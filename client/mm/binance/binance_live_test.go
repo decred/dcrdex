@@ -21,21 +21,24 @@ import (
 )
 
 var (
-	log            = dex.StdOutLogger("T", dex.LevelTrace)
-	binanceUS      = true
-	global         bool
-	apiKey         string
-	apiSecret      string
-	minTradeSymbol string
+	log       = dex.StdOutLogger("T", dex.LevelTrace)
+	binanceUS = true
+	net       = dex.Mainnet
+	apiKey    string
+	apiSecret string
 )
 
 func TestMain(m *testing.M) {
-	flag.StringVar(&minTradeSymbol, "symbol", "", "Market slug")
-	flag.BoolVar(&global, "global", false, "Use Binance global")
+	var global, testnet bool
+	flag.BoolVar(&global, "global", false, "use Binance global")
+	flag.BoolVar(&testnet, "testnet", false, "use testnet")
 	flag.Parse()
 
 	if global {
 		binanceUS = false
+	}
+	if testnet {
+		net = dex.Testnet
 	}
 
 	if s := os.Getenv("SECRET"); s != "" {
@@ -48,7 +51,7 @@ func TestMain(m *testing.M) {
 	m.Run()
 }
 
-func tNewBinance(t *testing.T, net dex.Network) *binance {
+func tNewBinance() *binance {
 	cfg := &libxc.CEXConfig{
 		Net:       net,
 		APIKey:    apiKey,
@@ -84,7 +87,7 @@ func (drv *spoofDriver) Info() *asset.WalletInfo {
 }
 
 func TestConnect(t *testing.T) {
-	bnc := tNewBinance(t, dex.Simnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
@@ -109,7 +112,7 @@ func TestConnect(t *testing.T) {
 // This may fail due to balance being to low. You can try switching the side
 // of the trade or the qty.
 func TestTrade(t *testing.T) {
-	bnc := tNewBinance(t, dex.Testnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 	_, err := bnc.Connect(ctx)
@@ -160,7 +163,7 @@ func TestTrade(t *testing.T) {
 func TestCancelTrade(t *testing.T) {
 	tradeID := "42641326270691d752e000000001"
 
-	bnc := tNewBinance(t, dex.Testnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 	_, err := bnc.Connect(ctx)
@@ -175,7 +178,7 @@ func TestCancelTrade(t *testing.T) {
 }
 
 func TestMatchedMarkets(t *testing.T) {
-	bnc := tNewBinance(t, dex.Mainnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
@@ -195,7 +198,7 @@ func TestMatchedMarkets(t *testing.T) {
 }
 
 func TestVWAP(t *testing.T) {
-	bnc := tNewBinance(t, dex.Mainnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 	_, err := bnc.Connect(ctx)
@@ -260,7 +263,7 @@ func TestVWAP(t *testing.T) {
 }
 
 func TestSubscribeMarket(t *testing.T) {
-	bnc := tNewBinance(t, dex.Testnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 	wg, err := bnc.Connect(ctx)
@@ -277,7 +280,7 @@ func TestSubscribeMarket(t *testing.T) {
 }
 
 func TestWithdrawal(t *testing.T) {
-	bnc := tNewBinance(t, dex.Mainnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
@@ -296,7 +299,7 @@ func TestWithdrawal(t *testing.T) {
 }
 
 func TestConfirmDeposit(t *testing.T) {
-	bnc := tNewBinance(t, dex.Mainnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
@@ -310,7 +313,7 @@ func TestConfirmDeposit(t *testing.T) {
 }
 
 func TestGetDepositAddress(t *testing.T) {
-	bnc := tNewBinance(t, dex.Mainnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
@@ -328,7 +331,7 @@ func TestGetDepositAddress(t *testing.T) {
 }
 
 func TestBalances(t *testing.T) {
-	bnc := tNewBinance(t, dex.Testnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
@@ -346,7 +349,7 @@ func TestBalances(t *testing.T) {
 }
 
 func TestGetCoinInfo(t *testing.T) {
-	bnc := tNewBinance(t, dex.Mainnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
@@ -381,7 +384,7 @@ func TestGetCoinInfo(t *testing.T) {
 }
 
 func TestTradeStatus(t *testing.T) {
-	bnc := tNewBinance(t, dex.Testnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
@@ -400,7 +403,7 @@ func TestTradeStatus(t *testing.T) {
 
 func TestMarkets(t *testing.T) {
 	// Need keys for getCoinInfo
-	bnc := tNewBinance(t, dex.Testnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
@@ -416,33 +419,4 @@ func TestMarkets(t *testing.T) {
 
 	b, _ := json.MarshalIndent(mkts, "", "    ")
 	fmt.Println("##### Market Data:", string(b))
-}
-
-func TestGetMinTrade(t *testing.T) {
-	// e.g.
-	// go test -tags bnclive -run TestGetMinTrade --symbol DCRBTC --global
-
-	if minTradeSymbol == "" {
-		t.Fatal("No market symbol provided")
-	}
-	bnc := tNewBinance(t, dex.Testnet)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	var xcInfo bntypes.ExchangeInfo
-	if err := bnc.getAPI(ctx, "/api/v3/exchangeInfo", nil, false, false, &xcInfo); err != nil {
-		t.Fatal(err)
-	}
-	for _, mkt := range xcInfo.Symbols {
-		if mkt.Symbol != minTradeSymbol {
-			continue
-		}
-		for _, filt := range mkt.Filters {
-			if filt.FilterType == "LOT_SIZE" {
-				fmt.Printf("Market %s min trade = %f %s \n", mkt.Symbol, filt.MinQty, mkt.BaseAsset)
-				return
-			}
-		}
-	}
-	t.Fatal("Market not found")
 }

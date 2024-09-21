@@ -69,6 +69,8 @@ type MarketMatch struct {
 	MarketID string `json:"marketID"`
 	// Slug is a market identifier used by the cex.
 	Slug string `json:"slug"`
+	// LotSize is the minimum trade size for the market.
+	LotSize uint64 `json:"lotSize"`
 }
 
 type BalanceUpdate struct {

@@ -336,54 +336,25 @@ func (b *binanceOrderBook) midGap() uint64 {
 	return b.book.MidGap()
 }
 
-// TODO: check all symbols
-var dexToBinanceSymbol = map[string]string{
-	"POLYGON": "MATIC",
-	"WETH":    "ETH",
-}
-
-var binanceToDexSymbol = make(map[string]string)
-
 func convertBnCoin(coin string) string {
-	symbol := strings.ToLower(coin)
-	if convertedSymbol, found := binanceToDexSymbol[strings.ToUpper(coin)]; found {
-		symbol = strings.ToLower(convertedSymbol)
+	switch coin {
+	case "MATIC", "POL":
+		return "polygon"
 	}
-	return symbol
-}
-
-func convertBnNetwork(network string) string {
-	symbol := convertBnCoin(network)
-	if symbol == "weth" {
-		return "eth"
-	}
-	return symbol
+	return strings.ToLower(coin)
 }
 
 // binanceCoinNetworkToDexSymbol takes the coin name and its network name as
 // returned by the binance API and returns the DEX symbol.
 func binanceCoinNetworkToDexSymbol(coin, network string) string {
-	symbol, netSymbol := convertBnCoin(coin), convertBnNetwork(network)
-	if symbol == "weth" && netSymbol == "eth" {
-		return "eth"
-	}
+	symbol, netSymbol := convertBnCoin(coin), convertBnCoin(network)
 	if symbol == netSymbol {
 		return symbol
 	}
+	if symbol == "eth" {
+		return "weth." + netSymbol
+	}
 	return symbol + "." + netSymbol
-}
-
-func init() {
-	for key, value := range dexToBinanceSymbol {
-		binanceToDexSymbol[value] = key
-	}
-}
-
-func mapDexToBinanceSymbol(symbol string) string {
-	if binanceSymbol, found := dexToBinanceSymbol[symbol]; found {
-		return binanceSymbol
-	}
-	return symbol
 }
 
 type bncAssetConfig struct {
@@ -406,7 +377,7 @@ func bncAssetCfg(assetID uint32) (*bncAssetConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	coin := mapDexToBinanceSymbol(ui.Conventional.Unit)
+	coin := ui.Conventional.Unit
 	chain := coin
 	if tkn := asset.TokenInfo(assetID); tkn != nil {
 		pui, err := asset.UnitInfo(tkn.ParentID)
@@ -420,7 +391,7 @@ func bncAssetCfg(assetID uint32) (*bncAssetConfig, error) {
 		assetID:          assetID,
 		symbol:           dex.BipIDSymbol(assetID),
 		coin:             coin,
-		chain:            mapDexToBinanceSymbol(chain),
+		chain:            chain,
 		conversionFactor: ui.Conventional.ConversionFactor,
 	}, nil
 }
@@ -588,8 +559,6 @@ func (bnc *binance) refreshBalances(ctx context.Context) error {
 	return nil
 }
 
-// readCoins stores the token IDs for which deposits and withdrawals are
-// enabled on binance and sets the minWithdraw map.
 func (bnc *binance) readCoins(coins []*bntypes.CoinInfo) {
 	tokenIDs := make(map[string][]uint32)
 	minWithdraw := make(map[uint32]uint64)
@@ -622,12 +591,10 @@ func (bnc *binance) readCoins(coins []*bntypes.CoinInfo) {
 // getCoinInfo retrieves binance configs then updates the user balances and
 // the tokenIDs.
 func (bnc *binance) getCoinInfo(ctx context.Context) error {
-	coins := make([]*bntypes.CoinInfo, 0)
-	err := bnc.getAPI(ctx, "/sapi/v1/capital/config/getall", nil, true, true, &coins)
-	if err != nil {
+	var coins []*bntypes.CoinInfo
+	if err := bnc.getAPI(ctx, "/sapi/v1/capital/config/getall", nil, true, true, &coins); err != nil {
 		return fmt.Errorf("error getting binance coin info: %w", err)
 	}
-
 	bnc.readCoins(coins)
 	return nil
 }
@@ -1177,8 +1144,30 @@ func (bnc *binance) MatchedMarkets(ctx context.Context) (_ []*libxc.MarketMatch,
 	}
 	markets := make([]*libxc.MarketMatch, 0, len(bnMarkets))
 
+	lotSize := func(mkt *bntypes.Market) uint64 {
+		var assetID uint32
+		if tids := tokenIDs[mkt.BaseAsset]; len(tids) > 0 {
+			assetID = tids[0]
+		} else {
+			var found bool
+			if assetID, found = dex.BipSymbolID(convertBnCoin(mkt.BaseAsset)); !found {
+				return 0
+			}
+		}
+		ui, err := asset.UnitInfo(assetID)
+		if err != nil {
+			return 0
+		}
+		for _, filt := range mkt.Filters {
+			if filt.FilterType == "LOT_SIZE" {
+				return uint64(math.Round(filt.MinQty * float64(ui.Conventional.ConversionFactor)))
+			}
+		}
+		return 0
+	}
+
 	for _, mkt := range bnMarkets {
-		dexMarkets := binanceMarketToDexMarkets(mkt.BaseAsset, mkt.QuoteAsset, tokenIDs, bnc.isUS)
+		dexMarkets := binanceMarketToDexMarkets(mkt.BaseAsset, mkt.QuoteAsset, tokenIDs, lotSize(mkt), bnc.isUS)
 		markets = append(markets, dexMarkets...)
 	}
 
@@ -1911,7 +1900,7 @@ func assetDisabled(isUS bool, assetID uint32) bool {
 // A symbol represents a single market on the CEX, but tokens on the DEX
 // have a different assetID for each network they are on, therefore they will
 // match multiple markets as defined using assetID.
-func binanceMarketToDexMarkets(binanceBaseSymbol, binanceQuoteSymbol string, tokenIDs map[string][]uint32, isUS bool) []*libxc.MarketMatch {
+func binanceMarketToDexMarkets(binanceBaseSymbol, binanceQuoteSymbol string, tokenIDs map[string][]uint32, lotSize uint64, isUS bool) []*libxc.MarketMatch {
 	var baseAssetIDs, quoteAssetIDs []uint32
 
 	baseAssetIDs = getDEXAssetIDs(binanceBaseSymbol, tokenIDs)
@@ -1935,6 +1924,7 @@ func binanceMarketToDexMarkets(binanceBaseSymbol, binanceQuoteSymbol string, tok
 				MarketID: dex.BipIDSymbol(baseID) + "_" + dex.BipIDSymbol(quoteID),
 				BaseID:   baseID,
 				QuoteID:  quoteID,
+				LotSize:  lotSize,
 			})
 		}
 	}
