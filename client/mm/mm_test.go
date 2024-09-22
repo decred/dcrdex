@@ -73,6 +73,8 @@ type tCore struct {
 	singleLotBuyFees  *orderFees
 	singleLotFeesErr  error
 	multiTradeResult  []*core.Order
+	multiTradeBuyErr  error
+	multiTradeSellErr error
 	noteFeed          chan core.Notification
 	isAccountLocker   map[uint32]bool
 	isWithdrawer      map[uint32]bool
@@ -89,6 +91,10 @@ type tCore struct {
 	walletTxsMtx      sync.Mutex
 	walletTxs         map[string]*asset.WalletTransaction
 	fiatRates         map[uint32]float64
+	userParcels       uint32
+	parcelLimit       uint32
+	exchange          *core.Exchange
+	walletStates      map[uint32]*core.WalletState
 }
 
 func newTCore() *tCore {
@@ -102,8 +108,9 @@ func newTCore() *tCore {
 		bookFeed: &tBookFeed{
 			c: make(chan *core.BookUpdate, 1),
 		},
-		walletTxs: make(map[string]*asset.WalletTransaction),
-		book:      &orderbook.OrderBook{},
+		walletTxs:    make(map[string]*asset.WalletTransaction),
+		book:         &orderbook.OrderBook{},
+		walletStates: make(map[uint32]*core.WalletState),
 	}
 }
 
@@ -145,6 +152,12 @@ func (c *tCore) AssetBalance(assetID uint32) (*core.WalletBalance, error) {
 	return c.assetBalances[assetID], c.assetBalanceErr
 }
 func (c *tCore) MultiTrade(pw []byte, forms *core.MultiTradeForm) ([]*core.Order, error) {
+	if forms.Sell && c.multiTradeSellErr != nil {
+		return nil, c.multiTradeSellErr
+	}
+	if !forms.Sell && c.multiTradeBuyErr != nil {
+		return nil, c.multiTradeBuyErr
+	}
 	c.multiTradesPlaced = append(c.multiTradesPlaced, forms)
 	return c.multiTradeResult, nil
 }
@@ -175,9 +188,6 @@ func (c *tCore) Login(pw []byte) error {
 func (c *tCore) OpenWallet(assetID uint32, pw []byte) error {
 	return nil
 }
-func (c *tCore) User() *core.User {
-	return nil
-}
 func (c *tCore) WalletTransaction(assetID uint32, txID string) (*asset.WalletTransaction, error) {
 	c.walletTxsMtx.Lock()
 	defer c.walletTxsMtx.Unlock()
@@ -191,8 +201,9 @@ func (c *tCore) Network() dex.Network {
 func (c *tCore) FiatConversionRates() map[uint32]float64 {
 	return c.fiatRates
 }
-func (c *tCore) Broadcast(core.Notification) {
-
+func (c *tCore) Broadcast(core.Notification) {}
+func (c *tCore) TradingLimits(host string) (userParcels, parcelLimit uint32, err error) {
+	return c.userParcels, c.parcelLimit, nil
 }
 
 func (c *tCore) Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (asset.Coin, error) {
@@ -214,6 +225,30 @@ func (c *tCore) Order(id dex.Bytes) (*core.Order, error) {
 		return o, nil
 	}
 	return nil, fmt.Errorf("order %s not found", id)
+}
+
+func (c *tCore) Exchange(host string) (*core.Exchange, error) {
+	return c.exchange, nil
+}
+
+func (c *tCore) WalletState(assetID uint32) *core.WalletState {
+	return c.walletStates[assetID]
+}
+
+func (c *tCore) setWalletsAndExchange(m *core.Market) {
+	c.walletStates[m.BaseID] = &core.WalletState{
+		PeerCount: 1,
+		Synced:    true,
+	}
+	c.walletStates[m.QuoteID] = &core.WalletState{
+		PeerCount: 1,
+		Synced:    true,
+	}
+	c.exchange = &core.Exchange{
+		Auth: core.ExchangeAuth{
+			EffectiveTier: 2,
+		},
+	}
 }
 
 func (c *tCore) setAssetBalances(balances map[uint32]uint64) {
@@ -254,6 +289,7 @@ type tBotCoreAdaptor struct {
 	maxSellQty       uint64
 	lastTradePlaced  *dexOrder
 	tradeResult      *core.Order
+	balanceDefs      map[uint32]uint64
 }
 
 func (c *tBotCoreAdaptor) DEXBalance(assetID uint32) (*BotBalance, error) {
@@ -294,11 +330,11 @@ func (c *tBotCoreAdaptor) OrderFeesInUnits(sell, base bool, rate uint64) (uint64
 	return c.buyFeesInQuote, nil
 }
 
-func (c *tBotCoreAdaptor) SufficientBalanceForDEXTrade(rate, qty uint64, sell bool) (bool, error) {
+func (c *tBotCoreAdaptor) SufficientBalanceForDEXTrade(rate, qty uint64, sell bool) (bool, map[uint32]uint64, error) {
 	if sell {
-		return qty <= c.maxSellQty, nil
+		return qty <= c.maxSellQty, c.balanceDefs, nil
 	}
-	return qty <= c.maxBuyQty, nil
+	return qty <= c.maxBuyQty, c.balanceDefs, nil
 }
 
 func (c *tBotCoreAdaptor) DEXTrade(rate, qty uint64, sell bool) (*core.Order, error) {
@@ -311,6 +347,10 @@ func (c *tBotCoreAdaptor) DEXTrade(rate, qty uint64, sell bool) (*core.Order, er
 }
 
 func (u *tBotCoreAdaptor) registerFeeGap(s *FeeGapStats) {}
+
+func (u *tBotCoreAdaptor) checkBotHealth() bool {
+	return true
+}
 
 func newTBotCoreAdaptor(c *tCore) *tBotCoreAdaptor {
 	return &tBotCoreAdaptor{
@@ -529,9 +569,6 @@ type prepareRebalanceResult struct {
 }
 
 type tBotCexAdaptor struct {
-	bidsVWAP        map[uint64]*vwapResult
-	asksVWAP        map[uint64]*vwapResult
-	vwapErr         error
 	balances        map[uint32]*BotBalance
 	balanceErr      error
 	tradeID         string
@@ -542,12 +579,11 @@ type tBotCexAdaptor struct {
 	tradeUpdates    chan *libxc.Trade
 	maxBuyQty       uint64
 	maxSellQty      uint64
+	balanceDefs     map[uint32]uint64
 }
 
 func newTBotCEXAdaptor() *tBotCexAdaptor {
 	return &tBotCexAdaptor{
-		bidsVWAP:        make(map[uint64]*vwapResult),
-		asksVWAP:        make(map[uint64]*vwapResult),
 		balances:        make(map[uint32]*BotBalance),
 		cancelledTrades: make([]string, 0),
 		tradeUpdates:    make(chan *libxc.Trade),
@@ -592,32 +628,12 @@ func (c *tBotCexAdaptor) CEXTrade(ctx context.Context, baseID, quoteID uint32, s
 func (c *tBotCexAdaptor) FreeUpFunds(assetID uint32, cex bool, amt uint64, currEpoch uint64) {
 }
 
-func (c *tBotCexAdaptor) VWAP(baseID, quoteID uint32, sell bool, qty uint64) (vwap, extrema uint64, filled bool, err error) {
-	if c.vwapErr != nil {
-		return 0, 0, false, c.vwapErr
-	}
-
-	if sell {
-		res, found := c.asksVWAP[qty]
-		if !found {
-			return 0, 0, false, nil
-		}
-		return res.avg, res.extrema, true, nil
-	}
-
-	res, found := c.bidsVWAP[qty]
-	if !found {
-		return 0, 0, false, nil
-	}
-	return res.avg, res.extrema, true, nil
-
-}
 func (c *tBotCexAdaptor) MidGap(baseID, quoteID uint32) uint64 { return 0 }
-func (c *tBotCexAdaptor) SufficientBalanceForCEXTrade(baseID, quoteID uint32, sell bool, rate, qty uint64) (bool, error) {
+func (c *tBotCexAdaptor) SufficientBalanceForCEXTrade(baseID, quoteID uint32, sell bool, rate, qty uint64) (bool, map[uint32]uint64) {
 	if sell {
-		return qty <= c.maxSellQty, nil
+		return qty <= c.maxSellQty, c.balanceDefs
 	}
-	return qty <= c.maxBuyQty, nil
+	return qty <= c.maxBuyQty, c.balanceDefs
 }
 
 func (c *tBotCexAdaptor) Book() (_, _ []*core.MiniOrder, _ error) { return nil, nil, nil }
@@ -663,6 +679,7 @@ func (t *tExchangeAdaptor) Book() (buys, sells []*core.MiniOrder, _ error) {
 func (t *tExchangeAdaptor) sendStatsUpdate()             {}
 func (t *tExchangeAdaptor) withPause(func() error) error { return nil }
 func (t *tExchangeAdaptor) botCfg() *BotConfig           { return t.cfg }
+func (t *tExchangeAdaptor) problems() *BotProblems       { return nil }
 
 func TestAvailableBalances(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

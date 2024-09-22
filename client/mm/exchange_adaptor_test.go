@@ -213,7 +213,7 @@ func TestSufficientBalanceForDEXTrade(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Connect error: %v", err)
 				}
-				sufficient, err := adaptor.SufficientBalanceForDEXTrade(test.rate, test.qty, test.sell)
+				sufficient, _, err := adaptor.SufficientBalanceForDEXTrade(test.rate, test.qty, test.sell)
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
 				}
@@ -280,10 +280,7 @@ func TestSufficientBalanceForCEXTrade(t *testing.T) {
 						QuoteID: quoteID,
 					},
 				})
-				sufficient, err := adaptor.SufficientBalanceForCEXTrade(baseID, quoteID, test.sell, test.rate, test.qty)
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
+				sufficient, _ := adaptor.SufficientBalanceForCEXTrade(baseID, quoteID, test.sell, test.rate, test.qty)
 				if sufficient != expSufficient {
 					t.Fatalf("expected sufficient=%v, got %v", expSufficient, sufficient)
 				}
@@ -1619,7 +1616,8 @@ func TestMultiTrade(t *testing.T) {
 					} else {
 						placements = test.buyPlacements
 					}
-					res := adaptor.multiTrade(placements, sell, driftTolerance, currEpoch)
+
+					res, _, _, _ := adaptor.multiTrade(placements, sell, driftTolerance, currEpoch)
 
 					expectedOrderIDs := test.expectedOrderIDs
 					if decrement {
@@ -2436,7 +2434,7 @@ func TestDEXTrade(t *testing.T) {
 			t.Fatalf("%s: Connect error: %v", test.name, err)
 		}
 
-		orders := adaptor.multiTrade(test.placements, test.sell, 0.01, 100)
+		orders, _, _, _ := adaptor.multiTrade(test.placements, test.sell, 0.01, 100)
 		if len(orders) == 0 {
 			t.Fatalf("%s: multi trade did not place orders", test.name)
 		}
@@ -2925,6 +2923,10 @@ func TestDeposit(t *testing.T) {
 				},
 				eventLogDB: eventLogDB,
 			})
+
+			tCore.singleLotBuyFees = tFees(0, 0, 0, 0)
+			tCore.singleLotSellFees = tFees(0, 0, 0, 0)
+
 			_, err := adaptor.Connect(ctx)
 			if err != nil {
 				t.Fatalf("%s: Connect error: %v", test.name, err)
@@ -3127,6 +3129,9 @@ func TestWithdraw(t *testing.T) {
 			},
 			eventLogDB: eventLogDB,
 		})
+		tCore.singleLotBuyFees = tFees(0, 0, 0, 0)
+		tCore.singleLotSellFees = tFees(0, 0, 0, 0)
+
 		_, err := adaptor.Connect(ctx)
 		if err != nil {
 			t.Fatalf("%s: Connect error: %v", test.name, err)
@@ -3602,6 +3607,8 @@ func TestCEXTrade(t *testing.T) {
 			},
 			eventLogDB: eventLogDB,
 		})
+		tCore.singleLotBuyFees = tFees(0, 0, 0, 0)
+		tCore.singleLotSellFees = tFees(0, 0, 0, 0)
 		_, err := adaptor.Connect(ctx)
 		if err != nil {
 			t.Fatalf("%s: Connect error: %v", test.name, err)

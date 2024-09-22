@@ -194,6 +194,21 @@ const (
 	archivedSettingsID               = "ARCHIVED_SETTINGS"
 	idTransparent                    = "TRANSPARENT"
 	idNoCodeProvided                 = "NO_CODE_PROVIDED"
+	idWalletNotSynced                = "WALLET_NOT_SYNCED"
+	idWalletNoPeers                  = "WALLET_NO_PEERS"
+	idDepositError                   = "DEPOSIT_ERROR"
+	idWithdrawError                  = "WITHDRAW_ERROR"
+	idDEXUnderfunded                 = "DEX_UNDERFUNDED"
+	idCEXUnderfunded                 = "CEX_UNDERFUNDED"
+	idCEXTooShallow                  = "CEX_TOO_SHALLOW"
+	idAccountSuspended               = "ACCOUNT_SUSPENDED"
+	idUserLimitTooLow                = "USER_LIMIT_TOO_LOW"
+	idNoPriceSource                  = "NO_PRICE_SOURCE"
+	idCEXOrderbookUnsynced           = "CEX_ORDERBOOK_UNSYNCED"
+	idDeterminePlacementsError       = "DETERMINE_PLACEMENTS_ERROR"
+	idPlaceBuyOrdersError            = "PLACE_BUY_ORDERS_ERROR"
+	idPlaceSellOrdersError           = "PLACE_SELL_ORDERS_ERROR"
+	idCEXTradeError                  = "CEX_TRADE_ERROR"
 )
 
 var enUS = map[string]*intl.Translation{
@@ -387,6 +402,21 @@ var enUS = map[string]*intl.Translation{
 	archivedSettingsID:               {T: "Archived Settings"},
 	idTransparent:                    {T: "Transparent"},
 	idNoCodeProvided:                 {T: "no code provided"},
+	idWalletNotSynced:                {T: "{{ assetSymbol }} wallet not synced."},
+	idWalletNoPeers:                  {T: "{{ assetSymbol }} wallet has no peers."},
+	idDepositError:                   {T: "The last attempted deposit of {{ assetSymbol }} at {{ time }} failed with the following error: {{ error }}"},
+	idWithdrawError:                  {T: "The last attempted withdrawal of {{ assetSymbol }} at {{ time }} failed with the following error: {{ error }}"},
+	idDEXUnderfunded:                 {T: "The {{ assetSymbol }} wallet is underfunded by {{ amount }}"},
+	idCEXUnderfunded:                 {T: "The {{ cexName }} {{ assetSymbol }} wallet is underfunded by {{ amount }}"},
+	idCEXTooShallow:                  {T: "The {{ cexName }} market on the {{ side }} side is too shallow for arbitrages as specified by the configuration."},
+	idAccountSuspended:               {T: "Your account at {{ dexHost }} is suspended."},
+	idUserLimitTooLow:                {T: "Your account at {{ dexHost }} has a limit too low to place all the orders required by the configuration."},
+	idNoPriceSource:                  {T: "No oracle or fiat rate sources are available for this market."},
+	idCEXOrderbookUnsynced:           {T: "The {{ cexName }} orderbook is not synced."},
+	idDeterminePlacementsError:       {T: "Error determining placements: {{ error }}"},
+	idPlaceBuyOrdersError:            {T: "Error placing buy orders: {{ error }}"},
+	idPlaceSellOrdersError:           {T: "Error placing sell orders: {{ error }}"},
+	idCEXTradeError:                  {T: "The last attempted CEX trade at {{ time }} failed with the following error: {{ error }}"},
 }
 
 var ptBR = map[string]*intl.Translation{

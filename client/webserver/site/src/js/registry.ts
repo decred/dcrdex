@@ -4,6 +4,7 @@ declare global {
     enableLogger: (loggerID: string, enable: boolean) => void
     recordLogger: (loggerID: string, enable: boolean) => void
     dumpLogger: (loggerID: string) => void
+    mmstatus: () => Promise<MarketMakingStatus>
     testFormatFourSigFigs: () => void
     testFormatRateFullPrecision: () => void
     user: () => User
@@ -882,6 +883,13 @@ export interface CEXBalanceUpdate {
   balance: ExchangeBalance
 }
 
+export interface BotProblemsNote extends CoreNote {
+  host: string
+  baseID: number
+  quoteID: number
+  problems?: BotProblems
+}
+
 export interface FeeEstimates extends LotFeeRange {
   bookingFeesPerLot: number
   bookingFees: number
@@ -939,10 +947,36 @@ export interface RunStats {
   feeGap: FeeGapStats
 }
 
+export interface StampedError {
+  stamp: number
+  err: string
+}
+
+export interface BotProblems {
+  walletNotSynced: Record<number, boolean>
+  noWalletPeers: Record<number, boolean>
+  depositErr: Record<number, StampedError>
+  withdrawErr: Record<number, StampedError>
+  dexBalanceDeficiencies: Record<number, number>
+  cexBalanceDeficiencies: Record<number, number>
+  cexTooShallow: Record<string, boolean>
+  accountSuspended: boolean
+  userLimitTooLow: boolean
+  noPriceSource: boolean
+  oracleFiatMismatch: boolean
+  cexOrderbookUnsynced: boolean
+  determinePlacementsErr: string
+  placeBuyOrdersErr: string
+  placeSellOrdersErr: string
+  cexTradeErr: StampedError
+  additionalError: string
+}
+
 export interface MMBotStatus {
   config: BotConfig
   running: boolean
   runStats?: RunStats
+  problems?: BotProblems
 }
 
 export interface MarketMakingStatus {

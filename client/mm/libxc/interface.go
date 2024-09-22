@@ -78,6 +78,7 @@ type BalanceUpdate struct {
 
 var (
 	ErrWithdrawalPending = errors.New("withdrawal pending")
+	ErrUnsyncedOrderbook = errors.New("orderbook not synced")
 )
 
 // CEX implements a set of functions that can be used to interact with a
