@@ -1037,17 +1037,13 @@ export class FeeAssetSelectionForm {
       this.marketRows.push({ mkt, tmpl, setTier })
     }
 
-    if (xc.assets) {
-      for (const { symbol, id: assetID } of Object.values(xc.assets)) {
-        if (!app().assets[assetID]) continue
-        const bondAsset = xc.bondAssets[symbol]
-        if (bondAsset) addBondRow(assetID, bondAsset)
-      }
+    for (const { symbol, id: assetID } of Object.values(xc.assets || {})) {
+      if (!app().assets[assetID]) continue
+      const bondAsset = xc.bondAssets[symbol]
+      if (bondAsset) addBondRow(assetID, bondAsset)
     }
 
-    if (xc.markets) {
-      for (const mkt of Object.values(xc.markets)) addMarketRow(mkt)
-    }
+    for (const mkt of Object.values(xc.markets || {})) addMarketRow(mkt)
 
     // page.host.textContent = xc.host
     page.tradingTierInput.value = xc.auth.targetTier ? String(xc.auth.targetTier) : '1'

@@ -176,7 +176,7 @@ export default class DexSettingsPage extends BasePage {
     })
 
     this.dexAddrForm = new forms.DEXAddressForm(page.dexAddrForm, async (xc: Exchange) => {
-      window.location.assign(`/dexsettings/${xc.host}`)
+      app().loadPage(`/dexsettings/${xc.host}`)
     }, this.host)
 
     // forms.bind(page.bondDetailsForm, page.updateBondOptionsConfirm, () => this.updateBondOptions())
@@ -352,11 +352,10 @@ export default class DexSettingsPage extends BasePage {
     if (disable) {
       this.page.toggleAccountStatusBtn.textContent = intl.prep(intl.ID_ENABLE_ACCOUNT)
       Doc.hide(page.forms)
-    } else {
-      this.page.toggleAccountStatusBtn.textContent = intl.prep(intl.ID_DISABLE_ACCOUNT)
-    }
+    } else this.page.toggleAccountStatusBtn.textContent = intl.prep(intl.ID_DISABLE_ACCOUNT)
+
     this.accountDisabled = disable
-    window.location.assign(`/dexsettings/${host}`)
+    app().loadPage(`dexsettings/${host}`)
   }
 
   async prepareAccountDisable (disableAccountForm: HTMLElement) {

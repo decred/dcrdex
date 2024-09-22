@@ -73,7 +73,7 @@ func (c *Core) ToggleAccountStatus(pw []byte, addr string, disable bool) error {
 		}
 
 		if dc.hasUnspentBond() {
-			c.log.Warnf("Disabling dex server with unspent bonds. Bonds will be refunded when expired.")
+			c.log.Info("Disabling dex server with unspent bonds. Bonds will be refunded when expired.")
 		}
 	}
 
@@ -86,16 +86,18 @@ func (c *Core) ToggleAccountStatus(pw []byte, addr string, disable bool) error {
 		dc.acct.toggleAccountStatus(true)
 		c.stopDEXConnection(dc)
 	} else {
-		acct, err := c.db.Account(addr)
+		acctInfo, err := c.db.Account(addr)
 		if err != nil {
 			return err
 		}
 
-		if !c.connectAccount(acct) {
-			c.log.Errorf("Failed to establish connection to %s (will retry)", addr)
+		dc, err := c.connectDEX(acctInfo)
+		if err != nil {
+			c.log.Errorf("Trouble establishing connection to %s (will retry). Error: %v", acctInfo.Host, err)
 		}
-
-		c.initializeDEXConnections(crypter)
+		// Connected or not, add dex connection to the connections map.
+		c.addDexConnection(dc)
+		c.initializeDEXConnection(dc, crypter)
 	}
 
 	return nil
@@ -215,7 +217,7 @@ func (c *Core) AccountImport(pw []byte, acct *Account, bonds []*db.Bond) error {
 			return err
 		}
 		c.addDexConnection(dc)
-		c.initializeDEXConnections(crypter)
+		c.initializeDEXConnection(dc, crypter)
 		return nil
 	}
 
@@ -282,7 +284,7 @@ func (c *Core) AccountImport(pw []byte, acct *Account, bonds []*db.Bond) error {
 		return err
 	}
 	c.addDexConnection(dc)
-	c.initializeDEXConnections(crypter)
+	c.initializeDEXConnection(dc, crypter)
 	return nil
 }
 
