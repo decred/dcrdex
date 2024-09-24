@@ -522,8 +522,11 @@ export class BotMarket {
     } = this
     const [baseWallet, quoteWallet] = [app().walletMap[baseID], app().walletMap[quoteID]]
     const [bInv, qInv] = [runningBotInventory(baseID), runningBotInventory(quoteID)]
-    const [cexBaseAvail, cexQuoteAvail] = [(cexBaseBalance?.available || 0) - bInv.cex.total, (cexQuoteBalance?.available || 0) - qInv.cex.total]
-    const [dexBaseAvail, dexQuoteAvail] = [baseWallet.balance.available - bInv.dex.total, quoteWallet.balance.available - qInv.dex.total]
+    // In these available balance calcs, only subtract the available balance of
+    // running bots, since the locked/reserved/immature is already subtracted
+    // from the wallet's total available balance.
+    const [cexBaseAvail, cexQuoteAvail] = [(cexBaseBalance?.available || 0) - bInv.cex.avail, (cexQuoteBalance?.available || 0) - qInv.cex.avail]
+    const [dexBaseAvail, dexQuoteAvail] = [baseWallet.balance.available - bInv.dex.avail, quoteWallet.balance.available - qInv.dex.avail]
     const baseAvail = dexBaseAvail + cexBaseAvail
     const quoteAvail = dexQuoteAvail + cexQuoteAvail
     const baseFeeWallet = baseFeeID === baseID ? baseWallet : app().walletMap[baseFeeID]
