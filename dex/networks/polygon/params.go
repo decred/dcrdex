@@ -17,7 +17,7 @@ var (
 	UnitInfo = dex.UnitInfo{
 		AtomicUnit: "gwei",
 		Conventional: dex.Denomination{
-			Unit:             "MATIC",
+			Unit:             "POL",
 			ConversionFactor: 1e9,
 		},
 		Alternatives: []dex.Denomination{
