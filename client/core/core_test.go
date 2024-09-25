@@ -3999,9 +3999,9 @@ func TestHandlePreimageRequest(t *testing.T) {
 			t.Fatal("no msgjson.Error sent from preimage request handling")
 		}
 
-		tracker.mtx.RLock()
+		tracker.csumMtx.RLock()
 		csum := tracker.csum
-		tracker.mtx.RUnlock()
+		tracker.csumMtx.RUnlock()
 		if !bytes.Equal(firstCSum, csum) {
 			t.Fatalf(
 				"[handlePreimageRequest] csum was changed, exp: %s, got: %s",
@@ -4070,9 +4070,9 @@ func TestHandlePreimageRequest(t *testing.T) {
 			t.Fatal("no order note from preimage request handling")
 		}
 
-		tracker.mtx.RLock()
+		tracker.csumMtx.RLock()
 		checkSum := tracker.csum
-		tracker.mtx.RUnlock()
+		tracker.csumMtx.RUnlock()
 		if !bytes.Equal(csum, checkSum) {
 			t.Fatalf(
 				"[handlePreimageRequest] csum was changed, exp: %s, got: %s",
@@ -4154,9 +4154,9 @@ func TestHandlePreimageRequest(t *testing.T) {
 			t.Fatal("no order note from preimage request handling")
 		}
 
-		tracker.mtx.RLock()
+		tracker.csumMtx.RLock()
 		cancelCsum := tracker.cancelCsum
-		tracker.mtx.RUnlock()
+		tracker.csumMtx.RUnlock()
 		if !bytes.Equal(commitCSum, cancelCsum) {
 			t.Fatalf(
 				"handlePreimageRequest must initialize tracker cancel csum, exp: %s, got: %s",
@@ -4244,9 +4244,9 @@ func TestHandlePreimageRequest(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatal("no msgjson.Error sent from preimage request handling")
 		}
-		tracker.mtx.RLock()
+		tracker.csumMtx.RLock()
 		cancelCsum := tracker.cancelCsum
-		tracker.mtx.RUnlock()
+		tracker.csumMtx.RUnlock()
 		if !bytes.Equal(firstCSum, cancelCsum) {
 			t.Fatalf(
 				"[handlePreimageRequest] cancel csum was changed, exp: %s, got: %s",
@@ -4330,9 +4330,9 @@ func TestHandlePreimageRequest(t *testing.T) {
 			t.Fatal("no order note from preimage request handling")
 		}
 
-		tracker.mtx.RLock()
+		tracker.csumMtx.RLock()
 		cancelCsum := tracker.cancelCsum
-		tracker.mtx.RUnlock()
+		tracker.csumMtx.RUnlock()
 		if !bytes.Equal(csum, cancelCsum) {
 			t.Fatalf(
 				"[handlePreimageRequest] cancel csum was changed, exp: %s, got: %s",
