@@ -1,13 +1,13 @@
 //go:build bnclive
 
-package libxc
+package binance
 
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
-	"os/user"
 	"strings"
 	"sync"
 	"testing"
@@ -15,18 +15,32 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	_ "decred.org/dcrdex/client/asset/importall"
-	"decred.org/dcrdex/client/mm/libxc/bntypes"
+	"decred.org/dcrdex/client/mm/binance/bntypes"
+	"decred.org/dcrdex/client/mm/libxc"
 	"decred.org/dcrdex/dex"
 )
 
 var (
 	log       = dex.StdOutLogger("T", dex.LevelTrace)
-	u, _      = user.Current()
-	apiKey    = ""
-	apiSecret = ""
+	binanceUS = true
+	net       = dex.Mainnet
+	apiKey    string
+	apiSecret string
 )
 
 func TestMain(m *testing.M) {
+	var global, testnet bool
+	flag.BoolVar(&global, "global", false, "use Binance global")
+	flag.BoolVar(&testnet, "testnet", false, "use testnet")
+	flag.Parse()
+
+	if global {
+		binanceUS = false
+	}
+	if testnet {
+		net = dex.Testnet
+	}
+
 	if s := os.Getenv("SECRET"); s != "" {
 		apiSecret = s
 	}
@@ -37,8 +51,8 @@ func TestMain(m *testing.M) {
 	m.Run()
 }
 
-func tNewBinance(t *testing.T, net dex.Network) *binance {
-	cfg := &CEXConfig{
+func tNewBinance() *binance {
+	cfg := &libxc.CEXConfig{
 		Net:       net,
 		APIKey:    apiKey,
 		SecretKey: apiSecret,
@@ -47,8 +61,7 @@ func tNewBinance(t *testing.T, net dex.Network) *binance {
 			log.Infof("Notification sent: %+v", n)
 		},
 	}
-	const binanceUS = true
-	return newBinance(cfg, binanceUS)
+	return New(cfg, binanceUS)
 }
 
 type spoofDriver struct {
@@ -74,7 +87,7 @@ func (drv *spoofDriver) Info() *asset.WalletInfo {
 }
 
 func TestConnect(t *testing.T) {
-	bnc := tNewBinance(t, dex.Simnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
@@ -99,7 +112,7 @@ func TestConnect(t *testing.T) {
 // This may fail due to balance being to low. You can try switching the side
 // of the trade or the qty.
 func TestTrade(t *testing.T) {
-	bnc := tNewBinance(t, dex.Testnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 	_, err := bnc.Connect(ctx)
@@ -150,7 +163,7 @@ func TestTrade(t *testing.T) {
 func TestCancelTrade(t *testing.T) {
 	tradeID := "42641326270691d752e000000001"
 
-	bnc := tNewBinance(t, dex.Testnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 	_, err := bnc.Connect(ctx)
@@ -165,7 +178,7 @@ func TestCancelTrade(t *testing.T) {
 }
 
 func TestMatchedMarkets(t *testing.T) {
-	bnc := tNewBinance(t, dex.Mainnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
@@ -185,7 +198,7 @@ func TestMatchedMarkets(t *testing.T) {
 }
 
 func TestVWAP(t *testing.T) {
-	bnc := tNewBinance(t, dex.Mainnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 	_, err := bnc.Connect(ctx)
@@ -250,7 +263,7 @@ func TestVWAP(t *testing.T) {
 }
 
 func TestSubscribeMarket(t *testing.T) {
-	bnc := tNewBinance(t, dex.Testnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 	wg, err := bnc.Connect(ctx)
@@ -267,7 +280,7 @@ func TestSubscribeMarket(t *testing.T) {
 }
 
 func TestWithdrawal(t *testing.T) {
-	bnc := tNewBinance(t, dex.Mainnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
@@ -286,7 +299,7 @@ func TestWithdrawal(t *testing.T) {
 }
 
 func TestConfirmDeposit(t *testing.T) {
-	bnc := tNewBinance(t, dex.Mainnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
@@ -295,12 +308,12 @@ func TestConfirmDeposit(t *testing.T) {
 		t.Fatalf("Connect error: %v", err)
 	}
 
-	confirmed, amt := bnc.ConfirmDeposit(ctx, &DepositData{})
+	confirmed, amt := bnc.ConfirmDeposit(ctx, &libxc.DepositData{})
 	t.Logf("confirmed: %v, amt: %v", confirmed, amt)
 }
 
 func TestGetDepositAddress(t *testing.T) {
-	bnc := tNewBinance(t, dex.Mainnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
@@ -318,7 +331,7 @@ func TestGetDepositAddress(t *testing.T) {
 }
 
 func TestBalances(t *testing.T) {
-	bnc := tNewBinance(t, dex.Testnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
@@ -336,7 +349,7 @@ func TestBalances(t *testing.T) {
 }
 
 func TestGetCoinInfo(t *testing.T) {
-	bnc := tNewBinance(t, dex.Mainnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
@@ -371,7 +384,7 @@ func TestGetCoinInfo(t *testing.T) {
 }
 
 func TestTradeStatus(t *testing.T) {
-	bnc := tNewBinance(t, dex.Testnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
@@ -390,7 +403,7 @@ func TestTradeStatus(t *testing.T) {
 
 func TestMarkets(t *testing.T) {
 	// Need keys for getCoinInfo
-	bnc := tNewBinance(t, dex.Testnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 

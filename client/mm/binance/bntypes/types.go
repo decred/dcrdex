@@ -10,7 +10,69 @@ type Market struct {
 	QuoteAsset          string   `json:"quoteAsset"`
 	QuoteAssetPrecision int      `json:"quoteAssetPrecision"`
 	OrderTypes          []string `json:"orderTypes"`
+	Filters             []struct {
+		FilterType string  `json:"filterType"`
+		MinQty     float64 `json:"minQty,string"`
+		MaxQty     float64 `json:"maxQty,string"`
+		StepSize   float64 `json:"stepSize,string"`
+	} `json:"filters"`
 }
+
+// "filters": [
+// 	{
+// 		"filterType": "PRICE_FILTER",
+// 		"minPrice": "0.00010000",
+// 		"maxPrice": "1000.00000000",
+// 		"tickSize": "0.00010000"
+// 	},
+// 	{
+// 		"filterType": "LOT_SIZE",
+// 		"minQty": "0.10000000",
+// 		"maxQty": "92141578.00000000",
+// 		"stepSize": "0.10000000"
+// 	},
+// 	{
+// 		"filterType": "ICEBERG_PARTS",
+// 		"limit": 10
+// 	},
+// 	{
+// 		"filterType": "MARKET_LOT_SIZE",
+// 		"minQty": "0.00000000",
+// 		"maxQty": "14989.56610878",
+// 		"stepSize": "0.00000000"
+// 	},
+// 	{
+// 		"filterType": "TRAILING_DELTA",
+// 		"minTrailingAboveDelta": 10,
+// 		"maxTrailingAboveDelta": 2000,
+// 		"minTrailingBelowDelta": 10,
+// 		"maxTrailingBelowDelta": 2000
+// 	},
+// 	{
+// 		"filterType": "PERCENT_PRICE_BY_SIDE",
+// 		"bidMultiplierUp": "5",
+// 		"bidMultiplierDown": "0.2",
+// 		"askMultiplierUp": "5",
+// 		"askMultiplierDown": "0.2",
+// 		"avgPriceMins": 5
+// 	},
+// 	{
+// 		"filterType": "NOTIONAL",
+// 		"minNotional": "10.00000000",
+// 		"applyMinToMarket": true,
+// 		"maxNotional": "9000000.00000000",
+// 		"applyMaxToMarket": false,
+// 		"avgPriceMins": 5
+// 	},
+// 	{
+// 		"filterType": "MAX_NUM_ORDERS",
+// 		"maxNumOrders": 200
+// 	},
+// 	{
+// 		"filterType": "MAX_NUM_ALGO_ORDERS",
+// 		"maxNumAlgoOrders": 5
+// 	}
+// ],
 
 type Balance struct {
 	Asset  string  `json:"asset"`

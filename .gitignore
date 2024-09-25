@@ -49,3 +49,4 @@ client/cmd/translationsreport/translationsreport
 client/cmd/translationsreport/worksheets
 server/cmd/dexadm/dexadm
 server/cmd/geogame/geogame
+client/mm/binance/cmd/lotsizes/lotsizes

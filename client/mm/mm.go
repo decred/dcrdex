@@ -14,6 +14,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
+	_ "decred.org/dcrdex/client/mm/binance"
 	"decred.org/dcrdex/client/mm/libxc"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"

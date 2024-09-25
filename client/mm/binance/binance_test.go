@@ -1,15 +1,17 @@
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
-package libxc
+package binance
 
 import (
 	"testing"
+
+	"decred.org/dcrdex/client/mm/libxc"
 )
 
 func TestSubscribeTradeUpdates(t *testing.T) {
 	bn := &binance{
-		tradeUpdaters: make(map[int]chan *Trade),
+		tradeUpdaters: make(map[int]chan *libxc.Trade),
 	}
 	_, unsub0, _ := bn.SubscribeTradeUpdates()
 	_, _, id1 := bn.SubscribeTradeUpdates()
