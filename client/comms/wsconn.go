@@ -145,6 +145,9 @@ type WsCfg struct {
 	DisableAutoReconnect bool
 
 	ConnectHeaders http.Header
+
+	// EchoPingData will echo any data from pings as the pong data.
+	EchoPingData bool
 }
 
 // wsConn represents a client websocket connection.
@@ -258,7 +261,9 @@ func (conn *wsConn) connect(ctx context.Context) error {
 		return err
 	}
 
-	ws.SetPingHandler(func(string) error {
+	echoPing := conn.cfg.EchoPingData
+
+	ws.SetPingHandler(func(appData string) error {
 		now := time.Now()
 
 		// Set the deadline for the next ping.
@@ -268,8 +273,13 @@ func (conn *wsConn) connect(ctx context.Context) error {
 			return err
 		}
 
+		var data []byte
+		if echoPing {
+			data = []byte(appData)
+		}
+
 		// Respond with a pong.
-		err = ws.WriteControl(websocket.PongMessage, []byte{}, now.Add(writeWait))
+		err = ws.WriteControl(websocket.PongMessage, data, now.Add(writeWait))
 		if err != nil {
 			// read loop handles reconnect
 			conn.log.Errorf("pong write error: %v", err)
