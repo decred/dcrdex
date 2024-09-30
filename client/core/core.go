@@ -7141,6 +7141,10 @@ func (c *Core) initialize() error {
 	c.log.Infof("Connected to %d of %d DEX servers", liveConns, len(accts))
 
 	for _, dbWallet := range dbWallets {
+		if asset.Asset(dbWallet.AssetID) == nil && asset.TokenInfo(dbWallet.AssetID) == nil {
+			c.log.Infof("Wallet for asset %s no longer supported", dex.BipIDSymbol(dbWallet.AssetID))
+			continue
+		}
 		assetID := dbWallet.AssetID
 		wallet, err := c.loadWallet(dbWallet)
 		if err != nil {

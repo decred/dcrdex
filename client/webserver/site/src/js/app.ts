@@ -794,12 +794,19 @@ export default class Application {
    * updateMarketElements sets the textContent for any ticker or asset name
    * elements or any asset logo src attributes for descendents of ancestor.
    */
-  updateMarketElements (ancestor: PageElement, baseID: number, quoteID: number) {
-    const { unitInfo: bui, name: baseName, symbol: baseSymbol } = this.assets[baseID]
+  updateMarketElements (ancestor: PageElement, baseID: number, quoteID: number, xc?: Exchange) {
+    const getAsset = (assetID: number) => {
+      const a = this.assets[assetID]
+      if (a) return a
+      if (!xc) throw Error(`no asset found for asset ID ${assetID}`)
+      const xcAsset = xc.assets[assetID]
+      return { unitInfo: xcAsset.unitInfo, name: xcAsset.symbol, symbol: xcAsset.symbol }
+    }
+    const { unitInfo: bui, name: baseName, symbol: baseSymbol } = getAsset(baseID)
     for (const el of Doc.applySelector(ancestor, '[data-base-name')) el.textContent = baseName
     for (const img of Doc.applySelector(ancestor, '[data-base-logo]')) img.src = Doc.logoPath(baseSymbol)
     for (const el of Doc.applySelector(ancestor, '[data-base-ticker]')) el.textContent = bui.conventional.unit
-    const { unitInfo: qui, name: quoteName, symbol: quoteSymbol } = this.assets[quoteID]
+    const { unitInfo: qui, name: quoteName, symbol: quoteSymbol } = getAsset(quoteID)
     for (const el of Doc.applySelector(ancestor, '[data-quote-name')) el.textContent = quoteName
     for (const img of Doc.applySelector(ancestor, '[data-quote-logo]')) img.src = Doc.logoPath(quoteSymbol)
     for (const el of Doc.applySelector(ancestor, '[data-quote-ticker]')) el.textContent = qui.conventional.unit
