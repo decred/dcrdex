@@ -169,6 +169,7 @@ export default class OrdersPage extends BasePage {
       let fromSymbol, toSymbol, fromUnit, toUnit, fromQty
       let toQty = ''
       const xc = app().exchanges[ord.host] || undefined
+      if ((!app().assets[ord.baseID] && !xc.assets[ord.baseID]) || (!app().assets[ord.quoteID] && !xc.assets[ord.quoteID])) continue
       const [baseUnitInfo, quoteUnitInfo] = [app().unitInfo(ord.baseID, xc), app().unitInfo(ord.quoteID, xc)]
       if (ord.sell) {
         [fromSymbol, toSymbol] = [ord.baseSymbol, ord.quoteSymbol];

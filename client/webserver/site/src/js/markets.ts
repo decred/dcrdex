@@ -790,7 +790,7 @@ export default class MarketsPage extends BasePage {
     }
 
     const mmStatus = app().mmStatus
-    if (mmStatus && this.mmRunning === undefined) {
+    if (mmStatus && this.mmRunning === undefined && this.market.base && this.market.quote) {
       const { base: { id: baseID }, quote: { id: quoteID }, dex: { host } } = this.market
       const botStatus = mmStatus.bots.find(({ config: cfg }) => cfg.baseID === baseID && cfg.quoteID === quoteID && cfg.host === host)
       this.mmRunning = Boolean(botStatus?.running)
@@ -1118,6 +1118,7 @@ export default class MarketsPage extends BasePage {
     const mktId = marketID(baseCfg.symbol, quoteCfg.symbol)
     const baseAsset = app().assets[baseID]
     const quoteAsset = app().assets[quoteID]
+
     const mkt = {
       dex: dex,
       sid: mktId, // A string market identifier used by the DEX.
@@ -1145,7 +1146,6 @@ export default class MarketsPage extends BasePage {
     this.mmRunning = undefined
     page.lotSize.textContent = Doc.formatCoinValue(mkt.cfg.lotsize, mkt.baseUnitInfo)
     page.rateStep.textContent = Doc.formatCoinValue(mkt.cfg.ratestep / rateConversionFactor)
-    app().updateMarketElements(this.main, baseID, quoteID)
 
     this.displayMessageIfMissingWallet()
     this.balanceWgt.setWallets(host, baseID, quoteID)
@@ -1162,7 +1162,7 @@ export default class MarketsPage extends BasePage {
       base: baseID,
       quote: quoteID
     })
-    app().updateMarketElements(this.main, baseID, quoteID)
+    app().updateMarketElements(this.main, baseID, quoteID, dex)
     this.marketList.select(host, baseID, quoteID)
     this.setLoaderMsgVisibility()
     this.setTokenApprovalVisibility()
