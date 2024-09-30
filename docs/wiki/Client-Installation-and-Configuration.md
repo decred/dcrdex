@@ -55,8 +55,8 @@ checkmark in the "native" column, no external software is required.
 | Bitcoin Cash |    ✓   | [v27.0.0](https://bitcoincashnode.org/) |     x    | use only Bitcoin Cash Node for full node |
 | Dogecoin     |    x   |  [v1.14.7.0](https://dogecoin.com/) |     x    |                              |
 | Zcash        |    x   |   [v5.4.2](https://z.cash/download/)  |     x    |                              |
-| Dash         |    x   |  [v20.1.1](https://github.com/dashpay/dash/releases)  |     x    |
-| Firo         |    x   | [v0.14.13.3](https://github.com/firoorg/firo/releases) | [v4.1.5.5](https://github.com/firoorg/electrum-firo/releases) |
+| Dash         |    x   |  [v20.1.1](https://github.com/dashpay/dash/releases)  |     x    | |
+| Firo         |    x   | [v0.14.13.3](https://github.com/firoorg/firo/releases) | [v4.1.5.5](https://github.com/firoorg/electrum-firo/releases) | |
 
 NOTE: The Electrum option is less mature and provides less privacy than the
 other wallet types. Some manual configuration of the Electrum wallet's RPC
@@ -91,19 +91,19 @@ several blocks.
 2. In your web browser, navigate to <http://localhost:5758>. Skip this step if
    using Decrediton.
 
-   <img src="images/omnibar-client.png" width="320">
+   <img src="images/omnibar-client.png" width="320" alt="">
 
 3. Set your new **client application password**. You will use this password to
    perform all future security-sensitive client operations.
 
-   <img src="images/client-pw.png" width="320">
+   <img src="images/client-pw.png" width="320" alt="">
 
    NOTE: Checking the "Remember my password" box only applies to the current
    session. It is easiest for most users to have it checked.
 
 4. After creating your app password, you'll be taken to the `Quick Configuration` form:
 
-   <img src="images/quick-config.png" width="350">
+   <img src="images/quick-config.png" width="350" alt="">
 
    The selected native wallets will be created for you and you'll be connected
    to the selected DEX server when you submit the form.
@@ -118,7 +118,7 @@ several blocks.
    via the "gears" icon in the top navigation bar to retrieve your application
    seed later.
 
-    <img src="images/view-seed.png" width="360">
+    <img src="images/view-seed.png" width="360" alt="">
 
 6. That's it! You'll be redirected to the wallets page after step 4 above.
 
