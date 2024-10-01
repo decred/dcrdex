@@ -18,12 +18,12 @@ account.
 1. Go to the `Markets` Page.
 2. Find the `Create Account` button and click it.
 
-    <img src="./images/create-account-market-page.png" width="300">
+    <img src="./images/create-account-market-page.png" width="300" alt="">
 
 3. The DEX host will show all offered markets, and a choice of assets with which
    you can lock in a bond to enable trading. Select the asset you wish to use.
 
-   <img src="images/choose-bond-asset.png" width="400">
+   <img src="images/choose-bond-asset.png" width="400" alt="">
 
    **NOTE**: A dedicate wiki page describing time-locked fidelity bonds will be
    created, but in short, fidelity bonds are funds redeemable only by you, but
@@ -36,7 +36,7 @@ account.
    wallet and click "Create!". The wallet will begin to synchronize with the
    asset's network.
 
-   <img src="images/create-btc.png" width="360">
+   <img src="images/create-btc.png" width="360" alt="">
 
 5. The next form will show you synchronization progress, and give you the
    deposit address for your wallet and the minimum amount you should deposit to
@@ -45,7 +45,7 @@ account.
    (i.e. be mined in a block) before the form will update your balance. This
    form will be skipped if the wallet is already funded and synchronized.
 
-   <img src="images/sync-fund-btc.png" width="360">
+   <img src="images/sync-fund-btc.png" width="360" alt="">
 
    **IMPORTANT**: This is your own wallet, and you can send as much as you
    like to it since *only* the amount required for the bond will be spent in the
@@ -72,7 +72,7 @@ account.
    time-locked fidelity bond, the form will update, and you should click the
    button to create and broadcast your bond transaction.
 
-   <img src="images/register-button.png" width="360">
+   <img src="images/register-button.png" width="360" alt="">
 
    After proceeding, the available balance will be the amount you deposited
    in the previous step minus this bond amount and transaction fees.
@@ -80,7 +80,7 @@ account.
 7. You will then be taken to the **Markets** page, where you must wait for
    confirmations on your bond transaction:
 
-   <img src="images/wait-for-confs.png" width="360">
+   <img src="images/wait-for-confs.png" width="360" alt="">
 
    While waiting, you may create additional wallets either directly from the
    displayed market or on the Wallets page accessible from the navigation bar at
@@ -89,7 +89,7 @@ account.
    After the transaction is confirmed, the application will submit the bond for
    validation and you will be ready to trade:
 
-   <img src="images/bond-accepted.png" width="360">
+   <img src="images/bond-accepted.png" width="360" alt="">
 
    It is recommended to export bond information whenever they are created since
    they are not automatically restored from just the application seed,
@@ -111,7 +111,7 @@ need to export it. Here's how you can do it:
 2. Click on the DEX account in the `Registered Dexes` list. In this example, it
    will be `dex.decred.org:7232 ⚙️`
 
-    <img src="./images/dex-account-settings.png" width="360">
+    <img src="./images/dex-account-settings.png" width="360" alt="">
 
 3. On the DEX account settings view, click `Export Account`.
 4. Select the directory where you want to save the `.json` file. Make sure to
@@ -125,11 +125,11 @@ here's how you can do it:
 1. Go to the `Settings` Page.
 2. Click on `Import Account`.
 
-    <img src="./images/dex-account-import.png" width="300">
+    <img src="./images/dex-account-import.png" width="300" alt="">
 
 3. Choose the exported DEX account `.json` file by clicking on `load from file`.
 
-    <img src="./images/import-dex-from-file.png" width="300">
+    <img src="./images/import-dex-from-file.png" width="300" alt="">
 
 4. Click `Authorize Import`.
 
@@ -155,12 +155,12 @@ To add a new DEX server:
 1. Go to the `Settings` page.
 2. Click on `Add a DEX`.
 
-    <img src="./images/add-dex-account.png" width="300">
+    <img src="./images/add-dex-account.png" width="300" alt="">
 
 3. Enter the address a known DEX server that you would like to use. and select
    the DEX server TLS file after clicking on `add a file`.
 
-    <img src="images/add-dex.png" width="320">
+    <img src="images/add-dex.png" width="320" alt="">
 
    **NOTE**: If you just want to view the markets without being able to trade,
    check the "No account" box. You will have an opportunity to create an

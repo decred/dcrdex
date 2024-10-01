@@ -69,6 +69,7 @@ func init() {
 	asset.Register(BipID, &Driver{})
 	registerToken(usdcTokenID, "The USDC Ethereum ERC20 token.")
 	registerToken(usdtTokenID, "The USDT Ethereum ERC20 token.")
+	registerToken(maticTokenID, "The MATIC Ethereum ERC20 token.")
 }
 
 const (
@@ -124,9 +125,10 @@ const (
 )
 
 var (
-	usdcTokenID, _ = dex.BipSymbolID("usdc.eth")
-	usdtTokenID, _ = dex.BipSymbolID("usdt.eth")
-	walletOpts     = []*asset.ConfigOption{
+	usdcTokenID, _  = dex.BipSymbolID("usdc.eth")
+	usdtTokenID, _  = dex.BipSymbolID("usdt.eth")
+	maticTokenID, _ = dex.BipSymbolID("matic.eth")
+	walletOpts      = []*asset.ConfigOption{
 		{
 			Key:         "gasfeelimit",
 			DisplayName: "Gas Fee Limit",
@@ -5304,6 +5306,9 @@ func getFileCredentials(chain, path string, net dex.Network) (seed []byte, provi
 			providers = append(providers, uri)
 		}
 	}
+	if len(providers) == 0 {
+		return nil, nil, fmt.Errorf("no providers in the file at %s for chain %s, network %s", path, chain, net)
+	}
 	if net == dex.Simnet && len(providers) == 0 {
 		u, _ := user.Current()
 		switch chain {
@@ -5382,12 +5387,13 @@ func quickNode(ctx context.Context, walletDir string, contractVer uint32,
 
 // waitForConfirmation waits for the specified transaction to have > 0
 // confirmations.
-func waitForConfirmation(ctx context.Context, cl ethFetcher, txHash common.Hash) error {
+func waitForConfirmation(ctx context.Context, desc string, cl ethFetcher, txHash common.Hash, log dex.Logger) error {
 	bestHdr, err := cl.bestHeader(ctx)
 	if err != nil {
 		return fmt.Errorf("error getting best header: %w", err)
 	}
 	ticker := time.NewTicker(stateUpdateTick)
+	lastReport := time.Now()
 	defer ticker.Stop()
 	for {
 		select {
@@ -5404,6 +5410,10 @@ func waitForConfirmation(ctx context.Context, cl ethFetcher, txHash common.Hash)
 				}
 				if confs > 0 {
 					return nil
+				}
+				if time.Since(lastReport) > time.Second*30 {
+					log.Infof("Awaiting confirmations for %s tx %s", desc, txHash)
+					lastReport = time.Now()
 				}
 			}
 
@@ -5837,7 +5847,8 @@ func (getGas) Estimate(ctx context.Context, net dex.Network, assetID, contractVe
 		if err != nil {
 			return fmt.Errorf("error sending fee reserves to approval client: %v", err)
 		}
-		if err = waitForConfirmation(ctx, approvalClient, tx.Hash()); err != nil {
+		log.Infof("Funded approval client gas with %s in transaction %s", wParams.UnitInfo.FormatAtoms(feePreload), tx.Hash())
+		if err = waitForConfirmation(ctx, "approval client fee funding", approvalClient, tx.Hash(), log); err != nil {
 			return fmt.Errorf("error waiting for approval fee funding tx: %w", err)
 		}
 
@@ -5949,7 +5960,7 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 			if err != nil {
 				return fmt.Errorf("error estimating approve gas: %w", err)
 			}
-			if err = waitForConfirmation(ctx, cl, tx.Hash()); err != nil {
+			if err = waitForConfirmation(ctx, "approval", cl, tx.Hash(), log); err != nil {
 				return fmt.Errorf("error waiting for approve transaction: %w", err)
 			}
 			receipt, _, err := cl.transactionAndReceipt(ctx, tx.Hash())
@@ -5988,7 +5999,7 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 		if err != nil {
 			return fmt.Errorf("transfer error: %w", err)
 		}
-		if err = waitForConfirmation(ctx, cl, transferTx.Hash()); err != nil {
+		if err = waitForConfirmation(ctx, "transfer", cl, transferTx.Hash(), log); err != nil {
 			return fmt.Errorf("error waiting for transfer tx: %w", err)
 		}
 		receipt, _, err := cl.transactionAndReceipt(ctx, transferTx.Hash())
@@ -6034,7 +6045,7 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 		if err != nil {
 			return fmt.Errorf("initiate error for %d swaps: %v", n, err)
 		}
-		if err = waitForConfirmation(ctx, cl, tx.Hash()); err != nil {
+		if err = waitForConfirmation(ctx, "init", cl, tx.Hash(), log); err != nil {
 			return fmt.Errorf("error waiting for init tx to be mined: %w", err)
 		}
 		receipt, _, err := cl.transactionAndReceipt(ctx, tx.Hash())
@@ -6076,7 +6087,7 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 		if err != nil {
 			return fmt.Errorf("redeem error for %d swaps: %v", n, err)
 		}
-		if err = waitForConfirmation(ctx, cl, tx.Hash()); err != nil {
+		if err = waitForConfirmation(ctx, "redeem", cl, tx.Hash(), log); err != nil {
 			return fmt.Errorf("error waiting for redeem tx to be mined: %w", err)
 		}
 		receipt, _, err = cl.transactionAndReceipt(ctx, tx.Hash())

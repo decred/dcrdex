@@ -25,14 +25,14 @@ From the "Wallets" page of the DEX application, you select Ethereum from the
 left menu, which will show you your ETH balance if you already have a
 wallet, or you will see a "Create a Ethereum Wallet" button:
 
-   <img src="images/eth-create-wallet.png" width="320">
+   <img src="images/eth-create-wallet.png" width="320" alt="">
 
 When you click the button, you will be able to specify one or more RPC provider
 endpoints. You can provide a single endpoint, but it is recommended to specify
 more than one for redundancy. Click the "+" icon at the right to add additional
 providers.
 
-   <img src="images/eth-wallet-settings.png" width="320">
+   <img src="images/eth-wallet-settings.png" width="320" alt="">
 
 The types of endpoints that are supported are:
 

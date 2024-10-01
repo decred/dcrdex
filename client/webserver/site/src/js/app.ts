@@ -794,12 +794,19 @@ export default class Application {
    * updateMarketElements sets the textContent for any ticker or asset name
    * elements or any asset logo src attributes for descendents of ancestor.
    */
-  updateMarketElements (ancestor: PageElement, baseID: number, quoteID: number) {
-    const { unitInfo: bui, name: baseName, symbol: baseSymbol } = this.assets[baseID]
+  updateMarketElements (ancestor: PageElement, baseID: number, quoteID: number, xc?: Exchange) {
+    const getAsset = (assetID: number) => {
+      const a = this.assets[assetID]
+      if (a) return a
+      if (!xc) throw Error(`no asset found for asset ID ${assetID}`)
+      const xcAsset = xc.assets[assetID]
+      return { unitInfo: xcAsset.unitInfo, name: xcAsset.symbol, symbol: xcAsset.symbol }
+    }
+    const { unitInfo: bui, name: baseName, symbol: baseSymbol } = getAsset(baseID)
     for (const el of Doc.applySelector(ancestor, '[data-base-name')) el.textContent = baseName
     for (const img of Doc.applySelector(ancestor, '[data-base-logo]')) img.src = Doc.logoPath(baseSymbol)
     for (const el of Doc.applySelector(ancestor, '[data-base-ticker]')) el.textContent = bui.conventional.unit
-    const { unitInfo: qui, name: quoteName, symbol: quoteSymbol } = this.assets[quoteID]
+    const { unitInfo: qui, name: quoteName, symbol: quoteSymbol } = getAsset(quoteID)
     for (const el of Doc.applySelector(ancestor, '[data-quote-name')) el.textContent = quoteName
     for (const img of Doc.applySelector(ancestor, '[data-quote-logo]')) img.src = Doc.logoPath(quoteSymbol)
     for (const el of Doc.applySelector(ancestor, '[data-quote-ticker]')) el.textContent = qui.conventional.unit
@@ -1052,21 +1059,19 @@ export default class Application {
 
         // Updates given order in market's orders list if it finds it.
         // Returns a bool which indicates if order was found.
+        mkt.orders = mkt.orders || []
         const updateOrder = (mkt: Market, ord: Order) => {
-          for (const i in mkt.orders || []) {
-            if (mkt.orders[i].id === ord.id) {
-              mkt.orders[i] = ord
-              return true
-            }
-          }
-          return false
+          const i = mkt.orders.findIndex((o: Order) => o.id === ord.id)
+          if (i === -1) return false
+          if (note.topic === 'OrderRetired') mkt.orders.splice(i, 1)
+          else mkt.orders[i] = ord
+          return true
         }
         // If the notification order already exists we update it.
         // In case market's orders list is empty or the notification order isn't
         // part of it we add it manually as this means the order was
         // just placed.
-        if (!mkt.orders) mkt.orders = [order]
-        else if (!updateOrder(mkt, order)) mkt.orders.push(order)
+        if (!updateOrder(mkt, order)) mkt.orders.push(order)
         break
       }
       case 'balance': {

@@ -1211,7 +1211,7 @@ export interface Application {
   bindTooltips (ancestor: HTMLElement): void
   bindUrlHandlers (ancestor: HTMLElement): void
   attachHeader (): void
-  updateMarketElements (ancestor: PageElement, baseID: number, quoteID: number): void
+  updateMarketElements (ancestor: PageElement, baseID: number, quoteID: number, xc?: Exchange): void
   showDropdown (icon: HTMLElement, dialog: HTMLElement): void
   ackNotes (): void
   setNoteTimes (noteList: HTMLElement): void

@@ -101,6 +101,8 @@ type CoreConfig struct {
 	// Net is a derivative field set by ResolveConfig.
 	Net dex.Network
 
+	TheOneHost string `long:"onehost" description:"Only connect with this server."`
+
 	NoAutoWalletLock   bool `long:"no-wallet-lock" description:"Disable locking of wallets on shutdown or logout. Use this if you want your external wallets to stay unlocked after closing the DEX app."`
 	NoAutoDBBackup     bool `long:"no-db-backup" description:"Disable creation of a database backup on shutdown."`
 	UnlockCoinsOnLogin bool `long:"release-wallet-coins" description:"On login or wallet creation, instruct the wallet to release any coins that it may have locked."`
@@ -213,6 +215,7 @@ func (cfg *Config) Core(log dex.Logger) *core.Config {
 		NoAutoWalletLock:   cfg.NoAutoWalletLock,
 		NoAutoDBBackup:     cfg.NoAutoDBBackup,
 		ExtensionModeFile:  cfg.ExtensionModeFile,
+		TheOneHost:         cfg.TheOneHost,
 	}
 }
 

@@ -114,7 +114,7 @@ const defaultProfit = {
 const defaultLevelSpacing = {
   prec: 3,
   value: 0.005,
-  minV: 0.0001,
+  minV: 0.001,
   maxV: 0.02,
   range: 0.02 - 0.0001
 }

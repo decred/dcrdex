@@ -1433,6 +1433,8 @@ type Config struct {
 	// for running core in extension mode, which gives the caller options for
 	// e.g. limiting the ability to configure wallets.
 	ExtensionModeFile string
+
+	TheOneHost string
 }
 
 // locale is data associated with the currently selected language.
@@ -7139,6 +7141,10 @@ func (c *Core) initialize() error {
 	c.log.Infof("Connected to %d of %d DEX servers", liveConns, len(accts))
 
 	for _, dbWallet := range dbWallets {
+		if asset.Asset(dbWallet.AssetID) == nil && asset.TokenInfo(dbWallet.AssetID) == nil {
+			c.log.Infof("Wallet for asset %s no longer supported", dex.BipIDSymbol(dbWallet.AssetID))
+			continue
+		}
 		assetID := dbWallet.AssetID
 		wallet, err := c.loadWallet(dbWallet)
 		if err != nil {
@@ -7172,6 +7178,11 @@ func (c *Core) connectAccount(acct *db.AccountInfo) (connected bool) {
 	if err != nil {
 		c.log.Errorf("skipping loading of %s due to address parse error: %v", host, err)
 		return
+	}
+
+	if c.cfg.TheOneHost != "" && c.cfg.TheOneHost != host {
+		c.log.Infof("Running with --onehost = %q.", c.cfg.TheOneHost)
+		return false
 	}
 
 	var connectFlag connectDEXFlag
@@ -7445,6 +7456,12 @@ func (c *Core) loadDBTrades(dc *dexConnection) error {
 		c.notify(newOrderNote(TopicOrderLoaded, "", "", db.Data, tracker.coreOrder()))
 
 		if mktConf == nil || !versCompat {
+			if tracker.status() < order.OrderStatusExecuted {
+				// Either we couldn't connect at startup and we don't have the
+				// server config, or we have a server config and the market no
+				// longer exists. Either way, revoke the order.
+				tracker.revoke()
+			}
 			tracker.setSelfGoverned(true) // redeem and refund only
 			c.log.Warnf("No server market or incompatible/missing asset configurations for trade %v, market %v, host %v!",
 				tracker.Order.ID(), tracker.mktID, dc.acct.host)

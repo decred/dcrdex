@@ -66,6 +66,7 @@ func init() {
 
 	registerToken(usdcID, 0)
 	registerToken(usdtID, 0)
+	registerToken(maticID, 0)
 }
 
 const (
@@ -82,8 +83,9 @@ var (
 		SupportsDynamicTxFee: true,
 	}
 
-	usdcID, _ = dex.BipSymbolID("usdc.eth")
-	usdtID, _ = dex.BipSymbolID("usdt.eth")
+	usdcID, _  = dex.BipSymbolID("usdc.eth")
+	usdtID, _  = dex.BipSymbolID("usdt.eth")
+	maticID, _ = dex.BipSymbolID("matic.eth")
 )
 
 func networkToken(vToken *VersionedToken, net dex.Network) (netToken *dexeth.NetToken, contract *dexeth.SwapContract, err error) {

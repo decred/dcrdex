@@ -1390,8 +1390,9 @@ func (bnc *binance) getUserDataStream(ctx context.Context) (err error) {
 		}
 
 		conn, err := comms.NewWsConn(&comms.WsCfg{
-			URL:      bnc.wsURL + "/ws/" + listenKey,
-			PingWait: time.Minute * 4,
+			URL:          bnc.wsURL + "/ws/" + listenKey,
+			PingWait:     time.Minute * 4,
+			EchoPingData: true,
 			ReconnectSync: func() {
 				bnc.log.Debugf("Binance reconnected")
 			},
@@ -1601,7 +1602,8 @@ func (bnc *binance) connectToMarketDataStream(ctx context.Context, baseID, quote
 			// minutes. If the websocket server does not receive a pong frame
 			// back from the connection within a 10 minute period, the connection
 			// will be disconnected. Unsolicited pong frames are allowed.
-			PingWait: time.Minute * 4,
+			PingWait:     time.Minute * 4,
+			EchoPingData: true,
 			ReconnectSync: func() {
 				bnc.log.Debugf("Binance reconnected")
 			},
