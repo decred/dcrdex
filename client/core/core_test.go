@@ -7071,7 +7071,9 @@ func TestHandleNomatch(t *testing.T) {
 	dc.trades[marketOID] = marketTracker
 
 	runNomatch := func(tag string, oid order.OrderID) {
+		dc.tradeMtx.RLock()
 		tracker, _, _ := dc.findOrder(oid)
+		dc.tradeMtx.RUnlock()
 		if tracker == nil {
 			t.Fatalf("%s: order ID not found", tag)
 		}
@@ -7084,7 +7086,9 @@ func TestHandleNomatch(t *testing.T) {
 	}
 
 	checkTradeStatus := func(tag string, oid order.OrderID, expStatus order.OrderStatus) {
+		dc.tradeMtx.RLock()
 		tracker, _, _ := dc.findOrder(oid)
+		dc.tradeMtx.RUnlock()
 		if tracker.metaData.Status != expStatus {
 			t.Fatalf("%s: wrong status. expected %s, got %s", tag, expStatus, tracker.metaData.Status)
 		}

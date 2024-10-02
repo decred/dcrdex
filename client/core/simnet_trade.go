@@ -2216,7 +2216,10 @@ func (client *simulationClient) findOrder(orderID string) (*trackedTrade, error)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing order id %s -> %v", orderID, err)
 	}
-	tracker, _, _ := client.dc().findOrder(oid)
+	dc := client.dc()
+	dc.tradeMtx.RLock()
+	tracker, _, _ := dc.findOrder(oid)
+	dc.tradeMtx.RUnlock()
 	return tracker, nil
 }
 
