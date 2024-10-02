@@ -611,6 +611,8 @@ func (ss *SyncStatus) BlockProgress() float32 {
 		return 1
 	case ss.TargetHeight == 0:
 		return 0
+	case ss.TargetHeight == ss.StartingBlocks:
+		return 0.999
 	}
 	prog := float32(ss.Blocks-ss.StartingBlocks) / float32(ss.TargetHeight-ss.StartingBlocks)
 	if ss.Transactions == nil { // If the asset doesn't support tx sync status, max unsynced is 0.999
