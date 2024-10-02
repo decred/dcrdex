@@ -43,6 +43,8 @@ function cleanup() {
 	rm -rf "$APP_DIR"
 }
 
+export MACOSX_DEPLOYMENT_TARGET=10.11.0
+
 function prepare() {
 	# Remove the installers directories and recreate them.
 	rm -rf "${INSTALLERS_DIR}"
@@ -70,7 +72,7 @@ function prepare() {
 		  <key>CFBundleVersion</key><string>${BUILD_VER}</string>
 		  <key>CFBundleSignature</key><string>dexc</string>
 		  <key>CFBundleSupportedPlatforms</key><array><string>MacOSX</string></array>
-		  <key>LSMinimumSystemVersion</key><string>10.11.0</string>
+		  <key>LSMinimumSystemVersion</key><string>${MACOSX_DEPLOYMENT_TARGET}</string>
 		  <key>NSHighResolutionCapable</key><true/>
 		  <key>NSRequiresAquaSystemAppearance</key><false/>
 		  <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
@@ -94,14 +96,16 @@ function build_targets() {
 
     echo "Building .DMG click installer for ${OS}-${ARCH}"
 
-	TARGET_NAME="bisonw${FLAVOR}-${OS}-${ARCH}-v${VER}"
+	TARGET_NAME="bisonw-desktop-${OS}-${ARCH}-v${VER}"
 
 	# Remove any existing executable if any.
 	rm -rf "${APP_EXCE_DIR}"
 	mkdir -p "${APP_EXCE_DIR}"
 
+	# Potentially want to run with CGO_CXXFLAGS="-mmacosx-version-min=10.11.0"
+
     pushd ..
-    GOOS=${OS} GOARCH=${ARCH} CGO_ENABLED=1 go build -v -trimpath ${TAGS_DEXC:+-tags ${TAGS_DEXC}} -o "${APP_EXCE_DIR}/${APP_NAME}" -ldflags "${LDFLAGS_DEXC:-${LDFLAGS_BASE}}"
+    GOOS=${OS} GOARCH=${ARCH} CGO_ENABLED=1 go build -v -trimpath -o "${APP_EXCE_DIR}/${APP_NAME}" -ldflags "${LDFLAGS_DEXC:-${LDFLAGS_BASE}}"
     popd
 
 	./create-dmg.sh \
@@ -121,8 +125,6 @@ function build_targets() {
 }
 
 TARGETS="darwin/amd64 darwin/arm64"
-FLAVOR="-tray"
-TAGS_DEXC="systray"
 prepare
 build_targets
 cleanup
