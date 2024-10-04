@@ -148,13 +148,13 @@ tmux rename-window -t $SESSION:0 'harness-ctl'
 if [ -z "${ONLY_TWO}" ]; then
   tmux new-window -t $SESSION:1 -n 'bisonw1' $SHELL
   tmux send-keys -t $SESSION:1 "cd ${PAIR_ROOT}/dexc1" C-m
-  tmux send-keys -t $SESSION:1 "${BISONW} --appdata=${CLIENT_1_DIR} ${BW_ARGS[@]}" C-m
+  tmux send-keys -t $SESSION:1 "${BISONW} --appdata=${CLIENT_1_DIR} ${BW_ARGS[*]}" C-m
 fi
 
 if [ -z "${ONLY_ONE}" ]; then
   tmux new-window -t $SESSION:2 -n 'bisonw2' $SHELL
   tmux send-keys -t $SESSION:2 "cd ${PAIR_ROOT}/dexc1" C-m
-  tmux send-keys -t $SESSION:2 "${BISONW} --appdata=${CLIENT_2_DIR} ${BW_ARGS[@]}" C-m
+  tmux send-keys -t $SESSION:2 "${BISONW} --appdata=${CLIENT_2_DIR} ${BW_ARGS[*]}" C-m
 fi
 
 tmux select-window -t $SESSION:0
