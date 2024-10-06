@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"decred.org/dcrdex/client/db"
@@ -138,7 +137,7 @@ var (
 // Opts is a set of options for the DB.
 type Opts struct {
 	BackupOnShutdown bool // default is true
-	ArchiveSizeLimit uint64
+	PruneArchive     uint64
 }
 
 var defaultOpts = Opts{
@@ -219,6 +218,11 @@ func NewDB(dbPath string, logger dex.Logger, opts ...Opts) (dexdb.DB, error) {
 		return nil, err
 	}
 
+	if bdb.opts.PruneArchive > 0 {
+		bdb.log.Info("Pruning the order archive")
+		bdb.pruneArchivedOrders(bdb.opts.PruneArchive)
+	}
+
 	bdb.log.Infof("Started database (version = %d, file = %s)", DBVersion, dbPath)
 
 	return bdb, nil
@@ -235,28 +239,7 @@ func (db *BoltDB) fileSize(path string) int64 {
 
 // Run waits for context cancellation and closes the database.
 func (db *BoltDB) Run(ctx context.Context) {
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		tick := time.After(time.Minute)
-		for {
-			select {
-			case <-tick:
-			case <-ctx.Done():
-				return
-			}
-			if err := db.pruneArchivedOrders(); err != nil {
-				db.log.Errorf("Error cleaning archive: %v", err)
-			}
-			tick = time.After(time.Minute * 30)
-		}
-	}()
-
 	<-ctx.Done() // wait for shutdown to backup and compact
-
-	// Wait for archive cleaner to exit.
-	wg.Wait()
 
 	// Create a backup in the backups folder.
 	if db.opts.BackupOnShutdown {
@@ -430,11 +413,7 @@ func (db *BoltDB) SetPrimaryCredentials(creds *dexdb.PrimaryCredentials) error {
 	})
 }
 
-func (db *BoltDB) pruneArchivedOrders() error {
-	var archiveSizeLimit uint64 = 1000
-	if db.opts.ArchiveSizeLimit != 0 {
-		archiveSizeLimit = db.opts.ArchiveSizeLimit
-	}
+func (db *BoltDB) pruneArchivedOrders(prunedSize uint64) error {
 
 	return db.Update(func(tx *bbolt.Tx) error {
 		archivedOB := tx.Bucket(archivedOrdersBucket)
@@ -462,11 +441,11 @@ func (db *BoltDB) pruneArchivedOrders() error {
 		}
 
 		nOrds := uint64(archivedOB.Stats().BucketN - 1 /* BucketN includes top bucket */)
-		if nOrds <= archiveSizeLimit {
+		if nOrds <= prunedSize {
 			return nil
 		}
 
-		toClear := int(nOrds - archiveSizeLimit)
+		toClear := int(nOrds - prunedSize)
 
 		type orderStamp struct {
 			oid   []byte
@@ -525,7 +504,7 @@ func (db *BoltDB) pruneArchivedOrders() error {
 			}
 		}
 
-		matchesToDelete := make([][]byte, 0, archiveSizeLimit /* just avoid some allocs if we can */)
+		matchesToDelete := make([][]byte, 0, prunedSize /* just avoid some allocs if we can */)
 		archivedMatches := tx.Bucket(archivedMatchesBucket)
 		if archivedMatches == nil {
 			return errors.New("no archived match bucket")

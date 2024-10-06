@@ -1629,8 +1629,8 @@ func TestPokes(t *testing.T) {
 
 func TestPruneArchivedOrders(t *testing.T) {
 	const host = "blah"
-	const archiveSizeLimit = 5
-	boltdb, shutdown := newTestDB(t, Opts{ArchiveSizeLimit: archiveSizeLimit})
+	const prunedSize = 5
+	boltdb, shutdown := newTestDB(t)
 	defer shutdown()
 
 	archivedOrdersN := func() (n int) {
@@ -1663,27 +1663,27 @@ func TestPruneArchivedOrders(t *testing.T) {
 		})
 		return oid
 	}
-	for i := 0; i < archiveSizeLimit*2; i++ {
+	for i := 0; i < prunedSize*2; i++ {
 		addOrder(0)
 	}
 
-	if n := archivedOrdersN(); n != archiveSizeLimit*2 {
-		t.Fatalf("Expected %d archived orders after intitialization, saw %d", archiveSizeLimit*2, n)
+	if n := archivedOrdersN(); n != prunedSize*2 {
+		t.Fatalf("Expected %d archived orders after intitialization, saw %d", prunedSize*2, n)
 	}
 
-	if err := boltdb.pruneArchivedOrders(); err != nil {
+	if err := boltdb.pruneArchivedOrders(prunedSize); err != nil {
 		t.Fatalf("pruneArchivedOrders error: %v", err)
 	}
 
-	if n := archivedOrdersN(); n != archiveSizeLimit {
-		t.Fatalf("Expected %d archived orders after first pruning, saw %d", archiveSizeLimit, n)
+	if n := archivedOrdersN(); n != prunedSize {
+		t.Fatalf("Expected %d archived orders after first pruning, saw %d", prunedSize, n)
 	}
 
 	// Make sure we pruned the first 5.
 	if err := boltdb.View(func(tx *bbolt.Tx) error {
 		bkt := tx.Bucket(archivedOrdersBucket)
 		return bkt.ForEach(func(oidB, _ []byte) error {
-			if stamp := intCoder.Uint64(bkt.Bucket(oidB).Get(updateTimeKey)); stamp < archiveSizeLimit {
+			if stamp := intCoder.Uint64(bkt.Bucket(oidB).Get(updateTimeKey)); stamp < prunedSize {
 				return fmt.Errorf("order stamp %d should have been pruned", stamp)
 			}
 			return nil
@@ -1707,12 +1707,12 @@ func TestPruneArchivedOrders(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := boltdb.pruneArchivedOrders(); err != nil {
+	if err := boltdb.pruneArchivedOrders(prunedSize); err != nil {
 		t.Fatalf("Error pruning orders when one has an active match: %v", err)
 	}
 
-	if n := archivedOrdersN(); n != archiveSizeLimit {
-		t.Fatalf("Expected %d archived orders after pruning with active match order in place, saw %d", archiveSizeLimit, n)
+	if n := archivedOrdersN(); n != prunedSize {
+		t.Fatalf("Expected %d archived orders after pruning with active match order in place, saw %d", prunedSize, n)
 	}
 
 	// Our active match order should still be available
@@ -1727,11 +1727,11 @@ func TestPruneArchivedOrders(t *testing.T) {
 	}
 	// Add an order to push the now retirable older order out
 	addOrder(0)
-	if err := boltdb.pruneArchivedOrders(); err != nil {
+	if err := boltdb.pruneArchivedOrders(prunedSize); err != nil {
 		t.Fatalf("Error pruning orders after retiring match: %v", err)
 	}
-	if n := archivedOrdersN(); n != archiveSizeLimit {
-		t.Fatalf("Expected %d archived orders after pruning with retired match, saw %d", archiveSizeLimit, n)
+	if n := archivedOrdersN(); n != prunedSize {
+		t.Fatalf("Expected %d archived orders after pruning with retired match, saw %d", prunedSize, n)
 	}
 	// Match should not be archived any longer.
 	metaID := m.MatchOrderUniqueID()
