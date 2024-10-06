@@ -108,7 +108,7 @@ type CoreConfig struct {
 
 	ExtensionModeFile string `long:"extension-mode-file" description:"path to a file that specifies options for running core as an extension."`
 
-	ArchiveSizeLimit uint64 `long:"archivesize" description:"the maximum number of orders to be archived before deleting the oldest"`
+	PruneArchive uint64 `long:"prunearchive" description:"prune that order archive to the specified number of most recent orders"`
 }
 
 // WebConfig encapsulates the configuration needed for the web server.
@@ -216,7 +216,7 @@ func (cfg *Config) Core(log dex.Logger) *core.Config {
 		NoAutoWalletLock:   cfg.NoAutoWalletLock,
 		NoAutoDBBackup:     cfg.NoAutoDBBackup,
 		ExtensionModeFile:  cfg.ExtensionModeFile,
-		ArchiveSizeLimit:   cfg.ArchiveSizeLimit,
+		PruneArchive:       cfg.PruneArchive,
 	}
 }
 
@@ -226,9 +226,6 @@ var DefaultConfig = Config{
 	LogConfig:  LogConfig{DebugLevel: defaultLogLevel},
 	RPCConfig: RPCConfig{
 		CertHosts: []string{defaultTestnetHost, defaultSimnetHost, defaultMainnetHost},
-	},
-	CoreConfig: CoreConfig{
-		ArchiveSizeLimit: defaultArchiveSizeLimit,
 	},
 }
 

@@ -1433,9 +1433,9 @@ type Config struct {
 	// for running core in extension mode, which gives the caller options for
 	// e.g. limiting the ability to configure wallets.
 	ExtensionModeFile string
-	// ArchiveSizeLimit is the maximum number of orders that will be archived
-	// before we start deleting the oldest.
-	ArchiveSizeLimit uint64
+	// PruneArchive will prune the order archive to the specified number of
+	// orders.
+	PruneArchive uint64
 }
 
 // locale is data associated with the currently selected language.
@@ -1518,7 +1518,7 @@ func New(cfg *Config) (*Core, error) {
 	}
 	dbOpts := bolt.Opts{
 		BackupOnShutdown: !cfg.NoAutoDBBackup,
-		ArchiveSizeLimit: cfg.ArchiveSizeLimit,
+		PruneArchive:     cfg.PruneArchive,
 	}
 	boltDB, err := bolt.NewDB(cfg.DBPath, cfg.Logger.SubLogger("DB"), dbOpts)
 	if err != nil {
