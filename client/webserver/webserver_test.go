@@ -1005,7 +1005,8 @@ func testTrade(t *testing.T, async bool) {
 	reader := new(TReader)
 
 	body := &tradeForm{
-		Pass: []byte("random"),
+		Pass:  []byte("random"),
+		Order: new(core.TradeForm),
 	}
 
 	ensure := func(want string) {

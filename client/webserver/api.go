@@ -629,6 +629,10 @@ func (s *WebServer) apiTrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer zero(pass)
+	if form.Order == nil {
+		s.writeAPIError(w, errors.New("order missing"))
+		return
+	}
 	ord, err := s.core.Trade(pass, form.Order)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error placing order: %w", err))
@@ -748,6 +752,10 @@ func (s *WebServer) apiAccountImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer zero(pass)
+	if form.Account == nil {
+		s.writeAPIError(w, errors.New("account missing"))
+		return
+	}
 	err = s.core.AccountImport(pass, form.Account, form.Bonds)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error importing account: %w", err))
@@ -1668,6 +1676,11 @@ func (s *WebServer) apiRunLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Market == nil {
+		s.writeAPIError(w, errors.New("market missing"))
+		return
+	}
+
 	logs, updatedLogs, overview, err := s.mm.RunLogs(req.StartTime, req.Market, req.N, req.RefID, req.Filters)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error getting run logs: %w", err))
@@ -1888,6 +1901,11 @@ func (s *WebServer) apiStartMarketMakingBot(w http.ResponseWriter, r *http.Reque
 		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
+	defer zero(appPW)
+	if form.Config == nil {
+		s.writeAPIError(w, errors.New("config missing"))
+		return
+	}
 	if err = s.mm.StartBot(form.Config, nil, appPW); err != nil {
 		s.writeAPIError(w, fmt.Errorf("error starting market making: %v", err))
 		return
@@ -1902,6 +1920,10 @@ func (s *WebServer) apiStopMarketMakingBot(w http.ResponseWriter, r *http.Reques
 	}
 	if !readPost(w, r, &form) {
 		s.writeAPIError(w, fmt.Errorf("failed to read form"))
+		return
+	}
+	if form.Market == nil {
+		s.writeAPIError(w, errors.New("market missing"))
 		return
 	}
 	if err := s.mm.StopBot(form.Market); err != nil {
