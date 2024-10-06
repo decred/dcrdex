@@ -872,7 +872,11 @@ func (w *spvWallet) GetTransaction(ctx context.Context, txHash *chainhash.Hash) 
 
 	if txd.Block.Height != -1 {
 		ret.BlockHash = txd.Block.Hash.String()
-		ret.Confirmations = int64(tipHeight - txd.Block.Height + 1)
+		if tipHeight >= txd.Block.Height {
+			ret.Confirmations = int64(tipHeight - txd.Block.Height + 1)
+		} else {
+			ret.Confirmations = 1
+		}
 	}
 
 	details, err := w.ListTransactionDetails(ctx, txHash)
