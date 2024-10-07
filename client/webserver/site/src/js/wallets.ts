@@ -641,7 +641,7 @@ export default class WalletsPage extends BasePage {
       page.unapproveTokenErr.textContent = res.msg
       Doc.show(page.unapproveTokenErr)
     } else {
-      let feeText = `${Doc.formatCoinValue(res.txFee, parentAsset.unitInfo)} ${parentAsset.symbol.toUpperCase()}`
+      let feeText = `${Doc.formatCoinValue(res.txFee, parentAsset.unitInfo)} ${parentAsset.unitInfo.conventional.unit}`
       const rate = app().fiatRatesMap[parentAsset.id]
       if (rate) {
         feeText += ` (${Doc.formatFiatConversion(res.txFee, rate, parentAsset.unitInfo)} USD)`
@@ -1755,10 +1755,10 @@ export default class WalletsPage extends BasePage {
       let assetID = this.selectedAssetID
       if (tx.tokenID) assetID = tx.tokenID
       Doc.show(page.txDetailsAmtSection)
-      const amt = Doc.formatCoinValue(tx.amount, app().unitInfo(assetID))
-      const amtUnit = app().assets[assetID].symbol.split('.')[0].toUpperCase()
+      const ui = app().unitInfo(assetID)
+      const amt = Doc.formatCoinValue(tx.amount, ui)
       const [s, c] = txTypeSignAndClass(tx.type)
-      page.txDetailsAmount.textContent = `${s}${amt} ${amtUnit}`
+      page.txDetailsAmount.textContent = `${s}${amt} ${ui.conventional.unit}`
       if (c !== '') page.txDetailsAmount.classList.add(c)
     }
 
@@ -1772,8 +1772,9 @@ export default class WalletsPage extends BasePage {
         console.error(`wallet transaction ${tx.id} is supposed to be a token tx, but asset ${tx.tokenID} is not a token`)
       }
     }
-    const fee = Doc.formatCoinValue(tx.fees, app().unitInfo(feeAsset))
-    page.txDetailsFee.textContent = `${fee} ${app().assets[feeAsset].symbol.toUpperCase()}`
+    const feeUI = app().unitInfo(feeAsset)
+    const fee = Doc.formatCoinValue(tx.fees, feeUI)
+    page.txDetailsFee.textContent = `${fee} ${feeUI.conventional.unit}`
 
     // Time / block number
     page.txDetailsBlockNumber.textContent = `${tx.blockNumber}`
