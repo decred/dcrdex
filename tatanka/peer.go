@@ -4,10 +4,8 @@
 package tatanka
 
 import (
-	"math"
 	"sync"
 
-	"decred.org/dcrdex/tatanka/mj"
 	"decred.org/dcrdex/tatanka/tanka"
 )
 
@@ -17,42 +15,7 @@ type peer struct {
 
 	mtx         sync.RWMutex
 	*tanka.Peer // Bonds and Reputation protected by mtx
-	rrs         map[tanka.PeerID]*mj.RemoteReputation
-}
-
-// score calculates the peer's reputation score.
-func (p *peer) score() int16 {
-	p.mtx.RLock()
-	defer p.mtx.RUnlock()
-	// If we have registered enough points ourselves, just use our score.
-	if len(p.Reputation.Points) == tanka.MaxReputationEntries {
-		return p.Reputation.Score
-	}
-	// Create a composite score. This is not an average. If we have 90 or the
-	// max 100 sepearate point entries, our score is weighted as 90%. The other
-	// 10% is taken from a poll of peers, weighted according to the number of
-	// points that they report.
-	myScoreRatio := float64(len(p.Reputation.Points)) / tanka.MaxReputationEntries
-	remainingScoreRatio := (tanka.MaxReputationEntries - float64(len(p.Reputation.Points))) / tanka.MaxReputationEntries
-	var weight int64
-	var ptCount uint32
-	for _, r := range p.rrs {
-		if r == nil {
-			continue
-		}
-		weight += int64(r.Score) * int64(r.NumPts)
-		ptCount += uint32(r.NumPts)
-	}
-
-	remoteScore := float64(weight) / float64(ptCount)
-	score := int64(math.Round(float64(p.Reputation.Score)*myScoreRatio + remoteScore*remainingScoreRatio))
-	if score > math.MaxUint16 {
-		score = math.MaxInt64
-	}
-	if score < -int64(math.MaxInt16) {
-		score = -int64(math.MaxInt16)
-	}
-	return int16(score)
+	rrs         map[tanka.PeerID]*tanka.Reputation
 }
 
 // banned checks whether the peer is banned.

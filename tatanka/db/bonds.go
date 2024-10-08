@@ -4,65 +4,70 @@
 package db
 
 import (
-	"encoding/json"
 	"fmt"
 	"time"
 
+	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/lexi"
 	"decred.org/dcrdex/tatanka/tanka"
 )
 
-type jsonCoder struct {
-	thing interface{}
+type dbBond struct {
+	*tanka.Bond
 }
 
-func newJSON(thing interface{}) *jsonCoder {
-	return &jsonCoder{thing}
+func (bond *dbBond) MarshalBinary() ([]byte, error) {
+	const bondVer = 0
+	var b encode.BuildyBytes = make([]byte, 1, 1+tanka.PeerIDLength+4+len(bond.CoinID)+8+8)
+	b[0] = bondVer
+	b = b.AddData(bond.PeerID[:]).
+		AddData(encode.Uint32Bytes(bond.AssetID)).
+		AddData(bond.CoinID).
+		AddData(encode.Uint64Bytes(bond.Strength)).
+		AddData(encode.Uint64Bytes(uint64(bond.Expiration.Unix())))
+	return b, nil
 }
 
-func (p *jsonCoder) MarshalBinary() ([]byte, error) {
-	return json.Marshal(p.thing)
-}
-
-func (p *jsonCoder) UnmarshalBinary(b []byte) error {
-	return json.Unmarshal(b, p.thing)
-}
-
-func (d *DB) StoreBond(newBond *tanka.Bond) (goodBonds []*tanka.Bond, err error) {
-	var existingBonds []*tanka.Bond
-	if _, err = d.bondsDB.Get(newBond.PeerID[:], newJSON(existingBonds)); err != nil {
-		return nil, fmt.Errorf("error reading bonds db: %w", err)
+func (bond *dbBond) UnmarshalBinary(b []byte) error {
+	const bondVer = 0
+	bond.Bond = new(tanka.Bond)
+	ver, pushes, err := encode.DecodeBlob(b, 5)
+	if err != nil {
+		return fmt.Errorf("error decoding bond blob: %w", err)
 	}
-
-	for _, b := range existingBonds {
-		if time.Now().After(b.Expiration) {
-			continue
-		}
-		goodBonds = append(goodBonds, b)
+	if ver != bondVer {
+		return fmt.Errorf("unknown bond version %d", ver)
 	}
+	if len(pushes) != 5 {
+		return fmt.Errorf("unknown number of bond blob pushes %d", len(pushes))
+	}
+	copy(bond.PeerID[:], pushes[0])
+	bond.AssetID = encode.BytesToUint32(pushes[1])
+	bond.CoinID = pushes[2]
+	bond.Strength = encode.BytesToUint64(pushes[3])
+	bond.Expiration = time.Unix(int64(encode.BytesToUint64(pushes[4])), 0)
+	return nil
+}
 
-	goodBonds = append(goodBonds, newBond)
-	return goodBonds, d.bondsDB.Store(newBond.PeerID[:], newJSON(goodBonds))
+func (d *DB) StoreBond(newBond *tanka.Bond) error {
+	return d.bonds.Set(lexi.B(newBond.CoinID), &dbBond{newBond}, lexi.WithReplace())
 }
 
 func (d *DB) GetBonds(peerID tanka.PeerID) ([]*tanka.Bond, error) {
-	var existingBonds []*tanka.Bond
-	if _, err := d.bondsDB.Get(peerID[:], newJSON(&existingBonds)); err != nil {
-		return nil, fmt.Errorf("error reading bonds db: %w", err)
-	}
-
-	var goodBonds []*tanka.Bond
-	for _, b := range existingBonds {
-		if time.Now().After(b.Expiration) {
-			continue
-		}
-		goodBonds = append(goodBonds, b)
-	}
-
-	if len(goodBonds) != len(existingBonds) {
-		if err := d.bondsDB.Store(peerID[:], newJSON(goodBonds)); err != nil {
-			return nil, fmt.Errorf("error storing bonds after pruning: %v", err)
-		}
-	}
-
-	return goodBonds, nil
+	var bonds []*tanka.Bond
+	now := time.Now()
+	return bonds, d.bonderIdx.Iterate(peerID[:], func(it *lexi.Iter) error {
+		return it.V(func(vB []byte) error {
+			var bond dbBond
+			if err := bond.UnmarshalBinary(vB); err != nil {
+				return fmt.Errorf("error unmarshaling bond: %w", err)
+			}
+			if bond.Expiration.Before(now) {
+				it.Delete()
+				return nil
+			}
+			bonds = append(bonds, bond.Bond)
+			return nil
+		})
+	})
 }

@@ -10,15 +10,16 @@ import (
 )
 
 const (
+	MaxSubScore          = 256
 	MaxReputationEntries = 100
 	TierIncrement        = 20
-	MaxScore             = MaxReputationEntries
+	MaxAggregateScore    = MaxReputationEntries * MaxSubScore
 	EpochLength          = time.Second * 15
 )
 
 type Reputation struct {
-	Score  int16
-	Points []int8
+	Score int64
+	Depth uint64
 }
 
 type Bond struct {
