@@ -78,32 +78,36 @@ func (s *tSender) Disconnect() {
 	s.disconnected = true
 }
 
-func tNewTatanka(id byte) (*Tatanka, func()) {
+func tNewTatanka() *Tatanka {
 	priv, _ := secp256k1.GeneratePrivateKey()
 	var peerID tanka.PeerID
-	peerID[tanka.PeerIDLength-1] = id
+	copy(peerID[:], priv.PubKey().SerializeCompressed())
 
-	ctx, cancel := context.WithCancel(context.Background())
-
-	srv := &Tatanka{
-		ctx: ctx,
+	return &Tatanka{
 		net: dex.Simnet,
 		log: dex.StdOutLogger("T", dex.LevelTrace),
 		// db:            db,
 		priv: priv,
 		id:   peerID,
 		// chains:        chains,
-		tatankas:      make(map[tanka.PeerID]*remoteTatanka),
-		clients:       make(map[tanka.PeerID]*client),
-		remoteClients: make(map[tanka.PeerID]map[tanka.PeerID]struct{}),
-		topics:        make(map[tanka.Topic]*Topic),
-		recentRelays:  make(map[[32]byte]time.Time),
-		clientJobs:    make(chan *clientJob, 128),
+		tatankas:        make(map[tanka.PeerID]*remoteTatanka),
+		clients:         make(map[tanka.PeerID]*client),
+		remoteClients:   make(map[tanka.PeerID]map[tanka.PeerID]struct{}),
+		topics:          make(map[tanka.Topic]*Topic),
+		recentRelays:    make(map[[32]byte]time.Time),
+		clientJobs:      make(chan *clientJob, 128),
+		clientHandlers:  make(map[string]interface{}),
+		tatankaHandlers: make(map[string]interface{}),
 	}
+}
 
-	go srv.runRemoteClientsLoop(ctx)
+func tNewRunningTatanka() (*Tatanka, func()) {
+	tt := tNewTatanka()
+	ctx, cancel := context.WithCancel(context.Background())
+	tt.ctx = ctx
+	go tt.runRemoteClientsLoop(ctx)
 
-	return srv, cancel
+	return tt, cancel
 }
 
 func tNewPeer(id byte) (*peer, *tSender) {
@@ -111,7 +115,7 @@ func tNewPeer(id byte) (*peer, *tSender) {
 	peerID[tanka.PeerIDLength-1] = id
 	p := &tanka.Peer{ID: peerID}
 	s := tNewSender(peerID)
-	return &peer{Peer: p, Sender: s, rrs: make(map[tanka.PeerID]*mj.RemoteReputation)}, s
+	return &peer{Peer: p, Sender: s, rrs: make(map[tanka.PeerID]*tanka.Reputation)}, s
 }
 
 func tNewRemoteTatanka(id byte) (*remoteTatanka, *tSender) {
@@ -125,7 +129,7 @@ func tNewClient(id byte) (*client, *tSender) {
 }
 
 func TestTankagrams(t *testing.T) {
-	srv, shutdown := tNewTatanka(0)
+	srv, shutdown := tNewRunningTatanka()
 	defer shutdown()
 
 	tt, tts := tNewRemoteTatanka(1)
@@ -210,4 +214,10 @@ func TestTankagrams(t *testing.T) {
 	if r.Result != mj.TRTTransmitted {
 		t.Fatalf("Expected result %q, got %q", mj.TRTTransmitted, r.Result)
 	}
+}
+
+func TestPrepareHandlers(t *testing.T) {
+	// Really just checking for proper call signatures for the handlers.
+	// Incorrect call signatures will cause a panic in prepareHandlers.
+	tNewTatanka().prepareHandlers()
 }
