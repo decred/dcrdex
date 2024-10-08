@@ -48,4 +48,5 @@ server/cmd/validatemarkets
 client/cmd/translationsreport/translationsreport
 client/cmd/translationsreport/worksheets
 server/cmd/dexadm/dexadm
+client/tor/build
 server/cmd/geogame/geogame
