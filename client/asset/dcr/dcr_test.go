@@ -450,17 +450,6 @@ func (c *tRPCClient) GetRawMempool(_ context.Context, txType chainjson.GetRawMem
 	return txHashes, nil
 }
 
-func (c *tRPCClient) GetRawTransaction(_ context.Context, txHash *chainhash.Hash) (*dcrutil.Tx, error) {
-	if c.rawTxErr != nil {
-		return nil, c.rawTxErr
-	}
-	tx, found := c.blockchain.rawTxs[*txHash]
-	if !found {
-		return nil, dcrjson.NewRPCError(dcrjson.ErrRPCNoTxInfo, "no test raw tx "+txHash.String())
-	}
-	return dcrutil.NewTx(tx.tx), nil
-}
-
 func (c *tRPCClient) GetBalanceMinConf(_ context.Context, account string, minConfirms int) (*walletjson.GetBalanceResult, error) {
 	return c.balanceResult, c.balanceErr
 }
