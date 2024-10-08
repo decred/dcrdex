@@ -14,7 +14,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -84,7 +83,6 @@ type dcrWallet interface {
 	UnlockAccount(ctx context.Context, account uint32, passphrase []byte) error
 	LoadPrivateKey(ctx context.Context, addr stdaddr.Address) (key *secp256k1.PrivateKey, zero func(), err error)
 	TxDetails(ctx context.Context, txHash *chainhash.Hash) (*udb.TxDetails, error)
-	GetTransactionsByHashes(ctx context.Context, txHashes []*chainhash.Hash) (txs []*wire.MsgTx, notFound []*wire.InvVect, err error)
 	StakeInfo(ctx context.Context) (*wallet.StakeInfoData, error)
 	PurchaseTickets(ctx context.Context, n wallet.NetworkBackend, req *wallet.PurchaseTicketsRequest) (*wallet.PurchaseTicketsResponse, error)
 	ForUnspentUnexpiredTickets(ctx context.Context, f func(hash *chainhash.Hash) error) error
@@ -859,15 +857,8 @@ func (w *spvWallet) GetTransaction(ctx context.Context, txHash *chainhash.Hash) 
 
 	_, tipHeight := w.MainChainTip(ctx)
 
-	var b strings.Builder
-	b.Grow(2 * txd.MsgTx.SerializeSize())
-	err = txd.MsgTx.Serialize(hex.NewEncoder(&b))
-	if err != nil {
-		return nil, err
-	}
-
 	ret := WalletTransaction{
-		Hex: b.String(),
+		MsgTx: &txd.MsgTx,
 	}
 
 	if txd.Block.Height != -1 {
@@ -908,20 +899,6 @@ func (w *spvWallet) MatchAnyScript(ctx context.Context, blockHash *chainhash.Has
 	}
 	return filter.MatchAny(key, scripts), nil
 
-}
-
-// GetRawTransaction returns details of the tx with the provided hash. Returns
-// asset.CoinNotFoundError if the tx is not found.
-// Part of the Wallet interface.
-func (w *spvWallet) GetRawTransaction(ctx context.Context, txHash *chainhash.Hash) (*wire.MsgTx, error) {
-	txs, _, err := w.dcrWallet.GetTransactionsByHashes(ctx, []*chainhash.Hash{txHash})
-	if err != nil {
-		return nil, err
-	}
-	if len(txs) != 1 {
-		return nil, asset.CoinNotFoundError
-	}
-	return txs[0], nil
 }
 
 // GetBestBlock returns the hash and height of the wallet's best block.
