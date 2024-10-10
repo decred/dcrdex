@@ -697,10 +697,12 @@ export default class MarketsPage extends BasePage {
       }
     }
 
-    const qconv = app().unitInfo(this.market.cfg.quoteid, this.market.dex).conventional.conversionFactor
+    const baseID = this.market.base.id
+    const quoteID = this.market.quote.id
+    const dex = this.market.dex
     for (const s of this.stats) {
-      s.tmpl.high.textContent = high > 0 ? Doc.formatFourSigFigs(high / qconv) : '-'
-      s.tmpl.low.textContent = low > 0 ? Doc.formatFourSigFigs(low / qconv) : '-'
+      s.tmpl.high.textContent = high > 0 ? Doc.formatFourSigFigs(app().conventionalRate(baseID, quoteID, high, dex)) : '-'
+      s.tmpl.low.textContent = low > 0 ? Doc.formatFourSigFigs(app().conventionalRate(baseID, quoteID, low, dex)) : '-'
     }
   }
 
