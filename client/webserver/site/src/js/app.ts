@@ -60,7 +60,8 @@ import {
   RunStatsNote,
   MMBotStatus,
   CEXNotification,
-  CEXBalanceUpdate
+  CEXBalanceUpdate,
+  BotProblemsNote
 } from './registry'
 import { setCoinHref } from './coinexplorers'
 
@@ -1183,6 +1184,12 @@ export default class Application {
             this.mmStatus.cexes[n.cexName].balances[u.assetID] = u.balance
           }
         }
+        break
+      }
+      case 'botproblems': {
+        const n = note as BotProblemsNote
+        const bot = this.botStatus(n.host, n.baseID, n.quoteID)
+        if (bot) bot.problems = n.problems
         break
       }
     }
