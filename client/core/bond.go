@@ -510,6 +510,13 @@ func (c *Core) refundExpiredBonds(ctx context.Context, acct *dexAccount, cfg *de
 		//
 		// TODO: if mustPost > 0 { wallet.RenewBond(...) }
 
+		// Ensure wallet is unlocked for use below.
+		_, err = wallet.refreshUnlock()
+		if err != nil {
+			c.log.Errorf("failed to unlock bond asset wallet %v: %v", unbip(state.BondAssetID), err)
+			continue
+		}
+
 		// Generate a refund tx paying to an address from the currently
 		// connected wallet, using bond.KeyIndex to create the signed
 		// transaction. The RefundTx is really a backup.
