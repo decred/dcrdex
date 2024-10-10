@@ -846,9 +846,9 @@ func (s *WebServer) apiRestoreWalletInfo(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, resp)
 }
 
-// apiAccountDisable is the handler for the '/disableaccount' API request.
-func (s *WebServer) apiAccountDisable(w http.ResponseWriter, r *http.Request) {
-	form := new(accountDisableForm)
+// apiToggleAccountStatus is the handler for the '/toggleaccountstatus' API request.
+func (s *WebServer) apiToggleAccountStatus(w http.ResponseWriter, r *http.Request) {
+	form := new(updateAccountStatusForm)
 	defer form.Pass.Clear()
 	if !readPost(w, r, form) {
 		return
@@ -860,12 +860,14 @@ func (s *WebServer) apiAccountDisable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Disable account.
-	err = s.core.AccountDisable(appPW, form.Host)
+	err = s.core.ToggleAccountStatus(appPW, form.Host, form.Disable)
 	if err != nil {
-		s.writeAPIError(w, fmt.Errorf("error disabling account: %w", err))
+		s.writeAPIError(w, fmt.Errorf("error updating account status: %w", err))
 		return
 	}
-	w.Header().Set("Connection", "close")
+	if form.Disable {
+		w.Header().Set("Connection", "close")
+	}
 	writeJSON(w, simpleAck())
 }
 

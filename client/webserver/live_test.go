@@ -772,7 +772,7 @@ func (c *TCore) AccountExport(pw []byte, host string) (*core.Account, []*db.Bond
 func (c *TCore) AccountImport(pw []byte, account *core.Account, bond []*db.Bond) error {
 	return nil
 }
-func (c *TCore) AccountDisable(pw []byte, host string) error { return nil }
+func (c *TCore) ToggleAccountStatus(pw []byte, host string, disable bool) error { return nil }
 
 func (c *TCore) TxHistory(assetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
 	return nil, nil
@@ -2176,13 +2176,13 @@ func (m *TMarketMaker) StartBot(startCfg *mm.StartConfig, alternateConfigPath *s
 				mkt.BaseID: randomBalance(),
 			},
 			DEXBalances: map[uint32]*mm.BotBalance{
-				mkt.BaseID: &mm.BotBalance{
+				mkt.BaseID: {
 					Available: randomBalance(),
 					Locked:    randomBalance(),
 					Pending:   randomBalance(),
 					Reserved:  randomBalance(),
 				},
-				mkt.BaseID: &mm.BotBalance{
+				mkt.BaseID: {
 					Available: randomBalance(),
 					Locked:    randomBalance(),
 					Pending:   randomBalance(),
@@ -2190,13 +2190,13 @@ func (m *TMarketMaker) StartBot(startCfg *mm.StartConfig, alternateConfigPath *s
 				},
 			},
 			CEXBalances: map[uint32]*mm.BotBalance{
-				mkt.BaseID: &mm.BotBalance{
+				mkt.BaseID: {
 					Available: randomBalance(),
 					Locked:    randomBalance(),
 					Pending:   randomBalance(),
 					Reserved:  randomBalance(),
 				},
-				mkt.BaseID: &mm.BotBalance{
+				mkt.BaseID: {
 					Available: randomBalance(),
 					Locked:    randomBalance(),
 					Pending:   randomBalance(),
@@ -2313,12 +2313,12 @@ func (m *TMarketMaker) Status() *mm.Status {
 			stats = &mm.RunStats{
 				InitialBalances: make(map[uint32]uint64),
 				DEXBalances: map[uint32]*mm.BotBalance{
-					botCfg.BaseID:  &mm.BotBalance{Available: randomBalance()},
-					botCfg.QuoteID: &mm.BotBalance{Available: randomBalance()},
+					botCfg.BaseID:  {Available: randomBalance()},
+					botCfg.QuoteID: {Available: randomBalance()},
 				},
 				CEXBalances: map[uint32]*mm.BotBalance{
-					botCfg.BaseID:  &mm.BotBalance{Available: randomBalance()},
-					botCfg.QuoteID: &mm.BotBalance{Available: randomBalance()},
+					botCfg.BaseID:  {Available: randomBalance()},
+					botCfg.QuoteID: {Available: randomBalance()},
 				},
 				ProfitLoss:         randomProfitLoss(botCfg.BaseID, botCfg.QuoteID),
 				StartTime:          time.Now().Add(-time.Duration(float64(time.Hour*10) * rand.Float64())).Unix(),

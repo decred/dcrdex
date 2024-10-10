@@ -510,6 +510,13 @@ func (c *Core) refundExpiredBonds(ctx context.Context, acct *dexAccount, cfg *de
 		//
 		// TODO: if mustPost > 0 { wallet.RenewBond(...) }
 
+		// Ensure wallet is unlocked for use below.
+		_, err = wallet.refreshUnlock()
+		if err != nil {
+			c.log.Errorf("failed to unlock bond asset wallet %v: %v", unbip(state.BondAssetID), err)
+			continue
+		}
+
 		// Generate a refund tx paying to an address from the currently
 		// connected wallet, using bond.KeyIndex to create the signed
 		// transaction. The RefundTx is really a backup.
@@ -705,15 +712,13 @@ func (c *Core) rotateBonds(ctx context.Context) {
 		// locked. However, we must refund bonds regardless.
 
 		bondCfg := c.dexBondConfig(dc, now)
-		if len(bondCfg.bondAssets) == 0 {
+		if len(bondCfg.bondAssets) == 0 && !dc.acct.isDisabled() {
 			if !dc.IsDown() && dc.config() != nil {
 				dc.log.Meter("no-bond-assets", time.Minute*10).Warnf("Zero bond assets reported for apparently connected DCRDEX server")
 			}
 			continue
 		}
 		acctBondState := c.bondStateOfDEX(dc, bondCfg)
-
-		c.repostPendingBonds(dc, bondCfg, acctBondState, unlocked)
 
 		refundedAssets, expiredStrength, err := c.refundExpiredBonds(ctx, dc.acct, bondCfg, acctBondState, now)
 		if err != nil {
@@ -723,6 +728,12 @@ func (c *Core) rotateBonds(ctx context.Context) {
 		for assetID := range refundedAssets {
 			c.updateAssetBalance(assetID)
 		}
+
+		if dc.acct.isDisabled() {
+			continue // For disabled account, we should only bother about unspent bonds that might have been refunded by refundExpiredBonds above.
+		}
+
+		c.repostPendingBonds(dc, bondCfg, acctBondState, unlocked)
 
 		bondAsset := bondCfg.bondAssets[acctBondState.BondAssetID]
 		if bondAsset == nil {

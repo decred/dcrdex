@@ -133,7 +133,7 @@ type clientCore interface {
 	MaxSell(host string, base, quote uint32) (*core.MaxOrderEstimate, error)
 	AccountExport(pw []byte, host string) (*core.Account, []*db.Bond, error)
 	AccountImport(pw []byte, account *core.Account, bonds []*db.Bond) error
-	AccountDisable(pw []byte, host string) error
+	ToggleAccountStatus(pw []byte, host string, disable bool) error
 	IsInitialized() bool
 	ExportSeed(pw []byte) (string, error)
 	PreOrder(*core.TradeForm) (*core.OrderEstimate, error)
@@ -536,7 +536,7 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/exportaccount", s.apiAccountExport)
 			apiAuth.Post("/exportseed", s.apiExportSeed)
 			apiAuth.Post("/importaccount", s.apiAccountImport)
-			apiAuth.Post("/disableaccount", s.apiAccountDisable)
+			apiAuth.Post("/toggleaccountstatus", s.apiToggleAccountStatus)
 			apiAuth.Post("/accelerateorder", s.apiAccelerateOrder)
 			apiAuth.Post("/preaccelerate", s.apiPreAccelerate)
 			apiAuth.Post("/accelerationestimate", s.apiAccelerationEstimate)

@@ -47,8 +47,9 @@ type DB interface {
 	ConfirmBond(host string, assetID uint32, bondCoinID []byte) error
 	// BondRefunded records that a bond has been refunded.
 	BondRefunded(host string, assetID uint32, bondCoinID []byte) error
-	// DisableAccount sets the AccountInfo disabled status to true.
-	DisableAccount(host string) error
+	// ToggleAccountStatus enables or disables the account associated with the
+	// given host.
+	ToggleAccountStatus(host string, disable bool) error
 	// UpdateOrder saves the order information in the database. Any existing
 	// order info will be overwritten without indication.
 	UpdateOrder(m *MetaOrder) error

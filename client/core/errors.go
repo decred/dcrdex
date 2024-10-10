@@ -42,7 +42,7 @@ const (
 	fileReadErr
 	unknownDEXErr
 	accountRetrieveErr
-	accountDisableErr
+	accountStatusUpdateErr
 	suspendedAcctErr
 	existenceCheckErr
 	createWalletErr

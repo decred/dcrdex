@@ -63,6 +63,7 @@ export interface Exchange {
   candleDurs: string[]
   maxScore: number
   penaltyThreshold: number
+  disabled:boolean
 }
 
 export interface Candle {

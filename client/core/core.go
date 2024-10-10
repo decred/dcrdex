@@ -455,6 +455,7 @@ func (c *Core) exchangeInfo(dc *dexConnection) *Exchange {
 			Host:             dc.acct.host,
 			AcctID:           acctID,
 			ConnectionStatus: dc.status(),
+			Disabled:         dc.acct.isDisabled(),
 		}
 	}
 
@@ -493,6 +494,7 @@ func (c *Core) exchangeInfo(dc *dexConnection) *Exchange {
 		Auth:             acctBondState.ExchangeAuth,
 		MaxScore:         cfg.MaxScore,
 		PenaltyThreshold: cfg.PenaltyThreshold,
+		Disabled:         dc.acct.isDisabled(),
 	}
 }
 
@@ -5126,70 +5128,80 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) {
 	var wg sync.WaitGroup
 	conns := c.dexConnections()
 	for _, dc := range conns {
-		if dc.acct.isViewOnly() {
-			continue // don't attempt authDEX for view-only conn
-		}
-
-		// Unlock before checking auth and continuing, because if the user
-		// logged out and didn't shut down, the account is still authed, but
-		// locked, and needs unlocked.
-		err := dc.acct.unlock(crypter)
-		if err != nil {
-			subject, details := c.formatDetails(TopicAccountUnlockError, dc.acct.host, err)
-			c.notify(newFeePaymentNote(TopicAccountUnlockError, subject, details, db.ErrorLevel, dc.acct.host)) // newDEXAuthNote?
-			continue
-		}
-
-		// Unlock the bond wallet if a target tier is set.
-		if bondAssetID, targetTier, maxBondedAmt := dc.bondOpts(); targetTier > 0 {
-			c.log.Debugf("Preparing %s wallet to maintain target tier of %d for %v, bonding limit %v",
-				unbip(bondAssetID), targetTier, dc.acct.host, maxBondedAmt)
-			wallet, exists := c.wallet(bondAssetID)
-			if !exists || !wallet.connected() { // connectWallets already run, just fail
-				subject, details := c.formatDetails(TopicBondWalletNotConnected, unbip(bondAssetID))
-				var w *WalletState
-				if exists {
-					w = wallet.state()
-				}
-				c.notify(newWalletConfigNote(TopicBondWalletNotConnected, subject, details, db.ErrorLevel, w))
-			} else if !wallet.unlocked() {
-				err = wallet.Unlock(crypter)
-				if err != nil {
-					subject, details := c.formatDetails(TopicWalletUnlockError, dc.acct.host, err)
-					c.notify(newFeePaymentNote(TopicWalletUnlockError, subject, details, db.ErrorLevel, dc.acct.host))
-				}
-			}
-		}
-
-		if dc.acct.authed() { // should not be possible with newly idempotent login, but there's AccountImport...
-			continue // authDEX already done
-		}
-
-		// Pending bonds will be handled by authDEX. Expired bonds will be
-		// refunded by rotateBonds.
-
-		// If the connection is down, authDEX will fail on Send.
-		if dc.IsDown() {
-			c.log.Warnf("Connection to %v not available for authorization. "+
-				"It will automatically authorize when it connects.", dc.acct.host)
-			subject, details := c.formatDetails(TopicDEXDisconnected, dc.acct.host)
-			c.notify(newConnEventNote(TopicDEXDisconnected, subject, dc.acct.host, comms.Disconnected, details, db.ErrorLevel))
-			continue
-		}
-
 		wg.Add(1)
 		go func(dc *dexConnection) {
 			defer wg.Done()
-			err := c.authDEX(dc)
-			if err != nil {
-				subject, details := c.formatDetails(TopicDexAuthError, dc.acct.host, err)
-				c.notify(newDEXAuthNote(TopicDexAuthError, subject, dc.acct.host, false, details, db.ErrorLevel))
-				return
-			}
+			c.initializeDEXConnection(dc, crypter)
 		}(dc)
 	}
 
 	wg.Wait()
+}
+
+// initializeDEXConnection connects to the DEX server in the conns map and
+// authenticates the connection.
+func (c *Core) initializeDEXConnection(dc *dexConnection, crypter encrypt.Crypter) {
+	if dc.acct.isViewOnly() {
+		return // don't attempt authDEX for view-only conn
+	}
+
+	// Unlock before checking auth and continuing, because if the user
+	// logged out and didn't shut down, the account is still authed, but
+	// locked, and needs unlocked.
+	err := dc.acct.unlock(crypter)
+	if err != nil {
+		subject, details := c.formatDetails(TopicAccountUnlockError, dc.acct.host, err)
+		c.notify(newFeePaymentNote(TopicAccountUnlockError, subject, details, db.ErrorLevel, dc.acct.host)) // newDEXAuthNote?
+		return
+	}
+
+	if dc.acct.isDisabled() {
+		return // For disabled account, we only want dc.acct.unlock above to initialize the account ID.
+	}
+
+	// Unlock the bond wallet if a target tier is set.
+	if bondAssetID, targetTier, maxBondedAmt := dc.bondOpts(); targetTier > 0 {
+		c.log.Debugf("Preparing %s wallet to maintain target tier of %d for %v, bonding limit %v",
+			unbip(bondAssetID), targetTier, dc.acct.host, maxBondedAmt)
+		wallet, exists := c.wallet(bondAssetID)
+		if !exists || !wallet.connected() { // connectWallets already run, just fail
+			subject, details := c.formatDetails(TopicBondWalletNotConnected, unbip(bondAssetID))
+			var w *WalletState
+			if exists {
+				w = wallet.state()
+			}
+			c.notify(newWalletConfigNote(TopicBondWalletNotConnected, subject, details, db.ErrorLevel, w))
+		} else if !wallet.unlocked() {
+			err = wallet.Unlock(crypter)
+			if err != nil {
+				subject, details := c.formatDetails(TopicWalletUnlockError, dc.acct.host, err)
+				c.notify(newFeePaymentNote(TopicWalletUnlockError, subject, details, db.ErrorLevel, dc.acct.host))
+			}
+		}
+	}
+
+	if dc.acct.authed() { // should not be possible with newly idempotent login, but there's AccountImport...
+		return // authDEX already done
+	}
+
+	// Pending bonds will be handled by authDEX. Expired bonds will be
+	// refunded by rotateBonds.
+
+	// If the connection is down, authDEX will fail on Send.
+	if dc.IsDown() {
+		c.log.Warnf("Connection to %v not available for authorization. "+
+			"It will automatically authorize when it connects.", dc.acct.host)
+		subject, details := c.formatDetails(TopicDEXDisconnected, dc.acct.host)
+		c.notify(newConnEventNote(TopicDEXDisconnected, subject, dc.acct.host, comms.Disconnected, details, db.ErrorLevel))
+		return
+	}
+
+	// Authenticate dex connection
+	err = c.authDEX(dc)
+	if err != nil {
+		subject, details := c.formatDetails(TopicDexAuthError, dc.acct.host, err)
+		c.notify(newDEXAuthNote(TopicDexAuthError, subject, dc.acct.host, false, details, db.ErrorLevel))
+	}
 }
 
 // resolveActiveTrades loads order and match data from the database. Only active
@@ -7172,7 +7184,8 @@ func (c *Core) initialize() error {
 // connectAccount makes a connection to the DEX for the given account. If a
 // non-nil dexConnection is returned from newDEXConnection, it was inserted into
 // the conns map even if the connection attempt failed (connected == false), and
-// the connect retry / keepalive loop is active.
+// the connect retry / keepalive loop is active. The intial connection attempt
+// or keepalive loop will not run if acct is disabled.
 func (c *Core) connectAccount(acct *db.AccountInfo) (connected bool) {
 	host, err := addrHost(acct.Host)
 	if err != nil {
@@ -8167,7 +8180,7 @@ func (c *Core) startDexConnection(acctInfo *db.AccountInfo, dc *dexConnection) e
 	// the dexConnection's ConnectionMaster is shut down. This goroutine should
 	// be started as long as the reconnect loop is running. It only returns when
 	// the wsConn is stopped.
-	listen := dc.broadcastingConnect()
+	listen := dc.broadcastingConnect() && !dc.acct.isDisabled()
 	if listen {
 		c.wg.Add(1)
 		go c.listen(dc)
@@ -8212,6 +8225,12 @@ func (c *Core) startDexConnection(acctInfo *db.AccountInfo, dc *dexConnection) e
 
 		// Now in authDEX, we must reconcile the above categorized bonds
 		// according to ConnectResult.Bonds slice.
+	}
+
+	if dc.acct.isDisabled() {
+		// Sort out the bonds with current time to indicate refundable bonds.
+		categorizeBonds(time.Now().Unix())
+		return nil // nothing else to do
 	}
 
 	err := dc.connMaster.Connect(c.ctx)

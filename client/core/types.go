@@ -714,6 +714,7 @@ type Exchange struct {
 	Auth             ExchangeAuth           `json:"auth"`
 	PenaltyThreshold uint32                 `json:"penaltyThreshold"`
 	MaxScore         uint32                 `json:"maxScore"`
+	Disabled         bool                   `json:"disabled"`
 }
 
 // newDisplayIDFromSymbols creates a display-friendly market ID for a base/quote
@@ -817,6 +818,7 @@ type dexAccount struct {
 
 	authMtx           sync.RWMutex
 	isAuthed          bool
+	disabled          bool
 	pendingBondsConfs map[string]uint32
 	pendingBonds      []*db.Bond // not yet confirmed
 	bonds             []*db.Bond // confirmed, and not yet expired
@@ -835,6 +837,7 @@ func newDEXAccount(acctInfo *db.AccountInfo, viewOnly bool) *dexAccount {
 		cert:              acctInfo.Cert,
 		dexPubKey:         acctInfo.DEXPubKey,
 		viewOnly:          viewOnly,
+		disabled:          acctInfo.Disabled,
 		encKey:            acctInfo.EncKey(), // privKey and id on decrypt
 		pendingBondsConfs: make(map[string]uint32),
 		// bonds are set separately when categorized in connectDEX
@@ -956,6 +959,18 @@ func (a *dexAccount) status() (initialized, unlocked bool) {
 	a.keyMtx.RLock()
 	defer a.keyMtx.RUnlock()
 	return len(a.encKey) > 0, a.privKey != nil
+}
+
+func (a *dexAccount) isDisabled() bool {
+	a.authMtx.RLock()
+	defer a.authMtx.RUnlock()
+	return a.disabled
+}
+
+func (a *dexAccount) toggleAccountStatus(disable bool) {
+	a.authMtx.Lock()
+	defer a.authMtx.Unlock()
+	a.disabled = disable
 }
 
 // locked will be true if the account private key is currently decrypted, or
