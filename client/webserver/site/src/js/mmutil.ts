@@ -21,12 +21,15 @@ import {
   BotBalance,
   Order,
   LotFeeRange,
-  BookingFees
+  BookingFees,
+  BotProblemsNote,
+  BotProblems
 } from './registry'
 import { getJSON, postJSON } from './http'
 import Doc, { clamp } from './doc'
 import * as OrderUtil from './orderutil'
 import { Chart, Region, Extents, Translator } from './charts'
+import * as intl from './locales'
 
 export const GapStrategyMultiplier = 'multiplier'
 export const GapStrategyAbsolute = 'absolute'
@@ -507,8 +510,8 @@ export class BotMarket {
     const { baseID, quoteID } = this
     const botStatus = app().mmStatus.bots.find((s: MMBotStatus) => s.config.baseID === baseID && s.config.quoteID === quoteID)
     if (!botStatus) return { botCfg: {} as BotConfig, running: false, runStats: {} as RunStats }
-    const { config: botCfg, running, runStats } = botStatus
-    return { botCfg, running, runStats }
+    const { config: botCfg, running, runStats, problems } = botStatus
+    return { botCfg, running, runStats, problems }
   }
 
   /*
@@ -843,6 +846,13 @@ export class RunningMarketMakerDisplay {
     this.update()
   }
 
+  handleBotProblemsNote (n: BotProblemsNote) {
+    if (!this.mkt) return
+    const { baseID, quoteID, host } = this.mkt
+    if (n.baseID !== baseID || n.quoteID !== quoteID || n.host !== host) return
+    this.update()
+  }
+
   setTicker () {
     this.page.runTime.textContent = Doc.hmsSince(this.startTime)
   }
@@ -855,8 +865,10 @@ export class RunningMarketMakerDisplay {
       }
     } = this
     // Get fresh stats
-    const { botCfg: { cexName, basicMarketMakingConfig: bmmCfg }, runStats } = this.mkt.status()
+    const { botCfg: { cexName, basicMarketMakingConfig: bmmCfg }, runStats, problems } = this.mkt.status()
+
     Doc.hide(page.stats, page.cexRow, page.pendingDepositBox, page.pendingWithdrawalBox)
+
     if (!runStats) {
       if (this.ticker) {
         clearInterval(this.ticker)
@@ -932,6 +944,15 @@ export class RunningMarketMakerDisplay {
     if (remoteGap) {
       page.remoteGap.textContent = Doc.formatFourSigFigs(remoteGap)
       page.remoteGapPct.textContent = (remoteGap / basisPrice * 100 || 0).toFixed(2)
+    }
+
+    const problemMessages = botProblemMessages(problems, this.mkt.cexName, this.mkt.host)
+    Doc.setVis(problemMessages.length > 0, page.botProblemsBox)
+    Doc.empty(page.botProblemsBox)
+    for (const msg of problemMessages) {
+      const spanEl = document.createElement('span') as PageElement
+      spanEl.textContent = `- ${msg}`
+      page.botProblemsBox.appendChild(spanEl)
     }
   }
 
@@ -1037,4 +1058,124 @@ export function feesAndCommit (
   }
 
   return { commit, fees }
+}
+
+function botProblemMessages (problems: BotProblems | undefined, cexName: string, dexHost: string): string[] {
+  if (!problems) return []
+  const msgs: string[] = []
+
+  if (problems.walletNotSynced) {
+    for (const [assetID, notSynced] of Object.entries(problems.walletNotSynced)) {
+      if (notSynced) {
+        msgs.push(intl.prep(intl.ID_WALLET_NOT_SYNCED, { assetSymbol: app().assets[Number(assetID)].symbol.toUpperCase() }))
+      }
+    }
+  }
+
+  if (problems.noWalletPeers) {
+    for (const [assetID, noPeers] of Object.entries(problems.noWalletPeers)) {
+      if (noPeers) {
+        msgs.push(intl.prep(intl.ID_WALLET_NO_PEERS, { assetSymbol: app().assets[Number(assetID)].symbol.toUpperCase() }))
+      }
+    }
+  }
+
+  if (problems.depositErr) {
+    for (const [assetID, depositErr] of Object.entries(problems.depositErr)) {
+      msgs.push(intl.prep(intl.ID_DEPOSIT_ERROR,
+        {
+          assetSymbol: app().assets[Number(assetID)].symbol.toUpperCase(),
+          time: new Date(depositErr.stamp * 1000).toLocaleString(),
+          error: depositErr.err
+        }))
+    }
+  }
+
+  if (problems.withdrawErr) {
+    for (const [assetID, withdrawErr] of Object.entries(problems.withdrawErr)) {
+      msgs.push(intl.prep(intl.ID_WITHDRAW_ERROR,
+        {
+          assetSymbol: app().assets[Number(assetID)].symbol.toUpperCase(),
+          time: new Date(withdrawErr.stamp * 1000).toLocaleString(),
+          error: withdrawErr.err
+        }))
+    }
+  }
+
+  if (problems.dexBalanceDeficiencies) {
+    for (const [assetID, def] of Object.entries(problems.dexBalanceDeficiencies)) {
+      if (def > 0) {
+        const asset = app().assets[Number(assetID)]
+        msgs.push(intl.prep(intl.ID_DEX_UNDERFUNDED, {
+          assetSymbol: app().assets[Number(assetID)].symbol.toUpperCase(),
+          amount: Doc.formatCoinValue(def, asset.unitInfo)
+        }))
+      }
+    }
+  }
+
+  if (problems.cexBalanceDeficiencies) {
+    for (const [assetID, def] of Object.entries(problems.cexBalanceDeficiencies)) {
+      if (def > 0) {
+        const asset = app().assets[Number(assetID)]
+        msgs.push(intl.prep(intl.ID_CEX_UNDERFUNDED, {
+          assetSymbol: app().assets[Number(assetID)].symbol.toUpperCase(),
+          amount: Doc.formatCoinValue(def, asset.unitInfo),
+          cexName: cexName
+        }))
+      }
+    }
+  }
+
+  if (problems.cexTooShallow) {
+    for (const [side, shallow] of Object.entries(problems.cexTooShallow)) {
+      if (shallow) {
+        const sideID = side === 'sell' ? intl.ID_SELL : intl.ID_BUY
+        const sideString = intl.prep(sideID)
+        msgs.push(intl.prep(intl.ID_CEX_TOO_SHALLOW, { cexName: cexName, side: sideString }))
+      }
+    }
+  }
+
+  if (problems.accountSuspended) {
+    msgs.push(intl.prep(intl.ID_ACCOUNT_SUSPENDED, { dexHost: dexHost }))
+  }
+
+  if (problems.userLimitTooLow) {
+    msgs.push(intl.prep(intl.ID_USER_LIMIT_TOO_LOW, { dexHost: dexHost }))
+  }
+
+  if (problems.noPriceSource) {
+    msgs.push(intl.prep(intl.ID_NO_PRICE_SOURCE))
+  }
+
+  if (problems.cexOrderbookUnsynced) {
+    msgs.push(intl.prep(intl.ID_CEX_ORDERBOOK_UNSYNCED, { cexName: cexName }))
+  }
+
+  if (problems.determinePlacementsErr) {
+    msgs.push(intl.prep(intl.ID_DETERMINE_PLACEMENTS_ERROR, { error: problems.determinePlacementsErr }))
+  }
+
+  if (problems.placeBuyOrdersErr) {
+    msgs.push(intl.prep(intl.ID_PLACE_BUY_ORDERS_ERROR, { error: problems.placeBuyOrdersErr }))
+  }
+
+  if (problems.placeSellOrdersErr) {
+    msgs.push(intl.prep(intl.ID_PLACE_SELL_ORDERS_ERROR, { error: problems.placeSellOrdersErr }))
+  }
+
+  if (problems.cexTradeErr) {
+    msgs.push(intl.prep(intl.ID_CEX_TRADE_ERROR,
+      {
+        time: new Date(problems.cexTradeErr.stamp * 1000).toLocaleString(),
+        error: problems.cexTradeErr.err
+      }))
+  }
+
+  return msgs
+}
+
+window.mmstatus = function () : Promise<MarketMakingStatus> {
+  return MM.status()
 }

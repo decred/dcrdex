@@ -3,22 +3,26 @@
 package mm
 
 import (
+	"errors"
 	"math"
 	"testing"
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex/calc"
+	"decred.org/dcrdex/dex/msgjson"
 )
 
 type tBasicMMCalculator struct {
-	bp uint64
+	bp    uint64
+	bpErr error
+
 	hs uint64
 }
 
 var _ basicMMCalculator = (*tBasicMMCalculator)(nil)
 
-func (r *tBasicMMCalculator) basisPrice() uint64 {
-	return r.bp
+func (r *tBasicMMCalculator) basisPrice() (uint64, error) {
+	return r.bp, r.bpErr
 }
 func (r *tBasicMMCalculator) halfSpread(basisPrice uint64) (uint64, error) {
 	return r.hs, nil
@@ -27,7 +31,6 @@ func (r *tBasicMMCalculator) halfSpread(basisPrice uint64) (uint64, error) {
 func (r *tBasicMMCalculator) feeGapStats(basisPrice uint64) (*FeeGapStats, error) {
 	return &FeeGapStats{FeeGap: r.hs * 2}, nil
 }
-
 func TestBasisPrice(t *testing.T) {
 	mkt := &core.Market{
 		RateStep:   1,
@@ -85,7 +88,7 @@ func TestBasisPrice(t *testing.T) {
 			core:   adaptor,
 		}
 
-		rate := calculator.basisPrice()
+		rate, _ := calculator.basisPrice()
 		if rate != tt.exp {
 			t.Fatalf("%s: %d != %d", tt.name, rate, tt.exp)
 		}
@@ -331,6 +334,10 @@ func TestBasicMMRebalance(t *testing.T) {
 				calculator: calculator,
 			}
 			tcore := newTCore()
+			tcore.setWalletsAndExchange(&core.Market{
+				BaseID:  baseID,
+				QuoteID: quoteID,
+			})
 			mm.clientCore = tcore
 			mm.botCfgV.Store(&BotConfig{})
 			mm.fiatRates.Store(map[uint32]float64{baseID: 1, quoteID: 1})
@@ -402,6 +409,148 @@ func TestBasicMMRebalance(t *testing.T) {
 						t.Fatalf("wrong lots %d for sell at rate %d", lots, expSell.rate)
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestBasicMMBotProblems(t *testing.T) {
+	const basisPrice uint64 = 5e6
+	const halfSpread uint64 = 2e5
+	const rateStep uint64 = 1e3
+	const atomToConv float64 = 1
+	const baseID, quoteID = uint32(42), uint32(0)
+	const lotSize = uint64(1e8)
+
+	type test struct {
+		name              string
+		bpErr             error
+		multiTradeBuyErr  error
+		multiTradeSellErr error
+		noBalance         bool
+
+		expBotProblems *BotProblems
+	}
+
+	updateBotProblems := func(f func(*BotProblems)) *BotProblems {
+		bp := newBotProblems()
+		f(bp)
+		return bp
+	}
+
+	noIDErr1 := errors.New("no ID")
+	noIDErr2 := errors.New("no ID")
+
+	var swapFees, redeemFees, refundFees uint64 = 1e5, 2e5, 3e5
+
+	tests := []*test{
+		{
+			name:           "no problems",
+			expBotProblems: newBotProblems(),
+		},
+		{
+			name:  "mid gap outside oracle safe range",
+			bpErr: errOracleFiatMismatch,
+			expBotProblems: updateBotProblems(func(bp *BotProblems) {
+				bp.OracleFiatMismatch = true
+			}),
+		},
+		{
+			name:              "wallet sync errors",
+			multiTradeBuyErr:  &core.WalletSyncError{AssetID: baseID},
+			multiTradeSellErr: &core.WalletSyncError{AssetID: quoteID},
+			expBotProblems: updateBotProblems(func(bp *BotProblems) {
+				bp.WalletNotSynced[baseID] = true
+				bp.WalletNotSynced[quoteID] = true
+			}),
+		},
+		{
+			name:              "account suspended",
+			multiTradeBuyErr:  core.ErrAccountSuspended,
+			multiTradeSellErr: core.ErrAccountSuspended,
+			expBotProblems: updateBotProblems(func(bp *BotProblems) {
+				bp.AccountSuspended = true
+			}),
+		},
+		{
+			name:              "buy no peers, sell qty too high",
+			multiTradeBuyErr:  &core.WalletNoPeersError{AssetID: baseID},
+			multiTradeSellErr: &msgjson.Error{Code: msgjson.OrderQuantityTooHigh},
+			expBotProblems: updateBotProblems(func(bp *BotProblems) {
+				bp.NoWalletPeers[baseID] = true
+				bp.UserLimitTooLow = true
+			}),
+		},
+		{
+			name:              "unidentified errors",
+			multiTradeBuyErr:  noIDErr1,
+			multiTradeSellErr: noIDErr2,
+			expBotProblems: updateBotProblems(func(bp *BotProblems) {
+				bp.PlaceBuyOrdersErr = noIDErr1
+				bp.PlaceSellOrdersErr = noIDErr2
+			}),
+		},
+		{
+			name:      "no balance",
+			noBalance: true,
+			expBotProblems: updateBotProblems(func(bp *BotProblems) {
+				bp.DEXBalanceDeficiencies = map[uint32]uint64{
+					baseID:  lotSize + swapFees,
+					quoteID: calc.BaseToQuote(basisPrice-basisPrice/100, lotSize) + swapFees,
+				}
+			}),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calculator := &tBasicMMCalculator{
+				bp:    basisPrice,
+				bpErr: tt.bpErr,
+				hs:    halfSpread,
+			}
+
+			adaptor := newTBotCoreAdaptor(newTCore())
+			mm := &basicMarketMaker{
+				unifiedExchangeAdaptor: mustParseAdaptorFromMarket(&core.Market{
+					RateStep:   rateStep,
+					AtomToConv: atomToConv,
+					BaseID:     baseID,
+					QuoteID:    quoteID,
+					LotSize:    lotSize,
+				}),
+				calculator: calculator,
+				core:       adaptor,
+			}
+
+			mm.buyFees = tFees(swapFees, redeemFees, refundFees, 0)
+			mm.sellFees = tFees(swapFees, redeemFees, refundFees, 0)
+
+			mm.unifiedExchangeAdaptor.clientCore.(*tCore).multiTradeBuyErr = tt.multiTradeBuyErr
+			mm.unifiedExchangeAdaptor.clientCore.(*tCore).multiTradeSellErr = tt.multiTradeSellErr
+
+			if !tt.noBalance {
+				mm.baseDexBalances[baseID] = int64(lotSize * 50)
+				mm.baseDexBalances[quoteID] = int64(calc.BaseToQuote(basisPrice, lotSize*50))
+			}
+
+			mm.cfgV.Store(&BasicMarketMakingConfig{
+				GapStrategy: GapStrategyPercent,
+				SellPlacements: []*OrderPlacement{
+					{Lots: 1, GapFactor: 0.01},
+				},
+				BuyPlacements: []*OrderPlacement{
+					{Lots: 1, GapFactor: 0.01},
+				},
+			})
+
+			mm.unifiedExchangeAdaptor.fiatRates.Store(map[uint32]float64{baseID: 1, quoteID: 1})
+
+			mm.rebalance(100)
+
+			problems := mm.problems()
+			if !tt.expBotProblems.isEqual(problems) {
+				t.Fatalf("expected bot problems %v, got %v", tt.expBotProblems, problems)
 			}
 		})
 	}

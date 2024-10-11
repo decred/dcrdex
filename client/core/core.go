@@ -5899,7 +5899,7 @@ func (c *Core) prepareForTradeRequestPrep(pw []byte, base, quote uint32, host st
 		return fail(err)
 	}
 	if dc.acct.suspended() {
-		return fail(newError(suspendedAcctErr, "may not trade while account is suspended"))
+		return fail(newError(suspendedAcctErr, "%w", ErrAccountSuspended))
 	}
 
 	mktID := marketName(base, quote)
@@ -5936,12 +5936,10 @@ func (c *Core) prepareForTradeRequestPrep(pw []byte, base, quote uint32, host st
 		w.mtx.RLock()
 		defer w.mtx.RUnlock()
 		if w.peerCount < 1 {
-			return fmt.Errorf("%s wallet has no network peers (check your network or firewall)",
-				unbip(w.AssetID))
+			return &WalletNoPeersError{w.AssetID}
 		}
 		if !w.syncStatus.Synced {
-			return fmt.Errorf("%s still syncing. progress = %.2f%%", unbip(w.AssetID),
-				w.syncStatus.BlockProgress()*100)
+			return &WalletSyncError{w.AssetID, w.syncStatus.BlockProgress()}
 		}
 		return nil
 	}
@@ -10877,4 +10875,64 @@ func (c *Core) RedeemGeocode(appPW, code []byte, msg string) (dex.Bytes, uint64,
 // ExtensionModeConfig is the configuration parsed from the extension-mode file.
 func (c *Core) ExtensionModeConfig() *ExtensionModeConfig {
 	return c.extensionModeConfig
+}
+
+// calcParcelLimit computes the users score-scaled user parcel limit.
+func calcParcelLimit(tier int64, score, maxScore int32) uint32 {
+	// Users limit starts at 2 parcels per tier.
+	lowerLimit := tier * dex.PerTierBaseParcelLimit
+	// Limit can scale up to 3x with score.
+	upperLimit := lowerLimit * dex.ParcelLimitScoreMultiplier
+	limitRange := upperLimit - lowerLimit
+	var scaleFactor float64
+	if score > 0 {
+		scaleFactor = float64(score) / float64(maxScore)
+	}
+	return uint32(lowerLimit) + uint32(math.Round(scaleFactor*float64(limitRange)))
+}
+
+// TradingLimits returns the number of parcels the user can trade on an
+// exchange and the amount that are currently being traded.
+func (c *Core) TradingLimits(host string) (userParcels, parcelLimit uint32, err error) {
+	dc, _, err := c.dex(host)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	cfg := dc.config()
+	dc.acct.authMtx.RLock()
+	rep := dc.acct.rep
+	dc.acct.authMtx.RUnlock()
+
+	mkts := make(map[string]*msgjson.Market, len(cfg.Markets))
+	for _, mkt := range cfg.Markets {
+		mkts[mkt.Name] = mkt
+	}
+	mktTrades := make(map[string][]*trackedTrade)
+	for _, t := range dc.trackedTrades() {
+		mktTrades[t.mktID] = append(mktTrades[t.mktID], t)
+	}
+
+	parcelLimit = calcParcelLimit(rep.EffectiveTier(), rep.Score, int32(cfg.MaxScore))
+	for mktID, trades := range mktTrades {
+		mkt := mkts[mktID]
+		if mkt == nil {
+			c.log.Warnf("trade for unknown market %q", mktID)
+			continue
+		}
+
+		var midGap, mktWeight uint64
+		for _, t := range trades {
+			if t.isEpochOrder() && midGap == 0 {
+				midGap, err = dc.midGap(mkt.Base, mkt.Quote)
+				if err != nil && !errors.Is(err, orderbook.ErrEmptyOrderbook) {
+					return 0, 0, err
+				}
+			}
+			mktWeight += t.marketWeight(midGap, mkt.LotSize)
+		}
+		userParcels += uint32(mktWeight / (uint64(mkt.ParcelSize) * mkt.LotSize))
+	}
+
+	return userParcels, parcelLimit, nil
 }

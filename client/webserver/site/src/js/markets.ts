@@ -64,7 +64,8 @@ import {
   ApprovalStatus,
   OrderFilter,
   RunStatsNote,
-  RunEventNote
+  RunEventNote,
+  BotProblemsNote
 } from './registry'
 import { setOptionTemplates } from './opts'
 import { RunningMarketMakerDisplay } from './mmutil'
@@ -523,6 +524,10 @@ export default class MarketsPage extends BasePage {
           this.mmRunning = Boolean(note.stats)
           this.resolveOrderFormVisibility()
         }
+      },
+      botproblems: (note: BotProblemsNote) => {
+        if (note.baseID !== this.market.base.id || note.quoteID !== this.market.quote.id || note.host !== this.market.dex.host) return
+        this.mm.handleBotProblemsNote(note)
       },
       runevent: (note: RunEventNote) => {
         if (note.baseID !== this.market.base.id || note.quoteID !== this.market.quote.id || note.host !== this.market.dex.host) return
