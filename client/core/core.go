@@ -5145,10 +5145,6 @@ func (c *Core) initializeDEXConnection(dc *dexConnection, crypter encrypt.Crypte
 		return // don't attempt authDEX for view-only conn
 	}
 
-	if initialized, _ := dc.acct.status(); !initialized {
-		return // dex account is not yet initialized, so we can't unlock it.
-	}
-
 	// Unlock before checking auth and continuing, because if the user
 	// logged out and didn't shut down, the account is still authed, but
 	// locked, and needs unlocked.
@@ -7134,7 +7130,7 @@ func (c *Core) initialize() error {
 		wg.Add(1)
 		go func(acct *db.AccountInfo) {
 			defer wg.Done()
-			if c.connectAccount(acct) {
+			if _, connected := c.connectAccount(acct); connected {
 				atomic.AddUint32(&liveConns, 1)
 			}
 		}(acct)
@@ -7190,7 +7186,7 @@ func (c *Core) initialize() error {
 // the conns map even if the connection attempt failed (connected == false), and
 // the connect retry / keepalive loop is active. The intial connection attempt
 // or keepalive loop will not run if acct is disabled.
-func (c *Core) connectAccount(acct *db.AccountInfo) (connected bool) {
+func (c *Core) connectAccount(acct *db.AccountInfo) (dc *dexConnection, connected bool) {
 	host, err := addrHost(acct.Host)
 	if err != nil {
 		c.log.Errorf("skipping loading of %s due to address parse error: %v", host, err)
@@ -7199,7 +7195,7 @@ func (c *Core) connectAccount(acct *db.AccountInfo) (connected bool) {
 
 	if c.cfg.TheOneHost != "" && c.cfg.TheOneHost != host {
 		c.log.Infof("Running with --onehost = %q.", c.cfg.TheOneHost)
-		return false
+		return
 	}
 
 	var connectFlag connectDEXFlag
@@ -7207,7 +7203,7 @@ func (c *Core) connectAccount(acct *db.AccountInfo) (connected bool) {
 		connectFlag |= connectDEXFlagViewOnly
 	}
 
-	dc, err := c.newDEXConnection(acct, connectFlag)
+	dc, err = c.newDEXConnection(acct, connectFlag)
 	if err != nil {
 		c.log.Errorf("Unable to prepare DEX %s: %v", host, err)
 		return
@@ -7220,7 +7216,7 @@ func (c *Core) connectAccount(acct *db.AccountInfo) (connected bool) {
 
 	// Connected or not, the dexConnection goes in the conns map now.
 	c.addDexConnection(dc)
-	return err == nil
+	return dc, err == nil
 }
 
 func (c *Core) dbOrders(host string) ([]*db.MetaOrder, error) {

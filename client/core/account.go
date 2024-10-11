@@ -48,7 +48,7 @@ func (c *Core) disconnectDEX(dc *dexConnection) {
 
 // ToggleAccountStatus is used to disable or enable an account by given host and
 // application password.
-func (c *Core) ToggleAccountStatus(pw []byte, addr string, disable bool) error {
+func (c *Core) ToggleAccountStatus(pw []byte, host string, disable bool) error {
 	// Validate password.
 	crypter, err := c.encryptionKey(pw)
 	if err != nil {
@@ -57,7 +57,7 @@ func (c *Core) ToggleAccountStatus(pw []byte, addr string, disable bool) error {
 
 	// Get dex connection by host. All exchange servers (enabled or not) are loaded as
 	// dexConnections but disabled servers are not connected.
-	dc, _, err := c.dex(addr)
+	dc, _, err := c.dex(host)
 	if err != nil {
 		return newError(unknownDEXErr, "error retrieving dex conn: %w", err)
 	}
@@ -77,7 +77,7 @@ func (c *Core) ToggleAccountStatus(pw []byte, addr string, disable bool) error {
 		}
 	}
 
-	err = c.db.ToggleAccountStatus(addr, disable)
+	err = c.db.ToggleAccountStatus(host, disable)
 	if err != nil {
 		return newError(accountStatusUpdateErr, "error updating account status: %w", err)
 	}
@@ -86,12 +86,14 @@ func (c *Core) ToggleAccountStatus(pw []byte, addr string, disable bool) error {
 		dc.acct.toggleAccountStatus(true)
 		c.stopDEXConnection(dc)
 	} else {
-		acctInfo, err := c.db.Account(addr)
+		acctInfo, err := c.db.Account(host)
 		if err != nil {
 			return err
 		}
-
-		c.connectAccount(acctInfo)
+		dc, connected := c.connectAccount(acctInfo)
+		if !connected {
+			return fmt.Errorf("failed to connected re-enabled account: %w", err)
+		}
 		c.initializeDEXConnection(dc, crypter)
 	}
 
