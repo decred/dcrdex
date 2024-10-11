@@ -91,12 +91,7 @@ func (c *Core) ToggleAccountStatus(pw []byte, addr string, disable bool) error {
 			return err
 		}
 
-		dc, err := c.connectDEX(acctInfo)
-		if err != nil {
-			c.log.Errorf("Trouble establishing connection to %s (will retry). Error: %v", acctInfo.Host, err)
-		}
-		// Connected or not, add dex connection to the connections map.
-		c.addDexConnection(dc)
+		c.connectAccount(acctInfo)
 		c.initializeDEXConnection(dc, crypter)
 	}
 
