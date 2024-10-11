@@ -7090,7 +7090,7 @@ func TestHandleNomatch(t *testing.T) {
 	dc.trades[marketOID] = marketTracker
 
 	runNomatch := func(tag string, oid order.OrderID) {
-		tracker, _, _ := dc.findOrder(oid)
+		tracker, _ := dc.findOrder(oid)
 		if tracker == nil {
 			t.Fatalf("%s: order ID not found", tag)
 		}
@@ -7103,7 +7103,7 @@ func TestHandleNomatch(t *testing.T) {
 	}
 
 	checkTradeStatus := func(tag string, oid order.OrderID, expStatus order.OrderStatus) {
-		tracker, _, _ := dc.findOrder(oid)
+		tracker, _ := dc.findOrder(oid)
 		if tracker.metaData.Status != expStatus {
 			t.Fatalf("%s: wrong status. expected %s, got %s", tag, expStatus, tracker.metaData.Status)
 		}

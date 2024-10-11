@@ -600,17 +600,17 @@ func (dc *dexConnection) activeOrders() ([]*Order, []*InFlightOrder) {
 
 // findOrder returns the tracker and preimage for an order ID, and a boolean
 // indicating whether this is a cancel order.
-func (dc *dexConnection) findOrder(oid order.OrderID) (tracker *trackedTrade, preImg order.Preimage, isCancel bool) {
+func (dc *dexConnection) findOrder(oid order.OrderID) (tracker *trackedTrade, isCancel bool) {
 	dc.tradeMtx.RLock()
 	defer dc.tradeMtx.RUnlock()
 	// Try to find the order as a trade.
 	if tracker, found := dc.trades[oid]; found {
-		return tracker, tracker.preImg, false
+		return tracker, false
 	}
 
 	if tid, found := dc.cancelTradeID(oid); found {
 		if tracker, found := dc.trades[tid]; found {
-			return tracker, tracker.preImg, true
+			return tracker, true
 		} else {
 			dc.log.Errorf("Did not find trade for cancel order ID %s", oid)
 		}
@@ -670,7 +670,7 @@ func (c *Core) sendCancelOrder(dc *dexConnection, oid order.OrderID, base, quote
 // tryCancel will look for an order with the specified order ID, and attempt to
 // cancel the order. It is not an error if the order is not found.
 func (c *Core) tryCancel(dc *dexConnection, oid order.OrderID) (found bool, err error) {
-	tracker, _, _ := dc.findOrder(oid)
+	tracker, _ := dc.findOrder(oid)
 	if tracker == nil {
 		return // false, nil
 	}
@@ -796,7 +796,7 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs boo
 	for _, msgMatch := range msgMatches {
 		var oid order.OrderID
 		copy(oid[:], msgMatch.OrderID)
-		tracker, _, isCancel := dc.findOrder(oid)
+		tracker, isCancel := dc.findOrder(oid)
 		if tracker == nil {
 			dc.blindCancelsMtx.Lock()
 			_, found := dc.blindCancels[oid]
@@ -4976,7 +4976,7 @@ func (c *Core) Order(oidB dex.Bytes) (*Order, error) {
 	}
 	// See if it's an active order first.
 	for _, dc := range c.dexConnections() {
-		tracker, _, _ := dc.findOrder(oid)
+		tracker, _ := dc.findOrder(oid)
 		if tracker != nil {
 			return tracker.coreOrder(), nil
 		}
@@ -8518,7 +8518,7 @@ func handleRevokeOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	var oid order.OrderID
 	copy(oid[:], revocation.OrderID)
 
-	tracker, _, isCancel := dc.findOrder(oid)
+	tracker, isCancel := dc.findOrder(oid)
 	if tracker == nil {
 		return fmt.Errorf("no order found with id %s", oid.String())
 	}
@@ -8560,7 +8560,7 @@ func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	var oid order.OrderID
 	copy(oid[:], revocation.OrderID)
 
-	tracker, _, _ := dc.findOrder(oid)
+	tracker, _ := dc.findOrder(oid)
 	if tracker == nil {
 		return fmt.Errorf("no order found with id %s (not an error if you've completed your side of the swap)", oid.String())
 	}
@@ -8959,7 +8959,8 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 }
 
 func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.OrderID, commitChecksum dex.Bytes) error {
-	tracker, preImg, isCancel := dc.findOrder(oid)
+	tracker, isCancel := dc.findOrder(oid)
+	var preImg order.Preimage
 	if tracker == nil {
 		var found bool
 		dc.blindCancelsMtx.Lock()
@@ -8971,7 +8972,8 @@ func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.
 	} else {
 		// Record the csum if this preimage request is novel, and deny it if
 		// this is a duplicate request with an altered csum.
-		if !acceptCsum(tracker, isCancel, commitChecksum) {
+		var accept bool
+		if accept, preImg = acceptCsum(tracker, isCancel, commitChecksum); !accept {
 			csumErr := errors.New("invalid csum in duplicate preimage request")
 			resp, err := msgjson.NewResponse(reqID, nil,
 				msgjson.NewError(msgjson.InvalidRequestError, "%v", csumErr))
@@ -9014,7 +9016,7 @@ func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.
 // the server may have used the knowledge of this preimage we are sending them
 // now to alter the epoch shuffle. The return value is false if a previous
 // checksum has been recorded that differs from the provided one.
-func acceptCsum(tracker *trackedTrade, isCancel bool, commitChecksum dex.Bytes) bool {
+func acceptCsum(tracker *trackedTrade, isCancel bool, commitChecksum dex.Bytes) (bool, order.Preimage) {
 	// Do not allow csum to be changed once it has been committed to
 	// (initialized to something other than `nil`) because it is probably a
 	// malicious behavior by the server.
@@ -9023,16 +9025,16 @@ func acceptCsum(tracker *trackedTrade, isCancel bool, commitChecksum dex.Bytes) 
 	if isCancel {
 		if tracker.cancelCsum == nil {
 			tracker.cancelCsum = commitChecksum
-			return true
+			return true, tracker.cancelPreimg
 		}
-		return bytes.Equal(commitChecksum, tracker.cancelCsum)
+		return bytes.Equal(commitChecksum, tracker.cancelCsum), tracker.cancelPreimg
 	}
 	if tracker.csum == nil {
 		tracker.csum = commitChecksum
-		return true
+		return true, tracker.preImg
 	}
 
-	return bytes.Equal(commitChecksum, tracker.csum)
+	return bytes.Equal(commitChecksum, tracker.csum), tracker.preImg
 }
 
 // handleMatchRoute processes the DEX-originating match route request,
@@ -9111,7 +9113,7 @@ func handleNoMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error 
 	var oid order.OrderID
 	copy(oid[:], nomatchMsg.OrderID)
 
-	tracker, _, _ := dc.findOrder(oid)
+	tracker, _ := dc.findOrder(oid)
 	if tracker == nil {
 		dc.blindCancelsMtx.Lock()
 		_, found := dc.blindCancels[oid]
@@ -9185,7 +9187,7 @@ func handleAuditRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	var oid order.OrderID
 	copy(oid[:], audit.OrderID)
 
-	tracker, _, _ := dc.findOrder(oid)
+	tracker, _ := dc.findOrder(oid)
 	if tracker == nil {
 		return fmt.Errorf("audit request received for unknown order: %s", string(msg.Payload))
 	}
@@ -9210,7 +9212,7 @@ func handleRedemptionRoute(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	var oid order.OrderID
 	copy(oid[:], redemption.OrderID)
 
-	tracker, _, isCancel := dc.findOrder(oid)
+	tracker, isCancel := dc.findOrder(oid)
 	if tracker != nil {
 		if isCancel {
 			return fmt.Errorf("redemption request received for cancel order %v, match %v (you ok server?)",
@@ -10261,7 +10263,7 @@ func (c *Core) RemoveWalletPeer(assetID uint32, address string) error {
 // id. An error is returned if it cannot be found.
 func (c *Core) findActiveOrder(oid order.OrderID) (*trackedTrade, error) {
 	for _, dc := range c.dexConnections() {
-		tracker, _, _ := dc.findOrder(oid)
+		tracker, _ := dc.findOrder(oid)
 		if tracker != nil {
 			return tracker, nil
 		}
@@ -10648,7 +10650,7 @@ func (c *Core) handleRetryRedemptionAction(actionB []byte) error {
 	copy(oid[:], req.OrderID)
 	var tracker *trackedTrade
 	for _, dc := range c.dexConnections() {
-		tracker, _, _ = dc.findOrder(oid)
+		tracker, _ = dc.findOrder(oid)
 		if tracker != nil {
 			break
 		}
