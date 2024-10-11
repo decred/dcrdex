@@ -641,7 +641,7 @@ export default class WalletsPage extends BasePage {
       page.unapproveTokenErr.textContent = res.msg
       Doc.show(page.unapproveTokenErr)
     } else {
-      let feeText = `${Doc.formatCoinValue(res.txFee, parentAsset.unitInfo)} ${parentAsset.symbol.toUpperCase()}`
+      let feeText = `${Doc.formatCoinValue(res.txFee, parentAsset.unitInfo)} ${parentAsset.unitInfo.conventional.unit}`
       const rate = app().fiatRatesMap[parentAsset.id]
       if (rate) {
         feeText += ` (${Doc.formatFiatConversion(res.txFee, rate, parentAsset.unitInfo)} USD)`
@@ -1674,7 +1674,19 @@ export default class WalletsPage extends BasePage {
 
   updateTxHistoryRow (row: PageElement, tx: WalletTransaction, assetID: number) {
     const tmpl = Doc.parseTemplate(row)
-    const ui = app().unitInfo(assetID)
+    let amtAssetID = assetID
+    let feesAssetID = assetID
+    if (tx.tokenID) {
+      amtAssetID = tx.tokenID
+      if (assetID !== tx.tokenID) feesAssetID = assetID
+      else {
+        const asset = app().assets[assetID]
+        if (asset.token) feesAssetID = asset.token.parentID
+        else console.error(`unable to determine fee asset for tx ${tx.id}`)
+      }
+    }
+    const amtAssetUI = app().unitInfo(amtAssetID)
+    const feesAssetUI = app().unitInfo(feesAssetID)
     tmpl.age.textContent = Doc.timeSince(tx.timestamp * 1000)
     tmpl.age.dataset.timestamp = String(tx.timestamp * 1000)
     Doc.setVis(tx.timestamp === 0, tmpl.pending)
@@ -1689,12 +1701,12 @@ export default class WalletsPage extends BasePage {
     tmpl.type.textContent = txType
     tmpl.id.textContent = trimStringWithEllipsis(tx.id, 12)
     tmpl.id.setAttribute('title', tx.id)
-    tmpl.fees.textContent = Doc.formatCoinValue(tx.fees, ui)
+    tmpl.fees.textContent = Doc.formatCoinValue(tx.fees, feesAssetUI)
     if (noAmtTxTypes.includes(tx.type)) {
       tmpl.amount.textContent = '-'
     } else {
       const [u, c] = txTypeSignAndClass(tx.type)
-      const amt = Doc.formatCoinValue(tx.amount, ui)
+      const amt = Doc.formatCoinValue(tx.amount, amtAssetUI)
       tmpl.amount.textContent = `${u}${amt}`
       if (c !== '') tmpl.amount.classList.add(c)
     }
@@ -1740,17 +1752,13 @@ export default class WalletsPage extends BasePage {
     if (noAmtTxTypes.includes(tx.type)) {
       Doc.hide(page.txDetailsAmtSection)
     } else {
+      let assetID = this.selectedAssetID
+      if (tx.tokenID) assetID = tx.tokenID
       Doc.show(page.txDetailsAmtSection)
-      const amt = Doc.formatCoinValue(tx.amount, app().unitInfo(this.selectedAssetID))
-      let amtUnit : string
-      if (tx.tokenID) {
-        amtUnit = app().assets[tx.tokenID].symbol.split('.')[0].toUpperCase()
-      } else {
-        amtUnit = app().assets[this.selectedAssetID].symbol.split('.')[0].toUpperCase()
-      }
-
+      const ui = app().unitInfo(assetID)
+      const amt = Doc.formatCoinValue(tx.amount, ui)
       const [s, c] = txTypeSignAndClass(tx.type)
-      page.txDetailsAmount.textContent = `${s}${amt} ${amtUnit}`
+      page.txDetailsAmount.textContent = `${s}${amt} ${ui.conventional.unit}`
       if (c !== '') page.txDetailsAmount.classList.add(c)
     }
 
@@ -1764,8 +1772,9 @@ export default class WalletsPage extends BasePage {
         console.error(`wallet transaction ${tx.id} is supposed to be a token tx, but asset ${tx.tokenID} is not a token`)
       }
     }
-    const fee = Doc.formatCoinValue(tx.fees, app().unitInfo(feeAsset))
-    page.txDetailsFee.textContent = `${fee} ${app().assets[feeAsset].symbol.toUpperCase()}`
+    const feeUI = app().unitInfo(feeAsset)
+    const fee = Doc.formatCoinValue(tx.fees, feeUI)
+    page.txDetailsFee.textContent = `${fee} ${feeUI.conventional.unit}`
 
     // Time / block number
     page.txDetailsBlockNumber.textContent = `${tx.blockNumber}`
