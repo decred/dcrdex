@@ -5936,7 +5936,7 @@ func isMixTx(tx *wire.MsgTx) (isMix bool, mixDenom int64) {
 }
 
 // idUnknownTx identifies the type and details of a transaction either made
-// or recieved by the wallet.
+// or received by the wallet.
 func (dcr *ExchangeWallet) idUnknownTx(ctx context.Context, tx *ListTransactionsResult) (*asset.WalletTransaction, error) {
 	txHash, err := chainhash.NewHashFromStr(tx.TxID)
 	if err != nil {
@@ -6252,7 +6252,7 @@ func (dcr *ExchangeWallet) idUnknownTx(ctx context.Context, tx *ListTransactions
 }
 
 // addUnknownTransactionsToHistory checks for any transactions the wallet has
-// made or recieved that are not part of the transaction history. It scans
+// made or received that are not part of the transaction history. It scans
 // from the last point to which it had previously scanned to the current tip.
 func (dcr *ExchangeWallet) addUnknownTransactionsToHistory(tip uint64) {
 	txHistoryDB := dcr.txDB()
@@ -6320,7 +6320,7 @@ func (dcr *ExchangeWallet) addUnknownTransactionsToHistory(tip uint64) {
 }
 
 // syncTxHistory checks to see if there are any transactions which the wallet
-// has made or recieved that are not part of the transaction history, then
+// has made or received that are not part of the transaction history, then
 // identifies and adds them. It also checks all the pending transactions to see
 // if they have been mined into a block, and if so, updates the transaction
 // history to reflect the block height.
@@ -6699,11 +6699,10 @@ func (dcr *ExchangeWallet) handleTipChange(ctx context.Context, newTipHash *chai
 		dcr.cycleMixer()
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(1)
+	dcr.wg.Add(1)
 	go func() {
-		defer wg.Done()
 		dcr.syncTxHistory(ctx, uint64(newTipHeight))
+		dcr.wg.Done()
 	}()
 
 	// Search for contract redemption in new blocks if there
@@ -6759,13 +6758,7 @@ func (dcr *ExchangeWallet) handleTipChange(ctx context.Context, newTipHash *chai
 
 	// Run the redemption search from the startHeight determined above up
 	// till the current tip height.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		dcr.findRedemptionsInBlockRange(startHeight, newTipHeight, contractOutpoints)
-	}()
-
-	wg.Wait()
+	dcr.findRedemptionsInBlockRange(startHeight, newTipHeight, contractOutpoints)
 }
 
 func (dcr *ExchangeWallet) getBestBlock(ctx context.Context) (*block, error) {
