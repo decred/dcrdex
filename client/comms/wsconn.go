@@ -98,6 +98,7 @@ type WsConn interface {
 	RequestWithTimeout(msg *msgjson.Message, respHandler func(*msgjson.Message), expireTime time.Duration, expire func()) error
 	Connect(ctx context.Context) (*sync.WaitGroup, error)
 	MessageSource() <-chan *msgjson.Message
+	UpdateURL(url string)
 }
 
 // When the DEX sends a request to the client, a responseHandler is created
@@ -161,6 +162,7 @@ type wsConn struct {
 	cfg    *WsCfg
 	tlsCfg *tls.Config
 	readCh chan *msgjson.Message
+	urlV   atomic.Value
 
 	wsMtx sync.Mutex
 	ws    *websocket.Conn
@@ -203,14 +205,26 @@ func NewWsConn(cfg *WsCfg) (WsConn, error) {
 		ServerName: uri.Hostname(),
 	}
 
-	return &wsConn{
+	conn := &wsConn{
 		cfg:          cfg,
 		log:          cfg.Logger,
 		tlsCfg:       tlsConfig,
 		readCh:       make(chan *msgjson.Message, readBuffSize),
 		respHandlers: make(map[uint64]*responseHandler),
 		reconnectCh:  make(chan struct{}, 1),
-	}, nil
+	}
+
+	conn.urlV.Store(cfg.URL)
+
+	return conn, nil
+}
+
+func (conn *wsConn) UpdateURL(uri string) {
+	conn.urlV.Store(uri)
+}
+
+func (conn *wsConn) url() string {
+	return conn.urlV.Load().(string)
 }
 
 // IsDown indicates if the connection is known to be down.
@@ -240,7 +254,7 @@ func (conn *wsConn) connect(ctx context.Context) error {
 		dialer.Proxy = http.ProxyFromEnvironment
 	}
 
-	ws, _, err := dialer.DialContext(ctx, conn.cfg.URL, conn.cfg.ConnectHeaders)
+	ws, _, err := dialer.DialContext(ctx, conn.url(), conn.cfg.ConnectHeaders)
 	if err != nil {
 		if isErrorInvalidCert(err) {
 			conn.setConnectionStatus(InvalidCert)
@@ -331,7 +345,7 @@ func (conn *wsConn) handleReadError(err error) {
 
 	var netErr net.Error
 	if errors.As(err, &netErr) && netErr.Timeout() {
-		conn.log.Errorf("Read timeout on connection to %s.", conn.cfg.URL)
+		conn.log.Errorf("Read timeout on connection to %s.", conn.url())
 		reconnect()
 		return
 	}
@@ -457,11 +471,11 @@ func (conn *wsConn) keepAlive(ctx context.Context) {
 				return
 			}
 
-			conn.log.Infof("Attempting to reconnect to %s...", conn.cfg.URL)
+			conn.log.Infof("Attempting to reconnect to %s...", conn.url())
 			err := conn.connect(ctx)
 			if err != nil {
 				conn.log.Errorf("Reconnect failed. Scheduling reconnect to %s in %.1f seconds.",
-					conn.cfg.URL, rcInt.Seconds())
+					conn.url(), rcInt.Seconds())
 				time.AfterFunc(rcInt, func() {
 					conn.reconnectCh <- struct{}{}
 				})

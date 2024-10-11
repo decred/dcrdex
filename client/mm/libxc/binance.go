@@ -1628,7 +1628,10 @@ func (bnc *binance) subscribeToAdditionalMarketDataStream(ctx context.Context, b
 	streamID := marketDataStreamID(mktID)
 
 	bnc.booksMtx.Lock()
-	defer bnc.booksMtx.Unlock()
+	defer func() {
+		bnc.booksMtx.Unlock()
+		bnc.marketStream.UpdateURL(bnc.marketStreamsURL())
+	}()
 
 	book, found := bnc.books[mktID]
 	if found {
@@ -1747,6 +1750,14 @@ out:
 	return nil
 }
 
+// marketStreamsURL returns the URL for the market data stream using all the
+// currently subscribed markets.
+//
+// bnc.booksMtx MUST NOT be held when calling this function.
+func (bnc *binance) marketStreamsURL() string {
+	return bnc.wsURL + "/stream?streams=" + strings.Join(bnc.streams(), "/")
+}
+
 // connectToMarketDataStream is called when the first market is subscribed to.
 // It creates a connection to the market data stream and starts a goroutine
 // to reconnect every 12 hours, as Binance will close the stream every 24
@@ -1757,7 +1768,6 @@ func (bnc *binance) connectToMarketDataStream(ctx context.Context, baseID, quote
 	checkSubsC := make(chan struct{})
 
 	newConnection := func() (comms.WsConn, *dex.ConnectionMaster, error) {
-		addr := fmt.Sprintf("%s/stream?streams=%s", bnc.wsURL, strings.Join(bnc.streams(), "/"))
 		// Need to send key but not signature
 		connectEventFunc := func(cs comms.ConnectionStatus) {
 			if cs != comms.Disconnected && cs != comms.Connected {
@@ -1776,7 +1786,7 @@ func (bnc *binance) connectToMarketDataStream(ctx context.Context, baseID, quote
 			}
 		}
 		conn, err := comms.NewWsConn(&comms.WsCfg{
-			URL: addr,
+			URL: bnc.marketStreamsURL(),
 			// Binance Docs: The websocket server will send a ping frame every 3
 			// minutes. If the websocket server does not receive a pong frame
 			// back from the connection within a 10 minute period, the connection
@@ -1929,6 +1939,8 @@ func (bnc *binance) UnsubscribeMarket(baseID, quoteID uint32) (err error) {
 		if unsubscribe {
 			if err := bnc.subUnsubDepth(false, streamID); err != nil {
 				bnc.log.Errorf("error unsubscribing from market data stream", err)
+			} else {
+				bnc.marketStream.UpdateURL(bnc.marketStreamsURL())
 			}
 		}
 	}()
