@@ -1924,6 +1924,8 @@ func (bnc *binance) UnsubscribeMarket(baseID, quoteID uint32) (err error) {
 	defer func() {
 		bnc.booksMtx.Unlock()
 
+		conn.UpdateURL(bnc.streamURL())
+
 		if closer != nil {
 			closer.Disconnect()
 		}
