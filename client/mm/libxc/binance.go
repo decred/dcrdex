@@ -1618,7 +1618,7 @@ func (bnc *binance) getOrderbookSnapshot(ctx context.Context, mktSymbol string) 
 // subscribeToAdditionalMarketDataStream is called when a new market is
 // subscribed to after the market data stream connection has already been
 // established.
-func (bnc *binance) subscribeToAdditionalMarketDataStream(ctx context.Context, baseID, quoteID uint32) error {
+func (bnc *binance) subscribeToAdditionalMarketDataStream(ctx context.Context, baseID, quoteID uint32) (err error) {
 	baseCfg, quoteCfg, err := bncAssetCfgs(baseID, quoteID)
 	if err != nil {
 		return fmt.Errorf("error getting asset cfg for %d: %w", baseID, err)
@@ -1626,6 +1626,10 @@ func (bnc *binance) subscribeToAdditionalMarketDataStream(ctx context.Context, b
 
 	mktID := binanceMktID(baseCfg, quoteCfg)
 	streamID := marketDataStreamID(mktID)
+
+	defer func() {
+		bnc.marketStream.UpdateURL(bnc.streamURL())
+	}()
 
 	bnc.booksMtx.Lock()
 	defer bnc.booksMtx.Unlock()
@@ -1660,6 +1664,10 @@ func (bnc *binance) streams() []string {
 		streamNames = append(streamNames, marketDataStreamID(mktID))
 	}
 	return streamNames
+}
+
+func (bnc *binance) streamURL() string {
+	return fmt.Sprintf("%s/stream?streams=%s", bnc.wsURL, strings.Join(bnc.streams(), "/"))
 }
 
 // checkSubs will query binance for current market subscriptions and compare
@@ -1756,8 +1764,7 @@ func (bnc *binance) connectToMarketDataStream(ctx context.Context, baseID, quote
 	reconnectC := make(chan struct{})
 	checkSubsC := make(chan struct{})
 
-	newConnection := func() (comms.WsConn, *dex.ConnectionMaster, error) {
-		addr := fmt.Sprintf("%s/stream?streams=%s", bnc.wsURL, strings.Join(bnc.streams(), "/"))
+	newConnection := func() (*dex.ConnectionMaster, error) {
 		// Need to send key but not signature
 		connectEventFunc := func(cs comms.ConnectionStatus) {
 			if cs != comms.Disconnected && cs != comms.Connected {
@@ -1776,7 +1783,7 @@ func (bnc *binance) connectToMarketDataStream(ctx context.Context, baseID, quote
 			}
 		}
 		conn, err := comms.NewWsConn(&comms.WsCfg{
-			URL: addr,
+			URL: bnc.streamURL(),
 			// Binance Docs: The websocket server will send a ping frame every 3
 			// minutes. If the websocket server does not receive a pong frame
 			// back from the connection within a 10 minute period, the connection
@@ -1795,16 +1802,16 @@ func (bnc *binance) connectToMarketDataStream(ctx context.Context, baseID, quote
 			RawHandler:       bnc.handleMarketDataNote,
 		})
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 
 		bnc.marketStream = conn
 		cm := dex.NewConnectionMaster(conn)
 		if err = cm.ConnectOnce(ctx); err != nil {
-			return nil, nil, fmt.Errorf("websocketHandler remote connect: %v", err)
+			return nil, fmt.Errorf("websocketHandler remote connect: %v", err)
 		}
 
-		return conn, cm, nil
+		return cm, nil
 	}
 
 	// Add the initial book to the books map
@@ -1822,12 +1829,10 @@ func (bnc *binance) connectToMarketDataStream(ctx context.Context, baseID, quote
 	bnc.booksMtx.Unlock()
 
 	// Create initial connection to the market data stream
-	conn, cm, err := newConnection()
+	cm, err := newConnection()
 	if err != nil {
 		return fmt.Errorf("error connecting to market data stream : %v", err)
 	}
-
-	bnc.marketStream = conn
 
 	book.sync(ctx)
 
@@ -1836,9 +1841,8 @@ func (bnc *binance) connectToMarketDataStream(ctx context.Context, baseID, quote
 		reconnect := func() error {
 			bnc.marketStreamMtx.Lock()
 			defer bnc.marketStreamMtx.Unlock()
-
 			oldCm := cm
-			conn, cm, err = newConnection()
+			cm, err = newConnection()
 			if err != nil {
 				return err
 			}
@@ -1846,8 +1850,6 @@ func (bnc *binance) connectToMarketDataStream(ctx context.Context, baseID, quote
 			if oldCm != nil {
 				oldCm.Disconnect()
 			}
-
-			bnc.marketStream = conn
 			return nil
 		}
 
@@ -1921,6 +1923,8 @@ func (bnc *binance) UnsubscribeMarket(baseID, quoteID uint32) (err error) {
 	bnc.booksMtx.Lock()
 	defer func() {
 		bnc.booksMtx.Unlock()
+
+		conn.UpdateURL(bnc.streamURL())
 
 		if closer != nil {
 			closer.Disconnect()
