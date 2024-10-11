@@ -5145,6 +5145,10 @@ func (c *Core) initializeDEXConnection(dc *dexConnection, crypter encrypt.Crypte
 		return // don't attempt authDEX for view-only conn
 	}
 
+	if initialized, _ := dc.acct.status(); !initialized {
+		return // dex account is not yet initialized, so we can't unlock it.
+	}
+
 	// Unlock before checking auth and continuing, because if the user
 	// logged out and didn't shut down, the account is still authed, but
 	// locked, and needs unlocked.
