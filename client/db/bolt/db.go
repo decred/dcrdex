@@ -421,6 +421,11 @@ func (db *BoltDB) pruneArchivedOrders(prunedSize uint64) error {
 			return fmt.Errorf("failed to open %s bucket", string(archivedOrdersBucket))
 		}
 
+		nOrds := uint64(archivedOB.Stats().BucketN - 1 /* BucketN includes top bucket */)
+		if nOrds <= prunedSize {
+			return nil
+		}
+
 		// We won't delete any orders with active matches.
 		activeMatches := tx.Bucket(activeMatchesBucket)
 		if activeMatches == nil {
@@ -440,11 +445,6 @@ func (db *BoltDB) pruneArchivedOrders(prunedSize uint64) error {
 			return fmt.Errorf("error building active match order ID index: %w", err)
 		}
 
-		nOrds := uint64(archivedOB.Stats().BucketN - 1 /* BucketN includes top bucket */)
-		if nOrds <= prunedSize {
-			return nil
-		}
-
 		toClear := int(nOrds - prunedSize)
 
 		type orderStamp struct {
@@ -457,6 +457,7 @@ func (db *BoltDB) pruneArchivedOrders(prunedSize uint64) error {
 				return deletes[i].stamp < deletes[j].stamp
 			})
 		}
+		var sortedAtCapacity bool
 		if err := archivedOB.ForEach(func(oidB, v []byte) error {
 			var oid order.OrderID
 			copy(oid[:], oidB)
@@ -478,8 +479,13 @@ func (db *BoltDB) pruneArchivedOrders(prunedSize uint64) error {
 					stamp: stamp,
 					oid:   oidB,
 				})
-				sortDeletes()
 				return nil
+			}
+			if !sortedAtCapacity {
+				// Make sure the last element is the newest one once we hit
+				// capacity.
+				sortDeletes()
+				sortedAtCapacity = true
 			}
 			if stamp > deletes[len(deletes)-1].stamp {
 				return nil

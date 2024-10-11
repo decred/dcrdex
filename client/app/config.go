@@ -110,7 +110,7 @@ type CoreConfig struct {
 
 	ExtensionModeFile string `long:"extension-mode-file" description:"path to a file that specifies options for running core as an extension."`
 
-	PruneArchive uint64 `long:"prunearchive" description:"prune that order archive to the specified number of most recent orders"`
+	PruneArchive uint64 `long:"prunearchive" description:"prune that order archive to the specified number of most recent orders. zero means no pruning."`
 }
 
 // WebConfig encapsulates the configuration needed for the web server.
