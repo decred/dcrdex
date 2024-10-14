@@ -246,7 +246,7 @@ func (c *TCore) AccountExport(pw []byte, host string) (*core.Account, []*db.Bond
 func (c *TCore) AccountImport(pw []byte, account *core.Account, bonds []*db.Bond) error {
 	return nil
 }
-func (c *TCore) AccountDisable(pw []byte, host string) error { return nil }
+func (c *TCore) ToggleAccountStatus(pw []byte, host string, disable bool) error { return nil }
 
 func (c *TCore) ExportSeed(pw []byte) (string, error) {
 	return "seed words here", nil

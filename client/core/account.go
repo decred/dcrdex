@@ -14,9 +14,9 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
-// disconnectDEX unsubscribes from the dex's orderbooks, ends the connection
-// with the dex, and removes it from the connection map.
-func (c *Core) disconnectDEX(dc *dexConnection) {
+// stopDEXConnection unsubscribes from the dex's orderbooks and ends the
+// connection with the dex. The dexConnection will still remain in c.conns map.
+func (c *Core) stopDEXConnection(dc *dexConnection) {
 	// Stop dexConnection books.
 	dc.cfgMtx.RLock()
 	if dc.cfg != nil {
@@ -34,42 +34,68 @@ func (c *Core) disconnectDEX(dc *dexConnection) {
 		}
 	}
 	dc.cfgMtx.RUnlock()
+	dc.connMaster.Disconnect() // disconnect
+}
+
+// disconnectDEX disconnects a dex and removes it from the connection map.
+func (c *Core) disconnectDEX(dc *dexConnection) {
 	// Disconnect and delete connection from map.
-	dc.connMaster.Disconnect()
+	c.stopDEXConnection(dc)
 	c.connMtx.Lock()
 	delete(c.conns, dc.acct.host)
 	c.connMtx.Unlock()
 }
 
-// AccountDisable is used to disable an account by given host and application
-// password.
-func (c *Core) AccountDisable(pw []byte, addr string) error {
+// ToggleAccountStatus is used to disable or enable an account by given host and
+// application password.
+func (c *Core) ToggleAccountStatus(pw []byte, host string, disable bool) error {
 	// Validate password.
-	_, err := c.encryptionKey(pw)
+	crypter, err := c.encryptionKey(pw)
 	if err != nil {
 		return codedError(passwordErr, err)
 	}
 
-	// Get dex connection by host.
-	dc, _, err := c.dex(addr)
+	// Get dex connection by host. All exchange servers (enabled or not) are loaded as
+	// dexConnections but disabled servers are not connected.
+	dc, _, err := c.dex(host)
 	if err != nil {
 		return newError(unknownDEXErr, "error retrieving dex conn: %w", err)
 	}
 
-	// Check active orders or bonds.
-	if dc.hasActiveOrders() {
-		return fmt.Errorf("cannot disable account with active orders")
-	}
-	if dc.hasUnspentBond() {
-		return fmt.Errorf("cannot disable account with unspent bonds")
+	if dc.acct.isDisabled() == disable {
+		return nil // no-op
 	}
 
-	err = c.db.DisableAccount(dc.acct.host)
+	if disable {
+		// Check active orders or bonds.
+		if dc.hasActiveOrders() {
+			return fmt.Errorf("cannot disable account with active orders")
+		}
+
+		if dc.hasUnspentBond() {
+			c.log.Info("Disabling dex server with unspent bonds. Bonds will be refunded when expired.")
+		}
+	}
+
+	err = c.db.ToggleAccountStatus(host, disable)
 	if err != nil {
-		return newError(accountDisableErr, "error disabling account: %w", err)
+		return newError(accountStatusUpdateErr, "error updating account status: %w", err)
 	}
 
-	c.disconnectDEX(dc)
+	if disable {
+		dc.acct.toggleAccountStatus(true)
+		c.stopDEXConnection(dc)
+	} else {
+		acctInfo, err := c.db.Account(host)
+		if err != nil {
+			return err
+		}
+		dc, connected := c.connectAccount(acctInfo)
+		if !connected {
+			return fmt.Errorf("failed to connected re-enabled account: %w", err)
+		}
+		c.initializeDEXConnection(dc, crypter)
+	}
 
 	return nil
 }
@@ -188,7 +214,7 @@ func (c *Core) AccountImport(pw []byte, acct *Account, bonds []*db.Bond) error {
 			return err
 		}
 		c.addDexConnection(dc)
-		c.initializeDEXConnections(crypter)
+		c.initializeDEXConnection(dc, crypter)
 		return nil
 	}
 
@@ -255,7 +281,7 @@ func (c *Core) AccountImport(pw []byte, acct *Account, bonds []*db.Bond) error {
 		return err
 	}
 	c.addDexConnection(dc)
-	c.initializeDEXConnections(crypter)
+	c.initializeDEXConnection(dc, crypter)
 	return nil
 }
 
@@ -368,9 +394,9 @@ func (c *Core) UpdateDEXHost(oldHost, newHost string, appPW []byte, certI any) (
 		}
 	}
 
-	err = c.db.DisableAccount(oldDc.acct.host)
+	err = c.db.ToggleAccountStatus(oldDc.acct.host, true)
 	if err != nil {
-		return nil, newError(accountDisableErr, "error disabling account: %w", err)
+		return nil, newError(accountStatusUpdateErr, "error updating account status: %w", err)
 	}
 
 	updatedHost = true
