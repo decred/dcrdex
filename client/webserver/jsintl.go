@@ -194,6 +194,10 @@ const (
 	archivedSettingsID               = "ARCHIVED_SETTINGS"
 	idTransparent                    = "TRANSPARENT"
 	idNoCodeProvided                 = "NO_CODE_PROVIDED"
+	enableAccount                    = "ENABLE_ACCOUNT"
+	disableAccount                   = "DISABLE_ACCOUNT"
+	accountDisabledMsg               = "ACCOUNT_DISABLED_MSG"
+	dexDisabledMsg                   = "DEX_DISABLED_MSG"
 )
 
 var enUS = map[string]*intl.Translation{
@@ -387,6 +391,10 @@ var enUS = map[string]*intl.Translation{
 	archivedSettingsID:               {T: "Archived Settings"},
 	idTransparent:                    {T: "Transparent"},
 	idNoCodeProvided:                 {T: "no code provided"},
+	enableAccount:                    {T: "Enable Account"},
+	disableAccount:                   {T: "Disable Account"},
+	accountDisabledMsg:               {T: "account disabled - re-enable to update settings"},
+	dexDisabledMsg:                   {T: "DEX server is disabled. Visit the settings page to enable and connect to this server."},
 }
 
 var ptBR = map[string]*intl.Translation{

@@ -423,8 +423,12 @@ func (tdb *TDB) BondRefunded(host string, assetID uint32, bondCoinID []byte) err
 	return nil
 }
 
-func (tdb *TDB) DisableAccount(url string) error {
-	tdb.disabledHost = &url
+func (tdb *TDB) ToggleAccountStatus(host string, disable bool) error {
+	if disable {
+		tdb.disabledHost = &host
+	} else {
+		tdb.disabledHost = nil
+	}
 	return tdb.disableAccountErr
 }
 

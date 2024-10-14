@@ -133,9 +133,10 @@ type accountImportForm struct {
 	Bonds   []*db.Bond       `json:"bonds"`
 }
 
-type accountDisableForm struct {
-	Pass encode.PassBytes `json:"pw"`
-	Host string           `json:"host"`
+type updateAccountStatusForm struct {
+	Pass    encode.PassBytes `json:"pw"`
+	Host    string           `json:"host"`
+	Disable bool             `json:"disable"`
 }
 
 type deleteRecordsForm struct {

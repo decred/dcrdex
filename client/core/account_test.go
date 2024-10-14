@@ -59,32 +59,39 @@ func TestAccountExport(t *testing.T) {
 }
 */
 
-func TestAccountDisable(t *testing.T) {
+func TestToggleAccountStatus(t *testing.T) {
 	activeTrades := map[order.OrderID]*trackedTrade{
 		{}: {metaData: &db.OrderMetaData{Status: order.OrderStatusBooked}},
 	}
 
 	tests := []struct {
-		name, host                          string
-		recryptErr, acctErr, disableAcctErr error
-		wantErr, wantErrCode, loseConns     bool
-		activeTrades                        map[order.OrderID]*trackedTrade
-		errCode                             int
+		name, host                                   string
+		recryptErr, acctErr, disableAcctErr          error
+		wantErr, wantErrCode, loseConns, wantDisable bool
+		activeTrades                                 map[order.OrderID]*trackedTrade
+		errCode                                      int
 	}{{
-		name: "ok",
-		host: tDexHost,
+		name:        "ok: disable account",
+		host:        tDexHost,
+		wantDisable: true,
 	}, {
-		name:       "password error",
-		host:       tDexHost,
-		recryptErr: tErr,
-		wantErr:    true,
-		errCode:    passwordErr,
+		name:        "ok: enable account",
+		host:        tDexHost,
+		wantDisable: false,
+	}, {
+		name:        "password error",
+		host:        tDexHost,
+		recryptErr:  tErr,
+		wantErr:     true,
+		errCode:     passwordErr,
+		wantDisable: true,
 	}, {
 		name:        "host error",
 		host:        ":bad:",
 		wantErr:     true,
 		wantErrCode: true,
 		errCode:     unknownDEXErr,
+		wantDisable: true,
 	}, {
 		name:        "dex not in conns",
 		host:        tDexHost,
@@ -92,18 +99,21 @@ func TestAccountDisable(t *testing.T) {
 		wantErr:     true,
 		wantErrCode: true,
 		errCode:     unknownDEXErr,
+		wantDisable: true,
 	}, {
 		name:         "has active orders",
 		host:         tDexHost,
 		activeTrades: activeTrades,
 		wantErr:      true,
+		wantDisable:  true,
 	}, {
 		name:           "disable account error",
 		host:           tDexHost,
 		disableAcctErr: errors.New(""),
 		wantErr:        true,
 		wantErrCode:    true,
-		errCode:        accountDisableErr,
+		errCode:        accountStatusUpdateErr,
+		wantDisable:    true,
 	}}
 
 	for _, test := range tests {
@@ -122,7 +132,7 @@ func TestAccountDisable(t *testing.T) {
 		}
 		tCore.connMtx.Unlock()
 
-		err := tCore.AccountDisable(tPW, test.host)
+		err := tCore.ToggleAccountStatus(tPW, test.host, test.wantDisable)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %v", test.name)
@@ -135,15 +145,21 @@ func TestAccountDisable(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error for test %v: %v", test.name, err)
 		}
-		if _, found := tCore.conns[test.host]; found {
-			t.Fatal("found disabled account dex connection")
-		}
-		if rig.db.disabledHost == nil {
-			t.Fatal("expected execution of db.DisableAccount")
-		}
-		if *rig.db.disabledHost != test.host {
-			t.Fatalf("expected db disabled account to match test host, want: %v"+
-				" got: %v", test.host, *rig.db.disabledHost)
+		if test.wantDisable {
+			if dc, found := tCore.conns[test.host]; found && !dc.acct.isDisabled() {
+				t.Fatal("expected disabled dex account")
+			}
+			if rig.db.disabledHost == nil {
+				t.Fatal("expected a disable dex server host")
+			}
+			if *rig.db.disabledHost != test.host {
+				t.Fatalf("expected db account to match test host, want: %v"+
+					" got: %v", test.host, *rig.db.disabledHost)
+			}
+		} else {
+			if dc, found := tCore.conns[test.host]; found && dc.acct.isDisabled() {
+				t.Fatal("expected enabled dex account")
+			}
 		}
 	}
 }
