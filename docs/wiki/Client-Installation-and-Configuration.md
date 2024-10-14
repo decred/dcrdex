@@ -55,8 +55,8 @@ checkmark in the "native" column, no external software is required.
 | Bitcoin Cash |    ✓   | [v27.0.0](https://bitcoincashnode.org/) |     x    | use only Bitcoin Cash Node for full node |
 | Dogecoin     |    x   |  [v1.14.7.0](https://dogecoin.com/) |     x    |                              |
 | Zcash        |    x   |   [v5.4.2](https://z.cash/download/)  |     x    |                              |
-| Dash         |    x   |  [v20.1.1](https://github.com/dashpay/dash/releases)  |     x    |
-| Firo         |    x   | [v0.14.13.3](https://github.com/firoorg/firo/releases) | [v4.1.5.5](https://github.com/firoorg/electrum-firo/releases) |
+| Dash         |    x   |  [v20.1.1](https://github.com/dashpay/dash/releases)  |     x    | |
+| Firo         |    x   | [v0.14.14.0](https://github.com/firoorg/firo/releases) | [v4.1.5.5](https://github.com/firoorg/electrum-firo/releases) | |
 
 NOTE: The Electrum option is less mature and provides less privacy than the
 other wallet types. Some manual configuration of the Electrum wallet's RPC
