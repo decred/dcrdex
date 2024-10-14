@@ -293,7 +293,7 @@ func (a *arbMarketMaker) ordersToPlace() (buys, sells []*multiTradePlacement) {
 
 // distribution parses the current inventory distribution and checks if better
 // distributions are possible via deposit or withdrawal.
-func (a *arbMarketMaker) distribution(useMinTransfer bool) (dist *distribution, err error) {
+func (a *arbMarketMaker) distribution(additionalDEX, additionalCEX map[uint32]uint64) (dist *distribution, err error) {
 	cfgI := a.placementLotsV.Load()
 	if cfgI == nil {
 		return nil, errors.New("no placements?")
@@ -320,8 +320,8 @@ func (a *arbMarketMaker) distribution(useMinTransfer bool) (dist *distribution, 
 	if perLot == nil {
 		return nil, fmt.Errorf("error getting lot costs: %w", err)
 	}
-	dist = a.newDistribution(perLot)
-	a.optimizeTransfers(dist, dexSellLots, dexBuyLots, dexSellLots, dexBuyLots, useMinTransfer)
+	dist = a.newDistribution(perLot, additionalDEX, additionalCEX)
+	a.optimizeTransfers(dist, dexSellLots, dexBuyLots, dexSellLots, dexBuyLots)
 	return dist, nil
 }
 

@@ -35,6 +35,13 @@ func MapKeys[K comparable, V any](m map[K]V) []K {
 	return ks
 }
 
+func SafeSub[I constraints.Unsigned](a I, b I) I {
+	if a < b {
+		return 0
+	}
+	return a - b
+}
+
 func Min[I constraints.Ordered](m I, ns ...I) I {
 	min := m
 	for _, n := range ns {

@@ -400,7 +400,7 @@ func (a *simpleArbMarketMaker) rebalance(newEpoch uint64) {
 	a.registerFeeGap()
 }
 
-func (a *simpleArbMarketMaker) distribution(useMinTransfer bool) (dist *distribution, err error) {
+func (a *simpleArbMarketMaker) distribution(additionalDEX, additionalCEX map[uint32]uint64) (dist *distribution, err error) {
 	sellVWAP, buyVWAP, err := a.cexCounterRates(1, 1)
 	if err != nil {
 		return nil, fmt.Errorf("error getting cex counter-rates: %w", err)
@@ -422,11 +422,11 @@ func (a *simpleArbMarketMaker) distribution(useMinTransfer bool) (dist *distribu
 	if perLot == nil {
 		return nil, fmt.Errorf("error getting lot costs: %w", err)
 	}
-	dist = a.newDistribution(perLot)
+	dist = a.newDistribution(perLot, additionalDEX, additionalCEX)
 	avgBaseLot, avgQuoteLot := float64(perLot.dexBase+perLot.cexBase)/2, float64(perLot.dexQuote+perLot.cexQuote)/2
 	baseLots := uint64(math.Round(float64(dist.baseInv.total) / avgBaseLot / 2))
 	quoteLots := uint64(math.Round(float64(dist.quoteInv.total) / avgQuoteLot / 2))
-	a.optimizeTransfers(dist, baseLots, quoteLots, baseLots*2, quoteLots*2, useMinTransfer)
+	a.optimizeTransfers(dist, baseLots, quoteLots, baseLots*2, quoteLots*2)
 	return dist, nil
 }
 

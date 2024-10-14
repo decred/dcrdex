@@ -926,30 +926,27 @@ func validRunningBotCfgUpdate(oldCfg, newCfg *BotConfig) error {
 	return nil
 }
 
-// internalTransfer is called from the exchange adaptor to attempt an internal
-// transfer rather than a withdrawal / deposit.
+// internalTransfer is called from the exchange adaptor when attempting an
+// internal transfer.
 //
 // ** IMPORTANT ** No mutexes in exchangeAdaptor should be locked when calling this
 // function.
-func (m *MarketMaker) internalTransfer(mkt *MarketWithHost, doTransfer doTransferFunc) (complete bool) {
+func (m *MarketMaker) internalTransfer(mkt *MarketWithHost, doTransfer doTransferFunc) error {
 	m.startUpdateMtx.Lock()
 	defer m.startUpdateMtx.Unlock()
 
 	runningBots := m.runningBotsLookup()
 	rb, found := runningBots[*mkt]
 	if !found {
-		m.log.Errorf("internalTransfer called for non-running bot %s", mkt)
-		return false
+		return fmt.Errorf("internalTransfer called for non-running bot %s", mkt)
 	}
 	if rb.cexCfg == nil {
-		m.log.Errorf("internalTransfer called for bot without CEX config %s", mkt)
-		return false
+		return fmt.Errorf("internalTransfer called for bot without CEX config %s", mkt)
 	}
 
 	dex, cex, err := m.availableBalances(mkt, rb.cexCfg)
 	if err != nil {
-		m.log.Errorf("error getting available balances: %v", err)
-		return false
+		return fmt.Errorf("error getting available balances: %v", err)
 	}
 
 	return doTransfer(dex, cex)
