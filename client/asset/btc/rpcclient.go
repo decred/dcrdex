@@ -907,9 +907,8 @@ func (wc *rpcClient) estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract 
 	args = append(args, options)
 
 	var res struct {
-		TxBytes        dex.Bytes `json:"hex"`
-		Fees           float64   `json:"fee"`
-		ChangePosition uint32    `json:"changepos"`
+		TxBytes dex.Bytes `json:"hex"`
+		Fees    float64   `json:"fee"`
 	}
 	err = wc.call(methodFundRawTransaction, args, &res)
 	if err != nil {
