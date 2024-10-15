@@ -404,6 +404,8 @@ func (m *market) msgRate(convRate float64) uint64 {
 	return calc.MessageRate(convRate, m.bui, m.qui)
 }
 
+type doTransferFunc func(dexAvailable, cexAvailable map[uint32]uint64) bool
+
 // unifiedExchangeAdaptor implements both botCoreAdaptor and botCexAdaptor.
 type unifiedExchangeAdaptor struct {
 	*market
@@ -422,6 +424,9 @@ type unifiedExchangeAdaptor struct {
 	initialBalances map[uint32]uint64
 	baseTraits      asset.WalletTrait
 	quoteTraits     asset.WalletTrait
+	// ** IMPORTANT ** No mutexes is should be locked when calling this
+	// function.
+	internalTransfer func(*MarketWithHost, doTransferFunc) bool
 
 	botLooper dex.Connector
 	botLoop   *dex.ConnectionMaster
@@ -2493,12 +2498,12 @@ func dexOrderEffects(o *core.Order, swaps, redeems, refunds map[string]*asset.Wa
 		dex.Settled[fromFeeAsset] -= int64(tx.Fees)
 	}
 
-	var reedeemIsDynamicSwapper, refundIsDynamicSwapper bool
+	var redeemIsDynamicSwapper, refundIsDynamicSwapper bool
 	if o.Sell {
-		reedeemIsDynamicSwapper = quoteTraits.IsDynamicSwapper()
+		redeemIsDynamicSwapper = quoteTraits.IsDynamicSwapper()
 		refundIsDynamicSwapper = baseTraits.IsDynamicSwapper()
 	} else {
-		reedeemIsDynamicSwapper = baseTraits.IsDynamicSwapper()
+		redeemIsDynamicSwapper = baseTraits.IsDynamicSwapper()
 		refundIsDynamicSwapper = quoteTraits.IsDynamicSwapper()
 	}
 
@@ -2510,7 +2515,7 @@ func dexOrderEffects(o *core.Order, swaps, redeems, refunds map[string]*asset.Wa
 		}
 
 		dex.Pending[toAsset] += tx.Amount
-		if reedeemIsDynamicSwapper {
+		if redeemIsDynamicSwapper {
 			dex.Settled[toFeeAsset] -= int64(tx.Fees)
 		} else if dex.Pending[toFeeAsset] >= tx.Fees {
 			dex.Pending[toFeeAsset] -= tx.Fees
@@ -2724,14 +2729,19 @@ func (u *unifiedExchangeAdaptor) newDistribution(perLot *lotCosts) *distribution
 // and quote assetDistribution. To find the best asset distribution, a series
 // of possible target configurations are tested and the distribution that
 // results in the highest matchability is chosen.
-func (u *unifiedExchangeAdaptor) optimizeTransfers(dist *distribution, dexSellLots, dexBuyLots, maxSellLots, maxBuyLots uint64) {
+func (u *unifiedExchangeAdaptor) optimizeTransfers(dist *distribution,
+	dexSellLots, dexBuyLots, maxSellLots, maxBuyLots uint64, useMinTransfer bool) {
 	baseInv, quoteInv := dist.baseInv, dist.quoteInv
 	perLot := dist.perLot
 
-	if u.autoRebalanceCfg == nil {
+	if u.autoRebalanceCfg == nil && useMinTransfer {
 		return
 	}
-	minBaseTransfer, minQuoteTransfer := u.autoRebalanceCfg.MinBaseTransfer, u.autoRebalanceCfg.MinQuoteTransfer
+
+	var minBaseTransfer, minQuoteTransfer uint64
+	if useMinTransfer {
+		minBaseTransfer, minQuoteTransfer = u.autoRebalanceCfg.MinBaseTransfer, u.autoRebalanceCfg.MinQuoteTransfer
+	}
 
 	additionalBaseFees, additionalQuoteFees := perLot.baseFunding, perLot.quoteFunding
 	if u.baseID == u.quoteFeeID {
@@ -2912,8 +2922,78 @@ func (u *unifiedExchangeAdaptor) optimizeTransfers(dist *distribution, dexSellLo
 	quoteInv.toWithdraw = split.quoteWithdraw
 }
 
-// transfer attempts to perform the transers specified in the distribution.
-func (u *unifiedExchangeAdaptor) transfer(dist *distribution, currEpoch uint64) (actionTaken bool, err error) {
+// tryInternalTransfers attempts to use available funds that are not reserved
+// by any bots to rebalance between the DEX and the CEX instead of doing an
+// actual deposit or withdrawal. True is returned if the deposits and/or
+// withdrawals were completely covered using available funds.
+func (u *unifiedExchangeAdaptor) tryInternalTransfers(dist *distribution) bool {
+	doTransfer := func(dexAvail, cexAvail map[uint32]uint64) bool {
+		u.balancesMtx.Lock()
+		defer u.balancesMtx.Unlock()
+
+		baseInv, quoteInv := dist.baseInv, dist.quoteInv
+		dexDiffs, cexDiffs := make(map[uint32]int64), make(map[uint32]int64)
+
+		complete := true
+		transferDone := false
+
+		if baseInv.toDeposit > 0 {
+			botDEXBal := u.dexBalance(u.baseID).Available
+			toDeposit := utils.Min(baseInv.toDeposit, cexAvail[u.baseID], botDEXBal)
+			complete = complete && toDeposit == baseInv.toDeposit
+			transferDone = transferDone || toDeposit > 0
+			u.baseCexBalances[u.baseID] += int64(toDeposit)
+			u.baseDexBalances[u.baseID] -= int64(toDeposit)
+			dexDiffs = map[uint32]int64{u.baseID: -int64(toDeposit)}
+			cexDiffs = map[uint32]int64{u.baseID: int64(toDeposit)}
+		}
+
+		if baseInv.toWithdraw > 0 {
+			botCEXBal := u.cexBalance(u.baseID).Available
+			toWithdraw := utils.Min(baseInv.toWithdraw, dexAvail[u.baseID], botCEXBal)
+			complete = complete && toWithdraw == baseInv.toWithdraw
+			transferDone = transferDone || toWithdraw > 0
+			u.baseCexBalances[u.baseID] -= int64(toWithdraw)
+			u.baseDexBalances[u.baseID] += int64(toWithdraw)
+			dexDiffs = map[uint32]int64{u.baseID: int64(toWithdraw)}
+			cexDiffs = map[uint32]int64{u.baseID: -int64(toWithdraw)}
+		}
+
+		if quoteInv.toDeposit > 0 {
+			botDEXBal := u.dexBalance(u.quoteID).Available
+			toDeposit := utils.Min(quoteInv.toDeposit, cexAvail[u.quoteID], botDEXBal)
+			complete = complete && toDeposit == quoteInv.toDeposit
+			transferDone = transferDone || toDeposit > 0
+			u.baseCexBalances[u.quoteID] += int64(toDeposit)
+			u.baseDexBalances[u.quoteID] -= int64(toDeposit)
+			dexDiffs[u.quoteID] = -int64(toDeposit)
+			cexDiffs[u.quoteID] = int64(toDeposit)
+		}
+
+		if quoteInv.toWithdraw > 0 {
+			botCEXBal := u.cexBalance(u.quoteID).Available
+			toWithdraw := utils.Min(quoteInv.toWithdraw, dexAvail[u.quoteID], botCEXBal)
+			complete = complete && toWithdraw == quoteInv.toWithdraw
+			transferDone = transferDone || toWithdraw > 0
+			u.baseCexBalances[u.quoteID] -= int64(toWithdraw)
+			u.baseDexBalances[u.quoteID] += int64(toWithdraw)
+			dexDiffs[u.quoteID] = int64(toWithdraw)
+			cexDiffs[u.quoteID] = -int64(toWithdraw)
+		}
+
+		if transferDone {
+			u.logBalanceAdjustments(dexDiffs, cexDiffs, "Internal transfer")
+		}
+
+		return complete
+	}
+
+	return u.internalTransfer(u.mwh, doTransfer)
+}
+
+// tryExternalTransfers attempts to perform the transfers specified in the
+// distribution by doing an actual deposit or withdrawal.
+func (u *unifiedExchangeAdaptor) tryExternalTransfers(dist *distribution, currEpoch uint64) (actionTaken bool, err error) {
 	baseInv, quoteInv := dist.baseInv, dist.quoteInv
 	if baseInv.toDeposit+baseInv.toWithdraw+quoteInv.toDeposit+quoteInv.toWithdraw == 0 {
 		return false, nil
@@ -2999,6 +3079,35 @@ func (u *unifiedExchangeAdaptor) transfer(dist *distribution, currEpoch uint64) 
 		}
 	}
 	return true, nil
+}
+
+// tryTransfers attempts to optimize the asset distribution by moving funds
+// between the DEX and the CEX. If the distribution is already optimal, no
+// transfers are made. If the distribution is not optimal, the bot will first
+// attempt to use available funds to rebalance the distribution. If this is
+// not sufficient, an actual deposit or withdrawal will be done.
+func (u *unifiedExchangeAdaptor) tryTransfers(currEpoch uint64, distribution func(bool) (*distribution, error)) (actionTaken bool, err error) {
+	dist, err := distribution(false)
+	if err != nil {
+		return false, fmt.Errorf("distribution calculation error: %w", err)
+	}
+
+	baseInv, quoteInv := dist.baseInv, dist.quoteInv
+	if baseInv.toDeposit+baseInv.toWithdraw+quoteInv.toDeposit+quoteInv.toWithdraw == 0 {
+		return false, nil
+	}
+
+	complete := u.tryInternalTransfers(dist)
+	if complete || u.autoRebalanceCfg == nil {
+		return false, nil
+	}
+
+	dist, err = distribution(true)
+	if err != nil {
+		return false, fmt.Errorf("distribution calculation error: %w", err)
+	}
+
+	return u.tryExternalTransfers(dist, currEpoch)
 }
 
 // assetInventory is an accounting of the distribution of base- or quote-asset
@@ -3477,6 +3586,7 @@ type exchangeAdaptorCfg struct {
 	log                 dex.Logger
 	eventLogDB          eventLogDB
 	botCfg              *BotConfig
+	internalTransfer    func(*MarketWithHost, doTransferFunc) bool
 }
 
 // newUnifiedExchangeAdaptor is the constructor for a unifiedExchangeAdaptor.
@@ -3528,6 +3638,7 @@ func newUnifiedExchangeAdaptor(cfg *exchangeAdaptorCfg) (*unifiedExchangeAdaptor
 		baseTraits:       baseTraits,
 		quoteTraits:      quoteTraits,
 		autoRebalanceCfg: cfg.autoRebalanceConfig,
+		internalTransfer: cfg.internalTransfer,
 
 		baseDexBalances:    baseDEXBalances,
 		baseCexBalances:    baseCEXBalances,
