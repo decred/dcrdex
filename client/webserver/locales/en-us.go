@@ -653,6 +653,7 @@ var EnUS = map[string]*intl.Translation{
 	"Transaction":                 {T: "Transaction"},
 	"Value":                       {T: "Value"},
 	"Prepaid bond redeemed":       {T: "Prepaid bond redeemed!"},
+	"Enable Account":              {T: "Enable Account"},
 	"Show trading tier info":      {T: "Show trading tier info"},
 	"Hide trading tier info":      {T: "Hide trading tier info"},
 	"Show reputation":             {T: "Show reputation"},
