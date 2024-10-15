@@ -271,6 +271,7 @@ func testDexConnection(ctx context.Context, crypter *tCrypter) (*dexConnection, 
 		},
 		notify:            func(Notification) {},
 		trades:            make(map[order.OrderID]*trackedTrade),
+		cancels:           make(map[order.OrderID]order.OrderID),
 		inFlightOrders:    make(map[uint64]*InFlightOrder),
 		epoch:             map[string]uint64{tDcrBtcMktName: 0},
 		resolvedEpoch:     map[string]uint64{tDcrBtcMktName: 0},
@@ -346,6 +347,8 @@ func (conn *TWebsocket) Connect(context.Context) (*sync.WaitGroup, error) {
 	return &sync.WaitGroup{}, conn.connectErr
 }
 
+func (conn *TWebsocket) UpdateURL(string) {}
+
 type TDB struct {
 	updateWalletErr          error
 	acct                     *db.AccountInfo
@@ -420,8 +423,12 @@ func (tdb *TDB) BondRefunded(host string, assetID uint32, bondCoinID []byte) err
 	return nil
 }
 
-func (tdb *TDB) DisableAccount(url string) error {
-	tdb.disabledHost = &url
+func (tdb *TDB) ToggleAccountStatus(host string, disable bool) error {
+	if disable {
+		tdb.disabledHost = &host
+	} else {
+		tdb.disabledHost = nil
+	}
 	return tdb.disableAccountErr
 }
 
@@ -3792,9 +3799,9 @@ func TestHandlePreimageRequest(t *testing.T) {
 		// resetCsum resets csum for further preimage request since multiple
 		// testing scenarios use the same tracker object.
 		resetCsum := func(tracker *trackedTrade) {
-			tracker.mtx.Lock()
+			tracker.csumMtx.Lock()
 			tracker.csum = nil
-			tracker.mtx.Unlock()
+			tracker.csumMtx.Unlock()
 		}
 
 		rig.dc.trades[oid] = tracker
@@ -3923,15 +3930,17 @@ func TestHandlePreimageRequest(t *testing.T) {
 			t.Fatal("no order note from preimage request handling")
 		}
 
-		tracker.mtx.RLock()
-		if !bytes.Equal(commitCSum, tracker.csum) {
+		tracker.csumMtx.RLock()
+		csum := tracker.csum
+		tracker.csumMtx.RUnlock()
+		if !bytes.Equal(commitCSum, csum) {
 			t.Fatalf(
 				"handlePreimageRequest must initialize tracker csum, exp: %s, got: %s",
 				commitCSum,
-				tracker.csum,
+				csum,
 			)
 		}
-		tracker.mtx.RUnlock()
+
 	})
 	t.Run("more than one preimage request for order (different csums)", func(t *testing.T) {
 		rig := newTestRig()
@@ -3996,15 +4005,17 @@ func TestHandlePreimageRequest(t *testing.T) {
 			t.Fatal("no msgjson.Error sent from preimage request handling")
 		}
 
-		tracker.mtx.RLock()
-		if !bytes.Equal(firstCSum, tracker.csum) {
+		tracker.csumMtx.RLock()
+		csum := tracker.csum
+		tracker.csumMtx.RUnlock()
+		if !bytes.Equal(firstCSum, csum) {
 			t.Fatalf(
 				"[handlePreimageRequest] csum was changed, exp: %s, got: %s",
 				firstCSum,
-				tracker.csum,
+				csum,
 			)
 		}
-		tracker.mtx.RUnlock()
+
 	})
 	t.Run("more than one preimage request for order (same csum)", func(t *testing.T) {
 		rig := newTestRig()
@@ -4065,15 +4076,16 @@ func TestHandlePreimageRequest(t *testing.T) {
 			t.Fatal("no order note from preimage request handling")
 		}
 
-		tracker.mtx.RLock()
-		if !bytes.Equal(csum, tracker.csum) {
+		tracker.csumMtx.RLock()
+		checkSum := tracker.csum
+		tracker.csumMtx.RUnlock()
+		if !bytes.Equal(csum, checkSum) {
 			t.Fatalf(
 				"[handlePreimageRequest] csum was changed, exp: %s, got: %s",
 				csum,
-				tracker.csum,
+				checkSum,
 			)
 		}
-		tracker.mtx.RUnlock()
 	})
 	t.Run("csum for cancel order", func(t *testing.T) {
 		rig := newTestRig()
@@ -4104,7 +4116,8 @@ func TestHandlePreimageRequest(t *testing.T) {
 				epochLen: mkt.EpochLen,
 			},
 		}
-		oid := tracker.cancel.ID()
+		oid := tracker.ID()
+		cid := tracker.cancel.ID()
 
 		// Test the new path with rig.core.sentCommits.
 		readyCommitment := func(commit order.Commitment) chan struct{} {
@@ -4119,7 +4132,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 		commitCSum := dex.Bytes{2, 3, 5, 7, 11, 13}
 		commitSig := readyCommitment(commit)
 		payload := &msgjson.PreimageRequest{
-			OrderID:        oid[:],
+			OrderID:        cid[:],
 			Commitment:     commit[:],
 			CommitChecksum: commitCSum,
 		}
@@ -4127,7 +4140,8 @@ func TestHandlePreimageRequest(t *testing.T) {
 
 		notes := rig.core.NotificationFeed()
 
-		rig.dc.trades[order.OrderID{}] = tracker
+		rig.dc.trades[oid] = tracker
+		rig.dc.registerCancelLink(cid, oid)
 		err := handlePreimageRequest(rig.core, rig.dc, reqCommit)
 		if err != nil {
 			t.Fatalf("handlePreimageRequest error: %v", err)
@@ -4146,15 +4160,17 @@ func TestHandlePreimageRequest(t *testing.T) {
 			t.Fatal("no order note from preimage request handling")
 		}
 
-		tracker.mtx.RLock()
-		if !bytes.Equal(commitCSum, tracker.cancel.csum) {
+		tracker.csumMtx.RLock()
+		cancelCsum := tracker.cancelCsum
+		tracker.csumMtx.RUnlock()
+		if !bytes.Equal(commitCSum, cancelCsum) {
 			t.Fatalf(
 				"handlePreimageRequest must initialize tracker cancel csum, exp: %s, got: %s",
 				commitCSum,
-				tracker.cancel.csum,
+				cancelCsum,
 			)
 		}
-		tracker.mtx.RUnlock()
+
 	})
 	t.Run("more than one preimage request for cancel order (different csums)", func(t *testing.T) {
 		rig := newTestRig()
@@ -4171,9 +4187,9 @@ func TestHandlePreimageRequest(t *testing.T) {
 			db:       rig.db,
 			dc:       rig.dc,
 			metaData: &db.OrderMetaData{},
+			// Simulate first preimage request by initializing csum here.
+			cancelCsum: firstCSum,
 			cancel: &trackedCancel{
-				// Simulate first preimage request by initializing csum here.
-				csum: firstCSum,
 				CancelOrder: order.CancelOrder{
 					P: order.Prefix{
 						AccountID:  rig.dc.acct.ID(),
@@ -4188,7 +4204,8 @@ func TestHandlePreimageRequest(t *testing.T) {
 				epochLen: mkt.EpochLen,
 			},
 		}
-		oid := tracker.cancel.ID()
+		oid := tracker.ID()
+		cid := tracker.cancel.ID()
 
 		// Test the new path with rig.core.sentCommits.
 		readyCommitment := func(commit order.Commitment) chan struct{} {
@@ -4203,7 +4220,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 		secondCSum := dex.Bytes{2, 3, 5, 7, 11, 14}
 		commitSig := readyCommitment(commit)
 		payload := &msgjson.PreimageRequest{
-			OrderID:        oid[:],
+			OrderID:        cid[:],
 			Commitment:     commit[:],
 			CommitChecksum: secondCSum,
 		}
@@ -4214,7 +4231,8 @@ func TestHandlePreimageRequest(t *testing.T) {
 		rig.ws.sendMsgErrChan = make(chan *msgjson.Error, 1)
 		defer func() { rig.ws.sendMsgErrChan = nil }()
 
-		rig.dc.trades[order.OrderID{}] = tracker
+		rig.dc.trades[oid] = tracker
+		rig.dc.registerCancelLink(cid, oid)
 		err := handlePreimageRequest(rig.core, rig.dc, reqCommit)
 		if err != nil {
 			t.Fatalf("handlePreimageRequest error: %v", err)
@@ -4232,15 +4250,16 @@ func TestHandlePreimageRequest(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatal("no msgjson.Error sent from preimage request handling")
 		}
-		tracker.mtx.RLock()
-		if !bytes.Equal(firstCSum, tracker.cancel.csum) {
+		tracker.csumMtx.RLock()
+		cancelCsum := tracker.cancelCsum
+		tracker.csumMtx.RUnlock()
+		if !bytes.Equal(firstCSum, cancelCsum) {
 			t.Fatalf(
 				"[handlePreimageRequest] cancel csum was changed, exp: %s, got: %s",
 				firstCSum,
-				tracker.cancel.csum,
+				cancelCsum,
 			)
 		}
-		tracker.mtx.RUnlock()
 	})
 	t.Run("more than one preimage request for cancel order (same csum)", func(t *testing.T) {
 		rig := newTestRig()
@@ -4257,9 +4276,9 @@ func TestHandlePreimageRequest(t *testing.T) {
 			db:       rig.db,
 			dc:       rig.dc,
 			metaData: &db.OrderMetaData{},
+			// Simulate first preimage request by initializing csum here.
+			cancelCsum: csum,
 			cancel: &trackedCancel{
-				// Simulate first preimage request by initializing csum here.
-				csum: csum,
 				CancelOrder: order.CancelOrder{
 					P: order.Prefix{
 						AccountID:  rig.dc.acct.ID(),
@@ -4274,7 +4293,8 @@ func TestHandlePreimageRequest(t *testing.T) {
 				epochLen: mkt.EpochLen,
 			},
 		}
-		oid := tracker.cancel.ID()
+		oid := tracker.ID()
+		cid := tracker.cancel.ID()
 
 		// Test the new path with rig.core.sentCommits.
 		readyCommitment := func(commit order.Commitment) chan struct{} {
@@ -4288,7 +4308,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 		commit := preImg.Commit()
 		commitSig := readyCommitment(commit)
 		payload := &msgjson.PreimageRequest{
-			OrderID:        oid[:],
+			OrderID:        cid[:],
 			Commitment:     commit[:],
 			CommitChecksum: csum,
 		}
@@ -4296,7 +4316,8 @@ func TestHandlePreimageRequest(t *testing.T) {
 
 		notes := rig.core.NotificationFeed()
 
-		rig.dc.trades[order.OrderID{}] = tracker
+		rig.dc.trades[oid] = tracker
+		rig.dc.registerCancelLink(cid, oid)
 		err := handlePreimageRequest(rig.core, rig.dc, reqCommit)
 		if err != nil {
 			t.Fatalf("handlePreimageRequest error: %v", err)
@@ -4315,15 +4336,16 @@ func TestHandlePreimageRequest(t *testing.T) {
 			t.Fatal("no order note from preimage request handling")
 		}
 
-		tracker.mtx.RLock()
-		if !bytes.Equal(csum, tracker.cancel.csum) {
+		tracker.csumMtx.RLock()
+		cancelCsum := tracker.cancelCsum
+		tracker.csumMtx.RUnlock()
+		if !bytes.Equal(csum, cancelCsum) {
 			t.Fatalf(
 				"[handlePreimageRequest] cancel csum was changed, exp: %s, got: %s",
 				csum,
-				tracker.cancel.csum,
+				cancelCsum,
 			)
 		}
-		tracker.mtx.RUnlock()
 	})
 }
 
@@ -4391,6 +4413,7 @@ func TestHandleRevokeOrderMsg(t *testing.T) {
 	tracker.cancel = &trackedCancel{CancelOrder: *co}
 	coid := co.ID()
 	rig.dc.trades[oid] = tracker
+	rig.dc.registerCancelLink(coid, oid)
 
 	orderNotes, feedDone := orderNoteFeed(tCore)
 	defer feedDone()
@@ -5016,6 +5039,7 @@ func TestTradeTracking(t *testing.T) {
 	}
 	tracker.cancel = &trackedCancel{CancelOrder: *co, epochLen: mkt.EpochLen}
 	coid := co.ID()
+	rig.dc.registerCancelLink(coid, tracker.ID())
 	m1 := &msgjson.Match{
 		OrderID:  loid[:],
 		MatchID:  mid[:],
@@ -7057,6 +7081,7 @@ func TestHandleNomatch(t *testing.T) {
 	standingTracker.cancel = &trackedCancel{
 		CancelOrder: *cancelOrder,
 	}
+	dc.registerCancelLink(cancelOID, standingOID)
 
 	// 4. Market order.
 	loWillBeMarket, dbOrder, preImgL, _ := makeLimitOrder(dc, true, dcrBtcLotSize*100, dcrBtcRateStep)
@@ -7071,7 +7096,7 @@ func TestHandleNomatch(t *testing.T) {
 	dc.trades[marketOID] = marketTracker
 
 	runNomatch := func(tag string, oid order.OrderID) {
-		tracker, _, _ := dc.findOrder(oid)
+		tracker, _ := dc.findOrder(oid)
 		if tracker == nil {
 			t.Fatalf("%s: order ID not found", tag)
 		}
@@ -7084,7 +7109,7 @@ func TestHandleNomatch(t *testing.T) {
 	}
 
 	checkTradeStatus := func(tag string, oid order.OrderID, expStatus order.OrderStatus) {
-		tracker, _, _ := dc.findOrder(oid)
+		tracker, _ := dc.findOrder(oid)
 		if tracker.metaData.Status != expStatus {
 			t.Fatalf("%s: wrong status. expected %s, got %s", tag, expStatus, tracker.metaData.Status)
 		}

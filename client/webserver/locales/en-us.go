@@ -51,7 +51,7 @@ var EnUS = map[string]*intl.Translation{
 	"Authorize Export":               {T: "Authorize Export"},
 	"export_app_pw_msg":              {T: "Enter your app password to confirm account export for"},
 	"Disable Account":                {T: "Disable Account"},
-	"disable_dex_server":             {T: "This DEX server may be re-enabled at any time in the future by adding it again."},
+	"disable_dex_server":             {T: "This DEX server may be re-enabled at any time in the future on the settings page.", Version: 1},
 	"Authorize Import":               {T: "Authorize Import"},
 	"app_pw_import_msg":              {T: "Enter your app password to confirm account import"},
 	"Account File":                   {T: "Account File"},

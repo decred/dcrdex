@@ -173,6 +173,10 @@ type dexConnection struct {
 	// processed by a dex server.
 	inFlightOrders map[uint64]*InFlightOrder
 
+	// A map linking cancel order IDs to trade order IDs.
+	cancelsMtx sync.RWMutex
+	cancels    map[order.OrderID]order.OrderID
+
 	blindCancelsMtx sync.Mutex
 	blindCancels    map[order.OrderID]order.Preimage
 
@@ -251,6 +255,25 @@ func (dc *dexConnection) bondAssets() (map[uint32]*BondAsset, uint64) {
 		bondAssets[assetID] = &coreBondAsset
 	}
 	return bondAssets, cfg.BondExpiry
+}
+
+func (dc *dexConnection) registerCancelLink(cid, oid order.OrderID) {
+	dc.cancelsMtx.Lock()
+	dc.cancels[cid] = oid
+	dc.cancelsMtx.Unlock()
+}
+
+func (dc *dexConnection) deleteCancelLink(cid order.OrderID) {
+	dc.cancelsMtx.Lock()
+	delete(dc.cancels, cid)
+	dc.cancelsMtx.Unlock()
+}
+
+func (dc *dexConnection) cancelTradeID(cid order.OrderID) (order.OrderID, bool) {
+	dc.cancelsMtx.RLock()
+	defer dc.cancelsMtx.RUnlock()
+	oid, found := dc.cancels[cid]
+	return oid, found
 }
 
 // marketConfig is the market's configuration, as returned by the server in the
@@ -455,6 +478,7 @@ func (c *Core) exchangeInfo(dc *dexConnection) *Exchange {
 			Host:             dc.acct.host,
 			AcctID:           acctID,
 			ConnectionStatus: dc.status(),
+			Disabled:         dc.acct.isDisabled(),
 		}
 	}
 
@@ -493,6 +517,7 @@ func (c *Core) exchangeInfo(dc *dexConnection) *Exchange {
 		Auth:             acctBondState.ExchangeAuth,
 		MaxScore:         cfg.MaxScore,
 		PenaltyThreshold: cfg.PenaltyThreshold,
+		Disabled:         dc.acct.isDisabled(),
 	}
 }
 
@@ -577,17 +602,19 @@ func (dc *dexConnection) activeOrders() ([]*Order, []*InFlightOrder) {
 
 // findOrder returns the tracker and preimage for an order ID, and a boolean
 // indicating whether this is a cancel order.
-func (dc *dexConnection) findOrder(oid order.OrderID) (tracker *trackedTrade, preImg order.Preimage, isCancel bool) {
+func (dc *dexConnection) findOrder(oid order.OrderID) (tracker *trackedTrade, isCancel bool) {
 	dc.tradeMtx.RLock()
 	defer dc.tradeMtx.RUnlock()
 	// Try to find the order as a trade.
 	if tracker, found := dc.trades[oid]; found {
-		return tracker, tracker.preImg, false
+		return tracker, false
 	}
-	// Search the cancel order IDs.
-	for _, tracker := range dc.trades {
-		if tracker.cancel != nil && tracker.cancel.ID() == oid {
-			return tracker, tracker.cancel.preImg, true
+
+	if tid, found := dc.cancelTradeID(oid); found {
+		if tracker, found := dc.trades[tid]; found {
+			return tracker, true
+		} else {
+			dc.log.Errorf("Did not find trade for cancel order ID %s", oid)
 		}
 	}
 	return
@@ -645,7 +672,7 @@ func (c *Core) sendCancelOrder(dc *dexConnection, oid order.OrderID, base, quote
 // tryCancel will look for an order with the specified order ID, and attempt to
 // cancel the order. It is not an error if the order is not found.
 func (c *Core) tryCancel(dc *dexConnection, oid order.OrderID) (found bool, err error) {
-	tracker, _, _ := dc.findOrder(oid)
+	tracker, _ := dc.findOrder(oid)
 	if tracker == nil {
 		return // false, nil
 	}
@@ -771,7 +798,7 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs boo
 	for _, msgMatch := range msgMatches {
 		var oid order.OrderID
 		copy(oid[:], msgMatch.OrderID)
-		tracker, _, isCancel := dc.findOrder(oid)
+		tracker, isCancel := dc.findOrder(oid)
 		if tracker == nil {
 			dc.blindCancelsMtx.Lock()
 			_, found := dc.blindCancels[oid]
@@ -4953,7 +4980,7 @@ func (c *Core) Order(oidB dex.Bytes) (*Order, error) {
 	}
 	// See if it's an active order first.
 	for _, dc := range c.dexConnections() {
-		tracker, _, _ := dc.findOrder(oid)
+		tracker, _ := dc.findOrder(oid)
 		if tracker != nil {
 			return tracker.coreOrder(), nil
 		}
@@ -5126,70 +5153,80 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) {
 	var wg sync.WaitGroup
 	conns := c.dexConnections()
 	for _, dc := range conns {
-		if dc.acct.isViewOnly() {
-			continue // don't attempt authDEX for view-only conn
-		}
-
-		// Unlock before checking auth and continuing, because if the user
-		// logged out and didn't shut down, the account is still authed, but
-		// locked, and needs unlocked.
-		err := dc.acct.unlock(crypter)
-		if err != nil {
-			subject, details := c.formatDetails(TopicAccountUnlockError, dc.acct.host, err)
-			c.notify(newFeePaymentNote(TopicAccountUnlockError, subject, details, db.ErrorLevel, dc.acct.host)) // newDEXAuthNote?
-			continue
-		}
-
-		// Unlock the bond wallet if a target tier is set.
-		if bondAssetID, targetTier, maxBondedAmt := dc.bondOpts(); targetTier > 0 {
-			c.log.Debugf("Preparing %s wallet to maintain target tier of %d for %v, bonding limit %v",
-				unbip(bondAssetID), targetTier, dc.acct.host, maxBondedAmt)
-			wallet, exists := c.wallet(bondAssetID)
-			if !exists || !wallet.connected() { // connectWallets already run, just fail
-				subject, details := c.formatDetails(TopicBondWalletNotConnected, unbip(bondAssetID))
-				var w *WalletState
-				if exists {
-					w = wallet.state()
-				}
-				c.notify(newWalletConfigNote(TopicBondWalletNotConnected, subject, details, db.ErrorLevel, w))
-			} else if !wallet.unlocked() {
-				err = wallet.Unlock(crypter)
-				if err != nil {
-					subject, details := c.formatDetails(TopicWalletUnlockError, dc.acct.host, err)
-					c.notify(newFeePaymentNote(TopicWalletUnlockError, subject, details, db.ErrorLevel, dc.acct.host))
-				}
-			}
-		}
-
-		if dc.acct.authed() { // should not be possible with newly idempotent login, but there's AccountImport...
-			continue // authDEX already done
-		}
-
-		// Pending bonds will be handled by authDEX. Expired bonds will be
-		// refunded by rotateBonds.
-
-		// If the connection is down, authDEX will fail on Send.
-		if dc.IsDown() {
-			c.log.Warnf("Connection to %v not available for authorization. "+
-				"It will automatically authorize when it connects.", dc.acct.host)
-			subject, details := c.formatDetails(TopicDEXDisconnected, dc.acct.host)
-			c.notify(newConnEventNote(TopicDEXDisconnected, subject, dc.acct.host, comms.Disconnected, details, db.ErrorLevel))
-			continue
-		}
-
 		wg.Add(1)
 		go func(dc *dexConnection) {
 			defer wg.Done()
-			err := c.authDEX(dc)
-			if err != nil {
-				subject, details := c.formatDetails(TopicDexAuthError, dc.acct.host, err)
-				c.notify(newDEXAuthNote(TopicDexAuthError, subject, dc.acct.host, false, details, db.ErrorLevel))
-				return
-			}
+			c.initializeDEXConnection(dc, crypter)
 		}(dc)
 	}
 
 	wg.Wait()
+}
+
+// initializeDEXConnection connects to the DEX server in the conns map and
+// authenticates the connection.
+func (c *Core) initializeDEXConnection(dc *dexConnection, crypter encrypt.Crypter) {
+	if dc.acct.isViewOnly() {
+		return // don't attempt authDEX for view-only conn
+	}
+
+	// Unlock before checking auth and continuing, because if the user
+	// logged out and didn't shut down, the account is still authed, but
+	// locked, and needs unlocked.
+	err := dc.acct.unlock(crypter)
+	if err != nil {
+		subject, details := c.formatDetails(TopicAccountUnlockError, dc.acct.host, err)
+		c.notify(newFeePaymentNote(TopicAccountUnlockError, subject, details, db.ErrorLevel, dc.acct.host)) // newDEXAuthNote?
+		return
+	}
+
+	if dc.acct.isDisabled() {
+		return // For disabled account, we only want dc.acct.unlock above to initialize the account ID.
+	}
+
+	// Unlock the bond wallet if a target tier is set.
+	if bondAssetID, targetTier, maxBondedAmt := dc.bondOpts(); targetTier > 0 {
+		c.log.Debugf("Preparing %s wallet to maintain target tier of %d for %v, bonding limit %v",
+			unbip(bondAssetID), targetTier, dc.acct.host, maxBondedAmt)
+		wallet, exists := c.wallet(bondAssetID)
+		if !exists || !wallet.connected() { // connectWallets already run, just fail
+			subject, details := c.formatDetails(TopicBondWalletNotConnected, unbip(bondAssetID))
+			var w *WalletState
+			if exists {
+				w = wallet.state()
+			}
+			c.notify(newWalletConfigNote(TopicBondWalletNotConnected, subject, details, db.ErrorLevel, w))
+		} else if !wallet.unlocked() {
+			err = wallet.Unlock(crypter)
+			if err != nil {
+				subject, details := c.formatDetails(TopicWalletUnlockError, dc.acct.host, err)
+				c.notify(newFeePaymentNote(TopicWalletUnlockError, subject, details, db.ErrorLevel, dc.acct.host))
+			}
+		}
+	}
+
+	if dc.acct.authed() { // should not be possible with newly idempotent login, but there's AccountImport...
+		return // authDEX already done
+	}
+
+	// Pending bonds will be handled by authDEX. Expired bonds will be
+	// refunded by rotateBonds.
+
+	// If the connection is down, authDEX will fail on Send.
+	if dc.IsDown() {
+		c.log.Warnf("Connection to %v not available for authorization. "+
+			"It will automatically authorize when it connects.", dc.acct.host)
+		subject, details := c.formatDetails(TopicDEXDisconnected, dc.acct.host)
+		c.notify(newConnEventNote(TopicDEXDisconnected, subject, dc.acct.host, comms.Disconnected, details, db.ErrorLevel))
+		return
+	}
+
+	// Authenticate dex connection
+	err = c.authDEX(dc)
+	if err != nil {
+		subject, details := c.formatDetails(TopicDexAuthError, dc.acct.host, err)
+		c.notify(newDEXAuthNote(TopicDexAuthError, subject, dc.acct.host, false, details, db.ErrorLevel))
+	}
 }
 
 // resolveActiveTrades loads order and match data from the database. Only active
@@ -7118,7 +7155,7 @@ func (c *Core) initialize() error {
 		wg.Add(1)
 		go func(acct *db.AccountInfo) {
 			defer wg.Done()
-			if c.connectAccount(acct) {
+			if _, connected := c.connectAccount(acct); connected {
 				atomic.AddUint32(&liveConns, 1)
 			}
 		}(acct)
@@ -7172,8 +7209,9 @@ func (c *Core) initialize() error {
 // connectAccount makes a connection to the DEX for the given account. If a
 // non-nil dexConnection is returned from newDEXConnection, it was inserted into
 // the conns map even if the connection attempt failed (connected == false), and
-// the connect retry / keepalive loop is active.
-func (c *Core) connectAccount(acct *db.AccountInfo) (connected bool) {
+// the connect retry / keepalive loop is active. The intial connection attempt
+// or keepalive loop will not run if acct is disabled.
+func (c *Core) connectAccount(acct *db.AccountInfo) (dc *dexConnection, connected bool) {
 	host, err := addrHost(acct.Host)
 	if err != nil {
 		c.log.Errorf("skipping loading of %s due to address parse error: %v", host, err)
@@ -7182,7 +7220,7 @@ func (c *Core) connectAccount(acct *db.AccountInfo) (connected bool) {
 
 	if c.cfg.TheOneHost != "" && c.cfg.TheOneHost != host {
 		c.log.Infof("Running with --onehost = %q.", c.cfg.TheOneHost)
-		return false
+		return
 	}
 
 	var connectFlag connectDEXFlag
@@ -7190,7 +7228,7 @@ func (c *Core) connectAccount(acct *db.AccountInfo) (connected bool) {
 		connectFlag |= connectDEXFlagViewOnly
 	}
 
-	dc, err := c.newDEXConnection(acct, connectFlag)
+	dc, err = c.newDEXConnection(acct, connectFlag)
 	if err != nil {
 		c.log.Errorf("Unable to prepare DEX %s: %v", host, err)
 		return
@@ -7203,7 +7241,7 @@ func (c *Core) connectAccount(acct *db.AccountInfo) (connected bool) {
 
 	// Connected or not, the dexConnection goes in the conns map now.
 	c.addDexConnection(dc)
-	return err == nil
+	return dc, err == nil
 }
 
 func (c *Core) dbOrders(host string) ([]*db.MetaOrder, error) {
@@ -8104,6 +8142,7 @@ func (c *Core) newDEXConnection(acctInfo *db.AccountInfo, flag connectDEXFlag) (
 		ticker:            newDexTicker(defaultTickInterval), // updated when server config obtained
 		books:             make(map[string]*bookie),
 		trades:            make(map[order.OrderID]*trackedTrade),
+		cancels:           make(map[order.OrderID]order.OrderID),
 		inFlightOrders:    make(map[uint64]*InFlightOrder),
 		blindCancels:      make(map[order.OrderID]order.Preimage),
 		apiVer:            -1,
@@ -8167,7 +8206,7 @@ func (c *Core) startDexConnection(acctInfo *db.AccountInfo, dc *dexConnection) e
 	// the dexConnection's ConnectionMaster is shut down. This goroutine should
 	// be started as long as the reconnect loop is running. It only returns when
 	// the wsConn is stopped.
-	listen := dc.broadcastingConnect()
+	listen := dc.broadcastingConnect() && !dc.acct.isDisabled()
 	if listen {
 		c.wg.Add(1)
 		go c.listen(dc)
@@ -8212,6 +8251,12 @@ func (c *Core) startDexConnection(acctInfo *db.AccountInfo, dc *dexConnection) e
 
 		// Now in authDEX, we must reconcile the above categorized bonds
 		// according to ConnectResult.Bonds slice.
+	}
+
+	if dc.acct.isDisabled() {
+		// Sort out the bonds with current time to indicate refundable bonds.
+		categorizeBonds(time.Now().Unix())
+		return nil // nothing else to do
 	}
 
 	err := dc.connMaster.Connect(c.ctx)
@@ -8509,7 +8554,7 @@ func handleRevokeOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	var oid order.OrderID
 	copy(oid[:], revocation.OrderID)
 
-	tracker, _, isCancel := dc.findOrder(oid)
+	tracker, isCancel := dc.findOrder(oid)
 	if tracker == nil {
 		return fmt.Errorf("no order found with id %s", oid.String())
 	}
@@ -8551,7 +8596,7 @@ func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	var oid order.OrderID
 	copy(oid[:], revocation.OrderID)
 
-	tracker, _, _ := dc.findOrder(oid)
+	tracker, _ := dc.findOrder(oid)
 	if tracker == nil {
 		return fmt.Errorf("no order found with id %s (not an error if you've completed your side of the swap)", oid.String())
 	}
@@ -8916,7 +8961,7 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	}
 
 	if len(req.Commitment) != order.CommitmentSize {
-		return fmt.Errorf("received preimage request for %v with no corresponding order submission response.", oid)
+		return fmt.Errorf("received preimage request for %s with no corresponding order submission response", oid)
 	}
 
 	// See if we recognize that commitment, and if we do, just wait for the
@@ -8950,7 +8995,8 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 }
 
 func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.OrderID, commitChecksum dex.Bytes) error {
-	tracker, preImg, isCancel := dc.findOrder(oid)
+	tracker, isCancel := dc.findOrder(oid)
+	var preImg order.Preimage
 	if tracker == nil {
 		var found bool
 		dc.blindCancelsMtx.Lock()
@@ -8962,7 +9008,8 @@ func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.
 	} else {
 		// Record the csum if this preimage request is novel, and deny it if
 		// this is a duplicate request with an altered csum.
-		if !acceptCsum(tracker, isCancel, commitChecksum) {
+		var accept bool
+		if accept, preImg = acceptCsum(tracker, isCancel, commitChecksum); !accept {
 			csumErr := errors.New("invalid csum in duplicate preimage request")
 			resp, err := msgjson.NewResponse(reqID, nil,
 				msgjson.NewError(msgjson.InvalidRequestError, "%v", csumErr))
@@ -9005,26 +9052,25 @@ func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.
 // the server may have used the knowledge of this preimage we are sending them
 // now to alter the epoch shuffle. The return value is false if a previous
 // checksum has been recorded that differs from the provided one.
-func acceptCsum(tracker *trackedTrade, isCancel bool, commitChecksum dex.Bytes) bool {
+func acceptCsum(tracker *trackedTrade, isCancel bool, commitChecksum dex.Bytes) (bool, order.Preimage) {
 	// Do not allow csum to be changed once it has been committed to
 	// (initialized to something other than `nil`) because it is probably a
 	// malicious behavior by the server.
-	tracker.mtx.Lock()
-	defer tracker.mtx.Unlock()
-
+	tracker.csumMtx.Lock()
+	defer tracker.csumMtx.Unlock()
 	if isCancel {
-		if tracker.cancel.csum == nil {
-			tracker.cancel.csum = commitChecksum
-			return true
+		if tracker.cancelCsum == nil {
+			tracker.cancelCsum = commitChecksum
+			return true, tracker.cancelPreimg
 		}
-		return bytes.Equal(commitChecksum, tracker.cancel.csum)
+		return bytes.Equal(commitChecksum, tracker.cancelCsum), tracker.cancelPreimg
 	}
 	if tracker.csum == nil {
 		tracker.csum = commitChecksum
-		return true
+		return true, tracker.preImg
 	}
 
-	return bytes.Equal(commitChecksum, tracker.csum)
+	return bytes.Equal(commitChecksum, tracker.csum), tracker.preImg
 }
 
 // handleMatchRoute processes the DEX-originating match route request,
@@ -9103,7 +9149,7 @@ func handleNoMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error 
 	var oid order.OrderID
 	copy(oid[:], nomatchMsg.OrderID)
 
-	tracker, _, _ := dc.findOrder(oid)
+	tracker, _ := dc.findOrder(oid)
 	if tracker == nil {
 		dc.blindCancelsMtx.Lock()
 		_, found := dc.blindCancels[oid]
@@ -9177,7 +9223,7 @@ func handleAuditRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	var oid order.OrderID
 	copy(oid[:], audit.OrderID)
 
-	tracker, _, _ := dc.findOrder(oid)
+	tracker, _ := dc.findOrder(oid)
 	if tracker == nil {
 		return fmt.Errorf("audit request received for unknown order: %s", string(msg.Payload))
 	}
@@ -9202,7 +9248,7 @@ func handleRedemptionRoute(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	var oid order.OrderID
 	copy(oid[:], redemption.OrderID)
 
-	tracker, _, isCancel := dc.findOrder(oid)
+	tracker, isCancel := dc.findOrder(oid)
 	if tracker != nil {
 		if isCancel {
 			return fmt.Errorf("redemption request received for cancel order %v, match %v (you ok server?)",
@@ -10253,7 +10299,7 @@ func (c *Core) RemoveWalletPeer(assetID uint32, address string) error {
 // id. An error is returned if it cannot be found.
 func (c *Core) findActiveOrder(oid order.OrderID) (*trackedTrade, error) {
 	for _, dc := range c.dexConnections() {
-		tracker, _, _ := dc.findOrder(oid)
+		tracker, _ := dc.findOrder(oid)
 		if tracker != nil {
 			return tracker, nil
 		}
@@ -10640,7 +10686,7 @@ func (c *Core) handleRetryRedemptionAction(actionB []byte) error {
 	copy(oid[:], req.OrderID)
 	var tracker *trackedTrade
 	for _, dc := range c.dexConnections() {
-		tracker, _, _ = dc.findOrder(oid)
+		tracker, _ = dc.findOrder(oid)
 		if tracker != nil {
 			break
 		}
@@ -10738,6 +10784,15 @@ func (c *Core) checkEpochResolution(host string, mktID string) {
 	}
 	currentEpoch := dc.marketEpoch(mktID, time.Now())
 	lastEpoch := currentEpoch - 1
+
+	// Short path if we're already resolved.
+	dc.epochMtx.RLock()
+	resolvedEpoch := dc.resolvedEpoch[mktID]
+	dc.epochMtx.RUnlock()
+	if lastEpoch == resolvedEpoch {
+		return
+	}
+
 	ts, inFlights := dc.marketTrades(mktID)
 	for _, ord := range inFlights {
 		if ord.Epoch == lastEpoch {
@@ -10745,18 +10800,23 @@ func (c *Core) checkEpochResolution(host string, mktID string) {
 		}
 	}
 	for _, t := range ts {
+		// Is this order from the last epoch and still not booked or executed?
 		if t.epochIdx() == lastEpoch && t.status() == order.OrderStatusEpoch {
 			return
 		}
-		if t.cancel != nil && t.cancelEpochIdx() == lastEpoch {
-			t.mtx.RLock()
-			matched := t.cancel.matches.taker != nil
-			t.mtx.RUnlock()
-			if !matched {
-				return
-			}
+		// Does this order have an in-flight cancel order that is not yet
+		// resolved?
+		t.mtx.RLock()
+		unresolvedCancel := t.cancel != nil && t.cancelEpochIdx() == lastEpoch && t.cancel.matches.taker == nil
+		t.mtx.RUnlock()
+		if unresolvedCancel {
+			return
 		}
 	}
+
+	// We don't have any unresolved orders or cancel orders from the last epoch.
+	// Just make sure that not other thread has resolved the epoch and then send
+	// the notification.
 	dc.epochMtx.Lock()
 	sendUpdate := lastEpoch > dc.resolvedEpoch[mktID]
 	dc.resolvedEpoch[mktID] = lastEpoch
