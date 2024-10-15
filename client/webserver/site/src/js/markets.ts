@@ -290,14 +290,19 @@ export default class MarketsPage extends BasePage {
     bind(page.approveBaseBttn, 'click', () => { this.showTokenApprovalForm(true) })
     bind(page.approveQuoteBttn, 'click', () => { this.showTokenApprovalForm(false) })
 
-    bind(page.showTradingTier, 'click', () => {
-      Doc.hide(page.showTradingTier)
-      Doc.show(page.tradingLimits)
-    })
-    bind(page.showTradingReputation, 'click', () => {
-      Doc.hide(page.showTradingReputation)
-      Doc.show(page.reputationMeter)
-    })
+    const toggleTradingTier = (show: boolean) => {
+      Doc.setVis(!show, page.showTradingTier)
+      Doc.setVis(show, page.tradingLimits, page.hideTradingTier)
+    }
+    bind(page.showTradingTier, 'click', () => { toggleTradingTier(true) })
+    bind(page.hideTradingTier, 'click', () => { toggleTradingTier(false) })
+
+    const toggleTradingReputation = (show: boolean) => {
+      Doc.setVis(!show, page.showTradingReputation)
+      Doc.setVis(show, page.reputationMeter, page.hideTradingReputation)
+    }
+    bind(page.showTradingReputation, 'click', () => { toggleTradingReputation(true) })
+    bind(page.hideTradingReputation, 'click', () => { toggleTradingReputation(false) })
 
     // Buttons to set order type and side.
     bind(page.buyBttn, 'click', () => { this.setBuy() })
