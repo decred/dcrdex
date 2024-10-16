@@ -1,3 +1,5 @@
+<a id="top"/>
+
 # Test App Server
 
 The client's GUI app can connect to a test app server. This allows testing of
@@ -14,3 +16,8 @@ go test -tags live -timeout 60m
 ```
 
 In your browser, navigate to `http://localhost:54321`.
+
+
+---
+
+[⤴ Back to Top](#top)

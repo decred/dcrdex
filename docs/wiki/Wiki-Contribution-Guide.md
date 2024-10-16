@@ -1,4 +1,5 @@
-# How to contribute changes to the wiki
+<a id="top"/>
+
 
 1. Fork the dcrdex repo.
 
@@ -7,3 +8,7 @@
 3. Submit a PR.
 
 Your changes will be reviewed. Updates may be requested before merging.
+
+---
+
+[⤴ Back to Top](#top)
