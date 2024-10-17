@@ -9,9 +9,9 @@ set -o pipefail;
 export GOWORK=off
 
 # For release set metadata to "release".
-VER="1.0.0"
+VER="1.0.1"
 META="release"
-BUILD_VER="1.0.0" # increment for every build.
+BUILD_VER="1.0.1" # increment for every build.
 OS_FULL_VERSION="$(sw_vers | sed -n 2p | cut -d : -f 2 | tr -d '[:space:]' | cut -c1-)"
 OS_MAJOR_VERSION="$(echo $OS_FULL_VERSION | cut -d . -f 1)"
 OS_MINOR_VERSION="$(echo $OS_FULL_VERSION | cut -d . -f 2)"

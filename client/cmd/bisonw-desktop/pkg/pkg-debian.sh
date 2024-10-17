@@ -6,7 +6,7 @@
 set -ex
 
 APP="bisonw"
-VER="1.0.0"
+VER="1.0.1"
 META="release"
 REV="0"
 ARCH="amd64"
