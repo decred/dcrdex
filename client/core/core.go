@@ -1460,8 +1460,11 @@ type Config struct {
 	// for running core in extension mode, which gives the caller options for
 	// e.g. limiting the ability to configure wallets.
 	ExtensionModeFile string
-
+	// TheOneHost will run core with only the specified server.
 	TheOneHost string
+	// PruneArchive will prune the order archive to the specified number of
+	// orders.
+	PruneArchive uint64
 }
 
 // locale is data associated with the currently selected language.
@@ -1544,6 +1547,7 @@ func New(cfg *Config) (*Core, error) {
 	}
 	dbOpts := bolt.Opts{
 		BackupOnShutdown: !cfg.NoAutoDBBackup,
+		PruneArchive:     cfg.PruneArchive,
 	}
 	boltDB, err := bolt.NewDB(cfg.DBPath, cfg.Logger.SubLogger("DB"), dbOpts)
 	if err != nil {

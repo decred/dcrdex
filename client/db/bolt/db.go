@@ -137,6 +137,7 @@ var (
 // Opts is a set of options for the DB.
 type Opts struct {
 	BackupOnShutdown bool // default is true
+	PruneArchive     uint64
 }
 
 var defaultOpts = Opts{
@@ -215,6 +216,11 @@ func NewDB(dbPath string, logger dex.Logger, opts ...Opts) (dexdb.DB, error) {
 	err = bdb.upgradeDB()
 	if err != nil {
 		return nil, err
+	}
+
+	if bdb.opts.PruneArchive > 0 {
+		bdb.log.Info("Pruning the order archive")
+		bdb.pruneArchivedOrders(bdb.opts.PruneArchive)
 	}
 
 	bdb.log.Infof("Started database (version = %d, file = %s)", DBVersion, dbPath)
@@ -404,6 +410,131 @@ func (db *BoltDB) SetPrimaryCredentials(creds *dexdb.PrimaryCredentials) error {
 
 	return db.Update(func(tx *bbolt.Tx) error {
 		return db.setCreds(tx, creds)
+	})
+}
+
+func (db *BoltDB) pruneArchivedOrders(prunedSize uint64) error {
+
+	return db.Update(func(tx *bbolt.Tx) error {
+		archivedOB := tx.Bucket(archivedOrdersBucket)
+		if archivedOB == nil {
+			return fmt.Errorf("failed to open %s bucket", string(archivedOrdersBucket))
+		}
+
+		nOrds := uint64(archivedOB.Stats().BucketN - 1 /* BucketN includes top bucket */)
+		if nOrds <= prunedSize {
+			return nil
+		}
+
+		// We won't delete any orders with active matches.
+		activeMatches := tx.Bucket(activeMatchesBucket)
+		if activeMatches == nil {
+			return fmt.Errorf("failed to open %s bucket", string(activeMatchesBucket))
+		}
+		oidsWithActiveMatches := make(map[order.OrderID]struct{}, 0)
+		if err := activeMatches.ForEach(func(k, _ []byte) error {
+			mBkt := activeMatches.Bucket(k)
+			if mBkt == nil {
+				return fmt.Errorf("error getting match bucket %x", k)
+			}
+			var oid order.OrderID
+			copy(oid[:], mBkt.Get(orderIDKey))
+			oidsWithActiveMatches[oid] = struct{}{}
+			return nil
+		}); err != nil {
+			return fmt.Errorf("error building active match order ID index: %w", err)
+		}
+
+		toClear := int(nOrds - prunedSize)
+
+		type orderStamp struct {
+			oid   []byte
+			stamp uint64
+		}
+		deletes := make([]*orderStamp, 0, toClear)
+		sortDeletes := func() {
+			sort.Slice(deletes, func(i, j int) bool {
+				return deletes[i].stamp < deletes[j].stamp
+			})
+		}
+		var sortedAtCapacity bool
+		if err := archivedOB.ForEach(func(oidB, v []byte) error {
+			var oid order.OrderID
+			copy(oid[:], oidB)
+			if _, found := oidsWithActiveMatches[oid]; found {
+				return nil
+			}
+			oBkt := archivedOB.Bucket(oidB)
+			if oBkt == nil {
+				return fmt.Errorf("no order bucket iterated order %x", oidB)
+			}
+			stampB := oBkt.Get(updateTimeKey)
+			if stampB == nil {
+				// Highly improbable.
+				stampB = make([]byte, 8)
+			}
+			stamp := intCoder.Uint64(stampB)
+			if len(deletes) < toClear {
+				deletes = append(deletes, &orderStamp{
+					stamp: stamp,
+					oid:   oidB,
+				})
+				return nil
+			}
+			if !sortedAtCapacity {
+				// Make sure the last element is the newest one once we hit
+				// capacity.
+				sortDeletes()
+				sortedAtCapacity = true
+			}
+			if stamp > deletes[len(deletes)-1].stamp {
+				return nil
+			}
+			deletes[len(deletes)-1] = &orderStamp{
+				stamp: stamp,
+				oid:   oidB,
+			}
+			sortDeletes()
+			return nil
+		}); err != nil {
+			return fmt.Errorf("archive iteration error: %v", err)
+		}
+
+		deletedOrders := make(map[order.OrderID]struct{})
+		for _, del := range deletes {
+			var oid order.OrderID
+			copy(oid[:], del.oid)
+			deletedOrders[oid] = struct{}{}
+			if err := archivedOB.DeleteBucket(del.oid); err != nil {
+				return fmt.Errorf("error deleting archived order %q: %v", del.oid, err)
+			}
+		}
+
+		matchesToDelete := make([][]byte, 0, prunedSize /* just avoid some allocs if we can */)
+		archivedMatches := tx.Bucket(archivedMatchesBucket)
+		if archivedMatches == nil {
+			return errors.New("no archived match bucket")
+		}
+		if err := archivedMatches.ForEach(func(k, _ []byte) error {
+			matchBkt := archivedMatches.Bucket(k)
+			if matchBkt == nil {
+				return fmt.Errorf("no bucket found for %x during iteration", k)
+			}
+			var oid order.OrderID
+			copy(oid[:], matchBkt.Get(orderIDKey))
+			if _, found := deletedOrders[oid]; found {
+				matchesToDelete = append(matchesToDelete, k)
+			}
+			return nil
+		}); err != nil {
+			return fmt.Errorf("error finding matches to prune: %w", err)
+		}
+		for i := range matchesToDelete {
+			if err := archivedMatches.DeleteBucket(matchesToDelete[i]); err != nil {
+				return fmt.Errorf("error deleting pruned match %x: %w", matchesToDelete[i], err)
+			}
+		}
+		return nil
 	})
 }
 

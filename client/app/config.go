@@ -22,17 +22,18 @@ import (
 )
 
 const (
-	defaultRPCCertFile = "rpc.cert"
-	defaultRPCKeyFile  = "rpc.key"
-	defaultMainnetHost = "127.0.0.1"
-	defaultTestnetHost = "127.0.0.2"
-	defaultSimnetHost  = "127.0.0.3"
-	walletPairOneHost  = "127.0.0.6"
-	walletPairTwoHost  = "127.0.0.7"
-	defaultRPCPort     = "5757"
-	defaultWebPort     = "5758"
-	defaultLogLevel    = "debug"
-	configFilename     = "dexc.conf"
+	defaultRPCCertFile      = "rpc.cert"
+	defaultRPCKeyFile       = "rpc.key"
+	defaultMainnetHost      = "127.0.0.1"
+	defaultTestnetHost      = "127.0.0.2"
+	defaultSimnetHost       = "127.0.0.3"
+	walletPairOneHost       = "127.0.0.6"
+	walletPairTwoHost       = "127.0.0.7"
+	defaultRPCPort          = "5757"
+	defaultWebPort          = "5758"
+	defaultLogLevel         = "debug"
+	configFilename          = "dexc.conf"
+	defaultArchiveSizeLimit = 1000
 )
 
 var (
@@ -108,6 +109,8 @@ type CoreConfig struct {
 	UnlockCoinsOnLogin bool `long:"release-wallet-coins" description:"On login or wallet creation, instruct the wallet to release any coins that it may have locked."`
 
 	ExtensionModeFile string `long:"extension-mode-file" description:"path to a file that specifies options for running core as an extension."`
+
+	PruneArchive uint64 `long:"prunearchive" description:"prune that order archive to the specified number of most recent orders. zero means no pruning."`
 }
 
 // WebConfig encapsulates the configuration needed for the web server.
@@ -216,6 +219,7 @@ func (cfg *Config) Core(log dex.Logger) *core.Config {
 		NoAutoDBBackup:     cfg.NoAutoDBBackup,
 		ExtensionModeFile:  cfg.ExtensionModeFile,
 		TheOneHost:         cfg.TheOneHost,
+		PruneArchive:       cfg.PruneArchive,
 	}
 }
 
