@@ -1879,7 +1879,7 @@ func (btc *baseWallet) feeRate(confTarget uint64) (uint64, error) {
 }
 
 func rpcFeeRate(ctx context.Context, rr RawRequester, confTarget uint64) (uint64, error) {
-	feeResult, err := estimateSmartFee(ctx, rr, confTarget, &btcjson.EstimateModeConservative)
+	feeResult, err := estimateSmartFee(ctx, rr, confTarget, &btcjson.EstimateModeEconomical)
 	if err != nil {
 		return 0, err
 	}
