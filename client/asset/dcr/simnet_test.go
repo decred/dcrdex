@@ -460,11 +460,7 @@ func runTest(t *testing.T, splitTx bool) {
 		if err != nil || tx == nil {
 			t.Fatalf("GetTransaction: %v", err)
 		}
-		msgTx, err := msgTxFromHex(tx.Hex)
-		if err != nil {
-			t.Fatalf("msgTxFromHex: %v", err)
-		}
-		txData, err := msgTx.Bytes()
+		txData, err := tx.MsgTx.Bytes()
 		if err != nil {
 			t.Fatalf("msgTx.Bytes: %v", err)
 		}
