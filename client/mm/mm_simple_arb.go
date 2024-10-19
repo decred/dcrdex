@@ -422,11 +422,11 @@ func (a *simpleArbMarketMaker) distribution(additionalDEX, additionalCEX map[uin
 	if perLot == nil {
 		return nil, fmt.Errorf("error getting lot costs: %w", err)
 	}
-	dist = a.newDistribution(perLot, additionalDEX, additionalCEX)
+	dist = a.newDistribution(perLot)
 	avgBaseLot, avgQuoteLot := float64(perLot.dexBase+perLot.cexBase)/2, float64(perLot.dexQuote+perLot.cexQuote)/2
 	baseLots := uint64(math.Round(float64(dist.baseInv.total) / avgBaseLot / 2))
 	quoteLots := uint64(math.Round(float64(dist.quoteInv.total) / avgQuoteLot / 2))
-	a.optimizeTransfers(dist, baseLots, quoteLots, baseLots*2, quoteLots*2)
+	a.optimizeTransfers(dist, baseLots, quoteLots, baseLots*2, quoteLots*2, additionalDEX, additionalCEX)
 	return dist, nil
 }
 

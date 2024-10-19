@@ -469,23 +469,31 @@ func TestFreeUpFunds(t *testing.T) {
 }
 
 func TestDistribution(t *testing.T) {
-	// utxo/utxo
-	testDistribution(t, 42, 0)
-	// utxo/account-locker
-	testDistribution(t, 42, 60)
-	testDistribution(t, 60, 42)
-	// token/parent
-	testDistribution(t, 60001, 60)
-	testDistribution(t, 60, 60001)
-	// token/token - same chain
-	testDistribution(t, 966002, 966001)
-	testDistribution(t, 966001, 966002)
-	// token/token - different chains
-	testDistribution(t, 60001, 966003)
-	testDistribution(t, 966003, 60001)
-	// utxo/token
-	testDistribution(t, 42, 966003)
-	testDistribution(t, 966003, 42)
+	tests := [][2]uint32{
+		// utxo/utxo
+		{42, 0},
+		// utxo/account-locker
+		{42, 60},
+		{60, 42},
+		// token/parent
+		{60001, 60},
+		{60, 60001},
+		// token/token - same chain
+		{966002, 966001},
+		{966001, 966002},
+		// token/token - different chains
+		{60001, 966003},
+		{966003, 60001},
+		// utxo/token
+		{42, 966003},
+		{966003, 42},
+	}
+
+	for _, test := range tests {
+		t.Run(fmt.Sprintf("%d/%d", test[0], test[1]), func(t *testing.T) {
+			testDistribution(t, test[0], test[1])
+		})
+	}
 }
 
 func testDistribution(t *testing.T, baseID, quoteID uint32) {
@@ -507,7 +515,7 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 	tCore := newTCore()
 	u.CEX = cex
 	u.clientCore = tCore
-	u.autoRebalanceCfg = &AutoRebalanceConfig{}
+	u.autoRebalanceCfg = &AutoRebalanceConfig{TopUpFeeReserves: true}
 	a := &arbMarketMaker{unifiedExchangeAdaptor: u}
 	a.cfgV.Store(&ArbMarketMakerConfig{Profit: profit})
 	fiatRates := map[uint32]float64{baseID: 1, quoteID: 1}
@@ -579,6 +587,18 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 		a.baseCexBalances[quoteID] = int64(cexQuote)
 	}
 
+	// setFeeBal should only be used when the fee asset is not the
+	// other asset on the market. setLots will set the fee balances
+	// in order not to require top ups. This should be called again
+	// to test fee top ups.
+	setFeeBal := func(base bool, amt int64) {
+		if base {
+			a.baseDexBalances[u.baseFeeID] = amt
+		} else {
+			a.baseDexBalances[u.quoteFeeID] = amt
+		}
+	}
+
 	setLots := func(b, s uint64) {
 		buyLots, sellLots = b, s
 		a.placementLotsV.Store(&placementLots{
@@ -628,7 +648,18 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 		updateInternalTransferBalances(u, dexAvailableBalances, cexAvailableBalances)
 	}
 
-	checkDistribution := func(baseDeposit, baseWithdraw, quoteDeposit, quoteWithdraw uint64, baseInternal, quoteInternal bool) {
+	// setAvailableFeeBalances should only be used when the fee asset is not the
+	// other asset on the market.
+	setAvailableFeeBalance := func(base bool, amt uint64) {
+		if base {
+			dexAvailableBalances[u.baseFeeID] = amt
+		} else {
+			dexAvailableBalances[u.quoteFeeID] = amt
+		}
+		updateInternalTransferBalances(u, dexAvailableBalances, cexAvailableBalances)
+	}
+
+	checkDistribution := func(baseDeposit, baseWithdraw, quoteDeposit, quoteWithdraw uint64, baseInternal, quoteInternal bool, feeReserveTopUps ...map[uint32]uint64) {
 		t.Helper()
 		dist, err := a.distribution(dexAvailableBalances, cexAvailableBalances)
 		if err != nil {
@@ -679,12 +710,91 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 		if dist.quoteInv.toInternalWithdraw != expQuoteInternalWithdraw {
 			t.Fatalf("wrong quote internal withrawal size. wanted %d, got %d", expQuoteInternalWithdraw, dist.quoteInv.toInternalWithdraw)
 		}
+
+		if len(feeReserveTopUps) > 0 != (len(dist.feeReserveTopUps) > 0) {
+			t.Fatalf("expected fee top ups %v, but got %v", len(feeReserveTopUps) > 0, len(dist.feeReserveTopUps) > 0)
+		}
+		if len(feeReserveTopUps) > 0 {
+			feeReserveTopUps := feeReserveTopUps[0]
+			for assetID, topUp := range feeReserveTopUps {
+				if topUp == 0 {
+					delete(feeReserveTopUps, assetID)
+				}
+			}
+
+			if len(feeReserveTopUps) != len(dist.feeReserveTopUps) {
+				t.Fatalf("wrong number of fee top ups. wanted %d, got %d", len(feeReserveTopUps), len(dist.feeReserveTopUps))
+			}
+			for assetID, exp := range feeReserveTopUps {
+				if dist.feeReserveTopUps[assetID] != exp {
+					t.Fatalf("wrong fee top up for asset %d. wanted %d, got %d", assetID, exp, dist.feeReserveTopUps[assetID])
+				}
+			}
+		}
 	}
 
 	setLots(1, 1)
 	// Base asset - perfect distribution - no action
 	setBals(minDexBase, minCexBase, minDexQuote, minCexQuote)
 	checkDistribution(0, 0, 0, 0, false, false)
+
+	// Test fee top ups.
+	baseCouldNeedTopUp := baseID != u.baseFeeID && quoteID != u.baseFeeID
+	quoteCouldNeedTopUp := baseID != u.quoteFeeID && quoteID != u.quoteFeeID
+	if baseCouldNeedTopUp || quoteCouldNeedTopUp {
+		applyTopUpBuffer := func(topUp uint64) uint64 {
+			return topUp * (100 + feeReserveBuffer) / 100
+		}
+
+		var minBaseFeeAsset, minQuoteFeeAsset uint64
+		if baseCouldNeedTopUp {
+			minBaseFeeAsset = applyTopUpBuffer(sellSwapFees + buyRedeemFees + sellRefundFees)
+			setAvailableFeeBalance(true, minBaseFeeAsset)
+		}
+		if quoteCouldNeedTopUp {
+			minQuoteFeeAsset = applyTopUpBuffer(buySwapFees + sellRedeemFees + buyRefundFees)
+			setAvailableFeeBalance(false, minQuoteFeeAsset)
+		}
+
+		if u.baseFeeID == u.quoteFeeID {
+			setAvailableFeeBalance(true, minBaseFeeAsset+minQuoteFeeAsset)
+			checkDistribution(0, 0, 0, 0, false, false, map[uint32]uint64{u.baseFeeID: minBaseFeeAsset + minQuoteFeeAsset})
+		} else {
+			checkDistribution(0, 0, 0, 0, false, false, map[uint32]uint64{u.baseFeeID: minBaseFeeAsset, u.quoteFeeID: minQuoteFeeAsset})
+		}
+
+		if baseCouldNeedTopUp {
+			setFeeBal(true, 100)
+		}
+		if quoteCouldNeedTopUp {
+			setFeeBal(false, 100)
+		}
+		if u.baseFeeID == u.quoteFeeID {
+			checkDistribution(0, 0, 0, 0, false, false, map[uint32]uint64{u.baseFeeID: minBaseFeeAsset + minQuoteFeeAsset - 100})
+		} else {
+			checkDistribution(0, 0, 0, 0, false, false, map[uint32]uint64{u.baseFeeID: utils.SafeSub(minBaseFeeAsset, 100), u.quoteFeeID: utils.SafeSub(minQuoteFeeAsset, 100)})
+		}
+
+		if baseCouldNeedTopUp {
+			setFeeBal(true, 0)
+			setAvailableFeeBalance(true, minBaseFeeAsset-50)
+		}
+		if quoteCouldNeedTopUp {
+			setFeeBal(false, 0)
+			setAvailableFeeBalance(false, minQuoteFeeAsset-50)
+		}
+
+		if u.baseFeeID == u.quoteFeeID {
+			setAvailableFeeBalance(true, minBaseFeeAsset+minQuoteFeeAsset-50)
+			checkDistribution(0, 0, 0, 0, false, false, map[uint32]uint64{u.baseFeeID: minBaseFeeAsset + minQuoteFeeAsset - 50})
+		} else {
+			checkDistribution(0, 0, 0, 0, false, false, map[uint32]uint64{u.baseFeeID: utils.SafeSub(minBaseFeeAsset, 50), u.quoteFeeID: utils.SafeSub(minQuoteFeeAsset, 50)})
+		}
+
+		setAvailableFeeBalance(true, 0)
+		setAvailableFeeBalance(false, 0)
+		setFeeBal(true, 0)
+	}
 
 	// Move all of the base balance to cex and max sure we get a withdraw.
 	setBals(0, totalBase, minDexQuote, minCexQuote)
@@ -700,9 +810,9 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 	// Raise the transfer theshold by one atom and it should zero the withdraw.
 	a.autoRebalanceCfg.MinBaseTransfer = minDexBase + 1
 	checkDistribution(0, 0, 0, 0, false, false)
-	a.autoRebalanceCfg.MinBaseTransfer = 0
 
 	// Same for quote
+	setLots(1, 1)
 	setBals(minDexBase, minCexBase, 0, totalQuote)
 	checkDistribution(0, 0, 0, minDexQuote, false, false)
 	setAvailableBalances(0, 0, minDexQuote, 0)
@@ -712,9 +822,9 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 	setAvailableBalances(0, 0, 0, 0)
 	a.autoRebalanceCfg.MinQuoteTransfer = minDexQuote + 1
 	checkDistribution(0, 0, 0, 0, false, false)
-	a.autoRebalanceCfg.MinQuoteTransfer = 0
 
 	// Base deposit
+	setLots(1, 1)
 	setBals(totalBase, 0, minDexQuote, minCexQuote)
 	checkDistribution(minCexBase, 0, 0, 0, false, false)
 	setAvailableBalances(0, minCexBase, 0, 0)
@@ -1032,6 +1142,178 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 	checkTransfers(false, 0, 0, 0, 0, false, false)
 
 	u.market = mustParseMarket(&core.Market{})
+}
+
+func TestFeeAssetTopUp(t *testing.T) {
+	tests := [][2]uint32{
+		// utxo/utxo
+		{42, 0},
+		// utxo/account-locker
+		{42, 60},
+		{60, 42},
+		// token/parent
+		{60001, 60},
+		{60, 60001},
+		// token/token - same chain
+		{966002, 966001},
+		{966001, 966002},
+		// token/token - different chains
+		{60001, 966003},
+		{966003, 60001},
+		// utxo/token
+		{42, 966003},
+		{966003, 42},
+	}
+
+	for _, test := range tests {
+		t.Run(fmt.Sprintf("%d/%d", test[0], test[1]), func(t *testing.T) {
+			testFeeAssetTopUp(t, test[0], test[1])
+		})
+	}
+}
+
+func testFeeAssetTopUp(t *testing.T, baseID, quoteID uint32) {
+	const lotSize = 5e7
+	const sellSwapFees, sellRedeemFees = 3e5, 1e5
+	const buySwapFees, buyRedeemFees = 2e4, 1e4
+	const sellRefundFees, buyRefundFees = 8e3, 9e4
+	u := mustParseAdaptorFromMarket(&core.Market{
+		LotSize:  lotSize,
+		BaseID:   baseID,
+		QuoteID:  quoteID,
+		RateStep: 1e2,
+	})
+	cex := newTCEX()
+	tCore := newTCore()
+	u.CEX = cex
+	u.clientCore = tCore
+	u.autoRebalanceCfg = &AutoRebalanceConfig{TopUpFeeReserves: true}
+
+	maxBuyFees := &LotFees{
+		Swap:   buySwapFees,
+		Redeem: buyRedeemFees,
+		Refund: buyRefundFees,
+	}
+	maxSellFees := &LotFees{
+		Swap:   sellSwapFees,
+		Redeem: sellRedeemFees,
+		Refund: sellRefundFees,
+	}
+
+	buyBookingFees, sellBookingFees := u.bookingFees(maxBuyFees, maxSellFees)
+	u.inventoryMods = make(map[uint32]int64)
+	fiatRates := map[uint32]float64{baseID: 1, quoteID: 1}
+	u.fiatRates.Store(fiatRates)
+
+	u.buyFees = &orderFees{
+		LotFeeRange: &LotFeeRange{
+			Max: maxBuyFees,
+			Estimated: &LotFees{
+				Swap:   buySwapFees,
+				Redeem: buyRedeemFees,
+				Refund: buyRefundFees,
+			},
+		},
+		bookingFeesPerLot: buyBookingFees,
+	}
+	u.sellFees = &orderFees{
+		LotFeeRange: &LotFeeRange{
+			Max: maxSellFees,
+			Estimated: &LotFees{
+				Swap:   sellSwapFees,
+				Redeem: sellRedeemFees,
+			},
+		},
+		bookingFeesPerLot: sellBookingFees,
+	}
+
+	setFeeBal := func(base bool, amt int64) {
+		if base {
+			u.baseDexBalances[u.baseFeeID] = amt
+		} else {
+			u.baseDexBalances[u.quoteFeeID] = amt
+		}
+	}
+
+	dexAvailableBalances := map[uint32]uint64{}
+	cexAvailableBalances := map[uint32]uint64{}
+	setAvailableFeeBalance := func(base bool, amt uint64) {
+		if base {
+			dexAvailableBalances[u.baseFeeID] = amt
+		} else {
+			dexAvailableBalances[u.quoteFeeID] = amt
+		}
+		updateInternalTransferBalances(u, dexAvailableBalances, cexAvailableBalances)
+	}
+
+	checkTopUps := func(buyLots, sellLots uint64, expBaseTopUp, expQuoteTopUp uint64) {
+		u.balancesMtx.RLock()
+		initialBaseFeeAsset, initialQuoteFeeAsset := u.baseDexBalances[u.baseFeeID], u.baseDexBalances[u.quoteFeeID]
+		u.balancesMtx.RUnlock()
+
+		u.topUpFeeReserves(buyLots, sellLots)
+
+		u.balancesMtx.RLock()
+		baseFeeAssetDiff := u.baseDexBalances[u.baseFeeID] - initialBaseFeeAsset
+		quoteFeeAssetDiff := u.baseDexBalances[u.quoteFeeID] - initialQuoteFeeAsset
+		u.balancesMtx.RUnlock()
+
+		if baseFeeAssetDiff != int64(expBaseTopUp) {
+			t.Fatalf("wrong base fee asset top up. wanted %d, got %d", expBaseTopUp, baseFeeAssetDiff)
+		}
+
+		if quoteFeeAssetDiff != int64(expQuoteTopUp) {
+			t.Fatalf("wrong quote fee asset top up. wanted %d, got %d", expQuoteTopUp, quoteFeeAssetDiff)
+		}
+	}
+
+	sameFeeAsset := u.baseFeeID == u.quoteFeeID
+	baseFeeAssetMayNeedTopUp := baseID != u.baseFeeID && quoteID != u.baseFeeID
+	quoteFeeAssetMayNeedTopUp := baseID != u.quoteFeeID && quoteID != u.quoteFeeID
+
+	minFeeAssets := func(buyLots, sellLots uint64) (uint64, uint64) {
+		applyTopUpBuffer := func(topUp uint64) uint64 {
+			return topUp * (100 + feeReserveBuffer) / 100
+		}
+
+		var minBaseFeeAsset, minQuoteFeeAsset uint64
+		if baseFeeAssetMayNeedTopUp {
+			minBaseFeeAsset = sellLots * (sellSwapFees + sellRefundFees)
+			minBaseFeeAsset += buyLots * buyRedeemFees
+		}
+		if quoteFeeAssetMayNeedTopUp {
+			minQuoteFeeAsset = buyLots * (buySwapFees + buyRefundFees)
+			minQuoteFeeAsset += sellLots * sellRedeemFees
+		}
+
+		if sameFeeAsset {
+			minBaseFeeAsset += minQuoteFeeAsset
+			minQuoteFeeAsset = minBaseFeeAsset
+		}
+
+		return applyTopUpBuffer(minBaseFeeAsset), applyTopUpBuffer(minQuoteFeeAsset)
+	}
+
+	minBaseFeeAsset, minQuoteFeeAsset := minFeeAssets(1, 1)
+	setFeeBal(true, 0)
+	setFeeBal(false, 0)
+	setAvailableFeeBalance(true, 0)
+	setAvailableFeeBalance(false, 0)
+	checkTopUps(1, 1, 0, 0)
+
+	setAvailableFeeBalance(true, minBaseFeeAsset)
+	setAvailableFeeBalance(false, minQuoteFeeAsset)
+	checkTopUps(1, 1, minBaseFeeAsset, minQuoteFeeAsset)
+
+	setFeeBal(true, 100)
+	setFeeBal(false, 100)
+	checkTopUps(1, 1, utils.SafeSub(minBaseFeeAsset, 100), utils.SafeSub(minQuoteFeeAsset, 100))
+
+	setFeeBal(true, 0)
+	setFeeBal(false, 0)
+	setAvailableFeeBalance(true, minBaseFeeAsset-200)
+	setAvailableFeeBalance(false, minQuoteFeeAsset-200)
+	checkTopUps(1, 1, utils.SafeSub(minBaseFeeAsset, 200), utils.SafeSub(minQuoteFeeAsset, 200))
 }
 
 func TestMultiTrade(t *testing.T) {

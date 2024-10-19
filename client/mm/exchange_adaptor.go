@@ -404,7 +404,7 @@ func (m *market) msgRate(convRate float64) uint64 {
 	return calc.MessageRate(convRate, m.bui, m.qui)
 }
 
-type doTransferFunc func(dexAvailable, cexAvailable map[uint32]uint64) error
+type doInternalTransferFunc func(dexAvailable, cexAvailable map[uint32]uint64) error
 
 // unifiedExchangeAdaptor implements both botCoreAdaptor and botCexAdaptor.
 type unifiedExchangeAdaptor struct {
@@ -426,7 +426,7 @@ type unifiedExchangeAdaptor struct {
 	quoteTraits     asset.WalletTrait
 	// ** IMPORTANT ** No mutexes should be locked when calling this
 	// function.
-	internalTransfer func(*MarketWithHost, doTransferFunc) error
+	internalTransfer func(*MarketWithHost, doInternalTransferFunc) error
 
 	botLooper dex.Connector
 	botLoop   *dex.ConnectionMaster
@@ -2680,7 +2680,9 @@ func (u *unifiedExchangeAdaptor) handleDEXNotification(n core.Notification) {
 type lotCosts struct {
 	dexBase, dexQuote,
 	cexBase, cexQuote uint64
+	baseSwap, quoteSwap       uint64
 	baseRedeem, quoteRedeem   uint64
+	baseRefund, quoteRefund   uint64
 	baseFunding, quoteFunding uint64 // per multi-order
 }
 
@@ -2695,7 +2697,9 @@ func (u *unifiedExchangeAdaptor) lotCosts(sellVWAP, buyVWAP uint64) (*lotCosts, 
 		perLot.dexBase += sellFees.bookingFeesPerLot
 	}
 	perLot.cexBase = u.lotSize
+	perLot.baseSwap = sellFees.Max.Swap
 	perLot.baseRedeem = buyFees.Max.Redeem
+	perLot.baseRefund = sellFees.Max.Refund
 	perLot.baseFunding = sellFees.funding
 
 	dexQuoteLot := calc.BaseToQuote(sellVWAP, u.lotSize)
@@ -2705,42 +2709,156 @@ func (u *unifiedExchangeAdaptor) lotCosts(sellVWAP, buyVWAP uint64) (*lotCosts, 
 		perLot.dexQuote += buyFees.bookingFeesPerLot
 	}
 	perLot.cexQuote = cexQuoteLot
+	perLot.quoteSwap = buyFees.Max.Swap
 	perLot.quoteRedeem = sellFees.Max.Redeem
+	perLot.quoteRefund = buyFees.Max.Refund
 	perLot.quoteFunding = buyFees.funding
 	return perLot, nil
 }
 
 // distribution is a collection of asset distributions and per-lot estimates.
 type distribution struct {
-	baseInv  *assetInventory
-	quoteInv *assetInventory
-	perLot   *lotCosts
+	baseInv          *assetInventory
+	quoteInv         *assetInventory
+	perLot           *lotCosts
+	feeReserveTopUps map[uint32]uint64
 }
 
-func (u *unifiedExchangeAdaptor) newDistribution(perLot *lotCosts, additionalDEX, additionalCEX map[uint32]uint64) *distribution {
-	dist := &distribution{
-		baseInv:  u.inventory(u.baseID, perLot.dexBase, perLot.cexBase),
-		quoteInv: u.inventory(u.quoteID, perLot.dexQuote, perLot.cexQuote),
-		perLot:   perLot,
+func (u *unifiedExchangeAdaptor) newDistribution(perLot *lotCosts) *distribution {
+	return &distribution{
+		baseInv:          u.inventory(u.baseID, u.baseFeeID, perLot.dexBase, perLot.cexBase),
+		quoteInv:         u.inventory(u.quoteID, u.quoteFeeID, perLot.dexQuote, perLot.cexQuote),
+		perLot:           perLot,
+		feeReserveTopUps: make(map[uint32]uint64),
 	}
-	dist.baseInv.dexAdditionalAvailable = additionalDEX[u.baseID]
-	dist.baseInv.cexAdditionalAvailable = additionalCEX[u.baseID]
-	dist.quoteInv.dexAdditionalAvailable = additionalDEX[u.quoteID]
-	dist.quoteInv.cexAdditionalAvailable = additionalCEX[u.quoteID]
-	return dist
+}
+
+type feeReserveInfo struct {
+	reserves      uint64
+	swapRefundFee uint64
+	redeemFee     uint64
+}
+
+const feeReserveBuffer uint64 = 2 // 2% buffer
+
+// requiredTopUps calculates the required top-ups of fee reserves for assets
+// that have a fee asset which is neither the base nor quote asset in order
+// to be able to place all the required orders.
+func (u *unifiedExchangeAdaptor) requiredTopUps(baseInfo, quoteInfo *feeReserveInfo, maxBuyLots, maxSellLots uint64) map[uint32]uint64 {
+	feeReserveTopUps := map[uint32]uint64{}
+
+	applyFeeReserveBuffer := func(amt uint64) uint64 {
+		return amt * (100 + feeReserveBuffer) / 100
+	}
+
+	sameFeeAssets := u.baseFeeID == u.quoteFeeID
+	baseMayRequireTopUp := u.baseFeeID != u.baseID && u.baseFeeID != u.quoteID
+	quoteMayRequireTopUp := u.quoteFeeID != u.baseID && u.quoteFeeID != u.quoteID
+
+	if sameFeeAssets && baseMayRequireTopUp {
+		feeRequired := maxSellLots * (baseInfo.swapRefundFee + quoteInfo.redeemFee)
+		feeRequired += maxBuyLots * (baseInfo.redeemFee + quoteInfo.swapRefundFee)
+		feeRequired = applyFeeReserveBuffer(feeRequired)
+		if feeRequired > baseInfo.reserves {
+			feeReserveTopUps[u.baseFeeID] = feeRequired - baseInfo.reserves
+		}
+	}
+
+	if !sameFeeAssets && baseMayRequireTopUp {
+		baseFeeRequired := baseInfo.swapRefundFee*maxSellLots + baseInfo.redeemFee*maxBuyLots
+		baseFeeRequired = applyFeeReserveBuffer(baseFeeRequired)
+		if baseFeeRequired > baseInfo.reserves {
+			feeReserveTopUps[u.baseFeeID] = baseFeeRequired - baseInfo.reserves
+		}
+	}
+	if !sameFeeAssets && quoteMayRequireTopUp {
+		quoteFeeRequired := quoteInfo.swapRefundFee*maxBuyLots + quoteInfo.redeemFee*maxSellLots
+		quoteFeeRequired = applyFeeReserveBuffer(quoteFeeRequired)
+		if quoteFeeRequired > quoteInfo.reserves {
+			feeReserveTopUps[u.quoteFeeID] = quoteFeeRequired - quoteInfo.reserves
+		}
+	}
+
+	return feeReserveTopUps
+}
+
+func (u *unifiedExchangeAdaptor) feeReserveInfo() (base, quote *feeReserveInfo, err error) {
+	buyFees, sellFees, err := u.orderFees()
+	if err != nil {
+		return nil, nil, fmt.Errorf("error getting order fees: %w", err)
+	}
+
+	u.balancesMtx.RLock()
+	defer u.balancesMtx.RUnlock()
+
+	baseFeeBalance := u.dexBalance(u.baseFeeID)
+	quoteFeeBalance := u.dexBalance(u.quoteFeeID)
+
+	base = &feeReserveInfo{
+		reserves:      baseFeeBalance.Available + baseFeeBalance.Locked,
+		swapRefundFee: sellFees.Max.Swap + sellFees.Max.Refund,
+		redeemFee:     buyFees.Max.Redeem,
+	}
+
+	quote = &feeReserveInfo{
+		reserves:      quoteFeeBalance.Available + quoteFeeBalance.Locked,
+		swapRefundFee: buyFees.Max.Swap + buyFees.Max.Refund,
+		redeemFee:     sellFees.Max.Redeem,
+	}
+
+	return
+}
+
+func (u *unifiedExchangeAdaptor) topUpFeeReserves(maxSellLots, maxBuyLots uint64) {
+	if u.autoRebalanceCfg == nil || !u.autoRebalanceCfg.TopUpFeeReserves {
+		return
+	}
+
+	baseInfo, quoteInfo, err := u.feeReserveInfo()
+	if err != nil {
+		u.log.Errorf("Error getting fee reserve info: %v", err)
+		return
+	}
+
+	requiredTopUps := u.requiredTopUps(baseInfo, quoteInfo, maxBuyLots, maxSellLots)
+
+	if len(requiredTopUps) == 0 {
+		return
+	}
+
+	err = u.internalTransfer(u.mwh, func(dexAvail, _ map[uint32]uint64) error {
+		feeReserveTopUps := make(map[uint32]uint64)
+		for assetID, topUp := range requiredTopUps {
+			toTopUp := utils.Min(topUp, dexAvail[assetID])
+			if toTopUp > 0 {
+				feeReserveTopUps[assetID] = toTopUp
+			}
+		}
+
+		if len(feeReserveTopUps) == 0 {
+			return nil
+		}
+
+		u.doInternalTransfers(0, 0, 0, 0, feeReserveTopUps)
+		return nil
+	})
+	if err != nil {
+		u.log.Errorf("internal transfer error: %v", err)
+	}
 }
 
 // optimizeTransfers populates the toDeposit and toWithdraw fields of the base
-// and quote assetDistribution. To find the best asset distribution, a series
-// of possible target configurations are tested and the distribution that
-// results in the highest matchability is chosen.
-func (u *unifiedExchangeAdaptor) optimizeTransfers(dist *distribution, dexSellLots, dexBuyLots, maxSellLots, maxBuyLots uint64) {
-	baseInv, quoteInv := dist.baseInv, dist.quoteInv
-	perLot := dist.perLot
-
+// and quote assetDistributions, and the feeReserveTopUps map. To find the best
+// asset distribution, a series of possible target configurations are tested and
+// the distribution that results in the highest matchability score is chosen.
+func (u *unifiedExchangeAdaptor) optimizeTransfers(dist *distribution, dexSellLots, dexBuyLots, maxSellLots, maxBuyLots uint64,
+	dexAdditionalAvailable, cexAdditionalAvailable map[uint32]uint64) {
 	if u.autoRebalanceCfg == nil {
 		return
 	}
+
+	baseInv, quoteInv := dist.baseInv, dist.quoteInv
+	perLot := dist.perLot
 	minBaseTransfer, minQuoteTransfer := u.autoRebalanceCfg.MinBaseTransfer, u.autoRebalanceCfg.MinQuoteTransfer
 
 	additionalBaseFees, additionalQuoteFees := perLot.baseFunding, perLot.quoteFunding
@@ -2757,6 +2875,40 @@ func (u *unifiedExchangeAdaptor) optimizeTransfers(dist *distribution, dexSellLo
 	if quoteInv.total > additionalQuoteFees {
 		quoteAvail = quoteInv.total - additionalQuoteFees
 	}
+
+	if u.autoRebalanceCfg.TopUpFeeReserves {
+		baseFeeReserveInfo := &feeReserveInfo{
+			reserves:      baseInv.feeReserves,
+			swapRefundFee: perLot.baseSwap + perLot.baseRefund,
+			redeemFee:     perLot.baseRedeem,
+		}
+		quoteFeeReserveInfo := &feeReserveInfo{
+			reserves:      quoteInv.feeReserves,
+			swapRefundFee: perLot.quoteSwap + perLot.quoteRefund,
+			redeemFee:     perLot.quoteRedeem,
+		}
+		requiredTopUps := u.requiredTopUps(baseFeeReserveInfo, quoteFeeReserveInfo, maxBuyLots, maxSellLots)
+		for assetID, topUp := range requiredTopUps {
+			var toTopUp uint64
+			if assetID == u.baseFeeID {
+				toTopUp = utils.Min(dexAdditionalAvailable[u.baseFeeID], topUp)
+			} else {
+				toTopUp = utils.Min(dexAdditionalAvailable[u.quoteFeeID], topUp)
+			}
+			if toTopUp > 0 {
+				dist.feeReserveTopUps[assetID] = toTopUp
+			}
+		}
+	}
+
+	if !u.autoRebalanceCfg.InternalTransfers && minBaseTransfer == 0 && minQuoteTransfer == 0 {
+		return
+	}
+
+	baseDEXAdditionalAvailable := dexAdditionalAvailable[u.baseID]
+	quoteDEXAdditionalAvailable := dexAdditionalAvailable[u.quoteID]
+	baseCEXAdditionalAvailable := cexAdditionalAvailable[u.baseID]
+	quoteCEXAdditionalAvailable := cexAdditionalAvailable[u.quoteID]
 
 	// matchability is the number of lots that can be matched with a specified
 	// asset distribution.
@@ -2870,8 +3022,8 @@ func (u *unifiedExchangeAdaptor) optimizeTransfers(dist *distribution, dexSellLo
 			if dexTarget > baseInv.dex {
 				toWithdraw := dexTarget - baseInv.dex
 				if baseInternal {
-					baseWithdraw = utils.Min(dist.baseInv.dexAdditionalAvailable, toWithdraw, dist.baseInv.cexAvail)
-					if toWithdraw > dist.baseInv.dexAdditionalAvailable {
+					baseWithdraw = utils.Min(baseDEXAdditionalAvailable, toWithdraw, dist.baseInv.cexAvail)
+					if toWithdraw > baseDEXAdditionalAvailable {
 						dexTotal := utils.SafeSub(dist.baseInv.dex+baseWithdraw, additionalBaseFees)
 						actualDexBaseLots = dexTotal / perLot.dexBase
 						actualCexBaseLots = utils.SafeSub(dist.baseInv.cex, baseWithdraw) / perLot.cexBase
@@ -2885,8 +3037,8 @@ func (u *unifiedExchangeAdaptor) optimizeTransfers(dist *distribution, dexSellLo
 			} else if cexTarget > baseInv.cex {
 				toDeposit := cexTarget - baseInv.cex
 				if baseInternal {
-					baseDeposit = utils.Min(dist.baseInv.cexAdditionalAvailable, toDeposit, dist.baseInv.dexAvail)
-					if toDeposit > dist.baseInv.cexAdditionalAvailable {
+					baseDeposit = utils.Min(baseCEXAdditionalAvailable, toDeposit, dist.baseInv.dexAvail)
+					if toDeposit > baseCEXAdditionalAvailable {
 						dexTotal := utils.SafeSub(dist.baseInv.dex, baseDeposit)
 						dexTotal = utils.SafeSub(dexTotal, additionalBaseFees)
 						actualDexBaseLots = dexTotal / perLot.dexBase
@@ -2908,8 +3060,8 @@ func (u *unifiedExchangeAdaptor) optimizeTransfers(dist *distribution, dexSellLo
 			if dexTarget > quoteInv.dex {
 				toWithdraw := dexTarget - quoteInv.dex
 				if quoteInternal {
-					quoteWithdraw = utils.Min(dist.quoteInv.dexAdditionalAvailable, toWithdraw, dist.quoteInv.cexAvail)
-					if toWithdraw > dist.quoteInv.dexAdditionalAvailable {
+					quoteWithdraw = utils.Min(quoteDEXAdditionalAvailable, toWithdraw, dist.quoteInv.cexAvail)
+					if toWithdraw > quoteDEXAdditionalAvailable {
 						dexTotal := utils.SafeSub(dist.quoteInv.dex+quoteWithdraw, additionalQuoteFees)
 						actualDexQuoteLots = dexTotal / perLot.dexQuote
 						actualCexQuoteLots = (dist.quoteInv.cex - quoteWithdraw) / perLot.cexQuote
@@ -2923,8 +3075,8 @@ func (u *unifiedExchangeAdaptor) optimizeTransfers(dist *distribution, dexSellLo
 			} else if cexTarget > quoteInv.cex {
 				toDeposit := cexTarget - quoteInv.cex
 				if quoteInternal {
-					quoteDeposit = utils.Min(dist.quoteInv.cexAdditionalAvailable, toDeposit, dist.quoteInv.dexAvail)
-					if toDeposit > dist.quoteInv.cexAdditionalAvailable {
+					quoteDeposit = utils.Min(quoteCEXAdditionalAvailable, toDeposit, dist.quoteInv.dexAvail)
+					if toDeposit > quoteCEXAdditionalAvailable {
 						dexTotal := utils.SafeSub(dist.quoteInv.dex, quoteDeposit)
 						dexTotal = utils.SafeSub(dexTotal, additionalQuoteFees)
 						actualDexQuoteLots = dexTotal / perLot.dexQuote
@@ -3016,24 +3168,41 @@ func (u *unifiedExchangeAdaptor) optimizeTransfers(dist *distribution, dexSellLo
 	}
 }
 
-type distributionFunc func(dexAvail, cexAvail map[uint32]uint64) (*distribution, error)
-
-func (u *unifiedExchangeAdaptor) doInternalTransfers(dist *distribution) {
+func (u *unifiedExchangeAdaptor) doInternalTransfers(baseDeposit, baseWithdraw, quoteDeposit, quoteWithdraw uint64, feeReserveTopUps map[uint32]uint64) {
 	u.balancesMtx.Lock()
+
 	dexDiffs, cexDiffs := make(map[uint32]int64), make(map[uint32]int64)
+	dexDiffs[u.baseID] = int64(baseWithdraw - baseDeposit)
+	cexDiffs[u.baseID] = -int64(baseWithdraw - baseDeposit)
+	dexDiffs[u.quoteID] = int64(quoteWithdraw - quoteDeposit)
+	cexDiffs[u.quoteID] = -int64(quoteWithdraw - quoteDeposit)
 
-	dexDiffs[u.baseID] = int64(dist.baseInv.toInternalWithdraw - dist.baseInv.toInternalDeposit)
-	cexDiffs[u.baseID] = -int64(dist.baseInv.toInternalWithdraw - dist.baseInv.toInternalDeposit)
-	dexDiffs[u.quoteID] = int64(dist.quoteInv.toInternalWithdraw - dist.quoteInv.toInternalDeposit)
-	cexDiffs[u.quoteID] = -int64(dist.quoteInv.toInternalWithdraw - dist.quoteInv.toInternalDeposit)
+	toppedUpFeeReserves := false
+	for feeAsset, topUp := range feeReserveTopUps {
+		toppedUpFeeReserves = toppedUpFeeReserves || topUp != 0
+		dexDiffs[feeAsset] += int64(topUp)
+		u.inventoryMods[feeAsset] += int64(topUp)
+	}
 
-	u.baseDexBalances[u.baseID] += dexDiffs[u.baseID]
-	u.baseCexBalances[u.baseID] += cexDiffs[u.baseID]
-	u.baseDexBalances[u.quoteID] += dexDiffs[u.quoteID]
-	u.baseCexBalances[u.quoteID] += cexDiffs[u.quoteID]
+	for assetID, diff := range dexDiffs {
+		u.baseDexBalances[assetID] += diff
+	}
+
+	for assetID, diff := range cexDiffs {
+		u.baseCexBalances[assetID] += diff
+	}
+
 	u.balancesMtx.Unlock()
 
-	if dexDiffs[u.baseID] != 0 || dexDiffs[u.quoteID] != 0 {
+	if toppedUpFeeReserves {
+		inventoryUpdates := make(map[uint32]int64)
+		for assetID, topUp := range feeReserveTopUps {
+			inventoryUpdates[assetID] = int64(topUp)
+		}
+		u.updateInventoryEvent(inventoryUpdates)
+	}
+
+	if toppedUpFeeReserves || baseDeposit > 0 || baseWithdraw > 0 || quoteDeposit > 0 || quoteWithdraw > 0 {
 		u.logBalanceAdjustments(dexDiffs, cexDiffs, "internal transfers")
 	}
 }
@@ -3129,6 +3298,8 @@ func (u *unifiedExchangeAdaptor) doExternalTransfers(dist *distribution, currEpo
 	return true, nil
 }
 
+type distributionFunc func(dexAvail, cexAvail map[uint32]uint64) (*distribution, error)
+
 func (u *unifiedExchangeAdaptor) tryTransfers(currEpoch uint64, df distributionFunc) (actionTaken bool, err error) {
 	if u.autoRebalanceCfg == nil {
 		return false, nil
@@ -3141,7 +3312,11 @@ func (u *unifiedExchangeAdaptor) tryTransfers(currEpoch uint64, df distributionF
 			return fmt.Errorf("distribution calculation error: %w", err)
 		}
 
-		u.doInternalTransfers(dist)
+		baseDeposit := dist.baseInv.toInternalDeposit
+		baseWithdraw := dist.baseInv.toInternalWithdraw
+		quoteDeposit := dist.quoteInv.toInternalDeposit
+		quoteWithdraw := dist.quoteInv.toInternalWithdraw
+		u.doInternalTransfers(baseDeposit, baseWithdraw, quoteDeposit, quoteWithdraw, dist.feeReserveTopUps)
 		return nil
 	})
 	if err != nil {
@@ -3159,14 +3334,16 @@ type assetInventory struct {
 	dexPending uint64
 	dexLots    uint64
 
+	// feeReserves is the amount of the fee asset that is available on the dex.
+	// This is only populated if the fee asset is neither the base nor quote
+	// asset.
+	feeReserves uint64
+
 	cex      uint64
 	cexAvail uint64
 	cexLots  uint64
 
 	total uint64
-
-	dexAdditionalAvailable uint64
-	cexAdditionalAvailable uint64
 
 	toDeposit          uint64
 	toWithdraw         uint64
@@ -3176,7 +3353,7 @@ type assetInventory struct {
 
 // inventory generates a current view of the the bot's asset distribution.
 // Use optimizeTransfers to set toDeposit and toWithdraw.
-func (u *unifiedExchangeAdaptor) inventory(assetID uint32, dexLot, cexLot uint64) (b *assetInventory) {
+func (u *unifiedExchangeAdaptor) inventory(assetID, feeAssetID uint32, dexLot, cexLot uint64) (b *assetInventory) {
 	b = new(assetInventory)
 	u.balancesMtx.RLock()
 	defer u.balancesMtx.RUnlock()
@@ -3191,6 +3368,12 @@ func (u *unifiedExchangeAdaptor) inventory(assetID uint32, dexLot, cexLot uint64
 	b.cex = cexBalance.Available + cexBalance.Reserved + cexBalance.Pending
 	b.cexLots = b.cex / cexLot
 	b.total = b.dex + b.cex
+
+	if feeAssetID != u.baseID && feeAssetID != u.quoteID {
+		feeBalance := u.dexBalance(feeAssetID)
+		b.feeReserves = feeBalance.Available + feeBalance.Locked
+	}
+
 	return
 }
 
@@ -3625,7 +3808,7 @@ type exchangeAdaptorCfg struct {
 	log                 dex.Logger
 	eventLogDB          eventLogDB
 	botCfg              *BotConfig
-	internalTransfer    func(*MarketWithHost, doTransferFunc) error
+	internalTransfer    func(*MarketWithHost, doInternalTransferFunc) error
 }
 
 // newUnifiedExchangeAdaptor is the constructor for a unifiedExchangeAdaptor.

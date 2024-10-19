@@ -443,14 +443,14 @@ func mustParseAdaptorFromMarket(m *core.Market) *unifiedExchangeAdaptor {
 		eventLogDB:         newTEventLogDB(),
 		pendingDeposits:    make(map[string]*pendingDeposit),
 		pendingWithdrawals: make(map[string]*pendingWithdrawal),
-		internalTransfer: func(mwh *MarketWithHost, fn doTransferFunc) error {
+		internalTransfer: func(mwh *MarketWithHost, fn doInternalTransferFunc) error {
 			return fn(map[uint32]uint64{}, map[uint32]uint64{})
 		},
 	}
 }
 
 func updateInternalTransferBalances(u *unifiedExchangeAdaptor, baseBal, quoteBal map[uint32]uint64) {
-	u.internalTransfer = func(mwh *MarketWithHost, fn doTransferFunc) error {
+	u.internalTransfer = func(mwh *MarketWithHost, fn doInternalTransferFunc) error {
 		return fn(baseBal, quoteBal)
 	}
 }

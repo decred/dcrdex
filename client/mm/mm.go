@@ -931,7 +931,7 @@ func validRunningBotCfgUpdate(oldCfg, newCfg *BotConfig) error {
 //
 // ** IMPORTANT ** No mutexes in exchangeAdaptor should be locked when calling this
 // function.
-func (m *MarketMaker) internalTransfer(mkt *MarketWithHost, doTransfer doTransferFunc) error {
+func (m *MarketMaker) internalTransfer(mkt *MarketWithHost, doTransfer doInternalTransferFunc) error {
 	m.startUpdateMtx.Lock()
 	defer m.startUpdateMtx.Unlock()
 
@@ -939,9 +939,6 @@ func (m *MarketMaker) internalTransfer(mkt *MarketWithHost, doTransfer doTransfe
 	rb, found := runningBots[*mkt]
 	if !found {
 		return fmt.Errorf("internalTransfer called for non-running bot %s", mkt)
-	}
-	if rb.cexCfg == nil {
-		return fmt.Errorf("internalTransfer called for bot without CEX config %s", mkt)
 	}
 
 	dex, cex, err := m.availableBalances(mkt, rb.cexCfg)

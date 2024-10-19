@@ -356,6 +356,7 @@ func TestBasicMMRebalance(t *testing.T) {
 				},
 				bookingFeesPerLot: sellSwapFees,
 			}
+			mm.placementLotsV.Store(&placementLots{})
 			mm.baseDexBalances[baseID] = lotSize * 50
 			mm.baseCexBalances[baseID] = lotSize * 50
 			mm.baseDexBalances[quoteID] = int64(calc.BaseToQuote(basisPrice, lotSize*50))

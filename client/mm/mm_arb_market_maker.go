@@ -320,8 +320,8 @@ func (a *arbMarketMaker) distribution(additionalDEX, additionalCEX map[uint32]ui
 	if perLot == nil {
 		return nil, fmt.Errorf("error getting lot costs: %w", err)
 	}
-	dist = a.newDistribution(perLot, additionalDEX, additionalCEX)
-	a.optimizeTransfers(dist, dexSellLots, dexBuyLots, dexSellLots, dexBuyLots)
+	dist = a.newDistribution(perLot)
+	a.optimizeTransfers(dist, dexSellLots, dexBuyLots, dexSellLots, dexBuyLots, additionalDEX, additionalCEX)
 	return dist, nil
 }
 
