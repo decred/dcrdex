@@ -758,6 +758,8 @@ export interface OrderPlacement {
 export interface AutoRebalanceConfig {
   minBaseTransfer: number
   minQuoteTransfer: number
+  internalTransfers: boolean
+  topUpFeeReserves: boolean
 }
 
 export interface BasicMarketMakingConfig {
@@ -808,6 +810,8 @@ export interface UIConfig {
   quoteConfig: BotAssetConfig
   simpleArbLots?: number
   cexRebalance: boolean
+  internalTransfers: boolean
+  topUpFeeReserves: boolean
 }
 
 export interface StartConfig extends MarketWithHost {
