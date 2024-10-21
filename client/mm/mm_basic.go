@@ -274,6 +274,7 @@ func (b *basicMMCalculatorImpl) feeGapStats(basisPrice uint64) (*FeeGapStats, er
 type basicMarketMaker struct {
 	*unifiedExchangeAdaptor
 	cfgV             atomic.Value // *BasicMarketMakingConfig
+	placementLotsV   atomic.Value // *placementLots
 	core             botCoreAdaptor
 	oracle           oracle
 	rebalanceRunning atomic.Bool
@@ -373,7 +374,11 @@ func (m *basicMarketMaker) rebalance(newEpoch uint64) {
 	}
 	defer m.rebalanceRunning.Store(false)
 
-	m.log.Tracef("rebalance: epoch %d", newEpoch)
+	m.log.Infof("rebalance: epoch %d", newEpoch)
+
+	placements := m.placementLotsV.Load().(*placementLots)
+	dexSellLots, dexBuyLots := placements.baseLots, placements.quoteLots
+	m.topUpFeeReserves(dexSellLots, dexBuyLots)
 
 	buyOrders, sellOrders, err := m.ordersToPlace()
 	if err != nil {
@@ -422,6 +427,20 @@ func (m *basicMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error)
 	return &wg, nil
 }
 
+func (m *basicMarketMaker) setTransferConfig(cfg *BasicMarketMakingConfig) {
+	var baseLots, quoteLots uint64
+	for _, p := range cfg.BuyPlacements {
+		quoteLots += p.Lots
+	}
+	for _, p := range cfg.SellPlacements {
+		baseLots += p.Lots
+	}
+	m.placementLotsV.Store(&placementLots{
+		baseLots:  baseLots,
+		quoteLots: quoteLots,
+	})
+}
+
 func (m *basicMarketMaker) updateConfig(cfg *BotConfig) error {
 	if cfg.BasicMMConfig == nil {
 		// implies bug in caller
@@ -434,6 +453,7 @@ func (m *basicMarketMaker) updateConfig(cfg *BotConfig) error {
 	}
 
 	m.cfgV.Store(cfg.BasicMMConfig)
+	m.setTransferConfig(cfg.BasicMMConfig)
 	return nil
 }
 
@@ -460,6 +480,7 @@ func newBasicMarketMaker(cfg *BotConfig, adaptorCfg *exchangeAdaptorCfg, oracle 
 		oracle:                 oracle,
 	}
 	basicMM.cfgV.Store(cfg.BasicMMConfig)
+	basicMM.setTransferConfig(cfg.BasicMMConfig)
 	adaptor.setBotLoop(basicMM.botLoop)
 	return basicMM, nil
 }

@@ -8,6 +8,7 @@ import {
   StartConfig,
   OrderPlacement,
   AutoRebalanceConfig,
+  UIConfig,
   CEXNotification
 } from './registry'
 import {
@@ -742,7 +743,7 @@ class Bot extends BotMarket {
   }
 
   async start () {
-    const { page, alloc, baseID, quoteID, host, cexName, cfg: { uiConfig: { cexRebalance } } } = this
+    const { page, alloc, baseID, quoteID, host, cexName, cfg: { uiConfig } } = this
 
     Doc.hide(page.errMsg)
     if (cexName && !app().mmStatus.cexes[cexName]?.connected) {
@@ -762,7 +763,8 @@ class Bot extends BotMarket {
       host: host,
       alloc: alloc
     }
-    if (cexName && cexRebalance) startConfig.autoRebalance = this.autoRebalanceSettings()
+
+    startConfig.autoRebalance = this.autoRebalanceSettings(uiConfig)
 
     try {
       app().log('mm', 'starting mm bot', startConfig)
@@ -776,7 +778,7 @@ class Bot extends BotMarket {
     this.hideAllocationDialog()
   }
 
-  autoRebalanceSettings (): AutoRebalanceConfig {
+  minTransferAmounts (): [number, number] {
     const {
       proj: { bProj, qProj, alloc }, baseFeeID, quoteFeeID, cfg: { uiConfig: { baseConfig, quoteConfig } },
       baseID, quoteID, cexName, mktID
@@ -801,7 +803,23 @@ class Bot extends BotMarket {
     const minBaseTransfer = Math.round(minB + baseConfig.transferFactor * (maxB - minB))
     const [minQ, maxQ] = [mkt.quoteMinWithdraw, Math.max(mkt.quoteMinWithdraw * 2, maxQuote)]
     const minQuoteTransfer = Math.round(minQ + quoteConfig.transferFactor * (maxQ - minQ))
-    return { minBaseTransfer, minQuoteTransfer }
+    return [minBaseTransfer, minQuoteTransfer]
+  }
+
+  autoRebalanceSettings (uiCfg: UIConfig) : AutoRebalanceConfig | undefined {
+    if (!uiCfg.cexRebalance && !uiCfg.internalTransfers && !uiCfg.topUpFeeReserves) return
+    const cfg : AutoRebalanceConfig = {
+      topUpFeeReserves: uiCfg.topUpFeeReserves,
+      internalTransfers: uiCfg.internalTransfers,
+      minBaseTransfer: 0,
+      minQuoteTransfer: 0
+    }
+    if (uiCfg.cexRebalance && this.cexName) {
+      const [minBaseTransfer, minQuoteTransfer] = this.minTransferAmounts()
+      cfg.minBaseTransfer = minBaseTransfer
+      cfg.minQuoteTransfer = minQuoteTransfer
+    }
+    return cfg
   }
 
   reconfigure () {

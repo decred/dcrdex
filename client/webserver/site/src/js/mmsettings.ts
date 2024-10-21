@@ -179,6 +179,8 @@ interface ConfigState {
   driftTolerance: number
   orderPersistence: number // epochs
   cexRebalance: boolean
+  internalTransfers: boolean
+  topUpFeeReserves: boolean
   disabled: boolean
   buyPlacements: OrderPlacement[]
   sellPlacements: OrderPlacement[]
@@ -295,6 +297,9 @@ export default class MarketMakerSettingsPage extends BasePage {
     Doc.bind(page.marketHeader, 'click', () => { this.showMarketSelectForm() })
     Doc.bind(page.marketFilterInput, 'input', () => { this.sortMarketRows() })
     Doc.bind(page.cexRebalanceCheckbox, 'change', () => { this.autoRebalanceChanged() })
+    Doc.bind(page.topUpFeeReserveSettings, 'change', () => { this.topUpFeeReserveChanged() })
+    Doc.bind(page.internalOnlyRadio, 'change', () => { this.internalOnlyChanged() })
+    Doc.bind(page.externalTransfersRadio, 'change', () => { this.externalTransfersChanged() })
     Doc.bind(page.switchToAdvanced, 'click', () => { this.showAdvancedConfig() })
     Doc.bind(page.switchToQuickConfig, 'click', () => { this.switchToQuickConfig() })
     Doc.bind(page.qcMatchBuffer, 'change', () => { this.matchBufferChanged() })
@@ -594,7 +599,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     }) as ConfigState
 
     if (botCfg) {
-      const { basicMarketMakingConfig: mmCfg, arbMarketMakingConfig: arbMMCfg, simpleArbConfig: arbCfg, uiConfig: { cexRebalance } } = botCfg
+      const { basicMarketMakingConfig: mmCfg, arbMarketMakingConfig: arbMMCfg, simpleArbConfig: arbCfg, uiConfig } = botCfg
       this.creatingNewBot = false
       // This is kinda sloppy, but we'll copy any relevant issues from the
       // old config into the originalConfig.
@@ -605,7 +610,9 @@ export default class MarketMakerSettingsPage extends BasePage {
       oldCfg.quoteConfig = Object.assign({}, defaultBotAssetConfig, botCfg.uiConfig.quoteConfig)
       oldCfg.baseOptions = botCfg.baseWalletOptions || {}
       oldCfg.quoteOptions = botCfg.quoteWalletOptions || {}
-      oldCfg.cexRebalance = cexRebalance
+      oldCfg.cexRebalance = uiConfig.cexRebalance
+      oldCfg.internalTransfers = uiConfig.internalTransfers
+      oldCfg.topUpFeeReserves = uiConfig.topUpFeeReserves
 
       if (mmCfg) {
         oldCfg.buyPlacements = mmCfg.buyPlacements
@@ -648,9 +655,15 @@ export default class MarketMakerSettingsPage extends BasePage {
     setMarketElements(document.body, baseID, quoteID, host)
     Doc.setVis(botType !== botTypeBasicArb, page.driftToleranceBox, page.switchToAdvanced)
     Doc.setVis(Boolean(cexName), ...Doc.applySelector(document.body, '[data-cex-show]'))
-
     Doc.setVis(viewOnly, page.viewOnlyRunning)
+
+    const baseFeeAssetID = baseToken?.parentID ?? baseID
+    const quoteFeeAssetID = quoteToken?.parentID ?? quoteID
+    let showFeeReserveTopUpSetting = baseFeeAssetID !== baseID && baseFeeAssetID !== quoteID
+    showFeeReserveTopUpSetting = showFeeReserveTopUpSetting || (quoteFeeAssetID !== baseID && quoteFeeAssetID !== quoteID)
+    Doc.setVis(showFeeReserveTopUpSetting, page.topUpFeeReserveSettings)
     Doc.setVis(cexName, page.cexRebalanceSettings)
+
     if (cexName) setCexElements(document.body, cexName)
 
     await this.fetchMarketReport()
@@ -1168,10 +1181,53 @@ export default class MarketMakerSettingsPage extends BasePage {
     }
   }
 
+  internalOnlyChanged () {
+    const checked = Boolean(this.page.internalOnlyRadio.checked)
+    this.page.externalTransfersRadio.checked = !checked
+    this.updatedConfig.cexRebalance = !checked
+    this.updatedConfig.internalTransfers = checked
+    this.updateAllocations()
+  }
+
+  externalTransfersChanged () {
+    const checked = Boolean(this.page.externalTransfersRadio.checked)
+    this.page.internalOnlyRadio.checked = !checked
+    this.updatedConfig.cexRebalance = checked
+    this.updatedConfig.internalTransfers = !checked
+    this.updateAllocations()
+  }
+
   autoRebalanceChanged () {
     const { page, updatedConfig: cfg } = this
-    cfg.cexRebalance = page.cexRebalanceCheckbox?.checked ?? false
+    const checked = page.cexRebalanceCheckbox?.checked
+    Doc.setVis(checked, page.internalOnlySettings, page.externalTransfersSettings)
+    if (checked && !cfg.cexRebalance && !cfg.internalTransfers) {
+      // default to external transfers
+      cfg.cexRebalance = true
+      page.externalTransfersRadio.checked = true
+      page.internalOnlyRadio.checked = false
+    } else if (!checked) {
+      cfg.cexRebalance = false
+      cfg.internalTransfers = false
+      page.externalTransfersRadio.checked = false
+      page.internalOnlyRadio.checked = false
+    } else if (cfg.cexRebalance && cfg.internalTransfers) {
+      // should not happen.. set to default
+      cfg.internalTransfers = false
+      page.externalTransfersRadio.checked = true
+      page.internalOnlyRadio.checked = false
+    } else {
+      // set to current values. This case should only be called when the form
+      // is loaded.
+      page.externalTransfersRadio.checked = cfg.cexRebalance
+      page.internalOnlyRadio.checked = cfg.internalTransfers
+    }
+
     this.updateAllocations()
+  }
+
+  topUpFeeReserveChanged () {
+    this.updatedConfig.topUpFeeReserves = Boolean(this.page.topUpFeeReservesCheckbox.checked)
   }
 
   async submitBotType () {
@@ -1620,9 +1676,12 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.qcProfitSlider.setValue((profit - defaultProfit.minV) / defaultProfit.range)
 
     if (cexName) {
-      page.cexRebalanceCheckbox.checked = cfg.cexRebalance
+      page.cexRebalanceCheckbox.checked = cfg.cexRebalance || cfg.internalTransfers
+      page.internalOnlyRadio.checked = cfg.internalTransfers
+      page.externalTransfersRadio.checked = cfg.cexRebalance
       this.autoRebalanceChanged()
     }
+    page.topUpFeeReservesCheckbox.checked = cfg.topUpFeeReserves
 
     // Gap strategy
     if (!page.gapStrategySelect.options) return
@@ -1701,7 +1760,9 @@ export default class MarketMakerSettingsPage extends BasePage {
         simpleArbLots: cfg.simpleArbLots,
         baseConfig: cfg.baseConfig,
         quoteConfig: cfg.quoteConfig,
-        cexRebalance: cfg.cexRebalance
+        cexRebalance: cfg.cexRebalance,
+        internalTransfers: cfg.internalTransfers,
+        topUpFeeReserves: cfg.topUpFeeReserves
       },
       baseWalletOptions: cfg.baseOptions,
       quoteWalletOptions: cfg.quoteOptions

@@ -658,4 +658,10 @@ var EnUS = map[string]*intl.Translation{
 	"Hide trading tier info":      {T: "Hide trading tier info"},
 	"Show reputation":             {T: "Show reputation"},
 	"Hide reputation":             {T: "Hide reputation"},
+	"Top up fee reserves":         {T: "Top up fee reserves"},
+	"top_up_fee_reserves_tooltip": {T: "When enabled, if the bot's fee reserves run too low, it will be allocated additional available funds from the wallet to be able to cover all configured placements. This is only applicable when the fee asset is neither the base nor quote asset."},
+	"Allow external transfers":    {T: "Allow external transfers"},
+	"external_transfers_tooltip":  {T: "When enabled, the bot will be able to transfer funds between the DEX and the CEX."},
+	"Internal transfers only":     {T: "Internal transfers only"},
+	"internal_only_tooltip":       {T: "When enabled, the bot will be able to use any available funds in the wallet to simulate a transfer between the DEX and the CEX, (i.e. increase the bot's DEX balance and decrease the bot's CEX balance when a withdrawal needs to be made) but no actual transfers will be made."},
 }
