@@ -3539,15 +3539,11 @@ func (dcr *ExchangeWallet) lookupTxOutput(ctx context.Context, txHash *chainhash
 	if err != nil {
 		return nil, 0, 0, err // asset.CoinNotFoundError if not found
 	}
-	msgTx, err := msgTxFromHex(tx.Hex)
-	if err != nil {
-		return nil, 0, 0, fmt.Errorf("invalid hex for tx %s: %v", txHash, err)
-	}
-	if int(vout) >= len(msgTx.TxOut) {
+	if int(vout) >= len(tx.MsgTx.TxOut) {
 		return nil, 0, 0, fmt.Errorf("tx %s has no output at %d", txHash, vout)
 	}
 
-	txOut = msgTx.TxOut[vout]
+	txOut = tx.MsgTx.TxOut[vout]
 	confs = uint32(tx.Confirmations)
 
 	// We have the requested output. Check if it is spent.
@@ -3716,15 +3712,11 @@ func (dcr *ExchangeWallet) queueFindRedemptionRequest(ctx context.Context, contr
 	if err != nil {
 		return nil, nil, err
 	}
-	msgTx, err := msgTxFromHex(tx.Hex)
-	if err != nil {
-		return nil, nil, fmt.Errorf("invalid contract tx hex %s: %w", tx.Hex, err)
-	}
-	if int(vout) > len(msgTx.TxOut)-1 {
+	if int(vout) > len(tx.MsgTx.TxOut)-1 {
 		return nil, nil, fmt.Errorf("vout index %d out of range for transaction %s", vout, txHash)
 	}
-	contractScript := msgTx.TxOut[vout].PkScript
-	contractScriptVer := msgTx.TxOut[vout].Version
+	contractScript := tx.MsgTx.TxOut[vout].PkScript
+	contractScriptVer := tx.MsgTx.TxOut[vout].Version
 	if !stdscript.IsScriptHashScript(contractScriptVer, contractScript) {
 		return nil, nil, fmt.Errorf("coin %s not a valid contract", contractOutpoint.String())
 	}
@@ -3787,12 +3779,12 @@ func (dcr *ExchangeWallet) findRedemptionsInMempool(contractOutpoints []outPoint
 	}
 
 	for _, txHash := range mempoolTxs {
-		tx, err := dcr.wallet.GetRawTransaction(dcr.ctx, txHash)
+		tx, err := dcr.wallet.GetTransaction(dcr.ctx, txHash)
 		if err != nil {
 			logAbandon(fmt.Sprintf("getrawtransaction error for tx hash %v: %v", txHash, err))
 			return
 		}
-		found, canceled := dcr.findRedemptionsInTx("mempool", tx, contractOutpoints)
+		found, canceled := dcr.findRedemptionsInTx("mempool", tx.MsgTx, contractOutpoints)
 		totalFound += found
 		totalCanceled += canceled
 		if totalFound+totalCanceled == contractsCount {
@@ -4588,11 +4580,7 @@ func (dcr *ExchangeWallet) FindBond(ctx context.Context, coinID []byte, searchUn
 	// to this wallet, it should be found here.
 	tx, err := dcr.wallet.GetTransaction(ctx, txHash)
 	if err == nil {
-		msgTx, err := msgTxFromHex(tx.Hex)
-		if err != nil {
-			return nil, fmt.Errorf("invalid hex for tx %s: %v", txHash, err)
-		}
-		return decodeV0BondTx(msgTx)
+		return decodeV0BondTx(tx.MsgTx)
 	}
 	if !errors.Is(err, asset.CoinNotFoundError) {
 		dcr.log.Warnf("Unexpected error looking up bond output %v:%d", txHash, vout)
@@ -5937,52 +5925,52 @@ func isMixTx(tx *wire.MsgTx) (isMix bool, mixDenom int64) {
 
 // idUnknownTx identifies the type and details of a transaction either made
 // or received by the wallet.
-func (dcr *ExchangeWallet) idUnknownTx(ctx context.Context, tx *ListTransactionsResult) (*asset.WalletTransaction, error) {
-	txHash, err := chainhash.NewHashFromStr(tx.TxID)
+func (dcr *ExchangeWallet) idUnknownTx(ctx context.Context, ltxr *ListTransactionsResult) (*asset.WalletTransaction, error) {
+	txHash, err := chainhash.NewHashFromStr(ltxr.TxID)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding tx hash %s: %v", tx.TxID, err)
+		return nil, fmt.Errorf("error decoding tx hash %s: %v", ltxr.TxID, err)
 	}
-	msgTx, err := dcr.wallet.GetRawTransaction(ctx, txHash)
+	tx, err := dcr.wallet.GetTransaction(ctx, txHash)
 	if err != nil {
-		return nil, fmt.Errorf("GetRawTransaction error: %v", err)
+		return nil, fmt.Errorf("GetTransaction error: %v", err)
 	}
 
 	var totalIn uint64
-	for _, txIn := range msgTx.TxIn {
+	for _, txIn := range tx.MsgTx.TxIn {
 		if txIn.ValueIn > 0 {
 			totalIn += uint64(txIn.ValueIn)
 		}
 	}
 
 	var totalOut uint64
-	for _, txOut := range msgTx.TxOut {
+	for _, txOut := range tx.MsgTx.TxOut {
 		totalOut += uint64(txOut.Value)
 	}
 
-	fee := rpcTxFee(tx)
+	fee := rpcTxFee(ltxr)
 	if fee == 0 && totalIn > totalOut {
 		fee = totalIn - totalOut
 	}
 
-	switch *tx.TxType {
+	switch *ltxr.TxType {
 	case walletjson.LTTTVote:
 		return &asset.WalletTransaction{
 			Type:   asset.TicketVote,
-			ID:     tx.TxID,
+			ID:     ltxr.TxID,
 			Amount: totalOut,
 			Fees:   fee,
 		}, nil
 	case walletjson.LTTTRevocation:
 		return &asset.WalletTransaction{
 			Type:   asset.TicketRevocation,
-			ID:     tx.TxID,
+			ID:     ltxr.TxID,
 			Amount: totalOut,
 			Fees:   fee,
 		}, nil
 	case walletjson.LTTTTicket:
 		return &asset.WalletTransaction{
 			Type:   asset.TicketPurchase,
-			ID:     tx.TxID,
+			ID:     ltxr.TxID,
 			Amount: totalOut,
 			Fees:   fee,
 		}, nil
@@ -6003,11 +5991,11 @@ func (dcr *ExchangeWallet) idUnknownTx(ctx context.Context, tx *ListTransactions
 			BondID:    pkHash[:],
 		}
 	}
-	if isBond, bondInfo := txIsBond(msgTx); isBond {
+	if isBond, bondInfo := txIsBond(tx.MsgTx); isBond {
 		return &asset.WalletTransaction{
 			Type:     asset.CreateBond,
-			ID:       tx.TxID,
-			Amount:   uint64(msgTx.TxOut[0].Value),
+			ID:       ltxr.TxID,
+			Amount:   uint64(tx.MsgTx.TxOut[0].Value),
 			Fees:     fee,
 			BondInfo: bondInfo,
 		}, nil
@@ -6023,10 +6011,10 @@ func (dcr *ExchangeWallet) idUnknownTx(ctx context.Context, tx *ListTransactions
 		}
 		return
 	}
-	if v := txPaysToScriptHash(msgTx); v > 0 {
+	if v := txPaysToScriptHash(tx.MsgTx); v > 0 {
 		return &asset.WalletTransaction{
 			Type:   asset.SwapOrSend,
-			ID:     tx.TxID,
+			ID:     ltxr.TxID,
 			Amount: v,
 			Fees:   fee,
 		}, nil
@@ -6059,10 +6047,10 @@ func (dcr *ExchangeWallet) idUnknownTx(ctx context.Context, tx *ListTransactions
 	redeemsSwap := func(msgTx *wire.MsgTx) bool {
 		return containsContractAtPushIndex(msgTx, 4, contractIsSwap)
 	}
-	if redeemsSwap(msgTx) {
+	if redeemsSwap(tx.MsgTx) {
 		return &asset.WalletTransaction{
 			Type:   asset.Redeem,
-			ID:     tx.TxID,
+			ID:     ltxr.TxID,
 			Amount: totalOut + fee,
 			Fees:   fee,
 		}, nil
@@ -6070,10 +6058,10 @@ func (dcr *ExchangeWallet) idUnknownTx(ctx context.Context, tx *ListTransactions
 	refundsSwap := func(msgTx *wire.MsgTx) bool {
 		return containsContractAtPushIndex(msgTx, 3, contractIsSwap)
 	}
-	if refundsSwap(msgTx) {
+	if refundsSwap(tx.MsgTx) {
 		return &asset.WalletTransaction{
 			Type:   asset.Refund,
-			ID:     tx.TxID,
+			ID:     ltxr.TxID,
 			Amount: totalOut + fee,
 			Fees:   fee,
 		}, nil
@@ -6097,10 +6085,10 @@ func (dcr *ExchangeWallet) idUnknownTx(ctx context.Context, tx *ListTransactions
 		}
 		return containsContractAtPushIndex(msgTx, 2, isBond), bondInfo
 	}
-	if isBondRedemption, bondInfo := redeemsBond(msgTx); isBondRedemption {
+	if isBondRedemption, bondInfo := redeemsBond(tx.MsgTx); isBondRedemption {
 		return &asset.WalletTransaction{
 			Type:     asset.RedeemBond,
-			ID:       tx.TxID,
+			ID:       ltxr.TxID,
 			Amount:   totalOut,
 			Fees:     fee,
 			BondInfo: bondInfo,
@@ -6130,17 +6118,17 @@ func (dcr *ExchangeWallet) idUnknownTx(ctx context.Context, tx *ListTransactions
 		return true
 	}
 
-	if tx.Send && allOutputsPayUs(msgTx) && len(msgTx.TxIn) == 1 {
+	if ltxr.Send && allOutputsPayUs(tx.MsgTx) && len(tx.MsgTx.TxIn) == 1 {
 		return &asset.WalletTransaction{
 			Type: asset.Split,
-			ID:   tx.TxID,
+			ID:   ltxr.TxID,
 			Fees: fee,
 		}, nil
 	}
 
-	if isMix, mixDenom := isMixTx(msgTx); isMix {
+	if isMix, mixDenom := isMixTx(tx.MsgTx); isMix {
 		var mixedAmount uint64
-		for _, txOut := range msgTx.TxOut {
+		for _, txOut := range tx.MsgTx.TxOut {
 			if txOut.Value == mixDenom {
 				_, addrs := stdscript.ExtractAddrs(scriptVersion, txOut.PkScript, dcr.chainParams)
 				if err != nil {
@@ -6166,7 +6154,7 @@ func (dcr *ExchangeWallet) idUnknownTx(ctx context.Context, tx *ListTransactions
 
 		return &asset.WalletTransaction{
 			Type:   asset.Mix,
-			ID:     tx.TxID,
+			ID:     ltxr.TxID,
 			Amount: mixedAmount,
 			Fees:   fee,
 		}, nil
@@ -6224,30 +6212,30 @@ func (dcr *ExchangeWallet) idUnknownTx(ctx context.Context, tx *ListTransactions
 		return
 	}
 
-	in, out := txOutDirection(msgTx)
+	in, out := txOutDirection(tx.MsgTx)
 
-	if tx.Send {
+	if ltxr.Send {
 		txType := asset.Send
 		amt := out
-		if allOutputsPayUs(msgTx) {
+		if allOutputsPayUs(tx.MsgTx) {
 			txType = asset.SelfSend
 			amt = in
 		}
 		return &asset.WalletTransaction{
 			Type:      txType,
-			ID:        tx.TxID,
+			ID:        ltxr.TxID,
 			Amount:    amt,
 			Fees:      fee,
-			Recipient: getRecipient(msgTx, false),
+			Recipient: getRecipient(tx.MsgTx, false),
 		}, nil
 	}
 
 	return &asset.WalletTransaction{
 		Type:      asset.Receive,
-		ID:        tx.TxID,
+		ID:        ltxr.TxID,
 		Amount:    in,
 		Fees:      fee,
-		Recipient: getRecipient(msgTx, true),
+		Recipient: getRecipient(tx.MsgTx, true),
 	}, nil
 }
 
