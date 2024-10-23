@@ -6611,7 +6611,7 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 		}
 
 		if walletBlock == nil {
-			dcr.handleTipChange(ctx, newTip.hash, newTip.height, nil)
+			dcr.handleTipChange(ctx, newTip.hash, newTip.height)
 			return
 		}
 
@@ -6639,7 +6639,7 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 						"never reported: %s (%d). If you see this message repeatedly, it may indicate "+
 						"an issue with the wallet.", newTip.hash, newTip.height)
 				}
-				dcr.handleTipChange(ctx, newTip.hash, newTip.height, nil)
+				dcr.handleTipChange(ctx, newTip.hash, newTip.height)
 			}),
 		}
 	}
@@ -6666,7 +6666,7 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 				}
 				queuedBlock = nil
 			}
-			dcr.handleTipChange(ctx, walletTip.hash, walletTip.height, nil)
+			dcr.handleTipChange(ctx, walletTip.hash, walletTip.height)
 		case <-ctx.Done():
 			return
 		}
@@ -6678,9 +6678,8 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 	}
 }
 
-func (dcr *ExchangeWallet) handleTipChange(ctx context.Context, newTipHash *chainhash.Hash, newTipHeight int64, err error) {
-	if err != nil {
-		dcr.log.Error(err)
+func (dcr *ExchangeWallet) handleTipChange(ctx context.Context, newTipHash *chainhash.Hash, newTipHeight int64) {
+	if dcr.ctx.Err() != nil {
 		return
 	}
 
