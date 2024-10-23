@@ -49,6 +49,20 @@ func (s *WebServer) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// tokenAuthMiddleware checks for an dexauth query parameter.
+// If present, it sets the dexauth cookie.  This allows for passwordless
+// login in the context of mobile companion apps.
+func (s *WebServer) tokenAuthMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queries := r.URL.Query()
+		authToken := queries.Get(authCK)
+		if authToken != "" {
+			setCookie(authCK, authToken, w)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // extractBooleanCookie extracts the cookie value with key k from the Request,
 // and interprets the value as true only if it's equal to the string "1".
 func extractBooleanCookie(r *http.Request, k string, defaultVal bool) bool {
