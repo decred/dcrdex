@@ -382,13 +382,12 @@ export default class WalletsPage extends BasePage {
     // Validate send address on input.
     Doc.bind(page.sendAddr, 'input', async () => {
       const asset = app().assets[this.selectedAssetID]
-      Doc.hide(page.validAddr)
-      page.sendAddr.classList.remove('is-invalid')
+      page.sendAddr.classList.remove('border-danger', 'border-success')
       const addr = page.sendAddr.value || ''
       if (!asset || addr === '') return
       const valid = await this.validateSendAddress(addr, asset.id)
-      if (valid) Doc.show(page.validAddr)
-      else page.sendAddr.classList.add('is-invalid')
+      if (valid) page.sendAddr.classList.add('border-success')
+      else page.sendAddr.classList.add('border-danger')
     })
 
     // A link on the wallet reconfiguration form to show/hide the password field.
@@ -2161,8 +2160,8 @@ export default class WalletsPage extends BasePage {
       Doc.show(page.toggleSubtract)
     }
 
-    Doc.hide(page.validAddr, page.sendErr, page.maxSendDisplay, page.sendTokenMsgBox)
-    page.sendAddr.classList.remove('invalid')
+    Doc.hide(page.sendErr, page.maxSendDisplay, page.sendTokenMsgBox)
+    page.sendAddr.classList.remove('border-danger', 'border-success')
     page.sendAddr.value = ''
     page.sendAmt.value = ''
     const xcRate = app().fiatRatesMap[assetID]
