@@ -355,6 +355,10 @@ export default class DexSettingsPage extends BasePage {
     } else this.page.toggleAccountStatusBtn.textContent = intl.prep(intl.ID_DISABLE_ACCOUNT)
 
     this.accountDisabled = disable
+
+    // Refresh exchange information since we've just enabled/disabled the
+    // exchange.
+    await app().fetchUser()
     app().loadPage(`dexsettings/${host}`)
   }
 
