@@ -322,6 +322,8 @@ github.com/decred/vspd/types/v2 v2.1.0 h1:cUVlmHPeLVsksPRnr2WHsmC2t1Skl6g1WH0Hmp
 github.com/decred/vspd/types/v2 v2.1.0/go.mod h1:2xnNqedkt9GuL+pK8uIzDxqYxFlwLRflYFJH64b76n0=
 github.com/denis-tingajkin/go-header v0.4.2/go.mod h1:eLRHAVXzE5atsKAnNRDB90WHCFFnBUn4RN0nRcs1LJA=
 github.com/desertbit/timer v0.0.0-20180107155436-c41aec40b27f/go.mod h1:xH/i4TFMt8koVQZ6WFms69WAsDWr2XsYL3Hkl7jkoLE=
+github.com/dev-warrior777/go-monero v0.1.0 h1:86JJRiYNk2muLJFWM6kgb7qZh1gE/ETjvjHSW+3Rn5c=
+github.com/dev-warrior777/go-monero v0.1.0/go.mod h1:DSf/k695WklA8lTl1EzqNLhtKP3BE3x5KU6tsPrXp4k=
 github.com/dgraph-io/badger v1.6.2 h1:mNw0qs90GVgGGWylh0umH5iag1j6n/PeJtNvL6KY/x8=
 github.com/dgraph-io/badger v1.6.2/go.mod h1:JW2yswe3V058sS0kZ2h/AXeDSqFjxnZcRrVH//y2UQE=
 github.com/dgraph-io/ristretto v0.0.2 h1:a5WaUrDa0qm0YrAAS1tUykT5El3kt62KNZZeMxQn3po=
@@ -613,6 +615,8 @@ github.com/hashicorp/logutils v1.0.0/go.mod h1:QIAnNjmIWmVIIkWDTG1z5v++HQmx9WQRO
 github.com/hashicorp/mdns v1.0.0/go.mod h1:tL+uN++7HEJ6SQLQ2/p+z2pH24WQKWjBPkE0mNTz8vQ=
 github.com/hashicorp/memberlist v0.1.3/go.mod h1:ajVTdAv/9Im8oMAAj5G31PhhMCZJV2pPBoIllUwCN7I=
 github.com/hashicorp/serf v0.8.2/go.mod h1:6hOLApaqBFA1NXqRQAsxw9QxuDEvNxSQRwA/JwenrHc=
+github.com/haven-protocol-org/monero-go-utils v0.0.0-20211126154105-058b2666f217 h1:CflMOYZHhaBo+7up92oOYcesIG+qDCAKdJo+niKBFWM=
+github.com/haven-protocol-org/monero-go-utils v0.0.0-20211126154105-058b2666f217/go.mod h1:vSMDRpw62HGWO1Fi9DQwfgs4e3JCbt475GWY/W5DQZI=
 github.com/holiman/billy v0.0.0-20240216141850-2abb0c79d3c4 h1:X4egAf/gcS1zATw6wn4Ej8vjuVGxeHdan+bRb2ebyv4=
 github.com/holiman/billy v0.0.0-20240216141850-2abb0c79d3c4/go.mod h1:5GuXa7vkL8u9FkFuWdVvfR5ix8hRB7DbOAaYULamFpc=
 github.com/holiman/bloomfilter/v2 v2.0.3 h1:73e0e/V0tCydx14a0SCYS/EWCxgwLZ18CZcZKVu0fao=
