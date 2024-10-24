@@ -4,35 +4,6 @@ This guide assumes you have already set up a Bison Wallet using the
 [Bison Wallet Setup Guide](./Bison%20Wallet%20Setup%20Guide.md).
 
 ---
-# Table of Contents
-
-* [Header](#header)
-* [Wallets](#wallets)
-  * [Asset Selection](#asset-selection)
-  * [Wallet Details](#wallet-details)
-  * [Receive](#receive)
-  * [Send](#send)
-  * [Wallet Settings](#wallet-settings)
-    * [Common Parameters](#common-parameters)
-    * [External Wallet Parameters](#external-wallet-parameters)
-    * [Functions](#wallet-settings-functions)
-  * [Fee Status](#fee-status)
-  * [Transaction History](#transaction-history)
-  * [Markets](#markets)
-  * [Recent Activity](#recent-activity)
-  * [Asset-Specific Features](#asset-specific-features)
-    * [Decred](#decred)
-      * [Privacy](#privacy)
-      * [Staking](#staking)
-      * [Voting Preferences](#voting-preferences)
-  * [External Wallet Configuration](#external-wallet-configuration)
-  * [Custom RPC Providers for EVM-compatible networks](#custom-rpc-providers-for-evm-compatible-networks)
-* [Trade]()
-
- 
-
----
-
 # Header
 
 The Header is displayed at the top of the window, and it is used to access 
@@ -50,7 +21,7 @@ The header contains links to the following sections:
 
 # Wallets
 
-The Wallets tab is divided into the following sections:
+The Wallet view is divided into the following sections:
 
 ## Asset Selection
 
@@ -59,7 +30,131 @@ available assets in Bison Wallet. For smart contract-enabled tokens that use ano
 underlying blockchain (e.g. Ethereum, Polygon, etc.), the network is indicated with a smaller
 icon in the top-right of each asset.
 
-![Header](./images/using-bison-wallet/wallets-assetselection.png)
+![Asset Selection](./images/using-bison-wallet/wallets-assetselection.png)
+
+### Creating a New Wallet
+
+If you wish to create additional wallets beyond those set up during the 
+[Quick Configuration](./Bison%20Wallet%20Setup%20Guide.md#quick-configuration), click the desired
+asset and click on the *Create Wallet* button. 
+
+![Create Wallet Button](./images/using-bison-wallet/wallets-create.png)
+
+Most users will utilize the native wallets already built into Bison Wallet. Based on the asset, 
+you may have the option to choose between a Native/SPV Wallet, an external full node wallet, 
+or an Electrum-based wallet.
+
+If a native wallet has already been created for a selected asset, you can modify the wallet type 
+through the Wallet Settings dialog.
+
+#### Native Wallet
+
+All private keys and accounts for Bison Wallet's native wallets are derived from the application's seed, 
+ensuring that reinitializing the wallet from this seed will restore all wallets and associated token wallets. 
+The keys are exclusively managed by the application, and all transaction signing is securely 
+processed through Bison Wallet.
+
+Bison Wallet's native Bitcoin and Litecoin wallets use [Neutrino](https://github.com/lightninglabs/neutrino), 
+while the native Decred wallet utilizes 
+[Decred's Simple Payment Verification (SPV)](https://docs.decred.org/wallets/spv/) implementation. These native 
+wallets provide fast, lightweight functionality with minimal resource usage, while preserving
+privacy by limiting data exposure during transaction verification. 
+
+For EVM-Compatible assets, such as Ethereum and Polygon, Bison Wallet leverages RPC Providers. which serve as 
+the wallet's gateway to the respective blockchain networks, read more about [RPC Providers](#todo-rpc) in their 
+respective section of this wiki.
+
+Creating a new native wallet is simple—no additional parameters are needed. Just click the **Create** button in the
+**Add a Wallet** dialog.
+
+![Create Native Wallet](./images/using-bison-wallet/wallet-create-LTC-Native.png)
+
+#### External Wallet
+
+Bison Wallet supports using full node and Electrum-based wallets, depending on the asset. 
+
+If using external wallet software, you **must** ensure it remains running while Bison Wallet is running. Do not shut 
+down, lock, unlock, or otherwise modify your wallet settings while Bison Wallet is running. Also, only send funds 
+from within Bison Wallet, not directly from the external wallet's own controls. Finally, do not manually lock 
+or unlock any coins while Bison Wallet is running.
+
+##### Full Node
+
+A full node wallet operates by downloading and storing the entire blockchain for a given asset. It independently 
+verifies every transaction and block, offering maximum security, privacy, and decentralization. While it provides 
+a high level of trust, it requires more storage, bandwidth, and processing power compared to lightweight or 
+SPV wallets.
+
+Bitcoin Core and most wallets based on it support block pruning, which can reduce blockchain storage to just a few 
+gigabytes instead of the full blockchain size. However, a larger storage allocation is recommended to avoid full 
+reindexing if the wallet is used infrequently. Additionally, for accurate network fee estimates, the full node 
+should remain running for several blocks.
+
+![Create Full Node Wallet](./images/using-bison-wallet/wallet-create-LTC-Core.png)
+
+The rest of this section will walk through the configuration of a Litecoin Core wallet for illustrative 
+purposes. Some steps may differ depending on the asset.
+
+Some manual configuration of the full node's RPC server is also required. This can be done via command line parameters
+or by editing the configuration file (e.g., `bitcoin.conf`, `litecoin.conf`, etc.). Simply add the following lines,
+replacing the values as needed:
+```
+server=1
+rpcuser=<Username>
+rpcpassword=<Password>
+rpcbind=<Address>:<Port Number>
+```
+When configuring your wallet in Bison Wallet:
+* **Wallet Name:** the name of the wallet as created in the external wallet.
+* **JSON-RPC Username:** value entered for rpcuser.
+* **JSON-RPC Password:** value entered for rpcpassword.
+* **JSON-RPC Address:** value entered for rpcbind.
+* **Wallet Password:** the passphrase for unlocking the external wallet, leave blank if it's not encrypted.
+
+The wallet status will be indicated in the [Wallet Details](#wallet-details) section once the wallet has been
+correctly configured.
+
+![Create Full Node Wallet](./images/using-bison-wallet/wallet-create-LTC-Core-created.png)
+
+##### Electrum
+
+[Electrum](https://electrum.org/) is a type of light wallet that allows users to interact with the respective blockchain 
+without running a full node, it works by connecting to external servers instead. Light wallets provide a level of 
+convenience but there are often subtle consequences due to their reliance on centralized services, read more about this 
+topic in the
+[Decred Documentation](https://docs.decred.org/wallets/spv/#how-is-this-different-from-a-light-wallet). 
+
+The Electrum option in Bison Wallet is less mature and provides less privacy than the other wallet types. 
+The rest of this section will walk through the configuration of a Litecoin Electrum wallet for illustrative 
+purposes. Some steps may differ depending on the asset.
+
+![Create Electrum Wallet](./images/using-bison-wallet/wallet-create-LTC-Electrum.png)
+
+Some manual configuration of the Electrum wallet's RPC server is also necessary, this can be done via 
+[CLI](https://electrum.readthedocs.io/en/latest/jsonrpc.html) or, using the console in the GUI:
+
+1. From the menu bar, click View > Show Console.
+2. Enter the following commands, replacing the values as required:
+   1. Type ``setconfig('rpcuser','<Username>')``, and press Enter. 
+   The entered value will be the JSON-RPC Username in Bison Wallet. 
+   2. Type ``setconfig('rpcpassword','<Password>')``, and press Enter. 
+   The entered value will be the JSON-RPC Password in Bison Wallet. 
+   3. Type ``setconfig('rpcport','<Port Number>')``, and press Enter. 
+   The entered value will be the JSON-RPC Port in Bison Wallet. 
+   4. Type ``setconfig('rpchost','<Address>')``, and press Enter - use `127.0.0.1` for localhost. 
+   By default, Bison Wallet is set up for Electrum wallets running in localhost - this can be modified 
+   in the JSON-RPC Address field under **show additional settings**.
+3. Restart Electrum.
+4. Enter the Electrum Wallet Password in Bison Wallet.
+5. Click **Add**.
+
+**Note:** By default, Bison Wallet is set up for **default_wallet** in Electrum - this can be modified 
+in the Wallet File field under **show additional settings**.
+
+The wallet status will be indicated in the [Wallet Details](#wallet-details) section once the wallet has been
+correctly configured.
+
+![Electrum Wallet Synchronized](./images/using-bison-wallet/wallet-create-LTC-Electrum-synched.png)
 
 ## Wallet Details
 
@@ -106,8 +201,9 @@ After reviewing these numbers, you can press the **Send** button and your transa
 ### Wallet Settings
 
 The parameters and functions available under Wallet Settings vary depending on the asset and the type of wallet 
-selected. Descriptions for each parameter are also available within the settings panel in Bison Wallet by hovering 
-over the 🛈 icon.
+selected. The wallet settings panel also allows you to change the wallet type (e.g. Native/SPV, Electrum or Full Node).
+Descriptions for each parameter are also available within the settings panel in Bison Wallet by hovering 
+over the information icon.
 
 ![Decred Wallet Settings](./images/using-bison-wallet/wallets-settings-native-decred.png)
 
@@ -281,23 +377,14 @@ agendas and let you set your vote preference.
 
 Read more about Decred's Governance in the [Decred Documentation](https://docs.decred.org/governance/overview/).
 
-## External Wallet Configuration
-
-
-
 ## Custom RPC Providers for EVM-Compatible Networks
 
 _This section of the wiki is only applicable to Ethereum and Polygon._
 
-EVM (Ethereum Virtual Machine) compatible wallets within Bison Wallet operate similarly to the native Bitcoin and 
-Decred wallets. As with the other native wallets, private keys and accounts are derived from the Bison Wallet 
-application's seed, ensuring that reinitializing the wallet from this seed will restore both the wallet and any 
-associated token  wallets. The keys are exclusively managed by the application, and all transaction signing is securely 
-processed through Bison Wallet.
-
-However, unlike the other native wallets, Bison Wallet leverages RPC Providers, which serve as the wallet's 
-gateway to the respective blockchain networks. For example, many casual Ethereum users are familiar with Infura,
-which is the default RPC provider for popular wallets such as MetaMask. 
+The native wallet Bison Wallet leverages RPC Providers, which serve as the wallet's 
+gateway to the respective blockchain networks for EVM (Ethereum Virtual Machine) compatible assets. For example, 
+many casual Ethereum users are familiar with Infura, which is the default RPC provider for popular wallets 
+such as MetaMask. 
 
 When setting up your wallets for EVM-compatible assets in Bison Wallet, it will use a default set of public 
 RPC providers, which could become outdated or unreliable. We recommend that you specify the full path to a custom 
@@ -378,6 +465,7 @@ Some providers allow you to sign in with a web3 wallet (e.g. MetaMask) to create
 a personal API key and access a dashboard. This may be preferable to creating an
 account with an email address.
 
+---
 
 # Markets
 
