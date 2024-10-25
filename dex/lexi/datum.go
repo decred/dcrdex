@@ -22,6 +22,11 @@ func (d *datum) bytes() ([]byte, error) {
 	if d.version != 0 {
 		return nil, fmt.Errorf("unknown datum version %d", d.version)
 	}
+
+	// encoded datum length is 1 byte for version, 1 varint to say how many
+	// indexes there are then for each index, a varint to specify the size of
+	// the index entry followed by the entry itself, then a varint to specify
+	// the size of the value blob followed by the value blob itself.
 	bLen := 1 + len(d.v) + wire.VarIntSerializeSize(uint64(len(d.v))) + wire.VarIntSerializeSize(uint64(len(d.indexes)))
 	for _, ib := range d.indexes {
 		bLen += len(ib) + wire.VarIntSerializeSize(uint64(len(ib)))

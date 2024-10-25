@@ -37,7 +37,7 @@ type Index struct {
 }
 
 // AddIndex adds an index to a Table. Once an Index is added, every datum
-// inserted Set in the Table will generate an entry in the Index too.
+// Set in the Table will generate an entry in the Index too.
 func (t *Table) AddIndex(name string, f func(k, v encoding.BinaryMarshaler) ([]byte, error)) (*Index, error) {
 	p, err := t.prefixForName(t.name + "__idx__" + name)
 	if err != nil {
@@ -72,7 +72,7 @@ type iteratorOpts struct {
 	seek    []byte
 }
 
-// IterationOption is a knob to change on Iterate runs on an Index.
+// IterationOption is a knob to change how Iterate runs on an Index.
 type IterationOption func(opts *iteratorOpts)
 
 // WithUpdate must be used if the caller intends to make modifications during
