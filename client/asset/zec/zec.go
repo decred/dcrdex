@@ -3346,7 +3346,8 @@ func (w *zecWallet) idUnknownTx(tx *btcjson.ListTransactionsResult) (*asset.Wall
 func (w *zecWallet) addUnknownTransactionsToHistory(tip uint64) {
 	txHistoryDB := w.txDB()
 
-	const blockQueryBuffer = 3
+	// Zcash has a maximum reorg length of 100 blocks.
+	const blockQueryBuffer = 100
 	var blockToQuery uint64
 	lastQuery := w.receiveTxLastQuery.Load()
 	if lastQuery == 0 {
@@ -3421,6 +3422,10 @@ func (w *zecWallet) syncTxHistory(tip uint64) {
 
 	txHistoryDB := w.txDB()
 	if txHistoryDB == nil {
+		// It's actually impossible to get here, because we error and return
+		// early in Connect if startTxHistoryDB returns an error, but we'll
+		// log this for good measure anyway.
+		w.log.Error("Transaction history database was not initialized")
 		return
 	}
 
