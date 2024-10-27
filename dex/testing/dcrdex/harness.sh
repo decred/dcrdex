@@ -20,17 +20,18 @@ cat > "${DCRDEX_DATA_DIR}/build" <<EOF
 #!/usr/bin/env bash
 cd ${HARNESS_DIR}/../../../server/cmd/dcrdex/
 go build -o ${DCRDEX_DATA_DIR}/dcrdex -ldflags \
-    "-X 'decred.org/dcrdex/dex.testLockTimeTaker=1m' \
-    -X 'decred.org/dcrdex/dex.testLockTimeMaker=2m'"
+    "-X 'decred.org/dcrdex/dex.testLockTimeTaker=3m' \
+    -X 'decred.org/dcrdex/dex.testLockTimeMaker=6m'"
 EOF
 chmod +x "${DCRDEX_DATA_DIR}/build"
 
+# Alternate lock times build script as a harness control
 cat > "${DCRDEX_DATA_DIR}/build-lock" <<EOF
 #!/usr/bin/env bash
 cd ${HARNESS_DIR}/../../../server/cmd/dcrdex/
 go build -o ${DCRDEX_DATA_DIR}/dcrdex -ldflags \
-    "-X 'decred.org/dcrdex/dex.testLockTimeTaker=\${1:-3m}' \
-    -X 'decred.org/dcrdex/dex.testLockTimeMaker=\${2:-6m}'"
+    "-X 'decred.org/dcrdex/dex.testLockTimeTaker=\${1:-1m}' \
+    -X 'decred.org/dcrdex/dex.testLockTimeMaker=\${2:-2m}'"
 EOF
 chmod +x "${DCRDEX_DATA_DIR}/build-lock"
 

@@ -36,7 +36,7 @@ while [ "${1:-}" != "" ]; do
   shift
 done
 
-if [ "$SIMNET" ] ; then
+if [ "${SIMNET}" ] ; then
   PAIR_ROOT=~/dextest/simnet-walletpair
   CLIENT_1_ADDR="127.0.0.6:5760"
   CLIENT_1_RPC_ADDR="127.0.0.6:5761"
@@ -57,7 +57,13 @@ BW_DIR=$(realpath ../../../client/cmd/bisonw)
 BISONW="${BW_DIR}/bisonw"
 
 cd "${BW_DIR}"
-go build
+if [ "${SIMNET}" ] ; then
+  echo "building bisonw for simnet - lock times: taker 3m, maker 6m"
+  go build -ldflags "-X decred.org/dcrdex/dex.testLockTimeTaker=3m \
+                     -X decred.org/dcrdex/dex.testLockTimeMaker=6m"
+else
+  go build
+fi
 cd -
 
 mkdir -p "${HARNESS_DIR}"
