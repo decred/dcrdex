@@ -30,11 +30,13 @@ while [ "${1:-}" != "" ]; do
       echo "Only starting wallet # 1"
       ;;
     *)
-      BW_ARGS+=("$1")
+      BW_ARGS+=" ${1}"
       ;;
   esac
   shift
 done
+
+echo "BW_ARGS=${BW_ARGS} - overrides config"
 
 if [ "$SIMNET" ] ; then
   PAIR_ROOT=~/dextest/simnet-walletpair
