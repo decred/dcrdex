@@ -1706,15 +1706,15 @@ export default class MarketsPage extends BasePage {
       let ordType = ''
       switch (ord.type) {
         case OrderUtil.OrderTypeLimit:{
-          ordType = 'limit'
+          ordType = intl.prep(intl.ID_LIMIT_ORDER)
           break
         }
         case OrderUtil.OrderTypeMarket:{
-          ordType = 'market'
+          ordType = intl.prep(intl.ID_MARKET_ORDER)
           break
         }
         case OrderUtil.OrderTypeCancel:{
-          ordType = 'cancel'
+          ordType = intl.prep('cancel') // currently no translation
           break
         }
       }
