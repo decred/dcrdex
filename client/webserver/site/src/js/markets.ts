@@ -1714,7 +1714,7 @@ export default class MarketsPage extends BasePage {
           break
         }
         case OrderUtil.OrderTypeCancel:{
-          ordType = intl.prep('cancel') // currently no translation
+          ordType = 'cancel' // currently no translation
           break
         }
       }
