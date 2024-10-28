@@ -9385,10 +9385,10 @@ func handleRedemptionRoute(c *Core, dc *dexConnection, msg *msgjson.Message) err
 // zero, a resync monitor goroutine is launched to poll SyncStatus until the
 // wallet has caught up with its network. The monitor goroutine will regularly
 // emit wallet state notes, and once sync has been restored, a wallet balance
-// note will be emitted. If err is non-nil, numPeers should be zero.
-func (c *Core) peerChange(w *xcWallet, numPeers uint32, err error) {
-	if err != nil {
-		c.log.Warnf("%s wallet communication issue: %q", unbip(w.AssetID), err.Error())
+// note will be emitted. If peerChangeErr is non-nil, numPeers should be zero.
+func (c *Core) peerChange(w *xcWallet, numPeers uint32, peerChangeErr error) {
+	if peerChangeErr != nil {
+		c.log.Warnf("%s wallet communication issue: %q", unbip(w.AssetID), peerChangeErr.Error())
 	} else if numPeers == 0 {
 		c.log.Warnf("Wallet for asset %s has zero network peers!", unbip(w.AssetID))
 	} else {
@@ -9423,10 +9423,10 @@ func (c *Core) peerChange(w *xcWallet, numPeers uint32, err error) {
 
 	// Send a WalletStateNote in case Synced or anything else has changed.
 	if atomic.LoadUint32(w.broadcasting) == 1 {
-		if (numPeers == 0 || err != nil) && !wasDisconnected { // was connected or initial report
-			if err != nil {
+		if (numPeers == 0 || peerChangeErr != nil) && !wasDisconnected { // was connected or initial report
+			if peerChangeErr != nil {
 				subject, details := c.formatDetails(TopicWalletCommsWarning,
-					w.Info().Name, err.Error())
+					w.Info().Name, peerChangeErr.Error())
 				c.notify(newWalletConfigNote(TopicWalletCommsWarning, subject, details,
 					db.ErrorLevel, w.state()))
 			} else {
