@@ -2600,14 +2600,32 @@ func (c *Core) sendInitAsync(t *trackedTrade, match *matchTracker, coinID, contr
 		err = t.dc.signAndRequest(init, msgjson.InitRoute, ack, timeout)
 		if err != nil {
 			var msgErr *msgjson.Error
-			if errors.As(err, &msgErr) && msgErr.Code == msgjson.SettlementSequenceError {
-				c.log.Errorf("Starting match status resolution for 'init' request SettlementSequenceError")
-				c.resolveMatchConflicts(t.dc, map[order.OrderID]*matchStatusConflict{
-					t.ID(): {
-						trade:   t,
-						matches: []*matchTracker{match},
-					},
-				})
+			if errors.As(err, &msgErr) {
+				if msgErr.Code == msgjson.SettlementSequenceError {
+					c.log.Errorf("Starting match status resolution for 'init' request SettlementSequenceError")
+					c.resolveMatchConflicts(t.dc, map[order.OrderID]*matchStatusConflict{
+						t.ID(): {
+							trade:   t,
+							matches: []*matchTracker{match},
+						},
+					})
+				} else if msgErr.Code == msgjson.RPCUnknownMatch {
+					t.mtx.Lock()
+					oid := t.ID()
+					c.log.Warnf("DEX %s did not report active match %s on order %s - assuming revoked, status %v.",
+						t.dc.acct.host, match, oid, match.Status)
+					// We must have missed the revoke notification. Flag to allow recovery
+					// and subsequent retirement of the match and parent trade.
+					match.MetaData.Proof.SelfRevoked = true
+					if err := c.db.UpdateMatch(&match.MetaMatch); err != nil {
+						c.log.Errorf("Failed to update missing/revoked match: %v", err)
+					}
+					t.mtx.Unlock()
+					numMissing := 1
+					subject, details := c.formatDetails(TopicMissingMatches,
+						numMissing, makeOrderToken(t.token()), t.dc.acct.host)
+					c.notify(newOrderNote(TopicMissingMatches, subject, details, db.ErrorLevel, t.coreOrderInternal()))
+				}
 			}
 			err = fmt.Errorf("error sending 'init' message: %w", err)
 			return
@@ -2870,14 +2888,32 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 		err = t.dc.signAndRequest(msgRedeem, msgjson.RedeemRoute, ack, timeout)
 		if err != nil {
 			var msgErr *msgjson.Error
-			if errors.As(err, &msgErr) && msgErr.Code == msgjson.SettlementSequenceError {
-				c.log.Errorf("Starting match status resolution for 'redeem' request SettlementSequenceError")
-				c.resolveMatchConflicts(t.dc, map[order.OrderID]*matchStatusConflict{
-					t.ID(): {
-						trade:   t,
-						matches: []*matchTracker{match},
-					},
-				})
+			if errors.As(err, &msgErr) {
+				if msgErr.Code == msgjson.SettlementSequenceError {
+					c.log.Errorf("Starting match status resolution for 'redeem' request SettlementSequenceError")
+					c.resolveMatchConflicts(t.dc, map[order.OrderID]*matchStatusConflict{
+						t.ID(): {
+							trade:   t,
+							matches: []*matchTracker{match},
+						},
+					})
+				} else if msgErr.Code == msgjson.RPCUnknownMatch {
+					t.mtx.Lock()
+					oid := t.ID()
+					c.log.Warnf("DEX %s did not report active match %s on order %s - assuming revoked, status %v.",
+						t.dc.acct.host, match, oid, match.Status)
+					// We must have missed the revoke notification. Flag to allow recovery
+					// and subsequent retirement of the match and parent trade.
+					match.MetaData.Proof.SelfRevoked = true
+					if err := c.db.UpdateMatch(&match.MetaMatch); err != nil {
+						c.log.Errorf("Failed to update missing/revoked match: %v", err)
+					}
+					t.mtx.Unlock()
+					numMissing := 1
+					subject, details := c.formatDetails(TopicMissingMatches,
+						numMissing, makeOrderToken(t.token()), t.dc.acct.host)
+					c.notify(newOrderNote(TopicMissingMatches, subject, details, db.ErrorLevel, t.coreOrderInternal()))
+				}
 			}
 			err = fmt.Errorf("error sending 'redeem' message: %w", err)
 			return
