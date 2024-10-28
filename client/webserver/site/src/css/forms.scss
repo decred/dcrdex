@@ -22,6 +22,14 @@ textarea {
     outline: none;
   }
 
+  &.border-danger {
+    border-color: var(--text-danger);
+  }
+  
+  &.border-success {
+    border-color: var(--indicator-good);
+  }
+
   &.thin {
     width: 4rem;
   }
@@ -68,14 +76,6 @@ select {
   .setuporange {
     color: #b89400;
   }
-}
-
-.border-danger {
-  border-color: red;
-}
-
-.border-success {
-  border-color: #009931;
 }
 
 #confirmRegForm {
