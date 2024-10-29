@@ -244,3 +244,14 @@ function dexAssetSymbol (host: string, assetID: number): string {
 export function isCancellable (ord: Order): boolean {
   return ord.type === Limit && ord.tif === StandingTiF && ord.status < StatusExecuted
 }
+
+export function orderTypeText (ordType: number): string {
+  switch (ordType) {
+    case OrderTypeLimit:
+      return intl.prep(intl.ID_LIMIT_ORDER)
+    case OrderTypeMarket:
+      return intl.prep(intl.ID_MARKET_ORDER)
+    default: // OrderTypeCancel
+      return intl.prep(intl.ID_CANCEL_ORDER)
+  }
+}

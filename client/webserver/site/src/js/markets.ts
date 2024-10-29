@@ -1703,22 +1703,7 @@ export default class MarketsPage extends BasePage {
       else rateStr = Doc.formatRateFullPrecision(ord.rate, market.baseUnitInfo, market.quoteUnitInfo, cfg.ratestep)
       details.rate.textContent = mord.header.rate.textContent = rateStr
       header.baseSymbol.textContent = market.baseUnitInfo.conventional.unit
-      let ordType = ''
-      switch (ord.type) {
-        case OrderUtil.OrderTypeLimit:{
-          ordType = intl.prep(intl.ID_LIMIT_ORDER)
-          break
-        }
-        case OrderUtil.OrderTypeMarket:{
-          ordType = intl.prep(intl.ID_MARKET_ORDER)
-          break
-        }
-        case OrderUtil.OrderTypeCancel:{
-          ordType = 'cancel' // currently no translation
-          break
-        }
-      }
-      details.type.textContent = ordType
+      details.type.textContent = OrderUtil.orderTypeText(ord.type)
       this.updateMetaOrder(mord)
 
       Doc.bind(div, 'mouseenter', () => {
