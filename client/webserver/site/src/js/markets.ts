@@ -19,7 +19,8 @@ import {
   AccelerateOrderForm,
   DepositAddress,
   TokenApprovalForm,
-  bind as bindForm
+  bind as bindForm,
+  Forms
 } from './forms'
 import * as OrderUtil from './orderutil'
 import ws from './ws'
@@ -64,7 +65,9 @@ import {
   ApprovalStatus,
   OrderFilter,
   RunStatsNote,
-  RunEventNote
+  RunEventNote,
+  EpochReportNote,
+  CEXProblemsNote
 } from './registry'
 import { setOptionTemplates } from './opts'
 import { RunningMarketMakerDisplay } from './mmutil'
@@ -80,8 +83,6 @@ const candlesRoute = 'candles'
 const candleUpdateRoute = 'candle_update'
 const unmarketRoute = 'unmarket'
 const epochMatchSummaryRoute = 'epoch_match_summary'
-
-const animationLength = 500
 
 const anHour = 60 * 60 * 1000 // milliseconds
 const maxUserOrdersShown = 10
@@ -191,7 +192,7 @@ export default class MarketsPage extends BasePage {
   stats: [StatsDisplay, StatsDisplay]
   loadingAnimations: { candles?: Wave, depth?: Wave }
   mmRunning: boolean | undefined
-
+  forms: Forms
   constructor (main: HTMLElement, pageParams: MarketsPageParams) {
     super()
 
@@ -214,6 +215,7 @@ export default class MarketsPage extends BasePage {
     this.recentMatchesSortDirection = -1
     // store original title so we can re-append it when updating market value.
     this.ogTitle = document.title
+    this.forms = new Forms(page.forms)
 
     const depthReporters = {
       click: (x: number) => { this.reportDepthClick(x) },
@@ -272,7 +274,7 @@ export default class MarketsPage extends BasePage {
       this.depositAddrForm = new DepositAddress(page.deposit)
     }
 
-    this.mm = new RunningMarketMakerDisplay(page.mmRunning, 'markets')
+    this.mm = new RunningMarketMakerDisplay(page.mmRunning, this.forms, page.orderReportForm, 'markets')
 
     this.reputationMeter = new ReputationMeter(page.reputationMeter)
 
@@ -366,7 +368,7 @@ export default class MarketsPage extends BasePage {
     // Cancel order form.
     bindForm(page.cancelForm, page.cancelSubmit, async () => { this.submitCancel() })
     // Order detail view.
-    Doc.bind(page.vFeeDetails, 'click', () => this.showForm(page.vDetailPane))
+    Doc.bind(page.vFeeDetails, 'click', () => this.forms.show(page.vDetailPane))
     Doc.bind(page.closeDetailPane, 'click', () => this.showVerifyForm())
     // // Bind active orders list's header sort events.
     page.recentMatchesTable.querySelectorAll('[data-ordercol]')
@@ -408,7 +410,7 @@ export default class MarketsPage extends BasePage {
     setRecentMatchesSortColClasses()
 
     const closePopups = () => {
-      Doc.hide(page.forms)
+      this.forms.close()
     }
 
     // If the user clicks outside of a form, it should close the page overlay.
@@ -528,6 +530,14 @@ export default class MarketsPage extends BasePage {
           this.mmRunning = Boolean(note.stats)
           this.resolveOrderFormVisibility()
         }
+      },
+      epochreport: (note: EpochReportNote) => {
+        if (note.baseID !== this.market.base.id || note.quoteID !== this.market.quote.id || note.host !== this.market.dex.host) return
+        this.mm.handleEpochReportNote(note)
+      },
+      cexproblems: (note: CEXProblemsNote) => {
+        if (note.baseID !== this.market.base.id || note.quoteID !== this.market.quote.id || note.host !== this.market.dex.host) return
+        this.mm.handleCexProblemsNote(note)
       },
       runevent: (note: RunEventNote) => {
         if (note.baseID !== this.market.base.id || note.quoteID !== this.market.quote.id || note.host !== this.market.dex.host) return
@@ -832,7 +842,7 @@ export default class MarketsPage extends BasePage {
   async showTokenApprovalForm (isBase: boolean) {
     const assetID = isBase ? this.market.base.id : this.market.quote.id
     this.approveTokenForm.setAsset(assetID, this.market.dex.host)
-    this.showForm(this.page.approveTokenForm)
+    this.forms.show(this.page.approveTokenForm)
   }
 
   /*
@@ -1968,20 +1978,6 @@ export default class MarketsPage extends BasePage {
     this.candleChart.draw()
   }
 
-  /* showForm shows a modal form with a little animation. */
-  async showForm (form: HTMLElement) {
-    this.currentForm = form
-    const page = this.page
-    Doc.hide(...Array.from(page.forms.children))
-    form.style.right = '10000px'
-    Doc.show(page.forms, form)
-    const shift = (page.forms.offsetWidth + form.offsetWidth) / 2
-    await Doc.animate(animationLength, progress => {
-      form.style.right = `${(1 - progress) * shift}px`
-    }, 'easeOutHard')
-    form.style.right = '0'
-  }
-
   /*
    * showToggleWalletStatus displays the toggleWalletStatusConfirm form to
    * enable a wallet.
@@ -1991,7 +1987,7 @@ export default class MarketsPage extends BasePage {
     this.openAsset = asset
     Doc.hide(page.toggleWalletStatusErr, page.walletStatusDisable, page.disableWalletMsg)
     Doc.show(page.walletStatusEnable, page.enableWalletMsg)
-    this.showForm(page.toggleWalletStatusConfirm)
+    this.forms.show(page.toggleWalletStatusConfirm)
   }
 
   /*
@@ -2137,7 +2133,7 @@ export default class MarketsPage extends BasePage {
   async showVerifyForm () {
     const page = this.page
     Doc.hide(page.vErr)
-    this.showForm(page.verifyForm)
+    this.forms.show(page.verifyForm)
   }
 
   /*
@@ -2393,7 +2389,7 @@ export default class MarketsPage extends BasePage {
     page.cancelRemain.textContent = Doc.formatCoinValue(remaining, asset.unitInfo)
     page.cancelUnit.textContent = asset.symbol.toUpperCase()
     Doc.hide(page.cancelErr)
-    this.showForm(page.cancelForm)
+    this.forms.show(page.cancelForm)
     this.cancelData = {
       bttn: Doc.tmplElement(row, 'cancelBttn'),
       order: ord
@@ -2405,7 +2401,7 @@ export default class MarketsPage extends BasePage {
     const loaded = app().loading(this.main)
     this.accelerateOrderForm.refresh(order)
     loaded()
-    this.showForm(this.page.accelerateForm)
+    this.forms.show(this.page.accelerateForm)
   }
 
   /* showCreate shows the new wallet creation form. */
@@ -2413,7 +2409,7 @@ export default class MarketsPage extends BasePage {
     const page = this.page
     this.currentCreate = asset
     this.newWalletForm.setAsset(asset.id)
-    this.showForm(page.newWalletForm)
+    this.forms.show(page.newWalletForm)
   }
 
   /*
@@ -2446,7 +2442,7 @@ export default class MarketsPage extends BasePage {
   /* Display a deposit address. */
   async showDeposit (assetID: number) {
     this.depositAddrForm.setAsset(assetID)
-    this.showForm(this.page.deposit)
+    this.forms.show(this.page.deposit)
   }
 
   showCustomProviderDialog (assetID: number) {

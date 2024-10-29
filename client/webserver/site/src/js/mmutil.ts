@@ -21,12 +21,22 @@ import {
   BotBalance,
   Order,
   LotFeeRange,
-  BookingFees
+  BookingFees,
+  BotProblems,
+  EpochReportNote,
+  OrderReport,
+  EpochReport,
+  TradePlacement,
+  SupportedAsset,
+  CEXProblemsNote,
+  CEXProblems
 } from './registry'
 import { getJSON, postJSON } from './http'
 import Doc, { clamp } from './doc'
 import * as OrderUtil from './orderutil'
 import { Chart, Region, Extents, Translator } from './charts'
+import * as intl from './locales'
+import { Forms } from './forms'
 
 export const GapStrategyMultiplier = 'multiplier'
 export const GapStrategyAbsolute = 'absolute'
@@ -407,6 +417,7 @@ export class BotMarket {
   quoteLot: number
   quoteLotConv: number
   quoteLotUSD: number
+  rateStep: number
   baseFeeFiatRate: number
   quoteFeeFiatRate: number
   baseLots: number
@@ -459,9 +470,10 @@ export class BotMarket {
     this.mktID = `${baseSymbol}_${quoteSymbol}`
 
     const { markets } = app().exchanges[host]
-    const { lotsize: lotSize } = markets[this.mktID]
+    const { lotsize: lotSize, ratestep: rateStep } = markets[this.mktID]
     this.lotSize = lotSize
     this.lotSizeConv = lotSize / bui.conventional.conversionFactor
+    this.rateStep = rateStep
     this.quoteLot = calculateQuoteLot(lotSize, baseID, quoteID)
     this.quoteLotConv = this.quoteLot / qui.conventional.conversionFactor
 
@@ -507,8 +519,8 @@ export class BotMarket {
     const { baseID, quoteID } = this
     const botStatus = app().mmStatus.bots.find((s: MMBotStatus) => s.config.baseID === baseID && s.config.quoteID === quoteID)
     if (!botStatus) return { botCfg: {} as BotConfig, running: false, runStats: {} as RunStats }
-    const { config: botCfg, running, runStats } = botStatus
-    return { botCfg, running, runStats }
+    const { config: botCfg, running, runStats, latestEpoch, cexProblems } = botStatus
+    return { botCfg, running, runStats, latestEpoch, cexProblems }
   }
 
   /*
@@ -760,15 +772,34 @@ export class RunningMarketMakerDisplay {
   mkt: BotMarket
   startTime: number
   ticker: any
+  currentForm: PageElement
+  forms: Forms
+  latestEpoch?: EpochReport
+  cexProblems?: CEXProblems
+  orderReportFormEl: PageElement
+  orderReportForm: Record<string, PageElement>
+  dexBalancesRowTmpl: PageElement
+  placementRowTmpl: PageElement
+  placementAmtRowTmpl: PageElement
+  displayedSide: 'buys' | 'sells'
 
-  constructor (div: PageElement, page: string) {
+  constructor (div: PageElement, forms: Forms, orderReportForm: PageElement, page: string) {
     this.div = div
     this.page = Doc.parseTemplate(div)
+    this.orderReportFormEl = orderReportForm
+    this.orderReportForm = Doc.idDescendants(orderReportForm)
+    this.dexBalancesRowTmpl = this.orderReportForm.dexBalancesRowTmpl
+    this.placementRowTmpl = this.orderReportForm.placementRowTmpl
+    this.placementAmtRowTmpl = this.orderReportForm.placementAmtRowTmpl
+    Doc.cleanTemplates(this.dexBalancesRowTmpl, this.placementRowTmpl, this.placementAmtRowTmpl)
+    this.forms = forms
     Doc.bind(this.page.stopBttn, 'click', () => this.stop())
     Doc.bind(this.page.runLogsBttn, 'click', () => {
       const { mkt: { baseID, quoteID, host }, startTime } = this
       app().loadPage('mmlogs', { baseID, quoteID, host, startTime, returnPage: page })
     })
+    Doc.bind(this.page.buyOrdersBttn, 'click', () => this.showOrderReport('buys'))
+    Doc.bind(this.page.sellOrdersBttn, 'click', () => this.showOrderReport('sells'))
   }
 
   async stop () {
@@ -843,6 +874,28 @@ export class RunningMarketMakerDisplay {
     this.update()
   }
 
+  handleEpochReportNote (n: EpochReportNote) {
+    if (!this.mkt) return
+    const { baseID, quoteID, host } = this.mkt
+    if (n.baseID !== baseID || n.quoteID !== quoteID || n.host !== host) return
+    if (!n.report) return
+    this.latestEpoch = n.report
+    if (this.forms.currentForm === this.orderReportFormEl) {
+      const orderReport = this.displayedSide === 'buys' ? n.report.buysReport : n.report.sellsReport
+      if (orderReport) this.updateOrderReport(orderReport, this.displayedSide, n.report.epochNum)
+      else this.forms.close()
+    }
+    this.update()
+  }
+
+  handleCexProblemsNote (n: CEXProblemsNote) {
+    if (!this.mkt) return
+    const { baseID, quoteID, host } = this.mkt
+    if (n.baseID !== baseID || n.quoteID !== quoteID || n.host !== host) return
+    this.cexProblems = n.problems
+    this.update()
+  }
+
   setTicker () {
     this.page.runTime.textContent = Doc.hmsSince(this.startTime)
   }
@@ -855,8 +908,12 @@ export class RunningMarketMakerDisplay {
       }
     } = this
     // Get fresh stats
-    const { botCfg: { cexName, basicMarketMakingConfig: bmmCfg }, runStats } = this.mkt.status()
+    const { botCfg: { cexName, basicMarketMakingConfig: bmmCfg }, runStats, latestEpoch, cexProblems } = this.mkt.status()
+    if (latestEpoch) this.latestEpoch = latestEpoch
+    if (cexProblems) this.cexProblems = cexProblems
+
     Doc.hide(page.stats, page.cexRow, page.pendingDepositBox, page.pendingWithdrawalBox)
+
     if (!runStats) {
       if (this.ticker) {
         clearInterval(this.ticker)
@@ -933,6 +990,195 @@ export class RunningMarketMakerDisplay {
       page.remoteGap.textContent = Doc.formatFourSigFigs(remoteGap)
       page.remoteGapPct.textContent = (remoteGap / basisPrice * 100 || 0).toFixed(2)
     }
+
+    Doc.setVis(latestEpoch?.buysReport, page.buyOrdersReportBox)
+    if (latestEpoch?.buysReport) {
+      const allPlaced = allOrdersPlaced(latestEpoch.buysReport)
+      Doc.setVis(allPlaced, page.buyOrdersSuccess)
+      Doc.setVis(!allPlaced, page.buyOrdersFailed)
+    }
+
+    Doc.setVis(latestEpoch?.sellsReport, page.sellOrdersReportBox)
+    if (latestEpoch?.sellsReport) {
+      const allPlaced = allOrdersPlaced(latestEpoch.sellsReport)
+      Doc.setVis(allPlaced, page.sellOrdersSuccess)
+      Doc.setVis(!allPlaced, page.sellOrdersFailed)
+    }
+
+    const preOrderProblemMessages = botProblemMessages(latestEpoch?.preOrderProblems, this.mkt.cexName, this.mkt.host)
+    const cexErrorMessages = cexProblemMessages(this.cexProblems)
+    const allMessages = [...preOrderProblemMessages, ...cexErrorMessages]
+    Doc.setVis(allMessages.length > 0, page.preOrderProblemsBox)
+    Doc.empty(page.preOrderProblemsBox)
+    for (const msg of allMessages) {
+      const spanEl = document.createElement('span') as PageElement
+      spanEl.textContent = `- ${msg}`
+      page.preOrderProblemsBox.appendChild(spanEl)
+    }
+  }
+
+  updateOrderReport (report: OrderReport, side: 'buys' | 'sells', epochNum: number) {
+    const form = this.orderReportForm
+    const sideTxt = side === 'buys' ? intl.prep(intl.ID_BUY) : intl.prep(intl.ID_SELL)
+    form.orderReportTitle.textContent = intl.prep(intl.ID_ORDER_REPORT_TITLE, { side: sideTxt, epochNum: `${epochNum}` })
+
+    Doc.setVis(report.error, form.orderReportError)
+    Doc.setVis(!report.error, form.orderReportDetails)
+    if (report.error) {
+      const problemMessages = botProblemMessages(report.error, this.mkt.cexName, this.mkt.host)
+      Doc.empty(form.orderReportError)
+      for (const msg of problemMessages) {
+        const spanEl = document.createElement('span') as PageElement
+        spanEl.textContent = `- ${msg}`
+        form.orderReportError.appendChild(spanEl)
+      }
+      return
+    }
+
+    form.cexLogo.src = CEXDisplayInfos[this.mkt.cexName].logo
+    form.cexBalancesTitle.textContent = intl.prep(intl.ID_CEX_BALANCES, { cexName: CEXDisplayInfos[this.mkt.cexName].name })
+    Doc.empty(form.dexBalancesBody, form.placementsBody)
+    const createRow = (assetID: number): [PageElement, number] => {
+      const row = this.dexBalancesRowTmpl.cloneNode(true) as HTMLElement
+      const rowTmpl = Doc.parseTemplate(row)
+      const asset = app().assets[assetID]
+      rowTmpl.asset.textContent = asset.symbol.toUpperCase()
+      rowTmpl.assetLogo.src = Doc.logoPath(asset.symbol)
+      const unitInfo = asset.unitInfo
+      const available = report.availableDexBals[assetID] ? report.availableDexBals[assetID].available : 0
+      const required = report.requiredDexBals[assetID] ? report.requiredDexBals[assetID] : 0
+      const remaining = report.remainingDexBals[assetID] ? report.remainingDexBals[assetID] : 0
+      const pending = report.availableDexBals[assetID] ? report.availableDexBals[assetID].pending : 0
+      const locked = report.availableDexBals[assetID] ? report.availableDexBals[assetID].locked : 0
+      const used = report.usedDexBals[assetID] ? report.usedDexBals[assetID] : 0
+      rowTmpl.available.textContent = Doc.formatCoinValue(available, unitInfo)
+      rowTmpl.locked.textContent = Doc.formatCoinValue(locked, unitInfo)
+      rowTmpl.required.textContent = Doc.formatCoinValue(required, unitInfo)
+      rowTmpl.remaining.textContent = Doc.formatCoinValue(remaining, unitInfo)
+      rowTmpl.pending.textContent = Doc.formatCoinValue(pending, unitInfo)
+      rowTmpl.used.textContent = Doc.formatCoinValue(used, unitInfo)
+      const deficiency = safeSub(required, available)
+      rowTmpl.deficiency.textContent = Doc.formatCoinValue(deficiency, unitInfo)
+      if (deficiency > 0) rowTmpl.deficiency.classList.add('text-danger')
+      const deficiencyWithPending = safeSub(deficiency, pending)
+      rowTmpl.deficiencyWithPending.textContent = Doc.formatCoinValue(deficiencyWithPending, unitInfo)
+      if (deficiencyWithPending > 0) rowTmpl.deficiencyWithPending.classList.add('text-danger')
+      return [row, deficiency]
+    }
+    const setDeficiencyVisibility = (deficiency: boolean, rows: HTMLElement[]) => {
+      Doc.setVis(deficiency, form.dexDeficiencyHeader, form.dexDeficiencyWithPendingHeader)
+      for (const row of rows) {
+        const rowTmpl = Doc.parseTemplate(row)
+        Doc.setVis(deficiency, rowTmpl.deficiency, rowTmpl.deficiencyWithPending)
+      }
+    }
+    const assetIDs = [this.mkt.baseID, this.mkt.quoteID]
+    if (!assetIDs.includes(this.mkt.baseFeeID)) assetIDs.push(this.mkt.baseFeeID)
+    if (!assetIDs.includes(this.mkt.quoteFeeID)) assetIDs.push(this.mkt.quoteFeeID)
+    let totalDeficiency = 0
+    const rows : PageElement[] = []
+    for (const assetID of assetIDs) {
+      const [row, deficiency] = createRow(assetID)
+      totalDeficiency += deficiency
+      form.dexBalancesBody.appendChild(row)
+      rows.push(row)
+    }
+    setDeficiencyVisibility(totalDeficiency > 0, rows)
+
+    Doc.setVis(this.mkt.cexName, form.cexBalancesTable, form.counterTradeRateHeader)
+    let cexAsset: SupportedAsset
+    if (this.mkt.cexName) {
+      const cexAssetID = side === 'buys' ? this.mkt.baseID : this.mkt.quoteID
+      cexAsset = app().assets[cexAssetID]
+      form.cexAsset.textContent = cexAsset.symbol.toUpperCase()
+      form.cexAssetLogo.src = Doc.logoPath(cexAsset.symbol)
+      const availableCexBal = report.availableCexBal ? report.availableCexBal.available : 0
+      const requiredCexBal = report.requiredCexBal ? report.requiredCexBal : 0
+      const remainingCexBal = report.remainingCexBal ? report.remainingCexBal : 0
+      const pendingCexBal = report.availableCexBal ? report.availableCexBal.pending : 0
+      const reservedCexBal = report.availableCexBal ? report.availableCexBal.reserved : 0
+      const usedCexBal = report.usedCexBal ? report.usedCexBal : 0
+      const deficiencyCexBal = safeSub(requiredCexBal, availableCexBal)
+      const deficiencyWithPendingCexBal = safeSub(deficiencyCexBal, pendingCexBal)
+      form.cexAvailable.textContent = Doc.formatCoinValue(availableCexBal, cexAsset.unitInfo)
+      form.cexLocked.textContent = Doc.formatCoinValue(reservedCexBal, cexAsset.unitInfo)
+      form.cexRequired.textContent = Doc.formatCoinValue(requiredCexBal, cexAsset.unitInfo)
+      form.cexRemaining.textContent = Doc.formatCoinValue(remainingCexBal, cexAsset.unitInfo)
+      form.cexPending.textContent = Doc.formatCoinValue(pendingCexBal, cexAsset.unitInfo)
+      form.cexUsed.textContent = Doc.formatCoinValue(usedCexBal, cexAsset.unitInfo)
+      const deficient = deficiencyCexBal > 0
+      Doc.setVis(deficient, form.cexDeficiencyHeader, form.cexDeficiencyWithPendingHeader,
+        form.cexDeficiency, form.cexDeficiencyWithPending)
+      if (deficient) {
+        form.cexDeficiency.textContent = Doc.formatCoinValue(deficiencyCexBal, cexAsset.unitInfo)
+        form.cexDeficiencyWithPending.textContent = Doc.formatCoinValue(deficiencyWithPendingCexBal, cexAsset.unitInfo)
+      }
+    }
+
+    let anyErrors = false
+    for (const placement of report.placements) if (placement.error) { anyErrors = true; break }
+    Doc.setVis(anyErrors, form.errorHeader)
+    const createPlacementRow = (placement: TradePlacement, priority: number): PageElement => {
+      const row = this.placementRowTmpl.cloneNode(true) as HTMLElement
+      const rowTmpl = Doc.parseTemplate(row)
+      const baseUI = app().assets[this.mkt.baseID].unitInfo
+      const quoteUI = app().assets[this.mkt.quoteID].unitInfo
+      rowTmpl.priority.textContent = String(priority)
+      rowTmpl.rate.textContent = Doc.formatRateFullPrecision(placement.rate, baseUI, quoteUI, this.mkt.rateStep)
+      rowTmpl.lots.textContent = String(placement.lots)
+      rowTmpl.standingLots.textContent = String(placement.standingLots)
+      rowTmpl.orderedLots.textContent = String(placement.orderedLots)
+      if (placement.standingLots + placement.orderedLots < placement.lots) {
+        rowTmpl.lots.classList.add('text-danger')
+        rowTmpl.standingLots.classList.add('text-danger')
+        rowTmpl.orderedLots.classList.add('text-danger')
+      }
+      Doc.setVis(placement.counterTradeRate > 0, rowTmpl.counterTradeRate)
+      rowTmpl.counterTradeRate.textContent = Doc.formatRateFullPrecision(placement.counterTradeRate, baseUI, quoteUI, this.mkt.rateStep)
+      for (const assetID of assetIDs) {
+        const asset = app().assets[assetID]
+        const unitInfo = asset.unitInfo
+        const requiredAmt = placement.requiredDex[assetID] ? placement.requiredDex[assetID] : 0
+        const usedAmt = placement.usedDex[assetID] ? placement.usedDex[assetID] : 0
+        const requiredRow = this.placementAmtRowTmpl.cloneNode(true) as HTMLElement
+        const requiredRowTmpl = Doc.parseTemplate(requiredRow)
+        const usedRow = this.placementAmtRowTmpl.cloneNode(true) as HTMLElement
+        const usedRowTmpl = Doc.parseTemplate(usedRow)
+        requiredRowTmpl.amt.textContent = Doc.formatCoinValue(requiredAmt, unitInfo)
+        requiredRowTmpl.assetLogo.src = Doc.logoPath(asset.symbol)
+        requiredRowTmpl.assetSymbol.textContent = asset.symbol.toUpperCase()
+        usedRowTmpl.amt.textContent = Doc.formatCoinValue(usedAmt, unitInfo)
+        usedRowTmpl.assetLogo.src = Doc.logoPath(asset.symbol)
+        usedRowTmpl.assetSymbol.textContent = asset.symbol.toUpperCase()
+        rowTmpl.requiredDEX.appendChild(requiredRow)
+        rowTmpl.usedDEX.appendChild(usedRow)
+      }
+      Doc.setVis(this.mkt.cexName, rowTmpl.requiredCEX, rowTmpl.usedCEX)
+      if (this.mkt.cexName) {
+        const requiredAmt = Doc.formatCoinValue(placement.requiredCex, cexAsset.unitInfo)
+        rowTmpl.requiredCEX.textContent = `${requiredAmt} ${cexAsset.symbol.toUpperCase()}`
+        const usedAmt = Doc.formatCoinValue(placement.usedCex, cexAsset.unitInfo)
+        rowTmpl.usedCEX.textContent = `${usedAmt} ${cexAsset.symbol.toUpperCase()}`
+      }
+      Doc.setVis(anyErrors, rowTmpl.error)
+      if (placement.error) {
+        const errMessages = botProblemMessages(placement.error, this.mkt.cexName, this.mkt.host)
+        rowTmpl.error.textContent = errMessages.join('\n')
+      }
+      return row
+    }
+    for (let i = 0; i < report.placements.length; i++) {
+      form.placementsBody.appendChild(createPlacementRow(report.placements[i], i + 1))
+    }
+  }
+
+  showOrderReport (side: 'buys' | 'sells') {
+    if (!this.latestEpoch) return
+    const report = side === 'buys' ? this.latestEpoch.buysReport : this.latestEpoch.sellsReport
+    if (!report) return
+    this.updateOrderReport(report, side, this.latestEpoch.epochNum)
+    this.displayedSide = side
+    this.forms.show(this.orderReportFormEl)
   }
 
   readBook () {
@@ -941,6 +1187,16 @@ export class RunningMarketMakerDisplay {
     const orders = app().exchanges[host].markets[mktID].orders || []
     page.nBookedOrders.textContent = String(orders.filter((ord: Order) => ord.status === OrderUtil.StatusBooked).length)
   }
+}
+
+function allOrdersPlaced (report: OrderReport) {
+  if (report.error) return false
+  for (let i = 0; i < report.placements.length; i++) {
+    const placement = report.placements[i]
+    if (placement.orderedLots + placement.standingLots < placement.lots) return false
+    if (placement.error) return false
+  }
+  return true
 }
 
 function setSignedValue (v: number, vEl: PageElement, signEl: PageElement, maxDecimals?: number) {
@@ -1037,4 +1293,88 @@ export function feesAndCommit (
   }
 
   return { commit, fees }
+}
+
+function botProblemMessages (problems: BotProblems | undefined, cexName: string, dexHost: string): string[] {
+  if (!problems) return []
+  const msgs: string[] = []
+
+  if (problems.walletNotSynced) {
+    for (const [assetID, notSynced] of Object.entries(problems.walletNotSynced)) {
+      if (notSynced) {
+        msgs.push(intl.prep(intl.ID_WALLET_NOT_SYNCED, { assetSymbol: app().assets[Number(assetID)].symbol.toUpperCase() }))
+      }
+    }
+  }
+
+  if (problems.noWalletPeers) {
+    for (const [assetID, noPeers] of Object.entries(problems.noWalletPeers)) {
+      if (noPeers) {
+        msgs.push(intl.prep(intl.ID_WALLET_NO_PEERS, { assetSymbol: app().assets[Number(assetID)].symbol.toUpperCase() }))
+      }
+    }
+  }
+
+  if (problems.accountSuspended) {
+    msgs.push(intl.prep(intl.ID_ACCOUNT_SUSPENDED, { dexHost: dexHost }))
+  }
+
+  if (problems.userLimitTooLow) {
+    msgs.push(intl.prep(intl.ID_USER_LIMIT_TOO_LOW, { dexHost: dexHost }))
+  }
+
+  if (problems.noPriceSource) {
+    msgs.push(intl.prep(intl.ID_NO_PRICE_SOURCE))
+  }
+
+  if (problems.cexOrderbookUnsynced) {
+    msgs.push(intl.prep(intl.ID_CEX_ORDERBOOK_UNSYNCED, { cexName: cexName }))
+  }
+
+  if (problems.causesSelfMatch) {
+    msgs.push(intl.prep(intl.ID_CAUSES_SELF_MATCH))
+  }
+
+  return msgs
+}
+
+function cexProblemMessages (problems: CEXProblems | undefined): string[] {
+  if (!problems) return []
+  const msgs: string[] = []
+  if (problems.depositErr) {
+    for (const [assetID, depositErr] of Object.entries(problems.depositErr)) {
+      msgs.push(intl.prep(intl.ID_DEPOSIT_ERROR,
+        {
+          assetSymbol: app().assets[Number(assetID)].symbol.toUpperCase(),
+          time: new Date(depositErr.stamp * 1000).toLocaleString(),
+          error: depositErr.error
+        }))
+    }
+  }
+  if (problems.withdrawErr) {
+    for (const [assetID, withdrawErr] of Object.entries(problems.withdrawErr)) {
+      msgs.push(intl.prep(intl.ID_WITHDRAW_ERROR,
+        {
+          assetSymbol: app().assets[Number(assetID)].symbol.toUpperCase(),
+          time: new Date(withdrawErr.stamp * 1000).toLocaleString(),
+          error: withdrawErr.error
+        }))
+    }
+  }
+  if (problems.tradeErr) {
+    msgs.push(intl.prep(intl.ID_CEX_TRADE_ERROR,
+      {
+        time: new Date(problems.tradeErr.stamp * 1000).toLocaleString(),
+        error: problems.tradeErr.error
+      }))
+  }
+  return msgs
+}
+
+function safeSub (a: number, b: number) {
+  return a - b > 0 ? a - b : 0
+}
+
+window.mmstatus = function () : Promise<MarketMakingStatus> {
+  return MM.status()
 }

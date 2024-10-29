@@ -68,7 +68,7 @@ interface FormsConfig {
 
 export class Forms {
   formsDiv: PageElement
-  currentForm: PageElement
+  currentForm: PageElement | undefined
   keyup: (e: KeyboardEvent) => void
   closed?: () => void
 
@@ -81,6 +81,7 @@ export class Forms {
     })
 
     Doc.bind(formsDiv, 'mousedown', (e: MouseEvent) => {
+      if (!this.currentForm) return
       if (!Doc.mouseInElement(e, this.currentForm)) { this.close() }
     })
 
@@ -108,6 +109,7 @@ export class Forms {
   close (): void {
     Doc.hide(this.formsDiv)
     if (this.closed) this.closed()
+    this.currentForm = undefined
   }
 
   exit () {
