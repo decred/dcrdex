@@ -1059,10 +1059,10 @@ export class RunningMarketMakerDisplay {
       rowTmpl.used.textContent = Doc.formatCoinValue(used, unitInfo)
       const deficiency = safeSub(required, available)
       rowTmpl.deficiency.textContent = Doc.formatCoinValue(deficiency, unitInfo)
-      if (deficiency > 0) rowTmpl.deficiency.classList.add('text-danger')
+      if (deficiency > 0) rowTmpl.deficiency.classList.add('text-warning')
       const deficiencyWithPending = safeSub(deficiency, pending)
       rowTmpl.deficiencyWithPending.textContent = Doc.formatCoinValue(deficiencyWithPending, unitInfo)
-      if (deficiencyWithPending > 0) rowTmpl.deficiencyWithPending.classList.add('text-danger')
+      if (deficiencyWithPending > 0) rowTmpl.deficiencyWithPending.classList.add('text-warning')
       return [row, deficiency]
     }
     const setDeficiencyVisibility = (deficiency: boolean, rows: HTMLElement[]) => {
@@ -1129,9 +1129,9 @@ export class RunningMarketMakerDisplay {
       rowTmpl.standingLots.textContent = String(placement.standingLots)
       rowTmpl.orderedLots.textContent = String(placement.orderedLots)
       if (placement.standingLots + placement.orderedLots < placement.lots) {
-        rowTmpl.lots.classList.add('text-danger')
-        rowTmpl.standingLots.classList.add('text-danger')
-        rowTmpl.orderedLots.classList.add('text-danger')
+        rowTmpl.lots.classList.add('text-warning')
+        rowTmpl.standingLots.classList.add('text-warning')
+        rowTmpl.orderedLots.classList.add('text-warning')
       }
       Doc.setVis(placement.counterTradeRate > 0, rowTmpl.counterTradeRate)
       rowTmpl.counterTradeRate.textContent = Doc.formatRateFullPrecision(placement.counterTradeRate, baseUI, quoteUI, this.mkt.rateStep)
