@@ -86,6 +86,7 @@ const (
 	limitOrderID                     = "LIMIT_ORDER"
 	limitOrderImmediateTifID         = "LIMIT_ORDER_IMMEDIATE_TIF"
 	marketOrderID                    = "MARKET_ORDER"
+	cancelOrderID                    = "CANCEL_ORDER"
 	matchStatusNewlyMatchedID        = "MATCH_STATUS_NEWLY_MATCHED"
 	matchStatusMakerSwapCastID       = "MATCH_STATUS_MAKER_SWAP_CAST"
 	matchStatusTakerSwapCastID       = "MATCH_STATUS_TAKER_SWAP_CAST"
@@ -304,6 +305,7 @@ var enUS = map[string]*intl.Translation{
 	limitOrderID:                     {T: "limit"},
 	limitOrderImmediateTifID:         {T: "limit (i)", Notes: "i = immediate"},
 	marketOrderID:                    {T: "market"},
+	cancelOrderID:                    {T: "cancel"},
 	matchStatusNewlyMatchedID:        {T: "Newly Matched"},
 	matchStatusMakerSwapCastID:       {T: "Maker Swap Sent"},
 	matchStatusTakerSwapCastID:       {T: "Taker Swap Sent"},
@@ -525,6 +527,9 @@ var zhCN = map[string]*intl.Translation{
 	createID:                 {T: "创建"},
 	availableID:              {T: "可用"},
 	immatureID:               {T: "不成"},
+	limitOrderID:             {T: "限价单"},
+	marketOrderID:            {T: "市价单"},
+	cancelOrderID:            {T: "取消单"},
 }
 
 var plPL = map[string]*intl.Translation{

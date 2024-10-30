@@ -27,10 +27,10 @@ while [ "${1:-}" != "" ]; do
       ;;
     -2)
       ONLY_TWO="1"
-      echo "Only starting wallet # 1"
+      echo "Only starting wallet # 2"
       ;;
     *)
-      BW_ARGS+=("$1")
+      BW_ARGS+=" ${1}"
       ;;
   esac
   shift
