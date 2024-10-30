@@ -11,6 +11,8 @@ const (
 	NoteTypeRunStats        = "runstats"
 	NoteTypeRunEvent        = "runevent"
 	NoteTypeCEXNotification = "cexnote"
+	NoteTypeEpochReport     = "epochreport"
+	NoteTypeCEXProblems     = "cexproblems"
 )
 
 type runStatsNote struct {
@@ -69,5 +71,41 @@ func newCexUpdateNote(cexName string, topic db.Topic, note interface{}) *cexNoti
 		Notification: db.NewNotification(NoteTypeCEXNotification, topic, "", "", db.Data),
 		CEXName:      cexName,
 		Note:         note,
+	}
+}
+
+type botProblemsNotification struct {
+	db.Notification
+	Host    string       `json:"host"`
+	BaseID  uint32       `json:"baseID"`
+	QuoteID uint32       `json:"quoteID"`
+	Report  *EpochReport `json:"report"`
+}
+
+func newEpochReportNote(host string, baseID, quoteID uint32, report *EpochReport) *botProblemsNotification {
+	return &botProblemsNotification{
+		Notification: db.NewNotification(NoteTypeEpochReport, "", "", "", db.Data),
+		Host:         host,
+		BaseID:       baseID,
+		QuoteID:      quoteID,
+		Report:       report,
+	}
+}
+
+type cexProblemsNotification struct {
+	db.Notification
+	Host     string       `json:"host"`
+	BaseID   uint32       `json:"baseID"`
+	QuoteID  uint32       `json:"quoteID"`
+	Problems *CEXProblems `json:"problems"`
+}
+
+func newCexProblemsNote(host string, baseID, quoteID uint32, problems *CEXProblems) *cexProblemsNotification {
+	return &cexProblemsNotification{
+		Notification: db.NewNotification(NoteTypeCEXProblems, "", "", "", db.Data),
+		Host:         host,
+		BaseID:       baseID,
+		QuoteID:      quoteID,
+		Problems:     problems,
 	}
 }

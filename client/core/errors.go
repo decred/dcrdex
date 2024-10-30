@@ -106,3 +106,26 @@ func UnwrapErr(err error) error {
 	}
 	return UnwrapErr(InnerErr)
 }
+
+var (
+	ErrAccountSuspended = errors.New("may not trade while account is suspended")
+)
+
+// WalletNoPeersError should be returned when a wallet has no network peers.
+type WalletNoPeersError struct {
+	AssetID uint32
+}
+
+func (e *WalletNoPeersError) Error() string {
+	return fmt.Sprintf("%s wallet has no network peers (check your network or firewall)", unbip(e.AssetID))
+}
+
+// WalletSyncError should be returned when a wallet is still syncing.
+type WalletSyncError struct {
+	AssetID  uint32
+	Progress float32
+}
+
+func (e *WalletSyncError) Error() string {
+	return fmt.Sprintf("%s still syncing. progress = %.2f%%", unbip(e.AssetID), e.Progress*100)
+}

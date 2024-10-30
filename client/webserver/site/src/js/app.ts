@@ -60,7 +60,9 @@ import {
   RunStatsNote,
   MMBotStatus,
   CEXNotification,
-  CEXBalanceUpdate
+  CEXBalanceUpdate,
+  EpochReportNote,
+  CEXProblemsNote
 } from './registry'
 import { setCoinHref } from './coinexplorers'
 
@@ -1172,6 +1174,10 @@ export default class Application {
         if (bot) {
           bot.runStats = n.stats
           bot.running = Boolean(n.stats)
+          if (!n.stats) {
+            bot.latestEpoch = undefined
+            bot.cexProblems = undefined
+          }
         }
         break
       }
@@ -1183,6 +1189,18 @@ export default class Application {
             this.mmStatus.cexes[n.cexName].balances[u.assetID] = u.balance
           }
         }
+        break
+      }
+      case 'epochreport': {
+        const n = note as EpochReportNote
+        const bot = this.botStatus(n.host, n.baseID, n.quoteID)
+        if (bot) bot.latestEpoch = n.report
+        break
+      }
+      case 'cexproblems': {
+        const n = note as CEXProblemsNote
+        const bot = this.botStatus(n.host, n.baseID, n.quoteID)
+        if (bot) bot.cexProblems = n.problems
         break
       }
     }

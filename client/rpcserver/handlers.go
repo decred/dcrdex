@@ -524,13 +524,16 @@ func handleMultiTrade(s *RPCServer, params *RawParams) *msgjson.ResponsePayload 
 		return usage(multiTradeRoute, err)
 	}
 	defer form.appPass.Clear()
-	res, err := s.core.MultiTrade(form.appPass, form.srvForm)
-	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCTradeError, "unable to multi trade: %v", err)
-		return createResponse(multiTradeRoute, nil, resErr)
-	}
-	trades := make([]*tradeResponse, 0, len(res))
-	for _, trade := range res {
+	results := s.core.MultiTrade(form.appPass, form.srvForm)
+	trades := make([]*tradeResponse, 0, len(results))
+	for _, res := range results {
+		if res.Error != nil {
+			trades = append(trades, &tradeResponse{
+				Error: res.Error,
+			})
+			continue
+		}
+		trade := res.Order
 		trades = append(trades, &tradeResponse{
 			OrderID: trade.ID.String(),
 			Sig:     trade.Sig.String(),

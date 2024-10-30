@@ -897,6 +897,21 @@
     </table>
   </div>
   <div class="flex-stretch-column mt-2 px-3">
+    <div data-tmpl="buyOrdersReportBox" class="d-flex justify-content-between align-items-center d-hide">
+      <span data-tmpl="buyOrdersSuccess" class="text-buycolor">[[[buy_orders_success]]]</span>
+      <span data-tmpl="buyOrdersFailed" class="d-hide text-danger">[[[buy_orders_failed]]]</span>
+      <button data-tmpl="buyOrdersBttn" class="ico-open"></button>
+    </div>
+
+    <div data-tmpl="sellOrdersReportBox" class="d-flex justify-content-between align-items-center d-hide">
+      <span data-tmpl="sellOrdersSuccess" class="text-buycolor">[[[sell_orders_success]]]</span>
+      <span data-tmpl="sellOrdersFailed" class="d-hide text-danger">[[[sell_orders_failed]]]</span>
+      <button data-tmpl="sellOrdersBttn" class="ico-open"></button>
+    </div>
+
+    <div data-tmpl="preOrderProblemsBox" class="d-flex flex-column bot-problems-section">
+    </div>
+
     <div class="d-flex justify-content-between align-items-center">
       <span>[[[Profit]]]</span>
       <span class="flex-center">
@@ -1015,6 +1030,117 @@
       <button data-tmpl="runLogsBttn" class="ico-textfile"></button>
       <button data-tmpl="stopBttn" class="ms-3 position-relative">Stop</button>
     </div>
+  </div>
+</div>
+{{end}}
+
+{{define "orderReportForm"}}
+<div class="form-closer"><span class="ico-cross"></span></div>
+<div>
+  <header id="orderReportTitle"></header>
+  <div id="orderReportError" class="text-danger d-flex flex-column"></div>
+  <div id="orderReportDetails" class="d-flex flex-column">
+    <div class="fs18 mt-3 align-self-start"><img class="logo-square small"><span class="ms-2">[[[Wallet Balances]]]</span></div>
+    <table class="table striped border mt-3 w-auto mx-auto">
+      <thead>
+        <tr>
+          <th class="border text-center">[[[Asset]]]</th>
+          <th class="border text-center">[[[Available]]]</th>
+          <th class="border text-center">[[[Locked]]]</th>
+          <th class="border text-center">[[[Pending]]]</th>
+          <th class="border text-center">[[[Required]]]</th>
+          <th class="border text-center">[[[Used]]]</th>
+          <th class="border text-center">[[[Remaining]]]</th>
+          <th id="dexDeficiencyHeader" class="border text-center">[[[Deficiency]]]</th>
+          <th id="dexDeficiencyWithPendingHeader" class="border text-center">[[[Deficiency with Pending]]]</th>
+        </tr>
+      </thead>
+      <tbody id="dexBalancesBody">
+        <tr id="dexBalancesRowTmpl">
+          <td class="border text-center"><img data-tmpl="assetLogo" class="micro-icon me-1"><span data-tmpl="asset"></span></td>
+          <td class="border text-center" data-tmpl="available"></td>
+          <td class="border text-center" data-tmpl="locked"></td>
+          <td class="border text-center" data-tmpl="pending"></td>
+          <td class="border text-center" data-tmpl="required"></td>
+          <td class="border text-center" data-tmpl="used"></td>
+          <td class="border text-center" data-tmpl="remaining"></td>
+          <td class="border text-center" data-tmpl="deficiency"></td>
+          <td class="border text-center" data-tmpl="deficiencyWithPending"></td>
+        </tr>
+      </tbody>
+    </table>
+    <hr>
+
+    <div class="fs18 align-self-start"><img id="cexLogo" src="/img/binance.com.png" class="small-icon"><span class="ms-2" id="cexBalancesTitle"></span></div>
+    <table id="cexBalancesTable" class="table striped border mt-3 w-auto mx-auto">
+      <thead>
+        <tr>
+          <th class="border text-center">[[[Asset]]]</th>
+          <th class="border text-center">[[[Available]]]</th>
+          <th class="border text-center">[[[Locked]]]</th>
+          <th class="border text-center">[[[Pending]]]</th>
+          <th class="border text-center">[[[Required]]]</th>
+          <th class="border text-center">[[[Used]]]</th>
+          <th class="border text-center">[[[Remaining]]]</th>
+          <th id="cexDeficiencyHeader" class="border text-center">[[[Deficiency]]]</th>
+          <th id="cexDeficiencyWithPendingHeader" class="border text-center">[[[Deficiency with Pending]]]</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="border text-center"><img id="cexAssetLogo" class="micro-icon me-1"><span id="cexAsset"></span></td>
+          <td id="cexAvailable" class="border text-center"></td>
+          <td id="cexLocked" class="border text-center"></td>
+          <td id="cexPending" class="border text-center"></td>
+          <td id="cexRequired" class="border text-center"></td>
+          <td id="cexUsed" class="border text-center"></td>
+          <td id="cexRemaining" class="border text-center"></td>
+          <td id="cexDeficiency" class="border text-center"></td>
+          <td id="cexDeficiencyWithPending" class="border text-center"></td>
+        </tr>
+      </tbody>
+    </table>
+    <hr>
+
+    <div class="fs18 align-self-start">Placements</div>
+    <table id="placementsTable" class="table striped border mt-3 w-auto mx-auto">
+      <thead>
+        <tr>
+          <th class="border text-center">[[[Priority]]]</th>
+          <th class="border text-center">[[[Lots]]]</th>
+          <th class="border text-center">[[[Standing Lots]]]</th>
+          <th class="border text-center">[[[Ordered Lots]]]</th>
+          <th class="border text-center">[[[Rate]]]</th>
+          <th class="border text-center" id="counterTradeRateHeader">[[[Arb Rate]]]</th>
+          <th class="border text-center">[[[Required DEX]]]</th>
+          <th class="border text-center">[[[Used DEX]]]</th>
+          <th class="border text-center">[[[Required CEX]]]</th>
+          <th class="border text-center">[[[Used CEX]]]</th>
+          <th class="border text-center" id="errorHeader">[[[Error]]]</th>
+        </tr>
+      </thead>
+      <tbody id="placementsBody">
+        <tr id="placementRowTmpl">
+          <td data-tmpl="priority" class="text-center border"></td>
+          <td data-tmpl="lots" class="text-center border"></td>
+          <td data-tmpl="standingLots" class="text-center border"></td>
+          <td data-tmpl="orderedLots" class="text-center border"></td>
+          <td data-tmpl="rate" class="text-center border"></td>
+          <td data-tmpl="counterTradeRate" class="text-center border"></td>
+          <td data-tmpl="requiredDEX" class="text-center border">
+            <span id="placementAmtRowTmpl" class="d-flex justify-content-end">
+              <span data-tmpl="amt"></span>
+              <img data-tmpl="assetLogo" class="micro-icon mx-1 mt-1">
+              <span data-tmpl="assetSymbol"></span>
+            </span>
+          </td>
+          <td data-tmpl="usedDEX" class="text-center border"></td>
+          <td data-tmpl="requiredCEX" class="text-center border"></td>
+          <td data-tmpl="usedCEX" class="text-center border"></td>
+          <td data-tmpl="error" class="text-center border text-danger" style="max-width: 200px"></td>
+        </tr>
+      </tbody>
+    </table>
   </div>
 </div>
 {{end}}

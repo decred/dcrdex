@@ -61,6 +61,7 @@ type tradeResponse struct {
 	OrderID string `json:"orderID"`
 	Sig     string `json:"sig"`
 	Stamp   uint64 `json:"stamp"`
+	Error   error  `json:"error,omitempty"`
 }
 
 // myOrdersResponse is used when responding to the myorders route.
