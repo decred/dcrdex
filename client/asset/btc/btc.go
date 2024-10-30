@@ -184,7 +184,7 @@ var (
 		Tab:               "External",
 		Description:       "Connect to bitcoind",
 		DefaultConfigPath: dexbtc.SystemConfigPath("bitcoin"),
-		ConfigOpts:        append(RPCConfigOpts("Bitcoin", "8332"), CommonConfigOpts("BTC", true)...),
+		ConfigOpts:        append(RPCConfigOpts("Bitcoin", "8332"), CommonConfigOpts("BTC", false)...),
 		MultiFundingOpts:  MultiFundingOpts,
 	}
 	spvWalletDefinition = &asset.WalletDefinition{
@@ -201,7 +201,7 @@ var (
 		Tab:         "Electrum (external)",
 		Description: "Use an external Electrum Wallet",
 		// json: DefaultConfigPath: filepath.Join(btcutil.AppDataDir("electrum", false), "config"), // e.g. ~/.electrum/config
-		ConfigOpts:       append(append(ElectrumConfigOpts, CommonConfigOpts("BTC", false)...), apiFallbackOpt(false)),
+		ConfigOpts:       append(ElectrumConfigOpts, CommonConfigOpts("BTC", false)...),
 		MultiFundingOpts: MultiFundingOpts,
 	}
 
@@ -506,6 +506,12 @@ func parseRPCWalletConfig(settings map[string]string, symbol string, net dex.Net
 	cfg, err := readRPCWalletConfig(settings, symbol, net, ports)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	// For BTC, external fee rates are the default because of the instability
+	// of estimatesmartfee.
+	if symbol == "btc" {
+		cfg.ApiFeeFallback = true
 	}
 
 	cl, err := newRPCConnection(cfg, singularWallet)
@@ -1849,17 +1855,19 @@ func (btc *baseWallet) legacyBalance() (*asset.Balance, error) {
 
 // feeRate returns the current optimal fee rate in sat / byte using the
 // estimatesmartfee RPC or an external API if configured and enabled.
-func (btc *baseWallet) feeRate(confTarget uint64) (uint64, error) {
-	// Local estimate first. localFeeRate might be a dummy function for spv
-	// wallets.
-	feeRate, err := btc.localFeeRate(btc.ctx, btc.node, confTarget) // e.g. rpcFeeRate
-	if err == nil {
-		return feeRate, nil
+func (btc *baseWallet) feeRate(confTarget uint64) (feeRate uint64, err error) {
+	allowExternalFeeRate := btc.apiFeeFallback()
+	// Because of the problems Bitcoin's unstable estimatesmartfee has caused,
+	// we won't use it.
+	if btc.symbol != "btc" || !allowExternalFeeRate {
+		feeRate, err := btc.localFeeRate(btc.ctx, btc.node, confTarget) // e.g. rpcFeeRate
+		if err == nil {
+			return feeRate, nil
+		} else if !allowExternalFeeRate {
+			return 0, fmt.Errorf("error getting local rate and external rates are disabled: %w", err)
+		}
 	}
 
-	if !btc.apiFeeFallback() {
-		return 0, err
-	}
 	if btc.feeCache == nil {
 		return 0, fmt.Errorf("external fee rate fetcher not configured")
 	}
