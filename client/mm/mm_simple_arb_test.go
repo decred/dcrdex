@@ -459,140 +459,144 @@ func TestArbRebalance(t *testing.T) {
 	}
 
 	runTest := func(test *test) {
-		cex := newTBotCEXAdaptor()
-		cex.vwapErr = test.cexVWAPErr
-		cex.tradeErr = test.cexTradeErr
-		cex.maxBuyQty = test.cexMaxBuyQty
-		cex.maxSellQty = test.cexMaxSellQty
+		t.Run(test.name, func(t *testing.T) {
+			cex := newTBotCEXAdaptor()
+			tcex := newTCEX()
+			tcex.vwapErr = test.cexVWAPErr
+			cex.tradeErr = test.cexTradeErr
+			cex.maxBuyQty = test.cexMaxBuyQty
+			cex.maxSellQty = test.cexMaxSellQty
 
-		tCore := newTCore()
-		coreAdaptor := newTBotCoreAdaptor(tCore)
-		coreAdaptor.buyFeesInQuote = feesInQuoteUnits
-		coreAdaptor.sellFeesInQuote = feesInQuoteUnits
-		coreAdaptor.maxBuyQty = test.dexMaxBuyQty
-		coreAdaptor.maxSellQty = test.dexMaxSellQty
+			tc := newTCore()
+			coreAdaptor := newTBotCoreAdaptor(tc)
+			coreAdaptor.buyFeesInQuote = feesInQuoteUnits
+			coreAdaptor.sellFeesInQuote = feesInQuoteUnits
+			coreAdaptor.maxBuyQty = test.dexMaxBuyQty
+			coreAdaptor.maxSellQty = test.dexMaxSellQty
 
-		if test.expectedDexOrder != nil {
-			coreAdaptor.tradeResult = &core.Order{
-				Qty:  test.expectedDexOrder.qty,
-				Rate: test.expectedDexOrder.rate,
-				Sell: test.expectedDexOrder.sell,
+			if test.expectedDexOrder != nil {
+				coreAdaptor.tradeResult = &core.Order{
+					Qty:  test.expectedDexOrder.qty,
+					Rate: test.expectedDexOrder.rate,
+					Sell: test.expectedDexOrder.sell,
+				}
 			}
-		}
 
-		orderBook := &tOrderBook{
-			bidsVWAP: make(map[uint64]vwapResult),
-			asksVWAP: make(map[uint64]vwapResult),
-			vwapErr:  test.dexVWAPErr,
-		}
-		for i := range test.books.dexBidsAvg {
-			orderBook.bidsVWAP[uint64(i+1)] = vwapResult{test.books.dexBidsAvg[i], test.books.dexBidsExtrema[i]}
-		}
-		for i := range test.books.dexAsksAvg {
-			orderBook.asksVWAP[uint64(i+1)] = vwapResult{test.books.dexAsksAvg[i], test.books.dexAsksExtrema[i]}
-		}
-		for i := range test.books.cexBidsAvg {
-			cex.bidsVWAP[uint64(i+1)*lotSize] = &vwapResult{test.books.cexBidsAvg[i], test.books.cexBidsExtrema[i]}
-		}
-		for i := range test.books.cexAsksAvg {
-			cex.asksVWAP[uint64(i+1)*lotSize] = &vwapResult{test.books.cexAsksAvg[i], test.books.cexAsksExtrema[i]}
-		}
+			orderBook := &tOrderBook{
+				bidsVWAP: make(map[uint64]vwapResult),
+				asksVWAP: make(map[uint64]vwapResult),
+				vwapErr:  test.dexVWAPErr,
+			}
+			for i := range test.books.dexBidsAvg {
+				orderBook.bidsVWAP[uint64(i+1)] = vwapResult{test.books.dexBidsAvg[i], test.books.dexBidsExtrema[i]}
+			}
+			for i := range test.books.dexAsksAvg {
+				orderBook.asksVWAP[uint64(i+1)] = vwapResult{test.books.dexAsksAvg[i], test.books.dexAsksExtrema[i]}
+			}
+			for i := range test.books.cexBidsAvg {
+				tcex.bidsVWAP[uint64(i+1)*lotSize] = vwapResult{test.books.cexBidsAvg[i], test.books.cexBidsExtrema[i]}
+			}
+			for i := range test.books.cexAsksAvg {
+				tcex.asksVWAP[uint64(i+1)*lotSize] = vwapResult{test.books.cexAsksAvg[i], test.books.cexAsksExtrema[i]}
+			}
 
-		a := &simpleArbMarketMaker{
-			unifiedExchangeAdaptor: mustParseAdaptorFromMarket(&core.Market{
+			u := mustParseAdaptorFromMarket(&core.Market{
 				LotSize:  lotSize,
 				BaseID:   baseID,
 				QuoteID:  quoteID,
 				RateStep: 1e2,
-			}),
-			cex:        cex,
-			core:       coreAdaptor,
-			activeArbs: test.existingArbs,
-		}
-		const sellSwapFees, sellRedeemFees = 3e5, 1e5
-		const buySwapFees, buyRedeemFees = 2e4, 1e4
-		const buyRate, sellRate = 1e7, 1.1e7
-		tcex := newTCEX()
-		a.CEX = tcex
-		tcex.asksVWAP[lotSize] = vwapResult{avg: buyRate}
-		tcex.bidsVWAP[lotSize] = vwapResult{avg: sellRate}
-		a.buyFees = &orderFees{
-			LotFeeRange: &LotFeeRange{
-				Max: &LotFees{
-					Redeem: buyRedeemFees,
+			})
+			u.clientCore.(*tCore).userParcels = 0
+			u.clientCore.(*tCore).parcelLimit = 1
+
+			a := &simpleArbMarketMaker{
+				unifiedExchangeAdaptor: u,
+				cex:                    cex,
+				core:                   coreAdaptor,
+				activeArbs:             test.existingArbs,
+			}
+			const sellSwapFees, sellRedeemFees = 3e5, 1e5
+			const buySwapFees, buyRedeemFees = 2e4, 1e4
+			const buyRate, sellRate = 1e7, 1.1e7
+			a.CEX = tcex
+			a.buyFees = &OrderFees{
+				LotFeeRange: &LotFeeRange{
+					Max: &LotFees{
+						Redeem: buyRedeemFees,
+					},
+					Estimated: &LotFees{
+						Swap:   buySwapFees,
+						Redeem: buyRedeemFees,
+					},
 				},
-				Estimated: &LotFees{
-					Swap:   buySwapFees,
-					Redeem: buyRedeemFees,
+				BookingFeesPerLot: buySwapFees,
+			}
+			a.sellFees = &OrderFees{
+				LotFeeRange: &LotFeeRange{
+					Max: &LotFees{
+						Redeem: sellRedeemFees,
+					},
+					Estimated: &LotFees{
+						Swap:   sellSwapFees,
+						Redeem: sellRedeemFees,
+					},
 				},
-			},
-			bookingFeesPerLot: buySwapFees,
-		}
-		a.sellFees = &orderFees{
-			LotFeeRange: &LotFeeRange{
-				Max: &LotFees{
-					Redeem: sellRedeemFees,
-				},
-				Estimated: &LotFees{
-					Swap:   sellSwapFees,
-					Redeem: sellRedeemFees,
-				},
-			},
-			bookingFeesPerLot: sellSwapFees,
-		}
-		// arbEngine.setBotLoop(arbEngine.botLoop)
-		a.cfgV.Store(&SimpleArbConfig{
-			ProfitTrigger:      profitTrigger,
-			MaxActiveArbs:      maxActiveArbs,
-			NumEpochsLeaveOpen: numEpochsLeaveOpen,
+				BookingFeesPerLot: sellSwapFees,
+			}
+			// arbEngine.setBotLoop(arbEngine.botLoop)
+			a.cfgV.Store(&SimpleArbConfig{
+				ProfitTrigger:      profitTrigger,
+				MaxActiveArbs:      maxActiveArbs,
+				NumEpochsLeaveOpen: numEpochsLeaveOpen,
+			})
+			a.book = orderBook
+			a.rebalance(currEpoch)
+
+			// Check dex trade
+			if test.expectedDexOrder == nil != (coreAdaptor.lastTradePlaced == nil) {
+				t.Fatalf("%s: expected dex order %v but got %v", test.name, (test.expectedDexOrder != nil), (coreAdaptor.lastTradePlaced != nil))
+			}
+			if test.expectedDexOrder != nil {
+				if test.expectedDexOrder.rate != coreAdaptor.lastTradePlaced.rate {
+					t.Fatalf("%s: expected sell order rate %d but got %d", test.name, test.expectedDexOrder.rate, coreAdaptor.lastTradePlaced.rate)
+				}
+				if test.expectedDexOrder.qty != coreAdaptor.lastTradePlaced.qty {
+					t.Fatalf("%s: expected sell order qty %d but got %d", test.name, test.expectedDexOrder.qty, coreAdaptor.lastTradePlaced.qty)
+				}
+				if test.expectedDexOrder.sell != coreAdaptor.lastTradePlaced.sell {
+					t.Fatalf("%s: expected sell order sell %v but got %v", test.name, test.expectedDexOrder.sell, coreAdaptor.lastTradePlaced.sell)
+				}
+			}
+
+			// Check cex trade
+			if (test.expectedCexOrder == nil) != (cex.lastTrade == nil) {
+				t.Fatalf("%s: expected cex order %v but got %v", test.name, (test.expectedCexOrder != nil), (cex.lastTrade != nil))
+			}
+			if cex.lastTrade != nil &&
+				*cex.lastTrade != *test.expectedCexOrder {
+				t.Fatalf("%s: cex order %+v != expected %+v", test.name, cex.lastTrade, test.expectedCexOrder)
+			}
+
+			// Check dex cancels
+			if len(test.expectedDEXCancels) != len(tc.cancelsPlaced) {
+				t.Fatalf("%s: expected %d cancels but got %d", test.name, len(test.expectedDEXCancels), len(tc.cancelsPlaced))
+			}
+			for i := range test.expectedDEXCancels {
+				if !bytes.Equal(test.expectedDEXCancels[i], tc.cancelsPlaced[i][:]) {
+					t.Fatalf("%s: expected cancel %x but got %x", test.name, test.expectedDEXCancels[i], tc.cancelsPlaced[i])
+				}
+			}
+
+			// Check cex cancels
+			if len(test.expectedCEXCancels) != len(cex.cancelledTrades) {
+				t.Fatalf("%s: expected %d cex cancels but got %d", test.name, len(test.expectedCEXCancels), len(cex.cancelledTrades))
+			}
+			for i := range test.expectedCEXCancels {
+				if test.expectedCEXCancels[i] != cex.cancelledTrades[i] {
+					t.Fatalf("%s: expected cex cancel %s but got %s", test.name, test.expectedCEXCancels[i], cex.cancelledTrades[i])
+				}
+			}
 		})
-		a.book = orderBook
-		a.rebalance(currEpoch)
-
-		// Check dex trade
-		if test.expectedDexOrder == nil != (coreAdaptor.lastTradePlaced == nil) {
-			t.Fatalf("%s: expected dex order %v but got %v", test.name, (test.expectedDexOrder != nil), (coreAdaptor.lastTradePlaced != nil))
-		}
-		if test.expectedDexOrder != nil {
-			if test.expectedDexOrder.rate != coreAdaptor.lastTradePlaced.rate {
-				t.Fatalf("%s: expected sell order rate %d but got %d", test.name, test.expectedDexOrder.rate, coreAdaptor.lastTradePlaced.rate)
-			}
-			if test.expectedDexOrder.qty != coreAdaptor.lastTradePlaced.qty {
-				t.Fatalf("%s: expected sell order qty %d but got %d", test.name, test.expectedDexOrder.qty, coreAdaptor.lastTradePlaced.qty)
-			}
-			if test.expectedDexOrder.sell != coreAdaptor.lastTradePlaced.sell {
-				t.Fatalf("%s: expected sell order sell %v but got %v", test.name, test.expectedDexOrder.sell, coreAdaptor.lastTradePlaced.sell)
-			}
-		}
-
-		// Check cex trade
-		if (test.expectedCexOrder == nil) != (cex.lastTrade == nil) {
-			t.Fatalf("%s: expected cex order %v but got %v", test.name, (test.expectedCexOrder != nil), (cex.lastTrade != nil))
-		}
-		if cex.lastTrade != nil &&
-			*cex.lastTrade != *test.expectedCexOrder {
-			t.Fatalf("%s: cex order %+v != expected %+v", test.name, cex.lastTrade, test.expectedCexOrder)
-		}
-
-		// Check dex cancels
-		if len(test.expectedDEXCancels) != len(tCore.cancelsPlaced) {
-			t.Fatalf("%s: expected %d cancels but got %d", test.name, len(test.expectedDEXCancels), len(tCore.cancelsPlaced))
-		}
-		for i := range test.expectedDEXCancels {
-			if !bytes.Equal(test.expectedDEXCancels[i], tCore.cancelsPlaced[i][:]) {
-				t.Fatalf("%s: expected cancel %x but got %x", test.name, test.expectedDEXCancels[i], tCore.cancelsPlaced[i])
-			}
-		}
-
-		// Check cex cancels
-		if len(test.expectedCEXCancels) != len(cex.cancelledTrades) {
-			t.Fatalf("%s: expected %d cex cancels but got %d", test.name, len(test.expectedCEXCancels), len(cex.cancelledTrades))
-		}
-		for i := range test.expectedCEXCancels {
-			if test.expectedCEXCancels[i] != cex.cancelledTrades[i] {
-				t.Fatalf("%s: expected cex cancel %s but got %s", test.name, test.expectedCEXCancels[i], cex.cancelledTrades[i])
-			}
-		}
 	}
 
 	for _, test := range tests {
@@ -690,6 +694,8 @@ func TestArbDexTradeUpdates(t *testing.T) {
 			core:       coreAdaptor,
 			activeArbs: test.activeArbs,
 		}
+		arbEngine.clientCore = newTCore()
+		arbEngine.CEX = newTCEX()
 		arbEngine.ctx = ctx
 		arbEngine.setBotLoop(arbEngine.botLoop)
 		arbEngine.cfgV.Store(&SimpleArbConfig{
@@ -812,6 +818,7 @@ func TestCexTradeUpdates(t *testing.T) {
 			activeArbs: test.activeArbs,
 		}
 		arbEngine.ctx = ctx
+		arbEngine.CEX = newTCEX()
 		arbEngine.setBotLoop(arbEngine.botLoop)
 		arbEngine.cfgV.Store(&SimpleArbConfig{
 			ProfitTrigger:      0.01,
@@ -847,3 +854,154 @@ func TestCexTradeUpdates(t *testing.T) {
 		runTest(test)
 	}
 }
+
+/*func TestArbBotProblems(t *testing.T) {
+	const baseID, quoteID = 42, 0
+	const lotSize uint64 = 5e9
+	const sellSwapFees, sellRedeemFees = 3e6, 1e6
+	const buySwapFees, buyRedeemFees = 2e5, 1e5
+	const buyRate, sellRate = 1e7, 1.1e7
+
+	type test struct {
+		name            string
+		userLimitTooLow bool
+		dexBalanceDefs  map[uint32]uint64
+		cexBalanceDefs  map[uint32]uint64
+
+		expBotProblems *BotProblems
+	}
+
+	updateBotProblems := func(f func(*BotProblems)) *BotProblems {
+		bp := newBotProblems()
+		f(bp)
+		return bp
+	}
+
+	tests := []*test{
+		{
+			name:           "no problems",
+			expBotProblems: newBotProblems(),
+		},
+		{
+			name:            "user limit too low",
+			userLimitTooLow: true,
+			expBotProblems: updateBotProblems(func(bp *BotProblems) {
+				bp.UserLimitTooLow = true
+			}),
+		},
+		{
+			name: "balance deficiencies",
+			dexBalanceDefs: map[uint32]uint64{
+				baseID:  lotSize + sellSwapFees,
+				quoteID: calc.BaseToQuote(buyRate, lotSize) + buySwapFees,
+			},
+			cexBalanceDefs: map[uint32]uint64{
+				baseID:  lotSize,
+				quoteID: calc.BaseToQuote(sellRate, lotSize),
+			},
+			expBotProblems: updateBotProblems(func(bp *BotProblems) {
+				// All these values are multiplied by 2 because the same deficiencies
+				// are returned for buys and sells, and they are summed.
+				bp.DEXBalanceDeficiencies = map[uint32]uint64{
+					baseID:  (lotSize + sellSwapFees) * 2,
+					quoteID: (calc.BaseToQuote(buyRate, lotSize) + buySwapFees) * 2,
+				}
+				bp.CEXBalanceDeficiencies = map[uint32]uint64{
+					baseID:  lotSize * 2,
+					quoteID: calc.BaseToQuote(sellRate, lotSize) * 2,
+				}
+			}),
+		},
+	}
+
+	runTest := func(tt *test) {
+		t.Run(tt.name, func(t *testing.T) {
+			cex := newTCEX()
+			mkt := &core.Market{
+				RateStep:   1e3,
+				AtomToConv: 1,
+				LotSize:    lotSize,
+				BaseID:     baseID,
+				QuoteID:    quoteID,
+			}
+			u := mustParseAdaptorFromMarket(mkt)
+			u.CEX = cex
+			u.botCfgV.Store(&BotConfig{})
+			c := newTCore()
+			if !tt.userLimitTooLow {
+				u.clientCore.(*tCore).userParcels = 0
+				u.clientCore.(*tCore).parcelLimit = 1
+			}
+			u.fiatRates.Store(map[uint32]float64{baseID: 1, quoteID: 1})
+			cexAdaptor := newTBotCEXAdaptor()
+			coreAdaptor := newTBotCoreAdaptor(c)
+			a := &simpleArbMarketMaker{
+				unifiedExchangeAdaptor: u,
+				cex:                    cexAdaptor,
+				core:                   coreAdaptor,
+			}
+
+			coreAdaptor.balanceDefs = tt.dexBalanceDefs
+			cexAdaptor.balanceDefs = tt.cexBalanceDefs
+
+			a.cfgV.Store(&SimpleArbConfig{})
+
+			cex.asksVWAP[lotSize] = vwapResult{
+				avg:     buyRate,
+				extrema: buyRate,
+			}
+			cex.bidsVWAP[lotSize] = vwapResult{
+				avg:     sellRate,
+				extrema: sellRate,
+			}
+
+			a.book = &tOrderBook{
+				bidsVWAP: map[uint64]vwapResult{
+					1: {
+						avg:     buyRate,
+						extrema: buyRate,
+					},
+				},
+				asksVWAP: map[uint64]vwapResult{
+					1: {
+						avg:     sellRate,
+						extrema: sellRate,
+					},
+				},
+			}
+
+			a.buyFees = &OrderFees{
+				LotFeeRange: &LotFeeRange{
+					Max: &LotFees{
+						Redeem: buyRedeemFees,
+						Swap:   buySwapFees,
+					},
+					Estimated: &LotFees{},
+				},
+				BookingFeesPerLot: buySwapFees,
+			}
+			a.sellFees = &OrderFees{
+				LotFeeRange: &LotFeeRange{
+					Max: &LotFees{
+						Redeem: sellRedeemFees,
+						Swap:   sellSwapFees,
+					},
+					Estimated: &LotFees{},
+				},
+				BookingFeesPerLot: sellSwapFees,
+			}
+
+			a.rebalance(1)
+
+			problems := a.problems()
+			if !reflect.DeepEqual(tt.expBotProblems, problems) {
+				t.Fatalf("expected bot problems %v, got %v", tt.expBotProblems, problems)
+			}
+		})
+	}
+
+	for _, test := range tests {
+		runTest(test)
+	}
+}
+*/

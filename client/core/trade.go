@@ -3819,6 +3819,79 @@ func (t *trackedTrade) orderAccelerationParameters() (swapCoins, accelerationCoi
 	return swapCoins, accelerationCoins, dex.Bytes(t.metaData.ChangeCoin), requiredForRemainingSwaps, nil
 }
 
+func (t *trackedTrade) likelyTaker(midGap uint64) bool {
+	if t.Type() == order.MarketOrderType {
+		return true
+	}
+	lo := t.Order.(*order.LimitOrder)
+	if lo.Force == order.ImmediateTiF {
+		return true
+	}
+
+	if midGap == 0 {
+		return false
+	}
+
+	if lo.Sell {
+		return lo.Rate < midGap
+	}
+
+	return lo.Rate > midGap
+}
+
+func (t *trackedTrade) baseQty(midGap, lotSize uint64) uint64 {
+	qty := t.Trade().Quantity
+
+	if t.Type() == order.MarketOrderType && !t.Trade().Sell {
+		if midGap == 0 {
+			qty = lotSize
+		} else {
+			qty = calc.QuoteToBase(midGap, qty)
+		}
+	}
+
+	return qty
+}
+
+func (t *trackedTrade) epochWeight(midGap, lotSize uint64) uint64 {
+	if t.status() >= order.OrderStatusBooked {
+		return 0
+	}
+
+	if t.likelyTaker(midGap) {
+		return 2 * t.baseQty(midGap, lotSize)
+	}
+
+	return t.baseQty(midGap, lotSize)
+}
+
+func (t *trackedTrade) bookedWeight() uint64 {
+	if t.status() != order.OrderStatusBooked {
+		return 0
+	}
+
+	return t.Trade().Remaining()
+}
+
+func (t *trackedTrade) settlingWeight() (weight uint64) {
+	for _, match := range t.matches {
+		if (match.Side == order.Maker && match.Status >= order.MakerRedeemed) ||
+			(match.Side == order.Taker && match.Status >= order.MatchComplete) {
+			continue
+		}
+		weight += match.Quantity
+	}
+	return
+}
+
+func (t *trackedTrade) isEpochOrder() bool {
+	return t.status() == order.OrderStatusEpoch
+}
+
+func (t *trackedTrade) marketWeight(midGap, lotSize uint64) uint64 {
+	return t.epochWeight(midGap, lotSize) + t.bookedWeight() + t.settlingWeight()
+}
+
 // mapifyCoins converts the slice of coins to a map keyed by hex coin ID.
 func mapifyCoins(coins asset.Coins) map[string]asset.Coin {
 	coinMap := make(map[string]asset.Coin, len(coins))

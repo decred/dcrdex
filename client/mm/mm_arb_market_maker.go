@@ -13,6 +13,7 @@ import (
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/mm/libxc"
+	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/order"
@@ -235,20 +236,20 @@ func (a *arbMarketMaker) dexPlacementRate(cexRate uint64, sell bool) (uint64, er
 	return dexPlacementRate(cexRate, sell, a.cfg().Profit, a.market, feesInQuoteUnits, a.log)
 }
 
-func (a *arbMarketMaker) ordersToPlace() (buys, sells []*multiTradePlacement) {
-	orders := func(cfgPlacements []*ArbMarketMakingPlacement, sellOnDEX bool) []*multiTradePlacement {
-		newPlacements := make([]*multiTradePlacement, 0, len(cfgPlacements))
+type arbMMPlacementReason struct {
+	Depth         uint64 `json:"depth"`
+	CEXTooShallow bool   `json:"cexFilled"`
+}
+
+func (a *arbMarketMaker) ordersToPlace() (buys, sells []*TradePlacement, err error) {
+	orders := func(cfgPlacements []*ArbMarketMakingPlacement, sellOnDEX bool) ([]*TradePlacement, error) {
+		newPlacements := make([]*TradePlacement, 0, len(cfgPlacements))
 		var cumulativeCEXDepth uint64
 		for i, cfgPlacement := range cfgPlacements {
 			cumulativeCEXDepth += uint64(float64(cfgPlacement.Lots*a.lotSize) * cfgPlacement.Multiplier)
 			_, extrema, filled, err := a.CEX.VWAP(a.baseID, a.quoteID, sellOnDEX, cumulativeCEXDepth)
 			if err != nil {
-				a.log.Errorf("Error calculating vwap: %v", err)
-				newPlacements = append(newPlacements, &multiTradePlacement{
-					rate: 0,
-					lots: 0,
-				})
-				continue
+				return nil, fmt.Errorf("error getting CEX VWAP: %w", err)
 			}
 
 			if a.log.Level() == dex.LevelTrace {
@@ -259,35 +260,31 @@ func (a *arbMarketMaker) ordersToPlace() (buys, sells []*multiTradePlacement) {
 
 			if !filled {
 				a.log.Infof("CEX %s side has < %s on the orderbook.", sellStr(!sellOnDEX), a.fmtBase(cumulativeCEXDepth))
-				newPlacements = append(newPlacements, &multiTradePlacement{
-					rate: 0,
-					lots: 0,
-				})
+				newPlacements = append(newPlacements, &TradePlacement{})
 				continue
 			}
 
 			placementRate, err := a.dexPlacementRate(extrema, sellOnDEX)
 			if err != nil {
-				a.log.Errorf("Error calculating dex placement rate: %v", err)
-				newPlacements = append(newPlacements, &multiTradePlacement{
-					rate: 0,
-					lots: 0,
-				})
-				continue
+				return nil, fmt.Errorf("error calculating DEX placement rate: %w", err)
 			}
 
-			newPlacements = append(newPlacements, &multiTradePlacement{
-				rate:             placementRate,
-				lots:             cfgPlacement.Lots,
-				counterTradeRate: extrema,
+			newPlacements = append(newPlacements, &TradePlacement{
+				Rate:             placementRate,
+				Lots:             cfgPlacement.Lots,
+				CounterTradeRate: extrema,
 			})
 		}
 
-		return newPlacements
+		return newPlacements, nil
 	}
 
-	buys = orders(a.cfg().BuyPlacements, false)
-	sells = orders(a.cfg().SellPlacements, true)
+	buys, err = orders(a.cfg().BuyPlacements, false)
+	if err != nil {
+		return
+	}
+
+	sells, err = orders(a.cfg().SellPlacements, true)
 	return
 }
 
@@ -331,7 +328,7 @@ func (a *arbMarketMaker) distribution() (dist *distribution, err error) {
 // and potentially needed withdrawals and deposits, and finally cancel any
 // trades on the CEX that have been open for more than the number of epochs
 // specified in the config.
-func (a *arbMarketMaker) rebalance(epoch uint64) {
+func (a *arbMarketMaker) rebalance(epoch uint64, book *orderbook.OrderBook) {
 	if !a.rebalanceRunning.CompareAndSwap(false, true) {
 		return
 	}
@@ -344,29 +341,48 @@ func (a *arbMarketMaker) rebalance(epoch uint64) {
 	}
 	a.currEpoch.Store(epoch)
 
+	if !a.checkBotHealth(epoch) {
+		a.tryCancelOrders(a.ctx, &epoch, false)
+		return
+	}
+
 	actionTaken, err := a.tryTransfers(currEpoch)
 	if err != nil {
 		a.log.Errorf("Error performing transfers: %v", err)
-		return
-	}
-	if actionTaken {
+	} else if actionTaken {
 		return
 	}
 
-	buys, sells := a.ordersToPlace()
-	buyInfos := a.multiTrade(buys, false, a.cfg().DriftTolerance, currEpoch)
-	sellInfos := a.multiTrade(sells, true, a.cfg().DriftTolerance, currEpoch)
-	a.matchesMtx.Lock()
-	for oid, info := range buyInfos {
-		a.pendingOrders[oid] = info.counterTradeRate
+	var buysReport, sellsReport *OrderReport
+	buyOrders, sellOrders, determinePlacementsErr := a.ordersToPlace()
+	if determinePlacementsErr != nil {
+		a.tryCancelOrders(a.ctx, &epoch, false)
+	} else {
+		var buys, sells map[order.OrderID]*dexOrderInfo
+		buys, buysReport = a.multiTrade(buyOrders, false, a.cfg().DriftTolerance, currEpoch)
+		for id, ord := range buys {
+			a.matchesMtx.Lock()
+			a.pendingOrders[id] = ord.counterTradeRate
+			a.matchesMtx.Unlock()
+		}
+
+		sells, sellsReport = a.multiTrade(sellOrders, true, a.cfg().DriftTolerance, currEpoch)
+		for id, ord := range sells {
+			a.matchesMtx.Lock()
+			a.pendingOrders[id] = ord.counterTradeRate
+			a.matchesMtx.Unlock()
+		}
 	}
-	for oid, info := range sellInfos {
-		a.pendingOrders[oid] = info.counterTradeRate
+
+	epochReport := &EpochReport{
+		BuysReport:  buysReport,
+		SellsReport: sellsReport,
+		EpochNum:    epoch,
 	}
-	a.matchesMtx.Unlock()
+	epochReport.setPreOrderProblems(determinePlacementsErr)
+	a.updateEpochReport(epochReport)
 
 	a.cancelExpiredCEXTrades()
-
 	a.registerFeeGap()
 }
 
@@ -379,7 +395,7 @@ func (a *arbMarketMaker) tryTransfers(currEpoch uint64) (actionTaken bool, err e
 	return a.transfer(dist, currEpoch)
 }
 
-func feeGap(core botCoreAdaptor, cex botCexAdaptor, baseID, quoteID uint32, lotSize uint64) (*FeeGapStats, error) {
+func feeGap(core botCoreAdaptor, cex libxc.CEX, baseID, quoteID uint32, lotSize uint64) (*FeeGapStats, error) {
 	s := &FeeGapStats{
 		BasisPrice: cex.MidGap(baseID, quoteID),
 	}
@@ -413,7 +429,7 @@ func feeGap(core botCoreAdaptor, cex botCexAdaptor, baseID, quoteID uint32, lotS
 }
 
 func (a *arbMarketMaker) registerFeeGap() {
-	feeGap, err := feeGap(a.core, a.cex, a.baseID, a.quoteID, a.lotSize)
+	feeGap, err := feeGap(a.core, a.CEX, a.baseID, a.quoteID, a.lotSize)
 	if err != nil {
 		a.log.Warnf("error getting fee-gap stats: %v", err)
 		return
@@ -446,7 +462,7 @@ func (a *arbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
 			case ni := <-bookFeed.Next():
 				switch epoch := ni.Payload.(type) {
 				case *core.ResolvedEpoch:
-					a.rebalance(epoch.Current)
+					a.rebalance(epoch.Current, book)
 				}
 			case <-ctx.Done():
 				return

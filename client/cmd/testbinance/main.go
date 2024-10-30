@@ -433,6 +433,7 @@ func (f *fakeBinance) run(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			}
+
 			f.withdrawalHistoryMtx.Lock()
 			for transferID, withdraw := range f.withdrawalHistory {
 				if withdraw.txID.Load() != nil {

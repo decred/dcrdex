@@ -139,7 +139,7 @@ func (c *BasicMarketMakingConfig) Validate() error {
 }
 
 type basicMMCalculator interface {
-	basisPrice() uint64
+	basisPrice() (bp uint64, err error)
 	halfSpread(uint64) (uint64, error)
 	feeGapStats(uint64) (*FeeGapStats, error)
 }
@@ -152,6 +152,9 @@ type basicMMCalculatorImpl struct {
 	log    dex.Logger
 }
 
+var errNoBasisPrice = errors.New("no oracle or fiat rate available")
+var errOracleFiatMismatch = errors.New("oracle rate and fiat rate mismatch")
+
 // basisPrice calculates the basis price for the market maker.
 // The mid-gap of the dex order book is used, and if oracles are
 // available, and the oracle weighting is > 0, the oracle price
@@ -162,7 +165,7 @@ type basicMMCalculatorImpl struct {
 // or oracle weighting is 0, the fiat rate is used.
 // If there is no fiat rate available, the empty market rate in the
 // configuration is used.
-func (b *basicMMCalculatorImpl) basisPrice() uint64 {
+func (b *basicMMCalculatorImpl) basisPrice() (uint64, error) {
 	oracleRate := b.msgRate(b.oracle.getMarketPrice(b.baseID, b.quoteID))
 	b.log.Tracef("oracle rate = %s", b.fmtRate(oracleRate))
 
@@ -172,15 +175,15 @@ func (b *basicMMCalculatorImpl) basisPrice() uint64 {
 			"No fiat-based rate estimate(s) available for sanity check for %s", b.market.name,
 		)
 		if oracleRate == 0 { // steppedRate(0, x) => x, so we have to handle this.
-			return 0
+			return 0, errNoBasisPrice
 		}
-		return steppedRate(oracleRate, b.rateStep)
+		return steppedRate(oracleRate, b.rateStep), nil
 	}
 	if oracleRate == 0 {
 		b.log.Meter("basisPrice_nooracle_"+b.market.name, time.Hour).Infof(
 			"No oracle rate available. Using fiat-derived basis rate = %s for %s", b.fmtRate(rateFromFiat), b.market.name,
 		)
-		return steppedRate(rateFromFiat, b.rateStep)
+		return steppedRate(rateFromFiat, b.rateStep), nil
 	}
 	mismatch := math.Abs((float64(oracleRate) - float64(rateFromFiat)) / float64(oracleRate))
 	const maxOracleFiatMismatch = 0.05
@@ -189,10 +192,10 @@ func (b *basicMMCalculatorImpl) basisPrice() uint64 {
 			"Oracle rate sanity check failed for %s. oracle rate = %s, rate from fiat = %s",
 			b.market.name, b.market.fmtRate(oracleRate), b.market.fmtRate(rateFromFiat),
 		)
-		return 0
+		return 0, errOracleFiatMismatch
 	}
 
-	return steppedRate(oracleRate, b.rateStep)
+	return steppedRate(oracleRate, b.rateStep), nil
 }
 
 // halfSpread calculates the distance from the mid-gap where if you sell a lot
@@ -318,10 +321,10 @@ func (m *basicMarketMaker) orderPrice(basisPrice, feeAdj uint64, sell bool, gapF
 	return basisPrice - adj
 }
 
-func (m *basicMarketMaker) ordersToPlace() (buyOrders, sellOrders []*multiTradePlacement, err error) {
-	basisPrice := m.calculator.basisPrice()
-	if basisPrice == 0 {
-		return nil, nil, fmt.Errorf("no basis price available")
+func (m *basicMarketMaker) ordersToPlace() (buyOrders, sellOrders []*TradePlacement, err error) {
+	basisPrice, err := m.calculator.basisPrice()
+	if err != nil {
+		return nil, nil, err
 	}
 
 	feeGap, err := m.calculator.feeGapStats(basisPrice)
@@ -340,8 +343,8 @@ func (m *basicMarketMaker) ordersToPlace() (buyOrders, sellOrders []*multiTradeP
 			m.name, m.fmtRate(basisPrice), m.fmtRate(feeAdj))
 	}
 
-	orders := func(orderPlacements []*OrderPlacement, sell bool) []*multiTradePlacement {
-		placements := make([]*multiTradePlacement, 0, len(orderPlacements))
+	orders := func(orderPlacements []*OrderPlacement, sell bool) []*TradePlacement {
+		placements := make([]*TradePlacement, 0, len(orderPlacements))
 		for i, p := range orderPlacements {
 			rate := m.orderPrice(basisPrice, feeAdj, sell, p.GapFactor)
 
@@ -354,9 +357,9 @@ func (m *basicMarketMaker) ordersToPlace() (buyOrders, sellOrders []*multiTradeP
 			if rate == 0 {
 				lots = 0
 			}
-			placements = append(placements, &multiTradePlacement{
-				rate: rate,
-				lots: lots,
+			placements = append(placements, &TradePlacement{
+				Rate: rate,
+				Lots: lots,
 			})
 		}
 		return placements
@@ -375,15 +378,27 @@ func (m *basicMarketMaker) rebalance(newEpoch uint64) {
 
 	m.log.Tracef("rebalance: epoch %d", newEpoch)
 
-	buyOrders, sellOrders, err := m.ordersToPlace()
-	if err != nil {
-		m.log.Errorf("error calculating orders to place: %v. cancelling all orders", err)
+	if !m.checkBotHealth(newEpoch) {
 		m.tryCancelOrders(m.ctx, &newEpoch, false)
 		return
 	}
 
-	m.multiTrade(buyOrders, false, m.cfg().DriftTolerance, newEpoch)
-	m.multiTrade(sellOrders, true, m.cfg().DriftTolerance, newEpoch)
+	var buysReport, sellsReport *OrderReport
+	buyOrders, sellOrders, determinePlacementsErr := m.ordersToPlace()
+	if determinePlacementsErr != nil {
+		m.tryCancelOrders(m.ctx, &newEpoch, false)
+	} else {
+		_, buysReport = m.multiTrade(buyOrders, false, m.cfg().DriftTolerance, newEpoch)
+		_, sellsReport = m.multiTrade(sellOrders, true, m.cfg().DriftTolerance, newEpoch)
+	}
+
+	epochReport := &EpochReport{
+		BuysReport:  buysReport,
+		SellsReport: sellsReport,
+		EpochNum:    newEpoch,
+	}
+	epochReport.setPreOrderProblems(determinePlacementsErr)
+	m.updateEpochReport(epochReport)
 }
 
 func (m *basicMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {

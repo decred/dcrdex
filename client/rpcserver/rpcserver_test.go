@@ -177,8 +177,8 @@ func (c *TCore) RemoveWalletPeer(assetID uint32, address string) error {
 func (c *TCore) Notifications(n int) (notes, pokes []*db.Notification, _ error) {
 	return nil, nil, nil
 }
-func (c *TCore) MultiTrade(appPass []byte, form *core.MultiTradeForm) ([]*core.Order, error) {
-	return nil, nil
+func (c *TCore) MultiTrade(appPass []byte, form *core.MultiTradeForm) []*core.MultiTradeResult {
+	return nil
 }
 func (c *TCore) SetVSP(assetID uint32, addr string) error {
 	return c.setVSPErr
