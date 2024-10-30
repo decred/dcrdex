@@ -25,6 +25,13 @@ Please read the [v1.0.1 release notes](https://github.com/decred/dcrdex/releases
 - Change native Polygon asset from MATIC to POL
 - A bunch of little UI bugs (#2968)
 - Remove too-restrictive validation of seeds (when recovering password) that didn't account for new mnemonic seeds
+- Disable estimatesmartfee RPC as a source for Bitcoin transaction fee rates. It's busted
+- Increase transaction history query buffer for Zcash to accommodate shorter block times
+- Fix bug on markets view where user orders showed a ticker in the order type section instead of the order type
+- Use border color to show if address is valid or invalid instead of the incorrectly-styled checkmark
+- Update neutrino dependency for Bitcoin SPV wallet
+- Add epoch reporting for market maker bots to better inform users of the bot's current state
+- Fix bug where orders revoked by the server during disconnects were left in limbo
 
 ## Code Summary
 
