@@ -22,6 +22,14 @@ textarea {
     outline: none;
   }
 
+  &.border-danger {
+    border-color: var(--text-danger);
+  }
+  
+  &.border-success {
+    border-color: var(--indicator-good);
+  }
+
   &.thin {
     width: 4rem;
   }
