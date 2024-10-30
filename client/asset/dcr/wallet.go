@@ -139,9 +139,6 @@ type Wallet interface {
 	// tx with the provided hash. Returns asset.CoinNotFoundError if the tx is not
 	// found in the wallet.
 	GetTransaction(ctx context.Context, txHash *chainhash.Hash) (*WalletTransaction, error)
-	// GetRawTransaction returns details of the tx with the provided hash.
-	// Returns asset.CoinNotFoundError if the tx is not found.
-	GetRawTransaction(ctx context.Context, txHash *chainhash.Hash) (*wire.MsgTx, error)
 	// GetBestBlock returns the hash and height of the wallet's best block.
 	GetBestBlock(ctx context.Context) (*chainhash.Hash, int64, error)
 	// GetBlockHash returns the hash of the mainchain block at the specified height.
@@ -186,7 +183,7 @@ type WalletTransaction struct {
 	Confirmations int64
 	BlockHash     string
 	Details       []walletjson.GetTransactionDetailsResult
-	Hex           string
+	MsgTx         *wire.MsgTx
 }
 
 // tipNotifier can be implemented if the Wallet is able to provide a stream of

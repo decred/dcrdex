@@ -949,30 +949,6 @@ func TestMatchAnyScript(t *testing.T) {
 	}
 }
 
-func TestGetRawTransaction(t *testing.T) {
-	w, dcrw := tNewSpvWallet()
-
-	dcrw.txsByHash = []*wire.MsgTx{{}}
-
-	if _, err := w.GetRawTransaction(tCtx, nil); err != nil {
-		t.Fatalf("intitial GetRawTransaction error: %v", err)
-	}
-
-	// TxDetails NotExist error
-	dcrw.txsByHash = []*wire.MsgTx{}
-	if _, err := w.GetRawTransaction(tCtx, nil); !errors.Is(err, asset.CoinNotFoundError) {
-		t.Fatalf("expected asset.CoinNotFoundError, got %v", err)
-	}
-	dcrw.txsByHash = []*wire.MsgTx{{}}
-
-	// TxDetails generic error
-	dcrw.txsByHashErr = tErr
-	if _, err := w.GetRawTransaction(tCtx, nil); err == nil {
-		t.Fatalf("expected TxDetail generic error to propagate")
-	}
-	dcrw.txsByHashErr = nil
-}
-
 func TestBirthdayBlockHeight(t *testing.T) {
 	spvw, dcrw := tNewSpvWallet()
 

@@ -134,7 +134,6 @@ type rpcClient interface {
 	GetBlockHeaderVerbose(ctx context.Context, blockHash *chainhash.Hash) (*chainjson.GetBlockHeaderVerboseResult, error)
 	GetBlockHeader(ctx context.Context, blockHash *chainhash.Hash) (*wire.BlockHeader, error)
 	GetRawMempool(ctx context.Context, txType chainjson.GetRawMempoolTxTypeCmd) ([]*chainhash.Hash, error)
-	GetRawTransaction(ctx context.Context, txHash *chainhash.Hash) (*dcrutil.Tx, error)
 	LockUnspent(ctx context.Context, unlock bool, ops []*wire.OutPoint) error
 	GetRawChangeAddress(ctx context.Context, account string, net stdaddr.AddressParams) (stdaddr.Address, error)
 	GetNewAddressGapPolicy(ctx context.Context, account string, gap dcrwallet.GapPolicy) (stdaddr.Address, error)
@@ -755,38 +754,16 @@ func (w *rpcWallet) GetTransaction(ctx context.Context, txHash *chainhash.Hash) 
 		}
 		return nil, fmt.Errorf("error finding transaction %s in wallet: %w", txHash, translateRPCCancelErr(err))
 	}
+	msgTx, err := msgTxFromHex(tx.Hex)
+	if err != nil {
+		return nil, fmt.Errorf("invalid tx hex %s: %w", tx.Hex, err)
+	}
 	return &WalletTransaction{
 		Confirmations: tx.Confirmations,
 		BlockHash:     tx.BlockHash,
 		Details:       tx.Details,
-		Hex:           tx.Hex,
+		MsgTx:         msgTx,
 	}, nil
-}
-
-// GetRawTransaction returns details of the tx with the provided hash. Returns
-// asset.CoinNotFoundError if the tx is not found.
-// Part of the Wallet interface.
-func (w *rpcWallet) GetRawTransaction(ctx context.Context, txHash *chainhash.Hash) (*wire.MsgTx, error) {
-	if w.spvMode {
-		gtr, err := w.rpcClient.GetTransaction(ctx, txHash)
-		if err != nil {
-			return nil, err
-		}
-
-		txB, err := hex.DecodeString(gtr.Hex)
-		if err != nil {
-			return nil, err
-		}
-
-		return msgTxFromBytes(txB)
-	}
-
-	utilTx, err := w.rpcClient.GetRawTransaction(ctx, txHash)
-	if err != nil {
-		return nil, err
-	}
-
-	return utilTx.MsgTx(), nil
 }
 
 func (w *rpcWallet) ListSinceBlock(ctx context.Context, start int32) ([]ListTransactionsResult, error) {
