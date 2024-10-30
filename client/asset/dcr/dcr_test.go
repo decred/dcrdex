@@ -450,17 +450,6 @@ func (c *tRPCClient) GetRawMempool(_ context.Context, txType chainjson.GetRawMem
 	return txHashes, nil
 }
 
-func (c *tRPCClient) GetRawTransaction(_ context.Context, txHash *chainhash.Hash) (*dcrutil.Tx, error) {
-	if c.rawTxErr != nil {
-		return nil, c.rawTxErr
-	}
-	tx, found := c.blockchain.rawTxs[*txHash]
-	if !found {
-		return nil, dcrjson.NewRPCError(dcrjson.ErrRPCNoTxInfo, "no test raw tx "+txHash.String())
-	}
-	return dcrutil.NewTx(tx.tx), nil
-}
-
 func (c *tRPCClient) GetBalanceMinConf(_ context.Context, account string, minConfirms int) (*walletjson.GetBalanceResult, error) {
 	return c.balanceResult, c.balanceErr
 }
@@ -491,6 +480,18 @@ func (c *tRPCClient) DumpPrivKey(_ context.Context, address stdaddr.Address) (*d
 func (c *tRPCClient) GetTransaction(_ context.Context, txHash *chainhash.Hash) (*walletjson.GetTransactionResult, error) {
 	if c.walletTxFn != nil {
 		return c.walletTxFn()
+	}
+	c.blockchain.mtx.RLock()
+	defer c.blockchain.mtx.RUnlock()
+	if rawTx, has := c.blockchain.rawTxs[*txHash]; has {
+		b, err := rawTx.tx.Bytes()
+		if err != nil {
+			return nil, err
+		}
+		walletTx := &walletjson.GetTransactionResult{
+			Hex: hex.EncodeToString(b),
+		}
+		return walletTx, nil
 	}
 	return nil, dcrjson.NewRPCError(dcrjson.ErrRPCNoTxInfo, "no test transaction")
 }
@@ -3200,10 +3201,6 @@ func TestFindRedemption(t *testing.T) {
 		Hex: txHex,
 	}
 
-	node.walletTxFn = func() (*walletjson.GetTransactionResult, error) {
-		return walletTx, nil
-	}
-
 	// Add an intermediate block for good measure.
 	node.blockchain.addRawTx(contractHeight+1, dummyTx())
 
@@ -3219,6 +3216,10 @@ func TestFindRedemption(t *testing.T) {
 	}
 	if !bytes.Equal(checkSecret, secret) {
 		t.Fatalf("wrong secret. expected %x, got %x", secret, checkSecret)
+	}
+
+	node.walletTxFn = func() (*walletjson.GetTransactionResult, error) {
+		return walletTx, nil
 	}
 
 	// Move the redemption to a new block and check if wallet.FindRedemption finds it.
@@ -4654,7 +4655,7 @@ func TestFindBond(t *testing.T) {
 	}, {
 		name:    "bad msgtx",
 		coinID:  bond.CoinID,
-		txRes:   txFn(nil, bond.SignedTx[1:]),
+		txRes:   txFn(nil, bond.SignedTx[100:]),
 		wantErr: true,
 	}, {
 		name:         "get best block error",
