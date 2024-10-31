@@ -19,7 +19,7 @@ Please read the [v1.0.1 release notes](https://github.com/decred/dcrdex/releases
 - Fix filename flavor and enforce darwin cgo minimum version in bisonw-desktop builds
 - Fix double accounting for locked balance when calculating available balance in market maker bot allocations
 - Get rid of dead asset Zclassic
-- Correct market maket bot level-spacing minimum value to match precision
+- Correct market maker bot level-spacing minimum value to match precision
 - Add MATIC token on Ethereum network, for users who may have accidentally withdrawn on incorrect network
 - Fixes an persistent error for orders that were active at startup, but for which the server was no longer reachable, or the market no longer existed
 - Change native Polygon asset from MATIC to POL
