@@ -538,6 +538,10 @@ div[data-handler=init] {
   }
 }
 
+#placementsBody td[data-tmpl=error] {
+  max-width: 200px;
+}
+
 body.dark {
   ::-webkit-calendar-picker-indicator {
     filter: invert(1);
