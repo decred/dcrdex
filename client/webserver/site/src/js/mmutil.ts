@@ -537,7 +537,10 @@ export class BotMarket {
     // In these available balance calcs, only subtract the available balance of
     // running bots, since the locked/reserved/immature is already subtracted
     // from the wallet's total available balance.
-    const [cexBaseAvail, cexQuoteAvail] = [(cexBaseBalance?.available || 0) - bInv.cex.avail, (cexQuoteBalance?.available || 0) - qInv.cex.avail]
+    let cexBaseAvail = 0
+    let cexQuoteAvail = 0
+    if (cexBaseBalance) cexBaseAvail = (cexBaseBalance.available || 0) - bInv.cex.avail
+    if (cexQuoteBalance) cexQuoteAvail = (cexQuoteBalance.available || 0) - qInv.cex.avail
     const [dexBaseAvail, dexQuoteAvail] = [baseWallet.balance.available - bInv.dex.avail, quoteWallet.balance.available - qInv.dex.avail]
     const baseAvail = dexBaseAvail + cexBaseAvail
     const quoteAvail = dexQuoteAvail + cexQuoteAvail
@@ -548,14 +551,14 @@ export class BotMarket {
     if (baseFeeID !== baseID) {
       const bFeeInv = runningBotInventory(baseID)
       dexBaseFeeAvail = baseFeeWallet.balance.available - bFeeInv.dex.total
-      cexBaseFeeAvail = (cexBaseBalance?.available || 0) - bFeeInv.cex.total
+      if (cexBaseBalance) cexBaseFeeAvail = (cexBaseBalance.available || 0) - bFeeInv.cex.total
       baseFeeAvail = dexBaseFeeAvail + cexBaseFeeAvail
     }
     let [quoteFeeAvail, dexQuoteFeeAvail, cexQuoteFeeAvail] = [quoteAvail, dexQuoteAvail, cexQuoteAvail]
     if (quoteFeeID !== quoteID) {
       const qFeeInv = runningBotInventory(quoteID)
       dexQuoteFeeAvail = quoteFeeWallet.balance.available - qFeeInv.dex.total
-      cexQuoteFeeAvail = (cexQuoteBalance?.available || 0) - qFeeInv.cex.total
+      if (cexQuoteBalance) cexQuoteFeeAvail = (cexQuoteBalance.available || 0) - qFeeInv.cex.total
       quoteFeeAvail = dexQuoteFeeAvail + cexQuoteFeeAvail
     }
     return { // convert to conventioanl.
