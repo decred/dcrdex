@@ -281,7 +281,6 @@ type tBotCoreAdaptor struct {
 	maxSellQty       uint64
 	lastTradePlaced  *dexOrder
 	tradeResult      *core.Order
-	balanceDefs      map[uint32]uint64
 }
 
 func (c *tBotCoreAdaptor) DEXBalance(assetID uint32) (*BotBalance, error) {
@@ -322,11 +321,11 @@ func (c *tBotCoreAdaptor) OrderFeesInUnits(sell, base bool, rate uint64) (uint64
 	return c.buyFeesInQuote, nil
 }
 
-func (c *tBotCoreAdaptor) SufficientBalanceForDEXTrade(rate, qty uint64, sell bool) (bool, map[uint32]uint64, error) {
+func (c *tBotCoreAdaptor) SufficientBalanceForDEXTrade(rate, qty uint64, sell bool) (bool, error) {
 	if sell {
-		return qty <= c.maxSellQty, c.balanceDefs, nil
+		return qty <= c.maxSellQty, nil
 	}
-	return qty <= c.maxBuyQty, c.balanceDefs, nil
+	return qty <= c.maxBuyQty, nil
 }
 
 func (c *tBotCoreAdaptor) DEXTrade(rate, qty uint64, sell bool) (*core.Order, error) {
@@ -571,7 +570,6 @@ type tBotCexAdaptor struct {
 	tradeUpdates    chan *libxc.Trade
 	maxBuyQty       uint64
 	maxSellQty      uint64
-	balanceDefs     map[uint32]uint64
 }
 
 func newTBotCEXAdaptor() *tBotCexAdaptor {
@@ -621,11 +619,11 @@ func (c *tBotCexAdaptor) FreeUpFunds(assetID uint32, cex bool, amt uint64, currE
 }
 
 func (c *tBotCexAdaptor) MidGap(baseID, quoteID uint32) uint64 { return 0 }
-func (c *tBotCexAdaptor) SufficientBalanceForCEXTrade(baseID, quoteID uint32, sell bool, rate, qty uint64) (bool, map[uint32]uint64) {
+func (c *tBotCexAdaptor) SufficientBalanceForCEXTrade(baseID, quoteID uint32, sell bool, rate, qty uint64) bool {
 	if sell {
-		return qty <= c.maxSellQty, c.balanceDefs
+		return qty <= c.maxSellQty
 	}
-	return qty <= c.maxBuyQty, c.balanceDefs
+	return qty <= c.maxBuyQty
 }
 
 func (c *tBotCexAdaptor) Book() (_, _ []*core.MiniOrder, _ error) { return nil, nil, nil }

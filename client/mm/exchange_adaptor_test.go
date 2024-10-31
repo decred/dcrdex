@@ -18,6 +18,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/dex/utils"
 	"github.com/davecgh/go-spew/spew"
@@ -213,7 +214,7 @@ func TestSufficientBalanceForDEXTrade(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Connect error: %v", err)
 				}
-				sufficient, _, err := adaptor.SufficientBalanceForDEXTrade(test.rate, test.qty, test.sell)
+				sufficient, err := adaptor.SufficientBalanceForDEXTrade(test.rate, test.qty, test.sell)
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
 				}
@@ -280,7 +281,7 @@ func TestSufficientBalanceForCEXTrade(t *testing.T) {
 						QuoteID: quoteID,
 					},
 				})
-				sufficient, _ := adaptor.SufficientBalanceForCEXTrade(baseID, quoteID, test.sell, test.rate, test.qty)
+				sufficient := adaptor.SufficientBalanceForCEXTrade(baseID, quoteID, test.sell, test.rate, test.qty)
 				if sufficient != expSufficient {
 					t.Fatalf("expected sufficient=%v, got %v", expSufficient, sufficient)
 				}
@@ -1527,6 +1528,157 @@ func TestMultiTrade(t *testing.T) {
 						3*buyFees.Max.Swap + buyFees.Funding,
 				},
 				UsedCEXBal: 3 * lotSize,
+			},
+			expectedOrderIDsWithDecrement: []order.OrderID{
+				orderIDs[4], orderIDs[5],
+			},
+		},
+		{
+			name:    "not enough bonding for last placement",
+			baseID:  42,
+			quoteID: 0,
+
+			// ---- Sell ----
+			sellDexBalances: map[uint32]uint64{
+				42: 4*lotSize + 4*sellFees.Max.Swap + sellFees.Funding,
+				0:  0,
+			},
+			sellCexBalances: map[uint32]uint64{
+				42: 0,
+				0: b2q(sellPlacements[0].CounterTradeRate, lotSize) +
+					b2q(sellPlacements[1].CounterTradeRate, 2*lotSize) +
+					b2q(sellPlacements[2].CounterTradeRate, 3*lotSize) +
+					b2q(sellPlacements[3].CounterTradeRate, 2*lotSize),
+			},
+			sellPlacements:    sellPlacements,
+			sellPendingOrders: pendingOrders(true, 42, 0),
+			expectedSellPlacements: []*core.QtyRate{
+				{Qty: lotSize, Rate: sellPlacements[1].Rate},
+				{Qty: 2 * lotSize, Rate: sellPlacements[2].Rate},
+				{Qty: lotSize, Rate: sellPlacements[3].Rate},
+			},
+			expectedSellOrderReport: &OrderReport{
+				Placements: []*TradePlacement{
+					{Lots: 1, Rate: sps[0].Rate, CounterTradeRate: sps[0].CounterTradeRate,
+						StandingLots: 1,
+						RequiredDEX:  map[uint32]uint64{},
+						UsedDEX:      map[uint32]uint64{},
+						RequiredCEX:  0,
+						UsedCEX:      0,
+					},
+					{Lots: 2, Rate: sps[1].Rate, CounterTradeRate: sps[1].CounterTradeRate,
+						StandingLots: 1,
+						RequiredDEX: map[uint32]uint64{
+							42: lotSize + sellFees.Max.Swap,
+						},
+						UsedDEX: map[uint32]uint64{
+							42: lotSize + sellFees.Max.Swap,
+						},
+						RequiredCEX: b2q(sellPlacements[1].CounterTradeRate, lotSize),
+						UsedCEX:     b2q(sellPlacements[1].CounterTradeRate, lotSize),
+						OrderedLots: 1,
+					},
+					{Lots: 3, Rate: sps[2].Rate, CounterTradeRate: sps[2].CounterTradeRate,
+						StandingLots: 1,
+						RequiredDEX: map[uint32]uint64{
+							42: 2 * (lotSize + sellFees.Max.Swap),
+						},
+						UsedDEX: map[uint32]uint64{
+							42: 2 * (lotSize + sellFees.Max.Swap),
+						},
+						RequiredCEX: b2q(sellPlacements[2].CounterTradeRate, 2*lotSize),
+						UsedCEX:     b2q(sellPlacements[2].CounterTradeRate, 2*lotSize),
+						OrderedLots: 2,
+					},
+					{Lots: 2, Rate: sps[3].Rate, CounterTradeRate: sps[3].CounterTradeRate,
+						StandingLots: 1,
+						RequiredDEX: map[uint32]uint64{
+							42: lotSize + sellFees.Max.Swap,
+						},
+						UsedDEX:     map[uint32]uint64{},
+						RequiredCEX: b2q(sellPlacements[3].CounterTradeRate, lotSize),
+						UsedCEX:     0,
+						OrderedLots: 0,
+						Error: &BotProblems{
+							UserLimitTooLow: true,
+						},
+					},
+				},
+				Fees: sellFees,
+				AvailableDEXBals: map[uint32]*BotBalance{
+					42: {
+						Available: 4*lotSize + 4*sellFees.Max.Swap + sellFees.Funding,
+					},
+					0: {},
+				},
+				RequiredDEXBals: map[uint32]uint64{
+					42: 4*lotSize + 4*sellFees.Max.Swap + sellFees.Funding,
+				},
+				RemainingDEXBals: map[uint32]uint64{
+					42: 0,
+					0:  0,
+				},
+				AvailableCEXBal: &BotBalance{
+					Available: b2q(sellPlacements[1].CounterTradeRate, lotSize) +
+						b2q(sellPlacements[2].CounterTradeRate, 2*lotSize) +
+						b2q(sellPlacements[3].CounterTradeRate, lotSize),
+					Reserved: b2q(sellPlacements[0].CounterTradeRate, lotSize) +
+						b2q(sellPlacements[1].CounterTradeRate, lotSize) +
+						b2q(sellPlacements[2].CounterTradeRate, lotSize) +
+						b2q(sellPlacements[3].CounterTradeRate, lotSize),
+				},
+				RequiredCEXBal: b2q(sellPlacements[1].CounterTradeRate, lotSize) +
+					b2q(sellPlacements[2].CounterTradeRate, 2*lotSize) +
+					b2q(sellPlacements[3].CounterTradeRate, lotSize),
+				RemainingCEXBal: 0,
+				UsedDEXBals: map[uint32]uint64{
+					42: 4*lotSize + 4*sellFees.Max.Swap + sellFees.Funding,
+				},
+				UsedCEXBal: b2q(sellPlacements[1].CounterTradeRate, lotSize) +
+					b2q(sellPlacements[2].CounterTradeRate, 2*lotSize) +
+					b2q(sellPlacements[3].CounterTradeRate, lotSize),
+			},
+			expectedSellPlacementsWithDecrement: []*core.QtyRate{
+				{Qty: lotSize, Rate: sellPlacements[1].Rate},
+				{Qty: 2 * lotSize, Rate: sellPlacements[2].Rate},
+			},
+
+			// ---- Buy ----
+			buyDexBalances: map[uint32]uint64{
+				42: 0,
+				0: b2q(buyPlacements[1].Rate, lotSize) +
+					b2q(buyPlacements[2].Rate, 2*lotSize) +
+					b2q(buyPlacements[3].Rate, lotSize) +
+					4*buyFees.Max.Swap + buyFees.Funding,
+			},
+			buyCexBalances: map[uint32]uint64{
+				42: 8 * lotSize,
+				0:  0,
+			},
+			buyPlacements:    buyPlacements,
+			buyPendingOrders: pendingOrders(false, 42, 0),
+			expectedBuyPlacements: []*core.QtyRate{
+				{Qty: lotSize, Rate: buyPlacements[1].Rate},
+				{Qty: 2 * lotSize, Rate: buyPlacements[2].Rate},
+				{Qty: lotSize, Rate: buyPlacements[3].Rate},
+			},
+			expectedBuyPlacementsWithDecrement: []*core.QtyRate{
+				{Qty: lotSize, Rate: buyPlacements[1].Rate},
+				{Qty: 2 * lotSize, Rate: buyPlacements[2].Rate},
+			},
+			expectedCancels:              []order.OrderID{orderIDs[2]},
+			expectedCancelsWithDecrement: []order.OrderID{orderIDs[2]},
+			multiTradeResult: []*core.MultiTradeResult{
+				{Order: &core.Order{ID: orderIDs[4][:]}},
+				{Order: &core.Order{ID: orderIDs[5][:]}},
+				{Error: &msgjson.Error{Code: msgjson.OrderQuantityTooHigh}},
+			},
+			multiTradeResultWithDecrement: []*core.MultiTradeResult{
+				{Order: &core.Order{ID: orderIDs[4][:]}},
+				{Order: &core.Order{ID: orderIDs[5][:]}},
+			},
+			expectedOrderIDs: []order.OrderID{
+				orderIDs[4], orderIDs[5],
 			},
 			expectedOrderIDsWithDecrement: []order.OrderID{
 				orderIDs[4], orderIDs[5],

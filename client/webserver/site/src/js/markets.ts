@@ -70,7 +70,7 @@ import {
   CEXProblemsNote
 } from './registry'
 import { setOptionTemplates } from './opts'
-import { RunningMarketMakerDisplay } from './mmutil'
+import { RunningMarketMakerDisplay, RunningMMDisplayElements } from './mmutil'
 
 const bind = Doc.bind
 
@@ -274,7 +274,14 @@ export default class MarketsPage extends BasePage {
       this.depositAddrForm = new DepositAddress(page.deposit)
     }
 
-    this.mm = new RunningMarketMakerDisplay(page.mmRunning, this.forms, page.orderReportForm, 'markets')
+    const runningMMDisplayElements: RunningMMDisplayElements = {
+      orderReportForm: page.orderReportForm,
+      dexBalancesRowTmpl: page.dexBalancesRowTmpl,
+      placementRowTmpl: page.placementRowTmpl,
+      placementAmtRowTmpl: page.placementAmtRowTmpl
+    }
+    Doc.cleanTemplates(page.dexBalancesRowTmpl, page.placementRowTmpl, page.placementAmtRowTmpl)
+    this.mm = new RunningMarketMakerDisplay(page.mmRunning, this.forms, runningMMDisplayElements, 'markets')
 
     this.reputationMeter = new ReputationMeter(page.reputationMeter)
 
@@ -283,6 +290,7 @@ export default class MarketsPage extends BasePage {
 
     // Prepare templates for the buy and sell tables and the user's order table.
     setOptionTemplates(page)
+
     Doc.cleanTemplates(
       page.orderRowTmpl, page.durBttnTemplate, page.booleanOptTmpl, page.rangeOptTmpl,
       page.orderOptTmpl, page.userOrderTmpl, page.recentMatchesTemplate

@@ -769,6 +769,13 @@ export class BotMarket {
   }
 }
 
+export type RunningMMDisplayElements = {
+  orderReportForm: PageElement
+  dexBalancesRowTmpl: PageElement
+  placementRowTmpl: PageElement
+  placementAmtRowTmpl: PageElement
+}
+
 export class RunningMarketMakerDisplay {
   div: PageElement
   page: Record<string, PageElement>
@@ -781,19 +788,19 @@ export class RunningMarketMakerDisplay {
   cexProblems?: CEXProblems
   orderReportFormEl: PageElement
   orderReportForm: Record<string, PageElement>
+  displayedOrderReportFormSide: 'buys' | 'sells'
   dexBalancesRowTmpl: PageElement
   placementRowTmpl: PageElement
   placementAmtRowTmpl: PageElement
-  displayedSide: 'buys' | 'sells'
 
-  constructor (div: PageElement, forms: Forms, orderReportForm: PageElement, page: string) {
+  constructor (div: PageElement, forms: Forms, elements: RunningMMDisplayElements, page: string) {
     this.div = div
     this.page = Doc.parseTemplate(div)
-    this.orderReportFormEl = orderReportForm
-    this.orderReportForm = Doc.idDescendants(orderReportForm)
-    this.dexBalancesRowTmpl = this.orderReportForm.dexBalancesRowTmpl
-    this.placementRowTmpl = this.orderReportForm.placementRowTmpl
-    this.placementAmtRowTmpl = this.orderReportForm.placementAmtRowTmpl
+    this.orderReportFormEl = elements.orderReportForm
+    this.orderReportForm = Doc.idDescendants(elements.orderReportForm)
+    this.dexBalancesRowTmpl = elements.dexBalancesRowTmpl
+    this.placementRowTmpl = elements.placementRowTmpl
+    this.placementAmtRowTmpl = elements.placementAmtRowTmpl
     Doc.cleanTemplates(this.dexBalancesRowTmpl, this.placementRowTmpl, this.placementAmtRowTmpl)
     this.forms = forms
     Doc.bind(this.page.stopBttn, 'click', () => this.stop())
@@ -883,9 +890,9 @@ export class RunningMarketMakerDisplay {
     if (n.baseID !== baseID || n.quoteID !== quoteID || n.host !== host) return
     if (!n.report) return
     this.latestEpoch = n.report
-    if (this.forms.currentForm === this.orderReportFormEl) {
-      const orderReport = this.displayedSide === 'buys' ? n.report.buysReport : n.report.sellsReport
-      if (orderReport) this.updateOrderReport(orderReport, this.displayedSide, n.report.epochNum)
+    if (this.forms.currentForm === this.orderReportFormEl && this.forms.currentFormID === this.mkt.id) {
+      const orderReport = this.displayedOrderReportFormSide === 'buys' ? n.report.buysReport : n.report.sellsReport
+      if (orderReport) this.updateOrderReport(orderReport, this.displayedOrderReportFormSide, n.report.epochNum)
       else this.forms.close()
     }
     this.update()
@@ -912,8 +919,8 @@ export class RunningMarketMakerDisplay {
     } = this
     // Get fresh stats
     const { botCfg: { cexName, basicMarketMakingConfig: bmmCfg }, runStats, latestEpoch, cexProblems } = this.mkt.status()
-    if (latestEpoch) this.latestEpoch = latestEpoch
-    if (cexProblems) this.cexProblems = cexProblems
+    this.latestEpoch = latestEpoch
+    this.cexProblems = cexProblems
 
     Doc.hide(page.stats, page.cexRow, page.pendingDepositBox, page.pendingWithdrawalBox)
 
@@ -1038,8 +1045,6 @@ export class RunningMarketMakerDisplay {
       return
     }
 
-    form.cexLogo.src = CEXDisplayInfos[this.mkt.cexName].logo
-    form.cexBalancesTitle.textContent = intl.prep(intl.ID_CEX_BALANCES, { cexName: CEXDisplayInfos[this.mkt.cexName].name })
     Doc.empty(form.dexBalancesBody, form.placementsBody)
     const createRow = (assetID: number): [PageElement, number] => {
       const row = this.dexBalancesRowTmpl.cloneNode(true) as HTMLElement
@@ -1088,9 +1093,16 @@ export class RunningMarketMakerDisplay {
     }
     setDeficiencyVisibility(totalDeficiency > 0, rows)
 
-    Doc.setVis(this.mkt.cexName, form.cexBalancesTable, form.counterTradeRateHeader)
+    Doc.setVis(this.mkt.cexName, form.cexSection, form.counterTradeRateHeader, form.requiredCEXHeader, form.usedCEXHeader)
     let cexAsset: SupportedAsset
     if (this.mkt.cexName) {
+      const cexDisplayInfo = CEXDisplayInfos[this.mkt.cexName]
+      if (cexDisplayInfo) {
+        form.cexLogo.src = cexDisplayInfo.logo
+        form.cexBalancesTitle.textContent = intl.prep(intl.ID_CEX_BALANCES, { cexName: cexDisplayInfo.name })
+      } else {
+        console.error(`CEXDisplayInfo not found for ${this.mkt.cexName}`)
+      }
       const cexAssetID = side === 'buys' ? this.mkt.baseID : this.mkt.quoteID
       cexAsset = app().assets[cexAssetID]
       form.cexAsset.textContent = cexAsset.symbol.toUpperCase()
@@ -1115,6 +1127,8 @@ export class RunningMarketMakerDisplay {
       if (deficient) {
         form.cexDeficiency.textContent = Doc.formatCoinValue(deficiencyCexBal, cexAsset.unitInfo)
         form.cexDeficiencyWithPending.textContent = Doc.formatCoinValue(deficiencyWithPendingCexBal, cexAsset.unitInfo)
+        if (deficiencyWithPendingCexBal > 0) form.cexDeficiencyWithPending.classList.add('text-warning')
+        else form.cexDeficiencyWithPending.classList.remove('text-warning')
       }
     }
 
@@ -1180,8 +1194,8 @@ export class RunningMarketMakerDisplay {
     const report = side === 'buys' ? this.latestEpoch.buysReport : this.latestEpoch.sellsReport
     if (!report) return
     this.updateOrderReport(report, side, this.latestEpoch.epochNum)
-    this.displayedSide = side
-    this.forms.show(this.orderReportFormEl)
+    this.displayedOrderReportFormSide = side
+    this.forms.show(this.orderReportFormEl, this.mkt.id)
   }
 
   readBook () {

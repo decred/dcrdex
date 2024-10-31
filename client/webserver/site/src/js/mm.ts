@@ -24,7 +24,8 @@ import {
   PlacementsChart,
   BotMarket,
   hostedMarketID,
-  RunningMarketMakerDisplay
+  RunningMarketMakerDisplay,
+  RunningMMDisplayElements
 } from './mmutil'
 import Doc, { MiniSlider } from './doc'
 import BasePage from './basepage'
@@ -32,7 +33,6 @@ import * as OrderUtil from './orderutil'
 import { Forms, CEXConfigurationForm } from './forms'
 import * as intl from './locales'
 import { StatusBooked } from './orderutil'
-
 const mediumBreakpoint = 768
 
 interface FundingSlider {
@@ -184,6 +184,7 @@ export default class MarketMakerPage extends BasePage {
   sortedBots: Bot[]
   cexes: Record<string, CEXRow>
   twoColumn: boolean
+  runningMMDisplayElements: RunningMMDisplayElements
 
   constructor (main: HTMLElement) {
     super()
@@ -198,6 +199,13 @@ export default class MarketMakerPage extends BasePage {
 
     this.forms = new Forms(page.forms)
     this.cexConfigForm = new CEXConfigurationForm(page.cexConfigForm, (cexName: string) => this.cexConfigured(cexName))
+    this.runningMMDisplayElements = {
+      orderReportForm: page.orderReportForm,
+      dexBalancesRowTmpl: page.dexBalancesRowTmpl,
+      placementRowTmpl: page.placementRowTmpl,
+      placementAmtRowTmpl: page.placementAmtRowTmpl
+    }
+    Doc.cleanTemplates(page.dexBalancesRowTmpl, page.placementRowTmpl, page.placementAmtRowTmpl)
 
     Doc.bind(page.newBot, 'click', () => { this.newBot() })
     Doc.bind(page.archivedLogsBtn, 'click', () => { app().loadPage('mmarchives') })
@@ -306,7 +314,7 @@ export default class MarketMakerPage extends BasePage {
     const [baseSymbol, quoteSymbol] = [app().assets[baseID].symbol, app().assets[quoteID].symbol]
     const mktID = `${baseSymbol}_${quoteSymbol}`
     if (!app().exchanges[host]?.markets[mktID]) return
-    const bot = new Bot(this, botStatus, startupBalanceCache)
+    const bot = new Bot(this, this.runningMMDisplayElements, botStatus, startupBalanceCache)
     page.botRows.appendChild(bot.row.tr)
     sortedBots.push(bot)
     bots[bot.id] = bot
@@ -411,7 +419,7 @@ class Bot extends BotMarket {
   row: BotRow
   runDisplay: RunningMarketMakerDisplay
 
-  constructor (pg: MarketMakerPage, status: MMBotStatus, startupBalanceCache?: Record<number, Promise<ExchangeBalance>>) {
+  constructor (pg: MarketMakerPage, runningMMElements: RunningMMDisplayElements, status: MMBotStatus, startupBalanceCache?: Record<number, Promise<ExchangeBalance>>) {
     super(status.config)
     startupBalanceCache = startupBalanceCache ?? {}
     this.pg = pg
@@ -421,7 +429,7 @@ class Bot extends BotMarket {
     const div = this.div = pg.page.botTmpl.cloneNode(true) as PageElement
     const page = this.page = Doc.parseTemplate(div)
 
-    this.runDisplay = new RunningMarketMakerDisplay(page.onBox, pg.forms, pg.page.orderReportForm, 'mm')
+    this.runDisplay = new RunningMarketMakerDisplay(page.onBox, pg.forms, runningMMElements, 'mm')
 
     setMarketElements(div, baseID, quoteID, host)
     if (cexName) setCexElements(div, cexName)
