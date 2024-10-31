@@ -108,8 +108,8 @@ export class Forms {
 
   close (): void {
     Doc.hide(this.formsDiv)
-    if (this.closed) this.closed()
     this.currentForm = undefined
+    if (this.closed) this.closed()
   }
 
   exit () {

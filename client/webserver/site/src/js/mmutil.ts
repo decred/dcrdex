@@ -778,10 +778,10 @@ export class RunningMarketMakerDisplay {
   cexProblems?: CEXProblems
   orderReportFormEl: PageElement
   orderReportForm: Record<string, PageElement>
+  displayedOrderReportFormSide: 'buys' | 'sells'
   dexBalancesRowTmpl: PageElement
   placementRowTmpl: PageElement
   placementAmtRowTmpl: PageElement
-  displayedSide: 'buys' | 'sells'
 
   constructor (div: PageElement, forms: Forms, orderReportForm: PageElement, page: string) {
     this.div = div
@@ -881,8 +881,8 @@ export class RunningMarketMakerDisplay {
     if (!n.report) return
     this.latestEpoch = n.report
     if (this.forms.currentForm === this.orderReportFormEl) {
-      const orderReport = this.displayedSide === 'buys' ? n.report.buysReport : n.report.sellsReport
-      if (orderReport) this.updateOrderReport(orderReport, this.displayedSide, n.report.epochNum)
+      const orderReport = this.displayedOrderReportFormSide === 'buys' ? n.report.buysReport : n.report.sellsReport
+      if (orderReport) this.updateOrderReport(orderReport, this.displayedOrderReportFormSide, n.report.epochNum)
       else this.forms.close()
     }
     this.update()
@@ -909,8 +909,8 @@ export class RunningMarketMakerDisplay {
     } = this
     // Get fresh stats
     const { botCfg: { cexName, basicMarketMakingConfig: bmmCfg }, runStats, latestEpoch, cexProblems } = this.mkt.status()
-    if (latestEpoch) this.latestEpoch = latestEpoch
-    if (cexProblems) this.cexProblems = cexProblems
+    this.latestEpoch = latestEpoch
+    this.cexProblems = cexProblems
 
     Doc.hide(page.stats, page.cexRow, page.pendingDepositBox, page.pendingWithdrawalBox)
 
@@ -1112,6 +1112,8 @@ export class RunningMarketMakerDisplay {
       if (deficient) {
         form.cexDeficiency.textContent = Doc.formatCoinValue(deficiencyCexBal, cexAsset.unitInfo)
         form.cexDeficiencyWithPending.textContent = Doc.formatCoinValue(deficiencyWithPendingCexBal, cexAsset.unitInfo)
+        if (deficiencyWithPendingCexBal > 0) form.cexDeficiencyWithPending.classList.add('text-warning')
+        else form.cexDeficiencyWithPending.classList.remove('text-warning')
       }
     }
 
@@ -1177,7 +1179,7 @@ export class RunningMarketMakerDisplay {
     const report = side === 'buys' ? this.latestEpoch.buysReport : this.latestEpoch.sellsReport
     if (!report) return
     this.updateOrderReport(report, side, this.latestEpoch.epochNum)
-    this.displayedSide = side
+    this.displayedOrderReportFormSide = side
     this.forms.show(this.orderReportFormEl)
   }
 
