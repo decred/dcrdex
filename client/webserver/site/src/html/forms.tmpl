@@ -1069,10 +1069,11 @@
         </tr>
       </tbody>
     </table>
-    <hr>
 
-    <div class="fs18 align-self-start"><img id="cexLogo" src="/img/binance.com.png" class="small-icon"><span class="ms-2" id="cexBalancesTitle"></span></div>
-    <table id="cexBalancesTable" class="table striped border mt-3 w-auto mx-auto">
+    <div id="cexSection">
+      <hr>
+      <div class="fs18 align-self-start"><img id="cexLogo" class="small-icon"><span class="ms-2" id="cexBalancesTitle"></span></div>
+      <table id="cexBalancesTable" class="table striped border mt-3 w-auto mx-auto">
       <thead>
         <tr>
           <th class="border text-center">[[[Asset]]]</th>
@@ -1095,13 +1096,14 @@
           <td id="cexRequired" class="border text-center"></td>
           <td id="cexUsed" class="border text-center"></td>
           <td id="cexRemaining" class="border text-center"></td>
-          <td id="cexDeficiency" class="border text-center"></td>
+          <td id="cexDeficiency" class="border text-center text-warning"></td>
           <td id="cexDeficiencyWithPending" class="border text-center"></td>
-        </tr>
-      </tbody>
-    </table>
-    <hr>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
+    <hr>
     <div class="fs18 align-self-start">Placements</div>
     <table id="placementsTable" class="table striped border mt-3 w-auto mx-auto">
       <thead>
@@ -1114,8 +1116,8 @@
           <th class="border text-center" id="counterTradeRateHeader">[[[Arb Rate]]]</th>
           <th class="border text-center">[[[Required DEX]]]</th>
           <th class="border text-center">[[[Used DEX]]]</th>
-          <th class="border text-center">[[[Required CEX]]]</th>
-          <th class="border text-center">[[[Used CEX]]]</th>
+          <th class="border text-center" id="requiredCEXHeader">[[[Required CEX]]]</th>
+          <th class="border text-center" id="usedCEXHeader">[[[Used CEX]]]</th>
           <th class="border text-center" id="errorHeader">[[[Error]]]</th>
         </tr>
       </thead>

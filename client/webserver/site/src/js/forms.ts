@@ -69,6 +69,7 @@ interface FormsConfig {
 export class Forms {
   formsDiv: PageElement
   currentForm: PageElement | undefined
+  currentFormID: string | undefined
   keyup: (e: KeyboardEvent) => void
   closed?: () => void
 
@@ -94,8 +95,9 @@ export class Forms {
   }
 
   /* showForm shows a modal form with a little animation. */
-  async show (form: HTMLElement): Promise<void> {
+  async show (form: HTMLElement, id?: string): Promise<void> {
     this.currentForm = form
+    this.currentFormID = id
     Doc.hide(...Array.from(this.formsDiv.children))
     form.style.right = '10000px'
     Doc.show(this.formsDiv, form)
@@ -108,8 +110,9 @@ export class Forms {
 
   close (): void {
     Doc.hide(this.formsDiv)
-    if (this.closed) this.closed()
     this.currentForm = undefined
+    this.currentFormID = undefined
+    if (this.closed) this.closed()
   }
 
   exit () {

@@ -82,32 +82,17 @@ func (a *simpleArbMarketMaker) cfg() *SimpleArbConfig {
 }
 
 // arbExists checks if an arbitrage opportunity exists.
-func (a *simpleArbMarketMaker) arbExists() (exists, sellOnDex bool, lotsToArb, dexRate, cexRate uint64, dexDefs, cexDefs map[uint32]uint64, err error) {
+func (a *simpleArbMarketMaker) arbExists() (exists, sellOnDex bool, lotsToArb, dexRate, cexRate uint64, err error) {
 	sellOnDex = false
-	exists, lotsToArb, dexRate, cexRate, buyDexDefs, buyCexDefs, err := a.arbExistsOnSide(sellOnDex)
+	exists, lotsToArb, dexRate, cexRate, err = a.arbExistsOnSide(sellOnDex)
 	if err != nil || exists {
 		return
 	}
 
 	sellOnDex = true
-	exists, lotsToArb, dexRate, cexRate, sellDexDefs, sellCexDefs, err := a.arbExistsOnSide(sellOnDex)
+	exists, lotsToArb, dexRate, cexRate, err = a.arbExistsOnSide(sellOnDex)
 	if err != nil || exists {
 		return
-	}
-
-	dexDefs = make(map[uint32]uint64)
-	cexDefs = make(map[uint32]uint64)
-	for assetID, qty := range buyDexDefs {
-		dexDefs[assetID] += qty
-	}
-	for assetID, qty := range sellDexDefs {
-		dexDefs[assetID] += qty
-	}
-	for assetID, qty := range buyCexDefs {
-		cexDefs[assetID] += qty
-	}
-	for assetID, qty := range sellCexDefs {
-		cexDefs[assetID] += qty
 	}
 
 	return
@@ -115,24 +100,21 @@ func (a *simpleArbMarketMaker) arbExists() (exists, sellOnDex bool, lotsToArb, d
 
 // arbExistsOnSide checks if an arbitrage opportunity exists either when
 // buying or selling on the dex.
-func (a *simpleArbMarketMaker) arbExistsOnSide(sellOnDEX bool) (exists bool, lotsToArb, dexRate, cexRate uint64, dexDefs, cexDefs map[uint32]uint64, err error) {
+func (a *simpleArbMarketMaker) arbExistsOnSide(sellOnDEX bool) (exists bool, lotsToArb, dexRate, cexRate uint64, err error) {
 	lotSize := a.lotSize
 	var prevProfit uint64
 
 	for numLots := uint64(1); ; numLots++ {
 		dexAvg, dexExtrema, dexFilled, err := a.book.VWAP(numLots, a.lotSize, !sellOnDEX)
 		if err != nil {
-			return false, 0, 0, 0, nil, nil, fmt.Errorf("error calculating dex VWAP: %w", err)
+			return false, 0, 0, 0, fmt.Errorf("error calculating dex VWAP: %w", err)
 		}
-		if !dexFilled {
-			break
-		}
-
 		cexAvg, cexExtrema, cexFilled, err := a.CEX.VWAP(a.baseID, a.quoteID, sellOnDEX, numLots*lotSize)
 		if err != nil {
-			return false, 0, 0, 0, nil, nil, fmt.Errorf("error calculating cex VWAP: %w", err)
+			return false, 0, 0, 0, fmt.Errorf("error calculating cex VWAP: %w", err)
 		}
-		if !cexFilled {
+
+		if !dexFilled || !cexFilled {
 			break
 		}
 
@@ -154,15 +136,15 @@ func (a *simpleArbMarketMaker) arbExistsOnSide(sellOnDEX bool) (exists bool, lot
 			break
 		}
 
-		dexSufficient, dexDefs, err := a.core.SufficientBalanceForDEXTrade(dexExtrema, numLots*lotSize, sellOnDEX)
+		dexSufficient, err := a.core.SufficientBalanceForDEXTrade(dexExtrema, numLots*lotSize, sellOnDEX)
 		if err != nil {
-			return false, 0, 0, 0, nil, nil, fmt.Errorf("error checking dex balance: %w", err)
+			return false, 0, 0, 0, fmt.Errorf("error checking dex balance: %w", err)
 		}
 
-		cexSufficient, cexDefs := a.cex.SufficientBalanceForCEXTrade(a.baseID, a.quoteID, !sellOnDEX, cexExtrema, numLots*lotSize)
+		cexSufficient := a.cex.SufficientBalanceForCEXTrade(a.baseID, a.quoteID, !sellOnDEX, cexExtrema, numLots*lotSize)
 		if !dexSufficient || !cexSufficient {
 			if numLots == 1 {
-				return false, 0, 0, 0, dexDefs, cexDefs, nil
+				return false, 0, 0, 0, nil
 			} else {
 				break
 			}
@@ -174,7 +156,7 @@ func (a *simpleArbMarketMaker) arbExistsOnSide(sellOnDEX bool) (exists bool, lot
 
 		feesInQuoteUnits, err := a.core.OrderFeesInUnits(sellOnDEX, false, dexAvg)
 		if err != nil {
-			return false, 0, 0, 0, nil, nil, fmt.Errorf("error getting fees: %w", err)
+			return false, 0, 0, 0, fmt.Errorf("error getting fees: %w", err)
 		}
 
 		qty := numLots * lotSize
@@ -198,10 +180,10 @@ func (a *simpleArbMarketMaker) arbExistsOnSide(sellOnDEX bool) (exists bool, lot
 	if lotsToArb > 0 {
 		a.log.Infof("arb opportunity - sellOnDex: %t, lotsToArb: %d, dexRate: %s, cexRate: %s: profit: %s",
 			sellOnDEX, lotsToArb, a.fmtRate(dexRate), a.fmtRate(cexRate), a.fmtBase(prevProfit))
-		return true, lotsToArb, dexRate, cexRate, nil, nil, nil
+		return true, lotsToArb, dexRate, cexRate, nil
 	}
 
-	return false, 0, 0, 0, nil, nil, nil
+	return false, 0, 0, 0, nil
 }
 
 // executeArb will execute an arbitrage sequence by placing orders on the dex
@@ -368,12 +350,15 @@ func (a *simpleArbMarketMaker) handleDEXOrderUpdate(o *core.Order) {
 	}
 }
 
-func (a *simpleArbMarketMaker) tryArb(newEpoch uint64) (exists, sellOnDEX bool) {
+func (a *simpleArbMarketMaker) tryArb(newEpoch uint64) (exists, sellOnDEX bool, err error) {
 	if !(a.checkBotHealth(newEpoch) && a.tradingLimitNotReached(newEpoch)) {
-		return false, false
+		return false, false, nil
 	}
 
-	exists, sellOnDex, lotsToArb, dexRate, cexRate, _, _, _ := a.arbExists()
+	exists, sellOnDex, lotsToArb, dexRate, cexRate, err := a.arbExists()
+	if err != nil {
+		return false, false, err
+	}
 	if a.log.Level() == dex.LevelTrace {
 		a.log.Tracef("%s rebalance. exists = %t, %s on dex, lots = %d, dex rate = %s, cex rate = %s",
 			a.name, exists, sellStr(sellOnDex), lotsToArb, a.fmtRate(dexRate), a.fmtRate(cexRate))
@@ -383,7 +368,7 @@ func (a *simpleArbMarketMaker) tryArb(newEpoch uint64) (exists, sellOnDEX bool) 
 		a.executeArb(sellOnDex, lotsToArb, dexRate, cexRate, newEpoch)
 	}
 
-	return exists, sellOnDex
+	return exists, sellOnDex, nil
 }
 
 // rebalance checks if there is an arbitrage opportunity between the dex and cex,
@@ -402,7 +387,16 @@ func (a *simpleArbMarketMaker) rebalance(newEpoch uint64) {
 		return
 	}
 
-	exists, sellOnDex := a.tryArb(newEpoch)
+	epochReport := &EpochReport{EpochNum: newEpoch}
+
+	exists, sellOnDex, err := a.tryArb(newEpoch)
+	if err != nil {
+		epochReport.setPreOrderProblems(err)
+		a.unifiedExchangeAdaptor.updateEpochReport(epochReport)
+		return
+	}
+
+	a.unifiedExchangeAdaptor.updateEpochReport(epochReport)
 
 	a.activeArbsMtx.Lock()
 	remainingArbs := make([]*arbSequence, 0, len(a.activeArbs))

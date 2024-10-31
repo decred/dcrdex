@@ -982,9 +982,7 @@ export interface TradePlacement {
   requiredCex: number
   usedDex: Record<number, number>
   usedCex: number
-  causesSelfMatch: boolean
   error?: BotProblems
-  reason: any
 }
 
 export interface OrderReport {

@@ -115,6 +115,10 @@ func (ob *orderbook) clear() {
 }
 
 func (ob *orderbook) vwap(bids bool, qty uint64) (vwap, extrema uint64, filled bool) {
+	if qty == 0 { // avoid division by zero
+		return 0, 0, false
+	}
+
 	ob.mtx.RLock()
 	defer ob.mtx.RUnlock()
 
