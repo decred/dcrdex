@@ -47,6 +47,10 @@ type CEXConfig struct {
 type AutoRebalanceConfig struct {
 	MinBaseTransfer  uint64 `json:"minBaseTransfer"`
 	MinQuoteTransfer uint64 `json:"minQuoteTransfer"`
+	// InternalOnly means that the bot will only simulate transfers by
+	// allocating unallocated funds to the bot's balance and never actually
+	// perform deposits and withdrawals with the CEX.
+	InternalOnly bool `json:"internalOnly"`
 }
 
 // BotBalanceAllocation is the initial allocation of funds for a bot.

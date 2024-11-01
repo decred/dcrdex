@@ -874,6 +874,7 @@ func (m *MarketMaker) startBot(startCfg *StartConfig, botCfg *BotConfig, cexCfg 
 		log:                 m.botSubLogger(botCfg),
 		botCfg:              botCfg,
 		eventLogDB:          m.eventLogDB,
+		internalTransfer:    m.internalTransfer,
 	}
 
 	bot, err := m.newBot(botCfg, adaptorCfg)
@@ -1066,6 +1067,29 @@ func validRunningBotCfgUpdate(oldCfg, newCfg *BotConfig) error {
 	}
 
 	return nil
+}
+
+// internalTransfer is called from the exchange adaptor when attempting an
+// internal transfer.
+//
+// ** IMPORTANT ** No mutexes in exchangeAdaptor should be locked when calling this
+// function.
+func (m *MarketMaker) internalTransfer(mkt *MarketWithHost, doTransfer doInternalTransferFunc) error {
+	m.startUpdateMtx.Lock()
+	defer m.startUpdateMtx.Unlock()
+
+	runningBots := m.runningBotsLookup()
+	rb, found := runningBots[*mkt]
+	if !found {
+		return fmt.Errorf("internalTransfer called for non-running bot %s", mkt)
+	}
+
+	dex, cex, err := m.availableBalances(mkt, rb.cexCfg)
+	if err != nil {
+		return fmt.Errorf("error getting available balances: %v", err)
+	}
+
+	return doTransfer(dex, cex)
 }
 
 // UpdateRunningBotInventory updates the inventory of a running bot.
