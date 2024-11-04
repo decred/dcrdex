@@ -2603,6 +2603,18 @@ func (m *TMarketMaker) CEXBook(host string, baseID, quoteID uint32) (buys, sells
 	return book.Buys, book.Sells, nil
 }
 
+func (m *TMarketMaker) AvailableBalances(mkt *mm.MarketWithHost, cexName *string) (dexBalances, cexBalances map[uint32]uint64, _ error) {
+	return map[uint32]uint64{mkt.BaseID: 1e6, mkt.QuoteID: 1e6}, map[uint32]uint64{mkt.BaseID: 1e6, mkt.QuoteID: 1e6}, nil
+}
+
+func (m *TMarketMaker) MaxFundingFees(mkt *mm.MarketWithHost, maxBuyPlacements, maxSellPlacements uint32, baseOptions, quoteOptions map[string]string) (buyFees, sellFees uint64, _ error) {
+	return 1e4, 1e4, nil
+}
+
+func (m *TMarketMaker) UpdateRunningBotCfg(cfg *mm.BotConfig, balanceDiffs *mm.BotInventoryDiffs, saveUpdate bool) error {
+	return nil
+}
+
 func makeRequiredAction(assetID uint32, actionID string) *asset.ActionRequiredNote {
 	txID := dex.Bytes(encode.RandomBytes(32)).String()
 	var payload any

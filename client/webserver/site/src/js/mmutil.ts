@@ -16,12 +16,9 @@ import {
   UnitInfo,
   MarketReport,
   BotBalanceAllocation,
-  ProjectedAlloc,
   BalanceNote,
   BotBalance,
   Order,
-  LotFeeRange,
-  BookingFees,
   BotProblems,
   EpochReportNote,
   OrderReport,
@@ -79,6 +76,13 @@ class MarketMakerBot {
   }
 
   /*
+   * updateRunningBot updates the BotConfig and inventory for a running bot.
+   */
+  async updateRunningBot (cfg: BotConfig, diffs: BotBalanceAllocation) {
+    return postJSON('/api/updaterunningbot', { cfg, diffs })
+  }
+
+  /*
    * updateCEXConfig appends or updates the specified CEXConfig.
    */
   async updateCEXConfig (cfg: CEXConfig) {
@@ -91,6 +95,10 @@ class MarketMakerBot {
 
   async report (host: string, baseID: number, quoteID: number) {
     return postJSON('/api/marketreport', { host, baseID, quoteID })
+  }
+
+  async maxFundingFees (market: MarketWithHost, maxBuyPlacements: number, maxSellPlacements: number, baseOptions: Record<string, string>, quoteOptions: Record<string, string>) {
+    return postJSON('/api/maxfundingfees', { market, maxBuyPlacements, maxSellPlacements, baseOptions, quoteOptions })
   }
 
   async startBot (config: StartConfig) {
@@ -126,6 +134,10 @@ class MarketMakerBot {
     const cexBalance = (await postJSON('/api/cexbalance', { cexName, assetID })).cexBalance
     this.cexBalanceCache[cexName][assetID] = cexBalance
     return cexBalance
+  }
+
+  async availableBalances (market: MarketWithHost, cexName?: string) : Promise<{ dexBalances: Record<number, number>, cexBalances: Record<number, number> }> {
+    return await postJSON('/api/availablebalances', { market, cexName })
   }
 }
 
@@ -359,24 +371,6 @@ export function liveBotStatus (host: string, baseID: number, quoteID: number): M
   if (statuses.length) return statuses[0]
 }
 
-interface Lotter {
-  lots: number
-}
-
-function sumLots (lots: number, p: Lotter) {
-  return lots + p.lots
-}
-
-interface AllocationProjection {
-  bProj: ProjectedAlloc
-  qProj: ProjectedAlloc
-  alloc: Record<number, number>
-}
-
-function emptyProjection (): ProjectedAlloc {
-  return { book: 0, bookingFees: 0, swapFeeReserves: 0, cex: 0, orderReserves: 0, slippageBuffer: 0 }
-}
-
 export class BotMarket {
   cfg: BotConfig
   host: string
@@ -400,7 +394,6 @@ export class BotMarket {
   cexName: string
   dinfo: CEXDisplayInfo
   alloc: BotBalanceAllocation
-  proj: AllocationProjection
   bui: UnitInfo
   baseFactor: number
   baseFeeUI: UnitInfo
@@ -420,11 +413,7 @@ export class BotMarket {
   rateStep: number
   baseFeeFiatRate: number
   quoteFeeFiatRate: number
-  baseLots: number
-  quoteLots: number
   marketReport: MarketReport
-  nBuyPlacements: number
-  nSellPlacements: number
 
   constructor (cfg: BotConfig) {
     const host = this.host = cfg.host
@@ -480,20 +469,10 @@ export class BotMarket {
 
     if (cfg.arbMarketMakingConfig) {
       this.botType = botTypeArbMM
-      this.baseLots = cfg.arbMarketMakingConfig.sellPlacements.reduce(sumLots, 0)
-      this.quoteLots = cfg.arbMarketMakingConfig.buyPlacements.reduce(sumLots, 0)
-      this.nBuyPlacements = cfg.arbMarketMakingConfig.buyPlacements.length
-      this.nSellPlacements = cfg.arbMarketMakingConfig.sellPlacements.length
     } else if (cfg.simpleArbConfig) {
       this.botType = botTypeBasicArb
-      this.baseLots = cfg.uiConfig.simpleArbLots as number
-      this.quoteLots = cfg.uiConfig.simpleArbLots as number
-    } else if (cfg.basicMarketMakingConfig) { // basicmm
+    } else if (cfg.basicMarketMakingConfig) {
       this.botType = botTypeBasicMM
-      this.baseLots = cfg.basicMarketMakingConfig.sellPlacements.reduce(sumLots, 0)
-      this.quoteLots = cfg.basicMarketMakingConfig.buyPlacements.reduce(sumLots, 0)
-      this.nBuyPlacements = cfg.basicMarketMakingConfig.buyPlacements.length
-      this.nSellPlacements = cfg.basicMarketMakingConfig.sellPlacements.length
     }
   }
 
@@ -503,7 +482,6 @@ export class BotMarket {
     const r = this.marketReport = res.report as MarketReport
     this.lotSizeUSD = lotSizeConv * r.baseFiatRate
     this.quoteLotUSD = quoteLotConv * r.quoteFiatRate
-    this.proj = this.projectedAllocations()
   }
 
   status () {
@@ -576,197 +554,6 @@ export class BotMarket {
       cexQuoteFeeAvail: cexQuoteFeeAvail / quoteFeeFactor
     }
   }
-
-  /*
-   * feesAndCommit generates a snapshot of current market fees, as well as a
-   * "commit", which is the funding dedicated to being on order. The commit
-   * values do not include booking fees, order reserves, etc. just the order
-   * quantity.
-   */
-  feesAndCommit () {
-    const {
-      baseID, quoteID, marketReport: { baseFees, quoteFees }, lotSize,
-      baseLots, quoteLots, baseFeeID, quoteFeeID, baseIsAccountLocker, quoteIsAccountLocker,
-      cfg: { uiConfig: { baseConfig, quoteConfig } }
-    } = this
-
-    return feesAndCommit(
-      baseID, quoteID, baseFees, quoteFees, lotSize, baseLots, quoteLots,
-      baseFeeID, quoteFeeID, baseIsAccountLocker, quoteIsAccountLocker,
-      baseConfig.orderReservesFactor, quoteConfig.orderReservesFactor
-    )
-  }
-
-  /*
-   * projectedAllocations calculates the required asset allocations from the
-   * user's configuration settings and the current market state.
-   */
-  projectedAllocations () {
-    const {
-      cfg: { uiConfig: { quoteConfig, baseConfig } },
-      baseFactor, quoteFactor, baseID, quoteID, lotSizeConv, quoteLotConv,
-      baseFeeFactor, quoteFeeFactor, baseFeeID, quoteFeeID, baseToken,
-      quoteToken, cexName
-    } = this
-    const { commit, fees } = this.feesAndCommit()
-
-    const bProj = emptyProjection()
-    const qProj = emptyProjection()
-
-    bProj.book = commit.dex.base.lots * lotSizeConv
-    qProj.book = commit.cex.base.lots * quoteLotConv
-
-    bProj.orderReserves = Math.max(commit.cex.base.val, commit.dex.base.val) * baseConfig.orderReservesFactor / baseFactor
-    qProj.orderReserves = Math.max(commit.cex.quote.val, commit.dex.quote.val) * quoteConfig.orderReservesFactor / quoteFactor
-
-    if (cexName) {
-      bProj.cex = commit.cex.base.lots * lotSizeConv
-      qProj.cex = commit.cex.quote.lots * quoteLotConv
-    }
-
-    bProj.bookingFees = fees.base.bookingFees / baseFeeFactor
-    qProj.bookingFees = fees.quote.bookingFees / quoteFeeFactor
-
-    if (baseToken) bProj.swapFeeReserves = fees.base.tokenFeesPerSwap * baseConfig.swapFeeN / baseFeeFactor
-    if (quoteToken) qProj.swapFeeReserves = fees.quote.tokenFeesPerSwap * quoteConfig.swapFeeN / quoteFeeFactor
-    qProj.slippageBuffer = (qProj.book + qProj.cex + qProj.orderReserves) * quoteConfig.slippageBufferFactor
-
-    const alloc: Record<number, number> = {}
-    const addAlloc = (assetID: number, amt: number) => { alloc[assetID] = (alloc[assetID] ?? 0) + amt }
-    addAlloc(baseID, Math.round((bProj.book + bProj.cex + bProj.orderReserves) * baseFactor))
-    addAlloc(baseFeeID, Math.round((bProj.bookingFees + bProj.swapFeeReserves) * baseFeeFactor))
-    addAlloc(quoteID, Math.round((qProj.book + qProj.cex + qProj.orderReserves + qProj.slippageBuffer) * quoteFactor))
-    addAlloc(quoteFeeID, Math.round((qProj.bookingFees + qProj.swapFeeReserves) * quoteFeeFactor))
-
-    return { qProj, bProj, alloc }
-  }
-
-  /*
-   * fundingState examines the projected allocations and the user's wallet
-   * balances to determine whether the user can fund the bot fully, unbalanced,
-   * or starved, and what funding source options might be available.
-   */
-  fundingState () {
-    const {
-      proj: { bProj, qProj }, baseID, quoteID, baseFeeID, quoteFeeID,
-      cfg: { uiConfig: { cexRebalance } }, cexName
-    } = this
-    const {
-      baseAvail, quoteAvail, dexBaseAvail, dexQuoteAvail, cexBaseAvail, cexQuoteAvail,
-      dexBaseFeeAvail, dexQuoteFeeAvail
-    } = this.adjustedBalances()
-
-    const canRebalance = Boolean(cexName && cexRebalance)
-
-    // Three possible states.
-    // 1. We have the funding in the projection, and its in the right places.
-    //    Give them some options for which wallet to pull order reserves from,
-    //    but they can start immediately..
-    // 2. We have the funding, but it's in the wrong place or the wrong asset,
-    //    but we have deposits and withdraws enabled. We can offer them the
-    //    option to start in an unbalanced state.
-    // 3. We don't have the funds. We offer them an option to start in a
-    //    starved state.
-    const cexMinBaseAlloc = bProj.cex
-    let [dexMinBaseAlloc, transferableBaseAlloc, dexBaseFeeReq] = [bProj.book, 0, 0]
-    // Only add booking fees if this is the fee asset.
-    if (baseID === baseFeeID) dexMinBaseAlloc += bProj.bookingFees
-    // Base asset is a token.
-    else dexBaseFeeReq += bProj.bookingFees + bProj.swapFeeReserves
-    // If we can rebalance, the order reserves could potentially be withdrawn.
-    if (canRebalance) transferableBaseAlloc += bProj.orderReserves
-    // If we can't rebalance, order reserves are required in dex balance.
-    else dexMinBaseAlloc += bProj.orderReserves
-    // Handle the special case where the base asset it the quote asset's fee
-    // asset.
-    if (baseID === quoteFeeID) {
-      if (canRebalance) transferableBaseAlloc += qProj.bookingFees + qProj.swapFeeReserves
-      else dexMinBaseAlloc += qProj.bookingFees + qProj.swapFeeReserves
-    }
-
-    let [dexMinQuoteAlloc, cexMinQuoteAlloc, transferableQuoteAlloc, dexQuoteFeeReq] = [qProj.book, qProj.cex, 0, 0]
-    if (quoteID === quoteFeeID) dexMinQuoteAlloc += qProj.bookingFees
-    else dexQuoteFeeReq += qProj.bookingFees + qProj.swapFeeReserves
-    if (canRebalance) transferableQuoteAlloc += qProj.orderReserves + qProj.slippageBuffer
-    else {
-      // The slippage reserves reserves should be split between cex and dex.
-      dexMinQuoteAlloc += qProj.orderReserves
-      const basis = qProj.book + qProj.cex + qProj.orderReserves
-      dexMinQuoteAlloc += (qProj.book + qProj.orderReserves) / basis * qProj.slippageBuffer
-      cexMinQuoteAlloc += qProj.cex / basis * qProj.slippageBuffer
-    }
-    if (quoteID === baseFeeID) {
-      if (canRebalance) transferableQuoteAlloc += bProj.bookingFees + bProj.swapFeeReserves
-      else dexMinQuoteAlloc += bProj.bookingFees + bProj.swapFeeReserves
-    }
-
-    const dexBaseFunded = dexBaseAvail >= dexMinBaseAlloc
-    const cexBaseFunded = cexBaseAvail >= cexMinBaseAlloc
-    const dexQuoteFunded = dexQuoteAvail >= dexMinQuoteAlloc
-    const cexQuoteFunded = cexQuoteAvail >= cexMinQuoteAlloc
-    const totalBaseReq = dexMinBaseAlloc + cexMinBaseAlloc + transferableBaseAlloc
-    const totalQuoteReq = dexMinQuoteAlloc + cexMinQuoteAlloc + transferableQuoteAlloc
-    const baseFundedAndBalanced = dexBaseFunded && cexBaseFunded && baseAvail >= totalBaseReq
-    const quoteFundedAndBalanced = dexQuoteFunded && cexQuoteFunded && quoteAvail >= totalQuoteReq
-    const baseFeesFunded = dexBaseFeeAvail >= dexBaseFeeReq
-    const quoteFeesFunded = dexQuoteFeeAvail >= dexQuoteFeeReq
-
-    const fundedAndBalanced = baseFundedAndBalanced && quoteFundedAndBalanced && baseFeesFunded && quoteFeesFunded
-
-    // Are we funded but not balanced, but able to rebalance with a cex?
-    let fundedAndNotBalanced = !fundedAndBalanced
-    if (!fundedAndBalanced) {
-      const ordersFunded = baseAvail >= totalBaseReq && quoteAvail >= totalQuoteReq
-      const feesFunded = baseFeesFunded && quoteFeesFunded
-      fundedAndNotBalanced = ordersFunded && feesFunded && canRebalance
-    }
-
-    return {
-      base: {
-        dex: {
-          avail: dexBaseAvail,
-          req: dexMinBaseAlloc,
-          funded: dexBaseFunded
-        },
-        cex: {
-          avail: cexBaseAvail,
-          req: cexMinBaseAlloc,
-          funded: cexBaseFunded
-        },
-        transferable: transferableBaseAlloc,
-        fees: {
-          avail: dexBaseFeeAvail,
-          req: dexBaseFeeReq,
-          funded: baseFeesFunded
-        },
-        fundedAndBalanced: baseFundedAndBalanced,
-        fundedAndNotBalanced: !baseFundedAndBalanced && baseAvail >= totalBaseReq && canRebalance
-      },
-      quote: {
-        dex: {
-          avail: dexQuoteAvail,
-          req: dexMinQuoteAlloc,
-          funded: dexQuoteFunded
-        },
-        cex: {
-          avail: cexQuoteAvail,
-          req: cexMinQuoteAlloc,
-          funded: cexQuoteFunded
-        },
-        transferable: transferableQuoteAlloc,
-        fees: {
-          avail: dexQuoteFeeAvail,
-          req: dexQuoteFeeReq,
-          funded: quoteFeesFunded
-        },
-        fundedAndBalanced: quoteFundedAndBalanced,
-        fundedAndNotBalanced: !quoteFundedAndBalanced && quoteAvail >= totalQuoteReq && canRebalance
-      },
-      fundedAndBalanced,
-      fundedAndNotBalanced,
-      starved: !fundedAndBalanced && !fundedAndNotBalanced
-    }
-  }
 }
 
 export type RunningMMDisplayElements = {
@@ -807,6 +594,10 @@ export class RunningMarketMakerDisplay {
     Doc.bind(this.page.runLogsBttn, 'click', () => {
       const { mkt: { baseID, quoteID, host }, startTime } = this
       app().loadPage('mmlogs', { baseID, quoteID, host, startTime, returnPage: page })
+    })
+    Doc.bind(this.page.settingsBttn, 'click', () => {
+      const { mkt: { baseID, quoteID, host } } = this
+      app().loadPage('mmsettings', { baseID, quoteID, host })
     })
     Doc.bind(this.page.buyOrdersBttn, 'click', () => this.showOrderReport('buys'))
     Doc.bind(this.page.sellOrdersBttn, 'click', () => this.showOrderReport('sells'))
@@ -1221,95 +1012,6 @@ function setSignedValue (v: number, vEl: PageElement, signEl: PageElement, maxDe
   signEl.classList.toggle('ico-plus', v > 0)
   signEl.classList.toggle('text-good', v > 0)
   // signEl.classList.toggle('ico-minus', v < 0)
-}
-
-export function feesAndCommit (
-  baseID: number, quoteID: number, baseFees: LotFeeRange, quoteFees: LotFeeRange,
-  lotSize: number, baseLots: number, quoteLots: number, baseFeeID: number, quoteFeeID: number,
-  baseIsAccountLocker: boolean, quoteIsAccountLocker: boolean, baseOrderReservesFactor: number,
-  quoteOrderReservesFactor: number
-) {
-  const quoteLot = calculateQuoteLot(lotSize, baseID, quoteID)
-  const [cexBaseLots, cexQuoteLots] = [quoteLots, baseLots]
-  const commit = {
-    dex: {
-      base: {
-        lots: baseLots,
-        val: baseLots * lotSize
-      },
-      quote: {
-        lots: quoteLots,
-        val: quoteLots * quoteLot
-      }
-    },
-    cex: {
-      base: {
-        lots: cexBaseLots,
-        val: cexBaseLots * lotSize
-      },
-      quote: {
-        lots: cexQuoteLots,
-        val: cexQuoteLots * quoteLot
-      }
-    }
-  }
-
-  let baseTokenFeesPerSwap = 0
-  let baseRedeemReservesPerLot = 0
-  if (baseID !== baseFeeID) { // token
-    baseTokenFeesPerSwap += baseFees.estimated.swap
-    if (baseFeeID === quoteFeeID) baseTokenFeesPerSwap += quoteFees.estimated.redeem
-  }
-  let baseBookingFeesPerLot = baseFees.max.swap
-  if (baseID === quoteFeeID) baseBookingFeesPerLot += quoteFees.max.redeem
-  if (baseIsAccountLocker) {
-    baseBookingFeesPerLot += baseFees.max.refund
-    if (!quoteIsAccountLocker && baseFeeID !== quoteFeeID) baseRedeemReservesPerLot = baseFees.max.redeem
-  }
-
-  let quoteTokenFeesPerSwap = 0
-  let quoteRedeemReservesPerLot = 0
-  if (quoteID !== quoteFeeID) {
-    quoteTokenFeesPerSwap += quoteFees.estimated.swap
-    if (quoteFeeID === baseFeeID) quoteTokenFeesPerSwap += baseFees.estimated.redeem
-  }
-  let quoteBookingFeesPerLot = quoteFees.max.swap
-  if (quoteID === baseFeeID) quoteBookingFeesPerLot += baseFees.max.redeem
-  if (quoteIsAccountLocker) {
-    quoteBookingFeesPerLot += quoteFees.max.refund
-    if (!baseIsAccountLocker && quoteFeeID !== baseFeeID) quoteRedeemReservesPerLot = quoteFees.max.redeem
-  }
-
-  const baseReservesFactor = 1 + baseOrderReservesFactor
-  const quoteReservesFactor = 1 + quoteOrderReservesFactor
-
-  const baseBookingFees = (baseBookingFeesPerLot * baseLots) * baseReservesFactor
-  const baseRedeemFees = (baseRedeemReservesPerLot * quoteLots) * quoteReservesFactor
-  const quoteBookingFees = (quoteBookingFeesPerLot * quoteLots) * quoteReservesFactor
-  const quoteRedeemFees = (quoteRedeemReservesPerLot * baseLots) * baseReservesFactor
-
-  const fees: BookingFees = {
-    base: {
-      ...baseFees,
-      bookingFeesPerLot: baseBookingFeesPerLot,
-      bookingFeesPerCounterLot: baseRedeemReservesPerLot,
-      bookingFees: baseBookingFees + baseRedeemFees,
-      swapReservesFactor: baseReservesFactor,
-      redeemReservesFactor: quoteReservesFactor,
-      tokenFeesPerSwap: baseTokenFeesPerSwap
-    },
-    quote: {
-      ...quoteFees,
-      bookingFeesPerLot: quoteBookingFeesPerLot,
-      bookingFeesPerCounterLot: quoteRedeemReservesPerLot,
-      bookingFees: quoteBookingFees + quoteRedeemFees,
-      swapReservesFactor: quoteReservesFactor,
-      redeemReservesFactor: baseReservesFactor,
-      tokenFeesPerSwap: quoteTokenFeesPerSwap
-    }
-  }
-
-  return { commit, fees }
 }
 
 function botProblemMessages (problems: BotProblems | undefined, cexName: string, dexHost: string): string[] {
