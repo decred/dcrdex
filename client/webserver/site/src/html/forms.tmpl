@@ -1028,6 +1028,8 @@
     </div>
     <div class="d-flex align-items-stretch ps-3 border-start">
       <button data-tmpl="runLogsBttn" class="ico-textfile"></button>
+      <button data-tmpl="settingsBttn" class="ico-settings ms-1"></button>
+      <button data-tmpl="adjustBalanceBttn" class="ico-lever ms-1"></button>
       <button data-tmpl="stopBttn" class="ms-3 position-relative">Stop</button>
     </div>
   </div>
@@ -1145,4 +1147,336 @@
     </table>
   </div>
 </div>
+{{end}}
+
+{{define "allocationForm"}}
+<div>
+  <div class="fs24 text-center py-3 border-bottom" id="allocationFormTitle"></div>
+
+  {{- /* FUNDING STATUS DEPENDENT MESSAGING AND START BUTTON */ -}}
+  <div class="d-flex align-items-stretch border-bottom">
+    <div class="flex-grow-1 p-3">
+      <div class="fs16">
+        Before starting the bot, you need to allocate funds for trading. The minimum required allocation for all the configured placements
+        is set by default, and you can add additional funds by adjusting the configurations below. Alternatively, you can manually set each
+        of the balances individually.
+      </div>
+    </div>
+    <div class="p-3 ps-4 d-flex flex-column justify-content-between align-items-end">
+      <button id="startBttn" class="ico-arrowright fs35 p-3 go"></button>
+      <div id="allocationErrMsg" class="py-2 px-3 mb-2 border-bottom flex-center text-warning d-hide"></div>
+    </div>
+  </div>
+
+  <div id="errMsg" class="py-2 px-3 mb-2 border-bottom flex-center text-warning d-hide"></div>
+
+  {{- /* PROPOSED ALLOCATIONS AND ADJUSTMENTS */ -}}
+
+  <div class="d-flex justify-content-between">
+    {{- /* LEFT COLUMN */ -}}
+    <div class="d-flex flex-column col-15 me-4">
+      {{- /* TO ALLOCATE */ -}}
+      <section id="toAllocateSection" class="col-24 p-3">
+        <div class="d-flex justify-content-between">
+          <div class="fs16 mb-2">To Allocate</div>
+          <button id="adjustManuallyBtn" class="medium px-4 mb-2">Adjust Manually</button>
+        </div>
+        <span class="text-buycolor">Sufficient Funds</span>
+        <br>
+        <span class="text-danger">Insufficient Funds</span>
+        <br>
+        <span class="text-warning">Sufficient With Rebalance</span>
+        <span class="ico-info fs13 ms-1 text-warning" data-tooltip="Rebalance is enabled and additional funds were allocated on either the CEX or DEX"></span>
+        <div id="toAllocateTable">
+          {{ template "balancesTable" }}
+        </div>
+      </section>
+
+      {{- /* BALANCE CONFIGURATION */ -}}
+      <section id="adjustManuallySection" class="col-24 p-3">
+        <div class="d-flex justify-content-between">
+          <div class="fs16 mb-2">Balance Configuration</div>
+          <button id="quickConfigBtn" class="medium px-4 mb-2">Quick Config</button>
+        </div>
+
+        {{- /* DEX BALANCES */ -}}
+        <div class="d-flex align-items-center mb-3">
+          <img class="logo-square mini-icon me-2">
+          <div class="d-flex flex-grow-1">
+            <div class="d-flex flex-column me-4">
+              <label class="small">
+                <img data-base-logo class="micro-icon me-1">
+                <span data-base-ticker></span>
+              </label>
+              <div class="ms-2 d-flex flex-column align-items-stretch w-100">
+                <div>
+                  <input id="dexBaseBalance" type="number" class="fs14 text-center p-2" step="any">
+                </div>
+                <div id="dexBaseBalanceSlider" class="mini-slider mt-2 me-3"></div>
+              </div>
+            </div>
+            <div class="d-flex flex-column me-4">
+              <label class="small">
+                <img data-quote-logo class="micro-icon me-1">
+                <span data-quote-ticker></span>
+              </label>
+              <div class="ms-2 d-flex flex-column align-items-stretch w-100">
+                <div>
+                  <input id="dexQuoteBalance" type="number" class="fs14 text-center p-2" step="any">
+                </div>
+                <div id="dexQuoteBalanceSlider" class="mini-slider mt-2 me-3"></div>
+              </div>
+            </div>
+            <div id="dexBaseFeeBalanceSection" class="d-flex flex-column me-4">
+              <label class="small">
+                <img data-base-fee-logo class="micro-icon me-1">
+                <span data-base-fee-ticker></span>
+              </label>
+              <div class="ms-2 d-flex flex-column align-items-stretch w-100">
+                <div>
+                  <input id="baseFeeBalance" type="number" class="fs14 text-center p-2" step="any">
+                </div>
+                <div id="baseFeeBalanceSlider" class="mini-slider mt-2 me-3"></div>
+              </div>
+            </div>
+            <div id="dexQuoteFeeBalanceSection" class="d-flex flex-column">
+              <label class="small">
+                <img data-quote-fee-logo class="micro-icon me-1">
+                <span data-quote-fee-ticker></span>
+              </label>
+              <div class="ms-2 d-flex flex-column align-items-stretch w-100">
+                <div>
+                  <input id="quoteFeeBalance" type="number" class="fs14 text-center p-2" step="any">
+                </div>
+                <div id="quoteFeeBalanceSlider" class="mini-slider mt-2 me-3"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {{- /* CEX BALANCES */ -}}
+        <div id="adjustManuallyCexBalances" class="d-flex align-items-center">
+          <img data-cex-logo class="mini-icon me-2">
+          <div class="d-flex flex-grow-1">
+            <div class="d-flex flex-column me-4">
+              <label class="small">
+                <img data-base-logo class="micro-icon me-1">
+                <span data-base-ticker></span>
+              </label>
+              <div class="ms-2 d-flex flex-column align-items-stretch w-100">
+                <div>
+                  <input id="cexBaseBalance" type="number" class="fs14 text-center p-2" step="any">
+                </div>
+                <div id="cexBaseBalanceSlider" class="mini-slider mt-2 me-3"></div>
+              </div>
+            </div>
+            <div class="d-flex flex-column me-4">
+              <label class="small">
+                <img data-quote-logo class="micro-icon me-1">
+                <span data-quote-ticker></span>
+              </label>
+              <div class="ms-2 d-flex flex-column align-items-stretch w-100">
+                <div>
+                  <input id="cexQuoteBalance" type="number" class="fs14 text-center p-2" step="any">
+                </div>
+                <div id="cexQuoteBalanceSlider" class="mini-slider mt-2 me-3"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="col-24 d-flex flex-column">
+        {{- /* AVAILABLE BALANCES */ -}}
+        <section class="p-3" style="width: fit-content">
+          <div class="fs16 mb-2">Available Balances</div>
+          <div id="availableBalances">
+            {{template "balancesTable"}}
+          </div>
+        </section>
+
+        {{- /* RUNNING BOT BALANCES */ -}}
+        <section class="p-3" id="runningBotBalances" style="width: fit-content">
+          <div class="fs16 mb-2">Running Bot Balances</div>
+          <div id="runningBotBalancesTable">
+            {{template "balancesTable"}}
+          </div>
+        </section>
+
+        {{- /* REQUIRED PER SELL LOT */ -}}
+        <section class="p-3" style="width: fit-content">
+          <div class="fs16 mb-2">Required Per Sell Lot</div>
+          <div id="sellPerLot">
+            {{template "balancesTable"}}
+          </div>
+        </section>
+
+        {{- /* REQUIRED PER BUY LOT */ -}}
+        <section class="p-3" style="width: fit-content">
+          <div class="fs16 mb-2">Required Per Buy Lot</div>
+          <div id="buyPerLot">
+            {{template "balancesTable"}}
+          </div>
+        </section>
+      </div>
+    </div>
+
+    {{- /* RIGHT COLUMN - ADJUSTMENTS */ -}}
+    <div class="d-flex flex-column col-8">
+      <section id="quickConfigSection" class="col-24 p-3 me-4">
+        <div class="d-flex justify-content-between">
+          <div class="fs16 mb-2">Adjustments</div>
+        </div>
+
+        <div class="d-flex flex-column align-items-start pt-2 mt-2 border-top">
+          <div class="fs17 pb-1">
+            Buy Buffer
+            <span class="ico-info fs13 ms-1" data-tooltip="Additional funds to allocate beyond the minimum required for buy orders"></span>
+          </div>
+          <div class="ms-2 d-flex flex-column align-items-stretch w-100">
+            <div>
+              <input id="buyBuffer" type="number" class="fs14 text-center p-2" style="width: 30%" step="1">
+            </div>
+            <div id="buyBufferSlider" class="mini-slider mt-2 me-3"></div>
+          </div>
+        </div>
+
+        <div class="d-flex flex-column align-items-start pt-2 mt-2 border-top">
+          <div class="fs17 pb-1">
+            Sell Buffer
+            <span class="ico-info fs13 ms-1" data-tooltip="Additional funds to allocate beyond the minimum required for sell orders"></span>
+          </div>
+          <div class="ms-2 d-flex flex-column align-items-stretch w-100">
+            <div>
+              <input id="sellBuffer" type="number" class="fs14 text-center p-2" style="width: 30%" step="1">
+            </div>
+            <div id="sellBufferSlider" class="mini-slider mt-2 me-3"></div>
+          </div>
+        </div>
+
+        <div class="d-flex flex-column align-items-start pt-2 mt-2 border-top">
+          <div class="fs17 pb-1">
+            Slippage Buffer
+            <span class="ico-info fs13 ms-1" data-tooltip="Additional funds to allocate to account for price slippage"></span>
+          </div>
+          <div class="ms-2 d-flex flex-column align-items-stretch w-100">
+            <div class="d-flex align-items-center">
+              <input id="slippageBuffer" type="number" class="fs14 text-center p-2" style="width: 30%" step="0.001">
+              <span class="fs14 ms-1">%</span>
+            </div>
+            <div id="slippageBufferSlider" class="mini-slider mt-2 me-3"></div>
+          </div>
+        </div>
+
+        <div id="buyFeeReserveSection" class="d-flex flex-column align-items-start pt-2 mt-2 border-top">
+          <div class="fs17 pb-1">
+            Buy Fee Reserve
+            <span class="ico-info fs13 ms-1" data-tooltip="Additional funds to reserve for transaction fees on buy orders"></span>
+          </div>
+          <div class="ms-2 d-flex flex-column align-items-stretch w-100">
+            <div>
+              <input id="buyFeeReserve" type="number" class="fs14 text-center p-2" style="width: 30%" step="1">
+            </div>
+            <div id="buyFeeReserveSlider" class="mini-slider mt-2 me-3"></div>
+          </div>
+        </div>
+
+        <div id="sellFeeReserveSection" class="d-flex flex-column align-items-start pt-2 mt-2 border-top">
+          <div class="fs17 pb-1">
+            Sell Fee Reserve
+            <span class="ico-info fs13 ms-1" data-tooltip="Additional funds to reserve for transaction fees on sell orders"></span>
+          </div>
+          <div class="ms-2 d-flex flex-column align-items-stretch w-100">
+            <div>
+              <input id="sellFeeReserve" type="number" class="fs14 text-center p-2" style="width: 30%" step="1">
+            </div>
+            <div id="sellFeeReserveSlider" class="mini-slider mt-2 me-3"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="rebalanceSection" class="p-3 col-24 me-4">
+        <div class="d-flex justify-content-between">
+          <div class="fs16 mb-2">Auto Rebalance</div>
+        </div>
+
+        <div class="d-flex align-items-center">
+          <input type="checkbox" id="enableRebalance" class="form-check-input me-2 mt-0">
+          <label for="enableRebalance" class="fs17">Enable Auto Rebalance</label>
+          <span class="ico-info fs13 ms-1" data-tooltip="Automatically transfer funds between wallet and CEX to maintain target balances"></span>
+        </div>
+
+        <div id="rebalanceSettings">
+          <div class="d-flex flex-column align-items-start pt-2 mt-2 border-top">
+            <div class="fs17 pb-1">
+              <img data-base-logo class="mini-icon">
+              <span data-base-ticker></span> Minimum Transfer
+              <span class="ico-info fs13 ms-1" data-tooltip="The minimum amount that can be transferred between the wallet and CEX"></span>
+            </div>
+            <div class="ms-2 d-flex flex-column align-items-stretch w-100">
+              <div>
+                <input id="baseMinTransfer" type="number" class="fs14 text-center p-2" style="width: 30%" step="any">
+              </div>
+              <div id="baseMinTransferSlider" class="mini-slider mt-2 me-3"></div>
+            </div>
+          </div>
+
+          <div class="d-flex flex-column align-items-start pt-2 mt-2 border-top">
+            <div class="fs17 pb-1">
+              <img data-quote-logo class="mini-icon">
+              <span data-quote-ticker></span> Minimum Transfer
+              <span class="ico-info fs13 ms-1" data-tooltip="The minimum amount that can be transferred between the wallet and CEX"></span>
+            </div>
+            <div class="ms-2 d-flex flex-column align-items-stretch w-100">
+              <div>
+                <input id="quoteMinTransfer" type="number" class="fs14 text-center p-2" style="width: 30%" step="any">
+              </div>
+              <div id="quoteMinTransferSlider" class="mini-slider mt-2 me-3"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{ define "balancesTable" }}
+<table>
+  <thead>
+    <tr>
+      <th></th>
+      <th class="text-center">
+        <img data-base-logo class="mini-icon">
+        <span data-base-ticker></span>
+      </th>
+      <th class="text-center">
+        <img data-quote-logo class="mini-icon">
+        <span data-quote-ticker></span>
+      </th>
+      <th data-tmpl="baseFeeHeader" class="text-center">
+        <img data-base-fee-logo class="mini-icon">
+        <span data-base-fee-ticker></span>
+      </th>
+      <th data-tmpl="quoteFeeHeader" class="text-center">
+        <img data-quote-fee-logo class="mini-icon">
+        <span data-quote-fee-ticker></span>
+      </th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><img class="logo-square mini-icon"></td>
+      <td data-tmpl="dexBaseAlloc" class="text-center border"></td>
+      <td data-tmpl="dexQuoteAlloc" class="text-center border"></td>
+      <td data-tmpl="dexBaseFeeAlloc" class="text-center border"></td>
+      <td data-tmpl="dexQuoteFeeAlloc" class="text-center border"></td>
+    </tr>
+    <tr data-tmpl="cexRow">
+      <td><img data-cex-logo class="mini-icon"></td>
+      <td data-tmpl="cexBaseAlloc" class="text-center border"></td>
+      <td data-tmpl="cexQuoteAlloc" class="text-center border"></td>
+    </tr>
+  </tbody>
+</table>
 {{end}}

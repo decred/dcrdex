@@ -22,7 +22,6 @@
     </div>
   </div>
   <div id="botSettingsContainer" class="flex-grow-1 d-flex flex-wrap d-hide">
-
     {{- /* PLACEMENTS */ -}}
     <div class="col-24 col-md-12 col-xl-8 col-xxl-6">
       <section class="p-3">
@@ -54,12 +53,13 @@
             </div>
           </div>
         </div>
+        
+        <div id="viewOnlyRunning" class="w-100 d-flex flex-center pb-2 mx-2 fs18">
+          <span id="onIndicator" class="on-indicator on me-2"></span> [[[bot_running]]]
+        </div>
+        
         {{- /* MANUAL CONFIG */ -}}
         <div id="advancedConfig" class="d-hide">
-          {{- /* VIEW-ONLY MODE */ -}}
-          <div id="viewOnlyRunning" class="w-100 d-flex flex-center pb-2 mb-3 fs18 border-bottom">
-            <span id="onIndicator" class="on-indicator on me-2"></span> [[[bots_running_view_only]]]
-          </div>
           {{- /* STRATEGY SELECTION */ -}}
           <div id="gapStrategyBox" class="w-100">
             <div class="d-flex flex-column align-items-stretch pb-2">
@@ -182,7 +182,7 @@
         {{- /* QUICK CONFIG */ -}}
         <div id="quickConfig" class="d-hide">
           <div class="d-flex justify-content-between lh1 pt-2 mt-2 border-top">
-            <span class="fs20 pt-pt5">[[[Quick Placements]]]</span>
+            <span id="qcTitle" class="fs20 pt-pt5">[[[Quick Placements]]]</span>
             <button id="switchToAdvanced" class="small">
               <span class="ico-settings fs14 me-1"></span>
               <span class="fs15">[[[Configure manually]]]</span>
@@ -355,348 +355,95 @@
     </div>
 
     {{- /* ASSET SETTINGS */ -}}
-    <div class="d-flex flex-wrap col-24 col-md-12 col-xl-16 col-xxl-18">
-      <div id=assetPaneBox class="d-flex flex-wrap col-24 col-xxl-19">
-        <div id="basePane" class="flex-stretch-column col-24 col-xl-12">
-          <section class="flex-stretch-column">
+    <div class="d-flex flex-column col-24 col-md-12 col-xl-16 col-xxl-18">
 
-            {{- /* LOGO AND TOTAL ALLOCATION */ -}}
-            <div class="d-flex align-items-start justify-content-between px-3 pt-3 pb-2 border-bottom">
-              <div class="d-flex align-items-center lh1">
-                <img class="me-1 mini-icon" data-logo>
-                <span class="fs26" data-name></span>
-              </div>
-              <div class="d-flex flex-column align-items-end">
-                <div class="d-flex align-items-end lh1">
-                  <span data-tmpl="commitTotal" class="fs18 demi"></span>
-                  <span class="fs15 grey ms-1" data-ticker></span>
+      {{- /* WALLET SETTINGS */ -}}
+      <section class="col-9 py-2 px-3">          
+        {{- /* WALLET SETTINGS */ -}}
+        <div class="col-24 px-3 py-2">
+          <div class="d-flex align-items-center border-bottom pb-2">
+            <span class="ico-settings fs15 pe-2"></span>
+            <span class="fs18">[[[Wallet Options]]]</span>
+          </div>
+          <div id="walletSettingsBox" class="d-flex flex-row">
+            <div id="baseSettings" class="me-2 col-12">
+              <span class="d-flex align-items-center pt-2">
+                <img data-tmpl="logo" class="mini-icon me-1"> 
+                <span data-tmpl="ticker"></span>
+              </span>
+              <div data-tmpl="walletSettingsNone" class="text-center p-2 my-2 border-top border-bottom rounded3">no settings available</div>
+              <div data-tmpl="walletSettings" class="flex-stretch-column fs15">
+                <div data-tmpl="boolSettingTmpl" class="d-flex align-items-center pt-2 mt-2 border-top">
+                  <input type="checkbox" data-tmpl="input" class="form-check-input me-2 mt-0">
+                  <span data-tmpl="name"></span>
+                  <span data-tmpl="tooltip" class="ico-info fs12"></span>
                 </div>
-                <div class="fs14 grey demi">
-                  ~ <span data-tmpl="commitTotalFiat"></span> USD
-                </div>
-              </div>
-            </div>
-
-            {{- /* ALLOCATIONS */ -}}
-            <div class="d-flex align-items-stretch border-bottom">
-
-              {{- /* ASSET ALLOCATIONS */ -}}
-              <div class="col-12 flex-stretch-column ps-3 py-2 pe-2">
-                {{- /* DEX BOOKING */ -}}
-                <div class="flex-stretch-column">
+                <div data-tmpl="rangeSettingTmpl" class="pt-2 mt-2 border-top">
                   <div class="d-flex align-items-center justify-content-between">
-                    <span class="me-1 fs16">Order Inventory</span>
-                    <span class="d-flex align-items-end">
-                      <span data-tmpl="bookLots" class="fs16"></span>
-                      <span class="fs14 grey ms-1">lots</span>
-                      
-                    </span>
-                  </div>
-                  <div class="d-flex align-items-end justify-content-end">
-                    <span class="fs14 grey me-1">x</span>
-                    <span data-tmpl="bookLotSize" class="fs16"></span>
-                    <span class="fs14 grey ms-1">
-                      <span data-ticker></span> per lot
-                    </span>
-                  </div>
-                  <div class="d-flex align-items-end justify-content-end">
-                    <span class="fs14 grey me-1">=</span>
-                    <span data-tmpl="bookCommitment" class="fs16"></span>
-                    <span class="fs14 grey ms-1" data-ticker></span>
-                  </div>
-                </div>
-    
-                {{- /* CEX COUNTER INVENTORY */ -}}
-                <div data-tmpl="cexMinInvBox" class="d-flex align-items-center justify-content-between border-top pt-2 mt-2">
-                  <span class="me-1 fs16">CEX Inventory</span>
-                  <div class="d-flex align-items-end">
-                    <span data-tmpl="cexMinInv" class="fs16"></span>
-                    <span class="fs14 grey ms-1" data-ticker></span>
-                  </div>
-                </div>
-    
-                {{- /* ORDER RESERVES */ -}}
-                <div data-tmpl="orderReservesBox" class="flex-stretch-column border-top pt-2 mt-2">
-                  <div class="d-flex align-items-center justify-content-between">
-                    <span class="me-1 fs16">Order Reserves</span>
-                    <div data-tmpl="orderReservesSlider" class="mini-slider flex-grow-1 ms-2"></div>
-                  </div>
-                  <div class="d-flex align-items-center justify-content-end">
-                    <input type="number" data-tmpl="orderReservesFactor" class="fs16 micro text-end">
-                  </div>
-                  <div class="d-flex align-items-end justify-content-end">
-                    <span class="fs14 grey me-1">x</span>
-                    <span data-tmpl="orderReservesBasis" class="fs16"></span>
-                    <span class="fs14 grey ms-1" data-ticker></span>
-                  </div>
-                  <div class="d-flex align-items-end justify-content-end">
-                    <span class="fs14 grey me-1">=</span>
-                    <span data-tmpl="orderReserves" class="fs16"></span>
-                    <span class="fs14 grey ms-1" data-ticker></span>
-                  </div>
-                </div>
-
-                {{- /* QUOTE SLIPPAGE BUFFER */ -}}
-                <div data-tmpl="slippageBufferBox" class="flex-stretch-column border-top pt-2 mt-2">
-                  <div class="d-flex align-items-center justify-content-between">
-                    <span class="me-1 fs16">Slippage Buffer</span>
-                    <div data-tmpl="slippageBufferSlider" class="mini-slider flex-grow-1 ms-2"></div>
-                  </div>
-                  <div class="d-flex align-items-center justify-content-end">
-                    <input type="number" data-tmpl="slippageBufferFactor" class="fs16 micro text-end">
-                  </div>
-                  <div class="d-flex align-items-end justify-content-end">
-                    <span class="fs14 grey me-1">x</span>
-                    <span data-tmpl="slippageBufferBasis" class="fs16"></span>
-                    <span class="fs14 grey ms-1" data-ticker></span>
-                  </div>
-                  <div class="d-flex align-items-end justify-content-end">
-                    <span class="fs14 grey me-1">=</span>
-                    <span data-tmpl="slippageBuffer" class="fs16"></span>
-                    <span class="fs14 grey ms-1" data-ticker></span>
-                  </div>
-                </div>
-              </div>
-    
-              {{- /* FEE ALLOCATIONS */ -}}
-              <div class="col-12 flex-stretch-column ps-2 my-2 pe-3 border-left">
-
-                {{- /* TOKEN FEE RESERVES */ -}}
-                <div data-tmpl="feeTotalBox" class="d-flex align-items-start justify-content-between mb-2 pb-2 border-bottom">
-                  <div class="flex-center lh1">
-                    <img class="me-1 micro-icon" data-fee-logo>
-                    <span class="fs16">Fee Reserves</span>
-                  </div>
-                  <div class="d-flex flex-column align-items-end">
-                    <div class="d-flex align-items-end lh1">
-                      <span data-tmpl="feeTotal" class="fs16 demi"></span>
-                      <span class="fs14 grey ms-1" data-fee-ticker></span>
-                    </div>
-                    <div class="fs14 grey demi">
-                      ~ <span data-tmpl="feeTotalFiat"></span> USD
-                    </div>
-                  </div>
-                </div>
-
-                {{- /* BOOKING FEES */ -}}
-                <div class="flex-stretch-column">
-                  <div class="d-flex align-items-center justify-content-between">
-                    <span class="me-1 fs16">Booking Fees</span>
-                    <span class="d-flex align-items-end">
-                      <span data-tmpl="bookingFeesLots" class="fs16"></span>
-                      <span class="fs14 grey ms-1">lots</span>
-                    </span>
-                  </div>
-                  <div class="d-flex align-items-end justify-content-end">
-                    <span class="fs14 grey me-1">x</span>
-                    <span data-tmpl="bookingFeesPerLot" class="fs16"></span>
-                    <span class="fs14 grey ms-1">
-                      <span data-fee-ticker></span> per lot
-                    </span>
-                  </div>
-                  <div class="d-flex align-items-end justify-content-end">
-                    <span class="fs14 grey me-1">x</span>
-                    <span data-tmpl="swapReservesFactor" class="fs16"></span>
-                    <span class="fs14 grey ms-1">reserves</span>
-                  </div>
-                  <div data-tmpl="redemptionFeesBox" class="flex-stretch-column">
-                    <div class="d-flex align-items-end justify-content-end">
-                      <span class="fs14 grey me-1">+</span>
-                      <span data-tmpl="redemptionFeesLots" class="fs16"></span>
-                      <span class="fs14 grey ms-1">redeems</span>
-                    </div>
-                    <div class="d-flex align-items-end justify-content-end">
-                      <span class="fs14 grey me-1">x</span>
-                      <span data-tmpl="redemptionFeesPerLot" class="fs16"></span>
-                      <span class="fs14 grey ms-1">
-                        <span data-fee-ticker></span> per redeem
-                      </span>
-                    </div>
-                    <div class="d-flex align-items-end justify-content-end">
-                      <span class="fs14 grey me-1">x</span>
-                      <span data-tmpl="redeemReservesFactor" class="fs16"></span>
-                      <span class="fs14 grey ms-1">reserves</span>
-                    </div>
-                  </div>
-                  <div class="d-flex align-items-end justify-content-end">
-                    <span class="fs14 grey me-1">=</span>
-                    <span data-tmpl="bookingFees" class="fs16"></span>
-                    <span class="fs14 grey ms-1" data-fee-ticker></span>
-                  </div>
-                </div>
-
-                {{- /* SWAP RESERVES */ -}}
-                <div data-tmpl="feeReservesBox" class="flex-stretch-column border-top pt-2 mt-2">
-                  <div class="d-flex align-items-center">
-                    <span class="me-1 fs16">Swap Fee Reserves</span>
-                    <div data-tmpl="nSwapFeesSlider" class="mini-slider flex-grow-1 ms-2 mt-1"></div>
-                  </div>
-                  <div class="d-flex align-items-end justify-content-end">
-                    <div data-tmpl="nSwapFees" class="d-flex align-items-stretch">
-                      <input type="number" step="1" class="fs16 micro text-end">
-                      <div class="flex-stretch-column border user-select-none">
-                        <span class="ico-arrowup fs8 grey border-bottom px-1 flex-grow-1 flex-center ml2px pointer hoverbg"></span>
-                        <span class="ico-arrowdown fs8 grey px-1 flex-grow-1 flex-center pointer hoverbg"></span>
-                      </div>
-                    </div>
-                    <span class="fs14 grey ms-1">swaps</span>
-                  </div>
-                  <div class="d-flex align-items-end justify-content-end">
-                    <span class="fs14 grey me-1">x</span>
-                    <span data-tmpl="feeReservesPerSwap" class="fs16"></span>
-                    <span class="fs14 grey ms-1">
-                      <span data-fee-ticker></span> per swap
-                    </span>
-                  </div>
-                  <div class="d-flex align-items-end justify-content-end">
-                    <span class="fs14 grey me-1">=</span>
-                    <span data-tmpl="feeReserves" class="fs16"></span>
-                    <span class="fs14 grey ms-1" data-fee-ticker></span>
-                  </div>
-                </div>
-              </div>
-
-            </div>
-
-            {{- /* ASSET SETTINGS */ -}}
-            <div class="d-flex align-items-stretch mt-1 border-top">
-              {{- /* WALLET SETTINGS */ -}}
-              <!-- <div class="d-flex align-items-center">
-                <span class="ico-settings me-2 fs16"></span>
-                <span class="fs20">[[[wallet_settings]]]</span>
-              </div> -->
-              <div class="col-12 px-3 py-2 flex-stretch-column">
-                <div class="d-flex align-items-center">
-                  <span class="ico-settings fs15 pe-2"></span>
-                  <span class="fs18">[[[Wallet Options]]]</span>
-                </div>
-                <div data-tmpl="walletSettingsNone" class="text-center p-2 my-2 border-top border-bottom rounded3">no settings available</div>
-                <div data-tmpl="walletSettings" class="flex-stretch-column fs15">
-                  <div data-tmpl="boolSettingTmpl" class="d-flex align-items-center pt-2 mt-2 border-top">
-                    <input type="checkbox" data-tmpl="input" class="form-check-input me-2 mt-0">
                     <span data-tmpl="name"></span>
                     <span data-tmpl="tooltip" class="ico-info fs12"></span>
                   </div>
-                  <div data-tmpl="rangeSettingTmpl" class="pt-2 mt-2 border-top">
-                    <div class="d-flex align-items-center justify-content-between">
-                      <span data-tmpl="name"></span>
-                      <span data-tmpl="tooltip" class="ico-info fs12"></span>
-                    </div>
-                    <div class="d-flex align-items-center">
-                      <div data-tmpl="slider" class="mini-slider flex-grow-1 me-2"></div>
-                      <input type="number" data-tmpl="value" class="micro wide text-end">
-                      <div data-tmpl="unit" class="fs14 grey ms-1"></div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div class="col-12 flex-stretch-column py-2 px-3 border-left">
-                {{- /* BALANCES */ -}}
-                <div class="d-flex align-items-center justify-content-between fs16">
-                  <div class="flex-center">
-                    <img class="micro-icon" data-logo>
-                    <span class="ms-1">[[[Available]]]</span>
-                  </div>
-                  <div class="flex-center">
-                    <span data-tmpl="avail"></span>
-                    <span class="fs14 grey ms-1" data-ticker></span>
-                  </div>
-                </div>
-                <div class="d-flex justify-content-between">
-                  <div>
-                    <div data-tmpl="balanceBreakdown">
-                      <div class="d-flex align-items-center">
-                        <span class="fs16 lh1">├─</span>
-                        <img class="logo-square micro-icon mx-1">
-                        <span data-tmpl="dexAvail" class="fs14"></span>
-                      </div>
-                      <div class="d-flex align-items-center fs14">
-                        <span class="fs16 lh1">└─</span>
-                        <img class="micro-icon mx-1" data-cex-logo>
-                        <span data-tmpl="cexAvail" class="fs14"></span>
-                      </div>
-                    </div>
-                  </div>
-                  <div data-tmpl="showBalance" class="ico-qrcode fs16 pointer hoverbg"></div>
-                </div>
-                <div data-tmpl="feeBalances" class="d-flex align-items-center justify-content-between fs16 mt-2">
-                  <div class="flex-center">
-                    <img class="micro-icon" data-fee-logo>
-                    <span class="ms-1">[[[Available]]]</span>
-                  </div>
-                  <div class="flex-center">
-                    <span data-tmpl="feeAvail"></span>
-                    <span class="fs14 grey ms-1" data-fee-ticker></span>
-                  </div>
-                </div>
-
-                {{- /* REBALANCE SETTINGS */ -}}
-                <div data-tmpl="rebalanceOpts" class="flex-stretch-column mt-2 pt-2 border-top">
                   <div class="d-flex align-items-center">
-                    <img class="micro-icon me-2" data-cex-logo>
-                    <span class="fs18">[[[cex_rebalance]]]</span>
-                  </div>
-                  <div class="fs16 mt-2 pt-2 border-top d-flex align-items-center justify-content-between">
-                    <span>[[[Minimum Transfer]]]</span>
-                    <span class="ico-info fs12" data-tooltip="[[[arb_transfer_tooltip]]]"></span>
-                  </div>
-                  <div class="d-flex align-items-center my-2">
-                    <div data-tmpl="minTransferSlider" class="mini-slider flex-grow-1 me-2"></div>
-                    <input type="number" data-tmpl="minTransfer" class="micro wide text-end">
-                    <span class="fs14 grey ms-1" data-ticker></span>
+                    <div data-tmpl="slider" class="mini-slider flex-grow-1 me-2"></div>
+                    <input type="number" data-tmpl="value" class="micro wide text-end">
+                    <div data-tmpl="unit" class="fs14 grey ms-1"></div>
                   </div>
                 </div>
               </div>
             </div>
-          </section>
+          </div>
         </div>
-      </div>
-      {{- /* GENERAL SETTINGS */ -}}
-      <div class="col-24 col-xxl-5 flex-stretch-column">
-        <section class="flex-stretch-column py-2 px-3">
+      </section>
+
+      {{- /* KNOBS */ -}}
+      <section class="col-9 py-2 px-3">
+        <div class="d-flex align-items-center">
+          <span class="ico-lever fs20 pe-2"></span>
+          <span class="fs22">Knobs</span>
+        </div>
+
+        {{- /* DRIFT TOLERANCE */ -}}
+        <div id="driftToleranceBox" class="flex-stretch-column">
+          <div class="d-flex align-items-center justify-content-between mt-2 pt-2 border-top">
+            <span class="fs16">
+              [[[Drift tolerance]]]
+            </span>
+            <span class="ico-info fs12" data-tooltip="[[[drift_tolerance_tooltip]]]"></span>
+          </div>
           <div class="d-flex align-items-center">
-            <span class="ico-lever fs20 pe-2"></span>
-            <span class="fs22">Knobs</span>
+            <div id="driftToleranceSlider" class="mini-slider flex-grow-1 me-2"></div>
+            <input type="number" id="driftToleranceInput" class="micro text-end">
+            <span class="fs14 grey ms-1">%</span>
           </div>
-          {{- /* CEX REBALANCE CHECKBOX */ -}}
-          <label id="cexRebalanceSettings" for="cexRebalanceCheckbox" class="fs16 d-flex align-items-center justify-content-between mt-2 pt-2 border-top">
-            <div class="flex-center">
-              <input type="checkbox" id="cexRebalanceCheckbox" class="form-check-input me-2 mt-0" checked>
-              <span>[[[Arbitrage Rebalance]]]</span>
-            </div>
-            <span class="ico-info fs12" data-tooltip="[[[enable_rebalance_tooltip]]]"></span>
-          </label>
+        </div>
 
-          {{- /* DRIFT TOLERANCE */ -}}
-          <div id="driftToleranceBox" class="flex-stretch-column">
-            <div class="d-flex align-items-center justify-content-between mt-2 pt-2 border-top">
-              <span class="fs16">
-                [[[Drift tolerance]]]
-              </span>
-              <span class="ico-info fs12" data-tooltip="[[[drift_tolerance_tooltip]]]"></span>
-            </div>
-            <div class="d-flex align-items-center">
-              <div id="driftToleranceSlider" class="mini-slider flex-grow-1 me-2"></div>
-              <input type="number" id="driftToleranceInput" class="micro text-end">
-              <span class="fs14 grey ms-1">%</span>
-            </div>
+        {{- /* ORDER PERSISTENCE */ -}}
+        <div id="orderPersistenceBox" class="flex-stretch-column mt-2 pt-2 border-top">
+          <div class="fs16 mb-2 d-flex align-items-center justify-content-between">
+            <span>[[[Order persistence]]]</span>
+            <span class="ico-info fs12" data-tooltip="[[[order_persistence_tooltip]]]"></span>
           </div>
+          <div class="d-flex align-items-center">
+            <div id="orderPersistenceSlider" class="mini-slider flex-grow-1 me-2"></div>
+            <input type="number" id="orderPersistence" class="micro thin text-end">
+            <span class="fs14 grey ms-1">epochs</span>
+          </div>
+        </div>
+      </section>
 
-          {{- /* ORDER PERSISTENCE */ -}}
-          <div id="orderPersistenceBox" class="flex-stretch-column mt-2 pt-2 border-top">
-            <div class="fs16 mb-2 d-flex align-items-center justify-content-between">
-              <span>[[[Order persistence]]]</span>
-              <span class="ico-info fs12" data-tooltip="[[[order_persistence_tooltip]]]"></span>
-            </div>
-            <div class="d-flex align-items-center">
-              <div id="orderPersistenceSlider" class="mini-slider flex-grow-1 me-2"></div>
-              <input type="number" id="orderPersistence" class="micro thin text-end">
-              <span class="fs14 grey ms-1">epochs</span>
-            </div>
-          </div>
-        </section>
-      </div>
+      {{- /* MINIMUM ALLOCATIONS */ -}}
+      <section class="col-9 py-2 px-3">
+        <div class="fs16 mb-2">Minimum Allocations</div>
+        <span class="text-buycolor">Sufficient Funds</span>
+        <br>
+        <span class="text-danger">Insufficient Funds</span>
+        <br>
+        <span class="text-warning">Sufficient With Rebalance</span>
+        <span class="ico-info fs13 ms-1 text-warning" data-tooltip="Rebalance is enabled and additional funds were allocated on either the CEX or DEX"></span>
+        <div id="minAllocationTable">
+          {{ template "balancesTable" }}
+        </div>
+      </section>
     </div>
   </div>
 
