@@ -510,21 +510,21 @@ func (m *MarketMaker) connectCEX(ctx context.Context, c *centralizedExchange) er
 	if !cm.On() {
 		c.connectErr = ""
 		if err := cm.ConnectOnce(ctx); err != nil {
-			c.connectErr = err.Error()
-			return fmt.Errorf("failed to connect to CEX: %v", err)
+			c.connectErr = core.UnwrapErr(err).Error()
+			return fmt.Errorf("failed to connect to CEX: %w", err)
 		}
 		mkts, err := c.Markets(ctx)
 		if err != nil {
 			// Probably can't get here if we didn't error on connect, but
 			// checking anyway.
-			c.connectErr = err.Error()
-			return fmt.Errorf("error refreshing markets: %v", err)
+			c.connectErr = core.UnwrapErr(err).Error()
+			return fmt.Errorf("error refreshing markets: %w", err)
 		}
 		c.mkts = mkts
 		bals, err := c.Balances(ctx)
 		if err != nil {
-			c.connectErr = err.Error()
-			return fmt.Errorf("error getting balances: %v", err)
+			c.connectErr = core.UnwrapErr(err).Error()
+			return fmt.Errorf("error getting balances: %w", err)
 		}
 		c.balances = bals
 	}
@@ -590,12 +590,12 @@ func (m *MarketMaker) loadCEX(ctx context.Context, cfg *CEXConfig) (*centralized
 	if err != nil {
 		m.log.Errorf("Failed to get markets for %s: %v", cfg.Name, err)
 		c.mkts = make(map[string]*libxc.Market)
-		c.connectErr = err.Error()
+		c.connectErr = core.UnwrapErr(err).Error()
 	}
 	if c.balances, err = c.Balances(ctx); err != nil {
 		m.log.Errorf("Failed to get balances for %s: %v", cfg.Name, err)
 		c.balances = make(map[uint32]*libxc.ExchangeBalance)
-		c.connectErr = err.Error()
+		c.connectErr = core.UnwrapErr(err).Error()
 	}
 	m.cexes[cfg.Name] = c
 	success = true
@@ -1390,7 +1390,7 @@ func (m *MarketMaker) connectedCEX(cexName string) (*centralizedExchange, error)
 
 	err := m.connectCEX(m.ctx, cex)
 	if err != nil {
-		return nil, fmt.Errorf("error connecting to CEX: %v", err)
+		return nil, fmt.Errorf("error connecting to CEX: %w", err)
 	}
 
 	return cex, nil

@@ -2151,14 +2151,13 @@ export class TokenApprovalForm {
 export class CEXConfigurationForm {
   form: PageElement
   page: Record<string, PageElement>
-  success: (cexName: string) => void
+  updated: (cexName: string, success: boolean) => void
   cexName: string
 
-  constructor (form: PageElement, success: (cexName: string) => void) {
+  constructor (form: PageElement, updated: (cexName: string, success: boolean) => void) {
     this.form = form
-    this.success = success
+    this.updated = updated
     this.page = Doc.parseTemplate(form)
-
     Doc.bind(this.page.cexSubmit, 'click', () => this.submit())
   }
 
@@ -2202,12 +2201,11 @@ export class CEXConfigurationForm {
         apiSecret: apiSecret
       })
       if (!app().checkResponse(res)) throw res
-      await app().fetchMMStatus()
-      this.success(cexName)
+      this.updated(cexName, true)
     } catch (e) {
       Doc.show(page.cexFormErr)
       page.cexFormErr.textContent = intl.prep(intl.ID_API_ERROR, { msg: e.msg ?? String(e) })
-      return
+      this.updated(cexName, false)
     } finally {
       loaded()
     }

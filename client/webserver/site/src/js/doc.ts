@@ -246,6 +246,17 @@ export default class Doc {
   }
 
   /*
+   * showTemporarily shows the specified elements for the specified time, then
+   * hides it again.
+   */
+  static showTemporarily (timeout: number, ...els: Element[]) {
+    this.show(...els)
+    setTimeout(() => {
+      this.hide(...els)
+    }, timeout)
+  }
+
+  /*
    * show or hide the specified elements, based on value of the truthiness of
    * vis.
    */
