@@ -5893,7 +5893,7 @@ func rpcTxFee(tx *ListTransactionsResult) uint64 {
 	return 0
 }
 
-func isMixTx(tx *wire.MsgTx) (isMix bool, mixDenom int64) {
+func isRegularMix(tx *wire.MsgTx) (isMix bool, mixDenom int64) {
 	if len(tx.TxOut) < 3 || len(tx.TxIn) < 3 {
 		return false, 0
 	}
@@ -5953,6 +5953,14 @@ func isMixedSplitTx(tx *wire.MsgTx) (isMix bool, tikPrice int64) {
 	}
 
 	return true, tikPrice
+}
+
+func isMixTx(tx *wire.MsgTx) (isMix bool, mixDenom int64) {
+	if isMix, mixDenom = isRegularMix(tx); isMix {
+		return
+	}
+
+	return isMixedSplitTx(tx)
 }
 
 // idUnknownTx identifies the type and details of a transaction either made
@@ -6162,40 +6170,6 @@ func (dcr *ExchangeWallet) idUnknownTx(ctx context.Context, ltxr *ListTransactio
 		var mixedAmount uint64
 		for _, txOut := range tx.MsgTx.TxOut {
 			if txOut.Value == mixDenom {
-				_, addrs := stdscript.ExtractAddrs(scriptVersion, txOut.PkScript, dcr.chainParams)
-				if err != nil {
-					dcr.log.Errorf("ExtractAddrs error: %w", err)
-					continue
-				}
-				if len(addrs) != 1 { // sanity check
-					continue
-				}
-
-				addr := addrs[0]
-				owns, err := dcr.wallet.WalletOwnsAddress(ctx, addr)
-				if err != nil {
-					dcr.log.Errorf("walletOwnsAddress error: %w", err)
-					continue
-				}
-
-				if owns {
-					mixedAmount += uint64(txOut.Value)
-				}
-			}
-		}
-
-		return &asset.WalletTransaction{
-			Type:   asset.Mix,
-			ID:     ltxr.TxID,
-			Amount: mixedAmount,
-			Fees:   fee,
-		}, nil
-	}
-
-	if isMix, tikPrice := isMixedSplitTx(tx.MsgTx); isMix {
-		var mixedAmount uint64
-		for _, txOut := range tx.MsgTx.TxOut {
-			if txOut.Value == tikPrice {
 				_, addrs := stdscript.ExtractAddrs(scriptVersion, txOut.PkScript, dcr.chainParams)
 				if err != nil {
 					dcr.log.Errorf("ExtractAddrs error: %w", err)
