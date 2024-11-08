@@ -5893,7 +5893,7 @@ func rpcTxFee(tx *ListTransactionsResult) uint64 {
 	return 0
 }
 
-func isMixTx(tx *wire.MsgTx) (isMix bool, mixDenom int64) {
+func isRegularMix(tx *wire.MsgTx) (isMix bool, mixDenom int64) {
 	if len(tx.TxOut) < 3 || len(tx.TxIn) < 3 {
 		return false, 0
 	}
@@ -5921,6 +5921,46 @@ func isMixTx(tx *wire.MsgTx) (isMix bool, mixDenom int64) {
 	// TODO: revisit the input count requirements
 	isMix = mixCount >= uint32(len(tx.TxOut)/2)
 	return
+}
+
+// isMixedSplitTx tests if a transaction is a CSPP-mixed ticket split
+// transaction (the transaction that creates appropriately-sized outputs to be
+// spent by a ticket purchase). This dumbly checks for at least three outputs
+// of the same size and three of other sizes. It could be smarter by checking
+// for ticket price + ticket fee outputs, but it's impossible to know the fee
+// after the fact although it`s probably the default fee.
+func isMixedSplitTx(tx *wire.MsgTx) (isMix bool, tikPrice int64) {
+	if len(tx.TxOut) < 6 || len(tx.TxIn) < 3 {
+		return false, 0
+	}
+	values := make(map[int64]int)
+	for _, o := range tx.TxOut {
+		values[o.Value]++
+	}
+
+	var numPossibleTickets int
+	for k, v := range values {
+		if v > numPossibleTickets {
+			numPossibleTickets = v
+			tikPrice = k
+		}
+	}
+	numOtherOut := len(tx.TxOut) - numPossibleTickets
+
+	// NOTE: The numOtherOut requirement may be too strict,
+	if numPossibleTickets < 3 || numOtherOut < 3 {
+		return false, 0
+	}
+
+	return true, tikPrice
+}
+
+func isMixTx(tx *wire.MsgTx) (isMix bool, mixDenom int64) {
+	if isMix, mixDenom = isRegularMix(tx); isMix {
+		return
+	}
+
+	return isMixedSplitTx(tx)
 }
 
 // idUnknownTx identifies the type and details of a transaction either made
