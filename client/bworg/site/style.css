@@ -1,0 +1,304 @@
+:root {
+  --dark-bg: #040b14;
+  --subsection-bg: #ccdef6;
+  --text-color: #dfe2e1;
+  --subsection-text-color: #2c2c2c;
+  --subtext-color: #919392;
+  --link-color-hover: #5e9ffa;
+
+  --font-sans: "source-sans", sans-serif;
+  --font-demi-sans: "demi-sans", sans-serif;
+}
+
+/* fonts */
+@font-face {
+  font-family: "source-sans";
+  src:
+    url("/font/source-sans-pro-v9-latin-regular.woff") format("woff"),
+    url("/font/source-sans-pro-v9-latin-regular.svg") format("svg");
+  font-weight: normal;
+  font-style: normal;
+}
+
+/* fonts */
+@font-face {
+  font-family: "demi-sans";
+  src:
+    url("/font/source-sans-pro-semibold.woff") format("woff"),
+    url("/font/source-sans-pro-semibold.svg") format("svg");
+  font-weight: bolder;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: "icomoon";
+  src:
+    url("/font/icomoon.woff?v=0") format("woff"),
+    url("/font/icomoon.svg?v=0") format("svg");
+  font-weight: normal;
+  font-style: normal;
+}
+
+[class^="ico-"],
+[class*=" ico-"] {
+  /* use !important to prevent issues with browser extensions that change fonts */
+  font-family: "icomoon", monospace !important;
+  speak: none;
+  font-style: normal;
+  font-weight: normal;
+  font-variant: normal;
+  text-transform: none;
+  line-height: 1;
+
+  /* Better Font Rendering =========== */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.ico-download::before {
+  content: "\e960";
+}
+
+.ico-secret-agent::before {
+  content: "\e961";
+}
+
+.ico-ticket::before {
+  content: "\e962";
+}
+
+.ico-barchart::before {
+  content: "\e963";
+}
+
+.ico-shieldcheck::before {
+  content: "\e964";
+}
+
+.ico-key::before {
+  content: "\e965";
+}
+
+.ico-magic-wand::before {
+  content: "\e966";
+}
+
+.fs20 {
+  font-size: 20px;
+}
+
+.fs25 {
+  font-size: 25px;
+}
+
+.fs30 {
+  font-size: 30px;
+}
+
+.fs40 {
+  font-size: 40px;
+}
+
+.demi {
+  font-family: var(--font-demi-sans);
+}
+
+.text-center {
+  text-align: center;
+}
+
+.underline {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+  text-decoration-color: #fff7;
+}
+
+.mr-1 {
+  margin-right: 0.5rem;
+}
+
+.mr-3 {
+  margin-right: 2rem;
+}
+
+.ms-1 {
+  margin-left: 0.5rem;
+}
+
+.mt-1 {
+  margin-top: 0.5rem;
+}
+
+.mt-2 {
+  margin-top: 1rem;
+}
+
+.mt-3 {
+  margin-top: 2rem;
+}
+
+.mt-4 {
+  margin-top: 4rem;
+}
+
+.d-flex {
+  display: flex;
+}
+
+.flex-grow-1 {
+  flex-grow: 1;
+}
+
+.justify-content-end {
+  justify-content: flex-end;
+}
+
+.justify-content-between {
+  justify-content: space-between;
+}
+
+.justify-content-around {
+  justify-content: space-around;
+}
+
+.align-items-center {
+  align-items: center;
+}
+
+.align-items-start {
+  align-items: flex-start;
+}
+
+.flex-center {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.w-75 {
+  width: 75%;
+}
+
+.grey {
+  color: var(--subtext-color);
+}
+
+body {
+  background-color: var(--dark-bg);
+  color: var(--text-color);
+  font-family: var(--font-sans);
+}
+
+section {
+  padding: 1rem;
+  max-width: 1280px;
+  margin: auto;
+}
+
+a,
+a:visited,
+a:hover {
+  text-decoration: none;
+  color: inherit;
+}
+
+a,
+a:visited {
+  color: inherit;
+}
+
+a:hover {
+  color: var(--link-color-hover);
+}
+
+#logo {
+  content: url("/img/logo_750x150.png");
+}
+
+#topImage {
+  content: url("/img/screenshot.png");
+  width: 100%;
+  height: auto;
+  border: 2px solid #333;
+  border-radius: 10px;
+}
+
+#topSubLeft {
+  content: url("/img/walletview.png");
+  width: 100%;
+  height: auto;
+}
+
+#topSubRight {
+  content: url("/img/mmview.png");
+  width: 100%;
+  height: auto;
+}
+
+.downloads > a:not(:last-child) {
+  margin-right: 2.5rem;
+}
+
+.subsection {
+  color: var(--subsection-text-color);
+  background-color: var(--subsection-bg);
+}
+
+.logosection {
+  background-color: #1e2b3a;
+}
+
+.features {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+}
+
+.features > div {
+  padding: 1rem;
+  margin: 2rem 1rem;
+  background-color: #e7f0fc;
+}
+
+.features > div > div:first-child {
+  font-family: demi-sans;
+  font-size: 26px;
+  display: flex;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.features > div > div:last-child {
+  margin-top: 0.5rem;
+  font-size: 20px;
+}
+
+.features > div > div:first-child > span:first-child {
+  font-size: 28px;
+  margin-right: 1.5rem;
+}
+
+.fade-to-subsection {
+  height: 3rem;
+  background: linear-gradient(to bottom, transparent, var(--subsection-bg));
+  pointer-events: none;
+}
+
+.fade-from-subsection {
+  height: 3rem;
+  background: linear-gradient(to top, transparent, var(--subsection-bg));
+  pointer-events: none;
+}
+
+.win-logo {
+  content: url("/img/winlogo.png");
+}
+
+.linux-logo {
+  content: url("/img/linuxlogo.png");
+}
+
+.mac-logo {
+  content: url("/img/maclogo.png");
+}
