@@ -955,7 +955,7 @@ func (w *spvWallet) connect(ctx context.Context, wg *sync.WaitGroup) (err error)
 // moveWalletData will move all wallet files to a backup directory, but leaving
 // the logs folder.
 func (w *spvWallet) moveWalletData(backupDir string) error {
-	timeString := time.Now().Format("2006-01-02T15:04:05")
+	timeString := time.Now().Format("2006-01-02T15_04_05")
 	backupFolder := filepath.Join(backupDir, w.chainParams.Name, timeString)
 	err := os.MkdirAll(backupFolder, 0744)
 	if err != nil {
