@@ -159,7 +159,6 @@ export default class MarketsPage extends BasePage {
   maxLoaded: (() => void) | null
   maxOrderUpdateCounter: number
   market: CurrentMarket
-  currentForm: HTMLElement
   openAsset: SupportedAsset
   currentCreate: SupportedAsset
   maxEstimateTimer: number | null
@@ -215,7 +214,13 @@ export default class MarketsPage extends BasePage {
     this.recentMatchesSortDirection = -1
     // store original title so we can re-append it when updating market value.
     this.ogTitle = document.title
-    this.forms = new Forms(page.forms)
+    this.forms = new Forms(page.forms, {
+      closed: (closedForm: PageElement | undefined) => {
+        if (closedForm === page.vDetailPane) {
+          this.showVerifyForm()
+        }
+      }
+    })
 
     const depthReporters = {
       click: (x: number) => { this.reportDepthClick(x) },
@@ -420,14 +425,6 @@ export default class MarketsPage extends BasePage {
     const closePopups = () => {
       this.forms.close()
     }
-
-    // If the user clicks outside of a form, it should close the page overlay.
-    bind(page.forms, 'mousedown', (e: MouseEvent) => {
-      if (Doc.isDisplayed(page.vDetailPane) && !Doc.mouseInElement(e, page.vDetailPane)) return this.showVerifyForm()
-      if (!Doc.mouseInElement(e, this.currentForm)) {
-        closePopups()
-      }
-    })
 
     this.keyup = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
