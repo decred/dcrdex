@@ -63,7 +63,7 @@ interface WalletConfig {
 }
 
 interface FormsConfig {
-  closed?: () => void
+  closed?: (closedForm: PageElement | undefined) => void
 }
 
 export class Forms {
@@ -71,7 +71,7 @@ export class Forms {
   currentForm: PageElement | undefined
   currentFormID: string | undefined
   keyup: (e: KeyboardEvent) => void
-  closed?: () => void
+  closed?: (closedForm: PageElement | undefined) => void
 
   constructor (formsDiv: PageElement, cfg?: FormsConfig) {
     this.formsDiv = formsDiv
@@ -110,9 +110,10 @@ export class Forms {
 
   close (): void {
     Doc.hide(this.formsDiv)
+    const closedForm = this.currentForm
     this.currentForm = undefined
     this.currentFormID = undefined
-    if (this.closed) this.closed()
+    if (this.closed) this.closed(closedForm)
   }
 
   exit () {
