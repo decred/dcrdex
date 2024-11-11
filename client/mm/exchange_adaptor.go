@@ -760,7 +760,7 @@ func (u *unifiedExchangeAdaptor) updateDepositEvent(deposit *pendingDeposit) {
 	e := &MarketMakingEvent{
 		ID:             deposit.eventLogID,
 		TimeStamp:      deposit.timestamp,
-		BalanceEffects: combineBalanceEffects(deposit.balanceEffects()),
+		BalanceEffects: combineBalanceEffects(depositBalanceEffects(deposit.assetID, deposit.tx, deposit.cexConfirmed)),
 		Pending:        !deposit.cexConfirmed || !deposit.feeConfirmed,
 		DepositEvent: &DepositEvent{
 			AssetID:     deposit.assetID,
