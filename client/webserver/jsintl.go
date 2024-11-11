@@ -217,6 +217,8 @@ const (
 	idOrderReportTitle               = "ORDER_REPORT_TITLE"
 	idCEXBalances                    = "CEX_BALANCES"
 	idCausesSelfMatch                = "CAUSES_SELF_MATCH"
+	idCexNotConnected                = "CEX_NOT_CONNECTED"
+	idRemovingBotConfig              = "REMOVING_BOT_CONFIG"
 )
 
 var enUS = map[string]*intl.Translation{
@@ -433,6 +435,8 @@ var enUS = map[string]*intl.Translation{
 	idOrderReportTitle:               {T: "{{ side }} orders report for epoch #{{ epochNum }}"},
 	idCEXBalances:                    {T: "{{ cexName }} Balances"},
 	idCausesSelfMatch:                {T: "This order would cause a self-match"},
+	idCexNotConnected:                {T: "{{ cexName }} not connected"},
+	idRemovingBotConfig:              {T: "Are you sure you want to remove the config for the {{ baseSymbol }}-{{ quoteSymbol }} market on {{ host }}?"},
 }
 
 var ptBR = map[string]*intl.Translation{

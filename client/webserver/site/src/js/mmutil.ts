@@ -423,8 +423,6 @@ export class BotMarket {
   baseLots: number
   quoteLots: number
   marketReport: MarketReport
-  cexBaseBalance?: ExchangeBalance
-  cexQuoteBalance?: ExchangeBalance
   nBuyPlacements: number
   nSellPlacements: number
 
@@ -499,20 +497,13 @@ export class BotMarket {
     }
   }
 
-  async initialize (startupBalanceCache: Record<number, Promise<ExchangeBalance>>) {
-    const { host, baseID, quoteID, lotSizeConv, quoteLotConv, cexName } = this
+  async initialize () {
+    const { host, baseID, quoteID, lotSizeConv, quoteLotConv } = this
     const res = await MM.report(host, baseID, quoteID)
     const r = this.marketReport = res.report as MarketReport
     this.lotSizeUSD = lotSizeConv * r.baseFiatRate
     this.quoteLotUSD = quoteLotConv * r.quoteFiatRate
     this.proj = this.projectedAllocations()
-
-    if (cexName) {
-      const b = startupBalanceCache[baseID] = startupBalanceCache[baseID] || MM.cexBalance(cexName, baseID)
-      const q = startupBalanceCache[quoteID] = startupBalanceCache[quoteID] || MM.cexBalance(cexName, quoteID)
-      this.cexBaseBalance = await b
-      this.cexQuoteBalance = await q
-    }
   }
 
   status () {
@@ -529,16 +520,25 @@ export class BotMarket {
   */
   adjustedBalances () {
     const {
-      baseID, quoteID, baseFeeID, quoteFeeID, cexBaseBalance, cexQuoteBalance,
+      baseID, quoteID, baseFeeID, quoteFeeID, cexName,
       baseFactor, quoteFactor, baseFeeFactor, quoteFeeFactor
     } = this
     const [baseWallet, quoteWallet] = [app().walletMap[baseID], app().walletMap[quoteID]]
     const [bInv, qInv] = [runningBotInventory(baseID), runningBotInventory(quoteID)]
+
     // In these available balance calcs, only subtract the available balance of
     // running bots, since the locked/reserved/immature is already subtracted
     // from the wallet's total available balance.
     let cexBaseAvail = 0
     let cexQuoteAvail = 0
+    let cexBaseBalance: ExchangeBalance | undefined
+    let cexQuoteBalance: ExchangeBalance | undefined
+    if (cexName) {
+      const cex = app().mmStatus.cexes[cexName]
+      if (!cex) throw Error('where\'s the cex status?')
+      cexBaseBalance = cex.balances[baseID]
+      cexQuoteBalance = cex.balances[quoteID]
+    }
     if (cexBaseBalance) cexBaseAvail = (cexBaseBalance.available || 0) - bInv.cex.avail
     if (cexQuoteBalance) cexQuoteAvail = (cexQuoteBalance.available || 0) - qInv.cex.avail
     const [dexBaseAvail, dexQuoteAvail] = [baseWallet.balance.available - bInv.dex.avail, quoteWallet.balance.available - qInv.dex.avail]
@@ -823,7 +823,7 @@ export class RunningMarketMakerDisplay {
     const botStatus = app().mmStatus.bots.find(({ config: c }: MMBotStatus) => c.baseID === baseID && c.quoteID === quoteID && c.host === host)
     if (!botStatus) return
     const mkt = new BotMarket(botStatus.config)
-    await mkt.initialize({})
+    await mkt.initialize()
     this.setBotMarket(mkt)
   }
 

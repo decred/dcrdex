@@ -663,11 +663,11 @@ func (bnc *binance) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	wg := new(sync.WaitGroup)
 
 	if err := bnc.getCoinInfo(ctx); err != nil {
-		return nil, fmt.Errorf("error getting coin info: %v", err)
+		return nil, fmt.Errorf("error getting coin info: %w", err)
 	}
 
 	if _, err := bnc.getMarkets(ctx); err != nil {
-		return nil, fmt.Errorf("error getting markets: %v", err)
+		return nil, fmt.Errorf("error getting markets: %w", err)
 	}
 
 	if err := bnc.setBalances(ctx); err != nil {
