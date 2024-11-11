@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"math"
 	"math/rand"
 	"net/http"
@@ -150,14 +151,49 @@ func makeCoinpapAsset(assetID uint32, symbol, name string) *fiatrates.Coinpaprik
 	}
 }
 
+// sendBalanceUpdateRequest sends a balance update request to the testbinance server
+// running in another process.
+func sendBalanceUpdateRequest(coin string, balanceUpdate float64) {
+	if coin == "" || balanceUpdate == 0 {
+		fmt.Printf("Invalid balance update request: coin = %q, balanceUpdate = %f\n", coin, balanceUpdate)
+		return
+	}
+
+	url := fmt.Sprintf("http://localhost:37346/testbinance/updatebalance?coin=%s&amt=%f",
+		coin, balanceUpdate)
+	resp, err := http.Get(url)
+	if err != nil {
+		log.Errorf("Error sending balance update request: %v", err)
+		return
+	}
+
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		fmt.Println("Balance update request failed:", string(body))
+		return
+	}
+
+	fmt.Println("Balance update request sent")
+}
+
 func main() {
 	var logDebug, logTrace bool
+	var coin string
+	var balanceUpdate float64
 	flag.Float64Var(&walkingSpeedAdj, "walkspeed", 1.0, "scale the maximum walking speed. default scale of 1.0 is about 3%")
 	flag.Float64Var(&gapRange, "gaprange", 0.04, "a ratio of how much the gap can vary. default is 0.04 => 4%")
 	flag.BoolVar(&logDebug, "debug", false, "use debug logging")
 	flag.BoolVar(&logTrace, "trace", false, "use trace logging")
 	flag.BoolVar(&flappyWS, "flappyws", false, "periodically drop websocket clients and delete subscriptions")
+	flag.Float64Var(&balanceUpdate, "balupdate", 0, "update the balance of an asset on a testbinance server running as another process")
+	flag.StringVar(&coin, "coin", "", "coin for testbinance admin update")
 	flag.Parse()
+
+	if balanceUpdate != 0 {
+		sendBalanceUpdateRequest(coin, balanceUpdate)
+		return
+	}
 
 	switch {
 	case logTrace:
@@ -312,8 +348,30 @@ func newFakeBinanceServer(ctx context.Context) (*fakeBinance, error) {
 
 	mux.Get("/ws/{listenKey}", f.handleAccountSubscription)
 	mux.Get("/stream", f.handleMarketStream)
+	mux.Route("/testbinance", func(r chi.Router) {
+		r.Get("/updatebalance", f.handleUpdateBalance)
+	})
 
 	return f, nil
+}
+
+func (f *fakeBinance) handleUpdateBalance(w http.ResponseWriter, r *http.Request) {
+	coin := r.URL.Query().Get("coin")
+	amtStr := r.URL.Query().Get("amt")
+	amt, err := strconv.ParseFloat(amtStr, 64)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("invalid amt %q: %v", amtStr, err), http.StatusBadRequest)
+		return
+	}
+
+	balUpdate := f.updateBalance(coin, amt)
+	if balUpdate == nil {
+		http.Error(w, fmt.Sprintf("no balance to update for %q", coin), http.StatusBadRequest)
+		return
+	}
+
+	f.sendBalanceUpdates([]*bntypes.WSBalance{balUpdate})
+	w.WriteHeader(http.StatusOK)
 }
 
 func (f *fakeBinance) run(ctx context.Context) {
@@ -779,6 +837,27 @@ func (f *fakeBinance) handleGetDepositAddress(w http.ResponseWriter, r *http.Req
 	writeJSONWithStatus(w, resp, http.StatusOK)
 }
 
+func (f *fakeBinance) updateBalance(coin string, amt float64) *bntypes.WSBalance {
+	f.balancesMtx.Lock()
+	defer f.balancesMtx.Unlock()
+
+	var balUpdate *bntypes.WSBalance
+
+	for _, b := range f.balances {
+		if b.Asset == coin {
+			if amt+b.Free < 0 {
+				b.Free = 0
+			} else {
+				b.Free += amt
+			}
+			balUpdate = (*bntypes.WSBalance)(b)
+			break
+		}
+	}
+
+	return balUpdate
+}
+
 func (f *fakeBinance) handleWithdrawal(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	apiKey := extractAPIKey(r)
@@ -814,24 +893,7 @@ func (f *fakeBinance) handleWithdrawal(w http.ResponseWriter, r *http.Request) {
 	}
 	f.withdrawalHistoryMtx.Unlock()
 
-	var balUpdate *bntypes.WSBalance
-	debitBalance := func(coin string, amt float64) {
-		for _, b := range f.balances {
-			if b.Asset == coin {
-				if amt > b.Free {
-					b.Free = 0
-				} else {
-					b.Free -= amt
-				}
-			}
-			balUpdate = (*bntypes.WSBalance)(b)
-		}
-	}
-
-	f.balancesMtx.Lock()
-	debitBalance(coin, amt)
-	f.balancesMtx.Unlock()
-
+	balUpdate := f.updateBalance(coin, -amt)
 	f.sendBalanceUpdates([]*bntypes.WSBalance{balUpdate})
 
 	resp := struct {

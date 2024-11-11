@@ -151,8 +151,12 @@
                       <button data-tmpl="reconfigureBttn">
                         <span class="ico-settings fs17"></span>
                       </button>
+                      <button class="ms-1 danger" data-tmpl="removeBttn">
+                        <span class="ico-cross fs17"></span>
+                      </button>
                     </div>
                   </div>
+                  <span data-tmpl="offError" class="fs16 px-3 text-center text-warning d-hide"></span>
 
                   {{- /* PROJECTED ALLOCATIONS */ -}}
                   <div class="flex-stretch-column px-3 pt-2 mt-2 border-top">
@@ -608,6 +612,18 @@
 
     <form class="position-relative d-hide" id="orderReportForm" autocomplete="off">
       {{template "orderReportForm"}}
+    </form>
+
+    <form class="position-relative mw-425 d-hide" id="confirmRemoveForm" autocomplete="off">
+      <div class="form-closer"><span class="ico-cross"></span></div>
+      <div>
+        <header>[[[removing_bot_config]]]</header>
+        <div>
+          <span id="confirmRemoveCfgMsg"></span>
+        </div>
+        <button id="confirmRemoveConfigBttn" type="button" class="feature mt-2">Confirm</button>
+        <div id="removeCfgErr" class="fs15 text-center d-hide text-danger text-break"></div>
+      </div>
     </form>
   </div>  {{- /* END FORMS */ -}}
 </div>

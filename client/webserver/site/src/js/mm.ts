@@ -4,13 +4,13 @@ import {
   MMBotStatus,
   RunStatsNote,
   RunEventNote,
-  ExchangeBalance,
   StartConfig,
   OrderPlacement,
   AutoRebalanceConfig,
   CEXNotification,
   EpochReportNote,
-  CEXProblemsNote
+  CEXProblemsNote,
+  MarketWithHost
 } from './registry'
 import {
   MM,
@@ -185,6 +185,7 @@ export default class MarketMakerPage extends BasePage {
   cexes: Record<string, CEXRow>
   twoColumn: boolean
   runningMMDisplayElements: RunningMMDisplayElements
+  removingCfg: MarketWithHost | undefined
 
   constructor (main: HTMLElement) {
     super()
@@ -198,7 +199,7 @@ export default class MarketMakerPage extends BasePage {
     Doc.cleanTemplates(page.botTmpl, page.botRowTmpl, page.exchangeRowTmpl)
 
     this.forms = new Forms(page.forms)
-    this.cexConfigForm = new CEXConfigurationForm(page.cexConfigForm, (cexName: string) => this.cexConfigured(cexName))
+    this.cexConfigForm = new CEXConfigurationForm(page.cexConfigForm, (cexName: string, success: boolean) => this.cexConfigured(cexName, success))
     this.runningMMDisplayElements = {
       orderReportForm: page.orderReportForm,
       dexBalancesRowTmpl: page.dexBalancesRowTmpl,
@@ -209,6 +210,7 @@ export default class MarketMakerPage extends BasePage {
 
     Doc.bind(page.newBot, 'click', () => { this.newBot() })
     Doc.bind(page.archivedLogsBtn, 'click', () => { app().loadPage('mmarchives') })
+    Doc.bind(page.confirmRemoveConfigBttn, 'click', () => { this.removeCfg() })
 
     this.twoColumn = window.innerWidth >= mediumBreakpoint
     const ro = new ResizeObserver(() => { this.resized() })
@@ -279,9 +281,7 @@ export default class MarketMakerPage extends BasePage {
       return (b.runStats?.startTime ?? 0) - (a.runStats?.startTime ?? 0)
     })
 
-    const startupBalanceCache: Record<number, Promise<ExchangeBalance>> = {}
-
-    for (const botStatus of sortedBots) this.addBot(botStatus, startupBalanceCache)
+    for (const botStatus of sortedBots) this.addBot(botStatus)
   }
 
   async handleCEXNote (n: CEXNotification) {
@@ -307,18 +307,43 @@ export default class MarketMakerPage extends BasePage {
     Doc.unbind(document, 'keyup', this.keyup)
   }
 
-  addBot (botStatus: MMBotStatus, startupBalanceCache?: Record<number, Promise<ExchangeBalance>>) {
+  addBot (botStatus: MMBotStatus) {
     const { page, bots, sortedBots } = this
     // Make sure the market still exists.
     const { config: { baseID, quoteID, host } } = botStatus
     const [baseSymbol, quoteSymbol] = [app().assets[baseID].symbol, app().assets[quoteID].symbol]
     const mktID = `${baseSymbol}_${quoteSymbol}`
     if (!app().exchanges[host]?.markets[mktID]) return
-    const bot = new Bot(this, this.runningMMDisplayElements, botStatus, startupBalanceCache)
+    const bot = new Bot(this, this.runningMMDisplayElements, botStatus)
     page.botRows.appendChild(bot.row.tr)
     sortedBots.push(bot)
     bots[bot.id] = bot
     this.appendBotBox(bot.div)
+  }
+
+  confirmRemoveCfg (mwh: MarketWithHost) {
+    const page = this.page
+    this.removingCfg = mwh
+    Doc.hide(page.removeCfgErr)
+    const baseAsset = app().assets[mwh.baseID]
+    const quoteAsset = app().assets[mwh.quoteID]
+    const baseSymbol = baseAsset.symbol.toUpperCase()
+    const quoteSymbol = quoteAsset.symbol.toUpperCase()
+    page.confirmRemoveCfgMsg.textContent = intl.prep(intl.ID_REMOVING_BOT_CONFIG, { host: mwh.host, baseSymbol, quoteSymbol })
+    this.forms.show(this.page.confirmRemoveForm)
+  }
+
+  async removeCfg () {
+    const page = this.page
+    if (!this.removingCfg) { this.forms.close(); return }
+    const resp = await MM.removeBotConfig(this.removingCfg.host, this.removingCfg.baseID, this.removingCfg.quoteID)
+    if (!app().checkResponse(resp)) {
+      page.removeCfgErr.textContent = intl.prep(intl.ID_API_ERROR, { msg: resp.msg })
+      Doc.show(page.removeCfgErr)
+      return
+    }
+    await app().fetchMMStatus()
+    app().loadPage('mm')
   }
 
   appendBotBox (div: PageElement) {
@@ -352,10 +377,10 @@ export default class MarketMakerPage extends BasePage {
     app().loadPage('mmsettings')
   }
 
-  async cexConfigured (cexName: string) {
+  async cexConfigured (cexName: string, success: boolean) {
     await app().fetchMMStatus()
     this.updateCexRow(this.cexes[cexName])
-    this.forms.close()
+    if (success) this.forms.close()
   }
 
   updateCexRow (row: CEXRow) {
@@ -419,9 +444,8 @@ class Bot extends BotMarket {
   row: BotRow
   runDisplay: RunningMarketMakerDisplay
 
-  constructor (pg: MarketMakerPage, runningMMElements: RunningMMDisplayElements, status: MMBotStatus, startupBalanceCache?: Record<number, Promise<ExchangeBalance>>) {
+  constructor (pg: MarketMakerPage, runningMMElements: RunningMMDisplayElements, status: MMBotStatus) {
     super(status.config)
-    startupBalanceCache = startupBalanceCache ?? {}
     this.pg = pg
     const { baseID, quoteID, host, botType, nBuyPlacements, nSellPlacements, cexName } = this
     this.id = hostedMarketID(host, baseID, quoteID)
@@ -452,6 +476,7 @@ class Bot extends BotMarket {
     Doc.bind(page.startBttn, 'click', () => this.start())
     Doc.bind(page.allocationBttn, 'click', () => this.allocate())
     Doc.bind(page.reconfigureBttn, 'click', () => this.reconfigure())
+    Doc.bind(page.removeBttn, 'click', () => this.pg.confirmRemoveCfg(status.config))
     Doc.bind(page.goBackFromAllocation, 'click', () => this.hideAllocationDialog())
     Doc.bind(page.marketLink, 'click', () => app().loadPage('markets', { host, baseID, quoteID }))
 
@@ -469,11 +494,11 @@ class Bot extends BotMarket {
     })
     Doc.bind(tr, 'click', () => pg.showBot(this.id))
 
-    this.initialize(startupBalanceCache)
+    this.initialize()
   }
 
-  async initialize (startupBalanceCache: Record<number, Promise<ExchangeBalance>>) {
-    await super.initialize(startupBalanceCache)
+  async initialize () {
+    await super.initialize()
     this.runDisplay.setBotMarket(this)
     const {
       page, host, cexName, botType, div,
@@ -632,12 +657,22 @@ class Bot extends BotMarket {
    * confirm allocations and start the bot.
    */
   allocate () {
-    const f = this.fundingState()
     const {
       page, marketReport: { baseFiatRate, quoteFiatRate }, baseID, quoteID,
       baseFeeID, quoteFeeID, baseFeeFiatRate, quoteFeeFiatRate, cexName,
       baseFactor, quoteFactor, baseFeeFactor, quoteFeeFactor, host, mktID
     } = this
+
+    if (cexName) {
+      const cex = app().mmStatus.cexes[cexName]
+      if (!cex || !cex.connected) {
+        page.offError.textContent = intl.prep(intl.ID_CEX_NOT_CONNECTED, { cexName })
+        Doc.showTemporarily(3000, page.offError)
+        return
+      }
+    }
+
+    const f = this.fundingState()
 
     const [proposedDexBase, proposedCexBase, baseSlider] = parseFundingOptions(f.base)
     const [proposedDexQuote, proposedCexQuote, quoteSlider] = parseFundingOptions(f.quote)
@@ -823,7 +858,15 @@ class Bot extends BotMarket {
   }
 
   reconfigure () {
-    const { host, baseID, quoteID, cexName, botType } = this
+    const { host, baseID, quoteID, cexName, botType, page } = this
+    if (cexName) {
+      const cex = app().mmStatus.cexes[cexName]
+      if (!cex || !cex.connected) {
+        page.offError.textContent = intl.prep(intl.ID_CEX_NOT_CONNECTED, { cexName })
+        Doc.showTemporarily(3000, page.offError)
+        return
+      }
+    }
     app().loadPage('mmsettings', { host, baseID, quoteID, cexName, botType })
   }
 
