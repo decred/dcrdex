@@ -3,7 +3,7 @@ module decred.org/dcrdex
 go 1.21
 
 require (
-	decred.org/dcrwallet/v4 v4.1.1
+	decred.org/dcrwallet/v4 v4.2.0
 	fyne.io/systray v1.10.1-0.20220621085403-9a2652634e93
 	github.com/btcsuite/btcd v0.24.2-beta.rc1.0.20240625142744-cc26860b4026
 	github.com/btcsuite/btcd/btcec/v2 v2.3.4
@@ -24,11 +24,11 @@ require (
 	github.com/decred/dcrd/addrmgr/v2 v2.0.4
 	github.com/decred/dcrd/blockchain/stake/v5 v5.0.1
 	github.com/decred/dcrd/blockchain/standalone/v2 v2.2.1
-	github.com/decred/dcrd/certgen v1.1.3
+	github.com/decred/dcrd/certgen v1.2.0
 	github.com/decred/dcrd/chaincfg/chainhash v1.0.4
 	github.com/decred/dcrd/chaincfg/v3 v3.2.1
 	github.com/decred/dcrd/connmgr/v3 v3.1.2
-	github.com/decred/dcrd/crypto/blake256 v1.0.1
+	github.com/decred/dcrd/crypto/blake256 v1.1.0
 	github.com/decred/dcrd/dcrec v1.0.1
 	github.com/decred/dcrd/dcrec/edwards/v2 v2.0.3
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0
@@ -63,18 +63,18 @@ require (
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/tyler-smith/go-bip39 v1.1.0
 	go.etcd.io/bbolt v1.3.9
-	golang.org/x/crypto v0.23.0
+	golang.org/x/crypto v0.26.0
 	golang.org/x/exp v0.0.0-20231110203233-9a3e6036ecaa
-	golang.org/x/sync v0.7.0
-	golang.org/x/term v0.20.0
-	golang.org/x/text v0.15.0
+	golang.org/x/sync v0.8.0
+	golang.org/x/term v0.23.0
+	golang.org/x/text v0.17.0
 	golang.org/x/time v0.5.0
 	gopkg.in/ini.v1 v1.67.0
 	lukechampine.com/blake3 v1.3.0
 )
 
 require (
-	decred.org/cspp/v2 v2.2.0 // indirect
+	decred.org/cspp/v2 v2.3.0 // indirect
 	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 // indirect
 	github.com/DataDog/zstd v1.5.2 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
@@ -104,11 +104,15 @@ require (
 	github.com/crate-crypto/go-kzg-4844 v1.0.0 // indirect
 	github.com/dchest/siphash v1.2.3 // indirect
 	github.com/deckarep/golang-set/v2 v2.6.0 // indirect
+	github.com/decred/dcrd/container/lru v1.0.0 // indirect
+	github.com/decred/dcrd/crypto/rand v1.0.0 // indirect
 	github.com/decred/dcrd/crypto/ripemd160 v1.0.2 // indirect
 	github.com/decred/dcrd/database/v3 v3.0.2 // indirect
 	github.com/decred/dcrd/lru v1.1.2 // indirect
-	github.com/decred/dcrd/mixing v0.3.0 // indirect
+	github.com/decred/dcrd/mixing v0.4.2 // indirect
 	github.com/decred/vspd/client/v3 v3.0.0 // indirect
+	github.com/decred/vspd/client/v4 v4.0.0 // indirect
+	github.com/decred/vspd/types/v3 v3.0.0 // indirect
 	github.com/dgraph-io/ristretto v0.0.2 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ethereum/c-kzg-4844 v1.0.0 // indirect
@@ -131,7 +135,7 @@ require (
 	github.com/jrick/wsrpc/v2 v2.3.5 // indirect
 	github.com/kkdai/bstream v1.0.0 // indirect
 	github.com/klauspost/compress v1.16.0 // indirect
-	github.com/klauspost/cpuid/v2 v2.2.7 // indirect
+	github.com/klauspost/cpuid/v2 v2.2.8 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lightninglabs/gozmq v0.0.0-20191113021534-d20a764486bf // indirect
@@ -171,8 +175,10 @@ require (
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
 	github.com/zquestz/grab v0.0.0-20190224022517-abcee96e61b1 // indirect
-	golang.org/x/net v0.25.0 // indirect
-	golang.org/x/sys v0.20.0 // indirect
+	golang.org/x/net v0.28.0 // indirect
+	golang.org/x/sys v0.23.0 // indirect
+	google.golang.org/genproto v0.0.0-20230410155749-daa745c078e1 // indirect
+	google.golang.org/grpc v1.56.3 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect
