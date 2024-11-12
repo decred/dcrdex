@@ -26,37 +26,36 @@ build_targets (){
   for TARGET in ${TARGETS}; do
     OS=${TARGET%%/*}
     ARCH=${TARGET##*/}
-    echo "Building for ${OS}-${ARCH} with FLAVOR=${FLAVOR}"
+    echo "Building for ${OS}-${ARCH}"
 
-    mkdir -p "bin/bisonw${FLAVOR}-${OS}-${ARCH}-v${VER}"
+    mkdir -p "bin/bisonw-${OS}-${ARCH}-v${VER}"
 
     pushd client/cmd/bisonw
-    GOOS=${OS} GOARCH=${ARCH} go build -trimpath ${TAGS_BISONW:+-tags ${TAGS_BISONW}} -o "../../../bin/bisonw${FLAVOR}-${OS}-${ARCH}-v${VER}/${BISONW_EXE}" -ldflags "${LDFLAGS_BISONW:-${LDFLAGS_BASE}}"
+    GOOS=${OS} GOARCH=${ARCH} go build -trimpath ${TAGS_BISONW:+-tags ${TAGS_BISONW}} -o "../../../bin/bisonw-${OS}-${ARCH}-v${VER}/${BISONW_EXE}" -ldflags "${LDFLAGS_BISONW:-${LDFLAGS_BASE}}"
     popd
 
     pushd client/cmd/bwctl
-    GOOS=${OS} GOARCH=${ARCH} go build -trimpath -o "../../../bin/bisonw${FLAVOR}-${OS}-${ARCH}-v${VER}" -ldflags "${LDFLAGS_BASE}"
+    GOOS=${OS} GOARCH=${ARCH} go build -trimpath -o "../../../bin/bisonw-${OS}-${ARCH}-v${VER}" -ldflags "${LDFLAGS_BASE}"
     popd
 
     pushd bin
     if [[ "$OS" == "windows" ]]; then
-      zip -9 -r -q "bisonw${FLAVOR}-${OS}-${ARCH}-v${VER}.zip" "bisonw${FLAVOR}-${OS}-${ARCH}-v${VER}"
+      zip -9 -r -q "bisonw-${OS}-${ARCH}-v${VER}.zip" "bisonw-${OS}-${ARCH}-v${VER}"
     else
-      tar -I 'gzip -9' --owner=0 --group=0 -cf "bisonw${FLAVOR}-${OS}-${ARCH}-v${VER}.tar.gz" "bisonw${FLAVOR}-${OS}-${ARCH}-v${VER}"
+      tar -I 'gzip -9' --owner=0 --group=0 -cf "bisonw-${OS}-${ARCH}-v${VER}.tar.gz" "bisonw-${OS}-${ARCH}-v${VER}"
     fi
     popd
   done
 }
 
 # Vanilla builds on all supported os/arch targets
-TARGETS="linux/amd64 linux/arm64 windows/amd64 darwin/amd64 darwin/arm64"
+TARGETS="linux/amd64 linux/arm64 linux/riscv64 darwin/amd64 darwin/arm64 freebsd/amd64 openbsd/amd64 openbsd/arm64"
 build_targets
 
 # Only Windows gets the systray build
 TARGETS="windows/amd64"
-FLAVOR="-tray"
 TAGS_BISONW="systray"
-BISONW_EXE="bisonw-tray.exe"
+BISONW_EXE="bisonw.exe"
 LDFLAGS_BISONW="${LDFLAGS_BASE} -H=windowsgui"
 build_targets
 
