@@ -325,11 +325,9 @@ export default class MarketMakerPage extends BasePage {
     const page = this.page
     this.removingCfg = mwh
     Doc.hide(page.removeCfgErr)
-    const baseAsset = app().assets[mwh.baseID]
-    const quoteAsset = app().assets[mwh.quoteID]
-    const baseSymbol = baseAsset.symbol.toUpperCase()
-    const quoteSymbol = quoteAsset.symbol.toUpperCase()
-    page.confirmRemoveCfgMsg.textContent = intl.prep(intl.ID_REMOVING_BOT_CONFIG, { host: mwh.host, baseSymbol, quoteSymbol })
+    const { unitInfo: { conventional: { unit: baseTicker } } } = app().assets[mwh.baseID]
+    const { unitInfo: { conventional: { unit: quoteTicker } } } = app().assets[mwh.quoteID]
+    page.confirmRemoveCfgMsg.textContent = intl.prep(intl.ID_DELETE_BOT, { host: mwh.host, baseTicker, quoteTicker })
     this.forms.show(this.page.confirmRemoveForm)
   }
 

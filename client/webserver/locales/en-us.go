@@ -678,5 +678,5 @@ var EnUS = map[string]*intl.Translation{
 	"Priority":                    {T: "Priority"},
 	"Wallet Balances":             {T: "Wallet Balances"},
 	"Placements":                  {T: "Placements"},
-	"removing_bot_config":         {T: "Removing Bot Config"},
+	"delete_bot":                  {T: "Delete Bot"},
 }
