@@ -39,7 +39,7 @@ const (
 
 	// DefaultResponseTimeout is the default timeout for responses after a
 	// request is successfully sent.
-	DefaultResponseTimeout = 30 * time.Second
+	DefaultResponseTimeout = time.Minute
 )
 
 // ConnectionStatus represents the current status of the websocket connection.
