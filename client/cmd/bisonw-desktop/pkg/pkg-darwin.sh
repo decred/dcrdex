@@ -82,12 +82,14 @@ function prepare() {
 }
 
 # Build the webpack bundle prior to building the webserver package, which embeds
-# the files.
-pushd ../../../webserver/site
-go generate # just check, no write
-npm ci
-npm run build
-popd
+# the files. Don't do this for release builds because the assets are committed.
+if [ "${META}" != "release" ]; then
+	pushd ../../../webserver/site
+	go generate # just check, no write
+	npm ci
+	npm run build
+	popd
+fi
 
 function build_targets() {
   for TARGET in ${TARGETS}; do
