@@ -1752,22 +1752,6 @@ var freeFeeSources = []*txfee.SourceConfig{
 		},
 	},
 	{
-		// undocumented
-		Name:   "billfodl.com",
-		Rank:   2,
-		Period: time.Minute * 3,
-		F: func(ctx context.Context) (rate uint64, errDelay time.Duration, err error) {
-			const uri = "https://bitcoinfees.billfodl.com/api/fees/"
-			var res struct {
-				Fastest uint64 `json:"fastestFee,string"`
-			}
-			if err := dexnet.Get(ctx, uri, &res); err != nil {
-				return 0, time.Minute * 10, err
-			}
-			return res.Fastest, 0, nil
-		},
-	},
-	{
 		// https://blockchair.com/api/docs#link_M0
 		Name:   "blockchair.com",
 		Rank:   3,               // blockchair sometimes returns zero. Use only as a last resort.
