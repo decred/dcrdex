@@ -416,7 +416,11 @@ func (s *Server) Run(ctx context.Context) {
 
 		wsConn, err := ws.NewConnection(w, r, pongWait)
 		if err != nil {
-			log.Errorf("ws connection error: %v", err)
+			if errors.Is(err, ws.ErrHandshake) {
+				log.Debug(err)
+			} else {
+				log.Errorf("ws connection error: %v", err)
+			}
 			return
 		}
 
