@@ -54,7 +54,6 @@ build_targets
 
 # Only Windows gets the systray build
 TARGETS="windows/amd64"
-FLAVOR="-tray"
 TAGS_BISONW="systray"
 BISONW_EXE="bisonw-tray.exe"
 LDFLAGS_BISONW="${LDFLAGS_BASE} -H=windowsgui"
