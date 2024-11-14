@@ -35,13 +35,6 @@ func (db *DB) Table(name string) (*Table, error) {
 	}, nil
 }
 
-// UseDefaultSetOptions sets default options for Set.
-func (t *Table) UseDefaultSetOptions(setOpts ...SetOption) {
-	for i := range setOpts {
-		setOpts[i](&t.defaultSetOptions)
-	}
-}
-
 // Get retrieves a value from the Table.
 func (t *Table) Get(k encoding.BinaryMarshaler, v encoding.BinaryUnmarshaler) error {
 	kB, err := k.MarshalBinary()
@@ -98,6 +91,13 @@ type SetOption func(opts *setOpts)
 func WithReplace() SetOption {
 	return func(opts *setOpts) {
 		opts.replace = true
+	}
+}
+
+// UseDefaultSetOptions sets default options for Set.
+func (t *Table) UseDefaultSetOptions(setOpts ...SetOption) {
+	for i := range setOpts {
+		setOpts[i](&t.defaultSetOptions)
 	}
 }
 

@@ -47,7 +47,7 @@ func bytesToPrefix(b []byte) (p keyPrefix) {
 
 func lastKeyForPrefix(txn *badger.Txn, p keyPrefix) (k []byte) {
 	reverseIteratePrefix(txn, p[:], nil, func(iter *badger.Iterator) error {
-		k = iter.Item().Key()[prefixSize:]
+		k = iter.Item().KeyCopy(nil)[prefixSize:]
 		return ErrEndIteration
 	}, withPrefetchSize(1))
 	return

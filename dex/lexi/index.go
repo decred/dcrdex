@@ -18,10 +18,6 @@ const (
 	// ErrEndIteration can be returned from the function passed to Iterate
 	// to end iteration. No error will be returned from Iterate.
 	ErrEndIteration = dex.ErrorKind("end iteration")
-	// ErrDeleteEntry can be returned from the function passed to Iterate to
-	// trigger deletion of the datum, all of its index entries, and its key-id
-	// entries.
-	ErrDeleteEntry = dex.ErrorKind("delete entry")
 )
 
 // Index is just a lexicographically-ordered list of byte slices. An Index is
@@ -133,15 +129,12 @@ func (i *Iter) V(f func(vB []byte) error) error {
 }
 
 // K is the key for the datum.
-func (i *Iter) K() (k []byte, _ error) {
+func (i *Iter) K() ([]byte, error) {
 	item, err := i.txn.Get(prefixedKey(idToKeyPrefix, i.dbID[:]))
 	if err != nil {
-		return
+		return nil, err
 	}
-	return k, item.Value(func(kB []byte) error {
-		k = kB
-		return nil
-	})
+	return item.ValueCopy(nil)
 }
 
 // Entry is the actual index entry. These are the bytes returned by the
@@ -261,7 +254,7 @@ func iteratePrefix(txn *badger.Txn, prefix, seek []byte, f func(iter *badger.Ite
 		iter.Seek(seek)
 	}
 
-	for ; iter.ValidForPrefix(prefix); iter.Next() {
+	for ; iter.Valid(); iter.Next() {
 		if err := f(iter); err != nil {
 			if errors.Is(err, ErrEndIteration) {
 				return nil
