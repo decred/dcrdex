@@ -66,17 +66,17 @@ reality of unreliable consumer networks and other such technical issues.
 Your reputation score increases by successfully completing trades.
 Misbehaviour and failure to act on a trade will penalize your score depending on the type of match failure:
 
-| Action             | Score Penalty | Notes                                               |
-|--------------------|---------------|-----------------------------------------------------|
-| No Redeem as Taker | - 1           | Counterparty not affected, no stuck funds.          |
-| No Swap as Maker   | - 4           | Book spoof, taker need snew order. No locked funds. |
-| Excessive Cancels  | - 5           |                                                     |
-| No Redeem as Maker | - 7           | Taker has funds stuck for 8 hours in contract.      |
-| No Swap as Taker   | - 11          | Maker funds stuck for 20 hours in contract.         |
+| Action             | Score Penalty | Notes                                                 |
+|--------------------|---------------|-------------------------------------------------------|
+| No Redeem as Taker | - 1           | Counterparty not affected, no stuck funds.            |
+| No Swap as Maker   | - 4           | Book spoof, taker needs a new order. No locked funds. |
+| Excessive Cancels  | - 5           |                                                       |
+| No Redeem as Maker | - 7           | Taker has funds stuck for 8 hours in contract.        |
+| No Swap as Taker   | - 11          | Maker funds stuck for 20 hours in contract.           |
 
 # Adding a new DCRDEX Server
 
-DCRDEX Servers can be added ocated in the `Registered Dexes` section of the 
+DCRDEX Servers can be added in the `Registered Dexes` section of the 
 [Settings Panel](Header#settings-panel).
 
 <img src="./images/using-bison-wallet/settings-addServer.png" width="400" alt="">

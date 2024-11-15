@@ -14,7 +14,7 @@ and ran the [Quick Configuration](Quick-Configuration).
 
 # Create Account
 
-Clicking the `Trade` button in the header will navigate to the [Trade](./Using-BIson-Wallet.md#trade) view.
+Clicking the `Trade` button in the header will navigate to the [Trade](./Using-Bison-Wallet.md#trade) view.
 The available markets on the connected DCRDEX servers are listed on the left side of the screen.
 
 
@@ -60,12 +60,12 @@ will have to post a bond to maintain their trading tier.
 # Bond Submission
 
 Once the bond asset is selected, a prompt to select the 
-[Trading Tier](./Using-BIson-Wallet.md#changing-trading-tier) will appear.
+[Trading Tier](./Using-Bison-Wallet.md#changing-trading-tier) will appear.
 Increasing your tier enables trading of larger quantities at a time. A higher tier also 
 increase your capacity for violations before trading privileges are completely suspended.
 
 Trading limits are also increased as you establish 
-[reputation](./Using-BIson-Wallet.md#reputation-score) by engaging 
+[reputation](./Using-Bison-Wallet.md#reputation-score) by engaging 
 in normal trading activity and successfully completing matches.
 
 
@@ -128,6 +128,6 @@ more information.
 
 ---
 
-Next Section: [Using Bison Wallet](Using-BIson-Wallet)
+Next Section: [Using Bison Wallet](Using-Bison-Wallet)
 
 [⤴ Back to Top](#top)

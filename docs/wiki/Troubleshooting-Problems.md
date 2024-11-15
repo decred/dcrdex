@@ -85,7 +85,7 @@ A warning will appear indicating what actions to expect, click ``Submit``.
 
 <img src="./images/using-bison-wallet/wallets-settings-recover-warning.png" width="400" alt="">
 
-Once hte recovery process has completed, the wallet will be re-created and start
+Once the recovery process has completed, the wallet will be re-created and start
 synchronizing:
 
 <img src="./images/using-bison-wallet/wallets-settings-recovered.png" width="550" alt="">

@@ -9,7 +9,7 @@
   - [Quick Configuration](Quick-Configuration)
   - [Creating a DCRDEX Sever Account](Creating-a-DCRDEX-Server-Account)
     - [Fidelity Bonds](Creating-a-DCRDEX-Server-Account#fidelity-bonds)
-- [Using Bison Wallet](Using-BIson-Wallet)
+- [Using Bison Wallet](Using-Bison-Wallet)
   - [Header](Header)
     - [Notifications Panel](Header#notifications-panel)
     - [Language Switching](Header#language-switching)

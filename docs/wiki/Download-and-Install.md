@@ -62,7 +62,7 @@ disk image.
 1. Download the ```bisonw-desktop-linux-amd64-v1.0.0.deb``` file.
 
 2. Open a terminal in the extracted folder and run the command 
-```dpkg -i ./bisonw-desktop-linux-amd64-v1.0.0.deb```.
+```sudo dpkg -i ./bisonw-desktop-linux-amd64-v1.0.0.deb```.
 
 3. Bison Wallet can then be launched from the applications menu.
 
