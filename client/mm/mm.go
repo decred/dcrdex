@@ -477,6 +477,31 @@ func (m *MarketMaker) MarketReport(host string, baseID, quoteID uint32) (*Market
 	}, nil
 }
 
+// MaxFundingFees returns the maximum funding fees for a bot on a market.
+// There must be a bot config saved in the default config file for the
+// market.
+func (m *MarketMaker) MaxFundingFees(mwh *MarketWithHost) (buyFees, sellFees uint64, err error) {
+	cfg := m.defaultConfig()
+	botCfg := cfg.botConfig(mwh)
+	if botCfg == nil {
+		return 0, 0, fmt.Errorf("no bot config found for %s", mwh)
+	}
+
+	maxBuyPlacements, maxSellPlacements := botCfg.maxPlacements()
+
+	buyFundingFees, err := m.core.MaxFundingFees(mwh.QuoteID, mwh.Host, maxBuyPlacements, botCfg.QuoteWalletOptions)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to get buy funding fees: %w", err)
+	}
+
+	sellFundingFees, err := m.core.MaxFundingFees(mwh.BaseID, mwh.Host, maxSellPlacements, botCfg.BaseWalletOptions)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to get sell funding fees: %w", err)
+	}
+
+	return buyFundingFees, sellFundingFees, nil
+}
+
 func (m *MarketMaker) loginAndUnlockWallets(pw []byte, cfg *BotConfig) error {
 	err := m.core.Login(pw)
 	if err != nil {
@@ -1085,12 +1110,13 @@ func (m *MarketMaker) UpdateRunningBotInventory(mkt *MarketWithHost, balanceDiff
 	}
 
 	if err := rb.withPause(func() error {
-		rb.bot.updateInventory(balanceDiffs)
+		rb.updateInventory(balanceDiffs)
 		return nil
 	}); err != nil {
 		rb.cm.Disconnect()
 		return fmt.Errorf("configuration update error. bot stopped: %w", err)
 	}
+
 	return nil
 }
 
@@ -1126,12 +1152,15 @@ func (m *MarketMaker) UpdateRunningBotCfg(cfg *BotConfig, balanceDiffs *BotInven
 
 	var stoppedOracle, startedOracle, updateSuccess bool
 	defer func() {
-		if updateSuccess {
-			return
+		if updateSuccess && saveUpdate {
+			m.updateDefaultBotConfig(cfg)
 		}
-		if startedOracle {
+
+		if !updateSuccess && startedOracle {
 			m.oracle.stopAutoSyncingMarket(cfg.BaseID, cfg.QuoteID)
-		} else if stoppedOracle {
+		}
+
+		if !updateSuccess && stoppedOracle {
 			err := m.oracle.startAutoSyncingMarket(oldCfg.BaseID, oldCfg.QuoteID)
 			if err != nil {
 				m.log.Errorf("Error restarting oracle for %s: %v", mkt, err)
@@ -1711,10 +1740,14 @@ func (m *MarketMaker) availableBalances(mkt *MarketWithHost, cexCfg *CEXConfig) 
 // AvailableBalances returns the available balances of assets relevant to
 // market making on the specified market on the DEX (including fee assets),
 // and optionally a CEX depending on the configured strategy.
-func (m *MarketMaker) AvailableBalances(mkt *MarketWithHost, alternateConfigPath *string) (dexBalances, cexBalances map[uint32]uint64, _ error) {
-	_, cexCfg, err := m.configsForMarket(mkt, alternateConfigPath)
-	if err != nil {
-		return nil, nil, err
+func (m *MarketMaker) AvailableBalances(mkt *MarketWithHost, cexName *string) (dexBalances, cexBalances map[uint32]uint64, _ error) {
+	var cexCfg *CEXConfig
+	if cexName != nil && *cexName != "" {
+		cex := m.cexes[*cexName]
+		if cex == nil {
+			return nil, nil, fmt.Errorf("CEX %s not found", *cexName)
+		}
+		cexCfg = cex.CEXConfig
 	}
 
 	return m.availableBalances(mkt, cexCfg)

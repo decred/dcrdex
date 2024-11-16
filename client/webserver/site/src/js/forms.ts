@@ -1,4 +1,4 @@
-import Doc, { Animation } from './doc'
+import Doc, { Animation, MiniSlider, NumberInput } from './doc'
 import { postJSON } from './http'
 import State from './state'
 import * as intl from './locales'
@@ -28,11 +28,26 @@ import {
   Token,
   WalletCreationNote,
   CoreNote,
-  PrepaidBondID
+  PrepaidBondID,
+  MarketReport,
+  UnitInfo,
+  RunStats,
+  AutoRebalanceConfig
 } from './registry'
 import { XYRangeHandler } from './opts'
 import { CoinExplorers } from './coinexplorers'
-import { MM, setCexElements } from './mmutil'
+import {
+  MM,
+  PerLot,
+  perLotRequirements,
+  setCexElements,
+  setMarketElements,
+  toAllocate,
+  toAllocateRunning,
+  AvailableFunds,
+  AllocationStatus,
+  AllocationResult
+} from './mmutil'
 
 interface ConfigOptionInput extends HTMLInputElement {
   configOpt: ConfigOption
@@ -1031,7 +1046,7 @@ export class FeeAssetSelectionForm {
         const privilegedLimit = conventionalLotSize * parcelSize * perTierBaseParcelLimit * parcelLimitScoreMultiplier * tier
         tmpl.tradeLimitLow.textContent = Doc.formatFourSigFigs(startingLimit)
         tmpl.tradeLimitHigh.textContent = Doc.formatFourSigFigs(privilegedLimit)
-        const baseFiatRate = app().fiatRatesMap[baseID]
+        const baseFiatRate = 0 // app().fiatRatesMap[baseID]
         if (baseFiatRate) {
           tmpl.fiatTradeLimitLow.textContent = Doc.formatFourSigFigs(startingLimit * baseFiatRate)
           tmpl.fiatTradeLimitHigh.textContent = Doc.formatFourSigFigs(privilegedLimit * baseFiatRate)
@@ -2213,6 +2228,481 @@ export class CEXConfigurationForm {
   }
 }
 
+export class AllocationForm {
+  form: PageElement
+  page: Record<string, PageElement>
+  buyBufferSlider: MiniSlider
+  buyBufferInput: NumberInput
+  sellBufferSlider: MiniSlider
+  sellBufferInput: NumberInput
+  slippageBufferSlider: MiniSlider
+  slippageBufferInput: NumberInput
+  buyFeeReserveSlider: MiniSlider
+  buyFeeReserveInput: NumberInput
+  sellFeeReserveSlider: MiniSlider
+  sellFeeReserveInput: NumberInput
+  baseDexBalanceSlider: MiniSlider
+  baseDexBalanceInput: NumberInput
+  quoteDexBalanceSlider: MiniSlider
+  quoteDexBalanceInput: NumberInput
+  baseFeeBalanceSlider: MiniSlider
+  baseFeeBalanceInput: NumberInput
+  quoteFeeBalanceSlider: MiniSlider
+  quoteFeeBalanceInput: NumberInput
+  baseCexBalanceSlider: MiniSlider
+  baseCexBalanceInput: NumberInput
+  quoteCexBalanceSlider: MiniSlider
+  quoteCexBalanceInput: NumberInput
+  baseMinTransferInput: NumberInput
+  baseMinTransferSlider: MiniSlider
+  quoteMinTransferInput: NumberInput
+  quoteMinTransferSlider: MiniSlider
+  numSellLots: number
+  numBuyLots: number
+  perSellLot: PerLot
+  perBuyLot: PerLot
+  marketReport: MarketReport
+  availableFunds: AvailableFunds
+  canRebalance: boolean
+  baseID: number
+  quoteID: number
+  baseFeeID: number
+  quoteFeeID: number
+  host: string
+  baseIsAccountLocker: boolean
+  quoteIsAccountLocker: boolean
+  baseUI: UnitInfo
+  quoteUI: UnitInfo
+  baseFeeUI: UnitInfo
+  quoteFeeUI: UnitInfo
+  allocation: AllocationResult
+  botID: string
+  buyFundingFees: number
+  sellFundingFees: number
+  isRunning: boolean
+  cexName: string
+  runStats: RunStats | undefined
+  baseMinTransfer: number
+  quoteMinTransfer: number
+  maxBaseTransfer: number
+  maxQuoteTransfer: number
+
+  constructor (form: PageElement, submit: (allocation: AllocationResult, running: boolean, autoRebalance: AutoRebalanceConfig | undefined) => void) {
+    this.form = form
+    const page = this.page = Doc.idDescendants(form)
+    Doc.bind(page.startBttn, 'click', (e: PointerEvent) => {
+      if (!e.pointerType) return // TODO: I don't know how to prevent enter on an input from triggering this
+      let autoRebalance: AutoRebalanceConfig | undefined
+      if (page.enableRebalance.checked) {
+        const baseMinTransfer = this.baseMinTransferInput.value() * this.baseUI.conventional.conversionFactor
+        const quoteMinTransfer = this.quoteMinTransferInput.value() * this.quoteUI.conventional.conversionFactor
+        autoRebalance = {
+          minBaseTransfer: baseMinTransfer,
+          minQuoteTransfer: quoteMinTransfer
+        }
+      }
+      submit(this.allocation, this.isRunning, autoRebalance)
+    })
+    Doc.bind(page.adjustManuallyBtn, 'click', () => this.adjustManually())
+    Doc.bind(page.quickConfigBtn, 'click', () => this.quickConfig())
+    Doc.bind(page.enableRebalance, 'change', () => this.enableRebalanceChanged())
+    this.buyBufferSlider = new MiniSlider(page.buyBufferSlider, (amt: number) => this.sliderChanged(amt, 'buyBuffer'))
+    this.buyBufferInput = new NumberInput(page.buyBuffer, { prec: 0, min: 0, changed: (amt: number) => this.inputChanged(amt, 'buyBuffer') })
+    this.sellBufferSlider = new MiniSlider(page.sellBufferSlider, (amt: number) => this.sliderChanged(amt, 'sellBuffer'))
+    this.sellBufferInput = new NumberInput(page.sellBuffer, { prec: 0, min: 0, changed: (amt: number) => this.inputChanged(amt, 'sellBuffer') })
+    this.slippageBufferSlider = new MiniSlider(page.slippageBufferSlider, (amt: number) => this.sliderChanged(amt, 'slippageBuffer'))
+    this.slippageBufferInput = new NumberInput(page.slippageBuffer, { prec: 3, min: 0, changed: (amt: number) => this.inputChanged(amt, 'slippageBuffer') })
+    this.buyFeeReserveSlider = new MiniSlider(page.buyFeeReserveSlider, (amt: number) => this.sliderChanged(amt, 'buyFeeReserve'))
+    this.buyFeeReserveInput = new NumberInput(page.buyFeeReserve, { prec: 0, min: 0, changed: (amt: number) => this.inputChanged(amt, 'buyFeeReserve') })
+    this.sellFeeReserveSlider = new MiniSlider(page.sellFeeReserveSlider, (amt: number) => this.sliderChanged(amt, 'sellFeeReserve'))
+    this.sellFeeReserveInput = new NumberInput(page.sellFeeReserve, { prec: 0, min: 0, changed: (amt: number) => this.inputChanged(amt, 'sellFeeReserve') })
+    this.baseDexBalanceSlider = new MiniSlider(page.dexBaseBalanceSlider, (amt: number) => this.balanceSliderChanged(amt, 'base', 'dex'))
+    this.baseDexBalanceInput = new NumberInput(page.dexBaseBalance, { prec: 0, min: 0, changed: (amt: number) => this.balanceInputChanged(amt, 'base', 'dex') })
+    this.quoteDexBalanceSlider = new MiniSlider(page.dexQuoteBalanceSlider, (amt: number) => this.balanceSliderChanged(amt, 'quote', 'dex'))
+    this.quoteDexBalanceInput = new NumberInput(page.dexQuoteBalance, { prec: 0, min: 0, changed: (amt: number) => this.balanceInputChanged(amt, 'quote', 'dex') })
+    this.baseFeeBalanceSlider = new MiniSlider(page.baseFeeBalanceSlider, (amt: number) => this.balanceSliderChanged(amt, 'base', 'dex'))
+    this.baseFeeBalanceInput = new NumberInput(page.baseFeeBalance, { prec: 0, min: 0, changed: (amt: number) => this.balanceInputChanged(amt, 'base', 'dex') })
+    this.quoteFeeBalanceSlider = new MiniSlider(page.quoteFeeBalanceSlider, (amt: number) => this.balanceSliderChanged(amt, 'quote', 'dex'))
+    this.quoteFeeBalanceInput = new NumberInput(page.quoteFeeBalance, { prec: 0, min: 0, changed: (amt: number) => this.balanceInputChanged(amt, 'quote', 'dex') })
+    this.baseCexBalanceSlider = new MiniSlider(page.cexBaseBalanceSlider, (amt: number) => this.balanceSliderChanged(amt, 'base', 'cex'))
+    this.baseCexBalanceInput = new NumberInput(page.cexBaseBalance, { prec: 0, min: 0, changed: (amt: number) => this.balanceInputChanged(amt, 'base', 'cex') })
+    this.quoteCexBalanceSlider = new MiniSlider(page.cexQuoteBalanceSlider, (amt: number) => this.balanceSliderChanged(amt, 'quote', 'cex'))
+    this.quoteCexBalanceInput = new NumberInput(page.cexQuoteBalance, { prec: 0, min: 0, changed: (amt: number) => this.balanceInputChanged(amt, 'quote', 'cex') })
+    this.baseMinTransferSlider = new MiniSlider(page.baseMinTransferSlider, (amt: number) => this.minTransferSliderChanged(amt, 'base'))
+    this.baseMinTransferInput = new NumberInput(page.baseMinTransfer, { prec: 0, min: 0, changed: (amt: number) => this.minTransferInputChanged(amt, 'base') })
+    this.quoteMinTransferSlider = new MiniSlider(page.quoteMinTransferSlider, (amt: number) => this.minTransferSliderChanged(amt, 'quote'))
+    this.quoteMinTransferInput = new NumberInput(page.quoteMinTransfer, { prec: 0, min: 0, changed: (amt: number) => this.minTransferInputChanged(amt, 'quote') })
+  }
+
+  enableRebalanceChanged () {
+    const { page } = this
+    const checked = page.enableRebalance.checked
+    Doc.setVis(checked, page.rebalanceSettings)
+  }
+
+  adjustManually () {
+    const { page } = this
+    Doc.hide(page.quickConfigSection, page.toAllocateSection)
+    Doc.show(page.adjustManuallySection)
+  }
+
+  quickConfig () {
+    const { page } = this
+    Doc.hide(page.adjustManuallySection)
+    Doc.show(page.quickConfigSection, page.toAllocateSection)
+    this.updateAllocation()
+  }
+
+  init (
+    baseID: number, quoteID: number, host: string, baseFeeID: number, quoteFeeID: number,
+    cexName: string, bui: UnitInfo, qui: UnitInfo, baseFeeUI: UnitInfo,
+    quoteFeeUI: UnitInfo, marketReport: MarketReport, lotSize: number,
+    quoteLot: number, baseIsAccountLocker: boolean, quoteIsAccountLocker: boolean,
+    availableFunds: AvailableFunds, canRebalance: boolean, botID: string,
+    numBuyLots: number, numSellLots: number, buyFundingFees: number, sellFundingFees: number,
+    runStats: RunStats | undefined) {
+    const { page } = this
+
+    const { perSellLot, perBuyLot } = perLotRequirements(baseID, quoteID, baseFeeID, quoteFeeID, lotSize,
+      quoteLot, marketReport, baseIsAccountLocker, quoteIsAccountLocker)
+    this.perSellLot = perSellLot
+    this.perBuyLot = perBuyLot
+    this.marketReport = marketReport
+    this.availableFunds = availableFunds
+    this.canRebalance = canRebalance
+    this.botID = botID
+    this.baseID = baseID
+    this.quoteID = quoteID
+    this.baseFeeID = baseFeeID
+    this.quoteFeeID = quoteFeeID
+    this.baseIsAccountLocker = baseIsAccountLocker
+    this.quoteIsAccountLocker = quoteIsAccountLocker
+    this.baseUI = bui
+    this.quoteUI = qui
+    this.baseFeeUI = baseFeeUI
+    this.quoteFeeUI = quoteFeeUI
+    this.numBuyLots = numBuyLots
+    this.numSellLots = numSellLots
+    this.buyFundingFees = buyFundingFees
+    this.sellFundingFees = sellFundingFees
+    this.isRunning = !!runStats
+    this.runStats = runStats
+    this.cexName = cexName
+    this.host = host
+    const basePrec = Math.log10(bui.conventional.conversionFactor)
+    const quotePrec = Math.log10(qui.conventional.conversionFactor)
+    const baseFeePrec = Math.log10(baseFeeUI.conventional.conversionFactor)
+    const quoteFeePrec = Math.log10(quoteFeeUI.conventional.conversionFactor)
+    this.baseDexBalanceInput.prec = basePrec
+    this.baseDexBalanceInput.min = this.minBalance('base', 'dex')
+    this.quoteDexBalanceInput.prec = quotePrec
+    this.quoteDexBalanceInput.min = this.minBalance('quote', 'dex')
+    this.baseFeeBalanceInput.prec = baseFeePrec
+    this.baseFeeBalanceInput.min = this.minBalance('baseFee', 'dex')
+    this.quoteFeeBalanceInput.prec = quoteFeePrec
+    this.quoteFeeBalanceInput.min = this.minBalance('quoteFee', 'dex')
+    this.baseCexBalanceInput.prec = basePrec
+    this.baseCexBalanceInput.min = this.minBalance('base', 'cex')
+    this.quoteCexBalanceInput.prec = quotePrec
+    this.quoteCexBalanceInput.min = this.minBalance('quote', 'cex')
+    this.baseMinTransferInput.prec = basePrec
+    this.quoteMinTransferInput.prec = quotePrec
+
+    page.allocationFormTitle.textContent = intl.prep(intl.ID_ALLOCATION_FORM_TITLE, {
+      baseSymbol: bui.conventional.unit,
+      quoteSymbol: qui.conventional.unit,
+      host: host
+    })
+
+    populateBalancesTable(page.sellPerLot, baseID, quoteID, baseFeeID, quoteFeeID, cexName,
+      perSellLot.dex, perSellLot.cex, bui, qui, baseFeeUI, quoteFeeUI, host)
+    populateBalancesTable(page.buyPerLot, baseID, quoteID, baseFeeID, quoteFeeID, cexName,
+      perBuyLot.dex, perBuyLot.cex, bui, qui, baseFeeUI, quoteFeeUI, host)
+    populateBalancesTable(page.availableBalances, baseID, quoteID, baseFeeID, quoteFeeID, cexName,
+      availableFunds.dex, availableFunds.cex, bui, qui, baseFeeUI, quoteFeeUI, host)
+
+    const baseFeeNotTraded = baseFeeID !== baseID && baseFeeID !== quoteID
+    const quoteFeeNotTraded = quoteFeeID !== baseID && quoteFeeID !== quoteID
+    Doc.setVis(baseFeeNotTraded, page.dexBaseFeeBalanceSection)
+    Doc.setVis(quoteFeeNotTraded, page.dexQuoteFeeBalanceSection)
+    Doc.setVis(baseFeeNotTraded || quoteFeeNotTraded, page.buyFeeReserveSection, page.sellFeeReserveSection)
+
+    // Running bot balances
+    Doc.setVis(this.isRunning, page.runningBotBalances)
+    if (runStats) {
+      const availableDEX: Record<number, number> = {}
+      const availableCEX: Record<number, number> = {}
+      for (const assetID of Object.keys(runStats.dexBalances)) {
+        availableDEX[Number(assetID)] = runStats.dexBalances[Number(assetID)].available
+      }
+      for (const assetID of Object.keys(runStats.cexBalances)) {
+        availableCEX[Number(assetID)] = runStats.cexBalances[Number(assetID)].available
+      }
+      populateBalancesTable(page.runningBotBalancesTable, baseID, quoteID, baseFeeID, quoteFeeID, cexName,
+        availableDEX, availableCEX, bui, qui, baseFeeUI, quoteFeeUI, host)
+    }
+
+    this.buyBufferInput.setValue(0)
+    this.buyBufferSlider.setValue(0)
+    this.sellBufferInput.setValue(0)
+    this.sellBufferSlider.setValue(0)
+    this.slippageBufferInput.setValue(0)
+    this.slippageBufferSlider.setValue(0)
+    this.buyFeeReserveInput.setValue(0)
+    this.buyFeeReserveSlider.setValue(0)
+    this.sellFeeReserveInput.setValue(0)
+    this.sellFeeReserveSlider.setValue(0)
+
+    setMarketElements(this.form, baseID, quoteID, host)
+    Doc.setVis(cexName, page.rebalanceSection, page.adjustManuallyCexBalances)
+    if (cexName) {
+      const mktID = `${app().assets[baseID].symbol}_${app().assets[quoteID].symbol}`
+      const cexMkt = app().mmStatus.cexes[cexName].markets[mktID]
+      this.baseMinTransfer = cexMkt.baseMinWithdraw
+      this.quoteMinTransfer = cexMkt.quoteMinWithdraw
+      setCexElements(this.form, cexName)
+      page.enableRebalance.checked = true
+      this.enableRebalanceChanged()
+    } else {
+      page.enableRebalance.checked = false
+    }
+
+    this.quickConfig()
+  }
+
+  sliderMax (slider: 'buyBuffer' | 'sellBuffer' | 'slippageBuffer' | 'buyFeeReserve' | 'sellFeeReserve') : number {
+    switch (slider) {
+      case 'buyBuffer': return 3 * this.numBuyLots
+      case 'sellBuffer': return 3 * this.numSellLots
+      case 'slippageBuffer': return 100
+      case 'buyFeeReserve': return 1000
+      case 'sellFeeReserve': return 1000
+    }
+  }
+
+  sliderInput (slider: 'buyBuffer' | 'sellBuffer' | 'slippageBuffer' | 'buyFeeReserve' | 'sellFeeReserve') : NumberInput {
+    switch (slider) {
+      case 'buyBuffer': return this.buyBufferInput
+      case 'sellBuffer': return this.sellBufferInput
+      case 'slippageBuffer': return this.slippageBufferInput
+      case 'buyFeeReserve': return this.buyFeeReserveInput
+      case 'sellFeeReserve': return this.sellFeeReserveInput
+    }
+  }
+
+  slider (sliderName: 'buyBuffer' | 'sellBuffer' | 'slippageBuffer' | 'buyFeeReserve' | 'sellFeeReserve') : MiniSlider {
+    switch (sliderName) {
+      case 'buyBuffer': return this.buyBufferSlider
+      case 'sellBuffer': return this.sellBufferSlider
+      case 'slippageBuffer': return this.slippageBufferSlider
+      case 'buyFeeReserve': return this.buyFeeReserveSlider
+      case 'sellFeeReserve': return this.sellFeeReserveSlider
+    }
+  }
+
+  balanceSlider (asset: 'base' | 'quote' | 'baseFee' | 'quoteFee', location: 'dex' | 'cex') : MiniSlider | undefined {
+    switch (asset) {
+      case 'base': return location === 'dex' ? this.baseDexBalanceSlider : this.baseCexBalanceSlider
+      case 'quote': return location === 'dex' ? this.quoteDexBalanceSlider : this.quoteCexBalanceSlider
+      case 'baseFee': return location === 'dex' ? this.baseFeeBalanceSlider : undefined
+      case 'quoteFee': return location === 'dex' ? this.quoteFeeBalanceSlider : undefined
+    }
+  }
+
+  balanceInput (asset: 'base' | 'quote' | 'baseFee' | 'quoteFee', location: 'dex' | 'cex') : NumberInput | undefined {
+    switch (asset) {
+      case 'base': return location === 'dex' ? this.baseDexBalanceInput : this.baseCexBalanceInput
+      case 'quote': return location === 'dex' ? this.quoteDexBalanceInput : this.quoteCexBalanceInput
+      case 'baseFee': return location === 'dex' ? this.baseFeeBalanceInput : undefined
+      case 'quoteFee': return location === 'dex' ? this.quoteFeeBalanceInput : undefined
+    }
+  }
+
+  assetID (asset: 'base' | 'quote' | 'baseFee' | 'quoteFee') : number {
+    switch (asset) {
+      case 'base': return this.baseID
+      case 'quote': return this.quoteID
+      case 'baseFee': return this.baseFeeID
+      case 'quoteFee': return this.quoteFeeID
+    }
+  }
+
+  maxBalance (asset: 'base' | 'quote' | 'baseFee' | 'quoteFee', location: 'dex' | 'cex') : number {
+    const assetID = this.assetID(asset)
+    if (location === 'dex') return this.availableFunds.dex[assetID] ?? 0
+    return this.availableFunds.cex ? this.availableFunds.cex[assetID] ?? 0 : 0
+  }
+
+  minBalance (asset: 'base' | 'quote' | 'baseFee' | 'quoteFee', location: 'dex' | 'cex') : number {
+    if (!this.runStats) return 0
+    const assetID = this.assetID(asset)
+    if (location === 'dex') {
+      return -this.runStats.dexBalances[assetID].available
+    }
+    return -this.runStats.cexBalances[assetID].available
+  }
+
+  assetUnitInfo (asset: 'base' | 'quote' | 'baseFee' | 'quoteFee') : UnitInfo {
+    switch (asset) {
+      case 'base': return this.baseUI
+      case 'quote': return this.quoteUI
+      case 'baseFee': return this.baseFeeUI
+      case 'quoteFee': return this.quoteFeeUI
+    }
+  }
+
+  minTransferSliderChanged (amt: number, asset: 'base' | 'quote') {
+    const max = asset === 'base' ? this.maxBaseTransfer : this.maxQuoteTransfer
+    const min = asset === 'base' ? this.baseMinTransfer : this.quoteMinTransfer
+    const input = asset === 'base' ? this.baseMinTransferInput : this.quoteMinTransferInput
+    const ui = asset === 'base' ? this.baseUI : this.quoteUI
+    const value = Math.floor((max - min) * amt + min)
+    console.log({ min, max, amt, value })
+    input.setValue(value / ui.conventional.conversionFactor)
+  }
+
+  minTransferInputChanged (amt: number, asset: 'base' | 'quote') {
+    const max = asset === 'base' ? this.maxBaseTransfer : this.maxQuoteTransfer
+    const min = asset === 'base' ? this.baseMinTransfer : this.quoteMinTransfer
+    const input = asset === 'base' ? this.baseMinTransferInput : this.quoteMinTransferInput
+    const slider = asset === 'base' ? this.baseMinTransferSlider : this.quoteMinTransferSlider
+    const ui = asset === 'base' ? this.baseUI : this.quoteUI
+    amt = amt * ui.conventional.conversionFactor
+    if (amt > max || amt < min) {
+      amt = amt > max ? max : min
+      input.setValue(amt / ui.conventional.conversionFactor)
+    }
+    slider.setValue((amt - min) / (max - min))
+  }
+
+  balanceSliderChanged (amt: number, asset: 'base' | 'quote' | 'baseFee' | 'quoteFee', location: 'dex' | 'cex') {
+    const max = this.maxBalance(asset, location)
+    const min = this.minBalance(asset, location)
+    const input = this.balanceInput(asset, location)
+    const ui = this.assetUnitInfo(asset)
+    if (input) {
+      amt = (max - min) * amt + min
+      if (amt < 0) amt = Math.ceil(amt)
+      else amt = Math.floor(amt)
+      input.setValue(amt / ui.conventional.conversionFactor)
+    }
+    this.setBalanceManually(amt, asset, location)
+  }
+
+  setBalanceManually (amt: number, asset: 'base' | 'quote' | 'baseFee' | 'quoteFee', location: 'dex' | 'cex') {
+    const assetID = this.assetID(asset)
+    if (location === 'dex') {
+      this.allocation.dex[assetID] = [amt, 'sufficient']
+    } else {
+      this.allocation.cex[assetID] = [amt, 'sufficient']
+    }
+  }
+
+  balanceInputChanged (amt: number, asset: 'base' | 'quote' | 'baseFee' | 'quoteFee', location: 'dex' | 'cex') {
+    const max = this.maxBalance(asset, location)
+    const min = this.minBalance(asset, location)
+    amt = amt * this.assetUnitInfo(asset).conventional.conversionFactor
+    if (amt > max || amt < min) {
+      if (amt > max) amt = max
+      else amt = min
+      const input = this.balanceInput(asset, location)
+      const unitInfo = this.assetUnitInfo(asset)
+      if (input) input.setValue(amt / unitInfo.conventional.conversionFactor)
+    }
+    const slider = this.balanceSlider(asset, location)
+    if (slider) slider.setValue((amt - min) / (max - min))
+    this.setBalanceManually(amt, asset, location)
+  }
+
+  sliderChanged (amt: number, sliderName: 'buyBuffer' | 'sellBuffer' | 'slippageBuffer' | 'buyFeeReserve' | 'sellFeeReserve') {
+    const max = this.sliderMax(sliderName)
+    const input = this.sliderInput(sliderName)
+    input.setValue(max * amt)
+    this.updateAllocation()
+  }
+
+  inputChanged (amt: number, sliderName: 'buyBuffer' | 'sellBuffer' | 'slippageBuffer' | 'buyFeeReserve' | 'sellFeeReserve') {
+    const slider = this.slider(sliderName)
+    const max = this.sliderMax(sliderName)
+    slider.setValue(amt / max)
+    this.updateAllocation()
+  }
+
+  updateAllocation () {
+    const { page } = this
+    const slippageBuffer = this.slippageBufferInput.value()
+    const buyLotsBuffer = this.buyBufferInput.value()
+    const totalBuyLots = buyLotsBuffer + this.numBuyLots
+    const sellLotsBuffer = this.sellBufferInput.value()
+    const totalSellLots = sellLotsBuffer + this.numSellLots
+    const buyFeeBuffer = this.buyFeeReserveInput.value()
+    const sellFeeBuffer = this.sellFeeReserveInput.value()
+
+    let toAlloc : AllocationResult
+
+    if (this.runStats) {
+      toAlloc = toAllocateRunning(totalBuyLots, totalSellLots, slippageBuffer, buyFeeBuffer, sellFeeBuffer, this.perBuyLot, this.perSellLot,
+        this.marketReport, this.availableFunds, this.canRebalance, this.baseID, this.quoteID, this.baseFeeID, this.quoteFeeID,
+        this.baseIsAccountLocker, this.quoteIsAccountLocker, this.runStats, this.buyFundingFees, this.sellFundingFees)
+    } else {
+      toAlloc = toAllocate(totalBuyLots, totalSellLots, slippageBuffer, buyFeeBuffer, sellFeeBuffer, this.perBuyLot, this.perSellLot,
+        this.marketReport, this.availableFunds, this.canRebalance, this.baseID, this.quoteID, this.baseFeeID, this.quoteFeeID,
+        this.baseIsAccountLocker, this.quoteIsAccountLocker, this.buyFundingFees, this.sellFundingFees)
+    }
+
+    this.allocation = toAlloc
+    populateColoredBalancesTable(page.toAllocateTable, this.baseID, this.quoteID, this.baseFeeID, this.quoteFeeID, this.cexName,
+      toAlloc, this.baseUI, this.quoteUI, this.baseFeeUI, this.quoteFeeUI, this.host)
+
+    const assets = Array.from(new Set([this.baseID, this.baseFeeID, this.quoteID, this.quoteFeeID]))
+    for (const assetID of assets) {
+      const dexAlloc = toAlloc.dex[assetID] ? toAlloc.dex[assetID][0] : 0
+      const cexAlloc = toAlloc.cex[assetID] ? toAlloc.cex[assetID][0] : 0
+      if (assetID === this.baseID) {
+        this.baseDexBalanceInput.setValue(dexAlloc / this.baseUI.conventional.conversionFactor)
+        const dexMax = this.maxBalance('base', 'dex')
+        const dexMin = this.minBalance('base', 'dex')
+        this.baseDexBalanceSlider.setValue((dexAlloc - dexMin) / (dexMax - dexMin))
+        this.baseCexBalanceInput.setValue(cexAlloc / this.baseUI.conventional.conversionFactor)
+        const cexMax = this.maxBalance('base', 'cex')
+        const cexMin = this.minBalance('base', 'cex')
+        this.baseCexBalanceSlider.setValue((cexAlloc - cexMin) / (cexMax - cexMin))
+      }
+      if (assetID === this.quoteID) {
+        this.quoteDexBalanceInput.setValue(dexAlloc / this.quoteUI.conventional.conversionFactor)
+        const dexMax = this.maxBalance('quote', 'dex')
+        const dexMin = this.minBalance('quote', 'dex')
+        this.quoteDexBalanceSlider.setValue((dexAlloc - dexMin) / (dexMax - dexMin))
+        this.quoteCexBalanceInput.setValue(cexAlloc / this.quoteUI.conventional.conversionFactor)
+        const cexMax = this.maxBalance('quote', 'cex')
+        const cexMin = this.minBalance('quote', 'cex')
+        this.quoteCexBalanceSlider.setValue((cexAlloc - cexMin) / (cexMax - cexMin))
+      }
+      if (assetID === this.baseFeeID && this.baseFeeID !== this.baseID && this.baseFeeID !== this.quoteID) {
+        this.baseFeeBalanceInput.setValue(dexAlloc / this.baseFeeUI.conventional.conversionFactor)
+        const dexMax = this.maxBalance('baseFee', 'dex')
+        const dexMin = this.minBalance('baseFee', 'dex')
+        this.baseFeeBalanceSlider.setValue((dexAlloc - dexMin) / (dexMax - dexMin))
+      }
+      if (assetID === this.quoteFeeID && this.quoteFeeID !== this.quoteID && this.quoteFeeID !== this.baseID) {
+        this.quoteFeeBalanceInput.setValue(dexAlloc / this.quoteFeeUI.conventional.conversionFactor)
+        const dexMax = this.maxBalance('quoteFee', 'dex')
+        const dexMin = this.minBalance('quoteFee', 'dex')
+        this.quoteFeeBalanceSlider.setValue((dexAlloc - dexMin) / (dexMax - dexMin))
+      }
+    }
+
+    if (this.cexName) {
+      const totalBaseAlloc = toAlloc.cex[this.baseID] ? toAlloc.cex[this.baseID][0] : 0
+      const totalQuoteAlloc = toAlloc.cex[this.quoteID] ? toAlloc.cex[this.quoteID][0] : 0
+      this.maxBaseTransfer = Math.max(this.baseMinTransfer * 2, totalBaseAlloc)
+      this.maxQuoteTransfer = Math.max(this.quoteMinTransfer * 2, totalQuoteAlloc)
+      this.minTransferInputChanged(this.baseMinTransferInput.value(), 'base')
+      this.minTransferInputChanged(this.quoteMinTransferInput.value(), 'quote')
+    }
+  }
+}
+
 const animationLength = 300
 
 /* Swap form1 for form2 with an animation. */
@@ -2261,6 +2751,69 @@ export function bind (form: HTMLElement, submitBttn: HTMLElement, handler: (e: E
   }
   Doc.bind(submitBttn, 'click', wrapper)
   Doc.bind(form, 'submit', wrapper)
+}
+
+function populateBalancesTable (
+  div: PageElement, baseID: number, quoteID: number, baseFeeID: number, quoteFeeID: number, cexName: string,
+  dexBalances: Record<number, number>, cexBalances: Record<number, number> | undefined, baseUI: UnitInfo, quoteUI: UnitInfo,
+  baseFeeUI: UnitInfo, quoteFeeUI: UnitInfo, host: string) {
+  const page = Doc.parseTemplate(div)
+  const baseFeeNotTraded = baseFeeID !== baseID && baseFeeID !== quoteID
+  const quoteFeeNotTraded = quoteFeeID !== quoteID && quoteFeeID !== baseID
+
+  Doc.setVis(baseFeeNotTraded, page.baseFeeHeader, page.dexBaseFeeAlloc)
+  Doc.setVis(quoteFeeNotTraded, page.quoteFeeHeader, page.dexQuoteFeeAlloc)
+  Doc.setVis(cexName, page.cexRow)
+
+  const format = (v: number, unitInfo: UnitInfo) => v ? Doc.formatCoinValue(v, unitInfo) : '0'
+
+  page.dexBaseAlloc.textContent = format(dexBalances[baseID], baseUI)
+  page.dexQuoteAlloc.textContent = format(dexBalances[quoteID], quoteUI)
+  if (baseFeeNotTraded) page.dexBaseFeeAlloc.textContent = format(dexBalances[baseFeeID], baseFeeUI)
+  if (quoteFeeNotTraded) page.dexQuoteFeeAlloc.textContent = format(dexBalances[quoteFeeID], quoteFeeUI)
+
+  if (cexBalances && cexName) {
+    page.cexBaseAlloc.textContent = format(cexBalances[baseID], baseUI)
+    page.cexQuoteAlloc.textContent = format(cexBalances[quoteID], quoteUI)
+    setCexElements(div, cexName)
+  }
+
+  setMarketElements(div, baseID, quoteID, host)
+}
+
+export function populateColoredBalancesTable (
+  div: PageElement, baseID: number, quoteID: number, baseFeeID: number, quoteFeeID: number, cexName: string,
+  allocationResult: AllocationResult, baseUI: UnitInfo, quoteUI: UnitInfo,
+  baseFeeUI: UnitInfo, quoteFeeUI: UnitInfo, host: string) {
+  const dexBalances: Record<number, number> = {}
+  const cexBalances: Record<number, number> = {}
+  const page = Doc.parseTemplate(div)
+
+  const setColor = (el: PageElement, status: AllocationStatus) => {
+    el.classList.remove('text-buycolor', 'text-danger', 'text-warning')
+    switch (status) {
+      case 'sufficient': el.classList.add('text-buycolor'); break
+      case 'insufficient': el.classList.add('text-danger'); break
+      case 'sufficient-with-rebalance': el.classList.add('text-warning'); break
+    }
+  }
+
+  for (const [key, value] of Object.entries(allocationResult.dex)) {
+    const assetID = Number(key)
+    if (assetID === baseID) setColor(page.dexBaseAlloc, value[1])
+    if (assetID === quoteID) setColor(page.dexQuoteAlloc, value[1])
+    if (assetID === baseFeeID) setColor(page.dexBaseFeeAlloc, value[1])
+    if (assetID === quoteFeeID) setColor(page.dexQuoteFeeAlloc, value[1])
+    dexBalances[assetID] = value[0]
+  }
+  for (const [key, value] of Object.entries(allocationResult.cex)) {
+    const assetID = Number(key)
+    if (assetID === baseID) setColor(page.cexBaseAlloc, value[1])
+    if (assetID === quoteID) setColor(page.cexQuoteAlloc, value[1])
+    cexBalances[assetID] = value[0]
+  }
+  populateBalancesTable(div, baseID, quoteID, baseFeeID, quoteFeeID, cexName,
+    dexBalances, cexBalances, baseUI, quoteUI, baseFeeUI, quoteFeeUI, host)
 }
 
 // isTruthyString will be true if the provided string is recognized as a

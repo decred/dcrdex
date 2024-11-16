@@ -11,6 +11,15 @@ type MarketMakingConfig struct {
 	CexConfigs []*CEXConfig `json:"cexConfigs"`
 }
 
+func (m *MarketMakingConfig) botConfig(mwh *MarketWithHost) *BotConfig {
+	for _, cfg := range m.BotConfigs {
+		if cfg.Host == mwh.Host && cfg.BaseID == mwh.BaseID && cfg.QuoteID == mwh.QuoteID {
+			return cfg
+		}
+	}
+	return nil
+}
+
 func (cfg *MarketMakingConfig) Copy() *MarketMakingConfig {
 	c := &MarketMakingConfig{
 		BotConfigs: make([]*BotConfig, len(cfg.BotConfigs)),
