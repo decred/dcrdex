@@ -107,6 +107,18 @@ type matchTracker struct {
 	// if we redeem as taker anyway.
 	matchCompleteSent bool
 
+	// confirmRefundNumTries is just used for logging.
+	confirmRefundNumTries int
+	// refundConfs and refundConfsReq are updated while the refund
+	// confirmation process is running. Their values are not updated after the
+	// match reaches MatchConfirmed status.
+	refundConfs    uint64
+	refundConfsReq uint64
+	// refundRejected will be true if a refund tx was rejected. A
+	// a rejected tx may indicate a serious internal issue, so we will seek
+	// user approval before replacing the tx.
+	refundRejected bool
+
 	// The fields below need to be modified without the parent trackedTrade's
 	// mutex being write locked, so they have dedicated mutexes.
 
@@ -256,8 +268,9 @@ type trackedTrade struct {
 	// request a fee suggestion at redeem time because it would require making
 	// the full redemption routine async (TODO?). This fee suggestion is
 	// intentionally not stored as part of the db.OrderMetaData, and should be
-	// repopulated if the client is restarted.
-	redeemFeeSuggestion feeStamped
+	// repopulated if the client is restarted. refundFeeSuggestion is the
+	// same but for Refunds.
+	redeemFeeSuggestion, refundFeeSuggestion feeStamped
 
 	selfGoverned uint32 // (atomic) server either lacks this market or is down
 
@@ -360,59 +373,67 @@ func (t *trackedTrade) status() order.OrderStatus {
 	return t.metaData.Status
 }
 
-// cacheRedemptionFeeSuggestion sets the redeemFeeSuggestion for the
-// trackedTrade. If a request to the server for the fee suggestion must be made,
-// the request will be run in a goroutine, i.e. the field is not necessarily set
-// when this method returns. If there is a synced book, the estimate will always
+// cacheRedemptionFeeSuggestion sets the redeemFeeSuggestion and refundFeeSuggestion
+// for the trackedTrade. If a request to the server for the fee suggestion must
+// be made, the request will be run in a goroutine, i.e. the field is not necessarily
+// set when this method returns. If there is a synced book, the estimate will always
 // be updated. If there is no synced book, but a non-zero fee suggestion is
 // already cached, no new requests will be made.
 //
 // The trackedTrade mutex should be held for reads for safe access to the
 // walletSet and the readyToTick flag.
-func (t *trackedTrade) cacheRedemptionFeeSuggestion() {
+func (t *trackedTrade) cacheFeeSuggestions() {
 	now := time.Now()
 
-	t.redeemFeeSuggestion.Lock()
-	defer t.redeemFeeSuggestion.Unlock()
+	cache := func(fs *feeStamped, w *xcWallet) {
+		fs.Lock()
+		defer fs.Unlock()
 
-	if now.Sub(t.redeemFeeSuggestion.stamp) < freshRedeemFeeAge {
-		return
-	}
-
-	set := func(rate uint64) {
-		t.redeemFeeSuggestion.rate = rate
-		t.redeemFeeSuggestion.stamp = now
-	}
-
-	// Use the wallet's rate first. Note that this could make a costly request
-	// to an external fee oracle if an internal estimate is not available and
-	// the wallet settings permit external API requests.
-	toWallet := t.wallets.toWallet
-	if t.readyToTick && toWallet.connected() {
-		if feeRate := toWallet.feeRate(); feeRate != 0 {
-			set(feeRate)
+		if now.Sub(fs.stamp) < freshRedeemFeeAge {
 			return
 		}
-	}
 
-	// Check any book that might have the fee recorded from an epoch_report note
-	// (requires a book subscription).
-	redeemAsset := toWallet.AssetID
-	feeSuggestion := t.dc.bestBookFeeSuggestion(redeemAsset)
-	if feeSuggestion > 0 {
-		set(feeSuggestion)
-		return
-	}
-
-	// Fetch it from the server. Last resort!
-	go func() {
-		feeSuggestion = t.dc.fetchFeeRate(redeemAsset)
-		if feeSuggestion > 0 {
-			t.redeemFeeSuggestion.Lock()
-			set(feeSuggestion)
-			t.redeemFeeSuggestion.Unlock()
+		set := func(rate uint64) {
+			fs.rate = rate
+			fs.stamp = now
 		}
-	}()
+
+		// Use the wallet's rate first. Note that this could make a costly request
+		// to an external fee oracle if an internal estimate is not available and
+		// the wallet settings permit external API requests.
+		toWallet := t.wallets.toWallet
+		if t.readyToTick && toWallet.connected() {
+			if feeRate := toWallet.feeRate(); feeRate != 0 {
+				set(feeRate)
+				return
+			}
+		}
+
+		// Check any book that might have the fee recorded from an epoch_report note
+		// (requires a book subscription).
+		asset := w.AssetID
+		feeSuggestion := t.dc.bestBookFeeSuggestion(asset)
+		if feeSuggestion > 0 {
+			set(feeSuggestion)
+			return
+		}
+
+		// Fetch it from the server. Last resort!
+		go func() {
+			feeSuggestion = t.dc.fetchFeeRate(asset)
+			if feeSuggestion > 0 {
+				fs.Lock()
+				set(feeSuggestion)
+				fs.Unlock()
+			}
+		}()
+	}
+
+	// Cache redeem fee.
+	cache(&t.redeemFeeSuggestion, t.wallets.toWallet)
+
+	// Cache refund fee.
+	cache(&t.refundFeeSuggestion, t.wallets.fromWallet)
 }
 
 // accountRedeemer is equivalent to calling
@@ -673,7 +694,8 @@ func (t *trackedTrade) coreOrderInternal() *Order {
 		corder.Matches = append(corder.Matches, matchFromMetaMatchWithConfs(t, &mt.MetaMatch,
 			swapConfs, int64(t.metaData.FromSwapConf),
 			counterConfs, int64(t.metaData.ToSwapConf),
-			int64(mt.redemptionConfs), int64(mt.redemptionConfsReq)))
+			int64(mt.redemptionConfs), int64(mt.redemptionConfsReq),
+			int64(mt.refundConfs), int64(mt.refundConfsReq)))
 	}
 	corder.AllFeesConfirmed = allFeesConfirmed
 
@@ -1843,6 +1865,23 @@ func shouldConfirmRedemption(match *matchTracker) bool {
 	return len(proof.TakerRedeem) > 0
 }
 
+// shouldConfirmRefund will return true if a refund transaction has been
+// broadcast, but it has not yet been confirmed.
+//
+// This method accesses match fields and MUST be called with the trackedTrade
+// mutex lock held for reads.
+func shouldConfirmRefund(match *matchTracker) bool {
+	if match.Status == order.MatchConfirmed {
+		return false
+	}
+
+	if match.refundRejected {
+		return false
+	}
+
+	return len(match.MetaData.Proof.RefundCoin) > 0
+}
+
 // tick will check for and perform any match actions necessary.
 func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	assets := make(assetMap) // callers expect non-nil map even on error :(
@@ -1866,7 +1905,7 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	tLock = time.Since(tStart)
 
 	var swaps, redeems, refunds, revokes, searches, redemptionConfirms,
-		dynamicSwapFeeConfirms, dynamicRedemptionFeeConfirms []*matchTracker
+		refundConfirms, dynamicSwapFeeConfirms, dynamicRedemptionFeeConfirms []*matchTracker
 	var sent, quoteSent, received, quoteReceived uint64
 
 	checkMatch := func(match *matchTracker) error { // only errors on context.DeadlineExceeded or context.Canceled
@@ -1955,6 +1994,11 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 			return nil
 		}
 
+		if shouldConfirmRefund(match) {
+			refundConfirms = append(refundConfirms, match)
+			return nil
+		}
+
 		// For certain "self-governed" trades where the market or server has
 		// vanished, we should revoke the match to allow it to retire without
 		// having sent any pending redeem requests. Note that self-governed is
@@ -1977,8 +2021,8 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	// Begin checks under read-only lock.
 	t.mtx.RLock()
 
-	// Make sure we have a redemption fee suggestion cached.
-	t.cacheRedemptionFeeSuggestion()
+	// Make sure we have a redemption and refund fee suggestion cached.
+	t.cacheFeeSuggestions()
 
 	if !t.readyToTick {
 		t.mtx.RUnlock()
@@ -2028,7 +2072,8 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 
 	if !rmCancel && len(swaps) == 0 && len(refunds) == 0 && len(redeems) == 0 &&
 		len(revokes) == 0 && len(searches) == 0 && len(redemptionConfirms) == 0 &&
-		len(dynamicSwapFeeConfirms) == 0 && len(dynamicRedemptionFeeConfirms) == 0 {
+		len(refundConfirms) == 0 && len(dynamicSwapFeeConfirms) == 0 &&
+		len(dynamicRedemptionFeeConfirms) == 0 {
 		return assets, nil // nothing to do, don't acquire the write-lock
 	}
 
@@ -2138,6 +2183,14 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 
 	if len(redemptionConfirms) > 0 {
 		c.confirmRedemptions(t, redemptionConfirms)
+	}
+
+	if len(refundConfirms) > 0 {
+		for _, match := range refundConfirms {
+			if _, err := c.confirmRefund(t, match); err != nil {
+				t.dc.log.Errorf("Unable to confirm refund: %v", err)
+			}
+		}
 	}
 
 	for _, match := range dynamicSwapFeeConfirms {
@@ -2991,6 +3044,23 @@ func (t *trackedTrade) redeemFee() uint64 {
 	return feeSuggestion
 }
 
+func (t *trackedTrade) refundFee() uint64 {
+	// Try not to use (*Core).feeSuggestion here, since it can incur an RPC
+	// request to the server. t.refundFeeSuggestion is updated every tick and
+	// uses a rate directly from our wallet, if available. Only go looking for
+	// one if we don't have one cached.
+	var feeSuggestion uint64
+	if _, is := t.accountRefunder(); is {
+		feeSuggestion = t.metaData.MaxFeeRate
+	} else {
+		feeSuggestion = t.refundFeeSuggestion.get()
+	}
+	if feeSuggestion == 0 {
+		feeSuggestion = t.dc.bestBookFeeSuggestion(t.wallets.fromWallet.AssetID)
+	}
+	return feeSuggestion
+}
+
 // confirmRedemption attempts to confirm the redemptions for each match, and
 // then return any refund addresses that we won't be using.
 func (c *Core) confirmRedemptions(t *trackedTrade, matches []*matchTracker) {
@@ -3060,10 +3130,8 @@ func (c *Core) confirmRedemption(t *trackedTrade, match *matchTracker) (bool, er
 
 	match.confirmRedemptionNumTries++
 
-	redemptionStatus, err := toWallet.Wallet.ConfirmRedemption(dex.Bytes(redeemCoinID), &asset.Redemption{
-		Spends: match.counterSwap,
-		Secret: proof.Secret,
-	}, t.redeemFee())
+	redemptionStatus, err := toWallet.Wallet.ConfirmTransaction(dex.Bytes(redeemCoinID),
+		asset.NewRedeemConfTx(match.counterSwap, proof.Secret), t.redeemFee())
 	switch {
 	case err == nil:
 	case errors.Is(err, asset.ErrSwapRefunded):
@@ -3081,7 +3149,7 @@ func (c *Core) confirmRedemption(t *trackedTrade, match *matchTracker) (bool, er
 		match.redemptionRejected = true
 		// We need to seek user approval before trying again, since new fees
 		// could be incurred.
-		actionRequest, note := newRejectedRedemptionNote(toWallet.AssetID, t.ID(), redeemCoinID)
+		actionRequest, note := newRejectedTxNote(toWallet.AssetID, t.ID(), redeemCoinID, asset.CTRedeem)
 		t.notify(note)
 		c.requestedActionMtx.Lock()
 		c.requestedActions[dex.Bytes(redeemCoinID).String()] = actionRequest
@@ -3153,6 +3221,133 @@ func (c *Core) confirmRedemption(t *trackedTrade, match *matchTracker) (bool, er
 		t.notify(note)
 	}
 	return redemptionConfirmed, nil
+}
+
+// confirmRefund checks if the user's refund has been confirmed,
+// and if so, updates the match's status to MatchConfirmed.
+//
+// This method accesses match fields and MUST be called with the trackedTrade
+// mutex lock held for writes.
+func (c *Core) confirmRefund(t *trackedTrade, match *matchTracker) (bool, error) {
+	if confs := match.refundConfs; confs > 0 && confs >= match.refundConfsReq { // already there, stop checking
+		if match.Status == order.MatchConfirmed {
+			return true, nil
+		}
+		match.Status = order.MatchConfirmed
+		err := t.db.UpdateMatch(&match.MetaMatch)
+		if err != nil {
+			t.dc.log.Errorf("failed to update match in db: %v", err)
+		}
+		subject, details := t.formatDetails(TopicRefundConfirmed, match.token(), makeOrderToken(t.token()))
+		note := newMatchNote(TopicRefundConfirmed, subject, details, db.Success, t, match)
+		t.notify(note)
+		return true, nil
+	}
+
+	// In some cases the wallet will need to send a new refund transaction.
+	fromWallet := t.wallets.fromWallet
+
+	if err := fromWallet.checkPeersAndSyncStatus(); err != nil {
+		return false, err
+	}
+
+	didUnlock, err := fromWallet.refreshUnlock()
+	if err != nil { // Just log it and try anyway.
+		t.dc.log.Errorf("refreshUnlock error checking refund %s: %v", fromWallet.Symbol, err)
+	}
+	if didUnlock {
+		t.dc.log.Warnf("Unexpected unlock needed for the %s wallet to check a refund", fromWallet.Symbol)
+	}
+
+	proof := &match.MetaData.Proof
+	refundCoinID := proof.RefundCoin
+	secretHash := proof.SecretHash
+	var swapCoinID dex.Bytes
+	if match.Side == order.Maker {
+		swapCoinID = dex.Bytes(match.MetaData.Proof.MakerSwap)
+	} else {
+		swapCoinID = dex.Bytes(match.MetaData.Proof.TakerSwap)
+	}
+	contractToRefund := match.MetaData.Proof.ContractData
+
+	match.confirmRedemptionNumTries++
+
+	refundStatus, err := fromWallet.Wallet.ConfirmTransaction(dex.Bytes(refundCoinID),
+		asset.NewRefundConfTx(swapCoinID, contractToRefund, secretHash), t.refundFee())
+	switch {
+	case err == nil:
+	case errors.Is(err, asset.ErrSwapRedeemed):
+		subject, details := t.formatDetails(TopicSwapRedeemed, match.token(), makeOrderToken(t.token()))
+		note := newMatchNote(TopicSwapRedeemed, subject, details, db.ErrorLevel, t, match)
+		t.notify(note)
+		match.Status = order.MatchConfirmed
+		err := t.db.UpdateMatch(&match.MetaMatch)
+		if err != nil {
+			t.dc.log.Errorf("Failed to update match in db %v", err)
+		}
+		return false, errors.New("swap was already redeemed by the counterparty")
+
+	case errors.Is(err, asset.ErrTxRejected):
+		match.refundRejected = true
+		// We need to seek user approval before trying again, since new fees
+		// could be incurred.
+		actionRequest, note := newRejectedTxNote(fromWallet.AssetID, t.ID(), refundCoinID, asset.CTRefund)
+		t.notify(note)
+		c.requestedActionMtx.Lock()
+		c.requestedActions[dex.Bytes(refundCoinID).String()] = actionRequest
+		c.requestedActionMtx.Unlock()
+		return false, fmt.Errorf("%s transaction %s was rejected. Seeking user approval before trying again",
+			unbip(fromWallet.AssetID), coinIDString(fromWallet.AssetID, refundCoinID))
+	case errors.Is(err, asset.ErrTxLost):
+		// The transaction was nonce-replaced or otherwise lost without
+		// rejection or with user acknowlegement. Try again.
+		match.MetaData.Proof.RefundCoin = nil
+		c.log.Infof("Redemption %s (%s) has been noted as lost.", refundCoinID, unbip(fromWallet.AssetID))
+
+		if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
+			t.dc.log.Errorf("failed to update match after lost tx reported: %v", err)
+		}
+		return false, nil
+	default:
+		match.delayTicks(time.Minute * 15)
+		return false, fmt.Errorf("error confirming refund for coin %v. already tried %d times, will retry later: %v",
+			refundCoinID, match.confirmRefundNumTries, err)
+	}
+
+	var refundResubmitted, refundConfirmed bool
+	if !bytes.Equal(refundCoinID, refundStatus.CoinID) {
+		refundResubmitted = true
+		match.MetaData.Proof.RefundCoin = order.CoinID(refundStatus.CoinID)
+	}
+
+	match.refundConfs, match.refundConfsReq = refundStatus.Confs, refundStatus.Req
+
+	if refundStatus.Confs >= refundStatus.Req {
+		refundConfirmed = true
+		match.Status = order.MatchConfirmed
+	}
+	if refundResubmitted || refundConfirmed {
+		err := t.db.UpdateMatch(&match.MetaMatch)
+		if err != nil {
+			t.dc.log.Errorf("failed to update match in db: %v", err)
+		}
+	}
+
+	if refundResubmitted {
+		subject, details := t.formatDetails(TopicRefundResubmitted, match.token(), makeOrderToken(t.token()))
+		note := newMatchNote(TopicRefundResubmitted, subject, details, db.WarningLevel, t, match)
+		t.notify(note)
+	}
+
+	if refundConfirmed {
+		subject, details := t.formatDetails(TopicRefundConfirmed, match.token(), makeOrderToken(t.token()))
+		note := newMatchNote(TopicRefundConfirmed, subject, details, db.Success, t, match)
+		t.notify(note)
+	} else {
+		note := newMatchNote(TopicConfirms, "", "", db.Data, t, match)
+		t.notify(note)
+	}
+	return refundConfirmed, nil
 }
 
 // findMakersRedemption starts a goroutine to search for the redemption of

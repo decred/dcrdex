@@ -233,12 +233,12 @@
         <div data-tmpl="errMsg" class="p-2 text-warning d-hide"></div>
       </div>
 
-      <div id="rejectedRedemptionTmpl" class="flex-stretch-column mt-2">
+      <div id="rejectedTxTmpl" class="flex-stretch-column mt-2">
         <div class="text-justify">
-          A <span data-tmpl="assetName"></span> trade redemption was rejected
-          by the network. Network transaction fees were incurred. You
-          can try to redeem again, but it will likely incur more fees and
-          it may be rejected again.
+          A <span data-tmpl="assetName"></span> trade <span data-tmpl="txType"></span>
+	  was rejected by the network. Network transaction fees were incurred.
+	  You can try to <span data-tmpl="txType"></span> again, but it will
+	  likely incur more fees and it may be rejected again.
         </div>
         <a data-tmpl="txid" class="d-block fs12 mono word-break-all border p-2 mt-2"></a>
         <div class="d-flex align-items-stretch mt-3">
