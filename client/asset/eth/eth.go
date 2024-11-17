@@ -5285,24 +5285,24 @@ func (eth *ETHWallet) checkForNewBlocks(ctx context.Context) {
 	}
 }
 
-// ConfirmRedemption checks the status of a redemption. If a transaction has
-// been fee-replaced, the caller is notified of this by having a different
-// coinID in the returned asset.ConfirmRedemptionStatus as was used to call the
+// ConfirmTransaction checks the status of a redemption or refund. If a tx
+// has been fee-replaced, the caller is notified of this by having a different
+// coinID in the returned asset.ConfirmTxStatus as was used to call the
 // function. Fee argument is ignored since it is calculated from the best
 // header.
-func (w *ETHWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset.Redemption, _ uint64) (*asset.ConfirmRedemptionStatus, error) {
+func (w *ETHWallet) ConfirmTransaction(coinID dex.Bytes, confirmTx *asset.ConfirmTx, _ uint64) (*asset.ConfirmTxStatus, error) {
 	if len(coinID) == dexeth.UserOpCoinIDLength {
-		return w.confirmUserOpRedemption(coinID, redemption)
+		return w.confirmUserOpRedemption(coinID, confirmTx)
 	}
-	return w.confirmRedemption(coinID, redemption)
+	return w.confirmTransaction(coinID, confirmTx)
 }
 
-func (w *ETHWallet) confirmUserOpRedemption(coinID dex.Bytes, redemption *asset.Redemption) (*asset.ConfirmRedemptionStatus, error) {
+func (w *ETHWallet) confirmUserOpRedemption(coinID dex.Bytes, redemption *asset.ConfirmTx) (*asset.ConfirmTxStatus, error) {
 	tip := w.tipHeight()
 	var userOpHash common.Hash
 	copy(userOpHash[:], coinID[:common.HashLength])
 
-	contractVer, locator, err := dexeth.DecodeContractData(redemption.Spends.Contract)
+	contractVer, locator, err := dexeth.DecodeContractData(redemption.Contract())
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode contract data: %w", err)
 	}
@@ -5332,7 +5332,7 @@ func (w *ETHWallet) confirmUserOpRedemption(coinID dex.Bytes, redemption *asset.
 			if err := errBasedOnStatus(asset.ErrTxRejected); err != nil {
 				return nil, err
 			}
-			return &asset.ConfirmRedemptionStatus{
+			return &asset.ConfirmTxStatus{
 				Confs:             w.finalizeConfs,
 				Req:               w.finalizeConfs,
 				CoinID:            userOpCoinID(userOpHash, txHash),
@@ -5345,7 +5345,7 @@ func (w *ETHWallet) confirmUserOpRedemption(coinID dex.Bytes, redemption *asset.
 			if err := errBasedOnStatus(asset.ErrTxLost); err != nil {
 				return nil, err
 			}
-			return &asset.ConfirmRedemptionStatus{
+			return &asset.ConfirmTxStatus{
 				Confs:             w.finalizeConfs,
 				Req:               w.finalizeConfs,
 				CoinID:            userOpCoinID(userOpHash, txHash),
@@ -5353,7 +5353,7 @@ func (w *ETHWallet) confirmUserOpRedemption(coinID dex.Bytes, redemption *asset.
 			}, nil
 		}
 
-		return &asset.ConfirmRedemptionStatus{
+		return &asset.ConfirmTxStatus{
 			Confs:             safeConfs(tip, s.blockNum),
 			Req:               w.finalizeConfs,
 			CoinID:            userOpCoinID(userOpHash, txHash),
@@ -5379,7 +5379,7 @@ func (w *ETHWallet) confirmUserOpRedemption(coinID dex.Bytes, redemption *asset.
 		if err := errBasedOnStatus(asset.ErrTxLost); err != nil {
 			return nil, err
 		}
-		return &asset.ConfirmRedemptionStatus{
+		return &asset.ConfirmTxStatus{
 			Confs:             w.finalizeConfs,
 			Req:               w.finalizeConfs,
 			CoinID:            userOpCoinID(userOpHash, common.Hash{}),
@@ -5390,7 +5390,7 @@ func (w *ETHWallet) confirmUserOpRedemption(coinID dex.Bytes, redemption *asset.
 	confs := safeConfsBig(tip, receipt.receipt.BlockNumber)
 	if confs >= w.finalizeConfs {
 		if receipt.success {
-			return &asset.ConfirmRedemptionStatus{
+			return &asset.ConfirmTxStatus{
 				Confs:             w.finalizeConfs,
 				Req:               w.finalizeConfs,
 				CoinID:            userOpCoinID(userOpHash, receipt.receipt.TxHash),
@@ -5401,7 +5401,7 @@ func (w *ETHWallet) confirmUserOpRedemption(coinID dex.Bytes, redemption *asset.
 		if err := errBasedOnStatus(asset.ErrTxRejected); err != nil {
 			return nil, err
 		}
-		return &asset.ConfirmRedemptionStatus{
+		return &asset.ConfirmTxStatus{
 			Confs:             w.finalizeConfs,
 			Req:               w.finalizeConfs,
 			CoinID:            userOpCoinID(userOpHash, receipt.receipt.TxHash),
@@ -5409,7 +5409,7 @@ func (w *ETHWallet) confirmUserOpRedemption(coinID dex.Bytes, redemption *asset.
 		}, nil
 	}
 
-	return &asset.ConfirmRedemptionStatus{
+	return &asset.ConfirmTxStatus{
 		Confs:             confs,
 		Req:               w.finalizeConfs,
 		CoinID:            userOpCoinID(userOpHash, receipt.receipt.TxHash),
@@ -5417,25 +5417,25 @@ func (w *ETHWallet) confirmUserOpRedemption(coinID dex.Bytes, redemption *asset.
 	}, nil
 }
 
-// ConfirmRedemption checks the status of a redemption. If a transaction has
-// been fee-replaced, the caller is notified of this by having a different
-// coinID in the returned asset.ConfirmRedemptionStatus as was used to call the
+// ConfirmTransaction checks the status of a redemption or refund. If a tx
+// has been fee-replaced, the caller is notified of this by having a different
+// coinID in the returned asset.ConfirmTxStatus as was used to call the
 // function. Fee argument is ignored since it is calculated from the best
 // header.
-func (w *TokenWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset.Redemption, _ uint64) (*asset.ConfirmRedemptionStatus, error) {
-	return w.confirmRedemption(coinID, redemption)
+func (w *TokenWallet) ConfirmTransaction(coinID dex.Bytes, confirmTx *asset.ConfirmTx, _ uint64) (*asset.ConfirmTxStatus, error) {
+	return w.confirmTransaction(coinID, confirmTx)
 }
 
-func confStatus(confs, req uint64, txHash common.Hash) *asset.ConfirmRedemptionStatus {
-	return &asset.ConfirmRedemptionStatus{
+func confStatus(confs, req uint64, txHash common.Hash) *asset.ConfirmTxStatus {
+	return &asset.ConfirmTxStatus{
 		Confs:  confs,
 		Req:    req,
 		CoinID: txHash[:],
 	}
 }
 
-// confirmRedemption checks the confirmation status of a redemption transaction.
-func (w *assetWallet) confirmRedemption(coinID dex.Bytes, redemption *asset.Redemption) (*asset.ConfirmRedemptionStatus, error) {
+// confirmTransaction checks the confirmation status of a transaction.
+func (w *assetWallet) confirmTransaction(coinID dex.Bytes, confirmTx *asset.ConfirmTx) (*asset.ConfirmTxStatus, error) {
 	if len(coinID) != common.HashLength {
 		return nil, fmt.Errorf("expected coin ID to be a transaction hash, but it has a length of %d",
 			len(coinID))
@@ -5443,7 +5443,7 @@ func (w *assetWallet) confirmRedemption(coinID dex.Bytes, redemption *asset.Rede
 	var txHash common.Hash
 	copy(txHash[:], coinID)
 
-	contractVer, locator, err := dexeth.DecodeContractData(redemption.Spends.Contract)
+	contractVer, locator, err := dexeth.DecodeContractData(confirmTx.Contract())
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode contract data: %w", err)
 	}
@@ -5460,7 +5460,7 @@ func (w *assetWallet) confirmRedemption(coinID dex.Bytes, redemption *asset.Rede
 			txHash = common.HexToHash(s.nonceReplacement)
 		}
 
-		var confirmStatus *asset.ConfirmRedemptionStatus
+		var confirmStatus *asset.ConfirmTxStatus
 		if s.blockNum != 0 && s.blockNum <= tip {
 			confirmStatus = confStatus(tip-s.blockNum+1, w.finalizeConfs, txHash)
 		} else {
@@ -5501,15 +5501,24 @@ func (w *assetWallet) confirmRedemption(coinID dex.Bytes, redemption *asset.Rede
 		if err != nil {
 			return nil, fmt.Errorf("error pulling swap data from contract: %v", err)
 		}
-		switch status.Step {
-		case dexeth.SSRedeemed:
-			w.log.Infof("Redemption in tx %s was apparently redeemed by another tx. OK.", txHash)
-			return confStatus(w.finalizeConfs, w.finalizeConfs, txHash), nil
-		case dexeth.SSRefunded:
-			return nil, asset.ErrSwapRefunded
+		if confirmTx.IsRedeem() {
+			switch status.Step {
+			case dexeth.SSRedeemed:
+				w.log.Infof("Redemption in tx %s was apparently redeemed by another tx. OK.", txHash)
+				return confStatus(w.finalizeConfs, w.finalizeConfs, txHash), nil
+			case dexeth.SSRefunded:
+				return nil, asset.ErrSwapRefunded
+			}
+		} else {
+			switch status.Step {
+			case dexeth.SSRedeemed:
+				return nil, asset.ErrSwapRedeemed
+			case dexeth.SSRefunded:
+				w.log.Infof("Refund in tx %s was apparently redeemed by another tx. OK.", txHash)
+				return confStatus(w.finalizeConfs, w.finalizeConfs, txHash), nil
+			}
 		}
-
-		err = fmt.Errorf("tx %s failed to redeem %s funds", txHash, dex.BipIDSymbol(w.assetID))
+		err = fmt.Errorf("tx %s failed to %s %s funds", txHash, confirmTx.TxType(), dex.BipIDSymbol(w.assetID))
 		return nil, errors.Join(err, asset.ErrTxRejected)
 	}
 	return confStatus(confs, w.finalizeConfs, txHash), nil

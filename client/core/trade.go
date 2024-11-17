@@ -3134,10 +3134,8 @@ func (c *Core) confirmRedemption(t *trackedTrade, match *matchTracker) (bool, er
 
 	match.confirmRedemptionNumTries++
 
-	redemptionStatus, err := toWallet.Wallet.ConfirmRedemption(dex.Bytes(redeemCoinID), &asset.Redemption{
-		Spends: match.counterSwap,
-		Secret: proof.Secret,
-	}, t.redeemFee())
+	redemptionStatus, err := toWallet.Wallet.ConfirmTransaction(dex.Bytes(redeemCoinID),
+		asset.NewRedeemConfTx(match.counterSwap, proof.Secret), t.redeemFee())
 	switch {
 	case err == nil:
 	case errors.Is(err, asset.ErrSwapRefunded):
