@@ -95,7 +95,11 @@ func (m *MRPCTest) rpcClient(dir string, seed []byte, endpoints []string, net de
 		return nil, fmt.Errorf("error creating wallet: %v", err)
 	}
 
-	return newMultiRPCClient(dir, endpoints, log, cfg, 3, net)
+	creds, err := walletCredentials(cfg.ChainID, dir, net)
+	if err != nil {
+		return nil, fmt.Errorf("error generating wallet credentials: %w", err)
+	}
+	return newMultiRPCClient(creds, endpoints, log, cfg, 3, net)
 }
 
 func (m *MRPCTest) TestHTTP(t *testing.T, port string) {
@@ -157,7 +161,7 @@ func (m *MRPCTest) TestSimnetMultiRPCClient(t *testing.T, wsPort, httpPort strin
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := cl.sendTransaction(ctx, txOpts, alphaAddr, nil); err != nil {
+				if _, err := cl.genSignAndSendTransaction(ctx, txOpts, alphaAddr, nil); err != nil {
 					t.Fatalf("error sending tx %d-%d: %v", i, j, err)
 				}
 			}
