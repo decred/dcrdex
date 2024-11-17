@@ -3768,6 +3768,14 @@ func (w *assetWallet) confirmTransaction(coinID dex.Bytes, confirmTx *asset.Conf
 	var txHash common.Hash
 	copy(txHash[:], coinID)
 
+	// If the status of the swap was refunded when we tried to refund, the
+	// zero hash is saved. We don't know the tx that altered the swap or
+	// how many confs it has. Assume confirmed.
+	zeroHash := common.Hash{}
+	if txHash == zeroHash {
+		return confStatus(w.finalizeConfs, w.finalizeConfs, txHash), nil
+	}
+
 	contractVer, secretHash, err := dexeth.DecodeContractData(confirmTx.Contract())
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode contract data: %w", err)
