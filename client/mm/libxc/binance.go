@@ -1248,7 +1248,6 @@ func (bnc *binance) request(ctx context.Context, method, endpoint string, query,
 
 	req.Header = header
 
-	// bnc.log.Tracef("Sending request: %+v", req)
 	var errPayload struct {
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
