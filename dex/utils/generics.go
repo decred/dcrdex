@@ -35,6 +35,14 @@ func MapKeys[K comparable, V any](m map[K]V) []K {
 	return ks
 }
 
+func Map[F any, T any](s []F, f func(F) T) []T {
+	r := make([]T, len(s))
+	for i, v := range s {
+		r[i] = f(v)
+	}
+	return r
+}
+
 func SafeSub[I constraints.Unsigned](a I, b I) I {
 	if a < b {
 		return 0

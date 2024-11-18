@@ -17,6 +17,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/dex/utils"
 )
 
 // ArbMarketMakingPlacement is the configuration for an order placement
@@ -110,13 +111,23 @@ func (a *ArbMarketMakerConfig) copy() *ArbMarketMakerConfig {
 //
 // This function is NOT thread safe.
 func (c *ArbMarketMakerConfig) updateLotSize(originalLotSize, newLotSize uint64) {
-	for _, p := range c.SellPlacements {
-		p.Lots = (p.Lots * originalLotSize) / newLotSize
+	b2a := func(p *OrderPlacement) *ArbMarketMakingPlacement {
+		return &ArbMarketMakingPlacement{
+			Lots:       p.Lots,
+			Multiplier: p.GapFactor,
+		}
 	}
-
-	for _, p := range c.BuyPlacements {
-		p.Lots = (p.Lots * originalLotSize) / newLotSize
+	a2b := func(p *ArbMarketMakingPlacement) *OrderPlacement {
+		return &OrderPlacement{
+			Lots:      p.Lots,
+			GapFactor: p.Multiplier,
+		}
 	}
+	update := func(placements []*ArbMarketMakingPlacement) []*ArbMarketMakingPlacement {
+		return utils.Map(updateLotSize(utils.Map(placements, a2b), originalLotSize, newLotSize), b2a)
+	}
+	c.SellPlacements = update(c.SellPlacements)
+	c.BuyPlacements = update(c.BuyPlacements)
 }
 
 func (a *ArbMarketMakerConfig) placementLots() *placementLots {
