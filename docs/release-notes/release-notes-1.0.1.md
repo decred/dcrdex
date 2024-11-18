@@ -2,7 +2,7 @@
 
 This release contains several important fixes and improvements.  All users are advised to update.
 
-Please read the [v1.0.1 release notes](https://github.com/decred/dcrdex/releases/tag/v1.0.0) for a full list of changes since v0.6.
+Please read the [v1.0.0 release notes](https://github.com/decred/dcrdex/releases/tag/v1.0.0) for a full list of changes since v0.6.
 
 ## Fixes and Improvements
 
