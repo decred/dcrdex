@@ -15,6 +15,7 @@ import (
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
+	"decred.org/dcrdex/dex/utils"
 )
 
 // GapStrategy is a specifier for an algorithm to choose the maker bot's target
@@ -162,19 +163,38 @@ func (c *BasicMarketMakingConfig) copy() *BasicMarketMakingConfig {
 	return &cfg
 }
 
+func updateLotSize(placements []*OrderPlacement, originalLotSize, newLotSize uint64) (updatedPlacements []*OrderPlacement) {
+	var qtyCounter uint64
+	for _, p := range placements {
+		qtyCounter += p.Lots * originalLotSize
+	}
+	newPlacements := make([]*OrderPlacement, 0, len(placements))
+	for _, p := range placements {
+		lots := uint64(math.Round((float64(p.Lots) * float64(originalLotSize)) / float64(newLotSize)))
+		lots = utils.Max(lots, 1)
+		maxLots := qtyCounter / newLotSize
+		lots = utils.Min(lots, maxLots)
+		if lots == 0 {
+			continue
+		}
+		qtyCounter -= lots * newLotSize
+		newPlacements = append(newPlacements, &OrderPlacement{
+			Lots:      lots,
+			GapFactor: p.GapFactor,
+		})
+	}
+
+	return newPlacements
+}
+
 // updateLotSize modifies the number of lots in each placement in the event
 // of a lot size change. It will place as many lots as possible without
 // exceeding the total quantity placed using the original lot size.
 //
 // This function is NOT thread safe.
 func (c *BasicMarketMakingConfig) updateLotSize(originalLotSize, newLotSize uint64) {
-	for _, p := range c.SellPlacements {
-		p.Lots = (p.Lots * originalLotSize) / newLotSize
-	}
-
-	for _, p := range c.BuyPlacements {
-		p.Lots = (p.Lots * originalLotSize) / newLotSize
-	}
+	c.SellPlacements = updateLotSize(c.SellPlacements, originalLotSize, newLotSize)
+	c.BuyPlacements = updateLotSize(c.BuyPlacements, originalLotSize, newLotSize)
 }
 
 type basicMMCalculator interface {
