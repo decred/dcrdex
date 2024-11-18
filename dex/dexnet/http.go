@@ -19,6 +19,7 @@ type RequestOption struct {
 	responseSizeLimit int64
 	statusFunc        func(int)
 	header            *[2]string
+	errThing          interface{}
 }
 
 // WithSizeLimit sets a size limit for a response. See defaultResponseSizeLimit
@@ -37,6 +38,11 @@ func WithStatusFunc(f func(int)) *RequestOption {
 func WithRequestHeader(k, v string) *RequestOption {
 	h := [2]string{k, v}
 	return &RequestOption{header: &h}
+}
+
+// WithErrorParsing adds parsing of response bodies for HTTP error responses.
+func WithErrorParsing(thing interface{}) *RequestOption {
+	return &RequestOption{errThing: thing}
 }
 
 // Post peforms an HTTP POST request. If thing is non-nil, the response will
@@ -67,6 +73,7 @@ func Get(ctx context.Context, uri string, thing interface{}, opts ...*RequestOpt
 func Do(req *http.Request, thing interface{}, opts ...*RequestOption) error {
 	var sizeLimit int64 = defaultResponseSizeLimit
 	var statusFunc func(int)
+	var errThing interface{}
 	for _, opt := range opts {
 		switch {
 		case opt.responseSizeLimit > 0:
@@ -77,6 +84,8 @@ func Do(req *http.Request, thing interface{}, opts ...*RequestOption) error {
 			h := *opt.header
 			k, v := h[0], h[1]
 			req.Header.Add(k, v)
+		case opt.errThing != nil:
+			errThing = opt.errThing
 		}
 	}
 	resp, err := http.DefaultClient.Do(req)
@@ -88,6 +97,12 @@ func Do(req *http.Request, thing interface{}, opts ...*RequestOption) error {
 		statusFunc(resp.StatusCode)
 	}
 	if resp.StatusCode != http.StatusOK {
+		if errThing != nil {
+			reader := io.LimitReader(resp.Body, sizeLimit)
+			if err = json.NewDecoder(reader).Decode(errThing); err != nil {
+				return fmt.Errorf("HTTP error: %q (code %d). error encountered parsing error body: %w", resp.Status, resp.StatusCode, err)
+			}
+		}
 		return fmt.Errorf("HTTP error: %q (code %d)", resp.Status, resp.StatusCode)
 	}
 	if thing == nil {

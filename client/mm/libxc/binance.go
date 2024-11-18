@@ -1064,12 +1064,7 @@ func (bnc *binance) CancelTrade(ctx context.Context, baseID, quoteID uint32, tra
 	v.Add("symbol", slug)
 	v.Add("origClientOrderId", tradeID)
 
-	req, err := bnc.generateRequest(ctx, "DELETE", "/api/v3/order", v, nil, true, true)
-	if err != nil {
-		return err
-	}
-
-	return requestInto(req, &struct{}{})
+	return bnc.request(ctx, "DELETE", "/api/v3/order", v, nil, true, true, nil)
 }
 
 func (bnc *binance) Balances(ctx context.Context) (map[uint32]*ExchangeBalance, error) {
@@ -1195,22 +1190,14 @@ func (bnc *binance) MatchedMarkets(ctx context.Context) (_ []*MarketMatch, err e
 }
 
 func (bnc *binance) getAPI(ctx context.Context, endpoint string, query url.Values, key, sign bool, thing interface{}) error {
-	req, err := bnc.generateRequest(ctx, http.MethodGet, endpoint, query, nil, key, sign)
-	if err != nil {
-		return fmt.Errorf("generateRequest error: %w", err)
-	}
-	return requestInto(req, thing)
+	return bnc.request(ctx, http.MethodGet, endpoint, query, nil, key, sign, thing)
 }
 
 func (bnc *binance) postAPI(ctx context.Context, endpoint string, query, form url.Values, key, sign bool, thing interface{}) error {
-	req, err := bnc.generateRequest(ctx, http.MethodPost, endpoint, query, form, key, sign)
-	if err != nil {
-		return fmt.Errorf("generateRequest error: %w", err)
-	}
-	return requestInto(req, thing)
+	return bnc.request(ctx, http.MethodPost, endpoint, query, form, key, sign, thing)
 }
 
-func (bnc *binance) generateRequest(ctx context.Context, method, endpoint string, query, form url.Values, key, sign bool) (*http.Request, error) {
+func (bnc *binance) request(ctx context.Context, method, endpoint string, query, form url.Values, key, sign bool, thing interface{}) error {
 	var fullURL string
 	if strings.Contains(endpoint, "sapi") {
 		fullURL = bnc.accountsURL + endpoint
@@ -1240,7 +1227,7 @@ func (bnc *binance) generateRequest(ctx context.Context, method, endpoint string
 		raw := queryString + bodyString
 		mac := hmac.New(sha256.New, []byte(bnc.secretKey))
 		if _, err := mac.Write([]byte(raw)); err != nil {
-			return nil, fmt.Errorf("hmax Write error: %w", err)
+			return fmt.Errorf("hmax Write error: %w", err)
 		}
 		v := url.Values{}
 		v.Set("signature", hex.EncodeToString(mac.Sum(nil)))
@@ -1256,12 +1243,21 @@ func (bnc *binance) generateRequest(ctx context.Context, method, endpoint string
 
 	req, err := http.NewRequestWithContext(ctx, method, fullURL, body)
 	if err != nil {
-		return nil, fmt.Errorf("NewRequestWithContext error: %w", err)
+		return fmt.Errorf("NewRequestWithContext error: %w", err)
 	}
 
 	req.Header = header
 
-	return req, nil
+	// bnc.log.Tracef("Sending request: %+v", req)
+	var errPayload struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+	}
+	if err := dexnet.Do(req, thing, dexnet.WithSizeLimit(1<<24), dexnet.WithErrorParsing(errPayload)); err != nil {
+		bnc.log.Errorf("request error from endpoint %q with query = %q, body = %q", endpoint, queryString, bodyString)
+		return fmt.Errorf("%w, bn code = %d, msg = %q", err, errPayload.Code, errPayload.Msg)
+	}
+	return nil
 }
 
 func (bnc *binance) handleOutboundAccountPosition(update *bntypes.StreamUpdate) {
@@ -1487,13 +1483,7 @@ func (bnc *binance) getUserDataStream(ctx context.Context) (err error) {
 			q := make(url.Values)
 			q.Add("listenKey", bnc.listenKey.Load().(string))
 			// Doing a PUT on a listenKey will extend its validity for 60 minutes.
-			req, err := bnc.generateRequest(ctx, http.MethodPut, "/api/v3/userDataStream", q, nil, true, false)
-			if err != nil {
-				bnc.log.Errorf("Error generating keep-alive request: %v. Trying again in 10 seconds.", err)
-				retryKeepAlive = time.After(time.Second * 10)
-				return
-			}
-			if err := requestInto(req, nil); err != nil {
+			if err := bnc.request(ctx, http.MethodPut, "/api/v3/userDataStream", q, nil, true, false, nil); err != nil {
 				bnc.log.Errorf("Error sending keep-alive request: %v. Trying again in 10 seconds", err)
 				retryKeepAlive = time.After(time.Second * 10)
 				return
@@ -2138,9 +2128,4 @@ func binanceMarketToDexMarkets(binanceBaseSymbol, binanceQuoteSymbol string, tok
 	}
 
 	return markets
-}
-
-func requestInto(req *http.Request, thing interface{}) error {
-	// bnc.log.Tracef("Sending request: %+v", req)
-	return dexnet.Do(req, thing, dexnet.WithSizeLimit(1<<24))
 }
