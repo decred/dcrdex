@@ -580,26 +580,6 @@ func (dc *dexConnection) hasActiveOrders() bool {
 	return false
 }
 
-// activeOrders returns a slice of active orders and inflight orders.
-func (dc *dexConnection) activeOrders() ([]*Order, []*InFlightOrder) {
-	dc.tradeMtx.RLock()
-	defer dc.tradeMtx.RUnlock()
-
-	var activeOrders []*Order
-	for _, trade := range dc.trades {
-		if trade.isActive() {
-			activeOrders = append(activeOrders, trade.coreOrder())
-		}
-	}
-
-	var inflightOrders []*InFlightOrder
-	for _, ord := range dc.inFlightOrders {
-		inflightOrders = append(inflightOrders, ord)
-	}
-
-	return activeOrders, inflightOrders
-}
-
 // findOrder returns the tracker and preimage for an order ID, and a boolean
 // indicating whether this is a cancel order.
 func (dc *dexConnection) findOrder(oid order.OrderID) (tracker *trackedTrade, isCancel bool) {
@@ -4814,38 +4794,6 @@ func (c *Core) initializePrimaryCredentials(pw []byte, oldKeyParams []byte) erro
 	subject, details := c.formatDetails(TopicUpgradedToSeed)
 	c.notify(newSecurityNote(TopicUpgradedToSeed, subject, details, db.WarningLevel))
 	return nil
-}
-
-// ActiveOrders returns a map of host to all of their active orders from db if
-// core is not yet logged in or from loaded trades map if core is logged in.
-// Inflight orders are also returned for all dex servers if any.
-func (c *Core) ActiveOrders() (map[string][]*Order, map[string][]*InFlightOrder, error) {
-	c.loginMtx.Lock()
-	loggedIn := c.loggedIn
-	c.loginMtx.Unlock()
-
-	dexInflightOrders := make(map[string][]*InFlightOrder)
-	dexActiveOrders := make(map[string][]*Order)
-	for _, dc := range c.dexConnections() {
-		if loggedIn {
-			orders, inflight := dc.activeOrders()
-			dexActiveOrders[dc.acct.host] = append(dexActiveOrders[dc.acct.host], orders...)
-			dexInflightOrders[dc.acct.host] = append(dexInflightOrders[dc.acct.host], inflight...)
-			continue
-		}
-
-		// Not logged in, load from db orders.
-		ords, err := c.dbOrders(dc.acct.host)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		for _, ord := range ords {
-			dexActiveOrders[dc.acct.host] = append(dexActiveOrders[dc.acct.host], coreOrderFromTrade(ord.Order, ord.MetaData))
-		}
-	}
-
-	return dexActiveOrders, dexInflightOrders, nil
 }
 
 // Active indicates if there are any active orders across all configured
