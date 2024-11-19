@@ -643,8 +643,8 @@ type ExchangeWallet struct {
 	oracleFees    map[uint64]feeStamped // conf target => fee rate
 	oracleFailing bool
 
-	tipMtx     sync.RWMutex
-	currentTip *block
+	handleTipMtx sync.Mutex
+	currentTip   atomic.Value // *block
 
 	// Coins returned by Fund are cached for quick reference.
 	fundingMtx   sync.RWMutex
@@ -1064,13 +1064,11 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	}
 
 	// Initialize the best block.
-	dcr.tipMtx.Lock()
-	dcr.currentTip, err = dcr.getBestBlock(ctx)
-	tip := dcr.currentTip
-	dcr.tipMtx.Unlock()
+	tip, err := dcr.getBestBlock(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error initializing best block for DCR: %w", err)
 	}
+	dcr.currentTip.Store(tip)
 	dcr.startingBlocks.Store(uint64(tip.height))
 
 	dbCM, err := dcr.startTxHistoryDB(ctx)
@@ -3592,9 +3590,7 @@ func (dcr *ExchangeWallet) lookupTxOutput(ctx context.Context, txHash *chainhash
 // LockTimeExpired returns true if the specified locktime has expired, making it
 // possible to redeem the locked coins.
 func (dcr *ExchangeWallet) LockTimeExpired(ctx context.Context, lockTime time.Time) (bool, error) {
-	dcr.tipMtx.RLock()
-	blockHash := dcr.currentTip.hash
-	dcr.tipMtx.RUnlock()
+	blockHash := dcr.cachedBestBlock().hash
 	hdr, err := dcr.wallet.GetBlockHeader(ctx, blockHash)
 	if err != nil {
 		return false, fmt.Errorf("unable to retrieve the block header: %w", err)
@@ -3657,9 +3653,7 @@ func (dcr *ExchangeWallet) FindRedemption(ctx context.Context, coinID, _ dex.Byt
 	if contractBlock == nil {
 		dcr.findRedemptionsInMempool([]outPoint{contractOutpoint})
 	} else {
-		dcr.tipMtx.RLock()
-		bestBlock := dcr.currentTip
-		dcr.tipMtx.RUnlock()
+		bestBlock := dcr.cachedBestBlock()
 		dcr.findRedemptionsInBlockRange(contractBlock.height, bestBlock.height, []outPoint{contractOutpoint})
 	}
 
@@ -4833,11 +4827,8 @@ func (dcr *ExchangeWallet) SyncStatus() (ss *asset.SyncStatus, err error) {
 		}
 
 		if wasSynced := dcr.previouslySynced.Swap(synced); synced && !wasSynced {
-			dcr.tipMtx.RLock()
-			tip := dcr.currentTip
-			dcr.tipMtx.RUnlock()
-
-			dcr.syncTxHistory(dcr.ctx, uint64(tip.height))
+			tip := dcr.cachedBestBlock()
+			go dcr.syncTxHistory(dcr.ctx, uint64(tip.height))
 		}
 	}()
 
@@ -6630,11 +6621,7 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 			return
 		}
 
-		dcr.tipMtx.RLock()
-		sameTip := dcr.currentTip.hash.IsEqual(newTip.hash)
-		dcr.tipMtx.RUnlock()
-
-		if sameTip {
+		if dcr.cachedBestBlock().hash.IsEqual(newTip.hash) {
 			return
 		}
 
@@ -6682,9 +6669,7 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 				// Mempool tx seen.
 				dcr.emitBalance()
 
-				dcr.tipMtx.RLock()
-				tip := dcr.currentTip
-				dcr.tipMtx.RUnlock()
+				tip := dcr.cachedBestBlock()
 				dcr.syncTxHistory(ctx, uint64(tip.height))
 				continue
 			}
@@ -6712,11 +6697,10 @@ func (dcr *ExchangeWallet) handleTipChange(ctx context.Context, newTipHash *chai
 	}
 
 	// Lock to avoid concurrent handleTipChange execution for simplicity.
-	dcr.tipMtx.Lock()
-	defer dcr.tipMtx.Unlock()
+	dcr.handleTipMtx.Lock()
+	defer dcr.handleTipMtx.Unlock()
 
-	prevTip := dcr.currentTip
-	dcr.currentTip = &block{newTipHeight, newTipHash}
+	prevTip := dcr.currentTip.Swap(&block{newTipHeight, newTipHash}).(*block)
 
 	dcr.log.Tracef("tip change: %d (%s) => %d (%s)", prevTip.height, prevTip.hash, newTipHeight, newTipHash)
 
@@ -6849,10 +6833,8 @@ func (dcr *ExchangeWallet) blockHeader(ctx context.Context, blockHash *chainhash
 	return blockHeader, true, validMainchain, nil
 }
 
-func (dcr *ExchangeWallet) cachedBestBlock() block {
-	dcr.tipMtx.RLock()
-	defer dcr.tipMtx.RUnlock()
-	return *dcr.currentTip
+func (dcr *ExchangeWallet) cachedBestBlock() *block {
+	return dcr.currentTip.Load().(*block)
 }
 
 // wireBytes dumps the serialized transaction bytes.
