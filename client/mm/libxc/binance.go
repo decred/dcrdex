@@ -1253,7 +1253,7 @@ func (bnc *binance) request(ctx context.Context, method, endpoint string, query,
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
 	}
-	if err := dexnet.Do(req, thing, dexnet.WithSizeLimit(1<<24), dexnet.WithErrorParsing(errPayload)); err != nil {
+	if err := dexnet.Do(req, thing, dexnet.WithSizeLimit(1<<24), dexnet.WithErrorParsing(&errPayload)); err != nil {
 		bnc.log.Errorf("request error from endpoint %q with query = %q, body = %q", endpoint, queryString, bodyString)
 		return fmt.Errorf("%w, bn code = %d, msg = %q", err, errPayload.Code, errPayload.Msg)
 	}
