@@ -404,9 +404,9 @@ func (db *badgerTxDB) getTxs(n int, refID *common.Hash, past bool, tokenID *uint
 // getPendingTxs returns a map of nonce to extendedWalletTx for all
 // pending transactions.
 func (db *badgerTxDB) getPendingTxs() ([]*extendedWalletTx, error) {
-	// We will be iterating backwards from the most recent nonce.
-	// If we find numConfirmedTxsToCheck consecutive confirmed transactions,
-	// we can stop iterating.
+	// We will be iterating backwards from the most recent nonce. If we find
+	// numConfirmedTxsToCheck consecutive confirmed transactions, we can stop
+	// iterating.
 	const numConfirmedTxsToCheck = 20
 
 	txs := make([]*extendedWalletTx, 0, 4)
