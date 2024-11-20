@@ -43,6 +43,10 @@ func (req *FindRedemptionReq) sendResult(res *FindRedemptionResult) {
 	}
 }
 
+func (req *FindRedemptionReq) PkScript() []byte {
+	return req.pkScript
+}
+
 // FindRedemptionResult models the result of a find redemption attempt.
 type FindRedemptionResult struct {
 	redemptionCoinID dex.Bytes
@@ -505,7 +509,7 @@ func (r *RedemptionFinder) CancelRedemptionSearches() {
 	r.mtx.Unlock()
 }
 
-func findRedemptionsInTxWithHasher(ctx context.Context, segwit bool, reqs map[OutPoint]*FindRedemptionReq, msgTx *wire.MsgTx,
+func FindRedemptionsInTxWithHasher(ctx context.Context, segwit bool, reqs map[OutPoint]*FindRedemptionReq, msgTx *wire.MsgTx,
 	chainParams *chaincfg.Params, hashTx func(*wire.MsgTx) *chainhash.Hash) (discovered map[OutPoint]*FindRedemptionResult) {
 
 	discovered = make(map[OutPoint]*FindRedemptionResult, len(reqs))
