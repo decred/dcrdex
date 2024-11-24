@@ -2692,6 +2692,7 @@ func TestServer(t *testing.T) {
 		tCore.PostBond(&core.PostBondForm{Addr: firstDEX, Bond: 1, Asset: &assetID})
 	}
 
+	var appVersion = "1.0.2+release.local"
 	s, err := New(&Config{
 		Core: tCore,
 		MarketMaker: &TMarketMaker{
@@ -2703,7 +2704,7 @@ func TestServer(t *testing.T) {
 		Logger:   logger,
 		NoEmbed:  true, // use files on disk, and reload on each page load
 		HttpProf: true,
-	})
+	}, appVersion)
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)
 	}
