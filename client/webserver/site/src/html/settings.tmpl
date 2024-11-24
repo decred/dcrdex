@@ -79,7 +79,8 @@
       <div id="gameCodeLink" class="py-3 mb-3 border-bottom pointer hoverbg">
         <span class="ico-ticket"></span> [[[Redeem game code]]]
       </div>
-      <p class="grey">[[[Build ID]]]: <span id="commitHash" class="mono"></span></p>
+      {{$version := .AppVersion}}
+      <p class="grey">[[[Build ID]]]: <span id="version" class="mono">{{$version}}</span></p>
     </div>
   </section>
 

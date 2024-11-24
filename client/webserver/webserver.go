@@ -271,12 +271,13 @@ type WebServer struct {
 	bondBuf    map[uint32]valStamp
 
 	useDEXBranding bool
+	appVersion     string
 }
 
 // New is the constructor for a new WebServer. CustomSiteDir in the Config can
 // be left blank, in which case a handful of default locations will be checked.
 // This will work in most cases.
-func New(cfg *Config) (*WebServer, error) {
+func New(cfg *Config, appVersion string) (*WebServer, error) {
 	log = cfg.Logger
 
 	// Only look for files on disk if NoEmbed is set. This is necessary since
@@ -392,6 +393,7 @@ func New(cfg *Config) (*WebServer, error) {
 		cachedPasswords: make(map[string]*cachedPassword),
 		bondBuf:         map[uint32]valStamp{},
 		useDEXBranding:  useDEXBranding,
+		appVersion:      appVersion,
 	}
 	s.lang.Store(lang)
 

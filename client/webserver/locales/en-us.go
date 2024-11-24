@@ -167,7 +167,7 @@ var EnUS = map[string]*intl.Translation{
 	"browser_ntfn_blocked":      {T: "Browser notifications are currently blocked.  Please unblock this site in your browser to receive notifications."},
 	"enable_browser_ntfn_info":  {T: "Desktop notifications appear even when this window is not active.  When you have other applications open this can be helpful as you will be notified on DCRDEX events.  Customize below the types of notifications you would like to receive."},
 	"Save Notifications":        {T: "Save Notifications"},
-	"Build ID":                  {T: "Build ID"},
+	"Build ID":                  {T: "Version"},
 	"Connect":                   {T: "Connect"},
 	"Send":                      {T: "Send"},
 	"Deposit":                   {T: "Deposit"}, // unused

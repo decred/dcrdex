@@ -143,6 +143,7 @@ type Config struct {
 	WebConfig
 	LogConfig
 	MMConfig
+	AppVersion string
 	// AppData and ConfigPath should be parsed from the command-line,
 	// as it makes no sense to set these in the config file itself. If no values
 	// are assigned, defaults will be used.
@@ -348,6 +349,7 @@ func ResolveConfig(appData string, cfg *Config) error {
 	if cfg.MMConfig.EventLogDBPath == "" {
 		cfg.MMConfig.EventLogDBPath = defaultMMEventLogDBPath
 	}
+
 	return nil
 }
 

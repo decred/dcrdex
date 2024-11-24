@@ -6,9 +6,10 @@ const StyleLintPlugin = require('stylelint-webpack-plugin')
 const ESLintPlugin = require('eslint-webpack-plugin')
 
 const child_process = require('child_process')
-function git(command) {
-  return child_process.execSync(`git ${command}`, { encoding: 'utf8' }).trim();
-}
+// TODO: Remove
+// function git(command) {
+//   return child_process.execSync(`git ${command}`, { encoding: 'utf8' }).trim();
+// }
 
 module.exports = {
   target: "web",
@@ -38,9 +39,10 @@ module.exports = {
     ]
   },
   plugins: [
-    new webpack.EnvironmentPlugin({
-      COMMITHASH: git('rev-parse HEAD'),
-    }),
+    // TODO: Remove
+    // new webpack.EnvironmentPlugin({
+    //   COMMITHASH: git('rev-parse HEAD'),
+    // }),
     new CleanWebpackPlugin(),
     new MiniCssExtractPlugin({
       filename: '../dist/style.css'

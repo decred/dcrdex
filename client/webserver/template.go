@@ -5,18 +5,14 @@ package webserver
 
 import (
 	"bytes"
-	"encoding/hex"
 	"fmt"
 	"html/template"
 	"io/fs"
 	"os"
 	"strings"
 
-	"runtime/debug"
-
 	"decred.org/dcrdex/client/intl"
 	"decred.org/dcrdex/client/webserver/locales"
-	"decred.org/dcrdex/dex/encode"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -188,17 +184,18 @@ func (t *templates) exec(name string, data any) (string, error) {
 	return page.String(), err
 }
 
-var commit = func() string {
-	if info, ok := debug.ReadBuildInfo(); ok {
-		for _, setting := range info.Settings {
-			if setting.Key == "vcs.revision" && len(setting.Value) >= 8 {
-				return setting.Value
-			}
-		}
-	}
+// TODO: Remove
+// var commit = func() string {
+// 	if info, ok := debug.ReadBuildInfo(); ok {
+// 		for _, setting := range info.Settings {
+// 			if setting.Key == "vcs.revision" && len(setting.Value) >= 8 {
+// 				return setting.Value
+// 			}
+// 		}
+// 	}
 
-	return hex.EncodeToString(encode.RandomBytes(4))
-}()
+// 	return hex.EncodeToString(encode.RandomBytes(4))
+// }()
 
 // templateFuncs are able to be called during template execution.
 var templateFuncs = template.FuncMap{
@@ -228,7 +225,8 @@ var templateFuncs = template.FuncMap{
 		}
 		return parts[0]
 	},
-	"commitHash": func() string {
-		return commit[:8]
-	},
+	// TODO: Remove
+	// "commitHash": func() string {
+	// 	return commit[:8]
+	// },
 }

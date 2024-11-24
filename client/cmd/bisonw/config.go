@@ -13,6 +13,7 @@ func configure() (*app.Config, error) {
 	// or the version flag was specified. Override any environment variables
 	// with parsed command line flags.
 	iniCfg := app.DefaultConfig
+	iniCfg.AppVersion = app.Version
 	preCfg := iniCfg
 	if err := app.ParseCLIConfig(&preCfg); err != nil {
 		return nil, err

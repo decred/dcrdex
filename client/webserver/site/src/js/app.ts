@@ -161,7 +161,7 @@ export default class Application {
   authed: boolean
   user: User
   seedGenTime: number
-  commitHash: string
+  // commitHash: string // TODO: Remove
   showPopups: boolean
   loggers: Record<string, boolean>
   recorders: Record<string, LogMessage[]>
@@ -185,14 +185,15 @@ export default class Application {
     this.notes = []
     this.pokes = []
     this.seedGenTime = 0
-    this.commitHash = process.env.COMMITHASH || ''
+    // this.commitHash = process.env.COMMITHASH || '' // TODO: Remove
     this.noteReceivers = []
     this.fiatRatesMap = {}
     this.showPopups = State.fetchLocal(State.popupsLK) === '1'
     this.txHistoryMap = {}
     this.requiredActions = {}
 
-    console.log('Bison Wallet, Build', this.commitHash.substring(0, 7))
+    console.log('Bison Wallet')
+    // console.log('Bison Wallet, Build', this.commitHash.substring(0, 7)) // TODO: Remove
 
     // Set Bootstrap dark theme attribute if dark mode is enabled.
     if (State.isDark()) {
@@ -261,7 +262,8 @@ export default class Application {
     // Don't fetch the user until we know what page we're on.
     await this.fetchUser()
     const ignoreCachedLocale = process.env.NODE_ENV === 'development'
-    await intl.loadLocale(this.lang, this.commitHash, ignoreCachedLocale)
+    await intl.loadLocale(this.lang, ignoreCachedLocale)
+    // await intl.loadLocale(this.lang, this.commitHash, ignoreCachedLocale) // TODO: Remove
     // The application is free to respond with a page that differs from the
     // one requested in the omnibox, e.g. routing though a login page. Set the
     // current URL state based on the actual page.
