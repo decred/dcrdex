@@ -1352,6 +1352,10 @@ function botProblemMessages (problems: BotProblems | undefined, cexName: string,
     msgs.push(intl.prep(intl.ID_CAUSES_SELF_MATCH))
   }
 
+  if (problems.unknownError) {
+    msgs.push(problems.unknownError)
+  }
+
   return msgs
 }
 

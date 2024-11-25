@@ -565,7 +565,7 @@ type Wallet interface {
 	// FundMultiOrder funds multiple orders at once. The return values will
 	// be in the same order as the passed orders. If less values are returned
 	// than the number of orders, then the orders at the end of the list were
-	// not about to be funded.
+	// not able to be funded.
 	FundMultiOrder(ord *MultiOrder, maxLock uint64) (coins []Coins, redeemScripts [][]dex.Bytes, fundingFees uint64, err error)
 	// MaxFundingFees returns the max fees that could be paid for funding a swap.
 	MaxFundingFees(numTrades uint32, feeRate uint64, options map[string]string) uint64
