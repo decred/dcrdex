@@ -3630,11 +3630,14 @@ func (u *unifiedExchangeAdaptor) tradingLimitNotReached(epochNum uint64) bool {
 		if err == nil && !tradingLimitReached {
 			return
 		}
-
+		var unknownErr string
+		if err != nil {
+			unknownErr = err.Error()
+		}
 		u.updateEpochReport(&EpochReport{
 			PreOrderProblems: &BotProblems{
 				UserLimitTooLow: tradingLimitReached,
-				UnknownError:    err,
+				UnknownError:    unknownErr,
 			},
 			EpochNum: epochNum,
 		})
@@ -3707,6 +3710,10 @@ func (u *unifiedExchangeAdaptor) checkBotHealth(epochNum uint64) (healthy bool) 
 		if healthy {
 			return
 		}
+		var unknownErr string
+		if err != nil {
+			unknownErr = err.Error()
+		}
 		problems := &BotProblems{
 			NoWalletPeers: map[uint32]bool{
 				u.baseID:  baseAssetNoPeers,
@@ -3717,7 +3724,7 @@ func (u *unifiedExchangeAdaptor) checkBotHealth(epochNum uint64) (healthy bool) 
 				u.quoteID: quoteAssetNotSynced,
 			},
 			AccountSuspended: accountSuspended,
-			UnknownError:     err,
+			UnknownError:     unknownErr,
 		}
 		u.updateEpochReport(&EpochReport{
 			PreOrderProblems: problems,
