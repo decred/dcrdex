@@ -264,7 +264,7 @@ type BotProblems struct {
 	// CausesSelfMatch is true if the order would cause a self match.
 	CausesSelfMatch bool `json:"causesSelfMatch"`
 	// UnknownError is set if an error occurred that was not one of the above.
-	UnknownError error `json:"unknownError"`
+	UnknownError string `json:"unknownError"`
 }
 
 // EpochReport contains a report of a bot's activity during an epoch.

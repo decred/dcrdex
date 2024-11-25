@@ -68,5 +68,5 @@ func updateBotProblemsBasedOnError(problems *BotProblems, err error) {
 		return
 	}
 
-	problems.UnknownError = err
+	problems.UnknownError = err.Error()
 }
