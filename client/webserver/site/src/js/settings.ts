@@ -61,13 +61,6 @@ export default class SettingsPage extends BasePage {
       app().showPopups = show
     })
 
-    // TODO: Remove
-    // page.commitHash.textContent = app().commitHash.substring(0, 7)
-    // Doc.bind(page.addADex, 'click', () => {
-    //   this.dexAddrForm.refresh()
-    //   this.showForm(page.dexAddrForm)
-    // })
-
     this.fiatRateSources.forEach(src => {
       Doc.bind(src, 'change', async () => {
         const res = await postJSON('/api/toggleratesource', {

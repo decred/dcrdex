@@ -1275,7 +1275,6 @@ export interface Application {
   exchanges: Record<string, Exchange>
   fiatRatesMap: Record<number, number>
   showPopups: boolean
-  // commitHash: string // TODO: Remove
   authed: boolean
   start (): Promise<void>
   reconnected (): void

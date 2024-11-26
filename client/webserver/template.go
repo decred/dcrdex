@@ -184,19 +184,6 @@ func (t *templates) exec(name string, data any) (string, error) {
 	return page.String(), err
 }
 
-// TODO: Remove
-// var commit = func() string {
-// 	if info, ok := debug.ReadBuildInfo(); ok {
-// 		for _, setting := range info.Settings {
-// 			if setting.Key == "vcs.revision" && len(setting.Value) >= 8 {
-// 				return setting.Value
-// 			}
-// 		}
-// 	}
-
-// 	return hex.EncodeToString(encode.RandomBytes(4))
-// }()
-
 // templateFuncs are able to be called during template execution.
 var templateFuncs = template.FuncMap{
 	"toUpper": strings.ToUpper,
@@ -225,8 +212,4 @@ var templateFuncs = template.FuncMap{
 		}
 		return parts[0]
 	},
-	// TODO: Remove
-	// "commitHash": func() string {
-	// 	return commit[:8]
-	// },
 }
