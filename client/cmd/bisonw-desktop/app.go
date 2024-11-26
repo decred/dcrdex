@@ -222,7 +222,7 @@ func mainCore() error {
 		}()
 	}
 
-	webSrv, err := webserver.New(cfg.Web(clientCore, marketMaker, logMaker.Logger("WEB"), utc))
+	webSrv, err := webserver.New(cfg.Web(clientCore, marketMaker, logMaker.Logger("WEB"), utc), cfg.AppVersion)
 	if err != nil {
 		return fmt.Errorf("failed creating web server: %w", err)
 	}
