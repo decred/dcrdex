@@ -596,7 +596,7 @@ var ZhCN = map[string]*intl.Translation{
 	"Commited": {T: "已承诺" },
 	"Required": {T: "必需" },
 	"OK": {T: "确定" },
-	"remote exchange gap": {T: "远程交易所差价", "Notes": "CEX订单簿上的差价" },
+	"remote exchange gap": {T: "远程交易所差价"},
 	"Match buffer": {T: "匹配缓冲区" },
 	"Price increment": {T: "价格增量" },
 	"Profit threshold": {T: "利润阈值" },
