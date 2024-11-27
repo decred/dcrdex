@@ -5759,23 +5759,29 @@ type MultiTradeResult struct {
 // MultiTrade is used to place multiple standing limit orders on the same
 // side of the same market simultaneously.
 func (c *Core) MultiTrade(pw []byte, form *MultiTradeForm) []*MultiTradeResult {
-	results := make([]*MultiTradeResult, len(form.Placements))
+	results := make([]*MultiTradeResult, 0, len(form.Placements))
+
 	reqs, err := c.prepareMultiTradeRequests(pw, form)
 	if err != nil {
-		for i := range results {
-			results[i] = &MultiTradeResult{Error: err}
+		for range form.Placements {
+			results = append(results, &MultiTradeResult{Error: err})
 		}
 		return results
 	}
 
-	for i, req := range reqs {
-		var corder *Order
-		corder, err = c.sendTradeRequest(req)
-		if err != nil {
-			results[i] = &MultiTradeResult{Error: err}
+	for i := range form.Placements {
+		if i >= len(reqs) {
+			results = append(results, &MultiTradeResult{Error: errors.New("wallet unable to fund order")})
 			continue
 		}
-		results[i] = &MultiTradeResult{Order: corder}
+
+		req := reqs[i]
+		corder, err := c.sendTradeRequest(req)
+		if err != nil {
+			results = append(results, &MultiTradeResult{Error: err})
+			continue
+		}
+		results = append(results, &MultiTradeResult{Order: corder})
 	}
 
 	return results
