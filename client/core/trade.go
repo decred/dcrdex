@@ -3086,141 +3086,49 @@ func (c *Core) confirmRedemptions(t *trackedTrade, matches []*matchTracker) {
 // This method accesses match fields and MUST be called with the trackedTrade
 // mutex lock held for writes.
 func (c *Core) confirmRedemption(t *trackedTrade, match *matchTracker) (bool, error) {
-	if confs := match.redemptionConfs; confs > 0 && confs >= match.redemptionConfsReq { // already there, stop checking
-		if len(match.MetaData.Proof.Auth.RedeemSig) == 0 && (!t.isSelfGoverned() && !match.MetaData.Proof.IsRevoked()) {
-			return false, nil // waiting on redeem request to succeed
-		}
-		// Redeem request just succeeded or we gave up on the server.
-		if match.Status == order.MatchConfirmed {
-			return true, nil // raced with concurrent sendRedeemAsync
-		}
-		match.Status = order.MatchConfirmed
-		err := t.db.UpdateMatch(&match.MetaMatch)
-		if err != nil {
-			t.dc.log.Errorf("failed to update match in db: %v", err)
-		}
-		subject, details := t.formatDetails(TopicRedemptionConfirmed, match.token(), makeOrderToken(t.token()))
-		note := newMatchNote(TopicRedemptionConfirmed, subject, details, db.Success, t, match)
-		t.notify(note)
-		return true, nil
-	}
-
-	// In some cases the wallet will need to send a new redeem transaction.
-	toWallet := t.wallets.toWallet
-
-	if err := toWallet.checkPeersAndSyncStatus(); err != nil {
-		return false, err
-	}
-
-	didUnlock, err := toWallet.refreshUnlock()
-	if err != nil { // Just log it and try anyway.
-		t.dc.log.Errorf("refreshUnlock error checking redeem %s: %v", toWallet.Symbol, err)
-	}
-	if didUnlock {
-		t.dc.log.Warnf("Unexpected unlock needed for the %s wallet to check a redemption", toWallet.Symbol)
-	}
-
-	proof := &match.MetaData.Proof
-	var redeemCoinID order.CoinID
-	if match.Side == order.Maker {
-		redeemCoinID = proof.MakerRedeem
-	} else {
-		redeemCoinID = proof.TakerRedeem
-	}
-
-	match.confirmRedemptionNumTries++
-
-	redemptionStatus, err := toWallet.Wallet.ConfirmTransaction(dex.Bytes(redeemCoinID),
-		asset.NewRedeemConfTx(match.counterSwap, proof.Secret), t.redeemFee())
-	switch {
-	case err == nil:
-	case errors.Is(err, asset.ErrSwapRefunded):
-		subject, details := t.formatDetails(TopicSwapRefunded, match.token(), makeOrderToken(t.token()))
-		note := newMatchNote(TopicSwapRefunded, subject, details, db.ErrorLevel, t, match)
-		t.notify(note)
-		match.Status = order.MatchConfirmed
-		err := t.db.UpdateMatch(&match.MetaMatch)
-		if err != nil {
-			t.dc.log.Errorf("Failed to update match in db %v", err)
-		}
-		return false, errors.New("swap was already refunded by the counterparty")
-
-	case errors.Is(err, asset.ErrTxRejected):
-		match.redemptionRejected = true
-		// We need to seek user approval before trying again, since new fees
-		// could be incurred.
-		actionRequest, note := newRejectedTxNote(toWallet.AssetID, t.ID(), redeemCoinID, asset.CTRedeem)
-		t.notify(note)
-		c.requestedActionMtx.Lock()
-		c.requestedActions[dex.Bytes(redeemCoinID).String()] = actionRequest
-		c.requestedActionMtx.Unlock()
-		return false, fmt.Errorf("%s transaction %s was rejected. Seeking user approval before trying again",
-			unbip(toWallet.AssetID), coinIDString(toWallet.AssetID, redeemCoinID))
-	case errors.Is(err, asset.ErrTxLost):
-		// The transaction was nonce-replaced or otherwise lost without
-		// rejection or with user acknowlegement. Try again.
-		var coinID order.CoinID
-		if match.Side == order.Taker {
-			coinID = match.MetaData.Proof.TakerRedeem
-			match.MetaData.Proof.TakerRedeem = nil
-			match.Status = order.MakerRedeemed
-		} else {
-			coinID = match.MetaData.Proof.MakerRedeem
-			match.MetaData.Proof.MakerRedeem = nil
-			match.Status = order.TakerSwapCast
-		}
-		c.log.Infof("Redemption %s (%s) has been noted as lost.", coinID, unbip(toWallet.AssetID))
-
-		if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
-			t.dc.log.Errorf("failed to update match after lost tx reported: %v", err)
-		}
-		return false, nil
-	default:
-		match.delayTicks(time.Minute * 15)
-		return false, fmt.Errorf("error confirming redemption for coin %v. already tried %d times, will retry later: %v",
-			redeemCoinID, match.confirmRedemptionNumTries, err)
-	}
-
-	var redemptionResubmitted, redemptionConfirmed bool
-	if !bytes.Equal(redeemCoinID, redemptionStatus.CoinID) {
-		redemptionResubmitted = true
-		if match.Side == order.Maker {
-			proof.MakerRedeem = order.CoinID(redemptionStatus.CoinID)
-		} else {
-			proof.TakerRedeem = order.CoinID(redemptionStatus.CoinID)
-		}
-	}
-
-	match.redemptionConfs, match.redemptionConfsReq = redemptionStatus.Confs, redemptionStatus.Req
-
-	if redemptionStatus.Confs >= redemptionStatus.Req &&
-		(len(match.MetaData.Proof.Auth.RedeemSig) > 0 || t.isSelfGoverned()) {
-		redemptionConfirmed = true
-		match.Status = order.MatchConfirmed
-	}
-
-	if redemptionResubmitted || redemptionConfirmed {
-		err := t.db.UpdateMatch(&match.MetaMatch)
-		if err != nil {
-			t.dc.log.Errorf("failed to update match in db: %v", err)
-		}
-	}
-
-	if redemptionResubmitted {
-		subject, details := t.formatDetails(TopicRedemptionResubmitted, match.token(), makeOrderToken(t.token()))
-		note := newMatchNote(TopicRedemptionResubmitted, subject, details, db.WarningLevel, t, match)
-		t.notify(note)
-	}
-
-	if redemptionConfirmed {
-		subject, details := t.formatDetails(TopicRedemptionConfirmed, match.token(), makeOrderToken(t.token()))
-		note := newMatchNote(TopicRedemptionConfirmed, subject, details, db.Success, t, match)
-		t.notify(note)
-	} else {
-		note := newMatchNote(TopicConfirms, "", "", db.Data, t, match)
-		t.notify(note)
-	}
-	return redemptionConfirmed, nil
+	return c.confirmTx(t, match, &txInfo{
+		confs:          match.redemptionConfs,
+		confsReq:       match.redemptionConfsReq,
+		numTries:       &match.confirmRedemptionNumTries,
+		wallet:         t.wallets.toWallet,
+		coinID:         match.MetaData.Proof.MakerRedeem,
+		txType:         asset.CTRedeem,
+		fee:            t.redeemFee,
+		isRejected:     &match.redemptionRejected,
+		needsRedeemSig: true,
+		confTx: func() (*asset.ConfirmTxStatus, error) {
+			proof := &match.MetaData.Proof
+			var redeemCoinID order.CoinID
+			if match.Side == order.Maker {
+				redeemCoinID = proof.MakerRedeem
+			} else {
+				redeemCoinID = proof.TakerRedeem
+			}
+			return t.wallets.toWallet.Wallet.ConfirmTransaction(dex.Bytes(redeemCoinID),
+				asset.NewRedeemConfTx(match.counterSwap, proof.Secret), t.redeemFee())
+		},
+		handleResubmit: func(newCoinID []byte) {
+			proof := &match.MetaData.Proof
+			if match.Side == order.Maker {
+				proof.MakerRedeem = order.CoinID(newCoinID)
+			} else {
+				proof.TakerRedeem = order.CoinID(newCoinID)
+			}
+		},
+		handleLostTx: func() {
+			if match.Side == order.Taker {
+				match.MetaData.Proof.TakerRedeem = nil
+				match.Status = order.MakerRedeemed
+			} else {
+				match.MetaData.Proof.MakerRedeem = nil
+				match.Status = order.TakerSwapCast
+			}
+		},
+		resubmitTopic:    TopicRedemptionResubmitted,
+		confirmedTopic:   TopicRedemptionConfirmed,
+		counterTxSuccess: TopicSwapRefunded,
+		counterTxError:   "swap was already refunded by the counterparty",
+	})
 }
 
 // confirmRefund checks if the user's refund has been confirmed,
@@ -3229,7 +3137,64 @@ func (c *Core) confirmRedemption(t *trackedTrade, match *matchTracker) (bool, er
 // This method accesses match fields and MUST be called with the trackedTrade
 // mutex lock held for writes.
 func (c *Core) confirmRefund(t *trackedTrade, match *matchTracker) (bool, error) {
-	if confs := match.refundConfs; confs > 0 && confs >= match.refundConfsReq { // already there, stop checking
+	return c.confirmTx(t, match, &txInfo{
+		confs:          match.refundConfs,
+		confsReq:       match.refundConfsReq,
+		numTries:       &match.confirmRefundNumTries,
+		wallet:         t.wallets.fromWallet,
+		coinID:         match.MetaData.Proof.RefundCoin,
+		txType:         asset.CTRefund,
+		fee:            t.refundFee,
+		isRejected:     &match.refundRejected,
+		needsRedeemSig: false,
+		confTx: func() (*asset.ConfirmTxStatus, error) {
+			proof := &match.MetaData.Proof
+			var swapCoinID dex.Bytes
+			if match.Side == order.Maker {
+				swapCoinID = dex.Bytes(match.MetaData.Proof.MakerSwap)
+			} else {
+				swapCoinID = dex.Bytes(match.MetaData.Proof.TakerSwap)
+			}
+			return t.wallets.fromWallet.Wallet.ConfirmTransaction(dex.Bytes(proof.RefundCoin),
+				asset.NewRefundConfTx(swapCoinID, proof.ContractData, proof.SecretHash), t.refundFee())
+		},
+		handleResubmit: func(newCoinID []byte) {
+			match.MetaData.Proof.RefundCoin = order.CoinID(newCoinID)
+		},
+		handleLostTx: func() {
+			match.MetaData.Proof.RefundCoin = nil
+		},
+		resubmitTopic:    TopicRefundResubmitted,
+		confirmedTopic:   TopicRefundConfirmed,
+		counterTxSuccess: TopicSwapRedeemed,
+		counterTxError:   "swap was already redeemed by the counterparty",
+	})
+}
+
+type txInfo struct {
+	confs            uint64
+	confsReq         uint64
+	numTries         *int
+	wallet           *xcWallet
+	coinID           order.CoinID
+	txType           asset.ConfirmTxType
+	fee              func() uint64
+	isRejected       *bool
+	needsRedeemSig   bool
+	confTx           func() (*asset.ConfirmTxStatus, error)
+	handleResubmit   func([]byte)
+	handleLostTx     func()
+	resubmitTopic    Topic
+	confirmedTopic   Topic
+	counterTxSuccess Topic
+	counterTxError   string
+}
+
+func (c *Core) confirmTx(t *trackedTrade, match *matchTracker, info *txInfo) (bool, error) {
+	if info.confs > 0 && info.confs >= info.confsReq { // already there, stop checking
+		if info.needsRedeemSig && len(match.MetaData.Proof.Auth.RedeemSig) == 0 && (!t.isSelfGoverned() && !match.MetaData.Proof.IsRevoked()) {
+			return false, nil // waiting on redeem request to succeed
+		}
 		if match.Status == order.MatchConfirmed {
 			return true, nil
 		}
@@ -3238,71 +3203,52 @@ func (c *Core) confirmRefund(t *trackedTrade, match *matchTracker) (bool, error)
 		if err != nil {
 			t.dc.log.Errorf("failed to update match in db: %v", err)
 		}
-		subject, details := t.formatDetails(TopicRefundConfirmed, match.token(), makeOrderToken(t.token()))
-		note := newMatchNote(TopicRefundConfirmed, subject, details, db.Success, t, match)
+		subject, details := t.formatDetails(info.confirmedTopic, match.token(), makeOrderToken(t.token()))
+		note := newMatchNote(info.confirmedTopic, subject, details, db.Success, t, match)
 		t.notify(note)
 		return true, nil
 	}
 
-	// In some cases the wallet will need to send a new refund transaction.
-	fromWallet := t.wallets.fromWallet
-
-	if err := fromWallet.checkPeersAndSyncStatus(); err != nil {
+	if err := info.wallet.checkPeersAndSyncStatus(); err != nil {
 		return false, err
 	}
 
-	didUnlock, err := fromWallet.refreshUnlock()
+	didUnlock, err := info.wallet.refreshUnlock()
 	if err != nil { // Just log it and try anyway.
-		t.dc.log.Errorf("refreshUnlock error checking refund %s: %v", fromWallet.Symbol, err)
+		t.dc.log.Errorf("refreshUnlock error checking %s: %v", info.wallet.Symbol, err)
 	}
 	if didUnlock {
-		t.dc.log.Warnf("Unexpected unlock needed for the %s wallet to check a refund", fromWallet.Symbol)
+		t.dc.log.Warnf("Unexpected unlock needed for the %s wallet to check a transaction", info.wallet.Symbol)
 	}
 
-	proof := &match.MetaData.Proof
-	refundCoinID := proof.RefundCoin
-	secretHash := proof.SecretHash
-	var swapCoinID dex.Bytes
-	if match.Side == order.Maker {
-		swapCoinID = dex.Bytes(match.MetaData.Proof.MakerSwap)
-	} else {
-		swapCoinID = dex.Bytes(match.MetaData.Proof.TakerSwap)
-	}
-	contractToRefund := match.MetaData.Proof.ContractData
+	*info.numTries++
 
-	match.confirmRedemptionNumTries++
-
-	refundStatus, err := fromWallet.Wallet.ConfirmTransaction(dex.Bytes(refundCoinID),
-		asset.NewRefundConfTx(swapCoinID, contractToRefund, secretHash), t.refundFee())
+	status, err := info.confTx()
 	switch {
 	case err == nil:
-	case errors.Is(err, asset.ErrSwapRedeemed):
-		subject, details := t.formatDetails(TopicSwapRedeemed, match.token(), makeOrderToken(t.token()))
-		note := newMatchNote(TopicSwapRedeemed, subject, details, db.ErrorLevel, t, match)
+	case errors.Is(err, asset.ErrSwapRefunded), errors.Is(err, asset.ErrSwapRedeemed):
+		subject, details := t.formatDetails(info.counterTxSuccess, match.token(), makeOrderToken(t.token()))
+		note := newMatchNote(info.counterTxSuccess, subject, details, db.ErrorLevel, t, match)
 		t.notify(note)
 		match.Status = order.MatchConfirmed
 		err := t.db.UpdateMatch(&match.MetaMatch)
 		if err != nil {
 			t.dc.log.Errorf("Failed to update match in db %v", err)
 		}
-		return false, errors.New("swap was already redeemed by the counterparty")
+		return false, errors.New(info.counterTxError)
 
 	case errors.Is(err, asset.ErrTxRejected):
-		match.refundRejected = true
-		// We need to seek user approval before trying again, since new fees
-		// could be incurred.
-		actionRequest, note := newRejectedTxNote(fromWallet.AssetID, t.ID(), refundCoinID, asset.CTRefund)
+		*info.isRejected = true
+		actionRequest, note := newRejectedTxNote(info.wallet.AssetID, t.ID(), info.coinID, info.txType)
 		t.notify(note)
 		c.requestedActionMtx.Lock()
-		c.requestedActions[dex.Bytes(refundCoinID).String()] = actionRequest
+		c.requestedActions[dex.Bytes(info.coinID).String()] = actionRequest
 		c.requestedActionMtx.Unlock()
 		return false, fmt.Errorf("%s transaction %s was rejected. Seeking user approval before trying again",
-			unbip(fromWallet.AssetID), coinIDString(fromWallet.AssetID, refundCoinID))
+			unbip(info.wallet.AssetID), coinIDString(info.wallet.AssetID, info.coinID))
 	case errors.Is(err, asset.ErrTxLost):
-		// The transaction was nonce-replaced or otherwise lost without
-		// rejection or with user acknowlegement. Try again.
-		match.MetaData.Proof.RefundCoin = nil
-		c.log.Infof("Redemption %s (%s) has been noted as lost.", refundCoinID, unbip(fromWallet.AssetID))
+		info.handleLostTx()
+		c.log.Infof("Transaction %s (%s) has been noted as lost.", info.coinID, unbip(info.wallet.AssetID))
 
 		if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
 			t.dc.log.Errorf("failed to update match after lost tx reported: %v", err)
@@ -3310,44 +3256,52 @@ func (c *Core) confirmRefund(t *trackedTrade, match *matchTracker) (bool, error)
 		return false, nil
 	default:
 		match.delayTicks(time.Minute * 15)
-		return false, fmt.Errorf("error confirming refund for coin %v. already tried %d times, will retry later: %v",
-			refundCoinID, match.confirmRefundNumTries, err)
+		return false, fmt.Errorf("error confirming transaction for coin %v. already tried %d times, will retry later: %v",
+			info.coinID, *info.numTries, err)
 	}
 
-	var refundResubmitted, refundConfirmed bool
-	if !bytes.Equal(refundCoinID, refundStatus.CoinID) {
-		refundResubmitted = true
-		match.MetaData.Proof.RefundCoin = order.CoinID(refundStatus.CoinID)
+	var resubmitted, confirmed bool
+	if !bytes.Equal(info.coinID, status.CoinID) {
+		resubmitted = true
+		info.handleResubmit(status.CoinID)
 	}
 
-	match.refundConfs, match.refundConfsReq = refundStatus.Confs, refundStatus.Req
-
-	if refundStatus.Confs >= refundStatus.Req {
-		refundConfirmed = true
-		match.Status = order.MatchConfirmed
+	if info.txType == asset.CTRedeem {
+		match.redemptionConfs, match.redemptionConfsReq = status.Confs, status.Req
+		if status.Confs >= status.Req && (len(match.MetaData.Proof.Auth.RedeemSig) > 0 || t.isSelfGoverned()) {
+			confirmed = true
+			match.Status = order.MatchConfirmed
+		}
+	} else {
+		match.refundConfs, match.refundConfsReq = status.Confs, status.Req
+		if status.Confs >= status.Req {
+			confirmed = true
+			match.Status = order.MatchConfirmed
+		}
 	}
-	if refundResubmitted || refundConfirmed {
+
+	if resubmitted || confirmed {
 		err := t.db.UpdateMatch(&match.MetaMatch)
 		if err != nil {
 			t.dc.log.Errorf("failed to update match in db: %v", err)
 		}
 	}
 
-	if refundResubmitted {
-		subject, details := t.formatDetails(TopicRefundResubmitted, match.token(), makeOrderToken(t.token()))
-		note := newMatchNote(TopicRefundResubmitted, subject, details, db.WarningLevel, t, match)
+	if resubmitted {
+		subject, details := t.formatDetails(info.resubmitTopic, match.token(), makeOrderToken(t.token()))
+		note := newMatchNote(info.resubmitTopic, subject, details, db.WarningLevel, t, match)
 		t.notify(note)
 	}
 
-	if refundConfirmed {
-		subject, details := t.formatDetails(TopicRefundConfirmed, match.token(), makeOrderToken(t.token()))
-		note := newMatchNote(TopicRefundConfirmed, subject, details, db.Success, t, match)
+	if confirmed {
+		subject, details := t.formatDetails(info.confirmedTopic, match.token(), makeOrderToken(t.token()))
+		note := newMatchNote(info.confirmedTopic, subject, details, db.Success, t, match)
 		t.notify(note)
 	} else {
 		note := newMatchNote(TopicConfirms, "", "", db.Data, t, match)
 		t.notify(note)
 	}
-	return refundConfirmed, nil
+	return confirmed, nil
 }
 
 // findMakersRedemption starts a goroutine to search for the redemption of
