@@ -642,7 +642,7 @@ type Bonder interface {
 	// the first bond to ensure it succeeds, assuming balance was checked.
 	BondsFeeBuffer(feeRate uint64) uint64
 
-	// SetReserves sets the bond reserve amount for the wallet.
+	// SetBondReserves sets the bond reserve amount for the wallet.
 	SetBondReserves(reserves uint64)
 
 	// MakeBondTx authors a DEX time-locked fidelity bond transaction for the
@@ -876,7 +876,7 @@ type TokenMaster interface {
 // AccountLocker is a wallet in which redemptions and refunds require a wallet
 // to have available balance to pay fees.
 type AccountLocker interface {
-	// ReserveNRedemption is used when preparing funding for an order that
+	// ReserveNRedemptions is used when preparing funding for an order that
 	// redeems to an account-based asset. The wallet will set aside the
 	// appropriate amount of funds so that we can redeem N swaps using the
 	// specified fee and asset version. It is an error to request funds >
