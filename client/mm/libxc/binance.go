@@ -449,8 +449,8 @@ type tradeInfo struct {
 }
 
 type withdrawInfo struct {
-	minimum         uint64
-	integerMultiple float64
+	minimum uint64
+	lotSize uint64
 }
 
 type binance struct {
@@ -627,10 +627,9 @@ func (bnc *binance) readCoins(coins []*bntypes.CoinInfo) {
 				tokenIDs[nfo.Coin] = append(tokenIDs[nfo.Coin], assetID)
 			}
 			minimum := uint64(math.Round(float64(ui.Conventional.ConversionFactor) * netInfo.WithdrawMin))
-			integerMultiple := netInfo.WithdrawIntegerMultiple
 			minWithdraw[assetID] = &withdrawInfo{
-				minimum:         minimum,
-				integerMultiple: integerMultiple,
+				minimum: minimum,
+				lotSize: uint64(math.Round(netInfo.WithdrawIntegerMultiple * float64(ui.Conventional.ConversionFactor))),
 			}
 		}
 	}
@@ -659,12 +658,44 @@ func (bnc *binance) getMarkets(ctx context.Context) (map[string]*bntypes.Market,
 	}
 
 	marketsMap := make(map[string]*bntypes.Market, len(exchangeInfo.Symbols))
+	tokenIDs := bnc.tokenIDs.Load().(map[string][]uint32)
 	for _, market := range exchangeInfo.Symbols {
+		dexMarkets := binanceMarketToDexMarkets(market.BaseAsset, market.QuoteAsset, tokenIDs, bnc.isUS)
+		if len(dexMarkets) == 0 {
+			continue
+		}
+		dexMkt := dexMarkets[0]
+
+		bui, _ := asset.UnitInfo(dexMkt.BaseID)
+		qui, _ := asset.UnitInfo(dexMkt.QuoteID)
+
+		var rateStepFound, lotSizeFound bool
+		for _, filter := range market.Filters {
+			if filter.Type == "PRICE_FILTER" {
+				rateStepFound = true
+				conv := float64(qui.Conventional.ConversionFactor) / float64(bui.Conventional.ConversionFactor) * calc.RateEncodingFactor
+				market.RateStep = uint64(math.Round(filter.TickSize * conv))
+				market.MinPrice = uint64(math.Round(filter.MinPrice * conv))
+				market.MaxPrice = uint64(math.Round(filter.MaxPrice * conv))
+			} else if filter.Type == "LOT_SIZE" {
+				lotSizeFound = true
+				market.LotSize = uint64(math.Round(filter.StepSize * float64(bui.Conventional.ConversionFactor)))
+				market.MinQty = uint64(math.Round(filter.MinQty * float64(bui.Conventional.ConversionFactor)))
+				market.MaxQty = uint64(math.Round(filter.MaxQty * float64(bui.Conventional.ConversionFactor)))
+			}
+			if rateStepFound && lotSizeFound {
+				break
+			}
+		}
+		if !rateStepFound || !lotSizeFound {
+			bnc.log.Errorf("missing filter for market %s, rate step found = %t, lot size found = %t", dexMkt.MarketID, rateStepFound, lotSizeFound)
+			continue
+		}
+
 		marketsMap[market.Symbol] = market
 	}
 
 	bnc.markets.Store(marketsMap)
-
 	return marketsMap, nil
 }
 
@@ -777,50 +808,14 @@ func (bnc *binance) generateTradeID() string {
 	return hex.EncodeToString(append(bnc.tradeIDNoncePrefix, nonceB...))
 }
 
-func applyPriceFilter(price float64, filters []*bntypes.Filter) (string, error) {
-	var priceFilter *bntypes.Filter
-	for _, filter := range filters {
-		if filter.Type == "PRICE_FILTER" {
-			priceFilter = filter
-		}
+// steppedRate rounds the rate to the nearest integer multiple of the step.
+// The minimum returned value is step.
+func steppedRate(r, step uint64) uint64 {
+	steps := math.Round(float64(r) / float64(step))
+	if steps == 0 {
+		return step
 	}
-	if priceFilter == nil {
-		return "", fmt.Errorf("no price filter found")
-	}
-	if priceFilter.MinPrice > 0 && price < priceFilter.MinPrice {
-		return "", fmt.Errorf("price is below min price: %v", price)
-	}
-	if priceFilter.MaxPrice > 0 && price > priceFilter.MaxPrice {
-		return "", fmt.Errorf("price is above max price: %v", price)
-	}
-	if priceFilter.TickSize == 0 {
-		return strconv.FormatFloat(price, 'f', -1, 64), nil
-	}
-
-	return steppedAmount(price, priceFilter.TickSize), nil
-}
-
-func applyLotSizeFilter(qty float64, filters []*bntypes.Filter) (string, error) {
-	var lotSizeFilter *bntypes.Filter
-	for _, filter := range filters {
-		if filter.Type == "LOT_SIZE" {
-			lotSizeFilter = filter
-		}
-	}
-	if lotSizeFilter == nil {
-		return "", fmt.Errorf("no lot size filter found")
-	}
-	if qty < lotSizeFilter.MinQty {
-		return "", fmt.Errorf("quantity is below min quantity: %v", qty)
-	}
-	if qty > lotSizeFilter.MaxQty {
-		return "", fmt.Errorf("quantity is above max quantity: %v", qty)
-	}
-	if lotSizeFilter.StepSize == 0 {
-		return "", fmt.Errorf("lot size filter step size == 0")
-	}
-
-	return steppedAmount(qty, lotSizeFilter.StepSize), nil
+	return uint64(math.Round(steps * float64(step)))
 }
 
 // Trade executes a trade on the CEX. subscriptionID takes an ID returned from
@@ -849,17 +844,21 @@ func (bnc *binance) Trade(ctx context.Context, baseID, quoteID uint32, sell bool
 		return nil, fmt.Errorf("market not found: %v", slug)
 	}
 
+	if rate < market.MinPrice || rate > market.MaxPrice {
+		return nil, fmt.Errorf("rate %v is out of bounds for market %v", rate, slug)
+	}
+	rate = steppedRate(rate, market.RateStep)
 	convRate := calc.ConventionalRateAlt(rate, baseCfg.conversionFactor, quoteCfg.conversionFactor)
-	price, err := applyPriceFilter(convRate, market.Filters)
-	if err != nil {
-		return nil, fmt.Errorf("error applying price filter: %v", err)
-	}
+	ratePrec := int(math.Round(math.Log10(calc.RateEncodingFactor * float64(baseCfg.conversionFactor) / float64(quoteCfg.conversionFactor) / float64(market.RateStep))))
+	rateStr := strconv.FormatFloat(convRate, 'f', ratePrec, 64)
 
-	convQty := float64(qty) / float64(baseCfg.conversionFactor)
-	quantity, err := applyLotSizeFilter(convQty, market.Filters)
-	if err != nil {
-		return nil, fmt.Errorf("error applying lot size filter: %v", err)
+	if qty < market.MinQty || qty > market.MaxQty {
+		return nil, fmt.Errorf("quantity %v is out of bounds for market %v", qty, slug)
 	}
+	steppedQty := steppedRate(qty, market.LotSize)
+	convQty := float64(steppedQty) / float64(baseCfg.conversionFactor)
+	qtyPrec := int(math.Round(math.Log10(float64(baseCfg.conversionFactor) / float64(market.LotSize))))
+	qtyStr := strconv.FormatFloat(convQty, 'f', qtyPrec, 64)
 
 	tradeID := bnc.generateTradeID()
 
@@ -869,8 +868,8 @@ func (bnc *binance) Trade(ctx context.Context, baseID, quoteID uint32, sell bool
 	v.Add("type", "LIMIT")
 	v.Add("timeInForce", "GTC")
 	v.Add("newClientOrderId", tradeID)
-	v.Add("quantity", quantity)
-	v.Add("price", price)
+	v.Add("quantity", qtyStr)
+	v.Add("price", rateStr)
 
 	bnc.tradeUpdaterMtx.Lock()
 	_, found = bnc.tradeUpdaters[subscriptionID]
@@ -962,44 +961,6 @@ func (bnc *binance) ConfirmWithdrawal(ctx context.Context, withdrawalID string, 
 	return uint64(amt), status.TxID, nil
 }
 
-func floatToScaledUint(f float64) (uint64, int) {
-	str := strconv.FormatFloat(f, 'f', -1, 64)
-	parts := strings.Split(str, ".")
-	scaledStr := parts[0]
-	decimalPlaces := 0
-	if len(parts) == 2 {
-		scaledStr += parts[1]
-		decimalPlaces = len(parts[1])
-	}
-	scaledValue, _ := strconv.ParseUint(scaledStr, 10, 64)
-	return scaledValue, decimalPlaces
-}
-
-func scaledUintToString(u uint64, decimalPlaces int) string {
-	numStr := strconv.FormatUint(u, 10)
-	if decimalPlaces == 0 {
-		return numStr
-	}
-	length := len(numStr)
-	if decimalPlaces > length {
-		leadingZeros := decimalPlaces - length
-		return "0." + fmt.Sprintf("%0*d%s", leadingZeros, 0, numStr)
-	} else if decimalPlaces == length {
-		return "0." + numStr
-	} else {
-		return numStr[:length-decimalPlaces] + "." + numStr[length-decimalPlaces:]
-	}
-}
-
-func steppedAmount(amt float64, stepSize float64) string {
-	steps := uint64(math.Round(amt / stepSize))
-	if steps == 0 {
-		steps = 1
-	}
-	scaled, prec := floatToScaledUint(stepSize)
-	return scaledUintToString(steps*scaled, prec)
-}
-
 // Withdraw withdraws funds from the CEX to a certain address. onComplete
 // is called with the actual amount withdrawn (amt - fees) and the
 // transaction ID of the withdrawal.
@@ -1009,19 +970,21 @@ func (bnc *binance) Withdraw(ctx context.Context, assetID uint32, qty uint64, ad
 		return "", fmt.Errorf("error getting symbol data for %d: %w", assetID, err)
 	}
 
-	integerMultiple, err := bnc.withdrawIntegerMultiple(assetID)
+	lotSize, err := bnc.withdrawLotSize(assetID)
 	if err != nil {
-		return "", fmt.Errorf("error getting integer multiple for %d: %w", assetID, err)
+		return "", fmt.Errorf("error getting withdraw lot size for %d: %w", assetID, err)
 	}
 
-	convQty := float64(qty) / float64(assetCfg.conversionFactor)
-	amt := steppedAmount(convQty, integerMultiple)
+	steppedQty := steppedRate(qty, lotSize)
+	convQty := float64(steppedQty) / float64(assetCfg.conversionFactor)
+	prec := int(math.Round(math.Log10(float64(assetCfg.conversionFactor) / float64(lotSize))))
+	qtyStr := strconv.FormatFloat(convQty, 'f', prec, 64)
 
 	v := make(url.Values)
 	v.Add("coin", assetCfg.coin)
 	v.Add("network", assetCfg.chain)
 	v.Add("address", address)
-	v.Add("amount", amt)
+	v.Add("amount", qtyStr)
 
 	withdrawResp := struct {
 		ID string `json:"id"`
@@ -1200,13 +1163,16 @@ func (bnc *binance) minimumWithdraws(baseID, quoteID uint32) (base uint64, quote
 	return
 }
 
-func (bnc *binance) withdrawIntegerMultiple(assetID uint32) (float64, error) {
+func (bnc *binance) withdrawLotSize(assetID uint32) (uint64, error) {
 	minsI := bnc.minWithdraw.Load()
 	if minsI == nil {
 		return 0, fmt.Errorf("no withdraw info")
 	}
 	mins := minsI.(map[uint32]*withdrawInfo)
-	return mins[assetID].integerMultiple, nil
+	if info, found := mins[assetID]; found {
+		return info.lotSize, nil
+	}
+	return 0, fmt.Errorf("no withdraw info for asset ID %d", assetID)
 }
 
 func (bnc *binance) Markets(ctx context.Context) (map[string]*Market, error) {
@@ -1363,7 +1329,7 @@ func (bnc *binance) request(ctx context.Context, method, endpoint string, query,
 		Msg  string `json:"msg"`
 	}
 	if err := dexnet.Do(req, thing, dexnet.WithSizeLimit(1<<24), dexnet.WithErrorParsing(&errPayload)); err != nil {
-		bnc.log.Errorf("request error from endpoint %q with query = %q, body = %q", endpoint, queryString, bodyString)
+		bnc.log.Errorf("request error from endpoint %s %q with query = %q, body = %q", method, endpoint, queryString, bodyString)
 		return fmt.Errorf("%w, bn code = %d, msg = %q", err, errPayload.Code, errPayload.Msg)
 	}
 	return nil

@@ -25,6 +25,14 @@ type Market struct {
 	QuoteAssetPrecision int       `json:"quoteAssetPrecision"`
 	OrderTypes          []string  `json:"orderTypes"`
 	Filters             []*Filter `json:"filters"`
+
+	// Below fields are parsed from Filters.
+	LotSize  uint64
+	MinQty   uint64
+	MaxQty   uint64
+	RateStep uint64
+	MinPrice uint64
+	MaxPrice uint64
 }
 
 type Balance struct {
