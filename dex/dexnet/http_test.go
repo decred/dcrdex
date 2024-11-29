@@ -1,33 +1,29 @@
-//go:build live
-
 package dexnet
 
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
-func TestGet(t *testing.T) {
+func TestErrorParsing(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	uri := "https://dcrdata.decred.org/api/block/best"
-	var resp struct {
-		Height int64 `json:"height"`
-	}
-	var code int
-	if err := Get(ctx, uri, &resp, WithStatusFunc(func(c int) { code = c })); err != nil {
-		t.Fatalf("Get error: %v", err)
-	}
-	if resp.Height == 0 {
-		t.Fatal("Height not parsed")
-	}
-	if code != http.StatusOK {
-		t.Fatalf("expected code 200, got %d", code)
-	}
-	// Check size limit
-	if err := Get(ctx, uri, &resp, WithSizeLimit(1)); err == nil {
-		t.Fatal("Didn't get parse error for low size limit")
-	}
 
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"code": -150, "msg": "you messed up, bruh"}`, http.StatusBadRequest)
+	}))
+	defer ts.Close()
+
+	var errPayload struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+	}
+	if err := Get(ctx, ts.URL, nil, WithErrorParsing(&errPayload)); err == nil {
+		t.Fatal("didn't get an http error")
+	}
+	if errPayload.Code != -150 || errPayload.Msg != "you messed up, bruh" {
+		t.Fatal("unexpected error body")
+	}
 }
