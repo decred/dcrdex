@@ -105,7 +105,7 @@ NOT EVEN BISON WALLET OR DECRED DEVELOPERS!**_
   
 # Wallet Synchronization
 
-After the [Quick Configuration](quick-configuration) wizard has been completed, the 
+After the [Quick Configuration](Quick-Configuration) wizard has been completed, the 
 [Wallet](Wallet) view will be displayed, the Block Synch indicator 
  on each wallet shows the progress as each blockchain is synchronized.
 

@@ -60,12 +60,12 @@ will have to post a bond to maintain their trading tier.
 # Bond Submission
 
 Once the bond asset is selected, a prompt to select the 
-[Trading Tier](./Using-Bison-Wallet#changing-trading-tier) will appear.
+[Trading Tier](Managing-your-DCRDEX-Accounts#changing-trading-tier) will appear.
 Increasing your tier enables trading of larger quantities at a time. A higher tier also 
 increase your capacity for violations before trading privileges are completely suspended.
 
 Trading limits are also increased as you establish 
-[reputation](./Using-Bison-Wallet#reputation-score) by engaging 
+[reputation](Managing-your-DCRDEX-Accounts#reputation-score) by engaging 
 in normal trading activity and successfully completing matches.
 
 

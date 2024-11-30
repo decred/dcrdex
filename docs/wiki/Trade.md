@@ -65,13 +65,13 @@ clicking the `Show Trading Tier Info` button.
 <img src="./images/using-bison-wallet/trade-tradingtier-2.png" width="400" alt="">
 
 * **Parcel Size:** A server-side configurable parameter on DCRDEX, set individually for each market. 
-It defines the number of [lots](#lot-size) a user can trade based on their trading tier. 
+It defines the number of [lots](Order-Management#lot-size) a user can trade based on their trading tier. 
 In markets with low-fee assets, lot sizes may be very small, resulting in a larger parcel size. 
 Conversely, markets with high-fee assets generally have larger lot sizes, where a smaller parcel 
 size may be more appropriate.
 * **Trading Tier:** Reflects your account's current actual trading tier with the DCRDEX server,
-determined based on your active [bonds](./Bison-Wallet-Setup-Guide.md#fidelity-bonds) 
-and [reputation score](#reputation-score).
+determined based on your active [bonds](Creating-a-DCRDEX-Server-Account#fidelity-bonds)
+and [reputation score](Managing-your-DCRDEX-Accounts#reputation-score).
 When your trading tier falls below 1, your booked orders will be revoked.
 * **Trading Limits:** The maximum number of lots you can trade in the selected market, 
 calculated based on the market’s parcel size and your actual trading tier.
@@ -88,7 +88,7 @@ can be viewed by clicking the **Show Reputation** button.
 
 <img src="./images/using-bison-wallet/trade-reputation-2.png" width="400" alt="">
 
-Read more about reputation in the [managing your DCRDEX accounts](#managing-your-dcrdex-accounts)
+Read more about reputation in the [managing your DCRDEX accounts](Managing-your-DCRDEX-Accounts)
 section of this wiki.
 
 ## Your Orders
@@ -108,7 +108,7 @@ the <img src="./images/using-bison-wallet/button-link.png" width="20" alt=""> bu
 * **Type:** The type of order. "limit", "market", or "cancel".
 * **Side**: buy or sell.
 * **Status:** The status of the order: epoch, booked, executed, canceled, or revoked.
-Read more about status in the [Order Details View](#order-details-view) section of this wiki.
+Read more about status in the [Order Details View](Order-Management#order-details) section of this wiki.
 * **Age:** The time that this order has been active in human readable form.
 * **Quantity:** The amount being traded.
 * **Filled:** The order quantity that has been matched.
