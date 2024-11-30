@@ -14,7 +14,7 @@ and ran the [Quick Configuration](Quick-Configuration).
 
 # Create Account
 
-Clicking the `Trade` button in the header will navigate to the [Trade](./Using-Bison-Wallet.md#trade) view.
+Clicking the `Trade` button in the header will navigate to the [Trade](Trade) view.
 The available markets on the connected DCRDEX servers are listed on the left side of the screen.
 
 
@@ -41,7 +41,7 @@ This will open the `Select Bond Asset` prompt.
 
 A fidelity bond are funds that are temporarily locked in an on-chain contract,
 which is only redeemable by the user who posted the bond after a certain time.
-Fidelity Bonds act as an incentive good behaviour on the DCRDEX servers and are required for
+Fidelity Bonds act as an incentive for good behaviour on the DCRDEX servers and are required for
 creating an account on every server. 
 
 ### Pre-paid Bonds
@@ -60,12 +60,12 @@ will have to post a bond to maintain their trading tier.
 # Bond Submission
 
 Once the bond asset is selected, a prompt to select the 
-[Trading Tier](./Using-Bison-Wallet.md#changing-trading-tier) will appear.
+[Trading Tier](./Using-Bison-Wallet#changing-trading-tier) will appear.
 Increasing your tier enables trading of larger quantities at a time. A higher tier also 
 increase your capacity for violations before trading privileges are completely suspended.
 
 Trading limits are also increased as you establish 
-[reputation](./Using-Bison-Wallet.md#reputation-score) by engaging 
+[reputation](./Using-Bison-Wallet#reputation-score) by engaging 
 in normal trading activity and successfully completing matches.
 
 
@@ -73,8 +73,8 @@ in normal trading activity and successfully completing matches.
 <img src="./images/setup-guide/bond-2.png" width="1200" alt="">
 
 
-Clicking the `Submit` button display a new prompt indicating the requirements for submitting 
-a bond with the selected asset. The synchronization status and available funds, along with 
+Clicking the `Submit` button displays a new prompt indicating the requirements for submitting 
+a bond with the selected asset, the synchronization status and available funds, along with 
 a deposit address for the selected bond asset. 
 
 This is your own wallet, and you can send as much as you like to it since only the amount 

@@ -1,6 +1,6 @@
 <a id="top"/>
 
-**Looking to contribute? We need your help** to make DEX &#35;1.
+**Looking to contribute? We need your help** to make DEX \#1.
 
 Nearly all development is done in Go and JavaScript. Work is coordinated
 through [the repo issues](https://github.com/decred/dcrdex/issues),

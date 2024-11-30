@@ -10,7 +10,7 @@ For a step-by-step guide of the download, installation and configuration of Biso
 see the [Getting Started](Getting-Started) section.
 
 If you're a developer and interested in contributing, jump to the
-the [Development and Contributing](Development-and-Contributing) section.
+ [Development and Contributing](Development-and-Contributing) section.
 
 
 # What is Bison Wallet?
@@ -18,8 +18,8 @@ the [Development and Contributing](Development-and-Contributing) section.
 Bison Wallet is a multi-coin wallet developed in concert with [DCRDEX](#what-is-dcrdex) 
 and [Tatanka Mesh](#tatanka-mesh). Bison Wallet leverages state-of-the-art blockchain 
 technology to bring more features and more privacy for your favorite assets. DCRDEX is 
-built-in, as well as advanced trading features like market-making and arbitrage, directly
-from your wallet.
+built-in and has advanced trading features like market-making and arbitrage with funds 
+directlyfrom your wallet.
 
 Our goal is to find a balance of convenience and privacy that works for you,
 while giving you access to advanced features most wallets ignore. For many

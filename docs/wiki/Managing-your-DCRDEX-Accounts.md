@@ -34,9 +34,9 @@ determined based on your active [bonds](Creating-a-DCRDEX-Server-Account#fidelit
 and [reputation](#reputation-score) score.
 * **Penalties:** the number of tiers that are currently revoked due to low user score.
 * **Bonds Pending Refund:** expired bonds that are pending a refund transaction.
-* **Auto Reneww:** enable automatic bond renewal for the selected target tier.
+* **Auto Renew:** enable automatic bond renewal for the selected target tier.
 * **Penalty Comps:** enable posting additional bonds to offset penalized tiers.
-* **Reputation:** current [reputation](#reputation-score) score for the associated DCRDEX server account.
+* **Score:** current [reputation](#reputation-score) score for the associated DCRDEX server account.
 
 # Changing Trading Tier
 
