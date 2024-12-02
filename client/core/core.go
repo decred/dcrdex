@@ -479,6 +479,9 @@ func (c *Core) exchangeInfo(dc *dexConnection) *Exchange {
 			AcctID:           acctID,
 			ConnectionStatus: dc.status(),
 			Disabled:         dc.acct.isDisabled(),
+			Markets:          make(map[string]*Market),
+			Assets:           make(map[uint32]*dex.Asset),
+			BondAssets:       make(map[string]*BondAsset),
 		}
 	}
 
