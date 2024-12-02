@@ -238,8 +238,9 @@ type Config struct {
 	// should be used by default since site files from older distributions may
 	// be present on the disk. When NoEmbed is true, this also implies reloading
 	// and execution of html templates on each request.
-	NoEmbed  bool
-	HttpProf bool
+	NoEmbed    bool
+	HttpProf   bool
+	AppVersion string
 }
 
 type valStamp struct {
@@ -277,7 +278,7 @@ type WebServer struct {
 // New is the constructor for a new WebServer. CustomSiteDir in the Config can
 // be left blank, in which case a handful of default locations will be checked.
 // This will work in most cases.
-func New(cfg *Config, appVersion string) (*WebServer, error) {
+func New(cfg *Config) (*WebServer, error) {
 	log = cfg.Logger
 
 	// Only look for files on disk if NoEmbed is set. This is necessary since
@@ -393,7 +394,7 @@ func New(cfg *Config, appVersion string) (*WebServer, error) {
 		cachedPasswords: make(map[string]*cachedPassword),
 		bondBuf:         map[uint32]valStamp{},
 		useDEXBranding:  useDEXBranding,
-		appVersion:      appVersion,
+		appVersion:      cfg.AppVersion,
 	}
 	s.lang.Store(lang)
 

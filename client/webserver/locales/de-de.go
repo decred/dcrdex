@@ -135,7 +135,7 @@ var DeDE = map[string]*intl.Translation{
 	"Export Account":            {T: "Account exportieren"},
 	"simultaneous_servers_msg":  {T: "Der <span class=brand></span> unterstützt die gleichzeitige Nutzung einer beliebigen Anzahl von DEX-Servern."},
 	"Change App Password":       {T: "App-Passwort ändern"},
-	"Build ID":                  {T: "Version"},
+	"Version":                   {T: "Version"},
 	"Connect":                   {T: "Verbinden"},
 	"Send":                      {T: "Senden"},
 	"Deposit":                   {T: "Einzahlen"},

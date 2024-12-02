@@ -143,7 +143,6 @@ type Config struct {
 	WebConfig
 	LogConfig
 	MMConfig
-	AppVersion string
 	// AppData and ConfigPath should be parsed from the command-line,
 	// as it makes no sense to set these in the config file itself. If no values
 	// are assigned, defaults will be used.
@@ -163,7 +162,7 @@ type Config struct {
 // Web creates a configuration for the webserver. This is a Config method
 // instead of a WebConfig method because Language is an app-level setting used
 // by both core and rpcserver.
-func (cfg *Config) Web(c *core.Core, mm *mm.MarketMaker, log dex.Logger, utc bool) *webserver.Config {
+func (cfg *Config) Web(c *core.Core, mm *mm.MarketMaker, log dex.Logger, utc bool, appVersion string) *webserver.Config {
 	addr := cfg.WebAddr
 	host, _, err := net.SplitHostPort(addr)
 	if err == nil && host != "" {
@@ -197,6 +196,7 @@ func (cfg *Config) Web(c *core.Core, mm *mm.MarketMaker, log dex.Logger, utc boo
 		NoEmbed:       cfg.NoEmbedSite,
 		HttpProf:      cfg.HTTPProfile,
 		Language:      cfg.Language,
+		AppVersion:    appVersion,
 	}
 }
 

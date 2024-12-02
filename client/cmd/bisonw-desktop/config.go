@@ -49,8 +49,6 @@ func configure() (*Config, error) {
 		return nil, err
 	}
 
-	cfg.AppVersion = app.Version
-
 	// Resolve unset fields.
 	return &cfg, app.ResolveConfig(appData, &cfg.Config)
 }
