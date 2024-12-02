@@ -2145,7 +2145,7 @@ func (m *TMarketMaker) MarketReport(host string, baseID, quoteID uint32) (*mm.Ma
 	}, nil
 }
 
-func (m *TMarketMaker) StartBot(startCfg *mm.StartConfig, alternateConfigPath *string, appPW []byte) (err error) {
+func (m *TMarketMaker) StartBot(startCfg *mm.StartConfig, alternateConfigPath *string, appPW []byte, overrideLotSizeUpdate bool) (err error) {
 	m.runningBotsMtx.Lock()
 	defer m.runningBotsMtx.Unlock()
 
