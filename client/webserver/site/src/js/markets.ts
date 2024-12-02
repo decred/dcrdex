@@ -529,8 +529,8 @@ export default class MarketsPage extends BasePage {
       reputation: () => { this.updateReputation() },
       feepayment: () => { this.updateReputation() },
       runstats: (note: RunStatsNote) => {
-        this.mm.update()
         if (note.baseID !== this.market.base.id || note.quoteID !== this.market.quote.id || note.host !== this.market.dex.host) return
+        this.mm.update()
         if (Boolean(this.mmRunning) !== Boolean(note.stats)) {
           this.mmRunning = Boolean(note.stats)
           this.resolveOrderFormVisibility()
