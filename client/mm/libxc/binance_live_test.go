@@ -5,9 +5,10 @@ package libxc
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
+	"math"
 	"os"
-	"os/user"
 	"strings"
 	"sync"
 	"testing"
@@ -17,16 +18,48 @@ import (
 	_ "decred.org/dcrdex/client/asset/importall"
 	"decred.org/dcrdex/client/mm/libxc/bntypes"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/calc"
 )
 
 var (
 	log       = dex.StdOutLogger("T", dex.LevelTrace)
-	u, _      = user.Current()
-	apiKey    = ""
-	apiSecret = ""
+	binanceUS = true
+	net       = dex.Mainnet
+	apiKey    string
+	apiSecret string
+	baseID    uint64
+	quoteID   uint64
+	rate      float64
+	qty       float64
+	sell      bool
+	tradeID   string
+	assetID   uint64
+	txID      string
+	addr      string
 )
 
 func TestMain(m *testing.M) {
+	var global, testnet bool
+	flag.BoolVar(&global, "global", false, "use Binance global")
+	flag.BoolVar(&testnet, "testnet", false, "use testnet")
+	flag.Uint64Var(&baseID, "base", ^uint64(0), "base asset ID")
+	flag.Uint64Var(&quoteID, "quote", ^uint64(0), "quote asset ID")
+	flag.Float64Var(&rate, "rate", -1, "rate")
+	flag.Float64Var(&qty, "qty", -1, "qty")
+	flag.StringVar(&tradeID, "trade", "", "trade ID")
+	flag.BoolVar(&sell, "sell", false, "sell")
+	flag.Uint64Var(&assetID, "asset", ^uint64(0), "asset ID")
+	flag.StringVar(&txID, "tx", "", "tx ID")
+	flag.StringVar(&addr, "addr", "", "address")
+	flag.Parse()
+
+	if global {
+		binanceUS = false
+	}
+	if testnet {
+		net = dex.Testnet
+	}
+
 	if s := os.Getenv("SECRET"); s != "" {
 		apiSecret = s
 	}
@@ -37,7 +70,7 @@ func TestMain(m *testing.M) {
 	m.Run()
 }
 
-func tNewBinance(t *testing.T, net dex.Network) *binance {
+func tNewBinance() *binance {
 	cfg := &CEXConfig{
 		Net:       net,
 		APIKey:    apiKey,
@@ -47,7 +80,6 @@ func tNewBinance(t *testing.T, net dex.Network) *binance {
 			log.Infof("Notification sent: %+v", n)
 		},
 	}
-	const binanceUS = true
 	return newBinance(cfg, binanceUS)
 }
 
@@ -73,33 +105,12 @@ func (drv *spoofDriver) Info() *asset.WalletInfo {
 	}
 }
 
-func TestConnect(t *testing.T) {
-	bnc := tNewBinance(t, dex.Simnet)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
-	defer cancel()
-
-	_, err := bnc.Connect(ctx)
-	if err != nil {
-		t.Fatalf("Connect error: %v", err)
+func TestPlaceTrade(t *testing.T) {
+	if baseID == ^uint64(0) || quoteID == ^uint64(0) || rate < 0 || qty < 0 {
+		t.Fatalf("baseID, quoteID, rate, or qty not set")
 	}
 
-	balance, err := bnc.Balance(60)
-	if err != nil {
-		t.Fatalf("Balance error: %v", err)
-	}
-	t.Logf("usdc balance: %v", balance)
-
-	balance, err = bnc.Balance(0)
-	if err != nil {
-		t.Fatalf("Balance error: %v", err)
-	}
-	t.Logf("btc balance: %v", balance)
-}
-
-// This may fail due to balance being to low. You can try switching the side
-// of the trade or the qty.
-func TestTrade(t *testing.T) {
-	bnc := tNewBinance(t, dex.Testnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 	_, err := bnc.Connect(ctx)
@@ -131,7 +142,13 @@ func TestTrade(t *testing.T) {
 		}
 	}()
 
-	trade, err := bnc.Trade(ctx, 60, 60001, false, 3600e5, 1e7, updaterID)
+	baseUI, _ := asset.UnitInfo(uint32(baseID))
+	quoteUI, _ := asset.UnitInfo(uint32(quoteID))
+	msgRate := calc.MessageRate(rate, baseUI, quoteUI)
+	msgQty := uint64(math.Round(qty * float64(baseUI.Conventional.ConversionFactor)))
+
+	t.Logf("msgRate: %v, msgQty: %v", msgRate, msgQty)
+	trade, err := bnc.Trade(ctx, uint32(baseID), uint32(quoteID), false, msgRate, msgQty, updaterID)
 	if err != nil {
 		t.Fatalf("trade error: %v", err)
 	}
@@ -148,9 +165,14 @@ func TestTrade(t *testing.T) {
 }
 
 func TestCancelTrade(t *testing.T) {
-	tradeID := "42641326270691d752e000000001"
+	if tradeID == "" {
+		t.Fatalf("tradeID not set")
+	}
+	if baseID == ^uint64(0) || quoteID == ^uint64(0) {
+		t.Fatalf("baseID or quoteID not set")
+	}
 
-	bnc := tNewBinance(t, dex.Testnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 	_, err := bnc.Connect(ctx)
@@ -158,14 +180,14 @@ func TestCancelTrade(t *testing.T) {
 		t.Fatalf("Connect error: %v", err)
 	}
 
-	err = bnc.CancelTrade(ctx, 60, 0, tradeID)
+	err = bnc.CancelTrade(ctx, uint32(baseID), uint32(quoteID), tradeID)
 	if err != nil {
 		t.Fatalf("error cancelling trade: %v", err)
 	}
 }
 
 func TestMatchedMarkets(t *testing.T) {
-	bnc := tNewBinance(t, dex.Mainnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
@@ -185,7 +207,7 @@ func TestMatchedMarkets(t *testing.T) {
 }
 
 func TestVWAP(t *testing.T) {
-	bnc := tNewBinance(t, dex.Mainnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 	_, err := bnc.Connect(ctx)
@@ -250,7 +272,11 @@ func TestVWAP(t *testing.T) {
 }
 
 func TestSubscribeMarket(t *testing.T) {
-	bnc := tNewBinance(t, dex.Testnet)
+	if baseID == ^uint64(0) || quoteID == ^uint64(0) {
+		t.Fatalf("baseID or quoteID not set")
+	}
+
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 	wg, err := bnc.Connect(ctx)
@@ -258,7 +284,7 @@ func TestSubscribeMarket(t *testing.T) {
 		t.Fatalf("Connect error: %v", err)
 	}
 
-	err = bnc.SubscribeMarket(ctx, 60, 0)
+	err = bnc.SubscribeMarket(ctx, uint32(baseID), uint32(quoteID))
 	if err != nil {
 		t.Fatalf("failed to subscribe to market: %v", err)
 	}
@@ -267,7 +293,17 @@ func TestSubscribeMarket(t *testing.T) {
 }
 
 func TestWithdrawal(t *testing.T) {
-	bnc := tNewBinance(t, dex.Mainnet)
+	if assetID == ^uint64(0) {
+		t.Fatalf("assetID not set")
+	}
+	if qty < 0 {
+		t.Fatalf("qty not set")
+	}
+	if addr == "" {
+		t.Fatalf("addr not set")
+	}
+
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
@@ -276,7 +312,11 @@ func TestWithdrawal(t *testing.T) {
 		t.Fatalf("Connect error: %v", err)
 	}
 
-	withdrawalID, err := bnc.Withdraw(ctx, 966, 2e10, "")
+	ui, _ := asset.UnitInfo(uint32(assetID))
+	msgQty := uint64(math.Round(qty * float64(ui.Conventional.ConversionFactor)))
+
+	t.Logf("msgQty: %v", msgQty)
+	withdrawalID, err := bnc.Withdraw(ctx, uint32(assetID), msgQty, addr)
 	if err != nil {
 		fmt.Printf("withdrawal error: %v", err)
 		return
@@ -286,7 +326,14 @@ func TestWithdrawal(t *testing.T) {
 }
 
 func TestConfirmDeposit(t *testing.T) {
-	bnc := tNewBinance(t, dex.Mainnet)
+	if assetID == ^uint64(0) {
+		t.Fatalf("assetID not set")
+	}
+	if txID == "" {
+		t.Fatalf("txID not set")
+	}
+
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
@@ -295,12 +342,20 @@ func TestConfirmDeposit(t *testing.T) {
 		t.Fatalf("Connect error: %v", err)
 	}
 
-	confirmed, amt := bnc.ConfirmDeposit(ctx, &DepositData{})
-	t.Logf("confirmed: %v, amt: %v", confirmed, amt)
+	confirmed, amt := bnc.ConfirmDeposit(ctx, &DepositData{
+		AssetID: uint32(assetID),
+		TxID:    txID,
+	})
+
+	t.Logf("Confirmed: %v, Amt: %v", confirmed, amt)
 }
 
 func TestGetDepositAddress(t *testing.T) {
-	bnc := tNewBinance(t, dex.Mainnet)
+	if assetID == ^uint64(0) {
+		t.Fatalf("assetID not set")
+	}
+
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
@@ -309,16 +364,20 @@ func TestGetDepositAddress(t *testing.T) {
 		t.Fatalf("Connect error: %v", err)
 	}
 
-	addr, err := bnc.GetDepositAddress(ctx, 966)
+	addr, err := bnc.GetDepositAddress(ctx, uint32(assetID))
 	if err != nil {
 		t.Fatalf("getDepositAddress error: %v", err)
 	}
 
-	t.Logf("deposit address: %v", addr)
+	t.Logf("Deposit Address: %v", addr)
 }
 
-func TestBalances(t *testing.T) {
-	bnc := tNewBinance(t, dex.Testnet)
+func TestBalanceIndividually(t *testing.T) {
+	if assetID == ^uint64(0) {
+		t.Fatalf("assetID not set")
+	}
+
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
@@ -327,7 +386,7 @@ func TestBalances(t *testing.T) {
 		t.Fatalf("Connect error: %v", err)
 	}
 
-	balance, err := bnc.Balance(0)
+	balance, err := bnc.Balance(uint32(assetID))
 	if err != nil {
 		t.Fatalf("balances error: %v", err)
 	}
@@ -335,8 +394,28 @@ func TestBalances(t *testing.T) {
 	t.Logf("%+v", balance)
 }
 
+func TestBalances(t *testing.T) {
+	bnc := tNewBinance()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
+	defer cancel()
+
+	_, err := bnc.Connect(ctx)
+	if err != nil {
+		t.Fatalf("Connect error: %v", err)
+	}
+
+	balances, err := bnc.Balances(ctx)
+	if err != nil {
+		t.Fatalf("balances error: %v", err)
+	}
+
+	for assetID, b := range balances {
+		t.Logf("%s: %+v", dex.BipIDSymbol(assetID), b)
+	}
+}
+
 func TestGetCoinInfo(t *testing.T) {
-	bnc := tNewBinance(t, dex.Mainnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
@@ -371,7 +450,14 @@ func TestGetCoinInfo(t *testing.T) {
 }
 
 func TestTradeStatus(t *testing.T) {
-	bnc := tNewBinance(t, dex.Testnet)
+	if tradeID == "" {
+		t.Fatalf("tradeID not set")
+	}
+	if baseID == ^uint64(0) || quoteID == ^uint64(0) {
+		t.Fatalf("baseID or quoteID not set")
+	}
+
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
@@ -380,7 +466,7 @@ func TestTradeStatus(t *testing.T) {
 		t.Fatalf("Connect error: %v", err)
 	}
 
-	trade, err := bnc.TradeStatus(ctx, "eb6b6e1177213643142700000001", 60, 60001)
+	trade, err := bnc.TradeStatus(ctx, tradeID, uint32(baseID), uint32(quoteID))
 	if err != nil {
 		t.Fatalf("trade status error: %v", err)
 	}
@@ -390,7 +476,7 @@ func TestTradeStatus(t *testing.T) {
 
 func TestMarkets(t *testing.T) {
 	// Need keys for getCoinInfo
-	bnc := tNewBinance(t, dex.Testnet)
+	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
 
