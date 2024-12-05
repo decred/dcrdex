@@ -16,6 +16,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/fiatrates"
+	"decred.org/dcrdex/dex/txfee"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/tatanka"
 	"github.com/jessevdk/go-flags"
@@ -106,12 +107,13 @@ type Config struct {
 	Testnet bool `long:"testnet" description:"Use the test network (default mainnet)."`
 	Simnet  bool `long:"simnet" description:"Use the simulation test network (default mainnet)."`
 
-	CertPath      string   `long:"tlscert" description:"TLS certificate file."`
-	KeyPath       string   `long:"tlskey" description:"TLS private key file."`
-	Listeners     []string `long:"listen" description:"IP addresses on which the RPC server should listen for incoming connections."`
-	NoTLS         bool     `long:"notls" description:"Run without TLS encryption."`
-	AltDNSNames   []string `long:"altdnsnames" description:"A list of hostnames to include in the RPC certificate (X509v3 Subject Alternative Name)."`
-	HiddenService string   `long:"hiddenservice" description:"A host:port on which the RPC server should listen for incoming hidden service connections. No TLS is used for these connections."`
+	CertPath       string   `long:"tlscert" description:"TLS certificate file."`
+	KeyPath        string   `long:"tlskey" description:"TLS private key file."`
+	Listeners      []string `long:"listen" description:"IP addresses on which the RPC server should listen for incoming connections."`
+	NoTLS          bool     `long:"notls" description:"Run without TLS encryption."`
+	AltDNSNames    []string `long:"altdnsnames" description:"A list of hostnames to include in the RPC certificate (X509v3 Subject Alternative Name)."`
+	HiddenService  string   `long:"hiddenservice" description:"A host:port on which the RPC server should listen for incoming hidden service connections. No TLS is used for these connections."`
+	TxFeeOracleCfg txfee.Config
 
 	WebAddr string `long:"webaddr" description:"The public facing address by which peers should connect."`
 
