@@ -9,7 +9,7 @@
   <link rel="icon" href="/img/favicon.png?v=AZ4AZX">
   <meta name="description" content="Bison Wallet">
   <title>{{.Title}}</title>
-  <link href="/css/style.css" rel="stylesheet">
+  <link href="/css/style.css{{webpackBuildIdQuery}}" rel="stylesheet">
 </head>
 <body {{if .UseDEXBranding}}class="dex-branding"{{end}}>
   <div class="popup-notes d-hide" id="popupNotes">
@@ -257,7 +257,7 @@
   </div>
 </div>
 
-<script src="/js/entry.js"></script>
+<script src="/js/entry.js{{webpackBuildIdQuery}}"></script>
 </body>
 </html>
 {{end}}

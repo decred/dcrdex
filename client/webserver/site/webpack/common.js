@@ -5,10 +5,24 @@ const MiniCssExtractPlugin = require('mini-css-extract-plugin')
 const StyleLintPlugin = require('stylelint-webpack-plugin')
 const ESLintPlugin = require('eslint-webpack-plugin')
 
-const child_process = require('child_process')
+const fs = require('node:fs')
+const buildIdFilename = 'webpack-build-id.txt'
+
+function randBuildId () {
+  const buildID = JSON.stringify(Math.floor(Math.random() * 1000000000)).trim()
+  console.log('WEBPACK_BUILD_ID:', buildID)
+  fs.writeFile(buildIdFilename, buildID, err => {
+    if (err) {
+      console.error(err)
+    } else {
+      console.log(' ', buildID, ' written to ', buildIdFilename)
+    }
+  })
+  return buildID
+}
 
 module.exports = {
-  target: "web",
+  target: 'web',
   module: {
     rules: [
       {
@@ -26,7 +40,7 @@ module.exports = {
           {
             loader: 'sass-loader',
             options: {
-              implementation: require("sass"), // dart-sass
+              implementation: require('sass'), // dart-sass
               sourceMap: true
             }
           }
@@ -35,12 +49,15 @@ module.exports = {
     ]
   },
   plugins: [
+    new webpack.DefinePlugin({
+      'process.env.WEBPACK_BUILD_ID': randBuildId()
+    }),
     new CleanWebpackPlugin(),
     new MiniCssExtractPlugin({
       filename: '../dist/style.css'
     }),
     new StyleLintPlugin({
-      threads: true,
+      threads: true
     }),
     new ESLintPlugin({
       extensions: ['ts'],
@@ -53,7 +70,7 @@ module.exports = {
     publicPath: '/dist/'
   },
   resolve: {
-    extensions: ['.ts', ".js"],
+    extensions: ['.ts', '.js']
   },
   // Fixes weird issue with watch script. See
   // https://github.com/webpack/webpack/issues/2297#issuecomment-289291324

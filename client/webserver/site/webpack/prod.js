@@ -9,7 +9,7 @@ module.exports = merge(common, {
     usedExports: true,
     minimize: true,
     minimizer: [
-      `...`, // extend webpack 5's TerserPlugin
+      '...', // extend webpack 5's TerserPlugin
       new CssMinimizerPlugin({})
     ]
   },

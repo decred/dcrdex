@@ -1275,6 +1275,7 @@ export interface Application {
   exchanges: Record<string, Exchange>
   fiatRatesMap: Record<number, number>
   showPopups: boolean
+  webpackBuildID: string
   authed: boolean
   start (): Promise<void>
   reconnected (): void

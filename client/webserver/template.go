@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"decred.org/dcrdex/client/intl"
@@ -16,6 +17,8 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
+
+const webpackBuildIdFile = "webpack-build-id.txt"
 
 // pageTemplate holds the information necessary to process a template. Also
 // holds information necessary to reload the templates for development.
@@ -184,6 +187,37 @@ func (t *templates) exec(name string, data any) (string, error) {
 	return page.String(), err
 }
 
+// webpackBuildIdQuery fetches latest webpack build from the webpack-build-id.txt
+// file in app site directory and makes it available to append to the main css
+// link and to the main script link in bodybuilder; this should cause no reload
+// of the main css/js files if they are already cached by the browser.
+// If webpackBuildIdFile is not found return a fallback query that will make the
+// browser reload css/js.
+var webpackBuildIdQuery = func() string {
+	var fallbackQueryStr = "?v=1"
+	d, _ := os.Getwd()
+	cwd := filepath.Base(d)
+	if cwd != "bisonw" {
+		return fallbackQueryStr
+	}
+	d = filepath.Dir(d)
+	cmd := filepath.Base(d)
+	if cmd != "cmd" {
+		return fallbackQueryStr
+	}
+	d = filepath.Dir(d)
+	client := filepath.Base(d)
+	if client != "client" {
+		return fallbackQueryStr
+	}
+	f := filepath.Join(d, "/webserver/site", webpackBuildIdFile)
+	wpB, err := os.ReadFile(f)
+	if err != nil {
+		return fallbackQueryStr
+	}
+	return "?v=" + string(wpB)
+}()
+
 // templateFuncs are able to be called during template execution.
 var templateFuncs = template.FuncMap{
 	"toUpper": strings.ToUpper,
@@ -211,5 +245,8 @@ var templateFuncs = template.FuncMap{
 			return "wtf"
 		}
 		return parts[0]
+	},
+	"webpackBuildIdQuery": func() string {
+		return webpackBuildIdQuery
 	},
 }

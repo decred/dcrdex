@@ -161,6 +161,7 @@ export default class Application {
   authed: boolean
   user: User
   seedGenTime: number
+  webpackBuildID: string
   showPopups: boolean
   loggers: Record<string, boolean>
   recorders: Record<string, LogMessage[]>
@@ -184,13 +185,14 @@ export default class Application {
     this.notes = []
     this.pokes = []
     this.seedGenTime = 0
+    this.webpackBuildID = process.env.WEBPACK_BUILD_ID || ''
     this.noteReceivers = []
     this.fiatRatesMap = {}
     this.showPopups = State.fetchLocal(State.popupsLK) === '1'
     this.txHistoryMap = {}
     this.requiredActions = {}
 
-    console.log('Bison Wallet')
+    console.log('Bison Wallet', 'Webpack Build Id:', this.webpackBuildID)
 
     // Set Bootstrap dark theme attribute if dark mode is enabled.
     if (State.isDark()) {
@@ -259,7 +261,7 @@ export default class Application {
     // Don't fetch the user until we know what page we're on.
     await this.fetchUser()
     const ignoreCachedLocale = process.env.NODE_ENV === 'development'
-    await intl.loadLocale(this.lang, ignoreCachedLocale)
+    await intl.loadLocale(this.lang, this.webpackBuildID, ignoreCachedLocale)
     // The application is free to respond with a page that differs from the
     // one requested in the omnibox, e.g. routing though a login page. Set the
     // current URL state based on the actual page.
