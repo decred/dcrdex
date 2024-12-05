@@ -9,7 +9,7 @@
   <link rel="icon" href="/img/favicon.png?v=AZ4AZX">
   <meta name="description" content="Bison Wallet">
   <title>{{.Title}}</title>
-  <link href="/css/style.css?v={{commitHash}}" rel="stylesheet">
+  <link href="/css/style.css{{webpackBuildIdQuery}}" rel="stylesheet">
 </head>
 <body {{if .UseDEXBranding}}class="dex-branding"{{end}}>
   <div class="popup-notes d-hide" id="popupNotes">
@@ -97,7 +97,7 @@
       <span class="ico-barchart fs16 me-2"></span>
       [[[Market Making]]]
     </a>
-    <a href="/settings" class="demi hoverbright plainlink d-flex align-items-center py-1">
+    <a href="/settings" class="demi hoverbright plainlink d-flex align-items-center py-1 authed-only">
       <span class="ico-settings fs16 me-2"></span>
       [[[Settings]]]
     </a>
@@ -257,7 +257,7 @@
   </div>
 </div>
 
-<script src="/js/entry.js?v={{commitHash}}"></script>
+<script src="/js/entry.js{{webpackBuildIdQuery}}"></script>
 </body>
 </html>
 {{end}}

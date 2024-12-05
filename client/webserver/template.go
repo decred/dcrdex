@@ -5,21 +5,20 @@ package webserver
 
 import (
 	"bytes"
-	"encoding/hex"
 	"fmt"
 	"html/template"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
-
-	"runtime/debug"
 
 	"decred.org/dcrdex/client/intl"
 	"decred.org/dcrdex/client/webserver/locales"
-	"decred.org/dcrdex/dex/encode"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
+
+const webpackBuildIdFile = "webpack-build-id.txt"
 
 // pageTemplate holds the information necessary to process a template. Also
 // holds information necessary to reload the templates for development.
@@ -188,16 +187,35 @@ func (t *templates) exec(name string, data any) (string, error) {
 	return page.String(), err
 }
 
-var commit = func() string {
-	if info, ok := debug.ReadBuildInfo(); ok {
-		for _, setting := range info.Settings {
-			if setting.Key == "vcs.revision" && len(setting.Value) >= 8 {
-				return setting.Value
-			}
-		}
+// webpackBuildIdQuery fetches latest webpack build from the webpack-build-id.txt
+// file in app site directory and makes it available to append to the main css
+// link and to the main script link in bodybuilder; this should cause no reload
+// of the main css/js files if they are already cached by the browser.
+// If webpackBuildIdFile is not found return a fallback query that will make the
+// browser reload css/js.
+var webpackBuildIdQuery = func() string {
+	var fallbackQueryStr = "?v=1"
+	d, _ := os.Getwd()
+	cwd := filepath.Base(d)
+	if cwd != "bisonw" {
+		return fallbackQueryStr
 	}
-
-	return hex.EncodeToString(encode.RandomBytes(4))
+	d = filepath.Dir(d)
+	cmd := filepath.Base(d)
+	if cmd != "cmd" {
+		return fallbackQueryStr
+	}
+	d = filepath.Dir(d)
+	client := filepath.Base(d)
+	if client != "client" {
+		return fallbackQueryStr
+	}
+	f := filepath.Join(d, "/webserver/site", webpackBuildIdFile)
+	wpB, err := os.ReadFile(f)
+	if err != nil {
+		return fallbackQueryStr
+	}
+	return "?v=" + string(wpB)
 }()
 
 // templateFuncs are able to be called during template execution.
@@ -228,7 +246,7 @@ var templateFuncs = template.FuncMap{
 		}
 		return parts[0]
 	},
-	"commitHash": func() string {
-		return commit[:8]
+	"webpackBuildIdQuery": func() string {
+		return webpackBuildIdQuery
 	},
 }

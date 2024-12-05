@@ -137,7 +137,7 @@ var Ar = map[string]*intl.Translation{
 	"Export Account":            {T: "تصدير الحساب"},
 	"simultaneous_servers_msg":  {T: "يدعم عميل منصة المبادلات اللامركزية لديكريد الاستخدام المتزامن لأي عدد من خوادم منصة المبادلات اللامركزية DEX."},
 	"Change App Password":       {T: "تغيير كلمة مرور التطبيق"},
-	"Build ID":                  {T: "معرف البنية"},
+	"Version":                   {T: "معرف البنية"},
 	"Connect":                   {T: "اتصل"},
 	"Send":                      {T: "ارسال"},
 	"Deposit":                   {T: "إيداع"},

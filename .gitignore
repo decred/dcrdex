@@ -33,6 +33,7 @@ dex/testing/loadbot/loadbot
 bin/
 bin-v*/
 client/webserver/site/template-builder/template-builder
+client/webserver/site/webpack-build-id.txt
 dex/testing/btc/harnesschain.tar.gz
 client/asset/btc/electrum/example/server/server
 client/asset/btc/electrum/example/wallet/wallet

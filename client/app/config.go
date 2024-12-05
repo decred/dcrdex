@@ -162,7 +162,7 @@ type Config struct {
 // Web creates a configuration for the webserver. This is a Config method
 // instead of a WebConfig method because Language is an app-level setting used
 // by both core and rpcserver.
-func (cfg *Config) Web(c *core.Core, mm *mm.MarketMaker, log dex.Logger, utc bool) *webserver.Config {
+func (cfg *Config) Web(c *core.Core, mm *mm.MarketMaker, log dex.Logger, utc bool, appVersion string) *webserver.Config {
 	addr := cfg.WebAddr
 	host, _, err := net.SplitHostPort(addr)
 	if err == nil && host != "" {
@@ -196,6 +196,7 @@ func (cfg *Config) Web(c *core.Core, mm *mm.MarketMaker, log dex.Logger, utc boo
 		NoEmbed:       cfg.NoEmbedSite,
 		HttpProf:      cfg.HTTPProfile,
 		Language:      cfg.Language,
+		AppVersion:    appVersion,
 	}
 }
 
@@ -348,6 +349,7 @@ func ResolveConfig(appData string, cfg *Config) error {
 	if cfg.MMConfig.EventLogDBPath == "" {
 		cfg.MMConfig.EventLogDBPath = defaultMMEventLogDBPath
 	}
+
 	return nil
 }
 

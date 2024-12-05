@@ -222,16 +222,16 @@ export const ID_DELETE_BOT = 'DELETE_BOT'
 
 let locale: Locale
 
-export async function loadLocale (lang: string, commitHash: string, skipCache: boolean) {
+export async function loadLocale (lang: string, buildID: string, skipCache: boolean) {
   if (!skipCache) {
     const specs = State.fetchLocal(State.localeSpecsKey)
-    if (specs && specs.lang === lang && specs.commitHash === commitHash) {
+    if (specs && specs.lang === lang && specs.webpackBuildID === buildID) { // not stale
       locale = State.fetchLocal(State.localeKey)
       return
     }
   }
   locale = await postJSON('/api/locale', lang)
-  State.storeLocal(State.localeSpecsKey, { lang, commitHash })
+  State.storeLocal(State.localeSpecsKey, { lang, buildID })
   State.storeLocal(State.localeKey, locale)
 }
 
