@@ -25,7 +25,7 @@ You will use this password to perform all future security-sensitive client opera
 # Restore Existing Seed
 
 From the `New Password` prompt, you can also restore an existing application seed by clicking
-in the `Restoration Seed` button and entering the seed backup phrase in the 12 word format.
+in the `Restoration Seed` button and entering the seed backup phrase in the 15 word format.
 
 <img src="./images/setup-guide/restore-seed.png" width="1200" alt="">
 
@@ -65,7 +65,7 @@ used to restore your DCRDEX accounts and any native wallets - so keep it safe.
 
 
 
-Clicking `Backup Now` will reveal the seed in a 12-word format, you can also skip thi sstep.
+Clicking `Backup Now` will reveal the seed in a 15-word format, you can also skip this step.
 
 
 
@@ -106,7 +106,7 @@ NOT EVEN BISON WALLET OR DECRED DEVELOPERS!**_
 # Wallet Synchronization
 
 After the [Quick Configuration](Quick-Configuration) wizard has been completed, the 
-[Wallet](Wallet) view will be displayed, the Block Synch indicator 
+[Wallet](Wallet) view will be displayed, the Block Sync indicator 
  on each wallet shows the progress as each blockchain is synchronized.
 
 

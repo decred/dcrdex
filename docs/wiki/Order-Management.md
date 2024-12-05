@@ -49,7 +49,7 @@ your order can be submitted by clicking the ``Place Order`` button.
 <img src="./images/using-bison-wallet/trade-placeorder.png" width="400" alt="">
 
 A prompt will appear to verify the details of the submitted order. 
-Fee projections will be displayed, clicking the `details` button will 
+Fee projections will be displayed. Clicking the `details` button will 
 open the [Fee Details](#fee-details) view.
 
 <img src="./images/using-bison-wallet/trade-placeorder2.png" width="400" alt="">
@@ -67,14 +67,14 @@ follows once it has been submitted to the DCRDEX server.
 
 DCRDEX does not collect any fees on the trades, but since all swap transactions
 occur on-chain and are created directly by the users, they will pay network
-transaction fees. Transaction fees vary based on how orders are matched. Fee
-estimates are shown during order submission, and the realized fees are displayed
-on the [order details](#order-details) view once the trade settles.
+transaction fees. Transaction fees vary based on how orders are matched and
+network activity. Fee estimates are shown during order submission, and the realized 
+fees are displayed on the [order details](#order-details) view once the trade settles.
 
 
 The fee details screen indicates the best and worst-case settlement fee estimates
 based on network conditions at the time of order submission. If network congestion
-is higher when the order is match, the fees could be higher but will remain
+is higher when the order is matched, the fees could be higher but will remain
 less or equal to the `Maximum Possible Swap Fees`.
 
 <img src="./images/using-bison-wallet/trade-feedetails.png" width="400" alt="">

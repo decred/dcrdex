@@ -41,8 +41,7 @@ a visual representation of the order book, showing cumulative buy and sell order
 
 # Order Panel
 
-The order panel allows you to place orders, manage orders and the view recent matches for the selected market,
-along with access to your trading tier and reputation with the associated DEX server.
+The order panel allows you to place orders, manage orders, view recent matches for the selected market, and access your trading tier and reputation with the associated DEX server.
 
 
 ## Submit Order
@@ -98,10 +97,11 @@ This section show your recent orders for the selected market.
 <img src="./images/using-bison-wallet/trade-yourOrders-1.png" width="1200" alt="">
 
 Clicking each order will expand it to display additional information. 
-If an order is still in booked status, ti can be cancelled by the 
+If an order is still in booked status, it can be cancelled by the 
 <img src="./images/using-bison-wallet/button-cancel.png" width="20" alt=""> button, 
 while the [Order Details](#order-details-view) view can be accessed by clicking
-the <img src="./images/using-bison-wallet/button-link.png" width="20" alt=""> button.
+the <img src="./images/using-bison-wallet/button-link.png" width="20" alt=""> button. Stuck swap transactions can also be accelerated by clicking the 
+<img src="./images/using-bison-wallet/button-accelerate.png" width="20" alt=""> button.
 
 <img src="./images/using-bison-wallet/trade-yourOrders-2.png" width="400" alt="">
 

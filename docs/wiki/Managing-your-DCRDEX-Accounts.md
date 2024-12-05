@@ -81,7 +81,7 @@ DCRDEX Servers can be added in the `Registered Dexes` section of the
 
 <img src="./images/using-bison-wallet/settings-addServer.png" width="400" alt="">
 
-The `Add a DCRDEX Server` form will be displayed. Enter the address a known DCRDEX server 
+The `Add a DCRDEX Server` form will be displayed. Enter the address of a known DCRDEX server 
 that you would like to use, and select the  associated TLS file after clicking on `add a file`,
 then click `Submit`.
 

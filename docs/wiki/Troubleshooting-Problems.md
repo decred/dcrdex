@@ -4,7 +4,7 @@ _Last updated for Bison Wallet v1.0.0._
 
 > [!CAUTION]
 > Before starting any attempt at fixing a broken wallet, ensure you have your correct 
-12 word seed written down (preferably physically, on a piece of paper) and accessible,
+15 word seed written down (preferably physically, on a piece of paper) and accessible,
 along with an 
 > [export of your DCRDEX server accounts](Managing-your-DCRDEX-Accounts#export-dcrdex-account).
 >
@@ -27,8 +27,8 @@ The main location for Bison Wallet data files is OS-dependent:
 | OS      | Bison Wallet Path                        |
 |---------|------------------------------------------|
 | Windows | ``%LocalAppData%/Dexc/``                 |
-| macOS   | ``~/.dexc/``                             |
-| Linux   | ``~/Library/Application\ Support/Dexc/`` |
+| Linux   | ``~/.dexc/``                             |
+| macOS   | ``~/Library/Application\ Support/Dexc/`` |
 
 There are different log files which may be reviewed when troubleshooting a problem:
 
@@ -51,7 +51,7 @@ To rescan the wallet, open the [wallet settings](Wallet#wallet-settings) dialog 
 
 <img src="./images/using-bison-wallet/wallets-settings-rescan.png" width="400" alt="">
 
-You will a message with a green check icon if the rescan was successfully initiated.
+You will see a message with a green check icon if the rescan was successfully initiated.
 
 <img src="./images/using-bison-wallet/wallets-settings-rescan-running.png" width="400" alt="">
 
@@ -99,8 +99,7 @@ as described in the [Rescanning](#rescanning) section of this wiki.
 
 If you wish to force a rescan, you can do so by following these steps:
 
-1. Delete the wallet.db file in the `assetdb/btc/mainnet/` (for mainnet) folder as described at the end 
-of the previous section.  Start DEX and log in. Follow the instructions in 
+1. Move the ``wallet.db``file in the `assetdb/btc/mainnet/` (for mainnet) to a safe backup location. Start DEX and log in. Follow the instructions in 
 [recovery section](#recovery) to reinitialize the wallet and begin a resync.
 2. OR (**safest option**) use the `dropwtxmgr` tool on that wallet.db file.  
 See the instructions in <https://github.com/btcsuite/btcwallet/blob/master/docs/force_rescans.md>. 
@@ -116,8 +115,8 @@ as described in the [Recovery](#recovery) section of this wiki.
 
 In addition to reinitializing or rescanning the wallet.db files, you may also remove all of the chain data 
 files to force resynchronization of all blockchain data used by the neutrino service that powers the wallet. 
-To do this, shutdown Bison Wallet and delete all the files in `assetdb/btc/mainnet/` (for mainnet BTC), 
-including `neutrino.db`, `reg_filter_headers.bin`, `block_headers.bin`, and `wallet.db`.  
+To do this, shutdown Bison Wallet and move all the files in `assetdb/btc/mainnet/` (for mainnet BTC), 
+including `neutrino.db`, `reg_filter_headers.bin`, `block_headers.bin`, and `wallet.db` to a safe backup location.  
 You may keep `peers.json` to help with bootstrapping when you restart, but it may be deleted too.
 
 Next, start Bison Wallet and go to the Wallet view, open [wallet settings](Wallet#wallet-settings) for the 

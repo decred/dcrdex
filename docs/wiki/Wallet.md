@@ -201,13 +201,13 @@ but for privacy reasons its best to generate a new one for each transaction.
 
 ## Send
 
-This where you can send funds from your wallet to another address. You will need to enter the recipient 
+This is where you can send funds from your wallet to another address. You will need to enter the recipient 
 address into the text box and the amount of funds you wish to send.
 
-* **Substract Fees from amount sent:** if left unchecked, the fees will be deducted from the remaining
+* **Subtract Fees from amount sent:** if left unchecked, the fees will be deducted from the remaining
 balance in the wallet.
 * **Max Estimated Send:** the estimated amount that will be received if you withdraw your current balance 
-with 'Subtract fees from amount sent' checked. 
+with 'Subtract fees  from amount sent' checked. 
 * **Max Estiamted Send Fee:** the estimated on-chain fee for the specified transaction.
 
 <img src="./images/using-bison-wallet/wallets-send.png" width="1200" alt="">
@@ -251,7 +251,7 @@ Only url-based authentication is supported. For a local node, use the filepath t
 on [RPC Providers](#rpc-providers-for-evm-compatible-networks) can be found in their 
 respective section of the wiki. 
 * **Gas Fee Limit:** This is the highest network fee rate you are willing to pay on swap transactions. 
-If gasfeelimit is lower than a market's maxfeerate, you will not be able to trade on that market with this wallet.
+If gasfeelimit is lower than a market's maxfeerate, you will not be able to trade on that market with this wallet. This setting is only applicable to account based assets.
 
 
 ## External Wallet Parameters
@@ -289,17 +289,13 @@ It is recommended that you **do not** export your wallet unless you are an exper
 and cannot be used until it is re-enabled. This will also disable all token wallets that depend on this wallet.
 * **Manage Peers:** Allows adding/removing of network peers.
 * **Wallet Logs:** Opens the log file for the wallet.
-* **Rescan:** Begins a rescan for all relevant transactions involving all active addresses and watched outpoints.
-Rescans can be time-consuming depending on the amount of data that must be checked, and the size of the blockchain.
-* **Disable Wallet:** This function will disable the wallet, it will not be connected to when you start Bison Wallet
-and cannot be used until it is re-enabled. This will also disable all token wallets that depend on this wallet.
+
 
 # Fee Status
 
 The fee status section contains summary information around the fees associated with the selected asset.
 
-* **Network Fee Rate:** fee rate is the number of units per byte that a user pays to add their transaction 
-to the specified blockchain.
+* **Network Fee Rate:** fee rate is the number of units per byte or gas unit that a user pays to add their transaction to the specified blockchain.
 * **Exchange Rate:** USD exchange rate for the selected asset.
 * **Send Fees:** Minimum fee for transferring funds on the blockchain.
 * **Sell Fees:** Minimum fee for performing a sell trade on the blockchain.
@@ -365,8 +361,7 @@ network. Mix coordination occurs every 10 minutes, and the wallet must remain un
 ## Staking
 
 Decred Staking allows users to participate in the network's governance and earn rewards by locking up their DCR 
-in exchange for tickets. These tickets grant voting rights on proposals and changes to the network, as well as on 
-validating blocks in the Proof-of-Stake (PoS) system. Once a ticket is randomly selected to vote, the user earns a 
+in exchange for tickets. These tickets grant voting rights on proposals, changes to the network, treasury expenditures, and block validation in the Proof-of-Stake (PoS) system. Once a ticket is randomly selected to vote, the user earns a 
 staking reward. This system promotes decentralization, as stakeholders have a direct say in the network's future, 
 while also securing the blockchain and earning passive income for participants. 
 
@@ -381,7 +376,7 @@ access to any of their user’s funds - the user is only delegating the rights t
 <img src="./images/using-bison-wallet/wallets-selectVSP.png" width="1200" alt="">
 
 Once the VSP has been selected, the `Purchase Tickets` button will display a prompt where you can specify the amount
-of tickets you wish to purchase.The price of a ticket is determined by an algorithm that aims to keep the ticket pool 
+of tickets you wish to purchase. The price of a ticket is determined by an algorithm that aims to keep the ticket pool 
 size, which is the total amount of tickets in the PoS system ticket pool, around a target size of 40,960 tickets.
 
 <img src="./images/using-bison-wallet/wallets-purchaseTickets.png" width="1200" alt="">
