@@ -1,4 +1,4 @@
-# Simnet Testing
+<a id="top"/>
 
 - [Simnet Harnesses](#simnet-harnesses)
   - [Start the DCR and BTC simnet harnesses](#start-the-dcr-and-btc-simnet-harnesses)
@@ -13,9 +13,9 @@
   - [Setup the wallet via the browser interface](#setup-the-wallet-via-the-browser-interface)
   - [Setup the wallet via bwctl](#setup-the-wallet-via-bwctl)
 
-## Simnet Harnesses
+# Simnet Harnesses
 
-### Start the DCR and BTC simnet harnesses
+## Start the DCR and BTC simnet harnesses
 
 The harnesses are used by both server (dcrdex) and wallet (bisonw).
 
@@ -39,7 +39,7 @@ When a harness is ready, it will be at a command prompt in a tmux session (green
 
 When done with a harness, use `./quit` to shutdown all the processes and tmux sessions started by the harness.
 
-### Automatic mining
+## Automatic mining
 
 For convenience, the harnesses may continually mine blocks with the `watch` command. To generate a new Bitcoin block every 5 seconds:
 
@@ -55,9 +55,9 @@ Decred is similar, but under the `dcr` folder:
 
 **WARNING**: Decred's harness can't mine indefinitely so stop the watch when you have completed your current test.  The harness config has a ticket buyer, but not enough tickets are purchased on a long enough timeline because automatic buying is not allowed before a price change.  This needs tweaking.
 
-## Server (`dcrdex`) Setup
+# Server (`dcrdex`) Setup
 
-### Harness option
+## Harness option
 
 There is a dcrdex harness that will set up everything for you, although with a very short contract lock time set of 1 min maker and 30 sec taker.
 
@@ -67,7 +67,7 @@ There is a dcrdex harness that will set up everything for you, although with a v
 
 To setup the dcrdex server manually, and with the regular contract lock times, follow the steps in the following subsections.
 
-### Configure dcrdex markets for simnet
+## Configure dcrdex markets for simnet
 
 NOTE: If using the harness option described in the previous section, this and other server setup is not required.
 
@@ -114,7 +114,7 @@ For the DCR config file, this could be `~/dextest/btc/alpha/alpha.conf` to use t
 
 For the BTC config file, this could be `~/dextest/btc/alpha/alpha.conf` to use the Bitcoin simnet harness' setup.
 
-### Prepare the PostgreSQL DB
+## Prepare the PostgreSQL DB
 
 If necessary, first create the `dcrdex` PostgreSQL user with `CREATE USER dcrdex;`.
 
@@ -125,7 +125,7 @@ DROP DATABASE dcrdex_simnet;
 CREATE DATABASE dcrdex_simnet OWNER dcrdex;
 ```
 
-### Start dcrdex
+## Start dcrdex
 
 Start `dcrdex` for simnet, with trace-level logging, and the `dcrdex_simnet` PostgreSQL database created [above](#prepare-the-postgresql-db):
 
@@ -135,9 +135,9 @@ Start `dcrdex` for simnet, with trace-level logging, and the `dcrdex_simnet` Pos
 
 Note that the registration fee xpub, amount, and required confirmations are set in markets.json now.
 
-## Wallet (`bisonw`) Setup
+# Wallet (`bisonw`) Setup
 
-### The wallet config files for bisonw
+## The wallet config files for bisonw
 
 Bitcoin:
 
@@ -151,7 +151,7 @@ Decred:
 - Account: default
 - Wallet password: "abc"
 
-### Start `bisonw`
+## Start `bisonw`
 
 Clear any existing wallet simnet files from previous setups:
 
@@ -167,7 +167,7 @@ Start `bisonw` with the web UI and RPC server in simnet mode and trace level log
 
 The wallet can be configured [via the browser interface](#setup-the-wallet-via-the-browser-interface) or with bwctl on the command line.
 
-### Setup the wallet via the browser interface
+## Setup the wallet via the browser interface
 
 In a browser, navigate to <http://127.0.0.3:5758/> (or whatever bisonw was configured to use with `--webaddr`), and be sure JavaScript is
 enabled. This should redirect to <http://127.0.0.3:5758/register.>
@@ -185,7 +185,7 @@ enabled. This should redirect to <http://127.0.0.3:5758/register.>
 6. Place a couple orders that match.
 7. Mine a few blocks on each chain, alternating chains. How many depends on the `"swapConf"` values in markets.json.
 
-### Setup the wallet via bwctl
+## Setup the wallet via bwctl
 
 IMPORTANT: The example `bwctl` commands in this section use the `--simnet` flag to change the default bisonw ports to which it will attempt to connect.  On the `release-0.1` branch where this is not supported, you will need to specify the `-a, --rpcaddr=` option to match bisonw. For example, if bisonw was started with `--rpcaddr=localhost:6757`, then `bwctl` would need to use `--rpcaddr=localhost:6757` as well.
 
@@ -292,7 +292,7 @@ During this process, `bisonw` should log messages similar to the following:
 
 For rapid setup, there is a script at `[repo root]/client/cmd/bwctl/simnet-setup.sh` that has a reasonable default. You may also use this script as a template.
 
-### Acquire DCR and BTC Simnet Funds
+## Acquire DCR and BTC Simnet Funds
 
 You can generate a deposit address for your wallet through the wallets view in the
 wallet.
@@ -302,3 +302,7 @@ Take the generated address to it's respective harness terminal and send funds to
 `./alpha sendtoaddress {address} {amount}`
 
 Note: If you're using an `SPV` wallet, run `./mine-alpha 1` after sending or the SPV wallets won't see it.
+
+---
+
+[⤴ Back to Top](#top)
