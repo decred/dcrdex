@@ -648,7 +648,7 @@ func (m *MarketMaker) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 			// Try to connect so we can update our balances and set the
 			// connected flag, but ignore errors.
 			if err := m.connectCEX(ctx, c); err != nil {
-				m.log.Infof("Could not connect to %q: %w", cexCfg.Name, err)
+				m.log.Infof("Could not connect to %q: %v", cexCfg.Name, err)
 			}
 		}
 	}
