@@ -566,7 +566,7 @@ func (bnc *binance) refreshBalances(ctx context.Context) error {
 	var resp bntypes.Account
 	err := bnc.getAPI(ctx, "/api/v3/account", nil, true, true, &resp)
 	if err != nil {
-		return fmt.Errorf("error getting balances: %w", err)
+		return err
 	}
 
 	tokenIDsI := bnc.tokenIDs.Load()
@@ -643,7 +643,7 @@ func (bnc *binance) getCoinInfo(ctx context.Context) error {
 	coins := make([]*bntypes.CoinInfo, 0)
 	err := bnc.getAPI(ctx, "/sapi/v1/capital/config/getall", nil, true, true, &coins)
 	if err != nil {
-		return fmt.Errorf("error getting binance coin info: %w", err)
+		return err
 	}
 
 	bnc.readCoins(coins)
@@ -654,7 +654,7 @@ func (bnc *binance) getMarkets(ctx context.Context) (map[string]*bntypes.Market,
 	var exchangeInfo bntypes.ExchangeInfo
 	err := bnc.getAPI(ctx, "/api/v3/exchangeInfo", nil, false, false, &exchangeInfo)
 	if err != nil {
-		return nil, fmt.Errorf("error getting markets from Binance: %w", err)
+		return nil, err
 	}
 
 	marketsMap := make(map[string]*bntypes.Market, len(exchangeInfo.Symbols))
@@ -712,11 +712,11 @@ func (bnc *binance) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	}
 
 	if err := bnc.setBalances(ctx); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error getting balances")
 	}
 
 	if err := bnc.getUserDataStream(ctx); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error getting user data stream")
 	}
 
 	// Refresh balances periodically. This is just for safety as they should
@@ -1329,9 +1329,10 @@ func (bnc *binance) request(ctx context.Context, method, endpoint string, query,
 		Msg  string `json:"msg"`
 	}
 	if err := dexnet.Do(req, thing, dexnet.WithSizeLimit(1<<24), dexnet.WithErrorParsing(&errPayload)); err != nil {
-		bnc.log.Errorf("request error from endpoint %s %q with query = %q, body = %q", method, endpoint, queryString, bodyString)
+		bnc.log.Errorf("request error from endpoint %s %q with query = %q, body = %q, err = %v, bn code = %d, msg = %q",
+			method, endpoint, queryString, bodyString, err, errPayload.Code, errPayload.Msg)
 		if errPayload.Msg != "" {
-			return fmt.Errorf("Binance error: %v", errPayload.Msg)
+			return fmt.Errorf("Binance error: %v (%d)", errPayload.Msg, errPayload.Code)
 		}
 		return err
 	}
@@ -1513,7 +1514,7 @@ func (bnc *binance) getUserDataStream(ctx context.Context) (err error) {
 
 		cm := dex.NewConnectionMaster(conn)
 		if err = cm.ConnectOnce(ctx); err != nil {
-			return nil, fmt.Errorf("user data stream connection error: %v", err)
+			return nil, err
 		}
 
 		return cm, nil
