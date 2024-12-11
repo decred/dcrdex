@@ -364,6 +364,10 @@ type BTCCloneCFG struct {
 	// into an address string. If AddressStringer is not supplied, the
 	// (btcutil.Address).String method will be used.
 	AddressStringer dexbtc.AddressStringer // btcutil.Address => string, may be an override or just the String method
+	// PayToAddressScript is an optional argument that can make non-standard tx
+	// outputs. If PayToAddressScript is not supplied the (txscript).PayToAddrScript
+	// method will be used. Note the extra paramaeter for a string address.
+	PayToAddressScript func(btcutil.Address, string) ([]byte, error)
 	// BlockDeserializer can be used in place of (*wire.MsgBlock).Deserialize.
 	BlockDeserializer func([]byte) (*wire.MsgBlock, error)
 	// ArglessChangeAddrRPC can be true if the getrawchangeaddress takes no
@@ -801,6 +805,7 @@ type baseWallet struct {
 	localFeeRate      func(context.Context, RawRequester, uint64) (uint64, error)
 	feeCache          *feeRateCache
 	decodeAddr        dexbtc.AddressDecoder
+	payToAddress      func(btcutil.Address, string) ([]byte, error)
 	walletDir         string
 
 	deserializeTx func([]byte) (*wire.MsgTx, error)
@@ -1317,6 +1322,13 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 		}
 	}
 
+	addressPayer := cfg.PayToAddressScript
+	if addressPayer == nil {
+		addressPayer = func(addr btcutil.Address, _ string) ([]byte, error) {
+			return txscript.PayToAddrScript(addr)
+		}
+	}
+
 	w := &baseWallet{
 		symbol:            cfg.Symbol,
 		chainParams:       cfg.ChainParams,
@@ -1336,6 +1348,7 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 		feeCache:          feeCache,
 		decodeAddr:        addrDecoder,
 		stringAddr:        addrStringer,
+		payToAddress:      addressPayer,
 		walletInfo:        cfg.WalletInfo,
 		deserializeTx:     txDeserializer,
 		serializeTx:       txSerializer,
@@ -4505,7 +4518,7 @@ func (btc *baseWallet) send(address string, val uint64, feeRate uint64, subtract
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("invalid address: %s", address)
 	}
-	pay2script, err := txscript.PayToAddrScript(addr)
+	pay2script, err := btc.payToAddress(addr, address)
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("PayToAddrScript error: %w", err)
 	}
