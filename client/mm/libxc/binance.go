@@ -338,23 +338,19 @@ func (b *binanceOrderBook) midGap() uint64 {
 
 // TODO: check all symbols
 var dexToBinanceSymbol = map[string]string{
-	"POLYGON": "MATIC",
-	"WETH":    "ETH",
+	"polygon": "MATIC",
+	"weth":    "ETH",
 }
 
 var binanceToDexSymbol = make(map[string]string)
 
-func convertBnCoin(coin string) string {
+// convertBnCoin converts a binance coin symbol to a dex symbol.
+func convertBnCoin(coin string, weth bool) string {
 	symbol := strings.ToLower(coin)
 	if convertedSymbol, found := binanceToDexSymbol[strings.ToUpper(coin)]; found {
-		symbol = strings.ToLower(convertedSymbol)
+		symbol = convertedSymbol
 	}
-	return symbol
-}
-
-func convertBnNetwork(network string) string {
-	symbol := convertBnCoin(network)
-	if symbol == "weth" {
+	if !weth && symbol == "weth" {
 		return "eth"
 	}
 	return symbol
@@ -363,7 +359,7 @@ func convertBnNetwork(network string) string {
 // binanceCoinNetworkToDexSymbol takes the coin name and its network name as
 // returned by the binance API and returns the DEX symbol.
 func binanceCoinNetworkToDexSymbol(coin, network string) string {
-	symbol, netSymbol := convertBnCoin(coin), convertBnNetwork(network)
+	symbol, netSymbol := convertBnCoin(coin, true), convertBnCoin(network, false)
 	if symbol == "weth" && netSymbol == "eth" {
 		return "eth"
 	}
@@ -380,10 +376,10 @@ func init() {
 }
 
 func mapDexToBinanceSymbol(symbol string) string {
-	if binanceSymbol, found := dexToBinanceSymbol[symbol]; found {
+	if binanceSymbol, found := dexToBinanceSymbol[strings.ToLower(symbol)]; found {
 		return binanceSymbol
 	}
-	return symbol
+	return strings.ToUpper(symbol)
 }
 
 type bncAssetConfig struct {
@@ -406,21 +402,24 @@ func bncAssetCfg(assetID uint32) (*bncAssetConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	coin := mapDexToBinanceSymbol(ui.Conventional.Unit)
+
+	symbol := dex.BipIDSymbol(assetID)
+	if symbol == "" {
+		return nil, fmt.Errorf("no symbol found for asset ID %d", assetID)
+	}
+
+	parts := strings.Split(symbol, ".")
+	coin := mapDexToBinanceSymbol(parts[0])
 	chain := coin
-	if tkn := asset.TokenInfo(assetID); tkn != nil {
-		pui, err := asset.UnitInfo(tkn.ParentID)
-		if err != nil {
-			return nil, err
-		}
-		chain = pui.Conventional.Unit
+	if len(parts) > 1 {
+		chain = mapDexToBinanceSymbol(parts[1])
 	}
 
 	return &bncAssetConfig{
 		assetID:          assetID,
-		symbol:           dex.BipIDSymbol(assetID),
+		symbol:           symbol,
 		coin:             coin,
-		chain:            mapDexToBinanceSymbol(chain),
+		chain:            chain,
 		conversionFactor: ui.Conventional.ConversionFactor,
 	}, nil
 }
@@ -659,6 +658,7 @@ func (bnc *binance) getMarkets(ctx context.Context) (map[string]*bntypes.Market,
 
 	marketsMap := make(map[string]*bntypes.Market, len(exchangeInfo.Symbols))
 	tokenIDs := bnc.tokenIDs.Load().(map[string][]uint32)
+
 	for _, market := range exchangeInfo.Symbols {
 		dexMarkets := binanceMarketToDexMarkets(market.BaseAsset, market.QuoteAsset, tokenIDs, bnc.isUS)
 		if len(dexMarkets) == 0 {
@@ -2130,13 +2130,7 @@ func (bnc *binance) TradeStatus(ctx context.Context, tradeID string, baseID, quo
 }
 
 func getDEXAssetIDs(coin string, tokenIDs map[string][]uint32) []uint32 {
-	dexSymbol := convertBnCoin(coin)
-
-	// Binance does not differentiate between eth and weth like we do.
-	dexNonTokenSymbol := dexSymbol
-	if dexNonTokenSymbol == "weth" {
-		dexNonTokenSymbol = "eth"
-	}
+	dexSymbol := convertBnCoin(coin, false)
 
 	isRegistered := func(assetID uint32) bool {
 		_, err := asset.UnitInfo(assetID)
@@ -2144,7 +2138,7 @@ func getDEXAssetIDs(coin string, tokenIDs map[string][]uint32) []uint32 {
 	}
 
 	assetIDs := make([]uint32, 0, 1)
-	if assetID, found := dex.BipSymbolID(dexNonTokenSymbol); found {
+	if assetID, found := dex.BipSymbolID(dexSymbol); found {
 		// Only registered assets.
 		if isRegistered(assetID) {
 			assetIDs = append(assetIDs, assetID)
