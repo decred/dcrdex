@@ -12,7 +12,7 @@ See Also: README_HARNESS.md
 ## 2. ElectrumX-Firo Test Harness
 
 The harness is a script named **electrumx.sh** which downloads a git repo
-containing a release version of ElectrumX-Firo server.
+containing a specific commit of ElectrumX-Firo server. No external releases.
 
 It requires **harness.sh** Firo chain server harness running.
 

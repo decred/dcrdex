@@ -22,6 +22,7 @@ import (
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/txscript"
 )
 
 const (
@@ -168,6 +169,8 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		AssetID:                  BipID,
 		FeeEstimator:             estimateFee,
 		ExternalFeeEstimator:     externalFeeRate,
+		AddressDecoder:           decodeAddress,
+		PayToAddressScript:       payToAddressScript,
 		PrivKeyFunc:              nil, // set only for walletTypeRPC below
 	}
 
@@ -193,6 +196,35 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	default:
 		return nil, fmt.Errorf("unknown wallet type %q for firo", cfg.Type)
 	}
+}
+
+/******************************************************************************
+                             Helper Functions
+******************************************************************************/
+
+// decodeAddress decodes a firo address. For normal transparent addresses this
+// just uses btcd: btcutil.DecodeAddress.
+func decodeAddress(address string, net *chaincfg.Params) (btcutil.Address, error) {
+	if isExxAddress(address) {
+		return decodeExxAddress(address, net)
+	}
+	decAddr, err := btcutil.DecodeAddress(address, net)
+	if err != nil {
+		return nil, err
+	}
+	if !decAddr.IsForNet(net) {
+		return nil, errors.New("wrong network")
+	}
+	return decAddr, nil
+}
+
+// payToAddressScript builds a P2PKH script for a Firo output. For normal transparent
+// addresses btcd: txscript.PayToAddrScript is used.
+func payToAddressScript(addr btcutil.Address, address string) ([]byte, error) {
+	if isExxAddress(address) {
+		return buildExxPayToScript(addr, address)
+	}
+	return txscript.PayToAddrScript(addr)
 }
 
 // rpcCaller is satisfied by ExchangeWalletFullNode (baseWallet), providing
