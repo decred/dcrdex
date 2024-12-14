@@ -172,6 +172,7 @@ var EnUS = map[string]*intl.Translation{
 	"companion_app_tor_needed":  {T: "Tor must be enabled for this."},
 	"Pair companion app":        {T: "Pair companion app"},
 	"Download APK":              {T: "Download APK"},
+	"Version":                   {T: "Version"},
 	"Build ID":                  {T: "Build ID"},
 	"Connect":                   {T: "Connect"},
 	"Send":                      {T: "Send"},

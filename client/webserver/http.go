@@ -58,6 +58,7 @@ type CommonArguments struct {
 	UserInfo       *userInfo
 	Title          string
 	UseDEXBranding bool
+	Version        string
 }
 
 // Create the CommonArguments for the request.
@@ -66,6 +67,7 @@ func (s *WebServer) commonArgs(r *http.Request, title string) *CommonArguments {
 		UserInfo:       extractUserInfo(r),
 		Title:          title,
 		UseDEXBranding: s.useDEXBranding,
+		Version:        s.appVersion,
 	}
 }
 
@@ -292,6 +294,7 @@ func (s *WebServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 		FiatCurrency    string
 		Exchanges       map[string]*core.Exchange
 		IsInitialized   bool
+		AppVersion      string
 	}{
 		CommonArguments: *common,
 		KnownExchanges:  s.knownUnregisteredExchanges(xcs),
@@ -299,6 +302,7 @@ func (s *WebServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 		FiatRateSources: s.core.FiatRateSources(),
 		Exchanges:       xcs,
 		IsInitialized:   s.core.IsInitialized(),
+		AppVersion:      s.appVersion,
 	}
 	s.sendTemplate(w, "settings", data)
 }
