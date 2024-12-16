@@ -42,6 +42,9 @@ var upgrades = [...]upgradefunc{
 	v5Upgrade,
 	// v5 => v6 splits matches into separate active and archived buckets.
 	v6Upgrade,
+	// v6 => v7 sets the status of all refunded matches to order.MatchConfirmed
+	// status.
+	v7Upgrade,
 }
 
 // DBVersion is the latest version of the database that is understood. Databases
@@ -363,6 +366,68 @@ func v6Upgrade(dbtx *bbolt.Tx) error {
 			return err
 		}
 		return archivedMatchesBkt.DeleteBucket(k)
+	})
+}
+
+// v7Upgrade sets the status to all archived refund matches to order.MatchConfirmed.
+// From now on all refunds must also have confirmations for the trade to be
+// considered inactive.
+func v7Upgrade(dbtx *bbolt.Tx) error {
+	const oldVersion = 6
+
+	if err := ensureVersion(dbtx, oldVersion); err != nil {
+		return err
+	}
+
+	amb := []byte("matches") // archived matches
+	mKey := []byte("match")  // matchKey
+	pKey := []byte("proof")  // proofKey
+
+	var nRefunded int
+
+	defer func() {
+		upgradeLog.Infof("%d inactive refunded matches set to confirmed status", nRefunded)
+	}()
+
+	archivedMatchesBkt := dbtx.Bucket(amb)
+
+	return archivedMatchesBkt.ForEach(func(k, _ []byte) error {
+		archivedMBkt := archivedMatchesBkt.Bucket(k)
+		if archivedMBkt == nil {
+			return fmt.Errorf("match %x bucket is not a bucket", k)
+		}
+		proofB := archivedMBkt.Get(pKey)
+		if len(proofB) == 0 {
+			return fmt.Errorf("empty proof")
+		}
+		proof, _, err := dexdb.DecodeMatchProof(proofB)
+		if err != nil {
+			return fmt.Errorf("error decoding proof: %w", err)
+		}
+
+		// Check if refund.
+		if len(proof.RefundCoin) == 0 {
+			return nil
+		}
+		nRefunded++
+
+		matchB := archivedMBkt.Get(mKey)
+		if matchB == nil {
+			return fmt.Errorf("nil match bytes for %x", k)
+		}
+		match, _, err := order.DecodeMatch(matchB)
+		if err != nil {
+			return fmt.Errorf("error decoding match %x: %w", k, err)
+		}
+
+		match.Status = order.MatchConfirmed
+
+		updatedMatchB := order.EncodeMatch(match)
+		if err != nil {
+			return fmt.Errorf("error encoding match %x: %w", k, err)
+		}
+
+		return archivedMBkt.Put(matchKey, updatedMatchB)
 	})
 }
 
