@@ -202,7 +202,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
                              Helper Functions
 ******************************************************************************/
 
-// decodeAddress decodes a firo address. For normal transparent addresses this
+// decodeAddress decodes a Firo address. For normal transparent addresses this
 // just uses btcd: btcutil.DecodeAddress.
 func decodeAddress(address string, net *chaincfg.Params) (btcutil.Address, error) {
 	if isExxAddress(address) {
@@ -252,7 +252,6 @@ func privKeyForAddress(c rpcCaller, addr string) (*btcec.PrivateKey, error) {
 	}
 	i := i0 + len(searchStr)
 	auth := errStr[i : i+4]
-	/// fmt.Printf("OTA: %s\n", auth)
 
 	err = c.CallRPC(methodDumpPrivKey, []any{addr, auth}, &privkeyStr)
 	if err != nil {
