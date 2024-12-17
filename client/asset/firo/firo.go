@@ -22,7 +22,6 @@ import (
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/txscript"
 )
 
 const (
@@ -170,7 +169,6 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		FeeEstimator:             estimateFee,
 		ExternalFeeEstimator:     externalFeeRate,
 		AddressDecoder:           decodeAddress,
-		PayToAddressScript:       payToAddressScript,
 		PrivKeyFunc:              nil, // set only for walletTypeRPC below
 	}
 
@@ -218,15 +216,6 @@ func decodeAddress(address string, net *chaincfg.Params) (btcutil.Address, error
 	return decAddr, nil
 }
 
-// payToAddressScript builds a P2PKH script for a Firo output. For normal transparent
-// addresses btcd: txscript.PayToAddrScript is used.
-func payToAddressScript(addr btcutil.Address, address string) ([]byte, error) {
-	if isExxAddress(address) {
-		return buildExxPayToScript(addr, address)
-	}
-	return txscript.PayToAddrScript(addr)
-}
-
 // rpcCaller is satisfied by ExchangeWalletFullNode (baseWallet), providing
 // direct RPC requests.
 type rpcCaller interface {
@@ -252,6 +241,7 @@ func privKeyForAddress(c rpcCaller, addr string) (*btcec.PrivateKey, error) {
 	}
 	i := i0 + len(searchStr)
 	auth := errStr[i : i+4]
+	/// fmt.Printf("OTA: %s\n", auth)
 
 	err = c.CallRPC(methodDumpPrivKey, []any{addr, auth}, &privkeyStr)
 	if err != nil {
