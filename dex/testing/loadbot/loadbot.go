@@ -710,7 +710,8 @@ func loadNodeConfig(symbol, node string) map[string]string {
 	var cfgPath string
 	switch symbol {
 	case eth, usdc:
-		cfgPath = filepath.Join(dextestDir, harnessSymbol(symbol), node, "node", "eth.conf")
+		// Eth harness only has an alpha node.
+		cfgPath = filepath.Join(dextestDir, harnessSymbol(symbol), "alpha", "node", "eth.conf")
 	case polygon, usdcp:
 		return map[string]string{}
 	default:
