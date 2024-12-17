@@ -5,19 +5,10 @@ set -ex
 # The following are required script arguments.
 TMUX_WIN_ID=$1
 NAME=$2
-NODE_PORT=$3
-CHAIN_ADDRESS=$4
-CHAIN_PASSWORD=$5
-CHAIN_ADDRESS_JSON=$6
-CHAIN_ADDRESS_JSON_FILE_NAME=$7
-ADDRESS_JSON=$8
-ADDRESS_JSON_FILE_NAME=$9
-NODE_KEY=${10}
-SYNC_MODE=${11}
-AUTHRPC_PORT=${12}
-HTTP_PORT=${13}
-WS_PORT=${14}
-WS_MODULES=${15}
+AUTHRPC_PORT=${3}
+HTTP_PORT=${4}
+WS_PORT=${5}
+WS_MODULES=${6}
 
 GROUP_DIR="${NODES_ROOT}/${NAME}"
 MINE_JS="${GROUP_DIR}/mine.js"
@@ -33,10 +24,8 @@ geth --datadir="${NODE_DIR}" \$*
 EOF
 chmod +x "${NODES_ROOT}/harness-ctl/${NAME}"
 
-# Write mine script if CHAIN_ADDRESS is present.
-if [ "${CHAIN_ADDRESS}" != "_" ]; then
-  # The mining script may end up mining more or less blocks than specified.
-  cat > "${NODES_ROOT}/harness-ctl/mine-${NAME}" <<EOF
+# The mining script may end up mining more or less blocks than specified.
+cat > "${NODES_ROOT}/harness-ctl/mine-${NAME}" <<EOF
 #!/usr/bin/env bash
   NUM=2
   case \$1 in
@@ -60,17 +49,10 @@ if [ "${CHAIN_ADDRESS}" != "_" ]; then
 EOF
   chmod +x "${NODES_ROOT}/harness-ctl/mine-${NAME}"
 
-  # Write password file to unlock accounts later.
-  cat > "${GROUP_DIR}/password" <<EOF
-$CHAIN_PASSWORD
-EOF
-
-fi
-
 cat > "${NODE_DIR}/eth.conf" <<EOF
 [Eth]
 NetworkId = 42
-SyncMode = "${SYNC_MODE}"
+SyncMode = "snap"
 
 [Node]
 DataDir = "${NODE_DIR}"
@@ -80,67 +62,22 @@ AuthPort = ${AUTHRPC_PORT}
 NoDiscovery = true
 BootstrapNodes = []
 BootstrapNodesV5 = []
-ListenAddr = ":${NODE_PORT}"
 NetRestrict = [ "127.0.0.1/8", "::1/128" ]
-EOF
-
-# Add etherbase if mining.
-if [ "${CHAIN_ADDRESS}" != "_" ]; then
-  cat >> "${NODE_DIR}/eth.conf" <<EOF
 
 [Eth.Miner]
-Etherbase = "0x${CHAIN_ADDRESS}"
-GasFloor = 30000000
 GasCeil = 30000000
 EOF
-fi
 
 # Create a tmux window.
 tmux new-window -t "$TMUX_WIN_ID" -n "${NAME}" "${SHELL}"
 tmux send-keys -t "$TMUX_WIN_ID" "set +o history" C-m
 tmux send-keys -t "$TMUX_WIN_ID" "cd ${NODE_DIR}" C-m
 
-# Create and wait for a node initiated with a predefined genesis json.
-echo "Creating simnet ${NAME} node"
-tmux send-keys -t "$TMUX_WIN_ID" "${NODES_ROOT}/harness-ctl/${NAME} init "\
-	"$GENESIS_JSON_FILE_LOCATION; tmux wait-for -S ${NAME}" C-m
-tmux wait-for "${NAME}"
-
-# Create two accounts. The first is used to mine blocks. The second contains
-# funds.
-if [ "${CHAIN_ADDRESS}" != "_" ]; then
-  echo "Creating account"
-  cat > "${NODE_DIR}/keystore/$CHAIN_ADDRESS_JSON_FILE_NAME" <<EOF
-$CHAIN_ADDRESS_JSON
-EOF
-fi
-
-cat > "${NODE_DIR}/keystore/$ADDRESS_JSON_FILE_NAME" <<EOF
-$ADDRESS_JSON
-EOF
-
-# The node key lets us control the enode address value.
-echo "Setting node key"
-cat > "${NODE_DIR}/geth/nodekey" <<EOF
-$NODE_KEY
-EOF
-
 echo "Starting simnet ${NAME} node"
-if [ "${SYNC_MODE}" = "snap" ]; then
-  # Start the eth node with the chain account unlocked, listening restricted to
-  # localhost, and our custom configuration file.
-  tmux send-keys -t "$TMUX_WIN_ID" "${NODES_ROOT}/harness-ctl/${NAME} " \
-	  "--config ${NODE_DIR}/eth.conf --unlock ${CHAIN_ADDRESS} " \
-	  "--password ${GROUP_DIR}/password --light.serve 25 --datadir.ancient " \
-	  "${NODE_DIR}/geth-ancient --verbosity 5 --vmdebug --http --http.port " \
-	  "${HTTP_PORT} --ws --ws.port ${WS_PORT} --ws.api " \
-	  "${WS_MODULES} --allow-insecure-unlock --rpc.enabledeprecatedpersonal " \
-	  "2>&1 | tee ${NODE_DIR}/${NAME}.log" C-m
-
-else
-  # Start the eth node listening restricted to localhost and our custom
-  # configuration file.
-  tmux send-keys -t "$TMUX_WIN_ID" "${NODES_ROOT}/harness-ctl/${NAME} --allow-insecure-unlock --rpc.enabledeprecatedpersonal " \
-	  "--config ${NODE_DIR}/eth.conf --verbosity 5 ${HTTP_OPT} 2>&1 | tee " \
-	  "${NODE_DIR}/${NAME}.log" C-m
-fi
+# Start the eth node with the chain account unlocked, listening restricted to
+# localhost, and our custom configuration file.
+tmux send-keys -t "$TMUX_WIN_ID" "${NODES_ROOT}/harness-ctl/${NAME} " \
+	"--config ${NODE_DIR}/eth.conf " \
+	"--verbosity 5 --vmdebug --http --http.port " \
+	"${HTTP_PORT} --ws --ws.port ${WS_PORT} --ws.api ${WS_MODULES} " \
+	"--dev --dev.period 5 2>&1 | tee ${NODE_DIR}/${NAME}.log" C-m
