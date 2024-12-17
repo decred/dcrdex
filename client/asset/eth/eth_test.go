@@ -4927,11 +4927,11 @@ func testMaxSwapRedeemLots(t *testing.T, assetID uint32) {
 			t.Fatalf("expected 63 for max redemptions but got %d", info.MaxRedeemsInTx)
 		}
 	} else {
-		if info.MaxSwapsInTx != 20 {
-			t.Fatalf("expected 20 for max swaps but got %d", info.MaxSwapsInTx)
+		if info.MaxSwapsInTx != 24 {
+			t.Fatalf("expected 24 for max swaps but got %d", info.MaxSwapsInTx)
 		}
-		if info.MaxRedeemsInTx != 45 {
-			t.Fatalf("expected 45 for max redemptions but got %d", info.MaxRedeemsInTx)
+		if info.MaxRedeemsInTx != 55 {
+			t.Fatalf("expected 55 for max redemptions but got %d", info.MaxRedeemsInTx)
 		}
 	}
 }
