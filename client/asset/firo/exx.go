@@ -1,10 +1,12 @@
 package firo
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
-	"strings"
 
+	"decred.org/dcrdex/client/asset/btc"
 	dexfiro "decred.org/dcrdex/dex/networks/firo"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/btcutil/base58"
@@ -16,88 +18,127 @@ import (
 // transparent Firo P2PKH address. It is required in order to send funds to
 // Binance and some other centralized exchanges.
 
-const (
-	PKH_LEN    = 20
-	SCRIPT_LEN = 26
-)
-
-const (
-	VERSION_01             = 0x01
-	MAINNET_VER_BYTE_PKH   = 0x52
-	MAINNET_VER_BYTE_EXX   = 0x01
-	TESTNET_VER_BYTE_PKH   = 0x41
-	TESTNET_VER_BYTE_EXT   = 0x01
-	ALLNETS_EXTRA_BYTE_ONE = 0xb9
-	MAINNET_EXTRA_BYTE_TWO = 0xbb
-	TESTNET_EXTRA_BYTE_TWO = 0xb1
-)
-
 // OP_EXCHANGEADDR is an unused bitcoin script opcode used to 'mark' the output
 // as an exchange address for the recipient.
-const OP_EXCHANGEADDR = 0xe0
-
-var (
-	errInvalidVersion       = errors.New("invalid version")
-	errInvalidExtra         = errors.New("invalid extra")
-	errInvalidDecodedLength = errors.New("invalid decoded length")
+const (
+	ExxMainnet      byte = 0xbb
+	ExxTestnet      byte = 0xb1
+	ExxSimnet       byte = 0xac
+	OP_EXCHANGEADDR byte = 0xe0
 )
 
-// isExxAddress determines whether the address encoding is a mainnet EXX address
-// or a testnet EXT address.
-func isExxAddress(address string) bool {
-	return strings.HasPrefix(address, "EXX") || strings.HasPrefix(address, "EXT")
+var (
+	ExxVersionedPrefix = [2]byte{0x01, 0xb9}
+)
+
+// isExxAddress determines whether the address encoding is an EXX, EXT address
+// for mainnet, testnet or regtest networks.
+func isExxAddress(addr string) bool {
+	b, ver, err := base58.CheckDecode(addr)
+	switch {
+	case err != nil:
+		return false
+	case ver != ExxVersionedPrefix[0]:
+		return false
+	case len(b) != ripemd160HashSize+2:
+		return false
+	case b[0] != ExxVersionedPrefix[1]:
+		return false
+	}
+	return true
+}
+
+func checksum(input []byte) (csum [4]byte) {
+	h0 := sha256.Sum256(input)
+	h1 := sha256.Sum256(h0[:])
+	copy(csum[:], h1[:])
+	return
 }
 
 // decodeExxAddress decodes a Firo exchange address.
 func decodeExxAddress(encodedAddr string, net *chaincfg.Params) (btcutil.Address, error) {
-	decoded, ver, err := base58.CheckDecode(encodedAddr)
-	if err != nil {
-		return nil, err
-	}
+	const (
+		checksumLength = 4
+		prefixLength   = 3
+		decodedLen     = prefixLength + ripemd160HashSize + checksumLength // exx prefix + hash + checksum
+	)
 
-	if ver != VERSION_01 {
-		return nil, errInvalidVersion
+	decoded := base58.Decode(encodedAddr)
+
+	if len(decoded) != decodedLen {
+		return nil, fmt.Errorf("base 58 decoded to incorrect length. %d != %d", len(decoded), decodedLen)
 	}
-	if decoded[0] != ALLNETS_EXTRA_BYTE_ONE {
-		return nil, errInvalidExtra
-	}
-	switch net {
-	case dexfiro.MainNetParams:
-		if decoded[1] != MAINNET_EXTRA_BYTE_TWO {
-			return nil, errInvalidExtra
-		}
-	case dexfiro.TestNetParams:
-		if decoded[1] != TESTNET_EXTRA_BYTE_TWO {
-			return nil, errInvalidExtra
-		}
+	netID := decoded[2]
+	var expNet string
+	switch netID {
+	case ExxMainnet:
+		expNet = dexfiro.MainNetParams.Name
+	case ExxTestnet:
+		expNet = dexfiro.TestNetParams.Name
+	case ExxSimnet:
+		expNet = dexfiro.RegressionNetParams.Name
 	default:
-		return nil, errInvalidExtra
+		return nil, fmt.Errorf("unrecognized network name %s", expNet)
 	}
-	decLen := len(decoded)
-	if decLen < PKH_LEN+1 {
-		return nil, errInvalidDecodedLength
+	if net.Name != expNet {
+		return nil, fmt.Errorf("wrong network. expected %s, got %s", net.Name, expNet)
 	}
-
-	decExtra := decLen - PKH_LEN
-	pkh := decoded[decExtra:]
-	addrPKH, err := btcutil.NewAddressPubKeyHash(pkh, net)
-	if err != nil {
-		return nil, err
+	csum := decoded[decodedLen-checksumLength:]
+	expectedCsum := checksum(decoded[:decodedLen-checksumLength])
+	if !bytes.Equal(csum, expectedCsum[:]) {
+		return nil, errors.New("checksum mismatch")
 	}
-	return btcutil.Address(addrPKH), nil
+	var h [ripemd160HashSize]byte
+	copy(h[:], decoded[prefixLength:decodedLen-checksumLength])
+	return &addressEXX{
+		hash:  h,
+		netID: netID,
+	}, nil
 }
 
-// buildExxPayToScript builds a P2PKH output script for a Firo exchange address.
-func buildExxPayToScript(addr btcutil.Address, address string) ([]byte, error) {
-	if _, isPKH := addr.(*btcutil.AddressPubKeyHash); !isPKH {
-		return nil, fmt.Errorf("address %s does not contain a pubkey hash", address)
+const ripemd160HashSize = 20
+
+// addressEXX implements btcutil.Address and btc.PaymentScripter
+type addressEXX struct {
+	hash  [ripemd160HashSize]byte
+	netID byte
+}
+
+var _ btcutil.Address = (*addressEXX)(nil)
+var _ btc.PaymentScripter = (*addressEXX)(nil)
+
+func (a *addressEXX) String() string {
+	return a.EncodeAddress()
+}
+
+func (a *addressEXX) EncodeAddress() string {
+	return base58.CheckEncode(append([]byte{ExxVersionedPrefix[1], a.netID}, a.hash[:]...), ExxVersionedPrefix[0])
+}
+
+func (a *addressEXX) ScriptAddress() []byte {
+	return a.hash[:]
+}
+
+func (a *addressEXX) IsForNet(chainParams *chaincfg.Params) bool {
+	switch a.netID {
+	case ExxMainnet:
+		return chainParams.Name == dexfiro.MainNetParams.Name
+	case ExxTestnet:
+		return chainParams.Name == dexfiro.TestNetParams.Name
+	case ExxSimnet:
+		return chainParams.Name == dexfiro.RegressionNetParams.Name
 	}
-	baseScript, err := txscript.PayToAddrScript(addr)
-	if err != nil {
-		return nil, err
-	}
-	script := make([]byte, 0, len(baseScript)+1)
-	script = append(script, OP_EXCHANGEADDR)
-	script = append(script, baseScript...)
-	return script, nil
+	return false
+}
+
+func (a *addressEXX) PaymentScript() ([]byte, error) {
+	// OP_EXCHANGEADDR << OP_DUP << OP_HASH160 << ToByteVector(keyID) << OP_EQUALVERIFY << OP_CHECKSIG;
+	return txscript.NewScriptBuilder().
+		AddOp(OP_EXCHANGEADDR).
+		AddOp(txscript.OP_DUP).
+		AddOp(txscript.OP_HASH160).
+		AddData(a.hash[:]).
+		AddOp(txscript.OP_EQUALVERIFY).
+		AddOp(txscript.OP_CHECKSIG).
+		Script()
 }
