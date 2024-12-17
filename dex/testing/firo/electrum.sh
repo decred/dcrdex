@@ -22,7 +22,10 @@ export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
 SCRIPT_DIR=$(pwd)
 
 # Electrum-Firo Version 4.1.5.2
-COMMIT=a3f64386efc9069cae83e23c241331de6f418b2f
+# COMMIT=a3f64386efc9069cae83e23c241331de6f418b2f
+
+# Electrum-Firo Version 4.1.5.5
+COMMIT=b99e9594bddeecba82a2531bbf0769bd589f3a34
 
 GENESIS=a42b98f04cc2916e8adfb5d9db8a2227c4629bc205748ed2f33180b636ee885b # regtest
 RPCPORT=8001
@@ -56,15 +59,12 @@ fi
 
 git remote -v
 
-CURRENT_COMMIT=$(git rev-parse HEAD)
-if [ ! "${CURRENT_COMMIT}" == "${COMMIT}" ]; then
-    git fetch --depth 1 origin ${COMMIT}
-    git reset --hard FETCH_HEAD
-fi
+git fetch --depth 1 origin ${COMMIT}
+git reset --hard FETCH_HEAD
 
 if [ ! -d "${ELECTRUM_DIR}/venv" ]; then
     # The venv interpreter will be this python version, e.g. python3.10
-    python3 -m venv ${ELECTRUM_DIR}/venv
+    python3.7 -m venv ${ELECTRUM_DIR}/venv
 fi
 source ${ELECTRUM_DIR}/venv/bin/activate
 python --version

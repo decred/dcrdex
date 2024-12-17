@@ -76,7 +76,8 @@ cd ${NODES_ROOT} && tmux new-session -d -s $SESSION $SHELL
 # Write config files.
 ################################################################################
 echo "Writing node config files"
-# These config files aren't actually used here, but can be used by other programs.
+# These config files aren't actually used here, but can be used by other programs
+# such as loadbot.
 
 cat > "${ALPHA_DIR}/alpha.conf" <<EOF
 rpcuser=user
