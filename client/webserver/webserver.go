@@ -238,8 +238,9 @@ type Config struct {
 	// should be used by default since site files from older distributions may
 	// be present on the disk. When NoEmbed is true, this also implies reloading
 	// and execution of html templates on each request.
-	NoEmbed  bool
-	HttpProf bool
+	NoEmbed    bool
+	HttpProf   bool
+	AppVersion string
 }
 
 type valStamp struct {
@@ -271,6 +272,7 @@ type WebServer struct {
 	bondBuf    map[uint32]valStamp
 
 	useDEXBranding bool
+	appVersion     string
 }
 
 // New is the constructor for a new WebServer. CustomSiteDir in the Config can
@@ -392,6 +394,7 @@ func New(cfg *Config) (*WebServer, error) {
 		cachedPasswords: make(map[string]*cachedPassword),
 		bondBuf:         map[uint32]valStamp{},
 		useDEXBranding:  useDEXBranding,
+		appVersion:      cfg.AppVersion,
 	}
 	s.lang.Store(lang)
 

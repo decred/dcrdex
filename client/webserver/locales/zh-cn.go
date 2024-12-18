@@ -135,6 +135,7 @@ var ZhCN = map[string]*intl.Translation{
 	"Export Account":            {T: "退出账户"},
 	"simultaneous_servers_msg":  {T: "Decred DEX 客户端支持同时使用任意数量的 DEX 服务器。"},
 	"Change App Password":       {T: "更改应用程序密码"},
+	"Version":                   {T: "版本"},
 	"Build ID":                  {T: "构建 ID"},
 	"Connect":                   {T: "连接"},
 	"Send":                      {T: "发送"},

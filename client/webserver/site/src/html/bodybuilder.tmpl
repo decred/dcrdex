@@ -97,7 +97,7 @@
       <span class="ico-barchart fs16 me-2"></span>
       [[[Market Making]]]
     </a>
-    <a href="/settings" class="demi hoverbright plainlink d-flex align-items-center py-1">
+    <a href="/settings" class="demi hoverbright plainlink d-flex align-items-center py-1 authed-only">
       <span class="ico-settings fs16 me-2"></span>
       [[[Settings]]]
     </a>
@@ -118,7 +118,14 @@
       <span class="ico-profile fs16 me-2"></span>
       [[[Sign Out]]]
     </div>
+    <div class="border-bottom py-2"></div>
+    <div class="demi-sans d-flex align-items-center py-1" id="version">
+      <div class="flex-center">
+        [[[Version]]] {{.Version}}
+      </div>
+    </div>
   </div>
+
 
 </header>
 {{end}}
