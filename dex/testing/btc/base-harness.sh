@@ -114,7 +114,7 @@ tmux send-keys -t $SESSION:0 "${DAEMON} -rpcuser=user -rpcpassword=pass \
   -rpcport=${ALPHA_RPC_PORT} -datadir=${ALPHA_DIR} $(deprecateddbd $ALPHA_DESCRIPTOR_WALLET) \
   -debug=rpc -debug=net -debug=mempool -debug=walletdb -debug=addrman -debug=mempoolrej \
   -whitelist=127.0.0.0/8 -whitelist=::1 \
-  -txindex=1 -regtest=1 -port=${ALPHA_LISTEN_PORT} -fallbackfee=0.00001 \
+  -txindex=1 -regtest=1 -bind=127.0.0.1:${ALPHA_LISTEN_PORT} -fallbackfee=0.00001 \
   ${EXTRA_ARGS}; tmux wait-for -S alpha${SYMBOL}" C-m
 sleep 3
 
@@ -131,7 +131,7 @@ tmux send-keys -t $SESSION:1 "${DAEMON} -rpcuser=user -rpcpassword=pass $(deprec
   -rpcport=${BETA_RPC_PORT} -datadir=${BETA_DIR} -txindex=1 -regtest=1 \
   -debug=rpc -debug=net -debug=mempool -debug=walletdb -debug=addrman -debug=mempoolrej \
   -whitelist=127.0.0.0/8 -whitelist=::1 \
-  -port=${BETA_LISTEN_PORT} -fallbackfee=0.00001 ${EXTRA_ARGS}; \
+  -bind=127.0.0.1:${BETA_LISTEN_PORT} -fallbackfee=0.00001 ${EXTRA_ARGS}; \
   tmux wait-for -S beta${SYMBOL}" C-m
 sleep 3
 
