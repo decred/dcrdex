@@ -145,7 +145,7 @@ func (d *Driver) Setup(cfg *asset.BackendConfig) (asset.Backend, error) {
 	case dex.Testnet:
 		chainID = params.SepoliaChainConfig.ChainID.Uint64()
 	default:
-		chainID = 42
+		chainID = 1337
 	}
 
 	return NewEVMBackend(cfg, chainID, dexeth.ContractAddresses, registeredTokens)
