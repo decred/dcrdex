@@ -707,8 +707,6 @@ var zhCN = map[string]*intl.Translation{
 	idOrderReportTitle:               {T: "{{ side }}订单报告，纪元 #{{ epochNum }}"},
 	idCEXBalances:                    {T: "{{ cexName }}余额"},
 	idCausesSelfMatch:                {T: "此订单会导致自匹配"},
-	idCexNotConnected:                {T: "{{ cexName }} 未连接"},
-	idRemovingBotConfig:              {T: "您确定要移除 {{ host }} 上 {{ baseSymbol }}-{{ quoteSymbol }} 市场的配置吗？"},
 }
 
 var plPL = map[string]*intl.Translation{
