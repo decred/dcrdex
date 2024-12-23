@@ -574,6 +574,7 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/txhistory", s.apiTxHistory)
 			apiAuth.Post("/takeaction", s.apiTakeAction)
 			apiAuth.Post("/redeemgamecode", s.redeemGameCode)
+			apiAuth.Post("/exportapplogs", s.apiExportAppLogs)
 
 			apiAuth.Post("/stakestatus", s.apiStakeStatus)
 			apiAuth.Post("/setvsp", s.apiSetVSP)
