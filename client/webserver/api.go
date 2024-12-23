@@ -2042,6 +2042,10 @@ func (s *WebServer) apiTakeAction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck())
 }
 
+func (s *WebServer) apiExportAppLogs(w http.ResponseWriter, r *http.Request) {
+	fmt.Printf("apiExportAppLogs")
+}
+
 func (s *WebServer) redeemGameCode(w http.ResponseWriter, r *http.Request) {
 	var form struct {
 		Code  dex.Bytes        `json:"code"`
