@@ -1118,8 +1118,8 @@ func (w *assetWallet) withNonce(ctx context.Context, f transactionGenerator) (er
 	w.log.Trace("Nonce chosen for tx generator =", n)
 
 	// Make a first attempt with our best-known nonce.
-	tx, txType, amt, recipient, err := f(n)
-	if err != nil && strings.Contains(err.Error(), "nonce too low") {
+	tx, txType, amt, recipient, submitErr := f(n)
+	if submitErr != nil && strings.Contains(submitErr.Error(), "nonce too low") {
 		w.log.Warnf("Too-low nonce detected. Attempting recovery")
 		confirmedNonceAt, pendingNonceAt, err := w.node.nonce(ctx)
 		if err != nil {
@@ -1127,17 +1127,19 @@ func (w *assetWallet) withNonce(ctx context.Context, f transactionGenerator) (er
 		}
 		w.confirmedNonceAt = confirmedNonceAt
 		w.pendingNonceAt = pendingNonceAt
-		if newNonce := nonce(); newNonce != n {
-			n = newNonce
-			// Try again.
-			tx, txType, amt, recipient, err = f(n)
-			if err != nil {
-				return err
-			}
-			w.log.Info("Nonce recovered and transaction broadcast")
-		} else {
+		newNonce := nonce()
+		if newNonce == n {
 			return fmt.Errorf("best RPC nonce %d not better than our best nonce %d", newNonce, n)
 		}
+		n = newNonce
+		// Try again.
+		tx, txType, amt, recipient, submitErr = f(n)
+		if submitErr == nil {
+			w.log.Info("Nonce recovered and transaction broadcast")
+		}
+	}
+	if submitErr != nil {
+		return submitErr
 	}
 
 	if tx != nil {
@@ -1149,7 +1151,8 @@ func (w *assetWallet) withNonce(ctx context.Context, f transactionGenerator) (er
 		w.emitTransactionNote(et.WalletTransaction, true)
 		w.log.Tracef("Transaction %s generated for nonce %s", et.ID, n)
 	}
-	return err
+
+	return nil
 }
 
 // nonceIsSane performs sanity checks on pending txs.
