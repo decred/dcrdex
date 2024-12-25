@@ -173,6 +173,8 @@ export default class SettingsPage extends BasePage {
     })
     forms.bind(page.exportSeedAuth, page.exportSeedSubmit, () => this.submitExportSeedReq())
 
+    Doc.bind(page.exportLogs, 'click', () => this.exportLogs())
+
     Doc.bind(page.gameCodeLink, 'click', () => this.showForm(page.gameCodeForm))
     Doc.bind(page.gameCodeSubmit, 'click', () => this.submitGameCode())
 
@@ -471,6 +473,16 @@ export default class SettingsPage extends BasePage {
     this.currentForm = form
     Doc.hide(oldForm)
     Doc.show(form)
+  }
+
+  async exportLogs () {
+    console.log('exportLogs->')
+
+    const url = new URL(window.location.href)
+    url.pathname = '/api/exportapplog'
+    window.open(url.toString())
+
+    console.log('exportLogs<-')
   }
 
   async submitGameCode () {

@@ -2043,7 +2043,16 @@ func (s *WebServer) apiTakeAction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *WebServer) apiExportAppLogs(w http.ResponseWriter, r *http.Request) {
-	fmt.Printf("apiExportAppLogs")
+	fmt.Printf("=== apiExportAppLogs->\n")
+	w.Header().Set("Content-Disposition", "attachment; filename=bwlogs.zip")
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusOK)
+
+	fmt.Printf("=== %s\n", s.mainLogFilePath)
+
+	// TODO(warrior) .. get the file ;-)
+
+	fmt.Printf("=== <-apiExportAppLogs\n")
 }
 
 func (s *WebServer) redeemGameCode(w http.ResponseWriter, r *http.Request) {

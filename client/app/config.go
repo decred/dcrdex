@@ -197,6 +197,7 @@ func (cfg *Config) Web(c *core.Core, mm *mm.MarketMaker, log dex.Logger, utc boo
 		KeyFile:       keyFile,
 		Language:      cfg.Language,
 		Tor:           cfg.Tor,
+		MainLogFilePath: cfg.LogPath,
 	}
 }
 
