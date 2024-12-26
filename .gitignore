@@ -50,3 +50,4 @@ client/cmd/translationsreport/worksheets
 server/cmd/dexadm/dexadm
 client/tor/build
 server/cmd/geogame/geogame
+client/cmd/bisonw/bwlog.zip
