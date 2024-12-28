@@ -144,6 +144,7 @@ type Config struct {
 	WebConfig
 	LogConfig
 	MMConfig
+	AppVersion string
 	// AppData and ConfigPath should be parsed from the command-line,
 	// as it makes no sense to set these in the config file itself. If no values
 	// are assigned, defaults will be used.
@@ -163,7 +164,7 @@ type Config struct {
 // Web creates a configuration for the webserver. This is a Config method
 // instead of a WebConfig method because Language is an app-level setting used
 // by both core and rpcserver.
-func (cfg *Config) Web(c *core.Core, mm *mm.MarketMaker, log dex.Logger, utc bool, appVersion string) *webserver.Config {
+func (cfg *Config) Web(c *core.Core, mm *mm.MarketMaker, log dex.Logger, utc bool) *webserver.Config {
 	addr := cfg.WebAddr
 	host, _, err := net.SplitHostPort(addr)
 	if err == nil && host != "" {
@@ -195,9 +196,11 @@ func (cfg *Config) Web(c *core.Core, mm *mm.MarketMaker, log dex.Logger, utc boo
 		UTC:           utc,
 		CertFile:      certFile,
 		KeyFile:       keyFile,
+		NoEmbed:       cfg.NoEmbedSite,
+		HttpProf:      cfg.HTTPProfile,
+		AppVersion:    cfg.AppVersion,
 		Language:      cfg.Language,
 		Tor:           cfg.Tor,
-		AppVersion:    appVersion,
 	}
 }
 
@@ -351,7 +354,14 @@ func ResolveConfig(appData string, cfg *Config) error {
 		cfg.MMConfig.EventLogDBPath = defaultMMEventLogDBPath
 	}
 
+	cfg.AppVersion = userAppVersion(Version)
 	return nil
+}
+
+// userAppVersion returns a simple user-facing version: maj.min.patch.
+func userAppVersion(fullVersion string) string {
+	parts := strings.Split(fullVersion, "-")
+	return parts[0]
 }
 
 // setNet sets the filepath for the network directory and some network specific

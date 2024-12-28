@@ -154,7 +154,7 @@ func runCore(cfg *app.Config) error {
 	}
 
 	if !cfg.NoWeb {
-		webSrv, err := webserver.New(cfg.Web(clientCore, marketMaker, logMaker.Logger("WEB"), utc, userAppVersion(app.Version)))
+		webSrv, err := webserver.New(cfg.Web(clientCore, marketMaker, logMaker.Logger("WEB"), utc))
 		if err != nil {
 			return fmt.Errorf("failed creating web server: %w", err)
 		}
@@ -230,10 +230,4 @@ func promptShutdown(clientCore *core.Core) bool {
 	}
 	fmt.Println("Shutdown aborted.")
 	return false
-}
-
-// userAppVersion returns a simplified version string for end users.
-func userAppVersion(fullAppVersion string) string {
-	parts := strings.Split(fullAppVersion, "-")
-	return parts[0]
 }

@@ -57,7 +57,6 @@ import (
 	"runtime"
 	"runtime/debug"
 	"runtime/pprof"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -223,10 +222,7 @@ func mainCore() error {
 		}()
 	}
 
-	parts := strings.Split(app.Version, "-")
-	userAppVersion := parts[0]
-
-	webSrv, err := webserver.New(cfg.Web(clientCore, marketMaker, logMaker.Logger("WEB"), utc, userAppVersion))
+	webSrv, err := webserver.New(cfg.Web(clientCore, marketMaker, logMaker.Logger("WEB"), utc))
 	if err != nil {
 		return fmt.Errorf("failed creating web server: %w", err)
 	}

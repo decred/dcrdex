@@ -231,7 +231,8 @@ type Config struct {
 	CustomSiteDir string
 	Language      string
 	Logger        dex.Logger
-	UTC           bool // for stdout http request logging
+	UTC           bool   // for stdout http request logging
+	AppVersion    string // user app version for UI
 	CertFile      string
 	KeyFile       string
 	// NoEmbed indicates to serve files from the system disk rather than the
@@ -240,10 +241,9 @@ type Config struct {
 	// should be used by default since site files from older distributions may
 	// be present on the disk. When NoEmbed is true, this also implies reloading
 	// and execution of html templates on each request.
-	NoEmbed    bool
-	HttpProf   bool
-	Tor        bool
-	AppVersion string
+	NoEmbed  bool
+	HttpProf bool
+	Tor      bool
 }
 
 type valStamp struct {
@@ -277,8 +277,9 @@ type WebServer struct {
 	bondBufMtx sync.Mutex
 	bondBuf    map[uint32]valStamp
 
+	appVersion string
+
 	useDEXBranding bool
-	appVersion     string
 }
 
 // New is the constructor for a new WebServer. CustomSiteDir in the Config can
@@ -404,8 +405,8 @@ func New(cfg *Config) (*WebServer, error) {
 		cachedPasswords: make(map[string]*cachedPassword),
 		tor:             cfg.Tor,
 		bondBuf:         map[uint32]valStamp{},
-		useDEXBranding:  useDEXBranding,
 		appVersion:      cfg.AppVersion,
+		useDEXBranding:  useDEXBranding,
 	}
 	s.lang.Store(lang)
 
