@@ -3167,7 +3167,6 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 	// This is still a fee estimate. The actual gas cost will be returned in the
 	// receipt.
 	fees := g.RedeemN(len(form.Redemptions)) * form.FeeSuggestion
-
 	return txs, outputCoin, fees, nil
 }
 
@@ -5442,14 +5441,6 @@ func (w *assetWallet) confirmTransaction(coinID dex.Bytes, confirmTx *asset.Conf
 	}
 	var txHash common.Hash
 	copy(txHash[:], coinID)
-
-	// If the status of the swap was refunded when we tried to refund, the
-	// zero hash is saved. We don't know the tx that altered the swap or
-	// how many confs it has. Assume confirmed.
-	zeroHash := common.Hash{}
-	if txHash == zeroHash {
-		return confStatus(w.finalizeConfs, w.finalizeConfs, txHash), nil
-	}
 
 	contractVer, locator, err := dexeth.DecodeContractData(confirmTx.Contract())
 	if err != nil {
