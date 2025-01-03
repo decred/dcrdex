@@ -3086,12 +3086,18 @@ func (c *Core) confirmRedemptions(t *trackedTrade, matches []*matchTracker) {
 // This method accesses match fields and MUST be called with the trackedTrade
 // mutex lock held for writes.
 func (c *Core) confirmRedemption(t *trackedTrade, match *matchTracker) (bool, error) {
+	var coinID order.CoinID
+	if match.Side == order.Maker {
+		coinID = match.MetaData.Proof.MakerRedeem
+	} else {
+		coinID = match.MetaData.Proof.TakerRedeem
+	}
 	return c.confirmTx(t, match, &txInfo{
 		confs:          match.redemptionConfs,
 		confsReq:       match.redemptionConfsReq,
 		numTries:       &match.confirmRedemptionNumTries,
 		wallet:         t.wallets.toWallet,
-		coinID:         match.MetaData.Proof.MakerRedeem,
+		coinID:         coinID,
 		txType:         asset.CTRedeem,
 		fee:            t.redeemFee,
 		isRejected:     &match.redemptionRejected,
@@ -3236,7 +3242,6 @@ func (c *Core) confirmTx(t *trackedTrade, match *matchTracker, info *txInfo) (bo
 			t.dc.log.Errorf("Failed to update match in db %v", err)
 		}
 		return false, errors.New(info.counterTxError)
-
 	case errors.Is(err, asset.ErrTxRejected):
 		*info.isRejected = true
 		actionRequest, note := newRejectedTxNote(info.wallet.AssetID, t.ID(), info.coinID, info.txType)
@@ -3247,9 +3252,8 @@ func (c *Core) confirmTx(t *trackedTrade, match *matchTracker, info *txInfo) (bo
 		return false, fmt.Errorf("%s transaction %s was rejected. Seeking user approval before trying again",
 			unbip(info.wallet.AssetID), coinIDString(info.wallet.AssetID, info.coinID))
 	case errors.Is(err, asset.ErrTxLost):
-		info.handleLostTx()
 		c.log.Infof("Transaction %s (%s) has been noted as lost.", info.coinID, unbip(info.wallet.AssetID))
-
+		info.handleLostTx()
 		if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
 			t.dc.log.Errorf("failed to update match after lost tx reported: %v", err)
 		}
