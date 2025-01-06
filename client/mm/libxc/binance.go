@@ -50,6 +50,8 @@ const (
 	// /sapi/v1/capital/config/getall endpoint.
 	fakeBinanceURL   = "http://localhost:37346"
 	fakeBinanceWsURL = "ws://localhost:37346"
+
+	bnErrCodeInvalidListenKey = -1125
 )
 
 // binanceOrderBook manages an orderbook for a single market. It keeps
@@ -450,6 +452,23 @@ type tradeInfo struct {
 type withdrawInfo struct {
 	minimum uint64
 	lotSize uint64
+}
+
+type BinanceCodedErr struct {
+	Code int    `json:"code"`
+	Msg  string `json:"msg"`
+}
+
+func (e *BinanceCodedErr) Error() string {
+	return fmt.Sprintf("code = %d, msg = %q", e.Code, e.Msg)
+}
+
+func errHasBnCode(err error, code int) bool {
+	var bnErr *BinanceCodedErr
+	if errors.As(err, &bnErr) && bnErr.Code == code {
+		return true
+	}
+	return false
 }
 
 type binance struct {
@@ -1324,17 +1343,11 @@ func (bnc *binance) request(ctx context.Context, method, endpoint string, query,
 
 	req.Header = header
 
-	var errPayload struct {
-		Code int    `json:"code"`
-		Msg  string `json:"msg"`
-	}
-	if err := dexnet.Do(req, thing, dexnet.WithSizeLimit(1<<24), dexnet.WithErrorParsing(&errPayload)); err != nil {
-		bnc.log.Errorf("request error from endpoint %s %q with query = %q, body = %q, err = %v, bn code = %d, msg = %q",
-			method, endpoint, queryString, bodyString, err, errPayload.Code, errPayload.Msg)
-		if errPayload.Msg != "" {
-			return fmt.Errorf("Binance error: %v (%d)", errPayload.Msg, errPayload.Code)
-		}
-		return err
+	var bnErr BinanceCodedErr
+	if err := dexnet.Do(req, thing, dexnet.WithSizeLimit(1<<24), dexnet.WithErrorParsing(&bnErr)); err != nil {
+		bnc.log.Errorf("request error from endpoint %s %q with query = %q, body = %q, bn coded error: %v, msg = %q",
+			method, endpoint, queryString, bodyString, &bnErr, bnErr.Msg)
+		return errors.Join(err, &bnErr)
 	}
 
 	return nil
@@ -1564,6 +1577,11 @@ func (bnc *binance) getUserDataStream(ctx context.Context) (err error) {
 			q.Add("listenKey", bnc.listenKey.Load().(string))
 			// Doing a PUT on a listenKey will extend its validity for 60 minutes.
 			if err := bnc.request(ctx, http.MethodPut, "/api/v3/userDataStream", q, nil, true, false, nil); err != nil {
+				if errHasBnCode(err, bnErrCodeInvalidListenKey) {
+					bnc.log.Warnf("Invalid listen key. Reconnecting...")
+					doReconnect()
+					return
+				}
 				bnc.log.Errorf("Error sending keep-alive request: %v. Trying again in 10 seconds", err)
 				retryKeepAlive = time.After(time.Second * 10)
 				return
