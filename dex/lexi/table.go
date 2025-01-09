@@ -42,7 +42,7 @@ func (t *Table) Get(k encoding.BinaryMarshaler, v encoding.BinaryUnmarshaler) er
 		return fmt.Errorf("error marshaling key: %w", err)
 	}
 	return t.View(func(txn *badger.Txn) error {
-		dbID, err := t.keyID(txn, kB)
+		dbID, err := t.keyID(txn, kB, true)
 		if err != nil {
 			return convertError(err)
 		}
@@ -122,7 +122,7 @@ func (t *Table) Set(k, v encoding.BinaryMarshaler, setOpts ...SetOption) error {
 	}
 	d := &datum{v: vB, indexes: make([][]byte, len(t.indexes))}
 	return t.Update(func(txn *badger.Txn) error {
-		dbID, err := t.keyID(txn, kB)
+		dbID, err := t.keyID(txn, kB, false)
 		if err != nil {
 			return convertError(err)
 		}
@@ -160,7 +160,7 @@ func (t *Table) Set(k, v encoding.BinaryMarshaler, setOpts ...SetOption) error {
 // and the id<->key mappings.
 func (t *Table) Delete(kB []byte) error {
 	return t.Update(func(txn *badger.Txn) error {
-		dbID, err := t.keyID(txn, kB)
+		dbID, err := t.keyID(txn, kB, true)
 		if err != nil {
 			return convertError(err)
 		}

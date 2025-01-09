@@ -78,8 +78,8 @@ var (
 		},
 		1: {
 			dex.Mainnet: common.HexToAddress("0xa958d5B8a3a29E3f5f41742Fbb939A0dd93EB418"), // tx 0x4adf0314237c454acee1f8d33e97f84126af612245cad0794471693f0906610e
-			dex.Testnet: common.HexToAddress("0x9CDe3c347021F0AA63E2780dAD867B5949c5E083"), // tx 0x90f18e70121598a48fc49a5d5b0328358eb34441e2c5dee439dda2dfc7bf3dd8
-			dex.Simnet:  common.HexToAddress("0x2f68e723b8989ba1c6a9f03e42f33cb7dc9d606f"),
+			dex.Testnet: common.HexToAddress("0xAf5E6d6fD9011A8256a74b22791Eb7865D0720EF"), // tx 0x7095a4bc715992b690728eff34b24eb1936a477fcca0796f1fac3f8cc844cb0f
+			dex.Simnet:  common.HexToAddress("0xdb0e7d9cfd4460abd84e38dc8fa5b72d8a4b72f0"),
 		},
 	}
 
@@ -463,6 +463,21 @@ func SwapVectorToAbigen(v *SwapVector) swapv1.ETHSwapVector {
 		Participant:     v.To,
 		Value:           v.Value,
 	}
+}
+
+type EntryPointVersion string
+
+const (
+	EntryPointVersion0_6 EntryPointVersion = "0.6"
+)
+
+var EntryPoints = map[dex.Network]map[EntryPointVersion]common.Address{
+	dex.Simnet: {
+		EntryPointVersion0_6: common.Address{}, // populated by MaybeReadSimnetAddrs
+	},
+	dex.Testnet: {
+		EntryPointVersion0_6: common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"), // tx 0x7095a4bc715992b690728eff34b24eb1936a477fcca0796f1fac3f8cc844cb0f
+	},
 }
 
 // ProtocolVersion assists in mapping the dex.Asset.Version to a contract

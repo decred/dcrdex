@@ -2225,6 +2225,7 @@ export default class MarketsPage extends BasePage {
     }
     for (const opt of swap.options || []) addOption(opt, true)
     for (const opt of redeem.options || []) addOption(opt, false)
+    Doc.setVis(redeem.userOpRequired, page.vUserOpWarning)
     app().bindTooltips(page.vDefaultOrderOpts)
     app().bindTooltips(page.vOtherOrderOpts)
   }

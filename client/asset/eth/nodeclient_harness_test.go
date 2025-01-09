@@ -43,11 +43,13 @@ import (
 	"decred.org/dcrdex/dex/encode"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
+	swapv1 "decred.org/dcrdex/dex/networks/eth/contracts/v1"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/crypto/secp256k1"
@@ -1754,6 +1756,215 @@ func testRedeem(t *testing.T, assetID uint32) {
 			if status.Step != test.finalStates[i] {
 				t.Fatalf("unexpected swap state for test %v [%d]: want %s got %s",
 					test.name, i, test.finalStates[i], status.Step)
+			}
+		}
+	}
+}
+
+func TestGaslessRedeem(t *testing.T) {
+	if contractVer != 1 {
+		t.Skip("skipping test for contract version 0")
+	}
+
+	lockTime := uint64(time.Now().Add(12 * secPerBlock).Unix())
+
+	numSecrets := 10
+	secrets := make([][32]byte, 0, numSecrets)
+	secretHashes := make([][32]byte, 0, numSecrets)
+	for i := 0; i < numSecrets; i++ {
+		var secret [32]byte
+		copy(secret[:], encode.RandomBytes(32))
+		secretHash := sha256.Sum256(secret[:])
+		secrets = append(secrets, secret)
+		secretHashes = append(secretHashes, secretHash)
+	}
+
+	gases := ethGases
+	c, pc := simnetContractor, participantContractor
+
+	tests := []struct {
+		name               string
+		sleepNBlocks       int
+		redeemerClient     ethFetcher
+		redeemer           *accounts.Account
+		redeemerContractor contractor
+		swaps              []*dexeth.SwapVector
+		secrets            [][32]byte
+		finalStates        []dexeth.SwapStep
+		addAmt             bool
+		expectRedeemErr    bool
+	}{
+		{
+			name:               "ok before locktime",
+			sleepNBlocks:       8,
+			redeemerClient:     participantEthClient,
+			redeemer:           participantAcct,
+			redeemerContractor: pc,
+			swaps: []*dexeth.SwapVector{
+				{
+					From:       participantAddr,
+					To:         participantAddr,
+					Value:      dexeth.GweiToWei(1e9),
+					SecretHash: secretHashes[0],
+					LockTime:   lockTime,
+				},
+			},
+			secrets:     [][32]byte{secrets[0]},
+			finalStates: []dexeth.SwapStep{dexeth.SSRedeemed},
+			addAmt:      true,
+		},
+	}
+
+	for _, test := range tests {
+		var optsVal uint64
+
+		for _, vector := range test.swaps {
+			swap, err := c.status(ctx, vector.Locator())
+			if err != nil {
+				t.Fatalf("unable to get swap state: %v", err)
+			}
+			state := dexeth.SwapStep(swap.Step)
+			if state != dexeth.SSNone {
+				t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, dexeth.SSNone, state)
+			}
+			optsVal += dexeth.WeiToGwei(vector.Value)
+		}
+
+		balance := func() (*big.Int, error) {
+			return test.redeemerClient.addressBalance(ctx, test.redeemerClient.address())
+		}
+
+		txOpts, err := test.redeemerClient.txOpts(ctx, optsVal, gases.SwapN(len(test.swaps)), dexeth.GweiToWei(maxFeeRate), nil, nil)
+		if err != nil {
+			t.Fatalf("%s: txOpts error: %v", test.name, err)
+		}
+		contracts := make([]*asset.Contract, 0, len(test.swaps))
+		for _, vector := range test.swaps {
+			contracts = append(contracts, newContract(vector.LockTime, vector.SecretHash, dexeth.WeiToGwei(vector.Value)))
+		}
+
+		tx, err := test.redeemerContractor.initiate(txOpts, contracts)
+		if err != nil {
+			t.Fatalf("%s: initiate error: %v ", test.name, err)
+		}
+
+		// This waitForMined will always take test.sleepNBlocks to complete.
+		if err := waitForMined(); err != nil {
+			t.Fatalf("%s: post-init mining error: %v", test.name, err)
+		}
+
+		receipt, err := waitForReceipt(test.redeemerClient, tx)
+		if err != nil {
+			t.Fatalf("%s: failed to get init receipt: %v", test.name, err)
+		}
+
+		err = checkTxStatus(receipt, txOpts.GasLimit)
+		if err != nil {
+			t.Fatalf("%s: failed init transaction status: %v", test.name, err)
+		}
+
+		fmt.Printf("Gas used for %d inits: %d \n", len(test.swaps), receipt.GasUsed)
+
+		for _, vector := range test.swaps {
+			swap, err := test.redeemerContractor.status(ctx, vector.Locator())
+			if err != nil {
+				t.Fatal("unable to get swap state")
+			}
+			if swap.Step != dexeth.SSInitiated {
+				t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, dexeth.SSInitiated, swap.Step)
+			}
+		}
+
+		preRedeemBal, err := balance()
+		if err != nil {
+			t.Fatalf("%s: balance error: %v", test.name, err)
+		}
+
+		abi, err := swapv1.ETHSwapMetaData.GetAbi()
+		if err != nil {
+			t.Fatalf("unable to get abi: %v", err)
+		}
+		redemptions := make([]swapv1.ETHSwapRedemption, 0, len(test.secrets))
+		for i, secret := range test.secrets {
+			vector := swapv1.ETHSwapVector{
+				SecretHash:      test.swaps[i].SecretHash,
+				Value:           test.swaps[i].Value,
+				Initiator:       test.swaps[i].From,
+				RefundTimestamp: test.swaps[i].LockTime,
+				Participant:     test.swaps[i].To,
+			}
+			redemptions = append(redemptions, swapv1.ETHSwapRedemption{Secret: secret, V: vector})
+		}
+		callData, err := abi.Pack("redeemAA", redemptions)
+		if err != nil {
+			t.Fatalf("unable to pack call data: %v", err)
+		}
+		fmt.Printf("calldata: %x\n", callData)
+		redeemGas := big.NewInt(int64(gases.Redeem * 5))
+		preVerificationGas := big.NewInt(int64(gases.Redeem * 5))
+		entryPoint := common.HexToAddress("0xc26c58195debc5e2e9864df74ab75fedd69330d0")
+		bundler, err := newBundler(ctx, "http://localhost:38557", entryPoint, participantEthClient.contractBackend())
+		if err != nil {
+			t.Fatalf("error creating bundler: %v", err)
+		}
+		contractAddr, exists := dexeth.ContractAddresses[1][dex.Simnet]
+		if !exists {
+			t.Fatalf("contract address not found")
+		}
+		nonce, err := bundler.getNonce(&bind.CallOpts{Pending: false}, contractAddr, participantAddr)
+		if err != nil {
+			t.Fatalf("error getting nonce: %v", err)
+		}
+
+		fmt.Println("Nonce: ", hexutil.EncodeBig(nonce))
+		userOpParam := &userOpParam{
+			Nonce:                hexutil.EncodeBig(nonce),
+			Sender:               contractAddr.Hex(),
+			CallData:             "0x" + hex.EncodeToString(callData),
+			CallGasLimit:         hexutil.EncodeBig(redeemGas),
+			VerificationGasLimit: hexutil.EncodeBig(redeemGas),
+			PreVerificationGas:   hexutil.EncodeBig(preVerificationGas),
+			Signature:            "0xfffffffffffffffffffffffffffffff0000000000000000000000000000000007aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c",
+		}
+		userOpHash, err := bundler.sendUserOp(ctx, userOpParam)
+		if err != nil {
+			t.Fatalf("error sending user op: %v", err)
+		}
+
+		gotReceipt := false
+		for i := 0; i < 60; i++ {
+			time.Sleep(time.Second)
+
+			receipt, err := bundler.getUserOpReceipt(ctx, userOpHash)
+			if err != nil {
+				t.Fatalf("error getting user op receipt: %v", err)
+			}
+			if receipt != nil && receipt.receipt != nil {
+				gotReceipt = true
+				spew.Dump(receipt)
+				break
+			}
+		}
+		if !gotReceipt {
+			t.Fatalf("did not get receipt")
+		}
+
+		postRedeemBal, err := balance()
+		if err != nil {
+			t.Fatalf("balance error: %v", err)
+		}
+
+		if postRedeemBal.Cmp(preRedeemBal) == 0 {
+			t.Fatalf("balance did not change")
+		}
+
+		for _, vector := range test.swaps {
+			swap, err := test.redeemerContractor.status(ctx, vector.Locator())
+			if err != nil {
+				t.Fatal("unable to get swap state")
+			}
+			if swap.Step != dexeth.SSRedeemed {
+				t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, dexeth.SSRedeemed, swap.Step)
 			}
 		}
 	}

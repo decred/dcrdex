@@ -407,6 +407,10 @@ type ConfirmRedemptionStatus struct {
 	Confs  uint64
 	Req    uint64
 	CoinID dex.Bytes
+	// PendingSubmission is true for ETH redemptions using a user op before
+	// the bundler has submitted the transaction. The redemption message
+	// should only be sent to the server once this is true.
+	PendingSubmission bool
 }
 
 // Wallet is a common interface to be implemented by cryptocurrency wallet
@@ -902,6 +906,23 @@ type AccountLocker interface {
 	UnlockRefundReserves(uint64)
 }
 
+// GaslessRedeemer is implemented by wallets that support gasless redemption.
+// This is a subset of wallets that implement AccountLocker.
+type GaslessRedeemer interface {
+	// GaslessRedeem will redeem swaps without requiring funds in the wallet.
+	// It should be called if ReserveNRedemptions returned a zero value. The
+	// submitted bool will be true if the wallet received funds since the
+	// wallet attempted to reserve funds, and is able to pay for the redemption
+	// on its own, otherwise if a user operation was sent to a bundler, it will
+	// be false.
+	//
+	// The redemption message should only be sent the the server if submitted is
+	// true. If it is false, an updated coin ID will be returned from
+	// ConfirmRedemption when the transaction is submitted by the bundler,
+	// and the server should be notified using that coin ID.
+	GaslessRedeem(redeems *RedeemForm) (ins []dex.Bytes, out Coin, feesPaid uint64, submitted bool, err error)
+}
+
 // LiveReconfigurer is a wallet that can possibly handle a reconfiguration
 // without the need for re-initialization.
 type LiveReconfigurer interface {
@@ -1174,6 +1195,11 @@ type WalletTransaction struct {
 	// Rejected will be true the transaction was rejected and did not have any
 	// effect, though fees were incurred.
 	Rejected bool `json:"rejected,omitempty"`
+	// UserOpTxID is the id of the transaction that the bundler submitted
+	// for a user op.
+	UserOpTxID string `json:"userOpTxID,omitempty"`
+	// IsUserOp will be true if the transaction is a user op.
+	IsUserOp bool `json:"isUserOp"`
 }
 
 // WalletHistorian is a wallet that is able to retrieve the history of all

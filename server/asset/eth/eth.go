@@ -79,7 +79,7 @@ func init() {
 
 	registerToken(usdcID, ProtocolVersion(usdcID))
 	registerToken(usdtID, ProtocolVersion(usdtID))
-	registerToken(maticID, ProtocolVersion(maticID))
+	// registerToken(maticID, ProtocolVersion(maticID))
 }
 
 // ProtocolVersion returns the default protocol version unless a reversion is
@@ -152,11 +152,11 @@ func (d *DriverBase) Version() uint32 {
 // DecodeCoinID creates a human-readable representation of a coin ID for
 // Ethereum. This must be a transaction hash.
 func (d *DriverBase) DecodeCoinID(coinID []byte) (string, error) {
-	txHash, err := dexeth.DecodeCoinID(coinID)
+	ethCoinID, err := dexeth.DecodeCoinID(coinID)
 	if err != nil {
 		return "", err
 	}
-	return txHash.String(), nil
+	return ethCoinID.TxHash.Hex(), nil
 }
 
 // UnitInfo returns the dex.UnitInfo for the asset.
@@ -198,7 +198,7 @@ func (d *Driver) Setup(cfg *asset.BackendConfig) (asset.Backend, error) {
 		}
 	}
 
-	return NewEVMBackend(cfg, chainID, dexeth.ContractAddresses, registeredTokens)
+	return NewEVMBackend(cfg, chainID, dexeth.ContractAddresses, registeredTokens, dexeth.EntryPoints[cfg.Net])
 }
 
 type TokenDriver struct {
@@ -232,6 +232,7 @@ type ethFetcher interface {
 	vector(ctx context.Context, assetID uint32, locator []byte) (*dexeth.SwapVector, error)
 	statusAndVector(ctx context.Context, assetID uint32, locator []byte) (*dexeth.SwapStatus, *dexeth.SwapVector, error)
 	accountBalance(ctx context.Context, assetID uint32, addr common.Address) (*big.Int, error)
+	getUserOpEvent(ctx context.Context, epAddress common.Address, epVersion dexeth.EntryPointVersion, userOpHash common.Hash, swapContractAddress common.Address, blockNumber uint64) (*userOpEvent, error)
 }
 
 type baseBackend struct {
@@ -244,6 +245,7 @@ type baseBackend struct {
 	baseChainID     uint32
 	baseChainName   string
 	versionedTokens map[uint32]*VersionedToken
+	evmChainID      uint64
 
 	// bestHeight is the last best known chain tip height. bestHeight is set
 	// in Connect before the poll loop is started, and only updated in the poll
@@ -281,6 +283,8 @@ type AssetBackend struct {
 	contractAddr   common.Address // could be v0 or v1
 	contractAddrV1 common.Address // required regardless
 	contractVer    uint32
+
+	entryPointAddresses map[dexeth.EntryPointVersion]common.Address
 }
 
 // ETHBackend implements some Ethereum-specific methods.
@@ -304,13 +308,14 @@ var _ asset.AccountBalancer = (*ETHBackend)(nil)
 
 // unconnectedETH returns a Backend without a node. The node should be set
 // before use.
-func unconnectedETH(bipID, contractVer uint32, contractAddr, contractAddrV1 common.Address, vTokens map[uint32]*VersionedToken, logger dex.Logger, net dex.Network) (*ETHBackend, error) {
+func unconnectedETH(bipID uint32, chainID uint64, contractVer uint32, contractAddr, contractAddrV1 common.Address, vTokens map[uint32]*VersionedToken, logger dex.Logger, net dex.Network) (*ETHBackend, error) {
 	return &ETHBackend{&AssetBackend{
 		baseBackend: &baseBackend{
 			net:             net,
 			baseLogger:      logger,
 			tokens:          make(map[uint32]*TokenBackend),
 			baseChainID:     bipID,
+			evmChainID:      chainID,
 			baseChainName:   strings.ToUpper(dex.BipIDSymbol(bipID)),
 			versionedTokens: vTokens,
 		},
@@ -395,6 +400,7 @@ func NewEVMBackend(
 	chainID uint64,
 	contractAddrs map[uint32]map[dex.Network]common.Address,
 	vTokens map[uint32]*VersionedToken,
+	entryPointAddresses map[dexeth.EntryPointVersion]common.Address,
 ) (*ETHBackend, error) {
 
 	endpoints, err := parseEndpoints(cfg)
@@ -426,12 +432,13 @@ func NewEVMBackend(
 		return nil, fmt.Errorf("no v1 contract address for %s on %s", assetName, net)
 	}
 
-	eth, err := unconnectedETH(baseChainID, contractVer, contractAddr, contractAddrV1, vTokens, log, net)
+	eth, err := unconnectedETH(baseChainID, chainID, contractVer, contractAddr, contractAddrV1, vTokens, log, net)
 	if err != nil {
 		return nil, err
 	}
 
 	eth.node = newRPCClient(baseChainID, chainID, net, endpoints, contractVer, contractAddr, contractAddrV1, log.SubLogger("RPC"))
+	eth.entryPointAddresses = entryPointAddresses
 	return eth, nil
 }
 
@@ -538,17 +545,17 @@ func (eth *ETHBackend) TokenBackend(assetID uint32, configPath string) (asset.Ba
 
 // TxData fetches the raw transaction data.
 func (eth *baseBackend) TxData(coinID []byte) ([]byte, error) {
-	txHash, err := dexeth.DecodeCoinID(coinID)
+	ethCoinID, err := dexeth.DecodeCoinID(coinID)
 	if err != nil {
 		return nil, fmt.Errorf("coin ID decoding error: %v", err)
 	}
 
-	tx, _, err := eth.node.transaction(eth.ctx, txHash)
+	tx, _, err := eth.node.transaction(eth.ctx, ethCoinID.TxHash)
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving transaction: %w", err)
 	}
 	if tx == nil { // Possible?
-		return nil, fmt.Errorf("no transaction %s", txHash)
+		return nil, fmt.Errorf("no transaction %s", ethCoinID.TxHash.Hex())
 	}
 
 	return tx.MarshalBinary()
@@ -763,11 +770,14 @@ func (be *AssetBackend) Redemption(redeemCoinID, _, contractData []byte) (asset.
 
 // ValidateCoinID attempts to decode the coinID.
 func (eth *baseBackend) ValidateCoinID(coinID []byte) (string, error) {
-	txHash, err := dexeth.DecodeCoinID(coinID)
+	ethCoinID, err := dexeth.DecodeCoinID(coinID)
 	if err != nil {
 		return "<invalid>", err
 	}
-	return txHash.String(), nil
+	if ethCoinID.IsUserOp {
+		return "userOp:" + ethCoinID.TxHash.Hex(), nil
+	}
+	return ethCoinID.TxHash.Hex(), nil
 }
 
 // CheckSwapAddress checks that the given address is parseable.
