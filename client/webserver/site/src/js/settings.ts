@@ -476,13 +476,9 @@ export default class SettingsPage extends BasePage {
   }
 
   async exportLogs () {
-    console.log('exportLogs->')
-
     const url = new URL(window.location.href)
     url.pathname = '/api/exportapplog'
     window.open(url.toString())
-
-    console.log('exportLogs<-')
   }
 
   async submitGameCode () {
