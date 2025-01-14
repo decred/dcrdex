@@ -316,6 +316,17 @@ type Token struct {
 	SupportedAssetVersions []uint32          `json:"supportedAssetVersions"`
 }
 
+type BlockchainClass string
+
+const (
+	BlockchainClassUTXO BlockchainClass = "UTXO"
+	BlockchainClassEVM  BlockchainClass = "EVM"
+)
+
+func (c BlockchainClass) IsEVM() bool {
+	return c == BlockchainClassEVM
+}
+
 // WalletInfo is auxiliary information about an ExchangeWallet.
 type WalletInfo struct {
 	// Name is the display name for the currency, e.g. "Decred"
@@ -337,10 +348,8 @@ type WalletInfo struct {
 	// UnitInfo is the information about unit names and conversion factors for
 	// the asset.
 	UnitInfo dex.UnitInfo `json:"unitinfo"`
-	// IsAccountBased should be set to true for account-based (EVM) assets, so
-	// that a common seed will be generated and wallets will generate the
-	// same address.
-	IsAccountBased bool
+	// BlockchainClass is the type of the wallet's blockchain.
+	BlockchainClass BlockchainClass
 }
 
 // ConfigOption is a wallet configuration option.

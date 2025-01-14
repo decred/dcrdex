@@ -140,6 +140,7 @@ var (
 			ConfigOpts:        configOpts,
 			NoAuth:            true,
 		}},
+		BlockchainClass: asset.BlockchainClassUTXO,
 	}
 
 	feeReservesPerLot = dexzec.TxFeesZIP317(dexbtc.RedeemP2PKHInputSize+1, 2*dexbtc.P2PKHOutputSize+1, 0, 0, 0, 0)

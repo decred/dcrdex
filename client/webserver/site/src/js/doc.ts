@@ -130,7 +130,7 @@ function convertToConventional (v: number, unitInfo?: UnitInfo) {
  * 1 - (-5) = 6, so the conversion that has the order closest to
  * bestDisplayOrder is the first one, 1,000 BTC.
  */
-const bestDisplayOrder = 1 // 10^1 => 1
+const bestDisplayOrder = 3 // 10^3 => 1000
 
 /*
  * resolveUnitConversions creates a lookup object mapping unit -> conversion
@@ -563,6 +563,10 @@ export default class Doc {
     const d: Record<string, PageElement> = {}
     for (const el of Doc.applySelector(ancestor, '[data-tmpl]')) d[el.dataset.tmpl || ''] = el
     return d
+  }
+
+  static clone (node: HTMLElement): PageElement {
+    return node.cloneNode(true) as PageElement
   }
 
   /*

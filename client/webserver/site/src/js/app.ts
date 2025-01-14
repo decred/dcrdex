@@ -53,6 +53,7 @@ import {
   PageElement,
   ActionRequiredNote,
   ActionResolvedNote,
+  TipChangeNote,
   TransactionActionNote,
   CoreActionRequiredNote,
   RejectedTxData,
@@ -183,6 +184,10 @@ export default class Application {
   txHistoryMap: Record<number, TxHistoryResult>
   requiredActions: Record<string, requiredAction>
   onionUrl: string
+  dynamicUnits: {
+    div: PageElement
+    rows: PageElement
+  }
 
   constructor () {
     this.notes = []
@@ -197,6 +202,13 @@ export default class Application {
 
     // Set dark theme.
     document.body.classList.toggle('dark', State.isDark())
+
+    const div = document.createElement('div') as PageElement
+    div.classList.add('position-absolute', 'p-3')
+    const rows = document.createElement('div') as PageElement
+    div.appendChild(rows)
+    rows.classList.add('body-bg', 'border')
+    this.dynamicUnits = { div, rows }
 
     // Loggers can be enabled by setting a truthy value to the loggerID using
     // enableLogger. Settings are stored across sessions. See docstring for the
@@ -380,6 +392,8 @@ export default class Application {
       return
     }
     this.attachCommon(this.main)
+    // Nix annoying auto-typing of form buttons.
+    for (const bttn of Doc.applySelector(this.main, 'form button')) bttn.setAttribute('type', 'button')
     if (this.loadedPage) this.loadedPage.unload()
     const constructor = constructors[handlerID]
     if (constructor) this.loadedPage = new constructor(this.main, data)
@@ -419,13 +433,8 @@ export default class Application {
    * display elements. The menu gives users an option to convert the value
    * to their preferred units.
    */
-  bindUnits (main: PageElement) {
-    const div = document.createElement('div') as PageElement
-    div.classList.add('position-absolute', 'p-3')
-    // div.style.backgroundColor = 'yellow'
-    const rows = document.createElement('div') as PageElement
-    div.appendChild(rows)
-    rows.classList.add('body-bg', 'border')
+  bindUnits (ancestor: PageElement) {
+    const { div, rows } = this.dynamicUnits
     const addRow = (el: PageElement, unit: string, cFactor: number) => {
       const box = Doc.safeSelector(el, '[data-unit-box]')
       const atoms = parseInt(box.dataset.atoms as string)
@@ -438,9 +447,9 @@ export default class Application {
         Doc.setText(el, '[data-unit]', unit)
       })
     }
-    for (const el of Doc.applySelector(main, '[data-conversion-value]')) {
+    for (const el of Doc.applySelector(ancestor, '[data-conversion-value]')) {
       const box = Doc.safeSelector(el, '[data-unit-box]')
-      Doc.bind(box, 'mouseenter', () => {
+      Doc.bind(box, 'click', () => {
         Doc.empty(rows)
         box.appendChild(div)
         const lyt = Doc.layoutMetrics(box)
@@ -1171,6 +1180,12 @@ export default class Application {
           }
           case 'actionResolved': {
             this.resolveAction(n.payload as ActionResolvedNote)
+            break
+          }
+          case 'tipChange': {
+            const note = n.payload as TipChangeNote
+            const w = this.assets[note.assetID].wallet
+            if (w) w.syncStatus.blocks = note.tip
           }
         }
         if (n.payload.route === 'transactionHistorySynced') {
@@ -1625,22 +1640,6 @@ export default class Application {
 
   clearTxHistory (assetID: number) {
     delete this.txHistoryMap[assetID]
-  }
-
-  async needsCustomProvider (assetID: number): Promise<boolean> {
-    const baseChainID = this.assets[assetID]?.token?.parentID ?? assetID
-    if (!baseChainID) return false
-    const w = this.walletMap[baseChainID]
-    if (!w) return false
-    const traitAccountLocker = 1 << 14
-    if ((w.traits & traitAccountLocker) === 0) return false
-    const res = await postJSON('/api/walletsettings', { assetID: baseChainID })
-    if (!this.checkResponse(res)) {
-      console.error(res.msg)
-      return false
-    }
-    const settings = res.map as Record<string, string>
-    return !settings.providers
   }
 
   async allBridgePaths (): Promise<Record<number, Record<number, string[]>>> {

@@ -185,7 +185,7 @@ var (
 				GuideLink:   "https://github.com/decred/dcrdex/wiki/Wallet#rpc-providers-for-evm-compatible-networks",
 			},
 		},
-		IsAccountBased: true,
+		BlockchainClass: asset.BlockchainClassEVM,
 	}
 
 	// unlimitedAllowance is the maximum supported allowance for an erc20
@@ -686,7 +686,7 @@ func CreateEVMWallet(chainID int64, createWalletParams *asset.CreateWalletParams
 func newWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network) (w asset.Wallet, err error) {
 	chainCfg, err := ChainConfig(net)
 	if err != nil {
-		return nil, fmt.Errorf("failed to locate Ethereum genesis configuration for network %s", net)
+		return nil, fmt.Errorf("failed to locate Ethereum genesis configuration for network %s: %v", net, err)
 	}
 	comp, err := NetworkCompatibilityData(net)
 	if err != nil {
@@ -1666,6 +1666,7 @@ func (w *ETHWallet) OpenTokenWallet(tokenCfg *asset.TokenConfig) (asset.Wallet, 
 			Name:              token.Name,
 			SupportedVersions: supportedAssetVersions,
 			UnitInfo:          token.UnitInfo,
+			BlockchainClass:   asset.BlockchainClassEVM,
 		},
 		tokenAddr:         netToken.Address,
 		pendingTxCheckBal: new(big.Int),

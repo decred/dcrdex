@@ -2,10 +2,7 @@ import Doc from './doc'
 import BasePage from './basepage'
 import { postJSON } from './http'
 import * as intl from './locales'
-import {
-  bind as bindForm,
-  slideSwap
-} from './forms'
+import { slideSwap } from './forms'
 import { Wave } from './charts'
 import {
   app,
@@ -90,8 +87,8 @@ class AppInitForm {
     this.form = form
     this.success = success
     const page = this.page = Doc.idDescendants(form)
-    bindForm(form, page.appPWSubmit, () => this.setAppPass())
-    bindForm(form, page.toggleSeedInput, () => {
+    Doc.bind(page.appPWSubmit, 'click', () => this.setAppPass())
+    Doc.bind(page.toggleSeedInput, 'click', () => {
       if (Doc.isHidden(page.seedInputBox)) {
         page.toggleSeedInputIcon.classList.remove('ico-plus')
         page.toggleSeedInputIcon.classList.add('ico-minus')
@@ -172,8 +169,8 @@ class QuickConfigForm {
     this.success = success
     const page = this.page = Doc.idDescendants(form)
     Doc.cleanTemplates(page.qcServerTmpl, page.qcWalletTmpl)
-    bindForm(form, page.quickConfigSubmit, () => { this.submit() })
-    bindForm(form, page.qcErrAck, () => { this.success() })
+    Doc.bind(page.quickConfigSubmit, 'click', () => { this.submit() })
+    Doc.bind(page.qcErrAck, 'click', () => { this.success() })
   }
 
   async update (pw: string, hosts: string[]) {
@@ -300,8 +297,8 @@ class SeedBackupForm {
   constructor (form: PageElement, success: () => void) {
     this.form = form
     const page = this.page = Doc.idDescendants(form)
-    bindForm(form, page.seedAck, () => success())
-    bindForm(form, page.showSeed, () => this.showSeed())
+    Doc.bind(page.seedAck, 'click', () => success())
+    Doc.bind(page.showSeed, 'click', () => this.showSeed())
   }
 
   update (mnemonic: string) {

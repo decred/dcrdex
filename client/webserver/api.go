@@ -464,20 +464,11 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer zero(pass)
-	var parentForm *core.WalletForm
-	if f := form.ParentForm; f != nil {
-		parentForm = &core.WalletForm{
-			AssetID: f.AssetID,
-			Config:  f.Config,
-			Type:    f.WalletType,
-		}
-	}
 	// Wallet does not exist yet. Try to create it.
 	err = s.core.CreateWallet(pass, form.Pass, &core.WalletForm{
-		AssetID:    form.AssetID,
-		Type:       form.WalletType,
-		Config:     form.Config,
-		ParentForm: parentForm,
+		AssetID: form.AssetID,
+		Type:    form.WalletType,
+		Config:  form.Config,
 	})
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error creating %s wallet: %w", unbip(form.AssetID), err))

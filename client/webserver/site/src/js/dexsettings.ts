@@ -165,7 +165,7 @@ export default class DexSettingsPage extends BasePage {
     }, this.host)
 
     // forms.bind(page.bondDetailsForm, page.updateBondOptionsConfirm, () => this.updateBondOptions())
-    forms.bind(page.disableAccountForm, page.disableAccountConfirm, () => this.toggleAccountStatus(true))
+    Doc.bind(page.disableAccountConfirm, 'click', () => this.toggleAccountStatus(true))
 
     Doc.bind(page.forms, 'mousedown', (e: MouseEvent) => {
       if (!Doc.mouseInElement(e, this.currentForm)) { this.closePopups() }

@@ -710,7 +710,7 @@ func (s *WebServer) buildTemplates(lang string) error {
 		addTemplate("login", bb, "forms").
 		addTemplate("register", bb, "forms").
 		addTemplate("markets", bb, "forms").
-		addTemplate("wallets", bb, "forms").
+		addTemplate("wallets", bb, "forms", "docs").
 		addTemplate("settings", bb, "forms").
 		addTemplate("orders", bb).
 		addTemplate("order", bb, "forms").

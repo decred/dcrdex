@@ -80,6 +80,7 @@ var (
 			DefaultConfigPath: dexbtc.SystemConfigPath("digibyte"),
 			ConfigOpts:        configOpts,
 		}},
+		BlockchainClass: asset.BlockchainClassUTXO,
 	}
 )
 

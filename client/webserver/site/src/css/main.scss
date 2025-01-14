@@ -213,7 +213,9 @@ z-index: 1000;
 }
 
 [data-unit-box] {
-  cursor: default;
+  @extend .hoverbg;
+
+  cursor: pointer;
   position: relative;
   overflow: visible;
 

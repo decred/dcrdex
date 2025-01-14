@@ -89,14 +89,6 @@ type WalletForm struct {
 	AssetID uint32
 	Config  map[string]string
 	Type    string
-	// ParentForm is the configuration settings for a parent asset. If this is a
-	// token whose parent asset needs configuration, a non-nil ParentForm can be
-	// supplied. This will cause CreateWallet to run in a special mode which
-	// will create the parent asset's wallet synchronously, but schedule the
-	// creation of the token wallet to occur asynchronously after the parent
-	// wallet is fully synced, sending NoteTypeCreateWallet notifications to
-	// update with progress.
-	ParentForm *WalletForm
 }
 
 // WalletBalance is an exchange wallet's balance which includes various locked
@@ -127,12 +119,12 @@ type WalletState struct {
 	AssetID      uint32                          `json:"assetID"`
 	Version      uint32                          `json:"version"`
 	WalletType   string                          `json:"type"`
+	Class        asset.BlockchainClass           `json:"class"`
 	Traits       asset.WalletTrait               `json:"traits"`
 	Open         bool                            `json:"open"`
 	Running      bool                            `json:"running"`
 	Balance      *WalletBalance                  `json:"balance"`
 	Address      string                          `json:"address"`
-	Units        string                          `json:"units"`
 	Encrypted    bool                            `json:"encrypted"`
 	PeerCount    uint32                          `json:"peerCount"`
 	Synced       bool                            `json:"synced"`
@@ -228,9 +220,6 @@ type SupportedAsset struct {
 	// Token is only populated for token assets.
 	Token    *asset.Token `json:"token"`
 	UnitInfo dex.UnitInfo `json:"unitInfo"`
-	// WalletCreationPending will be true if this wallet's parent wallet is
-	// being synced before this wallet is created.
-	WalletCreationPending bool `json:"walletCreationPending"`
 }
 
 // BondOptionsForm is used from the settings page to change the auto-bond
