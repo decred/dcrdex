@@ -87,9 +87,8 @@ type walletConfig struct {
 // newWalletForm is information necessary to create a new wallet.
 type newWalletForm struct {
 	walletConfig
-	Pass       encode.PassBytes `json:"pass"`
-	AppPW      encode.PassBytes `json:"appPass"`
-	ParentForm *walletConfig    `json:"parentForm"`
+	Pass  encode.PassBytes `json:"pass"`
+	AppPW encode.PassBytes `json:"appPass"`
 }
 
 // openWalletForm is information necessary to open a wallet.

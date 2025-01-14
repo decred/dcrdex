@@ -207,7 +207,6 @@ export interface SupportedAsset {
   info?: WalletInfo
   token?: Token
   unitInfo: UnitInfo
-  walletCreationPending: boolean
 }
 
 export interface Token {
@@ -247,13 +246,13 @@ export interface WalletState {
   assetID: number
   version: number
   type: string
+  class: string
   traits: number
   open: boolean
   running: boolean
   disabled: boolean
   balance: WalletBalance
   address: string
-  units: string
   encrypted: boolean
   peerCount: number
   synced: boolean
@@ -1350,9 +1349,9 @@ export interface Application {
   getWalletTx(assetID: number, txid: string): WalletTransaction | undefined
   clearTxHistory(assetID: number): void
   parentAsset(assetID: number): SupportedAsset
-  needsCustomProvider (assetID: number): Promise<boolean>
   allBridgePaths (): Promise<Record<number, Record<number, string[]>>>
   bridgeFeesAndLimits (fromAssetID: number, toAssetID: number, bridgeName: string): Promise<BridgeFeesAndLimits | null>
+  bindUnits (ancestor: PageElement): void
 }
 
 // TODO: Define an interface for Application?
