@@ -4281,10 +4281,10 @@ func (btc *baseWallet) Refund(coinID, contract dex.Bytes, feeRate uint64) (dex.B
 	}
 	btc.addTxToHistory(&asset.WalletTransaction{
 		Type:   asset.Refund,
-		ID:     txHash.String(),
+		ID:     refundHash.String(),
 		Amount: uint64(utxo.Value),
 		Fees:   fee,
-	}, txHash, true)
+	}, refundHash, true)
 
 	return ToCoinID(refundHash, 0), nil
 }
