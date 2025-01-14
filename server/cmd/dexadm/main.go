@@ -221,7 +221,7 @@ func configure() (*Config, error) {
 	}
 
 	if cfg.AdminSrvCertPath == "" {
-		return nil, fmt.Errorf("no adminsrvaddr argument in file or by command-line")
+		return nil, fmt.Errorf("no adminsrvcertpath argument in file or by command-line")
 	}
 
 	if cfg.AdminSrvPassword == "" {

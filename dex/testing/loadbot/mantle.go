@@ -526,15 +526,6 @@ func (m *Mantle) createWallet(symbol string, minFunds, maxFunds uint64, numCoins
 	}
 
 	var err error
-	if w.parentForm != nil {
-		// Create the parent asset
-		if w.parentAddress, err = createWallet(walletPass, w.parentForm, 1); err != nil {
-			m.fatalError("error creating parent asset wallet: %v", err)
-			return
-		}
-		walletPass = nil
-	}
-
 	if w.address, err = createWallet(walletPass, w.form, numCoins); err != nil {
 		m.fatalError(err.Error())
 		return
@@ -733,7 +724,6 @@ func randomToken() string {
 // keep the Core wallet's balance within allowable range.
 type botWallet struct {
 	form          *core.WalletForm
-	parentForm    *core.WalletForm
 	minFunds      uint64
 	maxFunds      uint64
 	name          string
@@ -752,7 +742,7 @@ type botWallet struct {
 // Set numCoins to at least twice the the maximum number of (booked + epoch)
 // orders the wallet is expected to support.
 func newBotWallet(symbol, node, name string, port string, pass []byte, minFunds, maxFunds uint64, numCoins int) *botWallet {
-	var form, parentForm *core.WalletForm
+	var form *core.WalletForm
 	switch symbol {
 	case dcr:
 		form = &core.WalletForm{
@@ -875,14 +865,6 @@ func newBotWallet(symbol, node, name string, port string, pass []byte, minFunds,
 				"providers": rpcProvider,
 			},
 		}
-		if symbol == usdc {
-			parentForm = form
-			form = &core.WalletForm{
-				Type:       "token",
-				AssetID:    usdcID,
-				ParentForm: form,
-			}
-		}
 	case polygon, usdcp:
 		rpcProvider := filepath.Join(dextestDir, "polygon", "alpha", "bor", "bor.ipc")
 		if node == beta {
@@ -895,26 +877,17 @@ func newBotWallet(symbol, node, name string, port string, pass []byte, minFunds,
 				"providers": rpcProvider,
 			},
 		}
-		if symbol == usdcp {
-			parentForm = form
-			form = &core.WalletForm{
-				Type:       "token",
-				AssetID:    usdcpID,
-				ParentForm: form,
-			}
-		}
 	}
 	return &botWallet{
-		form:       form,
-		parentForm: parentForm,
-		name:       name,
-		node:       node,
-		symbol:     symbol,
-		pass:       pass,
-		assetID:    form.AssetID,
-		numCoins:   numCoins,
-		minFunds:   minFunds,
-		maxFunds:   maxFunds,
+		form:     form,
+		name:     name,
+		node:     node,
+		symbol:   symbol,
+		pass:     pass,
+		assetID:  form.AssetID,
+		numCoins: numCoins,
+		minFunds: minFunds,
+		maxFunds: maxFunds,
 	}
 }
 

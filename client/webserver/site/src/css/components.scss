@@ -29,9 +29,19 @@ button {
     font-size: .9rem;
   }
 
+  &.micro {
+    padding: 0.1rem 0.25rem;
+    font-size: .8rem;
+  }
+
   &.large {
     padding: 0.5rem 1rem;
     font-size: 1.25rem;
+  }
+
+  &.noborder {
+    border: none;
+    border-radius: 0;
   }
 
   &.feature {
@@ -150,6 +160,14 @@ table {
       background-color: #7772;
     }
   }
+
+  &.no-bottom-border > tbody {
+    border-bottom-style: none;
+  }
+
+  & > thead.unbold th {
+    font-weight: normal;
+  }
 }
 
 a {
@@ -157,12 +175,6 @@ a {
 
   &:hover {
     color: var(--link-color-hover);
-  }
-}
-
-@include media-breakpoint-up(md) {
-  table#walletInfoTable {
-    width: auto;
   }
 }
 

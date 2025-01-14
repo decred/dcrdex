@@ -84,6 +84,7 @@ var (
 				ConfigOpts:  append(btc.ElectrumConfigOpts, btc.CommonConfigOpts("FIRO", true)...),
 			},
 		},
+		BlockchainClass: asset.BlockchainClassUTXO,
 	}
 )
 
