@@ -5,8 +5,7 @@ import {
   NewWalletForm,
   WalletConfigForm,
   DepositAddress,
-  bind as bindForm,
-  showSuccess
+  Forms
 } from './forms'
 import State from './state'
 import * as intl from './locales'
@@ -19,7 +18,6 @@ import {
   BalanceNote,
   WalletStateNote,
   WalletSyncNote,
-  RateNote,
   Order,
   OrderFilter,
   WalletCreationNote,
@@ -41,7 +39,7 @@ import {
   TxHistoryResult,
   TransactionNote,
   WalletTransaction,
-  FeeState
+  WalletInfo
 } from './registry'
 import { CoinExplorers } from './coinexplorers'
 
@@ -58,6 +56,143 @@ interface TicketPurchaseUpdate extends BaseWalletNote {
   stats?: TicketStats
 }
 
+class ChainAsset {
+  assetID: number
+  symbol: string
+  ui: UnitInfo
+  chainName: string
+  chainLogo: string
+  ticker: string
+  token?: {
+    parentMade: boolean
+    parentID: number
+    feeUI: UnitInfo
+  }
+
+  constructor (a: SupportedAsset) {
+    const { id: assetID, symbol, name, token, unitInfo: ui, unitInfo: { conventional: { unit: ticker } } } = a
+    this.assetID = assetID
+    this.ticker = ticker
+    this.symbol = symbol
+    this.ui = ui
+    this.chainName = token ? app().assets[token.parentID].name : name
+    this.chainLogo = token ? Doc.logoPath(app().assets[token.parentID].symbol) : Doc.logoPath(symbol)
+    if (token) this.token = { parentID: token.parentID, feeUI: app().unitInfo(token.parentID), parentMade: Boolean(app().assets[token.parentID].wallet) }
+  }
+
+  get bal () {
+    const w = app().assets[this.assetID].wallet
+    return w?.balance ?? { available: 0, locked: 0, immature: 0 }
+  }
+
+  updateTokenParentMade () {
+    if (!this.token) return false
+    this.token.parentMade = Boolean(app().assets[this.token.parentID].wallet)
+  }
+}
+
+class TickerAsset {
+  ticker: string // normalized e.g. WETH -> ETH
+  hasWallets: boolean
+  cFactor: number
+  bestID: number
+  logoSymbol: string
+  name: string
+  chainAssets: ChainAsset[]
+  chainAssetLookup: Record<number, ChainAsset>
+  haveAllFiatRates: boolean
+  isMultiNet: boolean
+  hasTokens: boolean
+  ui: UnitInfo
+
+  constructor (a: SupportedAsset) {
+    const { id: assetID, name, symbol, unitInfo: ui, unitInfo: { conventional: { conversionFactor: cFactor } } } = a
+    this.ticker = normalizedTicker(a)
+    this.cFactor = cFactor
+    this.chainAssets = []
+    this.chainAssetLookup = {}
+    this.bestID = assetID
+    this.name = name
+    this.logoSymbol = symbol
+    this.ui = ui
+    this.addChainAsset(a)
+  }
+
+  addChainAsset (a: SupportedAsset) {
+    const { id: assetID, symbol, name, wallet: w, token, unitInfo: ui } = a
+    const xcRate = app().fiatRatesMap[assetID]
+    if (!xcRate) this.haveAllFiatRates = false
+    this.hasTokens = this.hasTokens || Boolean(token)
+    if (!token) { // prefer the native asset data, e.g. weth.polygon -> eth}
+      this.bestID = assetID
+      this.logoSymbol = symbol
+      this.name = name
+      this.ui = ui
+    }
+    const ca = new ChainAsset(a)
+    this.hasWallets = this.hasWallets || Boolean(w) || Boolean(ca.token?.parentMade)
+    this.chainAssets.push(ca)
+    this.chainAssetLookup[a.id] = ca
+    this.chainAssets.sort((a: ChainAsset, b: ChainAsset) => {
+      if (a.token && !b.token) return 1
+      if (!a.token && b.token) return -1
+      return a.ticker.localeCompare(b.ticker)
+    })
+    this.isMultiNet = this.chainAssets.length > 1
+  }
+
+  walletInfo (): WalletInfo | undefined {
+    for (const { assetID } of this.chainAssets) {
+      const { info } = app().assets[assetID]
+      if (info) return info
+    }
+  }
+
+  updateHasWallets () {
+    for (const ta of this.chainAssets) {
+      ta.updateTokenParentMade()
+      const { assetID, token } = ta
+      if (app().walletMap[assetID] || token?.parentMade) {
+        this.hasWallets = true
+        return
+      }
+    }
+  }
+
+  /*
+   * blockchainWallet returns the assetID and wallet for the blockchain for
+   * which this ticker is a native asset, if it exists.
+   */
+  blockchainWallet () {
+    for (const { assetID } of this.chainAssets) {
+      const { wallet, token } = app().assets[assetID]
+      if (!token) return { assetID, wallet }
+    }
+  }
+
+  get avail () {
+    return this.chainAssets.reduce((sum: number, ca: ChainAsset) => sum + ca.bal.available, 0)
+  }
+
+  get immature () {
+    return this.chainAssets.reduce((sum: number, ca: ChainAsset) => sum + ca.bal.immature, 0)
+  }
+
+  get locked () {
+    return this.chainAssets.reduce((sum: number, ca: ChainAsset) => sum + ca.bal.locked, 0)
+  }
+
+  get total () {
+    return this.chainAssets.reduce((sum: number, { bal: { available, locked, immature } }: ChainAsset) => {
+      return sum + available + locked + immature
+    }, 0)
+  }
+
+  get xcRate () {
+    return app().fiatRatesMap[this.bestID]
+  }
+}
+
 const animationLength = 300
 const traitRescanner = 1
 const traitLogFiler = 1 << 2
@@ -68,7 +203,6 @@ const traitTxFeeEstimator = 1 << 9
 const traitPeerManager = 1 << 10
 const traitTokenApprover = 1 << 13
 const traitTicketBuyer = 1 << 15
-const traitHistorian = 1 << 16
 const traitFundsMixer = 1 << 17
 
 const traitsExtraOpts = traitLogFiler | traitRecoverer | traitRestorer | traitRescanner | traitPeerManager | traitTokenApprover
@@ -198,11 +332,6 @@ interface WalletRestoration {
   instructions: string
 }
 
-interface AssetButton {
-  tmpl: Record<string, PageElement>
-  bttn: PageElement
-}
-
 interface TicketPagination {
   number: number
   history: Ticket[]
@@ -224,7 +353,15 @@ export default class WalletsPage extends BasePage {
   body: HTMLElement
   data?: WalletsPageData
   page: Record<string, PageElement>
-  assetButtons: Record<number, AssetButton>
+  forms: Forms
+  selectedTicker: TickerAsset
+  tickerMap: Record<string, TickerAsset>
+  tickerList: TickerAsset[]
+  balTracker: Record<string, number>
+  tickerTemplates: Record<string, Record<string, PageElement>>
+  tickerButtons: Record<string, PageElement>
+  balanceDetails: Record<string, PageElement>
+  walletConfig: Record<string, PageElement>
   newWalletForm: NewWalletForm
   reconfigForm: WalletConfigForm
   walletCfgGuide: PageElement
@@ -233,12 +370,12 @@ export default class WalletsPage extends BasePage {
   changeWalletPW: boolean
   displayed: HTMLElement
   animation: Animation
-  forms: PageElement[]
+  formsList: PageElement[]
   forceReq: RescanRecoveryRequest
   forceUrl: string
   currentForm: PageElement
   restoreInfoCard: HTMLElement
-  selectedAssetID: number
+  selectedWalletID: number
   stakeStatus: TicketStakingStatus
   maxSend: number
   unapprovingTokenVersion: number
@@ -256,6 +393,15 @@ export default class WalletsPage extends BasePage {
     this.data = data
     const page = this.page = Doc.idDescendants(body)
     this.stampers = []
+    this.balTracker = {}
+    this.tickerTemplates = {}
+    this.tickerButtons = {}
+    this.selectedWalletID = -1
+
+    this.balanceDetails = Doc.parseTemplate(page.balanceDetails)
+    this.walletConfig = Doc.parseTemplate(page.walletConfig)
+    this.walletConfig.div = page.walletConfig
+
     net = app().user.net
 
     const setStamp = () => {
@@ -269,32 +415,30 @@ export default class WalletsPage extends BasePage {
       setStamp()
     }, 10000) // update every 10 seconds
 
-    Doc.cleanTemplates(page.restoreInfoCard, page.connectedIconTmpl, page.disconnectedIconTmpl, page.removeIconTmpl)
+    Doc.cleanTemplates(
+      page.restoreInfoCard, page.connectedIconTmpl, page.disconnectedIconTmpl,
+      page.removeIconTmpl, page.tickerBalsBox, page.blockchainBalanceTmpl,
+      page.multiNetTxFeeTmpl, page.multiNetFeeRateTmpl, page.netTxFeeTmpl,
+      page.netSelectBttnTmpl
+    )
     this.restoreInfoCard = page.restoreInfoCard.cloneNode(true) as HTMLElement
     Doc.show(page.connectedIconTmpl, page.disconnectedIconTmpl, page.removeIconTmpl)
 
-    this.forms = Doc.applySelector(page.forms, ':scope > form')
-    page.forms.querySelectorAll('.form-closer').forEach(el => {
-      Doc.bind(el, 'click', () => { this.closePopups() })
-    })
-    Doc.bind(page.cancelForce, 'click', () => { this.closePopups() })
-
-    this.selectedAssetID = -1
     Doc.cleanTemplates(
-      page.iconSelectTmpl, page.balanceDetailRow, page.recentOrderTmpl, page.vspRowTmpl,
+      page.iconSelectTmpl, page.recentOrderTmpl, page.vspRowTmpl,
       page.ticketHistoryRowTmpl, page.votingChoiceTmpl, page.votingAgendaTmpl, page.tspendTmpl,
       page.tkeyTmpl, page.txHistoryRowTmpl, page.txHistoryDateRowTmpl
     )
 
-    Doc.bind(page.createWallet, 'click', () => this.showNewWallet(this.selectedAssetID))
-    Doc.bind(page.connectBttn, 'click', () => this.doConnect(this.selectedAssetID))
-    Doc.bind(page.send, 'click', () => this.showSendForm(this.selectedAssetID))
-    Doc.bind(page.receive, 'click', () => this.showDeposit(this.selectedAssetID))
-    Doc.bind(page.unlockBttn, 'click', () => this.openWallet(this.selectedAssetID))
-    Doc.bind(page.lockBttn, 'click', () => this.lock(this.selectedAssetID))
-    Doc.bind(page.reconfigureBttn, 'click', () => this.showReconfig(this.selectedAssetID))
-    Doc.bind(page.needsProviderBttn, 'click', () => this.showReconfig(this.selectedAssetID))
-    Doc.bind(page.rescanWallet, 'click', () => this.rescanWallet(this.selectedAssetID))
+    Doc.bind(page.cancelForce, 'click', () => { this.forms.close() })
+    Doc.bind(page.createWallet, 'click', () => this.showNewWallet(this.selectedWalletID))
+    Doc.bind(page.connectBttn, 'click', () => this.doConnect(this.selectedWalletID))
+    Doc.bind(page.send, 'click', () => this.showSendForm())
+    Doc.bind(page.receive, 'click', () => this.showDeposit())
+    Doc.bind(page.unlockBttn, 'click', () => this.openWallet(this.selectedWalletID))
+    Doc.bind(page.lockBttn, 'click', () => this.lock(this.selectedWalletID))
+    Doc.bind(page.reconfigureBttn, 'click', () => this.showReconfig(this.selectedWalletID))
+    Doc.bind(page.rescanWallet, 'click', () => this.rescanWallet(this.selectedWalletID))
     Doc.bind(page.earlierTxs, 'click', () => this.loadEarlierTxs())
 
     const getTxID = () : string => {
@@ -307,85 +451,69 @@ export default class WalletsPage extends BasePage {
     Doc.bind(page.copyRecipientBtn, 'click', () => { setupCopyBtn(this.currTx?.recipient || '', page.txDetailsRecipient, page.copyRecipientBtn, '#1e7d11') })
     Doc.bind(page.copyBondIDBtn, 'click', () => { setupCopyBtn(this.currTx?.bondInfo?.bondID || '', page.txDetailsBondID, page.copyBondIDBtn, '#1e7d11') })
     Doc.bind(page.copyBondAccountIDBtn, 'click', () => { setupCopyBtn(this.currTx?.bondInfo?.accountID || '', page.txDetailsBondAccountID, page.copyBondAccountIDBtn, '#1e7d11') })
-    Doc.bind(page.hideMixTxsCheckbox, 'change', () => { this.showTxHistory(this.selectedAssetID) })
+    Doc.bind(page.hideMixTxsCheckbox, 'change', () => { this.showTxHistory(this.selectedWalletID) })
 
-    // Bind the new wallet form.
-    this.newWalletForm = new NewWalletForm(page.newWalletForm, (assetID: number) => {
-      const fmtParams = { assetName: app().assets[assetID].name }
-      this.assetUpdated(assetID, page.newWalletForm, intl.prep(intl.ID_NEW_WALLET_SUCCESS, fmtParams))
-      this.sortAssetButtons()
-      this.updateTicketBuyer(assetID)
-      this.updatePrivacy(assetID)
-    })
-
-    // Bind the wallet reconfig form.
-    this.reconfigForm = new WalletConfigForm(page.reconfigInputs, false)
-
-    this.walletCfgGuide = Doc.tmplElement(page.reconfigForm, 'walletCfgGuide')
-
-    // Bind the send form.
-    bindForm(page.sendForm, page.submitSendForm, async () => { this.stepSend() })
-    // Send confirmation form.
-    bindForm(page.vSendForm, page.vSend, async () => { this.send() })
-    // Bind the wallet reconfiguration submission.
-    bindForm(page.reconfigForm, page.submitReconfig, () => this.reconfig())
-
-    page.forms.querySelectorAll('.form-closer').forEach(el => {
-      Doc.bind(el, 'click', () => this.closePopups())
-    })
-
-    Doc.bind(page.forms, 'mousedown', (e: MouseEvent) => {
-      if (!Doc.mouseInElement(e, this.currentForm)) { this.closePopups() }
-    })
-
-    this.mixerToggle = new AniToggle(page.toggleMixer, page.mixingErr, false, (newState: boolean) => { return this.updateMixerState(newState) })
-
+    // Forms
+    this.forms = new Forms(page.forms)
     this.keyup = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (Doc.isDisplayed(this.page.forms)) this.closePopups()
-      }
+      if (e.key === 'Escape') this.forms.close()
     }
     Doc.bind(document, 'keyup', this.keyup)
 
+    this.newWalletForm = new NewWalletForm(page.newWalletForm, async (assetID: number) => {
+      await app().fetchUser()
+      const fmtParams = { assetName: app().assets[assetID].name }
+      this.assetUpdated(assetID, page.newWalletForm, intl.prep(intl.ID_NEW_WALLET_SUCCESS, fmtParams))
+      for (const ta of this.tickerList) ta.updateHasWallets()
+      this.refreshBalances()
+      this.sortTickers()
+      this.updateGlobalBalance()
+      if (this.selectedTicker.chainAssetLookup[assetID]) this.updateDisplayedTicker()
+      this.updateTicketBuyer()
+      this.updatePrivacy()
+    })
+
+    this.reconfigForm = new WalletConfigForm(page.reconfigInputs, false)
+    this.walletCfgGuide = Doc.tmplElement(page.reconfigForm, 'walletCfgGuide')
+    this.depositAddrForm = new DepositAddress(page.deposit)
+    this.mixerToggle = new AniToggle(page.toggleMixer, page.mixingErr, false, (newState: boolean) => { return this.updateMixerState(newState) })
+
+    Doc.bind(page.submitSendForm, 'click', async () => { this.stepSend() })
+    Doc.bind(page.vSend, 'click', async () => { this.send() })
+    Doc.bind(page.submitReconfig, 'click', () => this.reconfig())
     Doc.bind(page.downloadLogs, 'click', async () => { this.downloadLogs() })
     Doc.bind(page.exportWallet, 'click', async () => { this.displayExportWalletAuth() })
     Doc.bind(page.recoverWallet, 'click', async () => { this.showRecoverWallet() })
-    bindForm(page.exportWalletAuth, page.exportWalletAuthSubmit, async () => { this.exportWalletAuthSubmit() })
-    bindForm(page.recoverWalletConfirm, page.recoverWalletSubmit, () => { this.recoverWallet() })
-    bindForm(page.confirmForce, page.confirmForceSubmit, async () => { this.confirmForceSubmit() })
+    Doc.bind(page.exportWalletAuthSubmit, 'click', async () => { this.exportWalletAuthSubmit() })
+    Doc.bind(page.recoverWalletSubmit, 'click', () => { this.recoverWallet() })
+    Doc.bind(page.confirmForceSubmit, 'click', async () => { this.confirmForceSubmit() })
     Doc.bind(page.disableWallet, 'click', async () => { this.showToggleWalletStatus(true) })
     Doc.bind(page.enableWallet, 'click', async () => { this.showToggleWalletStatus(false) })
-    bindForm(page.toggleWalletStatusConfirm, page.toggleWalletStatusSubmit, async () => { this.toggleWalletStatus() })
+    Doc.bind(page.toggleWalletStatusSubmit, 'click', async () => { this.toggleWalletStatus() })
     Doc.bind(page.managePeers, 'click', async () => { this.showManagePeersForm() })
     Doc.bind(page.addPeerSubmit, 'click', async () => { this.submitAddPeer() })
     Doc.bind(page.unapproveTokenAllowance, 'click', async () => { this.showUnapproveTokenAllowanceTableForm() })
     Doc.bind(page.unapproveTokenSubmit, 'click', async () => { this.submitUnapproveTokenAllowance() })
     Doc.bind(page.showVSPs, 'click', () => { this.showVSPPicker() })
     Doc.bind(page.vspDisplay, 'click', () => { this.showVSPPicker() })
-    bindForm(page.vspPicker, page.customVspSubmit, async () => { this.setCustomVSP() })
+    Doc.bind(page.customVspSubmit, 'click', async () => { this.setCustomVSP() })
     Doc.bind(page.purchaseTicketsBttn, 'click', () => { this.showPurchaseTicketsDialog() })
-    bindForm(page.purchaseTicketsForm, page.purchaserSubmit, () => { this.purchaseTickets() })
+    Doc.bind(page.purchaserSubmit, 'click', () => { this.purchaseTickets() })
     Doc.bind(page.purchaserInput, 'change', () => { this.purchaserInputChanged() })
     Doc.bind(page.ticketHistory, 'click', () => { this.showTicketHistory() })
     Doc.bind(page.ticketHistoryNextPage, 'click', () => { this.nextTicketPage() })
     Doc.bind(page.ticketHistoryPrevPage, 'click', () => { this.prevTicketPage() })
     Doc.bind(page.setVotes, 'click', () => { this.showSetVotesDialog() })
     Doc.bind(page.purchaseTicketsErrCloser, 'click', () => { Doc.hide(page.purchaseTicketsErrBox) })
-    Doc.bind(page.privacyInfoBttn, 'click', () => { this.showForm(page.mixingInfo) })
-
-    // New deposit address button.
-    this.depositAddrForm = new DepositAddress(page.deposit)
-
-    // Clicking on the available amount on the Send form populates the
-    // amount field.
+    Doc.bind(page.privacyInfoBttn, 'click', () => { this.forms.show(page.mixingInfo) })
     Doc.bind(page.walletBal, 'click', () => { this.populateMaxSend() })
 
     // Display fiat value for current send amount.
     Doc.bind(page.sendAmt, 'input', () => {
-      const { unitInfo: ui } = app().assets[this.selectedAssetID]
+      const { unitInfo: ui } = app().assets[this.selectedWalletID]
       const amt = parseFloatDefault(page.sendAmt.value)
       const conversionFactor = ui.conventional.conversionFactor
-      Doc.showFiatValue(page.sendValue, amt * conversionFactor, app().fiatRatesMap[this.selectedAssetID], ui)
+      Doc.showFiatValue(page.sendValue, amt * conversionFactor, app().fiatRatesMap[this.selectedWalletID], ui)
     })
 
     // Clicking on maxSend on the send form should populate the amount field.
@@ -393,7 +521,7 @@ export default class WalletsPage extends BasePage {
 
     // Validate send address on input.
     Doc.bind(page.sendAddr, 'input', async () => {
-      const asset = app().assets[this.selectedAssetID]
+      const asset = app().assets[this.selectedWalletID]
       page.sendAddr.classList.remove('border-danger', 'border-success')
       const addr = page.sendAddr.value || ''
       if (!asset || addr === '') return
@@ -417,24 +545,28 @@ export default class WalletsPage extends BasePage {
         Doc.show(page.changeWalletType, page.changeTypeHideIcon)
         Doc.hide(page.changeTypeShowIcon)
         page.changeTypeMsg.textContent = intl.prep(intl.ID_KEEP_WALLET_TYPE)
-      } else this.showReconfig(this.selectedAssetID, { skipAnimation: true })
+      } else this.showReconfig(this.selectedWalletID, { skipAnimation: true })
     })
 
     app().registerNoteFeeder({
-      fiatrateupdate: (note: RateNote) => { this.handleRatesNote(note) },
+      fiatrateupdate: () => { this.handleRatesNote() },
       balance: (note: BalanceNote) => { this.handleBalanceNote(note) },
       walletstate: (note: WalletStateNote) => { this.handleWalletStateNote(note) },
       walletconfig: (note: WalletStateNote) => { this.handleWalletStateNote(note) },
-      walletsync: (note: WalletSyncNote) => { this.updateSyncAndPeers(note.assetID) },
+      walletsync: (note: WalletSyncNote) => {
+        if (note.assetID === this.selectedWalletID) this.updateSyncAndPeers()
+      },
       createwallet: (note: WalletCreationNote) => { this.handleCreateWalletNote(note) },
       walletnote: (note: WalletNote) => { this.handleCustomWalletNote(note) }
     })
 
-    const firstAsset = this.sortAssetButtons()
-    let selectedAsset = firstAsset.id
-    const assetIDStr = State.fetchLocal(State.selectedAssetLK)
-    if (assetIDStr) selectedAsset = Number(assetIDStr)
-    this.setSelectedAsset(selectedAsset)
+    this.prepareTickerAssets()
+    this.setTickerButtons()
+    this.refreshBalances()
+    this.updateGlobalBalance()
+    let lastTicker = State.fetchLocal(State.selectedAssetLK)
+    if (!lastTicker || !this.tickerMap[lastTicker]) lastTicker = 'DCR'
+    this.start(lastTicker)
 
     setInterval(() => {
       for (const row of this.page.txHistoryTableBody.children) {
@@ -444,16 +576,17 @@ export default class WalletsPage extends BasePage {
     }, 5000)
   }
 
-  closePopups () {
-    Doc.hide(this.page.forms)
-    this.currTx = undefined
-    if (this.animation) this.animation.stop()
+  async start (firstTicker: string) {
+    await this.setSelectedTicker(firstTicker)
+    this.page.walletDetailsBox.classList.remove('invisible')
+    this.page.assetSelect.classList.remove('invisible')
+    this.page.secondColumn.classList.remove('invisible')
   }
 
   async safePost (path: string, args: any): Promise<any> {
-    const assetID = this.selectedAssetID
+    const assetID = this.selectedWalletID
     const res = await postJSON(path, args)
-    if (assetID !== this.selectedAssetID) throw Error('asset changed during request. aborting')
+    if (assetID !== this.selectedWalletID) throw Error('asset changed during request. aborting')
     return res
   }
 
@@ -543,14 +676,14 @@ export default class WalletsPage extends BasePage {
       }
     }
     Doc.hide(page.sendForm)
-    await this.showForm(page.vSendForm)
+    await this.forms.show(page.vSendForm)
   }
 
   // cancelSend displays the send form if user wants to make modification.
   async cancelSend () {
     const page = this.page
     Doc.hide(page.vSendForm, page.sendErr)
-    await this.showForm(page.sendForm)
+    await this.forms.show(page.sendForm)
   }
 
   /*
@@ -582,7 +715,7 @@ export default class WalletsPage extends BasePage {
    * currently selected asset to the DEXes that use that version.
    */
   assetVersionUsedByDEXes (): Record<number, string[]> {
-    const assetID = this.selectedAssetID
+    const assetID = this.selectedWalletID
     const versionToDEXes = {} as Record<number, string[]>
     const exchanges = app().exchanges
 
@@ -607,7 +740,7 @@ export default class WalletsPage extends BasePage {
     const page = this.page
     const path = '/api/unapprovetoken'
     const res = await postJSON(path, {
-      assetID: this.selectedAssetID,
+      assetID: this.selectedWalletID,
       version: this.unapprovingTokenVersion
     })
     if (!app().checkResponse(res)) {
@@ -616,7 +749,7 @@ export default class WalletsPage extends BasePage {
       return
     }
 
-    const assetExplorer = CoinExplorers[this.selectedAssetID]
+    const assetExplorer = CoinExplorers[this.selectedWalletID]
     if (assetExplorer && assetExplorer[net]) {
       page.unapproveTokenTxID.href = assetExplorer[net](res.txID)
     }
@@ -634,7 +767,7 @@ export default class WalletsPage extends BasePage {
     this.unapprovingTokenVersion = version
     Doc.show(page.unapproveTokenSubmissionElements)
     Doc.hide(page.unapproveTokenTxMsg, page.unapproveTokenErr)
-    const asset = app().assets[this.selectedAssetID]
+    const asset = app().assets[this.selectedWalletID]
     if (!asset || !asset.token) return
     const parentAsset = app().assets[asset.token.parentID]
     if (!parentAsset) return
@@ -644,7 +777,7 @@ export default class WalletsPage extends BasePage {
 
     const path = '/api/approvetokenfee'
     const res = await postJSON(path, {
-      assetID: this.selectedAssetID,
+      assetID: this.selectedWalletID,
       version: version,
       approving: false
     })
@@ -659,7 +792,7 @@ export default class WalletsPage extends BasePage {
       }
       page.unapprovalFeeEstimate.textContent = feeText
     }
-    this.showForm(page.unapproveTokenForm)
+    this.forms.show(page.unapproveTokenForm)
   }
 
   /*
@@ -669,7 +802,7 @@ export default class WalletsPage extends BasePage {
    */
   async showUnapproveTokenAllowanceTableForm () {
     const page = this.page
-    const asset = app().assets[this.selectedAssetID]
+    const asset = app().assets[this.selectedWalletID]
     if (!asset || !asset.wallet || !asset.wallet.approved) return
     while (page.tokenVersionBody.firstChild) {
       page.tokenVersionBody.removeChild(page.tokenVersionBody.firstChild)
@@ -700,7 +833,7 @@ export default class WalletsPage extends BasePage {
     }
     Doc.setVis(showTable, page.tokenVersionTable)
     Doc.setVis(!showTable, page.tokenVersionNone)
-    this.showForm(page.unapproveTokenTableForm)
+    this.forms.show(page.unapproveTokenTableForm)
   }
 
   /*
@@ -713,7 +846,7 @@ export default class WalletsPage extends BasePage {
     Doc.hide(page.peerSpinner)
 
     const res = await postJSON('/api/getwalletpeers', {
-      assetID: this.selectedAssetID
+      assetID: this.selectedWalletID
     })
     if (!app().checkResponse(res)) {
       page.managePeersErr.textContent = res.msg
@@ -765,7 +898,7 @@ export default class WalletsPage extends BasePage {
         Doc.bind(removeIcon, 'click', async () => {
           Doc.hide(page.managePeersErr)
           const res = await postJSON('/api/removewalletpeer', {
-            assetID: this.selectedAssetID,
+            assetID: this.selectedWalletID,
             addr: peer.addr
           })
           if (!app().checkResponse(res)) {
@@ -787,7 +920,7 @@ export default class WalletsPage extends BasePage {
     const page = this.page
     await this.updateWalletPeersTable()
     Doc.hide(page.managePeersErr)
-    this.showForm(page.managePeersForm)
+    this.forms.show(page.managePeersForm)
   }
 
   // submitAddPeers sends a request for the wallet to connect to a new
@@ -796,7 +929,7 @@ export default class WalletsPage extends BasePage {
     const page = this.page
     Doc.hide(page.managePeersErr)
     const res = await postJSON('/api/addwalletpeer', {
-      assetID: this.selectedAssetID,
+      assetID: this.selectedWalletID,
       addr: page.addPeerInput.value
     })
     if (!app().checkResponse(res)) {
@@ -832,7 +965,7 @@ export default class WalletsPage extends BasePage {
     Doc.hide(page.toggleWalletStatusErr, page.walletStatusDisable, page.disableWalletMsg, page.walletStatusEnable, page.enableWalletMsg)
     if (disable) Doc.show(page.walletStatusDisable, page.disableWalletMsg)
     else Doc.show(page.walletStatusEnable, page.enableWalletMsg)
-    this.showForm(page.toggleWalletStatusConfirm)
+    this.forms.show(page.toggleWalletStatusConfirm)
   }
 
   /*
@@ -842,11 +975,11 @@ export default class WalletsPage extends BasePage {
     const page = this.page
     Doc.hide(page.toggleWalletStatusErr)
 
-    const asset = app().assets[this.selectedAssetID]
+    const asset = app().assets[this.selectedWalletID]
     const disable = !asset.wallet.disabled
     const url = '/api/togglewalletstatus'
     const req = {
-      assetID: this.selectedAssetID,
+      assetID: this.selectedWalletID,
       disable: disable
     }
 
@@ -863,7 +996,7 @@ export default class WalletsPage extends BasePage {
 
     let successMsg = intl.prep(intl.ID_WALLET_DISABLED_MSG, fmtParams)
     if (!disable) successMsg = intl.prep(intl.ID_WALLET_ENABLED_MSG, fmtParams)
-    this.assetUpdated(this.selectedAssetID, page.toggleWalletStatusConfirm, successMsg)
+    this.assetUpdated(this.selectedWalletID, page.toggleWalletStatusConfirm, successMsg)
   }
 
   /*
@@ -880,231 +1013,326 @@ export default class WalletsPage extends BasePage {
     this.displayed = box
   }
 
-  /* showForm shows a modal form with a little animation. */
-  async showForm (form: PageElement) {
-    const page = this.page
-    this.currentForm = form
-    this.forms.forEach(form => Doc.hide(form))
-    form.style.right = '10000px'
-    Doc.show(page.forms, form)
-    const shift = (page.forms.offsetWidth + form.offsetWidth) / 2
-    await Doc.animate(animationLength, progress => {
-      form.style.right = `${(1 - progress) * shift}px`
-    }, 'easeOutHard')
-    form.style.right = '0'
-  }
-
-  async showSuccess (msg: string) {
-    this.forms.forEach(form => Doc.hide(form))
-    this.currentForm = this.page.checkmarkForm
-    this.animation = showSuccess(this.page, msg)
-    await this.animation.wait()
-    this.animation = new Animation(1500, () => { /* pass */ }, '', () => {
-      if (this.currentForm === this.page.checkmarkForm) this.closePopups()
-    })
-  }
-
   /* Show the new wallet form. */
   async showNewWallet (assetID: number) {
     const page = this.page
     const box = page.newWalletForm
     this.newWalletForm.setAsset(assetID)
     const defaultsLoaded = this.newWalletForm.loadDefaults()
-    await this.showForm(box)
+    await this.forms.show(box)
     await defaultsLoaded
   }
 
-  // sortAssetButtons displays supported assets, sorted. Returns first asset in the
-  // list.
-  sortAssetButtons (): SupportedAsset {
-    const page = this.page
-    this.assetButtons = {}
-    Doc.empty(page.assetSelect)
-    const sortedAssets = [...Object.values(app().assets)]
-    sortedAssets.sort((a: SupportedAsset, b: SupportedAsset) => {
-      if (a.wallet && !b.wallet) return -1
-      if (!a.wallet && b.wallet) return 1
-      if (!a.wallet && !b.wallet) return a.symbol === 'dcr' ? -1 : 1
-      const [aBal, bBal] = [a.wallet.balance, b.wallet.balance]
-      const [aTotal, bTotal] = [aBal.available + aBal.immature + aBal.locked, bBal.available + bBal.immature + bBal.locked]
-      if (aTotal === 0 && bTotal === 0) return a.symbol.localeCompare(b.symbol)
+  prepareTickerAssets () {
+    const tickerList: TickerAsset[] = []
+    const tickerMap: Record<string, TickerAsset> = {}
+
+    for (const a of Object.values(app().user.assets)) {
+      const normedTicker = normalizedTicker(a)
+      let ta = tickerMap[normedTicker]
+      if (ta) {
+        ta.addChainAsset(a)
+        continue
+      }
+      ta = new TickerAsset(a)
+      tickerList.push(ta)
+      tickerMap[normedTicker] = ta
+    }
+    this.tickerList = tickerList
+    this.tickerMap = tickerMap
+  }
+
+  sortTickers () {
+    const { page, tickerList, tickerButtons } = this
+    tickerList.sort((a: TickerAsset, b: TickerAsset) => {
+      if (a.hasWallets && !b.hasWallets) return -1
+      if (!a.hasWallets && b.hasWallets) return 1
+      if (!a.hasWallets && !b.hasWallets) return a.ticker === 'DCR' ? -1 : 1
+      const [aTotal, bTotal] = [a.total, b.total]
+      if (aTotal === 0 && bTotal === 0) return a.ticker.localeCompare(b.ticker)
       else if (aTotal === 0) return 1
       else if (aTotal === 0) return -1
-      const [aFiat, bFiat] = [app().fiatRatesMap[a.id], app().fiatRatesMap[b.id]]
+      const [aFiat, bFiat] = [a.xcRate, b.xcRate]
       if (aFiat && !bFiat) return -1
       if (!aFiat && bFiat) return 1
       return bFiat * bTotal - aFiat * aTotal
     })
-    for (const a of sortedAssets) {
-      const bttn = page.iconSelectTmpl.cloneNode(true) as HTMLElement
-      page.assetSelect.appendChild(bttn)
-      const tmpl = Doc.parseTemplate(bttn)
-      this.assetButtons[a.id] = { tmpl, bttn }
-      this.updateAssetButton(a.id)
-      Doc.bind(bttn, 'click', () => {
-        this.setSelectedAsset(a.id)
-        State.storeLocal(State.selectedAssetLK, String(a.id))
-      })
-    }
-    page.assetSelect.classList.remove('invisible')
-    return sortedAssets[0]
+    Doc.empty(page.tickerBalsBox)
+    for (const { ticker } of tickerList) page.tickerBalsBox.appendChild(tickerButtons[ticker])
   }
 
-  updateAssetButton (assetID: number) {
-    const a = app().assets[assetID]
-    const { bttn, tmpl } = this.assetButtons[assetID]
-    Doc.hide(tmpl.fiatBox, tmpl.noWallet)
-    bttn.classList.add('nowallet')
-    tmpl.img.src ||= Doc.logoPath(a.symbol) // don't initiate GET if already set (e.g. update on some notification)
-    const symbolParts = a.symbol.split('.')
-    if (symbolParts.length === 2) {
-      const parentSymbol = symbolParts[1]
-      tmpl.parentImg.classList.remove('d-hide')
-      tmpl.parentImg.src ||= Doc.logoPath(parentSymbol)
+  refreshBalances () {
+    const { balTracker, tickerList, tickerTemplates, updateTickerButtonTemplate } = this
+    for (const ta of tickerList) {
+      const { ticker, total, xcRate, cFactor } = ta
+      balTracker[ticker] = total / cFactor * xcRate
+      updateTickerButtonTemplate(ta, tickerTemplates[ticker])
     }
-    if (this.selectedAssetID === assetID) bttn.classList.add('selected')
-    tmpl.name.textContent = a.name
-    if (a.wallet) {
-      bttn.classList.remove('nowallet')
-      const { wallet: { balance: b }, unitInfo: ui } = a
-      const totalBalance = b.available + b.locked + b.immature
-      const [s, unit] = Doc.formatBestUnitsFourSigFigs(totalBalance, ui)
-      tmpl.balance.textContent = s
-      tmpl.unit.textContent = unit
-      Doc.show(tmpl.balanceBox)
-      const fiatRate = app().fiatRatesMap[a.id]
-      if (fiatRate) {
-        Doc.show(tmpl.fiatBox)
-        tmpl.fiat.textContent = Doc.formatFourSigFigs(totalBalance / ui.conventional.conversionFactor * fiatRate)
-      }
-    } else Doc.show(tmpl.noWallet)
   }
 
-  async setSelectedAsset (assetID: number) {
-    const { assetSelect } = this.page
-    for (const b of assetSelect.children) b.classList.remove('selected')
-    this.assetButtons[assetID].bttn.classList.add('selected')
-    this.selectedAssetID = assetID
-    this.page.hideMixTxsCheckbox.checked = true
-    this.updateDisplayedAsset(assetID)
-    this.showAvailableMarkets(assetID)
-    const a = this.showRecentActivity(assetID)
-    const b = this.showTxHistory(assetID)
-    const c = this.updateTicketBuyer(assetID)
-    const d = this.updatePrivacy(assetID)
-    for (const p of [a, b, c, d]) await p
+  setTickerButtons () {
+    const { page, tickerList } = this
+    Doc.empty(page.assetSelect)
+    page.assetSelect.appendChild(page.globalBalanceBox)
+    page.assetSelect.appendChild(page.tickerBalsBox)
+    Doc.empty(page.tickerBalsBox)
+    for (const ta of tickerList) {
+      const { ticker, logoSymbol } = ta
+      const div = page.tickerBalTmpl.cloneNode(true) as PageElement
+      this.tickerButtons[ticker] = div
+      Doc.bind(div, 'click', () => this.setSelectedTicker(ticker))
+      const tmpl = Doc.parseTemplate(div)
+      this.tickerTemplates[ticker] = tmpl
+      tmpl.logo.src = Doc.logoPath(logoSymbol)
+      tmpl.ticker.textContent = ticker
+    }
+    this.sortTickers()
   }
 
-  updateDisplayedAsset (assetID: number) {
-    if (assetID !== this.selectedAssetID) return
-    const { symbol, wallet, name, token, unitInfo } = app().assets[assetID]
-    const { page, body } = this
-    Doc.setText(body, '[data-asset-name]', name)
-    Doc.setText(body, '[data-ticker]', unitInfo.conventional.unit)
-    page.assetLogo.src = Doc.logoPath(symbol)
-    Doc.hide(
-      page.balanceBox, page.fiatBalanceBox, page.createWallet, page.walletDetails,
-      page.sendReceive, page.connectBttnBox, page.statusLocked, page.statusReady,
-      page.statusOff, page.unlockBttnBox, page.lockBttnBox, page.connectBttnBox,
-      page.peerCountBox, page.syncProgressBox, page.statusDisabled, page.tokenInfoBox,
-      page.needsProviderBox, page.feeStateBox, page.txSyncBox, page.txProgress,
-      page.txFindingAddrs
-    )
-    this.checkNeedsProvider(assetID)
-    if (token) {
-      const parentAsset = app().assets[token.parentID]
-      page.tokenParentLogo.src = Doc.logoPath(parentAsset.symbol)
-      page.tokenParentName.textContent = parentAsset.name
-      Doc.show(page.tokenInfoBox)
+  updateTickerButtonTemplate (ta: TickerAsset, tmpl: Record<string, PageElement>) {
+    const { total, cFactor, hasWallets, xcRate } = ta
+    Doc.setVis(hasWallets && xcRate, tmpl.fiatBox)
+    if (hasWallets) {
+      tmpl.bal.textContent = Doc.formatFourSigFigs(total / cFactor)
+      tmpl.fiatBal.textContent = Doc.formatFourSigFigs(total / cFactor * xcRate, 2)
+      tmpl.logo.classList.remove('greyscale', 'faded')
+      tmpl.ticker.classList.remove('grey')
+    } else {
+      tmpl.logo.classList.add('greyscale', 'faded')
+      tmpl.ticker.classList.add('grey')
     }
-    if (wallet) {
-      this.updateDisplayedAssetBalance()
-      const { feeState, running, disabled, type: walletType } = wallet
+  }
 
-      const walletDef = app().walletDefinition(assetID, walletType)
+  updateGlobalBalance () {
+    const totalUSD = Object.values(this.balTracker).reduce((total, fiatBal) => total + fiatBal, 0)
+    this.page.globalBalance.textContent = Doc.formatFourSigFigs(totalUSD, 2)
+  }
+
+  updateAssetBalance (assetID: number) {
+    const ticker = normalizedTicker(app().assets[assetID])
+    const ta = this.tickerMap[ticker]
+    const { total, xcRate, cFactor } = ta
+    this.balTracker[ticker] = total / cFactor * xcRate
+    this.updateTickerButtonTemplate(ta, this.tickerTemplates[ticker])
+    this.updateGlobalBalance()
+  }
+
+  async setSelectedTicker (ticker: string) {
+    const ta = this.selectedTicker = this.tickerMap[ticker]
+    this.selectedWalletID = ta.blockchainWallet()?.assetID ?? -1
+    const { page } = this
+    const { logoSymbol, name, isMultiNet, hasTokens } = ta
+    Doc.setText(page.walletDetailsBox, '[data-ticker]', ticker)
+    Doc.setText(page.secondColumn, '[data-ticker]', ticker)
+    Doc.setText(page.walletDetailsBox, '[data-asset-name]', name)
+    Doc.setSrc(page.walletDetailsBox, '[data-logo]', Doc.logoPath(logoSymbol))
+    page.walletDetailsBox.classList.toggle('multinet', isMultiNet)
+    page.walletDetailsBox.classList.toggle('token', hasTokens)
+    for (const div of Array.from(page.docs.children) as PageElement[]) Doc.setVis(div.dataset.docTicker === ticker, div)
+    this.updateDisplayedTicker()
+    this.showAvailableMarkets()
+    for (const p of [
+      this.updateTicketBuyer(),
+      this.updatePrivacy(),
+      State.storeLocal(State.selectedAssetLK, ticker),
+      this.showRecentActivity()
+    ]) await p
+  }
+
+  updateDisplayedTicker () {
+    const { page, selectedTicker: ta } = this
+    const chainWallet = ta.blockchainWallet()
+    Doc.setVis(chainWallet && !chainWallet.wallet, page.createWalletBox)
+    Doc.setVis(ta.hasWallets, page.sendReceiveBox)
+    const w = chainWallet?.wallet
+    Doc.setVis(w, page.walletConfig)
+
+    if (w) {
+      Doc.show(page.walletConfig)
+      page.blockchainClass.textContent = w.class
+      const walletDef = app().walletDefinition(w.assetID, w.type)
       page.walletType.textContent = walletDef.tab
-      if (feeState) this.updateFeeState(feeState)
-      if (disabled) Doc.show(page.statusDisabled) // wallet is disabled
-      else if (running) {
-        this.updateSyncAndPeers(wallet.assetID)
-      } else Doc.show(page.statusOff, page.connectBttnBox) // wallet not running
-    } else Doc.show(page.createWallet) // no wallet
+      this.updateSyncAndPeers()
+    }
 
-    page.walletDetailsBox.classList.remove('invisible')
+    this.updateDisplayedTickerBalance()
+    this.updateFeeState()
   }
 
-  updateSyncAndPeers (assetID: number) {
-    const { page, selectedAssetID } = this
-    if (assetID !== selectedAssetID) return
-    const { peerCount, syncProgress, syncStatus, encrypted, open, running } = app().walletMap[assetID]
-    if (!running) return
-    Doc.show(page.sendReceive, page.peerCountBox, page.syncProgressBox)
-    page.peerCount.textContent = String(peerCount)
-    page.syncProgress.textContent = `${(syncProgress * 100).toFixed(1)}%`
-    if (open) {
-      Doc.show(page.statusReady)
-      if (!app().haveActiveOrders(assetID) && encrypted) Doc.show(page.lockBttnBox)
-    } else Doc.show(page.statusLocked, page.unlockBttnBox) // wallet not unlocked
-    Doc.setVis(syncStatus.txs !== undefined, page.txSyncBox)
-    if (syncStatus.txs !== undefined) {
-      Doc.hide(page.txProgress, page.txFindingAddrs)
-      if (syncStatus.txs === 0 && syncStatus.blocks >= syncStatus.targetHeight) Doc.show(page.txFindingAddrs)
-      else {
-        Doc.show(page.txProgress)
-        const prog = syncStatus.txs / syncStatus.targetHeight
-        page.txProgress.textContent = `${(prog * 100).toFixed(1)}%`
+  updateDisplayedTickerBalance (): void {
+    const { page, selectedTicker: ta, balanceDetails: { balance, fiatBalance, fiatBalanceBox } } = this
+    const { ui, total, cFactor, xcRate } = ta
+    balance.textContent = Doc.formatFourSigFigs(total / cFactor)
+    Doc.setVis(xcRate, fiatBalanceBox)
+    if (xcRate) fiatBalance.textContent = Doc.formatFourSigFigs(total / cFactor * xcRate, 2)
+    const chainWallet = ta.blockchainWallet()
+    // Only show balance breakdown if this is multi-chain or if this is unichain
+    // and has a wallet
+    const showBalanceBreakdown = Boolean(chainWallet?.wallet) || ta.isMultiNet
+    Doc.setVis(showBalanceBreakdown, page.balanceBreakdownBox)
+    Doc.setVis(total > 0, page.send)
+    if (!showBalanceBreakdown) return
+
+    Doc.empty(page.balanceBreakdown)
+    for (const { assetID, chainName, chainLogo, bal: { available, locked, immature }, token } of ta.chainAssets) {
+      const { wallet: w } = app().assets[assetID]
+      const tr = Doc.clone(page.blockchainBalanceTmpl)
+      page.balanceBreakdown.appendChild(tr)
+      const tmpl = Doc.parseTemplate(tr)
+      tmpl.chainLogo.src = chainLogo
+      tmpl.chainName.textContent = chainName
+      const usable = w || token?.parentMade
+      if (usable) {
+        if (immature > 0) Doc.formatCoinValue((immature), ui)
+        if (locked > 0) Doc.formatCoinValue((locked), ui)
+        tmpl.avail.textContent = Doc.formatCoinValue(available, ui)
+        tmpl.allocation.textContent = String(total ? Math.round((available + locked + immature) / total * 100) : 0) + '%'
       }
+      Doc.bind(tmpl.txsBttn, 'click', () => this.showTxHistory(assetID))
+      Doc.bind(tmpl.createWalletBttn, 'click', () => this.showNewWallet(token?.parentID ?? assetID))
+
+      Doc.setVis(usable, tmpl.txsBttn)
+      Doc.setVis(!usable, tmpl.createWalletBttn)
+    }
+
+    // TODO: handle reserves deficit with a notification.
+    // if (bal.reservesDeficit > 0) addPrimaryBalance(intl.prep(intl.ID_RESERVES_DEFICIT), bal.reservesDeficit, intl.prep(intl.ID_RESERVES_DEFICIT_MSG))
+
+    // page.purchaserBal.textContent = Doc.formatFourSigFigs(bal.available / ui.conventional.conversionFactor)
+    // app().bindTooltips(page.balanceDetailBox)
+  }
+
+  updateSyncAndPeers () {
+    const { page, selectedWalletID: assetID } = this
+    const w = app().walletMap[assetID]
+    const { peerCount, syncProgress, syncStatus, encrypted, open: unlocked, running, disabled } = w
+
+    Doc.hide(page.txSyncBox, page.txFindingAddrs, page.txProgress)
+    if (running) {
+      page.peerCount.textContent = String(peerCount)
+      page.syncProgress.textContent = `${(syncProgress * 100).toFixed(1)}%`
+      page.syncHeight.textContent = String(syncStatus.blocks)
+      if (syncStatus.txs !== undefined) {
+        Doc.show(page.txSyncBox)
+        if (syncStatus.txs === 0 && syncStatus.blocks >= syncStatus.targetHeight) Doc.show(page.txFindingAddrs)
+        else {
+          Doc.show(page.txProgress)
+          const prog = syncStatus.txs / syncStatus.targetHeight
+          page.txProgress.textContent = `${(prog * 100).toFixed(1)}%`
+        }
+      }
+    } else {
+      page.peerCount.textContent = '—'
+      page.syncProgress.textContent = '—'
+      page.syncHeight.textContent = '—'
+    }
+
+    Doc.hide(
+      page.statusReady, page.statusLocked, page.statusOff, page.statusDisabled,
+      page.statusSyncing, page.connectBttn, page.lockBttn, page.unlockBttn
+    )
+
+    if (disabled) return Doc.show(page.statusDisabled)
+    if (!running) return Doc.show(page.connectBttn, page.statusLocked)
+    const syncing = syncProgress < 1 || syncStatus.txs !== undefined
+    if (syncing) return Doc.show(page.statusSyncing)
+    Doc.show(page.statusReady)
+    const hasActiveOrders = app().haveActiveOrders(assetID)
+    const lockable = unlocked && encrypted && !hasActiveOrders
+    const unlockable = encrypted && !unlocked
+    Doc.setVis(unlockable, page.unlockBttn)
+    Doc.setVis(lockable, page.lockBttn)
+    if (unlockable) Doc.show(page.unlockBttn)
+    else if (lockable) Doc.show(page.lockBttn)
+  }
+
+  updateFeeState () {
+    const { page, selectedTicker: ta } = this
+    const { ui, xcRate, chainAssets } = ta
+
+    page.feeStateXcRate.textContent = Doc.formatFourSigFigs(xcRate)
+
+    const formatUSD = (el: PageElement, v: number, feeUI: UnitInfo, feeFiatRate: number) => {
+      const tmpl = Doc.parseTemplate(el)
+      const fv = v / feeUI.conventional.conversionFactor * feeFiatRate
+      Doc.setVis(fv <= 0.001, tmpl.lessThan)
+      tmpl.value.textContent = Doc.formatFourSigFigs(Math.max(fv, 0.001), fv >= 0.1 ? 2 : 3)
+    }
+
+    const feeAssetStuff = (ca: ChainAsset): [number, UnitInfo, number] => {
+      const { assetID, token } = ca
+      const feeAssetID = token ? token.parentID : assetID
+      const feeUI = token?.feeUI ?? ui
+      const feeFiatRate = app().fiatRatesMap[feeAssetID]
+      return [feeAssetID, feeUI, feeFiatRate]
+    }
+
+    Doc.setVis(ta.hasWallets, page.txFeesBox)
+    if (ta.isMultiNet) {
+      Doc.empty(page.netTxFees)
+      for (const ca of chainAssets) {
+        const { assetID, chainName, chainLogo } = ca
+        const [feeAssetID, feeUI, feeFiatRate] = feeAssetStuff(ca)
+        const tr = Doc.clone(page.netTxFeeTmpl)
+        page.netTxFees.appendChild(tr)
+        const tmpl = Doc.parseTemplate(tr)
+        tmpl.chainLogo.src = chainLogo
+        tmpl.chainName.textContent = chainName
+        const w = app().walletMap[assetID]
+        if (!w?.feeState) continue
+        // remove dummies
+        for (const dummy of Array.from(tr.children).slice(1)) tr.removeChild(dummy)
+        const { send, swap, redeem, rate } = w.feeState
+
+        const addTD = (v: number) => {
+          const td = Doc.clone(page.multiNetTxFeeTmpl)
+          tr.appendChild(td)
+          const tdTmpl = Doc.parseTemplate(td)
+          Doc.formatBestValueElement(tdTmpl.chainUnits, feeAssetID, v, feeUI)
+          formatUSD(tdTmpl.fiatUnits, v, feeUI, feeFiatRate)
+        }
+
+        addTD(send)
+        addTD(redeem) // buy
+        addTD(swap) // sell
+        // Rate
+        const td = Doc.clone(page.multiNetFeeRateTmpl)
+        tr.appendChild(td)
+        Doc.formatBestRateElement(td, feeAssetID, rate, feeUI)
+      }
+      app().bindUnits(page.netTxFees)
+    } else {
+      const [feeAssetID, feeUI, feeFiatRate] = feeAssetStuff(chainAssets[0])
+      const w = app().walletMap[feeAssetID]
+      if (!w?.feeState) return
+      const { rate, send, swap, redeem } = w.feeState
+      Doc.formatBestRateElement(page.networkFeeRate, feeAssetID, rate, feeUI)
+      Doc.formatBestValueElement(page.feeStateSendFees, feeAssetID, send, feeUI)
+      Doc.formatBestValueElement(page.feeStateSellFees, feeAssetID, swap, feeUI)
+      Doc.formatBestValueElement(page.feeStateBuyFees, feeAssetID, redeem, feeUI)
+      formatUSD(page.feeStateSendFiat, send, feeUI, feeFiatRate)
+      formatUSD(page.feeStateSellFiat, swap, feeUI, feeFiatRate)
+      formatUSD(page.feeStateBuyFiat, redeem, feeUI, feeFiatRate)
     }
   }
 
-  updateFeeState (feeState: FeeState) {
-    const { page, selectedAssetID: assetID } = this
-    Doc.hide(page.feeStateBox)
-    const { unitInfo: ui, token } = app().assets[assetID]
-    const fiatRate = app().fiatRatesMap[assetID]
-    if (!fiatRate) return
-    const feeAssetID = token ? token.parentID : assetID
-    const feeFiatRate = app().fiatRatesMap[feeAssetID]
-    if (token && !feeFiatRate) return
-    Doc.show(page.feeStateBox)
-    const feeUI = token ? app().assets[token.parentID].unitInfo : ui
-    Doc.formatBestRateElement(page.feeStateNetRate, feeAssetID, feeState.rate, feeUI)
-    Doc.formatBestValueElement(page.feeStateSendFees, feeAssetID, feeState.send, feeUI)
-    Doc.formatBestValueElement(page.feeStateSwapFees, feeAssetID, feeState.swap, feeUI)
-    Doc.formatBestValueElement(page.feeStateRedeemFees, feeAssetID, feeState.redeem, feeUI)
-    page.feeStateXcRate.textContent = Doc.formatFourSigFigs(fiatRate)
-    const sendFiat = feeState.send / feeUI.conventional.conversionFactor * feeFiatRate
-    page.feeStateSendFiat.textContent = Doc.formatFourSigFigs(sendFiat)
-    const swapFiat = feeState.swap / feeUI.conventional.conversionFactor * feeFiatRate
-    page.feeStateSwapFiat.textContent = Doc.formatFourSigFigs(swapFiat)
-    const redeemFiat = feeState.redeem / feeUI.conventional.conversionFactor * feeFiatRate
-    page.feeStateRedeemFiat.textContent = Doc.formatFourSigFigs(redeemFiat)
-    Doc.show(page.feeStateBox)
-  }
-
-  async checkNeedsProvider (assetID: number) {
-    const needs = await app().needsCustomProvider(assetID)
-    const { page: { needsProviderBox: box, needsProviderBttn: bttn } } = this
-    Doc.setVis(needs, box)
-    if (!needs) return
-    Doc.blink(bttn)
-  }
-
-  async updateTicketBuyer (assetID: number) {
+  async updateTicketBuyer () {
+    const { page, selectedWalletID: assetID } = this
+    if (assetID === -1) return Doc.hide(page.stakingBox)
+    const { wallet, unitInfo: ui } = app().assets[assetID]
+    Doc.hide(
+      page.pickVSP, page.stakingSummary, page.stakingErr,
+      page.vspDisplayBox, page.ticketPriceBox, page.purchaseTicketsBox,
+      page.stakingRpcSpvMsg, page.ticketsDisabled
+    )
+    const showStakingBox = wallet?.running && Boolean(wallet.traits & traitTicketBuyer)
+    Doc.setVis(showStakingBox, page.stakingBox)
+    if (!showStakingBox) return
     this.ticketPage = {
       number: 0,
       history: [],
       scanned: false
     }
-    const { wallet, unitInfo: ui } = app().assets[assetID]
-    const page = this.page
-    Doc.hide(
-      page.stakingBox, page.pickVSP, page.stakingSummary, page.stakingErr,
-      page.vspDisplayBox, page.ticketPriceBox, page.purchaseTicketsBox,
-      page.stakingRpcSpvMsg, page.ticketsDisabled
-    )
-    if (!wallet?.running || (wallet.traits & traitTicketBuyer) === 0) return
-    Doc.show(page.stakingBox)
     const loaded = app().loading(page.stakingBox)
     const res = await this.safePost('/api/stakestatus', assetID)
     loaded()
@@ -1127,7 +1355,7 @@ export default class WalletsPage extends BasePage {
     page.purchaserBal.textContent = Doc.formatCoinValue(wallet.balance.available, ui)
     this.updateTicketStats(stakeStatus.stats, ui, stakeStatus.ticketPrice, stakeStatus.votingSubsidy)
     // If this is an extension wallet, we'll might to disable all controls.
-    const disableStaking = app().extensionWallet(this.selectedAssetID)?.disableStaking
+    const disableStaking = app().extensionWallet(this.selectedWalletID)?.disableStaking
     if (disableStaking) {
       Doc.hide(page.setVotes, page.showVSPs)
       Doc.show(page.ticketsDisabled)
@@ -1171,9 +1399,9 @@ export default class WalletsPage extends BasePage {
   }
 
   async showVSPPicker () {
-    const assetID = this.selectedAssetID
+    const assetID = this.selectedWalletID
     const page = this.page
-    this.showForm(page.vspPicker)
+    this.forms.show(page.vspPicker)
     Doc.empty(page.vspPickerList)
     Doc.hide(page.stakingErr)
     const loaded = app().loading(page.vspPicker)
@@ -1203,7 +1431,7 @@ export default class WalletsPage extends BasePage {
     const page = this.page
     page.purchaserInput.value = ''
     Doc.hide(page.purchaserErr)
-    this.showForm(this.page.purchaseTicketsForm)
+    this.forms.show(this.page.purchaseTicketsForm)
     page.purchaserInput.focus()
   }
 
@@ -1218,7 +1446,7 @@ export default class WalletsPage extends BasePage {
   }
 
   async purchaseTickets () {
-    const { page, selectedAssetID: assetID } = this
+    const { page, selectedWalletID: assetID } = this
     // DRAFT NOTE: The user will get an actual ticket count somewhere in the
     // range 1 <= tickets_purchased <= n. See notes in
     // (*spvWallet).PurchaseTickets.
@@ -1235,14 +1463,14 @@ export default class WalletsPage extends BasePage {
       Doc.show(page.purchaserErr)
       return
     }
-    this.showSuccess(intl.prep(intl.ID_TICKETS_PURCHASED, { n: n.toLocaleString(Doc.languages()) }))
+    this.forms.showSuccess(intl.prep(intl.ID_TICKETS_PURCHASED, { n: n.toLocaleString(Doc.languages()) }))
   }
 
   processTicketPurchaseUpdate (walletNote: CustomWalletNote) {
-    const { stakeStatus, selectedAssetID, page } = this
+    const { stakeStatus, selectedWalletID, page } = this
     const { assetID } = walletNote
     const { err, remaining, tickets, stats } = walletNote.payload as TicketPurchaseUpdate
-    if (assetID !== selectedAssetID) return
+    if (assetID !== selectedWalletID) return
     if (err) {
       Doc.show(page.purchaseTicketsErrBox)
       page.purchaseTicketsErr.textContent = err
@@ -1257,7 +1485,7 @@ export default class WalletsPage extends BasePage {
   }
 
   async setVSP (assetID: number, vsp: VotingServiceProvider) {
-    this.closePopups()
+    this.forms.close()
     const page = this.page
     const loaded = app().loading(page.stakingBox)
     const res = await this.safePost('/api/setvsp', { assetID, url: vsp.url })
@@ -1271,7 +1499,7 @@ export default class WalletsPage extends BasePage {
   }
 
   setCustomVSP () {
-    const assetID = this.selectedAssetID
+    const assetID = this.selectedWalletID
     const vsp = { url: this.page.customVspUrl.value } as VotingServiceProvider
     this.setVSP(assetID, vsp)
   }
@@ -1294,7 +1522,7 @@ export default class WalletsPage extends BasePage {
   }
 
   displayTicketPage (pageNumber: number, pageOfTickets: Ticket[]) {
-    const { page, selectedAssetID: assetID } = this
+    const { page, selectedWalletID: assetID } = this
     const ui = app().unitInfo(assetID)
     const coinLink = CoinExplorers[assetID][app().user.net]
     Doc.empty(page.ticketHistoryRows)
@@ -1314,7 +1542,7 @@ export default class WalletsPage extends BasePage {
   }
 
   async ticketPageN (pageNumber: number) {
-    const { page, stakeStatus, ticketPage, selectedAssetID: assetID } = this
+    const { page, stakeStatus, ticketPage, selectedWalletID: assetID } = this
     const pageOfTickets = this.pageOfTickets(pageNumber)
     if (pageOfTickets.length < ticketPageSize && !ticketPage.scanned) {
       const n = ticketPageSize - pageOfTickets.length
@@ -1353,7 +1581,7 @@ export default class WalletsPage extends BasePage {
   }
 
   async showTicketHistory () {
-    this.showForm(this.page.ticketHistoryForm)
+    this.forms.show(this.page.ticketHistoryForm)
     await this.ticketPageN(this.ticketPage.number)
   }
 
@@ -1366,7 +1594,7 @@ export default class WalletsPage extends BasePage {
   }
 
   showSetVotesDialog () {
-    const { page, stakeStatus, selectedAssetID: assetID } = this
+    const { page, stakeStatus, selectedWalletID: assetID } = this
     const ui = app().unitInfo(assetID)
     Doc.hide(page.votingFormErr)
     const coinLink = CoinExplorers[assetID][app().user.net]
@@ -1458,19 +1686,22 @@ export default class WalletsPage extends BasePage {
       tmpl.key.textContent = keyPolicy.key
     }
 
-    this.showForm(page.votingForm)
+    this.forms.show(page.votingForm)
   }
 
-  async updatePrivacy (assetID: number) {
-    const disablePrivacy = app().extensionWallet(assetID)?.disablePrivacy
+  async updatePrivacy () {
+    const { page, selectedWalletID: assetID } = this
     this.mixing = false
-    const { wallet } = app().assets[assetID]
-    const page = this.page
-    Doc.hide(page.mixingBox, page.mixerOff, page.mixerOn)
+    if (assetID === -1) return Doc.hide(page.mixingBox)
+    const disablePrivacy = app().extensionWallet(assetID)?.disablePrivacy
+    const { wallet: w } = app().assets[assetID]
+    const showMixingBox = !disablePrivacy && w?.running && Boolean(w.traits & traitFundsMixer)
+    Doc.setVis(showMixingBox, page.mixingBox)
+    if (!showMixingBox) return
+    Doc.hide(page.mixerOff, page.mixerOn)
     // TODO: Show special messaging if the asset supports mixing but not this
     // wallet type.
-    if (disablePrivacy || !wallet?.running || (wallet.traits & traitFundsMixer) === 0) return
-    Doc.show(page.mixingBox, page.mixerLoading)
+    Doc.show(page.mixerLoading)
     const res = await this.safePost('/api/mixingstats', { assetID })
     Doc.hide(page.mixerLoading)
     if (!app().checkResponse(res)) {
@@ -1489,7 +1720,7 @@ export default class WalletsPage extends BasePage {
     const page = this.page
     Doc.hide(page.mixingErr)
     const loaded = app().loading(page.mixingBox)
-    const res = await postJSON('/api/configuremixer', { assetID: this.selectedAssetID, enabled: on })
+    const res = await postJSON('/api/configuremixer', { assetID: this.selectedWalletID, enabled: on })
     loaded()
     if (!app().checkResponse(res)) {
       page.mixingErr.textContent = intl.prep(intl.ID_API_ERROR, { msg: res.msg })
@@ -1501,87 +1732,14 @@ export default class WalletsPage extends BasePage {
     this.mixerToggle.setState(on)
   }
 
-  updateDisplayedAssetBalance (): void {
-    const page = this.page
-    const asset = app().assets[this.selectedAssetID]
-    const { wallet, unitInfo: ui, id: assetID } = asset
-    const bal = wallet.balance
-    Doc.show(page.balanceBox, page.walletDetails)
-    const totalLocked = bal.locked + bal.contractlocked + bal.bondlocked
-    const totalBalance = bal.available + totalLocked + bal.immature
-    page.balance.textContent = Doc.formatCoinValue(totalBalance, ui)
-    page.balanceUnit.textContent = ui.conventional.unit
-    const rate = app().fiatRatesMap[assetID]
-    if (rate) {
-      Doc.show(page.fiatBalanceBox)
-      page.fiatBalance.textContent = Doc.formatFiatConversion(totalBalance, rate, ui)
-    }
-    Doc.empty(page.balanceDetailBox)
-
-    const addBalanceRow = (cat: string, bal: number, tooltipMsg?: string) => {
-      const row = page.balanceDetailRow.cloneNode(true) as PageElement
-      page.balanceDetailBox.appendChild(row)
-      const tmpl = Doc.parseTemplate(row)
-      tmpl.name.textContent = cat
-      if (tooltipMsg) {
-        tmpl.tooltipMsg.dataset.tooltip = tooltipMsg
-        Doc.show(tmpl.tooltipMsg)
-      }
-      tmpl.balance.textContent = Doc.formatCoinValue(bal, ui)
-      return row
-    }
-
-    let lastSubLockedRow: PageElement | undefined
-    let lastPrimaryRow: PageElement | undefined
-    const addPrimaryBalance = (cat: string, bal: number, tooltipMsg?: string) => {
-      lastSubLockedRow = undefined
-      lastPrimaryRow = addBalanceRow(cat, bal, tooltipMsg)
-    }
-    const addSubBalance = (cat: string, bal: number, tooltipMsg?: string) => {
-      lastSubLockedRow = addBalanceRow(cat, bal, tooltipMsg)
-      lastSubLockedRow.classList.add('sub')
-    }
-    const setRowClasses = () => {
-      if (!lastSubLockedRow) return
-      (lastPrimaryRow as PageElement).classList.add('itemized')
-      lastSubLockedRow.classList.add('last')
-    }
-
-    addPrimaryBalance(intl.prep(intl.ID_AVAILABLE_TITLE), bal.available, '')
-    if (bal.other?.Shielded !== undefined) {
-      const transparent = bal.available - bal.other.Shielded.amt
-      addSubBalance(intl.prep(intl.ID_TRANSPARENT), transparent)
-      addSubBalance(intl.prep(intl.ID_SHIELDED), bal.other.Shielded.amt)
-    }
-    setRowClasses()
-
-    addPrimaryBalance(intl.prep(intl.ID_LOCKED_TITLE), totalLocked, intl.prep(intl.ID_LOCKED_BAL_MSG))
-    if (bal.orderlocked > 0) addSubBalance(intl.prep(intl.ID_ORDER), bal.orderlocked, intl.prep(intl.ID_LOCKED_ORDER_BAL_MSG))
-    if (bal.contractlocked > 0) addSubBalance(intl.prep(intl.ID_SWAPPING), bal.contractlocked, intl.prep(intl.ID_LOCKED_SWAPPING_BAL_MSG))
-    if (bal.bondlocked > 0) addSubBalance(intl.prep(intl.ID_BONDED), bal.bondlocked, intl.prep(intl.ID_LOCKED_BOND_BAL_MSG))
-    if (bal.bondReserves > 0) addSubBalance(intl.prep(intl.ID_BOND_RESERVES), bal.bondReserves, intl.prep(intl.ID_BOND_RESERVES_MSG))
-    if (bal?.other?.Staked !== undefined) addSubBalance('Staked', bal.other.Staked.amt)
-    setRowClasses()
-
-    if (bal.immature) addPrimaryBalance(intl.prep(intl.ID_IMMATURE_TITLE), bal.immature, intl.prep(intl.ID_IMMATURE_BAL_MSG))
-    if (bal?.other?.Unmixed !== undefined) addSubBalance('Unmixed', bal.other.Unmixed.amt)
-    setRowClasses()
-
-    // TODO: handle reserves deficit with a notification.
-    // if (bal.reservesDeficit > 0) addPrimaryBalance(intl.prep(intl.ID_RESERVES_DEFICIT), bal.reservesDeficit, intl.prep(intl.ID_RESERVES_DEFICIT_MSG))
-
-    page.purchaserBal.textContent = Doc.formatFourSigFigs(bal.available / ui.conventional.conversionFactor)
-    app().bindTooltips(page.balanceDetailBox)
-  }
-
-  showAvailableMarkets (assetID: number) {
-    const page = this.page
+  showAvailableMarkets () {
+    const { page, selectedTicker: { chainAssetLookup } } = this
     const exchanges = app().user.exchanges
-    const markets: [string, Exchange, Market][] = []
+    const markets: [string, Exchange, Market, ChainAsset][] = []
     for (const xc of Object.values(exchanges)) {
-      if (!xc.markets) continue
-      for (const mkt of Object.values(xc.markets)) {
-        if (mkt.baseid === assetID || mkt.quoteid === assetID) markets.push([xc.host, xc, mkt])
+      for (const mkt of Object.values(xc.markets ?? [])) {
+        if (chainAssetLookup[mkt.baseid]) markets.push([xc.host, xc, mkt, chainAssetLookup[mkt.baseid]])
+        else if (chainAssetLookup[mkt.quoteid]) markets.push([xc.host, xc, mkt, chainAssetLookup[mkt.quoteid]])
       }
     }
 
@@ -1593,15 +1751,15 @@ export default class WalletsPage extends BasePage {
       return volume / conversionFactor
     }
 
-    markets.sort((a: [string, Exchange, Market], b: [string, Exchange, Market]): number => {
-      const [hostA,, mktA] = a
-      const [hostB,, mktB] = b
+    markets.sort((a: [string, Exchange, Market, ChainAsset], b: [string, Exchange, Market, ChainAsset]): number => {
+      const [hostA,, mktA, caA] = a
+      const [hostB,, mktB, caB] = b
       if (!mktA.spot && !mktB.spot) return hostA.localeCompare(hostB)
-      return spotVolume(assetID, mktB) - spotVolume(assetID, mktA)
+      return spotVolume(caA.assetID, mktB) - spotVolume(caB.assetID, mktA)
     })
     Doc.empty(page.availableMarkets)
 
-    for (const [host, xc, mkt] of markets) {
+    for (const [host, xc, mkt, ca] of markets) {
       const { spot, baseid, basesymbol, quoteid, quotesymbol } = mkt
       const row = page.marketRow.cloneNode(true) as PageElement
       page.availableMarkets.appendChild(row)
@@ -1619,29 +1777,28 @@ export default class WalletsPage extends BasePage {
         const fmtSymbol = (s: string) => s.split('.')[0].toUpperCase()
         tmpl.priceQuoteUnit.textContent = fmtSymbol(quotesymbol)
         tmpl.priceBaseUnit.textContent = fmtSymbol(basesymbol)
-        tmpl.volume.textContent = Doc.formatFourSigFigs(spotVolume(assetID, mkt))
-        tmpl.volumeUnit.textContent = assetID === baseid ? fmtSymbol(basesymbol) : fmtSymbol(quotesymbol)
+        tmpl.volume.textContent = Doc.formatFourSigFigs(spotVolume(ca.assetID, mkt))
+        tmpl.volumeUnit.textContent = ca.assetID === baseid ? fmtSymbol(basesymbol) : fmtSymbol(quotesymbol)
       } else Doc.hide(tmpl.priceBox, tmpl.volumeBox)
       Doc.bind(row, 'click', () => app().loadPage('markets', { host, baseID: baseid, quoteID: quoteid }))
     }
-    page.marketsOverviewBox.classList.remove('invisible')
   }
 
-  async showRecentActivity (assetID: number) {
-    const page = this.page
+  async showRecentActivity () {
+    const { page, selectedTicker: ta } = this
     const loaded = app().loading(page.orderActivityBox)
     const filter: OrderFilter = {
       n: 20,
-      assets: [assetID],
+      assets: ta.chainAssets.map((ca: ChainAsset) => ca.assetID),
       hosts: [],
       statuses: []
     }
     const res = await postJSON('/api/orders', filter)
     loaded()
+    page.orderActivityBox.classList.remove('invisible')
     Doc.hide(page.noActivity, page.orderActivity)
     if (!res.orders || res.orders.length === 0) {
       Doc.show(page.noActivity)
-      page.orderActivityBox.classList.remove('invisible')
       return
     }
     Doc.show(page.orderActivity)
@@ -1679,7 +1836,6 @@ export default class WalletsPage extends BasePage {
       tmpl.link.href = `order/${ord.id}`
       app().bindInternalNavigation(row)
     }
-    page.orderActivityBox.classList.remove('invisible')
   }
 
   updateTxHistoryRow (row: PageElement, tx: WalletTransaction, assetID: number) {
@@ -1743,14 +1899,14 @@ export default class WalletsPage extends BasePage {
     const page = this.page
 
     // Block explorer
-    const assetExplorer = CoinExplorers[this.selectedAssetID]
+    const assetExplorer = CoinExplorers[this.selectedWalletID]
     if (assetExplorer && assetExplorer[net]) {
       page.txViewBlockExplorer.href = assetExplorer[net](tx.id)
     }
 
     // Tx type
     let txType = txTypeString(tx.type)
-    if (tx.tokenID && tx.tokenID !== this.selectedAssetID) {
+    if (tx.tokenID && tx.tokenID !== this.selectedWalletID) {
       const tokenSymbol = app().assets[tx.tokenID].symbol.split('.')[0].toUpperCase()
       txType = `${tokenSymbol} ${txType}`
     }
@@ -1762,7 +1918,7 @@ export default class WalletsPage extends BasePage {
     if (noAmtTxTypes.includes(tx.type)) {
       Doc.hide(page.txDetailsAmtSection)
     } else {
-      let assetID = this.selectedAssetID
+      let assetID = this.selectedWalletID
       if (tx.tokenID) assetID = tx.tokenID
       Doc.show(page.txDetailsAmtSection)
       const ui = app().unitInfo(assetID)
@@ -1773,7 +1929,7 @@ export default class WalletsPage extends BasePage {
     }
 
     // Fee
-    let feeAsset = this.selectedAssetID
+    let feeAsset = this.selectedWalletID
     if (tx.tokenID !== undefined) {
       const asset = app().assets[tx.tokenID]
       if (asset.token) {
@@ -1843,14 +1999,14 @@ export default class WalletsPage extends BasePage {
   }
 
   showTxDetailsPopup (id: string) {
-    const tx = app().getWalletTx(this.selectedAssetID, id)
+    const tx = app().getWalletTx(this.selectedWalletID, id)
     if (!tx) {
       console.error(`wallet transaction ${id} not found`)
       return
     }
     this.currTx = tx
     this.setTxDetailsPopupElements(tx)
-    this.showForm(this.page.txDetails)
+    this.forms.show(this.page.txDetails)
   }
 
   txHistoryTableNewestDate () : string {
@@ -1869,30 +2025,31 @@ export default class WalletsPage extends BasePage {
   }
 
   handleTxNote (tx: WalletTransaction, newTx: boolean) {
-    const { selectedAssetID: assetID } = this
-    this.depositAddrForm.handleTx(assetID, tx)
-    const w = app().assets[this.selectedAssetID].wallet
-    const hideMixing = (w.traits & traitFundsMixer) !== 0 && !!this.page.hideMixTxs.checked
+    const { page, selectedWalletID } = this
+    this.depositAddrForm.handleTx(selectedWalletID, tx)
+    if (!Doc.isDisplayed(page.txHistoryForm)) return
+    const w = app().assets[selectedWalletID].wallet
+    const hideMixing = (w.traits & traitFundsMixer) !== 0 && !!page.hideMixTxs.checked
     if (hideMixing && tx.type === txTypeMixing) return
     if (newTx) {
       if (!this.oldestTx) {
-        Doc.show(this.page.txHistoryTable)
-        Doc.hide(this.page.noTxHistory)
-        this.page.txHistoryTableBody.appendChild(this.txHistoryDateRow(this.txDate(tx)))
-        this.page.txHistoryTableBody.appendChild(this.txHistoryRow(tx, assetID))
+        Doc.show(page.txHistoryTable)
+        Doc.hide(page.noTxHistory)
+        page.txHistoryTableBody.appendChild(this.txHistoryDateRow(this.txDate(tx)))
+        page.txHistoryTableBody.appendChild(this.txHistoryRow(tx, selectedWalletID))
         this.oldestTx = tx
       } else if (this.txDate(tx) !== this.txHistoryTableNewestDate()) {
-        this.page.txHistoryTableBody.insertBefore(this.txHistoryRow(tx, assetID), this.page.txHistoryTableBody.children[0])
-        this.page.txHistoryTableBody.insertBefore(this.txHistoryDateRow(this.txDate(tx)), this.page.txHistoryTableBody.children[0])
+        page.txHistoryTableBody.insertBefore(this.txHistoryRow(tx, selectedWalletID), page.txHistoryTableBody.children[0])
+        page.txHistoryTableBody.insertBefore(this.txHistoryDateRow(this.txDate(tx)), page.txHistoryTableBody.children[0])
       } else {
-        this.page.txHistoryTableBody.insertBefore(this.txHistoryRow(tx, assetID), this.page.txHistoryTableBody.children[1])
+        page.txHistoryTableBody.insertBefore(this.txHistoryRow(tx, selectedWalletID), page.txHistoryTableBody.children[1])
       }
       return
     }
-    for (const row of this.page.txHistoryTableBody.children) {
+    for (const row of page.txHistoryTableBody.children) {
       const peRow = row as PageElement
       if (peRow.dataset.txid === tx.id) {
-        this.updateTxHistoryRow(peRow, tx, assetID)
+        this.updateTxHistoryRow(peRow, tx, selectedWalletID)
         break
       }
     }
@@ -1932,19 +2089,15 @@ export default class WalletsPage extends BasePage {
   async showTxHistory (assetID: number) {
     const page = this.page
     let txRes : TxHistoryResult
-    Doc.hide(page.txHistoryTable, page.txHistoryBox, page.noTxHistory, page.earlierTxs, page.txHistoryNotAvailable, page.hideMixTxs)
+    Doc.hide(page.txHistoryTable, page.noTxHistory, page.earlierTxs, page.hideMixTxs)
     Doc.empty(page.txHistoryTableBody)
     const w = app().assets[assetID].wallet
-    if (!w || w.disabled || (w.traits & traitHistorian) === 0) {
-      Doc.show(page.txHistoryNotAvailable)
-      return
-    }
 
     this.oldestTx = undefined
 
     const isMixing = (w.traits & traitFundsMixer) !== 0
     Doc.setVis(isMixing, page.hideMixTxs)
-    Doc.show(page.txHistoryBox)
+    this.forms.show(page.txHistoryForm)
 
     try {
       const hideMixing = isMixing && !!page.hideMixTxsCheckbox.checked
@@ -1978,10 +2131,10 @@ export default class WalletsPage extends BasePage {
     if (!this.oldestTx) return
     const page = this.page
     let txRes : TxHistoryResult
-    const w = app().assets[this.selectedAssetID].wallet
+    const w = app().assets[this.selectedWalletID].wallet
     const hideMixing = (w.traits & traitFundsMixer) !== 0 && !!page.hideMixTxsCheckbox.checked
     try {
-      txRes = await this.getTxHistory(this.selectedAssetID, hideMixing, this.oldestTx.id)
+      txRes = await this.getTxHistory(this.selectedWalletID, hideMixing, this.oldestTx.id)
     } catch (err) {
       console.error(err)
       return
@@ -1993,7 +2146,7 @@ export default class WalletsPage extends BasePage {
         oldestDate = date
         page.txHistoryTableBody.appendChild(this.txHistoryDateRow(date))
       }
-      const row = this.txHistoryRow(tx, this.selectedAssetID)
+      const row = this.txHistoryRow(tx, this.selectedWalletID)
       page.txHistoryTableBody.appendChild(row)
     }
     Doc.setVis(!txRes.lastTx, page.earlierTxs)
@@ -2027,12 +2180,12 @@ export default class WalletsPage extends BasePage {
 
   showConfirmForce () {
     Doc.hide(this.page.confirmForceErr)
-    this.showForm(this.page.confirmForce)
+    this.forms.show(this.page.confirmForce)
   }
 
   showRecoverWallet () {
     Doc.hide(this.page.recoverWalletErr)
-    this.showForm(this.page.recoverWalletConfirm)
+    this.forms.show(this.page.recoverWalletConfirm)
   }
 
   /* Show the open wallet form if the password is not cached, and otherwise
@@ -2099,7 +2252,7 @@ export default class WalletsPage extends BasePage {
 
     page.recfgAssetLogo.src = Doc.logoPath(asset.symbol)
     page.recfgAssetName.textContent = asset.name
-    if (!cfg?.skipAnimation) this.showForm(page.reconfigForm)
+    if (!cfg?.skipAnimation) this.forms.show(page.reconfigForm)
     const loaded = app().loading(page.reconfigForm)
     const res = await postJSON('/api/walletsettings', { assetID })
     loaded()
@@ -2136,10 +2289,10 @@ export default class WalletsPage extends BasePage {
   changeWalletType () {
     const page = this.page
     const walletType = page.changeWalletTypeSelect.value || ''
-    const walletDef = app().walletDefinition(this.selectedAssetID, walletType)
-    this.reconfigForm.update(this.selectedAssetID, walletDef.configopts || [], false)
-    const wallet = app().walletMap[this.selectedAssetID]
-    const currentDef = app().currentWalletDefinition(this.selectedAssetID)
+    const walletDef = app().walletDefinition(this.selectedWalletID, walletType)
+    this.reconfigForm.update(this.selectedWalletID, walletDef.configopts || [], false)
+    const wallet = app().walletMap[this.selectedWalletID]
+    const currentDef = app().currentWalletDefinition(this.selectedWalletID)
     if (walletDef.type !== currentDef.type) this.setRecoverySupportMsgViz(false, wallet.symbol)
     else this.showOrHideRecoverySupportMsg(wallet, walletDef.seeded)
     this.setGuideLink(walletDef.guidelink)
@@ -2155,7 +2308,7 @@ export default class WalletsPage extends BasePage {
   }
 
   updateDisplayedReconfigFields (walletDef: WalletDefinition) {
-    const disablePassword = app().extensionWallet(this.selectedAssetID)?.disablePassword
+    const disablePassword = app().extensionWallet(this.selectedWalletID)?.disablePassword
     if (walletDef.seeded || walletDef.type === 'token' || disablePassword) {
       Doc.hide(this.page.showChangePW, this.reconfigForm.fileSelector)
       this.changeWalletPW = false
@@ -2164,14 +2317,33 @@ export default class WalletsPage extends BasePage {
   }
 
   /* Display a deposit address. */
-  async showDeposit (assetID: number) {
-    this.depositAddrForm.setAsset(assetID)
-    this.showForm(this.page.deposit)
+  async showDeposit () {
+    const { page, selectedTicker: { chainAssets } } = this
+    const assetIDs = chainAssets.map(({ assetID }: ChainAsset) => assetID)
+    this.depositAddrForm.setAssetSelect(assetIDs)
+    this.forms.show(page.deposit)
   }
 
-  /* Show the form to either send or withdraw funds. */
-  async showSendForm (assetID: number) {
-    const page = this.page
+  async showSendForm () {
+    const { page, selectedTicker: { chainAssets } } = this
+    const fundedAssets: ChainAsset[] = []
+    for (const ca of chainAssets) if (ca.bal.available > 0) fundedAssets.push(ca)
+    if (fundedAssets.length === 1) return this.showSendAssetForm(fundedAssets[0].assetID)
+    Doc.empty(page.netSelectBox)
+    for (const { assetID, chainLogo, chainName, bal, ui } of chainAssets) {
+      const bttn = Doc.clone(page.netSelectBttnTmpl)
+      page.netSelectBox.appendChild(bttn)
+      const tmpl = Doc.parseTemplate(bttn)
+      tmpl.logo.src = chainLogo
+      tmpl.chainName.textContent = chainName
+      tmpl.bal.textContent = Doc.formatCoinValue(bal.available, ui)
+      Doc.bind(bttn, 'click', () => { this.showSendAssetForm(assetID) })
+    }
+    this.forms.show(page.sendChainSelectForm)
+  }
+
+  async showSendAssetForm (assetID: number) {
+    const { page } = this
     const box = page.sendForm
     const { wallet, unitInfo: ui, symbol, token } = app().assets[assetID]
     Doc.hide(page.toggleSubtract)
@@ -2236,7 +2408,7 @@ export default class WalletsPage extends BasePage {
     Doc.showFiatValue(page.sendValue, 0, xcRate, ui)
     page.walletBal.textContent = Doc.formatFullPrecision(wallet.balance.available, ui)
     box.dataset.assetID = String(assetID)
-    this.showForm(box)
+    this.forms.show(box)
   }
 
   /* doConnect connects to a wallet via the connectwallet API route. */
@@ -2248,17 +2420,17 @@ export default class WalletsPage extends BasePage {
       const { symbol } = app().assets[assetID]
       const page = this.page
       page.errorModalMsg.textContent = intl.prep(intl.ID_CONNECT_WALLET_ERR_MSG, { assetName: symbol, errMsg: res.msg })
-      this.showForm(page.errorModal)
+      this.forms.show(page.errorModal)
     }
-    this.updateDisplayedAsset(assetID)
+    this.updateSyncAndPeers()
   }
 
   assetUpdated (assetID: number, oldForm?: PageElement, successMsg?: string) {
-    if (assetID !== this.selectedAssetID) return
-    this.updateDisplayedAsset(assetID)
-    if (oldForm && Object.is(this.currentForm, oldForm)) {
-      if (successMsg) this.showSuccess(successMsg)
-      else this.closePopups()
+    if (this.selectedTicker.chainAssetLookup[assetID]) this.updateDisplayedTicker()
+    this.updateAssetBalance(assetID)
+    if (oldForm && Object.is(this.forms.currentForm, oldForm)) {
+      if (successMsg) this.forms.showSuccess(successMsg)
+      else this.forms.close()
     }
   }
 
@@ -2268,7 +2440,7 @@ export default class WalletsPage extends BasePage {
   */
   async populateMaxSend () {
     const page = this.page
-    const { id: assetID, unitInfo: ui, wallet } = app().assets[this.selectedAssetID]
+    const { id: assetID, unitInfo: ui, wallet } = app().assets[this.selectedWalletID]
     // Populate send amount with max send value and ensure we don't check
     // subtract checkbox for assets that don't have a withdraw method.
     const xcRate = app().fiatRatesMap[assetID]
@@ -2317,7 +2489,7 @@ export default class WalletsPage extends BasePage {
   /* update wallet configuration */
   async reconfig (): Promise<void> {
     const page = this.page
-    const assetID = this.selectedAssetID
+    const assetID = this.selectedWalletID
     Doc.hide(page.reconfigErr)
     let walletType = app().currentWalletDefinition(assetID).type
     if (!Doc.isHidden(page.changeWalletType)) {
@@ -2343,11 +2515,10 @@ export default class WalletsPage extends BasePage {
       return
     }
     this.assetUpdated(assetID, page.reconfigForm, intl.prep(intl.ID_RECONFIG_SUCCESS))
-    this.updateTicketBuyer(assetID)
+    this.updateTicketBuyer()
     app().clearTxHistory(assetID)
-    this.showTxHistory(assetID)
-    this.updatePrivacy(assetID)
-    this.checkNeedsProvider(assetID)
+    // this.showTxHistory(assetID)
+    this.updatePrivacy()
   }
 
   /* lock instructs the API to lock the wallet. */
@@ -2357,13 +2528,13 @@ export default class WalletsPage extends BasePage {
     const res = await postJSON('/api/closewallet', { assetID: assetID })
     loaded()
     if (!app().checkResponse(res)) return
-    this.updateDisplayedAsset(assetID)
-    this.updatePrivacy(assetID)
+    this.updateSyncAndPeers()
+    this.updatePrivacy()
   }
 
   async downloadLogs (): Promise<void> {
     const search = new URLSearchParams('')
-    search.append('assetid', `${this.selectedAssetID}`)
+    search.append('assetid', `${this.selectedWalletID}`)
     const url = new URL(window.location.href)
     url.search = search.toString()
     url.pathname = '/wallets/logfile'
@@ -2380,7 +2551,7 @@ export default class WalletsPage extends BasePage {
     const page = this.page
     Doc.hide(page.exportWalletErr)
     page.exportWalletPW.value = ''
-    this.showForm(page.exportWalletAuth)
+    this.forms.show(page.exportWalletAuth)
   }
 
   // exportWalletAuthSubmit is called after the user enters their password to
@@ -2389,7 +2560,7 @@ export default class WalletsPage extends BasePage {
   async exportWalletAuthSubmit (): Promise<void> {
     const page = this.page
     const req = {
-      assetID: this.selectedAssetID,
+      assetID: this.selectedWalletID,
       pass: page.exportWalletPW.value
     }
     const url = '/api/restorewalletinfo'
@@ -2418,14 +2589,14 @@ export default class WalletsPage extends BasePage {
       tmpl.instructions.textContent = wr.instructions
       page.restoreInfoCardsList.appendChild(card)
     }
-    this.showForm(page.restoreWalletInfo)
+    this.forms.show(page.restoreWalletInfo)
   }
 
   async recoverWallet (): Promise<void> {
     const page = this.page
     Doc.hide(page.recoverWalletErr)
     const req = {
-      assetID: this.selectedAssetID
+      assetID: this.selectedWalletID
     }
     const url = '/api/recoverwallet'
     const loaded = app().loading(page.forms)
@@ -2436,7 +2607,7 @@ export default class WalletsPage extends BasePage {
       this.forceReq = req
       this.showConfirmForce()
     } else if (app().checkResponse(res)) {
-      this.closePopups()
+      this.forms.close()
     } else {
       Doc.showFormError(page.recoverWalletErr, res.msg)
     }
@@ -2453,7 +2624,7 @@ export default class WalletsPage extends BasePage {
     const loaded = app().loading(page.forms)
     const res = await postJSON(this.forceUrl, this.forceReq)
     loaded()
-    if (app().checkResponse(res)) this.closePopups()
+    if (app().checkResponse(res)) this.forms.close()
     else {
       Doc.showFormError(page.confirmForceErr, res.msg)
     }
@@ -2463,19 +2634,18 @@ export default class WalletsPage extends BasePage {
      value in default fiat rate.
   . */
   handleBalanceNote (note: BalanceNote): void {
-    this.updateAssetButton(note.assetID)
-    if (note.assetID === this.selectedAssetID) this.updateDisplayedAssetBalance()
+    this.updateAssetBalance(note.assetID)
+    if (this.selectedTicker.chainAssetLookup[note.assetID]) this.updateDisplayedTickerBalance()
   }
 
   /* handleRatesNote handles fiat rate notifications, updating the fiat value of
    *  all supported assets.
    */
-  handleRatesNote (note: RateNote): void {
-    this.updateAssetButton(this.selectedAssetID)
-    if (!note.fiatRates[this.selectedAssetID]) return
-    this.updateDisplayedAssetBalance()
-    const { feeState } = app().walletMap[this.selectedAssetID]
-    if (feeState) this.updateFeeState(feeState)
+  handleRatesNote (): void {
+    this.updateDisplayedTickerBalance()
+    this.updateFeeState()
+    this.refreshBalances()
+    this.updateGlobalBalance()
   }
 
   /*
@@ -2483,24 +2653,21 @@ export default class WalletsPage extends BasePage {
    * 'walletconfig' notifications.
    */
   handleWalletStateNote (note: WalletStateNote): void {
-    const { assetID, feeState } = note.wallet
-    this.updateAssetButton(assetID)
-    this.assetUpdated(assetID)
+    const { assetID } = note.wallet
+    if (this.selectedTicker.chainAssetLookup[assetID]) this.updateDisplayedTicker()
+    if (assetID === this.selectedWalletID) this.updateFeeState()
     if (note.topic === 'WalletPeersUpdate' &&
-        assetID === this.selectedAssetID &&
+        assetID === this.selectedWalletID &&
         Doc.isDisplayed(this.page.managePeersForm)) {
       this.updateWalletPeersTable()
     }
-    if (feeState && assetID === this.selectedAssetID) this.updateFeeState(feeState)
   }
 
   /*
    * handleCreateWalletNote is a handler for 'createwallet' notifications.
    */
   handleCreateWalletNote (note: WalletCreationNote) {
-    this.updateAssetButton(note.assetID)
-    this.assetUpdated(note.assetID)
-    this.showTxHistory(note.assetID)
+    if (this.selectedTicker.chainAssetLookup[note.assetID]) this.updateDisplayedTicker()
   }
 
   handleCustomWalletNote (note: WalletNote) {
@@ -2508,6 +2675,7 @@ export default class WalletsPage extends BasePage {
     switch (walletNote.route) {
       case 'tipChange': {
         const n = walletNote as TipChangeNote
+        if (n.assetID === this.selectedWalletID) this.page.syncHeight.textContent = String(n.tip)
         switch (n.assetID) {
           case 42: { // dcr
             if (!this.stakeStatus) return
@@ -2527,14 +2695,14 @@ export default class WalletsPage extends BasePage {
       }
       case 'transaction': {
         const n = walletNote as TransactionNote
-        if (n.assetID === this.selectedAssetID) this.handleTxNote(n.transaction, n.new)
+        if (n.assetID === this.selectedWalletID) this.handleTxNote(n.transaction, n.new)
         break
       }
-      case 'transactionHistorySynced' : {
-        const n = walletNote
-        if (n.assetID === this.selectedAssetID) this.showTxHistory(n.assetID)
-        break
-      }
+      // case 'transactionHistorySynced' : {
+      //   const n = walletNote
+      //   if (n.assetID === this.selectedWalletID) this.showTxHistory(n.assetID)
+      //   break
+      // }
     }
   }
 
@@ -2551,4 +2719,9 @@ export default class WalletsPage extends BasePage {
 function trimStringWithEllipsis (str: string, maxLen: number): string {
   if (str.length <= maxLen) return str
   return `${str.substring(0, maxLen / 2)}...${str.substring(str.length - maxLen / 2)}`
+}
+
+function normalizedTicker (a: SupportedAsset): string {
+  const ticker = a.unitInfo.conventional.unit
+  return ticker === 'WETH' ? 'ETH' : ticker === 'WBTC' ? 'BTC' : ticker
 }

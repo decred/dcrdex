@@ -46,7 +46,6 @@ interface ProgressPoint {
 
 interface CurrentAsset {
   asset: SupportedAsset
-  parentAsset?: SupportedAsset
   winfo: WalletInfo | Token
   // selectedDef is used in a strange way for tokens. If a token's parent wallet
   // already exists, then selectedDef is going to be the Token.definition.
@@ -57,18 +56,13 @@ interface CurrentAsset {
   selectedDef: WalletDefinition
 }
 
-interface WalletConfig {
-  assetID: number
-  config: Record<string, string>
-  walletType: string
-}
-
 interface FormsConfig {
   closed?: (closedForm: PageElement | undefined) => void
 }
 
 export class Forms {
   formsDiv: PageElement
+  forms: PageElement[]
   currentForm: PageElement | undefined
   currentFormID: string | undefined
   keyup: (e: KeyboardEvent) => void
@@ -76,6 +70,7 @@ export class Forms {
 
   constructor (formsDiv: PageElement, cfg?: FormsConfig) {
     this.formsDiv = formsDiv
+    this.forms = Array.from(formsDiv.children) as PageElement[]
     this.closed = cfg?.closed
 
     formsDiv.querySelectorAll('.form-closer').forEach(el => {
@@ -99,14 +94,76 @@ export class Forms {
   async show (form: HTMLElement, id?: string): Promise<void> {
     this.currentForm = form
     this.currentFormID = id
-    Doc.hide(...Array.from(this.formsDiv.children))
-    form.style.right = '10000px'
+    Doc.hide(...this.forms)
     Doc.show(this.formsDiv, form)
-    const shift = (this.formsDiv.offsetWidth + form.offsetWidth) / 2
-    await Doc.animate(animationLength, progress => {
-      form.style.right = `${(1 - progress) * shift}px`
+    await this.randomAnim(form)
+  }
+
+  randomAnim (form: HTMLElement) {
+    switch (Math.floor(Math.random() * 4)) {
+      case 0: return this.slideIn(form)
+      case 1: return this.popIn(form)
+      case 2: return this.dropIn(form)
+      case 3: return this.sneakIn(form)
+    }
+  }
+
+  async slideIn (form: HTMLElement) {
+    if (oneOrNegativeOne() > 0) return this.slideInUpDown(form)
+    return this.slideInLeftRight(form)
+  }
+
+  async slideInUpDown (form: HTMLElement) {
+    const ud = oneOrNegativeOne()
+    const shift = ud * (this.formsDiv.offsetHeight + form.offsetHeight) / 2
+    form.style.top = `${shift}px`
+    await Doc.animate(animationLength, p => {
+      form.style.top = `${(1 - p) * shift}px`
     }, 'easeOutHard')
-    form.style.right = '0'
+  }
+
+  async slideInLeftRight (form: HTMLElement) {
+    const lr = oneOrNegativeOne()
+    const shift = lr * (this.formsDiv.offsetWidth + form.offsetWidth) / 2
+    form.style.right = `${shift}px`
+    await Doc.animate(animationLength, p => {
+      form.style.right = `${(1 - p) * shift}px`
+    }, 'easeOutHard')
+  }
+
+  async popIn (form: HTMLElement) {
+    await Doc.animate(animationLength, p => {
+      form.style.scale = `${p}`
+    }, 'easeOutHard')
+  }
+
+  async dropIn (form: HTMLElement) {
+    await Doc.animate(animationLength, p => {
+      form.style.opacity = String(p)
+      form.style.scale = `${(1 - p) * 2 + 1}`
+    }, 'easeOutHard')
+  }
+
+  async sneakIn (form: HTMLElement) {
+    const lr = oneOrNegativeOne()
+    const ud = oneOrNegativeOne()
+    const xShift = lr * (this.formsDiv.offsetWidth + form.offsetWidth) / 2
+    const yShift = ud * (this.formsDiv.offsetHeight + form.offsetHeight) / 2
+    await Doc.animate(animationLength, p => {
+      form.style.opacity = String(p)
+      form.style.left = `${(1 - p) * xShift}px`
+      form.style.top = `${(1 - p) * yShift}px`
+      form.style.scale = `${p}`
+    }, 'easeOutHard')
+  }
+
+  async showSuccess (msg: string) {
+    Doc.hide(...this.forms)
+    const checkmarkForm = Doc.idel(this.formsDiv, 'checkmarkForm')
+    this.currentForm = checkmarkForm
+    Doc.show(this.formsDiv, checkmarkForm)
+    await animateCheckmark(checkmarkForm, msg).wait()
+    Doc.hide(this.formsDiv)
   }
 
   close (): void {
@@ -122,6 +179,10 @@ export class Forms {
   }
 }
 
+function oneOrNegativeOne (): number {
+  return Math.sign(Math.random() - 0.5)
+}
+
 /*
  * NewWalletForm should be used with the "newWalletForm" template. The enclosing
  * <form> element should be the first argument of the constructor.
@@ -133,7 +194,6 @@ export class NewWalletForm {
   current: CurrentAsset
   subform: WalletConfigForm
   walletCfgGuide: PageElement
-  parentSyncer: null | ((w: WalletState) => void)
   createUpdater: null | ((note: WalletCreationNote) => void)
 
   constructor (form: HTMLElement, success: (assetID: number) => void, backFunc?: () => void) {
@@ -154,23 +214,12 @@ export class NewWalletForm {
 
     this.walletCfgGuide = Doc.tmplElement(form, 'walletCfgGuide')
 
-    bind(form, page.submitAdd, () => this.submit())
-    bind(form, page.oneBttn, () => this.submit())
+    Doc.bind(page.submitAdd, 'click', () => this.submit())
+    Doc.bind(page.oneBttn, 'click', () => this.submit())
 
     app().registerNoteFeeder({
-      walletstate: (note: WalletStateNote) => { this.reportWalletState(note.wallet) },
-      walletsync: (note: WalletSyncNote) => { if (this.parentSyncer) this.parentSyncer(app().walletMap[note.assetID]) },
       createwallet: (note: WalletCreationNote) => { this.reportCreationUpdate(note) }
     })
-  }
-
-  /*
-   * reportWalletState should be called when a 'walletstate' notification is
-   * received.
-   * TODO: Let form classes register for notifications.
-   */
-  reportWalletState (w: WalletState): void {
-    if (this.parentSyncer) this.parentSyncer(w)
   }
 
   /*
@@ -181,13 +230,12 @@ export class NewWalletForm {
     if (this.createUpdater) this.createUpdater(note)
   }
 
-  async createWallet (assetID: number, walletType: string, parentForm?: WalletConfig) {
+  async createWallet (assetID: number, walletType: string) {
     const createForm = {
       assetID: assetID,
       pass: this.page.newWalletPass.value || '',
       config: this.subform.map(assetID),
-      walletType: walletType,
-      parentForm: parentForm
+      walletType: walletType
     }
 
     const ani = new Wave(this.form, { backgroundColor: true })
@@ -201,88 +249,17 @@ export class NewWalletForm {
     const newWalletPass = page.newWalletPass as HTMLInputElement
     Doc.hide(page.newWalletErr)
 
-    const { asset, parentAsset } = this.current
+    const { asset } = this.current
     const selectedDef = this.current.selectedDef
-    let parentForm
-    let walletType = selectedDef.type
-    if (parentAsset) {
-      walletType = (asset.token as Token).definition.type
-      parentForm = {
-        assetID: parentAsset.id,
-        config: this.subform.map(parentAsset.id),
-        walletType: selectedDef.type
-      }
-    }
+    const walletType = selectedDef.type
     // Register the selected asset.
-    const res = await this.createWallet(asset.id, walletType, parentForm)
+    const res = await this.createWallet(asset.id, walletType)
     if (!app().checkResponse(res)) {
       this.setError(res.msg)
       return
     }
     newWalletPass.value = ''
-    if (parentAsset) await this.runParentSync()
-    else this.success(this.current.asset.id)
-  }
-
-  /*
-   * runParentSync shows a syncing sub-dialog that tracks the parent asset's
-   * syncProgress and informs the user that the token wallet will be created
-   * after sync is complete.
-   */
-  async runParentSync () {
-    const { page, current: { parentAsset, asset } } = this
-    if (!parentAsset) return
-
-    page.parentSyncPct.textContent = '0'
-    page.parentName.textContent = parentAsset.name
-    page.parentLogo.src = Doc.logoPath(parentAsset.symbol)
-    page.childName.textContent = asset.name
-    page.childLogo.src = Doc.logoPath(asset.symbol)
-    Doc.hide(page.mainForm)
-    Doc.show(page.parentSyncing)
-
-    try {
-      await this.syncParent(parentAsset)
-      this.success(this.current.asset.id)
-    } catch (error) {
-      this.setError(error.message || error)
-    }
-    Doc.show(page.mainForm)
-    Doc.hide(page.parentSyncing)
-  }
-
-  /*
-   * syncParent monitors the sync progress of a token's parent asset, generating
-   * an Error if the token wallet creation does not complete successfully.
-   */
-  syncParent (parentAsset: SupportedAsset): Promise<void> {
-    const { page, current: { asset } } = this
-    return new Promise((resolve, reject) => {
-      // First, check if it's already synced.
-      const w = app().assets[parentAsset.id].wallet
-      if (w && w.synced) return resolve()
-      // Not synced, so create a syncer to update the parent sync pane.
-      this.parentSyncer = (w: WalletState) => {
-        if (w.assetID !== parentAsset.id) return
-        page.parentSyncPct.textContent = (w.syncProgress * 100).toFixed(1)
-      }
-      // Handle the async result.
-      this.createUpdater = (note: WalletCreationNote) => {
-        if (note.assetID !== asset.id) return
-        switch (note.topic) {
-          case 'QueuedCreationFailed':
-            reject(new Error(`${note.subject}: ${note.details}`))
-            break
-          case 'QueuedCreationSuccess':
-            resolve()
-            break
-          default:
-            return
-        }
-        this.parentSyncer = null
-        this.createUpdater = null
-      }
-    })
+    this.success(this.current.asset.id)
   }
 
   /* setAsset sets the current asset of the NewWalletForm */
@@ -290,21 +267,15 @@ export class NewWalletForm {
     if (!this.parseAsset(assetID)) return // nothing to change
     const page = this.page
     const tabs = page.walletTypeTabs
-    const { winfo, asset, parentAsset } = this.current
+    const { winfo, asset } = this.current
     page.assetName.textContent = winfo.name
     page.newWalletPass.value = ''
 
     Doc.empty(tabs)
     Doc.hide(tabs, page.newWalletErr, page.tokenMsgBox)
     this.page.assetLogo.src = Doc.logoPath(asset.symbol)
-    if (parentAsset) {
-      page.tokenParentLogo.src = Doc.logoPath(parentAsset.symbol)
-      page.tokenParentName.textContent = parentAsset.name
-      Doc.show(page.tokenMsgBox)
-    }
 
-    const pinfo = parentAsset ? parentAsset.info : null
-    const walletDefs = pinfo ? pinfo.availablewallets : (winfo as WalletInfo).availablewallets ? (winfo as WalletInfo).availablewallets : [(winfo as Token).definition]
+    const walletDefs = (winfo as WalletInfo).availablewallets ? (winfo as WalletInfo).availablewallets : [(winfo as Token).definition]
 
     if (walletDefs.length > 1) {
       Doc.show(tabs)
@@ -324,8 +295,7 @@ export class NewWalletForm {
       first.classList.add('selected')
     }
 
-    await this.update(this.current.selectedDef)
-    if (asset.walletCreationPending) await this.runParentSync()
+    return this.update(this.current.selectedDef)
   }
 
   /*
@@ -348,7 +318,7 @@ export class NewWalletForm {
       return true
     }
     if (!parentAsset.info) throw Error('this parent has no wallet info!')
-    this.current = { asset, parentAsset, winfo: token, selectedDef: parentAsset.info.availablewallets[0] }
+    this.current = { asset, winfo: token, selectedDef: parentAsset.info.availablewallets[0] }
     return true
   }
 
@@ -376,7 +346,7 @@ export class NewWalletForm {
         break
       }
     }
-    const { asset, parentAsset, winfo } = this.current
+    const { asset } = this.current
     const displayCreateBtn = walletDef.seeded || Boolean(asset.token)
     if (displayCreateBtn && !containsRequired) {
       Doc.hide(page.walletSettingsHeader)
@@ -391,20 +361,7 @@ export class NewWalletForm {
       page.submitAdd.textContent = intl.prep(intl.ID_ADD)
     }
 
-    if (parentAsset) {
-      const parentAndTokenOpts = JSON.parse(JSON.stringify(configOpts))
-      // Add the regAsset field to the configurations so proper logos will be displayed
-      // next to them, and map can filter them out. The opts are copied here so the originals
-      // do not have the regAsset field added to them.
-      for (const opt of parentAndTokenOpts) opt.regAsset = parentAsset.id
-      const tokenOpts = (winfo as Token).definition.configopts || []
-      if (tokenOpts.length > 0) {
-        const tokenOptsCopy = JSON.parse(JSON.stringify(tokenOpts))
-        for (const opt of tokenOptsCopy) opt.regAsset = asset.id
-        parentAndTokenOpts.push(...tokenOptsCopy)
-      }
-      this.subform.update(asset.id, parentAndTokenOpts, false)
-    } else this.subform.update(asset.id, configOpts, false)
+    this.subform.update(asset.id, configOpts, false)
     this.setGuideLink(guideLink)
 
     // A seeded or token wallet is internal to Bison Wallet and as such does
@@ -436,16 +393,11 @@ export class NewWalletForm {
    */
   async loadDefaults () {
     // No default config files for seeded assets right now.
-    const { asset, parentAsset, selectedDef } = this.current
+    const { asset: { id: assetID }, selectedDef } = this.current
     if (!selectedDef.configpath) return
-    let configID = asset.id
-    if (parentAsset) {
-      if (selectedDef.seeded) return
-      configID = parentAsset.id
-    }
     const loaded = app().loading(this.form)
     const res = await postJSON('/api/defaultwalletcfg', {
-      assetID: configID,
+      assetID,
       type: selectedDef.type
     })
     loaded()
@@ -806,7 +758,7 @@ export class ConfirmRegistrationForm {
     this.certFile = ''
 
     Doc.bind(this.page.goBack, 'click', () => goBack())
-    bind(form, this.page.submit, () => this.submitForm())
+    Doc.bind(this.page.submit, 'click', () => this.submitForm())
   }
 
   setExchange (xc: Exchange, certFile: string) {
@@ -1222,7 +1174,6 @@ export class FeeAssetSelectionForm {
  */
 function setReadyMessage (el: PageElement, asset: SupportedAsset) {
   if (asset.wallet) el.textContent = intl.prep(intl.ID_WALLET_READY)
-  else if (asset.walletCreationPending) el.textContent = intl.prep(intl.ID_WALLET_PENDING)
   else el.textContent = intl.prep(intl.ID_SETUP_NEEDED)
   el.classList.remove('readygreen', 'setuporange')
   el.classList.add(asset.wallet ? 'readygreen' : 'setuporange')
@@ -1644,7 +1595,7 @@ export class DEXAddressForm {
       })
     }
 
-    bind(form, page.submit, () => this.checkDEX())
+    Doc.bind(page.submit, 'click', () => this.checkDEX())
 
     if (dexToUpdate) {
       Doc.hide(page.addDexHdr, page.skipRegistrationBox)
@@ -1755,7 +1706,7 @@ export class DiscoverAccountForm {
 
     const page = this.page = Doc.parseTemplate(form)
     page.dexHost.textContent = addr
-    bind(form, page.submit, () => this.checkDEX())
+    Doc.bind(page.submit, 'click', () => this.checkDEX())
   }
 
   /* Just a small size tweak and fade-in. */
@@ -1800,7 +1751,7 @@ export class LoginForm {
     this.success = success
     this.form = form
     const page = this.page = Doc.parseTemplate(form)
-    bind(form, page.submit, () => { this.submit() })
+    Doc.bind(page.submit, 'click', () => { this.submit() })
     app().registerNoteFeeder({
       login: (note: CoreNote) => { this.handleLoginNote(note) }
     })
@@ -1867,10 +1818,13 @@ export class DepositAddress {
   page: Record<string, PageElement>
   assetID: number
   addr: string
+  netSelectBttnTmpl: PageElement
 
   constructor (form: PageElement) {
     this.form = form
-    const page = this.page = Doc.idDescendants(form)
+    this.netSelectBttnTmpl = Doc.tmplElement(form, 'netSelectBttnTmpl')
+    this.netSelectBttnTmpl.remove()
+    const page = this.page = Doc.parseTemplate(form)
     Doc.cleanTemplates(page.unifiedReceiverTmpl)
     Doc.bind(page.newDepAddrBttn, 'click', async () => { this.newDepositAddress() })
     // navigator.clipboard can only be accessed on localhost or over https.
@@ -1881,28 +1835,54 @@ export class DepositAddress {
     }
   }
 
-  /* Display a deposit address. */
+  async setAssetSelect (assetIDs: number[]) {
+    if (assetIDs.length === 1) {
+      this.setAsset(assetIDs[0])
+      return
+    }
+    const { page, netSelectBttnTmpl } = this
+    const assets = assetIDs.map((assetID: number) => app().assets[assetID])
+    assets.sort((a: SupportedAsset) => a.token ? 1 : -1)
+    const { symbol, unitInfo } = assets[0]
+    page.depositLogo.src = Doc.logoPath(symbol)
+    page.depositName.textContent = unitInfo.conventional.unit
+    Doc.hide(page.mainForm)
+    Doc.show(page.netSelectForm)
+    Doc.empty(page.netSelectBox)
+    for (const { id: assetID, symbol, token, name } of assets) {
+      const bttn = Doc.clone(netSelectBttnTmpl)
+      page.netSelectBox.appendChild(bttn)
+      const tmpl = Doc.parseTemplate(bttn)
+      const chainSymbol = token ? app().assets[token.parentID].symbol : symbol
+      tmpl.logo.src = Doc.logoPath(chainSymbol)
+      const chainName = token ? app().assets[token.parentID].name : name
+      tmpl.chainName.textContent = chainName
+      Doc.bind(bttn, 'click', () => this.setAsset(assetID))
+    }
+  }
+
   async setAsset (assetID: number) {
     this.assetID = assetID
     const page = this.page
-    Doc.hide(page.depositErr, page.depositTokenMsgBox, page.addrUsed)
+    Doc.hide(page.depositErr, page.depositTokenMsgBox, page.netSelectForm, page.addrUsed)
+    Doc.show(page.mainForm)
     const asset = app().assets[assetID]
     page.depositLogo.src = Doc.logoPath(asset.symbol)
-    const wallet = app().walletMap[assetID]
     page.depositName.textContent = asset.unitInfo.conventional.unit
-    const addr = this.addr = wallet.address
-    if ((wallet.traits & traitNewAddresser) !== 0) {
-      const res = await postJSON('/api/addressused', { assetID, addr })
-      const used = app().checkResponse(res) && res.used
-      Doc.setVis(used, page.addrUsed)
-    }
+    const wallet = app().walletMap[assetID]
     if (asset.token) {
       const parentAsset = app().assets[asset.token.parentID]
       page.depositTokenParentLogo.src = Doc.logoPath(parentAsset.symbol)
       page.depositTokenParentName.textContent = parentAsset.name
       Doc.show(page.depositTokenMsgBox)
     }
+    const addr = this.addr = wallet.address
     Doc.setVis((wallet.traits & traitNewAddresser) !== 0, page.newDepAddrBttnBox)
+    if ((wallet.traits & traitNewAddresser) !== 0) {
+      const res = await postJSON('/api/addressused', { assetID, addr })
+      const used = app().checkResponse(res) && res.used
+      Doc.setVis(used, page.addrUsed)
+    }
     this.setAddress(addr)
   }
 
@@ -1992,7 +1972,7 @@ export class AppPassResetForm {
     this.form = form
     this.success = success
     const page = this.page = Doc.idDescendants(form)
-    bind(form, page.resetAppPWSubmitBtn, () => this.resetAppPW())
+    Doc.bind(page.resetAppPWSubmitBtn, 'click', () => this.resetAppPW())
   }
 
   async resetAppPW () {
@@ -2260,9 +2240,14 @@ export async function slideSwap (form1: HTMLElement, form2: HTMLElement) {
 }
 
 export function showSuccess (page: Record<string, PageElement>, msg: string) {
-  page.successMessage.textContent = msg
   Doc.show(page.forms, page.checkmarkForm)
-  page.checkmarkForm.style.right = '0'
+  return animateCheckmark(page.checkmarkForm, msg)
+}
+
+function animateCheckmark (checkmarkForm: PageElement, msg: string) {
+  const page = Doc.idDescendants(checkmarkForm)
+  page.successMessage.textContent = msg
+  checkmarkForm.style.right = '0'
   page.checkmark.style.fontSize = '0px'
 
   const [startR, startG, startB] = State.isDark() ? [223, 226, 225] : [51, 51, 51]
@@ -2273,19 +2258,6 @@ export function showSuccess (page: Record<string, PageElement>, msg: string) {
     page.checkmark.style.fontSize = `${prog * 80}px`
     page.checkmark.style.color = `rgb(${startR + prog * diffR}, ${startG + prog * diffG}, ${startB + prog * diffB})`
   }, 'easeOutElastic')
-}
-
-/*
- * bind binds the click and submit events and prevents page reloading on
- * submission.
- */
-export function bind (form: HTMLElement, submitBttn: HTMLElement, handler: (e: Event) => void) {
-  const wrapper = (e: Event) => {
-    if (e.preventDefault) e.preventDefault()
-    handler(e)
-  }
-  Doc.bind(submitBttn, 'click', wrapper)
-  Doc.bind(form, 'submit', wrapper)
 }
 
 // isTruthyString will be true if the provided string is recognized as a
