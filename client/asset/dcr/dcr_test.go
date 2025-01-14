@@ -162,9 +162,8 @@ func tNewWalletMonitorBlocks(monitorBlocks bool) (*ExchangeWallet, *tRPCClient, 
 	wallet.ctx = walletCtx
 
 	// Initialize the best block.
-	wallet.tipMtx.Lock()
-	wallet.currentTip, _ = wallet.getBestBlock(walletCtx)
-	wallet.tipMtx.Unlock()
+	tip, _ := wallet.getBestBlock(walletCtx)
+	wallet.currentTip.Store(tip)
 
 	if monitorBlocks {
 		go wallet.monitorBlocks(walletCtx)
@@ -4232,9 +4231,8 @@ func TestConfirmRedemption(t *testing.T) {
 	spenderTx := makeRawTx(inputs, nil)
 	node.blockchain.addRawTx(2, spenderTx)
 
-	wallet.tipMtx.Lock()
-	wallet.currentTip, _ = wallet.getBestBlock(wallet.ctx)
-	wallet.tipMtx.Unlock()
+	tip, _ := wallet.getBestBlock(wallet.ctx)
+	wallet.currentTip.Store(tip)
 
 	txFn := func(doErr []bool) func() (*walletjson.GetTransactionResult, error) {
 		var i int
@@ -5007,7 +5005,7 @@ func TestRescanSync(t *testing.T) {
 	defer shutdown()
 
 	const tip = 1000
-	wallet.currentTip = &block{height: tip}
+	wallet.currentTip.Store(&block{height: tip})
 
 	node.rawRes[methodSyncStatus], node.rawErr[methodSyncStatus] = json.Marshal(&walletjson.SyncStatusResult{
 		Synced:               true,

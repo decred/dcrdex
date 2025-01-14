@@ -274,9 +274,7 @@ func (w *NativeWallet) transferAccount(ctx context.Context, toAcct string, fromA
 // birthdayBlockHeight performs a binary search for the last block with a
 // timestamp lower than the provided birthday.
 func (w *NativeWallet) birthdayBlockHeight(ctx context.Context, bday uint64) int32 {
-	w.tipMtx.RLock()
-	tipHeight := w.currentTip.height
-	w.tipMtx.RUnlock()
+	tipHeight := w.cachedBestBlock().height
 	var err error
 	firstBlockAfterBday := sort.Search(int(tipHeight), func(blockHeightI int) bool {
 		if err != nil { // if we see any errors, just give up.

@@ -956,12 +956,12 @@ func TestBirthdayBlockHeight(t *testing.T) {
 	dcrw.makeBlocks(0, tipHeight)
 	w := &NativeWallet{
 		ExchangeWallet: &ExchangeWallet{
-			wallet:     spvw,
-			log:        dex.StdOutLogger("T", dex.LevelInfo),
-			currentTip: &block{height: tipHeight},
+			wallet: spvw,
+			log:    dex.StdOutLogger("T", dex.LevelInfo),
 		},
 		spvw: spvw,
 	}
+	w.currentTip.Store(&block{height: tipHeight})
 
 	if h := w.birthdayBlockHeight(tCtx, 5); h != 4 {
 		t.Fatalf("expected block 4, got %d", h)
@@ -982,12 +982,12 @@ func TestRescan(t *testing.T) {
 	spvw, dcrw := tNewSpvWallet()
 	w := &NativeWallet{
 		ExchangeWallet: &ExchangeWallet{
-			wallet:     spvw,
-			log:        dex.StdOutLogger("T", dex.LevelInfo),
-			currentTip: &block{height: tipHeight},
+			wallet: spvw,
+			log:    dex.StdOutLogger("T", dex.LevelInfo),
 		},
 		spvw: spvw,
 	}
+	w.currentTip.Store(&block{height: tipHeight})
 
 	dcrw.makeBlocks(0, tipHeight)
 
