@@ -345,12 +345,12 @@ var dexToBinanceSymbol = map[string]string{
 var binanceToDexSymbol = make(map[string]string)
 
 // convertBnCoin converts a binance coin symbol to a dex symbol.
-func convertBnCoin(coin string, weth bool) string {
+func convertBnCoin(coin string) string {
 	symbol := strings.ToLower(coin)
 	if convertedSymbol, found := binanceToDexSymbol[strings.ToUpper(coin)]; found {
 		symbol = convertedSymbol
 	}
-	if !weth && symbol == "weth" {
+	if symbol == "weth" {
 		return "eth"
 	}
 	return symbol
@@ -359,12 +359,12 @@ func convertBnCoin(coin string, weth bool) string {
 // binanceCoinNetworkToDexSymbol takes the coin name and its network name as
 // returned by the binance API and returns the DEX symbol.
 func binanceCoinNetworkToDexSymbol(coin, network string) string {
-	symbol, netSymbol := convertBnCoin(coin, true), convertBnCoin(network, false)
-	if symbol == "weth" && netSymbol == "eth" {
-		return "eth"
-	}
+	symbol, netSymbol := convertBnCoin(coin), convertBnCoin(network)
 	if symbol == netSymbol {
 		return symbol
+	}
+	if symbol == "eth" {
+		symbol = "weth"
 	}
 	return symbol + "." + netSymbol
 }
@@ -2130,7 +2130,7 @@ func (bnc *binance) TradeStatus(ctx context.Context, tradeID string, baseID, quo
 }
 
 func getDEXAssetIDs(coin string, tokenIDs map[string][]uint32) []uint32 {
-	dexSymbol := convertBnCoin(coin, false)
+	dexSymbol := convertBnCoin(coin)
 
 	isRegistered := func(assetID uint32) bool {
 		_, err := asset.UnitInfo(assetID)
