@@ -17,6 +17,7 @@ type Order struct {
 	QuoteID uint32 `json:"quoteID"`
 	Sell    bool   `json:"sell"`
 	Qty     uint64 `json:"qty"`
+	Settled uint64 `json:"settled"`
 	Rate    uint64 `json:"rate"`
 	// LotSize: Tatankanet does not prescribe a lot size. Instead, users must
 	// select their own minimum minimum lot size. The user's UI should ignore
@@ -28,13 +29,15 @@ type Order struct {
 	// does supply a suggested fee rate that is updated periodically. The user's
 	// UI should ignore an order from the order book if its MinFeeRate falls
 	// below the Tatnkanet suggested rate.
-	MinFeeRate uint64    `json:"minFeeRate"`
+	MinFeeRate uint64 `json:"minFeeRate"`
+	// Nonce can be used to force unique ids while other values are the same.
+	Nonce      uint32    `json:"nonce"`
 	Stamp      time.Time `json:"stamp"`
 	Expiration time.Time `json:"expiration"`
 }
 
-func (ord *Order) ID() [32]byte {
-	const msgLen = 32 + 4 + 4 + 1 + 8 + 8 + 8 + 8 + 8 + 8
+func (ord *Order) ID() ID32 {
+	const msgLen = 32 + 4 + 4 + 1 + 8 + 8 + 8 + 8 + 8 + 4
 	b := make([]byte, msgLen)
 	copy(b[:32], ord.From[:])
 	binary.BigEndian.PutUint32(b[32:36], ord.BaseID)
@@ -47,15 +50,19 @@ func (ord *Order) ID() [32]byte {
 	binary.BigEndian.PutUint64(b[57:65], ord.LotSize)
 	binary.BigEndian.PutUint64(b[65:73], ord.MinFeeRate)
 	binary.BigEndian.PutUint64(b[73:81], uint64(ord.Stamp.UnixMilli()))
-	binary.BigEndian.PutUint64(b[81:89], uint64(ord.Expiration.UnixMilli()))
+	binary.BigEndian.PutUint32(b[81:85], ord.Nonce)
+	// Settled and Expiration can be updated while keeping the same ID.
 	return blake256.Sum256(b)
-
 }
 
 type ID32 [32]byte
 
 func (i ID32) String() string {
 	return hex.EncodeToString(i[:])
+}
+
+func (i ID32) MarshalBinary() ([]byte, error) {
+	return i[:], nil
 }
 
 type Match struct {

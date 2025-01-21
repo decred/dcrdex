@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -96,6 +97,67 @@ func New(dir string, log dex.Logger) (*DB, error) {
 		bonds:        bondsTable,
 		bonderIdx:    bonderIdx,
 		bondStampIdx: bondStampIdx,
+	}, nil
+}
+
+func (db *DB) NewOrderBook(baseID, quoteID uint32) (*OrderBook, error) {
+	bSym := dex.BipIDSymbol(baseID)
+	qSym := dex.BipIDSymbol(quoteID)
+	if bSym == "" || qSym == "" {
+		return nil, errors.New("could not find base or quote symbol")
+	}
+	prefix := fmt.Sprintf("%s-%s", bSym, qSym)
+	orderBookTable, err := db.Table(fmt.Sprintf("%s-orderbook", prefix))
+	if err != nil {
+		return nil, fmt.Errorf("error constructing orderbook table: %w", err)
+	}
+
+	orderBookOrderIDIdx, err := orderBookTable.AddIndex(fmt.Sprintf("%s-orderbook-orderid", prefix), func(_, v encoding.BinaryMarshaler) ([]byte, error) {
+		o, is := v.(*OrderUpdate)
+		if !is {
+			return nil, fmt.Errorf("wrong type %T", v)
+		}
+		oID := o.ID()
+		return oID[:], nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	orderBookStampIdx, err := orderBookTable.AddIndex(fmt.Sprintf("%s-orderbook-stamp", prefix), func(_, v encoding.BinaryMarshaler) ([]byte, error) {
+		o, is := v.(*OrderUpdate)
+		if !is {
+			return nil, fmt.Errorf("wrong type %T", v)
+		}
+		tB := make([]byte, 8)
+		binary.BigEndian.PutUint64(tB, uint64(o.Stamp.UnixMilli()))
+		return tB, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	orderBookSellRateIdx, err := orderBookTable.AddIndex(fmt.Sprintf("%s-orderbook-sellrate", prefix), func(_, v encoding.BinaryMarshaler) ([]byte, error) {
+		o, is := v.(*OrderUpdate)
+		if !is {
+			return nil, fmt.Errorf("wrong type %T", v)
+		}
+		srB := make([]byte, 1+8)
+		if o.Sell {
+			srB[0] = 1
+		}
+		binary.BigEndian.PutUint64(srB[1:], o.Rate)
+		return srB, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &OrderBook{
+		orderBook:            orderBookTable,
+		orderBookOrderIDIdx:  orderBookOrderIDIdx,
+		orderBookStampIdx:    orderBookStampIdx,
+		orderBookSellRateIdx: orderBookSellRateIdx,
 	}, nil
 }
 
