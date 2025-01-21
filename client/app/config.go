@@ -119,6 +119,7 @@ type WebConfig struct {
 	HTTPProfile bool   `long:"httpprof" description:"Start HTTP profiler on /pprof."`
 	// Deprecated
 	Experimental bool `long:"experimental" description:"DEPRECATED: Enable experimental features"`
+	Tor          bool `long:"tor" description:"Enable tor hidden service"`
 }
 
 // LogConfig encapsulates the logging-related settings.
@@ -185,6 +186,7 @@ func (cfg *Config) Web(c *core.Core, mm *mm.MarketMaker, log dex.Logger, utc boo
 	}
 
 	return &webserver.Config{
+		DataDir:       filepath.Join(cfg.AppData, "srv"),
 		Core:          c,
 		MarketMaker:   mmCore,
 		Addr:          cfg.WebAddr,
@@ -193,9 +195,8 @@ func (cfg *Config) Web(c *core.Core, mm *mm.MarketMaker, log dex.Logger, utc boo
 		UTC:           utc,
 		CertFile:      certFile,
 		KeyFile:       keyFile,
-		NoEmbed:       cfg.NoEmbedSite,
-		HttpProf:      cfg.HTTPProfile,
 		Language:      cfg.Language,
+		Tor:           cfg.Tor,
 	}
 }
 
