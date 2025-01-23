@@ -471,7 +471,7 @@ type binance struct {
 	// tokenIDs maps the token's symbol to the list of bip ids of the token
 	// for each chain for which deposits and withdrawals are enabled on
 	// binance.
-	tokenIDs    atomic.Value // map[string][]uint32, binance coin ID string -> assset IDs
+	tokenIDs    atomic.Value // map[string][]uint32, binance coin ID string -> asset IDs
 	minWithdraw atomic.Value // map[uint32]map[uint32]*withdrawInfo
 
 	marketSnapshotMtx sync.Mutex

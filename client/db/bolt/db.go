@@ -1899,7 +1899,7 @@ func (db *BoltDB) LoadPokes() (pokes []*dexdb.Notification, _ error) {
 	})
 }
 
-// newest buckets gets the nested buckets with the hightest timestamp from the
+// newest buckets gets the nested buckets with the highest timestamp from the
 // specified master buckets. The nested bucket should have an encoded uint64 at
 // the timeKey. An optional filter function can be used to reject buckets.
 func newestBuckets(buckets []*bbolt.Bucket, n int, timeKey []byte, filter func([]byte, *bbolt.Bucket) bool) []*keyTimeTrio {
@@ -2246,7 +2246,7 @@ func (db *BoltDB) DeleteInactiveOrders(ctx context.Context, olderThan *time.Time
 	return nDeletedOrders, nil
 }
 
-// orderSide Returns wether the order was for buying or selling the asset.
+// orderSide Returns whether the order was for buying or selling the asset.
 func orderSide(tx *bbolt.Tx, oid order.OrderID) (sell bool, err error) {
 	oidB := oid[:]
 	ob := tx.Bucket(activeOrdersBucket)
