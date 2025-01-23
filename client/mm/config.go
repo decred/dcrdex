@@ -3,6 +3,7 @@ package mm
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 )
 
 // MarketMakingConfig is the overall configuration of the market maker.
@@ -125,6 +126,23 @@ func (c *BotConfig) requiresPriceOracle() bool {
 
 func (c *BotConfig) requiresCEX() bool {
 	return c.SimpleArbConfig != nil || c.ArbMarketMakerConfig != nil
+}
+
+// multiSplitBuffer returns the additional buffer to add to the order size
+// when doing a multi-split. This only applies to the quote asset.
+func (c *BotConfig) multiSplitBuffer() float64 {
+	if c.QuoteWalletOptions == nil {
+		return 0
+	}
+	multiSplitBuffer, ok := c.QuoteWalletOptions["multisplitbuffer"]
+	if !ok {
+		return 0
+	}
+	multiSplitBufferFloat, err := strconv.ParseFloat(multiSplitBuffer, 64)
+	if err != nil {
+		return 0
+	}
+	return multiSplitBufferFloat
 }
 
 // maxPlacements returns the max amount of placements this bot will place on
