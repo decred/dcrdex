@@ -26,7 +26,7 @@ func convertError(err error) error {
 	case errors.Is(err, badger.ErrKeyNotFound):
 		return ErrKeyNotFound
 	}
-	return nil
+	return err
 }
 
 // DB is the Lexi DB. The Lexi DB wraps a badger key-value database and provides
@@ -177,13 +177,13 @@ func (db *DB) nextID() (dbID DBID, _ error) {
 // method is provided as a tool to keep database index entries short.
 func (db *DB) KeyID(kB []byte) (dbID DBID, err error) {
 	err = db.View(func(txn *badger.Txn) error {
-		dbID, err = db.keyID(txn, kB)
+		dbID, err = db.keyID(txn, kB, true)
 		return err
 	})
 	return
 }
 
-func (db *DB) keyID(txn *badger.Txn, kB []byte) (dbID DBID, err error) {
+func (db *DB) keyID(txn *badger.Txn, kB []byte, readOnly bool) (dbID DBID, err error) {
 	item, err := txn.Get(prefixedKey(keyToIDPrefix, kB))
 	if err == nil {
 		err = item.Value(func(v []byte) error {
@@ -192,7 +192,7 @@ func (db *DB) keyID(txn *badger.Txn, kB []byte) (dbID DBID, err error) {
 		})
 		return
 	}
-	if errors.Is(err, ErrKeyNotFound) {
+	if !readOnly && errors.Is(err, ErrKeyNotFound) {
 		if dbID, err = db.nextID(); err != nil {
 			return
 		}
