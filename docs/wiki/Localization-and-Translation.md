@@ -1,4 +1,4 @@
-# Localization and Translation
+<a id="top"/>
 
 Bison Wallet supports translations for the browser frontend and the notification messages from the backend.
 
@@ -10,7 +10,7 @@ To add a new locale, the translations must be defined in the following locations
 
 If you decide to do the following for a different language, please see the [Contribution Guide](https://github.com/decred/dcrdex/wiki/Contribution-Guide) for help with the github workflow.
 
-## Step 1 - HTML
+# Step 1 - HTML
 
 To create or update the HTML translations, create or modify the appropriate dictionary
 in the `client/webserver/locales` directory. These dictionaries map HTML template
@@ -21,7 +21,7 @@ entries for all keys in the English dictionary.
 When creating a dictionary for a new language, use the BCP 47 language tag to construct
 the file's name. Then new language's HTML strings map must then be listed in [client/webserver/locales/locales.go](https://github.com/decred/dcrdex/blob/master/client/webserver/locales/locales.go) with an appropriate language tag.
 
-## Step 2 - Notifications
+# Step 2 - Notifications
 
 To update the notification translations, add or modify the translation in the appropriate locale dictionary map (e.g `originLocale`, `ptBR`, etc) in the [`client/core/locale_ntfn.go`](https://github.com/decred/dcrdex/blob/master/client/core/locale_ntfn.go) file. These dictionaries maps notification keys to translations. New or modified entries should use the translation in the English dictionary (`var originLocale map[Topic]*translation` in the file `locale_ntfn.go`) as the source text. The goal is to duplicate entries for all keys in the English dictionary.
 
@@ -31,10 +31,15 @@ Note how in **client/core/locale_ntfn.go** there are "printf" specifiers like `%
 
 Once the translations are added to **client/core/locale_ntfn.go**, the new map is listed in the `var locales map[string]map[Topic]*translation` at the bottom of the same file.
 
-## Step 3 - JavaScript
+# Step 3 - JavaScript
 
 To update the JavaScript strings translation in [client/webserver/site/src/js/locales.ts](https://github.com/decred/dcrdex/blob/master/client/webserver/site/src/js/locales.ts), add or modify the translation in the appropriate language object.
 
 When creating a dictionary for a new language, create the language dictionary object (e.g `export const ar: Locale = { ... }`) then add strings translation corresponding to the English text in the `enUS` object at the top of the same file.  Finally, the new object should be listed in the `const localesMap` at the end of the file.
 
 When testing, remember to rebuild the site assets bundle with `npm ci && npm run build` and bump the cache with `./bust_caches.sh` in the **client/webserver/site** folder.
+
+
+---
+
+[⤴ Back to Top](#top)
