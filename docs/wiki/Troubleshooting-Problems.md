@@ -19,6 +19,7 @@ permanently - we recommend backing it up via the [Settings Panel](Header#setting
   - [Recovery](#recovery)
   - [Forced Rescan](#forced-rescan)
   - [Full Reinitialize](#full-reinitialize)
+  - [Private Key Export](#native-wallet-export)
 
 # Location of Application and Log files
 
@@ -43,7 +44,8 @@ There are different log files which may be reviewed when troubleshooting a probl
 
 ## Rescanning
 
-_**NOTE:** This section of the is only applicable to Decred, Bitcoin and Litecoin wallets._
+>[!NOTE] 
+> This section of the is only applicable to Decred, Bitcoin and Litecoin wallets.
 
 In rare circumstances, your wallet may need to rescan the blockchain for missed transactions. 
 This is a process that can take several hours, depending on the number of transactions in the wallet.
@@ -57,9 +59,10 @@ You will see a message with a green check icon if the rescan was successfully in
 
 ## Recovery
 
-_**NOTE:** This section of the is only applicable to Neutrino based wallets like Bitcoin and Litecoin._
+>[!NOTE] 
+> This section of the is only applicable to Decred, Bitcoin and Litecoin wallets.
 
-If a neutrino wallet is corrupted, the [dexc.log](#location-of-application-and-log-files) may have a message
+If a neutrino wallet is corrupted, the [dexc.log](#location-of-application-and-log-files) may have a message 
 similiar to:
 
 ``
@@ -121,6 +124,36 @@ You may keep `peers.json` to help with bootstrapping when you restart, but it ma
 
 Next, start Bison Wallet and go to the Wallet view, open [wallet settings](Wallet#wallet-settings) for the 
 affected wallet, and click `Recover` after ensuring it is currently showing the `Native` wallet option.
+
+## Private Key Export
+
+>[!NOTE] 
+> This section of the wiki is only applicable to Ethereum and Polygon wallets.
+
+If you have accidentally sent funds to Bison Wallet on an unsupported chain (e.g. a token on Avalanche instead of Polygon), these can be recovered by exporting the receiving wallet's raw private key and importing into an external wallet.
+
+>[!CAUTION]
+> **Make sure nobody else can see your screen. If anyone gets access to the wallet seed, they will be able to steal all of your funds.**
+> Using an externally restored wallet while you have active trades running in the DEX could result in failed trades and **LOST FUNDS**. 
+> It is recommended that you do not export your wallet unless you are an experienced user and you know what are doing.
+
+To export the wallet's private key, open the [wallet settings](Wallet#wallet-settings) for the receiving wallet, and click the `Export Wallet` button:
+
+<img src="./images/using-bison-wallet/wallets-settings-export.png" width="400" alt="">
+
+Once you enter your password, your wallet's private key will be revealed.
+
+<img src="./images/using-bison-wallet/wallets-settings-exported.png" width="400" alt="">
+
+> [!NOTE]
+> The following steps are a guide for importing the raw private key into MetaMask as an exmaple.
+Please note that some steps may vary if you are using a different wallet.
+
+Accounts can be only imported by private key if MetaMask has already been initialized. If this is your first time installing MetaMask, create a new wallet and secret recovery phrase. Then, to import your Bison Wallet account into MetaMask, follow the steps below:
+
+1. Open the settings menu.
+2. Select "Import Account".
+3. Make sure "Private Key" is selected, and enter the private key above into the box.
 
 ---
 

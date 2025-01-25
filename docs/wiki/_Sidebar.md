@@ -57,6 +57,7 @@
       - [Recovery](Troubleshooting-Problems#recovery)
       - [Forced Rescan](Troubleshooting-Problems#forced-rescan)
       - [Full Reinitialize](Troubleshooting-Problems#full-reinitialize)
+      - [Private Key Export](Troubleshooting-Problems#private-key-export)
   - [Development & Contributing](Development-and-Contributing)
     - [Contribution Guide](Contribution-Guide)
     - [DCRDEX Specification](https://github.com/decred/dcrdex/blob/master/spec/README.mediawiki)
