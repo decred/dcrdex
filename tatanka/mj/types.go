@@ -36,10 +36,10 @@ const (
 	RouteTatankaConnect   = "tatanka_connect"
 	RouteNewClient        = "new_client"
 	RouteClientDisconnect = "client_disconnect"
-	RouteGetReputation    = "get_reputation"
 	RouteRelayBroadcast   = "relay_broadcast"
 	RouteRelayTankagram   = "relay_tankagram"
 	RoutePathInquiry      = "path_inquiry"
+	RouteShareScore       = "share_score"
 
 	// tatanka <=> client
 	RouteConnect     = "connect"
@@ -48,6 +48,7 @@ const (
 	RouteSubscribe   = "subscribe"
 	RouteUnsubscribe = "unsubscribe"
 	RouteRates       = "rates"
+	RouteSetScore    = "set_score"
 
 	// client1 <=> tatankanode <=> client2
 	RouteTankagram     = "tankagram"
@@ -92,11 +93,6 @@ type Connect struct {
 }
 
 type Disconnect = Connect
-
-type RemoteReputation struct {
-	Score  int16
-	NumPts uint8
-}
 
 type Tankagram struct {
 	To           tanka.PeerID     `json:"to"`
@@ -192,6 +188,21 @@ type NewSubscriber struct {
 	PeerID  tanka.PeerID  `json:"peerID"`
 	Topic   tanka.Topic   `json:"topic"`
 	Subject tanka.Subject `json:"subject"`
+}
+
+// ScoreReport is an update of a client's score of a peer.
+type ScoreReport struct {
+	PeerID tanka.PeerID `json:"peerID"`
+	Score  int8         `json:"score"`
+}
+
+// SharedScore is a scorer-scored tuple shared between tatanka nodes, along
+// with the sending tatanka's new view of the scored peer's reputation.
+type SharedScore struct {
+	Scorer     tanka.PeerID      `json:"scorer"`
+	Scored     tanka.PeerID      `json:"scored"`
+	Score      int8              `json:"score"`
+	Reputation *tanka.Reputation `json:"rep"`
 }
 
 func MustRequest(route string, payload any) *msgjson.Message {
