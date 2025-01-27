@@ -52,7 +52,8 @@ selection.
 
 <img src="./images/using-bison-wallet/header-language.png" width="300" alt="">
 
-In the example above, the current language is set to ``US English`` and clicking the ``DE`` button
+In the example above, the current language is set to ``English``, while clicking the 
+<img src="./images/using-bison-wallet/header-language-de.png" width="20" alt=""> button
 will change the language to ``German``.
 
 # Settings Panel
