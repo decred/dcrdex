@@ -88,7 +88,7 @@ const (
 	// confCheckTimeout is the amount of time allowed to check for
 	// confirmations. Testing on testnet has shown spikes up to 2.5
 	// seconds. This value may need to be adjusted in the future.
-	confCheckTimeout = 4 * time.Second
+	confCheckTimeout = 30 * time.Second
 
 	// coinIDTakerFoundMakerRedemption is a prefix to identify one of CoinID formats,
 	// see DecodeCoinID func for details.
@@ -3700,7 +3700,7 @@ func (eth *ETHWallet) monitorBlocks(ctx context.Context) {
 // tipChange callback function is invoked and a goroutine is started to check
 // if any contracts in the findRedemptionQueue are redeemed in the new blocks.
 func (eth *ETHWallet) checkForNewBlocks(ctx context.Context) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	bestHdr, err := eth.node.bestHeader(ctx)
 	if err != nil {
