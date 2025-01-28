@@ -70,6 +70,10 @@ func valueIndex(k, v encoding.BinaryMarshaler) ([]byte, error) {
 	return v.(*tValue).idx, nil
 }
 
+func valueKey(k, v encoding.BinaryMarshaler) ([]byte, error) {
+	return v.(*tValue).k, nil
+}
+
 func TestIndex(t *testing.T) {
 	db, shutdown := newTestDB(t)
 	defer shutdown()
@@ -84,11 +88,26 @@ func TestIndex(t *testing.T) {
 		t.Fatalf("Error adding index: %v", err)
 	}
 
+	keyIdx, err := tbl.AddIndex("K", valueKey)
+	if err != nil {
+		t.Fatalf("Error adding index: %v", err)
+	}
+
+	// Put 100 values in.
 	const nVs = 100
 	vs := make([]*tValue, nVs)
 	for i := 0; i < nVs; i++ {
+		// Random value, but with a flag at the end.
 		k := append(encode.RandomBytes(5), byte(i))
-		v := &tValue{k: []byte{byte(i)}, v: encode.RandomBytes(10), idx: []byte{byte(i)}}
+		// The index is keyed on i, with a prefix of 0, until 40, after which
+		// the prefix is 1.
+		indexKey := []byte{byte(i)}
+		prefix := []byte{0}
+		if i >= 40 {
+			prefix = []byte{1}
+		}
+		indexKey = append(prefix, indexKey...)
+		v := &tValue{k: indexKey, v: encode.RandomBytes(10), idx: []byte{byte(i)}}
 		vs[i] = v
 		if err := tbl.Set(B(k), v); err != nil {
 			t.Fatalf("Error setting table entry: %v", err)
@@ -115,6 +134,37 @@ func TestIndex(t *testing.T) {
 	// Iterate backwards
 	i = nVs
 	idx.Iterate(nil, func(it *Iter) error {
+		i--
+		v := vs[i]
+		return it.V(func(vB []byte) error {
+			if !bytes.Equal(vB, v.v) {
+				t.Fatalf("Wrong bytes for reverse iteration index %d", i)
+			}
+			return nil
+		})
+	}, WithReverse())
+	if i != 0 {
+		t.Fatalf("Expected to iterate back to zero but only got to %d", i)
+	}
+
+	// Iterate forwards with prefix.
+	keyIdx.Iterate([]byte{0}, func(it *Iter) error {
+		v := vs[i]
+		it.V(func(vB []byte) error {
+			if !bytes.Equal(vB, v.v) {
+				t.Fatalf("Wrong bytes for forward iteration index %d", i)
+			}
+			return nil
+		})
+		i++
+		return nil
+	})
+	if i != 40 {
+		t.Fatalf("Expected to iterate 40 items but only did %d", i)
+	}
+
+	// Iterate backwards with prefix.
+	keyIdx.Iterate([]byte{0}, func(it *Iter) error {
 		i--
 		v := vs[i]
 		return it.V(func(vB []byte) error {
