@@ -1206,6 +1206,10 @@ var deDE = map[Topic]*translation{
 		subject:  intl.Translation{T: "Warnung bei Wallet Verbindung"},
 		template: intl.Translation{T: "Unvollständige Registration für %s erkannt, konnte keine Verbindung zum Decred Wallet herstellen"},
 	},
+	TopicBondWalletNotConnected: {
+		subject:  intl.Translation{T: "Kautions-Wallet nicht verbunden"},
+		template: intl.Translation{T: "Das Wallet für den ausgewählten Coin %s zur Bezahlung der Kaution ist nicht verbunden"},
+	},
 	TopicWalletUnlockError: {
 		subject:  intl.Translation{T: "Fehler beim Entsperren des Wallet"},
 		template: intl.Translation{T: "Verbunden zum Wallet um die Registration bei %s abzuschließen, ein Fehler beim entsperren des Wallet ist aufgetreten: %v"},
@@ -1229,6 +1233,14 @@ var deDE = map[Topic]*translation{
 	TopicSendSuccess: {
 		subject:  intl.Translation{T: "Erfolgreich gesendet"},
 		template: intl.Translation{T: "Das Senden von %s wurde erfolgreich abgeschlossen. Coin ID = %s"},
+	},
+	TopicAsyncOrderFailure: {
+		subject:  intl.Translation{T: "In-Flight Order Error"},
+		template: intl.Translation{T: "In-Flight Auftrag mit ID %v fehlgeschlagen: %v", Notes: "args: order ID, error]"},
+	},
+	TopicOrderQuantityTooHigh: {
+		subject:  intl.Translation{T: "Trade limit exceeded"},
+		template: intl.Translation{T: "Auftragsmenge überschreited aktuelles Handelslimit bei %s", Notes: "args: [host]"},
 	},
 	TopicOrderLoadFailure: {
 		subject:  intl.Translation{T: "Fehler beim Laden der Aufträge"},
@@ -1355,8 +1367,13 @@ var deDE = map[Topic]*translation{
 		template: intl.Translation{T: "%d Matches durch %s gemeldet wurden für %s nicht gefunden."},
 	},
 	TopicFailedCancel: {
-		subject:  intl.Translation{T: "Abbruch fehlgeschlagen"},
-		template: intl.Translation{T: "Der Auftrag für den Abbruch des Auftrags %s blieb 2 Epochen lang im Epoche-Status hängen und wird nun gelöscht."},
+		subject: intl.Translation{T: "Failed cancel"},
+		template: intl.Translation{
+			Version: 1,
+			T:       "Order Abbruch für %s fehlgeschlagen und wurde nun gelöscht.",
+			Notes: `args: [token], "failed" means we missed the preimage request ` +
+				`and either got the revoke_order message or it stayed in epoch status for too long.`,
+		},
 	},
 	TopicAuditTrouble: {
 		subject:  intl.Translation{T: "Audit-Probleme"},
@@ -1414,6 +1431,10 @@ var deDE = map[Topic]*translation{
 		subject:  intl.Translation{T: "Verbindung zum Server getrennt"},
 		template: intl.Translation{T: "Verbindung zu %s unterbrochen"},
 	},
+	TopicDexConnectivity: {
+		subject:  intl.Translation{T: "Internet Connectivity"},
+		template: intl.Translation{T: "Die Internet Verbindung zu %s ist instabil, Überprüfe deine Internet Verbindung", Notes: "args: [host]"},
+	},
 	TopicPenalized: {
 		subject:  intl.Translation{T: "Bestrafung durch einen Server erhalten"},
 		template: intl.Translation{T: "Bestrafung von DEX %s\nletzte gebrochene Regel: %s\nZeitpunkt: %v\nDetails:\n\"%s\"\n"},
@@ -1433,6 +1454,67 @@ var deDE = map[Topic]*translation{
 	TopicQueuedCreationFailed: {
 		subject:  intl.Translation{T: "Token-Wallet konnte nicht erstellt werden"},
 		template: intl.Translation{T: "Nach dem Erstellen des %s-Wallet kam es zu einen Fehler, konnte das %s-Wallet nicht erstellen"},
+	},
+	TopicRedemptionResubmitted: {
+		subject:  intl.Translation{T: "Redemption Resubmitted"},
+		template: intl.Translation{T: "Deine Redemption für Match %s für Order %s wurde neu eingereicht."},
+	},
+	TopicSwapRefunded: {
+		subject:  intl.Translation{T: "Swap Refunded"},
+		template: intl.Translation{T: "Match %s für Order %s wurde von der Gegenpartei zurückerstattet."},
+	},
+	TopicRedemptionConfirmed: {
+		subject:  intl.Translation{T: "Redemption Confirmed"},
+		template: intl.Translation{T: "Deine Redemption für Match %s für Order %s wurde bestätigt."},
+	},
+	TopicWalletTypeDeprecated: {
+		subject:  intl.Translation{T: "Wallet Disabled"},
+		template: intl.Translation{T: "Dein %s Wallet wird nicht länger unterstützt. Erstelle eine neues Wallet."},
+	},
+	TopicOrderResumeFailure: {
+		subject:  intl.Translation{T: "Resume order failure"},
+		template: intl.Translation{T: "Wiederaufnahme des Orders nicht möglich: %v"},
+	},
+	TopicBondConfirming: {
+		subject:  intl.Translation{T: "Kauftions-Bestätigung"},
+		template: intl.Translation{T: "Warte auf %d Bestätigungen für die Kaution %v (%s) bei %s", Notes: "args: [reqConfs, bondCoinStr, assetID, acct.host]"},
+	},
+	TopicBondConfirmed: {
+		subject:  intl.Translation{T: "Kaution Bestätigt"},
+		template: intl.Translation{T: "Neuer Konto-Tier = %d (Ziel = %d).", Notes: "args: [effectiveTier, targetTier]"},
+	},
+	TopicBondExpired: {
+		subject:  intl.Translation{T: "Kaution ausgelaufen"},
+		template: intl.Translation{T: "Neuer Konto-Tier = %d (Ziel = %d).", Notes: "args: [effectiveTier, targetTier]"},
+	},
+	TopicBondRefunded: {
+		subject:  intl.Translation{T: "Kaution zurückerstattet"},
+		template: intl.Translation{T: "Kaution %v bei %v zurückerstattet in %v, fordere %v als Rückerstattung %v nach Abzug der Transaktionsgebühren", Notes: "args: [bondIDStr, acct.host, refundCoinStr, refundVal, Amount]"},
+	},
+	TopicBondPostError: {
+		subject:  intl.Translation{T: "Bond post error"},
+		template: intl.Translation{T: "Fehler beim Einreichen der Kaution (versuche weiter): %v (%T)", Notes: "args: [err, err]"},
+	},
+	TopicBondPostErrorConfirm: {
+		subject:  intl.Translation{T: "Bond post error"},
+		template: intl.Translation{T: "Fehler beim warten auf Bestätigungen der Kaution %s: %v"},
+	},
+	TopicDexAuthErrorBond: {
+		subject:  intl.Translation{T: "Authentication error"},
+		template: intl.Translation{T: "Kauftion bestätigt, aber Fehler bei Authentifizierung der Verbindung: %v", Notes: "args: [err]"},
+	},
+	TopicAccountRegTier: {
+		subject:  intl.Translation{T: "Account registered"},
+		template: intl.Translation{T: "Neurer Konto-Tier = %d", Notes: "args: [effectiveTier]"},
+	},
+	TopicUnknownBondTierZero: {
+		subject: intl.Translation{T: "Unknown bond found"},
+		template: intl.Translation{
+			T: "Unbekannte %s Kautionen wurden gefunden und den aktiven Bonds hinzugefügt " +
+				"aber dein Ziel-Tier bei %s ist auf 0 konfiguriert. Setze deinen " +
+				"Ziel-Tier in den Einstellungen um deine Kaution automatisch zu verlängern.",
+			Notes: "args: [bond asset, dex host]",
+		},
 	},
 }
 
