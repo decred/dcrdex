@@ -82,7 +82,7 @@ var EnUS = map[string]*intl.Translation{
 	"posting_bonds_shortly":          {T: "Creating bonds..."},
 	"bond_creation_pending_msg":      {T: `In order to trade at <span id="postingBondsDex" class="text-break"></span> bond(s) will be created shortly.`},
 	"action_required_to_trade":       {T: "ACTION REQUIRED TO TRADE"},
-	"acct_tier_post_bond":            {T: `You account tier is <span id="acctTier"></span>. You need to post new bonds to trade.`},
+	"acct_tier_post_bond":            {T: `Your account tier is <span id="acctTier"></span>. You need to post new bonds to trade.`},
 	"enable_bond_maintenance":        {T: "Enable bond maintenance from DEX Settings page."},
 	"Buy":                            {T: "Buy"},
 	"Sell":                           {T: "Sell"},
