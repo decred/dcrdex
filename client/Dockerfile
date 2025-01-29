@@ -44,10 +44,11 @@ RUN CGO_ENABLED=0 GOOS=linux GO111MODULE=on go build
 FROM debian:buster-slim
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates
 WORKDIR /dex
-ENV HOME /dex
+ENV HOME=/dex
 RUN mkdir -p /dex/.dexc && chown 1000 /dex/.dexc
 USER 1000
 COPY --from=gobuilder /root/dex/client/cmd/bisonw/bisonw ./
 COPY --from=gobuilder /root/dex/client/cmd/bwctl/bwctl ./
+COPY ./client/entrypoint.sh ./
 EXPOSE 5758
-CMD [ "./bisonw", "--webaddr=0.0.0.0:5758" ]
+ENTRYPOINT [ "./entrypoint.sh" ]
