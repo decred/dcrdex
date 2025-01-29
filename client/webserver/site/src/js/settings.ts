@@ -475,10 +475,16 @@ export default class SettingsPage extends BasePage {
     Doc.show(form)
   }
 
+  /* exportLogs zips the main app log and sends it back as an attachment */
   async exportLogs () {
     const url = new URL(window.location.href)
     url.pathname = '/api/exportapplog'
-    window.open(url.toString())
+    const target = '_self'
+    if (window.isWebview !== undefined) {
+      window.open(url.toString(), target) // explicit
+    } else {
+      window.open(url.toString())
+    }
   }
 
   async submitGameCode () {

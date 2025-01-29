@@ -2045,9 +2045,14 @@ func (s *WebServer) apiTakeAction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck())
 }
 
-// apiExportAppLogs zips the application log and sends it back to the browser.
+// apiExportAppLogs time stamps the application log, zips it and sends it back to
+// the browser or webview as an attachment. Logfile names need to be distinct as
+// webview will not overwite an existing file.
 func (s *WebServer) apiExportAppLogs(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Disposition", "attachment; filename=bwlog.zip")
+	timeStamp := time.Now().UnixMilli()
+	zipAttachment := fmt.Sprintf("attachment; filename=bwlog_%d.zip", timeStamp)
+
+	w.Header().Set("Content-Disposition", zipAttachment)
 	w.Header().Set("Content-Type", "application/octet-stream; type=zip")
 	w.WriteHeader(http.StatusOK)
 
