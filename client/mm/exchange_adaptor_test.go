@@ -644,7 +644,7 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 	// Move all of the base balance to cex and max sure we get a withdraw.
 	setBals(0, totalBase, minDexQuote, minCexQuote)
 	checkDistribution(0, minDexBase, 0, 0)
-	// Raise the transfer theshold by one atom and it should zero the withdraw.
+	// Raise the transfer threshold by one atom and it should zero the withdraw.
 	a.autoRebalanceCfg.MinBaseTransfer = minDexBase + 1
 	checkDistribution(0, 0, 0, 0)
 	a.autoRebalanceCfg.MinBaseTransfer = 0

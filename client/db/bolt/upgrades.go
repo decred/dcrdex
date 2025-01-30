@@ -36,7 +36,7 @@ var upgrades = [...]upgradefunc{
 	v3Upgrade,
 	// v3 => v4 splits orders into active and archived.
 	v4Upgrade,
-	// v4 => v5 adds PrimaryCredentials with determinstic client seed, but the
+	// v4 => v5 adds PrimaryCredentials with deterministic client seed, but the
 	// only thing we need to do during the DB upgrade is to update the
 	// db.AccountInfo to differentiate legacy vs. new-style key.
 	v5Upgrade,
