@@ -155,6 +155,12 @@
   display: inline-block;
 }
 
+.ico-wide-headed-down-arrow::before {
+  content: "\e919";
+  display: inline-block;
+  transform: rotate(270deg);
+}
+
 .ico-arrowup::before {
   content: "\e90c";
   display: inline-block;

@@ -186,17 +186,18 @@ func (cfg *Config) Web(c *core.Core, mm *mm.MarketMaker, log dex.Logger, utc boo
 	}
 
 	return &webserver.Config{
-		DataDir:       filepath.Join(cfg.AppData, "srv"),
-		Core:          c,
-		MarketMaker:   mmCore,
-		Addr:          cfg.WebAddr,
-		CustomSiteDir: cfg.SiteDir,
-		Logger:        log,
-		UTC:           utc,
-		CertFile:      certFile,
-		KeyFile:       keyFile,
-		Language:      cfg.Language,
-		Tor:           cfg.Tor,
+		DataDir:         filepath.Join(cfg.AppData, "srv"),
+		Core:            c,
+		MarketMaker:     mmCore,
+		Addr:            cfg.WebAddr,
+		CustomSiteDir:   cfg.SiteDir,
+		Logger:          log,
+		UTC:             utc,
+		CertFile:        certFile,
+		KeyFile:         keyFile,
+		Language:        cfg.Language,
+		Tor:             cfg.Tor,
+		MainLogFilePath: cfg.LogPath,
 	}
 }
 
