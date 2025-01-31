@@ -2,7 +2,7 @@
 
 // This is a simplified version of OpenZeppelin Contracts v4.4.0 (token/ERC20/ERC20.sol).
 
-pragma solidity = 0.8.18;
+pragma solidity = 0.8.28;
 
 contract TestToken {
     event Transfer(address indexed _from, address indexed _to, uint256 _value);
@@ -31,9 +31,15 @@ contract TestToken {
         _decimals = dec;
 
         _totalSupply = 44000000000000000000000;
-        _balances[0x18D65FB8d60c1199bb1Ad381bE47aA692b482605] = 11000000000000000000000; // alpha
-        _balances[0x4F8eF3892B65ED7fc356fF473a2eF2aE5EC27A06] = 11000000000000000000000; // beta
-        _balances[0xd12aB7cf72CCf1f3882eC99DDc53CD415635C3bE] = 11000000000000000000000; // delta
+    }
+
+    /**
+     * @dev Set the balance for the sender. Not part of a real erc20 token's
+     * api.
+     */
+    function setSenderBalance(uint256 amt) public virtual returns (bool) {
+        _balances[msg.sender] = amt;
+        return true;
     }
 
     /**
