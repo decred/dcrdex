@@ -4,75 +4,75 @@
 package db
 
 import (
-	"encoding"
 	"encoding/binary"
 	"fmt"
 	"time"
 
-	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/lexi"
 	"decred.org/dcrdex/tatanka/tanka"
 )
 
-// Reputation entries with key encoded as
-//    peer_id | 6_bytes_millisecond_timestamp | 32_byte_penalty_id
-// Value is empty if it's a success. For penalties, the value is
-//   1_byte_score_decrement | encoded_penalty_proof.
+type dbScore struct {
+	scorer tanka.PeerID
+	scored tanka.PeerID
+	score  int8
+	stamp  time.Time
+}
 
-func (d *DB) Reputation(peerID tanka.PeerID) (rep *tanka.Reputation, err error) {
-	rep = &tanka.Reputation{
-		Points: make([]int8, 0, tanka.MaxReputationEntries),
+func (s *dbScore) MarshalBinary() ([]byte, error) {
+	return []byte{byte(s.score)}, nil
+}
+
+func (d *DB) SetScore(scored, scorer tanka.PeerID, score int8, stamp time.Time) error {
+	k := append(scored[:], scorer[:]...)
+	s := &dbScore{
+		scorer: scorer,
+		scored: scored,
+		score:  score,
+		stamp:  stamp,
 	}
-	return rep, d.reputationDB.ForEach(func(k, v []byte) error {
-		if len(v) == 0 {
-			// Success
-			rep.Score++
-			rep.Points = append(rep.Points, 1)
-			return nil
+	return d.scores.Set(lexi.B(k), s, lexi.WithReplace())
+}
+
+func (d *DB) Reputation(scored tanka.PeerID) (*tanka.Reputation, error) {
+	agg := new(tanka.Reputation)
+	var s dbScore
+	var i int
+	return agg, d.scoredIdx.Iterate(scored[:], func(it *lexi.Iter) error {
+		if i >= tanka.MaxReputationEntries {
+			return it.Delete()
 		}
-		rep.Score -= int16(v[0])
-		rep.Points = append(rep.Points, -int8(v[0]))
+		k, err := it.K()
+		if err != nil {
+			return fmt.Errorf("error getting score key: %w", err)
+		}
+		if len(k) != 2*tanka.PeerIDLength {
+			return fmt.Errorf("wrong score key length: %d != %d", len(k), 2*tanka.PeerIDLength)
+		}
+		copy(s.scored[:], k)
+		copy(s.scorer[:], k[tanka.PeerIDLength:])
+		if err := it.V(func(vB []byte) error {
+			if len(vB) != 1 {
+				return fmt.Errorf("score not a single byte. length = %d", len(vB))
+			}
+			s.score = int8(vB[0])
+			return nil
+		}); err != nil {
+			return err
+		}
+		if err := it.Entry(func(idxB []byte) error {
+			if len(idxB) != tanka.PeerIDLength+8 {
+				return fmt.Errorf("wrong score-stamp index length %d", len(idxB))
+			}
+			s.stamp = time.UnixMilli(int64(binary.BigEndian.Uint64(idxB[tanka.PeerIDLength:])))
+			return nil
+		}); err != nil {
+			return err
+		}
+
+		agg.Score += int64(s.score)
+		agg.Depth++
+		i++
 		return nil
-	}, WithPrefix(peerID[:]), WithReverse(), WithMaxEntries(tanka.MaxReputationEntries, true))
-}
-
-func (d *DB) RegisterSuccess(peerID tanka.PeerID, stamp time.Time, refID [32]byte) error {
-	const keyLength = tanka.PeerIDLength + 6 + 32
-	k := make([]byte, keyLength)
-	copy(k[:tanka.PeerIDLength], peerID[:])
-	stampB := make([]byte, 8)
-	binary.BigEndian.PutUint64(stampB, uint64(stamp.UnixMilli()))
-	copy(k[tanka.PeerIDLength:tanka.PeerIDLength+6], stampB[2:])
-	copy(k[tanka.PeerIDLength+6:], refID[:])
-
-	if err := d.reputationDB.Store(k, dex.Bytes{}); err != nil {
-		return fmt.Errorf("error storing success for user %q: %v", peerID, err)
-	}
-
-	// TODO: Periodically run a nanny function to clear extra entries. Otherwise
-	// entries are only deleted during the score scan. So theoretically, someone
-	// could fill the db with a billion successes. Same in RegisterPenalty.
-
-	return nil
-}
-
-func (d *DB) RegisterPenalty(peerID tanka.PeerID, stamp time.Time, penaltyID [32]byte, scoreDecrement uint8, penaltyInfo encoding.BinaryMarshaler) error {
-	const keyLength = tanka.PeerIDLength + 6 + 32
-	k := make([]byte, keyLength)
-	copy(k[:tanka.PeerIDLength], peerID[:])
-	stampB := make([]byte, 8)
-	binary.BigEndian.PutUint64(stampB, uint64(stamp.UnixMilli()))
-	copy(k[tanka.PeerIDLength:tanka.PeerIDLength+6], stampB[2:])
-	copy(k[tanka.PeerIDLength+6:], penaltyID[:])
-
-	b, err := penaltyInfo.MarshalBinary()
-	if err != nil {
-		return fmt.Errorf("error marshaling penalty info: %w", err)
-	}
-	v := make(dex.Bytes, 1+len(b))
-	v[0] = scoreDecrement
-	copy(v[1:], b)
-	if err := d.reputationDB.Store(k, v); err != nil {
-		return fmt.Errorf("error storing penalty: %w", err)
-	}
-	return nil
+	}, lexi.WithUpdate())
 }
