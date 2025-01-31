@@ -7,10 +7,15 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"fmt"
+	"math/big"
+	"path/filepath"
 
+	"decred.org/dcrdex/dex"
 	"github.com/ethereum/go-ethereum/accounts"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
@@ -34,19 +39,33 @@ func importKeyToKeyStore(ks *keystore.KeyStore, priv *ecdsa.PrivateKey, pw []byt
 
 // accountCredentials captures the account-specific geth interfaces.
 type accountCredentials struct {
-	ks     *keystore.KeyStore
-	acct   *accounts.Account
-	addr   common.Address
-	wallet accounts.Wallet
+	ks      *keystore.KeyStore
+	acct    *accounts.Account
+	addr    common.Address
+	wallet  accounts.Wallet
+	chainID *big.Int
 }
 
-func pathCredentials(dir string) (*accountCredentials, error) {
+func (c *accountCredentials) signedTx(txOpts *bind.TransactOpts, to common.Address, data []byte) (*types.Transaction, error) {
+	return c.ks.SignTx(*c.acct, types.NewTx(&types.DynamicFeeTx{
+		To:        &to,
+		ChainID:   c.chainID,
+		Nonce:     txOpts.Nonce.Uint64(),
+		Gas:       txOpts.GasLimit,
+		GasFeeCap: txOpts.GasFeeCap,
+		GasTipCap: txOpts.GasTipCap,
+		Value:     txOpts.Value,
+		Data:      data,
+	}), c.chainID)
+}
+
+func pathCredentials(chainID *big.Int, dir string) (*accountCredentials, error) {
 	// TODO: Use StandardScryptN and StandardScryptP?
-	return credentialsFromKeyStore(keystore.NewKeyStore(dir, keystore.LightScryptN, keystore.LightScryptP))
+	return credentialsFromKeyStore(keystore.NewKeyStore(dir, keystore.LightScryptN, keystore.LightScryptP), chainID)
 
 }
 
-func credentialsFromKeyStore(ks *keystore.KeyStore) (*accountCredentials, error) {
+func credentialsFromKeyStore(ks *keystore.KeyStore, chainID *big.Int) (*accountCredentials, error) {
 	accts := ks.Accounts()
 	if len(accts) != 1 {
 		return nil, fmt.Errorf("unexpected number of accounts, %d", len(accts))
@@ -57,10 +76,11 @@ func credentialsFromKeyStore(ks *keystore.KeyStore) (*accountCredentials, error)
 		return nil, fmt.Errorf("unexpected number of wallets, %d", len(wallets))
 	}
 	return &accountCredentials{
-		ks:     ks,
-		acct:   &acct,
-		addr:   acct.Address,
-		wallet: wallets[0],
+		ks:      ks,
+		acct:    &acct,
+		addr:    acct.Address,
+		wallet:  wallets[0],
+		chainID: chainID,
 	}, nil
 }
 
@@ -84,4 +104,9 @@ func signData(creds *accountCredentials, data []byte) (sig, pubKey []byte, err e
 	sig = sig[:64]
 
 	return
+}
+
+func walletCredentials(chainID *big.Int, dir string, net dex.Network) (*accountCredentials, error) {
+	walletDir := getWalletDir(dir, net)
+	return pathCredentials(chainID, filepath.Join(walletDir, "keystore"))
 }
