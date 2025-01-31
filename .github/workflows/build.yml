@@ -10,18 +10,18 @@ jobs:
       matrix:
         go: ['1.22', '1.23']
     steps:
-      - uses: awalsh128/cache-apt-pkgs-action@a6c3917cc929dd0345bfb2d3feaf9101823370ad #v1.4.2
+      - uses: awalsh128/cache-apt-pkgs-action@5902b33ae29014e6ca012c5d8025d4346556bd40 #v1.4.3
         with:
           packages: git-restore-mtime libgtk-3-dev libwebkit2gtk-4.0-dev
           version: 1.0
 
       - name: Set up Go
-        uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32 #v5.0.2
+        uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 #v5.3.0
         with:
           go-version: ${{ matrix.go }}
 
       - name: Check out source
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 #v4.1.7
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 #v4.2.2
         with:
           fetch-depth: 0
       # Restore original file modification times for test cache reasons
@@ -30,7 +30,7 @@ jobs:
       - name: Install Linters
         run: "curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.60.2"
       - name: Use test and module cache
-        uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 #v4.0.2
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 #v4.2.0
         with:
           path: |
             ~/.cache/go-build
@@ -52,9 +52,9 @@ jobs:
       matrix:
         node-version: [18.x, 20.x]
     steps:
-    - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 #v4.1.7
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 #v4.2.2
     - name: Use nodejs ${{ matrix.node-version }}
-      uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b #v4.0.3
+      uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a #v4.2.0
       with:
         node-version: ${{ matrix.node-version }}
     - name: npm clean-install
@@ -71,11 +71,10 @@ jobs:
     name: Lint Markdown
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 #v4.1.7
-    - uses: DavidAnson/markdownlint-cli2-action@b4c9feab76d8025d1e83c653fa3990936df0e6c8 #v16.0.0
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 #v4.2.2
+    - uses: DavidAnson/markdownlint-cli2-action@05f32210e84442804257b2a6f20b273450ec8265 #v19.1.0
       continue-on-error: true
       with:
         globs: |
           *.md
           docs/**/*.md
-      
