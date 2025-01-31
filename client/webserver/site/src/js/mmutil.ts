@@ -64,6 +64,11 @@ export const CEXDisplayInfos: Record<string, CEXDisplayInfo> = {
   }
 }
 
+export interface PerLot {
+  cex: Record<number, number>
+  dex: Record<number, number>
+}
+
 /*
  * MarketMakerBot is the front end representation of the server's
  * mm.MarketMaker. MarketMakerBot is a singleton assigned to MM below.
@@ -79,6 +84,20 @@ class MarketMakerBot {
   }
 
   /*
+   * updateBotInventory updates the inventory of a running bot.
+   */
+  async updateBotInventory (market: MarketWithHost, diffs: BotBalanceAllocation) {
+    return postJSON('/api/updatebotinventory', { market, diffs })
+  }
+
+  /*
+   * updateRunningBotConfig updates the BotConfig for a running bot.
+   */
+  async updateRunningBotConfig (cfg: BotConfig) {
+    return postJSON('/api/updaterunningbotconfig', cfg)
+  }
+
+  /*
    * updateCEXConfig appends or updates the specified CEXConfig.
    */
   async updateCEXConfig (cfg: CEXConfig) {
@@ -91,6 +110,10 @@ class MarketMakerBot {
 
   async report (host: string, baseID: number, quoteID: number) {
     return postJSON('/api/marketreport', { host, baseID, quoteID })
+  }
+
+  async maxFundingFees (market: MarketWithHost) {
+    return postJSON('/api/maxfundingfees', { market })
   }
 
   async startBot (config: StartConfig) {
@@ -126,6 +149,10 @@ class MarketMakerBot {
     const cexBalance = (await postJSON('/api/cexbalance', { cexName, assetID })).cexBalance
     this.cexBalanceCache[cexName][assetID] = cexBalance
     return cexBalance
+  }
+
+  async availableBalances (market: MarketWithHost, cexName?: string) : Promise<{ dexBalances: Record<number, number>, cexBalances: Record<number, number> }> {
+    return await postJSON('/api/availablebalances', { market, cexName })
   }
 }
 
@@ -373,10 +400,6 @@ interface AllocationProjection {
   alloc: Record<number, number>
 }
 
-function emptyProjection (): ProjectedAlloc {
-  return { book: 0, bookingFees: 0, swapFeeReserves: 0, cex: 0, orderReserves: 0, slippageBuffer: 0 }
-}
-
 export class BotMarket {
   cfg: BotConfig
   host: string
@@ -420,11 +443,13 @@ export class BotMarket {
   rateStep: number
   baseFeeFiatRate: number
   quoteFeeFiatRate: number
-  baseLots: number
-  quoteLots: number
+  sellLots: number
+  buyLots: number
   marketReport: MarketReport
   nBuyPlacements: number
   nSellPlacements: number
+  nBuyLots: number
+  nSellLots: number
 
   constructor (cfg: BotConfig) {
     const host = this.host = cfg.host
@@ -480,18 +505,18 @@ export class BotMarket {
 
     if (cfg.arbMarketMakingConfig) {
       this.botType = botTypeArbMM
-      this.baseLots = cfg.arbMarketMakingConfig.sellPlacements.reduce(sumLots, 0)
-      this.quoteLots = cfg.arbMarketMakingConfig.buyPlacements.reduce(sumLots, 0)
+      this.sellLots = cfg.arbMarketMakingConfig.sellPlacements.reduce(sumLots, 0)
+      this.buyLots = cfg.arbMarketMakingConfig.buyPlacements.reduce(sumLots, 0)
       this.nBuyPlacements = cfg.arbMarketMakingConfig.buyPlacements.length
       this.nSellPlacements = cfg.arbMarketMakingConfig.sellPlacements.length
     } else if (cfg.simpleArbConfig) {
       this.botType = botTypeBasicArb
-      this.baseLots = cfg.uiConfig.simpleArbLots as number
-      this.quoteLots = cfg.uiConfig.simpleArbLots as number
+      this.sellLots = 1
+      this.buyLots = 1
     } else if (cfg.basicMarketMakingConfig) { // basicmm
       this.botType = botTypeBasicMM
-      this.baseLots = cfg.basicMarketMakingConfig.sellPlacements.reduce(sumLots, 0)
-      this.quoteLots = cfg.basicMarketMakingConfig.buyPlacements.reduce(sumLots, 0)
+      this.sellLots = cfg.basicMarketMakingConfig.sellPlacements.reduce(sumLots, 0)
+      this.buyLots = cfg.basicMarketMakingConfig.buyPlacements.reduce(sumLots, 0)
       this.nBuyPlacements = cfg.basicMarketMakingConfig.buyPlacements.length
       this.nSellPlacements = cfg.basicMarketMakingConfig.sellPlacements.length
     }
@@ -503,7 +528,7 @@ export class BotMarket {
     const r = this.marketReport = res.report as MarketReport
     this.lotSizeUSD = lotSizeConv * r.baseFiatRate
     this.quoteLotUSD = quoteLotConv * r.quoteFiatRate
-    this.proj = this.projectedAllocations()
+    // this.proj = this.projectedAllocations()
   }
 
   status () {
@@ -583,11 +608,10 @@ export class BotMarket {
    * values do not include booking fees, order reserves, etc. just the order
    * quantity.
    */
-  feesAndCommit () {
+  /* feesAndCommit () {
     const {
       baseID, quoteID, marketReport: { baseFees, quoteFees }, lotSize,
-      baseLots, quoteLots, baseFeeID, quoteFeeID, baseIsAccountLocker, quoteIsAccountLocker,
-      cfg: { uiConfig: { baseConfig, quoteConfig } }
+      baseLots, quoteLots, baseFeeID, quoteFeeID, baseIsAccountLocker, quoteIsAccountLocker
     } = this
 
     return feesAndCommit(
@@ -595,13 +619,13 @@ export class BotMarket {
       baseFeeID, quoteFeeID, baseIsAccountLocker, quoteIsAccountLocker,
       baseConfig.orderReservesFactor, quoteConfig.orderReservesFactor
     )
-  }
+  } */
 
   /*
    * projectedAllocations calculates the required asset allocations from the
    * user's configuration settings and the current market state.
    */
-  projectedAllocations () {
+  /* projectedAllocations () {
     const {
       cfg: { uiConfig: { quoteConfig, baseConfig } },
       baseFactor, quoteFactor, baseID, quoteID, lotSizeConv, quoteLotConv,
@@ -639,14 +663,14 @@ export class BotMarket {
     addAlloc(quoteFeeID, Math.round((qProj.bookingFees + qProj.swapFeeReserves) * quoteFeeFactor))
 
     return { qProj, bProj, alloc }
-  }
+  } */
 
   /*
    * fundingState examines the projected allocations and the user's wallet
    * balances to determine whether the user can fund the bot fully, unbalanced,
    * or starved, and what funding source options might be available.
    */
-  fundingState () {
+  /* fundingState () {
     const {
       proj: { bProj, qProj }, baseID, quoteID, baseFeeID, quoteFeeID,
       cfg: { uiConfig: { cexRebalance } }, cexName
@@ -766,7 +790,7 @@ export class BotMarket {
       fundedAndNotBalanced,
       starved: !fundedAndBalanced && !fundedAndNotBalanced
     }
-  }
+  } */
 }
 
 export type RunningMMDisplayElements = {
@@ -793,7 +817,7 @@ export class RunningMarketMakerDisplay {
   placementRowTmpl: PageElement
   placementAmtRowTmpl: PageElement
 
-  constructor (div: PageElement, forms: Forms, elements: RunningMMDisplayElements, page: string) {
+  constructor (div: PageElement, forms: Forms, elements: RunningMMDisplayElements, page: string, adjustBalances: () => void) {
     this.div = div
     this.page = Doc.parseTemplate(div)
     this.orderReportFormEl = elements.orderReportForm
@@ -808,6 +832,11 @@ export class RunningMarketMakerDisplay {
       const { mkt: { baseID, quoteID, host }, startTime } = this
       app().loadPage('mmlogs', { baseID, quoteID, host, startTime, returnPage: page })
     })
+    Doc.bind(this.page.settingsBttn, 'click', () => {
+      const { mkt: { baseID, quoteID, host } } = this
+      app().loadPage('mmsettings', { baseID, quoteID, host })
+    })
+    Doc.bind(this.page.adjustBalanceBttn, 'click', () => adjustBalances())
     Doc.bind(this.page.buyOrdersBttn, 'click', () => this.showOrderReport('buys'))
     Doc.bind(this.page.sellOrdersBttn, 'click', () => this.showOrderReport('sells'))
   }
@@ -1310,6 +1339,234 @@ export function feesAndCommit (
   }
 
   return { commit, fees }
+}
+
+export type AllocationStatus = 'sufficient' | 'insufficient' | 'sufficient-with-rebalance'
+export type AllocationResult = {
+  dex: Record<number, [number, AllocationStatus]>
+  cex: Record<number, [number, AllocationStatus]>
+}
+export type AvailableFunds = {
+  dex: Record<number, number>
+  cex?: Record<number, number>
+}
+
+export function requiredFunds (
+  numBuyLots: number, numSellLots: number, slippageBuffer: number, buyFeeBuffer: number,
+  sellFeeBuffer: number, perBuyLot: PerLot, perSellLot: PerLot, marketReport: MarketReport,
+  baseIsAccountLocker: boolean, quoteIsAccountLocker: boolean, baseID: number,
+  quoteID: number, baseFeeID: number, quoteFeeID: number, buyFundingFees: number, sellFundingFees: number) : AllocationResult {
+  const toAllocate: AllocationResult = { dex: {}, cex: {} }
+
+  const assetIDs = Array.from(new Set([baseID, quoteID, baseFeeID, quoteFeeID]))
+
+  for (const assetID of assetIDs) {
+    toAllocate.dex[assetID] = [0, 'sufficient']
+    toAllocate.cex[assetID] = [0, 'sufficient']
+  }
+
+  // For each asset, calculate total allocation needed
+  for (const assetID of assetIDs) {
+    // Buy lots
+    if (perBuyLot.cex[assetID]) {
+      toAllocate.cex[assetID][0] += perBuyLot.cex[assetID] * numBuyLots
+    }
+    if (perBuyLot.dex[assetID]) {
+      toAllocate.dex[assetID][0] += perBuyLot.dex[assetID] * numBuyLots
+    }
+
+    // Sell lots
+    if (perSellLot.cex[assetID]) {
+      toAllocate.cex[assetID][0] += perSellLot.cex[assetID] * numSellLots
+    }
+    if (perSellLot.dex[assetID]) {
+      toAllocate.dex[assetID][0] += perSellLot.dex[assetID] * numSellLots
+    }
+
+    // Apply slippage buffer to quote asset allocations
+    if (assetID === quoteID) {
+      toAllocate.cex[assetID][0] *= (1 + (slippageBuffer / 100))
+      toAllocate.dex[assetID][0] *= (1 + (slippageBuffer / 100))
+    }
+
+    if (assetID === baseFeeID) {
+      toAllocate.dex[baseFeeID][0] += sellFeeBuffer * marketReport.baseFees.max.swap
+      toAllocate.dex[baseFeeID][0] += sellFundingFees
+      if (baseIsAccountLocker) {
+        toAllocate.dex[baseFeeID][0] += buyFeeBuffer * marketReport.baseFees.max.redeem
+        toAllocate.dex[baseFeeID][0] += sellFeeBuffer * marketReport.baseFees.max.refund
+      }
+    }
+
+    if (assetID === quoteFeeID) {
+      toAllocate.dex[quoteFeeID][0] += buyFeeBuffer * marketReport.quoteFees.max.swap
+      toAllocate.dex[quoteFeeID][0] += buyFundingFees
+      if (quoteIsAccountLocker) {
+        toAllocate.dex[quoteFeeID][0] += sellFeeBuffer * marketReport.quoteFees.max.redeem
+        toAllocate.dex[quoteFeeID][0] += buyFeeBuffer * marketReport.quoteFees.max.refund
+      }
+    }
+  }
+
+  return toAllocate
+}
+
+export function toAllocate (
+  numBuyLots: number, numSellLots: number, slippageBuffer: number, buyFeeBuffer: number,
+  sellFeeBuffer: number, perBuyLot: PerLot, perSellLot: PerLot, marketReport: MarketReport,
+  availableFunds: AvailableFunds, canRebalance: boolean, baseID: number, quoteID: number,
+  baseFeeID: number, quoteFeeID: number, baseIsAccountLocker: boolean, quoteIsAccountLocker: boolean,
+  buyFundingFees: number, sellFundingFees: number
+) : AllocationResult {
+  const toAllocate = requiredFunds(numBuyLots, numSellLots, slippageBuffer, buyFeeBuffer, sellFeeBuffer, perBuyLot,
+    perSellLot, marketReport, baseIsAccountLocker, quoteIsAccountLocker, baseID, quoteID, baseFeeID, quoteFeeID,
+    buyFundingFees, sellFundingFees)
+  const assetIDs = new Set([baseID, quoteID, baseFeeID, quoteFeeID])
+
+  // For each asset, check if allocation is sufficient and set status
+  for (const assetID of assetIDs) {
+    const cexRequired = toAllocate.cex[assetID][0]
+    const dexRequired = toAllocate.dex[assetID][0]
+
+    const cexAvail = availableFunds.cex?.[assetID] ?? 0
+    const dexAvail = availableFunds.dex?.[assetID] ?? 0
+
+    const cexSurplusDeficit = cexAvail - cexRequired
+    const dexSurplusDeficit = dexAvail - dexRequired
+
+    // Check CEX allocation
+    if (cexSurplusDeficit >= 0) {
+      // already correct
+    } else {
+      toAllocate.cex[assetID][1] = 'insufficient'
+      toAllocate.cex[assetID][0] = cexAvail
+    }
+
+    // Check DEX allocation
+    if (dexSurplusDeficit >= 0) {
+      // already correct
+    } else {
+      toAllocate.dex[assetID][1] = 'insufficient'
+      toAllocate.dex[assetID][0] = dexAvail
+    }
+
+    // If dex is insufficient, increase cex allocation
+    if (canRebalance && toAllocate.cex[assetID][1] === 'sufficient' && toAllocate.dex[assetID][1] === 'insufficient') {
+      const additionalDEXRequired = dexRequired - toAllocate.dex[assetID][0]
+      const additionalCEX = Math.min(additionalDEXRequired, cexAvail - toAllocate.cex[assetID][0])
+      toAllocate.cex[assetID][0] += additionalCEX
+      if (additionalCEX === additionalDEXRequired) toAllocate.dex[assetID][1] = 'sufficient-with-rebalance'
+    }
+
+    // If cex is insufficient, increase dex allocation
+    if (canRebalance && toAllocate.cex[assetID][1] === 'insufficient' && toAllocate.dex[assetID][1] === 'sufficient') {
+      const additionalCEXRequired = cexRequired - toAllocate.cex[assetID][0]
+      const additionalDEX = Math.min(additionalCEXRequired, dexAvail - toAllocate.dex[assetID][0])
+      toAllocate.dex[assetID][0] += additionalDEX
+      if (additionalDEX === additionalCEXRequired) toAllocate.cex[assetID][1] = 'sufficient-with-rebalance'
+    }
+  }
+
+  return toAllocate
+}
+
+export function toAllocateRunning (
+  numBuyLots: number, numSellLots: number, slippageBuffer: number, buyFeeBuffer: number,
+  sellFeeBuffer: number, perBuyLot: PerLot, perSellLot: PerLot, marketReport: MarketReport,
+  availableFunds: AvailableFunds, canRebalance: boolean, baseID: number, quoteID: number,
+  baseFeeID: number, quoteFeeID: number, baseIsAccountLocker: boolean, quoteIsAccountLocker: boolean,
+  runStats: RunStats, buyFundingFees: number, sellFundingFees: number) : AllocationResult {
+  const toAllocate = requiredFunds(numBuyLots, numSellLots, slippageBuffer, buyFeeBuffer, sellFeeBuffer,
+    perBuyLot, perSellLot, marketReport, baseIsAccountLocker, quoteIsAccountLocker, baseID, quoteID, baseFeeID, quoteFeeID,
+    buyFundingFees, sellFundingFees)
+  const assetIDs = new Set([baseID, quoteID, baseFeeID, quoteFeeID])
+
+  const totalBotBalance = (source: 'cex' | 'dex', assetID: number) => {
+    let bals
+    if (source === 'dex') {
+      bals = runStats.dexBalances[assetID]
+    } else {
+      bals = runStats.cexBalances[assetID]
+    }
+    return bals.available + bals.locked + bals.pending + bals.reserved
+  }
+
+  for (const assetID of assetIDs) {
+    const botDEXTotal = totalBotBalance('dex', assetID)
+    const botCEXTotal = totalBotBalance('cex', assetID)
+    const botDEXAvailable = runStats.dexBalances[assetID].available
+    const botCEXAvailable = runStats.cexBalances[assetID].available
+    const cexAvailable = availableFunds.cex ? availableFunds.cex[assetID] : 0
+    const dexAvailable = availableFunds.dex[assetID] ?? 0
+
+    const cexRequired = toAllocate.cex[assetID] ? toAllocate.cex[assetID][0] : 0
+    const dexRequired = toAllocate.dex[assetID] ? toAllocate.dex[assetID][0] : 0
+
+    const additionalCEXRequired = cexRequired - botCEXTotal // may be negative
+    const additionalDEXRequired = dexRequired - botDEXTotal // may be negative
+
+    // CEX allocation
+    if (additionalCEXRequired <= 0) {
+      toAllocate.cex[assetID][0] = -Math.min(-additionalCEXRequired, botCEXAvailable)
+    } else {
+      toAllocate.cex[assetID][0] = Math.min(additionalCEXRequired, cexAvailable)
+      if (toAllocate.cex[assetID][0] < additionalCEXRequired) toAllocate.cex[assetID][1] = 'insufficient'
+    }
+
+    // DEX allocation
+    if (additionalDEXRequired <= 0) {
+      toAllocate.dex[assetID][0] = -Math.min(-additionalDEXRequired, botDEXAvailable)
+    } else {
+      toAllocate.dex[assetID][0] = Math.min(additionalDEXRequired, dexAvailable)
+      if (toAllocate.dex[assetID][0] < additionalDEXRequired) toAllocate.dex[assetID][1] = 'insufficient'
+    }
+
+    // If dex is insufficient, increase cex allocation
+    if (canRebalance && toAllocate.cex[assetID][1] === 'sufficient' && toAllocate.dex[assetID][1] === 'insufficient') {
+      const dexAdditionalRequired = additionalDEXRequired - toAllocate.dex[assetID][0]
+      const additionalCEX = Math.min(dexAdditionalRequired, cexAvailable - toAllocate.cex[assetID][0])
+      toAllocate.cex[assetID][0] += additionalCEX
+      if (additionalCEX === dexAdditionalRequired) toAllocate.dex[assetID][1] = 'sufficient-with-rebalance'
+    }
+
+    // If cex is insufficient, increase dex allocation
+    if (canRebalance && toAllocate.cex[assetID][1] === 'insufficient' && toAllocate.dex[assetID][1] === 'sufficient') {
+      const cexAdditionalRequired = additionalCEXRequired - toAllocate.cex[assetID][0]
+      const additionalDEX = Math.min(cexAdditionalRequired, dexAvailable - toAllocate.dex[assetID][0])
+      toAllocate.dex[assetID][0] += additionalDEX
+      if (additionalDEX === cexAdditionalRequired) toAllocate.cex[assetID][1] = 'sufficient-with-rebalance'
+    }
+  }
+
+  return toAllocate
+}
+
+export function perLotRequirements (
+  baseID: number, quoteID: number, baseFeeID: number, quoteFeeID: number,
+  lotSize: number, quoteLot: number, marketReport: MarketReport,
+  baseIsAccountLocker: boolean, quoteIsAccountLocker: boolean): { perSellLot: PerLot, perBuyLot: PerLot } {
+  const perSellLot: PerLot = { cex: {}, dex: {} }
+  perSellLot.dex[baseID] = lotSize
+  perSellLot.dex[baseFeeID] = (perSellLot.dex[baseFeeID] ?? 0) + marketReport.baseFees.max.swap // TODO: booking fees
+  perSellLot.cex[quoteID] = quoteLot
+  if (baseIsAccountLocker) perSellLot.dex[baseFeeID] = (perSellLot.dex[baseFeeID] ?? 0) + marketReport.baseFees.max.refund
+  if (quoteIsAccountLocker) perSellLot.dex[quoteFeeID] = (perSellLot.dex[quoteFeeID] ?? 0) + marketReport.quoteFees.max.redeem
+
+  const perBuyLot: PerLot = { cex: {}, dex: {} }
+  perBuyLot.dex[quoteID] = quoteLot
+  perBuyLot.dex[quoteFeeID] = (perBuyLot.dex[quoteFeeID] ?? 0) + marketReport.quoteFees.max.swap // TODO: booking fees
+  perBuyLot.cex[baseID] = lotSize
+  if (baseIsAccountLocker) perBuyLot.dex[baseFeeID] = (perBuyLot.dex[baseFeeID] ?? 0) + marketReport.baseFees.max.redeem
+  if (quoteIsAccountLocker) perBuyLot.dex[quoteFeeID] = (perBuyLot.dex[quoteFeeID] ?? 0) + marketReport.quoteFees.max.refund
+
+  for (const assetID of Array.from(new Set([baseID, quoteID, baseFeeID, quoteFeeID]))) {
+    perSellLot.dex[assetID] = Math.floor(perSellLot.dex[assetID] ?? 0)
+    perBuyLot.dex[assetID] = Math.floor(perBuyLot.dex[assetID] ?? 0)
+    perSellLot.cex[assetID] = Math.floor(perSellLot.cex[assetID] ?? 0)
+    perBuyLot.cex[assetID] = Math.floor(perBuyLot.cex[assetID] ?? 0)
+  }
+
+  return { perSellLot, perBuyLot }
 }
 
 function botProblemMessages (problems: BotProblems | undefined, cexName: string, dexHost: string): string[] {

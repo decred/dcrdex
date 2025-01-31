@@ -3590,6 +3590,7 @@ func (u *unifiedExchangeAdaptor) updateConfig(cfg *BotConfig) {
 
 func (u *unifiedExchangeAdaptor) updateInventory(balanceDiffs *BotInventoryDiffs) {
 	u.updateInventoryEvent(u.applyInventoryDiffs(balanceDiffs))
+	u.sendStatsUpdate()
 }
 
 func (u *unifiedExchangeAdaptor) Book() (buys, sells []*core.MiniOrder, _ error) {

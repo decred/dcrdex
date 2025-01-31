@@ -797,20 +797,6 @@ export interface BotBalanceAllocation {
   cex: Record<number, number>
 }
 
-export interface BotAssetConfig {
-  swapFeeN: number
-  orderReservesFactor: number
-  slippageBufferFactor: number
-  transferFactor: number
-}
-
-export interface UIConfig {
-  baseConfig: BotAssetConfig
-  quoteConfig: BotAssetConfig
-  simpleArbLots?: number
-  cexRebalance: boolean
-}
-
 export interface StartConfig extends MarketWithHost {
   autoRebalance?: AutoRebalanceConfig
   alloc: BotBalanceAllocation
@@ -823,7 +809,6 @@ export interface BotConfig {
   baseWalletOptions?: Record<string, string>
   quoteWalletOptions?: Record<string, string>
   cexName: string
-  uiConfig: UIConfig
   basicMarketMakingConfig?: BasicMarketMakingConfig
   arbMarketMakingConfig?: ArbMarketMakingConfig
   simpleArbConfig?: SimpleArbConfig

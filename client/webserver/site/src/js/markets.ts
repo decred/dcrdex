@@ -286,7 +286,7 @@ export default class MarketsPage extends BasePage {
       placementAmtRowTmpl: page.placementAmtRowTmpl
     }
     Doc.cleanTemplates(page.dexBalancesRowTmpl, page.placementRowTmpl, page.placementAmtRowTmpl)
-    this.mm = new RunningMarketMakerDisplay(page.mmRunning, this.forms, runningMMDisplayElements, 'markets')
+    this.mm = new RunningMarketMakerDisplay(page.mmRunning, this.forms, runningMMDisplayElements, 'markets', () => { console.log('allocate') })
 
     this.reputationMeter = new ReputationMeter(page.reputationMeter)
 

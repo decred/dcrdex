@@ -19,6 +19,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
+	"github.com/davecgh/go-spew/spew"
 )
 
 var zero = encode.ClearBytes
@@ -1751,6 +1752,54 @@ func (s *WebServer) apiStakeStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *WebServer) apiAvailableBalances(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Market  *mm.MarketWithHost `json:"market"`
+		CEXName *string            `json:"cexName,omitempty"`
+	}
+	if !readPost(w, r, &req) {
+		return
+	}
+	dexBalances, cexBalances, err := s.mm.AvailableBalances(req.Market, req.CEXName)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error fetching available balances: %w", err))
+		return
+	}
+
+	writeJSON(w, &struct {
+		OK          bool              `json:"ok"`
+		DEXBalances map[uint32]uint64 `json:"dexBalances"`
+		CEXBalances map[uint32]uint64 `json:"cexBalances"`
+	}{
+		OK:          true,
+		DEXBalances: dexBalances,
+		CEXBalances: cexBalances,
+	})
+}
+
+func (s *WebServer) apiMaxFundingFees(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Market *mm.MarketWithHost `json:"market"`
+	}
+	if !readPost(w, r, &req) {
+		return
+	}
+	buyFees, sellFees, err := s.mm.MaxFundingFees(req.Market)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error getting max funding fees: %w", err))
+		return
+	}
+	writeJSON(w, &struct {
+		OK       bool   `json:"ok"`
+		BuyFees  uint64 `json:"buyFees"`
+		SellFees uint64 `json:"sellFees"`
+	}{
+		OK:       true,
+		BuyFees:  buyFees,
+		SellFees: sellFees,
+	})
+}
+
 func (s *WebServer) apiSetVSP(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		AssetID uint32 `json:"assetID"`
@@ -1964,6 +2013,39 @@ func (s *WebServer) apiUpdateBotConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	writeJSON(w, simpleAck())
+}
+
+func (s *WebServer) apiUpdateRunningBotConfig(w http.ResponseWriter, r *http.Request) {
+	var updatedCfg *mm.BotConfig
+	if !readPost(w, r, &updatedCfg) {
+		s.writeAPIError(w, fmt.Errorf("failed to read config"))
+		return
+	}
+
+	spew.Dump("apiUpdateRunningBotConfig", updatedCfg)
+
+	if err := s.mm.UpdateRunningBotCfg(updatedCfg, nil, true); err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+
+	writeJSON(w, simpleAck())
+}
+
+func (s *WebServer) apiUpdateBotInventory(w http.ResponseWriter, r *http.Request) {
+	var form struct {
+		Market *mm.MarketWithHost    `json:"market"`
+		Diffs  *mm.BotInventoryDiffs `json:"diffs"`
+	}
+	if !readPost(w, r, &form) {
+		s.writeAPIError(w, fmt.Errorf("failed to read form"))
+		return
+	}
+	if err := s.mm.UpdateRunningBotInventory(form.Market, form.Diffs); err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
 	writeJSON(w, simpleAck())
 }
 
