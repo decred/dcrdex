@@ -231,7 +231,8 @@ type Config struct {
 	CustomSiteDir string
 	Language      string
 	Logger        dex.Logger
-	UTC           bool // for stdout http request logging
+	UTC           bool   // for stdout http request logging
+	AppVersion    string // user app version for UI
 	CertFile      string
 	KeyFile       string
 	// NoEmbed indicates to serve files from the system disk rather than the
@@ -275,6 +276,8 @@ type WebServer struct {
 
 	bondBufMtx sync.Mutex
 	bondBuf    map[uint32]valStamp
+
+	appVersion string
 
 	useDEXBranding bool
 }
@@ -402,6 +405,7 @@ func New(cfg *Config) (*WebServer, error) {
 		cachedPasswords: make(map[string]*cachedPassword),
 		tor:             cfg.Tor,
 		bondBuf:         map[uint32]valStamp{},
+		appVersion:      cfg.AppVersion,
 		useDEXBranding:  useDEXBranding,
 	}
 	s.lang.Store(lang)

@@ -166,6 +166,7 @@ var ZhCN = map[string]*intl.Translation{
 	"browser_ntfn_blocked":      {T: "浏览器通知目前被阻止。请在浏览器中解除对该站点的阻止，以接收通知。"},
 	"enable_browser_ntfn_info":  {T: "即使此窗口不活跃，桌面通知仍会出现。当您打开其他应用程序时，这会很有帮助，因为您将收到 DCRDEX 事件的通知。您可以在下方自定义您希望接收的通知类型。"},
 	"Save Notifications":        {T: "保存通知"},
+	"Version":                   {T: "版本"},
 	"Build ID":                  {T: "构建 ID"},
 	"Connect":                   {T: "连接"},
 	"Send":                      {T: "发送"},
