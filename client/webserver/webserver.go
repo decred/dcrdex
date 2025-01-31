@@ -176,7 +176,7 @@ type clientCore interface {
 
 type MMCore interface {
 	MarketReport(host string, base, quote uint32) (*mm.MarketReport, error)
-	StartBot(mkt *mm.StartConfig, alternateConfigPath *string, pw []byte) (err error)
+	StartBot(mkt *mm.StartConfig, alternateConfigPath *string, pw []byte, overrideLotSizeChange bool) (err error)
 	StopBot(mkt *mm.MarketWithHost) error
 	UpdateCEXConfig(updatedCfg *mm.CEXConfig) error
 	CEXBalance(cexName string, assetID uint32) (*libxc.ExchangeBalance, error)
