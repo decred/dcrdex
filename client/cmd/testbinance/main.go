@@ -119,6 +119,20 @@ func makeMarket(baseSymbol, quoteSymbol string) *bntypes.Market {
 			"TAKE_PROFIT",
 			"TAKE_PROFIT_LIMIT",
 		},
+		Filters: []*bntypes.Filter{
+			{
+				Type:     "PRICE_FILTER",
+				MinPrice: 0,
+				MaxPrice: math.MaxFloat64,
+				TickSize: 1e-9,
+			},
+			{
+				Type:     "LOT_SIZE",
+				MinQty:   0,
+				MaxQty:   math.MaxFloat64,
+				StepSize: 1e-9,
+			},
+		},
 	}
 }
 
