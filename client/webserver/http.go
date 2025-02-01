@@ -294,7 +294,6 @@ func (s *WebServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 		FiatCurrency    string
 		Exchanges       map[string]*core.Exchange
 		IsInitialized   bool
-		AppVersion      string
 	}{
 		CommonArguments: *common,
 		KnownExchanges:  s.knownUnregisteredExchanges(xcs),
@@ -302,7 +301,6 @@ func (s *WebServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 		FiatRateSources: s.core.FiatRateSources(),
 		Exchanges:       xcs,
 		IsInitialized:   s.core.IsInitialized(),
-		AppVersion:      s.appVersion,
 	}
 	s.sendTemplate(w, "settings", data)
 }

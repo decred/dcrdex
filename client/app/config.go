@@ -144,7 +144,6 @@ type Config struct {
 	WebConfig
 	LogConfig
 	MMConfig
-	AppVersion string
 	// AppData and ConfigPath should be parsed from the command-line,
 	// as it makes no sense to set these in the config file itself. If no values
 	// are assigned, defaults will be used.
@@ -198,7 +197,7 @@ func (cfg *Config) Web(c *core.Core, mm *mm.MarketMaker, log dex.Logger, utc boo
 		KeyFile:       keyFile,
 		NoEmbed:       cfg.NoEmbedSite,
 		HttpProf:      cfg.HTTPProfile,
-		AppVersion:    cfg.AppVersion,
+		AppVersion:    userAppVersion(Version),
 		Language:      cfg.Language,
 		Tor:           cfg.Tor,
 	}
@@ -354,7 +353,6 @@ func ResolveConfig(appData string, cfg *Config) error {
 		cfg.MMConfig.EventLogDBPath = defaultMMEventLogDBPath
 	}
 
-	cfg.AppVersion = userAppVersion(Version)
 	return nil
 }
 
