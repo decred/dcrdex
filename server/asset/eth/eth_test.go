@@ -271,6 +271,7 @@ func tNewBackend(assetID uint32) (*AssetBackend, *testNode) {
 		assetID:    assetID,
 		blockChans: make(map[chan *asset.BlockUpdate]struct{}),
 		atomize:    dexeth.WeiToGwei,
+		gases:      dexeth.VersionedGases[ProtocolVersion(BipID).ContractVersion()],
 	}, node
 }
 

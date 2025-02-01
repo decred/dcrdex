@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/config"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -132,7 +131,7 @@ func networkToken(vToken *VersionedToken, net dex.Network) (netToken *dexeth.Net
 	}
 
 	contract, found = netToken.SwapContracts[vToken.ContractVersion]
-	if !found || contract.Address == (common.Address{}) {
+	if !found || (vToken.ContractVersion == 0 && contract.Address == (common.Address{})) {
 		return nil, nil, fmt.Errorf("no version %d address for %s on %s", vToken.ContractVersion, vToken.Name, net)
 	}
 	return
@@ -189,7 +188,10 @@ func (d *Driver) Setup(cfg *asset.BackendConfig) (asset.Backend, error) {
 	for _, tkn := range registeredTokens {
 		netToken, found := tkn.NetTokens[cfg.Net]
 		if !found {
-			return nil, fmt.Errorf("no %s token for %s", tkn.Name, cfg.Net)
+			if cfg.Net == dex.Mainnet {
+				return nil, fmt.Errorf("no %s token for %s", tkn.Name, cfg.Net)
+			}
+			continue
 		}
 		if _, found = netToken.SwapContracts[tkn.ContractVersion]; !found {
 			return nil, fmt.Errorf("no version %d swap contract adddress for %s on %s. "+
@@ -268,15 +270,12 @@ type AssetBackend struct {
 	tokenAddr common.Address
 	log       dex.Logger
 	atomize   func(*big.Int) uint64 // atomize takes floor. use for values, not fee rates
+	gases     *dexeth.Gases
 
 	// The backend provides block notification channels through the BlockChannel
 	// method.
 	blockChansMtx sync.RWMutex
 	blockChans    map[chan *asset.BlockUpdate]struct{}
-
-	// initTxSize is the gas used for an initiation transaction with one swap.
-	initTxSize uint64
-	redeemSize uint64
 
 	contractAddr   common.Address // could be v0 or v1
 	contractAddrV1 common.Address // required regardless
@@ -318,10 +317,9 @@ func unconnectedETH(bipID, contractVer uint32, contractAddr, contractAddrV1 comm
 		contractAddr:   contractAddr,
 		contractAddrV1: contractAddrV1,
 		blockChans:     make(map[chan *asset.BlockUpdate]struct{}),
-		initTxSize:     dexeth.InitGas(1, contractVer),
-		redeemSize:     dexeth.RedeemGas(1, contractVer),
 		assetID:        bipID,
 		atomize:        dexeth.WeiToGwei,
+		gases:          dexeth.VersionedGases[contractVer],
 		contractVer:    contractVer,
 	}}, nil
 }
@@ -501,18 +499,9 @@ func (eth *ETHBackend) TokenBackend(assetID uint32, configPath string) (asset.Ba
 		return nil, err
 	}
 
-	gases := new(configuredTokenGases)
-	if configPath != "" {
-		if err := config.ParseInto(configPath, gases); err != nil {
-			return nil, fmt.Errorf("error parsing fee overrides for token %d: %v", assetID, err)
-		}
-	}
-
-	if gases.Swap == 0 {
-		gases.Swap = swapContract.Gas.Swap
-	}
-	if gases.Redeem == 0 {
-		gases.Redeem = swapContract.Gas.Redeem
+	contractAddr := swapContract.Address
+	if vToken.ContractVersion == 1 {
+		contractAddr = eth.contractAddrV1
 	}
 
 	if err := eth.node.loadToken(eth.ctx, assetID, vToken); err != nil {
@@ -525,10 +514,9 @@ func (eth *ETHBackend) TokenBackend(assetID uint32, configPath string) (asset.Ba
 			log:          eth.baseLogger.SubLogger(strings.ToUpper(dex.BipIDSymbol(assetID))),
 			assetID:      assetID,
 			blockChans:   make(map[chan *asset.BlockUpdate]struct{}),
-			initTxSize:   gases.Swap,
-			redeemSize:   gases.Redeem,
-			contractAddr: swapContract.Address,
+			contractAddr: contractAddr,
 			atomize:      vToken.EVMToAtomic,
+			gases:        &swapContract.Gas,
 		},
 		VersionedToken: vToken,
 	}
@@ -556,12 +544,12 @@ func (eth *baseBackend) TxData(coinID []byte) ([]byte, error) {
 
 // InitTxSize is an upper limit on the gas used for an initiation.
 func (be *AssetBackend) InitTxSize() uint64 {
-	return be.initTxSize
+	return be.gases.Swap
 }
 
 // RedeemSize is the same as (dex.Asset).RedeemSize for the asset.
 func (be *AssetBackend) RedeemSize() uint64 {
-	return be.redeemSize
+	return be.gases.Redeem
 }
 
 // FeeRate returns the current optimal fee rate in gwei / gas.
