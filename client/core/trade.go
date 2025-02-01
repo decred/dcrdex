@@ -2284,7 +2284,7 @@ func (t *trackedTrade) revokeMatch(matchID order.MatchID, fromServer bool) error
 //
 // This method modifies match fields and MUST be called with the trackedTrade
 // mutex lock held for writes.
-func (c *Core) swapMatches(t *trackedTrade, matches []*matchTracker) error {
+func (c *Core) swapMatches(t *trackedTrade, matches []*matchTracker) (err error) {
 	errs := newErrorSet("swapMatches order %s - ", t.ID())
 	groupables := make([]*matchTracker, 0, len(matches)) // Over-allocating if there are suspect matches
 	var suspects []*matchTracker
@@ -2295,24 +2295,57 @@ func (c *Core) swapMatches(t *trackedTrade, matches []*matchTracker) error {
 			groupables = append(groupables, m)
 		}
 	}
+	feeRate := t.bestSwapGroupFeeRate(matches)
 	if len(groupables) > 0 {
-		maxSwapsInTx := int(t.wallets.fromWallet.Info().MaxSwapsInTx)
+		var maxSwapsInTx int
+		if counter, is := t.wallets.fromWallet.Wallet.(asset.MaxMatchesCounter); is {
+			if maxSwapsInTx, err = counter.MaxSwaps(t.metaData.FromVersion, feeRate); err != nil {
+				t.dc.log.Meter("failed_swap_count", time.Minute*10).Warn("Failed to count swap txs: %v", err)
+			}
+		}
 		if maxSwapsInTx <= 0 || len(groupables) < maxSwapsInTx {
-			c.swapMatchGroup(t, groupables, errs)
+			c.swapMatchGroup(t, groupables, feeRate, errs)
 		} else {
 			for i := 0; i < len(groupables); i += maxSwapsInTx {
 				if i+maxSwapsInTx < len(groupables) {
-					c.swapMatchGroup(t, groupables[i:i+maxSwapsInTx], errs)
+					c.swapMatchGroup(t, groupables[i:i+maxSwapsInTx], feeRate, errs)
 				} else {
-					c.swapMatchGroup(t, groupables[i:], errs)
+					c.swapMatchGroup(t, groupables[i:], feeRate, errs)
 				}
 			}
 		}
 	}
 	for _, m := range suspects {
-		c.swapMatchGroup(t, []*matchTracker{m}, errs)
+		c.swapMatchGroup(t, []*matchTracker{m}, feeRate, errs)
 	}
 	return errs.ifAny()
+}
+
+// bestSwapGroupRate gets the most appropriate fee rate for a group of swaps.
+func (t *trackedTrade) bestSwapGroupFeeRate(matches []*matchTracker) uint64 {
+	var highestFeeRate uint64
+	for _, match := range matches {
+		if match.FeeRateSwap > highestFeeRate {
+			highestFeeRate = match.FeeRateSwap
+		}
+	}
+	// Use a higher swap fee rate if a local estimate is higher than the
+	// prescribed rate, but not higher than the funded (max) rate.
+	if highestFeeRate < t.metaData.MaxFeeRate {
+		freshRate := t.wallets.fromWallet.feeRate()
+		if freshRate == 0 { // either not a FeeRater, or FeeRate failed
+			freshRate = t.dc.bestBookFeeSuggestion(t.wallets.fromWallet.AssetID)
+		}
+		if freshRate > t.metaData.MaxFeeRate {
+			freshRate = t.metaData.MaxFeeRate
+		}
+		if highestFeeRate < freshRate {
+			t.dc.log.Infof("Prescribed %v fee rate %v looks low, using %v",
+				t.wallets.fromWallet.Symbol, highestFeeRate, freshRate)
+			highestFeeRate = freshRate
+		}
+	}
+	return highestFeeRate
 }
 
 // swapMatchGroup will send a transaction with swap outputs for the specified
@@ -2320,11 +2353,17 @@ func (c *Core) swapMatches(t *trackedTrade, matches []*matchTracker) error {
 //
 // This method modifies match fields and MUST be called with the trackedTrade
 // mutex lock held for writes.
-func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *errorSet) {
+func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, highestFeeRate uint64, errs *errorSet) {
+	// Ensure swap is not sent with a zero fee rate.
+	if highestFeeRate == 0 {
+		errs.add("swap cannot proceed with a zero fee rate")
+		return
+	}
+
 	// Prepare the asset.Contracts.
 	contracts := make([]*asset.Contract, len(matches))
 	// These matches may have different fee rates, matched in different epochs.
-	var highestFeeRate uint64
+
 	for i, match := range matches {
 		value := match.Quantity
 		if !match.trade.Sell {
@@ -2344,10 +2383,6 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 			Value:      value,
 			SecretHash: match.MetaData.Proof.SecretHash,
 			LockTime:   uint64(lockTime),
-		}
-
-		if match.FeeRateSwap > highestFeeRate {
-			highestFeeRate = match.FeeRateSwap
 		}
 	}
 
@@ -2396,41 +2431,18 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 		return
 	}
 
-	// Use a higher swap fee rate if a local estimate is higher than the
-	// prescribed rate, but not higher than the funded (max) rate.
-	if highestFeeRate < t.metaData.MaxFeeRate {
-		freshRate := fromWallet.feeRate()
-		if freshRate == 0 { // either not a FeeRater, or FeeRate failed
-			freshRate = t.dc.bestBookFeeSuggestion(fromWallet.AssetID)
-		}
-		if freshRate > t.metaData.MaxFeeRate {
-			freshRate = t.metaData.MaxFeeRate
-		}
-		if highestFeeRate < freshRate {
-			c.log.Infof("Prescribed %v fee rate %v looks low, using %v",
-				fromWallet.Symbol, highestFeeRate, freshRate)
-			highestFeeRate = freshRate
-		}
-	}
-
-	// Ensure swap is not sent with a zero fee rate.
-	if highestFeeRate == 0 {
-		errs.add("swap cannot proceed with a zero fee rate")
-		return
-	}
-
 	// swapMatches is no longer idempotent after this point.
 
 	// Send the swap. If the swap fails, set the swapErr flag for all matches.
 	// A more sophisticated solution might involve tracking the error time too
 	// and trying again in certain circumstances.
 	swaps := &asset.Swaps{
-		Version:    t.metaData.FromVersion,
-		Inputs:     inputs,
-		Contracts:  contracts,
-		FeeRate:    highestFeeRate,
-		LockChange: lockChange,
-		Options:    t.options,
+		AssetVersion: t.metaData.FromVersion,
+		Inputs:       inputs,
+		Contracts:    contracts,
+		FeeRate:      highestFeeRate,
+		LockChange:   lockChange,
+		Options:      t.options,
 	}
 	receipts, change, fees, err := fromWallet.Swap(swaps)
 	if err != nil {
@@ -2659,7 +2671,7 @@ func (c *Core) sendInitAsync(t *trackedTrade, match *matchTracker, coinID, contr
 //
 // This method modifies match fields and MUST be called with the trackedTrade
 // mutex lock held for writes.
-func (c *Core) redeemMatches(t *trackedTrade, matches []*matchTracker) error {
+func (c *Core) redeemMatches(t *trackedTrade, matches []*matchTracker) (err error) {
 	errs := newErrorSet("redeemMatches order %s - ", t.ID())
 	groupables := make([]*matchTracker, 0, len(matches)) // Over-allocating if there are suspect matches
 	var suspects []*matchTracker
@@ -2674,7 +2686,12 @@ func (c *Core) redeemMatches(t *trackedTrade, matches []*matchTracker) error {
 		if !t.wallets.toWallet.connected() {
 			return errWalletNotConnected // don't ungroup, just return
 		}
-		maxRedeemsInTx := int(t.wallets.toWallet.Info().MaxRedeemsInTx)
+		var maxRedeemsInTx int
+		if counter, is := t.wallets.fromWallet.Wallet.(asset.MaxMatchesCounter); is {
+			if maxRedeemsInTx, err = counter.MaxRedeems(t.metaData.FromVersion); err != nil {
+				t.dc.log.Meter("failed_redeem_count", time.Minute*10).Warn("Failed to count redeem txs: %v", err)
+			}
+		}
 		if maxRedeemsInTx <= 0 || len(groupables) < maxRedeemsInTx {
 			c.redeemMatchGroup(t, groupables, errs)
 		} else {
