@@ -110,16 +110,16 @@ func TestTestnetFees(t *testing.T) {
 	mt.FeeHistory(t, dex.Testnet, 3, 90)
 }
 
-func TestTestnetTipCaps(t *testing.T) {
-	mt.TipCaps(t, dex.Testnet)
+func TestBlockStats(t *testing.T) {
+	mt.BlockStats(t, 5, 1024, dex.Mainnet)
+}
+
+func TestTestnetBlockStats(t *testing.T) {
+	mt.BlockStats(t, 5, 1024, dex.Testnet)
 }
 
 func TestFees(t *testing.T) {
 	mt.FeeHistory(t, dex.Mainnet, 3, 365)
-}
-
-func TestTipCaps(t *testing.T) {
-	mt.TipCaps(t, dex.Mainnet)
 }
 
 func TestReceiptsHaveEffectiveGasPrice(t *testing.T) {

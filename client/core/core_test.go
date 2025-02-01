@@ -715,6 +715,7 @@ type TXCWallet struct {
 	reserves                    atomic.Uint64
 	findBond                    *asset.BondDetails
 	findBondErr                 error
+	maxSwaps, maxRedeems        int
 
 	confirmRedemptionResult *asset.ConfirmRedemptionStatus
 	confirmRedemptionErr    error
@@ -1120,6 +1121,15 @@ func (w *TXCWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time.Ti
 
 func (w *TXCWallet) WalletTransaction(context.Context, dex.Bytes) (*asset.WalletTransaction, error) {
 	return nil, nil
+}
+
+var _ asset.MaxMatchesCounter = (*TXCWallet)(nil)
+
+func (w *TXCWallet) MaxSwaps(serverVer uint32, feeRate uint64) (int, error) {
+	return w.maxSwaps, nil
+}
+func (w *TXCWallet) MaxRedeems(serverVer uint32) (int, error) {
+	return w.maxRedeems, nil
 }
 
 type TAccountLocker struct {
@@ -9150,8 +9160,8 @@ func TestMaxSwapsRedeemsInTx(t *testing.T) {
 	tCore.wallets[tUTXOAssetB.ID] = btcWallet
 	walletSet, _, _, _ := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, true)
 
-	tDcrWallet.info.MaxSwapsInTx = 4
-	tBtcWallet.info.MaxRedeemsInTx = 4
+	tDcrWallet.maxSwaps = 4
+	tDcrWallet.maxRedeems = 4
 
 	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, 0, 0)
 	oid := lo.ID()
@@ -9215,7 +9225,7 @@ func TestMaxSwapsRedeemsInTx(t *testing.T) {
 		t.Helper()
 		for i := range expected {
 			if expected[i] != len(wallet.lastRedeems[i].Redemptions) {
-				t.Fatalf("expected %d swaps but got %d", expected[i], len(wallet.lastRedeems[i].Redemptions))
+				t.Fatalf("expected %d redeems but got %d", expected[i], len(wallet.lastRedeems[i].Redemptions))
 			}
 		}
 	}

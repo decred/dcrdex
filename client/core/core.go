@@ -5077,7 +5077,7 @@ func (c *Core) MaxBuy(host string, baseID, quoteID uint32, rate uint64) (*MaxOrd
 	}
 
 	preRedeem, err := baseWallet.PreRedeem(&asset.PreRedeemForm{
-		Version:       baseAsset.Version,
+		AssetVersion:  baseAsset.Version,
 		Lots:          maxBuy.Lots,
 		FeeSuggestion: redeemFeeSuggestion,
 	})
@@ -5136,7 +5136,7 @@ func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, erro
 	}
 
 	preRedeem, err := quoteWallet.PreRedeem(&asset.PreRedeemForm{
-		Version:       quoteAsset.Version,
+		AssetVersion:  quoteAsset.Version,
 		Lots:          maxSell.Lots,
 		FeeSuggestion: redeemFeeSuggestion,
 	})
@@ -5722,7 +5722,7 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 	}
 
 	swapEstimate, err := wallets.fromWallet.PreSwap(&asset.PreSwapForm{
-		Version:         assetConfigs.fromAsset.Version,
+		AssetVersion:    assetConfigs.fromAsset.Version,
 		LotSize:         swapLotSize,
 		Lots:            lots,
 		MaxFeeRate:      assetConfigs.fromAsset.MaxFeeRate,
@@ -5737,7 +5737,7 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 	}
 
 	redeemEstimate, err := wallets.toWallet.PreRedeem(&asset.PreRedeemForm{
-		Version:         assetConfigs.toAsset.Version,
+		AssetVersion:    assetConfigs.toAsset.Version,
 		Lots:            lots,
 		FeeSuggestion:   redeemFeeSuggestion,
 		SelectedOptions: form.Options,
@@ -6235,7 +6235,7 @@ func (c *Core) prepareTradeRequest(pw []byte, form *TradeForm) (*tradeRequest, e
 	}
 
 	coins, redeemScripts, fundingFees, err := fromWallet.FundOrder(&asset.Order{
-		Version:       assetConfigs.fromAsset.Version,
+		AssetVersion:  assetConfigs.fromAsset.Version,
 		Value:         fundQty,
 		MaxSwapCount:  lots,
 		MaxFeeRate:    assetConfigs.fromAsset.MaxFeeRate,
