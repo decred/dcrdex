@@ -240,9 +240,10 @@ type Config struct {
 	// should be used by default since site files from older distributions may
 	// be present on the disk. When NoEmbed is true, this also implies reloading
 	// and execution of html templates on each request.
-	NoEmbed  bool
-	HttpProf bool
-	Tor      bool
+	NoEmbed         bool
+	HttpProf        bool
+	Tor             bool
+	MainLogFilePath string
 }
 
 type valStamp struct {
@@ -276,7 +277,8 @@ type WebServer struct {
 	bondBufMtx sync.Mutex
 	bondBuf    map[uint32]valStamp
 
-	useDEXBranding bool
+	useDEXBranding  bool
+	mainLogFilePath string
 }
 
 // New is the constructor for a new WebServer. CustomSiteDir in the Config can
@@ -403,6 +405,7 @@ func New(cfg *Config) (*WebServer, error) {
 		tor:             cfg.Tor,
 		bondBuf:         map[uint32]valStamp{},
 		useDEXBranding:  useDEXBranding,
+		mainLogFilePath: cfg.MainLogFilePath,
 	}
 	s.lang.Store(lang)
 
@@ -574,6 +577,7 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/txhistory", s.apiTxHistory)
 			apiAuth.Post("/takeaction", s.apiTakeAction)
 			apiAuth.Post("/redeemgamecode", s.redeemGameCode)
+			apiAuth.Get("/exportapplog", s.apiExportAppLogs)
 
 			apiAuth.Post("/stakestatus", s.apiStakeStatus)
 			apiAuth.Post("/setvsp", s.apiSetVSP)
