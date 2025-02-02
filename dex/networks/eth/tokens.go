@@ -391,6 +391,7 @@ var Tokens = map[uint32]*Token{
 						}},
 				},
 			},
+			// No USDC version 1 gases on simnet, for testing purposes.
 		},
 	},
 	maticTokenID: {

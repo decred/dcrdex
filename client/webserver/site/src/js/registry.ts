@@ -215,6 +215,7 @@ export interface Token {
   unitInfo: UnitInfo
   contractAddress: string
   definition: WalletDefinition
+  supportedAssetVersions: number[]
 }
 
 export enum ApprovalStatus {

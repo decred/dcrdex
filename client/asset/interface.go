@@ -300,8 +300,9 @@ type WalletDefinition struct {
 // Token combines the generic dex.Token with a WalletDefinition.
 type Token struct {
 	*dex.Token
-	Definition      *WalletDefinition `json:"definition"`
-	ContractAddress string            `json:"contractAddress"` // Set in SetNetwork
+	Definition             *WalletDefinition `json:"definition"`
+	ContractAddress        string            `json:"contractAddress"` // Set in SetNetwork
+	SupportedAssetVersions []uint32          `json:"supportedAssetVersions"`
 }
 
 // WalletInfo is auxiliary information about an ExchangeWallet.
@@ -1440,10 +1441,10 @@ type MultiOrderValue struct {
 
 // MultiOrder is order details needed for FundMultiOrder.
 type MultiOrder struct {
-	// Version is the asset version of the "from" asset with the init
+	// AssetVersion is the asset version of the "from" asset with the init
 	// transaction.
-	Version uint32
-	Values  []*MultiOrderValue
+	AssetVersion uint32
+	Values       []*MultiOrderValue
 	// MaxFeeRate is the largest possible fee rate for the init transaction (of
 	// this "from" asset) specific to and provided by a particular server, and
 	// is used to calculate the funding required to cover fees.

@@ -7,7 +7,7 @@ Trader routines, each with their own *core.Core (actually, a *Mantle) and
 wallets.
 
 Build with server locktimes in mind.
-i.e. -ldflags "-X 'decred.org/dcrdex/dex.testLockTimeTaker=30s' -X 'decred.org/dcrdex/dex.testLockTimeMaker=1m'"
+i.e. -ldflags "-X 'decred.org/dcrdex/dex.testLockTimeTaker=3m' -X 'decred.org/dcrdex/dex.testLockTimeMaker=6m'"
 
 Supported assets are bch, btc, dash, dcr, doge, dgb, eth, firo, ltc, and zec.
 */

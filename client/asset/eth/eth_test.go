@@ -2189,8 +2189,8 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 			tokenBal:  uint64(dexeth.GweiFactor),
 			parentBal: uint64(dexeth.GweiFactor),
 			multiOrder: &asset.MultiOrder{
-				Version:    fromAsset.Version,
-				MaxFeeRate: fromAsset.MaxFeeRate,
+				AssetVersion: fromAsset.Version,
+				MaxFeeRate:   fromAsset.MaxFeeRate,
 				Values: []*asset.MultiOrderValue{
 					{
 						Value:        uint64(dexeth.GweiFactor) / 2,
@@ -2209,8 +2209,8 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 			tokenBal:  uint64(dexeth.GweiFactor),
 			parentBal: uint64(dexeth.GweiFactor),
 			multiOrder: &asset.MultiOrder{
-				Version:    fromAsset.Version,
-				MaxFeeRate: fromAsset.MaxFeeRate,
+				AssetVersion: fromAsset.Version,
+				MaxFeeRate:   fromAsset.MaxFeeRate,
 				Values: []*asset.MultiOrderValue{
 					{
 						Value:        uint64(dexeth.GweiFactor) / 2,
@@ -2231,8 +2231,8 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 			tokenBal:  uint64(dexeth.GweiFactor),
 			parentBal: uint64(dexeth.GweiFactor),
 			multiOrder: &asset.MultiOrder{
-				Version:    fromAsset.Version,
-				MaxFeeRate: fromAsset.MaxFeeRate,
+				AssetVersion: fromAsset.Version,
+				MaxFeeRate:   fromAsset.MaxFeeRate,
 				Values: []*asset.MultiOrderValue{
 					{
 						Value:        uint64(dexeth.GweiFactor) / 2,
@@ -2254,8 +2254,8 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 			tokenBal:  uint64(dexeth.GweiFactor),
 			parentBal: uint64(dexeth.GweiFactor),
 			multiOrder: &asset.MultiOrder{
-				Version:    fromAsset.Version,
-				MaxFeeRate: fromAsset.MaxFeeRate,
+				AssetVersion: fromAsset.Version,
+				MaxFeeRate:   fromAsset.MaxFeeRate,
 				Values: []*asset.MultiOrderValue{
 					{
 						Value:        uint64(dexeth.GweiFactor) / 2,
@@ -2276,8 +2276,8 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 			tokenBal:  uint64(dexeth.GweiFactor),
 			parentBal: uint64(dexeth.GweiFactor),
 			multiOrder: &asset.MultiOrder{
-				Version:    fromAsset.Version,
-				MaxFeeRate: fromAsset.MaxFeeRate,
+				AssetVersion: fromAsset.Version,
+				MaxFeeRate:   fromAsset.MaxFeeRate,
 				Values: []*asset.MultiOrderValue{
 					{
 						Value:        uint64(dexeth.GweiFactor) / 2,
@@ -2298,8 +2298,8 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 			tokenBal:  uint64(dexeth.GweiFactor) - 1,
 			parentBal: uint64(dexeth.GweiFactor),
 			multiOrder: &asset.MultiOrder{
-				Version:    fromAsset.Version,
-				MaxFeeRate: fromAsset.MaxFeeRate,
+				AssetVersion: fromAsset.Version,
+				MaxFeeRate:   fromAsset.MaxFeeRate,
 				Values: []*asset.MultiOrderValue{
 					{
 						Value:        uint64(dexeth.GweiFactor) / 2,
@@ -2319,8 +2319,8 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 			tokenBal:  uint64(dexeth.GweiFactor),
 			parentBal: swapGas * 4 * fromAsset.MaxFeeRate,
 			multiOrder: &asset.MultiOrder{
-				Version:    fromAsset.Version,
-				MaxFeeRate: fromAsset.MaxFeeRate,
+				AssetVersion: fromAsset.Version,
+				MaxFeeRate:   fromAsset.MaxFeeRate,
 				Values: []*asset.MultiOrderValue{
 					{
 						Value:        uint64(dexeth.GweiFactor) / 2,
@@ -2339,8 +2339,8 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 			tokenBal:  uint64(dexeth.GweiFactor),
 			parentBal: swapGas*4*fromAsset.MaxFeeRate - 1,
 			multiOrder: &asset.MultiOrder{
-				Version:    fromAsset.Version,
-				MaxFeeRate: fromAsset.MaxFeeRate,
+				AssetVersion: fromAsset.Version,
+				MaxFeeRate:   fromAsset.MaxFeeRate,
 				Values: []*asset.MultiOrderValue{
 					{
 						Value:        uint64(dexeth.GweiFactor) / 2,

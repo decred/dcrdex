@@ -679,6 +679,7 @@ func (be *AssetBackend) Contract(coinID, contractData []byte) (*asset.Contract, 
 	if err != nil {
 		return nil, fmt.Errorf("unable to get confirmations: %v", err)
 	}
+
 	return &asset.Contract{
 		Coin:         sc,
 		SwapAddress:  sc.vector.To.String(),
