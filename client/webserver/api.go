@@ -4,11 +4,14 @@
 package webserver
 
 import (
+	"archive/zip"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -2042,17 +2045,37 @@ func (s *WebServer) apiTakeAction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck())
 }
 
+// apiExportAppLogs time stamps the application log, zips it and sends it back to
+// the browser or webview as an attachment. Logfile names need to be distinct as
+// webview will not overwite an existing file.
 func (s *WebServer) apiExportAppLogs(w http.ResponseWriter, r *http.Request) {
-	fmt.Printf("=== apiExportAppLogs->\n")
-	w.Header().Set("Content-Disposition", "attachment; filename=bwlogs.zip")
-	w.Header().Set("Content-Type", "text/plain")
+	timeString := time.Now().Format("2006-01-02T15_04_05")
+	zipAttachment := fmt.Sprintf("attachment; filename=bwlog_%s.zip", timeString)
+
+	w.Header().Set("Content-Disposition", zipAttachment)
+	w.Header().Set("Content-Type", "application/octet-stream; type=zip")
 	w.WriteHeader(http.StatusOK)
 
-	fmt.Printf("=== %s\n", s.mainLogFilePath)
+	zipWriter := zip.NewWriter(w)
+	defer zipWriter.Close()
 
-	// TODO(warrior) .. get the file ;-)
+	lf, err := os.Open(s.mainLogFilePath)
+	if err != nil {
+		log.Errorf("error opening bisonw log file: %v", err)
+		return
+	}
+	defer lf.Close()
 
-	fmt.Printf("=== <-apiExportAppLogs\n")
+	iow, err := zipWriter.Create("bwlog.txt") // only 1 file in zip header
+	if err != nil {
+		log.Errorf("error creating an io.Writer: %v", err)
+		return
+	}
+
+	if _, err := io.Copy(iow, lf); err != nil {
+		log.Errorf("error copying bisonw log to zip writer: %v", err)
+		return
+	}
 }
 
 func (s *WebServer) redeemGameCode(w http.ResponseWriter, r *http.Request) {

@@ -240,9 +240,9 @@ type Config struct {
 	// should be used by default since site files from older distributions may
 	// be present on the disk. When NoEmbed is true, this also implies reloading
 	// and execution of html templates on each request.
-	NoEmbed  bool
-	HttpProf bool
-	Tor      bool
+	NoEmbed         bool
+	HttpProf        bool
+	Tor             bool
 	MainLogFilePath string
 }
 
