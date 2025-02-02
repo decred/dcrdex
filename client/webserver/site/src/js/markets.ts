@@ -741,19 +741,20 @@ export default class MarketsPage extends BasePage {
         text: intl.prep(intl.ID_NOT_SUPPORTED, { asset: symbol.toUpperCase() })
       }
     }
-    // check if versions are supported. If asset is a token, we check if its
-    // parent supports the version.
-    const bVers = (base.token ? app().assets[base.token.parentID].info?.versions : base.info?.versions) as number[]
-    const qVers = (quote.token ? app().assets[quote.token.parentID].info?.versions : quote.info?.versions) as number[]
-    // if none them are token, just check if own asset is supported.
+    const assetVersionSupported = (a: SupportedAsset, ver: number) => {
+      const supportedAssetVersions = (a.token ? a.token.supportedAssetVersions : a.info?.versions) as number[]
+      return supportedAssetVersions.includes(ver)
+    }
+    const baseSupported = assetVersionSupported(base, baseCfg.version)
+    const quoteSupported = assetVersionSupported(quote, quoteCfg.version)
     let text = ''
-    if (!bVers.includes(baseCfg.version)) {
-      text = intl.prep(intl.ID_VERSION_NOT_SUPPORTED, { asset: base.symbol.toUpperCase(), version: baseCfg.version + '' })
-    } else if (!qVers.includes(quoteCfg.version)) {
-      text = intl.prep(intl.ID_VERSION_NOT_SUPPORTED, { asset: quote.symbol.toUpperCase(), version: quoteCfg.version + '' })
+    if (!baseSupported) {
+      text = intl.prep(intl.ID_VERSION_NOT_SUPPORTED, { asset: base.unitInfo.conventional.unit, version: String(baseCfg.version) })
+    } else if (!quoteSupported) {
+      text = intl.prep(intl.ID_VERSION_NOT_SUPPORTED, { asset: base.unitInfo.conventional.unit, version: String(quoteCfg.version) })
     }
     return {
-      isSupported: bVers.includes(baseCfg.version) && qVers.includes(quoteCfg.version),
+      isSupported: baseSupported && quoteSupported,
       text
     }
   }

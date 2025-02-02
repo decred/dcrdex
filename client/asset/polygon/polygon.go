@@ -27,14 +27,19 @@ func registerToken(tokenID uint32, desc string, nets ...dex.Network) {
 		panic("token " + strconv.Itoa(int(tokenID)) + " not known")
 	}
 	netAddrs := make(map[dex.Network]string)
+	netVersions := make(map[dex.Network][]uint32, 3)
 	for net, netToken := range token.NetTokens {
 		netAddrs[net] = netToken.Address.String()
+		netVersions[net] = make([]uint32, 0, 1)
+		for ver := range netToken.SwapContracts {
+			netVersions[net] = append(netVersions[net], ver)
+		}
 	}
 	asset.RegisterToken(tokenID, token.Token, &asset.WalletDefinition{
 		Type:        walletTypeToken,
 		Tab:         "Polygon token",
 		Description: desc,
-	}, netAddrs)
+	}, netAddrs, netVersions)
 }
 
 func init() {

@@ -6325,7 +6325,7 @@ func (c *Core) prepareMultiTradeRequests(pw []byte, form *MultiTradeForm) ([]*tr
 	}
 
 	allCoins, allRedeemScripts, fundingFees, err := fromWallet.FundMultiOrder(&asset.MultiOrder{
-		Version:       assetConfigs.fromAsset.Version,
+		AssetVersion:  assetConfigs.fromAsset.Version,
 		Values:        orderValues,
 		MaxFeeRate:    assetConfigs.fromAsset.MaxFeeRate,
 		FeeSuggestion: c.feeSuggestion(dc, assetConfigs.fromAsset.ID),

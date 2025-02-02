@@ -3,7 +3,7 @@
 # dcrdex, bisonw, and the wallet simnet harnesses should all be running before
 # calling this script.
 #
-# bisonw can be built with -ldflags "-X 'decred.org/dcrdex/dex.testLockTimeTaker=30s' -X 'decred.org/dcrdex/dex.testLockTimeMaker=1m'"
+# bisonw can be built with -ldflags "-X 'decred.org/dcrdex/dex.testLockTimeTaker=3m' -X 'decred.org/dcrdex/dex.testLockTimeMaker=6m'"
 # in order to set simnet locktimes.
 
 set +e

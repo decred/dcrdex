@@ -361,19 +361,19 @@ func run(ctx context.Context) error {
 		return err
 	}
 	log.Info("Success completed without error.")
-	log.Info("------------------")
+	log.Info(" ------------------")
 	log.Info("Running alice bails before xmr init.")
 	if err := aliceBailsBeforeXmrInit(ctx); err != nil {
 		return err
 	}
 	log.Info("Alice bails before xmr init completed without error.")
-	log.Info("------------------")
+	log.Info(" ------------------")
 	log.Info("Running refund.")
 	if err := refund(ctx); err != nil {
 		return err
 	}
 	log.Info("Refund completed without error.")
-	log.Info("------------------")
+	log.Info(" ------------------")
 	log.Info("Running bob bails after xmr init.")
 	if err := bobBailsAfterXmrInit(ctx); err != nil {
 		return err

@@ -16,7 +16,8 @@ import (
 // networks enables filtering out tokens via the package's SetNetwork.
 type nettedToken struct {
 	*Token
-	addrs map[dex.Network]string
+	erc20NetAddrs             map[dex.Network]string
+	netSupportedAssetVersions map[dex.Network][]uint32
 }
 
 var (
@@ -85,7 +86,13 @@ func Register(assetID uint32, driver Driver) {
 // RegisterToken should be called to register tokens. If no nets are specified
 // the token will be registered for all networks. The user must invoke
 // SetNetwork to enable net-based filtering of package function output.
-func RegisterToken(tokenID uint32, token *dex.Token, walletDef *WalletDefinition, addrs map[dex.Network]string) {
+func RegisterToken(
+	tokenID uint32,
+	token *dex.Token,
+	walletDef *WalletDefinition,
+	erc20NetAddrs map[dex.Network]string,
+	netSupportedAssetVersions map[dex.Network][]uint32,
+) {
 	driversMtx.Lock()
 	defer driversMtx.Unlock()
 	if _, exists := tokens[tokenID]; exists {
@@ -101,7 +108,8 @@ func RegisterToken(tokenID uint32, token *dex.Token, walletDef *WalletDefinition
 			Definition: walletDef,
 			// ContractAddress specified in SetNetwork.
 		},
-		addrs: addrs,
+		erc20NetAddrs:             erc20NetAddrs,
+		netSupportedAssetVersions: netSupportedAssetVersions,
 	}
 }
 
@@ -262,12 +270,13 @@ func UnitInfo(assetID uint32) (dex.UnitInfo, error) {
 // network. SetNetwork need only be called once during initialization.
 func SetNetwork(net dex.Network) {
 	for assetID, nt := range tokens {
-		addr, exists := nt.addrs[net]
+		addr, exists := nt.erc20NetAddrs[net]
 		if !exists {
 			delete(tokens, assetID)
 			continue
 		}
 		nt.Token.ContractAddress = addr
+		nt.Token.SupportedAssetVersions = nt.netSupportedAssetVersions[net]
 	}
 }
 
