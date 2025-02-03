@@ -133,6 +133,7 @@ var PlPL = map[string]*intl.Translation{
 	"Export Account":                {T: "Eksportuj konto"},
 	"simultaneous_servers_msg":      {T: "Klient Decred DEX wspiera jednoczesne korzystanie z wielu serwerów DEX."},
 	"Change App Password":           {T: "Zmień hasło aplikacji"},
+	"Version":                       {T: "Wersja"},
 	"Build ID":                      {T: "ID builda"},
 	"Connect":                       {T: "Połącz"},
 	"Withdraw":                      {T: "Wypłać"},
