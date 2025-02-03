@@ -1,5 +1,3 @@
-# Creating a DCRDEX Server Account
-
 <a id="top"></a>
 
 _Last updated for Bison Wallet v1.0.0._

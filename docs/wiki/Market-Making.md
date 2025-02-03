@@ -134,9 +134,9 @@ The following placement settings are available in the Manual Configuration mode:
     * **Absolute:** The distance from the basis price is exactly the specified rate in the placement.
     * **Multiplier:** The distance from the basis price is a multiple of half the break-even spread.
 
-* **Buy Placements:** Defines the bot's buy order placements. If the available balance is insufficient to place all orders.
+* **Buy Placements:** Defines the bot's buy order placements.
 
-* **Sell Placements:** Defines the bot's sell order placements. If the available balance is insufficient to place all orders.
+* **Sell Placements:** Defines the bot's sell order placements.
 
 ### Asset Settings
 

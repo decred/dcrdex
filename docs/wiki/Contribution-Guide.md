@@ -1,5 +1,3 @@
-# Contribution Guide
-
 <a id="top"/>
 
 We welcome your contributions to dcrdex.
