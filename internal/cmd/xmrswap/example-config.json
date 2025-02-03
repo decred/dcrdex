@@ -1,0 +1,11 @@
+{
+        "alice": {
+            "xmrhost": "http://127.0.0.1:28284/json_rpc",
+            "dcrconf": "/home/me/dextest/dcr/trading1/trading1.conf"
+        },
+        "bob": {
+            "xmrhost": "http://127.0.0.1:28184/json_rpc",
+            "dcrconf": "/home/me/dextest/dcr/trading2/trading2.conf"
+        },
+        "extraxmrhost": "http://127.0.0.1:28484/json_rpc"
+    }
