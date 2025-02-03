@@ -1,3 +1,5 @@
+# Market Making
+
 <a id="top"/>
 
 _Last updated for Bison Wallet v1.0.0._
@@ -52,15 +54,23 @@ To start the bot, click the `Allocate and Run` button. A prompt will appear, con
  
 The bot can then be started by pressing the <img src="./images/using-bison-wallet/mm-start-button.png" width="20" alt=""> button.
 
-The market making screen will update to display the bot's status and key performance statistics.
+The market making screen will update to display the bot's status and key performance statistics. 
 
 <img src="./images/using-bison-wallet/mm-basic-running.png" width="800" alt="">
 
-If you do not have sufficient funds to run the bot with the specified parameters, the allocation prompt will display a warning and prevent the bot from starting.
+The bot can be stopped by pressing the `Stop` button, or deleted by pressing the <img src="./images/using-bison-wallet/mm-delete-button.png" width="20" alt=""> button. 
+
+If you lack sufficient funds to run the bot with the specified parameters, the allocation prompt will display a warning.
 
 <img src="./images/using-bison-wallet/mm-allocate-2.png" width="400" alt="">
 
-The bot can be stopped by pressing the `Stop` button, or deleted by pressing the <img src="./images/using-bison-wallet/mm-delete-button.png" width="20" alt=""> button. 
+You can still start the bot, but a warning will appear when orders cannot be placed.
+
+<img src="./images/using-bison-wallet/mm-allocate-3.png" width="400" alt="">
+
+Clicking the <img src="./images/using-bison-wallet/button-link.png" width="20" alt=""> button will open the orders report for the epoch, showing the available balances for the assets on the selected market and any deficits affecting the operation of the bot.
+
+<img src="./images/using-bison-wallet/mm-orders-report.png" width="600" alt="">
 
 ## Bot Settings
 
@@ -84,31 +94,24 @@ The strategy continually adjusts by replenishing orders to maintain the grid, al
 oscillations without needing to predict the market's direction.
 
 
-
-
 ### Basis Price
 
-The basis price for the market maker is calculated using the mid-gap of the market order book as a starting point. If oracles are available and the oracle weighting is greater than 0, the oracle price is factored into the basis price adjustment.
-
-In cases where the DEX market is empty:
-- If oracles are available and their weighting is greater than 0, the oracle rate is used.
-- If no oracles are available or their weighting is 0, the fiat rate is used.
-- If no fiat rate is available, the configuration's empty market rate is applied.
+If oracles are available for a market, the basis price is calculated as the volume-weighted average of the prices returned by the oracles. The available oracles can be viewed on the market maker settings screen. If no oracles are available, the basis price is determined using the fiat rates of both assets, which are fetched from the sources specified on the [Settings Panel](Header#settings-panel).
 
 ### Placements
 
-Placements refer to the settings and algorithm used by the market maker bot to strategically place buy and sell orders in the selected market. 
+Placements refer to the settings and algorithm used by the market maker bot to strategically place buy and sell orders in the selected market. If the available balance is insufficient to place all orders, the bot will prioritize them accordingly.  
 
 #### Quick Configuration
 
-Bison Wallet's market-making feature offers a Quick Configuration mode, allowing users to easily set up market maker placements and adjust key parameters. This mode utilizes the `Percent Plus` gap strategy, where the gap between buy and sell orders starts at the breakeven spread—the minimum spread required for a buy-sell pair to be profitable—and adds a user-defined profit threshold, calculated as a percentage of the mid-gap price. Additionally, Quick Configuration mode includes an interactive visual aid, enabling users to fine-tune their settings with ease.
+Bison Wallet's market-making feature offers a Quick Configuration mode, allowing users to easily set up market maker placements and adjust key parameters. This mode utilizes the `Percent Plus` gap strategy, where the gap between buy and sell orders starts at the breakeven spread — the minimum spread required for a buy-sell pair to be profitable when accounting for network fees — and adds a user-defined profit threshold, calculated as a percentage of the basis price. Additionally, Quick Configuration mode includes an interactive visual aid, enabling users to fine-tune their settings with ease.
 
 <img src="./images/using-bison-wallet/mm-placements-quick.png" width="400" alt="">
 
 The following placement settings are available in Quick Configuration mode:
 
 * **Price Levels Per Side:** The number of steps or levels at which the bot will place orders on each side of the order book.
-* **Lots per Level:** The depth of each order, defined by the number of lots the bot allocates per price level.
+* **Lots per Level:** Quantity to be placed at each price level. As orders are matched, new orders will be placed to maintain this quantity.
 * **Profit Threshold:** Adjusts the spread by adding a margin to the breakeven spread, expressed as a percentage of the mid-gap price.
 * **Price Increment:** The price difference between consecutive order levels in the order book.
 
@@ -124,18 +127,16 @@ Manual placement configuration allows users to fine-tune their market-making str
 
 The following placement settings are available in the Manual Configuration mode:
 
-* **Gap Strategy:** Sets the algorithm for calculating the distance from the basis price to place orders. The following strategies are available:
-    * **Percent Plus:** The gap starts at the break-even spread, which is the minimum spread at which a buy-sell combo produces profit, 
-    and then adds the specified spread, calculated as a percentage of the mid-gap price.
-    * **Percent:** The gap is set to the specified percent of the mid-gap price.
-    * **Absolute Plus:** The gap starts at the break-even spread, which is the minimum spread at which a buy-sell combo produces profit, 
-    and then adds the specified rate difference to both sides.
-    * **Absolute:** The spread is set to the specified value both left and right of the mid-gap, resulting in a total gap of twice the 
-    specified value.
-    * **Multiplier:** The gap is set to the specified multiple of the break-even spread, which is the minimum spread at which a buy-sell combo produces profit.
+* **Gap Strategy:** Defines the algorithm used to calculate the distance from the basis price when placing orders. Some algorithms factor in the break-even spread, which is the price difference between a buy and sell order where, if one lot of each is matched, the resulting profit precisely covers the network fees for both swaps. The following strategies are available:
+    * **Percent Plus:** The distance from the basis price is calculated as the specified percentage of the price, plus half of the break-even spread.
+    * **Percent:** The distance from the basis price is determined by the specified percentage of the price.
+    * **Absolute Plus:** The distance from the basis price is exactly the specified rate in the placement, plus half of the break-even spread.
+    * **Absolute:** The distance from the basis price is exactly the specified rate in the placement.
+    * **Multiplier:** The distance from the basis price is a multiple of half the break-even spread.
 
-* **Buy Placements:** Defines the bot's buy order placements. If the available balance is insufficient to place all orders, the bot will prioritize them accordingly. 
-* **Sell Placements:** Defines the bot's sell order placements. If the available balance is insufficient to place all orders, the bot will prioritize them accordingly.
+* **Buy Placements:** Defines the bot's buy order placements. If the available balance is insufficient to place all orders.
+
+* **Sell Placements:** Defines the bot's sell order placements. If the available balance is insufficient to place all orders.
 
 ### Asset Settings
 
