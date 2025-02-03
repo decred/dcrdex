@@ -1,3 +1,5 @@
+# Contribution Guide
+
 <a id="top"/>
 
 We welcome your contributions to dcrdex.
@@ -49,7 +51,6 @@ should first
 **dcrdex** is a great place to get started, but you would be expected to take on
 only smaller jobs until you are comfortable navigating the code and have shown
 the ability to communicate and follow through.
-
 
 ---
 

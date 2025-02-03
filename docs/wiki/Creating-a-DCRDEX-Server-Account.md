@@ -1,3 +1,5 @@
+# Creating a DCRDEX Server Account
+
 <a id="top"></a>
 
 _Last updated for Bison Wallet v1.0.0._
@@ -21,17 +23,13 @@ The available markets on the connected DCRDEX servers are listed on the left sid
 <img src="./images/setup-guide/trade-1.png" width="1200" alt="">
 
 
-An account can be created with the respective server by clicking the `Create Account` button
-on the top right of the screen. 
-
+An account can be created with the respective server by clicking the `Create Account` button on the top right of the screen.
 
 
 <img src="./images/setup-guide/trade-2.png" width="1200" alt="">
 
 
-
 This will open the `Select Bond Asset` prompt.
-
 
 
 <img src="./images/setup-guide/bond-1.png" width="1200" alt="">
@@ -69,7 +67,6 @@ Trading limits are also increased as you establish
 in normal trading activity and successfully completing matches.
 
 
-
 <img src="./images/setup-guide/bond-2.png" width="1200" alt="">
 
 
@@ -87,13 +84,11 @@ with an equivalent amount plus fees in reserves. The remainder goes to your avai
 which can then be traded, sent, or simply held in the wallet.
 
 
-
 <img src="./images/setup-guide/bond-3.png" width="1200" alt="">
 
 
 Once the wallet has synchronized and sufficient funds are available, a prompt will appear
 to confirm the selected bond options.
-
 
 
 <img src="./images/setup-guide/bond-4.png" width="1200" alt="">
@@ -107,13 +102,11 @@ bond transaction will be indicated on the top right. The number of required conf
 depending on the selected bond asset.
 
 
-
 <img src="./images/setup-guide/bond-5.png" width="1200" alt="">
 
 
 Once the bond transaction has been confirmed, the order submission section will be visible in the
 top right of the markets tab.
-
 
 
 <img src="./images/setup-guide/bond-6.png" width="1200" alt="">
