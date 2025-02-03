@@ -133,6 +133,7 @@ var PtBr = map[string]*intl.Translation{
 	"Export Account":             {T: "Exportar Conta"},
 	"simultaneous_servers_msg":   {T: "O cliente da DEX suporta simultâneos números de servidores DEX."},
 	"Change App Password":        {T: "Trocar Senha do aplicativo"},
+	"Version":                    {T: "Versão"},
 	"Build ID":                   {T: "ID da Build"},
 	"Connect":                    {T: "Conectar"},
 	"Withdraw":                   {T: "Retirar"},
