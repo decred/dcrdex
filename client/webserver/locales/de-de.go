@@ -167,6 +167,7 @@ var DeDE = map[string]*intl.Translation{
 	"browser_ntfn_blocked":      {T: "Browser-Benachrichtigungen sind derzeit blockiert. Heben die Blockierung dieser Seite in Ihrem Browser auf, um Benachrichtigungen zu erhalten."},
 	"enable_browser_ntfn_info":  {T: "Benachrichtigungen auf dem Desktop erscheinen auch dann, wenn dieses Fenster nicht aktiv ist.  Dies kann nützlich sein, wenn Sie andere Anwendungen aktiviert haben, da Sie dann Benachrichtigungen über Aktivitäten auf Bison Wallet erhalten. Sie können die Arten von Benachrichtigungen, die Sie erhalten möchten, unten anpassen."},
 	"Save Notifications":        {T: "Benachrichtigungen Speichern"},
+	"Version":                   {T: "Version"},
 	"Build ID":                  {T: "Build ID"},
 	"Connect":                   {T: "Verbinden"},
 	"Send":                      {T: "Senden"},
