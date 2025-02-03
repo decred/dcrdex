@@ -24,37 +24,67 @@ The market making functionality can be accessed from the header.
 
 <img src="./images/using-bison-wallet/header-mm.png" width="400" alt="">
 
-Upon opening the Market Making screen for the first time, you can create a new bot, configure API access for centralized exchanges, or review previous run logs.
+# Bot Management
+
+Upon opening the market making screen, you can create a new bot, edit an existing bot, configure API access for centralized exchanges, or review previous run logs.
 
 <img src="./images/using-bison-wallet/mm-start.png" width="800" alt="">
 
-
-# Creating a New Bot
-
-When creating a new bot, you will be prompted to select the market you want to trade in. If you have configured API access for supported centralized exchanges, an icon will highlight the markets that support arbitrage strategies.
+When creating a new bot, you will be prompted to select the market you want it to trade in. If you have configured API access for supported centralized exchanges, an icon will highlight the markets that support arbitrage strategies.
 
 <img src="./images/using-bison-wallet/mm-selectmarket.png" width="400" alt="">
 
-After selecting the desired market, a prompt will appear, allowing you to choose one of the supported strategies.
+After selecting the desired market, a prompt will appear, allowing you to choose one of the supported bots.
 
 <img src="./images/using-bison-wallet/mm-choosebot.png" width="400" alt="">
 
+After configuring placements and other parameters, the bot can be created by clicking the `Create Bot` button.
 
+<img src="./images/using-bison-wallet/mm-basic-createbot.png" width="400" alt="">
+
+The Market Making Overview screen will appear, displaying all configured bots.
+
+<img src="./images/using-bison-wallet/mm-basic-createbot2.png" width="800" alt="">
+
+To start the bot, click the `Allocate and Run` button. A prompt will appear, confirming whether you have sufficient funds to run the bot with the configured parameters.
+
+<img src="./images/using-bison-wallet/mm-allocate-1.png" width="400" alt="">
+ 
+The bot can then be started by pressing the <img src="./images/using-bison-wallet/mm-start-button.png" width="20" alt=""> button.
+
+The market making screen will update to display the bot's status and key performance statistics.
+
+<img src="./images/using-bison-wallet/mm-basic-running.png" width="800" alt="">
+
+If you do not have sufficient funds to run the bot with the specified parameters, the allocation prompt will display a warning and prevent the bot from starting.
+
+<img src="./images/using-bison-wallet/mm-allocate-2.png" width="400" alt="">
+
+The bot can be stopped by pressing the `Stop` button, or deleted by pressing the <img src="./images/using-bison-wallet/mm-delete-button.png" width="20" alt=""> button. 
+
+## Bot Settings
+
+The market maker settings allow you to configure all the necessary parameters for your bot, it can be accessed by pressing the <img src="./images/using-bison-wallet/mm-botconfig-button.png" width="20" alt=""> button.
+
+
+<img src="./images/using-bison-wallet/mm-settings.png" width="1200" alt="">
+
+The bot's parameters can be confirmed by pressing the `Save Settings` button.
+
+# Bot Types
+
+The following section details the bot types available in Bison Wallet and their configuration parameters.
 
 ## Basic Market Maker
 
 The Basic Market Maker aims to profit from market volatility by placing buy and sell orders at predefined price intervals based 
-on the selected strategy. It works by creating a "grid" of orders around the basis market price. As the market fluctuates, 
+on the selected strategy. It works by creating a grid of orders around the basis market price. As the market fluctuates, 
 buy orders are matched when the price drops to a specific level, and corresponding sell orders are matched as the price rises. 
 The strategy continually adjusts by replenishing orders to maintain the grid, allowing traders to capture profits from price 
 oscillations without needing to predict the market's direction.
 
 
 
-The market maker settings allow you to configure all the necessary parameters for your bot.
-
-
-<img src="./images/using-bison-wallet/mm-settings.png" width="1200" alt="">
 
 ### Basis Price
 
@@ -82,7 +112,7 @@ The following placement settings are available in Quick Configuration mode:
 * **Profit Threshold:** Adjusts the spread by adding a margin to the breakeven spread, expressed as a percentage of the mid-gap price.
 * **Price Increment:** The price difference between consecutive order levels in the order book.
 
-<img src="./images/using-bison-wallet/mm-placements-quick-layout.png" width="400" alt="">
+<img src="./images/using-bison-wallet/mm-placements-quick-layout.png" width="800" alt="">
 
 
 #### Manual Configuration
@@ -111,4 +141,21 @@ The following placement settings are available in the Manual Configuration mode:
 
 The asset settings panel allows users to configure the amount of funds the bot will allocate and reserve while running in the specified market.
 
-<img src="./images/using-bison-wallet/mm-basic-assetsettings.png" width="600" alt="">
+<img src="./images/using-bison-wallet/mm-basic-assetsettings.png" width="800" alt="">
+
+* **Order Inventory:** The amount of funds required to initially place all specified orders.
+* **Order Reserves:** Additional funds allocated for placing extra orders, specified as a multiple of the initial placements.
+* **Commit Total:** The total amount of funds allocated for order placements.
+* **Booking Fees:**  The funds required to cover swap fee obligations for the initial placements.
+* **Swap Fee Reserves:** Additional funds set aside for swap fees to accommodate extra orders, specified as the number of swaps.
+* **Fee Reserves:** The total amount of funds allocated for swap fees..
+* **Slippage Buffer:**  Extra funds reserved as a buffer to account for slippage..
+
+### Knobs
+
+The knobs panel contains additional settings that are specific to the basic market maker bot.
+
+<img src="./images/using-bison-wallet/mm-basic-knobs.png" width="400" alt="">
+
+* **Drift Tolerance:** The allowable deviation from the ideal order price before the bot cancels and rebooks the order.
+
