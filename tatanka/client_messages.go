@@ -153,6 +153,38 @@ func (t *Tatanka) handleClientConnect(cl tanka.Sender, msg *msgjson.Message) *ms
 	return nil
 }
 
+// Tatanka.clientHandlers
+
+type clientRequestHandler = func(c *client, msg *msgjson.Message) *msgjson.Error
+type clientNotificationHandler = func(c *client, msg *msgjson.Message)
+
+// handleClientMessage handles incoming messages from locally-connected clients.
+// All messages except for handleClientConnect and handlePostBond are handled
+// here, with some common pre-processing and validation done before the
+// subsequent route handler is called.
+func (t *Tatanka) handleClientMessage(cl tanka.Sender, msg *msgjson.Message) *msgjson.Error {
+	peerID := cl.PeerID()
+	c := t.clientNode(peerID)
+	if c == nil {
+		t.log.Errorf("Ignoring message from unknown client %s", peerID)
+		cl.Disconnect()
+		return nil
+	}
+
+	if err := mj.CheckSig(msg, c.PubKey); err != nil {
+		t.log.Errorf("Signature error for %q message from %q: %v", msg.Route, c.ID, err)
+		return msgjson.NewError(mj.ErrSig, "signature doesn't check")
+	}
+
+	switch handle := t.clientHandlers[msg.Route].(type) {
+	case clientRequestHandler:
+		return handle(c, msg)
+	case clientNotificationHandler:
+		handle(c, msg)
+	}
+	return nil // Notification
+}
+
 // handlePostBond handles a new bond sent from a locally connected client.
 // handlePostBond is the only client route than can be invoked before the user
 // is bonded.
@@ -226,38 +258,6 @@ func (t *Tatanka) handlePostBond(cl tanka.Sender, msg *msgjson.Message) *msgjson
 	return nil
 }
 
-// Tatanka.clientHandlers
-
-type clientRequestHandler = func(c *client, msg *msgjson.Message) *msgjson.Error
-type clientNotificationHandler = func(c *client, msg *msgjson.Message)
-
-// handleClientMessage handles incoming messages from locally-connected clients.
-// All messages except for handleClientConnect and handlePostBond are handled
-// here, with some common pre-processing and validation done before the
-// subsequent route handler is called.
-func (t *Tatanka) handleClientMessage(cl tanka.Sender, msg *msgjson.Message) *msgjson.Error {
-	peerID := cl.PeerID()
-	c := t.clientNode(peerID)
-	if c == nil {
-		t.log.Errorf("Ignoring message from unknown client %s", peerID)
-		cl.Disconnect()
-		return nil
-	}
-
-	if err := mj.CheckSig(msg, c.PubKey); err != nil {
-		t.log.Errorf("Signature error for %q message from %q: %v", msg.Route, c.ID, err)
-		return msgjson.NewError(mj.ErrSig, "signature doesn't check")
-	}
-
-	switch handle := t.clientHandlers[msg.Route].(type) {
-	case clientRequestHandler:
-		return handle(c, msg)
-	case clientNotificationHandler:
-		handle(c, msg)
-	}
-	return nil // Notification
-}
-
 // handleSubscription handles a new subscription, adding the subject to the
 // map if it doesn't exist. It then distributes a NewSubscriber broadcast
 // to all current subscribers and remote tatankas.
@@ -272,12 +272,23 @@ func (t *Tatanka) handleSubscription(c *client, msg *msgjson.Message) *msgjson.E
 		return msgjson.NewError(mj.ErrBadRequest, "is this payload a subscription?")
 	}
 
+	newSubB, err := json.Marshal(&mj.NewSubscriber{
+		PeerID:  c.ID,
+		Topic:   sub.Topic,
+		Subject: sub.Subject,
+	})
+	if err != nil {
+		t.log.Errorf("error marshaling subscription from %s: %w", c.ID, err)
+		return msgjson.NewError(mj.ErrInternal, "why didn't the NewSubscriber marshal?")
+	}
+
 	bcast := &mj.Broadcast{
 		Topic:       sub.Topic,
 		Subject:     sub.Subject,
 		MessageType: mj.MessageTypeNewSubscriber,
 		PeerID:      c.ID,
 		Stamp:       time.Now(),
+		Payload:     newSubB,
 	}
 
 	// Do a helper function here to keep things tidy below.
