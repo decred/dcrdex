@@ -215,7 +215,7 @@ func (t *Tatanka) handlePostBond(cl tanka.Sender, msg *msgjson.Message) *msgjson
 		msgjson.NewError(mj.ErrInternal, "internal error")
 	}
 
-	if len(liveBonds) > 0 { // Probably no way to get here with empty allBonds, but checking anyway.
+	if len(liveBonds) > 0 { // Probably no way to get here with empty liveBonds, but checking anyway.
 		if c := t.clientNode(peerID); c != nil {
 			c.updateBonds(liveBonds)
 		}
@@ -231,7 +231,7 @@ func (t *Tatanka) handlePostBond(cl tanka.Sender, msg *msgjson.Message) *msgjson
 type clientRequestHandler = func(c *client, msg *msgjson.Message) *msgjson.Error
 type clientNotificationHandler = func(c *client, msg *msgjson.Message)
 
-// handleClientMessage handles incoming message from locally-connected clients.
+// handleClientMessage handles incoming messages from locally-connected clients.
 // All messages except for handleClientConnect and handlePostBond are handled
 // here, with some common pre-processing and validation done before the
 // subsequent route handler is called.

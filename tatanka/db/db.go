@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,6 +17,12 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/lexi"
+)
+
+const DBVersion = 0
+
+var (
+	versionKey = []byte("dbver")
 )
 
 type DB struct {
@@ -37,7 +44,32 @@ func New(dir string, log dex.Logger) (*DB, error) {
 		Log:  log,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("error constructing new db: %w", err)
+		return nil, fmt.Errorf("error initializing db: %w", err)
+	}
+
+	metaTable, err := db.Table("meta")
+	if err != nil {
+		return nil, fmt.Errorf("error initializing meta table: %w", err)
+	}
+	verB, err := metaTable.GetRaw(lexi.B(versionKey))
+	if err != nil {
+		if errors.Is(err, lexi.ErrKeyNotFound) {
+			// fresh install
+			verB = []byte{DBVersion}
+			metaTable.Set(lexi.B(versionKey), lexi.B(verB))
+		} else {
+			return nil, fmt.Errorf("error getting version")
+		}
+	}
+	if len(verB) != 1 {
+		return nil, fmt.Errorf("bad version length. bad")
+	}
+	ver := verB[0]
+	if ver > DBVersion {
+		return nil, fmt.Errorf("database reporting version from the future")
+	}
+	if ver < DBVersion {
+		// Do lexi upgrade stuff.
 	}
 
 	// Scores. Keyed on (scorer peer ID, scored peer ID).
@@ -56,14 +88,14 @@ func New(dir string, log dex.Logger) (*DB, error) {
 		return append(s.scored[:], tB...), nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("error constructing reputation index: %w", err)
+		return nil, fmt.Errorf("error initializing reputation index: %w", err)
 	}
 	scoredIdx.UseDefaultIterationOptions(lexi.WithReverse())
 
 	// Bonds. Keyed on coin ID
 	bondsTable, err := db.Table("bonds")
 	if err != nil {
-		return nil, fmt.Errorf("error constructing bonds table: %w", err)
+		return nil, fmt.Errorf("error initializing bonds table: %w", err)
 	}
 	// Retrieve bonds by peer ID.
 	bonderIdx, err := bondsTable.AddIndex("bonder", func(_, v encoding.BinaryMarshaler) ([]byte, error) {
@@ -74,7 +106,7 @@ func New(dir string, log dex.Logger) (*DB, error) {
 		return b.PeerID[:], nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("error constructing bonder index: %w", err)
+		return nil, fmt.Errorf("error initializing bonder index: %w", err)
 	}
 	// We'll periodically prune expired bonds.
 	bondStampIdx, err := bondsTable.AddIndex("bond-stamp", func(_, v encoding.BinaryMarshaler) ([]byte, error) {
@@ -86,7 +118,7 @@ func New(dir string, log dex.Logger) (*DB, error) {
 	})
 	bondStampIdx.UseDefaultIterationOptions(lexi.WithReverse())
 	if err != nil {
-		return nil, fmt.Errorf("error constructing bond stamp index: %w", err)
+		return nil, fmt.Errorf("error initializing bond stamp index: %w", err)
 	}
 	return &DB{
 		DB:           db,
@@ -105,7 +137,9 @@ func (db *DB) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		for {
 			select {
 			case <-time.After(time.Hour):
+				wg.Add(1)
 				db.pruneOldBonds()
+				wg.Done()
 			case <-ctx.Done():
 				return
 			}
