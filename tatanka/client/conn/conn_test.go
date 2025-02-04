@@ -1,4 +1,4 @@
-package client
+package conn
 
 import (
 	"bytes"

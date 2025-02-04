@@ -108,14 +108,15 @@ func (idx *Index) UseDefaultIterationOptions(optss ...IterationOption) {
 	}
 }
 
-// Iter is an entry in the Index. The caller can use Iter to access and delete
-// data associated with the index entry and it's datum.
+// Iter is an entry in the Index or Table. The caller can use Iter to access and
+// delete data associated with the entry and it's datum.
 type Iter struct {
-	idx  *Index
-	item *badger.Item
-	txn  *badger.Txn
-	dbID DBID
-	d    *datum
+	table   *Table
+	isIndex bool
+	item    *badger.Item
+	txn     *badger.Txn
+	dbID    DBID
+	d       *datum
 }
 
 // V gives access to the datum bytes. The byte slice passed to f is only valid
@@ -138,26 +139,27 @@ func (i *Iter) K() ([]byte, error) {
 	return item.ValueCopy(nil)
 }
 
-// Entry is the actual index entry. These are the bytes returned by the
-// generator passed to AddIndex.
+// Entry is the actual index entry when iterating an Index. When iterating a
+// Table, this method doesn't really have a use, so we'll just return the DBID.
 func (i *Iter) Entry(f func(idxB []byte) error) error {
 	k := i.item.Key()
-	if len(k) < prefixSize+DBIDSize {
-		return fmt.Errorf("index entry too small. length = %d", len(k))
+	if i.isIndex {
+		if len(k) < prefixSize+DBIDSize {
+			return fmt.Errorf("index entry too small. length = %d", len(k))
+		}
+		return f(k[prefixSize : len(k)-DBIDSize])
 	}
-	return f(k[prefixSize : len(k)-DBIDSize])
+	if len(k) < prefixSize {
+		return fmt.Errorf("table key too small. length = %d", len(k))
+	}
+	return f(k[prefixSize:])
 }
 
 func (i *Iter) datum() (_ *datum, err error) {
 	if i.d != nil {
 		return i.d, nil
 	}
-	k := i.item.Key()
-	if len(k) < prefixSize+DBIDSize {
-		return nil, fmt.Errorf("invalid index entry length %d", len(k))
-	}
-	dbID := newDBIDFromBytes(k[len(k)-DBIDSize:])
-	i.d, err = i.idx.table.get(i.txn, dbID)
+	i.d, err = i.table.get(i.txn, i.dbID)
 	return i.d, err
 }
 
@@ -167,7 +169,7 @@ func (i *Iter) Delete() error {
 	if err != nil {
 		return err
 	}
-	return i.idx.table.deleteDatum(i.txn, i.dbID, d)
+	return i.table.deleteDatum(i.txn, i.dbID, d)
 }
 
 // IndexBucket is any one of a number of common types whose binary encoding is
@@ -195,11 +197,15 @@ func parseIndexBucket(i IndexBucket) (b []byte, err error) {
 // Iterate iterates the index, providing access to the index entry, datum, and
 // datum key via the Iter.
 func (idx *Index) Iterate(prefixI IndexBucket, f func(*Iter) error, iterOpts ...IterationOption) error {
+	return idx.iterate(idx.prefix, idx.table, idx.defaultIterationOptions, true, prefixI, f, iterOpts...)
+}
+
+// iterate iterates a table or index.
+func (db *DB) iterate(keyPfix keyPrefix, table *Table, io iteratorOpts, isIndex bool, prefixI IndexBucket, f func(*Iter) error, iterOpts ...IterationOption) error {
 	prefix, err := parseIndexBucket(prefixI)
 	if err != nil {
 		return err
 	}
-	io := idx.defaultIterationOptions
 	for i := range iterOpts {
 		iterOpts[i](&io)
 	}
@@ -207,26 +213,37 @@ func (idx *Index) Iterate(prefixI IndexBucket, f func(*Iter) error, iterOpts ...
 	if io.reverse {
 		iterFunc = reverseIteratePrefix
 	}
-	viewUpdate := idx.View
+	viewUpdate := db.View
 	if io.update {
-		viewUpdate = idx.Update
+		viewUpdate = db.Update
 	}
 	var seek []byte
 	if len(io.seek) > 0 {
-		seek = prefixedKey(idx.prefix, io.seek)
+		seek = prefixedKey(keyPfix, io.seek)
 	}
 	return viewUpdate(func(txn *badger.Txn) error {
-		return iterFunc(txn, prefixedKey(idx.prefix, prefix), seek, func(iter *badger.Iterator) error {
+		return iterFunc(txn, prefixedKey(keyPfix, prefix), seek, func(iter *badger.Iterator) error {
 			item := iter.Item()
 			k := item.Key()
-			if len(k) < prefixSize+DBIDSize {
-				return fmt.Errorf("invalid index entry length %d", len(k))
+
+			var dbID DBID
+			if isIndex {
+				if len(k) < prefixSize+DBIDSize {
+					return fmt.Errorf("invalid index entry length %d", len(k))
+				}
+				dbID = newDBIDFromBytes(k[len(k)-DBIDSize:])
+			} else {
+				if len(k) != prefixSize+DBIDSize {
+					return fmt.Errorf("invalid table key length %d", len(k))
+				}
+				copy(dbID[:], k)
 			}
 			return f(&Iter{
-				idx:  idx,
-				item: iter.Item(),
-				txn:  txn,
-				dbID: newDBIDFromBytes(k[len(k)-DBIDSize:]),
+				isIndex: isIndex,
+				table:   table,
+				item:    iter.Item(),
+				txn:     txn,
+				dbID:    dbID,
 			})
 		})
 	})
