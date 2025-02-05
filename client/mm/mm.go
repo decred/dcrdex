@@ -790,7 +790,7 @@ type StartConfig struct {
 }
 
 // StartBot starts a market making bot.
-func (m *MarketMaker) StartBot(startCfg *StartConfig, alternateConfigPath *string, appPW []byte) (err error) {
+func (m *MarketMaker) StartBot(startCfg *StartConfig, alternateConfigPath *string, appPW []byte, overrideLotSizeChange bool) (err error) {
 	mkt := startCfg.MarketWithHost
 
 	m.startUpdateMtx.Lock()
@@ -825,6 +825,31 @@ func (m *MarketMaker) StartBot(startCfg *StartConfig, alternateConfigPath *strin
 	if botCfg.RPCConfig != nil {
 		startCfg.Alloc = botCfg.RPCConfig.Alloc
 		startCfg.AutoRebalance = botCfg.RPCConfig.AutoRebalance
+	}
+
+	// Lot size may be zero if started from RPC. If the lot size in the config
+	// is set, then we check if the lot size has changed since the configuration
+	// was saved. If so, and overrideLotSizeChange is false, we return an error.
+	// If overrideLotSizeChange is true, we update the lot size in the config.
+	if botCfg.LotSize > 0 {
+		mktInfo, err := m.core.ExchangeMarket(mkt.Host, mkt.BaseID, mkt.QuoteID)
+		if err != nil {
+			return fmt.Errorf("error getting market info for %s: %w", mkt, err)
+		}
+
+		if botCfg.LotSize != mktInfo.LotSize {
+			if overrideLotSizeChange {
+				botCfg.LotSize = mktInfo.LotSize
+				m.updateDefaultBotConfig(botCfg)
+			} else {
+				return fmt.Errorf("lot size changed since configuration")
+			}
+		}
+
+		if !overrideLotSizeChange && botCfg.LotSize != mktInfo.LotSize {
+			return fmt.Errorf("lot size for %s has changed: %d -> %d", mkt, botCfg.LotSize, mktInfo.LotSize)
+		}
+		botCfg.LotSize = mktInfo.LotSize
 	}
 
 	return m.startBot(startCfg, botCfg, cexCfg, appPW)
@@ -989,6 +1014,12 @@ func (m *MarketMaker) UpdateBotConfig(updatedCfg *BotConfig) error {
 	if running {
 		return fmt.Errorf("call UpdateRunningBotCfg to update the config of a running bot")
 	}
+
+	mkt, err := m.core.ExchangeMarket(updatedCfg.Host, updatedCfg.BaseID, updatedCfg.QuoteID)
+	if err != nil {
+		return fmt.Errorf("error getting market: %w", err)
+	}
+	updatedCfg.LotSize = mkt.LotSize
 
 	m.updateDefaultBotConfig(updatedCfg)
 	return nil
