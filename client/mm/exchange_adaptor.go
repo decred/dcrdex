@@ -1229,14 +1229,19 @@ func (u *unifiedExchangeAdaptor) multiTrade(
 
 	rateCausesSelfMatch := u.rateCausesSelfMatchFunc(sell)
 
+	multiSplitBuffer := u.botCfg().multiSplitBuffer()
+
 	fundingReq := func(rate, lots, counterTradeRate uint64) (dexReq map[uint32]uint64, cexReq uint64) {
 		qty := u.lotSize * lots
+		swapFees := fees.Swap * lots
 		if !sell {
 			qty = calc.BaseToQuote(rate, qty)
+			qty = uint64(math.Round(float64(qty) * (100 + multiSplitBuffer) / 100))
+			swapFees = uint64(math.Round(float64(swapFees) * (100 + multiSplitBuffer) / 100))
 		}
 		dexReq = make(map[uint32]uint64)
 		dexReq[fromID] += qty
-		dexReq[fromFeeID] += fees.Swap * lots
+		dexReq[fromFeeID] += swapFees
 		if u.isAccountLocker(fromID) {
 			dexReq[fromFeeID] += fees.Refund * lots
 		}
