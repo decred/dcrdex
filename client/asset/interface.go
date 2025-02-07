@@ -1537,10 +1537,6 @@ type ActionRequiredNote struct {
 	ActionID string `json:"actionID"`
 }
 
-// ActionResolved is sent by wallets when action is no longer required for a
-// unique ID.
-const ActionResolved = "actionResolved"
-
 type ActionResolvedNote struct {
 	baseWalletNotification
 	UniqueID string `json:"uniqueID"`
