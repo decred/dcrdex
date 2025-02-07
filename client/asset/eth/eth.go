@@ -4683,7 +4683,7 @@ func (w *baseWallet) checkPendingTxs() {
 			// on it, cancel that request.
 			if pendingTx.actionRequested {
 				pendingTx.actionRequested = false
-				w.requestAction(asset.ActionResolved, pendingTx.ID, nil, pendingTx.TokenID)
+				w.resolveAction(pendingTx.ID, pendingTx.TokenID)
 			}
 		}
 	}
@@ -5044,8 +5044,8 @@ func (w *assetWallet) userActionRecoverNonces(actionB []byte) error {
 	return nil
 }
 
-// requestAction sends a ActionRequired or ActionResolved notification up the
-// chain of command. nonceMtx must be locked.
+// requestAction sends a ActionRequired notification up the chain of command.
+// nonceMtx must be locked.
 func (w *baseWallet) requestAction(actionID, uniqueID string, req *TransactionActionNote, tokenID *uint32) {
 	assetID := w.baseChainID
 	if tokenID != nil {
@@ -5056,6 +5056,20 @@ func (w *baseWallet) requestAction(actionID, uniqueID string, req *TransactionAc
 		return
 	}
 	aw.emit.ActionRequired(uniqueID, actionID, req)
+}
+
+// resolveAction sends a ActionResolved notification up the chain of command.
+// nonceMtx must be locked.
+func (w *baseWallet) resolveAction(uniqueID string, tokenID *uint32) {
+	assetID := w.baseChainID
+	if tokenID != nil {
+		assetID = *tokenID
+	}
+	aw := w.wallet(assetID)
+	if aw == nil { // sanity
+		return
+	}
+	aw.emit.ActionResolved(uniqueID)
 }
 
 // TakeAction satisfies asset.ActionTaker. This handles responses from the
