@@ -1521,7 +1521,7 @@ func (dm *DEX) EnableDataAPI(yes bool) {
 	dm.server.EnableDataAPI(yes)
 }
 
-// candlesParamsParser is middleware for the /candles routes. Parses the
+// candleParamsParser is middleware for the /candles routes. Parses the
 // *msgjson.CandlesRequest from the URL parameters.
 func candleParamsParser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

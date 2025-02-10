@@ -191,7 +191,7 @@ func (t *Tatanka) handleRelayedTankagram(tt *remoteTatanka, msg *msgjson.Message
 	return nil
 }
 
-// handlePathInquire returns whether a particular client is connected to this
+// handlePathInquiry returns whether a particular client is connected to this
 // node.
 func (t *Tatanka) handlePathInquiry(tt *remoteTatanka, msg *msgjson.Message) *msgjson.Error {
 	var inq mj.PathInquiry
