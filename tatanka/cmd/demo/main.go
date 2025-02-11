@@ -14,8 +14,10 @@ import (
 	"sync"
 	"time"
 
+	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/dex"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
+	"decred.org/dcrdex/server/asset/dcr"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/tatanka"
 	"decred.org/dcrdex/tatanka/chain/utxo"
@@ -106,12 +108,13 @@ func mainErr() (err error) {
 	dir1 := filepath.Join(tmpDir, "tatanka2")
 	priv1, pid1 := genKey(dir1)
 
+	client1Net := dex.Simnet // change to testnet or mainnet to test fee estimates
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		defer cancel()
 
-		runServer(ctx, dir0, addrs[0], addrs[1], priv1.PubKey().SerializeCompressed(), true)
+		runServer(ctx, client1Net, dir0, addrs[0], addrs[1], priv1.PubKey().SerializeCompressed(), true)
 	}()
 
 	time.Sleep(time.Second)
@@ -121,7 +124,7 @@ func mainErr() (err error) {
 		defer wg.Done()
 		defer cancel()
 
-		runServer(ctx, dir1, addrs[1], addrs[0], priv0.PubKey().SerializeCompressed(), true)
+		runServer(ctx, dex.Simnet, dir1, addrs[1], addrs[0], priv0.PubKey().SerializeCompressed(), true)
 	}()
 
 	time.Sleep(time.Second)
@@ -289,10 +292,26 @@ func mainErr() (err error) {
 		fmt.Printf("\nGot fiat rates for %d out of %d assets\n", got, want)
 	}
 
+	fmt.Println("Testing fee estimates.....")
+
+	if client1Net == dex.Mainnet || client1Net == dex.Testnet {
+		if err = cl1.SubscribeToFeeEstimates(); err != nil {
+			return err
+		}
+
+		// Wait for fee estimate.
+		<-cl1.Next()
+
+		for _, chainID := range []uint32{btc.BipID, dcr.BipID} {
+			fmt.Println(dex.BipIDSymbol(chainID), "->", cl1.FeeEstimate(chainID))
+		}
+	} else {
+		fmt.Printf("\nSkipping fee estimate test for %s\n", client1Net)
+	}
+
 	fmt.Println("!!!!!!!! Test Success !!!!!!!!")
 
 	cancel()
-
 	wg.Wait()
 
 	cl1.cm.Wait()
@@ -325,7 +344,7 @@ func findOpenAddrs(n int) ([]net.Addr, error) {
 	return addrs, nil
 }
 
-func runServer(ctx context.Context, dir string, addr, peerAddr net.Addr, peerID []byte, disableMessariFiatRateSource bool) {
+func runServer(ctx context.Context, net dex.Network, dir string, addr, peerAddr net.Addr, peerID []byte, disableMessariFiatRateSource bool) {
 	n := newBootNode(peerAddr.String(), peerID)
 
 	log := logMaker.Logger(fmt.Sprintf("SRV[%s]", addr))
@@ -341,7 +360,7 @@ func runServer(ctx context.Context, dir string, addr, peerAddr net.Addr, peerID 
 	}
 
 	cfg := &tatanka.Config{
-		Net:     dex.Simnet,
+		Net:     net,
 		DataDir: dir,
 		Logger:  log,
 		RPC: comms.RPCConfig{
