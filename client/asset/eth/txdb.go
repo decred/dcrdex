@@ -12,6 +12,7 @@ import (
 	"math"
 	"math/big"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -50,6 +51,8 @@ type extendedWalletTx struct {
 	actionRequested bool
 	actionIgnored   time.Time
 	indexed         bool
+
+	initialSendComplete atomic.Bool
 }
 
 func (t *extendedWalletTx) age() time.Duration {
@@ -343,6 +346,7 @@ func unmarshalTx(wtB []byte) (wt *extendedWalletTx, err error) {
 	wt.txHash = common.HexToHash(wt.ID)
 	wt.lastBroadcast = time.Unix(int64(wt.SubmissionTime), 0)
 	wt.savedToDB = true
+	wt.initialSendComplete.Store(true)
 	return
 }
 
