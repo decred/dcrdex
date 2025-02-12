@@ -447,6 +447,7 @@ var EnUS = map[string]*intl.Translation{
 	"Minimum Balance":             {T: "Minimum Balance"},
 	"Minimum Transfer":            {T: "Minimum Transfer"},
 	"update_settings":             {Version: 1, T: "Save Settings"},
+	"update_running":              {T: "Update Running Bot"},
 	"create_bot":                  {T: "Create Bot"},
 	"reset_settings":              {T: "Reset Settings"},
 	"gap_strategy":                {T: "Gap Strategy"},
@@ -547,7 +548,6 @@ var EnUS = map[string]*intl.Translation{
 	"decred_privacy":              {T: "Decred's form of privacy is especially powerful because Decred wallets integrate privacy with staking, which facilitates a consistently large anonymity set, a critical feature for privacy."},
 	"privacy_optional":            {T: "Privacy is completely optional, and can be disabled at any time. There are increased transaction fees associated with privacy, but these fees have historically been relatively negligible."},
 	"privacy_unlocked":            {T: "The wallet must remain unlocked while mixing."},
-	"bots_running_view_only":      {T: "Bots are running. You are in view-only mode."},
 	"select_a_cex_prompt":         {T: "Select an exchange to enable arbitrage"},
 	"Market not available":        {T: "Market not available"},
 	"bot_profit_title":            {T: "Choose your profit threshold"},
@@ -685,4 +685,6 @@ var EnUS = map[string]*intl.Translation{
 	"Wallet Balances":             {T: "Wallet Balances"},
 	"Placements":                  {T: "Placements"},
 	"delete_bot":                  {T: "Delete Bot"},
+	"bot_running":                 {T: "This bot is currently running"},
+	"Asset Allocations":           {T: "Asset Allocations"},
 }

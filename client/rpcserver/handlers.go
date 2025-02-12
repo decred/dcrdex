@@ -861,7 +861,7 @@ func handleMMAvailableBalances(s *RPCServer, params *RawParams) *msgjson.Respons
 		return usage(mmAvailableBalancesRoute, err)
 	}
 
-	dexBalances, cexBalances, err := s.mm.AvailableBalances(form.mkt, &form.cfgFilePath)
+	dexBalances, cexBalances, err := s.mm.AvailableBalances(form.mkt, form.cexName)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCMMAvailableBalancesError, "unable to get available balances: %v", err)
 		return createResponse(mmAvailableBalancesRoute, nil, resErr)
