@@ -1106,6 +1106,10 @@ func TestMultiTrade(t *testing.T) {
 
 	b2q := calc.BaseToQuote
 
+	addBuffer := func(qty uint64, buffer float64) uint64 {
+		return uint64(math.Round(float64(qty) * (100 + buffer) / 100))
+	}
+
 	/*
 	 * The dexBalance and cexBalances fields of this test are set so that they
 	 * are at an edge. If any non-zero balance is decreased by 1, the behavior
@@ -1116,6 +1120,8 @@ func TestMultiTrade(t *testing.T) {
 		name    string
 		baseID  uint32
 		quoteID uint32
+
+		multiSplitBuffer float64
 
 		sellDexBalances   map[uint32]uint64
 		sellCexBalances   map[uint32]uint64
@@ -1526,6 +1532,392 @@ func TestMultiTrade(t *testing.T) {
 					0: b2q(buyPlacements[1].Rate, lotSize) +
 						b2q(buyPlacements[2].Rate, 2*lotSize) +
 						3*buyFees.Max.Swap + buyFees.Funding,
+				},
+				UsedCEXBal: 3 * lotSize,
+			},
+			expectedOrderIDsWithDecrement: []order.OrderID{
+				orderIDs[4], orderIDs[5],
+			},
+		},
+		{
+			name:    "non account locker - multi split buffer",
+			baseID:  42,
+			quoteID: 0,
+
+			multiSplitBuffer: 0.1,
+
+			// ---- Sell ----
+			sellDexBalances: map[uint32]uint64{
+				42: 4*lotSize + 4*sellFees.Max.Swap + sellFees.Funding,
+				0:  0,
+			},
+			sellCexBalances: map[uint32]uint64{
+				42: 0,
+				0: b2q(sellPlacements[0].CounterTradeRate, lotSize) +
+					b2q(sellPlacements[1].CounterTradeRate, 2*lotSize) +
+					b2q(sellPlacements[2].CounterTradeRate, 3*lotSize) +
+					b2q(sellPlacements[3].CounterTradeRate, 2*lotSize),
+			},
+			sellPlacements:    sellPlacements,
+			sellPendingOrders: pendingOrders(true, 42, 0),
+			expectedSellPlacements: []*core.QtyRate{
+				{Qty: lotSize, Rate: sellPlacements[1].Rate},
+				{Qty: 2 * lotSize, Rate: sellPlacements[2].Rate},
+				{Qty: lotSize, Rate: sellPlacements[3].Rate},
+			},
+			expectedSellOrderReport: &OrderReport{
+				Placements: []*TradePlacement{
+					{Lots: 1, Rate: sps[0].Rate, CounterTradeRate: sps[0].CounterTradeRate,
+						StandingLots: 1,
+						RequiredDEX:  map[uint32]uint64{},
+						UsedDEX:      map[uint32]uint64{},
+						RequiredCEX:  0,
+						UsedCEX:      0,
+					},
+					{Lots: 2, Rate: sps[1].Rate, CounterTradeRate: sps[1].CounterTradeRate,
+						StandingLots: 1,
+						RequiredDEX: map[uint32]uint64{
+							42: lotSize + sellFees.Max.Swap,
+						},
+						UsedDEX: map[uint32]uint64{
+							42: lotSize + sellFees.Max.Swap,
+						},
+						RequiredCEX: b2q(sellPlacements[1].CounterTradeRate, lotSize),
+						UsedCEX:     b2q(sellPlacements[1].CounterTradeRate, lotSize),
+						OrderedLots: 1,
+					},
+					{Lots: 3, Rate: sps[2].Rate, CounterTradeRate: sps[2].CounterTradeRate,
+						StandingLots: 1,
+						RequiredDEX: map[uint32]uint64{
+							42: 2 * (lotSize + sellFees.Max.Swap),
+						},
+						UsedDEX: map[uint32]uint64{
+							42: 2 * (lotSize + sellFees.Max.Swap),
+						},
+						RequiredCEX: b2q(sellPlacements[2].CounterTradeRate, 2*lotSize),
+						UsedCEX:     b2q(sellPlacements[2].CounterTradeRate, 2*lotSize),
+						OrderedLots: 2,
+					},
+					{Lots: 2, Rate: sps[3].Rate, CounterTradeRate: sps[3].CounterTradeRate,
+						StandingLots: 1,
+						RequiredDEX: map[uint32]uint64{
+							42: lotSize + sellFees.Max.Swap,
+						},
+						UsedDEX: map[uint32]uint64{
+							42: lotSize + sellFees.Max.Swap,
+						},
+						RequiredCEX: b2q(sellPlacements[3].CounterTradeRate, lotSize),
+						UsedCEX:     b2q(sellPlacements[3].CounterTradeRate, lotSize),
+						OrderedLots: 1,
+					},
+				},
+				Fees: sellFees,
+				AvailableDEXBals: map[uint32]*BotBalance{
+					42: {
+						Available: 4*lotSize + 4*sellFees.Max.Swap + sellFees.Funding,
+					},
+					0: {},
+				},
+				RequiredDEXBals: map[uint32]uint64{
+					42: 4*lotSize + 4*sellFees.Max.Swap + sellFees.Funding,
+				},
+				RemainingDEXBals: map[uint32]uint64{
+					42: 0,
+					0:  0,
+				},
+				AvailableCEXBal: &BotBalance{
+					Available: b2q(sellPlacements[1].CounterTradeRate, lotSize) +
+						b2q(sellPlacements[2].CounterTradeRate, 2*lotSize) +
+						b2q(sellPlacements[3].CounterTradeRate, lotSize),
+					Reserved: b2q(sellPlacements[0].CounterTradeRate, lotSize) +
+						b2q(sellPlacements[1].CounterTradeRate, lotSize) +
+						b2q(sellPlacements[2].CounterTradeRate, lotSize) +
+						b2q(sellPlacements[3].CounterTradeRate, lotSize),
+				},
+				RequiredCEXBal: b2q(sellPlacements[1].CounterTradeRate, lotSize) +
+					b2q(sellPlacements[2].CounterTradeRate, 2*lotSize) +
+					b2q(sellPlacements[3].CounterTradeRate, lotSize),
+				RemainingCEXBal: 0,
+				UsedDEXBals: map[uint32]uint64{
+					42: 4*lotSize + 4*sellFees.Max.Swap + sellFees.Funding,
+				},
+				UsedCEXBal: b2q(sellPlacements[1].CounterTradeRate, lotSize) +
+					b2q(sellPlacements[2].CounterTradeRate, 2*lotSize) +
+					b2q(sellPlacements[3].CounterTradeRate, lotSize),
+			},
+			expectedSellPlacementsWithDecrement: []*core.QtyRate{
+				{Qty: lotSize, Rate: sellPlacements[1].Rate},
+				{Qty: 2 * lotSize, Rate: sellPlacements[2].Rate},
+			},
+			expectedSellOrderReportWithDEXDecrement: &OrderReport{
+				Placements: []*TradePlacement{
+					{Lots: 1, Rate: sps[0].Rate, CounterTradeRate: sps[0].CounterTradeRate,
+						StandingLots: 1,
+						RequiredDEX:  map[uint32]uint64{},
+						UsedDEX:      map[uint32]uint64{},
+						RequiredCEX:  0,
+						UsedCEX:      0,
+					},
+					{Lots: 2, Rate: sps[1].Rate, CounterTradeRate: sps[1].CounterTradeRate,
+						StandingLots: 1,
+						RequiredDEX: map[uint32]uint64{
+							42: lotSize + sellFees.Max.Swap,
+						},
+						UsedDEX: map[uint32]uint64{
+							42: lotSize + sellFees.Max.Swap,
+						},
+						RequiredCEX: b2q(sellPlacements[1].CounterTradeRate, lotSize),
+						UsedCEX:     b2q(sellPlacements[1].CounterTradeRate, lotSize),
+						OrderedLots: 1,
+					},
+					{Lots: 3, Rate: sps[2].Rate, CounterTradeRate: sps[2].CounterTradeRate,
+						StandingLots: 1,
+						RequiredDEX: map[uint32]uint64{
+							42: 2 * (lotSize + sellFees.Max.Swap),
+						},
+						UsedDEX: map[uint32]uint64{
+							42: 2 * (lotSize + sellFees.Max.Swap),
+						},
+						RequiredCEX: b2q(sellPlacements[2].CounterTradeRate, 2*lotSize),
+						UsedCEX:     b2q(sellPlacements[2].CounterTradeRate, 2*lotSize),
+						OrderedLots: 2,
+					},
+					{Lots: 2, Rate: sps[3].Rate, CounterTradeRate: sps[3].CounterTradeRate,
+						StandingLots: 1,
+						RequiredDEX: map[uint32]uint64{
+							42: lotSize + sellFees.Max.Swap,
+						},
+						UsedDEX:     map[uint32]uint64{},
+						RequiredCEX: b2q(sellPlacements[3].CounterTradeRate, lotSize),
+						UsedCEX:     0,
+						OrderedLots: 0,
+					},
+				},
+				Fees: sellFees,
+				AvailableDEXBals: map[uint32]*BotBalance{
+					42: {
+						Available: 4*lotSize + 4*sellFees.Max.Swap + sellFees.Funding - 1,
+					},
+					0: {},
+				},
+				RequiredDEXBals: map[uint32]uint64{
+					42: 4*lotSize + 4*sellFees.Max.Swap + sellFees.Funding,
+				},
+				RemainingDEXBals: map[uint32]uint64{
+					42: lotSize + sellFees.Max.Swap - 1,
+					0:  0,
+				},
+				AvailableCEXBal: &BotBalance{
+					Available: b2q(sellPlacements[1].CounterTradeRate, lotSize) +
+						b2q(sellPlacements[2].CounterTradeRate, 2*lotSize) +
+						b2q(sellPlacements[3].CounterTradeRate, lotSize),
+					Reserved: b2q(sellPlacements[0].CounterTradeRate, lotSize) +
+						b2q(sellPlacements[1].CounterTradeRate, lotSize) +
+						b2q(sellPlacements[2].CounterTradeRate, lotSize) +
+						b2q(sellPlacements[3].CounterTradeRate, lotSize),
+				},
+				RequiredCEXBal: b2q(sellPlacements[1].CounterTradeRate, lotSize) +
+					b2q(sellPlacements[2].CounterTradeRate, 2*lotSize) +
+					b2q(sellPlacements[3].CounterTradeRate, lotSize),
+				RemainingCEXBal: b2q(sellPlacements[3].CounterTradeRate, lotSize),
+				UsedDEXBals: map[uint32]uint64{
+					42: 3*lotSize + 3*sellFees.Max.Swap + sellFees.Funding,
+				},
+				UsedCEXBal: b2q(sellPlacements[1].CounterTradeRate, lotSize) +
+					b2q(sellPlacements[2].CounterTradeRate, 2*lotSize),
+			},
+
+			// ---- Buy ----
+			buyDexBalances: map[uint32]uint64{
+				42: 0,
+				0: addBuffer(b2q(buyPlacements[1].Rate, lotSize)+
+					b2q(buyPlacements[2].Rate, 2*lotSize)+
+					b2q(buyPlacements[3].Rate, lotSize)+
+					4*buyFees.Max.Swap, 0.1) + buyFees.Funding,
+			},
+			buyCexBalances: map[uint32]uint64{
+				42: 8 * lotSize,
+				0:  0,
+			},
+			buyPlacements:    buyPlacements,
+			buyPendingOrders: pendingOrders(false, 42, 0),
+			expectedBuyPlacements: []*core.QtyRate{
+				{Qty: lotSize, Rate: buyPlacements[1].Rate},
+				{Qty: 2 * lotSize, Rate: buyPlacements[2].Rate},
+				{Qty: lotSize, Rate: buyPlacements[3].Rate},
+			},
+			expectedBuyPlacementsWithDecrement: []*core.QtyRate{
+				{Qty: lotSize, Rate: buyPlacements[1].Rate},
+				{Qty: 2 * lotSize, Rate: buyPlacements[2].Rate},
+			},
+			expectedCancels:              []order.OrderID{orderIDs[2]},
+			expectedCancelsWithDecrement: []order.OrderID{orderIDs[2]},
+			multiTradeResult: []*core.MultiTradeResult{
+				{Order: &core.Order{ID: orderIDs[4][:]}},
+				{Order: &core.Order{ID: orderIDs[5][:]}},
+				{Order: &core.Order{ID: orderIDs[6][:]}},
+			},
+			multiTradeResultWithDecrement: []*core.MultiTradeResult{
+				{Order: &core.Order{ID: orderIDs[4][:]}},
+				{Order: &core.Order{ID: orderIDs[5][:]}},
+			},
+			expectedOrderIDs: []order.OrderID{
+				orderIDs[4], orderIDs[5], orderIDs[6],
+			},
+			expectedBuyOrderReport: &OrderReport{
+				Placements: []*TradePlacement{
+					{Lots: 1, Rate: bps[0].Rate, CounterTradeRate: bps[0].CounterTradeRate,
+						StandingLots: 1,
+						RequiredDEX:  map[uint32]uint64{},
+						UsedDEX:      map[uint32]uint64{},
+						RequiredCEX:  0,
+						UsedCEX:      0,
+					},
+					{Lots: 2, Rate: bps[1].Rate, CounterTradeRate: bps[1].CounterTradeRate,
+						StandingLots: 1,
+						RequiredDEX: map[uint32]uint64{
+							0: addBuffer(b2q(buyPlacements[1].Rate, lotSize)+buyFees.Max.Swap, 0.1),
+						},
+						UsedDEX: map[uint32]uint64{
+							0: addBuffer(b2q(buyPlacements[1].Rate, lotSize)+buyFees.Max.Swap, 0.1),
+						},
+						RequiredCEX: lotSize,
+						UsedCEX:     lotSize,
+						OrderedLots: 1,
+					},
+					{Lots: 3, Rate: bps[2].Rate, CounterTradeRate: bps[2].CounterTradeRate,
+						StandingLots: 1,
+						RequiredDEX: map[uint32]uint64{
+							0: addBuffer(2*(b2q(buyPlacements[2].Rate, lotSize)+buyFees.Max.Swap), 0.1),
+						},
+						UsedDEX: map[uint32]uint64{
+							0: addBuffer(2*(b2q(buyPlacements[2].Rate, lotSize)+buyFees.Max.Swap), 0.1),
+						},
+						RequiredCEX: 2 * lotSize,
+						UsedCEX:     2 * lotSize,
+						OrderedLots: 2,
+					},
+					{Lots: 2, Rate: bps[3].Rate, CounterTradeRate: bps[3].CounterTradeRate,
+						StandingLots: 1,
+						RequiredDEX: map[uint32]uint64{
+							0: addBuffer(b2q(buyPlacements[3].Rate, lotSize)+buyFees.Max.Swap, 0.1),
+						},
+						UsedDEX: map[uint32]uint64{
+							0: addBuffer(b2q(buyPlacements[3].Rate, lotSize)+buyFees.Max.Swap, 0.1),
+						},
+						RequiredCEX: lotSize,
+						UsedCEX:     lotSize,
+						OrderedLots: 1,
+					},
+				},
+				Fees: buyFees,
+				AvailableDEXBals: map[uint32]*BotBalance{
+					0: {
+						Available: addBuffer(b2q(buyPlacements[1].Rate, lotSize)+
+							b2q(buyPlacements[2].Rate, 2*lotSize)+
+							b2q(buyPlacements[3].Rate, lotSize)+
+							4*buyFees.Max.Swap, 0.1) + buyFees.Funding,
+					},
+					42: {},
+				},
+				RequiredDEXBals: map[uint32]uint64{
+					0: addBuffer(b2q(buyPlacements[1].Rate, lotSize)+
+						b2q(buyPlacements[2].Rate, 2*lotSize)+
+						b2q(buyPlacements[3].Rate, lotSize)+
+						4*buyFees.Max.Swap, 0.1) + buyFees.Funding,
+				},
+				RemainingDEXBals: map[uint32]uint64{
+					42: 0,
+					0:  0,
+				},
+				AvailableCEXBal: &BotBalance{
+					Available: 4 * lotSize,
+					Reserved:  4 * lotSize,
+				},
+				RequiredCEXBal:  4 * lotSize,
+				RemainingCEXBal: 0,
+				UsedDEXBals: map[uint32]uint64{
+					0: addBuffer(b2q(buyPlacements[1].Rate, lotSize)+
+						b2q(buyPlacements[2].Rate, 2*lotSize)+
+						b2q(buyPlacements[3].Rate, lotSize)+
+						4*buyFees.Max.Swap, 0.1) + buyFees.Funding,
+				},
+				UsedCEXBal: 4 * lotSize,
+			},
+			expectedBuyOrderReportWithDEXDecrement: &OrderReport{
+				Placements: []*TradePlacement{
+					{Lots: 1, Rate: bps[0].Rate, CounterTradeRate: bps[0].CounterTradeRate,
+						StandingLots: 1,
+						RequiredDEX:  map[uint32]uint64{},
+						UsedDEX:      map[uint32]uint64{},
+						RequiredCEX:  0,
+						UsedCEX:      0,
+					},
+					{Lots: 2, Rate: bps[1].Rate, CounterTradeRate: bps[1].CounterTradeRate,
+						StandingLots: 1,
+						RequiredDEX: map[uint32]uint64{
+							0: addBuffer(b2q(buyPlacements[1].Rate, lotSize)+buyFees.Max.Swap, 0.1),
+						},
+						UsedDEX: map[uint32]uint64{
+							0: addBuffer(b2q(buyPlacements[1].Rate, lotSize)+buyFees.Max.Swap, 0.1),
+						},
+						RequiredCEX: lotSize,
+						UsedCEX:     lotSize,
+						OrderedLots: 1,
+					},
+					{Lots: 3, Rate: bps[2].Rate, CounterTradeRate: bps[2].CounterTradeRate,
+						StandingLots: 1,
+						RequiredDEX: map[uint32]uint64{
+							0: addBuffer(2*(b2q(buyPlacements[2].Rate, lotSize)+buyFees.Max.Swap), 0.1),
+						},
+						UsedDEX: map[uint32]uint64{
+							0: addBuffer(2*(b2q(buyPlacements[2].Rate, lotSize)+buyFees.Max.Swap), 0.1),
+						},
+						RequiredCEX: 2 * lotSize,
+						UsedCEX:     2 * lotSize,
+						OrderedLots: 2,
+					},
+					{Lots: 2, Rate: bps[3].Rate, CounterTradeRate: bps[3].CounterTradeRate,
+						StandingLots: 1,
+						RequiredDEX: map[uint32]uint64{
+							0: addBuffer(b2q(buyPlacements[3].Rate, lotSize)+buyFees.Max.Swap, 0.1),
+						},
+						UsedDEX:     map[uint32]uint64{},
+						RequiredCEX: lotSize,
+						UsedCEX:     0,
+						OrderedLots: 0,
+					},
+				},
+				Fees: buyFees,
+				AvailableDEXBals: map[uint32]*BotBalance{
+					0: {
+						Available: addBuffer(b2q(buyPlacements[1].Rate, lotSize)+
+							b2q(buyPlacements[2].Rate, 2*lotSize)+
+							b2q(buyPlacements[3].Rate, lotSize)+
+							4*buyFees.Max.Swap, 0.1) + buyFees.Funding - 1,
+					},
+					42: {},
+				},
+				RequiredDEXBals: map[uint32]uint64{
+					0: addBuffer(b2q(buyPlacements[1].Rate, lotSize)+
+						b2q(buyPlacements[2].Rate, 2*lotSize)+
+						b2q(buyPlacements[3].Rate, lotSize)+
+						4*buyFees.Max.Swap, 0.1) + buyFees.Funding,
+				},
+				RemainingDEXBals: map[uint32]uint64{
+					42: 0,
+					0:  addBuffer(b2q(buyPlacements[3].Rate, lotSize)+buyFees.Max.Swap, 0.1) - 1,
+				},
+				AvailableCEXBal: &BotBalance{
+					Available: 4 * lotSize,
+					Reserved:  4 * lotSize,
+				},
+				RequiredCEXBal:  4 * lotSize,
+				RemainingCEXBal: lotSize,
+				UsedDEXBals: map[uint32]uint64{
+					0: addBuffer(b2q(buyPlacements[1].Rate, lotSize)+
+						b2q(buyPlacements[2].Rate, 2*lotSize)+
+						3*buyFees.Max.Swap, 0.1) + buyFees.Funding,
 				},
 				UsedCEXBal: 3 * lotSize,
 			},
@@ -2627,6 +3019,12 @@ func TestMultiTrade(t *testing.T) {
 						eventLogDB: &tEventLogDB{},
 					})
 
+					if test.multiSplitBuffer > 0 {
+						adaptor.botCfg().QuoteWalletOptions = map[string]string{
+							"multisplitbuffer": fmt.Sprintf("%f", test.multiSplitBuffer),
+						}
+					}
+
 					var pendingOrders map[order.OrderID]*pendingDEXOrder
 					if sell {
 						pendingOrders = test.sellPendingOrders
@@ -2881,7 +3279,7 @@ func TestDEXTrade(t *testing.T) {
 
 	type updatesAndBalances struct {
 		orderUpdate      *orderUpdate
-		txUpdates        []*asset.WalletTransaction
+		txUpdates        map[string]*asset.WalletTransaction
 		stats            *RunStats
 		numPendingTrades int
 	}
@@ -2909,6 +3307,13 @@ func TestDEXTrade(t *testing.T) {
 	quoteLot1, quoteLot2 := b2q(rate1, lotSize), b2q(rate2, lotSize)
 	quotePerLot1, quotePerLot2 := quoteLot1+buyFees, quoteLot2+buyFees
 
+	// This emulates the coinIDs of UTXO coins, which have the
+	// vout appended to the tx id.
+	suffixedCoinID := func(id string, suffix int) *string {
+		s := fmt.Sprintf("%s0%d", id, suffix)
+		return &s
+	}
+
 	tests := []*test{
 		{
 			name: "non dynamic swapper, sell",
@@ -2934,8 +3339,8 @@ func TestDEXTrade(t *testing.T) {
 			updatesAndBalances: []*updatesAndBalances{
 				// First order has a match and sends a swap tx
 				{
-					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[0], asset.Swap, 2*lotSize, swapFees, false),
+					txUpdates: map[string]*asset.WalletTransaction{
+						coinIDs[0]: newWalletTx(coinIDs[0], asset.Swap, 2*lotSize, swapFees, false),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[0], 3*basePerLot, 0, 0, 0, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[0], nil, nil, 2*lotSize, rate1)),
@@ -2949,8 +3354,8 @@ func TestDEXTrade(t *testing.T) {
 				},
 				// Second order has a match and sends swap tx
 				{
-					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[1], asset.Swap, 3*lotSize, swapFees, false),
+					txUpdates: map[string]*asset.WalletTransaction{
+						coinIDs[1]: newWalletTx(coinIDs[1], asset.Swap, 3*lotSize, swapFees, false),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[1], 2*basePerLot, 0, 0, 0, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[1], nil, nil, 3*lotSize, rate2)),
@@ -2964,9 +3369,9 @@ func TestDEXTrade(t *testing.T) {
 				},
 				// First order swap is confirmed, and redemption is sent
 				{
-					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[0], asset.Swap, 2*lotSize, swapFees, true),
-						newWalletTx(coinIDs[2], asset.Redeem, 2*quoteLot1, redeemFees, false),
+					txUpdates: map[string]*asset.WalletTransaction{
+						coinIDs[0]: newWalletTx(coinIDs[0], asset.Swap, 2*lotSize, swapFees, true),
+						coinIDs[2]: newWalletTx(coinIDs[2], asset.Redeem, 2*quoteLot1, redeemFees, false),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[0], 3*basePerLot, 0, 0, 0, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2*lotSize, rate1)),
@@ -2980,8 +3385,8 @@ func TestDEXTrade(t *testing.T) {
 				},
 				// First order redemption confirmed
 				{
-					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[2], asset.Redeem, b2q(5e7, 2e6), redeemFees, true),
+					txUpdates: map[string]*asset.WalletTransaction{
+						coinIDs[2]: newWalletTx(coinIDs[2], asset.Redeem, b2q(5e7, 2e6), redeemFees, true),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[0], 3*basePerLot, 0, 0, 0, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2*lotSize, rate1)),
@@ -3007,10 +3412,10 @@ func TestDEXTrade(t *testing.T) {
 				},
 				// Second order second match, swap sent, and first match refunded
 				{
-					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[1], asset.Swap, 3*lotSize, swapFees, true),
-						newWalletTx(coinIDs[3], asset.Refund, 3*lotSize, refundFees, false),
-						newWalletTx(coinIDs[4], asset.Swap, 2*lotSize, swapFees, false),
+					txUpdates: map[string]*asset.WalletTransaction{
+						coinIDs[1]: newWalletTx(coinIDs[1], asset.Swap, 3*lotSize, swapFees, true),
+						coinIDs[3]: newWalletTx(coinIDs[3], asset.Refund, 3*lotSize, refundFees, false),
+						coinIDs[4]: newWalletTx(coinIDs[4], asset.Swap, 2*lotSize, swapFees, false),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[1], 0, 0, 0, 0, order.OrderStatusExecuted, false,
 						newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 3*lotSize, rate2),
@@ -3025,10 +3430,10 @@ func TestDEXTrade(t *testing.T) {
 				},
 				// Second order second match redeemed and confirmed, first match refund confirmed
 				{
-					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[3], asset.Refund, 3*lotSize, refundFees, true),
-						newWalletTx(coinIDs[4], asset.Swap, 2*lotSize, swapFees, true),
-						newWalletTx(coinIDs[5], asset.Redeem, 2*quoteLot2, redeemFees, true),
+					txUpdates: map[string]*asset.WalletTransaction{
+						coinIDs[3]: newWalletTx(coinIDs[3], asset.Refund, 3*lotSize, refundFees, true),
+						coinIDs[4]: newWalletTx(coinIDs[4], asset.Swap, 2*lotSize, swapFees, true),
+						coinIDs[5]: newWalletTx(coinIDs[5], asset.Redeem, 2*quoteLot2, redeemFees, true),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[1], 0, 0, 0, 0, order.OrderStatusExecuted, true,
 						newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 3e6, 6e7),
@@ -3065,8 +3470,8 @@ func TestDEXTrade(t *testing.T) {
 			updatesAndBalances: []*updatesAndBalances{
 				// First order has a match and sends a swap tx
 				{
-					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[0], asset.Swap, 2*quoteLot1, swapFees, false),
+					txUpdates: map[string]*asset.WalletTransaction{
+						coinIDs[0]: newWalletTx(coinIDs[0], asset.Swap, 2*quoteLot1, swapFees, false),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[0], 3*quotePerLot1, 0, 0, 0, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[0], nil, nil, 2*lotSize, rate1)),
@@ -3080,8 +3485,8 @@ func TestDEXTrade(t *testing.T) {
 				},
 				// Second order has a match and sends swap tx
 				{
-					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[1], asset.Swap, 3*quoteLot2, swapFees, false),
+					txUpdates: map[string]*asset.WalletTransaction{
+						coinIDs[1]: newWalletTx(coinIDs[1], asset.Swap, 3*quoteLot2, swapFees, false),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[1], 2*quotePerLot2, 0, 0, 0, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[1], nil, nil, 3*lotSize, rate2)),
@@ -3095,9 +3500,9 @@ func TestDEXTrade(t *testing.T) {
 				},
 				// First order swap is confirmed, and redemption is sent
 				{
-					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[0], asset.Swap, 2*quoteLot1, swapFees, true),
-						newWalletTx(coinIDs[2], asset.Redeem, 2*lotSize, redeemFees, false),
+					txUpdates: map[string]*asset.WalletTransaction{
+						coinIDs[0]: newWalletTx(coinIDs[0], asset.Swap, 2*quoteLot1, swapFees, true),
+						coinIDs[2]: newWalletTx(coinIDs[2], asset.Redeem, 2*lotSize, redeemFees, false),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[0], 3*quotePerLot1, 0, 0, 0, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2*quoteLot1, rate1)),
@@ -3111,8 +3516,8 @@ func TestDEXTrade(t *testing.T) {
 				},
 				// First order redemption confirmed
 				{
-					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[2], asset.Redeem, 2*lotSize, redeemFees, true),
+					txUpdates: map[string]*asset.WalletTransaction{
+						coinIDs[2]: newWalletTx(coinIDs[2], asset.Redeem, 2*lotSize, redeemFees, true),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[0], 3*quotePerLot1, 0, 0, 0, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2*lotSize, rate1)),
@@ -3138,10 +3543,10 @@ func TestDEXTrade(t *testing.T) {
 				},
 				// Second order second match, swap sent, and first match refunded
 				{
-					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[1], asset.Swap, 3*quoteLot2, swapFees, true),
-						newWalletTx(coinIDs[3], asset.Refund, 3*quoteLot2, refundFees, false),
-						newWalletTx(coinIDs[4], asset.Swap, 2*quoteLot2, swapFees, false),
+					txUpdates: map[string]*asset.WalletTransaction{
+						coinIDs[1]: newWalletTx(coinIDs[1], asset.Swap, 3*quoteLot2, swapFees, true),
+						coinIDs[3]: newWalletTx(coinIDs[3], asset.Refund, 3*quoteLot2, refundFees, false),
+						coinIDs[4]: newWalletTx(coinIDs[4], asset.Swap, 2*quoteLot2, swapFees, false),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[1], 0, 0, 0, 0, order.OrderStatusExecuted, false,
 						newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 3*lotSize, rate2),
@@ -3156,10 +3561,10 @@ func TestDEXTrade(t *testing.T) {
 				},
 				// Second order second match redeemed and confirmed, first match refund confirmed
 				{
-					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[3], asset.Refund, 3*quoteLot2, refundFees, true),
-						newWalletTx(coinIDs[4], asset.Swap, 2*quoteLot2, swapFees, true),
-						newWalletTx(coinIDs[5], asset.Redeem, 2*lotSize, redeemFees, true),
+					txUpdates: map[string]*asset.WalletTransaction{
+						coinIDs[3]: newWalletTx(coinIDs[3], asset.Refund, 3*quoteLot2, refundFees, true),
+						coinIDs[4]: newWalletTx(coinIDs[4], asset.Swap, 2*quoteLot2, swapFees, true),
+						coinIDs[5]: newWalletTx(coinIDs[5], asset.Redeem, 2*lotSize, redeemFees, true),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[1], 0, 0, 0, 0, order.OrderStatusExecuted, true,
 						newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 3*lotSize, rate2),
@@ -3204,8 +3609,8 @@ func TestDEXTrade(t *testing.T) {
 			updatesAndBalances: []*updatesAndBalances{
 				// First order has a match and sends a swap tx
 				{
-					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[0], asset.Swap, 2*lotSize, swapFees, false),
+					txUpdates: map[string]*asset.WalletTransaction{
+						coinIDs[0]: newWalletTx(coinIDs[0], asset.Swap, 2*lotSize, swapFees, false),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[0], 3*basePerLot, 0, 5*redeemFees, 5*refundFees, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[0], nil, nil, 2*lotSize, rate1)),
@@ -3220,8 +3625,8 @@ func TestDEXTrade(t *testing.T) {
 				},
 				// Second order has a match and sends swap tx
 				{
-					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[1], asset.Swap, 3*lotSize, swapFees, false),
+					txUpdates: map[string]*asset.WalletTransaction{
+						coinIDs[1]: newWalletTx(coinIDs[1], asset.Swap, 3*lotSize, swapFees, false),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[1], 2*basePerLot, 0, 5*redeemFees, 5*refundFees, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[1], nil, nil, 3*lotSize, rate2)),
@@ -3236,9 +3641,9 @@ func TestDEXTrade(t *testing.T) {
 				},
 				// First order swap is confirmed, and redemption is sent
 				{
-					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[0], asset.Swap, 2*lotSize, swapFees, true),
-						newWalletTx(coinIDs[2], asset.Redeem, 2*quoteLot1, redeemFees, false),
+					txUpdates: map[string]*asset.WalletTransaction{
+						coinIDs[0]: newWalletTx(coinIDs[0], asset.Swap, 2*lotSize, swapFees, true),
+						coinIDs[2]: newWalletTx(coinIDs[2], asset.Redeem, 2*quoteLot1, redeemFees, false),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[0], 3*basePerLot, 0, 3*redeemFees, 3*refundFees, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2*lotSize, rate1)),
@@ -3253,8 +3658,8 @@ func TestDEXTrade(t *testing.T) {
 				},
 				// First order redemption confirmed
 				{
-					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[2], asset.Redeem, 2*quoteLot1, redeemFees, true),
+					txUpdates: map[string]*asset.WalletTransaction{
+						coinIDs[2]: newWalletTx(coinIDs[2], asset.Redeem, 2*quoteLot1, redeemFees, true),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[0], 3*basePerLot, 0, 3*redeemFees, 3*refundFees, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2*lotSize, rate1)),
@@ -3282,10 +3687,10 @@ func TestDEXTrade(t *testing.T) {
 				},
 				// Second order second match, swap sent, and first match refunded
 				{
-					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[1], asset.Swap, 3*lotSize, swapFees, true),
-						newWalletTx(coinIDs[3], asset.Refund, 3*lotSize, refundFees, false),
-						newWalletTx(coinIDs[4], asset.Swap, 2*lotSize, swapFees, false),
+					txUpdates: map[string]*asset.WalletTransaction{
+						coinIDs[1]: newWalletTx(coinIDs[1], asset.Swap, 3*lotSize, swapFees, true),
+						coinIDs[3]: newWalletTx(coinIDs[3], asset.Refund, 3*lotSize, refundFees, false),
+						coinIDs[4]: newWalletTx(coinIDs[4], asset.Swap, 2*lotSize, swapFees, false),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[1], 0, 0, 2*redeemFees, 2*refundFees, order.OrderStatusExecuted, false,
 						newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 3*lotSize, rate2),
@@ -3301,10 +3706,10 @@ func TestDEXTrade(t *testing.T) {
 				},
 				// Second order second match redeemed and confirmed, first match refund confirmed
 				{
-					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[3], asset.Refund, 3*lotSize, refundFees, true),
-						newWalletTx(coinIDs[4], asset.Swap, 2*lotSize, swapFees, true),
-						newWalletTx(coinIDs[5], asset.Redeem, 2*quoteLot2, redeemFees, true),
+					txUpdates: map[string]*asset.WalletTransaction{
+						coinIDs[3]: newWalletTx(coinIDs[3], asset.Refund, 3*lotSize, refundFees, true),
+						coinIDs[4]: newWalletTx(coinIDs[4], asset.Swap, 2*lotSize, swapFees, true),
+						coinIDs[5]: newWalletTx(coinIDs[5], asset.Redeem, 2*quoteLot2, redeemFees, true),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[1], 0, 0, 0, 0, order.OrderStatusExecuted, true, newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 0, 0), newMatchUpdate(&coinIDs[4], &coinIDs[5], nil, 0, 0)),
 					stats: &RunStats{
@@ -3347,8 +3752,8 @@ func TestDEXTrade(t *testing.T) {
 			updatesAndBalances: []*updatesAndBalances{
 				// First order has a match and sends a swap tx
 				{
-					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[0], asset.Swap, 2*quoteLot1, swapFees, false),
+					txUpdates: map[string]*asset.WalletTransaction{
+						coinIDs[0]: newWalletTx(coinIDs[0], asset.Swap, 2*quoteLot1, swapFees, false),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[0], 3*quoteLot1, 3*buyFees, 5*redeemFees, 5*refundFees, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[0], nil, nil, 2*lotSize, rate1)),
@@ -3363,8 +3768,8 @@ func TestDEXTrade(t *testing.T) {
 				},
 				// Second order has a match and sends swap tx
 				{
-					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[1], asset.Swap, 3*quoteLot2, swapFees, false),
+					txUpdates: map[string]*asset.WalletTransaction{
+						coinIDs[1]: newWalletTx(coinIDs[1], asset.Swap, 3*quoteLot2, swapFees, false),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[1], 2*quoteLot2, 2*buyFees, 5*redeemFees, 5*refundFees, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[1], nil, nil, 3*lotSize, rate2)),
@@ -3379,9 +3784,9 @@ func TestDEXTrade(t *testing.T) {
 				},
 				// First order swap is confirmed, and redemption is sent
 				{
-					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[0], asset.Swap, 2*quoteLot1, swapFees, true),
-						newWalletTx(coinIDs[2], asset.Redeem, 2*lotSize, redeemFees, false),
+					txUpdates: map[string]*asset.WalletTransaction{
+						coinIDs[0]: newWalletTx(coinIDs[0], asset.Swap, 2*quoteLot1, swapFees, true),
+						coinIDs[2]: newWalletTx(coinIDs[2], asset.Redeem, 2*lotSize, redeemFees, false),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[0], 3*quoteLot1, 3*buyFees, 3*redeemFees, 3*refundFees, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2*lotSize, rate1)),
@@ -3396,8 +3801,8 @@ func TestDEXTrade(t *testing.T) {
 				},
 				// First order redemption confirmed
 				{
-					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[2], asset.Redeem, 2*lotSize, redeemFees, true),
+					txUpdates: map[string]*asset.WalletTransaction{
+						coinIDs[2]: newWalletTx(coinIDs[2], asset.Redeem, 2*lotSize, redeemFees, true),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[0], 3*quoteLot1, 3*buyFees, 3*redeemFees, 3*refundFees, order.OrderStatusBooked, false,
 						newMatchUpdate(&coinIDs[0], &coinIDs[2], nil, 2*lotSize, rate1)),
@@ -3425,10 +3830,10 @@ func TestDEXTrade(t *testing.T) {
 				},
 				// Second order second match, swap sent, and first match refunded
 				{
-					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[1], asset.Swap, 3*quoteLot2, swapFees, true),
-						newWalletTx(coinIDs[3], asset.Refund, 3*quoteLot2, refundFees, false),
-						newWalletTx(coinIDs[4], asset.Swap, 2*quoteLot2, swapFees, false),
+					txUpdates: map[string]*asset.WalletTransaction{
+						coinIDs[1]: newWalletTx(coinIDs[1], asset.Swap, 3*quoteLot2, swapFees, true),
+						coinIDs[3]: newWalletTx(coinIDs[3], asset.Refund, 3*quoteLot2, refundFees, false),
+						coinIDs[4]: newWalletTx(coinIDs[4], asset.Swap, 2*quoteLot2, swapFees, false),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[1], 0, 0, 2*redeemFees, 2*refundFees, order.OrderStatusExecuted, false,
 						newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 3*lotSize, rate2),
@@ -3444,10 +3849,10 @@ func TestDEXTrade(t *testing.T) {
 				},
 				// Second order second match redeemed and confirmed, first match refund confirmed
 				{
-					txUpdates: []*asset.WalletTransaction{
-						newWalletTx(coinIDs[3], asset.Refund, 3*quoteLot2, refundFees, true),
-						newWalletTx(coinIDs[4], asset.Swap, 2*quoteLot2, swapFees, true),
-						newWalletTx(coinIDs[5], asset.Redeem, 2*lotSize, redeemFees, true),
+					txUpdates: map[string]*asset.WalletTransaction{
+						coinIDs[3]: newWalletTx(coinIDs[3], asset.Refund, 3*quoteLot2, refundFees, true),
+						coinIDs[4]: newWalletTx(coinIDs[4], asset.Swap, 2*quoteLot2, swapFees, true),
+						coinIDs[5]: newWalletTx(coinIDs[5], asset.Redeem, 2*lotSize, redeemFees, true),
 					},
 					orderUpdate: newOrderUpdate(orderIDs[1], 0, 0, 0, 0, order.OrderStatusExecuted, true,
 						newMatchUpdate(&coinIDs[1], nil, &coinIDs[3], 3*lotSize, rate2),
@@ -3459,6 +3864,64 @@ func TestDEXTrade(t *testing.T) {
 							60:     {1e8 + 4*lotSize - 2*redeemFees, 0, 0, 0},
 						},
 					},
+				},
+			},
+		},
+		{
+			name: "non dynamic swapper, sell, shared swap and redeem txs",
+			initialBalances: map[uint32]uint64{
+				42: 1e8,
+				0:  1e8,
+			},
+			sell:    true,
+			baseID:  42,
+			quoteID: 0,
+			placements: []*TradePlacement{
+				{Lots: 5, Rate: rate1},
+			},
+			initialLockedFunds: []*orderLockedFunds{
+				newOrderLockedFunds(orderIDs[0], basePerLot*5, 0, 0, 0),
+			},
+			postTradeBalances: map[uint32]*BotBalance{
+				42: {1e8 - 5*basePerLot, 5 * basePerLot, 0, 0},
+				0:  {1e8, 0, 0, 0},
+			},
+			updatesAndBalances: []*updatesAndBalances{
+				// Order has two matches, sends one swap tx for both
+				{
+					txUpdates: map[string]*asset.WalletTransaction{
+						*suffixedCoinID(coinIDs[0], 0): newWalletTx(coinIDs[0], asset.Swap, 5*lotSize, swapFees, false),
+						*suffixedCoinID(coinIDs[0], 1): newWalletTx(coinIDs[0], asset.Swap, 5*lotSize, swapFees, false),
+					},
+					orderUpdate: newOrderUpdate(orderIDs[0], 0, 0, 0, 0, order.OrderStatusBooked, false,
+						newMatchUpdate(suffixedCoinID(coinIDs[0], 0), nil, nil, 2*lotSize, rate1),
+						newMatchUpdate(suffixedCoinID(coinIDs[0], 1), nil, nil, 3*lotSize, rate1),
+					),
+					stats: &RunStats{
+						DEXBalances: map[uint32]*BotBalance{
+							42: {1e8 - 5*lotSize - swapFees, 0, 0, 0},
+							0:  {1e8, 0, 5 * quoteLot1, 0},
+						},
+					},
+					numPendingTrades: 1,
+				},
+				// Both matches redeemed with same tx
+				{
+					txUpdates: map[string]*asset.WalletTransaction{
+						*suffixedCoinID(coinIDs[1], 0): newWalletTx(coinIDs[1], asset.Redeem, 5*quoteLot1, redeemFees, true),
+						*suffixedCoinID(coinIDs[1], 1): newWalletTx(coinIDs[1], asset.Redeem, 5*quoteLot1, redeemFees, true),
+					},
+					orderUpdate: newOrderUpdate(orderIDs[0], 0, 0, 0, 0, order.OrderStatusExecuted, true,
+						newMatchUpdate(suffixedCoinID(coinIDs[0], 0), suffixedCoinID(coinIDs[1], 0), nil, 2*lotSize, rate1),
+						newMatchUpdate(suffixedCoinID(coinIDs[0], 1), suffixedCoinID(coinIDs[1], 1), nil, 3*lotSize, rate1),
+					),
+					stats: &RunStats{
+						DEXBalances: map[uint32]*BotBalance{
+							42: {1e8 - 5*lotSize - swapFees, 0, 0, 0},
+							0:  {1e8 + 5*quoteLot1 - redeemFees, 0, 0, 0},
+						},
+					},
+					numPendingTrades: 0,
 				},
 			},
 		},
@@ -3572,7 +4035,8 @@ func TestDEXTrade(t *testing.T) {
 
 		for i, update := range test.updatesAndBalances {
 			tCore.walletTxsMtx.Lock()
-			for _, txUpdate := range update.txUpdates {
+			for coinID, txUpdate := range update.txUpdates {
+				tCore.walletTxs[coinID] = txUpdate
 				tCore.walletTxs[txUpdate.ID] = txUpdate
 			}
 			tCore.walletTxsMtx.Unlock()
@@ -5031,9 +5495,12 @@ func TestRefreshPendingEvents(t *testing.T) {
 		},
 	}
 	pord := &pendingDEXOrder{
-		swaps:   map[string]*asset.WalletTransaction{},
-		redeems: map[string]*asset.WalletTransaction{},
-		refunds: map[string]*asset.WalletTransaction{},
+		swaps:              map[string]*asset.WalletTransaction{},
+		redeems:            map[string]*asset.WalletTransaction{},
+		refunds:            map[string]*asset.WalletTransaction{},
+		swapCoinIDToTxID:   map[string]string{},
+		redeemCoinIDToTxID: map[string]string{},
+		refundCoinIDToTxID: map[string]string{},
 	}
 	adaptor.pendingDEXOrders[dexOrderID] = pord
 	pord.state.Store(&dexOrderState{

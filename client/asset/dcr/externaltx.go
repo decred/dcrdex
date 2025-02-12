@@ -63,7 +63,7 @@ func (dcr *ExchangeWallet) lookupTxOutWithBlockFilters(ctx context.Context, op o
 	tip, err := dcr.getBestBlock(ctx)
 	if err != nil {
 		dcr.log.Errorf("getbestblock error %v", err)
-		*tip = dcr.cachedBestBlock()
+		tip = dcr.cachedBestBlock()
 	}
 	var confs uint32
 	if tip.height >= outputBlock.height { // slight possibility that the cached tip height is behind the output's block height

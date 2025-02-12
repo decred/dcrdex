@@ -640,7 +640,7 @@ var zhCN = map[Topic]*translation{
 	},
 	TopicSendSuccess: {
 		subject:  intl.Translation{T: "提款已发送"},
-		template: intl.Translation{T: "%s %s (%s) 的提款已成功完成。硬币 ID = %s"},
+		template: intl.Translation{T: "已成功发送 %s %s 到 %s。交易 ID = %s"}, // alt. %s %s (%s) 的提款已成功完成。硬币 ID = %s
 	},
 	TopicOrderLoadFailure: {
 		subject:  intl.Translation{T: "请求加载失败"},
@@ -650,14 +650,14 @@ var zhCN = map[Topic]*translation{
 		subject:  intl.Translation{T: "下达市价单"},
 		template: intl.Translation{T: "以市场价格 (%[3]s) 出售 %[1]s %[2]s"},
 	},
-	// [qty, ticker, rate string, token], RETRANSLATE.
+	// [qty, ticker, rate string, token], RETRANSLATE -> Retranslated.
 	TopicBuyOrderPlaced: {
 		subject:  intl.Translation{T: "已下订单"},
-		template: intl.Translation{T: "Buying %s %s，值 = %s (%s)"},
+		template: intl.Translation{T: "购买 %s %s，价格 = %s（%s）"},
 	},
 	TopicSellOrderPlaced: {
 		subject:  intl.Translation{T: "已下订单"},
-		template: intl.Translation{T: "Selling %s %s，值 = %s (%s)"},
+		template: intl.Translation{T: "卖出 %s %s，价格 = %s（%s）"}, // alt. Selling %s %s，值 = %s (%s)
 	},
 	TopicMissingMatches: {
 		subject:  intl.Translation{T: "订单缺失匹配"},
@@ -693,23 +693,23 @@ var zhCN = map[Topic]*translation{
 	},
 	TopicBuyOrderCanceled: {
 		subject:  intl.Translation{T: "订单取消"},
-		template: intl.Translation{T: "买入 %s-%s 的 %s 订单已被取消 (%s)"}, // alt. %s 上 %s-%s 上的 %s 请求已被取消 (%s)
+		template: intl.Translation{T: "在 %s-%s 上的买单 %s 已被取消（%s）"}, // alt. %s 上 %s-%s 上的 %s 请求已被取消 (%s)  alt2. 买入 %s-%s 的 %s 订单已被取消 (%s)
 	},
 	TopicSellOrderCanceled: {
 		subject:  intl.Translation{T: "订单取消"},
-		template: intl.Translation{T: "卖出 %s-%s 的 %s 订单已被取消 (%s)"}, // alt. %s 上 %s-%s 上的 %s 请求已被取消 (%s)
+		template: intl.Translation{T: "在 %s-%s 上的卖单，价格为 %s，已被取消（%s）"}, // alt. %s 上 %s-%s 上的 %s 请求已被取消 (%s)  alt2. 卖出 %s-%s 的 %s 订单已被取消 (%s)
 	},
 	TopicBuyMatchesMade: {
 		subject:  intl.Translation{T: "匹配完成"},
-		template: intl.Translation{T: "买入 %s-%s %.1f%% 的订单已完成 (%s)"}, // alt. %s 请求超过 %s-%s %.1f%% 已填充（%s）
+		template: intl.Translation{T: "在 %s-%s 上的买单已完成 %.1f%%（%s）"}, // alt. %s 请求超过 %s-%s %.1f%% 已填充（%s）
 	},
 	TopicSellMatchesMade: {
 		subject:  intl.Translation{T: "匹配完成"},
-		template: intl.Translation{T: "卖出 %s-%s %.1f%% 的订单已完成 (%s)"}, // alt. %s 请求超过 %s-%s %.1f%% 已填充（%s）
+		template: intl.Translation{T: "在 %s-%s 上的卖单已完成 %.1f%%（%s)"}, // alt. %s 请求超过 %s-%s %.1f%% 已填充（%s） alt 2. 卖出 %s-%s %.1f%% 的订单已完成 (%s)
 	},
 	TopicSwapSendError: {
 		subject:  intl.Translation{T: "发送交换时出错"},
-		template: intl.Translation{T: "在以 %[3]s 的顺序发送价值 %[1]s %[2]s 的输出的交换时遇到错误"}, // ? 在订单 %s 上发送价值 %.8f %s 的交换输出时遇到错误
+		template: intl.Translation{T: "发送 %s 时遇到错误：%v"}, // ? 在订单 %s 上发送价值 %.8f %s 的交换输出时遇到错误
 	},
 	TopicInitError: {
 		subject:  intl.Translation{T: "交易错误"},
@@ -769,7 +769,7 @@ var zhCN = map[Topic]*translation{
 	},
 	TopicFailedCancel: {
 		subject:  intl.Translation{T: "取消失败"},
-		template: intl.Translation{T: "取消订单 %s 的订单 %s 处于 Epoque 状态 2 个 epoques，现在已被删除。"},
+		template: intl.Translation{T: "订单 %s 的取消请求失败，现已删除。订单 %s 的取消请求失败，现已删除。"}, // alt.   取消订单 %s 的订单 %s 处于 Epoque 状态 2 个 epoques，现在已被删除。
 	},
 	TopicAuditTrouble: {
 		subject:  intl.Translation{T: "审计时的问题"},
@@ -842,6 +842,100 @@ var zhCN = map[Topic]*translation{
 	TopicDEXNotification: {
 		subject:  intl.Translation{T: "来自DEX的消息"},
 		template: intl.Translation{T: "%s: %s"},
+	},
+	// Inserted
+	TopicDexConnectivity: {
+		subject:  intl.Translation{T: "互联网连接"},
+		template: intl.Translation{T: "您与 %s 的互联网连接不稳定，请检查您的网络连接", Notes: "args: [host]"},
+	},
+	TopicWalletPeersWarning: {
+		subject:  intl.Translation{T: "钱包网络问题"},
+		template: intl.Translation{T: "%v 钱包没有网络对等节点！", Notes: "args: [asset name]"},
+	},
+	TopicAsyncOrderFailure: {
+		subject:  intl.Translation{T: "订单处理错误"},
+		template: intl.Translation{T: "ID 为 %v 的正在处理订单失败：%v", Notes: "args: order ID, error]"},
+	},
+	TopicWalletCommsWarning: {
+		subject:  intl.Translation{T: "钱包连接问题"},
+		template: intl.Translation{T: "无法与 %v 钱包通信！原因：%v", Notes: "args: [asset name, error message]"},
+	},
+	TopicBondWalletNotConnected: {
+		subject:  intl.Translation{T: "债券钱包未连接"},
+		template: intl.Translation{T: "所选债券资产 %s 的钱包未连接"},
+	},
+	TopicOrderQuantityTooHigh: {
+		subject:  intl.Translation{T: "超出交易限制"},
+		template: intl.Translation{T: "订单数量超出 %s 当前的交易限制", Notes: "args: [host]"},
+	},
+	TopicWalletPeersRestored: {
+		subject:  intl.Translation{T: "钱包连接已恢复"},
+		template: intl.Translation{T: "%v 钱包已重新建立连接。", Notes: "args: [asset name]"},
+	},
+	// End Inserted
+	// START NEW
+	TopicQueuedCreationFailed: {
+		subject:  intl.Translation{T: "创建代币钱包失败"},
+		template: intl.Translation{T: "成功创建 %s 钱包后，创建 %s 钱包失败", Notes: "args: [parentSymbol, tokenSymbol]"},
+	},
+	TopicRedemptionResubmitted: {
+		subject:  intl.Translation{T: "赎回请求已重新提交"},
+		template: intl.Translation{T: "您在订单 %s 中的匹配 %s 赎回请求已重新提交"},
+	},
+	TopicSwapRefunded: {
+		subject:  intl.Translation{T: "兑换已退款"},
+		template: intl.Translation{T: "订单 %s 中的匹配 %s 已被对方退款"},
+	},
+	TopicRedemptionConfirmed: {
+		subject:  intl.Translation{T: "赎回已确认"},
+		template: intl.Translation{T: "您在订单 %s 中的匹配 %s 赎回请求已确认"},
+	},
+	TopicWalletTypeDeprecated: {
+		subject:  intl.Translation{T: "钱包已禁用"},
+		template: intl.Translation{T: "您的 %s 钱包类型不再受支持，请创建一个新钱包。"},
+	},
+	TopicOrderResumeFailure: {
+		subject:  intl.Translation{T: "恢复订单失败"},
+		template: intl.Translation{T: "恢复交易处理失败：%v"},
+	},
+	TopicBondConfirming: {
+		subject:  intl.Translation{T: "正在确认债券"},
+		template: intl.Translation{T: "正在等待 %d 个确认，以将债券 %v (%s) 发布到 %s", Notes: "args: [reqConfs, bondCoinStr, assetID, acct.host]"},
+	},
+	TopicBondConfirmed: {
+		subject:  intl.Translation{T: "债券已确认"},
+		template: intl.Translation{T: "新等级 = %d（目标等级 = %d）", Notes: "args: [effectiveTier, targetTier]"},
+	},
+	TopicBondExpired: {
+		subject:  intl.Translation{T: "债券已过期"},
+		template: intl.Translation{T: "新等级 = %d (目标 = %d)。", Notes: "args: [effectiveTier, targetTier]"},
+	},
+	TopicBondRefunded: {
+		subject:  intl.Translation{T: "债券已退款"},
+		template: intl.Translation{T: "债券 %v 为 %v 已退款，扣除交易费后追回 %v 的 %v", Notes: "args: [bondIDStr, acct.host, refundCoinStr, refundVal, Amount]"},
+	},
+	TopicBondPostError: {
+		subject:  intl.Translation{T: "债券发布错误"},
+		template: intl.Translation{T: "保税后 请求错误（将重试）：%v (%T)", Notes: "args: [err, err]"},
+	},
+	TopicBondPostErrorConfirm: {
+		subject:  intl.Translation{T: "债券发布错误"},
+		template: intl.Translation{T: "在等待 %s 的债券确认时遇到错误：%v"},
+	},
+	TopicDexAuthErrorBond: {
+		subject:  intl.Translation{T: "身份验证错误"},
+		template: intl.Translation{T: "债券已确认，但连接验证失败：%v", Notes: "args: [err]"},
+	},
+	TopicAccountRegTier: {
+		subject:  intl.Translation{T: "账户已注册"},
+		template: intl.Translation{T: "新等级 = %d", Notes: "args: [effectiveTier]"},
+	},
+	TopicUnknownBondTierZero: {
+		subject: intl.Translation{T: "发现未知债券"},
+		template: intl.Translation{
+			T:     "发现未知的 %s 债券并已添加到活跃债券中，但在 %s 的 DEX 上您的目标等级为零。请在设置中设置您的目标等级，以便保持债券并启用自动续期。",
+			Notes: "args: [bond asset, dex host]",
+		},
 	},
 }
 
@@ -1206,6 +1300,10 @@ var deDE = map[Topic]*translation{
 		subject:  intl.Translation{T: "Warnung bei Wallet Verbindung"},
 		template: intl.Translation{T: "Unvollständige Registration für %s erkannt, konnte keine Verbindung zum Decred Wallet herstellen"},
 	},
+	TopicBondWalletNotConnected: {
+		subject:  intl.Translation{T: "Kautions-Wallet nicht verbunden"},
+		template: intl.Translation{T: "Das Wallet für den ausgewählten Coin %s zur Bezahlung der Kaution ist nicht verbunden"},
+	},
 	TopicWalletUnlockError: {
 		subject:  intl.Translation{T: "Fehler beim Entsperren des Wallet"},
 		template: intl.Translation{T: "Verbunden zum Wallet um die Registration bei %s abzuschließen, ein Fehler beim entsperren des Wallet ist aufgetreten: %v"},
@@ -1229,6 +1327,14 @@ var deDE = map[Topic]*translation{
 	TopicSendSuccess: {
 		subject:  intl.Translation{T: "Erfolgreich gesendet"},
 		template: intl.Translation{T: "Das Senden von %s wurde erfolgreich abgeschlossen. Coin ID = %s"},
+	},
+	TopicAsyncOrderFailure: {
+		subject:  intl.Translation{T: "In-Flight Order Error"},
+		template: intl.Translation{T: "In-Flight Auftrag mit ID %v fehlgeschlagen: %v", Notes: "args: order ID, error]"},
+	},
+	TopicOrderQuantityTooHigh: {
+		subject:  intl.Translation{T: "Trade limit exceeded"},
+		template: intl.Translation{T: "Auftragsmenge überschreited aktuelles Handelslimit bei %s", Notes: "args: [host]"},
 	},
 	TopicOrderLoadFailure: {
 		subject:  intl.Translation{T: "Fehler beim Laden der Aufträge"},
@@ -1355,8 +1461,13 @@ var deDE = map[Topic]*translation{
 		template: intl.Translation{T: "%d Matches durch %s gemeldet wurden für %s nicht gefunden."},
 	},
 	TopicFailedCancel: {
-		subject:  intl.Translation{T: "Abbruch fehlgeschlagen"},
-		template: intl.Translation{T: "Der Auftrag für den Abbruch des Auftrags %s blieb 2 Epochen lang im Epoche-Status hängen und wird nun gelöscht."},
+		subject: intl.Translation{T: "Failed cancel"},
+		template: intl.Translation{
+			Version: 1,
+			T:       "Order Abbruch für %s fehlgeschlagen und wurde nun gelöscht.",
+			Notes: `args: [token], "failed" means we missed the preimage request ` +
+				`and either got the revoke_order message or it stayed in epoch status for too long.`,
+		},
 	},
 	TopicAuditTrouble: {
 		subject:  intl.Translation{T: "Audit-Probleme"},
@@ -1414,6 +1525,10 @@ var deDE = map[Topic]*translation{
 		subject:  intl.Translation{T: "Verbindung zum Server getrennt"},
 		template: intl.Translation{T: "Verbindung zu %s unterbrochen"},
 	},
+	TopicDexConnectivity: {
+		subject:  intl.Translation{T: "Internet Connectivity"},
+		template: intl.Translation{T: "Die Internet Verbindung zu %s ist instabil, Überprüfe deine Internet Verbindung", Notes: "args: [host]"},
+	},
 	TopicPenalized: {
 		subject:  intl.Translation{T: "Bestrafung durch einen Server erhalten"},
 		template: intl.Translation{T: "Bestrafung von DEX %s\nletzte gebrochene Regel: %s\nZeitpunkt: %v\nDetails:\n\"%s\"\n"},
@@ -1433,6 +1548,67 @@ var deDE = map[Topic]*translation{
 	TopicQueuedCreationFailed: {
 		subject:  intl.Translation{T: "Token-Wallet konnte nicht erstellt werden"},
 		template: intl.Translation{T: "Nach dem Erstellen des %s-Wallet kam es zu einen Fehler, konnte das %s-Wallet nicht erstellen"},
+	},
+	TopicRedemptionResubmitted: {
+		subject:  intl.Translation{T: "Redemption Resubmitted"},
+		template: intl.Translation{T: "Deine Redemption für Match %s für Order %s wurde neu eingereicht."},
+	},
+	TopicSwapRefunded: {
+		subject:  intl.Translation{T: "Swap Refunded"},
+		template: intl.Translation{T: "Match %s für Order %s wurde von der Gegenpartei zurückerstattet."},
+	},
+	TopicRedemptionConfirmed: {
+		subject:  intl.Translation{T: "Redemption Confirmed"},
+		template: intl.Translation{T: "Deine Redemption für Match %s für Order %s wurde bestätigt."},
+	},
+	TopicWalletTypeDeprecated: {
+		subject:  intl.Translation{T: "Wallet Disabled"},
+		template: intl.Translation{T: "Dein %s Wallet wird nicht länger unterstützt. Erstelle eine neues Wallet."},
+	},
+	TopicOrderResumeFailure: {
+		subject:  intl.Translation{T: "Resume order failure"},
+		template: intl.Translation{T: "Wiederaufnahme des Orders nicht möglich: %v"},
+	},
+	TopicBondConfirming: {
+		subject:  intl.Translation{T: "Kauftions-Bestätigung"},
+		template: intl.Translation{T: "Warte auf %d Bestätigungen für die Kaution %v (%s) bei %s", Notes: "args: [reqConfs, bondCoinStr, assetID, acct.host]"},
+	},
+	TopicBondConfirmed: {
+		subject:  intl.Translation{T: "Kaution Bestätigt"},
+		template: intl.Translation{T: "Neuer Konto-Tier = %d (Ziel = %d).", Notes: "args: [effectiveTier, targetTier]"},
+	},
+	TopicBondExpired: {
+		subject:  intl.Translation{T: "Kaution ausgelaufen"},
+		template: intl.Translation{T: "Neuer Konto-Tier = %d (Ziel = %d).", Notes: "args: [effectiveTier, targetTier]"},
+	},
+	TopicBondRefunded: {
+		subject:  intl.Translation{T: "Kaution zurückerstattet"},
+		template: intl.Translation{T: "Kaution %v bei %v zurückerstattet in %v, fordere %v als Rückerstattung %v nach Abzug der Transaktionsgebühren", Notes: "args: [bondIDStr, acct.host, refundCoinStr, refundVal, Amount]"},
+	},
+	TopicBondPostError: {
+		subject:  intl.Translation{T: "Bond post error"},
+		template: intl.Translation{T: "Fehler beim Einreichen der Kaution (versuche weiter): %v (%T)", Notes: "args: [err, err]"},
+	},
+	TopicBondPostErrorConfirm: {
+		subject:  intl.Translation{T: "Bond post error"},
+		template: intl.Translation{T: "Fehler beim warten auf Bestätigungen der Kaution %s: %v"},
+	},
+	TopicDexAuthErrorBond: {
+		subject:  intl.Translation{T: "Authentication error"},
+		template: intl.Translation{T: "Kauftion bestätigt, aber Fehler bei Authentifizierung der Verbindung: %v", Notes: "args: [err]"},
+	},
+	TopicAccountRegTier: {
+		subject:  intl.Translation{T: "Account registered"},
+		template: intl.Translation{T: "Neurer Konto-Tier = %d", Notes: "args: [effectiveTier]"},
+	},
+	TopicUnknownBondTierZero: {
+		subject: intl.Translation{T: "Unknown bond found"},
+		template: intl.Translation{
+			T: "Unbekannte %s Kautionen wurden gefunden und den aktiven Bonds hinzugefügt " +
+				"aber dein Ziel-Tier bei %s ist auf 0 konfiguriert. Setze deinen " +
+				"Ziel-Tier in den Einstellungen um deine Kaution automatisch zu verlängern.",
+			Notes: "args: [bond asset, dex host]",
+		},
 	},
 }
 

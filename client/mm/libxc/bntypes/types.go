@@ -2,14 +2,37 @@ package bntypes
 
 import "encoding/json"
 
+type Filter struct {
+	Type string `json:"filterType"`
+
+	// Price filter
+	MinPrice float64 `json:"minPrice,string"`
+	MaxPrice float64 `json:"maxPrice,string"`
+	TickSize float64 `json:"tickSize,string"`
+
+	// Lot size filter
+	MinQty   float64 `json:"minQty,string"`
+	MaxQty   float64 `json:"maxQty,string"`
+	StepSize float64 `json:"stepSize,string"`
+}
+
 type Market struct {
-	Symbol              string   `json:"symbol"`
-	Status              string   `json:"status"`
-	BaseAsset           string   `json:"baseAsset"`
-	BaseAssetPrecision  int      `json:"baseAssetPrecision"`
-	QuoteAsset          string   `json:"quoteAsset"`
-	QuoteAssetPrecision int      `json:"quoteAssetPrecision"`
-	OrderTypes          []string `json:"orderTypes"`
+	Symbol              string    `json:"symbol"`
+	Status              string    `json:"status"`
+	BaseAsset           string    `json:"baseAsset"`
+	BaseAssetPrecision  int       `json:"baseAssetPrecision"`
+	QuoteAsset          string    `json:"quoteAsset"`
+	QuoteAssetPrecision int       `json:"quoteAssetPrecision"`
+	OrderTypes          []string  `json:"orderTypes"`
+	Filters             []*Filter `json:"filters"`
+
+	// Below fields are parsed from Filters.
+	LotSize  uint64
+	MinQty   uint64
+	MaxQty   uint64
+	RateStep uint64
+	MinPrice uint64
+	MaxPrice uint64
 }
 
 type Balance struct {
@@ -34,9 +57,9 @@ type NetworkInfo struct {
 	// ResetAddressStatus      bool    `json:"resetAddressStatus"`
 	// SpecialTips             string  `json:"specialTips"`
 	// UnLockConfirm           int     `json:"unLockConfirm"`
-	WithdrawEnable bool    `json:"withdrawEnable"`
-	WithdrawFee    float64 `json:"withdrawFee,string"`
-	// WithdrawIntegerMultiple float64 `json:"withdrawIntegerMultiple,string"`
+	WithdrawEnable          bool    `json:"withdrawEnable"`
+	WithdrawFee             float64 `json:"withdrawFee,string"`
+	WithdrawIntegerMultiple float64 `json:"withdrawIntegerMultiple,string"`
 	// WithdrawMax             float64 `json:"withdrawMax,string"`
 	WithdrawMin float64 `json:"withdrawMin,string"`
 	// SameAddress             bool    `json:"sameAddress"`
