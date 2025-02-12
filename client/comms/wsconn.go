@@ -564,7 +564,7 @@ func (conn *wsConn) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		close(conn.readCh) // signal to MessageSource receivers that the wsConn is dead
 	}()
 
-	return &conn.wg, err
+	return &conn.wg, nil
 }
 
 // Stop can be used to close the connection and all of the goroutines started by
