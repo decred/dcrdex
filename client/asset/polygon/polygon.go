@@ -12,6 +12,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/eth"
 	"decred.org/dcrdex/dex"
+	dexeth "decred.org/dcrdex/dex/networks/eth"
 	dexpolygon "decred.org/dcrdex/dex/networks/polygon"
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -26,14 +27,19 @@ func registerToken(tokenID uint32, desc string, nets ...dex.Network) {
 		panic("token " + strconv.Itoa(int(tokenID)) + " not known")
 	}
 	netAddrs := make(map[dex.Network]string)
+	netVersions := make(map[dex.Network][]uint32, 3)
 	for net, netToken := range token.NetTokens {
 		netAddrs[net] = netToken.Address.String()
+		netVersions[net] = make([]uint32, 0, 1)
+		for ver := range netToken.SwapContracts {
+			netVersions[net] = append(netVersions[net], ver)
+		}
 	}
 	asset.RegisterToken(tokenID, token.Token, &asset.WalletDefinition{
 		Type:        walletTypeToken,
 		Tab:         "Polygon token",
 		Description: desc,
-	}, netAddrs)
+	}, netAddrs, netVersions)
 }
 
 func init() {
@@ -73,7 +79,7 @@ var (
 	}
 	WalletInfo = asset.WalletInfo{
 		Name:              "Polygon",
-		SupportedVersions: []uint32{0},
+		SupportedVersions: []uint32{0, 1},
 		UnitInfo:          dexpolygon.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{
 			{
@@ -84,8 +90,6 @@ var (
 				Seeded:      true,
 				NoAuth:      true,
 			},
-			// MaxSwapsInTx and MaxRedeemsInTx are set in (Wallet).Info, since
-			// the value cannot be known until we connect and get network info.
 		},
 		IsAccountBased: true,
 	}
@@ -152,6 +156,7 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Networ
 		WalletInfo:         WalletInfo,
 		Net:                net,
 		DefaultProviders:   defaultProviders,
+		MaxTxFeeGwei:       1000 * dexeth.GweiFactor, // 1000 POL
 	})
 }
 

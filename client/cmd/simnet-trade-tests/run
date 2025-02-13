@@ -2,8 +2,8 @@
 set -e
 
 go build -tags harness -ldflags \
-    "-X 'decred.org/dcrdex/dex.testLockTimeTaker=1m' \
-    -X 'decred.org/dcrdex/dex.testLockTimeMaker=2m'"
+    "-X 'decred.org/dcrdex/dex.testLockTimeTaker=3m' \
+    -X 'decred.org/dcrdex/dex.testLockTimeMaker=6m'"
 
 case $1 in
 

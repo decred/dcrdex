@@ -196,11 +196,8 @@ export default class Application {
 
     console.log('Bison Wallet, Build', this.commitHash.substring(0, 7))
 
-    // Set Bootstrap dark theme attribute if dark mode is enabled.
-    if (State.isDark()) {
-      document.body.classList.add('dark')
-    }
-    document.body.classList.add('loaded')
+    // Set dark theme.
+    document.body.classList.toggle('dark', State.isDark())
 
     // Loggers can be enabled by setting a truthy value to the loggerID using
     // enableLogger. Settings are stored across sessions. See docstring for the

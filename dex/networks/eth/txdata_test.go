@@ -124,7 +124,7 @@ func TestParseInitiateDataV0(t *testing.T) {
 	}}
 
 	for _, test := range tests {
-		parsedInitiations, err := ParseInitiateData(test.calldata, 0)
+		parsedInitiations, err := ParseInitiateDataV0(test.calldata)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)
@@ -217,7 +217,7 @@ func TestParseRedeemDataV0(t *testing.T) {
 	}}
 
 	for _, test := range tests {
-		parsedRedemptions, err := ParseRedeemData(test.calldata, 0)
+		parsedRedemptions, err := ParseRedeemDataV0(test.calldata)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)
@@ -282,7 +282,7 @@ func TestParseRefundDataV0(t *testing.T) {
 	}}
 
 	for _, test := range tests {
-		parsedSecretHash, err := ParseRefundData(test.calldata, 0)
+		parsedSecretHash, err := ParseRefundDataV0(test.calldata)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)

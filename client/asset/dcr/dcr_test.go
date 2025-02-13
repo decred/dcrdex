@@ -876,7 +876,7 @@ func TestAvailableFund(t *testing.T) {
 	}
 
 	ord := &asset.Order{
-		Version:       version,
+		AssetVersion:  version,
 		Value:         0,
 		MaxSwapCount:  1,
 		MaxFeeRate:    tDCR.MaxFeeRate,
@@ -2595,7 +2595,7 @@ func TestFundEdges(t *testing.T) {
 
 	node.unspent = []walletjson.ListUnspentResult{p2pkhUnspent}
 	ord := &asset.Order{
-		Version:       version,
+		AssetVersion:  version,
 		Value:         swapVal,
 		MaxSwapCount:  lots,
 		MaxFeeRate:    tDCR.MaxFeeRate,
@@ -3871,7 +3871,7 @@ func TestPreSwap(t *testing.T) {
 	node.unspent = []walletjson.ListUnspentResult{p2pkhUnspent}
 
 	form := &asset.PreSwapForm{
-		Version:       version,
+		AssetVersion:  version,
 		LotSize:       tLotSize,
 		Lots:          lots,
 		MaxFeeRate:    tDCR.MaxFeeRate,
@@ -3913,8 +3913,8 @@ func TestPreRedeem(t *testing.T) {
 	defer shutdown()
 
 	preRedeem, err := wallet.PreRedeem(&asset.PreRedeemForm{
-		Version: version,
-		Lots:    5,
+		AssetVersion: version,
+		Lots:         5,
 	})
 	// Shouldn't actually be any path to error.
 	if err != nil {

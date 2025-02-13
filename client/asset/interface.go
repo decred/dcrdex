@@ -300,8 +300,9 @@ type WalletDefinition struct {
 // Token combines the generic dex.Token with a WalletDefinition.
 type Token struct {
 	*dex.Token
-	Definition      *WalletDefinition `json:"definition"`
-	ContractAddress string            `json:"contractAddress"` // Set in SetNetwork
+	Definition             *WalletDefinition `json:"definition"`
+	ContractAddress        string            `json:"contractAddress"` // Set in SetNetwork
+	SupportedAssetVersions []uint32          `json:"supportedAssetVersions"`
 }
 
 // WalletInfo is auxiliary information about an ExchangeWallet.
@@ -325,12 +326,6 @@ type WalletInfo struct {
 	// UnitInfo is the information about unit names and conversion factors for
 	// the asset.
 	UnitInfo dex.UnitInfo `json:"unitinfo"`
-	// MaxSwapsInTx is the max amount of swaps that this wallet can do in a
-	// single transaction.
-	MaxSwapsInTx uint64
-	// MaxRedeemsInTx is the max amount of redemptions that this wallet can do
-	// in a single transaction.
-	MaxRedeemsInTx uint64
 	// IsAccountBased should be set to true for account-based (EVM) assets, so
 	// that a common seed will be generated and wallets will generate the
 	// same address.
@@ -1340,8 +1335,8 @@ type AuditInfo struct {
 
 // Swaps is the details needed to broadcast a swap contract(s).
 type Swaps struct {
-	// Version is the asset version.
-	Version uint32
+	// AssetVersion is the server's asset version.``
+	AssetVersion uint32
 	// Inputs are the Coins being spent.
 	Inputs Coins
 	// Contract is the contract data.
@@ -1392,9 +1387,9 @@ type RedeemForm struct {
 
 // Order is order details needed for FundOrder.
 type Order struct {
-	// Version is the asset version of the "from" asset with the init
+	// AssetVersion is the asset version of the "from" asset with the init
 	// transaction.
-	Version uint32
+	AssetVersion uint32
 	// Value is the amount required to satisfy the order. The Value does not
 	// include fees. Fees will be calculated internally based on the number of
 	// possible swaps (MaxSwapCount) and the exchange's configuration
@@ -1446,10 +1441,10 @@ type MultiOrderValue struct {
 
 // MultiOrder is order details needed for FundMultiOrder.
 type MultiOrder struct {
-	// Version is the asset version of the "from" asset with the init
+	// AssetVersion is the asset version of the "from" asset with the init
 	// transaction.
-	Version uint32
-	Values  []*MultiOrderValue
+	AssetVersion uint32
+	Values       []*MultiOrderValue
 	// MaxFeeRate is the largest possible fee rate for the init transaction (of
 	// this "from" asset) specific to and provided by a particular server, and
 	// is used to calculate the funding required to cover fees.
@@ -1476,6 +1471,12 @@ type MultiOrder struct {
 // A GeocodeRedeemer redeems funds from a geocode game.
 type GeocodeRedeemer interface {
 	RedeemGeocode(code []byte, msg string) (dex.Bytes, uint64, error)
+}
+
+// MaxMatchesCounter counts the maximum number of matches that can go in a tx.
+type MaxMatchesCounter interface {
+	MaxSwaps(serverVer uint32, feeRate uint64) (int, error)
+	MaxRedeems(serverVer uint32) (int, error)
 }
 
 // WalletNotification can be any asynchronous information the wallet needs

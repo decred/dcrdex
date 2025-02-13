@@ -119,3 +119,11 @@ func TestMainnetCompliance(t *testing.T) {
 func TestReceiptsHaveEffectiveGasPrice(t *testing.T) {
 	mt.TestReceiptsHaveEffectiveGasPrice(t)
 }
+
+func TestBlockStats(t *testing.T) {
+	mt.BlockStats(t, 5, 1024, dex.Mainnet)
+}
+
+func TestTestnetBlockStats(t *testing.T) {
+	mt.BlockStats(t, 5, 1024, dex.Testnet)
+}

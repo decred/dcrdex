@@ -266,7 +266,7 @@ func Run(t *testing.T, cfg *Config) {
 	checkAmt("second", rig.secondWallet)
 
 	ord := &asset.Order{
-		Version:      0,
+		AssetVersion: 0,
 		Value:        contractValue * 3,
 		MaxSwapCount: lots * 3,
 		MaxFeeRate:   cfg.Asset.MaxFeeRate,
