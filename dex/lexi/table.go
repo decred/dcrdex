@@ -35,13 +35,13 @@ func (db *DB) Table(name string) (*Table, error) {
 	}, nil
 }
 
-// Get retrieves a value from the Table.
-func (t *Table) Get(k encoding.BinaryMarshaler, v encoding.BinaryUnmarshaler) error {
+// GetRaw retrieves a value from the Table as raw bytes.
+func (t *Table) GetRaw(k encoding.BinaryMarshaler) (b []byte, err error) {
 	kB, err := k.MarshalBinary()
 	if err != nil {
-		return fmt.Errorf("error marshaling key: %w", err)
+		return nil, fmt.Errorf("error marshaling key: %w", err)
 	}
-	return t.View(func(txn *badger.Txn) error {
+	err = t.View(func(txn *badger.Txn) error {
 		dbID, err := t.keyID(txn, kB, true)
 		if err != nil {
 			return convertError(err)
@@ -50,8 +50,19 @@ func (t *Table) Get(k encoding.BinaryMarshaler, v encoding.BinaryUnmarshaler) er
 		if err != nil {
 			return err
 		}
-		return v.UnmarshalBinary(d.v)
+		b = d.v
+		return nil
 	})
+	return
+}
+
+// Get retrieves a value from the Table.
+func (t *Table) Get(k encoding.BinaryMarshaler, thing encoding.BinaryUnmarshaler) error {
+	b, err := t.GetRaw(k)
+	if err != nil {
+		return err
+	}
+	return thing.UnmarshalBinary(b)
 }
 
 // func (t *Table) GetDBID(dbID DBID, v encoding.BinaryUnmarshaler) error {
