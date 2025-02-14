@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"decred.org/dcrdex/dex"
-	dexeth "decred.org/dcrdex/dex/networks/eth"
 	"github.com/ethereum/go-ethereum/common"
 	ethcore "github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/eth/ethconfig"
@@ -65,7 +64,7 @@ func NetworkCompatibilityData(net dex.Network) (c CompatibilityData, err error) 
 	addr := common.HexToAddress("18d65fb8d60c1199bb1ad381be47aa692b482605")
 	var (
 		tTxHashFile    = filepath.Join(tDir, "test_tx_hash.txt")
-		tBlockHashFile = filepath.Join(tDir, "test_block10_hash.txt")
+		tBlockHashFile = filepath.Join(tDir, "test_block1_hash.txt")
 		tContractFile  = filepath.Join(tDir, "test_usdc_contract_address.txt")
 	)
 	readIt := func(path string) string {
@@ -103,10 +102,8 @@ func ETHConfig(net dex.Network) (c ethconfig.Config, err error) {
 	case dex.Testnet:
 		c.Genesis = ethcore.DefaultSepoliaGenesisBlock()
 	case dex.Simnet:
-		c.Genesis, err = readSimnetGenesisFile()
-		if err != nil {
-			return c, fmt.Errorf("readSimnetGenesisFile error: %w", err)
-		}
+		// Args are gasLimit, faucet address.
+		c.Genesis = ethcore.DeveloperGenesisBlock(30000000, nil)
 	default:
 		return c, fmt.Errorf("unknown network %d", net)
 
@@ -122,20 +119,4 @@ func ChainConfig(net dex.Network) (c *params.ChainConfig, err error) {
 		return nil, err
 	}
 	return cfg.Genesis.Config, nil
-}
-
-// readSimnetGenesisFile reads the simnet genesis file.
-func readSimnetGenesisFile() (*ethcore.Genesis, error) {
-	dataDir, err := simnetDataDir()
-	if err != nil {
-		return nil, err
-	}
-
-	genesisFile := filepath.Join(dataDir, "genesis.json")
-	genesisCfg, err := dexeth.LoadGenesisFile(genesisFile)
-	if err != nil {
-		return nil, fmt.Errorf("error reading genesis file: %v", err)
-	}
-
-	return genesisCfg, nil
 }

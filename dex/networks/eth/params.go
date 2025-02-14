@@ -32,8 +32,8 @@ const (
 // These are the chain IDs of the various Ethereum network supported.
 const (
 	MainnetChainID = 1
-	TestnetChainID = 5  // Görli
-	SimnetChainID  = 42 // see dex/testing/eth/harness.sh
+	TestnetChainID = 11155111 // Sepolia
+	SimnetChainID  = 1337     // see dex/testing/eth/harness.sh
 )
 
 var (

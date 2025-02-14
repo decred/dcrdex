@@ -110,8 +110,6 @@ func (s *sideStacker) SetupWallets(m *Mantle) {
 		"per epoch, %s to %s %s balance, and %s to %s %s balance, %d initial %s coins, %d initial %s coins",
 		s.numStanding, s.ordsPerEpoch, fmtAtoms(minBaseQty, baseSymbol), fmtAtoms(maxBaseQty, baseSymbol), baseSymbol,
 		fmtAtoms(minQuoteQty, quoteSymbol), fmtAtoms(maxQuoteQty, quoteSymbol), quoteSymbol, baseCoins, baseSymbol, quoteCoins, quoteSymbol)
-	<-mine(baseSymbol, alpha)
-	<-mine(quoteSymbol, alpha)
 }
 
 // HandleNotification is part of the Trader interface.

@@ -197,25 +197,6 @@ func returnAddress(symbol string) string {
 	return alphaAddrQuote
 }
 
-// mine will mine a single block on the node and asset indicated.
-func mine(symbol, node string) <-chan *harnessResult {
-	n := 1
-	switch symbol {
-	case eth:
-		// geth may not include some tx at first because ???. Mine more.
-		n = 4
-	case zec, zcl:
-		// Zcash has a problem selecting unused utxo for a second when
-		// also mining. https://github.com/zcash/zcash/issues/6045
-		zecSendMtx.Lock()
-		defer func() {
-			time.Sleep(time.Second)
-			zecSendMtx.Unlock()
-		}()
-	}
-	return harnessCtl(ctx, symbol, fmt.Sprintf("./mine-%s", node), fmt.Sprintf("%d", n))
-}
-
 // harnessResult is the result of a harnessCtl command.
 type harnessResult struct {
 	err    error
@@ -499,7 +480,7 @@ func run() error {
 		case dcr:
 			args = []string{"getnewaddress", "default", "ignore"}
 		case eth, usdc, polygon, usdcp:
-			args = []string{"attach", `--exec eth.accounts[1]`}
+			args = []string{"attach", `--exec eth.accounts[0]`}
 		case zec, zcl:
 			return "tmEgW8c44RQQfft9FHXnqGp8XEcQQSRcUXD", nil // ALPHA_ADDR in the zcash harness.sh
 		default:
@@ -710,7 +691,8 @@ func loadNodeConfig(symbol, node string) map[string]string {
 	var cfgPath string
 	switch symbol {
 	case eth, usdc:
-		cfgPath = filepath.Join(dextestDir, harnessSymbol(symbol), node, "node", "eth.conf")
+		// Eth harness only has an alpha node.
+		cfgPath = filepath.Join(dextestDir, harnessSymbol(symbol), "alpha", "node", "eth.conf")
 	case polygon, usdcp:
 		return map[string]string{}
 	default:

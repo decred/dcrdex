@@ -72,9 +72,7 @@ var (
 	testnetParticipantWalletDir string
 
 	alphaNodeDir               = filepath.Join(homeDir, "dextest", "eth", "alpha", "node")
-	alphaIPCFile               = filepath.Join(alphaNodeDir, "geth.ipc")
-	betaNodeDir                = filepath.Join(homeDir, "dextest", "eth", "beta", "node")
-	betaIPCFile                = filepath.Join(betaNodeDir, "geth.ipc")
+	alphaWSEndpoint            = "ws://127.0.0.1:38557"
 	ctx                        context.Context
 	tLogger                    = dex.StdOutLogger("ETHTEST", dex.LevelWarn)
 	simnetWalletSeed           = "0812f5244004217452059e2fd11603a511b5d0870ead753df76c966ce3c71531"
@@ -208,23 +206,23 @@ func prepareRPCClient(name, dataDir string, providers []string, net dex.Network)
 	return c, c.creds.acct, nil
 }
 
-func rpcEndpoints(net dex.Network) ([]string, []string) {
+func rpcEndpoints(net dex.Network) []string {
 	if net == dex.Testnet {
-		return rpcProviders, rpcProviders
+		return rpcProviders
 	}
-	return []string{alphaIPCFile}, []string{betaIPCFile}
+	return []string{alphaWSEndpoint}
 }
 
 func prepareTestRPCClients(initiatorDir, participantDir string, net dex.Network) (err error) {
-	initiatorEndpoints, participantEndpoints := rpcEndpoints(net)
+	endpoints := rpcEndpoints(net)
 
-	ethClient, simnetAcct, err = prepareRPCClient("initiator", initiatorDir, initiatorEndpoints, net)
+	ethClient, simnetAcct, err = prepareRPCClient("initiator", initiatorDir, endpoints, net)
 	if err != nil {
 		return err
 	}
 	fmt.Println("initiator address is", ethClient.address())
 
-	participantEthClient, participantAcct, err = prepareRPCClient("participant", participantDir, participantEndpoints, net)
+	participantEthClient, participantAcct, err = prepareRPCClient("participant", participantDir, endpoints, net)
 	if err != nil {
 		ethClient.shutdown()
 		return err
@@ -258,14 +256,14 @@ func runSimnet(m *testing.M) (int, error) {
 
 	ethSwapContractAddr = dexeth.ContractAddresses[contractVer][dex.Simnet]
 
-	initiatorProviders, participantProviders := rpcEndpoints(dex.Simnet)
+	providers := rpcEndpoints(dex.Simnet)
 
-	err = setupWallet(simnetWalletDir, simnetWalletSeed, "localhost:30355", initiatorProviders, dex.Simnet)
+	err = setupWallet(simnetWalletDir, simnetWalletSeed, "localhost:30355", providers, dex.Simnet)
 	if err != nil {
 		return 1, err
 	}
 
-	err = setupWallet(participantWalletDir, participantWalletSeed, "localhost:30356", participantProviders, dex.Simnet)
+	err = setupWallet(participantWalletDir, participantWalletSeed, "localhost:30356", providers, dex.Simnet)
 	if err != nil {
 		return 1, err
 	}
@@ -390,13 +388,13 @@ func runTestnet(m *testing.M) (int, error) {
 	ethSwapContractAddr = dexeth.ContractAddresses[contractVer][dex.Testnet]
 	fmt.Printf("ETH swap contract address is %v\n", ethSwapContractAddr)
 
-	initiatorRPC, participantRPC := rpcEndpoints(dex.Testnet)
+	rpc := rpcEndpoints(dex.Testnet)
 
-	err = setupWallet(testnetWalletDir, testnetWalletSeed, "localhost:30355", initiatorRPC, dex.Testnet)
+	err = setupWallet(testnetWalletDir, testnetWalletSeed, "localhost:30355", rpc, dex.Testnet)
 	if err != nil {
 		return 1, err
 	}
-	err = setupWallet(testnetParticipantWalletDir, testnetParticipantWalletSeed, "localhost:30356", participantRPC, dex.Testnet)
+	err = setupWallet(testnetParticipantWalletDir, testnetParticipantWalletSeed, "localhost:30356", rpc, dex.Testnet)
 	if err != nil {
 		return 1, err
 	}
