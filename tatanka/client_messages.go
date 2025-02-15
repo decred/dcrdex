@@ -155,10 +155,13 @@ func (t *Tatanka) handleClientMessage(cl tanka.Sender, msg *msgjson.Message) *ms
 		return nil
 	}
 
-	if err := mj.CheckSig(msg, c.PubKey); err != nil {
-		t.log.Errorf("Signature error for %q message from %q: %v", msg.Route, c.ID, err)
-		return msgjson.NewError(mj.ErrSig, "signature doesn't check")
-	}
+	// For wss connections, we'll only check sigs for RouteConnect.
+	// The TLS & WebSockets protocols collectively ensure that subsequent
+	// messages are the same client.
+	// if err := mj.CheckSig(msg, c.PubKey); err != nil {
+	// 	t.log.Errorf("Signature error for %q message from %q: %v", msg.Route, c.ID, err)
+	// 	return msgjson.NewError(mj.ErrSig, "signature doesn't check")
+	// }
 
 	t.clientMtx.RLock()
 	c, found := t.clients[peerID]
@@ -278,12 +281,23 @@ func (t *Tatanka) handleSubscription(c *client, msg *msgjson.Message) *msgjson.E
 		return msgjson.NewError(mj.ErrBadRequest, "is this payload a subscription?")
 	}
 
+	newSubB, err := json.Marshal(&mj.NewSubscriber{
+		PeerID:  c.ID,
+		Topic:   sub.Topic,
+		Subject: sub.Subject,
+	})
+	if err != nil {
+		t.log.Errorf("error marshaling subscription from %s: %w", c.ID, err)
+		return msgjson.NewError(mj.ErrInternal, "why didn't the NewSubscriber marshal?")
+	}
+
 	bcast := &mj.Broadcast{
 		Topic:       sub.Topic,
 		Subject:     sub.Subject,
 		MessageType: mj.MessageTypeNewSubscriber,
 		PeerID:      c.ID,
 		Stamp:       time.Now(),
+		Payload:     newSubB,
 	}
 
 	// Do a helper function here to keep things tidy below.
