@@ -85,10 +85,12 @@ const (
 
 	providersKey = "providers"
 
-	// confCheckTimeout is the amount of time allowed to check for
-	// confirmations. Testing on testnet has shown spikes up to 2.5
-	// seconds. This value may need to be adjusted in the future.
-	confCheckTimeout = 4 * time.Second
+	// onChainDataFetchTimeout is the max amount of time allocated to fetching
+	// on-chain data. Testing on testnet has shown spikes up to 2.5 seconds
+	// (but on internet, with Tor, it could actually take up to 30 seconds easily).
+	// Setting it to 10 seconds for now until https://github.com/decred/dcrdex/issues/3184
+	// is resolved.
+	onChainDataFetchTimeout = 10 * time.Second
 
 	// coinIDTakerFoundMakerRedemption is a prefix to identify one of CoinID formats,
 	// see DecodeCoinID func for details.
@@ -3347,7 +3349,7 @@ func (w *assetWallet) SwapConfirmations(ctx context.Context, coinID dex.Bytes, c
 		return 0, false, err
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, confCheckTimeout)
+	ctx, cancel := context.WithTimeout(ctx, onChainDataFetchTimeout)
 	defer cancel()
 
 	swapData, err := w.swap(ctx, secretHash, contractVer)
@@ -3700,7 +3702,7 @@ func (eth *ETHWallet) monitorBlocks(ctx context.Context) {
 // tipChange callback function is invoked and a goroutine is started to check
 // if any contracts in the findRedemptionQueue are redeemed in the new blocks.
 func (eth *ETHWallet) checkForNewBlocks(ctx context.Context) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, onChainDataFetchTimeout)
 	defer cancel()
 	bestHdr, err := eth.node.bestHeader(ctx)
 	if err != nil {
@@ -4683,7 +4685,7 @@ func (w *baseWallet) checkPendingTxs() {
 			// on it, cancel that request.
 			if pendingTx.actionRequested {
 				pendingTx.actionRequested = false
-				w.requestAction(asset.ActionResolved, pendingTx.ID, nil, pendingTx.TokenID)
+				w.resolveAction(pendingTx.ID, pendingTx.TokenID)
 			}
 		}
 	}
@@ -5044,8 +5046,8 @@ func (w *assetWallet) userActionRecoverNonces(actionB []byte) error {
 	return nil
 }
 
-// requestAction sends a ActionRequired or ActionResolved notification up the
-// chain of command. nonceMtx must be locked.
+// requestAction sends a ActionRequired notification up the chain of command.
+// nonceMtx must be locked.
 func (w *baseWallet) requestAction(actionID, uniqueID string, req *TransactionActionNote, tokenID *uint32) {
 	assetID := w.baseChainID
 	if tokenID != nil {
@@ -5056,6 +5058,20 @@ func (w *baseWallet) requestAction(actionID, uniqueID string, req *TransactionAc
 		return
 	}
 	aw.emit.ActionRequired(uniqueID, actionID, req)
+}
+
+// resolveAction sends a ActionResolved notification up the chain of command.
+// nonceMtx must be locked.
+func (w *baseWallet) resolveAction(uniqueID string, tokenID *uint32) {
+	assetID := w.baseChainID
+	if tokenID != nil {
+		assetID = *tokenID
+	}
+	aw := w.wallet(assetID)
+	if aw == nil { // sanity
+		return
+	}
+	aw.emit.ActionResolved(uniqueID)
 }
 
 // TakeAction satisfies asset.ActionTaker. This handles responses from the

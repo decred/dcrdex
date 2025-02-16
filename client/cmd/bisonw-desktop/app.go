@@ -462,7 +462,7 @@ func systrayOnReady(ctx context.Context, logDirectory string, openC chan<- struc
 	killC chan<- os.Signal, activeState <-chan bool) {
 	systray.SetIcon(FavIcon)
 	systray.SetTitle("Bison Wallet")
-	systray.SetTooltip("Self-custodial multi-wallet with atomic swap capability, by Decred.")
+	systray.SetTooltip("Self-custodial multi-wallet")
 
 	// TODO: Consider reworking main so we can show the icon earlier?
 	// mStarting := systray.AddMenuItem("Starting...", "Starting up. Please wait...")

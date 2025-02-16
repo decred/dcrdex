@@ -264,7 +264,7 @@ type BotProblems struct {
 	// CausesSelfMatch is true if the order would cause a self match.
 	CausesSelfMatch bool `json:"causesSelfMatch"`
 	// UnknownError is set if an error occurred that was not one of the above.
-	UnknownError error `json:"unknownError"`
+	UnknownError string `json:"unknownError"`
 }
 
 // EpochReport contains a report of a bot's activity during an epoch.
@@ -648,7 +648,7 @@ func (m *MarketMaker) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 			// Try to connect so we can update our balances and set the
 			// connected flag, but ignore errors.
 			if err := m.connectCEX(ctx, c); err != nil {
-				m.log.Infof("Could not connect to %q: %w", cexCfg.Name, err)
+				m.log.Infof("Could not connect to %q: %v", cexCfg.Name, err)
 			}
 		}
 	}
@@ -1213,7 +1213,7 @@ func (m *MarketMaker) updateDEXOrderEvent(mkt *MarketWithHost, event *MarketMaki
 		return nil, fmt.Errorf("error fetching order: %v", err)
 	}
 
-	swapIDs, redeemIDs, refundIDs := orderTransactions(o)
+	swapIDs, redeemIDs, refundIDs := orderCoinIDs(o)
 	fromAsset, _, toAsset, _ := orderAssets(mkt.BaseID, mkt.QuoteID, o.Sell)
 	swaps := make(map[string]*asset.WalletTransaction, len(swapIDs))
 	redeems := make(map[string]*asset.WalletTransaction, len(redeemIDs))
@@ -1221,21 +1221,21 @@ func (m *MarketMaker) updateDEXOrderEvent(mkt *MarketWithHost, event *MarketMaki
 	allTxs := make([]*asset.WalletTransaction, 0, len(orderEvent.Transactions))
 	pendingTx := false
 
-	processTxs := func(assetID uint32, txIDs map[string]bool, txs map[string]*asset.WalletTransaction) {
-		for txid := range txIDs {
-			tx := findEventTx(txid)
+	processTxs := func(assetID uint32, coinIDs map[string]bool, txs map[string]*asset.WalletTransaction) {
+		for coinID := range coinIDs {
+			tx := findEventTx(coinID)
 
 			if tx == nil || !tx.Confirmed {
 				var err error
-				tx, err = m.core.WalletTransaction(assetID, txid)
+				tx, err = m.core.WalletTransaction(assetID, coinID)
 				if err != nil {
-					m.log.Errorf("Error fetching transaction %s for %s: %v", txid, mkt, err)
+					m.log.Errorf("Error fetching transaction %s for %s: %v", coinID, mkt, err)
 					pendingTx = true
 					continue
 				}
 			}
 
-			txs[txid] = tx
+			txs[tx.ID] = tx
 			allTxs = append(allTxs, tx)
 			pendingTx = pendingTx || !tx.Confirmed
 		}
