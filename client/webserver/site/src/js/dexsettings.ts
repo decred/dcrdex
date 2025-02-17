@@ -129,30 +129,17 @@ export default class DexSettingsPage extends BasePage {
       if (!this.accountDisabled) page.toggleAutoRenew.click()
     })
 
-    page.penaltyComps.textContent = String(xc.auth.penaltyComps)
-    const hideCompInput = () => {
-      Doc.hide(page.penaltyCompInput)
-      Doc.show(page.penaltyComps)
-    }
+    page.penaltyCompInput.value = String(xc.auth.penaltyComps)
     Doc.bind(page.penaltyCompBox, 'click', (e: MouseEvent) => {
       e.stopPropagation()
       const xc = app().exchanges[this.host]
       page.penaltyCompInput.value = String(xc.auth.penaltyComps)
-      Doc.hide(page.penaltyComps)
-      Doc.show(page.penaltyCompInput)
       page.penaltyCompInput.focus()
-      const checkClick = (e: MouseEvent) => {
-        if (Doc.mouseInElement(e, page.penaltyCompBox)) return
-        hideCompInput()
-        Doc.unbind(document, 'click', checkClick)
-      }
-      Doc.bind(document, 'click', checkClick)
     })
 
     Doc.bind(page.penaltyCompInput, 'keyup', async (e: KeyboardEvent) => {
       Doc.hide(page.penaltyCompsErr)
       if (e.key === 'Escape') {
-        hideCompInput()
         return
       }
       if (!(e.key === 'Enter')) return
@@ -166,13 +153,11 @@ export default class DexSettingsPage extends BasePage {
       try {
         await this.updateBondOptions({ penaltyComps })
         loaded()
-        page.penaltyComps.textContent = String(penaltyComps)
       } catch (e) {
         loaded()
         Doc.show(page.penaltyCompsErr)
         page.penaltyCompsErr.textContent = intl.prep(intl.ID_API_ERROR, { msg: e.msg })
       }
-      hideCompInput()
     })
 
     this.dexAddrForm = new forms.DEXAddressForm(page.dexAddrForm, async (xc: Exchange) => {
