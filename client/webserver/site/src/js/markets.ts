@@ -979,7 +979,7 @@ export default class MarketsPage extends BasePage {
     this.updateRegistrationStatusView()
 
     const showSection = (section: PageElement | undefined) => {
-      const elements = [page.registrationStatus, page.bondRequired, page.bondCreationPending, page.notRegistered]
+      const elements = [page.registrationStatus, page.bondRequired, page.bondCreationPending, page.notRegistered, page.penaltyCompsRequired]
       for (const el of elements) {
         Doc.setVis(el === section, el)
       }
@@ -1000,6 +1000,11 @@ export default class MarketsPage extends BasePage {
     } else if (market.dex.viewOnly) {
       page.unregisteredDex.textContent = market.dex.host
       showSection(page.notRegistered)
+    } else if (market.dex.auth.targetTier > 0 && market.dex.auth.rep.penalties > market.dex.auth.penaltyComps) {
+      page.acctPenalties.textContent = `${market.dex.auth.rep.penalties}`
+      page.acctPenaltyComps.textContent = `${market.dex.auth.penaltyComps}`
+      page.compsDexSettingsLink.href = `/dexsettings/${market.dex.host}`
+      showSection(page.penaltyCompsRequired)
     } else if (this.hasPendingBonds()) {
       showSection(page.registrationStatus)
     } else if (market.dex.auth.targetTier > 0) {
@@ -1121,7 +1126,7 @@ export default class MarketsPage extends BasePage {
     // Hide the balance widget
     this.balanceWgt.setBalanceVisibility(false)
 
-    Doc.hide(page.notRegistered, page.bondRequired, page.noWallet)
+    Doc.hide(page.notRegistered, page.bondRequired, page.noWallet, page.penaltyCompsRequired)
 
     // If we have not yet connected, there is no dex.assets or any other
     // exchange data, so just put up a message and wait for the connection to be
