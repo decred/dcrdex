@@ -28,6 +28,7 @@ const (
 	ErrNoConfig
 	ErrBannned
 	ErrFailedRelay
+	ErrUnknownSender
 )
 
 const (
