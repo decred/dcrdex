@@ -430,6 +430,11 @@ type BTCCloneCFG struct {
 	AssetID uint32
 }
 
+// PaymentScripter can be implemented to make non-standard payment scripts.
+type PaymentScripter interface {
+	PaymentScript() ([]byte, error)
+}
+
 // RPCConfig adds a wallet name to the basic configuration.
 type RPCConfig struct {
 	dexbtc.RPCConfig `ini:",extends"`
@@ -4505,7 +4510,12 @@ func (btc *baseWallet) send(address string, val uint64, feeRate uint64, subtract
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("invalid address: %s", address)
 	}
-	pay2script, err := txscript.PayToAddrScript(addr)
+	var pay2script []byte
+	if scripter, is := addr.(PaymentScripter); is {
+		pay2script, err = scripter.PaymentScript()
+	} else {
+		pay2script, err = txscript.PayToAddrScript(addr)
+	}
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("PayToAddrScript error: %w", err)
 	}
