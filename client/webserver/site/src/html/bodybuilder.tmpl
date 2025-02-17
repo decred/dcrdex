@@ -9,14 +9,9 @@
   <link rel="icon" href="/img/favicon.png?v=AZ4AZX">
   <meta name="description" content="Bison Wallet">
   <title>{{.Title}}</title>
-  <style>
-    body {
-      display: none;
-    }
-  </style>
   <link href="/css/style.css?v={{commitHash}}" rel="stylesheet">
 </head>
-<body {{if .UseDEXBranding}}class="dex-branding"{{end}}>
+<body class="dark{{if .UseDEXBranding}} dex-branding{{end}}">
   <div class="popup-notes d-hide" id="popupNotes">
     <span data-tmpl="note" class="fs15">
       <div class="note-indicator d-inline-block" data-tmpl="indicator"></div>

@@ -122,7 +122,7 @@ contract ETHSwap {
     }
 
     // redeem redeems a contract. It checks that the sender is not a contract,
-    // and that the secret hash hashes to secretHash. msg.value is tranfered
+    // and that the secret hashes to secretHash. msg.value is tranfered
     // from the contract to the sender.
     //
     // It is important to note that this uses call.value which comes with no

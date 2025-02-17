@@ -538,7 +538,7 @@ func TestFundOrder(t *testing.T) {
 	}
 
 	ord := &asset.Order{
-		Version:      version,
+		AssetVersion: version,
 		Value:        0,
 		MaxSwapCount: 1,
 		Options:      make(map[string]string),
@@ -1335,10 +1335,10 @@ func TestPreSwap(t *testing.T) {
 	}
 
 	form := &asset.PreSwapForm{
-		Version:   version,
-		LotSize:   tLotSize,
-		Lots:      lots,
-		Immediate: false,
+		AssetVersion: version,
+		LotSize:      tLotSize,
+		Lots:         lots,
+		Immediate:    false,
 	}
 
 	setFunds(minReq)

@@ -38,8 +38,9 @@ type RedeemEstimate struct {
 
 // PreSwapForm can be used to get a swap fees estimate.
 type PreSwapForm struct {
-	// Version is the asset version. Most backends only support one version.
-	Version uint32
+	// AssetVersion is the server's asset version. Most backends only support
+	// one version.
+	AssetVersion uint32
 	// LotSize is the lot size for the calculation. For quote assets, LotSize
 	// should be based on either the user's limit order rate, or some measure
 	// of the current market rate.
@@ -83,8 +84,9 @@ type PreSwap struct {
 
 // PreRedeemForm can be used to get a redemption estimate.
 type PreRedeemForm struct {
-	// Version is the asset version. Most backends only support one version.
-	Version uint32
+	// AssetVersion is the asset version. Most backends only support one
+	// version.
+	AssetVersion uint32
 	// Lots is the number of lots in the order.
 	Lots uint64
 	// FeeSuggestion is a suggested fee from the server.

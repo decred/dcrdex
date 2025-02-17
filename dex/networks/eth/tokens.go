@@ -64,7 +64,7 @@ type NetToken struct {
 
 // SwapContract represents a single swap contract instance.
 type SwapContract struct {
-	Address common.Address
+	Address common.Address // Only used for v0 contracts
 	Gas     Gases
 }
 
@@ -106,6 +106,29 @@ var Tokens = map[uint32]*Token{
 							Refund:    77_000,
 							Approve:   78_400,
 							Transfer:  85_100,
+						},
+					},
+					1: {
+						Gas: Gases{
+							// First swap used 98443 gas Recommended Gases.Swap = 127975
+							// 	1 additional swaps averaged 26491 gas each. Recommended Gases.SwapAdd = 34438
+							// 	[98443 124934]
+							// First redeem used 54761 gas. Recommended Gases.Redeem = 71189
+							// 	1 additional redeems averaged 10722 gas each. recommended Gases.RedeemAdd = 13938
+							// 	[54761 65483]
+							// Average of 2 refunds: 58328. Recommended Gases.Refund = 75826
+							// 	[58289 58367]
+							// Average of 2 approvals: 55882. Recommended Gases.Approve = 72646
+							// 	[55882 55882]
+							// Average of 1 transfers: 62224. Recommended Gases.Transfer = 80891
+							// 	[62224]
+							Swap:      127_975,
+							SwapAdd:   34_438,
+							Redeem:    71_189,
+							RedeemAdd: 13_938,
+							Refund:    75_826,
+							Approve:   72_646,
+							Transfer:  80_891,
 						},
 					},
 				},
@@ -160,6 +183,29 @@ var Tokens = map[uint32]*Token{
 							Transfer:  85_100,  // actual ~65,524 (initial receive, subsequent 48,424)
 						},
 					},
+					1: {
+						Gas: Gases{
+							// First swap used 98310 gas Recommended Gases.Swap = 127803
+							// 	2 additional swaps averaged 26507 gas each. Recommended Gases.SwapAdd = 34459
+							// 	[98310 124825 151325]
+							// First redeem used 54672 gas. Recommended Gases.Redeem = 71073
+							// 	2 additional redeems averaged 10726 gas each. recommended Gases.RedeemAdd = 13943
+							// 	[54672 65406 76124]
+							// Average of 3 refunds: 58056. Recommended Gases.Refund = 75472
+							// 	[58187 58278 57705]
+							// Average of 2 approvals: 55785. Recommended Gases.Approve = 72520
+							// 	[55785 55785]
+							// Average of 1 transfers: 62135. Recommended Gases.Transfer = 80775
+							// 	[62135]
+							Swap:      127_803,
+							SwapAdd:   34_459,
+							Redeem:    71_073,
+							RedeemAdd: 13_943,
+							Refund:    75_472,
+							Approve:   72_520,
+							Transfer:  80_775,
+						},
+					},
 				},
 			},
 			dex.Simnet: {
@@ -176,6 +222,29 @@ var Tokens = map[uint32]*Token{
 							Approve:   32_303,
 							Transfer:  66_953,
 						}},
+					1: {
+						Gas: Gases{
+							// First swap used 88089 gas Recommended Gases.Swap = 114515
+							Swap: 114_515,
+							// 	4 additional swaps averaged 26671 gas each. Recommended Gases.SwapAdd = 34672
+							// 	[88089 114763 141438 168100 194775]
+							SwapAdd: 34_672,
+							// First redeem used 44825 gas. Recommended Gases.Redeem = 58272
+							Redeem: 58_272,
+							// 	4 additional redeems averaged 10929 gas each. recommended Gases.RedeemAdd = 14207
+							// 	[44825 55765 66682 77611 88541]
+							RedeemAdd: 14_207,
+							// Average of 5 refunds: 47624. Recommended Gases.Refund = 61911
+							// 	[47624 47624 47624 47624 47624]
+							Refund: 61_911,
+							// Average of 2 approvals: 44754. Recommended Gases.Approve = 58180
+							// 	[44754 44754]
+							Approve: 58_180,
+							// Average of 1 transfers: 51509. Recommended Gases.Transfer = 66961
+							// 	[51509]
+							Transfer: 66_961,
+						},
+					},
 				},
 			},
 		},
@@ -227,6 +296,29 @@ var Tokens = map[uint32]*Token{
 							Transfer:  82_124,
 						},
 					},
+					1: {
+						// First swap used 95314 gas Recommended Gases.Swap = 123908
+						// 	1 additional swaps averaged 26503 gas each. Recommended Gases.SwapAdd = 34453
+						// 	[95314 121817]
+						// First redeem used 55512 gas. Recommended Gases.Redeem = 72165
+						// 	1 additional redeems averaged 10710 gas each. recommended Gases.RedeemAdd = 13923
+						// 	[55512 66222]
+						// Average of 2 refunds: 59072. Recommended Gases.Refund = 76793
+						// 	[59036 59109]
+						// Average of 2 approvals: 48897. Recommended Gases.Approve = 63566
+						// 	[48897 48897]
+						// Average of 1 transfers: 63173. Recommended Gases.Transfer = 82124
+						// 	[63173]
+						Gas: Gases{
+							Swap:      123_908,
+							SwapAdd:   34_453,
+							Redeem:    72_165,
+							RedeemAdd: 13_923,
+							Refund:    76_793,
+							Approve:   63_566,
+							Transfer:  82_124,
+						},
+					},
 				},
 			},
 			dex.Testnet: {
@@ -258,13 +350,36 @@ var Tokens = map[uint32]*Token{
 							Transfer:  82_196,
 						},
 					},
+					1: {
+						Gas: Gases{
+							// First swap used 95350 gas Recommended Gases.Swap = 123955
+							// 	2 additional swaps averaged 26501 gas each. Recommended Gases.SwapAdd = 34451
+							// 	[95350 121853 148353]
+							// First redeem used 55567 gas. Recommended Gases.Redeem = 72237
+							// 	2 additional redeems averaged 10714 gas each. recommended Gases.RedeemAdd = 13928
+							// 	[55567 66289 76995]
+							// Average of 3 refunds: 58950. Recommended Gases.Refund = 76635
+							// 	[59092 58595 59164]
+							// Average of 2 approvals: 48930. Recommended Gases.Approve = 63609
+							// 	[48930 48930]
+							// Average of 1 transfers: 63216. Recommended Gases.Transfer = 82180
+							// 	[63216]
+							Swap:      123_955,
+							SwapAdd:   34_451,
+							Redeem:    72_237,
+							RedeemAdd: 13_928,
+							Refund:    76_635,
+							Approve:   63_609,
+							Transfer:  82_180,
+						},
+					},
 				},
 			},
 			dex.Simnet: {
 				Address: common.Address{},
 				SwapContracts: map[uint32]*SwapContract{
 					0: {
-						Address: common.Address{},
+						Address: common.Address{}, // Filled in by MaybeReadSimnetAddrs
 						Gas: Gases{
 							Swap:      203_317,
 							SwapAdd:   146_368,
@@ -276,6 +391,7 @@ var Tokens = map[uint32]*Token{
 						}},
 				},
 			},
+			// No USDC version 1 gases on simnet, for testing purposes.
 		},
 	},
 	maticTokenID: {
@@ -348,7 +464,7 @@ func MaybeReadSimnetAddrs() {
 
 func MaybeReadSimnetAddrsDir(
 	dir string,
-	contractsAddrs map[uint32]map[dex.Network]common.Address,
+	contractAddrs map[uint32]map[dex.Network]common.Address,
 	multiBalandAddresses map[dex.Network]common.Address,
 	usdcToken *NetToken,
 	usdtToken *NetToken,
@@ -368,20 +484,22 @@ func MaybeReadSimnetAddrsDir(
 		return
 	}
 
-	ethSwapContractAddrFile := filepath.Join(harnessDir, "eth_swap_contract_address.txt")
-	testUSDCSwapContractAddrFile := filepath.Join(harnessDir, "usdc_swap_contract_address.txt")
+	ethSwapContractAddrFileV0 := filepath.Join(harnessDir, "eth_swap_contract_address.txt")
+	ethSwapContractAddrFileV1 := filepath.Join(harnessDir, "eth_swap_contract_address_v1.txt")
+	testUSDCSwapContractAddrFileV0 := filepath.Join(harnessDir, "usdc_swap_contract_address.txt")
 	testUSDCContractAddrFile := filepath.Join(harnessDir, "test_usdc_contract_address.txt")
-	testUSDTSwapContractAddrFile := filepath.Join(harnessDir, "usdt_swap_contract_address.txt")
+	testUSDTSwapContractAddrFileV0 := filepath.Join(harnessDir, "usdt_swap_contract_address.txt")
 	testUSDTContractAddrFile := filepath.Join(harnessDir, "test_usdt_contract_address.txt")
 	multiBalanceContractAddrFile := filepath.Join(harnessDir, "multibalance_address.txt")
 
-	contractsAddrs[0][dex.Simnet] = maybeGetContractAddrFromFile(ethSwapContractAddrFile)
+	contractAddrs[0][dex.Simnet] = maybeGetContractAddrFromFile(ethSwapContractAddrFileV0)
+	contractAddrs[1][dex.Simnet] = maybeGetContractAddrFromFile(ethSwapContractAddrFileV1)
 	multiBalandAddresses[dex.Simnet] = maybeGetContractAddrFromFile(multiBalanceContractAddrFile)
 
-	usdcToken.SwapContracts[0].Address = maybeGetContractAddrFromFile(testUSDCSwapContractAddrFile)
+	usdcToken.SwapContracts[0].Address = maybeGetContractAddrFromFile(testUSDCSwapContractAddrFileV0)
 	usdcToken.Address = maybeGetContractAddrFromFile(testUSDCContractAddrFile)
 
-	usdtToken.SwapContracts[0].Address = maybeGetContractAddrFromFile(testUSDTSwapContractAddrFile)
+	usdtToken.SwapContracts[0].Address = maybeGetContractAddrFromFile(testUSDTSwapContractAddrFileV0)
 	usdtToken.Address = maybeGetContractAddrFromFile(testUSDTContractAddrFile)
 }
 

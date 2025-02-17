@@ -40,14 +40,9 @@ import (
 	ethmath "github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/eth/ethconfig"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/tyler-smith/go-bip39"
 )
-
-func init() {
-	dexeth.MaybeReadSimnetAddrs()
-}
 
 func registerToken(tokenID uint32, desc string) {
 	token, found := dexeth.Tokens[tokenID]
@@ -55,17 +50,23 @@ func registerToken(tokenID uint32, desc string) {
 		panic("token " + strconv.Itoa(int(tokenID)) + " not known")
 	}
 	netAddrs := make(map[dex.Network]string)
+	netAssetVersions := make(map[dex.Network][]uint32, 3)
 	for net, netToken := range token.NetTokens {
 		netAddrs[net] = netToken.Address.String()
+		netAssetVersions[net] = make([]uint32, 0, 1)
+		for ver := range netToken.SwapContracts {
+			netAssetVersions[net] = append(netAssetVersions[net], ver)
+		}
 	}
 	asset.RegisterToken(tokenID, token.Token, &asset.WalletDefinition{
 		Type:        walletTypeToken,
 		Tab:         "Ethereum token",
 		Description: desc,
-	}, netAddrs)
+	}, netAddrs, netAssetVersions)
 }
 
 func init() {
+	dexeth.MaybeReadSimnetAddrs()
 	asset.Register(BipID, &Driver{})
 	registerToken(usdcTokenID, "The USDC Ethereum ERC20 token.")
 	registerToken(usdtTokenID, "The USDT Ethereum ERC20 token.")
@@ -96,15 +97,6 @@ const (
 	// see DecodeCoinID func for details.
 	coinIDTakerFoundMakerRedemption = "TakerFoundMakerRedemption:"
 
-	// maxTxFeeGwei is the default max amount of eth that can be used in one
-	// transaction. This is set by the host in the case of providers. The
-	// internal node currently has no max but also cannot be used since the
-	// merge.
-	//
-	// TODO: Find a way to ask the host about their config set max fee and
-	// gas values.
-	maxTxFeeGwei = 1_000_000_000
-
 	LiveEstimateFailedError = dex.ErrorKind("live gas estimate failed")
 
 	// txAgeOut is the amount of time after which we forego any tx
@@ -121,9 +113,8 @@ const (
 	stateUpdateTick = time.Second * 5
 	// maxUnindexedTxs is the number of pending txs we will allow to be
 	// unverified on-chain before we halt broadcasting of new txs.
-	maxUnindexedTxs       = 10
-	peerCountTicker       = 5 * time.Second // no rpc calls here
-	contractVersionNewest = ^uint32(0)
+	maxUnindexedTxs = 10
+	peerCountTicker = 5 * time.Second // no rpc calls here
 )
 
 var (
@@ -163,7 +154,7 @@ var (
 		// exposed though any Driver methods or assets/driver functions. Use the
 		// parent wallet's WalletInfo via (*Driver).Info if you need a token's
 		// supported versions before a wallet is available.
-		SupportedVersions: []uint32{0},
+		SupportedVersions: []uint32{0, 1},
 		UnitInfo:          dexeth.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{
 			// {
@@ -181,8 +172,6 @@ var (
 				Seeded:      true,
 				GuideLink:   "https://github.com/decred/dcrdex/blob/master/docs/wiki/Ethereum.md",
 			},
-			// MaxSwapsInTx and MaxRedeemsInTx are set in (Wallet).Info, since
-			// the value cannot be known until we connect and get network info.
 		},
 		IsAccountBased: true,
 	}
@@ -204,31 +193,6 @@ var (
 		0,                                // index 0
 	}
 )
-
-// perTxGasLimit is the most gas we can use on a transaction. It is the lower of
-// either the per tx or per block gas limit.
-func perTxGasLimit(gasFeeLimit uint64) uint64 {
-	// maxProportionOfBlockGasLimitToUse sets the maximum proportion of a
-	// block's gas limit that a swap and redeem transaction will use. Since it
-	// is set to 4, the max that will be used is 25% (1/4) of the block's gas
-	// limit.
-	const maxProportionOfBlockGasLimitToUse = 4
-
-	// blockGasLimit is the amount of gas we can use in one transaction
-	// according to the block gas limit.
-
-	// Ethereum GasCeil: 30_000_000, Polygon: 8_000_000
-	blockGasLimit := ethconfig.Defaults.Miner.GasCeil / maxProportionOfBlockGasLimitToUse
-
-	// txGasLimit is the amount of gas we can use in one transaction
-	// according to the default transaction gas fee limit.
-	txGasLimit := maxTxFeeGwei / gasFeeLimit
-
-	if blockGasLimit > txGasLimit {
-		return txGasLimit
-	}
-	return blockGasLimit
-}
 
 // safeConfs returns the confirmations for a given tip and block number,
 // returning 0 if the block number is zero or if the tip is lower than the
@@ -362,7 +326,7 @@ type Balance struct {
 }
 
 // ethFetcher represents a blockchain information fetcher. In practice, it is
-// satisfied by *nodeClient. For testing, it can be satisfied by a stub.
+// satisfied by *multiRPCClient. For testing, it can be satisfied by a stub.
 type ethFetcher interface {
 	address() common.Address
 	addressBalance(ctx context.Context, addr common.Address) (*big.Int, error)
@@ -441,11 +405,12 @@ type baseWallet struct {
 	multiBalanceAddress  common.Address
 	multiBalanceContract *multibal.MultiBalanceV0
 
-	baseChainID uint32
-	chainCfg    *params.ChainConfig
-	chainID     int64
-	compat      *CompatibilityData
-	tokens      map[uint32]*dexeth.Token
+	baseChainID  uint32
+	chainCfg     *params.ChainConfig
+	chainID      int64
+	compat       *CompatibilityData
+	tokens       map[uint32]*dexeth.Token
+	maxTxFeeGwei uint64
 
 	startingBlocks atomic.Uint64
 
@@ -492,12 +457,10 @@ type assetWallet struct {
 	ui        dex.UnitInfo
 	connected atomic.Bool
 	wi        asset.WalletInfo
+	tokenAddr common.Address // empty address for base chain asset
 
 	versionedContracts map[uint32]common.Address
 	versionedGases     map[uint32]*dexeth.Gases
-
-	maxSwapGas   uint64
-	maxRedeemGas uint64
 
 	lockedFunds struct {
 		mtx                sync.RWMutex
@@ -507,7 +470,7 @@ type assetWallet struct {
 	}
 
 	findRedemptionMtx  sync.RWMutex
-	findRedemptionReqs map[[32]byte]*findRedemptionRequest
+	findRedemptionReqs map[string]*findRedemptionRequest
 
 	approvalsMtx     sync.RWMutex
 	pendingApprovals map[uint32]*pendingApproval
@@ -516,7 +479,8 @@ type assetWallet struct {
 	lastPeerCount uint32
 	peersChange   func(uint32, error)
 
-	contractors map[uint32]contractor // version -> contractor
+	contractorV0 contractor
+	contractorV1 contractor
 
 	evmify  func(uint64) *big.Int
 	atomize func(*big.Int) uint64
@@ -549,17 +513,54 @@ type TokenWallet struct {
 	netToken *dexeth.NetToken
 }
 
-func (w *assetWallet) maxSwapsAndRedeems() (maxSwaps, maxRedeems uint64) {
-	txGasLimit := perTxGasLimit(atomic.LoadUint64(&w.gasFeeLimitV))
-	return txGasLimit / w.maxSwapGas, txGasLimit / w.maxRedeemGas
+// perTxGasLimit is the most gas we can use on a transaction. It is the lower of
+// either the block's gas limit or the limit based on our maximum allowable
+// fees.
+func (w *assetWallet) perTxGasLimit(feeRateGwei uint64) uint64 {
+	blockGasLimit := w.tip().GasLimit
+	maxFeeBasedGasLimit := w.maxTxFeeGwei / feeRateGwei
+	if maxFeeBasedGasLimit < blockGasLimit {
+		return maxFeeBasedGasLimit
+	}
+	return blockGasLimit
+}
+
+// maxSwapsOrRedeems calculates the maximum number of swaps or redemptions that
+// can go in a single transaction. If feeRateGwei is not provided, the
+// prevailing fee rate will be used.
+func (w *assetWallet) maxSwapsOrRedeems(oneGas, gasAdd uint64, feeRateGwei uint64) (n int, err error) {
+	feeRate := dexeth.GweiToWei(feeRateGwei)
+	if feeRateGwei == 0 {
+		feeRate, err = w.currentFeeRate(w.ctx)
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	txGasLimit := w.perTxGasLimit(dexeth.WeiToGweiCeil(feeRate))
+	if oneGas > txGasLimit {
+		return 0, fmt.Errorf("tx limit zero")
+	}
+	return 1 + int((txGasLimit-oneGas)/gasAdd), nil
+}
+
+var _ asset.MaxMatchesCounter = (*assetWallet)(nil)
+
+// MaxSwaps is the maximum matches than can go in a swap tx.
+func (w *assetWallet) MaxSwaps(assetVer uint32, feeRateGwei uint64) (int, error) {
+	g := w.gases(contractVersion(assetVer))
+	return w.maxSwapsOrRedeems(g.Swap, g.SwapAdd, feeRateGwei)
+}
+
+// MaxRedeems is the maximum matches than can go in a redeem tx.
+func (w *assetWallet) MaxRedeems(assetVer uint32) (int, error) {
+	g := w.gases(contractVersion(assetVer))
+	return w.maxSwapsOrRedeems(g.Redeem, g.RedeemAdd, 0)
 }
 
 // Info returns basic information about the wallet and asset.
 func (w *assetWallet) Info() *asset.WalletInfo {
 	wi := w.wi
-	maxSwaps, maxRedeems := w.maxSwapsAndRedeems()
-	wi.MaxSwapsInTx = maxSwaps
-	wi.MaxRedeemsInTx = maxRedeems
 	return &wi
 }
 
@@ -597,6 +598,16 @@ func privKeyFromSeed(seed []byte) (pk []byte, zero func(), err error) {
 	return pk, extKey.Zero, nil
 }
 
+// contractVersion converts a server's asset protocol version to a swap contract
+// version. It applies to both tokens and eth right now, but that may not always
+// be the case.
+func contractVersion(assetVer uint32) uint32 {
+	if assetVer == asset.VersionNewest {
+		return dexeth.ContractVersionNewest
+	}
+	return dexeth.ProtocolVersion(assetVer).ContractVersion()
+}
+
 func CreateEVMWallet(chainID int64, createWalletParams *asset.CreateWalletParams, compat *CompatibilityData, skipConnect bool) error {
 	switch createWalletParams.Type {
 	case walletTypeGeth:
@@ -615,16 +626,6 @@ func CreateEVMWallet(chainID int64, createWalletParams *asset.CreateWalletParams
 	defer zero()
 
 	switch createWalletParams.Type {
-	// case walletTypeGeth:
-	// 	node, err := prepareNode(&nodeConfig{
-	// 		net:    createWalletParams.Net,
-	// 		appDir: walletDir,
-	// 	})
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	defer node.Close()
-	// 	return importKeyToNode(node, privateKey, createWalletParams.Pass)
 	case walletTypeRPC:
 		// Make the wallet dir if it does not exist, otherwise we may fail to
 		// write the compliant-providers.json file. Create the keystore
@@ -718,6 +719,7 @@ func newWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		WalletInfo:         WalletInfo,
 		Net:                net,
 		DefaultProviders:   defaultProviders,
+		MaxTxFeeGwei:       dexeth.GweiFactor, // 1 ETH
 	})
 }
 
@@ -736,6 +738,9 @@ type EVMWalletConfig struct {
 	MultiBalAddress    common.Address // If empty, separate calls for N tokens + 1
 	WalletInfo         asset.WalletInfo
 	Net                dex.Network
+	// MaxTxFeeGwei is the absolute maximum fees we will allow for a single tx.
+	// It should be set to a relatively large value.
+	MaxTxFeeGwei uint64
 }
 
 func NewEVMWallet(cfg *EVMWalletConfig) (w *ETHWallet, err error) {
@@ -778,6 +783,7 @@ func NewEVMWallet(cfg *EVMWalletConfig) (w *ETHWallet, err error) {
 		gasFeeLimitV:        gasFeeLimit,
 		wallets:             make(map[uint32]*assetWallet),
 		multiBalanceAddress: cfg.MultiBalAddress,
+		maxTxFeeGwei:        cfg.MaxTxFeeGwei,
 	}
 
 	var maxSwapGas, maxRedeemGas uint64
@@ -790,40 +796,23 @@ func NewEVMWallet(cfg *EVMWalletConfig) (w *ETHWallet, err error) {
 		}
 	}
 
-	txGasLimit := perTxGasLimit(gasFeeLimit)
-
-	if maxSwapGas == 0 || txGasLimit < maxSwapGas {
-		return nil, errors.New("max swaps cannot be zero or undefined")
-	}
-	if maxRedeemGas == 0 || txGasLimit < maxRedeemGas {
-		return nil, errors.New("max redeems cannot be zero or undefined")
-	}
-
 	aw := &assetWallet{
 		baseWallet:         eth,
 		log:                cfg.Logger,
 		assetID:            assetID,
 		versionedContracts: cfg.BaseChainContracts,
 		versionedGases:     cfg.VersionedGases,
-		maxSwapGas:         maxSwapGas,
-		maxRedeemGas:       maxRedeemGas,
 		emit:               cfg.AssetCfg.Emit,
-		findRedemptionReqs: make(map[[32]byte]*findRedemptionRequest),
+		findRedemptionReqs: make(map[string]*findRedemptionRequest),
 		pendingApprovals:   make(map[uint32]*pendingApproval),
 		approvalCache:      make(map[uint32]bool),
 		peersChange:        cfg.AssetCfg.PeersChange,
-		contractors:        make(map[uint32]contractor),
 		evmify:             dexeth.GweiToWei,
 		atomize:            dexeth.WeiToGwei,
 		ui:                 dexeth.UnitInfo,
 		pendingTxCheckBal:  new(big.Int),
 		wi:                 cfg.WalletInfo,
 	}
-
-	maxSwaps, maxRedeems := aw.maxSwapsAndRedeems()
-
-	cfg.Logger.Debugf("ETH wallet will support a maximum of %d swaps and %d redeems per transaction.",
-		maxSwaps, maxRedeems)
 
 	aw.wallets = map[uint32]*assetWallet{
 		assetID: aw,
@@ -878,13 +867,19 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	for ver, constructor := range contractorConstructors {
 		contractAddr, exists := w.versionedContracts[ver]
 		if !exists || contractAddr == (common.Address{}) {
-			return nil, fmt.Errorf("no contract address for version %d, net %s", ver, w.net)
+			w.log.Debugf("no eth swap contract address for version %d, net %s", ver, w.net)
+			continue
 		}
-		c, err := constructor(contractAddr, w.addr, w.node.contractBackend())
+		c, err := constructor(w.net, contractAddr, w.addr, w.node.contractBackend())
 		if err != nil {
 			return nil, fmt.Errorf("error constructor version %d contractor: %v", ver, err)
 		}
-		w.contractors[ver] = c
+		switch ver {
+		case 0:
+			w.contractorV0 = c
+		case 1:
+			w.contractorV1 = c
+		}
 	}
 
 	if w.multiBalanceAddress != (common.Address{}) {
@@ -948,7 +943,7 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 			bestHdr.Number, confirmedNonce, nextNonce, len(pendingTxs), highestPendingNonce, lowestPendingNonce)
 	}
 
-	height := w.currentTip.Number
+	height := bestHdr.Number
 	// NOTE: We should be using the tipAtConnect to set Progress in SyncStatus.
 	atomic.StoreInt64(&w.tipAtConnect, height.Int64())
 	w.log.Infof("Connected to eth (%s), at height %d", w.walletType, height)
@@ -985,7 +980,7 @@ func (w *TokenWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		return nil, fmt.Errorf("parent wallet not connected")
 	}
 
-	err := w.loadContractors()
+	err := w.loadContractors(w.parent)
 	if err != nil {
 		return nil, err
 	}
@@ -1006,11 +1001,15 @@ func (w *TokenWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	return &wg, nil
 }
 
-// tipHeight gets the current best header's tip height.
-func (w *baseWallet) tipHeight() uint64 {
+func (w *baseWallet) tip() *types.Header {
 	w.tipMtx.RLock()
 	defer w.tipMtx.RUnlock()
-	return w.currentTip.Number.Uint64()
+	return w.currentTip
+}
+
+// tipHeight gets the current best header's tip height.
+func (w *baseWallet) tipHeight() uint64 {
+	return w.tip().Number.Uint64()
 }
 
 // Reconfigure attempts to reconfigure the wallet.
@@ -1239,30 +1238,13 @@ func (w *ETHWallet) OpenTokenWallet(tokenCfg *asset.TokenConfig) (asset.Wallet, 
 		return nil, fmt.Errorf("could not find token with ID %d on network %s", w.assetID, w.net)
 	}
 
-	var maxSwapGas, maxRedeemGas uint64
-	for _, contract := range netToken.SwapContracts {
-		if contract.Gas.Swap > maxSwapGas {
-			maxSwapGas = contract.Gas.Swap
-		}
-		if contract.Gas.Redeem > maxRedeemGas {
-			maxRedeemGas = contract.Gas.Redeem
-		}
-	}
-
-	txGasLimit := perTxGasLimit(atomic.LoadUint64(&w.gasFeeLimitV))
-
-	if maxSwapGas == 0 || txGasLimit < maxSwapGas {
-		return nil, errors.New("max swaps cannot be zero or undefined")
-	}
-	if maxRedeemGas == 0 || txGasLimit < maxRedeemGas {
-		return nil, errors.New("max redeems cannot be zero or undefined")
-	}
-
+	supportedAssetVersions := make([]uint32, 0, 1)
 	contracts := make(map[uint32]common.Address)
 	gases := make(map[uint32]*dexeth.Gases)
 	for ver, c := range netToken.SwapContracts {
 		contracts[ver] = c.Address
 		gases[ver] = &c.Gas
+		supportedAssetVersions = append(supportedAssetVersions, ver)
 	}
 
 	aw := &assetWallet{
@@ -1271,22 +1253,20 @@ func (w *ETHWallet) OpenTokenWallet(tokenCfg *asset.TokenConfig) (asset.Wallet, 
 		assetID:            tokenCfg.AssetID,
 		versionedContracts: contracts,
 		versionedGases:     gases,
-		maxSwapGas:         maxSwapGas,
-		maxRedeemGas:       maxRedeemGas,
 		emit:               tokenCfg.Emit,
 		peersChange:        tokenCfg.PeersChange,
-		findRedemptionReqs: make(map[[32]byte]*findRedemptionRequest),
+		findRedemptionReqs: make(map[string]*findRedemptionRequest),
 		pendingApprovals:   make(map[uint32]*pendingApproval),
 		approvalCache:      make(map[uint32]bool),
-		contractors:        make(map[uint32]contractor),
 		evmify:             token.AtomicToEVM,
 		atomize:            token.EVMToAtomic,
 		ui:                 token.UnitInfo,
 		wi: asset.WalletInfo{
 			Name:              token.Name,
-			SupportedVersions: w.wi.SupportedVersions,
+			SupportedVersions: supportedAssetVersions,
 			UnitInfo:          token.UnitInfo,
 		},
+		tokenAddr:         netToken.Address,
 		pendingTxCheckBal: new(big.Int),
 	}
 
@@ -1443,18 +1423,19 @@ func (w *TokenWallet) MaxOrder(ord *asset.MaxOrderForm) (*asset.SwapEstimate, er
 		ord.RedeemVersion, ord.RedeemAssetID, w.parent)
 }
 
-func (w *assetWallet) maxOrder(lotSize uint64, maxFeeRate uint64, ver uint32,
-	redeemVer, redeemAssetID uint32, feeWallet *assetWallet) (*asset.SwapEstimate, error) {
+func (w *assetWallet) maxOrder(lotSize uint64, maxFeeRate uint64, initAssetVer,
+	redeemAssetVer, redeemAssetID uint32, feeWallet *assetWallet) (*asset.SwapEstimate, error) {
 	balance, err := w.Balance()
 	if err != nil {
 		return nil, err
 	}
+	initContractVer := contractVersion(initAssetVer)
 	// Get the refund gas.
-	if g := w.gases(ver); g == nil {
+	if g := w.gases(initContractVer); g == nil {
 		return nil, fmt.Errorf("no gas table")
 	}
 
-	g, err := w.initGasEstimate(1, ver, redeemVer, redeemAssetID)
+	g, err := w.initGasEstimate(1, initContractVer, contractVersion(redeemAssetVer), redeemAssetID, maxFeeRate)
 	liveEstimateFailed := errors.Is(err, LiveEstimateFailedError)
 	if err != nil && !liveEstimateFailed {
 		return nil, fmt.Errorf("gasEstimate error: %w", err)
@@ -1484,7 +1465,7 @@ func (w *assetWallet) maxOrder(lotSize uint64, maxFeeRate uint64, ver uint32,
 			FeeReservesPerLot: feeReservesPerLot,
 		}, nil
 	}
-	return w.estimateSwap(lots, lotSize, maxFeeRate, ver, feeReservesPerLot)
+	return w.estimateSwap(lots, lotSize, maxFeeRate, initContractVer, feeReservesPerLot)
 }
 
 // PreSwap gets order estimates based on the available funds and the wallet
@@ -1500,7 +1481,7 @@ func (w *TokenWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
 }
 
 func (w *assetWallet) preSwap(req *asset.PreSwapForm, feeWallet *assetWallet) (*asset.PreSwap, error) {
-	maxEst, err := w.maxOrder(req.LotSize, req.MaxFeeRate, req.Version,
+	maxEst, err := w.maxOrder(req.LotSize, req.MaxFeeRate, req.AssetVersion,
 		req.RedeemVersion, req.RedeemAssetID, feeWallet)
 	if err != nil {
 		return nil, err
@@ -1511,7 +1492,7 @@ func (w *assetWallet) preSwap(req *asset.PreSwapForm, feeWallet *assetWallet) (*
 	}
 
 	est, err := w.estimateSwap(req.Lots, req.LotSize, req.MaxFeeRate,
-		req.Version, maxEst.FeeReservesPerLot)
+		contractVersion(req.AssetVersion), maxEst.FeeReservesPerLot)
 	if err != nil {
 		return nil, err
 	}
@@ -1527,13 +1508,11 @@ func (w *baseWallet) MaxFundingFees(_ uint32, _ uint64, _ map[string]string) uin
 }
 
 // SingleLotSwapRefundFees returns the fees for a swap transaction for a single lot.
-func (w *assetWallet) SingleLotSwapRefundFees(version uint32, feeSuggestion uint64, _ bool) (swapFees uint64, refundFees uint64, err error) {
-	if version == asset.VersionNewest {
-		version = contractVersionNewest
-	}
-	g := w.gases(version)
+func (w *assetWallet) SingleLotSwapRefundFees(assetVer uint32, feeSuggestion uint64, _ bool) (swapFees uint64, refundFees uint64, err error) {
+	contractVer := contractVersion(assetVer)
+	g := w.gases(contractVer)
 	if g == nil {
-		return 0, 0, fmt.Errorf("no gases known for %d version %d", w.assetID, version)
+		return 0, 0, fmt.Errorf("no gases known for %d contract version %d", w.assetID, contractVersion(assetVer))
 	}
 	return g.Swap * feeSuggestion, g.Refund * feeSuggestion, nil
 }
@@ -1541,7 +1520,7 @@ func (w *assetWallet) SingleLotSwapRefundFees(version uint32, feeSuggestion uint
 // estimateSwap prepares an *asset.SwapEstimate. The estimate does not include
 // funds that might be locked for refunds.
 func (w *assetWallet) estimateSwap(
-	lots, lotSize uint64, maxFeeRate uint64, ver uint32, feeReservesPerLot uint64,
+	lots, lotSize uint64, maxFeeRate uint64, contractVer uint32, feeReservesPerLot uint64,
 ) (*asset.SwapEstimate, error) {
 
 	if lots == 0 {
@@ -1556,7 +1535,7 @@ func (w *assetWallet) estimateSwap(
 	}
 	feeRateGwei := dexeth.WeiToGweiCeil(feeRate)
 	// This is an estimate, so we use the (lower) live gas estimates.
-	oneSwap, err := w.estimateInitGas(w.ctx, 1, ver)
+	oneSwap, err := w.estimateInitGas(w.ctx, 1, contractVer)
 	if err != nil {
 		return nil, fmt.Errorf("(%d) error estimating swap gas: %v", w.assetID, err)
 	}
@@ -1586,7 +1565,7 @@ func (w *assetWallet) gases(contractVer uint32) *dexeth.Gases {
 // PreRedeem generates an estimate of the range of redemption fees that could
 // be assessed.
 func (w *assetWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, error) {
-	oneRedeem, nRedeem, err := w.redeemGas(int(req.Lots), req.Version)
+	oneRedeem, nRedeem, err := w.redeemGas(int(req.Lots), contractVersion(req.AssetVersion))
 	if err != nil {
 		return nil, err
 	}
@@ -1600,15 +1579,11 @@ func (w *assetWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, err
 }
 
 // SingleLotRedeemFees returns the fees for a redeem transaction for a single lot.
-func (w *assetWallet) SingleLotRedeemFees(version uint32, feeSuggestion uint64) (fees uint64, err error) {
-	if version == asset.VersionNewest {
-		version = contractVersionNewest
-	}
-	g := w.gases(version)
+func (w *assetWallet) SingleLotRedeemFees(assetVer uint32, feeSuggestion uint64) (fees uint64, err error) {
+	g := w.gases(contractVersion(assetVer))
 	if g == nil {
-		return 0, fmt.Errorf("no gases known for %d version %d", w.assetID, version)
+		return 0, fmt.Errorf("no gases known for %d, constract version %d", w.assetID, contractVersion(assetVer))
 	}
-
 	return g.Redeem * feeSuggestion, nil
 }
 
@@ -1665,8 +1640,10 @@ func (w *ETHWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uint6
 			dex.BipIDSymbol(w.assetID), ord.MaxFeeRate, w.gasFeeLimit())
 	}
 
-	g, err := w.initGasEstimate(int(ord.MaxSwapCount), ord.Version,
-		ord.RedeemVersion, ord.RedeemAssetID)
+	contractVer := contractVersion(ord.AssetVersion)
+
+	g, err := w.initGasEstimate(int(ord.MaxSwapCount), contractVer,
+		ord.RedeemVersion, ord.RedeemAssetID, ord.MaxFeeRate)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error estimating swap gas: %v", err)
 	}
@@ -1703,7 +1680,7 @@ func (w *TokenWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uin
 			dex.BipIDSymbol(w.assetID), ord.MaxFeeRate, w.gasFeeLimit())
 	}
 
-	approvalStatus, err := w.approvalStatus(ord.Version)
+	approvalStatus, err := w.approvalStatus(ord.AssetVersion)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error getting approval status: %v", err)
 	}
@@ -1717,8 +1694,8 @@ func (w *TokenWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uin
 		return nil, nil, 0, fmt.Errorf("unknown approval status %d", approvalStatus)
 	}
 
-	g, err := w.initGasEstimate(int(ord.MaxSwapCount), ord.Version,
-		ord.RedeemVersion, ord.RedeemAssetID)
+	g, err := w.initGasEstimate(int(ord.MaxSwapCount), contractVersion(ord.AssetVersion),
+		ord.RedeemVersion, ord.RedeemAssetID, ord.MaxFeeRate)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error estimating swap gas: %v", err)
 	}
@@ -1755,7 +1732,7 @@ func (w *ETHWallet) FundMultiOrder(ord *asset.MultiOrder, maxLock uint64) ([]ass
 			dex.BipIDSymbol(w.assetID), ord.MaxFeeRate, w.gasFeeLimit())
 	}
 
-	g, err := w.initGasEstimate(1, ord.Version, ord.RedeemVersion, ord.RedeemAssetID)
+	g, err := w.initGasEstimate(1, ord.AssetVersion, ord.RedeemVersion, ord.RedeemAssetID, ord.MaxFeeRate)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error estimating swap gas: %v", err)
 	}
@@ -1793,7 +1770,7 @@ func (w *TokenWallet) FundMultiOrder(ord *asset.MultiOrder, maxLock uint64) ([]a
 			dex.BipIDSymbol(w.assetID), ord.MaxFeeRate, w.gasFeeLimit())
 	}
 
-	approvalStatus, err := w.approvalStatus(ord.Version)
+	approvalStatus, err := w.approvalStatus(ord.AssetVersion)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error getting approval status: %v", err)
 	}
@@ -1807,8 +1784,8 @@ func (w *TokenWallet) FundMultiOrder(ord *asset.MultiOrder, maxLock uint64) ([]a
 		return nil, nil, 0, fmt.Errorf("unknown approval status %d", approvalStatus)
 	}
 
-	g, err := w.initGasEstimate(1, ord.Version,
-		ord.RedeemVersion, ord.RedeemAssetID)
+	g, err := w.initGasEstimate(1, ord.AssetVersion,
+		ord.RedeemVersion, ord.RedeemAssetID, ord.MaxFeeRate)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error estimating swap gas: %v", err)
 	}
@@ -1862,17 +1839,17 @@ type gasEstimate struct {
 // initGasEstimate gets the best available gas estimate for n initiations. A
 // live estimate is checked against the server's configured values and our own
 // known values and errors or logs generated in certain cases.
-func (w *assetWallet) initGasEstimate(n int, initVer, redeemVer, redeemAssetID uint32) (est *gasEstimate, err error) {
+func (w *assetWallet) initGasEstimate(n int, initContractVer, redeemContractVer, redeemAssetID uint32, feeRateGwei uint64) (est *gasEstimate, err error) {
 	est = new(gasEstimate)
 
 	// Get the refund gas.
-	if g := w.gases(initVer); g == nil {
+	if g := w.gases(initContractVer); g == nil {
 		return nil, fmt.Errorf("no gas table")
 	} else { // scoping g
 		est.Refund = g.Refund
 	}
 
-	est.Swap, est.nSwap, err = w.swapGas(n, initVer)
+	est.Swap, est.nSwap, err = w.swapGas(n, initContractVer, feeRateGwei)
 	if err != nil && !errors.Is(err, LiveEstimateFailedError) {
 		return nil, err
 	}
@@ -1883,7 +1860,7 @@ func (w *assetWallet) initGasEstimate(n int, initVer, redeemVer, redeemAssetID u
 
 	if redeemW := w.wallet(redeemAssetID); redeemW != nil {
 		var er error
-		est.Redeem, est.nRedeem, er = redeemW.redeemGas(n, redeemVer)
+		est.Redeem, est.nRedeem, er = redeemW.redeemGas(n, redeemContractVer)
 		if err != nil {
 			return nil, fmt.Errorf("error calculating fee-family redeem gas: %w", er)
 		}
@@ -1898,99 +1875,76 @@ func (w *assetWallet) initGasEstimate(n int, initVer, redeemVer, redeemAssetID u
 // cannot get a live estimate from the contractor, which will happen if the
 // wallet has no balance. A live gas estimate will always be attempted, and used
 // if our expected gas values are lower (anomalous).
-func (w *assetWallet) swapGas(n int, ver uint32) (oneSwap, nSwap uint64, err error) {
-	g := w.gases(ver)
+func (w *assetWallet) swapGas(n int, contractVer uint32, feeRateGwei uint64) (oneSwapGas, nSwapGas uint64, err error) {
+	g := w.gases(contractVer)
 	if g == nil {
-		return 0, 0, fmt.Errorf("no gases known for %d version %d", w.assetID, ver)
+		return 0, 0, fmt.Errorf("no gases known for %d contract version %d", w.assetID, contractVer)
 	}
-	oneSwap = g.Swap
-
-	// We have no way of updating the value of SwapAdd without a version change,
-	// but we're not gonna worry about accuracy for nSwap, since it's only used
-	// for estimates and never for dex-validated values like order funding.
-	nSwap = oneSwap + uint64(n-1)*g.SwapAdd
+	oneSwapGas = g.Swap
 
 	// The amount we can estimate and ultimately the amount we can use in a
 	// single transaction is limited by the block gas limit or the tx gas
 	// limit. Core will use the largest gas among all versions when
 	// determining the maximum number of swaps that can be in one
-	// transaction. Limit our gas estimate to the same number of swaps.
-	nMax := n
-	maxSwaps, _ := w.maxSwapsAndRedeems()
-	var nRemain, nFull int
-	if uint64(n) > maxSwaps {
-		nMax = int(maxSwaps)
-		nFull = n / nMax
-		nSwap = (oneSwap + uint64(nMax-1)*g.SwapAdd) * uint64(nFull)
-		nRemain = n % nMax
-		if nRemain != 0 {
-			nSwap += oneSwap + uint64(nRemain-1)*g.SwapAdd
-		}
+	// transaction. Limit our gas estimate to the same number of swaps/redeems..
+	maxSwapsPerTx, err := w.maxSwapsOrRedeems(g.Swap, g.SwapAdd, feeRateGwei)
+	if err != nil {
+		return 0, 0, fmt.Errorf("error calculating max swaps: %w", err)
 	}
 
-	// If a live estimate is greater than our estimate from configured values,
-	// use the live estimate with a warning.
-	gasEst, err := w.estimateInitGas(w.ctx, nMax, ver)
-	if err != nil {
-		err = errors.Join(err, LiveEstimateFailedError)
-		return
-		// Or we could go with what we know? But this estimate error could be a
-		// hint that the transaction would fail, and we don't have a way to
-		// recover from that. Play it safe and allow caller to retry assuming
-		// the error is transient with the provider.
-		// w.log.Errorf("(%d) error estimating swap gas (using expected gas cap instead): %v", w.assetID, err)
-		// return oneSwap, nSwap, true, nil
-	}
-	if nMax != n {
-		// If we needed to adjust the max earlier, and the estimate did
-		// not error, multiply the estimate by the number of full
-		// transactions and add the estimate of the remainder.
-		gasEst *= uint64(nFull)
-		if nRemain > 0 {
-			remainEst, err := w.estimateInitGas(w.ctx, nRemain, ver)
-			if err != nil {
-				w.log.Errorf("(%d) error estimating swap gas for remainder: %v", w.assetID, err)
-				return 0, 0, err
-			}
-			gasEst += remainEst
+	if nFull := n / maxSwapsPerTx; nFull > 0 {
+		fullGas := g.SwapN(maxSwapsPerTx)
+		if fullGasEst, err := w.estimateInitGas(w.ctx, maxSwapsPerTx, contractVer); err != nil {
+			w.log.Errorf("(%d) error estimating swap gas for full txs: %v", w.assetID, err)
+			return 0, 0, errors.Join(err, LiveEstimateFailedError)
+		} else if fullGasEst > fullGas {
+			w.log.Warnf("%d-tx (full) swap gas estimate %d is greater than the server's configured value %d. Using live estimate + 10%%.",
+				nFull, fullGasEst, fullGas)
+			fullGas = fullGasEst * 11 / 10
 		}
+		nSwapGas = uint64(nFull) * fullGas
 	}
-	if gasEst > nSwap {
-		w.log.Warnf("Swap gas estimate %d is greater than the server's configured value %d. Using live estimate + 10%%.", gasEst, nSwap)
-		nSwap = gasEst * 11 / 10 // 10% buffer
-		if n == 1 && nSwap > oneSwap {
-			oneSwap = nSwap
+	if nRemain := n & maxSwapsPerTx; nRemain > 0 {
+		remainGas := g.SwapN(nRemain)
+		if remainGasEst, err := w.estimateInitGas(w.ctx, nRemain, contractVer); err != nil {
+			w.log.Errorf("(%d) error estimating swap gas for remainder: %v", w.assetID, err)
+			return 0, 0, errors.Join(err, LiveEstimateFailedError)
+		} else if remainGasEst > remainGas {
+			w.log.Warnf("%d-tx swap gas estimate %d is greater than the server's configured value %d. Using live estimate + 10%%.",
+				nRemain, remainGasEst, remainGas)
+			remainGas = remainGasEst * 11 / 10
 		}
+		nSwapGas += remainGas
 	}
 	return
 }
 
 // redeemGas gets an accurate estimate for redemption gas. We allow a DEX server
 // some latitude in adjusting the redemption gas, up to 2x our local estimate.
-func (w *assetWallet) redeemGas(n int, ver uint32) (oneGas, nGas uint64, err error) {
-	g := w.gases(ver)
+func (w *assetWallet) redeemGas(n int, contractVer uint32) (oneGas, nGas uint64, err error) {
+	g := w.gases(contractVer)
 	if g == nil {
 		return 0, 0, fmt.Errorf("no gas table for redemption asset %d", w.assetID)
 	}
 	redeemGas := g.Redeem
 	// Not concerned with the accuracy of nGas. It's never used outside of
 	// best case estimates.
-	return redeemGas, redeemGas + (uint64(n)-1)*g.RedeemAdd, nil
+	return redeemGas, g.RedeemN(n), nil
 }
 
 // approvalGas gets the best available estimate for an approval tx, which is
 // the greater of the asset's registered value and a live estimate. It is an
 // error if a live estimate cannot be retrieved, which will be the case if the
 // user's eth balance is insufficient to cover tx fees for the approval.
-func (w *assetWallet) approvalGas(newGas *big.Int, ver uint32) (uint64, error) {
-	ourGas := w.gases(ver)
+func (w *assetWallet) approvalGas(newGas *big.Int, contractVer uint32) (uint64, error) {
+	ourGas := w.gases(contractVer)
 	if ourGas == nil {
-		return 0, fmt.Errorf("no gases known for %d version %d", w.assetID, ver)
+		return 0, fmt.Errorf("no gases known for %d contract version %d", w.assetID, contractVer)
 	}
 
 	approveGas := ourGas.Approve
 
-	if approveEst, err := w.estimateApproveGas(newGas); err != nil {
+	if approveEst, err := w.estimateApproveGas(contractVer, newGas); err != nil {
 		return 0, fmt.Errorf("error estimating approve gas: %v", err)
 	} else if approveEst > approveGas {
 		w.log.Warnf("Approve gas estimate %d is greater than the expected value %d. Using live estimate + 10%%.", approveEst, approveGas)
@@ -2103,13 +2057,13 @@ func (w *TokenWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 
 // swapReceipt implements the asset.Receipt interface for ETH.
 type swapReceipt struct {
-	txHash     common.Hash
-	secretHash [dexeth.SecretHashSize]byte
+	txHash  common.Hash
+	locator []byte
 	// expiration and value can be determined with a blockchain
 	// lookup, but we cache these values to avoid this.
 	expiration   time.Time
 	value        uint64
-	ver          uint32
+	contractVer  uint32
 	contractAddr string // specified by ver, here for naive consumers
 }
 
@@ -2130,7 +2084,7 @@ func (r *swapReceipt) Coin() asset.Coin {
 // Contract returns the swap's identifying data, which the concatenation of the
 // contract version and the secret hash.
 func (r *swapReceipt) Contract() dex.Bytes {
-	return dexeth.EncodeContractData(r.ver, r.secretHash)
+	return dexeth.EncodeContractData(r.contractVer, r.locator)
 }
 
 // String returns a string representation of the swapReceipt. The secret hash
@@ -2139,8 +2093,8 @@ func (r *swapReceipt) Contract() dex.Bytes {
 // the user can pick this information from the transaction's "to" address and
 // the calldata, this simplifies the process.
 func (r *swapReceipt) String() string {
-	return fmt.Sprintf("{ tx hash: %s, contract address: %s, secret hash: %x }",
-		r.txHash, r.contractAddr, r.secretHash)
+	return fmt.Sprintf("{ tx hash: %s, contract address: %s, locator: %x }",
+		r.txHash, r.contractAddr, r.locator)
 }
 
 // SignedRefund returns an empty byte array. ETH does not support a pre-signed
@@ -2178,9 +2132,9 @@ func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 		swapVal += contract.Value
 	}
 
-	// Set the gas limit as high as reserves will allow.
+	contractVer := contractVersion(swaps.AssetVersion)
 	n := len(swaps.Contracts)
-	oneSwap, nSwap, err := w.swapGas(n, swaps.Version)
+	oneSwap, nSwap, err := w.swapGas(n, contractVer, swaps.FeeRate)
 	if err != nil {
 		return fail("error getting gas fees: %v", err)
 	}
@@ -2212,7 +2166,7 @@ func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 		return fail("Swap: failed to get network tip cap: %w", err)
 	}
 
-	tx, err := w.initiate(w.ctx, w.assetID, swaps.Contracts, gasLimit, maxFeeRate, tipRate, swaps.Version)
+	tx, err := w.initiate(w.ctx, w.assetID, swaps.Contracts, gasLimit, maxFeeRate, tipRate, contractVer)
 	if err != nil {
 		return fail("Swap: initiate error: %w", err)
 	}
@@ -2220,15 +2174,13 @@ func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 	txHash := tx.Hash()
 	receipts := make([]asset.Receipt, 0, n)
 	for _, swap := range swaps.Contracts {
-		var secretHash [dexeth.SecretHashSize]byte
-		copy(secretHash[:], swap.SecretHash)
 		receipts = append(receipts, &swapReceipt{
 			expiration:   time.Unix(int64(swap.LockTime), 0),
 			value:        swap.Value,
 			txHash:       txHash,
-			secretHash:   secretHash,
-			ver:          swaps.Version,
-			contractAddr: w.versionedContracts[swaps.Version].String(),
+			locator:      acToLocator(contractVer, swap, dexeth.GweiToWei(swap.Value), w.addr),
+			contractVer:  contractVer,
+			contractAddr: w.versionedContracts[contractVer].String(),
 		})
 	}
 
@@ -2241,6 +2193,26 @@ func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 	}
 
 	return receipts, change, fees, nil
+}
+
+// acToLocator converts the asset.Contract to a version-specific locator.
+func acToLocator(contractVer uint32, swap *asset.Contract, evmValue *big.Int, from common.Address) []byte {
+	switch contractVer {
+	case 0:
+		return swap.SecretHash
+	case 1:
+		var secretHash [32]byte
+		copy(secretHash[:], swap.SecretHash)
+		return (&dexeth.SwapVector{
+			From:       from,
+			To:         common.HexToAddress(swap.Address),
+			Value:      evmValue,
+			SecretHash: secretHash,
+			LockTime:   swap.LockTime,
+		}).Locator()
+	default:
+		panic("need to add a version in acToLocator")
+	}
 }
 
 // Swap sends the swaps in a single transaction. The fees used returned are the
@@ -2275,7 +2247,8 @@ func (w *TokenWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uin
 	}
 
 	n := len(swaps.Contracts)
-	oneSwap, nSwap, err := w.swapGas(n, swaps.Version)
+	contractVer := contractVersion(swaps.AssetVersion)
+	oneSwap, nSwap, err := w.swapGas(n, contractVer, swaps.FeeRate)
 	if err != nil {
 		return fail("error getting gas fees: %v", err)
 	}
@@ -2301,28 +2274,26 @@ func (w *TokenWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uin
 		return fail("Swap: failed to get network tip cap: %w", err)
 	}
 
-	tx, err := w.initiate(w.ctx, w.assetID, swaps.Contracts, gasLimit, maxFeeRate, tipRate, swaps.Version)
+	tx, err := w.initiate(w.ctx, w.assetID, swaps.Contracts, gasLimit, maxFeeRate, tipRate, contractVer)
 	if err != nil {
 		return fail("Swap: initiate error: %w", err)
 	}
 
-	if w.netToken.SwapContracts[swaps.Version] == nil {
-		return fail("unable to find contract address for asset %d contract version %d", w.assetID, swaps.Version)
+	if w.netToken.SwapContracts[swaps.AssetVersion] == nil {
+		return fail("unable to find contract address for asset %d contract version %d", w.assetID, swaps.AssetVersion)
 	}
 
-	contractAddr := w.netToken.SwapContracts[swaps.Version].Address.String()
+	contractAddr := w.netToken.SwapContracts[contractVer].Address.String()
 
 	txHash := tx.Hash()
 	receipts := make([]asset.Receipt, 0, n)
 	for _, swap := range swaps.Contracts {
-		var secretHash [dexeth.SecretHashSize]byte
-		copy(secretHash[:], swap.SecretHash)
 		receipts = append(receipts, &swapReceipt{
 			expiration:   time.Unix(int64(swap.LockTime), 0),
 			value:        swap.Value,
 			txHash:       txHash,
-			secretHash:   secretHash,
-			ver:          swaps.Version,
+			locator:      acToLocator(contractVer, swap, w.evmify(swap.Value), w.addr),
+			contractVer:  contractVer,
 			contractAddr: contractAddr,
 		})
 	}
@@ -2373,16 +2344,19 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 
 	var contractVer uint32 // require a consistent version since this is a single transaction
 	secrets := make([][32]byte, 0, n)
+	locators := make([][]byte, 0, n)
 	var redeemedValue uint64
 	for i, redemption := range form.Redemptions {
 		// NOTE: redemption.Spends.SecretHash is a dup of the hash extracted
 		// from redemption.Spends.Contract. Even for scriptable UTXO assets, the
 		// redeem script in this Contract field is redundant with the SecretHash
 		// field as ExtractSwapDetails can be applied to extract the hash.
-		ver, secretHash, err := dexeth.DecodeContractData(redemption.Spends.Contract)
+		ver, locator, err := dexeth.DecodeContractData(redemption.Spends.Contract)
 		if err != nil {
 			return fail(fmt.Errorf("Redeem: invalid versioned swap contract data: %w", err))
 		}
+
+		locators = append(locators, locator)
 		if i == 0 {
 			contractVer = ver
 		} else if contractVer != ver {
@@ -2397,23 +2371,23 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 		var secret [32]byte
 		copy(secret[:], redemption.Secret)
 		secrets = append(secrets, secret)
-		redeemable, err := w.isRedeemable(secretHash, secret, ver)
+		redeemable, err := w.isRedeemable(locator, secret, ver)
 		if err != nil {
 			return fail(fmt.Errorf("Redeem: failed to check if swap is redeemable: %w", err))
 		}
 		if !redeemable {
-			return fail(fmt.Errorf("Redeem: secretHash %x not redeemable with secret %x",
-				secretHash, secret))
+			return fail(fmt.Errorf("Redeem: version %d locator %x not redeemable with secret %x",
+				ver, locator, secret))
 		}
 
-		swapData, err := w.swap(w.ctx, secretHash, ver)
+		status, vector, err := w.statusAndVector(w.ctx, locator, contractVer)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error finding swap state: %w", err)
 		}
-		if swapData.State != dexeth.SSInitiated {
+		if status.Step != dexeth.SSInitiated {
 			return nil, nil, 0, asset.ErrSwapNotInitiated
 		}
-		redeemedValue += w.atomize(swapData.Value)
+		redeemedValue += w.atomize(vector.Value)
 	}
 
 	g := w.gases(contractVer)
@@ -2521,7 +2495,7 @@ func recoverPubkey(msgHash, sig []byte) ([]byte, error) {
 // tokenBalance checks the token balance of the account handled by the wallet.
 func (w *assetWallet) tokenBalance() (bal *big.Int, err error) {
 	// We don't care about the version.
-	return bal, w.withTokenContractor(w.assetID, contractVersionNewest, func(c tokenContractor) error {
+	return bal, w.withTokenContractor(w.assetID, dexeth.ContractVersionERC20, func(c tokenContractor) error {
 		bal, err = c.balance(w.ctx)
 		return err
 	})
@@ -2529,8 +2503,8 @@ func (w *assetWallet) tokenBalance() (bal *big.Int, err error) {
 
 // tokenAllowance checks the amount of tokens that the swap contract is approved
 // to spend on behalf of the account handled by the wallet.
-func (w *assetWallet) tokenAllowance(version uint32) (allowance *big.Int, err error) {
-	return allowance, w.withTokenContractor(w.assetID, version, func(c tokenContractor) error {
+func (w *assetWallet) tokenAllowance(contractVer uint32) (allowance *big.Int, err error) {
+	return allowance, w.withTokenContractor(w.assetID, contractVer, func(c tokenContractor) error {
 		allowance, err = c.allowance(w.ctx)
 		return err
 	})
@@ -2557,16 +2531,20 @@ func (w *assetWallet) approveToken(ctx context.Context, amount *big.Int, gasLimi
 	})
 }
 
-func (w *assetWallet) approvalStatus(version uint32) (asset.ApprovalStatus, error) {
+func (w *assetWallet) approvalStatus(assetVer uint32) (asset.ApprovalStatus, error) {
 	if w.assetID == w.baseChainID {
 		return asset.Approved, nil
 	}
 
+	contractVer := contractVersion(assetVer)
+
 	// If the result has been cached, return what is in the cache.
 	// The cache is cleared if an approval/unapproval tx is done.
 	w.approvalsMtx.RLock()
-	if approved, cached := w.approvalCache[version]; cached {
-		w.approvalsMtx.RUnlock()
+	approved, cached := w.approvalCache[contractVer]
+	_, pending := w.pendingApprovals[contractVer]
+	w.approvalsMtx.RUnlock()
+	if cached {
 		if approved {
 			return asset.Approved, nil
 		} else {
@@ -2574,24 +2552,22 @@ func (w *assetWallet) approvalStatus(version uint32) (asset.ApprovalStatus, erro
 		}
 	}
 
-	if _, pending := w.pendingApprovals[version]; pending {
-		w.approvalsMtx.RUnlock()
+	if pending {
 		return asset.Pending, nil
 	}
-	w.approvalsMtx.RUnlock()
 
 	w.approvalsMtx.Lock()
 	defer w.approvalsMtx.Unlock()
 
-	currentAllowance, err := w.tokenAllowance(version)
+	currentAllowance, err := w.tokenAllowance(contractVer)
 	if err != nil {
 		return asset.NotApproved, fmt.Errorf("error retrieving current allowance: %w", err)
 	}
 	if currentAllowance.Cmp(unlimitedAllowanceReplenishThreshold) >= 0 {
-		w.approvalCache[version] = true
+		w.approvalCache[contractVer] = true
 		return asset.Approved, nil
 	}
-	w.approvalCache[version] = false
+	w.approvalCache[contractVer] = false
 	return asset.NotApproved, nil
 }
 
@@ -2721,16 +2697,14 @@ func (w *TokenWallet) ApprovalFee(assetVer uint32, approve bool) (uint64, error)
 // ApprovalStatus returns the approval status for each version of the
 // token's swap contract.
 func (w *TokenWallet) ApprovalStatus() map[uint32]asset.ApprovalStatus {
-	versions := w.Info().SupportedVersions
-
 	statuses := map[uint32]asset.ApprovalStatus{}
-	for _, version := range versions {
-		status, err := w.approvalStatus(version)
+	for _, assetVer := range w.wi.SupportedVersions {
+		status, err := w.approvalStatus(assetVer)
 		if err != nil {
-			w.log.Errorf("error checking approval status for version %d: %w", version, err)
+			w.log.Errorf("error checking approval status for swap contract version %d: %w", assetVer, err)
 			continue
 		}
-		statuses[version] = status
+		statuses[assetVer] = status
 	}
 
 	return statuses
@@ -2756,8 +2730,8 @@ func (w *ETHWallet) ReserveNRedemptions(n uint64, ver uint32, maxFeeRate uint64)
 // ReserveNRedemptions locks funds for redemption. It is an error if there
 // is insufficient spendable balance.
 // Part of the AccountLocker interface.
-func (w *TokenWallet) ReserveNRedemptions(n uint64, ver uint32, maxFeeRate uint64) (uint64, error) {
-	g := w.gases(ver)
+func (w *TokenWallet) ReserveNRedemptions(n uint64, assetVer uint32, maxFeeRate uint64) (uint64, error) {
+	g := w.gases(contractVersion(assetVer))
 	if g == nil {
 		return 0, fmt.Errorf("no gas table")
 	}
@@ -2802,8 +2776,8 @@ func (w *TokenWallet) ReReserveRedemption(req uint64) error {
 
 // ReserveNRefunds locks funds for doing refunds. It is an error if there
 // is insufficient spendable balance. Part of the AccountLocker interface.
-func (w *ETHWallet) ReserveNRefunds(n uint64, ver uint32, maxFeeRate uint64) (uint64, error) {
-	g := w.gases(ver)
+func (w *ETHWallet) ReserveNRefunds(n uint64, assetVer uint32, maxFeeRate uint64) (uint64, error) {
+	g := w.gases(contractVersion(assetVer))
 	if g == nil {
 		return 0, errors.New("no gas table")
 	}
@@ -2812,8 +2786,8 @@ func (w *ETHWallet) ReserveNRefunds(n uint64, ver uint32, maxFeeRate uint64) (ui
 
 // ReserveNRefunds locks funds for doing refunds. It is an error if there
 // is insufficient spendable balance. Part of the AccountLocker interface.
-func (w *TokenWallet) ReserveNRefunds(n uint64, ver uint32, maxFeeRate uint64) (uint64, error) {
-	g := w.gases(ver)
+func (w *TokenWallet) ReserveNRefunds(n uint64, assetVer uint32, maxFeeRate uint64) (uint64, error) {
+	g := w.gases(contractVersion(assetVer))
 	if g == nil {
 		return 0, errors.New("no gas table")
 	}
@@ -2889,32 +2863,73 @@ func (w *assetWallet) AuditContract(coinID, contract, serializedTx dex.Bytes, re
 		return nil, fmt.Errorf("AuditContract: coin id != txHash - coin id: %x, txHash: %s", coinID, tx.Hash())
 	}
 
-	version, secretHash, err := dexeth.DecodeContractData(contract)
+	version, locator, err := dexeth.DecodeContractData(contract)
 	if err != nil {
 		return nil, fmt.Errorf("AuditContract: failed to decode contract data: %w", err)
 	}
 
-	initiations, err := dexeth.ParseInitiateData(tx.Data(), version)
-	if err != nil {
-		return nil, fmt.Errorf("AuditContract: failed to parse initiate data: %w", err)
-	}
+	var val uint64
+	var participant string
+	var lockTime time.Time
+	var secretHashB []byte
+	switch version {
+	case 0:
+		initiations, err := dexeth.ParseInitiateDataV0(tx.Data())
+		if err != nil {
+			return nil, fmt.Errorf("AuditContract: failed to parse initiate data: %w", err)
+		}
 
-	initiation, ok := initiations[secretHash]
-	if !ok {
-		return nil, errors.New("AuditContract: tx does not initiate secret hash")
+		secretHash, err := dexeth.ParseV0Locator(locator)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing v0 locator (%x): %w", locator, err)
+		}
+
+		initiation, ok := initiations[secretHash]
+		if !ok {
+			return nil, errors.New("AuditContract: tx does not initiate secret hash")
+		}
+		val = w.atomize(initiation.Value)
+		participant = initiation.Participant.String()
+		lockTime = initiation.LockTime
+		secretHashB = secretHash[:]
+	case 1:
+		vec, err := dexeth.ParseV1Locator(locator)
+		if err != nil {
+			return nil, err
+		}
+		tokenAddr, txVectors, err := dexeth.ParseInitiateDataV1(tx.Data())
+		if err != nil {
+			return nil, fmt.Errorf("AuditContract: failed to parse initiate data: %w", err)
+		}
+		if tokenAddr != w.tokenAddr {
+			return nil, fmt.Errorf("address in init tx data is incorrect. %s != %s", tokenAddr, w.tokenAddr)
+		}
+		txVec, ok := txVectors[vec.SecretHash]
+		if !ok {
+			return nil, errors.New("AuditContract: tx does not initiate secret hash")
+		}
+		if !dexeth.CompareVectors(vec, txVec) {
+			return nil, fmt.Errorf("tx vector doesn't match expectation. %+v != %+v", txVec, vec)
+		}
+		val = w.atomize(vec.Value)
+		participant = vec.To.String()
+		lockTime = time.Unix(int64(vec.LockTime), 0)
+		secretHashB = vec.SecretHash[:]
+	default:
+		return nil, fmt.Errorf("unknown contract version %d", version)
 	}
 
 	coin := &coin{
 		id:    txHash,
-		value: w.atomize(initiation.Value),
+		value: val,
 	}
 
 	return &asset.AuditInfo{
-		Recipient:  initiation.Participant.Hex(),
-		Expiration: initiation.LockTime,
+		Recipient:  participant,
+		Expiration: lockTime,
 		Coin:       coin,
 		Contract:   contract,
-		SecretHash: secretHash[:],
+		SecretHash: secretHashB,
 	}, nil
 }
 
@@ -2932,26 +2947,25 @@ func (w *assetWallet) LockTimeExpired(ctx context.Context, lockTime time.Time) (
 // ContractLockTimeExpired returns true if the specified contract's locktime has
 // expired, making it possible to issue a Refund.
 func (w *assetWallet) ContractLockTimeExpired(ctx context.Context, contract dex.Bytes) (bool, time.Time, error) {
-	contractVer, secretHash, err := dexeth.DecodeContractData(contract)
+	contractVer, locator, err := dexeth.DecodeContractData(contract)
 	if err != nil {
 		return false, time.Time{}, err
 	}
 
-	swap, err := w.swap(ctx, secretHash, contractVer)
+	status, vec, err := w.statusAndVector(ctx, locator, contractVer)
 	if err != nil {
 		return false, time.Time{}, err
-	}
-
-	// Time is not yet set for uninitiated swaps.
-	if swap.State == dexeth.SSNone {
+	} else if status.Step == dexeth.SSNone {
 		return false, time.Time{}, asset.ErrSwapNotInitiated
 	}
 
-	expired, err := w.LockTimeExpired(ctx, swap.LockTime)
+	lockTime := time.Unix(int64(vec.LockTime), 0)
+
+	expired, err := w.LockTimeExpired(ctx, lockTime)
 	if err != nil {
 		return false, time.Time{}, err
 	}
-	return expired, swap.LockTime, nil
+	return expired, lockTime, nil
 }
 
 // findRedemptionResult is used internally for queued findRedemptionRequests.
@@ -2969,22 +2983,21 @@ type findRedemptionRequest struct {
 
 // sendFindRedemptionResult sends the result or logs a message if it cannot be
 // sent.
-func (eth *baseWallet) sendFindRedemptionResult(req *findRedemptionRequest, secretHash [32]byte,
-	secret []byte, makerAddr string, err error) {
+func (eth *baseWallet) sendFindRedemptionResult(req *findRedemptionRequest, locator, secret []byte, makerAddr string, err error) {
 	select {
 	case req.res <- &findRedemptionResult{secret: secret, makerAddr: makerAddr, err: err}:
 	default:
-		eth.log.Info("findRedemptionResult channel blocking for request %s", secretHash)
+		eth.log.Info("findRedemptionResult channel blocking for request %x", locator)
 	}
 }
 
 // findRedemptionRequests creates a copy of the findRedemptionReqs map.
-func (w *assetWallet) findRedemptionRequests() map[[32]byte]*findRedemptionRequest {
+func (w *assetWallet) findRedemptionRequests() map[string]*findRedemptionRequest {
 	w.findRedemptionMtx.RLock()
 	defer w.findRedemptionMtx.RUnlock()
-	reqs := make(map[[32]byte]*findRedemptionRequest, len(w.findRedemptionReqs))
-	for secretHash, req := range w.findRedemptionReqs {
-		reqs[secretHash] = req
+	reqs := make(map[string]*findRedemptionRequest, len(w.findRedemptionReqs))
+	for loc, req := range w.findRedemptionReqs {
+		reqs[loc] = req
 	}
 	return reqs
 }
@@ -3001,13 +3014,13 @@ func (w *assetWallet) FindRedemption(ctx context.Context, _, contract dex.Bytes)
 	// contract, so we are basically doing the next best thing here.
 	const coinIDTmpl = coinIDTakerFoundMakerRedemption + "%s"
 
-	contractVer, secretHash, err := dexeth.DecodeContractData(contract)
+	contractVer, locator, err := dexeth.DecodeContractData(contract)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	// See if it's ready right away.
-	secret, makerAddr, err := w.findSecret(secretHash, contractVer)
+	secret, makerAddr, err := w.findSecret(locator, contractVer)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -3022,14 +3035,16 @@ func (w *assetWallet) FindRedemption(ctx context.Context, _, contract dex.Bytes)
 		res:         make(chan *findRedemptionResult, 1),
 	}
 
+	locatorKey := string(locator)
+
 	w.findRedemptionMtx.Lock()
 
-	if w.findRedemptionReqs[secretHash] != nil {
+	if w.findRedemptionReqs[locatorKey] != nil {
 		w.findRedemptionMtx.Unlock()
-		return nil, nil, fmt.Errorf("duplicate find redemption request for %x", secretHash)
+		return nil, nil, fmt.Errorf("duplicate find redemption request for %x", locator)
 	}
 
-	w.findRedemptionReqs[secretHash] = req
+	w.findRedemptionReqs[locatorKey] = req
 
 	w.findRedemptionMtx.Unlock()
 
@@ -3040,11 +3055,11 @@ func (w *assetWallet) FindRedemption(ctx context.Context, _, contract dex.Bytes)
 	}
 
 	w.findRedemptionMtx.Lock()
-	delete(w.findRedemptionReqs, secretHash)
+	delete(w.findRedemptionReqs, locatorKey)
 	w.findRedemptionMtx.Unlock()
 
 	if res == nil {
-		return nil, nil, fmt.Errorf("context cancelled for find redemption request %x", secretHash)
+		return nil, nil, fmt.Errorf("context cancelled for find redemption request %x", locator)
 	}
 
 	if res.err != nil {
@@ -3054,64 +3069,61 @@ func (w *assetWallet) FindRedemption(ctx context.Context, _, contract dex.Bytes)
 	return dex.Bytes(fmt.Sprintf(coinIDTmpl, res.makerAddr)), res.secret[:], nil
 }
 
-// findSecret returns redemption secret from smart contract that Maker put there
-// redeeming Taker swap along with Maker Ethereum account address. Returns empty
-// values if Maker hasn't redeemed yet.
-func (w *assetWallet) findSecret(secretHash [32]byte, contractVer uint32) ([]byte, string, error) {
+func (w *assetWallet) findSecret(locator []byte, contractVer uint32) ([]byte, string, error) {
 	ctx, cancel := context.WithTimeout(w.ctx, 10*time.Second)
 	defer cancel()
-	swap, err := w.swap(ctx, secretHash, contractVer)
+	status, vector, err := w.statusAndVector(ctx, locator, contractVer)
 	if err != nil {
 		return nil, "", err
 	}
 
-	switch swap.State {
+	switch status.Step {
 	case dexeth.SSInitiated:
 		return nil, "", nil // no Maker redeem yet, but keep checking
 	case dexeth.SSRedeemed:
-		return swap.Secret[:], swap.Initiator.String(), nil
+		return status.Secret[:], vector.From.String(), nil
 	case dexeth.SSNone:
-		return nil, "", fmt.Errorf("swap %x does not exist", secretHash)
+		return nil, "", fmt.Errorf("swap %x does not exist", locator)
 	case dexeth.SSRefunded:
-		return nil, "", fmt.Errorf("swap %x is already refunded", secretHash)
+		return nil, "", fmt.Errorf("swap %x is already refunded", locator)
 	}
-	return nil, "", fmt.Errorf("unrecognized swap state %v", swap.State)
+	return nil, "", fmt.Errorf("unrecognized swap state %v", status.Step)
 }
 
 // Refund refunds a contract. This can only be used after the time lock has
 // expired.
 func (w *assetWallet) Refund(_, contract dex.Bytes, feeRate uint64) (dex.Bytes, error) {
-	version, secretHash, err := dexeth.DecodeContractData(contract)
+	contractVer, locator, err := dexeth.DecodeContractData(contract)
 	if err != nil {
 		return nil, fmt.Errorf("Refund: failed to decode contract: %w", err)
 	}
 
-	swap, err := w.swap(w.ctx, secretHash, version)
+	status, vector, err := w.statusAndVector(w.ctx, locator, contractVer)
 	if err != nil {
 		return nil, err
 	}
 	// It's possible the swap was refunded by someone else. In that case we
 	// cannot know the refunding tx hash.
-	switch swap.State {
+	switch status.Step {
 	case dexeth.SSInitiated: // good, check refundability
 	case dexeth.SSNone:
 		return nil, asset.ErrSwapNotInitiated
 	case dexeth.SSRefunded:
-		w.log.Infof("Swap with secret hash %x already refunded.", secretHash)
+		w.log.Infof("Swap with locator %x already refunded.", locator)
 		zeroHash := common.Hash{}
 		return zeroHash[:], nil
 	case dexeth.SSRedeemed:
-		w.log.Infof("Swap with secret hash %x already redeemed with secret key %x.",
-			secretHash, swap.Secret)
+		w.log.Infof("Swap with locator %x already redeemed with secret key %x.",
+			locator, status.Secret)
 		return nil, asset.CoinNotFoundError // so caller knows to FindRedemption
 	}
 
-	refundable, err := w.isRefundable(secretHash, version)
+	refundable, err := w.isRefundable(locator, contractVer)
 	if err != nil {
 		return nil, fmt.Errorf("Refund: failed to check isRefundable: %w", err)
 	}
 	if !refundable {
-		return nil, fmt.Errorf("Refund: swap with secret hash %x is not refundable", secretHash)
+		return nil, fmt.Errorf("Refund: swap with locator %x is not refundable", locator)
 	}
 
 	maxFeeRate := dexeth.GweiToWei(feeRate)
@@ -3120,7 +3132,7 @@ func (w *assetWallet) Refund(_, contract dex.Bytes, feeRate uint64) (dex.Bytes, 
 		return nil, fmt.Errorf("Refund: failed to get network tip cap: %w", err)
 	}
 
-	tx, err := w.refund(secretHash, w.atomize(swap.Value), maxFeeRate, tipRate, version)
+	tx, err := w.refund(locator, w.atomize(vector.Value), maxFeeRate, tipRate, contractVer)
 	if err != nil {
 		return nil, fmt.Errorf("Refund: failed to call refund: %w", err)
 	}
@@ -3238,7 +3250,7 @@ func (w *TokenWallet) canSend(value uint64, verifyBalance, isPreEstimate bool) (
 	}
 	maxFeeRateGwei := dexeth.WeiToGweiCeil(maxFeeRate)
 
-	g := w.gases(contractVersionNewest)
+	g := w.gases(dexeth.ContractVersionERC20)
 	if g == nil {
 		return 0, nil, nil, fmt.Errorf("gas table not found")
 	}
@@ -3309,7 +3321,7 @@ func (w *TokenWallet) EstimateSendTxFee(addr string, value, _ uint64, _, maxWith
 
 // StandardSendFees returns the fees for a simple send tx.
 func (w *TokenWallet) StandardSendFee(feeRate uint64) uint64 {
-	g := w.gases(contractVersionNewest)
+	g := w.gases(dexeth.ContractVersionNewest)
 	if g == nil {
 		w.log.Errorf("error getting gases for token %s", w.token.Name)
 		return 0
@@ -3352,24 +3364,34 @@ func (w *assetWallet) SwapConfirmations(ctx context.Context, coinID dex.Bytes, c
 	ctx, cancel := context.WithTimeout(ctx, onChainDataFetchTimeout)
 	defer cancel()
 
-	swapData, err := w.swap(ctx, secretHash, contractVer)
+	tip := w.tipHeight()
+
+	status, err := w.status(ctx, secretHash, contractVer)
 	if err != nil {
 		return 0, false, fmt.Errorf("error finding swap state: %w", err)
 	}
 
-	if swapData.State == dexeth.SSNone {
-		// Check if we know about the tx ourselves. If it's not in pendingTxs
-		// or the database, assume it's lost.
+	if status.Step == dexeth.SSNone {
 		return 0, false, asset.ErrSwapNotInitiated
 	}
 
-	spent = swapData.State >= dexeth.SSRedeemed
-	tip := w.tipHeight()
+	spent = status.Step >= dexeth.SSRedeemed
+	if spent && contractVer == 1 {
+		// Gotta get the confirimations directly.
+		var txHash common.Hash
+		copy(txHash[:], coinID)
+		confs, err = w.node.transactionConfirmations(ctx, txHash)
+		if err != nil {
+			return 0, false, fmt.Errorf("error finding swap state: %w", err)
+		}
+		return
+	}
+
 	// TODO: If tip < swapData.BlockHeight (which has been observed), what does
 	// that mean? Are we using the wrong provider in a multi-provider setup? How
 	// do we resolve provider relevance?
-	if tip >= swapData.BlockHeight {
-		confs = uint32(tip - swapData.BlockHeight + 1)
+	if tip >= status.BlockHeight {
+		confs = uint32(w.tipHeight() - status.BlockHeight + 1)
 	}
 	return
 }
@@ -3471,37 +3493,6 @@ func (eth *assetWallet) DynamicRedemptionFeesPaid(ctx context.Context, coinID, c
 	return eth.swapOrRedemptionFeesPaid(ctx, coinID, contractData, false)
 }
 
-// extractSecretHashes extracts the secret hashes from the reedeem or swap tx
-// data. The returned hashes are sorted lexicographically.
-func extractSecretHashes(isInit bool, txData []byte, contractVer uint32) (secretHashes [][]byte, _ error) {
-	defer func() {
-		sort.Slice(secretHashes, func(i, j int) bool { return bytes.Compare(secretHashes[i], secretHashes[j]) < 0 })
-	}()
-	if isInit {
-		inits, err := dexeth.ParseInitiateData(txData, contractVer)
-		if err != nil {
-			return nil, fmt.Errorf("invalid initiate data: %v", err)
-		}
-		secretHashes = make([][]byte, 0, len(inits))
-		for k := range inits {
-			copyK := k
-			secretHashes = append(secretHashes, copyK[:])
-		}
-		return secretHashes, nil
-	}
-	// redeem
-	redeems, err := dexeth.ParseRedeemData(txData, contractVer)
-	if err != nil {
-		return nil, fmt.Errorf("invalid redeem data: %v", err)
-	}
-	secretHashes = make([][]byte, 0, len(redeems))
-	for k := range redeems {
-		copyK := k
-		secretHashes = append(secretHashes, copyK[:])
-	}
-	return secretHashes, nil
-}
-
 // swapOrRedemptionFeesPaid returns exactly how much gwei was used to send an
 // initiation or redemption transaction. It also returns the secret hashes
 // included with this init or redeem. Secret hashes are sorted so returns are
@@ -3516,15 +3507,14 @@ func (w *baseWallet) swapOrRedemptionFeesPaid(
 	coinID dex.Bytes,
 	contractData dex.Bytes,
 	isInit bool,
-) (fee uint64, secretHashes [][]byte, err error) {
-
-	var txHash common.Hash
-	copy(txHash[:], coinID)
-
-	contractVer, secretHash, err := dexeth.DecodeContractData(contractData)
+) (fee uint64, locators [][]byte, err error) {
+	contractVer, locator, err := dexeth.DecodeContractData(contractData)
 	if err != nil {
 		return 0, nil, err
 	}
+
+	var txHash common.Hash
+	copy(txHash[:], coinID)
 
 	tip := w.tipHeight()
 
@@ -3541,7 +3531,7 @@ func (w *baseWallet) swapOrRedemptionFeesPaid(
 		if confs := safeConfs(tip, blockNum); confs < w.finalizeConfs {
 			return 0, nil, asset.ErrNotEnoughConfirms
 		}
-		secretHashes, err = extractSecretHashes(isInit, tx.Data(), contractVer)
+		locators, _, err = extractSecretHashes(tx, contractVer, isInit)
 		return
 	}
 
@@ -3559,21 +3549,84 @@ func (w *baseWallet) swapOrRedemptionFeesPaid(
 
 	bigFees := new(big.Int).Mul(receipt.EffectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
 	fee = dexeth.WeiToGweiCeil(bigFees)
-	secretHashes, err = extractSecretHashes(isInit, tx.Data(), contractVer)
+	locators, _, err = extractSecretHashes(tx, contractVer, isInit)
 	if err != nil {
 		return 0, nil, err
 	}
+
+	sort.Slice(locators, func(i, j int) bool { return bytes.Compare(locators[i], locators[j]) < 0 })
 	var found bool
-	for i := range secretHashes {
-		if bytes.Equal(secretHash[:], secretHashes[i]) {
+	for i := range locators {
+		if bytes.Equal(locator, locators[i]) {
 			found = true
 			break
 		}
 	}
 	if !found {
-		return 0, nil, fmt.Errorf("secret hash %x not found in transaction", secretHash)
+		return 0, nil, fmt.Errorf("locator %x not found in transaction", locator)
 	}
-	return dexeth.WeiToGweiCeil(bigFees), secretHashes, nil
+	return dexeth.WeiToGweiCeil(bigFees), locators, nil
+}
+
+// extractSecretHashes extracts the secret hashes from the reedeem or swap tx
+// data. The returned hashes are sorted lexicographically.
+func extractSecretHashes(tx *types.Transaction, contractVer uint32, isInit bool) (locators, secretHashes [][]byte, err error) {
+	defer func() {
+		sort.Slice(secretHashes, func(i, j int) bool { return bytes.Compare(secretHashes[i], secretHashes[j]) < 0 })
+	}()
+
+	switch contractVer {
+	case 0:
+		if isInit {
+			inits, err := dexeth.ParseInitiateDataV0(tx.Data())
+			if err != nil {
+				return nil, nil, fmt.Errorf("invalid initiate data: %v", err)
+			}
+			locators = make([][]byte, 0, len(inits))
+			for k := range inits {
+				copyK := k
+				locators = append(locators, copyK[:])
+			}
+		} else {
+			redeems, err := dexeth.ParseRedeemDataV0(tx.Data())
+			if err != nil {
+				return nil, nil, fmt.Errorf("invalid redeem data: %v", err)
+			}
+			locators = make([][]byte, 0, len(redeems))
+			for k := range redeems {
+				copyK := k
+				locators = append(locators, copyK[:])
+			}
+		}
+		return locators, locators, nil
+	case 1:
+		if isInit {
+			_, vectors, err := dexeth.ParseInitiateDataV1(tx.Data())
+			if err != nil {
+				return nil, nil, fmt.Errorf("invalid initiate data: %v", err)
+			}
+			locators = make([][]byte, 0, len(vectors))
+			secretHashes = make([][]byte, 0, len(vectors))
+			for _, vec := range vectors {
+				locators = append(locators, vec.Locator())
+				secretHashes = append(secretHashes, vec.SecretHash[:])
+			}
+		} else {
+			_, redeems, err := dexeth.ParseRedeemDataV1(tx.Data())
+			if err != nil {
+				return nil, nil, fmt.Errorf("invalid redeem data: %v", err)
+			}
+			locators = make([][]byte, 0, len(redeems))
+			secretHashes = make([][]byte, 0, len(redeems))
+			for secretHash, r := range redeems {
+				locators = append(locators, r.Contract.Locator())
+				secretHashes = append(secretHashes, secretHash[:])
+			}
+		}
+		return locators, secretHashes, nil
+	default:
+		return nil, nil, fmt.Errorf("unknown server version %d", contractVer)
+	}
 }
 
 // RegFeeConfirmations gets the number of confirmations for the specified
@@ -3712,9 +3765,7 @@ func (eth *ETHWallet) checkForNewBlocks(ctx context.Context) {
 	bestHash := bestHdr.Hash()
 	// This method is called frequently. Don't hold write lock
 	// unless tip has changed.
-	eth.tipMtx.RLock()
-	currentTipHash := eth.currentTip.Hash()
-	eth.tipMtx.RUnlock()
+	currentTipHash := eth.tip().Hash()
 	if currentTipHash == bestHash {
 		return
 	}
@@ -3770,7 +3821,7 @@ func (w *assetWallet) confirmRedemption(coinID dex.Bytes, redemption *asset.Rede
 	var txHash common.Hash
 	copy(txHash[:], coinID)
 
-	contractVer, secretHash, err := dexeth.DecodeContractData(redemption.Spends.Contract)
+	contractVer, locator, err := dexeth.DecodeContractData(redemption.Spends.Contract)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode contract data: %w", err)
 	}
@@ -3825,11 +3876,11 @@ func (w *assetWallet) confirmRedemption(coinID dex.Bytes, redemption *asset.Rede
 		}
 		// We weren't able to redeem. Perhaps fees were too low, but we'll
 		// check the status in the contract for a couple of other conditions.
-		swap, err := w.swap(w.ctx, secretHash, contractVer)
+		status, err := w.status(w.ctx, locator, contractVer)
 		if err != nil {
 			return nil, fmt.Errorf("error pulling swap data from contract: %v", err)
 		}
-		switch swap.State {
+		switch status.Step {
 		case dexeth.SSRedeemed:
 			w.log.Infof("Redemption in tx %s was apparently redeemed by another tx. OK.", txHash)
 			return confStatus(w.finalizeConfs, w.finalizeConfs, txHash), nil
@@ -3903,15 +3954,16 @@ func (w *baseWallet) localTxStatus(txHash common.Hash) (_ bool, s *walletTxStatu
 
 // checkFindRedemptions checks queued findRedemptionRequests.
 func (w *assetWallet) checkFindRedemptions() {
-	for secretHash, req := range w.findRedemptionRequests() {
+	for loc, req := range w.findRedemptionRequests() {
 		if w.ctx.Err() != nil {
 			return
 		}
-		secret, makerAddr, err := w.findSecret(secretHash, req.contractVer)
+		locator := []byte(loc)
+		secret, makerAddr, err := w.findSecret(locator, req.contractVer)
 		if err != nil {
-			w.sendFindRedemptionResult(req, secretHash, nil, "", err)
+			w.sendFindRedemptionResult(req, locator, nil, "", err)
 		} else if len(secret) > 0 {
-			w.sendFindRedemptionResult(req, secretHash, secret, makerAddr, nil)
+			w.sendFindRedemptionResult(req, locator, secret, makerAddr, nil)
 		}
 	}
 }
@@ -4062,6 +4114,10 @@ func (w *assetWallet) getConfirmedBalance() (*big.Int, error) {
 	return reqBal, nil
 }
 
+func (w *assetWallet) contractors() map[uint32]contractor {
+	return map[uint32]contractor{0: w.contractorV0, 1: w.contractorV1}
+}
+
 func (w *assetWallet) balanceWithTxPool() (*Balance, error) {
 	isToken := w.assetID != w.baseChainID
 	confirmed, err := w.getConfirmedBalance()
@@ -4131,7 +4187,7 @@ func (w *assetWallet) balanceWithTxPool() (*Balance, error) {
 		}
 
 		var contractOut uint64
-		for ver, c := range w.contractors {
+		for ver, c := range w.contractors() {
 			in, out, err := c.value(w.ctx, tx)
 			if err != nil {
 				w.log.Errorf("version %d contractor incomingValue error: %v", ver, err)
@@ -4230,7 +4286,7 @@ func (w *ETHWallet) sendToAddr(addr common.Address, amt uint64, maxFeeRate, tipR
 
 // sendToAddr sends funds to the address.
 func (w *TokenWallet) sendToAddr(addr common.Address, amt uint64, maxFeeRate, tipRate *big.Int) (tx *types.Transaction, err error) {
-	g := w.gases(contractVersionNewest)
+	g := w.gases(dexeth.ContractVersionERC20)
 	if g == nil {
 		return nil, fmt.Errorf("no gas table")
 	}
@@ -4244,7 +4300,7 @@ func (w *TokenWallet) sendToAddr(addr common.Address, amt uint64, maxFeeRate, ti
 			txType = asset.SelfSend
 		}
 		recipient := addr.Hex()
-		return tx, txType, amt, &recipient, w.withTokenContractor(w.assetID, contractVersionNewest, func(c tokenContractor) error {
+		return tx, txType, amt, &recipient, w.withTokenContractor(w.assetID, dexeth.ContractVersionERC20, func(c tokenContractor) error {
 			tx, err = c.transfer(txOpts, addr, w.evmify(amt))
 			if err != nil {
 				return err
@@ -4255,10 +4311,27 @@ func (w *TokenWallet) sendToAddr(addr common.Address, amt uint64, maxFeeRate, ti
 
 }
 
-// swap gets a swap keyed by secretHash in the contract.
-func (w *assetWallet) swap(ctx context.Context, secretHash [32]byte, contractVer uint32) (swap *dexeth.SwapState, err error) {
-	return swap, w.withContractor(contractVer, func(c contractor) error {
-		swap, err = c.swap(ctx, secretHash)
+// status fetches the SwapStatus for the locator and contract version.
+func (w *assetWallet) status(ctx context.Context, locator []byte, contractVer uint32) (s *dexeth.SwapStatus, err error) {
+	return s, w.withContractor(contractVer, func(c contractor) error {
+		s, err = c.status(ctx, locator)
+		return err
+	})
+}
+
+// vector fetches the SwapVector for the locator and contract version.
+func (w *assetWallet) vector(ctx context.Context, locator []byte, contractVer uint32) (v *dexeth.SwapVector, err error) {
+	return v, w.withContractor(contractVer, func(c contractor) error {
+		v, err = c.vector(ctx, locator)
+		return err
+	})
+}
+
+// statusAndVector fetches the SwapStatus and SwapVector for the locator and
+// contract version.
+func (w *assetWallet) statusAndVector(ctx context.Context, locator []byte, contractVer uint32) (s *dexeth.SwapStatus, v *dexeth.SwapVector, err error) {
+	return s, v, w.withContractor(contractVer, func(c contractor) error {
+		s, v, err = c.statusAndVector(ctx, locator)
 		return err
 	})
 }
@@ -4302,23 +4375,23 @@ func (w *assetWallet) estimateInitGas(ctx context.Context, numSwaps int, contrac
 // nodeclient_harness_test.go suite (GetGasEstimates, testRedeemGas, etc.).
 // Never use this with a public RPC provider, especially as maker, since it
 // reveals the secret keys.
-func (w *assetWallet) estimateRedeemGas(ctx context.Context, secrets [][32]byte, contractVer uint32) (gas uint64, err error) {
+func (w *assetWallet) estimateRedeemGas(ctx context.Context, secrets [][32]byte, locators [][]byte, contractVer uint32) (gas uint64, err error) {
 	return gas, w.withContractor(contractVer, func(c contractor) error {
-		gas, err = c.estimateRedeemGas(ctx, secrets)
+		gas, err = c.estimateRedeemGas(ctx, secrets, locators)
 		return err
 	})
 }
 
 // estimateRefundGas checks the amount of gas that is used for a refund.
-func (w *assetWallet) estimateRefundGas(ctx context.Context, secretHash [32]byte, contractVer uint32) (gas uint64, err error) {
+func (w *assetWallet) estimateRefundGas(ctx context.Context, locator []byte, contractVer uint32) (gas uint64, err error) {
 	return gas, w.withContractor(contractVer, func(c contractor) error {
-		gas, err = c.estimateRefundGas(ctx, secretHash)
+		gas, err = c.estimateRefundGas(ctx, locator)
 		return err
 	})
 }
 
 // loadContractors prepares the token contractors and add them to the map.
-func (w *assetWallet) loadContractors() error {
+func (w *assetWallet) loadContractors(parent *assetWallet) error {
 	token, found := w.tokens[w.assetID]
 	if !found {
 		return fmt.Errorf("token %d not found", w.assetID)
@@ -4328,32 +4401,41 @@ func (w *assetWallet) loadContractors() error {
 		return fmt.Errorf("token %d not found", w.assetID)
 	}
 
-	for ver := range netToken.SwapContracts {
-		constructor, found := tokenContractorConstructors[ver]
-		if !found {
-			w.log.Errorf("contractor constructor not found for token %s, version %d", token.Name, ver)
-			continue
-		}
-		c, err := constructor(w.net, token, w.addr, w.node.contractBackend())
+	if _, found := netToken.SwapContracts[0]; found {
+		c, err := newV0TokenContractor(w.net, token, w.addr, w.node.contractBackend())
 		if err != nil {
-			return fmt.Errorf("error constructing token %s contractor version %d: %w", token.Name, ver, err)
+			return fmt.Errorf("error constructing token %s contractor version 0: %w", token.Name, err)
 		}
-
 		if netToken.Address != c.tokenAddress() {
 			return fmt.Errorf("wrong %s token address. expected %s, got %s", token.Name, netToken.Address, c.tokenAddress())
 		}
+		w.contractorV0 = c
+	}
 
-		w.contractors[ver] = c
+	if _, found := netToken.SwapContracts[1]; found {
+		if parent.contractorV1 == nil {
+			return errors.New("can't construct version 1 contractor if parent doesn't have the unified contractor")
+		}
+		cgen, ok := parent.contractorV1.(unifiedContractor)
+		if !ok {
+			return errors.New("parent contractor ain't unified")
+		}
+		c, err := cgen.tokenContractor(token)
+		if err != nil {
+			return fmt.Errorf("error constructing version 1 token %s contractor: %w", token.Name, err)
+		}
+		w.contractorV1 = c
 	}
 	return nil
 }
 
 // withContractor runs the provided function with the versioned contractor.
 func (w *assetWallet) withContractor(contractVer uint32, f func(contractor) error) error {
-	if contractVer == contractVersionNewest {
+	if contractVer == dexeth.ContractVersionERC20 {
+		// For ERC20 methods, use the most recent contractor version.
 		var bestVer uint32
 		var bestContractor contractor
-		for ver, c := range w.contractors {
+		for ver, c := range w.contractors() {
 			if ver >= bestVer {
 				bestContractor = c
 				bestVer = ver
@@ -4361,19 +4443,28 @@ func (w *assetWallet) withContractor(contractVer uint32, f func(contractor) erro
 		}
 		return f(bestContractor)
 	}
-	contractor, found := w.contractors[contractVer]
-	if !found {
-		return fmt.Errorf("no version %d contractor for asset %d", contractVer, w.assetID)
+	var c contractor
+	switch contractVer {
+	case 0:
+		if w.contractorV0 == nil {
+			return errors.New("no version 0 contractor")
+		}
+		c = w.contractorV0
+	case 1:
+		if w.contractorV1 == nil {
+			return errors.New("no version 1 contractor")
+		}
+		c = w.contractorV1
 	}
-	return f(contractor)
+	return f(c)
 }
 
 // withTokenContractor runs the provided function with the tokenContractor.
-func (w *assetWallet) withTokenContractor(assetID, ver uint32, f func(tokenContractor) error) error {
-	return w.withContractor(ver, func(c contractor) error {
+func (w *assetWallet) withTokenContractor(assetID, contractVer uint32, f func(tokenContractor) error) error {
+	return w.withContractor(contractVer, func(c contractor) error {
 		tc, is := c.(tokenContractor)
 		if !is {
-			return fmt.Errorf("contractor for %d %T is not a tokenContractor", assetID, c)
+			return fmt.Errorf("contractor for %s version %d is not a tokenContractor. type = %T", w.ui.Conventional.Unit, contractVer, c)
 		}
 		return f(tc)
 	})
@@ -4381,18 +4472,9 @@ func (w *assetWallet) withTokenContractor(assetID, ver uint32, f func(tokenContr
 
 // estimateApproveGas estimates the gas required for a transaction approving a
 // spender for an ERC20 contract.
-func (w *assetWallet) estimateApproveGas(newGas *big.Int) (gas uint64, err error) {
-	return gas, w.withTokenContractor(w.assetID, contractVersionNewest, func(c tokenContractor) error {
+func (w *assetWallet) estimateApproveGas(contractVer uint32, newGas *big.Int) (gas uint64, err error) {
+	return gas, w.withTokenContractor(w.assetID, contractVer, func(c tokenContractor) error {
 		gas, err = c.estimateApproveGas(w.ctx, newGas)
-		return err
-	})
-}
-
-// estimateTransferGas estimates the gas needed for a token transfer call to an
-// ERC20 contract.
-func (w *assetWallet) estimateTransferGas(val uint64) (gas uint64, err error) {
-	return gas, w.withTokenContractor(w.assetID, contractVersionNewest, func(c tokenContractor) error {
-		gas, err = c.estimateTransferGas(w.ctx, w.evmify(val))
 		return err
 	})
 }
@@ -4445,7 +4527,7 @@ func (w *assetWallet) redeem(
 // refund refunds a swap contract using the account controlled by the wallet.
 // Any on-chain failure, such as the locktime not being past, will not cause
 // this to error.
-func (w *assetWallet) refund(secretHash [32]byte, amt uint64, maxFeeRate, tipRate *big.Int, contractVer uint32) (tx *types.Transaction, err error) {
+func (w *assetWallet) refund(locator []byte, amt uint64, maxFeeRate, tipRate *big.Int, contractVer uint32) (tx *types.Transaction, err error) {
 	gas := w.gases(contractVer)
 	if gas == nil {
 		return nil, fmt.Errorf("no gas table for asset %d, version %d", w.assetID, contractVer)
@@ -4456,30 +4538,34 @@ func (w *assetWallet) refund(secretHash [32]byte, amt uint64, maxFeeRate, tipRat
 			return nil, 0, 0, nil, err
 		}
 		return tx, asset.Refund, amt, nil, w.withContractor(contractVer, func(c contractor) error {
-			tx, err = c.refund(txOpts, secretHash)
+			tx, err = c.refund(txOpts, locator)
 			return err
 		})
 	})
 }
 
-// isRedeemable checks if the swap identified by secretHash is redeemable using
-// secret. This must NOT be a contractor call.
-func (w *assetWallet) isRedeemable(secretHash [32]byte, secret [32]byte, contractVer uint32) (redeemable bool, err error) {
-	swap, err := w.swap(w.ctx, secretHash, contractVer)
+// isRedeemable checks if the swap identified by secretHash is redeemable using secret.
+func (w *assetWallet) isRedeemable(locator []byte, secret [32]byte, contractVer uint32) (redeemable bool, err error) {
+	status, err := w.status(w.ctx, locator, contractVer)
 	if err != nil {
 		return false, err
 	}
 
-	if swap.State != dexeth.SSInitiated {
+	if status.Step != dexeth.SSInitiated {
 		return false, nil
 	}
 
-	return w.ValidateSecret(secret[:], secretHash[:]), nil
+	vector, err := w.vector(w.ctx, locator, contractVer)
+	if err != nil {
+		return false, err
+	}
+
+	return w.ValidateSecret(secret[:], vector.SecretHash[:]), nil
 }
 
-func (w *assetWallet) isRefundable(secretHash [32]byte, contractVer uint32) (refundable bool, err error) {
+func (w *assetWallet) isRefundable(locator []byte, contractVer uint32) (refundable bool, err error) {
 	return refundable, w.withContractor(contractVer, func(c contractor) error {
-		refundable, err = c.isRefundable(secretHash)
+		refundable, err = c.isRefundable(locator)
 		return err
 	})
 }
@@ -4487,7 +4573,6 @@ func (w *assetWallet) isRefundable(secretHash [32]byte, contractVer uint32) (ref
 func checkTxStatus(receipt *types.Receipt, gasLimit uint64) error {
 	if receipt.Status != types.ReceiptStatusSuccessful {
 		return fmt.Errorf("transaction status failed")
-
 	}
 
 	if receipt.GasUsed > gasLimit {
@@ -5237,7 +5322,7 @@ func (w *ETHWallet) WalletTransaction(ctx context.Context, txID string) (*asset.
 // transaction, finds the log that sends tokens to the wallet's address,
 // and returns the value of the transfer.
 func (w *TokenWallet) extractValueFromTransferLog(receipt *types.Receipt) (v uint64, err error) {
-	return v, w.withTokenContractor(w.assetID, contractVersionNewest, func(c tokenContractor) error {
+	return v, w.withTokenContractor(w.assetID, dexeth.ContractVersionERC20, func(c tokenContractor) error {
 		v, err = c.parseTransfer(receipt)
 		return err
 	})
@@ -5383,18 +5468,26 @@ func quickNode(ctx context.Context, walletDir string, contractVer uint32,
 		if ctor == nil {
 			return nil, nil, fmt.Errorf("no contractor constructor for eth contract version %d", contractVer)
 		}
-		c, err = ctor(wParams.ContractAddr, cl.address(), cl.contractBackend())
+		c, err = ctor(net, wParams.ContractAddr, cl.address(), cl.contractBackend())
 		if err != nil {
 			return nil, nil, fmt.Errorf("contractor constructor error: %v", err)
 		}
 	} else {
-		ctor := tokenContractorConstructors[contractVer]
-		if ctor == nil {
-			return nil, nil, fmt.Errorf("no token contractor constructor for eth contract version %d", contractVer)
-		}
-		c, err = ctor(net, wParams.Token, cl.address(), cl.contractBackend())
-		if err != nil {
-			return nil, nil, fmt.Errorf("token contractor constructor error: %v", err)
+		switch contractVer {
+		case 0:
+			c, err = newV0TokenContractor(net, wParams.Token, cl.address(), cl.contractBackend())
+			if err != nil {
+				return nil, nil, fmt.Errorf("token contractor constructor error: %v", err)
+			}
+		case 1:
+			bc, err := newV1Contractor(net, wParams.ContractAddr, cl.address(), cl.contractBackend())
+			if err != nil {
+				return nil, nil, fmt.Errorf("base contractor constructor error: %v", err)
+			}
+			c, err = bc.(unifiedContractor).tokenContractor(wParams.Token)
+			if err != nil {
+				return nil, nil, fmt.Errorf("tokenContractor error: %v", err)
+			}
 		}
 	}
 	success = true
@@ -5507,9 +5600,26 @@ func (getGas) ReadCredentials(chain, credentialsPath string, net dex.Network) (a
 	return
 }
 
-func getGetGasClientWithEstimatesAndBalances(ctx context.Context, net dex.Network, contractVer uint32, maxSwaps int,
-	walletDir string, providers []string, seed []byte, wParams *GetGasWalletParams, log dex.Logger) (cl *multiRPCClient, c contractor,
-	ethReq, swapReq, feeRate uint64, ethBal, tokenBal *big.Int, err error) {
+func getGetGasClientWithEstimatesAndBalances(
+	ctx context.Context,
+	net dex.Network,
+	contractVer uint32,
+	maxSwaps int,
+	walletDir string,
+	providers []string,
+	seed []byte,
+	wParams *GetGasWalletParams,
+	log dex.Logger,
+) (
+	cl *multiRPCClient,
+	c contractor,
+	ethReq,
+	swapReq,
+	feeRate uint64,
+	ethBal,
+	tokenBal *big.Int,
+	err error,
+) {
 
 	cl, c, err = quickNode(ctx, walletDir, contractVer, seed, providers, wParams, net, log)
 	if err != nil {
@@ -5760,6 +5870,7 @@ func (getGas) returnFunds(
 	}
 
 	remainder := ethBal - fees
+
 	txOpts, err := cl.txOpts(ctx, remainder, defaultSendGasLimit, maxFeeRate, tipRate, nil)
 	if err != nil {
 		return fmt.Errorf("error generating tx opts: %w", err)
@@ -5783,6 +5894,10 @@ func (getGas) returnFunds(
 // indicating the amount of funding needed to run.
 func (getGas) Estimate(ctx context.Context, net dex.Network, assetID, contractVer uint32, maxSwaps int,
 	credentialsPath string, wParams *GetGasWalletParams, log dex.Logger) error {
+
+	if *wParams.Gas == (dexeth.Gases{}) {
+		return fmt.Errorf("empty gas table. put some estimates in VersionedGases or Tokens for this contract")
+	}
 
 	symbol := dex.BipIDSymbol(assetID)
 	log.Infof("Getting gas estimates for up to %d swaps of asset %s, contract version %d on %s", maxSwaps, symbol, contractVer, symbol)
@@ -5829,8 +5944,9 @@ func (getGas) Estimate(ctx context.Context, net dex.Network, assetID, contractVe
 
 	var approvalClient *multiRPCClient
 	var approvalContractor tokenContractor
+	evmify := dexeth.GweiToWei
 	if isToken {
-
+		evmify = wParams.Token.AtomicToEVM
 		atomicBal := wParams.Token.EVMToAtomic(tokenBal)
 
 		convUnit := ui.Conventional.Unit
@@ -5873,7 +5989,7 @@ func (getGas) Estimate(ctx context.Context, net dex.Network, assetID, contractVe
 	}
 
 	log.Debugf("Getting gas estimates")
-	return getGasEstimates(ctx, cl, approvalClient, c, approvalContractor, maxSwaps, wParams.Gas, log)
+	return getGasEstimates(ctx, cl, approvalClient, c, approvalContractor, maxSwaps, contractVer, wParams.Gas, evmify, log)
 }
 
 // getGasEstimate is used to get a gas table for an asset's contract(s). The
@@ -5888,7 +6004,7 @@ func (getGas) Estimate(ctx context.Context, net dex.Network, assetID, contractVe
 // gas estimate. These are only needed when the asset is a token. For eth, they
 // can be nil.
 func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac tokenContractor,
-	maxSwaps int, g *dexeth.Gases, log dex.Logger) (err error) {
+	maxSwaps int, contractVer uint32, g *dexeth.Gases, evmify func(v uint64) *big.Int, log dex.Logger) (err error) {
 
 	tc, isToken := c.(tokenContractor)
 
@@ -5924,6 +6040,8 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 	if err != nil {
 		return fmt.Errorf("error getting network fees: %v", err)
 	}
+
+	maxFeeRate := new(big.Int).Add(tipRate, new(big.Int).Mul(baseRate, big.NewInt(2)))
 
 	defer func() {
 		if len(stats.swaps) == 0 {
@@ -5965,10 +6083,15 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 		fmt.Printf("    %+v \n", stats.transfers)
 	}()
 
+	logTx := func(tag string, n int, tx *types.Transaction) {
+		log.Infof("%s %d tx, hash = %s, nonce = %d, maxFeeRate = %s, tip cap = %s",
+			tag, n, tx.Hash(), tx.Nonce(), tx.GasFeeCap(), tx.GasTipCap())
+	}
+
 	// Estimate approve for tokens.
 	if isToken {
 		sendApprove := func(cl ethFetcher, c tokenContractor) error {
-			txOpts, err := cl.txOpts(ctx, 0, g.Approve*2, baseRate, tipRate, nil)
+			txOpts, err := cl.txOpts(ctx, 0, g.Approve*2, maxFeeRate, tipRate, nil)
 			if err != nil {
 				return fmt.Errorf("error constructing signed tx opts for approve: %w", err)
 			}
@@ -5976,6 +6099,7 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 			if err != nil {
 				return fmt.Errorf("error estimating approve gas: %w", err)
 			}
+			logTx("Approve", 1, tx)
 			if err = waitForConfirmation(ctx, "approval", cl, tx.Hash(), log); err != nil {
 				return fmt.Errorf("error waiting for approve transaction: %w", err)
 			}
@@ -6002,7 +6126,7 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 			return fmt.Errorf("error sending approve transaction for the initiator: %w", err)
 		}
 
-		txOpts, err := cl.txOpts(ctx, 0, g.Transfer*2, baseRate, tipRate, nil)
+		txOpts, err := cl.txOpts(ctx, 0, g.Transfer*2, maxFeeRate, tipRate, nil)
 		if err != nil {
 			return fmt.Errorf("error constructing signed tx opts for transfer: %w", err)
 		}
@@ -6015,6 +6139,7 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 		if err != nil {
 			return fmt.Errorf("transfer error: %w", err)
 		}
+		logTx("Transfer", 1, transferTx)
 		if err = waitForConfirmation(ctx, "transfer", cl, transferTx.Hash(), log); err != nil {
 			return fmt.Errorf("error waiting for transfer tx: %w", err)
 		}
@@ -6029,9 +6154,11 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 		stats.transfers = append(stats.transfers, receipt.GasUsed)
 	}
 
+	var v uint64 = 1
 	for n := 1; n <= maxSwaps; n++ {
 		contracts := make([]*asset.Contract, 0, n)
 		secrets := make([][32]byte, 0, n)
+		lockTime := time.Now().Add(-time.Hour)
 		for i := 0; i < n; i++ {
 			secretB := encode.RandomBytes(32)
 			var secret [32]byte
@@ -6039,9 +6166,9 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 			secretHash := sha256.Sum256(secretB)
 			contracts = append(contracts, &asset.Contract{
 				Address:    cl.address().String(), // trading with self
-				Value:      1,
+				Value:      v,
 				SecretHash: secretHash[:],
-				LockTime:   uint64(time.Now().Add(-time.Hour).Unix()),
+				LockTime:   uint64(lockTime.Unix()),
 			})
 			secrets = append(secrets, secret)
 		}
@@ -6052,7 +6179,7 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 		}
 
 		// Send the inits
-		txOpts, err := cl.txOpts(ctx, optsVal, g.SwapN(n)*2, baseRate, tipRate, nil)
+		txOpts, err := cl.txOpts(ctx, optsVal, g.SwapN(n)*2, maxFeeRate, tipRate, nil)
 		if err != nil {
 			return fmt.Errorf("error constructing signed tx opts for %d swaps: %v", n, err)
 		}
@@ -6061,6 +6188,7 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 		if err != nil {
 			return fmt.Errorf("initiate error for %d swaps: %v", n, err)
 		}
+		logTx("Initiate", n, tx)
 		if err = waitForConfirmation(ctx, "init", cl, tx.Hash(), log); err != nil {
 			return fmt.Errorf("error waiting for init tx to be mined: %w", err)
 		}
@@ -6071,13 +6199,11 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 		if err = checkTxStatus(receipt, txOpts.GasLimit); err != nil {
 			return fmt.Errorf("init tx failed status check: %w", err)
 		}
-		log.Infof("%d gas used for %d initiation txs", receipt.GasUsed, n)
+		log.Infof("%d gas used for %d initiations in tx %s", receipt.GasUsed, n, tx.Hash())
 		stats.swaps = append(stats.swaps, receipt.GasUsed)
 
 		// Estimate a refund
-		var firstSecretHash [32]byte
-		copy(firstSecretHash[:], contracts[0].SecretHash)
-		refundGas, err := c.estimateRefundGas(ctx, firstSecretHash)
+		refundGas, err := c.estimateRefundGas(ctx, acToLocator(contractVer, contracts[0], evmify(v), cl.address()))
 		if err != nil {
 			return fmt.Errorf("error estimate refund gas: %w", err)
 		}
@@ -6088,21 +6214,25 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 		for i, contract := range contracts {
 			redemptions = append(redemptions, &asset.Redemption{
 				Spends: &asset.AuditInfo{
+					Recipient:  cl.address().String(),
+					Expiration: lockTime,
+					Contract:   dexeth.EncodeContractData(contractVer, acToLocator(contractVer, contract, evmify(v), cl.address())),
 					SecretHash: contract.SecretHash,
 				},
 				Secret: secrets[i][:],
 			})
 		}
 
-		txOpts, err = cl.txOpts(ctx, 0, g.RedeemN(n)*2, baseRate, tipRate, nil)
+		txOpts, err = cl.txOpts(ctx, 0, g.RedeemN(n)*2, maxFeeRate, tipRate, nil)
 		if err != nil {
 			return fmt.Errorf("error constructing signed tx opts for %d redeems: %v", n, err)
 		}
-		log.Debugf("Sending %d redemption txs", n)
+		log.Debugf("Sending %d redemptions", n)
 		tx, err = c.redeem(txOpts, redemptions)
 		if err != nil {
 			return fmt.Errorf("redeem error for %d swaps: %v", n, err)
 		}
+		logTx("Redeem", n, tx)
 		if err = waitForConfirmation(ctx, "redeem", cl, tx.Hash(), log); err != nil {
 			return fmt.Errorf("error waiting for redeem tx to be mined: %w", err)
 		}
@@ -6113,7 +6243,7 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 		if err = checkTxStatus(receipt, txOpts.GasLimit); err != nil {
 			return fmt.Errorf("redeem tx failed status check: %w", err)
 		}
-		log.Infof("%d gas used for %d redemptions", receipt.GasUsed, n)
+		log.Infof("%d gas used for %d redemptions in tx %s", receipt.GasUsed, n, tx.Hash())
 		stats.redeems = append(stats.redeems, receipt.GasUsed)
 	}
 
@@ -6144,7 +6274,7 @@ func newTxOpts(ctx context.Context, from common.Address, val, maxGas uint64, max
 }
 
 func gases(contractVer uint32, versionedGases map[uint32]*dexeth.Gases) *dexeth.Gases {
-	if contractVer != contractVersionNewest {
+	if contractVer != dexeth.ContractVersionNewest {
 		return versionedGases[contractVer]
 	}
 	var bestVer uint32

@@ -266,7 +266,7 @@ func TestMultiSplit(t *testing.T) {
 
 	// All funds should be transparent now.
 	multiFund := &asset.MultiOrder{
-		Version: version,
+		AssetVersion: version,
 		Values: []*asset.MultiOrderValue{
 			{Value: v0, MaxSwapCount: 1},
 			{Value: v1, MaxSwapCount: 2},
