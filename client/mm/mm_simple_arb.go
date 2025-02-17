@@ -380,7 +380,7 @@ func (a *simpleArbMarketMaker) rebalance(newEpoch uint64) {
 	defer a.rebalanceRunning.Store(false)
 	a.log.Tracef("rebalance: epoch %d", newEpoch)
 
-	actionTaken, err := a.tryTransfers(newEpoch)
+	actionTaken, err := a.tryTransfers(newEpoch, a.distribution)
 	if err != nil {
 		a.log.Errorf("Error performing transfers: %v", err)
 	} else if actionTaken {
@@ -416,7 +416,7 @@ func (a *simpleArbMarketMaker) rebalance(newEpoch uint64) {
 	a.registerFeeGap()
 }
 
-func (a *simpleArbMarketMaker) distribution() (dist *distribution, err error) {
+func (a *simpleArbMarketMaker) distribution(additionalDEX, additionalCEX map[uint32]uint64) (dist *distribution, err error) {
 	sellVWAP, buyVWAP, err := a.cexCounterRates(1, 1)
 	if err != nil {
 		return nil, fmt.Errorf("error getting cex counter-rates: %w", err)
@@ -442,17 +442,8 @@ func (a *simpleArbMarketMaker) distribution() (dist *distribution, err error) {
 	avgBaseLot, avgQuoteLot := float64(perLot.dexBase+perLot.cexBase)/2, float64(perLot.dexQuote+perLot.cexQuote)/2
 	baseLots := uint64(math.Round(float64(dist.baseInv.total) / avgBaseLot / 2))
 	quoteLots := uint64(math.Round(float64(dist.quoteInv.total) / avgQuoteLot / 2))
-	a.optimizeTransfers(dist, baseLots, quoteLots, baseLots*2, quoteLots*2)
+	a.optimizeTransfers(dist, baseLots, quoteLots, baseLots*2, quoteLots*2, additionalDEX, additionalCEX)
 	return dist, nil
-}
-
-func (a *simpleArbMarketMaker) tryTransfers(currEpoch uint64) (actionTaken bool, err error) {
-	dist, err := a.distribution()
-	if err != nil {
-		a.log.Errorf("distribution calculation error: %v", err)
-		return
-	}
-	return a.transfer(dist, currEpoch)
 }
 
 func (a *simpleArbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
