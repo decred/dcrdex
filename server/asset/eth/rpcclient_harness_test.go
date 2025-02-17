@@ -28,8 +28,8 @@ var (
 	homeDir      = os.Getenv("HOME")
 	alphaIPCFile = filepath.Join(homeDir, "dextest", "eth", "alpha", "node", "geth.ipc")
 
-	contractAddrFile   = filepath.Join(homeDir, "dextest", "eth", "eth_swap_contract_address_v0.txt")
-	tokenSwapAddrFile  = filepath.Join(homeDir, "dextest", "eth", "usdc_swap_contract_address_v0.txt")
+	contractAddrFile   = filepath.Join(homeDir, "dextest", "eth", "eth_swap_contract_address.txt")
+	tokenSwapAddrFile  = filepath.Join(homeDir, "dextest", "eth", "usdc_swap_contract_address.txt")
 	tokenErc20AddrFile = filepath.Join(homeDir, "dextest", "eth", "test_usdc_contract_address.txt")
 	deltaAddress       = "d12ab7cf72ccf1f3882ec99ddc53cd415635c3be"
 	gammaAddress       = "41293c2032bac60aa747374e966f79f575d42379"

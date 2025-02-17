@@ -153,8 +153,8 @@ mine_pending_txs() {
 mine_pending_txs
 
 ETH_SWAP_CONTRACT_ADDR_V0=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/contractAddress.js --exec contractAddress(\"${ETH_SWAP_CONTRACT_HASH_V0}\")" | sed 's/"//g')
-echo "ETH SWAP contract address is ${ETH_SWAP_CONTRACT_ADDR_V0}. Saving to ${NODES_ROOT}/eth_swap_contract_address_v0.txt"
-cat > "${NODES_ROOT}/eth_swap_contract_address_v0.txt" <<EOF
+echo "ETH SWAP contract address is ${ETH_SWAP_CONTRACT_ADDR_V0}. Saving to ${NODES_ROOT}/eth_swap_contract_address.txt"
+cat > "${NODES_ROOT}/eth_swap_contract_address.txt" <<EOF
 ${ETH_SWAP_CONTRACT_ADDR_V0}
 EOF
 
@@ -222,8 +222,8 @@ chmod +x "${NODES_ROOT}/harness-ctl/sendUSDT"
 mine_pending_txs
 
 USDC_SWAP_CONTRACT_ADDR_V0=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/contractAddress.js --exec contractAddress(\"${USDC_SWAP_CONTRACT_HASH_V0}\")" | sed 's/"//g')
-echo "USDC v0 swap contract address is ${USDC_SWAP_CONTRACT_ADDR_V0}. Saving to ${NODES_ROOT}/usdc_swap_contract_address_v0.txt"
-cat > "${NODES_ROOT}/usdc_swap_contract_address_v0.txt" <<EOF
+echo "USDC v0 swap contract address is ${USDC_SWAP_CONTRACT_ADDR_V0}. Saving to ${NODES_ROOT}/usdc_swap_contract_address.txt"
+cat > "${NODES_ROOT}/usdc_swap_contract_address.txt" <<EOF
 ${USDC_SWAP_CONTRACT_ADDR_V0}
 EOF
 
