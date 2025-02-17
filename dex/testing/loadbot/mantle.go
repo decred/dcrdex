@@ -47,6 +47,7 @@ func runTrader(t Trader, name string) {
 	}
 
 	t.SetupWallets(m)
+	time.Sleep(time.Second * 3)
 
 	if ctx.Err() != nil {
 		return
@@ -67,6 +68,14 @@ func runTrader(t Trader, name string) {
 	err = m.Login(pass)
 	if err != nil {
 		m.fatalError("login error: %v", err)
+		return
+	}
+
+	select {
+	// wait at least a block for reg funds
+	case <-time.After(time.Second * 11):
+	case <-ctx.Done():
+		m.fatalError("%v", ctx.Err())
 		return
 	}
 
@@ -96,7 +105,6 @@ func runTrader(t Trader, name string) {
 			return fmt.Errorf("error approving %s token: %v", symbol, err)
 		}
 		m.log.Infof("Waiting for %s token approval", symbol)
-		<-harnessCtl(ctx, symbol, "./mine-alpha", "1")
 		select {
 		case <-approved:
 			m.log.Infof("%s token approved", symbol)
@@ -482,7 +490,6 @@ func (m *Mantle) createWallet(symbol string, minFunds, maxFunds uint64, numCoins
 				}
 				for {
 					time.Sleep(time.Second * 3)
-					<-harnessCtl(ctx, walletSymbol, "./mine-alpha", "1")
 					bal, err := m.AssetBalance(tkn.ParentID)
 					if err != nil {
 						if ignoreErrors && ctx.Err() == nil {
@@ -504,9 +511,8 @@ func (m *Mantle) createWallet(symbol string, minFunds, maxFunds uint64, numCoins
 					if ignoreErrors && ctx.Err() == nil {
 						m.log.Errorf("Trouble sending %d %s to %s: %v\n Sleeping and trying again.", fmtAtoms(chunk, walletSymbol), walletSymbol, addr, err)
 						// It often happens that the wallet is not able to
-						// create enough outputs. mine and try indefinitely
+						// create enough outputs. try indefinitely
 						// if we are ignoring errors.
-						<-harnessCtl(ctx, walletSymbol, "./mine-alpha", "1")
 						time.Sleep(time.Second)
 						continue
 					}
@@ -515,7 +521,6 @@ func (m *Mantle) createWallet(symbol string, minFunds, maxFunds uint64, numCoins
 				i++
 			}
 		}
-		<-harnessCtl(ctx, walletSymbol, "./mine-alpha", "1")
 
 		return addr, nil
 	}
@@ -534,7 +539,6 @@ func (m *Mantle) createWallet(symbol string, minFunds, maxFunds uint64, numCoins
 		m.fatalError(err.Error())
 		return
 	}
-	<-mine(symbol, alpha)
 
 }
 
@@ -609,10 +613,9 @@ func (m *Mantle) replenishBalance(w *botWallet, minFunds, maxFunds uint64) {
 					m.log.Errorf("Trouble sending %d %s to %s: %v\n Sleeping and trying again.",
 						fmtAtoms(chunk, w.symbol), w.symbol, w.address, err)
 					// It often happens that the wallet is not able to
-					// create enough outputs. mine and try indefinitely
+					// create enough outputs. try indefinitely
 					// if we are ignoring errors.
 					time.Sleep(3)
-					<-harnessCtl(ctx, w.symbol, fmt.Sprintf("./mine-%s", alpha), "1")
 					time.Sleep(time.Second)
 					continue
 				}
@@ -864,10 +867,7 @@ func newBotWallet(symbol, node, name string, port string, pass []byte, minFunds,
 			},
 		}
 	case eth, usdc:
-		rpcProvider := filepath.Join(dextestDir, "eth", "alpha", "node", "geth.ipc")
-		if node == beta {
-			rpcProvider = filepath.Join(dextestDir, "eth", "beta", "node", "geth.ipc")
-		}
+		rpcProvider := "ws://127.0.0.1:38557"
 		form = &core.WalletForm{
 			Type:    "rpc",
 			AssetID: ethID,
