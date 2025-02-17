@@ -844,6 +844,7 @@ func newDEXAccount(acctInfo *db.AccountInfo, viewOnly bool) *dexAccount {
 		targetTier:   acctInfo.TargetTier,
 		maxBondedAmt: acctInfo.MaxBondedAmt,
 		bondAsset:    acctInfo.BondAsset,
+		penaltyComps: acctInfo.PenaltyComps,
 	}
 }
 
