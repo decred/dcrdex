@@ -624,7 +624,7 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 	if err != nil {
 		return "<invalid>", err
 	}
-	return fmt.Sprintf("%v:%d", txid, vout), err
+	return fmt.Sprintf("%v:%d", txid, vout), nil
 }
 
 // Info returns basic information about the wallet and asset.

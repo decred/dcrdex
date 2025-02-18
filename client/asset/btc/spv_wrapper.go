@@ -361,7 +361,7 @@ func (w *spvWallet) getChainHeight() (int32, error) {
 	if err != nil {
 		return -1, err
 	}
-	return blk.Height, err
+	return blk.Height, nil
 }
 
 func (w *spvWallet) peerCount() (uint32, error) {
