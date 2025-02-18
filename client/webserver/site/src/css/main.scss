@@ -12,14 +12,11 @@ body {
   bottom: 0;
   left: 0;
   right: 0;
+  display: flex;
   flex-direction: column;
   justify-content: flex-start;
   background-color: var(--body-bg);
   color: var(--text-color);
-
-  &.loaded {
-    display: flex;
-  }
 }
 
 header#header {

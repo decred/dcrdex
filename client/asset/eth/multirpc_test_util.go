@@ -389,30 +389,32 @@ func (m *MRPCTest) FeeHistory(t *testing.T, net dex.Network, blockTimeSecs, days
 	})
 }
 
-func (m *MRPCTest) TipCaps(t *testing.T, net dex.Network) {
+func (m *MRPCTest) BlockStats(t *testing.T, steps, skipN int, net dex.Network) {
 	m.withClient(t, net, func(ctx context.Context, cl *multiRPCClient) {
 		if err := cl.withAny(ctx, func(ctx context.Context, p *provider) error {
 			blk, err := p.ec.BlockByNumber(ctx, nil)
 			if err != nil {
 				return err
 			}
-			h := blk.Number()
-			const m = 20 // how many txs
-			var n int
-			for {
+			tip := blk.Number()
+			for step := 0; step < steps; step++ {
+				if step != 0 {
+					blk, err = p.ec.BlockByNumber(ctx, tip.Add(tip, big.NewInt(int64(-skipN*step))))
+					if err != nil {
+						return err
+					}
+				}
 				txs := blk.Transactions()
-				fmt.Printf("##### Block %d has %d transactions \n", h, len(txs))
+				fmt.Printf("##### Block %d, %d transactions, gas limit = %d \n", blk.Number(), len(txs), blk.GasLimit())
+				const maxTxs = 10
+				var n int
 				for _, tx := range txs {
-					n++
+
 					fmt.Println("##### Tx tip cap =", fmtFee(tx.GasTipCap()))
-				}
-				if n >= m {
-					break
-				}
-				h.Add(h, big.NewInt(-1))
-				blk, err = p.ec.BlockByNumber(ctx, h)
-				if err != nil {
-					return fmt.Errorf("error getting block %d: %w", h, err)
+					n++
+					if n >= maxTxs {
+						break
+					}
 				}
 			}
 

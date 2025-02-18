@@ -16,6 +16,7 @@ import (
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	multibal "decred.org/dcrdex/dex/networks/eth/contracts/multibalance"
 	ethv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
+	ethv1 "decred.org/dcrdex/dex/networks/eth/contracts/v1"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -140,21 +141,20 @@ func (contractDeployer) EstimateMultiBalanceDeployFunding(
 }
 
 func (contractDeployer) txData(contractVer uint32, tokenAddr common.Address) (txData []byte, err error) {
+	if tokenAddr == (common.Address{}) {
+		switch contractVer {
+		case 0:
+			return common.FromHex(ethv0.ETHSwapBin), nil
+		case 1:
+			return common.FromHex(ethv1.ETHSwapBin), nil
+		}
+	}
 	var abi *abi.ABI
 	var bytecode []byte
-	isToken := tokenAddr != (common.Address{})
-	if isToken {
-		switch contractVer {
-		case 0:
-			bytecode = common.FromHex(erc20v0.ERC20SwapBin)
-			abi, err = erc20v0.ERC20SwapMetaData.GetAbi()
-		}
-	} else {
-		switch contractVer {
-		case 0:
-			bytecode = common.FromHex(ethv0.ETHSwapBin)
-			abi, err = ethv0.ETHSwapMetaData.GetAbi()
-		}
+	switch contractVer {
+	case 0:
+		bytecode = common.FromHex(erc20v0.ERC20SwapBin)
+		abi, err = erc20v0.ERC20SwapMetaData.GetAbi()
 	}
 	if err != nil {
 		return nil, fmt.Errorf("error parsing ABI: %w", err)
@@ -162,15 +162,11 @@ func (contractDeployer) txData(contractVer uint32, tokenAddr common.Address) (tx
 	if abi == nil {
 		return nil, fmt.Errorf("no abi data for version %d", contractVer)
 	}
-	txData = bytecode
-	if isToken {
-		argData, err := abi.Pack("", tokenAddr)
-		if err != nil {
-			return nil, fmt.Errorf("error packing token address: %w", err)
-		}
-		txData = append(txData, argData...)
+	argData, err := abi.Pack("", tokenAddr)
+	if err != nil {
+		return nil, fmt.Errorf("error packing token address: %w", err)
 	}
-	return
+	return append(bytecode, argData...), nil
 }
 
 // DeployContract deployes a dcrdex swap contract.
@@ -199,13 +195,17 @@ func (contractDeployer) DeployContract(
 				contractAddr, tx, _, err := erc20v0.DeployERC20Swap(txOpts, cb, tokenAddress)
 				return contractAddr, tx, err
 			}
-
 		}
 	} else {
 		switch contractVer {
 		case 0:
 			deployer = func(txOpts *bind.TransactOpts, cb bind.ContractBackend) (common.Address, *types.Transaction, error) {
 				contractAddr, tx, _, err := ethv0.DeployETHSwap(txOpts, cb)
+				return contractAddr, tx, err
+			}
+		case 1:
+			deployer = func(txOpts *bind.TransactOpts, cb bind.ContractBackend) (common.Address, *types.Transaction, error) {
+				contractAddr, tx, _, err := ethv1.DeployETHSwap(txOpts, cb)
 				return contractAddr, tx, err
 			}
 		}
@@ -264,7 +264,7 @@ func (contractDeployer) deployContract(
 	}
 
 	feeRate := dexeth.WeiToGweiCeil(maxFeeRate)
-	log.Infof("Estimated fees: %s gwei / gas", ui.ConventionalString(feeRate*gas))
+	log.Infof("Estimated fees: %s gwei", ui.ConventionalString(feeRate*gas))
 
 	gas *= 5 / 4 // Add 20% buffer
 	feesWithBuffer := feeRate * gas
@@ -287,7 +287,13 @@ func (contractDeployer) deployContract(
 		return err
 	}
 
-	log.Infof("👍 Contract %s launched with tx %s", contractAddr, tx.Hash())
+	log.Infof("Contract %s launched with tx %s", contractAddr, tx.Hash())
+
+	if err = waitForConfirmation(ctx, "deploy", cl, tx.Hash(), log); err != nil {
+		return fmt.Errorf("error waiting for deployment transaction status: %w", err)
+	}
+
+	log.Info("👍 Transaction confirmed")
 
 	return nil
 }

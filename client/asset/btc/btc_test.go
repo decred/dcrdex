@@ -2197,7 +2197,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	}
 
 	ord := &asset.Order{
-		Version:       version,
+		AssetVersion:  version,
 		Value:         0,
 		MaxSwapCount:  1,
 		MaxFeeRate:    tBTC.MaxFeeRate,
@@ -2762,7 +2762,7 @@ func TestFundEdges(t *testing.T) {
 	unspents := []*ListUnspentResult{p2pkhUnspent}
 	node.listUnspent = unspents
 	ord := &asset.Order{
-		Version:       version,
+		AssetVersion:  version,
 		Value:         swapVal,
 		MaxSwapCount:  lots,
 		MaxFeeRate:    tBTC.MaxFeeRate,
@@ -2986,7 +2986,7 @@ func TestFundEdgesSegwit(t *testing.T) {
 	unspents := []*ListUnspentResult{p2wpkhUnspent}
 	node.listUnspent = unspents
 	ord := &asset.Order{
-		Version:       version,
+		AssetVersion:  version,
 		Value:         swapVal,
 		MaxSwapCount:  lots,
 		MaxFeeRate:    tBTC.MaxFeeRate,
@@ -4365,7 +4365,7 @@ func testPreSwap(t *testing.T, segwit bool, walletType string) {
 	}
 
 	form := &asset.PreSwapForm{
-		Version:       version,
+		AssetVersion:  version,
 		LotSize:       tLotSize,
 		Lots:          lots,
 		MaxFeeRate:    tBTC.MaxFeeRate,
@@ -4411,8 +4411,8 @@ func testPreRedeem(t *testing.T, segwit bool, walletType string) {
 	defer shutdown()
 
 	preRedeem, err := wallet.PreRedeem(&asset.PreRedeemForm{
-		Version: version,
-		Lots:    5,
+		AssetVersion: version,
+		Lots:         5,
 	})
 	// Shouldn't actually be any path to error.
 	if err != nil {

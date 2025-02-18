@@ -348,7 +348,7 @@ func runTest(t *testing.T, splitTx bool) {
 	}
 
 	ord := &asset.Order{
-		Version:      tDCR.Version,
+		AssetVersion: tDCR.Version,
 		Value:        contractValue * 3,
 		MaxSwapCount: lots * 3,
 		MaxFeeRate:   tDCR.MaxFeeRate,

@@ -47,11 +47,21 @@ var (
 	testAddressB = common.HexToAddress("8d83B207674bfd53B418a6E47DA148F5bFeCc652")
 	testAddressC = common.HexToAddress("2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27")
 
-	ethGases   = dexeth.VersionedGases[0]
-	tokenGases = dexeth.Tokens[usdcTokenID].NetTokens[dex.Simnet].SwapContracts[0].Gas
+	ethGasesV0   = dexeth.VersionedGases[0]
+	tokenGasesV0 = dexeth.Tokens[usdcTokenID].NetTokens[dex.Simnet].SwapContracts[0].Gas
+	ethGasesV1   = dexeth.VersionedGases[1]
+	tokenGasesV1 = dexeth.Tokens[usdcTokenID].NetTokens[dex.Simnet].SwapContracts[1].Gas
 
-	tETH = &dex.Asset{
-		// Version meaning?
+	tETHV0 = &dex.Asset{
+		Version:    0,
+		ID:         60,
+		Symbol:     "ETH",
+		MaxFeeRate: 100,
+		SwapConf:   1,
+	}
+
+	tETHV1 = &dex.Asset{
+		Version:    1,
 		ID:         60,
 		Symbol:     "ETH",
 		MaxFeeRate: 100,
@@ -66,10 +76,18 @@ var (
 		SwapConf:   1,
 	}
 
-	tToken = &dex.Asset{
+	tTokenV0 = &dex.Asset{
 		ID:         usdcTokenID,
 		Symbol:     "usdc.eth",
 		Version:    0,
+		MaxFeeRate: 20,
+		SwapConf:   1,
+	}
+
+	tTokenV1 = &dex.Asset{
+		ID:         usdcTokenID,
+		Symbol:     "dextt.eth",
+		Version:    1,
 		MaxFeeRate: 20,
 		SwapConf:   1,
 	}
@@ -330,6 +348,9 @@ type tContractor struct {
 	redeemGasErr      error
 	refundGasErr      error
 	redeemGasOverride *uint64
+	redeemable        bool
+	redeemableErr     error
+	redeemableMap     map[string]bool
 	valueIn           map[common.Hash]uint64
 	valueOut          map[common.Hash]uint64
 	valueErr          error
@@ -343,6 +364,76 @@ type tContractor struct {
 		maxFeeRate *big.Int
 		// contractVer uint32
 	}
+}
+
+func (c *tContractor) status(ctx context.Context, locator []byte) (*dexeth.SwapStatus, error) {
+	if c.swapErr != nil {
+		return nil, c.swapErr
+	}
+	vector, err := c.vector(ctx, locator)
+	if err != nil {
+		return nil, err
+	}
+	swap, ok := c.swapMap[vector.SecretHash]
+	if !ok {
+		return nil, errors.New("swap not in map")
+	}
+	s := &dexeth.SwapStatus{
+		Step:        swap.State,
+		Secret:      swap.Secret,
+		BlockHeight: swap.BlockHeight,
+	}
+	return s, nil
+}
+
+func (c *tContractor) vector(ctx context.Context, locator []byte) (*dexeth.SwapVector, error) {
+	if c.swapErr != nil {
+		return nil, c.swapErr
+	}
+	if len(locator) == dexeth.LocatorV1Length {
+		return dexeth.ParseV1Locator(locator)
+	}
+	var secretHash [32]byte
+	copy(secretHash[:], locator)
+	swap, ok := c.swapMap[secretHash]
+	if !ok {
+		return nil, errors.New("swap not in map")
+	}
+	v := &dexeth.SwapVector{
+		From:       swap.Initiator,
+		To:         swap.Participant,
+		Value:      swap.Value,
+		SecretHash: secretHash,
+		LockTime:   uint64(swap.LockTime.Unix()),
+	}
+	return v, nil
+}
+
+func (c *tContractor) statusAndVector(ctx context.Context, locator []byte) (*dexeth.SwapStatus, *dexeth.SwapVector, error) {
+	if c.swapErr != nil {
+		return nil, nil, c.swapErr
+	}
+	vector, err := c.vector(ctx, locator)
+	if err != nil {
+		return nil, nil, err
+	}
+	swap, ok := c.swapMap[vector.SecretHash]
+	if !ok {
+		return nil, nil, errors.New("swap not in map")
+	}
+	v := &dexeth.SwapVector{
+		From:       swap.Initiator,
+		To:         swap.Participant,
+		Value:      swap.Value,
+		SecretHash: vector.SecretHash,
+		LockTime:   uint64(swap.LockTime.Unix()),
+	}
+	s := &dexeth.SwapStatus{
+		Step:        swap.State,
+		Secret:      swap.Secret,
+		BlockHeight: swap.BlockHeight,
+	}
+	return s, v, nil
 }
 
 func (c *tContractor) swap(ctx context.Context, secretHash [32]byte) (*dexeth.SwapState, error) {
@@ -366,8 +457,12 @@ func (c *tContractor) redeem(txOpts *bind.TransactOpts, redeems []*asset.Redempt
 	return c.redeemTx, c.redeemErr
 }
 
-func (c *tContractor) refund(opts *bind.TransactOpts, secretHash [32]byte) (*types.Transaction, error) {
-	c.lastRefund.secretHash = secretHash
+func (c *tContractor) refund(opts *bind.TransactOpts, locator []byte) (*types.Transaction, error) {
+	vector, err := c.vector(context.Background(), locator)
+	if err != nil {
+		return nil, err
+	}
+	c.lastRefund.secretHash = vector.SecretHash
 	c.lastRefund.maxFeeRate = opts.GasFeeCap
 	return c.refundTx, c.refundErr
 }
@@ -376,22 +471,50 @@ func (c *tContractor) estimateInitGas(ctx context.Context, n int) (uint64, error
 	return c.gasEstimates.SwapN(n), c.initGasErr
 }
 
-func (c *tContractor) estimateRedeemGas(ctx context.Context, secrets [][32]byte) (uint64, error) {
+func (c *tContractor) estimateRedeemGas(ctx context.Context, secrets [][32]byte, locators [][]byte) (uint64, error) {
 	if c.redeemGasOverride != nil {
 		return *c.redeemGasOverride, nil
 	}
 	return c.gasEstimates.RedeemN(len(secrets)), c.redeemGasErr
 }
 
-func (c *tContractor) estimateRefundGas(ctx context.Context, secretHash [32]byte) (uint64, error) {
+func (c *tContractor) estimateRefundGas(ctx context.Context, locator []byte) (uint64, error) {
 	return c.gasEstimates.Refund, c.refundGasErr
 }
 
-func (c *tContractor) value(_ context.Context, tx *types.Transaction) (incoming, outgoing uint64, err error) {
-	return c.valueIn[tx.Hash()], c.valueOut[tx.Hash()], c.valueErr
+func (c *tContractor) isRedeemable(locator []byte, secret [32]byte) (bool, error) {
+	if c.redeemableErr != nil {
+		return false, c.redeemableErr
+	}
+
+	vector, err := c.vector(context.Background(), locator)
+	if err != nil {
+		return false, err
+	}
+
+	if c.swapMap != nil && c.swapMap[vector.SecretHash] == nil {
+		return false, fmt.Errorf("test error: no swap in swap map")
+	}
+
+	if c.redeemableMap != nil {
+		return c.redeemableMap[string(locator)], nil
+	}
+
+	return c.redeemable, c.redeemableErr
 }
 
-func (c *tContractor) isRefundable(secretHash [32]byte) (bool, error) {
+func (c *tContractor) value(_ context.Context, tx *types.Transaction) (incoming, outgoing uint64, err error) {
+	incoming, outgoing = c.valueIn[tx.Hash()], c.valueOut[tx.Hash()]
+	if incoming > 0 {
+		delete(c.valueIn, tx.Hash())
+	}
+	if outgoing > 0 {
+		delete(c.valueOut, tx.Hash())
+	}
+	return incoming, outgoing, c.valueErr
+}
+
+func (c *tContractor) isRefundable(locator []byte) (bool, error) {
 	return c.refundable, c.refundableErr
 }
 
@@ -1090,7 +1213,7 @@ func newTestNode(assetID uint32) *tMempoolNode {
 	}
 
 	tc := &tContractor{
-		gasEstimates: ethGases,
+		gasEstimates: ethGasesV0,
 		swapMap:      make(map[[32]byte]*dexeth.SwapState),
 		valueIn:      make(map[common.Hash]uint64),
 		valueOut:     make(map[common.Hash]uint64),
@@ -1103,7 +1226,7 @@ func newTestNode(assetID uint32) *tMempoolNode {
 		allow:       new(big.Int),
 	}
 	if assetID != BipID {
-		ttc.tContractor.gasEstimates = &tokenGases
+		ttc.tContractor.gasEstimates = &tokenGasesV0
 		c = ttc
 	}
 
@@ -1173,16 +1296,16 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 			confirmedNonceAt: new(big.Int),
 			pendingTxs:       make([]*extendedWalletTx, 0),
 			txDB:             &tTxDB{},
-			currentTip:       &types.Header{Number: new(big.Int)},
+			currentTip:       &types.Header{Number: new(big.Int), GasLimit: 30_000_000},
 			finalizeConfs:    txConfsNeededToConfirm,
+			maxTxFeeGwei:     dexeth.GweiFactor, // 1 ETH
 		},
 		versionedGases:     versionedGases,
-		maxSwapGas:         versionedGases[0].Swap,
-		maxRedeemGas:       versionedGases[0].Redeem,
 		log:                tLogger.SubLogger(strings.ToUpper(dex.BipIDSymbol(assetID))),
 		assetID:            assetID,
-		contractors:        map[uint32]contractor{0: c},
-		findRedemptionReqs: make(map[[32]byte]*findRedemptionRequest),
+		contractorV0:       c,
+		contractorV1:       c,
+		findRedemptionReqs: make(map[string]*findRedemptionRequest),
 		evmify:             dexeth.GweiToWei,
 		atomize:            dexeth.WeiToGwei,
 		pendingTxCheckBal:  new(big.Int),
@@ -1206,7 +1329,8 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 		node.tokenParent = &assetWallet{
 			baseWallet:       aw.baseWallet,
 			log:              tLogger.SubLogger("ETH"),
-			contractors:      map[uint32]contractor{0: node.tContractor},
+			contractorV0:     node.tContractor,
+			contractorV1:     node.tContractor,
 			assetID:          BipID,
 			atomize:          dexeth.WeiToGwei,
 			pendingApprovals: make(map[uint32]*pendingApproval),
@@ -1362,13 +1486,13 @@ func TestBalanceWithMempool(t *testing.T) {
 			t.Fatalf("unexpected error for test %q: %v", test.name, err)
 		}
 		if bal.Available != test.wantBal {
-			t.Fatalf("want available balance %v got %v for test %q", test.wantBal, bal.Available, test.name)
+			t.Fatalf("%s: want available balance %v got %v for test %q", test.name, test.wantBal, bal.Available, test.name)
 		}
 		if bal.Immature != test.wantImmature {
-			t.Fatalf("want immature balance %v got %v for test %q", test.wantImmature, bal.Immature, test.name)
+			t.Fatalf("%s: want immature balance %v got %v for test %q", test.name, test.wantImmature, bal.Immature, test.name)
 		}
 		if bal.Locked != test.wantLocked {
-			t.Fatalf("want locked balance %v got %v for test %q", test.wantLocked, bal.Locked, test.name)
+			t.Fatalf("%s: want locked balance %v got %v for test %q", test.name, test.wantLocked, bal.Locked, test.name)
 		}
 	}
 }
@@ -1550,31 +1674,45 @@ func testRefund(t *testing.T, assetID uint32) {
 	const gweiBal = 1e9
 	const ogRefundReserves = 1e8
 
-	v1Contractor := &tContractor{
-		swapMap:      make(map[[32]byte]*dexeth.SwapState, 1),
-		gasEstimates: ethGases,
-		redeemTx:     types.NewTx(&types.DynamicFeeTx{}),
-	}
-	var v1c contractor = v1Contractor
+	// v1Contractor := &tContractor{
+	// 	swapMap:      make(map[[32]byte]*dexeth.SwapState, 1),
+	// 	gasEstimates: ethGasesV0,
+	// 	redeemTx:     types.NewTx(&types.DynamicFeeTx{}),
+	// }
+	// var v1c contractor = v1Contractor
 
-	gasesV1 := &dexeth.Gases{Refund: 1e5}
-	if assetID == BipID {
-		eth.versionedGases[1] = gasesV1
-	} else {
-		eth.versionedGases[1] = &dexeth.Tokens[usdcTokenID].NetTokens[dex.Simnet].SwapContracts[0].Gas
-		v1c = &tTokenContractor{tContractor: v1Contractor}
-	}
+	// gasesV1 := &dexeth.Gases{Refund: 1e5}
+	// if assetID == BipID {
+	// 	dexeth.VersionedGases[1] = gasesV1
+	// 	defer delete(dexeth.VersionedGases, 1)
+	// } else {
+	// 	tokenContracts := dexeth.Tokens[usdcTokenID].NetTokens[dex.Simnet].SwapContracts
+	// 	tc := *tokenContracts[0]
+	// 	tc.Gas = *gasesV1
+	// 	tokenContracts[1] = &tc
+	// 	defer delete(tokenContracts, 1)
+	// 	v1c = &tTokenContractor{tContractor: v1Contractor}
+	// }
 
-	eth.contractors[1] = v1c
+	// eth.contractors[1] = v1c
 
 	var secretHash [32]byte
 	copy(secretHash[:], encode.RandomBytes(32))
-	v0Contract := dexeth.EncodeContractData(0, secretHash)
-	ss := &dexeth.SwapState{Value: dexeth.GweiToWei(1)}
-	v0Contractor := node.tContractor
+	v0Contract := dexeth.EncodeContractData(0, secretHash[:])
+	v1Vector := dexeth.SwapVector{
+		From:       testAddressA,
+		To:         testAddressB,
+		Value:      dexeth.GweiToWei(1),
+		SecretHash: secretHash,
+		LockTime:   uint64(time.Now().Unix()),
+	}
+	v1Contract := dexeth.EncodeContractData(1, v1Vector.Locator())
 
-	v0Contractor.swapMap[secretHash] = ss
-	v1Contractor.swapMap[secretHash] = ss
+	ss := &dexeth.SwapState{
+		Value: dexeth.GweiToWei(1),
+	}
+
+	node.tContractor.swapMap[secretHash] = ss
 
 	tests := []struct {
 		name            string
@@ -1587,7 +1725,7 @@ func testRefund(t *testing.T, assetID uint32) {
 		wantZeroHash    bool
 		swapStep        dexeth.SwapStep
 		swapErr         error
-		useV1Gases      bool
+		v1              bool
 	}{
 		{
 			name:         "ok",
@@ -1600,7 +1738,7 @@ func testRefund(t *testing.T, assetID uint32) {
 			swapStep:     dexeth.SSInitiated,
 			isRefundable: true,
 			wantLocked:   ogRefundReserves - feeSuggestion*dexeth.RefundGas(1),
-			useV1Gases:   true,
+			v1:           true,
 		},
 		{
 			name:         "ok refunded",
@@ -1641,11 +1779,10 @@ func testRefund(t *testing.T, assetID uint32) {
 	}
 
 	for _, test := range tests {
+		c := node.tContractor
 		contract := v0Contract
-		c := v0Contractor
-		if test.useV1Gases {
-			contract = dexeth.EncodeContractData(1, secretHash)
-			c = v1Contractor
+		if test.v1 {
+			contract = v1Contract
 		} else if test.badContract {
 			contract = []byte{}
 		}
@@ -1727,11 +1864,11 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 	w, eth, node, shutdown := tassetWallet(assetID)
 	defer shutdown()
 	walletBalanceGwei := uint64(dexeth.GweiFactor)
-	fromAsset := tETH
+	fromAsset := tETHV0
 	if assetID == BipID {
 		node.bal = dexeth.GweiToWei(walletBalanceGwei)
 	} else {
-		fromAsset = tToken
+		fromAsset = tTokenV0
 		node.tokenContractor.bal = dexeth.GweiToWei(walletBalanceGwei)
 		node.tokenContractor.allow = unlimitedAllowance
 		node.tokenParent.node.(*tMempoolNode).bal = dexeth.GweiToWei(walletBalanceGwei)
@@ -1793,7 +1930,7 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 	}
 
 	order := asset.Order{
-		Version:       fromAsset.Version,
+		AssetVersion:  fromAsset.Version,
 		Value:         walletBalanceGwei / 2,
 		MaxSwapCount:  2,
 		MaxFeeRate:    fromAsset.MaxFeeRate,
@@ -1905,7 +2042,8 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 	w2, eth2, _, shutdown2 := tassetWallet(assetID)
 	defer shutdown2()
 	eth2.node = node
-	eth2.contractors[0] = node.tokenContractor
+	eth2.contractorV0 = node.tokenContractor
+	eth2.contractorV1 = node.tokenContractor
 	node.tokenContractor.bal = dexeth.GweiToWei(walletBalanceGwei)
 
 	// Test reloading coins from first order
@@ -2021,10 +2159,10 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 
 	defer shutdown()
 
-	fromAsset := tETH
+	fromAsset := tETHV0
 	swapGas := dexeth.VersionedGases[fromAsset.Version].Swap
 	if assetID != BipID {
-		fromAsset = tToken
+		fromAsset = tTokenV0
 		node.tokenContractor.allow = unlimitedAllowance
 		swapGas = dexeth.Tokens[usdcTokenID].NetTokens[dex.Simnet].
 			SwapContracts[fromAsset.Version].Gas.Swap
@@ -2051,8 +2189,8 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 			tokenBal:  uint64(dexeth.GweiFactor),
 			parentBal: uint64(dexeth.GweiFactor),
 			multiOrder: &asset.MultiOrder{
-				Version:    fromAsset.Version,
-				MaxFeeRate: fromAsset.MaxFeeRate,
+				AssetVersion: fromAsset.Version,
+				MaxFeeRate:   fromAsset.MaxFeeRate,
 				Values: []*asset.MultiOrderValue{
 					{
 						Value:        uint64(dexeth.GweiFactor) / 2,
@@ -2071,8 +2209,8 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 			tokenBal:  uint64(dexeth.GweiFactor),
 			parentBal: uint64(dexeth.GweiFactor),
 			multiOrder: &asset.MultiOrder{
-				Version:    fromAsset.Version,
-				MaxFeeRate: fromAsset.MaxFeeRate,
+				AssetVersion: fromAsset.Version,
+				MaxFeeRate:   fromAsset.MaxFeeRate,
 				Values: []*asset.MultiOrderValue{
 					{
 						Value:        uint64(dexeth.GweiFactor) / 2,
@@ -2093,8 +2231,8 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 			tokenBal:  uint64(dexeth.GweiFactor),
 			parentBal: uint64(dexeth.GweiFactor),
 			multiOrder: &asset.MultiOrder{
-				Version:    fromAsset.Version,
-				MaxFeeRate: fromAsset.MaxFeeRate,
+				AssetVersion: fromAsset.Version,
+				MaxFeeRate:   fromAsset.MaxFeeRate,
 				Values: []*asset.MultiOrderValue{
 					{
 						Value:        uint64(dexeth.GweiFactor) / 2,
@@ -2116,8 +2254,8 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 			tokenBal:  uint64(dexeth.GweiFactor),
 			parentBal: uint64(dexeth.GweiFactor),
 			multiOrder: &asset.MultiOrder{
-				Version:    fromAsset.Version,
-				MaxFeeRate: fromAsset.MaxFeeRate,
+				AssetVersion: fromAsset.Version,
+				MaxFeeRate:   fromAsset.MaxFeeRate,
 				Values: []*asset.MultiOrderValue{
 					{
 						Value:        uint64(dexeth.GweiFactor) / 2,
@@ -2138,8 +2276,8 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 			tokenBal:  uint64(dexeth.GweiFactor),
 			parentBal: uint64(dexeth.GweiFactor),
 			multiOrder: &asset.MultiOrder{
-				Version:    fromAsset.Version,
-				MaxFeeRate: fromAsset.MaxFeeRate,
+				AssetVersion: fromAsset.Version,
+				MaxFeeRate:   fromAsset.MaxFeeRate,
 				Values: []*asset.MultiOrderValue{
 					{
 						Value:        uint64(dexeth.GweiFactor) / 2,
@@ -2160,8 +2298,8 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 			tokenBal:  uint64(dexeth.GweiFactor) - 1,
 			parentBal: uint64(dexeth.GweiFactor),
 			multiOrder: &asset.MultiOrder{
-				Version:    fromAsset.Version,
-				MaxFeeRate: fromAsset.MaxFeeRate,
+				AssetVersion: fromAsset.Version,
+				MaxFeeRate:   fromAsset.MaxFeeRate,
 				Values: []*asset.MultiOrderValue{
 					{
 						Value:        uint64(dexeth.GweiFactor) / 2,
@@ -2181,8 +2319,8 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 			tokenBal:  uint64(dexeth.GweiFactor),
 			parentBal: swapGas * 4 * fromAsset.MaxFeeRate,
 			multiOrder: &asset.MultiOrder{
-				Version:    fromAsset.Version,
-				MaxFeeRate: fromAsset.MaxFeeRate,
+				AssetVersion: fromAsset.Version,
+				MaxFeeRate:   fromAsset.MaxFeeRate,
 				Values: []*asset.MultiOrderValue{
 					{
 						Value:        uint64(dexeth.GweiFactor) / 2,
@@ -2201,8 +2339,8 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 			tokenBal:  uint64(dexeth.GweiFactor),
 			parentBal: swapGas*4*fromAsset.MaxFeeRate - 1,
 			multiOrder: &asset.MultiOrder{
-				Version:    fromAsset.Version,
-				MaxFeeRate: fromAsset.MaxFeeRate,
+				AssetVersion: fromAsset.Version,
+				MaxFeeRate:   fromAsset.MaxFeeRate,
 				Values: []*asset.MultiOrderValue{
 					{
 						Value:        uint64(dexeth.GweiFactor) / 2,
@@ -2268,13 +2406,12 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 
 func TestPreSwap(t *testing.T) {
 	const baseFee, tip = 42, 2
-	const feeSuggestion = 90 // ignored by eth's PreSwap
+	const currentFees = 44
 	const lotSize = 10e9
-	oneFee := ethGases.Swap * tETH.MaxFeeRate
-	refund := ethGases.Refund * tETH.MaxFeeRate
+	oneFee := ethGasesV0.Swap * tETHV0.MaxFeeRate
+	refund := ethGasesV0.Refund * tETHV0.MaxFeeRate
 	oneLock := lotSize + oneFee + refund
-
-	oneFeeToken := tokenGases.Swap*tToken.MaxFeeRate + tokenGases.Refund*tToken.MaxFeeRate
+	oneFeeToken := tokenGasesV0.Swap*tTokenV0.MaxFeeRate + tokenGasesV0.Refund*tTokenV0.MaxFeeRate
 
 	type testData struct {
 		name      string
@@ -2323,9 +2460,9 @@ func TestPreSwap(t *testing.T) {
 
 			wantLots:      1,
 			wantValue:     lotSize,
-			wantMaxFees:   tETH.MaxFeeRate * ethGases.Swap,
-			wantBestCase:  (baseFee + tip) * ethGases.Swap,
-			wantWorstCase: (baseFee + tip) * ethGases.Swap,
+			wantMaxFees:   tETHV0.MaxFeeRate * ethGasesV0.Swap,
+			wantBestCase:  currentFees * ethGasesV0.Swap,
+			wantWorstCase: currentFees * ethGasesV0.Swap,
 		},
 		{
 			name:      "one lot enough for fees - token",
@@ -2336,9 +2473,9 @@ func TestPreSwap(t *testing.T) {
 
 			wantLots:      1,
 			wantValue:     lotSize,
-			wantMaxFees:   tToken.MaxFeeRate * tokenGases.Swap,
-			wantBestCase:  (baseFee + tip) * tokenGases.Swap,
-			wantWorstCase: (baseFee + tip) * tokenGases.Swap,
+			wantMaxFees:   tTokenV0.MaxFeeRate * tokenGasesV0.Swap,
+			wantBestCase:  currentFees * tokenGasesV0.Swap,
+			wantWorstCase: currentFees * tokenGasesV0.Swap,
 		},
 		{
 			name: "more lots than max lots",
@@ -2363,9 +2500,9 @@ func TestPreSwap(t *testing.T) {
 
 			wantLots:      4,
 			wantValue:     4 * lotSize,
-			wantMaxFees:   4 * tETH.MaxFeeRate * ethGases.Swap,
-			wantBestCase:  (baseFee + tip) * ethGases.Swap,
-			wantWorstCase: 4 * (baseFee + tip) * ethGases.Swap,
+			wantMaxFees:   4 * tETHV0.MaxFeeRate * ethGasesV0.Swap,
+			wantBestCase:  currentFees * ethGasesV0.Swap,
+			wantWorstCase: 4 * currentFees * ethGasesV0.Swap,
 		},
 		{
 			name:      "fewer than max lots - token",
@@ -2376,9 +2513,9 @@ func TestPreSwap(t *testing.T) {
 
 			wantLots:      4,
 			wantValue:     4 * lotSize,
-			wantMaxFees:   4 * tToken.MaxFeeRate * tokenGases.Swap,
-			wantBestCase:  (baseFee + tip) * tokenGases.Swap,
-			wantWorstCase: 4 * (baseFee + tip) * tokenGases.Swap,
+			wantMaxFees:   4 * tTokenV0.MaxFeeRate * tokenGasesV0.Swap,
+			wantBestCase:  currentFees * tokenGasesV0.Swap,
+			wantWorstCase: 4 * currentFees * tokenGasesV0.Swap,
 		},
 		{
 			name:   "balanceError",
@@ -2400,11 +2537,12 @@ func TestPreSwap(t *testing.T) {
 	}
 
 	runTest := func(t *testing.T, test testData) {
+
 		var assetID uint32 = BipID
-		assetCfg := tETH
+		assetCfg := tETHV0
 		if test.token {
 			assetID = usdcTokenID
-			assetCfg = tToken
+			assetCfg = tTokenV0
 		}
 
 		w, _, node, shutdown := tassetWallet(assetID)
@@ -2412,7 +2550,7 @@ func TestPreSwap(t *testing.T) {
 		node.baseFee, node.tip = dexeth.GweiToWei(baseFee), dexeth.GweiToWei(tip)
 
 		if test.token {
-			node.tContractor.gasEstimates = &tokenGases
+			node.tContractor.gasEstimates = &tokenGasesV0
 			node.tokenContractor.bal = dexeth.GweiToWei(test.bal)
 			node.bal = dexeth.GweiToWei(test.parentBal)
 		} else {
@@ -2422,11 +2560,11 @@ func TestPreSwap(t *testing.T) {
 		node.balErr = test.balErr
 
 		preSwap, err := w.PreSwap(&asset.PreSwapForm{
-			Version:       assetCfg.Version,
+			AssetVersion:  assetCfg.Version,
 			LotSize:       lotSize,
 			Lots:          test.lots,
 			MaxFeeRate:    assetCfg.MaxFeeRate,
-			FeeSuggestion: feeSuggestion, // ignored
+			FeeSuggestion: currentFees, // ignored
 			RedeemVersion: tBTC.Version,
 			RedeemAssetID: tBTC.ID,
 		})
@@ -2438,7 +2576,7 @@ func TestPreSwap(t *testing.T) {
 			return
 		}
 		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+			t.Fatalf("%q: %v", test.name, err)
 		}
 
 		est := preSwap.Estimate
@@ -2476,6 +2614,13 @@ func testSwap(t *testing.T, assetID uint32) {
 	w, eth, node, shutdown := tassetWallet(assetID)
 	defer shutdown()
 
+	assetCfg := tETHV0
+	gases := ethGasesV0
+	if assetID != BipID {
+		assetCfg = tTokenV0
+		gases = &tokenGasesV0
+	}
+
 	receivingAddress := "0x2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27"
 	node.tContractor.initTx = types.NewTx(&types.DynamicFeeTx{})
 
@@ -2485,7 +2630,8 @@ func testSwap(t *testing.T, assetID uint32) {
 			if assetID == BipID {
 				coinIDs = append(coinIDs, createFundingCoin(eth.addr, amt).RecoveryID())
 			} else {
-				fees := n * tokenGases.Swap * tToken.MaxFeeRate
+				// Not gonna version the fees here unless it matters.
+				fees := n * gases.Swap * assetCfg.MaxFeeRate
 				coinIDs = append(coinIDs, createTokenFundingCoin(eth.addr, amt, fees).RecoveryID())
 			}
 		}
@@ -2511,12 +2657,7 @@ func testSwap(t *testing.T, assetID uint32) {
 	}
 
 	gasNeededForSwaps := func(numSwaps int) uint64 {
-		if assetID == BipID {
-			return ethGases.Swap * uint64(numSwaps)
-		} else {
-			return tokenGases.Swap * uint64(numSwaps)
-		}
-
+		return gases.Swap * uint64(numSwaps)
 	}
 
 	testSwap := func(testName string, swaps asset.Swaps, expectError bool) {
@@ -2554,16 +2695,17 @@ func testSwap(t *testing.T, assetID uint32) {
 					testName, receipt.Coin().Value(), contract.Value)
 			}
 			contractData := receipt.Contract()
-			ver, secretHash, err := dexeth.DecodeContractData(contractData)
+			contractVer, locator, err := dexeth.DecodeContractData(contractData)
 			if err != nil {
 				t.Fatalf("failed to decode contract data: %v", err)
 			}
-			if swaps.Version != ver {
+			if contractVersion(swaps.AssetVersion) != contractVer {
 				t.Fatal("wrong contract version")
 			}
-			if !bytes.Equal(contract.SecretHash, secretHash[:]) {
-				t.Fatalf("%v, contract: %x != secret hash in input: %x",
-					testName, receipt.Contract(), secretHash)
+			chkLocator := acToLocator(contractVer, contract, dexeth.GweiToWei(contract.Value), node.addr)
+			if !bytes.Equal(locator, chkLocator) {
+				t.Fatalf("%v, contract: %x != locator in input: %x",
+					testName, receipt.Contract(), locator)
 			}
 
 			totalCoinValue += receipt.Coin().Value()
@@ -2633,16 +2775,12 @@ func testSwap(t *testing.T, assetID uint32) {
 		},
 	}
 	inputs := refreshWalletAndFundCoins(5, []uint64{ethToGwei(2)}, 1)
-	assetCfg := tETH
-	if assetID != BipID {
-		assetCfg = tToken
-	}
 	swaps := asset.Swaps{
-		Version:    assetCfg.Version,
-		Inputs:     inputs,
-		Contracts:  contracts,
-		FeeRate:    assetCfg.MaxFeeRate,
-		LockChange: false,
+		AssetVersion: assetCfg.Version,
+		Inputs:       inputs,
+		Contracts:    contracts,
+		FeeRate:      assetCfg.MaxFeeRate,
+		LockChange:   false,
 	}
 	testSwap("error initialize but no send", swaps, true)
 	node.tContractor.initErr = nil
@@ -2659,22 +2797,22 @@ func testSwap(t *testing.T, assetID uint32) {
 
 	inputs = refreshWalletAndFundCoins(5, []uint64{ethToGwei(2)}, 1)
 	swaps = asset.Swaps{
-		Version:    assetCfg.Version,
-		Inputs:     inputs,
-		Contracts:  contracts,
-		FeeRate:    assetCfg.MaxFeeRate,
-		LockChange: false,
+		AssetVersion: assetCfg.Version,
+		Inputs:       inputs,
+		Contracts:    contracts,
+		FeeRate:      assetCfg.MaxFeeRate,
+		LockChange:   false,
 	}
 	testSwap("one contract, don't lock change", swaps, false)
 
 	// Test one contract with locking change
 	inputs = refreshWalletAndFundCoins(5, []uint64{ethToGwei(2)}, 1)
 	swaps = asset.Swaps{
-		Version:    assetCfg.Version,
-		Inputs:     inputs,
-		Contracts:  contracts,
-		FeeRate:    assetCfg.MaxFeeRate,
-		LockChange: true,
+		AssetVersion: assetCfg.Version,
+		Inputs:       inputs,
+		Contracts:    contracts,
+		FeeRate:      assetCfg.MaxFeeRate,
+		LockChange:   true,
 	}
 	testSwap("one contract, lock change", swaps, false)
 
@@ -2695,43 +2833,62 @@ func testSwap(t *testing.T, assetID uint32) {
 	}
 	inputs = refreshWalletAndFundCoins(5, []uint64{ethToGwei(3)}, 2)
 	swaps = asset.Swaps{
-		Version:    assetCfg.Version,
-		Inputs:     inputs,
-		Contracts:  contracts,
-		FeeRate:    assetCfg.MaxFeeRate,
-		LockChange: false,
+		AssetVersion: assetCfg.Version,
+		Inputs:       inputs,
+		Contracts:    contracts,
+		FeeRate:      assetCfg.MaxFeeRate,
+		LockChange:   false,
 	}
 	testSwap("two contracts", swaps, false)
 
 	// Test error when funding coins are not enough to cover swaps
 	inputs = refreshWalletAndFundCoins(5, []uint64{ethToGwei(1)}, 2)
 	swaps = asset.Swaps{
-		Version:    assetCfg.Version,
-		Inputs:     inputs,
-		Contracts:  contracts,
-		FeeRate:    assetCfg.MaxFeeRate,
-		LockChange: false,
+		AssetVersion: assetCfg.Version,
+		Inputs:       inputs,
+		Contracts:    contracts,
+		FeeRate:      assetCfg.MaxFeeRate,
+		LockChange:   false,
 	}
 	testSwap("funding coins not enough balance", swaps, true)
 
 	// Ensure when funds are exactly the same as required works properly
 	inputs = refreshWalletAndFundCoins(5, []uint64{ethToGwei(2) + (2 * 200 * dexeth.InitGas(1, 0))}, 2)
 	swaps = asset.Swaps{
-		Inputs:     inputs,
-		Version:    assetCfg.Version,
-		Contracts:  contracts,
-		FeeRate:    assetCfg.MaxFeeRate,
-		LockChange: false,
+		Inputs:       inputs,
+		AssetVersion: assetCfg.Version,
+		Contracts:    contracts,
+		FeeRate:      assetCfg.MaxFeeRate,
+		LockChange:   false,
 	}
 	testSwap("exact change", swaps, false)
+
+	// Version 1
+	assetCfg = tETHV1
+	gases = ethGasesV1
+	if assetID != BipID {
+		assetCfg = tTokenV1
+		gases = &tokenGasesV1
+	}
+	node.tContractor.gasEstimates = gases
+
+	inputs = refreshWalletAndFundCoins(5, []uint64{ethToGwei(2) + (2 * 200 * dexeth.InitGas(1, 1))}, 2)
+	swaps = asset.Swaps{
+		Inputs:       inputs,
+		AssetVersion: assetCfg.Version,
+		Contracts:    contracts,
+		FeeRate:      assetCfg.MaxFeeRate,
+		LockChange:   false,
+	}
+	testSwap("v1", swaps, false)
 }
 
 func TestPreRedeem(t *testing.T) {
-	w, _, _, shutdown := tassetWallet(BipID)
+	w, _, node, shutdown := tassetWallet(BipID)
 	defer shutdown()
 
 	form := &asset.PreRedeemForm{
-		Version:       tETH.Version,
+		AssetVersion:  tETHV0.Version,
 		Lots:          5,
 		FeeSuggestion: 100,
 	}
@@ -2749,7 +2906,8 @@ func TestPreRedeem(t *testing.T) {
 	w, _, _, shutdown2 := tassetWallet(usdcTokenID)
 	defer shutdown2()
 
-	form.Version = tToken.Version
+	form.AssetVersion = tTokenV0.Version
+	node.tokenContractor.allow = unlimitedAllowanceReplenishThreshold
 
 	preRedeem, err = w.PreRedeem(form)
 	if err != nil {
@@ -2770,41 +2928,49 @@ func testRedeem(t *testing.T, assetID uint32) {
 	w, eth, node, shutdown := tassetWallet(assetID)
 	defer shutdown()
 
-	// Test with a non-zero contract version to ensure it makes it into the receipt
-	contractVer := uint32(1)
+	// // Test with a non-zero contract version to ensure it makes it into the receipt
+	// contractVer := uint32(1)
 
-	eth.versionedGases[1] = ethGases
-	if assetID != BipID {
-		eth.versionedGases[1] = &tokenGases
+	// eth.versionedGases[1] = ethGases
+	// if assetID != BipID {
+	// 	eth.versionedGases[1] = &tokenGases
+	// }
+
+	// tokenContracts := eth.tokens[usdcTokenID].NetTokens[dex.Simnet].SwapContracts
+	// tokenContracts[1] = tokenContracts[0]
+	// defer delete(tokenContracts, 1)
+
+	// contractorV1 := &tContractor{
+	// 	swapMap:      make(map[[32]byte]*dexeth.SwapState, 1),
+	// 	gasEstimates: ethGases,
+	// 	redeemTx:     types.NewTx(&types.DynamicFeeTx{Data: []byte{1, 2, 3}}),
+	// }
+	// var c contractor = contractorV1
+	// if assetID != BipID {
+	// 	c = &tTokenContractor{
+	// 		tContractor: contractorV1,
+	// 	}
+	// }
+	var contractor *tContractor
+	if assetID == BipID {
+		contractor = eth.contractorV0.(*tContractor)
+	} else {
+		contractor = eth.contractorV1.(*tTokenContractor).tContractor
 	}
+	contractor.redeemTx = types.NewTx(&types.DynamicFeeTx{Data: []byte{1, 2, 3}})
+	now := time.Now()
+	const value = 1e9
 
-	tokenContracts := eth.tokens[usdcTokenID].NetTokens[dex.Simnet].SwapContracts
-	tokenContracts[1] = tokenContracts[0]
-	defer delete(tokenContracts, 1)
-
-	contractorV1 := &tContractor{
-		swapMap:      make(map[[32]byte]*dexeth.SwapState, 1),
-		gasEstimates: ethGases,
-		redeemTx:     types.NewTx(&types.DynamicFeeTx{Data: []byte{1, 2, 3}}),
-	}
-	var c contractor = contractorV1
-	if assetID != BipID {
-		c = &tTokenContractor{
-			tContractor: contractorV1,
-		}
-	}
-	eth.contractors[1] = c
-
-	addSwapToSwapMap := func(secretHash [32]byte, value uint64, step dexeth.SwapStep) {
+	addSwapToSwapMap := func(secretHash [32]byte, step dexeth.SwapStep) {
 		swap := dexeth.SwapState{
 			BlockHeight: 1,
-			LockTime:    time.Now(),
+			LockTime:    now,
 			Initiator:   testAddressB,
 			Participant: testAddressA,
 			Value:       dexeth.GweiToWei(value),
 			State:       step,
 		}
-		contractorV1.swapMap[secretHash] = &swap
+		contractor.swapMap[secretHash] = &swap
 	}
 
 	numSecrets := 3
@@ -2818,20 +2984,22 @@ func testRedeem(t *testing.T, assetID uint32) {
 		secretHashes = append(secretHashes, secretHash)
 	}
 
-	addSwapToSwapMap(secretHashes[0], 1e9, dexeth.SSInitiated) // states will be reset by tests though
-	addSwapToSwapMap(secretHashes[1], 1e9, dexeth.SSInitiated)
+	addSwapToSwapMap(secretHashes[0], dexeth.SSInitiated)
+	addSwapToSwapMap(secretHashes[1], dexeth.SSInitiated)
 
 	/* COMMENTED while estimateRedeemGas is on the $#!t list
-	var redeemGas uint64
+	var redeemGasesV0, redeemGasesV1 *dexeth.Gases
 	if assetID == BipID {
-		redeemGas = ethGases.Redeem
+		redeemGasesV0 = ethGasesV0
+		redeemGasesV1 = ethGasesV1
 	} else {
-		redeemGas = tokenGases.Redeem
+		redeemGasesV0 = &tokenGasesV0
+		redeemGasesV1 = &tokenGasesV1
 	}
-
-	var higherGasEstimate uint64 = redeemGas * 2 * 12 / 10       // 120% of estimate
-	var doubleGasEstimate uint64 = (redeemGas * 2 * 2) * 10 / 11 // 200% of estimate after 10% increase
-	// var moreThanDoubleGasEstimate uint64 = (redeemGas * 2 * 21 / 10) * 10 / 11 // > 200% of estimate after 10% increase
+	redeemGas := redeemGasesV0.Redeem
+	var higherGasEstimate uint64 = redeemGas * 2 * 12 / 10                     // 120% of estimate
+	var doubleGasEstimate uint64 = (redeemGas * 2 * 2) * 10 / 11               // 200% of estimate after 10% increase
+	var moreThanDoubleGasEstimate uint64 = (redeemGas * 2 * 21 / 10) * 10 / 11 // > 200% of estimate after 10% increase
 	// additionalFundsNeeded calculates the amount of available funds that we be
 	// needed to use a higher gas estimate than the original, and double the base
 	// fee if it is higher than the server's max fee rate.
@@ -2866,6 +3034,40 @@ func testRedeem(t *testing.T, assetID uint32) {
 		secretHashes[0]: dexeth.SSInitiated,
 		secretHashes[1]: dexeth.SSInitiated,
 	}
+	newRedeem := func(idx int) *asset.Redemption {
+		return &asset.Redemption{
+			Spends: &asset.AuditInfo{
+				Contract:   dexeth.EncodeContractData(0, secretHashes[idx][:]),
+				SecretHash: secretHashes[idx][:], // redundant for all current assets, unused with eth
+				Coin: &coin{
+					id:    randomHash(),
+					value: value,
+				},
+			},
+			Secret: secrets[idx][:],
+		}
+	}
+
+	// newRedeemV1 := func(idx int) *asset.Redemption {
+	// 	locator := (&dexeth.SwapVector{
+	// 		From:       testAddressA,
+	// 		To:         testAddressB,
+	// 		Value:      value,
+	// 		SecretHash: secretHashes[idx],
+	// 		LockTime:   uint64(now.Unix()),
+	// 	}).Locator()
+	// 	return &asset.Redemption{
+	// 		Spends: &asset.AuditInfo{
+	// 			Contract:   dexeth.EncodeContractData(1, locator),
+	// 			SecretHash: secretHashes[idx][:], // redundant for all current assets, unused with eth
+	// 			Coin: &coin{
+	// 				id:    randomHash(),
+	// 				value: value,
+	// 			},
+	// 		},
+	// 		Secret: secrets[idx][:],
+	// 	}
+	// }
 
 	tests := []struct {
 		name              string
@@ -2878,6 +3080,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 		redeemGasOverride *uint64
 		expectedGasFeeCap *big.Int
 		expectError       bool
+		v1                bool
 	}{
 		{
 			name:              "ok",
@@ -2887,32 +3090,24 @@ func testRedeem(t *testing.T, assetID uint32) {
 			baseFee:           dexeth.GweiToWei(100),
 			expectedGasFeeCap: dexeth.GweiToWei(100),
 			form: asset.RedeemForm{
-				Redemptions: []*asset.Redemption{
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
-							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
-							Coin: &coin{
-								id: randomHash(),
-							},
-						},
-						Secret: secrets[0][:],
-					},
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
-							SecretHash: secretHashes[1][:],
-							Coin: &coin{
-								id: randomHash(),
-							},
-						},
-						Secret: secrets[1][:],
-					},
-				},
+				Redemptions:   []*asset.Redemption{newRedeem(0), newRedeem(1)},
 				FeeSuggestion: 100,
 			},
 		},
 		/* COMMENTED while estimateRedeemGas is on the $#!t list
+		{
+			name:              "ok-v1",
+			expectError:       false,
+			isRedeemable:      true,
+			ethBal:            dexeth.GweiToWei(10e9),
+			baseFee:           dexeth.GweiToWei(100),
+			expectedGasFeeCap: dexeth.GweiToWei(100),
+			form: asset.RedeemForm{
+				Redemptions:   []*asset.Redemption{newRedeemV1(0), newRedeemV1(1)},
+				FeeSuggestion: 100,
+			},
+			v1: true,
+		},
 		{
 			name:              "higher gas estimate than reserved",
 			expectError:       false,
@@ -2922,28 +3117,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			expectedGasFeeCap: dexeth.GweiToWei(100),
 			redeemGasOverride: &higherGasEstimate,
 			form: asset.RedeemForm{
-				Redemptions: []*asset.Redemption{
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
-							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
-							Coin: &coin{
-								id: randomHash(),
-							},
-						},
-						Secret: secrets[0][:],
-					},
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
-							SecretHash: secretHashes[1][:],
-							Coin: &coin{
-								id: randomHash(),
-							},
-						},
-						Secret: secrets[1][:],
-					},
-				},
+				Redemptions:   []*asset.Redemption{newRedeem(0), newRedeem(1)},
 				FeeSuggestion: 100,
 			},
 		},
@@ -2956,28 +3130,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			expectedGasFeeCap: dexeth.GweiToWei(100),
 			redeemGasOverride: &doubleGasEstimate,
 			form: asset.RedeemForm{
-				Redemptions: []*asset.Redemption{
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
-							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
-							Coin: &coin{
-								id: randomHash(),
-							},
-						},
-						Secret: secrets[0][:],
-					},
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
-							SecretHash: secretHashes[1][:],
-							Coin: &coin{
-								id: randomHash(),
-							},
-						},
-						Secret: secrets[1][:],
-					},
-				},
+				Redemptions:   []*asset.Redemption{newRedeem(0), newRedeem(1)},
 				FeeSuggestion: 100,
 			},
 		},
@@ -2989,28 +3142,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			baseFee:           dexeth.GweiToWei(100),
 			redeemGasOverride: &moreThanDoubleGasEstimate,
 			form: asset.RedeemForm{
-				Redemptions: []*asset.Redemption{
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
-							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
-							Coin: &coin{
-								id: randomHash(),
-							},
-						},
-						Secret: secrets[0][:],
-					},
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
-							SecretHash: secretHashes[1][:],
-							Coin: &coin{
-								id: randomHash(),
-							},
-						},
-						Secret: secrets[1][:],
-					},
-				},
+				Redemptions:   []*asset.Redemption{newRedeem(0), newRedeem(1)},
 				FeeSuggestion: 100,
 			},
 		},
@@ -3022,28 +3154,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			baseFee:           dexeth.GweiToWei(100),
 			redeemGasOverride: &higherGasEstimate,
 			form: asset.RedeemForm{
-				Redemptions: []*asset.Redemption{
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
-							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
-							Coin: &coin{
-								id: randomHash(),
-							},
-						},
-						Secret: secrets[0][:],
-					},
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
-							SecretHash: secretHashes[1][:],
-							Coin: &coin{
-								id: randomHash(),
-							},
-						},
-						Secret: secrets[1][:],
-					},
-				},
+				Redemptions:   []*asset.Redemption{newRedeem(0), newRedeem(1)},
 				FeeSuggestion: 100,
 			},
 		},
@@ -3056,28 +3167,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			expectedGasFeeCap: dexeth.GweiToWei(300),
 			redeemGasOverride: &higherGasEstimate,
 			form: asset.RedeemForm{
-				Redemptions: []*asset.Redemption{
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
-							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
-							Coin: &coin{
-								id: randomHash(),
-							},
-						},
-						Secret: secrets[0][:],
-					},
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
-							SecretHash: secretHashes[1][:],
-							Coin: &coin{
-								id: randomHash(),
-							},
-						},
-						Secret: secrets[1][:],
-					},
-				},
+				Redemptions:   []*asset.Redemption{newRedeem(0), newRedeem(1)},
 				FeeSuggestion: 100,
 			},
 		},
@@ -3090,28 +3180,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			expectedGasFeeCap: dexeth.GweiToWei(298),
 			redeemGasOverride: &higherGasEstimate,
 			form: asset.RedeemForm{
-				Redemptions: []*asset.Redemption{
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
-							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
-							Coin: &coin{
-								id: randomHash(),
-							},
-						},
-						Secret: secrets[0][:],
-					},
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
-							SecretHash: secretHashes[1][:],
-							Coin: &coin{
-								id: randomHash(),
-							},
-						},
-						Secret: secrets[1][:],
-					},
-				},
+				Redemptions:   []*asset.Redemption{newRedeem(0), newRedeem(1)},
 				FeeSuggestion: 100,
 			},
 		},
@@ -3127,28 +3196,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			baseFee: dexeth.GweiToWei(100),
 
 			form: asset.RedeemForm{
-				Redemptions: []*asset.Redemption{
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
-							SecretHash: secretHashes[0][:],
-							Coin: &coin{
-								id: randomHash(),
-							},
-						},
-						Secret: secrets[0][:],
-					},
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
-							SecretHash: secretHashes[1][:],
-							Coin: &coin{
-								id: randomHash(),
-							},
-						},
-						Secret: secrets[1][:],
-					},
-				},
+				Redemptions:   []*asset.Redemption{newRedeem(0), newRedeem(1)},
 				FeeSuggestion: 100,
 			},
 		},
@@ -3159,28 +3207,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			baseFee:     dexeth.GweiToWei(100),
 			swapErr:     errors.New("swap() error"),
 			form: asset.RedeemForm{
-				Redemptions: []*asset.Redemption{
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
-							SecretHash: secretHashes[0][:],
-							Coin: &coin{
-								id: randomHash(),
-							},
-						},
-						Secret: secrets[0][:],
-					},
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
-							SecretHash: secretHashes[1][:],
-							Coin: &coin{
-								id: randomHash(),
-							},
-						},
-						Secret: secrets[1][:],
-					},
-				},
+				Redemptions:   []*asset.Redemption{newRedeem(0), newRedeem(1)},
 				FeeSuggestion: 100,
 			},
 		},
@@ -3192,18 +3219,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			ethBal:      dexeth.GweiToWei(10e9),
 			baseFee:     dexeth.GweiToWei(100),
 			form: asset.RedeemForm{
-				Redemptions: []*asset.Redemption{
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
-							SecretHash: secretHashes[0][:],
-							Coin: &coin{
-								id: randomHash(),
-							},
-						},
-						Secret: secrets[0][:],
-					},
-				},
+				Redemptions:   []*asset.Redemption{newRedeem(0)},
 				FeeSuggestion: 200,
 			},
 		},
@@ -3214,18 +3230,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			ethBal:      dexeth.GweiToWei(10e9),
 			baseFee:     dexeth.GweiToWei(100),
 			form: asset.RedeemForm{
-				Redemptions: []*asset.Redemption{
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[2]),
-							SecretHash: secretHashes[2][:],
-							Coin: &coin{
-								id: randomHash(),
-							},
-						},
-						Secret: secrets[2][:],
-					},
-				},
+				Redemptions:   []*asset.Redemption{newRedeem(2)},
 				FeeSuggestion: 100,
 			},
 		},
@@ -3243,14 +3248,19 @@ func testRedeem(t *testing.T, assetID uint32) {
 	}
 
 	for _, test := range tests {
-		contractorV1.redeemErr = test.redeemErr
-		contractorV1.swapErr = test.swapErr
-		contractorV1.redeemGasOverride = test.redeemGasOverride
+		contractor.redeemErr = test.redeemErr
+		contractor.swapErr = test.swapErr
+		contractor.redeemGasOverride = test.redeemGasOverride
 		for secretHash, step := range test.swapMap {
-			contractorV1.swapMap[secretHash].State = step
+			contractor.swapMap[secretHash].State = step
 		}
 		node.bal = test.ethBal
 		node.baseFee = test.baseFee
+
+		var contractVer uint32
+		if test.v1 {
+			contractVer = 1
+		}
 
 		txs, out, fees, err := w.Redeem(&test.form)
 		if test.expectError {
@@ -3269,10 +3279,8 @@ func testRedeem(t *testing.T, assetID uint32) {
 		}
 
 		// Check fees returned from Redeem are as expected
-		expectedGas := dexeth.RedeemGas(len(test.form.Redemptions), 0)
-		if assetID != BipID {
-			expectedGas = tokenGases.Redeem + (uint64(len(test.form.Redemptions))-1)*tokenGases.RedeemAdd
-		}
+		rg := gases(contractVer, eth.versionedGases)
+		expectedGas := rg.Redeem + (uint64(len(test.form.Redemptions))-1)*rg.RedeemAdd
 		expectedFees := expectedGas * test.form.FeeSuggestion
 		if fees != expectedFees {
 			t.Fatalf("%v: expected fees %d, but got %d", test.name, expectedFees, fees)
@@ -3281,44 +3289,52 @@ func testRedeem(t *testing.T, assetID uint32) {
 		// Check that value of output coin is as axpected
 		var totalSwapValue uint64
 		for _, redemption := range test.form.Redemptions {
-			_, secretHash, err := dexeth.DecodeContractData(redemption.Spends.Contract)
+			_, locator, err := dexeth.DecodeContractData(redemption.Spends.Contract)
 			if err != nil {
-				t.Fatalf("DecodeContractData: %v", err)
+				t.Fatalf("DecodeLocator: %v", err)
+			}
+			var secretHash [32]byte
+			if test.v1 {
+				v, _ := dexeth.ParseV1Locator(locator)
+				secretHash = v.SecretHash
+			} else {
+				copy(secretHash[:], locator)
 			}
 			// secretHash should equal redemption.Spends.SecretHash, but it's
 			// not part of the Redeem code, just the test input consistency.
-			swap := contractorV1.swapMap[secretHash]
+			swap := contractor.swapMap[secretHash]
 			totalSwapValue += dexeth.WeiToGwei(swap.Value)
 		}
 		if out.Value() != totalSwapValue {
-			t.Fatalf("expected coin value to be %d but got %d",
-				totalSwapValue, out.Value())
+			t.Fatalf("%s: expected coin value to be %d but got %d",
+				test.name, totalSwapValue, out.Value())
 		}
 
 		// Check that gas limit in the transaction is as expected
 		var expectedGasLimit uint64
-		// if test.redeemGasOverride == nil {
-		if assetID == BipID {
-			expectedGasLimit = ethGases.Redeem * uint64(len(test.form.Redemptions))
+		if test.redeemGasOverride == nil {
+			if assetID == BipID {
+				expectedGasLimit = rg.Redeem * uint64(len(test.form.Redemptions))
+			} else {
+				expectedGasLimit = rg.Redeem * uint64(len(test.form.Redemptions))
+			}
 		} else {
-			expectedGasLimit = tokenGases.Redeem * uint64(len(test.form.Redemptions))
+			expectedGasLimit = rg.Redeem * uint64(len(test.form.Redemptions))
 		}
-		// } else {
-		// 	expectedGasLimit = *test.redeemGasOverride * 11 / 10
-		// }
-		if contractorV1.lastRedeemOpts.GasLimit != expectedGasLimit {
-			t.Fatalf("%s: expected gas limit %d, but got %d", test.name, expectedGasLimit, contractorV1.lastRedeemOpts.GasLimit)
+		if contractor.lastRedeemOpts.GasLimit != expectedGasLimit {
+			t.Fatalf("%s: expected gas limit %d, but got %d", test.name, expectedGasLimit, contractor.lastRedeemOpts.GasLimit)
 		}
 
 		// Check that the gas fee cap in the transaction is as expected
-		if contractorV1.lastRedeemOpts.GasFeeCap.Cmp(test.expectedGasFeeCap) != 0 {
-			t.Fatalf("%s: expected gas fee cap %v, but got %v", test.name, test.expectedGasFeeCap, contractorV1.lastRedeemOpts.GasFeeCap)
+		if contractor.lastRedeemOpts.GasFeeCap.Cmp(test.expectedGasFeeCap) != 0 {
+			t.Fatalf("%s: expected gas fee cap %v, but got %v", test.name, test.expectedGasFeeCap, contractor.lastRedeemOpts.GasFeeCap)
 		}
 	}
 }
 
 func TestMaxOrder(t *testing.T) {
 	const baseFee, tip = 42, 2
+	const currentFee = baseFee + tip
 
 	type testData struct {
 		name          string
@@ -3326,7 +3342,6 @@ func TestMaxOrder(t *testing.T) {
 		balErr        error
 		lotSize       uint64
 		maxFeeRate    uint64
-		feeSuggestion uint64
 		token         bool
 		parentBal     uint64
 		wantErr       bool
@@ -3336,113 +3351,124 @@ func TestMaxOrder(t *testing.T) {
 		wantWorstCase uint64
 		wantBestCase  uint64
 		wantLocked    uint64
+		v1            bool
 	}
 	tests := []testData{
 		{
-			name:          "no balance",
-			bal:           0,
-			lotSize:       10,
-			feeSuggestion: 90,
-			maxFeeRate:    100,
+			name:       "no balance",
+			bal:        0,
+			lotSize:    10,
+			maxFeeRate: 100,
 		},
 		{
-			name:          "no balance - token",
-			bal:           0,
-			lotSize:       10,
-			feeSuggestion: 90,
-			maxFeeRate:    100,
-			token:         true,
-			parentBal:     100,
+			name:       "no balance - token",
+			bal:        0,
+			lotSize:    10,
+			maxFeeRate: 100,
+			token:      true,
+			parentBal:  100,
 		},
 		{
-			name:          "not enough for fees",
-			bal:           10,
-			lotSize:       10,
-			feeSuggestion: 90,
-			maxFeeRate:    100,
+			name:       "not enough for fees",
+			bal:        10,
+			lotSize:    10,
+			maxFeeRate: 100,
 		},
 		{
-			name:          "not enough for fees - token",
-			bal:           10,
-			token:         true,
-			parentBal:     0,
-			lotSize:       10,
-			feeSuggestion: 90,
-			maxFeeRate:    100,
+			name:       "not enough for fees - token",
+			bal:        10,
+			token:      true,
+			parentBal:  0,
+			lotSize:    10,
+			maxFeeRate: 100,
 		},
 		{
 			name:          "one lot enough for fees",
 			bal:           11,
 			lotSize:       10,
-			feeSuggestion: 90,
 			maxFeeRate:    100,
 			wantLots:      1,
 			wantValue:     ethToGwei(10),
-			wantMaxFees:   100 * ethGases.Swap,
-			wantBestCase:  (baseFee + tip) * ethGases.Swap,
-			wantWorstCase: (baseFee + tip) * ethGases.Swap,
-			wantLocked:    ethToGwei(10) + (100 * ethGases.Swap),
+			wantMaxFees:   100 * ethGasesV0.Swap,
+			wantBestCase:  currentFee * ethGasesV0.Swap,
+			wantWorstCase: currentFee * ethGasesV0.Swap,
+			wantLocked:    ethToGwei(10) + (100 * ethGasesV0.Swap),
+		},
+		{
+			name:          "one lot enough for fees - v1",
+			bal:           11,
+			lotSize:       10,
+			maxFeeRate:    100,
+			wantLots:      1,
+			wantValue:     ethToGwei(10),
+			wantMaxFees:   100 * ethGasesV1.Swap,
+			wantBestCase:  currentFee * ethGasesV1.Swap,
+			wantWorstCase: currentFee * ethGasesV1.Swap,
+			wantLocked:    ethToGwei(10) + (100 * ethGasesV0.Swap),
+			v1:            true,
 		},
 		{
 			name:          "one lot enough for fees - token",
 			bal:           11,
 			lotSize:       10,
-			feeSuggestion: 90,
 			maxFeeRate:    100,
 			token:         true,
 			parentBal:     1,
 			wantLots:      1,
 			wantValue:     ethToGwei(10),
-			wantMaxFees:   100 * tokenGases.Swap,
-			wantBestCase:  (baseFee + tip) * tokenGases.Swap,
-			wantWorstCase: (baseFee + tip) * tokenGases.Swap,
-			wantLocked:    ethToGwei(10) + (100 * tokenGases.Swap),
+			wantMaxFees:   100 * tokenGasesV0.Swap,
+			wantBestCase:  currentFee * tokenGasesV0.Swap,
+			wantWorstCase: currentFee * tokenGasesV0.Swap,
+			wantLocked:    ethToGwei(10) + (100 * tokenGasesV0.Swap),
 		},
 		{
 			name:          "multiple lots",
 			bal:           51,
 			lotSize:       10,
-			feeSuggestion: 90,
 			maxFeeRate:    100,
 			wantLots:      5,
 			wantValue:     ethToGwei(50),
-			wantMaxFees:   5 * 100 * ethGases.Swap,
-			wantBestCase:  (baseFee + tip) * ethGases.Swap,
-			wantWorstCase: 5 * (baseFee + tip) * ethGases.Swap,
-			wantLocked:    ethToGwei(50) + (5 * 100 * ethGases.Swap),
+			wantMaxFees:   5 * 100 * ethGasesV0.Swap,
+			wantBestCase:  currentFee * ethGasesV0.Swap,
+			wantWorstCase: 5 * currentFee * ethGasesV0.Swap,
+			wantLocked:    ethToGwei(50) + (5 * 100 * ethGasesV0.Swap),
 		},
 		{
 			name:          "multiple lots - token",
 			bal:           51,
 			lotSize:       10,
-			feeSuggestion: 90,
 			maxFeeRate:    100,
 			token:         true,
 			parentBal:     1,
 			wantLots:      5,
 			wantValue:     ethToGwei(50),
-			wantMaxFees:   5 * 100 * tokenGases.Swap,
-			wantBestCase:  (baseFee + tip) * tokenGases.Swap,
-			wantWorstCase: 5 * (baseFee + tip) * tokenGases.Swap,
-			wantLocked:    ethToGwei(50) + (5 * 100 * tokenGases.Swap),
+			wantMaxFees:   5 * 100 * tokenGasesV0.Swap,
+			wantBestCase:  currentFee * tokenGasesV0.Swap,
+			wantWorstCase: 5 * currentFee * tokenGasesV0.Swap,
+			wantLocked:    ethToGwei(50) + (5 * 100 * tokenGasesV0.Swap),
 		},
 		{
-			name:          "balanceError",
-			bal:           51,
-			lotSize:       10,
-			feeSuggestion: 90,
-			maxFeeRate:    100,
-			balErr:        errors.New("test error"),
-			wantErr:       true,
+			name:    "balanceError",
+			bal:     51,
+			lotSize: 10,
+			// feeSuggestion: 90,
+			maxFeeRate: 100,
+			balErr:     errors.New("test error"),
+			wantErr:    true,
 		},
 	}
 
 	runTest := func(t *testing.T, test testData) {
 		var assetID uint32 = BipID
-		assetCfg := tETH
+		gases := ethGasesV0
 		if test.token {
 			assetID = usdcTokenID
-			assetCfg = tToken
+			gases = &tokenGasesV0
+			if test.v1 {
+				gases = &tokenGasesV1
+			}
+		} else if test.v1 {
+			gases = ethGasesV1
 		}
 
 		w, _, node, shutdown := tassetWallet(assetID)
@@ -3450,7 +3476,8 @@ func TestMaxOrder(t *testing.T) {
 		node.baseFee, node.tip = dexeth.GweiToWei(baseFee), dexeth.GweiToWei(tip)
 
 		if test.token {
-			node.tContractor.gasEstimates = &tokenGases
+			node.tContractor.gasEstimates = &tokenGasesV0
+			// dexAsset = tTokenV0
 			node.tokenContractor.bal = dexeth.GweiToWei(ethToGwei(test.bal))
 			node.bal = dexeth.GweiToWei(ethToGwei(test.parentBal))
 		} else {
@@ -3458,11 +3485,16 @@ func TestMaxOrder(t *testing.T) {
 		}
 
 		node.balErr = test.balErr
+		node.tContractor.gasEstimates = gases
+
+		var serverVer uint32
+		if test.v1 {
+			serverVer = 1
+		}
 
 		maxOrder, err := w.MaxOrder(&asset.MaxOrderForm{
 			LotSize:       ethToGwei(test.lotSize),
-			FeeSuggestion: test.feeSuggestion, // ignored
-			AssetVersion:  assetCfg.Version,
+			AssetVersion:  serverVer,
 			MaxFeeRate:    test.maxFeeRate,
 			RedeemVersion: tBTC.Version,
 			RedeemAssetID: tBTC.ID,
@@ -3499,15 +3531,6 @@ func TestMaxOrder(t *testing.T) {
 			runTest(t, test)
 		})
 	}
-}
-
-func overMaxWei() *big.Int {
-	maxInt := ^uint64(0)
-	maxWei := new(big.Int).SetUint64(maxInt)
-	gweiFactorBig := big.NewInt(dexeth.GweiFactor)
-	maxWei.Mul(maxWei, gweiFactorBig)
-	overMaxWei := new(big.Int).Set(maxWei)
-	return overMaxWei.Add(overMaxWei, gweiFactorBig)
 }
 
 func packInitiateDataV0(initiations []*dexeth.Initiation) ([]byte, error) {
@@ -3568,7 +3591,7 @@ func testAuditContract(t *testing.T, assetID uint32) {
 	}{
 		{
 			name:     "ok",
-			contract: dexeth.EncodeContractData(0, secretHashes[1]),
+			contract: dexeth.EncodeContractData(0, secretHashes[1][:]),
 			initiations: []*dexeth.Initiation{
 				{
 					LockTime:    now,
@@ -3588,7 +3611,7 @@ func testAuditContract(t *testing.T, assetID uint32) {
 		},
 		{
 			name:     "coin id different than tx hash",
-			contract: dexeth.EncodeContractData(0, secretHashes[0]),
+			contract: dexeth.EncodeContractData(0, secretHashes[0][:]),
 			initiations: []*dexeth.Initiation{
 				{
 					LockTime:    now,
@@ -3607,7 +3630,7 @@ func testAuditContract(t *testing.T, assetID uint32) {
 		},
 		{
 			name:     "contract not part of transaction",
-			contract: dexeth.EncodeContractData(0, secretHashes[2]),
+			contract: dexeth.EncodeContractData(0, secretHashes[2][:]),
 			initiations: []*dexeth.Initiation{
 				{
 					LockTime:    now,
@@ -3626,13 +3649,13 @@ func testAuditContract(t *testing.T, assetID uint32) {
 		},
 		{
 			name:      "cannot parse tx data",
-			contract:  dexeth.EncodeContractData(0, secretHashes[2]),
+			contract:  dexeth.EncodeContractData(0, secretHashes[2][:]),
 			badTxData: true,
 			wantErr:   true,
 		},
 		{
 			name:     "cannot unmarshal tx binary",
-			contract: dexeth.EncodeContractData(0, secretHashes[1]),
+			contract: dexeth.EncodeContractData(0, secretHashes[1][:]),
 			initiations: []*dexeth.Initiation{
 				{
 					LockTime:    now,
@@ -3843,8 +3866,12 @@ func TestSwapConfirmation(t *testing.T) {
 
 	var secretHash [32]byte
 	copy(secretHash[:], encode.RandomBytes(32))
-	state := &dexeth.SwapState{}
-	hdr := &types.Header{}
+	state := &dexeth.SwapState{
+		Value: dexeth.GweiToWei(1),
+	}
+	hdr := &types.Header{
+		GasLimit: 30_000_000,
+	}
 
 	node.tContractor.swapMap[secretHash] = state
 
@@ -3860,7 +3887,7 @@ func TestSwapConfirmation(t *testing.T) {
 
 	checkResult := func(expErr bool, expConfs uint32, expSpent bool) {
 		t.Helper()
-		confs, spent, err := eth.SwapConfirmations(ctx, nil, dexeth.EncodeContractData(ver, secretHash), time.Time{})
+		confs, spent, err := eth.SwapConfirmations(ctx, nil, dexeth.EncodeContractData(ver, secretHash[:]), time.Time{})
 		if err != nil {
 			if expErr {
 				return
@@ -3889,7 +3916,7 @@ func TestSwapConfirmation(t *testing.T) {
 
 	// ErrSwapNotInitiated
 	state.State = dexeth.SSNone
-	_, _, err := eth.SwapConfirmations(ctx, nil, dexeth.EncodeContractData(0, secretHash), time.Time{})
+	_, _, err := eth.SwapConfirmations(ctx, nil, dexeth.EncodeContractData(0, secretHash[:]), time.Time{})
 	if !errors.Is(err, asset.ErrSwapNotInitiated) {
 		t.Fatalf("expected ErrSwapNotInitiated, got %v", err)
 	}
@@ -4059,6 +4086,7 @@ func TestLocktimeExpired(t *testing.T) {
 	state := &dexeth.SwapState{
 		LockTime: time.Now(),
 		State:    dexeth.SSInitiated,
+		Value:    dexeth.GweiToWei(1),
 	}
 
 	header := &types.Header{
@@ -4132,10 +4160,11 @@ func testFindRedemption(t *testing.T, assetID uint32) {
 	copy(secret[:], encode.RandomBytes(32))
 	secretHash := sha256.Sum256(secret[:])
 
-	contract := dexeth.EncodeContractData(0, secretHash)
+	contract := dexeth.EncodeContractData(0, secretHash[:])
 	state := &dexeth.SwapState{
 		Secret: secret,
 		State:  dexeth.SSInitiated,
+		Value:  dexeth.GweiToWei(1),
 	}
 
 	node.tContractor.swapMap[secretHash] = state
@@ -4179,7 +4208,7 @@ func testFindRedemption(t *testing.T, assetID uint32) {
 				select {
 				case <-time.After(time.Millisecond):
 					eth.findRedemptionMtx.RLock()
-					pending := eth.findRedemptionReqs[secretHash] != nil
+					pending := eth.findRedemptionReqs[string(secretHash[:])] != nil
 					eth.findRedemptionMtx.RUnlock()
 					if !pending {
 						continue
@@ -4243,7 +4272,7 @@ func testFindRedemption(t *testing.T, assetID uint32) {
 
 	// dupe
 	eth.findRedemptionMtx.Lock()
-	eth.findRedemptionReqs[secretHash] = &findRedemptionRequest{}
+	eth.findRedemptionReqs[string(secretHash[:])] = &findRedemptionRequest{}
 	eth.findRedemptionMtx.Unlock()
 	res := make(chan error, 1)
 	go func() {
@@ -4280,25 +4309,14 @@ func testRefundReserves(t *testing.T, assetID uint32) {
 	node.swapMap = map[[32]byte]*dexeth.SwapState{secretHash: {}}
 
 	feeWallet := eth
-	gasesV0 := dexeth.VersionedGases[0]
-	gasesV1 := &dexeth.Gases{Refund: 1e6}
-	assetV0 := *tETH
-
-	assetV1 := *tETH
-	if assetID == BipID {
-		eth.versionedGases[1] = gasesV1
-	} else {
+	gasesV0 := eth.versionedGases[0]
+	gasesV1 := eth.versionedGases[1]
+	assetV0 := *tETHV0
+	assetV1 := *tETHV0
+	if assetID != BipID {
 		feeWallet = node.tokenParent
-		assetV0 = *tToken
-		assetV1 = *tToken
-		tokenContracts := eth.tokens[usdcTokenID].NetTokens[dex.Simnet].SwapContracts
-		tc := *tokenContracts[0]
-		tc.Gas = *gasesV1
-		tokenContracts[1] = &tc
-		defer delete(tokenContracts, 1)
-		gasesV0 = &tokenGases
-		eth.versionedGases[0] = gasesV0
-		eth.versionedGases[1] = gasesV1
+		assetV0 = *tTokenV0
+		assetV1 = *tTokenV0
 		node.tokenContractor.bal = dexeth.GweiToWei(1e9)
 	}
 
@@ -4379,21 +4397,17 @@ func testRedemptionReserves(t *testing.T, assetID uint32) {
 	var secretHash [32]byte
 	node.tContractor.swapMap[secretHash] = &dexeth.SwapState{}
 
-	gasesV1 := &dexeth.Gases{Redeem: 1e6, RedeemAdd: 85e5}
-	gasesV0 := dexeth.VersionedGases[0]
-	assetV0 := *tETH
-	assetV1 := *tETH
+	gasesV0 := eth.versionedGases[0]
+	gasesV1 := eth.versionedGases[1]
+	eth.versionedGases[1] = gasesV1
+	assetV0 := *tETHV0
+	assetV1 := *tETHV0
 	feeWallet := eth
-	if assetID == BipID {
-		eth.versionedGases[1] = gasesV1
-	} else {
+	if assetID != BipID {
 		node.tokenContractor.allow = unlimitedAllowanceReplenishThreshold
 		feeWallet = node.tokenParent
-		assetV0 = *tToken
-		assetV1 = *tToken
-		gasesV0 = &tokenGases
-		eth.versionedGases[0] = gasesV0
-		eth.versionedGases[1] = gasesV1
+		assetV0 = *tTokenV0
+		assetV1 = *tTokenV0
 	}
 
 	assetV0.MaxFeeRate = 45
@@ -4500,7 +4514,7 @@ func testSend(t *testing.T, assetID uint32) {
 
 	maxFeeRate, _, _ := eth.recommendedMaxFeeRate(eth.ctx)
 	ethFees := dexeth.WeiToGwei(maxFeeRate) * defaultSendGasLimit
-	tokenFees := dexeth.WeiToGwei(maxFeeRate) * tokenGases.Transfer
+	tokenFees := dexeth.WeiToGwei(maxFeeRate) * tokenGasesV1.Transfer
 
 	const val = 10e9
 	const testAddr = "dd93b447f7eBCA361805eBe056259853F3912E04"
@@ -4553,12 +4567,12 @@ func testSend(t *testing.T, assetID uint32) {
 		coin, err := w.Send(test.addr, val, 0)
 		if test.wantErr {
 			if err == nil {
-				t.Fatalf("expected error for test %v", test.name)
+				t.Fatalf("expected error for test %q", test.name)
 			}
 			continue
 		}
 		if err != nil {
-			t.Fatalf("unexpected error for test %v: %v", test.name, err)
+			t.Fatalf("unexpected error for test %q: %v", test.name, err)
 		}
 		if !bytes.Equal(txHash[:], coin.ID()) {
 			t.Fatal("coin is not the tx hash")
@@ -4588,7 +4602,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 
 	redemption := &asset.Redemption{
 		Spends: &asset.AuditInfo{
-			Contract: dexeth.EncodeContractData(0, secretHash),
+			Contract: dexeth.EncodeContractData(0, secretHash[:]),
 		},
 		Secret: secret[:],
 	}
@@ -4690,7 +4704,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 		fmt.Printf("###### %s ###### \n", test.name)
 
 		node.tContractor.swapMap = map[[32]byte]*dexeth.SwapState{
-			secretHash: {State: test.step},
+			secretHash: {State: test.step, Value: big.NewInt(1)},
 		}
 		node.tContractor.lastRedeems = nil
 		node.tokenContractor.bal = big.NewInt(1e9)
@@ -4798,7 +4812,7 @@ func testEstimateSendTxFee(t *testing.T, assetID uint32) {
 
 	maxFeeRate, _, _ := eth.recommendedMaxFeeRate(eth.ctx)
 	ethFees := dexeth.WeiToGwei(maxFeeRate) * defaultSendGasLimit
-	tokenFees := dexeth.WeiToGwei(maxFeeRate) * tokenGases.Transfer
+	tokenFees := dexeth.WeiToGwei(maxFeeRate) * tokenGasesV1.Transfer
 
 	ethFees = ethFees * 12 / 10
 	tokenFees = tokenFees * 12 / 10
@@ -4872,70 +4886,6 @@ func testEstimateSendTxFee(t *testing.T, assetID uint32) {
 	}
 }
 
-// This test will fail if new versions of the eth or the test token
-// contract (that require more gas) are added.
-func TestMaxSwapRedeemLots(t *testing.T) {
-	t.Run("eth", func(t *testing.T) { testMaxSwapRedeemLots(t, BipID) })
-	t.Run("token", func(t *testing.T) { testMaxSwapRedeemLots(t, usdcTokenID) })
-}
-
-func testMaxSwapRedeemLots(t *testing.T, assetID uint32) {
-	drv := &Driver{}
-	logger := dex.StdOutLogger("ETHTEST", dex.LevelOff)
-	tmpDir := t.TempDir()
-
-	settings := map[string]string{providersKey: "a.ipc"}
-	err := CreateEVMWallet(dexeth.ChainIDs[dex.Testnet], &asset.CreateWalletParams{
-		Type:     walletTypeRPC,
-		Seed:     encode.RandomBytes(32),
-		Pass:     encode.RandomBytes(32),
-		Settings: settings,
-		DataDir:  tmpDir,
-		Net:      dex.Testnet,
-		Logger:   logger,
-	}, &testnetCompatibilityData, true)
-	if err != nil {
-		t.Fatalf("CreateEVMWallet error: %v", err)
-	}
-
-	wallet, err := drv.Open(&asset.WalletConfig{
-		Type:     walletTypeRPC,
-		Settings: settings,
-		DataDir:  tmpDir,
-	}, logger, dex.Testnet)
-	if err != nil {
-		t.Fatalf("driver open error: %v", err)
-	}
-
-	if assetID != BipID {
-		eth, _ := wallet.(*ETHWallet)
-		eth.net = dex.Simnet
-		wallet, err = eth.OpenTokenWallet(&asset.TokenConfig{
-			AssetID: assetID,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	info := wallet.Info()
-	if assetID == BipID {
-		if info.MaxSwapsInTx != 28 {
-			t.Fatalf("expected 28 for max swaps but got %d", info.MaxSwapsInTx)
-		}
-		if info.MaxRedeemsInTx != 63 {
-			t.Fatalf("expected 63 for max redemptions but got %d", info.MaxRedeemsInTx)
-		}
-	} else {
-		if info.MaxSwapsInTx != 24 {
-			t.Fatalf("expected 24 for max swaps but got %d", info.MaxSwapsInTx)
-		}
-		if info.MaxRedeemsInTx != 55 {
-			t.Fatalf("expected 55 for max redemptions but got %d", info.MaxRedeemsInTx)
-		}
-	}
-}
-
 func TestSwapOrRedemptionFeesPaid(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -4946,7 +4896,7 @@ func TestSwapOrRedemptionFeesPaid(t *testing.T) {
 	contractDataFn := func(ver uint32, secretH []byte) []byte {
 		s := [32]byte{}
 		copy(s[:], secretH)
-		return dexeth.EncodeContractData(ver, s)
+		return dexeth.EncodeContractData(ver, s[:])
 	}
 	const tip = 100
 	const feeRate = 2 // gwei / gas
