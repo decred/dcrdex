@@ -280,7 +280,7 @@ type WebServer struct {
 
 	appVersion string
 
-	useDEXBranding bool
+	useDEXBranding  bool
 	mainLogFilePath string
 }
 
