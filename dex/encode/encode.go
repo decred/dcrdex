@@ -55,6 +55,11 @@ func Uint64Bytes(i uint64) []byte {
 	return b
 }
 
+// BytesToUint64 converts the length-8, big-endian encoded byte slice to a uint64.
+func BytesToUint64(i []byte) uint64 {
+	return IntCoder.Uint64(i[:8])
+}
+
 // CopySlice makes a copy of the slice.
 func CopySlice(b []byte) []byte {
 	newB := make([]byte, len(b))

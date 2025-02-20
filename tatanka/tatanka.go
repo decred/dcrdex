@@ -6,7 +6,6 @@ package tatanka
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -89,17 +88,19 @@ type parsedBootNode struct {
 //  2. Distribute broadcasts and relay tankagrams.
 //  3. Provide some basic oracle services.
 type Tatanka struct {
-	net       dex.Network
-	log       dex.Logger
-	tcpSrv    *tcp.Server
-	dataDir   string
-	ctx       context.Context
-	wg        *sync.WaitGroup
-	whitelist map[tanka.PeerID]*parsedBootNode
-	db        *db.DB
-	nets      atomic.Value // []uint32
-	handlers  map[string]func(tanka.Sender, *msgjson.Message) *msgjson.Error
-	routes    []string
+	net             dex.Network
+	log             dex.Logger
+	tcpSrv          *tcp.Server
+	dataDir         string
+	ctx             context.Context
+	wg              *sync.WaitGroup
+	whitelist       map[tanka.PeerID]*parsedBootNode
+	db              *db.DB
+	nets            atomic.Value // []uint32
+	specialHandlers map[string]func(tanka.Sender, *msgjson.Message) *msgjson.Error
+	clientHandlers  map[string]interface{} // clientRequestHandler | clientNotificationHandler
+	tatankaHandlers map[string]interface{} // tatankaRequestHandler | tatankaNotificationHandler
+	routes          []string
 	// bondTier  atomic.Uint64
 
 	priv *secp256k1.PrivateKey
@@ -199,20 +200,22 @@ func New(cfg *Config) (*Tatanka, error) {
 	}
 
 	t := &Tatanka{
-		net:           cfg.Net,
-		dataDir:       cfg.DataDir,
-		log:           cfg.Logger,
-		whitelist:     whitelist,
-		db:            db,
-		priv:          priv,
-		id:            peerID,
-		chains:        chains,
-		tatankas:      make(map[tanka.PeerID]*remoteTatanka),
-		clients:       make(map[tanka.PeerID]*client),
-		remoteClients: make(map[tanka.PeerID]map[tanka.PeerID]struct{}),
-		topics:        make(map[tanka.Topic]*Topic),
-		recentRelays:  make(map[[32]byte]time.Time),
-		clientJobs:    make(chan *clientJob, 128),
+		net:             cfg.Net,
+		dataDir:         cfg.DataDir,
+		log:             cfg.Logger,
+		whitelist:       whitelist,
+		db:              db,
+		priv:            priv,
+		id:              peerID,
+		chains:          chains,
+		tatankas:        make(map[tanka.PeerID]*remoteTatanka),
+		clients:         make(map[tanka.PeerID]*client),
+		remoteClients:   make(map[tanka.PeerID]map[tanka.PeerID]struct{}),
+		topics:          make(map[tanka.Topic]*Topic),
+		recentRelays:    make(map[[32]byte]time.Time),
+		clientJobs:      make(chan *clientJob, 128),
+		clientHandlers:  make(map[string]interface{}),
+		tatankaHandlers: make(map[string]interface{}),
 	}
 
 	if !cfg.FiatOracleConfig.AllFiatSourceDisabled() {
@@ -244,24 +247,55 @@ func New(cfg *Config) (*Tatanka, error) {
 }
 
 func (t *Tatanka) prepareHandlers() {
-	t.handlers = map[string]func(tanka.Sender, *msgjson.Message) *msgjson.Error{
+	t.specialHandlers = map[string]func(tanka.Sender, *msgjson.Message) *msgjson.Error{
 		// tatanka messages
-		mj.RouteTatankaConnect:   t.handleInboundTatankaConnect,
-		mj.RouteTatankaConfig:    t.handleTatankaMessage,
-		mj.RouteRelayBroadcast:   t.handleTatankaMessage,
-		mj.RouteNewClient:        t.handleTatankaMessage,
-		mj.RouteClientDisconnect: t.handleTatankaMessage,
-		mj.RouteRelayTankagram:   t.handleTatankaMessage,
-		mj.RoutePathInquiry:      t.handleTatankaMessage,
+		mj.RouteTatankaConnect: t.handleInboundTatankaConnect,
 		// client messages
-		mj.RouteConnect:     t.handleClientConnect,
-		mj.RoutePostBond:    t.handlePostBond,
-		mj.RouteSubscribe:   t.handleClientMessage,
-		mj.RouteUnsubscribe: t.handleClientMessage,
-		mj.RouteBroadcast:   t.handleClientMessage,
-		mj.RouteTankagram:   t.handleClientMessage,
+		mj.RouteConnect:  t.handleClientConnect,
+		mj.RoutePostBond: t.handlePostBond,
 	}
-	for route := range t.handlers {
+	// Tatanka routes
+	registerTatankaHandler := func(route string, handler interface{}) {
+		if _, is := handler.(tatankaRequestHandler); !is {
+			if _, is := handler.(tatankaNotificationHandler); !is {
+				panic("unknown handler type for " + route)
+			}
+		}
+		t.tatankaHandlers[route] = handler
+	}
+	for route, handler := range map[string]interface{}{
+		mj.RouteTatankaConfig:    t.handleTatankaConfig,
+		mj.RouteRelayBroadcast:   t.handleRelayBroadcast,
+		mj.RouteNewClient:        t.handleNewRemoteClientNotification,
+		mj.RouteClientDisconnect: t.handleRemoteClientDisconnect,
+		mj.RouteRelayTankagram:   t.handleRelayedTankagram,
+		mj.RoutePathInquiry:      t.handlePathInquiry,
+		mj.RouteShareScore:       t.handleShareScore,
+	} {
+		registerTatankaHandler(route, handler)
+	}
+	// Client routes
+	registerClientHandler := func(route string, handler interface{}) {
+		if _, is := handler.(clientRequestHandler); !is {
+			if _, is := handler.(clientNotificationHandler); !is {
+				panic("unknown handler type for " + route)
+			}
+		}
+		t.clientHandlers[route] = handler
+	}
+	for route, handler := range map[string]interface{}{
+		mj.RouteSubscribe: t.handleSubscription,
+		// mj.RouteUnsubscribe: t.handleUnsubscribe,
+		mj.RouteBroadcast: t.handleBroadcast,
+		mj.RouteTankagram: t.handleTankagram,
+		mj.RouteSetScore:  t.handleSetScore,
+	} {
+		registerClientHandler(route, handler)
+	}
+	for route := range t.specialHandlers {
+		t.routes = append(t.routes, route)
+	}
+	for route := range t.clientHandlers {
 		t.routes = append(t.routes, route)
 	}
 }
@@ -399,7 +433,7 @@ func (t *Tatanka) runWhitelistLoop(ctx context.Context) {
 				continue
 			}
 
-			p, rrs, err := t.loadPeer(n.peerID)
+			p, err := t.db.Peer(n.peerID)
 			if err != nil {
 				t.log.Errorf("error getting peer info for boot node at %q (proto %q): %v", string(n.cfg), proto, err)
 				continue
@@ -438,7 +472,7 @@ func (t *Tatanka) runWhitelistLoop(ctx context.Context) {
 			t.log.Infof("Connected to boot node with peer ID %s, config %s", n.peerID, string(n.cfg))
 
 			cl.SetPeerID(p.ID)
-			pp := &peer{Peer: p, Sender: cl, rrs: rrs}
+			pp := &peer{Peer: p, Sender: cl, rrs: make(map[tanka.PeerID]*tanka.Reputation)}
 			tt := &remoteTatanka{peer: pp}
 			t.tatankasMtx.Lock()
 			t.tatankas[p.ID] = tt
@@ -538,106 +572,6 @@ func (t *Tatanka) request(s tanka.Sender, msg *msgjson.Message, respHandler func
 	return err
 }
 
-// loadPeer loads and resolves peer reputation data from the database.
-func (t *Tatanka) loadPeer(peerID tanka.PeerID) (*tanka.Peer, map[tanka.PeerID]*mj.RemoteReputation, error) {
-	p, err := t.db.GetPeer(peerID)
-	if err == nil {
-		return p, nil, nil
-	}
-
-	if !errors.Is(err, db.ErrNotFound) {
-		return nil, nil, err
-	}
-	pubKey, err := secp256k1.ParsePubKey(peerID[:])
-	if err != nil {
-		return nil, nil, fmt.Errorf("ParsePubKey error: %w", err)
-	}
-	rep, rrs, err := t.resolveReputation(peerID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("error fetching reputation: %w", err)
-	}
-
-	return &tanka.Peer{
-		ID:         peerID,
-		PubKey:     pubKey,
-		Reputation: rep,
-	}, rrs, nil
-}
-
-// resolveReputation constructs a user reputation, doing a "soft sync" with
-// the mesh if our data is scant.
-func (t *Tatanka) resolveReputation(peerID tanka.PeerID) (*tanka.Reputation, map[tanka.PeerID]*mj.RemoteReputation, error) {
-	rep, err := t.db.Reputation(peerID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("error fetching reputation: %w", err)
-	}
-	// If we have a fully-established reputation, we don't care what our peers
-	// think of this guy.
-	if len(rep.Points) == tanka.MaxReputationEntries {
-		return rep, nil, nil
-	}
-
-	if true {
-		fmt.Println("!!!! Skipping reputation resolution")
-		return rep, nil, nil
-	}
-
-	// We don't have enough info. We'll reach out to others to see what we can
-	// figure out.
-	tankas := t.tatankaNodes()
-	n := len(tankas)
-	type res struct {
-		rr *mj.RemoteReputation
-		id tanka.PeerID
-	}
-	resC := make(chan *res)
-
-	report := func(rr *res) {
-		select {
-		case resC <- rr:
-		case <-time.After(time.Second):
-			t.log.Errorf("blocking remote reputation result channel")
-		}
-	}
-
-	requestReputation := func(tt *remoteTatanka) {
-		req := mj.MustRequest(mj.RouteGetReputation, nil)
-		t.request(tt, req, func(respMsg *msgjson.Message) {
-			var rr mj.RemoteReputation
-			if err := respMsg.UnmarshalResult(&rr); err == nil {
-				report(&res{
-					id: tt.ID,
-					rr: &rr,
-				})
-			} else {
-				t.log.Errorf("error requesting remote reputation from %q: %v", tt.ID, err)
-				report(nil)
-			}
-		})
-	}
-	for _, tt := range tankas {
-		requestReputation(tt)
-	}
-
-	received := make(map[tanka.PeerID]*mj.RemoteReputation, n)
-	timedOut := time.After(time.Second * 10)
-
-out:
-	for {
-		select {
-		case res := <-resC:
-			received[res.id] = res.rr
-			if len(received) == n {
-				break out
-			}
-		case <-timedOut:
-			t.log.Errorf("timed out waiting for remote reputations. %d received out of %d requested", len(received), len(tankas))
-			break out
-		}
-	}
-	return rep, received, nil
-}
-
 func (t *Tatanka) generateConfig(bondTier uint64) *mj.TatankaConfig {
 	return &mj.TatankaConfig{
 		ID:       t.id,
@@ -648,7 +582,7 @@ func (t *Tatanka) generateConfig(bondTier uint64) *mj.TatankaConfig {
 }
 
 func calcTier(r *tanka.Reputation, bondTier uint64) int64 {
-	return int64(bondTier) + int64(r.Score)/tanka.TierIncrement
+	return int64(bondTier) + r.Score/tanka.TierIncrement
 }
 
 // ChainConfig is how the chain configuration is specified in the Tatanka
@@ -686,11 +620,16 @@ func (t *tcpCore) HandleMessage(cl tanka.Sender, msg *msgjson.Message) *msgjson.
 		t.log.Tracef("Tatanka node handling message. route = %s, payload = %s", msg.Route, mj.Truncate(msg.Payload))
 	}
 
-	handle, found := t.handlers[msg.Route]
-	if !found {
-		return msgjson.NewError(mj.ErrBadRequest, "route %q not known", msg.Route)
+	if _, found := t.clientHandlers[msg.Route]; found {
+		return t.handleClientMessage(cl, msg)
 	}
-	return handle(cl, msg)
+	if _, found := t.tatankaHandlers[msg.Route]; found {
+		return t.handleTatankaMessage(cl, msg)
+	}
+	if handle, found := t.specialHandlers[msg.Route]; found {
+		return handle(cl, msg)
+	}
+	return msgjson.NewError(mj.ErrBadRequest, "route %q not known", msg.Route)
 }
 
 // clientDisconnected handle a client disconnect, removing the client from the

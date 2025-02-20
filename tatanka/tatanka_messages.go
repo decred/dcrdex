@@ -23,7 +23,7 @@ func (t *Tatanka) handleInboundTatankaConnect(cl tanka.Sender, msg *msgjson.Mess
 		return msgjson.NewError(mj.ErrAuth, "not whitelisted")
 	}
 
-	p, rrs, err := t.loadPeer(cfg.ID)
+	p, err := t.db.Peer(cfg.ID)
 	if err != nil {
 		return msgjson.NewError(mj.ErrInternal, "error finding peer: %v", err)
 	}
@@ -75,7 +75,7 @@ func (t *Tatanka) handleInboundTatankaConnect(cl tanka.Sender, msg *msgjson.Mess
 		t.log.Debugf("Connecting Tatanka node %s replaces already connected node", cl.PeerID())
 	}
 
-	pp := &peer{Peer: p, Sender: cl, rrs: rrs}
+	pp := &peer{Peer: p, Sender: cl, rrs: make(map[tanka.PeerID]*tanka.Reputation)}
 
 	// TODO: Check Tatanka Node reputation too
 	// if pp.banned() {
@@ -92,6 +92,9 @@ func (t *Tatanka) handleInboundTatankaConnect(cl tanka.Sender, msg *msgjson.Mess
 
 	return nil
 }
+
+type tatankaRequestHandler = func(tt *remoteTatanka, msg *msgjson.Message) *msgjson.Error
+type tatankaNotificationHandler = func(tt *remoteTatanka, msg *msgjson.Message)
 
 // handleTatankaMessage handles all messages from remote tatanka nodes except
 // for mj.RouteTatankaConnect. The node is expected to already be connected.
@@ -123,32 +126,11 @@ func (t *Tatanka) handleTatankaMessage(cl tanka.Sender, msg *msgjson.Message) *m
 		return msgjson.NewError(mj.ErrNoConfig, "send your configuration first")
 	}
 
-	switch msg.Type {
-	case msgjson.Request:
-		switch msg.Route {
-		case mj.RouteRelayTankagram:
-			return t.handleRelayedTankagram(tt, msg)
-		case mj.RoutePathInquiry:
-			return t.handlePathInquiry(tt, msg)
-		default:
-			return msgjson.NewError(mj.ErrBadRequest, "unknown request route %q", msg.Route)
-		}
-	case msgjson.Notification:
-		switch msg.Route {
-		case mj.RouteNewClient:
-			t.handleNewRemoteClientNotification(tt.ID, msg)
-		case mj.RouteClientDisconnect:
-			t.handleRemoteClientDisconnect(tt.ID, msg)
-		case mj.RouteTatankaConfig:
-			t.handleTatankaConfig(tt, msg)
-		case mj.RouteRelayBroadcast:
-			t.handleRelayBroadcast(tt, msg)
-		default:
-			// TODO: What? Can't let this happen too much.
-			return msgjson.NewError(mj.ErrBadRequest, "unknown notification route %q", msg.Route)
-		}
-	default:
-		return msgjson.NewError(mj.ErrBadRequest, "unknown message type %d", msg.Type)
+	switch handle := t.tatankaHandlers[msg.Route].(type) {
+	case tatankaRequestHandler:
+		return handle(tt, msg)
+	case tatankaNotificationHandler:
+		handle(tt, msg)
 	}
 	return nil
 }
@@ -208,7 +190,7 @@ func (t *Tatanka) handlePathInquiry(tt *remoteTatanka, msg *msgjson.Message) *ms
 
 // handleNewRemoteClientNotification handles an mj.RouteNewClient notification,
 // updating the t.remoteClients map.
-func (t *Tatanka) handleNewRemoteClientNotification(ttID tanka.PeerID, msg *msgjson.Message) {
+func (t *Tatanka) handleNewRemoteClientNotification(tt *remoteTatanka, msg *msgjson.Message) {
 	if t.skipRelay(msg) {
 		return
 	}
@@ -218,12 +200,28 @@ func (t *Tatanka) handleNewRemoteClientNotification(ttID tanka.PeerID, msg *msgj
 		t.log.Errorf("error unmarshaling %s notification payload: %q", msg.Route, err)
 		return
 	}
-	t.registerRemoteClient(ttID, conn.ID)
+	t.registerRemoteClient(tt.ID, conn.ID)
+	t.clientMtx.RLock()
+	var rep *tanka.Reputation
+	c, found := t.clients[conn.ID]
+	if found {
+		rep = c.Reputation
+	}
+	t.clientMtx.RUnlock()
+	if rep == nil {
+		var err error
+		rep, err = t.db.Reputation(conn.ID)
+		if err != nil {
+			t.log.Errorf("error getting reputation for %s from DB: %q", conn.ID, err)
+			return
+		}
+	}
+	t.sendResult(tt, msg.ID, rep)
 }
 
 // handleRemoteClientDisconnect handles an mj.RouteClientDisconnect
 // notification, updating the t.remoteClients map.
-func (t *Tatanka) handleRemoteClientDisconnect(ttID tanka.PeerID, msg *msgjson.Message) {
+func (t *Tatanka) handleRemoteClientDisconnect(tt *remoteTatanka, msg *msgjson.Message) {
 	if t.skipRelay(msg) {
 		return
 	}
@@ -237,7 +235,7 @@ func (t *Tatanka) handleRemoteClientDisconnect(ttID tanka.PeerID, msg *msgjson.M
 	job := &clientJob{
 		task: &clientJobRemoteDisconnect{
 			clientID: dconn.ID,
-			tankaID:  ttID,
+			tankaID:  tt.ID,
 		},
 		res: make(chan interface{}, 1),
 	}
@@ -284,4 +282,32 @@ func (t *Tatanka) handleRelayBroadcast(tt *remoteTatanka, msg *msgjson.Message) 
 		t.log.Errorf("error distributing broadcast: %v", msgErr)
 		return
 	}
+}
+
+func (t *Tatanka) handleShareScore(tt *remoteTatanka, msg *msgjson.Message) {
+	var ss mj.SharedScore
+	if err := msg.Unmarshal(&ss); err != nil {
+		t.log.Errorf("error unmarshaling shared score: %v", err)
+		return
+	}
+	if err := t.db.SetScore(ss.Scored, ss.Scorer, ss.Score, time.Now()); err != nil {
+		return
+	}
+	t.clientMtx.RLock()
+	c, found := t.clients[ss.Scored]
+	t.clientMtx.RUnlock()
+	if !found {
+		return
+	}
+
+	rep, err := t.db.Reputation(ss.Scored)
+	if err != nil {
+		t.log.Errorf("error updating reputation after shared score update: %v", err)
+		return
+	}
+
+	c.mtx.Lock()
+	c.Reputation = rep
+	c.rrs[tt.ID] = ss.Reputation
+	c.mtx.Unlock()
 }
