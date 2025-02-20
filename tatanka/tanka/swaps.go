@@ -49,7 +49,7 @@ func (ord *Order) ID() [32]byte {
 }
 
 func (ord *Order) Valid() error {
-	// Check whether the lot size is a power of 2, using binary ju-jitsu.
+	// Check whether the lot size is a power of 2, using binary jiu-jitsu.
 	if ord.LotSize&(ord.LotSize-1) != 0 {
 		return fmt.Errorf("lot size %d is not a power of 2", ord.LotSize)
 	}
@@ -65,7 +65,7 @@ func (ord *Order) Valid() error {
 	if ord.Rate == 0 {
 		return errors.New("order rate is zero")
 	}
-	if ord.Expiration.Equal(ord.Stamp) || ord.Expiration.Before(ord.Stamp) {
+	if !ord.Expiration.After(ord.Stamp) {
 		return errors.New("order is pre-expired")
 	}
 	return nil

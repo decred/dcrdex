@@ -26,7 +26,7 @@ const (
 	ReasonTheirQtyTooSmall = "their order size is less than our lot size"
 )
 
-// OrderIsMatchable determines whether a given standling limit order is
+// OrderIsMatchable determines whether a given standing limit order is
 // matchable for our desired quantity and fee parameters.
 func OrderIsMatchable(desiredQty uint64, theirOrd *tanka.Order, p *FeeParameters) (_ bool, reason string) {
 	// Can we satisfy their lot size?
