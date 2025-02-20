@@ -344,7 +344,7 @@ func (c *MeshConn) addTatankaNode(ctx context.Context, creds *TatankaCredentials
 	}
 
 	if err := cm.Connect(ctx); err != nil {
-		c.log.Errorf("error connecting to tatanka node %s at %s: %v. will keep trying to connect", err)
+		return fmt.Errorf("error connecting to tatanka node %s at %s: %w. will keep trying to connect", peerID, uri, err)
 	}
 
 	return nil
@@ -407,6 +407,9 @@ func (c *MeshConn) tatankas(mode TatankaSelectionMode) (tts []*tatanka, _ error)
 		for peerID, tt := range c.tatankaNodes {
 			if tt.cm.On() && peerID != skipID {
 				tts = append(tts, tt)
+				if mode == SelectionModeAny {
+					return tts, nil
+				}
 			}
 		}
 		if len(tts) == 0 {
