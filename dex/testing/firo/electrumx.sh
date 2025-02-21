@@ -16,7 +16,11 @@
 
 set -ex
 
-COMMIT=c0cdcc0dfcaa057058fd1ed281557dede924cd27
+# No external releases - just master
+# May 11, 2023
+# COMMIT=c0cdcc0dfcaa057058fd1ed281557dede924cd27
+#  Jul 8, 2024
+COMMIT=937e4bb3d8802317b64231844b698d8758029ca5
 
 ELECTRUMX_DIR=~/dextest/electrum/firo/server
 REPO_DIR=${ELECTRUMX_DIR}/electrumx-repo
@@ -53,7 +57,7 @@ export NET="regtest"
 export DB_ENGINE="leveldb"
 export DB_DIRECTORY="${DATA_DIR}"
 export DAEMON_URL="http://user:pass@127.0.0.1:53768"    # harness:alpha:rpc
-export SERVICES="ssl://localhost:50002,rpc://"
+export SERVICES="ssl://localhost:50002,tcp://localhost:50001,rpc://"
 export SSL_CERTFILE="${DATA_DIR}/ssl.cert"
 export SSL_KEYFILE="${DATA_DIR}/ssl.key"
 export PEER_DISCOVERY="off"
