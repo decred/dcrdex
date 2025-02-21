@@ -16,10 +16,11 @@ import (
 // lookup and iteration.
 type Table struct {
 	*DB
-	name              string
-	prefix            keyPrefix
-	indexes           []*Index
-	defaultSetOptions setOpts
+	name                    string
+	prefix                  keyPrefix
+	indexes                 []*Index
+	defaultSetOptions       setOpts
+	defaultIterationOptions iteratorOpts
 }
 
 // Table constructs a new table in the DB.
@@ -199,4 +200,16 @@ func (t *Table) deleteDatum(txn *badger.Txn, dbID DBID, d *datum) error {
 		return fmt.Errorf("error deleting table entry: %w", err)
 	}
 	return t.deleteDBID(txn, dbID)
+}
+
+// UseDefaultIterationOptions sets default options for Iterate.
+func (t *Table) UseDefaultIterationOptions(optss ...IterationOption) {
+	for i := range optss {
+		optss[i](&t.defaultIterationOptions)
+	}
+}
+
+// Iterate iterates the table.
+func (t *Table) Iterate(prefixI IndexBucket, f func(*Iter) error, iterOpts ...IterationOption) error {
+	return t.iterate(t.prefix, t, t.defaultIterationOptions, false, prefixI, f, iterOpts...)
 }
