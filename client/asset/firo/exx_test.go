@@ -3,7 +3,6 @@ package firo
 import (
 	"bytes"
 	"encoding/hex"
-	"fmt"
 	"testing"
 
 	"decred.org/dcrdex/client/asset/btc"
@@ -12,11 +11,12 @@ import (
 )
 
 const (
-	exxAddress    = "EXXKcAcVWXeG7S9aiXXGuGNZkWdB9XuSbJ1z"
-	scriptAddress = "386ed39285803b1782d0e363897f1a81a5b87421"
-
-	testnetExtAddress    = "EXTSnBDP57YoFRzLwHQoP1grxh9j52FKmRBY"
-	testnetScriptAddress = "963f2fd5ee2ee37d0b327794fc915d01343a4891"
+	exxAddress               = "EXXKcAcVWXeG7S9aiXXGuGNZkWdB9XuSbJ1z"
+	scriptAddress            = "386ed39285803b1782d0e363897f1a81a5b87421"
+	expectedScriptStr        = "e076a914386ed39285803b1782d0e363897f1a81a5b8742188ac"
+	testnetExtAddress        = "EXTSnBDP57YoFRzLwHQoP1grxh9j52FKmRBY"
+	testnetScriptAddress     = "963f2fd5ee2ee37d0b327794fc915d01343a4891"
+	testnetExpectedScriptStr = "e076a914963f2fd5ee2ee37d0b327794fc915d01343a489188ac"
 
 	// Example: e0 76a914 386ed39285803b1782d0e363897f1a81a5b87421 88ac
 	scriptLenEXX = 1 + 3 + ripemd160HashSize + 2
@@ -34,7 +34,7 @@ func TestDecodeExxAddress(t *testing.T) {
 
 	switch ty := addr.(type) {
 	case btcutil.Address, *addressEXX:
-		fmt.Printf("type=%T\n", ty)
+		t.Logf("type=%T\n", ty)
 	default:
 		t.Fatalf("invalid type=%T", ty)
 	}
@@ -76,6 +76,10 @@ func TestBuildExxPayToScript(t *testing.T) {
 	if len(script) != scriptLenEXX {
 		t.Fatalf("wrong script length - expected %d got %d", scriptLenEXX, len(script))
 	}
+	expected, _ := hex.DecodeString(expectedScriptStr)
+	if !bytes.Equal(script, expected) {
+		t.Fatalf("wrong script - expected %x got %x", expected, script)
+	}
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -90,7 +94,7 @@ func TestDecodeExtAddress(t *testing.T) {
 
 	switch ty := addr.(type) {
 	case btcutil.Address:
-		fmt.Printf("testnet - type=%T\n", ty)
+		t.Logf("testnet - type=%T\n", ty)
 	default:
 		t.Fatalf("testnet - invalid type=%T", ty)
 	}
@@ -111,7 +115,7 @@ func TestDecodeExtAddress(t *testing.T) {
 	}
 	enc := addr.EncodeAddress()
 	if enc != testnetExtAddress {
-		t.Fatalf("EncodeAddress failed expected %s got %s", testnetExtAddress, enc)
+		t.Fatalf("testnet - EncodeAddress failed expected %s got %s", testnetExtAddress, enc)
 	}
 }
 
@@ -127,9 +131,13 @@ func TestBuildExtPayToScript(t *testing.T) {
 			t.Fatal(err)
 		}
 	} else {
-		t.Fatal("addr does not implement btc.PaymentScripter")
+		t.Fatal("testnet - addr does not implement btc.PaymentScripter")
 	}
 	if len(script) != scriptLenEXX {
-		t.Fatalf("wrong script length - expected %d got %d", scriptLenEXX, len(script))
+		t.Fatalf("testnet - wrong script length - expected %d got %d", scriptLenEXX, len(script))
+	}
+	expected, _ := hex.DecodeString(testnetExpectedScriptStr)
+	if !bytes.Equal(script, expected) {
+		t.Fatalf("testnet - wrong script - expected %x got %x", expected, script)
 	}
 }
