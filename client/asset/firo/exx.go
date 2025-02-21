@@ -78,7 +78,7 @@ func decodeExxAddress(encodedAddr string, net *chaincfg.Params) (btcutil.Address
 	case ExxSimnet:
 		expNet = dexfiro.RegressionNetParams.Name
 	default:
-		return nil, fmt.Errorf("unrecognized network name %s", expNet)
+		return nil, fmt.Errorf("unrecognized network id %x", netID)
 	}
 	if net.Name != expNet {
 		return nil, fmt.Errorf("wrong network. expected %s, got %s", net.Name, expNet)
