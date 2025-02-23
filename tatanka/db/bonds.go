@@ -50,7 +50,7 @@ func (bond *dbBond) UnmarshalBinary(b []byte) error {
 }
 
 func (d *DB) StoreBond(newBond *tanka.Bond) error {
-	return d.bonds.Set(lexi.B(newBond.CoinID), &dbBond{newBond}, lexi.WithReplace())
+	return d.bonds.Set(newBond.CoinID[:], &dbBond{newBond}, lexi.WithReplace())
 }
 
 func (d *DB) GetBonds(peerID tanka.PeerID) ([]*tanka.Bond, error) {

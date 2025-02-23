@@ -5,7 +5,6 @@ package db
 
 import (
 	"context"
-	"encoding"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -51,12 +50,12 @@ func New(dir string, log dex.Logger) (*DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error initializing meta table: %w", err)
 	}
-	verB, err := metaTable.GetRaw(lexi.B(versionKey))
+	verB, err := metaTable.GetRaw(versionKey)
 	if err != nil {
 		if errors.Is(err, lexi.ErrKeyNotFound) {
 			// fresh install
 			verB = []byte{DBVersion}
-			metaTable.Set(lexi.B(versionKey), lexi.B(verB))
+			metaTable.Set(versionKey, verB)
 		} else {
 			return nil, fmt.Errorf("error getting version")
 		}
@@ -78,7 +77,7 @@ func New(dir string, log dex.Logger) (*DB, error) {
 		return nil, fmt.Errorf("error constructing reputation table: %w", err)
 	}
 	// Scored peer index with timestamp sorting.
-	scoredIdx, err := scoreTable.AddIndex("scored-stamp", func(_, v encoding.BinaryMarshaler) ([]byte, error) {
+	scoredIdx, err := scoreTable.AddIndex("scored-stamp", func(_, v lexi.KV) ([]byte, error) {
 		s, is := v.(*dbScore)
 		if !is {
 			return nil, fmt.Errorf("wrong type %T", v)
@@ -98,7 +97,7 @@ func New(dir string, log dex.Logger) (*DB, error) {
 		return nil, fmt.Errorf("error initializing bonds table: %w", err)
 	}
 	// Retrieve bonds by peer ID.
-	bonderIdx, err := bondsTable.AddIndex("bonder", func(_, v encoding.BinaryMarshaler) ([]byte, error) {
+	bonderIdx, err := bondsTable.AddIndex("bonder", func(_, v lexi.KV) ([]byte, error) {
 		b, is := v.(*dbBond)
 		if !is {
 			return nil, fmt.Errorf("wrong type %T", v)
@@ -109,7 +108,7 @@ func New(dir string, log dex.Logger) (*DB, error) {
 		return nil, fmt.Errorf("error initializing bonder index: %w", err)
 	}
 	// We'll periodically prune expired bonds.
-	bondStampIdx, err := bondsTable.AddIndex("bond-stamp", func(_, v encoding.BinaryMarshaler) ([]byte, error) {
+	bondStampIdx, err := bondsTable.AddIndex("bond-stamp", func(_, v lexi.KV) ([]byte, error) {
 		b, is := v.(*dbBond)
 		if !is {
 			return nil, fmt.Errorf("wrong type %T", v)
