@@ -2,7 +2,6 @@ package lexi
 
 import (
 	"bytes"
-	"encoding"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,11 +65,11 @@ func (v *tValue) MarshalBinary() ([]byte, error) {
 	return v.v, nil
 }
 
-func valueIndex(k, v encoding.BinaryMarshaler) ([]byte, error) {
+func valueIndex(k, v KV) ([]byte, error) {
 	return v.(*tValue).idx, nil
 }
 
-func valueKey(k, v encoding.BinaryMarshaler) ([]byte, error) {
+func valueKey(k, v KV) ([]byte, error) {
 	return v.(*tValue).k, nil
 }
 
@@ -109,7 +108,7 @@ func TestIndex(t *testing.T) {
 		indexKey = append(prefix, indexKey...)
 		v := &tValue{k: indexKey, v: encode.RandomBytes(10), idx: []byte{byte(i)}}
 		vs[i] = v
-		if err := tbl.Set(B(k), v); err != nil {
+		if err := tbl.Set(k, v); err != nil {
 			t.Fatalf("Error setting table entry: %v", err)
 		}
 	}
