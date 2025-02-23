@@ -5,11 +5,8 @@ package lexi
 
 import (
 	"bytes"
-	"encoding"
-	"encoding/binary"
 	"errors"
 	"fmt"
-	"time"
 
 	"decred.org/dcrdex/dex"
 	"github.com/dgraph-io/badger"
@@ -29,13 +26,13 @@ type Index struct {
 	name                    string
 	table                   *Table
 	prefix                  keyPrefix
-	f                       func(k, v encoding.BinaryMarshaler) ([]byte, error)
+	f                       func(k, v KV) ([]byte, error)
 	defaultIterationOptions iteratorOpts
 }
 
 // AddIndex adds an index to a Table. Once an Index is added, every datum
 // Set in the Table will generate an entry in the Index too.
-func (t *Table) AddIndex(name string, f func(k, v encoding.BinaryMarshaler) ([]byte, error)) (*Index, error) {
+func (t *Table) AddIndex(name string, f func(k, v KV) ([]byte, error)) (*Index, error) {
 	p, err := t.prefixForName(t.name + "__idx__" + name)
 	if err != nil {
 		return nil, err
@@ -51,7 +48,7 @@ func (t *Table) AddIndex(name string, f func(k, v encoding.BinaryMarshaler) ([]b
 	return idx, nil
 }
 
-func (idx *Index) add(txn *badger.Txn, k, v encoding.BinaryMarshaler, dbID DBID) ([]byte, error) {
+func (idx *Index) add(txn *badger.Txn, k, v KV, dbID DBID) ([]byte, error) {
 	idxB, err := idx.f(k, v)
 	if err != nil {
 		return nil, fmt.Errorf("error getting index value: %w", err)
@@ -172,37 +169,15 @@ func (i *Iter) Delete() error {
 	return i.table.deleteDatum(i.txn, i.dbID, d)
 }
 
-// IndexBucket is any one of a number of common types whose binary encoding is
-// straight-forward. An IndexBucket restricts Iterate to the entries in the
-// index that have the bytes decoded from the IndexBucket as the prefix.
-type IndexBucket interface{}
-
-func parseIndexBucket(i IndexBucket) (b []byte, err error) {
-	switch it := i.(type) {
-	case []byte:
-		b = it
-	case uint32:
-		b = make([]byte, 4)
-		binary.BigEndian.PutUint32(b[:], it)
-	case time.Time:
-		b = make([]byte, 8)
-		binary.BigEndian.PutUint64(b[:], uint64(it.UnixMilli()))
-	case nil:
-	default:
-		err = fmt.Errorf("unknown IndexBucket type %T", it)
-	}
-	return
-}
-
 // Iterate iterates the index, providing access to the index entry, datum, and
 // datum key via the Iter.
-func (idx *Index) Iterate(prefixI IndexBucket, f func(*Iter) error, iterOpts ...IterationOption) error {
+func (idx *Index) Iterate(prefixI KV, f func(*Iter) error, iterOpts ...IterationOption) error {
 	return idx.iterate(idx.prefix, idx.table, idx.defaultIterationOptions, true, prefixI, f, iterOpts...)
 }
 
 // iterate iterates a table or index.
-func (db *DB) iterate(keyPfix keyPrefix, table *Table, io iteratorOpts, isIndex bool, prefixI IndexBucket, f func(*Iter) error, iterOpts ...IterationOption) error {
-	prefix, err := parseIndexBucket(prefixI)
+func (db *DB) iterate(keyPfix keyPrefix, table *Table, io iteratorOpts, isIndex bool, prefixI KV, f func(*Iter) error, iterOpts ...IterationOption) error {
+	prefix, err := parseKV(prefixI)
 	if err != nil {
 		return err
 	}

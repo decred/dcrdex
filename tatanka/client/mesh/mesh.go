@@ -214,7 +214,7 @@ func (m *Mesh) SubscribeToFiatRates() error {
 // PostBond stores the bond in the database and sends it to the mesh.
 func (m *Mesh) PostBond(bond *tanka.Bond) error {
 	k := bond.ID()
-	if err := m.bondTable.Set(lexi.B(k[:]), lexi.JSON(bond)); err != nil {
+	if err := m.bondTable.Set(k[:], lexi.JSON(bond)); err != nil {
 		return fmt.Errorf("error storing bond in DB: %w", err)
 	}
 	req := mj.MustRequest(mj.RoutePostBond, []*tanka.Bond{bond})

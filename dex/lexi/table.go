@@ -37,8 +37,8 @@ func (db *DB) Table(name string) (*Table, error) {
 }
 
 // GetRaw retrieves a value from the Table as raw bytes.
-func (t *Table) GetRaw(k encoding.BinaryMarshaler) (b []byte, err error) {
-	kB, err := k.MarshalBinary()
+func (t *Table) GetRaw(k KV) (b []byte, err error) {
+	kB, err := parseKV(k)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling key: %w", err)
 	}
@@ -58,7 +58,7 @@ func (t *Table) GetRaw(k encoding.BinaryMarshaler) (b []byte, err error) {
 }
 
 // Get retrieves a value from the Table.
-func (t *Table) Get(k encoding.BinaryMarshaler, thing encoding.BinaryUnmarshaler) error {
+func (t *Table) Get(k KV, thing encoding.BinaryUnmarshaler) error {
 	b, err := t.GetRaw(k)
 	if err != nil {
 		return err
@@ -114,8 +114,8 @@ func (t *Table) UseDefaultSetOptions(setOpts ...SetOption) {
 }
 
 // Set inserts a new value for the key, and creates index entries.
-func (t *Table) Set(k, v encoding.BinaryMarshaler, setOpts ...SetOption) error {
-	kB, err := k.MarshalBinary()
+func (t *Table) Set(k, v KV, setOpts ...SetOption) error {
+	kB, err := parseKV(k)
 	if err != nil {
 		return fmt.Errorf("error marshaling key: %w", err)
 	}
@@ -124,7 +124,7 @@ func (t *Table) Set(k, v encoding.BinaryMarshaler, setOpts ...SetOption) error {
 	if len(kB) == 0 {
 		return errors.New("no zero-length keys allowed")
 	}
-	vB, err := v.MarshalBinary()
+	vB, err := parseKV(v)
 	if err != nil {
 		return fmt.Errorf("error marshaling value: %w", err)
 	}
@@ -210,6 +210,6 @@ func (t *Table) UseDefaultIterationOptions(optss ...IterationOption) {
 }
 
 // Iterate iterates the table.
-func (t *Table) Iterate(prefixI IndexBucket, f func(*Iter) error, iterOpts ...IterationOption) error {
+func (t *Table) Iterate(prefixI KV, f func(*Iter) error, iterOpts ...IterationOption) error {
 	return t.iterate(t.prefix, t, t.defaultIterationOptions, false, prefixI, f, iterOpts...)
 }
