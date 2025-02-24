@@ -1,0 +1,23 @@
+{
+    "name": "ethswap",
+    "version": "1.0.0",
+    "description": "",
+    "main": "index.js",
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "dependencies": {
+        "@account-abstraction/contracts": "^0.6.0",
+        "@openzeppelin/contracts": "^4.2.0",
+        "crypto": "^1.0.1",
+        "dotenv": "^16.4.1",
+        "hardhat": "^2.19.5"
+    },
+    "devDependencies": {
+        "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+        "@nomiclabs/hardhat-etherscan": "^3.1.8"
+    }
+}
