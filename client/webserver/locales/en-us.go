@@ -687,4 +687,6 @@ var EnUS = map[string]*intl.Translation{
 	"Wallet Balances":             {T: "Wallet Balances"},
 	"Placements":                  {T: "Placements"},
 	"delete_bot":                  {T: "Delete Bot"},
+	"user_op_id":                  {T: "User Op ID"},
+	"user_op_required":            {T: "You do not have enough funds for redemption. A bundler will be used for gasless redemption."},
 }

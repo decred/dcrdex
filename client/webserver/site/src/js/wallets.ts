@@ -291,7 +291,13 @@ export default class WalletsPage extends BasePage {
     Doc.bind(page.rescanWallet, 'click', () => this.rescanWallet(this.selectedAssetID))
     Doc.bind(page.earlierTxs, 'click', () => this.loadEarlierTxs())
 
-    Doc.bind(page.copyTxIDBtn, 'click', () => { setupCopyBtn(this.currTx?.id || '', page.txDetailsID, page.copyTxIDBtn, '#1e7d11') })
+    const getTxID = () : string => {
+      if (!this.currTx) return ''
+      if (this.currTx.isUserOp) return this.currTx.userOpTxID
+      return this.currTx.id
+    }
+    Doc.bind(page.copyTxIDBtn, 'click', () => { setupCopyBtn(getTxID(), page.txDetailsID, page.copyTxIDBtn, '#1e7d11') })
+    Doc.bind(page.copyUserOpIDBtn, 'click', () => { setupCopyBtn(this.currTx?.id || '', page.txDetailsUserOpID, page.copyUserOpIDBtn, '#1e7d11') })
     Doc.bind(page.copyRecipientBtn, 'click', () => { setupCopyBtn(this.currTx?.recipient || '', page.txDetailsRecipient, page.copyRecipientBtn, '#1e7d11') })
     Doc.bind(page.copyBondIDBtn, 'click', () => { setupCopyBtn(this.currTx?.bondInfo?.bondID || '', page.txDetailsBondID, page.copyBondIDBtn, '#1e7d11') })
     Doc.bind(page.copyBondAccountIDBtn, 'click', () => { setupCopyBtn(this.currTx?.bondInfo?.accountID || '', page.txDetailsBondAccountID, page.copyBondAccountIDBtn, '#1e7d11') })
@@ -1671,6 +1677,8 @@ export default class WalletsPage extends BasePage {
   }
 
   updateTxHistoryRow (row: PageElement, tx: WalletTransaction, assetID: number) {
+    console.log(JSON.stringify(tx, null, 2))
+
     const tmpl = Doc.parseTemplate(row)
     let amtAssetID = assetID
     let feesAssetID = assetID
@@ -1733,7 +1741,8 @@ export default class WalletsPage extends BasePage {
     // Block explorer
     const assetExplorer = CoinExplorers[this.selectedAssetID]
     if (assetExplorer && assetExplorer[net]) {
-      page.txViewBlockExplorer.href = assetExplorer[net](tx.id)
+      const txIDString = tx.userOpTxID || tx.id
+      page.txViewBlockExplorer.href = assetExplorer[net](txIDString)
     }
 
     // Tx type
@@ -1783,9 +1792,18 @@ export default class WalletsPage extends BasePage {
     Doc.setVis(tx.blockNumber === 0, page.timestampPending, page.blockNumberPending)
     Doc.setVis(tx.blockNumber !== 0, page.txDetailsBlockNumber, page.txDetailsTimestamp)
 
-    // Tx ID
-    page.txDetailsID.textContent = trimStringWithEllipsis(tx.id, 20)
-    page.txDetailsID.setAttribute('title', tx.id)
+    // Tx ID / User Op ID
+    Doc.setVis(tx.isUserOp, page.txDetailsUserOpIDSection)
+    if (tx.isUserOp) {
+      page.txDetailsUserOpID.textContent = trimStringWithEllipsis(tx.id, 20)
+      page.txDetailsUserOpID.setAttribute('title', tx.id)
+      const txIDString = tx.userOpTxID || 'Unsubmitted'
+      page.txDetailsID.textContent = trimStringWithEllipsis(txIDString, 20)
+      page.txDetailsID.setAttribute('title', txIDString)
+    } else {
+      page.txDetailsID.textContent = trimStringWithEllipsis(tx.id, 20)
+      page.txDetailsID.setAttribute('title', tx.id)
+    }
 
     // Recipient
     if (tx.recipient) {
