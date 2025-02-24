@@ -1,0 +1,6 @@
+build-entrypoint
+package-lock.json
+EntryPoint.bin
+artifacts/
+.env
+cache/
