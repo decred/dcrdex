@@ -5573,7 +5573,7 @@ func (c *Core) SingleLotFees(form *SingleLotFeesForm) (swapFees, redeemFees, ref
 		}
 		swapFeeRate, redeemFeeRate = swapAsset.MaxFeeRate, redeemAsset.MaxFeeRate
 	} else {
-		swapFeeRate = c.feeSuggestionAny(wallets.fromWallet.AssetID) // server rates only for the swap init
+		swapFeeRate = c.feeSuggestion(dc, wallets.fromWallet.AssetID) // server rates only for the swap init
 		if swapFeeRate == 0 {
 			return 0, 0, 0, fmt.Errorf("failed to get swap fee suggestion for %s at %s", wallets.fromWallet.Symbol, form.Host)
 		}
