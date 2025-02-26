@@ -17,9 +17,11 @@ import (
 
 	"decred.org/dcrdex/dex"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
+	v6EP "decred.org/dcrdex/dex/networks/eth/contracts/entrypoints/0.6"
 	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	swapv1 "decred.org/dcrdex/dex/networks/eth/contracts/v1"
 	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -526,6 +528,49 @@ func (c *rpcclient) loadToken(ctx context.Context, assetID uint32, vToken *Versi
 		cl.tokens[assetID] = tkn
 	}
 	return nil
+}
+
+type userOpEvent struct {
+	sender        common.Address
+	success       bool
+	actualGasCost *big.Int
+	actualGasUsed *big.Int
+}
+
+func (c *rpcclient) getUserOpEvent(ctx context.Context, epAddress common.Address, epVersion dexeth.EntryPointVersion,
+	userOpHash common.Hash, swapContractAddress common.Address, blockNumber uint64) (*userOpEvent, error) {
+	if epVersion != dexeth.EntryPointVersion0_6 {
+		return nil, fmt.Errorf("unsupported entrypoint version: %s", epVersion)
+	}
+	userOpEvent := &userOpEvent{}
+	return nil, c.withClient(func(ec *ethConn) error {
+		ep, err := v6EP.NewEntrypoint(epAddress, ec)
+		if err != nil {
+			return fmt.Errorf("error creating entrypoint: %v", err)
+		}
+		iter, err := ep.FilterUserOperationEvent(&bind.FilterOpts{
+			Start: blockNumber,
+			End:   &blockNumber,
+		}, [][32]byte{userOpHash}, []common.Address{swapContractAddress}, []common.Address{})
+		if err != nil {
+			return fmt.Errorf("error filtering user operation event: %v", err)
+		}
+		foundEvent := false
+		for iter.Next() {
+			if iter.Event.UserOpHash == userOpHash {
+				foundEvent = true
+				break
+			}
+		}
+		if !foundEvent {
+			return fmt.Errorf("user op event not found")
+		}
+		userOpEvent.sender = iter.Event.Sender
+		userOpEvent.success = iter.Event.Success
+		userOpEvent.actualGasCost = iter.Event.ActualGasCost
+		userOpEvent.actualGasUsed = iter.Event.ActualGasUsed
+		return nil
+	})
 }
 
 func (c *rpcclient) withTokener(assetID uint32, f func(*tokener) error) error {

@@ -10720,7 +10720,11 @@ func (c *Core) handleRetryRedemptionAction(actionB []byte) error {
 				if err := c.db.UpdateMatch(&match.MetaMatch); err != nil {
 					c.log.Errorf("Failed to update match in DB: %v", err)
 				}
-			} else if match.Side == order.Maker && match.Status == order.MakerRedeemed {
+				// For maker, the status could be either MakerRedeemed or
+				// MatchComplete because the redeem message may have gone
+				// through with correct secret, allowing the taker to redeem,
+				// even if the maker's redemption tx failed.
+			} else if match.Side == order.Maker && (match.Status == order.MakerRedeemed || match.Status == order.MatchComplete) {
 				match.redemptionRejected = false
 				match.MetaData.Proof.MakerRedeem = nil
 				match.Status = order.TakerSwapCast
