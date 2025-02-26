@@ -582,7 +582,6 @@ func (t *Tatanka) handleTankagram(c *client, msg *msgjson.Message) *msgjson.Erro
 
 	// The TankagramResult is signed separately.
 	sendTankagramResult := func(r *mj.TankagramResult) {
-		r.Sign(t.priv)
 		t.sendResult(c, msg.ID, r)
 	}
 
@@ -594,7 +593,7 @@ func (t *Tatanka) handleTankagram(c *client, msg *msgjson.Message) *msgjson.Erro
 		relayedMsg := mj.MustRequest(mj.RouteTankagram, gram)
 		sent, clientErr, err := t.requestAnyOne([]tanka.Sender{recip}, relayedMsg, &resB)
 		if sent {
-			sendTankagramResult(&mj.TankagramResult{Result: mj.TRTTransmitted, Response: resB})
+			sendTankagramResult(&mj.TankagramResult{Result: mj.TRTTransmitted, EncryptedPayload: resB})
 			return nil
 		}
 		if clientErr != nil {

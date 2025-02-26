@@ -99,7 +99,7 @@ func (m *Mesh) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 			HandleTatankaNotification: func(tatankaID tanka.PeerID, msg *msgjson.Message) {
 				m.handleTatankaNotification(tatankaID, msg)
 			},
-			HandlePeerMessage: func(peerID tanka.PeerID, msg any) *msgjson.Error {
+			HandlePeerMessage: func(peerID tanka.PeerID, msg *conn.IncomingTankagram) *msgjson.Error {
 				return m.handlePeerRequest(peerID, msg)
 			},
 		},
@@ -176,7 +176,6 @@ func (m *Mesh) handleTatankaNotification(peerID tanka.PeerID, msg *msgjson.Messa
 
 func (m *Mesh) handlePeerRequest(peerID tanka.PeerID, msgI any) *msgjson.Error {
 	switch msgI.(type) {
-	case *conn.IncomingPeerConnect:
 	case *conn.IncomingTankagram:
 	}
 	m.emit(msgI)
@@ -247,6 +246,7 @@ func (m *Mesh) SubscribeMarket(baseID, quoteID uint32) error {
 		Topic:   mj.TopicMarket,
 		Subject: tanka.Subject(mktName),
 	})
+	mj.SignMessage(m.priv, req)
 
 	m.marketsMtx.Lock()
 	defer m.marketsMtx.Unlock()
@@ -297,15 +297,15 @@ func (m *Mesh) handleRates(msg *msgjson.Message) {
 	m.emit(&rm)
 }
 
-func (m *Mesh) ConnectPeer(peerID tanka.PeerID) error {
-	return m.conn.ConnectPeer(peerID)
-}
-
 func (m *Mesh) Auth(tatankaID tanka.PeerID) error {
 	return m.conn.Auth(tatankaID)
 }
 
-func (m *Mesh) RequestPeer(peerID tanka.PeerID, msg *msgjson.Message, thing interface{}) (*mj.TankagramResult, error) {
+func (m *Mesh) ConnectPeer(peerID tanka.PeerID) error {
+	return m.conn.ConnectPeer(peerID)
+}
+
+func (m *Mesh) RequestPeer(peerID tanka.PeerID, msg *msgjson.Message, thing interface{}) error {
 	return m.conn.RequestPeer(peerID, msg, thing)
 }
 
