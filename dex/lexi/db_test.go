@@ -222,6 +222,18 @@ func TestIndex(t *testing.T) {
 	if i != 74 {
 		t.Fatal("never reached 74")
 	}
+
+	// Make sure we can iterate the table directly
+	i = 0
+	if err := tbl.Iterate(nil, func(it *Iter) error {
+		i++
+		return nil
+	}); err != nil {
+		t.Fatalf("Error iterating table: %v", err)
+	}
+	if i != 50 {
+		t.Fatal("table didn't have 50")
+	}
 }
 
 func TestDatum(t *testing.T) {
