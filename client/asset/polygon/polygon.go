@@ -91,7 +91,7 @@ var (
 				NoAuth:      true,
 			},
 		},
-		IsAccountBased: true,
+		BlockchainClass: asset.BlockchainClassEVM,
 	}
 )
 

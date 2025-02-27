@@ -99,6 +99,7 @@ var (
 			ConfigOpts:        configOpts,
 			NoAuth:            true,
 		}},
+		BlockchainClass: asset.BlockchainClassUTXO,
 	}
 )
 
