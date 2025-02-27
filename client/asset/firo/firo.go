@@ -76,12 +76,14 @@ var (
 				Description:       "Connect to firod",
 				DefaultConfigPath: dexbtc.SystemConfigPath("firo"),
 				ConfigOpts:        configOpts,
+				MultiFundingOpts:  btc.MultiFundingOpts,
 			},
 			{
-				Type:        walletTypeElectrum,
-				Tab:         "Electrum-Firo (external)",
-				Description: "Use an external Electrum-Firo Wallet",
-				ConfigOpts:  append(btc.ElectrumConfigOpts, btc.CommonConfigOpts("FIRO", true)...),
+				Type:             walletTypeElectrum,
+				Tab:              "Electrum-Firo (external)",
+				Description:      "Use an external Electrum-Firo Wallet",
+				ConfigOpts:       append(btc.ElectrumConfigOpts, btc.CommonConfigOpts("FIRO", true)...),
+				MultiFundingOpts: btc.MultiFundingOpts,
 			},
 		},
 	}
