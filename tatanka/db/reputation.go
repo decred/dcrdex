@@ -30,7 +30,7 @@ func (d *DB) SetScore(scored, scorer tanka.PeerID, score int8, stamp time.Time) 
 		score:  score,
 		stamp:  stamp,
 	}
-	return d.scores.Set(lexi.B(k), s, lexi.WithReplace())
+	return d.scores.Set(k, s, lexi.WithReplace())
 }
 
 func (d *DB) Reputation(scored tanka.PeerID) (*tanka.Reputation, error) {
