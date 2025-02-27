@@ -2181,7 +2181,7 @@ func getDEXAssetIDs(coin string, tokenIDs map[string][]uint32) []uint32 {
 
 func assetDisabled(isUS bool, assetID uint32) bool {
 	switch dex.BipIDSymbol(assetID) {
-	case "firo", "zec":
+	case "zec":
 		return !isUS // exchange addresses not yet implemented
 	}
 	return false
