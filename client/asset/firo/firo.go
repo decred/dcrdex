@@ -170,6 +170,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		AssetID:                  BipID,
 		FeeEstimator:             estimateFee,
 		ExternalFeeEstimator:     externalFeeRate,
+		AddressDecoder:           decodeAddress,
 		PrivKeyFunc:              nil, // set only for walletTypeRPC below
 	}
 
@@ -195,6 +196,26 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	default:
 		return nil, fmt.Errorf("unknown wallet type %q for firo", cfg.Type)
 	}
+}
+
+/******************************************************************************
+                             Helper Functions
+******************************************************************************/
+
+// decodeAddress decodes a Firo address. For normal transparent addresses this
+// just uses btcd: btcutil.DecodeAddress.
+func decodeAddress(address string, net *chaincfg.Params) (btcutil.Address, error) {
+	if isExxAddress(address) {
+		return decodeExxAddress(address, net)
+	}
+	decAddr, err := btcutil.DecodeAddress(address, net)
+	if err != nil {
+		return nil, err
+	}
+	if !decAddr.IsForNet(net) {
+		return nil, errors.New("wrong network")
+	}
+	return decAddr, nil
 }
 
 // rpcCaller is satisfied by ExchangeWalletFullNode (baseWallet), providing
