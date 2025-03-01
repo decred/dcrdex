@@ -5510,6 +5510,116 @@ func (c *Core) ApproveTokenFee(assetID uint32, version uint32, approval bool) (u
 	return wallet.ApprovalFee(version, approval)
 }
 
+// BridgeContractApprovalStatus returns the approval status of the bridge
+// contract for the specified asset.
+func (c *Core) BridgeContractApprovalStatus(assetID uint32) (asset.ApprovalStatus, error) {
+	wallet, err := c.connectedWallet(assetID)
+	if err != nil {
+		return 0, err
+	}
+
+	return wallet.BridgeContractApprovalStatus(c.ctx)
+}
+
+// ApproveBridgeContract approves the bridge contract for the specified asset.
+func (c *Core) ApproveBridgeContract(assetID uint32) (string, error) {
+	wallet, err := c.connectedWallet(assetID)
+	if err != nil {
+		return "", err
+	}
+
+	if !wallet.unlocked() {
+		return "", fmt.Errorf("wallet %s must be unlocked", unbip(assetID))
+	}
+
+	err = wallet.checkPeersAndSyncStatus()
+	if err != nil {
+		return "", err
+	}
+
+	txID, err := wallet.ApproveBridgeContract(c.ctx)
+	if err != nil {
+		return "", err
+	}
+
+	return txID, nil
+}
+
+// UnapproveBridgeContract unapproves the bridge contract for the specified
+// asset.
+func (c *Core) UnapproveBridgeContract(assetID uint32) (string, error) {
+	wallet, err := c.connectedWallet(assetID)
+	if err != nil {
+		return "", err
+	}
+
+	if !wallet.unlocked() {
+		return "", fmt.Errorf("wallet %s must be unlocked", unbip(assetID))
+	}
+
+	err = wallet.checkPeersAndSyncStatus()
+	if err != nil {
+		return "", err
+	}
+
+	txID, err := wallet.UnapproveBridgeContract(c.ctx)
+	if err != nil {
+		return "", err
+	}
+
+	return txID, nil
+}
+
+// Bridge burns tokens on the source chain in order to mint them on the
+// destination chain.
+func (c *Core) Bridge(fromAssetID, toAssetID uint32, amt uint64) (txID string, err error) {
+	wallet, err := c.connectedWallet(fromAssetID)
+	if err != nil {
+		return "", err
+	}
+
+	if !wallet.unlocked() {
+		return "", fmt.Errorf("wallet %s must be unlocked", unbip(fromAssetID))
+	}
+
+	err = wallet.checkPeersAndSyncStatus()
+	if err != nil {
+		return "", err
+	}
+
+	return wallet.Bridge(c.ctx, amt, toAssetID)
+}
+
+// GetMintData takes the txID returned from bridge and looks up the data needed
+// to mint the bridged tokens on the destination chain.
+func (c *Core) GetMintData(fromAssetID uint32, burnTxID string) ([]byte, error) {
+	wallet, err := c.connectedWallet(fromAssetID)
+	if err != nil {
+		return nil, err
+	}
+
+	return wallet.GetMintData(c.ctx, burnTxID)
+}
+
+// Mint mints bridged tokens on the destination chain.
+func (c *Core) Mint(toAssetID uint32, mintData []byte) (txID string, err error) {
+	wallet, err := c.connectedWallet(toAssetID)
+	if err != nil {
+		return "", err
+	}
+
+	if !wallet.unlocked() {
+		return "", fmt.Errorf("wallet %s must be unlocked", unbip(toAssetID))
+	}
+
+	err = wallet.checkPeersAndSyncStatus()
+	if err != nil {
+		return "", err
+	}
+
+	return wallet.Mint(c.ctx, mintData)
+}
+
 // EstimateSendTxFee returns an estimate of the tx fee needed to send or
 // withdraw the specified amount.
 func (c *Core) EstimateSendTxFee(address string, assetID uint32, amount uint64, subtract, maxWithdraw bool) (fee uint64, isValidAddress bool, err error) {

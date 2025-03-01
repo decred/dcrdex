@@ -1100,6 +1100,9 @@ func TestCheckForNewBlocks(t *testing.T) {
 					txDB:             &tTxDB{},
 					finalizeConfs:    txConfsNeededToConfirm,
 				},
+				versionedContracts: map[uint32]common.Address{
+					0: {},
+				},
 				log:     tLogger.SubLogger("ETH"),
 				emit:    emit,
 				assetID: BipID,
@@ -1309,11 +1312,14 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 		evmify:             dexeth.GweiToWei,
 		atomize:            dexeth.WeiToGwei,
 		pendingTxCheckBal:  new(big.Int),
-		pendingApprovals:   make(map[uint32]*pendingApproval),
-		approvalCache:      make(map[uint32]bool),
+		pendingApprovals:   make(map[common.Address]*pendingApproval),
+		approvalCache:      make(map[common.Address]bool),
 		// move up after review
 		wi:   WalletInfo,
 		emit: asset.NewWalletEmitter(emitChan, BipID, tLogger),
+		versionedContracts: map[uint32]common.Address{
+			0: {},
+		},
 	}
 	aw.wallets = map[uint32]*assetWallet{
 		BipID: aw,
@@ -1333,8 +1339,8 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 			contractorV1:     node.tContractor,
 			assetID:          BipID,
 			atomize:          dexeth.WeiToGwei,
-			pendingApprovals: make(map[uint32]*pendingApproval),
-			approvalCache:    make(map[uint32]bool),
+			pendingApprovals: make(map[common.Address]*pendingApproval),
+			approvalCache:    make(map[common.Address]bool),
 			emit:             asset.NewWalletEmitter(emitChan, BipID, tLogger),
 		}
 		w = &TokenWallet{
@@ -2021,7 +2027,7 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 
 	// Test that funding without allowance causes error
 	if assetID != BipID {
-		eth.approvalCache = make(map[uint32]bool)
+		eth.approvalCache = make(map[common.Address]bool)
 		node.tokenContractor.allow = big.NewInt(0)
 		_, _, _, err = w.FundOrder(&order)
 		if err == nil {

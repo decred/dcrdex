@@ -702,3 +702,67 @@ func (w *xcWallet) feeRate() uint64 {
 	}
 	return 0
 }
+
+// BridgeContractApprovalStatus returns the approval status of the bridge
+// contract if the wallet is a Bridger.
+func (w *xcWallet) BridgeContractApprovalStatus(ctx context.Context) (asset.ApprovalStatus, error) {
+	approver, ok := w.Wallet.(asset.Bridger)
+	if !ok {
+		return 0, fmt.Errorf("%s wallet is not a Bridger", unbip(w.AssetID))
+	}
+	return approver.BridgeContractApprovalStatus(ctx)
+}
+
+// ApproveBridgeContract approves the bridge contract if the wallet is a
+// Bridger.
+func (w *xcWallet) ApproveBridgeContract(ctx context.Context) (string, error) {
+	approver, ok := w.Wallet.(asset.Bridger)
+	if !ok {
+		return "", fmt.Errorf("%s wallet is not a Bridger", unbip(w.AssetID))
+	}
+	return approver.ApproveBridgeContract(ctx)
+}
+
+// UnapproveBridgeContract removes approval of the bridge contract if the
+// wallet is a Bridger.
+func (w *xcWallet) UnapproveBridgeContract(ctx context.Context) (string, error) {
+	approver, ok := w.Wallet.(asset.Bridger)
+	if !ok {
+		return "", fmt.Errorf("%s wallet is not a Bridger", unbip(w.AssetID))
+	}
+	return approver.UnapproveBridgeContract(ctx)
+}
+
+// Bridge sends an amount to the specified destination if the wallet is a
+// Bridger.
+func (w *xcWallet) Bridge(ctx context.Context, amt uint64, dest uint32) (txID string, err error) {
+	bridger, ok := w.Wallet.(asset.Bridger)
+	if !ok {
+		return "", fmt.Errorf("%s wallet is not a Bridger", unbip(w.AssetID))
+	}
+	return bridger.Bridge(ctx, amt, dest)
+}
+
+// GetMintData retrieves the mint data for the specified transaction if the
+func (w *xcWallet) GetMintData(ctx context.Context, txID string) ([]byte, error) {
+	bridger, ok := w.Wallet.(asset.Bridger)
+	if !ok {
+		return nil, fmt.Errorf("%s wallet is not a Bridger", unbip(w.AssetID))
+	}
+	return bridger.GetMintData(ctx, txID)
+}
+
+// Mint mints the asset on the destination chain if the wallet is a Bridger.
+func (w *xcWallet) Mint(ctx context.Context, mintData []byte) (txID string, err error) {
+	bridger, ok := w.Wallet.(asset.Bridger)
+	if !ok {
+		return "", fmt.Errorf("%s wallet is not a Bridger", unbip(w.AssetID))
+	}
+	return bridger.Mint(ctx, mintData)
+}
+
+// feeRater is identical to calling w.Wallet.(asset.FeeRater).
+func (w *xcWallet) feeRater() (asset.FeeRater, bool) {
+	rater, is := w.Wallet.(asset.FeeRater)
+	return rater, is
+}

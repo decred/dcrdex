@@ -4,10 +4,12 @@
 package rpcserver
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -64,6 +66,7 @@ const (
 	txHistoryRoute             = "txhistory"
 	walletTxRoute              = "wallettx"
 	withdrawBchSpvRoute        = "withdrawbchspv"
+	bridgeRoute                = "bridge"
 )
 
 const (
@@ -140,7 +143,7 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	setVotingPreferencesRoute:  handleSetVotingPreferences,
 	txHistoryRoute:             handleTxHistory,
 	walletTxRoute:              handleWalletTx,
-	withdrawBchSpvRoute:        handleWithdrawBchSpv,
+	bridgeRoute:                handleBridge,
 }
 
 // handleHelp handles requests for help. Returns general help for all commands
@@ -1074,6 +1077,162 @@ func handleWithdrawBchSpv(s *RPCServer, params *RawParams) *msgjson.ResponsePayl
 	return createResponse(withdrawBchSpvRoute, dex.Bytes(txB).String(), nil)
 }
 
+func handleCheckBridgeApproval(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	if len(params.Args) != 1 {
+		return usage(bridgeRoute, fmt.Errorf("expected 1 args, got %d", len(params.Args)))
+	}
+
+	i, err := strconv.ParseUint(params.Args[0], 10, 32)
+	if err != nil {
+		return usage(bridgeRoute, fmt.Errorf("error parsing assetID: %v", err))
+	}
+
+	assetID := uint32(i)
+
+	approvalStatus, err := s.core.BridgeContractApprovalStatus(assetID)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to check bridge approval: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCBridgeError, errMsg)
+		return createResponse(bridgeRoute, nil, resErr)
+	}
+
+	return createResponse(bridgeRoute, approvalStatus, nil)
+}
+
+func handleApproveBridge(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	if len(params.Args) != 2 {
+		return usage(bridgeRoute, fmt.Errorf("expected 2 args, got %d", len(params.Args)))
+	}
+
+	i, err := strconv.ParseUint(params.Args[0], 10, 32)
+	if err != nil {
+		return usage(bridgeRoute, fmt.Errorf("error parsing assetID: %v", err))
+	}
+
+	assetID := uint32(i)
+
+	approve, err := strconv.ParseBool(params.Args[1])
+	if err != nil {
+		return usage(bridgeRoute, fmt.Errorf("error parsing approve: %v", err))
+	}
+
+	var txID string
+	if approve {
+		txID, err = s.core.ApproveBridgeContract(assetID)
+	} else {
+		txID, err = s.core.UnapproveBridgeContract(assetID)
+	}
+
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to approve bridge contract: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCBridgeError, errMsg)
+		return createResponse(bridgeRoute, nil, resErr)
+	}
+
+	return createResponse(bridgeRoute, txID, nil)
+}
+
+func handleBurn(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	if len(params.Args) != 3 {
+		return usage(bridgeRoute, fmt.Errorf("expected 3 args, got %d", len(params.Args)))
+	}
+
+	fromAssetID, err := strconv.ParseUint(params.Args[0], 10, 32)
+	if err != nil {
+		return usage(bridgeRoute, fmt.Errorf("error parsing fromAssetID: %v", err))
+	}
+
+	toAssetID, err := strconv.ParseUint(params.Args[1], 10, 32)
+	if err != nil {
+		return usage(bridgeRoute, fmt.Errorf("error parsing toAssetID: %v", err))
+	}
+
+	value, err := strconv.ParseUint(params.Args[2], 10, 64)
+	if err != nil {
+		return usage(bridgeRoute, fmt.Errorf("error parsing value: %v", err))
+	}
+
+	txID, err := s.core.Bridge(uint32(fromAssetID), uint32(toAssetID), value)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to burn tokens: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCBridgeError, errMsg)
+		return createResponse(bridgeRoute, nil, resErr)
+	}
+
+	return createResponse(bridgeRoute, txID, nil)
+}
+
+func handleGetMintData(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	if len(params.Args) != 2 {
+		return usage(bridgeRoute, fmt.Errorf("expected 1 args, got %d", len(params.Args)))
+	}
+
+	fromAssetID, err := strconv.ParseUint(params.Args[0], 10, 32)
+	if err != nil {
+		return usage(bridgeRoute, fmt.Errorf("error parsing fromAssetID: %v", err))
+	}
+
+	burnTxID := params.Args[1]
+
+	mintInfo, err := s.core.GetMintData(uint32(fromAssetID), burnTxID)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to get mint info: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCBridgeError, errMsg)
+		return createResponse(bridgeRoute, nil, resErr)
+	}
+
+	return createResponse(bridgeRoute, hex.EncodeToString(mintInfo), nil)
+}
+
+func handleMint(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	if len(params.Args) != 2 {
+		return usage(bridgeRoute, fmt.Errorf("expected 1 args, got %d", len(params.Args)))
+	}
+
+	toAssetID, err := strconv.ParseUint(params.Args[0], 10, 32)
+	if err != nil {
+		return usage(bridgeRoute, fmt.Errorf("error parsing toAssetID: %v", err))
+	}
+
+	mintData, err := hex.DecodeString(params.Args[1])
+	if err != nil {
+		return usage(bridgeRoute, fmt.Errorf("error parsing mintData: %v", err))
+	}
+
+	mintInfo, err := s.core.Mint(uint32(toAssetID), mintData)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to get mint info: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCBridgeError, errMsg)
+		return createResponse(bridgeRoute, nil, resErr)
+	}
+
+	return createResponse(bridgeRoute, mintInfo, nil)
+}
+
+func handleBridge(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	if len(params.Args) < 1 {
+		return usage(bridgeRoute, fmt.Errorf("no arguments provided"))
+	}
+
+	subCommand := params.Args[0]
+	params.Args = params.Args[1:]
+
+	switch subCommand {
+	case "checkbridgeapproval":
+		return handleCheckBridgeApproval(s, params)
+	case "approvebridge":
+		return handleApproveBridge(s, params)
+	case "burn":
+		return handleBurn(s, params)
+	case "getmintinfo":
+		return handleGetMintData(s, params)
+	case "mint":
+		return handleMint(s, params)
+	}
+
+	return usage(bridgeRoute, fmt.Errorf("unrecognized subcommand %s", subCommand))
+}
+
 // format concatenates thing and tail. If thing is empty, returns an empty
 // string.
 func format(thing, tail string) string {
@@ -1843,5 +2002,30 @@ an spv wallet and enables options to view and set the vsp.
 		cmdSummary:  `Get a transaction that will withdraw all funds from the deprecated Bitcoin Cash SPV wallet`,
 		argsLong: `Args:
 		  recipient (string): The Bitcoin Cash address to withdraw the funds to`,
+	},
+	bridgeRoute: {
+		argsShort: `subCommand subCommandArgs...`,
+		cmdSummary: `Interact with a token bridge.
+			Subcommands are "checkbridgeapproval", "approvebridge", "burn", "getmintinfo", "mint".
+			checkbridgeapproval: Check if the bridge contract is approved.
+			    args: assetID
+			approvebridge: (Un)Approve the bridge contract.
+			    args: assetID approve
+			burn: Burn tokens on "from" chain.
+			    args: fromAssetID toAssetID value
+			getmintinfo: Get information needed to mint tokens.
+			    args: burnTxID
+			mint: Mint tokens on "to" chain.
+			    args: mintInfo
+			`,
+		argsLong: `Args:
+			subCommand (string): The subcommand to execute.
+			assetID (int): The asset's BIP-44 registered coin index.
+			approve (bool): Whether to approve or unapprove the bridge contract.
+			fromAssetID (int): The asset's BIP-44 registered coin index on the "from" chain.
+			toAssetID (int): The asset's BIP-44 registered coin index on the "to" chain.
+			value (int): The amount of tokens to bridge.
+			burnTxID (string): The transaction ID of the burn transaction. Returned from the burn command.
+			mintInfo (string): The information needed to mint tokens. Returned from the getmintinfo command.`,
 	},
 }

@@ -694,6 +694,15 @@ type Withdrawer interface {
 	Withdraw(address string, value, feeRate uint64) (Coin, error)
 }
 
+type Bridger interface {
+	ApproveBridgeContract(ctx context.Context) (string, error)
+	UnapproveBridgeContract(ctx context.Context) (string, error)
+	BridgeContractApprovalStatus(ctx context.Context) (ApprovalStatus, error)
+	Bridge(ctx context.Context, amt uint64, dest uint32) (txID string, err error)
+	GetMintData(ctx context.Context, txID string) ([]byte, error)
+	Mint(ctx context.Context, mintData []byte) (txID string, err error)
+}
+
 // Sweeper is a wallet that can clear the entire balance of the wallet/account
 // to an address. Similar to Withdraw, but no input value is required.
 type Sweeper interface {
@@ -1122,6 +1131,8 @@ const (
 	// and was unable to determine if the transaction was a swap or a send.
 	SwapOrSend
 	Mix
+	BridgeToken
+	MintToken
 )
 
 // IncomingTxType returns true if the wallet's balance increases due to a
