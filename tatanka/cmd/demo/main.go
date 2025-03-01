@@ -19,7 +19,8 @@ import (
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/tatanka"
 	"decred.org/dcrdex/tatanka/chain/utxo"
-	tankaclient "decred.org/dcrdex/tatanka/client"
+	"decred.org/dcrdex/tatanka/client/conn"
+	"decred.org/dcrdex/tatanka/client/mesh"
 	"decred.org/dcrdex/tatanka/mj"
 	"decred.org/dcrdex/tatanka/tanka"
 	"decred.org/dcrdex/tatanka/tcp"
@@ -126,15 +127,17 @@ func mainErr() (err error) {
 
 	time.Sleep(time.Second)
 
-	cl1, err := newClient(ctx, addrs[0].String(), pid0, 0)
+	cl1, shutdown1, err := newClient(ctx, addrs[0].String(), pid0, 0)
 	if err != nil {
 		return fmt.Errorf("error making first connected client: %v", err)
 	}
+	defer shutdown1()
 
-	cl2, err := newClient(ctx, addrs[1].String(), pid1, 1)
+	cl2, shutdown2, err := newClient(ctx, addrs[1].String(), pid1, 1)
 	if err != nil {
 		return fmt.Errorf("error making second connected client: %v", err)
 	}
+	defer shutdown2()
 
 	// cm.Disconnect()
 
@@ -152,7 +155,7 @@ func mainErr() (err error) {
 	// Client 1 should receive a notification.
 	select {
 	case bcastI := <-cl1.Next():
-		bcast, is := bcastI.(mj.Broadcast)
+		bcast, is := bcastI.(*mj.Broadcast)
 		if !is {
 			return fmt.Errorf("expected new subscription Broadcast, got %T", bcastI)
 		}
@@ -175,7 +178,7 @@ func mainErr() (err error) {
 
 	select {
 	case bcastI := <-cl1.Next():
-		bcast, is := bcastI.(mj.Broadcast)
+		bcast, is := bcastI.(*mj.Broadcast)
 		if !is {
 			return fmt.Errorf("client 1 expected trollbox Broadcast bounceback, got %T", bcastI)
 		}
@@ -189,7 +192,7 @@ func mainErr() (err error) {
 
 	select {
 	case bcastI := <-cl2.Next():
-		bcast, is := bcastI.(mj.Broadcast)
+		bcast, is := bcastI.(*mj.Broadcast)
 		if !is {
 			return fmt.Errorf("client 2 expected trollbox Broadcast, got %T", bcastI)
 		}
@@ -202,13 +205,13 @@ func mainErr() (err error) {
 	}
 
 	// Connect clients
-	if _, err := cl1.ConnectPeer(cl2.ID()); err != nil {
+	if err := cl1.ConnectPeer(cl2.ID()); err != nil {
 		return fmt.Errorf("error connecting peers: %w", err)
 	}
 
 	select {
 	case newPeerI := <-cl2.Next():
-		if _, is := newPeerI.(*tankaclient.IncomingPeerConnect); !is {
+		if _, is := newPeerI.(*conn.IncomingPeerConnect); !is {
 			return fmt.Errorf("expected IncomingPeerConnect, got %T", newPeerI)
 		}
 		fmt.Printf("Client 2's received the new peer notification: %+v \n", newPeerI)
@@ -218,10 +221,11 @@ func mainErr() (err error) {
 
 	// Send a tankagram
 	const testRoute = "test_route"
-	respC := make(chan interface{})
+	respC := make(chan any)
 	go func() {
 		msg := mj.MustRequest(testRoute, true)
-		r, resB, err := cl1.SendTankagram(cl2.ID(), msg)
+		var resp string
+		r, err := cl1.RequestPeer(cl2.ID(), msg, &resp)
 		if r.Result != mj.TRTTransmitted {
 			respC <- fmt.Errorf("not transmitted. %q", r.Result)
 			return
@@ -230,12 +234,12 @@ func mainErr() (err error) {
 			respC <- err
 			return
 		}
-		respC <- resB
+		respC <- resp
 	}()
 
 	select {
 	case gramI := <-cl2.Next():
-		gram, is := gramI.(*tankaclient.IncomingTankagram)
+		gram, is := gramI.(*conn.IncomingTankagram)
 		if !is {
 			return fmt.Errorf("expected IncomingTankagram, got a %T", gramI)
 		}
@@ -252,13 +256,9 @@ func mainErr() (err error) {
 		switch resp := respI.(type) {
 		case error:
 			return fmt.Errorf("error sending tankagram: %v", resp)
-		case json.RawMessage:
-			var s string
-			if err := json.Unmarshal(resp, &s); err != nil {
-				return fmt.Errorf("tankagram response didn't unmarshal: %w", err)
-			}
-			if s != "ok" {
-				return fmt.Errorf("wrong tankagram response %q", s)
+		case string:
+			if resp != "ok" {
+				return fmt.Errorf("wrong tankagram response %q", resp)
 			}
 		}
 	case <-time.After(time.Second):
@@ -272,7 +272,19 @@ func mainErr() (err error) {
 	}
 
 	// Wait for rate message.
-	<-cl1.Next()
+	timeout := time.NewTimer(time.Second)
+out:
+	for {
+		select {
+		case msgI := <-cl1.Next():
+			switch msgI.(type) {
+			case *mj.RateMessage:
+				break out
+			}
+		case <-timeout.C:
+			return errors.New("timed out waiting for rate message")
+		}
+	}
 
 	want := len(chains)
 	got := 0
@@ -302,7 +314,7 @@ func mainErr() (err error) {
 }
 
 type connectedClient struct {
-	*tankaclient.TankaClient
+	*mesh.Mesh
 	cm *dex.ConnectionMaster
 }
 
@@ -385,45 +397,54 @@ func newBootNode(addr string, peerID []byte) tatanka.BootNode {
 	}
 }
 
-func newClient(ctx context.Context, addr string, peerID tanka.PeerID, i int) (*connectedClient, error) {
+func newClient(ctx context.Context, addr string, peerID tanka.PeerID, i int) (*connectedClient, context.CancelFunc, error) {
 	log := logMaker.NewLogger(fmt.Sprintf("tCL[%d:%s]", i, addr), dex.LevelTrace)
 	priv, _ := secp256k1.GeneratePrivateKey()
 
-	tc := tankaclient.New(&tankaclient.Config{
+	dataDir, _ := os.MkdirTemp("", "")
+	shutdown := func() {
+		os.RemoveAll(dataDir)
+	}
+
+	mesh, err := mesh.New(&mesh.Config{
+		DataDir:    dataDir,
 		Logger:     log.SubLogger("tTC"),
 		PrivateKey: priv,
+		EntryNode: &mesh.TatankaCredentials{
+			PeerID: peerID,
+			Addr:   addr,
+			NoTLS:  true,
+		},
 	})
+	if err != nil {
+		return nil, nil, err
+	}
 
-	cm := dex.NewConnectionMaster(tc)
+	cm := dex.NewConnectionMaster(mesh)
 	if err := cm.ConnectOnce(ctx); err != nil {
-		return nil, fmt.Errorf("ConnectOnce error: %w", err)
+		return nil, nil, fmt.Errorf("ConnectOnce error: %w", err)
 	}
 
-	if err := tc.AddTatankaNode(ctx, peerID, "ws://"+addr, nil); err != nil {
-		cm.Disconnect()
-		return nil, fmt.Errorf("error adding server %q", addr)
-	}
-
-	if err := tc.PostBond(&tanka.Bond{
-		PeerID:     tc.ID(),
+	if err := mesh.PostBond(&tanka.Bond{
+		PeerID:     mesh.ID(),
 		AssetID:    42,
 		CoinID:     nil,
 		Strength:   1,
 		Expiration: time.Now().Add(time.Hour * 24 * 365),
 	}); err != nil {
 		cm.Disconnect()
-		return nil, fmt.Errorf("PostBond error: %v", err)
+		return nil, nil, fmt.Errorf("PostBond error: %v", err)
 	}
 
-	if err := tc.Auth(peerID); err != nil {
+	if err := mesh.Auth(peerID); err != nil {
 		cm.Disconnect()
-		return nil, fmt.Errorf("auth error: %v", err)
+		return nil, nil, fmt.Errorf("auth error: %v", err)
 	}
 
 	return &connectedClient{
-		TankaClient: tc,
-		cm:          cm,
-	}, nil
+		Mesh: mesh,
+		cm:   cm,
+	}, shutdown, nil
 }
 
 func mustEncode(thing interface{}) json.RawMessage {

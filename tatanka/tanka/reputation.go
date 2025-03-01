@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
+	"github.com/decred/dcrd/crypto/blake256"
 )
 
 const (
@@ -28,6 +30,17 @@ type Bond struct {
 	CoinID     dex.Bytes `json:"coinID"`
 	Strength   uint64    `json:"strength"`
 	Expiration time.Time `json:"expiration"`
+	// TODO (buck): Switch to Maturation.
+	Maturation time.Time `json:"maturation"`
+}
+
+func (bond *Bond) ID() ID32 {
+	buf := make([]byte, PeerIDLength+4 /* asset ID */ +len(bond.CoinID))
+	copy(buf[:PeerIDLength], bond.PeerID[:])
+	copy(buf[PeerIDLength:PeerIDLength+4], encode.Uint32Bytes(bond.AssetID))
+	copy(buf[PeerIDLength+4:], bond.CoinID[:])
+	return blake256.Sum256(buf)
+
 }
 
 type HTLCAudit struct{}
