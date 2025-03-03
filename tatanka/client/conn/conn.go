@@ -449,7 +449,7 @@ func (c *MeshConn) handleTatankaMessage(tatankaID tanka.PeerID, msg *msgjson.Mes
 		c.handlers.HandleTatankaNotification(tatankaID, msg)
 		return nil
 	default:
-		c.log.Errorf("tatanka node %s send a message with an unhandleable type %d", msg.Type)
+		c.log.Errorf("tatanka node %s send a message with an unhandleable type %d", tt.peerID, msg.Type)
 		return msgjson.NewError(mj.ErrBadRequest, "message type %d doesn't work for me", msg.Type)
 	}
 }
