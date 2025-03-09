@@ -5,13 +5,14 @@ package conn
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
-	"crypto/rsa"
-	"encoding/binary"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,11 +22,14 @@ import (
 	"decred.org/dcrdex/tatanka/mj"
 	"decred.org/dcrdex/tatanka/tanka"
 	tcpclient "decred.org/dcrdex/tatanka/tcp/client"
-	"github.com/decred/dcrd/crypto/blake256"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
-const rsaPrivateKeyLength = 2048
+const (
+	ErrPeerNeedsReconnect = dex.ErrorKind("peer needs reconnect")
+	ErrTankaError         = dex.ErrorKind("tanka error")
+	ErrBadPeerResponse    = dex.ErrorKind("bad peer response")
+)
 
 // NetworkBackend represents a peer's communication protocol.
 type NetworkBackend interface {
@@ -34,7 +38,7 @@ type NetworkBackend interface {
 }
 
 // tatanka is a Tatanka mesh server node.
-type tatanka struct {
+type tatankaNode struct {
 	NetworkBackend
 	cm     *dex.ConnectionMaster
 	url    string
@@ -43,79 +47,119 @@ type tatanka struct {
 	config atomic.Value // *mj.TatankaConfig
 }
 
-func (tt *tatanka) String() string {
+func (tt *tatankaNode) String() string {
 	return fmt.Sprintf("%s @ %s", tt.peerID, tt.url)
 }
 
 // peer is a network peer with which we have established encrypted
 // communication.
 type peer struct {
-	id            tanka.PeerID
-	pub           *secp256k1.PublicKey
-	decryptionKey *rsa.PrivateKey // ours
-	encryptionKey *rsa.PublicKey
+	id                 tanka.PeerID
+	ephemeralSharedKey []byte
 }
 
-// wireKey encrypts our RSA public key for transmission.
-func (p *peer) wireKey() []byte {
-	modulusB := p.decryptionKey.PublicKey.N.Bytes()
-	encryptionKey := make([]byte, 8+len(modulusB))
-	binary.BigEndian.PutUint64(encryptionKey[:8], uint64(p.decryptionKey.PublicKey.E))
-	copy(encryptionKey[8:], modulusB)
-	return encryptionKey
-}
+const (
+	aesKeySize   = 32
+	gcmNonceSize = 12
+)
 
-// https://stackoverflow.com/a/67035019
-func (p *peer) decryptRSA(enc []byte) ([]byte, error) {
-	msgLen := len(enc)
-	hasher := blake256.New()
-	step := p.decryptionKey.PublicKey.Size()
-	var b []byte
-	for start := 0; start < msgLen; start += step {
-		finish := start + step
-		if finish > msgLen {
-			finish = msgLen
-		}
-		block, err := rsa.DecryptOAEP(hasher, rand.Reader, p.decryptionKey, enc[start:finish], []byte{})
-		if err != nil {
-			return nil, err
-		}
-		b = append(b, block...)
+func decryptAES(key []byte, ciphertext []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create AES cipher: %v", err)
 	}
-	return b, nil
-}
 
-func (p *peer) encryptRSA(b []byte) ([]byte, error) {
-	msgLen := len(b)
-	hasher := blake256.New()
-	step := p.encryptionKey.Size() - 2*hasher.Size() - 2
-	var enc []byte
-	for start := 0; start < msgLen; start += step {
-		finish := start + step
-		if finish > msgLen {
-			finish = msgLen
-		}
-		block, err := rsa.EncryptOAEP(hasher, rand.Reader, p.encryptionKey, b[start:finish], []byte{})
-		if err != nil {
-			return nil, err
-		}
-		enc = append(enc, block...)
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GCM: %v", err)
 	}
-	return enc, nil
+
+	if len(ciphertext) < gcmNonceSize {
+		return nil, fmt.Errorf("ciphertext too short")
+	}
+	nonce, ciphertext := ciphertext[:gcmNonceSize], ciphertext[gcmNonceSize:]
+
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return nil, fmt.Errorf("decryption failed: %v", err)
+	}
+
+	return plaintext, nil
 }
 
-// IncomingPeerConnect will be emitted when a peer requests a connection for
-// the transmission of tankagrams.
-type IncomingPeerConnect struct {
-	PeerID tanka.PeerID
-	Reject func()
+func decryptTankagramPayload(key []byte, ciphertext []byte) (*msgjson.Message, error) {
+	plaintext, err := decryptAES(key, ciphertext)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt payload: %v", err)
+	}
+
+	var msg msgjson.Message
+	if err := json.Unmarshal(plaintext, &msg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal payload: %v", err)
+	}
+
+	return &msg, nil
+}
+
+func decryptTankagramResult(key []byte, ciphertext []byte) (*mj.TankagramResultPayload, error) {
+	fmt.Printf("decrypting tankagram result with key %s\n", hex.EncodeToString(key))
+
+	plaintext, err := decryptAES(key, ciphertext)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt payload: %v", err)
+	}
+
+	var res mj.TankagramResultPayload
+	if err := json.Unmarshal(plaintext, &res); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal payload: %v", err)
+	}
+
+	return &res, nil
+}
+
+func encryptAES(key []byte, plaintext []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create AES cipher: %v", err)
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GCM: %v", err)
+	}
+
+	nonce := make([]byte, gcmNonceSize)
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, fmt.Errorf("failed to generate nonce: %v", err)
+	}
+
+	ciphertext := gcm.Seal(nonce, nonce, plaintext, nil)
+	return ciphertext, nil
+}
+
+func encryptTankagramResult(key []byte, msg *mj.TankagramResultPayload) ([]byte, error) {
+	plaintext, err := json.Marshal(msg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal payload: %v", err)
+	}
+	return encryptAES(key, plaintext)
+}
+
+func encryptTankagramPayload(key []byte, msg *msgjson.Message) ([]byte, error) {
+	plaintext, err := json.Marshal(msg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal payload: %v", err)
+	}
+
+	return encryptAES(key, plaintext)
 }
 
 // IncomingTankagram will be emitted when we receive a tankagram from a
 // connected peer.
 type IncomingTankagram struct {
-	Msg     *msgjson.Message
-	Respond func(thing interface{}) error
+	Msg        *msgjson.Message
+	Respond    func(any) error
+	RespondErr func(mj.TankagramError) error
 }
 
 // NewMarketSubscriber will be emitted when a new client subscribes to a market.
@@ -128,7 +172,7 @@ type NewMarketSubscriber struct {
 type MessageHandlers struct {
 	HandleTatankaRequest      func(tanka.PeerID, *msgjson.Message) *msgjson.Error
 	HandleTatankaNotification func(tanka.PeerID, *msgjson.Message)
-	HandlePeerMessage         func(tanka.PeerID, any) *msgjson.Error
+	HandlePeerMessage         func(tanka.PeerID, *IncomingTankagram) *msgjson.Error
 }
 
 // Config is the configuration for the MeshConn.
@@ -158,7 +202,7 @@ type MeshConn struct {
 	priv   *secp256k1.PrivateKey
 
 	tankaMtx     sync.RWMutex
-	tatankaNodes map[tanka.PeerID]*tatanka
+	tatankaNodes map[tanka.PeerID]*tatankaNode
 
 	peersMtx sync.RWMutex
 	peers    map[tanka.PeerID]*peer
@@ -174,110 +218,170 @@ func New(cfg *Config) *MeshConn {
 		priv:         cfg.PrivateKey,
 		peerID:       peerID,
 		entryNode:    cfg.EntryNode,
-		tatankaNodes: make(map[tanka.PeerID]*tatanka),
+		tatankaNodes: make(map[tanka.PeerID]*tatankaNode),
 		peers:        make(map[tanka.PeerID]*peer),
 	}
 	return c
 }
 
-func (c *MeshConn) handleTankagram(tt *tatanka, tankagram *msgjson.Message) *msgjson.Error {
+func (c *MeshConn) sendErrorTankagramResult(tt *tatankaNode, id uint64, tankagramErr mj.TankagramError, encKey []byte) error {
+	enc, err := encryptTankagramResult(encKey, &mj.TankagramResultPayload{
+		Error: tankagramErr,
+	})
+	if err != nil {
+		return fmt.Errorf("error encrypting tankagram result: %v", err)
+	}
+	if err := c.sendResult(tt, id, enc); err != nil {
+		return fmt.Errorf("error sending tankagram result: %v", err)
+	}
+	return nil
+}
+
+func (c *MeshConn) sendTankagramResult(tt *tatankaNode, id uint64, payload dex.Bytes, encKey []byte) error {
+	enc, err := encryptTankagramResult(encKey, &mj.TankagramResultPayload{
+		Error:   mj.TEErrNone,
+		Payload: payload,
+	})
+	if err != nil {
+		return err
+	}
+	return c.sendResult(tt, id, enc)
+}
+
+// handleNewPeerTankagram handles a tankagram recieved from a new peer. The
+// tankagram should be encrypted with the permanent encryption key decrived
+// for our permanent private key and the peer's peerID. The contents of the
+// tankagram should be an EncryptionKeyPayload, used to establish an ephemeral
+// encryption key.
+func (c *MeshConn) handleNewPeerTankagram(tt *tatankaNode, gram *mj.Tankagram, id uint64) {
+	pub, err := secp256k1.ParsePubKey(gram.From[:])
+	if err != nil {
+		c.log.Errorf("bad peer ID %s", gram.From)
+		return
+	}
+
+	sharedSecretPerm := sharedSecret(c.priv, pub)
+
+	tankagramErr := mj.TEErrNone
+	var ephPriv *secp256k1.PrivateKey
+	var remoteEphPub *secp256k1.PublicKey
+
+	defer func() {
+		// If we encountered an error, send an error result.
+		if tankagramErr != mj.TEErrNone {
+			if err := c.sendErrorTankagramResult(tt, id, tankagramErr, sharedSecretPerm); err != nil {
+				c.log.Errorf("error sending tankagram result: %v", err)
+			}
+			return
+		}
+
+		// Otherwise, send our ephemeral pub key.
+		res := mj.EncryptionKeyPayload{
+			EphemeralPubKey: ephPriv.PubKey().SerializeCompressed(),
+		}
+		resB, err := json.Marshal(res)
+		if err != nil {
+			c.log.Errorf("error marshalling ephemeral pubkey: %v", err)
+			return
+		}
+		if err := c.sendTankagramResult(tt, id, resB, sharedSecretPerm); err != nil {
+			c.log.Errorf("error sending ephemeral pubkey: %v", err)
+			return
+		}
+
+		// Add the peer to our peers map.
+		c.peersMtx.Lock()
+		c.peers[gram.From] = &peer{
+			id:                 gram.From,
+			ephemeralSharedKey: sharedSecret(ephPriv, remoteEphPub),
+		}
+		c.peersMtx.Unlock()
+	}()
+
+	decryptedPayload, err := decryptTankagramPayload(sharedSecretPerm, gram.EncryptedPayload)
+	if err != nil {
+		c.log.Errorf("failed to decrypt new peer tankagram with permanent key: %v", err)
+		// Assume that they sent a message with an ephemeral key that
+		// we do not have, possibly due to restarting the client. They
+		// will need to do a new handshake before further communication.
+		tankagramErr = mj.TEDecryptionFailed
+		return
+	}
+
+	c.log.Infof("decrypted new peer tankagram: %+v", decryptedPayload)
+
+	if decryptedPayload.Route != mj.RouteEncryptionKey {
+		c.log.Errorf("unexpected route for new peer tankagram %s", decryptedPayload.Route)
+		tankagramErr = mj.TEEBadRequest
+		return
+	}
+
+	var encryptionKeyPayload mj.EncryptionKeyPayload
+	if err := json.Unmarshal(decryptedPayload.Payload, &encryptionKeyPayload); err != nil {
+		c.log.Errorf("error unmarshalling encryption key payload: %v", err)
+		tankagramErr = mj.TEEBadRequest
+		return
+	}
+
+	remoteEphPub, err = secp256k1.ParsePubKey(encryptionKeyPayload.EphemeralPubKey)
+	if err != nil {
+		c.log.Errorf("failed to parse ephemeral pubkey: %v", err)
+		tankagramErr = mj.TEEBadRequest
+		return
+	}
+
+	ephPriv, err = secp256k1.GeneratePrivateKey()
+	if err != nil {
+		c.log.Errorf("failed to generate ephemeral private key: %v", err)
+		tankagramErr = mj.TEEPeerError
+		return
+	}
+}
+
+func (c *MeshConn) handleTankagram(tt *tatankaNode, tankagram *msgjson.Message) {
 	var gram mj.Tankagram
 	if err := tankagram.Unmarshal(&gram); err != nil {
-		return msgjson.NewError(mj.ErrBadRequest, "unmarshal error")
+		c.log.Errorf("error unmarshalling tankagram: %v", err)
+		return
 	}
 
 	c.peersMtx.Lock()
-	defer c.peersMtx.Unlock()
 	p, peerExisted := c.peers[gram.From]
+	c.peersMtx.Unlock()
 	if !peerExisted {
-		// TODO: We should do a little message verification before accepting
-		// new peers.
-		if gram.Message == nil || gram.Message.Route != mj.RouteEncryptionKey {
-			return msgjson.NewError(mj.ErrBadRequest, "where's your key?")
-		}
-		pub, err := secp256k1.ParsePubKey(gram.From[:])
-		if err != nil {
-			c.log.Errorf("could not parse pubkey for tankagram from %s: %w", gram.From, err)
-			return msgjson.NewError(mj.ErrBadRequest, "bad pubkey")
-		}
-		priv, err := rsa.GenerateKey(rand.Reader, rsaPrivateKeyLength)
-		if err != nil {
-			return msgjson.NewError(mj.ErrInternal, "error generating rsa key: %v", err)
-		}
-		p = &peer{
-			id:            gram.From,
-			pub:           pub,
-			decryptionKey: priv,
-		}
-
-		msg := gram.Message
-		if err := mj.CheckSig(msg, p.pub); err != nil {
-			c.log.Errorf("%s sent a unencrypted message with a bad signature: %w", p.id, err)
-			return msgjson.NewError(mj.ErrBadRequest, "bad gram sig")
-		}
-
-		var b dex.Bytes
-		if err := msg.Unmarshal(&b); err != nil {
-			c.log.Errorf("%s tankagram unmarshal error: %w", err)
-			return msgjson.NewError(mj.ErrBadRequest, "unmarshal key error")
-		}
-
-		p.encryptionKey, err = decodePubkeyRSA(b)
-		if err != nil {
-			c.log.Errorf("error decoding RSA pub key from %s: %v", p.id, err)
-			return msgjson.NewError(mj.ErrBadRequest, "bad key encoding")
-		}
-
-		if err := c.sendResult(tt, tankagram.ID, dex.Bytes(p.wireKey())); err != nil {
-			c.log.Errorf("error responding to encryption key message from peer %s", p.id)
-		} else {
-			c.peers[p.id] = p
-			c.handlers.HandlePeerMessage(p.id, &IncomingPeerConnect{
-				PeerID: p.id,
-				Reject: func() {
-					c.peersMtx.Lock()
-					delete(c.peers, p.id)
-					c.peersMtx.Unlock()
-				},
-			})
-		}
-		return nil
+		c.handleNewPeerTankagram(tt, &gram, tankagram.ID)
+		return
 	}
 
 	// If this isn't the encryption key, this gram.Message is ignored and this
 	// is assumed to be encrypted.
-	if len(gram.EncryptedMsg) == 0 {
+	if len(gram.EncryptedPayload) == 0 {
 		c.log.Errorf("%s sent a tankagram with no message or data", p.id)
-		return msgjson.NewError(mj.ErrBadRequest, "bad gram")
+		c.sendErrorTankagramResult(tt, tankagram.ID, mj.TEEBadRequest, p.ephemeralSharedKey)
+		return
 	}
 
-	b, err := p.decryptRSA(gram.EncryptedMsg)
+	decryptedPayload, err := decryptTankagramPayload(p.ephemeralSharedKey, gram.EncryptedPayload)
 	if err != nil {
-		c.log.Errorf("%s sent an enrypted message that didn't decrypt: %v", p.id, err)
-		return msgjson.NewError(mj.ErrBadRequest, "bad encryption")
-	}
-	msg, err := msgjson.DecodeMessage(b)
-	if err != nil {
-		c.log.Errorf("%s sent a tankagram that didn't encode a message: %v", p.id, err)
-		return msgjson.NewError(mj.ErrBadRequest, "where's the message?")
+		c.log.Errorf("failed to decrypt tankagram payload with ephemeral key: %v", err)
+		c.sendErrorTankagramResult(tt, tankagram.ID, mj.TEDecryptionFailed, p.ephemeralSharedKey)
+		return
 	}
 
 	c.handlers.HandlePeerMessage(p.id, &IncomingTankagram{
-		Msg: msg,
-		Respond: func(thing interface{}) error {
-			b, err := json.Marshal(thing)
+		Msg: decryptedPayload,
+		Respond: func(payload any) error {
+			payloadB, err := json.Marshal(payload)
 			if err != nil {
+				c.log.Errorf("error marshalling payload: %v", err)
 				return err
 			}
-			enc, err := p.encryptRSA(b)
-			if err != nil {
-				return err
-			}
-			return c.sendResult(tt, tankagram.ID, dex.Bytes(enc))
+			return c.sendTankagramResult(tt, tankagram.ID, payloadB, p.ephemeralSharedKey)
+		},
+		RespondErr: func(tankagramErr mj.TankagramError) error {
+			return c.sendErrorTankagramResult(tt, tankagram.ID, tankagramErr, p.ephemeralSharedKey)
 		},
 	})
-
-	return nil
 }
 
 func (c *MeshConn) Connect(ctx context.Context) (*sync.WaitGroup, error) {
@@ -317,8 +421,8 @@ func (c *MeshConn) addTatankaNode(ctx context.Context, creds *TatankaCredentials
 		Logger: log,
 		URL:    uri + "/ws",
 		Cert:   cert,
-		HandleMessage: func(msg *msgjson.Message) *msgjson.Error {
-			return c.handleTatankaMessage(peerID, msg)
+		HandleMessage: func(msg *msgjson.Message) {
+			c.handleTatankaMessage(peerID, msg)
 		},
 	})
 	if err != nil {
@@ -335,7 +439,7 @@ func (c *MeshConn) addTatankaNode(ctx context.Context, creds *TatankaCredentials
 		log.Infof("replacing existing connection for tatanka node %s", tt)
 	}
 
-	c.tatankaNodes[peerID] = &tatanka{
+	c.tatankaNodes[peerID] = &tatankaNode{
 		NetworkBackend: cl,
 		cm:             cm,
 		url:            uri,
@@ -368,7 +472,7 @@ func (c *MeshConn) Auth(tatankaID tanka.PeerID) error {
 	return nil
 }
 
-func (c *MeshConn) tatanka(tatankaID tanka.PeerID) *tatanka {
+func (c *MeshConn) tatanka(tatankaID tanka.PeerID) *tatankaNode {
 	c.tankaMtx.RLock()
 	defer c.tankaMtx.RUnlock()
 	return c.tatankaNodes[tatankaID]
@@ -383,7 +487,7 @@ const (
 )
 
 // tatankas generates a list of tatanka nodes.
-func (c *MeshConn) tatankas(mode TatankaSelectionMode) (tts []*tatanka, _ error) {
+func (c *MeshConn) tatankas(mode TatankaSelectionMode) (tts []*tatankaNode, _ error) {
 	c.tankaMtx.RLock()
 	defer c.tankaMtx.RUnlock()
 	en := c.tatankaNodes[c.entryNode.PeerID]
@@ -395,9 +499,9 @@ func (c *MeshConn) tatankas(mode TatankaSelectionMode) (tts []*tatanka, _ error)
 		if !en.cm.On() {
 			return nil, errors.New("entry node no connected")
 		}
-		return []*tatanka{en}, nil
+		return []*tatankaNode{en}, nil
 	case SelectionModeAll, SelectionModeAny:
-		tts := make([]*tatanka, 0, len(c.tatankaNodes))
+		tts := make([]*tatankaNode, 0, len(c.tatankaNodes))
 		var skipID tanka.PeerID
 		// Entry node always goes first, if available.
 		if en != nil && en.cm.On() {
@@ -421,40 +525,39 @@ func (c *MeshConn) tatankas(mode TatankaSelectionMode) (tts []*tatanka, _ error)
 	}
 }
 
-func (c *MeshConn) handleTatankaMessage(tatankaID tanka.PeerID, msg *msgjson.Message) *msgjson.Error {
+func (c *MeshConn) handleTatankaMessage(tatankaID tanka.PeerID, msg *msgjson.Message) {
 	if c.log.Level() == dex.LevelTrace {
-		c.log.Tracef("Client handling message from tatanka node: route = %s, payload = %s", msg.Route, mj.Truncate(msg.Payload))
+		c.log.Tracef("Client handling message from tatanka node: route = %s", msg.Route)
 	}
 
 	tt := c.tatanka(tatankaID)
 	if tt == nil {
 		c.log.Error("Message received from unknown tatanka node")
-		return msgjson.NewError(mj.ErrUnknownSender, "who are you?")
+		return
 	}
 
 	if err := mj.CheckSig(msg, tt.pub); err != nil {
 		// DRAFT TODO: Record for reputation somehow, no?
 		c.log.Errorf("tatanka node %s sent a bad signature. disconnecting", tt.peerID)
-		return msgjson.NewError(mj.ErrAuth, "bad sig")
+		return
 	}
 
 	if msg.Type == msgjson.Request && msg.Route == mj.RouteTankagram {
-		return c.handleTankagram(tt, msg)
+		c.handleTankagram(tt, msg)
+		return
 	}
 
 	switch msg.Type {
 	case msgjson.Request:
-		return c.handlers.HandleTatankaRequest(tatankaID, msg)
+		c.handlers.HandleTatankaRequest(tatankaID, msg)
 	case msgjson.Notification:
 		c.handlers.HandleTatankaNotification(tatankaID, msg)
-		return nil
 	default:
 		c.log.Errorf("tatanka node %s send a message with an unhandleable type %d", tt.peerID, msg.Type)
-		return msgjson.NewError(mj.ErrBadRequest, "message type %d doesn't work for me", msg.Type)
 	}
 }
 
-func (c *MeshConn) sendResult(tt *tatanka, msgID uint64, result interface{}) error {
+func (c *MeshConn) sendResult(tt *tatankaNode, msgID uint64, result dex.Bytes) error {
 	resp, err := msgjson.NewResponse(msgID, result, nil)
 	if err != nil {
 		return err
@@ -547,10 +650,14 @@ func (c *MeshConn) RequestMesh(msg *msgjson.Message, thing any, opts ...RequestO
 	return errors.New("failed to request from any tatanka nodes")
 }
 
-func (c *MeshConn) requestTT(tt *tatanka, msg *msgjson.Message, thing any, timeout time.Duration) (err error) {
+func (c *MeshConn) requestTT(tt *tatankaNode, msg *msgjson.Message, thing any, timeout time.Duration) (err error) {
 	errChan := make(chan error)
 	if err := tt.Request(msg, func(msg *msgjson.Message) {
-		errChan <- msg.UnmarshalResult(thing)
+		if thing != nil {
+			errChan <- msg.UnmarshalResult(thing)
+		} else {
+			errChan <- nil
+		}
 	}); err != nil {
 		errChan <- fmt.Errorf("request error: %w", err)
 	}
@@ -563,36 +670,59 @@ func (c *MeshConn) requestTT(tt *tatanka, msg *msgjson.Message, thing any, timeo
 	return err
 }
 
-// ConnectPeer connects to a peer by sending our encryption key and receiving
-// theirs.
+// sharedSecret computes the shared secret used for encrypting and decrypting
+// messages between two peers. The shared secret is the hash of the result of
+// an elliptic curve diffie-hellman key exchange.
+func sharedSecret(ourPriv *secp256k1.PrivateKey, theirPub *secp256k1.PublicKey) []byte {
+	sharedSecret := secp256k1.GenerateSharedSecret(ourPriv, theirPub)
+	hash := sha256.Sum256(sharedSecret)
+	return hash[:]
+}
+
+// ConnectPeer establishes a connection to a peer. A handhshake is performed
+// to establish an ephemeral shared secret, which is used to encrypt and
+// decrypt messages between the two peers for the duration of the connection.
+// A permanent shared secret based on the peer IDs is used to encrypt the
+// handshake messages.
 func (c *MeshConn) ConnectPeer(peerID tanka.PeerID) error {
-	c.peersMtx.Lock()
-	defer c.peersMtx.Unlock()
-	p, exists := c.peers[peerID]
-	if !exists {
-		priv, err := rsa.GenerateKey(rand.Reader, rsaPrivateKeyLength)
-		if err != nil {
-			return fmt.Errorf("error generating rsa key: %v", err)
-		}
-		remotePub, err := secp256k1.ParsePubKey(peerID[:])
-		if err != nil {
-			return fmt.Errorf("error parsing remote pubkey: %v", err)
-		}
-		p = &peer{
-			id:            peerID,
-			pub:           remotePub,
-			decryptionKey: priv,
-		}
+	// Parse remote permanent public key from peerID
+	remotePub, err := secp256k1.ParsePubKey(peerID[:])
+	if err != nil {
+		return fmt.Errorf("error parsing remote pubkey from peer %s: %v", peerID, err)
 	}
 
-	msg := mj.MustNotification(mj.RouteEncryptionKey, dex.Bytes(p.wireKey()))
-	mj.SignMessage(c.priv, msg) // We sign the embedded message separately.
+	// Compute permanent shared secret, to use for encrypting the handshake
+	// messages.
+	sharedSecretPerm := sharedSecret(c.priv, remotePub)
+
+	// Generate ephemeral key pair for this session
+	ephPrivKey, err := secp256k1.GeneratePrivateKey()
+	if err != nil {
+		return fmt.Errorf("peer %s: failed to generate ephemeral key: %v", peerID, err)
+	}
+
+	encryptionKeyPayload, err := json.Marshal(mj.EncryptionKeyPayload{
+		EphemeralPubKey: ephPrivKey.PubKey().SerializeCompressed(),
+	})
+	if err != nil {
+		return fmt.Errorf("peer %s: failed to marshal encryption key payload: %v", peerID, err)
+	}
+
+	msg := msgjson.Message{
+		Route:   mj.RouteEncryptionKey,
+		Payload: encryptionKeyPayload,
+	}
+	encryptedPayload, err := encryptTankagramPayload(sharedSecretPerm, &msg)
+	if err != nil {
+		return fmt.Errorf("peer %s: failed to encrypt ephemeral pubkey: %v", peerID, err)
+	}
 
 	req := mj.MustRequest(mj.RouteTankagram, &mj.Tankagram{
-		To:      peerID,
-		From:    c.peerID,
-		Message: msg,
+		From:             c.peerID,
+		To:               peerID,
+		EncryptedPayload: encryptedPayload,
 	})
+	mj.SignMessage(c.priv, req)
 
 	var r mj.TankagramResult
 	if err := c.RequestMesh(req, &r, WithSelectionMode(SelectionModeAny), WithExamination(func(tatankaURL string, tatankaID tanka.PeerID) bool {
@@ -602,41 +732,63 @@ func (c *MeshConn) ConnectPeer(peerID tanka.PeerID) error {
 		c.log.Errorf("Tankagram transmission failure connecting to %s via %s @ %s: %q", peerID, tatankaID, tatankaURL, r.Result)
 		return false
 	})); err != nil {
-		return err
+		return fmt.Errorf("peer %s: failed to send ephemeral key: %v", peerID, err)
 	}
 
-	// We need to get this to the caller, as a Tankagram result can
-	// be used as part of an audit request for reporting penalties.
-	pub, err := decodePubkeyRSA(r.Response)
+	tankagramResult, err := decryptTankagramResult(sharedSecretPerm, r.EncryptedPayload)
 	if err != nil {
-		return fmt.Errorf("error decoding RSA pub key from %s: %v", p.id, err)
+		return fmt.Errorf("peer %s: error decrypting response: %v", peerID, err)
 	}
-	p.encryptionKey = pub
-	c.peers[peerID] = p
+
+	var resp mj.EncryptionKeyPayload
+	if err := json.Unmarshal(tankagramResult.Payload, &resp); err != nil {
+		return fmt.Errorf("peer %s: error unmarshalling response: %v", peerID, err)
+	}
+
+	remoteEphPub, err := secp256k1.ParsePubKey(resp.EphemeralPubKey)
+	if err != nil {
+		return fmt.Errorf("peer %s: error decoding ephemeral pubkey: %v", peerID, err)
+	}
+
+	c.peersMtx.Lock()
+	defer c.peersMtx.Unlock()
+	c.peers[peerID] = &peer{
+		id:                 peerID,
+		ephemeralSharedKey: sharedSecret(ephPrivKey, remoteEphPub),
+	}
+
 	return nil
 }
 
 // RequestPeer sends a request to an already-connected peer.
-func (c *MeshConn) RequestPeer(peerID tanka.PeerID, msg *msgjson.Message, thing interface{}) (_ *mj.TankagramResult, err error) {
+func (c *MeshConn) RequestPeer(peerID tanka.PeerID, msg *msgjson.Message, thing interface{}) error {
 	c.peersMtx.RLock()
 	p, known := c.peers[peerID]
 	c.peersMtx.RUnlock()
-
 	if !known {
-		return nil, fmt.Errorf("not connected to peer %s", peerID)
+		return fmt.Errorf("not connected to peer %s", peerID)
 	}
 
-	mj.SignMessage(c.priv, msg)
-	tankaGram := &mj.Tankagram{
-		From: c.peerID,
-		To:   peerID,
-	}
-	tankaGram.EncryptedMsg, err = c.signAndEncryptTankagram(p, msg)
+	payloadB, err := json.Marshal(msg)
 	if err != nil {
-		return nil, fmt.Errorf("error signing and encrypting tankagram for %s: %w", p.id, err)
+		return fmt.Errorf("error marshaling payload: %w", err)
 	}
+
+	encryptedPayload, err := encryptAES(p.ephemeralSharedKey, payloadB)
+	if err != nil {
+		return fmt.Errorf("error encrypting payload for %s: %w", p.id, err)
+	}
+
+	tankaGram := &mj.Tankagram{
+		From:             c.peerID,
+		To:               peerID,
+		EncryptedPayload: encryptedPayload,
+	}
+
 	var res mj.TankagramResult
 	wrappedMsg := mj.MustRequest(mj.RouteTankagram, tankaGram)
+	mj.SignMessage(c.priv, wrappedMsg)
+
 	if err := c.RequestMesh(wrappedMsg, &res, WithSelectionMode(SelectionModeAny), WithExamination(func(tatankaURL string, tatankaID tanka.PeerID) bool {
 		if res.Result == mj.TRTTransmitted {
 			return true
@@ -644,41 +796,49 @@ func (c *MeshConn) RequestPeer(peerID tanka.PeerID, msg *msgjson.Message, thing 
 		c.log.Errorf("Tankagram transmission failure sending %s to %s via %s @ %s: %q", msg.Route, peerID, tatankaID, tatankaURL, res.Result)
 		return false
 	})); err != nil {
-		return nil, err
+		return err
 	}
-	respB, err := p.decryptRSA(res.Response)
+
+	switch res.Result {
+	case mj.TRTErrFromTanka:
+		return ErrTankaError
+	case mj.TRTNoPath:
+		return ErrTankaError
+	case mj.TRTErrBadClient:
+		c.log.Errorf("ErrBadPeerResponse due to bad client")
+		return ErrBadPeerResponse
+	}
+
+	decryptedRes, err := decryptTankagramResult(p.ephemeralSharedKey, res.EncryptedPayload)
 	if err != nil {
-		return nil, fmt.Errorf("message to %s transmitted, but errored while decoding response: %w", p.id, err)
+		remotePub, err := p.id.PublicKey()
+		if err != nil {
+			return fmt.Errorf("peer ID %s does not map to a valid public key: %w", p.id, err)
+		}
+		permanentSharedKey := sharedSecret(c.priv, remotePub)
+		decryptedRes, err := decryptTankagramResult(permanentSharedKey, res.EncryptedPayload)
+		if err != nil {
+			c.log.Errorf("ErrBadPeerResponse due to cannot decrypt")
+			return ErrBadPeerResponse
+		}
+		if decryptedRes.Error == mj.TEDecryptionFailed {
+			c.log.Errorf("peer %s needs reconnect", p.id)
+			return ErrPeerNeedsReconnect
+		}
+		// If we requested using an ephemeral key, and they responded using the
+		// permanent key, the only valid response is a TEDecryptionFailed.
+		return ErrBadPeerResponse
 	}
+
 	if thing != nil {
-		if len(respB) == 0 {
-			return nil, fmt.Errorf("empty response from %s when non-empty response expected", p.id)
+		if len(decryptedRes.Payload) == 0 {
+			return ErrBadPeerResponse
 		}
-		if err = json.Unmarshal(respB, thing); err != nil {
-			return nil, fmt.Errorf("error unmarshaling result from peer %s: %w", p.id, err)
+		if err = json.Unmarshal(decryptedRes.Payload, thing); err != nil {
+			c.log.Errorf("error unmarshalling response: %v", err)
+			return ErrBadPeerResponse
 		}
 	}
-	return &res, nil
-}
 
-func (c *MeshConn) signAndEncryptTankagram(p *peer, msg *msgjson.Message) ([]byte, error) {
-	mj.SignMessage(c.priv, msg)
-	b, err := json.Marshal(msg)
-	if err != nil {
-		return nil, fmt.Errorf("error marshaling tankagram: %w", err)
-	}
-	return p.encryptRSA(b)
-}
-
-func decodePubkeyRSA(b []byte) (*rsa.PublicKey, error) {
-	if len(b) < 9 {
-		return nil, fmt.Errorf("invalid payload length of %d", len(b))
-	}
-	exponentB, modulusB := b[:8], b[8:]
-	exponent := int(binary.BigEndian.Uint64(exponentB))
-	modulus := new(big.Int).SetBytes(modulusB)
-	return &rsa.PublicKey{
-		E: exponent,
-		N: modulus,
-	}, nil
+	return nil
 }

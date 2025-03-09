@@ -16,6 +16,10 @@ const PeerIDLength = secp256k1.PubKeyBytesLenCompressed
 // Mesh. The PeerID is the compressed-format serialized secp256k1.PublicKey.
 type PeerID [PeerIDLength]byte
 
+func (p PeerID) PublicKey() (*secp256k1.PublicKey, error) {
+	return secp256k1.ParsePubKey(p[:])
+}
+
 func (p PeerID) String() string {
 	return hex.EncodeToString(p[:])
 }
