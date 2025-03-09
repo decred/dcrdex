@@ -227,12 +227,25 @@ func (db *DB) deleteDBID(txn *badger.Txn, dbID DBID) error {
 	return nil
 }
 
-// B is a byte slice that implements encoding.BinaryMarshaler.
-type B []byte
+// KV is any one of a number of common types whose binary encoding is
+// straight-forward.
+type KV interface{}
 
-var _ encoding.BinaryMarshaler = B{}
-
-// MarshalBinary implements encoding.BinaryMarshaler for the B.
-func (b B) MarshalBinary() ([]byte, error) {
-	return b, nil
+func parseKV(i KV) (b []byte, err error) {
+	switch it := i.(type) {
+	case []byte:
+		b = it
+	case uint32:
+		b = make([]byte, 4)
+		binary.BigEndian.PutUint32(b[:], it)
+	case time.Time:
+		b = make([]byte, 8)
+		binary.BigEndian.PutUint64(b[:], uint64(it.UnixMilli()))
+	case encoding.BinaryMarshaler:
+		b, err = it.MarshalBinary()
+	case nil:
+	default:
+		err = fmt.Errorf("unknown IndexBucket type %T", it)
+	}
+	return
 }
