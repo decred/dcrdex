@@ -5,15 +5,13 @@ package tor
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 
 	"decred.org/dcrdex/dex"
 )
 
 func TestConnect(t *testing.T) {
-	dataDir, _ := os.MkdirTemp("", "")
-	defer os.RemoveAll(dataDir)
+	dataDir := t.TempDir()
 
 	log := dex.StdOutLogger("T", dex.LevelDebug)
 	relay, err := New(dataDir, log)
