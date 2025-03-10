@@ -692,9 +692,9 @@ export class DepthChart extends Chart {
         ctx.restore()
       }
 
-      // for (const line of this.lines || []) {
-      //   drawLine(line.rate, line.color)
-      // }
+      for (const line of this.lines || []) {
+        drawLine(line.rate, line.color)
+      }
 
       const tolerance = (high - low) * 0.005
       const hoverMarkers = []
