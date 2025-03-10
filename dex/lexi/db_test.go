@@ -2,7 +2,6 @@ package lexi
 
 import (
 	"bytes"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,10 +11,7 @@ import (
 )
 
 func newTestDB(t *testing.T) (*DB, func()) {
-	tmpDir, err := os.MkdirTemp("", "")
-	if err != nil {
-		t.Fatalf("error making temp dir: %v", err)
-	}
+	tmpDir := t.TempDir()
 	db, err := New(&Config{
 		Path: filepath.Join(tmpDir, "test.db"),
 		Log:  dex.StdOutLogger("T", dex.LevelInfo),
@@ -23,7 +19,7 @@ func newTestDB(t *testing.T) (*DB, func()) {
 	if err != nil {
 		t.Fatalf("error constructing db: %v", err)
 	}
-	return db, func() { os.RemoveAll(tmpDir) }
+	return db, func() {}
 }
 
 func TestPrefixes(t *testing.T) {
