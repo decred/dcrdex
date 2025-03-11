@@ -25,13 +25,14 @@ type Order struct {
 	// orderbook orders that don't have the requisite lot size. The UI should
 	// show lot size selection in terms of a sliding scale of fee exposure.
 	// Lot sizes can only be powers of 2.
-	LotSize    uint64    `json:"lotSize"`
-	Stamp      time.Time `json:"stamp"`
-	Expiration time.Time `json:"expiration"`
+	LotSize uint64    `json:"lotSize"`
+	Stamp   time.Time `json:"stamp"`
+	// Nonce can be used to force unique ids while other values are the same.
+	Nonce uint32 `json:"nonce"`
 }
 
 func (ord *Order) ID() [32]byte {
-	const msgLen = 32 + 4 + 4 + 1 + 8 + 8 + 8 + 8 + 8
+	const msgLen = 32 + 4 + 4 + 1 + 8 + 8 + 8 + 8 + 4
 	b := make([]byte, msgLen)
 	copy(b[:32], ord.From[:])
 	binary.BigEndian.PutUint32(b[32:36], ord.BaseID)
@@ -43,7 +44,7 @@ func (ord *Order) ID() [32]byte {
 	binary.BigEndian.PutUint64(b[49:57], ord.Rate)
 	binary.BigEndian.PutUint64(b[57:65], ord.LotSize)
 	binary.BigEndian.PutUint64(b[65:73], uint64(ord.Stamp.UnixMilli()))
-	binary.BigEndian.PutUint64(b[73:81], uint64(ord.Expiration.UnixMilli()))
+	binary.BigEndian.PutUint32(b[73:77], ord.Nonce)
 	return blake256.Sum256(b)
 
 }
@@ -64,9 +65,6 @@ func (ord *Order) Valid() error {
 	}
 	if ord.Rate == 0 {
 		return errors.New("order rate is zero")
-	}
-	if !ord.Expiration.After(ord.Stamp) {
-		return errors.New("order is pre-expired")
 	}
 	return nil
 }
@@ -102,4 +100,50 @@ type MatchAcceptance struct {
 type MarketParameters struct {
 	BaseID  uint32 `json:"baseID"`
 	QuoteID uint32 `json:"quoteID"`
+}
+
+const (
+	OrderExpiration    = time.Hour * 12
+	OrderUpdateVersion = 0
+)
+
+type OrderUpdate struct {
+	*Order
+	Version    uint8     `json:"version"`
+	Expiration time.Time `json:"expiration"`
+	Settled    uint64    `json:"settled"`
+	// The signature of all other serialized fields with private key
+	// belonging to PeerID.
+	Sig []byte `json:"sig"`
+}
+
+func NewOrderUpdate(o *Order, settled uint64) *OrderUpdate {
+	return &OrderUpdate{
+		Version:    OrderUpdateVersion,
+		Expiration: o.Stamp.Add(OrderExpiration),
+		Settled:    settled,
+		Order:      o,
+	}
+}
+
+// Serialize returns the bytes needed to sign the update.
+func (ou *OrderUpdate) Serialize() ([]byte, error) {
+	msgLen := 1 + 32 + 4 + 4 + 1 + 8 + 8 + 8 + 8 + 4 + 8 + 8
+	b := make([]byte, msgLen)
+	b[0] = ou.Version
+	copy(b[1:33], ou.From[:])
+	binary.BigEndian.PutUint32(b[33:37], ou.BaseID)
+	binary.BigEndian.PutUint32(b[37:41], ou.QuoteID)
+	if ou.Sell {
+		b[42] = 1
+	}
+	binary.BigEndian.PutUint64(b[42:50], ou.Qty)
+	binary.BigEndian.PutUint64(b[50:58], ou.Rate)
+	binary.BigEndian.PutUint64(b[58:66], ou.LotSize)
+	binary.BigEndian.PutUint64(b[66:74], uint64(ou.Stamp.UnixMilli()))
+	binary.BigEndian.PutUint32(b[74:78], ou.Nonce)
+	binary.BigEndian.PutUint64(b[78:84], uint64(ou.Expiration.UnixMilli()))
+	binary.BigEndian.PutUint64(b[84:92], ou.Settled)
+
+	return b, nil
 }
