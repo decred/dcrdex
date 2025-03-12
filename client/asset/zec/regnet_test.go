@@ -8,7 +8,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"os/user"
 	"path/filepath"
@@ -164,8 +163,7 @@ func testDeserializeBlocks(t *testing.T, port string, upgradeHeights ...int64) {
 func TestMultiSplit(t *testing.T) {
 	log := dex.StdOutLogger("T", dex.LevelTrace)
 	c := make(chan asset.WalletNotification, 16)
-	tmpDir, _ := os.MkdirTemp("", "")
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 	walletCfg := &asset.WalletConfig{
 		Type: walletTypeRPC,
 		Settings: map[string]string{

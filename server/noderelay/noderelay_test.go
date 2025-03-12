@@ -29,11 +29,7 @@ func TestNexus(t *testing.T) {
 		t.Fatalf("error splitting host and port from address %q", addr)
 	}
 
-	dir, err := os.MkdirTemp("", "")
-	if err != nil {
-		t.Fatalf("Error making temp dir: %v", err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	relayID := "0xabcanything_you-want"
 

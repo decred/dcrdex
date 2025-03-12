@@ -178,8 +178,7 @@ func (m *MRPCTest) TestSimnetMultiRPCClient(t *testing.T, wsPort, httpPort strin
 
 func (m *MRPCTest) TestMonitorNet(t *testing.T, net dex.Network) {
 	seed, providers := m.readProviderFile(t, net)
-	dir, _ := os.MkdirTemp("", "")
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	cl, err := m.rpcClient(dir, seed, providers, net, true)
 	if err != nil {
@@ -202,8 +201,7 @@ func (m *MRPCTest) TestRPC(t *testing.T, net dex.Network) {
 	if endpoint == "" {
 		t.Fatalf("specify a provider in the PROVIDER environmental variable")
 	}
-	dir, _ := os.MkdirTemp("", "")
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 	cl, err := m.rpcClient(dir, encode.RandomBytes(32), []string{endpoint}, net, true)
 	if err != nil {
 		t.Fatal(err)
@@ -233,8 +231,7 @@ func (m *MRPCTest) TestFreeServers(t *testing.T, freeServers []string, net dex.N
 		t.Fatalf("compatDataLookup error: %v", err)
 	}
 	runTest := func(endpoint string) error {
-		dir, _ := os.MkdirTemp("", "")
-		defer os.RemoveAll(dir)
+		dir := t.TempDir()
 		cl, err := m.rpcClient(dir, encode.RandomBytes(32), []string{endpoint}, net, true)
 		if err != nil {
 			return fmt.Errorf("tRPCClient error: %v", err)
@@ -333,8 +330,7 @@ func (m *MRPCTest) TestReceiptsHaveEffectiveGasPrice(t *testing.T) {
 
 func (m *MRPCTest) withClient(t *testing.T, net dex.Network, f func(context.Context, *multiRPCClient)) {
 	seed, providers := m.readProviderFile(t, net)
-	dir, _ := os.MkdirTemp("", "")
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	cl, err := m.rpcClient(dir, seed, providers, net, false)
 	if err != nil {
