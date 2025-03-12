@@ -429,7 +429,7 @@ type unifiedExchangeAdaptor struct {
 	botLoop   *dex.ConnectionMaster
 	paused    atomic.Bool
 
-	autoRebalanceCfg *AutoRebalanceConfig
+	autoRebalanceCfgV atomic.Value // *AutoRebalanceConfig
 
 	subscriptionIDMtx sync.RWMutex
 	subscriptionID    *int
@@ -485,6 +485,13 @@ var _ botCexAdaptor = (*unifiedExchangeAdaptor)(nil)
 
 func (u *unifiedExchangeAdaptor) botCfg() *BotConfig {
 	return u.botCfgV.Load().(*BotConfig)
+}
+
+func (u *unifiedExchangeAdaptor) autoRebalanceCfg() *AutoRebalanceConfig {
+	if cfg := u.autoRebalanceCfgV.Load(); cfg != nil {
+		return cfg.(*AutoRebalanceConfig)
+	}
+	return nil
 }
 
 // botLooper is just a dex.Connector for a function.
@@ -2805,7 +2812,7 @@ func (u *unifiedExchangeAdaptor) handleServerConfigUpdate() {
 			cfg := u.botCfg()
 			copy := cfg.copy()
 			copy.updateLotSize(u.lotSize.Load(), coreMkt.LotSize)
-			err := u.updateConfig(copy)
+			err := u.updateConfig(copy, u.autoRebalanceCfg())
 			if err != nil {
 				return err
 			}
@@ -2916,10 +2923,11 @@ func (u *unifiedExchangeAdaptor) optimizeTransfers(dist *distribution, dexSellLo
 	baseInv, quoteInv := dist.baseInv, dist.quoteInv
 	perLot := dist.perLot
 
-	if u.autoRebalanceCfg == nil {
+	autoRebalanceCfg := u.autoRebalanceCfg()
+	if autoRebalanceCfg == nil {
 		return
 	}
-	minBaseTransfer, minQuoteTransfer := u.autoRebalanceCfg.MinBaseTransfer, u.autoRebalanceCfg.MinQuoteTransfer
+	minBaseTransfer, minQuoteTransfer := autoRebalanceCfg.MinBaseTransfer, autoRebalanceCfg.MinQuoteTransfer
 
 	additionalBaseFees, additionalQuoteFees := perLot.baseFunding, perLot.quoteFunding
 	if u.baseID == u.quoteFeeID {
@@ -3667,18 +3675,20 @@ func (u *unifiedExchangeAdaptor) applyInventoryDiffs(balanceDiffs *BotInventoryD
 	return mods
 }
 
-func (u *unifiedExchangeAdaptor) updateConfig(cfg *BotConfig) error {
+func (u *unifiedExchangeAdaptor) updateConfig(cfg *BotConfig, autoRebalanceCfg *AutoRebalanceConfig) error {
 	if err := validateConfigUpdate(u.botCfg(), cfg); err != nil {
 		return err
 	}
 
 	u.botCfgV.Store(cfg)
+	u.autoRebalanceCfgV.Store(autoRebalanceCfg)
 	u.updateConfigEvent(cfg)
 	return nil
 }
 
 func (u *unifiedExchangeAdaptor) updateInventory(balanceDiffs *BotInventoryDiffs) {
 	u.updateInventoryEvent(u.applyInventoryDiffs(balanceDiffs))
+	u.sendStatsUpdate()
 }
 
 func (u *unifiedExchangeAdaptor) Book() (buys, sells []*core.MiniOrder, _ error) {
@@ -3901,16 +3911,15 @@ func newUnifiedExchangeAdaptor(cfg *exchangeAdaptorCfg) (*unifiedExchangeAdaptor
 	}
 
 	adaptor := &unifiedExchangeAdaptor{
-		market:           mkt,
-		clientCore:       cfg.core,
-		CEX:              cfg.cex,
-		botID:            cfg.botID,
-		log:              cfg.log,
-		eventLogDB:       cfg.eventLogDB,
-		initialBalances:  initialBalances,
-		baseTraits:       baseTraits,
-		quoteTraits:      quoteTraits,
-		autoRebalanceCfg: cfg.autoRebalanceConfig,
+		market:          mkt,
+		clientCore:      cfg.core,
+		CEX:             cfg.cex,
+		botID:           cfg.botID,
+		log:             cfg.log,
+		eventLogDB:      cfg.eventLogDB,
+		initialBalances: initialBalances,
+		baseTraits:      baseTraits,
+		quoteTraits:     quoteTraits,
 
 		baseDexBalances:    baseDEXBalances,
 		baseCexBalances:    baseCEXBalances,
@@ -3925,6 +3934,7 @@ func newUnifiedExchangeAdaptor(cfg *exchangeAdaptorCfg) (*unifiedExchangeAdaptor
 
 	adaptor.fiatRates.Store(map[uint32]float64{})
 	adaptor.botCfgV.Store(cfg.botCfg)
+	adaptor.autoRebalanceCfgV.Store(cfg.autoRebalanceConfig)
 
 	return adaptor, nil
 }
