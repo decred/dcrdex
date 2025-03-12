@@ -459,6 +459,14 @@ func (c *tCEX) Markets(ctx context.Context) (map[string]*libxc.Market, error) {
 	return nil, nil
 }
 func (c *tCEX) Balance(assetID uint32) (*libxc.ExchangeBalance, error) {
+	if c.balanceErr != nil {
+		return nil, c.balanceErr
+	}
+
+	if c.balances[assetID] == nil {
+		return &libxc.ExchangeBalance{}, nil
+	}
+
 	return c.balances[assetID], c.balanceErr
 }
 func (c *tCEX) Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, updaterID int) (*libxc.Trade, error) {
@@ -657,7 +665,7 @@ func (t *tExchangeAdaptor) CEXBalance(assetID uint32) *BotBalance {
 	return t.cexBalances[assetID]
 }
 func (t *tExchangeAdaptor) stats() *RunStats { return nil }
-func (t *tExchangeAdaptor) updateConfig(cfg *BotConfig) error {
+func (t *tExchangeAdaptor) updateConfig(cfg *BotConfig, autoRebalanceCfg *AutoRebalanceConfig) error {
 	t.cfg = cfg
 	return nil
 }
@@ -771,9 +779,9 @@ func TestAvailableBalances(t *testing.T) {
 		60001: 6e5,
 	})
 
-	checkAvailableBalances := func(mkt *MarketWithHost, expDex, expCex map[uint32]uint64) {
+	checkAvailableBalances := func(mkt *MarketWithHost, cexName *string, expDex, expCex map[uint32]uint64) {
 		t.Helper()
-		dexBalances, cexBalances, err := mm.AvailableBalances(mkt, nil)
+		dexBalances, cexBalances, err := mm.AvailableBalances(mkt, cexName)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -785,11 +793,14 @@ func TestAvailableBalances(t *testing.T) {
 		}
 	}
 
+	binanceName := libxc.Binance
+	binanceUSName := libxc.BinanceUS
+
 	// No running bots
-	checkAvailableBalances(dcrBtc, map[uint32]uint64{42: 9e5, 0: 7e5}, map[uint32]uint64{})
-	checkAvailableBalances(ethBtc, map[uint32]uint64{60: 8e5, 0: 7e5}, map[uint32]uint64{60: 9e5, 0: 8e5})
-	checkAvailableBalances(btcUsdc, map[uint32]uint64{0: 7e5, 60: 8e5, 60001: 6e5}, map[uint32]uint64{0: 8e5, 60001: 6e5})
-	checkAvailableBalances(dcrUsdc, map[uint32]uint64{42: 9e5, 60: 8e5, 60001: 6e5}, map[uint32]uint64{42: 7e5, 60001: 6e5})
+	checkAvailableBalances(dcrBtc, nil, map[uint32]uint64{42: 9e5, 0: 7e5}, map[uint32]uint64{})
+	checkAvailableBalances(ethBtc, &binanceName, map[uint32]uint64{60: 8e5, 0: 7e5}, map[uint32]uint64{60: 9e5, 0: 8e5})
+	checkAvailableBalances(btcUsdc, &binanceName, map[uint32]uint64{0: 7e5, 60: 8e5, 60001: 6e5}, map[uint32]uint64{0: 8e5, 60001: 6e5})
+	checkAvailableBalances(dcrUsdc, &binanceUSName, map[uint32]uint64{42: 9e5, 60: 8e5, 60001: 6e5}, map[uint32]uint64{42: 7e5, 60001: 6e5})
 
 	rb := &runningBot{
 		bot: &tExchangeAdaptor{
@@ -807,8 +818,8 @@ func TestAvailableBalances(t *testing.T) {
 	}
 	mm.runningBots[*btcUsdc] = rb
 
-	checkAvailableBalances(dcrBtc, map[uint32]uint64{42: 9e5, 0: 3e5}, map[uint32]uint64{})
-	checkAvailableBalances(ethBtc, map[uint32]uint64{60: 7e5, 0: 3e5}, map[uint32]uint64{60: 9e5, 0: 5e5})
-	checkAvailableBalances(btcUsdc, map[uint32]uint64{0: 3e5, 60: 7e5, 60001: 4e5}, map[uint32]uint64{0: 5e5, 60001: 4e5})
-	checkAvailableBalances(dcrUsdc, map[uint32]uint64{42: 9e5, 60: 7e5, 60001: 4e5}, map[uint32]uint64{42: 7e5, 60001: 6e5})
+	checkAvailableBalances(dcrBtc, nil, map[uint32]uint64{42: 9e5, 0: 3e5}, map[uint32]uint64{})
+	checkAvailableBalances(ethBtc, &binanceName, map[uint32]uint64{60: 7e5, 0: 3e5}, map[uint32]uint64{60: 9e5, 0: 5e5})
+	checkAvailableBalances(btcUsdc, &binanceName, map[uint32]uint64{0: 3e5, 60: 7e5, 60001: 4e5}, map[uint32]uint64{0: 5e5, 60001: 4e5})
+	checkAvailableBalances(dcrUsdc, &binanceUSName, map[uint32]uint64{42: 9e5, 60: 7e5, 60001: 4e5}, map[uint32]uint64{42: 7e5, 60001: 6e5})
 }

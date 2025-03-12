@@ -798,17 +798,20 @@ export interface BotBalanceAllocation {
   cex: Record<number, number>
 }
 
-export interface BotAssetConfig {
-  swapFeeN: number
-  orderReservesFactor: number
-  slippageBufferFactor: number
-  transferFactor: number
+export interface QuickBalanceConfig {
+  buysBuffer: number
+  sellsBuffer: number
+  buyFeeReserve: number
+  sellFeeReserve: number
+  slippageBuffer: number
 }
 
 export interface UIConfig {
-  baseConfig: BotAssetConfig
-  quoteConfig: BotAssetConfig
-  simpleArbLots?: number
+  quickBalance: QuickBalanceConfig
+  allocation: BotBalanceAllocation
+  usingQuickBalance: boolean
+  baseMinTransfer: number
+  quoteMinTransfer: number
   cexRebalance: boolean
 }
 
@@ -903,37 +906,6 @@ export interface FeeEstimates extends LotFeeRange {
   bookingFeesPerLot: number
   bookingFees: number
   tokenFeesPerSwap: number
-}
-
-export interface ProjectedAlloc {
-  // book is inventory dedicated either to active orders for basicmm and arbmm,
-  // or on reserve for orders in the case of basicarb. book + bookingFees is the
-  // starvation threshold for DEX, meaning it's impossible to start a bot
-  // unstarved if there no way to get book + bookingFees to Bison Wallet. A user
-  // could potentially adjust order reserves or swap fee reserves to free up
-  // more funds, but with possible degradation of bot performance.
-  book: number
-  // booking fees is funding dedicated to covering the fees for funded orders.
-  // bookingFees are in the units of the parent chain for token assets.
-  bookingFees: number
-  // swapFeeReserves is only required for token assets. These are fees
-  // reserved for funding swaps. These fees are only debited, so will definitely
-  // run out eventually, but we'll get a UI that enabled manual and/or auto
-  // refill soon. swapFeeReserves are in the units of the parent chain.
-  swapFeeReserves: number
-  // cex is the inventory dedicated to funding counter-orders on cex for an
-  // arbmm or simplearb bot. cex is the starvation threshold for CEX.
-  cex: number
-  // orderReserves is inventory reserved for facilitating withdraws and
-  // deposits or for replacing matched orders. It's a good idea to have a
-  // little extra around, otherwise a trade sequence gone wrong could put
-  // the bot in a starved or unbalanced state.
-  orderReserves: number
-  // slippageBuffer is only required for the quote asset. This accounts for
-  // variations in rate, because the quote asset's "lot size" varies with
-  // rate. If the rate goes down, the quote-converted lot size goes up, so
-  // we'll let the user choose to reserve a little extra for this case.
-  slippageBuffer: number
 }
 
 export interface FeeGapStats {
