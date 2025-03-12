@@ -4996,7 +4996,7 @@ func (btc *intermediaryWallet) EstimateSendTxFee(address string, sendAmount, fee
 	return fee, isValidAddress, nil
 }
 
-// StandardSendFees returns the fees for a simple send tx with one input and two
+// StandardSendFee returns the fees for a simple send tx with one input and two
 // outputs.
 func (btc *baseWallet) StandardSendFee(feeRate uint64) uint64 {
 	var sz uint64 = dexbtc.MinimumTxOverhead
