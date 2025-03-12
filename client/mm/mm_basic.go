@@ -437,7 +437,7 @@ func (m *basicMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error)
 	return &wg, nil
 }
 
-func (m *basicMarketMaker) updateConfig(cfg *BotConfig) error {
+func (m *basicMarketMaker) updateConfig(cfg *BotConfig, _ *AutoRebalanceConfig) error {
 	if cfg.BasicMMConfig == nil {
 		// implies bug in caller
 		return errors.New("no market making config provided")
@@ -449,6 +449,8 @@ func (m *basicMarketMaker) updateConfig(cfg *BotConfig) error {
 	}
 
 	m.cfgV.Store(cfg.BasicMMConfig)
+	m.unifiedExchangeAdaptor.updateConfig(cfg, nil)
+
 	return nil
 }
 

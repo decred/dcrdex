@@ -522,14 +522,14 @@ func (a *arbMarketMaker) setTransferConfig(cfg *ArbMarketMakerConfig) {
 	})
 }
 
-func (a *arbMarketMaker) updateConfig(cfg *BotConfig) error {
+func (a *arbMarketMaker) updateConfig(cfg *BotConfig, autoRebalanceCfg *AutoRebalanceConfig) error {
 	if cfg.ArbMarketMakerConfig == nil {
 		return errors.New("no arb market maker config provided")
 	}
 
 	a.cfgV.Store(cfg.ArbMarketMakerConfig)
 	a.setTransferConfig(cfg.ArbMarketMakerConfig)
-	a.unifiedExchangeAdaptor.updateConfig(cfg)
+	a.unifiedExchangeAdaptor.updateConfig(cfg, autoRebalanceCfg)
 	return nil
 }
 
