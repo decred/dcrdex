@@ -136,10 +136,11 @@ func runTrader(t Trader, name string) {
 		}
 	}()
 
+	notes := m.Core.NotificationFeed().C
 out:
 	for {
 		select {
-		case note := <-m.notes:
+		case note := <-notes:
 			if note.Severity() >= db.ErrorLevel {
 				m.fatalError("Error note received: %s", mustJSON(note))
 				continue
@@ -195,7 +196,6 @@ type Mantle struct {
 	waiter        *dex.StartStopWaiter
 	name          string
 	log           dex.Logger
-	notes         <-chan core.Notification
 	wallets       map[uint32]*botWallet
 	lastReplenish time.Time
 }
@@ -235,7 +235,6 @@ func newMantle(name string) (*Mantle, error) {
 		name:    name,
 		log:     loggerMaker.Logger("MANTLE:" + name),
 		wallets: make(map[uint32]*botWallet),
-		notes:   c.NotificationFeed().C,
 	}
 
 	return m, nil
