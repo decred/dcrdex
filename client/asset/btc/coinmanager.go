@@ -203,7 +203,7 @@ func (c *CoinManager) OrderWithLeastOverFund(maxLock, feeRate uint64, orders []*
 	return
 }
 
-// fundMultiBestEffort makes a best effort to fund every order. If it is not
+// FundMultiBestEffort makes a best effort to fund every order. If it is not
 // possible, it returns coins for the orders that could be funded. The coins
 // that fund each order are returned in the same order as the values that were
 // passed in. If a split is allowed and all orders cannot be funded, nil slices
