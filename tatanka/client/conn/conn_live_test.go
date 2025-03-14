@@ -341,5 +341,13 @@ func TestConnectPeer(t *testing.T) {
 		t.Fatalf("timeout waiting for incoming tatanka request peer 2")
 	}
 
+	conn2.conn.peers = make(map[tanka.PeerID]*peer)
+
 	wg.Wait()
+
+	var res testRequest
+	err = conn1.conn.RequestPeer(conn2.peerID, testReq, &res)
+	if err != ErrPeerNeedsReconnect {
+		t.Fatalf("expected ErrPeerNeedsReconnect, got %v", err)
+	}
 }

@@ -9,7 +9,6 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -102,8 +101,6 @@ func decryptTankagramPayload(key []byte, ciphertext []byte) (*msgjson.Message, e
 }
 
 func decryptTankagramResult(key []byte, ciphertext []byte) (*mj.TankagramResultPayload, error) {
-	fmt.Printf("decrypting tankagram result with key %s\n", hex.EncodeToString(key))
-
 	plaintext, err := decryptAES(key, ciphertext)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt payload: %v", err)
@@ -769,12 +766,12 @@ func (c *MeshConn) RequestPeer(peerID tanka.PeerID, msg *msgjson.Message, thing 
 		return fmt.Errorf("not connected to peer %s", peerID)
 	}
 
-	payloadB, err := json.Marshal(msg)
+	payload, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("error marshaling payload: %w", err)
 	}
 
-	encryptedPayload, err := encryptAES(p.ephemeralSharedKey, payloadB)
+	encryptedPayload, err := encryptAES(p.ephemeralSharedKey, payload)
 	if err != nil {
 		return fmt.Errorf("error encrypting payload for %s: %w", p.id, err)
 	}
@@ -818,11 +815,10 @@ func (c *MeshConn) RequestPeer(peerID tanka.PeerID, msg *msgjson.Message, thing 
 		permanentSharedKey := sharedSecret(c.priv, remotePub)
 		decryptedRes, err := decryptTankagramResult(permanentSharedKey, res.EncryptedPayload)
 		if err != nil {
-			c.log.Errorf("ErrBadPeerResponse due to cannot decrypt")
+			c.log.Errorf("RequestPeer: could not decrypt tankagram result: %v", err)
 			return ErrBadPeerResponse
 		}
 		if decryptedRes.Error == mj.TEDecryptionFailed {
-			c.log.Errorf("peer %s needs reconnect", p.id)
 			return ErrPeerNeedsReconnect
 		}
 		// If we requested using an ephemeral key, and they responded using the
