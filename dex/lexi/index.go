@@ -27,12 +27,11 @@ type Index struct {
 	table                   *Table
 	prefix                  keyPrefix
 	f                       func(k, v KV) ([]byte, error)
+	unique                  bool
 	defaultIterationOptions iteratorOpts
 }
 
-// AddIndex adds an index to a Table. Once an Index is added, every datum
-// Set in the Table will generate an entry in the Index too.
-func (t *Table) AddIndex(name string, f func(k, v KV) ([]byte, error)) (*Index, error) {
+func (t *Table) addIndex(name string, f func(k, v KV) ([]byte, error), unique bool) (*Index, error) {
 	p, err := t.prefixForName(t.name + "__idx__" + name)
 	if err != nil {
 		return nil, err
@@ -43,9 +42,78 @@ func (t *Table) AddIndex(name string, f func(k, v KV) ([]byte, error)) (*Index, 
 		table:  t,
 		prefix: p,
 		f:      f,
+		unique: unique,
 	}
 	t.indexes = append(t.indexes, idx)
 	return idx, nil
+}
+
+// AddIndex adds an index to a Table. After an index is added, every item
+// added to the Table with Set will automatically generate a corresponding
+// entry in this index.
+func (t *Table) AddIndex(name string, f func(k, v KV) ([]byte, error)) (*Index, error) {
+	return t.addIndex(name, f, false)
+}
+
+// AddUniqueIndex adds a unique index to a Table. After an index is added, every
+// item added to the Table with Set will automatically generate a corresponding
+// entry in this index. The unique index guarantees that no two entries in the
+// index have the same value. If you attempt to add an entry that would create a
+// duplicate in the unique index, an error will be returned. However, if Set() is
+// called with the WithReplace() option, the existing entry will be overwritten
+// instead.
+func (t *Table) AddUniqueIndex(name string, f func(k, v KV) ([]byte, error)) (*Index, error) {
+	return t.addIndex(name, f, true)
+}
+
+// uniqueIndexConflictError is returned when a unique index conflict is encountered.
+// The caller should delete the table entry identified by conflictDBID before adding
+// the new entry.
+type uniqueIndexConflictError struct {
+	indexName    string
+	conflictDBID DBID
+}
+
+func (e uniqueIndexConflictError) Error() string {
+	return fmt.Sprintf("unique index conflict on %s", e.indexName)
+}
+
+func (idx *Index) checkForIndexConflict(txn *badger.Txn, idxB []byte, updatingDBID DBID) error {
+	conflictPrefix := prefixedKey(idx.prefix, idxB)
+
+	var conflictDBID DBID
+	var foundConflict bool
+
+	err := iteratePrefix(txn, conflictPrefix, nil, func(iter *badger.Iterator) error {
+		item := iter.Item()
+		key := item.Key()
+
+		if len(key) < prefixSize+DBIDSize {
+			return fmt.Errorf("index entry too small. length = %d", len(key))
+		}
+
+		existingDBID := newDBIDFromBytes(key[len(key)-DBIDSize:])
+
+		if existingDBID != updatingDBID {
+			conflictDBID = existingDBID
+			foundConflict = true
+			return ErrEndIteration
+		}
+
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("error checking for index uniqueness: %w", err)
+	}
+
+	if foundConflict {
+		return uniqueIndexConflictError{
+			indexName:    idx.name,
+			conflictDBID: conflictDBID,
+		}
+	}
+
+	return nil
 }
 
 func (idx *Index) add(txn *badger.Txn, k, v KV, dbID DBID) ([]byte, error) {
@@ -54,6 +122,13 @@ func (idx *Index) add(txn *badger.Txn, k, v KV, dbID DBID) ([]byte, error) {
 		return nil, fmt.Errorf("error getting index value: %w", err)
 	}
 	b := prefixedKey(idx.prefix, append(idxB, dbID[:]...))
+
+	if idx.unique {
+		if err := idx.checkForIndexConflict(txn, idxB, dbID); err != nil {
+			return nil, err
+		}
+	}
+
 	if err := txn.Set(b, nil); err != nil {
 		return nil, fmt.Errorf("error writing index entry: %w", err)
 	}
@@ -157,7 +232,10 @@ func (i *Iter) datum() (_ *datum, err error) {
 		return i.d, nil
 	}
 	i.d, err = i.table.get(i.txn, i.dbID)
-	return i.d, err
+	if err != nil {
+		return nil, err
+	}
+	return i.d, nil
 }
 
 // Delete deletes the indexed datum and any associated index entries.
@@ -211,7 +289,7 @@ func (db *DB) iterate(keyPfix keyPrefix, table *Table, io iteratorOpts, isIndex 
 				if len(k) != prefixSize+DBIDSize {
 					return fmt.Errorf("invalid table key length %d", len(k))
 				}
-				copy(dbID[:], k)
+				copy(dbID[:], k[prefixSize:])
 			}
 			return f(&Iter{
 				isIndex: isIndex,
