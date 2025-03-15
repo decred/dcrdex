@@ -1014,7 +1014,7 @@ func (wc *rpcClient) swapConfirmations(txHash *chainhash.Hash, vout uint32, _ []
 	return uint32(tx.Confirmations), true, nil
 }
 
-// getBlockHeader gets the *rpcBlockHeader for the specified block hash.
+// getRPCBlockHeader gets the *rpcBlockHeader for the specified block hash.
 func (wc *rpcClient) getRPCBlockHeader(blockHash *chainhash.Hash) (*BlockHeader, error) {
 	blkHeader := new(BlockHeader)
 	err := wc.call(methodGetBlockHeader,
