@@ -40,8 +40,8 @@ cloud.google.com/go/storage v1.10.0/go.mod h1:FLPqc6j+Ki4BU591ie1oL6qBQGu2Bl/tZ9
 contrib.go.opencensus.io/exporter/stackdriver v0.13.4/go.mod h1:aXENhDJ1Y4lIg4EUaVTwzvYETVNZk10Pu26tevFKLUc=
 decred.org/cspp/v2 v2.4.0 h1:whb0YW+UELHJS/UfT5MBXSJXrKUVw5omhgKNhjzYix4=
 decred.org/cspp/v2 v2.4.0/go.mod h1:9nO3bfvCheOPIFZw5f6sRQ42CjBFB5RKSaJ9Iq6G4MA=
-decred.org/dcrwallet/v4 v4.3.0 h1:JqFyUa5Xj51br1In8wzQresUrW5nuGp7cCFIxpb4VZE=
-decred.org/dcrwallet/v4 v4.3.0/go.mod h1:cd0+55eXPYwYddb/8r3dRyXI+MXiqx642QisZbswzUI=
+decred.org/dcrwallet/v4 v4.3.1 h1:6OZ1GS9YvLk2/SGZc2Tw11QV3sqkov431da7sBd7Bc0=
+decred.org/dcrwallet/v4 v4.3.1/go.mod h1:cd0+55eXPYwYddb/8r3dRyXI+MXiqx642QisZbswzUI=
 dmitri.shuralyov.com/gpu/mtl v0.0.0-20190408044501-666a987793e9/go.mod h1:H6x//7gZCb22OMCxBHrMx7a5I7Hp++hsVxbQ4BYO7hU=
 github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 h1:cTp8I5+VIoKjsnZuH8vjyaysT/ses3EvZeaV/1UkF2M=
 github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96/go.mod h1:bOvUY6CB00SOBii9/FifXqc0awNKxLFCL/+pkDPuyl8=
