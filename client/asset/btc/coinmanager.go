@@ -538,7 +538,7 @@ func (c *CoinManager) LockUTXOs(utxos []*UTxO) {
 	c.mtx.Unlock()
 }
 
-// LockOutputs locks the utxos in the provided mapping.
+// LockOutputsMap locks the utxos in the provided mapping.
 func (c *CoinManager) LockOutputsMap(utxos map[OutPoint]*UTxO) {
 	c.mtx.Lock()
 	for pt, utxo := range utxos {

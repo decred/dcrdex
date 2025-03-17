@@ -339,7 +339,7 @@ func (wc *WalletClient) PayTo(ctx context.Context, walletPass string, addr strin
 	return txRaw, nil
 }
 
-// PayToFromAbsFee allows specifying prevouts (in txid:vout format) and an
+// PayToFromCoinsAbsFee allows specifying prevouts (in txid:vout format) and an
 // absolute fee in BTC instead of a fee rate. This combination allows specifying
 // precisely how much will be withdrawn from the wallet (subtracting fees),
 // unless the change is dust and omitted. The transaction is not broadcasted;
