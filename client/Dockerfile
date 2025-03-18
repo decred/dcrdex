@@ -27,13 +27,13 @@ RUN npm run build
 
 # bisonw binary build
 
-# The image below is golang:1.21.0-alpine3.18 (linux/amd64)
+# The image below is golang:1.24.1-alpine3.21 (linux/amd64)
 # It's pulled by the digest (immutable id) to avoid supply-chain attacks.
 # Maintainer Note:
 #    To update to a new digest, you must first manually pull the new image:
 #    `docker pull golang:<new version>`
 #    Docker will print the digest of the new image after the pull has finished.
-FROM golang@sha256:445f34008a77b0b98bf1821bf7ef5e37bb63cc42d22ee7c21cc17041070d134f AS gobuilder
+FROM golang@sha256:43c094ad24b6ac0546c62193baeb3e6e49ce14d3250845d166c77c25f64b0386 AS gobuilder
 COPY --from=nodebuilder /root/dex/ /root/dex/
 WORKDIR /root/dex/client/cmd/bisonw/
 RUN CGO_ENABLED=0 GOOS=linux GO111MODULE=on go build
