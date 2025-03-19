@@ -7,7 +7,7 @@ on:
 
 env:
   DOCKER_CLI_EXPERIMENTAL: enabled
-  IMAGE_NAME: decred/dcrdex
+  IMAGE_NAME: decred/bisonwallet
 
 jobs:
   build-and-push:
