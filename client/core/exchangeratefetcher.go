@@ -153,7 +153,7 @@ func FetchDcrdataRates(ctx context.Context, log dex.Logger, assets map[uint32]*S
 	})
 
 	if err := getRates(ctx, dcrDataURL, res); err != nil {
-		log.Error(err)
+		log.Error("error getting prices from dcrdata: %w", err)
 		return nil
 	}
 

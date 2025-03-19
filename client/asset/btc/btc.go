@@ -216,6 +216,7 @@ var (
 			electrumWalletDefinition,
 		},
 		LegacyWalletIndex: 1,
+		BlockchainClass:   asset.BlockchainClassUTXO,
 	}
 )
 
