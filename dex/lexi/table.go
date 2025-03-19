@@ -155,15 +155,41 @@ func (t *Table) Set(k, v KV, setOpts ...SetOption) error {
 				}
 			}
 		}
+
+		// Add to indexes
 		for i, idx := range t.indexes {
 			if d.indexes[i], err = idx.add(txn, k, v, dbID); err != nil {
+				// Handle unique index conflicts
+				var indexConflictError uniqueIndexConflictError
+				if errors.As(err, &indexConflictError) {
+					// If the index is unique and we're not replacing, return an error
+					if !opts.replace {
+						return fmt.Errorf("index uniqueness violation on %q", indexConflictError.indexName)
+					}
+
+					// If we're replacing, delete the old entry
+					if err := t.removeTableEntry(txn, indexConflictError.conflictDBID); err != nil {
+						return fmt.Errorf("error deleting conflicting entry from index %q: %w", indexConflictError.indexName, err)
+					}
+
+					// Try again
+					d.indexes[i], err = idx.add(txn, k, v, dbID)
+					if err != nil {
+						return fmt.Errorf("error adding entry to index after deleting conflicting entry: %w", err)
+					}
+
+					continue
+				}
+
 				return fmt.Errorf("error adding entry to index %q: %w", idx.name, err)
 			}
 		}
+
 		dB, err := d.bytes()
 		if err != nil {
 			return fmt.Errorf("error encoding datum: %w", err)
 		}
+
 		return txn.Set(prefixedKey(t.prefix, dbID[:]), dB)
 	})
 }
@@ -176,17 +202,21 @@ func (t *Table) Delete(kB []byte) error {
 		if err != nil {
 			return convertError(err)
 		}
-		item, err := txn.Get(dbID[:])
+		return t.removeTableEntry(txn, dbID)
+	})
+}
+
+func (t *Table) removeTableEntry(txn *badger.Txn, dbID DBID) error {
+	item, err := txn.Get(prefixedKey(t.prefix, dbID[:]))
+	if err != nil {
+		return convertError(err)
+	}
+	return item.Value(func(dB []byte) error {
+		d, err := decodeDatum(dB)
 		if err != nil {
-			return convertError(err)
+			return fmt.Errorf("error decoding datum: %w", err)
 		}
-		return item.Value(func(dB []byte) error {
-			d, err := decodeDatum(dB)
-			if err != nil {
-				return fmt.Errorf("error decoding datum: %w", err)
-			}
-			return t.deleteDatum(txn, dbID, d)
-		})
+		return t.deleteDatum(txn, dbID, d)
 	})
 }
 

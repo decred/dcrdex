@@ -9,6 +9,8 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
+	"github.com/davecgh/go-spew/spew"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 func TestTxDB(t *testing.T) {
@@ -19,7 +21,7 @@ func TestTxDB(t *testing.T) {
 	_, eth, node, shutdown := tassetWallet(BipID)
 	shutdown()
 
-	txHistoryStore, err := newBadgerTxDB(tempDir, tLogger)
+	txHistoryStore, err := NewTxDB(tempDir, tLogger, BipID)
 	if err != nil {
 		t.Fatalf("error connecting to tx history store: %v", err)
 	}
@@ -67,7 +69,7 @@ func TestTxDB(t *testing.T) {
 	}
 	expectedTxs = []*asset.WalletTransaction{wt2.WalletTransaction, wt1.WalletTransaction}
 	if !reflect.DeepEqual(expectedTxs, txs) {
-		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
+		t.Fatalf("expected txs %s but got %s", spew.Sdump(expectedTxs), spew.Sdump(txs))
 	}
 
 	err = txHistoryStore.storeTx(wt3)
@@ -114,11 +116,11 @@ func TestTxDB(t *testing.T) {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
 	if !reflect.DeepEqual(allTxs, txs) {
-		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
+		t.Fatalf("expected txs %s but got %s", spew.Sdump(allTxs), spew.Sdump(txs))
 	}
 	txHistoryStore.Close()
 
-	txHistoryStore, err = newBadgerTxDB(tempDir, dex.StdOutLogger("TXDB", dex.LevelTrace))
+	txHistoryStore, err = NewTxDB(tempDir, dex.StdOutLogger("TXDB", dex.LevelTrace), BipID)
 	if err != nil {
 		t.Fatalf("error connecting to tx history store: %v", err)
 	}
@@ -136,7 +138,7 @@ func TestTxDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
-	expectedUnconfirmedTxs := []*extendedWalletTx{wt2, wt3, wt4}
+	expectedUnconfirmedTxs := []*extendedWalletTx{wt4, wt3, wt2}
 	compareTxs := func(txs0, txs1 []*extendedWalletTx) bool {
 		if len(txs0) != len(txs1) {
 			return false
@@ -154,7 +156,7 @@ func TestTxDB(t *testing.T) {
 		return true
 	}
 	if !compareTxs(expectedUnconfirmedTxs, unconfirmedTxs) {
-		t.Fatalf("expected txs %+v but got %+v", expectedUnconfirmedTxs, unconfirmedTxs)
+		t.Fatalf("expected txs:\n%s\n\nbut got:\n%s", spew.Sdump(expectedUnconfirmedTxs), spew.Sdump(unconfirmedTxs))
 	}
 
 	txs, err = txHistoryStore.getTxs(0, nil, false, nil)
@@ -172,5 +174,72 @@ func TestTxDB(t *testing.T) {
 	expectedTxs = []*asset.WalletTransaction{wt1.WalletTransaction}
 	if !reflect.DeepEqual(expectedTxs, txs) {
 		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
+	}
+}
+
+func TestTxDBReplaceNonce(t *testing.T) {
+	tempDir := t.TempDir()
+	tLogger := dex.StdOutLogger("TXDB", dex.LevelTrace)
+
+	_, eth, node, shutdown := tassetWallet(BipID)
+	shutdown()
+
+	txHistoryStore, err := NewTxDB(tempDir, tLogger, BipID)
+	if err != nil {
+		t.Fatalf("error connecting to tx history store: %v", err)
+	}
+
+	newTx := func(nonce uint64) *extendedWalletTx {
+		return eth.extendedTx(node.newTransaction(nonce, big.NewInt(1)), asset.Send, 1, nil)
+	}
+
+	wt1 := newTx(1)
+	wt2 := newTx(1)
+
+	err = txHistoryStore.storeTx(wt1)
+	if err != nil {
+		t.Fatalf("error storing tx: %v", err)
+	}
+
+	err = txHistoryStore.storeTx(wt2)
+	if err != nil {
+		t.Fatalf("error storing tx: %v", err)
+	}
+
+	tx, err := txHistoryStore.getTx(wt1.txHash)
+	if err != nil {
+		t.Fatalf("error retrieving tx: %v", err)
+	}
+	if tx != nil {
+		t.Fatalf("expected nil tx but got %+v", tx)
+	}
+
+	txs, err := txHistoryStore.getTxs(0, nil, false, nil)
+	if err != nil {
+		t.Fatalf("error retrieving txs: %v", err)
+	}
+	if len(txs) != 1 {
+		t.Fatalf("expected 1 tx but got %d", len(txs))
+	}
+	if txs[0].ID != wt2.ID {
+		t.Fatalf("expected tx %s but got %s", wt2.ID, txs[0].ID)
+	}
+}
+
+func TestTxDB_getUnknownTx(t *testing.T) {
+	tempDir := t.TempDir()
+	tLogger := dex.StdOutLogger("TXDB", dex.LevelTrace)
+
+	txHistoryStore, err := NewTxDB(tempDir, tLogger, BipID)
+	if err != nil {
+		t.Fatalf("error connecting to tx history store: %v", err)
+	}
+
+	tx, err := txHistoryStore.getTx(common.Hash{0x01})
+	if err != nil {
+		t.Fatalf("error retrieving tx: %v", err)
+	}
+	if tx != nil {
+		t.Fatalf("expected nil tx but got %+v", tx)
 	}
 }

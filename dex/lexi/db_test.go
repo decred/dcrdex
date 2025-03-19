@@ -271,3 +271,115 @@ func TestDatum(t *testing.T) {
 	d.indexes = append(d.indexes, encode.RandomBytes(300))
 	testEncodeDecode("complex", d)
 }
+
+func TestUniqueIndex(t *testing.T) {
+	db, shutdown := newTestDB(t)
+	defer shutdown()
+
+	tbl, err := db.Table("UniqueTest")
+	if err != nil {
+		t.Fatalf("Error creating table: %v", err)
+	}
+
+	uniqueIdx, err := tbl.AddUniqueIndex("Unique", func(k, v KV) ([]byte, error) {
+		return v.(*tValue).idx, nil
+	})
+	if err != nil {
+		t.Fatalf("Error adding unique index: %v", err)
+	}
+
+	key1 := []byte("key1")
+	key2 := []byte("key2")
+
+	// Both values have the same index key to test uniqueness constraint
+	sameIndexKey := []byte{0x01}
+
+	val1 := &tValue{
+		k:   key1,
+		v:   []byte("value1"),
+		idx: sameIndexKey,
+	}
+	val2 := &tValue{
+		k:   key2,
+		v:   []byte("value2"),
+		idx: sameIndexKey,
+	}
+
+	// First insert should succeed
+	if err := tbl.Set(key1, val1); err != nil {
+		t.Fatalf("Error setting first value: %v", err)
+	}
+
+	// Second insert with same index key should fail without WithReplace()
+	err = tbl.Set(key2, val2)
+	if err == nil {
+		t.Fatal("Expected error when inserting duplicate index value without WithReplace(), but got none")
+	}
+	if !strings.Contains(err.Error(), "index uniqueness violation") {
+		t.Fatalf("Expected unique index error, got: %v", err)
+	}
+
+	// Verify the first value is still there
+	var retrievedVal []byte
+	numEntries := 0
+	err = tbl.Iterate(nil, func(it *Iter) error {
+		numEntries++
+		err := it.V(func(v []byte) error {
+			retrievedVal = v
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Error iterating table: %v", err)
+	}
+	if !bytes.Equal(retrievedVal, val1.v) {
+		t.Fatalf("Expected value1 to still be in table, got %s", retrievedVal)
+	}
+	if numEntries != 1 {
+		t.Fatalf("Expected 1 entry in table, got %d", numEntries)
+	}
+
+	// Second insert with same index key should succeed with WithReplace()
+	if err := tbl.Set(key2, val2, WithReplace()); err != nil {
+		t.Fatalf("Error setting second value with WithReplace(): %v", err)
+	}
+
+	// Verify the replacement worked by checking the table content
+	numEntries = 0
+	var lastVal []byte
+	err = tbl.Iterate(nil, func(it *Iter) error {
+		numEntries++
+		return it.V(func(v []byte) error {
+			lastVal = v
+			return nil
+		})
+	})
+	if err != nil {
+		t.Fatalf("Error iterating table after replace: %v", err)
+	}
+	if numEntries != 1 {
+		t.Fatalf("Expected 1 value in table after replace, got %d", numEntries)
+	}
+	if !bytes.Equal(lastVal, val2.v) {
+		t.Fatalf("Expected replaced value to be value2, got %s", lastVal)
+	}
+
+	// Verify we can iterate through the unique index and get the correct result
+	numEntries = 0
+	uniqueIdx.Iterate(nil, func(it *Iter) error {
+		numEntries++
+		return it.V(func(v []byte) error {
+			if !bytes.Equal(v, val2.v) {
+				t.Fatalf("Expected value2 when iterating unique index, got %s", v)
+			}
+			return nil
+		})
+	})
+	if numEntries != 1 {
+		t.Fatalf("Expected 1 value in unique index, got %d", numEntries)
+	}
+}

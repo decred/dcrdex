@@ -4,20 +4,16 @@
 package eth
 
 import (
-	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"math/big"
-	"sync"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/utils"
-	"github.com/dgraph-io/badger"
+	"decred.org/dcrdex/dex/lexi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 )
@@ -52,6 +48,20 @@ type extendedWalletTx struct {
 	indexed         bool
 }
 
+func (wt *extendedWalletTx) MarshalBinary() ([]byte, error) {
+	return json.Marshal(wt)
+}
+
+func (wt *extendedWalletTx) UnmarshalBinary(b []byte) error {
+	if err := json.Unmarshal(b, &wt); err != nil {
+		return err
+	}
+	wt.txHash = common.HexToHash(wt.ID)
+	wt.lastBroadcast = time.Unix(int64(wt.SubmissionTime), 0)
+	wt.savedToDB = true
+	return nil
+}
+
 func (t *extendedWalletTx) age() time.Duration {
 	return time.Since(time.Unix(int64(t.SubmissionTime), 0))
 }
@@ -60,72 +70,6 @@ func (t *extendedWalletTx) tx() (*types.Transaction, error) {
 	tx := new(types.Transaction)
 	return tx, tx.UnmarshalBinary(t.RawTx)
 }
-
-var (
-	// noncePrefix is the prefix for the key used to map a nonce to an
-	// extendedWalletTx.
-	noncePrefix = []byte("nonce-")
-	// txHashPrefix is the prefix for the key used to map a transaction hash
-	// to a nonce key.
-	txHashPrefix = []byte("txHash-")
-	// dbVersionKey is the key used to store the database version.
-	dbVersionKey = []byte("dbVersion")
-)
-
-func nonceKey(nonce uint64) []byte {
-	key := make([]byte, len(noncePrefix)+8)
-	copy(key, noncePrefix)
-	binary.BigEndian.PutUint64(key[len(noncePrefix):], nonce)
-	return key
-}
-
-func txKey(txHash common.Hash) []byte {
-	key := make([]byte, len(txHashPrefix)+20)
-	copy(key, txHashPrefix)
-	copy(key[len(txHashPrefix):], txHash[:])
-	return key
-}
-
-// badgerDB returns ErrConflict when a read happening in a update (read/write)
-// transaction is stale. This function retries updates multiple times in
-// case of conflicts.
-func (db *badgerTxDB) Update(f func(txn *badger.Txn) error) (err error) {
-	db.updateWG.Add(1)
-	defer db.updateWG.Done()
-
-	const maxRetries = 10
-	sleepTime := 5 * time.Millisecond
-
-	for i := 0; i < maxRetries; i++ {
-		if err = db.DB.Update(f); err == nil || !errors.Is(err, badger.ErrConflict) {
-			return err
-		}
-		sleepTime *= 2
-		time.Sleep(sleepTime)
-	}
-
-	return err
-}
-
-var maxNonceKey = nonceKey(math.MaxUint64)
-
-// initialDBVersion only contained mappings from txHash -> monitoredTx.
-// const initialDBVersion = 0
-
-// prefixDBVersion contains two mappings each marked with a prefix:
-//
-//	nonceKey -> extendedWalletTx (noncePrefix)
-//	txHash -> nonceKey (txHashPrefix)
-// const prefixDBVersion = 1
-
-// txMappingVersion reverses the semantics so that all txs are accessible
-// by txHash.
-//
-// nonceKey -> best-known txHash
-// txHash -> extendedWalletTx, which contains a nonce
-const txMappingVersion = 2
-
-const txDBVersion = txMappingVersion
 
 type txDB interface {
 	dex.Connector
@@ -139,361 +83,210 @@ type txDB interface {
 	getPendingTxs() ([]*extendedWalletTx, error)
 }
 
-type badgerTxDB struct {
-	*badger.DB
-	filePath string
-	log      dex.Logger
-	updateWG sync.WaitGroup
+type TxDB struct {
+	*lexi.DB
+	txs           *lexi.Table
+	allAssetIndex *lexi.Index
+	assetIndex    *lexi.Index
+
+	baseChainID uint32
 }
 
-var _ txDB = (*badgerTxDB)(nil)
+var _ txDB = (*TxDB)(nil)
 
-func newBadgerTxDB(filePath string, log dex.Logger) (*badgerTxDB, error) {
-	// If memory use is a concern, could try
-	//   .WithValueLogLoadingMode(options.FileIO) // default options.MemoryMap
-	//   .WithMaxTableSize(sz int64); // bytes, default 6MB
-	//   .WithValueLogFileSize(sz int64), bytes, default 1 GB, must be 1MB <= sz <= 1GB
-	opts := badger.DefaultOptions(filePath).WithLogger(&badgerLoggerWrapper{log})
-	var err error
-	bdb, err := badger.Open(opts)
-	if err == badger.ErrTruncateNeeded {
-		// Probably a Windows thing.
-		// https://github.com/dgraph-io/badger/issues/744
-		log.Warnf("error opening badger db: %v", err)
-		// Try again with value log truncation enabled.
-		opts.Truncate = true
-		log.Warnf("Attempting to reopen badger DB with the Truncate option set...")
-		bdb, err = badger.Open(opts)
+// nonceIndexEntry creates an index entry for iterating over all
+// transactions.
+// The entry is 8 bytes total:
+// - 8 bytes: nonce
+func nonceIndexEntry(wt *extendedWalletTx) []byte {
+	entry := make([]byte, 8)
+	binary.BigEndian.PutUint64(entry[:8], wt.Nonce.Uint64())
+	return entry
+}
+
+// assetIndexEntry creates an index entry for iterating over transactions of a
+// specific asset.
+// The entry is 12 bytes total:
+// - 4 bytes: asset ID
+// - 8 bytes: nonce
+func assetIndexEntry(wt *extendedWalletTx, baseChainID uint32) []byte {
+	var assetID uint32 = baseChainID
+	if wt.TokenID != nil {
+		assetID = *wt.TokenID
 	}
+	assetKey := make([]byte, 4+8)
+	binary.BigEndian.PutUint32(assetKey[:4], assetID)
+	binary.BigEndian.PutUint64(assetKey[4:], wt.Nonce.Uint64())
+	return assetKey
+}
+
+// NewTxDB creates a transaction database for storing Ethereum transactions.
+func NewTxDB(path string, log dex.Logger, baseChainID uint32) (*TxDB, error) {
+	ldb, err := lexi.New(&lexi.Config{
+		Path: path,
+		Log:  log,
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	db := &badgerTxDB{
-		DB:       bdb,
-		filePath: filePath,
-		log:      log,
-	}
-	return db, nil
-}
-
-func (db *badgerTxDB) Connect(ctx context.Context) (*sync.WaitGroup, error) {
-	if err := db.updateVersion(); err != nil {
-		return nil, fmt.Errorf("failed to update db: %w", err)
-	}
-
-	var wg sync.WaitGroup
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		defer db.Close()
-		defer db.updateWG.Wait()
-		ticker := time.NewTicker(5 * time.Minute)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				err := db.RunValueLogGC(0.5)
-				if err != nil && !errors.Is(err, badger.ErrNoRewrite) {
-					db.log.Errorf("garbage collection error: %v", err)
-				}
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	return &wg, nil
-}
-
-// txForNonce gets the registered for the given nonce.
-func txForNonce(txn *badger.Txn, nonce uint64) (tx *extendedWalletTx, err error) {
-	nk := nonceKey(nonce)
-	txHashi, err := txn.Get(nk)
+	txs, err := ldb.Table("txs")
 	if err != nil {
 		return nil, err
 	}
-	return tx, txHashi.Value(func(txHashB []byte) error {
-		var txHash common.Hash
-		copy(txHash[:], txHashB)
-		txi, err := txn.Get(txKey(txHash))
-		if err != nil {
-			return err
-		}
-		return txi.Value(func(wtB []byte) error {
-			tx, err = unmarshalTx(wtB)
-			return err
-		})
-	})
-}
 
-// txForHash get the extendedWalletTx at the given tx hash and checks for any
-// unsaved nonce replacement.
-func txForHash(txn *badger.Txn, txHash common.Hash) (wt *extendedWalletTx, err error) {
-	txi, err := txn.Get(txKey(txHash))
+	allAssetIndex, err := txs.AddUniqueIndex("allAssets", func(k, v lexi.KV) ([]byte, error) {
+		wt, is := v.(*extendedWalletTx)
+		if !is {
+			return nil, fmt.Errorf("expected type *extendedWalletTx, got %T", wt)
+		}
+		return nonceIndexEntry(wt), nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	return wt, txi.Value(func(wtB []byte) error {
-		wt, err = unmarshalTx(wtB)
-		if err != nil || wt.Confirmed || wt.NonceReplacement != "" {
-			return err
-		}
-		nonceTx, err := txForNonce(txn, wt.Nonce.Uint64())
-		if err != nil {
-			return err
-		}
-		if nonceTx.txHash != wt.txHash && nonceTx.Confirmed {
-			wt.NonceReplacement = wt.txHash.String()
-		}
-		return nil
-	})
-}
 
-// updateVersion updates the DB to the latest version. In version 0,
-// only a mapping from txHash to monitoredTx was stored, with no
-// prefixes.
-func (db *badgerTxDB) updateVersion() error {
-	// Check if the database version is stored. If not, the db
-	// is version 0.
-	var version int
-	err := db.View(func(txn *badger.Txn) error {
-		item, err := txn.Get(dbVersionKey)
-		if err != nil {
-			if errors.Is(err, badger.ErrKeyNotFound) {
-				return nil
-			}
-			return err
+	assetIndex, err := txs.AddUniqueIndex("asset", func(k, v lexi.KV) ([]byte, error) {
+		wt, is := v.(*extendedWalletTx)
+		if !is {
+			return nil, fmt.Errorf("expected type *extendedWalletTx, got %T", wt)
 		}
-		return item.Value(func(versionB []byte) error {
-			version = int(binary.BigEndian.Uint64(versionB))
-			return nil
-		})
+		return assetIndexEntry(wt, baseChainID), nil
 	})
 	if err != nil {
-		db.log.Errorf("error retrieving database version: %v", err)
+		return nil, err
 	}
 
-	if version < txMappingVersion {
-		if err := db.DB.DropAll(); err != nil {
-			return fmt.Errorf("error deleting DB entries for version upgrade: %w", err)
-		}
-		versionB := make([]byte, 8)
-		binary.BigEndian.PutUint64(versionB, txMappingVersion)
-		if err = db.Update(func(txn *badger.Txn) error {
-			return txn.Set(dbVersionKey, versionB)
-		}); err != nil {
-			return err
-		}
-		db.log.Infof("Upgraded DB to version %d by deleting everything and starting from scratch.", txMappingVersion)
-	} else if version > txDBVersion {
-		return fmt.Errorf("database version %d is not supported", version)
+	return &TxDB{
+		DB:            ldb,
+		txs:           txs,
+		allAssetIndex: allAssetIndex,
+		assetIndex:    assetIndex,
+		baseChainID:   baseChainID,
+	}, nil
+}
+
+// storeTx stores a transaction in the database. If a transaction with the
+// same hash or nonce already exists, it is replaced.
+func (db *TxDB) storeTx(wt *extendedWalletTx) error {
+	hash := common.HexToHash(wt.ID)
+	err := db.txs.Set(hash[:], wt, lexi.WithReplace())
+	if err != nil {
+		return err
 	}
 
 	return nil
 }
 
-// storeTx stores a mapping from nonce to extendedWalletTx and a mapping from
-// transaction hash to nonce so transactions can be looked up by hash. If a
-// nonce already exists, the extendedWalletTx is overwritten.
-func (db *badgerTxDB) storeTx(wt *extendedWalletTx) error {
-	wtB, err := json.Marshal(wt)
-	if err != nil {
-		return err
-	}
-	nonce := wt.Nonce.Uint64()
-
-	return db.Update(func(txn *badger.Txn) error {
-		// If there is not a confirmed tx at this tx's nonce, map the nonce
-		// to this tx.
-		nonceTx, err := txForNonce(txn, nonce)
-		if err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
-			return fmt.Errorf("error reading nonce tx: %w", err)
-		}
-		// If we don't have a tx stored at the nonce or the tx stored at the
-		// nonce is not confirmed, put this one there instead, unless this one
-		// has been marked as nonce-replaced.
-		if (nonceTx == nil || !nonceTx.Confirmed) && wt.NonceReplacement == "" {
-			if err := txn.Set(nonceKey(nonce), wt.txHash[:]); err != nil {
-				return fmt.Errorf("error mapping nonce to tx hash: %w", err)
-			}
-		}
-		// Store the tx at its hash.
-		return txn.Set(txKey(wt.txHash), wtB)
-	})
-}
-
 // getTx gets a single transaction. It is not an error if the tx is not known.
 // In that case, a nil tx is returned.
-func (db *badgerTxDB) getTx(txHash common.Hash) (tx *extendedWalletTx, err error) {
-	return tx, db.View(func(txn *badger.Txn) error {
-		tx, err = txForHash(txn, txHash)
-		if errors.Is(err, badger.ErrKeyNotFound) {
-			return nil
+func (db *TxDB) getTx(txHash common.Hash) (*extendedWalletTx, error) {
+	var wt extendedWalletTx
+	if err := db.txs.Get(txHash[:], &wt); err != nil {
+		if errors.Is(err, lexi.ErrKeyNotFound) {
+			return nil, nil
 		}
-		return err
-	})
-}
-
-// unmarshalTx attempts to decode the binary tx and sets some unexported fields.
-func unmarshalTx(wtB []byte) (wt *extendedWalletTx, err error) {
-	if err = json.Unmarshal(wtB, &wt); err != nil {
 		return nil, err
 	}
-	wt.txHash = common.HexToHash(wt.ID)
-	wt.lastBroadcast = time.Unix(int64(wt.SubmissionTime), 0)
-	wt.savedToDB = true
-	return
+	return &wt, nil
 }
 
-// getTxs fetches n transactions. If no refID is provided, getTxs returns the
-// n most recent txs in reverse-nonce order. If no refID is provided, the past
-// argument is ignored. If a refID is provided, getTxs will return n txs
-// starting with the nonce of the tx referenced. When refID is provided, and
-// past is false, the results will be in increasing order starting at and
-// including the nonce of the referenced tx. If refID is provided and past
-// is true, the results will be in decreasing nonce order starting at and
-// including the referenced tx. No orphans will be included in the results.
-// If a non-nil refID is not found, asset.CoinNotFoundError is returned.
-func (db *badgerTxDB) getTxs(n int, refID *common.Hash, past bool, tokenID *uint32) ([]*asset.WalletTransaction, error) {
+// getTxs fetches n transactions.
+//
+// If n=0, getTxs returns all transactions in reverse-nonce order.
+//
+// If no refID is provided:
+// - Returns the n most recent transactions in reverse-nonce order
+// - The past argument is ignored
+//
+// If refID is provided:
+// - Returns n transactions starting with the referenced transaction
+// - If past=false: Results are in increasing nonce order
+// - If past=true: Results are in decreasing nonce order
+// - The referenced transaction is included in results
+// - Returns asset.CoinNotFoundError if refID not found
+func (db *TxDB) getTxs(n int, refID *common.Hash, past bool, assetID *uint32) ([]*asset.WalletTransaction, error) {
+	var opts []lexi.IterationOption
+	if past || refID == nil {
+		opts = append(opts, lexi.WithReverse())
+	}
+
+	if refID != nil {
+		wt, err := db.getTx(*refID)
+		if err != nil {
+			return nil, asset.CoinNotFoundError
+		}
+
+		var entry []byte
+		if assetID == nil {
+			entry = nonceIndexEntry(wt)
+		} else {
+			var refTxAssetID uint32 = db.baseChainID
+			if wt.TokenID != nil {
+				refTxAssetID = *wt.TokenID
+			}
+			if refTxAssetID != *assetID {
+				return nil, fmt.Errorf("token ID mismatch: %d != %d", refTxAssetID, *assetID)
+			}
+			entry = assetIndexEntry(wt, db.baseChainID)
+		}
+
+		opts = append(opts, lexi.WithSeek(entry))
+	}
+
 	txs := make([]*asset.WalletTransaction, 0, n)
-
-	return txs, db.View(func(txn *badger.Txn) error {
-		opts := badger.DefaultIteratorOptions
-		opts.Reverse = true // If non refID, it's always reverse
-		opts.Prefix = noncePrefix
-		startNonceKey := maxNonceKey
-		if refID != nil {
-			opts.Reverse = past
-			// Get the nonce for the provided tx hash.
-			wt, err := txForHash(txn, *refID)
-			if err != nil {
-				if errors.Is(err, badger.ErrKeyNotFound) {
-					return asset.CoinNotFoundError
-				}
-				return err
-			}
-			startNonceKey = nonceKey(wt.Nonce.Uint64())
+	iterFunc := func(it *lexi.Iter) error {
+		wt := new(extendedWalletTx)
+		err := it.V(func(vB []byte) error {
+			return wt.UnmarshalBinary(vB)
+		})
+		if err != nil {
+			return err
 		}
 
-		it := txn.NewIterator(opts)
-		defer it.Close()
+		txs = append(txs, wt.WalletTransaction)
 
-		for it.Seek(startNonceKey); it.Valid() && (n <= 0 || len(txs) < n); it.Next() {
-			txHashi := it.Item()
-			if err := txHashi.Value(func(txHashB []byte) error {
-				var txHash common.Hash
-				copy(txHash[:], txHashB)
-				wt, err := txForHash(txn, txHash)
-				if err != nil {
-					return err
-				}
-				if tokenID != nil && (wt.TokenID == nil || *tokenID != *wt.TokenID) {
-					return nil
-				}
-				txs = append(txs, wt.WalletTransaction)
-				return nil
-			}); err != nil {
-				return err
-			}
+		if n > 0 && len(txs) >= n {
+			return lexi.ErrEndIteration
 		}
+
 		return nil
-	})
+	}
+
+	if assetID == nil {
+		return txs, db.allAssetIndex.Iterate(nil, iterFunc, opts...)
+	}
+
+	return txs, db.assetIndex.Iterate(*assetID, iterFunc, opts...)
 }
 
-// getPendingTxs returns a map of nonce to extendedWalletTx for all
-// pending transactions.
-func (db *badgerTxDB) getPendingTxs() ([]*extendedWalletTx, error) {
-	// We will be iterating backwards from the most recent nonce. If we find
-	// numConfirmedTxsToCheck consecutive confirmed transactions, we can stop
-	// iterating.
+// getPendingTxs returns all unconfirmed transactions that have not been marked
+// as lost.
+func (db *TxDB) getPendingTxs() (txs []*extendedWalletTx, err error) {
 	const numConfirmedTxsToCheck = 20
+	var numConfirmedTxs int
 
-	txs := make([]*extendedWalletTx, 0, 4)
-
-	err := db.View(func(txn *badger.Txn) error {
-		opts := badger.DefaultIteratorOptions
-		opts.Reverse = true
-		opts.Prefix = noncePrefix
-		it := txn.NewIterator(opts)
-		defer it.Close()
-
-		var numConfirmedTxs int
-		for it.Seek(maxNonceKey); it.Valid(); it.Next() {
-			txHashi := it.Item()
-			err := txHashi.Value(func(txHashB []byte) error {
-				var txHash common.Hash
-				copy(txHash[:], txHashB)
-				txi, err := txn.Get(txKey(txHash))
-				if err != nil {
-					return err
-				}
-				return txi.Value(func(wtB []byte) error {
-					wt, err := unmarshalTx(wtB)
-					if err != nil {
-						db.log.Errorf("unable to unmarhsal wallet transaction: %s: %v", string(wtB), err)
-						return err
-					}
-					if wt.AssumedLost {
-						return nil
-					}
-					if !wt.Confirmed {
-						numConfirmedTxs = 0
-						txs = append(txs, wt)
-					} else {
-						numConfirmedTxs++
-						if numConfirmedTxs >= numConfirmedTxsToCheck {
-							return nil
-						}
-					}
-					return nil
-				})
-
-			})
-			if err != nil {
-				return err
+	db.allAssetIndex.Iterate(nil, func(it *lexi.Iter) error {
+		wt := new(extendedWalletTx)
+		err := it.V(func(vB []byte) error {
+			return wt.UnmarshalBinary(vB)
+		})
+		if err != nil {
+			return err
+		}
+		if wt.AssumedLost {
+			return nil
+		}
+		if !wt.Confirmed {
+			numConfirmedTxs = 0
+			txs = append(txs, wt)
+		} else {
+			numConfirmedTxs++
+			if numConfirmedTxs >= numConfirmedTxsToCheck {
+				return lexi.ErrEndIteration
 			}
 		}
 		return nil
-	})
-
-	utils.ReverseSlice(txs)
-
-	return txs, err
-}
-
-// badgerLoggerWrapper wraps dex.Logger and translates Warnf to Warningf to
-// satisfy badger.Logger. It also lowers the log level of Infof to Debugf
-// and Debugf to Tracef.
-type badgerLoggerWrapper struct {
-	dex.Logger
-}
-
-var _ badger.Logger = (*badgerLoggerWrapper)(nil)
-
-// Debugf -> dex.Logger.Tracef
-func (log *badgerLoggerWrapper) Debugf(s string, a ...interface{}) {
-	log.Tracef(s, a...)
-}
-
-func (log *badgerLoggerWrapper) Debug(a ...interface{}) {
-	log.Trace(a...)
-}
-
-// Infof -> dex.Logger.Debugf
-func (log *badgerLoggerWrapper) Infof(s string, a ...interface{}) {
-	log.Debugf(s, a...)
-}
-
-func (log *badgerLoggerWrapper) Info(a ...interface{}) {
-	log.Debug(a...)
-}
-
-// Warningf -> dex.Logger.Warnf
-func (log *badgerLoggerWrapper) Warningf(s string, a ...interface{}) {
-	log.Warnf(s, a...)
-}
-
-func (log *badgerLoggerWrapper) Warning(a ...interface{}) {
-	log.Warn(a...)
+	}, lexi.WithReverse())
+	return
 }
