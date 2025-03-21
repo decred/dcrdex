@@ -451,6 +451,34 @@ var Tokens = map[uint32]*Token{
 					},
 				},
 			},
+			dex.Testnet: {
+				Address: common.HexToAddress("0x3fd0A53F4Bf853985a95F4Eb3F9C9FDE1F8e2b53"),
+				SwapContracts: map[uint32]*SwapContract{
+					1: {
+						Gas: Gases{
+							// First swap used 95350 gas Recommended Gases.Swap = 123955
+							// 	2 additional swaps averaged 26501 gas each. Recommended Gases.SwapAdd = 34451
+							// 	[95350 121853 148353]
+							// First redeem used 55567 gas. Recommended Gases.Redeem = 72237
+							// 	2 additional redeems averaged 10714 gas each. recommended Gases.RedeemAdd = 13928
+							// 	[55567 66289 76995]
+							// Average of 3 refunds: 58950. Recommended Gases.Refund = 76635
+							// 	[59092 58595 59164]
+							// Average of 2 approvals: 48930. Recommended Gases.Approve = 63609
+							// 	[48930 48930]
+							// Average of 1 transfers: 63216. Recommended Gases.Transfer = 82180
+							// 	[63216]
+							Swap:      123_955,
+							SwapAdd:   34_451,
+							Redeem:    72_237,
+							RedeemAdd: 13_928,
+							Refund:    76_635,
+							Approve:   63_609,
+							Transfer:  82_180,
+						},
+					},
+				},
+			},
 		},
 	},
 }

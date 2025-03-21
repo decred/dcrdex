@@ -201,6 +201,24 @@ func (c *TCore) WalletTransaction(assetID uint32, txID string) (*asset.WalletTra
 func (c *TCore) GenerateBCHRecoveryTransaction(appPW []byte, recipient string) ([]byte, error) {
 	return nil, nil
 }
+func (c *TCore) BridgeContractApprovalStatus(assetID uint32) (asset.ApprovalStatus, error) {
+	return 0, nil
+}
+func (c *TCore) ApproveBridgeContract(assetID uint32) (string, error) {
+	return "", nil
+}
+func (c *TCore) UnapproveBridgeContract(assetID uint32) (string, error) {
+	return "", nil
+}
+func (c *TCore) Bridge(fromAssetID, toAssetID uint32, amt uint64) (txID string, err error) {
+	return "", nil
+}
+func (c *TCore) BridgeHistory(fromAssetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
+	return nil, nil
+}
+func (c *TCore) PendingBridges(fromAssetID uint32) ([]*asset.WalletTransaction, error) {
+	return nil, nil
+}
 
 type tBookFeed struct{}
 
