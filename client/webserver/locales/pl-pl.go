@@ -538,7 +538,6 @@ var PlPL = map[string]*intl.Translation{
 	"privacy_intro":               {T: "Po włączeniu prywatności wszystkie środki będą wysyłane za pośrednictwem usługi maskowania historii adresów przy użyciu protokołu o nazwie StakeShuffle."},
 	"decred_privacy":              {T: "Forma prywatności Decred jest szczególnie potężna, ponieważ portfele Decred integrują prywatność ze stakingiem, co daje ciągły dostęp do dużego zbioru anonimowości będącego kluczową cechą prywatności."},
 	"privacy_optional":            {T: "Prywatność jest całkowicie opcjonalna i można ją wyłączyć w dowolnym momencie. Z prywatnością wiążą się zwiększone opłaty transakcyjne, ale w przeszłości były one stosunkowo niewielkie."},
-	"bots_running_view_only":      {T: "Boty są uruchomione. Jesteś w trybie tylko do podglądu."},
 	"select_a_cex_prompt":         {T: "Wybierz giełdę, aby uruchomić arbitraż"},
 	"Market not available":        {T: "Rynek niedostępny"},
 	"bot_profit_title":            {T: "Wybierz próg zysku"},

@@ -529,12 +529,13 @@ func (a *simpleArbMarketMaker) registerFeeGap() {
 	a.unifiedExchangeAdaptor.registerFeeGap(feeGap)
 }
 
-func (a *simpleArbMarketMaker) updateConfig(cfg *BotConfig) error {
+func (a *simpleArbMarketMaker) updateConfig(cfg *BotConfig, autoRebalanceCfg *AutoRebalanceConfig) error {
 	if cfg.SimpleArbConfig == nil {
 		// implies bug in caller
 		return fmt.Errorf("no arb config provided")
 	}
 	a.cfgV.Store(cfg.SimpleArbConfig)
+	a.unifiedExchangeAdaptor.updateConfig(cfg, autoRebalanceCfg)
 	return nil
 }
 

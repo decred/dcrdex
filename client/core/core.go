@@ -7131,7 +7131,7 @@ func (c *Core) AssetBalance(assetID uint32) (*WalletBalance, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%d -> %s wallet error: %w", assetID, unbip(assetID), err)
 	}
-	return c.updateWalletBalance(wallet)
+	return c.walletBalance(wallet)
 }
 
 func pluralize(n int) string {
