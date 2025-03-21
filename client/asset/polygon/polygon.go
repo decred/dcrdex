@@ -142,7 +142,7 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Networ
 	}
 
 	// BipID, chainCfg, cfg, &t, dexpolygon.VersionedGases, dexpolygon.Tokens, logger, net
-	return eth.NewEVMWallet(&eth.EVMWalletConfig{
+	evmWallet, err := eth.NewEVMWallet(&eth.EVMWalletConfig{
 		BaseChainID:        BipID,
 		ChainCfg:           chainCfg,
 		AssetCfg:           cfg,
@@ -158,6 +158,17 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Networ
 		DefaultProviders:   defaultProviders,
 		MaxTxFeeGwei:       1000 * dexeth.GweiFactor, // 1000 POL
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	if eth.IsPolygonBridgeSupported(BipID, net) {
+		return &eth.ETHBridgeWallet{
+			ETHWallet: evmWallet,
+		}, nil
+	}
+
+	return evmWallet, nil
 }
 
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
