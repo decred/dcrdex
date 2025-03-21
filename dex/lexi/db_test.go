@@ -3,6 +3,8 @@ package lexi
 import (
 	"bytes"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -381,5 +383,136 @@ func TestUniqueIndex(t *testing.T) {
 	})
 	if numEntries != 1 {
 		t.Fatalf("Expected 1 value in unique index, got %d", numEntries)
+	}
+}
+
+// TestNotIndexed tests that when an index mapping function returns
+// ErrNotIndexed, the datum is not added to the index.
+func TestNotIndexed(t *testing.T) {
+	db, shutdown := newTestDB(t)
+	defer shutdown()
+
+	tbl, err := db.Table("NotIndexedTest")
+	if err != nil {
+		t.Fatalf("Error creating table: %v", err)
+	}
+
+	// Create an index that only indexes even values where the first byte is
+	// even.
+	idx, err := tbl.AddIndex("EvenOnly", func(k, v KV) ([]byte, error) {
+		val := v.(*tValue)
+		if len(val.v) > 0 && val.v[0]%2 == 0 {
+			return []byte{val.v[0]}, nil
+		}
+		return nil, ErrNotIndexed
+	})
+	if err != nil {
+		t.Fatalf("Error adding index: %v", err)
+	}
+
+	// Insert 10 values, with alternating even/odd first bytes
+	for i := 0; i < 10; i++ {
+		k := []byte{byte(i)}
+		v := &tValue{
+			k:   k,
+			v:   append([]byte{byte(i)}, encode.RandomBytes(5)...),
+			idx: []byte{byte(i)},
+		}
+		if err := tbl.Set(k, v); err != nil {
+			t.Fatalf("Error setting value %d: %v", i, err)
+		}
+	}
+
+	count := 0
+	expectedValues := []byte{0, 2, 4, 6, 8}
+	foundValues := make([]byte, 0, 5)
+	err = idx.Iterate(nil, func(it *Iter) error {
+		count++
+		return it.V(func(vB []byte) error {
+			if len(vB) > 0 {
+				foundValues = append(foundValues, vB[0])
+			}
+			return nil
+		})
+	})
+	if err != nil {
+		t.Fatalf("Error iterating index: %v", err)
+	}
+
+	// Ensure that the number of values in the index is correct,
+	// and that the expected values were found.
+	if count != 5 {
+		t.Fatalf("Expected 5 indexed values, got %d", count)
+	}
+	sort.Slice(foundValues, func(i, j int) bool {
+		return foundValues[i] < foundValues[j]
+	})
+	if !reflect.DeepEqual(foundValues, expectedValues) {
+		t.Fatalf("Expected values %v, got %v", expectedValues, foundValues)
+	}
+
+	// Ensure the table has all the values, even those that were not indexed.
+	tableCount := 0
+	err = tbl.Iterate(nil, func(it *Iter) error {
+		tableCount++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Error iterating table: %v", err)
+	}
+	if tableCount != 10 {
+		t.Fatalf("Expected 10 table entries, got %d", tableCount)
+	}
+
+	// Delete an even and an odd value
+	evenKey := []byte{2}
+	oddKey := []byte{3}
+	if err := tbl.Delete(evenKey); err != nil {
+		t.Fatalf("Error deleting even key: %v", err)
+	}
+	if err := tbl.Delete(oddKey); err != nil {
+		t.Fatalf("Error deleting odd key: %v", err)
+	}
+
+	// Recheck the index after deletion
+	count = 0
+	expectedValues = []byte{0, 4, 6, 8} // 2 was removed
+	foundValues = make([]byte, 0, 4)
+	err = idx.Iterate(nil, func(it *Iter) error {
+		count++
+		return it.V(func(vB []byte) error {
+			if len(vB) > 0 {
+				foundValues = append(foundValues, vB[0])
+			}
+			return nil
+		})
+	})
+	if err != nil {
+		t.Fatalf("Error iterating index after deletion: %v", err)
+	}
+
+	// Ensure that the number of values in the index is correct after deletion,
+	// and that the expected values were found.
+	if count != 4 {
+		t.Fatalf("Expected 4 indexed values after deletion, got %d", count)
+	}
+	sort.Slice(foundValues, func(i, j int) bool {
+		return foundValues[i] < foundValues[j]
+	})
+	if !reflect.DeepEqual(foundValues, expectedValues) {
+		t.Fatalf("Expected values %v after deletion, got %v", expectedValues, foundValues)
+	}
+
+	// Recheck the table after deletion
+	tableCount = 0
+	err = tbl.Iterate(nil, func(it *Iter) error {
+		tableCount++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Error iterating table after deletion: %v", err)
+	}
+	if tableCount != 8 {
+		t.Fatalf("Expected 8 table entries after deletion, got %d", tableCount)
 	}
 }
