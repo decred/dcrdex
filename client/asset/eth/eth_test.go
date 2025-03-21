@@ -577,11 +577,13 @@ func (c *tTokenContractor) estimateTransferGas(context.Context, *big.Int) (uint6
 
 type tTxDB struct {
 	storeTxCalled  bool
+	storedTx       *extendedWalletTx
 	storeTxErr     error
 	removeTxCalled bool
 	removeTxErr    error
 	txToGet        *extendedWalletTx
 	getTxErr       error
+	pendingBridges []*extendedWalletTx
 }
 
 var _ txDB = (*tTxDB)(nil)
@@ -591,6 +593,7 @@ func (db *tTxDB) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 }
 func (db *tTxDB) storeTx(wt *extendedWalletTx) error {
 	db.storeTxCalled = true
+	db.storedTx = wt
 	return db.storeTxErr
 }
 func (db *tTxDB) removeTx(_ /* id */ string) error {
@@ -598,7 +601,7 @@ func (db *tTxDB) removeTx(_ /* id */ string) error {
 	return db.removeTxErr
 }
 func (db *tTxDB) getTxs(n int, refID *common.Hash, past bool, tokenID *uint32) ([]*asset.WalletTransaction, error) {
-	return nil, nil
+	panic("getTxs not implemented")
 }
 
 // getTx gets a single transaction. It is not an error if the tx is not known.
@@ -607,10 +610,19 @@ func (db *tTxDB) getTx(txHash common.Hash) (tx *extendedWalletTx, _ error) {
 	return db.txToGet, db.getTxErr
 }
 func (db *tTxDB) getPendingTxs() ([]*extendedWalletTx, error) {
-	return nil, nil
+	panic("getPendingTxs not implemented")
 }
 func (db *tTxDB) close() error {
 	return nil
+}
+func (db *tTxDB) getBridges(n int, refID *common.Hash, past bool) ([]*asset.WalletTransaction, error) {
+	panic("getBridges not implemented")
+}
+func (db *tTxDB) getPendingBridges() ([]*extendedWalletTx, error) {
+	return db.pendingBridges, nil
+}
+func (db *tTxDB) getBridgeCompletion(initiationTxID string) (*extendedWalletTx, error) {
+	panic("getBridgeCompletion not implemented")
 }
 
 // func TestCheckUnconfirmedTxs(t *testing.T) {
@@ -810,7 +822,11 @@ func TestCheckPendingTxs(t *testing.T) {
 
 	val := dexeth.GweiToWei(1)
 	extendedTx := func(nonce, blockNum, blockStamp, submissionStamp uint64) *extendedWalletTx {
-		pendingTx := eth.extendedTx(node.newTransaction(nonce, val), asset.Send, 1, nil)
+		pendingTx := eth.extendedTx(&genTxResult{
+			tx:     node.newTransaction(nonce, val),
+			txType: asset.Send,
+			amt:    1,
+		})
 		pendingTx.BlockNumber = blockNum
 		pendingTx.Confirmed = blockNum > 0 && blockNum <= finalized
 		pendingTx.Timestamp = blockStamp
@@ -965,8 +981,11 @@ func TestTakeAction(t *testing.T) {
 	defer shutdown()
 
 	aGwei := dexeth.GweiToWei(1)
-
-	pendingTx := eth.extendedTx(node.newTransaction(0, aGwei), asset.Send, 1, nil)
+	pendingTx := eth.extendedTx(&genTxResult{
+		tx:     node.newTransaction(0, aGwei),
+		txType: asset.Send,
+		amt:    1,
+	})
 	eth.pendingTxs = []*extendedWalletTx{pendingTx}
 
 	feeCap := new(big.Int).Mul(aGwei, big.NewInt(5))
@@ -1000,7 +1019,11 @@ func TestTakeAction(t *testing.T) {
 		t.Fatal("didn't save to DB")
 	}
 
-	pendingTx = eth.extendedTx(node.newTransaction(1, aGwei), asset.Send, 1, nil)
+	pendingTx = eth.extendedTx(&genTxResult{
+		tx:     node.newTransaction(1, aGwei),
+		txType: asset.Send,
+		amt:    1,
+	})
 	eth.pendingTxs = []*extendedWalletTx{pendingTx}
 	pendingTx.SubmissionTime = 0
 	// Neglecting to bump should reset submission time.
@@ -1039,7 +1062,11 @@ func TestTakeAction(t *testing.T) {
 		t.Fatalf("replacement tx wasn't accepted")
 	}
 	// wrong nonce is an error though
-	pendingTx = eth.extendedTx(node.newTransaction(5050, aGwei), asset.Send, 1, nil)
+	pendingTx = eth.extendedTx(&genTxResult{
+		tx:     node.newTransaction(5050, aGwei),
+		txType: asset.Send,
+		amt:    1,
+	})
 	eth.pendingTxs = []*extendedWalletTx{pendingTx}
 	lostNonceAction = []byte(fmt.Sprintf(`{"txID":"%s","abandon":false,"replacementID":"%s"}`, pendingTx.ID, replacementTx.Hash()))
 	if err := eth.TakeAction(actionTypeLostNonce, lostNonceAction); err == nil {
@@ -1047,7 +1074,11 @@ func TestTakeAction(t *testing.T) {
 	}
 
 	// Missing nonces
-	tx5 := eth.extendedTx(node.newTransaction(5, aGwei), asset.Send, 1, nil)
+	tx5 := eth.extendedTx(&genTxResult{
+		tx:     node.newTransaction(5, aGwei),
+		txType: asset.Send,
+		amt:    1,
+	})
 	eth.pendingTxs = []*extendedWalletTx{tx5}
 	eth.confirmedNonceAt = big.NewInt(2)
 	eth.pendingNonceAt = big.NewInt(6)
@@ -1099,6 +1130,9 @@ func TestCheckForNewBlocks(t *testing.T) {
 					pendingNonceAt:   new(big.Int),
 					txDB:             &tTxDB{},
 					finalizeConfs:    txConfsNeededToConfirm,
+				},
+				versionedContracts: map[uint32]common.Address{
+					0: {},
 				},
 				log:     tLogger.SubLogger("ETH"),
 				emit:    emit,
@@ -1309,11 +1343,14 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 		evmify:             dexeth.GweiToWei,
 		atomize:            dexeth.WeiToGwei,
 		pendingTxCheckBal:  new(big.Int),
-		pendingApprovals:   make(map[uint32]*pendingApproval),
-		approvalCache:      make(map[uint32]bool),
+		pendingApprovals:   make(map[common.Address]*pendingApproval),
+		approvalCache:      make(map[common.Address]bool),
 		// move up after review
 		wi:   WalletInfo,
 		emit: asset.NewWalletEmitter(emitChan, BipID, tLogger),
+		versionedContracts: map[uint32]common.Address{
+			0: {},
+		},
 	}
 	aw.wallets = map[uint32]*assetWallet{
 		BipID: aw,
@@ -1333,8 +1370,8 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 			contractorV1:     node.tContractor,
 			assetID:          BipID,
 			atomize:          dexeth.WeiToGwei,
-			pendingApprovals: make(map[uint32]*pendingApproval),
-			approvalCache:    make(map[uint32]bool),
+			pendingApprovals: make(map[common.Address]*pendingApproval),
+			approvalCache:    make(map[common.Address]bool),
 			emit:             asset.NewWalletEmitter(emitChan, BipID, tLogger),
 		}
 		w = &TokenWallet{
@@ -2021,7 +2058,7 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 
 	// Test that funding without allowance causes error
 	if assetID != BipID {
-		eth.approvalCache = make(map[uint32]bool)
+		eth.approvalCache = make(map[common.Address]bool)
 		node.tokenContractor.allow = big.NewInt(0)
 		_, _, _, err = w.FundOrder(&order)
 		if err == nil {
@@ -3956,7 +3993,7 @@ func TestDriverOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("driver open error: %v", err)
 	}
-	eth, ok := wallet.(*ETHWallet)
+	eth, ok := wallet.(*ETHBridgeWallet)
 	if !ok {
 		t.Fatalf("failed to cast wallet as assetWallet")
 	}
@@ -3970,7 +4007,7 @@ func TestDriverOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("driver open error: %v", err)
 	}
-	eth, ok = wallet.(*ETHWallet)
+	eth, ok = wallet.(*ETHBridgeWallet)
 	if !ok {
 		t.Fatalf("failed to cast wallet as assetWallet")
 	}
@@ -5043,7 +5080,11 @@ func TestSwapOrRedemptionFeesPaid(t *testing.T) {
 	for _, test := range tests {
 		var txHash common.Hash
 		if test.pendingTx != nil {
-			wt := bw.extendedTx(test.pendingTx, asset.Unknown, 1, nil)
+			wt := bw.extendedTx(&genTxResult{
+				tx:     test.pendingTx,
+				txType: asset.Unknown,
+				amt:    1,
+			})
 			wt.BlockNumber = test.pendingTxBlock
 			wt.Fees = fees
 			bw.pendingTxs = []*extendedWalletTx{wt}
@@ -5166,6 +5207,184 @@ func TestFreshProviderList(t *testing.T) {
 			}
 		})
 	}
+}
+
+type mockBridge struct {
+	getCompletionDataFunc   func(ctx context.Context, txID string) ([]byte, error)
+	getCompletionDataCalled chan struct{}
+}
+
+var _ bridge = (*mockBridge)(nil)
+
+func (m *mockBridge) getCompletionData(ctx context.Context, bridgeTxID string) ([]byte, error) {
+	if m.getCompletionDataCalled != nil {
+		m.getCompletionDataCalled <- struct{}{}
+	}
+	return m.getCompletionDataFunc(ctx, bridgeTxID)
+}
+func (m *mockBridge) bridgeContractAddr() common.Address { panic("not implemented") }
+func (m *mockBridge) bridgeContractAllowance(ctx context.Context) (*big.Int, error) {
+	panic("not implemented")
+}
+func (m *mockBridge) approveBridgeContract(txOpts *bind.TransactOpts, amount *big.Int) (*types.Transaction, error) {
+	panic("not implemented")
+}
+func (m *mockBridge) requiresBridgeContractApproval() bool { panic("not implemented") }
+func (m *mockBridge) initiateBridge(txOpts *bind.TransactOpts, destAssetID uint32, amount *big.Int) (*types.Transaction, bool, error) {
+	panic("not implemented")
+}
+func (m *mockBridge) completeBridge(txOpts *bind.TransactOpts, completionData []byte) (*types.Transaction, error) {
+	panic("not implemented")
+}
+func (m *mockBridge) initiateBridgeGas() uint64 { panic("not implemented") }
+func (m *mockBridge) completeBridgeGas() uint64 { panic("not implemented") }
+
+func TestBridgeManager(t *testing.T) {
+	setupWithPendingBridges := func(t *testing.T, pendingBridges []*extendedWalletTx) (*bridgeManager, *mockBridge, chan asset.WalletNotification, *tTxDB, dex.Logger) {
+		log := dex.StdOutLogger("TEST", dex.LevelDebug)
+		notificationChan := make(chan asset.WalletNotification, 10)
+		emitter := asset.NewWalletEmitter(notificationChan, BipID, log)
+
+		// Create a mock bridge with default "not ready" behavior
+		mb := &mockBridge{
+			getCompletionDataFunc: func(ctx context.Context, txID string) ([]byte, error) {
+				return nil, errors.New("not ready")
+			},
+			getCompletionDataCalled: make(chan struct{}, 10),
+		}
+
+		db := &tTxDB{}
+		db.pendingBridges = pendingBridges
+		bm, err := newBridgeManager(context.Background(), BipID, BipID, mb, emitter, db, 100*time.Millisecond, log)
+		if err != nil {
+			t.Fatalf("error creating bridge manager: %v", err)
+		}
+
+		return bm, mb, notificationChan, db, log
+	}
+
+	setup := func(t *testing.T) (*bridgeManager, *mockBridge, chan asset.WalletNotification, *tTxDB, dex.Logger) {
+		bm, mb, notificationChan, db, log := setupWithPendingBridges(t, nil)
+		return bm, mb, notificationChan, db, log
+	}
+
+	// Test: Adding and monitoring a pending bridge
+	t.Run("AddAndMonitor", func(t *testing.T) {
+		bm, mb, _, _, _ := setup(t)
+
+		// Add a pending bridge
+		burnTxID := "tx1"
+		destAssetID := uint32(123)
+		bm.addPendingBridge(burnTxID, destAssetID, 1)
+
+		// Wait for getMintInfo to be called at least twice
+		for i := 0; i < 2; i++ {
+			select {
+			case <-mb.getCompletionDataCalled:
+				// Continue
+			case <-time.After(1 * time.Second):
+				t.Fatalf("timeout waiting for getCompletionData call %d", i+1)
+			}
+		}
+	})
+
+	// Test: Successful mint info retrieval and notification
+	t.Run("SuccessfulMintInfo", func(t *testing.T) {
+		bm, mb, notificationChan, _, _ := setup(t)
+
+		// Configure getMintInfo to succeed
+		completionData := []byte("completionData")
+		mb.getCompletionDataFunc = func(ctx context.Context, txID string) ([]byte, error) {
+			return completionData, nil
+		}
+
+		// Add a pending bridge
+		burnTxID := "tx2"
+		destAssetID := uint32(60001)
+		bm.addPendingBridge(burnTxID, destAssetID, 1)
+
+		// Wait for and verify the notification
+		select {
+		case note := <-notificationChan:
+			bridgeNote, ok := note.(*asset.BridgeReadyToCompleteNote)
+			if !ok {
+				t.Fatalf("expected *BridgeReadyToCompleteNote, got %T", note)
+			}
+			if bridgeNote.DestAssetID != destAssetID {
+				t.Errorf("expected destAssetID %d, got %d", destAssetID, bridgeNote.DestAssetID)
+			}
+			if string(bridgeNote.Data) != string(completionData) {
+				t.Errorf("expected completionData %q, got %q", completionData, bridgeNote.Data)
+			}
+		case <-time.After(1 * time.Second):
+			t.Fatal("timeout waiting for BridgeReadyToComplete notification")
+		}
+	})
+
+	t.Run("MarkAsComplete", func(t *testing.T) {
+		bm, mb, _, db, _ := setup(t)
+
+		// Add a pending bridge
+		burnTxID := "tx3"
+		destAssetID := uint32(789)
+		bm.addPendingBridge(burnTxID, destAssetID, 1)
+
+		db.txToGet = &extendedWalletTx{
+			WalletTransaction: &asset.WalletTransaction{
+				ID: burnTxID,
+				BridgeCounterpartTx: &asset.BridgeCounterpartTx{
+					AssetID: destAssetID,
+				},
+			},
+		}
+
+		// Wait for at least one getMintInfo call
+		select {
+		case <-mb.getCompletionDataCalled:
+			// Proceed
+		case <-time.After(1 * time.Second):
+			t.Fatal("timeout waiting for initial getCompletionData call")
+		}
+
+		// Remove the bridge
+		bm.markBridgeComplete(burnTxID, "mintTxID", 1)
+
+		// Wait and ensure no more calls occur
+		time.Sleep(300 * time.Millisecond) // Longer than 2 monitor intervals
+		select {
+		case <-mb.getCompletionDataCalled:
+			t.Error("getCompletionData was called after removing all pending bridges")
+		default:
+			// No additional calls, as expected
+		}
+
+		if db.storedTx.BridgeCounterpartTx.ID != "mintTxID" {
+			t.Errorf("expected BridgeCounterpartTx.ID to be mintTxID, got %s", db.storedTx.BridgeCounterpartTx.ID)
+		}
+	})
+
+	t.Run("LoadPendingBridges", func(t *testing.T) {
+		destAssetID := uint32(123)
+		burnTxID := "tx4"
+		bm, _, _, _, _ := setupWithPendingBridges(t, []*extendedWalletTx{
+			{
+				WalletTransaction: &asset.WalletTransaction{
+					Type: asset.InitiateBridge,
+					ID:   burnTxID,
+					BridgeCounterpartTx: &asset.BridgeCounterpartTx{
+						AssetID: destAssetID,
+					},
+				},
+			},
+		})
+
+		if len(bm.pendingBridges) != 1 {
+			t.Fatalf("expected 1 pending bridge, got %d", len(bm.pendingBridges))
+		}
+		if bm.pendingBridges[burnTxID].destAssetID != destAssetID {
+			t.Fatalf("expected pending bridge ID to be %s, and dest asset ID to be %d", burnTxID, destAssetID)
+		}
+	})
 }
 
 func TestDomain(t *testing.T) {
