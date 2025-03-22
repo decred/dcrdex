@@ -37,7 +37,7 @@ func Test_electrumWallet(t *testing.T) {
 		segwit: true,
 	})
 	var wg sync.WaitGroup
-	err := ew.connect(ctx, &wg)
+	err := ew.Connect(ctx, &wg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func Test_electrumWallet(t *testing.T) {
 	}
 
 	// gettxout - first the spent output
-	fundTxOut, fundConfs, err := ew.getTxOut(fundHash, fundVout, nil, time.Time{})
+	fundTxOut, fundConfs, err := ew.GetTxOut(fundHash, fundVout, nil, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func Test_electrumWallet(t *testing.T) {
 	fundVal = 20000
 	fundPkScript, _ = hex.DecodeString("76a914b3e0f80ce29ac48793de504ae9aa0b6579dda29a88ac")
 	fundAddr = "mwv4kWRXkc2w42823FU9SJ16cvZH8Aobke"
-	fundTxOut, fundConfs, err = ew.getTxOut(fundHash, fundVout, nil, time.Time{})
+	fundTxOut, fundConfs, err = ew.GetTxOut(fundHash, fundVout, nil, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,12 +122,12 @@ func Test_electrumWallet(t *testing.T) {
 	}
 	t.Log(addr)
 
-	err = ew.walletUnlock([]byte(walletPass))
+	err = ew.WalletUnlock([]byte(walletPass))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = ew.privKeyForAddress(addr)
+	_, err = ew.PrivKeyForAddress(addr)
 	if err != nil {
 		t.Fatal(err)
 	}

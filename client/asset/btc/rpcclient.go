@@ -159,7 +159,7 @@ func ChainOK(net dex.Network, str string) bool {
 	return strings.Contains(str, chainStr)
 }
 
-func (wc *rpcClient) connect(ctx context.Context, _ *sync.WaitGroup) error {
+func (wc *rpcClient) Connect(ctx context.Context, _ *sync.WaitGroup) error {
 	wc.ctx = ctx
 	// Check the version. Do it here, so we can also diagnose a bad connection.
 	netVer, codeVer, err := wc.getVersion()
@@ -196,11 +196,11 @@ func (wc *rpcClient) connect(ctx context.Context, _ *sync.WaitGroup) error {
 	return nil
 }
 
-// reconfigure attempts to reconfigure the rpcClient for the new settings. Live
+// Reconfigure attempts to reconfigure the rpcClient for the new settings. Live
 // reconfiguration is only attempted if the new wallet type is walletTypeRPC. If
 // the special_activelyUsed flag is set, reconfigure will fail if we can't
 // validate ownership of the current deposit address.
-func (wc *rpcClient) reconfigure(cfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error) {
+func (wc *rpcClient) Reconfigure(cfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error) {
 	if cfg.Type != wc.cloneParams.WalletCFG.Type {
 		restartRequired = true
 		return
@@ -323,15 +323,15 @@ func (wc *rpcClient) sendRawTransaction(tx *wire.MsgTx) (txHash *chainhash.Hash,
 		prevOut := &txIn.PreviousOutPoint
 		ops = append(ops, &Output{Pt: NewOutPoint(&prevOut.Hash, prevOut.Index)})
 	}
-	if err := wc.lockUnspent(true, ops); err != nil {
+	if err := wc.LockUnspent(true, ops); err != nil {
 		wc.log.Warnf("error unlocking spent outputs: %v", err)
 	}
 	return txHash, nil
 }
 
-// getTxOut returns the transaction output info if it's unspent and
+// GetTxOut returns the transaction output info if it's unspent and
 // nil, otherwise.
-func (wc *rpcClient) getTxOut(txHash *chainhash.Hash, index uint32, _ []byte, _ time.Time) (*wire.TxOut, uint32, error) {
+func (wc *rpcClient) GetTxOut(txHash *chainhash.Hash, index uint32, _ []byte, _ time.Time) (*wire.TxOut, uint32, error) {
 	txOut, err := wc.getTxOutput(txHash, index)
 	if err != nil {
 		return nil, 0, fmt.Errorf("getTxOut error: %w", err)
@@ -363,8 +363,8 @@ func (wc *rpcClient) callHashGetter(method string, args anylist) (*chainhash.Has
 	return chainhash.NewHashFromStr(txid)
 }
 
-// getBlock fetches the MsgBlock.
-func (wc *rpcClient) getBlock(h chainhash.Hash) (*wire.MsgBlock, error) {
+// GetBlock fetches the MsgBlock.
+func (wc *rpcClient) GetBlock(h chainhash.Hash) (*wire.MsgBlock, error) {
 	var blkB dex.Bytes
 	args := anylist{h.String()}
 	if wc.booleanGetBlock {
@@ -380,31 +380,31 @@ func (wc *rpcClient) getBlock(h chainhash.Hash) (*wire.MsgBlock, error) {
 	return wc.deserializeBlock(blkB)
 }
 
-// getBlockHash returns the hash of the block in the best block chain at the
+// GetBlockHash returns the hash of the block in the best block chain at the
 // given height.
-func (wc *rpcClient) getBlockHash(blockHeight int64) (*chainhash.Hash, error) {
+func (wc *rpcClient) GetBlockHash(blockHeight int64) (*chainhash.Hash, error) {
 	return wc.callHashGetter(methodGetBlockHash, anylist{blockHeight})
 }
 
-// getBestBlockHash returns the hash of the best block in the longest block
+// GetBestBlockHash returns the hash of the best block in the longest block
 // chain (aka mainchain).
-func (wc *rpcClient) getBestBlockHash() (*chainhash.Hash, error) {
+func (wc *rpcClient) GetBestBlockHash() (*chainhash.Hash, error) {
 	return wc.callHashGetter(methodGetBestBlockHash, nil)
 }
 
-// getBestBlockHeight returns the height of the top mainchain block.
-func (wc *rpcClient) getBestBlockHeader() (*BlockHeader, error) {
-	tipHash, err := wc.getBestBlockHash()
+// GetBestBlockHeader returns the height of the top mainchain block.
+func (wc *rpcClient) GetBestBlockHeader() (*BlockHeader, error) {
+	tipHash, err := wc.GetBestBlockHash()
 	if err != nil {
 		return nil, err
 	}
-	hdr, _, err := wc.getBlockHeader(tipHash)
+	hdr, _, err := wc.GetBlockHeader(tipHash)
 	return hdr, err
 }
 
-// getBestBlockHeight returns the height of the top mainchain block.
-func (wc *rpcClient) getBestBlockHeight() (int32, error) {
-	header, err := wc.getBestBlockHeader()
+// GetBestBlockHeight returns the height of the top mainchain block.
+func (wc *rpcClient) GetBestBlockHeight() (int32, error) {
+	header, err := wc.GetBestBlockHeader()
 	if err != nil {
 		return -1, err
 	}
@@ -413,7 +413,7 @@ func (wc *rpcClient) getBestBlockHeight() (int32, error) {
 
 // getChainStamp satisfies chainStamper for manual median time calculations.
 func (wc *rpcClient) getChainStamp(blockHash *chainhash.Hash) (stamp time.Time, prevHash *chainhash.Hash, err error) {
-	hdr, _, err := wc.getBlockHeader(blockHash)
+	hdr, _, err := wc.GetBlockHeader(blockHash)
 	if err != nil {
 		return
 	}
@@ -424,15 +424,15 @@ func (wc *rpcClient) getChainStamp(blockHash *chainhash.Hash) (stamp time.Time, 
 	return time.Unix(hdr.Time, 0).UTC(), prevHash, nil
 }
 
-// medianTime is the median time for the current best block.
-func (wc *rpcClient) medianTime() (stamp time.Time, err error) {
-	tipHash, err := wc.getBestBlockHash()
+// MedianTime is the median time for the current best block.
+func (wc *rpcClient) MedianTime() (stamp time.Time, err error) {
+	tipHash, err := wc.GetBestBlockHash()
 	if err != nil {
 		return
 	}
 	if wc.manualMedianTime {
 		return CalcMedianTime(func(blockHash *chainhash.Hash) (stamp time.Time, prevHash *chainhash.Hash, err error) {
-			hdr, _, err := wc.getBlockHeader(blockHash)
+			hdr, _, err := wc.GetBlockHeader(blockHash)
 			if err != nil {
 				return
 			}
@@ -485,23 +485,23 @@ func (wc *rpcClient) GetRawTransaction(txHash *chainhash.Hash) (*wire.MsgTx, err
 	return wc.deserializeTx(txB)
 }
 
-// balances retrieves a wallet's balance details.
-func (wc *rpcClient) balances() (*GetBalancesResult, error) {
+// Balances retrieves a wallet's balance details.
+func (wc *rpcClient) Balances() (*GetBalancesResult, error) {
 	var balances GetBalancesResult
 	return &balances, wc.call(methodGetBalances, nil, &balances)
 }
 
-// listUnspent retrieves a list of the wallet's UTXOs.
-func (wc *rpcClient) listUnspent() ([]*ListUnspentResult, error) {
+// ListUnspent retrieves a list of the wallet's UTXOs.
+func (wc *rpcClient) ListUnspent() ([]*ListUnspentResult, error) {
 	unspents := make([]*ListUnspentResult, 0)
 	// TODO: listunspent 0 9999999 []string{}, include_unsafe=false
 	return unspents, wc.call(methodListUnspent, anylist{uint8(0)}, &unspents)
 }
 
-// lockUnspent locks and unlocks outputs for spending. An output that is part of
+// LockUnspent locks and unlocks outputs for spending. An output that is part of
 // an order, but not yet spent, should be locked until spent or until the order
 // is canceled or fails.
-func (wc *rpcClient) lockUnspent(unlock bool, ops []*Output) error {
+func (wc *rpcClient) LockUnspent(unlock bool, ops []*Output) error {
 	var rpcops []*RPCOutpoint // To clear all, this must be nil->null, not empty slice.
 	for _, op := range ops {
 		rpcops = append(rpcops, &RPCOutpoint{
@@ -517,9 +517,9 @@ func (wc *rpcClient) lockUnspent(unlock bool, ops []*Output) error {
 	return err
 }
 
-// listLockUnspent returns a slice of outpoints for all unspent outputs marked
+// ListLockUnspent returns a slice of outpoints for all unspent outputs marked
 // as locked by a wallet.
-func (wc *rpcClient) listLockUnspent() ([]*RPCOutpoint, error) {
+func (wc *rpcClient) ListLockUnspent() ([]*RPCOutpoint, error) {
 	var unspents []*RPCOutpoint
 	err := wc.call(methodListLockUnspent, nil, &unspents)
 	if err != nil {
@@ -561,9 +561,9 @@ func (wc *rpcClient) listLockUnspent() ([]*RPCOutpoint, error) {
 	return unspents, nil
 }
 
-// changeAddress gets a new internal address from the wallet. The address will
+// ChangeAddress gets a new internal address from the wallet. The address will
 // be bech32-encoded (P2WPKH).
-func (wc *rpcClient) changeAddress() (btcutil.Address, error) {
+func (wc *rpcClient) ChangeAddress() (btcutil.Address, error) {
 	var addrStr string
 	var err error
 	switch {
@@ -580,7 +580,7 @@ func (wc *rpcClient) changeAddress() (btcutil.Address, error) {
 	return wc.decodeAddr(addrStr, wc.chainParams)
 }
 
-func (wc *rpcClient) externalAddress() (btcutil.Address, error) {
+func (wc *rpcClient) ExternalAddress() (btcutil.Address, error) {
 	if wc.segwit {
 		return wc.address("bech32")
 	}
@@ -602,8 +602,8 @@ func (wc *rpcClient) address(aType string) (btcutil.Address, error) {
 	return wc.decodeAddr(addrStr, wc.chainParams) // we should consider returning a string
 }
 
-// signTx attempts to have the wallet sign the transaction inputs.
-func (wc *rpcClient) signTx(inTx *wire.MsgTx) (*wire.MsgTx, error) {
+// SignTx attempts to have the wallet sign the transaction inputs.
+func (wc *rpcClient) SignTx(inTx *wire.MsgTx) (*wire.MsgTx, error) {
 	txBytes, err := wc.serializeTx(inTx)
 	if err != nil {
 		return nil, fmt.Errorf("tx serialization error: %w", err)
@@ -639,8 +639,8 @@ func (wc *rpcClient) listDescriptors(private bool) (*listDescriptorsResult, erro
 	return descriptors, wc.call(methodListDescriptors, anylist{private}, descriptors)
 }
 
-func (wc *rpcClient) listTransactionsSinceBlock(blockHeight int32) ([]*ListTransactionsResult, error) {
-	blockHash, err := wc.getBlockHash(int64(blockHeight))
+func (wc *rpcClient) ListTransactionsSinceBlock(blockHeight int32) ([]*ListTransactionsResult, error) {
+	blockHash, err := wc.GetBlockHash(int64(blockHeight))
 	if err != nil {
 		return nil, fmt.Errorf("getBlockHash error: %w", err)
 	}
@@ -670,9 +670,9 @@ func (wc *rpcClient) listTransactionsSinceBlock(blockHeight int32) ([]*ListTrans
 	return txs, nil
 }
 
-// privKeyForAddress retrieves the private key associated with the specified
+// PrivKeyForAddress retrieves the private key associated with the specified
 // address.
-func (wc *rpcClient) privKeyForAddress(addr string) (*btcec.PrivateKey, error) {
+func (wc *rpcClient) PrivKeyForAddress(addr string) (*btcec.PrivateKey, error) {
 	// Use a specialized client's privKey function
 	if wc.privKeyFunc != nil {
 		return wc.privKeyFunc(addr)
@@ -841,8 +841,8 @@ masters:
 	return nil, errors.New("no private key found for address")
 }
 
-// getWalletTransaction retrieves the JSON-RPC gettransaction result.
-func (wc *rpcClient) getWalletTransaction(txHash *chainhash.Hash) (*GetTransactionResult, error) {
+// GetWalletTransaction retrieves the JSON-RPC gettransaction result.
+func (wc *rpcClient) GetWalletTransaction(txHash *chainhash.Hash) (*GetTransactionResult, error) {
 	tx := new(GetTransactionResult)
 	err := wc.call(methodGetTransaction, anylist{txHash.String()}, tx)
 	if err != nil {
@@ -854,19 +854,19 @@ func (wc *rpcClient) getWalletTransaction(txHash *chainhash.Hash) (*GetTransacti
 	return tx, nil
 }
 
-// walletUnlock unlocks the wallet.
-func (wc *rpcClient) walletUnlock(pw []byte) error {
+// WalletUnlock unlocks the wallet.
+func (wc *rpcClient) WalletUnlock(pw []byte) error {
 	// 100000000 comes from bitcoin-cli help walletpassphrase
 	return wc.call(methodUnlock, anylist{string(pw), 100000000}, nil)
 }
 
-// walletLock locks the wallet.
-func (wc *rpcClient) walletLock() error {
+// WalletLock locks the wallet.
+func (wc *rpcClient) WalletLock() error {
 	return wc.call(methodLock, nil, nil)
 }
 
-// locked returns the wallet's lock state.
-func (wc *rpcClient) locked() bool {
+// Locked returns the wallet's lock state.
+func (wc *rpcClient) Locked() bool {
 	walletInfo, err := wc.GetWalletInfo()
 	if err != nil {
 		wc.log.Errorf("GetWalletInfo error: %w", err)
@@ -880,9 +880,9 @@ func (wc *rpcClient) locked() bool {
 	return time.Unix(*walletInfo.UnlockedUntil, 0).Before(time.Now())
 }
 
-// sendTxFeeEstimator returns the fee required to send tx using the provided
+// EstimateSendTxFee returns the fee required to send tx using the provided
 // feeRate.
-func (wc *rpcClient) estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract bool) (txfee uint64, err error) {
+func (wc *rpcClient) EstimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract bool) (txfee uint64, err error) {
 	txBytes, err := wc.serializeTx(tx)
 	if err != nil {
 		return 0, fmt.Errorf("tx serialization error: %w", err)
@@ -941,9 +941,9 @@ func (wc *rpcClient) GetWalletInfo() (*GetWalletInfoResult, error) {
 	return wi, wc.call(methodGetWalletInfo, nil, wi)
 }
 
-// fingerprint returns an identifier for this wallet. Only HD wallets will have
+// Fingerprint returns an identifier for this wallet. Only HD wallets will have
 // an identifier. Descriptor wallets will not.
-func (wc *rpcClient) fingerprint() (string, error) {
+func (wc *rpcClient) Fingerprint() (string, error) {
 	walletInfo, err := wc.GetWalletInfo()
 	if err != nil {
 		return "", err
@@ -967,8 +967,8 @@ func (wc *rpcClient) getAddressInfo(addr btcutil.Address, method string) (*GetAd
 	return ai, wc.call(method, anylist{addrStr}, ai)
 }
 
-// ownsAddress indicates if an address belongs to the wallet.
-func (wc *rpcClient) ownsAddress(addr btcutil.Address) (bool, error) {
+// OwnsAddress indicates if an address belongs to the wallet.
+func (wc *rpcClient) OwnsAddress(addr btcutil.Address) (bool, error) {
 	method := methodGetAddressInfo
 	if wc.legacyValidateAddressRPC {
 		method = methodValidateAddress
@@ -980,8 +980,8 @@ func (wc *rpcClient) ownsAddress(addr btcutil.Address) (bool, error) {
 	return ai.IsMine, nil
 }
 
-// syncStatus is information about the blockchain sync status.
-func (wc *rpcClient) syncStatus() (*asset.SyncStatus, error) {
+// SyncStatus is information about the blockchain sync status.
+func (wc *rpcClient) SyncStatus() (*asset.SyncStatus, error) {
 	chainInfo, err := wc.getBlockchainInfo()
 	if err != nil {
 		return nil, fmt.Errorf("getblockchaininfo error: %w", err)
@@ -994,17 +994,17 @@ func (wc *rpcClient) syncStatus() (*asset.SyncStatus, error) {
 	}, nil
 }
 
-// swapConfirmations gets the number of confirmations for the specified coin ID
+// SwapConfirmations gets the number of confirmations for the specified coin ID
 // by first checking for a unspent output, and if not found, searching indexed
 // wallet transactions.
-func (wc *rpcClient) swapConfirmations(txHash *chainhash.Hash, vout uint32, _ []byte, _ time.Time) (confs uint32, spent bool, err error) {
+func (wc *rpcClient) SwapConfirmations(txHash *chainhash.Hash, vout uint32, _ []byte, _ time.Time) (confs uint32, spent bool, err error) {
 	// Check for an unspent output.
 	txOut, err := wc.getTxOutput(txHash, vout)
 	if err == nil && txOut != nil {
 		return uint32(txOut.Confirmations), false, nil
 	}
 	// Check wallet transactions.
-	tx, err := wc.getWalletTransaction(txHash)
+	tx, err := wc.GetWalletTransaction(txHash)
 	if err != nil {
 		if IsTxNotFoundErr(err) {
 			return 0, false, asset.CoinNotFoundError
@@ -1026,10 +1026,10 @@ func (wc *rpcClient) getRPCBlockHeader(blockHash *chainhash.Hash) (*BlockHeader,
 	return blkHeader, nil
 }
 
-// getBlockHeader gets the *blockHeader for the specified block hash. It also
+// GetBlockHeader gets the *BlockHeader for the specified block hash. It also
 // returns a bool value to indicate whether this block is a part of main chain.
 // For orphaned blocks header.Confirmations is negative (typically -1).
-func (wc *rpcClient) getBlockHeader(blockHash *chainhash.Hash) (header *BlockHeader, mainchain bool, err error) {
+func (wc *rpcClient) GetBlockHeader(blockHash *chainhash.Hash) (header *BlockHeader, mainchain bool, err error) {
 	hdr, err := wc.getRPCBlockHeader(blockHash)
 	if err != nil {
 		return nil, false, err
@@ -1039,10 +1039,10 @@ func (wc *rpcClient) getBlockHeader(blockHash *chainhash.Hash) (header *BlockHea
 	return hdr, mainchain, nil
 }
 
-// getBlockHeight gets the mainchain height for the specified block. Returns
+// GetBlockHeight gets the mainchain height for the specified block. Returns
 // error for orphaned blocks.
-func (wc *rpcClient) getBlockHeight(blockHash *chainhash.Hash) (int32, error) {
-	hdr, _, err := wc.getBlockHeader(blockHash)
+func (wc *rpcClient) GetBlockHeight(blockHash *chainhash.Hash) (int32, error) {
+	hdr, _, err := wc.GetBlockHeader(blockHash)
 	if err != nil {
 		return -1, err
 	}
@@ -1052,7 +1052,7 @@ func (wc *rpcClient) getBlockHeight(blockHash *chainhash.Hash) (int32, error) {
 	return int32(hdr.Height), nil
 }
 
-func (wc *rpcClient) peerCount() (uint32, error) {
+func (wc *rpcClient) PeerCount() (uint32, error) {
 	var r struct {
 		Connections uint32 `json:"connections"`
 	}
@@ -1090,9 +1090,9 @@ func (wc *rpcClient) getVersion() (uint64, uint64, error) {
 	return r.Version, r.ProtocolVersion, nil
 }
 
-// findRedemptionsInMempool attempts to find spending info for the specified
+// FindRedemptionsInMempool attempts to find spending info for the specified
 // contracts by searching every input of all txs in the mempool.
-func (wc *rpcClient) findRedemptionsInMempool(ctx context.Context, reqs map[OutPoint]*FindRedemptionReq) (discovered map[OutPoint]*FindRedemptionResult) {
+func (wc *rpcClient) FindRedemptionsInMempool(ctx context.Context, reqs map[OutPoint]*FindRedemptionReq) (discovered map[OutPoint]*FindRedemptionResult) {
 	return FindRedemptionsInMempool(ctx, wc.log, reqs, wc.GetRawMempool, wc.GetRawTransaction, wc.segwit, wc.hashTx, wc.chainParams)
 }
 
@@ -1140,7 +1140,7 @@ func FindRedemptionsInMempool(
 			logAbandon(fmt.Sprintf("getrawtransaction error for tx hash %v: %v", txHash, err))
 			return
 		}
-		newlyDiscovered := findRedemptionsInTxWithHasher(ctx, segwit, reqs, tx, chainParams, hashTx)
+		newlyDiscovered := FindRedemptionsInTxWithHasher(ctx, segwit, reqs, tx, chainParams, hashTx)
 		for outPt, res := range newlyDiscovered {
 			discovered[outPt] = res
 		}
@@ -1149,10 +1149,10 @@ func FindRedemptionsInMempool(
 	return
 }
 
-// searchBlockForRedemptions attempts to find spending info for the specified
+// SearchBlockForRedemptions attempts to find spending info for the specified
 // contracts by searching every input of all txs in the provided block range.
-func (wc *rpcClient) searchBlockForRedemptions(ctx context.Context, reqs map[OutPoint]*FindRedemptionReq, blockHash chainhash.Hash) (discovered map[OutPoint]*FindRedemptionResult) {
-	msgBlock, err := wc.getBlock(blockHash)
+func (wc *rpcClient) SearchBlockForRedemptions(ctx context.Context, reqs map[OutPoint]*FindRedemptionReq, blockHash chainhash.Hash) (discovered map[OutPoint]*FindRedemptionResult) {
+	msgBlock, err := wc.GetBlock(blockHash)
 	if err != nil {
 		wc.log.Errorf("RPC GetBlock error: %v", err)
 		return
@@ -1172,7 +1172,7 @@ func SearchBlockForRedemptions(
 	discovered = make(map[OutPoint]*FindRedemptionResult, len(reqs))
 
 	for _, msgTx := range msgBlock.Transactions {
-		newlyDiscovered := findRedemptionsInTxWithHasher(ctx, segwit, reqs, msgTx, chainParams, hashTx)
+		newlyDiscovered := FindRedemptionsInTxWithHasher(ctx, segwit, reqs, msgTx, chainParams, hashTx)
 		for outPt, res := range newlyDiscovered {
 			discovered[outPt] = res
 		}
