@@ -463,11 +463,12 @@ export interface CoreActionRequiredNote extends CoreNote {
   payload: ActionRequiredNote
 }
 
-export interface RejectedRedemptionData {
+export interface RejectedTxData {
   assetID: number
   orderID: string
   coinID: string
   coinFmt: string
+  txType: string
 }
 
 export interface SpotPriceNote extends CoreNote {
