@@ -745,24 +745,25 @@ func (w *xcWallet) InitiateBridge(ctx context.Context, amt uint64, dest uint32) 
 
 // CompleteBridge completes the bridge on the destination chain if the wallet
 // is a Bridger.
-func (w *xcWallet) CompleteBridge(ctx context.Context, bridgeTx *asset.BridgeCounterpartTx, amount uint64, mintData []byte) (txID string, err error) {
+func (w *xcWallet) CompleteBridge(ctx context.Context, bridgeTx *asset.BridgeCounterpartTx, amount uint64, mintData []byte) error {
 	bridger, ok := w.Wallet.(asset.Bridger)
 	if !ok {
-		return "", fmt.Errorf("%s wallet is not a Bridger", unbip(w.AssetID))
+		return fmt.Errorf("%s wallet is not a Bridger", unbip(w.AssetID))
 	}
+
 	return bridger.CompleteBridge(ctx, bridgeTx, amount, mintData)
 }
 
 // MarkBridgeComplete marks the bridge as complete on the source chain if the
 // wallet is a Bridger.
-func (w *xcWallet) MarkBridgeComplete(initiationTxID, completionTxID string) {
+func (w *xcWallet) MarkBridgeComplete(initiationTxID string, completionTxID string, completionTime uint64) {
 	bridger, ok := w.Wallet.(asset.Bridger)
 	if !ok {
 		w.log.Errorf("MarkBridgeComplete: %s wallet is not a Bridger", unbip(w.AssetID))
 		return
 	}
 
-	bridger.MarkBridgeComplete(initiationTxID, completionTxID)
+	bridger.MarkBridgeComplete(initiationTxID, completionTxID, completionTime)
 }
 
 // PendingBridges returns the pending bridges originating on the chain of the

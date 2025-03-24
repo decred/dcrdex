@@ -126,19 +126,19 @@ func assetIndexEntry(wt *extendedWalletTx, baseChainID uint32) []byte {
 }
 
 // bridgeIndexEntry generates an index entry for iterating over bridge initiation
-// transactions. The index is sorted in chronological order based on the block
-// in which the corresponding bridge completion transaction was submitted.
+// transactions. The index is sorted in chronological order based on the time
+// in which the corresponding bridge completion transaction was mined.
 // Pending bridges appear at the end of the index. Pending bridges are those
 // where the counterpart tx is not yet confirmed. Max uint64 is used to indicate
 // a pending bridge.
 func bridgeIndexEntry(wt *extendedWalletTx) []byte {
-	var bridgeCompletedBlock uint64 = ^uint64(0)
-	if wt.BridgeCounterpartTx != nil && wt.BridgeCounterpartTx.BlockCompleted != 0 {
-		bridgeCompletedBlock = wt.BridgeCounterpartTx.BlockCompleted
+	var bridgeCompletionTime uint64 = ^uint64(0)
+	if wt.BridgeCounterpartTx != nil && wt.BridgeCounterpartTx.CompletionTime != 0 {
+		bridgeCompletionTime = wt.BridgeCounterpartTx.CompletionTime
 	}
 
 	entry := make([]byte, 8)
-	binary.BigEndian.PutUint64(entry[:8], bridgeCompletedBlock)
+	binary.BigEndian.PutUint64(entry[:8], bridgeCompletionTime)
 	return entry
 }
 
@@ -199,6 +199,9 @@ func NewTxDB(path string, log dex.Logger, baseChainID uint32) (*TxDB, error) {
 			return nil, fmt.Errorf("expected type *extendedWalletTx, got %T", wt)
 		}
 		if wt.Type != asset.CompleteBridge {
+			return nil, lexi.ErrNotIndexed
+		}
+		if wt.BridgeCounterpartTx == nil {
 			return nil, lexi.ErrNotIndexed
 		}
 		txHash := common.HexToHash(wt.BridgeCounterpartTx.ID)
@@ -416,7 +419,7 @@ func (db *TxDB) getPendingBridges() (txs []*extendedWalletTx, err error) {
 		}
 
 		// A bridge is pending if it doesn't have a counterpart tx or the counterpart isn't confirmed
-		isPending := wt.BridgeCounterpartTx == nil || wt.BridgeCounterpartTx.BlockCompleted == 0
+		isPending := wt.BridgeCounterpartTx == nil || wt.BridgeCounterpartTx.CompletionTime == 0
 		if isPending {
 			txs = append(txs, wt)
 		}

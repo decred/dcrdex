@@ -162,7 +162,7 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Networ
 		return nil, err
 	}
 
-	if eth.IsPolygonBridgeSupported(BipID, net) {
+	if _, supported := eth.PolygonBridgeSupportedAsset(BipID, net); supported {
 		return &eth.ETHBridgeWallet{
 			ETHWallet: evmWallet,
 		}, nil

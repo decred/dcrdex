@@ -622,7 +622,7 @@ func (db *tTxDB) getPendingBridges() ([]*extendedWalletTx, error) {
 	return db.pendingBridges, nil
 }
 func (db *tTxDB) getBridgeCompletion(initiationTxID string) (*extendedWalletTx, error) {
-	panic("getBridgeCompletion not implemented")
+	return db.txToGet, db.getTxErr
 }
 
 // func TestCheckUnconfirmedTxs(t *testing.T) {
@@ -836,6 +836,16 @@ func TestCheckPendingTxs(t *testing.T) {
 		return pendingTx
 	}
 
+	const initiationTxID = "initiationTx"
+	updateToBridgeCompletion := func(tx *extendedWalletTx) *extendedWalletTx {
+		tx.Type = asset.CompleteBridge
+		tx.BridgeCounterpartTx = &asset.BridgeCounterpartTx{
+			ID:      initiationTxID,
+			AssetID: BipID,
+		}
+		return tx
+	}
+
 	newReceipt := func(confs uint64) *types.Receipt {
 		r := &types.Receipt{
 			EffectiveGasPrice: big.NewInt(1),
@@ -862,6 +872,19 @@ func TestCheckPendingTxs(t *testing.T) {
 		}
 	}
 
+	getBridgeCompleteNote := func(t *testing.T) *asset.BridgeCompletedNote {
+		for {
+			select {
+			case ni := <-emitChan:
+				if n, ok := ni.(*asset.BridgeCompletedNote); ok {
+					return n
+				}
+			default:
+				return nil
+			}
+		}
+	}
+
 	for _, tt := range []*struct {
 		name        string
 		dbErr       error
@@ -871,6 +894,7 @@ func TestCheckPendingTxs(t *testing.T) {
 		txs         []bool
 		noncesAfter []uint64
 		actionID    string
+		bridgeDone  string
 		recast      bool
 	}{
 		{
@@ -899,6 +923,22 @@ func TestCheckPendingTxs(t *testing.T) {
 				extendedTx(4, 0, 0, finalizedStamp),
 			},
 			receipts: []*types.Receipt{newReceipt(txConfsNeededToConfirm)},
+		},
+		{
+			name: "bridge completion not yet confirmed",
+			pendingTxs: []*extendedWalletTx{
+				updateToBridgeCompletion(extendedTx(4, 0, 0, finalizedStamp)),
+			},
+			noncesAfter: []uint64{4},
+			receipts:    []*types.Receipt{newReceipt(txConfsNeededToConfirm - 1)},
+		},
+		{
+			name: "confirm bridge completion",
+			pendingTxs: []*extendedWalletTx{
+				updateToBridgeCompletion(extendedTx(4, 0, 0, finalizedStamp)),
+			},
+			receipts:   []*types.Receipt{newReceipt(txConfsNeededToConfirm)},
+			bridgeDone: initiationTxID,
 		},
 		{
 			name: "old and unindexed",
@@ -971,6 +1011,17 @@ func TestCheckPendingTxs(t *testing.T) {
 			}
 			if tt.recast != (node.lastSignedTx != nil) {
 				t.Fatalf("wrong recast result recast = %t, lastSignedTx = %t", tt.recast, node.lastSignedTx != nil)
+			}
+			if tt.bridgeDone != "" {
+				if bridgeNote := getBridgeCompleteNote(t); bridgeNote == nil {
+					t.Fatalf("expected bridge completion, got none")
+				} else if bridgeNote.InitiationTxID != tt.bridgeDone {
+					t.Fatalf("expected bridge completion for %s, got %s", tt.bridgeDone, bridgeNote.InitiationTxID)
+				}
+			} else {
+				if bridgeNote := getBridgeCompleteNote(t); bridgeNote != nil {
+					t.Fatalf("expected no bridge completion, got %s", bridgeNote.InitiationTxID)
+				}
 			}
 		})
 	}
@@ -5212,6 +5263,7 @@ func TestFreshProviderList(t *testing.T) {
 type mockBridge struct {
 	getCompletionDataFunc   func(ctx context.Context, txID string) ([]byte, error)
 	getCompletionDataCalled chan struct{}
+	completeBridgeCalled    bool
 }
 
 var _ bridge = (*mockBridge)(nil)
@@ -5234,10 +5286,11 @@ func (m *mockBridge) initiateBridge(txOpts *bind.TransactOpts, destAssetID uint3
 	panic("not implemented")
 }
 func (m *mockBridge) completeBridge(txOpts *bind.TransactOpts, completionData []byte) (*types.Transaction, error) {
-	panic("not implemented")
+	m.completeBridgeCalled = true
+	return types.NewTransaction(0, common.Address{}, big.NewInt(0), 0, nil, []byte{}), nil
 }
-func (m *mockBridge) initiateBridgeGas() uint64 { panic("not implemented") }
-func (m *mockBridge) completeBridgeGas() uint64 { panic("not implemented") }
+func (m *mockBridge) initiateBridgeGas() uint64 { return 0 }
+func (m *mockBridge) completeBridgeGas() uint64 { return 0 }
 
 func TestBridgeManager(t *testing.T) {
 	setupWithPendingBridges := func(t *testing.T, pendingBridges []*extendedWalletTx) (*bridgeManager, *mockBridge, chan asset.WalletNotification, *tTxDB, dex.Logger) {
@@ -5385,6 +5438,143 @@ func TestBridgeManager(t *testing.T) {
 			t.Fatalf("expected pending bridge ID to be %s, and dest asset ID to be %d", burnTxID, destAssetID)
 		}
 	})
+}
+
+func TestCompleteBridge(t *testing.T) {
+	initiationTx := &asset.BridgeCounterpartTx{
+		ID:      "initiation-tx-id",
+		AssetID: 123,
+	}
+	timestamp := uint64(time.Now().Unix())
+	confirmedTx := &extendedWalletTx{
+		WalletTransaction: &asset.WalletTransaction{
+			ID:                  "complete-tx-id",
+			Amount:              1e9,
+			Confirmed:           true,
+			Type:                asset.CompleteBridge,
+			BridgeCounterpartTx: initiationTx,
+			Timestamp:           timestamp,
+		},
+		Nonce:     new(big.Int),
+		savedToDB: true,
+	}
+	pendingTx := &extendedWalletTx{
+		WalletTransaction: &asset.WalletTransaction{
+			ID:                  "complete-tx-id",
+			Amount:              1e9,
+			Confirmed:           false,
+			Type:                asset.CompleteBridge,
+			BridgeCounterpartTx: initiationTx,
+			Timestamp:           timestamp,
+		},
+		Nonce:     new(big.Int),
+		savedToDB: true,
+	}
+
+	tests := []struct {
+		name           string
+		dbTx           *extendedWalletTx
+		pendingTx      *extendedWalletTx
+		dbErr          error
+		expectComplete bool
+		expectNote     bool
+		expectErr      bool
+	}{
+		{
+			name:           "new completion",
+			expectComplete: true,
+		},
+		{
+			name:      "pending completion",
+			pendingTx: pendingTx,
+		},
+		{
+			name:       "confirmed completion",
+			dbTx:       confirmedTx,
+			expectNote: true,
+		},
+		{
+			name:      "db error",
+			dbErr:     errors.New("db error"),
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w, _, _, shutdown := tassetWallet(BipID)
+			defer shutdown()
+
+			bridgeWallet := &ETHBridgeWallet{ETHWallet: w.(*ETHWallet)}
+			bridge := &mockBridge{}
+			bridgeWallet.manager = &bridgeManager{
+				bridge: bridge,
+			}
+
+			emitChan := make(chan asset.WalletNotification, 1)
+			bridgeWallet.emit = asset.NewWalletEmitter(emitChan, BipID, bridgeWallet.log)
+
+			txDB := &tTxDB{
+				txToGet:  tt.dbTx,
+				getTxErr: tt.dbErr,
+			}
+			bridgeWallet.txDB = txDB
+
+			if tt.pendingTx != nil {
+				bridgeWallet.pendingTxs = []*extendedWalletTx{tt.pendingTx}
+			} else {
+				bridgeWallet.pendingTxs = []*extendedWalletTx{}
+			}
+
+			err := bridgeWallet.CompleteBridge(context.Background(), initiationTx, 1e9, []byte("completionData"))
+
+			if tt.expectErr {
+				if err == nil {
+					t.Fatalf("expected error but got none")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if tt.expectComplete != bridge.completeBridgeCalled {
+				t.Fatalf("completeBridge called = %v, want %v", bridge.completeBridgeCalled, tt.expectComplete)
+			}
+
+			var note *asset.BridgeCompletedNote
+		noteLoop:
+			for {
+				select {
+				case n := <-emitChan:
+					if n, ok := n.(*asset.BridgeCompletedNote); ok {
+						note = n
+					}
+				default:
+					break noteLoop
+				}
+			}
+
+			if tt.expectNote != (note != nil) {
+				t.Fatalf("expected note = %v, got %v", tt.expectNote, (note != nil))
+			}
+
+			if note != nil {
+				if note.CompletionTime != timestamp {
+					t.Fatalf("expected CompletionTime = %d, got %d", timestamp, note.CompletionTime)
+				}
+				if note.InitiationTxID != initiationTx.ID {
+					t.Fatalf("expected InitiationTxID = %s, got %s", initiationTx.ID, note.InitiationTxID)
+				}
+				if note.CompletionTxID != confirmedTx.ID {
+					t.Fatalf("expected CompletionTxID = %s, got %s", confirmedTx.ID, note.CompletionTxID)
+				}
+				if note.SourceAssetID != initiationTx.AssetID {
+					t.Fatalf("expected SourceAssetID = %d, got %d", initiationTx.AssetID, note.SourceAssetID)
+				}
+			}
+		})
+	}
 }
 
 func TestDomain(t *testing.T) {

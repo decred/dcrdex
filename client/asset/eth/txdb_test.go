@@ -268,7 +268,7 @@ func TestTxDB_GetBridges(t *testing.T) {
 				ID:   "0x1111111111111111111111111111111111111111111111111111111111111111",
 				Type: asset.InitiateBridge,
 				BridgeCounterpartTx: &asset.BridgeCounterpartTx{
-					BlockCompleted: 100,
+					CompletionTime: 100,
 				},
 			},
 			Nonce:          big.NewInt(1),
@@ -280,7 +280,7 @@ func TestTxDB_GetBridges(t *testing.T) {
 				ID:   "0x2222222222222222222222222222222222222222222222222222222222222222",
 				Type: asset.InitiateBridge,
 				BridgeCounterpartTx: &asset.BridgeCounterpartTx{
-					BlockCompleted: 99,
+					CompletionTime: 99,
 				},
 			},
 			Nonce:          big.NewInt(2),

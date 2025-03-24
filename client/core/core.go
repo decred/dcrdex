@@ -9572,19 +9572,21 @@ func (c *Core) handleBridgeReadyToComplete(n *asset.BridgeReadyToCompleteNote) {
 		AssetID: n.AssetID,
 		ID:      n.InitiateBridgeTxID,
 	}
-	completionTxID, err := destWallet.CompleteBridge(c.ctx, bridgeTx, n.Amount, n.Data)
+
+	err = destWallet.CompleteBridge(c.ctx, bridgeTx, n.Amount, n.Data)
 	if err != nil {
 		c.log.Errorf("Error completing bridge: %v", err)
-		return
 	}
+}
 
-	sourceWallet, err := c.connectedWallet(n.AssetID)
+func (c *Core) handleBridgeCompleted(n *asset.BridgeCompletedNote) {
+	sourceWallet, err := c.connectedWallet(n.SourceAssetID)
 	if err != nil {
-		c.log.Errorf("Wallet for asset %s is not connected", unbip(n.AssetID))
+		c.log.Errorf("Bridge %s funds are completed, but wallet unable to connect.", unbip(n.SourceAssetID))
 		return
 	}
 
-	sourceWallet.MarkBridgeComplete(n.InitiateBridgeTxID, completionTxID)
+	sourceWallet.MarkBridgeComplete(n.InitiationTxID, n.CompletionTxID, n.CompletionTime)
 }
 
 // handleWalletNotification processes an asynchronous wallet notification.
@@ -9619,6 +9621,8 @@ func (c *Core) handleWalletNotification(ni asset.WalletNotification) {
 		c.deleteRequestedAction(n.UniqueID)
 	case *asset.BridgeReadyToCompleteNote:
 		c.handleBridgeReadyToComplete(n)
+	case *asset.BridgeCompletedNote:
+		c.handleBridgeCompleted(n)
 	}
 	c.notify(newWalletNote(ni))
 }

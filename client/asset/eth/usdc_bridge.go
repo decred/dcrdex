@@ -3,11 +3,8 @@ package eth
 import (
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"io"
 	"math/big"
-	"net/http"
 	"strings"
 	"time"
 
@@ -17,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/dexnet"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/networks/erc20"
 	"decred.org/dcrdex/dex/networks/erc20/cctp"
@@ -298,36 +296,17 @@ func (b *usdcBridge) getMessageSentEventLog(ctx context.Context, bridgeTxID stri
 func (b *usdcBridge) getAttestation(ctx context.Context, msg []byte) ([]byte, error) {
 	msgHash := "0x" + hex.EncodeToString(crypto.Keccak256(msg))
 	url := fmt.Sprintf("%s%s", b.attestationUrl, msgHash)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("attestation request failed with status %d", resp.StatusCode)
-	}
-
-	reader := io.LimitReader(resp.Body, 1<<22)
-	r, err := io.ReadAll(reader)
-	if err != nil {
-		return nil, err
-	}
-	attestationResponse := struct {
+	var attestationResponse struct {
 		Attestation string `json:"attestation"`
 		Status      string `json:"status"`
-	}{}
-	err = json.Unmarshal(r, &attestationResponse)
-	if err != nil {
-		return nil, err
 	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 
-	if attestationResponse.Status != "complete" {
+	if err := dexnet.Get(ctx, url, &attestationResponse); err != nil {
+		return nil, err
+	} else if attestationResponse.Status != "complete" {
 		return nil, fmt.Errorf("attestation is still pending")
 	}
 
