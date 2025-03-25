@@ -365,11 +365,13 @@ func TestBasicMMRebalance(t *testing.T) {
 			mm.baseCexBalances[baseID] = lotSize * 50
 			mm.baseDexBalances[quoteID] = int64(calc.BaseToQuote(basisPrice, lotSize*50))
 			mm.baseCexBalances[quoteID] = int64(calc.BaseToQuote(basisPrice, lotSize*50))
-			mm.cfgV.Store(&BasicMarketMakingConfig{
-				GapStrategy:    tt.strategy,
-				BuyPlacements:  tt.cfgBuyPlacements,
-				SellPlacements: tt.cfgSellPlacements,
-			})
+			mm.unifiedExchangeAdaptor.botCfgV.Store(&BotConfig{
+				BasicMMConfig: &BasicMarketMakingConfig{
+					GapStrategy:    tt.strategy,
+					BuyPlacements:  tt.cfgBuyPlacements,
+					SellPlacements: tt.cfgSellPlacements,
+				}})
+
 			mm.rebalance(100)
 
 			if len(tcore.multiTradesPlaced) != 2 {

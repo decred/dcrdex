@@ -138,6 +138,45 @@ func (c *BasicMarketMakingConfig) Validate() error {
 	return nil
 }
 
+func (c *BasicMarketMakingConfig) copy() *BasicMarketMakingConfig {
+	cfg := *c
+
+	sellPlacements := make([]*OrderPlacement, 0, len(c.SellPlacements))
+	for _, p := range c.SellPlacements {
+		sellPlacements = append(sellPlacements, &OrderPlacement{
+			Lots:      p.Lots,
+			GapFactor: p.GapFactor,
+		})
+	}
+	cfg.SellPlacements = sellPlacements
+
+	buyPlacements := make([]*OrderPlacement, 0, len(c.BuyPlacements))
+	for _, p := range c.BuyPlacements {
+		buyPlacements = append(buyPlacements, &OrderPlacement{
+			Lots:      p.Lots,
+			GapFactor: p.GapFactor,
+		})
+	}
+	cfg.BuyPlacements = buyPlacements
+
+	return &cfg
+}
+
+// updateLotSize modifies the number of lots in each placement in the event
+// of a lot size change. It will place as many lots as possible without
+// exceeding the total quantity placed using the original lot size.
+//
+// This function is NOT thread safe.
+func (c *BasicMarketMakingConfig) updateLotSize(originalLotSize, newLotSize uint64) {
+	for _, p := range c.SellPlacements {
+		p.Lots = (p.Lots * originalLotSize) / newLotSize
+	}
+
+	for _, p := range c.BuyPlacements {
+		p.Lots = (p.Lots * originalLotSize) / newLotSize
+	}
+}
+
 type basicMMCalculator interface {
 	basisPrice() (bp uint64, err error)
 	halfSpread(uint64) (uint64, error)
@@ -170,6 +209,7 @@ func (b *basicMMCalculatorImpl) basisPrice() (uint64, error) {
 	b.log.Tracef("oracle rate = %s", b.fmtRate(oracleRate))
 
 	rateFromFiat := b.core.ExchangeRateFromFiatSources()
+	rateStep := b.rateStep.Load()
 	if rateFromFiat == 0 {
 		b.log.Meter("basisPrice_nofiat_"+b.market.name, time.Hour).Warn(
 			"No fiat-based rate estimate(s) available for sanity check for %s", b.market.name,
@@ -177,13 +217,13 @@ func (b *basicMMCalculatorImpl) basisPrice() (uint64, error) {
 		if oracleRate == 0 { // steppedRate(0, x) => x, so we have to handle this.
 			return 0, errNoBasisPrice
 		}
-		return steppedRate(oracleRate, b.rateStep), nil
+		return steppedRate(oracleRate, rateStep), nil
 	}
 	if oracleRate == 0 {
 		b.log.Meter("basisPrice_nooracle_"+b.market.name, time.Hour).Infof(
 			"No oracle rate available. Using fiat-derived basis rate = %s for %s", b.fmtRate(rateFromFiat), b.market.name,
 		)
-		return steppedRate(rateFromFiat, b.rateStep), nil
+		return steppedRate(rateFromFiat, rateStep), nil
 	}
 	mismatch := math.Abs((float64(oracleRate) - float64(rateFromFiat)) / float64(oracleRate))
 	const maxOracleFiatMismatch = 0.05
@@ -195,7 +235,7 @@ func (b *basicMMCalculatorImpl) basisPrice() (uint64, error) {
 		return 0, errOracleFiatMismatch
 	}
 
-	return steppedRate(oracleRate, b.rateStep), nil
+	return steppedRate(oracleRate, rateStep), nil
 }
 
 // halfSpread calculates the distance from the mid-gap where if you sell a lot
@@ -254,7 +294,7 @@ func (b *basicMMCalculatorImpl) feeGapStats(basisPrice uint64) (*FeeGapStats, er
 	 */
 
 	f := sellFeesInBaseUnits + buyFeesInBaseUnits
-	l := b.lotSize
+	l := b.lotSize.Load()
 
 	r := float64(basisPrice) / calc.RateEncodingFactor
 	g := float64(f) * r / float64(f+2*l)
@@ -276,7 +316,6 @@ func (b *basicMMCalculatorImpl) feeGapStats(basisPrice uint64) (*FeeGapStats, er
 
 type basicMarketMaker struct {
 	*unifiedExchangeAdaptor
-	cfgV             atomic.Value // *BasicMarketMakingConfig
 	core             botCoreAdaptor
 	oracle           oracle
 	rebalanceRunning atomic.Bool
@@ -286,7 +325,7 @@ type basicMarketMaker struct {
 var _ bot = (*basicMarketMaker)(nil)
 
 func (m *basicMarketMaker) cfg() *BasicMarketMakingConfig {
-	return m.cfgV.Load().(*BasicMarketMakingConfig)
+	return m.botCfg().BasicMMConfig
 }
 
 func (m *basicMarketMaker) orderPrice(basisPrice, feeAdj uint64, sell bool, gapFactor float64) uint64 {
@@ -308,7 +347,7 @@ func (m *basicMarketMaker) orderPrice(basisPrice, feeAdj uint64, sell bool, gapF
 		adj += feeAdj
 	}
 
-	adj = steppedRate(adj, m.rateStep)
+	adj = steppedRate(adj, m.rateStep.Load())
 
 	if sell {
 		return basisPrice + adj
@@ -437,21 +476,6 @@ func (m *basicMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error)
 	return &wg, nil
 }
 
-func (m *basicMarketMaker) updateConfig(cfg *BotConfig) error {
-	if cfg.BasicMMConfig == nil {
-		// implies bug in caller
-		return errors.New("no market making config provided")
-	}
-
-	err := cfg.BasicMMConfig.Validate()
-	if err != nil {
-		return fmt.Errorf("invalid market making config: %v", err)
-	}
-
-	m.cfgV.Store(cfg.BasicMMConfig)
-	return nil
-}
-
 // RunBasicMarketMaker starts a basic market maker bot.
 func newBasicMarketMaker(cfg *BotConfig, adaptorCfg *exchangeAdaptorCfg, oracle oracle, log dex.Logger) (*basicMarketMaker, error) {
 	if cfg.BasicMMConfig == nil {
@@ -474,7 +498,6 @@ func newBasicMarketMaker(cfg *BotConfig, adaptorCfg *exchangeAdaptorCfg, oracle 
 		core:                   adaptor,
 		oracle:                 oracle,
 	}
-	basicMM.cfgV.Store(cfg.BasicMMConfig)
 	adaptor.setBotLoop(basicMM.botLoop)
 	return basicMM, nil
 }

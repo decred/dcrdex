@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+
+	"decred.org/dcrdex/dex/utils"
 )
 
 // MarketMakingConfig is the overall configuration of the market maker.
@@ -50,10 +52,24 @@ type AutoRebalanceConfig struct {
 	MinQuoteTransfer uint64 `json:"minQuoteTransfer"`
 }
 
+func (a *AutoRebalanceConfig) copy() *AutoRebalanceConfig {
+	return &AutoRebalanceConfig{
+		MinBaseTransfer:  a.MinBaseTransfer,
+		MinQuoteTransfer: a.MinQuoteTransfer,
+	}
+}
+
 // BotBalanceAllocation is the initial allocation of funds for a bot.
 type BotBalanceAllocation struct {
 	DEX map[uint32]uint64 `json:"dex"`
 	CEX map[uint32]uint64 `json:"cex"`
+}
+
+func (b *BotBalanceAllocation) copy() *BotBalanceAllocation {
+	return &BotBalanceAllocation{
+		DEX: utils.CopyMap(b.DEX),
+		CEX: utils.CopyMap(b.CEX),
+	}
 }
 
 // BotInventoryDiffs is the amount of funds to add or remove from a bot's
@@ -61,6 +77,13 @@ type BotBalanceAllocation struct {
 type BotInventoryDiffs struct {
 	DEX map[uint32]int64 `json:"dex"`
 	CEX map[uint32]int64 `json:"cex"`
+}
+
+func (d *BotInventoryDiffs) copy() *BotInventoryDiffs {
+	return &BotInventoryDiffs{
+		DEX: utils.CopyMap(d.DEX),
+		CEX: utils.CopyMap(d.CEX),
+	}
 }
 
 // balanceDiffsToAllocations converts a BotInventoryDiffs to a
@@ -90,6 +113,18 @@ func balanceDiffsToAllocation(diffs *BotInventoryDiffs) *BotBalanceAllocation {
 // should be created and the event log db should be updated to support both
 // versions.
 
+type rpcConfig struct {
+	Alloc         *BotBalanceAllocation `json:"alloc"`
+	AutoRebalance *AutoRebalanceConfig  `json:"autoRebalance"`
+}
+
+func (r *rpcConfig) copy() *rpcConfig {
+	return &rpcConfig{
+		Alloc:         r.Alloc.copy(),
+		AutoRebalance: r.AutoRebalance.copy(),
+	}
+}
+
 // BotConfig is the configuration for a market making bot.
 // The balance fields are the initial amounts that will be reserved to use for
 // this bot. As the bot trades, the amounts reserved for it will be updated.
@@ -109,15 +144,77 @@ type BotConfig struct {
 
 	// RPCConfig can be used for file-based initial allocations and
 	// auto-rebalance settings.
-	RPCConfig *struct {
-		Alloc         *BotBalanceAllocation `json:"alloc"`
-		AutoRebalance *AutoRebalanceConfig  `json:"autoRebalance"`
-	} `json:"rpcConfig"`
+	RPCConfig *rpcConfig `json:"rpcConfig"`
+
+	// LotSize is the lot size of the market at the time this configuration
+	// was created. It is used to notify the user if the lot size changes
+	// when they are starting the bot.
+	LotSize uint64 `json:"lotSize"`
 
 	// Only one of the following configs should be set
 	BasicMMConfig        *BasicMarketMakingConfig `json:"basicMarketMakingConfig,omitempty"`
 	SimpleArbConfig      *SimpleArbConfig         `json:"simpleArbConfig,omitempty"`
 	ArbMarketMakerConfig *ArbMarketMakerConfig    `json:"arbMarketMakingConfig,omitempty"`
+}
+
+func (c *BotConfig) copy() *BotConfig {
+	b := *c
+
+	b.BaseWalletOptions = utils.CopyMap(c.BaseWalletOptions)
+	b.QuoteWalletOptions = utils.CopyMap(c.QuoteWalletOptions)
+
+	if c.UIConfig != nil {
+		b.UIConfig = make(json.RawMessage, len(c.UIConfig))
+		copy(b.UIConfig, c.UIConfig)
+	}
+	if c.RPCConfig != nil {
+		b.RPCConfig = c.RPCConfig.copy()
+	}
+	if c.BasicMMConfig != nil {
+		b.BasicMMConfig = c.BasicMMConfig.copy()
+	}
+	if c.SimpleArbConfig != nil {
+		b.SimpleArbConfig = c.SimpleArbConfig.copy()
+	}
+	if c.ArbMarketMakerConfig != nil {
+		b.ArbMarketMakerConfig = c.ArbMarketMakerConfig.copy()
+	}
+
+	return &b
+}
+
+// updateLotSize modifies the bot's configuration based on an update to the
+// market's lot size.
+func (c *BotConfig) updateLotSize(oldLotSize, newLotSize uint64) {
+	if c.BasicMMConfig != nil {
+		c.BasicMMConfig.updateLotSize(oldLotSize, newLotSize)
+	} else if c.ArbMarketMakerConfig != nil {
+		c.ArbMarketMakerConfig.updateLotSize(oldLotSize, newLotSize)
+	}
+}
+
+func (c *BotConfig) validate() error {
+	if c.BasicMMConfig != nil {
+		return c.BasicMMConfig.Validate()
+	} else if c.SimpleArbConfig != nil {
+		return c.SimpleArbConfig.Validate()
+	} else if c.ArbMarketMakerConfig != nil {
+		// TODO:
+		// c.ArbMarketMakerConfig.Validate()
+		return nil
+	}
+
+	return fmt.Errorf("no bot config set")
+}
+
+func validateConfigUpdate(old, new *BotConfig) error {
+	if (old.BasicMMConfig == nil) != (new.BasicMMConfig == nil) ||
+		(old.SimpleArbConfig == nil) != (new.SimpleArbConfig == nil) ||
+		(old.ArbMarketMakerConfig == nil) != (new.ArbMarketMakerConfig == nil) {
+		return fmt.Errorf("cannot change bot type")
+	}
+
+	return new.validate()
 }
 
 func (c *BotConfig) requiresPriceOracle() bool {

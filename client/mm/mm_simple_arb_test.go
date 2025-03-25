@@ -544,10 +544,12 @@ func TestArbRebalance(t *testing.T) {
 				BookingFeesPerLot: sellSwapFees,
 			}
 			// arbEngine.setBotLoop(arbEngine.botLoop)
-			a.cfgV.Store(&SimpleArbConfig{
-				ProfitTrigger:      profitTrigger,
-				MaxActiveArbs:      maxActiveArbs,
-				NumEpochsLeaveOpen: numEpochsLeaveOpen,
+			a.unifiedExchangeAdaptor.botCfgV.Store(&BotConfig{
+				SimpleArbConfig: &SimpleArbConfig{
+					ProfitTrigger:      profitTrigger,
+					MaxActiveArbs:      maxActiveArbs,
+					NumEpochsLeaveOpen: numEpochsLeaveOpen,
+				},
 			})
 			a.book = orderBook
 			a.rebalance(currEpoch)
@@ -698,11 +700,14 @@ func TestArbDexTradeUpdates(t *testing.T) {
 		arbEngine.CEX = newTCEX()
 		arbEngine.ctx = ctx
 		arbEngine.setBotLoop(arbEngine.botLoop)
-		arbEngine.cfgV.Store(&SimpleArbConfig{
-			ProfitTrigger:      0.01,
-			MaxActiveArbs:      5,
-			NumEpochsLeaveOpen: 10,
+		arbEngine.unifiedExchangeAdaptor.botCfgV.Store(&BotConfig{
+			SimpleArbConfig: &SimpleArbConfig{
+				ProfitTrigger:      0.01,
+				MaxActiveArbs:      5,
+				NumEpochsLeaveOpen: 10,
+			},
 		})
+
 		err := arbEngine.runBotLoop(ctx)
 		if err != nil {
 			t.Fatalf("%s: Connect error: %v", test.name, err)
@@ -820,10 +825,12 @@ func TestCexTradeUpdates(t *testing.T) {
 		arbEngine.ctx = ctx
 		arbEngine.CEX = newTCEX()
 		arbEngine.setBotLoop(arbEngine.botLoop)
-		arbEngine.cfgV.Store(&SimpleArbConfig{
-			ProfitTrigger:      0.01,
-			MaxActiveArbs:      5,
-			NumEpochsLeaveOpen: 10,
+		arbEngine.unifiedExchangeAdaptor.botCfgV.Store(&BotConfig{
+			SimpleArbConfig: &SimpleArbConfig{
+				ProfitTrigger:      0.01,
+				MaxActiveArbs:      5,
+				NumEpochsLeaveOpen: 10,
+			},
 		})
 
 		err := arbEngine.runBotLoop(ctx)
