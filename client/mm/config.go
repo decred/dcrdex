@@ -195,13 +195,11 @@ func (c *BotConfig) updateLotSize(oldLotSize, newLotSize uint64) {
 
 func (c *BotConfig) validate() error {
 	if c.BasicMMConfig != nil {
-		return c.BasicMMConfig.Validate()
+		return c.BasicMMConfig.validate()
 	} else if c.SimpleArbConfig != nil {
-		return c.SimpleArbConfig.Validate()
+		return c.SimpleArbConfig.validate()
 	} else if c.ArbMarketMakerConfig != nil {
-		// TODO:
-		// c.ArbMarketMakerConfig.Validate()
-		return nil
+		return c.ArbMarketMakerConfig.validate()
 	}
 
 	return fmt.Errorf("no bot config set")

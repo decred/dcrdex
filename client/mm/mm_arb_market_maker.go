@@ -86,23 +86,36 @@ type ArbMarketMakerConfig struct {
 func (a *ArbMarketMakerConfig) copy() *ArbMarketMakerConfig {
 	c := *a
 
-	c.BuyPlacements = make([]*ArbMarketMakingPlacement, 0, len(a.BuyPlacements))
-	for _, p := range a.BuyPlacements {
-		c.BuyPlacements = append(c.BuyPlacements, &ArbMarketMakingPlacement{
+	copyArbMarketMakingPlacement := func(p *ArbMarketMakingPlacement) *ArbMarketMakingPlacement {
+		return &ArbMarketMakingPlacement{
 			Lots:       p.Lots,
 			Multiplier: p.Multiplier,
-		})
+		}
 	}
-
-	c.SellPlacements = make([]*ArbMarketMakingPlacement, 0, len(a.SellPlacements))
-	for _, p := range a.SellPlacements {
-		c.SellPlacements = append(c.SellPlacements, &ArbMarketMakingPlacement{
-			Lots:       p.Lots,
-			Multiplier: p.Multiplier,
-		})
-	}
+	c.BuyPlacements = utils.Map(a.BuyPlacements, copyArbMarketMakingPlacement)
+	c.SellPlacements = utils.Map(a.SellPlacements, copyArbMarketMakingPlacement)
 
 	return &c
+}
+
+func (a *ArbMarketMakerConfig) validate() error {
+	if len(a.BuyPlacements) == 0 && len(a.SellPlacements) == 0 {
+		return fmt.Errorf("no placements")
+	}
+
+	if a.Profit <= 0 {
+		return fmt.Errorf("profit must be greater than 0")
+	}
+
+	if a.DriftTolerance < 0 || a.DriftTolerance > 0.01 {
+		return fmt.Errorf("drift tolerance %f out of bounds", a.DriftTolerance)
+	}
+
+	if a.NumEpochsLeaveOpen < 2 {
+		return fmt.Errorf("arbs must be left open for at least 2 epochs")
+	}
+
+	return nil
 }
 
 // updateLotSize modifies the number of lots in each placement in the event

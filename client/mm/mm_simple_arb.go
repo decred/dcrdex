@@ -43,7 +43,7 @@ func (c *SimpleArbConfig) copy() *SimpleArbConfig {
 	}
 }
 
-func (c *SimpleArbConfig) Validate() error {
+func (c *SimpleArbConfig) validate() error {
 	if c.ProfitTrigger <= 0 || c.ProfitTrigger > 1 {
 		return fmt.Errorf("profit trigger must be 0 < t <= 1, but got %v", c.ProfitTrigger)
 	}

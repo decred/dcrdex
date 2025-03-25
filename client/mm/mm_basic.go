@@ -78,7 +78,7 @@ func needBreakEvenHalfSpread(strat GapStrategy) bool {
 	return strat == GapStrategyAbsolutePlus || strat == GapStrategyPercentPlus || strat == GapStrategyMultiplier
 }
 
-func (c *BasicMarketMakingConfig) Validate() error {
+func (c *BasicMarketMakingConfig) validate() error {
 	if c.DriftTolerance == 0 {
 		c.DriftTolerance = 0.001
 	}
@@ -142,23 +142,15 @@ func (c *BasicMarketMakingConfig) Validate() error {
 func (c *BasicMarketMakingConfig) copy() *BasicMarketMakingConfig {
 	cfg := *c
 
-	sellPlacements := make([]*OrderPlacement, 0, len(c.SellPlacements))
-	for _, p := range c.SellPlacements {
-		sellPlacements = append(sellPlacements, &OrderPlacement{
+	copyOrderPlacement := func(p *OrderPlacement) *OrderPlacement {
+		return &OrderPlacement{
 			Lots:      p.Lots,
 			GapFactor: p.GapFactor,
-		})
+		}
 	}
-	cfg.SellPlacements = sellPlacements
 
-	buyPlacements := make([]*OrderPlacement, 0, len(c.BuyPlacements))
-	for _, p := range c.BuyPlacements {
-		buyPlacements = append(buyPlacements, &OrderPlacement{
-			Lots:      p.Lots,
-			GapFactor: p.GapFactor,
-		})
-	}
-	cfg.BuyPlacements = buyPlacements
+	cfg.SellPlacements = utils.Map(c.SellPlacements, copyOrderPlacement)
+	cfg.BuyPlacements = utils.Map(c.BuyPlacements, copyOrderPlacement)
 
 	return &cfg
 }
@@ -508,7 +500,7 @@ func newBasicMarketMaker(cfg *BotConfig, adaptorCfg *exchangeAdaptorCfg, oracle 
 		return nil, fmt.Errorf("error constructing exchange adaptor: %w", err)
 	}
 
-	err = cfg.BasicMMConfig.Validate()
+	err = cfg.BasicMMConfig.validate()
 	if err != nil {
 		return nil, fmt.Errorf("invalid market making config: %v", err)
 	}
