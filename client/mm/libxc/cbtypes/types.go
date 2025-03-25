@@ -163,31 +163,31 @@ type AccountsResult struct {
 }
 
 type Market struct {
-	ProductID                string  `json:"product_id"`
-	Price                    float64 `json:"price,string"`
-	DayPriceChangePctStr     string  `json:"price_percentage_change_24h"`
-	Volume                   float64 `json:"volume_24h,string"`
-	DayVolumeChangePctStr    string  `json:"volume_percentage_change_24h"`
-	BaseIncrement            float64 `json:"base_increment,string"`
-	QuoteIncrement           float64 `json:"quote_increment,string"`
-	QuoteMinSize             float64 `json:"quote_min_size,string"`
-	QuoteMaxSize             float64 `json:"quote_max_size,string"`
-	BaseMinSize              float64 `json:"base_min_size,string"`
-	BaseMaxSize              float64 `json:"base_max_size,string"`
-	BaseName                 string  `json:"base_name"`
-	QuoteName                string  `json:"quote_name"`
-	Watched                  bool    `json:"watched"`
-	IsDisabled               bool    `json:"is_disabled"`
-	New                      bool    `json:"new"`
-	Status                   string  `json:"status"`
-	CancelOnly               bool    `json:"cancel_only"`
-	LimitOnly                bool    `json:"limit_only"`
-	PostOnly                 bool    `json:"post_only"`
-	TradingDisabled          bool    `json:"trading_disabled"`
-	AuctionMode              bool    `json:"auction_mode"`
-	ProductType              string  `json:"product_type"`
-	QuoteCurrencyID          string  `json:"quote_currency_id"`
-	BaseCurrencyID           string  `json:"base_currency_id"`
+	ProductID             string `json:"product_id"`
+	Price                 string `json:"price"`
+	DayPriceChangePctStr  string `json:"price_percentage_change_24h"`
+	Volume                string `json:"volume_24h"`
+	DayVolumeChangePctStr string `json:"volume_percentage_change_24h"`
+	BaseIncrement         string `json:"base_increment"`
+	// QuoteIncrement           float64 `json:"quote_increment,string"`
+	// QuoteMinSize             float64 `json:"quote_min_size,string"`
+	// QuoteMaxSize             float64 `json:"quote_max_size,string"`
+	BaseMinSize              string `json:"base_min_size"`
+	BaseMaxSize              string `json:"base_max_size"`
+	BaseName                 string `json:"base_name"`
+	QuoteName                string `json:"quote_name"`
+	Watched                  bool   `json:"watched"`
+	IsDisabled               bool   `json:"is_disabled"`
+	New                      bool   `json:"new"`
+	Status                   string `json:"status"`
+	CancelOnly               bool   `json:"cancel_only"`
+	LimitOnly                bool   `json:"limit_only"`
+	PostOnly                 bool   `json:"post_only"`
+	TradingDisabled          bool   `json:"trading_disabled"`
+	AuctionMode              bool   `json:"auction_mode"`
+	ProductType              string `json:"product_type"`
+	QuoteCurrencyID          string `json:"quote_currency_id"`
+	BaseCurrencyID           string `json:"base_currency_id"`
 	FCMTradingSessionDetails struct {
 		IsSessionOpen bool      `json:"is_session_open"`
 		OpenTime      time.Time `json:"open_time"`
@@ -199,7 +199,7 @@ type Market struct {
 	BaseDisplaySymbol  string   `json:"base_display_symbol"`
 	QuoteDisplaySymbol string   `json:"quote_display_symbol"`
 	ViewOnly           bool     `json:"view_only"`
-	PriceIncrement     float64  `json:"price_increment,string"`
+	PriceIncrement     string   `json:"price_increment"`
 	// FutureProductDetails struct { ... } `json:"future_product_details"`
 
 	// These are not in the response, but calculated.
