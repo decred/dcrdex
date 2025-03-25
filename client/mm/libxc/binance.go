@@ -980,50 +980,6 @@ func (bnc *binance) ConfirmWithdrawal(ctx context.Context, withdrawalID string, 
 	return uint64(amt), status.TxID, nil
 }
 
-func floatToScaledUint(f float64) (uint64, int) {
-	str := strconv.FormatFloat(f, 'f', -1, 64)
-	parts := strings.Split(str, ".")
-	scaledStr := parts[0]
-	decimalPlaces := 0
-	if len(parts) == 2 {
-		scaledStr += parts[1]
-		decimalPlaces = len(parts[1])
-	}
-	scaledValue, _ := strconv.ParseUint(scaledStr, 10, 64)
-	return scaledValue, decimalPlaces
-}
-
-func scaledUintToString(u uint64, decimalPlaces int) string {
-	numStr := strconv.FormatUint(u, 10)
-	if decimalPlaces == 0 {
-		return numStr
-	}
-	length := len(numStr)
-	if decimalPlaces > length {
-		leadingZeros := decimalPlaces - length
-		return "0." + fmt.Sprintf("%0*d%s", leadingZeros, 0, numStr)
-	} else if decimalPlaces == length {
-		return "0." + numStr
-	} else {
-		return numStr[:length-decimalPlaces] + "." + numStr[length-decimalPlaces:]
-	}
-}
-
-func steppedAmount(amt float64, stepSize float64) float64 {
-	steppedAmountStr := steppedAmountStr(amt, stepSize)
-	steppedAmount, _ := strconv.ParseFloat(steppedAmountStr, 64)
-	return steppedAmount
-}
-
-func steppedAmountStr(amt float64, stepSize float64) string {
-	steps := uint64(math.Round(amt / stepSize))
-	if steps == 0 {
-		steps = 1
-	}
-	scaled, prec := floatToScaledUint(stepSize)
-	return scaledUintToString(steps*scaled, prec)
-}
-
 // Withdraw withdraws funds from the CEX to a certain address. onComplete
 // is called with the actual amount withdrawn (amt - fees) and the
 // transaction ID of the withdrawal.
@@ -1191,8 +1147,10 @@ func (bnc *binance) Balances(ctx context.Context) (map[uint32]*ExchangeBalance, 
 	bnc.balanceMtx.RLock()
 	defer bnc.balanceMtx.RUnlock()
 
-	if err := bnc.refreshBalances(ctx); err != nil {
-		return nil, err
+	if len(bnc.balances) == 0 {
+		if err := bnc.refreshBalances(ctx); err != nil {
+			return nil, err
+		}
 	}
 
 	balances := make(map[uint32]*ExchangeBalance)

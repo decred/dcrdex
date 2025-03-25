@@ -24,7 +24,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -35,11 +34,13 @@ import (
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/utils"
+
 	"gopkg.in/square/go-jose.v2"
 	"gopkg.in/square/go-jose.v2/jwt"
 )
 
-// https://docs.cloud.coinbase.com/advanced-trade-api/docs/
+// https://docs.cdp.coinbase.com/advanced-trade/reference/
+// https://docs.cdp.coinbase.com/advanced-trade/docs/ws-overview
 
 // supportedCoinbaseTokens is the set of supported Coinbase tokens.
 // There is no API to query the networks that coinbase supports withdrawals on.
@@ -83,27 +84,25 @@ func newCBWSConn(apiName, apiPrivateKey, wsPath, productID, channel, channelID s
 }
 
 func (c *cbWSConn) handleWebsocketMessage(b []byte) {
-	var errMsg struct {
-		Type    string `json:"type"`
-		Message string `json:"message"`
-	}
-	if err := json.Unmarshal(b, &errMsg); err == nil && errMsg.Type == "error" {
-		c.log.Errorf("Websocket error: %s", errMsg.Message)
-		return
-	}
-
-	var probe struct {
+	var msg struct {
+		Type        string `json:"type"`
+		Message     string `json:"message"`
 		Channel     string `json:"channel"`
 		SequenceNum uint64 `json:"sequence_num"`
 	}
-	if err := json.Unmarshal(b, &probe); err != nil || probe.Channel == "" {
-		c.log.Errorf("Error parsing websocket message channel: channel = %q, err = %v", probe.Channel, err)
+	if err := json.Unmarshal(b, &msg); err != nil {
+		c.log.Errorf("Error unmarshaling websocket message: %v", err)
+		c.log.Errorf("Raw Message: %s", string(b))
+		return
+	}
+	if msg.Type == "error" {
+		c.log.Errorf("Websocket error: %s", msg.Message)
 		return
 	}
 
-	lastSeq := c.seq.Swap(probe.SequenceNum)
-	if lastSeq != 0 && lastSeq != probe.SequenceNum-1 {
-		c.log.Errorf("message out of sequence. %d -> %d", lastSeq, probe.SequenceNum)
+	lastSeq := c.seq.Swap(msg.SequenceNum)
+	if lastSeq != 0 && lastSeq != msg.SequenceNum-1 {
+		c.log.Errorf("Websocket message out of sequence. %d -> %d", lastSeq, msg.SequenceNum)
 		c.setSynced(false)
 
 		// Will resubscribe in handleSubscriptionMessage.
@@ -111,14 +110,16 @@ func (c *cbWSConn) handleWebsocketMessage(b []byte) {
 		return
 	}
 
-	switch probe.Channel {
+	switch msg.Channel {
 	case c.channelID:
 		c.msgHandler(b)
 	case "subscriptions":
 		c.handleSubscriptionMessage(b)
+	case "heartbeats":
+	default:
+		c.log.Errorf("Websocket message for unknown channel %q", msg.Channel)
 	}
 }
-
 func (c *cbWSConn) subUnsub(sub bool) error {
 	typ := "subscribe"
 	if !sub {
@@ -1476,10 +1477,6 @@ func (c *coinbase) updateAccounts(ctx context.Context) error {
 			}
 
 			for _, id := range ids {
-				fmt.Printf("Broadcasting balance update for asset ID %+v\n", &ExchangeBalance{
-					Available: toAtomic(v.AvailableBalance.Value, &ui),
-					Locked:    toAtomic(v.Hold.Value, &ui),
-				})
 				c.broadcast(&BalanceUpdate{
 					AssetID: id,
 					Balance: &ExchangeBalance{
@@ -1547,13 +1544,16 @@ func (c *coinbase) getAccountID(ctx context.Context, ticker string) (string, err
 	return a.UUID, nil
 }
 
-func parsePercent(v string) float64 {
-	v = strings.TrimSuffix(v, "%")
+func parseFloat(v string) float64 {
 	f, err := strconv.ParseFloat(v, 64)
 	if err != nil {
 		return 0
 	}
 	return f
+}
+
+func parsePercent(v string) float64 {
+	return parseFloat(strings.TrimSuffix(v, "%"))
 }
 
 func (c *coinbase) coinbaseMarketToDexMarkets(baseTicker, quoteTicker string) [][2]uint32 {
@@ -1603,11 +1603,11 @@ func (c *coinbase) updateMarkets(ctx context.Context) (map[string]*Market, error
 		bui, _ := asset.UnitInfo(baseAssetID)
 		qui, _ := asset.UnitInfo(quoteAssetID)
 
-		mkt.LotSize = uint64(math.Round(mkt.BaseIncrement * float64(bui.Conventional.ConversionFactor)))
-		mkt.MaxQty = uint64(math.Round(mkt.BaseMaxSize * float64(bui.Conventional.ConversionFactor)))
-		mkt.MinQty = uint64(math.Round(mkt.BaseMinSize * float64(bui.Conventional.ConversionFactor)))
+		mkt.LotSize = uint64(math.Round(parseFloat(mkt.BaseIncrement) * float64(bui.Conventional.ConversionFactor)))
+		mkt.MaxQty = uint64(math.Round(parseFloat(mkt.BaseMaxSize) * float64(bui.Conventional.ConversionFactor)))
+		mkt.MinQty = uint64(math.Round(parseFloat(mkt.BaseMinSize) * float64(bui.Conventional.ConversionFactor)))
 		conv := float64(qui.Conventional.ConversionFactor) / float64(bui.Conventional.ConversionFactor) * calc.RateEncodingFactor
-		mkt.RateStep = uint64(math.Round(mkt.PriceIncrement * conv))
+		mkt.RateStep = uint64(math.Round(parseFloat(mkt.PriceIncrement) * conv))
 		cbMarkets[mkt.ProductID] = mkt
 
 		pctPriceChange := parsePercent(mkt.DayPriceChangePctStr)
@@ -1616,14 +1616,15 @@ func (c *coinbase) updateMarkets(ctx context.Context) (map[string]*Market, error
 			// Just in case to avoid division by zero.
 			priceChange = 0
 		} else {
-			priceChange = mkt.Price - mkt.Price/(1+pctPriceChange/100)
+			price := parseFloat(mkt.Price)
+			priceChange = price - price/(1+pctPriceChange/100)
 		}
 		day := &MarketDay{
-			Vol:            mkt.Volume,
-			QuoteVol:       steppedAmount(mkt.Price*mkt.Volume, mkt.QuoteIncrement),
-			PriceChange:    steppedAmount(priceChange, mkt.PriceIncrement),
-			PriceChangePct: steppedAmount(pctPriceChange, 0.01),
-			LastPrice:      mkt.Price,
+			Vol:            parseFloat(mkt.Volume),
+			QuoteVol:       parseFloat(mkt.Price) * parseFloat(mkt.Volume),
+			PriceChange:    priceChange,
+			PriceChangePct: pctPriceChange,
+			LastPrice:      parseFloat(mkt.Price),
 			// Coinbase does not provide average and high/low prices.
 		}
 
