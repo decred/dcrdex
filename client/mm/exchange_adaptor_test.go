@@ -507,7 +507,9 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 	u.clientCore = tCore
 	u.autoRebalanceCfg = &AutoRebalanceConfig{}
 	a := &arbMarketMaker{unifiedExchangeAdaptor: u}
-	a.cfgV.Store(&ArbMarketMakerConfig{Profit: profit})
+	u.botCfgV.Store(&BotConfig{
+		ArbMarketMakerConfig: &ArbMarketMakerConfig{Profit: profit},
+	})
 	fiatRates := map[uint32]float64{baseID: 1, quoteID: 1}
 	u.fiatRates.Store(fiatRates)
 
@@ -579,9 +581,16 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 
 	setLots := func(b, s uint64) {
 		buyLots, sellLots = b, s
-		a.placementLotsV.Store(&placementLots{
-			baseLots:  sellLots,
-			quoteLots: buyLots,
+		u.botCfgV.Store(&BotConfig{
+			ArbMarketMakerConfig: &ArbMarketMakerConfig{
+				Profit: profit,
+				BuyPlacements: []*ArbMarketMakingPlacement{
+					{Lots: buyLots, Multiplier: 1},
+				},
+				SellPlacements: []*ArbMarketMakingPlacement{
+					{Lots: sellLots, Multiplier: 1},
+				},
+			},
 		})
 		addBaseFees, addQuoteFees = sellFundingFees, buyFundingFees
 		cex.asksVWAP[lotSize*buyLots] = vwapResult{avg: buyVWAP}

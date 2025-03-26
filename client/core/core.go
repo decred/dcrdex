@@ -8328,6 +8328,7 @@ func (c *Core) handleReconnect(host string) {
 		c.log.Errorf("handleReconnect: Unable to apply new configuration for DEX at %s: %v", host, err)
 		return
 	}
+	c.notify(newServerConfigUpdateNote(host))
 
 	type market struct { // for book re-subscribe
 		name  string
