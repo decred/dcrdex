@@ -343,7 +343,7 @@ func (c *CoinManager) spendableUTXOs(confs uint32) ([]*CompositeUTXO, map[OutPoi
 		return nil, nil, 0, err
 	}
 
-	utxos, utxoMap, sum, err := convertUnspent(confs, unspents, c.chainParams)
+	utxos, utxoMap, sum, err := ConvertUnspent(confs, unspents, c.chainParams)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -564,7 +564,7 @@ func (c *CoinManager) LockedOutput(pt OutPoint) *UTxO {
 	return c.lockedOutputs[pt]
 }
 
-func convertUnspent(confs uint32, unspents []*ListUnspentResult, chainParams *chaincfg.Params) ([]*CompositeUTXO, map[OutPoint]*CompositeUTXO, uint64, error) {
+func ConvertUnspent(confs uint32, unspents []*ListUnspentResult, chainParams *chaincfg.Params) ([]*CompositeUTXO, map[OutPoint]*CompositeUTXO, uint64, error) {
 	sort.Slice(unspents, func(i, j int) bool { return unspents[i].Amount < unspents[j].Amount })
 	var sum uint64
 	utxos := make([]*CompositeUTXO, 0, len(unspents))

@@ -18,47 +18,47 @@ import (
 // all requests with a context.Context.
 type Wallet interface {
 	RawRequester // for localFeeRate/rpcFeeRate calls
-	connect(ctx context.Context, wg *sync.WaitGroup) error
-	sendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error)
-	getTxOut(txHash *chainhash.Hash, index uint32, pkScript []byte, startTime time.Time) (*wire.TxOut, uint32, error)
-	getBlockHash(blockHeight int64) (*chainhash.Hash, error)
-	getBestBlockHash() (*chainhash.Hash, error)
-	getBestBlockHeight() (int32, error)
-	medianTime() (time.Time, error)
-	balances() (*GetBalancesResult, error)
-	listUnspent() ([]*ListUnspentResult, error) // must not return locked coins
-	lockUnspent(unlock bool, ops []*Output) error
-	listLockUnspent() ([]*RPCOutpoint, error)
-	changeAddress() (btcutil.Address, error) // warning: don't just use the Stringer if there's a "recode" function for a clone e.g. BCH
-	externalAddress() (btcutil.Address, error)
-	signTx(inTx *wire.MsgTx) (*wire.MsgTx, error)
-	privKeyForAddress(addr string) (*btcec.PrivateKey, error)
-	walletUnlock(pw []byte) error
-	walletLock() error
-	locked() bool
-	syncStatus() (*asset.SyncStatus, error)
-	peerCount() (uint32, error)
-	swapConfirmations(txHash *chainhash.Hash, vout uint32, contract []byte, startTime time.Time) (confs uint32, spent bool, err error)
-	getBestBlockHeader() (*BlockHeader, error)
-	ownsAddress(addr btcutil.Address) (bool, error) // this should probably just take a string
-	getWalletTransaction(txHash *chainhash.Hash) (*GetTransactionResult, error)
-	reconfigure(walletCfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error)
-	fingerprint() (string, error)
-	listTransactionsSinceBlock(blockHeight int32) ([]*ListTransactionsResult, error)
+	Connect(ctx context.Context, wg *sync.WaitGroup) error
+	SendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error)
+	GetTxOut(txHash *chainhash.Hash, index uint32, pkScript []byte, startTime time.Time) (*wire.TxOut, uint32, error)
+	GetBlockHash(blockHeight int64) (*chainhash.Hash, error)
+	GetBestBlockHash() (*chainhash.Hash, error)
+	GetBestBlockHeight() (int32, error)
+	MedianTime() (time.Time, error)
+	Balances() (*GetBalancesResult, error)
+	ListUnspent() ([]*ListUnspentResult, error) // must not return locked coins
+	LockUnspent(unlock bool, ops []*Output) error
+	ListLockUnspent() ([]*RPCOutpoint, error)
+	ChangeAddress() (btcutil.Address, error) // warning: don't just use the Stringer if there's a "recode" function for a clone e.g. BCH
+	ExternalAddress() (btcutil.Address, error)
+	SignTx(inTx *wire.MsgTx) (*wire.MsgTx, error)
+	PrivKeyForAddress(addr string) (*btcec.PrivateKey, error)
+	WalletUnlock(pw []byte) error
+	WalletLock() error
+	Locked() bool
+	SyncStatus() (*asset.SyncStatus, error)
+	PeerCount() (uint32, error)
+	SwapConfirmations(txHash *chainhash.Hash, vout uint32, contract []byte, startTime time.Time) (confs uint32, spent bool, err error)
+	GetBestBlockHeader() (*BlockHeader, error)
+	OwnsAddress(addr btcutil.Address) (bool, error) // this should probably just take a string
+	GetWalletTransaction(txHash *chainhash.Hash) (*GetTransactionResult, error)
+	Reconfigure(walletCfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error)
+	Fingerprint() (string, error)
+	ListTransactionsSinceBlock(blockHeight int32) ([]*ListTransactionsResult, error)
 	AddressUsed(addr string) (bool, error)
 }
 
-type tipRedemptionWallet interface {
+type TipRedemptionWallet interface {
 	Wallet
-	getBlockHeight(*chainhash.Hash) (int32, error)
-	getBlockHeader(blockHash *chainhash.Hash) (hdr *BlockHeader, mainchain bool, err error)
-	getBlock(h chainhash.Hash) (*wire.MsgBlock, error)
-	searchBlockForRedemptions(ctx context.Context, reqs map[OutPoint]*FindRedemptionReq, blockHash chainhash.Hash) (discovered map[OutPoint]*FindRedemptionResult)
-	findRedemptionsInMempool(ctx context.Context, reqs map[OutPoint]*FindRedemptionReq) (discovered map[OutPoint]*FindRedemptionResult)
+	GetBlockHeight(*chainhash.Hash) (int32, error)
+	GetBlockHeader(blockHash *chainhash.Hash) (hdr *BlockHeader, mainchain bool, err error)
+	GetBlock(h chainhash.Hash) (*wire.MsgBlock, error)
+	SearchBlockForRedemptions(ctx context.Context, reqs map[OutPoint]*FindRedemptionReq, blockHash chainhash.Hash) (discovered map[OutPoint]*FindRedemptionResult)
+	FindRedemptionsInMempool(ctx context.Context, reqs map[OutPoint]*FindRedemptionReq) (discovered map[OutPoint]*FindRedemptionResult)
 }
 
-type txFeeEstimator interface {
-	estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract bool) (fee uint64, err error)
+type TxFeeEstimator interface {
+	EstimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract bool) (fee uint64, err error)
 }
 
 // walletTxChecker provide a fast wallet tx query when block info not needed.
