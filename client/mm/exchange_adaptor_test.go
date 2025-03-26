@@ -20,7 +20,6 @@ import (
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
-	"decred.org/dcrdex/dex/utils"
 	"github.com/davecgh/go-spew/spew"
 )
 
@@ -622,7 +621,7 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 			t.Fatalf("Error getting lot costs: %v", err)
 		}
 		a.autoRebalanceCfg.MinBaseTransfer = lotSize
-		a.autoRebalanceCfg.MinQuoteTransfer = utils.Min(perLot.cexQuote, perLot.dexQuote)
+		a.autoRebalanceCfg.MinQuoteTransfer = min(perLot.cexQuote, perLot.dexQuote)
 	}
 
 	checkDistribution := func(baseDeposit, baseWithdraw, quoteDeposit, quoteWithdraw uint64) {

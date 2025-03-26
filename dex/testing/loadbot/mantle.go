@@ -705,17 +705,6 @@ func truncate(v, mod int64) uint64 {
 	return t
 }
 
-// clamp returns the closest value to v within the bounds of [min, max].
-func clamp(v, min, max int) int {
-	if v > max {
-		return max
-	}
-	if v < min {
-		return min
-	}
-	return v
-}
-
 const walletNameLength = 4
 
 var chars = []byte("123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz")

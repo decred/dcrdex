@@ -519,10 +519,7 @@ type TokenWallet struct {
 func (w *assetWallet) perTxGasLimit(feeRateGwei uint64) uint64 {
 	blockGasLimit := w.tip().GasLimit
 	maxFeeBasedGasLimit := w.maxTxFeeGwei / feeRateGwei
-	if maxFeeBasedGasLimit < blockGasLimit {
-		return maxFeeBasedGasLimit
-	}
-	return blockGasLimit
+	return min(maxFeeBasedGasLimit, blockGasLimit)
 }
 
 // maxSwapsOrRedeems calculates the maximum number of swaps or redemptions that
