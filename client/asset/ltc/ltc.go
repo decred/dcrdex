@@ -170,24 +170,22 @@ func (d *Driver) Create(params *asset.CreateWalletParams) error {
 		params.Logger, recoveryCfg.NumExternalAddresses, recoveryCfg.NumInternalAddresses, chainParams)
 }
 
-// customSPVWalletConstructors are functions for setting up custom
-// implementations of the btc.BTCWallet interface that may be used by the
-// ExchangeWalletSPV instead of the default spv implementation.
-var customSPVWalletConstructors = map[string]btc.CustomSPVWalletConstructor{}
+// customWalletConstructors are functions for setting up btc.CustomWallet
+// implementations used by btc.ExchangeWalletCustom.
+var customWalletConstructors = map[string]btc.CustomWalletConstructor{}
 
-// RegisterCustomSPVWallet registers a function that should be used in creating
-// a btc.BTCWallet implementation that the ExchangeWalletSPV will use in place
-// of the default spv wallet implementation. External consumers can use this
-// function to provide alternative btc.BTCWallet implementations, and must do so
-// before attempting to create an ExchangeWalletSPV instance of this type. It'll
-// panic if callers try to register a wallet twice.
-func RegisterCustomSPVWallet(constructor btc.CustomSPVWalletConstructor, def *asset.WalletDefinition) {
+// RegisterCustomWallet registers a function that should be used in creating a
+// btc.CustomWallet implementation for btc.ExchangeWalletCustom. External
+// consumers can use this function to provide btc.CustomWallet implementation,
+// and must do so before attempting to create an btc.ExchangeWalletCustom
+// instance of this type. It'll panic if callers try to register a wallet twice.
+func RegisterCustomWallet(constructor btc.CustomWalletConstructor, def *asset.WalletDefinition) {
 	for _, availableWallets := range WalletInfo.AvailableWallets {
 		if def.Type == availableWallets.Type {
 			panic(fmt.Sprintf("wallet type (%q) is already registered", def.Type))
 		}
 	}
-	customSPVWalletConstructors[def.Type] = constructor
+	customWalletConstructors[def.Type] = constructor
 	WalletInfo.AvailableWallets = append(WalletInfo.AvailableWallets, def)
 }
 
@@ -243,22 +241,11 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		cloneCFG.MinElectrumVersion = *ver
 		return btc.ElectrumWallet(cloneCFG)
 	default:
-		makeCustomWallet, ok := customSPVWalletConstructors[cfg.Type]
+		makeCustomWallet, ok := customWalletConstructors[cfg.Type]
 		if !ok {
 			return nil, fmt.Errorf("unknown wallet type %q", cfg.Type)
 		}
-
-		// Create custom wallet first and return early if we encounter any
-		// error.
-		ltcWallet, err := makeCustomWallet(cfg.Settings, cloneCFG.ChainParams)
-		if err != nil {
-			return nil, fmt.Errorf("custom wallet setup error: %v", err)
-		}
-
-		walletConstructor := func(_ string, _ *btc.WalletConfig, _ *chaincfg.Params, _ dex.Logger) btc.BTCWallet {
-			return ltcWallet
-		}
-		return btc.OpenSPVWallet(cloneCFG, walletConstructor)
+		return btc.OpenCustomWallet(cloneCFG, makeCustomWallet)
 	}
 }
 

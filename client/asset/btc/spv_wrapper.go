@@ -100,9 +100,6 @@ type BTCWallet interface {
 	WaitForShutdown()
 	ChainSynced() bool // currently unused
 	AccountProperties(scope waddrmgr.KeyScope, acct uint32) (*waddrmgr.AccountProperties, error)
-	// AccountInfo returns the account information of the wallet for use by the
-	// exchange wallet.
-	AccountInfo() XCWalletAccount
 	// The below methods are not implemented by *wallet.Wallet, so must be
 	// implemented by the BTCWallet implementation.
 	WalletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDetails, error)
@@ -118,11 +115,6 @@ type BTCWallet interface {
 	AddPeer(string) error
 	RemovePeer(string) error
 	GetTransactions(startHeight, endHeight int32, accountName string, cancel <-chan struct{}) (*wallet.GetTransactionsResult, error)
-}
-
-type XCWalletAccount struct {
-	AccountName   string
-	AccountNumber uint32
 }
 
 // BlockNotification is block hash and height delivered by a BTCWallet when it
@@ -211,6 +203,7 @@ type spvWallet struct {
 	wallet      BTCWallet
 	cl          SPVService
 	acctNum     uint32
+	acctName    string
 	dir         string
 	decodeAddr  dexbtc.AddressDecoder
 
@@ -226,9 +219,9 @@ type spvWallet struct {
 var _ Wallet = (*spvWallet)(nil)
 var _ tipNotifier = (*spvWallet)(nil)
 
-// reconfigure attempts to reconfigure the rpcClient for the new settings. Live
+// Reconfigure attempts to reconfigure the rpcClient for the new settings. Live
 // reconfiguration is only attempted if the new wallet type is walletTypeSPV.
-func (w *spvWallet) reconfigure(cfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error) {
+func (w *spvWallet) Reconfigure(cfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error) {
 	// If the wallet type is not SPV, then we can't reconfigure the wallet.
 	if cfg.Type != walletTypeSPV {
 		restartRequired = true
@@ -258,11 +251,11 @@ func (w *spvWallet) RawRequest(ctx context.Context, method string, params []json
 	return nil, errors.New("RawRequest not available on spv")
 }
 
-func (w *spvWallet) ownsAddress(addr btcutil.Address) (bool, error) {
+func (w *spvWallet) OwnsAddress(addr btcutil.Address) (bool, error) {
 	return w.wallet.HaveAddress(addr)
 }
 
-func (w *spvWallet) sendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error) {
+func (w *spvWallet) SendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error) {
 	// Publish the transaction in a goroutine so the caller may wait for a given
 	// period before it goes asynchronous and it is assumed that btcwallet at
 	// least succeeded with its DB updates and queueing of the transaction for
@@ -306,7 +299,11 @@ func (w *spvWallet) sendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error) 
 	return &txHash, nil
 }
 
-func (w *spvWallet) getBlock(blockHash chainhash.Hash) (*wire.MsgBlock, error) {
+func (w *spvWallet) GetBlockHeaderVerbose(blockHash *chainhash.Hash) (*wire.BlockHeader, error) {
+	return w.cl.GetBlockHeader(blockHash)
+}
+
+func (w *spvWallet) GetBlock(blockHash chainhash.Hash) (*wire.MsgBlock, error) {
 	block, err := w.cl.GetBlock(blockHash)
 	if err != nil {
 		return nil, fmt.Errorf("neutrino GetBlock error: %v", err)
@@ -315,27 +312,25 @@ func (w *spvWallet) getBlock(blockHash chainhash.Hash) (*wire.MsgBlock, error) {
 	return block.MsgBlock(), nil
 }
 
-func (w *spvWallet) getBlockHash(blockHeight int64) (*chainhash.Hash, error) {
+func (w *spvWallet) GetBlockHash(blockHeight int64) (*chainhash.Hash, error) {
 	return w.cl.GetBlockHash(blockHeight)
 }
 
-// getBlockHeight gets the mainchain height for the specified block. Returns
-// error for orphaned blocks.
-func (w *spvWallet) getBlockHeight(h *chainhash.Hash) (int32, error) {
+func (w *spvWallet) GetBlockHeight(h *chainhash.Hash) (int32, error) {
 	return w.cl.GetBlockHeight(h)
 }
 
-func (w *spvWallet) getBestBlockHash() (*chainhash.Hash, error) {
+func (w *spvWallet) GetBestBlockHash() (*chainhash.Hash, error) {
 	blk := w.wallet.SyncedTo()
 	return &blk.Hash, nil
 }
 
-// getBestBlockHeight returns the height of the best block processed by the
+// GetBestBlockHeight returns the height of the best block processed by the
 // wallet, which indicates the height at which the compact filters have been
 // retrieved and scanned for wallet addresses. This is may be less than
 // getChainHeight, which indicates the height that the chain service has reached
 // in its retrieval of block headers and compact filter headers.
-func (w *spvWallet) getBestBlockHeight() (int32, error) {
+func (w *spvWallet) GetBestBlockHeight() (int32, error) {
 	return w.wallet.SyncedTo().Height, nil
 }
 
@@ -348,15 +343,15 @@ func (w *spvWallet) getChainStamp(blockHash *chainhash.Hash) (stamp time.Time, p
 	return hdr.Timestamp, &hdr.PrevBlock, nil
 }
 
-// medianTime is the median time for the current best block.
-func (w *spvWallet) medianTime() (time.Time, error) {
+// MedianTime is the median time for the current best block.
+func (w *spvWallet) MedianTime() (time.Time, error) {
 	blk := w.wallet.SyncedTo()
 	return CalcMedianTime(w.getChainStamp, &blk.Hash)
 }
 
-// getChainHeight is only for confirmations since it does not reflect the wallet
+// GetChainHeight is only for confirmations since it does not reflect the wallet
 // manager's sync height, just the chain service.
-func (w *spvWallet) getChainHeight() (int32, error) {
+func (w *spvWallet) GetChainHeight() (int32, error) {
 	blk, err := w.cl.BestBlock()
 	if err != nil {
 		return -1, err
@@ -364,7 +359,7 @@ func (w *spvWallet) getChainHeight() (int32, error) {
 	return blk.Height, nil
 }
 
-func (w *spvWallet) peerCount() (uint32, error) {
+func (w *spvWallet) PeerCount() (uint32, error) {
 	return uint32(len(w.cl.Peers())), nil
 }
 
@@ -406,7 +401,7 @@ func (w *spvWallet) syncHeight() int32 {
 // the chain service sync stage that comes before the wallet has performed any
 // address recovery/rescan, and switch to the wallet's sync height when it
 // reports non-zero height.
-func (w *spvWallet) syncStatus() (*asset.SyncStatus, error) {
+func (w *spvWallet) SyncStatus() (*asset.SyncStatus, error) {
 	// Chain service headers (block and filter) height.
 	chainBlk, err := w.cl.BestBlock()
 	if err != nil {
@@ -496,8 +491,7 @@ func (w *spvWallet) ownsInputs(txid string) bool {
 	return true
 }
 
-func (w *spvWallet) listTransactionsSinceBlock(blockHeight int32) ([]*ListTransactionsResult, error) {
-	acctName := w.wallet.AccountInfo().AccountName
+func (w *spvWallet) ListTransactionsSinceBlock(blockHeight int32) ([]*ListTransactionsResult, error) {
 	tip, err := w.cl.BestBlock()
 	if err != nil {
 		return nil, fmt.Errorf("BestBlock error: %v", err)
@@ -506,7 +500,7 @@ func (w *spvWallet) listTransactionsSinceBlock(blockHeight int32) ([]*ListTransa
 	// We use GetTransactions instead of ListSinceBlock, because ListSinceBlock
 	// does not include transactions that pay to a change address, which
 	// Redeem, Refund, and RedeemBond do.
-	res, err := w.wallet.GetTransactions(blockHeight, tip.Height, acctName, nil)
+	res, err := w.wallet.GetTransactions(blockHeight, tip.Height, w.acctName, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -538,9 +532,9 @@ func (w *spvWallet) listTransactionsSinceBlock(blockHeight int32) ([]*ListTransa
 }
 
 // balances retrieves a wallet's balance details.
-func (w *spvWallet) balances() (*GetBalancesResult, error) {
+func (w *spvWallet) Balances() (*GetBalancesResult, error) {
 	// Determine trusted vs untrusted coins with listunspent.
-	unspents, err := w.wallet.ListUnspent(0, math.MaxInt32, w.wallet.AccountInfo().AccountName)
+	unspents, err := w.wallet.ListUnspent(0, math.MaxInt32, w.acctName)
 	if err != nil {
 		return nil, fmt.Errorf("error listing unspent outputs: %w", err)
 	}
@@ -575,9 +569,9 @@ func (w *spvWallet) balances() (*GetBalancesResult, error) {
 	}, nil
 }
 
-// listUnspent retrieves list of the wallet's UTXOs.
-func (w *spvWallet) listUnspent() ([]*ListUnspentResult, error) {
-	unspents, err := w.wallet.ListUnspent(0, math.MaxInt32, w.wallet.AccountInfo().AccountName)
+// ListUnspent retrieves list of the wallet's UTXOs.
+func (w *spvWallet) ListUnspent() ([]*ListUnspentResult, error) {
+	unspents, err := w.wallet.ListUnspent(0, math.MaxInt32, w.acctName)
 	if err != nil {
 		return nil, err
 	}
@@ -619,10 +613,10 @@ func (w *spvWallet) listUnspent() ([]*ListUnspentResult, error) {
 	return res, nil
 }
 
-// lockUnspent locks and unlocks outputs for spending. An output that is part of
+// LockUnspent locks and unlocks outputs for spending. An output that is part of
 // an order, but not yet spent, should be locked until spent or until the order
 // is  canceled or fails.
-func (w *spvWallet) lockUnspent(unlock bool, ops []*Output) error {
+func (w *spvWallet) LockUnspent(unlock bool, ops []*Output) error {
 	switch {
 	case unlock && len(ops) == 0:
 		w.wallet.ResetLockedOutpoints()
@@ -639,9 +633,9 @@ func (w *spvWallet) lockUnspent(unlock bool, ops []*Output) error {
 	return nil
 }
 
-// listLockUnspent returns a slice of outpoints for all unspent outputs marked
+// ListLockUnspent returns a slice of outpoints for all unspent outputs marked
 // as locked by a wallet.
-func (w *spvWallet) listLockUnspent() ([]*RPCOutpoint, error) {
+func (w *spvWallet) ListLockUnspent() ([]*RPCOutpoint, error) {
 	outpoints := w.wallet.LockedOutpoints()
 	pts := make([]*RPCOutpoint, 0, len(outpoints))
 	for _, pt := range outpoints {
@@ -653,28 +647,28 @@ func (w *spvWallet) listLockUnspent() ([]*RPCOutpoint, error) {
 	return pts, nil
 }
 
-// changeAddress gets a new internal address from the wallet. The address will
+// ChangeAddress gets a new internal address from the wallet. The address will
 // be bech32-encoded (P2WPKH).
-func (w *spvWallet) changeAddress() (btcutil.Address, error) {
+func (w *spvWallet) ChangeAddress() (btcutil.Address, error) {
 	return w.wallet.NewChangeAddress(w.acctNum, waddrmgr.KeyScopeBIP0084)
 }
 
-// externalAddress gets a new bech32-encoded (P2WPKH) external address from the
+// ExternalAddress gets a new bech32-encoded (P2WPKH) external address from the
 // wallet.
-func (w *spvWallet) externalAddress() (btcutil.Address, error) {
+func (w *spvWallet) ExternalAddress() (btcutil.Address, error) {
 	return w.wallet.NewAddress(w.acctNum, waddrmgr.KeyScopeBIP0084)
 }
 
 // signTx attempts to have the wallet sign the transaction inputs.
-func (w *spvWallet) signTx(tx *wire.MsgTx) (*wire.MsgTx, error) {
+func (w *spvWallet) SignTx(tx *wire.MsgTx) (*wire.MsgTx, error) {
 	// Can't use btcwallet.Wallet.SignTransaction, because it doesn't work for
 	// segwit transactions (for real?).
 	return tx, w.wallet.SignTx(tx)
 }
 
-// privKeyForAddress retrieves the private key associated with the specified
+// PrivKeyForAddress retrieves the private key associated with the specified
 // address.
-func (w *spvWallet) privKeyForAddress(addr string) (*btcec.PrivateKey, error) {
+func (w *spvWallet) PrivKeyForAddress(addr string) (*btcec.PrivateKey, error) {
 	a, err := w.decodeAddr(addr, w.chainParams)
 	if err != nil {
 		return nil, err
@@ -693,25 +687,25 @@ func (w *spvWallet) Lock() error {
 	return nil
 }
 
-// estimateSendTxFee callers should provide at least one output value.
-func (w *spvWallet) estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract bool) (fee uint64, err error) {
+// EstimateSendTxFee callers should provide at least one output value.
+func (w *spvWallet) EstimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract bool) (fee uint64, err error) {
 	minTxSize := uint64(tx.SerializeSize())
 	var sendAmount uint64
 	for _, txOut := range tx.TxOut {
 		sendAmount += uint64(txOut.Value)
 	}
 
-	unspents, err := w.listUnspent()
+	unspents, err := w.ListUnspent()
 	if err != nil {
 		return 0, fmt.Errorf("error listing unspent outputs: %w", err)
 	}
 
-	utxos, _, _, err := convertUnspent(0, unspents, w.chainParams)
+	utxos, _, _, err := ConvertUnspent(0, unspents, w.chainParams)
 	if err != nil {
 		return 0, fmt.Errorf("error converting unspent outputs: %w", err)
 	}
 
-	enough := sendEnough(sendAmount, feeRate, subtract, minTxSize, true, false)
+	enough := SendEnough(sendAmount, feeRate, subtract, minTxSize, true, false)
 	sum, _, inputsSize, _, _, _, _, err := TryFund(utxos, enough)
 	if err != nil {
 		return 0, err
@@ -752,11 +746,11 @@ func (w *spvWallet) estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract b
 	return finalFee, nil
 }
 
-// swapConfirmations attempts to get the number of confirmations and the spend
+// SwapConfirmations attempts to get the number of confirmations and the spend
 // status for the specified tx output. For swap outputs that were not generated
 // by this wallet, startTime must be supplied to limit the search. Use the match
 // time assigned by the server.
-func (w *spvWallet) swapConfirmations(txHash *chainhash.Hash, vout uint32, pkScript []byte,
+func (w *spvWallet) SwapConfirmations(txHash *chainhash.Hash, vout uint32, pkScript []byte,
 	startTime time.Time) (confs uint32, spent bool, err error) {
 
 	// First, check if it's a wallet transaction. We probably won't be able
@@ -792,7 +786,7 @@ func (w *spvWallet) swapConfirmations(txHash *chainhash.Hash, vout uint32, pkScr
 	// status, but it will allow us to short circuit a longer scan if we already
 	// know the output is spent.
 	if blockHash == nil {
-		blockHash, _ = w.mainchainBlockForStoredTx(txHash)
+		blockHash, _ = w.MainchainBlockForStoredTx(txHash)
 	}
 
 	// Our last option is neutrino.
@@ -805,7 +799,7 @@ func (w *spvWallet) swapConfirmations(txHash *chainhash.Hash, vout uint32, pkScr
 		return 0, false, err
 	}
 
-	if utxo.spend == nil && utxo.blockHash == nil {
+	if utxo.Spend == nil && utxo.BlockHash == nil {
 		if assumedMempool {
 			w.log.Tracef("swapConfirmations - scanFilters did not find %v:%d, assuming in mempool.",
 				txHash, vout)
@@ -817,15 +811,15 @@ func (w *spvWallet) swapConfirmations(txHash *chainhash.Hash, vout uint32, pkScr
 			txHash, vout, startTime, pkScript)
 	}
 
-	if utxo.blockHash != nil {
-		bestHeight, err := w.getChainHeight()
+	if utxo.BlockHash != nil {
+		bestHeight, err := w.GetChainHeight()
 		if err != nil {
 			return 0, false, fmt.Errorf("getBestBlockHeight error: %v", err)
 		}
-		confs = uint32(bestHeight) - utxo.blockHeight + 1
+		confs = uint32(bestHeight) - utxo.BlockHeight + 1
 	}
 
-	if utxo.spend != nil {
+	if utxo.Spend != nil {
 		// In the off-chance that a spend was found but not the output itself,
 		// confs will be incorrect here.
 		// In situations where we're looking for the counter-party's swap, we
@@ -841,16 +835,16 @@ func (w *spvWallet) swapConfirmations(txHash *chainhash.Hash, vout uint32, pkScr
 	return confs, false, nil
 }
 
-func (w *spvWallet) locked() bool {
+func (w *spvWallet) Locked() bool {
 	return w.wallet.Locked()
 }
 
-func (w *spvWallet) walletLock() error {
+func (w *spvWallet) WalletLock() error {
 	w.wallet.Lock()
 	return nil
 }
 
-func (w *spvWallet) walletUnlock(pw []byte) error {
+func (w *spvWallet) WalletUnlock(pw []byte) error {
 	return w.Unlock(pw)
 }
 
@@ -858,10 +852,9 @@ func (w *spvWallet) getBlockHeaderVerbose(blockHash *chainhash.Hash) (*wire.Bloc
 	return w.cl.GetBlockHeader(blockHash)
 }
 
-// getBlockHeader gets the *blockHeader for the specified block hash. It also
 // returns a bool value to indicate whether this block is a part of main chain.
 // For orphaned blocks header.Confirmations is negative.
-func (w *spvWallet) getBlockHeader(blockHash *chainhash.Hash) (header *BlockHeader, mainchain bool, err error) {
+func (w *spvWallet) GetBlockHeader(blockHash *chainhash.Hash) (header *BlockHeader, mainchain bool, err error) {
 	hdr, err := w.cl.GetBlockHeader(blockHash)
 	if err != nil {
 		return nil, false, err
@@ -878,7 +871,7 @@ func (w *spvWallet) getBlockHeader(blockHash *chainhash.Hash) (header *BlockHead
 	}
 
 	confirmations := int64(-1)
-	mainchain = w.blockIsMainchain(blockHash, blockHeight)
+	mainchain = w.BlockIsMainchain(blockHash, blockHeight)
 	if mainchain {
 		confirmations = int64(confirms(blockHeight, tip.Height))
 	}
@@ -892,12 +885,12 @@ func (w *spvWallet) getBlockHeader(blockHash *chainhash.Hash) (header *BlockHead
 	}, mainchain, nil
 }
 
-func (w *spvWallet) getBestBlockHeader() (*BlockHeader, error) {
-	hash, err := w.getBestBlockHash()
+func (w *spvWallet) GetBestBlockHeader() (*BlockHeader, error) {
+	hash, err := w.GetBestBlockHash()
 	if err != nil {
 		return nil, err
 	}
-	hdr, _, err := w.getBlockHeader(hash)
+	hdr, _, err := w.GetBlockHeader(hash)
 	return hdr, err
 }
 
@@ -905,8 +898,8 @@ func (w *spvWallet) logFilePath() string {
 	return filepath.Join(w.dir, logDirName, logFileName)
 }
 
-// connect will start the wallet and begin syncing.
-func (w *spvWallet) connect(ctx context.Context, wg *sync.WaitGroup) (err error) {
+// Connect will start the wallet and begin syncing.
+func (w *spvWallet) Connect(ctx context.Context, wg *sync.WaitGroup) (err error) {
 	w.cl, err = w.wallet.Start()
 	if err != nil {
 		return err
@@ -1063,9 +1056,9 @@ func (w *spvWallet) numDerivedAddresses() (internal, external uint32, err error)
 	return props.InternalKeyCount, props.ExternalKeyCount, nil
 }
 
-// fingerprint returns an identifier for this wallet. It is the hash of the
+// Fingerprint returns an identifier for this wallet. It is the hash of the
 // compressed serialization of the account pub key.
-func (w *spvWallet) fingerprint() (string, error) {
+func (w *spvWallet) Fingerprint() (string, error) {
 	props, err := w.wallet.AccountProperties(waddrmgr.KeyScopeBIP0084, w.acctNum)
 	if err != nil {
 		return "", err
@@ -1083,10 +1076,10 @@ func (w *spvWallet) fingerprint() (string, error) {
 	return hex.EncodeToString(btcutil.Hash160(pk.SerializeCompressed())), nil
 }
 
-// getTxOut finds an unspent transaction output and its number of confirmations.
+// GetTxOut finds an unspent transaction output and its number of confirmations.
 // To match the behavior of the RPC method, even if an output is found, if it's
 // known to be spent, no *wire.TxOut and no error will be returned.
-func (w *spvWallet) getTxOut(txHash *chainhash.Hash, vout uint32, pkScript []byte, startTime time.Time) (*wire.TxOut, uint32, error) {
+func (w *spvWallet) GetTxOut(txHash *chainhash.Hash, vout uint32, pkScript []byte, startTime time.Time) (*wire.TxOut, uint32, error) {
 	// Check for a wallet transaction first
 	txDetails, err := w.wallet.WalletTransaction(txHash)
 	var blockHash *chainhash.Hash
@@ -1132,7 +1125,7 @@ func (w *spvWallet) getTxOut(txHash *chainhash.Hash, vout uint32, pkScript []byt
 		return nil, 0, err
 	}
 
-	if utxo == nil || utxo.spend != nil || utxo.blockHash == nil {
+	if utxo == nil || utxo.Spend != nil || utxo.BlockHash == nil {
 		return nil, 0, nil
 	}
 
@@ -1141,14 +1134,14 @@ func (w *spvWallet) getTxOut(txHash *chainhash.Hash, vout uint32, pkScript []byt
 		return nil, 0, fmt.Errorf("BestBlock error: %v", err)
 	}
 
-	confs := uint32(confirms(int32(utxo.blockHeight), tip.Height))
+	confs := uint32(confirms(int32(utxo.BlockHeight), tip.Height))
 
-	return utxo.txOut, confs, nil
+	return utxo.TxOut, confs, nil
 }
 
 // matchPkScript pulls the filter for the block and attempts to match the
 // supplied scripts.
-func (w *spvWallet) matchPkScript(blockHash *chainhash.Hash, scripts [][]byte) (bool, error) {
+func (w *spvWallet) MatchPkScript(blockHash *chainhash.Hash, scripts [][]byte) (bool, error) {
 	filter, err := w.cl.GetCFilter(*blockHash, wire.GCSFilterRegular)
 	if err != nil {
 		return false, fmt.Errorf("GetCFilter error: %w", err)
@@ -1168,9 +1161,9 @@ func (w *spvWallet) matchPkScript(blockHash *chainhash.Hash, scripts [][]byte) (
 	return matchFound, nil
 }
 
-// searchBlockForRedemptions attempts to find spending info for the specified
+// SearchBlockForRedemptions attempts to find spending info for the specified
 // contracts by searching every input of all txs in the provided block range.
-func (w *spvWallet) searchBlockForRedemptions(ctx context.Context, reqs map[OutPoint]*FindRedemptionReq,
+func (w *spvWallet) SearchBlockForRedemptions(ctx context.Context, reqs map[OutPoint]*FindRedemptionReq,
 	blockHash chainhash.Hash) (discovered map[OutPoint]*FindRedemptionResult) {
 
 	// Just match all the scripts together.
@@ -1181,7 +1174,7 @@ func (w *spvWallet) searchBlockForRedemptions(ctx context.Context, reqs map[OutP
 
 	discovered = make(map[OutPoint]*FindRedemptionResult, len(reqs))
 
-	matchFound, err := w.matchPkScript(&blockHash, scripts)
+	matchFound, err := w.MatchPkScript(&blockHash, scripts)
 	if err != nil {
 		w.log.Errorf("matchPkScript error: %v", err)
 		return
@@ -1199,7 +1192,7 @@ func (w *spvWallet) searchBlockForRedemptions(ctx context.Context, reqs map[OutP
 	}
 
 	for _, msgTx := range block.MsgBlock().Transactions {
-		newlyDiscovered := findRedemptionsInTxWithHasher(ctx, true, reqs, msgTx, w.chainParams, hashTx)
+		newlyDiscovered := FindRedemptionsInTxWithHasher(ctx, true, reqs, msgTx, w.chainParams, hashTx)
 		for outPt, res := range newlyDiscovered {
 			discovered[outPt] = res
 		}
@@ -1207,8 +1200,8 @@ func (w *spvWallet) searchBlockForRedemptions(ctx context.Context, reqs map[OutP
 	return
 }
 
-// findRedemptionsInMempool is unsupported for SPV.
-func (w *spvWallet) findRedemptionsInMempool(ctx context.Context, reqs map[OutPoint]*FindRedemptionReq) (discovered map[OutPoint]*FindRedemptionResult) {
+// FindRedemptionsInMempool is unsupported for SPV.
+func (w *spvWallet) FindRedemptionsInMempool(ctx context.Context, reqs map[OutPoint]*FindRedemptionReq) (discovered map[OutPoint]*FindRedemptionResult) {
 	return
 }
 
@@ -1222,7 +1215,7 @@ func (w *spvWallet) confirmations(txHash *chainhash.Hash, vout uint32) (blockHas
 
 	if details.Block.Hash != (chainhash.Hash{}) {
 		blockHash = &details.Block.Hash
-		height, err := w.getChainHeight()
+		height, err := w.GetChainHeight()
 		if err != nil {
 			return nil, 0, false, err
 		}
@@ -1237,12 +1230,12 @@ func (w *spvWallet) confirmations(txHash *chainhash.Hash, vout uint32) (blockHas
 	return blockHash, confs, false, SpentStatusUnknown
 }
 
-// getWalletTransaction checks the wallet database for the specified
+// GetWalletTransaction checks the wallet database for the specified
 // transaction. Only transactions with output scripts that pay to the wallet or
 // transactions that spend wallet outputs are stored in the wallet database.
 // This is pretty much copy-paste from btcwallet 'gettransaction' JSON-RPC
 // handler.
-func (w *spvWallet) getWalletTransaction(txHash *chainhash.Hash) (*GetTransactionResult, error) {
+func (w *spvWallet) GetWalletTransaction(txHash *chainhash.Hash) (*GetTransactionResult, error) {
 	// Option # 1 just copies from UnstableAPI.TxDetails. Duplicating the
 	// unexported bucket key feels dirty.
 	//

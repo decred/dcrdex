@@ -342,7 +342,7 @@ func (btc *ExchangeWalletElectrum) watchBlocks(ctx context.Context) {
 	defer ticker.Stop()
 
 	bestBlock := func() (*BlockVector, error) {
-		hdr, err := btc.node.getBestBlockHeader()
+		hdr, err := btc.node.GetBestBlockHeader()
 		if err != nil {
 			return nil, fmt.Errorf("getBestBlockHeader: %v", err)
 		}
@@ -367,7 +367,7 @@ func (btc *ExchangeWalletElectrum) watchBlocks(ctx context.Context) {
 			// only comparing heights instead of hashes, which means we might
 			// not notice a reorg to a block at the same height, which is
 			// unimportant because of how electrum searches for transactions.
-			ss, err := btc.node.syncStatus()
+			ss, err := btc.node.SyncStatus()
 			if err != nil {
 				btc.log.Errorf("failed to get sync status: %w", err)
 				continue
@@ -442,7 +442,7 @@ func (btc *ExchangeWalletElectrum) syncTxHistory(tip uint64) {
 			return
 		}
 
-		gtr, err := btc.node.getWalletTransaction(&txHash)
+		gtr, err := btc.node.GetWalletTransaction(&txHash)
 		if errors.Is(err, asset.CoinNotFoundError) {
 			err = txHistoryDB.RemoveTx(txHash.String())
 			if err == nil || errors.Is(err, asset.CoinNotFoundError) {
@@ -463,9 +463,9 @@ func (btc *ExchangeWalletElectrum) syncTxHistory(tip uint64) {
 
 		var updated bool
 		if gtr.BlockHash != "" {
-			bestHeight, err := btc.node.getBestBlockHeight()
+			bestHeight, err := btc.node.GetBestBlockHeight()
 			if err != nil {
-				btc.log.Errorf("getBestBlockHeader: %v", err)
+				btc.log.Errorf("GetBestBlockHeader: %v", err)
 				return
 			}
 			// TODO: Just get the block height with the header.
@@ -558,16 +558,16 @@ func (btc *ExchangeWalletElectrum) WalletTransaction(ctx context.Context, txID s
 			return nil, fmt.Errorf("error decoding txid %s: %w", txID, err)
 		}
 
-		gtr, err := btc.node.getWalletTransaction(txHash)
+		gtr, err := btc.node.GetWalletTransaction(txHash)
 		if err != nil {
 			return nil, fmt.Errorf("error getting transaction %s: %w", txID, err)
 		}
 
 		var blockHeight uint32
 		if gtr.BlockHash != "" {
-			bestHeight, err := btc.node.getBestBlockHeight()
+			bestHeight, err := btc.node.GetBestBlockHeight()
 			if err != nil {
-				return nil, fmt.Errorf("getBestBlockHeader: %v", err)
+				return nil, fmt.Errorf("GetBestBlockHeader: %v", err)
 			}
 			// TODO: Just get the block height with the header.
 			blockHeight := bestHeight - int32(gtr.Confirmations) + 1
