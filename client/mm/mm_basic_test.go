@@ -176,6 +176,72 @@ func TestBreakEvenHalfSpread(t *testing.T) {
 	}
 }
 
+func TestUpdateLotSize(t *testing.T) {
+	tests := []struct {
+		name           string
+		placements     []*OrderPlacement
+		originalSize   uint64
+		newSize        uint64
+		wantPlacements []*OrderPlacement
+	}{
+		{
+			name: "simple halving",
+			placements: []*OrderPlacement{
+				{Lots: 2, GapFactor: 1.0},
+				{Lots: 4, GapFactor: 2.0},
+			},
+			originalSize: 100,
+			newSize:      200,
+			wantPlacements: []*OrderPlacement{
+				{Lots: 1, GapFactor: 1.0},
+				{Lots: 2, GapFactor: 2.0},
+			},
+		},
+		{
+			name: "rounding up",
+			placements: []*OrderPlacement{
+				{Lots: 3, GapFactor: 1.0},
+				{Lots: 1, GapFactor: 1.0},
+			},
+			originalSize: 100,
+			newSize:      160,
+			wantPlacements: []*OrderPlacement{
+				{Lots: 2, GapFactor: 1.0},
+			},
+		},
+		{
+			name: "minimum 1 lot",
+			placements: []*OrderPlacement{
+				{Lots: 1, GapFactor: 1.0},
+				{Lots: 1, GapFactor: 1.0},
+				{Lots: 1, GapFactor: 1.0},
+			},
+			originalSize: 100,
+			newSize:      250,
+			wantPlacements: []*OrderPlacement{
+				{Lots: 1, GapFactor: 1.0},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := updateLotSize(tt.placements, tt.originalSize, tt.newSize)
+			if len(got) != len(tt.wantPlacements) {
+				t.Fatalf("got %d placements, want %d", len(got), len(tt.wantPlacements))
+			}
+			for i := range got {
+				if got[i].Lots != tt.wantPlacements[i].Lots {
+					t.Errorf("placement %d: got %d lots, want %d", i, got[i].Lots, tt.wantPlacements[i].Lots)
+				}
+				if got[i].GapFactor != tt.wantPlacements[i].GapFactor {
+					t.Errorf("placement %d: got %f gap factor, want %f", i, got[i].GapFactor, tt.wantPlacements[i].GapFactor)
+				}
+			}
+		})
+	}
+}
+
 func TestBasicMMRebalance(t *testing.T) {
 	const basisPrice uint64 = 5e6
 	const halfSpread uint64 = 2e5
@@ -365,11 +431,13 @@ func TestBasicMMRebalance(t *testing.T) {
 			mm.baseCexBalances[baseID] = lotSize * 50
 			mm.baseDexBalances[quoteID] = int64(calc.BaseToQuote(basisPrice, lotSize*50))
 			mm.baseCexBalances[quoteID] = int64(calc.BaseToQuote(basisPrice, lotSize*50))
-			mm.cfgV.Store(&BasicMarketMakingConfig{
-				GapStrategy:    tt.strategy,
-				BuyPlacements:  tt.cfgBuyPlacements,
-				SellPlacements: tt.cfgSellPlacements,
-			})
+			mm.unifiedExchangeAdaptor.botCfgV.Store(&BotConfig{
+				BasicMMConfig: &BasicMarketMakingConfig{
+					GapStrategy:    tt.strategy,
+					BuyPlacements:  tt.cfgBuyPlacements,
+					SellPlacements: tt.cfgSellPlacements,
+				}})
+
 			mm.rebalance(100)
 
 			if len(tcore.multiTradesPlaced) != 2 {

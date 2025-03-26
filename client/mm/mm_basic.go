@@ -15,6 +15,7 @@ import (
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
+	"decred.org/dcrdex/dex/utils"
 )
 
 // GapStrategy is a specifier for an algorithm to choose the maker bot's target
@@ -77,7 +78,7 @@ func needBreakEvenHalfSpread(strat GapStrategy) bool {
 	return strat == GapStrategyAbsolutePlus || strat == GapStrategyPercentPlus || strat == GapStrategyMultiplier
 }
 
-func (c *BasicMarketMakingConfig) Validate() error {
+func (c *BasicMarketMakingConfig) validate() error {
 	if c.DriftTolerance == 0 {
 		c.DriftTolerance = 0.001
 	}
@@ -138,6 +139,56 @@ func (c *BasicMarketMakingConfig) Validate() error {
 	return nil
 }
 
+func (c *BasicMarketMakingConfig) copy() *BasicMarketMakingConfig {
+	cfg := *c
+
+	copyOrderPlacement := func(p *OrderPlacement) *OrderPlacement {
+		return &OrderPlacement{
+			Lots:      p.Lots,
+			GapFactor: p.GapFactor,
+		}
+	}
+
+	cfg.SellPlacements = utils.Map(c.SellPlacements, copyOrderPlacement)
+	cfg.BuyPlacements = utils.Map(c.BuyPlacements, copyOrderPlacement)
+
+	return &cfg
+}
+
+func updateLotSize(placements []*OrderPlacement, originalLotSize, newLotSize uint64) (updatedPlacements []*OrderPlacement) {
+	var qtyCounter uint64
+	for _, p := range placements {
+		qtyCounter += p.Lots * originalLotSize
+	}
+	newPlacements := make([]*OrderPlacement, 0, len(placements))
+	for _, p := range placements {
+		lots := uint64(math.Round((float64(p.Lots) * float64(originalLotSize)) / float64(newLotSize)))
+		lots = utils.Max(lots, 1)
+		maxLots := qtyCounter / newLotSize
+		lots = utils.Min(lots, maxLots)
+		if lots == 0 {
+			continue
+		}
+		qtyCounter -= lots * newLotSize
+		newPlacements = append(newPlacements, &OrderPlacement{
+			Lots:      lots,
+			GapFactor: p.GapFactor,
+		})
+	}
+
+	return newPlacements
+}
+
+// updateLotSize modifies the number of lots in each placement in the event
+// of a lot size change. It will place as many lots as possible without
+// exceeding the total quantity placed using the original lot size.
+//
+// This function is NOT thread safe.
+func (c *BasicMarketMakingConfig) updateLotSize(originalLotSize, newLotSize uint64) {
+	c.SellPlacements = updateLotSize(c.SellPlacements, originalLotSize, newLotSize)
+	c.BuyPlacements = updateLotSize(c.BuyPlacements, originalLotSize, newLotSize)
+}
+
 type basicMMCalculator interface {
 	basisPrice() (bp uint64, err error)
 	halfSpread(uint64) (uint64, error)
@@ -170,6 +221,7 @@ func (b *basicMMCalculatorImpl) basisPrice() (uint64, error) {
 	b.log.Tracef("oracle rate = %s", b.fmtRate(oracleRate))
 
 	rateFromFiat := b.core.ExchangeRateFromFiatSources()
+	rateStep := b.rateStep.Load()
 	if rateFromFiat == 0 {
 		b.log.Meter("basisPrice_nofiat_"+b.market.name, time.Hour).Warn(
 			"No fiat-based rate estimate(s) available for sanity check for %s", b.market.name,
@@ -177,13 +229,13 @@ func (b *basicMMCalculatorImpl) basisPrice() (uint64, error) {
 		if oracleRate == 0 { // steppedRate(0, x) => x, so we have to handle this.
 			return 0, errNoBasisPrice
 		}
-		return steppedRate(oracleRate, b.rateStep), nil
+		return steppedRate(oracleRate, rateStep), nil
 	}
 	if oracleRate == 0 {
 		b.log.Meter("basisPrice_nooracle_"+b.market.name, time.Hour).Infof(
 			"No oracle rate available. Using fiat-derived basis rate = %s for %s", b.fmtRate(rateFromFiat), b.market.name,
 		)
-		return steppedRate(rateFromFiat, b.rateStep), nil
+		return steppedRate(rateFromFiat, rateStep), nil
 	}
 	mismatch := math.Abs((float64(oracleRate) - float64(rateFromFiat)) / float64(oracleRate))
 	const maxOracleFiatMismatch = 0.05
@@ -195,7 +247,7 @@ func (b *basicMMCalculatorImpl) basisPrice() (uint64, error) {
 		return 0, errOracleFiatMismatch
 	}
 
-	return steppedRate(oracleRate, b.rateStep), nil
+	return steppedRate(oracleRate, rateStep), nil
 }
 
 // halfSpread calculates the distance from the mid-gap where if you sell a lot
@@ -254,7 +306,7 @@ func (b *basicMMCalculatorImpl) feeGapStats(basisPrice uint64) (*FeeGapStats, er
 	 */
 
 	f := sellFeesInBaseUnits + buyFeesInBaseUnits
-	l := b.lotSize
+	l := b.lotSize.Load()
 
 	r := float64(basisPrice) / calc.RateEncodingFactor
 	g := float64(f) * r / float64(f+2*l)
@@ -276,7 +328,6 @@ func (b *basicMMCalculatorImpl) feeGapStats(basisPrice uint64) (*FeeGapStats, er
 
 type basicMarketMaker struct {
 	*unifiedExchangeAdaptor
-	cfgV             atomic.Value // *BasicMarketMakingConfig
 	core             botCoreAdaptor
 	oracle           oracle
 	rebalanceRunning atomic.Bool
@@ -286,7 +337,7 @@ type basicMarketMaker struct {
 var _ bot = (*basicMarketMaker)(nil)
 
 func (m *basicMarketMaker) cfg() *BasicMarketMakingConfig {
-	return m.cfgV.Load().(*BasicMarketMakingConfig)
+	return m.botCfg().BasicMMConfig
 }
 
 func (m *basicMarketMaker) orderPrice(basisPrice, feeAdj uint64, sell bool, gapFactor float64) uint64 {
@@ -308,7 +359,7 @@ func (m *basicMarketMaker) orderPrice(basisPrice, feeAdj uint64, sell bool, gapF
 		adj += feeAdj
 	}
 
-	adj = steppedRate(adj, m.rateStep)
+	adj = steppedRate(adj, m.rateStep.Load())
 
 	if sell {
 		return basisPrice + adj
@@ -437,21 +488,6 @@ func (m *basicMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error)
 	return &wg, nil
 }
 
-func (m *basicMarketMaker) updateConfig(cfg *BotConfig) error {
-	if cfg.BasicMMConfig == nil {
-		// implies bug in caller
-		return errors.New("no market making config provided")
-	}
-
-	err := cfg.BasicMMConfig.Validate()
-	if err != nil {
-		return fmt.Errorf("invalid market making config: %v", err)
-	}
-
-	m.cfgV.Store(cfg.BasicMMConfig)
-	return nil
-}
-
 // RunBasicMarketMaker starts a basic market maker bot.
 func newBasicMarketMaker(cfg *BotConfig, adaptorCfg *exchangeAdaptorCfg, oracle oracle, log dex.Logger) (*basicMarketMaker, error) {
 	if cfg.BasicMMConfig == nil {
@@ -464,7 +500,7 @@ func newBasicMarketMaker(cfg *BotConfig, adaptorCfg *exchangeAdaptorCfg, oracle 
 		return nil, fmt.Errorf("error constructing exchange adaptor: %w", err)
 	}
 
-	err = cfg.BasicMMConfig.Validate()
+	err = cfg.BasicMMConfig.validate()
 	if err != nil {
 		return nil, fmt.Errorf("invalid market making config: %v", err)
 	}
@@ -474,7 +510,6 @@ func newBasicMarketMaker(cfg *BotConfig, adaptorCfg *exchangeAdaptorCfg, oracle 
 		core:                   adaptor,
 		oracle:                 oracle,
 	}
-	basicMM.cfgV.Store(cfg.BasicMMConfig)
 	adaptor.setBotLoop(basicMM.botLoop)
 	return basicMM, nil
 }

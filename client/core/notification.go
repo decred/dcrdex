@@ -686,6 +686,21 @@ func newUpgradeNote(topic Topic, subject, details string, severity db.Severity) 
 	}
 }
 
+// ServerConfigUpdateNote is sent when a server's configuration is updated.
+type ServerConfigUpdateNote struct {
+	db.Notification
+	Host string `json:"host"`
+}
+
+const TopicServerConfigUpdate Topic = "ServerConfigUpdate"
+
+func newServerConfigUpdateNote(host string) *ServerConfigUpdateNote {
+	return &ServerConfigUpdateNote{
+		Notification: db.NewNotification(NoteTypeServerNotify, TopicServerConfigUpdate, "", "", db.Data),
+		Host:         host,
+	}
+}
+
 // WalletCreationNote is a notification regarding asynchronous wallet creation.
 type WalletCreationNote struct {
 	db.Notification
