@@ -481,6 +481,16 @@ func (c *Core) refundExpiredBonds(ctx context.Context, acct *dexAccount, cfg *de
 		}
 
 		assetID := bond.AssetID
+
+		if assetID == account.PrepaidBondID {
+			if err := c.db.BondRefunded(acct.host, assetID, bond.CoinID); err != nil {
+				c.log.Errorf("Failed to mark pre-paid bond as refunded: %v", err)
+			} else {
+				spentBonds = append(spentBonds, &bondID{assetID, bond.CoinID})
+			}
+			continue
+		}
+
 		wallet, err := c.connectedWallet(assetID)
 		if err != nil {
 			c.log.Errorf("%v wallet not available to refund bond %v: %v",
@@ -488,7 +498,7 @@ func (c *Core) refundExpiredBonds(ctx context.Context, acct *dexAccount, cfg *de
 			continue
 		}
 		if _, ok := wallet.Wallet.(asset.Bonder); !ok { // will fail in RefundBond, but assert here anyway
-			return nil, 0, fmt.Errorf("Wallet %v is not an asset.Bonder", unbip(bond.AssetID))
+			return nil, 0, fmt.Errorf("wallet %v is not an asset.Bonder", unbip(bond.AssetID))
 		}
 
 		expired, err := wallet.LockTimeExpired(ctx, time.Unix(int64(bond.LockTime), 0))
