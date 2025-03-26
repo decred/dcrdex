@@ -79,20 +79,16 @@ func New(cfg *Config) (*DB, error) {
 func (db *DB) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	db.wg.Add(1)
 	go func() {
-		defer db.wg.Done()
-		<-ctx.Done()
-		if err := db.idSeq.Release(); err != nil {
-			db.log.Errorf("Error releasing sequence: %v", err)
-		}
-	}()
-
-	db.wg.Add(1)
-	go func() {
-		defer db.wg.Done()
-		defer db.Close()
-		defer db.updateWG.Wait()
 		ticker := time.NewTicker(5 * time.Minute)
-		defer ticker.Stop()
+		defer func() {
+			ticker.Stop()
+			db.updateWG.Wait()
+			if err := db.idSeq.Release(); err != nil {
+				db.log.Errorf("Error releasing sequence: %v", err)
+			}
+			db.Close()
+			db.wg.Done()
+		}()
 		for {
 			select {
 			case <-ticker.C:
