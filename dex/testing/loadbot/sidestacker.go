@@ -17,6 +17,7 @@ import (
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/dex/utils"
 )
 
 const stackerSpread = 50.0
@@ -208,7 +209,7 @@ func (s *sideStacker) stack(m *Mantle, currentEpoch uint64) {
 		numNewStanding = s.numStanding - activeSells
 		neg = 1
 	}
-	numNewStanding = clamp(numNewStanding, 0, s.ordsPerEpoch)
+	numNewStanding = utils.Clamp(numNewStanding, 0, s.ordsPerEpoch)
 	numMatchers := s.ordsPerEpoch - numNewStanding
 	s.log.Infof("Seller = %t placing %d standers and %d matchers. Currently %d active orders",
 		s.seller, numNewStanding, numMatchers, activeOrders)

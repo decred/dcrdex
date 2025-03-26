@@ -2928,8 +2928,8 @@ func (u *unifiedExchangeAdaptor) optimizeTransfers(dist *distribution, dexSellLo
 	// matchability is the number of lots that can be matched with a specified
 	// asset distribution.
 	matchability := func(dexBaseLots, dexQuoteLots, cexBaseLots, cexQuoteLots uint64) uint64 {
-		sells := utils.Min(dexBaseLots, cexQuoteLots, maxSellLots)
-		buys := utils.Min(dexQuoteLots, cexBaseLots, maxBuyLots)
+		sells := min(dexBaseLots, cexQuoteLots, maxSellLots)
+		buys := min(dexQuoteLots, cexBaseLots, maxBuyLots)
 		return buys + sells
 	}
 
@@ -2955,10 +2955,10 @@ func (u *unifiedExchangeAdaptor) optimizeTransfers(dist *distribution, dexSellLo
 	}
 
 	baseSplit := func(dexTarget, cexTarget uint64) (dexLots, cexLots, extra uint64) {
-		return targetedSplit(baseAvail, utils.Min(dexTarget, maxSellLots), utils.Min(cexTarget, maxBuyLots), perLot.dexBase, perLot.cexBase)
+		return targetedSplit(baseAvail, min(dexTarget, maxSellLots), min(cexTarget, maxBuyLots), perLot.dexBase, perLot.cexBase)
 	}
 	quoteSplit := func(dexTarget, cexTarget uint64) (dexLots, cexLots, extra uint64) {
-		return targetedSplit(quoteAvail, utils.Min(dexTarget, maxBuyLots), utils.Min(cexTarget, maxSellLots), perLot.dexQuote, perLot.cexQuote)
+		return targetedSplit(quoteAvail, min(dexTarget, maxBuyLots), min(cexTarget, maxSellLots), perLot.dexQuote, perLot.cexQuote)
 	}
 
 	// We'll keep track of any distributions that have a matchability score
@@ -3048,7 +3048,7 @@ func (u *unifiedExchangeAdaptor) optimizeTransfers(dist *distribution, dexSellLo
 			baseWithdraw:  baseWithdraw,
 			quoteDeposit:  quoteDeposit,
 			quoteWithdraw: quoteWithdraw,
-			spread:        utils.Min(dexBaseLots, dexQuoteLots, cexBaseLots, cexQuoteLots),
+			spread:        min(dexBaseLots, dexQuoteLots, cexBaseLots, cexQuoteLots),
 		})
 	}
 

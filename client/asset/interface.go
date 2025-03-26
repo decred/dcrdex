@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/utils"
 	dcrwalletjson "decred.org/dcrwallet/v4/rpc/jsonrpc/types"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
@@ -611,7 +610,7 @@ func (ss *SyncStatus) BlockProgress() float32 {
 	}
 	prog := float32(ss.Blocks-ss.StartingBlocks) / float32(ss.TargetHeight-ss.StartingBlocks)
 	if ss.Transactions == nil { // If the asset doesn't support tx sync status, max unsynced is 0.999
-		return utils.Min(prog, 0.999)
+		return min(prog, 0.999)
 	}
 	return prog
 }
