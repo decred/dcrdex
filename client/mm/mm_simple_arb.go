@@ -35,7 +35,15 @@ type SimpleArbConfig struct {
 	NumEpochsLeaveOpen uint32 `json:"numEpochsLeaveOpen"`
 }
 
-func (c *SimpleArbConfig) Validate() error {
+func (c *SimpleArbConfig) copy() *SimpleArbConfig {
+	return &SimpleArbConfig{
+		ProfitTrigger:      c.ProfitTrigger,
+		MaxActiveArbs:      c.MaxActiveArbs,
+		NumEpochsLeaveOpen: c.NumEpochsLeaveOpen,
+	}
+}
+
+func (c *SimpleArbConfig) validate() error {
 	if c.ProfitTrigger <= 0 || c.ProfitTrigger > 1 {
 		return fmt.Errorf("profit trigger must be 0 < t <= 1, but got %v", c.ProfitTrigger)
 	}
@@ -67,7 +75,6 @@ type simpleArbMarketMaker struct {
 	*unifiedExchangeAdaptor
 	cex              botCexAdaptor
 	core             botCoreAdaptor
-	cfgV             atomic.Value // *SimpleArbConfig
 	book             dexOrderBook
 	rebalanceRunning atomic.Bool
 
@@ -78,7 +85,7 @@ type simpleArbMarketMaker struct {
 var _ bot = (*simpleArbMarketMaker)(nil)
 
 func (a *simpleArbMarketMaker) cfg() *SimpleArbConfig {
-	return a.cfgV.Load().(*SimpleArbConfig)
+	return a.botCfg().SimpleArbConfig
 }
 
 // arbExists checks if an arbitrage opportunity exists.
@@ -101,11 +108,11 @@ func (a *simpleArbMarketMaker) arbExists() (exists, sellOnDex bool, lotsToArb, d
 // arbExistsOnSide checks if an arbitrage opportunity exists either when
 // buying or selling on the dex.
 func (a *simpleArbMarketMaker) arbExistsOnSide(sellOnDEX bool) (exists bool, lotsToArb, dexRate, cexRate uint64, err error) {
-	lotSize := a.lotSize
+	lotSize := a.lotSize.Load()
 	var prevProfit uint64
 
 	for numLots := uint64(1); ; numLots++ {
-		dexAvg, dexExtrema, dexFilled, err := a.book.VWAP(numLots, a.lotSize, !sellOnDEX)
+		dexAvg, dexExtrema, dexFilled, err := a.book.VWAP(numLots, lotSize, !sellOnDEX)
 		if err != nil {
 			return false, 0, 0, 0, fmt.Errorf("error calculating dex VWAP: %w", err)
 		}
@@ -207,6 +214,8 @@ func (a *simpleArbMarketMaker) executeArb(sellOnDex bool, lotsToArb, dexRate, ce
 	}
 	// also check self-match on CEX?
 
+	lotSize := a.lotSize.Load()
+
 	// Hold the lock for this entire process because updates to the cex trade
 	// may come even before the Trade function has returned, and in order to
 	// be able to process them, the new arbSequence struct must already be in
@@ -215,13 +224,13 @@ func (a *simpleArbMarketMaker) executeArb(sellOnDex bool, lotsToArb, dexRate, ce
 	defer a.activeArbsMtx.Unlock()
 
 	// Place cex order first. If placing dex order fails then can freely cancel cex order.
-	cexTrade, err := a.cex.CEXTrade(a.ctx, a.baseID, a.quoteID, !sellOnDex, cexRate, lotsToArb*a.lotSize)
+	cexTrade, err := a.cex.CEXTrade(a.ctx, a.baseID, a.quoteID, !sellOnDex, cexRate, lotsToArb*lotSize)
 	if err != nil {
 		a.log.Errorf("error placing cex order: %v", err)
 		return
 	}
 
-	dexOrder, err := a.core.DEXTrade(dexRate, lotsToArb*a.lotSize, sellOnDex)
+	dexOrder, err := a.core.DEXTrade(dexRate, lotsToArb*lotSize, sellOnDex)
 	if err != nil {
 		if err != nil {
 			a.log.Errorf("error placing dex order: %v", err)
@@ -426,14 +435,15 @@ func (a *simpleArbMarketMaker) distribution() (dist *distribution, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("error getting converted fees: %w", err)
 	}
-	adj := float64(sellFeesInBase)/float64(a.lotSize) + a.cfg().ProfitTrigger
-	sellRate := steppedRate(uint64(math.Round(float64(sellVWAP)*(1+adj))), a.rateStep)
+	lotSize, rateStep := a.lotSize.Load(), a.rateStep.Load()
+	adj := float64(sellFeesInBase)/float64(lotSize) + a.cfg().ProfitTrigger
+	sellRate := steppedRate(uint64(math.Round(float64(sellVWAP)*(1+adj))), rateStep)
 	buyFeesInBase, err := a.OrderFeesInUnits(false, true, buyVWAP)
 	if err != nil {
 		return nil, fmt.Errorf("error getting converted fees: %w", err)
 	}
-	adj = float64(buyFeesInBase)/float64(a.lotSize) + a.cfg().ProfitTrigger
-	buyRate := steppedRate(uint64(math.Round(float64(buyVWAP)/(1+adj))), a.rateStep)
+	adj = float64(buyFeesInBase)/float64(lotSize) + a.cfg().ProfitTrigger
+	buyRate := steppedRate(uint64(math.Round(float64(buyVWAP)/(1+adj))), rateStep)
 	perLot, err := a.lotCosts(sellRate, buyRate)
 	if perLot == nil {
 		return nil, fmt.Errorf("error getting lot costs: %w", err)
@@ -521,21 +531,12 @@ func (a *simpleArbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, er
 }
 
 func (a *simpleArbMarketMaker) registerFeeGap() {
-	feeGap, err := feeGap(a.core, a.CEX, a.baseID, a.quoteID, a.lotSize)
+	feeGap, err := feeGap(a.core, a.CEX, a.baseID, a.quoteID, a.lotSize.Load())
 	if err != nil {
 		a.log.Warnf("error getting fee-gap stats: %v", err)
 		return
 	}
 	a.unifiedExchangeAdaptor.registerFeeGap(feeGap)
-}
-
-func (a *simpleArbMarketMaker) updateConfig(cfg *BotConfig) error {
-	if cfg.SimpleArbConfig == nil {
-		// implies bug in caller
-		return fmt.Errorf("no arb config provided")
-	}
-	a.cfgV.Store(cfg.SimpleArbConfig)
-	return nil
 }
 
 func newSimpleArbMarketMaker(cfg *BotConfig, adaptorCfg *exchangeAdaptorCfg, log dex.Logger) (*simpleArbMarketMaker, error) {
@@ -555,7 +556,6 @@ func newSimpleArbMarketMaker(cfg *BotConfig, adaptorCfg *exchangeAdaptorCfg, log
 		core:                   adaptor,
 		activeArbs:             make([]*arbSequence, 0),
 	}
-	simpleArb.cfgV.Store(cfg.SimpleArbConfig)
 	adaptor.setBotLoop(simpleArb.botLoop)
 	return simpleArb, nil
 }

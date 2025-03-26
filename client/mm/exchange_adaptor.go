@@ -305,8 +305,8 @@ type pendingCEXOrder struct {
 type market struct {
 	host        string
 	name        string
-	rateStep    uint64
-	lotSize     uint64
+	rateStep    atomic.Uint64
+	lotSize     atomic.Uint64
 	baseID      uint32
 	baseTicker  string
 	bui         dex.UnitInfo
@@ -346,11 +346,10 @@ func parseMarket(host string, mkt *core.Market) (*market, error) {
 			return nil, err
 		}
 	}
-	return &market{
+
+	m := &market{
 		host:        host,
 		name:        mkt.Name,
-		rateStep:    mkt.RateStep,
-		lotSize:     mkt.LotSize,
 		baseID:      mkt.BaseID,
 		baseTicker:  bui.Conventional.Unit,
 		bui:         bui,
@@ -361,7 +360,10 @@ func parseMarket(host string, mkt *core.Market) (*market, error) {
 		qui:         qui,
 		quoteFeeID:  quoteFeeID,
 		quoteFeeUI:  quoteFeeUI,
-	}, nil
+	}
+	m.lotSize.Store(mkt.LotSize)
+	m.rateStep.Store(mkt.RateStep)
+	return m, nil
 }
 
 func (m *market) fmtRate(msgRate uint64) string {
@@ -410,6 +412,7 @@ type unifiedExchangeAdaptor struct {
 	libxc.CEX
 
 	ctx             context.Context
+	kill            context.CancelFunc
 	wg              sync.WaitGroup
 	botID           string
 	log             dex.Logger
@@ -513,12 +516,14 @@ func (u *unifiedExchangeAdaptor) withPause(f func() error) error {
 	defer u.paused.Store(false)
 
 	u.botLoop.Disconnect()
+
 	if err := f(); err != nil {
 		return err
 	}
 	if u.ctx.Err() != nil { // Make sure we weren't shut down during pause.
 		return u.ctx.Err()
 	}
+
 	return u.botLoop.ConnectOnce(u.ctx)
 }
 
@@ -649,7 +654,7 @@ func (u *unifiedExchangeAdaptor) SufficientBalanceForDEXTrade(rate, qty uint64, 
 	}
 	balances[fromAsset] -= fromQty
 
-	numLots := qty / u.lotSize
+	numLots := qty / u.lotSize.Load()
 	if balances[fromFeeAsset] < numLots*fees.Swap {
 		return false, nil
 	}
@@ -1163,6 +1168,7 @@ func (u *unifiedExchangeAdaptor) multiTrade(
 	if sell {
 		or.Fees = sellFees
 	}
+	lotSize := u.lotSize.Load()
 
 	fromID, fromFeeID, toID, toFeeID := orderAssets(u.baseID, u.quoteID, sell)
 	fees, fundingFees := or.Fees.Max, or.Fees.Funding
@@ -1211,7 +1217,7 @@ func (u *unifiedExchangeAdaptor) multiTrade(
 			}
 
 			mustCancel := !withinTolerance(order.Rate, placements[o.placementIndex].Rate, driftTolerance)
-			or.Placements[o.placementIndex].StandingLots += (order.Qty - order.Filled) / u.lotSize
+			or.Placements[o.placementIndex].StandingLots += (order.Qty - order.Filled) / lotSize
 			if or.Placements[o.placementIndex].StandingLots > or.Placements[o.placementIndex].Lots {
 				mustCancel = true
 			}
@@ -1232,7 +1238,7 @@ func (u *unifiedExchangeAdaptor) multiTrade(
 	multiSplitBuffer := u.botCfg().multiSplitBuffer()
 
 	fundingReq := func(rate, lots, counterTradeRate uint64) (dexReq map[uint32]uint64, cexReq uint64) {
-		qty := u.lotSize * lots
+		qty := lotSize * lots
 		swapFees := fees.Swap * lots
 		if !sell {
 			qty = calc.BaseToQuote(rate, qty)
@@ -1250,9 +1256,9 @@ func (u *unifiedExchangeAdaptor) multiTrade(
 		}
 		if accountForCEXBal {
 			if sell {
-				cexReq = calc.BaseToQuote(counterTradeRate, u.lotSize*lots)
+				cexReq = calc.BaseToQuote(counterTradeRate, lotSize*lots)
 			} else {
-				cexReq = u.lotSize * lots
+				cexReq = lotSize * lots
 			}
 		}
 		return
@@ -1322,7 +1328,7 @@ func (u *unifiedExchangeAdaptor) multiTrade(
 				placementIndex:   uint64(i),
 				counterTradeRate: placement.CounterTradeRate,
 				placement: &core.QtyRate{
-					Qty:  lotsToPlace * u.lotSize,
+					Qty:  lotsToPlace * lotSize,
 					Rate: placement.Rate,
 				},
 			})
@@ -2771,6 +2777,38 @@ func (u *unifiedExchangeAdaptor) handleDEXOrderUpdate(o *core.Order) {
 	u.updateDEXOrderEvent(pendingOrder, complete)
 }
 
+func (u *unifiedExchangeAdaptor) handleServerConfigUpdate() {
+	coreMkt, err := u.clientCore.ExchangeMarket(u.host, u.baseID, u.quoteID)
+	if err != nil {
+		u.log.Errorf("Stopping bot due to error getting market params: %v", err)
+		u.kill()
+		return
+	}
+
+	if coreMkt.LotSize == u.lotSize.Load() && coreMkt.RateStep == u.rateStep.Load() {
+		return
+	}
+
+	err = u.withPause(func() error {
+		if coreMkt.LotSize != u.lotSize.Load() {
+			cfg := u.botCfg()
+			copy := cfg.copy()
+			copy.updateLotSize(u.lotSize.Load(), coreMkt.LotSize)
+			err := u.updateConfig(copy)
+			if err != nil {
+				return err
+			}
+			u.lotSize.Store(coreMkt.LotSize)
+		}
+		u.rateStep.Store(coreMkt.RateStep)
+		return nil
+	})
+	if err != nil {
+		u.log.Errorf("Error updating config due to server config update. stopping bot: %v", err)
+		u.kill()
+	}
+}
+
 func (u *unifiedExchangeAdaptor) handleDEXNotification(n core.Notification) {
 	switch note := n.(type) {
 	case *core.OrderNote:
@@ -2798,6 +2836,11 @@ func (u *unifiedExchangeAdaptor) handleDEXNotification(n core.Notification) {
 		}
 	case *core.FiatRatesNote:
 		u.fiatRates.Store(note.FiatRates)
+	case *core.ServerConfigUpdateNote:
+		if note.Host != u.host {
+			return
+		}
+		u.handleServerConfigUpdate()
 	}
 }
 
@@ -2818,16 +2861,17 @@ func (u *unifiedExchangeAdaptor) lotCosts(sellVWAP, buyVWAP uint64) (*lotCosts, 
 	if err != nil {
 		return nil, fmt.Errorf("error getting order fees: %w", err)
 	}
-	perLot.dexBase = u.lotSize
+	lotSize := u.lotSize.Load()
+	perLot.dexBase = lotSize
 	if u.baseID == u.baseFeeID {
 		perLot.dexBase += sellFees.BookingFeesPerLot
 	}
-	perLot.cexBase = u.lotSize
+	perLot.cexBase = lotSize
 	perLot.baseRedeem = buyFees.Max.Redeem
 	perLot.baseFunding = sellFees.Funding
 
-	dexQuoteLot := calc.BaseToQuote(sellVWAP, u.lotSize)
-	cexQuoteLot := calc.BaseToQuote(buyVWAP, u.lotSize)
+	dexQuoteLot := calc.BaseToQuote(sellVWAP, lotSize)
+	cexQuoteLot := calc.BaseToQuote(buyVWAP, lotSize)
 	perLot.dexQuote = dexQuoteLot
 	if u.quoteID == u.quoteFeeID {
 		perLot.dexQuote += buyFees.BookingFeesPerLot
@@ -3192,6 +3236,7 @@ func (u *unifiedExchangeAdaptor) inventory(assetID uint32, dexLot, cexLot uint64
 // specified number of lots. If the book is too empty for the specified number
 // of lots, a 1-lot estimate will be attempted too.
 func (u *unifiedExchangeAdaptor) cexCounterRates(cexBuyLots, cexSellLots uint64) (dexBuyRate, dexSellRate uint64, err error) {
+	lotSize := u.lotSize.Load()
 	tryLots := func(b, s uint64) (uint64, uint64, bool, error) {
 		if b == 0 {
 			b = 1
@@ -3199,14 +3244,14 @@ func (u *unifiedExchangeAdaptor) cexCounterRates(cexBuyLots, cexSellLots uint64)
 		if s == 0 {
 			s = 1
 		}
-		buyRate, _, filled, err := u.CEX.VWAP(u.baseID, u.quoteID, true, u.lotSize*s)
+		buyRate, _, filled, err := u.CEX.VWAP(u.baseID, u.quoteID, true, lotSize*s)
 		if err != nil {
 			return 0, 0, false, fmt.Errorf("error calculating dex buy price for quote conversion: %w", err)
 		}
 		if !filled {
 			return 0, 0, false, nil
 		}
-		sellRate, _, filled, err := u.CEX.VWAP(u.baseID, u.quoteID, false, u.lotSize*b)
+		sellRate, _, filled, err := u.CEX.VWAP(u.baseID, u.quoteID, false, lotSize*b)
 		if err != nil {
 			return 0, 0, false, fmt.Errorf("error calculating dex sell price for quote conversion: %w", err)
 		}
@@ -3336,7 +3381,7 @@ func (u *unifiedExchangeAdaptor) updateFeeRates() (buyFees, sellFees *OrderFees,
 }
 
 func (u *unifiedExchangeAdaptor) Connect(ctx context.Context) (*sync.WaitGroup, error) {
-	u.ctx = ctx
+	u.ctx, u.kill = context.WithCancel(ctx)
 	fiatRates := u.clientCore.FiatConversionRates()
 	u.fiatRates.Store(fiatRates)
 
@@ -3476,7 +3521,6 @@ func newProfitLoss(
 	mods map[uint32]int64,
 	fiatRates map[uint32]float64,
 ) *ProfitLoss {
-
 	pl := &ProfitLoss{
 		Initial: make(map[uint32]*Amount, len(initialBalances)),
 		Mods:    make(map[uint32]*Amount, len(mods)),
@@ -3610,9 +3654,14 @@ func (u *unifiedExchangeAdaptor) applyInventoryDiffs(balanceDiffs *BotInventoryD
 	return mods
 }
 
-func (u *unifiedExchangeAdaptor) updateConfig(cfg *BotConfig) {
+func (u *unifiedExchangeAdaptor) updateConfig(cfg *BotConfig) error {
+	if err := validateConfigUpdate(u.botCfg(), cfg); err != nil {
+		return err
+	}
+
 	u.botCfgV.Store(cfg)
 	u.updateConfigEvent(cfg)
+	return nil
 }
 
 func (u *unifiedExchangeAdaptor) updateInventory(balanceDiffs *BotInventoryDiffs) {
