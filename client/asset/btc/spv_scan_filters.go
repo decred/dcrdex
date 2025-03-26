@@ -13,27 +13,27 @@ import (
 	"github.com/btcsuite/btcd/wire"
 )
 
-// spendingInput is added to a filterScanResult if a spending input is found.
-type spendingInput struct {
-	txHash      chainhash.Hash
-	vin         uint32
-	blockHash   chainhash.Hash
-	blockHeight uint32
+// SpendingInput is added to a filterScanResult if a spending input is found.
+type SpendingInput struct {
+	TxHash      chainhash.Hash
+	Vin         uint32
+	BlockHash   chainhash.Hash
+	BlockHeight uint32
 }
 
-// filterScanResult is the result from a filter scan.
-type filterScanResult struct {
-	// blockHash is the block that the output was found in.
-	blockHash *chainhash.Hash
-	// blockHeight is the height of the block that the output was found in.
-	blockHeight uint32
-	// txOut is the output itself.
-	txOut *wire.TxOut
-	// spend will be set if a spending input is found.
-	spend *spendingInput
-	// checkpoint is used to track the last block scanned so that future scans
+// FilterScanResult is the result from a filter scan.
+type FilterScanResult struct {
+	// BlockHash is the block that the output was found in.
+	BlockHash *chainhash.Hash
+	// BlockHeight is the height of the block that the output was found in.
+	BlockHeight uint32
+	// TxOut is the output itself.
+	TxOut *wire.TxOut
+	// Spend will be set if a spending input is found.
+	Spend *SpendingInput
+	// Checkpoint is used to track the last block scanned so that future scans
 	// can skip scanned blocks.
-	checkpoint chainhash.Hash
+	Checkpoint chainhash.Hash
 }
 
 // hashEntry stores a chainhash.Hash with a last-access time that can be used
@@ -43,52 +43,52 @@ type hashEntry struct {
 	lastAccess time.Time
 }
 
-// scanCheckpoint is a cached, incomplete filterScanResult. When another scan
-// is requested for an outpoint with a cached *scanCheckpoint, the scan can
-// pick up where it left off.
-type scanCheckpoint struct {
-	res        *filterScanResult
-	lastAccess time.Time
+// ScanCheckpoint is a cached, incomplete FilterScanResult. When another scan is
+// requested for an outpoint with a cached *ScanCheckpoint, the scan can pick up
+// where it left off.
+type ScanCheckpoint struct {
+	Res        *FilterScanResult
+	LastAccess time.Time
 }
 
-// blockInfoReader defines methods for retrieving block information.
-type blockInfoReader interface {
-	getBlockHash(blockHeight int64) (*chainhash.Hash, error)
-	getBlockHeight(*chainhash.Hash) (int32, error)
-	getBlockHeaderVerbose(blockHash *chainhash.Hash) (*wire.BlockHeader, error)
-	getBlock(h chainhash.Hash) (*wire.MsgBlock, error)
-	getChainHeight() (int32, error)
-	matchPkScript(blockHash *chainhash.Hash, scripts [][]byte) (bool, error)
+// BlockInfoReader defines methods for retrieving block information.
+type BlockInfoReader interface {
+	GetBlockHash(blockHeight int64) (*chainhash.Hash, error)
+	GetBlockHeight(*chainhash.Hash) (int32, error)
+	GetBlockHeaderVerbose(blockHash *chainhash.Hash) (*wire.BlockHeader, error)
+	GetBlock(h chainhash.Hash) (*wire.MsgBlock, error)
+	GetChainHeight() (int32, error)
+	MatchPkScript(blockHash *chainhash.Hash, scripts [][]byte) (bool, error)
 }
 
 // BlockFiltersScanner is a utility tool for searching for an output and its
 // spending input by scanning BIP158 compact filters. Used by SPV wallets to
 // locate non-wallet transactions.
 type BlockFiltersScanner struct {
-	blockInfoReader
+	BlockInfoReader
 	log             dex.Logger
 	cacheExpiration time.Duration
 
 	checkpointMtx sync.Mutex
-	checkpoints   map[OutPoint]*scanCheckpoint
+	checkpoints   map[OutPoint]*ScanCheckpoint
 
 	txBlocksMtx sync.Mutex
 	txBlocks    map[chainhash.Hash]*hashEntry
 }
 
 // NewBlockFiltersScanner creates a BlockFiltersScanner.
-func NewBlockFiltersScanner(blkInfoRdr blockInfoReader, log dex.Logger) *BlockFiltersScanner {
+func NewBlockFiltersScanner(blkInfoRdr BlockInfoReader, log dex.Logger) *BlockFiltersScanner {
 	return &BlockFiltersScanner{
-		blockInfoReader: blkInfoRdr,
+		BlockInfoReader: blkInfoRdr,
 		log:             log,
 		cacheExpiration: time.Hour * 2,
 		txBlocks:        make(map[chainhash.Hash]*hashEntry),
-		checkpoints:     make(map[OutPoint]*scanCheckpoint),
+		checkpoints:     make(map[OutPoint]*ScanCheckpoint),
 	}
 }
 
-// storeTxBlock stores the block hash for the tx in the cache.
-func (s *BlockFiltersScanner) storeTxBlock(txHash, blockHash chainhash.Hash) {
+// StoreTxBlock stores the block hash for the tx in the cache.
+func (s *BlockFiltersScanner) StoreTxBlock(txHash, blockHash chainhash.Hash) {
 	s.txBlocksMtx.Lock()
 	defer s.txBlocksMtx.Unlock()
 	s.txBlocks[txHash] = &hashEntry{
@@ -97,8 +97,8 @@ func (s *BlockFiltersScanner) storeTxBlock(txHash, blockHash chainhash.Hash) {
 	}
 }
 
-// txBlock attempts to retrieve the block hash for the tx from the cache.
-func (s *BlockFiltersScanner) txBlock(txHash chainhash.Hash) (chainhash.Hash, bool) {
+// TxBlock attempts to retrieve the block hash for the tx from the cache.
+func (s *BlockFiltersScanner) TxBlock(txHash chainhash.Hash) (chainhash.Hash, bool) {
 	s.txBlocksMtx.Lock()
 	defer s.txBlocksMtx.Unlock()
 	entry, found := s.txBlocks[txHash]
@@ -109,46 +109,46 @@ func (s *BlockFiltersScanner) txBlock(txHash chainhash.Hash) (chainhash.Hash, bo
 	return entry.hash, true
 }
 
-// cacheCheckpoint caches a *filterScanResult so that future scans can be
+// CacheCheckpoint caches a *filterScanResult so that future scans can be
 // skipped or shortened.
-func (s *BlockFiltersScanner) cacheCheckpoint(txHash *chainhash.Hash, vout uint32, res *filterScanResult) {
-	if res.spend != nil && res.blockHash == nil {
+func (s *BlockFiltersScanner) CacheCheckpoint(txHash *chainhash.Hash, vout uint32, res *FilterScanResult) {
+	if res.Spend != nil && res.BlockHash == nil {
 		// Probably set the start time too late. Don't cache anything
 		return
 	}
 	s.checkpointMtx.Lock()
 	defer s.checkpointMtx.Unlock()
-	s.checkpoints[NewOutPoint(txHash, vout)] = &scanCheckpoint{
-		res:        res,
-		lastAccess: time.Now(),
+	s.checkpoints[NewOutPoint(txHash, vout)] = &ScanCheckpoint{
+		Res:        res,
+		LastAccess: time.Now(),
 	}
 }
 
-// unvalidatedCheckpoint returns any cached *filterScanResult for the outpoint.
-func (s *BlockFiltersScanner) unvalidatedCheckpoint(txHash *chainhash.Hash, vout uint32) *filterScanResult {
+// UnvalidatedCheckpoint returns any cached *filterScanResult for the outpoint.
+func (s *BlockFiltersScanner) UnvalidatedCheckpoint(txHash *chainhash.Hash, vout uint32) *FilterScanResult {
 	s.checkpointMtx.Lock()
 	defer s.checkpointMtx.Unlock()
 	check, found := s.checkpoints[NewOutPoint(txHash, vout)]
 	if !found {
 		return nil
 	}
-	check.lastAccess = time.Now()
-	res := *check.res
+	check.LastAccess = time.Now()
+	res := *check.Res
 	return &res
 }
 
-// checkpoint returns a filterScanResult and the checkpoint block hash. If a
+// Checkpoint returns a filterScanResult and the checkpoint block hash. If a
 // result is found with an orphaned checkpoint block hash, it is cleared from
 // the cache and not returned.
-func (s *BlockFiltersScanner) checkpoint(txHash *chainhash.Hash, vout uint32) *filterScanResult {
-	res := s.unvalidatedCheckpoint(txHash, vout)
+func (s *BlockFiltersScanner) Checkpoint(txHash *chainhash.Hash, vout uint32) *FilterScanResult {
+	res := s.UnvalidatedCheckpoint(txHash, vout)
 	if res == nil {
 		return nil
 	}
-	if !s.blockIsMainchain(&res.checkpoint, -1) {
+	if !s.BlockIsMainchain(&res.Checkpoint, -1) {
 		// reorg detected, abandon the checkpoint.
 		s.log.Debugf("abandoning checkpoint %s because checkpoint block %q is orphaned",
-			NewOutPoint(txHash, vout), res.checkpoint)
+			NewOutPoint(txHash, vout), res.Checkpoint)
 		s.checkpointMtx.Lock()
 		delete(s.checkpoints, NewOutPoint(txHash, vout))
 		s.checkpointMtx.Unlock()
@@ -171,22 +171,22 @@ func (s *BlockFiltersScanner) CleanCaches(expiration time.Duration) {
 
 	s.checkpointMtx.Lock()
 	for outPt, check := range s.checkpoints {
-		if time.Since(check.lastAccess) > expiration {
+		if time.Since(check.LastAccess) > expiration {
 			delete(s.checkpoints, outPt)
 		}
 	}
 	s.checkpointMtx.Unlock()
 }
 
-// blockForStoredTx looks for a block hash in the txBlocks index.
-func (s *BlockFiltersScanner) blockForStoredTx(txHash *chainhash.Hash) (*chainhash.Hash, int32, error) {
+// BlockForStoredTx looks for a block hash in the txBlocks index.
+func (s *BlockFiltersScanner) BlockForStoredTx(txHash *chainhash.Hash) (*chainhash.Hash, int32, error) {
 	// Check if we know the block hash for the tx.
-	blockHash, found := s.txBlock(*txHash)
+	blockHash, found := s.TxBlock(*txHash)
 	if !found {
 		return nil, 0, nil
 	}
 	// Check that the block is still mainchain.
-	blockHeight, err := s.getBlockHeight(&blockHash)
+	blockHeight, err := s.GetBlockHeight(&blockHash)
 	if err != nil {
 		s.log.Errorf("Error retrieving block height for hash %s: %v", blockHash, err)
 		return nil, 0, err
@@ -194,17 +194,17 @@ func (s *BlockFiltersScanner) blockForStoredTx(txHash *chainhash.Hash) (*chainha
 	return &blockHash, blockHeight, nil
 }
 
-// blockIsMainchain will be true if the blockHash is that of a mainchain block.
-func (s *BlockFiltersScanner) blockIsMainchain(blockHash *chainhash.Hash, blockHeight int32) bool {
+// BlockIsMainchain will be true if the blockHash is that of a mainchain block.
+func (s *BlockFiltersScanner) BlockIsMainchain(blockHash *chainhash.Hash, blockHeight int32) bool {
 	if blockHeight < 0 {
 		var err error
-		blockHeight, err = s.getBlockHeight(blockHash)
+		blockHeight, err = s.GetBlockHeight(blockHash)
 		if err != nil {
 			s.log.Errorf("Error getting block height for hash %s", blockHash)
 			return false
 		}
 	}
-	checkHash, err := s.getBlockHash(int64(blockHeight))
+	checkHash, err := s.GetBlockHash(int64(blockHeight))
 	if err != nil {
 		s.log.Errorf("Error retrieving block hash for height %d", blockHeight)
 		return false
@@ -213,11 +213,11 @@ func (s *BlockFiltersScanner) blockIsMainchain(blockHash *chainhash.Hash, blockH
 	return *checkHash == *blockHash
 }
 
-// mainchainBlockForStoredTx gets the block hash and height for the transaction
+// MainchainBlockForStoredTx gets the block hash and height for the transaction
 // IFF an entry has been stored in the txBlocks index.
-func (s *BlockFiltersScanner) mainchainBlockForStoredTx(txHash *chainhash.Hash) (*chainhash.Hash, int32) {
+func (s *BlockFiltersScanner) MainchainBlockForStoredTx(txHash *chainhash.Hash) (*chainhash.Hash, int32) {
 	// Check that the block is still mainchain.
-	blockHash, blockHeight, err := s.blockForStoredTx(txHash)
+	blockHash, blockHeight, err := s.BlockForStoredTx(txHash)
 	if err != nil {
 		s.log.Errorf("Error retrieving mainchain block height for hash %s", blockHash)
 		return nil, 0
@@ -225,33 +225,33 @@ func (s *BlockFiltersScanner) mainchainBlockForStoredTx(txHash *chainhash.Hash) 
 	if blockHash == nil {
 		return nil, 0
 	}
-	if !s.blockIsMainchain(blockHash, blockHeight) {
+	if !s.BlockIsMainchain(blockHash, blockHeight) {
 		return nil, 0
 	}
 	return blockHash, blockHeight
 }
 
-// findBlockForTime locates a good start block so that a search beginning at the
+// FindBlockForTime locates a good start block so that a search beginning at the
 // returned block has a very low likelihood of missing any blocks that have time
 // > matchTime. This is done by performing a binary search (sort.Search) to find
 // a block with a block time maxFutureBlockTime before matchTime. To ensure
 // we also accommodate the median-block time rule and aren't missing anything
 // due to out of sequence block times we use an unsophisticated algorithm of
 // choosing the first block in an 11 block window with no times >= matchTime.
-func (s *BlockFiltersScanner) findBlockForTime(matchTime time.Time) (int32, error) {
+func (s *BlockFiltersScanner) FindBlockForTime(matchTime time.Time) (int32, error) {
 	offsetTime := matchTime.Add(-maxFutureBlockTime)
 
-	bestHeight, err := s.getChainHeight()
+	bestHeight, err := s.GetChainHeight()
 	if err != nil {
 		return 0, fmt.Errorf("getChainHeight error: %v", err)
 	}
 
 	getBlockTimeForHeight := func(height int32) (time.Time, error) {
-		hash, err := s.getBlockHash(int64(height))
+		hash, err := s.GetBlockHash(int64(height))
 		if err != nil {
 			return time.Time{}, err
 		}
-		header, err := s.getBlockHeaderVerbose(hash)
+		header, err := s.GetBlockHeaderVerbose(hash)
 		if err != nil {
 			return time.Time{}, err
 		}
@@ -300,30 +300,30 @@ func (s *BlockFiltersScanner) findBlockForTime(matchTime time.Time) (int32, erro
 // both the output and a spending transaction is found. if startTime is
 // supplied, and the blockHash for the output is not known to the wallet, a
 // candidate block will be selected with findBlockTime.
-func (s *BlockFiltersScanner) ScanFilters(txHash *chainhash.Hash, vout uint32, pkScript []byte, walletTip int32, startTime time.Time, blockHash *chainhash.Hash) (*filterScanResult, error) {
+func (s *BlockFiltersScanner) ScanFilters(txHash *chainhash.Hash, vout uint32, pkScript []byte, walletTip int32, startTime time.Time, blockHash *chainhash.Hash) (*FilterScanResult, error) {
 	// TODO: Check that any blockHash supplied is not orphaned?
 
 	// Check if we know the block hash for the tx.
 	var limitHeight int32
 	// See if we have a checkpoint to use.
-	checkPt := s.checkpoint(txHash, vout)
+	checkPt := s.Checkpoint(txHash, vout)
 	if checkPt != nil {
-		if checkPt.blockHash != nil && checkPt.spend != nil {
+		if checkPt.BlockHash != nil && checkPt.Spend != nil {
 			// We already have the output and the spending input, and
 			// checkpointBlock already verified it's still mainchain.
 			return checkPt, nil
 		}
-		height, err := s.getBlockHeight(&checkPt.checkpoint)
+		height, err := s.GetBlockHeight(&checkPt.Checkpoint)
 		if err != nil {
-			return nil, fmt.Errorf("getBlockHeight error: %w", err)
+			return nil, fmt.Errorf("GetBlockHeight error: %w", err)
 		}
 		limitHeight = height + 1
 	} else if blockHash == nil {
 		// No checkpoint and no block hash. Gotta guess based on time.
-		blockHash, limitHeight = s.mainchainBlockForStoredTx(txHash)
+		blockHash, limitHeight = s.MainchainBlockForStoredTx(txHash)
 		if blockHash == nil {
 			var err error
-			limitHeight, err = s.findBlockForTime(startTime)
+			limitHeight, err = s.FindBlockForTime(startTime)
 			if err != nil {
 				return nil, err
 			}
@@ -331,7 +331,7 @@ func (s *BlockFiltersScanner) ScanFilters(txHash *chainhash.Hash, vout uint32, p
 	} else {
 		// No checkpoint, but user supplied a block hash.
 		var err error
-		limitHeight, err = s.getBlockHeight(blockHash)
+		limitHeight, err = s.GetBlockHeight(blockHash)
 		if err != nil {
 			return nil, fmt.Errorf("error getting height for supplied block hash %s", blockHash)
 		}
@@ -350,52 +350,52 @@ func (s *BlockFiltersScanner) ScanFilters(txHash *chainhash.Hash, vout uint32, p
 
 	// If we found a block, let's store a reference in our local database so we
 	// can maybe bypass a long search next time.
-	if utxo.blockHash != nil {
+	if utxo.BlockHash != nil {
 		s.log.Debugf("cfilters scan SUCCEEDED for %v:%d. block hash: %v, spent: %v",
-			txHash, vout, utxo.blockHash, utxo.spend != nil)
-		s.storeTxBlock(*txHash, *utxo.blockHash)
+			txHash, vout, utxo.BlockHash, utxo.Spend != nil)
+		s.StoreTxBlock(*txHash, *utxo.BlockHash)
 	}
 
-	s.cacheCheckpoint(txHash, vout, utxo)
+	s.CacheCheckpoint(txHash, vout, utxo)
 
 	return utxo, nil
 }
 
 // filterScanFromHeight scans BIP158 filters beginning at the specified block
 // height until the tip, or until a spending transaction is found.
-func (s *BlockFiltersScanner) filterScanFromHeight(txHash chainhash.Hash, vout uint32, pkScript []byte, walletTip int32, startBlockHeight int32, checkPt *filterScanResult) (*filterScanResult, error) {
+func (s *BlockFiltersScanner) filterScanFromHeight(txHash chainhash.Hash, vout uint32, pkScript []byte, walletTip int32, startBlockHeight int32, checkPt *FilterScanResult) (*FilterScanResult, error) {
 	res := checkPt
 	if res == nil {
-		res = new(filterScanResult)
+		res = new(FilterScanResult)
 	}
 
 search:
 	for height := startBlockHeight; height <= walletTip; height++ {
-		if res.spend != nil && res.blockHash == nil {
+		if res.Spend != nil && res.BlockHash == nil {
 			s.log.Warnf("A spending input (%s) was found during the scan but the output (%s) "+
 				"itself wasn't found. Was the startBlockHeight early enough?",
-				NewOutPoint(&res.spend.txHash, res.spend.vin),
+				NewOutPoint(&res.Spend.TxHash, res.Spend.Vin),
 				NewOutPoint(&txHash, vout),
 			)
 			return res, nil
 		}
-		blockHash, err := s.getBlockHash(int64(height))
+		blockHash, err := s.GetBlockHash(int64(height))
 		if err != nil {
 			return nil, fmt.Errorf("error getting block hash for height %d: %w", height, err)
 		}
-		matched, err := s.matchPkScript(blockHash, [][]byte{pkScript})
+		matched, err := s.MatchPkScript(blockHash, [][]byte{pkScript})
 		if err != nil {
 			return nil, fmt.Errorf("matchPkScript error: %w", err)
 		}
 
-		res.checkpoint = *blockHash
+		res.Checkpoint = *blockHash
 		if !matched {
 			continue search
 		}
 		// Pull the block.
 		s.log.Tracef("Block %v matched pkScript for output %v:%d. Pulling the block...",
 			blockHash, txHash, vout)
-		msgBlock, err := s.getBlock(*blockHash)
+		msgBlock, err := s.GetBlock(*blockHash)
 		if err != nil {
 			return nil, fmt.Errorf("GetBlock error: %v", err)
 		}
@@ -404,19 +404,19 @@ search:
 	nextTx:
 		for _, tx := range msgBlock.Transactions {
 			// Look for a spending input.
-			if res.spend == nil {
+			if res.Spend == nil {
 				for vin, txIn := range tx.TxIn {
 					prevOut := &txIn.PreviousOutPoint
 					if prevOut.Hash == txHash && prevOut.Index == vout {
-						res.spend = &spendingInput{
-							txHash:      tx.TxHash(),
-							vin:         uint32(vin),
-							blockHash:   *blockHash,
-							blockHeight: uint32(height),
+						res.Spend = &SpendingInput{
+							TxHash:      tx.TxHash(),
+							Vin:         uint32(vin),
+							BlockHash:   *blockHash,
+							BlockHeight: uint32(height),
 						}
-						s.log.Tracef("Found txn %v spending %v in block %v (%d)", res.spend.txHash,
-							txHash, res.spend.blockHash, res.spend.blockHeight)
-						if res.blockHash != nil {
+						s.log.Tracef("Found txn %v spending %v in block %v (%d)", res.Spend.TxHash,
+							txHash, res.Spend.BlockHash, res.Spend.BlockHeight)
+						if res.BlockHash != nil {
 							break search
 						}
 						// The output could still be in this block, just not
@@ -426,16 +426,16 @@ search:
 				}
 			}
 			// Only check for the output if this is the right transaction.
-			if res.blockHash != nil || tx.TxHash() != txHash {
+			if res.BlockHash != nil || tx.TxHash() != txHash {
 				continue nextTx
 			}
 			for _, txOut := range tx.TxOut {
 				if bytes.Equal(txOut.PkScript, pkScript) {
-					res.blockHash = blockHash
-					res.blockHeight = uint32(height)
-					res.txOut = txOut
-					s.log.Tracef("Found txn %v in block %v (%d)", txHash, res.blockHash, height)
-					if res.spend != nil {
+					res.BlockHash = blockHash
+					res.BlockHeight = uint32(height)
+					res.TxOut = txOut
+					s.log.Tracef("Found txn %v in block %v (%d)", txHash, res.BlockHash, height)
+					if res.Spend != nil {
 						break search
 					}
 					// Keep looking for the spending transaction.

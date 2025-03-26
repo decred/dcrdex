@@ -206,7 +206,7 @@ func (ew *electrumWallet) connInfo(ctx context.Context, host string) (addr strin
 }
 
 // part of btc.Wallet interface
-func (ew *electrumWallet) connect(ctx context.Context, wg *sync.WaitGroup) error {
+func (ew *electrumWallet) Connect(ctx context.Context, wg *sync.WaitGroup) error {
 	// Helper to get a host:port string and connection options for a host name.
 	connInfo := func(host string) (addr string, srvOpts *electrum.ConnectOpts, err error) {
 		addr, tlsConfig, err := ew.connInfo(ctx, host)
@@ -260,7 +260,7 @@ func (ew *electrumWallet) connect(ctx context.Context, wg *sync.WaitGroup) error
 
 	// This wallet may not be "protected", in which case we omit the password
 	// from the requests. Detect this now and flag the wallet as unlocked.
-	_ = ew.walletUnlock([]byte{})
+	_ = ew.WalletUnlock([]byte{})
 
 	// Start a goroutine to keep the chain client alive and on the same
 	// ElectrumX server as the external Electrum wallet if possible.
@@ -343,7 +343,7 @@ func (ew *electrumWallet) connect(ctx context.Context, wg *sync.WaitGroup) error
 	return err
 }
 
-func (ew *electrumWallet) reconfigure(cfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error) {
+func (ew *electrumWallet) Reconfigure(cfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error) {
 	// electrumWallet only handles walletTypeElectrum.
 	if cfg.Type != walletTypeElectrum {
 		restartRequired = true
@@ -363,7 +363,7 @@ func (ew *electrumWallet) reconfigure(cfg *asset.WalletConfig, currentAddress st
 }
 
 // part of btc.Wallet interface
-func (ew *electrumWallet) sendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error) {
+func (ew *electrumWallet) SendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error) {
 	b, err := serializeMsgTx(tx)
 	if err != nil {
 		return nil, err
@@ -389,7 +389,7 @@ func (ew *electrumWallet) sendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, e
 		prevOut := txIn.PreviousOutPoint
 		ops[i] = &Output{Pt: NewOutPoint(&prevOut.Hash, prevOut.Index)}
 	}
-	if err = ew.lockUnspent(true, ops); err != nil {
+	if err = ew.LockUnspent(true, ops); err != nil {
 		ew.log.Errorf("Failed to unlock spent UTXOs: %v", err)
 	}
 	return hash, nil
@@ -431,7 +431,7 @@ func (ew *electrumWallet) outputIsSpent(ctx context.Context, txHash *chainhash.H
 }
 
 // part of btc.Wallet interface
-func (ew *electrumWallet) getTxOut(txHash *chainhash.Hash, vout uint32, _ []byte, _ time.Time) (*wire.TxOut, uint32, error) {
+func (ew *electrumWallet) GetTxOut(txHash *chainhash.Hash, vout uint32, _ []byte, _ time.Time) (*wire.TxOut, uint32, error) {
 	return ew.getTxOutput(ew.ctx, txHash, vout)
 }
 
@@ -489,8 +489,8 @@ func (ew *electrumWallet) getBlockHeaderByHeight(ctx context.Context, height int
 }
 
 // part of btc.Wallet interface
-func (ew *electrumWallet) medianTime() (time.Time, error) {
-	chainHeight, err := ew.getBestBlockHeight()
+func (ew *electrumWallet) MedianTime() (time.Time, error) {
+	chainHeight, err := ew.GetBestBlockHeight()
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -554,7 +554,7 @@ func (ew *electrumWallet) calcMedianTime(ctx context.Context, height int64) (tim
 }
 
 // part of btc.Wallet interface
-func (ew *electrumWallet) getBlockHash(height int64) (*chainhash.Hash, error) {
+func (ew *electrumWallet) GetBlockHash(height int64) (*chainhash.Hash, error) {
 	hdr, err := ew.getBlockHeaderByHeight(ew.ctx, height)
 	if err != nil {
 		return nil, err
@@ -564,16 +564,16 @@ func (ew *electrumWallet) getBlockHash(height int64) (*chainhash.Hash, error) {
 }
 
 // part of btc.Wallet interface
-func (ew *electrumWallet) getBestBlockHash() (*chainhash.Hash, error) {
+func (ew *electrumWallet) GetBestBlockHash() (*chainhash.Hash, error) {
 	inf, err := ew.wallet.GetInfo(ew.ctx)
 	if err != nil {
 		return nil, err
 	}
-	return ew.getBlockHash(inf.SyncHeight)
+	return ew.GetBlockHash(inf.SyncHeight)
 }
 
 // part of btc.Wallet interface
-func (ew *electrumWallet) getBestBlockHeight() (int32, error) {
+func (ew *electrumWallet) GetBestBlockHeight() (int32, error) {
 	inf, err := ew.wallet.GetInfo(ew.ctx)
 	if err != nil {
 		return 0, err
@@ -582,7 +582,7 @@ func (ew *electrumWallet) getBestBlockHeight() (int32, error) {
 }
 
 // part of btc.Wallet interface
-func (ew *electrumWallet) getBestBlockHeader() (*BlockHeader, error) {
+func (ew *electrumWallet) GetBestBlockHeader() (*BlockHeader, error) {
 	inf, err := ew.wallet.GetInfo(ew.ctx)
 	if err != nil {
 		return nil, err
@@ -604,7 +604,7 @@ func (ew *electrumWallet) getBestBlockHeader() (*BlockHeader, error) {
 }
 
 // part of btc.Wallet interface
-func (ew *electrumWallet) balances() (*GetBalancesResult, error) {
+func (ew *electrumWallet) Balances() (*GetBalancesResult, error) {
 	eBal, err := ew.wallet.GetBalance(ew.ctx)
 	if err != nil {
 		return nil, err
@@ -623,12 +623,12 @@ func (ew *electrumWallet) balances() (*GetBalancesResult, error) {
 }
 
 // part of btc.Wallet interface
-func (ew *electrumWallet) listUnspent() ([]*ListUnspentResult, error) {
+func (ew *electrumWallet) ListUnspent() ([]*ListUnspentResult, error) {
 	eUnspent, err := ew.wallet.ListUnspent(ew.ctx)
 	if err != nil {
 		return nil, err
 	}
-	chainHeight, err := ew.getBestBlockHeight()
+	chainHeight, err := ew.GetBestBlockHeight()
 	if err != nil {
 		return nil, err
 	}
@@ -698,7 +698,7 @@ func (ew *electrumWallet) listUnspent() ([]*ListUnspentResult, error) {
 }
 
 // part of btc.Wallet interface
-func (ew *electrumWallet) lockUnspent(unlock bool, ops []*Output) error {
+func (ew *electrumWallet) LockUnspent(unlock bool, ops []*Output) error {
 	eUnspent, err := ew.wallet.ListUnspent(ew.ctx)
 	if err != nil {
 		return err
@@ -767,13 +767,13 @@ func (ew *electrumWallet) listLockedOutpoints() []*RPCOutpoint {
 }
 
 // part of btc.Wallet interface
-func (ew *electrumWallet) listLockUnspent() ([]*RPCOutpoint, error) {
+func (ew *electrumWallet) ListLockUnspent() ([]*RPCOutpoint, error) {
 	return ew.listLockedOutpoints(), nil
 }
 
-// externalAddress creates a fresh address beyond the default gap limit, so it
+// ExternalAddress creates a fresh address beyond the default gap limit, so it
 // should be used immediately. Part of btc.Wallet interface.
-func (ew *electrumWallet) externalAddress() (btcutil.Address, error) {
+func (ew *electrumWallet) ExternalAddress() (btcutil.Address, error) {
 	addr, err := ew.wallet.GetUnusedAddress(ew.ctx)
 	if err != nil {
 		return nil, err
@@ -781,14 +781,14 @@ func (ew *electrumWallet) externalAddress() (btcutil.Address, error) {
 	return ew.decodeAddr(addr, ew.chainParams)
 }
 
-// changeAddress creates a fresh address beyond the default gap limit, so it
+// ChangeAddress creates a fresh address beyond the default gap limit, so it
 // should be used immediately. Part of btc.Wallet interface.
-func (ew *electrumWallet) changeAddress() (btcutil.Address, error) {
-	return ew.externalAddress() // sadly, cannot request internal addresses
+func (ew *electrumWallet) ChangeAddress() (btcutil.Address, error) {
+	return ew.ExternalAddress() // sadly, cannot request internal addresses
 }
 
 // part of btc.Wallet interface
-func (ew *electrumWallet) signTx(inTx *wire.MsgTx) (*wire.MsgTx, error) {
+func (ew *electrumWallet) SignTx(inTx *wire.MsgTx) (*wire.MsgTx, error) {
 	// If the wallet's signtransaction RPC ever has a problem with the PSBT, we
 	// could attempt to sign the transaction ourselves by pulling the inputs'
 	// private keys and using txscript manually, but this can vary greatly
@@ -819,7 +819,7 @@ type pubKeyer interface {
 }
 
 // part of btc.Wallet interface
-func (ew *electrumWallet) privKeyForAddress(addr string) (*btcec.PrivateKey, error) {
+func (ew *electrumWallet) PrivKeyForAddress(addr string) (*btcec.PrivateKey, error) {
 	addrDec, err := ew.decodeAddr(addr, ew.chainParams)
 	if err != nil {
 		return nil, err
@@ -885,8 +885,8 @@ func (ew *electrumWallet) testPass(pw []byte) error {
 	return nil
 }
 
-// walletLock locks the wallet. Part of the btc.Wallet interface.
-func (ew *electrumWallet) walletLock() error {
+// WalletLock locks the wallet. Part of the btc.Wallet interface.
+func (ew *electrumWallet) WalletLock() error {
 	ew.pwMtx.Lock()
 	defer ew.pwMtx.Unlock()
 	if ew.pw == "" && ew.unlocked {
@@ -900,9 +900,9 @@ func (ew *electrumWallet) walletLock() error {
 	return nil
 }
 
-// locked indicates if the wallet has been unlocked. Part of the btc.Wallet
+// Locked indicates if the wallet has been unlocked. Part of the btc.Wallet
 // interface.
-func (ew *electrumWallet) locked() bool {
+func (ew *electrumWallet) Locked() bool {
 	ew.pwMtx.RLock()
 	defer ew.pwMtx.RUnlock()
 	return !ew.unlocked
@@ -915,10 +915,10 @@ func (ew *electrumWallet) walletPass() string {
 	return pw
 }
 
-// walletUnlock attempts to unlock the wallet with the provided password. On
+// WalletUnlock attempts to unlock the wallet with the provided password. On
 // success, the password is stored and may be accessed via pass or walletPass.
 // Part of the btc.Wallet interface.
-func (ew *electrumWallet) walletUnlock(pw []byte) error {
+func (ew *electrumWallet) WalletUnlock(pw []byte) error {
 	if err := ew.testPass(pw); err != nil {
 		return err
 	}
@@ -929,7 +929,7 @@ func (ew *electrumWallet) walletUnlock(pw []byte) error {
 }
 
 // part of the btc.Wallet interface
-func (ew *electrumWallet) peerCount() (uint32, error) {
+func (ew *electrumWallet) PeerCount() (uint32, error) {
 	if ew.chain() == nil { // must work prior to resetChain
 		return 0, nil
 	}
@@ -948,7 +948,7 @@ func (ew *electrumWallet) peerCount() (uint32, error) {
 }
 
 // part of the btc.Wallet interface
-func (ew *electrumWallet) ownsAddress(addr btcutil.Address) (bool, error) {
+func (ew *electrumWallet) OwnsAddress(addr btcutil.Address) (bool, error) {
 	addrStr, err := ew.stringAddr(addr, ew.chainParams)
 	if err != nil {
 		return false, err
@@ -964,7 +964,7 @@ func (ew *electrumWallet) ownsAddress(addr btcutil.Address) (bool, error) {
 }
 
 // part of the btc.Wallet interface
-func (ew *electrumWallet) syncStatus() (*asset.SyncStatus, error) {
+func (ew *electrumWallet) SyncStatus() (*asset.SyncStatus, error) {
 	info, err := ew.wallet.GetInfo(ew.ctx)
 	if err != nil {
 		return nil, err
@@ -977,8 +977,8 @@ func (ew *electrumWallet) syncStatus() (*asset.SyncStatus, error) {
 }
 
 // part of the btc.Wallet interface
-func (ew *electrumWallet) listTransactionsSinceBlock(blockHeight int32) ([]*ListTransactionsResult, error) {
-	bestHeight, err := ew.getBestBlockHeight()
+func (ew *electrumWallet) ListTransactionsSinceBlock(blockHeight int32) ([]*ListTransactionsResult, error) {
+	bestHeight, err := ew.GetBestBlockHeight()
 	if err != nil {
 		return nil, fmt.Errorf("error getting best block: %v", err)
 	}
@@ -1044,7 +1044,7 @@ func (ew *electrumWallet) checkWalletTx(txid string) ([]byte, uint32, error) {
 }
 
 // part of the walletTxChecker interface
-func (ew *electrumWallet) getWalletTransaction(txHash *chainhash.Hash) (*GetTransactionResult, error) {
+func (ew *electrumWallet) GetWalletTransaction(txHash *chainhash.Hash) (*GetTransactionResult, error) {
 	// Try the wallet first. If it is not a wallet transaction or if it is
 	// confirmed, fall back to the chain method to get the block info and time
 	// fields.
@@ -1078,12 +1078,12 @@ func (ew *electrumWallet) getWalletTransaction(txHash *chainhash.Hash) (*GetTran
 	}, nil
 }
 
-func (ew *electrumWallet) fingerprint() (string, error) {
+func (ew *electrumWallet) Fingerprint() (string, error) {
 	return "", fmt.Errorf("fingerprint not implemented")
 }
 
 // part of the walletTxChecker interface
-func (ew *electrumWallet) swapConfirmations(txHash *chainhash.Hash, vout uint32, contract []byte, startTime time.Time) (confs uint32, spent bool, err error) {
+func (ew *electrumWallet) SwapConfirmations(txHash *chainhash.Hash, vout uint32, contract []byte, startTime time.Time) (confs uint32, spent bool, err error) {
 	// To determine if it is spent, we need the address of the output.
 	var pkScript []byte
 	txid := txHash.String()
