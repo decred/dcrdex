@@ -92,12 +92,7 @@ func decryptTankagramPayload(key []byte, ciphertext []byte) (*msgjson.Message, e
 		return nil, fmt.Errorf("failed to decrypt payload: %v", err)
 	}
 
-	var msg msgjson.Message
-	if err := json.Unmarshal(plaintext, &msg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal payload: %v", err)
-	}
-
-	return &msg, nil
+	return msgjson.DecodeMessage(plaintext)
 }
 
 func decryptTankagramResult(key []byte, ciphertext []byte) (*mj.TankagramResultPayload, error) {
@@ -246,8 +241,8 @@ func (c *MeshConn) sendTankagramResult(tt *tatankaNode, id uint64, payload dex.B
 }
 
 // handleNewPeerTankagram handles a tankagram recieved from a new peer. The
-// tankagram should be encrypted with the permanent encryption key decrived
-// for our permanent private key and the peer's peerID. The contents of the
+// tankagram should be encrypted with the permanent encryption key derived from
+// our permanent private key and the peer's peerID. The contents of the
 // tankagram should be an EncryptionKeyPayload, used to establish an ephemeral
 // encryption key.
 func (c *MeshConn) handleNewPeerTankagram(tt *tatankaNode, gram *mj.Tankagram, id uint64) {
