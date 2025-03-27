@@ -2187,6 +2187,8 @@ func (c *Core) connectWalletResumeTrades(w *xcWallet, resumeTrades bool) (deposi
 		return "", newError(connectWalletErr, "failed to connect %s wallet: %w", w.Symbol, err)
 	}
 
+	w.processWalletTransactions(w.PendingTransactions(c.ctx))
+
 	// This may be a wallet that does not require a password, so we can attempt
 	// to resume any active trades.
 	if resumeTrades {
@@ -2899,6 +2901,7 @@ func (c *Core) loadXCWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		broadcasting: new(uint32),
 		disabled:     dbWallet.Disabled,
 		syncStatus:   &asset.SyncStatus{},
+		pendingTxs:   make(map[string]*asset.WalletTransaction),
 	}
 
 	token := asset.TokenInfo(assetID)
@@ -9825,6 +9828,12 @@ func (c *Core) handleWalletNotification(ni asset.WalletNotification) {
 		c.handleBridgeReadyToComplete(n)
 	case *asset.BridgeCompletedNote:
 		c.handleBridgeCompleted(n)
+	case *asset.TransactionNote:
+		w, ok := c.wallet(n.AssetID)
+		if !ok {
+			return
+		}
+		w.processWalletTransactions([]*asset.WalletTransaction{n.Transaction})
 	}
 	c.notify(newWalletNote(ni))
 }

@@ -347,6 +347,12 @@ interface reconfigSettings {
   elevateProviders?: boolean
 }
 
+interface PendingTx extends WalletTransaction {
+  chainAsset: ChainAsset
+  tr: PageElement
+  tmpl: Record<string, PageElement>
+}
+
 let net = 0
 
 export default class WalletsPage extends BasePage {
@@ -384,19 +390,19 @@ export default class WalletsPage extends BasePage {
   currTx: WalletTransaction | undefined
   mixing: boolean
   mixerToggle: AniToggle
-  stampers: PageElement[]
   secondTicker: number
+  pendingTxs: Record<string, PendingTx>
 
   constructor (body: HTMLElement, data?: WalletsPageData) {
     super()
     this.body = body
     this.data = data
     const page = this.page = Doc.idDescendants(body)
-    this.stampers = []
     this.balTracker = {}
     this.tickerTemplates = {}
     this.tickerButtons = {}
     this.selectedWalletID = -1
+    this.pendingTxs = {}
 
     this.balanceDetails = Doc.parseTemplate(page.balanceDetails)
     this.walletConfig = Doc.parseTemplate(page.walletConfig)
@@ -405,10 +411,10 @@ export default class WalletsPage extends BasePage {
     net = app().user.net
 
     const setStamp = () => {
-      for (const span of this.stampers) {
-        if (span.dataset.stamp) {
-          span.textContent = Doc.timeSince(parseInt(span.dataset.stamp || '') * 1000)
-        }
+      for (const pt of Object.values(this.pendingTxs)) pt.tmpl.age.textContent = Doc.timeSince(pt.timestamp * 1000)
+      for (const row of this.page.txHistoryTableBody.children) {
+        const age = Doc.tmplElement(row as PageElement, 'age')
+        age.textContent = Doc.timeSince(parseInt(age.dataset.timestamp as string))
       }
     }
     this.secondTicker = window.setInterval(() => {
@@ -419,7 +425,7 @@ export default class WalletsPage extends BasePage {
       page.restoreInfoCard, page.connectedIconTmpl, page.disconnectedIconTmpl,
       page.removeIconTmpl, page.tickerBalsBox, page.blockchainBalanceTmpl,
       page.multiNetTxFeeTmpl, page.multiNetFeeRateTmpl, page.netTxFeeTmpl,
-      page.netSelectBttnTmpl
+      page.netSelectBttnTmpl, page.pendingTxTmpl
     )
     this.restoreInfoCard = page.restoreInfoCard.cloneNode(true) as HTMLElement
     Doc.show(page.connectedIconTmpl, page.disconnectedIconTmpl, page.removeIconTmpl)
@@ -507,10 +513,12 @@ export default class WalletsPage extends BasePage {
     Doc.bind(page.purchaseTicketsErrCloser, 'click', () => { Doc.hide(page.purchaseTicketsErrBox) })
     Doc.bind(page.privacyInfoBttn, 'click', () => { this.forms.show(page.mixingInfo) })
     Doc.bind(page.walletBal, 'click', () => { this.populateMaxSend() })
+    Doc.bind(page.expandPendingTxs, 'click', () => { this.toggleExpandPendingTxs() })
 
     // Display fiat value for current send amount.
     Doc.bind(page.sendAmt, 'input', () => {
-      const { unitInfo: ui } = app().assets[this.selectedWalletID]
+      const assetID = parseInt(page.sendForm.dataset.assetID || '')
+      const ui = app().unitInfo(assetID)
       const amt = parseFloatDefault(page.sendAmt.value)
       const conversionFactor = ui.conventional.conversionFactor
       Doc.showFiatValue(page.sendValue, amt * conversionFactor, app().fiatRatesMap[this.selectedWalletID], ui)
@@ -566,14 +574,12 @@ export default class WalletsPage extends BasePage {
     this.updateGlobalBalance()
     let lastTicker = State.fetchLocal(State.selectedAssetLK)
     if (!lastTicker || !this.tickerMap[lastTicker]) lastTicker = 'DCR'
+    const expanded = Boolean(State.fetchLocal(State.pendingTxsExpandedLK))
+    if (expanded) {
+      page.expandPendingTxs.classList.add('ico-arrowup')
+      page.expandPendingTxs.classList.remove('ico-arrowdown')
+    }
     this.start(lastTicker)
-
-    setInterval(() => {
-      for (const row of this.page.txHistoryTableBody.children) {
-        const age = Doc.tmplElement(row as PageElement, 'age')
-        age.textContent = Doc.timeSince(parseInt(age.dataset.timestamp as string))
-      }
-    }, 5000)
   }
 
   async start (firstTicker: string) {
@@ -1126,11 +1132,12 @@ export default class WalletsPage extends BasePage {
     Doc.setText(page.secondColumn, '[data-ticker]', ticker)
     Doc.setText(page.walletDetailsBox, '[data-asset-name]', name)
     Doc.setSrc(page.walletDetailsBox, '[data-logo]', Doc.logoPath(logoSymbol))
-    page.walletDetailsBox.classList.toggle('multinet', isMultiNet)
-    page.walletDetailsBox.classList.toggle('token', hasTokens)
+    page.tickerBox.classList.toggle('multinet', isMultiNet)
+    page.tickerBox.classList.toggle('token', hasTokens)
     for (const div of Array.from(page.docs.children) as PageElement[]) Doc.setVis(div.dataset.docTicker === ticker, div)
     this.updateDisplayedTicker()
     this.showAvailableMarkets()
+    this.showPendingTxs()
     for (const p of [
       this.updateTicketBuyer(),
       this.updatePrivacy(),
@@ -1524,7 +1531,7 @@ export default class WalletsPage extends BasePage {
   displayTicketPage (pageNumber: number, pageOfTickets: Ticket[]) {
     const { page, selectedWalletID: assetID } = this
     const ui = app().unitInfo(assetID)
-    const coinLink = CoinExplorers[assetID][app().user.net]
+    const coinLink = CoinExplorers[assetID][net]
     Doc.empty(page.ticketHistoryRows)
     page.ticketHistoryPage.textContent = String(pageNumber)
     for (const { tx, status } of pageOfTickets) {
@@ -1784,6 +1791,42 @@ export default class WalletsPage extends BasePage {
     }
   }
 
+  showPendingTxs () {
+    const { page, selectedTicker: { chainAssets } } = this
+    const pendingTxs: PendingTx[] = []
+    this.pendingTxs = {}
+    for (const ca of chainAssets) {
+      const w = app().walletMap[ca.assetID]
+      if (!w) continue
+      for (const tx of Object.values(w.pendingTxs)) {
+        if (tx.timestamp === 0) continue
+        const pt = { ...tx, chainAsset: ca } as PendingTx
+        pendingTxs.push(pt)
+        this.pendingTxs[tx.id] = pt
+      }
+    }
+    pendingTxs.sort((a: WalletTransaction, b: WalletTransaction) => a.timestamp < b.timestamp ? 1 : -1)
+    Doc.empty(page.pendingTxs)
+    for (const pt of pendingTxs) {
+      this.initializePendingTx(pt)
+      page.pendingTxs.appendChild(pt.tr)
+      updatePendingTx(pt)
+    }
+    this.setPendingTxVisibility()
+  }
+
+  initializePendingTx (pt: PendingTx) {
+    pt.tr = Doc.clone(this.page.pendingTxTmpl)
+    const tmpl = pt.tmpl = Doc.parseTemplate(pt.tr)
+    const { type: txType, id: txID, chainAsset: { assetID, chainLogo, chainName } } = pt
+    tmpl.chainLogo.src = chainLogo
+    tmpl.chainName.textContent = chainName
+    tmpl.type.textContent = txTypeString(txType)
+    tmpl.id.textContent = trimStringWithEllipsis(txID, 12)
+    const coinLink = CoinExplorers[assetID][net]
+    tmpl.id.href = coinLink(txID)
+  }
+
   async showRecentActivity () {
     const { page, selectedTicker: ta } = this
     const loaded = app().loading(page.orderActivityBox)
@@ -1857,7 +1900,6 @@ export default class WalletsPage extends BasePage {
     tmpl.age.dataset.timestamp = String(tx.timestamp * 1000)
     Doc.setVis(tx.timestamp === 0, tmpl.pending)
     Doc.setVis(tx.timestamp !== 0, tmpl.age)
-    if (tx.timestamp > 0) tmpl.age.dataset.stamp = String(tx.timestamp)
     let txType = txTypeString(tx.type)
     if (tx.tokenID && tx.tokenID !== assetID) {
       const tokenAsset = app().assets[tx.tokenID]
@@ -1883,8 +1925,6 @@ export default class WalletsPage extends BasePage {
     row.dataset.txid = tx.id
     Doc.bind(row, 'click', () => this.showTxDetailsPopup(tx.id))
     this.updateTxHistoryRow(row, tx, assetID)
-    const tmpl = Doc.parseTemplate(row)
-    this.stampers.push(tmpl.age)
     return row
   }
 
@@ -2024,11 +2064,29 @@ export default class WalletsPage extends BasePage {
     return (new Date(tx.timestamp * 1000)).toLocaleDateString()
   }
 
-  handleTxNote (tx: WalletTransaction, newTx: boolean) {
-    const { page, selectedWalletID } = this
+  handleTxNote (ca: ChainAsset, tx: WalletTransaction, newTx: boolean) {
+    const { page, selectedWalletID, pendingTxs } = this
     this.depositAddrForm.handleTx(selectedWalletID, tx)
+    const pt = pendingTxs[tx.id]
+    if (tx.confirmed) {
+      delete pendingTxs[tx.id]
+      if (pt) pt.tr.remove()
+    } else if (tx.timestamp > 0) {
+      if (pt) {
+        Object.assign(pt, tx)
+        updatePendingTx(pt)
+      } else {
+        const newPT = { ...tx, chainAsset: ca } as PendingTx
+        pendingTxs[tx.id] = newPT
+        this.initializePendingTx(newPT)
+        page.pendingTxs.prepend(newPT.tr)
+        updatePendingTx(newPT)
+      }
+    }
+    this.setPendingTxVisibility()
+
     if (!Doc.isDisplayed(page.txHistoryForm)) return
-    const w = app().assets[selectedWalletID].wallet
+    const w = app().assets[ca.assetID].wallet
     const hideMixing = (w.traits & traitFundsMixer) !== 0 && !!page.hideMixTxs.checked
     if (hideMixing && tx.type === txTypeMixing) return
     if (newTx) {
@@ -2056,6 +2114,31 @@ export default class WalletsPage extends BasePage {
     if (tx.id === this.currTx?.id) {
       this.setTxDetailsPopupElements(tx)
     }
+  }
+
+  setPendingTxVisibility () {
+    const { page, pendingTxs } = this
+    const n = Object.keys(pendingTxs).length
+    Doc.setVis(n === 0, page.noPendingTxs)
+    Doc.setVis(n > 0, page.somePendingTxs)
+    if (n === 0) return Doc.hide(page.pendingTxsListBox)
+    page.pendingTxsCount.textContent = String(n)
+    const expanded = page.expandPendingTxs.classList.contains('ico-arrowup')
+    Doc.setVis(expanded, page.pendingTxsListBox)
+  }
+
+  toggleExpandPendingTxs () {
+    const { page: { expandPendingTxs: div } } = this
+    const expanded = div.classList.contains('ico-arrowup')
+    State.storeLocal(State.pendingTxsExpandedLK, !expanded)
+    if (expanded) {
+      div.classList.remove('ico-arrowup')
+      div.classList.add('ico-arrowdown')
+    } else {
+      div.classList.add('ico-arrowup')
+      div.classList.remove('ico-arrowdown')
+    }
+    this.setPendingTxVisibility()
   }
 
   async getTxHistory (assetID: number, hideMixTxs: boolean, after?: string) : Promise<TxHistoryResult> {
@@ -2344,7 +2427,6 @@ export default class WalletsPage extends BasePage {
 
   async showSendAssetForm (assetID: number) {
     const { page } = this
-    const box = page.sendForm
     const { wallet, unitInfo: ui, symbol, token } = app().assets[assetID]
     Doc.hide(page.toggleSubtract)
     page.subtractCheckBox.checked = false
@@ -2407,8 +2489,8 @@ export default class WalletsPage extends BasePage {
 
     Doc.showFiatValue(page.sendValue, 0, xcRate, ui)
     page.walletBal.textContent = Doc.formatFullPrecision(wallet.balance.available, ui)
-    box.dataset.assetID = String(assetID)
-    this.forms.show(box)
+    page.sendForm.dataset.assetID = String(assetID)
+    this.forms.show(page.sendForm)
   }
 
   /* doConnect connects to a wallet via the connectwallet API route. */
@@ -2695,7 +2777,8 @@ export default class WalletsPage extends BasePage {
       }
       case 'transaction': {
         const n = walletNote as TransactionNote
-        if (n.assetID === this.selectedWalletID) this.handleTxNote(n.transaction, n.new)
+        const ca = this.selectedTicker.chainAssetLookup[n.assetID]
+        if (ca) this.handleTxNote(ca, n.transaction, n.new)
         break
       }
       // case 'transactionHistorySynced' : {
@@ -2714,6 +2797,20 @@ export default class WalletsPage extends BasePage {
     clearInterval(this.secondTicker)
     Doc.unbind(document, 'keyup', this.keyup)
   }
+}
+
+function updatePendingTx (pt: PendingTx) {
+  const { tmpl } = pt
+  tmpl.age.textContent = Doc.timeSince(pt.timestamp * 1000)
+  if (noAmtTxTypes.includes(pt.type)) {
+    tmpl.amount.textContent = '-'
+  } else {
+    const [u, c] = txTypeSignAndClass(pt.type)
+    const amt = Doc.formatCoinValue(pt.amount, pt.chainAsset.ui)
+    tmpl.amount.textContent = `${u}${amt}`
+    if (c !== '') tmpl.amount.classList.add(c)
+  }
+  if (pt.confirms) tmpl.confirms.textContent = `${pt.confirms.current} / ${pt.confirms.target}`
 }
 
 function trimStringWithEllipsis (str: string, maxLen: number): string {

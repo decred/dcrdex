@@ -40,7 +40,6 @@ type ExchangeWalletElectrum struct {
 
 var _ asset.Wallet = (*ExchangeWalletElectrum)(nil)
 var _ asset.Authenticator = (*ExchangeWalletElectrum)(nil)
-var _ asset.WalletHistorian = (*ExchangeWalletElectrum)(nil)
 
 // ElectrumWallet creates a new ExchangeWalletElectrum for the provided
 // configuration, which must contain the necessary details for accessing the
