@@ -4,18 +4,14 @@
 package mj
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/fiatrates"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/tatanka/tanka"
-	"github.com/btcsuite/btcd/btcec/v2/ecdsa"
-	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
 const (
@@ -95,11 +91,37 @@ type Connect struct {
 
 type Disconnect = Connect
 
+// EncryptionKeyPayload is the payload of a Tankagram or TankagramResult that
+// contains the ephemeral public key of the sender.
+type EncryptionKeyPayload struct {
+	EphemeralPubKey dex.Bytes `json:"ephemeralPubKey"`
+}
+
 type Tankagram struct {
-	To           tanka.PeerID     `json:"to"`
-	From         tanka.PeerID     `json:"from"`
-	Message      *msgjson.Message `json:"message,omitempty"`
-	EncryptedMsg dex.Bytes        `json:"encryptedMessage,omitempty"`
+	To               tanka.PeerID `json:"to"`
+	From             tanka.PeerID `json:"from"`
+	EncryptedPayload dex.Bytes    `json:"encryptedPayload"`
+}
+
+// TankagramError is a standard error that can be returned to a peer.
+type TankagramError string
+
+const (
+	TEErrNone TankagramError = ""
+	// TEEPeerError is returned when a peer encounters an error.
+	TEEPeerError  TankagramError = "error"
+	TEEBadRequest TankagramError = "bad_request"
+	// TEDecryptionFailed is returned when a tankagram cannot be decrypted.
+	// This usually means that the counterparty does not have the same ephemeral
+	// encryption key, and it needs to be re-established.
+	TEDecryptionFailed TankagramError = "decryption_failed"
+)
+
+// TankagramResultPayload must be the contents of a decrypted
+// TankagramResult EncryptedResponse.
+type TankagramResultPayload struct {
+	Error   TankagramError `json:"error"`
+	Payload dex.Bytes      `json:"payload"`
 }
 
 // TankagramResultType is a critical component of the mesh network's reputation
@@ -110,29 +132,13 @@ type TankagramResultType string
 const (
 	TRTTransmitted  TankagramResultType = "transmitted"
 	TRTNoPath       TankagramResultType = "nopath"
-	TRTErrFromPeer  TankagramResultType = "errorfrompeer"
 	TRTErrFromTanka TankagramResultType = "errorfromtanka"
 	TRTErrBadClient TankagramResultType = "badclient"
 )
 
 type TankagramResult struct {
-	Result   TankagramResultType `json:"result"`
-	Response dex.Bytes           `json:"response"`
-	// If the tankagram is not transmitted, the server will stamp and sign the
-	// tankagram separately.
-	Stamp uint64    `json:"stamp"`
-	Sig   dex.Bytes `json:"sig"`
-}
-
-func (r *TankagramResult) Sign(priv *secp256k1.PrivateKey) {
-	r.Stamp = uint64(time.Now().UnixMilli())
-	resultB := []byte(r.Result)
-	preimage := make([]byte, len(resultB)+len(r.Response)+4)
-	copy(preimage[:len(resultB)], resultB)
-	copy(preimage[len(resultB):len(resultB)+len(r.Response)], r.Response)
-	copy(preimage[len(resultB)+len(r.Response):], encode.Uint64Bytes(r.Stamp))
-	digest := sha256.Sum256(preimage)
-	r.Sig = ecdsa.Sign(priv, digest[:]).Serialize()
+	Result           TankagramResultType `json:"result"`
+	EncryptedPayload dex.Bytes           `json:"encryptedPayload"`
 }
 
 type Broadcast struct {
