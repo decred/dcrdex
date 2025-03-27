@@ -53,7 +53,7 @@ import {
   GapStrategyPercentPlus,
   feesAndCommit
 } from './mmutil'
-import { Forms, bind as bindForm, NewWalletForm, TokenApprovalForm, DepositAddress, CEXConfigurationForm } from './forms'
+import { Forms, NewWalletForm, TokenApprovalForm, DepositAddress, CEXConfigurationForm } from './forms'
 import * as intl from './locales'
 import * as OrderUtil from './orderutil'
 
@@ -288,7 +288,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     Doc.bind(page.updateButton, 'click', () => { this.saveSettings() })
     Doc.bind(page.createButton, 'click', async () => { this.saveSettings() })
     Doc.bind(page.deleteBttn, 'click', () => { this.delete() })
-    bindForm(page.botTypeForm, page.botTypeSubmit, () => { this.submitBotType() })
+    Doc.bind(page.botTypeSubmit, 'click', () => { this.submitBotType() })
     Doc.bind(page.noMarketBttn, 'click', () => { this.showMarketSelectForm() })
     Doc.bind(page.botTypeHeader, 'click', () => { this.reshowBotTypeForm() })
     Doc.bind(page.botTypeChangeMarket, 'click', () => { this.showMarketSelectForm() })
