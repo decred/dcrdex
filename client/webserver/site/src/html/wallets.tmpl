@@ -56,7 +56,7 @@
     </section>
 
     <div class="flex-grow-1 position-relative">
-      <div class="scrollsmall fill-abs d-flex flex-wrap align-items-stretch">
+      <div id="tickerBox" class="scrollsmall fill-abs d-flex flex-wrap align-items-stretch">
         {{- /* WALLET DETAILS */ -}}
         <div id="walletDetailsBox" class="position-relative col-24 col-xl-12 col-xxl-9 flex-stretch-column invisible">
           <div class="column flex-stretch-column">
@@ -122,6 +122,16 @@
               </div>
               <div id="createWalletBox" class="p-3 border-top text-end">
                 <button id="createWallet" class="large feature">[[[create_a_x_wallet]]]</button>
+              </div>
+            </section>
+
+            {{- /* EXCHANGE RATE */ -}}
+            <section class="flex-stretch-column">
+              <div class="flex-center py-2 fs15 demi">Exchange Rate</div>
+              <div class="mx-2 border-bottom"></div>
+              <div class="flex-grow-1 flex-center py-2">
+                <span class="fs16 mb-1 demi">$</span>
+                <span id="feeStateXcRate" class="fs22 me-1 demi lh1"></span>
               </div>
             </section>
 
@@ -477,13 +487,44 @@
         <div id="secondColumn" class="position-relative col-24 col-xl-12 col-xxl-15 flex-stretch-column stylish-overflow-lg invisible">
           <div class="column flex-stretch-column">
 
-            {{- /* EXCHANGE RATE */ -}}
-            <section class="flex-stretch-column">
-              <div class="flex-center py-2 fs15 demi">Exchange Rate</div>
-              <div class="mx-2 border-bottom"></div>
-              <div class="flex-grow-1 flex-center py-2">
-                <span class="fs16 mb-1 demi">$</span>
-                <span id="feeStateXcRate" class="fs22 me-1 demi lh1"></span>
+            {{/* PENDING TRANSACTIONS */}}
+            <section>
+              <div class="flex-center py-3 fs18">
+                <span id="noPendingTxs">no pending transactions</span>
+                <span id="somePendingTxs">
+                  <span id="pendingTxsCount"></span>
+                  <span>pending transactions</span>
+                  <span id="expandPendingTxs" class="p-1 pointer hoverbg fs11 ico-arrowdown"></span>
+                </span>
+              </div>
+              <div id="pendingTxsListBox" class="d-hide px-2 pb-3">
+                <table id="pendingTxsList" class="compact row-border border-top">
+                  <thead class="unbold fs15">
+                    <tr>
+                      <th class="multinetonly">Network</th>
+                      <th>[[[Type]]]</th>
+                      <th class="d-none d-sm-table-cell">[[[ID]]]</th>
+                      <th>[[[Age]]]</th>
+                      <th class="text-end">[[[Amount]]]</th>
+                      <th>Confirms</th>
+                    </tr>
+                  </thead>
+                  <tbody id="pendingTxs">
+                    <tr id="pendingTxTmpl">
+                      <th class="multinetonly">
+                        <img data-tmpl="chainLogo" class="micro-icon greyscale">
+                        <span data-tmpl="chainName" class="ms-1"></span>
+                      </th>
+                      <td data-tmpl="type"></td>
+                      <td class="d-none d-sm-table-cell">
+                        <a data-tmpl="id" class="subtlelink"></a>
+                      </td>
+                      <td data-tmpl="age"></td>
+                      <td data-tmpl="amount" class="text-end"></td>
+                      <td data-tmpl="confirms"></td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </section>
 

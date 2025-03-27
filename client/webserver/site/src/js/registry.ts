@@ -261,6 +261,7 @@ export interface WalletState {
   syncStatus: SyncStatus
   approved: Record<number, ApprovalStatus>
   feeState?: FeeState
+  pendingTxs: Record<string, WalletTransaction>
 }
 
 export interface WalletInfo {
@@ -1283,6 +1284,12 @@ export interface WalletTransaction {
   isUserOp: boolean
   userOpTxID: string
   bridgeCounterpartTx?: BridgeCounterpartTx
+  confirmed: boolean
+  confirms?: {
+    current: number
+    target: number
+  }
+  rejected: boolean
 }
 
 export interface TxHistoryResult {

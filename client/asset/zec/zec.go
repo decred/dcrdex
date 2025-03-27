@@ -337,7 +337,6 @@ type zecWallet struct {
 
 var _ asset.FeeRater = (*zecWallet)(nil)
 var _ asset.Wallet = (*zecWallet)(nil)
-var _ asset.WalletHistorian = (*zecWallet)(nil)
 var _ asset.NewAddresser = (*zecWallet)(nil)
 
 // TODO: Implement LiveReconfigurer
@@ -3089,6 +3088,21 @@ func (w *zecWallet) WalletTransaction(_ context.Context, txID string) (*asset.Wa
 	return tx, nil
 }
 
+// PendingTransactions loads wallet transactions that are not yet confirmed.
+func (w *zecWallet) PendingTransactions(ctx context.Context) []*asset.WalletTransaction {
+	w.pendingTxsMtx.RLock()
+	defer w.pendingTxsMtx.RUnlock()
+	txs := make([]*asset.WalletTransaction, 0, len(w.pendingTxs))
+	for _, tx := range w.pendingTxs {
+		if tx.Confirmed {
+			continue
+		}
+		txCopy := *tx.WalletTransaction
+		txs = append(txs, &txCopy)
+	}
+	return txs
+}
+
 // TxHistory returns all the transactions the wallet has made. If refID is nil,
 // then transactions starting from the most recent are returned (past is ignored).
 // If past is true, the transactions prior to the refID are returned, otherwise
@@ -3523,9 +3537,18 @@ func (w *zecWallet) syncTxHistory(tip uint64) {
 		if tx.BlockNumber > 0 && tip >= tx.BlockNumber {
 			confs = tip - tx.BlockNumber + 1
 		}
+
 		if confs >= defaultConfTarget {
 			tx.Confirmed = true
+			tx.Confirms = nil
 			updated = true
+		} else {
+			tx.Confirmed = false
+			updated = tx.Confirms == nil || tx.Confirms.Current != uint32(confs)
+			tx.Confirms = &asset.Confirms{
+				Current: uint32(confs),
+				Target:  requiredRedeemConfirms,
+			}
 		}
 
 		if updated {

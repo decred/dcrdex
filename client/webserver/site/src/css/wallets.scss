@@ -148,15 +148,17 @@
       width: 18px;
       height: 18px;
     }
+  }
 
+  #tickerBox {
     &:not(.multinet) .multinetonly {
       display: none !important;
     }
-
+  
     &.multinet .uninetonly {
       display: none !important;
     }
-
+  
     &:not(.token) .tokenonly {
       display: none !important;
     }
@@ -185,7 +187,7 @@
   }
 
   .negative-tx {
-    color: $danger;
+    color: inherit;
   }
 
   #docs {

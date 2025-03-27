@@ -986,6 +986,12 @@ export default class Application {
    * or updates an existing transaction.
    */
   handleTransactionNote (assetID: number, note: TransactionNote) {
+    const w = this.walletMap[assetID]
+    if (!w) return
+    const tx = note.transaction
+    if (tx.confirmed) delete w.pendingTxs[tx.id]
+    else w.pendingTxs[tx.id] = tx
+
     const txHistory = this.txHistoryMap[assetID]
     if (!txHistory) return
 
