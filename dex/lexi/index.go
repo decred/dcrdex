@@ -16,6 +16,9 @@ const (
 	// ErrEndIteration can be returned from the function passed to Iterate
 	// to end iteration. No error will be returned from Iterate.
 	ErrEndIteration = dex.ErrorKind("end iteration")
+	// ErrNotIndexed can be returned from the function passed to AddIndex
+	// to indicate that a datum should not be added to the index.
+	ErrNotIndexed = dex.ErrorKind("not indexed")
 )
 
 // Index is just a lexicographically-ordered list of byte slices. An Index is
@@ -116,9 +119,14 @@ func (idx *Index) checkForIndexConflict(txn *badger.Txn, idxB []byte, updatingDB
 	return nil
 }
 
+// add adds an entry to the index. If this element is not required to be
+// indexed, a nil byte slice is returned and no error is returned.
 func (idx *Index) add(txn *badger.Txn, k, v KV, dbID DBID) ([]byte, error) {
 	idxB, err := idx.f(k, v)
 	if err != nil {
+		if errors.Is(err, ErrNotIndexed) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("error getting index value: %w", err)
 	}
 	b := prefixedKey(idx.prefix, append(idxB, dbID[:]...))
