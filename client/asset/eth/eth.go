@@ -1085,6 +1085,8 @@ func (w *TokenBridgeWallet) Connect(ctx context.Context) (wg *sync.WaitGroup, er
 		bridge, err = newUsdcBridge(w.assetID, w.net, w.netToken.Address, w.node.contractBackend(), w.addr, w.node)
 	case w.baseChainID == polygonID:
 		bridge, err = newPolygonBridgePolygonErc20(w.node.contractBackend(), w.assetID, w.netToken.Address, w.log, w.net)
+	case w.assetID == ethMaticID:
+		bridge, err = newPolygonBridgeEthPOL(w.node.contractBackend(), w.assetID, w.netToken.Address, w.net, w.addr, w.log)
 	case w.baseChainID == ethID:
 		bridge, err = newPolygonBridgeEthErc20(ctx, w.node.contractBackend(), w.assetID, w.netToken.Address, w.net, w.addr, w.log)
 	default:

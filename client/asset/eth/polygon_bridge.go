@@ -23,6 +23,7 @@ var (
 	wethPolygonID, _ = dex.BipSymbolID("weth.polygon")
 	ethID, _         = dex.BipSymbolID("eth")
 	polygonID, _     = dex.BipSymbolID("polygon")
+	ethMaticID, _    = dex.BipSymbolID("matic.eth")
 )
 
 var polygonBridgeSupportedAssets = map[dex.Network]map[uint32]uint32{
@@ -31,10 +32,12 @@ var polygonBridgeSupportedAssets = map[dex.Network]map[uint32]uint32{
 		usdtPolygonID: usdtEthID,
 		ethID:         wethPolygonID,
 		wethPolygonID: ethID,
+		ethMaticID:    polygonID,
 	},
 	dex.Testnet: {
 		ethID:         wethPolygonID,
 		wethPolygonID: ethID,
+		ethMaticID:    polygonID,
 	},
 }
 
@@ -144,9 +147,26 @@ func (b *polygonBridgePolygonERC20) completeBridgeGas() uint64 {
 	return 0
 }
 
-var rootChainManagerAddrs = map[dex.Network]common.Address{
-	dex.Mainnet: common.HexToAddress("0xA0c68C638235ee32657e8f720a23ceC1bFc77C77"),
-	dex.Testnet: common.HexToAddress("0x34f5a25b627f50bb3f5cab72807c4d4f405a9232"),
+type polygonBridgeAddresses struct {
+	// rootChainManagerAddr is the address of the root chain manager contract.
+	// This is the newer polygon bridge used to bridge ERC20s and ETH between
+	// Ethereum and Polygon POS.
+	rootChainManagerAddr common.Address
+	// depositManagerAddr is the address of the deposit manager contract. This
+	// is part of the original plasma bridge, and is used to deposit MATIC and
+	// POL to Polygon POS.
+	depositManagerAddr common.Address
+}
+
+var polygonBridgeAddrs = map[dex.Network]*polygonBridgeAddresses{
+	dex.Mainnet: {
+		rootChainManagerAddr: common.HexToAddress("0xA0c68C638235ee32657e8f720a23ceC1bFc77C77"),
+		depositManagerAddr:   common.HexToAddress("0x401f6c983ea34274ec46f84d70b31c151321188b"),
+	},
+	dex.Testnet: {
+		rootChainManagerAddr: common.HexToAddress("0x34f5a25b627f50bb3f5cab72807c4d4f405a9232"),
+		depositManagerAddr:   common.HexToAddress("0x44Ad17990F9128C6d823Ee10dB7F0A5d40a731A4"),
+	},
 }
 
 // polygonBridgeEth is used to manage the bridge operations on Ethereum
@@ -162,12 +182,12 @@ type polygonBridgeEth struct {
 var _ bridge = (*polygonBridgeEth)(nil)
 
 func newPolygonBridgeEth(cb bind.ContractBackend, net dex.Network, addr common.Address, log dex.Logger) (*polygonBridgeEth, error) {
-	rootChainManagerAddr, found := rootChainManagerAddrs[net]
+	addrs, found := polygonBridgeAddrs[net]
 	if !found {
 		return nil, fmt.Errorf("no root chain manager address found for network %s", net)
 	}
 
-	rootChainManager, err := polygonbridge.NewRootChainManager(rootChainManagerAddr, cb)
+	rootChainManager, err := polygonbridge.NewRootChainManager(addrs.rootChainManagerAddr, cb)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +261,7 @@ type polygonBridgeEthErc20 struct {
 var _ bridge = (*polygonBridgeEthErc20)(nil)
 
 func newPolygonBridgeEthErc20(ctx context.Context, cb bind.ContractBackend, assetID uint32, tokenAddress common.Address, net dex.Network, addr common.Address, log dex.Logger) (*polygonBridgeEthErc20, error) {
-	rootChainManagerAddr, found := rootChainManagerAddrs[net]
+	addrs, found := polygonBridgeAddrs[net]
 	if !found {
 		return nil, fmt.Errorf("no root chain manager address found for network %s", net)
 	}
@@ -251,7 +271,7 @@ func newPolygonBridgeEthErc20(ctx context.Context, cb bind.ContractBackend, asse
 		return nil, err
 	}
 
-	rootChainManager, err := polygonbridge.NewRootChainManager(rootChainManagerAddr, cb)
+	rootChainManager, err := polygonbridge.NewRootChainManager(addrs.rootChainManagerAddr, cb)
 	if err != nil {
 		return nil, err
 	}
@@ -337,4 +357,96 @@ func (b *polygonBridgeEthErc20) initiateBridgeGas() uint64 {
 
 func (b *polygonBridgeEthErc20) completeBridgeGas() uint64 {
 	return 600_000
+}
+
+// polygonBridgeEthPOLToken is the bridge operations on Ethereum for POL/MATIC
+// tokens.
+type polygonBridgeEthPOLToken struct {
+	tokenAddress       common.Address
+	tokenContract      *erc20.IERC20
+	depositManager     *polygonbridge.DepositManager
+	depositManagerAddr common.Address
+	cb                 bind.ContractBackend
+	log                dex.Logger
+	addr               common.Address
+	assetID            uint32
+	net                dex.Network
+}
+
+var _ bridge = (*polygonBridgeEthPOLToken)(nil)
+
+func newPolygonBridgeEthPOL(cb bind.ContractBackend, assetID uint32, tokenAddress common.Address, net dex.Network, addr common.Address, log dex.Logger) (*polygonBridgeEthPOLToken, error) {
+	addrs, found := polygonBridgeAddrs[net]
+	if !found {
+		return nil, fmt.Errorf("no root chain manager address found for network %s", net)
+	}
+
+	tokenContract, err := erc20.NewIERC20(tokenAddress, cb)
+	if err != nil {
+		return nil, err
+	}
+
+	depositManager, err := polygonbridge.NewDepositManager(addrs.depositManagerAddr, cb)
+	if err != nil {
+		return nil, err
+	}
+
+	return &polygonBridgeEthPOLToken{
+		tokenAddress:       tokenAddress,
+		tokenContract:      tokenContract,
+		depositManager:     depositManager,
+		depositManagerAddr: addrs.depositManagerAddr,
+		cb:                 cb,
+		log:                log,
+		addr:               addr,
+		assetID:            assetID,
+		net:                net,
+	}, nil
+}
+
+func (b *polygonBridgeEthPOLToken) bridgeContractAddr() common.Address {
+	return b.depositManagerAddr
+}
+
+func (b *polygonBridgeEthPOLToken) approveBridgeContract(opts *bind.TransactOpts, amt *big.Int) (*types.Transaction, error) {
+	return b.tokenContract.Approve(opts, b.depositManagerAddr, amt)
+}
+
+func (b *polygonBridgeEthPOLToken) bridgeContractAllowance(ctx context.Context) (*big.Int, error) {
+	_, pendingUnavailable := b.cb.(*multiRPCClient)
+	callOpts := &bind.CallOpts{
+		Pending: !pendingUnavailable,
+		From:    b.addr,
+		Context: ctx,
+	}
+	return b.tokenContract.Allowance(callOpts, b.addr, b.depositManagerAddr)
+}
+
+func (b *polygonBridgeEthPOLToken) requiresBridgeContractApproval() bool {
+	return true
+}
+
+func (b *polygonBridgeEthPOLToken) initiateBridge(opts *bind.TransactOpts, destAssetID uint32, amt *big.Int) (*types.Transaction, bool, error) {
+	expectedDestAssetID, _ := PolygonBridgeSupportedAsset(b.assetID, b.net)
+	if expectedDestAssetID != destAssetID {
+		return nil, false, fmt.Errorf("%s cannot be bridged to %s", dex.BipIDSymbol(b.assetID), dex.BipIDSymbol(expectedDestAssetID))
+	}
+	tx, err := b.depositManager.DepositERC20ForUser(opts, b.tokenAddress, b.addr, amt)
+	return tx, true, err
+}
+
+func (b *polygonBridgeEthPOLToken) getCompletionData(ctx context.Context, bridgeTxID string) ([]byte, error) {
+	return nil, fmt.Errorf("no completion transaction is required when bridging from eth -> pol")
+}
+
+func (b *polygonBridgeEthPOLToken) completeBridge(opts *bind.TransactOpts, mintInfo []byte) (tx *types.Transaction, err error) {
+	panic("not implemented")
+}
+
+func (b *polygonBridgeEthPOLToken) initiateBridgeGas() uint64 {
+	return 600_000
+}
+
+func (b *polygonBridgeEthPOLToken) completeBridgeGas() uint64 {
+	panic("not implemented")
 }
