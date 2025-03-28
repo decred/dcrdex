@@ -259,7 +259,7 @@ func (m *Mesh) SubscribeMarket(baseID, quoteID uint32) error {
 
 	m.markets[mktName] = &market{
 		log:  m.log.SubLogger(mktName),
-		ords: make(map[tanka.ID32]*order),
+		ords: make(map[tanka.ID40]*order),
 	}
 	return nil
 }
