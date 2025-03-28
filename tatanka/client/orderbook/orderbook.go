@@ -4,7 +4,7 @@
 package orderbook
 
 import (
-	"errors"
+	"fmt"
 	"sort"
 	"sync"
 
@@ -13,18 +13,18 @@ import (
 
 // OrderBooker specifies the orderbook interface.
 type OrderBooker interface {
-	OrderIDs() [][32]byte
-	Order(id [32]byte) *tanka.OrderUpdate
-	Orders(ids [][32]byte) []*tanka.OrderUpdate
-	FindOrders(filter *OrderFilter) []*tanka.OrderUpdate
-	AddUpdate(*tanka.OrderUpdate) error
-	Delete(id [32]byte)
+	Order(id tanka.ID40) *tanka.Order
+	Orders(ids []tanka.ID40) []*tanka.Order
+	FindOrders(filter *OrderFilter) []*tanka.Order
+	Add(*tanka.Order)
+	Update(ou *tanka.OrderUpdate) error
+	Delete(id tanka.ID40)
 }
 
 // OrderFilter is used when searching for orders.
 type OrderFilter struct {
 	IsSell *bool
-	Check  func(*tanka.OrderUpdate) (ok, done bool)
+	Check  func(*tanka.Order) (ok, done bool)
 }
 
 var _ OrderBooker = (*OrderBook)(nil)
@@ -32,47 +32,34 @@ var _ OrderBooker = (*OrderBook)(nil)
 // OrderBook holds the orderbook.
 type OrderBook struct {
 	mtx  sync.RWMutex
-	book map[[32]byte]*tanka.OrderUpdate
+	book map[tanka.ID40]*tanka.Order
 	// buys and sells use the same pointers as the book and are sorted
 	// with the best trade first.
-	buys, sells []*tanka.OrderUpdate
+	buys, sells []*tanka.Order
 }
 
 // NewOrderBook created a new orderbook.
 func NewOrderBook() *OrderBook {
 	return &OrderBook{
-		book: make(map[[32]byte]*tanka.OrderUpdate),
+		book: make(map[tanka.ID40]*tanka.Order),
 	}
-}
-
-// OrderIDs returns all order ids.
-func (ob *OrderBook) OrderIDs() [][32]byte {
-	ob.mtx.RLock()
-	defer ob.mtx.RUnlock()
-	ids := make([][32]byte, len(ob.book))
-	i := 0
-	for id := range ob.book {
-		ids[i] = id
-		i++
-	}
-	return ids
 }
 
 // Order returns one order by id.
-func (ob *OrderBook) Order(id [32]byte) *tanka.OrderUpdate {
+func (ob *OrderBook) Order(id tanka.ID40) *tanka.Order {
 	ob.mtx.RLock()
 	defer ob.mtx.RUnlock()
 	return ob.book[id]
 }
 
 // Orders returns all orders for the supplied ids.
-func (ob *OrderBook) Orders(ids [][32]byte) []*tanka.OrderUpdate {
+func (ob *OrderBook) Orders(ids []tanka.ID40) []*tanka.Order {
 	ob.mtx.RLock()
 	defer ob.mtx.RUnlock()
-	ords := make([]*tanka.OrderUpdate, 0, len(ids))
+	ords := make([]*tanka.Order, 0, len(ids))
 	for _, id := range ids {
-		if ou, has := ob.book[id]; has {
-			ords = append(ords, ou)
+		if o, has := ob.book[id]; has {
+			ords = append(ords, o)
 		}
 	}
 	return ords
@@ -80,7 +67,7 @@ func (ob *OrderBook) Orders(ids [][32]byte) []*tanka.OrderUpdate {
 
 // FindOrders returns all orders the filter returns true until it specifies
 // done. Orders are returned with the best buys/sells first.
-func (ob *OrderBook) FindOrders(filter *OrderFilter) (ous []*tanka.OrderUpdate) {
+func (ob *OrderBook) FindOrders(filter *OrderFilter) (orders []*tanka.Order) {
 	if filter == nil {
 		return nil
 	}
@@ -89,9 +76,9 @@ func (ob *OrderBook) FindOrders(filter *OrderFilter) (ous []*tanka.OrderUpdate) 
 		if isSell {
 			ords = ob.sells
 		}
-		for _, ou := range ords {
+		for _, o := range ords {
 			if filter.Check != nil {
-				ok, done := filter.Check(ou)
+				ok, done := filter.Check(o)
 				if !ok {
 					continue
 				}
@@ -99,7 +86,7 @@ func (ob *OrderBook) FindOrders(filter *OrderFilter) (ous []*tanka.OrderUpdate) 
 					break
 				}
 			}
-			ous = append(ous, ou)
+			orders = append(orders, o)
 		}
 	}
 	ob.mtx.RLock()
@@ -110,60 +97,70 @@ func (ob *OrderBook) FindOrders(filter *OrderFilter) (ous []*tanka.OrderUpdate) 
 		find(false)
 		find(true)
 	}
-	return ous
+	return orders
 }
 
 // addOrderAndSort must be called with the mtx held for writes.
-func (ob *OrderBook) addOrderAndSort(ou *tanka.OrderUpdate) {
+func (ob *OrderBook) addOrderAndSort(o *tanka.Order) {
 	ords := &ob.buys
 	sortFn := func(i, j int) bool { return (*ords)[i].Rate > (*ords)[j].Rate }
-	if ou.Sell {
+	if o.Sell {
 		ords = &ob.sells
 		sortFn = func(i, j int) bool { return (*ords)[i].Rate < (*ords)[j].Rate }
 	}
-	*ords = append(*ords, ou)
+	*ords = append(*ords, o)
 	sort.Slice(*ords, sortFn)
 }
 
-// addOrderAndSort must be called with the mtx held for writes.
-func (ob *OrderBook) deleteSortedOrder(ou *tanka.OrderUpdate) {
+// deleteSortedOrder must be called with the mtx held for writes.
+func (ob *OrderBook) deleteSortedOrder(o *tanka.Order) {
 	ords := &ob.buys
-	if ou.Sell {
+	if o.Sell {
 		ords = &ob.sells
 	}
 	for i, o := range *ords {
 		// Comparing pointers.
-		if o == ou {
+		if o == o {
 			*ords = append((*ords)[:i], (*ords)[i+1:]...)
 			break
 		}
 	}
 }
 
-// AddUpdate adds or updates an order.
-func (ob *OrderBook) AddUpdate(ou *tanka.OrderUpdate) error {
-	id := ou.ID()
+// Add adds an order.
+func (ob *OrderBook) Add(o *tanka.Order) {
+	id := o.ID()
 	ob.mtx.Lock()
 	defer ob.mtx.Unlock()
-	oldOU, has := ob.book[id]
-	if has && oldOU.Expiration.Before(ou.Expiration) {
-		return errors.New("expiration is before already recorded order")
-	}
-	ob.book[id] = ou
+	_, has := ob.book[id]
 	if has {
-		ob.deleteSortedOrder(oldOU)
+		return
 	}
-	ob.addOrderAndSort(ou)
+	ob.book[id] = o
+	ob.addOrderAndSort(o)
+}
+
+// Update updates an order.
+func (ob *OrderBook) Update(ou *tanka.OrderUpdate) error {
+	ob.mtx.Lock()
+	defer ob.mtx.Unlock()
+	id := ou.ID()
+	o, has := ob.book[id]
+	if !has {
+		return fmt.Errorf("order %x not found", id)
+	}
+	o.Qty = ou.Qty
+	o.Stamp = ou.Stamp
 	return nil
 }
 
 // Delete deletes an order from the books.
-func (ob *OrderBook) Delete(id [32]byte) {
+func (ob *OrderBook) Delete(id tanka.ID40) {
 	ob.mtx.Lock()
 	defer ob.mtx.Unlock()
-	ou, has := ob.book[id]
+	o, has := ob.book[id]
 	if has {
 		delete(ob.book, id)
-		ob.deleteSortedOrder(ou)
+		ob.deleteSortedOrder(o)
 	}
 }
