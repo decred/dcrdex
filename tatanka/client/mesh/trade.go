@@ -14,7 +14,7 @@ import (
 
 type order struct {
 	*tanka.Order
-	oid      tanka.ID32
+	oid      tanka.ID40
 	proposed map[tanka.ID32]*tanka.Match
 	accepted map[tanka.ID32]*tanka.Match
 }
@@ -23,7 +23,7 @@ type market struct {
 	log dex.Logger
 
 	ordsMtx sync.RWMutex
-	ords    map[tanka.ID32]*order
+	ords    map[tanka.ID40]*order
 }
 
 func (m *market) addOrder(ord *tanka.Order) {
