@@ -10,6 +10,7 @@ import (
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex/calc"
+	"decred.org/dcrdex/dex/utils"
 )
 
 // sniper is a Trader that will randomly place orders targeting existing orders.
@@ -95,9 +96,9 @@ func (s *sniper) snipe(m *Mantle) {
 	}
 
 	maxOrders := 1 + rand.Intn(s.maxOrdsPerEpoch)
-	targets := book.Sells[:clamp(maxOrders, 0, len(book.Sells))]
+	targets := book.Sells[:utils.Clamp(maxOrders, 0, len(book.Sells))]
 	if sell {
-		targets = book.Buys[:clamp(maxOrders, 0, len(book.Buys))]
+		targets = book.Buys[:utils.Clamp(maxOrders, 0, len(book.Buys))]
 	}
 	rem := maxQty
 

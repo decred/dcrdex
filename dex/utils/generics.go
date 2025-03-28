@@ -50,31 +50,6 @@ func SafeSub[I constraints.Unsigned](a I, b I) I {
 	return a - b
 }
 
-func Min[I constraints.Ordered](m I, ns ...I) I {
-	min := m
-	for _, n := range ns {
-		if n < min {
-			min = n
-		}
-	}
-	return min
-}
-
-func Max[I constraints.Ordered](m I, ns ...I) I {
-	max := m
-	for _, n := range ns {
-		if n > max {
-			max = n
-		}
-	}
-	return max
-}
-
-func Clamp[I constraints.Ordered](v I, min I, max I) I {
-	if v < min {
-		v = min
-	} else if v > max {
-		v = max
-	}
-	return v
+func Clamp[I constraints.Ordered](v I, minVal I, maxVal I) I {
+	return max(min(v, maxVal), minVal)
 }
