@@ -56,10 +56,11 @@ var (
 	}
 )
 
+// ### Helper Functions
+
 func newBootNode(addr string, peerID []byte) tatanka.BootNode {
 	tcpCfg, _ := json.Marshal(&tcp.RemoteNodeConfig{
 		URL: "ws://" + addr,
-		// Cert: ,
 	})
 	return tatanka.BootNode{
 		Protocol: "ws",
@@ -68,9 +69,58 @@ func newBootNode(addr string, peerID []byte) tatanka.BootNode {
 	}
 }
 
-func findOpenAddrs(n int) ([]net.Addr, error) {
-	addrs := make([]net.Addr, 0, n)
+func genKeyPair() (*secp256k1.PrivateKey, tanka.PeerID) {
+	priv, _ := secp256k1.GeneratePrivateKey()
+	var peerID tanka.PeerID
+	copy(peerID[:], priv.PubKey().SerializeCompressed())
+	return priv, peerID
+}
+
+func mustEncode(thing interface{}) json.RawMessage {
+	b, err := json.Marshal(thing)
+	if err != nil {
+		panic("mustEncode: " + err.Error())
+	}
+	return b
+}
+
+// ### Test types
+
+type tTatankaNodeInfo struct {
+	priv   *secp256k1.PrivateKey
+	peerID tanka.PeerID
+	addr   net.Addr
+}
+
+type tTatanka struct {
+	tatanka  *tatanka.Tatanka
+	cm       *dex.ConnectionMaster
+	nodeInfo *tTatankaNodeInfo
+}
+
+type tMesh struct {
+	tatankas []*tTatanka
+}
+
+type tConn struct {
+	conn                         *MeshConn
+	cm                           *dex.ConnectionMaster
+	priv                         *secp256k1.PrivateKey
+	peerID                       tanka.PeerID
+	incomingTatankaRequests      chan *msgjson.Message
+	incomingTatankaNotifications chan *msgjson.Message
+	incomingPeerMsgs             chan *IncomingTankagram
+}
+
+// ### Network Setup Functions
+
+// meshNodeInfos creates a list of node info for a mesh of n nodes.
+func meshNodeInfos(n int) ([]*tTatankaNodeInfo, error) {
+	nodes := make([]*tTatankaNodeInfo, 0, n)
+
 	for i := 0; i < n; i++ {
+		priv, peerID := genKeyPair()
+
 		addr, err := net.ResolveTCPAddr("tcp", "localhost:0")
 		if err != nil {
 			return nil, err
@@ -81,36 +131,30 @@ func findOpenAddrs(n int) ([]net.Addr, error) {
 			return nil, err
 		}
 		defer l.Close()
-		addrs = append(addrs, l.Addr())
+
+		nodes = append(nodes, &tTatankaNodeInfo{
+			priv:   priv,
+			peerID: peerID,
+			addr:   l.Addr(),
+		})
 	}
 
-	return addrs, nil
+	return nodes, nil
 }
 
-type testTatanka struct {
-	tatanka *tatanka.Tatanka
-	cm      *dex.ConnectionMaster
-	privKey *secp256k1.PrivateKey
-	peerID  tanka.PeerID
-	addr    string
-}
-
-func genKey() (*secp256k1.PrivateKey, tanka.PeerID) {
-	priv, _ := secp256k1.GeneratePrivateKey()
-	var peerID tanka.PeerID
-	copy(peerID[:], priv.PubKey().SerializeCompressed())
-	return priv, peerID
-}
-
-func runServer(t *testing.T, ctx context.Context, addr, peerAddr net.Addr, disableMessariFiatRateSource bool) (*testTatanka, error) {
-	priv, peerID := genKey()
-
+// runServer starts a new Tatanka node with the given node info and other nodes as
+// part of its whitelist.
+func runServer(t *testing.T, ctx context.Context, thisNode *tTatankaNodeInfo, otherNodes []*tTatankaNodeInfo, disableMessariFiatRateSource bool) (*tTatanka, error) {
 	dir := t.TempDir()
 	os.MkdirAll(dir, 0755)
-	os.WriteFile(filepath.Join(dir, "priv.key"), priv.Serialize(), 0644)
+	os.WriteFile(filepath.Join(dir, "priv.key"), thisNode.priv.Serialize(), 0644)
 
-	n := newBootNode(peerAddr.String(), peerID[:])
-	log := logMaker.Logger(fmt.Sprintf("SRV[%s]", addr))
+	whiteList := make([]tatanka.BootNode, 0, len(otherNodes))
+	for _, node := range otherNodes {
+		whiteList = append(whiteList, newBootNode(node.addr.String(), node.peerID[:]))
+	}
+
+	log := logMaker.Logger(fmt.Sprintf("SRV[%s]", thisNode.addr))
 	ttCfg := &tatanka.ConfigFile{Chains: chains}
 	rawCfg, _ := json.Marshal(ttCfg)
 	cfgPath := filepath.Join(dir, "config.json")
@@ -124,11 +168,11 @@ func runServer(t *testing.T, ctx context.Context, addr, peerAddr net.Addr, disab
 		DataDir: dir,
 		Logger:  log,
 		RPC: comms.RPCConfig{
-			ListenAddrs: []string{addr.String()},
+			ListenAddrs: []string{thisNode.addr.String()},
 			NoTLS:       true,
 		},
 		ConfigPath: cfgPath,
-		WhiteList:  []tatanka.BootNode{n},
+		WhiteList:  whiteList,
 	}
 
 	if disableMessariFiatRateSource {
@@ -149,84 +193,53 @@ func runServer(t *testing.T, ctx context.Context, addr, peerAddr net.Addr, disab
 		return nil, err
 	}
 
-	return &testTatanka{
-		tatanka: tatanka,
-		addr:    addr.String(),
-		cm:      cm,
-		privKey: priv,
-		peerID:  peerID,
+	return &tTatanka{
+		tatanka:  tatanka,
+		cm:       cm,
+		nodeInfo: thisNode,
 	}, nil
 }
 
-type testMesh struct {
-	tatankas []*testTatanka
-}
-
-func setupMesh(t *testing.T, ctx context.Context, numNodes int) (*testMesh, error) {
-	addrs, err := findOpenAddrs(numNodes)
+// setupMesh creates a mesh of numNode tatankas, with each node having all
+// other nodes in the mesh as its whitelist.
+func setupMesh(t *testing.T, ctx context.Context, numNodes int) ([]*tTatanka, error) {
+	nodes, err := meshNodeInfos(numNodes)
 	if err != nil {
-		return nil, fmt.Errorf("findOpenAddrs error: %w", err)
+		return nil, fmt.Errorf("meshNodeInfos error: %w", err)
 	}
 
-	tatankas := make([]*testTatanka, 0, numNodes)
+	tatankas := make([]*tTatanka, 0, numNodes)
 	for i := 0; i < numNodes; i++ {
-		var peerAddr net.Addr
-		if i == numNodes-1 {
-			peerAddr = addrs[0]
-		} else {
-			peerAddr = addrs[i+1]
-		}
-		tt, err := runServer(t, ctx, addrs[i], peerAddr, true)
+		thisNode := nodes[i]
+		otherNodes := make([]*tTatankaNodeInfo, 0, numNodes-1)
+		otherNodes = append(otherNodes, nodes[:i]...)
+		otherNodes = append(otherNodes, nodes[i+1:]...)
+
+		tt, err := runServer(t, ctx, thisNode, otherNodes, true)
 		if err != nil {
 			return nil, fmt.Errorf("runServer error: %w", err)
 		}
+
 		tatankas = append(tatankas, tt)
 	}
 
-	return &testMesh{
-		tatankas: tatankas,
-	}, nil
+	return tatankas, nil
 }
 
-func mustEncode(thing interface{}) json.RawMessage {
-	b, err := json.Marshal(thing)
-	if err != nil {
-		panic("mustEncode: " + err.Error())
-	}
-	return b
-}
+// newTestConn creates a new client connection to a tatanka node.
+func newTestConn(t *testing.T, i int, ctx context.Context, tatankaNodeInfo *tTatankaNodeInfo) (*tConn, error) {
+	priv, peerID := genKeyPair()
 
-func TestMain(m *testing.M) {
-	var err error
-	logMaker, err = dex.NewLoggerMaker(os.Stdout, dex.LevelTrace.String())
-	if err != nil {
-		panic("failed to create custom logger: " + err.Error())
-	}
-	comms.UseLogger(logMaker.NewLogger("COMMS", dex.LevelTrace))
-	os.Exit(m.Run())
-}
-
-type testConn struct {
-	conn                         *MeshConn
-	cm                           *dex.ConnectionMaster
-	priv                         *secp256k1.PrivateKey
-	peerID                       tanka.PeerID
-	incomingTatankaRequests      chan *msgjson.Message
-	incomingTatankaNotifications chan *msgjson.Message
-	incomingPeerMsgs             chan *IncomingTankagram
-}
-
-func newTestConn(t *testing.T, i int, ctx context.Context, tatankaAddr string, tatankaPeerID tanka.PeerID) (*testConn, error) {
-	priv, peerID := genKey()
-
+	// Setup channels for incoming messages
 	incomingTatankaRequests := make(chan *msgjson.Message, 10)
 	incomingTatankaNotifications := make(chan *msgjson.Message, 10)
 	incomingPeerMsgs := make(chan *IncomingTankagram, 10)
 
+	// Configure connection
 	cfg := &Config{
 		EntryNode: &TatankaCredentials{
-			PeerID: tatankaPeerID,
-			Addr:   tatankaAddr,
+			PeerID: tatankaNodeInfo.peerID,
+			Addr:   tatankaNodeInfo.addr.String(),
 			NoTLS:  true,
 		},
 		Handlers: &MessageHandlers{
@@ -246,30 +259,33 @@ func newTestConn(t *testing.T, i int, ctx context.Context, tatankaAddr string, t
 		PrivateKey: priv,
 	}
 
+	// Create and connect
 	conn := New(cfg)
 	cm := dex.NewConnectionMaster(conn)
 	if err := cm.ConnectOnce(ctx); err != nil {
 		return nil, fmt.Errorf("ConnectOnce error: %w", err)
 	}
 
+	// Post a DCR bond with 1 year expiration
+	const bondExpirationDuration = time.Hour * 24 * 365
 	postBondReq := mj.MustRequest(mj.RoutePostBond, []*tanka.Bond{&tanka.Bond{
 		PeerID:     peerID,
 		AssetID:    42,
 		CoinID:     encode.RandomBytes(32),
 		Strength:   1,
-		Expiration: time.Now().Add(time.Hour * 24 * 365),
+		Expiration: time.Now().Add(bondExpirationDuration),
 	}})
 	err := conn.RequestMesh(postBondReq, nil)
 	if err != nil {
 		return nil, fmt.Errorf("PostBond error: %w", err)
 	}
 
-	err = conn.Auth(tatankaPeerID)
+	err = conn.Auth(tatankaNodeInfo.peerID)
 	if err != nil {
 		return nil, fmt.Errorf("Auth error: %w", err)
 	}
 
-	return &testConn{
+	return &tConn{
 		conn:                         conn,
 		cm:                           cm,
 		priv:                         priv,
@@ -280,44 +296,55 @@ func newTestConn(t *testing.T, i int, ctx context.Context, tatankaAddr string, t
 	}, nil
 }
 
+func TestMain(m *testing.M) {
+	var err error
+	logMaker, err = dex.NewLoggerMaker(os.Stdout, dex.LevelTrace.String())
+	if err != nil {
+		panic("failed to create custom logger: " + err.Error())
+	}
+	comms.UseLogger(logMaker.NewLogger("COMMS", dex.LevelTrace))
+	os.Exit(m.Run())
+}
+
 func TestConnectPeer(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	testMesh, err := setupMesh(t, ctx, 2)
+	// Create a two node mesh
+	mesh, err := setupMesh(t, ctx, 2)
 	if err != nil {
 		t.Fatalf("setupMesh error: %v", err)
 	}
 
-	conn1, err := newTestConn(t, 1, ctx, testMesh.tatankas[0].addr, testMesh.tatankas[0].peerID)
+	// Create two clients, one connected to each node
+	conn1, err := newTestConn(t, 1, ctx, mesh[0].nodeInfo)
+	if err != nil {
+		t.Fatalf("newTestConn error: %v", err)
+	}
+	conn2, err := newTestConn(t, 2, ctx, mesh[1].nodeInfo)
 	if err != nil {
 		t.Fatalf("newTestConn error: %v", err)
 	}
 
-	conn2, err := newTestConn(t, 2, ctx, testMesh.tatankas[0].addr, testMesh.tatankas[0].peerID)
-	if err != nil {
-		t.Fatalf("newTestConn error: %v", err)
-	}
-
+	// Connect client 1 to client 2
 	err = conn1.conn.ConnectPeer(conn2.peerID)
 	if err != nil {
 		t.Fatalf("ConnectPeer error: %v", err)
 	}
 
+	// Create a test request and expected response
 	type testRequest struct {
 		Test string `json:"test"`
 	}
-
 	testReq, err := msgjson.NewRequest(1, "Test", testRequest{Test: "testingRequest"})
 	if err != nil {
 		t.Fatalf("NewRequest error: %v", err)
 	}
-
 	expResponse := testRequest{Test: "testingResponse"}
 
+	// Send the request and check the response
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-
 	go func() {
 		defer wg.Done()
 
@@ -331,6 +358,7 @@ func TestConnectPeer(t *testing.T) {
 		}
 	}()
 
+	// Use client 2 to respond to the request
 	select {
 	case msg := <-conn2.incomingPeerMsgs:
 		err = msg.Respond(expResponse)
@@ -341,10 +369,12 @@ func TestConnectPeer(t *testing.T) {
 		t.Fatalf("timeout waiting for incoming tatanka request peer 2")
 	}
 
-	conn2.conn.peers = make(map[tanka.PeerID]*peer)
-
 	wg.Wait()
 
+	// Simulate client 2 restarting and no longer knowing about the
+	// original ephemeral key. Ensure that ErrPeerNeedsReconnect is returned
+	// when client 1 makes a request to client 2.
+	conn2.conn.peers = make(map[tanka.PeerID]*peer)
 	var res testRequest
 	err = conn1.conn.RequestPeer(conn2.peerID, testReq, &res)
 	if err != ErrPeerNeedsReconnect {

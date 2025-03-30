@@ -292,6 +292,9 @@ func (t *Tatanka) prepareHandlers() {
 	} {
 		registerClientHandler(route, handler)
 	}
+	for route := range t.tatankaHandlers {
+		t.routes = append(t.routes, route)
+	}
 	for route := range t.specialHandlers {
 		t.routes = append(t.routes, route)
 	}
