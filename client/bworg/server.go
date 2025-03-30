@@ -69,7 +69,7 @@ func mainErr() error {
 	}
 
 	mux := srv.Mux()
-	// TODO: LimitRate is a little too restrictive for a http site. Figure out
+	// TODO: LimitRate is a little too restrictive for an http site. Figure out
 	// a way to customize the rate limits.
 	// mux.Use(srv.LimitRate)
 
