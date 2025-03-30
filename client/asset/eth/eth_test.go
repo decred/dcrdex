@@ -626,8 +626,8 @@ func (db *tTxDB) removeTx(_ /* id */ string) error {
 	db.removeTxCalled = true
 	return db.removeTxErr
 }
-func (db *tTxDB) getTxs(n int, refID *common.Hash, past bool, tokenID *uint32) ([]*asset.WalletTransaction, error) {
-	panic("getTxs not implemented")
+func (db *tTxDB) getTxs(tokenID *uint32, req *asset.TxHistoryRequest) (*asset.TxHistoryResponse, error) {
+	return nil, nil
 }
 
 // getTx gets a single transaction. It is not an error if the tx is not known.

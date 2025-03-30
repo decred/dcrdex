@@ -419,6 +419,26 @@ type ConfirmTxStatus struct {
 	PendingSubmission bool
 }
 
+type TxHistoryRequest struct {
+	N           int               `json:"n"`
+	RefID       *string           `json:"refID"`
+	Past        bool              `json:"past"`
+	IgnoreTypes []TransactionType `json:"ignoreTypes"`
+}
+
+func (r *TxHistoryRequest) IngoreTypesLookup() map[TransactionType]bool {
+	m := make(map[TransactionType]bool)
+	for _, txType := range r.IgnoreTypes {
+		m[txType] = true
+	}
+	return m
+}
+
+type TxHistoryResponse struct {
+	Txs           []*WalletTransaction `json:"txs"`
+	MoreAvailable bool                 `json:"moreAvailable"`
+}
+
 // Wallet is a common interface to be implemented by cryptocurrency wallet
 // software.
 type Wallet interface {
@@ -585,7 +605,7 @@ type Wallet interface {
 	// refID are returned, otherwise the transactions after the refID are
 	// returned. n is the number of transactions to return. If n is <= 0,
 	// all the transactions will be returned.
-	TxHistory(n int, refID *string, past bool) ([]*WalletTransaction, error)
+	TxHistory(*TxHistoryRequest) (*TxHistoryResponse, error)
 	// WalletTransaction returns a single transaction that either a wallet
 	// has made or in which the wallet has received funds. This function may
 	// support more transactions than are returned by TxHistory. For example,

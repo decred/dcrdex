@@ -2107,31 +2107,26 @@ func (s *WebServer) apiMarketMakingStatus(w http.ResponseWriter, r *http.Request
 
 func (s *WebServer) apiTxHistory(w http.ResponseWriter, r *http.Request) {
 	var form struct {
+		asset.TxHistoryRequest
 		AssetID uint32 `json:"assetID"`
-		N       int    `json:"n"`
-		RefID   string `json:"refID"`
-		Past    bool   `json:"past"`
 	}
 	if !readPost(w, r, &form) {
 		return
 	}
 
-	var refID *string
-	if len(form.RefID) > 0 {
-		refID = &form.RefID
-	}
-
-	txs, err := s.core.TxHistory(form.AssetID, form.N, refID, form.Past)
+	resp, err := s.core.TxHistory(form.AssetID, &form.TxHistoryRequest)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error getting transaction history: %w", err))
 		return
 	}
 	writeJSON(w, &struct {
-		OK  bool                       `json:"ok"`
-		Txs []*asset.WalletTransaction `json:"txs"`
+		OK            bool                       `json:"ok"`
+		Txs           []*asset.WalletTransaction `json:"txs"`
+		MoreAvailable bool                       `json:"moreAvailable"`
 	}{
-		OK:  true,
-		Txs: txs,
+		OK:            true,
+		Txs:           resp.Txs,
+		MoreAvailable: resp.MoreAvailable,
 	})
 }
 

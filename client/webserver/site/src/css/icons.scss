@@ -155,6 +155,12 @@
   display: inline-block;
 }
 
+.ico-wide-headed-right-arrow::before {
+  content: "\e919";
+  display: inline-block;
+  transform: rotate(180deg);
+}
+
 .ico-wide-headed-down-arrow::before {
   content: "\e919";
   display: inline-block;

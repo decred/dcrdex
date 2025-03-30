@@ -7157,12 +7157,10 @@ func (dcr *ExchangeWallet) syncTxHistory(ctx context.Context, tip uint64) {
 			if tx.BlockNumber != uint64(blockHeight) || tx.Timestamp != uint64(block.Timestamp.Unix()) {
 				tx.BlockNumber = uint64(blockHeight)
 				tx.Timestamp = uint64(block.Timestamp.Unix())
-				updated = true
 			}
 		} else if gtr.BlockHash == "" && tx.BlockNumber != 0 {
 			tx.BlockNumber = 0
 			tx.Timestamp = 0
-			updated = true
 		}
 
 		var confs uint64
@@ -7773,13 +7771,13 @@ func (dcr *ExchangeWallet) PendingTransactions(ctx context.Context) []*asset.Wal
 // If past is true, the transactions prior to the refID are returned, otherwise
 // the transactions after the refID are returned. n is the number of
 // transactions to return. If n is <= 0, all the transactions will be returned.
-func (dcr *ExchangeWallet) TxHistory(n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
+func (dcr *ExchangeWallet) TxHistory(req *asset.TxHistoryRequest) (*asset.TxHistoryResponse, error) {
 	txHistoryDB := dcr.txDB()
 	if txHistoryDB == nil {
 		return nil, fmt.Errorf("tx database not initialized")
 	}
 
-	return txHistoryDB.GetTxs(n, refID, past)
+	return txHistoryDB.GetTxs(req)
 }
 
 // ConfirmTransaction returns how many confirmations a redemption or refund has.

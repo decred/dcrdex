@@ -3108,13 +3108,13 @@ func (w *zecWallet) PendingTransactions(ctx context.Context) []*asset.WalletTran
 // If past is true, the transactions prior to the refID are returned, otherwise
 // the transactions after the refID are returned. n is the number of
 // transactions to return. If n is <= 0, all the transactions will be returned.
-func (w *zecWallet) TxHistory(n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
+func (w *zecWallet) TxHistory(req *asset.TxHistoryRequest) (*asset.TxHistoryResponse, error) {
 	txHistoryDB := w.txDB()
 	if txHistoryDB == nil {
 		return nil, fmt.Errorf("tx database not initialized")
 	}
 
-	return txHistoryDB.GetTxs(n, refID, past)
+	return txHistoryDB.GetTxs(req)
 }
 
 const sendCategory = "send"
@@ -3514,7 +3514,6 @@ func (w *zecWallet) syncTxHistory(tip uint64) {
 			return
 		}
 
-		var updated bool
 		if gtr.blockHash != nil && *gtr.blockHash != (chainhash.Hash{}) {
 			block, _, err := getVerboseBlockHeader(w, gtr.blockHash)
 			if err != nil {
@@ -3525,12 +3524,10 @@ func (w *zecWallet) syncTxHistory(tip uint64) {
 			if tx.BlockNumber != uint64(blockHeight) || tx.Timestamp != uint64(block.Time) {
 				tx.BlockNumber = uint64(blockHeight)
 				tx.Timestamp = uint64(block.Time)
-				updated = true
 			}
 		} else if gtr.blockHash == nil && tx.BlockNumber != 0 {
 			tx.BlockNumber = 0
 			tx.Timestamp = 0
-			updated = true
 		}
 
 		var confs uint64
@@ -3538,6 +3535,7 @@ func (w *zecWallet) syncTxHistory(tip uint64) {
 			confs = tip - tx.BlockNumber + 1
 		}
 
+		var updated bool
 		if confs >= defaultConfTarget {
 			tx.Confirmed = true
 			tx.Confirms = nil

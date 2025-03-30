@@ -29,12 +29,12 @@ func TestTxDB(t *testing.T) {
 		t.Fatalf("error connecting to tx history store: %v", err)
 	}
 
-	txs, err := txHistoryStore.getTxs(0, nil, true, nil)
+	r, err := txHistoryStore.getTxs(nil, &asset.TxHistoryRequest{Past: true})
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
-	if len(txs) != 0 {
-		t.Fatalf("expected 0 txs but got %d", len(txs))
+	if len(r.Txs) != 0 {
+		t.Fatalf("expected 0 txs but got %d", len(r.Txs))
 	}
 
 	newTx := func(nonce uint64) *extendedWalletTx {
@@ -57,57 +57,59 @@ func TestTxDB(t *testing.T) {
 		t.Fatalf("error storing tx: %v", err)
 	}
 
-	txs, err = txHistoryStore.getTxs(0, nil, true, nil)
+	r, err = txHistoryStore.getTxs(nil, &asset.TxHistoryRequest{Past: true})
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
 	expectedTxs := []*asset.WalletTransaction{wt1.WalletTransaction}
-	if !reflect.DeepEqual(expectedTxs, txs) {
-		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
+	if !reflect.DeepEqual(expectedTxs, r.Txs) {
+		t.Fatalf("expected txs %+v but got %+v", expectedTxs, r.Txs)
 	}
 
 	err = txHistoryStore.storeTx(wt2)
 	if err != nil {
 		t.Fatalf("error storing tx: %v", err)
 	}
-	txs, err = txHistoryStore.getTxs(0, nil, true, nil)
+	r, err = txHistoryStore.getTxs(nil, &asset.TxHistoryRequest{Past: true})
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
 	expectedTxs = []*asset.WalletTransaction{wt2.WalletTransaction, wt1.WalletTransaction}
-	if !reflect.DeepEqual(expectedTxs, txs) {
-		t.Fatalf("expected txs %s but got %s", spew.Sdump(expectedTxs), spew.Sdump(txs))
+	if !reflect.DeepEqual(expectedTxs, r.Txs) {
+		t.Fatalf("expected txs %s but got %s", spew.Sdump(expectedTxs), spew.Sdump(r.Txs))
 	}
 
 	err = txHistoryStore.storeTx(wt3)
 	if err != nil {
 		t.Fatalf("error storing tx: %v", err)
 	}
-	txs, err = txHistoryStore.getTxs(2, nil, true, nil)
+	r, err = txHistoryStore.getTxs(nil, &asset.TxHistoryRequest{N: 2, Past: true})
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
 	expectedTxs = []*asset.WalletTransaction{wt3.WalletTransaction, wt2.WalletTransaction}
-	if !reflect.DeepEqual(expectedTxs, txs) {
-		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
+	if !reflect.DeepEqual(expectedTxs, r.Txs) {
+		t.Fatalf("expected txs %+v but got %+v", expectedTxs, r.Txs)
 	}
 
-	txs, err = txHistoryStore.getTxs(0, &wt2.txHash, true, nil)
+	s := wt2.txHash.String()
+	r, err = txHistoryStore.getTxs(nil, &asset.TxHistoryRequest{RefID: &s, Past: true})
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
 	expectedTxs = []*asset.WalletTransaction{wt2.WalletTransaction, wt1.WalletTransaction}
-	if !reflect.DeepEqual(expectedTxs, txs) {
-		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
+	if !reflect.DeepEqual(expectedTxs, r.Txs) {
+		t.Fatalf("expected txs %+v but got %+v", expectedTxs, r.Txs)
 	}
 
-	txs, err = txHistoryStore.getTxs(0, &wt2.txHash, false, nil)
+	s = wt2.txHash.String()
+	r, err = txHistoryStore.getTxs(nil, &asset.TxHistoryRequest{RefID: &s})
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
 	expectedTxs = []*asset.WalletTransaction{wt2.WalletTransaction, wt3.WalletTransaction}
-	if !reflect.DeepEqual(expectedTxs, txs) {
-		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
+	if !reflect.DeepEqual(expectedTxs, r.Txs) {
+		t.Fatalf("expected txs %+v but got %+v", expectedTxs, r.Txs)
 	}
 
 	allTxs := []*asset.WalletTransaction{wt4.WalletTransaction, wt3.WalletTransaction, wt2.WalletTransaction, wt1.WalletTransaction}
@@ -118,12 +120,12 @@ func TestTxDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error storing tx: %v", err)
 	}
-	txs, err = txHistoryStore.getTxs(0, nil, false, nil)
+	r, err = txHistoryStore.getTxs(nil, &asset.TxHistoryRequest{})
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
-	if !reflect.DeepEqual(allTxs, txs) {
-		t.Fatalf("expected txs %s but got %s", spew.Sdump(allTxs), spew.Sdump(txs))
+	if !reflect.DeepEqual(allTxs, r.Txs) {
+		t.Fatalf("expected txs %s but got %s", spew.Sdump(allTxs), spew.Sdump(r.Txs))
 	}
 	txHistoryStore.Close()
 
@@ -133,12 +135,12 @@ func TestTxDB(t *testing.T) {
 	}
 	defer txHistoryStore.Close()
 
-	txs, err = txHistoryStore.getTxs(0, nil, false, nil)
+	r, err = txHistoryStore.getTxs(nil, &asset.TxHistoryRequest{})
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
-	if !reflect.DeepEqual(allTxs, txs) {
-		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
+	if !reflect.DeepEqual(allTxs, r.Txs) {
+		t.Fatalf("expected txs %+v but got %+v", expectedTxs, r.Txs)
 	}
 
 	unconfirmedTxs, err := txHistoryStore.getPendingTxs()
@@ -166,21 +168,28 @@ func TestTxDB(t *testing.T) {
 		t.Fatalf("expected txs:\n%s\n\nbut got:\n%s", spew.Sdump(expectedUnconfirmedTxs), spew.Sdump(unconfirmedTxs))
 	}
 
-	txs, err = txHistoryStore.getTxs(0, nil, false, nil)
+	r, err = txHistoryStore.getTxs(nil, &asset.TxHistoryRequest{})
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
-	if !reflect.DeepEqual(allTxs, txs) {
-		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
+	if !reflect.DeepEqual(allTxs, r.Txs) {
+		t.Fatalf("expected txs %+v but got %+v", expectedTxs, r.Txs)
 	}
 
-	txs, err = txHistoryStore.getTxs(0, nil, false, &usdcEthID)
+	r, err = txHistoryStore.getTxs(&usdcEthID, &asset.TxHistoryRequest{})
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
 	expectedTxs = []*asset.WalletTransaction{wt1.WalletTransaction}
-	if !reflect.DeepEqual(expectedTxs, txs) {
-		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
+	if !reflect.DeepEqual(expectedTxs, r.Txs) {
+		t.Fatalf("expected txs %+v but got %+v", expectedTxs, r.Txs)
+	}
+	r, err = txHistoryStore.getTxs(&usdcEthID, &asset.TxHistoryRequest{IgnoreTypes: []asset.TransactionType{asset.Send}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Txs) != 0 {
+		t.Fatal("expected no tx with type filter on, but got some")
 	}
 }
 
@@ -226,12 +235,17 @@ func TestTxDB_userOp(t *testing.T) {
 	}
 
 	expectedTxs := []*asset.WalletTransaction{wt4.WalletTransaction, wt3.WalletTransaction, wt2UserOp.WalletTransaction, wt2.WalletTransaction, wt1.WalletTransaction}
-	txs, err := txHistoryStore.getTxs(0, nil, true, nil)
+	r, err := txHistoryStore.getTxs(nil, &asset.TxHistoryRequest{
+		N:           0,
+		RefID:       nil,
+		Past:        true,
+		IgnoreTypes: nil,
+	})
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
-	if !reflect.DeepEqual(expectedTxs, txs) {
-		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
+	if !reflect.DeepEqual(expectedTxs, r.Txs) {
+		t.Fatalf("expected txs %+v but got %+v", expectedTxs, r.Txs)
 	}
 }
 
@@ -276,15 +290,15 @@ func TestTxDBReplaceNonce(t *testing.T) {
 		t.Fatalf("expected nil tx but got %+v", tx)
 	}
 
-	txs, err := txHistoryStore.getTxs(0, nil, false, nil)
+	r, err := txHistoryStore.getTxs(nil, &asset.TxHistoryRequest{})
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
-	if len(txs) != 1 {
-		t.Fatalf("expected 1 tx but got %d", len(txs))
+	if len(r.Txs) != 1 {
+		t.Fatalf("expected 1 tx but got %d", len(r.Txs))
 	}
-	if txs[0].ID != wt2.ID {
-		t.Fatalf("expected tx %s but got %s", wt2.ID, txs[0].ID)
+	if r.Txs[0].ID != wt2.ID {
+		t.Fatalf("expected tx %s but got %s", wt2.ID, r.Txs[0].ID)
 	}
 }
 

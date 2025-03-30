@@ -511,10 +511,10 @@
                   </thead>
                   <tbody id="pendingTxs">
                     <tr id="pendingTxTmpl">
-                      <th class="multinetonly">
+                      <td class="multinetonly">
                         <img data-tmpl="chainLogo" class="micro-icon greyscale">
                         <span data-tmpl="chainName" class="ms-1"></span>
-                      </th>
+                      </td>
                       <td data-tmpl="type"></td>
                       <td class="d-none d-sm-table-cell">
                         <a data-tmpl="id" class="subtlelink"></a>
@@ -1262,9 +1262,9 @@
       <header>[[[asset_name tx_history]]]</header>
       <span class="mx-3" id="hideMixTxs">
         <input type="checkbox" id="hideMixTxsCheckbox" class="form-check-input">
-        <label for="hideMixTxsCheckbox" class="form-check-label">[[[Hide Mixing Transactions]]]</label>
+        <label for="hideMixTxsCheckbox" class="form-check-label ms-1">[[[Hide Mixing Transactions]]]</label>
       </span>
-      <div id="txHistoryTableContainer" class="flex-stretch-column pb-3">
+      <div id="txHistoryTableContainer" class="flex-stretch-column py-0">
         <table id="txHistoryTable" class="row-border border-top">
           <thead>
             <tr>
@@ -1301,7 +1301,11 @@
             </tr>
           </tbody>
         </table>
-        <span id="earlierTxs" class="mx-2">[[[load_earlier_transactions]]]</span>
+        <div id="txHistoryMoreAvailable" class="d-flex justify-content-end align-items-center pt-1">
+          <span id="txHistoryBack" class="p-1 pointer hoverbg ico-wide-headed-left-arrow"></span>
+          <span id="txHistoryPg" class="fs16 mx-1 p-1"></span>
+          <span id="txHistoryFwd" class="p-1 pointer hoverbg ico-wide-headed-right-arrow"></span>
+        </div>
       </div>
       <div class="flex-center p-2 mb-3 mx-3 fs18 border rounded3 d-hide" id="noTxHistory">
         [[[no_tx_history]]]

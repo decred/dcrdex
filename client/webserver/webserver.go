@@ -170,7 +170,7 @@ type clientCore interface {
 	SetVotingPreferences(assetID uint32, choices, tSpendPolicy, treasuryPolicy map[string]string) error
 	ListVSPs(assetID uint32) ([]*asset.VotingServiceProvider, error)
 	TicketPage(assetID uint32, scanStart int32, n, skipN int) ([]*asset.Ticket, error)
-	TxHistory(assetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error)
+	TxHistory(assetID uint32, req *asset.TxHistoryRequest) (*asset.TxHistoryResponse, error)
 	FundsMixingStats(assetID uint32) (*asset.FundsMixingStats, error)
 	ConfigureFundsMixer(appPW []byte, assetID uint32, enabled bool) error
 	SetLanguage(string) error
