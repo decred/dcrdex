@@ -7129,12 +7129,10 @@ func (btc *intermediaryWallet) syncTxHistory(tip uint64) {
 			if tx.BlockNumber != uint64(blockHeight) || tx.Timestamp != gtr.BlockTime {
 				tx.BlockNumber = uint64(blockHeight)
 				tx.Timestamp = gtr.BlockTime
-				updated = true
 			}
 		} else if gtr.BlockHash == "" && tx.BlockNumber != 0 {
 			tx.BlockNumber = 0
 			tx.Timestamp = 0
-			updated = true
 		}
 
 		var confs uint64
@@ -7282,12 +7280,12 @@ func (btc *baseWallet) PendingTransactions(ctx context.Context) []*asset.WalletT
 // If past is true, the transactions prior to the refID are returned, otherwise
 // the transactions after the refID are returned. n is the number of
 // transactions to return. If n is <= 0, all the transactions will be returned.
-func (btc *intermediaryWallet) TxHistory(n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
+func (btc *intermediaryWallet) TxHistory(req *asset.TxHistoryRequest) (*asset.TxHistoryResponse, error) {
 	txHistoryDB := btc.txDB()
 	if txHistoryDB == nil {
 		return nil, fmt.Errorf("tx database not initialized")
 	}
-	return txHistoryDB.GetTxs(n, refID, past)
+	return txHistoryDB.GetTxs(req)
 }
 
 // lockedSats is the total value of locked outputs, as locked with LockUnspent.

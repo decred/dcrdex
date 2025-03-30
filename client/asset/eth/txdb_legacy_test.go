@@ -67,19 +67,19 @@ func TestMigrateLegacyTxDB(t *testing.T) {
 	}
 
 	// Check all transactions were migrated
-	migratedTxs, err := lexiDB.getTxs(0, nil, true, nil)
+	migratedTxsResp, err := lexiDB.getTxs(nil, &asset.TxHistoryRequest{N: 0, Past: true})
 	if err != nil {
 		t.Fatalf("error getting migrated txs: %v", err)
 	}
 
-	if len(migratedTxs) != len(txs) {
-		t.Fatalf("expected %d txs but got %d", len(txs), len(migratedTxs))
+	if len(migratedTxsResp.Txs) != len(txs) {
+		t.Fatalf("expected %d txs but got %d", len(txs), len(migratedTxsResp.Txs))
 	}
 
 	// Check each tx was migrated correctly
 	for i, origTx := range txs {
 		var found bool
-		for _, tx := range migratedTxs {
+		for _, tx := range migratedTxsResp.Txs {
 			if reflect.DeepEqual(origTx.WalletTransaction, tx) {
 				found = true
 				break

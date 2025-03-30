@@ -1290,9 +1290,16 @@ export interface WalletTransaction {
   rejected: boolean
 }
 
+export interface TxHistoryRequest {
+  n: number
+  refID?: string
+  past: boolean
+  ignoreTypes?: number[]
+}
+
 export interface TxHistoryResult {
-  txs: WalletTransaction[]
-  lastTx: boolean
+  txs : WalletTransaction[]
+  moreAvailable: boolean
 }
 
 export const PrepaidBondID = 2147483647
@@ -1352,9 +1359,6 @@ export interface Application {
   checkResponse (resp: APIResponse): boolean
   signOut (): Promise<void>
   registerNoteFeeder (receivers: Record<string, (n: CoreNote) => void>): void
-  txHistory(assetID: number, n: number, after?: string): Promise<TxHistoryResult>
-  getWalletTx(assetID: number, txid: string): WalletTransaction | undefined
-  clearTxHistory(assetID: number): void
   parentAsset(assetID: number): SupportedAsset
   allBridgePaths (): Promise<Record<number, Record<number, string[]>>>
   bridgeFeesAndLimits (fromAssetID: number, toAssetID: number, bridgeName: string): Promise<BridgeFeesAndLimits | null>
