@@ -1124,7 +1124,7 @@ func (w *TXCWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time.Ti
 	}, func() {}, nil
 }
 
-func (w *TXCWallet) TxHistory(n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
+func (w *TXCWallet) TxHistory(*asset.TxHistoryRequest) (*asset.TxHistoryResponse, error) {
 	return nil, nil
 }
 func (w *TXCWallet) WalletTransaction(ctx context.Context, txID string) (*asset.WalletTransaction, error) {

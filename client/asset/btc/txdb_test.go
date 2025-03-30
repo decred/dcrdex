@@ -18,7 +18,7 @@ import (
 
 func TestTxDB(t *testing.T) {
 	tempDir := t.TempDir()
-	tLogger := dex.StdOutLogger("TXDB", dex.LevelTrace)
+	tLogger := dex.StdOutLogger("TXDB", dex.LevelInfo)
 
 	txHistoryStore := NewBadgerTxDB(tempDir, tLogger)
 
@@ -34,12 +34,12 @@ func TestTxDB(t *testing.T) {
 		wg.Wait()
 	}()
 
-	txs, err := txHistoryStore.GetTxs(0, nil, true)
+	r, err := txHistoryStore.GetTxs(&asset.TxHistoryRequest{Past: true})
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
-	if len(txs) != 0 {
-		t.Fatalf("expected 0 txs but got %d", len(txs))
+	if len(r.Txs) != 0 {
+		t.Fatalf("expected 0 txs but got %d", len(r.Txs))
 	}
 
 	tx1 := &ExtendedWalletTx{
@@ -78,16 +78,20 @@ func TestTxDB(t *testing.T) {
 	GetTxsAndCheck := func(n int, refID *string, past bool, expected []*asset.WalletTransaction) {
 		t.Helper()
 
-		txs, err = txHistoryStore.GetTxs(n, refID, past)
+		r, err = txHistoryStore.GetTxs(&asset.TxHistoryRequest{
+			N:     n,
+			RefID: refID,
+			Past:  past,
+		})
 		if err != nil {
 			t.Fatalf("failed to get txs: %v", err)
 		}
-		if len(txs) != len(expected) {
-			t.Fatalf("expected %d txs but got %d", len(expected), len(txs))
+		if len(r.Txs) != len(expected) {
+			t.Fatalf("expected %d txs but got %d", len(expected), len(r.Txs))
 		}
 		for i, expectedTx := range expected {
-			if !reflect.DeepEqual(expectedTx, txs[i]) {
-				t.Fatalf("transaction %d: %+v != %+v", i, expectedTx, txs[i])
+			if !reflect.DeepEqual(expectedTx, r.Txs[i]) {
+				t.Fatalf("transaction %d: %+v != %+v", i, expectedTx, r.Txs[i])
 			}
 		}
 	}
@@ -115,6 +119,7 @@ func TestTxDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to store tx: %v", err)
 	}
+
 	GetTxsAndCheck(0, nil, true, []*asset.WalletTransaction{})
 	getPendingTxsAndCheck([]*ExtendedWalletTx{tx1})
 
@@ -185,7 +190,7 @@ func TestTxDB(t *testing.T) {
 	}
 	GetTxsAndCheck(0, nil, true, []*asset.WalletTransaction{})
 
-	_, err = txHistoryStore.GetTxs(1, &tx2.ID, true)
+	_, err = txHistoryStore.GetTx(tx2.ID)
 	if !errors.Is(err, asset.CoinNotFoundError) {
 		t.Fatalf("expected coin not found error but got %v", err)
 	}

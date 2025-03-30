@@ -2629,7 +2629,7 @@ func (c *Core) createWallet(crypter encrypt.Crypter, walletPW []byte, form *Wall
 	atomic.StoreUint32(wallet.broadcasting, 0)
 
 	if err = wallet.OpenWithPW(c.ctx, crypter); err != nil {
-		return nil, err
+		return err
 	}
 
 	dbWallet.Address, err = c.connectWallet(wallet)
@@ -6065,13 +6065,13 @@ func (c *Core) MultiTrade(pw []byte, form *MultiTradeForm) []*MultiTradeResult {
 // refID are returned, otherwise the transactions after the refID are
 // returned. n is the number of transactions to return. If n is <= 0,
 // all the transactions will be returned
-func (c *Core) TxHistory(assetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
+func (c *Core) TxHistory(assetID uint32, req *asset.TxHistoryRequest) (*asset.TxHistoryResponse, error) {
 	wallet, found := c.wallet(assetID)
 	if !found {
 		return nil, newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
 	}
 
-	return wallet.TxHistory(n, refID, past)
+	return wallet.TxHistory(req)
 }
 
 // WalletTransaction returns information about a transaction that the wallet

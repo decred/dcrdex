@@ -502,6 +502,15 @@ func (x *wallet) FundMultiOrder(ord *asset.MultiOrder, maxLock uint64) (coins []
 func (x *wallet) MaxFundingFees(numTrades uint32, feeRate uint64, options map[string]string) uint64 {
 	return 0
 }
+func (x *wallet) TxHistory(*asset.TxHistoryRequest) (*asset.TxHistoryResponse, error) {
+	return nil, asset.ErrUnsupported
+}
+func (x *wallet) WalletTransaction(ctx context.Context, txID string) (*asset.WalletTransaction, error) {
+	return nil, asset.ErrUnsupported
+}
+func (x *wallet) PendingTransactions(ctx context.Context) []*asset.WalletTransaction {
+	return nil
+}
 
 //////////////////////////
 // asset.TxFeeEstimator //

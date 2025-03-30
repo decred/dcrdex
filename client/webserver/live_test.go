@@ -772,7 +772,7 @@ func (c *TCore) AccountImport(pw []byte, account *core.Account, bond []*db.Bond)
 }
 func (c *TCore) ToggleAccountStatus(pw []byte, host string, disable bool) error { return nil }
 
-func (c *TCore) TxHistory(assetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
+func (c *TCore) TxHistory(uint32, *asset.TxHistoryRequest) (*asset.TxHistoryResponse, error) {
 	return nil, nil
 }
 
