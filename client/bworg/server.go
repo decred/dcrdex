@@ -75,6 +75,7 @@ func mainErr() error {
 
 	fileServer(mux, "/font")
 	fileServer(mux, "/img")
+	fileServer(mux, "/js")
 	fileServer(mux, "/")
 
 	srv.Run(ctx)
@@ -112,7 +113,6 @@ func fileServer(rr chi.Router, pathPrefix string) {
 		}
 		// Strip the path prefix and clean the path.
 		upath = path.Clean(upath)
-
 		if upath == "/" {
 			upath = "/index.html"
 		}

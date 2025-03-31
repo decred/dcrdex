@@ -3,46 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bison Wallet - Secure & Trustless Crypto Trading</title>
-    
-    
-    <script src="https://cdn.tailwindcss.com"></script>
-    
+    <title>Bison Wallet | Reliable Self-custodial Crypto Wallet</title>
+
+    <script src="/js/tailwinds.js"></script>
     
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=PT+Sans+Caption:wght@400;700&family=Wellfleet&display=swap" rel="stylesheet">
     
     
     <style>
-      @font-face {
-        font-family: 'LucideIcons';
-        src: url(https://unpkg.com/lucide-static@0.378.0/font/Lucide.ttf) format('truetype');
-      }
-      .lucide {
-        font-family: 'LucideIcons';
-        font-size: 1.25rem; /* Default icon size */
-        line-height: 1;
-        vertical-align: middle;
-        font-style: normal;
-        font-weight: normal;
-        speak: none;
-        text-transform: none;
-        letter-spacing: normal;
-        word-wrap: normal;
-        white-space: nowrap;
-        direction: ltr;
-        -webkit-font-smoothing: antialiased;
-        -moz-osx-font-smoothing: grayscale;
-        text-rendering: optimizeLegibility;
-        font-feature-settings: 'liga';
-      }
       /* Basic styling */
       html {
         scroll-behavior: smooth;
       }
       body {
-        font-family: 'Inter', sans-serif;
+        font-family: "PT Sans Caption", sans-serif;;
         background-color: #111827; /* Gray-900 */
         color: #d1d5db; /* Gray-300 - Default text slightly lighter */
         overflow-x: hidden;
@@ -104,11 +80,6 @@
            color: #ffffff; /* White text */
        }
 
-      /* Adjust icon size */
-      .lucide-sm { font-size: 1rem; }
-      .lucide-lg { font-size: 1.5rem; }
-      .lucide-xl { font-size: 2rem; }
-
       /* Image fitting */
        .hero-image, .about-image {
            width: 100%;
@@ -159,52 +130,117 @@
        }
        #getting-started ol li .list-number {
             position: absolute;
-            left: 0; /* Align to the new padded left edge */
-            top: 0.125rem; /* Adjust vertical alignment if needed (top-0.5) */
+            left: -18px; /* Align to the new padded left edge */
             display: flex;
-            height: 1.5rem; /* h-6 */
-            width: 1.5rem; /* w-6 */
-            align-items: center;
-            justify-content: center;
+            place-content: center;
+            width: 35px;
+            height: 35px;
+            padding: 7px 0;
             border-radius: 9999px; /* rounded-full */
             background-color: #2563eb; /* bg-blue-600 */
             color: #ffffff; /* text-white */
-            font-size: 0.75rem; /* text-xs */
+            font-size: 20px; /* text-xs */
             font-weight: 600; /* font-semibold */
+            z-index: 10;
+            line-height: 1;
             /* Removed ring as it might interfere with positioning */
        }
-       #getting-started ol li:hover .list-number {
-            background-color: #1d4ed8; /* bg-blue-700 on hover */
-       }
-
-
-    </style>
-    
-    
-    <script>
-        // Lucide Icon Map (unchanged)
-        const lucideIconMap = {
-            'shield-check': '\uF5A7', 'zap': '\uF758', 'lock': '\uF45D', 'message-circle': '\uF4A4',
-            'download': '\uF2F9', 'info': '\uF3F2', 'repeat': '\uF54E', 'coins': '\uF249',
-            'bot': '\uF1C4', 'vote': '\uF6E9', 'cpu': '\uF2AD', 'hard-drive': '\uF3B9',
-            'key-round': '\uF436', 'list': '\uF45A', 'book-open': '\uF1C2', 'life-buoy': '\uF458',
-            'newspaper': '\uF4D6', 'tag': '\uF62B', 'users': '\uF6E0', 'check-circle': '\uF21D',
-            'arrow-right': '\uF143', 'external-link': '\uF314', 'menu' : '\uF4A7', 'x': '\uF6EA'
-        };
-
-        function insertLucideIcons() {
-            document.querySelectorAll('[data-lucide]').forEach(el => {
-                const iconName = el.getAttribute('data-lucide');
-                if (lucideIconMap[iconName]) {
-                    el.textContent = lucideIconMap[iconName];
-                    el.setAttribute('aria-hidden', 'true');
-                } else {
-                    el.textContent = '?';
-                    console.warn(`Lucide icon "${iconName}" not found in map.`);
-                }
-            });
+        #getting-started ol li:hover .list-number {
+          background-color: #1d4ed8; /* bg-blue-700 on hover */
         }
+        .flex-grow-1 {
+          flex-grow: 1;
+        }
+        .border-left {
+          border-style: none none none solid;
+        }
+        #downloadDropdown {
+          position: absolute;
+          top: calc(100% + 2px);
+          background-color: rgb(15, 15, 15);
+          display: flex;
+          flex-direction: column;
+          align-items: stretch;
+          z-index: 10000;
+          border-style: none solid solid solid;
+          width: 100%;
+        }
+        #downloadDropdown > div {
+          padding: 0.5em;
+          display: flex;
+          place-content: center;
+          user-select: none;
+        }
+        #downloadDropdown > div:hover {
+          background-color: rgb(40, 40, 40);
+        }
+        #download {
+          position: relative;
+          z-index: 1000;
+          overflow: visible;
+        }
+        #download .hidden {
+          display: none !important;
+        }
+        .coin {
+          width: 25px;
+          height: 25px;
+          background-image: url('/img/coinbar.png');
+        }
+        #coins .coin {
+          margin-right: 0.5rem;
+        }
+        #coins > div {
+          display: flex;
+          place-content: center;
+        }
+        #coins > div > span {
+          text-wrap: nowrap;
+        }
+        .coin.dcr {
+          background-position: 0 0;
+        }
+        .coin.btc {
+          background-position: -28px 0;
+        }
+        .coin.eth {
+          width: 16px;
+          background-position: -56px 0;
+        }
+        .coin.usdt {
+          background-position: -72px 0;
+        }
+        .coin.usdc {
+          background-position: -100px 0;
+        }
+        .coin.ltc {
+          background-position: -128px 0;
+        }
+        .coin.zec {
+          background-position: -156px 0;
+        }
+        .coin.pol {
+          background-position: -182px 0;
+        }
+        .coin.dgb {
+          background-position: -210px 0;
+        }
+        .coin.firo {
+          background-position: -240px 0;
+        }
+        .coin.dash {
+          background-position: -266px 0;
+        }
+        .coin.bch {
+          width: 28px;
+          background-position: -294px 0;
+        }
+        .coin.doge {
+          background-position: -320px 0;
+        }
+    </style>
 
+    <script>
         function imageError(imgElement) {
             imgElement.style.display = 'none';
             const parent = imgElement.parentElement;
@@ -235,7 +271,7 @@
 
 
         document.addEventListener('DOMContentLoaded', () => {
-            insertLucideIcons();
+            // insertLucideIcons();
             setupScrollAnimations();
 
             // Mobile Menu Toggle Logic
@@ -267,7 +303,7 @@
                 
                 <div class="flex items-center flex-shrink-0">
                     
-                    <img src="https://dex.decred.org/images/bw-logo.svg" alt="Bison Wallet Logo" class="nav-logo" onerror="this.style.display='none';">
+                    <img src="/img/bisonwallet-full-dark.svg" alt="Bison Wallet Logo" class="nav-logo" onerror="this.style.display='none';">
                     
                 </div>
                 
@@ -288,14 +324,14 @@
                     
                     <button type="button" class="bg-gray-800 inline-flex items-center justify-center p-2 rounded-lg text-gray-400 hover:text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-white transition-all duration-200" aria-controls="mobile-menu" aria-expanded="false">
                         <span class="sr-only">Open main menu</span>
-                        <span id="menu-icon" class="lucide block h-6 w-6" data-lucide="menu"></span>
-                        <span id="close-icon" class="lucide hidden h-6 w-6" data-lucide="x"></span>
+                        <span id="menu-icon" class="block h-6 w-6" data-lucide="menu"></span>
+                        <span id="close-icon" class="hidden h-6 w-6" data-lucide="x"></span>
                     </button>
                 </div>
             </div>
         </div>
         
-        <div class="md:hidden hidden" id="mobile-menu">
+        <div class="md:hidden block" id="mobile-menu">
              <div class="px-2 pt-2 pb-3 space-y-1 sm:px-3">
                 <a href="#features" class="text-gray-300 hover:bg-gray-700 hover:text-white block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200">Features</a>
                 <a href="#getting-started" class="text-gray-300 hover:bg-gray-700 hover:text-white block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200">Get Started</a>
@@ -318,15 +354,15 @@
             </h1>
             
             <p class="mt-6 text-lg max-w-3xl mx-auto scroll-animate delay-100 body-text">
-                Your non-custodial gateway to the Decred ecosystem and DCRDEX. Experience peer-to-peer atomic swaps, multi-coin support, enhanced privacy, DCR staking, and more – all under your control.
+                Your self-custodial gateway to the premier blockchain assets. Experience peer-to-peer atomic swaps with the DCRDEX protocol, enhanced privacy, DCR staking, and more – all under your control.
             </p>
             
             <div class="mt-10 flex items-center justify-center gap-x-4 sm:gap-x-6 flex-wrap gap-y-4 scroll-animate delay-200">
                 <a href="#download" class="btn-primary rounded-lg px-5 py-3 text-sm font-semibold shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 transition duration-200 ease-in-out inline-flex items-center gap-2 transform hover:scale-105">
-                    <span class="lucide lucide-sm" data-lucide="download"></span> Download Now
+                    <span data-lucide="download"></span> Download Now
                 </a>
                 <a href="#features" class="btn-secondary rounded-lg px-5 py-3 text-sm font-semibold transition duration-200 ease-in-out inline-flex items-center gap-2 transform hover:scale-105">
-                    Explore Features <span class="lucide lucide-sm" data-lucide="arrow-right"></span>
+                    Explore Features <span data-lucide="arrow-right"></span>
                 </a>
             </div>
             
@@ -349,7 +385,7 @@
             <div class="mx-auto max-w-2xl lg:text-center scroll-animate">
                 <h2 class="text-base font-semibold leading-7 text-blue-400 subheading">Core Capabilities</h2>
                 <p class="mt-2 text-3xl font-bold tracking-tight text-white sm:text-4xl">
-                    Empowering Your Decentralized Experience
+                    Empowering Your Decentralized Future
                 </p>
                 <p class="mt-6 text-lg body-text">
                     Bison Wallet offers a robust suite of features built for security, privacy, and user control.
@@ -359,86 +395,75 @@
             <div class="mx-auto mt-16 max-w-6xl sm:mt-20 lg:mt-24">
                 
                 <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                    
-                    
+
                     <div class="feature-box md:col-span-2 lg:col-span-2 flex flex-col scroll-animate">
                         <div class="feature-icon self-start">
-                             <span class="lucide" data-lucide="repeat"></span>
+                             <span data-lucide="repeat"></span>
                         </div>
                         <dt class="mt-4 text-lg font-semibold leading-7 text-white subheading">Trustless P2P Trading</dt>
                         <dd class="mt-1 flex-auto text-base body-text">Trade directly peer-to-peer via atomic swaps on DCRDEX. No intermediaries, no custodial risk.</dd>
                     </div>
 
-                    
                     <div class="feature-box flex flex-col scroll-animate delay-100">
                         <div class="feature-icon self-start">
-                             <span class="lucide" data-lucide="key-round"></span>
+                             <span data-lucide="key-round"></span>
                         </div>
-                        <dt class="mt-4 text-base font-semibold leading-7 text-white subheading">Non-Custodial Control</dt>
+                        <dt class="mt-4 text-base font-semibold leading-7 text-white subheading">Self-Custodial Control</dt>
                         <dd class="mt-1 flex-auto text-base body-text">You hold your keys, you control your funds. True self-sovereignty.</dd>
                     </div>
 
-                    
                     <div class="feature-box flex flex-col scroll-animate delay-200">
                         <div class="feature-icon self-start">
-                             <span class="lucide" data-lucide="lock"></span>
+                             <span data-lucide="lock"></span>
                         </div>
                         <dt class="mt-4 text-base font-semibold leading-7 text-white subheading">Enhanced Privacy</dt>
                         <dd class="mt-1 flex-auto text-base body-text">Built-in decentralized coin mixing for Decred transactions.</dd>
                     </div>
 
-                    
                     <div class="feature-box flex flex-col scroll-animate delay-100">
                         <div class="feature-icon self-start">
-                             <span class="lucide" data-lucide="coins"></span>
+                             <span data-lucide="coins"></span>
                         </div>
                         <dt class="mt-4 text-base font-semibold leading-7 text-white subheading">Multi-Coin Support</dt>
                         <dd class="mt-1 flex-auto text-base body-text">Manage DCR, BTC, LTC, ETH, POLY, stablecoins & more.</dd>
                     </div>
 
-                    
                     <div class="feature-box flex flex-col scroll-animate delay-200">
                         <div class="feature-icon self-start">
-                             <span class="lucide" data-lucide="vote"></span>
+                             <span data-lucide="vote"></span>
                         </div>
                         <dt class="mt-4 text-base font-semibold leading-7 text-white subheading">Integrated DCR Staking</dt>
                         <dd class="mt-1 flex-auto text-base body-text">Stake Decred directly to earn rewards and participate in governance.</dd>
                     </div>
 
-                    
                     <div class="feature-box md:col-span-2 lg:col-span-2 flex flex-col scroll-animate delay-300">
                         <div class="feature-icon self-start">
-                             <span class="lucide" data-lucide="bot"></span>
+                             <span data-lucide="bot"></span>
                         </div>
                         <dt class="mt-4 text-lg font-semibold leading-7 text-white subheading">Market Maker Bots</dt>
-                        <dd class="mt-1 flex-auto text-base body-text">Provide liquidity on DCRDEX with user-friendly, built-in bots via an intuitive GUI. Potential earnings through spreads.</dd>
+                        <dd class="mt-1 flex-auto text-base body-text">
+                          Provide liquidity on DCRDEX with user-friendly, built-in bots via an intuitive GUI.
+                          Potential earnings through spreads.
+                          Link with your Binance or Binance.us account to perform arbitrage.
+                        </dd>
                     </div>
 
-                    
-                    <div class="feature-box flex flex-col scroll-animate delay-200">
-                        <div class="feature-icon self-start">
-                             <span class="lucide" data-lucide="hard-drive"></span>
-                        </div>
-                        <dt class="mt-4 text-base font-semibold leading-7 text-white subheading">Hardware Wallet Support</dt>
-                        <dd class="mt-1 flex-auto text-base body-text">Integrates with Trezor and Ledger devices for enhanced offline security.</dd>
-                    </div>
-
-                    
                     <div class="feature-box flex flex-col scroll-animate delay-300">
                         <div class="feature-icon self-start">
-                             <span class="lucide" data-lucide="cpu"></span>
+                             <span data-lucide="cpu"></span>
                         </div>
                         <dt class="mt-4 text-base font-semibold leading-7 text-white subheading">Lightweight & Fast</dt>
                         <dd class="mt-1 flex-auto text-base body-text">Uses SPV wallets for quick sync without full blockchain downloads.</dd>
                     </div>
 
-                    
                     <div class="feature-box flex flex-col scroll-animate delay-100">
                         <div class="feature-icon self-start">
-                             <span class="lucide" data-lucide="tag"></span>
+                             <span data-lucide="tag"></span>
                         </div>
                         <dt class="mt-4 text-base font-semibold leading-7 text-white subheading">Cost-Effective Trading</dt>
-                        <dd class="mt-1 flex-auto text-base body-text">Low fees for stablecoin trades on Polygon via DCRDEX.</dd>
+                        <dd class="mt-1 flex-auto text-base body-text">
+                          Ultra-low transaction fees on most chains. Trade stablecoins on Polygon for fractions of a penny per trade.
+                        </dd>
                     </div>
                 </div>
             </div>
@@ -459,7 +484,7 @@
             </div>
             <div class="mt-16 max-w-4xl mx-auto scroll-animate delay-100">
                 
-                <ol class="space-y-8 border-l-2 border-blue-500"> 
+                <ol id="onboardList" class="space-y-8 border-l-2 border-blue-500"> 
                     <li class="group"> 
                         <span class="list-number">1</span>
                         <h3 class="text-lg font-semibold leading-8 text-white subheading">Download & Install</h3>
@@ -483,11 +508,11 @@
                      <li class="group">
                         <span class="list-number">5</span>
                         <h3 class="text-lg font-semibold leading-8 text-white subheading">Understand Trading Bonds (DCRDEX)</h3>
-                        <p class="mt-1 text-base body-text">DCRDEX requires a small DCR bond to place orders, preventing spam. Understand this requirement before trading. More details in the <a href="#support" class="text-blue-400 hover:text-blue-300 underline transition-colors">Support/FAQ</a>.</p>
+                        <p class="mt-1 text-base body-text">DCRDEX requires a small amount of DCR locked in a refundable on-chain bond to place orders, preventing spam. Understand this requirement before trading. More details in the <a href="#support" class="text-blue-400 hover:text-blue-300 underline transition-colors">Support/FAQ</a>.</p>
                     </li>
                 </ol>
                  <div class="mt-12 text-center">
-                     <a href="#support" class="text-sm font-semibold leading-6 text-blue-400 hover:text-blue-300 transition-colors">Need more help? Visit Support & FAQ <span data-lucide="arrow-right" class="lucide lucide-sm inline-block"></span></a>
+                     <a href="#support" class="text-sm font-semibold leading-6 text-blue-400 hover:text-blue-300 transition-colors">Need more help? Visit Support & FAQ <span data-lucide="arrow-right" class="inline-block"></span></a>
                  </div>
             </div>
         </div>
@@ -497,7 +522,7 @@
      <section id="supported-assets" class="py-24 sm:py-32 bg-gray-900 overflow-hidden">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="mx-auto max-w-3xl text-center scroll-animate">
-                 <span class="lucide lucide-xl text-blue-400 mb-4" data-lucide="coins"></span>
+                 <span class="text-blue-400 mb-4" data-lucide="coins"></span>
                 <h2 class="text-3xl font-bold tracking-tight text-white sm:text-4xl">
                     Supported Assets on DCRDEX
                 </h2>
@@ -507,21 +532,63 @@
             </div>
             <div class="mt-16 max-w-5xl mx-auto scroll-animate delay-100">
                 
-                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 text-center">
-                    
-                    <div class="bg-gray-800 p-4 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105"><span class="font-medium text-white">Decred (DCR)</span></div>
-                    <div class="bg-gray-800 p-4 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105"><span class="font-medium text-white">Bitcoin (BTC)</span></div>
-                    <div class="bg-gray-800 p-4 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105"><span class="font-medium text-white">Litecoin (LTC)</span></div>
-                    <div class="bg-gray-800 p-4 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105"><span class="font-medium text-white">Ethereum (ETH)</span></div>
-                    <div class="bg-gray-800 p-4 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105"><span class="font-medium text-white">Polygon (MATIC)</span></div>
-                    <div class="bg-gray-800 p-4 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105"><span class="font-medium text-white">Bitcoin Cash (BCH)</span></div>
-                    <div class="bg-gray-800 p-4 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105"><span class="font-medium text-white">Zcash (ZEC)</span></div>
-                    <div class="bg-gray-800 p-4 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105"><span class="font-medium text-white">Dogecoin (DOGE)</span></div>
-                    <div class="bg-gray-800 p-4 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105"><span class="font-medium text-white">USDC (Polygon)</span></div>
-                    <div class="bg-gray-800 p-4 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105"><span class="font-medium text-white">USDT (Polygon)</span></div>
-                    <div class="bg-gray-700/50 p-4 rounded-lg flex items-center justify-center border border-dashed border-gray-600"><span class="font-medium text-gray-400 italic">More coming...</span></div>
+                <div id="coins" class="grid grid-cols-1 xs:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 text-center">
+                    <div class="bg-gray-800 p-4 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105 flex place-content-center">
+                      <div class="coin dcr"></div>
+                      <span class="font-medium text-white">Decred (DCR)</span>
+                    </div>
+                    <div class="bg-gray-800 p-4 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105">
+                      <div class="coin btc"></div>
+                      <span class="font-medium text-white">Bitcoin (BTC)</span>
+                    </div>
+                    <div class="bg-gray-800 p-4 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105">
+                      <div class="coin ltc"></div>
+                      <span class="font-medium text-white">Litecoin (LTC)</span>
+                    </div>
+                    <div class="bg-gray-800 p-4 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105">
+                      <div class="coin eth"></div>
+                      <span class="font-medium text-white">Ethereum (ETH)</span>
+                    </div>
+                    <div class="bg-gray-800 p-4 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105">
+                      <div class="coin pol"></div>
+                      <span class="font-medium text-white">Polygon (POL)</span>
+                    </div>
+                    <div class="bg-gray-800 p-4 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105">
+                      <div class="coin bch"></div>
+                      <span class="font-medium text-white">Bitcoin Cash (BCH)</span>
+                    </div>
+                    <div class="bg-gray-800 p-4 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105">
+                      <div class="coin zec"></div>
+                      <span class="font-medium text-white">Zcash (ZEC)</span>
+                    </div>
+                    <div class="bg-gray-800 p-4 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105">
+                      <div class="coin doge"></div>
+                      <span class="font-medium text-white">Dogecoin (DOGE)</span>
+                    </div>
+                    <div class="bg-gray-800 p-4 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105">
+                      <div class="coin usdc"></div>
+                      <span class="font-medium text-white">USDC</span>
+                    </div>
+                    <div class="bg-gray-800 p-4 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105">
+                      <div class="coin usdt"></div>
+                      <span class="font-medium text-white">USDT</span>
+                    </div>
+                    <div class="bg-gray-800 p-4 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105">
+                      <div class="coin dgb"></div>
+                      <span class="font-medium text-white">Digibyte (DGB)</span>
+                    </div>
+                    <div class="bg-gray-800 p-4 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105">
+                      <div class="coin firo"></div>
+                      <span class="font-medium text-white">Firo (FIRO)</span>
+                    </div>
+                    <div class="bg-gray-800 p-4 rounded-lg hover:bg-gray-700 transition-all duration-200 transform hover:scale-105">
+                      <div class="coin dash"></div>
+                      <span class="font-medium text-white">Dash (DASH)</span>
+                    </div>
+                    <div class="bg-gray-700/50 p-4 rounded-lg flex items-center justify-center border border-dashed border-gray-600">
+                      <span class="font-medium text-gray-400 italic">More coming...</span>
+                    </div>
                  </div>
-                 <p class="mt-8 text-center text-sm text-gray-400">Note: Asset availability depends on DCRDEX market liquidity and wallet support.</p>
             </div>
         </div>
     </section>
@@ -530,7 +597,7 @@
     <section id="security" class="py-24 sm:py-32 bg-gray-800 overflow-hidden">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
              <div class="mx-auto max-w-3xl text-center scroll-animate">
-                 <span class="lucide lucide-xl text-blue-400 mb-4" data-lucide="shield-check"></span>
+                 <span class="text-blue-400 mb-4" data-lucide="shield-check"></span>
                 <h2 class="text-3xl font-bold tracking-tight text-white sm:text-4xl">
                     Your Security is Paramount
                 </h2>
@@ -540,19 +607,19 @@
             </div>
             <div class="mt-16 max-w-4xl mx-auto grid md:grid-cols-2 gap-8 lg:gap-12">
                 <div class="bg-gray-900 p-6 rounded-lg shadow-md border border-transparent hover:border-blue-500 transition-all duration-300 scroll-animate delay-100">
-                    <h3 class="text-lg font-semibold text-white flex items-center gap-2 subheading"><span class="lucide lucide-sm text-blue-400" data-lucide="key-round"></span> Non-Custodial</h3>
+                    <h3 class="text-lg font-semibold text-white flex items-center gap-2 subheading"><span class="text-blue-400" data-lucide="key-round"></span> Self-Custodial</h3>
                     <p class="mt-2 text-base body-text">You, and only you, hold the private keys to your funds. Bison Wallet software never takes custody of your assets.</p>
                 </div>
                  <div class="bg-gray-900 p-6 rounded-lg shadow-md border border-transparent hover:border-blue-500 transition-all duration-300 scroll-animate delay-200">
-                    <h3 class="text-lg font-semibold text-white flex items-center gap-2 subheading"><span class="lucide lucide-sm text-blue-400" data-lucide="hard-drive"></span> Hardware Wallet Compatible</h3>
-                    <p class="mt-2 text-base body-text">For maximum security, integrate Bison Wallet with your Trezor or Ledger device to keep keys offline.</p>
+                    <h3 class="text-lg font-semibold text-white flex items-center gap-2 subheading"><span class="text-blue-400" data-lucide="eye-off"></span> Private</h3>
+                    <p class="mt-2 text-base body-text">No KYC or AML. No registration. No names. DCRDEX does not track IPs when you retrieve or relay order info.</p>
                 </div>
                  <div class="bg-gray-900 p-6 rounded-lg shadow-md border border-transparent hover:border-blue-500 transition-all duration-300 scroll-animate delay-300">
-                    <h3 class="text-lg font-semibold text-white flex items-center gap-2 subheading"><span class="lucide lucide-sm text-blue-400" data-lucide="cpu"></span> Lightweight SPV Technology</h3>
+                    <h3 class="text-lg font-semibold text-white flex items-center gap-2 subheading"><span class="text-blue-400" data-lucide="cpu"></span> Lightweight SPV Technology</h3>
                     <p class="mt-2 text-base body-text">Simplified Payment Verification offers a balance of security and speed without needing full blockchain downloads.</p>
                 </div>
                  <div class="bg-gray-900 p-6 rounded-lg shadow-md border border-red-500/50 scroll-animate delay-100">
-                    <h3 class="text-lg font-semibold text-red-400 flex items-center gap-2 subheading"><span class="lucide lucide-sm text-red-400" data-lucide="info"></span> Your Responsibility</h3>
+                    <h3 class="text-lg font-semibold text-red-400 flex items-center gap-2 subheading"><span class="text-red-400" data-lucide="info"></span> Your Responsibility</h3>
                     <p class="mt-2 text-base body-text">Safeguarding your seed phrase is vital. Store it securely offline. Loss of your seed phrase means loss of access to your funds.</p>
                      <p class="mt-4 text-xs text-gray-500">Always verify software sources and be cautious of phishing attempts.</p>
                 </div>
@@ -564,7 +631,7 @@
     <section id="fees" class="py-24 sm:py-32 bg-gray-900 overflow-hidden">
          <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
              <div class="mx-auto max-w-3xl text-center scroll-animate">
-                 <span class="lucide lucide-xl text-blue-400 mb-4" data-lucide="tag"></span>
+                 <span class="text-blue-400 mb-4" data-lucide="tag"></span>
                 <h2 class="text-3xl font-bold tracking-tight text-white sm:text-4xl">
                     Transparent Fee Structure
                 </h2>
@@ -599,15 +666,15 @@
                     </p>
                     <ul class="mt-6 space-y-3 text-base body-text">
                          <li class="flex gap-x-3">
-                            <span class="lucide lucide-sm text-blue-400 flex-none mt-1" data-lucide="check-circle"></span>
+                            <span class="text-blue-400 flex-none mt-1" data-lucide="check-circle"></span>
                             <span>Hybrid PoW/PoS consensus for robust security and stakeholder governance.</span>
                         </li>
                          <li class="flex gap-x-3">
-                            <span class="lucide lucide-sm text-blue-400 flex-none mt-1" data-lucide="check-circle"></span>
+                            <span class="text-blue-400 flex-none mt-1" data-lucide="check-circle"></span>
                             <span>On-chain voting empowers the community to direct the project's future.</span>
                         </li>
                          <li class="flex gap-x-3">
-                            <span class="lucide lucide-sm text-blue-400 flex-none mt-1" data-lucide="check-circle"></span>
+                            <span class="text-blue-400 flex-none mt-1" data-lucide="check-circle"></span>
                             <span>Treasury system funds development and ecosystem growth sustainably.</span>
                         </li>
                     </ul>
@@ -616,7 +683,7 @@
                      </p>
                      <a href="https://decred.org/" target="_blank" rel="noopener noreferrer" class="mt-8 inline-flex items-center gap-x-2 rounded-lg btn-primary px-4 py-2.5 text-sm font-semibold shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 transition duration-200 ease-in-out transform hover:scale-105">
                         Visit Decred.org
-                        <span class="lucide lucide-sm" data-lucide="external-link"></span>
+                        <span data-lucide="external-link"></span>
                     </a>
                 </div>
                 
@@ -639,20 +706,30 @@
                 Download the latest version for your operating system and join the decentralized future.
             </p>
             <div class="mt-10 flex flex-wrap items-center justify-center gap-x-6 gap-y-4">
-                
-                <a href="#" class="btn-secondary rounded-lg px-5 py-3 text-sm font-semibold shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white transition duration-200 ease-in-out inline-flex items-center gap-2 transform hover:scale-105">
-                    <span class="lucide lucide-sm" data-lucide="download"></span> Download for Windows
-                </a>
-                 <a href="#" class="btn-secondary rounded-lg px-5 py-3 text-sm font-semibold shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white transition duration-200 ease-in-out inline-flex items-center gap-2 transform hover:scale-105 delay-100">
-                    <span class="lucide lucide-sm" data-lucide="download"></span> Download for macOS
-                </a>
-                 <a href="#" class="btn-secondary rounded-lg px-5 py-3 text-sm font-semibold shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white transition duration-200 ease-in-out inline-flex items-center gap-2 transform hover:scale-105 delay-200">
-                    <span class="lucide lucide-sm" data-lucide="download"></span> Download for Linux
-                </a>
+                <div class="flex items-stretch border-solid border-gray-400 border-2 rounded-lg cursor-pointer relative">
+                  <a id="downloadLink" href="https://github.com/decred/dcrdex/releases/latest/download/bisonw-desktop-windows-amd64-v1.0.2.msi" class="block p-6 place-content-center btn-primary">
+                    Download for Windows (installer)
+                  </a>
+                  <div id="downloadToggleDropdown" class="p-6 place-content-center border-left border-gray-400 border-2 btn-primary">
+                    <i data-lucide="chevron-down"></i>
+                  </div>
+                  <div id="downloadDropdown" class="border-2 border-gray-400 hidden">
+                    <div data-os-variant="windows" data-link="bisonw-desktop-windows-amd64-v1.0.2.msi">Windows (installer)</div>
+                    <div data-os-variant="linux-deb" data-link="bisonw-desktop-linux-amd64-v1.0.2.deb">Debian Linux AMD64 (installer)</div>
+                    <div data-os-variant="linux-amd" data-link="bisonw-linux-amd64-v1.0.2.tar.gz">Linux AMD64 (binary archive)</div>
+                    <div data-os-variant="linux-arm" data-link="bisonw-linux-arm64-v1.0.2.tar.gz">Linux ARM64 (binary archive)</div>
+                    <div data-os-variant="mac-arm-installer" data-link="bisonw-desktop-darwin-arm64-v1.0.2.dmg">Mac OS M-series/ARM (installer)</div>
+                    <div data-os-variant="mac-amd-installer" data-link="bisonw-desktop-darwin-amd64-v1.0.2.dmg">Mac OS AMD64 (installer)</div>
+                    <div data-os-variant="mac-arm" data-link="bisonw-darwin-arm64-v1.0.2.tar.gz">Mac OS M-series/ARM (binary archive)</div>
+                    <div data-os-variant="mac-amd" data-link="bisonw-darwin-amd64-v1.0.2.tar.gz">Mac OS AMD64 (binary archive)</div>
+                    <div data-os-variant="freebsd" data-link="bisonw-freebsd-amd64-v1.0.2.tar.gz">Free BSD AMD64 (binary archive)</div>
+                    <div data-os-variant="riscv" data-link="bisonw-linux-riscv64-v1.0.2.tar.gz">RISC-V 64-bit (binary archive)</div>
+                  </div>
+                </div>
             </div>
              <div class="mt-8">
-                 <a href="https://github.com/decred/bisonrelay" target="_blank" rel="noopener noreferrer" class="text-sm font-semibold leading-6 text-gray-400 hover:text-white transition duration-200 ease-in-out inline-flex items-center gap-1">
-                    View Source Code on GitHub <span class="lucide lucide-sm" data-lucide="external-link"></span>
+                 <a href="https://github.com/decred/dcrdex" target="_blank" rel="noopener noreferrer" class="text-sm font-semibold leading-6 text-gray-400 hover:text-white transition duration-200 ease-in-out inline-flex items-center gap-1">
+                    View Source Code on GitHub <span data-lucide="external-link"></span>
                 </a>
             </div>
         </div>
@@ -661,16 +738,15 @@
     
     <section id="support" class="py-24 sm:py-32 bg-gray-800 overflow-hidden">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center scroll-animate">
-            <span class="lucide lucide-xl text-blue-400 mb-4" data-lucide="life-buoy"></span>
+            <span class="text-blue-400 mb-4" data-lucide="life-buoy"></span>
             <h2 class="text-3xl font-bold tracking-tight text-white sm:text-4xl">Support & FAQ</h2>
             <p class="mt-4 text-lg max-w-2xl mx-auto body-text">
                 Find answers to common questions and get help with Bison Wallet. Check our comprehensive FAQ or reach out to the active Decred community.
             </p>
              <div class="mt-10">
-                 
-                 <a href="#" class="btn-primary rounded-lg px-6 py-3 text-base font-semibold shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 transition duration-200 ease-in-out inline-flex items-center gap-2 transform hover:scale-105">
-                    View FAQ & Support Resources
-                </a>
+              <a href="https://docs.decred.org/faq/general/" class="btn-primary rounded-lg px-6 py-3 text-base font-semibold shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 transition duration-200 ease-in-out inline-flex items-center gap-2 transform hover:scale-105">
+                View FAQ & Support Resources
+              </a>
             </div>
              <p class="mt-8 text-sm text-gray-400">Join the conversation on: <a href="https://matrix.to/#/#decred:decred.org" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline">Matrix</a>, <a href="https://discord.gg/decred" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline">Discord</a></p>
         </div>
@@ -679,16 +755,15 @@
     
     <section id="blog" class="py-24 sm:py-32 bg-gray-900 overflow-hidden">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center scroll-animate">
-            <span class="lucide lucide-xl text-blue-400 mb-4" data-lucide="newspaper"></span>
+            <span class="text-blue-400 mb-4" data-lucide="newspaper"></span>
             <h2 class="text-3xl font-bold tracking-tight text-white sm:text-4xl">Latest News & Updates</h2>
             <p class="mt-4 text-lg max-w-2xl mx-auto body-text">
                 Stay informed about Bison Wallet development, new features, DCRDEX news, and educational content from the Decred ecosystem.
             </p>
              <div class="mt-10">
-                 
-                 <a href="#" class="btn-secondary rounded-lg px-6 py-3 text-base font-semibold transition duration-200 ease-in-out inline-flex items-center gap-2 transform hover:scale-105">
-                    Visit the Blog <span class="lucide lucide-sm" data-lucide="arrow-right"></span>
-                </a>
+              <a href="https://blog.decred.org/" class="btn-secondary rounded-lg px-6 py-3 text-base font-semibold transition duration-200 ease-in-out inline-flex items-center gap-2 transform hover:scale-105">
+                Visit the Blog <span data-lucide="arrow-right"></span>
+              </a>
             </div>
         </div>
     </section>
@@ -697,7 +772,7 @@
     <footer class="bg-gray-800 border-t border-gray-700">
         <div class="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8 overflow-hidden">
             <nav class="-mx-5 -my-2 flex flex-wrap justify-center scroll-animate" aria-label="Footer">
-                
+
                 <div class="px-5 py-2">
                     <a href="#features" class="text-base text-gray-400 hover:text-gray-300 transition-colors duration-200">Features</a>
                 </div>
@@ -713,20 +788,69 @@
                 <div class="px-5 py-2">
                     <a href="https://github.com/decred/bisonrelay" target="_blank" rel="noopener noreferrer" class="text-base text-gray-400 hover:text-gray-300 transition-colors duration-200">GitHub</a>
                 </div>
-                 <div class="px-5 py-2">
-                    <a href="https://decred.org/" target="_blank" rel="noopener noreferrer" class="text-base text-gray-400 hover:text-gray-300 transition-colors duration-200">Decred.org</a>
+                <div class="px-5 py-2">
+                  <a href="https://decred.org/" target="_blank" rel="noopener noreferrer" class="text-base text-gray-400 hover:text-gray-300 transition-colors duration-200">Decred.org</a>
                 </div>
-                
-                </nav>
-             
-             <div class="mt-8 text-center text-sm text-gray-400 max-w-2xl mx-auto scroll-animate delay-100">
-                 <p>Bison Wallet is a community-driven project within the Decred ecosystem, focused on providing secure and private access to decentralized trading via DCRDEX.</p>
-             </div>
+            </nav>
+
+            <div class="mt-8 text-center text-sm text-gray-400 max-w-2xl mx-auto scroll-animate delay-100">
+                <p>Bison Wallet is a community-driven project within the Decred ecosystem, focused on providing secure and private access to decentralized trading via DCRDEX.</p>
+            </div>
             <p class="mt-8 text-center text-base text-gray-500 scroll-animate delay-200">
                 &copy; 2025 Bison Wallet Contributors. Built by the Decred Community.
             </p>
         </div>
     </footer>
-
+    <script src="/js/lucide.min.js"></script>
+    <script>
+      lucide.createIcons()
+      const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+      const platform = navigator.platform || "unknown";
+      let userOS = 'windows'
+      switch (true) {
+        case (/win/i.test(userAgent)):
+          userOS = "windows"
+          break
+        case (/Mac/i.test(userAgent)):
+          userOS = "mac"
+          break
+        case (/Linux/i.test(userAgent)):
+          userOS = "linux"
+          break
+        case (/freebsd/i.test(userAgent) || /freebsd/i.test(platform)):
+          userOS = "freebsd"
+          break
+        case (/riscv/i.test(userAgent) || /risc-v/i.test(userAgent)):imageError
+          userOS = "riscv"
+      }
+      let arch = "amd"
+      switch (true) {
+        case /aarch64|arm64|armv8/i:
+          arch = "arm"
+          break
+        case /x86_64|amd64|wow64/i:
+          arch = "amd"
+      }
+      const downloadToggleDropdown = document.getElementById("downloadToggleDropdown")
+      const downloadDropdown = document.getElementById("downloadDropdown")
+      const downloadLink = document.getElementById("downloadLink")
+      const changeDownloadLink = (bttn) => {
+        downloadLink.textContent = `Download for ${bttn.textContent}`
+          downloadLink.href = `https://github.com/decred/dcrdex/releases/latest/download/${bttn.dataset.link}`
+          downloadDropdown.classList.add('hidden')
+      }
+      const downloadSelectBttns = {}
+      for (const bttn of downloadDropdown.querySelectorAll(':scope > div')) {
+        downloadSelectBttns[bttn.dataset.osVariant] = bttn
+        bttn.addEventListener("click", () => changeDownloadLink(bttn))
+      }      
+      downloadToggleDropdown.addEventListener("click", () => downloadDropdown.classList.toggle('hidden'))
+      let bestDownload = userOS
+      if (!(['windows', 'freebsd', 'riscv'].includes(userOS))) {
+        bestDownload += `-${arch}`
+        if (userOS === 'mac') bestDownload += '-installer'
+      }
+      changeDownloadLink(downloadSelectBttns[bestDownload])
+    </script>
 </body>
 </html>
