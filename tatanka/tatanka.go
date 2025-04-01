@@ -292,6 +292,9 @@ func (t *Tatanka) prepareHandlers() {
 	} {
 		registerClientHandler(route, handler)
 	}
+	for route := range t.tatankaHandlers {
+		t.routes = append(t.routes, route)
+	}
 	for route := range t.specialHandlers {
 		t.routes = append(t.routes, route)
 	}
@@ -617,7 +620,7 @@ func (t *tcpCore) Routes() []string {
 
 func (t *tcpCore) HandleMessage(cl tanka.Sender, msg *msgjson.Message) *msgjson.Error {
 	if t.log.Level() == dex.LevelTrace {
-		t.log.Tracef("Tatanka node handling message. route = %s, payload = %s", msg.Route, mj.Truncate(msg.Payload))
+		t.log.Tracef("Tatanka node handling message. route = %s, payload = %s", msg.Route, string(msg.Payload))
 	}
 
 	if _, found := t.clientHandlers[msg.Route]; found {

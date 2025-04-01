@@ -23,7 +23,7 @@ type Client struct {
 	cert   []byte
 	cl     comms.WsConn
 	cm     *dex.ConnectionMaster
-	handle func(*msgjson.Message) *msgjson.Error
+	handle func(*msgjson.Message)
 }
 
 type Config struct {
@@ -31,7 +31,7 @@ type Config struct {
 	URL           string
 	Cert          []byte
 	PrivateKey    *secp256k1.PrivateKey
-	HandleMessage func(*msgjson.Message) *msgjson.Error
+	HandleMessage func(*msgjson.Message)
 }
 
 func New(cfg *Config) (*Client, error) {

@@ -168,7 +168,7 @@ func TestTankagrams(t *testing.T) {
 	resp := mj.MustResponse(msg.ID, responseB, nil)
 	c1s.queueResponse(resp)
 	checkResponse(mj.TRTTransmitted)
-	if !bytes.Equal(r.Response, responseB) {
+	if !bytes.Equal(r.EncryptedPayload, responseB) {
 		t.Fatalf("wrong response")
 	}
 
@@ -179,11 +179,11 @@ func TestTankagrams(t *testing.T) {
 
 	// Client not responsive locally, but is remotely.
 	c1s.responseErr = errors.New("test error")
-	resp, _ = msgjson.NewResponse(msg.ID, &mj.TankagramResult{Result: mj.TRTTransmitted, Response: responseB}, nil)
+	resp, _ = msgjson.NewResponse(msg.ID, &mj.TankagramResult{Result: mj.TRTTransmitted, EncryptedPayload: responseB}, nil)
 	tts.queueResponse(resp)
 	srv.remoteClients[c1.ID] = map[tanka.PeerID]struct{}{tt.ID: {}}
 	checkResponse(mj.TRTTransmitted)
-	if !bytes.Equal(r.Response, responseB) {
+	if !bytes.Equal(r.EncryptedPayload, responseB) {
 		t.Fatalf("wrong response")
 	}
 	c1s.responseErr = nil

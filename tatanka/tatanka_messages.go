@@ -103,7 +103,7 @@ type tatankaNotificationHandler = func(tt *remoteTatanka, msg *msgjson.Message)
 // the appropriate handler.
 func (t *Tatanka) handleTatankaMessage(cl tanka.Sender, msg *msgjson.Message) *msgjson.Error {
 	if t.log.Level() == dex.LevelTrace {
-		t.log.Tracef("Tatanka node handling message from remote tatanka. route = %s, payload = %s", msg.Route, mj.Truncate(msg.Payload))
+		t.log.Tracef("Tatanka node handling message from remote tatanka. route = %s, payload = %s", msg.Route, string(msg.Payload))
 	}
 
 	peerID := cl.PeerID()
@@ -157,7 +157,7 @@ func (t *Tatanka) handleRelayedTankagram(tt *remoteTatanka, msg *msgjson.Message
 	var resB dex.Bytes
 	sent, clientErr, err := t.requestAnyOne([]tanka.Sender{c}, relayedMsg, &resB)
 	if sent {
-		t.sendResult(tt, msg.ID, &mj.TankagramResult{Result: mj.TRTTransmitted, Response: resB})
+		t.sendResult(tt, msg.ID, &mj.TankagramResult{Result: mj.TRTTransmitted, EncryptedPayload: resB})
 		return nil
 	}
 	if clientErr != nil {
