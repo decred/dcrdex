@@ -153,8 +153,7 @@ type spvWallet struct {
 	dir               string
 	chainParams       *chaincfg.Params
 	log               dex.Logger
-	spv               spvSyncer // *spv.Syncer
-	bestSpvPeerHeight int32     // atomic
+	bestSpvPeerHeight int32 // atomic
 	tipChan           chan *block
 	gapLimit          uint32
 
@@ -164,6 +163,9 @@ type spvWallet struct {
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+
+	spvMtx sync.RWMutex
+	spv    spvSyncer // *spv.Syncer
 }
 
 var _ Wallet = (*spvWallet)(nil)
@@ -393,19 +395,10 @@ func (w *spvWallet) startWallet(ctx context.Context) error {
 	w.dcrWallet = &extendedWallet{dcrw}
 	w.db = db
 
-	var connectPeers []string
-	switch w.chainParams.Net {
-	case wire.SimNet:
-		connectPeers = []string{"localhost:19560"}
-	}
-
-	spv := newSpvSyncer(dcrw, w.dir, connectPeers)
-	w.spv = spv
-
 	w.wg.Add(2)
 	go func() {
 		defer w.wg.Done()
-		w.spvLoop(ctx, spv)
+		w.spvLoop(ctx)
 	}()
 	go func() {
 		defer w.wg.Done()
@@ -427,8 +420,11 @@ func (w *spvWallet) stop() {
 	w.log.Info("SPV wallet closed")
 }
 
-func (w *spvWallet) spvLoop(ctx context.Context, syncer *spv.Syncer) {
+func (w *spvWallet) spvLoop(ctx context.Context) {
 	for {
+		// Create a new syncer after every failure or dcrwallet will
+		// panic because of closing of a closed channel.
+		syncer := w.newSpvSyncer()
 		err := syncer.Run(ctx)
 		if ctx.Err() != nil {
 			return
@@ -741,6 +737,8 @@ func (w *spvWallet) SignRawTransaction(ctx context.Context, baseTx *wire.MsgTx) 
 // SendRawTransaction broadcasts the provided transaction to the Decred network.
 // Part of the Wallet interface.
 func (w *spvWallet) SendRawTransaction(ctx context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error) {
+	w.spvMtx.RLock()
+	defer w.spvMtx.RUnlock()
 	// TODO: Conditional high fee check?
 	return w.PublishTransaction(ctx, tx, w.spv)
 }
@@ -829,7 +827,9 @@ func (w *spvWallet) GetBlock(ctx context.Context, blockHash *chainhash.Hash) (*w
 		return block, nil
 	}
 
+	w.spvMtx.RLock()
 	blocks, err := w.spv.Blocks(ctx, []*chainhash.Hash{blockHash})
+	w.spvMtx.RUnlock()
 	if err != nil {
 		return nil, err
 	}
@@ -983,7 +983,9 @@ func (w *spvWallet) SyncStatus(ctx context.Context) (*asset.SyncStatus, error) {
 	height = utils.Clamp(height, 0, targetHeight)
 	ss.Blocks = uint64(height)
 
+	w.spvMtx.RLock()
 	ss.Synced, _ = w.spv.Synced(ctx)
+	w.spvMtx.RUnlock()
 
 	if rescanHash, err := w.dcrWallet.RescanPoint(ctx); err != nil {
 		return nil, fmt.Errorf("error getting rescan point: %w", err)
@@ -1003,7 +1005,9 @@ func (w *spvWallet) SyncStatus(ctx context.Context) (*asset.SyncStatus, error) {
 // spv peers. If no peers are connected, the last observed max peer height is
 // returned.
 func (w *spvWallet) bestPeerInitialHeight() int32 {
+	w.spvMtx.RLock()
 	peers := w.spv.GetRemotePeers()
+	w.spvMtx.RUnlock()
 	if len(peers) == 0 {
 		return atomic.LoadInt32(&w.bestSpvPeerHeight)
 	}
@@ -1047,6 +1051,8 @@ func (w *spvWallet) newVSPClient(vspHost, vspPubKey string, log dex.Logger) (*vs
 
 // rescan performs a blocking rescan, sending updates on the channel.
 func (w *spvWallet) rescan(ctx context.Context, fromHeight int32, c chan wallet.RescanProgress) {
+	w.spvMtx.RLock()
+	defer w.spvMtx.RUnlock()
 	w.dcrWallet.RescanProgressFromHeight(ctx, w.spv, fromHeight, c)
 }
 
@@ -1085,7 +1091,9 @@ func (w *spvWallet) PurchaseTickets(ctx context.Context, n int, vspHost, vspPubK
 		}
 	}
 
+	w.spvMtx.RLock()
 	res, err := w.dcrWallet.PurchaseTickets(ctx, w.spv, req)
+	w.spvMtx.RUnlock()
 	if err != nil {
 		return nil, err
 	}
@@ -1443,6 +1451,8 @@ func (w *spvWallet) cachedBlock(blockHash *chainhash.Hash) *wire.MsgBlock {
 
 // PeerCount returns the count of currently connected peers.
 func (w *spvWallet) PeerCount(ctx context.Context) (uint32, error) {
+	w.spvMtx.RLock()
+	defer w.spvMtx.RUnlock()
 	return uint32(len(w.spv.GetRemotePeers())), nil
 }
 
@@ -1458,15 +1468,25 @@ func (w *spvWallet) cleanBlockCache() {
 	}
 }
 
-func newSpvSyncer(w *wallet.Wallet, netDir string, connectPeers []string) *spv.Syncer {
+func (w *spvWallet) newSpvSyncer() *spv.Syncer {
+	w.spvMtx.Lock()
+	defer w.spvMtx.Unlock()
+	ew := w.dcrWallet.(*extendedWallet)
+	dcrw := ew.Wallet
+	var connectPeers []string
+	switch w.chainParams.Net {
+	case wire.SimNet:
+		connectPeers = []string{"localhost:19560"}
+	}
 	addr := &net.TCPAddr{IP: net.ParseIP("::1"), Port: 0}
-	amgr := addrmgr.New(netDir, net.LookupIP)
-	lp := p2p.NewLocalPeer(w.ChainParams(), addr, amgr)
-	syncer := spv.NewSyncer(w, lp)
+	amgr := addrmgr.New(w.dir, net.LookupIP)
+	lp := p2p.NewLocalPeer(dcrw.ChainParams(), addr, amgr)
+	syncer := spv.NewSyncer(dcrw, lp)
 	if len(connectPeers) > 0 {
 		syncer.SetPersistentPeers(connectPeers)
 	}
-	w.SetNetworkBackend(syncer)
+	dcrw.SetNetworkBackend(syncer)
+	w.spv = syncer
 	return syncer
 }
 
