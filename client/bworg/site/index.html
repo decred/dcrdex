@@ -4,15 +4,23 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bison Wallet | Reliable Self-custodial Crypto Wallet</title>
+    <link rel="icon" href="/img/favicon.png" type="image/png">
 
     <script src="/js/tailwinds.js"></script>
-    
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=PT+Sans+Caption:wght@400;700&family=Wellfleet&display=swap" rel="stylesheet">
-    
-    
+
     <style>
+      @font-face {
+        font-family: 'PT Sans Caption';
+        src: url('/font/PTSansCaption-Regular.ttf') format('truetype');
+        font-weight: normal;
+        font-style: normal;
+      }
+      @font-face {
+        font-family: 'PT Sans Caption';
+        src: url('/font/PTSansCaption-Bold.ttf') format('truetype');
+        font-weight: bold;
+        font-style: normal;
+      }
       /* Basic styling */
       html {
         scroll-behavior: smooth;
@@ -132,7 +140,8 @@
             position: absolute;
             left: -18px; /* Align to the new padded left edge */
             display: flex;
-            place-content: center;
+            justify-content: center;
+            align-items: center;
             width: 35px;
             height: 35px;
             padding: 7px 0;
@@ -168,7 +177,8 @@
         #downloadDropdown > div {
           padding: 0.5em;
           display: flex;
-          place-content: center;
+          justify-content: center;
+          align-items: center;
           user-select: none;
         }
         #downloadDropdown > div:hover {
@@ -192,7 +202,8 @@
         }
         #coins > div {
           display: flex;
-          place-content: center;
+          justify-content: center;
+          align-items: center;
         }
         #coins > div > span {
           text-wrap: nowrap;
@@ -201,7 +212,7 @@
           background-position: 0 0;
         }
         .coin.btc {
-          background-position: -28px 0;
+          background-position: -27px 0;
         }
         .coin.eth {
           width: 16px;
@@ -226,17 +237,21 @@
           background-position: -210px 0;
         }
         .coin.firo {
-          background-position: -240px 0;
+          background-position: -238px 0;
         }
         .coin.dash {
-          background-position: -266px 0;
+          background-position: -265px 0;
         }
         .coin.bch {
           width: 28px;
-          background-position: -294px 0;
+          background-position: -292px 0;
         }
         .coin.doge {
-          background-position: -320px 0;
+          background-position: -321px 0;
+        }
+        #downloadImg {
+          height: 30px;
+          margin-right: 10px;
         }
     </style>
 
@@ -303,7 +318,7 @@
                 
                 <div class="flex items-center flex-shrink-0">
                     
-                    <img src="/img/bisonwallet-full-dark.svg" alt="Bison Wallet Logo" class="nav-logo" onerror="this.style.display='none';">
+                    <img src="/img/bisonwallet-full-dark.png" alt="Bison Wallet Logo" class="nav-logo" onerror="this.style.display='none';">
                     
                 </div>
                 
@@ -331,7 +346,7 @@
             </div>
         </div>
         
-        <div class="md:hidden block" id="mobile-menu">
+        <div class="hidden" id="mobile-menu">
              <div class="px-2 pt-2 pb-3 space-y-1 sm:px-3">
                 <a href="#features" class="text-gray-300 hover:bg-gray-700 hover:text-white block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200">Features</a>
                 <a href="#getting-started" class="text-gray-300 hover:bg-gray-700 hover:text-white block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200">Get Started</a>
@@ -707,8 +722,9 @@
             </p>
             <div class="mt-10 flex flex-wrap items-center justify-center gap-x-6 gap-y-4">
                 <div class="flex items-stretch border-solid border-gray-400 border-2 rounded-lg cursor-pointer relative">
-                  <a id="downloadLink" href="https://github.com/decred/dcrdex/releases/latest/download/bisonw-desktop-windows-amd64-v1.0.2.msi" class="block p-6 place-content-center btn-primary">
-                    Download for Windows (installer)
+                  <a id="downloadLink" href="https://github.com/decred/dcrdex/releases/latest/download/bisonw-desktop-windows-amd64-v1.0.2.msi" class="flex py-2 px-6 justify-center items-center text-lg leading-none btn-primary">
+                    <img id="downloadImg">
+                    <span id="downloadText">Download for Windows (installer)</span>
                   </a>
                   <div id="downloadToggleDropdown" class="p-6 place-content-center border-left border-gray-400 border-2 btn-primary">
                     <i data-lucide="chevron-down"></i>
@@ -737,18 +753,23 @@
 
     
     <section id="support" class="py-24 sm:py-32 bg-gray-800 overflow-hidden">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center scroll-animate">
+        <div class="max-w-full mx-auto px-4 sm:px-6 lg:px-8 text-center scroll-animate">
             <span class="text-blue-400 mb-4" data-lucide="life-buoy"></span>
             <h2 class="text-3xl font-bold tracking-tight text-white sm:text-4xl">Support & FAQ</h2>
             <p class="mt-4 text-lg max-w-2xl mx-auto body-text">
                 Find answers to common questions and get help with Bison Wallet. Check our comprehensive FAQ or reach out to the active Decred community.
             </p>
-             <div class="mt-10">
-              <a href="https://docs.decred.org/faq/general/" class="btn-primary rounded-lg px-6 py-3 text-base font-semibold shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 transition duration-200 ease-in-out inline-flex items-center gap-2 transform hover:scale-105">
-                View FAQ & Support Resources
+             <div class="flex flex-col lg:flex-row mt-5 justify-center">
+              <a href="https://docs.decred.org/" class="btn-primary rounded-lg px-6 py-3 text-base font-semibold shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 transition duration-200 ease-in-out inline-flex place-content-center gap-2 transform hover:scale-105 me-0 lg:me-5">
+                Documentation & FAQ
+              </a>
+              <a href="https://decred.org/matrix-support/" class="btn-primary rounded-lg px-6 py-3 text-base font-semibold shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 transition duration-200 ease-in-out inline-flex place-content-center gap-2 transform hover:scale-105 mx-0 lg:mx-5 mt-5 lg:mt-0">
+                Live Support / Community on Matrix
+              </a>
+              <a href="https://discord.gg/decred" class="btn-primary rounded-lg px-6 py-3 text-base font-semibold shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 transition duration-200 ease-in-out inline-flex place-content-center gap-2 transform hover:scale-105 ms-0 lg:ms-5 mt-5 lg:mt-0">
+                Live Support / Community on Discord
               </a>
             </div>
-             <p class="mt-8 text-sm text-gray-400">Join the conversation on: <a href="https://matrix.to/#/#decred:decred.org" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline">Matrix</a>, <a href="https://discord.gg/decred" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline">Discord</a></p>
         </div>
     </section>
 
@@ -786,7 +807,7 @@
                     <a href="#support" class="text-base text-gray-400 hover:text-gray-300 transition-colors duration-200">Support</a>
                 </div>
                 <div class="px-5 py-2">
-                    <a href="https://github.com/decred/bisonrelay" target="_blank" rel="noopener noreferrer" class="text-base text-gray-400 hover:text-gray-300 transition-colors duration-200">GitHub</a>
+                    <a href="https://github.com/decred/dcrdex" target="_blank" rel="noopener noreferrer" class="text-base text-gray-400 hover:text-gray-300 transition-colors duration-200">GitHub</a>
                 </div>
                 <div class="px-5 py-2">
                   <a href="https://decred.org/" target="_blank" rel="noopener noreferrer" class="text-base text-gray-400 hover:text-gray-300 transition-colors duration-200">Decred.org</a>
@@ -834,10 +855,27 @@
       const downloadToggleDropdown = document.getElementById("downloadToggleDropdown")
       const downloadDropdown = document.getElementById("downloadDropdown")
       const downloadLink = document.getElementById("downloadLink")
+      const downloadText = document.getElementById("downloadText")
+      const downloadImg = document.getElementById("downloadImg")
       const changeDownloadLink = (bttn) => {
-        downloadLink.textContent = `Download for ${bttn.textContent}`
+          downloadText.textContent = `Download for ${bttn.textContent}`
           downloadLink.href = `https://github.com/decred/dcrdex/releases/latest/download/${bttn.dataset.link}`
           downloadDropdown.classList.add('hidden')
+          const osVar = bttn.dataset.osVariant.split("-")[0]
+          downloadImg.classList.remove('hidden')
+          switch (osVar) {
+            case 'windows':
+              downloadImg.src = '/img/winlogo.png'
+              break
+            case 'mac':
+              downloadImg.src = '/img/maclogo.png'
+              break
+            case 'linux':
+              downloadImg.src = '/img/linuxlogo.png'
+              break
+            default:
+              downloadImg.classList.add('hidden')
+          }
       }
       const downloadSelectBttns = {}
       for (const bttn of downloadDropdown.querySelectorAll(':scope > div')) {
