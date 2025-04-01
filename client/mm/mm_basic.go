@@ -163,9 +163,9 @@ func updateLotSize(placements []*OrderPlacement, originalLotSize, newLotSize uin
 	newPlacements := make([]*OrderPlacement, 0, len(placements))
 	for _, p := range placements {
 		lots := uint64(math.Round((float64(p.Lots) * float64(originalLotSize)) / float64(newLotSize)))
-		lots = utils.Max(lots, 1)
+		lots = max(lots, 1)
 		maxLots := qtyCounter / newLotSize
-		lots = utils.Min(lots, maxLots)
+		lots = min(lots, maxLots)
 		if lots == 0 {
 			continue
 		}

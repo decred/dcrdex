@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/utils"
 )
 
 // FeeFetchFunc is a function that fetches a fee rate. If an error is
@@ -113,7 +112,7 @@ func prioritizedFeeRate(sources [][]*feeFetchSource) uint64 {
 			weightedRate += w * float64(src.rate)
 		}
 		if weightedRate != 0 {
-			return utils.Max(1, uint64(math.Round(weightedRate/weight)))
+			return max(1, uint64(math.Round(weightedRate/weight)))
 		}
 	}
 	return 0
@@ -161,7 +160,7 @@ func (f *FeeFetcher) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		r, errDelay, err := src.F(ctx)
 		if err != nil {
 			src.log.Meter("fetch-error", time.Minute*30).Errorf("Fetch error: %v", err)
-			src.failUntil = time.Now().Add(utils.Max(minFeeFetchErrorDelay, errDelay))
+			src.failUntil = time.Now().Add(max(minFeeFetchErrorDelay, errDelay))
 			return false
 		}
 		if r == 0 {
@@ -202,7 +201,7 @@ func (f *FeeFetcher) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 				f.log.Meter("all-failed", time.Minute*10).Error("All sources failed")
 				timeout = time.NewTimer(feeFetchDefaultTick)
 			} else {
-				timeout = time.NewTimer(utils.Max(0, delay))
+				timeout = time.NewTimer(max(0, delay))
 			}
 			select {
 			case <-timeout.C:

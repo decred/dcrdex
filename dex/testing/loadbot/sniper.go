@@ -95,9 +95,9 @@ func (s *sniper) snipe(m *Mantle) {
 	}
 
 	maxOrders := 1 + rand.Intn(s.maxOrdsPerEpoch)
-	targets := book.Sells[:clamp(maxOrders, 0, len(book.Sells))]
+	targets := book.Sells[:min(maxOrders, len(book.Sells))]
 	if sell {
-		targets = book.Buys[:clamp(maxOrders, 0, len(book.Buys))]
+		targets = book.Buys[:min(maxOrders, len(book.Buys))]
 	}
 	rem := maxQty
 
