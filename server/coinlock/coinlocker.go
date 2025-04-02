@@ -98,7 +98,7 @@ func (bl *bookLocker) LockOrdersCoins(orders []order.Order) []order.Order {
 	return bl.bookLock.LockOrdersCoins(orders)
 }
 
-// LockOrdersCoins locks coins associated with certain orders.
+// LockCoins locks coins associated with certain orders.
 func (bl *bookLocker) LockCoins(orderCoins map[order.OrderID][]CoinID) map[order.OrderID][]CoinID {
 	return bl.bookLock.LockCoins(orderCoins)
 }
