@@ -11,6 +11,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/tatanka/mj"
 	"decred.org/dcrdex/tatanka/tanka"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -98,6 +99,7 @@ func tNewTatanka() *Tatanka {
 		clientJobs:      make(chan *clientJob, 128),
 		clientHandlers:  make(map[string]interface{}),
 		tatankaHandlers: make(map[string]interface{}),
+		httpReqHandlers: make(map[string]comms.HTTPHandler),
 	}
 }
 

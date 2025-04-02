@@ -35,6 +35,7 @@ type Config struct {
 type Mesh struct {
 	priv   *secp256k1.PrivateKey
 	peerID tanka.PeerID
+
 	// cfg      *Config
 	log       dex.Logger
 	entryNode *TatankaCredentials
@@ -97,15 +98,9 @@ func (m *Mesh) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		EntryNode: m.entryNode,
 		Logger:    m.log.SubLogger("tTC"),
 		Handlers: &conn.MessageHandlers{
-			HandleTatankaRequest: func(tatankaID tanka.PeerID, msg *msgjson.Message) *msgjson.Error {
-				return m.handleTatankaRequest(tatankaID, msg)
-			},
-			HandleTatankaNotification: func(tatankaID tanka.PeerID, msg *msgjson.Message) {
-				m.handleTatankaNotification(tatankaID, msg)
-			},
-			HandlePeerMessage: func(peerID tanka.PeerID, msg *conn.IncomingTankagram) *msgjson.Error {
-				return m.handlePeerRequest(peerID, msg)
-			},
+			HandleTatankaRequest:      m.handleTatankaRequest,
+			HandleTatankaNotification: m.handleTatankaNotification,
+			HandlePeerMessage:         m.handlePeerRequest,
 		},
 		PrivateKey: m.priv,
 	})
@@ -159,33 +154,31 @@ func (m *Mesh) emit(thing any) {
 	}
 }
 
-func (m *Mesh) handleTatankaRequest(tatankaID tanka.PeerID, msg *msgjson.Message) *msgjson.Error {
-	switch msg.Route {
+func (m *Mesh) handleTatankaRequest(route string, payload json.RawMessage, respond func(any, *msgjson.Error)) {
+	switch route {
 	default:
-		m.log.Debugf("Received a request from tatanka node %s for unknown route %q", tatankaID, msg.Route)
+		m.log.Debugf("Received a request for an unknown route %q", route)
 	}
-	return nil
 }
 
-func (m *Mesh) handleTatankaNotification(_ /*peerID unused*/ tanka.PeerID, msg *msgjson.Message) {
-	switch msg.Route {
+func (m *Mesh) handleTatankaNotification(route string, payload json.RawMessage) {
+	switch route {
 	case mj.RouteBroadcast:
-		m.handleBroadcast(msg)
+		m.handleBroadcast(payload)
 	case mj.RouteRates:
-		m.handleRates(msg)
+		m.handleRates(payload)
 	case mj.RouteFeeRateEstimate:
-		m.handleFeeEstimates(msg)
+		m.handleFeeEstimates(payload)
 	default:
-		m.emit(msg)
+		m.emit(payload)
 	}
 }
 
-func (m *Mesh) handlePeerRequest(_ /*peerID unused*/ tanka.PeerID, msgI any) *msgjson.Error {
-	switch msgI.(type) {
-	case *conn.IncomingTankagram:
+func (m *Mesh) handlePeerRequest(peerID tanka.PeerID, route string, payload json.RawMessage, respond func(any, mj.TankagramError)) {
+	switch route {
+	default:
+		m.log.Debugf("Received a peer request for an unknown route %q", route)
 	}
-	m.emit(msgI)
-	return nil
 }
 
 func (m *Mesh) Broadcast(topic tanka.Topic, subject tanka.Subject, msgType mj.BroadcastMessageType, thing interface{}) error {
@@ -248,31 +241,24 @@ func (m *Mesh) SubscribeMarket(baseID, quoteID uint32) error {
 		return fmt.Errorf("error constructing market name: %w", err)
 	}
 
-	req := mj.MustRequest(mj.RouteSubscribe, &mj.Subscription{
-		Topic:   mj.TopicMarket,
-		Subject: tanka.Subject(mktName),
-	})
-	mj.SignMessage(m.priv, req)
-
 	m.marketsMtx.Lock()
 	defer m.marketsMtx.Unlock()
 
-	// Only possible non-error response is `true`.
-	var ok bool
-	if err := m.conn.RequestMesh(req, &ok); err != nil {
-		return err
+	if err = m.conn.Subscribe(mj.TopicMarket, tanka.Subject(mktName)); err != nil {
+		return fmt.Errorf("error subscribing to market: %w", err)
 	}
 
 	m.markets[mktName] = &market{
 		log:  m.log.SubLogger(mktName),
 		ords: make(map[tanka.ID40]*order),
 	}
+
 	return nil
 }
 
-func (m *Mesh) handleBroadcast(msg *msgjson.Message) {
+func (m *Mesh) handleBroadcast(payload json.RawMessage) {
 	var bcast mj.Broadcast
-	if err := msg.Unmarshal(&bcast); err != nil {
+	if err := json.Unmarshal(payload, &bcast); err != nil {
 		m.log.Errorf("%s broadcast unmarshal error: %w", err)
 		return
 	}
@@ -280,15 +266,17 @@ func (m *Mesh) handleBroadcast(msg *msgjson.Message) {
 	case mj.TopicMarket:
 		m.handleMarketBroadcast(&bcast)
 	}
+
 	m.emit(&bcast)
 }
 
-func (m *Mesh) handleRates(msg *msgjson.Message) {
+func (m *Mesh) handleRates(payload json.RawMessage) {
 	var rm mj.RateMessage
-	if err := msg.Unmarshal(&rm); err != nil {
+	if err := json.Unmarshal(payload, &rm); err != nil {
 		m.log.Errorf("%s rate message unmarshal error: %w", err)
 		return
 	}
+
 	switch rm.Topic {
 	case mj.TopicFiatRate:
 		m.fiatRatesMtx.Lock()
@@ -301,10 +289,6 @@ func (m *Mesh) handleRates(msg *msgjson.Message) {
 		m.fiatRatesMtx.Unlock()
 	}
 	m.emit(&rm)
-}
-
-func (m *Mesh) Auth(tatankaID tanka.PeerID) error {
-	return m.conn.Auth(tatankaID)
 }
 
 func (m *Mesh) ConnectPeer(peerID tanka.PeerID) error {
@@ -323,12 +307,13 @@ type meshConn struct {
 	cm *dex.ConnectionMaster
 }
 
-func (m *Mesh) handleFeeEstimates(msg *msgjson.Message) {
+func (m *Mesh) handleFeeEstimates(payload json.RawMessage) {
 	var rm mj.FeeRateEstimateMessage
-	if err := msg.Unmarshal(&rm); err != nil {
+	if err := json.Unmarshal(payload, &rm); err != nil {
 		m.log.Errorf("%s rate message unmarshal error: %w", err)
 		return
 	}
+
 	switch rm.Topic {
 	case mj.TopicFeeRateEstimate:
 		m.feeRateEstimateMtx.Lock()

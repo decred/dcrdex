@@ -12,14 +12,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/dexnet"
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/tatanka"
 	"decred.org/dcrdex/tatanka/mj"
 	"decred.org/dcrdex/tatanka/tanka"
+	"decred.org/dcrdex/tatanka/tcp"
 	tcpclient "decred.org/dcrdex/tatanka/tcp/client"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
@@ -74,7 +78,7 @@ func decryptAES(key []byte, ciphertext []byte) ([]byte, error) {
 	}
 
 	if len(ciphertext) < gcmNonceSize {
-		return nil, fmt.Errorf("ciphertext too short")
+		return nil, errors.New("ciphertext too short")
 	}
 	nonce, ciphertext := ciphertext[:gcmNonceSize], ciphertext[gcmNonceSize:]
 
@@ -129,14 +133,6 @@ func encryptAES(key []byte, plaintext []byte) ([]byte, error) {
 	return ciphertext, nil
 }
 
-func encryptTankagramResult(key []byte, msg *mj.TankagramResultPayload) ([]byte, error) {
-	plaintext, err := json.Marshal(msg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal payload: %v", err)
-	}
-	return encryptAES(key, plaintext)
-}
-
 func encryptTankagramPayload(key []byte, msg *msgjson.Message) ([]byte, error) {
 	plaintext, err := json.Marshal(msg)
 	if err != nil {
@@ -144,6 +140,29 @@ func encryptTankagramPayload(key []byte, msg *msgjson.Message) ([]byte, error) {
 	}
 
 	return encryptAES(key, plaintext)
+}
+
+func encryptTankagramResult(result any, tankagramError mj.TankagramError, encKey []byte) (dex.Bytes, error) {
+	var resB []byte
+	if result != nil {
+		var err error
+		resB, err = json.Marshal(result)
+		if err != nil {
+			return nil, fmt.Errorf("error marshalling result: %v", err)
+		}
+	}
+
+	tankagramResult := &mj.TankagramResultPayload{
+		Error:   tankagramError,
+		Payload: resB,
+	}
+
+	plainText, err := json.Marshal(tankagramResult)
+	if err != nil {
+		return nil, fmt.Errorf("error marshalling tankagram result: %v", err)
+	}
+
+	return encryptAES(encKey, plainText)
 }
 
 // IncomingTankagram will be emitted when we receive a tankagram from a
@@ -162,9 +181,9 @@ type NewMarketSubscriber struct {
 
 // MessageHandlers are handlers for different types of messages from the Mesh.
 type MessageHandlers struct {
-	HandleTatankaRequest      func(tanka.PeerID, *msgjson.Message) *msgjson.Error
-	HandleTatankaNotification func(tanka.PeerID, *msgjson.Message)
-	HandlePeerMessage         func(tanka.PeerID, *IncomingTankagram) *msgjson.Error
+	HandleTatankaRequest      func(route string, payload json.RawMessage, respond func(any, *msgjson.Error))
+	HandleTatankaNotification func(route string, payload json.RawMessage)
+	HandlePeerMessage         func(peerID tanka.PeerID, route string, payload json.RawMessage, respond func(any, mj.TankagramError))
 }
 
 // Config is the configuration for the MeshConn.
@@ -178,23 +197,46 @@ type Config struct {
 // TatankaCredentials are the connection credentials for a Tatanka node.
 type TatankaCredentials struct {
 	PeerID tanka.PeerID
-	Addr   string
-	Cert   []byte
-	NoTLS  bool
+	// Addr should not include the protocol prefix.
+	Addr  string
+	Cert  []byte
+	NoTLS bool
+}
+
+func (c *TatankaCredentials) HttpURL() string {
+	if c.NoTLS {
+		return fmt.Sprintf("http://%s", c.Addr)
+	}
+	return fmt.Sprintf("https://%s", c.Addr)
+}
+
+func (c *TatankaCredentials) WsURL() string {
+	if c.NoTLS {
+		return fmt.Sprintf("ws://%s", c.Addr)
+	}
+	return fmt.Sprintf("wss://%s", c.Addr)
 }
 
 // MeshConn is a Tatanka Mesh connection manager. MeshConn handles both tatanka
 // nodes and regular peers.
 type MeshConn struct {
+	ctx       context.Context
 	log       dex.Logger
 	handlers  *MessageHandlers
 	entryNode *TatankaCredentials
 
+	subscriptionMtx sync.RWMutex
+	subscriptions   map[tanka.Topic]map[tanka.Subject]bool
+
+	maintainingMeshConnections atomic.Bool
+
+	nodesMtx      sync.RWMutex
+	primaryNode   *tatankaNode
+	secondaryNode *tatankaNode
+	knownNodes    []*TatankaCredentials
+
 	peerID tanka.PeerID
 	priv   *secp256k1.PrivateKey
-
-	tankaMtx     sync.RWMutex
-	tatankaNodes map[tanka.PeerID]*tatankaNode
 
 	peersMtx sync.RWMutex
 	peers    map[tanka.PeerID]*peer
@@ -205,90 +247,42 @@ func New(cfg *Config) *MeshConn {
 	var peerID tanka.PeerID
 	copy(peerID[:], cfg.PrivateKey.PubKey().SerializeCompressed())
 	c := &MeshConn{
-		log:          cfg.Logger,
-		handlers:     cfg.Handlers,
-		priv:         cfg.PrivateKey,
-		peerID:       peerID,
-		entryNode:    cfg.EntryNode,
-		tatankaNodes: make(map[tanka.PeerID]*tatankaNode),
-		peers:        make(map[tanka.PeerID]*peer),
+		log:           cfg.Logger,
+		handlers:      cfg.Handlers,
+		priv:          cfg.PrivateKey,
+		entryNode:     cfg.EntryNode,
+		peerID:        peerID,
+		knownNodes:    make([]*TatankaCredentials, 0, 4),
+		peers:         make(map[tanka.PeerID]*peer),
+		subscriptions: make(map[tanka.Topic]map[tanka.Subject]bool),
 	}
 	return c
 }
 
-func (c *MeshConn) sendErrorTankagramResult(tt *tatankaNode, id uint64, tankagramErr mj.TankagramError, encKey []byte) error {
-	enc, err := encryptTankagramResult(encKey, &mj.TankagramResultPayload{
-		Error: tankagramErr,
-	})
-	if err != nil {
-		return fmt.Errorf("error encrypting tankagram result: %v", err)
-	}
-	if err := c.sendResult(tt, id, enc); err != nil {
-		return fmt.Errorf("error sending tankagram result: %v", err)
-	}
-	return nil
-}
-
-func (c *MeshConn) sendTankagramResult(tt *tatankaNode, id uint64, payload dex.Bytes, encKey []byte) error {
-	enc, err := encryptTankagramResult(encKey, &mj.TankagramResultPayload{
-		Error:   mj.TEErrNone,
-		Payload: payload,
-	})
-	if err != nil {
-		return err
-	}
-	return c.sendResult(tt, id, enc)
-}
-
-// handleNewPeerTankagram handles a tankagram recieved from a new peer. The
+// handleNewPeerTankagram handles a tankagram received from a new peer. The
 // tankagram should be encrypted with the permanent encryption key derived from
 // our permanent private key and the peer's peerID. The contents of the
 // tankagram should be an EncryptionKeyPayload, used to establish an ephemeral
 // encryption key.
-func (c *MeshConn) handleNewPeerTankagram(tt *tatankaNode, gram *mj.Tankagram, id uint64) {
+func (c *MeshConn) handleNewPeerTankagram(gram *mj.Tankagram, id uint64, sendResponse func(*msgjson.Message)) {
 	pub, err := secp256k1.ParsePubKey(gram.From[:])
 	if err != nil {
-		c.log.Errorf("bad peer ID %s", gram.From)
+		c.log.Errorf("Bad peer ID %s", gram.From)
 		return
 	}
 
 	sharedSecretPerm := sharedSecret(c.priv, pub)
 
-	tankagramErr := mj.TEErrNone
-	var ephPriv *secp256k1.PrivateKey
-	var remoteEphPub *secp256k1.PublicKey
-
-	defer func() {
-		// If we encountered an error, send an error result.
-		if tankagramErr != mj.TEErrNone {
-			if err := c.sendErrorTankagramResult(tt, id, tankagramErr, sharedSecretPerm); err != nil {
-				c.log.Errorf("error sending tankagram result: %v", err)
-			}
-			return
-		}
-
-		// Otherwise, send our ephemeral pub key.
-		res := mj.EncryptionKeyPayload{
-			EphemeralPubKey: ephPriv.PubKey().SerializeCompressed(),
-		}
-		resB, err := json.Marshal(res)
+	sendError := func(tankagramErr mj.TankagramError) {
+		enc, err := encryptTankagramResult(nil, tankagramErr, sharedSecretPerm)
 		if err != nil {
-			c.log.Errorf("error marshalling ephemeral pubkey: %v", err)
+			c.log.Errorf("Error encrypting tankagram result: %v", err)
 			return
 		}
-		if err := c.sendTankagramResult(tt, id, resB, sharedSecretPerm); err != nil {
-			c.log.Errorf("error sending ephemeral pubkey: %v", err)
-			return
-		}
-
-		// Add the peer to our peers map.
-		c.peersMtx.Lock()
-		c.peers[gram.From] = &peer{
-			id:                 gram.From,
-			ephemeralSharedKey: sharedSecret(ephPriv, remoteEphPub),
-		}
-		c.peersMtx.Unlock()
-	}()
+		resp := mj.MustResponse(id, enc, nil)
+		mj.SignMessage(c.priv, resp)
+		sendResponse(resp)
+	}
 
 	decryptedPayload, err := decryptTankagramPayload(sharedSecretPerm, gram.EncryptedPayload)
 	if err != nil {
@@ -296,41 +290,60 @@ func (c *MeshConn) handleNewPeerTankagram(tt *tatankaNode, gram *mj.Tankagram, i
 		// Assume that they sent a message with an ephemeral key that
 		// we do not have, possibly due to restarting the client. They
 		// will need to do a new handshake before further communication.
-		tankagramErr = mj.TEDecryptionFailed
+		sendError(mj.TEDecryptionFailed)
 		return
 	}
 
-	c.log.Infof("decrypted new peer tankagram: %+v", decryptedPayload)
-
 	if decryptedPayload.Route != mj.RouteEncryptionKey {
 		c.log.Errorf("unexpected route for new peer tankagram %s", decryptedPayload.Route)
-		tankagramErr = mj.TEEBadRequest
+		sendError(mj.TEEBadRequest)
 		return
 	}
 
 	var encryptionKeyPayload mj.EncryptionKeyPayload
 	if err := json.Unmarshal(decryptedPayload.Payload, &encryptionKeyPayload); err != nil {
-		c.log.Errorf("error unmarshalling encryption key payload: %v", err)
-		tankagramErr = mj.TEEBadRequest
+		c.log.Errorf("Error unmarshalling encryption key payload: %v", err)
+		sendError(mj.TEEBadRequest)
 		return
 	}
 
-	remoteEphPub, err = secp256k1.ParsePubKey(encryptionKeyPayload.EphemeralPubKey)
+	remoteEphPub, err := secp256k1.ParsePubKey(encryptionKeyPayload.EphemeralPubKey)
 	if err != nil {
-		c.log.Errorf("failed to parse ephemeral pubkey: %v", err)
-		tankagramErr = mj.TEEBadRequest
+		c.log.Errorf("Failed to parse ephemeral pubkey: %v", err)
+		sendError(mj.TEEBadRequest)
 		return
 	}
 
-	ephPriv, err = secp256k1.GeneratePrivateKey()
+	ephPriv, err := secp256k1.GeneratePrivateKey()
 	if err != nil {
-		c.log.Errorf("failed to generate ephemeral private key: %v", err)
-		tankagramErr = mj.TEEPeerError
+		c.log.Errorf("Failed to generate ephemeral private key: %v", err)
+		sendError(mj.TEEPeerError)
 		return
 	}
+
+	res := mj.EncryptionKeyPayload{
+		EphemeralPubKey: ephPriv.PubKey().SerializeCompressed(),
+	}
+	enc, err := encryptTankagramResult(res, mj.TEErrNone, sharedSecretPerm)
+	if err != nil {
+		c.log.Errorf("Error encrypting tankagram result: %v", err)
+		return
+	}
+	msg := mj.MustResponse(id, enc, nil)
+	mj.SignMessage(c.priv, msg)
+	sendResponse(msg)
+
+	// Add the peer to our peers map.
+	c.peersMtx.Lock()
+	c.peers[gram.From] = &peer{
+		id:                 gram.From,
+		ephemeralSharedKey: sharedSecret(ephPriv, remoteEphPub),
+	}
+	c.peersMtx.Unlock()
 }
 
-func (c *MeshConn) handleTankagram(tt *tatankaNode, tankagram *msgjson.Message) {
+// handleTankagram handles a tankagram from a peer.
+func (c *MeshConn) handleTankagram(tankagram *msgjson.Message, sendResponse func(*msgjson.Message)) {
 	var gram mj.Tankagram
 	if err := tankagram.Unmarshal(&gram); err != nil {
 		c.log.Errorf("error unmarshalling tankagram: %v", err)
@@ -340,212 +353,451 @@ func (c *MeshConn) handleTankagram(tt *tatankaNode, tankagram *msgjson.Message) 
 	c.peersMtx.Lock()
 	p, peerExisted := c.peers[gram.From]
 	c.peersMtx.Unlock()
+
+	// If the peer doesn't exist, we need to do the handshake.
 	if !peerExisted {
-		c.handleNewPeerTankagram(tt, &gram, tankagram.ID)
+		c.handleNewPeerTankagram(&gram, tankagram.ID, sendResponse)
 		return
 	}
 
-	// If this isn't the encryption key, this gram.Message is ignored and this
-	// is assumed to be encrypted.
+	sendError := func(tankagramErr mj.TankagramError, encKey []byte) {
+		enc, err := encryptTankagramResult(nil, tankagramErr, encKey)
+		if err != nil {
+			c.log.Errorf("Error encrypting tankagram result: %v", err)
+			return
+		}
+		sendResponse(mj.MustResponse(tankagram.ID, enc, nil))
+	}
+
+	// An empty payload is invalid.
 	if len(gram.EncryptedPayload) == 0 {
-		c.log.Errorf("%s sent a tankagram with no message or data", p.id)
-		c.sendErrorTankagramResult(tt, tankagram.ID, mj.TEEBadRequest, p.ephemeralSharedKey)
+		sendError(mj.TEEBadRequest, p.ephemeralSharedKey)
 		return
 	}
 
+	// If the payload cannot be decrypted with the ephemeral shared key,
+	// let the peer know that a shared key must be established before
+	// we can communicate.
 	decryptedPayload, err := decryptTankagramPayload(p.ephemeralSharedKey, gram.EncryptedPayload)
 	if err != nil {
-		c.log.Errorf("failed to decrypt tankagram payload with ephemeral key: %v", err)
-		c.sendErrorTankagramResult(tt, tankagram.ID, mj.TEDecryptionFailed, p.ephemeralSharedKey)
+		sendError(mj.TEDecryptionFailed, p.ephemeralSharedKey)
 		return
 	}
 
-	c.handlers.HandlePeerMessage(p.id, &IncomingTankagram{
-		Msg: decryptedPayload,
-		Respond: func(payload any) error {
-			payloadB, err := json.Marshal(payload)
-			if err != nil {
-				c.log.Errorf("error marshalling payload: %v", err)
-				return err
-			}
-			return c.sendTankagramResult(tt, tankagram.ID, payloadB, p.ephemeralSharedKey)
-		},
-		RespondErr: func(tankagramErr mj.TankagramError) error {
-			return c.sendErrorTankagramResult(tt, tankagram.ID, tankagramErr, p.ephemeralSharedKey)
-		},
-	})
+	respond := func(resp any, tankagramErr mj.TankagramError) {
+		respB, err := encryptTankagramResult(resp, tankagramErr, p.ephemeralSharedKey)
+		if err != nil {
+			c.log.Errorf("Error encrypting tankagram result: %v", err)
+			return
+		}
+		sendResponse(mj.MustResponse(tankagram.ID, respB, nil))
+	}
+	c.handlers.HandlePeerMessage(gram.From, decryptedPayload.Route, decryptedPayload.Payload, respond)
 }
+
+type numNodesToConnect int
+
+const (
+	numNodesToConnectSecondary        numNodesToConnect = 1
+	numNodesToConnectPrimarySecondary numNodesToConnect = 2
+)
 
 func (c *MeshConn) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	var wg sync.WaitGroup
 
 	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		<-ctx.Done()
-		c.tankaMtx.Lock()
-		for peerID, tt := range c.tatankaNodes {
-			c.log.Infof("Disconnecting old tatanka node %s", tt)
-			tt.cm.Disconnect()
-			delete(c.tatankaNodes, peerID)
-		}
-		c.tankaMtx.Unlock()
-	}()
+	go c.disconnectNodesOnCancel(ctx, &wg)
 
-	if err := c.addTatankaNode(ctx, c.entryNode); err != nil {
-		return nil, err
+	c.ctx = ctx
+
+	knownNodes, err := c.fetchKnownNodes(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetching known nodes: %w", err)
 	}
+
+	c.nodesMtx.Lock()
+	c.knownNodes = knownNodes
+	connectedNodes, err := c.connectToKnownNodes(numNodesToConnectPrimarySecondary, nil)
+	if err != nil {
+		c.nodesMtx.Unlock()
+		return nil, fmt.Errorf("connecting to known nodes: %w", err)
+	}
+	for i, node := range connectedNodes {
+		if i == 0 {
+			c.primaryNode = node
+		} else {
+			c.secondaryNode = node
+		}
+	}
+	c.nodesMtx.Unlock()
+
+	wg.Add(1)
+	go c.runNodeMaintenance(ctx, &wg)
 
 	return &wg, nil
 }
 
-func (c *MeshConn) addTatankaNode(ctx context.Context, creds *TatankaCredentials) error {
-	peerID, uri, cert := creds.PeerID, "wss://"+creds.Addr, creds.Cert
-	if creds.NoTLS {
-		uri = "ws://" + creds.Addr
+// disconnectNodesOnCancel disconnects the primary and secondary nodes
+// when the context is cancelled.
+func (c *MeshConn) disconnectNodesOnCancel(ctx context.Context, wg *sync.WaitGroup) {
+	defer wg.Done()
+	<-ctx.Done()
+
+	c.nodesMtx.Lock()
+	defer c.nodesMtx.Unlock()
+
+	if c.primaryNode != nil {
+		c.primaryNode.cm.Disconnect()
 	}
-	pub, err := secp256k1.ParsePubKey(peerID[:])
+	if c.secondaryNode != nil {
+		c.secondaryNode.cm.Disconnect()
+	}
+}
+
+func (c *MeshConn) runNodeMaintenance(ctx context.Context, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			c.nodesMtx.Lock()
+			c.maintainMeshConnections()
+			c.nodesMtx.Unlock()
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (c *MeshConn) getNodeInfo(ctx context.Context, url string) (*tatanka.NodeInfoResponse, error) {
+	var resp tatanka.NodeInfoResponse
+	if err := dexnet.Get(ctx, fmt.Sprintf("%s/%s", url, mj.RouteNodeInfo), &resp); err != nil {
+		return nil, fmt.Errorf("error getting node info from node: %w", err)
+	}
+	return &resp, nil
+}
+
+// fetchKnownNodes queries the entry node for its list of whitelisted nodes
+// and returns a list of TatankaCredentials for each node, including the
+// entry node itself.
+func (c *MeshConn) fetchKnownNodes(ctx context.Context) ([]*TatankaCredentials, error) {
+	entryNodeInfo, err := c.getNodeInfo(ctx, c.entryNode.HttpURL())
 	if err != nil {
-		return fmt.Errorf("error parsing pubkey from peer ID: %w", err)
+		return nil, fmt.Errorf("error getting node info from entry node: %w", err)
 	}
-	log := c.log.SubLogger("TCP")
-	cl, err := tcpclient.New(&tcpclient.Config{
-		Logger: log,
-		URL:    uri + "/ws",
-		Cert:   cert,
-		HandleMessage: func(msg *msgjson.Message) {
-			c.handleTatankaMessage(peerID, msg)
-		},
+
+	knownNodes := make([]*TatankaCredentials, 0, len(entryNodeInfo.Whitelist)+1)
+	knownNodes = append(knownNodes, c.entryNode)
+
+	for _, node := range entryNodeInfo.Whitelist {
+		var peerID tanka.PeerID
+		copy(peerID[:], node.PeerID)
+
+		var remoteNodeConfig tcp.RemoteNodeConfig
+		if err := json.Unmarshal(node.Config, &remoteNodeConfig); err != nil {
+			return nil, fmt.Errorf("error reading boot node configuration: %w", err)
+		}
+
+		// Remove protocol from URL
+		addr := remoteNodeConfig.URL
+		if idx := strings.Index(addr, "://"); idx >= 0 {
+			addr = addr[idx+3:]
+		}
+
+		knownNodes = append(knownNodes, &TatankaCredentials{
+			PeerID: peerID,
+			Addr:   addr,
+			Cert:   remoteNodeConfig.Cert,
+			NoTLS:  len(remoteNodeConfig.Cert) == 0,
+		})
+	}
+
+	return knownNodes, nil
+}
+
+// connectToKnownNodes connects to the specified number of nodes from c.knownNodes.
+// If two nodes are being connected, the first returned node will have the
+// subscriptions updated because this will be the primary node.
+//
+// The caller must hold c.nodesMtx.
+func (c *MeshConn) connectToKnownNodes(numNodes numNodesToConnect, existingNode *tanka.PeerID) ([]*tatankaNode, error) {
+	connectedNodes := make([]*tatankaNode, 0, int(numNodes))
+
+	if c.log.Level() == dex.LevelTrace {
+		c.log.Tracef("Connecting to %d known nodes", len(c.knownNodes))
+	}
+
+	for _, node := range c.knownNodes {
+		if len(connectedNodes) >= int(numNodes) {
+			break
+		}
+
+		if existingNode != nil && *existingNode == node.PeerID {
+			continue
+		}
+
+		updateSubscriptions := len(connectedNodes) == 0 && numNodes == numNodesToConnectPrimarySecondary
+		tatankaNode, err := c.connectToTatankaNode(c.ctx, node, updateSubscriptions)
+		if err != nil {
+			c.log.Errorf("Failed to connect to tatanka node %s: %v", node.PeerID, err)
+			continue
+		}
+
+		connectedNodes = append(connectedNodes, tatankaNode)
+	}
+
+	if len(connectedNodes) == 0 {
+		return nil, fmt.Errorf("unable to connect to any tatanka nodes")
+	}
+
+	return connectedNodes, nil
+}
+
+func (c *MeshConn) sendUpdateSubscriptionsRequest(tt *tatankaNode) error {
+	subs := c.currentSubscriptions()
+	updateSubsReq := mj.MustRequest(mj.RouteUpdateSubscriptions, &mj.UpdateSubscriptions{
+		Subscriptions: subs,
 	})
+	mj.SignMessage(c.priv, updateSubsReq)
+	return tt.Send(updateSubsReq)
+}
+
+// failoverToSecondary updates the secondary node to be the primary node.
+// It also sends the required subscriptions to the new primary node. The
+// function returns true if the failover was successful.
+func (c *MeshConn) failoverToSecondary() bool {
+	c.nodesMtx.Lock()
+	defer c.nodesMtx.Unlock()
+
+	c.primaryNode = c.secondaryNode
+	c.secondaryNode = nil
+
+	err := c.sendUpdateSubscriptionsRequest(c.primaryNode)
 	if err != nil {
-		return fmt.Errorf("error creating connection: %w", err)
+		c.log.Errorf("Failed to send update subscriptions request to new primary node: %v", err)
+		c.primaryNode.cm.Disconnect()
+		c.primaryNode = nil
+		return false
 	}
 
+	return true
+}
+
+// maintainMeshConnections updates the secondary node to be the primary if
+// there's no primary, and attempts to find new nodes if there is no primary
+// or secondary node.
+//
+// c.nodesMtx MUST locked when calling this function.
+func (c *MeshConn) maintainMeshConnections() {
+	if !c.maintainingMeshConnections.CompareAndSwap(false, true) {
+		return
+	}
+	defer c.maintainingMeshConnections.Store(false)
+
+	c.nodesMtx.RLock()
+	if c.primaryNode != nil && c.secondaryNode != nil {
+		c.nodesMtx.RUnlock()
+		return
+	}
+
+	numNodesRequired := numNodesToConnectSecondary
+	var existingNode *tanka.PeerID
+	var failoverToSecondary bool
+
+	if c.primaryNode == nil && c.secondaryNode != nil {
+		// Doing the failover later because we need a write lock to do it.
+		failoverToSecondary = true
+		existingNode = &c.secondaryNode.peerID
+	} else if c.primaryNode != nil && c.secondaryNode == nil {
+		existingNode = &c.primaryNode.peerID
+	} else { // c.primaryNode == nil && c.secondaryNode == nil
+		numNodesRequired = numNodesToConnectPrimarySecondary
+	}
+	c.nodesMtx.RUnlock()
+
+	// Attempt to failover to the secondary node if necessary. If it fails,
+	// we'll try to find a new primary and secondary node.
+	if failoverToSecondary && !c.failoverToSecondary() {
+		numNodesRequired = numNodesToConnectPrimarySecondary
+		existingNode = nil
+	}
+
+	if numNodesRequired == numNodesToConnectSecondary {
+		c.log.Infof("Attempting to find a new secondary node.")
+	} else {
+		c.log.Infof("Attempting to find a new primary and secondary node.")
+	}
+
+	newNodes, err := c.connectToKnownNodes(numNodesRequired, existingNode)
+	if err != nil {
+		c.log.Errorf("Failed to update node(s): %w", err)
+		return
+	}
+
+	c.nodesMtx.Lock()
+	for _, node := range newNodes {
+		if c.primaryNode == nil {
+			c.primaryNode = node
+		} else {
+			c.secondaryNode = node
+		}
+	}
+	c.nodesMtx.Unlock()
+}
+
+func (c *MeshConn) handleNodeDisconnected(peerID tanka.PeerID) {
+	if c.ctx.Err() != nil {
+		return
+	}
+
+	c.nodesMtx.Lock()
+	if c.primaryNode != nil && c.primaryNode.peerID == peerID {
+		c.primaryNode = nil
+		c.log.Infof("Primary node (%s) disconnected.", peerID)
+	}
+	if c.secondaryNode != nil && c.secondaryNode.peerID == peerID {
+		c.secondaryNode = nil
+		c.log.Infof("Secondary node (%s) disconnected.", peerID)
+	}
+	c.nodesMtx.Unlock()
+
+	c.maintainMeshConnections()
+}
+
+func (c *MeshConn) currentSubscriptions() map[tanka.Topic][]tanka.Subject {
+	subs := make(map[tanka.Topic][]tanka.Subject)
+
+	c.subscriptionMtx.RLock()
+	for topic, subjects := range c.subscriptions {
+		if len(subjects) == 0 {
+			continue
+		}
+		subs[topic] = make([]tanka.Subject, 0, len(subjects))
+		for subject := range subjects {
+			subs[topic] = append(subs[topic], subject)
+		}
+	}
+	c.subscriptionMtx.RUnlock()
+
+	return subs
+}
+
+func (c *MeshConn) sendConnectRequest(cl *tatankaNode, updateSubscriptions bool) (*mj.TatankaConfig, error) {
+	var subs map[tanka.Topic][]tanka.Subject
+	if updateSubscriptions {
+		subs = c.currentSubscriptions()
+	}
+
+	connectReq := mj.MustRequest(mj.RouteConnect, &mj.Connect{
+		ID:          c.peerID,
+		InitialSubs: subs,
+	})
+	mj.SignMessage(c.priv, connectReq)
+
+	var tatankaConfig *mj.TatankaConfig
+	if err := c.requestTT(cl, connectReq, &tatankaConfig, DefaultRequestTimeout); err != nil {
+		return nil, fmt.Errorf("error requesting tatanka config: %w", err)
+	}
+
+	return tatankaConfig, nil
+}
+
+func (c *MeshConn) setupWSConnection(ctx context.Context, creds *TatankaCredentials) (tt *tatankaNode, err error) {
+	pub, err := secp256k1.ParsePubKey(creds.PeerID[:])
+	if err != nil {
+		return nil, fmt.Errorf("error parsing pubkey from peer ID: %w", err)
+	}
+
+	url := creds.WsURL() + "/ws"
+
+	initialConnectSuccessful := false
+	cfg := &tcpclient.Config{
+		Logger: c.log.SubLogger("TCP"),
+		URL:    url,
+		Cert:   creds.Cert,
+		ConnectEventFunc: func(status tcpclient.ConnectionStatus) {
+			if !initialConnectSuccessful {
+				return
+			}
+			if status == tcpclient.Disconnected {
+				c.handleNodeDisconnected(creds.PeerID)
+			}
+		},
+		HandleMessage: func(msg *msgjson.Message, sendResponse func(*msgjson.Message)) {
+			c.handleTatankaMessage(creds.PeerID, pub, msg, sendResponse)
+		},
+	}
+	cl, err := tcpclient.New(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("error creating connection: %w", err)
+	}
 	cm := dex.NewConnectionMaster(cl)
-
-	c.tankaMtx.Lock()
-	defer c.tankaMtx.Unlock()
-
-	if tt := c.tatankaNodes[peerID]; tt != nil {
-		tt.cm.Disconnect()
-		log.Infof("replacing existing connection for tatanka node %s", tt)
+	if err := cm.ConnectOnce(ctx); err != nil {
+		return nil, fmt.Errorf("error connecting to tatanka node %s at %s: %w", creds.PeerID, cfg.URL, err)
 	}
 
-	c.tatankaNodes[peerID] = &tatankaNode{
+	initialConnectSuccessful = true
+
+	return &tatankaNode{
 		NetworkBackend: cl,
 		cm:             cm,
-		url:            uri,
-		peerID:         peerID,
+		url:            url,
+		peerID:         creds.PeerID,
 		pub:            pub,
-	}
-
-	if err := cm.Connect(ctx); err != nil {
-		return fmt.Errorf("error connecting to tatanka node %s at %s: %w. will keep trying to connect", peerID, uri, err)
-	}
-
-	return nil
+	}, nil
 }
 
-// Auth sends our connect message to the tatanka node.
-func (c *MeshConn) Auth(tatankaID tanka.PeerID) error {
-	c.tankaMtx.RLock()
-	tt, found := c.tatankaNodes[tatankaID]
-	c.tankaMtx.RUnlock()
-	if !found {
-		return fmt.Errorf("cannot auth with unknown server %s", tatankaID)
+func (c *MeshConn) connectToTatankaNode(ctx context.Context, creds *TatankaCredentials, updateSubscriptions bool) (*tatankaNode, error) {
+	tt, err := c.setupWSConnection(ctx, creds)
+	if err != nil {
+		return nil, fmt.Errorf("error setting up WS connection: %w", err)
 	}
-	connectMsg := mj.MustRequest(mj.RouteConnect, &mj.Connect{ID: c.peerID})
-	mj.SignMessage(c.priv, connectMsg)
-	var cfg *mj.TatankaConfig
-	if err := c.requestTT(tt, connectMsg, &cfg, DefaultRequestTimeout); err != nil {
-		return err
+
+	tatankaConfig, err := c.sendConnectRequest(tt, updateSubscriptions)
+	if err != nil {
+		return nil, fmt.Errorf("error sending connect request: %w", err)
 	}
-	tt.config.Store(cfg)
-	return nil
+
+	tt.config.Store(tatankaConfig)
+
+	if c.log.Level() == dex.LevelTrace {
+		c.log.Tracef("Connected to %s", tt.url)
+	}
+
+	return tt, nil
 }
 
-func (c *MeshConn) tatanka(tatankaID tanka.PeerID) *tatankaNode {
-	c.tankaMtx.RLock()
-	defer c.tankaMtx.RUnlock()
-	return c.tatankaNodes[tatankaID]
-}
-
-type TatankaSelectionMode string
-
-const (
-	SelectionModeEntryNode TatankaSelectionMode = "EntryNode"
-	SelectionModeAll       TatankaSelectionMode = "All"
-	SelectionModeAny       TatankaSelectionMode = "Any"
-)
-
-// tatankas generates a list of tatanka nodes.
-func (c *MeshConn) tatankas(mode TatankaSelectionMode) (tts []*tatankaNode, _ error) {
-	c.tankaMtx.RLock()
-	defer c.tankaMtx.RUnlock()
-	en := c.tatankaNodes[c.entryNode.PeerID]
-	switch mode {
-	case SelectionModeEntryNode:
-		if en == nil {
-			return nil, errors.New("no entry node initialized")
-		}
-		if !en.cm.On() {
-			return nil, errors.New("entry node no connected")
-		}
-		return []*tatankaNode{en}, nil
-	case SelectionModeAll, SelectionModeAny:
-		tts := make([]*tatankaNode, 0, len(c.tatankaNodes))
-		var skipID tanka.PeerID
-		// Entry node always goes first, if available.
-		if en != nil && en.cm.On() {
-			tts = append(tts, en)
-			skipID = en.peerID
-		}
-		for peerID, tt := range c.tatankaNodes {
-			if tt.cm.On() && peerID != skipID {
-				tts = append(tts, tt)
-				if mode == SelectionModeAny {
-					return tts, nil
-				}
-			}
-		}
-		if len(tts) == 0 {
-			return nil, errors.New("no tatanka nodes available")
-		}
-		return tts, nil
-	default:
-		return nil, fmt.Errorf("unknown tatanka selection mode %q", mode)
-	}
-}
-
-func (c *MeshConn) handleTatankaMessage(tatankaID tanka.PeerID, msg *msgjson.Message) {
+func (c *MeshConn) handleTatankaMessage(tatankaID tanka.PeerID, pub *secp256k1.PublicKey, msg *msgjson.Message, sendResponse func(*msgjson.Message)) {
 	if c.log.Level() == dex.LevelTrace {
 		c.log.Tracef("Client handling message from tatanka node: route = %s", msg.Route)
 	}
 
-	tt := c.tatanka(tatankaID)
-	if tt == nil {
-		c.log.Error("Message received from unknown tatanka node")
-		return
-	}
-
-	if err := mj.CheckSig(msg, tt.pub); err != nil {
+	if err := mj.CheckSig(msg, pub); err != nil {
 		// DRAFT TODO: Record for reputation somehow, no?
-		c.log.Errorf("tatanka node %s sent a bad signature. disconnecting", tt.peerID)
+		c.log.Errorf("tatanka node %s sent a bad signature. disconnecting", tatankaID)
 		return
 	}
 
 	if msg.Type == msgjson.Request && msg.Route == mj.RouteTankagram {
-		c.handleTankagram(tt, msg)
+		c.handleTankagram(msg, sendResponse)
 		return
 	}
 
 	switch msg.Type {
 	case msgjson.Request:
-		c.handlers.HandleTatankaRequest(tatankaID, msg)
+		respond := func(payload any, err *msgjson.Error) {
+			resp := mj.MustResponse(msg.ID, payload, err)
+			mj.SignMessage(c.priv, resp)
+			sendResponse(resp)
+		}
+		c.handlers.HandleTatankaRequest(msg.Route, msg.Payload, respond)
 	case msgjson.Notification:
-		c.handlers.HandleTatankaNotification(tatankaID, msg)
+		c.handlers.HandleTatankaNotification(msg.Route, msg.Payload)
 	default:
-		c.log.Errorf("tatanka node %s send a message with an unhandleable type %d", tt.peerID, msg.Type)
+		c.log.Errorf("tatanka node %s send a message with an unhandleable type %d", tatankaID, msg.Type)
 	}
 }
 
@@ -560,10 +812,9 @@ func (c *MeshConn) sendResult(tt *tatankaNode, msgID uint64, result dex.Bytes) e
 const DefaultRequestTimeout = 30 * time.Second
 
 type requestConfig struct {
-	timeout       time.Duration
-	errCodeFunc   func(code int)
-	selectionMode TatankaSelectionMode
-	examineFunc   func(tatankaURL string, tatankaID tanka.PeerID) (ok bool)
+	timeout     time.Duration
+	errCodeFunc func(code int)
+	examineFunc func(tatankaURL string, tatankaID tanka.PeerID) (ok bool)
 }
 
 // RequestOption is an optional modifier to request behavior.
@@ -585,13 +836,6 @@ func WithErrorCode(f func(code int)) RequestOption {
 	}
 }
 
-// WithSelectionMode set which tatanka nodes are selected for the request.
-func WithSelectionMode(mode TatankaSelectionMode) RequestOption {
-	return func(cfg *requestConfig) {
-		cfg.selectionMode = mode
-	}
-}
-
 // WithExamination allows the caller to check the result before returning, and
 // continue trying other tatanka nodes if necessary.
 func WithExamination(f func(tatankaURL string, tatankaID tanka.PeerID) (resultOK bool)) RequestOption {
@@ -600,51 +844,65 @@ func WithExamination(f func(tatankaURL string, tatankaID tanka.PeerID) (resultOK
 	}
 }
 
+func (c *MeshConn) Subscribe(topic tanka.Topic, subject tanka.Subject) error {
+	req := mj.MustRequest(mj.RouteSubscribe, &mj.Subscription{
+		Topic:   topic,
+		Subject: subject,
+	})
+	mj.SignMessage(c.priv, req)
+
+	// Only possible non-error response is `true`.
+	var ok bool
+	err := c.RequestMesh(req, &ok)
+	if err != nil {
+		return err
+	}
+
+	c.subscriptionMtx.Lock()
+	defer c.subscriptionMtx.Unlock()
+
+	_, ok = c.subscriptions[topic]
+	if !ok {
+		c.subscriptions[topic] = make(map[tanka.Subject]bool)
+	}
+	c.subscriptions[topic][subject] = true
+
+	return nil
+}
+
 // RequestMesh sends a request to the Mesh.
 func (c *MeshConn) RequestMesh(msg *msgjson.Message, thing any, opts ...RequestOption) error {
 	cfg := &requestConfig{
-		timeout:       DefaultRequestTimeout,
-		selectionMode: SelectionModeEntryNode,
+		timeout: DefaultRequestTimeout,
 	}
 	for _, opt := range opts {
 		opt(cfg)
 	}
 
-	tts, err := c.tatankas(cfg.selectionMode)
+	c.nodesMtx.RLock()
+	primaryNode := c.primaryNode
+	c.nodesMtx.RUnlock()
+	if primaryNode == nil {
+		return errors.New("not connected to any tatanka nodes")
+	}
+
+	mj.SignMessage(c.priv, msg)
+	err := c.requestTT(primaryNode, msg, thing, cfg.timeout)
 	if err != nil {
 		return err
 	}
 
-	for _, tt := range tts {
-		if err := c.requestTT(tt, msg, thing, cfg.timeout); err == nil {
-			var resultOK bool = true
-			if cfg.examineFunc != nil {
-				resultOK = cfg.examineFunc(tt.url, tt.peerID)
-			}
-			switch cfg.selectionMode {
-			case SelectionModeAny, SelectionModeEntryNode:
-				if resultOK {
-					return nil
-				}
-			}
-		} else { // err != nil
-			var msgErr *msgjson.Error
-			if cfg.errCodeFunc != nil && errors.As(err, &msgErr) {
-				cfg.errCodeFunc(msgErr.Code)
-			}
-			switch cfg.selectionMode {
-			case SelectionModeEntryNode:
-				return err
-			}
-		}
+	if cfg.examineFunc != nil && !cfg.examineFunc(primaryNode.url, primaryNode.peerID) {
+		return fmt.Errorf("request failed examination")
 	}
 
-	return errors.New("failed to request from any tatanka nodes")
+	return nil
 }
 
-func (c *MeshConn) requestTT(tt *tatankaNode, msg *msgjson.Message, thing any, timeout time.Duration) (err error) {
+func (c *MeshConn) requestTT(tt NetworkBackend, msg *msgjson.Message, thing any, timeout time.Duration) (err error) {
 	errChan := make(chan error)
 	if err := tt.Request(msg, func(msg *msgjson.Message) {
+		c.log.Infof("received response: %v", msg)
 		if thing != nil {
 			errChan <- msg.UnmarshalResult(thing)
 		} else {
@@ -659,6 +917,7 @@ func (c *MeshConn) requestTT(tt *tatankaNode, msg *msgjson.Message, thing any, t
 	case <-time.After(timeout):
 		return fmt.Errorf("timed out (%s) waiting for response from %s for route %q", timeout, tt, msg.Route)
 	}
+
 	return err
 }
 
@@ -717,7 +976,7 @@ func (c *MeshConn) ConnectPeer(peerID tanka.PeerID) error {
 	mj.SignMessage(c.priv, req)
 
 	var r mj.TankagramResult
-	if err := c.RequestMesh(req, &r, WithSelectionMode(SelectionModeAny), WithExamination(func(tatankaURL string, tatankaID tanka.PeerID) bool {
+	if err := c.RequestMesh(req, &r, WithExamination(func(tatankaURL string, tatankaID tanka.PeerID) bool {
 		if r.Result == mj.TRTTransmitted {
 			return true
 		}
@@ -781,7 +1040,7 @@ func (c *MeshConn) RequestPeer(peerID tanka.PeerID, msg *msgjson.Message, thing 
 	wrappedMsg := mj.MustRequest(mj.RouteTankagram, tankaGram)
 	mj.SignMessage(c.priv, wrappedMsg)
 
-	if err := c.RequestMesh(wrappedMsg, &res, WithSelectionMode(SelectionModeAny), WithExamination(func(tatankaURL string, tatankaID tanka.PeerID) bool {
+	if err := c.RequestMesh(wrappedMsg, &res, WithExamination(func(tatankaURL string, tatankaID tanka.PeerID) bool {
 		if res.Result == mj.TRTTransmitted {
 			return true
 		}

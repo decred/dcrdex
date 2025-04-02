@@ -14,6 +14,7 @@ import (
 	"decred.org/dcrdex/dex/utils"
 	"decred.org/dcrdex/tatanka/mj"
 	"decred.org/dcrdex/tatanka/tanka"
+	"decred.org/dcrdex/tatanka/tcp"
 )
 
 // clientJob is a job for the remote clients loop.
@@ -96,6 +97,23 @@ func (t *Tatanka) registerRemoteClient(tankaID, clientID tanka.PeerID) {
 
 // Tatanka.specialHandlers
 
+// setSubscriptions sets the topic for which a client is subscribed.
+// TODO: This function currently only adds subscriptions, but it should also remove
+// the subscriptions that are not in the set.
+func (t *Tatanka) setSubscriptions(peerID tanka.PeerID, subs map[tanka.Topic][]tanka.Subject) {
+	for topic, subjects := range subs {
+		for _, subject := range subjects {
+			t.storeSubscription(peerID, topic, subject, &mj.Broadcast{
+				Topic:       topic,
+				Subject:     subject,
+				MessageType: mj.MessageTypeNewSubscriber,
+				PeerID:      peerID,
+				Stamp:       time.Now(),
+			})
+		}
+	}
+}
+
 // handleClientConnect handles a new locally-connected client. checking
 // reputation before adding the client to the map.
 func (t *Tatanka) handleClientConnect(cl tanka.Sender, msg *msgjson.Message) *msgjson.Error {
@@ -116,20 +134,30 @@ func (t *Tatanka) handleClientConnect(cl tanka.Sender, msg *msgjson.Message) *ms
 	cl.SetPeerID(p.ID)
 
 	pp := &peer{Peer: p, Sender: cl, rrs: make(map[tanka.PeerID]*tanka.Reputation)}
-	if pp.banned() {
-		return msgjson.NewError(mj.ErrBanned, "your tier is <= 0. post some bonds")
-	}
+
+	// TODO: this is temporarily removed until a future change
+	// implements how bonds will be communicated between the client and
+	// server.
+	/*if pp.banned() {
+		return msgjson.NewError(mj.ErrBannned, "your tier is <= 0. post some bonds")
+	}*/
 
 	bondTier := p.BondTier()
 
 	t.clientMtx.Lock()
 	oldClient := t.clients[conn.ID]
 	t.clients[conn.ID] = &client{peer: pp}
+	numClients := len(t.clients)
+	if len(conn.InitialSubs) > 0 {
+		t.setSubscriptions(conn.ID, conn.InitialSubs)
+	}
 	t.clientMtx.Unlock()
 
 	if oldClient != nil {
 		t.log.Debugf("new connection for already connected client %q", conn.ID)
 		oldClient.Disconnect()
+	} else if numClients >= t.maxClients {
+		return msgjson.NewError(mj.ErrCapacity, "node is at capacity")
 	}
 
 	t.sendResult(cl, msg.ID, t.generateConfig(bondTier))
@@ -205,6 +233,7 @@ func (t *Tatanka) handlePostBond(cl tanka.Sender, msg *msgjson.Message) *msgjson
 		t.log.Errorf("Bond-posting client didn't provide a peer ID")
 		return msgjson.NewError(mj.ErrBadRequest, "no peer ID")
 	}
+
 	for i := 1; i < len(bonds); i++ {
 		if bonds[i].PeerID != bonds[0].PeerID {
 			t.log.Errorf("Bond-posting client provided non uniform peer IDs")
@@ -264,6 +293,133 @@ func (t *Tatanka) handlePostBond(cl tanka.Sender, msg *msgjson.Message) *msgjson
 	return nil
 }
 
+// NodeInfoResponse is the response to a NodeInfo request.
+type NodeInfoResponse struct {
+	Capacity  uint64      `json:"capacity"`
+	Chains    []uint32    `json:"chains"`
+	Whitelist []*BootNode `json:"whitelist"`
+}
+
+func (t *Tatanka) handleNodeInfo(any) (any, error) {
+	t.clientMtx.RLock()
+	numClients := len(t.clients)
+	t.clientMtx.RUnlock()
+
+	var remainingCapacity uint64
+	if t.maxClients > numClients {
+		remainingCapacity = uint64(t.maxClients - numClients)
+	}
+
+	t.chainMtx.RLock()
+	chains := make([]uint32, 0, len(t.chains))
+	for assetID := range t.chains {
+		chains = append(chains, assetID)
+	}
+	t.chainMtx.RUnlock()
+
+	whitelist := make([]*BootNode, 0, len(t.whitelist))
+
+	for peerID, node := range t.whitelist {
+		var n tcp.RemoteNodeConfig
+		if err := json.Unmarshal(node.cfg, &n); err != nil {
+			t.log.Errorf("error reading boot node configuration: %w", err)
+			continue
+		}
+		whitelist = append(whitelist, &BootNode{
+			PeerID:   peerID[:],
+			Config:   node.cfg,
+			Protocol: node.protocol,
+		})
+	}
+
+	return NodeInfoResponse{remainingCapacity, chains, whitelist}, nil
+}
+
+func (t *Tatanka) notifySubscribersOfNewSubscriber(
+	subs map[tanka.PeerID]struct{},
+	topicName tanka.Topic,
+	subjectName tanka.Subject,
+	bcast *mj.Broadcast,
+) {
+	clientMsg := mj.MustNotification(mj.RouteBroadcast, bcast)
+	mj.SignMessage(t.priv, clientMsg)
+	clientMsgB, _ := json.Marshal(clientMsg)
+	for peerID := range subs {
+		subscriber, found := t.clients[peerID]
+		if !found {
+			t.log.Errorf("client not found for subscriber %s on topic %q, subject %q", peerID, topicName, subjectName)
+			continue
+		}
+
+		if err := subscriber.Sender.SendRaw(clientMsgB); err != nil {
+			// DRAFT TODO: Remove subscriber and client and disconnect?
+			// Or do that in (*Tatanka).send?
+			t.log.Errorf("Error relaying broadcast: %v", err)
+			continue
+		}
+	}
+}
+
+// storeSubscription adds a client to the subscriptions map.
+//
+// t.clientsMtx must be held when calling this function.
+func (t *Tatanka) storeSubscription(
+	peerID tanka.PeerID,
+	topicName tanka.Topic,
+	subjectName tanka.Subject,
+	bcast *mj.Broadcast,
+) {
+	topic, exists := t.topics[topicName]
+	if exists {
+		// We have the topic. Do we have the subject?
+		topic.subscribers[peerID] = struct{}{}
+		subs, exists := topic.subjects[subjectName]
+		if exists {
+			// We already have the subject, distribute the broadcast to existing
+			// subscribers.
+			t.notifySubscribersOfNewSubscriber(subs, topicName, subjectName, bcast)
+			subs[peerID] = struct{}{}
+		} else {
+			// Add the subject. Nothing to broadcast.
+			topic.subjects[subjectName] = map[tanka.PeerID]struct{}{
+				peerID: {},
+			}
+		}
+	} else {
+		// New topic and subject.
+		t.log.Tracef("Adding new subscription topic and subject %s -> %s", topicName, subjectName)
+		t.topics[topicName] = &Topic{
+			subjects: map[tanka.Subject]map[tanka.PeerID]struct{}{
+				subjectName: {
+					peerID: {},
+				},
+			},
+			subscribers: map[tanka.PeerID]struct{}{
+				peerID: {},
+			},
+		}
+	}
+}
+
+func (t *Tatanka) handleUpdateSubscriptions(c *client, msg *msgjson.Message) *msgjson.Error {
+	if t.skipRelay(msg) {
+		return nil
+	}
+
+	var updateSubs *mj.UpdateSubscriptions
+	if err := msg.Unmarshal(&updateSubs); err != nil || updateSubs == nil {
+		t.log.Errorf("error unmarshaling update subscriptions from %s: %w", c.ID, err)
+		return msgjson.NewError(mj.ErrBadRequest, "is this payload an update subscriptions?")
+	}
+
+	t.clientMtx.Lock()
+	t.setSubscriptions(c.ID, updateSubs.Subscriptions)
+	t.clientMtx.Unlock()
+
+	t.sendResult(c, msg.ID, true)
+	return nil
+}
+
 // handleSubscription handles a new subscription, adding the subject to the
 // map if it doesn't exist. It then distributes a NewSubscriber broadcast
 // to all current subscribers and remote tatankas.
@@ -297,64 +453,18 @@ func (t *Tatanka) handleSubscription(c *client, msg *msgjson.Message) *msgjson.E
 		Payload:     newSubB,
 	}
 
-	// Do a helper function here to keep things tidy below.
-	relay := func(subs map[tanka.PeerID]struct{}) {
-		clientMsg := mj.MustNotification(mj.RouteBroadcast, bcast)
-		mj.SignMessage(t.priv, clientMsg)
-		clientMsgB, _ := json.Marshal(clientMsg)
-		for peerID := range subs {
-			subscriber, found := t.clients[peerID]
-			if !found {
-				t.log.Errorf("client not found for subscriber %s on topic %q, subject %q", peerID, sub.Topic, sub.Subject)
-				continue
-			}
-
-			if err := subscriber.Sender.SendRaw(clientMsgB); err != nil {
-				// DRAFT TODO: Remove subscriber and client and disconnect?
-				// Or do that in (*Tatanka).send?
-				t.log.Errorf("Error relaying broadcast: %v", err)
-				continue
-			}
-		}
-	}
-
 	// Send it to all other remote tatankas.
 	t.relayBroadcast(bcast, c.ID)
 
 	// Find it and broadcast to locally-connected clients, or add the subject if
 	// it doesn't exist.
+	//
+	// TODO: clientMtx here is locked while a message is sent to all subscribers.
+	// This needs to be avoided.
 	t.clientMtx.Lock()
 	defer t.clientMtx.Unlock()
-	topic, exists := t.topics[sub.Topic]
-	if exists {
-		// We have the topic. Do we have the subject?
-		topic.subscribers[c.ID] = struct{}{}
-		subs, exists := topic.subjects[sub.Subject]
-		if exists {
-			// We already have the subject, distribute the broadcast to existing
-			// subscribers.
-			relay(subs)
-			subs[c.ID] = struct{}{}
-		} else {
-			// Add the subject. Nothing to broadcast.
-			topic.subjects[sub.Subject] = map[tanka.PeerID]struct{}{
-				c.ID: {},
-			}
-		}
-	} else {
-		// New topic and subject.
-		t.log.Tracef("Adding new subscription topic and subject %s -> %s", sub.Topic, sub.Subject)
-		t.topics[sub.Topic] = &Topic{
-			subjects: map[tanka.Subject]map[tanka.PeerID]struct{}{
-				sub.Subject: {
-					c.ID: {},
-				},
-			},
-			subscribers: map[tanka.PeerID]struct{}{
-				c.ID: {},
-			},
-		}
-	}
+
+	t.storeSubscription(c.ID, sub.Topic, sub.Subject, bcast)
 
 	t.sendResult(c, msg.ID, true)
 	t.replySubscription(c, sub.Topic)
@@ -621,11 +731,12 @@ func (t *Tatanka) handleTankagram(c *client, msg *msgjson.Message) *msgjson.Erro
 			return nil
 		}
 		if clientErr != nil {
+			t.log.Errorf("Error sending to local client clientErr %s: %v", recip.ID, clientErr)
 			sendTankagramResult(&mj.TankagramResult{Result: mj.TRTErrBadClient})
 			return nil
 		}
 		if err != nil {
-			t.log.Errorf("Error sending to local client %s: %v", recip.ID, err)
+			t.log.Errorf("Error sending to local client err %s: %v", recip.ID, err)
 		}
 	}
 
