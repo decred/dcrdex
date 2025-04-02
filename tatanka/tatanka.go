@@ -66,12 +66,16 @@ func (topic *Topic) unsubUser(peerID tanka.PeerID) {
 type BootNode struct {
 	// Protocol is one of ("ws", "wss"), though other tatanka comms protocols
 	// may be implemented later. Or we may end up using e.g. go-libp2p.
-	Protocol string
-	PeerID   dex.Bytes
+	Protocol string    `json:"protocol"`
+	PeerID   dex.Bytes `json:"peer_id"`
 	// Config can take different forms depending on the comms protocol, but is
 	// probably a tcp.RemoteNodeConfig.
-	Config json.RawMessage
+	Config json.RawMessage `json:"config"`
 }
+
+// Draft note: Why do we need a parsedBootNode? Why not just make BootNode
+// have a tanka.PeerID instead of a dex.Bytes? Also, instead of having a
+// TatankaCredentials in client/conn, can we use BootNode as well?
 
 // parsedBootNode is the unexported version of BootNode, but with a PeerID
 // instead of []byte.
@@ -101,6 +105,9 @@ type Tatanka struct {
 	clientHandlers  map[string]interface{} // clientRequestHandler | clientNotificationHandler
 	tatankaHandlers map[string]interface{} // tatankaRequestHandler | tatankaNotificationHandler
 	routes          []string
+	httpReqHandlers map[string]comms.HTTPHandler
+	httpRoutes      []string
+	maxClients      int
 	// bondTier  atomic.Uint64
 
 	priv *secp256k1.PrivateKey
@@ -133,8 +140,8 @@ type Config struct {
 	Logger     dex.Logger
 	RPC        comms.RPCConfig
 	ConfigPath string
+	MaxClients int
 
-	// TODO: Change to whitelist
 	WhiteList []BootNode
 
 	FiatOracleConfig fiatrates.Config
@@ -199,6 +206,10 @@ func New(cfg *Config) (*Tatanka, error) {
 		}
 	}
 
+	if cfg.MaxClients < 1 {
+		return nil, fmt.Errorf("max clients must be greater than 0")
+	}
+
 	t := &Tatanka{
 		net:             cfg.Net,
 		dataDir:         cfg.DataDir,
@@ -216,6 +227,8 @@ func New(cfg *Config) (*Tatanka, error) {
 		clientJobs:      make(chan *clientJob, 128),
 		clientHandlers:  make(map[string]interface{}),
 		tatankaHandlers: make(map[string]interface{}),
+		httpReqHandlers: make(map[string]comms.HTTPHandler),
+		maxClients:      cfg.MaxClients,
 	}
 
 	if !cfg.FiatOracleConfig.AllFiatSourceDisabled() {
@@ -284,7 +297,8 @@ func (t *Tatanka) prepareHandlers() {
 		t.clientHandlers[route] = handler
 	}
 	for route, handler := range map[string]interface{}{
-		mj.RouteSubscribe: t.handleSubscription,
+		mj.RouteSubscribe:           t.handleSubscription,
+		mj.RouteUpdateSubscriptions: t.handleUpdateSubscriptions,
 		// mj.RouteUnsubscribe: t.handleUnsubscribe,
 		mj.RouteBroadcast: t.handleBroadcast,
 		mj.RouteTankagram: t.handleTankagram,
@@ -300,6 +314,17 @@ func (t *Tatanka) prepareHandlers() {
 	}
 	for route := range t.clientHandlers {
 		t.routes = append(t.routes, route)
+	}
+
+	// HTTP Requests
+	registerHTTPRequestHandler := func(route string, handler comms.HTTPHandler) {
+		t.httpReqHandlers[route] = handler
+		t.httpRoutes = append(t.httpRoutes, route)
+	}
+	for route, handler := range map[string]comms.HTTPHandler{
+		mj.RouteNodeInfo: t.handleNodeInfo,
+	} {
+		registerHTTPRequestHandler(route, handler)
 	}
 }
 
@@ -632,7 +657,23 @@ func (t *tcpCore) HandleMessage(cl tanka.Sender, msg *msgjson.Message) *msgjson.
 	if handle, found := t.specialHandlers[msg.Route]; found {
 		return handle(cl, msg)
 	}
+
+	fmt.Println("no route found", msg.Route)
+
 	return msgjson.NewError(mj.ErrBadRequest, "route %q not known", msg.Route)
+}
+
+func (t *tcpCore) HTTPRoutes() []string {
+	return t.httpRoutes
+}
+
+func (t *tcpCore) HandleRequest(route string, thing any) (any, error) {
+	handler, found := t.httpReqHandlers[route]
+	if !found {
+		return nil, fmt.Errorf("http route %v not found", route)
+	}
+
+	return handler(thing)
 }
 
 // clientDisconnected handle a client disconnect, removing the client from the
@@ -692,6 +733,7 @@ func (t *Tatanka) broadcastRates() {
 			topic := t.topics[mj.TopicFiatRate]
 			t.clientMtx.RUnlock()
 
+			// TODO: Is this a race condition on topic.subscribers?
 			if topic != nil && len(topic.subscribers) > 0 {
 				t.batchSend(topic.subscribers, mj.MustNotification(mj.RouteRates, &mj.RateMessage{
 					Topic: mj.TopicFiatRate,
