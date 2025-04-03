@@ -6,11 +6,9 @@ package libxc
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
+	"crypto/ecdsa"
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -39,8 +37,9 @@ import (
 	"gopkg.in/square/go-jose.v2/jwt"
 )
 
-// https://docs.cdp.coinbase.com/advanced-trade/reference/
-// https://docs.cdp.coinbase.com/advanced-trade/docs/ws-overview
+// Trading docs: 			  https://docs.cdp.coinbase.com/advanced-trade/reference/
+// Trading websocket docs:    https://docs.cdp.coinbase.com/advanced-trade/docs/ws-overview
+// Deposit / withdrawal docs: https://docs.cdp.coinbase.com/coinbase-app/docs/api-transactions
 
 // supportedCoinbaseTokens is the set of supported Coinbase tokens.
 // There is no API to query the networks that coinbase supports withdrawals on.
@@ -56,30 +55,34 @@ var supportedCoinbaseTokens = map[uint32]struct{}{
 // and also the heartbeats channel. If a message arrives out of order,
 // the channel is unsubscribed, then resubscribed.
 type cbWSConn struct {
-	wsConn        comms.WsConn
-	seq           atomic.Uint64
-	wsPath        string
-	log           dex.Logger
-	productID     string
-	channel       string
-	channelID     string
-	msgHandler    func([]byte)
-	setSynced     func(bool)
-	apiName       string
-	apiPrivateKey string
+	wsConn     comms.WsConn
+	seq        atomic.Uint64
+	wsPath     string
+	log        dex.Logger
+	productID  string
+	channel    string
+	channelID  string
+	msgHandler func([]byte)
+	setSynced  func(bool)
+	apiName    string
+	privKey    *ecdsa.PrivateKey
 }
 
-func newCBWSConn(apiName, apiPrivateKey, wsPath, productID, channel, channelID string, msgHandler func([]byte), setSynced func(bool), log dex.Logger) *cbWSConn {
+func newCBWSConn(apiName, wsPath, productID, channel, channelID string, msgHandler func([]byte), setSynced func(bool), privKey *ecdsa.PrivateKey, log dex.Logger) *cbWSConn {
+	subLoggerName := fmt.Sprintf("WS-%s", channel)
+	if productID != "" {
+		subLoggerName += "-" + productID
+	}
 	return &cbWSConn{
-		apiName:       apiName,
-		apiPrivateKey: apiPrivateKey,
-		wsPath:        wsPath,
-		log:           log,
-		productID:     productID,
-		channel:       channel,
-		channelID:     channelID,
-		msgHandler:    msgHandler,
-		setSynced:     setSynced,
+		apiName:    apiName,
+		wsPath:     wsPath,
+		log:        log.SubLogger(subLoggerName),
+		productID:  productID,
+		channel:    channel,
+		channelID:  channelID,
+		msgHandler: msgHandler,
+		setSynced:  setSynced,
+		privKey:    privKey,
 	}
 }
 
@@ -137,9 +140,9 @@ func (c *cbWSConn) subUnsub(sub bool) error {
 		Channel:    c.channel,
 	}
 
-	if c.apiName != "" {
+	if c.apiName != "" && c.privKey != nil {
 		uri := fmt.Sprintf("%s %s%s", http.MethodGet, c.wsPath, "")
-		jwt, err := buildJWT(c.apiName, c.apiPrivateKey, uri)
+		jwt, err := buildJWT(c.apiName, uri, c.privKey)
 		if err != nil {
 			return err
 		}
@@ -218,25 +221,28 @@ func (c *cbWSConn) handleSubscriptionMessage(b []byte) {
 }
 
 func (c *cbWSConn) Connect(ctx context.Context) (*sync.WaitGroup, error) {
-	subLoggerName := fmt.Sprintf("WS-%s", c.channel)
-	if c.productID != "" {
-		subLoggerName += "-" + c.productID
-	}
-
+	initialConnect := true
 	conn, err := comms.NewWsConn(&comms.WsCfg{
 		URL: "wss://" + c.wsPath,
-		// The websocket server will send a ping frame every 3 minutes. If the
-		// websocket server does not receive a pong frame back from the
-		// connection within a 10 minute period, the connection will be
-		// disconnected. Unsolicited pong frames are allowed.
-		PingWait: time.Minute * 4,
-		ReconnectSync: func() {
-			fmt.Println("--reconnected")
-		},
+		// Coinbase does not send pings, but there is a heartbeat every second,
+		// so if no messages come for one minute, we are disconnected.
+		PingWait:      time.Minute,
+		ReconnectSync: func() {},
+		ConnectEventFunc: func(cs comms.ConnectionStatus) {
+			if cs != comms.Connected && cs != comms.Disconnected {
+				return
+			}
 
-		ConnectEventFunc: func(cs comms.ConnectionStatus) {},
-		Logger:           c.log.SubLogger(subLoggerName),
-		RawHandler:       c.handleWebsocketMessage,
+			if cs == comms.Connected && initialConnect {
+				initialConnect = false
+			} else if cs == comms.Connected {
+				c.subUnsub(false)
+			} else { // Disconnected
+				c.setSynced(false)
+			}
+		},
+		Logger:     c.log,
+		RawHandler: c.handleWebsocketMessage,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error creating WsConn: %w", err)
@@ -251,7 +257,7 @@ func (c *cbWSConn) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 
 	if err := c.subUnsub(true); err != nil {
 		cm.Disconnect()
-		return nil, fmt.Errorf("error subscribing to level2: %w", err)
+		return nil, fmt.Errorf("error subscribing to %v: %w", c.channel, err)
 	}
 
 	if err := c.subHeartbeats(); err != nil {
@@ -347,7 +353,7 @@ func (c *cbBook) vwap(sell bool, qty uint64) (vwap, extrema uint64, filled bool,
 		return 0, 0, false, fmt.Errorf("book not synced")
 	}
 
-	vwap, extrema, filled = c.book.vwap(sell, qty)
+	vwap, extrema, filled = c.book.vwap(!sell, qty)
 	return
 }
 
@@ -356,9 +362,9 @@ func (c *cbBook) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		c.synced.Store(synced)
 	}
 
-	// apiKey and apiName not provided because these subscriptions do not need
+	// apiName and signer not provided because these subscriptions do not need
 	// authentication.
-	conn := newCBWSConn("", "", c.wsPath, c.productID, "level2", "l2_data", c.handleLevel2Message, setSynced, c.log)
+	conn := newCBWSConn("", c.wsPath, c.productID, "level2", "l2_data", c.handleLevel2Message, setSynced, nil, c.log)
 	wsCM := dex.NewConnectionMaster(conn)
 	if err := wsCM.ConnectOnce(ctx); err != nil {
 		return nil, fmt.Errorf("error connecting to websocket feed: %w", err)
@@ -386,18 +392,18 @@ func (c *cbBook) sync(ctx context.Context) error {
 }
 
 type coinbase struct {
-	log           dex.Logger
-	basePath      string
-	wsPath        string
-	apiName       string
-	apiPrivateKey string
-	tickerIDs     map[string][]uint32
-	idTicker      map[uint32]string
-	ctx           context.Context
-	net           dex.Network
-	accounts      atomic.Value // map[string]*coinbaseAccount
-	assets        atomic.Value // map[string]*coinbaseAsset
-	markets       atomic.Value // map[string]*coinbaseMarket
+	log        dex.Logger
+	basePath   string
+	wsPath     string
+	apiName    string
+	apiPrivKey *ecdsa.PrivateKey
+	tickerIDs  map[string][]uint32
+	idTicker   map[uint32]string
+	ctx        context.Context
+	net        dex.Network
+	accounts   atomic.Value // map[string]*coinbaseAccount
+	assets     atomic.Value // map[string]*coinbaseAsset
+	markets    atomic.Value // map[string]*coinbaseMarket
 
 	marketSnapshotMtx sync.RWMutex
 	marketSnapshot    struct {
@@ -464,13 +470,24 @@ func newCoinbase(cfg *CEXConfig) (*coinbase, error) {
 	// Unescape any line breaks in the secret key.
 	secretKey := strings.ReplaceAll(cfg.SecretKey, `\n`, "\n")
 
+	// Create a JSON Web Signature (JWS) signer using the secret key.
+	// This is used
+	block, _ := pem.Decode([]byte(secretKey))
+	if block == nil {
+		return nil, fmt.Errorf("jwt: Could not decode private key")
+	}
+	key, err := x509.ParseECPrivateKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("jwt: %w", err)
+	}
+
 	return &coinbase{
 		net:                cfg.Net,
 		log:                cfg.Logger,
 		basePath:           basePath,
 		wsPath:             wsPath,
 		apiName:            cfg.APIKey,
-		apiPrivateKey:      secretKey,
+		apiPrivKey:         key,
 		tickerIDs:          tickerIDs,
 		idTicker:           idTicker,
 		tradeIDNoncePrefix: encode.RandomBytes(10),
@@ -542,7 +559,7 @@ func (c *coinbase) handleUserMessage(b []byte) {
 }
 
 func (c *coinbase) subscribeUserChannel(ctx context.Context) (*sync.WaitGroup, error) {
-	conn := newCBWSConn(c.apiName, c.apiPrivateKey, c.wsPath, "", "user", "user", c.handleUserMessage, func(bool) {}, c.log)
+	conn := newCBWSConn(c.apiName, c.wsPath, "", "user", "user", c.handleUserMessage, func(bool) {}, c.apiPrivKey, c.log)
 	cm := dex.NewConnectionMaster(conn)
 	if err := cm.ConnectOnce(ctx); err != nil {
 		return nil, fmt.Errorf("error connecting to websocket feed: %w", err)
@@ -586,14 +603,14 @@ func (c *coinbase) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	go func() {
 		defer wg.Done()
 
-		timer := time.NewTimer(time.Second * 30)
-		defer timer.Stop()
+		ticker := time.NewTicker(time.Second * 30)
+		defer ticker.Stop()
 
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-timer.C:
+			case <-ticker.C:
 				if err := c.updateAccounts(ctx); err != nil {
 					c.log.Errorf("error fetching accounts: %v", err)
 				}
@@ -1112,7 +1129,7 @@ func (c *coinbase) getTransactionByTxID(ctx context.Context, assetID uint32, txI
 }
 
 // ConfirmDeposit checks if a deposit has been confirmed and returns the
-// amount deposited. This will only work for deposits that have been
+// amount deposited. This will only work for deposits that have been made
 // in the past 3 days.
 func (c *coinbase) ConfirmDeposit(ctx context.Context, deposit *DepositData) (bool, uint64) {
 	tx, err := c.getTransactionByTxID(ctx, deposit.AssetID, deposit.TxID)
@@ -1232,6 +1249,9 @@ func (c *coinbase) TradeStatus(ctx context.Context, id string, baseID, quoteID u
 		return nil, fmt.Errorf("error getting unit info for quote asset ID %d: %v", quoteID, err)
 	}
 
+	filledValue := toAtomic(res.Order.FilledValue, &qui)
+	totalFees := toAtomic(res.Order.TotalFees, &qui)
+
 	return &Trade{
 		ID:          id,
 		Sell:        res.Order.Side == "SELL",
@@ -1240,7 +1260,7 @@ func (c *coinbase) TradeStatus(ctx context.Context, id string, baseID, quoteID u
 		BaseID:      baseID,
 		QuoteID:     quoteID,
 		BaseFilled:  toAtomic(res.Order.FilledSize, &bui),
-		QuoteFilled: toAtomic(res.Order.TotalValueAfterFees, &qui),
+		QuoteFilled: utils.SafeSub(filledValue, totalFees),
 		Complete:    res.Order.Status != "OPEN" && res.Order.Status != "PENDING",
 	}, nil
 }
@@ -1337,19 +1357,9 @@ type APIKeyClaims struct {
 	URI string `json:"uri,omitempty"`
 }
 
-func buildJWT(apiName, apiPrivateKey, uri string) (string, error) {
-	block, _ := pem.Decode([]byte(apiPrivateKey))
-	if block == nil {
-		return "", fmt.Errorf("jwt: Could not decode private key")
-	}
-
-	key, err := x509.ParseECPrivateKey(block.Bytes)
-	if err != nil {
-		return "", fmt.Errorf("jwt: %w", err)
-	}
-
+func buildJWT(apiName, uri string, privKey *ecdsa.PrivateKey) (string, error) {
 	sig, err := jose.NewSigner(
-		jose.SigningKey{Algorithm: jose.ES256, Key: key},
+		jose.SigningKey{Algorithm: jose.ES256, Key: privKey},
 		(&jose.SignerOptions{NonceSource: nonceSource{}}).WithType("JWT").WithHeader("kid", apiName),
 	)
 	if err != nil {
@@ -1370,21 +1380,6 @@ func buildJWT(apiName, apiPrivateKey, uri string) (string, error) {
 		return "", fmt.Errorf("jwt: %w", err)
 	}
 	return jwtString, nil
-}
-
-func (c *coinbase) sign(preimage string) (string, error) {
-	key, err := base64.StdEncoding.DecodeString(c.apiPrivateKey)
-	if err != nil {
-		return "", err
-	}
-
-	signature := hmac.New(sha256.New, key)
-	_, err = signature.Write([]byte(preimage))
-	if err != nil {
-		return "", err
-	}
-
-	return base64.StdEncoding.EncodeToString(signature.Sum(nil)), nil
 }
 
 func (c *coinbase) prepareRequest(ctx context.Context, method, endpoint string, queryParams url.Values, bodyParams interface{}) (_ *http.Request, _ context.CancelFunc, err error) {
@@ -1414,7 +1409,7 @@ func (c *coinbase) prepareRequest(ctx context.Context, method, endpoint string, 
 	}
 
 	uri := fmt.Sprintf("%s %s%s", method, c.basePath, endpoint)
-	jwt, err := buildJWT(c.apiName, c.apiPrivateKey, uri)
+	jwt, err := buildJWT(c.apiName, uri, c.apiPrivKey)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error building JWT: %w", err)
 	}

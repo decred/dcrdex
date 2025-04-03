@@ -125,6 +125,8 @@ type TradeStatusResponse struct {
 	Order struct {
 		Status              string  `json:"status"`
 		FilledSize          float64 `json:"filled_size,string"`
+		FilledValue         float64 `json:"filled_value,string"`
+		TotalFees           float64 `json:"total_fees,string"`
 		TotalValueAfterFees float64 `json:"total_value_after_fees,string"`
 		Side                string  `json:"side"`
 		Config              struct {

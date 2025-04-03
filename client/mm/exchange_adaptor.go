@@ -1551,11 +1551,11 @@ func cexTradeBalanceEffects(trade *libxc.Trade) (effects *BalanceEffects) {
 
 	if trade.Sell {
 		effects.Settled[trade.BaseID] = -int64(trade.Qty)
-		effects.Locked[trade.BaseID] = trade.Qty - trade.BaseFilled
+		effects.Locked[trade.BaseID] = utils.SafeSub(trade.Qty, trade.BaseFilled)
 		effects.Settled[trade.QuoteID] = int64(trade.QuoteFilled)
 	} else {
 		effects.Settled[trade.QuoteID] = -int64(calc.BaseToQuote(trade.Rate, trade.Qty))
-		effects.Locked[trade.QuoteID] = calc.BaseToQuote(trade.Rate, trade.Qty) - trade.QuoteFilled
+		effects.Locked[trade.QuoteID] = utils.SafeSub(calc.BaseToQuote(trade.Rate, trade.Qty), trade.QuoteFilled)
 		effects.Settled[trade.BaseID] = int64(trade.BaseFilled)
 	}
 
@@ -1918,7 +1918,7 @@ func (u *unifiedExchangeAdaptor) confirmWithdrawal(ctx context.Context, id strin
 
 	tx, err := u.clientCore.WalletTransaction(withdrawal.assetID, txID)
 	if errors.Is(err, asset.CoinNotFoundError) {
-		u.log.Warnf("%s wallet does not know about withdrawal tx: %s", dex.BipIDSymbol(withdrawal.assetID), id)
+		u.log.Warnf("%s wallet does not know about withdrawal tx: %s", dex.BipIDSymbol(withdrawal.assetID), txID)
 		return false
 	}
 	if err != nil {
