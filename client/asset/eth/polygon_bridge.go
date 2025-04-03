@@ -23,7 +23,7 @@ var (
 	wethPolygonID, _ = dex.BipSymbolID("weth.polygon")
 	ethID, _         = dex.BipSymbolID("eth")
 	polygonID, _     = dex.BipSymbolID("polygon")
-	ethMaticID, _    = dex.BipSymbolID("matic.eth")
+	maticEthID, _    = dex.BipSymbolID("matic.eth")
 )
 
 var polygonBridgeSupportedAssets = map[dex.Network]map[uint32]uint32{
@@ -32,12 +32,12 @@ var polygonBridgeSupportedAssets = map[dex.Network]map[uint32]uint32{
 		usdtPolygonID: usdtEthID,
 		ethID:         wethPolygonID,
 		wethPolygonID: ethID,
-		ethMaticID:    polygonID,
+		maticEthID:    polygonID,
 	},
 	dex.Testnet: {
 		ethID:         wethPolygonID,
 		wethPolygonID: ethID,
-		ethMaticID:    polygonID,
+		maticEthID:    polygonID,
 	},
 }
 

@@ -45,7 +45,7 @@ func TestTxDB(t *testing.T) {
 
 	wt1 := newTx(1)
 	wt1.Confirmed = true
-	wt1.TokenID = &usdcTokenID
+	wt1.TokenID = &usdcEthID
 	wt2 := newTx(2)
 	wt3 := newTx(3)
 	wt4 := newTx(4)
@@ -172,7 +172,7 @@ func TestTxDB(t *testing.T) {
 		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
 	}
 
-	txs, err = txHistoryStore.getTxs(0, nil, false, &usdcTokenID)
+	txs, err = txHistoryStore.getTxs(0, nil, false, &usdcEthID)
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}

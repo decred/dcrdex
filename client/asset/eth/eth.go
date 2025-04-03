@@ -69,9 +69,9 @@ func registerToken(tokenID uint32, desc string) {
 func init() {
 	dexeth.MaybeReadSimnetAddrs()
 	asset.Register(BipID, &Driver{})
-	registerToken(usdcTokenID, "The USDC Ethereum ERC20 token.")
-	registerToken(usdtTokenID, "The USDT Ethereum ERC20 token.")
-	registerToken(maticTokenID, "The MATIC Ethereum ERC20 token.")
+	registerToken(usdcEthID, "The USDC Ethereum ERC20 token.")
+	registerToken(usdtEthID, "The USDT Ethereum ERC20 token.")
+	registerToken(maticEthID, "The MATIC Ethereum ERC20 token.")
 }
 
 const (
@@ -119,10 +119,7 @@ const (
 )
 
 var (
-	usdcTokenID, _  = dex.BipSymbolID("usdc.eth")
-	usdtTokenID, _  = dex.BipSymbolID("usdt.eth")
-	maticTokenID, _ = dex.BipSymbolID("matic.eth")
-	walletOpts      = []*asset.ConfigOption{
+	walletOpts = []*asset.ConfigOption{
 		{
 			Key:         "gasfeelimit",
 			DisplayName: "Gas Fee Limit",
@@ -1085,7 +1082,7 @@ func (w *TokenBridgeWallet) Connect(ctx context.Context) (wg *sync.WaitGroup, er
 		bridge, err = newUsdcBridge(w.assetID, w.net, w.netToken.Address, w.node.contractBackend(), w.addr, w.node)
 	case w.baseChainID == polygonID:
 		bridge, err = newPolygonBridgePolygonErc20(w.node.contractBackend(), w.assetID, w.netToken.Address, w.log, w.net)
-	case w.assetID == ethMaticID:
+	case w.assetID == maticEthID:
 		bridge, err = newPolygonBridgeEthPOL(w.node.contractBackend(), w.assetID, w.netToken.Address, w.net, w.addr, w.log)
 	case w.baseChainID == ethID:
 		bridge, err = newPolygonBridgeEthErc20(ctx, w.node.contractBackend(), w.assetID, w.netToken.Address, w.net, w.addr, w.log)

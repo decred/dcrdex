@@ -986,6 +986,18 @@ const (
 	NotApproved
 )
 
+func (a ApprovalStatus) String() string {
+	switch a {
+	case Approved:
+		return "approved"
+	case Pending:
+		return "pending"
+	case NotApproved:
+		return "not approved"
+	}
+	return "unknown"
+}
+
 // TokenApprover is implemented by wallets that require an approval before
 // trading.
 type TokenApprover interface {

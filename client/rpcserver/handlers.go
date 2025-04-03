@@ -1103,7 +1103,7 @@ func handleCheckBridgeApproval(s *RPCServer, params *RawParams) *msgjson.Respons
 		return createResponse(checkBridgeApprovalRoute, nil, resErr)
 	}
 
-	return createResponse(checkBridgeApprovalRoute, approvalStatus, nil)
+	return createResponse(checkBridgeApprovalRoute, approvalStatus.String(), nil)
 }
 
 func handleApproveBridge(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
@@ -1989,25 +1989,26 @@ an spv wallet and enables options to view and set the vsp.
 		argsShort:  `assetID`,
 		cmdSummary: "Check if the bridge contract is approved.",
 		argsLong: `Args:
-		assetID (int): The asset's BIP-44 registered coin index.`,
+		assetID (int): The BIP-44 registered coin index of the asset from where the bridge will be initiated.`,
 	},
 	approveBridgeContractRoute: {
-		argsShort:  `assetID`,
+		argsShort:  `assetID approve`,
 		cmdSummary: "Approve the bridge contract.",
 		argsLong: `Args:
-		assetID (int): The asset's BIP-44 registered coin index.`,
+		assetID (int): The asset's BIP-44 registered coin index on the "from" chain.
+		approve (bool): True to approve, false to unapprove.`,
 	},
 	pendingBridgesRoute: {
 		argsShort:  `assetID`,
 		cmdSummary: "Get pending bridges.",
 		argsLong: `Args:
-		assetID (int): The asset's BIP-44 registered coin index.`,
+		assetID (int): The asset's BIP-44 registered coin index on the "from" chain.`,
 	},
 	bridgeHistoryRoute: {
 		argsShort:  `assetID (n) (refTxID) (past)`,
 		cmdSummary: "Get bridge history.",
 		argsLong: `Args:
-		assetID (int): The asset's BIP-44 registered coin index.
+		assetID (int): The asset's BIP-44 registered coin index on the "from" chain.
 		n (int): The number of transactions to return. If <= 0 or unset, all transactions are returned.
 		refTxID (string): If set, the transactions before or after this tx (depending on the past argument)
 		will be returned.

@@ -41,7 +41,7 @@ func TestMigrateLegacyTxDB(t *testing.T) {
 	wt1.Confirmed = true
 	wt2 := newTx(2)
 	wt3 := newTx(3)
-	wt3.TokenID = &usdcTokenID
+	wt3.TokenID = &usdcEthID
 
 	// Store in legacy db
 	txs := []*extendedWalletTx{wt1, wt2, wt3}
