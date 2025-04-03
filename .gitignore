@@ -43,6 +43,7 @@ client/cmd/bisonw-desktop/pkg/installers
 client/cmd/testbinance/testbinance
 client/cmd/mmbaltracker/mmbaltracker
 server/noderelay/cmd/sourcenode/sourcenode
+client/cmd/bisonw-desktop/snap/snapcraft.yaml
 tatanka/cmd/demo/demo
 server/cmd/validatemarkets
 client/cmd/translationsreport/translationsreport
