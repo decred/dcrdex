@@ -688,4 +688,5 @@ var EnUS = map[string]*intl.Translation{
 	"Placements":                  {T: "Placements"},
 	"delete_bot":                  {T: "Delete Bot"},
 	"export_logs":                 {T: "Export Logs"},
+	"address has been used":       {T: "address has been used"},
 }

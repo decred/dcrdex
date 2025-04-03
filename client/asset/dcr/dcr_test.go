@@ -721,6 +721,10 @@ func (c *tRPCClient) SetTxFee(ctx context.Context, fee dcrutil.Amount) error {
 	return nil
 }
 
+func (c *tRPCClient) GetReceivedByAddressMinConf(ctx context.Context, address stdaddr.Address, minConfs int) (dcrutil.Amount, error) {
+	return 0, nil
+}
+
 func (c *tRPCClient) ListSinceBlock(ctx context.Context, hash *chainhash.Hash) (*walletjson.ListSinceBlockResult, error) {
 	return nil, nil
 }
