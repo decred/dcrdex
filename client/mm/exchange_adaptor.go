@@ -3016,14 +3016,6 @@ func (u *unifiedExchangeAdaptor) optimizeTransfers(dist *distribution, dexSellLo
 		onlyQuoteInternal
 	)
 
-	isETHToken := func(assetID uint32) bool {
-		token := asset.TokenInfo(assetID)
-		if token == nil {
-			return false
-		}
-		return token.ParentID == 60
-	}
-
 	splits := make([]*scoredSplit, 0)
 	// scoreSplitSource gets a score for the proposed asset distribution using
 	// the specified sources for the transfer, and, if the score is higher than
@@ -3035,10 +3027,13 @@ func (u *unifiedExchangeAdaptor) optimizeTransfers(dist *distribution, dexSellLo
 		incrementFees := func(base bool) {
 			// TODO: use actual fees
 			fees++
-			if base && (u.baseID == 0 || u.baseID == 60 || isETHToken(u.baseID)) {
+
+			baseToken := asset.TokenInfo(u.baseID)
+			if base && (u.baseID == 0 || u.baseID == 60 || (baseToken != nil && baseToken.ParentID == 60)) {
 				fees++
 			}
-			if !base && (u.quoteID == 0 || u.quoteID == 60 || isETHToken(u.quoteID)) {
+			quoteToken := asset.TokenInfo(u.quoteID)
+			if !base && (u.quoteID == 0 || u.quoteID == 60 || (quoteToken != nil && quoteToken.ParentID == 60)) {
 				fees++
 			}
 		}
