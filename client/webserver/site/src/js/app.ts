@@ -55,7 +55,7 @@ import {
   ActionResolvedNote,
   TransactionActionNote,
   CoreActionRequiredNote,
-  RejectedRedemptionData,
+  RejectedTxData,
   MarketMakingStatus,
   RunStatsNote,
   MMBotStatus,
@@ -646,7 +646,8 @@ export default class Application {
       case 'lostNonce':
         return this.lostNonceAction(req)
       case 'redeemRejected':
-        return this.redeemRejectedAction(req)
+      case 'refundRejected':
+        return this.txRejectedAction(req)
     }
     throw Error('unknown required action ID ' + req.actionID)
   }
@@ -755,14 +756,15 @@ export default class Application {
     return div
   }
 
-  redeemRejectedAction (req: ActionRequiredNote) {
-    const { orderID, coinID, coinFmt, assetID } = req.payload as RejectedRedemptionData
-    const div = this.page.rejectedRedemptionTmpl.cloneNode(true) as PageElement
+  txRejectedAction (req: ActionRequiredNote) {
+    const { orderID, coinID, coinFmt, assetID, txType } = req.payload as RejectedTxData
+    const div = this.page.rejectedTxTmpl.cloneNode(true) as PageElement
     const tmpl = Doc.parseTemplate(div)
     const { name, token } = this.assets[assetID]
     tmpl.assetName.textContent = name
     tmpl.txid.textContent = coinFmt
     tmpl.txid.dataset.explorerCoin = coinID
+    tmpl.txType.textContent = txType
     setCoinHref(token ? token.parentID : assetID, tmpl.txid)
     Doc.bind(tmpl.doNothingBttn, 'click', () => {
       this.submitAction(req, { orderID, coinID, retry: false }, tmpl.errMsg)
