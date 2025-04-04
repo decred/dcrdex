@@ -289,6 +289,7 @@ var (
 				MultiFundingOpts:  multiFundingOpts,
 			},
 		},
+		BlockchainClass: asset.BlockchainClassUTXO,
 	}
 	swapFeeBumpKey      = "swapfeebump"
 	splitKey            = "swapsplit"
