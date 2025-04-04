@@ -1739,7 +1739,6 @@ func (m *MarketMaker) availableBalances(mkt *MarketWithHost, cexCfg *CEXConfig) 
 		if balancesEqual(updatedDEXBalances, totalDEXBalances) && balancesEqual(updatedCEXBalances, totalCEXBalances) {
 			for assetID, bal := range reservedDEXBalances {
 				if bal > totalDEXBalances[assetID] {
-					m.log.Warnf("reserved DEX balance for %s exceeds available balance: %d > %d", dex.BipIDSymbol(assetID), bal, totalDEXBalances[assetID])
 					totalDEXBalances[assetID] = 0
 				} else {
 					totalDEXBalances[assetID] -= bal
@@ -1747,7 +1746,6 @@ func (m *MarketMaker) availableBalances(mkt *MarketWithHost, cexCfg *CEXConfig) 
 			}
 			for assetID, bal := range reservedCEXBalances {
 				if bal > totalCEXBalances[assetID] {
-					m.log.Warnf("reserved CEX balance for %s exceeds available balance: %d > %d", dex.BipIDSymbol(assetID), bal, totalCEXBalances[assetID])
 					totalCEXBalances[assetID] = 0
 				} else {
 					totalCEXBalances[assetID] -= bal
