@@ -187,6 +187,9 @@ type MMCore interface {
 	RunOverview(startTime int64, mkt *mm.MarketWithHost) (*mm.MarketMakingRunOverview, error)
 	RunLogs(startTime int64, mkt *mm.MarketWithHost, n uint64, refID *uint64, filter *mm.RunLogFilters) (events, updatedEvents []*mm.MarketMakingEvent, overview *mm.MarketMakingRunOverview, err error)
 	CEXBook(host string, baseID, quoteID uint32) (buys, sells []*core.MiniOrder, _ error)
+	UpdateRunningBotCfg(cfg *mm.BotConfig, balanceDiffs *mm.BotInventoryDiffs, autoRebalanceCfg *mm.AutoRebalanceConfig, saveUpdate bool) error
+	AvailableBalances(mkt *mm.MarketWithHost, cexName *string) (dexBalances, cexBalances map[uint32]uint64, _ error)
+	MaxFundingFees(mkt *mm.MarketWithHost, maxBuyPlacements, maxSellPlacements uint32, baseOptions, quoteOptions map[string]string) (buyFees, sellFees uint64, err error)
 }
 
 // genCertPair generates a key/cert pair to the paths provided.
@@ -596,6 +599,7 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/startmarketmakingbot", s.apiStartMarketMakingBot)
 			apiAuth.Post("/stopmarketmakingbot", s.apiStopMarketMakingBot)
 			apiAuth.Post("/updatebotconfig", s.apiUpdateBotConfig)
+			apiAuth.Post("/updaterunningbot", s.apiUpdateRunningBot)
 			apiAuth.Post("/updatecexconfig", s.apiUpdateCEXConfig)
 			apiAuth.Post("/removebotconfig", s.apiRemoveBotConfig)
 			apiAuth.Get("/marketmakingstatus", s.apiMarketMakingStatus)
@@ -604,6 +608,9 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Get("/archivedmmruns", s.apiArchivedRuns)
 			apiAuth.Post("/mmrunlogs", s.apiRunLogs)
 			apiAuth.Post("/cexbook", s.apiCEXBook)
+			apiAuth.Post("/availablebalances", s.apiAvailableBalances)
+			apiAuth.Post("/maxfundingfees", s.apiMaxFundingFees)
+
 		})
 	})
 
