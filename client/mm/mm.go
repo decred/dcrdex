@@ -1636,13 +1636,18 @@ func (m *MarketMaker) availableBalances(mkt *MarketWithHost, cexCfg *CEXConfig) 
 				return nil, nil, err
 			}
 
-			for assetID := range cexAssets {
-				balance, err := cex.Balance(assetID)
-				if err != nil {
-					return nil, nil, err
-				}
+			balances, err := cex.Balances(m.ctx)
+			if err != nil {
+				return nil, nil, err
+			}
 
-				cexBals[assetID] = balance.Available
+			for assetID := range cexAssets {
+				bal, found := balances[assetID]
+				if !found {
+					cexBals[assetID] = 0
+					continue
+				}
+				cexBals[assetID] = bal.Available
 			}
 		}
 
