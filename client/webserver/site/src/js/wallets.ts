@@ -1849,6 +1849,8 @@ export default class WalletsPage extends BasePage {
   }
 
   handleTxNote (tx: WalletTransaction, newTx: boolean) {
+    const { selectedAssetID: assetID } = this
+    this.depositAddrForm.handleTx(assetID, tx)
     const w = app().assets[this.selectedAssetID].wallet
     const hideMixing = (w.traits & traitFundsMixer) !== 0 && !!this.page.hideMixTxs.checked
     if (hideMixing && tx.type === txTypeMixing) return
@@ -1857,20 +1859,20 @@ export default class WalletsPage extends BasePage {
         Doc.show(this.page.txHistoryTable)
         Doc.hide(this.page.noTxHistory)
         this.page.txHistoryTableBody.appendChild(this.txHistoryDateRow(this.txDate(tx)))
-        this.page.txHistoryTableBody.appendChild(this.txHistoryRow(tx, this.selectedAssetID))
+        this.page.txHistoryTableBody.appendChild(this.txHistoryRow(tx, assetID))
         this.oldestTx = tx
       } else if (this.txDate(tx) !== this.txHistoryTableNewestDate()) {
-        this.page.txHistoryTableBody.insertBefore(this.txHistoryRow(tx, this.selectedAssetID), this.page.txHistoryTableBody.children[0])
+        this.page.txHistoryTableBody.insertBefore(this.txHistoryRow(tx, assetID), this.page.txHistoryTableBody.children[0])
         this.page.txHistoryTableBody.insertBefore(this.txHistoryDateRow(this.txDate(tx)), this.page.txHistoryTableBody.children[0])
       } else {
-        this.page.txHistoryTableBody.insertBefore(this.txHistoryRow(tx, this.selectedAssetID), this.page.txHistoryTableBody.children[1])
+        this.page.txHistoryTableBody.insertBefore(this.txHistoryRow(tx, assetID), this.page.txHistoryTableBody.children[1])
       }
       return
     }
     for (const row of this.page.txHistoryTableBody.children) {
       const peRow = row as PageElement
       if (peRow.dataset.txid === tx.id) {
-        this.updateTxHistoryRow(peRow, tx, this.selectedAssetID)
+        this.updateTxHistoryRow(peRow, tx, assetID)
         break
       }
     }
