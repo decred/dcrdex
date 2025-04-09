@@ -79,7 +79,7 @@ Package: bisonw
 Version: ${VER}
 Architecture: ${ARCH}
 Maintainer: Decred developers <briantstafford@gmail.com>
-Depends: libgtk-3-0, libwebkit2gtk-4.0-37
+Depends: libgtk-3-0, libwebkit2gtk-4.1-0
 Description: A multi-wallet backed by Decred DEX
 EOF
 
