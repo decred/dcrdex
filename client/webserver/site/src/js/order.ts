@@ -307,23 +307,27 @@ export default class OrderPage extends BasePage {
     if (m.status === OrderUtil.MakerSwapCast && !m.revoked && !m.refund) {
       const c = makerSwapCoin(m)
       tmpl.makerSwapMsg.textContent = confirmationString(c)
-      Doc.hide(tmpl.takerSwapMsg, tmpl.makerRedeemMsg, tmpl.takerRedeemMsg)
+      Doc.hide(tmpl.takerSwapMsg, tmpl.makerRedeemMsg, tmpl.takerRedeemMsg, tmpl.refundMsg)
       Doc.show(tmpl.makerSwapMsg)
     } else if (m.status === OrderUtil.TakerSwapCast && !m.revoked && !m.refund) {
       const c = takerSwapCoin(m)
       tmpl.takerSwapMsg.textContent = confirmationString(c)
-      Doc.hide(tmpl.makerSwapMsg, tmpl.makerRedeemMsg, tmpl.takerRedeemMsg)
+      Doc.hide(tmpl.makerSwapMsg, tmpl.makerRedeemMsg, tmpl.takerRedeemMsg, tmpl.refundMsg)
       Doc.show(tmpl.takerSwapMsg)
     } else if (inConfirmingMakerRedeem(m) && !m.revoked && !m.refund) {
       tmpl.makerRedeemMsg.textContent = confirmationString(m.redeem)
-      Doc.hide(tmpl.makerSwapMsg, tmpl.takerSwapMsg, tmpl.takerRedeemMsg)
+      Doc.hide(tmpl.makerSwapMsg, tmpl.takerSwapMsg, tmpl.takerRedeemMsg, tmpl.refundMsg)
       Doc.show(tmpl.makerRedeemMsg)
     } else if (inConfirmingTakerRedeem(m) && !m.revoked && !m.refund) {
       tmpl.takerRedeemMsg.textContent = confirmationString(m.redeem)
-      Doc.hide(tmpl.makerSwapMsg, tmpl.takerSwapMsg, tmpl.makerRedeemMsg)
+      Doc.hide(tmpl.makerSwapMsg, tmpl.takerSwapMsg, tmpl.makerRedeemMsg, tmpl.refundMsg)
       Doc.show(tmpl.takerRedeemMsg)
-    } else {
+    } else if (inConfirmingRefund(m)) {
+      tmpl.refundMsg.textContent = confirmationString(m.refund)
       Doc.hide(tmpl.makerSwapMsg, tmpl.takerSwapMsg, tmpl.makerRedeemMsg, tmpl.takerRedeemMsg)
+      Doc.show(tmpl.refundMsg)
+    } else {
+      Doc.hide(tmpl.makerSwapMsg, tmpl.takerSwapMsg, tmpl.makerRedeemMsg, tmpl.takerRedeemMsg, tmpl.refundMsg)
     }
 
     if (!m.revoked) {
@@ -557,4 +561,11 @@ function inConfirmingMakerRedeem (m: Match) {
 */
 function inConfirmingTakerRedeem (m: Match) {
   return m.status < OrderUtil.MatchConfirmed && m.side === OrderUtil.Taker && m.status >= OrderUtil.MatchComplete
+}
+
+/*
+* inConfirmingRefund will be true if we are waiting on confirmations for our refund.
+*/
+function inConfirmingRefund (m: Match) {
+  return m.status < OrderUtil.MatchConfirmed && m.refund && m.refund.confs.count <= m.refund.confs.required
 }

@@ -435,8 +435,11 @@ const (
 	TopicCounterConfirms       Topic = "CounterConfirms"
 	TopicConfirms              Topic = "Confirms"
 	TopicRedemptionResubmitted Topic = "RedemptionResubmitted"
+	TopicRefundResubmitted     Topic = "RefundResubmitted"
 	TopicSwapRefunded          Topic = "SwapRefunded"
+	TopicSwapRedeemed          Topic = "SwapRedeemed"
 	TopicRedemptionConfirmed   Topic = "RedemptionConfirmed"
+	TopicRefundConfirmed       Topic = "RefundConfirmed"
 )
 
 func newMatchNote(topic Topic, subject, details string, severity db.Severity, t *trackedTrade, match *matchTracker) *MatchNote {
@@ -451,7 +454,8 @@ func newMatchNote(topic Topic, subject, details string, severity db.Severity, t 
 		OrderID:      t.ID().Bytes(),
 		Match: matchFromMetaMatchWithConfs(t.Order, &match.MetaMatch, swapConfs,
 			int64(t.metaData.FromSwapConf), counterConfs, int64(t.metaData.ToSwapConf),
-			int64(match.redemptionConfs), int64(match.redemptionConfsReq)),
+			int64(match.redemptionConfs), int64(match.redemptionConfsReq),
+			int64(match.refundConfs), int64(match.refundConfsReq)),
 		Host:     t.dc.acct.host,
 		MarketID: marketName(t.Base(), t.Quote()),
 	}
@@ -776,6 +780,8 @@ func newUnknownBondTierZeroNote(subject, details string) *db.Notification {
 const (
 	ActionIDRedeemRejected = "redeemRejected"
 	TopicRedeemRejected    = "RedeemRejected"
+	ActionIDRefundRejected = "refundRejected"
+	TopicRefundRejected    = "RefundRejected"
 )
 
 func newActionRequiredNote(actionID, uniqueID string, payload any) *asset.ActionRequiredNote {
@@ -789,28 +795,36 @@ func newActionRequiredNote(actionID, uniqueID string, payload any) *asset.Action
 	return n
 }
 
-type RejectedRedemptionData struct {
+type RejectedTxData struct {
 	OrderID dex.Bytes `json:"orderID"`
 	CoinID  dex.Bytes `json:"coinID"`
 	AssetID uint32    `json:"assetID"`
 	CoinFmt string    `json:"coinFmt"`
+	TxType  string    `json:"txType"`
 }
 
 // ActionRequiredNote is structured like a WalletNote. The payload will be
 // an *asset.ActionRequiredNote. This is done for compatibility reasons.
 type ActionRequiredNote WalletNote
 
-func newRejectedRedemptionNote(assetID uint32, oid order.OrderID, coinID []byte) (*asset.ActionRequiredNote, *ActionRequiredNote) {
-	data := &RejectedRedemptionData{
+func newRejectedTxNote(assetID uint32, oid order.OrderID, coinID []byte, txType asset.ConfirmTxType) (*asset.ActionRequiredNote, *ActionRequiredNote) {
+	data := &RejectedTxData{
 		AssetID: assetID,
 		OrderID: oid[:],
 		CoinID:  coinID,
 		CoinFmt: coinIDString(assetID, coinID),
+		TxType:  txType.String(),
 	}
 	uniqueID := dex.Bytes(coinID).String()
-	actionNote := newActionRequiredNote(ActionIDRedeemRejected, uniqueID, data)
+	actionID := ActionIDRedeemRejected
+	topic := db.Topic(TopicRedeemRejected)
+	if txType == asset.CTRefund {
+		actionID = ActionIDRefundRejected
+		topic = TopicRefundRejected
+	}
+	actionNote := newActionRequiredNote(actionID, uniqueID, data)
 	coreNote := &ActionRequiredNote{
-		Notification: db.NewNotification(NoteTypeActionRequired, TopicRedeemRejected, "", "", db.Data),
+		Notification: db.NewNotification(NoteTypeActionRequired, topic, "", "", db.Data),
 		Payload:      actionNote,
 	}
 	return actionNote, coreNote
