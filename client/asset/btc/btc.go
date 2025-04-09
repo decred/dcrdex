@@ -919,6 +919,7 @@ var _ asset.Authenticator = (*ExchangeWalletFullNode)(nil)
 var _ asset.Authenticator = (*ExchangeWalletAccelerator)(nil)
 var _ asset.AddressReturner = (*baseWallet)(nil)
 var _ asset.WalletHistorian = (*ExchangeWalletSPV)(nil)
+var _ asset.NewAddresser = (*baseWallet)(nil)
 
 // RecoveryCfg is the information that is transferred from the old wallet
 // to the new one when the wallet is recovered.
@@ -4455,6 +4456,11 @@ func (btc *baseWallet) ReturnRedemptionAddress(addr string) {
 // NewAddresser interface.
 func (btc *baseWallet) NewAddress() (string, error) {
 	return btc.DepositAddress()
+}
+
+// AddressUsed checks if a wallet address has been used.
+func (btc *baseWallet) AddressUsed(addrStr string) (bool, error) {
+	return btc.node.AddressUsed(addrStr)
 }
 
 // Withdraw withdraws funds to the specified address. Fees are subtracted from

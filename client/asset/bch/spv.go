@@ -802,6 +802,18 @@ func (w *bchSPVWallet) RemovePeer(addr string) error {
 	return w.peerManager.RemovePeer(addr)
 }
 
+func (w *bchSPVWallet) TotalReceivedForAddr(btcAddr btcutil.Address, minConf int32) (btcutil.Amount, error) {
+	bchAddr, err := dexbch.BTCAddrToBCHAddr(btcAddr, w.btcParams)
+	if err != nil {
+		return 0, err
+	}
+	amt, err := w.Wallet.TotalReceivedForAddr(bchAddr, 0)
+	if err != nil {
+		return 0, err
+	}
+	return btcutil.Amount(amt), nil
+}
+
 // secretSource is used to locate keys and redemption scripts while signing a
 // transaction. secretSource satisfies the txauthor.SecretsSource interface.
 type secretSource struct {

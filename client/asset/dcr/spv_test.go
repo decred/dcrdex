@@ -430,6 +430,10 @@ func (w *tDcrWallet) RescanPoint(ctx context.Context) (*chainhash.Hash, error) {
 	return nil, nil
 }
 
+func (w *tDcrWallet) TotalReceivedForAddr(ctx context.Context, addr stdaddr.Address, minConf int32) (dcrutil.Amount, error) {
+	return 0, nil
+}
+
 func tNewSpvWallet() (*spvWallet, *tDcrWallet) {
 	dcrw := &tDcrWallet{
 		blockInfo:      make(map[int32]*wallet.BlockInfo),
