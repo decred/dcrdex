@@ -1870,7 +1870,12 @@ export class DepositAddress {
     const page = this.page = Doc.idDescendants(form)
     Doc.cleanTemplates(page.unifiedReceiverTmpl)
     Doc.bind(page.newDepAddrBttn, 'click', async () => { this.newDepositAddress() })
-    Doc.bind(page.copyAddressBtn, 'click', () => { this.copyAddress() })
+    // navigator.clipboard can only be accessed on localhost or over https.
+    if (window.isSecureContext) {
+      Doc.bind(page.copyAddressBtn, 'click', () => { this.copyAddress() })
+    } else {
+      Doc.hide(page.copyAddressBtn)
+    }
   }
 
   /* Display a deposit address. */
