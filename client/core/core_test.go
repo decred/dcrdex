@@ -914,6 +914,10 @@ func (w *TXCWallet) NewAddress() (string, error) {
 	return "", w.addrErr
 }
 
+func (w *TXCWallet) AddressUsed(addr string) (bool, error) {
+	return false, nil
+}
+
 func (w *TXCWallet) Unlock(pw []byte) error {
 	return w.unlockErr
 }

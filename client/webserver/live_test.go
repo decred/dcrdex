@@ -1657,6 +1657,10 @@ func (c *TCore) NewDepositAddress(assetID uint32) (string, error) {
 	return ordertest.RandomAddress(), nil
 }
 
+func (c *TCore) AddressUsed(assetID uint32, addr string) (bool, error) {
+	return rand.Float32() > 0.5, nil
+}
+
 func (c *TCore) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) error { return nil }
 
 func (c *TCore) User() *core.User {

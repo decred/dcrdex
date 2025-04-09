@@ -336,6 +336,7 @@ type zecWallet struct {
 var _ asset.FeeRater = (*zecWallet)(nil)
 var _ asset.Wallet = (*zecWallet)(nil)
 var _ asset.WalletHistorian = (*zecWallet)(nil)
+var _ asset.NewAddresser = (*zecWallet)(nil)
 
 // TODO: Implement LiveReconfigurer
 // var _ asset.LiveReconfigurer = (*zecWallet)(nil)
@@ -1678,6 +1679,13 @@ func (w *zecWallet) DepositAddress() (string, error) {
 
 func (w *zecWallet) NewAddress() (string, error) {
 	return w.DepositAddress()
+}
+
+// AddressUsed checks if a wallet address has been used.
+func (w *zecWallet) AddressUsed(addrStr string) (bool, error) {
+	// TODO: Resolve with new unified address encoding in https://github.com/decred/dcrdex/pull/2675
+	recv, err := getReceivedByAddress(w, addrStr)
+	return recv != 0, err
 }
 
 func (w *zecWallet) FindRedemption(ctx context.Context, coinID, contract dex.Bytes) (redemptionCoin, secret dex.Bytes, err error) {
