@@ -31,7 +31,7 @@ import (
 	_ "embed"
 	"unsafe"
 
-	"github.com/webview/webview"
+	webview "github.com/bisoncraft/webview_go"
 )
 
 //go:embed src/bisonw.png
