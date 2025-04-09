@@ -365,6 +365,10 @@ func (c *tBtcWallet) RemovePeer(string) error {
 	return nil
 }
 
+func (c *tBtcWallet) TotalReceivedForAddr(addr btcutil.Address, minConf int32) (btcutil.Amount, error) {
+	return 0, nil
+}
+
 type tNeutrinoClient struct {
 	*testData
 }

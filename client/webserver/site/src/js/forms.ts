@@ -28,7 +28,8 @@ import {
   Token,
   WalletCreationNote,
   CoreNote,
-  PrepaidBondID
+  PrepaidBondID,
+  WalletTransaction
 } from './registry'
 import { XYRangeHandler } from './opts'
 import { CoinExplorers } from './coinexplorers'
@@ -1864,6 +1865,7 @@ export class DepositAddress {
   form: PageElement
   page: Record<string, PageElement>
   assetID: number
+  addr: string
 
   constructor (form: PageElement) {
     this.form = form
@@ -1882,11 +1884,17 @@ export class DepositAddress {
   async setAsset (assetID: number) {
     this.assetID = assetID
     const page = this.page
-    Doc.hide(page.depositErr, page.depositTokenMsgBox)
+    Doc.hide(page.depositErr, page.depositTokenMsgBox, page.addrUsed)
     const asset = app().assets[assetID]
     page.depositLogo.src = Doc.logoPath(asset.symbol)
     const wallet = app().walletMap[assetID]
     page.depositName.textContent = asset.unitInfo.conventional.unit
+    const addr = this.addr = wallet.address
+    if ((wallet.traits & traitNewAddresser) !== 0) {
+      const res = await postJSON('/api/addressused', { assetID, addr })
+      const used = app().checkResponse(res) && res.used
+      Doc.setVis(used, page.addrUsed)
+    }
     if (asset.token) {
       const parentAsset = app().assets[asset.token.parentID]
       page.depositTokenParentLogo.src = Doc.logoPath(parentAsset.symbol)
@@ -1894,7 +1902,7 @@ export class DepositAddress {
       Doc.show(page.depositTokenMsgBox)
     }
     Doc.setVis((wallet.traits & traitNewAddresser) !== 0, page.newDepAddrBttnBox)
-    this.setAddress(wallet.address)
+    this.setAddress(addr)
   }
 
   setAddress (addr: string) {
@@ -1945,11 +1953,20 @@ export class DepositAddress {
     }
     app().walletMap[assetID].address = res.address
     this.setAddress(res.address)
+    Doc.hide(page.addrUsed)
+  }
+
+  handleTx (assetID: number, tx: WalletTransaction) {
+    if (assetID !== this.assetID) return
+    const wallet = app().walletMap[assetID]
+    if ((wallet.traits & traitNewAddresser) === 0) return
+    const { page, addr } = this
+    if (tx.amount > 0 && tx.recipient === addr) Doc.show(page.addrUsed)
   }
 
   async copyAddress () {
-    const page = this.page
-    navigator.clipboard.writeText(page.depositAddress.textContent || '')
+    const { page, addr } = this
+    navigator.clipboard.writeText(addr)
       .then(() => {
         Doc.show(page.copyAlert)
         setTimeout(() => {

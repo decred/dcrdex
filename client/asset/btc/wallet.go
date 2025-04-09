@@ -45,6 +45,7 @@ type Wallet interface {
 	reconfigure(walletCfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error)
 	fingerprint() (string, error)
 	listTransactionsSinceBlock(blockHeight int32) ([]*ListTransactionsResult, error)
+	AddressUsed(addr string) (bool, error)
 }
 
 type tipRedemptionWallet interface {
