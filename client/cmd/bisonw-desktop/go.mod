@@ -9,9 +9,9 @@ replace decred.org/dcrdex => ../../..
 require (
 	decred.org/dcrdex v0.6.3
 	fyne.io/systray v1.10.1-0.20230403195833-7dc3c09283d6
+	github.com/bisoncraft/webview_go v0.1.0
 	github.com/pkg/browser v0.0.0-20210911075715-681adbf594b8
 	github.com/progrium/macdriver v0.4.0
-	github.com/webview/webview v0.0.0-20230415172654-8387ff8945fc
 )
 
 require (

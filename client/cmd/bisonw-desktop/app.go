@@ -70,9 +70,9 @@ import (
 	"decred.org/dcrdex/client/webserver"
 	"decred.org/dcrdex/dex"
 	"fyne.io/systray"
+	webview "github.com/bisoncraft/webview_go"
 	"github.com/gen2brain/beeep"
 	"github.com/pkg/browser"
-	"github.com/webview/webview"
 )
 
 func mainCore() error {

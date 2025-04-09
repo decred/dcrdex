@@ -5,14 +5,14 @@ permissions:
 jobs:
   build-go:
     name: Go CI
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         go: ['1.22', '1.23']
     steps:
       - uses: awalsh128/cache-apt-pkgs-action@5902b33ae29014e6ca012c5d8025d4346556bd40 #v1.4.3
         with:
-          packages: git-restore-mtime libgtk-3-dev libwebkit2gtk-4.0-dev
+          packages: git-restore-mtime libgtk-3-dev libwebkit2gtk-4.1-dev
           version: 1.0
 
       - name: Set up Go
