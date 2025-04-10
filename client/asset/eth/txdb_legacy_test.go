@@ -30,14 +30,18 @@ func TestMigrateLegacyTxDB(t *testing.T) {
 	defer shutdown()
 
 	newTx := func(nonce uint64) *extendedWalletTx {
-		return eth.extendedTx(node.newTransaction(nonce, big.NewInt(1)), asset.Send, 1, nil)
+		return eth.extendedTx(&genTxResult{
+			tx:     node.newTransaction(nonce, big.NewInt(1)),
+			txType: asset.Send,
+			amt:    1,
+		})
 	}
 
 	wt1 := newTx(1)
 	wt1.Confirmed = true
 	wt2 := newTx(2)
 	wt3 := newTx(3)
-	wt3.TokenID = &usdcTokenID
+	wt3.TokenID = &usdcEthID
 
 	// Store in legacy db
 	txs := []*extendedWalletTx{wt1, wt2, wt3}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -64,6 +65,11 @@ const (
 	txHistoryRoute             = "txhistory"
 	walletTxRoute              = "wallettx"
 	withdrawBchSpvRoute        = "withdrawbchspv"
+	bridgeRoute                = "bridge"
+	checkBridgeApprovalRoute   = "checkbridgeapproval"
+	approveBridgeContractRoute = "approvebridgecontract"
+	pendingBridgesRoute        = "pendingbridges"
+	bridgeHistoryRoute         = "bridgehistory"
 )
 
 const (
@@ -141,6 +147,11 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	txHistoryRoute:             handleTxHistory,
 	walletTxRoute:              handleWalletTx,
 	withdrawBchSpvRoute:        handleWithdrawBchSpv,
+	bridgeRoute:                handleBridge,
+	checkBridgeApprovalRoute:   handleCheckBridgeApproval,
+	approveBridgeContractRoute: handleApproveBridge,
+	pendingBridgesRoute:        handlePendingBridges,
+	bridgeHistoryRoute:         handleBridgeHistory,
 }
 
 // handleHelp handles requests for help. Returns general help for all commands
@@ -1074,6 +1085,128 @@ func handleWithdrawBchSpv(s *RPCServer, params *RawParams) *msgjson.ResponsePayl
 	return createResponse(withdrawBchSpvRoute, dex.Bytes(txB).String(), nil)
 }
 
+func handleCheckBridgeApproval(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	if len(params.Args) != 1 {
+		return usage(checkBridgeApprovalRoute, fmt.Errorf("expected 1 args, got %d", len(params.Args)))
+	}
+
+	i, err := strconv.ParseUint(params.Args[0], 10, 32)
+	if err != nil {
+		return usage(checkBridgeApprovalRoute, fmt.Errorf("error parsing assetID: %v", err))
+	}
+
+	assetID := uint32(i)
+
+	approvalStatus, err := s.core.BridgeContractApprovalStatus(assetID)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCBridgeError, "unable to check bridge approval: %v", err)
+		return createResponse(checkBridgeApprovalRoute, nil, resErr)
+	}
+
+	return createResponse(checkBridgeApprovalRoute, approvalStatus.String(), nil)
+}
+
+func handleApproveBridge(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	if len(params.Args) != 2 {
+		return usage(approveBridgeContractRoute, fmt.Errorf("expected 2 args, got %d", len(params.Args)))
+	}
+
+	i, err := strconv.ParseUint(params.Args[0], 10, 32)
+	if err != nil {
+		return usage(approveBridgeContractRoute, fmt.Errorf("error parsing assetID: %v", err))
+	}
+
+	assetID := uint32(i)
+
+	approve, err := strconv.ParseBool(params.Args[1])
+	if err != nil {
+		return usage(approveBridgeContractRoute, fmt.Errorf("error parsing approve: %v", err))
+	}
+
+	var txID string
+	if approve {
+		txID, err = s.core.ApproveBridgeContract(assetID)
+	} else {
+		txID, err = s.core.UnapproveBridgeContract(assetID)
+	}
+
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCBridgeError, "unable to approve bridge contract: %v", err)
+		return createResponse(approveBridgeContractRoute, nil, resErr)
+	}
+
+	return createResponse(approveBridgeContractRoute, txID, nil)
+}
+
+func handleBridge(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	if len(params.Args) != 3 {
+		return usage(bridgeRoute, fmt.Errorf("expected 3 args, got %d", len(params.Args)))
+	}
+
+	fromAssetID, err := strconv.ParseUint(params.Args[0], 10, 32)
+	if err != nil {
+		return usage(bridgeRoute, fmt.Errorf("error parsing fromAssetID: %v", err))
+	}
+
+	toAssetID, err := strconv.ParseUint(params.Args[1], 10, 32)
+	if err != nil {
+		return usage(bridgeRoute, fmt.Errorf("error parsing toAssetID: %v", err))
+	}
+
+	value, err := strconv.ParseFloat(params.Args[2], 64)
+	if err != nil {
+		return usage(bridgeRoute, fmt.Errorf("error parsing value: %v", err))
+	}
+
+	unitInfo, err := asset.UnitInfo(uint32(fromAssetID))
+	if err != nil {
+		return usage(bridgeRoute, fmt.Errorf("error getting unit info: %v", err))
+	}
+	atomValue := uint64(value * float64(unitInfo.Conventional.ConversionFactor))
+
+	txID, err := s.core.Bridge(uint32(fromAssetID), uint32(toAssetID), atomValue)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCBridgeError, "unable to initiate bridge: %v", err)
+		return createResponse(bridgeRoute, nil, resErr)
+	}
+
+	return createResponse(bridgeRoute, txID, nil)
+}
+
+func handlePendingBridges(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	if len(params.Args) != 1 {
+		return usage(pendingBridgesRoute, fmt.Errorf("expected 1 arg, got %d", len(params.Args)))
+	}
+
+	assetID, err := strconv.ParseUint(params.Args[0], 10, 32)
+	if err != nil {
+		return usage(pendingBridgesRoute, fmt.Errorf("error parsing assetID: %v", err))
+	}
+
+	bridges, err := s.core.PendingBridges(uint32(assetID))
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCBridgeError, "unable to get pending bridges: %v", err)
+		return createResponse(pendingBridgesRoute, nil, resErr)
+	}
+
+	return createResponse(pendingBridgesRoute, bridges, nil)
+}
+
+func handleBridgeHistory(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	form, err := parseTxHistoryArgs(params)
+	if err != nil {
+		return usage(bridgeHistoryRoute, err)
+	}
+
+	bridges, err := s.core.BridgeHistory(form.assetID, form.num, form.refID, form.past)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCBridgeError, "unable to get bridge history: %v", err)
+		return createResponse(bridgeHistoryRoute, nil, resErr)
+	}
+
+	return createResponse(bridgeHistoryRoute, bridges, nil)
+}
+
 // format concatenates thing and tail. If thing is empty, returns an empty
 // string.
 func format(thing, tail string) string {
@@ -1843,5 +1976,43 @@ an spv wallet and enables options to view and set the vsp.
 		cmdSummary:  `Get a transaction that will withdraw all funds from the deprecated Bitcoin Cash SPV wallet`,
 		argsLong: `Args:
 		  recipient (string): The Bitcoin Cash address to withdraw the funds to`,
+	},
+	bridgeRoute: {
+		argsShort:  `fromAssetID toAssetID value`,
+		cmdSummary: "Bridge tokens from one chain to another",
+		argsLong: `Args:
+		fromAssetID (int): The asset's BIP-44 registered coin index on the "from" chain.
+		toAssetID (int): The asset's BIP-44 registered coin index on the "to" chain.
+		value (int): The amount of tokens to bridge.`,
+	},
+	checkBridgeApprovalRoute: {
+		argsShort:  `assetID`,
+		cmdSummary: "Check if the bridge contract is approved.",
+		argsLong: `Args:
+		assetID (int): The BIP-44 registered coin index of the asset from where the bridge will be initiated.`,
+	},
+	approveBridgeContractRoute: {
+		argsShort:  `assetID approve`,
+		cmdSummary: "Approve the bridge contract.",
+		argsLong: `Args:
+		assetID (int): The asset's BIP-44 registered coin index on the "from" chain.
+		approve (bool): True to approve, false to unapprove.`,
+	},
+	pendingBridgesRoute: {
+		argsShort:  `assetID`,
+		cmdSummary: "Get pending bridges.",
+		argsLong: `Args:
+		assetID (int): The asset's BIP-44 registered coin index on the "from" chain.`,
+	},
+	bridgeHistoryRoute: {
+		argsShort:  `assetID (n) (refTxID) (past)`,
+		cmdSummary: "Get bridge history.",
+		argsLong: `Args:
+		assetID (int): The asset's BIP-44 registered coin index on the "from" chain.
+		n (int): The number of transactions to return. If <= 0 or unset, all transactions are returned.
+		refTxID (string): If set, the transactions before or after this tx (depending on the past argument)
+		will be returned.
+		past (bool): If true, the transactions before the reference tx will be returned. If false, the
+		transactions after the reference tx will be returned.`,
 	},
 }

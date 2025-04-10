@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"reflect"
 	"testing"
+	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
@@ -35,12 +36,16 @@ func TestTxDB(t *testing.T) {
 	}
 
 	newTx := func(nonce uint64) *extendedWalletTx {
-		return eth.extendedTx(node.newTransaction(nonce, big.NewInt(1)), asset.Send, 1, nil)
+		return eth.extendedTx(&genTxResult{
+			tx:     node.newTransaction(nonce, big.NewInt(1)),
+			txType: asset.Send,
+			amt:    1,
+		})
 	}
 
 	wt1 := newTx(1)
 	wt1.Confirmed = true
-	wt1.TokenID = &usdcTokenID
+	wt1.TokenID = &usdcEthID
 	wt2 := newTx(2)
 	wt3 := newTx(3)
 	wt4 := newTx(4)
@@ -167,7 +172,7 @@ func TestTxDB(t *testing.T) {
 		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
 	}
 
-	txs, err = txHistoryStore.getTxs(0, nil, false, &usdcTokenID)
+	txs, err = txHistoryStore.getTxs(0, nil, false, &usdcEthID)
 	if err != nil {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
@@ -190,7 +195,11 @@ func TestTxDBReplaceNonce(t *testing.T) {
 	}
 
 	newTx := func(nonce uint64) *extendedWalletTx {
-		return eth.extendedTx(node.newTransaction(nonce, big.NewInt(1)), asset.Send, 1, nil)
+		return eth.extendedTx(&genTxResult{
+			tx:     node.newTransaction(nonce, big.NewInt(1)),
+			txType: asset.Send,
+			amt:    1,
+		})
 	}
 
 	wt1 := newTx(1)
@@ -242,4 +251,235 @@ func TestTxDB_getUnknownTx(t *testing.T) {
 	if tx != nil {
 		t.Fatalf("expected nil tx but got %+v", tx)
 	}
+}
+
+func TestTxDB_GetBridges(t *testing.T) {
+	tempDir := t.TempDir()
+	db, err := NewTxDB(tempDir, tLogger, BipID)
+	if err != nil {
+		t.Fatalf("error creating txDB: %v", err)
+	}
+	defer db.Close()
+
+	txs := []*extendedWalletTx{
+		// Completed bridge, block 100
+		{
+			WalletTransaction: &asset.WalletTransaction{
+				ID:   "0x1111111111111111111111111111111111111111111111111111111111111111",
+				Type: asset.InitiateBridge,
+				BridgeCounterpartTx: &asset.BridgeCounterpartTx{
+					CompletionTime: 100,
+				},
+			},
+			Nonce:          big.NewInt(1),
+			SubmissionTime: uint64(time.Now().Add(-24 * time.Hour).Unix()),
+		},
+		// Completed bridge, block 99
+		{
+			WalletTransaction: &asset.WalletTransaction{
+				ID:   "0x2222222222222222222222222222222222222222222222222222222222222222",
+				Type: asset.InitiateBridge,
+				BridgeCounterpartTx: &asset.BridgeCounterpartTx{
+					CompletionTime: 99,
+				},
+			},
+			Nonce:          big.NewInt(2),
+			SubmissionTime: uint64(time.Now().Add(-20 * time.Hour).Unix()),
+		},
+		// Pending bridge
+		{
+			WalletTransaction: &asset.WalletTransaction{
+				ID:                  "0x3333333333333333333333333333333333333333333333333333333333333333",
+				Type:                asset.InitiateBridge,
+				BridgeCounterpartTx: nil,
+			},
+			Nonce:          big.NewInt(3),
+			SubmissionTime: uint64(time.Now().Add(-18 * time.Hour).Unix()),
+		},
+		// Non-bridge transaction
+		{
+			WalletTransaction: &asset.WalletTransaction{
+				ID:   "0x4444444444444444444444444444444444444444444444444444444444444444",
+				Type: asset.Send,
+			},
+			Nonce:          big.NewInt(5),
+			SubmissionTime: uint64(time.Now().Add(-10 * time.Hour).Unix()),
+		},
+	}
+
+	// Store all transactions
+	for _, tx := range txs {
+		if err := db.storeTx(tx); err != nil {
+			t.Fatalf("error storing tx: %v", err)
+		}
+	}
+
+	t.Run("getBridges all", func(t *testing.T) {
+		result, err := db.getBridges(0, nil, false)
+		if err != nil {
+			t.Fatalf("getBridges failed: %v", err)
+		}
+		if len(result) != 3 {
+			t.Fatalf("expected 3 bridge initiations, got %d", len(result))
+		}
+		if result[0].ID != txs[2].ID || result[1].ID != txs[0].ID ||
+			result[2].ID != txs[1].ID {
+			t.Fatalf("getBridges returned incorrect order of transactions")
+		}
+	})
+
+	t.Run("getBridges limited", func(t *testing.T) {
+		result, err := db.getBridges(2, nil, false)
+		if err != nil {
+			t.Fatalf("getBridges failed: %v", err)
+		}
+		if len(result) != 2 {
+			t.Fatalf("expected 2 bridge initiations, got %d", len(result))
+		}
+
+		if result[0].ID != txs[2].ID || result[1].ID != txs[0].ID {
+			t.Fatalf("getBridges returned incorrect transactions")
+		}
+	})
+
+	t.Run("getBridges with refID and past=false", func(t *testing.T) {
+		refID := common.HexToHash(txs[0].ID)
+		result, err := db.getBridges(2, &refID, false)
+		if err != nil {
+			t.Fatalf("getBridges failed: %v", err)
+		}
+		if len(result) != 2 {
+			t.Fatalf("expected 2 bridge initiations, got %d", len(result))
+		}
+
+		if result[0].ID != txs[0].ID || result[1].ID != txs[2].ID {
+			t.Fatalf("getBridges returned incorrect transactions")
+		}
+	})
+
+	t.Run("getBridges with refID and past=true", func(t *testing.T) {
+		refID := common.HexToHash(txs[0].ID)
+		result, err := db.getBridges(2, &refID, true)
+		if err != nil {
+			t.Fatalf("getBridges failed: %v", err)
+		}
+		if len(result) != 2 {
+			t.Fatalf("expected 2 bridge transactions, got %d", len(result))
+		}
+
+		if result[0].ID != txs[0].ID || result[1].ID != txs[1].ID {
+			t.Fatalf("getBridges returned incorrect transactions")
+		}
+	})
+
+	t.Run("getBridges with invalid refID", func(t *testing.T) {
+		invalidID := common.HexToHash("0xdeadbeef")
+		_, err := db.getBridges(2, &invalidID, false)
+		if err == nil || err != asset.CoinNotFoundError {
+			t.Fatalf("expected CoinNotFoundError, got %v", err)
+		}
+	})
+
+	t.Run("getBridges with non-bridge refID", func(t *testing.T) {
+		nonBridgeID := common.HexToHash(txs[3].ID)
+		_, err := db.getBridges(2, &nonBridgeID, false)
+		if err == nil {
+			t.Fatalf("expected error for non-bridge refID, got nil")
+		}
+	})
+
+	t.Run("getPendingBridges", func(t *testing.T) {
+		result, err := db.getPendingBridges()
+		if err != nil {
+			t.Fatalf("getPendingBridges failed: %v", err)
+		}
+		if len(result) != 1 {
+			t.Fatalf("expected 2 pending bridge transactions, got %d", len(result))
+		}
+		if result[0].ID != txs[2].ID {
+			t.Fatalf("expected pending bridge %s but got %s", txs[2].ID, result[0].ID)
+		}
+	})
+}
+
+func TestTxDB_GetBridgeMint(t *testing.T) {
+	tempDir := t.TempDir()
+	db, err := NewTxDB(tempDir, tLogger, BipID)
+	if err != nil {
+		t.Fatalf("error creating txDB: %v", err)
+	}
+	defer db.Close()
+
+	burnTxID := "0x1111111111111111111111111111111111111111111111111111111111111111"
+
+	// Create a mint transaction that references the burn transaction
+	mintTx := &extendedWalletTx{
+		WalletTransaction: &asset.WalletTransaction{
+			ID:   "0x2222222222222222222222222222222222222222222222222222222222222222",
+			Type: asset.CompleteBridge,
+			BridgeCounterpartTx: &asset.BridgeCounterpartTx{
+				ID: burnTxID,
+			},
+		},
+		Nonce:          big.NewInt(2),
+		SubmissionTime: uint64(time.Now().Add(-20 * time.Hour).Unix()),
+	}
+
+	// Create another mint transaction that references a different burn ID
+	anotherMintTx := &extendedWalletTx{
+		WalletTransaction: &asset.WalletTransaction{
+			ID:   "0x3333333333333333333333333333333333333333333333333333333333333333",
+			Type: asset.CompleteBridge,
+			BridgeCounterpartTx: &asset.BridgeCounterpartTx{
+				ID: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			},
+		},
+		Nonce:          big.NewInt(3),
+		SubmissionTime: uint64(time.Now().Add(-18 * time.Hour).Unix()),
+	}
+
+	// Create a regular transaction (non-bridge)
+	regularTx := &extendedWalletTx{
+		WalletTransaction: &asset.WalletTransaction{
+			ID:   "0x4444444444444444444444444444444444444444444444444444444444444444",
+			Type: asset.Send,
+		},
+		Nonce:          big.NewInt(4),
+		SubmissionTime: uint64(time.Now().Add(-16 * time.Hour).Unix()),
+	}
+
+	// Store all transactions
+	if err := db.storeTx(mintTx); err != nil {
+		t.Fatalf("error storing mint tx: %v", err)
+	}
+	if err := db.storeTx(anotherMintTx); err != nil {
+		t.Fatalf("error storing another mint tx: %v", err)
+	}
+	if err := db.storeTx(regularTx); err != nil {
+		t.Fatalf("error storing regular tx: %v", err)
+	}
+
+	t.Run("get completion transaction with valid burn ID", func(t *testing.T) {
+		result, err := db.getBridgeCompletion(burnTxID)
+		if err != nil {
+			t.Fatalf("getBridgeCompletion failed: %v", err)
+		}
+		if result == nil {
+			t.Fatalf("expected mint transaction, got nil")
+		}
+		if result.ID != mintTx.ID {
+			t.Fatalf("expected mint tx %s, got %s", mintTx.ID, result.ID)
+		}
+	})
+
+	t.Run("get completion transaction with unknown burn ID", func(t *testing.T) {
+		unknownID := "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+		result, err := db.getBridgeCompletion(unknownID)
+		if err != nil {
+			t.Fatalf("getBridgeCompletion should return nil, not error for unknown ID: %v", err)
+		}
+		if result != nil {
+			t.Fatalf("expected nil result for unknown burn ID, got %+v", result)
+		}
+	})
 }
