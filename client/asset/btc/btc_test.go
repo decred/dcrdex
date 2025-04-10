@@ -80,34 +80,6 @@ func randBytes(l int) []byte {
 	return b
 }
 
-func signFuncRaw(t *testing.T, params []json.RawMessage, sizeTweak int, sigComplete, segwit bool) (json.RawMessage, error) {
-	signTxRes := SignTxResult{
-		Complete: sigComplete,
-	}
-	var msgHex string
-	err := json.Unmarshal(params[0], &msgHex)
-	if err != nil {
-		t.Fatalf("error unmarshaling transaction hex: %v", err)
-	}
-	msgBytes, _ := hex.DecodeString(msgHex)
-	txReader := bytes.NewReader(msgBytes)
-	msgTx := wire.NewMsgTx(wire.TxVersion)
-	err = msgTx.Deserialize(txReader)
-	if err != nil {
-		t.Fatalf("error deserializing contract: %v", err)
-	}
-
-	signFunc(msgTx, sizeTweak, segwit)
-
-	buf := new(bytes.Buffer)
-	err = msgTx.Serialize(buf)
-	if err != nil {
-		t.Fatalf("error serializing contract: %v", err)
-	}
-	signTxRes.Hex = buf.Bytes()
-	return mustMarshal(signTxRes), nil
-}
-
 func signFunc(tx *wire.MsgTx, sizeTweak int, segwit bool) {
 	// Set the sigScripts to random bytes of the correct length for spending a
 	// p2pkh output.
@@ -551,12 +523,6 @@ func (c *testData) addRawTx(blockHeight int64, tx *wire.MsgTx) (*chainhash.Hash,
 	// map key is technically always wrong.
 	block.msgBlock.AddTransaction(tx)
 	return blockHash, block.msgBlock
-}
-
-func (c *testData) addDBBlockForTx(txHash, blockHash *chainhash.Hash) {
-	c.blockchainMtx.Lock()
-	defer c.blockchainMtx.Unlock()
-	c.dbBlockForTx[*txHash] = &hashEntry{hash: *blockHash}
 }
 
 func (c *testData) getBlockAtHeight(blockHeight int64) (*chainhash.Hash, *msgBlockWithHeight) {
@@ -3752,7 +3718,6 @@ func testLockUnlock(t *testing.T, segwit bool, walletType string) {
 			t.Fatalf("no error for walletlock rpc error")
 		}
 	}
-
 }
 
 type tSenderType byte
