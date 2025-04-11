@@ -9,7 +9,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/utils"
-	dcrwalletjson "decred.org/dcrwallet/v4/rpc/jsonrpc/types"
+	dcrwalletjson "decred.org/dcrwallet/v5/rpc/jsonrpc/types"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
