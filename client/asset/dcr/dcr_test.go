@@ -27,8 +27,8 @@ import (
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
-	"decred.org/dcrwallet/v4/rpc/client/dcrwallet"
-	walletjson "decred.org/dcrwallet/v4/rpc/jsonrpc/types"
+	"decred.org/dcrwallet/v5/rpc/client/dcrwallet"
+	walletjson "decred.org/dcrwallet/v5/rpc/jsonrpc/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec"
@@ -540,7 +540,7 @@ func (c *tRPCClient) GetStakeInfo(ctx context.Context) (*walletjson.GetStakeInfo
 }
 
 func (c *tRPCClient) PurchaseTicket(ctx context.Context, fromAccount string, spendLimit dcrutil.Amount, minConf *int,
-	ticketAddress stdaddr.Address, numTickets *int, poolAddress stdaddr.Address, poolFees *dcrutil.Amount,
+	numTickets *int,
 	expiry *int, ticketChange *bool, ticketFee *dcrutil.Amount) (tix []*chainhash.Hash, _ error) {
 
 	if c.purchaseTicketsErr != nil {

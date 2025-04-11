@@ -1,6 +1,6 @@
 module decred.org/dcrdex/client/cmd/bisonw-desktop
 
-go 1.22
+go 1.23
 
 toolchain go1.23.2
 
@@ -25,7 +25,7 @@ require (
 	github.com/dcrlabs/ltcwallet v0.0.0-20240823165752-3e026e8da010 // indirect
 	github.com/decred/dcrd/container/lru v1.0.0 // indirect
 	github.com/decred/dcrd/crypto/rand v1.0.1 // indirect
-	github.com/decred/dcrd/mixing v0.5.0 // indirect
+	github.com/decred/dcrd/mixing v0.5.1-0.20250319155359-2b7d311f4a81 // indirect
 	github.com/decred/vspd/client/v4 v4.0.1 // indirect
 	github.com/decred/vspd/types/v3 v3.0.0 // indirect
 	github.com/ethereum/c-kzg-4844 v1.0.0 // indirect
@@ -42,8 +42,8 @@ require (
 	github.com/prometheus/common v0.39.0 // indirect
 	github.com/prometheus/procfs v0.9.0 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
-	github.com/stretchr/testify v1.9.0 // indirect
-	github.com/supranational/blst v0.3.11 // indirect
+	github.com/stretchr/testify v1.10.0 // indirect
+	github.com/supranational/blst v0.3.13 // indirect
 	github.com/tadvi/systray v0.0.0-20190226123456-11a2b8fa57af // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect
@@ -51,7 +51,7 @@ require (
 
 require (
 	decred.org/cspp/v2 v2.4.0 // indirect
-	decred.org/dcrwallet/v4 v4.3.1 // indirect
+	decred.org/dcrwallet/v5 v5.0.0-20250407130412-4f0acd20d74c // indirect
 	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 // indirect
 	github.com/DataDog/zstd v1.5.2 // indirect
 	github.com/StackExchange/wmi v1.2.1 // indirect
@@ -114,7 +114,7 @@ require (
 	github.com/decred/slog v1.2.0 // indirect
 	github.com/decred/vspd/types/v2 v2.1.0 // indirect
 	github.com/dgraph-io/badger v1.6.2 // indirect
-	github.com/dgraph-io/ristretto v0.0.2 // indirect
+	github.com/dgraph-io/ristretto v0.0.3-0.20200630154024-f66de99634de // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ethereum/go-ethereum v1.14.8 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
@@ -130,7 +130,7 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/golang/snappy v0.0.5-0.20220116011046-fa5810519dcb // indirect
-	github.com/google/uuid v1.3.1 // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.1 // indirect
 	github.com/holiman/bloomfilter/v2 v2.0.3 // indirect
 	github.com/holiman/uint256 v1.3.1 // indirect
@@ -165,7 +165,6 @@ require (
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
 	github.com/olekukonko/tablewriter v0.0.5 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/progrium/darwinkit v0.5.0
 	github.com/rivo/uniseg v0.2.0 // indirect
 	github.com/rogpeppe/go-internal v1.12.0 // indirect
 	github.com/shirou/gopsutil v3.21.4-0.20210419000835-c7a38de76ee5+incompatible // indirect
@@ -179,13 +178,13 @@ require (
 	go.etcd.io/bbolt v1.3.11 // indirect
 	golang.org/x/crypto v0.33.0 // indirect
 	golang.org/x/exp v0.0.0-20231110203233-9a3e6036ecaa // indirect
-	golang.org/x/net v0.28.0 // indirect
+	golang.org/x/net v0.34.0 // indirect
 	golang.org/x/sync v0.11.0 // indirect
 	golang.org/x/sys v0.30.0 // indirect
 	golang.org/x/term v0.29.0 // indirect
 	golang.org/x/text v0.22.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
-	google.golang.org/protobuf v1.34.2 // indirect
+	google.golang.org/protobuf v1.36.5 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	lukechampine.com/blake3 v1.3.0 // indirect
 )
