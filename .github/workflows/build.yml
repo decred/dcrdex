@@ -39,8 +39,6 @@ jobs:
           restore-keys: go-test-${{ matrix.go }}
 
       - name: Test
-        env:
-          GO111MODULE: "on"
         run: |
           mkdir -p client/webserver/site/dist
           touch -t 2306151245 client/webserver/site/dist/placeholder
