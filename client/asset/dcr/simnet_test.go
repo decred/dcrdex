@@ -33,7 +33,7 @@ import (
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
-	"decred.org/dcrwallet/v4/wallet"
+	"decred.org/dcrwallet/v5/wallet"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"

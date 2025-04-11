@@ -118,7 +118,6 @@ type BTCWallet interface {
 	AddPeer(string) error
 	RemovePeer(string) error
 	GetTransactions(startHeight, endHeight int32, accountName string, cancel <-chan struct{}) (*wallet.GetTransactionsResult, error)
-	ListSinceBlock(start, end, syncHeight int32) ([]btcjson.ListTransactionsResult, error)
 	TotalReceivedForAddr(addr btcutil.Address, minConf int32) (btcutil.Amount, error)
 }
 

@@ -19,9 +19,9 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrwallet/v4/rpc/client/dcrwallet"
-	walletjson "decred.org/dcrwallet/v4/rpc/jsonrpc/types"
-	"decred.org/dcrwallet/v4/wallet"
+	"decred.org/dcrwallet/v5/rpc/client/dcrwallet"
+	walletjson "decred.org/dcrwallet/v5/rpc/jsonrpc/types"
+	"decred.org/dcrwallet/v5/wallet"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -149,7 +149,7 @@ type rpcClient interface {
 	ValidateAddress(ctx context.Context, address stdaddr.Address) (*walletjson.ValidateAddressWalletResult, error)
 	GetStakeInfo(ctx context.Context) (*walletjson.GetStakeInfoResult, error)
 	PurchaseTicket(ctx context.Context, fromAccount string, spendLimit dcrutil.Amount, minConf *int,
-		ticketAddress stdaddr.Address, numTickets *int, poolAddress stdaddr.Address, poolFees *dcrutil.Amount,
+		numTickets *int,
 		expiry *int, ticketChange *bool, ticketFee *dcrutil.Amount) ([]*chainhash.Hash, error)
 	GetTickets(ctx context.Context, includeImmature bool) ([]*chainhash.Hash, error)
 	GetVoteChoices(ctx context.Context) (*walletjson.GetVoteChoicesResult, error)
@@ -1027,10 +1027,7 @@ func (w *rpcWallet) PurchaseTickets(ctx context.Context, n int, _, _ string, _ b
 		"default",
 		0,   // spendLimit
 		nil, // minConf
-		nil, // ticketAddress
 		&n,  // numTickets
-		nil, // poolAddress
-		nil, // poolFees
 		nil, // expiry
 		nil, // ticketChange
 		nil, // ticketFee

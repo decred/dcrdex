@@ -10,7 +10,7 @@ import (
 	"time"
 
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
-	walletjson "decred.org/dcrwallet/v4/rpc/jsonrpc/types"
+	walletjson "decred.org/dcrwallet/v5/rpc/jsonrpc/types"
 )
 
 func Test_leastOverFund(t *testing.T) {

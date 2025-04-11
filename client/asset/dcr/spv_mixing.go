@@ -3,7 +3,7 @@ package dcr
 import (
 	"context"
 
-	"decred.org/dcrwallet/v4/wallet/udb"
+	"decred.org/dcrwallet/v5/wallet/udb"
 	"github.com/decred/dcrd/dcrutil/v4"
 )
 
