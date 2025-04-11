@@ -22,7 +22,7 @@ const (
 	ErrAuth
 	ErrSig
 	ErrNoConfig
-	ErrBannned
+	ErrBanned
 	ErrFailedRelay
 	ErrUnknownSender
 )

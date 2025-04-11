@@ -123,8 +123,6 @@ func TestWSLink_handleMessageRecover(t *testing.T) {
 	wsLink.handleMessage(msg)
 
 	wsLink.handler = func(msg *msgjson.Message) *msgjson.Error {
-		var v []int
-		_ = v[0]
 		return nil
 	}
 
