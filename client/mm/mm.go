@@ -1322,7 +1322,7 @@ func (m *MarketMaker) updateCEXOrderEvent(mkt *MarketWithHost, event *MarketMaki
 		return nil, fmt.Errorf("error fetching trade status: %v", err)
 	}
 
-	return cexOrderEvent(trade, event.ID, event.TimeStamp), nil
+	return cexOrderEvent(trade, event.ID, event.TimeStamp, m.log), nil
 }
 
 func (m *MarketMaker) updateDepositEvent(event *MarketMakingEvent, cexName string) (*MarketMakingEvent, error) {

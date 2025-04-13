@@ -741,12 +741,12 @@ func (u *unifiedExchangeAdaptor) updateDEXOrderEvent(o *pendingDEXOrder, complet
 	u.notifyEvent(e)
 }
 
-func cexOrderEvent(trade *libxc.Trade, eventID uint64, timestamp int64) *MarketMakingEvent {
+func cexOrderEvent(trade *libxc.Trade, eventID uint64, timestamp int64, log dex.Logger) *MarketMakingEvent {
 	return &MarketMakingEvent{
 		ID:             eventID,
 		TimeStamp:      timestamp,
 		Pending:        !trade.Complete,
-		BalanceEffects: cexTradeBalanceEffects(trade),
+		BalanceEffects: cexTradeBalanceEffects(trade, log),
 		CEXOrderEvent: &CEXOrderEvent{
 			ID:          trade.ID,
 			Rate:        trade.Rate,
@@ -761,7 +761,7 @@ func cexOrderEvent(trade *libxc.Trade, eventID uint64, timestamp int64) *MarketM
 // updateCEXOrderEvent updates the event log with the current state of a
 // pending CEX order and sends an event notification.
 func (u *unifiedExchangeAdaptor) updateCEXOrderEvent(trade *libxc.Trade, eventID uint64, timestamp int64) {
-	event := cexOrderEvent(trade, eventID, timestamp)
+	event := cexOrderEvent(trade, eventID, timestamp, u.log)
 	u.eventLogDB.storeEvent(u.startTime.Load(), u.mwh, event, u.balanceState())
 	u.notifyEvent(event)
 }
@@ -1535,7 +1535,7 @@ func (u *unifiedExchangeAdaptor) refreshAllPendingEvents(ctx context.Context) {
 // incompleteCexTradeBalanceEffects returns the balance effects of an
 // incomplete CEX trade. As soon as a CEX trade is complete, it is removed
 // from the pending map, so completed trades do not need to be calculated.
-func cexTradeBalanceEffects(trade *libxc.Trade) (effects *BalanceEffects) {
+func cexTradeBalanceEffects(trade *libxc.Trade, log dex.Logger) (effects *BalanceEffects) {
 	effects = newBalanceEffects()
 
 	if trade.Complete {
@@ -1551,6 +1551,10 @@ func cexTradeBalanceEffects(trade *libxc.Trade) (effects *BalanceEffects) {
 
 	if trade.Sell {
 		effects.Settled[trade.BaseID] = -int64(trade.Qty)
+		if trade.BaseFilled > trade.Qty {
+			log.Errorf("cexTradeBalanceEffects: CEX trade %s has more base filled than qty. "+
+				"qty: %d, baseFilled: %d", trade.ID, trade.Qty, trade.BaseFilled)
+		}
 		effects.Locked[trade.BaseID] = utils.SafeSub(trade.Qty, trade.BaseFilled)
 		effects.Settled[trade.QuoteID] = int64(trade.QuoteFilled)
 	} else {
@@ -1585,7 +1589,7 @@ func (u *unifiedExchangeAdaptor) cexBalance(assetID uint32) *BotBalance {
 		trade := pendingOrder.trade
 		pendingOrder.tradeMtx.RUnlock()
 
-		addEffects(cexTradeBalanceEffects(trade))
+		addEffects(cexTradeBalanceEffects(trade, u.log))
 	}
 
 	for _, withdrawal := range u.pendingWithdrawals {
@@ -2149,7 +2153,7 @@ func (u *unifiedExchangeAdaptor) handleCEXTradeUpdate(trade *libxc.Trade) {
 
 	diffs := make(map[uint32]int64)
 
-	balanceEffects := cexTradeBalanceEffects(trade)
+	balanceEffects := cexTradeBalanceEffects(trade, u.log)
 	for assetID, v := range balanceEffects.Settled {
 		u.baseCexBalances[assetID] += v
 		diffs[assetID] = v

@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"io"
 	"math"
 	"math/big"
 	"net/http"
@@ -30,6 +29,7 @@ import (
 	"decred.org/dcrdex/client/mm/libxc/cbtypes"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
+	"decred.org/dcrdex/dex/dexnet"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/utils"
 
@@ -1308,33 +1308,13 @@ func (c *coinbase) request(ctx context.Context, method, endpoint string, queryPa
 	}
 	defer resp.Body.Close()
 
-	if !isSuccessfulStatusCode(resp) {
-		b, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return fmt.Errorf("error reading response body: %v", err)
+	var errCode int
+	var errResp json.RawMessage
+	if err := dexnet.Do(req, &res, dexnet.WithStatusFunc(func(code int) { errCode = code }), dexnet.WithErrorParsing(&errResp)); err != nil {
+		if errCode == http.StatusUnauthorized {
+			return fmt.Errorf("authentication failure")
 		}
-		if len(b) < 14 && strings.TrimSpace(string(b)) == "Unauthorized" {
-			return fmt.Errorf("unauthorized")
-		}
-		var e cbErrorResp
-		if err := json.Unmarshal(b, &e); err != nil {
-			return fmt.Errorf("error unmarshaling error response: %s", string(b))
-		}
-		if len(e.Errors) > 0 {
-			return fmt.Errorf("error response (%d): %s", resp.StatusCode, e.Errors[0].Message)
-		}
-		return fmt.Errorf("error response (%d): %s", resp.StatusCode, string(b))
-	}
-
-	if res != nil {
-		b, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return fmt.Errorf("error reading response body: %v", err)
-		}
-
-		if err := json.Unmarshal(b, res); err != nil {
-			return fmt.Errorf("error unmarshaling response: %v", err)
-		}
+		return fmt.Errorf("error response (%d): %s", errCode, string(errResp))
 	}
 
 	return nil
@@ -1642,14 +1622,6 @@ func (c *coinbase) updateMarkets(ctx context.Context) (map[string]*Market, error
 	c.marketSnapshot.m = markets
 	c.marketSnapshot.stamp = time.Now()
 	return markets, nil
-}
-
-func toAtomicFromString(v string, ui *dex.UnitInfo) uint64 {
-	f, err := strconv.ParseFloat(v, 64)
-	if err != nil {
-		return 0
-	}
-	return toAtomic(f, ui)
 }
 
 func toAtomic(v float64, ui *dex.UnitInfo) uint64 {
