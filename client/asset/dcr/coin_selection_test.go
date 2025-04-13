@@ -5,6 +5,7 @@ package dcr
 import (
 	"math/rand"
 	"reflect"
+	"slices"
 	"sort"
 	"testing"
 	"time"
@@ -228,18 +229,6 @@ func Test_utxoSetDiff(t *testing.T) {
 		return out
 	}
 
-	checkPtrs := func(a, b []*compositeUTXO) bool {
-		if len(a) != len(b) {
-			return false
-		}
-		for i := range a {
-			if a[i] != b[i] {
-				return false
-			}
-		}
-		return true
-	}
-
 	tests := []struct {
 		name string
 		set  []*compositeUTXO
@@ -296,7 +285,7 @@ func Test_utxoSetDiff(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := utxoSetDiff(tt.set, tt.sub)
-			if !checkPtrs(got, tt.want) {
+			if !slices.Equal(got, tt.want) {
 				t.Errorf("utxoSetDiff() = %v, want %v", got, tt.want)
 			}
 		})
