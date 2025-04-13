@@ -1899,8 +1899,9 @@ func (u *unifiedExchangeAdaptor) confirmWithdrawal(ctx context.Context, id strin
 	withdrawal.txMtx.RUnlock()
 
 	if txID == "" {
+		var amt uint64
 		var err error
-		_, txID, err = u.CEX.ConfirmWithdrawal(ctx, id, withdrawal.assetID)
+		amt, txID, err = u.CEX.ConfirmWithdrawal(ctx, id, withdrawal.assetID)
 		if errors.Is(err, libxc.ErrWithdrawalPending) {
 			return false
 		}
@@ -1910,6 +1911,7 @@ func (u *unifiedExchangeAdaptor) confirmWithdrawal(ctx context.Context, id strin
 		}
 
 		withdrawal.txMtx.Lock()
+		withdrawal.amtWithdrawn = amt
 		withdrawal.txID = txID
 		withdrawal.txMtx.Unlock()
 	}
@@ -1966,7 +1968,7 @@ func (u *unifiedExchangeAdaptor) withdraw(ctx context.Context, assetID uint32, a
 	}
 
 	u.balancesMtx.Lock()
-	withdrawalID, err := u.CEX.Withdraw(ctx, assetID, amount, addr)
+	withdrawalID, amtWithdrawn, err := u.CEX.Withdraw(ctx, assetID, amount, addr)
 	if err != nil {
 		u.balancesMtx.Unlock()
 		return err
@@ -1982,7 +1984,7 @@ func (u *unifiedExchangeAdaptor) withdraw(ctx context.Context, assetID uint32, a
 		eventLogID:   u.eventLogID.Add(1),
 		timestamp:    time.Now().Unix(),
 		assetID:      assetID,
-		amtWithdrawn: amount,
+		amtWithdrawn: amtWithdrawn,
 		withdrawalID: withdrawalID,
 	}
 	u.pendingWithdrawals[withdrawalID] = withdrawal

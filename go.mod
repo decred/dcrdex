@@ -75,6 +75,7 @@ require (
 	golang.org/x/text v0.22.0
 	golang.org/x/time v0.5.0
 	gopkg.in/ini.v1 v1.67.0
+	gopkg.in/square/go-jose.v2 v2.6.0
 	lukechampine.com/blake3 v1.3.0
 )
 
