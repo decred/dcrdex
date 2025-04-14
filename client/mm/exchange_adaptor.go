@@ -3016,6 +3016,10 @@ func (u *unifiedExchangeAdaptor) optimizeTransfers(dist *distribution, dexSellLo
 		onlyQuoteInternal
 	)
 
+	baseToken, quoteToken := asset.TokenInfo(u.baseID), asset.TokenInfo(u.quoteID)
+	highBaseFees := u.baseID == 0 || u.baseID == 60 || (baseToken != nil && baseToken.ParentID == 60)
+	highQuoteFees := u.quoteID == 0 || u.quoteID == 60 || (quoteToken != nil && quoteToken.ParentID == 60)
+
 	splits := make([]*scoredSplit, 0)
 	// scoreSplitSource gets a score for the proposed asset distribution using
 	// the specified sources for the transfer, and, if the score is higher than
@@ -3028,12 +3032,10 @@ func (u *unifiedExchangeAdaptor) optimizeTransfers(dist *distribution, dexSellLo
 			// TODO: use actual fees
 			fees++
 
-			baseToken := asset.TokenInfo(u.baseID)
-			if base && (u.baseID == 0 || u.baseID == 60 || (baseToken != nil && baseToken.ParentID == 60)) {
+			if base && highBaseFees {
 				fees++
 			}
-			quoteToken := asset.TokenInfo(u.quoteID)
-			if !base && (u.quoteID == 0 || u.quoteID == 60 || (quoteToken != nil && quoteToken.ParentID == 60)) {
+			if !base && highQuoteFees {
 				fees++
 			}
 		}
