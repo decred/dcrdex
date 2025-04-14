@@ -1528,6 +1528,9 @@ func newWalletConfig(db wallet.DB, chainParams *chaincfg.Params, gapLimit uint32
 		RelayFee:        defaultRelayFeePerKb,
 		Params:          chainParams,
 		MixSplitLimit:   defaultMixSplitLimit,
+		// TODO: Wallet should be closed and reopened when turning on
+		// and off mixing, and this should be a variable.
+		MixingEnabled: true,
 	}
 }
 
