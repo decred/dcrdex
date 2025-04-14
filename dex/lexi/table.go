@@ -132,7 +132,7 @@ func (t *Table) Set(k, v KV, setOpts ...SetOption) error {
 	for i := range setOpts {
 		setOpts[i](&opts)
 	}
-	d := &datum{v: vB, indexes: make([][]byte, len(t.indexes))}
+	d := &datum{v: vB, indexes: make([][]byte, 0, len(t.indexes))}
 	return t.Update(func(txn *badger.Txn) error {
 		dbID, err := t.keyID(txn, kB, false)
 		if err != nil {
@@ -157,11 +157,13 @@ func (t *Table) Set(k, v KV, setOpts ...SetOption) error {
 		}
 
 		// Add to indexes
-		for i, idx := range t.indexes {
-			if d.indexes[i], err = idx.add(txn, k, v, dbID); err != nil {
+		for _, idx := range t.indexes {
+			var indexEntry []byte
+			if indexEntry, err = idx.add(txn, k, v, dbID); err != nil {
 				// Handle unique index conflicts
 				var indexConflictError uniqueIndexConflictError
-				if errors.As(err, &indexConflictError) {
+				switch {
+				case errors.As(err, &indexConflictError):
 					// If the index is unique and we're not replacing, return an error
 					if !opts.replace {
 						return fmt.Errorf("index uniqueness violation on %q", indexConflictError.indexName)
@@ -173,15 +175,17 @@ func (t *Table) Set(k, v KV, setOpts ...SetOption) error {
 					}
 
 					// Try again
-					d.indexes[i], err = idx.add(txn, k, v, dbID)
+					indexEntry, err = idx.add(txn, k, v, dbID)
 					if err != nil {
 						return fmt.Errorf("error adding entry to index after deleting conflicting entry: %w", err)
 					}
-
-					continue
+				default:
+					return fmt.Errorf("error adding entry to index: %w", err)
 				}
+			}
 
-				return fmt.Errorf("error adding entry to index %q: %w", idx.name, err)
+			if indexEntry != nil {
+				d.indexes = append(d.indexes, indexEntry)
 			}
 		}
 

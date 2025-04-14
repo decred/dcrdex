@@ -449,6 +449,17 @@ var Tokens = map[uint32]*Token{
 							Transfer:  70_127,
 						},
 					},
+					1: {
+						Gas: Gases{
+							Swap:      123_955,
+							SwapAdd:   34_451,
+							Redeem:    72_237,
+							RedeemAdd: 13_928,
+							Refund:    76_635,
+							Approve:   63_393,
+							Transfer:  70_127,
+						},
+					},
 				},
 			},
 		},

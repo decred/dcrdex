@@ -113,6 +113,8 @@ export const txTypeTicketVote = 14
 export const txTypeTicketRevocation = 15
 export const txTypeSwapOrSend = 16
 export const txTypeMixing = 17
+export const txTypeBridgeInitiation = 18
+export const txTypeBridgeCompletion = 19
 
 const positiveTxTypes : number[] = [
   txTypeReceive,
@@ -120,7 +122,8 @@ const positiveTxTypes : number[] = [
   txTypeRefund,
   txTypeRedeemBond,
   txTypeTicketVote,
-  txTypeTicketRevocation
+  txTypeTicketRevocation,
+  txTypeBridgeCompletion
 ]
 
 const negativeTxTypes : number[] = [
@@ -128,7 +131,8 @@ const negativeTxTypes : number[] = [
   txTypeSwap,
   txTypeCreateBond,
   txTypeTicketPurchase,
-  txTypeSwapOrSend
+  txTypeSwapOrSend,
+  txTypeBridgeInitiation
 ]
 
 const noAmtTxTypes : number[] = [
@@ -162,7 +166,9 @@ const txTypeTranslationKeys = [
   intl.ID_TX_TYPE_TICKET_VOTE,
   intl.ID_TX_TYPE_TICKET_REVOCATION,
   intl.ID_TX_TYPE_SWAP_OR_SEND,
-  intl.ID_TX_TYPE_MIX
+  intl.ID_TX_TYPE_MIX,
+  intl.ID_TX_TYPE_BRIDGE_INITIATION,
+  intl.ID_TX_TYPE_BRIDGE_COMPLETION
 ]
 
 export function txTypeString (txType: number) : string {

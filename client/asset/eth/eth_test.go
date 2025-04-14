@@ -48,9 +48,9 @@ var (
 	testAddressC = common.HexToAddress("2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27")
 
 	ethGasesV0   = dexeth.VersionedGases[0]
-	tokenGasesV0 = dexeth.Tokens[usdcTokenID].NetTokens[dex.Simnet].SwapContracts[0].Gas
+	tokenGasesV0 = dexeth.Tokens[usdcEthID].NetTokens[dex.Simnet].SwapContracts[0].Gas
 	ethGasesV1   = dexeth.VersionedGases[1]
-	tokenGasesV1 = dexeth.Tokens[usdcTokenID].NetTokens[dex.Simnet].SwapContracts[1].Gas
+	tokenGasesV1 = dexeth.Tokens[usdcEthID].NetTokens[dex.Simnet].SwapContracts[1].Gas
 
 	tETHV0 = &dex.Asset{
 		Version:    0,
@@ -77,7 +77,7 @@ var (
 	}
 
 	tTokenV0 = &dex.Asset{
-		ID:         usdcTokenID,
+		ID:         usdcEthID,
 		Symbol:     "usdc.eth",
 		Version:    0,
 		MaxFeeRate: 20,
@@ -85,7 +85,7 @@ var (
 	}
 
 	tTokenV1 = &dex.Asset{
-		ID:         usdcTokenID,
+		ID:         usdcEthID,
 		Symbol:     "dextt.eth",
 		Version:    1,
 		MaxFeeRate: 20,
@@ -577,11 +577,13 @@ func (c *tTokenContractor) estimateTransferGas(context.Context, *big.Int) (uint6
 
 type tTxDB struct {
 	storeTxCalled  bool
+	storedTx       *extendedWalletTx
 	storeTxErr     error
 	removeTxCalled bool
 	removeTxErr    error
 	txToGet        *extendedWalletTx
 	getTxErr       error
+	pendingBridges []*extendedWalletTx
 }
 
 var _ txDB = (*tTxDB)(nil)
@@ -591,6 +593,7 @@ func (db *tTxDB) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 }
 func (db *tTxDB) storeTx(wt *extendedWalletTx) error {
 	db.storeTxCalled = true
+	db.storedTx = wt
 	return db.storeTxErr
 }
 func (db *tTxDB) removeTx(_ /* id */ string) error {
@@ -598,7 +601,7 @@ func (db *tTxDB) removeTx(_ /* id */ string) error {
 	return db.removeTxErr
 }
 func (db *tTxDB) getTxs(n int, refID *common.Hash, past bool, tokenID *uint32) ([]*asset.WalletTransaction, error) {
-	return nil, nil
+	panic("getTxs not implemented")
 }
 
 // getTx gets a single transaction. It is not an error if the tx is not known.
@@ -607,10 +610,19 @@ func (db *tTxDB) getTx(txHash common.Hash) (tx *extendedWalletTx, _ error) {
 	return db.txToGet, db.getTxErr
 }
 func (db *tTxDB) getPendingTxs() ([]*extendedWalletTx, error) {
-	return nil, nil
+	panic("getPendingTxs not implemented")
 }
 func (db *tTxDB) close() error {
 	return nil
+}
+func (db *tTxDB) getBridges(n int, refID *common.Hash, past bool) ([]*asset.WalletTransaction, error) {
+	panic("getBridges not implemented")
+}
+func (db *tTxDB) getPendingBridges() ([]*extendedWalletTx, error) {
+	return db.pendingBridges, nil
+}
+func (db *tTxDB) getBridgeCompletion(initiationTxID string) (*extendedWalletTx, error) {
+	return db.txToGet, db.getTxErr
 }
 
 // func TestCheckUnconfirmedTxs(t *testing.T) {
@@ -810,7 +822,11 @@ func TestCheckPendingTxs(t *testing.T) {
 
 	val := dexeth.GweiToWei(1)
 	extendedTx := func(nonce, blockNum, blockStamp, submissionStamp uint64) *extendedWalletTx {
-		pendingTx := eth.extendedTx(node.newTransaction(nonce, val), asset.Send, 1, nil)
+		pendingTx := eth.extendedTx(&genTxResult{
+			tx:     node.newTransaction(nonce, val),
+			txType: asset.Send,
+			amt:    1,
+		})
 		pendingTx.BlockNumber = blockNum
 		pendingTx.Confirmed = blockNum > 0 && blockNum <= finalized
 		pendingTx.Timestamp = blockStamp
@@ -818,6 +834,16 @@ func TestCheckPendingTxs(t *testing.T) {
 		pendingTx.lastBroadcast = time.Unix(int64(submissionStamp), 0)
 		pendingTx.lastFeeCheck = time.Unix(int64(submissionStamp), 0)
 		return pendingTx
+	}
+
+	const initiationTxID = "initiationTx"
+	updateToBridgeCompletion := func(tx *extendedWalletTx) *extendedWalletTx {
+		tx.Type = asset.CompleteBridge
+		tx.BridgeCounterpartTx = &asset.BridgeCounterpartTx{
+			ID:      initiationTxID,
+			AssetID: BipID,
+		}
+		return tx
 	}
 
 	newReceipt := func(confs uint64) *types.Receipt {
@@ -846,6 +872,19 @@ func TestCheckPendingTxs(t *testing.T) {
 		}
 	}
 
+	getBridgeCompleteNote := func(t *testing.T) *asset.BridgeCompletedNote {
+		for {
+			select {
+			case ni := <-emitChan:
+				if n, ok := ni.(*asset.BridgeCompletedNote); ok {
+					return n
+				}
+			default:
+				return nil
+			}
+		}
+	}
+
 	for _, tt := range []*struct {
 		name        string
 		dbErr       error
@@ -855,6 +894,7 @@ func TestCheckPendingTxs(t *testing.T) {
 		txs         []bool
 		noncesAfter []uint64
 		actionID    string
+		bridgeDone  string
 		recast      bool
 	}{
 		{
@@ -883,6 +923,22 @@ func TestCheckPendingTxs(t *testing.T) {
 				extendedTx(4, 0, 0, finalizedStamp),
 			},
 			receipts: []*types.Receipt{newReceipt(txConfsNeededToConfirm)},
+		},
+		{
+			name: "bridge completion not yet confirmed",
+			pendingTxs: []*extendedWalletTx{
+				updateToBridgeCompletion(extendedTx(4, 0, 0, finalizedStamp)),
+			},
+			noncesAfter: []uint64{4},
+			receipts:    []*types.Receipt{newReceipt(txConfsNeededToConfirm - 1)},
+		},
+		{
+			name: "confirm bridge completion",
+			pendingTxs: []*extendedWalletTx{
+				updateToBridgeCompletion(extendedTx(4, 0, 0, finalizedStamp)),
+			},
+			receipts:   []*types.Receipt{newReceipt(txConfsNeededToConfirm)},
+			bridgeDone: initiationTxID,
 		},
 		{
 			name: "old and unindexed",
@@ -956,6 +1012,17 @@ func TestCheckPendingTxs(t *testing.T) {
 			if tt.recast != (node.lastSignedTx != nil) {
 				t.Fatalf("wrong recast result recast = %t, lastSignedTx = %t", tt.recast, node.lastSignedTx != nil)
 			}
+			if tt.bridgeDone != "" {
+				if bridgeNote := getBridgeCompleteNote(t); bridgeNote == nil {
+					t.Fatalf("expected bridge completion, got none")
+				} else if bridgeNote.InitiationTxID != tt.bridgeDone {
+					t.Fatalf("expected bridge completion for %s, got %s", tt.bridgeDone, bridgeNote.InitiationTxID)
+				}
+			} else {
+				if bridgeNote := getBridgeCompleteNote(t); bridgeNote != nil {
+					t.Fatalf("expected no bridge completion, got %s", bridgeNote.InitiationTxID)
+				}
+			}
 		})
 	}
 }
@@ -965,8 +1032,11 @@ func TestTakeAction(t *testing.T) {
 	defer shutdown()
 
 	aGwei := dexeth.GweiToWei(1)
-
-	pendingTx := eth.extendedTx(node.newTransaction(0, aGwei), asset.Send, 1, nil)
+	pendingTx := eth.extendedTx(&genTxResult{
+		tx:     node.newTransaction(0, aGwei),
+		txType: asset.Send,
+		amt:    1,
+	})
 	eth.pendingTxs = []*extendedWalletTx{pendingTx}
 
 	feeCap := new(big.Int).Mul(aGwei, big.NewInt(5))
@@ -1000,7 +1070,11 @@ func TestTakeAction(t *testing.T) {
 		t.Fatal("didn't save to DB")
 	}
 
-	pendingTx = eth.extendedTx(node.newTransaction(1, aGwei), asset.Send, 1, nil)
+	pendingTx = eth.extendedTx(&genTxResult{
+		tx:     node.newTransaction(1, aGwei),
+		txType: asset.Send,
+		amt:    1,
+	})
 	eth.pendingTxs = []*extendedWalletTx{pendingTx}
 	pendingTx.SubmissionTime = 0
 	// Neglecting to bump should reset submission time.
@@ -1039,7 +1113,11 @@ func TestTakeAction(t *testing.T) {
 		t.Fatalf("replacement tx wasn't accepted")
 	}
 	// wrong nonce is an error though
-	pendingTx = eth.extendedTx(node.newTransaction(5050, aGwei), asset.Send, 1, nil)
+	pendingTx = eth.extendedTx(&genTxResult{
+		tx:     node.newTransaction(5050, aGwei),
+		txType: asset.Send,
+		amt:    1,
+	})
 	eth.pendingTxs = []*extendedWalletTx{pendingTx}
 	lostNonceAction = []byte(fmt.Sprintf(`{"txID":"%s","abandon":false,"replacementID":"%s"}`, pendingTx.ID, replacementTx.Hash()))
 	if err := eth.TakeAction(actionTypeLostNonce, lostNonceAction); err == nil {
@@ -1047,7 +1125,11 @@ func TestTakeAction(t *testing.T) {
 	}
 
 	// Missing nonces
-	tx5 := eth.extendedTx(node.newTransaction(5, aGwei), asset.Send, 1, nil)
+	tx5 := eth.extendedTx(&genTxResult{
+		tx:     node.newTransaction(5, aGwei),
+		txType: asset.Send,
+		amt:    1,
+	})
 	eth.pendingTxs = []*extendedWalletTx{tx5}
 	eth.confirmedNonceAt = big.NewInt(2)
 	eth.pendingNonceAt = big.NewInt(6)
@@ -1099,6 +1181,9 @@ func TestCheckForNewBlocks(t *testing.T) {
 					pendingNonceAt:   new(big.Int),
 					txDB:             &tTxDB{},
 					finalizeConfs:    txConfsNeededToConfirm,
+				},
+				versionedContracts: map[uint32]common.Address{
+					0: {},
 				},
 				log:     tLogger.SubLogger("ETH"),
 				emit:    emit,
@@ -1309,11 +1394,14 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 		evmify:             dexeth.GweiToWei,
 		atomize:            dexeth.WeiToGwei,
 		pendingTxCheckBal:  new(big.Int),
-		pendingApprovals:   make(map[uint32]*pendingApproval),
-		approvalCache:      make(map[uint32]bool),
+		pendingApprovals:   make(map[common.Address]*pendingApproval),
+		approvalCache:      make(map[common.Address]bool),
 		// move up after review
 		wi:   WalletInfo,
 		emit: asset.NewWalletEmitter(emitChan, BipID, tLogger),
+		versionedContracts: map[uint32]common.Address{
+			0: {},
+		},
 	}
 	aw.wallets = map[uint32]*assetWallet{
 		BipID: aw,
@@ -1333,20 +1421,20 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 			contractorV1:     node.tContractor,
 			assetID:          BipID,
 			atomize:          dexeth.WeiToGwei,
-			pendingApprovals: make(map[uint32]*pendingApproval),
-			approvalCache:    make(map[uint32]bool),
+			pendingApprovals: make(map[common.Address]*pendingApproval),
+			approvalCache:    make(map[common.Address]bool),
 			emit:             asset.NewWalletEmitter(emitChan, BipID, tLogger),
 		}
 		w = &TokenWallet{
 			assetWallet: aw,
 			cfg:         &tokenWalletConfig{},
 			parent:      node.tokenParent,
-			token:       dexeth.Tokens[usdcTokenID],
-			netToken:    dexeth.Tokens[usdcTokenID].NetTokens[dex.Simnet],
+			token:       dexeth.Tokens[usdcEthID],
+			netToken:    dexeth.Tokens[usdcEthID].NetTokens[dex.Simnet],
 		}
 		aw.wallets = map[uint32]*assetWallet{
-			usdcTokenID: aw,
-			BipID:       node.tokenParent,
+			usdcEthID: aw,
+			BipID:     node.tokenParent,
 		}
 	}
 
@@ -1440,7 +1528,7 @@ func TestBalanceWithMempool(t *testing.T) {
 	for _, test := range tests {
 		var assetID uint32 = BipID
 		if test.token {
-			assetID = usdcTokenID
+			assetID = usdcEthID
 		}
 
 		_, eth, node, shutdown := tassetWallet(assetID)
@@ -1543,24 +1631,24 @@ func TestBalanceNoMempool(t *testing.T) {
 			name:    "eth with token fees",
 			assetID: BipID,
 			unconfirmedTxs: []*extendedWalletTx{
-				newExtendedWalletTx(usdcTokenID, 4, 5, 0, asset.Send),
+				newExtendedWalletTx(usdcEthID, 4, 5, 0, asset.Send),
 			},
 			expPendingOut: 5,
 		},
 		{
 			name:    "token with 1 tx and other ignored assets",
-			assetID: usdcTokenID,
+			assetID: usdcEthID,
 			unconfirmedTxs: []*extendedWalletTx{
-				newExtendedWalletTx(usdcTokenID, 4, 5, 0, asset.Send),
-				newExtendedWalletTx(usdcTokenID+1, 8, 9, 0, asset.Send),
+				newExtendedWalletTx(usdcEthID, 4, 5, 0, asset.Send),
+				newExtendedWalletTx(usdcEthID+1, 8, 9, 0, asset.Send),
 			},
 			expPendingOut: 4,
 		},
 		{
 			name:    "token with 1 tx incoming",
-			assetID: usdcTokenID,
+			assetID: usdcEthID,
 			unconfirmedTxs: []*extendedWalletTx{
-				newExtendedWalletTx(usdcTokenID, 15, 5, 0, asset.Redeem),
+				newExtendedWalletTx(usdcEthID, 15, 5, 0, asset.Redeem),
 			},
 			expPendingIn: 15,
 		},
@@ -1568,19 +1656,19 @@ func TestBalanceNoMempool(t *testing.T) {
 			name:    "eth mixed txs",
 			assetID: BipID,
 			unconfirmedTxs: []*extendedWalletTx{
-				newExtendedWalletTx(BipID, 1, 2, 0, asset.Swap),       // 3 eth out
-				newExtendedWalletTx(usdcTokenID, 3, 4, 1, asset.Send), // confirmed
-				newExtendedWalletTx(usdcTokenID, 5, 6, 0, asset.Swap), // 6 eth out
-				newExtendedWalletTx(BipID, 7, 1, 0, asset.Refund),     // 1 eth out, 7 eth in
+				newExtendedWalletTx(BipID, 1, 2, 0, asset.Swap),     // 3 eth out
+				newExtendedWalletTx(usdcEthID, 3, 4, 1, asset.Send), // confirmed
+				newExtendedWalletTx(usdcEthID, 5, 6, 0, asset.Swap), // 6 eth out
+				newExtendedWalletTx(BipID, 7, 1, 0, asset.Refund),   // 1 eth out, 7 eth in
 			},
 			expPendingOut: 10,
 			expPendingIn:  7,
 		},
 		{
 			name:    "already confirmed, but still waiting for txConfsNeededToConfirm",
-			assetID: usdcTokenID,
+			assetID: usdcEthID,
 			unconfirmedTxs: []*extendedWalletTx{
-				newExtendedWalletTx(usdcTokenID, 15, 5, 1, asset.Redeem),
+				newExtendedWalletTx(usdcEthID, 15, 5, 1, asset.Redeem),
 			},
 		},
 	}
@@ -1663,7 +1751,7 @@ func TestFeeRate(t *testing.T) {
 
 func TestRefund(t *testing.T) {
 	t.Run("eth", func(t *testing.T) { testRefund(t, BipID) })
-	t.Run("token", func(t *testing.T) { testRefund(t, usdcTokenID) })
+	t.Run("token", func(t *testing.T) { testRefund(t, usdcEthID) })
 }
 
 func testRefund(t *testing.T, assetID uint32) {
@@ -1686,7 +1774,7 @@ func testRefund(t *testing.T, assetID uint32) {
 	// 	dexeth.VersionedGases[1] = gasesV1
 	// 	defer delete(dexeth.VersionedGases, 1)
 	// } else {
-	// 	tokenContracts := dexeth.Tokens[usdcTokenID].NetTokens[dex.Simnet].SwapContracts
+	// 	tokenContracts := dexeth.Tokens[usdcEthID].NetTokens[dex.Simnet].SwapContracts
 	// 	tc := *tokenContracts[0]
 	// 	tc.Gas = *gasesV1
 	// 	tokenContracts[1] = &tc
@@ -1857,7 +1945,7 @@ func (b *badCoin) Value() uint64 {
 
 func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	t.Run("eth", func(t *testing.T) { testFundOrderReturnCoinsFundingCoins(t, BipID) })
-	t.Run("token", func(t *testing.T) { testFundOrderReturnCoinsFundingCoins(t, usdcTokenID) })
+	t.Run("token", func(t *testing.T) { testFundOrderReturnCoinsFundingCoins(t, usdcEthID) })
 }
 
 func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
@@ -2021,7 +2109,7 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 
 	// Test that funding without allowance causes error
 	if assetID != BipID {
-		eth.approvalCache = make(map[uint32]bool)
+		eth.approvalCache = make(map[common.Address]bool)
 		node.tokenContractor.allow = big.NewInt(0)
 		_, _, _, err = w.FundOrder(&order)
 		if err == nil {
@@ -2151,7 +2239,7 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 
 func TestFundMultiOrder(t *testing.T) {
 	t.Run("eth", func(t *testing.T) { testFundMultiOrder(t, BipID) })
-	t.Run("token", func(t *testing.T) { testFundMultiOrder(t, usdcTokenID) })
+	t.Run("token", func(t *testing.T) { testFundMultiOrder(t, usdcEthID) })
 }
 
 func testFundMultiOrder(t *testing.T, assetID uint32) {
@@ -2164,7 +2252,7 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 	if assetID != BipID {
 		fromAsset = tTokenV0
 		node.tokenContractor.allow = unlimitedAllowance
-		swapGas = dexeth.Tokens[usdcTokenID].NetTokens[dex.Simnet].
+		swapGas = dexeth.Tokens[usdcEthID].NetTokens[dex.Simnet].
 			SwapContracts[fromAsset.Version].Gas.Swap
 	}
 
@@ -2541,7 +2629,7 @@ func TestPreSwap(t *testing.T) {
 		var assetID uint32 = BipID
 		assetCfg := tETHV0
 		if test.token {
-			assetID = usdcTokenID
+			assetID = usdcEthID
 			assetCfg = tTokenV0
 		}
 
@@ -2607,7 +2695,7 @@ func TestPreSwap(t *testing.T) {
 
 func TestSwap(t *testing.T) {
 	t.Run("eth", func(t *testing.T) { testSwap(t, BipID) })
-	t.Run("token", func(t *testing.T) { testSwap(t, usdcTokenID) })
+	t.Run("token", func(t *testing.T) { testSwap(t, usdcEthID) })
 }
 
 func testSwap(t *testing.T, assetID uint32) {
@@ -2903,7 +2991,7 @@ func TestPreRedeem(t *testing.T) {
 	}
 
 	// Token
-	w, _, _, shutdown2 := tassetWallet(usdcTokenID)
+	w, _, _, shutdown2 := tassetWallet(usdcEthID)
 	defer shutdown2()
 
 	form.AssetVersion = tTokenV0.Version
@@ -2921,7 +3009,7 @@ func TestPreRedeem(t *testing.T) {
 
 func TestRedeem(t *testing.T) {
 	t.Run("eth", func(t *testing.T) { testRedeem(t, BipID) })
-	t.Run("token", func(t *testing.T) { testRedeem(t, usdcTokenID) })
+	t.Run("token", func(t *testing.T) { testRedeem(t, usdcEthID) })
 }
 
 func testRedeem(t *testing.T, assetID uint32) {
@@ -2936,7 +3024,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 	// 	eth.versionedGases[1] = &tokenGases
 	// }
 
-	// tokenContracts := eth.tokens[usdcTokenID].NetTokens[dex.Simnet].SwapContracts
+	// tokenContracts := eth.tokens[usdcEthID].NetTokens[dex.Simnet].SwapContracts
 	// tokenContracts[1] = tokenContracts[0]
 	// defer delete(tokenContracts, 1)
 
@@ -3462,7 +3550,7 @@ func TestMaxOrder(t *testing.T) {
 		var assetID uint32 = BipID
 		gases := ethGasesV0
 		if test.token {
-			assetID = usdcTokenID
+			assetID = usdcEthID
 			gases = &tokenGasesV0
 			if test.v1 {
 				gases = &tokenGasesV1
@@ -3560,7 +3648,7 @@ func packRedeemDataV0(redemptions []*dexeth.Redemption) ([]byte, error) {
 
 func TestAuditContract(t *testing.T) {
 	t.Run("eth", func(t *testing.T) { testAuditContract(t, BipID) })
-	t.Run("token", func(t *testing.T) { testAuditContract(t, usdcTokenID) })
+	t.Run("token", func(t *testing.T) { testAuditContract(t, usdcEthID) })
 }
 
 func testAuditContract(t *testing.T, assetID uint32) {
@@ -3956,7 +4044,7 @@ func TestDriverOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("driver open error: %v", err)
 	}
-	eth, ok := wallet.(*ETHWallet)
+	eth, ok := wallet.(*ETHBridgeWallet)
 	if !ok {
 		t.Fatalf("failed to cast wallet as assetWallet")
 	}
@@ -3970,7 +4058,7 @@ func TestDriverOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("driver open error: %v", err)
 	}
-	eth, ok = wallet.(*ETHWallet)
+	eth, ok = wallet.(*ETHBridgeWallet)
 	if !ok {
 		t.Fatalf("failed to cast wallet as assetWallet")
 	}
@@ -4149,7 +4237,7 @@ func TestLocktimeExpired(t *testing.T) {
 
 func TestFindRedemption(t *testing.T) {
 	t.Run("eth", func(t *testing.T) { testFindRedemption(t, BipID) })
-	t.Run("token", func(t *testing.T) { testFindRedemption(t, usdcTokenID) })
+	t.Run("token", func(t *testing.T) { testFindRedemption(t, usdcEthID) })
 }
 
 func testFindRedemption(t *testing.T, assetID uint32) {
@@ -4292,7 +4380,7 @@ func testFindRedemption(t *testing.T, assetID uint32) {
 
 func TestRefundReserves(t *testing.T) {
 	t.Run("eth", func(t *testing.T) { testRefundReserves(t, BipID) })
-	t.Run("token", func(t *testing.T) { testRefundReserves(t, usdcTokenID) })
+	t.Run("token", func(t *testing.T) { testRefundReserves(t, usdcEthID) })
 }
 
 func testRefundReserves(t *testing.T, assetID uint32) {
@@ -4378,7 +4466,7 @@ func testRefundReserves(t *testing.T, assetID uint32) {
 
 func TestRedemptionReserves(t *testing.T) {
 	t.Run("eth", func(t *testing.T) { testRedemptionReserves(t, BipID) })
-	t.Run("token", func(t *testing.T) { testRedemptionReserves(t, usdcTokenID) })
+	t.Run("token", func(t *testing.T) { testRedemptionReserves(t, usdcEthID) })
 }
 
 func testRedemptionReserves(t *testing.T, assetID uint32) {
@@ -4499,7 +4587,7 @@ func TestReconfigure(t *testing.T) {
 
 func TestSend(t *testing.T) {
 	t.Run("eth", func(t *testing.T) { testSend(t, BipID) })
-	t.Run("token", func(t *testing.T) { testSend(t, usdcTokenID) })
+	t.Run("token", func(t *testing.T) { testSend(t, usdcEthID) })
 }
 
 func testSend(t *testing.T, assetID uint32) {
@@ -4582,7 +4670,7 @@ func testSend(t *testing.T, assetID uint32) {
 
 func TestConfirmRedemption(t *testing.T) {
 	t.Run("eth", func(t *testing.T) { testConfirmRedemption(t, BipID) })
-	t.Run("token", func(t *testing.T) { testConfirmRedemption(t, usdcTokenID) })
+	t.Run("token", func(t *testing.T) { testConfirmRedemption(t, usdcEthID) })
 }
 
 func testConfirmRedemption(t *testing.T, assetID uint32) {
@@ -4756,7 +4844,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 // and sending will not cause a failure.
 func TestEstimateVsActualSendFees(t *testing.T) {
 	t.Run("eth", func(t *testing.T) { testEstimateVsActualSendFees(t, BipID) })
-	t.Run("token", func(t *testing.T) { testEstimateVsActualSendFees(t, usdcTokenID) })
+	t.Run("token", func(t *testing.T) { testEstimateVsActualSendFees(t, usdcEthID) })
 }
 
 func testEstimateVsActualSendFees(t *testing.T, assetID uint32) {
@@ -4803,7 +4891,7 @@ func testEstimateVsActualSendFees(t *testing.T, assetID uint32) {
 
 func TestEstimateSendTxFee(t *testing.T) {
 	t.Run("eth", func(t *testing.T) { testEstimateSendTxFee(t, BipID) })
-	t.Run("token", func(t *testing.T) { testEstimateSendTxFee(t, usdcTokenID) })
+	t.Run("token", func(t *testing.T) { testEstimateSendTxFee(t, usdcEthID) })
 }
 
 func testEstimateSendTxFee(t *testing.T, assetID uint32) {
@@ -5043,7 +5131,11 @@ func TestSwapOrRedemptionFeesPaid(t *testing.T) {
 	for _, test := range tests {
 		var txHash common.Hash
 		if test.pendingTx != nil {
-			wt := bw.extendedTx(test.pendingTx, asset.Unknown, 1, nil)
+			wt := bw.extendedTx(&genTxResult{
+				tx:     test.pendingTx,
+				txType: asset.Unknown,
+				amt:    1,
+			})
 			wt.BlockNumber = test.pendingTxBlock
 			wt.Fees = fees
 			bw.pendingTxs = []*extendedWalletTx{wt}
@@ -5162,6 +5254,323 @@ func TestFreshProviderList(t *testing.T) {
 			for i, p := range providers {
 				if p.tip.failCount != tt.expOrder[i] {
 					t.Fatalf("%d'th provider in sorted list is unexpected", i)
+				}
+			}
+		})
+	}
+}
+
+type mockBridge struct {
+	getCompletionDataFunc   func(ctx context.Context, txID string) ([]byte, error)
+	getCompletionDataCalled chan struct{}
+	completeBridgeCalled    bool
+}
+
+var _ bridge = (*mockBridge)(nil)
+
+func (m *mockBridge) getCompletionData(ctx context.Context, bridgeTxID string) ([]byte, error) {
+	if m.getCompletionDataCalled != nil {
+		m.getCompletionDataCalled <- struct{}{}
+	}
+	return m.getCompletionDataFunc(ctx, bridgeTxID)
+}
+func (m *mockBridge) bridgeContractAddr() common.Address { panic("not implemented") }
+func (m *mockBridge) bridgeContractAllowance(ctx context.Context) (*big.Int, error) {
+	panic("not implemented")
+}
+func (m *mockBridge) approveBridgeContract(txOpts *bind.TransactOpts, amount *big.Int) (*types.Transaction, error) {
+	panic("not implemented")
+}
+func (m *mockBridge) requiresBridgeContractApproval() bool { panic("not implemented") }
+func (m *mockBridge) initiateBridge(txOpts *bind.TransactOpts, destAssetID uint32, amount *big.Int) (*types.Transaction, bool, error) {
+	panic("not implemented")
+}
+func (m *mockBridge) completeBridge(txOpts *bind.TransactOpts, completionData []byte) (*types.Transaction, error) {
+	m.completeBridgeCalled = true
+	return types.NewTransaction(0, common.Address{}, big.NewInt(0), 0, nil, []byte{}), nil
+}
+func (m *mockBridge) initiateBridgeGas() uint64 { return 0 }
+func (m *mockBridge) completeBridgeGas() uint64 { return 0 }
+
+func TestBridgeManager(t *testing.T) {
+	setupWithPendingBridges := func(t *testing.T, pendingBridges []*extendedWalletTx) (*bridgeManager, *mockBridge, chan asset.WalletNotification, *tTxDB, dex.Logger) {
+		log := dex.StdOutLogger("TEST", dex.LevelDebug)
+		notificationChan := make(chan asset.WalletNotification, 10)
+		emitter := asset.NewWalletEmitter(notificationChan, BipID, log)
+
+		// Create a mock bridge with default "not ready" behavior
+		mb := &mockBridge{
+			getCompletionDataFunc: func(ctx context.Context, txID string) ([]byte, error) {
+				return nil, errors.New("not ready")
+			},
+			getCompletionDataCalled: make(chan struct{}, 10),
+		}
+
+		db := &tTxDB{}
+		db.pendingBridges = pendingBridges
+		bm, err := newBridgeManager(context.Background(), BipID, BipID, mb, emitter, db, 100*time.Millisecond, log)
+		if err != nil {
+			t.Fatalf("error creating bridge manager: %v", err)
+		}
+
+		return bm, mb, notificationChan, db, log
+	}
+
+	setup := func(t *testing.T) (*bridgeManager, *mockBridge, chan asset.WalletNotification, *tTxDB, dex.Logger) {
+		bm, mb, notificationChan, db, log := setupWithPendingBridges(t, nil)
+		return bm, mb, notificationChan, db, log
+	}
+
+	// Test: Adding and monitoring a pending bridge
+	t.Run("AddAndMonitor", func(t *testing.T) {
+		bm, mb, _, _, _ := setup(t)
+
+		// Add a pending bridge
+		burnTxID := "tx1"
+		destAssetID := uint32(123)
+		bm.addPendingBridge(burnTxID, destAssetID, 1)
+
+		// Wait for getMintInfo to be called at least twice
+		for i := 0; i < 2; i++ {
+			select {
+			case <-mb.getCompletionDataCalled:
+				// Continue
+			case <-time.After(1 * time.Second):
+				t.Fatalf("timeout waiting for getCompletionData call %d", i+1)
+			}
+		}
+	})
+
+	// Test: Successful mint info retrieval and notification
+	t.Run("SuccessfulMintInfo", func(t *testing.T) {
+		bm, mb, notificationChan, _, _ := setup(t)
+
+		// Configure getMintInfo to succeed
+		completionData := []byte("completionData")
+		mb.getCompletionDataFunc = func(ctx context.Context, txID string) ([]byte, error) {
+			return completionData, nil
+		}
+
+		// Add a pending bridge
+		burnTxID := "tx2"
+		destAssetID := uint32(60001)
+		bm.addPendingBridge(burnTxID, destAssetID, 1)
+
+		// Wait for and verify the notification
+		select {
+		case note := <-notificationChan:
+			bridgeNote, ok := note.(*asset.BridgeReadyToCompleteNote)
+			if !ok {
+				t.Fatalf("expected *BridgeReadyToCompleteNote, got %T", note)
+			}
+			if bridgeNote.DestAssetID != destAssetID {
+				t.Errorf("expected destAssetID %d, got %d", destAssetID, bridgeNote.DestAssetID)
+			}
+			if string(bridgeNote.Data) != string(completionData) {
+				t.Errorf("expected completionData %q, got %q", completionData, bridgeNote.Data)
+			}
+		case <-time.After(1 * time.Second):
+			t.Fatal("timeout waiting for BridgeReadyToComplete notification")
+		}
+	})
+
+	t.Run("MarkAsComplete", func(t *testing.T) {
+		bm, mb, _, db, _ := setup(t)
+
+		// Add a pending bridge
+		burnTxID := "tx3"
+		destAssetID := uint32(789)
+		bm.addPendingBridge(burnTxID, destAssetID, 1)
+
+		db.txToGet = &extendedWalletTx{
+			WalletTransaction: &asset.WalletTransaction{
+				ID: burnTxID,
+				BridgeCounterpartTx: &asset.BridgeCounterpartTx{
+					AssetID: destAssetID,
+				},
+			},
+		}
+
+		// Wait for at least one getMintInfo call
+		select {
+		case <-mb.getCompletionDataCalled:
+			// Proceed
+		case <-time.After(1 * time.Second):
+			t.Fatal("timeout waiting for initial getCompletionData call")
+		}
+
+		// Remove the bridge
+		bm.markBridgeComplete(burnTxID, "mintTxID", 1)
+
+		// Wait and ensure no more calls occur
+		time.Sleep(300 * time.Millisecond) // Longer than 2 monitor intervals
+		select {
+		case <-mb.getCompletionDataCalled:
+			t.Error("getCompletionData was called after removing all pending bridges")
+		default:
+			// No additional calls, as expected
+		}
+
+		if db.storedTx.BridgeCounterpartTx.ID != "mintTxID" {
+			t.Errorf("expected BridgeCounterpartTx.ID to be mintTxID, got %s", db.storedTx.BridgeCounterpartTx.ID)
+		}
+	})
+
+	t.Run("LoadPendingBridges", func(t *testing.T) {
+		destAssetID := uint32(123)
+		burnTxID := "tx4"
+		bm, _, _, _, _ := setupWithPendingBridges(t, []*extendedWalletTx{
+			{
+				WalletTransaction: &asset.WalletTransaction{
+					Type: asset.InitiateBridge,
+					ID:   burnTxID,
+					BridgeCounterpartTx: &asset.BridgeCounterpartTx{
+						AssetID: destAssetID,
+					},
+				},
+			},
+		})
+
+		if len(bm.pendingBridges) != 1 {
+			t.Fatalf("expected 1 pending bridge, got %d", len(bm.pendingBridges))
+		}
+		if bm.pendingBridges[burnTxID].destAssetID != destAssetID {
+			t.Fatalf("expected pending bridge ID to be %s, and dest asset ID to be %d", burnTxID, destAssetID)
+		}
+	})
+}
+
+func TestCompleteBridge(t *testing.T) {
+	initiationTx := &asset.BridgeCounterpartTx{
+		ID:      "initiation-tx-id",
+		AssetID: 123,
+	}
+	timestamp := uint64(time.Now().Unix())
+	confirmedTx := &extendedWalletTx{
+		WalletTransaction: &asset.WalletTransaction{
+			ID:                  "complete-tx-id",
+			Amount:              1e9,
+			Confirmed:           true,
+			Type:                asset.CompleteBridge,
+			BridgeCounterpartTx: initiationTx,
+			Timestamp:           timestamp,
+		},
+		Nonce:     new(big.Int),
+		savedToDB: true,
+	}
+	pendingTx := &extendedWalletTx{
+		WalletTransaction: &asset.WalletTransaction{
+			ID:                  "complete-tx-id",
+			Amount:              1e9,
+			Confirmed:           false,
+			Type:                asset.CompleteBridge,
+			BridgeCounterpartTx: initiationTx,
+			Timestamp:           timestamp,
+		},
+		Nonce:     new(big.Int),
+		savedToDB: true,
+	}
+
+	tests := []struct {
+		name           string
+		dbTx           *extendedWalletTx
+		pendingTx      *extendedWalletTx
+		dbErr          error
+		expectComplete bool
+		expectNote     bool
+		expectErr      bool
+	}{
+		{
+			name:           "new completion",
+			expectComplete: true,
+		},
+		{
+			name:      "pending completion",
+			pendingTx: pendingTx,
+		},
+		{
+			name:       "confirmed completion",
+			dbTx:       confirmedTx,
+			expectNote: true,
+		},
+		{
+			name:      "db error",
+			dbErr:     errors.New("db error"),
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w, _, _, shutdown := tassetWallet(BipID)
+			defer shutdown()
+
+			bridgeWallet := &ETHBridgeWallet{ETHWallet: w.(*ETHWallet)}
+			bridge := &mockBridge{}
+			bridgeWallet.manager = &bridgeManager{
+				bridge: bridge,
+			}
+
+			emitChan := make(chan asset.WalletNotification, 1)
+			bridgeWallet.emit = asset.NewWalletEmitter(emitChan, BipID, bridgeWallet.log)
+
+			txDB := &tTxDB{
+				txToGet:  tt.dbTx,
+				getTxErr: tt.dbErr,
+			}
+			bridgeWallet.txDB = txDB
+
+			if tt.pendingTx != nil {
+				bridgeWallet.pendingTxs = []*extendedWalletTx{tt.pendingTx}
+			} else {
+				bridgeWallet.pendingTxs = []*extendedWalletTx{}
+			}
+
+			err := bridgeWallet.CompleteBridge(context.Background(), initiationTx, 1e9, []byte("completionData"))
+
+			if tt.expectErr {
+				if err == nil {
+					t.Fatalf("expected error but got none")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if tt.expectComplete != bridge.completeBridgeCalled {
+				t.Fatalf("completeBridge called = %v, want %v", bridge.completeBridgeCalled, tt.expectComplete)
+			}
+
+			var note *asset.BridgeCompletedNote
+		noteLoop:
+			for {
+				select {
+				case n := <-emitChan:
+					if n, ok := n.(*asset.BridgeCompletedNote); ok {
+						note = n
+					}
+				default:
+					break noteLoop
+				}
+			}
+
+			if tt.expectNote != (note != nil) {
+				t.Fatalf("expected note = %v, got %v", tt.expectNote, (note != nil))
+			}
+
+			if note != nil {
+				if note.CompletionTime != timestamp {
+					t.Fatalf("expected CompletionTime = %d, got %d", timestamp, note.CompletionTime)
+				}
+				if note.InitiationTxID != initiationTx.ID {
+					t.Fatalf("expected InitiationTxID = %s, got %s", initiationTx.ID, note.InitiationTxID)
+				}
+				if note.CompletionTxID != confirmedTx.ID {
+					t.Fatalf("expected CompletionTxID = %s, got %s", confirmedTx.ID, note.CompletionTxID)
+				}
+				if note.SourceAssetID != initiationTx.AssetID {
+					t.Fatalf("expected SourceAssetID = %d, got %d", initiationTx.AssetID, note.SourceAssetID)
 				}
 			}
 		})

@@ -693,6 +693,47 @@ type Withdrawer interface {
 	Withdraw(address string, value, feeRate uint64) (Coin, error)
 }
 
+// Bridger is a wallet that can bridge funds to and receive bridged funds from
+// another blockchain.
+type Bridger interface {
+	// ApproveBridgeContract submits a transaction to authorize the bridge contract
+	// to manage the user's tokens. This step is optional for some assets.
+	// Use BridgeContractApprovalStatus to determine if approval is necessary.
+	ApproveBridgeContract(ctx context.Context) (string, error)
+
+	// UnapproveBridgeContract submits a transaction to revoke the bridge contract's
+	// permission to manage the user's tokens.
+	UnapproveBridgeContract(ctx context.Context) (string, error)
+
+	// BridgeContractApprovalStatus retrieves the current approval state of the bridge contract.
+	// Returns Approved for assets that don't require explicit approval.
+	BridgeContractApprovalStatus(ctx context.Context) (ApprovalStatus, error)
+
+	// InitiateBridge starts a fund transfer to the specified destination chain.
+	// If a completion transaction is needed, a BridgeReadyToCompleteNote will
+	// be emitted. Some assets do not require a completion transaction.
+	InitiateBridge(ctx context.Context, amt uint64, dest uint32) (txID string, err error)
+
+	// CompleteBridge finalizes a bridge by executing a transaction on the
+	// destination chain to issue the user's tokens. Some assets require
+	// multiple transactions to complete the bridge. Once all the transactions
+	// are confirmed, a BridgeCompletedNote will be emitted.
+	CompleteBridge(ctx context.Context, bridgeTx *BridgeCounterpartTx, amount uint64, mintData []byte) error
+
+	// MarkBridgeComplete should be invoked after the completion transaction
+	// is confirmed on the destination chain to update the bridge status.
+	// Without this, the bridge will still be in the pending state.
+	MarkBridgeComplete(initiationTxID string, completionTxID string, completionTime uint64)
+
+	// PendingBridges lists all uncompleted bridge transactions on the blockchain.
+	// For token wallets, this includes pending bridges for other tokens on the same chain.
+	PendingBridges() ([]*WalletTransaction, error)
+
+	// BridgeHistory retrieves a record of bridge transactions on the blockchain.
+	// For token wallets, this includes history for other tokens on the same chain.
+	BridgeHistory(n int, refID *string, past bool) ([]*WalletTransaction, error)
+}
+
 // Sweeper is a wallet that can clear the entire balance of the wallet/account
 // to an address. Similar to Withdraw, but no input value is required.
 type Sweeper interface {
@@ -945,6 +986,18 @@ const (
 	NotApproved
 )
 
+func (a ApprovalStatus) String() string {
+	switch a {
+	case Approved:
+		return "approved"
+	case Pending:
+		return "pending"
+	case NotApproved:
+		return "not approved"
+	}
+	return "unknown"
+}
+
 // TokenApprover is implemented by wallets that require an approval before
 // trading.
 type TokenApprover interface {
@@ -1122,6 +1175,8 @@ const (
 	// and was unable to determine if the transaction was a swap or a send.
 	SwapOrSend
 	Mix
+	InitiateBridge
+	CompleteBridge
 )
 
 // IncomingTxType returns true if the wallet's balance increases due to a
@@ -1139,6 +1194,23 @@ type BondTxInfo struct {
 	LockTime uint64 `json:"lockTime"`
 	// BondID is the ID of the bond.
 	BondID dex.Bytes `json:"bondID"`
+}
+
+// NoCompletionRequiredBridgeTxID is a placeholder ID used when a bridge
+// transaction does not require a corresponding completion transaction. This
+// typically occurs when bridging from a base chain to a Layer 2, where the
+// network automatically allocates tokens to the recipient without a mint step.
+const NoCompletionRequiredBridgeTxID = "no-completion-required"
+
+// BridgeCounterpartTx identifies an initiation transaction if it is part of a
+// completion transaction, or a completion transaction if it is part of an
+// initiation transaction.
+type BridgeCounterpartTx struct {
+	ID      string `json:"id"`
+	AssetID uint32 `json:"assetID"`
+	// CompletionTime is only populated for initiation transactions. It is the
+	// time when the completion transaction was mined.
+	CompletionTime uint64 `json:"completionTime"`
 }
 
 // WalletTransaction represents a transaction that was made by a wallet.
@@ -1169,6 +1241,10 @@ type WalletTransaction struct {
 	// Rejected will be true the transaction was rejected and did not have any
 	// effect, though fees were incurred.
 	Rejected bool `json:"rejected,omitempty"`
+	// BridgeCounterpartTx is only populated for Bridge related transactions.
+	// It contains the ID and asset ID of the transaction that either initiated
+	// the bridge or completed it.
+	BridgeCounterpartTx *BridgeCounterpartTx `json:"bridgeCounterpartTx,omitempty"`
 }
 
 // WalletHistorian is a wallet that is able to retrieve the history of all
@@ -1497,6 +1573,26 @@ type TipChangeNote struct {
 	Data any    `json:"data"`
 }
 
+// BridgeReadyToCompleteNode is emitted by the wallet that initiated a bridge
+// to indicate that the destination wallet can complete the bridge.
+type BridgeReadyToCompleteNote struct {
+	baseWalletNotification
+	DestAssetID        uint32 `json:"destAssetID"`
+	InitiateBridgeTxID string `json:"bridgeTxID"`
+	Amount             uint64 `json:"amount"`
+	Data               []byte `json:"data"`
+}
+
+// BridgeCompletedNote is emitted by the wallet that completed a bridge to
+// notify that the bridge has been completed.
+type BridgeCompletedNote struct {
+	baseWalletNotification
+	SourceAssetID  uint32 `json:"sourceAssetID"`
+	InitiationTxID string `json:"initiationTxID"`
+	CompletionTxID string `json:"completionTxIDs"`
+	CompletionTime uint64 `json:"completionTime"`
+}
+
 // BalanceChangeNote can be sent when the wallet detects a balance change
 // between tip changes.
 type BalanceChangeNote struct {
@@ -1627,6 +1723,36 @@ func (e *WalletEmitter) ActionRequired(uniqueID, actionID string, payload any) {
 		UniqueID: uniqueID,
 		ActionID: actionID,
 		Payload:  payload,
+	})
+}
+
+// BridgeReadyToComplete is emitted by the wallet which initiated a bridge to
+// notify that the destination chain is ready to complete the bridge.
+func (e *WalletEmitter) BridgeReadyToComplete(destAssetID uint32, bridgeTxID string, amount uint64, data []byte) {
+	e.emit(&BridgeReadyToCompleteNote{
+		baseWalletNotification: baseWalletNotification{
+			AssetID: e.assetID,
+			Route:   "bridgeReadyToComplete",
+		},
+		DestAssetID:        destAssetID,
+		InitiateBridgeTxID: bridgeTxID,
+		Amount:             amount,
+		Data:               data,
+	})
+}
+
+// BridgeCompleted is emitted by the wallet which completed a bridge to
+// notify that the bridge has been completed.
+func (e *WalletEmitter) BridgeCompleted(sourceAssetID uint32, initiationTxID string, completionTxID string, completionTime uint64) {
+	e.emit(&BridgeCompletedNote{
+		baseWalletNotification: baseWalletNotification{
+			AssetID: e.assetID,
+			Route:   "bridgeCompleted",
+		},
+		SourceAssetID:  sourceAssetID,
+		InitiationTxID: initiationTxID,
+		CompletionTxID: completionTxID,
+		CompletionTime: completionTime,
 	})
 }
 

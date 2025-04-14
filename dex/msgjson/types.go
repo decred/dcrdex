@@ -98,6 +98,7 @@ const (
 	RPCUpdateRunningBotCfgError          // 80
 	RPCUpdateRunningBotInvError          // 81
 	RPCMMStatusError                     // 82
+	RPCBridgeError                       // 83
 )
 
 // Routes are destinations for a "payload" of data. The type of data being

@@ -5525,6 +5525,119 @@ func (c *Core) ApproveTokenFee(assetID uint32, version uint32, approval bool) (u
 	return wallet.ApprovalFee(version, approval)
 }
 
+// BridgeContractApprovalStatus returns the approval status of the bridge
+// contract for the specified asset.
+func (c *Core) BridgeContractApprovalStatus(assetID uint32) (asset.ApprovalStatus, error) {
+	wallet, err := c.connectedWallet(assetID)
+	if err != nil {
+		return 0, err
+	}
+
+	return wallet.BridgeContractApprovalStatus(c.ctx)
+}
+
+// ApproveBridgeContract approves the bridge contract for the specified asset.
+func (c *Core) ApproveBridgeContract(assetID uint32) (string, error) {
+	wallet, err := c.connectedWallet(assetID)
+	if err != nil {
+		return "", err
+	}
+
+	if !wallet.unlocked() {
+		return "", fmt.Errorf("wallet %s must be unlocked", unbip(assetID))
+	}
+
+	err = wallet.checkPeersAndSyncStatus()
+	if err != nil {
+		return "", err
+	}
+
+	txID, err := wallet.ApproveBridgeContract(c.ctx)
+	if err != nil {
+		return "", err
+	}
+
+	return txID, nil
+}
+
+// UnapproveBridgeContract unapproves the bridge contract for the specified
+// asset.
+func (c *Core) UnapproveBridgeContract(assetID uint32) (string, error) {
+	wallet, err := c.connectedWallet(assetID)
+	if err != nil {
+		return "", err
+	}
+
+	if !wallet.unlocked() {
+		return "", fmt.Errorf("wallet %s must be unlocked", unbip(assetID))
+	}
+
+	err = wallet.checkPeersAndSyncStatus()
+	if err != nil {
+		return "", err
+	}
+
+	txID, err := wallet.UnapproveBridgeContract(c.ctx)
+	if err != nil {
+		return "", err
+	}
+
+	return txID, nil
+}
+
+// Bridge initiates a bridge.
+func (c *Core) Bridge(fromAssetID, toAssetID uint32, amt uint64) (txID string, err error) {
+	// Connect and unlock the source wallet.
+	sourceWallet, err := c.connectedWallet(fromAssetID)
+	if err != nil {
+		return "", err
+	}
+	if !sourceWallet.unlocked() {
+		return "", fmt.Errorf("wallet %s must be unlocked", unbip(fromAssetID))
+	}
+	err = sourceWallet.checkPeersAndSyncStatus()
+	if err != nil {
+		return "", err
+	}
+
+	// Connect and unlock the destination wallet.
+	destWallet, err := c.connectedWallet(toAssetID)
+	if err != nil {
+		return "", err
+	}
+	if !destWallet.unlocked() {
+		return "", fmt.Errorf("wallet %s must be unlocked", unbip(toAssetID))
+	}
+	err = destWallet.checkPeersAndSyncStatus()
+	if err != nil {
+		return "", err
+	}
+
+	// Initiate the bridge.
+	return sourceWallet.InitiateBridge(c.ctx, amt, toAssetID)
+}
+
+// PendingBridges returns the pending bridges originating on the chain of the
+// given asset ID.
+func (c *Core) PendingBridges(assetID uint32) ([]*asset.WalletTransaction, error) {
+	wallet, found := c.wallet(assetID)
+	if !found {
+		return nil, newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
+	}
+
+	return wallet.PendingBridges()
+}
+
+// BridgeHistory returns the bridge history for the given asset ID.
+func (c *Core) BridgeHistory(assetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
+	wallet, found := c.wallet(assetID)
+	if !found {
+		return nil, newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
+	}
+
+	return wallet.BridgeHistory(n, refID, past)
+}
+
 // EstimateSendTxFee returns an estimate of the tx fee needed to send or
 // withdraw the specified amount.
 func (c *Core) EstimateSendTxFee(address string, assetID uint32, amount uint64, subtract, maxWithdraw bool) (fee uint64, isValidAddress bool, err error) {
@@ -9464,6 +9577,34 @@ func (c *Core) peerChange(w *xcWallet, numPeers uint32, peerChangeErr error) {
 	}
 }
 
+func (c *Core) handleBridgeReadyToComplete(n *asset.BridgeReadyToCompleteNote) {
+	destWallet, err := c.connectedWallet(n.DestAssetID)
+	if err != nil {
+		c.log.Errorf("Bridge %s funds are ready to complete, but wallet unable to connect.", unbip(n.DestAssetID))
+		return
+	}
+
+	bridgeTx := &asset.BridgeCounterpartTx{
+		AssetID: n.AssetID,
+		ID:      n.InitiateBridgeTxID,
+	}
+
+	err = destWallet.CompleteBridge(c.ctx, bridgeTx, n.Amount, n.Data)
+	if err != nil {
+		c.log.Errorf("Error completing bridge: %v", err)
+	}
+}
+
+func (c *Core) handleBridgeCompleted(n *asset.BridgeCompletedNote) {
+	sourceWallet, err := c.connectedWallet(n.SourceAssetID)
+	if err != nil {
+		c.log.Errorf("Bridge %s funds are completed, but wallet unable to connect.", unbip(n.SourceAssetID))
+		return
+	}
+
+	sourceWallet.MarkBridgeComplete(n.InitiationTxID, n.CompletionTxID, n.CompletionTime)
+}
+
 // handleWalletNotification processes an asynchronous wallet notification.
 func (c *Core) handleWalletNotification(ni asset.WalletNotification) {
 	switch n := ni.(type) {
@@ -9494,6 +9635,10 @@ func (c *Core) handleWalletNotification(ni asset.WalletNotification) {
 		c.requestedActionMtx.Unlock()
 	case *asset.ActionResolvedNote:
 		c.deleteRequestedAction(n.UniqueID)
+	case *asset.BridgeReadyToCompleteNote:
+		c.handleBridgeReadyToComplete(n)
+	case *asset.BridgeCompletedNote:
+		c.handleBridgeCompleted(n)
 	}
 	c.notify(newWalletNote(ni))
 }
