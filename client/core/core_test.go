@@ -717,9 +717,9 @@ type TXCWallet struct {
 	findBondErr                 error
 	maxSwaps, maxRedeems        int
 
-	confirmRedemptionResult *asset.ConfirmRedemptionStatus
-	confirmRedemptionErr    error
-	confirmRedemptionCalled bool
+	confirmTxResult *asset.ConfirmTxStatus
+	confirmTxErr    error
+	confirmTxCalled bool
 
 	estFee    uint64
 	estFeeErr error
@@ -796,9 +796,9 @@ func (w *TXCWallet) Balance() (*asset.Balance, error) {
 	return w.bal, nil
 }
 
-func (w *TXCWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset.Redemption, feeSuggestion uint64) (*asset.ConfirmRedemptionStatus, error) {
-	w.confirmRedemptionCalled = true
-	return w.confirmRedemptionResult, w.confirmRedemptionErr
+func (w *TXCWallet) ConfirmTransaction(coinID dex.Bytes, confirmTx *asset.ConfirmTx, feeSuggestion uint64) (*asset.ConfirmTxStatus, error) {
+	w.confirmTxCalled = true
+	return w.confirmTxResult, w.confirmTxErr
 }
 
 func (w *TXCWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uint64, error) {
@@ -4553,8 +4553,8 @@ func TestTradeTracking(t *testing.T) {
 	btcWallet.address = "12DXGkvxFjuq5btXYkwWfBZaz1rVwFgini"
 	btcWallet.Unlock(rig.crypter)
 
-	tBtcWallet.confirmRedemptionErr = errors.New("")
-	tDcrWallet.confirmRedemptionErr = errors.New("")
+	tBtcWallet.confirmTxErr = errors.New("")
+	tDcrWallet.confirmTxErr = errors.New("")
 
 	matchSize := 4 * dcrBtcLotSize
 	cancelledQty := dcrBtcLotSize
@@ -5364,6 +5364,7 @@ func TestRefunds(t *testing.T) {
 	tCore.wallets[tACCTAsset.ID] = ethWallet
 	ethWallet.address = "18d65fb8d60c1199bb1ad381be47aa692b482605"
 	ethWallet.Unlock(rig.crypter)
+	tEthWallet.confirmTxResult = new(asset.ConfirmTxStatus)
 
 	checkStatus := func(tag string, match *matchTracker, wantStatus order.MatchStatus) {
 		t.Helper()
@@ -8756,7 +8757,7 @@ func TestMatchStatusResolution(t *testing.T) {
 	}
 }
 
-func TestConfirmRedemption(t *testing.T) {
+func TestConfirmTx(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()
 	dc := rig.dc
@@ -8785,7 +8786,7 @@ func TestConfirmRedemption(t *testing.T) {
 	tBtcWallet.redeemCoins = []dex.Bytes{tUpdatedCoinID}
 
 	ourContract := encode.RandomBytes(90)
-	setupMatch := func(status order.MatchStatus, side order.MatchSide) {
+	setupMatch := func(status order.MatchStatus, side order.MatchSide, isRefunded bool) {
 		matchID := ordertest.RandomMatchID()
 		_, auditInfo := tMsgAudit(oid, matchID, addr, 0, secretHash[:])
 		matchTime := time.Now()
@@ -8843,8 +8844,16 @@ func TestConfirmRedemption(t *testing.T) {
 				proof.Secret = secret
 			}
 		}
+		if status == order.MatchComplete {
+			proof.TakerRedeem = tCoinID
+		}
 		if status >= order.MatchComplete {
 			proof.TakerRedeem = tCoinID
+		}
+		if isRefunded {
+			proof.RefundCoin = tCoinID
+		} else {
+			proof.RefundCoin = nil
 		}
 	}
 
@@ -8854,19 +8863,21 @@ func TestConfirmRedemption(t *testing.T) {
 	}
 
 	tests := []struct {
-		name                    string
-		matchStatus             order.MatchStatus
-		matchSide               order.MatchSide
-		expectedNotifications   []*note
-		confirmRedemptionResult *asset.ConfirmRedemptionStatus
-		confirmRedemptionErr    error
+		name                                   string
+		matchStatus                            order.MatchStatus
+		matchSide                              order.MatchSide
+		expectedNotifications                  []*note
+		confirmTxResult, refundConfirmTxResult *asset.ConfirmTxStatus
+		confirmTxErr, refundConfirmTxErr       error
 
-		expectConfirmRedemptionCalled bool
-		expectedStatus                order.MatchStatus
-		expectTicksDelayed            bool
+		expectConfirmTxCalled, expectRefundConfirmTxCalled bool
+		expectedStatus                                     order.MatchStatus
+		expectTicksDelayed                                 bool
+
+		isRefund bool
 	}{
 		{
-			name:        "maker, makerRedeemed, confirmedRedemption",
+			name:        "maker, makerRedeemed, confirmedTx",
 			matchStatus: order.MakerRedeemed,
 			matchSide:   order.Maker,
 			expectedNotifications: []*note{
@@ -8875,13 +8886,13 @@ func TestConfirmRedemption(t *testing.T) {
 					topic:    TopicRedemptionConfirmed,
 				},
 			},
-			confirmRedemptionResult: &asset.ConfirmRedemptionStatus{
+			confirmTxResult: &asset.ConfirmTxStatus{
 				Confs:  10,
 				Req:    10,
 				CoinID: tCoinID,
 			},
-			expectConfirmRedemptionCalled: true,
-			expectedStatus:                order.MatchConfirmed,
+			expectConfirmTxCalled: true,
+			expectedStatus:        order.MatchConfirmed,
 		},
 		{
 			name:        "maker, makerRedeemed, confirmedRedemption, more confs than required",
@@ -8893,13 +8904,13 @@ func TestConfirmRedemption(t *testing.T) {
 					topic:    TopicRedemptionConfirmed,
 				},
 			},
-			confirmRedemptionResult: &asset.ConfirmRedemptionStatus{
+			confirmTxResult: &asset.ConfirmTxStatus{
 				Confs:  15,
 				Req:    10,
 				CoinID: tCoinID,
 			},
-			expectConfirmRedemptionCalled: true,
-			expectedStatus:                order.MatchConfirmed,
+			expectConfirmTxCalled: true,
+			expectedStatus:        order.MatchConfirmed,
 		},
 		{
 			name:        "taker, matchComplete, confirmedRedemption",
@@ -8911,13 +8922,13 @@ func TestConfirmRedemption(t *testing.T) {
 					topic:    TopicRedemptionConfirmed,
 				},
 			},
-			confirmRedemptionResult: &asset.ConfirmRedemptionStatus{
+			confirmTxResult: &asset.ConfirmTxStatus{
 				Confs:  10,
 				Req:    10,
 				CoinID: tCoinID,
 			},
-			expectConfirmRedemptionCalled: true,
-			expectedStatus:                order.MatchConfirmed,
+			expectConfirmTxCalled: true,
+			expectedStatus:        order.MatchConfirmed,
 		},
 		{
 			name:        "maker, makerRedeemed, incomplete",
@@ -8929,13 +8940,13 @@ func TestConfirmRedemption(t *testing.T) {
 					topic:    TopicConfirms,
 				},
 			},
-			confirmRedemptionResult: &asset.ConfirmRedemptionStatus{
+			confirmTxResult: &asset.ConfirmTxStatus{
 				Confs:  5,
 				Req:    10,
 				CoinID: tCoinID,
 			},
-			expectConfirmRedemptionCalled: true,
-			expectedStatus:                order.MakerRedeemed,
+			expectConfirmTxCalled: true,
+			expectedStatus:        order.MakerRedeemed,
 		},
 		{
 			name:        "maker, makerRedeemed, replacedTx",
@@ -8951,13 +8962,13 @@ func TestConfirmRedemption(t *testing.T) {
 					topic:    TopicConfirms,
 				},
 			},
-			confirmRedemptionResult: &asset.ConfirmRedemptionStatus{
+			confirmTxResult: &asset.ConfirmTxStatus{
 				Confs:  0,
 				Req:    10,
 				CoinID: tUpdatedCoinID,
 			},
-			expectConfirmRedemptionCalled: true,
-			expectedStatus:                order.MakerRedeemed,
+			expectConfirmTxCalled: true,
+			expectedStatus:        order.MakerRedeemed,
 		},
 		{
 			name:        "taker, matchComplete, replacedTx",
@@ -8973,13 +8984,13 @@ func TestConfirmRedemption(t *testing.T) {
 					topic:    TopicConfirms,
 				},
 			},
-			confirmRedemptionResult: &asset.ConfirmRedemptionStatus{
+			confirmTxResult: &asset.ConfirmTxStatus{
 				Confs:  0,
 				Req:    10,
 				CoinID: tUpdatedCoinID,
 			},
-			expectConfirmRedemptionCalled: true,
-			expectedStatus:                order.MatchComplete,
+			expectConfirmTxCalled: true,
+			expectedStatus:        order.MatchComplete,
 		},
 		{
 			// This case could happen if the dex was shut down right after
@@ -8997,90 +9008,260 @@ func TestConfirmRedemption(t *testing.T) {
 					topic:    TopicRedemptionConfirmed,
 				},
 			},
-			confirmRedemptionResult: &asset.ConfirmRedemptionStatus{
+			confirmTxResult: &asset.ConfirmTxStatus{
 				Confs:  10,
 				Req:    10,
 				CoinID: tUpdatedCoinID,
 			},
-			expectConfirmRedemptionCalled: true,
-			expectedStatus:                order.MatchConfirmed,
+			expectConfirmTxCalled: true,
+			expectedStatus:        order.MatchConfirmed,
 		},
 		{
-			name:                          "maker, makerRedeemed, error",
-			matchStatus:                   order.MakerRedeemed,
-			matchSide:                     order.Maker,
-			confirmRedemptionErr:          errors.New("err"),
-			expectedStatus:                order.MakerRedeemed,
-			expectTicksDelayed:            true,
-			expectConfirmRedemptionCalled: true,
+			name:                  "maker, makerRedeemed, error",
+			matchStatus:           order.MakerRedeemed,
+			matchSide:             order.Maker,
+			confirmTxErr:          errors.New("err"),
+			expectedStatus:        order.MakerRedeemed,
+			expectTicksDelayed:    true,
+			expectConfirmTxCalled: true,
 		},
 		{
-			name:                 "maker, makerRedeemed, swap refunded error",
-			matchStatus:          order.MakerRedeemed,
-			matchSide:            order.Maker,
-			confirmRedemptionErr: asset.ErrSwapRefunded,
-			expectedStatus:       order.MatchConfirmed,
+			name:           "maker, makerRedeemed, swap refunded error",
+			matchStatus:    order.MakerRedeemed,
+			matchSide:      order.Maker,
+			confirmTxErr:   asset.ErrSwapRefunded,
+			expectedStatus: order.MatchConfirmed,
 			expectedNotifications: []*note{
 				{
 					severity: db.ErrorLevel,
 					topic:    TopicSwapRefunded,
 				},
 			},
-			expectConfirmRedemptionCalled: true,
+			expectConfirmTxCalled: true,
 		},
 		{
-			name:                 "taker, takerRedeemed, redemption tx rejected error",
-			matchStatus:          order.MatchComplete,
-			matchSide:            order.Taker,
-			confirmRedemptionErr: asset.ErrTxRejected,
-			expectedStatus:       order.MatchComplete,
+			name:           "taker, takerRedeemed, redemption tx rejected error",
+			matchStatus:    order.MatchComplete,
+			matchSide:      order.Taker,
+			confirmTxErr:   asset.ErrTxRejected,
+			expectedStatus: order.MatchComplete,
 			expectedNotifications: []*note{
 				{
 					severity: db.Data,
 					topic:    TopicRedeemRejected,
 				},
 			},
-			expectConfirmRedemptionCalled: true,
+			expectConfirmTxCalled: true,
 		},
 		{
-			name:                          "maker, makerRedeemed, redemption tx lost",
-			matchStatus:                   order.MakerRedeemed,
-			matchSide:                     order.Maker,
-			confirmRedemptionErr:          asset.ErrTxLost,
-			expectedStatus:                order.TakerSwapCast,
-			expectConfirmRedemptionCalled: true,
+			name:                  "maker, makerRedeemed, redemption tx lost",
+			matchStatus:           order.MakerRedeemed,
+			matchSide:             order.Maker,
+			confirmTxErr:          asset.ErrTxLost,
+			expectedStatus:        order.TakerSwapCast,
+			expectConfirmTxCalled: true,
 		},
 		{
-			name:                          "taker, takerRedeemed, redemption tx lost",
-			matchStatus:                   order.MatchComplete,
-			matchSide:                     order.Taker,
-			confirmRedemptionErr:          asset.ErrTxLost,
-			expectedStatus:                order.MakerRedeemed,
-			expectConfirmRedemptionCalled: true,
+			name:                  "taker, takerRedeemed, redemption tx lost",
+			matchStatus:           order.MatchComplete,
+			matchSide:             order.Taker,
+			confirmTxErr:          asset.ErrTxLost,
+			expectedStatus:        order.MakerRedeemed,
+			expectConfirmTxCalled: true,
 		},
 		{
-			name:                          "maker, matchConfirmed",
-			matchStatus:                   order.MatchConfirmed,
-			matchSide:                     order.Maker,
-			expectedStatus:                order.MatchConfirmed,
-			expectedNotifications:         []*note{},
-			expectConfirmRedemptionCalled: false,
+			name:                  "maker, matchConfirmed",
+			matchStatus:           order.MatchConfirmed,
+			matchSide:             order.Maker,
+			expectedStatus:        order.MatchConfirmed,
+			expectedNotifications: []*note{},
+			expectConfirmTxCalled: false,
 		},
 		{
-			name:                          "maker, TakerSwapCast",
-			matchStatus:                   order.TakerSwapCast,
-			matchSide:                     order.Maker,
-			expectedStatus:                order.TakerSwapCast,
-			expectedNotifications:         []*note{},
-			expectConfirmRedemptionCalled: false,
+			name:                  "maker, TakerSwapCast",
+			matchStatus:           order.TakerSwapCast,
+			matchSide:             order.Maker,
+			expectedStatus:        order.TakerSwapCast,
+			expectedNotifications: []*note{},
+			expectConfirmTxCalled: false,
 		},
 		{
-			name:                          "taker, TakerSwapCast",
-			matchStatus:                   order.TakerSwapCast,
-			matchSide:                     order.Taker,
-			expectedStatus:                order.TakerSwapCast,
-			expectedNotifications:         []*note{},
-			expectConfirmRedemptionCalled: false,
+			name:                  "taker, TakerSwapCast",
+			matchStatus:           order.TakerSwapCast,
+			matchSide:             order.Taker,
+			expectedStatus:        order.TakerSwapCast,
+			expectedNotifications: []*note{},
+			expectConfirmTxCalled: false,
+		},
+		{
+			name:        "maker, taker swap cast, confirmedTx, refund",
+			matchStatus: order.MakerSwapCast,
+			matchSide:   order.Maker,
+			expectedNotifications: []*note{
+				{
+					severity: db.Success,
+					topic:    TopicRefundConfirmed,
+				},
+			},
+			refundConfirmTxResult: &asset.ConfirmTxStatus{
+				Confs:  10,
+				Req:    10,
+				CoinID: tCoinID,
+			},
+			expectRefundConfirmTxCalled: true,
+			expectedStatus:              order.MatchConfirmed,
+			isRefund:                    true,
+		},
+		{
+			name:        "taker, takerSwapCast, confirmedTx, refund",
+			matchStatus: order.TakerSwapCast,
+			matchSide:   order.Taker,
+			expectedNotifications: []*note{
+				{
+					severity: db.Success,
+					topic:    TopicRefundConfirmed,
+				},
+			},
+			refundConfirmTxResult: &asset.ConfirmTxStatus{
+				Confs:  10,
+				Req:    10,
+				CoinID: tCoinID,
+			},
+			expectRefundConfirmTxCalled: true,
+			expectedStatus:              order.MatchConfirmed,
+			isRefund:                    true,
+		},
+		{
+			name:        "maker, makerSwapCast, incomplete, refund",
+			matchStatus: order.MakerSwapCast,
+			matchSide:   order.Maker,
+			expectedNotifications: []*note{
+				{
+					severity: db.Data,
+					topic:    TopicConfirms,
+				},
+			},
+			refundConfirmTxResult: &asset.ConfirmTxStatus{
+				Confs:  5,
+				Req:    10,
+				CoinID: tCoinID,
+			},
+			expectRefundConfirmTxCalled: true,
+			expectedStatus:              order.MakerSwapCast,
+			isRefund:                    true,
+		},
+		{
+			name:        "taker, takerSwapCast, replacedTx, refund",
+			matchStatus: order.TakerSwapCast,
+			matchSide:   order.Taker,
+			expectedNotifications: []*note{
+				{
+					severity: db.WarningLevel,
+					topic:    TopicRefundResubmitted,
+				},
+				{
+					severity: db.Data,
+					topic:    TopicConfirms,
+				},
+			},
+			refundConfirmTxResult: &asset.ConfirmTxStatus{
+				Confs:  0,
+				Req:    10,
+				CoinID: tUpdatedCoinID,
+			},
+			expectRefundConfirmTxCalled: true,
+			expectedStatus:              order.TakerSwapCast,
+			isRefund:                    true,
+		},
+		{
+			name:        "maker, makerSwapCast, replacedTx confirmed, refund",
+			matchStatus: order.MakerSwapCast,
+			matchSide:   order.Maker,
+			expectedNotifications: []*note{
+				{
+					severity: db.WarningLevel,
+					topic:    TopicRefundResubmitted,
+				},
+				{
+					severity: db.Success,
+					topic:    TopicRefundConfirmed,
+				},
+			},
+			refundConfirmTxResult: &asset.ConfirmTxStatus{
+				Confs:  15,
+				Req:    10,
+				CoinID: tUpdatedCoinID,
+			},
+			expectRefundConfirmTxCalled: true,
+			expectedStatus:              order.MatchConfirmed,
+			isRefund:                    true,
+		},
+		{
+			name:                        "maker, makerSwapCast, error",
+			matchStatus:                 order.MakerSwapCast,
+			matchSide:                   order.Maker,
+			refundConfirmTxErr:          errors.New("err"),
+			expectedStatus:              order.MakerSwapCast,
+			expectTicksDelayed:          true,
+			expectRefundConfirmTxCalled: true,
+			isRefund:                    true,
+		},
+		{
+			name:               "maker, makerSwapCast, swap redeemed error",
+			matchStatus:        order.MakerSwapCast,
+			matchSide:          order.Maker,
+			refundConfirmTxErr: asset.ErrSwapRedeemed,
+			expectedStatus:     order.MatchConfirmed,
+			expectedNotifications: []*note{
+				{
+					severity: db.ErrorLevel,
+					topic:    TopicSwapRedeemed,
+				},
+			},
+			expectRefundConfirmTxCalled: true,
+			isRefund:                    true,
+		},
+		{
+			name:               "taker, takerSwapCast, refund tx rejected error",
+			matchStatus:        order.TakerSwapCast,
+			matchSide:          order.Taker,
+			refundConfirmTxErr: asset.ErrTxRejected,
+			expectedStatus:     order.TakerSwapCast,
+			expectedNotifications: []*note{
+				{
+					severity: db.Data,
+					topic:    TopicRefundRejected,
+				},
+			},
+			expectRefundConfirmTxCalled: true,
+			isRefund:                    true,
+		},
+		{
+			name:                        "maker, makerSwapCast, refund tx lost",
+			matchStatus:                 order.MakerSwapCast,
+			matchSide:                   order.Maker,
+			refundConfirmTxErr:          asset.ErrTxLost,
+			expectedStatus:              order.MakerSwapCast,
+			expectRefundConfirmTxCalled: true,
+			isRefund:                    true,
+		},
+		{
+			name:                        "taker, takerSwapCast, refund tx lost",
+			matchStatus:                 order.TakerSwapCast,
+			matchSide:                   order.Taker,
+			refundConfirmTxErr:          asset.ErrTxLost,
+			expectedStatus:              order.TakerSwapCast,
+			expectRefundConfirmTxCalled: true,
+			isRefund:                    true,
+		},
+		{
+			name:                  "maker, matchConfirmed, refund",
+			matchStatus:           order.MatchConfirmed,
+			matchSide:             order.Maker,
+			expectedStatus:        order.MatchConfirmed,
+			expectedNotifications: []*note{},
+			expectConfirmTxCalled: false,
+			isRefund:              true,
 		},
 	}
 
@@ -9088,18 +9269,27 @@ func TestConfirmRedemption(t *testing.T) {
 
 	for _, test := range tests {
 		tracker.mtx.Lock()
-		setupMatch(test.matchStatus, test.matchSide)
+		setupMatch(test.matchStatus, test.matchSide, test.isRefund)
 		tracker.mtx.Unlock()
 
-		tBtcWallet.confirmRedemptionResult = test.confirmRedemptionResult
-		tBtcWallet.confirmRedemptionErr = test.confirmRedemptionErr
-		tBtcWallet.confirmRedemptionCalled = false
+		tBtcWallet.confirmTxResult = test.confirmTxResult
+		tBtcWallet.confirmTxErr = test.confirmTxErr
+		tBtcWallet.confirmTxCalled = false
+
+		tDcrWallet.confirmTxResult = test.refundConfirmTxResult
+		tDcrWallet.confirmTxErr = test.refundConfirmTxErr
+		tDcrWallet.confirmTxCalled = false
 
 		tCore.tickAsset(dc, tUTXOAssetB.ID)
 
-		if tBtcWallet.confirmRedemptionCalled != test.expectConfirmRedemptionCalled {
-			t.Fatalf("%s: expected confirm redemption to be called=%v but got=%v",
-				test.name, test.expectConfirmRedemptionCalled, tBtcWallet.confirmRedemptionCalled)
+		if tBtcWallet.confirmTxCalled != test.expectConfirmTxCalled {
+			t.Fatalf("%s: expected confirm tx for redemption to be called=%v but got=%v",
+				test.name, test.expectConfirmTxCalled, tBtcWallet.confirmTxCalled)
+		}
+
+		if tDcrWallet.confirmTxCalled != test.expectRefundConfirmTxCalled {
+			t.Fatalf("%s: expected confirm tx for refund to be called=%v but got=%v",
+				test.name, test.expectRefundConfirmTxCalled, tDcrWallet.confirmTxCalled)
 		}
 
 		for _, expectedNotification := range test.expectedNotifications {
@@ -9123,20 +9313,27 @@ func TestConfirmRedemption(t *testing.T) {
 		}
 
 		tracker.mtx.RLock()
-		if test.confirmRedemptionResult != nil {
+		if test.confirmTxResult != nil {
 			var redeemCoin order.CoinID
 			if test.matchSide == order.Maker {
 				redeemCoin = match.MetaData.Proof.MakerRedeem
 			} else {
 				redeemCoin = match.MetaData.Proof.TakerRedeem
 			}
-			if !bytes.Equal(redeemCoin, test.confirmRedemptionResult.CoinID) {
-				t.Fatalf("%s: expected coin %v != actual %v", test.name, test.confirmRedemptionResult.CoinID, redeemCoin)
+			if !bytes.Equal(redeemCoin, test.confirmTxResult.CoinID) {
+				t.Fatalf("%s: expected coin %v != actual %v", test.name, test.confirmTxResult.CoinID, redeemCoin)
 			}
-			if test.confirmRedemptionResult.Confs >= test.confirmRedemptionResult.Req {
+			if test.confirmTxResult.Confs >= test.confirmTxResult.Req {
 				if len(tDcrWallet.returnedContracts) != 1 || !bytes.Equal(ourContract, tDcrWallet.returnedContracts[0]) {
 					t.Fatalf("%s: refund address not returned", test.name)
 				}
+			}
+		}
+
+		if test.refundConfirmTxResult != nil {
+			refundCoinID := match.MetaData.Proof.RefundCoin
+			if !bytes.Equal(refundCoinID, test.refundConfirmTxResult.CoinID) {
+				t.Fatalf("%s: expected coin %v != actual %v", test.name, test.refundConfirmTxResult.CoinID, refundCoinID)
 			}
 		}
 

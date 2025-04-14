@@ -4200,7 +4200,7 @@ func TestEstimateSendTxFee(t *testing.T) {
 	}
 }
 
-func TestConfirmRedemption(t *testing.T) {
+func TestConfirmTransaction(t *testing.T) {
 	wallet, node, shutdown := tNewWallet()
 	defer shutdown()
 
@@ -4210,6 +4210,7 @@ func TestConfirmRedemption(t *testing.T) {
 	lockTime := time.Now().Add(time.Hour * 12)
 	addr := tPKHAddr.String()
 
+	node.newAddr = tPKHAddr
 	contract, err := dexdcr.MakeContract(addr, addr, secretHash[:], lockTime.Unix(), tChainParams)
 	if err != nil {
 		t.Fatalf("error making swap contract: %v", err)
@@ -4274,10 +4275,7 @@ func TestConfirmRedemption(t *testing.T) {
 		SecretHash: secretHash[:],
 	}
 
-	redemption := &asset.Redemption{
-		Spends: ci,
-		Secret: secret,
-	}
+	confirmTx := asset.NewRedeemConfTx(ci, secret)
 
 	coinID := coin.ID()
 	// Inverting the first byte.
@@ -4285,56 +4283,62 @@ func TestConfirmRedemption(t *testing.T) {
 
 	tests := []struct {
 		name             string
-		redemption       *asset.Redemption
+		confirmTx        *asset.ConfirmTx
 		coinID           []byte
 		wantErr          bool
 		bestBlockErr     error
 		txRes            func() (*walletjson.GetTransactionResult, error)
 		wantConfs        uint64
-		mempoolRedeems   map[[32]byte]*mempoolRedeem
+		mempoolTxs       map[[32]byte]*mempoolTx
 		txOutRes         map[outPoint]*chainjson.GetTxOutResult
 		unspentOutputErr error
 	}{{
-		name:       "ok tx never seen before now",
+		name:      "ok tx never seen before now",
+		coinID:    coinID,
+		confirmTx: confirmTx,
+		txRes:     txFn([]bool{false}),
+	}, {
+		name:       "ok tx in map",
 		coinID:     coinID,
-		redemption: redemption,
+		confirmTx:  confirmTx,
 		txRes:      txFn([]bool{false}),
+		mempoolTxs: map[[32]byte]*mempoolTx{secretHash: {txHash: txHash, firstSeen: time.Now(), txType: asset.CTRedeem}},
 	}, {
-		name:           "ok tx in map",
-		coinID:         coinID,
-		redemption:     redemption,
-		txRes:          txFn([]bool{false}),
-		mempoolRedeems: map[[32]byte]*mempoolRedeem{secretHash: {txHash: txHash, firstSeen: time.Now()}},
-	}, {
-		name:           "tx in map has different hash than coin id",
-		coinID:         badCoinID,
-		redemption:     redemption,
-		txRes:          txFn([]bool{false}),
-		mempoolRedeems: map[[32]byte]*mempoolRedeem{secretHash: {txHash: txHash, firstSeen: time.Now()}},
-		wantErr:        true,
-	}, {
-		name:       "ok tx not found spent new tx",
-		coinID:     coinID,
-		redemption: redemption,
+		name:       "tx in map has different hash than coin id",
+		coinID:     badCoinID,
+		confirmTx:  confirmTx,
 		txRes:      txFn([]bool{false}),
-		txOutRes:   map[outPoint]*chainjson.GetTxOutResult{newOutPoint(&txHash, 0): makeGetTxOutRes(0, 5, nil)},
+		mempoolTxs: map[[32]byte]*mempoolTx{secretHash: {txHash: txHash, firstSeen: time.Now(), txType: asset.CTRedeem}},
+		wantErr:    true,
 	}, {
-		name:           "ok old tx should maybe be abandoned",
-		coinID:         coinID,
-		redemption:     redemption,
-		txRes:          txFn([]bool{false}),
-		mempoolRedeems: map[[32]byte]*mempoolRedeem{secretHash: {txHash: txHash, firstSeen: time.Now().Add(-maxRedeemMempoolAge - time.Second)}},
+		name:      "ok tx not found new tx",
+		coinID:    coinID,
+		confirmTx: confirmTx,
+		txRes:     txFn([]bool{true, false}),
+		txOutRes:  map[outPoint]*chainjson.GetTxOutResult{newOutPoint(&txHash, 0): makeGetTxOutRes(0, 5, nil)},
 	}, {
-		name:       "ok and spent",
+		name:      "ok refund tx not found new tx",
+		coinID:    coinID,
+		confirmTx: asset.NewRefundConfTx(coin.ID(), contract, secret),
+		txRes:     txFn([]bool{true, false}),
+		txOutRes:  map[outPoint]*chainjson.GetTxOutResult{newOutPoint(&txHash, 0): makeGetTxOutRes(0, 5, nil)},
+	}, {
+		name:       "ok old tx should maybe be abandoned",
 		coinID:     coinID,
-		txRes:      txFn([]bool{true, false}),
-		redemption: redemption,
-		wantConfs:  1, // one confirm because this tx is in the best block
+		confirmTx:  confirmTx,
+		txRes:      txFn([]bool{false}),
+		mempoolTxs: map[[32]byte]*mempoolTx{secretHash: {txHash: txHash, firstSeen: time.Now().Add(-maxMempoolAge - time.Second), txType: asset.CTRedeem}},
+	}, {
+		name:      "ok and spent",
+		coinID:    coinID,
+		txRes:     txFn([]bool{true, false}),
+		confirmTx: confirmTx,
+		wantConfs: 1, // one confirm because this tx is in the best block
 	}, {
 		name:   "ok and spent but we dont know who spent it",
 		coinID: coinID,
 		txRes:  txFn([]bool{true, false}),
-		redemption: func() *asset.Redemption {
+		confirmTx: func() *asset.ConfirmTx {
 			ci := &asset.AuditInfo{
 				Coin:       coin,
 				Contract:   contract,
@@ -4342,30 +4346,27 @@ func TestConfirmRedemption(t *testing.T) {
 				Expiration: lockTime,
 				SecretHash: make([]byte, 32), // fake secret hash
 			}
-			return &asset.Redemption{
-				Spends: ci,
-				Secret: secret,
-			}
+			return asset.NewRedeemConfTx(ci, secret)
 		}(),
-		wantConfs: requiredRedeemConfirms,
+		wantConfs: requiredConfTxConfirms,
 	}, {
-		name:       "get transaction error",
-		coinID:     coinID,
-		redemption: redemption,
-		txRes:      txFn([]bool{true, true}),
-		wantErr:    true,
+		name:      "get transaction error",
+		coinID:    coinID,
+		confirmTx: confirmTx,
+		txRes:     txFn([]bool{true, true}),
+		wantErr:   true,
 	}, {
-		name:       "decode coin error",
-		coinID:     nil,
-		redemption: redemption,
-		txRes:      txFn([]bool{true, false}),
-		wantErr:    true,
+		name:      "decode coin error",
+		coinID:    nil,
+		confirmTx: confirmTx,
+		txRes:     txFn([]bool{true, false}),
+		wantErr:   true,
 	}, {
 		name:     "redeem error",
 		coinID:   coinID,
 		txOutRes: map[outPoint]*chainjson.GetTxOutResult{newOutPoint(&txHash, 0): makeGetTxOutRes(0, 5, nil)},
 		txRes:    txFn([]bool{true, false}),
-		redemption: func() *asset.Redemption {
+		confirmTx: func() *asset.ConfirmTx {
 			ci := &asset.AuditInfo{
 				Coin: coin,
 				// Contract:   contract,
@@ -4373,25 +4374,29 @@ func TestConfirmRedemption(t *testing.T) {
 				Expiration: lockTime,
 				SecretHash: secretHash[:],
 			}
-			return &asset.Redemption{
-				Spends: ci,
-				Secret: secret,
-			}
+			return asset.NewRedeemConfTx(ci, secret)
 		}(),
 		wantErr: true,
+	}, {
+		name:      "refund error",
+		coinID:    coinID,
+		txOutRes:  map[outPoint]*chainjson.GetTxOutResult{newOutPoint(&txHash, 0): makeGetTxOutRes(0, 5, nil)},
+		txRes:     txFn([]bool{true, false}),
+		confirmTx: asset.NewRefundConfTx(coin.ID(), nil, secret),
+		wantErr:   true,
 	}}
 	for _, test := range tests {
 		node.walletTxFn = test.txRes
 		node.bestBlockErr = test.bestBlockErr
-		wallet.mempoolRedeems = test.mempoolRedeems
-		if wallet.mempoolRedeems == nil {
-			wallet.mempoolRedeems = make(map[[32]byte]*mempoolRedeem)
+		wallet.mempoolTxs = test.mempoolTxs
+		if wallet.mempoolTxs == nil {
+			wallet.mempoolTxs = make(map[[32]byte]*mempoolTx)
 		}
 		node.txOutRes = test.txOutRes
 		if node.txOutRes == nil {
 			node.txOutRes = make(map[outPoint]*chainjson.GetTxOutResult)
 		}
-		status, err := wallet.ConfirmRedemption(test.coinID, test.redemption, 0)
+		status, err := wallet.ConfirmTransaction(test.coinID, test.confirmTx, 0)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("%q: expected error", test.name)

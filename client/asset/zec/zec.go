@@ -70,10 +70,10 @@ const (
 	blockTicker     = time.Second
 	peerCountTicker = 5 * time.Second
 
-	// requiredRedeemConfirms is the amount of confirms a redeem transaction
-	// needs before the trade is considered confirmed. The redeem is
-	// monitored until this number of confirms is reached.
-	requiredRedeemConfirms = 1
+	// requiredConfTxConfirms is the amount of confirms a redeem or refund
+	// transaction needs before the trade is considered confirmed. The
+	// redeem is monitored until this number of confirms is reached.
+	requiredConfTxConfirms = 1
 
 	depositAddrPrefix = "unified:"
 )
@@ -1568,70 +1568,86 @@ func (w *zecWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroadcas
 	}, nil
 }
 
-func (w *zecWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset.Redemption, feeSuggestion uint64) (*asset.ConfirmRedemptionStatus, error) {
+func (w *zecWallet) ConfirmTransaction(coinID dex.Bytes, confirmTx *asset.ConfirmTx, feeSuggestion uint64) (*asset.ConfirmTxStatus, error) {
 	txHash, _, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, err
 	}
 
 	tx, err := getWalletTransaction(w, txHash)
-	// redemption transaction found, return its confirms.
+	// transaction found, return its confirms.
 	//
-	// TODO: Investigate the case where this redeem has been sitting in the
+	// TODO: Investigate the case where this tx has been sitting in the
 	// mempool for a long amount of time, possibly requiring some action by
 	// us to get it unstuck.
 	if err == nil {
 		if tx.Confirmations < 0 {
 			tx.Confirmations = 0
 		}
-		return &asset.ConfirmRedemptionStatus{
+		return &asset.ConfirmTxStatus{
 			Confs:  uint64(tx.Confirmations),
-			Req:    requiredRedeemConfirms,
+			Req:    requiredConfTxConfirms,
 			CoinID: coinID,
 		}, nil
 	}
 
-	// Redemption transaction is missing from the point of view of our node!
+	// Transaction is missing from the point of view of our node!
 	// Unlikely, but possible it was redeemed by another transaction. Check
 	// if the contract is still an unspent output.
 
-	swapHash, vout, err := decodeCoinID(redemption.Spends.Coin.ID())
+	swapHash, vout, err := decodeCoinID(confirmTx.SpendsCoinID())
 	if err != nil {
 		return nil, err
 	}
 
 	utxo, _, err := getTxOut(w, swapHash, vout)
 	if err != nil {
-		return nil, newError(errNoTx, "error finding unspent contract %s with swap hash %v vout %d: %w", redemption.Spends.Coin.ID(), swapHash, vout, err)
+		return nil, newError(errNoTx, "error finding unspent contract %s with swap hash %v vout %d: %w", confirmTx.SpendsCoinID(), swapHash, vout, err)
 	}
 	if utxo == nil {
 		// TODO: Spent, but by who. Find the spending tx.
-		w.log.Warnf("Contract coin %v with swap hash %v vout %d spent by someone but not sure who.", redemption.Spends.Coin.ID(), swapHash, vout)
+		w.log.Warnf("Contract coin %v with swap hash %v vout %d spent by someone but not sure who.", confirmTx.SpendsCoinID(), swapHash, vout)
 		// Incorrect, but we will be in a loop of erroring if we don't
 		// return something.
-		return &asset.ConfirmRedemptionStatus{
-			Confs:  requiredRedeemConfirms,
-			Req:    requiredRedeemConfirms,
+		return &asset.ConfirmTxStatus{
+			Confs:  requiredConfTxConfirms,
+			Req:    requiredConfTxConfirms,
 			CoinID: coinID,
 		}, nil
 	}
 
-	// The contract has not yet been redeemed, but it seems the redeeming
-	// tx has disappeared. Assume the fee was too low at the time and it
-	// was eventually purged from the mempool. Attempt to redeem again with
-	// a currently reasonable fee.
+	// The contract has not yet been redeemed or refunded, but it seems the
+	// spending tx has disappeared. Assume the fee was too low at the time
+	// and it was eventually purged from the mempool. Attempt to spend again
+	// with a currently reasonable fee.
+	var newCoinID dex.Bytes
+	if confirmTx.IsRedeem() {
+		form := &asset.RedeemForm{
+			Redemptions: []*asset.Redemption{
+				{
+					Spends: confirmTx.Spends(),
+					Secret: confirmTx.Secret(),
+				},
+			},
+			FeeSuggestion: feeSuggestion,
+		}
+		_, coin, _, err := w.Redeem(form)
+		if err != nil {
+			return nil, fmt.Errorf("unable to re-redeem %s with swap hash %v vout %d: %w", confirmTx.SpendsCoinID(), swapHash, vout, err)
+		}
+		newCoinID = coin.ID()
+	} else {
+		spendsCoinID := confirmTx.SpendsCoinID()
+		newCoinID, err = w.Refund(spendsCoinID, confirmTx.Contract(), feeSuggestion)
+		if err != nil {
+			return nil, fmt.Errorf("unable to re-refund %s: %w", spendsCoinID, err)
+		}
+	}
 
-	form := &asset.RedeemForm{
-		Redemptions: []*asset.Redemption{redemption},
-	}
-	_, coin, _, err := w.Redeem(form)
-	if err != nil {
-		return nil, fmt.Errorf("unable to re-redeem %s with swap hash %v vout %d: %w", redemption.Spends.Coin.ID(), swapHash, vout, err)
-	}
-	return &asset.ConfirmRedemptionStatus{
+	return &asset.ConfirmTxStatus{
 		Confs:  0,
-		Req:    requiredRedeemConfirms,
-		CoinID: coin.ID(),
+		Req:    requiredConfTxConfirms,
+		CoinID: newCoinID,
 	}, nil
 }
 
