@@ -5495,10 +5495,7 @@ out:
 				break out
 			}
 		}
-		blockHash = &blk.Header.PrevBlock
-		if blockHash == nil {
-			return nil, fmt.Errorf("did not find the bond output %v:%d", txHash, vout)
-		}
+		return nil, fmt.Errorf("did not find the bond output %v:%d", txHash, vout)
 	}
 	return btc.decodeV0BondTx(msgTx, txHash, coinID)
 }

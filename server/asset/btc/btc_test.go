@@ -438,7 +438,7 @@ func testRawTransactionVerbose(msgTx *wire.MsgTx, txid, blockHash *chainhash.Has
 }
 
 // Add a transaction output and it's getrawtransaction data.
-func testAddTxOut(msgTx *wire.MsgTx, vout uint32, txHash, blockHash *chainhash.Hash, blockHeight, confirmations int64) *btcjson.GetTxOutResult {
+func testAddTxOut(msgTx *wire.MsgTx, vout uint32, txHash, blockHash *chainhash.Hash, _ /* blockHeight unused */, confirmations int64) *btcjson.GetTxOutResult {
 	testChainMtx.Lock()
 	defer testChainMtx.Unlock()
 	txOut := testGetTxOut(confirmations, msgTx.TxOut[vout].Value, msgTx.TxOut[vout].PkScript)

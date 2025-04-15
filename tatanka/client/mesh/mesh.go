@@ -163,7 +163,7 @@ func (m *Mesh) handleTatankaRequest(tatankaID tanka.PeerID, msg *msgjson.Message
 	return nil
 }
 
-func (m *Mesh) handleTatankaNotification(peerID tanka.PeerID, msg *msgjson.Message) {
+func (m *Mesh) handleTatankaNotification(_ /*peerID unused*/ tanka.PeerID, msg *msgjson.Message) {
 	switch msg.Route {
 	case mj.RouteBroadcast:
 		m.handleBroadcast(msg)
@@ -174,7 +174,7 @@ func (m *Mesh) handleTatankaNotification(peerID tanka.PeerID, msg *msgjson.Messa
 	}
 }
 
-func (m *Mesh) handlePeerRequest(peerID tanka.PeerID, msgI any) *msgjson.Error {
+func (m *Mesh) handlePeerRequest(_ /*peerID unused*/ tanka.PeerID, msgI any) *msgjson.Error {
 	switch msgI.(type) {
 	case *conn.IncomingTankagram:
 	}
