@@ -176,6 +176,9 @@ func (m *Mesh) handleTatankaNotification(route string, payload json.RawMessage) 
 
 func (m *Mesh) handlePeerRequest(peerID tanka.PeerID, route string, payload json.RawMessage, respond func(any, mj.TankagramError)) {
 	switch route {
+	case mj.RouteNegotiate:
+		// TODO: Reputation check.
+		m.handleNegotiate(peerID, payload, respond)
 	default:
 		m.log.Debugf("Received a peer request for an unknown route %q", route)
 	}
@@ -249,8 +252,12 @@ func (m *Mesh) SubscribeMarket(baseID, quoteID uint32) error {
 	}
 
 	m.markets[mktName] = &market{
-		log:  m.log.SubLogger(mktName),
-		ords: make(map[tanka.ID40]*order),
+		log:     m.log.SubLogger(mktName),
+		peerID:  m.peerID,
+		baseID:  baseID,
+		quoteID: quoteID,
+		conn:    m.conn,
+		ords:    make(map[tanka.ID40]*order),
 	}
 
 	return nil
@@ -268,6 +275,30 @@ func (m *Mesh) handleBroadcast(payload json.RawMessage) {
 	}
 
 	m.emit(&bcast)
+}
+
+func (m *Mesh) handleNegotiate(peerID tanka.PeerID, payload json.RawMessage, respond func(any, mj.TankagramError)) {
+	var match *tanka.Match
+	if err := json.Unmarshal(payload, match); err != nil {
+		m.log.Debugf("handleNegotiate: unable to unmarshal match from peer %v: %v", peerID, err)
+		respond(false, mj.TEEBadRequest)
+		return
+	}
+	mktName, err := dex.MarketName(match.BaseID, match.QuoteID)
+	if err != nil {
+		m.log.Debugf("handleNegotiate: error constructing market name in request from peer %v: %v", peerID, err)
+		respond(false, mj.TEEPeerError)
+		return
+	}
+	m.marketsMtx.Lock()
+	market, found := m.markets[mktName]
+	m.marketsMtx.Unlock()
+	if !found {
+		m.log.Debugf("handleNegotiate: unable to find market %v in request from peer %v", mktName, peerID)
+		respond(false, mj.TEEPeerError)
+		return
+	}
+	respond(market.handleNegotiate(match), mj.TEErrNone)
 }
 
 func (m *Mesh) handleRates(payload json.RawMessage) {

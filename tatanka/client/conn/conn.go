@@ -40,7 +40,7 @@ type NetworkBackend interface {
 	Request(msg *msgjson.Message, respHandler func(*msgjson.Message)) error
 }
 
-// tatanka is a Tatanka mesh server node.
+// tatankaNode is a Tatanka mesh server node.
 type tatankaNode struct {
 	NetworkBackend
 	cm     *dex.ConnectionMaster
