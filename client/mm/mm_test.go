@@ -450,10 +450,7 @@ func (c *tCEX) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	return &sync.WaitGroup{}, nil
 }
 func (c *tCEX) Balances(ctx context.Context) (map[uint32]*libxc.ExchangeBalance, error) {
-	return nil, nil
-}
-func (c *tCEX) MatchedMarkets(ctx context.Context) ([]*libxc.MarketMatch, error) {
-	return nil, nil
+	return c.balances, nil
 }
 func (c *tCEX) Markets(ctx context.Context) (map[string]*libxc.Market, error) {
 	return nil, nil
@@ -515,14 +512,14 @@ func (c *tCEX) GetDepositAddress(ctx context.Context, assetID uint32) (string, e
 	return c.depositAddress, nil
 }
 
-func (c *tCEX) Withdraw(ctx context.Context, assetID uint32, qty uint64, address string) (string, error) {
+func (c *tCEX) Withdraw(ctx context.Context, assetID uint32, qty uint64, address string) (string, uint64, error) {
 	c.withdrawals = append(c.withdrawals, &withdrawArgs{
 		address: address,
 		amt:     qty,
 		assetID: assetID,
 	})
 
-	return c.withdrawalID, nil
+	return c.withdrawalID, qty, nil
 }
 
 func (c *tCEX) ConfirmWithdrawal(ctx context.Context, withdrawalID string, assetID uint32) (uint64, string, error) {
