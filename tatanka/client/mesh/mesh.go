@@ -152,6 +152,8 @@ func (m *Mesh) emit(thing any) {
 
 func (m *Mesh) handleTatankaRequest(route string, payload json.RawMessage, respond func(any, *msgjson.Error)) {
 	switch route {
+	case mj.RouteNegotiate:
+		m.handleNegotiate(payload, respond)
 	default:
 		m.log.Debugf("Received a request for an unknown route %q", route)
 	}
@@ -243,8 +245,12 @@ func (m *Mesh) SubscribeMarket(baseID, quoteID uint32) error {
 	}
 
 	m.markets[mktName] = &market{
-		log:  m.log.SubLogger(mktName),
-		ords: make(map[tanka.ID40]*order),
+		log:     m.log.SubLogger(mktName),
+		peerID:  m.peerID,
+		baseID:  baseID,
+		quoteID: quoteID,
+		conn:    m.conn,
+		ords:    make(map[tanka.ID40]*order),
 	}
 
 	return nil
@@ -262,6 +268,27 @@ func (m *Mesh) handleBroadcast(payload json.RawMessage) {
 	}
 
 	m.emit(&bcast)
+}
+
+func (m *Mesh) handleNegotiate(payload json.RawMessage, respond func(any, *msgjson.Error)) {
+	var match *tanka.Match
+	if err := json.Unmarshal(payload, match); err != nil {
+		respond(false, msgjson.NewError(msgjson.UnmarshalError, "unable to unmarshal match: %v", err))
+		return
+	}
+	mktName, err := dex.MarketName(match.BaseID, match.QuoteID)
+	if err != nil {
+		respond(false, msgjson.NewError(msgjson.UnknownMarketError, "error constructing market name: %v", err))
+		return
+	}
+	m.marketsMtx.Lock()
+	market, found := m.markets[mktName]
+	m.marketsMtx.Unlock()
+	if !found {
+		respond(false, msgjson.NewError(msgjson.UnknownMarketError, "unknown market: %s", mktName))
+		return
+	}
+	market.handleNegotiate(match, respond)
 }
 
 func (m *Mesh) handleRates(payload json.RawMessage) {
