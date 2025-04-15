@@ -63,7 +63,8 @@ func (t *Tatanka) runRemoteClientsLoop(ctx context.Context) {
 			case *clientJobRemoteDisconnect:
 				srvs, found := t.remoteClients[task.clientID]
 				if !found {
-					return
+					job.res <- true
+					continue
 				}
 				delete(srvs, task.tankaID)
 				if len(srvs) == 0 {

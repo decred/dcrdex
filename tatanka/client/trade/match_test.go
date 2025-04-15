@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"decred.org/dcrdex/dex/calc"
+	"decred.org/dcrdex/tatanka/client/orderbook"
 	"decred.org/dcrdex/tatanka/tanka"
 )
 
@@ -20,6 +21,7 @@ func TestMatchBook(t *testing.T) {
 	var desire *DesiredTrade
 	var ords []*tanka.Order
 	var p *FeeParameters
+	var book *orderbook.Book
 
 	// A function to reset everything
 	reset := func() {
@@ -42,14 +44,19 @@ func TestMatchBook(t *testing.T) {
 				Rate:    msgRate,
 				Qty:     baseQty,
 				LotSize: lotSize,
+				Sell:    !weSell,
 			},
+		}
+		book = orderbook.New()
+		for _, o := range ords {
+			book.Add(o)
 		}
 	}
 
 	// Our testing function
 	testMatches := func(expRemain uint64, expQtys []uint64) {
 		t.Helper()
-		matches, remain := MatchBook(desire, p, ords)
+		matches, remain := MatchBook(desire, p, book.Find)
 		if remain != expRemain {
 			t.Fatal("wrong remain", remain, expRemain)
 		}
@@ -79,7 +86,10 @@ func TestMatchBook(t *testing.T) {
 		Rate:    msgRate,
 		Qty:     baseQty,
 		LotSize: lotSize,
+		Nonce:   1,
+		Sell:    !weSell,
 	})
+	book.Add(ords[1])
 	testMatches(0, []uint64{2 * baseQty, baseQty})
 	// Double the rate of the new order though, and we're back to only getting
 	// the first order.
@@ -103,7 +113,10 @@ func TestMatchBook(t *testing.T) {
 		Rate:    msgRate,
 		Qty:     baseQty,
 		LotSize: lotSize,
+		Nonce:   1,
+		Sell:    !weSell,
 	})
+	book.Add(ords[1])
 	testMatches(0, []uint64{baseQty, baseQty})
 	// But if the second order isn't offering enough, we can't match it.
 	ords[1].Rate -= 1

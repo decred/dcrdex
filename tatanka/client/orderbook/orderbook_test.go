@@ -68,7 +68,7 @@ func testOrders() []*tanka.Order {
 }
 
 func TestOrders(t *testing.T) {
-	ob := NewOrderBook()
+	ob := New()
 	var oids []tanka.ID40
 	for _, o := range testOrders() {
 		ob.Add(o)
@@ -81,67 +81,84 @@ func TestOrders(t *testing.T) {
 }
 
 func TestFindOrders(t *testing.T) {
-	ob := NewOrderBook()
+	ob := New()
 	tOrds := testOrders()
 	for _, o := range tOrds {
 		ob.Add(o)
 	}
+	var ords []*tanka.Order
 	yes, no := true, false
 
 	tests := []struct {
 		name         string
-		filter       *OrderFilter
+		filter       *Filter
 		wantOrderLen int
 		wantOrderIdx []int
 	}{{
-		name:         "all orders",
-		filter:       new(OrderFilter),
+		name: "all orders",
+		filter: &Filter{
+			Check: func(o *tanka.Order) (done bool) {
+				ords = append(ords, o)
+				return false
+			},
+		},
 		wantOrderLen: 4,
 		wantOrderIdx: []int{1, 0, 2, 3},
 	}, {
 		name: "sells",
-		filter: &OrderFilter{
+		filter: &Filter{
 			IsSell: &yes,
+			Check: func(o *tanka.Order) (done bool) {
+				ords = append(ords, o)
+				return false
+			},
 		},
 		wantOrderLen: 2,
 		wantOrderIdx: []int{2, 3},
 	}, {
 		name: "buys",
-		filter: &OrderFilter{
+		filter: &Filter{
 			IsSell: &no,
+			Check: func(o *tanka.Order) (done bool) {
+				ords = append(ords, o)
+				return false
+			},
 		},
 		wantOrderLen: 2,
 		wantOrderIdx: []int{1, 0},
 	}, {
 		name: "lot size over 2",
-		filter: &OrderFilter{
-			Check: func(o *tanka.Order) (ok, done bool) {
-				return o.LotSize > 2, false
+		filter: &Filter{
+			Check: func(o *tanka.Order) (done bool) {
+				if o.LotSize > 2 {
+					ords = append(ords, o)
+				}
+				return false
 			},
 		},
 		wantOrderLen: 2,
 		wantOrderIdx: []int{0, 3},
 	}, {
 		name: "lot size over 2 and sell",
-		filter: &OrderFilter{
+		filter: &Filter{
 			IsSell: &yes,
-			Check: func(o *tanka.Order) (ok, done bool) {
-				return o.LotSize > 2, false
+			Check: func(o *tanka.Order) (done bool) {
+				if o.LotSize > 2 {
+					ords = append(ords, o)
+				}
+				return false
 			},
 		},
 		wantOrderLen: 1,
 		wantOrderIdx: []int{3},
 	}, {
 		name: "buy done after one",
-		filter: &OrderFilter{
+		filter: &Filter{
 			IsSell: &no,
-			Check: func() func(*tanka.Order) (ok, done bool) {
-				var i int
-				return func(*tanka.Order) (ok, done bool) {
-					defer func() { i++ }()
-					return true, i == 1
-				}
-			}(),
+			Check: func(o *tanka.Order) (done bool) {
+				ords = append(ords, o)
+				return true
+			},
 		},
 		wantOrderLen: 1,
 		wantOrderIdx: []int{1},
@@ -150,7 +167,8 @@ func TestFindOrders(t *testing.T) {
 	}}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			ords := ob.FindOrders(test.filter)
+			ords = nil
+			ob.Find(test.filter)
 			if len(ords) != test.wantOrderLen {
 				t.Fatalf("wanted %d but got %d orders", test.wantOrderLen, len(ords))
 			}
@@ -164,7 +182,7 @@ func TestFindOrders(t *testing.T) {
 }
 
 func TestUpdate(t *testing.T) {
-	ob := NewOrderBook()
+	ob := New()
 	ords := testOrders()
 	for _, o := range ords {
 		ob.Add(o)
@@ -217,7 +235,7 @@ func TestUpdate(t *testing.T) {
 }
 
 func TestDeleteOrder(t *testing.T) {
-	ob := NewOrderBook()
+	ob := New()
 	var oids []tanka.ID40
 	for _, o := range testOrders() {
 		ob.Add(o)
@@ -228,6 +246,12 @@ func TestDeleteOrder(t *testing.T) {
 	ous := ob.Orders(oids)
 	if len(ous) != 2 {
 		t.Fatalf("wanted 2 but got %d orders", len(oids))
+	}
+	if ob.buys[0].ID() != oids[1] {
+		t.Fatal("incorrect order deleted")
+	}
+	if ob.sells[0].ID() != oids[2] {
+		t.Fatal("incorrect order deleted")
 	}
 	if len(ob.sells) != 1 {
 		t.Fatalf("wanted 1 but got %d orders", len(oids))

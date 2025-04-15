@@ -41,7 +41,7 @@ func OrderIsMatchable(desiredQty uint64, theirOrd *tanka.Order, p *FeeParameters
 	return true, ""
 }
 
-// MinimumLotSize calculates the smallest lot size that satisfies the our
+// MinimumLotSize calculates the smallest lot size that satisfies our
 // desired maximum fee exposure.
 func MinimumLotSize(msgRate uint64, p *FeeParameters) uint64 {
 	// fee_exposure = (lots * base_fees_per_lot / qty) + (lots * quote_fees_per_lot / quote_qty)

@@ -53,6 +53,7 @@ const (
 	// client1 <=> tatankanode <=> client2
 	RouteTankagram     = "tankagram"
 	RouteEncryptionKey = "encryption_key"
+	RouteNegotiate     = "negotiate"
 	RouteBroadcast     = "broadcast"
 	RouteNewSubscriber = "new_subscriber"
 
@@ -71,8 +72,6 @@ type BroadcastMessageType string
 const (
 	MessageTypeTrollBox      BroadcastMessageType = "troll_box"
 	MessageTypeNewOrder      BroadcastMessageType = "new_order"
-	MessageTypeProposeMatch  BroadcastMessageType = "propose_match"
-	MessageTypeAcceptMatch   BroadcastMessageType = "accept_match"
 	MessageTypeNewSubscriber BroadcastMessageType = "new_subscriber"
 	MessageTypeUnsubTopic    BroadcastMessageType = "unsub_topic"
 	MessageTypeUnsubSubject  BroadcastMessageType = "unsub_subject"
