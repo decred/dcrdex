@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"sync"
 
+	"decred.org/dcrdex/dex/calc"
 	"github.com/huandu/skiplist"
 )
 
@@ -157,6 +158,44 @@ func (ob *orderbook) vwap(bids bool, baseQty uint64) (vwap, extrema uint64, fill
 	}
 
 	return weightedTotal.Div(weightedTotal, big.NewInt(int64(baseQty))).Uint64(), extrema, filled
+}
+
+func (ob *orderbook) invVWAP(bids bool, quoteQty uint64) (vwap, extrema uint64, filled bool) {
+	if quoteQty == 0 { // avoid division by zero
+		return 0, 0, false
+	}
+
+	ob.mtx.RLock()
+	defer ob.mtx.RUnlock()
+
+	var list *skiplist.SkipList
+	if bids {
+		list = &ob.bids
+	} else {
+		list = &ob.asks
+	}
+
+	var totalBaseQty uint64
+	remaining := quoteQty
+	for curr := list.Front(); curr != nil; curr = curr.Next() {
+		entry := curr.Value.(*obEntry)
+		quoteQty := calc.BaseToQuote(entry.rate, entry.qty)
+
+		if quoteQty >= remaining {
+			filled = true
+			extrema = entry.rate
+			totalBaseQty += calc.QuoteToBase(entry.rate, remaining)
+			break
+		}
+
+		remaining -= quoteQty
+		totalBaseQty += entry.qty
+	}
+	if !filled {
+		return 0, 0, false
+	}
+
+	return calc.BaseQuoteToRate(totalBaseQty, quoteQty), extrema, filled
 }
 
 func (ob *orderbook) midGap() uint64 {

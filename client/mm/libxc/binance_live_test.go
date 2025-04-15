@@ -22,20 +22,22 @@ import (
 )
 
 var (
-	log       = dex.StdOutLogger("T", dex.LevelTrace)
-	binanceUS = true
-	net       = dex.Mainnet
-	apiKey    string
-	apiSecret string
-	baseID    uint64
-	quoteID   uint64
-	rate      float64
-	qty       float64
-	sell      bool
-	tradeID   string
-	assetID   uint64
-	txID      string
-	addr      string
+	log         = dex.StdOutLogger("T", dex.LevelTrace)
+	binanceUS   = true
+	net         = dex.Mainnet
+	apiKey      string
+	apiSecret   string
+	baseID      uint64
+	quoteID     uint64
+	rate        float64
+	qty         float64
+	sell        bool
+	tradeID     string
+	assetID     uint64
+	txID        string
+	addr        string
+	invVWAP     bool
+	marketTrade bool
 )
 
 func TestMain(m *testing.M) {
@@ -51,6 +53,8 @@ func TestMain(m *testing.M) {
 	flag.Uint64Var(&assetID, "asset", ^uint64(0), "asset ID")
 	flag.StringVar(&txID, "tx", "", "tx ID")
 	flag.StringVar(&addr, "addr", "", "address")
+	flag.BoolVar(&invVWAP, "inv", false, "use inverse VWAP")
+	flag.BoolVar(&marketTrade, "market", false, "market trade")
 	flag.Parse()
 
 	if global {
@@ -106,8 +110,12 @@ func (drv *spoofDriver) Info() *asset.WalletInfo {
 }
 
 func TestPlaceTrade(t *testing.T) {
-	if baseID == ^uint64(0) || quoteID == ^uint64(0) || rate < 0 || qty < 0 {
-		t.Fatalf("baseID, quoteID, rate, or qty not set")
+	if baseID == ^uint64(0) || quoteID == ^uint64(0) || qty < 0 {
+		t.Fatalf("baseID, quoteID, or qty not set")
+	}
+
+	if rate < 0 && !marketTrade {
+		t.Fatalf("rate not set")
 	}
 
 	bnc := tNewBinance()
@@ -116,6 +124,11 @@ func TestPlaceTrade(t *testing.T) {
 	_, err := bnc.Connect(ctx)
 	if err != nil {
 		t.Fatalf("Connect error: %v", err)
+	}
+
+	err = bnc.SubscribeMarket(ctx, uint32(baseID), uint32(quoteID))
+	if err != nil {
+		t.Fatalf("failed to subscribe to market: %v", err)
 	}
 
 	wg := sync.WaitGroup{}
@@ -145,17 +158,29 @@ func TestPlaceTrade(t *testing.T) {
 	baseUI, _ := asset.UnitInfo(uint32(baseID))
 	quoteUI, _ := asset.UnitInfo(uint32(quoteID))
 	msgRate := calc.MessageRate(rate, baseUI, quoteUI)
-	msgQty := uint64(math.Round(qty * float64(baseUI.Conventional.ConversionFactor)))
+
+	var msgQty uint64
+	if marketTrade && !sell {
+		msgQty = uint64(math.Round(qty * float64(quoteUI.Conventional.ConversionFactor)))
+	} else {
+		msgQty = uint64(math.Round(qty * float64(baseUI.Conventional.ConversionFactor)))
+	}
+
+	orderType := OrderTypeLimit
+	if marketTrade {
+		orderType = OrderTypeMarket
+	}
 
 	t.Logf("msgRate: %v, msgQty: %v", msgRate, msgQty)
-	trade, err := bnc.Trade(ctx, uint32(baseID), uint32(quoteID), false, msgRate, msgQty, updaterID)
+
+	trade, err := bnc.Trade(ctx, uint32(baseID), uint32(quoteID), sell, msgRate, msgQty, orderType, updaterID)
 	if err != nil {
 		t.Fatalf("trade error: %v", err)
 	}
 
 	if false { // Cancel the trade
 		time.Sleep(1 * time.Second)
-		err = bnc.CancelTrade(ctx, 60, 0, trade.ID)
+		err = bnc.CancelTrade(ctx, uint32(baseID), uint32(quoteID), trade.ID)
 		if err != nil {
 			t.Fatalf("error cancelling trade: %v", err)
 		}
@@ -206,7 +231,7 @@ func TestMatchedMarkets(t *testing.T) {
 	}
 }
 
-func TestVWAP(t *testing.T) {
+func TestSubUnsubMarket(t *testing.T) {
 	bnc := tNewBinance()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
 	defer cancel()
@@ -268,6 +293,59 @@ func TestVWAP(t *testing.T) {
 	_, _, _, err = bnc.VWAP(60, 0, true, 2e9)
 	if err == nil {
 		t.Fatalf("error should be returned since all subscribers have unsubscribed")
+	}
+}
+
+func TestVWAP(t *testing.T) {
+	if baseID == ^uint64(0) || quoteID == ^uint64(0) {
+		t.Fatalf("baseID or quoteID not set")
+	}
+
+	if qty <= 0 {
+		t.Fatalf("qty not set")
+	}
+
+	bnc := tNewBinance()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Hour*23)
+	defer cancel()
+
+	err := bnc.SubscribeMarket(ctx, uint32(baseID), uint32(quoteID))
+	if err != nil {
+		t.Fatalf("failed to subscribe to market: %v", err)
+	}
+
+	baseUI, _ := asset.UnitInfo(uint32(baseID))
+	quoteUI, _ := asset.UnitInfo(uint32(quoteID))
+
+	var msgQty uint64
+	if invVWAP {
+		msgQty = uint64(math.Round(qty * float64(baseUI.Conventional.ConversionFactor)))
+	} else {
+		msgQty = uint64(math.Round(qty * float64(quoteUI.Conventional.ConversionFactor)))
+	}
+
+	for {
+		time.Sleep(5 * time.Second)
+		for _, sell := range []bool{true, false} {
+			t.Logf("====== %s =======", map[bool]string{true: "SELL", false: "BUY"}[sell])
+
+			var vwapFunc func(uint32, uint32, bool, uint64) (uint64, uint64, bool, error)
+			var vwapTypeStr string
+			if invVWAP {
+				vwapFunc = bnc.InvVWAP
+				vwapTypeStr = "INV-VWAP"
+			} else {
+				vwapFunc = bnc.VWAP
+				vwapTypeStr = "VWAP"
+			}
+
+			vwap, extrema, filled, err := vwapFunc(uint32(baseID), uint32(quoteID), sell, msgQty)
+			if err != nil {
+				t.Logf("%s error: %v", vwapTypeStr, err)
+				continue
+			}
+			t.Logf("%s: %v, extrema: %v, filled: %v", vwapTypeStr, vwap, extrema, filled)
+		}
 	}
 }
 
