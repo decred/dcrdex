@@ -18,9 +18,12 @@ type ExchangeBalance struct {
 
 // Trade represents a trade made on a CEX.
 type Trade struct {
-	ID          string
-	Sell        bool
+	ID   string
+	Sell bool
+	// Qty will be in the base asset, except for market buys, it will
+	// be the quote asset.
 	Qty         uint64
+	Market      bool
 	Rate        uint64
 	BaseID      uint32
 	QuoteID     uint32
@@ -81,6 +84,13 @@ var (
 	ErrUnsyncedOrderbook = errors.New("orderbook not synced")
 )
 
+type OrderType uint8
+
+const (
+	OrderTypeLimit OrderType = iota
+	OrderTypeMarket
+)
+
 // CEX implements a set of functions that can be used to interact with a
 // centralized exchange's spot trading API. All rates and quantities
 // when interacting with the CEX interface will adhere to the standard
@@ -104,9 +114,16 @@ type CEX interface {
 	// Trade, then updates to the trade will be sent on the updated channel
 	// returned from this function.
 	SubscribeTradeUpdates() (updates <-chan *Trade, unsubscribe func(), subscriptionID int)
-	// Trade executes a trade on the CEX. updaterID takes a subscriptionID
-	// returned from SubscribeTradeUpdates.
-	Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, subscriptionID int) (*Trade, error)
+	// Trade executes a trade on the CEX.
+	//   - subscriptionID takes an ID returned from SubscribeTradeUpdates.
+	//   - Rate is ignored for market orders.
+	//   - Qty is in units of base asset, except for market buys where it is in
+	//     units of quote asset.
+	Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, orderType OrderType, subscriptionID int) (*Trade, error)
+	// ValidateTrade validates a trade before it is executed. This is used to
+	// ensure that the trade will be able to be executed on the CEX before trades
+	// are placed on the DEX orderbook expecting to be able to be arbitraged.
+	ValidateTrade(baseID, quoteID uint32, sell bool, rate, qty uint64, orderType OrderType) error
 	// UnsubscribeMarket unsubscribes from order book updates on a market.
 	UnsubscribeMarket(baseID, quoteID uint32) error
 	// VWAP returns the volume weighted average price for a certain quantity
@@ -114,6 +131,10 @@ type CEX interface {
 	// the market on which to get the average price. SubscribeMarket must be
 	// called, and the market must be synced before results can be expected.
 	VWAP(baseID, quoteID uint32, sell bool, qty uint64) (vwap, extrema uint64, filled bool, err error)
+	// InvVWAP returns the inverse volume weighted average price for a certain
+	// quantity of the quote asset on a market. SubscribeMarket must be called,
+	// and the market must be synced before results can be expected.
+	InvVWAP(baseID, quoteID uint32, sell bool, qty uint64) (vwap, extrema uint64, filled bool, err error)
 	// MidGap returns the mid-gap price for an order book.
 	MidGap(baseID, quoteID uint32) uint64
 	// GetDepositAddress returns a deposit address for an asset.
