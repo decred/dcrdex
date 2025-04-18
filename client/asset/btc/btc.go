@@ -807,6 +807,10 @@ type baseWallet struct {
 	feeCache          *feeRateCache
 	decodeAddr        dexbtc.AddressDecoder
 	walletDir         string
+	// noListTxHistory is true for assets that cannot call the
+	// ListTransactionSinceBlock method. This is true for Firo
+	// electrum as of electrum 4.1.5.3.
+	noListTxHistory bool
 
 	deserializeTx func([]byte) (*wire.MsgTx, error)
 	serializeTx   func(*wire.MsgTx) ([]byte, error)
@@ -5862,6 +5866,10 @@ func (btc *baseWallet) idUnknownTx(tx *ListTransactionsResult) (*asset.WalletTra
 func (btc *baseWallet) addUnknownTransactionsToHistory(tip uint64) {
 	txHistoryDB := btc.txDB()
 	if txHistoryDB == nil {
+		return
+	}
+
+	if btc.noListTxHistory {
 		return
 	}
 

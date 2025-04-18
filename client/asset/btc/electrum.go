@@ -76,11 +76,16 @@ func ElectrumWallet(cfg *BTCCloneCFG) (*ExchangeWalletElectrum, error) {
 		findRedemptionQueue: make(map[OutPoint]*FindRedemptionReq),
 		minElectrumVersion:  cfg.MinElectrumVersion,
 	}
+
 	// In (*baseWallet).feeRate, use ExchangeWalletElectrum's walletFeeRate
 	// override for localFeeRate. No externalFeeRate is required but will be
 	// used if eew.walletFeeRate returned an error and an externalFeeRate is
 	// enabled.
 	btc.localFeeRate = eew.walletFeeRate
+
+	// Firo electrum does not have "onchain_history" method as of firo
+	// electrum 4.1.5.3, find an alternative.
+	btc.noListTxHistory = cfg.Symbol == "firo"
 
 	return eew, nil
 }
@@ -150,22 +155,16 @@ func (btc *ExchangeWalletElectrum) Connect(ctx context.Context) (*sync.WaitGroup
 		btc.ew.wallet.SetIncludeIgnoreWarnings(true)
 	}
 
-	// TODO: Firo electrum does not have "onchain_history" method as of firo
-	// electrum 4.1.5.3, find an alternative.
-	hasOnchainHistory := btc.symbol != "firo"
-
-	if hasOnchainHistory {
-		dbWG, err := btc.startTxHistoryDB(ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			dbWG.Wait()
-		}()
+	dbWG, err := btc.startTxHistoryDB(ctx)
+	if err != nil {
+		return nil, err
 	}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		dbWG.Wait()
+	}()
 
 	wg.Add(1)
 	go func() {
@@ -179,16 +178,14 @@ func (btc *ExchangeWalletElectrum) Connect(ctx context.Context) (*sync.WaitGroup
 		btc.monitorPeers(ctx)
 	}()
 
-	if hasOnchainHistory {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			btc.tipMtx.RLock()
-			tip := btc.currentTip
-			btc.tipMtx.RUnlock()
-			go btc.syncTxHistory(uint64(tip.Height))
-		}()
-	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		btc.tipMtx.RLock()
+		tip := btc.currentTip
+		btc.tipMtx.RUnlock()
+		go btc.syncTxHistory(uint64(tip.Height))
+	}()
 
 	return wg, nil
 }
@@ -547,6 +544,9 @@ func (btc *ExchangeWalletElectrum) WalletTransaction(ctx context.Context, txID s
 	}
 
 	txHistoryDB := btc.txDB()
+	if txHistoryDB == nil {
+		return nil, fmt.Errorf("tx database not initialized")
+	}
 	tx, err := txHistoryDB.GetTx(txID)
 	if err != nil && !errors.Is(err, asset.CoinNotFoundError) {
 		return nil, err
