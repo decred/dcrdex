@@ -814,7 +814,8 @@ type baseWallet struct {
 	// noListTxHistory is true for assets that cannot call the
 	// ListTransactionSinceBlock method. This is true for Firo
 	// electrum as of electrum 4.1.5.3.
-	noListTxHistory bool
+	noListTxHistory  bool
+	syncingTxHistory atomic.Bool
 
 	deserializeTx func([]byte) (*wire.MsgTx, error)
 	serializeTx   func(*wire.MsgTx) ([]byte, error)
@@ -1711,7 +1712,7 @@ func (btc *intermediaryWallet) Connect(ctx context.Context) (*sync.WaitGroup, er
 		btc.tipMtx.RLock()
 		tip := btc.currentTip
 		btc.tipMtx.RUnlock()
-		go btc.syncTxHistory(uint64(tip.Height))
+		go btc.syncTxHistory(uint64(tip.Height), btc.getBlockHeight)
 	}()
 
 	return wg, nil
@@ -4807,7 +4808,7 @@ func (btc *intermediaryWallet) reportNewTip(ctx context.Context, newTip *BlockVe
 	btc.log.Tracef("tip change: %d (%s) => %d (%s)", prevTip.Height, prevTip.Hash, newTip.Height, newTip.Hash)
 	btc.emit.TipChange(uint64(newTip.Height))
 
-	go btc.syncTxHistory(uint64(newTip.Height))
+	go btc.syncTxHistory(uint64(newTip.Height), btc.getBlockHeight)
 
 	btc.rf.ReportNewTip(ctx, prevTip, newTip)
 }
@@ -5971,12 +5972,28 @@ func (btc *baseWallet) addUnknownTransactionsToHistory(tip uint64) {
 	}
 }
 
+// getBlockHeightFunc returns the block height for a transaction.
+// -1 is returned if the block height is not known, but it is not an error.
+type getBlockHeightFunc func(*GetTransactionResult) (int32, error)
+
+func (btc *intermediaryWallet) getBlockHeight(gtr *GetTransactionResult) (int32, error) {
+	blockHash, err := chainhash.NewHashFromStr(gtr.BlockHash)
+	if err != nil {
+		return 0, fmt.Errorf("error decoding block hash %s: %w", gtr.BlockHash, err)
+	}
+	blockHeight, err := btc.tipRedeemer.GetBlockHeight(blockHash)
+	if err != nil {
+		return 0, fmt.Errorf("error getting block height for %s: %w", blockHash, err)
+	}
+	return int32(blockHeight), nil
+}
+
 // syncTxHistory checks to see if there are any transactions which the wallet
 // has made or recieved that are not part of the transaction history, then
 // identifies and adds them. It also checks all the pending transactions to see
 // if they have been mined into a block, and if so, updates the transaction
 // history to reflect the block height.
-func (btc *intermediaryWallet) syncTxHistory(tip uint64) {
+func (btc *baseWallet) syncTxHistory(tip uint64, getBlockHeight getBlockHeightFunc) {
 	if !btc.syncingTxHistory.CompareAndSwap(false, true) {
 		return
 	}
@@ -6031,14 +6048,12 @@ func (btc *intermediaryWallet) syncTxHistory(tip uint64) {
 
 		var updated bool
 		if gtr.BlockHash != "" {
-			blockHash, err := chainhash.NewHashFromStr(gtr.BlockHash)
+			blockHeight, err := getBlockHeight(gtr)
 			if err != nil {
-				btc.log.Errorf("Error decoding block hash %s: %v", gtr.BlockHash, err)
+				btc.log.Errorf("Error getting block height for %s: %v", gtr.BlockHash, err)
 				return
 			}
-			blockHeight, err := btc.tipRedeemer.GetBlockHeight(blockHash)
-			if err != nil {
-				btc.log.Errorf("Error getting block height for %s: %v", blockHash, err)
+			if blockHeight == -1 {
 				return
 			}
 			if tx.BlockNumber != uint64(blockHeight) || tx.Timestamp != gtr.BlockTime {

@@ -184,7 +184,7 @@ func (btc *ExchangeWalletElectrum) Connect(ctx context.Context) (*sync.WaitGroup
 		btc.tipMtx.RLock()
 		tip := btc.currentTip
 		btc.tipMtx.RUnlock()
-		go btc.syncTxHistory(uint64(tip.Height))
+		go btc.syncTxHistory(uint64(tip.Height), btc.getBlockHeight)
 	}()
 
 	return wg, nil
@@ -386,7 +386,7 @@ func (btc *ExchangeWalletElectrum) watchBlocks(ctx context.Context) {
 				continue
 			}
 
-			go btc.syncTxHistory(uint64(newTip.Height))
+			go btc.syncTxHistory(uint64(newTip.Height), btc.getBlockHeight)
 
 			btc.log.Tracef("tip change: %d (%s) => %d (%s)", currentTip.Height, currentTip.Hash,
 				newTip.Height, newTip.Hash)
@@ -400,135 +400,68 @@ func (btc *ExchangeWalletElectrum) watchBlocks(ctx context.Context) {
 	}
 }
 
-// syncTxHistory checks to see if there are any transactions which the wallet
-// has made or recieved that are not part of the transaction history, then
-// identifies and adds them. It also checks all the pending transactions to see
-// if they have been mined into a block, and if so, updates the transaction
-// history to reflect the block height.
-func (btc *ExchangeWalletElectrum) syncTxHistory(tip uint64) {
-	if !btc.syncingTxHistory.CompareAndSwap(false, true) {
-		return
-	}
-	defer btc.syncingTxHistory.Store(false)
-
-	txHistoryDB := btc.txDB()
-	if txHistoryDB == nil {
-		return
+// getBlockHeightWithPrevBlock determines the block height of a transaction
+// using the previous block hash field of the next block header. This is used
+// for Firo, since we do not have a golang library for FiroPOW.
+func (btc *ExchangeWalletElectrum) getBlockHeightWithPrevBlock(gtr *GetTransactionResult) (int32, error) {
+	if gtr.Confirmations < 2 {
+		return -1, nil
 	}
 
-	ss, err := btc.SyncStatus()
+	bestHeight, err := btc.node.GetBestBlockHeight()
 	if err != nil {
-		btc.log.Errorf("Error getting sync status: %v", err)
-		return
-	}
-	if !ss.Synced {
-		return
+		return 0, fmt.Errorf("GetBestBlockHeight: %v", err)
 	}
 
-	btc.addUnknownTransactionsToHistory(tip)
+	blockHeight := bestHeight - int32(gtr.Confirmations) + 1
 
-	pendingTxsCopy := make(map[chainhash.Hash]ExtendedWalletTx, len(btc.pendingTxs))
-	btc.pendingTxsMtx.RLock()
-	for hash, tx := range btc.pendingTxs {
-		pendingTxsCopy[hash] = tx
-	}
-	btc.pendingTxsMtx.RUnlock()
-
-	handlePendingTx := func(txHash chainhash.Hash, tx *ExtendedWalletTx) {
-		if !tx.Submitted {
-			return
+	for i := 0; i < 20 || blockHeight < 0; i++ {
+		if i > 20 || blockHeight < 0 {
+			return 0, fmt.Errorf("cannot find mined tx block number for %s", gtr.BlockHash)
 		}
-
-		gtr, err := btc.node.GetWalletTransaction(&txHash)
-		if errors.Is(err, asset.CoinNotFoundError) {
-			err = txHistoryDB.RemoveTx(txHash.String())
-			if err == nil || errors.Is(err, asset.CoinNotFoundError) {
-				btc.pendingTxsMtx.Lock()
-				delete(btc.pendingTxs, txHash)
-				btc.pendingTxsMtx.Unlock()
-			} else {
-				// Leave it in the pendingPendingTxs and attempt to remove it
-				// again next time.
-				btc.log.Errorf("Error removing tx %s from the history store: %v", txHash.String(), err)
-			}
-			return
-		}
+		bh, err := btc.ew.getBlockHeaderByHeight(btc.ctx, int64(blockHeight+1))
 		if err != nil {
-			btc.log.Errorf("Error getting transaction %s: %v", txHash.String(), err)
-			return
+			return 0, err
 		}
-
-		var updated bool
-		if gtr.BlockHash != "" {
-			bestHeight, err := btc.node.GetBestBlockHeight()
-			if err != nil {
-				btc.log.Errorf("GetBestBlockHeader: %v", err)
-				return
-			}
-			// TODO: Just get the block height with the header.
-			blockHeight := bestHeight - int32(gtr.Confirmations) + 1
-			i := 0
-			for {
-				if i > 20 || blockHeight < 0 {
-					btc.log.Errorf("Cannot find mined tx block number for %s", gtr.BlockHash)
-					return
-				}
-				bh, err := btc.ew.getBlockHeaderByHeight(btc.ctx, int64(blockHeight))
-				if err != nil {
-					btc.log.Errorf("Error getting mined tx block number %s: %v", gtr.BlockHash, err)
-					return
-				}
-				if bh.BlockHash().String() == gtr.BlockHash {
-					break
-				}
-				i++
-				blockHeight--
-			}
-			if tx.BlockNumber != uint64(blockHeight) {
-				tx.BlockNumber = uint64(blockHeight)
-				tx.Timestamp = gtr.BlockTime
-				updated = true
-			}
-		} else if gtr.BlockHash == "" && tx.BlockNumber != 0 {
-			tx.BlockNumber = 0
-			tx.Timestamp = 0
-			updated = true
+		if bh.PrevBlock.String() == gtr.BlockHash {
+			break
 		}
-
-		var confs uint64
-		if tx.BlockNumber > 0 && tip >= tx.BlockNumber {
-			confs = tip - tx.BlockNumber + 1
-		}
-		if confs >= requiredRedeemConfirms {
-			tx.Confirmed = true
-			updated = true
-		}
-
-		if updated {
-			err = txHistoryDB.StoreTx(tx)
-			if err != nil {
-				btc.log.Errorf("Error updating tx %s: %v", txHash, err)
-				return
-			}
-
-			btc.pendingTxsMtx.Lock()
-			if tx.Confirmed {
-				delete(btc.pendingTxs, txHash)
-			} else {
-				btc.pendingTxs[txHash] = *tx
-			}
-			btc.pendingTxsMtx.Unlock()
-
-			btc.emit.TransactionNote(tx.WalletTransaction, false)
-		}
+		blockHeight--
 	}
 
-	for hash, tx := range pendingTxsCopy {
-		if btc.ctx.Err() != nil {
-			return
-		}
-		handlePendingTx(hash, &tx)
+	return blockHeight, nil
+}
+
+func (btc *ExchangeWalletElectrum) getBlockHeightWithHash(gtr *GetTransactionResult) (int32, error) {
+	bestHeight, err := btc.node.GetBestBlockHeight()
+	if err != nil {
+		return 0, fmt.Errorf("GetBestBlockHeight: %v", err)
 	}
+
+	blockHeight := bestHeight - int32(gtr.Confirmations) + 1
+
+	for i := 0; i < 20 || blockHeight < 0; i++ {
+		if i > 20 || blockHeight < 0 {
+			return 0, fmt.Errorf("cannot find mined tx block number for %s", gtr.BlockHash)
+		}
+		bh, err := btc.ew.GetBlockHash(int64(blockHeight))
+		if err != nil {
+			return 0, err
+		}
+		if bh.String() == gtr.BlockHash {
+			break
+		}
+		blockHeight--
+	}
+
+	return blockHeight, nil
+}
+
+func (btc *ExchangeWalletElectrum) getBlockHeight(gtr *GetTransactionResult) (int32, error) {
+	if btc.symbol == "firo" {
+		return btc.getBlockHeightWithPrevBlock(gtr)
+	}
+	return btc.getBlockHeightWithHash(gtr)
 }
 
 // WalletTransaction returns a transaction that either the wallet has made or
