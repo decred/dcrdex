@@ -8,9 +8,7 @@ import (
 	filipEdwards "filippo.io/edwards25519"
 	"filippo.io/edwards25519/field"
 	"github.com/athanorlabs/go-dleq"
-	"github.com/athanorlabs/go-dleq/ed25519"
 	dleqEdwards "github.com/athanorlabs/go-dleq/ed25519"
-	"github.com/athanorlabs/go-dleq/secp256k1"
 	dleqSecp "github.com/athanorlabs/go-dleq/secp256k1"
 	dcrEdwards "github.com/decred/dcrd/dcrec/edwards/v2"
 	dcrSecp "github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -30,7 +28,7 @@ func ProveDLEQ(secret []byte) ([]byte, error) {
 	secretB := [32]byte{}
 	copy(secretB[:], secretCopy)
 
-	proof, err := dleq.NewProof(ed25519.NewCurve(), secp256k1.NewCurve(), secretB)
+	proof, err := dleq.NewProof(dleqEdwards.NewCurve(), dleqSecp.NewCurve(), secretB)
 	if err != nil {
 		return nil, err
 	}
