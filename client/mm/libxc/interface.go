@@ -139,11 +139,12 @@ type CEX interface {
 const (
 	Binance   = "Binance"
 	BinanceUS = "BinanceUS"
+	MEXC      = "MEXC"
 )
 
 // IsValidCEXName returns whether or not a cex name is supported.
 func IsValidCexName(cexName string) bool {
-	return cexName == Binance || cexName == BinanceUS
+	return cexName == Binance || cexName == BinanceUS || cexName == MEXC
 }
 
 type CEXConfig struct {
@@ -161,6 +162,8 @@ func NewCEX(cexName string, cfg *CEXConfig) (CEX, error) {
 		return newBinance(cfg, false), nil
 	case BinanceUS:
 		return newBinance(cfg, true), nil
+	case MEXC:
+		return newMEXC(cfg)
 	default:
 		return nil, fmt.Errorf("unrecognized CEX: %v", cexName)
 	}
