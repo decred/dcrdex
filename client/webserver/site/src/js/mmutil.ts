@@ -61,6 +61,10 @@ export const CEXDisplayInfos: Record<string, CEXDisplayInfo> = {
   'BinanceUS': {
     name: 'Binance U.S.',
     logo: '/img/binance.us.png'
+  },
+  'MEXC': {
+    name: 'MEXC',
+    logo: '/img/mexc.png' // Placeholder logo
   }
 }
 
