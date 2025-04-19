@@ -552,133 +552,157 @@ func (m *mexc) Balances(ctx context.Context) (map[uint32]*ExchangeBalance, error
 	return retBalances, nil
 }
 
-// Markets retrieves information ONLY for the DCR/USDT market on MEXC.
+// Markets retrieves information for all supported markets on MEXC.
 func (m *mexc) Markets(ctx context.Context) (map[string]*Market, error) {
 	info, err := m.getCachedExchangeInfo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get exchange info for Markets: %w", err)
 	}
 
-	m.mapMtx.RLock() // Lock for reading asset maps
-	dcrAssetID, dcrOK := dex.BipSymbolID("dcr")
-	// Find *a* USDT asset ID that was successfully mapped
-	var usdtAssetID uint32
-	var usdtOK bool
-	for assetID, coinName := range m.assetIDToCoin {
-		if coinName == "USDT" { // Assuming mapped coin name is USDT
-			usdtAssetID = assetID
-			usdtOK = true
-			break // Use the first mapped USDT ID found
-		}
-	}
-	m.mapMtx.RUnlock()
-
-	if !dcrOK || !usdtOK {
-		m.log.Warnf("DCR (%v) or USDT (%v) asset ID not found in mapping, cannot construct DCR/USDT market.", dcrOK, usdtOK)
-		return make(map[string]*Market), nil // Return empty map
+	// Fetch all tickers (or filter later if needed)
+	tickers, tickerErr := m.getTickers24hr(ctx, nil) // Pass nil for all symbols
+	if tickerErr != nil {
+		m.log.Warnf("Could not fetch 24hr ticker data for all markets: %v. MarketDay data will be missing.", tickerErr)
+		tickers = make(map[string]*mexctypes.Ticker24hr) // Ensure map is not nil
 	}
 
-	// Determine the expected MEXC symbol
-	expectedMEXCSymbol := "DCRUSDT" // <-- Revert to no underscore based on API response
-	dexMarketName, nameErr := dex.MarketName(dcrAssetID, usdtAssetID)
-	if nameErr != nil {
-		m.log.Errorf("Failed to generate DEX market name for DCR/USDT: %v", nameErr)
-		return make(map[string]*Market), nil // Return empty map
-	}
+	m.mapMtx.RLock() // Lock for reading asset mapping info
+	defer m.mapMtx.RUnlock()
 
 	markets := make(map[string]*Market)
-	foundSymbol := false
+	dexAssets := asset.Assets() // Get list of known DEX assets
+
 	for _, symInfo := range info.Symbols {
-		if symInfo.Symbol == expectedMEXCSymbol {
-			// Correct status check for MEXC API
-			if symInfo.Status != "1" || !symInfo.IsSpotTradingAllowed { // Check for "1"
-				m.log.Warnf("Found market %s but status is '%s' or spot trading not allowed (%v). Skipping.",
-					expectedMEXCSymbol, symInfo.Status, symInfo.IsSpotTradingAllowed) // Improved log
-				continue // Skip if not usable
-			}
+		// Check if market is active and spot trading is allowed
+		if symInfo.Status != "1" || !symInfo.IsSpotTradingAllowed {
+			continue
+		}
 
-			foundSymbol = true // Set flag since we found and passed checks
-			market := &Market{
-				BaseID:  dcrAssetID,
-				QuoteID: usdtAssetID,
-			}
+		// Map MEXC base/quote to potential DEX asset IDs
+		mexcBaseUpper := strings.ToUpper(symInfo.BaseAsset)
+		mexcQuoteUpper := strings.ToUpper(symInfo.QuoteAsset)
 
-			// Fetch and parse Ticker data specifically for this market
-			tickers, tickerErr := m.getTickers24hr(ctx, []string{expectedMEXCSymbol})
-			if tickerErr != nil {
-				m.log.Warnf("Could not fetch 24hr ticker data for %s: %v", expectedMEXCSymbol, tickerErr)
-			} else if ticker, ok := tickers[expectedMEXCSymbol]; ok {
-				day, parseErr := m.parseMarketDay(ticker)
-				if parseErr != nil {
-					m.log.Warnf("Error parsing MarketDay for %s: %v", expectedMEXCSymbol, parseErr)
-				} else {
-					market.Day = day
+		baseIDs, baseOK := m.coinToAssetIDs[mexcBaseUpper]
+		quoteIDs, quoteOK := m.coinToAssetIDs[mexcQuoteUpper]
+
+		if !baseOK || !quoteOK {
+			continue // Skip if either base or quote coin isn't mapped
+		}
+
+		// Iterate through all valid DEX asset ID combinations for this MEXC symbol
+		for _, baseID := range baseIDs {
+			for _, quoteID := range quoteIDs {
+				// Ensure both base and quote assets are known/supported by the DEX core
+				if _, baseKnown := dexAssets[baseID]; !baseKnown {
+					continue
 				}
+				if _, quoteKnown := dexAssets[quoteID]; !quoteKnown {
+					continue
+				}
+
+				// Generate DEX market name (e.g., "dcr_btc")
+				dexMarketName, nameErr := dex.MarketName(baseID, quoteID)
+				if nameErr != nil {
+					m.log.Warnf("Could not generate DEX market name for base %d / quote %d: %v", baseID, quoteID, nameErr)
+					continue
+				}
+
+				// Check if we already added this DEX pair (e.g., from USDT/USDC mapping to same ID)
+				if _, exists := markets[dexMarketName]; exists {
+					continue
+				}
+
+				market := &Market{
+					BaseID:  baseID,
+					QuoteID: quoteID,
+				}
+
+				// Add MarketDay data if available
+				if ticker, ok := tickers[symInfo.Symbol]; ok {
+					day, parseErr := m.parseMarketDay(ticker)
+					if parseErr != nil {
+						m.log.Warnf("Error parsing MarketDay for %s (DEX: %s): %v", symInfo.Symbol, dexMarketName, parseErr)
+					} else {
+						market.Day = day
+					}
+				}
+				markets[dexMarketName] = market
+				// m.log.Tracef("Added market %s (MEXC: %s)", dexMarketName, symInfo.Symbol)
 			}
-			markets[dexMarketName] = market
-			m.log.Infof("Found and constructed targeted DCR/USDT market: %s", dexMarketName)
-			break // Found the target market, no need to check others
 		}
 	}
 
-	if !foundSymbol {
-		m.log.Warnf("Target market symbol %s not found in MEXC exchange info.", expectedMEXCSymbol)
-	}
-
+	m.log.Infof("Found %d supported markets on MEXC.", len(markets))
 	return markets, nil
 }
 
-// MatchedMarkets retrieves ONLY the DCR/USDT market match if supported.
+// MatchedMarkets retrieves all supported markets on MEXC.
 func (m *mexc) MatchedMarkets(ctx context.Context) ([]*MarketMatch, error) {
 	info, err := m.getCachedExchangeInfo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get exchange info for MatchedMarkets: %w", err)
 	}
 
-	m.mapMtx.RLock()
-	dcrAssetID, dcrOK := dex.BipSymbolID("dcr")
-	var usdtAssetIDs []uint32 // Collect all mapped USDT variants
-	if ids, ok := m.coinToAssetIDs["USDT"]; ok {
-		usdtAssetIDs = ids
-	}
-	m.mapMtx.RUnlock()
+	m.mapMtx.RLock() // Lock for reading asset mapping info
+	defer m.mapMtx.RUnlock()
 
-	if !dcrOK || len(usdtAssetIDs) == 0 {
-		m.log.Warnf("DCR (%v) or USDT (%v) asset ID not found/mapped, cannot find DCR/USDT match.", dcrOK, len(usdtAssetIDs) > 0)
-		return []*MarketMatch{}, nil // Return empty slice
-	}
-
-	expectedMEXCSymbol := "DCRUSDT" // <-- Revert to no underscore based on API response
-	var matches []*MarketMatch
+	matches := []*MarketMatch{}
+	dexAssets := asset.Assets()           // Get list of known DEX assets
+	seenDexPairs := make(map[string]bool) // Track DEX pairs to avoid duplicates
 
 	for _, symInfo := range info.Symbols {
-		if symInfo.Symbol == expectedMEXCSymbol {
-			// Correct status check for MEXC API
-			if symInfo.Status != "1" || !symInfo.IsSpotTradingAllowed { // Check for "1"
-				continue // Skip if not usable
-			}
+		// Check if market is active and spot trading is allowed
+		if symInfo.Status != "1" || !symInfo.IsSpotTradingAllowed {
+			continue
+		}
 
-			// Create matches for DCR paired with *each* valid mapped USDT ID
-			for _, usdtAssetID := range usdtAssetIDs {
-				dexMarketName, nameErr := dex.MarketName(dcrAssetID, usdtAssetID)
-				if nameErr != nil {
-					m.log.Warnf("Could not generate DEX market name for DCR/%d: %v", usdtAssetID, nameErr)
+		// Map MEXC base/quote to potential DEX asset IDs
+		mexcBaseUpper := strings.ToUpper(symInfo.BaseAsset)
+		mexcQuoteUpper := strings.ToUpper(symInfo.QuoteAsset)
+
+		baseIDs, baseOK := m.coinToAssetIDs[mexcBaseUpper]
+		quoteIDs, quoteOK := m.coinToAssetIDs[mexcQuoteUpper]
+
+		if !baseOK || !quoteOK {
+			continue // Skip if either base or quote coin isn't mapped
+		}
+
+		// Iterate through all valid DEX asset ID combinations
+		for _, baseID := range baseIDs {
+			for _, quoteID := range quoteIDs {
+				// Ensure both base and quote assets are known/supported by the DEX core
+				if _, baseKnown := dexAssets[baseID]; !baseKnown {
 					continue
 				}
+				if _, quoteKnown := dexAssets[quoteID]; !quoteKnown {
+					continue
+				}
+
+				// Generate DEX market name (e.g., "dcr_btc")
+				dexMarketName, nameErr := dex.MarketName(baseID, quoteID)
+				if nameErr != nil {
+					m.log.Warnf("Could not generate DEX market name for base %d / quote %d: %v", baseID, quoteID, nameErr)
+					continue
+				}
+
+				// Avoid duplicate DEX pairs if multiple CEX symbols map to the same pair
+				if seenDexPairs[dexMarketName] {
+					continue
+				}
+				seenDexPairs[dexMarketName] = true
+
 				matches = append(matches, &MarketMatch{
-					BaseID:   dcrAssetID,
-					QuoteID:  usdtAssetID,
+					BaseID:   baseID,
+					QuoteID:  quoteID,
 					MarketID: dexMarketName,
-					Slug:     symInfo.Symbol,
+					Slug:     symInfo.Symbol, // Use the specific MEXC symbol as the Slug
 				})
 			}
-			m.log.Infof("Found %d DCR/USDT market matches.", len(matches))
-			return matches, nil // Return matches immediately after finding symbol
 		}
 	}
 
-	m.log.Warnf("Target market symbol %s not found in MEXC exchange info for MatchedMarkets.", expectedMEXCSymbol)
-	return []*MarketMatch{}, nil // Return empty slice if symbol not found
+	m.log.Infof("Found %d matched markets on MEXC.", len(matches))
+	return matches, nil
 }
 
 // getTickers24hr fetches 24hr ticker data for specific symbols or all symbols.
@@ -916,29 +940,40 @@ func (m *mexc) updateSymbolMappings(callerHoldsCoinLock bool) {
 	m.coinToAssetIDs = make(map[string][]uint32)
 	mappedCount := 0
 
-	// Target DEX symbols we care about (DCR and USDT on Polygon)
+	// Target DEX symbols we care about (e.g., DCR, BTC, USDT variants)
 	targetSymbols := map[string]bool{
 		"dcr":          true,
-		"usdt.polygon": true, // Use .polygon suffix
+		"btc":          true, // Add BTC
+		"usdt.polygon": true, // Keep specific USDT variant
+		"usdt.erc20":   true, // Add another USDT variant if needed
+		"usdt.trc20":   true, // Add another USDT variant if needed
+		// Add other desired symbols here
 	}
 
 	for mexcCoinUpper, coinData := range m.coinInfo {
-		if !(mexcCoinUpper == "DCR" || mexcCoinUpper == "USDT") {
-			continue
+		// Optimization: Skip coins not potentially part of targetSymbols
+		// Note: This is a rough check, as we don't know the network suffix yet.
+		if !(strings.Contains(strings.ToLower(mexcCoinUpper), "dcr") ||
+			strings.Contains(strings.ToLower(mexcCoinUpper), "btc") ||
+			strings.Contains(strings.ToLower(mexcCoinUpper), "usdt")) { // Adjust check based on targetSymbols
+			// continue // Keep commented to map all enabled coins, uncomment for optimization
 		}
+
 		for _, netInfo := range coinData.NetworkList {
 			if !netInfo.DepositEnable || !netInfo.WithdrawEnable {
 				continue
 			}
-			// fmt.Printf("PRINTF_DEBUG: Mapping attempt: ...\n") // Remove Printf
 			dexSymbol := m.mapMEXCCoinNetworkToDEXSymbol(mexcCoinUpper, netInfo.Network)
 			if dexSymbol == "" {
 				continue
 			}
+
+			// Check if the generated DEX symbol is one we are interested in mapping
+			// OR if we want to map all known symbols (remove this check)
 			if !targetSymbols[dexSymbol] {
-				// fmt.Printf("PRINTF_DEBUG:  -> Skipping: ...\n") // Remove Printf
-				continue
+				// continue // Keep commented to map all enabled coins, uncomment for optimization
 			}
+
 			assetID, found := m.symbolToAssetID[dexSymbol]
 			if !found {
 				// fmt.Printf("PRINTF_DEBUG:  -> Failed: ...\n") // Remove Printf
