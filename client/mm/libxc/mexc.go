@@ -552,29 +552,28 @@ func (m *mexc) Balances(ctx context.Context) (map[uint32]*ExchangeBalance, error
 	return retBalances, nil
 }
 
-// Markets retrieves information for all supported markets on MEXC.
+// Markets retrieves information for all DEX-supported markets on MEXC using asset.UnitInfo validation.
 func (m *mexc) Markets(ctx context.Context) (map[string]*Market, error) {
 	info, err := m.getCachedExchangeInfo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get exchange info for Markets: %w", err)
 	}
 
-	// Fetch all tickers (or filter later if needed)
-	tickers, tickerErr := m.getTickers24hr(ctx, nil) // Pass nil for all symbols
+	// Fetch all tickers
+	tickers, tickerErr := m.getTickers24hr(ctx, nil)
 	if tickerErr != nil {
 		m.log.Warnf("Could not fetch 24hr ticker data for all markets: %v. MarketDay data will be missing.", tickerErr)
 		tickers = make(map[string]*mexctypes.Ticker24hr) // Ensure map is not nil
 	}
 
-	m.mapMtx.RLock() // Lock for reading asset mapping info
+	m.mapMtx.RLock() // Lock for reading mapping info
 	defer m.mapMtx.RUnlock()
 
 	markets := make(map[string]*Market)
-	dexAssets := asset.Assets() // Get list of known DEX assets
 
 	for _, symInfo := range info.Symbols {
-		// Check if market is active and spot trading is allowed
-		if symInfo.Status != "1" || !symInfo.IsSpotTradingAllowed {
+		// Check status (NOTE: Intentionally ignoring isSpotTradingAllowed as per user request)
+		if symInfo.Status != "1" /*|| !symInfo.IsSpotTradingAllowed*/ {
 			continue
 		}
 
@@ -586,18 +585,24 @@ func (m *mexc) Markets(ctx context.Context) (map[string]*Market, error) {
 		quoteIDs, quoteOK := m.coinToAssetIDs[mexcQuoteUpper]
 
 		if !baseOK || !quoteOK {
-			continue // Skip if either base or quote coin isn't mapped
+			continue // Skip if either base or quote coin isn't mapped by us at all
 		}
 
 		// Iterate through all valid DEX asset ID combinations for this MEXC symbol
 		for _, baseID := range baseIDs {
+			// Validate base asset ID using UnitInfo
+			baseUnitInfo, baseErr := asset.UnitInfo(baseID)
+			if baseErr != nil {
+				// m.log.Tracef("Skipping base ID %d for MEXC base %s: %v", baseID, mexcBaseUpper, baseErr)
+				continue // Skip if this specific base ID is not known by asset system
+			}
+
 			for _, quoteID := range quoteIDs {
-				// Ensure both base and quote assets are known/supported by the DEX core
-				if _, baseKnown := dexAssets[baseID]; !baseKnown {
-					continue
-				}
-				if _, quoteKnown := dexAssets[quoteID]; !quoteKnown {
-					continue
+				// Validate quote asset ID using UnitInfo
+				quoteUnitInfo, quoteErr := asset.UnitInfo(quoteID)
+				if quoteErr != nil {
+					// m.log.Tracef("Skipping quote ID %d for MEXC quote %s: %v", quoteID, mexcQuoteUpper, quoteErr)
+					continue // Skip if this specific quote ID is not known by asset system
 				}
 
 				// Generate DEX market name (e.g., "dcr_btc")
@@ -615,6 +620,9 @@ func (m *mexc) Markets(ctx context.Context) (map[string]*Market, error) {
 				market := &Market{
 					BaseID:  baseID,
 					QuoteID: quoteID,
+					// Use the validated UnitInfo to get factors
+					// BaseMinWithdraw/QuoteMinWithdraw might require info not available here easily,
+					// would need to cross-reference with CoinInfo/NetworkList - skip for now.
 				}
 
 				// Add MarketDay data if available
@@ -627,32 +635,43 @@ func (m *mexc) Markets(ctx context.Context) (map[string]*Market, error) {
 					}
 				}
 				markets[dexMarketName] = market
-				// m.log.Tracef("Added market %s (MEXC: %s)", dexMarketName, symInfo.Symbol)
+				_ = baseUnitInfo // Avoid unused variable error if logging is off
+				_ = quoteUnitInfo
+				// m.log.Tracef("Added market %s (MEXC: %s, Base: %d, Quote: %d)", dexMarketName, symInfo.Symbol, baseID, quoteID)
 			}
 		}
 	}
 
-	m.log.Infof("Found %d supported markets on MEXC.", len(markets))
+	// Log the found markets for confirmation
+	if len(markets) > 0 {
+		mktNames := make([]string, 0, len(markets))
+		for name := range markets {
+			mktNames = append(mktNames, name)
+		}
+		sort.Strings(mktNames) // Sort for consistent logging
+		m.log.Infof("Found %d supported markets on MEXC: %s", len(markets), strings.Join(mktNames, ", "))
+	} else {
+		m.log.Warnf("Found 0 supported markets on MEXC after filtering.")
+	}
 	return markets, nil
 }
 
-// MatchedMarkets retrieves all supported markets on MEXC.
+// MatchedMarkets retrieves all supported markets on MEXC using asset.UnitInfo validation.
 func (m *mexc) MatchedMarkets(ctx context.Context) ([]*MarketMatch, error) {
 	info, err := m.getCachedExchangeInfo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get exchange info for MatchedMarkets: %w", err)
 	}
 
-	m.mapMtx.RLock() // Lock for reading asset mapping info
+	m.mapMtx.RLock() // Lock for reading mapping info
 	defer m.mapMtx.RUnlock()
 
 	matches := []*MarketMatch{}
-	dexAssets := asset.Assets()           // Get list of known DEX assets
 	seenDexPairs := make(map[string]bool) // Track DEX pairs to avoid duplicates
 
 	for _, symInfo := range info.Symbols {
-		// Check if market is active and spot trading is allowed
-		if symInfo.Status != "1" || !symInfo.IsSpotTradingAllowed {
+		// Check status (NOTE: Intentionally ignoring isSpotTradingAllowed as per user request)
+		if symInfo.Status != "1" /*|| !symInfo.IsSpotTradingAllowed*/ {
 			continue
 		}
 
@@ -664,18 +683,22 @@ func (m *mexc) MatchedMarkets(ctx context.Context) ([]*MarketMatch, error) {
 		quoteIDs, quoteOK := m.coinToAssetIDs[mexcQuoteUpper]
 
 		if !baseOK || !quoteOK {
-			continue // Skip if either base or quote coin isn't mapped
+			continue // Skip if either base or quote coin isn't mapped by us at all
 		}
 
 		// Iterate through all valid DEX asset ID combinations
 		for _, baseID := range baseIDs {
+			// Validate base asset ID using UnitInfo
+			_, baseErr := asset.UnitInfo(baseID)
+			if baseErr != nil {
+				continue // Skip if this specific base ID is not known by asset system
+			}
+
 			for _, quoteID := range quoteIDs {
-				// Ensure both base and quote assets are known/supported by the DEX core
-				if _, baseKnown := dexAssets[baseID]; !baseKnown {
-					continue
-				}
-				if _, quoteKnown := dexAssets[quoteID]; !quoteKnown {
-					continue
+				// Validate quote asset ID using UnitInfo
+				_, quoteErr := asset.UnitInfo(quoteID)
+				if quoteErr != nil {
+					continue // Skip if this specific quote ID is not known by asset system
 				}
 
 				// Generate DEX market name (e.g., "dcr_btc")
@@ -685,7 +708,7 @@ func (m *mexc) MatchedMarkets(ctx context.Context) ([]*MarketMatch, error) {
 					continue
 				}
 
-				// Avoid duplicate DEX pairs if multiple CEX symbols map to the same pair
+				// Avoid duplicate DEX pairs
 				if seenDexPairs[dexMarketName] {
 					continue
 				}
@@ -871,8 +894,8 @@ func (m *mexc) getCachedExchangeInfo(ctx context.Context) (*mexctypes.ExchangeIn
 	m.exchangeInfoStamp = time.Now()
 	m.log.Infof("Successfully fetched and cached MEXC exchange info (%d symbols).", len(info.Symbols))
 
-	// Call helper to update asset<->coin maps - we don't hold coin lock here
-	m.updateSymbolMappings(false)
+	// Remove premature call - mapping requires coinInfo as well.
+	// m.updateSymbolMappings(false)
 
 	return m.exchangeInfo, nil
 }
@@ -999,6 +1022,20 @@ func (m *mexc) updateSymbolMappings(callerHoldsCoinLock bool) {
 	if mappedCount < 2 {
 		m.log.Warnf("Expected at least DCR and USDT.polygon mappings, but only found %d.", mappedCount)
 	}
+
+	// --- Add Temp Debug Logging ---
+	logMsg := strings.Builder{}
+	logMsg.WriteString("Final coinToAssetIDs map contents:")
+	mapKeys := make([]string, 0, len(m.coinToAssetIDs))
+	for k := range m.coinToAssetIDs {
+		mapKeys = append(mapKeys, k)
+	}
+	sort.Strings(mapKeys)
+	for _, k := range mapKeys {
+		logMsg.WriteString(fmt.Sprintf("\n  %s: %v", k, m.coinToAssetIDs[k]))
+	}
+	m.log.Debugf(logMsg.String())
+	// --- End Temp Debug Logging ---
 }
 
 // mapMEXCCoinNetworkToDEXSymbol attempts to construct a DEX symbol (lowercase)
