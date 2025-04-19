@@ -75,3 +75,10 @@ type WsDealUpdateData struct {
 	OrderID         string `json:"i"`  // Order ID
 	TransactionTime int64  `json:"T"`  // Deal timestamp
 }
+
+// WsAccountUpdateData represents the payload ('d' field) for spot@private.account.v3.api.
+type WsAccountUpdateData struct {
+	Asset     string `json:"a"` // Asset
+	Available string `json:"f"` // Available balance
+	Locked    string `json:"l"` // Locked balance
+}

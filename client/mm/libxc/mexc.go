@@ -307,10 +307,15 @@ func (m *mexc) request(ctx context.Context, method, path string, params url.Valu
 		case http.MethodGet, http.MethodDelete:
 			// For GET/DELETE, sign the query string parameters
 			// Ensure params are encoded alphabetically (url.Values.Encode() does this)
-			signaturePayload = params.Encode()
+			signaturePayload = params.Encode() // Payload = Query String
 		case http.MethodPost, http.MethodPut:
-			// For POST/PUT, sign the request body
-			signaturePayload = bodyStr
+			// For POST/PUT: Sign the body IF it exists.
+			// If body is empty, sign the query parameters instead.
+			if bodyStr != "" {
+				signaturePayload = bodyStr
+			} else {
+				signaturePayload = params.Encode() // Sign query params if body is empty
+			}
 		default:
 			return fmt.Errorf("unsupported HTTP method for MEXC signing: %s", method)
 		} // Corrected closing brace for switch
@@ -961,37 +966,38 @@ func (m *mexc) updateSymbolMappings(callerHoldsCoinLock bool) {
 
 // mapMEXCCoinNetworkToDEXSymbol attempts to construct a DEX symbol (lowercase)
 func (m *mexc) mapMEXCCoinNetworkToDEXSymbol(mexcCoinUpper, mexcNetwork string) string {
-	// fmt.Printf("PRINTF_DEBUG:   Attempting to map ...\n") // Remove
-	dexBase := strings.ToLower(mexcCoinUpper)
+	if mexcCoinUpper == "" || mexcNetwork == "" {
+		return ""
+	}
 
+	dexBase := strings.ToLower(mexcCoinUpper)
+	upNetwork := strings.ToUpper(mexcNetwork)
+
+	// Handle the native case explicitly first
+	if strings.EqualFold(mexcCoinUpper, mexcNetwork) {
+		return dexBase
+	}
+
+	// If not native, determine the suffix based on known token networks
 	var dexNetSuffix string
-	switch mexcNetwork {
-	case mexcCoinUpper:
-		dexNetSuffix = ""
-	case "ETH", "ERC20": // Handle both potential names
+	switch upNetwork {
+	case "ETH", "ERC20":
 		dexNetSuffix = ".erc20"
-	case "TRX", "TRC20": // Handle both potential names
+	case "TRX", "TRC20":
 		dexNetSuffix = ".trc20"
 	case "BEP20(BSC)":
 		dexNetSuffix = ".bep20"
 	case "SOLANA":
 		dexNetSuffix = ".sol"
-	case "MATIC": // When MEXC network is MATIC
-		dexNetSuffix = ".polygon" // Generate .polygon suffix
-	// Add other known mappings if needed
+	case "MATIC":
+		dexNetSuffix = ".polygon"
 	default:
-		// fmt.Printf("PRINTF_DEBUG:     -> Failed: ...\n") // Remove
+		// Network is not native (checked above) and not a known token network
 		return ""
 	}
 
-	resultSymbol := ""
-	if dexNetSuffix == "" {
-		resultSymbol = dexBase
-	} else {
-		resultSymbol = dexBase + dexNetSuffix
-	}
-	// fmt.Printf("PRINTF_DEBUG:     -> Tentative DEX symbol: ...\n") // Remove
-	return resultSymbol
+	// Return token symbol (base + suffix)
+	return dexBase + dexNetSuffix
 }
 
 // --- Client Order ID Generation ---
@@ -1022,33 +1028,35 @@ func (m *mexc) stringToSatoshis(decimalAmount string, conversionFactor float64) 
 	if decimalAmount == "" {
 		return 0, nil
 	}
-	// Use big.Float for precision
-	fltAmount, ok := new(big.Float).SetString(decimalAmount)
+	// Use big.Float for precision, explicitly setting precision
+	const floatPrec = 128 // Use sufficient precision
+	fltAmount, ok := new(big.Float).SetPrec(floatPrec).SetString(decimalAmount)
 	if !ok {
 		return 0, fmt.Errorf("invalid amount string: %q", decimalAmount)
 	}
-	fltFactor := big.NewFloat(conversionFactor)
-	satAmountFlt := new(big.Float).Mul(fltAmount, fltFactor)
+	fltFactor := big.NewFloat(conversionFactor).SetPrec(floatPrec)
+	satAmountFlt := new(big.Float).SetPrec(floatPrec).Mul(fltAmount, fltFactor)
 
-	// Check for negative result, although unlikely for balances
-	if satAmountFlt.Sign() < 0 {
-		return 0, fmt.Errorf("negative satoshi amount calculated for %q", decimalAmount)
+	// --- Keep the rest of the checks added previously ---
+	if satAmountFlt == nil {
+		return 0, fmt.Errorf("internal error: satAmountFlt is nil")
 	}
-
-	// Convert to uint64. Use Int for rounding towards zero.
 	satAmountInt, accuracy := satAmountFlt.Int(nil)
-	if accuracy != big.Exact { // Check if the result was exact (no fractional part)
-		// Allow for small inaccuracies if rounding down
-		if accuracy == big.Below {
-			// Log if significant digits were lost? Usually indicates error in factor/precision.
-			// m.log.Warnf("Loss of precision converting %s to satoshis (Below)", decimalAmount)
-		} else {
-			return 0, fmt.Errorf("cannot exactly convert %s to satoshis (Accuracy: %v)", decimalAmount, accuracy)
-		}
+	if satAmountInt == nil {
+		return 0, fmt.Errorf("internal error: satAmountInt is nil after Int conversion")
 	}
-
-	if !satAmountInt.IsUint64() {
+	if satAmountInt.Sign() < 0 {
+		return 0, fmt.Errorf("amount %q results in negative satoshis", decimalAmount)
+	}
+	maxUint64Int := new(big.Int).SetUint64(math.MaxUint64)
+	if satAmountInt.Cmp(maxUint64Int) > 0 {
 		return 0, fmt.Errorf("amount %q exceeds uint64 range after conversion", decimalAmount)
+	}
+	if !satAmountInt.IsUint64() {
+		return 0, fmt.Errorf("amount %q cannot be represented as uint64 (IsUint64 failed)", decimalAmount)
+	}
+	if accuracy != big.Exact && accuracy != big.Below {
+		return 0, fmt.Errorf("cannot exactly convert %s to satoshis (Accuracy: %v)", decimalAmount, accuracy)
 	}
 
 	return satAmountInt.Uint64(), nil
@@ -1760,8 +1768,10 @@ func (m *mexc) Book(baseID, quoteID uint32) (buys, sells []*core.MiniOrder, _ er
 		conventionalRate := (float64(bid.rate) / quoteFactor) * baseFactor // Convert atomic rate (q/b) to conventional rate
 		conventionalQty := float64(bid.qty) / baseFactor                   // Convert atomic base qty to conventional qty
 		buys[i] = &core.MiniOrder{
-			Rate: conventionalRate, // Assign float64
-			Qty:  conventionalQty,  // Assign float64
+			Rate:      conventionalRate, // Assign float64
+			Qty:       conventionalQty,  // Assign float64
+			QtyAtomic: bid.qty,          // Add atomic qty
+			MsgRate:   bid.rate,         // Add atomic rate
 		}
 	}
 
@@ -1771,8 +1781,10 @@ func (m *mexc) Book(baseID, quoteID uint32) (buys, sells []*core.MiniOrder, _ er
 		conventionalRate := (float64(ask.rate) / quoteFactor) * baseFactor // Convert atomic rate (q/b) to conventional rate
 		conventionalQty := float64(ask.qty) / baseFactor                   // Convert atomic base qty to conventional qty
 		sells[i] = &core.MiniOrder{
-			Rate: conventionalRate, // Assign float64
-			Qty:  conventionalQty,  // Assign float64
+			Rate:      conventionalRate, // Assign float64
+			Qty:       conventionalQty,  // Assign float64
+			QtyAtomic: ask.qty,          // Add atomic qty
+			MsgRate:   ask.rate,         // Add atomic rate
 		}
 	}
 
@@ -2240,9 +2252,12 @@ func (m *mexc) listenKeyMaintainer(ctx context.Context) {
 // handleUserConnectEvent handles connection status changes for the user stream.
 func (m *mexc) handleUserConnectEvent(status comms.ConnectionStatus) {
 	m.log.Infof("User WS Connection Status Change: %v", status)
-	if status != comms.Connected {
-		m.signalReconnect() // Signal reconnect on any disconnect
-	}
+	// DO NOT signal reconnect here. WsConn handles temporary disconnects.
+	// Reconnect should only be triggered by listen key expiry (via keepAlive failure)
+	// or main context cancellation.
+	// if status != comms.Connected {
+	// 	m.signalReconnect() // Removed!
+	// }
 }
 
 // handleUserDataRawMessage parses raw byte messages from the User Data Stream.
@@ -2267,8 +2282,8 @@ func (m *mexc) handleUserDataRawMessage(msgBytes []byte) {
 		m.handleOrderUpdate(msgBytes) // Pass raw bytes for specific unmarshalling
 	case "spot@private.deals.v3.api":
 		m.handleDealUpdate(msgBytes) // Pass raw bytes for specific unmarshalling
-	// case "spot@private.account.v3.api": // Balance updates not explicitly handled yet
-	//    m.handleBalanceUpdate(msgBytes)
+	case "spot@private.account.v3.api": // Balance updates
+		m.handleBalanceUpdate(msgBytes) // Call new handler
 	default:
 		m.log.Tracef("Received unhandled user data event type '%s'", baseEvent.EventType)
 	}
@@ -2485,6 +2500,85 @@ func (m *mexc) handleDealUpdate(payload json.RawMessage) {
 
 	// 8. Notify subscriber (needs to be done outside the lock? No, map read is safe)
 	m.notifySubscriber(tradeInfo.updaterID, tradeUpdate)
+}
+
+// handleBalanceUpdate processes account balance update messages from WebSocket.
+func (m *mexc) handleBalanceUpdate(payload json.RawMessage) {
+	var baseMsg mexctypes.WsMessage // Need outer message for timestamp etc if needed later
+	if err := json.Unmarshal(payload, &baseMsg); err != nil {
+		m.log.Errorf("Failed to unmarshal outer WsMessage for balance update: %v, data: %s", err, string(payload))
+		return
+	}
+
+	var balanceUpdate mexctypes.WsAccountUpdateData
+	err := json.Unmarshal(baseMsg.Data, &balanceUpdate) // Unmarshal the inner 'd' field
+	if err != nil {
+		m.log.Errorf("Failed to unmarshal WsAccountUpdateData ('d' field): %v, data: %s", err, string(baseMsg.Data))
+		return
+	}
+
+	m.log.Debugf("Received MEXC Balance Update: Asset=%s, Available=%s, Locked=%s",
+		balanceUpdate.Asset, balanceUpdate.Available, balanceUpdate.Locked)
+
+	// Map MEXC asset to DEX asset ID(s)
+	mexcCoinUpper := strings.ToUpper(balanceUpdate.Asset)
+	m.mapMtx.RLock() // Lock for reading coinToAssetIDs
+	assetIDs, coinKnown := m.coinToAssetIDs[mexcCoinUpper]
+	m.mapMtx.RUnlock()
+
+	if !coinKnown || len(assetIDs) == 0 {
+		// m.log.Tracef("Balance update for unmapped/unknown asset: %s", mexcCoinUpper)
+		return // Ignore updates for assets we don't track
+	}
+
+	// Get precision for conversion (use first mapped ID, assuming same precision)
+	// Use background context as this is processing a background event.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	precision, pErr := m.getCoinPrecision(ctx, assetIDs[0])
+	if pErr != nil {
+		m.log.Errorf("Failed to get precision for balance update (%s): %v", mexcCoinUpper, pErr)
+		return
+	}
+	convFactor := math.Pow10(precision)
+
+	// Parse available and locked amounts
+	avail, availErr := m.stringToSatoshis(balanceUpdate.Available, convFactor)
+	locked, lockedErr := m.stringToSatoshis(balanceUpdate.Locked, convFactor)
+	if availErr != nil || lockedErr != nil {
+		m.log.Errorf("Error parsing balance amounts from update (%s): availErr=%v, lockedErr=%v", mexcCoinUpper, availErr, lockedErr)
+		return
+	}
+
+	newBalance := &ExchangeBalance{
+		Available: avail,
+		Locked:    locked,
+	}
+
+	// Update internal cache and broadcast for each mapped DEX asset ID
+	m.balancesMtx.Lock()
+	defer m.balancesMtx.Unlock()
+
+	for _, assetID := range assetIDs {
+		// Check if the balance actually changed before broadcasting
+		currentBalance, exists := m.balances[assetID]
+		if !exists || *currentBalance != *newBalance {
+			m.balances[assetID] = newBalance
+			m.log.Debugf("Updated balance via WS for AssetID %d: Avail=%d, Locked=%d", assetID, newBalance.Available, newBalance.Locked)
+
+			// Broadcast the update
+			bncUpdate := &BalanceUpdate{
+				AssetID: assetID,
+				Balance: newBalance, // Send pointer to the new balance stored in the map? Or a copy? Copy is safer.
+			}
+			bncUpdateCopy := *bncUpdate
+			bncUpdateCopy.Balance = &ExchangeBalance{Available: newBalance.Available, Locked: newBalance.Locked} // Make a copy of balance too
+			m.broadcast(&bncUpdateCopy)
+
+		} else {
+			// m.log.Tracef("Balance update for AssetID %d received, but no change detected.", assetID)
+		}
+	}
 }
 
 // notifySubscriber sends the trade update to the correct channel.
