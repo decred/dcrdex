@@ -179,15 +179,15 @@ func newMEXC(cfg *CEXConfig) (*mexc, error) {
 		reconnectChan:       make(chan struct{}, 1),
 	}
 	// Add log check right after logger assignment
-	m.log.Debugf("Logger check inside newMEXC - This should appear if debug is set.")
+	// m.log.Debugf("Logger check inside newMEXC - This should appear if debug is set.")
 
 	// Pre-build the symbol -> assetID map
-	m.log.Debugf("Building DEX symbol to Asset ID map...")
+	// m.log.Debugf("Building DEX symbol to Asset ID map...")
 	assetsInfo := asset.Assets()
 	for id, assetData := range assetsInfo {
 		lowerSymbol := strings.ToLower(assetData.Symbol)
 		m.symbolToAssetID[lowerSymbol] = id
-		m.log.Tracef("Mapped symbol \"%s\" to ID %d", lowerSymbol, id)
+		// m.log.Tracef("Mapped symbol \"%s\" to ID %d", lowerSymbol, id)
 		if assetData.Tokens != nil {
 			for tokenID := range assetData.Tokens { // Iterate over keys (token IDs)
 				// Get the registered symbol string for the token ID
@@ -195,7 +195,7 @@ func newMEXC(cfg *CEXConfig) (*mexc, error) {
 				if tokenSymbol != "" {
 					lowerTokenSymbol := strings.ToLower(tokenSymbol)
 					m.symbolToAssetID[lowerTokenSymbol] = tokenID
-					m.log.Tracef("Mapped token symbol \"%s\" to ID %d", lowerTokenSymbol, tokenID)
+					// m.log.Tracef("Mapped token symbol \"%s\" to ID %d", lowerTokenSymbol, tokenID)
 				} else {
 					m.log.Warnf("Could not get symbol for known token ID %d", tokenID)
 				}
@@ -205,14 +205,15 @@ func newMEXC(cfg *CEXConfig) (*mexc, error) {
 	m.log.Infof("Built DEX symbol map with %d entries.", len(m.symbolToAssetID))
 
 	// --- Add this block to log map keys ---
-	m.log.Debugf("Symbols found in asset map:")
+	// m.log.Debugf("Symbols found in asset map:")
 	mapKeys := make([]string, 0, len(m.symbolToAssetID))
 	for k := range m.symbolToAssetID {
 		mapKeys = append(mapKeys, k)
 	}
 	sort.Strings(mapKeys) // Sort for easier reading
 	for _, k := range mapKeys {
-		m.log.Debugf("  - \"%s\" -> ID %d", k, m.symbolToAssetID[k])
+		_ = k // Avoid declared and not used error when debug log is commented
+		// m.log.Debugf("  - \"%s\" -> ID %d", k, m.symbolToAssetID[k])
 	}
 	// --- End block ---
 
@@ -357,7 +358,7 @@ func (m *mexc) request(ctx context.Context, method, path string, params url.Valu
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "dcrdex-client")
 
-	m.log.Tracef("MEXC Request: %s %s", method, fullURL)
+	// m.log.Tracef("MEXC Request: %s %s", method, fullURL)
 
 	resp, err := m.client.Do(req)
 	if err != nil {
@@ -370,7 +371,7 @@ func (m *mexc) request(ctx context.Context, method, path string, params url.Valu
 		return fmt.Errorf("failed to read MEXC response body (%s %s): %w", method, path, err)
 	}
 
-	m.log.Tracef("MEXC Response Status: %d Body: %s", resp.StatusCode, string(respBodyBytes))
+	// m.log.Tracef("MEXC Response Status: %d Body: %s", resp.StatusCode, string(respBodyBytes))
 
 	// Check for non-2xx status codes first.
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -413,18 +414,18 @@ func (m *mexc) checkAPIKeys(ctx context.Context) error {
 
 // Connect performs initial setup and starts background processes.
 func (m *mexc) Connect(ctx context.Context) (*sync.WaitGroup, error) {
-	m.log.Debugf("MEXC Connect called")
+	// m.log.Debugf("MEXC Connect called")
 
 	if err := m.checkAPIKeys(ctx); err != nil {
 		return nil, fmt.Errorf("MEXC API key check failed: %w", err)
 	}
 	m.log.Infof("MEXC API keys appear valid.")
 
-	m.log.Debugf("Connect: Calling getCachedExchangeInfo...") // Log before exchange info
+	// m.log.Debugf("Connect: Calling getCachedExchangeInfo...") // Log before exchange info
 	if _, err := m.getCachedExchangeInfo(ctx); err != nil {
 		return nil, fmt.Errorf("failed to fetch initial MEXC exchange info: %w", err)
 	}
-	m.log.Debugf("Connect: Calling getCachedCoinInfo...") // Log before coin info
+	// m.log.Debugf("Connect: Calling getCachedCoinInfo...") // Log before coin info
 	if _, err := m.getCachedCoinInfo(ctx); err != nil {
 		return nil, fmt.Errorf("failed to fetch initial MEXC coin info: %w", err)
 	}
@@ -474,7 +475,7 @@ func (m *mexc) Balance(assetID uint32) (*ExchangeBalance, error) {
 
 // Balances retrieves the account balances from MEXC.
 func (m *mexc) Balances(ctx context.Context) (map[uint32]*ExchangeBalance, error) {
-	m.log.Debugf("Fetching MEXC balances...")
+	// m.log.Debugf("Fetching MEXC balances...")
 	path := "/api/v3/account"
 	var accountInfo mexctypes.AccountInfo
 	err := m.request(ctx, http.MethodGet, path, nil, nil, true, &accountInfo)
@@ -485,7 +486,8 @@ func (m *mexc) Balances(ctx context.Context) (map[uint32]*ExchangeBalance, error
 	// --- Add this logging ---
 	// Log the raw structure to see exactly what assets are returned
 	rawBalancesJSON, _ := json.MarshalIndent(accountInfo.Balances, "", "  ") // Pretty print
-	m.log.Debugf("Received raw balances from /api/v3/account:\n%s", string(rawBalancesJSON))
+	_ = rawBalancesJSON                                                      // Avoid declared and not used error when debug log is commented
+	// m.log.Debugf("Received raw balances from /api/v3/account:\n%s", string(rawBalancesJSON))
 	// --- End logging block ---
 
 	_, err = m.getCachedCoinInfo(ctx) // Ensure coin info is loaded for precision
@@ -496,17 +498,17 @@ func (m *mexc) Balances(ctx context.Context) (map[uint32]*ExchangeBalance, error
 	newBalances := make(map[uint32]*ExchangeBalance)
 	m.mapMtx.RLock()
 	m.coinInfoMtx.RLock()
-	m.log.Debugf("Processing %d balances from MEXC API", len(accountInfo.Balances)) // Log count
+	// m.log.Debugf("Processing %d balances from MEXC API", len(accountInfo.Balances)) // Log count
 	for _, bal := range accountInfo.Balances {
 		mexcCoinUpper := strings.ToUpper(bal.Asset)
-		m.log.Debugf("Processing balance for MEXC Coin: %s (Free: %s, Locked: %s)", mexcCoinUpper, bal.Free, bal.Locked) // Log raw balance
+		// m.log.Debugf("Processing balance for MEXC Coin: %s (Free: %s, Locked: %s)", mexcCoinUpper, bal.Free, bal.Locked) // Log raw balance
 
 		assetIDs, coinKnown := m.coinToAssetIDs[mexcCoinUpper]
 		if !coinKnown || len(assetIDs) == 0 {
-			m.log.Debugf(" -> Skipping %s: Not mapped to any known DEX asset ID", mexcCoinUpper) // Log skip reason
+			// m.log.Debugf(" -> Skipping %s: Not mapped to any known DEX asset ID", mexcCoinUpper) // Log skip reason
 			continue
 		}
-		m.log.Debugf(" -> Mapped to DEX IDs: %v", assetIDs) // Log mapped IDs
+		// m.log.Debugf(" -> Mapped to DEX IDs: %v", assetIDs) // Log mapped IDs
 
 		// Use first ID for precision lookup, assume precision is per-coin not per-network variant for balance
 		precision, pErr := m.getCoinPrecision(ctx, assetIDs[0])
@@ -529,7 +531,7 @@ func (m *mexc) Balances(ctx context.Context) (map[uint32]*ExchangeBalance, error
 
 		for _, assetID := range assetIDs {
 			newBalances[assetID] = &ExchangeBalance{Available: avail, Locked: locked}
-			m.log.Debugf("   -> Set balance for DEX ID %d", assetID) // Log successful set
+			// m.log.Debugf("   -> Set balance for DEX ID %d", assetID) // Log successful set
 		}
 	}
 	m.coinInfoMtx.RUnlock()
@@ -1602,7 +1604,8 @@ func (m *mexc) connectMarketStream(ctx context.Context) {
 
 // handleMarketConnectEvent handles connection status changes.
 func (m *mexc) handleMarketConnectEvent(status comms.ConnectionStatus) {
-	m.log.Infof("Market WS Connection Status Change: %v", status)
+	// Commented out: Underlying comms.WsConn may log similar reconnect events.
+	// m.log.Infof("Market WS Connection Status Change: %v", status)
 	if status != comms.Connected {
 		m.booksMtx.RLock()
 		for _, book := range m.books {
@@ -1847,7 +1850,7 @@ func (m *mexc) MidGap(baseID, quoteID uint32) uint64 {
 // ConfirmDeposit checks the status of a deposit by querying deposit history.
 func (m *mexc) ConfirmDeposit(ctx context.Context, deposit *DepositData) (bool, uint64) {
 	// NOTE: Matching primarily by TxID as Address might not be unique or consistently available.
-	m.log.Debugf("Confirming MEXC deposit for Asset: %d, TxID: %s", deposit.AssetID, deposit.TxID)
+	// m.log.Debugf("Confirming MEXC deposit for Asset: %d, TxID: %s", deposit.AssetID, deposit.TxID)
 
 	// 1. Map asset ID to MEXC Coin
 	m.mapMtx.RLock()
@@ -1881,8 +1884,8 @@ func (m *mexc) ConfirmDeposit(ctx context.Context, deposit *DepositData) (bool, 
 
 	// 3. Iterate and Match Deposit
 	for _, record := range history {
-		m.log.Tracef("Checking deposit record: Coin=%s, Amount=%s, Address=%s, TxID=%s, Status=%d",
-			record.Coin, record.Amount, record.Address, record.TxID, record.Status)
+		// m.log.Tracef("Checking deposit record: Coin=%s, Amount=%s, Address=%s, TxID=%s, Status=%d",
+		// 	record.Coin, record.Amount, record.Address, record.TxID, record.Status)
 
 		// Primary match criteria: TxID if available.
 		// Address matching is removed as DepositData doesn't have it and TxID is more reliable.
@@ -1890,7 +1893,7 @@ func (m *mexc) ConfirmDeposit(ctx context.Context, deposit *DepositData) (bool, 
 		txidMatch := deposit.TxID != "" && record.TxID == deposit.TxID
 
 		if txidMatch {
-			m.log.Debugf("Found potential deposit match via TxID: %s, Status=%d", record.TxID, record.Status)
+			// m.log.Debugf("Found potential deposit match via TxID: %s, Status=%d", record.TxID, record.Status)
 			// Check status: 6 = Credited/Success
 			if record.Status == 6 {
 				// 4. Parse Amount and Return Success
@@ -2251,7 +2254,8 @@ func (m *mexc) listenKeyMaintainer(ctx context.Context) {
 
 // handleUserConnectEvent handles connection status changes for the user stream.
 func (m *mexc) handleUserConnectEvent(status comms.ConnectionStatus) {
-	m.log.Infof("User WS Connection Status Change: %v", status)
+	// Commented out: Underlying comms.WsConn may log similar reconnect events.
+	// m.log.Infof("User WS Connection Status Change: %v", status)
 	// DO NOT signal reconnect here. WsConn handles temporary disconnects.
 	// Reconnect should only be triggered by listen key expiry (via keepAlive failure)
 	// or main context cancellation.
