@@ -250,8 +250,8 @@ func newMEXC(cfg *CEXConfig) (*mexc, error) {
 	userWsCfg.RawHandler = m.handleUserDataRawMessage     // Assign specific raw handler
 	userWsCfg.ReconnectSync = nil                         // No automatic resubscribe for user stream (needs new key)
 	userWsCfg.ConnectEventFunc = m.handleUserConnectEvent // Separate event handler
-	userWsCfg.PingWait = 24 * time.Hour                   // Effectively disable WsConn auto ping/pong
-	userWsCfg.EchoPingData = true                         // Required by MEXC for some interactions
+	userWsCfg.PingWait = 60 * time.Second                 // Revert PingWait to 60s for WsConn handling
+	userWsCfg.EchoPingData = true                         // Keep this enabled for WsConn PONGs
 	userDataStream, err := comms.NewWsConn(&userWsCfg)
 	if err != nil {
 		// Clean up market stream if user stream fails? Consider this if needed.
@@ -1735,7 +1735,7 @@ func (m *mexc) UnsubscribeMarket(baseID, quoteID uint32) error {
 }
 
 // connectMarketStream establishes the initial market data WebSocket connection,
-// sends the first subscription, and starts the proactive PING goroutine.
+// sends the first subscription.
 // It should only be called by SubscribeMarket when m.marketStream is nil.
 func (m *mexc) connectMarketStream(ctx context.Context, firstMexcSymbol string) error {
 	m.log.Infof("[MarketWS] Establishing initial connection for symbol %s...", firstMexcSymbol)
@@ -1774,35 +1774,9 @@ func (m *mexc) connectMarketStream(ctx context.Context, firstMexcSymbol string) 
 		}
 	}()
 
-	// Launch PING goroutine
-	m.wg.Add(1)
-	go func() {
-		defer m.wg.Done()
-		pingTicker := time.NewTicker(30 * time.Second)
-		defer pingTicker.Stop()
-		m.log.Infof("[MarketWS] Starting proactive PING ticker.")
-		defer m.log.Infof("[MarketWS] Stopping proactive PING ticker.")
-		pingCtx := ctx
-		for {
-			select {
-			case <-pingCtx.Done():
-				return
-			case <-pingTicker.C:
-				m.marketStreamMtx.RLock()
-				stream := m.marketStream
-				m.marketStreamMtx.RUnlock()
-				if stream != nil && !stream.IsDown() {
-					m.log.Debugf("Sending proactive WebSocket PING (Market Stream)")
-					pingJSON := `{"method":"PING"}`
-					if err := stream.SendRaw([]byte(pingJSON)); err != nil {
-						m.log.Errorf("Failed to send proactive WebSocket PING (Market Stream): %v", err)
-					}
-				}
-			}
-		}
-	}()
+	// REMOVED Proactive PING goroutine for Market Stream
 
-	time.Sleep(2 * time.Second)
+	time.Sleep(2 * time.Second) // Keep delay for connection establishment
 	if m.marketStream.IsDown() {
 		return fmt.Errorf("[MarketWS] connection failed shortly after initiation")
 	}
@@ -1872,7 +1846,7 @@ func (m *mexc) subscribeToAdditionalMarket(ctx context.Context, mexcSymbol strin
 
 // handleMarketRawMessage parses raw byte messages from the WebSocket.
 func (m *mexc) handleMarketRawMessage(msgBytes []byte) {
-	// Try to unmarshal as the base message type first (for Channel, Symbol, Ping, Data)
+	// Try to unmarshal as the base message type first
 	var baseMsg mexctypes.WsMessage
 	if err := json.Unmarshal(msgBytes, &baseMsg); err != nil {
 		m.log.Errorf("[MarketWS] Failed to unmarshal base market WS message: %v, msg: %s", err, string(msgBytes))
@@ -1901,25 +1875,24 @@ func (m *mexc) handleMarketRawMessage(msgBytes []byte) {
 		return // Handled depth update
 	}
 
-	// If Channel is empty or not recognized, check for other known message types
+	// If Channel is empty or not recognized, try parsing as a generic response
 	var genericResp struct {
 		ID   interface{} `json:"id"`
 		Code int         `json:"code"`
 		Msg  string      `json:"msg"`
 	}
 	if err := json.Unmarshal(msgBytes, &genericResp); err == nil {
-		if genericResp.Code == 0 && genericResp.Msg == "PONG" {
-			m.log.Tracef("[MarketWS] Received server PONG acknowledgement")
-			return
-		}
+		// Check for subscription success confirmations
 		if genericResp.Code == 0 && strings.Contains(strings.ToLower(genericResp.Msg), "success") {
 			m.log.Debugf("[MarketWS] Received MEXC WS Success Response/Confirmation: %s", string(msgBytes))
-			return
+			return // Handled success confirmation
 		}
+		// Log PONG or anything else structured but not recognized
 		m.log.Warnf("[MarketWS] Received unknown structured WS message: %s", string(msgBytes))
 		return
 	}
 
+	// If it couldn't be parsed as WsMessage or the generic struct, log as unparseable
 	m.log.Warnf("[MarketWS] Received unhandled/unparseable raw market message: %s", string(msgBytes))
 }
 
@@ -2441,16 +2414,13 @@ connectLoop:
 		// Add a small delay before sending subscriptions
 		time.Sleep(1 * time.Second)
 
-		// Add explicit subscriptions for the user data channels (if needed by MEXC)
-		// MEXC user stream might not require explicit subscriptions like Binance
-		// If they are needed, re-add the subscription loop here.
+		// Explicit subscriptions likely not needed for MEXC user stream
 		m.log.Infof("MEXC User Stream does not require explicit channel subscriptions.")
 
-		// Start a ticker for proactive WebSocket PINGs
-		pingTicker := time.NewTicker(30 * time.Second)
-		defer pingTicker.Stop()
+		// REMOVED Proactive PING ticker for User Stream
 
-		// RawHandler handles messages, listen key keepalive handled elsewhere
+		// RawHandler handles messages, listen key keepalive handled elsewhere.
+		// Rely on WsConn PingWait and EchoPingData for keepalive.
 	wsLoop: // Label for the select loop
 		for {
 			select {
@@ -2462,20 +2432,7 @@ connectLoop:
 				m.log.Warnf("Received reconnect signal for user data stream. Reconnecting...")
 				cancelKeyRefresh()
 				break wsLoop // Exit inner loop
-			// case <-proactiveReconnect.C: // This was removed as potentially problematic
-			// 	m.log.Infof("Proactively reconnecting WebSocket after %v to prevent server timeout", proactiveReconnectInterval)
-			// 	cancelKeyRefresh()
-			// 	break wsLoop // Exit inner loop
-			case <-pingTicker.C: // Send proactive WebSocket PING
-				// Only send ping if the stream is actually connected
-				if m.userDataStream != nil && !m.userDataStream.IsDown() {
-					m.log.Debugf("Sending proactive WebSocket PING (User Stream)")
-					pingJSON := `{"method":"PING"}`
-					if err := m.userDataStream.SendRaw([]byte(pingJSON)); err != nil {
-						m.log.Errorf("Failed to send proactive WebSocket PING (User Stream): %v", err)
-						// Consider triggering reconnect if ping fails?
-					}
-				}
+				// REMOVED pingTicker case
 			}
 		}
 
@@ -2523,56 +2480,39 @@ func (m *mexc) handleUserConnectEvent(status comms.ConnectionStatus) {
 func (m *mexc) handleUserDataRawMessage(msgBytes []byte) {
 	// m.log.Tracef("[UserWS] Raw message: %s", string(msgBytes))
 
-	// First check for server PING {"ping": ts}
-	var pingCheck struct {
-		Ping int64 `json:"ping"`
-	}
-	if err := json.Unmarshal(msgBytes, &pingCheck); err == nil && pingCheck.Ping > 0 {
-		m.log.Debugf("[UserWS] Received server PING: %d", pingCheck.Ping)
-		pong := mexctypes.WsPong{Pong: pingCheck.Ping}
-		pongBytes, err := json.Marshal(pong)
-		if err == nil {
-			if err := m.userDataStream.SendRaw(pongBytes); err != nil {
-				m.log.Errorf("[UserWS] Failed to send PONG response: %v", err)
-			} else {
-				m.log.Debugf("[UserWS] Sent PONG response: %d", pingCheck.Ping)
-			}
-		}
-		return
-	}
+	// REMOVED: Explicit server PING handling. Relying on WsConn EchoPingData.
+	// var pingCheck struct { Ping int64 `json:"ping"` }
+	// if err := json.Unmarshal(msgBytes, &pingCheck); err == nil && pingCheck.Ping > 0 { ... }
 
 	// Try to unmarshal into the base event type to get the event string 'e'
 	var baseEvent mexctypes.WsMessage // Reusing this struct for EventType ('e') field
 	err := json.Unmarshal(msgBytes, &baseEvent)
 	if err != nil {
+		// Check if it's the PONG ack to our (now removed) client PING
+		var pongAckCheck struct {
+			Msg string `json:"msg"`
+		}
+		if json.Unmarshal(msgBytes, &pongAckCheck) == nil && pongAckCheck.Msg == "PONG" {
+			m.log.Tracef("[UserWS] Received PONG acknowledgement message (ignoring).")
+			return
+		}
 		m.log.Errorf("[UserWS] Failed to unmarshal base user event: %v, payload: %s", err, string(msgBytes))
 		return
 	}
 
 	if baseEvent.EventType == "" {
-		// Could be keepalive response {"msg":"PONG", ...} or other non-event message
 		m.log.Tracef("[UserWS] Received user data message without event type: %s", string(msgBytes))
-		// Should we check for PONG msg here too?
-		// If we send PING {"method":"PING"}, MEXC might reply with {"msg":"PONG"}?
-		// Let's check for that explicitly.
-		var pongAckCheck struct {
-			Msg string `json:"msg"`
-		}
-		if json.Unmarshal(msgBytes, &pongAckCheck) == nil && pongAckCheck.Msg == "PONG" {
-			m.log.Tracef("[UserWS] Received PONG acknowledgement message.")
-			return
-		}
 		return
 	}
 
 	// Dispatch based on event type ('e')
 	switch baseEvent.EventType {
-	case "spot@private.orders.v3.api": // Order updates (e.g., new, filled, canceled)
-		m.handleOrderUpdate(msgBytes) // Pass raw bytes for specific unmarshalling
+	case "spot@private.orders.v3.api": // Order updates
+		m.handleOrderUpdate(msgBytes)
 	case "spot@private.deals.v3.api": // Trade execution updates
-		m.handleDealUpdate(msgBytes) // Pass raw bytes for specific unmarshalling
+		m.handleDealUpdate(msgBytes)
 	case "spot@private.account.v3.api": // Balance updates
-		m.handleBalanceUpdate(msgBytes) // Call new handler
+		m.handleBalanceUpdate(msgBytes)
 	default:
 		m.log.Warnf("[UserWS] Received unhandled user data event type '%s': %s", baseEvent.EventType, string(msgBytes))
 	}
