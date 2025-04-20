@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -732,6 +733,16 @@ func ValidateOrder(ord Order, status OrderStatus, lotSize uint64) error {
 		return fmt.Errorf("same asset specified for base and quote")
 	}
 
+	validateTrade := func(t *Trade) error {
+		if t.Quantity%lotSize != 0 || t.Remaining()%lotSize != 0 {
+			return fmt.Errorf("market sell order fails lot size requirement %d %% %d = %d", t.Quantity, lotSize, t.Quantity%lotSize)
+		}
+		if t.Quantity > math.MaxInt64 {
+			return fmt.Errorf("order quantity %d is greater than max allowed %d", t.Quantity, math.MaxInt64)
+		}
+		return nil
+	}
+
 	// Each order type has different rules about status and lot size.
 	switch ot := ord.(type) {
 	case *MarketOrder:
@@ -750,8 +761,10 @@ func ValidateOrder(ord Order, status OrderStatus, lotSize uint64) error {
 		// Market sell orders must respect lot size. Market buy orders must be
 		// of an amount sufficiently buffered beyond the minimum standing sell
 		// order's lot cost, but that is enforced by the order router.
-		if ot.Sell && (ot.Quantity%lotSize != 0 || ot.Remaining()%lotSize != 0) {
-			return fmt.Errorf("market sell order fails lot size requirement %d %% %d = %d", ot.Quantity, lotSize, ot.Quantity%lotSize)
+		if ot.Sell {
+			if err := validateTrade(&ot.T); err != nil {
+				return err
+			}
 		}
 
 	case *CancelOrder:

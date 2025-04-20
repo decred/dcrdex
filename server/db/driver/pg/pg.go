@@ -12,6 +12,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/server/db"
+	"decred.org/dcrdex/server/db/driver/pg/internal"
 )
 
 // Driver implements db.Driver.
@@ -58,6 +59,7 @@ type archiverTables struct {
 	accounts     string
 	bonds        string
 	prepaidBonds string
+	pointsTable  string
 }
 
 // Archiver must implement server/db.DEXArchivist.
@@ -69,6 +71,13 @@ type Archiver struct {
 	dbName       string
 	markets      map[string]*dex.MarketInfo
 	tables       archiverTables
+
+	queries struct {
+		selectPoints            *sql.Stmt // internal.SelectPoints
+		insertPoints            *sql.Stmt // internal.InsertPoints
+		prunePoints             *sql.Stmt // internal.PrunePoints
+		selectReputationVersion *sql.Stmt // internal.SelectReputationVersion
+	}
 
 	fatalMtx sync.RWMutex
 	fatal    chan struct{}
@@ -144,7 +153,7 @@ func NewArchiverForRead(ctx context.Context, cfg *Config) (*Archiver, error) {
 		mktMap[marketSchema(mkt.Name)] = mkt
 	}
 
-	return &Archiver{
+	a := &Archiver{
 		ctx:          ctx,
 		db:           db,
 		dbName:       cfg.DBName,
@@ -155,9 +164,12 @@ func NewArchiverForRead(ctx context.Context, cfg *Config) (*Archiver, error) {
 			accounts:     fullTableName(cfg.DBName, publicSchema, accountsTableName),
 			bonds:        fullTableName(cfg.DBName, publicSchema, bondsTableName),
 			prepaidBonds: fullTableName(cfg.DBName, publicSchema, prepaidBondsTableName),
+			pointsTable:  fullTableName(cfg.DBName, publicSchema, pointsTableName),
 		},
 		fatal: make(chan struct{}),
-	}, nil
+	}
+
+	return a, nil
 }
 
 // NewArchiver constructs a new Archiver. All tables are created, including
@@ -179,6 +191,9 @@ func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := archiver.prepareQueries(); err != nil {
+		return nil, err
+	}
 	for _, staleMarket := range purgeMarkets {
 		mkt := archiver.markets[staleMarket]
 		if mkt == nil { // shouldn't happen
@@ -197,6 +212,9 @@ func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
 
 // Close closes the underlying DB connection.
 func (a *Archiver) Close() error {
+	if err := a.queries.selectPoints.Close(); err != nil {
+		log.Errorf("Error closing prepared statement for reptuation points: %v", err)
+	}
 	return a.db.Close()
 }
 
@@ -214,4 +232,24 @@ func (a *Archiver) marketSchema(base, quote uint32) (string, error) {
 		}
 	}
 	return schema, nil
+}
+
+func (a *Archiver) prepareQueries() (err error) {
+	a.queries.selectPoints, err = a.db.Prepare(fmt.Sprintf(internal.SelectPoints, a.tables.pointsTable))
+	if err != nil {
+		return fmt.Errorf("error constructing prepared statement for reputation points selection: %w", err)
+	}
+	a.queries.insertPoints, err = a.db.Prepare(fmt.Sprintf(internal.InsertPoints, a.tables.pointsTable))
+	if err != nil {
+		return fmt.Errorf("error constructing prepared statement for reputation points insertion: %w", err)
+	}
+	a.queries.prunePoints, err = a.db.Prepare(fmt.Sprintf(internal.PrunePoints, a.tables.pointsTable))
+	if err != nil {
+		return fmt.Errorf("error constructing prepared statement for reputation points pruning: %w", err)
+	}
+	a.queries.selectReputationVersion, err = a.db.Prepare(fmt.Sprintf(internal.SelectReputationVersion, a.tables.accounts))
+	if err != nil {
+		return fmt.Errorf("error constructing prepared statement for reputation version selection: %w", err)
+	}
+	return nil
 }
