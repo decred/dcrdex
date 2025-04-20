@@ -233,26 +233,6 @@ func createTableStmt(db sqlQueryExecutor, fmtStmt, schema, tableName string) (bo
 	return created, nil
 }
 
-func dropTable(db sqlExecutor, tableName string) error {
-	_, err := db.Exec(fmt.Sprintf(`DROP TABLE IF EXISTS %s;`, tableName))
-	return err
-}
-
-// existsIndex checks if the specified index name exists.
-func existsIndex(db *sql.DB, indexName string) (exists bool, err error) {
-	err = db.QueryRow(internal.IndexExists, indexName, publicSchema).Scan(&exists)
-	if errors.Is(err, sql.ErrNoRows) {
-		err = nil
-	}
-	return
-}
-
-// isUniqueIndex checks if the given index name is defined as UNIQUE.
-func isUniqueIndex(db *sql.DB, indexName string) (isUnique bool, err error) {
-	err = db.QueryRow(internal.IndexIsUnique, indexName, publicSchema).Scan(&isUnique)
-	return
-}
-
 // parseUnit is used to separate a "unit" from pg_settings such as "8kB" into a
 // numeric component and a base unit string.
 func parseUnit(unit string) (multiple float64, baseUnit string, err error) {

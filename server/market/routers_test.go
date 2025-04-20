@@ -21,7 +21,6 @@ import (
 	ordertest "decred.org/dcrdex/dex/order/test"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
-	"decred.org/dcrdex/server/auth"
 	"decred.org/dcrdex/server/book"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
@@ -250,7 +249,7 @@ func (a *TAuth) PreimageSuccess(user account.AccountID, refTime time.Time, oid o
 func (a *TAuth) MissedPreimage(user account.AccountID, refTime time.Time, oid order.OrderID)  {}
 func (a *TAuth) SwapSuccess(user account.AccountID, mmid db.MarketMatchID, value uint64, refTime time.Time) {
 }
-func (a *TAuth) Inaction(user account.AccountID, step auth.NoActionStep, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID) {
+func (a *TAuth) Inaction(user account.AccountID, step db.Outcome, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID) {
 }
 func (a *TAuth) UserReputation(user account.AccountID) (tier int64, score, maxScore int32, err error) {
 	if a.rep.maxScore == 0 {
