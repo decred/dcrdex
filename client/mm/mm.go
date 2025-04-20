@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -1642,7 +1643,11 @@ func (m *MarketMaker) availableBalances(mkt *MarketWithHost, cexCfg *CEXConfig) 
 					return nil, nil, err
 				}
 
-				cexBals[assetID] = balance.Available
+				availBalance, parseErr := strconv.ParseUint(balance.Available, 10, 64)
+				if parseErr != nil {
+					return nil, nil, fmt.Errorf("error parsing CEX available balance string for asset %d: %w", assetID, parseErr)
+				}
+				cexBals[assetID] = availBalance
 			}
 		}
 

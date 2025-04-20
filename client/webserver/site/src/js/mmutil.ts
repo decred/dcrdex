@@ -543,8 +543,8 @@ export class BotMarket {
       cexBaseBalance = cex.balances[baseID]
       cexQuoteBalance = cex.balances[quoteID]
     }
-    if (cexBaseBalance) cexBaseAvail = (cexBaseBalance.available || 0) - bInv.cex.avail
-    if (cexQuoteBalance) cexQuoteAvail = (cexQuoteBalance.available || 0) - qInv.cex.avail
+    if (cexBaseBalance) cexBaseAvail = (parseFloat(cexBaseBalance.available || '0')) - bInv.cex.avail
+    if (cexQuoteBalance) cexQuoteAvail = (parseFloat(cexQuoteBalance.available || '0')) - qInv.cex.avail
     const [dexBaseAvail, dexQuoteAvail] = [baseWallet.balance.available - bInv.dex.avail, quoteWallet.balance.available - qInv.dex.avail]
     const baseAvail = dexBaseAvail + cexBaseAvail
     const quoteAvail = dexQuoteAvail + cexQuoteAvail
@@ -555,14 +555,14 @@ export class BotMarket {
     if (baseFeeID !== baseID) {
       const bFeeInv = runningBotInventory(baseID)
       dexBaseFeeAvail = baseFeeWallet.balance.available - bFeeInv.dex.total
-      if (cexBaseBalance) cexBaseFeeAvail = (cexBaseBalance.available || 0) - bFeeInv.cex.total
+      if (cexBaseBalance) cexBaseFeeAvail = (parseFloat(cexBaseBalance.available || '0')) - bFeeInv.cex.total
       baseFeeAvail = dexBaseFeeAvail + cexBaseFeeAvail
     }
     let [quoteFeeAvail, dexQuoteFeeAvail, cexQuoteFeeAvail] = [quoteAvail, dexQuoteAvail, cexQuoteAvail]
     if (quoteFeeID !== quoteID) {
       const qFeeInv = runningBotInventory(quoteID)
       dexQuoteFeeAvail = quoteFeeWallet.balance.available - qFeeInv.dex.total
-      if (cexQuoteBalance) cexQuoteFeeAvail = (cexQuoteBalance.available || 0) - qFeeInv.cex.total
+      if (cexQuoteBalance) cexQuoteFeeAvail = (parseFloat(cexQuoteBalance.available || '0')) - qFeeInv.cex.total
       quoteFeeAvail = dexQuoteFeeAvail + cexQuoteFeeAvail
     }
     return { // convert to conventioanl.
@@ -1111,29 +1111,28 @@ export class RunningMarketMakerDisplay {
       cexAsset = app().assets[cexAssetID]
       form.cexAsset.textContent = cexAsset.symbol.toUpperCase()
       form.cexAssetLogo.src = Doc.logoPath(cexAsset.symbol)
-      const availableCexBal = report.availableCexBal ? report.availableCexBal.available : 0
+      const availableCexBal = report.availableCexBal ? report.availableCexBal.available : 0 // Revert to number, default 0
       const requiredCexBal = report.requiredCexBal ? report.requiredCexBal : 0
       const remainingCexBal = report.remainingCexBal ? report.remainingCexBal : 0
       const pendingCexBal = report.availableCexBal ? report.availableCexBal.pending : 0
       const reservedCexBal = report.availableCexBal ? report.availableCexBal.reserved : 0
       const usedCexBal = report.usedCexBal ? report.usedCexBal : 0
-      const deficiencyCexBal = safeSub(requiredCexBal, availableCexBal)
+
+      const deficiencyCexBal = safeSub(requiredCexBal, availableCexBal) // Use number directly
       const deficiencyWithPendingCexBal = safeSub(deficiencyCexBal, pendingCexBal)
-      form.cexAvailable.textContent = Doc.formatCoinValue(availableCexBal, cexAsset.unitInfo)
+
+      form.cexAvailable.textContent = Doc.formatCoinValue(availableCexBal, cexAsset.unitInfo) // Use number directly
       form.cexLocked.textContent = Doc.formatCoinValue(reservedCexBal, cexAsset.unitInfo)
       form.cexRequired.textContent = Doc.formatCoinValue(requiredCexBal, cexAsset.unitInfo)
       form.cexRemaining.textContent = Doc.formatCoinValue(remainingCexBal, cexAsset.unitInfo)
       form.cexPending.textContent = Doc.formatCoinValue(pendingCexBal, cexAsset.unitInfo)
       form.cexUsed.textContent = Doc.formatCoinValue(usedCexBal, cexAsset.unitInfo)
       const deficient = deficiencyCexBal > 0
-      Doc.setVis(deficient, form.cexDeficiencyHeader, form.cexDeficiencyWithPendingHeader,
-        form.cexDeficiency, form.cexDeficiencyWithPending)
-      if (deficient) {
-        form.cexDeficiency.textContent = Doc.formatCoinValue(deficiencyCexBal, cexAsset.unitInfo)
-        form.cexDeficiencyWithPending.textContent = Doc.formatCoinValue(deficiencyWithPendingCexBal, cexAsset.unitInfo)
-        if (deficiencyWithPendingCexBal > 0) form.cexDeficiencyWithPending.classList.add('text-warning')
-        else form.cexDeficiencyWithPending.classList.remove('text-warning')
-      }
+      form.cexAvailable.classList.toggle('text-warning', deficient)
+      form.cexDeficiency.textContent = deficient ? Doc.formatCoinValue(deficiencyCexBal, cexAsset.unitInfo) : ''
+      form.cexDeficiencyWithPending.textContent = deficiencyWithPendingCexBal > 0 ? Doc.formatCoinValue(deficiencyWithPendingCexBal, cexAsset.unitInfo) : ''
+      Doc.setVis(deficient, form.cexDeficiencyBox)
+      Doc.setVis(deficiencyWithPendingCexBal > 0 && pendingCexBal > 0, form.cexDeficiencyWithPendingBox)
     }
 
     let anyErrors = false

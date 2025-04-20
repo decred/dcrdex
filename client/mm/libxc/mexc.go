@@ -561,7 +561,7 @@ func (m *mexc) Balances(ctx context.Context) (map[uint32]*ExchangeBalance, error
 	// Log the raw structure to see exactly what assets are returned
 	rawBalancesJSON, _ := json.MarshalIndent(accountInfo.Balances, "", "  ") // Pretty print
 	_ = rawBalancesJSON                                                      // Avoid declared and not used error when debug log is commented
-	// m.log.Debugf("Received raw balances from /api/v3/account:\n%s", string(rawBalancesJSON))
+	// m.log.Debugf("Received raw balances from /api/v3/account:\n%s", string(rawBalancesJSON)) // REMOVE DEBUG
 	// --- End logging block ---
 
 	_, err = m.getCachedCoinInfo(ctx) // Ensure coin info is loaded for precision
@@ -572,25 +572,36 @@ func (m *mexc) Balances(ctx context.Context) (map[uint32]*ExchangeBalance, error
 	newBalances := make(map[uint32]*ExchangeBalance)
 	m.mapMtx.RLock()
 	m.coinInfoMtx.RLock()
-	// m.log.Debugf("Processing %d balances from MEXC API", len(accountInfo.Balances)) // Log count
+	// m.log.Debugf("Processing %d balances from MEXC API", len(accountInfo.Balances)) // REMOVE DEBUG Log count
 	for _, bal := range accountInfo.Balances {
 		mexcCoinUpper := strings.ToUpper(bal.Asset)
-		// m.log.Debugf("Processing balance for MEXC Coin: %s (Free: %s, Locked: %s)", mexcCoinUpper, bal.Free, bal.Locked) // Log raw balance
+		// m.log.Debugf("Processing balance for MEXC Coin: %s (Free: %s, Locked: %s)", mexcCoinUpper, bal.Free, bal.Locked) // REMOVE DEBUG Log raw balance
 
 		assetIDs, coinKnown := m.coinToAssetIDs[mexcCoinUpper]
 		if !coinKnown || len(assetIDs) == 0 {
-			// m.log.Debugf(" -> Skipping %s: Not mapped to any known DEX asset ID", mexcCoinUpper) // Log skip reason
+			// m.log.Debugf(" -> Skipping %s: Not mapped to any known DEX asset ID", mexcCoinUpper) // REMOVE DEBUG Log skip reason
 			continue
 		}
-		// m.log.Debugf(" -> Mapped to DEX IDs: %v", assetIDs) // Log mapped IDs
+		// m.log.Debugf(" -> Mapped to DEX IDs: %v", assetIDs) // REMOVE DEBUG Log mapped IDs
 
-		// Use first ID for precision lookup, assume precision is per-coin not per-network variant for balance
-		precision, pErr := m.getCoinPrecision(ctx, assetIDs[0])
-		if pErr != nil {
-			m.log.Errorf(" -> Skipping %s: Failed to get precision: %v", mexcCoinUpper, pErr)
+		// *** FIX: Use precision directly from asset.UnitInfo ***
+		var precision int = -1
+		ui, uiErr := asset.UnitInfo(assetIDs[0]) // Use first ID, assume same precision for variants
+		if uiErr != nil {
+			m.log.Errorf(" -> Skipping %s: Failed to get UnitInfo for asset ID %d: %v", mexcCoinUpper, assetIDs[0], uiErr)
 			continue
 		}
+		precision = inferDecimals(ui.Conventional.ConversionFactor)
+		// *** End FIX ***
+
+		if precision < 0 {
+			// Should not happen if UnitInfo was found
+			m.log.Errorf(" -> Skipping %s: Could not determine precision even from UnitInfo for asset ID %d", mexcCoinUpper, assetIDs[0])
+			continue
+		}
+
 		convFactor := math.Pow10(precision)
+		// m.log.Debugf(" -> Precision for %s (AssetID %d): %d (Factor: %.0f)", mexcCoinUpper, assetIDs[0], precision, convFactor) // REMOVE DEBUG Log precision
 
 		avail, err := m.stringToSatoshis(bal.Free, convFactor)
 		if err != nil {
@@ -602,9 +613,11 @@ func (m *mexc) Balances(ctx context.Context) (map[uint32]*ExchangeBalance, error
 			m.log.Errorf(" -> Skipping %s: Error parsing locked balance %s: %v", mexcCoinUpper, bal.Locked, err)
 			continue
 		}
+		// m.log.Debugf(" -> Calculated satoshis for %s: Available=%d, Locked=%d", mexcCoinUpper, avail, locked) // REMOVE DEBUG Log calculated satoshis
+		// m.log.Debugf(" -> Calculated satoshis for %s: Available=%d, Locked=%d", mexcCoinUpper, avail, locked) // REMOVE DEBUG Uncommented for debugging
 
 		for _, assetID := range assetIDs {
-			newBalances[assetID] = &ExchangeBalance{Available: avail, Locked: locked}
+			newBalances[assetID] = &ExchangeBalance{Available: strconv.FormatUint(avail, 10), Locked: strconv.FormatUint(locked, 10)}
 			// m.log.Debugf("   -> Set balance for DEX ID %d", assetID) // Log successful set
 		}
 	}
@@ -622,6 +635,7 @@ func (m *mexc) Balances(ctx context.Context) (map[uint32]*ExchangeBalance, error
 		retBalances[k] = v
 	}
 
+	// m.log.Debugf("Returning processed balances: %+v", retBalances) // REMOVE DEBUG Log final map
 	m.log.Infof("Successfully updated MEXC balances for %d assets.", len(retBalances))
 	return retBalances, nil
 }
@@ -1176,14 +1190,17 @@ func (m *mexc) stringToSatoshis(decimalAmount string, conversionFactor float64) 
 	if decimalAmount == "" {
 		return 0, nil
 	}
+	// m.log.Debugf("stringToSatoshis: Input='%s', Factor=%.0f", decimalAmount, conversionFactor) // REMOVE DEBUG
 	// Use big.Float for precision, explicitly setting precision
 	const floatPrec = 128 // Use sufficient precision
 	fltAmount, ok := new(big.Float).SetPrec(floatPrec).SetString(decimalAmount)
 	if !ok {
 		return 0, fmt.Errorf("invalid amount string: %q", decimalAmount)
 	}
+	// m.log.Debugf("stringToSatoshis: Parsed fltAmount=%s", fltAmount.String()) // REMOVE DEBUG
 	fltFactor := big.NewFloat(conversionFactor).SetPrec(floatPrec)
 	satAmountFlt := new(big.Float).SetPrec(floatPrec).Mul(fltAmount, fltFactor)
+	// m.log.Debugf("stringToSatoshis: Calculated satAmountFlt=%s", satAmountFlt.String()) // REMOVE DEBUG
 
 	// --- Keep the rest of the checks added previously ---
 	if satAmountFlt == nil {
@@ -1193,6 +1210,7 @@ func (m *mexc) stringToSatoshis(decimalAmount string, conversionFactor float64) 
 	if satAmountInt == nil {
 		return 0, fmt.Errorf("internal error: satAmountInt is nil after Int conversion")
 	}
+	// m.log.Debugf("stringToSatoshis: Converted satAmountInt=%s, Accuracy=%v", satAmountInt.String(), accuracy) // REMOVE DEBUG
 	if satAmountInt.Sign() < 0 {
 		return 0, fmt.Errorf("amount %q results in negative satoshis", decimalAmount)
 	}
@@ -1207,7 +1225,9 @@ func (m *mexc) stringToSatoshis(decimalAmount string, conversionFactor float64) 
 		return 0, fmt.Errorf("cannot exactly convert %s to satoshis (Accuracy: %v)", decimalAmount, accuracy)
 	}
 
-	return satAmountInt.Uint64(), nil
+	finalUint64 := satAmountInt.Uint64()
+	// m.log.Debugf("stringToSatoshis: Returning finalUint64=%d", finalUint64) // REMOVE DEBUG
+	return finalUint64, nil
 }
 
 // --- Trading Methods ---
@@ -2780,8 +2800,8 @@ func (m *mexc) handleBalanceUpdate(payload json.RawMessage) {
 	}
 
 	newBalance := &ExchangeBalance{
-		Available: avail,
-		Locked:    locked,
+		Available: strconv.FormatUint(avail, 10),
+		Locked:    strconv.FormatUint(locked, 10),
 	}
 
 	// Update internal cache and broadcast for each mapped DEX asset ID
@@ -2793,7 +2813,7 @@ func (m *mexc) handleBalanceUpdate(payload json.RawMessage) {
 		currentBalance, exists := m.balances[assetID]
 		if !exists || *currentBalance != *newBalance {
 			m.balances[assetID] = newBalance
-			m.log.Debugf("Updated balance via WS for AssetID %d: Avail=%d, Locked=%d", assetID, newBalance.Available, newBalance.Locked)
+			m.log.Debugf("Updated balance via WS for AssetID %d: Avail=%s, Locked=%s", assetID, newBalance.Available, newBalance.Locked)
 
 			// Broadcast the update
 			bncUpdate := &BalanceUpdate{

@@ -601,8 +601,8 @@ func (bnc *binance) refreshBalances(ctx context.Context) error {
 				continue
 			}
 			updatedBalance := &ExchangeBalance{
-				Available: uint64(math.Round(bal.Free * float64(ui.Conventional.ConversionFactor))),
-				Locked:    uint64(math.Round(bal.Locked * float64(ui.Conventional.ConversionFactor))),
+				Available: strconv.FormatUint(uint64(math.Round(bal.Free*float64(ui.Conventional.ConversionFactor))), 10),
+				Locked:    strconv.FormatUint(uint64(math.Round(bal.Locked*float64(ui.Conventional.ConversionFactor))), 10),
 			}
 			currBalance, found := bnc.balances[assetID]
 			if found && *currBalance != *updatedBalance {
@@ -1371,8 +1371,8 @@ func (bnc *binance) handleOutboundAccountPosition(update *bntypes.StreamUpdate) 
 			}
 			oldBal := bnc.balances[assetID]
 			newBal := &ExchangeBalance{
-				Available: uint64(math.Round(bal.Free * float64(ui.Conventional.ConversionFactor))),
-				Locked:    uint64(math.Round(bal.Locked * float64(ui.Conventional.ConversionFactor))),
+				Available: strconv.FormatUint(uint64(math.Round(bal.Free*float64(ui.Conventional.ConversionFactor))), 10),
+				Locked:    strconv.FormatUint(uint64(math.Round(bal.Locked*float64(ui.Conventional.ConversionFactor))), 10),
 			}
 			bnc.balances[assetID] = newBal
 			if oldBal != nil && *oldBal != *newBal {

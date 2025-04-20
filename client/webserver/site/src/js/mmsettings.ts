@@ -740,7 +740,7 @@ export default class MarketMakerSettingsPage extends BasePage {
   adjustedBalances (baseWallet: WalletState, quoteWallet: WalletState) {
     const { cexBaseBalance, cexQuoteBalance } = this
     const [bInv, qInv] = [this.runningBotInventory(baseWallet.assetID), this.runningBotInventory(quoteWallet.assetID)]
-    const [cexBaseAvail, cexQuoteAvail] = [(cexBaseBalance?.available || 0) - bInv.cex.total, (cexQuoteBalance?.available || 0) - qInv.cex.total]
+    const [cexBaseAvail, cexQuoteAvail] = [(parseFloat(cexBaseBalance?.available || '0')) - bInv.cex.total, (parseFloat(cexQuoteBalance?.available || '0')) - qInv.cex.total]
     const [dexBaseAvail, dexQuoteAvail] = [baseWallet.balance.available - bInv.dex.total, quoteWallet.balance.available - qInv.dex.total]
     const baseAvail = dexBaseAvail + cexBaseAvail
     const quoteAvail = dexQuoteAvail + cexQuoteAvail
@@ -2321,8 +2321,8 @@ class AssetPane {
       page.dexAvail.textContent = Doc.formatFourSigFigs(dexAvail / ui.conventional.conversionFactor)
       // Ensure cexBalance properties are accessed safely as well
       const cexBalance = assetID === baseID ? cexBaseBalance : cexQuoteBalance
-      const cexRawAvail = cexBalance?.available || 0
-      cexAvail = cexRawAvail - botInv.cex.total
+      const cexRawAvail = parseFloat(cexBalance?.available || '0')
+      cexAvail = parseFloat(cexRawAvail.toString()) - botInv.cex.total // Ensure cexRawAvail is treated as number
       page.cexAvail.textContent = Doc.formatFourSigFigs(cexAvail / ui.conventional.conversionFactor)
     }
     page.avail.textContent = Doc.formatFourSigFigs((dexAvail + cexAvail) / ui.conventional.conversionFactor)

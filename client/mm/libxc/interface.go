@@ -12,8 +12,8 @@ import (
 // ExchangeBalance holds the available and locked balances of an asset
 // on a CEX.
 type ExchangeBalance struct {
-	Available uint64 `json:"available"`
-	Locked    uint64 `json:"locked"`
+	Available string `json:"available"`
+	Locked    string `json:"locked"`
 }
 
 // Trade represents a trade made on a CEX.
