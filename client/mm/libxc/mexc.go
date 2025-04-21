@@ -95,7 +95,7 @@ type mexc struct {
 	marketStream        comms.WsConn
 	marketStreamMtx     sync.RWMutex
 	marketSubs          map[string]uint32 // key: MEXC market symbol (e.g. BTCUSDT), value: subscriber count
-	marketSubResyncChan chan string       // Channel to signal book resync needed for a market symbol
+	marketSubResyncChan chan string       // Bidirectional channel
 
 	userDataStream     comms.WsConn
 	userDataStreamMtx  sync.RWMutex
@@ -250,7 +250,7 @@ func newMEXC(cfg *CEXConfig) (*mexc, error) {
 	userWsCfg.RawHandler = m.handleUserDataRawMessage     // Assign specific raw handler
 	userWsCfg.ReconnectSync = nil                         // No automatic resubscribe for user stream (needs new key)
 	userWsCfg.ConnectEventFunc = m.handleUserConnectEvent // Separate event handler
-	userWsCfg.PingWait = 60 * time.Second                 // Revert PingWait to 60s for WsConn handling
+	userWsCfg.PingWait = 30 * time.Second                 // Decrease PingWait for UserWS to 30s
 	userWsCfg.EchoPingData = true                         // Keep this enabled for WsConn PONGs
 	userDataStream, err := comms.NewWsConn(&userWsCfg)
 	if err != nil {
@@ -434,6 +434,36 @@ func (m *mexc) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		return nil, fmt.Errorf("failed to fetch initial MEXC coin info: %w", err)
 	}
 	m.log.Infof("Fetched initial MEXC exchange and coin info, updated mappings.")
+
+	// Launch Market Stream connection manager (moved here)
+	m.log.Infof("Launching connectMarketStream goroutine...")
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		// Pass the main context. Connection will happen when the first
+		// subscription occurs via connectMarketStream IF it hasn't already.
+		// Let's explicitly start the connection process here.
+		if m.marketStream != nil { // Ensure marketStream is initialized (should be by constructor)
+			connCtx := ctx
+			wgConn, err := m.marketStream.Connect(connCtx)
+			if err != nil {
+				if connCtx.Err() == nil {
+					m.log.Errorf("[MarketWS] Connection manager exited with error: %v", err)
+				} else {
+					m.log.Infof("[MarketWS] Connection manager exited: %v", connCtx.Err())
+				}
+			} else {
+				m.log.Infof("[MarketWS] Connection manager exited cleanly.")
+			}
+			if wgConn != nil {
+				wgConn.Wait()
+				m.log.Infof("[MarketWS] Connect waitgroup finished.")
+			}
+		} else {
+			m.log.Error("[MarketWS] marketStream was nil in Connect goroutine!")
+		}
+	}()
+	m.log.Infof("Launched connectMarketStream goroutine.")
 
 	// Launch User Data Stream connection manager
 	m.log.Infof("Launching connectUserStream goroutine...")
@@ -1402,17 +1432,19 @@ func (m *mexc) SubscribeMarket(ctx context.Context, baseID, quoteID uint32) erro
 
 	// First subscriber for this specific market, create the book instance.
 	m.log.Infof("First subscriber for %s, creating order book.", mexcSymbol)
-	baseInfo, baseErr := asset.Info(baseID)
-	quoteInfo, quoteErr := asset.Info(quoteID)
+	// Call asset.UnitInfo directly as asset.Info only checks base drivers, not tokens.
+	baseUnitInfo, baseErr := asset.UnitInfo(baseID)
+	quoteUnitInfo, quoteErr := asset.UnitInfo(quoteID)
 	if baseErr != nil || quoteErr != nil {
 		m.booksMtx.Unlock()
-		return fmt.Errorf("failed to get asset info for factors (base %d, quote %d)", baseID, quoteID)
+		// Keep the error message similar for consistency, even though we called UnitInfo.
+		return fmt.Errorf("failed to get asset info for factors (base %d, quote %d): %w, %w", baseID, quoteID, baseErr, quoteErr)
 	}
 
 	newBook := newMEXCOrderBook(
 		mexcSymbol,
-		baseInfo.UnitInfo.Conventional.ConversionFactor,
-		quoteInfo.UnitInfo.Conventional.ConversionFactor,
+		baseUnitInfo.Conventional.ConversionFactor,  // Use fetched UnitInfo
+		quoteUnitInfo.Conventional.ConversionFactor, // Use fetched UnitInfo
 		m.log.SubLogger(fmt.Sprintf("Book-%s", mexcSymbol)),
 		m.getDepthSnapshot,
 	)
@@ -1423,37 +1455,31 @@ func (m *mexc) SubscribeMarket(ctx context.Context, baseID, quoteID uint32) erro
 	// Start the book's run goroutine (manages sync state)
 	go newBook.run(ctx, m.marketSubResyncChan)
 
-	// 3. Handle WebSocket connection and subscription
+	// 3. Handle WebSocket subscription (Connection is managed by Connect method)
 	m.marketStreamMtx.Lock()
 	defer m.marketStreamMtx.Unlock()
 
+	// Assume Connect() started the connection attempt. Try to subscribe.
+	err = m.subscribeToAdditionalMarket(ctx, mexcSymbol)
+	if err != nil {
+		// Need to clean up the book we added if subscription failed
+		m.booksMtx.Lock()
+		delete(m.books, mexcSymbol)
+		m.booksMtx.Unlock()
+		newBook.stop() // Stop the run goroutine we started
+		// The error from subscribeToAdditionalMarket already indicates the problem.
+		return fmt.Errorf("failed to subscribe to cex market: %w", err) // Wrap error
+	}
+
+	/* REMOVED connection logic block
 	if m.marketStream == nil {
 		// First market subscription overall, establish connection
-		m.marketStreamMtx.Unlock() // Unlock before calling connect which locks its own mutexes
-		err = m.connectMarketStream(ctx, mexcSymbol)
-		m.marketStreamMtx.Lock() // Re-lock after call returns
-		if err != nil {
-			// Need to clean up the book we added if connection failed
-			m.booksMtx.Lock()
-			delete(m.books, mexcSymbol)
-			m.booksMtx.Unlock()
-			newBook.stop() // Stop the run goroutine we started
-			return fmt.Errorf("failed to establish initial market stream connection: %w", err)
-		}
-		// connectMarketStream already sent the subscription for this first symbol.
-		m.log.Infof("Initial market stream connected and subscribed to %s", mexcSymbol)
+		// ... connectMarketStream call ...
 	} else {
 		// Connection exists, subscribe to this additional market
-		err = m.subscribeToAdditionalMarket(ctx, mexcSymbol)
-		if err != nil {
-			// Need to clean up the book we added if subscription failed
-			m.booksMtx.Lock()
-			delete(m.books, mexcSymbol)
-			m.booksMtx.Unlock()
-			newBook.stop() // Stop the run goroutine we started
-			return fmt.Errorf("failed to subscribe to additional market %s: %w", mexcSymbol, err)
-		}
+		// ... subscribeToAdditionalMarket call ...
 	}
+	*/
 
 	m.log.Infof("Successfully processed subscription request for MEXC market %s", mexcSymbol)
 	return nil
@@ -1760,45 +1786,52 @@ func (m *mexc) UnsubscribeMarket(baseID, quoteID uint32) error {
 func (m *mexc) connectMarketStream(ctx context.Context, firstMexcSymbol string) error {
 	m.log.Infof("[MarketWS] Establishing initial connection for symbol %s...", firstMexcSymbol)
 
-	// Create WsConn instance
-	marketLogger := m.log.SubLogger("MarketWS")
-	marketWsCfg := &comms.WsCfg{
-		Logger: marketLogger, URL: mexcWsURL, PingWait: 75 * time.Second,
-		RawHandler: m.handleMarketRawMessage, ReconnectSync: m.resubscribeMarkets,
-		ConnectEventFunc: m.handleMarketConnectEvent, EchoPingData: true,
-	}
-	conn, err := comms.NewWsConn(marketWsCfg)
-	if err != nil {
-		return fmt.Errorf("failed to create market WebSocket connection: %w", err)
-	}
-	m.marketStream = conn
-
-	// Launch WsConn manager goroutine
-	m.wg.Add(1)
-	go func() {
-		defer m.wg.Done()
-		connCtx := ctx
-		wgConn, err := m.marketStream.Connect(connCtx)
+	// Create WsConn instance - NOTE: Instance should already be created by newMEXC
+	if m.marketStream == nil {
+		// This shouldn't happen if Connect runs first, but handle defensively.
+		marketLogger := m.log.SubLogger("MarketWS")
+		marketWsCfg := &comms.WsCfg{
+			Logger: marketLogger, URL: mexcWsURL, PingWait: 75 * time.Second,
+			RawHandler: m.handleMarketRawMessage, ReconnectSync: m.resubscribeMarkets,
+			ConnectEventFunc: m.handleMarketConnectEvent, EchoPingData: true,
+		}
+		conn, err := comms.NewWsConn(marketWsCfg) // Declare err here
 		if err != nil {
-			if connCtx.Err() == nil {
-				m.log.Errorf("[MarketWS] Connection manager exited with error: %v", err)
+			return fmt.Errorf("failed to create market WebSocket connection in connectMarketStream: %w", err)
+		}
+		m.marketStream = conn
+		// If we had to create it here, we also need to launch the manager!
+		m.log.Warnf("[MarketWS] marketStream was nil, had to recreate and launch manager.")
+		m.wg.Add(1)
+		go func() {
+			defer m.wg.Done()
+			connCtx := ctx
+			wgConn, err := m.marketStream.Connect(connCtx) // Shadow err is okay here
+			if err != nil {
+				if connCtx.Err() == nil {
+					m.log.Errorf("[MarketWS] Connection manager (late start) exited with error: %v", err)
+				} else {
+					m.log.Infof("[MarketWS] Connection manager (late start) exited: %v", connCtx.Err())
+				}
 			} else {
-				m.log.Infof("[MarketWS] Connection manager exited: %v", connCtx.Err())
+				m.log.Infof("[MarketWS] Connection manager (late start) exited cleanly.")
 			}
-		} else {
-			m.log.Infof("[MarketWS] Connection manager exited cleanly.")
-		}
-		if wgConn != nil {
-			wgConn.Wait()
-			m.log.Infof("[MarketWS] Connect waitgroup finished.")
-		}
-	}()
+			if wgConn != nil {
+				wgConn.Wait()
+				m.log.Infof("[MarketWS] Connect waitgroup (late start) finished.")
+			}
+		}()
+	}
 
-	// REMOVED Proactive PING goroutine for Market Stream
+	// Launch WsConn manager goroutine - REMOVED (moved to Connect)
+	// m.wg.Add(1)
+	// go func() { ... }()
 
-	time.Sleep(2 * time.Second) // Keep delay for connection establishment
+	// Wait briefly for the connection managed by Connect() to establish.
+	// TODO: Use a better synchronization mechanism (e.g., channel/waitgroup) if possible.
+	time.Sleep(3 * time.Second) // Increased delay slightly
 	if m.marketStream.IsDown() {
-		return fmt.Errorf("[MarketWS] connection failed shortly after initiation")
+		return fmt.Errorf("[MarketWS] connection failed shortly after initiation (checked in connectMarketStream)")
 	}
 
 	// Send initial subscription
@@ -1809,7 +1842,7 @@ func (m *mexc) connectMarketStream(ctx context.Context, firstMexcSymbol string) 
 	if marshalErr != nil {
 		return fmt.Errorf("failed to marshal initial market subscription request: %w", marshalErr)
 	}
-	err = m.marketStream.SendRaw(reqBytes)
+	err := m.marketStream.SendRaw(reqBytes) // Use := to declare err
 	if err != nil {
 		return fmt.Errorf("failed to send initial market subscription for %s: %w", firstMexcSymbol, err)
 	}
@@ -1820,16 +1853,33 @@ func (m *mexc) connectMarketStream(ctx context.Context, firstMexcSymbol string) 
 
 // handleMarketConnectEvent handles connection status changes.
 func (m *mexc) handleMarketConnectEvent(status comms.ConnectionStatus) {
-	// Commented out: Underlying comms.WsConn may log similar reconnect events.
-	// m.log.Infof("Market WS Connection Status Change: %v", status)
+	m.log.Infof("[MarketWS] Connection Status Change: %v", status) // Keep this log now
 	if status != comms.Connected {
 		m.booksMtx.RLock()
 		for _, book := range m.books {
 			book.synced.Store(false)
 		}
 		m.booksMtx.RUnlock()
+	} else {
+		// Connection established/re-established, trigger resync for all subscribed books
+		m.booksMtx.RLock()
+		numBooks := len(m.books)
+		if numBooks > 0 {
+			m.log.Infof("[MarketWS] Connection established. Requesting resync for %d subscribed market(s)...", numBooks)
+			for symbol, book := range m.books {
+				// Mark as unsynced again just before requesting resync
+				book.synced.Store(false)
+				select {
+				case m.marketSubResyncChan <- symbol:
+					m.log.Debugf("[MarketWS] Resync request sent for %s", symbol)
+				default:
+					m.log.Warnf("[MarketWS] Resync channel full when trying to signal %s", symbol)
+				}
+			}
+		}
+		m.booksMtx.RUnlock()
 	}
-	// ReconnectSync (resubscribeMarkets) is called automatically by WsConn after Connected status
+	// ReconnectSync (resubscribeMarkets) is called automatically by WsConn AFTER this handler returns on Connected status.
 }
 
 // subscribeToAdditionalMarket sends a subscription message for a new market
@@ -1885,8 +1935,9 @@ func (m *mexc) handleMarketRawMessage(msgBytes []byte) {
 	}
 
 	// Dispatch based on known channels
-	switch baseMsg.Channel {
-	case "spot@public.increase.depth.v3.api":
+	// Check for prefix instead of exact match, as channel includes symbol
+	switch {
+	case strings.HasPrefix(baseMsg.Channel, "spot@public.increase.depth.v3.api"):
 		if len(baseMsg.Data) == 0 || string(baseMsg.Data) == "null" {
 			m.log.Warnf("[MarketWS] Received depth update message with missing/null data field: %s", string(msgBytes))
 			return
@@ -1902,9 +1953,9 @@ func (m *mexc) handleMarketRawMessage(msgBytes []byte) {
 		Msg  string      `json:"msg"`
 	}
 	if err := json.Unmarshal(msgBytes, &genericResp); err == nil {
-		// Check for subscription success confirmations
-		if genericResp.Code == 0 && strings.Contains(strings.ToLower(genericResp.Msg), "success") {
-			m.log.Debugf("[MarketWS] Received MEXC WS Success Response/Confirmation: %s", string(msgBytes))
+		// Check for subscription success confirmations (Code 0 and Msg contains channel name)
+		if genericResp.Code == 0 && strings.Contains(genericResp.Msg, "spot@public.increase.depth.v3.api") {
+			m.log.Debugf("[MarketWS] Received MEXC WS Success Subscription Confirmation: %s", string(msgBytes))
 			return // Handled success confirmation
 		}
 		// Log PONG or anything else structured but not recognized
@@ -2033,10 +2084,33 @@ func (m *mexc) VWAP(baseID, quoteID uint32, sell bool, qty uint64) (vwap, extrem
 	}
 
 	bookInstance.mtx.RLock()
-	defer bookInstance.mtx.RUnlock()
-	if !bookInstance.synced.Load() {
-		return 0, 0, false, ErrUnsyncedOrderbook
+	syncedState := bookInstance.synced.Load()
+	if !syncedState {
+		// Book not synced, wait briefly for initial sync to complete.
+		bookInstance.mtx.RUnlock()                                                                   // Unlock before waiting
+		m.log.Tracef("VWAP check for %s: book initially unsynced, waiting up to 20s...", mexcSymbol) // Increased timeout
+		timer := time.NewTimer(20 * time.Second)                                                     // Increased timeout
+		select {
+		case <-bookInstance.syncChan: // Closed when sync completes
+			timer.Stop()
+			bookInstance.mtx.RLock() // Re-acquire lock
+			syncedState = bookInstance.synced.Load()
+			m.log.Tracef("VWAP check for %s: syncChan closed, re-checking sync status = %v", mexcSymbol, syncedState)
+			if !syncedState {
+				bookInstance.mtx.RUnlock()
+				return 0, 0, false, ErrUnsyncedOrderbook // Still not synced after chan closed
+			}
+			// Proceed with synced book below
+		case <-timer.C:
+			m.log.Warnf("VWAP check for %s: timed out waiting for initial sync", mexcSymbol)
+			return 0, 0, false, ErrUnsyncedOrderbook // Timed out
+		case <-m.quit: // Check global shutdown signal
+			timer.Stop()
+			return 0, 0, false, errors.New("mexc client shutting down")
+		}
+		// If we got here via syncChan closing and syncedState is now true, RLock is held.
 	}
+	defer bookInstance.mtx.RUnlock() // Ensure unlock if we proceeded
 
 	// Use the local book's vwap method
 	vwap, extrema, filled = bookInstance.book.vwap(!sell, qty) // Pass !sell for bids flag
@@ -2437,10 +2511,13 @@ connectLoop:
 		// Explicit subscriptions likely not needed for MEXC user stream
 		m.log.Infof("MEXC User Stream does not require explicit channel subscriptions.")
 
-		// REMOVED Proactive PING ticker for User Stream
-
-		// RawHandler handles messages, listen key keepalive handled elsewhere.
 		// Rely on WsConn PingWait and EchoPingData for keepalive.
+
+		// Add a proactive PING ticker
+		pingInterval := 25 * time.Second
+		pingTicker := time.NewTicker(pingInterval)
+		defer pingTicker.Stop()
+
 	wsLoop: // Label for the select loop
 		for {
 			select {
@@ -2452,7 +2529,22 @@ connectLoop:
 				m.log.Warnf("Received reconnect signal for user data stream. Reconnecting...")
 				cancelKeyRefresh()
 				break wsLoop // Exit inner loop
-				// REMOVED pingTicker case
+			case <-pingTicker.C:
+				// Send proactive client PING
+				if !m.userDataStream.IsDown() {
+					m.log.Tracef("[UserWS] Sending proactive PING")
+					// Use same format as server PING for potential compatibility
+					pingMsg := mexctypes.WsMessage{Ping: time.Now().UnixMilli()}
+					pingBytes, err := json.Marshal(pingMsg)
+					if err != nil {
+						m.log.Errorf("[UserWS] Failed to marshal proactive PING: %v", err)
+						continue
+					}
+					if err := m.userDataStream.SendRaw(pingBytes); err != nil {
+						m.log.Errorf("[UserWS] Failed to send proactive PING: %v", err)
+						// Don't necessarily break loop on send failure, WsConn might recover
+					}
+				}
 			}
 		}
 
@@ -2984,7 +3076,7 @@ func (m *mexc) getCoinPrecision(ctx context.Context, assetID uint32) (int, error
 
 // getDepthSnapshot fetches the order book snapshot via REST API.
 func (m *mexc) getDepthSnapshot(ctx context.Context, symbol string) (*mexctypes.DepthResponse, error) {
-	m.log.Debugf("Fetching order book snapshot for %s", symbol)
+	// m.log.Debugf("Fetching order book snapshot for %s via REST...", symbol) // REMOVED TEMP DEBUG
 	path := "/api/v3/depth"
 	params := url.Values{}
 	params.Set("symbol", symbol)
@@ -2993,8 +3085,10 @@ func (m *mexc) getDepthSnapshot(ctx context.Context, symbol string) (*mexctypes.
 	var resp mexctypes.DepthResponse
 	err := m.request(ctx, http.MethodGet, path, params, nil, false, &resp)
 	if err != nil {
+		// m.log.Errorf("getDepthSnapshot for %s FAILED: %v", symbol, err) // REMOVED TEMP DEBUG
 		return nil, fmt.Errorf("failed to get depth snapshot for %s: %w", symbol, err)
 	}
+	// m.log.Debugf("getDepthSnapshot for %s SUCCEEDED.", symbol) // REMOVED TEMP DEBUG
 	return &resp, nil
 }
 
@@ -3019,16 +3113,41 @@ func newMEXCOrderBook(
 }
 
 // run starts the synchronization process for the order book.
-func (ob *mexcOrderBook) run(ctx context.Context, resyncChan chan<- string) {
+func (ob *mexcOrderBook) run(ctx context.Context, resyncChan chan string) {
 	ob.log.Infof("Starting order book run loop for %s", ob.mktSymbol)
 	defer ob.log.Infof("Exiting order book run loop for %s", ob.mktSymbol)
 
-	// Initial sync attempt
-	if !ob.syncOrderbook(ctx) {
-		ob.log.Errorf("Initial order book sync failed for %s", ob.mktSymbol)
-		// If initial sync fails, we might rely on reconnects/resync signals
+	// Initial sync attempt with retries
+	synced := false
+	retryDelay := 2 * time.Second
+	maxRetries := 5 // Limit retries to avoid infinite loops
+	for i := 0; i < maxRetries; i++ {
+		if ob.syncOrderbook(ctx) {
+			synced = true
+			break // Success
+		}
+		ob.log.Errorf("Initial order book sync attempt %d/%d failed for %s. Retrying in %v...", i+1, maxRetries, ob.mktSymbol, retryDelay)
+		select {
+		case <-ctx.Done():
+			ob.log.Warnf("Context cancelled during initial sync retry for %s", ob.mktSymbol)
+			return // Exit if context is cancelled
+		case <-time.After(retryDelay):
+			// Continue to next retry
+		case <-ob.stopChan: // Check stop channel during retry
+			return
+		}
+		retryDelay *= 2 // Exponential backoff (optional, but good practice)
+		if retryDelay > 30*time.Second {
+			retryDelay = 30 * time.Second // Cap delay
+		}
 	}
 
+	if !synced {
+		ob.log.Errorf("Initial order book sync failed after %d retries for %s. Exiting run loop.", maxRetries, ob.mktSymbol)
+		return // Give up if initial sync failed after retries
+	}
+
+	// Original processing loop (runs only after successful initial sync)
 	for {
 		select {
 		case <-ctx.Done(): // Main context cancelled
@@ -3041,6 +3160,16 @@ func (ob *mexcOrderBook) run(ctx context.Context, resyncChan chan<- string) {
 				return
 			}
 			ob.processUpdate(update, resyncChan)
+		// Add case to handle resync requests
+		case symbolToResync := <-resyncChan: // Receive from bidirectional channel
+			if symbolToResync == ob.mktSymbol {
+				ob.log.Infof("Received resync request for %s, attempting sync...", ob.mktSymbol)
+				// Attempt sync (will mark synced=true on success)
+				if !ob.syncOrderbook(ctx) {
+					ob.log.Errorf("Resync attempt failed for %s", ob.mktSymbol)
+					// Consider if we need further action on repeated failures here
+				}
+			} // Ignore requests for other symbols
 		}
 	}
 }
@@ -3065,11 +3194,13 @@ drainLoop:
 		}
 	}
 
+	// ob.log.Debugf("-> Calling getSnapshot for %s", ob.mktSymbol) // REMOVED TEMP DEBUG
 	snapshot, err := ob.getSnapshot(ctx, ob.mktSymbol)
 	if err != nil {
-		ob.log.Errorf("Error getting orderbook snapshot for %s: %v", ob.mktSymbol, err)
+		// ob.log.Errorf("-> Error getting orderbook snapshot for %s: %v", ob.mktSymbol, err) // REMOVED TEMP DEBUG
 		return false
 	}
+	// ob.log.Debugf("-> getSnapshot successful for %s", ob.mktSymbol) // REMOVED TEMP DEBUG
 
 	bids, asks, err := ob.convertDepthEntries(snapshot.Bids, snapshot.Asks)
 	if err != nil {
@@ -3087,6 +3218,7 @@ drainLoop:
 
 	ob.log.Infof("Successfully processed snapshot for %s (Version: %d). Book Synced.", ob.mktSymbol, snapshotVersion)
 	ob.synced.Store(true)
+	// ob.log.Debugf("-> Set synced = true for %s", ob.mktSymbol) // REMOVED TEMP DEBUG
 
 	// Signal completion
 	select {
