@@ -236,7 +236,7 @@ func newMEXC(cfg *CEXConfig) (*mexc, error) {
 	marketWsCfg.RawHandler = m.handleMarketRawMessage // Assign market raw handler
 	marketWsCfg.ReconnectSync = m.resubscribeMarkets
 	marketWsCfg.ConnectEventFunc = m.handleMarketConnectEvent
-	marketWsCfg.PingWait = 75 * time.Second // Increased PingWait for market stream
+	marketWsCfg.PingWait = 15 * time.Second // Decreased PingWait for market stream
 	marketStream, err := comms.NewWsConn(&marketWsCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create market WebSocket connection: %w", err)
@@ -250,7 +250,7 @@ func newMEXC(cfg *CEXConfig) (*mexc, error) {
 	userWsCfg.RawHandler = m.handleUserDataRawMessage     // Assign specific raw handler
 	userWsCfg.ReconnectSync = nil                         // No automatic resubscribe for user stream (needs new key)
 	userWsCfg.ConnectEventFunc = m.handleUserConnectEvent // Separate event handler
-	userWsCfg.PingWait = 30 * time.Second                 // Decrease PingWait for UserWS to 30s
+	userWsCfg.PingWait = 15 * time.Second                 // Decrease PingWait further for UserWS to 15s
 	userWsCfg.EchoPingData = true                         // Keep this enabled for WsConn PONGs
 	userDataStream, err := comms.NewWsConn(&userWsCfg)
 	if err != nil {
@@ -1277,13 +1277,15 @@ func (m *mexc) Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rat
 	if err != nil {
 		return nil, fmt.Errorf("cannot get MEXC symbol info for trade (%s): %w", mexcSymbol, err)
 	}
-	baseAssetInfo, baseAssetErr := asset.Info(baseID)
-	quoteAssetInfo, quoteAssetErr := asset.Info(quoteID)
+	// Use asset.UnitInfo directly, as asset.Info doesn't support tokens
+	baseUnitInfo, baseAssetErr := asset.UnitInfo(baseID)
+	quoteUnitInfo, quoteAssetErr := asset.UnitInfo(quoteID)
 	if baseAssetErr != nil || quoteAssetErr != nil {
-		return nil, fmt.Errorf("failed to get asset info for base %d or quote %d", baseID, quoteID)
+		// Keep error message consistent, but include underlying errors
+		return nil, fmt.Errorf("failed to get asset info for base %d or quote %d: %w, %w", baseID, quoteID, baseAssetErr, quoteAssetErr)
 	}
-	baseFactor := float64(baseAssetInfo.UnitInfo.Conventional.ConversionFactor)
-	quoteFactor := float64(quoteAssetInfo.UnitInfo.Conventional.ConversionFactor)
+	baseFactor := float64(baseUnitInfo.Conventional.ConversionFactor)
+	quoteFactor := float64(quoteUnitInfo.Conventional.ConversionFactor)
 
 	// Use correct calc function and manual amount conversion
 	conventionalRate := calc.ConventionalRateAlt(rate, uint64(baseFactor), uint64(quoteFactor)) // Correct usage
@@ -2513,10 +2515,10 @@ connectLoop:
 
 		// Rely on WsConn PingWait and EchoPingData for keepalive.
 
-		// Add a proactive PING ticker
-		pingInterval := 25 * time.Second
-		pingTicker := time.NewTicker(pingInterval)
-		defer pingTicker.Stop()
+		// Removed proactive PING ticker
+		// pingInterval := 25 * time.Second
+		// pingTicker := time.NewTicker(pingInterval)
+		// defer pingTicker.Stop()
 
 	wsLoop: // Label for the select loop
 		for {
@@ -2529,22 +2531,24 @@ connectLoop:
 				m.log.Warnf("Received reconnect signal for user data stream. Reconnecting...")
 				cancelKeyRefresh()
 				break wsLoop // Exit inner loop
-			case <-pingTicker.C:
-				// Send proactive client PING
-				if !m.userDataStream.IsDown() {
-					m.log.Tracef("[UserWS] Sending proactive PING")
-					// Use same format as server PING for potential compatibility
-					pingMsg := mexctypes.WsMessage{Ping: time.Now().UnixMilli()}
-					pingBytes, err := json.Marshal(pingMsg)
-					if err != nil {
-						m.log.Errorf("[UserWS] Failed to marshal proactive PING: %v", err)
-						continue
+				/* Removed proactive PING case
+				case <-pingTicker.C:
+					// Send proactive client PING
+					if !m.userDataStream.IsDown() {
+						m.log.Tracef("[UserWS] Sending proactive PING")
+						// Use same format as server PING for potential compatibility
+						pingMsg := mexctypes.WsMessage{Ping: time.Now().UnixMilli()}
+						pingBytes, err := json.Marshal(pingMsg)
+						if err != nil {
+							m.log.Errorf("[UserWS] Failed to marshal proactive PING: %v", err)
+							continue
+						}
+						if err := m.userDataStream.SendRaw(pingBytes); err != nil {
+							m.log.Errorf("[UserWS] Failed to send proactive PING: %v", err)
+							// Don't necessarily break loop on send failure, WsConn might recover
+						}
 					}
-					if err := m.userDataStream.SendRaw(pingBytes); err != nil {
-						m.log.Errorf("[UserWS] Failed to send proactive PING: %v", err)
-						// Don't necessarily break loop on send failure, WsConn might recover
-					}
-				}
+				*/
 			}
 		}
 
