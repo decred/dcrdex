@@ -236,7 +236,7 @@ func newMEXC(cfg *CEXConfig) (*mexc, error) {
 	marketWsCfg.RawHandler = m.handleMarketRawMessage // Assign market raw handler
 	marketWsCfg.ReconnectSync = m.resubscribeMarkets
 	marketWsCfg.ConnectEventFunc = m.handleMarketConnectEvent
-	marketWsCfg.PingWait = 15 * time.Second // Decreased PingWait for market stream
+	marketWsCfg.PingWait = 120 * time.Second // Decreased PingWait for market stream
 	marketStream, err := comms.NewWsConn(&marketWsCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create market WebSocket connection: %w", err)
@@ -250,7 +250,7 @@ func newMEXC(cfg *CEXConfig) (*mexc, error) {
 	userWsCfg.RawHandler = m.handleUserDataRawMessage     // Assign specific raw handler
 	userWsCfg.ReconnectSync = nil                         // No automatic resubscribe for user stream (needs new key)
 	userWsCfg.ConnectEventFunc = m.handleUserConnectEvent // Separate event handler
-	userWsCfg.PingWait = 15 * time.Second                 // Decrease PingWait further for UserWS to 15s
+	userWsCfg.PingWait = 120 * time.Second                // Decrease PingWait further for UserWS to 15s
 	userWsCfg.EchoPingData = true                         // Keep this enabled for WsConn PONGs
 	userDataStream, err := comms.NewWsConn(&userWsCfg)
 	if err != nil {
@@ -1400,7 +1400,8 @@ func (m *mexc) CancelTrade(ctx context.Context, baseID, quoteID uint32, tradeID 
 		// Handle errors, e.g., already filled/canceled (-2011: Unknown order sent.)
 		var mexcErr *mexctypes.ErrorResponse
 		if errors.As(err, &mexcErr) && mexcErr.Code == -2011 {
-			m.log.Warnf("Attempted to cancel already filled/canceled/unknown MEXC order %s: %v", tradeID, err)
+			// Log as Debug instead of Warn, as this is expected when racing against fills/cancels
+			m.log.Debugf("Attempted to cancel already filled/canceled/unknown MEXC order %s: %v", tradeID, err)
 			// Order is already in a terminal state (or never existed). Treat as success.
 			return nil
 		}
