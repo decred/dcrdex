@@ -2319,7 +2319,7 @@ func inferDecimals(factor uint64) int {
 
 // --- User Data Stream (Listen Key) ---
 
-const listenKeyRefreshInterval = 45 * time.Minute // Keep alive slightly less than 60 min expiry
+const listenKeyRefreshInterval = 25 * time.Minute // Keep alive slightly less than 60 min expiry
 
 // getListenKey fetches a new listen key from MEXC.
 func (m *mexc) getListenKey(ctx context.Context) (string, error) {
