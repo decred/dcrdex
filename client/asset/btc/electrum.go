@@ -473,12 +473,12 @@ func (btc *ExchangeWalletElectrum) syncTxHistory(tip uint64) {
 					btc.log.Errorf("Cannot find mined tx block number for %s", gtr.BlockHash)
 					return
 				}
-				bh, err := btc.ew.getBlockHeaderByHeight(btc.ctx, int64(blockHeight))
+				bh, err := btc.ew.GetBlockHash(int64(blockHeight))
 				if err != nil {
 					btc.log.Errorf("Error getting mined tx block number %s: %v", gtr.BlockHash, err)
 					return
 				}
-				if bh.BlockHash().String() == gtr.BlockHash {
+				if bh.String() == gtr.BlockHash {
 					break
 				}
 				i++
