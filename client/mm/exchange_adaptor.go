@@ -2460,7 +2460,12 @@ func (u *unifiedExchangeAdaptor) cancelAllOrders(ctx context.Context) {
 	i := 0
 	for {
 		select {
-		case ni := <-bookFeed.Next():
+		case ni, ok := <-bookFeed.Next():
+			if !ok {
+				u.log.Error("Stopping bot due to nil book feed.")
+				u.kill()
+				return
+			}
 			switch epoch := ni.Payload.(type) {
 			case *core.ResolvedEpoch:
 				if u.tryCancelOrders(ctx, &epoch.Current, true) {
