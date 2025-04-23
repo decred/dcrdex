@@ -2259,7 +2259,10 @@ func (dcr *ExchangeWallet) submitMultiSplitTx(fundingCoins asset.Coins, _ /* spe
 			addr: outputAddresses[i].String(),
 		}
 	}
-	dcr.lockFundingCoins(fcs)
+	err = dcr.lockFundingCoins(fcs)
+	if err != nil {
+		return nil, 0, fmt.Errorf("lockFundingCoins: %w", err)
+	}
 
 	var totalOut uint64
 	for _, txOut := range tx.TxOut {
@@ -2409,7 +2412,10 @@ func (dcr *ExchangeWallet) fundMultiWithSplit(keep, maxLock uint64, values []*as
 		}
 	}
 
-	dcr.lockFundingCoins(spents)
+	err = dcr.lockFundingCoins(spents)
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("lockFundingCoins: %w", err)
+	}
 
 	return coins, redeemScripts, splitFees, nil
 }
@@ -2429,7 +2435,10 @@ func (dcr *ExchangeWallet) fundMulti(maxLock uint64, values []*asset.MultiOrderV
 		return nil, nil, 0, err
 	}
 	if len(coins) == len(values) || !allowSplit {
-		dcr.lockFundingCoins(fundingCoins)
+		err = dcr.lockFundingCoins(fundingCoins)
+		if err != nil {
+			return nil, nil, 0, fmt.Errorf("lockFundingCoins: %w", err)
+		}
 		return coins, redeemScripts, 0, nil
 	}
 
