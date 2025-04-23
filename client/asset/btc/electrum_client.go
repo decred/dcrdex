@@ -555,11 +555,18 @@ func (ew *electrumWallet) calcMedianTime(ctx context.Context, height int64) (tim
 
 // part of btc.Wallet interface
 func (ew *electrumWallet) GetBlockHash(height int64) (*chainhash.Hash, error) {
-	hdr, err := ew.getBlockHeaderByHeight(ew.ctx, height)
+	hdrStr, err := ew.chain().BlockHeader(ew.ctx, uint32(height))
 	if err != nil {
 		return nil, err
 	}
-	hash := hdr.BlockHash()
+
+	fullHeader, err := hex.DecodeString(hdrStr)
+	if err != nil {
+		return nil, err
+	}
+
+	hash := chainhash.DoubleHashH(fullHeader)
+
 	return &hash, nil
 }
 
