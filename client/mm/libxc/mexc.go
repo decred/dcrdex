@@ -2586,11 +2586,33 @@ func (m *mexc) listenKeyMaintainer(ctx context.Context) {
 
 // handleUserConnectEvent handles connection status changes for the user stream.
 func (m *mexc) handleUserConnectEvent(status comms.ConnectionStatus) {
-	// Commented out: Underlying comms.WsConn may log similar reconnect events.
-	// m.log.Infof("User WS Connection Status Change: %v", status)
-	// DO NOT signal reconnect here. WsConn handles temporary disconnects.
-	// Reconnect should only be triggered by listen key expiry (via keepAlive failure)
-	// or main context cancellation.
+	m.log.Infof("[UserWS] Connection Status Change: %v", status)
+
+	// We only need to take specific action on disconnect events.
+	// Connected events are handled by the WsConn and connectUserStream
+	// Prevent repeatedly triggering reconnects on status changes
+	if status == comms.Disconnected {
+		// Check if we're already in the process of reconnecting
+		select {
+		case <-m.reconnectChan: // Try to drain any existing signal
+			// Channel had a pending reconnect, which we just consumed
+			m.log.Debugf("[UserWS] Reconnect already pending, not sending additional signal")
+			// Put it back so the main handler will process it
+			m.reconnectChan <- struct{}{}
+		default:
+			// No reconnect pending, wait a moment to avoid rapid reconnect cycles
+			// Only signal reconnect if we're still disconnected after a short delay
+			// This helps avoid reconnection loops if the connection state changes rapidly
+			go func() {
+				time.Sleep(2 * time.Second)
+				// Double-check that we're still disconnected before triggering reconnect
+				if m.userDataStream != nil && m.userDataStream.IsDown() {
+					m.log.Infof("[UserWS] Still disconnected after delay, signaling reconnect")
+					m.signalReconnect()
+				}
+			}()
+		}
+	}
 }
 
 // handleUserDataRawMessage parses raw byte messages from the User Data Stream.
