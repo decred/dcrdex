@@ -1589,14 +1589,20 @@ func (m *mexc) GetDepositAddress(ctx context.Context, assetID uint32) (string, e
 	params.Set("coin", mexcCoin)
 	params.Set("network", mexcNetwork)
 
-	// 3. Send Request
-	var resp mexctypes.DepositAddress
-	err := m.request(ctx, http.MethodGet, path, params, nil, true, &resp)
+	// 3. Send Request - FIXED: handle array response
+	var respArray []mexctypes.DepositAddress
+	err := m.request(ctx, http.MethodGet, path, params, nil, true, &respArray)
 	if err != nil {
 		return "", fmt.Errorf("MEXC get deposit address request failed for %s (%s): %w", mexcCoin, mexcNetwork, err)
 	}
 
-	// 4. Return address (and handle tag)
+	// 4. Handle array response
+	if len(respArray) == 0 {
+		return "", fmt.Errorf("MEXC returned empty deposit address array for %s (%s)", mexcCoin, mexcNetwork)
+	}
+
+	// Use the first address in the array
+	resp := respArray[0]
 	if resp.Address == "" {
 		return "", fmt.Errorf("MEXC returned empty deposit address for %s (%s)", mexcCoin, mexcNetwork)
 	}
@@ -1606,7 +1612,7 @@ func (m *mexc) GetDepositAddress(ctx context.Context, assetID uint32) (string, e
 		// NOTE: Current libxc interface only returns address string.
 	}
 
-	m.log.Infof("Retrieved MEXC deposit address for %s (%s)", mexcCoin, mexcNetwork)
+	m.log.Infof("Retrieved MEXC deposit address for %s (%s): %s", mexcCoin, mexcNetwork, resp.Address)
 	return resp.Address, nil
 }
 
@@ -1749,6 +1755,7 @@ func (m *mexc) Withdraw(ctx context.Context, assetID uint32, atoms uint64, addre
 	amountStr := strconv.FormatFloat(conventionalAmount, 'f', precision, 64)
 
 	// 3. Prepare API Request
+	// Verified endpoint is correct per https://mexcdevelop.github.io/apidocs/spot_v3_en/#withdraw-new
 	path := "/api/v3/capital/withdraw/apply"
 	params := url.Values{}
 	params.Set("coin", mexcCoin)
