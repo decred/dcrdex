@@ -96,6 +96,8 @@ type mexc struct {
 	marketStreamMtx     sync.RWMutex
 	marketSubs          map[string]uint32 // key: MEXC market symbol (e.g. BTCUSDT), value: subscriber count
 	marketSubResyncChan chan string       // Bidirectional channel
+	marketSubStatus     map[string]bool   // key: MEXC market symbol, value: is subscribed
+	marketSubStatusMtx  sync.RWMutex
 
 	userDataStream     comms.WsConn
 	userDataStreamMtx  sync.RWMutex
@@ -174,6 +176,7 @@ func newMEXC(cfg *CEXConfig) (*mexc, error) {
 
 		marketSubs:          make(map[string]uint32),
 		marketSubResyncChan: make(chan string, 10),
+		marketSubStatus:     make(map[string]bool), // Initialize subscription tracking map
 		books:               make(map[string]*mexcOrderBook),
 		tradeUpdaters:       make(map[int]chan *Trade),
 		activeTrades:        make(map[string]*mexcTradeInfo),
@@ -1845,6 +1848,11 @@ func (m *mexc) UnsubscribeMarket(baseID, quoteID uint32) error {
 		return fmt.Errorf("failed to send market unsubscription: %w", err)
 	}
 
+	// Remove from subscription tracking
+	m.marketSubStatusMtx.Lock()
+	delete(m.marketSubStatus, mexcSymbol)
+	m.marketSubStatusMtx.Unlock()
+
 	m.log.Infof("Sent unsubscription request for %s", mexcSymbol)
 	return nil
 }
@@ -1959,6 +1967,16 @@ func (m *mexc) handleMarketConnectEvent(status comms.ConnectionStatus) {
 func (m *mexc) subscribeToAdditionalMarket(ctx context.Context, mexcSymbol string) error {
 	m.log.Infof("[MarketWS] Subscribing to additional market: %s", mexcSymbol)
 
+	// Check if already subscribed
+	m.marketSubStatusMtx.RLock()
+	subscribed := m.marketSubStatus[mexcSymbol]
+	m.marketSubStatusMtx.RUnlock()
+
+	if subscribed {
+		m.log.Debugf("[MarketWS] Already subscribed to %s, skipping subscription request", mexcSymbol)
+		return nil
+	}
+
 	if m.marketStream == nil || m.marketStream.IsDown() {
 		// This check is slightly redundant if caller holds lock and checks,
 		// but provides safety if called incorrectly.
@@ -1982,6 +2000,11 @@ func (m *mexc) subscribeToAdditionalMarket(ctx context.Context, mexcSymbol strin
 		m.log.Errorf("Failed to send market subscription for %s: %v", mexcSymbol, err)
 		return fmt.Errorf("failed to send market subscription for %s: %w", mexcSymbol, err)
 	}
+
+	// Mark as subscribed after sending the request
+	m.marketSubStatusMtx.Lock()
+	m.marketSubStatus[mexcSymbol] = true
+	m.marketSubStatusMtx.Unlock()
 
 	m.log.Infof("[MarketWS] Sent subscription request for additional market %s", mexcSymbol)
 	return nil
@@ -2028,8 +2051,40 @@ func (m *mexc) handleMarketRawMessage(msgBytes []byte) {
 	if err := json.Unmarshal(msgBytes, &genericResp); err == nil {
 		// Check for subscription success confirmations (Code 0 and Msg contains channel name)
 		if genericResp.Code == 0 && strings.Contains(genericResp.Msg, "spot@public.increase.depth.v3.api") {
-			m.log.Debugf("[MarketWS] Received MEXC WS Success Subscription Confirmation: %s", string(msgBytes))
-			return // Handled success confirmation
+			// Check if this is a subscription limit error first (has "Not Subscribed successfully" and "Exceeded maximum subscription limit")
+			if strings.Contains(genericResp.Msg, "Not Subscribed successfully") &&
+				strings.Contains(genericResp.Msg, "Exceeded maximum subscription limit") {
+				// Extract the symbol from the message
+				startIdx := strings.Index(genericResp.Msg, "[") + 1
+				endIdx := strings.Index(genericResp.Msg, "]")
+				if startIdx > 0 && endIdx > startIdx {
+					channelName := genericResp.Msg[startIdx:endIdx]
+					parts := strings.Split(channelName, "@")
+					if len(parts) > 0 {
+						symbol := parts[len(parts)-1]
+						m.log.Warnf("[MarketWS] Subscription failed for %s: Exceeded limit", symbol)
+
+						// Mark as unsubscribed so we can try again later
+						m.marketSubStatusMtx.Lock()
+						m.marketSubStatus[symbol] = false
+						m.marketSubStatusMtx.Unlock()
+					}
+				}
+			} else {
+				// This is a successful subscription confirmation
+				m.log.Debugf("[MarketWS] Received MEXC WS Success Subscription Confirmation: %s", string(msgBytes))
+
+				// Try to extract the symbol from the message
+				parts := strings.Split(genericResp.Msg, "@")
+				if len(parts) > 0 {
+					symbol := parts[len(parts)-1]
+					m.marketSubStatusMtx.Lock()
+					m.marketSubStatus[symbol] = true
+					m.marketSubStatusMtx.Unlock()
+					m.log.Debugf("[MarketWS] Confirmed subscription for %s", symbol)
+				}
+			}
+			return // Handled subscription response
 		}
 		// Log PONG or anything else structured but not recognized
 		m.log.Warnf("[MarketWS] Received unknown structured WS message: %s", string(msgBytes))
@@ -2048,23 +2103,36 @@ func (m *mexc) handleDepthUpdate(msg *mexctypes.WsMessage) {
 // resubscribeMarkets sends subscription messages for all currently tracked markets.
 func (m *mexc) resubscribeMarkets() {
 	m.booksMtx.RLock()
-	defer m.booksMtx.RUnlock()
-
 	if len(m.books) == 0 {
+		m.booksMtx.RUnlock()
 		return
 	}
-	m.log.Infof("Resubscribing to %d markets after reconnect...", len(m.books))
 
-	// First, ensure all tracked books are marked as needing resync
+	// Mark all books as needing resync regardless of subscription status
 	for symbol, book := range m.books {
-		// Mark as unsynced and will force a resync via connectedChan in handleMarketConnectEvent
 		book.synced.Store(false)
 		m.log.Debugf("Market %s marked for resync after reconnection", symbol)
 	}
 
-	// Now resubscribe each market to the websocket feed
+	// Collect symbols that need resubscription
+	symbols := make([]string, 0, len(m.books))
+	m.marketSubStatusMtx.RLock()
 	for symbol := range m.books {
-		// Reuse SubscribeMarket logic without locking/book creation
+		// Only add to resubscription list if not already subscribed
+		if !m.marketSubStatus[symbol] {
+			symbols = append(symbols, symbol)
+		} else {
+			m.log.Debugf("Market %s already tracked as subscribed, skipping resubscription", symbol)
+		}
+	}
+	m.marketSubStatusMtx.RUnlock()
+	m.booksMtx.RUnlock()
+
+	m.log.Infof("Resubscribing to %d markets after reconnect (out of %d total tracked)...",
+		len(symbols), len(m.books))
+
+	// Now subscribe only to the non-subscribed markets
+	for _, symbol := range symbols {
 		channel := fmt.Sprintf("spot@public.increase.depth.v3.api@%s", symbol)
 		req := mexctypes.WsRequest{
 			Method: "SUBSCRIPTION",
@@ -2075,11 +2143,15 @@ func (m *mexc) resubscribeMarkets() {
 			m.log.Errorf("[Resubscribe] Failed to marshal subscription for %s: %v", symbol, err)
 			continue
 		}
-		// Use SendRaw
+
 		if err := m.marketStream.SendRaw(reqBytes); err != nil {
 			m.log.Errorf("[Resubscribe] Failed to send subscription for %s: %v", symbol, err)
 		} else {
-			m.log.Debugf("[Resubscribe] Successfully resubscribed to %s", symbol)
+			m.log.Debugf("[Resubscribe] Sent subscription request for %s", symbol)
+			// Mark as subscribed as soon as we send the request
+			m.marketSubStatusMtx.Lock()
+			m.marketSubStatus[symbol] = true
+			m.marketSubStatusMtx.Unlock()
 		}
 	}
 }
