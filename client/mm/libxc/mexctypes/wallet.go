@@ -41,18 +41,32 @@ type DepositAddress struct {
 }
 
 // DepositHistoryRecord structure for GET /api/v3/capital/deposit/hisrec.
+// MEXC returns both "network" and "netWork" fields (different capitalization),
+// and "unlockConfirm" as a string, not an int.
 type DepositHistoryRecord struct {
 	Coin          string `json:"coin"`
-	Network       string `json:"network"`
+	Network       string `json:"network"` // Lowercase "n" version
+	NetWork       string `json:"netWork"` // Uppercase "W" version (MEXC inconsistency)
 	Amount        string `json:"amount"`
-	Status        int    `json:"status"` // 0:pending, 1:success
+	Status        int    `json:"status"` // 0:pending, 1:success, 4:processing, 6:credited/success
 	Address       string `json:"address"`
 	AddressTag    string `json:"addressTag,omitempty"`
 	TxID          string `json:"txId"`
 	InsertTime    int64  `json:"insertTime"`
-	UnlockConfirm int    `json:"unlockConfirm"` // Confirmations needed for unlock
+	UnlockConfirm string `json:"unlockConfirm"` // Changed from int to string
 	ConfirmTimes  string `json:"confirmTimes"`  // Current confirmations as string
+	Memo          string `json:"memo,omitempty"`
+	TransHash     string `json:"transHash,omitempty"`  // Transaction hash (may be same as txId without output index)
+	UpdateTime    int64  `json:"updateTime,omitempty"` // Timestamp of the last status update
 }
+
+// Status code reference for deposit status:
+// 0 = Pending
+// 1 = Success
+// 4 = Processing
+// 6 = Credited/Success
+// 7 = Wrong Deposit
+// 8 = Waiting User Confirm
 
 // WithdrawApplyResponse structure for POST /api/v3/capital/withdraw/apply.
 type WithdrawApplyResponse struct {
@@ -64,6 +78,7 @@ type WithdrawHistoryRecord struct {
 	ID             string `json:"id"` // Withdrawal ID from apply step
 	Coin           string `json:"coin"`
 	Network        string `json:"network"`
+	NetWork        string `json:"netWork"` // Uppercase "W" version (MEXC inconsistency)
 	Address        string `json:"address"`
 	Amount         string `json:"amount"`
 	TransactionFee string `json:"transactionFee"`

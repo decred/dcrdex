@@ -6,11 +6,13 @@
 package libxc
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/client/mm/libxc/mexctypes"
 	"decred.org/dcrdex/dex"
 	"github.com/stretchr/testify/require"
 )
@@ -133,4 +135,60 @@ func TestGenerateClientOrderID(t *testing.T) {
 
 	require.Equal(t, nonce1+1, nonce2, "Nonce should increment by 1")
 	require.Equal(t, nonce2+1, nonce3, "Nonce should increment by 1")
+}
+
+// TestDepositHistoryRecordUnmarshal tests that our DepositHistoryRecord struct
+// correctly handles the response format from MEXC's deposit history API.
+func TestDepositHistoryRecordUnmarshal(t *testing.T) {
+	// This is the example response from the MEXC API that was failing
+	exampleResponse := `[{
+		"amount":"4.0999748",
+		"coin":"DCR",
+		"network":"DCR",
+		"status":4,
+		"address":"DsXdNwAW7LN9TbRCtxB68VMwc7DC1567zbp",
+		"txId":"415ac0af23067e89447862d5f95cf990fb54047e2fbf4e00b82157d67b8d7c3a:0",
+		"insertTime":1745738140000,
+		"unlockConfirm":"20",
+		"confirmTimes":"2",
+		"memo":null,
+		"transHash":"415ac0af23067e89447862d5f95cf990fb54047e2fbf4e00b82157d67b8d7c3a",
+		"updateTime":1745738140000,
+		"netWork":"DCR"
+	}]`
+
+	var history []*mexctypes.DepositHistoryRecord
+	err := json.Unmarshal([]byte(exampleResponse), &history)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal deposit history: %v", err)
+	}
+
+	if len(history) != 1 {
+		t.Fatalf("Expected 1 history record, got %d", len(history))
+	}
+
+	record := history[0]
+
+	// Check that the fields were correctly parsed
+	if record.Coin != "DCR" {
+		t.Errorf("Expected Coin=DCR, got %s", record.Coin)
+	}
+
+	if record.Network != "DCR" {
+		t.Errorf("Expected Network=DCR, got %s", record.Network)
+	}
+
+	if record.NetWork != "DCR" {
+		t.Errorf("Expected NetWork=DCR, got %s", record.NetWork)
+	}
+
+	if record.UnlockConfirm != "20" {
+		t.Errorf("Expected UnlockConfirm=20, got %s", record.UnlockConfirm)
+	}
+
+	if record.TransHash != "415ac0af23067e89447862d5f95cf990fb54047e2fbf4e00b82157d67b8d7c3a" {
+		t.Errorf("Expected TransHash=415ac0af23067e89447862d5f95cf990fb54047e2fbf4e00b82157d67b8d7c3a, got %s", record.TransHash)
+	}
+
+	t.Logf("Successfully unmarshaled deposit history record: %+v", record)
 }

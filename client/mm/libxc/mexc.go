@@ -1587,7 +1587,7 @@ func (m *mexc) GetDepositAddress(ctx context.Context, assetID uint32) (string, e
 	path := "/api/v3/capital/deposit/address"
 	params := url.Values{}
 	params.Set("coin", mexcCoin)
-	params.Set("network", mexcNetwork)
+	params.Set("netWork", mexcNetwork) // Changed from "network" to "netWork" for MEXC API consistency
 
 	// 3. Send Request - FIXED: handle array response
 	var respArray []mexctypes.DepositAddress
@@ -1759,7 +1759,7 @@ func (m *mexc) Withdraw(ctx context.Context, assetID uint32, atoms uint64, addre
 	path := "/api/v3/capital/withdraw/apply"
 	params := url.Values{}
 	params.Set("coin", mexcCoin)
-	params.Set("network", mexcNetwork)
+	params.Set("netWork", mexcNetwork) // Changed from "network" to "netWork" for MEXC API consistency
 	params.Set("address", address)
 	params.Set("amount", amountStr)
 	// TODO: Add memo/tag handling if needed.
