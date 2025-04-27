@@ -22,6 +22,7 @@ import (
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/wire"
 )
 
 const (
@@ -137,13 +138,6 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		return nil, fmt.Errorf("unknown network ID %v", network)
 	}
 
-	// Designate the clone ports.
-	ports := dexbtc.NetPorts{
-		Mainnet: "8888",
-		Testnet: "18888",
-		Simnet:  "28888",
-	}
-
 	cloneCFG := &btc.BTCCloneCFG{
 		WalletCFG:                cfg,
 		MinNetworkVersion:        minNetworkVersion,
@@ -152,7 +146,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		Logger:                   logger,
 		Network:                  network,
 		ChainParams:              params,
-		Ports:                    ports,
+		Ports:                    dexfiro.NetPorts,
 		DefaultFallbackFee:       dexfiro.DefaultFee,
 		DefaultFeeRateLimit:      dexfiro.DefaultFeeRateLimit,
 		Segwit:                   false,
@@ -172,6 +166,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		ExternalFeeEstimator:     externalFeeRate,
 		AddressDecoder:           decodeAddress,
 		PrivKeyFunc:              nil, // set only for walletTypeRPC below
+		BlockDeserializer:        nil, // set only for walletTypeRPC below
 	}
 
 	switch cfg.Type {
@@ -180,6 +175,9 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		// override PrivKeyFunc - we need our own Firo dumpprivkey fn
 		cloneCFG.PrivKeyFunc = func(addr string) (*btcec.PrivateKey, error) {
 			return privKeyForAddress(exw, addr)
+		}
+		cloneCFG.BlockDeserializer = func(blk []byte) (*wire.MsgBlock, error) {
+			return deserializeBlock(exw, params, blk)
 		}
 		var err error
 		exw, err = btc.BTCCloneWallet(cloneCFG)

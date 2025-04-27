@@ -6,6 +6,7 @@ package firo
 import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/networks/btc"
+	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 )
@@ -14,6 +15,13 @@ const (
 	DefaultFee          = 1  // 0.00001000 FIRO/kB
 	DefaultFeeRateLimit = 20 // 0.00020000 FIRO/kB
 )
+
+// Designate the clone ports.
+var NetPorts = dexbtc.NetPorts{
+	Mainnet: "8888",
+	Testnet: "18888",
+	Simnet:  "28888",
+}
 
 // Firo v0.14.12.1 defaults:
 // -fallbackfee= (default: 20000) 	wallet.h: DEFAULT_FALLBACK_FEE unused afaics
