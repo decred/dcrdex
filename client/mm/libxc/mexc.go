@@ -565,13 +565,16 @@ func (m *mexc) periodicCoinInfoRefresh(ctx context.Context) {
 
 // --- CEX Interface Method Placeholders ---
 
+// Balance retrieves the balance for a specific asset.
 func (m *mexc) Balance(assetID uint32) (*ExchangeBalance, error) {
 	m.balancesMtx.RLock()
 	defer m.balancesMtx.RUnlock()
 	// TODO: Implement actual fetching if not found or stale
 	bal, ok := m.balances[assetID]
 	if !ok {
-		return nil, fmt.Errorf("balance for asset ID %d not available (MEXC)", assetID)
+		// Return zero balance instead of error when the balance is not available
+		m.log.Debugf("Balance for asset ID %d not available, returning zero balance", assetID)
+		return &ExchangeBalance{Available: "0", Locked: "0"}, nil
 	}
 	// Return a copy to prevent modification
 	ret := *bal
