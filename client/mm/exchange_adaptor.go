@@ -3386,7 +3386,9 @@ func (u *unifiedExchangeAdaptor) updateFeeRates() (buyFees, sellFees *OrderFees,
 }
 
 func (u *unifiedExchangeAdaptor) Connect(ctx context.Context) (*sync.WaitGroup, error) {
-	u.ctx, u.kill = context.WithCancel(ctx)
+	ctx, u.kill = context.WithCancel(ctx)
+	u.ctx = ctx
+
 	fiatRates := u.clientCore.FiatConversionRates()
 	u.fiatRates.Store(fiatRates)
 
