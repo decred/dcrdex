@@ -2183,10 +2183,6 @@ func (m *mexc) handleDepthUpdate(msg *mexctypes.WsMessage) {
 		return
 	}
 
-	// Add extra logging for debugging
-	m.log.Debugf("[MarketWS] Processing depth update for symbol: %s (from channel: %s)",
-		mktSymbol, msg.Channel)
-
 	// 2. Parse the depth update data from the message
 	var depthUpdate mexctypes.WsDepthUpdateData
 	if err := json.Unmarshal(msg.Data, &depthUpdate); err != nil {
@@ -2194,11 +2190,27 @@ func (m *mexc) handleDepthUpdate(msg *mexctypes.WsMessage) {
 		return
 	}
 
-	// Log empty Version field to help diagnose the issue
+	// Only log meaningful updates (with non-empty bids or asks) at debug level
+	hasBids := depthUpdate.Bids != nil && len(depthUpdate.Bids) > 0
+	hasAsks := depthUpdate.Asks != nil && len(depthUpdate.Asks) > 0
+
+	// For empty updates, only log at trace level to reduce spam
 	if depthUpdate.Version == "" {
-		rawData, _ := json.Marshal(depthUpdate)
-		m.log.Debugf("[MarketWS] Received depth update with empty Version field for %s: %s",
-			mktSymbol, string(rawData))
+		if !hasBids && !hasAsks {
+			// This is a heartbeat or empty update - log at trace level only
+			m.log.Tracef("[MarketWS] Received heartbeat update for %s (empty v/b/a)", mktSymbol)
+
+			// Skip forwarding empty updates to the order book
+			return
+		}
+
+		// If we have bids or asks but empty version, still process it but log
+		m.log.Warnf("[MarketWS] Received depth update with empty Version but has data for %s: bids=%v, asks=%v",
+			mktSymbol, hasBids, hasAsks)
+	} else if hasBids || hasAsks {
+		// Log non-empty updates that have a version
+		m.log.Debugf("[MarketWS] Processing depth update for %s: v=%s, bids=%d, asks=%d",
+			mktSymbol, depthUpdate.Version, len(depthUpdate.Bids), len(depthUpdate.Asks))
 	}
 
 	// 3. Find the order book for this market
