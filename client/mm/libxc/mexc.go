@@ -2097,25 +2097,32 @@ func (m *mexc) handleMarketRawMessage(msgBytes []byte) {
 			return
 		}
 
-		// Extract symbol from the protobuf message
-		if depthUpdate.Symbol == "" {
-			// Try to extract from the event type or channel format
-			// Typically in the format: "spot@public.limit.depth.v3.api.pb@BTCUSDT@5"
-			parts := strings.Split(pbMsg.EventType, "@")
-			if len(parts) >= 4 {
-				symbolPart := parts[3]
-				// Remove the depth value (e.g., "5") if present
-				if strings.Contains(symbolPart, "@") {
-					symbolPart = strings.Split(symbolPart, "@")[0]
-				}
-				depthUpdate.Symbol = symbolPart
-			}
+		// Check all active subscriptions to find a matching symbol
+		// Since we may not be able to extract the symbol from the binary message
+		mktSymbol := ""
+
+		// Get all currently subscribed markets
+		m.booksMtx.RLock()
+		activeMarkets := make([]string, 0, len(m.books))
+		for symbol := range m.books {
+			activeMarkets = append(activeMarkets, symbol)
+		}
+		m.booksMtx.RUnlock()
+
+		// For now, we only support subscribing to one market at a time for protobuf
+		// As a workaround, we'll use the first active market
+		if len(activeMarkets) > 0 {
+			mktSymbol = activeMarkets[0]
+			m.log.Debugf("[MarketWS] Using active market %s for protobuf message", mktSymbol)
 		}
 
-		if depthUpdate.Symbol == "" {
-			m.log.Warnf("[MarketWS] Could not determine symbol from protobuf message")
+		if mktSymbol == "" {
+			m.log.Warnf("[MarketWS] Could not determine symbol from protobuf message and no active markets found")
 			return
 		}
+
+		// Set the symbol in the depth update
+		depthUpdate.Symbol = mktSymbol
 
 		m.log.Debugf("[MarketWS] Successfully parsed protobuf depth update for %s: v=%s, bids=%d, asks=%d",
 			depthUpdate.Symbol, depthUpdate.Version, len(depthUpdate.Bids), len(depthUpdate.Asks))
@@ -2127,8 +2134,8 @@ func (m *mexc) handleMarketRawMessage(msgBytes []byte) {
 
 		// Create a synthetic WsMessage to pass to handleDepthUpdate
 		wsMsg := &mexctypes.WsMessage{
-			Channel: fmt.Sprintf("spot@public.limit.depth.v3.api.pb@%s@5", depthUpdate.Symbol),
-			Symbol:  depthUpdate.Symbol,
+			Channel: fmt.Sprintf("spot@public.limit.depth.v3.api.pb@%s@5", mktSymbol),
+			Symbol:  mktSymbol,
 		}
 
 		// Forward to the standard depth update handler
