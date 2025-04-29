@@ -1958,7 +1958,8 @@ func (m *mexc) connectMarketStream(ctx context.Context, firstMexcSymbol string) 
 
 	// Send initial subscription with updated channel format
 	m.log.Infof("[MarketWS] Sending initial subscription for %s", firstMexcSymbol)
-	channel := fmt.Sprintf("spot@public.limit.depth.v3.api.pb@%s@5", firstMexcSymbol)
+	// Use the JSON endpoint (not .pb protobuf endpoint)
+	channel := fmt.Sprintf("spot@public.limit.depth.v3.api@%s@5", firstMexcSymbol)
 	req := mexctypes.WsRequest{Method: "SUBSCRIPTION", Params: []string{channel}}
 	reqBytes, marshalErr := json.Marshal(req)
 	if marshalErr != nil {
@@ -2039,8 +2040,9 @@ func (m *mexc) subscribeToAdditionalMarket(ctx context.Context, mexcSymbol strin
 		}
 	}
 
-	// Update channel format to match MEXC API: spot@public.limit.depth.v3.api.pb@SYMBOL@5
-	channel := fmt.Sprintf("spot@public.limit.depth.v3.api.pb@%s@5", mexcSymbol)
+	// Update channel format to match MEXC API: spot@public.limit.depth.v3.api@SYMBOL@5
+	// Use the JSON endpoint (not .pb protobuf endpoint)
+	channel := fmt.Sprintf("spot@public.limit.depth.v3.api@%s@5", mexcSymbol)
 	req := mexctypes.WsRequest{
 		Method: "SUBSCRIPTION",
 		Params: []string{channel},
@@ -2064,6 +2066,12 @@ func (m *mexc) subscribeToAdditionalMarket(ctx context.Context, mexcSymbol strin
 
 // handleMarketRawMessage parses raw byte messages from the WebSocket.
 func (m *mexc) handleMarketRawMessage(msgBytes []byte) {
+	// Check if this might be a binary/protobuf message
+	if len(msgBytes) > 0 && (msgBytes[0] < 32 || msgBytes[0] > 126) {
+		m.log.Debugf("[MarketWS] Received possible binary message of length %d, ignoring", len(msgBytes))
+		return
+	}
+
 	// Clean the message - handle MEXC specific prefix
 	if len(msgBytes) > 0 && msgBytes[0] == '+' {
 		// MEXC sometimes sends messages with a '+' prefix - strip it
@@ -2080,7 +2088,15 @@ func (m *mexc) handleMarketRawMessage(msgBytes []byte) {
 	// Try to unmarshal as the base message type first
 	var baseMsg mexctypes.WsMessage
 	if err := json.Unmarshal(msgBytes, &baseMsg); err != nil {
-		m.log.Errorf("[MarketWS] Failed to unmarshal base market WS message: %v, msg: %s", err, string(msgBytes))
+		// Log full message if it's reasonably small
+		if len(msgBytes) <= 300 {
+			m.log.Errorf("[MarketWS] Failed to unmarshal base market WS message: %v, full msg: %s",
+				err, string(msgBytes))
+		} else {
+			// For longer messages, just log the first part
+			m.log.Errorf("[MarketWS] Failed to unmarshal base market WS message: %v, msg start: %s...",
+				err, string(msgBytes[:300]))
+		}
 		return
 	}
 
@@ -2099,8 +2115,7 @@ func (m *mexc) handleMarketRawMessage(msgBytes []byte) {
 	// Check for prefix instead of exact match, as channel includes symbol
 	switch {
 	case strings.HasPrefix(baseMsg.Channel, "spot@public.increase.depth.v3.api"),
-		strings.HasPrefix(baseMsg.Channel, "spot@public.limit.depth.v3.api"),
-		strings.HasPrefix(baseMsg.Channel, "spot@public.limit.depth.v3.api.pb"):
+		strings.HasPrefix(baseMsg.Channel, "spot@public.limit.depth.v3.api"):
 		if len(baseMsg.Data) == 0 || string(baseMsg.Data) == "null" {
 			m.log.Warnf("[MarketWS] Received depth update message with missing/null data field: %s", string(msgBytes))
 			return
@@ -2118,8 +2133,7 @@ func (m *mexc) handleMarketRawMessage(msgBytes []byte) {
 	if err := json.Unmarshal(msgBytes, &genericResp); err == nil {
 		// Check for subscription success confirmations (Code 0 and Msg contains channel name)
 		if genericResp.Code == 0 && (strings.Contains(genericResp.Msg, "spot@public.increase.depth.v3.api") ||
-			strings.Contains(genericResp.Msg, "spot@public.limit.depth.v3.api") ||
-			strings.Contains(genericResp.Msg, "spot@public.limit.depth.v3.api.pb")) {
+			strings.Contains(genericResp.Msg, "spot@public.limit.depth.v3.api")) {
 			m.log.Debugf("[MarketWS] Received MEXC WS Success Subscription Confirmation: %s", string(msgBytes))
 			return // Handled success confirmation
 		}
@@ -2141,7 +2155,7 @@ func (m *mexc) handleDepthUpdate(msg *mexctypes.WsMessage) {
 	if mktSymbol == "" {
 		// Format could be either:
 		// - "spot@public.increase.depth.v3.api@BTCUSDT" (old format)
-		// - "spot@public.limit.depth.v3.api.pb@BTCUSDT@5" (new format)
+		// - "spot@public.limit.depth.v3.api@BTCUSDT@5" (new format)
 		parts := strings.Split(msg.Channel, "@")
 		if len(parts) < 3 {
 			m.log.Errorf("[MarketWS] Invalid depth update channel format: %s", msg.Channel)
@@ -2150,7 +2164,7 @@ func (m *mexc) handleDepthUpdate(msg *mexctypes.WsMessage) {
 
 		// Extract symbol (either last part or second-to-last if there's a depth value)
 		if len(parts) >= 4 {
-			// New format with depth value at the end: "@SYMBOL@5"
+			// Check if the last part is a number (depth level)
 			if _, err := strconv.Atoi(parts[len(parts)-1]); err == nil {
 				// If the last part is a number (depth level), use the part before it
 				mktSymbol = parts[len(parts)-2]
@@ -2168,6 +2182,10 @@ func (m *mexc) handleDepthUpdate(msg *mexctypes.WsMessage) {
 		m.log.Errorf("[MarketWS] Could not determine market symbol from message: %+v", msg)
 		return
 	}
+
+	// Add extra logging for debugging
+	m.log.Debugf("[MarketWS] Processing depth update for symbol: %s (from channel: %s)",
+		mktSymbol, msg.Channel)
 
 	// 2. Parse the depth update data from the message
 	var depthUpdate mexctypes.WsDepthUpdateData
@@ -2225,7 +2243,8 @@ func (m *mexc) resubscribeMarkets() {
 	// Now resubscribe each market to the websocket feed
 	for symbol := range m.books {
 		// Reuse SubscribeMarket logic without locking/book creation
-		channel := fmt.Sprintf("spot@public.limit.depth.v3.api.pb@%s@5", symbol)
+		// Use the JSON endpoint (not .pb protobuf endpoint)
+		channel := fmt.Sprintf("spot@public.limit.depth.v3.api@%s@5", symbol)
 		req := mexctypes.WsRequest{
 			Method: "SUBSCRIPTION",
 			Params: []string{channel},
@@ -2885,6 +2904,12 @@ func (m *mexc) handleUserConnectEvent(status comms.ConnectionStatus) {
 
 // handleUserDataRawMessage parses raw byte messages from the User Data Stream.
 func (m *mexc) handleUserDataRawMessage(msgBytes []byte) {
+	// Check if this might be a binary/protobuf message
+	if len(msgBytes) > 0 && (msgBytes[0] < 32 || msgBytes[0] > 126) {
+		m.log.Debugf("[UserWS] Received possible binary message of length %d, ignoring", len(msgBytes))
+		return
+	}
+
 	// Clean the message - handle MEXC specific prefix
 	if len(msgBytes) > 0 && msgBytes[0] == '+' {
 		// MEXC sometimes sends messages with a '+' prefix - strip it
@@ -2908,6 +2933,16 @@ func (m *mexc) handleUserDataRawMessage(msgBytes []byte) {
 	var baseEvent mexctypes.WsMessage // Reusing this struct for EventType ('e') field
 	err := json.Unmarshal(msgBytes, &baseEvent)
 	if err != nil {
+		// Log full message if it's reasonably small
+		if len(msgBytes) <= 300 {
+			m.log.Errorf("[UserWS] Failed to unmarshal base user event: %v, full msg: %s",
+				err, string(msgBytes))
+		} else {
+			// For longer messages, just log the first part
+			m.log.Errorf("[UserWS] Failed to unmarshal base user event: %v, msg start: %s...",
+				err, string(msgBytes[:300]))
+		}
+
 		// Check if it's the PONG ack to our (now removed) client PING
 		var pongAckCheck struct {
 			Msg string `json:"msg"`
@@ -2916,7 +2951,6 @@ func (m *mexc) handleUserDataRawMessage(msgBytes []byte) {
 			m.log.Tracef("[UserWS] Received PONG acknowledgement message (ignoring).")
 			return
 		}
-		m.log.Errorf("[UserWS] Failed to unmarshal base user event: %v, payload: %s", err, string(msgBytes))
 		return
 	}
 
