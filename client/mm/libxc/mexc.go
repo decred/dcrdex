@@ -1958,8 +1958,10 @@ func (m *mexc) connectMarketStream(ctx context.Context, firstMexcSymbol string) 
 
 	// Send initial subscription with updated channel format
 	m.log.Infof("[MarketWS] Sending initial subscription for %s", firstMexcSymbol)
-	// Use the JSON endpoint (not .pb protobuf endpoint)
-	channel := fmt.Sprintf("spot@public.limit.depth.v3.api@%s@5", firstMexcSymbol)
+	// Use the incremental depth stream instead of limit depth
+	// Changed from: spot@public.limit.depth.v3.api@SYMBOL@5
+	// To: spot@public.increase.depth.v3.api@SYMBOL
+	channel := fmt.Sprintf("spot@public.increase.depth.v3.api@%s", firstMexcSymbol)
 	req := mexctypes.WsRequest{Method: "SUBSCRIPTION", Params: []string{channel}}
 	reqBytes, marshalErr := json.Marshal(req)
 	if marshalErr != nil {
@@ -2040,9 +2042,10 @@ func (m *mexc) subscribeToAdditionalMarket(ctx context.Context, mexcSymbol strin
 		}
 	}
 
-	// Update channel format to match MEXC API: spot@public.limit.depth.v3.api@SYMBOL@5
-	// Use the JSON endpoint (not .pb protobuf endpoint)
-	channel := fmt.Sprintf("spot@public.limit.depth.v3.api@%s@5", mexcSymbol)
+	// Update channel format to use the incremental depth stream instead of limit depth
+	// Changed from: spot@public.limit.depth.v3.api@SYMBOL@5
+	// To: spot@public.increase.depth.v3.api@SYMBOL
+	channel := fmt.Sprintf("spot@public.increase.depth.v3.api@%s", mexcSymbol)
 	req := mexctypes.WsRequest{
 		Method: "SUBSCRIPTION",
 		Params: []string{channel},
@@ -2255,8 +2258,8 @@ func (m *mexc) resubscribeMarkets() {
 	// Now resubscribe each market to the websocket feed
 	for symbol := range m.books {
 		// Reuse SubscribeMarket logic without locking/book creation
-		// Use the JSON endpoint (not .pb protobuf endpoint)
-		channel := fmt.Sprintf("spot@public.limit.depth.v3.api@%s@5", symbol)
+		// Use the incremental depth stream instead of limit depth
+		channel := fmt.Sprintf("spot@public.increase.depth.v3.api@%s", symbol)
 		req := mexctypes.WsRequest{
 			Method: "SUBSCRIPTION",
 			Params: []string{channel},
