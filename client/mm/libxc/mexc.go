@@ -70,6 +70,10 @@ type mexc struct {
 	balances    map[uint32]*ExchangeBalance
 	balancesMtx sync.RWMutex
 
+	// Add these fields for resubscription coordination
+	resubMtx        sync.Mutex  // Mutex to protect resubInProgress
+	resubInProgress atomic.Bool // Flag to track if resubscription is in progress
+
 	// Exchange and Coin Info Caches
 	exchangeInfo      *mexctypes.ExchangeInfo
 	exchangeInfoMtx   sync.RWMutex
@@ -242,8 +246,8 @@ func newMEXC(cfg *CEXConfig) (*mexc, error) {
 	marketWsCfg := *wsCfgBase
 	marketWsCfg.Logger = marketLogger // Assign market logger
 	marketWsCfg.URL = mexcWsURL
-	marketWsCfg.RawHandler = m.handleMarketRawMessage // Assign market raw handler
-	marketWsCfg.ReconnectSync = m.resubscribeMarkets
+	marketWsCfg.RawHandler = m.handleMarketRawMessage        // Assign market raw handler
+	marketWsCfg.ReconnectSync = m.checkAndResubscribeMarkets // Use thread-safe version
 	marketWsCfg.ConnectEventFunc = m.handleMarketConnectEvent
 	marketWsCfg.PingWait = 120 * time.Second // Decreased PingWait for market stream
 	marketStream, err := comms.NewWsConn(&marketWsCfg)
@@ -1986,8 +1990,10 @@ func (m *mexc) handleMarketConnectEvent(status comms.ConnectionStatus) {
 
 	switch status {
 	case comms.Connected:
-		// Re-subscribe to all markets on reconnection
-		m.resubscribeMarkets()
+		// Re-subscribe to all markets on reconnection - use the thread-safe function
+		// to avoid duplicate resubscription calls
+		m.log.Debugf("Market connection established, checking for books that need resubscription")
+		go m.checkAndResubscribeMarkets() // Run in a goroutine to avoid blocking
 
 		// Notify all books that connection is established
 		m.booksMtx.RLock()
@@ -2335,6 +2341,7 @@ func (m *mexc) handleDepthUpdate(msg *mexctypes.WsMessage) {
 }
 
 // resubscribeMarkets sends subscription messages for all currently tracked markets.
+// NOTE: This function should not be called directly, use checkAndResubscribeMarkets instead.
 func (m *mexc) resubscribeMarkets() {
 	m.booksMtx.RLock()
 	defer m.booksMtx.RUnlock()
@@ -2368,11 +2375,11 @@ func (m *mexc) resubscribeMarkets() {
 	}
 
 	if len(marketsToResub) == 0 {
-		m.log.Infof("All markets have recent updates, no resubscriptions needed")
+		m.log.Debugf("All markets have recent updates, no resubscriptions needed")
 		return
 	}
 
-	m.log.Infof("Resubscribing to %d/%d markets that need updates", len(marketsToResub), len(m.books))
+	m.log.Debugf("Resubscribing to %d/%d markets that need updates", len(marketsToResub), len(m.books))
 
 	// Now resubscribe each market that needs updates
 	for _, symbol := range marketsToResub {
@@ -3919,4 +3926,37 @@ func (ob *mexcOrderBook) convertDepthEntries(mexcBids, mexcAsks [][2]json.Number
 		return nil, nil, fmt.Errorf("asks: %w", err)
 	}
 	return bids, asks, nil
+}
+
+// Add this new function above resubscribeMarkets
+// checkAndResubscribeMarkets is a thread-safe function that checks orderbook update times
+// and only resubscribes to books that haven't received updates recently. This function
+// should be used by all reconnection points to avoid duplicate resubscriptions.
+func (m *mexc) checkAndResubscribeMarkets() {
+	// Check if resubscription is already in progress
+	if m.resubInProgress.Load() {
+		m.log.Debugf("Resubscription already in progress, skipping duplicate call")
+		return
+	}
+
+	// Try to set the in-progress flag
+	m.resubMtx.Lock()
+	if m.resubInProgress.Load() {
+		// Double-check after acquiring lock
+		m.resubMtx.Unlock()
+		m.log.Debugf("Resubscription already in progress after lock, skipping duplicate call")
+		return
+	}
+
+	// Set the flag and unlock
+	m.resubInProgress.Store(true)
+	m.resubMtx.Unlock()
+
+	// Ensure the flag is reset when done
+	defer func() {
+		m.resubInProgress.Store(false)
+	}()
+
+	// Call the implementation function which contains the actual resubscription logic
+	m.resubscribeMarkets()
 }
