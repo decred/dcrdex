@@ -1969,7 +1969,7 @@ func (m *mexc) connectMarketStream(ctx context.Context, firstMexcSymbol string) 
 	// Use the protobuf depth stream instead of incremental depth
 	// Changed from: spot@public.increase.depth.v3.api@SYMBOL
 	// To: spot@public.limit.depth.v3.api.pb@SYMBOL@5
-	channel := fmt.Sprintf("spot@public.limit.depth.v3.api.pb@%s@5", firstMexcSymbol)
+	channel := fmt.Sprintf("spot@public.limit.depth.v3.api.pb@%s@20", firstMexcSymbol)
 	req := mexctypes.WsRequest{Method: "SUBSCRIPTION", Params: []string{channel}}
 	reqBytes, marshalErr := json.Marshal(req)
 	if marshalErr != nil {
@@ -2055,7 +2055,7 @@ func (m *mexc) subscribeToAdditionalMarket(ctx context.Context, mexcSymbol strin
 	// Use the protobuf depth stream instead of incremental depth
 	// Changed from: spot@public.increase.depth.v3.api@SYMBOL
 	// To: spot@public.limit.depth.v3.api.pb@SYMBOL@5
-	channel := fmt.Sprintf("spot@public.limit.depth.v3.api.pb@%s@5", mexcSymbol)
+	channel := fmt.Sprintf("spot@public.limit.depth.v3.api.pb@%s@20", mexcSymbol)
 	req := mexctypes.WsRequest{
 		Method: "SUBSCRIPTION",
 		Params: []string{channel},
@@ -2145,7 +2145,7 @@ func (m *mexc) handleMarketRawMessage(msgBytes []byte) {
 
 		// Create a synthetic WsMessage to pass to handleDepthUpdate
 		wsMsg := &mexctypes.WsMessage{
-			Channel: fmt.Sprintf("spot@public.limit.depth.v3.api.pb@%s@5", mktSymbol),
+			Channel: fmt.Sprintf("spot@public.limit.depth.v3.api.pb@%s@20", mktSymbol),
 			Symbol:  mktSymbol,
 		}
 
@@ -2384,7 +2384,7 @@ func (m *mexc) resubscribeMarkets() {
 	// Now resubscribe each market that needs updates
 	for _, symbol := range marketsToResub {
 		// Use the protobuf depth stream
-		channel := fmt.Sprintf("spot@public.limit.depth.v3.api.pb@%s@5", symbol)
+		channel := fmt.Sprintf("spot@public.limit.depth.v3.api.pb@%s@20", symbol)
 		req := mexctypes.WsRequest{
 			Method: "SUBSCRIPTION",
 			Params: []string{channel},
