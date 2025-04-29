@@ -129,6 +129,7 @@ type mexcOrderBook struct {
 	syncChan       chan struct{} // Closed when initial sync completes
 	stopChan       chan struct{} // Closed to signal run loop exit
 	numSubscribers uint32
+	active         bool // Indicates if any bots are actively using this book
 	getSnapshot    func(ctx context.Context, symbol string) (*mexctypes.DepthResponse, error)
 	book           *orderbook // Use local type
 	updateQueue    chan *mexctypes.WsDepthUpdateData
@@ -436,15 +437,12 @@ func (m *mexc) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	}
 	m.log.Infof("Fetched initial MEXC exchange and coin info, updated mappings.")
 
-	// Launch Market Stream connection manager (moved here)
-	m.log.Infof("Launching connectMarketStream goroutine...")
+	// Launch Market Stream connection manager and immediately connect
+	m.log.Infof("Launching and connecting market stream immediately...")
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
-		// Pass the main context. Connection will happen when the first
-		// subscription occurs via connectMarketStream IF it hasn't already.
-		// Let's explicitly start the connection process here.
-		if m.marketStream != nil { // Ensure marketStream is initialized (should be by constructor)
+		if m.marketStream != nil {
 			connCtx := ctx
 			wgConn, err := m.marketStream.Connect(connCtx)
 			if err != nil {
@@ -464,7 +462,7 @@ func (m *mexc) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 			m.log.Error("[MarketWS] marketStream was nil in Connect goroutine!")
 		}
 	}()
-	m.log.Infof("Launched connectMarketStream goroutine.")
+	m.log.Infof("Market stream connection initiated.")
 
 	// Launch User Data Stream connection manager
 	m.log.Infof("Launching connectUserStream goroutine...")
@@ -475,17 +473,12 @@ func (m *mexc) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	}()
 	m.log.Infof("Launched connectUserStream goroutine.")
 
-	// NOTE: Account polling is removed as we rely on User Data Stream primarily now.
-	// If User Data Stream proves unreliable, polling could be re-added.
-	// m.startAccountDataPolling(ctx)
-
 	// Periodic background refresh tasks
 	m.wg.Add(2)
 	go m.periodicExchangeInfoRefresh(ctx)
 	go m.periodicCoinInfoRefresh(ctx)
 
-	m.log.Infof("MEXC Connect sequence completed (Market stream connects on first subscription).")
-	m.log.Infof("Connect method attempting to return...")
+	m.log.Infof("MEXC Connect sequence completed with persistent WebSocket connections.")
 	return &m.wg, nil
 }
 
@@ -1434,6 +1427,13 @@ func (m *mexc) SubscribeMarket(ctx context.Context, baseID, quoteID uint32) erro
 		m.log.Infof("Found existing orderbook for %s, checking sync status", mexcSymbol)
 		book.mtx.Lock()
 		book.numSubscribers++
+
+		// Reactivate the book if it was marked inactive
+		if !book.active {
+			book.active = true
+			m.log.Infof("Reactivating previously inactive book for %s", mexcSymbol)
+		}
+
 		isSynced := book.synced.Load()
 		// Create a new syncChan if needed - this is critical for proper waiting
 		if !isSynced {
@@ -1450,7 +1450,7 @@ func (m *mexc) SubscribeMarket(ctx context.Context, baseID, quoteID uint32) erro
 		syncChan := book.syncChan
 		book.mtx.Unlock()
 
-		m.log.Debugf("Incremented subscriber count for %s to %d (synced: %v)", mexcSymbol, book.numSubscribers, isSynced)
+		m.log.Debugf("Incremented subscriber count for %s to %d (synced: %v, active: true)", mexcSymbol, book.numSubscribers, isSynced)
 		m.booksMtx.Unlock()
 
 		// If the book exists but is not synced, trigger a resync and wait for it
@@ -1788,7 +1788,7 @@ func (m *mexc) UnsubscribeMarket(baseID, quoteID uint32) error {
 		return fmt.Errorf("cannot map DEX IDs to MEXC symbol for unsubscribe: %w", err)
 	}
 
-	// 2. Decrement subscriber count / remove book
+	// 2. Decrement subscriber count / mark as inactive but keep book
 	m.booksMtx.Lock()
 	book, exists := m.books[mexcSymbol]
 	if !exists {
@@ -1797,51 +1797,23 @@ func (m *mexc) UnsubscribeMarket(baseID, quoteID uint32) error {
 		return nil // Not subscribed, nothing to do
 	}
 
-	if book.numSubscribers > 1 {
+	book.mtx.Lock()
+	if book.numSubscribers > 0 {
 		book.numSubscribers--
 		m.log.Debugf("Decremented subscriber count for %s to %d", mexcSymbol, book.numSubscribers)
-		m.booksMtx.Unlock()
-		return nil // Still other subscribers
 	}
 
-	// Last subscriber, remove book and potentially send unsubscribe message
-	delete(m.books, mexcSymbol)
-	numRemainingBooks := len(m.books)
+	// Mark book as inactive when no subscribers, but keep it in memory
+	if book.numSubscribers == 0 {
+		book.active = false
+		m.log.Infof("No more subscribers for %s, marking as inactive but keeping book alive", mexcSymbol)
+	}
+	book.mtx.Unlock()
 	m.booksMtx.Unlock()
 
-	m.log.Infof("Last subscriber for %s, removing book (remaining books: %d).", mexcSymbol, numRemainingBooks)
+	// No longer remove books or send unsubscribe messages when subscriber count reaches zero
+	// This ensures books continue to receive updates even when no bots are using them
 
-	// Stop the book's sync goroutine
-	book.stop()
-
-	// 3. Send unsubscribe message if WebSocket is connected
-	m.marketStreamMtx.Lock()
-	defer m.marketStreamMtx.Unlock()
-
-	if m.marketStream == nil || m.marketStream.IsDown() {
-		m.log.Warnf("Cannot send unsubscribe for %s, market stream not connected or nil.", mexcSymbol)
-		return nil // Can't send if not connected
-	}
-
-	// Marshal and send
-	channel := fmt.Sprintf("spot@public.increase.depth.v3.api@%s", mexcSymbol)
-	req := mexctypes.WsRequest{
-		Method: "UNSUBSCRIPTION",
-		Params: []string{channel},
-	}
-	reqBytes, marshalErr := json.Marshal(req)
-	if marshalErr != nil {
-		m.log.Errorf("Failed to marshal market unsubscription request for %s: %v", mexcSymbol, marshalErr)
-		return nil // Return nil to indicate local cleanup succeeded despite marshal failure.
-	}
-	m.log.Debugf("[MarketWS] Sending UNSUBSCRIPTION for %s", mexcSymbol)
-	err = m.marketStream.SendRaw(reqBytes)
-	if err != nil {
-		m.log.Errorf("Failed to send MEXC market unsubscription for %s: %v", mexcSymbol, err)
-		return fmt.Errorf("failed to send market unsubscription: %w", err)
-	}
-
-	m.log.Infof("Sent unsubscription request for %s", mexcSymbol)
 	return nil
 }
 
@@ -2103,6 +2075,9 @@ func (m *mexc) Book(baseID, quoteID uint32) (buys, sells []*core.MiniOrder, _ er
 		return nil, nil, ErrUnsyncedOrderbook
 	}
 
+	// Note: We now serve books regardless of active status as long as they're synced
+	// This allows bots to get order book data even for inactive books
+
 	// Get asset info for conversion factors
 	baseInfo, baseErr := asset.Info(baseID)
 	quoteInfo, quoteErr := asset.Info(quoteID)
@@ -2192,10 +2167,13 @@ func (m *mexc) VWAP(baseID, quoteID uint32, sell bool, qty uint64) (vwap, extrem
 	}
 	defer bookInstance.mtx.RUnlock() // Ensure unlock if we proceeded
 
+	// Note: We now serve VWAP regardless of active status as long as the book is synced
+	// This allows bots to get VWAP data even from inactive books
+
 	// Use the local book's vwap method
 	vwap, extrema, filled = bookInstance.book.vwap(!sell, qty) // Pass !sell for bids flag
 	// Local vwap doesn't return error according to its definition in libxc/orderbook.go
-	return vwap, extrema, filled, nil // Added return
+	return vwap, extrema, filled, nil
 }
 
 // MidGap method implementation (using local orderbook)
@@ -2215,12 +2193,14 @@ func (m *mexc) MidGap(baseID, quoteID uint32) uint64 {
 
 	bookInstance.mtx.RLock()
 	defer bookInstance.mtx.RUnlock()
+
+	// Provide MidGap for synced books regardless of active status
 	if !bookInstance.synced.Load() {
 		return 0
 	}
 
 	// Use the local book's midGap method
-	return bookInstance.book.midGap() // Added return
+	return bookInstance.book.midGap()
 }
 
 // ConfirmDeposit checks the status of a deposit by querying deposit history.
@@ -3233,6 +3213,7 @@ func newMEXCOrderBook(
 		syncChan:      make(chan struct{}),                          // Unclosed initially
 		stopChan:      make(chan struct{}),                          // For stopping the run goroutine
 		connectedChan: make(chan bool),                              // Channel to communicate connection status changes
+		active:        true,                                         // New books are active by default when created
 	}
 }
 
