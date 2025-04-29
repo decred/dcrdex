@@ -134,6 +134,7 @@ type mexcOrderBook struct {
 	getSnapshot    func(ctx context.Context, symbol string) (*mexctypes.DepthResponse, error)
 	book           *orderbook // Use local type
 	updateQueue    chan *mexctypes.WsDepthUpdateData
+	updateBuffer   []*mexctypes.WsDepthUpdateData // Buffer for updates during initial sync
 	mktSymbol      string
 	baseFactor     uint64
 	quoteFactor    uint64
@@ -2093,10 +2094,6 @@ func (m *mexc) handleDepthUpdate(msg *mexctypes.WsMessage) {
 		return
 	}
 
-	// Log details about the update (debug level)
-	m.log.Debugf("[MarketWS] Received depth update for %s: version=%s, bids=%d, asks=%d",
-		mktSymbol, depthUpdate.Version, len(depthUpdate.Bids), len(depthUpdate.Asks))
-
 	// 3. Find the order book for this market
 	m.booksMtx.RLock()
 	book, exists := m.books[mktSymbol]
@@ -3335,6 +3332,7 @@ func newMEXCOrderBook(
 		getSnapshot:    getSnapshotFunc,
 		book:           newOrderBook(),
 		updateQueue:    make(chan *mexctypes.WsDepthUpdateData, 256), // Buffered queue
+		updateBuffer:   make([]*mexctypes.WsDepthUpdateData, 0, 50),  // Initial buffer capacity
 		syncChan:       make(chan struct{}),                          // Unclosed initially
 		stopChan:       make(chan struct{}),                          // For stopping the run goroutine
 		connectedChan:  make(chan bool, 5),                           // Increased buffer size to prevent "channel full" issues
@@ -3444,14 +3442,18 @@ func (ob *mexcOrderBook) syncOrderbook(ctx context.Context) bool {
 drainLoop:
 	for {
 		select {
-		case <-ob.updateQueue:
+		case update := <-ob.updateQueue:
+			// Instead of just counting drained updates, buffer them
+			ob.mtx.Lock()
+			ob.updateBuffer = append(ob.updateBuffer, update)
+			ob.mtx.Unlock()
 			drainedCount++
 		default:
 			break drainLoop
 		}
 	}
 	if drainedCount > 0 {
-		ob.log.Debugf("Drained %d pending updates before sync for %s", drainedCount, ob.mktSymbol)
+		ob.log.Debugf("Drained and buffered %d pending updates before sync for %s", drainedCount, ob.mktSymbol)
 	}
 
 	ob.log.Debugf("Fetching orderbook snapshot for %s via API", ob.mktSymbol)
@@ -3479,18 +3481,67 @@ drainLoop:
 		return false
 	}
 
+	// Initialize the book with snapshot data
 	ob.mtx.Lock()
 	ob.book.clear()
 	ob.book.update(bids, asks)
 	ob.lastUpdateID = snapshotVersion
+
+	// Get the buffered updates for processing after applying the snapshot
+	bufferedUpdates := ob.updateBuffer
+	ob.updateBuffer = nil          // Clear the buffer
 	ob.lastUpdateTime = time.Now() // Update the timestamp when processing a snapshot
 	ob.mtx.Unlock()
 
 	// Log some stats about the book to verify it's populated correctly
 	bidCount := len(bids)
 	askCount := len(asks)
-	ob.log.Infof("Successfully processed snapshot for %s (Version: %d, Bids: %d, Asks: %d). Book Synced.",
+	ob.log.Infof("Successfully processed snapshot for %s (Version: %d, Bids: %d, Asks: %d).",
 		ob.mktSymbol, snapshotVersion, bidCount, askCount)
+
+	// Process buffered updates that are newer than the snapshot
+	if len(bufferedUpdates) > 0 {
+		ob.log.Debugf("Processing %d buffered updates for %s", len(bufferedUpdates), ob.mktSymbol)
+
+		// Sort buffered updates by version (not strictly necessary, but cleaner)
+		sort.Slice(bufferedUpdates, func(i, j int) bool {
+			vi, _ := strconv.ParseUint(bufferedUpdates[i].Version, 10, 64)
+			vj, _ := strconv.ParseUint(bufferedUpdates[j].Version, 10, 64)
+			return vi < vj
+		})
+
+		// Apply buffered updates with version > snapshotVersion
+		applied := 0
+		for _, update := range bufferedUpdates {
+			updateVersion, err := strconv.ParseUint(update.Version, 10, 64)
+			if err != nil {
+				ob.log.Warnf("Failed to parse buffered update version '%s' for %s: %v. Skipping.",
+					update.Version, ob.mktSymbol, err)
+				continue
+			}
+
+			if updateVersion > snapshotVersion {
+				// Process this update
+				ob.mtx.Lock()
+				bids, asks, err := ob.convertDepthEntries(update.Bids, update.Asks)
+				if err != nil {
+					ob.log.Warnf("Error converting buffered update entries for %s (v%d): %v. Skipping.",
+						ob.mktSymbol, updateVersion, err)
+					ob.mtx.Unlock()
+					continue
+				}
+
+				ob.book.update(bids, asks)
+				ob.lastUpdateID = updateVersion
+				ob.lastUpdateTime = time.Now()
+				ob.mtx.Unlock()
+				applied++
+			}
+		}
+
+		ob.log.Debugf("Applied %d buffered updates for %s. Current Version: %d",
+			applied, ob.mktSymbol, ob.lastUpdateID)
+	}
 
 	ob.synced.Store(true)
 
@@ -3506,6 +3557,7 @@ drainLoop:
 	close(ob.syncChan)
 	ob.mtx.Unlock()
 
+	ob.log.Infof("Book synced for %s. Final version: %d", ob.mktSymbol, ob.lastUpdateID)
 	return true
 }
 
@@ -3518,23 +3570,24 @@ func (ob *mexcOrderBook) processUpdate(update *mexctypes.WsDepthUpdateData, resy
 		return
 	}
 
+	// If book is not synced, buffer the update for later processing
+	if !ob.synced.Load() {
+		ob.mtx.Lock()
+		ob.updateBuffer = append(ob.updateBuffer, update)
+		ob.log.Debugf("Buffered depth update for %s: version=%s (book not synced yet)", ob.mktSymbol, update.Version)
+		ob.mtx.Unlock()
+		return
+	}
+
 	ob.mtx.Lock()
 	defer ob.mtx.Unlock()
 
-	if !ob.synced.Load() {
-		return // Drop if not synced
-	}
-
+	// Only apply updates newer than our last processed ID, following MEXC docs
 	if updateVersion <= ob.lastUpdateID {
 		return // Stale or duplicate
 	}
 
-	if updateVersion > ob.lastUpdateID+1 {
-		ob.log.Warnf("Gap detected for %s: last update ID %d, received %d. Requesting resync.", ob.mktSymbol, ob.lastUpdateID, updateVersion)
-		ob.requestResync(resyncChan)
-		return
-	}
-
+	// Process the update - version is newer than our last update
 	bids, asks, err := ob.convertDepthEntries(update.Bids, update.Asks)
 	if err != nil {
 		ob.log.Errorf("Error converting update entries for %s (v%d): %v. Requesting resync.", ob.mktSymbol, updateVersion, err)
