@@ -2064,6 +2064,19 @@ func (m *mexc) subscribeToAdditionalMarket(ctx context.Context, mexcSymbol strin
 
 // handleMarketRawMessage parses raw byte messages from the WebSocket.
 func (m *mexc) handleMarketRawMessage(msgBytes []byte) {
+	// Clean the message - handle MEXC specific prefix
+	if len(msgBytes) > 0 && msgBytes[0] == '+' {
+		// MEXC sometimes sends messages with a '+' prefix - strip it
+		msgBytes = msgBytes[1:]
+		m.log.Debugf("[MarketWS] Stripped '+' prefix from message")
+	}
+
+	// Check for empty messages
+	if len(msgBytes) == 0 {
+		m.log.Debugf("[MarketWS] Received empty message")
+		return
+	}
+
 	// Try to unmarshal as the base message type first
 	var baseMsg mexctypes.WsMessage
 	if err := json.Unmarshal(msgBytes, &baseMsg); err != nil {
@@ -2872,6 +2885,19 @@ func (m *mexc) handleUserConnectEvent(status comms.ConnectionStatus) {
 
 // handleUserDataRawMessage parses raw byte messages from the User Data Stream.
 func (m *mexc) handleUserDataRawMessage(msgBytes []byte) {
+	// Clean the message - handle MEXC specific prefix
+	if len(msgBytes) > 0 && msgBytes[0] == '+' {
+		// MEXC sometimes sends messages with a '+' prefix - strip it
+		msgBytes = msgBytes[1:]
+		m.log.Debugf("[UserWS] Stripped '+' prefix from message")
+	}
+
+	// Check for empty messages
+	if len(msgBytes) == 0 {
+		m.log.Debugf("[UserWS] Received empty message")
+		return
+	}
+
 	// m.log.Tracef("[UserWS] Raw message: %s", string(msgBytes))
 
 	// REMOVED: Explicit server PING handling. Relying on WsConn EchoPingData.
