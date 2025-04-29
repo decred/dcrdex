@@ -1467,145 +1467,135 @@ func (m *mexc) CancelTrade(ctx context.Context, baseID, quoteID uint32, tradeID 
 	return nil
 }
 
-// SubscribeMarket subscribes to order book updates for a given market.
+// SubscribeMarket subscribes to a market's order book data stream.
 func (m *mexc) SubscribeMarket(ctx context.Context, baseID, quoteID uint32) error {
-	m.log.Debugf("SubscribeMarket called for %d/%d", baseID, quoteID)
-
-	// 1. Map IDs to MEXC symbol
+	// 1. Map from DEX asset IDs to MEXC symbol
 	mexcSymbol, err := m.mapDEXIDsToMEXCSymbol(baseID, quoteID)
 	if err != nil {
-		return fmt.Errorf("map error: %w", err)
+		return fmt.Errorf("failed to map market for subscription: %w", err)
 	}
 
-	// 2. Handle order book instance management
+	// 2. Check if we're already tracking this market
 	m.booksMtx.Lock()
-	book, exists := m.books[mexcSymbol]
-	if exists {
-		m.log.Infof("Found existing orderbook for %s, checking sync status", mexcSymbol)
-		book.mtx.Lock()
-		book.numSubscribers++
+	defer m.booksMtx.Unlock()
 
-		// Reactivate the book if it was marked inactive
-		if !book.active {
+	if book, exists := m.books[mexcSymbol]; exists {
+		// Already subscribed, just increment the reference count
+		if book != nil {
+			atomic.AddUint32(&book.numSubscribers, 1)
 			book.active = true
-			m.log.Infof("Reactivating previously inactive book for %s", mexcSymbol)
+			m.log.Infof("Incremented subscriber count for %s book to %d", mexcSymbol, book.numSubscribers)
+			return nil
 		}
-
-		isSynced := book.synced.Load()
-		// Create a new syncChan if needed - this is critical for proper waiting
-		if !isSynced {
-			// Close existing syncChan if it's not nil and create a new one
-			select {
-			case <-book.syncChan:
-				// Channel already closed, create a new one
-			default:
-				// Channel not closed, leave it
-			}
-			// Ensure we have a fresh channel for synchronization
-			book.syncChan = make(chan struct{})
-		}
-		syncChan := book.syncChan
-		book.mtx.Unlock()
-
-		m.log.Debugf("Incremented subscriber count for %s to %d (synced: %v, active: true)", mexcSymbol, book.numSubscribers, isSynced)
-		m.booksMtx.Unlock()
-
-		// If the book exists but is not synced, trigger a resync and wait for it
-		if !isSynced {
-			// First, resubscribe to the WebSocket feed for this market
-			m.marketStreamMtx.Lock()
-			err := m.subscribeToAdditionalMarket(ctx, mexcSymbol)
-			m.marketStreamMtx.Unlock()
-			if err != nil {
-				m.log.Errorf("Failed to resubscribe to market %s: %v", mexcSymbol, err)
-				return fmt.Errorf("failed to resubscribe to market %s: %w", mexcSymbol, err)
-			}
-
-			m.log.Infof("Existing book for %s is not synced, forcing resync", mexcSymbol)
-			// Force immediate resync of this book
-			if !book.syncOrderbook(ctx) {
-				m.log.Errorf("Failed to sync orderbook for %s", mexcSymbol)
-				return fmt.Errorf("failed to sync orderbook for %s", mexcSymbol)
-			}
-
-			// Wait for synchronization to complete with a timeout
-			m.log.Infof("Waiting for orderbook %s to complete synchronization", mexcSymbol)
-			syncTimeout := time.NewTimer(30 * time.Second)
-			select {
-			case <-syncChan: // syncChan is closed when sync completes
-				m.log.Infof("Orderbook for %s successfully synchronized", mexcSymbol)
-				syncTimeout.Stop()
-			case <-syncTimeout.C:
-				return fmt.Errorf("timed out waiting for %s orderbook to synchronize", mexcSymbol)
-			case <-ctx.Done():
-				syncTimeout.Stop()
-				return ctx.Err()
-			}
-		} else {
-			m.log.Infof("Existing book for %s is already synced, no resync needed", mexcSymbol)
-		}
-
-		return nil // Already subscribed, just increment count and set active
+		m.log.Warnf("Book entry exists for %s but is nil. Recreating.", mexcSymbol)
+		delete(m.books, mexcSymbol) // Remove nil entry
 	}
 
-	// First subscriber for this specific market, create the book instance.
-	m.log.Infof("First subscriber for %s, creating order book.", mexcSymbol)
-	// Call asset.UnitInfo directly as asset.Info only checks base drivers, not tokens.
-	baseUnitInfo, baseErr := asset.UnitInfo(baseID)
-	quoteUnitInfo, quoteErr := asset.UnitInfo(quoteID)
+	// 3. Create a new order book instance
+	baseInfo, baseErr := asset.Info(baseID)
+	quoteInfo, quoteErr := asset.Info(quoteID)
 	if baseErr != nil || quoteErr != nil {
-		m.booksMtx.Unlock()
-		// Keep the error message similar for consistency, even though we called UnitInfo.
-		return fmt.Errorf("failed to get asset info for factors (base %d, quote %d): %w, %w", baseID, quoteID, baseErr, quoteErr)
+		return fmt.Errorf("failed to get asset info for book creation (base %d, quote %d): %w, %w", baseID, quoteID, baseErr, quoteErr)
+	}
+	baseFactor := baseInfo.UnitInfo.Conventional.ConversionFactor
+	quoteFactor := quoteInfo.UnitInfo.Conventional.ConversionFactor
+	if baseFactor == 0 || quoteFactor == 0 {
+		return fmt.Errorf("invalid conversion factor (base: %d, quote: %d) for market %d/%d", baseFactor, quoteFactor, baseID, quoteID)
 	}
 
-	newBook := newMEXCOrderBook(
-		mexcSymbol,
-		baseUnitInfo.Conventional.ConversionFactor,  // Use fetched UnitInfo
-		quoteUnitInfo.Conventional.ConversionFactor, // Use fetched UnitInfo
-		m.log.SubLogger(fmt.Sprintf("Book-%s", mexcSymbol)),
-		m.getDepthSnapshot,
-	)
+	// Create a wrapper function to pass to newMEXCOrderBook that has access to mexc
+	getSnapshotWrapper := func(getCtx context.Context, symbol string) (*mexctypes.DepthResponse, error) {
+		return m.getDepthSnapshot(getCtx, symbol)
+	}
+
+	// Create new order book instance
+	newBook := newMEXCOrderBook(mexcSymbol, baseFactor, quoteFactor, m.log.SubLogger(mexcSymbol), getSnapshotWrapper)
 	newBook.numSubscribers = 1
+	newBook.active = true
+
+	// Store in books map
+	if m.books == nil {
+		m.books = make(map[string]*mexcOrderBook)
+	}
 	m.books[mexcSymbol] = newBook
-	// Keep track of the syncChan before unlocking
-	syncChan := newBook.syncChan
-	m.booksMtx.Unlock() // Unlock BEFORE potentially blocking network calls or starting goroutine
 
-	// Start the book's run goroutine (manages sync state)
-	go newBook.run(ctx, m.marketSubResyncChan)
+	// Ensure marketSubResyncChan is created if not already
+	if m.marketSubResyncChan == nil {
+		m.marketSubResyncChan = make(chan string, 32) // Buffer some resync requests
+	}
 
-	// 3. Handle WebSocket subscription (Connection is managed by Connect method)
+	// 4. Start order book synchronization
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		newBook.run(ctx, m.marketSubResyncChan)
+	}()
+	m.log.Infof("Started order book manager for %s", mexcSymbol)
+
+	// 5. Check and ensure market stream connection
 	m.marketStreamMtx.Lock()
-	// Assume Connect() started the connection attempt. Try to subscribe.
-	err = m.subscribeToAdditionalMarket(ctx, mexcSymbol)
+
+	// Wait for market stream to be connected before attempting to subscribe
+	maxAttempts := 30 // 30 attempts with 100ms delay = 3 seconds max wait time
+	isConnected := m.marketStream != nil && !m.marketStream.IsDown()
+
+	if !isConnected {
+		m.log.Infof("Market stream not connected, waiting before subscribing to %s...", mexcSymbol)
+		// Release the lock while waiting to avoid blocking other operations
+		m.marketStreamMtx.Unlock()
+
+		for attempt := 0; attempt < maxAttempts && !isConnected; attempt++ {
+			select {
+			case <-ctx.Done():
+				newBook.stop() // Clean up the book we just created
+				return fmt.Errorf("context canceled while waiting for market stream connection: %w", ctx.Err())
+			case <-time.After(100 * time.Millisecond):
+				// Reacquire lock to check connection status
+				m.marketStreamMtx.Lock()
+				isConnected = m.marketStream != nil && !m.marketStream.IsDown()
+				if !isConnected {
+					m.marketStreamMtx.Unlock() // Release if not connected yet
+				}
+				// If connected, keep lock held for subscription below
+			}
+		}
+
+		// If we broke out of the loop and we're not connected, we need to reacquire the lock to proceed
+		if !isConnected {
+			m.marketStreamMtx.Lock()
+		}
+	}
+
+	// Check connection status after waiting
+	if m.marketStream == nil || m.marketStream.IsDown() {
+		m.marketStreamMtx.Unlock()
+		newBook.stop() // Clean up the book we just created
+		return fmt.Errorf("market stream not connected when trying to subscribe to %s", mexcSymbol)
+	}
+
+	// Ensure we have a market subscriptions map
+	if m.marketSubs == nil {
+		m.marketSubs = make(map[string]uint32)
+	}
+
+	// Add to subscriptions map (not needed for operation, just for tracking)
+	m.marketSubs[mexcSymbol] = 1
+
+	// Release lock before calling out to subscribe
 	m.marketStreamMtx.Unlock()
 
+	// 6. Subscribe to the WebSocket stream for this market
+	err = m.subscribeToAdditionalMarket(ctx, mexcSymbol)
 	if err != nil {
-		// Need to clean up the book we added if subscription failed
+		// Failed to subscribe, clean up
 		m.booksMtx.Lock()
 		delete(m.books, mexcSymbol)
 		m.booksMtx.Unlock()
-		newBook.stop() // Stop the run goroutine we started
-		// The error from subscribeToAdditionalMarket already indicates the problem.
-		return fmt.Errorf("failed to subscribe to cex market: %w", err) // Wrap error
+		newBook.stop()
+		return fmt.Errorf("failed to subscribe to cex market: %w", err)
 	}
 
-	// Wait for synchronization to complete with a timeout
-	m.log.Infof("Waiting for initial synchronization of %s orderbook", mexcSymbol)
-	syncTimeout := time.NewTimer(30 * time.Second)
-	select {
-	case <-syncChan: // syncChan is closed when sync completes
-		m.log.Infof("Orderbook for %s successfully synchronized", mexcSymbol)
-		syncTimeout.Stop()
-	case <-syncTimeout.C:
-		return fmt.Errorf("timed out waiting for %s orderbook to synchronize", mexcSymbol)
-	case <-ctx.Done():
-		syncTimeout.Stop()
-		return ctx.Err()
-	}
-
-	m.log.Infof("Successfully processed subscription request for MEXC market %s", mexcSymbol)
+	m.log.Infof("Successfully subscribed to %s market stream", mexcSymbol)
 	return nil
 }
 
@@ -1985,10 +1975,32 @@ func (m *mexc) handleMarketConnectEvent(status comms.ConnectionStatus) {
 func (m *mexc) subscribeToAdditionalMarket(ctx context.Context, mexcSymbol string) error {
 	m.log.Infof("[MarketWS] Subscribing to additional market: %s", mexcSymbol)
 
+	// Double-check connection status before continuing
 	if m.marketStream == nil || m.marketStream.IsDown() {
 		// This check is slightly redundant if caller holds lock and checks,
 		// but provides safety if called incorrectly.
 		return fmt.Errorf("market stream not connected when trying to subscribe to %s", mexcSymbol)
+	}
+
+	// Add a short delay to ensure the connection is fully established
+	// This helps to avoid sending messages to a socket that's not fully ready
+	if m.marketStream.IsDown() {
+		m.log.Infof("[MarketWS] Waiting for full connection establishment to subscribe to %s", mexcSymbol)
+		connected := false
+		for attempt := 0; attempt < 10; attempt++ {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(300 * time.Millisecond):
+				if !m.marketStream.IsDown() {
+					connected = true
+					break
+				}
+			}
+		}
+		if !connected {
+			return fmt.Errorf("market stream not fully connected after waiting when trying to subscribe to %s", mexcSymbol)
+		}
 	}
 
 	channel := fmt.Sprintf("spot@public.increase.depth.v3.api@%s", mexcSymbol)
