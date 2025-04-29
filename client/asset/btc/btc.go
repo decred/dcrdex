@@ -319,6 +319,10 @@ func RPCConfigOpts(name, rpcPort string) []*asset.ConfigOption {
 type TxInSigner func(tx *wire.MsgTx, idx int, subScript []byte, hashType txscript.SigHashType,
 	key *btcec.PrivateKey, vals []int64, prevScripts [][]byte) ([]byte, error)
 
+type RpcCaller interface {
+	Call(method string, args []any, thing any) error
+}
+
 // BTCCloneCFG holds clone specific parameters.
 type BTCCloneCFG struct {
 	WalletCFG          *asset.WalletConfig
@@ -428,6 +432,11 @@ type BTCCloneCFG struct {
 	OmitRPCOptionsArg bool
 	// AssetID is the asset ID of the clone.
 	AssetID uint32
+	// CustomPrivKey is an optional function to get a private key for an address
+	// from the wallet.
+	CustomPrivKey func(rpcCaller RpcCaller, addr string) (*btcec.PrivateKey, error)
+	// CustomGetBlock is an optional function that returns a block by hash.
+	CustomGetBlock func(rpcCaller RpcCaller, hash chainhash.Hash) (*wire.MsgBlock, error)
 }
 
 // PaymentScripter can be implemented to make non-standard payment scripts.
@@ -1211,6 +1220,7 @@ func newRPCWallet(requester RawRequester, cfg *BTCCloneCFG, parsedCfg *RPCWallet
 		booleanGetBlock:   cfg.BooleanGetBlockRPC,
 		unlockSpends:      cfg.UnlockSpends,
 
+		customGetBlock:     cfg.CustomGetBlock,
 		deserializeTx:      btc.deserializeTx,
 		serializeTx:        btc.serializeTx,
 		hashTx:             btc.hashTx,
@@ -6272,11 +6282,11 @@ func (btc *baseWallet) scriptHashScript(contract []byte) ([]byte, error) {
 // client. CallRPC is not part of the wallet interface. Its intended use is for
 // clone wallets to implement custom functionality.
 func (btc *baseWallet) CallRPC(method string, args []any, thing any) error {
-	rpcCl, is := btc.node.(*rpcClient)
+	rpcClient, is := btc.node.(*rpcClient)
 	if !is {
 		return errors.New("wallet is not RPC")
 	}
-	return rpcCl.call(method, args, thing)
+	return rpcClient.Call(method, args, thing)
 }
 
 func scriptHashAddress(segwit bool, contract []byte, chainParams *chaincfg.Params) (btcutil.Address, error) {

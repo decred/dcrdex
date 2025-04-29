@@ -3,24 +3,23 @@ package firo
 import (
 	"encoding/binary"
 	"encoding/hex"
-	"fmt"
 	"math"
 	"time"
 
-	"github.com/btcsuite/btcd/chaincfg"
+	"decred.org/dcrdex/client/asset/btc"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 )
 
-const (
-	// Only blocks mined with progpow are considered.
-	// Previous mining algorithms: MTP and Lyra2z ignored as being too early for
-	// Firo wallet on Dex ~ late 2023
-	ProgpowStartTime        = 1635228000 // Tue Oct 26 2021 06:00:00 UTC+0
-	HeaderLength            = 80
-	ProgpowExtraLength      = 40
-	ProgpowFullHeaderLength = HeaderLength + ProgpowExtraLength
-)
+// const (
+// 	// Only blocks mined with progpow are considered.
+// 	// Previous mining algorithms: MTP and Lyra2z ignored as being too early for
+// 	// Firo wallet on Dex ~ late 2023
+// 	ProgpowStartTime        = 1635228000 // Tue Oct 26 2021 06:00:00 UTC+0
+// 	HeaderLength            = 80
+// 	ProgpowExtraLength      = 40
+// 	ProgpowFullHeaderLength = HeaderLength + ProgpowExtraLength
+// )
 
 type firoBlock struct {
 	hdrHash chainhash.Hash
@@ -33,24 +32,25 @@ type firoBlock struct {
 // plus any Transparent transactions found parsed into a wire.MsgBlock.
 //
 // The other 10 transaction types are discarded; including coinbase.
-func deserializeBlock(c rpcCaller, net *chaincfg.Params, blk []byte) (*wire.MsgBlock, error) {
+func getBlock(c btc.RpcCaller, hash chainhash.Hash) (*wire.MsgBlock, error) {
+	// func deserializeBlock(c rpcCaller, net *chaincfg.Params, blk []byte) (*wire.MsgBlock, error) {
 	firoBlock := &firoBlock{}
 
-	// hash header
-	var header []byte
-	switch net.Name {
-	case "mainnet", "testnet3":
-		header = make([]byte, ProgpowFullHeaderLength)
-		copy(header, blk[:ProgpowFullHeaderLength])
-	case "regtest":
-		header = make([]byte, HeaderLength)
-		copy(header, blk[:HeaderLength])
-	default:
-		return nil, fmt.Errorf("unknown net: %s", net.Name)
-	}
-	firoBlock.hdrHash = chainhash.DoubleHashH(header)
+	// // hash header
+	// var header []byte
+	// switch net.Name {
+	// case "mainnet", "testnet3":
+	// 	header = make([]byte, ProgpowFullHeaderLength)
+	// 	copy(header, blk[:ProgpowFullHeaderLength])
+	// case "regtest":
+	// 	header = make([]byte, HeaderLength)
+	// 	copy(header, blk[:HeaderLength])
+	// default:
+	// 	return nil, fmt.Errorf("unknown net: %s", net.Name)
+	// }
+	// firoBlock.hdrHash = chainhash.DoubleHashH(header)
 
-	fmt.Printf("firo deserialized block hash: %s\n", firoBlock.hdrHash.String())
+	// fmt.Printf("firo deserialized block hash: %s\n", firoBlock.hdrHash.String())
 
 	// get json block
 	jsonBlock, err := getJsonBlock(c, firoBlock.hdrHash)
@@ -94,11 +94,11 @@ func deserializeBlock(c rpcCaller, net *chaincfg.Params, blk []byte) (*wire.MsgB
 	}, nil
 }
 
-func getJsonBlock(c rpcCaller, h chainhash.Hash) (*firoBlkResult, error) {
+func getJsonBlock(c btc.RpcCaller, h chainhash.Hash) (*firoBlkResult, error) {
 	var blk firoBlkResult
 	args := anylist{h.String()}
 	args = append(args, true)
-	err := c.CallRPC(methodGetBlock, args, &blk)
+	err := c.Call(methodGetBlock, args, &blk)
 	if err != nil {
 		return nil, err
 	}
@@ -139,11 +139,11 @@ func makeHdr(jsonBlock *firoBlkResult) (*wire.BlockHeader, error) {
 
 // getJsonLiteTx just unmarshals the first 4 bytes which encode tx version and
 // tx type. This is consistent across all 11 tx types.
-func getJsonLiteTx(c rpcCaller, txHash string) (*firoTxLiteResult, error) {
+func getJsonLiteTx(c btc.RpcCaller, txHash string) (*firoTxLiteResult, error) {
 	var txLite firoTxLiteResult
 	args := anylist{txHash}
 	args = append(args, true)
-	err := c.CallRPC(methodRawTransaction, args, &txLite)
+	err := c.Call(methodRawTransaction, args, &txLite)
 	if err != nil {
 		return nil, err
 	}
@@ -152,11 +152,11 @@ func getJsonLiteTx(c rpcCaller, txHash string) (*firoTxLiteResult, error) {
 
 // getJsonNormalTx unmarshals most interesting fields in a normal (type 0)
 // transparent transaction
-func getJsonNormalTx(c rpcCaller, txHash string) (*firoNormalTxResult, error) {
+func getJsonNormalTx(c btc.RpcCaller, txHash string) (*firoNormalTxResult, error) {
 	var txNormal firoNormalTxResult
 	args := anylist{txHash}
 	args = append(args, true)
-	err := c.CallRPC(methodRawTransaction, args, &txNormal)
+	err := c.Call(methodRawTransaction, args, &txNormal)
 	if err != nil {
 		return nil, err
 	}

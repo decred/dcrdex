@@ -120,6 +120,7 @@ type rpcCore struct {
 	numericGetRawTxRPC bool
 	manualMedianTime   bool
 	addrFunc           func() (btcutil.Address, error)
+	customGetBlock     func(rpcCaller RpcCaller, hash chainhash.Hash) (*wire.MsgBlock, error)
 
 	deserializeBlock         func([]byte) (*wire.MsgBlock, error)
 	legacyValidateAddressRPC bool
@@ -296,7 +297,7 @@ func (wc *rpcClient) SendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error)
 		return nil, err
 	}
 	var txid string
-	err = wc.call(methodSendRawTransaction, anylist{hex.EncodeToString(b)}, &txid)
+	err = wc.Call(methodSendRawTransaction, anylist{hex.EncodeToString(b)}, &txid)
 	if err != nil {
 		return nil, err
 	}
@@ -351,13 +352,13 @@ func (wc *rpcClient) getTxOutput(txHash *chainhash.Hash, index uint32) (*btcjson
 	// Note that we pass to call pointer to a pointer (&res) so that
 	// json.Unmarshal can nil the pointer if the method returns the JSON null.
 	var res *btcjson.GetTxOutResult
-	return res, wc.call(methodGetTxOut, anylist{txHash.String(), index, true},
+	return res, wc.Call(methodGetTxOut, anylist{txHash.String(), index, true},
 		&res)
 }
 
 func (wc *rpcClient) callHashGetter(method string, args anylist) (*chainhash.Hash, error) {
 	var txid string
-	err := wc.call(method, args, &txid)
+	err := wc.Call(method, args, &txid)
 	if err != nil {
 		return nil, err
 	}
@@ -366,6 +367,9 @@ func (wc *rpcClient) callHashGetter(method string, args anylist) (*chainhash.Has
 
 // GetBlock fetches the MsgBlock.
 func (wc *rpcClient) GetBlock(h chainhash.Hash) (*wire.MsgBlock, error) {
+	if wc.customGetBlock != nil {
+		return wc.customGetBlock(wc, h)
+	}
 	var blkB dex.Bytes
 	args := anylist{h.String()}
 	if wc.booleanGetBlock {
@@ -373,7 +377,7 @@ func (wc *rpcClient) GetBlock(h chainhash.Hash) (*wire.MsgBlock, error) {
 	} else {
 		args = append(args, 0)
 	}
-	err := wc.call(methodGetBlock, args, &blkB)
+	err := wc.Call(methodGetBlock, args, &blkB)
 	if err != nil {
 		return nil, err
 	}
@@ -454,7 +458,7 @@ func (wc *rpcClient) MedianTime() (stamp time.Time, err error) {
 // GetRawMempool returns the hashes of all transactions in the memory pool.
 func (wc *rpcClient) GetRawMempool() ([]*chainhash.Hash, error) {
 	var mempool []string
-	err := wc.call(methodGetRawMempool, nil, &mempool)
+	err := wc.Call(methodGetRawMempool, nil, &mempool)
 	if err != nil {
 		return nil, err
 	}
@@ -478,7 +482,7 @@ func (wc *rpcClient) GetRawTransaction(txHash *chainhash.Hash) (*wire.MsgTx, err
 	if wc.numericGetRawTxRPC {
 		args[1] = 0
 	}
-	err := wc.call(methodGetRawTransaction, args, &txB)
+	err := wc.Call(methodGetRawTransaction, args, &txB)
 	if err != nil {
 		return nil, err
 	}
@@ -489,14 +493,14 @@ func (wc *rpcClient) GetRawTransaction(txHash *chainhash.Hash) (*wire.MsgTx, err
 // Balances retrieves a wallet's balance details.
 func (wc *rpcClient) Balances() (*GetBalancesResult, error) {
 	var balances GetBalancesResult
-	return &balances, wc.call(methodGetBalances, nil, &balances)
+	return &balances, wc.Call(methodGetBalances, nil, &balances)
 }
 
 // ListUnspent retrieves a list of the wallet's UTXOs.
 func (wc *rpcClient) ListUnspent() ([]*ListUnspentResult, error) {
 	unspents := make([]*ListUnspentResult, 0)
 	// TODO: listunspent 0 9999999 []string{}, include_unsafe=false
-	return unspents, wc.call(methodListUnspent, anylist{uint8(0)}, &unspents)
+	return unspents, wc.Call(methodListUnspent, anylist{uint8(0)}, &unspents)
 }
 
 // LockUnspent locks and unlocks outputs for spending. An output that is part of
@@ -511,7 +515,7 @@ func (wc *rpcClient) LockUnspent(unlock bool, ops []*Output) error {
 		})
 	}
 	var success bool
-	err := wc.call(methodLockUnspent, anylist{unlock, rpcops}, &success)
+	err := wc.Call(methodLockUnspent, anylist{unlock, rpcops}, &success)
 	if err == nil && !success {
 		return fmt.Errorf("lockunspent unsuccessful")
 	}
@@ -522,7 +526,7 @@ func (wc *rpcClient) LockUnspent(unlock bool, ops []*Output) error {
 // as locked by a wallet.
 func (wc *rpcClient) ListLockUnspent() ([]*RPCOutpoint, error) {
 	var unspents []*RPCOutpoint
-	err := wc.call(methodListLockUnspent, nil, &unspents)
+	err := wc.Call(methodListLockUnspent, nil, &unspents)
 	if err != nil {
 		return nil, err
 	}
@@ -534,7 +538,7 @@ func (wc *rpcClient) ListLockUnspent() ([]*RPCOutpoint, error) {
 	var i int // for in-place filter
 	for _, utxo := range unspents {
 		var gtxo *btcjson.GetTxOutResult
-		err = wc.call(methodGetTxOut, anylist{utxo.TxID, utxo.Vout, true}, &gtxo)
+		err = wc.Call(methodGetTxOut, anylist{utxo.TxID, utxo.Vout, true}, &gtxo)
 		if err != nil {
 			wc.log.Warnf("gettxout(%v:%d): %v", utxo.TxID, utxo.Vout, err)
 			continue
@@ -550,7 +554,7 @@ func (wc *rpcClient) ListLockUnspent() ([]*RPCOutpoint, error) {
 			TxID: utxo.TxID,
 			Vout: utxo.Vout,
 		}}
-		err = wc.call(methodLockUnspent, anylist{true, op}, &success)
+		err = wc.Call(methodLockUnspent, anylist{true, op}, &success)
 		if err != nil || !success {
 			wc.log.Warnf("lockunspent(unlocking %v:%d): success = %v, err = %v",
 				utxo.TxID, utxo.Vout, success, err)
@@ -569,11 +573,11 @@ func (wc *rpcClient) ChangeAddress() (btcutil.Address, error) {
 	var err error
 	switch {
 	case wc.omitAddressType:
-		err = wc.call(methodChangeAddress, nil, &addrStr)
+		err = wc.Call(methodChangeAddress, nil, &addrStr)
 	case wc.segwit:
-		err = wc.call(methodChangeAddress, anylist{"bech32"}, &addrStr)
+		err = wc.Call(methodChangeAddress, anylist{"bech32"}, &addrStr)
 	default:
-		err = wc.call(methodChangeAddress, anylist{"legacy"}, &addrStr)
+		err = wc.Call(methodChangeAddress, anylist{"legacy"}, &addrStr)
 	}
 	if err != nil {
 		return nil, err
@@ -596,7 +600,7 @@ func (wc *rpcClient) address(aType string) (btcutil.Address, error) {
 	if !wc.omitAddressType {
 		args = append(args, aType)
 	}
-	err := wc.call(methodNewAddress, args, &addrStr)
+	err := wc.Call(methodNewAddress, args, &addrStr)
 	if err != nil {
 		return nil, err
 	}
@@ -615,7 +619,7 @@ func (wc *rpcClient) SignTx(inTx *wire.MsgTx) (*wire.MsgTx, error) {
 		method = methodSignTxLegacy
 	}
 
-	err = wc.call(method, anylist{hex.EncodeToString(txBytes)}, res)
+	err = wc.Call(method, anylist{hex.EncodeToString(txBytes)}, res)
 	if err != nil {
 		return nil, fmt.Errorf("tx signing error: %w", err)
 	}
@@ -637,7 +641,7 @@ func (wc *rpcClient) SignTx(inTx *wire.MsgTx) (*wire.MsgTx, error) {
 
 func (wc *rpcClient) listDescriptors(private bool) (*listDescriptorsResult, error) {
 	descriptors := new(listDescriptorsResult)
-	return descriptors, wc.call(methodListDescriptors, anylist{private}, descriptors)
+	return descriptors, wc.Call(methodListDescriptors, anylist{private}, descriptors)
 }
 
 func (wc *rpcClient) ListTransactionsSinceBlock(blockHeight int32) ([]*ListTransactionsResult, error) {
@@ -648,7 +652,7 @@ func (wc *rpcClient) ListTransactionsSinceBlock(blockHeight int32) ([]*ListTrans
 	result := new(struct {
 		Transactions []btcjson.ListTransactionsResult `json:"transactions"`
 	})
-	err = wc.call(methodListSinceBlock, anylist{blockHash.String()}, result)
+	err = wc.Call(methodListSinceBlock, anylist{blockHash.String()}, result)
 	if err != nil {
 		return nil, fmt.Errorf("listtransactions error: %w", err)
 	}
@@ -681,7 +685,7 @@ func (wc *rpcClient) PrivKeyForAddress(addr string) (*btcec.PrivateKey, error) {
 	// Descriptor wallets do not have dumpprivkey.
 	if !wc.descriptors {
 		var keyHex string
-		err := wc.call(methodPrivKeyForAddress, anylist{addr}, &keyHex)
+		err := wc.Call(methodPrivKeyForAddress, anylist{addr}, &keyHex)
 		if err != nil {
 			return nil, err
 		}
@@ -701,7 +705,7 @@ func (wc *rpcClient) PrivKeyForAddress(addr string) (*btcec.PrivateKey, error) {
 	// getaddressinfo. When the parent master private key is identified, we
 	// derive the private key for the address.
 	ai := new(GetAddressInfoResult)
-	if err := wc.call(methodGetAddressInfo, anylist{addr}, ai); err != nil {
+	if err := wc.Call(methodGetAddressInfo, anylist{addr}, ai); err != nil {
 		return nil, fmt.Errorf("getaddressinfo RPC failure: %w", err)
 	}
 	wc.log.Tracef("Address %v descriptor: %v", addr, ai.Descriptor)
@@ -845,7 +849,7 @@ masters:
 // GetWalletTransaction retrieves the JSON-RPC gettransaction result.
 func (wc *rpcClient) GetWalletTransaction(txHash *chainhash.Hash) (*GetTransactionResult, error) {
 	tx := new(GetTransactionResult)
-	err := wc.call(methodGetTransaction, anylist{txHash.String()}, tx)
+	err := wc.Call(methodGetTransaction, anylist{txHash.String()}, tx)
 	if err != nil {
 		if IsTxNotFoundErr(err) {
 			return nil, asset.CoinNotFoundError
@@ -858,12 +862,12 @@ func (wc *rpcClient) GetWalletTransaction(txHash *chainhash.Hash) (*GetTransacti
 // WalletUnlock unlocks the wallet.
 func (wc *rpcClient) WalletUnlock(pw []byte) error {
 	// 100000000 comes from bitcoin-cli help walletpassphrase
-	return wc.call(methodUnlock, anylist{string(pw), 100000000}, nil)
+	return wc.Call(methodUnlock, anylist{string(pw), 100000000}, nil)
 }
 
 // WalletLock locks the wallet.
 func (wc *rpcClient) WalletLock() error {
-	return wc.call(methodLock, nil, nil)
+	return wc.Call(methodLock, nil, nil)
 }
 
 // Locked returns the wallet's lock state.
@@ -911,7 +915,7 @@ func (wc *rpcClient) EstimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract 
 		TxBytes dex.Bytes `json:"hex"`
 		Fees    float64   `json:"fee"`
 	}
-	err = wc.call(methodFundRawTransaction, args, &res)
+	err = wc.Call(methodFundRawTransaction, args, &res)
 	if err != nil {
 		wc.log.Debugf("%s fundrawtranasaction error for args %+v: %v \n", wc.cloneParams.WalletInfo.Name, args, err)
 		// This is a work around for ZEC wallet, which does not support options
@@ -924,7 +928,7 @@ func (wc *rpcClient) EstimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract 
 			var bal float64
 			// args: "(dummy)" minconf includeWatchonly inZat
 			// Using default inZat = false for compatibility with ZCL.
-			if err := wc.call(methodGetBalance, anylist{"", 0, false}, &bal); err != nil {
+			if err := wc.Call(methodGetBalance, anylist{"", 0, false}, &bal); err != nil {
 				return 0, err
 			}
 			if subtract && sendAmount <= toSatoshi(bal) {
@@ -939,7 +943,7 @@ func (wc *rpcClient) EstimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract 
 // GetWalletInfo gets the getwalletinfo RPC result.
 func (wc *rpcClient) GetWalletInfo() (*GetWalletInfoResult, error) {
 	wi := new(GetWalletInfoResult)
-	return wi, wc.call(methodGetWalletInfo, nil, wi)
+	return wi, wc.Call(methodGetWalletInfo, nil, wi)
 }
 
 // Fingerprint returns an identifier for this wallet. Only HD wallets will have
@@ -965,7 +969,7 @@ func (wc *rpcClient) getAddressInfo(addr btcutil.Address, method string) (*GetAd
 	if err != nil {
 		return nil, err
 	}
-	return ai, wc.call(method, anylist{addrStr}, ai)
+	return ai, wc.Call(method, anylist{addrStr}, ai)
 }
 
 // OwnsAddress indicates if an address belongs to the wallet.
@@ -1018,7 +1022,7 @@ func (wc *rpcClient) SwapConfirmations(txHash *chainhash.Hash, vout uint32, _ []
 // getRPCBlockHeader gets the *rpcBlockHeader for the specified block hash.
 func (wc *rpcClient) getRPCBlockHeader(blockHash *chainhash.Hash) (*BlockHeader, error) {
 	blkHeader := new(BlockHeader)
-	err := wc.call(methodGetBlockHeader,
+	err := wc.Call(methodGetBlockHeader,
 		anylist{blockHash.String(), true}, blkHeader)
 	if err != nil {
 		return nil, err
@@ -1057,7 +1061,7 @@ func (wc *rpcClient) PeerCount() (uint32, error) {
 	var r struct {
 		Connections uint32 `json:"connections"`
 	}
-	err := wc.call(methodGetNetworkInfo, nil, &r)
+	err := wc.Call(methodGetNetworkInfo, nil, &r)
 	if err != nil {
 		return 0, err
 	}
@@ -1067,7 +1071,7 @@ func (wc *rpcClient) PeerCount() (uint32, error) {
 // getBlockchainInfo sends the getblockchaininfo request and returns the result.
 func (wc *rpcClient) getBlockchainInfo() (*GetBlockchainInfoResult, error) {
 	chainInfo := new(GetBlockchainInfoResult)
-	err := wc.call(methodGetBlockchainInfo, nil, chainInfo)
+	err := wc.Call(methodGetBlockchainInfo, nil, chainInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -1081,7 +1085,7 @@ func (wc *rpcClient) getVersion() (uint64, uint64, error) {
 		SubVersion      string `json:"subversion"`
 		ProtocolVersion uint64 `json:"protocolversion"`
 	}{}
-	err := wc.call(methodGetNetworkInfo, nil, r)
+	err := wc.Call(methodGetNetworkInfo, nil, r)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -1184,7 +1188,7 @@ func SearchBlockForRedemptions(
 func (wc *rpcClient) AddressUsed(addr string) (bool, error) {
 	var recv float64
 	const minConf = 0
-	if err := wc.call(methodGetReceivedByAddress, []any{addr, minConf}, &recv); err != nil {
+	if err := wc.Call(methodGetReceivedByAddress, []any{addr, minConf}, &recv); err != nil {
 		return false, err
 	}
 	return recv != 0, nil
@@ -1193,7 +1197,7 @@ func (wc *rpcClient) AddressUsed(addr string) (bool, error) {
 // call is used internally to marshal parameters and send requests to the RPC
 // server via (*rpcclient.Client).RawRequest. If thing is non-nil, the result
 // will be marshaled into thing.
-func (wc *rpcClient) call(method string, args anylist, thing any) error {
+func (wc *rpcClient) Call(method string, args []any, thing any) error {
 	return Call(wc.ctx, wc.requester(), method, args, thing)
 }
 

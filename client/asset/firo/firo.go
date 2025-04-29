@@ -22,6 +22,7 @@ import (
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 )
 
@@ -172,12 +173,11 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	switch cfg.Type {
 	case walletTypeRPC:
 		var exw *btc.ExchangeWalletFullNode
-		// override PrivKeyFunc - we need our own Firo dumpprivkey fn
 		cloneCFG.PrivKeyFunc = func(addr string) (*btcec.PrivateKey, error) {
 			return privKeyForAddress(exw, addr)
 		}
-		cloneCFG.BlockDeserializer = func(blk []byte) (*wire.MsgBlock, error) {
-			return deserializeBlock(exw, params, blk)
+		cloneCFG.CustomGetBlock = func(rpcCaller btc.RpcCaller, hash chainhash.Hash) (*wire.MsgBlock, error) {
+			return getBlock(rpcCaller, hash)
 		}
 		var err error
 		exw, err = btc.BTCCloneWallet(cloneCFG)
