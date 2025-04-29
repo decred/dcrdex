@@ -34,6 +34,7 @@ type WsDepthUpdateData struct {
 	Version string           `json:"v"` // Version (update ID)
 	Bids    [][2]json.Number `json:"b"` // Price, Quantity as strings
 	Asks    [][2]json.Number `json:"a"` // Price, Quantity as strings
+	Symbol  string           `json:"-"` // Symbol - internal field, not from JSON
 }
 
 // --- User Data Stream Payloads --- //

@@ -109,6 +109,10 @@ type mexc struct {
 	books    map[string]*mexcOrderBook // key: MEXC market symbol (e.g. BTCUSDT)
 	booksMtx sync.RWMutex
 
+	// Protobuf Message Handling
+	protobufDepthUpdate    *mexctypes.WsDepthUpdateData
+	protobufDepthUpdateMtx sync.Mutex
+
 	// Trade Update Management
 	tradeUpdaters      map[int]chan *Trade // subscriptionID -> channel
 	tradeUpdaterMtx    sync.RWMutex
@@ -1958,10 +1962,10 @@ func (m *mexc) connectMarketStream(ctx context.Context, firstMexcSymbol string) 
 
 	// Send initial subscription with updated channel format
 	m.log.Infof("[MarketWS] Sending initial subscription for %s", firstMexcSymbol)
-	// Use the incremental depth stream instead of limit depth
-	// Changed from: spot@public.limit.depth.v3.api@SYMBOL@5
-	// To: spot@public.increase.depth.v3.api@SYMBOL
-	channel := fmt.Sprintf("spot@public.increase.depth.v3.api@%s", firstMexcSymbol)
+	// Use the protobuf depth stream instead of incremental depth
+	// Changed from: spot@public.increase.depth.v3.api@SYMBOL
+	// To: spot@public.limit.depth.v3.api.pb@SYMBOL@5
+	channel := fmt.Sprintf("spot@public.limit.depth.v3.api.pb@%s@5", firstMexcSymbol)
 	req := mexctypes.WsRequest{Method: "SUBSCRIPTION", Params: []string{channel}}
 	reqBytes, marshalErr := json.Marshal(req)
 	if marshalErr != nil {
@@ -2042,10 +2046,10 @@ func (m *mexc) subscribeToAdditionalMarket(ctx context.Context, mexcSymbol strin
 		}
 	}
 
-	// Update channel format to use the incremental depth stream instead of limit depth
-	// Changed from: spot@public.limit.depth.v3.api@SYMBOL@5
-	// To: spot@public.increase.depth.v3.api@SYMBOL
-	channel := fmt.Sprintf("spot@public.increase.depth.v3.api@%s", mexcSymbol)
+	// Use the protobuf depth stream instead of incremental depth
+	// Changed from: spot@public.increase.depth.v3.api@SYMBOL
+	// To: spot@public.limit.depth.v3.api.pb@SYMBOL@5
+	channel := fmt.Sprintf("spot@public.limit.depth.v3.api.pb@%s@5", mexcSymbol)
 	req := mexctypes.WsRequest{
 		Method: "SUBSCRIPTION",
 		Params: []string{channel},
@@ -2071,7 +2075,64 @@ func (m *mexc) subscribeToAdditionalMarket(ctx context.Context, mexcSymbol strin
 func (m *mexc) handleMarketRawMessage(msgBytes []byte) {
 	// Check if this might be a binary/protobuf message
 	if len(msgBytes) > 0 && (msgBytes[0] < 32 || msgBytes[0] > 126) {
-		m.log.Debugf("[MarketWS] Received possible binary message of length %d, ignoring", len(msgBytes))
+		m.log.Debugf("[MarketWS] Received binary message of length %d, attempting to parse as protobuf", len(msgBytes))
+
+		// Try to decode as protobuf using our generated code
+		pbMsg, err := mexctypes.UnmarshalMEXCDepthProto(msgBytes)
+		if err != nil {
+			m.log.Errorf("[MarketWS] Failed to decode protobuf message: %v", err)
+			// Log hex dump of the first few bytes to help diagnose issues
+			if len(msgBytes) > 16 {
+				m.log.Debugf("[MarketWS] First 16 bytes: %x", msgBytes[:16])
+			} else {
+				m.log.Debugf("[MarketWS] Message bytes: %x", msgBytes)
+			}
+			return
+		}
+
+		// Process the protobuf message
+		depthUpdate := mexctypes.ConvertProtoToDepthUpdate(pbMsg)
+		if depthUpdate == nil {
+			m.log.Warnf("[MarketWS] Failed to convert protobuf message to depth update")
+			return
+		}
+
+		// Extract symbol from the protobuf message
+		if depthUpdate.Symbol == "" {
+			// Try to extract from the event type or channel format
+			// Typically in the format: "spot@public.limit.depth.v3.api.pb@BTCUSDT@5"
+			parts := strings.Split(pbMsg.EventType, "@")
+			if len(parts) >= 4 {
+				symbolPart := parts[3]
+				// Remove the depth value (e.g., "5") if present
+				if strings.Contains(symbolPart, "@") {
+					symbolPart = strings.Split(symbolPart, "@")[0]
+				}
+				depthUpdate.Symbol = symbolPart
+			}
+		}
+
+		if depthUpdate.Symbol == "" {
+			m.log.Warnf("[MarketWS] Could not determine symbol from protobuf message")
+			return
+		}
+
+		m.log.Debugf("[MarketWS] Successfully parsed protobuf depth update for %s: v=%s, bids=%d, asks=%d",
+			depthUpdate.Symbol, depthUpdate.Version, len(depthUpdate.Bids), len(depthUpdate.Asks))
+
+		// Store the depth update in the mexc instance
+		m.protobufDepthUpdateMtx.Lock()
+		m.protobufDepthUpdate = depthUpdate
+		m.protobufDepthUpdateMtx.Unlock()
+
+		// Create a synthetic WsMessage to pass to handleDepthUpdate
+		wsMsg := &mexctypes.WsMessage{
+			Channel: fmt.Sprintf("spot@public.limit.depth.v3.api.pb@%s@5", depthUpdate.Symbol),
+			Symbol:  depthUpdate.Symbol,
+		}
+
+		// Forward to the standard depth update handler
+		m.handleDepthUpdate(wsMsg)
 		return
 	}
 
@@ -2136,7 +2197,8 @@ func (m *mexc) handleMarketRawMessage(msgBytes []byte) {
 	if err := json.Unmarshal(msgBytes, &genericResp); err == nil {
 		// Check for subscription success confirmations (Code 0 and Msg contains channel name)
 		if genericResp.Code == 0 && (strings.Contains(genericResp.Msg, "spot@public.increase.depth.v3.api") ||
-			strings.Contains(genericResp.Msg, "spot@public.limit.depth.v3.api")) {
+			strings.Contains(genericResp.Msg, "spot@public.limit.depth.v3.api") ||
+			strings.Contains(genericResp.Msg, "spot@public.limit.depth.v3.api.pb")) {
 			m.log.Debugf("[MarketWS] Received MEXC WS Success Subscription Confirmation: %s", string(msgBytes))
 			return // Handled success confirmation
 		}
@@ -2159,6 +2221,7 @@ func (m *mexc) handleDepthUpdate(msg *mexctypes.WsMessage) {
 		// Format could be either:
 		// - "spot@public.increase.depth.v3.api@BTCUSDT" (old format)
 		// - "spot@public.limit.depth.v3.api@BTCUSDT@5" (new format)
+		// - "spot@public.limit.depth.v3.api.pb@BTCUSDT@5" (protobuf format)
 		parts := strings.Split(msg.Channel, "@")
 		if len(parts) < 3 {
 			m.log.Errorf("[MarketWS] Invalid depth update channel format: %s", msg.Channel)
@@ -2186,11 +2249,31 @@ func (m *mexc) handleDepthUpdate(msg *mexctypes.WsMessage) {
 		return
 	}
 
-	// 2. Parse the depth update data from the message
-	var depthUpdate mexctypes.WsDepthUpdateData
-	if err := json.Unmarshal(msg.Data, &depthUpdate); err != nil {
-		m.log.Errorf("[MarketWS] Failed to unmarshal depth update data for %s: %v", mktSymbol, err)
-		return
+	var depthUpdate *mexctypes.WsDepthUpdateData
+
+	// Check if this is from a protobuf source (channel contains .pb)
+	if strings.Contains(msg.Channel, ".pb") {
+		// Get the stored protobuf depth update
+		m.protobufDepthUpdateMtx.Lock()
+		depthUpdate = m.protobufDepthUpdate
+		m.protobufDepthUpdate = nil // Clear it after use
+		m.protobufDepthUpdateMtx.Unlock()
+
+		if depthUpdate == nil {
+			m.log.Errorf("[MarketWS] Expected protobuf depth update but none found for %s", mktSymbol)
+			return
+		}
+
+		// Set the symbol field which isn't included in the protobuf data
+		depthUpdate.Symbol = mktSymbol
+	} else {
+		// Standard JSON parsing path
+		depthUpdate = &mexctypes.WsDepthUpdateData{}
+		if err := json.Unmarshal(msg.Data, depthUpdate); err != nil {
+			m.log.Errorf("[MarketWS] Failed to unmarshal depth update data for %s: %v", mktSymbol, err)
+			return
+		}
+		depthUpdate.Symbol = mktSymbol
 	}
 
 	// Only log meaningful updates (with non-empty bids or asks) at debug level
@@ -2231,7 +2314,7 @@ func (m *mexc) handleDepthUpdate(msg *mexctypes.WsMessage) {
 
 	// 4. Forward the update to the order book's update queue (non-blocking)
 	select {
-	case book.updateQueue <- &depthUpdate:
+	case book.updateQueue <- depthUpdate:
 		// Update sent to the book's processing queue
 	default:
 		// Queue is full - log warning
@@ -2258,8 +2341,8 @@ func (m *mexc) resubscribeMarkets() {
 	// Now resubscribe each market to the websocket feed
 	for symbol := range m.books {
 		// Reuse SubscribeMarket logic without locking/book creation
-		// Use the incremental depth stream instead of limit depth
-		channel := fmt.Sprintf("spot@public.increase.depth.v3.api@%s", symbol)
+		// Use the protobuf depth stream
+		channel := fmt.Sprintf("spot@public.limit.depth.v3.api.pb@%s@5", symbol)
 		req := mexctypes.WsRequest{
 			Method: "SUBSCRIPTION",
 			Params: []string{channel},
