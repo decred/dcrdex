@@ -1469,11 +1469,36 @@ func (m *mexc) CancelTrade(ctx context.Context, baseID, quoteID uint32, tradeID 
 
 // SubscribeMarket subscribes to a market's order book data stream.
 func (m *mexc) SubscribeMarket(ctx context.Context, baseID, quoteID uint32) error {
+	// Log asset IDs for diagnostic purposes
+	baseSymbol := dex.BipIDSymbol(baseID)
+	quoteSymbol := dex.BipIDSymbol(quoteID)
+	m.log.Infof("MEXC SubscribeMarket request for baseID=%d (%s), quoteID=%d (%s)",
+		baseID, baseSymbol, quoteID, quoteSymbol)
+
 	// 1. Map from DEX asset IDs to MEXC symbol
 	mexcSymbol, err := m.mapDEXIDsToMEXCSymbol(baseID, quoteID)
 	if err != nil {
+		// More detailed logging for debugging
+		m.mapMtx.RLock()
+		baseExists := false
+		quoteExists := false
+		var baseMEXC, quoteMEXC string
+		if coin, ok := m.assetIDToCoin[baseID]; ok {
+			baseExists = true
+			baseMEXC = coin
+		}
+		if coin, ok := m.assetIDToCoin[quoteID]; ok {
+			quoteExists = true
+			quoteMEXC = coin
+		}
+		m.mapMtx.RUnlock()
+
+		m.log.Errorf("Failed to map DEX IDs to MEXC symbol: baseID=%d (%s) mapped=%v (%s), quoteID=%d (%s) mapped=%v (%s): %v",
+			baseID, baseSymbol, baseExists, baseMEXC, quoteID, quoteSymbol, quoteExists, quoteMEXC, err)
 		return fmt.Errorf("failed to map market for subscription: %w", err)
 	}
+
+	m.log.Infof("Mapped DEX market %s/%s to MEXC symbol %s", baseSymbol, quoteSymbol, mexcSymbol)
 
 	// 2. Check if we're already tracking this market
 	m.booksMtx.Lock()
@@ -1492,13 +1517,24 @@ func (m *mexc) SubscribeMarket(ctx context.Context, baseID, quoteID uint32) erro
 	}
 
 	// 3. Create a new order book instance
-	baseInfo, baseErr := asset.Info(baseID)
-	quoteInfo, quoteErr := asset.Info(quoteID)
-	if baseErr != nil || quoteErr != nil {
-		return fmt.Errorf("failed to get asset info for book creation (base %d, quote %d): %w, %w", baseID, quoteID, baseErr, quoteErr)
+	// Use asset.UnitInfo directly, as asset.Info doesn't support tokens
+	baseUnitInfo, baseErr := asset.UnitInfo(baseID)
+	if baseErr != nil {
+		m.log.Errorf("Failed to get unit info for base ID %d (%s): %v", baseID, baseSymbol, baseErr)
+		return fmt.Errorf("failed to get unit info for base ID %d (%s): %w", baseID, baseSymbol, baseErr)
 	}
-	baseFactor := baseInfo.UnitInfo.Conventional.ConversionFactor
-	quoteFactor := quoteInfo.UnitInfo.Conventional.ConversionFactor
+
+	quoteUnitInfo, quoteErr := asset.UnitInfo(quoteID)
+	if quoteErr != nil {
+		m.log.Errorf("Failed to get unit info for quote ID %d (%s): %v", quoteID, quoteSymbol, quoteErr)
+		return fmt.Errorf("failed to get unit info for quote ID %d (%s): %w", quoteID, quoteSymbol, quoteErr)
+	}
+
+	baseFactor := baseUnitInfo.Conventional.ConversionFactor
+	quoteFactor := quoteUnitInfo.Conventional.ConversionFactor
+
+	m.log.Debugf("Using conversion factors - base: %d, quote: %d", baseFactor, quoteFactor)
+
 	if baseFactor == 0 || quoteFactor == 0 {
 		return fmt.Errorf("invalid conversion factor (base: %d, quote: %d) for market %d/%d", baseFactor, quoteFactor, baseID, quoteID)
 	}
@@ -2221,14 +2257,14 @@ func (m *mexc) Book(baseID, quoteID uint32) (buys, sells []*core.MiniOrder, _ er
 	// Note: We now serve books regardless of active status as long as they're synced
 	// This allows bots to get order book data even for inactive books
 
-	// Get asset info for conversion factors
-	baseInfo, baseErr := asset.Info(baseID)
-	quoteInfo, quoteErr := asset.Info(quoteID)
+	// Get asset info for conversion factors using UnitInfo
+	baseUnitInfo, baseErr := asset.UnitInfo(baseID)
+	quoteUnitInfo, quoteErr := asset.UnitInfo(quoteID)
 	if baseErr != nil || quoteErr != nil {
-		return nil, nil, fmt.Errorf("failed to get asset info for book conversion (base %d, quote %d): %w, %w", baseID, quoteID, baseErr, quoteErr)
+		return nil, nil, fmt.Errorf("failed to get unit info for book conversion (base %d, quote %d): %w, %w", baseID, quoteID, baseErr, quoteErr)
 	}
-	baseFactor := float64(baseInfo.UnitInfo.Conventional.ConversionFactor)
-	quoteFactor := float64(quoteInfo.UnitInfo.Conventional.ConversionFactor)
+	baseFactor := float64(baseUnitInfo.Conventional.ConversionFactor)
+	quoteFactor := float64(quoteUnitInfo.Conventional.ConversionFactor)
 	if baseFactor == 0 || quoteFactor == 0 {
 		return nil, nil, fmt.Errorf("invalid conversion factor (base: %.0f, quote: %.0f) for market %d/%d", baseFactor, quoteFactor, baseID, quoteID)
 	}
