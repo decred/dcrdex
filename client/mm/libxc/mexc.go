@@ -2106,6 +2106,13 @@ func (m *mexc) handleDepthUpdate(msg *mexctypes.WsMessage) {
 		return
 	}
 
+	// Log empty Version field to help diagnose the issue
+	if depthUpdate.Version == "" {
+		rawData, _ := json.Marshal(depthUpdate)
+		m.log.Debugf("[MarketWS] Received depth update with empty Version field for %s: %s",
+			mktSymbol, string(rawData))
+	}
+
 	// 3. Find the order book for this market
 	m.booksMtx.RLock()
 	book, exists := m.books[mktSymbol]
@@ -3525,6 +3532,12 @@ drainLoop:
 		// Apply buffered updates with version > snapshotVersion
 		applied := 0
 		for _, update := range bufferedUpdates {
+			// Skip updates with empty Version field
+			if update.Version == "" {
+				ob.log.Debugf("Skipping buffered update with empty Version field for %s", ob.mktSymbol)
+				continue
+			}
+
 			updateVersion, err := strconv.ParseUint(update.Version, 10, 64)
 			if err != nil {
 				ob.log.Warnf("Failed to parse buffered update version '%s' for %s: %v. Skipping.",
@@ -3575,6 +3588,12 @@ drainLoop:
 
 // processUpdate handles an incoming WebSocket depth update.
 func (ob *mexcOrderBook) processUpdate(update *mexctypes.WsDepthUpdateData, resyncChan chan<- string) {
+	// Skip updates with empty Version field
+	if update.Version == "" {
+		ob.log.Debugf("Skipping update with empty Version field for %s", ob.mktSymbol)
+		return
+	}
+
 	updateVersion, err := strconv.ParseUint(update.Version, 10, 64)
 	if err != nil {
 		ob.log.Errorf("Failed to parse update version '%s' for %s: %v. Requesting resync.", update.Version, ob.mktSymbol, err)
