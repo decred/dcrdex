@@ -2067,7 +2067,57 @@ func (m *mexc) handleMarketRawMessage(msgBytes []byte) {
 
 // handleDepthUpdate parses the data part of the depth update and forwards it.
 func (m *mexc) handleDepthUpdate(msg *mexctypes.WsMessage) {
-	// ... function body ...
+	// 1. Extract the market symbol from the message
+	mktSymbol := msg.Symbol
+
+	// Fallback to extracting from channel if Symbol is empty
+	if mktSymbol == "" {
+		// Format: "spot@public.increase.depth.v3.api@BTCUSDT"
+		parts := strings.Split(msg.Channel, "@")
+		if len(parts) < 4 {
+			m.log.Errorf("[MarketWS] Invalid depth update channel format: %s", msg.Channel)
+			return
+		}
+		mktSymbol = parts[len(parts)-1]
+	}
+
+	if mktSymbol == "" {
+		m.log.Errorf("[MarketWS] Could not determine market symbol from message: %+v", msg)
+		return
+	}
+
+	// 2. Parse the depth update data from the message
+	var depthUpdate mexctypes.WsDepthUpdateData
+	if err := json.Unmarshal(msg.Data, &depthUpdate); err != nil {
+		m.log.Errorf("[MarketWS] Failed to unmarshal depth update data for %s: %v", mktSymbol, err)
+		return
+	}
+
+	// Log details about the update (debug level)
+	m.log.Debugf("[MarketWS] Received depth update for %s: version=%s, bids=%d, asks=%d",
+		mktSymbol, depthUpdate.Version, len(depthUpdate.Bids), len(depthUpdate.Asks))
+
+	// 3. Find the order book for this market
+	m.booksMtx.RLock()
+	book, exists := m.books[mktSymbol]
+	m.booksMtx.RUnlock()
+
+	if !exists {
+		// This is not necessarily an error - we might receive updates for markets
+		// we haven't subscribed to yet, or for markets we've unsubscribed from
+		// but still receiving lingering messages
+		m.log.Tracef("[MarketWS] Received depth update for non-subscribed market: %s", mktSymbol)
+		return
+	}
+
+	// 4. Forward the update to the order book's update queue (non-blocking)
+	select {
+	case book.updateQueue <- &depthUpdate:
+		// Update sent to the book's processing queue
+	default:
+		// Queue is full - log warning
+		m.log.Warnf("[MarketWS] Update queue full for %s, dropping depth update", mktSymbol)
+	}
 }
 
 // resubscribeMarkets sends subscription messages for all currently tracked markets.

@@ -6,11 +6,14 @@
 package libxc
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/client/mm/libxc/mexctypes"
 	"decred.org/dcrdex/dex"
 	"github.com/stretchr/testify/require"
 )
@@ -133,4 +136,118 @@ func TestGenerateClientOrderID(t *testing.T) {
 
 	require.Equal(t, nonce1+1, nonce2, "Nonce should increment by 1")
 	require.Equal(t, nonce2+1, nonce3, "Nonce should increment by 1")
+}
+
+// TestHandleDepthUpdate tests the handleDepthUpdate function.
+func TestHandleDepthUpdate(t *testing.T) {
+	// Create a mock mexc instance
+	logger := dex.StdOutLogger("TEST", dex.LevelDebug)
+	m := &mexc{
+		log:      logger,
+		books:    make(map[string]*mexcOrderBook),
+		booksMtx: sync.RWMutex{},
+	}
+
+	// Create a mock orderbook for testing
+	const testSymbol = "BTCUSDT"
+	mockBook := &mexcOrderBook{
+		mktSymbol:   testSymbol,
+		log:         logger.SubLogger("BOOK-" + testSymbol),
+		updateQueue: make(chan *mexctypes.WsDepthUpdateData, 10),
+	}
+	mockBook.synced.Store(true) // Mark as synced for testing
+
+	// Add the mock book to our mexc instance
+	m.booksMtx.Lock()
+	m.books[testSymbol] = mockBook
+	m.booksMtx.Unlock()
+
+	// Create a test WsMessage with depth update data
+	rawBids := [][2]json.Number{
+		{json.Number("10000.50"), json.Number("1.5")},
+		{json.Number("10000.00"), json.Number("2.5")},
+	}
+	rawAsks := [][2]json.Number{
+		{json.Number("10001.00"), json.Number("1.0")},
+		{json.Number("10002.00"), json.Number("2.0")},
+	}
+
+	depthData := &mexctypes.WsDepthUpdateData{
+		Version: "123456789",
+		Bids:    rawBids,
+		Asks:    rawAsks,
+	}
+
+	depthDataBytes, err := json.Marshal(depthData)
+	require.NoError(t, err, "Failed to marshal depth data")
+
+	wsMsg := &mexctypes.WsMessage{
+		Channel: "spot@public.increase.depth.v3.api@" + testSymbol,
+		Symbol:  testSymbol,
+		Data:    depthDataBytes,
+	}
+
+	// Create a channel to receive the message from the update queue
+	receivedUpdate := make(chan *mexctypes.WsDepthUpdateData, 1)
+
+	// Start a goroutine to read from the update queue
+	go func() {
+		select {
+		case update := <-mockBook.updateQueue:
+			receivedUpdate <- update
+		case <-time.After(time.Second):
+			t.Errorf("Timed out waiting for update to be sent to the queue")
+			close(receivedUpdate)
+		}
+	}()
+
+	// Call handleDepthUpdate
+	m.handleDepthUpdate(wsMsg)
+
+	// Check if the update was sent to the book's update queue
+	select {
+	case update := <-receivedUpdate:
+		require.NotNil(t, update, "Update should not be nil")
+		require.Equal(t, "123456789", update.Version, "Version should match")
+		require.Len(t, update.Bids, 2, "Should have 2 bids")
+		require.Len(t, update.Asks, 2, "Should have 2 asks")
+
+		// Check a bid and ask value
+		require.Equal(t, "10000.50", string(update.Bids[0][0]), "First bid price should match")
+		require.Equal(t, "1.5", string(update.Bids[0][1]), "First bid quantity should match")
+		require.Equal(t, "10001.00", string(update.Asks[0][0]), "First ask price should match")
+		require.Equal(t, "1.0", string(update.Asks[0][1]), "First ask quantity should match")
+	case <-time.After(time.Second):
+		t.Fatalf("Timed out waiting for message on receivedUpdate channel")
+	}
+
+	// Test with non-existent book
+	nonExistentMsg := &mexctypes.WsMessage{
+		Channel: "spot@public.increase.depth.v3.api@UNKNOWN",
+		Symbol:  "UNKNOWN",
+		Data:    depthDataBytes,
+	}
+
+	// Call handleDepthUpdate with non-existent book symbol - should not panic
+	m.handleDepthUpdate(nonExistentMsg)
+
+	// Test with missing symbol
+	noSymbolMsg := &mexctypes.WsMessage{
+		Channel: "spot@public.increase.depth.v3.api@",
+		Symbol:  "",
+		Data:    depthDataBytes,
+	}
+
+	// Call handleDepthUpdate with missing symbol - should not panic
+	m.handleDepthUpdate(noSymbolMsg)
+
+	// Test with invalid depth data
+	invalidDataMsg := &mexctypes.WsMessage{
+		Channel: "spot@public.increase.depth.v3.api@" + testSymbol,
+		Symbol:  testSymbol,
+		Data:    []byte(`{"invalid": "json"`), // Invalid JSON
+	}
+
+	// Call handleDepthUpdate with invalid data - should not panic
+	m.handleDepthUpdate(invalidDataMsg)
 }
