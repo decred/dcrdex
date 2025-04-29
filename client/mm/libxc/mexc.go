@@ -140,6 +140,7 @@ type mexcOrderBook struct {
 	log            dex.Logger
 	lastUpdateID   uint64    // Use uint64 for comparison
 	connectedChan  chan bool // Channel to communicate connection status changes
+	lastUpdateTime time.Time // Track when we last received an update
 }
 
 // newMEXC constructor (Configure RawHandler)
@@ -1539,9 +1540,11 @@ func (m *mexc) SubscribeMarket(ctx context.Context, baseID, quoteID uint32) erro
 				syncTimeout.Stop()
 				return ctx.Err()
 			}
+		} else {
+			m.log.Infof("Existing book for %s is already synced, no resync needed", mexcSymbol)
 		}
 
-		return nil // Already subscribed, just increment count
+		return nil // Already subscribed, just increment count and set active
 	}
 
 	// First subscriber for this specific market, create the book instance.
@@ -1964,10 +1967,9 @@ func (m *mexc) handleMarketConnectEvent(status comms.ConnectionStatus) {
 		m.booksMtx.RUnlock()
 
 	case comms.Disconnected:
-		// Mark all books as unsynced when disconnected
+		// Do NOT mark books as unsynced when disconnected, just notify them
 		m.booksMtx.RLock()
 		for _, book := range m.books {
-			book.synced.Store(false)
 			select {
 			case book.connectedChan <- false:
 			default:
@@ -2078,11 +2080,10 @@ func (m *mexc) resubscribeMarkets() {
 	}
 	m.log.Infof("Resubscribing to %d markets after reconnect...", len(m.books))
 
-	// First, ensure all tracked books are marked as needing resync
-	for symbol, book := range m.books {
-		// Mark as unsynced and will force a resync via connectedChan in handleMarketConnectEvent
-		book.synced.Store(false)
-		m.log.Debugf("Market %s marked for resync after reconnection", symbol)
+	// Don't automatically mark books as unsynced, instead let each book
+	// decide if it needs resync based on timestamps and update flow
+	for symbol := range m.books {
+		m.log.Debugf("Resubscribing to market %s after reconnection", symbol)
 	}
 
 	// Now resubscribe each market to the websocket feed
@@ -3277,17 +3278,18 @@ func newMEXCOrderBook(
 	getSnapshotFunc func(ctx context.Context, symbol string) (*mexctypes.DepthResponse, error),
 ) *mexcOrderBook {
 	return &mexcOrderBook{
-		mktSymbol:     mktSymbol,
-		baseFactor:    baseFactor,
-		quoteFactor:   quoteFactor,
-		log:           log,
-		getSnapshot:   getSnapshotFunc,
-		book:          newOrderBook(),
-		updateQueue:   make(chan *mexctypes.WsDepthUpdateData, 256), // Buffered queue
-		syncChan:      make(chan struct{}),                          // Unclosed initially
-		stopChan:      make(chan struct{}),                          // For stopping the run goroutine
-		connectedChan: make(chan bool),                              // Channel to communicate connection status changes
-		active:        true,                                         // New books are active by default when created
+		mktSymbol:      mktSymbol,
+		baseFactor:     baseFactor,
+		quoteFactor:    quoteFactor,
+		log:            log,
+		getSnapshot:    getSnapshotFunc,
+		book:           newOrderBook(),
+		updateQueue:    make(chan *mexctypes.WsDepthUpdateData, 256), // Buffered queue
+		syncChan:       make(chan struct{}),                          // Unclosed initially
+		stopChan:       make(chan struct{}),                          // For stopping the run goroutine
+		connectedChan:  make(chan bool, 5),                           // Increased buffer size to prevent "channel full" issues
+		active:         true,                                         // New books are active by default when created
+		lastUpdateTime: time.Now(),                                   // Initialize with current time
 	}
 }
 
@@ -3326,6 +3328,8 @@ func (ob *mexcOrderBook) run(ctx context.Context, resyncChan chan string) {
 		return // Give up if initial sync failed after retries
 	}
 
+	isConnected := true // Track current connection state
+
 	// Original processing loop (runs only after successful initial sync)
 	for {
 		select {
@@ -3349,20 +3353,27 @@ func (ob *mexcOrderBook) run(ctx context.Context, resyncChan chan string) {
 				}
 			} // Ignore requests for other symbols
 		case connected := <-ob.connectedChan:
-			if !connected {
-				ob.log.Debugf("Market connection down, marking %s orderbook as unsynced", ob.mktSymbol)
-				ob.synced.Store(false)
-			} else {
-				// Connection is established, trigger a resync if book is not synced
-				if !ob.synced.Load() {
-					ob.log.Debugf("Market connection up, scheduling resync for %s", ob.mktSymbol)
-					select {
-					case resyncChan <- ob.mktSymbol:
-						ob.log.Debugf("Resync request sent for %s after connection restore", ob.mktSymbol)
-					default:
-						ob.log.Warnf("Resync channel full when trying to signal %s after connection restore", ob.mktSymbol)
+			// Only take action if connection state has changed
+			if connected != isConnected {
+				if !connected {
+					ob.log.Debugf("Market connection down for %s orderbook", ob.mktSymbol)
+				} else if !isConnected {
+					ob.log.Debugf("Market connection restored for %s", ob.mktSymbol)
+
+					// Only perform a resync if we detect the book is out of sync
+					// This avoids unnecessary resyncs on brief disconnections
+					lastUpdateTime := time.Now().Sub(ob.lastUpdateTime)
+					if lastUpdateTime > 30*time.Second && !ob.synced.Load() {
+						ob.log.Infof("Connection restored after %.1f seconds without updates, requesting resync", lastUpdateTime.Seconds())
+						select {
+						case resyncChan <- ob.mktSymbol:
+							ob.log.Debugf("Resync request sent for %s after connection restore", ob.mktSymbol)
+						default:
+							ob.log.Warnf("Resync channel full when trying to signal %s after connection restore", ob.mktSymbol)
+						}
 					}
 				}
+				isConnected = connected
 			}
 		}
 	}
@@ -3422,6 +3433,7 @@ drainLoop:
 	ob.book.clear()
 	ob.book.update(bids, asks)
 	ob.lastUpdateID = snapshotVersion
+	ob.lastUpdateTime = time.Now() // Update the timestamp when processing a snapshot
 	ob.mtx.Unlock()
 
 	// Log some stats about the book to verify it's populated correctly
@@ -3481,6 +3493,7 @@ func (ob *mexcOrderBook) processUpdate(update *mexctypes.WsDepthUpdateData, resy
 	}
 	ob.book.update(bids, asks)
 	ob.lastUpdateID = updateVersion
+	ob.lastUpdateTime = time.Now() // Update the timestamp when we process a valid update
 }
 
 // requestResync marks the book as unsynced and signals for a resync.
