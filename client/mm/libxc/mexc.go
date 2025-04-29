@@ -118,8 +118,9 @@ type mexc struct {
 	activeTradesMtx sync.RWMutex
 
 	// Shutdown signalling
-	wg   sync.WaitGroup
-	quit chan struct{}
+	wg             sync.WaitGroup
+	quit           chan struct{} // Closed to signal all goroutines to exit
+	disconnectOnce sync.Once     // Ensures shutdown logic runs exactly once
 }
 
 // mexcOrderBook struct definition
@@ -477,6 +478,60 @@ func (m *mexc) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	m.wg.Add(2)
 	go m.periodicExchangeInfoRefresh(ctx)
 	go m.periodicCoinInfoRefresh(ctx)
+
+	// Add a shutdown monitor to handle graceful cleanup when context is canceled
+	// This ensures proper resource cleanup when the parent context is cancelled:
+	// 1. Closes the quit channel to signal other goroutines to stop
+	// 2. Stops the listenKey refresh timer
+	// 3. Deletes the listenKey from MEXC
+	// 4. WebSocket connections are closed via their own context cancellation
+	// The sync.Once ensures this cleanup only happens once even if multiple
+	// goroutines detect the cancellation simultaneously.
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		<-ctx.Done()
+		m.log.Infof("Context canceled, initiating graceful shutdown...")
+
+		// Use disconnectOnce to ensure cleanup only happens once
+		m.disconnectOnce.Do(func() {
+			// Signal shutdown by closing the quit channel
+			select {
+			case <-m.quit:
+				// Already closed
+				m.log.Debugf("Quit channel already closed")
+			default:
+				close(m.quit)
+			}
+
+			// Stop listenKeyRefresh timer
+			m.listenKeyMtx.Lock()
+			if m.listenKeyRefresh != nil {
+				m.listenKeyRefresh.Stop()
+				m.listenKeyRefresh = nil
+			}
+			m.listenKeyMtx.Unlock()
+
+			// Delete listenKey from MEXC (best effort)
+			delCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			if key := m.listenKey.Load(); key != nil {
+				if keyStr, ok := key.(string); ok && keyStr != "" {
+					if err := m.deleteListenKey(delCtx); err != nil {
+						m.log.Warnf("Failed to delete listenKey during shutdown: %v", err)
+					} else {
+						m.log.Infof("Successfully deleted listenKey during shutdown")
+					}
+				}
+			}
+
+			// Note: The WebSocket connections will be closed by the WsConn implementation
+			// when their contexts are canceled, and the goroutines will exit naturally.
+
+			m.log.Infof("Shutdown initialization completed, context cancellation will stop remaining goroutines")
+		})
+	}()
 
 	m.log.Infof("MEXC Connect sequence completed with persistent WebSocket connections.")
 	return &m.wg, nil
@@ -2142,13 +2197,17 @@ func (m *mexc) VWAP(baseID, quoteID uint32, sell bool, qty uint64) (vwap, extrem
 	syncedState := bookInstance.synced.Load()
 	if !syncedState {
 		// Book not synced, wait briefly for initial sync to complete.
-		bookInstance.mtx.RUnlock()                                                                   // Unlock before waiting
-		m.log.Tracef("VWAP check for %s: book initially unsynced, waiting up to 20s...", mexcSymbol) // Increased timeout
-		timer := time.NewTimer(20 * time.Second)                                                     // Increased timeout
+		bookInstance.mtx.RUnlock() // Unlock before waiting
+		m.log.Tracef("VWAP check for %s: book initially unsynced, waiting up to 20s...", mexcSymbol)
+
+		// Create a context with timeout to prevent resource leak
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel() // Ensure cancellation on function exit
+
 		select {
 		case <-bookInstance.syncChan: // Closed when sync completes
-			timer.Stop()
 			bookInstance.mtx.RLock() // Re-acquire lock
+
 			syncedState = bookInstance.synced.Load()
 			m.log.Tracef("VWAP check for %s: syncChan closed, re-checking sync status = %v", mexcSymbol, syncedState)
 			if !syncedState {
@@ -2156,11 +2215,11 @@ func (m *mexc) VWAP(baseID, quoteID uint32, sell bool, qty uint64) (vwap, extrem
 				return 0, 0, false, ErrUnsyncedOrderbook // Still not synced after chan closed
 			}
 			// Proceed with synced book below
-		case <-timer.C:
+		case <-ctx.Done():
 			m.log.Warnf("VWAP check for %s: timed out waiting for initial sync", mexcSymbol)
 			return 0, 0, false, ErrUnsyncedOrderbook // Timed out
 		case <-m.quit: // Check global shutdown signal
-			timer.Stop()
+			m.log.Debugf("VWAP check for %s: aborted during shutdown", mexcSymbol)
 			return 0, 0, false, errors.New("mexc client shutting down")
 		}
 		// If we got here via syncChan closing and syncedState is now true, RLock is held.
@@ -2484,9 +2543,31 @@ func (m *mexc) resetListenKeyTimer() {
 
 	if m.listenKeyRefresh != nil {
 		m.listenKeyRefresh.Stop()
+		m.listenKeyRefresh = nil
 	}
+
+	// Check if we're shutting down before starting a new timer
+	select {
+	case <-m.quit:
+		// System is shutting down, don't start a new timer
+		m.log.Debugf("Not starting new listenKey timer, system is shutting down")
+		return
+	default:
+		// Continue with normal operation
+	}
+
 	// Create a new timer that will call keepAliveListenKey after the interval
 	m.listenKeyRefresh = time.AfterFunc(listenKeyRefreshInterval, func() {
+		// Check if quit channel is closed before initiating a new keepalive
+		select {
+		case <-m.quit:
+			// System is shutting down, don't start new operations
+			m.log.Debugf("Timer fired during shutdown - skipping listenKey keepalive")
+			return
+		default:
+			// Continue with normal operation
+		}
+
 		// Use a background context for the keepalive initiated by the timer
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -2516,12 +2597,14 @@ func (m *mexc) connectUserStream(ctx context.Context) {
 
 	var keyRefreshWg sync.WaitGroup
 	keyRefreshCtx, cancelKeyRefresh := context.WithCancel(ctx)
-	defer cancelKeyRefresh()
+	defer cancelKeyRefresh() // Ensure cancellation on function exit
 
 connectLoop:
 	for {
 		select {
 		case <-ctx.Done():
+			// Exit immediately when the parent context is done
+			m.log.Infof("Parent context canceled, shutting down user stream.")
 			return
 		default:
 		}
@@ -2554,7 +2637,15 @@ connectLoop:
 			m.log.Errorf("User data stream initial Connect failed: %v. Retrying...", connErr)
 			cancelKeyRefresh()
 			keyRefreshWg.Wait()
-			keyRefreshCtx, cancelKeyRefresh = context.WithCancel(ctx)
+
+			// Only create new context if parent context isn't done
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				keyRefreshCtx, cancelKeyRefresh = context.WithCancel(ctx)
+			}
+
 			// Check context before sleeping
 			select {
 			case <-time.After(reconnectInterval):
@@ -2573,11 +2664,6 @@ connectLoop:
 
 		// Rely on WsConn PingWait and EchoPingData for keepalive.
 
-		// Removed proactive PING ticker
-		// pingInterval := 25 * time.Second
-		// pingTicker := time.NewTicker(pingInterval)
-		// defer pingTicker.Stop()
-
 	wsLoop: // Label for the select loop
 		for {
 			select {
@@ -2589,24 +2675,6 @@ connectLoop:
 				m.log.Warnf("Received reconnect signal for user data stream. Reconnecting...")
 				cancelKeyRefresh()
 				break wsLoop // Exit inner loop
-				/* Removed proactive PING case
-				case <-pingTicker.C:
-					// Send proactive client PING
-					if !m.userDataStream.IsDown() {
-						m.log.Tracef("[UserWS] Sending proactive PING")
-						// Use same format as server PING for potential compatibility
-						pingMsg := mexctypes.WsMessage{Ping: time.Now().UnixMilli()}
-						pingBytes, err := json.Marshal(pingMsg)
-						if err != nil {
-							m.log.Errorf("[UserWS] Failed to marshal proactive PING: %v", err)
-							continue
-						}
-						if err := m.userDataStream.SendRaw(pingBytes); err != nil {
-							m.log.Errorf("[UserWS] Failed to send proactive PING: %v", err)
-							// Don't necessarily break loop on send failure, WsConn might recover
-						}
-					}
-				*/
 			}
 		}
 
@@ -2614,7 +2682,14 @@ connectLoop:
 		if connWg != nil {
 			connWg.Wait()
 		}
-		keyRefreshCtx, cancelKeyRefresh = context.WithCancel(ctx)
+
+		// Only create new context if parent context isn't done
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			keyRefreshCtx, cancelKeyRefresh = context.WithCancel(ctx)
+		}
 		// Loop continues after cleanup
 	}
 }
@@ -2628,17 +2703,16 @@ func (m *mexc) listenKeyMaintainer(ctx context.Context) {
 	// which calls keepAliveListenKey. This goroutine just needs to wait for shutdown.
 	<-ctx.Done()
 
-	// Stop the timer on shutdown
+	// Stop the timer on shutdown - but don't delete the listenKey here
+	// listenKey deletion is now handled by the main context cancellation handler
 	m.listenKeyMtx.Lock()
 	if m.listenKeyRefresh != nil {
 		m.listenKeyRefresh.Stop()
+		m.listenKeyRefresh = nil // Add explicit nil assignment to help GC
 	}
 	m.listenKeyMtx.Unlock()
 
-	// Attempt to delete the key on clean shutdown
-	delCtx, cancelDel := context.WithTimeout(context.Background(), 10*time.Second)
-	m.deleteListenKey(delCtx)
-	cancelDel()
+	m.log.Debugf("[UserWS] listenKeyMaintainer exiting due to context cancellation")
 }
 
 // handleUserConnectEvent handles connection status changes for the user stream.
