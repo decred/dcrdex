@@ -2075,7 +2075,6 @@ func (m *mexc) subscribeToAdditionalMarket(ctx context.Context, mexcSymbol strin
 func (m *mexc) handleMarketRawMessage(msgBytes []byte) {
 	// Check if this might be a binary/protobuf message
 	if len(msgBytes) > 0 && (msgBytes[0] < 32 || msgBytes[0] > 126) {
-		m.log.Debugf("[MarketWS] Received binary message of length %d, attempting to parse as protobuf", len(msgBytes))
 
 		// Try to decode as protobuf using our generated code
 		pbMsg, err := mexctypes.UnmarshalMEXCDepthProto(msgBytes)
@@ -2093,7 +2092,7 @@ func (m *mexc) handleMarketRawMessage(msgBytes []byte) {
 		// Process the protobuf message
 		depthUpdate := mexctypes.ConvertProtoToDepthUpdate(pbMsg)
 		if depthUpdate == nil {
-			m.log.Warnf("[MarketWS] Failed to convert protobuf message to depth update")
+			m.log.Debugf("[MarketWS] Failed to convert protobuf message to depth update")
 			return
 		}
 
@@ -2113,19 +2112,25 @@ func (m *mexc) handleMarketRawMessage(msgBytes []byte) {
 		// As a workaround, we'll use the first active market
 		if len(activeMarkets) > 0 {
 			mktSymbol = activeMarkets[0]
-			m.log.Debugf("[MarketWS] Using active market %s for protobuf message", mktSymbol)
+			// Log market assignment only at trace level
+			m.log.Tracef("[MarketWS] Using active market %s for protobuf message", mktSymbol)
 		}
 
 		if mktSymbol == "" {
-			m.log.Warnf("[MarketWS] Could not determine symbol from protobuf message and no active markets found")
+			// Reduce from WARNING to DEBUG level since this is expected behavior
+			// until we implement full binary parsing
+			m.log.Debugf("[MarketWS] No active markets found for binary message")
 			return
 		}
 
 		// Set the symbol in the depth update
 		depthUpdate.Symbol = mktSymbol
 
-		m.log.Debugf("[MarketWS] Successfully parsed protobuf depth update for %s: v=%s, bids=%d, asks=%d",
-			depthUpdate.Symbol, depthUpdate.Version, len(depthUpdate.Bids), len(depthUpdate.Asks))
+		// Only log successful parsing periodically or at trace level
+		if len(depthUpdate.Bids) > 0 || len(depthUpdate.Asks) > 0 {
+			m.log.Tracef("[MarketWS] Parsed protobuf depth update for %s: v=%s, bids=%d, asks=%d",
+				depthUpdate.Symbol, depthUpdate.Version, len(depthUpdate.Bids), len(depthUpdate.Asks))
+		}
 
 		// Store the depth update in the mexc instance
 		m.protobufDepthUpdateMtx.Lock()
