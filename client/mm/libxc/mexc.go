@@ -1469,6 +1469,12 @@ func (m *mexc) CancelTrade(ctx context.Context, baseID, quoteID uint32, tradeID 
 
 // SubscribeMarket subscribes to a market's order book data stream.
 func (m *mexc) SubscribeMarket(ctx context.Context, baseID, quoteID uint32) error {
+	// Debug log to help diagnose token issues
+	m.log.Debugf("SubscribeMarket called for baseID=%d, quoteID=%d", baseID, quoteID)
+	baseSymbol := dex.BipIDSymbol(baseID)
+	quoteSymbol := dex.BipIDSymbol(quoteID)
+	m.log.Debugf("Asset symbols: base=%s, quote=%s", baseSymbol, quoteSymbol)
+
 	// 1. Map from DEX asset IDs to MEXC symbol
 	mexcSymbol, err := m.mapDEXIDsToMEXCSymbol(baseID, quoteID)
 	if err != nil {
@@ -1492,13 +1498,42 @@ func (m *mexc) SubscribeMarket(ctx context.Context, baseID, quoteID uint32) erro
 	}
 
 	// 3. Create a new order book instance
+	// Handle special case for known problematic tokens like USDT variants
+	// Try to get asset info - this may fail for some token variants
 	baseInfo, baseErr := asset.Info(baseID)
 	quoteInfo, quoteErr := asset.Info(quoteID)
-	if baseErr != nil || quoteErr != nil {
-		return fmt.Errorf("failed to get asset info for book creation (base %d, quote %d): %w, %w", baseID, quoteID, baseErr, quoteErr)
+
+	// Get base factor, handling tokens appropriately
+	var baseFactor uint64
+	if baseErr != nil {
+		// If it's a known token (e.g., USDT.polygon), try to handle it
+		if baseSymbol != "" && strings.HasPrefix(strings.ToLower(baseSymbol), "usdt.") {
+			// Use generic USDT info - assuming 6 decimals
+			m.log.Debugf("Using fallback conversion factor for token %s (ID %d)", baseSymbol, baseID)
+			baseFactor = 1000000 // 10^6 for USDT
+		} else {
+			return fmt.Errorf("failed to get asset info for base %d (%s): %w", baseID, baseSymbol, baseErr)
+		}
+	} else {
+		baseFactor = baseInfo.UnitInfo.Conventional.ConversionFactor
 	}
-	baseFactor := baseInfo.UnitInfo.Conventional.ConversionFactor
-	quoteFactor := quoteInfo.UnitInfo.Conventional.ConversionFactor
+
+	// Get quote factor, handling tokens appropriately
+	var quoteFactor uint64
+	if quoteErr != nil {
+		// If it's a known token (e.g., USDT.polygon), try to handle it
+		if quoteSymbol != "" && strings.HasPrefix(strings.ToLower(quoteSymbol), "usdt.") {
+			// Use generic USDT info - assuming 6 decimals
+			m.log.Debugf("Using fallback conversion factor for token %s (ID %d)", quoteSymbol, quoteID)
+			quoteFactor = 1000000 // 10^6 for USDT
+		} else {
+			return fmt.Errorf("failed to get asset info for quote %d (%s): %w", quoteID, quoteSymbol, quoteErr)
+		}
+	} else {
+		quoteFactor = quoteInfo.UnitInfo.Conventional.ConversionFactor
+	}
+
+	// Validate factors
 	if baseFactor == 0 || quoteFactor == 0 {
 		return fmt.Errorf("invalid conversion factor (base: %d, quote: %d) for market %d/%d", baseFactor, quoteFactor, baseID, quoteID)
 	}
@@ -2200,14 +2235,42 @@ func (m *mexc) Book(baseID, quoteID uint32) (buys, sells []*core.MiniOrder, _ er
 	// Note: We now serve books regardless of active status as long as they're synced
 	// This allows bots to get order book data even for inactive books
 
-	// Get asset info for conversion factors
+	// Get asset info for conversion factors with special token handling
+	baseSymbol := dex.BipIDSymbol(baseID)
+	quoteSymbol := dex.BipIDSymbol(quoteID)
+
+	// Get base asset info
 	baseInfo, baseErr := asset.Info(baseID)
-	quoteInfo, quoteErr := asset.Info(quoteID)
-	if baseErr != nil || quoteErr != nil {
-		return nil, nil, fmt.Errorf("failed to get asset info for book conversion (base %d, quote %d): %w, %w", baseID, quoteID, baseErr, quoteErr)
+	var baseFactor float64
+	if baseErr != nil {
+		// If it's a known token (e.g., USDT.polygon), try to handle it
+		if baseSymbol != "" && strings.HasPrefix(strings.ToLower(baseSymbol), "usdt.") {
+			// Use generic USDT info - assuming 6 decimals
+			m.log.Tracef("Book: Using fallback conversion factor for token %s (ID %d)", baseSymbol, baseID)
+			baseFactor = 1000000 // 10^6 for USDT
+		} else {
+			return nil, nil, fmt.Errorf("failed to get asset info for base %d (%s): %w", baseID, baseSymbol, baseErr)
+		}
+	} else {
+		baseFactor = float64(baseInfo.UnitInfo.Conventional.ConversionFactor)
 	}
-	baseFactor := float64(baseInfo.UnitInfo.Conventional.ConversionFactor)
-	quoteFactor := float64(quoteInfo.UnitInfo.Conventional.ConversionFactor)
+
+	// Get quote asset info
+	quoteInfo, quoteErr := asset.Info(quoteID)
+	var quoteFactor float64
+	if quoteErr != nil {
+		// If it's a known token (e.g., USDT.polygon), try to handle it
+		if quoteSymbol != "" && strings.HasPrefix(strings.ToLower(quoteSymbol), "usdt.") {
+			// Use generic USDT info - assuming 6 decimals
+			m.log.Tracef("Book: Using fallback conversion factor for token %s (ID %d)", quoteSymbol, quoteID)
+			quoteFactor = 1000000 // 10^6 for USDT
+		} else {
+			return nil, nil, fmt.Errorf("failed to get asset info for quote %d (%s): %w", quoteID, quoteSymbol, quoteErr)
+		}
+	} else {
+		quoteFactor = float64(quoteInfo.UnitInfo.Conventional.ConversionFactor)
+	}
+
 	if baseFactor == 0 || quoteFactor == 0 {
 		return nil, nil, fmt.Errorf("invalid conversion factor (base: %.0f, quote: %.0f) for market %d/%d", baseFactor, quoteFactor, baseID, quoteID)
 	}
