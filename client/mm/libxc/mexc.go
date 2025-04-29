@@ -2346,13 +2346,36 @@ func (m *mexc) resubscribeMarkets() {
 
 	// Don't automatically mark books as unsynced, instead let each book
 	// decide if it needs resync based on timestamps and update flow
-	for symbol := range m.books {
-		m.log.Debugf("Resubscribing to market %s after reconnection", symbol)
+
+	// Collect markets that need resubscription (haven't received updates recently)
+	const resubTimeThreshold = 30 * time.Second
+	marketsToResub := make([]string, 0, len(m.books))
+	now := time.Now()
+
+	for symbol, book := range m.books {
+		// Check when the last update was received
+		timeSinceUpdate := now.Sub(book.lastUpdateTime)
+		needsResub := timeSinceUpdate > resubTimeThreshold
+
+		if needsResub {
+			m.log.Debugf("Market %s needs resubscription (last update: %v ago)",
+				symbol, timeSinceUpdate.Round(time.Second))
+			marketsToResub = append(marketsToResub, symbol)
+		} else {
+			m.log.Debugf("Market %s appears active (last update: %v ago), skipping resubscription",
+				symbol, timeSinceUpdate.Round(time.Second))
+		}
 	}
 
-	// Now resubscribe each market to the websocket feed
-	for symbol := range m.books {
-		// Reuse SubscribeMarket logic without locking/book creation
+	if len(marketsToResub) == 0 {
+		m.log.Infof("All markets have recent updates, no resubscriptions needed")
+		return
+	}
+
+	m.log.Infof("Resubscribing to %d/%d markets that need updates", len(marketsToResub), len(m.books))
+
+	// Now resubscribe each market that needs updates
+	for _, symbol := range marketsToResub {
 		// Use the protobuf depth stream
 		channel := fmt.Sprintf("spot@public.limit.depth.v3.api.pb@%s@5", symbol)
 		req := mexctypes.WsRequest{
@@ -3577,13 +3600,13 @@ func newMEXCOrderBook(
 		log:            log,
 		getSnapshot:    getSnapshotFunc,
 		book:           newOrderBook(),
-		updateQueue:    make(chan *mexctypes.WsDepthUpdateData, 256), // Buffered queue
-		updateBuffer:   make([]*mexctypes.WsDepthUpdateData, 0, 50),  // Initial buffer capacity
-		syncChan:       make(chan struct{}),                          // Unclosed initially
-		stopChan:       make(chan struct{}),                          // For stopping the run goroutine
-		connectedChan:  make(chan bool, 5),                           // Increased buffer size to prevent "channel full" issues
-		active:         true,                                         // New books are active by default when created
-		lastUpdateTime: time.Now(),                                   // Initialize with current time
+		updateQueue:    make(chan *mexctypes.WsDepthUpdateData, 2048), // Increased from 256 to 2048
+		updateBuffer:   make([]*mexctypes.WsDepthUpdateData, 0, 100),  // Increased from 50 to 100
+		syncChan:       make(chan struct{}),                           // Unclosed initially
+		stopChan:       make(chan struct{}),                           // For stopping the run goroutine
+		connectedChan:  make(chan bool, 5),                            // Increased buffer size to prevent "channel full" issues
+		active:         true,                                          // New books are active by default when created
+		lastUpdateTime: time.Now(),                                    // Initialize with current time
 	}
 }
 
