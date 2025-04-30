@@ -220,7 +220,10 @@ func (b *mxOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error /* no
 			b.synced.Store(false)
 			lastUpdateID = updateIDUnsynced
 			if resync {
-				resyncChan <- struct{}{}
+				select {
+				case resyncChan <- struct{}{}:
+				default:
+				}
 			}
 		}
 	}
@@ -240,13 +243,15 @@ func (b *mxOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error /* no
 			return false
 		}
 
+		// If this update is out of sequence, we need to resync
 		if !acceptedUpdate {
-			// On the first update, check if we missed anything
+			// On the first update, check if we missed anything (MEXC requires lastUpdateId + 1)
 			if updateVersion > lastUpdateID+1 {
 				b.log.Errorf("Missed update: expected %d, got %d", lastUpdateID+1, updateVersion)
 				return false
 			} else if updateVersion <= lastUpdateID {
-				// Skip updates older than or equal to our snapshot
+				// Skip updates older than or equal to our snapshot's lastUpdateId
+				b.log.Tracef("Skipping update with version %d <= %d", updateVersion, lastUpdateID)
 				return true
 			}
 		} else if updateVersion != lastUpdateID+1 {
@@ -255,15 +260,22 @@ func (b *mxOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error /* no
 			return false
 		}
 
+		// This is a valid update, apply it to the orderbook
 		acceptedUpdate = true
 		lastUpdateID = updateVersion
+		b.lastUpdateID = updateVersion
+
+		// Convert the update to order book entries
 		bids, asks, err := b.convertMEXCBook(update.Bids, update.Asks)
 		if err != nil {
 			b.log.Errorf("Error parsing MEXC book: %v", err)
 			return false
 		}
+
+		// Apply the update
 		b.book.update(bids, asks)
 		b.lastUpdateTime = time.Now()
+
 		return true
 	}
 
@@ -272,42 +284,58 @@ func (b *mxOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error /* no
 		syncMtx.Lock()
 		defer syncMtx.Unlock()
 
+		// Process all buffered updates where lastUpdateId < update.version <= (lastUpdateId + 1)
+		// This follows MEXC's recommendation
 		lastUpdateID = snapshotID
+
+		b.log.Debugf("Processing %d buffered updates with snapshot ID %d",
+			len(updateBuffer), snapshotID)
+
 		for _, update := range updateBuffer {
 			if !acceptUpdate(update) {
+				b.log.Warnf("Failed to process update from buffer, resyncing")
 				return false
 			}
 		}
 
+		// Mark the book as synced
 		b.synced.Store(true)
+		b.log.Infof("Orderbook for %s is now synced", b.mktID)
+
+		// Close the sync channel to signal sync completion
 		if syncChan != nil {
 			close(syncChan)
 			syncChan = nil
 		}
+
 		return true
 	}
 
-	// Fetch and process an orderbook snapshot
+	// Function to synchronize orderbook
 	syncOrderbook := func() bool {
+		// Get the orderbook snapshot
 		snapshot, err := b.getSnapshot()
 		if err != nil {
 			b.log.Errorf("Error getting orderbook snapshot: %v", err)
 			return false
 		}
 
+		// Convert the snapshot to order book entries
 		bids, asks, err := b.convertMEXCBook(snapshot.Bids, snapshot.Asks)
 		if err != nil {
 			b.log.Errorf("Error parsing MEXC book: %v", err)
 			return false
 		}
 
-		b.log.Debugf("Got %s orderbook snapshot with update ID %d", b.mktID, snapshot.LastUpdateID)
+		b.log.Debugf("Got %s orderbook snapshot with update ID %d, %d bids, %d asks",
+			b.mktID, snapshot.LastUpdateID, len(bids), len(asks))
 
+		// Clear and update the orderbook with the snapshot data
 		b.book.clear()
 		b.book.update(bids, asks)
 		b.lastUpdateTime = time.Now()
 
-		// Convert int64 LastUpdateID to uint64 for processSyncBuffer
+		// Process any buffered updates
 		return processSyncBuffer(uint64(snapshot.LastUpdateID))
 	}
 
@@ -340,7 +368,7 @@ func (b *mxOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error /* no
 	go func() {
 		defer wg.Done()
 
-		const retryFrequency = time.Second * 30
+		const retryFrequency = time.Second * 5
 		retry := time.After(0) // Start with immediate sync
 
 		for {
@@ -920,7 +948,7 @@ func isPbMessage(header []byte) bool {
 
 // handleProtobufMessage processes market data protobuf messages.
 func (m *mexc) handleProtobufMessage(data []byte) {
-	m.log.Tracef("[MarketWS] Received protobuf message of length %d", len(data))
+	m.log.Debugf("[MarketWS] Received protobuf message of length %d", len(data))
 
 	// Parse the binary protobuf message using our mexctypes
 	pbMsg, err := mexctypes.UnmarshalMEXCDepthProto(data)
@@ -942,26 +970,43 @@ func (m *mexc) handleProtobufMessage(data []byte) {
 		return
 	}
 
-	// Get all currently subscribed markets
-	m.booksMtx.RLock()
-	activeMarkets := make([]string, 0, len(m.books))
-	for symbol := range m.books {
-		activeMarkets = append(activeMarkets, symbol)
+	// Try to determine the symbol - either from the extracted pbMsg.Symbol or our active subscriptions
+	symbol := pbMsg.Symbol
+	if symbol == "" {
+		// If symbol wasn't extracted, try to find a match from our active subscriptions
+		m.booksMtx.RLock()
+		if len(m.books) == 1 {
+			// If we have only one active subscription, use that one
+			for s := range m.books {
+				symbol = s
+				break
+			}
+		} else if len(m.books) > 1 {
+			// If we have multiple active subscriptions, we'll take a best guess from
+			// our recent protobuf depth update history
+			m.protobufDepthUpdateMtx.Lock()
+			if m.protobufDepthUpdate != nil && m.protobufDepthUpdate.Symbol != "" {
+				symbol = m.protobufDepthUpdate.Symbol
+			}
+			m.protobufDepthUpdateMtx.Unlock()
+		}
+		m.booksMtx.RUnlock()
 	}
-	m.booksMtx.RUnlock()
 
-	// If we have no markets, there's no point in continuing
-	if len(activeMarkets) == 0 {
-		m.log.Tracef("[MarketWS] No active markets for protobuf message")
+	// If we still don't have a symbol, we can't route this message
+	if symbol == "" {
+		m.log.Debugf("[MarketWS] Cannot determine symbol for protobuf message, dropping")
 		return
 	}
 
-	// For now, use the first active market - this is a simplification that works
-	// when we're only subscribed to a single market, which is the common case
-	mktSymbol := activeMarkets[0]
+	// Assign the symbol to the depth update
+	depthUpdate.Symbol = symbol
 
-	// Add the symbol to the depth update
-	depthUpdate.Symbol = mktSymbol
+	// Ensure we have a valid version number for sequencing
+	if depthUpdate.Version == "" || depthUpdate.Version == "0" {
+		// Generate a timestamp-based version if none is available
+		depthUpdate.Version = strconv.FormatInt(time.Now().UnixNano(), 10)
+	}
 
 	// Log successful parsing periodically
 	if len(depthUpdate.Bids) > 0 || len(depthUpdate.Asks) > 0 {
@@ -974,13 +1019,13 @@ func (m *mexc) handleProtobufMessage(data []byte) {
 	m.protobufDepthUpdate = depthUpdate
 	m.protobufDepthUpdateMtx.Unlock()
 
-	// Find the book and forward the update
+	// Find the book for this symbol
 	m.booksMtx.RLock()
-	book, exists := m.books[mktSymbol]
+	book, exists := m.books[symbol]
 	m.booksMtx.RUnlock()
 
 	if !exists {
-		m.log.Tracef("[MarketWS] No orderbook found for %s", mktSymbol)
+		m.log.Tracef("[MarketWS] No orderbook found for %s", symbol)
 		return
 	}
 
@@ -989,7 +1034,7 @@ func (m *mexc) handleProtobufMessage(data []byte) {
 	case book.updateQueue <- depthUpdate:
 		// Update successfully queued
 	default:
-		m.log.Warnf("[MarketWS] Update queue full for %s, dropping depth update", mktSymbol)
+		m.log.Warnf("[MarketWS] Update queue full for %s, dropping depth update", symbol)
 	}
 }
 
@@ -1019,7 +1064,10 @@ func (m *mexc) connectMarketStream(ctx context.Context, firstMexcSymbol string) 
 	// Send initial subscription with protobuf format
 	m.log.Infof("[MarketWS] Sending initial subscription for %s", firstMexcSymbol)
 	channel := fmt.Sprintf("spot@public.limit.depth.v3.api.pb@%s@20", firstMexcSymbol)
-	req := WsRequest{Method: "SUBSCRIPTION", Params: []string{channel}}
+	req := WsRequest{
+		Method: "SUBSCRIPTION",
+		Params: []string{channel},
+	}
 	reqBytes, marshalErr := json.Marshal(req)
 	if marshalErr != nil {
 		return fmt.Errorf("failed to marshal initial market subscription request: %w", marshalErr)
@@ -1048,6 +1096,10 @@ func (m *mexc) getDepthSnapshot(ctx context.Context, symbol string) (*mexctypes.
 	if err != nil {
 		return nil, fmt.Errorf("failed to get depth snapshot: %w", err)
 	}
+
+	// Log more details about the received snapshot
+	m.log.Debugf("Received orderbook snapshot for %s with lastUpdateId: %d, bids: %d, asks: %d",
+		symbol, resp.LastUpdateID, len(resp.Bids), len(resp.Asks))
 
 	return &resp, nil
 }
@@ -3066,63 +3118,61 @@ func (m *mexc) SubscribeMarket(ctx context.Context, baseID, quoteID uint32) erro
 		return fmt.Errorf("error starting market streams: %w", err)
 	}
 
-	// Start the book sync process - this will fetch the snapshot
+	// Start the book sync process in a goroutine
 	go book.sync(ctx)
 
-	// Subscribe to the market - use a goroutine with retries to ensure we don't block
-	go func() {
-		// Initial delay to allow connection establishment
-		time.Sleep(500 * time.Millisecond)
+	// Wait a brief moment for the connection to establish
+	time.Sleep(200 * time.Millisecond)
 
-		// Try subscribing multiple times
-		success := false
-		for attempt := 0; attempt < 5 && !success; attempt++ {
-			m.marketStreamMtx.RLock()
-			marketStream := m.marketStream
-			isDown := marketStream == nil || marketStream.IsDown()
-			m.marketStreamMtx.RUnlock()
+	// Subscribe to the market with the correct format for MEXC protobuf
+	channel := fmt.Sprintf("spot@public.limit.depth.v3.api.pb@%s@20", slug)
+	subMsg := WsRequest{
+		Method: "SUBSCRIPTION",
+		Params: []string{channel},
+	}
 
-			if isDown {
-				if attempt > 0 {
-					m.log.Warnf("Attempt %d: Market stream is down, waiting before retry...", attempt+1)
-				}
-				time.Sleep(1 * time.Second)
-				continue
-			}
+	m.log.Infof("Subscribing to %s with protobuf format", channel)
+	subBytes, err := json.Marshal(subMsg)
+	if err != nil {
+		delete(m.books, slug)
+		return fmt.Errorf("error marshaling subscription message: %w", err)
+	}
 
-			// Subscribe using the correct protobuf format for MEXC
-			channel := fmt.Sprintf("spot@public.limit.depth.v3.api.pb@%s@20", slug)
-			subMsg := WsRequest{
-				Method: "SUBSCRIPTION",
-				Params: []string{channel},
-			}
+	// Send subscription with retries
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		m.marketStreamMtx.RLock()
+		marketStream := m.marketStream
+		isDown := marketStream == nil || marketStream.IsDown()
+		m.marketStreamMtx.RUnlock()
 
-			subBytes, err := json.Marshal(subMsg)
-			if err != nil {
-				m.log.Errorf("Error marshaling subscription message: %v", err)
-				time.Sleep(1 * time.Second)
-				continue
-			}
-
-			m.marketStreamMtx.RLock()
-			err = m.marketStream.SendRaw(subBytes)
-			m.marketStreamMtx.RUnlock()
-
-			if err != nil {
-				m.log.Errorf("Attempt %d: Error subscribing to %s: %v", attempt+1, channel, err)
-				time.Sleep(1 * time.Second)
-			} else {
-				m.log.Infof("Successfully subscribed to %s", channel)
-				success = true
-			}
+		if isDown {
+			lastErr = fmt.Errorf("market stream is down")
+			time.Sleep(500 * time.Millisecond)
+			continue
 		}
 
-		if !success {
-			m.log.Errorf("Failed to subscribe to %s after multiple attempts", slug)
-		}
-	}()
+		m.marketStreamMtx.RLock()
+		err = m.marketStream.SendRaw(subBytes)
+		m.marketStreamMtx.RUnlock()
 
-	return nil
+		if err != nil {
+			lastErr = err
+			m.log.Warnf("Attempt %d: Error subscribing to %s: %v", attempt+1, channel, err)
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+
+		m.log.Infof("Successfully subscribed to %s", channel)
+		return nil
+	}
+
+	// If all attempts failed, clean up and return an error
+	delete(m.books, slug)
+	if lastErr != nil {
+		return fmt.Errorf("failed to subscribe to %s after multiple attempts: %w", channel, lastErr)
+	}
+	return fmt.Errorf("failed to subscribe to %s after multiple attempts", channel)
 }
 
 // UnsubscribeMarket unsubscribes from order book updates on a market.

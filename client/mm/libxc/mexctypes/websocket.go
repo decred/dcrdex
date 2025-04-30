@@ -31,10 +31,11 @@ type WsPong struct {
 
 // WsDepthUpdateData is the payload ('d' field) for spot@public.increase.depth.v3.api
 type WsDepthUpdateData struct {
-	Version string           `json:"v"` // Version (update ID)
-	Bids    [][2]json.Number `json:"b"` // Price, Quantity as strings
-	Asks    [][2]json.Number `json:"a"` // Price, Quantity as strings
-	Symbol  string           `json:"-"` // Symbol - internal field, not from JSON
+	Version      string           `json:"v"` // Version (update ID)
+	Bids         [][2]json.Number `json:"b"` // Price, Quantity as strings
+	Asks         [][2]json.Number `json:"a"` // Price, Quantity as strings
+	Symbol       string           `json:"-"` // Symbol - internal field, not from JSON
+	LastUpdateID uint64           `json:"-"` // LastUpdateID for order synchronization - internal field
 }
 
 // --- User Data Stream Payloads --- //
