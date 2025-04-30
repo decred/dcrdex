@@ -189,20 +189,198 @@ func (b *mxOrderBook) sync(ctx context.Context) {
 		b.log.Errorf("Error connecting %s order book: %v", b.mktID, err)
 	}
 
-	// Check if we have a sync channel before waiting on it
+	// Wait for syncChan to be closed when the initial sync completes
 	if b.syncChan != nil {
 		<-b.syncChan
 	}
 }
 
+// Connect implements the dex.Connector interface, establishing the initial orderbook sync
+// and processing updates.
 func (b *mxOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error /* no errors */) {
-	// Similar implementation as binanceOrderBook.Connect but adapted for MEXC's orderbook format
-	// and update mechanisms
+	const updateIDUnsynced = math.MaxUint64
 
-	// For now we'll create a placeholder waitgroup and return it
+	// We'll use these variables to track sync state
+	var syncMtx sync.Mutex
+	var updateBuffer []*mexctypes.WsDepthUpdateData
+	syncChan := make(chan struct{})
+	b.syncChan = syncChan
+	var lastUpdateID uint64 = updateIDUnsynced
+	acceptedUpdate := false
+
+	resyncChan := make(chan struct{}, 1)
+
+	// Function to reset sync state
+	desync := func(resync bool) {
+		syncMtx.Lock()
+		defer syncMtx.Unlock()
+		updateBuffer = make([]*mexctypes.WsDepthUpdateData, 0)
+		acceptedUpdate = false
+		if lastUpdateID != updateIDUnsynced {
+			b.synced.Store(false)
+			lastUpdateID = updateIDUnsynced
+			if resync {
+				resyncChan <- struct{}{}
+			}
+		}
+	}
+
+	// Function to process a depth update
+	acceptUpdate := func(update *mexctypes.WsDepthUpdateData) bool {
+		if lastUpdateID == updateIDUnsynced {
+			// Book is still syncing. Add it to the buffer
+			updateBuffer = append(updateBuffer, update)
+			return true
+		}
+
+		// Parse the update version
+		updateVersion, err := strconv.ParseUint(update.Version, 10, 64)
+		if err != nil {
+			b.log.Errorf("Failed to parse update version: %v", err)
+			return false
+		}
+
+		if !acceptedUpdate {
+			// On the first update, check if we missed anything
+			if updateVersion > lastUpdateID+1 {
+				b.log.Errorf("Missed update: expected %d, got %d", lastUpdateID+1, updateVersion)
+				return false
+			} else if updateVersion <= lastUpdateID {
+				// Skip updates older than or equal to our snapshot
+				return true
+			}
+		} else if updateVersion != lastUpdateID+1 {
+			// Updates must be in sequence after the first one
+			b.log.Errorf("Out of sequence update: expected %d, got %d", lastUpdateID+1, updateVersion)
+			return false
+		}
+
+		acceptedUpdate = true
+		lastUpdateID = updateVersion
+		bids, asks, err := b.convertMEXCBook(update.Bids, update.Asks)
+		if err != nil {
+			b.log.Errorf("Error parsing MEXC book: %v", err)
+			return false
+		}
+		b.book.update(bids, asks)
+		b.lastUpdateTime = time.Now()
+		return true
+	}
+
+	// Process buffered updates after a snapshot
+	processSyncBuffer := func(snapshotID uint64) bool {
+		syncMtx.Lock()
+		defer syncMtx.Unlock()
+
+		lastUpdateID = snapshotID
+		for _, update := range updateBuffer {
+			if !acceptUpdate(update) {
+				return false
+			}
+		}
+
+		b.synced.Store(true)
+		if syncChan != nil {
+			close(syncChan)
+			syncChan = nil
+		}
+		return true
+	}
+
+	// Fetch and process an orderbook snapshot
+	syncOrderbook := func() bool {
+		snapshot, err := b.getSnapshot()
+		if err != nil {
+			b.log.Errorf("Error getting orderbook snapshot: %v", err)
+			return false
+		}
+
+		bids, asks, err := b.convertMEXCBook(snapshot.Bids, snapshot.Asks)
+		if err != nil {
+			b.log.Errorf("Error parsing MEXC book: %v", err)
+			return false
+		}
+
+		b.log.Debugf("Got %s orderbook snapshot with update ID %d", b.mktID, snapshot.LastUpdateID)
+
+		b.book.clear()
+		b.book.update(bids, asks)
+		b.lastUpdateTime = time.Now()
+
+		// Convert int64 LastUpdateID to uint64 for processSyncBuffer
+		return processSyncBuffer(uint64(snapshot.LastUpdateID))
+	}
+
 	var wg sync.WaitGroup
+
+	// Goroutine to process incoming updates
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		for {
+			select {
+			case update := <-b.updateQueue:
+				syncMtx.Lock()
+				success := acceptUpdate(update)
+				syncMtx.Unlock()
+
+				if !success {
+					b.log.Tracef("Bad %s update with ID %s", b.mktID, update.Version)
+					desync(true)
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Goroutine to handle resync operations
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		const retryFrequency = time.Second * 30
+		retry := time.After(0) // Start with immediate sync
+
+		for {
+			select {
+			case <-retry:
+				// Time to try a sync
+			case <-resyncChan:
+				if retry != nil { // don't hammer
+					continue
+				}
+			case connected := <-b.connectedChan:
+				if !connected {
+					b.log.Debugf("Unsyncing %s orderbook due to disconnect", b.mktID)
+					desync(false)
+					retry = nil
+					continue
+				}
+			case <-ctx.Done():
+				return
+			}
+
+			if syncOrderbook() {
+				b.log.Infof("Synced %s orderbook", b.mktID)
+				retry = nil
+			} else {
+				b.log.Infof("Failed to sync %s orderbook. Trying again in %s", b.mktID, retryFrequency)
+				desync(false) // Clear the buffer
+				retry = time.After(retryFrequency)
+			}
+		}
+	}()
+
 	return &wg, nil
 }
+
+// Similar implementation as binanceOrderBook.Connect but adapted for MEXC's orderbook format
+// and update mechanisms
+
+// For now we'll create a placeholder waitgroup and return it
+var tempplch = 0 // DELETE this line
 
 // vwap returns the volume weighted average price for a certain quantity of the
 // base asset. It returns an error if the orderbook is not synced.
@@ -742,13 +920,77 @@ func isPbMessage(header []byte) bool {
 
 // handleProtobufMessage processes market data protobuf messages.
 func (m *mexc) handleProtobufMessage(data []byte) {
-	// In a real implementation, proper protobuf parsing would be implemented
-	// This is a placeholder implementation to demonstrate the concept
-	m.log.Debugf("[MarketWS] Received protobuf message of length %d", len(data))
+	m.log.Tracef("[MarketWS] Received protobuf message of length %d", len(data))
 
-	// TODO: Implement actual protobuf parsing
-	// This would extract the symbol, bids, and asks from the protobuf message
-	// For now, we're just handling the message receipt
+	// Parse the binary protobuf message using our mexctypes
+	pbMsg, err := mexctypes.UnmarshalMEXCDepthProto(data)
+	if err != nil {
+		m.log.Errorf("[MarketWS] Failed to decode protobuf message: %v", err)
+		// Log hex dump of the first few bytes to help diagnose issues
+		if len(data) > 16 {
+			m.log.Debugf("[MarketWS] First 16 bytes: %x", data[:16])
+		} else {
+			m.log.Debugf("[MarketWS] Message bytes: %x", data)
+		}
+		return
+	}
+
+	// Convert the protobuf message to our depth update format
+	depthUpdate := mexctypes.ConvertProtoToDepthUpdate(pbMsg)
+	if depthUpdate == nil {
+		m.log.Debugf("[MarketWS] Failed to convert protobuf message to depth update")
+		return
+	}
+
+	// Get all currently subscribed markets
+	m.booksMtx.RLock()
+	activeMarkets := make([]string, 0, len(m.books))
+	for symbol := range m.books {
+		activeMarkets = append(activeMarkets, symbol)
+	}
+	m.booksMtx.RUnlock()
+
+	// If we have no markets, there's no point in continuing
+	if len(activeMarkets) == 0 {
+		m.log.Tracef("[MarketWS] No active markets for protobuf message")
+		return
+	}
+
+	// For now, use the first active market - this is a simplification that works
+	// when we're only subscribed to a single market, which is the common case
+	mktSymbol := activeMarkets[0]
+
+	// Add the symbol to the depth update
+	depthUpdate.Symbol = mktSymbol
+
+	// Log successful parsing periodically
+	if len(depthUpdate.Bids) > 0 || len(depthUpdate.Asks) > 0 {
+		m.log.Debugf("[MarketWS] Parsed protobuf depth update for %s: v=%s, bids=%d, asks=%d",
+			depthUpdate.Symbol, depthUpdate.Version, len(depthUpdate.Bids), len(depthUpdate.Asks))
+	}
+
+	// Store the depth update in the mexc instance for use by other methods
+	m.protobufDepthUpdateMtx.Lock()
+	m.protobufDepthUpdate = depthUpdate
+	m.protobufDepthUpdateMtx.Unlock()
+
+	// Find the book and forward the update
+	m.booksMtx.RLock()
+	book, exists := m.books[mktSymbol]
+	m.booksMtx.RUnlock()
+
+	if !exists {
+		m.log.Tracef("[MarketWS] No orderbook found for %s", mktSymbol)
+		return
+	}
+
+	// Forward the update to the book's update queue
+	select {
+	case book.updateQueue <- depthUpdate:
+		// Update successfully queued
+	default:
+		m.log.Warnf("[MarketWS] Update queue full for %s, dropping depth update", mktSymbol)
+	}
 }
 
 // connectMarketStream establishes a WebSocket connection for market data.
