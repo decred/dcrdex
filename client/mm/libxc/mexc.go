@@ -188,7 +188,11 @@ func (b *mxOrderBook) sync(ctx context.Context) {
 	if err := cm.ConnectOnce(ctx); err != nil {
 		b.log.Errorf("Error connecting %s order book: %v", b.mktID, err)
 	}
-	<-b.syncChan
+
+	// Check if we have a sync channel before waiting on it
+	if b.syncChan != nil {
+		<-b.syncChan
+	}
 }
 
 func (b *mxOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error /* no errors */) {
@@ -635,9 +639,12 @@ func (m *mexc) resubscribeMarkets(ctx context.Context) {
 	m.booksMtx.RLock()
 	activeSymbols := make([]string, 0, len(m.books))
 	for symbol, book := range m.books {
-		if book.active {
+		book.mtx.RLock()
+		if book.numSubscribers > 0 {
 			activeSymbols = append(activeSymbols, symbol)
+			book.active = true
 		}
+		book.mtx.RUnlock()
 	}
 	m.booksMtx.RUnlock()
 
@@ -649,7 +656,7 @@ func (m *mexc) resubscribeMarkets(ctx context.Context) {
 	// Batch subscribe to all active markets
 	channels := make([]string, len(activeSymbols))
 	for i, symbol := range activeSymbols {
-		channels[i] = fmt.Sprintf("spot@public.limit.depth.v3.api.pb@%s@20", symbol)
+		channels[i] = fmt.Sprintf("%s@depth", symbol)
 	}
 
 	// Send subscription request
@@ -657,6 +664,14 @@ func (m *mexc) resubscribeMarkets(ctx context.Context) {
 	reqBytes, err := json.Marshal(req)
 	if err != nil {
 		m.log.Errorf("[MarketWS] Failed to marshal resubscription request: %v", err)
+		return
+	}
+
+	m.marketStreamMtx.RLock()
+	defer m.marketStreamMtx.RUnlock()
+
+	if m.marketStream == nil || m.marketStream.IsDown() {
+		m.log.Errorf("[MarketWS] Cannot resubscribe - market stream is down or nil")
 		return
 	}
 
@@ -2713,13 +2728,122 @@ func (m *mexc) SubscribeMarket(ctx context.Context, baseID, quoteID uint32) erro
 	// Form the market slug
 	slug := baseCfg.coin + quoteCfg.coin
 
-	// Start market streams if not already running
-	if err := m.startMarketStreams(ctx); err != nil {
-		return fmt.Errorf("error starting market streams: %w", err)
+	// Lock to prevent concurrent modification of the books map
+	m.booksMtx.Lock()
+	defer m.booksMtx.Unlock()
+
+	// Check if we already have a book for this market
+	book, found := m.books[slug]
+	if found {
+		book.mtx.Lock()
+		book.numSubscribers++
+		book.mtx.Unlock()
+		return nil
 	}
 
-	// Subscribe to the market
-	m.subscribeMarketStream(ctx, slug)
+	// Create a new book before starting the connection
+	getSnapshot := func() (*mexctypes.DepthResponse, error) {
+		return m.getDepthSnapshot(ctx, slug)
+	}
+
+	book = newMxOrderBook(
+		baseCfg.conversionFactor,
+		quoteCfg.conversionFactor,
+		slug,
+		getSnapshot,
+		m.log.SubLogger(fmt.Sprintf("MEXC-OrderBook-%s", slug)),
+	)
+
+	m.books[slug] = book
+	book.syncChan = make(chan struct{})
+
+	// Now start the market stream connection if needed
+	m.marketStreamMtx.Lock()
+	defer m.marketStreamMtx.Unlock()
+
+	isNewConnection := m.marketStream == nil
+
+	// Start the market stream if not already running
+	if isNewConnection {
+		m.log.Infof("Initializing MEXC market data stream for %s", slug)
+
+		// Create WebSocket connection for market data
+		wsConn, err := comms.NewWsConn(&comms.WsCfg{
+			URL:              m.wsURL,
+			Logger:           m.log.SubLogger("MEXC-MarketStream"),
+			PingWait:         60 * time.Second,
+			RawHandler:       m.handleMarketDataMessage,
+			ConnectEventFunc: m.handleMarketConnectEvent,
+		})
+		if err != nil {
+			// Clean up the book we just added since we failed
+			delete(m.books, slug)
+			return fmt.Errorf("error creating market data websocket: %w", err)
+		}
+
+		m.marketStream = wsConn
+
+		// Connect and handle messages in the background
+		m.wg.Add(1)
+		go func() {
+			defer m.wg.Done()
+
+			wg, err := wsConn.Connect(ctx)
+			if err != nil {
+				m.log.Errorf("Error connecting to market data stream: %v", err)
+
+				m.marketStreamMtx.Lock()
+				m.marketStream = nil
+				m.marketStreamMtx.Unlock()
+
+				return
+			}
+
+			// Connection successful
+			m.log.Debugf("Connected to market data stream")
+
+			// Wait for the connection to close
+			wg.Wait()
+
+			m.log.Errorf("Market data stream disconnected")
+
+			m.marketStreamMtx.Lock()
+			m.marketStream = nil
+			m.marketStreamMtx.Unlock()
+		}()
+
+		// Give the connection a moment to establish
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	// Start the book sync process
+	go book.sync(ctx)
+
+	// If the stream is established or just created, subscribe to this market
+	if !isNewConnection || !m.marketStream.IsDown() {
+		// Subscribe to the market
+		subMsg := WsRequest{
+			Method: "SUBSCRIPTION",
+			Params: []string{fmt.Sprintf("%s@depth", slug)},
+		}
+
+		subBytes, err := json.Marshal(subMsg)
+		if err != nil {
+			m.log.Errorf("Error marshaling subscription message: %v", err)
+			// We don't return error here so the book sync can continue
+		} else {
+			// Try to send the subscription
+			err = m.marketStream.SendRaw(subBytes)
+			if err != nil {
+				m.log.Errorf("Error subscribing to %s@depth: %v", slug, err)
+				// We don't return error here so the book sync can continue
+			} else {
+				m.log.Infof("Subscribed to %s@depth", slug)
+			}
+		}
+	} else {
+		m.log.Warnf("Market stream not ready, sync will attempt to subscribe after connection is established")
+	}
 
 	return nil
 }
@@ -2735,13 +2859,48 @@ func (m *mexc) UnsubscribeMarket(baseID, quoteID uint32) error {
 	// Form the market slug
 	slug := baseCfg.coin + quoteCfg.coin
 
-	// Remove the book from our tracked books
+	// Lock to protect the books map
 	m.booksMtx.Lock()
-	delete(m.books, slug)
-	m.booksMtx.Unlock()
+	defer m.booksMtx.Unlock()
 
-	// We don't actually unsubscribe from the WebSocket because other
-	// parts of the application may still be using it
+	// Get the book
+	book, found := m.books[slug]
+	if !found {
+		return nil // Already unsubscribed
+	}
+
+	// Decrement subscriber count
+	book.mtx.Lock()
+	book.numSubscribers--
+	shouldRemove := book.numSubscribers == 0
+	book.active = !shouldRemove
+	book.mtx.Unlock()
+
+	// If this was the last subscriber, remove the book and unsubscribe
+	if shouldRemove {
+		// Try to unsubscribe from the websocket
+		m.marketStreamMtx.Lock()
+		if m.marketStream != nil && !m.marketStream.IsDown() {
+			subMsg := WsRequest{
+				Method: "UNSUBSCRIPTION",
+				Params: []string{fmt.Sprintf("%s@depth", slug)},
+			}
+
+			subBytes, err := json.Marshal(subMsg)
+			if err == nil {
+				err = m.marketStream.SendRaw(subBytes)
+				if err != nil {
+					m.log.Errorf("Error unsubscribing from %s@depth: %v", slug, err)
+				} else {
+					m.log.Infof("Unsubscribed from %s@depth", slug)
+				}
+			}
+		}
+		m.marketStreamMtx.Unlock()
+
+		// Remove the book
+		delete(m.books, slug)
+	}
 
 	return nil
 }
