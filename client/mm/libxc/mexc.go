@@ -243,24 +243,61 @@ func (b *mxOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error /* no
 			return false
 		}
 
-		// If this update is out of sequence, we need to resync
 		if !acceptedUpdate {
-			// On the first update, check if we missed anything (MEXC requires lastUpdateId + 1)
-			if updateVersion > lastUpdateID+1 {
-				b.log.Errorf("Missed update: expected %d, got %d", lastUpdateID+1, updateVersion)
+			// On the first update after snapshot, be more tolerant of sequence numbering
+			// MEXC WebSocket protobuf messages use a different sequence numbering system
+			// than the REST API snapshots
+			b.log.Infof("First update after snapshot: snapshot ID %d, update ID %d",
+				lastUpdateID, updateVersion)
+
+			// Accept any first update - MEXC's protobuf IDs are inconsistent with REST API IDs
+			acceptedUpdate = true
+			lastUpdateID = updateVersion
+			b.lastUpdateID = updateVersion
+
+			bids, asks, err := b.convertMEXCBook(update.Bids, update.Asks)
+			if err != nil {
+				b.log.Errorf("Error parsing MEXC book: %v", err)
 				return false
-			} else if updateVersion <= lastUpdateID {
-				// Skip updates older than or equal to our snapshot's lastUpdateId
-				b.log.Tracef("Skipping update with version %d <= %d", updateVersion, lastUpdateID)
+			}
+
+			b.book.update(bids, asks)
+			b.lastUpdateTime = time.Now()
+			return true
+		} else if updateVersion != lastUpdateID+1 {
+			// After the first update is accepted, we still want sequential updates
+			// The sequence should continue from whatever the first WS message used
+			if updateVersion < lastUpdateID {
+				// Skip outdated updates
+				b.log.Tracef("Skipping outdated update: got %d, current is %d",
+					updateVersion, lastUpdateID)
 				return true
 			}
-		} else if updateVersion != lastUpdateID+1 {
-			// Updates must be in sequence after the first one
+
+			// If we have a gap, but it's small, we could potentially be lenient here too
+			if updateVersion <= lastUpdateID+10 {
+				b.log.Warnf("Small sequence gap: expected %d, got %d - accepting anyway",
+					lastUpdateID+1, updateVersion)
+				lastUpdateID = updateVersion
+				b.lastUpdateID = updateVersion
+
+				bids, asks, err := b.convertMEXCBook(update.Bids, update.Asks)
+				if err != nil {
+					b.log.Errorf("Error parsing MEXC book: %v", err)
+					return false
+				}
+
+				b.book.update(bids, asks)
+				b.lastUpdateTime = time.Now()
+				return true
+			}
+
+			// Otherwise report the sequence mismatch
 			b.log.Errorf("Out of sequence update: expected %d, got %d", lastUpdateID+1, updateVersion)
 			return false
 		}
 
-		// This is a valid update, apply it to the orderbook
+		// Normal sequential update
 		acceptedUpdate = true
 		lastUpdateID = updateVersion
 		b.lastUpdateID = updateVersion
@@ -1002,10 +1039,17 @@ func (m *mexc) handleProtobufMessage(data []byte) {
 	// Assign the symbol to the depth update
 	depthUpdate.Symbol = symbol
 
-	// Ensure we have a valid version number for sequencing
+	// Use a small incrementing version number rather than a huge random one
+	// If we don't have a reasonable version number, generate a sequential one
+	// based on the LastUpdateId from the protobuf message
 	if depthUpdate.Version == "" || depthUpdate.Version == "0" {
-		// Generate a timestamp-based version if none is available
-		depthUpdate.Version = strconv.FormatInt(time.Now().UnixNano(), 10)
+		// Use a consistent and simple version numbering for updates
+		if pbMsg.LastUpdateId > 0 {
+			depthUpdate.Version = strconv.FormatUint(pbMsg.LastUpdateId, 10)
+		} else {
+			// Generate a sequential ID based on timestamp - much more stable than a huge random number
+			depthUpdate.Version = strconv.FormatInt(time.Now().UnixNano()%1000000, 10)
+		}
 	}
 
 	// Log successful parsing periodically

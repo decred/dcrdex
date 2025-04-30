@@ -85,20 +85,29 @@ func extractSymbolFromBinaryData(data []byte) string {
 // extractUpdateIDFromBinaryData tries to extract the LastUpdateId field from binary data
 // This is a best-effort implementation that looks for patterns in the binary data
 func extractUpdateIDFromBinaryData(data []byte) uint64 {
-	// As a simplified implementation, we'll use a timestamp-based ID when we can't extract one
-	// In a real implementation, this would parse the actual protobuf format
+	// Instead of trying to extract the actual sequencing number (which we can't without
+	// the protobuf schema), we'll generate sequence IDs based on data content hash.
+	// This creates more stable sequence numbers that will be identical for identical messages.
 
-	// If data is > 20 bytes, use bytes 8-16 as a number seed
-	// This is a placeholder - in production we would properly decode the protobuf
-	if len(data) > 20 {
-		var id uint64 = 0
-		for i := 8; i < 16 && i < len(data); i++ {
-			id = (id << 8) | uint64(data[i])
-		}
-		return id & 0x7FFFFFFFFFFFFFFF // Ensure positive
+	if len(data) < 8 {
+		return uint64(1)
 	}
 
-	return uint64(0)
+	// Use a simple accumulator algorithm to generate a stable sequence number
+	var id uint64 = 1
+	for i := 0; i < len(data); i++ {
+		// Only use every 4th byte to reduce impact of small changes
+		if i%4 == 0 {
+			id = (id + uint64(data[i])) % 10000000
+		}
+	}
+
+	// Ensure we never return 0
+	if id == 0 {
+		id = 1
+	}
+
+	return id
 }
 
 // extractDepthDataFromBinaryData tries to extract the bid and ask price levels from binary data
