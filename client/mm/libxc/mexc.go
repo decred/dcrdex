@@ -457,7 +457,10 @@ func newMexc(cfg *CEXConfig) (*mexc, error) {
 		quit:                make(chan struct{}),
 	}
 
+	// Initialize atomic values to prevent nil panics
 	m.markets.Store(make(map[string]*mexctypes.SymbolInfo))
+	m.tokenIDs.Store(make(map[string][]uint32))
+	m.minWithdraw.Store(make(map[uint32]*mxWithdrawInfo))
 	m.listenKey.Store("")
 
 	return m, nil
@@ -657,13 +660,85 @@ func (m *mexc) readCoins(coins []*mexctypes.CoinInfo) {
 // getCoinInfo retrieves MEXC configs then updates the user balances and
 // the tokenIDs.
 func (m *mexc) getCoinInfo(ctx context.Context) error {
-	coins := make([]*mexctypes.CoinInfo, 0)
-	err := m.getAPI(ctx, "/api/v3/capital/config/getall", nil, true, true, &coins)
+	m.log.Infof("Fetching MEXC coin info...")
+	path := "/api/v3/capital/config/getall"
+	var infoList []*mexctypes.CoinInfo
+	err := m.getAPI(ctx, path, nil, true, true, &infoList)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to fetch MEXC coin info: %w", err)
 	}
 
-	m.readCoins(coins)
+	// Convert list to map keyed by uppercase coin name
+	newCoinInfo := make(map[string]*mexctypes.CoinInfo, len(infoList))
+	for _, coin := range infoList {
+		newCoinInfo[strings.ToUpper(coin.Coin)] = coin
+	}
+
+	// Process coin info to build tokenIDs and minWithdraw maps
+	tokenIDs := make(map[string][]uint32)
+	minWithdraw := make(map[uint32]*mxWithdrawInfo)
+
+	for mexcCoinUpper, coinData := range newCoinInfo {
+		for _, netInfo := range coinData.NetworkList {
+			if !netInfo.WithdrawEnable || !netInfo.DepositEnable {
+				m.log.Tracef("Skipping %s network %s because deposits and/or withdraws are not enabled.",
+					mexcCoinUpper, netInfo.Network)
+				continue
+			}
+
+			dexSymbol := m.mapMEXCCoinNetworkToDEXSymbol(mexcCoinUpper, netInfo.Network)
+			if dexSymbol == "" {
+				continue
+			}
+
+			assetID, found := dex.BipSymbolID(dexSymbol)
+			if !found {
+				continue
+			}
+
+			ui, err := asset.UnitInfo(assetID)
+			if err != nil {
+				// Not a registered asset
+				continue
+			}
+
+			if tkn := asset.TokenInfo(assetID); tkn != nil {
+				tokenIDs[mexcCoinUpper] = append(tokenIDs[mexcCoinUpper], assetID)
+			}
+
+			// Parse withdraw minimum
+			minStr := netInfo.WithdrawMin
+			withdrawMin, _ := strconv.ParseFloat(minStr, 64)
+			minimum := uint64(math.Round(float64(ui.Conventional.ConversionFactor) * withdrawMin))
+
+			// Parse withdraw integer multiple
+			lotSizeStr := netInfo.WithdrawIntegerMultiple
+			if lotSizeStr == "" {
+				lotSizeStr = "0" // Default to 0 if not provided
+			}
+			withdrawMultiple, _ := strconv.ParseFloat(lotSizeStr, 64)
+
+			minWithdraw[assetID] = &mxWithdrawInfo{
+				minimum: minimum,
+				lotSize: uint64(math.Round(withdrawMultiple * float64(ui.Conventional.ConversionFactor))),
+			}
+
+			m.log.Debugf("Mapped %s/%s to DEX asset %s (ID: %d)", mexcCoinUpper, netInfo.Network, dexSymbol, assetID)
+		}
+	}
+
+	// Store the processed data in atomic values
+	m.tokenIDs.Store(tokenIDs)
+	m.minWithdraw.Store(minWithdraw)
+
+	// Log summary information
+	mappedCount := 0
+	for _, ids := range tokenIDs {
+		mappedCount += len(ids)
+	}
+	m.log.Infof("Successfully processed MEXC coin info: mapped %d coins with %d asset IDs",
+		len(tokenIDs), mappedCount)
+
 	return nil
 }
 
@@ -797,16 +872,45 @@ func mxSteppedRate(r, step uint64) uint64 {
 
 // getMarkets fetches all available markets from MEXC.
 func (m *mexc) getMarkets(ctx context.Context) (map[string]*mexctypes.SymbolInfo, error) {
+	m.log.Infof("Fetching MEXC exchange info...")
 	var exchangeInfo mexctypes.ExchangeInfo
 	err := m.getAPI(ctx, "/api/v3/exchangeInfo", nil, false, false, &exchangeInfo)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to fetch MEXC exchange info: %w", err)
 	}
 
 	marketsMap := make(map[string]*mexctypes.SymbolInfo, len(exchangeInfo.Symbols))
-	tokenIDs := m.tokenIDs.Load().(map[string][]uint32)
 
+	// Load tokenIDs - essential for market mapping
+	tokenIDsI := m.tokenIDs.Load()
+	if tokenIDsI == nil {
+		// If tokenIDs not loaded yet, try to load coin info first
+		m.log.Warnf("TokenIDs not loaded yet when fetching markets, attempting to load coin info first")
+
+		// Try to load coin info which should populate tokenIDs
+		if err := m.getCoinInfo(ctx); err != nil {
+			m.log.Errorf("Failed to load coin info: %v", err)
+			return nil, fmt.Errorf("cannot create market mapping without coin info: %w", err)
+		}
+
+		// Get the newly loaded tokenIDs
+		tokenIDsI = m.tokenIDs.Load()
+		if tokenIDsI == nil {
+			return nil, fmt.Errorf("tokenIDs still nil after loading coin info")
+		}
+	}
+
+	// Now safe to type assert
+	tokenIDs := tokenIDsI.(map[string][]uint32)
+
+	// Process each symbol to find DEX market matches
+	validMarketCount := 0
 	for _, symbol := range exchangeInfo.Symbols {
+		// Skip markets that aren't enabled for trading
+		if symbol.Status != "1" {
+			continue
+		}
+
 		dexMarkets := mxMarketToDexMarkets(symbol.BaseAsset, symbol.QuoteAsset, tokenIDs)
 		if len(dexMarkets) == 0 {
 			continue
@@ -815,9 +919,13 @@ func (m *mexc) getMarkets(ctx context.Context) (map[string]*mexctypes.SymbolInfo
 		// Store a copy of the symbol info
 		symCopy := symbol
 		marketsMap[symbol.Symbol] = &symCopy
+		validMarketCount++
 	}
 
 	m.markets.Store(marketsMap)
+	m.log.Infof("Successfully processed MEXC exchange info: found %d symbols, %d valid markets",
+		len(exchangeInfo.Symbols), validMarketCount)
+
 	return marketsMap, nil
 }
 
@@ -1183,6 +1291,14 @@ func (m *mexc) Tickers(ctx context.Context, markets []*MarketMatch) ([]*Ticker, 
 	var tickers []*Ticker
 	marketsMap := m.markets.Load().(map[string]*mexctypes.SymbolInfo)
 
+	// Safely get tokenIDs map
+	tokenIDsI := m.tokenIDs.Load()
+	if tokenIDsI == nil {
+		// If tokenIDs is not loaded yet, we can't process tickers properly
+		return nil, fmt.Errorf("token IDs not loaded, cannot process tickers")
+	}
+	tokenIDs := tokenIDsI.(map[string][]uint32)
+
 	for _, price := range prices {
 		// Skip if we don't have market info for this symbol
 		symInfo, found := marketsMap[price.Symbol]
@@ -1191,7 +1307,6 @@ func (m *mexc) Tickers(ctx context.Context, markets []*MarketMatch) ([]*Ticker, 
 		}
 
 		// Look for matches in our requested markets
-		tokenIDs := m.tokenIDs.Load().(map[string][]uint32)
 		baseMatches := getMEXCDEXAssetIDs(symInfo.BaseAsset, tokenIDs)
 		quoteMatches := getMEXCDEXAssetIDs(symInfo.QuoteAsset, tokenIDs)
 
@@ -2473,4 +2588,41 @@ func (m *mexc) SubscribeTradeUpdates() (<-chan *Trade, func(), int) {
 		defer m.tradeUpdaterMtx.Unlock()
 		delete(m.tradeUpdaters, id)
 	}, id
+}
+
+// mapMEXCCoinNetworkToDEXSymbol attempts to construct a DEX symbol (lowercase)
+// from MEXC coin and network names
+func (m *mexc) mapMEXCCoinNetworkToDEXSymbol(mexcCoinUpper, mexcNetwork string) string {
+	if mexcCoinUpper == "" || mexcNetwork == "" {
+		return ""
+	}
+
+	dexBase := strings.ToLower(mexcCoinUpper)
+	upNetwork := strings.ToUpper(mexcNetwork)
+
+	// Handle the native case explicitly first
+	if strings.EqualFold(mexcCoinUpper, mexcNetwork) {
+		return dexBase
+	}
+
+	// If not native, determine the suffix based on known token networks
+	var dexNetSuffix string
+	switch upNetwork {
+	case "ETH", "ERC20":
+		dexNetSuffix = ".erc20"
+	case "TRX", "TRC20":
+		dexNetSuffix = ".trc20"
+	case "BEP20(BSC)":
+		dexNetSuffix = ".bep20"
+	case "SOLANA":
+		dexNetSuffix = ".sol"
+	case "MATIC":
+		dexNetSuffix = ".polygon"
+	default:
+		// Network is not native (checked above) and not a known token network
+		return ""
+	}
+
+	// Return token symbol (base + suffix)
+	return dexBase + dexNetSuffix
 }
