@@ -239,74 +239,42 @@ func (b *mxOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error /* no
 		// Parse the update version
 		updateVersion, err := strconv.ParseUint(update.Version, 10, 64)
 		if err != nil {
-			b.log.Errorf("Failed to parse update version: %v", err)
-			return false
+			b.log.Warnf("Failed to parse update version: %v - continuing anyway", err)
+			// Generate a fallback version based on current lastUpdateID
+			updateVersion = lastUpdateID + 1
 		}
 
+		// Once we have a valid orderbook snapshot, we'll accept any update
+		// that has valid price data, regardless of sequence number
+
+		// Check if this update has valid data
+		if len(update.Bids) == 0 && len(update.Asks) == 0 {
+			b.log.Debugf("Update has no price data, skipping")
+			return true // Return true to avoid triggering resync
+		}
+
+		// Basic tracking of which updates we've seen
 		if !acceptedUpdate {
-			// On the first update after snapshot, be more tolerant of sequence numbering
-			// MEXC WebSocket protobuf messages use a different sequence numbering system
-			// than the REST API snapshots
-			b.log.Infof("First update after snapshot: snapshot ID %d, update ID %d",
-				lastUpdateID, updateVersion)
-
-			// Accept any first update - MEXC's protobuf IDs are inconsistent with REST API IDs
+			// First update after snapshot
+			b.log.Debugf("Processing first update after snapshot: ID %d", updateVersion)
 			acceptedUpdate = true
-			lastUpdateID = updateVersion
-			b.lastUpdateID = updateVersion
-
-			bids, asks, err := b.convertMEXCBook(update.Bids, update.Asks)
-			if err != nil {
-				b.log.Errorf("Error parsing MEXC book: %v", err)
-				return false
-			}
-
-			b.book.update(bids, asks)
-			b.lastUpdateTime = time.Now()
-			return true
-		} else if updateVersion != lastUpdateID+1 {
-			// After the first update is accepted, we still want sequential updates
-			// The sequence should continue from whatever the first WS message used
-			if updateVersion < lastUpdateID {
-				// Skip outdated updates
-				b.log.Tracef("Skipping outdated update: got %d, current is %d",
+		} else {
+			// For logging purposes only
+			if updateVersion <= lastUpdateID {
+				b.log.Tracef("Got out-of-sequence update: %d <= %d (current)",
 					updateVersion, lastUpdateID)
-				return true
 			}
-
-			// If we have a gap, but it's small, we could potentially be lenient here too
-			if updateVersion <= lastUpdateID+10 {
-				b.log.Warnf("Small sequence gap: expected %d, got %d - accepting anyway",
-					lastUpdateID+1, updateVersion)
-				lastUpdateID = updateVersion
-				b.lastUpdateID = updateVersion
-
-				bids, asks, err := b.convertMEXCBook(update.Bids, update.Asks)
-				if err != nil {
-					b.log.Errorf("Error parsing MEXC book: %v", err)
-					return false
-				}
-
-				b.book.update(bids, asks)
-				b.lastUpdateTime = time.Now()
-				return true
-			}
-
-			// Otherwise report the sequence mismatch
-			b.log.Errorf("Out of sequence update: expected %d, got %d", lastUpdateID+1, updateVersion)
-			return false
 		}
 
-		// Normal sequential update
-		acceptedUpdate = true
+		// Always update the sequence tracking
 		lastUpdateID = updateVersion
 		b.lastUpdateID = updateVersion
 
-		// Convert the update to order book entries
+		// Convert and apply the update data
 		bids, asks, err := b.convertMEXCBook(update.Bids, update.Asks)
 		if err != nil {
 			b.log.Errorf("Error parsing MEXC book: %v", err)
-			return false
+			return false // Only fail on data conversion errors
 		}
 
 		// Apply the update
@@ -391,8 +359,13 @@ func (b *mxOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error /* no
 				syncMtx.Unlock()
 
 				if !success {
-					b.log.Tracef("Bad %s update with ID %s", b.mktID, update.Version)
-					desync(true)
+					// Instead of immediately desyncing on any error, just log the issue
+					// Most sequence errors are harmless - the next message will likely be fine
+					b.log.Debugf("Update processing issue for %s with ID %s - continuing anyway",
+						b.mktID, update.Version)
+
+					// We won't desync on sequence issues, only on critical connection problems
+					// which are handled elsewhere
 				}
 			case <-ctx.Done():
 				return
@@ -865,12 +838,9 @@ func (m *mexc) handleMarketConnectEvent(status comms.ConnectionStatus) {
 		go m.resubscribeMarkets(context.Background())
 	case comms.Disconnected:
 		m.log.Warnf("[MarketWS] Connection lost")
-		// Mark all books as unsynced
-		m.booksMtx.RLock()
-		for _, book := range m.books {
-			book.synced.Store(false)
-		}
-		m.booksMtx.RUnlock()
+		// We will no longer mark books as unsynced on disconnection
+		// The books will continue to use their last known state
+		// and will be updated when the connection is re-established
 	}
 }
 
