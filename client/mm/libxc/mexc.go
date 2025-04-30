@@ -709,17 +709,38 @@ func (m *mexc) getCoinInfo(ctx context.Context) error {
 	tokenIDs := make(map[string][]uint32)
 	minWithdraw := make(map[uint32]*mxWithdrawInfo)
 
+	// Target DEX symbols we care about (e.g., DCR, BTC, USDT variants)
+	targetSymbols := map[string]bool{
+		"dcr":          true,
+		"btc":          true, // Add BTC
+		"usdt.polygon": true, // Keep specific USDT variant
+		"usdt.erc20":   true, // Add another USDT variant if needed
+		"usdt.trc20":   true, // Add another USDT variant if needed
+	}
+
 	for mexcCoinUpper, coinData := range newCoinInfo {
+		// Optimization: Skip coins not potentially part of targetSymbols
+		// Note: This is a rough check, as we don't know the network suffix yet.
+		if !(strings.Contains(strings.ToLower(mexcCoinUpper), "dcr") ||
+			strings.Contains(strings.ToLower(mexcCoinUpper), "btc") ||
+			strings.Contains(strings.ToLower(mexcCoinUpper), "usdt")) {
+			// continue // Keep commented to map all enabled coins
+		}
+
 		for _, netInfo := range coinData.NetworkList {
 			if !netInfo.WithdrawEnable || !netInfo.DepositEnable {
-				m.log.Tracef("Skipping %s network %s because deposits and/or withdraws are not enabled.",
-					mexcCoinUpper, netInfo.Network)
 				continue
 			}
 
+			// Use our mapping function to get DEX symbol
 			dexSymbol := m.mapMEXCCoinNetworkToDEXSymbol(mexcCoinUpper, netInfo.Network)
 			if dexSymbol == "" {
 				continue
+			}
+
+			// Check if the generated DEX symbol is one we are interested in mapping
+			if !targetSymbols[dexSymbol] {
+				// continue // Keep commented to map all enabled coins
 			}
 
 			assetID, found := dex.BipSymbolID(dexSymbol)
@@ -729,10 +750,11 @@ func (m *mexc) getCoinInfo(ctx context.Context) error {
 
 			ui, err := asset.UnitInfo(assetID)
 			if err != nil {
-				// Not a registered asset
+				// not a registered asset
 				continue
 			}
 
+			// Add to our mappings
 			if tkn := asset.TokenInfo(assetID); tkn != nil {
 				tokenIDs[mexcCoinUpper] = append(tokenIDs[mexcCoinUpper], assetID)
 			}
@@ -769,6 +791,11 @@ func (m *mexc) getCoinInfo(ctx context.Context) error {
 	}
 	m.log.Infof("Successfully processed MEXC coin info: mapped %d coins with %d asset IDs",
 		len(tokenIDs), mappedCount)
+
+	// Provide warning if we didn't find the most critical mappings
+	if mappedCount < 2 {
+		m.log.Warnf("Expected at least DCR and USDT.polygon mappings, but only found %d.", mappedCount)
+	}
 
 	return nil
 }
@@ -890,6 +917,16 @@ func getMEXCDEXAssetIDs(coin string, tokenIDs map[string][]uint32) []uint32 {
 	}
 
 	assetIDs := make([]uint32, 0, 1)
+
+	// Special handling for USDT - preferentially map to usdt.polygon
+	if strings.ToLower(coin) == "usdt" {
+		// Try to get the polygon variant first
+		if assetID, found := dex.BipSymbolID("usdt.polygon"); found && isRegistered(assetID) {
+			assetIDs = append(assetIDs, assetID)
+			return assetIDs // Return immediately with polygon variant
+		}
+	}
+
 	if assetID, found := dex.BipSymbolID(dexSymbol); found {
 		// Only registered assets.
 		if isRegistered(assetID) {
@@ -2292,17 +2329,82 @@ func (m *mexc) MatchedMarkets(ctx context.Context) ([]*MarketMatch, error) {
 	// Get fresh market data
 	mexcMarkets, err := m.getMarkets(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error fetching MEXC markets: %w", err)
 	}
 
-	tokenIDs := m.tokenIDs.Load().(map[string][]uint32)
+	// Make sure tokenIDs are loaded
+	tokenIDsI := m.tokenIDs.Load()
+	if tokenIDsI == nil {
+		m.log.Warnf("TokenIDs not loaded yet when fetching matched markets, attempting to load coin info first")
+		if err := m.getCoinInfo(ctx); err != nil {
+			return nil, fmt.Errorf("could not load token mappings: %w", err)
+		}
+
+		// Check again after loading
+		tokenIDsI = m.tokenIDs.Load()
+		if tokenIDsI == nil {
+			return nil, fmt.Errorf("failed to initialize token mappings")
+		}
+	}
+
+	tokenIDs := tokenIDsI.(map[string][]uint32)
 	var matches []*MarketMatch
+	seenDexPairs := make(map[string]bool)
 
-	for _, mexcMkt := range mexcMarkets {
-		dexMarkets := mxMarketToDexMarkets(mexcMkt.BaseAsset, mexcMkt.QuoteAsset, tokenIDs)
-		matches = append(matches, dexMarkets...)
+	for _, symInfo := range mexcMarkets {
+		// Get base asset IDs for this market
+		baseIDs := getMEXCDEXAssetIDs(symInfo.BaseAsset, tokenIDs)
+		if len(baseIDs) == 0 {
+			// Skip if we have no mapping for the base asset
+			continue
+		}
+
+		// Get quote asset IDs for this market
+		quoteIDs := getMEXCDEXAssetIDs(symInfo.QuoteAsset, tokenIDs)
+		if len(quoteIDs) == 0 {
+			// Skip if we have no mapping for the quote asset
+			continue
+		}
+
+		// Create market matches for all combinations of base and quote IDs
+		for _, baseID := range baseIDs {
+			// Validate base asset ID
+			_, baseErr := asset.UnitInfo(baseID)
+			if baseErr != nil {
+				continue // Skip if this base ID is not known by asset system
+			}
+
+			for _, quoteID := range quoteIDs {
+				// Validate quote asset ID
+				_, quoteErr := asset.UnitInfo(quoteID)
+				if quoteErr != nil {
+					continue // Skip if this quote ID is not known by asset system
+				}
+
+				// Generate DEX market name (e.g., "dcr_btc")
+				dexMarketName, nameErr := dex.MarketName(baseID, quoteID)
+				if nameErr != nil {
+					m.log.Warnf("Could not generate DEX market name for base %d / quote %d: %v", baseID, quoteID, nameErr)
+					continue
+				}
+
+				// Avoid duplicate DEX pairs
+				if seenDexPairs[dexMarketName] {
+					continue
+				}
+				seenDexPairs[dexMarketName] = true
+
+				matches = append(matches, &MarketMatch{
+					BaseID:   baseID,
+					QuoteID:  quoteID,
+					MarketID: dexMarketName,
+					Slug:     symInfo.Symbol, // Use the MEXC symbol as the Slug
+				})
+			}
+		}
 	}
 
+	m.log.Infof("Found %d matched markets on MEXC.", len(matches))
 	return matches, nil
 }
 
@@ -2654,6 +2756,11 @@ func (m *mexc) mapMEXCCoinNetworkToDEXSymbol(mexcCoinUpper, mexcNetwork string) 
 
 	dexBase := strings.ToLower(mexcCoinUpper)
 	upNetwork := strings.ToUpper(mexcNetwork)
+
+	// Special case for USDT: Always map to USDT.polygon for DCRDEX
+	if dexBase == "usdt" {
+		return "usdt.polygon"
+	}
 
 	// Handle the native case explicitly first
 	if strings.EqualFold(mexcCoinUpper, mexcNetwork) {
