@@ -653,10 +653,13 @@ func (m *mexc) resubscribeMarkets(ctx context.Context) {
 		return
 	}
 
-	// Batch subscribe to all active markets
+	m.log.Infof("[MarketWS] Resubscribing to %d active markets: %v", len(activeSymbols), activeSymbols)
+
+	// Batch subscribe to all active markets using the protobuf format
 	channels := make([]string, len(activeSymbols))
 	for i, symbol := range activeSymbols {
-		channels[i] = fmt.Sprintf("%s@depth", symbol)
+		// Use the protobuf format for depth data
+		channels[i] = fmt.Sprintf("spot@public.limit.depth.v3.api.pb@%s@20", symbol)
 	}
 
 	// Send subscription request
@@ -675,13 +678,21 @@ func (m *mexc) resubscribeMarkets(ctx context.Context) {
 		return
 	}
 
-	err = m.marketStream.SendRaw(reqBytes)
-	if err != nil {
-		m.log.Errorf("[MarketWS] Failed to send resubscription request: %v", err)
-		return
+	// Attempt to send with retries
+	var sendErr error
+	for i := 0; i < 3; i++ {
+		sendErr = m.marketStream.SendRaw(reqBytes)
+		if sendErr == nil {
+			m.log.Infof("[MarketWS] Successfully sent resubscription request for %d markets", len(activeSymbols))
+			return
+		}
+		m.log.Errorf("[MarketWS] Failed to send resubscription request (attempt %d): %v", i+1, sendErr)
+		time.Sleep(500 * time.Millisecond)
 	}
 
-	m.log.Infof("[MarketWS] Successfully sent resubscription request for %d markets", len(activeSymbols))
+	if sendErr != nil {
+		m.log.Errorf("[MarketWS] Failed to resubscribe after multiple attempts, will try again later")
+	}
 }
 
 // handleMarketRawMessage processes raw WebSocket messages from the market stream.
@@ -1892,15 +1903,18 @@ func (m *mexc) startMarketStreams(ctx context.Context) error {
 
 	if m.marketStream != nil && !m.marketStream.IsDown() {
 		// Already connected and working
+		m.log.Debugf("Market stream already connected")
 		return nil
 	}
 
 	// If we had a previous connection that's broken, clean it up
 	if m.marketStream != nil {
+		m.log.Debugf("Cleaning up previous market stream connection")
 		m.marketStream = nil
 	}
 
 	// Create WebSocket connection for market data
+	m.log.Infof("Starting MEXC market data stream...")
 	wsConn, err := comms.NewWsConn(&comms.WsCfg{
 		URL:              m.wsURL,
 		Logger:           m.log.SubLogger("MEXC-MarketStream"),
@@ -1913,7 +1927,6 @@ func (m *mexc) startMarketStreams(ctx context.Context) error {
 	}
 
 	m.marketStream = wsConn
-	m.log.Infof("Starting MEXC market data stream...")
 
 	// Connect and handle messages in the background
 	m.wg.Add(1)
@@ -1927,16 +1940,13 @@ func (m *mexc) startMarketStreams(ctx context.Context) error {
 			m.marketStreamMtx.Lock()
 			m.marketStream = nil
 			m.marketStreamMtx.Unlock()
-
 			return
 		}
 
-		// Wait for the connection to finish with a delay to ensure it's fully established
-		time.Sleep(1 * time.Second)
-
+		// Connection successful
 		m.log.Debugf("Connected to market data stream")
 
-		// Wait for connection to close
+		// Wait for the connection to close
 		wg.Wait()
 
 		m.log.Errorf("Market data stream disconnected")
@@ -1946,8 +1956,16 @@ func (m *mexc) startMarketStreams(ctx context.Context) error {
 		m.marketStreamMtx.Unlock()
 	}()
 
-	// Allow time for connection to establish
-	time.Sleep(500 * time.Millisecond)
+	// Add a brief delay to allow the initial connection establishment
+	// This is a simple way to improve the chances the connection is ready when we return
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if !wsConn.IsDown() {
+			m.log.Debugf("Market stream connected successfully")
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 
 	return nil
 }
@@ -1955,9 +1973,16 @@ func (m *mexc) startMarketStreams(ctx context.Context) error {
 // handleMarketDataMessage processes raw messages from the market data WebSocket
 func (m *mexc) handleMarketDataMessage(msg []byte) {
 	// Check if it's a binary message (protobuf)
-	if len(msg) > 0 && msg[0] == 0 {
+	if len(msg) > 0 && (msg[0] < 32 || msg[0] > 126) {
 		// Handle binary protobuf message
 		m.handleProtobufMessage(msg)
+		return
+	}
+
+	// Check if the message is a ping
+	if string(msg) == `{"ping":true}` || string(msg) == "ping" {
+		// Respond with pong
+		m.marketStream.SendRaw([]byte(`{"pong":true}`))
 		return
 	}
 
@@ -1968,17 +1993,50 @@ func (m *mexc) handleMarketDataMessage(msg []byte) {
 	}
 
 	if err := json.Unmarshal(msg, &baseMsg); err != nil {
-		m.log.Errorf("error parsing market stream message: %v", err)
+		// Try to check if it's a subscription response
+		var respMsg struct {
+			ID     interface{} `json:"id"`
+			Code   int         `json:"code"`
+			Status string      `json:"status"`
+			Msg    string      `json:"msg"`
+		}
+
+		if jsonErr := json.Unmarshal(msg, &respMsg); jsonErr == nil {
+			if respMsg.Code == 0 || respMsg.Status == "OK" || strings.Contains(respMsg.Msg, "success") {
+				m.log.Debugf("[MarketWS] Received subscription success response: %s", string(msg))
+				return
+			} else if respMsg.Code != 0 {
+				m.log.Errorf("[MarketWS] Received error response: Code=%d, Msg=%s", respMsg.Code, respMsg.Msg)
+				return
+			}
+		}
+
+		m.log.Errorf("[MarketWS] Failed to parse WebSocket message: %v\nRaw: %s", err, string(msg))
 		return
 	}
 
+	if baseMsg.Stream == "" {
+		m.log.Tracef("[MarketWS] Received message without stream: %s", string(msg))
+		return
+	}
+
+	// Process different message types based on stream value
 	if strings.Contains(baseMsg.Stream, "@depth") {
 		// Handle orderbook updates
-		depthUpdate := mexctypes.WsDepthUpdate{
-			Stream: baseMsg.Stream,
-			Data:   baseMsg.Data,
+		symbolParts := strings.Split(baseMsg.Stream, "@")
+		if len(symbolParts) < 1 {
+			m.log.Errorf("[MarketWS] Invalid stream format: %s", baseMsg.Stream)
+			return
 		}
+
+		// Check if it's a depth update
+		var depthUpdate mexctypes.WsDepthUpdate
+		depthUpdate.Stream = baseMsg.Stream
+		depthUpdate.Data = baseMsg.Data
+
 		m.processDepthUpdate(&depthUpdate)
+	} else {
+		m.log.Debugf("[MarketWS] Unhandled stream type: %s", baseMsg.Stream)
 	}
 }
 
@@ -2727,6 +2785,7 @@ func (m *mexc) SubscribeMarket(ctx context.Context, baseID, quoteID uint32) erro
 
 	// Form the market slug
 	slug := baseCfg.coin + quoteCfg.coin
+	m.log.Infof("Subscribing to MEXC market: %s", slug)
 
 	// Lock to prevent concurrent modification of the books map
 	m.booksMtx.Lock()
@@ -2737,7 +2796,9 @@ func (m *mexc) SubscribeMarket(ctx context.Context, baseID, quoteID uint32) erro
 	if found {
 		book.mtx.Lock()
 		book.numSubscribers++
+		book.active = true
 		book.mtx.Unlock()
+		m.log.Debugf("Already subscribed to %s, incremented subscribers to %d", slug, book.numSubscribers)
 		return nil
 	}
 
@@ -2757,93 +2818,67 @@ func (m *mexc) SubscribeMarket(ctx context.Context, baseID, quoteID uint32) erro
 	m.books[slug] = book
 	book.syncChan = make(chan struct{})
 
-	// Now start the market stream connection if needed
-	m.marketStreamMtx.Lock()
-	defer m.marketStreamMtx.Unlock()
-
-	isNewConnection := m.marketStream == nil
-
 	// Start the market stream if not already running
-	if isNewConnection {
-		m.log.Infof("Initializing MEXC market data stream for %s", slug)
-
-		// Create WebSocket connection for market data
-		wsConn, err := comms.NewWsConn(&comms.WsCfg{
-			URL:              m.wsURL,
-			Logger:           m.log.SubLogger("MEXC-MarketStream"),
-			PingWait:         60 * time.Second,
-			RawHandler:       m.handleMarketDataMessage,
-			ConnectEventFunc: m.handleMarketConnectEvent,
-		})
-		if err != nil {
-			// Clean up the book we just added since we failed
-			delete(m.books, slug)
-			return fmt.Errorf("error creating market data websocket: %w", err)
-		}
-
-		m.marketStream = wsConn
-
-		// Connect and handle messages in the background
-		m.wg.Add(1)
-		go func() {
-			defer m.wg.Done()
-
-			wg, err := wsConn.Connect(ctx)
-			if err != nil {
-				m.log.Errorf("Error connecting to market data stream: %v", err)
-
-				m.marketStreamMtx.Lock()
-				m.marketStream = nil
-				m.marketStreamMtx.Unlock()
-
-				return
-			}
-
-			// Connection successful
-			m.log.Debugf("Connected to market data stream")
-
-			// Wait for the connection to close
-			wg.Wait()
-
-			m.log.Errorf("Market data stream disconnected")
-
-			m.marketStreamMtx.Lock()
-			m.marketStream = nil
-			m.marketStreamMtx.Unlock()
-		}()
-
-		// Give the connection a moment to establish
-		time.Sleep(500 * time.Millisecond)
+	if err := m.startMarketStreams(ctx); err != nil {
+		delete(m.books, slug)
+		return fmt.Errorf("error starting market streams: %w", err)
 	}
 
-	// Start the book sync process
+	// Start the book sync process - this will fetch the snapshot
 	go book.sync(ctx)
 
-	// If the stream is established or just created, subscribe to this market
-	if !isNewConnection || !m.marketStream.IsDown() {
-		// Subscribe to the market
-		subMsg := WsRequest{
-			Method: "SUBSCRIPTION",
-			Params: []string{fmt.Sprintf("%s@depth", slug)},
-		}
+	// Subscribe to the market - use a goroutine with retries to ensure we don't block
+	go func() {
+		// Initial delay to allow connection establishment
+		time.Sleep(500 * time.Millisecond)
 
-		subBytes, err := json.Marshal(subMsg)
-		if err != nil {
-			m.log.Errorf("Error marshaling subscription message: %v", err)
-			// We don't return error here so the book sync can continue
-		} else {
-			// Try to send the subscription
-			err = m.marketStream.SendRaw(subBytes)
+		// Try subscribing multiple times
+		success := false
+		for attempt := 0; attempt < 5 && !success; attempt++ {
+			m.marketStreamMtx.RLock()
+			marketStream := m.marketStream
+			isDown := marketStream == nil || marketStream.IsDown()
+			m.marketStreamMtx.RUnlock()
+
+			if isDown {
+				if attempt > 0 {
+					m.log.Warnf("Attempt %d: Market stream is down, waiting before retry...", attempt+1)
+				}
+				time.Sleep(1 * time.Second)
+				continue
+			}
+
+			// Subscribe using the correct protobuf format for MEXC
+			channel := fmt.Sprintf("spot@public.limit.depth.v3.api.pb@%s@20", slug)
+			subMsg := WsRequest{
+				Method: "SUBSCRIPTION",
+				Params: []string{channel},
+			}
+
+			subBytes, err := json.Marshal(subMsg)
 			if err != nil {
-				m.log.Errorf("Error subscribing to %s@depth: %v", slug, err)
-				// We don't return error here so the book sync can continue
+				m.log.Errorf("Error marshaling subscription message: %v", err)
+				time.Sleep(1 * time.Second)
+				continue
+			}
+
+			m.marketStreamMtx.RLock()
+			err = m.marketStream.SendRaw(subBytes)
+			m.marketStreamMtx.RUnlock()
+
+			if err != nil {
+				m.log.Errorf("Attempt %d: Error subscribing to %s: %v", attempt+1, channel, err)
+				time.Sleep(1 * time.Second)
 			} else {
-				m.log.Infof("Subscribed to %s@depth", slug)
+				m.log.Infof("Successfully subscribed to %s", channel)
+				success = true
 			}
 		}
-	} else {
-		m.log.Warnf("Market stream not ready, sync will attempt to subscribe after connection is established")
-	}
+
+		if !success {
+			m.log.Errorf("Failed to subscribe to %s after multiple attempts", slug)
+		}
+	}()
 
 	return nil
 }
