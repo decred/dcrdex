@@ -1875,24 +1875,30 @@ func (m *mexc) startMarketStreams(ctx context.Context) error {
 	m.marketStreamMtx.Lock()
 	defer m.marketStreamMtx.Unlock()
 
+	if m.marketStream != nil && !m.marketStream.IsDown() {
+		// Already connected and working
+		return nil
+	}
+
+	// If we had a previous connection that's broken, clean it up
 	if m.marketStream != nil {
-		// Check if connected (determine via context property or attribute)
-		return nil // Already connected
+		m.marketStream = nil
 	}
 
 	// Create WebSocket connection for market data
 	wsConn, err := comms.NewWsConn(&comms.WsCfg{
-		URL:        m.wsURL,
-		Logger:     m.log.SubLogger("MEXC-MarketStream"),
-		PingWait:   60 * time.Second,
-		RawHandler: m.handleMarketDataMessage,
+		URL:              m.wsURL,
+		Logger:           m.log.SubLogger("MEXC-MarketStream"),
+		PingWait:         60 * time.Second,
+		RawHandler:       m.handleMarketDataMessage,
+		ConnectEventFunc: m.handleMarketConnectEvent,
 	})
 	if err != nil {
 		return fmt.Errorf("error creating market data websocket: %w", err)
 	}
 
 	m.marketStream = wsConn
-	m.log.Debugf("Connected to market data stream")
+	m.log.Infof("Starting MEXC market data stream...")
 
 	// Connect and handle messages in the background
 	m.wg.Add(1)
@@ -1910,6 +1916,12 @@ func (m *mexc) startMarketStreams(ctx context.Context) error {
 			return
 		}
 
+		// Wait for the connection to finish with a delay to ensure it's fully established
+		time.Sleep(1 * time.Second)
+
+		m.log.Debugf("Connected to market data stream")
+
+		// Wait for connection to close
 		wg.Wait()
 
 		m.log.Errorf("Market data stream disconnected")
@@ -1918,6 +1930,9 @@ func (m *mexc) startMarketStreams(ctx context.Context) error {
 		m.marketStream = nil
 		m.marketStreamMtx.Unlock()
 	}()
+
+	// Allow time for connection to establish
+	time.Sleep(500 * time.Millisecond)
 
 	return nil
 }
@@ -1960,21 +1975,52 @@ func (m *mexc) subscribeMarketStream(ctx context.Context, symbol string) {
 	m.marketStreamMtx.RUnlock()
 
 	if marketStream == nil {
-		m.log.Errorf("Cannot subscribe to %s, market stream not running", symbol)
-		return
+		// Try to create the stream if it doesn't exist
+		err := m.startMarketStreams(ctx)
+		if err != nil {
+			m.log.Errorf("Failed to start market stream for subscription: %v", err)
+			return
+		}
+
+		// Retry getting the stream after starting it
+		m.marketStreamMtx.RLock()
+		marketStream = m.marketStream
+		m.marketStreamMtx.RUnlock()
+
+		if marketStream == nil {
+			m.log.Errorf("Cannot subscribe to %s, market stream creation failed", symbol)
+			return
+		}
 	}
 
-	// Subscribe to depth updates
-	subMsg := struct {
-		Method string   `json:"method"`
-		Params []string `json:"params"`
-		ID     int      `json:"id"`
-	}{
+	// Ensure the connection is established before sending subscription
+	if marketStream.IsDown() {
+		m.log.Errorf("Cannot subscribe to %s, market stream is down", symbol)
+
+		// Try to reconnect
+		err := m.startMarketStreams(ctx)
+		if err != nil {
+			m.log.Errorf("Failed to restart market stream: %v", err)
+			return
+		}
+
+		// Get the new connection
+		m.marketStreamMtx.RLock()
+		marketStream = m.marketStream
+		m.marketStreamMtx.RUnlock()
+
+		if marketStream == nil || marketStream.IsDown() {
+			m.log.Errorf("Cannot subscribe to %s, reconnection failed", symbol)
+			return
+		}
+	}
+
+	// Subscribe to depth updates with correct format
+	subMsg := WsRequest{
 		Method: "SUBSCRIPTION",
 		Params: []string{
 			fmt.Sprintf("%s@depth", symbol),
 		},
-		ID: 1, // Arbitrary ID
 	}
 
 	subBytes, err := json.Marshal(subMsg)
@@ -1983,10 +2029,20 @@ func (m *mexc) subscribeMarketStream(ctx context.Context, symbol string) {
 		return
 	}
 
-	if err := marketStream.SendRaw(subBytes); err != nil {
-		m.log.Errorf("Error subscribing to %s@depth: %v", symbol, err)
-	} else {
-		m.log.Debugf("Subscribed to %s@depth", symbol)
+	// Try multiple times to send the subscription
+	var sendErr error
+	for i := 0; i < 3; i++ {
+		sendErr = marketStream.SendRaw(subBytes)
+		if sendErr == nil {
+			m.log.Infof("Successfully subscribed to %s@depth", symbol)
+			return
+		}
+		m.log.Errorf("Error subscribing to %s@depth (attempt %d): %v", symbol, i+1, sendErr)
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	if sendErr != nil {
+		m.log.Errorf("Failed to subscribe to %s@depth after multiple attempts", symbol)
 	}
 }
 
