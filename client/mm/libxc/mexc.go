@@ -563,46 +563,77 @@ func (m *mexc) setBalances(ctx context.Context) error {
 }
 
 func (m *mexc) refreshBalances(ctx context.Context) error {
+	m.log.Infof("Fetching MEXC account balances...")
 	var resp mexctypes.AccountInfo
 	err := m.getAPI(ctx, "/api/v3/account", nil, true, true, &resp)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to fetch MEXC account balances: %w", err)
 	}
 
 	tokenIDsI := m.tokenIDs.Load()
 	if tokenIDsI == nil {
-		return errors.New("cannot set balances before coin info is fetched")
+		// Try to load coin info first if it's not available
+		m.log.Warnf("TokenIDs not loaded, attempting to load coin info before processing balances")
+		if err := m.getCoinInfo(ctx); err != nil {
+			return fmt.Errorf("cannot fetch balances: token mappings unavailable and failed to load: %w", err)
+		}
+
+		// Check again after loading coin info
+		tokenIDsI = m.tokenIDs.Load()
+		if tokenIDsI == nil {
+			return fmt.Errorf("tokenIDs still nil after loading coin info")
+		}
 	}
+
 	tokenIDs := tokenIDsI.(map[string][]uint32)
+	m.log.Debugf("Processing %d balances from MEXC account", len(resp.Balances))
+
+	// Track processed balances for logging
+	processedCount := 0
+	nonZeroCount := 0
 
 	for _, bal := range resp.Balances {
-		// Convert string values to float64
+		// Skip assets with zero balance to reduce log noise
 		free, _ := strconv.ParseFloat(bal.Free, 64)
 		locked, _ := strconv.ParseFloat(bal.Locked, 64)
 
-		for _, assetID := range getMEXCDEXAssetIDs(bal.Asset, tokenIDs) {
+		// Skip zero balances (both free and locked)
+		if free == 0 && locked == 0 {
+			continue
+		}
+
+		assetIDs := getMEXCDEXAssetIDs(bal.Asset, tokenIDs)
+		if len(assetIDs) == 0 {
+			continue // Skip assets we don't have mappings for
+		}
+
+		nonZeroCount++
+
+		for _, assetID := range assetIDs {
 			ui, err := asset.UnitInfo(assetID)
 			if err != nil {
-				m.log.Errorf("no unit info for known asset ID %d?", assetID)
+				m.log.Errorf("No unit info for asset ID %d (%s), skipping balance", assetID, bal.Asset)
 				continue
 			}
+
 			updatedBalance := &ExchangeBalance{
 				Available: strconv.FormatUint(uint64(math.Round(free*float64(ui.Conventional.ConversionFactor))), 10),
 				Locked:    strconv.FormatUint(uint64(math.Round(locked*float64(ui.Conventional.ConversionFactor))), 10),
 			}
+
 			currBalance, found := m.balances[assetID]
 			if found && *currBalance != *updatedBalance {
-				// This function is only called when the CEX is started up, and
-				// once every 10 minutes. The balance should be updated by the user
-				// data stream, so if it is updated here, it could mean there is an
-				// issue.
-				m.log.Warnf("%v balance was out of sync. Updating. %+v -> %+v", bal.Asset, currBalance, updatedBalance)
+				// Log when balance changes are detected
+				m.log.Debugf("%s balance updated: %+v -> %+v", bal.Asset, currBalance, updatedBalance)
 			}
 
 			m.balances[assetID] = updatedBalance
+			processedCount++
 		}
 	}
 
+	m.log.Infof("Successfully processed MEXC balances: %d non-zero balances mapped to %d asset IDs",
+		nonZeroCount, processedCount)
 	return nil
 }
 
@@ -756,22 +787,31 @@ func (m *mexc) postAPI(ctx context.Context, endpoint string, query, form url.Val
 func (m *mexc) request(ctx context.Context, method, endpoint string, query, form url.Values, key, sign bool, thing interface{}) error {
 	fullURL := m.marketsURL + endpoint
 
+	// Create a new query if it doesn't exist
 	if query == nil {
 		query = make(url.Values)
 	}
 
+	// Add timestamp for signed requests - must be added before signature calculation
 	if sign {
-		// Add timestamp for signed requests
-		query.Add("timestamp", strconv.FormatInt(time.Now().UnixMilli(), 10))
-		query.Add("recvWindow", mxRecvWindow)
+		query.Set("timestamp", strconv.FormatInt(time.Now().UnixMilli(), 10))
+		query.Set("recvWindow", mxRecvWindow)
 	}
 
+	// Create a copy of query for the signature calculation before adding signature
+	signatureQuery := url.Values{}
+	for k, v := range query {
+		signatureQuery[k] = v
+	}
+
+	// Encode query string and prepare body for the request
 	queryString := query.Encode()
 	bodyString := ""
 	if form != nil {
 		bodyString = form.Encode()
 	}
 
+	// Set up headers
 	header := make(http.Header, 2)
 	body := bytes.NewBuffer(nil)
 
@@ -784,37 +824,44 @@ func (m *mexc) request(ctx context.Context, method, endpoint string, query, form
 		header.Set("X-MEXC-APIKEY", m.apiKey)
 	}
 
+	// Calculate and add signature
 	if sign {
-		// Construct signature payload based on request type
+		// Construct the signature payload based on the request type
 		var signaturePayload string
+
+		signatureQueryString := signatureQuery.Encode()
 
 		switch method {
 		case http.MethodGet, http.MethodDelete:
 			// For GET/DELETE requests, sign the query string
-			signaturePayload = queryString
+			signaturePayload = signatureQueryString
 		case http.MethodPost, http.MethodPut:
 			// For POST/PUT, sign the request body if present, otherwise query string
 			if bodyString != "" {
 				signaturePayload = bodyString
 			} else {
-				signaturePayload = queryString
+				signaturePayload = signatureQueryString
 			}
 		}
 
-		// Calculate signature
+		// Calculate HMAC-SHA256 signature
 		mac := hmac.New(sha256.New, []byte(m.secretKey))
 		mac.Write([]byte(signaturePayload))
 		signature := hex.EncodeToString(mac.Sum(nil))
 
-		// Add signature to query params (unlike some exchanges that add to headers)
+		// Add signature to query params
 		query.Set("signature", signature)
+
+		// Re-encode query string with signature included
 		queryString = query.Encode()
 	}
 
+	// Construct the full URL with query parameters
 	if queryString != "" {
 		fullURL = fmt.Sprintf("%s?%s", fullURL, queryString)
 	}
 
+	// Create and send the request
 	req, err := http.NewRequestWithContext(ctx, method, fullURL, body)
 	if err != nil {
 		return fmt.Errorf("NewRequestWithContext error: %w", err)
@@ -822,6 +869,7 @@ func (m *mexc) request(ctx context.Context, method, endpoint string, query, form
 
 	req.Header = header
 
+	// Handle the response
 	var mexcErr MxCodedErr
 	if err := dexnet.Do(req, thing, dexnet.WithSizeLimit(1<<24), dexnet.WithErrorParsing(&mexcErr)); err != nil {
 		m.log.Errorf("request error from endpoint %s %q with query = %q, body = %q, mexc coded error: %v, msg = %q",
@@ -976,7 +1024,8 @@ func (m *mexc) getUserDataStream(ctx context.Context) error {
 		ListenKey string `json:"listenKey"`
 	}
 
-	err := m.postAPI(ctx, "/api/v3/userDataStream", nil, nil, true, false, &resp)
+	// Changed from false to true for the sign parameter to ensure signature is included
+	err := m.postAPI(ctx, "/api/v3/userDataStream", nil, nil, true, true, &resp)
 	if err != nil {
 		return fmt.Errorf("error getting listen key: %w", err)
 	}
@@ -1016,7 +1065,8 @@ func (m *mexc) keepAliveListenKey(ctx context.Context) {
 			}
 			form := url.Values{}
 			form.Add("listenKey", key)
-			err := m.putAPI(ctx, "/api/v3/userDataStream", nil, form, true, false, nil)
+			// Changed from false to true for the sign parameter to ensure signature is included
+			err := m.putAPI(ctx, "/api/v3/userDataStream", nil, form, true, true, nil)
 			if err != nil {
 				m.log.Errorf("error refreshing listen key: %v", err)
 			} else {
@@ -1749,7 +1799,12 @@ func (m *mexc) Balance(assetID uint32) (*ExchangeBalance, error) {
 
 	bal, found := m.balances[assetID]
 	if !found {
-		return nil, fmt.Errorf("no balance found for asset %d", assetID)
+		// Instead of returning an error, return a zero balance
+		m.log.Debugf("No balance found for asset ID %d, returning zero balance", assetID)
+		return &ExchangeBalance{
+			Available: "0",
+			Locked:    "0",
+		}, nil
 	}
 
 	// Return a copy to prevent external modification
