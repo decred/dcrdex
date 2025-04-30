@@ -955,7 +955,7 @@ func isPbMessage(header []byte) bool {
 
 // handleProtobufMessage processes market data protobuf messages.
 func (m *mexc) handleProtobufMessage(data []byte) {
-	m.log.Debugf("[MarketWS] Received protobuf message of length %d", len(data))
+	m.log.Tracef("[MarketWS] Received protobuf message of length %d", len(data))
 
 	// Parse the binary protobuf message using our mexctypes
 	pbMsg, err := mexctypes.UnmarshalMEXCDepthProto(data)
@@ -1024,7 +1024,7 @@ func (m *mexc) handleProtobufMessage(data []byte) {
 
 	// Log successful parsing periodically
 	if len(depthUpdate.Bids) > 0 || len(depthUpdate.Asks) > 0 {
-		m.log.Debugf("[MarketWS] Parsed protobuf depth update for %s: v=%s, bids=%d, asks=%d",
+		m.log.Tracef("[MarketWS] Parsed protobuf depth update for %s: v=%s, bids=%d, asks=%d",
 			depthUpdate.Symbol, depthUpdate.Version, len(depthUpdate.Bids), len(depthUpdate.Asks))
 	}
 
