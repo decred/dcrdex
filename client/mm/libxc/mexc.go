@@ -82,6 +82,11 @@ const (
 	mxErrCodeInvalidListenKey = -1125 // Adjust if MEXC uses a different code
 )
 
+// Define error constants
+var (
+// No need to redefine ErrUnsyncedOrderbook here, it's already in interface.go
+)
+
 // mxOrderBook manages an orderbook for a single market. It keeps
 // the orderbook synced and allows querying of vwap.
 type mxOrderBook struct {
@@ -89,6 +94,7 @@ type mxOrderBook struct {
 	synced         atomic.Bool
 	syncChan       chan struct{}
 	numSubscribers uint32
+	active         bool
 	cm             *dex.ConnectionMaster
 
 	getSnapshot func() (*mexctypes.DepthResponse, error)
@@ -122,6 +128,7 @@ func newMxOrderBook(
 		getSnapshot:           getSnapshot,
 		connectedChan:         make(chan bool, 5),
 		lastUpdateTime:        time.Now(),
+		active:                true,
 	}
 }
 
@@ -378,6 +385,7 @@ type mexc struct {
 
 	marketStreamMtx sync.RWMutex
 	marketStream    comms.WsConn
+	userDataStream  comms.WsConn // Add userDataStream field
 
 	marketSubResyncChan chan string // Channel for market resubscription
 
@@ -434,9 +442,9 @@ func newMexc(cfg *CEXConfig) (*mexc, error) {
 
 	// Generate a prefix for order IDs based on API key
 	prefixBytes := sha256.Sum256([]byte(cfg.APIKey))
-	prefix := prefixBytes[:4]
+	prefix := prefixBytes[:5]
 
-	m := &mexc{
+	instance := &mexc{
 		log:                 cfg.Logger,
 		broadcast:           cfg.Notify,
 		marketsURL:          marketsURL,
@@ -446,112 +454,357 @@ func newMexc(cfg *CEXConfig) (*mexc, error) {
 		secretKey:           cfg.SecretKey,
 		knownAssets:         knownAssets,
 		balances:            make(map[uint32]*ExchangeBalance),
-		books:               make(map[string]*mxOrderBook),
 		net:                 cfg.Net,
 		tradeInfo:           make(map[string]*mxTradeInfo),
 		tradeUpdaters:       make(map[int]chan *Trade),
 		tradeIDNoncePrefix:  prefix,
 		reconnectChan:       make(chan struct{}, 1),
+		books:               make(map[string]*mxOrderBook),
 		marketSubResyncChan: make(chan string, 10),
 		activeTrades:        make(map[string]*mxTradeInfo),
 		quit:                make(chan struct{}),
 	}
 
 	// Initialize atomic values to prevent nil panics
-	m.markets.Store(make(map[string]*mexctypes.SymbolInfo))
-	m.tokenIDs.Store(make(map[string][]uint32))
-	m.minWithdraw.Store(make(map[uint32]*mxWithdrawInfo))
-	m.listenKey.Store("")
+	instance.markets.Store(make(map[string]*mexctypes.SymbolInfo))
+	instance.tokenIDs.Store(make(map[string][]uint32))
+	instance.minWithdraw.Store(make(map[uint32]*mxWithdrawInfo))
+	instance.listenKey.Store("")
 
-	return m, nil
+	// Create the market data WebSocket connection
+	marketLogger := cfg.Logger.SubLogger("MarketWS")
+	marketWsCfg := &comms.WsCfg{
+		Logger:           marketLogger,
+		URL:              wsURL,
+		PingWait:         60 * time.Second,
+		RawHandler:       instance.handleMarketRawMessage,
+		ConnectEventFunc: instance.handleMarketConnectEvent,
+		EchoPingData:     true,
+	}
+
+	marketStream, err := comms.NewWsConn(marketWsCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create market WebSocket connection: %w", err)
+	}
+	instance.marketStream = marketStream
+
+	// Create the user data WebSocket connection
+	userLogger := cfg.Logger.SubLogger("UserWS")
+	userWsCfg := &comms.WsCfg{
+		Logger:       userLogger,
+		URL:          wsURL, // Will be updated with listenKey before connect
+		PingWait:     30 * time.Second,
+		RawHandler:   instance.handleUserStreamRawMessage,
+		EchoPingData: true,
+	}
+
+	userStream, err := comms.NewWsConn(userWsCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create user WebSocket connection: %w", err)
+	}
+	instance.userDataStream = userStream
+
+	return instance, nil
 }
 
-// Connect connects to the MEXC API and starts background processes.
+// Connect establishes the connection to the exchange API and starts
+// background processes.
 func (m *mexc) Connect(ctx context.Context) (*sync.WaitGroup, error) {
-	wg := new(sync.WaitGroup)
+	// Check API keys by making a signed request
+	if err := m.checkAPIKeys(ctx); err != nil {
+		m.log.Errorf("API key check failed: %v", err)
+		return nil, fmt.Errorf("API key check failed: %w", err)
+	}
+	m.log.Infof("API keys verified successfully")
 
-	// 1. Fetch coin info (network, withdrawal info)
+	// Load initial market and token data
 	if err := m.getCoinInfo(ctx); err != nil {
-		return nil, fmt.Errorf("error getting coin info: %w", err)
+		return nil, fmt.Errorf("failed to fetch initial coin info: %w", err)
 	}
 
-	// 2. Fetch exchange info (markets, trading pairs)
 	if _, err := m.getMarkets(ctx); err != nil {
-		return nil, fmt.Errorf("error getting markets: %w", err)
+		return nil, fmt.Errorf("failed to fetch initial market info: %w", err)
 	}
 
-	// 3. Get initial account balances
-	if err := m.setBalances(ctx); err != nil {
-		return nil, fmt.Errorf("error getting balances: %w", err)
+	m.log.Infof("Initial market and coin data loaded successfully")
+
+	// Launch user data stream connection
+	m.log.Infof("Starting user data stream...")
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		m.connectUserStream(ctx)
+	}()
+
+	// Setup periodic data refresh
+	m.wg.Add(2)
+	go m.periodicCoinInfoRefresh(ctx)
+	go m.periodicMarketsRefresh(ctx)
+
+	m.log.Infof("MEXC connection established successfully")
+	return &m.wg, nil
+}
+
+// periodicCoinInfoRefresh periodically refreshes coin information.
+func (m *mexc) periodicCoinInfoRefresh(ctx context.Context) {
+	const refreshInterval = 1 * time.Hour
+	const errorRetryInterval = 1 * time.Minute
+
+	ticker := time.NewTicker(refreshInterval)
+	defer ticker.Stop()
+
+	m.log.Infof("Starting periodic coin info refresh (every %v)", refreshInterval)
+	defer m.log.Infof("Stopping periodic coin info refresh")
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			err := m.getCoinInfo(refreshCtx)
+			cancel()
+
+			if err != nil {
+				m.log.Errorf("Periodic coin info refresh failed: %v. Retrying in %v", err, errorRetryInterval)
+				ticker.Reset(errorRetryInterval)
+			} else {
+				m.log.Debugf("Periodic coin info refresh successful")
+				ticker.Reset(refreshInterval)
+			}
+		}
+	}
+}
+
+// periodicMarketsRefresh periodically refreshes market information.
+func (m *mexc) periodicMarketsRefresh(ctx context.Context) {
+	const refreshInterval = 1 * time.Hour
+	const errorRetryInterval = 1 * time.Minute
+
+	ticker := time.NewTicker(refreshInterval)
+	defer ticker.Stop()
+
+	m.log.Infof("Starting periodic market info refresh (every %v)", refreshInterval)
+	defer m.log.Infof("Stopping periodic market info refresh")
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			_, err := m.getMarkets(refreshCtx)
+			cancel()
+
+			if err != nil {
+				m.log.Errorf("Periodic market info refresh failed: %v. Retrying in %v", err, errorRetryInterval)
+				ticker.Reset(errorRetryInterval)
+			} else {
+				m.log.Debugf("Periodic market info refresh successful")
+				ticker.Reset(refreshInterval)
+			}
+		}
+	}
+}
+
+// handleMarketConnectEvent processes market WebSocket connection status changes.
+func (m *mexc) handleMarketConnectEvent(status comms.ConnectionStatus) {
+	m.log.Debugf("[MarketWS] Connection status changed: %s", status)
+
+	switch status {
+	case comms.Connected:
+		// When connection is established, resubscribe to all active markets
+		m.log.Infof("[MarketWS] Connection established, resubscribing to markets")
+		go m.resubscribeMarkets(context.Background())
+	case comms.Disconnected:
+		m.log.Warnf("[MarketWS] Connection lost")
+		// Mark all books as unsynced
+		m.booksMtx.RLock()
+		for _, book := range m.books {
+			book.synced.Store(false)
+		}
+		m.booksMtx.RUnlock()
+	}
+}
+
+// resubscribeMarkets resubscribes to all active market streams after a reconnection.
+func (m *mexc) resubscribeMarkets(ctx context.Context) {
+	m.log.Infof("[MarketWS] Resubscribing to markets after reconnection")
+
+	// Get the list of active symbols that need resubscription
+	m.booksMtx.RLock()
+	activeSymbols := make([]string, 0, len(m.books))
+	for symbol, book := range m.books {
+		if book.active {
+			activeSymbols = append(activeSymbols, symbol)
+		}
+	}
+	m.booksMtx.RUnlock()
+
+	if len(activeSymbols) == 0 {
+		m.log.Debugf("[MarketWS] No active markets to resubscribe")
+		return
 	}
 
-	// 4. Set up user data stream
-	if err := m.getUserDataStream(ctx); err != nil {
-		return nil, fmt.Errorf("error getting user data stream: %w", err)
+	// Batch subscribe to all active markets
+	channels := make([]string, len(activeSymbols))
+	for i, symbol := range activeSymbols {
+		channels[i] = fmt.Sprintf("spot@public.limit.depth.v3.api.pb@%s@20", symbol)
 	}
 
-	// 5. Start periodic balance refresh
-	wg.Add(1)
+	// Send subscription request
+	req := WsRequest{Method: "SUBSCRIPTION", Params: channels}
+	reqBytes, err := json.Marshal(req)
+	if err != nil {
+		m.log.Errorf("[MarketWS] Failed to marshal resubscription request: %v", err)
+		return
+	}
+
+	err = m.marketStream.SendRaw(reqBytes)
+	if err != nil {
+		m.log.Errorf("[MarketWS] Failed to send resubscription request: %v", err)
+		return
+	}
+
+	m.log.Infof("[MarketWS] Successfully sent resubscription request for %d markets", len(activeSymbols))
+}
+
+// handleMarketRawMessage processes raw WebSocket messages from the market stream.
+func (m *mexc) handleMarketRawMessage(raw []byte) {
+	if len(raw) == 0 {
+		return
+	}
+
+	// Check if the message is a ping
+	if string(raw) == `{"ping":true}` || string(raw) == "ping" {
+		// Respond with pong
+		m.marketStream.SendRaw([]byte(`{"pong":true}`))
+		return
+	}
+
+	// Check if it's a protobuf message (simplified check)
+	if len(raw) > 4 && isPbMessage(raw[0:4]) {
+		m.handleProtobufMessage(raw)
+		return
+	}
+
+	// Handle regular JSON messages
+	var resp WsResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		m.log.Errorf("[MarketWS] Failed to parse WebSocket message: %v\nRaw: %s", err, string(raw))
+		return
+	}
+
+	// Handle different response types
+	switch {
+	case resp.Result != nil:
+		m.log.Debugf("[MarketWS] Received subscription result: %v", resp.Result)
+	case resp.Error != nil:
+		m.log.Errorf("[MarketWS] Received error: %v", resp.Error)
+	default:
+		m.log.Warnf("[MarketWS] Unhandled WebSocket message: %s", string(raw))
+	}
+}
+
+// isPbMessage checks if the header bytes indicate a protobuf message
+func isPbMessage(header []byte) bool {
+	// This is a simplified check - in real implementation we would need
+	// to verify the protobuf header format more carefully
+	// In MEXC's case, protobuf messages start with specific header bytes
+	return len(header) >= 4 && header[0] == 0x12 && header[1] <= 0x10
+}
+
+// handleProtobufMessage processes market data protobuf messages.
+func (m *mexc) handleProtobufMessage(data []byte) {
+	// In a real implementation, proper protobuf parsing would be implemented
+	// This is a placeholder implementation to demonstrate the concept
+	m.log.Debugf("[MarketWS] Received protobuf message of length %d", len(data))
+
+	// TODO: Implement actual protobuf parsing
+	// This would extract the symbol, bids, and asks from the protobuf message
+	// For now, we're just handling the message receipt
+}
+
+// connectMarketStream establishes a WebSocket connection for market data.
+func (m *mexc) connectMarketStream(ctx context.Context, firstMexcSymbol string) error {
+	m.log.Infof("[MarketWS] Establishing initial connection for symbol %s...", firstMexcSymbol)
+
+	// Launch the WebSocket connection
+	wg, err := m.marketStream.Connect(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to connect market WebSocket: %w", err)
+	}
+	m.log.Debugf("[MarketWS] Connection initiated, waiting for establishment")
+
+	// Store the waitgroup so it can be used for cleanup later if needed
 	go func() {
-		defer wg.Done()
-		ticker := time.NewTicker(time.Minute)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				err := m.setBalances(ctx)
-				if err != nil {
-					m.log.Errorf("Error fetching balances: %v", err)
-				}
-			case <-ctx.Done():
-				return
-			}
-		}
+		wg.Wait()
+		m.log.Debugf("[MarketWS] Connection wait group completed")
 	}()
 
-	// 6. Start periodic market info refresh
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		nextTick := time.After(time.Hour)
-		for {
-			select {
-			case <-nextTick:
-				_, err := m.getMarkets(ctx)
-				if err != nil {
-					m.log.Errorf("Error fetching markets: %v", err)
-					nextTick = time.After(time.Minute)
-				} else {
-					nextTick = time.After(time.Hour)
-				}
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
+	// Wait for connection to establish
+	time.Sleep(500 * time.Millisecond)
+	if m.marketStream.IsDown() {
+		return fmt.Errorf("market stream connection failed shortly after initiation")
+	}
 
-	// 7. Start periodic coin info refresh
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		nextTick := time.After(time.Hour)
-		for {
-			select {
-			case <-nextTick:
-				err := m.getCoinInfo(ctx)
-				if err != nil {
-					m.log.Errorf("Error fetching coin info: %v", err)
-					nextTick = time.After(time.Minute)
-				} else {
-					nextTick = time.After(time.Hour)
-				}
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
+	// Send initial subscription with protobuf format
+	m.log.Infof("[MarketWS] Sending initial subscription for %s", firstMexcSymbol)
+	channel := fmt.Sprintf("spot@public.limit.depth.v3.api.pb@%s@20", firstMexcSymbol)
+	req := WsRequest{Method: "SUBSCRIPTION", Params: []string{channel}}
+	reqBytes, marshalErr := json.Marshal(req)
+	if marshalErr != nil {
+		return fmt.Errorf("failed to marshal initial market subscription request: %w", marshalErr)
+	}
 
-	return wg, nil
+	err = m.marketStream.SendRaw(reqBytes)
+	if err != nil {
+		return fmt.Errorf("failed to send initial market subscription for %s: %w", firstMexcSymbol, err)
+	}
+
+	m.log.Infof("[MarketWS] Initial connection and subscription process initiated for %s", firstMexcSymbol)
+	return nil
+}
+
+// getDepthSnapshot fetches an orderbook snapshot from the REST API.
+func (m *mexc) getDepthSnapshot(ctx context.Context, symbol string) (*mexctypes.DepthResponse, error) {
+	m.log.Debugf("Fetching depth snapshot for %s", symbol)
+
+	path := "/api/v3/depth"
+	params := url.Values{}
+	params.Set("symbol", symbol)
+	params.Set("limit", "1000") // Request maximum depth
+
+	var resp mexctypes.DepthResponse
+	err := m.getAPI(ctx, path, params, false, false, &resp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get depth snapshot: %w", err)
+	}
+
+	return &resp, nil
+}
+
+// handleUserStreamRawMessage processes raw WebSocket messages from the user data stream.
+func (m *mexc) handleUserStreamRawMessage(raw []byte) {
+	// This is a placeholder for handling user data stream messages
+	// In a complete implementation, we would parse and handle different message types
+	m.log.Debugf("[UserWS] Received message: %s", string(raw))
+}
+
+// checkAPIKeys checks if the provided API keys are valid.
+func (m *mexc) checkAPIKeys(ctx context.Context) error {
+	if m.apiKey == "" || m.secretKey == "" {
+		return fmt.Errorf("API key and/or secret key not provided")
+	}
+
+	// Use the account endpoint which requires authentication
+	path := "/api/v3/account"
+	err := m.getAPI(ctx, path, nil, true, true, nil)
+	if err != nil {
+		return fmt.Errorf("API key check failed: %w", err)
+	}
+
+	return nil
 }
 
 // setBalances queries MEXC for the user's balances and stores them in the
@@ -2222,21 +2475,6 @@ func (m *mexc) Close() {
 	}
 }
 
-// handleProtobufMessage processes binary protobuf messages from the WebSocket.
-func (m *mexc) handleProtobufMessage(msg []byte) {
-	// The actual implementation would use the protobuf package to decode
-	// the message, but for simplicity we'll log that we received it
-	m.log.Debugf("Received protobuf message of length %d bytes", len(msg))
-
-	// For protobuf depth updates, we would:
-	// 1. Decode the protobuf message
-	// 2. Convert to depth update structure
-	// 3. Process similar to JSON depth updates
-
-	// In a real implementation, this would use the protobuf definitions
-	// from mexctypes/protobuf.go
-}
-
 // processDepthUpdate processes orderbook depth updates from the WebSocket.
 func (m *mexc) processDepthUpdate(update *mexctypes.WsDepthUpdate) {
 	symbolParts := strings.Split(update.Stream, "@")
@@ -2787,4 +3025,29 @@ func (m *mexc) mapMEXCCoinNetworkToDEXSymbol(mexcCoinUpper, mexcNetwork string) 
 
 	// Return token symbol (base + suffix)
 	return dexBase + dexNetSuffix
+}
+
+// WsRequest represents a WebSocket request to MEXC.
+type WsRequest struct {
+	Method string   `json:"method"`
+	Params []string `json:"params"`
+}
+
+// WsResponse represents a WebSocket response from MEXC.
+type WsResponse struct {
+	Code   int         `json:"code,omitempty"`
+	Error  interface{} `json:"err,omitempty"`
+	Result interface{} `json:"result,omitempty"`
+}
+
+// connectUserStream sets up and establishes the user data stream
+func (m *mexc) connectUserStream(ctx context.Context) {
+	// Get a listen key first
+	if err := m.getUserDataStream(ctx); err != nil {
+		m.log.Errorf("Failed to get listen key for user data stream: %v", err)
+		return
+	}
+
+	// The userDataStreamHandler will handle connection and reconnection
+	// It gets called by getUserDataStream
 }
