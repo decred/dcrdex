@@ -82,3 +82,9 @@ type BookTicker struct {
 	AskPrice    string `json:"askPrice"`
 	AskQuantity string `json:"askQty"`
 }
+
+// TickerPrice structure for GET /api/v3/ticker/price endpoint.
+type TickerPrice struct {
+	Symbol string `json:"symbol"`
+	Price  string `json:"price"`
+}

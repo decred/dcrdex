@@ -83,3 +83,43 @@ type WsAccountUpdateData struct {
 	Available string `json:"f"` // Available balance
 	Locked    string `json:"l"` // Locked balance
 }
+
+// WsDepthUpdate represents a depth update from WebSocket
+type WsDepthUpdate struct {
+	Stream string          `json:"stream"`
+	Data   json.RawMessage `json:"data"`
+}
+
+// WsAccountUpdate represents an account update from WebSocket
+type WsAccountUpdate struct {
+	EventType string                `json:"e"`
+	EventTime int64                 `json:"E"`
+	Balances  []WsAccountUpdateData `json:"B"`
+}
+
+// WsOrderUpdate represents an order update from WebSocket
+type WsOrderUpdate struct {
+	EventType         string `json:"e"`
+	EventTime         int64  `json:"E"`
+	Symbol            string `json:"s"`
+	ClientOrderID     string `json:"c"`
+	Side              string `json:"S"`
+	OrderType         string `json:"o"`
+	TimeInForce       string `json:"f"`
+	OrderQuantity     string `json:"q"`
+	OrderPrice        string `json:"p"`
+	StopPrice         string `json:"P"`
+	OrderID           string `json:"i"`
+	OrderStatus       string `json:"X"`
+	OrderRejectReason string `json:"r"`
+	OrderTime         int64  `json:"O"`
+	TransactionTime   int64  `json:"T"`
+	WorkingTime       int64  `json:"W"`
+	OriginalQuantity  string `json:"Q"`
+	ExecutedQuantity  string `json:"z"`
+	LastExecutedPrice string `json:"L"`
+	LastExecutedQty   string `json:"l"`
+	Commission        string `json:"n"`
+	CommissionAsset   string `json:"N"`
+	IsMaker           bool   `json:"m"`
+}

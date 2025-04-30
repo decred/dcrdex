@@ -72,3 +72,23 @@ type WithdrawHistoryRecord struct {
 	TxID           string `json:"txId,omitempty"`
 	ApplyTime      string `json:"applyTime"` // Timestamp as string?
 }
+
+// PendingDeposit represents a deposit record returned by the deposit history endpoint
+type PendingDeposit struct {
+	TxID           string  `json:"txId"`
+	Coin           string  `json:"coin"`
+	Network        string  `json:"network"`
+	Amount         float64 `json:"amount"`
+	Address        string  `json:"address"`
+	AddressTag     string  `json:"addressTag"`
+	Status         int     `json:"status"` // 0:pending, 1:success
+	TransactionFee string  `json:"transactionFee"`
+	ConfirmTimes   string  `json:"confirmTimes"`
+	UnlockConfirm  string  `json:"unlockConfirm"`
+	WalletType     int     `json:"walletType"`
+	TxKey          string  `json:"txKey"`
+	DepositType    int     `json:"depositType"`
+	InsertTime     int64   `json:"insertTime"`
+	SuccessTime    int64   `json:"successTime"`
+	BlockHash      string  `json:"blockHash,omitempty"`
+}

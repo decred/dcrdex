@@ -84,3 +84,12 @@ type Trade struct {
 	IsMaker         bool   `json:"isMaker"`
 	IsBestMatch     bool   `json:"isBestMatch"` // Seems specific to Binance, check MEXC docs
 }
+
+// OrderResponse is an alias for NewOrderResponse
+type OrderResponse NewOrderResponse
+
+// CancelOrderResponse is an alias for CanceledOrder
+type CancelOrderResponse CanceledOrder
+
+// MyTrade is an alias for Trade
+type MyTrade Trade
