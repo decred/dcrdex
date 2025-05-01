@@ -31,6 +31,13 @@ type PublicLimitDepthV3ApiItemWrapper struct {
 	Quantity string `json:"quantity,omitempty"`
 }
 
+// Price scaling factor for MEXC API
+// Values from the API are multiplied by 10^6 (e.g., 12.91 USD is represented as 12910000)
+const (
+	mexcPriceScaleFactor    = 1000000.0   // 10^6 for price values
+	mexcQuantityScaleFactor = 100000000.0 // 10^8 for quantity values
+)
+
 // UnmarshalMEXCDepthProto unmarshals a binary protobuf message.
 // This handles parsing the websocket message format and extracting the protobuf data.
 func UnmarshalMEXCDepthProto(data []byte) (*PublicLimitDepthsV3ApiWrapper, error) {
@@ -82,33 +89,62 @@ func UnmarshalMEXCDepthProto(data []byte) (*PublicLimitDepthsV3ApiWrapper, error
 		}
 	}
 
-	// Convert Asks
+	// Convert Asks with correct scaling factor
 	if protoAsks := pbMsg.GetAsks(); len(protoAsks) > 0 {
 		result.Asks = make([]PublicLimitDepthV3ApiItemWrapper, 0, len(protoAsks))
 		for _, ask := range protoAsks {
 			if ask != nil {
+				// Apply scaling factor to convert from MEXC's representation to our API format
+				price, qty := applyScalingFactor(ask.GetPrice(), ask.GetQuantity())
 				result.Asks = append(result.Asks, PublicLimitDepthV3ApiItemWrapper{
-					Price:    ask.GetPrice(),
-					Quantity: ask.GetQuantity(),
+					Price:    price,
+					Quantity: qty,
 				})
 			}
 		}
 	}
 
-	// Convert Bids
+	// Convert Bids with correct scaling factor
 	if protoBids := pbMsg.GetBids(); len(protoBids) > 0 {
 		result.Bids = make([]PublicLimitDepthV3ApiItemWrapper, 0, len(protoBids))
 		for _, bid := range protoBids {
 			if bid != nil {
+				// Apply scaling factor to convert from MEXC's representation to our API format
+				price, qty := applyScalingFactor(bid.GetPrice(), bid.GetQuantity())
 				result.Bids = append(result.Bids, PublicLimitDepthV3ApiItemWrapper{
-					Price:    bid.GetPrice(),
-					Quantity: bid.GetQuantity(),
+					Price:    price,
+					Quantity: qty,
 				})
 			}
 		}
 	}
 
 	return result, nil
+}
+
+// applyScalingFactor adjusts price and quantity values from MEXC's representation
+// to the format expected by our API.
+func applyScalingFactor(priceStr, qtyStr string) (string, string) {
+	// Parse the string values to floats
+	price, err := strconv.ParseFloat(priceStr, 64)
+	if err != nil {
+		// If parsing fails, return the original strings
+		return priceStr, qtyStr
+	}
+
+	qty, err := strconv.ParseFloat(qtyStr, 64)
+	if err != nil {
+		// If parsing fails, return the original strings
+		return priceStr, qtyStr
+	}
+
+	// Divide by the scaling factors to get the actual values
+	adjustedPrice := price / mexcPriceScaleFactor
+	adjustedQty := qty / mexcQuantityScaleFactor
+
+	// Convert back to strings with appropriate precision
+	return strconv.FormatFloat(adjustedPrice, 'f', 8, 64),
+		strconv.FormatFloat(adjustedQty, 'f', 8, 64)
 }
 
 // extractProtobufData attempts to extract the actual protobuf binary data from the websocket message.
