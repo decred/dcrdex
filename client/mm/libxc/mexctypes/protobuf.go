@@ -31,13 +31,6 @@ type PublicLimitDepthV3ApiItemWrapper struct {
 	Quantity string `json:"quantity,omitempty"`
 }
 
-// Price scaling factor for MEXC API
-// Values from the API are multiplied by these factors
-const (
-	mexcPriceScaleFactor    = 1000000.0   // 10^6 for price values
-	mexcQuantityScaleFactor = 100000000.0 // 10^8 for quantity values
-)
-
 // UnmarshalMEXCDepthProto unmarshals a binary protobuf message.
 // This handles parsing the websocket message format and extracting the protobuf data.
 func UnmarshalMEXCDepthProto(data []byte) (*PublicLimitDepthsV3ApiWrapper, error) {
@@ -89,62 +82,33 @@ func UnmarshalMEXCDepthProto(data []byte) (*PublicLimitDepthsV3ApiWrapper, error
 		}
 	}
 
-	// Convert Asks with correct scaling factor
+	// Convert Asks - preserve raw numeric values
 	if protoAsks := pbMsg.GetAsks(); len(protoAsks) > 0 {
 		result.Asks = make([]PublicLimitDepthV3ApiItemWrapper, 0, len(protoAsks))
 		for _, ask := range protoAsks {
 			if ask != nil {
-				// Apply scaling factor to convert from MEXC's representation to our API format
-				price, qty := applyScalingFactor(ask.GetPrice(), ask.GetQuantity())
 				result.Asks = append(result.Asks, PublicLimitDepthV3ApiItemWrapper{
-					Price:    price,
-					Quantity: qty,
+					Price:    ask.GetPrice(),
+					Quantity: ask.GetQuantity(),
 				})
 			}
 		}
 	}
 
-	// Convert Bids with correct scaling factor
+	// Convert Bids - preserve raw numeric values
 	if protoBids := pbMsg.GetBids(); len(protoBids) > 0 {
 		result.Bids = make([]PublicLimitDepthV3ApiItemWrapper, 0, len(protoBids))
 		for _, bid := range protoBids {
 			if bid != nil {
-				// Apply scaling factor to convert from MEXC's representation to our API format
-				price, qty := applyScalingFactor(bid.GetPrice(), bid.GetQuantity())
 				result.Bids = append(result.Bids, PublicLimitDepthV3ApiItemWrapper{
-					Price:    price,
-					Quantity: qty,
+					Price:    bid.GetPrice(),
+					Quantity: bid.GetQuantity(),
 				})
 			}
 		}
 	}
 
 	return result, nil
-}
-
-// applyScalingFactor adjusts price and quantity values from MEXC's representation
-// to the format expected by our API.
-func applyScalingFactor(priceStr, qtyStr string) (string, string) {
-	// Parse the string values to floats
-	price, err := strconv.ParseFloat(priceStr, 64)
-	if err != nil {
-		// If parsing fails, return the original strings
-		return priceStr, qtyStr
-	}
-
-	qty, err := strconv.ParseFloat(qtyStr, 64)
-	if err != nil {
-		// If parsing fails, return the original strings
-		return priceStr, qtyStr
-	}
-
-	// Divide by the scaling factors to get the actual values
-	adjustedPrice := price / mexcPriceScaleFactor
-	adjustedQty := qty / mexcQuantityScaleFactor
-
-	// Format price with 5 decimal places and quantity with 8 decimal places
-	return strconv.FormatFloat(adjustedPrice, 'f', 5, 64),
-		strconv.FormatFloat(adjustedQty, 'f', 8, 64)
 }
 
 // extractProtobufData attempts to extract the actual protobuf binary data from the websocket message.
@@ -243,28 +207,10 @@ func handleJSONMessage(msg WsMessage) (*PublicLimitDepthsV3ApiWrapper, error) {
 		if err := json.Unmarshal(msg.Data, &depthData); err == nil {
 			// If we successfully parsed depth data, use that
 			if len(depthData.Asks) > 0 {
-				// Apply scaling to the JSON data as well
-				scaledAsks := make([]PublicLimitDepthV3ApiItemWrapper, 0, len(depthData.Asks))
-				for _, ask := range depthData.Asks {
-					price, qty := applyScalingFactor(ask.Price, ask.Quantity)
-					scaledAsks = append(scaledAsks, PublicLimitDepthV3ApiItemWrapper{
-						Price:    price,
-						Quantity: qty,
-					})
-				}
-				result.Asks = scaledAsks
+				result.Asks = depthData.Asks
 			}
 			if len(depthData.Bids) > 0 {
-				// Apply scaling to the JSON data as well
-				scaledBids := make([]PublicLimitDepthV3ApiItemWrapper, 0, len(depthData.Bids))
-				for _, bid := range depthData.Bids {
-					price, qty := applyScalingFactor(bid.Price, bid.Quantity)
-					scaledBids = append(scaledBids, PublicLimitDepthV3ApiItemWrapper{
-						Price:    price,
-						Quantity: qty,
-					})
-				}
-				result.Bids = scaledBids
+				result.Bids = depthData.Bids
 			}
 			if depthData.Version != "" {
 				result.Version = depthData.Version

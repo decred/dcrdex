@@ -136,6 +136,16 @@ func newMxOrderBook(
 // with the conventional quantity and rate, to the DEX message format which
 // can be used to update the orderbook.
 func (b *mxOrderBook) convertMEXCBook(mexcBids, mexcAsks [][2]json.Number) (bids, asks []*obEntry, err error) {
+	// Log first few entries from raw data for debugging
+	if len(mexcBids) > 0 {
+		b.log.Debugf("[RAW-DATA] First bid from MEXC: price=%s, qty=%s",
+			mexcBids[0][0].String(), mexcBids[0][1].String())
+	}
+	if len(mexcAsks) > 0 {
+		b.log.Debugf("[RAW-DATA] First ask from MEXC: price=%s, qty=%s",
+			mexcAsks[0][0].String(), mexcAsks[0][1].String())
+	}
+
 	convert := func(updates [][2]json.Number) ([]*obEntry, error) {
 		convertedUpdates := make([]*obEntry, 0, len(updates))
 
@@ -171,6 +181,16 @@ func (b *mxOrderBook) convertMEXCBook(mexcBids, mexcAsks [][2]json.Number) (bids
 	asks, err = convert(mexcAsks)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	// Log first entries after conversion for debugging
+	if len(bids) > 0 {
+		b.log.Debugf("[CONVERTED] First bid after conversion: rate=%d, qty=%d",
+			bids[0].rate, bids[0].qty)
+	}
+	if len(asks) > 0 {
+		b.log.Debugf("[CONVERTED] First ask after conversion: rate=%d, qty=%d",
+			asks[0].rate, asks[0].qty)
 	}
 
 	return bids, asks, nil
@@ -269,8 +289,8 @@ func (b *mxOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		} else {
 			// For logging purposes only
 			if updateVersion <= lastUpdateID {
-				b.log.Debugf("Got out-of-sequence update: %d <= %d (current)",
-					updateVersion, lastUpdateID)
+				// b.log.Debugf("Got out-of-sequence update: %d <= %d (current)",
+				// 	updateVersion, lastUpdateID)
 			}
 		}
 
@@ -283,14 +303,6 @@ func (b *mxOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		if err != nil {
 			b.log.Errorf("Error parsing MEXC book: %v", err)
 			return false // Only fail on data conversion errors
-		}
-
-		b.log.Debugf("Applying update with %d bids, %d asks", len(bids), len(asks))
-		if len(bids) > 0 {
-			b.log.Debugf("First bid: rate=%d, qty=%d", bids[0].rate, bids[0].qty)
-		}
-		if len(asks) > 0 {
-			b.log.Debugf("First ask: rate=%d, qty=%d", asks[0].rate, asks[0].qty)
 		}
 
 		// Apply the update
@@ -3349,6 +3361,17 @@ func (m *mexc) Book(baseID, quoteID uint32) (buys, sells []*core.MiniOrder, _ er
 	// Get bid and ask entries from the book
 	bids, asks := book.book.snap()
 
+	// Log conversion factors and first entries for debugging
+	m.log.Debugf("[BOOK-DEBUG] %s Market - Base conversion factor: %d, Quote conversion factor: %d",
+		slug, book.baseConversionFactor, book.quoteConversionFactor)
+
+	if len(bids) > 0 {
+		m.log.Debugf("[BOOK-DEBUG] First raw bid: rate=%d, qty=%d", bids[0].rate, bids[0].qty)
+	}
+	if len(asks) > 0 {
+		m.log.Debugf("[BOOK-DEBUG] First raw ask: rate=%d, qty=%d", asks[0].rate, asks[0].qty)
+	}
+
 	// Convert entries to MiniOrder format
 	buys = make([]*core.MiniOrder, 0, len(bids))
 	sells = make([]*core.MiniOrder, 0, len(asks))
@@ -3394,6 +3417,16 @@ func (m *mexc) Book(baseID, quoteID uint32) (buys, sells []*core.MiniOrder, _ er
 			MsgRate:   ask.rate,
 			Sell:      true,
 		})
+	}
+
+	// Log the first converted values
+	if len(buys) > 0 {
+		m.log.Debugf("[BOOK-DEBUG] First converted buy: conventional rate=%.8f, conventional qty=%.8f, msgRate=%d, qtyAtomic=%d",
+			buys[0].Rate, buys[0].Qty, buys[0].MsgRate, buys[0].QtyAtomic)
+	}
+	if len(sells) > 0 {
+		m.log.Debugf("[BOOK-DEBUG] First converted sell: conventional rate=%.8f, conventional qty=%.8f, msgRate=%d, qtyAtomic=%d",
+			sells[0].Rate, sells[0].Qty, sells[0].MsgRate, sells[0].QtyAtomic)
 	}
 
 	return buys, sells, nil
