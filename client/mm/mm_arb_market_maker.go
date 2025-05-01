@@ -556,7 +556,12 @@ func (a *arbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
 		defer bookFeed.Close()
 		for {
 			select {
-			case ni := <-bookFeed.Next():
+			case ni, ok := <-bookFeed.Next():
+				if !ok {
+					a.log.Error("Stopping bot due to nil book feed.")
+					a.kill()
+					return
+				}
 				switch epoch := ni.Payload.(type) {
 				case *core.ResolvedEpoch:
 					a.rebalance(epoch.Current, book)
