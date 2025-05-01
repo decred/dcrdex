@@ -150,9 +150,13 @@ func (b *mxOrderBook) convertMEXCBook(mexcBids, mexcAsks [][2]json.Number) (bids
 				return nil, fmt.Errorf("error parsing qty: %v", err)
 			}
 
+			// Calculate rate and quantity using conversion factors
+			rate := calc.MessageRateAlt(price, b.baseConversionFactor, b.quoteConversionFactor)
+			quantity := uint64(qty * float64(b.baseConversionFactor))
+
 			convertedUpdates = append(convertedUpdates, &obEntry{
-				rate: calc.MessageRateAlt(price, b.baseConversionFactor, b.quoteConversionFactor),
-				qty:  uint64(qty * float64(b.baseConversionFactor)),
+				rate: rate,
+				qty:  quantity,
 			})
 		}
 
@@ -197,8 +201,10 @@ func (b *mxOrderBook) sync(ctx context.Context) {
 
 // Connect implements the dex.Connector interface, establishing the initial orderbook sync
 // and processing updates.
-func (b *mxOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error /* no errors */) {
+func (b *mxOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	const updateIDUnsynced = math.MaxUint64
+
+	b.log.Debugf("Starting Connect for book %s", b.mktID)
 
 	// We'll use these variables to track sync state
 	var syncMtx sync.Mutex
@@ -219,6 +225,7 @@ func (b *mxOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error /* no
 		if lastUpdateID != updateIDUnsynced {
 			b.synced.Store(false)
 			lastUpdateID = updateIDUnsynced
+			b.log.Debugf("%s desync called, resetting state", b.mktID)
 			if resync {
 				select {
 				case resyncChan <- struct{}{}:
@@ -233,6 +240,7 @@ func (b *mxOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error /* no
 		if lastUpdateID == updateIDUnsynced {
 			// Book is still syncing. Add it to the buffer
 			updateBuffer = append(updateBuffer, update)
+			b.log.Debugf("Added update to buffer, now size=%d", len(updateBuffer))
 			return true
 		}
 
@@ -261,7 +269,7 @@ func (b *mxOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error /* no
 		} else {
 			// For logging purposes only
 			if updateVersion <= lastUpdateID {
-				b.log.Tracef("Got out-of-sequence update: %d <= %d (current)",
+				b.log.Debugf("Got out-of-sequence update: %d <= %d (current)",
 					updateVersion, lastUpdateID)
 			}
 		}
@@ -275,6 +283,14 @@ func (b *mxOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error /* no
 		if err != nil {
 			b.log.Errorf("Error parsing MEXC book: %v", err)
 			return false // Only fail on data conversion errors
+		}
+
+		b.log.Debugf("Applying update with %d bids, %d asks", len(bids), len(asks))
+		if len(bids) > 0 {
+			b.log.Debugf("First bid: rate=%d, qty=%d", bids[0].rate, bids[0].qty)
+		}
+		if len(asks) > 0 {
+			b.log.Debugf("First ask: rate=%d, qty=%d", asks[0].rate, asks[0].qty)
 		}
 
 		// Apply the update
@@ -319,6 +335,7 @@ func (b *mxOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error /* no
 	// Function to synchronize orderbook
 	syncOrderbook := func() bool {
 		// Get the orderbook snapshot
+		b.log.Debugf("Getting orderbook snapshot for %s", b.mktID)
 		snapshot, err := b.getSnapshot()
 		if err != nil {
 			b.log.Errorf("Error getting orderbook snapshot: %v", err)
@@ -334,6 +351,14 @@ func (b *mxOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error /* no
 
 		b.log.Debugf("Got %s orderbook snapshot with update ID %d, %d bids, %d asks",
 			b.mktID, snapshot.LastUpdateID, len(bids), len(asks))
+
+		// Log sample data from snapshot
+		if len(bids) > 0 {
+			b.log.Debugf("First bid from snapshot: rate=%d, qty=%d", bids[0].rate, bids[0].qty)
+		}
+		if len(asks) > 0 {
+			b.log.Debugf("First ask from snapshot: rate=%d, qty=%d", asks[0].rate, asks[0].qty)
+		}
 
 		// Clear and update the orderbook with the snapshot data
 		b.book.clear()
@@ -955,100 +980,86 @@ func isPbMessage(header []byte) bool {
 
 // handleProtobufMessage processes market data protobuf messages.
 func (m *mexc) handleProtobufMessage(data []byte) {
-	m.log.Tracef("[MarketWS] Received protobuf message of length %d", len(data))
-
 	// Parse the binary protobuf message using our mexctypes
-	pbMsg, err := mexctypes.UnmarshalMEXCDepthProto(data)
+	pb, err := mexctypes.UnmarshalMEXCDepthProto(data)
 	if err != nil {
-		m.log.Errorf("[MarketWS] Failed to decode protobuf message: %v", err)
-		// Log hex dump of the first few bytes to help diagnose issues
-		if len(data) > 16 {
-			m.log.Debugf("[MarketWS] First 16 bytes: %x", data[:16])
-		} else {
-			m.log.Debugf("[MarketWS] Message bytes: %x", data)
-		}
+		m.log.Errorf("Failed to decode protobuf message: %v", err)
 		return
 	}
 
 	// Convert the protobuf message to our depth update format
-	depthUpdate := mexctypes.ConvertProtoToDepthUpdate(pbMsg)
+	depthUpdate := mexctypes.ConvertProtoToDepthUpdate(pb)
 	if depthUpdate == nil {
-		m.log.Debugf("[MarketWS] Failed to convert protobuf message to depth update")
+		m.log.Debugf("Failed to convert protobuf message to depth update")
 		return
 	}
 
-	// Try to determine the symbol - either from the extracted pbMsg.Symbol or our active subscriptions
-	symbol := pbMsg.Symbol
+	// Safety check: ensure symbol is properly set
+	symbol := depthUpdate.Symbol
 	if symbol == "" {
-		// If symbol wasn't extracted, try to find a match from our active subscriptions
-		m.booksMtx.RLock()
-		if len(m.books) == 1 {
-			// If we have only one active subscription, use that one
-			for s := range m.books {
-				symbol = s
-				break
+		// If no symbol in the update, try to determine from other sources
+		if pb.Symbol != "" {
+			symbol = pb.Symbol
+		} else {
+			// Try to extract from the topic if available
+			// Check if the binary data contains a channel string
+			dataStr := string(data)
+			if strings.Contains(dataStr, "@") && strings.Contains(dataStr, "DCRUSDT") {
+				parts := strings.Split(dataStr, "@")
+				for _, part := range parts {
+					if strings.Contains(part, "DCRUSDT") {
+						symbolParts := strings.Split(part, "@")
+						if len(symbolParts) > 0 {
+							symbol = "DCRUSDT"
+							break
+						}
+					}
+				}
 			}
-		} else if len(m.books) > 1 {
-			// If we have multiple active subscriptions, we'll take a best guess from
-			// our recent protobuf depth update history
+
+			// If still no symbol, check our recent protobuf depth update history
 			m.protobufDepthUpdateMtx.Lock()
 			if m.protobufDepthUpdate != nil && m.protobufDepthUpdate.Symbol != "" {
 				symbol = m.protobufDepthUpdate.Symbol
 			}
 			m.protobufDepthUpdateMtx.Unlock()
 		}
-		m.booksMtx.RUnlock()
 	}
 
-	// If we still don't have a symbol, we can't route this message
+	// If we still couldn't determine the symbol, drop this message
 	if symbol == "" {
-		m.log.Debugf("[MarketWS] Cannot determine symbol for protobuf message, dropping")
 		return
 	}
 
-	// Assign the symbol to the depth update
-	depthUpdate.Symbol = symbol
-
-	// Use a small incrementing version number rather than a huge random one
-	// If we don't have a reasonable version number, generate a sequential one
-	// based on the LastUpdateId from the protobuf message
+	// Set this version based on the LastUpdateId from the protobuf message
 	if depthUpdate.Version == "" || depthUpdate.Version == "0" {
-		// Use a consistent and simple version numbering for updates
-		if pbMsg.LastUpdateId > 0 {
-			depthUpdate.Version = strconv.FormatUint(pbMsg.LastUpdateId, 10)
+		if pb.LastUpdateId > 0 {
+			depthUpdate.Version = strconv.FormatUint(pb.LastUpdateId, 10)
 		} else {
-			// Generate a sequential ID based on timestamp - much more stable than a huge random number
-			depthUpdate.Version = strconv.FormatInt(time.Now().UnixNano()%1000000, 10)
+			depthUpdate.Version = "1" // Default to 1 if no version found
 		}
 	}
 
-	// Log successful parsing periodically
-	if len(depthUpdate.Bids) > 0 || len(depthUpdate.Asks) > 0 {
-		m.log.Tracef("[MarketWS] Parsed protobuf depth update for %s: v=%s, bids=%d, asks=%d",
-			depthUpdate.Symbol, depthUpdate.Version, len(depthUpdate.Bids), len(depthUpdate.Asks))
-	}
-
-	// Store the depth update in the mexc instance for use by other methods
+	// Save this depth update for future reference
 	m.protobufDepthUpdateMtx.Lock()
 	m.protobufDepthUpdate = depthUpdate
 	m.protobufDepthUpdateMtx.Unlock()
 
-	// Find the book for this symbol
+	// Get the orderbook for this symbol
 	m.booksMtx.RLock()
-	book, exists := m.books[symbol]
+	book, found := m.books[symbol]
 	m.booksMtx.RUnlock()
 
-	if !exists {
-		m.log.Tracef("[MarketWS] No orderbook found for %s", symbol)
+	if !found {
 		return
 	}
 
-	// Forward the update to the book's update queue
+	// Queue the update for processing
 	select {
 	case book.updateQueue <- depthUpdate:
-		// Update successfully queued
+		// Successfully queued
 	default:
-		m.log.Warnf("[MarketWS] Update queue full for %s, dropping depth update", symbol)
+		m.log.Warnf("Update queue full for %s, dropping depth update", symbol)
 	}
 }
 
@@ -3267,8 +3278,19 @@ func (m *mexc) VWAP(baseID, quoteID uint32, sell bool, qty uint64) (vwap, extrem
 		return 0, 0, false, fmt.Errorf("market %s not subscribed", slug)
 	}
 
+	// Check if book is synced
+	if !book.synced.Load() {
+		return 0, 0, false, ErrUnsyncedOrderbook
+	}
+
 	// Get VWAP from the book
-	return book.vwap(sell, qty)
+	vwap, extrema, filled, err = book.vwap(sell, qty)
+
+	if err != nil {
+		return 0, 0, false, err
+	}
+
+	return vwap, extrema, filled, err
 }
 
 // MidGap returns the mid-gap price for an order book.
@@ -3315,34 +3337,64 @@ func (m *mexc) Book(baseID, quoteID uint32) (buys, sells []*core.MiniOrder, _ er
 		return nil, nil, fmt.Errorf("market %s not subscribed", slug)
 	}
 
+	// Check if book is synced
+	if !book.synced.Load() {
+		return nil, nil, ErrUnsyncedOrderbook
+	}
+
 	// Get a snapshot of the current order book
 	book.mtx.RLock()
 	defer book.mtx.RUnlock()
 
 	// Get bid and ask entries from the book
 	bids, asks := book.book.snap()
-	bFactor := float64(book.baseConversionFactor)
 
 	// Convert entries to MiniOrder format
-	convertSide := func(side []*obEntry, sell bool) []*core.MiniOrder {
-		orders := make([]*core.MiniOrder, len(side))
-		for i, entry := range side {
-			orders[i] = &core.MiniOrder{
-				Qty:       float64(entry.qty) / bFactor,
-				QtyAtomic: entry.qty,
-				Rate:      calc.ConventionalRateAlt(entry.rate, book.baseConversionFactor, book.quoteConversionFactor),
-				MsgRate:   entry.rate,
-				Sell:      sell,
-			}
+	buys = make([]*core.MiniOrder, 0, len(bids))
+	sells = make([]*core.MiniOrder, 0, len(asks))
+
+	// Calculate conversion factor
+	bFactor := float64(book.baseConversionFactor)
+
+	// Process bids (buy orders)
+	for _, bid := range bids {
+		// Skip invalid entries
+		if bid.rate == 0 || bid.qty == 0 {
+			continue
 		}
-		return orders
+
+		// Convert to conventional format
+		convRate := calc.ConventionalRateAlt(bid.rate, book.baseConversionFactor, book.quoteConversionFactor)
+		convQty := float64(bid.qty) / bFactor
+
+		buys = append(buys, &core.MiniOrder{
+			Qty:       convQty,
+			QtyAtomic: bid.qty,
+			Rate:      convRate,
+			MsgRate:   bid.rate,
+			Sell:      false,
+		})
 	}
 
-	// Convert bids to buy orders and asks to sell orders
-	buys = convertSide(bids, false)
-	sells = convertSide(asks, true)
+	// Process asks (sell orders)
+	for _, ask := range asks {
+		// Skip invalid entries
+		if ask.rate == 0 || ask.qty == 0 {
+			continue
+		}
 
-	m.log.Debugf("Returning order book for %s: %d buys, %d sells", slug, len(buys), len(sells))
+		// Convert to conventional format
+		convRate := calc.ConventionalRateAlt(ask.rate, book.baseConversionFactor, book.quoteConversionFactor)
+		convQty := float64(ask.qty) / bFactor
+
+		sells = append(sells, &core.MiniOrder{
+			Qty:       convQty,
+			QtyAtomic: ask.qty,
+			Rate:      convRate,
+			MsgRate:   ask.rate,
+			Sell:      true,
+		})
+	}
 
 	return buys, sells, nil
 }

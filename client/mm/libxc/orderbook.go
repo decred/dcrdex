@@ -89,26 +89,41 @@ func (ob *orderbook) update(bids []*obEntry, asks []*obEntry) {
 	ob.mtx.Lock()
 	defer ob.mtx.Unlock()
 
+	var bidsRemoved, bidsAdded, asksRemoved, asksAdded int
+
 	for _, entry := range bids {
 		if entry.qty == 0 {
 			ob.bids.Remove(entry)
+			bidsRemoved++
 			continue
 		}
 		ob.bids.Set(entry, entry)
+		bidsAdded++
 	}
 
 	for _, entry := range asks {
 		if entry.qty == 0 {
 			ob.asks.Remove(entry)
+			asksRemoved++
 			continue
 		}
 		ob.asks.Set(entry, entry)
+		asksAdded++
+	}
+
+	// Log summary of changes made to orderbook
+	if bidsRemoved > 0 || bidsAdded > 0 || asksRemoved > 0 || asksAdded > 0 {
+		fmt.Printf("[DEBUG-ORDERBOOK-UPDATE] Updated orderbook: bids +%d/-%d, asks +%d/-%d, new sizes: bids=%d, asks=%d\n",
+			bidsAdded, bidsRemoved, asksAdded, asksRemoved, ob.bids.Len(), ob.asks.Len())
 	}
 }
 
 func (ob *orderbook) clear() {
 	ob.mtx.Lock()
 	defer ob.mtx.Unlock()
+
+	fmt.Printf("[DEBUG-ORDERBOOK-UPDATE] Clearing orderbook (previous sizes: bids=%d, asks=%d)\n",
+		ob.bids.Len(), ob.asks.Len())
 
 	ob.bids = *skiplist.New(bidsComparable)
 	ob.asks = *skiplist.New(asksComparable)
@@ -129,6 +144,19 @@ func (ob *orderbook) vwap(bids bool, qty uint64) (vwap, extrema uint64, filled b
 		list = &ob.asks
 	}
 
+	// Log the VWAP request
+	side := "asks"
+	if bids {
+		side = "bids"
+	}
+	fmt.Printf("[DEBUG-VWAP] Calculating VWAP for %s, qty=%d, book size=%d\n",
+		side, qty, list.Len())
+
+	if list.Len() == 0 {
+		fmt.Printf("[DEBUG-VWAP] Empty orderbook for %s, cannot calculate VWAP\n", side)
+		return 0, 0, false
+	}
+
 	remaining := qty
 	var weightedSum uint64
 	for curr := list.Front(); curr != nil; curr = curr.Next() {
@@ -137,18 +165,29 @@ func (ob *orderbook) vwap(bids bool, qty uint64) (vwap, extrema uint64, filled b
 		}
 		entry := curr.Value.(*obEntry)
 		extrema = entry.rate
+
+		// Log the entry being processed
+		fmt.Printf("[DEBUG-VWAP] Processing %s entry: rate=%d, qty=%d, remaining=%d\n",
+			side, entry.rate, entry.qty, remaining)
+
 		if entry.qty >= remaining {
 			filled = true
 			weightedSum += remaining * extrema
+
+			// Log that we've filled the order
+			fmt.Printf("[DEBUG-VWAP] Order filled with this entry, final extrema=%d\n", extrema)
 			break
 		}
 		remaining -= entry.qty
 		weightedSum += entry.qty * extrema
 	}
 	if !filled {
+		fmt.Printf("[DEBUG-VWAP] Could not fill order completely, remaining=%d\n", remaining)
 		return 0, 0, false
 	}
 
+	vwap = weightedSum / qty
+	fmt.Printf("[DEBUG-VWAP] VWAP calculation complete: vwap=%d, extrema=%d\n", vwap, extrema)
 	return weightedSum / qty, extrema, filled
 }
 
@@ -158,14 +197,19 @@ func (ob *orderbook) midGap() uint64 {
 
 	bestBuyI := ob.bids.Front()
 	if bestBuyI == nil {
+		fmt.Printf("[DEBUG-MIDGAP] No bids in orderbook\n")
 		return 0
 	}
 	bestSellI := ob.asks.Front()
 	if bestSellI == nil {
+		fmt.Printf("[DEBUG-MIDGAP] No asks in orderbook\n")
 		return 0
 	}
 	bestBuy, bestSell := bestBuyI.Value.(*obEntry), bestSellI.Value.(*obEntry)
-	return (bestBuy.rate + bestSell.rate) / 2
+	midGap := (bestBuy.rate + bestSell.rate) / 2
+	fmt.Printf("[DEBUG-MIDGAP] Calculated midgap: bestBuy=%d, bestSell=%d, midGap=%d\n",
+		bestBuy.rate, bestSell.rate, midGap)
+	return midGap
 }
 
 // snap generates a snapshot of the book.
