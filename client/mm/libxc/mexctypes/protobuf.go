@@ -32,7 +32,7 @@ type PublicLimitDepthV3ApiItemWrapper struct {
 }
 
 // Price scaling factor for MEXC API
-// Values from the API are multiplied by 10^6 (e.g., 12.91 USD is represented as 12910000)
+// Values from the API are multiplied by these factors
 const (
 	mexcPriceScaleFactor    = 1000000.0   // 10^6 for price values
 	mexcQuantityScaleFactor = 100000000.0 // 10^8 for quantity values
@@ -142,8 +142,8 @@ func applyScalingFactor(priceStr, qtyStr string) (string, string) {
 	adjustedPrice := price / mexcPriceScaleFactor
 	adjustedQty := qty / mexcQuantityScaleFactor
 
-	// Convert back to strings with appropriate precision
-	return strconv.FormatFloat(adjustedPrice, 'f', 8, 64),
+	// Format price with 5 decimal places and quantity with 8 decimal places
+	return strconv.FormatFloat(adjustedPrice, 'f', 5, 64),
 		strconv.FormatFloat(adjustedQty, 'f', 8, 64)
 }
 
@@ -243,10 +243,28 @@ func handleJSONMessage(msg WsMessage) (*PublicLimitDepthsV3ApiWrapper, error) {
 		if err := json.Unmarshal(msg.Data, &depthData); err == nil {
 			// If we successfully parsed depth data, use that
 			if len(depthData.Asks) > 0 {
-				result.Asks = depthData.Asks
+				// Apply scaling to the JSON data as well
+				scaledAsks := make([]PublicLimitDepthV3ApiItemWrapper, 0, len(depthData.Asks))
+				for _, ask := range depthData.Asks {
+					price, qty := applyScalingFactor(ask.Price, ask.Quantity)
+					scaledAsks = append(scaledAsks, PublicLimitDepthV3ApiItemWrapper{
+						Price:    price,
+						Quantity: qty,
+					})
+				}
+				result.Asks = scaledAsks
 			}
 			if len(depthData.Bids) > 0 {
-				result.Bids = depthData.Bids
+				// Apply scaling to the JSON data as well
+				scaledBids := make([]PublicLimitDepthV3ApiItemWrapper, 0, len(depthData.Bids))
+				for _, bid := range depthData.Bids {
+					price, qty := applyScalingFactor(bid.Price, bid.Quantity)
+					scaledBids = append(scaledBids, PublicLimitDepthV3ApiItemWrapper{
+						Price:    price,
+						Quantity: qty,
+					})
+				}
+				result.Bids = scaledBids
 			}
 			if depthData.Version != "" {
 				result.Version = depthData.Version
