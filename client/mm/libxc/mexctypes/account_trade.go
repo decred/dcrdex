@@ -85,8 +85,17 @@ type Trade struct {
 	IsBestMatch     bool   `json:"isBestMatch"` // Seems specific to Binance, check MEXC docs
 }
 
-// OrderResponse is an alias for NewOrderResponse
-type OrderResponse NewOrderResponse
+// OrderResponse represents the response from the MEXC New Order endpoint
+type OrderResponse struct {
+	Symbol       string `json:"symbol"`
+	OrderID      string `json:"orderId"`
+	OrderListID  int    `json:"orderListId"`
+	Price        string `json:"price"`
+	OrigQty      string `json:"origQty"`
+	Type         string `json:"type"`
+	Side         string `json:"side"`
+	TransactTime int64  `json:"transactTime"`
+}
 
 // CancelOrderResponse is an alias for CanceledOrder
 type CancelOrderResponse CanceledOrder

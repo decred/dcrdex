@@ -2083,98 +2083,65 @@ func (m *mexc) OrderBook(ctx context.Context, mktMatch *MarketMatch) (vwap VWAPF
 	return book.vwap, nil
 }
 
-// Trade places a new order on the exchange.
+// Trade executes a trade on the MEXC exchange.
 func (m *mexc) Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, subscriptionID int) (*Trade, error) {
-	baseCfg, quoteCfg, err := mxAssetCfgs(baseID, quoteID)
+	side := "BUY"
+	if sell {
+		side = "SELL"
+	}
+
+	baseCfg, err := mxAssetCfg(baseID)
 	if err != nil {
-		return nil, fmt.Errorf("error getting asset configs: %w", err)
+		return nil, fmt.Errorf("error getting asset cfg for %d: %w", baseID, err)
 	}
 
-	// Make sure the ticker is not 0
-	if rate == 0 {
-		return nil, fmt.Errorf("rate cannot be 0")
+	quoteCfg, err := mxAssetCfg(quoteID)
+	if err != nil {
+		return nil, fmt.Errorf("error getting asset cfg for %d: %w", quoteID, err)
 	}
 
-	// Form the market slug by combining base and quote coins
-	slug := baseCfg.coin + quoteCfg.coin
+	symbol := baseCfg.coin + quoteCfg.coin
 
-	symInfo, found := m.markets.Load().(map[string]*mexctypes.SymbolInfo)[slug]
+	// Get market filters to determine price and quantity precision
+	markets := m.markets.Load().(map[string]*mexctypes.SymbolInfo)
+	market, found := markets[symbol]
 	if !found {
-		return nil, fmt.Errorf("market %s not found", slug)
+		return nil, fmt.Errorf("market not found: %v", symbol)
 	}
 
-	// Get trade precision
-	var filterQtyMax, filterQtyMin, filterQtyStep float64
-	var filterPriceStep float64
+	// Convert rate to conventional format
+	convRate := calc.ConventionalRateAlt(rate, baseCfg.conversionFactor, quoteCfg.conversionFactor)
 
-	for _, f := range symInfo.Filters {
-		filterType, ok := f["filterType"].(string)
-		if !ok {
-			continue
-		}
+	// Format rate to string with correct precision
+	priceStr := strconv.FormatFloat(convRate, 'f', int(market.QuoteAssetPrecision), 64)
 
-		switch filterType {
-		case "LOT_SIZE":
-			filterQtyMin, _ = strconv.ParseFloat(f["minQty"].(string), 64)
-			filterQtyMax, _ = strconv.ParseFloat(f["maxQty"].(string), 64)
-			filterQtyStep, _ = strconv.ParseFloat(f["stepSize"].(string), 64)
-		case "PRICE_FILTER":
-			filterPriceStep, _ = strconv.ParseFloat(f["tickSize"].(string), 64)
-		}
-	}
-
-	// Convert rate and qty to exchange format
-	convRate := float64(rate) / float64(quoteCfg.conversionFactor) * float64(baseCfg.conversionFactor)
+	// Convert quantity to conventional format
 	convQty := float64(qty) / float64(baseCfg.conversionFactor)
 
-	// Apply quantity filters
-	if convQty < filterQtyMin {
-		return nil, fmt.Errorf("quantity %f is below minimum %f", convQty, filterQtyMin)
-	}
-	if convQty > filterQtyMax {
-		return nil, fmt.Errorf("quantity %f is above maximum %f", convQty, filterQtyMax)
-	}
+	// Format quantity to string with correct precision
+	qtyStr := strconv.FormatFloat(convQty, 'f', int(market.BaseAssetPrecision), 64)
 
-	// Round according to step size
-	if filterQtyStep > 0 {
-		convQty = math.Floor(convQty/filterQtyStep) * filterQtyStep
-	}
+	// Generate a unique client order ID
+	clientOrderID := fmt.Sprintf("%x", m.tradeIDNonce.Add(1))
 
-	// Round price according to tick size
-	if filterPriceStep > 0 {
-		convRate = math.Floor(convRate/filterPriceStep) * filterPriceStep
-	}
+	// Prepare request parameters - Using query parameters as shown in the MEXC documentation
+	v := make(url.Values)
+	v.Add("symbol", symbol)
+	v.Add("side", side)
+	v.Add("type", "LIMIT")
+	v.Add("timeInForce", "GTC")
+	v.Add("newClientOrderId", clientOrderID) // Use newClientOrderId instead of clientOrderId
+	v.Add("quantity", qtyStr)                // Use quantity as per MEXC docs
+	v.Add("price", priceStr)
 
-	// Format the values according to MEXC requirements
-	qtyStr := strconv.FormatFloat(convQty, 'f', -1, 64)
-	rateStr := strconv.FormatFloat(convRate, 'f', -1, 64)
-
-	// Create a unique client order ID
-	clientOrderID := strconv.FormatInt(int64(subscriptionID), 10)
-
-	// Prepare the order parameters
-	form := url.Values{}
-	form.Add("symbol", slug)
-	form.Add("side", func() string {
-		if sell {
-			return "SELL"
-		}
-		return "BUY"
-	}())
-	form.Add("type", "LIMIT")
-	form.Add("timeInForce", "GTC") // Good Till Canceled
-	form.Add("quantity", qtyStr)
-	form.Add("price", rateStr)
-	form.Add("newClientOrderId", clientOrderID)
-
-	// Place the order
-	var resp mexctypes.OrderResponse
-	err = m.postAPI(ctx, "/api/v3/order", nil, form, true, true, &resp)
-	if err != nil {
-		return nil, fmt.Errorf("error placing order: %w", err)
+	// Store trade info for later status updates
+	m.tradeUpdaterMtx.Lock()
+	_, found = m.tradeUpdaters[subscriptionID]
+	if !found {
+		m.tradeUpdaterMtx.Unlock()
+		return nil, fmt.Errorf("no trade updater with ID %v", subscriptionID)
 	}
 
-	// Create trade info struct
 	tradeInfo := &mxTradeInfo{
 		updaterID: subscriptionID,
 		baseID:    baseID,
@@ -2184,23 +2151,52 @@ func (m *mexc) Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rat
 		qty:       qty,
 	}
 
-	// Update trade info and active trades
-	m.tradeUpdaterMtx.Lock()
-	m.tradeInfo[resp.OrderID] = tradeInfo
+	m.tradeInfo[clientOrderID] = tradeInfo
 	m.tradeUpdaterMtx.Unlock()
 
+	var success bool
+	defer func() {
+		if !success {
+			m.tradeUpdaterMtx.Lock()
+			delete(m.tradeInfo, clientOrderID)
+			m.tradeUpdaterMtx.Unlock()
+		}
+	}()
+
+	// Send the order request to MEXC
+	// The request will be POST /api/v3/order with query parameters
+	var orderResponse mexctypes.OrderResponse
+	err = m.postAPI(ctx, "/api/v3/order", v, nil, true, true, &orderResponse)
+	if err != nil {
+		return nil, err
+	}
+
+	m.log.Debugf("Placed order on MEXC: %s %s %s@%s, ID: %s",
+		side, symbol, qtyStr, priceStr, orderResponse.OrderID)
+
+	// Store the order ID returned by the exchange
+	m.tradeUpdaterMtx.Lock()
+	m.tradeInfo[orderResponse.OrderID] = tradeInfo
+	m.tradeUpdaterMtx.Unlock()
+
+	success = true
+
+	// Track as an active trade
 	m.activeTradesMtx.Lock()
-	m.activeTrades[resp.OrderID] = tradeInfo
+	m.activeTrades[orderResponse.OrderID] = tradeInfo
 	m.activeTradesMtx.Unlock()
 
-	// Return initial trade status
+	// Return the client order ID as the trade ID for consistency
 	return &Trade{
-		ID:      resp.OrderID,
-		Sell:    sell,
-		Qty:     qty,
-		Rate:    rate,
-		BaseID:  baseID,
-		QuoteID: quoteID,
+		ID:          clientOrderID,
+		Sell:        sell,
+		Rate:        rate,
+		Qty:         qty,
+		BaseID:      baseID,
+		QuoteID:     quoteID,
+		BaseFilled:  0,     // New orders typically have 0 filled
+		QuoteFilled: 0,     // New orders typically have 0 filled
+		Complete:    false, // New orders are not complete
 	}, nil
 }
 
@@ -2427,54 +2423,48 @@ func (m *mexc) subscribeMarketStream(ctx context.Context, symbol string) {
 	}
 }
 
-// CancelTrade attempts to cancel an order on the exchange.
-func (m *mexc) CancelTrade(ctx context.Context, baseID, quoteID uint32, id string) error {
+// CancelTrade cancels an open trade on the MEXC exchange.
+func (m *mexc) CancelTrade(ctx context.Context, baseID, quoteID uint32, tradeID string) error {
+	// Get asset configurations
+	baseCfg, err := mxAssetCfg(baseID)
+	if err != nil {
+		return fmt.Errorf("error getting asset cfg for %d: %w", baseID, err)
+	}
+
+	quoteCfg, err := mxAssetCfg(quoteID)
+	if err != nil {
+		return fmt.Errorf("error getting asset cfg for %d: %w", quoteID, err)
+	}
+
+	// Form the market symbol
+	symbol := baseCfg.coin + quoteCfg.coin
+
+	// Prepare query parameters for the cancel request
+	query := url.Values{}
+	query.Add("symbol", symbol)
+
+	// Check if this is a MEXC order ID we have in our tracking
 	m.activeTradesMtx.RLock()
-	info, found := m.activeTrades[id]
+	_, hasMEXCOrderID := m.activeTrades[tradeID]
 	m.activeTradesMtx.RUnlock()
 
-	if !found {
-		// If info is not found, use the provided baseID and quoteID to proceed
-		var err error
-		baseCfg, quoteCfg, err := mxAssetCfgs(baseID, quoteID)
-		if err != nil {
-			return fmt.Errorf("error getting asset configs: %w", err)
-		}
+	// First check if this is a client order ID in our tracking
+	m.tradeUpdaterMtx.RLock()
+	_, hasClientOrderID := m.tradeInfo[tradeID]
+	m.tradeUpdaterMtx.RUnlock()
 
-		slug := baseCfg.coin + quoteCfg.coin
-
-		// Send cancel request
-		query := url.Values{}
-		query.Add("symbol", slug)
-		query.Add("orderId", id)
-
-		var resp mexctypes.CancelOrderResponse
-		err = m.deleteAPI(ctx, "/api/v3/order", query, true, true, &resp)
-		if err != nil {
-			// Check if the order is already done
-			var mexcErr *MxCodedErr
-			if errors.As(err, &mexcErr) && mexcErr.Code == -2011 { // Order does not exist
-				return nil // Order already done/canceled
-			}
-			return fmt.Errorf("error canceling order: %w", err)
-		}
-
-		return nil
+	if hasMEXCOrderID {
+		// If it's a MEXC order ID, use orderId parameter
+		query.Add("orderId", tradeID)
+	} else if hasClientOrderID {
+		// If it's a client order ID we've tracked, use origClientOrderId parameter
+		query.Add("origClientOrderId", tradeID)
+	} else {
+		// If we're not sure, try as orderId (more common case)
+		query.Add("orderId", tradeID)
 	}
 
-	// If we have trade info, use that
-	baseCfg, quoteCfg, err := mxAssetCfgs(info.baseID, info.quoteID)
-	if err != nil {
-		return fmt.Errorf("error getting asset configs: %w", err)
-	}
-
-	slug := baseCfg.coin + quoteCfg.coin
-
-	// Send cancel request
-	query := url.Values{}
-	query.Add("symbol", slug)
-	query.Add("orderId", id)
-
+	// Execute the cancel order request
 	var resp mexctypes.CancelOrderResponse
 	err = m.deleteAPI(ctx, "/api/v3/order", query, true, true, &resp)
 	if err != nil {
@@ -2486,30 +2476,41 @@ func (m *mexc) CancelTrade(ctx context.Context, baseID, quoteID uint32, id strin
 		return fmt.Errorf("error canceling order: %w", err)
 	}
 
-	// Mark as canceled in our records
-	m.activeTradesMtx.Lock()
-	delete(m.activeTrades, id)
-	m.activeTradesMtx.Unlock()
+	m.log.Debugf("Canceled order on MEXC: %s, ID: %s, status: %s",
+		symbol, resp.OrderID, resp.Status)
 
-	// Send a final update if we have an updater
-	m.tradeUpdaterMtx.RLock()
-	updater, exists := m.tradeUpdaters[info.updaterID]
-	m.tradeUpdaterMtx.RUnlock()
+	// Clean up our trade tracking
+	m.tradeUpdaterMtx.Lock()
+	// We need to find and clean up the trade info
+	var tradeInfo *mxTradeInfo
+	var found bool
 
-	if exists {
-		select {
-		case updater <- &Trade{
-			ID:       id,
-			Complete: true,
-		}:
-		default:
-			m.log.Warnf("Trade updater channel full for %s", id)
-		}
-
-		m.tradeUpdaterMtx.Lock()
-		delete(m.tradeUpdaters, info.updaterID)
-		m.tradeUpdaterMtx.Unlock()
+	// Try to get trade info from different possible IDs
+	// Check if we have it by the order ID from the response
+	tradeInfo, found = m.tradeInfo[resp.OrderID]
+	if !found {
+		// If not found, try by the ID that was passed in
+		tradeInfo, found = m.tradeInfo[tradeID]
 	}
+
+	// If we found the trade info, clean up all references to it
+	if found {
+		// Clean up all references to this trade info
+		for id, info := range m.tradeInfo {
+			if info == tradeInfo {
+				delete(m.tradeInfo, id)
+			}
+		}
+	}
+	m.tradeUpdaterMtx.Unlock()
+
+	// Remove from active trades map
+	m.activeTradesMtx.Lock()
+	delete(m.activeTrades, resp.OrderID)
+	if resp.OrderID != tradeID {
+		delete(m.activeTrades, tradeID) // Also clean up by the ID passed in if different
+	}
+	m.activeTradesMtx.Unlock()
 
 	return nil
 }
@@ -3325,35 +3326,42 @@ func (m *mexc) Book(baseID, quoteID uint32) (buys, sells []*core.MiniOrder, _ er
 	return []*core.MiniOrder{}, []*core.MiniOrder{}, nil
 }
 
-// TradeStatus returns the current status of a trade.
-func (m *mexc) TradeStatus(ctx context.Context, id string, baseID, quoteID uint32) (*Trade, error) {
+// TradeStatus returns the current status of a trade on MEXC.
+func (m *mexc) TradeStatus(ctx context.Context, tradeID string, baseID, quoteID uint32) (*Trade, error) {
+	// Get asset configurations
 	baseCfg, quoteCfg, err := mxAssetCfgs(baseID, quoteID)
 	if err != nil {
 		return nil, fmt.Errorf("error getting asset configs: %w", err)
 	}
 
-	slug := baseCfg.coin + quoteCfg.coin
+	// Form the market symbol
+	symbol := baseCfg.coin + quoteCfg.coin
 
+	// Query the order status
 	query := url.Values{}
-	query.Add("symbol", slug)
-	query.Add("origClientOrderId", id) // Using origClientOrderId since we pass client ID
+	query.Add("symbol", symbol)
+	query.Add("orderId", tradeID) // Using orderId parameter as per MEXC docs
 
-	var resp mexctypes.Order // Use Order type which has all the fields we need
-	if err := m.getAPI(ctx, "/api/v3/order", query, true, true, &resp); err != nil {
-		return nil, fmt.Errorf("error getting order: %w", err)
+	var resp mexctypes.Order
+	err = m.getAPI(ctx, "/api/v3/order", query, true, true, &resp)
+	if err != nil {
+		return nil, fmt.Errorf("error getting order status: %w", err)
 	}
 
-	// Determine if it's complete
-	complete := resp.Status == "FILLED" || resp.Status == "CANCELED" || resp.Status == "REJECTED" || resp.Status == "EXPIRED"
+	m.log.Debugf("Got status for order %s: %s, side: %s, executed: %s/%s",
+		tradeID, resp.Status, resp.Side, resp.ExecutedQuantity, resp.OrigQuantity)
 
-	// Get the price from the response
+	// Determine if trade is complete - only consider FILLED as complete
+	complete := resp.Status == "FILLED"
+
+	// Get price from response
 	price, err := strconv.ParseFloat(resp.Price, 64)
 	if err != nil {
 		m.log.Errorf("Error parsing price: %v", err)
 		price = 0
 	}
 
-	// Calculate the rate in DEX format
+	// Calculate rate in DEX format
 	rate := calc.MessageRateAlt(price, baseCfg.conversionFactor, quoteCfg.conversionFactor)
 
 	// Parse original quantity
@@ -3364,14 +3372,13 @@ func (m *mexc) TradeStatus(ctx context.Context, id string, baseID, quoteID uint3
 	}
 	qty := uint64(math.Round(origQty * float64(baseCfg.conversionFactor)))
 
-	// Parse executed quantity
+	// Parse executed quantities
 	execQty, err := strconv.ParseFloat(resp.ExecutedQuantity, 64)
 	if err != nil {
 		m.log.Errorf("Error parsing executed quantity: %v", err)
 		execQty = 0
 	}
 
-	// Parse quote filled
 	quoteQty, err := strconv.ParseFloat(resp.CummulativeQuoteQty, 64)
 	if err != nil {
 		m.log.Errorf("Error parsing quote quantity: %v", err)
@@ -3381,9 +3388,23 @@ func (m *mexc) TradeStatus(ctx context.Context, id string, baseID, quoteID uint3
 	baseFilled := uint64(math.Round(execQty * float64(baseCfg.conversionFactor)))
 	quoteFilled := uint64(math.Round(quoteQty * float64(quoteCfg.conversionFactor)))
 
+	// If the order is complete, update our tracking maps
+	if complete {
+		m.activeTradesMtx.Lock()
+		delete(m.activeTrades, tradeID)
+		m.activeTradesMtx.Unlock()
+
+		m.tradeUpdaterMtx.Lock()
+		delete(m.tradeInfo, tradeID)
+		m.tradeUpdaterMtx.Unlock()
+	}
+
+	// Side is always "BUY" or "SELL" in the response
+	isSell := resp.Side == "SELL"
+
 	return &Trade{
-		ID:          id,
-		Sell:        resp.Side == "SELL",
+		ID:          tradeID,
+		Sell:        isSell,
 		Qty:         qty,
 		Rate:        rate,
 		BaseID:      baseID,
