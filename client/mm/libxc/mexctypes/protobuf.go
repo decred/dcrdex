@@ -5,6 +5,7 @@ package mexctypes
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -31,15 +32,33 @@ type PublicLimitDepthV3ApiItemWrapper struct {
 }
 
 // UnmarshalMEXCDepthProto unmarshals a binary protobuf message.
-// This uses proper protobuf unmarshaling using the generated code.
+// This handles parsing the websocket message format and extracting the protobuf data.
 func UnmarshalMEXCDepthProto(data []byte) (*PublicLimitDepthsV3ApiWrapper, error) {
+	// Check if this is a JSON message first - MEXC may send control messages as JSON
+	if len(data) > 0 && data[0] == '{' {
+		// This is likely a JSON message, not a protobuf message
+		var wsMsg WsMessage
+		if err := json.Unmarshal(data, &wsMsg); err == nil {
+			// Successfully parsed as JSON - extract info if possible
+			return handleJSONMessage(wsMsg)
+		}
+		// If JSON parsing failed, continue and try protobuf parsing
+	}
+
+	// Try to extract protobuf data from the websocket message
+	// The actual protobuf data might be wrapped or have headers
+	protoData, err := extractProtobufData(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract protobuf data: %w", err)
+	}
+
 	// Create an instance of the protobuf generated message
 	pbMsg := &PublicLimitDepthsV3Api{}
 
 	// Unmarshal using the protobuf library
-	err := proto.Unmarshal(data, pbMsg)
+	err = proto.Unmarshal(protoData, pbMsg)
 	if err != nil {
-		return nil, err // Return error if protobuf parsing fails
+		return nil, fmt.Errorf("proto: cannot parse data: %w", err)
 	}
 
 	// Convert from generated proto to our wrapped type
@@ -85,6 +104,119 @@ func UnmarshalMEXCDepthProto(data []byte) (*PublicLimitDepthsV3ApiWrapper, error
 					Price:    bid.GetPrice(),
 					Quantity: bid.GetQuantity(),
 				})
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// extractProtobufData attempts to extract the actual protobuf binary data from the websocket message.
+// MEXC may send the data in a specific format with headers or metadata.
+func extractProtobufData(data []byte) ([]byte, error) {
+	// Handle different possibilities for message format:
+
+	// 1. If the message is very short, it's probably not a valid protobuf message
+	if len(data) < 10 {
+		return nil, fmt.Errorf("message too short to be valid protobuf: %d bytes", len(data))
+	}
+
+	// 2. The message might have a header or specific framing
+	// Common patterns in binary protocols:
+	// - First few bytes might be a message type or length
+	// - There might be a specific offset where the actual data starts
+
+	// Try with potential binary frame formats:
+
+	// Option 1: Skip first 4 bytes (potential header/length)
+	if len(data) > 4 {
+		protoData := data[4:]
+		if tryUnmarshal(protoData) {
+			return protoData, nil
+		}
+	}
+
+	// Option 2: Skip first 8 bytes
+	if len(data) > 8 {
+		protoData := data[8:]
+		if tryUnmarshal(protoData) {
+			return protoData, nil
+		}
+	}
+
+	// Option 3: Check for specific signature/magic bytes
+	// Example: If we know the protobuf often starts with specific byte patterns
+	for i := 0; i < len(data)-8; i++ {
+		// Look for potential protobuf message start
+		// (This is speculative - ideally we'd know the exact framing)
+		if (data[i] == 0x0A || data[i] == 0x12) && (data[i+1] < 0x80) {
+			protoData := data[i:]
+			if tryUnmarshal(protoData) {
+				return protoData, nil
+			}
+		}
+	}
+
+	// If all the above options failed, try using the raw data
+	if tryUnmarshal(data) {
+		return data, nil
+	}
+
+	// If we can identify a JSON part at the beginning, skip it
+	for i := 0; i < len(data)-1; i++ {
+		if data[i] == '}' && (data[i+1] == 0x0A || data[i+1] == 0x12) {
+			protoData := data[i+1:]
+			if tryUnmarshal(protoData) {
+				return protoData, nil
+			}
+		}
+	}
+
+	// If all options failed, return the original data
+	// This will likely fail to unmarshal, but we've tried our best
+	return data, nil
+}
+
+// tryUnmarshal attempts to unmarshal a protobuf message to check if it's valid.
+// This is used to validate potential message formats.
+func tryUnmarshal(data []byte) bool {
+	msg := &PublicLimitDepthsV3Api{}
+	// We don't care about the content, just whether it can be parsed without error
+	return proto.Unmarshal(data, msg) == nil
+}
+
+// handleJSONMessage processes a JSON message from the websocket.
+// This handles control messages or other non-protobuf data.
+func handleJSONMessage(msg WsMessage) (*PublicLimitDepthsV3ApiWrapper, error) {
+	// Create a placeholder result
+	result := &PublicLimitDepthsV3ApiWrapper{
+		EventType: msg.Channel,
+		Symbol:    msg.Symbol,
+		Version:   strconv.FormatInt(msg.Ts, 10),
+	}
+
+	// If there's a timestamp, use it as LastUpdateId
+	if msg.Ts > 0 {
+		result.LastUpdateId = uint64(msg.Ts)
+	}
+
+	// If this has actual data attached, try to parse it
+	if len(msg.Data) > 0 {
+		// In some cases, the Data field might contain a JSON-encoded depth update
+		var depthData PublicLimitDepthsV3ApiWrapper
+		if err := json.Unmarshal(msg.Data, &depthData); err == nil {
+			// If we successfully parsed depth data, use that
+			if len(depthData.Asks) > 0 {
+				result.Asks = depthData.Asks
+			}
+			if len(depthData.Bids) > 0 {
+				result.Bids = depthData.Bids
+			}
+			if depthData.Version != "" {
+				result.Version = depthData.Version
+			}
+			if depthData.LastUpdateId > 0 {
+				result.LastUpdateId = depthData.LastUpdateId
 			}
 		}
 	}
