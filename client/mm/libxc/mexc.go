@@ -3315,15 +3315,36 @@ func (m *mexc) Book(baseID, quoteID uint32) (buys, sells []*core.MiniOrder, _ er
 		return nil, nil, fmt.Errorf("market %s not subscribed", slug)
 	}
 
-	// Create a copy of the book's entries
+	// Get a snapshot of the current order book
 	book.mtx.RLock()
 	defer book.mtx.RUnlock()
 
-	// Since we don't have direct access to the buys/sells fields,
-	// we're just returning empty slices for now
-	// In a real implementation, we would get a snapshot of the current book
+	// Get bid and ask entries from the book
+	bids, asks := book.book.snap()
+	bFactor := float64(book.baseConversionFactor)
 
-	return []*core.MiniOrder{}, []*core.MiniOrder{}, nil
+	// Convert entries to MiniOrder format
+	convertSide := func(side []*obEntry, sell bool) []*core.MiniOrder {
+		orders := make([]*core.MiniOrder, len(side))
+		for i, entry := range side {
+			orders[i] = &core.MiniOrder{
+				Qty:       float64(entry.qty) / bFactor,
+				QtyAtomic: entry.qty,
+				Rate:      calc.ConventionalRateAlt(entry.rate, book.baseConversionFactor, book.quoteConversionFactor),
+				MsgRate:   entry.rate,
+				Sell:      sell,
+			}
+		}
+		return orders
+	}
+
+	// Convert bids to buy orders and asks to sell orders
+	buys = convertSide(bids, false)
+	sells = convertSide(asks, true)
+
+	m.log.Debugf("Returning order book for %s: %d buys, %d sells", slug, len(buys), len(sells))
+
+	return buys, sells, nil
 }
 
 // TradeStatus returns the current status of a trade on MEXC.
