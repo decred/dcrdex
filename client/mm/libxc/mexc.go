@@ -136,15 +136,6 @@ func newMxOrderBook(
 // with the conventional quantity and rate, to the DEX message format which
 // can be used to update the orderbook.
 func (b *mxOrderBook) convertMEXCBook(mexcBids, mexcAsks [][2]json.Number) (bids, asks []*obEntry, err error) {
-	// Log first few entries from raw data for debugging
-	if len(mexcBids) > 0 {
-		b.log.Debugf("[RAW-DATA] First bid from MEXC: price=%s, qty=%s",
-			mexcBids[0][0].String(), mexcBids[0][1].String())
-	}
-	if len(mexcAsks) > 0 {
-		b.log.Debugf("[RAW-DATA] First ask from MEXC: price=%s, qty=%s",
-			mexcAsks[0][0].String(), mexcAsks[0][1].String())
-	}
 
 	convert := func(updates [][2]json.Number) ([]*obEntry, error) {
 		convertedUpdates := make([]*obEntry, 0, len(updates))
@@ -181,16 +172,6 @@ func (b *mxOrderBook) convertMEXCBook(mexcBids, mexcAsks [][2]json.Number) (bids
 	asks, err = convert(mexcAsks)
 	if err != nil {
 		return nil, nil, err
-	}
-
-	// Log first entries after conversion for debugging
-	if len(bids) > 0 {
-		b.log.Debugf("[CONVERTED] First bid after conversion: rate=%d, qty=%d",
-			bids[0].rate, bids[0].qty)
-	}
-	if len(asks) > 0 {
-		b.log.Debugf("[CONVERTED] First ask after conversion: rate=%d, qty=%d",
-			asks[0].rate, asks[0].qty)
 	}
 
 	return bids, asks, nil
