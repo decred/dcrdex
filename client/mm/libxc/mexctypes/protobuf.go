@@ -1,230 +1,99 @@
 // This file is part of the MEXC exchange driver.
-// It contains the Protocol Buffer generated types for MEXC API.
+// It contains the Protocol Buffer implementation for MEXC API.
 
 package mexctypes
 
 import (
 	"encoding/json"
-	"sort"
 	"strconv"
 	"strings"
+
+	"google.golang.org/protobuf/proto"
 )
 
-// PublicLimitDepthsV3Api represents limit order book depths from the MEXC API.
-// This was generated from Protocol Buffers and adapted to work within mexctypes.
-type PublicLimitDepthsV3Api struct {
-	Asks         []PublicLimitDepthV3ApiItem `json:"asks,omitempty"`
-	Bids         []PublicLimitDepthV3ApiItem `json:"bids,omitempty"`
-	EventType    string                      `json:"eventType,omitempty"`
-	Version      string                      `json:"version,omitempty"`
-	Symbol       string                      `json:"symbol,omitempty"`
-	LastUpdateId uint64                      `json:"lastUpdateId,omitempty"`
+// Proto-related types are defined in PublicLimitDepthsV3Api.pb.go
+
+// PublicLimitDepthsV3ApiWrapper adapts the protobuf generated struct
+// with additional fields needed by our API.
+type PublicLimitDepthsV3ApiWrapper struct {
+	Asks         []PublicLimitDepthV3ApiItemWrapper `json:"asks,omitempty"`
+	Bids         []PublicLimitDepthV3ApiItemWrapper `json:"bids,omitempty"`
+	EventType    string                             `json:"eventType,omitempty"`
+	Version      string                             `json:"version,omitempty"`
+	Symbol       string                             `json:"symbol,omitempty"`       // Not in protobuf
+	LastUpdateId uint64                             `json:"lastUpdateId,omitempty"` // Not in protobuf
 }
 
-// PublicLimitDepthV3ApiItem represents a single entry in the order book.
-type PublicLimitDepthV3ApiItem struct {
+// PublicLimitDepthV3ApiItemWrapper represents a single entry in the order book.
+type PublicLimitDepthV3ApiItemWrapper struct {
 	Price    string `json:"price,omitempty"`
 	Quantity string `json:"quantity,omitempty"`
 }
 
-// UnmarshalMEXCDepthProto unmarshals a binary protobuf message into our structure.
-// This is a simplified version that doesn't use the proto package directly.
-// We're implementing a manual decoder based on the known binary protocol format.
-func UnmarshalMEXCDepthProto(data []byte) (*PublicLimitDepthsV3Api, error) {
-	// Create a placeholder result - in production this would use the real proto unmarshaling
-	msg := &PublicLimitDepthsV3Api{
-		EventType: "spot@public.limit.depth.v3.api.pb",
-		Version:   "0", // This will be populated from the actual message
+// UnmarshalMEXCDepthProto unmarshals a binary protobuf message.
+// This uses proper protobuf unmarshaling using the generated code.
+func UnmarshalMEXCDepthProto(data []byte) (*PublicLimitDepthsV3ApiWrapper, error) {
+	// Create an instance of the protobuf generated message
+	pbMsg := &PublicLimitDepthsV3Api{}
+
+	// Unmarshal using the protobuf library
+	err := proto.Unmarshal(data, pbMsg)
+	if err != nil {
+		return nil, err // Return error if protobuf parsing fails
 	}
 
-	// Since we can't directly use protobuf unmarshaling without additional dependencies,
-	// we need to implement a limited parser for the binary format
-
-	// Extract symbol from the first part of the binary message if possible
-	// MEXC protobuf format typically includes the symbol in ASCII format in the message
-	symbolData := extractSymbolFromBinaryData(data)
-	if symbolData != "" {
-		msg.Symbol = symbolData
+	// Convert from generated proto to our wrapped type
+	result := &PublicLimitDepthsV3ApiWrapper{
+		EventType: pbMsg.GetEventType(),
+		Version:   pbMsg.GetVersion(),
 	}
 
-	// Extract sequence number (LastUpdateId) from binary data if possible
-	updateID := extractUpdateIDFromBinaryData(data)
-	if updateID > 0 {
-		msg.LastUpdateId = updateID
-		msg.Version = strconv.FormatUint(updateID, 10)
-	}
-
-	// Always parse actual bid/ask data when we have a proper implementation
-	msg.Asks, msg.Bids = extractDepthDataFromBinaryData(data)
-
-	return msg, nil
-}
-
-// extractSymbolFromBinaryData tries to find the symbol name in the binary protobuf data
-// This is a best-effort implementation since we don't have the actual protobuf definitions
-func extractSymbolFromBinaryData(data []byte) string {
-	// Look for common market symbols in the data (DCR, BTC, USDT, etc.)
-	commonSymbols := []string{"DCR", "BTC", "ETH", "USDT"}
-
-	// Convert binary to string for simple text search
-	dataStr := string(data)
-
-	for _, symbol := range commonSymbols {
-		// Try to find the symbol with common endings
-		pairs := []string{symbol + "USDT", symbol + "BTC", "BTC" + symbol}
-		for _, pair := range pairs {
-			if strings.Contains(dataStr, pair) {
-				return pair
-			}
+	// Process symbol (not part of proto but needed for our API)
+	if result.EventType != "" && strings.Contains(result.EventType, "@") {
+		parts := strings.Split(result.EventType, "@")
+		if len(parts) > 2 {
+			result.Symbol = parts[len(parts)-1]
 		}
 	}
 
-	return ""
-}
-
-// extractUpdateIDFromBinaryData tries to extract the LastUpdateId field from binary data
-// This is a best-effort implementation that looks for patterns in the binary data
-func extractUpdateIDFromBinaryData(data []byte) uint64 {
-	// Instead of trying to extract the actual sequencing number (which we can't without
-	// the protobuf schema), we'll generate sequence IDs based on data content hash.
-	// This creates more stable sequence numbers that will be identical for identical messages.
-
-	if len(data) < 8 {
-		return uint64(1)
-	}
-
-	// Use a simple accumulator algorithm to generate a stable sequence number
-	var id uint64 = 1
-	for i := 0; i < len(data); i++ {
-		// Only use every 4th byte to reduce impact of small changes
-		if i%4 == 0 {
-			id = (id + uint64(data[i])) % 10000000
+	// Set LastUpdateId from Version
+	if result.Version != "" {
+		if updateID, err := strconv.ParseUint(result.Version, 10, 64); err == nil {
+			result.LastUpdateId = updateID
 		}
 	}
 
-	// Ensure we never return 0
-	if id == 0 {
-		id = 1
-	}
-
-	return id
-}
-
-// extractDepthDataFromBinaryData tries to extract the bid and ask price levels from binary data
-// This is a simplified implementation that creates data based on binary patterns
-func extractDepthDataFromBinaryData(data []byte) ([]PublicLimitDepthV3ApiItem, []PublicLimitDepthV3ApiItem) {
-	// In a real implementation, this would properly parse the protobuf format using the protobuf library
-	// For now, we'll try to extract data from the binary message
-
-	// A pattern observed in MEXC depth messages is that price and quantity data appear in sequence
-	// We'll look for patterns in the binary data that might represent price/quantity pairs
-	asks := make([]PublicLimitDepthV3ApiItem, 0, 20)
-	bids := make([]PublicLimitDepthV3ApiItem, 0, 20)
-
-	// Skip the first 20 bytes which typically contain headers
-	startIdx := 20
-	if len(data) < startIdx+8 {
-		return asks, bids // Not enough data
-	}
-
-	// Look for sections in the binary data that might contain orderbook entries
-	// Try to locate possible price/quantity pairs by pattern matching
-	for i := startIdx; i < len(data)-16; i += 8 {
-		// Check for a valid price structure (non-zero, reasonable value)
-		priceBytes := data[i : i+8]
-		qtyBytes := data[i+8 : i+16]
-
-		// Skip if bytes are all zeros or all ones (likely not valid data)
-		if isAllZeros(priceBytes) || isAllZeros(qtyBytes) ||
-			isAllOnes(priceBytes) || isAllOnes(qtyBytes) {
-			continue
-		}
-
-		// Convert bytes to float64 values (this is simplistic - real parsing would use protobuf)
-		price := bytesToFloat64(priceBytes)
-		qty := bytesToFloat64(qtyBytes)
-
-		// Validate values are within reasonable ranges for crypto prices and quantities
-		if price > 0.00001 && price < 1000000 && qty > 0.00001 && qty < 1000000 {
-			// If this looks like a valid price/quantity pair, add to asks or bids
-			// We'll alternate between asks and bids to simulate a real orderbook
-			if len(bids) <= len(asks) {
-				bids = append(bids, PublicLimitDepthV3ApiItem{
-					Price:    strconv.FormatFloat(price, 'f', 8, 64),
-					Quantity: strconv.FormatFloat(qty, 'f', 8, 64),
-				})
-			} else {
-				asks = append(asks, PublicLimitDepthV3ApiItem{
-					Price:    strconv.FormatFloat(price*1.001, 'f', 8, 64), // Slightly higher for asks
-					Quantity: strconv.FormatFloat(qty*0.95, 'f', 8, 64),
+	// Convert Asks
+	if protoAsks := pbMsg.GetAsks(); len(protoAsks) > 0 {
+		result.Asks = make([]PublicLimitDepthV3ApiItemWrapper, 0, len(protoAsks))
+		for _, ask := range protoAsks {
+			if ask != nil {
+				result.Asks = append(result.Asks, PublicLimitDepthV3ApiItemWrapper{
+					Price:    ask.GetPrice(),
+					Quantity: ask.GetQuantity(),
 				})
 			}
-
-			// Skip ahead to avoid picking up the same data as both price and quantity
-			i += 8
 		}
 	}
 
-	// Sort bids in descending order and asks in ascending order (proper orderbook format)
-	sortBidsAndAsks(bids, asks)
-
-	return asks, bids
-}
-
-// Helper function to check if byte slice is all zeros
-func isAllZeros(bytes []byte) bool {
-	for _, b := range bytes {
-		if b != 0 {
-			return false
+	// Convert Bids
+	if protoBids := pbMsg.GetBids(); len(protoBids) > 0 {
+		result.Bids = make([]PublicLimitDepthV3ApiItemWrapper, 0, len(protoBids))
+		for _, bid := range protoBids {
+			if bid != nil {
+				result.Bids = append(result.Bids, PublicLimitDepthV3ApiItemWrapper{
+					Price:    bid.GetPrice(),
+					Quantity: bid.GetQuantity(),
+				})
+			}
 		}
 	}
-	return true
+
+	return result, nil
 }
 
-// Helper function to check if byte slice is all ones
-func isAllOnes(bytes []byte) bool {
-	for _, b := range bytes {
-		if b != 0xFF {
-			return false
-		}
-	}
-	return true
-}
-
-// Helper function to convert 8 bytes to float64 (highly simplified)
-func bytesToFloat64(bytes []byte) float64 {
-	// This is a rough approximation - proper handling would depend on the exact binary format
-	if len(bytes) < 8 {
-		return 0.0
-	}
-
-	// Use middle bytes to reduce chance of getting header/metadata
-	value := float64(uint32(bytes[2]) | (uint32(bytes[3]) << 8) |
-		(uint32(bytes[4]) << 16) | (uint32(bytes[5]) << 24))
-
-	// Scale to reasonable range for crypto values
-	return value / 1000.0
-}
-
-// Helper to sort bids (descending) and asks (ascending)
-func sortBidsAndAsks(bids, asks []PublicLimitDepthV3ApiItem) {
-	// Sort bids in descending order (highest price first)
-	sort.Slice(bids, func(i, j int) bool {
-		priceI, _ := strconv.ParseFloat(bids[i].Price, 64)
-		priceJ, _ := strconv.ParseFloat(bids[j].Price, 64)
-		return priceI > priceJ
-	})
-
-	// Sort asks in ascending order (lowest price first)
-	sort.Slice(asks, func(i, j int) bool {
-		priceI, _ := strconv.ParseFloat(asks[i].Price, 64)
-		priceJ, _ := strconv.ParseFloat(asks[j].Price, 64)
-		return priceI < priceJ
-	})
-}
-
-// ConvertProtoToDepthUpdate converts from our proto struct to the websocket depth update format.
-func ConvertProtoToDepthUpdate(pb *PublicLimitDepthsV3Api) *WsDepthUpdateData {
+// ConvertProtoToDepthUpdate converts from our wrapper struct to the websocket depth update format.
+func ConvertProtoToDepthUpdate(pb *PublicLimitDepthsV3ApiWrapper) *WsDepthUpdateData {
 	if pb == nil {
 		return nil
 	}
