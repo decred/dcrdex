@@ -61,16 +61,19 @@ type WithdrawApplyResponse struct {
 
 // WithdrawHistoryRecord structure for GET /api/v3/capital/withdraw/history.
 type WithdrawHistoryRecord struct {
-	ID             string `json:"id"` // Withdrawal ID from apply step
-	Coin           string `json:"coin"`
-	Network        string `json:"network"`
-	Address        string `json:"address"`
-	Amount         string `json:"amount"`
-	TransactionFee string `json:"transactionFee"`
-	Memo           string `json:"memo,omitempty"` // Address tag
-	Status         int    `json:"status"`         // 0: PENDING, 1: PROCESSING, 2: FAILED, 3: SUCCESS, 4: PENDING_CANCEL, 5: CANCELED
-	TxID           string `json:"txId,omitempty"`
-	ApplyTime      string `json:"applyTime"` // Timestamp as string?
+	ID           string `json:"id"` // Withdrawal ID from apply step
+	TxID         string `json:"txId,omitempty"`
+	Amount       string `json:"amount"`       // Amount as string
+	TransferType int    `json:"transferType"` // 0:withdraw
+	Status       int    `json:"status"`       // Status codes: 0:Email Sent, 1:Cancelled, 2:Awaiting Approval, 3:Rejected, 4:Processing, 5:Failure, 6:Completed
+	Info         string `json:"info"`         // Additional status information
+	Address      string `json:"address"`
+	Coin         string `json:"coin"`
+	Network      string `json:"network"`
+	TxKey        string `json:"txKey"` // Transaction key, maybe important for some networks
+	CompleteTime int64  `json:"completeTime"`
+	CreateTime   int64  `json:"createTime"`
+	ConfirmId    string `json:"confirmId"`
 }
 
 // PendingDeposit represents a deposit record returned by the deposit history endpoint

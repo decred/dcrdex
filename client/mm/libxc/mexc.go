@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"net/url"
@@ -1785,17 +1786,24 @@ func (m *mexc) request(ctx context.Context, method, endpoint string, query, form
 		// Construct the signature payload based on the request type
 		var signaturePayload string
 
+		// According to MEXC API docs:
+		// - GET and DELETE requests: signature is calculated from the query string
+		// - POST and PUT requests: signature is calculated from the request body if present,
+		//   otherwise from the query string
 		signatureQueryString := signatureQuery.Encode()
 
 		switch method {
 		case http.MethodGet, http.MethodDelete:
-			// For GET/DELETE requests, sign the query string
+			// For GET/DELETE requests, signature is calculated from query string
 			signaturePayload = signatureQueryString
 		case http.MethodPost, http.MethodPut:
-			// For POST/PUT, sign the request body if present, otherwise query string
+			// For POST/PUT with form body, signature is calculated from form body
+			// For POST/PUT with JSON body handled elsewhere, signature is calculated from query string
 			if bodyString != "" {
+				// If using form data in body
 				signaturePayload = bodyString
 			} else {
+				// If no form data (empty body), use query string
 				signaturePayload = signatureQueryString
 			}
 		}
@@ -3123,27 +3131,67 @@ func (m *mexc) Withdraw(ctx context.Context, assetID uint32, amt uint64, address
 		network = cfg.coin
 	}
 
-	form := url.Values{
-		"coin":    []string{cfg.coin},
-		"address": []string{address},
-		"amount":  []string{strconv.FormatFloat(convQty, 'f', -1, 64)},
-		"network": []string{network},
-	}
+	// Create query parameters with all required fields
+	query := url.Values{}
+	query.Set("coin", cfg.coin)
+	query.Set("address", address)
+	query.Set("amount", strconv.FormatFloat(convQty, 'f', -1, 64))
+	query.Set("netWork", network)
+	query.Set("timestamp", strconv.FormatInt(time.Now().UnixMilli(), 10))
+	query.Set("recvWindow", mxRecvWindow)
 
-	// Handle memo for assets that require it
-	// For MEXC, most memos are handled automatically via address detection
-	// but we'd add specific memo handling here if needed
+	// Calculate signature
+	signaturePayload := query.Encode()
+	mac := hmac.New(sha256.New, []byte(m.secretKey))
+	mac.Write([]byte(signaturePayload))
+	signature := hex.EncodeToString(mac.Sum(nil))
+	query.Set("signature", signature)
 
-	var resp struct {
-		ID string `json:"id"`
-	}
+	// Construct the full URL with query parameters
+	reqURL := fmt.Sprintf("%s/api/v3/capital/withdraw?%s", m.accountsURL, query.Encode())
 
-	err = m.postAPI(ctx, "/api/v3/capital/withdraw/apply", nil, form, true, true, &resp)
+	// Create request
+	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, nil)
 	if err != nil {
-		return "", fmt.Errorf("error submitting withdrawal: %w", err)
+		return "", fmt.Errorf("error creating request: %w", err)
 	}
 
-	return resp.ID, nil
+	req.Header.Set("X-MEXC-APIKEY", m.apiKey)
+
+	// Send request using standard HTTP client
+	client := &http.Client{
+		Timeout: 15 * time.Second,
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("error sending request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("error reading response: %w", err)
+	}
+
+	// Check for error response
+	if resp.StatusCode != http.StatusOK {
+		var errResp mexctypes.ErrorResponse
+		if err := json.Unmarshal(respBytes, &errResp); err == nil && errResp.Code != 0 {
+			return "", fmt.Errorf("HTTP error: %q (code %d), mexc error code: %d, message: %s",
+				resp.Status, resp.StatusCode, errResp.Code, errResp.Msg)
+		}
+		return "", fmt.Errorf("HTTP error: %q (code %d), response: %s",
+			resp.Status, resp.StatusCode, string(respBytes))
+	}
+
+	var response mexctypes.WithdrawApplyResponse
+	if err := json.Unmarshal(respBytes, &response); err != nil {
+		return "", fmt.Errorf("error parsing response: %w, raw: %s", err, string(respBytes))
+	}
+
+	// Return the withdrawal ID
+	return response.WithdrawID, nil
 }
 
 // Markets retrieves all available markets on the exchange. The map has the
@@ -4015,43 +4063,71 @@ func (m *mexc) ConfirmWithdrawal(ctx context.Context, withdrawalID string, asset
 		return 0, "", fmt.Errorf("error getting asset cfg for %d: %w", assetID, err)
 	}
 
-	// Create query parameters
+	// Create query parameters with required authentication
 	query := url.Values{}
 	query.Add("coin", assetCfg.coin)
+	query.Add("timestamp", strconv.FormatInt(time.Now().UnixMilli(), 10))
+	query.Add("recvWindow", mxRecvWindow)
 
 	// If withdrawal ID is provided, add it to the query
 	if withdrawalID != "" {
 		query.Add("withdrawId", withdrawalID)
 	}
 
-	// Query withdrawal history
-	var withdrawHistoryResponse []struct {
-		ID     string  `json:"id"`
-		Amount float64 `json:"amount"`
-		Status int     `json:"status"` // 0:Email Sent, 1:Cancelled, 2:Awaiting Approval, 3:Rejected, 4:Processing, 5:Failure, 6:Completed
-		TxID   string  `json:"txId"`
+	// Calculate signature for GET request (query parameters only)
+	signaturePayload := query.Encode()
+	mac := hmac.New(sha256.New, []byte(m.secretKey))
+	mac.Write([]byte(signaturePayload))
+	signature := hex.EncodeToString(mac.Sum(nil))
+	query.Set("signature", signature)
+
+	// Build the full URL with query parameters
+	fullURL := m.accountsURL + "/api/v3/capital/withdraw/history?" + query.Encode()
+
+	// Create the request
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
+	if err != nil {
+		return 0, "", fmt.Errorf("error creating request: %w", err)
 	}
 
-	if err := m.getAPI(ctx, "/api/v3/capital/withdraw/history", query, true, true, &withdrawHistoryResponse); err != nil {
-		return 0, "", err
+	// Set API key header
+	req.Header.Set("X-MEXC-APIKEY", m.apiKey)
+
+	// Use the updated WithdrawHistoryRecord type from mexctypes
+	var withdrawHistoryResponse []mexctypes.WithdrawHistoryRecord
+	var mexcErr MxCodedErr
+
+	if err := dexnet.Do(req, &withdrawHistoryResponse, dexnet.WithSizeLimit(1<<24), dexnet.WithErrorParsing(&mexcErr)); err != nil {
+		m.log.Errorf("withdraw history error: %v, mexc coded error: %v", err, &mexcErr)
+		return 0, "", fmt.Errorf("error getting withdrawal history: %w", errors.Join(err, &mexcErr))
 	}
 
 	// Find the matching withdrawal
-	for _, status := range withdrawHistoryResponse {
-		if status.ID == withdrawalID {
-			// Completed (status = 6)
-			if status.Status == 6 && status.TxID != "" {
-				amt := status.Amount * float64(assetCfg.conversionFactor)
-				return uint64(amt), status.TxID, nil
+	for _, record := range withdrawHistoryResponse {
+		if record.ID == withdrawalID {
+			// Status codes according to MEXC API:
+			// 1:APPLY, 2:AUDITING, 3:WAIT, 4:PROCESSING, 5:WAIT_PACKAGING,
+			// 6:WAIT_CONFIRM, 7:SUCCESS, 8:FAILED, 9:CANCEL, 10:MANUAL
+
+			// Completed (status = 7 SUCCESS)
+			if record.Status == 7 && record.TxID != "" {
+				// Convert amount string to float64
+				amount, err := strconv.ParseFloat(record.Amount, 64)
+				if err != nil {
+					return 0, "", fmt.Errorf("error parsing amount '%s': %w", record.Amount, err)
+				}
+
+				amt := amount * float64(assetCfg.conversionFactor)
+				return uint64(amt), record.TxID, nil
 			}
 
-			// Pending statuses
-			if status.Status == 0 || status.Status == 2 || status.Status == 4 {
+			// Pending statuses (1-6: all processing states)
+			if record.Status >= 1 && record.Status <= 6 {
 				return 0, "", ErrWithdrawalPending
 			}
 
-			// Other statuses (1:Cancelled, 3:Rejected, 5:Failure)
-			return 0, "", fmt.Errorf("withdrawal status: %d", status.Status)
+			// Other statuses (8:FAILED, 9:CANCEL, 10:MANUAL)
+			return 0, "", fmt.Errorf("withdrawal status: %d, info: %s", record.Status, record.Info)
 		}
 	}
 
