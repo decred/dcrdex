@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -117,14 +118,8 @@ func (btc *ExchangeWalletElectrum) Connect(ctx context.Context) (*sync.WaitGroup
 	if err != nil {
 		return nil, err
 	}
-	var hasFreezeUTXO bool
-	for i := range commands {
-		if commands[i] == "freeze_utxo" {
-			hasFreezeUTXO = true
-			break
-		}
-	}
-	if !hasFreezeUTXO {
+
+	if !slices.Contains(commands, "freeze_utxo") {
 		return nil, errors.New("wallet does not support the freeze_utxo command")
 	}
 
