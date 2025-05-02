@@ -186,17 +186,40 @@ func (b *mxOrderBook) convertMEXCBook(mexcBids, mexcAsks [][2]json.Number) (bids
 // This function runs until the context is canceled. It must be started as
 // a new goroutine.
 func (b *mxOrderBook) sync(ctx context.Context) {
+	// Create and store the ConnectionMaster under lock to prevent race conditions
 	cm := dex.NewConnectionMaster(b)
 	b.mtx.Lock()
 	b.cm = cm
 	b.mtx.Unlock()
-	if err := cm.ConnectOnce(ctx); err != nil {
+
+	// Set up a cleanup handler to ensure proper resource release on context cancellation
+	go func() {
+		<-ctx.Done()
+		b.log.Debugf("Context done, disconnecting ConnectionMaster for %s", b.mktID)
+		// Ensure ConnectionMaster is properly disconnected
+		b.mtx.Lock()
+		if b.cm != nil {
+			b.cm.Disconnect()
+			b.cm = nil
+		}
+		b.mtx.Unlock()
+	}()
+
+	// Connect once and check for errors
+	err := cm.ConnectOnce(ctx)
+	if err != nil {
 		b.log.Errorf("Error connecting %s order book: %v", b.mktID, err)
+		return
 	}
 
-	// Wait for syncChan to be closed when the initial sync completes
+	// Wait for initial sync to complete, or exit if context is cancelled
 	if b.syncChan != nil {
-		<-b.syncChan
+		select {
+		case <-b.syncChan:
+			b.log.Debugf("Initial sync completed for %s orderbook", b.mktID)
+		case <-ctx.Done():
+			b.log.Debugf("Context cancelled before initial sync could complete for %s", b.mktID)
+		}
 	}
 }
 
@@ -364,14 +387,118 @@ func (b *mxOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 
 	var wg sync.WaitGroup
 
+	// Create an internal context that we can cancel directly when cleaning up
+	internalCtx, internalCancel := context.WithCancel(ctx)
+
+	// Add cleanup handler for context cancellation
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// Wait for either the parent context or our internal context to be cancelled
+		select {
+		case <-ctx.Done():
+			// Parent context was cancelled
+			b.log.Infof("Parent context cancelled for orderbook %s, starting cleanup", b.mktID)
+		case <-internalCtx.Done():
+			// Internal context was cancelled (likely by explicit cleanup)
+			b.log.Infof("Internal context cancelled for orderbook %s, starting cleanup", b.mktID)
+		}
+
+		b.log.Debugf("Context done for orderbook %s, cleaning up resources", b.mktID)
+
+		// Mark book as unsynced to prevent further use
+		b.synced.Store(false)
+
+		// Cancel our internal context to signal all our goroutines
+		internalCancel()
+
+		// Clean up any resources that might prevent garbage collection
+		b.mtx.Lock()
+
+		// Save reference to updateQueue to drain it safely
+		queue := b.updateQueue
+
+		// Save reference to connection master to disconnect it properly
+		cm := b.cm
+
+		// Clear channel reference to prevent further use
+		if b.updateQueue != nil {
+			// Close the channel to signal processing goroutines to exit
+			b.log.Debugf("Closing update queue for orderbook %s", b.mktID)
+			close(b.updateQueue)
+			b.updateQueue = nil
+		}
+
+		// Clear other references
+		b.cm = nil
+		b.active = false
+
+		b.mtx.Unlock()
+
+		// Disconnect the ConnectionMaster if it exists
+		if cm != nil {
+			cm.Disconnect()
+			b.log.Infof("Disconnected ConnectionMaster for orderbook %s", b.mktID)
+		} else {
+			b.log.Debugf("No ConnectionMaster to disconnect for orderbook %s", b.mktID)
+		}
+
+		// Safely drain the update queue if it exists
+		if queue != nil {
+			// Drain queue with timeout
+			drainCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+			defer cancel()
+
+			// Try to drain remaining updates
+			drainCount := 0
+			drainDone := false
+
+			for !drainDone {
+				select {
+				case _, ok := <-queue:
+					if !ok {
+						drainDone = true
+					} else {
+						drainCount++
+					}
+				case <-drainCtx.Done():
+					drainDone = true
+					b.log.Debugf("Timeout while draining update queue for %s, drained %d updates", b.mktID, drainCount)
+				}
+			}
+
+			if drainCount > 0 {
+				b.log.Debugf("Drained %d updates from queue for %s", drainCount, b.mktID)
+			}
+		}
+
+		b.log.Infof("Orderbook %s cleanup complete", b.mktID)
+	}()
+
 	// Goroutine to process incoming updates
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 
 		for {
+			// Check if context is done before trying to read from channel
 			select {
-			case update := <-b.updateQueue:
+			case <-internalCtx.Done():
+				b.log.Debugf("Update processor for %s exiting due to context done", b.mktID)
+				return
+			default:
+				// Continue processing
+			}
+
+			// Try to read an update with timeout to allow checking context cancellation
+			select {
+			case update, ok := <-b.updateQueue:
+				if !ok {
+					// Channel closed
+					b.log.Debugf("Update queue closed for %s", b.mktID)
+					return
+				}
+
 				syncMtx.Lock()
 				success := acceptUpdate(update)
 				syncMtx.Unlock()
@@ -385,8 +512,12 @@ func (b *mxOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 					// We won't desync on sequence issues, only on critical connection problems
 					// which are handled elsewhere
 				}
-			case <-ctx.Done():
+			case <-internalCtx.Done():
+				b.log.Debugf("Update processor for %s exiting due to context done", b.mktID)
 				return
+			case <-time.After(250 * time.Millisecond):
+				// Timeout to check context cancellation more frequently
+				continue
 			}
 		}
 	}()
@@ -397,34 +528,58 @@ func (b *mxOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		defer wg.Done()
 
 		const retryFrequency = time.Second * 5
-		retry := time.After(0) // Start with immediate sync
+		var retryTimer *time.Timer
+
+		// Initialize the retry timer
+		retryTimer = time.NewTimer(0)
+		defer func() {
+			if !retryTimer.Stop() {
+				// Drain the channel if it was already fired
+				select {
+				case <-retryTimer.C:
+				default:
+				}
+			}
+		}()
 
 		for {
 			select {
-			case <-retry:
+			case <-retryTimer.C:
 				// Time to try a sync
-			case <-resyncChan:
-				if retry != nil { // don't hammer
-					continue
+				if syncOrderbook() {
+					b.log.Infof("Synced %s orderbook", b.mktID)
+					// Don't reset the timer - we're synced now
+				} else {
+					b.log.Infof("Failed to sync %s orderbook. Trying again in %s", b.mktID, retryFrequency)
+					desync(false) // Clear the buffer
+					retryTimer.Reset(retryFrequency)
 				}
+			case <-resyncChan:
+				if !retryTimer.Stop() {
+					// Drain the channel if it was already fired
+					select {
+					case <-retryTimer.C:
+					default:
+					}
+				}
+				retryTimer.Reset(0) // Trigger immediate sync
 			case connected := <-b.connectedChan:
 				if !connected {
 					b.log.Debugf("Unsyncing %s orderbook due to disconnect", b.mktID)
 					desync(false)
-					retry = nil
-					continue
+					// Reset timer only if it's not already set
+					if !retryTimer.Stop() {
+						// Drain the channel if it was already fired
+						select {
+						case <-retryTimer.C:
+						default:
+						}
+					}
+					retryTimer.Reset(retryFrequency)
 				}
-			case <-ctx.Done():
+			case <-internalCtx.Done():
+				b.log.Debugf("Resync handler for %s exiting due to context done", b.mktID)
 				return
-			}
-
-			if syncOrderbook() {
-				b.log.Infof("Synced %s orderbook", b.mktID)
-				retry = nil
-			} else {
-				b.log.Infof("Failed to sync %s orderbook. Trying again in %s", b.mktID, retryFrequency)
-				desync(false) // Clear the buffer
-				retry = time.After(retryFrequency)
 			}
 		}
 	}()
@@ -766,21 +921,150 @@ func (m *mexc) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 
 	m.log.Infof("Initial market and coin data loaded successfully")
 
-	// Launch user data stream connection
-	m.log.Infof("Starting user data stream...")
+	// Create a WaitGroup to track all goroutines
+	var wg sync.WaitGroup
+
+	// Set up cleanup handler for context cancellation
+	wg.Add(1)
 	m.wg.Add(1)
 	go func() {
+		defer wg.Done()
+		defer m.wg.Done()
+		<-ctx.Done()
+
+		m.log.Infof("MEXC context canceled, cleaning up resources")
+
+		// Signal all goroutines to exit
+		m.shutdownMtx.Lock()
+		select {
+		case <-m.quit:
+			// Already closed
+			m.shutdownMtx.Unlock()
+			m.log.Debugf("Quit channel already closed, continuing shutdown")
+			return
+		default:
+			close(m.quit)
+			m.log.Debugf("Closed quit channel to signal goroutines")
+		}
+		m.shutdownMtx.Unlock()
+
+		// Delete listen key to prevent reconnection attempts
+		if key := m.listenKey.Load().(string); key != "" {
+			// Create a context for cleanup operations
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			m.log.Infof("Deleting MEXC listen key during shutdown")
+			if err := m.deleteListenKey(cleanupCtx, key); err != nil {
+				m.log.Warnf("Error deleting listen key during shutdown: %v", err)
+			}
+
+			// Clear the listen key
+			m.listenKey.Store("")
+		}
+
+		// Explicitly clean up websocket connections
+		m.marketStreamMtx.Lock()
+		if m.marketStream != nil {
+			m.log.Infof("Cleaning up market stream connection during shutdown")
+			if !m.marketStream.IsDown() {
+				m.log.Debugf("Market stream is still active, will be closed via context")
+			}
+			// The connection should be cleaned up by the goroutine we started,
+			// but we set it to nil here to prevent any further use
+			m.marketStream = nil
+		} else {
+			m.log.Debugf("Market stream was already nil during cleanup")
+		}
+		m.marketStreamMtx.Unlock()
+
+		// Also clean up user data stream connection
+		if m.userDataStream != nil {
+			m.log.Infof("Cleaning up user data stream connection during shutdown")
+			// Clear the reference, actual cleanup happens in the goroutine
+			m.userDataStream = nil
+		} else {
+			m.log.Debugf("User data stream was already nil during cleanup")
+		}
+
+		// Disconnect all orderbook ConnectionMasters
+		orderbookCount := 0
+		activeBooks := 0
+		m.booksMtx.Lock()
+		m.log.Infof("Cleaning up %d orderbooks during shutdown", len(m.books))
+		for symbol, book := range m.books {
+			orderbookCount++
+			// Get the book's ConnectionMaster and disconnect it
+			book.mtx.Lock()
+			if book.active {
+				activeBooks++
+			}
+			if book.cm != nil {
+				m.log.Infof("Disconnecting ConnectionMaster for orderbook %s", symbol)
+				book.cm.Disconnect()
+				book.cm = nil
+			} else {
+				m.log.Debugf("ConnectionMaster was nil for orderbook %s", symbol)
+			}
+			// Close any channels to signal goroutines to exit
+			if book.updateQueue != nil {
+				m.log.Debugf("Closing update queue for orderbook %s", symbol)
+				close(book.updateQueue)
+				book.updateQueue = nil
+			}
+			book.active = false
+			book.mtx.Unlock()
+		}
+		m.booksMtx.Unlock()
+		m.log.Infof("Processed %d orderbooks during shutdown (%d were active)", orderbookCount, activeBooks)
+
+		// Wait for goroutines to exit with a timeout
+		m.log.Infof("Waiting for all MEXC goroutines to exit...")
+		waitChan := make(chan struct{})
+		go func() {
+			m.wg.Wait()
+			close(waitChan)
+		}()
+
+		select {
+		case <-waitChan:
+			m.log.Infof("All MEXC goroutines exited cleanly")
+		case <-time.After(5 * time.Second):
+			m.log.Warnf("Timed out waiting for some MEXC goroutines to exit")
+		}
+
+		m.log.Infof("MEXC adapter cleanup complete")
+	}()
+
+	// Launch user data stream connection
+	m.log.Infof("Starting user data stream...")
+	wg.Add(1)
+	m.wg.Add(1)
+	go func() {
+		defer wg.Done()
 		defer m.wg.Done()
 		m.connectUserStream(ctx)
 	}()
 
 	// Setup periodic data refresh
-	m.wg.Add(2)
-	go m.periodicCoinInfoRefresh(ctx)
-	go m.periodicMarketsRefresh(ctx)
+	wg.Add(1)
+	m.wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer m.wg.Done()
+		m.periodicCoinInfoRefresh(ctx)
+	}()
+
+	wg.Add(1)
+	m.wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer m.wg.Done()
+		m.periodicMarketsRefresh(ctx)
+	}()
 
 	m.log.Infof("MEXC connection established successfully")
-	return &m.wg, nil
+	return &wg, nil
 }
 
 // periodicCoinInfoRefresh periodically refreshes coin information.
@@ -798,7 +1082,19 @@ func (m *mexc) periodicCoinInfoRefresh(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-m.quit:
+			return
 		case <-ticker.C:
+			// Check again for context cancellation before starting work
+			select {
+			case <-ctx.Done():
+				return
+			case <-m.quit:
+				return
+			default:
+				// Continue with refresh
+			}
+
 			refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			err := m.getCoinInfo(refreshCtx)
 			cancel()
@@ -829,7 +1125,19 @@ func (m *mexc) periodicMarketsRefresh(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-m.quit:
+			return
 		case <-ticker.C:
+			// Check again for context cancellation before starting work
+			select {
+			case <-ctx.Done():
+				return
+			case <-m.quit:
+				return
+			default:
+				// Continue with refresh
+			}
+
 			refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			_, err := m.getMarkets(refreshCtx)
 			cancel()
@@ -853,7 +1161,13 @@ func (m *mexc) handleMarketConnectEvent(status comms.ConnectionStatus) {
 	case comms.Connected:
 		// When connection is established, resubscribe to all active markets
 		m.log.Infof("[MarketWS] Connection established, resubscribing to markets")
-		go m.resubscribeMarkets(context.Background())
+		// Use a background context if we don't have access to the original context
+		// This is safer than using a nil context
+		bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		go func() {
+			defer cancel() // Ensure the context is cancelled when done
+			m.resubscribeMarkets(bgCtx)
+		}()
 	case comms.Disconnected:
 		m.log.Warnf("[MarketWS] Connection lost")
 		// We will no longer mark books as unsynced on disconnection
@@ -903,7 +1217,6 @@ func (m *mexc) resubscribeMarkets(ctx context.Context) {
 
 	m.marketStreamMtx.RLock()
 	defer m.marketStreamMtx.RUnlock()
-
 	if m.marketStream == nil || m.marketStream.IsDown() {
 		m.log.Errorf("[MarketWS] Cannot resubscribe - market stream is down or nil")
 		return
@@ -1403,6 +1716,31 @@ func (m *mexc) postAPI(ctx context.Context, endpoint string, query, form url.Val
 
 // request makes an HTTP request to the MEXC API.
 func (m *mexc) request(ctx context.Context, method, endpoint string, query, form url.Values, key, sign bool, thing interface{}) error {
+	// Special case for listen key deletion during shutdown - allow it to proceed
+	// even if we're in the process of shutting down
+	isListenKeyDeletion := method == http.MethodDelete && endpoint == "/api/v3/userDataStream"
+
+	// Check if we're shutting down before making the request, unless it's a special case
+	if !isListenKeyDeletion {
+		select {
+		case <-m.quit:
+			m.log.Debugf("MEXC adapter shutting down, canceling request to %s", endpoint)
+			return fmt.Errorf("MEXC adapter is shutting down")
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			// Continue with the request
+		}
+	} else {
+		// For listen key deletion, only check context cancellation
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			// Continue with the request
+		}
+	}
+
 	fullURL := m.marketsURL + endpoint
 
 	// Create a new query if it doesn't exist
@@ -1479,7 +1817,7 @@ func (m *mexc) request(ctx context.Context, method, endpoint string, query, form
 		fullURL = fmt.Sprintf("%s?%s", fullURL, queryString)
 	}
 
-	// Create and send the request
+	// Create the request
 	req, err := http.NewRequestWithContext(ctx, method, fullURL, body)
 	if err != nil {
 		return fmt.Errorf("NewRequestWithContext error: %w", err)
@@ -1492,6 +1830,19 @@ func (m *mexc) request(ctx context.Context, method, endpoint string, query, form
 	if err := dexnet.Do(req, thing, dexnet.WithSizeLimit(1<<24), dexnet.WithErrorParsing(&mexcErr)); err != nil {
 		m.log.Errorf("request error from endpoint %s %q with query = %q, body = %q, mexc coded error: %v, msg = %q",
 			method, endpoint, queryString, bodyString, &mexcErr, mexcErr.Msg)
+
+		// Check if this is a listen key error during shutdown - don't propagate these errors
+		if sign && endpoint == "/api/v3/userDataStream" && errHasMxCode(err, mxErrCodeInvalidListenKey) {
+			// If we're deleting an already-invalid listenKey during shutdown, just log and return nil
+			select {
+			case <-m.quit:
+				m.log.Debugf("Ignoring invalid listen key error during shutdown: %v", err)
+				return nil
+			default:
+				// Not in shutdown, so propagate the error
+			}
+		}
+
 		return errors.Join(err, &mexcErr)
 	}
 
@@ -1684,32 +2035,58 @@ func (m *mexc) keepAliveListenKey(ctx context.Context) {
 	ticker := time.NewTicker(30 * time.Minute)
 	defer ticker.Stop()
 
+	m.log.Debugf("Starting listenKey keepalive routine")
+	defer m.log.Debugf("Exiting listenKey keepalive routine")
+
 	for {
 		select {
 		case <-ticker.C:
-			// Check if we're shutting down before refreshing the listen key
+			// First check context before doing any work
 			select {
+			case <-ctx.Done():
+				return
 			case <-m.quit:
-				m.log.Debugf("Not refreshing listen key during shutdown")
 				return
 			default:
-				// Continue with refresh
+				// Continue with refresh operation
 			}
 
 			key := m.listenKey.Load().(string)
 			if key == "" {
+				m.log.Debugf("No listenKey to refresh")
 				continue
 			}
+
+			m.log.Debugf("Refreshing MEXC listenKey")
 			form := url.Values{}
 			form.Add("listenKey", key)
-			// Changed from false to true for the sign parameter to ensure signature is included
-			err := m.putAPI(ctx, "/api/v3/userDataStream", nil, form, true, true, nil)
+
+			// Use a timeout context for the API call
+			refreshCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+
+			// Check for context cancellation one more time before making API call
+			select {
+			case <-refreshCtx.Done():
+				cancel()
+				continue
+			case <-m.quit:
+				cancel()
+				return
+			default:
+				// Continue with API call
+			}
+
+			err := m.putAPI(refreshCtx, "/api/v3/userDataStream", nil, form, true, true, nil)
+			cancel()
+
 			if err != nil {
-				m.log.Errorf("error refreshing listen key: %v", err)
+				m.log.Errorf("Error refreshing MEXC listenKey: %v", err)
 			} else {
-				m.log.Tracef("Successfully refreshed listen key")
+				m.log.Debugf("Successfully refreshed MEXC listenKey")
 			}
 		case <-ctx.Done():
+			return
+		case <-m.quit:
 			return
 		}
 	}
@@ -1723,80 +2100,109 @@ func (m *mexc) putAPI(ctx context.Context, endpoint string, query, form url.Valu
 // userDataStreamHandler connects to the user data stream and processes messages.
 func (m *mexc) userDataStreamHandler(ctx context.Context) {
 	reconnect := func() {
-		// Check if we're shutting down before attempting to reconnect
+		// Check for context cancellation and quit signal before reconnecting
 		select {
+		case <-ctx.Done():
+			m.log.Debugf("Not reconnecting user data stream - context cancelled")
+			return
 		case <-m.quit:
-			m.log.Debugf("Not reconnecting user data stream during shutdown")
+			m.log.Debugf("Not reconnecting user data stream - quit signaled")
 			return
 		default:
-			// Only try to reconnect if we're not shutting down
+			// Continue with reconnection
 		}
 
 		select {
 		case m.reconnectChan <- struct{}{}:
+			m.log.Debugf("Queued reconnection request")
 		default:
+			m.log.Debugf("Reconnection already queued")
 		}
 	}
+
+	m.log.Debugf("Starting user data stream handler")
+	defer m.log.Debugf("Exiting user data stream handler")
 
 	for {
 		select {
 		case <-ctx.Done():
+			m.log.Debugf("Exiting userDataStreamHandler - context done")
+			return
+		case <-m.quit:
+			m.log.Debugf("Exiting userDataStreamHandler - shutdown signaled")
 			return
 		case <-m.reconnectChan:
-			// Check if we're shutting down before reconnecting
+			// Double-check shutdown status before reconnecting
 			select {
 			case <-m.quit:
-				m.log.Debugf("Not reconnecting user data stream during shutdown")
+				m.log.Debugf("Not reconnecting user data stream - shutdown signaled")
 				return
 			default:
 				// Continue with reconnection
 			}
-		}
 
-		listenKey := m.listenKey.Load().(string)
-		if listenKey == "" {
-			m.log.Errorf("no listen key available, cannot connect to user data stream")
-			time.Sleep(5 * time.Second)
-			continue
-		}
+			// Get the current listen key
+			listenKey := m.listenKey.Load().(string)
+			if listenKey == "" {
+				m.log.Errorf("No listen key available, cannot connect to user data stream")
+				time.Sleep(5 * time.Second)
+				continue
+			}
 
-		wsURL := fmt.Sprintf("%s?listenKey=%s", m.wsURL, listenKey)
+			// Set up WebSocket connection with the listen key
+			wsURL := fmt.Sprintf("%s?listenKey=%s", m.wsURL, listenKey)
+			m.log.Debugf("Connecting to user data stream with listen key")
 
-		wsConn, err := comms.NewWsConn(&comms.WsCfg{
-			URL:        wsURL,
-			Logger:     m.log,
-			PingWait:   60 * time.Second,
-			RawHandler: m.handleUserDataMessage,
-		})
-		if err != nil {
-			m.log.Errorf("error creating user data stream websocket connection: %v", err)
-			time.Sleep(5 * time.Second)
-			reconnect()
-			continue
-		}
+			// Create a new websocket connection
+			wsConn, err := comms.NewWsConn(&comms.WsCfg{
+				URL:        wsURL,
+				Logger:     m.log.SubLogger("MEXC-UserStream"),
+				PingWait:   60 * time.Second,
+				RawHandler: m.handleUserDataMessage,
+			})
+			if err != nil {
+				m.log.Errorf("Error creating user data stream websocket connection: %v", err)
+				time.Sleep(5 * time.Second)
+				reconnect()
+				continue
+			}
 
-		m.log.Debugf("Connected to user data stream: %s", wsURL)
+			// Connect and wait for the connection to close
+			wg, err := wsConn.Connect(ctx)
+			if err != nil {
+				m.log.Errorf("Error connecting to user data stream: %v", err)
+				time.Sleep(5 * time.Second)
+				reconnect()
+				continue
+			}
 
-		// Connect and wait for the connection to close
-		wg, err := wsConn.Connect(ctx)
-		if err != nil {
-			m.log.Errorf("error connecting to user data stream: %v", err)
-			time.Sleep(5 * time.Second)
-			reconnect()
-			continue
-		}
+			// Wait for either the connection to close or a shutdown signal
+			disconnected := make(chan struct{})
+			go func() {
+				wg.Wait()
+				close(disconnected)
+			}()
 
-		// Wait for the connection to close
-		wg.Wait()
-
-		// Check if we're shutting down before reconnecting
-		select {
-		case <-m.quit:
-			m.log.Debugf("User data stream disconnected during shutdown, not reconnecting")
-			return
-		default:
-			m.log.Errorf("User data stream disconnected, reconnecting...")
-			time.Sleep(time.Second)
+			select {
+			case <-disconnected:
+				// Connection closed normally
+				m.log.Warnf("User data stream disconnected, scheduling reconnect")
+				time.Sleep(time.Second)
+				// Before initiating reconnect, check for shutdown
+				select {
+				case <-m.quit:
+					m.log.Debugf("Not reconnecting - shutdown signaled")
+					return
+				default:
+					reconnect()
+				}
+			case <-ctx.Done():
+				m.log.Debugf("Context canceled, exiting user data stream handler")
+				return
+			case <-m.quit:
+				m.log.Debugf("Shutdown signaled, exiting user data stream handler")
+				return
+			}
 		}
 	}
 }
@@ -2257,11 +2663,15 @@ func (m *mexc) startMarketStreams(ctx context.Context) error {
 	// Create WebSocket connection for market data
 	m.log.Infof("Starting MEXC market data stream...")
 	wsConn, err := comms.NewWsConn(&comms.WsCfg{
-		URL:              m.wsURL,
-		Logger:           m.log.SubLogger("MEXC-MarketStream"),
-		PingWait:         60 * time.Second,
-		RawHandler:       m.handleMarketDataMessage,
-		ConnectEventFunc: m.handleMarketConnectEvent,
+		URL:        m.wsURL,
+		Logger:     m.log.SubLogger("MEXC-MarketStream"),
+		PingWait:   60 * time.Second,
+		RawHandler: m.handleMarketDataMessage,
+		// Add a debug log when connection events occur
+		ConnectEventFunc: func(status comms.ConnectionStatus) {
+			m.log.Infof("Market stream connection status changed: %s", status)
+			m.handleMarketConnectEvent(status)
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("error creating market data websocket: %w", err)
@@ -2269,43 +2679,75 @@ func (m *mexc) startMarketStreams(ctx context.Context) error {
 
 	m.marketStream = wsConn
 
+	// Track this connection with a ConnectionMaster to ensure proper context cancellation
+	marketCM := dex.NewConnectionMaster(wsConn)
+
 	// Connect and handle messages in the background
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
 
-		wg, err := wsConn.Connect(ctx)
+		// Use the passed context to ensure proper cancellation
+		innerCtx, cancel := context.WithCancel(ctx)
+		defer cancel() // Ensure context is cancelled when goroutine exits
+
+		// Store a reference to the websocket connection for cleanup
+		localWsConn := wsConn
+
+		// When this goroutine exits, clean up the market stream reference
+		defer func() {
+			m.marketStreamMtx.Lock()
+			// Only clear the reference if it still points to our connection
+			if m.marketStream == localWsConn {
+				m.log.Debugf("Cleaning up market stream connection")
+				m.marketStream = nil
+			}
+			m.marketStreamMtx.Unlock()
+
+			// Ensure the ConnectionMaster is disconnected to properly shut down the connection
+			marketCM.Disconnect()
+			m.log.Debugf("Disconnected market stream ConnectionMaster during cleanup")
+		}()
+
+		// Check for context cancellation first
+		select {
+		case <-ctx.Done():
+			m.log.Infof("Not connecting to market stream - context cancelled")
+			return
+		default:
+			// Continue with connection
+		}
+
+		err := marketCM.ConnectOnce(innerCtx)
 		if err != nil {
 			m.log.Errorf("Error connecting to market data stream: %v", err)
-
-			m.marketStreamMtx.Lock()
-			m.marketStream = nil
-			m.marketStreamMtx.Unlock()
 			return
 		}
 
 		// Connection successful
 		m.log.Debugf("Connected to market data stream")
 
-		// Wait for the connection to close
-		wg.Wait()
-
-		m.log.Errorf("Market data stream disconnected")
-
-		m.marketStreamMtx.Lock()
-		m.marketStream = nil
-		m.marketStreamMtx.Unlock()
+		// Wait for either the connection to close or our context to be cancelled
+		select {
+		case <-innerCtx.Done():
+			m.log.Infof("Market data stream shutting down due to context cancellation")
+		}
 	}()
 
 	// Add a brief delay to allow the initial connection establishment
 	// This is a simple way to improve the chances the connection is ready when we return
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if !wsConn.IsDown() {
-			m.log.Debugf("Market stream connected successfully")
-			break
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			if !wsConn.IsDown() {
+				m.log.Debugf("Market stream connected successfully")
+				return nil
+			}
+			time.Sleep(100 * time.Millisecond)
 		}
-		time.Sleep(100 * time.Millisecond)
 	}
 
 	return nil
@@ -2554,7 +2996,27 @@ func (m *mexc) CancelTrade(ctx context.Context, baseID, quoteID uint32, tradeID 
 
 // deleteAPI sends a DELETE request to the specified endpoint.
 func (m *mexc) deleteAPI(ctx context.Context, endpoint string, query url.Values, key, sign bool, thing interface{}) error {
-	return m.request(ctx, http.MethodDelete, endpoint, query, nil, key, sign, thing)
+	m.log.Debugf("Sending DELETE request to MEXC endpoint: %s", endpoint)
+	err := m.request(ctx, http.MethodDelete, endpoint, query, nil, key, sign, thing)
+	if err != nil {
+		m.log.Errorf("MEXC DELETE request failed for endpoint %s: %v", endpoint, err)
+
+		// Check for specific errors that might be expected
+		var mexcErr *MxCodedErr
+		if errors.As(err, &mexcErr) {
+			m.log.Debugf("MEXC error code: %d, message: %s", mexcErr.Code, mexcErr.Msg)
+
+			// Handle some known error codes
+			if mexcErr.Code == mxErrCodeInvalidListenKey {
+				m.log.Debugf("Listen key is already invalid or expired")
+				return nil // Consider this a success for deletion purposes
+			}
+		}
+		return err
+	}
+
+	m.log.Debugf("MEXC DELETE request to %s completed successfully", endpoint)
+	return nil
 }
 
 // Balance gets the available balance for an asset.
@@ -2907,61 +3369,6 @@ func (m *mexc) EpochReport(ctx context.Context, startTime, endTime time.Time) (*
 // RegisteredAssets gets the list of assets registered with the CEX.
 func (m *mexc) RegisteredAssets() map[uint32]bool {
 	return m.knownAssets
-}
-
-// Close shuts down the exchange connection and any goroutines.
-func (m *mexc) Close() {
-	// This function is implemented in a new location below to improve shutdown procedures
-	// while respecting the existing ConnectionMaster architecture.
-	// See func (m *mexc) Close() defined later in this file.
-	m.shutdownMtx.Lock()
-	defer m.shutdownMtx.Unlock()
-
-	// Check if already closed
-	select {
-	case <-m.quit:
-		m.log.Debugf("Close called but MEXC adapter already closed")
-		return // already closed
-	default:
-		m.log.Infof("Closing MEXC exchange adapter")
-		close(m.quit)
-	}
-
-	// Delete listen key first to prevent reconnection attempts
-	if key := m.listenKey.Load().(string); key != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		m.deleteListenKey(ctx, key)
-	}
-
-	// Close and clean up WebSocket connections
-	m.closeAllWebSocketConnections()
-
-	// Unsubscribe from all books and get their connection masters
-	connMasters := m.unsubscribeAllBooks()
-
-	// Disconnect all book connection masters outside the lock
-	for _, cm := range connMasters {
-		m.log.Debugf("Disconnecting a book connection master")
-		cm.Disconnect()
-	}
-
-	// Wait for all goroutines to exit with timeout
-	waitDone := make(chan struct{})
-	go func() {
-		m.wg.Wait()
-		close(waitDone)
-	}()
-
-	select {
-	case <-waitDone:
-		m.log.Debugf("All MEXC exchange goroutines exited")
-	case <-time.After(10 * time.Second):
-		m.log.Warnf("Timed out waiting for some MEXC exchange goroutines to exit")
-	}
-
-	m.log.Infof("MEXC exchange adapter closed successfully")
 }
 
 // processDepthUpdate processes orderbook depth updates from the WebSocket.
@@ -3753,6 +4160,20 @@ type WsResponse struct {
 
 // connectUserStream sets up and establishes the user data stream
 func (m *mexc) connectUserStream(ctx context.Context) {
+	// Store the initial user data stream connection in a local variable
+	// This allows us to clean it up properly during shutdown
+	var userWsConn comms.WsConn
+
+	// Set up cleanup handler for context cancellation
+	defer func() {
+		// Check if we need to clean up the websocket connection
+		if userWsConn != nil {
+			m.log.Debugf("Cleaning up user data stream connection during shutdown")
+			// We don't need to call any explicit methods since the context cancellation
+			// should already trigger proper cleanup in the wsConn implementation
+		}
+	}()
+
 	// Get a listen key first
 	if err := m.getUserDataStream(ctx); err != nil {
 		m.log.Errorf("Failed to get listen key for user data stream: %v", err)
@@ -3764,86 +4185,35 @@ func (m *mexc) connectUserStream(ctx context.Context) {
 }
 
 // deleteListenKey is a helper method to delete the listen key from the server.
-func (m *mexc) deleteListenKey(ctx context.Context, key string) {
-	m.log.Debugf("Deleting listen key %s", key)
+func (m *mexc) deleteListenKey(ctx context.Context, key string) error {
+	m.log.Infof("Deleting MEXC listen key: %s", key)
+
+	// Create a timeout context if the context doesn't already have a deadline
+	var cancel context.CancelFunc
+	_, hasDeadline := ctx.Deadline()
+	if !hasDeadline {
+		ctx, cancel = context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+	}
 
 	form := url.Values{}
 	form.Add("listenKey", key)
 
 	err := m.deleteAPI(ctx, "/api/v3/userDataStream", form, true, true, nil)
 	if err != nil {
-		m.log.Errorf("Error deleting listen key: %v", err)
-	} else {
-		m.log.Debugf("Successfully deleted listen key")
-	}
-
-	// Clear the listen key regardless of API call result
-	m.listenKey.Store("")
-}
-
-// closeAllWebSocketConnections is a helper method to close all WebSocket connections.
-func (m *mexc) closeAllWebSocketConnections() {
-	// Close market stream
-	m.marketStreamMtx.Lock()
-	marketStream := m.marketStream
-	m.marketStream = nil
-	m.marketStreamMtx.Unlock()
-
-	if marketStream != nil {
-		m.log.Debugf("Closing market WebSocket connection")
-		// Send close message
-		marketStream.SendRaw([]byte(`{"method":"close"}`))
-	}
-
-	// Close user data stream
-	userStream := m.userDataStream
-	m.userDataStream = nil
-
-	if userStream != nil {
-		m.log.Debugf("Closing user data WebSocket connection")
-		// Send close message
-		userStream.SendRaw([]byte(`{"method":"close"}`))
-	}
-}
-
-// unsubscribeAllBooks unsubscribes from all orderbook streams and disconnects their ConnectionMasters.
-// Returns a list of ConnectionMaster objects that need to be disconnected.
-func (m *mexc) unsubscribeAllBooks() []*dex.ConnectionMaster {
-	m.booksMtx.Lock()
-	defer m.booksMtx.Unlock()
-
-	if len(m.books) == 0 {
-		return nil
-	}
-
-	m.log.Debugf("Unsubscribing from all %d orderbook streams", len(m.books))
-	var masters []*dex.ConnectionMaster
-
-	// Capture ConnectionMaster from each book
-	for slug, book := range m.books {
-		book.mtx.Lock()
-		if book.cm != nil {
-			masters = append(masters, book.cm)
-			book.cm = nil // Prevent double close
+		// Check if we're in shutdown mode
+		select {
+		case <-m.quit:
+			m.log.Warnf("Error deleting MEXC listen key during shutdown (will continue shutdown): %v", err)
+			// During shutdown, errors deleting the listen key aren't critical
+			// The API endpoint will eventually clean up expired listen keys
+			return nil
+		default:
+			m.log.Errorf("Error deleting MEXC listen key: %v", err)
+			return err
 		}
-		book.mtx.Unlock()
-
-		// Try to send unsubscription message
-		m.marketStreamMtx.RLock()
-		if m.marketStream != nil && !m.marketStream.IsDown() {
-			subMsg := WsRequest{
-				Method: "UNSUBSCRIPTION",
-				Params: []string{fmt.Sprintf("spot@public.limit.depth.v3.api.pb@%s@20", slug)},
-			}
-
-			if subBytes, err := json.Marshal(subMsg); err == nil {
-				m.marketStream.SendRaw(subBytes)
-			}
-		}
-		m.marketStreamMtx.RUnlock()
 	}
 
-	// Clear the books map
-	m.books = make(map[string]*mxOrderBook)
-	return masters
+	m.log.Infof("Successfully deleted MEXC listen key")
+	return nil
 }
