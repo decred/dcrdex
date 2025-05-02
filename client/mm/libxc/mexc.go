@@ -1687,6 +1687,15 @@ func (m *mexc) keepAliveListenKey(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
+			// Check if we're shutting down before refreshing the listen key
+			select {
+			case <-m.quit:
+				m.log.Debugf("Not refreshing listen key during shutdown")
+				return
+			default:
+				// Continue with refresh
+			}
+
 			key := m.listenKey.Load().(string)
 			if key == "" {
 				continue
@@ -1714,6 +1723,15 @@ func (m *mexc) putAPI(ctx context.Context, endpoint string, query, form url.Valu
 // userDataStreamHandler connects to the user data stream and processes messages.
 func (m *mexc) userDataStreamHandler(ctx context.Context) {
 	reconnect := func() {
+		// Check if we're shutting down before attempting to reconnect
+		select {
+		case <-m.quit:
+			m.log.Debugf("Not reconnecting user data stream during shutdown")
+			return
+		default:
+			// Only try to reconnect if we're not shutting down
+		}
+
 		select {
 		case m.reconnectChan <- struct{}{}:
 		default:
@@ -1725,7 +1743,14 @@ func (m *mexc) userDataStreamHandler(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-m.reconnectChan:
-			// Continue to reconnect logic
+			// Check if we're shutting down before reconnecting
+			select {
+			case <-m.quit:
+				m.log.Debugf("Not reconnecting user data stream during shutdown")
+				return
+			default:
+				// Continue with reconnection
+			}
 		}
 
 		listenKey := m.listenKey.Load().(string)
@@ -1763,8 +1788,16 @@ func (m *mexc) userDataStreamHandler(ctx context.Context) {
 
 		// Wait for the connection to close
 		wg.Wait()
-		m.log.Errorf("User data stream disconnected, reconnecting...")
-		time.Sleep(time.Second)
+
+		// Check if we're shutting down before reconnecting
+		select {
+		case <-m.quit:
+			m.log.Debugf("User data stream disconnected during shutdown, not reconnecting")
+			return
+		default:
+			m.log.Errorf("User data stream disconnected, reconnecting...")
+			time.Sleep(time.Second)
+		}
 	}
 }
 
@@ -2878,43 +2911,57 @@ func (m *mexc) RegisteredAssets() map[uint32]bool {
 
 // Close shuts down the exchange connection and any goroutines.
 func (m *mexc) Close() {
+	// This function is implemented in a new location below to improve shutdown procedures
+	// while respecting the existing ConnectionMaster architecture.
+	// See func (m *mexc) Close() defined later in this file.
 	m.shutdownMtx.Lock()
 	defer m.shutdownMtx.Unlock()
 
+	// Check if already closed
 	select {
 	case <-m.quit:
+		m.log.Debugf("Close called but MEXC adapter already closed")
 		return // already closed
 	default:
+		m.log.Infof("Closing MEXC exchange adapter")
 		close(m.quit)
 	}
 
-	// Close the market stream
-	m.marketStreamMtx.Lock()
-	marketStream := m.marketStream
-	m.marketStream = nil
-	m.marketStreamMtx.Unlock()
-
-	if marketStream != nil {
-		// Just set it to nil since we can't find a close method
-		// This is a placeholder - in a real implementation we would use the
-		// appropriate method to close the websocket connection
-	}
-
-	// Wait for all goroutines to exit
-	m.wg.Wait()
-
-	// Delete listen key to release server resources
+	// Delete listen key first to prevent reconnection attempts
 	if key := m.listenKey.Load().(string); key != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		form := url.Values{}
-		form.Add("listenKey", key)
-		err := m.deleteAPI(ctx, "/api/v3/userDataStream", nil, true, false, nil)
-		if err != nil {
-			m.log.Errorf("Error deleting listen key: %v", err)
-		}
+		m.deleteListenKey(ctx, key)
 	}
+
+	// Close and clean up WebSocket connections
+	m.closeAllWebSocketConnections()
+
+	// Unsubscribe from all books and get their connection masters
+	connMasters := m.unsubscribeAllBooks()
+
+	// Disconnect all book connection masters outside the lock
+	for _, cm := range connMasters {
+		m.log.Debugf("Disconnecting a book connection master")
+		cm.Disconnect()
+	}
+
+	// Wait for all goroutines to exit with timeout
+	waitDone := make(chan struct{})
+	go func() {
+		m.wg.Wait()
+		close(waitDone)
+	}()
+
+	select {
+	case <-waitDone:
+		m.log.Debugf("All MEXC exchange goroutines exited")
+	case <-time.After(10 * time.Second):
+		m.log.Warnf("Timed out waiting for some MEXC exchange goroutines to exit")
+	}
+
+	m.log.Infof("MEXC exchange adapter closed successfully")
 }
 
 // processDepthUpdate processes orderbook depth updates from the WebSocket.
@@ -3714,4 +3761,89 @@ func (m *mexc) connectUserStream(ctx context.Context) {
 
 	// The userDataStreamHandler will handle connection and reconnection
 	// It gets called by getUserDataStream
+}
+
+// deleteListenKey is a helper method to delete the listen key from the server.
+func (m *mexc) deleteListenKey(ctx context.Context, key string) {
+	m.log.Debugf("Deleting listen key %s", key)
+
+	form := url.Values{}
+	form.Add("listenKey", key)
+
+	err := m.deleteAPI(ctx, "/api/v3/userDataStream", form, true, true, nil)
+	if err != nil {
+		m.log.Errorf("Error deleting listen key: %v", err)
+	} else {
+		m.log.Debugf("Successfully deleted listen key")
+	}
+
+	// Clear the listen key regardless of API call result
+	m.listenKey.Store("")
+}
+
+// closeAllWebSocketConnections is a helper method to close all WebSocket connections.
+func (m *mexc) closeAllWebSocketConnections() {
+	// Close market stream
+	m.marketStreamMtx.Lock()
+	marketStream := m.marketStream
+	m.marketStream = nil
+	m.marketStreamMtx.Unlock()
+
+	if marketStream != nil {
+		m.log.Debugf("Closing market WebSocket connection")
+		// Send close message
+		marketStream.SendRaw([]byte(`{"method":"close"}`))
+	}
+
+	// Close user data stream
+	userStream := m.userDataStream
+	m.userDataStream = nil
+
+	if userStream != nil {
+		m.log.Debugf("Closing user data WebSocket connection")
+		// Send close message
+		userStream.SendRaw([]byte(`{"method":"close"}`))
+	}
+}
+
+// unsubscribeAllBooks unsubscribes from all orderbook streams and disconnects their ConnectionMasters.
+// Returns a list of ConnectionMaster objects that need to be disconnected.
+func (m *mexc) unsubscribeAllBooks() []*dex.ConnectionMaster {
+	m.booksMtx.Lock()
+	defer m.booksMtx.Unlock()
+
+	if len(m.books) == 0 {
+		return nil
+	}
+
+	m.log.Debugf("Unsubscribing from all %d orderbook streams", len(m.books))
+	var masters []*dex.ConnectionMaster
+
+	// Capture ConnectionMaster from each book
+	for slug, book := range m.books {
+		book.mtx.Lock()
+		if book.cm != nil {
+			masters = append(masters, book.cm)
+			book.cm = nil // Prevent double close
+		}
+		book.mtx.Unlock()
+
+		// Try to send unsubscription message
+		m.marketStreamMtx.RLock()
+		if m.marketStream != nil && !m.marketStream.IsDown() {
+			subMsg := WsRequest{
+				Method: "UNSUBSCRIPTION",
+				Params: []string{fmt.Sprintf("spot@public.limit.depth.v3.api.pb@%s@20", slug)},
+			}
+
+			if subBytes, err := json.Marshal(subMsg); err == nil {
+				m.marketStream.SendRaw(subBytes)
+			}
+		}
+		m.marketStreamMtx.RUnlock()
+	}
+
+	// Clear the books map
+	m.books = make(map[string]*mxOrderBook)
+	return masters
 }
