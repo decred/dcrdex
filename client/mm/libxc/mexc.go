@@ -2066,8 +2066,9 @@ func (m *mexc) keepAliveListenKey(ctx context.Context) {
 			}
 
 			m.log.Debugf("Refreshing MEXC listenKey")
-			form := url.Values{}
-			form.Add("listenKey", key)
+			// Move listenKey to query parameters instead of form body
+			query := url.Values{}
+			query.Add("listenKey", key)
 
 			// Use a timeout context for the API call
 			refreshCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -2084,7 +2085,8 @@ func (m *mexc) keepAliveListenKey(ctx context.Context) {
 				// Continue with API call
 			}
 
-			err := m.putAPI(refreshCtx, "/api/v3/userDataStream", nil, form, true, true, nil)
+			// Pass empty form body and include listenKey in query parameters
+			err := m.putAPI(refreshCtx, "/api/v3/userDataStream", query, nil, true, true, nil)
 			cancel()
 
 			if err != nil {
@@ -2483,7 +2485,9 @@ func (m *mexc) OrderBook(ctx context.Context, mktMatch *MarketMatch) (vwap VWAPF
 	if found {
 		book.mtx.Lock()
 		book.numSubscribers++
+		book.active = true
 		book.mtx.Unlock()
+		m.log.Debugf("Already subscribed to %s, incremented subscribers to %d", mktMatch.Slug, book.numSubscribers)
 		return book.vwap, nil
 	}
 
@@ -3004,27 +3008,7 @@ func (m *mexc) CancelTrade(ctx context.Context, baseID, quoteID uint32, tradeID 
 
 // deleteAPI sends a DELETE request to the specified endpoint.
 func (m *mexc) deleteAPI(ctx context.Context, endpoint string, query url.Values, key, sign bool, thing interface{}) error {
-	m.log.Debugf("Sending DELETE request to MEXC endpoint: %s", endpoint)
-	err := m.request(ctx, http.MethodDelete, endpoint, query, nil, key, sign, thing)
-	if err != nil {
-		m.log.Errorf("MEXC DELETE request failed for endpoint %s: %v", endpoint, err)
-
-		// Check for specific errors that might be expected
-		var mexcErr *MxCodedErr
-		if errors.As(err, &mexcErr) {
-			m.log.Debugf("MEXC error code: %d, message: %s", mexcErr.Code, mexcErr.Msg)
-
-			// Handle some known error codes
-			if mexcErr.Code == mxErrCodeInvalidListenKey {
-				m.log.Debugf("Listen key is already invalid or expired")
-				return nil // Consider this a success for deletion purposes
-			}
-		}
-		return err
-	}
-
-	m.log.Debugf("MEXC DELETE request to %s completed successfully", endpoint)
-	return nil
+	return m.request(ctx, http.MethodDelete, endpoint, query, nil, key, sign, thing)
 }
 
 // Balance gets the available balance for an asset.
@@ -3611,7 +3595,6 @@ func (m *mexc) SubscribeMarket(ctx context.Context, baseID, quoteID uint32) erro
 	if found {
 		book.mtx.Lock()
 		book.numSubscribers++
-		book.active = true
 		book.mtx.Unlock()
 		m.log.Debugf("Already subscribed to %s, incremented subscribers to %d", slug, book.numSubscribers)
 		return nil
@@ -4262,34 +4245,23 @@ func (m *mexc) connectUserStream(ctx context.Context) {
 
 // deleteListenKey is a helper method to delete the listen key from the server.
 func (m *mexc) deleteListenKey(ctx context.Context, key string) error {
-	m.log.Infof("Deleting MEXC listen key: %s", key)
-
-	// Create a timeout context if the context doesn't already have a deadline
-	var cancel context.CancelFunc
-	_, hasDeadline := ctx.Deadline()
-	if !hasDeadline {
-		ctx, cancel = context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
+	if key == "" {
+		return nil
 	}
 
-	form := url.Values{}
-	form.Add("listenKey", key)
+	m.log.Debugf("Deleting MEXC listenKey")
 
-	err := m.deleteAPI(ctx, "/api/v3/userDataStream", form, true, true, nil)
+	// Create query parameters with the listenKey
+	query := url.Values{}
+	query.Add("listenKey", key)
+
+	// Send delete request with listenKey in query params
+	err := m.deleteAPI(ctx, "/api/v3/userDataStream", query, true, true, nil)
 	if err != nil {
-		// Check if we're in shutdown mode
-		select {
-		case <-m.quit:
-			m.log.Warnf("Error deleting MEXC listen key during shutdown (will continue shutdown): %v", err)
-			// During shutdown, errors deleting the listen key aren't critical
-			// The API endpoint will eventually clean up expired listen keys
-			return nil
-		default:
-			m.log.Errorf("Error deleting MEXC listen key: %v", err)
-			return err
-		}
+		m.log.Errorf("Error deleting MEXC listenKey: %v", err)
+		return err
 	}
 
-	m.log.Infof("Successfully deleted MEXC listen key")
+	m.log.Debugf("Successfully deleted MEXC listenKey")
 	return nil
 }
