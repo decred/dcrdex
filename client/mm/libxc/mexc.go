@@ -1161,7 +1161,7 @@ func (m *mexc) handleMarketConnectEvent(status comms.ConnectionStatus) {
 	switch status {
 	case comms.Connected:
 		// When connection is established, resubscribe to all active markets
-		m.log.Infof("[MarketWS] Connection established, resubscribing to markets")
+		m.log.Debugf("[MarketWS] Connection established, resubscribing to markets")
 		// Use a background context if we don't have access to the original context
 		// This is safer than using a nil context
 		bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -1179,7 +1179,7 @@ func (m *mexc) handleMarketConnectEvent(status comms.ConnectionStatus) {
 
 // resubscribeMarkets resubscribes to all active market streams after a reconnection.
 func (m *mexc) resubscribeMarkets(ctx context.Context) {
-	m.log.Infof("[MarketWS] Resubscribing to markets after reconnection")
+	m.log.Debugf("[MarketWS] Resubscribing to markets after reconnection")
 
 	// Get the list of active symbols that need resubscription
 	m.booksMtx.RLock()
@@ -1199,7 +1199,7 @@ func (m *mexc) resubscribeMarkets(ctx context.Context) {
 		return
 	}
 
-	m.log.Infof("[MarketWS] Resubscribing to %d active markets: %v", len(activeSymbols), activeSymbols)
+	m.log.Debugf("[MarketWS] Resubscribing to %d active markets: %v", len(activeSymbols), activeSymbols)
 
 	// Batch subscribe to all active markets using the protobuf format
 	channels := make([]string, len(activeSymbols))
@@ -1228,7 +1228,7 @@ func (m *mexc) resubscribeMarkets(ctx context.Context) {
 	for i := 0; i < 3; i++ {
 		sendErr = m.marketStream.SendRaw(reqBytes)
 		if sendErr == nil {
-			m.log.Infof("[MarketWS] Successfully sent resubscription request for %d markets", len(activeSymbols))
+			m.log.Debugf("[MarketWS] Successfully sent resubscription request for %d markets", len(activeSymbols))
 			return
 		}
 		m.log.Errorf("[MarketWS] Failed to send resubscription request (attempt %d): %v", i+1, sendErr)
@@ -2681,7 +2681,7 @@ func (m *mexc) startMarketStreams(ctx context.Context) error {
 		RawHandler: m.handleMarketDataMessage,
 		// Add a debug log when connection events occur
 		ConnectEventFunc: func(status comms.ConnectionStatus) {
-			m.log.Infof("Market stream connection status changed: %s", status)
+			m.log.Debugf("Market stream connection status changed: %s", status)
 			m.handleMarketConnectEvent(status)
 		},
 	})
