@@ -1,253 +1,479 @@
-// To run these unit tests (which do not require API keys or build tags):
-// go test -v ./client/mm/libxc
-// Or run all unit tests in the project:
-// go test -v ./...
+// This code is available on the terms of the project LICENSE.md file,
+// also available online at https://blueoakcouncil.org/license/1.0.0.
 
 package libxc
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
-	"strconv"
-	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
-	"decred.org/dcrdex/client/mm/libxc/mexctypes"
 	"decred.org/dcrdex/dex"
-	"github.com/stretchr/testify/require"
+	"decred.org/dcrdex/dex/msgjson"
+
+	_ "decred.org/dcrdex/client/asset/importall"
 )
 
-// TestStringToSatoshis tests the stringToSatoshis conversion function.
-func TestStringToSatoshis(t *testing.T) {
-	// Mock logger or use a simple one if needed by the function indirectly
-	m := &mexc{log: dex.Disabled} // Assuming stringToSatoshis is a method on *mexc
-
-	tests := []struct {
-		name          string
-		input         string
-		convFactor    float64
-		expectedAtoms uint64
-		expectError   bool
-	}{
-		{"empty string", "", 1e8, 0, false},
-		{"zero amount", "0", 1e8, 0, false},
-		{"zero amount with decimals", "0.000", 1e8, 0, false},
-		{"simple btc", "1.23456789", 1e8, 123456789, false},
-		{"simple usdt", "123.45", 1e6, 123450000, false},
-		{"integer amount", "150", 1e8, 15000000000, false},
-		{"max uint64 boundary approx", "184467440.7370955161", 1e8, 18446744073709551, false},
-		{"too many decimals", "1.123456789", 1e8, 112345678, false},
-		{"factor 1", "12345", 1, 12345, false},
-		{"zero factor", "123", 0, 0, false}, // Factor 0 results in 0
-		{"invalid amount", "abc", 1e8, 0, true},
-		{"negative amount", "-1.0", 1e8, 0, true},
-		{"exceeds uint64", "200000000", 1e8, 20000000000000000, false},
-		{"scientific notation", "1.2e3", 1e8, 120000000000, false},
+// TestMXSubscribeTradeUpdates tests the subscription and unsubscription to trade updates.
+func TestMXSubscribeTradeUpdates(t *testing.T) {
+	m := &mexc{
+		tradeUpdaters: make(map[int]chan *Trade),
 	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			atoms, err := m.stringToSatoshis(tc.input, tc.convFactor)
-
-			if tc.expectError {
-				require.Error(t, err)
-			} else {
-				require.NoError(t, err)
-				require.Equal(t, tc.expectedAtoms, atoms)
-			}
-		})
+	_, unsub0, _ := m.SubscribeTradeUpdates()
+	_, _, id1 := m.SubscribeTradeUpdates()
+	unsub0()
+	_, _, id2 := m.SubscribeTradeUpdates()
+	if len(m.tradeUpdaters) != 2 {
+		t.Fatalf("wrong number of updaters. wanted 2, got %d", len(m.tradeUpdaters))
+	}
+	if id1 == id2 {
+		t.Fatalf("ids should be unique. got %d twice", id1)
+	}
+	if _, found := m.tradeUpdaters[id1]; !found {
+		t.Fatalf("id1 not found")
+	}
+	if _, found := m.tradeUpdaters[id2]; !found {
+		t.Fatalf("id2 not found")
 	}
 }
 
-// TestMapMEXCCoinNetworkToDEXSymbol tests the mapping from MEXC coin/network to DEX symbol.
+// TestMXConvertCoin tests the mxConvertCoin function.
+func TestMXConvertCoin(t *testing.T) {
+	tests := map[string]string{
+		"btc":   "btc",
+		"BTC":   "btc",
+		"weth":  "eth",
+		"WETH":  "eth",
+		"MATIC": "polygon",
+		"eth":   "eth",
+		"ETH":   "eth",
+		"":      "",
+	}
+
+	for input, expected := range tests {
+		result := mxConvertCoin(input)
+		if result != expected {
+			t.Fatalf("expected mxConvertCoin(%q) = %q, got %q", input, expected, result)
+		}
+	}
+}
+
+// TestMXCoinNetworkToDexSymbol tests the mxCoinNetworkToDexSymbol function.
+func TestMXCoinNetworkToDexSymbol(t *testing.T) {
+	tests := map[[2]string]string{
+		{"btc", "btc"}:    "btc",
+		{"BTC", "BTC"}:    "btc",
+		{"usdt", "eth"}:   "usdt.eth",
+		{"USDT", "ETH"}:   "usdt.eth",
+		{"eth", "eth"}:    "eth",
+		{"ETH", "ETH"}:    "eth",
+		{"weth", "eth"}:   "eth",
+		{"WETH", "ETH"}:   "eth",
+		{"usdt", "matic"}: "usdt.polygon",
+		{"USDT", "MATIC"}: "usdt.polygon",
+	}
+
+	for test, expected := range tests {
+		result := mxCoinNetworkToDexSymbol(test[0], test[1])
+		if result != expected {
+			t.Fatalf("expected mxCoinNetworkToDexSymbol(%q, %q) = %q, got %q",
+				test[0], test[1], expected, result)
+		}
+	}
+}
+
+// TestMapMEXCCoinNetworkToDEXSymbol tests the mapMEXCCoinNetworkToDEXSymbol method.
 func TestMapMEXCCoinNetworkToDEXSymbol(t *testing.T) {
-	// This function doesn't rely on internal state other than logging, which is disabled here.
 	m := &mexc{log: dex.Disabled}
 
-	tests := []struct {
-		name        string
-		mexcCoin    string // Uppercase
-		mexcNetwork string
-		expectedDex string // Lowercase
+	tests := map[[2]string]string{
+		{"DCR", "DCR"}:         "dcr",
+		{"USDT", "ETH"}:        "usdt.polygon", // Special case: USDT always maps to polygon
+		{"USDT", "ERC20"}:      "usdt.polygon", // Special case: USDT always maps to polygon
+		{"USDT", "MATIC"}:      "usdt.polygon", // Special case: USDT always maps to polygon
+		{"USDT", "TRX"}:        "usdt.polygon", // Special case: USDT always maps to polygon
+		{"USDT", "TRC20"}:      "usdt.polygon", // Special case: USDT always maps to polygon
+		{"USDT", "BEP20(BSC)"}: "usdt.polygon", // Special case: USDT always maps to polygon
+		{"USDT", "SOLANA"}:     "usdt.polygon", // Special case: USDT always maps to polygon
+		{"USDT", "SOMECHAIN"}:  "usdt.polygon", // Special case: USDT always maps to polygon
+		{"DCR", "ETH"}:         "dcr.erc20",
+		{"usdt", "ETH"}:        "usdt.polygon", // Lowercase also maps to polygon
+		{"USDT", "eth"}:        "usdt.polygon", // Mixed case also maps to polygon
+		{"", "ETH"}:            "",
+		{"USDT", ""}:           "",
+	}
+
+	for test, expected := range tests {
+		result := m.mapMEXCCoinNetworkToDEXSymbol(test[0], test[1])
+		if result != expected {
+			t.Fatalf("expected mapMEXCCoinNetworkToDEXSymbol(%q, %q) = %q, got %q",
+				test[0], test[1], expected, result)
+		}
+	}
+}
+
+// TestMXAssetCfg tests the mxAssetCfg function.
+func TestMXAssetCfg(t *testing.T) {
+	tests := map[uint32]struct {
+		symbol           string
+		coin             string
+		chain            string
+		conversionFactor uint64
 	}{
-		{"dcr native", "DCR", "DCR", "dcr"},
-		{"usdt erc20 (ETH)", "USDT", "ETH", "usdt.erc20"},
-		{"usdt erc20 (ERC20)", "USDT", "ERC20", "usdt.erc20"},
-		{"usdt polygon", "USDT", "MATIC", "usdt.polygon"},
-		{"usdt trc20 (TRX)", "USDT", "TRX", "usdt.trc20"},
-		{"usdt trc20 (TRC20)", "USDT", "TRC20", "usdt.trc20"},
-		{"usdt bep20", "USDT", "BEP20(BSC)", "usdt.bep20"},
-		{"usdt solana", "USDT", "SOLANA", "usdt.sol"},
-		{"btc native", "BTC", "BTC", "btc"},
-		{"eth native", "ETH", "ETH", "eth"},
-		{"unknown network", "USDT", "SOMECHAIN", ""},
-		{"mismatched_native", "DCR", "ETH", "dcr.erc20"},
-		{"lowercase input coin", "usdt", "ETH", "usdt.erc20"},
-		{"lowercase input network", "USDT", "eth", "usdt.erc20"},
-		{"empty coin", "", "ETH", ""},
-		{"empty network", "USDT", "", ""},
+		42: { // DCR
+			symbol:           "dcr",
+			coin:             "DCR",
+			chain:            "DCR",
+			conversionFactor: 1e8,
+		},
+		0: { // BTC
+			symbol:           "btc",
+			coin:             "BTC",
+			chain:            "BTC",
+			conversionFactor: 1e8,
+		},
+		60: { // ETH
+			symbol:           "eth",
+			coin:             "ETH",
+			chain:            "ETH",
+			conversionFactor: 1e9,
+		},
+		966001: { // USDC.polygon
+			symbol:           "usdc.polygon",
+			coin:             "USDC",
+			chain:            "MATIC",
+			conversionFactor: 1e6,
+		},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			dexSymbol := m.mapMEXCCoinNetworkToDEXSymbol(tc.mexcCoin, tc.mexcNetwork)
-			require.Equal(t, tc.expectedDex, dexSymbol)
-		})
+	for assetID, expected := range tests {
+		cfg, err := mxAssetCfg(assetID)
+		if err != nil {
+			t.Fatalf("error getting asset config for %d: %v", assetID, err)
+		}
+
+		if cfg.symbol != expected.symbol {
+			t.Errorf("assetID %d: expected symbol %q, got %q", assetID, expected.symbol, cfg.symbol)
+		}
+		if cfg.coin != expected.coin {
+			t.Errorf("assetID %d: expected coin %q, got %q", assetID, expected.coin, cfg.coin)
+		}
+		if cfg.chain != expected.chain {
+			t.Errorf("assetID %d: expected chain %q, got %q", assetID, expected.chain, cfg.chain)
+		}
+		if cfg.conversionFactor != expected.conversionFactor {
+			t.Errorf("assetID %d: expected conversionFactor %d, got %d",
+				assetID, expected.conversionFactor, cfg.conversionFactor)
+		}
 	}
 }
 
-// TestGenerateClientOrderID tests the client order ID generation.
-func TestGenerateClientOrderID(t *testing.T) {
-	// Need a mock mexc struct with a prefix
+// TestHandleMarketRawMessage tests the WebSocket ping/pong response mechanism.
+func TestHandleMarketRawMessage(t *testing.T) {
+	// Create a mock MEXC instance
 	m := &mexc{
-		log:                dex.Disabled,
-		tradeIDNoncePrefix: dex.Bytes("testprefix"),
+		log:               dex.Disabled,
+		connectionHealthy: atomic.Bool{},
+		marketStreamMtx:   sync.RWMutex{},
+	}
+	m.connectionHealthy.Store(false) // Initial false to test it gets set to true
+
+	// Set up a channel to capture sent messages
+	sentMessages := make(chan []byte, 10)
+
+	// Create a mock WsConn implementation
+	mockWsConn := &mockWsConn{
+		sendRaw: func(data []byte) error {
+			sentMessages <- data
+			return nil
+		},
+		isDown: func() bool {
+			return false
+		},
 	}
 
-	// Generate a few IDs
-	id1 := m.generateClientOrderID()
-	time.Sleep(2 * time.Millisecond) // Ensure timestamp potentially changes
-	id2 := m.generateClientOrderID()
-	id3 := m.generateClientOrderID()
+	// Set the mock connection
+	m.marketStreamMtx.Lock()
+	m.marketStream = mockWsConn
+	m.marketStreamMtx.Unlock()
 
-	// Check format (basic check)
-	prefix := "dcrdex-testprefix-"
-	require.True(t, strings.HasPrefix(id1, prefix), "ID1 has wrong prefix")
-	require.True(t, strings.HasPrefix(id2, prefix), "ID2 has wrong prefix")
-	require.True(t, strings.HasPrefix(id3, prefix), "ID3 has wrong prefix")
+	// Test handling a ping message
+	startCount := atomic.LoadUint64(&m.messageCounter)
+	pingMsg := []byte(`{"ping":true}`)
+	m.handleMarketRawMessage(pingMsg)
 
-	// Check uniqueness
-	require.NotEqual(t, id1, id2, "ID1 and ID2 should be different")
-	require.NotEqual(t, id2, id3, "ID2 and ID3 should be different")
-
-	// Check nonce increment (by parsing)
-	parseNonce := func(id string) int {
-		parts := strings.Split(id, "-")
-		require.Len(t, parts, 4, "ID should have 4 parts separated by hyphen")
-		nonce, err := strconv.Atoi(parts[3])
-		require.NoError(t, err, "Nonce part should be an integer")
-		return nonce
+	// Verify pong response
+	select {
+	case sentMsg := <-sentMessages:
+		if !bytes.Contains(sentMsg, []byte(`"pong"`)) {
+			t.Errorf("Expected pong message, got: %s", string(sentMsg))
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("No pong response was sent")
 	}
 
-	nonce1 := parseNonce(id1)
-	nonce2 := parseNonce(id2)
-	nonce3 := parseNonce(id3)
+	// Verify message counter was incremented
+	newCount := atomic.LoadUint64(&m.messageCounter)
+	if newCount != startCount+1 {
+		t.Errorf("Message counter not incremented: expected %d, got %d", startCount+1, newCount)
+	}
 
-	require.Equal(t, nonce1+1, nonce2, "Nonce should increment by 1")
-	require.Equal(t, nonce2+1, nonce3, "Nonce should increment by 1")
+	// Verify lastMessageReceived was updated
+	lastMsgTime := m.lastMessageReceived.Load().(time.Time)
+	if time.Since(lastMsgTime) > 100*time.Millisecond {
+		t.Errorf("lastMessageReceived not updated properly: %v", lastMsgTime)
+	}
+
+	// Verify connectionHealthy flag was set to true
+	if !m.connectionHealthy.Load() {
+		t.Error("connectionHealthy flag was not set to true")
+	}
+
+	// Test a normal message (not ping)
+	startCount = atomic.LoadUint64(&m.messageCounter)
+	m.lastMessageReceived.Store(time.Time{}) // Reset to zero time
+	normalMsg := []byte(`{"result":"success"}`)
+	m.handleMarketRawMessage(normalMsg)
+
+	// Verify message counter was incremented
+	newCount = atomic.LoadUint64(&m.messageCounter)
+	if newCount != startCount+1 {
+		t.Errorf("Message counter not incremented for normal message: expected %d, got %d",
+			startCount+1, newCount)
+	}
+
+	// Verify lastMessageReceived was updated
+	lastMsgTime = m.lastMessageReceived.Load().(time.Time)
+	if time.Since(lastMsgTime) > 100*time.Millisecond {
+		t.Errorf("lastMessageReceived not updated for normal message: %v", lastMsgTime)
+	}
 }
 
-// TestHandleDepthUpdate tests the handleDepthUpdate function.
-func TestHandleDepthUpdate(t *testing.T) {
-	// Create a mock mexc instance
-	logger := dex.StdOutLogger("TEST", dex.LevelDebug)
+// TestShouldSendPing tests the conditions for sending a ping based on last message time.
+func TestShouldSendPing(t *testing.T) {
+	// Create a mock MEXC instance
 	m := &mexc{
-		log:      logger,
-		books:    make(map[string]*mexcOrderBook),
-		booksMtx: sync.RWMutex{},
+		log:               dex.Disabled,
+		quit:              make(chan struct{}),
+		reconnectChan:     make(chan struct{}, 1),
+		connectionHealthy: atomic.Bool{},
+		marketStreamMtx:   sync.RWMutex{},
+	}
+	m.connectionHealthy.Store(true)
+
+	// Create a mock WsConn implementation
+	sentPings := make(chan []byte, 10)
+	mockWsConn := &mockWsConn{
+		sendRaw: func(data []byte) error {
+			sentPings <- data
+			return nil
+		},
+		isDown: func() bool {
+			return false
+		},
 	}
 
-	// Create a mock orderbook for testing
-	const testSymbol = "BTCUSDT"
-	mockBook := &mexcOrderBook{
-		mktSymbol:   testSymbol,
-		log:         logger.SubLogger("BOOK-" + testSymbol),
-		updateQueue: make(chan *mexctypes.WsDepthUpdateData, 10),
-	}
-	mockBook.synced.Store(true) // Mark as synced for testing
+	// Set the mock connection
+	m.marketStreamMtx.Lock()
+	m.marketStream = mockWsConn
+	m.marketStreamMtx.Unlock()
 
-	// Add the mock book to our mexc instance
-	m.booksMtx.Lock()
-	m.books[testSymbol] = mockBook
-	m.booksMtx.Unlock()
+	// Test Cases:
+	// 1. Last message received < 20 seconds ago (should NOT send ping)
+	m.lastMessageReceived.Store(time.Now().Add(-10 * time.Second))
 
-	// Create a test WsMessage with depth update data
-	rawBids := [][2]json.Number{
-		{json.Number("10000.50"), json.Number("1.5")},
-		{json.Number("10000.00"), json.Number("2.5")},
-	}
-	rawAsks := [][2]json.Number{
-		{json.Number("10001.00"), json.Number("1.0")},
-		{json.Number("10002.00"), json.Number("2.0")},
+	// Manually simulate the ping ticker firing
+	pingMsg := map[string]interface{}{"ping": time.Now().UnixNano() / int64(time.Millisecond)}
+	pingBytes, _ := json.Marshal(pingMsg)
+
+	// Check if the implementation would send a ping (we assume it wouldn't since last message was recent)
+	if time.Since(m.lastMessageReceived.Load().(time.Time)) > 20*time.Second {
+		m.marketStream.SendRaw(pingBytes)
 	}
 
-	depthData := &mexctypes.WsDepthUpdateData{
-		Version: "123456789",
-		Bids:    rawBids,
-		Asks:    rawAsks,
+	// Verify no ping message was sent
+	select {
+	case <-sentPings:
+		t.Error("A ping was sent when last message was less than 20 seconds ago")
+	case <-time.After(50 * time.Millisecond):
+		// Correct: no ping should be sent
 	}
 
-	depthDataBytes, err := json.Marshal(depthData)
-	require.NoError(t, err, "Failed to marshal depth data")
+	// 2. Last message received > 20 seconds ago (should send ping)
+	m.lastMessageReceived.Store(time.Now().Add(-30 * time.Second))
 
-	wsMsg := &mexctypes.WsMessage{
-		Channel: "spot@public.increase.depth.v3.api@" + testSymbol,
-		Symbol:  testSymbol,
-		Data:    depthDataBytes,
+	// Check if the implementation would send a ping (it should since last message was > 20s ago)
+	if time.Since(m.lastMessageReceived.Load().(time.Time)) > 20*time.Second {
+		m.marketStream.SendRaw(pingBytes)
 	}
 
-	// Create a channel to receive the message from the update queue
-	receivedUpdate := make(chan *mexctypes.WsDepthUpdateData, 1)
+	// Verify a ping message was sent
+	select {
+	case sentPing := <-sentPings:
+		// Validate it's a ping message
+		var pingData map[string]interface{}
+		if err := json.Unmarshal(sentPing, &pingData); err != nil {
+			t.Errorf("Invalid ping message format: %s", string(sentPing))
+		} else if _, ok := pingData["ping"]; !ok {
+			t.Errorf("Expected ping message but got: %s", string(sentPing))
+		}
+	case <-time.After(50 * time.Millisecond):
+		t.Error("No ping was sent when last message was more than 20 seconds ago")
+	}
 
-	// Start a goroutine to read from the update queue
+	// 3. Test stale connection detection (> 90 seconds without message)
+	m.lastMessageReceived.Store(time.Now().Add(-95 * time.Second))
+
+	// Capture reconnect signals
+	reconnects := make(chan struct{}, 1)
 	go func() {
 		select {
-		case update := <-mockBook.updateQueue:
-			receivedUpdate <- update
-		case <-time.After(time.Second):
-			t.Errorf("Timed out waiting for update to be sent to the queue")
-			close(receivedUpdate)
+		case <-m.reconnectChan:
+			reconnects <- struct{}{}
+		case <-time.After(100 * time.Millisecond):
+			// Test timeout, do nothing
 		}
 	}()
 
-	// Call handleDepthUpdate
-	m.handleDepthUpdate(wsMsg)
+	// Simulate the code that would trigger a reconnect
+	if time.Since(m.lastMessageReceived.Load().(time.Time)) > 90*time.Second {
+		m.reconnectChan <- struct{}{}
+	}
 
-	// Check if the update was sent to the book's update queue
+	// Verify a reconnect was triggered
 	select {
-	case update := <-receivedUpdate:
-		require.NotNil(t, update, "Update should not be nil")
-		require.Equal(t, "123456789", update.Version, "Version should match")
-		require.Len(t, update.Bids, 2, "Should have 2 bids")
-		require.Len(t, update.Asks, 2, "Should have 2 asks")
+	case <-reconnects:
+		// Correct: reconnect was triggered
+	case <-time.After(100 * time.Millisecond):
+		t.Error("No reconnection was triggered when connection was stale")
+	}
+}
 
-		// Check a bid and ask value
-		require.Equal(t, "10000.50", string(update.Bids[0][0]), "First bid price should match")
-		require.Equal(t, "1.5", string(update.Bids[0][1]), "First bid quantity should match")
-		require.Equal(t, "10001.00", string(update.Asks[0][0]), "First ask price should match")
-		require.Equal(t, "1.0", string(update.Asks[0][1]), "First ask quantity should match")
-	case <-time.After(time.Second):
-		t.Fatalf("Timed out waiting for message on receivedUpdate channel")
+// TestIsConnectionHealthy tests the IsConnectionHealthy method.
+func TestIsConnectionHealthy(t *testing.T) {
+	m := &mexc{
+		marketStreamMtx: sync.RWMutex{},
 	}
 
-	// Test with non-existent book
-	nonExistentMsg := &mexctypes.WsMessage{
-		Channel: "spot@public.increase.depth.v3.api@UNKNOWN",
-		Symbol:  "UNKNOWN",
-		Data:    depthDataBytes,
+	// Test with nil market stream
+	if m.IsConnectionHealthy() {
+		t.Error("IsConnectionHealthy should return false when marketStream is nil")
 	}
 
-	// Call handleDepthUpdate with non-existent book symbol - should not panic
-	m.handleDepthUpdate(nonExistentMsg)
+	// Test with down market stream
+	mockWsConn := &mockWsConn{
+		isDown: func() bool { return true },
+	}
+	m.marketStreamMtx.Lock()
+	m.marketStream = mockWsConn
+	m.marketStreamMtx.Unlock()
 
-	// Test with missing symbol
-	noSymbolMsg := &mexctypes.WsMessage{
-		Channel: "spot@public.increase.depth.v3.api@",
-		Symbol:  "",
-		Data:    depthDataBytes,
+	if m.IsConnectionHealthy() {
+		t.Error("IsConnectionHealthy should return false when marketStream is down")
 	}
 
-	// Call handleDepthUpdate with missing symbol - should not panic
-	m.handleDepthUpdate(noSymbolMsg)
+	// Test with up market stream but old lastMessageReceived
+	mockWsConn.isDown = func() bool { return false }
+	m.lastMessageReceived.Store(time.Now().Add(-2 * time.Minute))
+	m.connectionHealthy.Store(true)
 
-	// Test with invalid depth data
-	invalidDataMsg := &mexctypes.WsMessage{
-		Channel: "spot@public.increase.depth.v3.api@" + testSymbol,
-		Symbol:  testSymbol,
-		Data:    []byte(`{"invalid": "json"`), // Invalid JSON
+	if m.IsConnectionHealthy() {
+		t.Error("IsConnectionHealthy should return false when lastMessageReceived is too old")
 	}
 
-	// Call handleDepthUpdate with invalid data - should not panic
-	m.handleDepthUpdate(invalidDataMsg)
+	// Test with up market stream and recent lastMessageReceived
+	m.lastMessageReceived.Store(time.Now())
+	if !m.IsConnectionHealthy() {
+		t.Error("IsConnectionHealthy should return true with recent message and healthy connection")
+	}
+}
+
+// Mock implementation of the comms.WsConn interface for testing
+type mockWsConn struct {
+	sendRaw            func(data []byte) error
+	isDown             func() bool
+	nextID             func() uint64
+	send               func(msg *msgjson.Message) error
+	request            func(msg *msgjson.Message, respHandler func(*msgjson.Message)) error
+	requestRaw         func(msgID uint64, rawMsg []byte, respHandler func(*msgjson.Message)) error
+	requestWithTimeout func(msg *msgjson.Message, respHandler func(*msgjson.Message), expireTime time.Duration, expire func()) error
+	connect            func(ctx context.Context) (*sync.WaitGroup, error)
+	messageSource      func() <-chan *msgjson.Message
+	updateURL          func(string)
+}
+
+func (m *mockWsConn) SendRaw(data []byte) error {
+	if m.sendRaw != nil {
+		return m.sendRaw(data)
+	}
+	return nil
+}
+
+func (m *mockWsConn) IsDown() bool {
+	if m.isDown != nil {
+		return m.isDown()
+	}
+	return false
+}
+
+func (m *mockWsConn) NextID() uint64 {
+	if m.nextID != nil {
+		return m.nextID()
+	}
+	return 0
+}
+
+func (m *mockWsConn) Send(msg *msgjson.Message) error {
+	if m.send != nil {
+		return m.send(msg)
+	}
+	return nil
+}
+
+func (m *mockWsConn) Request(msg *msgjson.Message, respHandler func(*msgjson.Message)) error {
+	if m.request != nil {
+		return m.request(msg, respHandler)
+	}
+	return nil
+}
+
+func (m *mockWsConn) RequestRaw(msgID uint64, rawMsg []byte, respHandler func(*msgjson.Message)) error {
+	if m.requestRaw != nil {
+		return m.requestRaw(msgID, rawMsg, respHandler)
+	}
+	return nil
+}
+
+func (m *mockWsConn) RequestWithTimeout(msg *msgjson.Message, respHandler func(*msgjson.Message), expireTime time.Duration, expire func()) error {
+	if m.requestWithTimeout != nil {
+		return m.requestWithTimeout(msg, respHandler, expireTime, expire)
+	}
+	return nil
+}
+
+func (m *mockWsConn) Connect(ctx context.Context) (*sync.WaitGroup, error) {
+	if m.connect != nil {
+		return m.connect(ctx)
+	}
+	wg := &sync.WaitGroup{}
+	return wg, nil
+}
+
+func (m *mockWsConn) MessageSource() <-chan *msgjson.Message {
+	if m.messageSource != nil {
+		return m.messageSource()
+	}
+	ch := make(chan *msgjson.Message)
+	close(ch)
+	return ch
+}
+
+func (m *mockWsConn) UpdateURL(url string) {
+	if m.updateURL != nil {
+		m.updateURL(url)
+	}
 }

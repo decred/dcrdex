@@ -804,6 +804,11 @@ type mexc struct {
 	protobufDepthUpdate    *mexctypes.WsDepthUpdateData
 	protobufDepthUpdateMtx sync.Mutex
 
+	// For websocket connection health monitoring
+	lastMessageReceived atomic.Value // time.Time
+	connectionHealthy   atomic.Bool
+	messageCounter      uint64 // atomic
+
 	// For shutdown coordination
 	wg          sync.WaitGroup
 	quit        chan struct{}
@@ -864,6 +869,10 @@ func newMexc(cfg *CEXConfig) (*mexc, error) {
 	instance.tokenIDs.Store(make(map[string][]uint32))
 	instance.minWithdraw.Store(make(map[uint32]*mxWithdrawInfo))
 	instance.listenKey.Store("")
+
+	// Initialize connection health monitoring fields
+	instance.lastMessageReceived.Store(time.Now())
+	instance.connectionHealthy.Store(false)
 
 	// Create the market data WebSocket connection
 	marketLogger := cfg.Logger.SubLogger("MarketWS")
@@ -1035,6 +1044,30 @@ func (m *mexc) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		}
 
 		m.log.Infof("MEXC adapter cleanup complete")
+	}()
+
+	// Initialize market data stream
+	if err := m.startMarketStreams(ctx); err != nil {
+		m.log.Errorf("Failed to start market streams: %v", err)
+		return nil, fmt.Errorf("failed to start market streams: %w", err)
+	}
+
+	// Start ping keep-alive routine for WebSocket connection
+	wg.Add(1)
+	m.wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer m.wg.Done()
+		m.startPingKeepAlive(ctx)
+	}()
+
+	// Start message rate tracking for monitoring
+	wg.Add(1)
+	m.wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer m.wg.Done()
+		m.trackMessageRates(ctx)
 	}()
 
 	// Launch user data stream connection
@@ -1242,6 +1275,11 @@ func (m *mexc) resubscribeMarkets(ctx context.Context) {
 
 // handleMarketRawMessage processes raw WebSocket messages from the market stream.
 func (m *mexc) handleMarketRawMessage(raw []byte) {
+	// Update last message received time
+	m.lastMessageReceived.Store(time.Now())
+	m.connectionHealthy.Store(true)
+	atomic.AddUint64(&m.messageCounter, 1)
+
 	if len(raw) == 0 {
 		return
 	}
@@ -1250,6 +1288,7 @@ func (m *mexc) handleMarketRawMessage(raw []byte) {
 	if string(raw) == `{"ping":true}` || string(raw) == "ping" {
 		// Respond with pong
 		m.marketStream.SendRaw([]byte(`{"pong":true}`))
+		m.log.Debugf("[MarketWS] Received ping, sent pong response")
 		return
 	}
 
@@ -1287,6 +1326,14 @@ func isPbMessage(header []byte) bool {
 
 // handleProtobufMessage processes market data protobuf messages.
 func (m *mexc) handleProtobufMessage(data []byte) {
+	// Update last message received time and counters
+	m.lastMessageReceived.Store(time.Now())
+	m.connectionHealthy.Store(true)
+	atomic.AddUint64(&m.messageCounter, 1)
+
+	// Track processing time for performance monitoring
+	startTime := time.Now()
+
 	// Parse the binary protobuf message using our mexctypes
 	pb, err := mexctypes.UnmarshalMEXCDepthProto(data)
 	if err != nil {
@@ -1367,6 +1414,13 @@ func (m *mexc) handleProtobufMessage(data []byte) {
 		// Successfully queued
 	default:
 		m.log.Warnf("Update queue full for %s, dropping depth update", symbol)
+	}
+
+	// Log slow processing
+	processingTime := time.Since(startTime)
+	if processingTime > 100*time.Millisecond {
+		m.log.Debugf("[MarketWS] Slow protobuf processing: %v for symbol %s",
+			processingTime, symbol)
 	}
 }
 
@@ -2767,10 +2821,25 @@ func (m *mexc) startMarketStreams(ctx context.Context) error {
 
 // handleMarketDataMessage processes raw messages from the market data WebSocket
 func (m *mexc) handleMarketDataMessage(msg []byte) {
+	// Update last message received time
+	m.lastMessageReceived.Store(time.Now())
+	m.connectionHealthy.Store(true)
+	atomic.AddUint64(&m.messageCounter, 1)
+
+	// Track processing time for performance monitoring
+	startTime := time.Now()
+
 	// Check if it's a binary message (protobuf)
 	if len(msg) > 0 && (msg[0] < 32 || msg[0] > 126) {
 		// Handle binary protobuf message
 		m.handleProtobufMessage(msg)
+
+		// Log processing time if it's slow
+		processingTime := time.Since(startTime)
+		if processingTime > 100*time.Millisecond {
+			m.log.Debugf("[MarketWS] Slow protobuf processing: %v for %d bytes",
+				processingTime, len(msg))
+		}
 		return
 	}
 
@@ -2778,6 +2847,7 @@ func (m *mexc) handleMarketDataMessage(msg []byte) {
 	if string(msg) == `{"ping":true}` || string(msg) == "ping" {
 		// Respond with pong
 		m.marketStream.SendRaw([]byte(`{"pong":true}`))
+		m.log.Debugf("[MarketWS] Received ping, sent pong response")
 		return
 	}
 
@@ -2832,6 +2902,13 @@ func (m *mexc) handleMarketDataMessage(msg []byte) {
 		m.processDepthUpdate(&depthUpdate)
 	} else {
 		m.log.Debugf("[MarketWS] Unhandled stream type: %s", baseMsg.Stream)
+	}
+
+	// Log processing time if it's slow
+	processingTime := time.Since(startTime)
+	if processingTime > 100*time.Millisecond {
+		m.log.Debugf("[MarketWS] Slow message processing: %v for %d bytes",
+			processingTime, len(msg))
 	}
 }
 
@@ -4264,4 +4341,145 @@ func (m *mexc) deleteListenKey(ctx context.Context, key string) error {
 
 	m.log.Debugf("Successfully deleted MEXC listenKey")
 	return nil
+}
+
+// startPingKeepAlive starts a background goroutine that periodically sends ping messages
+// to the WebSocket server to keep the connection alive. This prevents the automatic
+// disconnection that occurs after 60 seconds of inactivity.
+func (m *mexc) startPingKeepAlive(ctx context.Context) {
+	m.log.Debugf("[MarketWS] Starting ping keep-alive routine")
+
+	// Ensure last message timestamp is initialized
+	if m.lastMessageReceived.Load() == nil {
+		m.lastMessageReceived.Store(time.Now())
+	}
+
+	pingTicker := time.NewTicker(30 * time.Second) // Send ping every 30 seconds if needed
+	defer pingTicker.Stop()
+
+	for {
+		select {
+		case <-pingTicker.C:
+			// Only send ping if we haven't received any message in the last 20 seconds
+			// This avoids unnecessary pings if we're already receiving data
+			lastMsgTime := m.lastMessageReceived.Load().(time.Time)
+			timeSinceLastMsg := time.Since(lastMsgTime)
+
+			if timeSinceLastMsg > 20*time.Second {
+				m.log.Debugf("[MarketWS] Sending ping to maintain connection (last msg: %v ago)",
+					timeSinceLastMsg.Round(time.Second))
+
+				// Create ping message in the format MEXC expects
+				pingMsg := map[string]interface{}{"ping": time.Now().UnixNano() / int64(time.Millisecond)}
+				pingBytes, err := json.Marshal(pingMsg)
+				if err != nil {
+					m.log.Errorf("[MarketWS] Error marshaling ping message: %v", err)
+					continue
+				}
+
+				// Get current market stream connection
+				m.marketStreamMtx.RLock()
+				marketStream := m.marketStream
+				m.marketStreamMtx.RUnlock()
+
+				if marketStream == nil || marketStream.IsDown() {
+					m.log.Warnf("[MarketWS] Cannot send ping - connection is down or nil")
+					continue
+				}
+
+				if err := marketStream.SendRaw(pingBytes); err != nil {
+					m.log.Warnf("[MarketWS] Failed to send ping: %v", err)
+				} else {
+					m.log.Tracef("[MarketWS] Ping sent successfully")
+				}
+			}
+
+			// Check if we've received any message recently to detect stale connections
+			if timeSinceLastMsg > 90*time.Second {
+				m.log.Warnf("[MarketWS] No messages received for %v, connection might be stale",
+					timeSinceLastMsg.Round(time.Second))
+
+				// Force reconnection if connection might be stale
+				m.marketStreamMtx.Lock()
+				if m.marketStream != nil {
+					// Trigger websocket reconnect through the reconnect channel
+					select {
+					case m.reconnectChan <- struct{}{}:
+						m.log.Debugf("[MarketWS] Triggered reconnect due to stale connection")
+					default:
+						m.log.Debugf("[MarketWS] Reconnect already queued")
+					}
+				}
+				m.marketStreamMtx.Unlock()
+			}
+
+		case <-ctx.Done():
+			m.log.Debugf("[MarketWS] Ping timer stopped due to context cancellation")
+			return
+		case <-m.quit:
+			m.log.Debugf("[MarketWS] Ping timer stopped due to quit signal")
+			return
+		}
+	}
+}
+
+// trackMessageRates monitors and logs WebSocket message throughput for diagnostics
+func (m *mexc) trackMessageRates(ctx context.Context) {
+	m.log.Debugf("[MarketWS] Starting message rate tracking")
+
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	var lastCount uint64
+	var lastTime time.Time = time.Now()
+
+	for {
+		select {
+		case <-ticker.C:
+			currentCount := atomic.LoadUint64(&m.messageCounter)
+			currentTime := time.Now()
+
+			// Calculate message rate over the period
+			duration := currentTime.Sub(lastTime).Seconds()
+			messageRate := float64(currentCount-lastCount) / duration
+
+			// Get connection health status
+			lastMsgTime := m.lastMessageReceived.Load().(time.Time)
+			timeSinceLastMsg := time.Since(lastMsgTime)
+			isConnected := !m.marketStream.IsDown()
+			isHealthy := m.connectionHealthy.Load()
+
+			// Log message rate and health information
+			m.log.Infof("[MarketWS] Stats: %.2f msgs/sec, last msg: %v ago, connected: %v, healthy: %v",
+				messageRate, timeSinceLastMsg.Round(time.Second), isConnected, isHealthy)
+
+			// Update tracking variables for next cycle
+			lastCount = currentCount
+			lastTime = currentTime
+
+		case <-ctx.Done():
+			m.log.Debugf("[MarketWS] Message rate tracking stopped due to context cancellation")
+			return
+		case <-m.quit:
+			m.log.Debugf("[MarketWS] Message rate tracking stopped due to quit signal")
+			return
+		}
+	}
+}
+
+// IsConnectionHealthy returns whether the WebSocket connection is healthy based on
+// recent message activity and connection status.
+func (m *mexc) IsConnectionHealthy() bool {
+	// Check if connection is reported as down by the WebSocket connection
+	m.marketStreamMtx.RLock()
+	marketStream := m.marketStream
+	m.marketStreamMtx.RUnlock()
+
+	if marketStream == nil || marketStream.IsDown() {
+		return false
+	}
+
+	// Check if we've received messages recently
+	lastMsgTime := m.lastMessageReceived.Load().(time.Time)
+	return time.Since(lastMsgTime) < 60*time.Second && m.connectionHealthy.Load()
 }
