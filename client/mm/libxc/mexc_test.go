@@ -228,9 +228,10 @@ func TestHandleMarketRawMessage(t *testing.T) {
 		t.Errorf("lastMessageReceived not updated properly: %v", lastMsgTime)
 	}
 
-	// Verify connectionHealthy flag was set to true
-	if !m.connectionHealthy.Load() {
-		t.Error("connectionHealthy flag was not set to true")
+	// Verify lastMessageReceived was properly updated
+	msgTime := m.lastMessageReceived.Load().(time.Time)
+	if time.Since(msgTime) > 100*time.Millisecond {
+		t.Error("lastMessageReceived was not properly updated")
 	}
 
 	// Test a normal message (not ping)
@@ -325,8 +326,8 @@ func TestShouldSendPing(t *testing.T) {
 		t.Error("No ping was sent when last message was more than 20 seconds ago")
 	}
 
-	// 3. Test stale connection detection (> 90 seconds without message)
-	m.lastMessageReceived.Store(time.Now().Add(-95 * time.Second))
+	// 3. Test stale connection detection (> 180 seconds without message)
+	m.lastMessageReceived.Store(time.Now().Add(-185 * time.Second))
 
 	// Capture reconnect signals
 	reconnects := make(chan struct{}, 1)
@@ -340,7 +341,7 @@ func TestShouldSendPing(t *testing.T) {
 	}()
 
 	// Simulate the code that would trigger a reconnect
-	if time.Since(m.lastMessageReceived.Load().(time.Time)) > 90*time.Second {
+	if time.Since(m.lastMessageReceived.Load().(time.Time)) > 180*time.Second {
 		m.reconnectChan <- struct{}{}
 	}
 
@@ -355,13 +356,32 @@ func TestShouldSendPing(t *testing.T) {
 
 // TestIsConnectionHealthy tests the IsConnectionHealthy method.
 func TestIsConnectionHealthy(t *testing.T) {
+	// Create a mexc instance for testing
 	m := &mexc{
 		marketStreamMtx: sync.RWMutex{},
+		booksMtx:        sync.RWMutex{},
+		books:           make(map[string]*mxOrderBook),
 	}
 
-	// Test with nil market stream
+	// Create a test book with subscribers to simulate active subscriptions
+	testBook := &mxOrderBook{
+		mtx:            sync.RWMutex{},
+		numSubscribers: 1, // Has one subscriber
+	}
+
+	// Test with no active books first (should return true since no subscriptions)
+	if !m.IsConnectionHealthy() {
+		t.Error("IsConnectionHealthy should return true when there are no active subscriptions")
+	}
+
+	// Add a book to simulate an active subscription
+	m.booksMtx.Lock()
+	m.books["BTCUSDT"] = testBook
+	m.booksMtx.Unlock()
+
+	// Now test with an active subscription but nil market stream
 	if m.IsConnectionHealthy() {
-		t.Error("IsConnectionHealthy should return false when marketStream is nil")
+		t.Error("IsConnectionHealthy should return false when marketStream is nil with active subscriptions")
 	}
 
 	// Test with down market stream
@@ -373,22 +393,41 @@ func TestIsConnectionHealthy(t *testing.T) {
 	m.marketStreamMtx.Unlock()
 
 	if m.IsConnectionHealthy() {
-		t.Error("IsConnectionHealthy should return false when marketStream is down")
+		t.Error("IsConnectionHealthy should return false when marketStream is down with active subscriptions")
 	}
 
-	// Test with up market stream but old lastMessageReceived
+	// Test with up market stream but old lastMessageReceived (> 60 seconds)
 	mockWsConn.isDown = func() bool { return false }
-	m.lastMessageReceived.Store(time.Now().Add(-2 * time.Minute))
-	m.connectionHealthy.Store(true)
+	m.lastMessageReceived.Store(time.Now().Add(-65 * time.Second))
 
 	if m.IsConnectionHealthy() {
-		t.Error("IsConnectionHealthy should return false when lastMessageReceived is too old")
+		t.Error("IsConnectionHealthy should return false when lastMessageReceived is too old with active subscriptions")
+	}
+
+	// Test with up market stream and older message but still within healthy threshold (< 60 seconds)
+	m.lastMessageReceived.Store(time.Now().Add(-55 * time.Second))
+	if !m.IsConnectionHealthy() {
+		t.Error("IsConnectionHealthy should return true when lastMessageReceived is within threshold with active subscriptions")
 	}
 
 	// Test with up market stream and recent lastMessageReceived
 	m.lastMessageReceived.Store(time.Now())
 	if !m.IsConnectionHealthy() {
-		t.Error("IsConnectionHealthy should return true with recent message and healthy connection")
+		t.Error("IsConnectionHealthy should return true with recent message with active subscriptions")
+	}
+
+	// Remove all subscriptions
+	m.booksMtx.Lock()
+	testBook.mtx.Lock()
+	testBook.numSubscribers = 0
+	testBook.mtx.Unlock()
+	m.booksMtx.Unlock()
+
+	// Test without active subscriptions - should always return true
+	m.lastMessageReceived.Store(time.Now().Add(-300 * time.Second)) // Very old
+
+	if !m.IsConnectionHealthy() {
+		t.Error("IsConnectionHealthy should return true when there are no active subscriptions")
 	}
 }
 

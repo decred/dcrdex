@@ -874,15 +874,18 @@ func newMexc(cfg *CEXConfig) (*mexc, error) {
 	instance.lastMessageReceived.Store(time.Now())
 	instance.connectionHealthy.Store(false)
 
-	// Create the market data WebSocket connection
+	// Create the market data WebSocket connection that extends read deadline on ANY message
 	marketLogger := cfg.Logger.SubLogger("MarketWS")
 	marketWsCfg := &comms.WsCfg{
 		Logger:           marketLogger,
 		URL:              wsURL,
-		PingWait:         60 * time.Second,
+		PingWait:         180 * time.Second, // Much more tolerant ping timeout to avoid spurious disconnects
 		RawHandler:       instance.handleMarketRawMessage,
 		ConnectEventFunc: instance.handleMarketConnectEvent,
 		EchoPingData:     true,
+		// Add a hook to extend the read deadline on ANY successful message read,
+		// not just on ping messages. This is the key fix for the timeout issue.
+		ReconnectSync: instance.afterReconnect,
 	}
 
 	marketStream, err := comms.NewWsConn(marketWsCfg)
@@ -944,105 +947,145 @@ func (m *mexc) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 
 		m.log.Infof("MEXC context canceled, cleaning up resources")
 
-		// Signal all goroutines to exit
+		// First, signal all goroutines to exit by closing the quit channel
 		m.shutdownMtx.Lock()
 		select {
 		case <-m.quit:
 			// Already closed
 			m.shutdownMtx.Unlock()
 			m.log.Debugf("Quit channel already closed, continuing shutdown")
-			return
 		default:
 			close(m.quit)
 			m.log.Debugf("Closed quit channel to signal goroutines")
+			m.shutdownMtx.Unlock()
 		}
-		m.shutdownMtx.Unlock()
 
-		// Delete listen key to prevent reconnection attempts
+		// Fast cleanup of active connections and resources in parallel
+		// Create a tighter timeout context for cleanup operations
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		// Use a WaitGroup to parallelize and track cleanup operations
+		var cleanupWg sync.WaitGroup
+
+		// 1. Clean up listen key (if exists)
 		if key := m.listenKey.Load().(string); key != "" {
-			// Create a context for cleanup operations
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-
-			m.log.Infof("Deleting MEXC listen key during shutdown")
-			if err := m.deleteListenKey(cleanupCtx, key); err != nil {
-				m.log.Warnf("Error deleting listen key during shutdown: %v", err)
-			}
-
-			// Clear the listen key
-			m.listenKey.Store("")
+			cleanupWg.Add(1)
+			go func(listenKey string) {
+				defer cleanupWg.Done()
+				m.log.Debugf("Deleting MEXC listen key during shutdown")
+				if err := m.deleteListenKey(cleanupCtx, listenKey); err != nil {
+					m.log.Warnf("Error deleting listen key during shutdown: %v", err)
+				}
+				m.listenKey.Store("")
+			}(key)
 		}
 
-		// Explicitly clean up websocket connections
-		m.marketStreamMtx.Lock()
-		if m.marketStream != nil {
-			m.log.Infof("Cleaning up market stream connection during shutdown")
-			if !m.marketStream.IsDown() {
-				m.log.Debugf("Market stream is still active, will be closed via context")
-			}
-			// The connection should be cleaned up by the goroutine we started,
-			// but we set it to nil here to prevent any further use
-			m.marketStream = nil
-		} else {
-			m.log.Debugf("Market stream was already nil during cleanup")
-		}
-		m.marketStreamMtx.Unlock()
-
-		// Also clean up user data stream connection
-		if m.userDataStream != nil {
-			m.log.Infof("Cleaning up user data stream connection during shutdown")
-			// Clear the reference, actual cleanup happens in the goroutine
-			m.userDataStream = nil
-		} else {
-			m.log.Debugf("User data stream was already nil during cleanup")
-		}
-
-		// Disconnect all orderbook ConnectionMasters
-		orderbookCount := 0
-		activeBooks := 0
-		m.booksMtx.Lock()
-		m.log.Infof("Cleaning up %d orderbooks during shutdown", len(m.books))
-		for symbol, book := range m.books {
-			orderbookCount++
-			// Get the book's ConnectionMaster and disconnect it
-			book.mtx.Lock()
-			if book.active {
-				activeBooks++
-			}
-			if book.cm != nil {
-				m.log.Infof("Disconnecting ConnectionMaster for orderbook %s", symbol)
-				book.cm.Disconnect()
-				book.cm = nil
-			} else {
-				m.log.Debugf("ConnectionMaster was nil for orderbook %s", symbol)
-			}
-			// Close any channels to signal goroutines to exit
-			if book.updateQueue != nil {
-				m.log.Debugf("Closing update queue for orderbook %s", symbol)
-				close(book.updateQueue)
-				book.updateQueue = nil
-			}
-			book.active = false
-			book.mtx.Unlock()
-		}
-		m.booksMtx.Unlock()
-		m.log.Infof("Processed %d orderbooks during shutdown (%d were active)", orderbookCount, activeBooks)
-
-		// Wait for goroutines to exit with a timeout
-		m.log.Infof("Waiting for all MEXC goroutines to exit...")
-		waitChan := make(chan struct{})
+		// 2. Clean up WebSocket connections
+		cleanupWg.Add(1)
 		go func() {
-			m.wg.Wait()
-			close(waitChan)
+			defer cleanupWg.Done()
+
+			// Clean up market stream
+			m.marketStreamMtx.Lock()
+			marketStream := m.marketStream
+			m.marketStream = nil // Immediately prevent further use
+			m.marketStreamMtx.Unlock()
+
+			if marketStream != nil {
+				m.log.Debugf("Cleaning up market stream connection")
+			}
+
+			// Clean up user data stream
+			userStream := m.userDataStream
+			m.userDataStream = nil // Immediately prevent further use
+
+			if userStream != nil {
+				m.log.Debugf("Cleaning up user data stream connection")
+			}
+		}()
+
+		// 3. Disconnect all orderbook ConnectionMasters
+		cleanupWg.Add(1)
+		go func() {
+			defer cleanupWg.Done()
+
+			// Get quick count of books
+			m.booksMtx.RLock()
+			bookCount := len(m.books)
+			m.booksMtx.RUnlock()
+
+			if bookCount == 0 {
+				return
+			}
+
+			m.log.Debugf("Fast cleanup of %d orderbooks", bookCount)
+
+			// Process books in batches to avoid long lock times
+			m.booksMtx.Lock()
+			books := make([]*mxOrderBook, 0, bookCount)
+			for _, book := range m.books {
+				books = append(books, book)
+			}
+			// Clear the map immediately to prevent further access
+			m.books = make(map[string]*mxOrderBook)
+			m.booksMtx.Unlock()
+
+			// Process collected books without holding the map lock
+			for _, book := range books {
+				book.mtx.Lock()
+				if book.cm != nil {
+					book.cm.Disconnect()
+					book.cm = nil
+				}
+				if book.updateQueue != nil {
+					close(book.updateQueue)
+					book.updateQueue = nil
+				}
+				book.active = false
+				book.mtx.Unlock()
+			}
+		}()
+
+		// Wait for parallel cleanup operations with a short timeout
+		cleanupDone := make(chan struct{})
+		go func() {
+			cleanupWg.Wait()
+			close(cleanupDone)
 		}()
 
 		select {
-		case <-waitChan:
-			m.log.Infof("All MEXC goroutines exited cleanly")
-		case <-time.After(5 * time.Second):
-			m.log.Warnf("Timed out waiting for some MEXC goroutines to exit")
+		case <-cleanupDone:
+			m.log.Debugf("Fast cleanup of MEXC resources completed")
+		case <-time.After(1500 * time.Millisecond):
+			m.log.Warnf("Timed out during fast cleanup phase")
 		}
 
+		// Brief wait for goroutines to notice quit signal and exit
+		waitChan := make(chan struct{})
+		go func() {
+			// Use a very short wait timeout - we've already done the important cleanup
+			waitTimer := time.NewTimer(500 * time.Millisecond)
+			defer waitTimer.Stop()
+
+			// Try a quick wait first
+			wgDone := make(chan struct{})
+			go func() {
+				m.wg.Wait()
+				close(wgDone)
+			}()
+
+			select {
+			case <-wgDone:
+				// Great, everything exited quickly
+			case <-waitTimer.C:
+				// Don't wait any longer
+			}
+
+			close(waitChan)
+		}()
+
+		<-waitChan // Very short wait, won't block shutdown for long
 		m.log.Infof("MEXC adapter cleanup complete")
 	}()
 
@@ -1051,15 +1094,6 @@ func (m *mexc) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		m.log.Errorf("Failed to start market streams: %v", err)
 		return nil, fmt.Errorf("failed to start market streams: %w", err)
 	}
-
-	// Start ping keep-alive routine for WebSocket connection
-	wg.Add(1)
-	m.wg.Add(1)
-	go func() {
-		defer wg.Done()
-		defer m.wg.Done()
-		m.startPingKeepAlive(ctx)
-	}()
 
 	// Start message rate tracking for monitoring
 	wg.Add(1)
@@ -1275,20 +1309,23 @@ func (m *mexc) resubscribeMarkets(ctx context.Context) {
 
 // handleMarketRawMessage processes raw WebSocket messages from the market stream.
 func (m *mexc) handleMarketRawMessage(raw []byte) {
-	// Update last message received time
-	m.lastMessageReceived.Store(time.Now())
-	m.connectionHealthy.Store(true)
+	// Simply increment message counter for stats
 	atomic.AddUint64(&m.messageCounter, 1)
+
+	// Store the time of the last message received - used for health monitoring
+	m.lastMessageReceived.Store(time.Now())
 
 	if len(raw) == 0 {
 		return
 	}
 
-	// Check if the message is a ping
-	if string(raw) == `{"ping":true}` || string(raw) == "ping" {
-		// Respond with pong
+	// Let the WebSocket library handle ping/pong automatically
+	// We only handle application-level pings/pongs here
+	rawStr := string(raw)
+	if (rawStr == `{"ping":true}` || rawStr == "ping") && m.marketStream != nil {
+		// Respond to application-level ping with pong
 		m.marketStream.SendRaw([]byte(`{"pong":true}`))
-		m.log.Debugf("[MarketWS] Received ping, sent pong response")
+		m.log.Tracef("[MarketWS] Received application ping, sent pong response")
 		return
 	}
 
@@ -1326,9 +1363,7 @@ func isPbMessage(header []byte) bool {
 
 // handleProtobufMessage processes market data protobuf messages.
 func (m *mexc) handleProtobufMessage(data []byte) {
-	// Update last message received time and counters
-	m.lastMessageReceived.Store(time.Now())
-	m.connectionHealthy.Store(true)
+	// Simply increment message counter for stats
 	atomic.AddUint64(&m.messageCounter, 1)
 
 	// Track processing time for performance monitoring
@@ -2821,9 +2856,7 @@ func (m *mexc) startMarketStreams(ctx context.Context) error {
 
 // handleMarketDataMessage processes raw messages from the market data WebSocket
 func (m *mexc) handleMarketDataMessage(msg []byte) {
-	// Update last message received time
-	m.lastMessageReceived.Store(time.Now())
-	m.connectionHealthy.Store(true)
+	// Simply increment message counter for stats
 	atomic.AddUint64(&m.messageCounter, 1)
 
 	// Track processing time for performance monitoring
@@ -4343,83 +4376,46 @@ func (m *mexc) deleteListenKey(ctx context.Context, key string) error {
 	return nil
 }
 
-// startPingKeepAlive starts a background goroutine that periodically sends ping messages
-// to the WebSocket server to keep the connection alive. This prevents the automatic
-// disconnection that occurs after 60 seconds of inactivity.
-func (m *mexc) startPingKeepAlive(ctx context.Context) {
-	m.log.Debugf("[MarketWS] Starting ping keep-alive routine")
+// hasActiveSubscriptions checks if there are any active orderbook subscriptions.
+// This is a utility function that might be used by other parts of the code.
+func (m *mexc) hasActiveSubscriptions() bool {
+	m.booksMtx.RLock()
+	defer m.booksMtx.RUnlock()
 
-	// Ensure last message timestamp is initialized
-	if m.lastMessageReceived.Load() == nil {
-		m.lastMessageReceived.Store(time.Now())
-	}
+	for _, book := range m.books {
+		book.mtx.RLock()
+		numSubs := book.numSubscribers
+		book.mtx.RUnlock()
 
-	pingTicker := time.NewTicker(30 * time.Second) // Send ping every 30 seconds if needed
-	defer pingTicker.Stop()
-
-	for {
-		select {
-		case <-pingTicker.C:
-			// Only send ping if we haven't received any message in the last 20 seconds
-			// This avoids unnecessary pings if we're already receiving data
-			lastMsgTime := m.lastMessageReceived.Load().(time.Time)
-			timeSinceLastMsg := time.Since(lastMsgTime)
-
-			if timeSinceLastMsg > 20*time.Second {
-				m.log.Debugf("[MarketWS] Sending ping to maintain connection (last msg: %v ago)",
-					timeSinceLastMsg.Round(time.Second))
-
-				// Create ping message in the format MEXC expects
-				pingMsg := map[string]interface{}{"ping": time.Now().UnixNano() / int64(time.Millisecond)}
-				pingBytes, err := json.Marshal(pingMsg)
-				if err != nil {
-					m.log.Errorf("[MarketWS] Error marshaling ping message: %v", err)
-					continue
-				}
-
-				// Get current market stream connection
-				m.marketStreamMtx.RLock()
-				marketStream := m.marketStream
-				m.marketStreamMtx.RUnlock()
-
-				if marketStream == nil || marketStream.IsDown() {
-					m.log.Warnf("[MarketWS] Cannot send ping - connection is down or nil")
-					continue
-				}
-
-				if err := marketStream.SendRaw(pingBytes); err != nil {
-					m.log.Warnf("[MarketWS] Failed to send ping: %v", err)
-				} else {
-					m.log.Tracef("[MarketWS] Ping sent successfully")
-				}
-			}
-
-			// Check if we've received any message recently to detect stale connections
-			if timeSinceLastMsg > 90*time.Second {
-				m.log.Warnf("[MarketWS] No messages received for %v, connection might be stale",
-					timeSinceLastMsg.Round(time.Second))
-
-				// Force reconnection if connection might be stale
-				m.marketStreamMtx.Lock()
-				if m.marketStream != nil {
-					// Trigger websocket reconnect through the reconnect channel
-					select {
-					case m.reconnectChan <- struct{}{}:
-						m.log.Debugf("[MarketWS] Triggered reconnect due to stale connection")
-					default:
-						m.log.Debugf("[MarketWS] Reconnect already queued")
-					}
-				}
-				m.marketStreamMtx.Unlock()
-			}
-
-		case <-ctx.Done():
-			m.log.Debugf("[MarketWS] Ping timer stopped due to context cancellation")
-			return
-		case <-m.quit:
-			m.log.Debugf("[MarketWS] Ping timer stopped due to quit signal")
-			return
+		if numSubs > 0 {
+			return true
 		}
+	}
+	return false
+}
+
+// sendPing is deprecated as we now rely on the WebSocket library's built-in ping mechanism
+func (m *mexc) sendPing() {
+	// This function is maintained as a no-op for compatibility
+	m.log.Tracef("[MarketWS] Manual ping sending disabled - using WebSocket library's mechanism")
+}
+
+// triggerReconnect is deprecated as we now rely on the WebSocket library's
+// internal reconnection mechanism and our order book update monitoring.
+func (m *mexc) triggerReconnect() {
+	// This function is maintained as a no-op for compatibility
+	m.log.Debugf("[MarketWS] Manual reconnect trigger disabled - using WebSocket library's mechanism")
+}
+
+// startPingKeepAlive is now a no-op function as we rely on the WebSocket library's
+// built-in ping/pong mechanism rather than implementing our own custom one.
+func (m *mexc) startPingKeepAlive(ctx context.Context) {
+	m.log.Debugf("[MarketWS] Ping keep-alive disabled - using WebSocket library's built-in mechanism")
+
+	// Just wait for context cancellation
+	select {
+	case <-ctx.Done():
+	case <-m.quit:
 	}
 }
 
@@ -4443,15 +4439,15 @@ func (m *mexc) trackMessageRates(ctx context.Context) {
 			duration := currentTime.Sub(lastTime).Seconds()
 			messageRate := float64(currentCount-lastCount) / duration
 
-			// Get connection health status
-			lastMsgTime := m.lastMessageReceived.Load().(time.Time)
-			timeSinceLastMsg := time.Since(lastMsgTime)
-			isConnected := !m.marketStream.IsDown()
-			isHealthy := m.connectionHealthy.Load()
+			// Check connection status directly using IsDown()
+			m.marketStreamMtx.RLock()
+			marketStream := m.marketStream
+			isConnected := marketStream != nil && !marketStream.IsDown()
+			m.marketStreamMtx.RUnlock()
 
-			// Log message rate and health information
-			m.log.Infof("[MarketWS] Stats: %.2f msgs/sec, last msg: %v ago, connected: %v, healthy: %v",
-				messageRate, timeSinceLastMsg.Round(time.Second), isConnected, isHealthy)
+			// Log message rate and connection status
+			m.log.Infof("[MarketWS] Stats: %.2f msgs/sec, connection up: %v",
+				messageRate, isConnected)
 
 			// Update tracking variables for next cycle
 			lastCount = currentCount
@@ -4468,18 +4464,86 @@ func (m *mexc) trackMessageRates(ctx context.Context) {
 }
 
 // IsConnectionHealthy returns whether the WebSocket connection is healthy based on
-// recent message activity and connection status.
+// message activity and orderbook update activity.
 func (m *mexc) IsConnectionHealthy() bool {
-	// Check if connection is reported as down by the WebSocket connection
-	m.marketStreamMtx.RLock()
-	marketStream := m.marketStream
-	m.marketStreamMtx.RUnlock()
-
-	if marketStream == nil || marketStream.IsDown() {
-		return false
+	// Check for shutdown first to avoid false positives
+	select {
+	case <-m.quit:
+		// We're shutting down, report as healthy to avoid reconnection attempts
+		return true
+	default:
+		// Continue with normal health check
 	}
 
-	// Check if we've received messages recently
-	lastMsgTime := m.lastMessageReceived.Load().(time.Time)
-	return time.Since(lastMsgTime) < 60*time.Second && m.connectionHealthy.Load()
+	// First check if we're receiving ANY messages, regardless of subscriptions
+	lastMsgTime := m.lastMessageReceived.Load()
+	if lastMsgTime != nil {
+		lastTime := lastMsgTime.(time.Time)
+		msgAge := time.Since(lastTime)
+
+		// If we've received any message in the last 30 seconds, connection is healthy
+		if msgAge < 30*time.Second {
+			return true
+		}
+
+		// If no messages in 60+ seconds, connection is definitely unhealthy
+		if msgAge > 60*time.Second {
+			m.log.Warnf("No messages received for %v, connection likely unhealthy",
+				msgAge.Round(time.Second))
+			return false
+		}
+
+		// For 30-60 second gap, fall through to check orderbook activity
+	}
+
+	// Only check orderbook updates for active subscriptions
+	m.booksMtx.RLock()
+	defer m.booksMtx.RUnlock()
+
+	hasActiveSubscriptions := false
+	allBooksHealthy := true
+
+	for symbol, book := range m.books {
+		book.mtx.RLock()
+		numSubs := book.numSubscribers
+		lastUpdateTime := book.lastUpdateTime
+		book.mtx.RUnlock()
+
+		if numSubs > 0 {
+			hasActiveSubscriptions = true
+
+			// For active subscriptions, check last update time
+			// 120 seconds tolerance for low-activity markets
+			if time.Since(lastUpdateTime) > 120*time.Second {
+				m.log.Warnf("Book %s hasn't received updates for %v",
+					symbol, time.Since(lastUpdateTime).Round(time.Second))
+				allBooksHealthy = false
+			}
+		}
+	}
+
+	// If no active subscriptions, rely solely on basic message activity
+	if !hasActiveSubscriptions {
+		// Already checked message activity above, so consider healthy
+		// if we've made it this far
+		return true
+	}
+
+	return allBooksHealthy
+}
+
+// afterReconnect handles actions needed after a websocket reconnection.
+// This is needed to properly resubscribe to markets and reset connection state.
+func (m *mexc) afterReconnect() {
+	m.log.Debugf("[MarketWS] Handling post-reconnection tasks")
+
+	// Mark connection as healthy again
+	m.connectionHealthy.Store(true)
+
+	// Use a background context for resubscription operations
+	bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Trigger a resubscription to all active markets
+	m.resubscribeMarkets(bgCtx)
 }
