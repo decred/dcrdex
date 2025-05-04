@@ -1,4 +1,4 @@
-//go:build harness
+///////go:build harness
 
 package firo
 
