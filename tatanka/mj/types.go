@@ -25,6 +25,7 @@ const (
 	ErrBannned
 	ErrFailedRelay
 	ErrUnknownSender
+	ErrCapacity
 )
 
 const (
@@ -39,19 +40,23 @@ const (
 	RouteShareScore       = "share_score"
 
 	// tatanka <=> client
-	RouteConnect     = "connect"
-	RouteConfig      = "config"
-	RoutePostBond    = "post_bond"
-	RouteSubscribe   = "subscribe"
-	RouteUnsubscribe = "unsubscribe"
-	RouteRates       = "rates"
-	RouteSetScore    = "set_score"
+	RouteConnect             = "connect"
+	RoutePostBond            = "post_bond"
+	RouteSubscribe           = "subscribe"
+	RouteUnsubscribe         = "unsubscribe"
+	RouteUpdateSubscriptions = "update_subscriptions"
+	RouteRates               = "rates"
+	RouteSetScore            = "set_score"
 
 	// client1 <=> tatankanode <=> client2
 	RouteTankagram     = "tankagram"
 	RouteEncryptionKey = "encryption_key"
+	RouteNegotiate     = "negotiate"
 	RouteBroadcast     = "broadcast"
 	RouteNewSubscriber = "new_subscriber"
+
+	// HTTP Requests, used before client established WS connection
+	RouteNodeInfo = "node_info"
 )
 
 const (
@@ -64,8 +69,6 @@ type BroadcastMessageType string
 const (
 	MessageTypeTrollBox      BroadcastMessageType = "troll_box"
 	MessageTypeNewOrder      BroadcastMessageType = "new_order"
-	MessageTypeProposeMatch  BroadcastMessageType = "propose_match"
-	MessageTypeAcceptMatch   BroadcastMessageType = "accept_match"
 	MessageTypeNewSubscriber BroadcastMessageType = "new_subscriber"
 	MessageTypeUnsubTopic    BroadcastMessageType = "unsub_topic"
 	MessageTypeUnsubSubject  BroadcastMessageType = "unsub_subject"
@@ -86,7 +89,12 @@ type TatankaConfig struct {
 }
 
 type Connect struct {
-	ID tanka.PeerID `json:"id"`
+	ID          tanka.PeerID                    `json:"id"`
+	InitialSubs map[tanka.Topic][]tanka.Subject `json:"initialSubs"`
+}
+
+type UpdateSubscriptions struct {
+	Subscriptions map[tanka.Topic][]tanka.Subject `json:"subscriptions"`
 }
 
 type Disconnect = Connect
@@ -142,6 +150,8 @@ type TankagramResult struct {
 }
 
 type Broadcast struct {
+	// TOOD: Why is PeerID part of the broadcast message when it can be
+	// determined by the request?
 	PeerID      tanka.PeerID         `json:"peerID"`
 	Topic       tanka.Topic          `json:"topic"`
 	Subject     tanka.Subject        `json:"subject"`
