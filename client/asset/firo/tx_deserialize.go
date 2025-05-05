@@ -3,7 +3,6 @@ package firo
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 
@@ -21,8 +20,6 @@ const (
 	maxTxOutPerMessage = wire.MaxMessagePayload/wire.MinTxOutPayload + 1
 )
 
-var errNotYetImplemented = errors.New("not yet implemented")
-
 type TxType int
 
 const (
@@ -37,7 +34,10 @@ const (
 	TransactionSpork                   = 7
 	TransactionLelantus                = 8
 	TransactionSpark                   = 9
-	TransactionAlias                   = 10
+	// src/primitives/transaction.h
+	// Git says it is recent (3 weeks ago) and associated with the upcoming
+	// Spark names. Introduced in https://github.com/firoorg/firo/pull/1532
+	TransactionAlias = 10
 )
 
 type decoder struct {
@@ -214,16 +214,15 @@ func deserializeTransaction(r io.Reader) (*txn, error) {
 		TransactionProviderUpdateRegistrar,
 		TransactionProviderUpdateRevoke,
 		TransactionCoinbase,
-		// TransactionSpork,
 		TransactionLelantus,
 		TransactionSpark:
 		{
 			deserializeTx(dec, &tx, tx.txType)
 		}
 	case TransactionQuorumCommitment:
-		err = deserializeQuorumTx(dec, &tx)
+		err = deserializeNonSpendingTx(dec, &tx, tx.txType)
 	case TransactionSpork:
-		err = errNotYetImplemented // checking with levon
+		err = deserializeNonSpendingTx(dec, &tx, tx.txType)
 	case TransactionAlias:
 		err = fmt.Errorf("TRANSACTION_ALIAS transaction type - wtf")
 	default:
@@ -296,15 +295,16 @@ func deserializeTx(dec *decoder, tx *txn, txType TxType) error {
 	return nil
 }
 
-// deserializeQuorumTx deserializes a quorum tx with no inputs and no outputs
-func deserializeQuorumTx(dec *decoder, tx *txn) error {
+// deserializeNonSpendingTx deserializes spork, quorum txs which have no inputs and
+// no outputs
+func deserializeNonSpendingTx(dec *decoder, tx *txn, txType TxType) error {
 	count, err := dec.readCompactSize()
 	if err != nil {
 		return err
 	}
 
 	if count != 0 {
-		return fmt.Errorf("quorum tx expected 0 txins - got %d", count)
+		return fmt.Errorf("tx (type=%d) expected 0 txins - got %d", txType, count)
 	}
 
 	count, err = dec.readCompactSize()
@@ -313,7 +313,7 @@ func deserializeQuorumTx(dec *decoder, tx *txn) error {
 	}
 
 	if count != 0 {
-		return fmt.Errorf("quorum tx expected 0 txouts - got %d", count)
+		return fmt.Errorf("tx (type=%d) expected 0 txouts - got %d", txType, count)
 	}
 
 	tx.msgTx.LockTime, err = dec.readUint32()
