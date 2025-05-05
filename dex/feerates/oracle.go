@@ -11,7 +11,7 @@ import (
 )
 
 // Oracle provides fee rates for all configured assets from external sources.
-// fee rate estimate values are in atoms for dcr, gwei for ethereum, satoshis
+// Fee rate estimate values are in atoms for dcr, gwei for ethereum, satoshis
 // for bitcoin and bitcoin clone blockchains (per byte sat), or the lowest
 // non-divisible unit in other non-Bitcoin blockchains.
 type Oracle struct {

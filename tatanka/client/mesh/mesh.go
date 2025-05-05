@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/feerates"
 	"decred.org/dcrdex/dex/fiatrates"
 	"decred.org/dcrdex/dex/lexi"
 	"decred.org/dcrdex/dex/msgjson"
@@ -50,6 +51,9 @@ type Mesh struct {
 
 	fiatRatesMtx sync.RWMutex
 	fiatRates    map[string]*fiatrates.FiatRateInfo
+
+	feeRateEstimateMtx sync.RWMutex
+	feeRateEstimates   map[uint32]*feerates.Estimate
 }
 
 // New is the constructor for a new Mesh.
@@ -169,6 +173,8 @@ func (m *Mesh) handleTatankaNotification(peerID tanka.PeerID, msg *msgjson.Messa
 		m.handleBroadcast(msg)
 	case mj.RouteRates:
 		m.handleRates(msg)
+	case mj.RouteFeeRateEstimate:
+		m.handleFeeEstimates(msg)
 	default:
 		m.emit(msg)
 	}
@@ -315,4 +321,44 @@ type TatankaCredentials = conn.TatankaCredentials
 type meshConn struct {
 	*conn.MeshConn
 	cm *dex.ConnectionMaster
+}
+
+func (m *Mesh) handleFeeEstimates(msg *msgjson.Message) {
+	var rm mj.FeeRateEstimateMessage
+	if err := msg.Unmarshal(&rm); err != nil {
+		m.log.Errorf("%s rate message unmarshal error: %w", err)
+		return
+	}
+	switch rm.Topic {
+	case mj.TopicFeeRateEstimate:
+		m.feeRateEstimateMtx.Lock()
+		for chainID, feeInfo := range rm.FeeRateEstimates {
+			m.feeRateEstimates[chainID] = &feerates.Estimate{
+				Value:       feeInfo.Value,
+				LastUpdated: time.Now(),
+			}
+		}
+		m.feeRateEstimateMtx.Unlock()
+	}
+	m.emit(&rm)
+}
+
+func (m *Mesh) FeeRateEstimate(chainID uint32) uint64 {
+	m.feeRateEstimateMtx.RLock()
+	defer m.feeRateEstimateMtx.RUnlock()
+	feeRate, ok := m.feeRateEstimates[chainID]
+	if ok && time.Since(feeRate.LastUpdated) < feerates.FeeRateEstimateExpiry {
+		return feeRate.Value
+	}
+	return 0
+}
+
+func (m *Mesh) SubscribeToFeeRateEstimates() error {
+	req := mj.MustRequest(mj.RouteSubscribe, &mj.Subscription{
+		Topic: mj.TopicFeeRateEstimate,
+	})
+
+	// Only possible non-error response is `true`.
+	var ok bool
+	return m.conn.RequestMesh(req, &ok)
 }

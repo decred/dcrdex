@@ -2755,8 +2755,8 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 		value: redeemedValue,
 	}
 
-	// This is still a fee estimate. If we add a redemption confirmation method
-	// as has been discussed, then maybe the fees can be updated there.
+	// This is still a fee rate estimate. If we add a redemption confirmation
+	// method as has been discussed, then maybe the fees can be updated there.
 	fees := g.RedeemN(len(form.Redemptions)) * form.FeeSuggestion
 
 	return txs, outputCoin, fees, nil
@@ -3990,12 +3990,12 @@ func (w *TokenWallet) canSend(value uint64, verifyBalance, isPreEstimate bool) (
 	return
 }
 
-// EstimateSendTxFee returns a tx fee estimate for a send tx. The provided fee
+// EstimateSendTxFee returns a tx fee rate estimate for a send tx. The provided fee
 // rate is ignored since all sends will use an internally derived fee rate. If
 // an address is provided, it will ensure wallet has enough to cover total
 // spend.
 func (w *ETHWallet) EstimateSendTxFee(addr string, value, _ uint64, _, maxWithdraw bool) (uint64, bool, error) {
-	if err := isValidSend(addr, value, maxWithdraw); err != nil && addr != "" { // fee estimate for a send tx.
+	if err := isValidSend(addr, value, maxWithdraw); err != nil && addr != "" { // fee rate estimate for a send tx.
 		return 0, false, err
 	}
 	maxFee, _, _, err := w.canSend(value, addr != "", true)
@@ -4010,12 +4010,12 @@ func (w *ETHWallet) StandardSendFee(feeRate uint64) uint64 {
 	return defaultSendGasLimit * feeRate
 }
 
-// EstimateSendTxFee returns a tx fee estimate for a send tx. The provided fee
+// EstimateSendTxFee returns a tx fee rate estimate for a send tx. The provided fee
 // rate is ignored since all sends will use an internally derived fee rate. If
 // an address is provided, it will ensure wallet has enough to cover total
 // spend.
 func (w *TokenWallet) EstimateSendTxFee(addr string, value, _ uint64, _, maxWithdraw bool) (fee uint64, isValidAddress bool, err error) {
-	if err := isValidSend(addr, value, maxWithdraw); err != nil && addr != "" { // fee estimate for a send tx.
+	if err := isValidSend(addr, value, maxWithdraw); err != nil && addr != "" { // fee rate estimate for a send tx.
 		return 0, false, err
 	}
 	maxFee, _, _, err := w.canSend(value, addr != "", true)

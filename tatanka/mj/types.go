@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/feerates"
 	"decred.org/dcrdex/dex/fiatrates"
 	"decred.org/dcrdex/dex/msgjson"
-	"decred.org/dcrdex/dex/txfee"
 	"decred.org/dcrdex/tatanka/tanka"
 )
 
@@ -40,14 +40,14 @@ const (
 	RouteShareScore       = "share_score"
 
 	// tatanka <=> client
-	RouteConnect     = "connect"
-	RouteConfig      = "config"
-	RoutePostBond    = "post_bond"
-	RouteSubscribe   = "subscribe"
-	RouteUnsubscribe = "unsubscribe"
-	RouteRates       = "rates"
-	RouteSetScore    = "set_score"
-	RouteFeeEstimate = "fee_estimate"
+	RouteConnect         = "connect"
+	RouteConfig          = "config"
+	RoutePostBond        = "post_bond"
+	RouteSubscribe       = "subscribe"
+	RouteUnsubscribe     = "unsubscribe"
+	RouteRates           = "rates"
+	RouteSetScore        = "set_score"
+	RouteFeeRateEstimate = "fee_rate_estimate"
 
 	// client1 <=> tatankanode <=> client2
 	RouteTankagram     = "tankagram"
@@ -57,9 +57,9 @@ const (
 )
 
 const (
-	TopicMarket      = "market"
-	TopicFiatRate    = "fiat_rate"
-	TopicFeeEstimate = "fee_estimate"
+	TopicMarket          = "market"
+	TopicFiatRate        = "fiat_rate"
+	TopicFeeRateEstimate = "fee_rate_estimate"
 )
 
 type BroadcastMessageType string
@@ -164,9 +164,9 @@ type Unsubscription struct {
 	PeerID tanka.PeerID `json:"peerID"`
 }
 
-type FeeEstimateMessage struct {
-	Topic        tanka.Topic                `json:"topic"`
-	FeeEstimates map[uint32]*txfee.Estimate `json:"feeEstimates"`
+type FeeRateEstimateMessage struct {
+	Topic            tanka.Topic                   `json:"topic"`
+	FeeRateEstimates map[uint32]*feerates.Estimate `json:"feeRateEstimates"`
 }
 
 type FundedMessage struct {

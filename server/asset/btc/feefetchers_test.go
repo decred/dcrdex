@@ -9,18 +9,18 @@ import (
 	"testing"
 	"time"
 
-	"decred.org/dcrdex/dex/txfee"
+	"decred.org/dcrdex/dex/feeratefetcher"
 )
 
-func testSource(src *txfee.SourceConfig) {
+func testSource(src *feeratefetcher.SourceConfig) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
 	feeRate, _, err := src.F(ctx)
 	if err != nil {
-		fmt.Printf("XXXXX Error fetching fee for %s: %v \n", src.Name, err)
+		fmt.Printf("XXXXX Error fetching fee rate for %s: %v \n", src.Name, err)
 		return
 	}
-	fmt.Printf("##### Fee fetched for %s: %d \n", src.Name, feeRate)
+	fmt.Printf("##### Fee rate fetched for %s: %d \n", src.Name, feeRate)
 }
 
 func TestFreeFeeFetchers(t *testing.T) {
@@ -30,9 +30,9 @@ func TestFreeFeeFetchers(t *testing.T) {
 }
 
 func TestTatumFeeFetcher(t *testing.T) {
-	testSource(tatumFeeFetcher(os.Getenv("KEY")))
+	testSource(tatumFeeRateFetcher(os.Getenv("KEY")))
 }
 
 func TestBlockDaemonFeeFetcher(t *testing.T) {
-	testSource(blockDaemonFeeFetcher(os.Getenv("KEY")))
+	testSource(blockDaemonFeeRateFetcher(os.Getenv("KEY")))
 }

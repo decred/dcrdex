@@ -217,6 +217,12 @@ func (t *Tatanka) handlePostBond(cl tanka.Sender, msg *msgjson.Message) *msgjson
 			t.log.Errorf("Bond-posting client %s sent a nil bond", peerID)
 			return msgjson.NewError(mj.ErrBadRequest, "nil bond")
 		}
+
+		if len(b.CoinID) == 0 {
+			t.log.Errorf("Bond-posting client %q sent a bond with no coin ID", peerID)
+			return msgjson.NewError(mj.ErrBadRequest, "no coin ID")
+		}
+
 		if b.Expiration.Before(time.Now()) {
 			t.log.Errorf("Bond-posting client %q sent an expired bond", peerID)
 			return msgjson.NewError(mj.ErrBadRequest, "bond already expired")
@@ -377,16 +383,16 @@ func (t *Tatanka) replySubscription(cl tanka.Sender, topic tanka.Topic) {
 			}
 		}
 
-	case mj.TopicFeeEstimate:
-		if t.hasTxFeeOracle() {
-			estimates := t.txFeeOracle.FeeEstimates()
+	case mj.TopicFeeRateEstimate:
+		if t.hasFeeRatesOracle() {
+			estimates := t.feeRatesOracle.FeeRateEstimates()
 			if len(estimates) == 0 { // no data to send
 				return
 			}
 
-			reply := mj.MustNotification(mj.RouteFeeEstimate, &mj.FeeEstimateMessage{
-				Topic:        mj.TopicFeeEstimate,
-				FeeEstimates: estimates,
+			reply := mj.MustNotification(mj.RouteFeeRateEstimate, &mj.FeeRateEstimateMessage{
+				Topic:            mj.TopicFeeRateEstimate,
+				FeeRateEstimates: estimates,
 			})
 
 			if err := t.send(cl, reply); err != nil {

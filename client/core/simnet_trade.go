@@ -2176,7 +2176,8 @@ func (s *simulationTest) assertBalanceChanges(client *simulationClient, isRefund
 
 	checkDiff := func(a *assetConfig, expDiff, fees int64) error {
 		// actual diff will likely be less than expected because of tx fees
-		// TODO: account for actual fee(s) or use a more realistic fee estimate.
+		// TODO: account for actual fee(s) or use a more realistic fee rate
+		// estimate.
 		expVal := expDiff
 		if !a.isToken {
 			expVal -= fees

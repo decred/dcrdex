@@ -4023,7 +4023,7 @@ func testEstimateSendTxFee(t *testing.T, segwit bool, walletType string) {
 	txSize := bSize + tx.SerializeSize()
 	minEstFee := optimalFeeRate * uint64(txSize)
 
-	// This should return fee estimate for one output.
+	// This should return fee rate estimate for one output.
 	node.txFee = minEstFee
 
 	estimate, _, err := wallet.EstimateSendTxFee(sendAddr, unspentSats, optimalFeeRate, true, false)
@@ -4034,7 +4034,7 @@ func testEstimateSendTxFee(t *testing.T, segwit bool, walletType string) {
 		t.Fatalf("expected estimate to be %v, got %v)", minEstFee, estimate)
 	}
 
-	// This should return fee estimate for two output.
+	// This should return fee rate estimate for two output.
 	minEstFeeWithEstChangeFee := uint64(txSize+opSize) * optimalFeeRate
 	node.txFee = minEstFeeWithEstChangeFee
 	estimate, _, err = wallet.EstimateSendTxFee(sendAddr, unspentSats/2, optimalFeeRate, false, false)
@@ -4047,7 +4047,7 @@ func testEstimateSendTxFee(t *testing.T, segwit bool, walletType string) {
 
 	dust := 0.00000016
 	node.listUnspent[0].Amount += dust
-	// This should return fee estimate for one output with dust added to fee.
+	// This should return fee rate estimate for one output with dust added to fee.
 	minFeeWithDust := minEstFee + toSatoshi(dust)
 	node.txFee = minFeeWithDust
 	estimate, _, err = wallet.EstimateSendTxFee(sendAddr, unspentSats, optimalFeeRate, true, false)

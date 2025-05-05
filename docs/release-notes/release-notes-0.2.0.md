@@ -92,7 +92,7 @@ understand the following:
   [08ec4ac](https://github.com/decred/dcrdex/commit/08ec4ac99f06aa23d654cd3855c62c13945b2a2e))
 - Multiple authorized browser sessions are now permitted. This refers to logging
   in to dexc from two different browsers that do not share a cookie store. This
-  is now permitted, however, signing *out* of one session signs out of all
+  is now permitted, however, signing _out_ of one session signs out of all
   sessions.
   ([030173b](https://github.com/decred/dcrdex/commit/030173b828fabb0cb4b2c9884bbeaa91b1ce7f11))
 - A wallet's connection settings and private passphrase can be changed at the
@@ -171,7 +171,7 @@ understand the following:
   This change was in 0.1.5, but it is reiterated here as it is an significant
   change in behavior that Go consumers should note.
 - Updates to the `User` struct returned by the `User` and `Exchanges` methods of
-  `client/core.Core`.  The `client/core.Market` has replaced the
+  `client/core.Core`. The `client/core.Market` has replaced the
   `{Base,Quote}{Order,Contract}Locked` fields with methods.
   ([167efd4](https://github.com/decred/dcrdex/commit/167efd491eb5eed4c1980995be6b48ea5a780f2a))
 - When specifying TLS certificates, allow either a filename or the contents of
@@ -182,7 +182,7 @@ understand the following:
   ([3aef72d](https://github.com/decred/dcrdex/commit/3aef72d00790b2d8b0354efaf844a8fd08f3bdc6))
 - `ReconfigureWallet` has a new pass input (`nil` indicates no password change).
   ([761e3e1](https://github.com/decred/dcrdex/commit/761e3e13981a9595623718036913fe54a2c2d764))
-- New order fee estimate API. See the new `(*Core).PreOrder` method and the new
+- New order fee rate estimate API. See the new `(*Core).PreOrder` method and the new
   returned `OrderEstimate` type. Also see the `PreSwap` and `PreRedeem` methods
   of `client/asset.Wallet`, and the new types of the same name.
   ([5394cea](https://github.com/decred/dcrdex/commit/5394ceaa2a0e69518cabb2a3ae4fdb2164a6a08e))
@@ -190,7 +190,7 @@ understand the following:
   ([b767a23](https://github.com/decred/dcrdex/commit/b767a23f0c89ec54a1f60e61c9bd21d05daba906))
 - Add the `(*Core).GetDEXConfig` method and a corresponding http API endpoint
   `getdexinfo` the functions similar to `getfee` by making a temporary
-  connection to a DEX with *no existing account*, except that it returns the
+  connection to a DEX with _no existing account_, except that it returns the
   server's entire config.
   ([d85f6bc](https://github.com/decred/dcrdex/commit/d85f6bc34d74773a56500089ff4d12e0e3d3380e))
 - Check the server's API version and each asset's version that are now returned
@@ -320,7 +320,7 @@ most notable fixes are:
 
 - Go 1.15 or 1.16
 - Node 14 is the minimum supported version for building the site assets.
-- dcrd and dcrwallet must *still* be built from their `release-v1.6` branches.
+- dcrd and dcrwallet must _still_ be built from their `release-v1.6` branches.
 - The minimum required dcrwallet RPC server version is 8.5.0, which corresponds
   to the v1.6.2 patch release of dcrwallet, but the latest `release-v1.6.x` tag
   should be used.

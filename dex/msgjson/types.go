@@ -220,7 +220,7 @@ const (
 	// spot price and volume for the DEX's markets.
 	SpotsRoute = "spots"
 	// FeeRateRoute is the client-originating request asking for the most
-	// recently recorded transaction fee estimate for an asset.
+	// recently recorded transaction fee rate estimate for an asset.
 	FeeRateRoute = "fee_rate"
 	// PriceFeedRoute is the client-originating request subscribing to the
 	// market overview feed.

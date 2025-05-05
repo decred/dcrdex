@@ -1156,7 +1156,7 @@ func TestReturnCoins(t *testing.T) {
 		t.Fatalf("no error for bad coins")
 	}
 
-	coinID := toCoinID(tTxHash, 0)
+	coinID := ToCoinID(tTxHash, 0)
 	coins = asset.Coins{&tCoin{id: coinID}, &tCoin{id: coinID}}
 	err = wallet.ReturnCoins(coins)
 	if err != nil {
@@ -1169,7 +1169,7 @@ func TestFundingCoins(t *testing.T) {
 	defer shutdown()
 
 	vout := uint32(123)
-	coinID := toCoinID(tTxHash, vout)
+	coinID := ToCoinID(tTxHash, vout)
 	p2pkhUnspent := walletjson.ListUnspentResult{
 		TxID:      tTxID,
 		Vout:      vout,
@@ -3062,7 +3062,7 @@ func TestAuditContract(t *testing.T) {
 
 	contractHash := contractTx.TxHash()
 	contractVout := uint32(0)
-	contractCoinID := toCoinID(&contractHash, contractVout)
+	contractCoinID := ToCoinID(&contractHash, contractVout)
 
 	audit, err := wallet.AuditContract(contractCoinID, contract, contractTxData, true)
 	if err != nil {
@@ -3185,7 +3185,7 @@ func TestFindRedemption(t *testing.T) {
 	outputScripts := []dex.Bytes{otherScript, contractP2SHScript}
 	contractTx := makeRawTx(inputs, outputScripts)
 	contractTxHash := contractTx.TxHash()
-	coinID := toCoinID(&contractTxHash, contractVout)
+	coinID := ToCoinID(&contractTxHash, contractVout)
 	blockHash, _ := node.blockchain.addRawTx(contractHeight, contractTx)
 	txHex, err := makeTxHex(inputs, outputScripts)
 	if err != nil {
@@ -4144,7 +4144,7 @@ func TestEstimateSendTxFee(t *testing.T) {
 	changeFee := dexdcr.P2PKHOutputSize * optimalFeeRate
 	estFeeWithChange := changeFee + estFee
 
-	// This should return fee estimate for one output.
+	// This should return fee rate estimate for one output.
 	addUtxo(unspentVal, 1, false)
 	estimate, _, err := wallet.EstimateSendTxFee(addr, unspentVal, optimalFeeRate, true, false)
 	if err != nil {
@@ -4154,7 +4154,7 @@ func TestEstimateSendTxFee(t *testing.T) {
 		t.Fatalf("expected estimate to be %v, got %v)", estFee, estimate)
 	}
 
-	// This should return fee estimate for two output.
+	// This should return fee rate estimate for two output.
 	estimate, _, err = wallet.EstimateSendTxFee(addr, unspentVal/2, optimalFeeRate, true, false)
 	if err != nil {
 		t.Fatal(err)
@@ -4171,7 +4171,7 @@ func TestEstimateSendTxFee(t *testing.T) {
 
 	dust := uint64(100)
 	addUtxo(dust, 0, true)
-	// This should return fee estimate for one output with dust added to fee.
+	// This should return fee rate estimate for one output with dust added to fee.
 	estFeeWithDust := estFee + 100
 	estimate, _, err = wallet.EstimateSendTxFee(addr, unspentVal, optimalFeeRate, true, false)
 	if err != nil {

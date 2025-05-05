@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/feerates"
 	"decred.org/dcrdex/dex/fiatrates"
 	"decred.org/dcrdex/dex/msgjson"
-	"decred.org/dcrdex/dex/txfee"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/tatanka/chain"
 	"decred.org/dcrdex/tatanka/db"
@@ -126,8 +126,8 @@ type Tatanka struct {
 	fiatRateOracle *fiatrates.Oracle
 	fiatRateChan   chan map[string]*fiatrates.FiatRateInfo
 
-	txFeeOracle       *txfee.Oracle
-	txFeeEstimateChan chan map[uint32]*txfee.Estimate
+	feeRatesOracle       *feerates.Oracle
+	feeRateEstimatesChan chan map[uint32]*feerates.Estimate
 }
 
 // Config is the configuration of the Tatanka.
@@ -138,7 +138,7 @@ type Config struct {
 	RPC        comms.RPCConfig
 	ConfigPath string
 
-	TxFeeOracleCfg txfee.Config
+	feeRatesOracleCfg feerates.Config
 
 	// TODO: Change to whitelist
 	WhiteList []BootNode
@@ -250,18 +250,18 @@ func New(cfg *Config) (*Tatanka, error) {
 	}
 
 	if t.net == dex.Mainnet || t.net == dex.Testnet {
-		t.txFeeEstimateChan = make(chan map[uint32]*txfee.Estimate)
-		t.txFeeOracle, err = txfee.NewOracle(t.net, cfg.TxFeeOracleCfg, nets, t.txFeeEstimateChan)
+		t.feeRateEstimatesChan = make(chan map[uint32]*feerates.Estimate)
+		t.feeRatesOracle, err = feerates.NewOracle(t.net, cfg.feeRatesOracleCfg, nets, t.feeRateEstimatesChan)
 		if err != nil {
-			return nil, fmt.Errorf("txfee.NewOracle error: %w", err)
+			return nil, fmt.Errorf("feerates.NewOracle error: %w", err)
 		}
 	}
 
 	return t, nil
 }
 
-func (t *Tatanka) hasTxFeeOracle() bool {
-	return t.txFeeOracle != nil
+func (t *Tatanka) hasFeeRatesOracle() bool {
+	return t.feeRatesOracle != nil
 }
 
 func (t *Tatanka) prepareHandlers() {
@@ -438,17 +438,17 @@ func (t *Tatanka) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) {
 		}()
 	}
 
-	if t.hasTxFeeOracle() {
+	if t.hasFeeRatesOracle() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			t.txFeeOracle.Run(t.ctx, t.log)
+			t.feeRatesOracle.Run(t.ctx, t.log)
 		}()
 
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			t.broadcastFeeEstimate()
+			t.broadcastFeeRateEstimates()
 		}()
 	}
 
@@ -734,29 +734,29 @@ func (t *Tatanka) broadcastRates() {
 	}
 }
 
-// broadcastFeeEstimate broadcasts fee estimates to all subscribed clients once
-// we receive data from t.txFeeEstimateChan.
-func (t *Tatanka) broadcastFeeEstimate() {
+// broadcastFeeRateEstimates broadcasts fee rate estimates to all subscribed clients once
+// we receive data from t.feeRateEstimatesChan.
+func (t *Tatanka) broadcastFeeRateEstimates() {
 	for {
 		select {
 		case <-t.ctx.Done():
 			return
-		case feeEstimate, ok := <-t.txFeeEstimateChan:
+		case feeRateEstimates, ok := <-t.feeRateEstimatesChan:
 			if !ok {
-				t.log.Debug("Tatanka stopped listening for fee estimates.")
+				t.log.Debug("Tatanka stopped listening for fee rate estimates.")
 				return
 			}
 
 			t.clientMtx.RLock()
-			topic := t.topics[mj.TopicFeeEstimate]
+			topic := t.topics[mj.TopicFeeRateEstimate]
 			t.clientMtx.RUnlock()
 			if topic == nil || len(topic.subscribers) == 0 {
 				continue
 			}
 
-			note := mj.MustNotification(mj.RouteFeeEstimate, &mj.FeeEstimateMessage{
-				Topic:        mj.TopicFeeEstimate,
-				FeeEstimates: feeEstimate,
+			note := mj.MustNotification(mj.RouteFeeRateEstimate, &mj.FeeRateEstimateMessage{
+				Topic:            mj.TopicFeeRateEstimate,
+				FeeRateEstimates: feeRateEstimates,
 			})
 			t.batchSend(topic.subscribers, note)
 		}
