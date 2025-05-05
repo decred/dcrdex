@@ -21,7 +21,8 @@ import {
   WalletState,
   UnitInfo,
   ProjectedAlloc,
-  AssetBookingFees
+  AssetBookingFees,
+  MultiHopCfg
 } from './registry'
 import Doc, {
   NumberInput,
@@ -187,6 +188,7 @@ interface ConfigState {
   baseConfig: BotAssetConfig
   quoteConfig: BotAssetConfig
   simpleArbLots: number
+  multiHop?: MultiHopCfg
 }
 
 interface BotSpecs {
@@ -210,6 +212,12 @@ interface MarketRow {
 
 interface UIOpts {
   usingUSDPerSide?: boolean
+}
+
+interface MultiHopArbMarket {
+  BaseMarket: [number, number]
+  QuoteMarket: [number, number]
+  BridgeAsset: number
 }
 
 export default class MarketMakerSettingsPage extends BasePage {
@@ -237,7 +245,9 @@ export default class MarketMakerSettingsPage extends BasePage {
   cexBaseBalance: ExchangeBalance
   cexQuoteBalance: ExchangeBalance
   specs: BotSpecs
-  mktID: string
+  dexMktID: string
+  arbMkt: string | MultiHopArbMarket
+  multiHopMarkets: MultiHopArbMarket[]
   formSpecs: BotSpecs
   formCexes: Record<string, cexButton>
   placementsCache: Record<string, [OrderPlacement[], OrderPlacement[]]>
@@ -309,6 +319,20 @@ export default class MarketMakerSettingsPage extends BasePage {
       this.updatedConfig.gapStrategy = gapStrategy
       this.setGapFactorLabels(gapStrategy)
       this.updateModifiedMarkers()
+    })
+    Doc.bind(page.bridgeAssetSelect, 'change', () => {
+      if (!page.bridgeAssetSelect.value) return
+      const bridgeAsset = page.bridgeAssetSelect.value
+      const bridgeAssetID = parseInt(bridgeAsset)
+      const multiHopMkts = this.multiHopMarkets.find(m => m.BridgeAsset === bridgeAssetID)
+      if (!multiHopMkts) {
+        console.error('Bridge asset not found in multi-hop markets', bridgeAssetID)
+        return
+      }
+      this.updatedConfig.multiHop = {
+        baseAssetMarket: multiHopMkts.BaseMarket,
+        quoteAssetMarket: multiHopMkts.QuoteMarket
+      }
     })
 
     // Buy/Sell placements
@@ -560,10 +584,11 @@ export default class MarketMakerSettingsPage extends BasePage {
     const { host, baseID, quoteID, cexName, botType } = specs
 
     const [{ symbol: baseSymbol, token: baseToken }, { symbol: quoteSymbol, token: quoteToken }] = [app().assets[baseID], app().assets[quoteID]]
-    this.mktID = `${baseSymbol}_${quoteSymbol}`
+    this.dexMktID = `${baseSymbol}_${quoteSymbol}`
+
     Doc.hide(
       page.botSettingsContainer, page.marketBox, page.updateButton, page.resetButton,
-      page.createButton, page.noMarket, page.missingFiatRates
+      page.createButton, page.noMarket, page.missingFiatRates, page.bridgeAssetBox
     )
 
     if ([baseID, quoteID, baseToken?.parentID ?? baseID, quoteToken?.parentID ?? quoteID].some((assetID: number) => !app().fiatRatesMap[assetID])) {
@@ -592,6 +617,76 @@ export default class MarketMakerSettingsPage extends BasePage {
       baseConfig: Object.assign({}, defaultBotAssetConfig),
       quoteConfig: Object.assign({}, defaultBotAssetConfig)
     }) as ConfigState
+
+    if (cexName) {
+      const cexStatus = mmStatus.cexes[cexName]
+      if (!cexStatus) {
+        console.error('CEX name not found in MM status', cexName)
+        Doc.show(page.missingFiatRates)
+        return
+      }
+      const [supportsDirectArb, multiHopMarkets] = this.cexSupportsArbOnMarket(baseID, quoteID, cexStatus)
+      if (!supportsDirectArb && multiHopMarkets.length === 0) {
+        console.error('CEX does not support arb on market', cexName, baseID, quoteID)
+        Doc.show(page.missingFiatRates)
+        return
+      }
+
+      if (supportsDirectArb) {
+        this.arbMkt = `${baseSymbol}_${quoteSymbol}`
+      } else {
+        if (botType !== botTypeArbMM) {
+          console.error('CEX does not support direct arb on market', cexName, baseID, quoteID)
+          Doc.show(page.missingFiatRates)
+          return
+        }
+
+        let bridgeAssetID = 0
+        if (this.originalConfig.multiHop) {
+          const { baseAssetMarket, quoteAssetMarket } = this.originalConfig.multiHop
+          let found = false
+          for (const market of multiHopMarkets) {
+            if (market.BaseMarket[0] === baseAssetMarket[0] && market.BaseMarket[1] === baseAssetMarket[1] &&
+              market.QuoteMarket[0] === quoteAssetMarket[0] && market.QuoteMarket[1] === quoteAssetMarket[1]) {
+              found = true
+              bridgeAssetID = market.BridgeAsset
+              break
+            }
+          }
+          if (!found) {
+            this.originalConfig.multiHop = {
+              baseAssetMarket: multiHopMarkets[0].BaseMarket,
+              quoteAssetMarket: multiHopMarkets[0].QuoteMarket
+            }
+            bridgeAssetID = multiHopMarkets[0].BridgeAsset
+          }
+        } else {
+          const mkt = multiHopMarkets[0]
+          this.originalConfig.multiHop = {
+            baseAssetMarket: [mkt.BaseMarket[0], mkt.BaseMarket[1]],
+            quoteAssetMarket: [mkt.QuoteMarket[0], mkt.QuoteMarket[1]]
+          }
+          bridgeAssetID = mkt.BridgeAsset
+        }
+        this.arbMkt = {
+          BaseMarket: this.originalConfig.multiHop.baseAssetMarket,
+          QuoteMarket: this.originalConfig.multiHop.quoteAssetMarket,
+          BridgeAsset: bridgeAssetID
+        }
+
+        Doc.empty(page.bridgeAssetSelect)
+        for (const market of multiHopMarkets) {
+          const bridgeSymbol = app().assets[market.BridgeAsset].symbol.toUpperCase()
+          const opt = document.createElement('option')
+          opt.value = String(market.BridgeAsset)
+          opt.textContent = bridgeSymbol
+          if (market.BridgeAsset === bridgeAssetID) opt.selected = true
+          page.bridgeAssetSelect.appendChild(opt)
+        }
+
+        Doc.show(page.bridgeAssetBox)
+      }
+    }
 
     if (botCfg) {
       const { basicMarketMakingConfig: mmCfg, arbMarketMakingConfig: arbMMCfg, simpleArbConfig: arbCfg, uiConfig: { cexRebalance } } = botCfg
@@ -748,9 +843,9 @@ export default class MarketMakerSettingsPage extends BasePage {
   }
 
   lotSizeUSD () {
-    const { specs: { host, baseID }, mktID, marketReport: { baseFiatRate } } = this
+    const { specs: { host, baseID }, dexMktID, marketReport: { baseFiatRate } } = this
     const xc = app().exchanges[host]
-    const market = xc.markets[mktID]
+    const market = xc.markets[dexMktID]
     const { lotsize: lotSize } = market
     const { unitInfo: ui } = app().assets[baseID]
     return lotSize / ui.conventional.conversionFactor * baseFiatRate
@@ -764,12 +859,12 @@ export default class MarketMakerSettingsPage extends BasePage {
     const {
       page, specs: { host, baseID, quoteID, cexName, botType }, basePane, quotePane,
       marketReport: { baseFiatRate, quoteFiatRate, baseFees, quoteFees },
-      lotsPerLevelIncrement, updatedConfig: cfg, originalConfig: oldCfg, mktID
+      lotsPerLevelIncrement, updatedConfig: cfg, originalConfig: oldCfg, dexMktID
     } = this
     const { symbol: baseSymbol, unitInfo: bui } = app().assets[baseID]
     const { symbol: quoteSymbol, unitInfo: qui } = app().assets[quoteID]
     const xc = app().exchanges[host]
-    const market = xc.markets[mktID]
+    const market = xc.markets[dexMktID]
     const { lotsize: lotSize, spot } = market
     const lotSizeUSD = lotSize / bui.conventional.conversionFactor * baseFiatRate
     const atomicRate = 1 / bui.conventional.conversionFactor * baseFiatRate / quoteFiatRate * qui.conventional.conversionFactor
@@ -797,7 +892,7 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     return {
       page, cfg, oldCfg, host, xc, baseID, quoteID, botType, cexName, baseFiatRate, quoteFiatRate,
-      xcRate, baseSymbol, quoteSymbol, mktID, lotSize, lotSizeUSD, lotsPerLevelIncrement,
+      xcRate, baseSymbol, quoteSymbol, dexMktID, lotSize, lotSizeUSD, lotsPerLevelIncrement,
       quoteLot, commit, basePane, quotePane, fees, ...walletStuff
     }
   }
@@ -1757,7 +1852,8 @@ export default class MarketMakerSettingsPage extends BasePage {
       sellPlacements: [],
       profit: cfg.profit,
       driftTolerance: cfg.driftTolerance,
-      orderPersistence: cfg.orderPersistence
+      orderPersistence: cfg.orderPersistence,
+      multiHop: cfg.multiHop
     }
     for (const p of cfg.buyPlacements) arbCfg.buyPlacements.push({ lots: p.lots, multiplier: p.gapFactor })
     for (const p of cfg.sellPlacements) arbCfg.sellPlacements.push({ lots: p.lots, multiplier: p.gapFactor })
@@ -1932,6 +2028,63 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.forms.show(page.cexConfigForm)
   }
 
+  cexSupportsArbOnMarket (baseID: number, quoteID: number, cexStatus: MMCEXStatus): [boolean, MultiHopArbMarket[]] {
+    let supportsDirectArb = false
+
+    const baseMarkets = new Set<number>()
+    const quoteMarkets = new Set<number>()
+
+    // Find all markets that trade either base or quote asset
+    for (const { baseID: b, quoteID: q } of Object.values(cexStatus.markets ?? [])) {
+      if (b === baseID && q === quoteID) {
+        supportsDirectArb = true
+        break
+      }
+
+      if (b === baseID) {
+        baseMarkets.add(q)
+      } else if (q === baseID) {
+        baseMarkets.add(b)
+      }
+      if (b === quoteID) {
+        quoteMarkets.add(q)
+      } else if (q === quoteID) {
+        quoteMarkets.add(b)
+      }
+    }
+
+    // Find all bridge assets that connect base and quote
+    const multiHopMarkets: MultiHopArbMarket[] = []
+    for (const bridgeAsset of baseMarkets) {
+      if (quoteMarkets.has(bridgeAsset)) {
+        // Check if bridge asset exists as base or quote in both markets
+        const markets = Object.values(cexStatus.markets ?? {})
+        let baseMarket = null
+        let quoteMarket = null
+        for (const market of markets) {
+          if ((market.baseID === baseID && market.quoteID === bridgeAsset) ||
+              (market.baseID === bridgeAsset && market.quoteID === baseID)) {
+            baseMarket = market
+          }
+          if ((market.baseID === quoteID && market.quoteID === bridgeAsset) ||
+              (market.baseID === bridgeAsset && market.quoteID === quoteID)) {
+            quoteMarket = market
+          }
+        }
+
+        if (baseMarket && quoteMarket) {
+          multiHopMarkets.push({
+            BaseMarket: [baseMarket.baseID, baseMarket.quoteID],
+            QuoteMarket: [quoteMarket.baseID, quoteMarket.quoteID],
+            BridgeAsset: bridgeAsset
+          })
+        }
+      }
+    }
+
+    return [supportsDirectArb, multiHopMarkets]
+  }
+
   /*
    * cexMarketSupportFilter returns a lookup CEXes that have a matching market
    * for the currently selected base and quote assets.
@@ -1939,11 +2092,9 @@ export default class MarketMakerSettingsPage extends BasePage {
   cexMarketSupportFilter (baseID: number, quoteID: number) {
     const cexes: Record<string, boolean> = {}
     for (const [cexName, cexStatus] of Object.entries(app().mmStatus.cexes)) {
-      for (const { baseID: b, quoteID: q } of Object.values(cexStatus.markets ?? [])) {
-        if (b === baseID && q === quoteID) {
-          cexes[cexName] = true
-          break
-        }
+      const [supportsDirectArb, bridgeAssets] = this.cexSupportsArbOnMarket(baseID, quoteID, cexStatus)
+      if (supportsDirectArb || bridgeAssets.length > 0) {
+        cexes[cexName] = true
       }
     }
     return (cexName: string) => Boolean(cexes[cexName])
@@ -2102,7 +2253,7 @@ class AssetPane {
     this.assetID = assetID
     this.isQuote = isQuote
     const cfg = this.cfg = isQuote ? this.pg.updatedConfig.quoteConfig : this.pg.updatedConfig.baseConfig
-    const { page, div, pg: { specs: { botType, baseID, cexName }, mktID, updatedConfig: { baseOptions, quoteOptions } } } = this
+    const { page, div, pg: { specs: { botType, baseID, cexName }, arbMkt, updatedConfig: { baseOptions, quoteOptions } } } = this
     const { symbol, name, token, unitInfo: ui } = app().assets[assetID]
     this.ui = ui
     this.walletConfig = assetID === baseID ? baseOptions : quoteOptions
@@ -2132,6 +2283,14 @@ class AssetPane {
     }
     if (botType !== botTypeBasicMM) {
       this.minTransfer.prec = Math.log10(ui.conventional.conversionFactor)
+      let mktID : string
+      if (typeof arbMkt === 'string') {
+        mktID = arbMkt
+      } else {
+        const mkt = isQuote ? arbMkt.QuoteMarket : arbMkt.BaseMarket
+        const idToSymbol = (id: number) => app().assets[id].symbol
+        mktID = `${idToSymbol(mkt[0])}_${idToSymbol(mkt[1])}`
+      }
       const mkt = app().mmStatus.cexes[cexName as string].markets[mktID]
       this.minTransfer.min = ((isQuote ? mkt.quoteMinWithdraw : mkt.baseMinWithdraw) / ui.conventional.conversionFactor)
     }

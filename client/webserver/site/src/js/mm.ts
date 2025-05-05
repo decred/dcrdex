@@ -827,10 +827,30 @@ class Bot extends BotMarket {
     this.hideAllocationDialog()
   }
 
+  minWithdrawals (): { minBaseWithdraw: number, minQuoteWithdraw: number } {
+    const { cfg, baseID, quoteID, cexName, mktID } = this
+    const cex = app().mmStatus.cexes[cexName]
+    if (!cfg.arbMarketMakingConfig || !cfg.arbMarketMakingConfig.multiHop) {
+      const mkt = cex.markets[mktID]
+      return { minBaseWithdraw: mkt.baseMinWithdraw, minQuoteWithdraw: mkt.quoteMinWithdraw }
+    }
+    const mktToSymbol = ([baseID, quoteID]: [number, number]) : string => {
+      const assetToSymbol = (assetID: number) : string => app().assets[assetID].symbol
+      return `${assetToSymbol(baseID)}_${assetToSymbol(quoteID)}`
+    }
+    const { baseAssetMarket, quoteAssetMarket } = cfg.arbMarketMakingConfig.multiHop
+    const baseMkt = cex.markets[mktToSymbol(baseAssetMarket)]
+    const quoteMkt = cex.markets[mktToSymbol(quoteAssetMarket)]
+    return {
+      minBaseWithdraw: baseAssetMarket[0] === baseID ? baseMkt.baseMinWithdraw : baseMkt.quoteMinWithdraw,
+      minQuoteWithdraw: quoteAssetMarket[0] === quoteID ? quoteMkt.baseMinWithdraw : quoteMkt.quoteMinWithdraw
+    }
+  }
+
   autoRebalanceSettings (): AutoRebalanceConfig {
     const {
       proj: { bProj, qProj, alloc }, baseFeeID, quoteFeeID, cfg: { uiConfig: { baseConfig, quoteConfig } },
-      baseID, quoteID, cexName, mktID
+      baseID, quoteID
     } = this
 
     const totalBase = alloc[baseID]
@@ -846,11 +866,10 @@ class Bot extends BotMarket {
     if (maxBase < 0 || maxQuote < 0) {
       throw Error(`rebalance math doesn't work: ${JSON.stringify({ bProj, qProj, maxBase, maxQuote })}`)
     }
-    const cex = app().mmStatus.cexes[cexName]
-    const mkt = cex.markets[mktID]
-    const [minB, maxB] = [mkt.baseMinWithdraw, Math.max(mkt.baseMinWithdraw * 2, maxBase)]
+    const { minBaseWithdraw, minQuoteWithdraw } = this.minWithdrawals()
+    const [minB, maxB] = [minBaseWithdraw, Math.max(minBaseWithdraw * 2, maxBase)]
     const minBaseTransfer = Math.round(minB + baseConfig.transferFactor * (maxB - minB))
-    const [minQ, maxQ] = [mkt.quoteMinWithdraw, Math.max(mkt.quoteMinWithdraw * 2, maxQuote)]
+    const [minQ, maxQ] = [minQuoteWithdraw, Math.max(minQuoteWithdraw * 2, maxQuote)]
     const minQuoteTransfer = Math.round(minQ + quoteConfig.transferFactor * (maxQ - minQ))
     return { minBaseTransfer, minQuoteTransfer }
   }
