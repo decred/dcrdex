@@ -29,8 +29,8 @@ const (
 	version = 0
 	// Zcoin XZC
 	BipID = 136
-	// Consensus changes v0.14.14.0
-	minNetworkVersion   = 141400
+	//  https://github.com/firoorg/firo/releases/tag/v0.14.14.1
+	minNetworkVersion   = 141401
 	walletTypeRPC       = "firodRPC"
 	walletTypeElectrum  = "electrumRPC"
 	estimateFeeConfs    = 2 // 2 blocks should be enough
