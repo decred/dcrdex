@@ -347,12 +347,21 @@ func (c *cbBook) midGap() (uint64, error) {
 	return c.book.midGap(), nil
 }
 
-func (c *cbBook) vwap(sell bool, qty uint64) (vwap, extrema uint64, filled bool, err error) {
+func (c *cbBook) vwap(bids bool, qty uint64) (vwap, extrema uint64, filled bool, err error) {
 	if !c.synced.Load() {
 		return 0, 0, false, fmt.Errorf("book not synced")
 	}
 
-	vwap, extrema, filled = c.book.vwap(!sell, qty)
+	vwap, extrema, filled = c.book.vwap(bids, qty)
+	return
+}
+
+func (c *cbBook) invVWAP(bids bool, qty uint64) (vwap, extrema uint64, filled bool, err error) {
+	if !c.synced.Load() {
+		return 0, 0, false, fmt.Errorf("book not synced")
+	}
+
+	vwap, extrema, filled = c.book.invVWAP(bids, qty)
 	return
 }
 
@@ -853,9 +862,88 @@ func (bnc *coinbase) generateTradeID() string {
 	return hex.EncodeToString(append(bnc.tradeIDNoncePrefix, nonceB...))
 }
 
+func buildOrderRequest(mkt *cbtypes.Market, baseID, quoteID uint32, sell bool, orderType OrderType, rate, qty uint64, tradeID string) (*cbtypes.OrderRequest, error) {
+	bui, err := asset.UnitInfo(baseID)
+	if err != nil {
+		return nil, fmt.Errorf("error getting unit info for base asset ID %d: %v", baseID, err)
+	}
+	qui, err := asset.UnitInfo(quoteID)
+	if err != nil {
+		return nil, fmt.Errorf("error getting unit info for quote asset ID %d: %v", quoteID, err)
+	}
+
+	bFactor := bui.Conventional.ConversionFactor
+	qFactor := qui.Conventional.ConversionFactor
+
+	getBaseQtyStr := func() (string, error) {
+		if qty < mkt.MinBaseQty || qty > mkt.MaxBaseQty {
+			return "", fmt.Errorf("quantity %v is out of bounds for market %v", qty, mkt.ProductID)
+		}
+		steppedQty := steppedRate(qty, mkt.BaseLotSize)
+		convQty := float64(steppedQty) / float64(bFactor)
+		qtyPrec := int(math.Round(math.Log10(float64(bFactor) / float64(mkt.BaseLotSize))))
+		return strconv.FormatFloat(convQty, 'f', qtyPrec, 64), nil
+	}
+
+	getQuoteQtyStr := func() (string, error) {
+		if qty < mkt.MinQuoteQty || qty > mkt.MaxQuoteQty {
+			return "", fmt.Errorf("quantity %v is out of bounds for market %v", qty, mkt.ProductID)
+		}
+		steppedQty := steppedRate(qty, mkt.QuoteLotSize)
+		convQty := float64(steppedQty) / float64(qFactor)
+		qtyPrec := int(math.Round(math.Log10(float64(qFactor) / float64(mkt.QuoteLotSize))))
+		return strconv.FormatFloat(convQty, 'f', qtyPrec, 64), nil
+	}
+
+	getRateStr := func() string {
+		rate = steppedRate(rate, mkt.RateStep)
+		convRate := calc.ConventionalRateAlt(rate, bFactor, qFactor)
+		ratePrec := int(math.Round(math.Log10(calc.RateEncodingFactor * float64(bFactor) / float64(qFactor) / float64(mkt.RateStep))))
+		return strconv.FormatFloat(convRate, 'f', ratePrec, 64)
+	}
+
+	var baseQtyStr, quoteQtyStr, rateStr string
+	if orderType == OrderTypeLimit {
+		rateStr = getRateStr()
+		baseQtyStr, err = getBaseQtyStr()
+	} else if sell {
+		baseQtyStr, err = getBaseQtyStr()
+	} else {
+		quoteQtyStr, err = getQuoteQtyStr()
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	side := "BUY"
+	if sell {
+		side = "SELL"
+	}
+
+	ord := &cbtypes.OrderRequest{
+		ProductID:     mkt.ProductID,
+		Side:          side,
+		ClientOrderID: tradeID,
+	}
+
+	if orderType == OrderTypeLimit {
+		limitConfig := &cbtypes.LimitOrderConfig{}
+		limitConfig.Limit.BaseSize = baseQtyStr
+		limitConfig.Limit.LimitPrice = rateStr
+		ord.OrderConfig = limitConfig
+	} else {
+		marketConfig := &cbtypes.MarketOrderConfig{}
+		marketConfig.Market.BaseSize = baseQtyStr
+		marketConfig.Market.QuoteSize = quoteQtyStr
+		ord.OrderConfig = marketConfig
+	}
+
+	return ord, nil
+}
+
 // Trade executes a trade on the CEX. updaterID takes a subscriptionID
 // returned from SubscribeTradeUpdates.
-func (c *coinbase) Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, subscriptionID int) (*Trade, error) {
+func (c *coinbase) Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, orderType OrderType, subscriptionID int) (*Trade, error) {
 	productID, err := c.newProductID(baseID, quoteID)
 	if err != nil {
 		return nil, fmt.Errorf("error generating product ID: %w", err)
@@ -865,34 +953,6 @@ func (c *coinbase) Trade(ctx context.Context, baseID, quoteID uint32, sell bool,
 	mkt, found := markets[productID]
 	if !found {
 		return nil, fmt.Errorf("no book found for %s", productID)
-	}
-	bui, err := asset.UnitInfo(baseID)
-	if err != nil {
-		return nil, fmt.Errorf("error getting unit info for base asset ID %d: %v", baseID, err)
-	}
-	qui, err := asset.UnitInfo(quoteID)
-	if err != nil {
-		return nil, fmt.Errorf("error getting unit info for quote asset ID %d: %v", quoteID, err)
-	}
-	bFactor := bui.Conventional.ConversionFactor
-	qFactor := qui.Conventional.ConversionFactor
-
-	rate = steppedRate(rate, mkt.RateStep)
-	convRate := calc.ConventionalRateAlt(rate, bFactor, qFactor)
-	ratePrec := int(math.Round(math.Log10(calc.RateEncodingFactor * float64(bFactor) / float64(qFactor) / float64(mkt.RateStep))))
-	rateStr := strconv.FormatFloat(convRate, 'f', ratePrec, 64)
-
-	if qty < mkt.MinQty || qty > mkt.MaxQty {
-		return nil, fmt.Errorf("quantity %v is out of bounds for market %v", qty, productID)
-	}
-	steppedQty := steppedRate(qty, mkt.LotSize)
-	convQty := float64(steppedQty) / float64(bFactor)
-	qtyPrec := int(math.Round(math.Log10(float64(bFactor) / float64(mkt.LotSize))))
-	qtyStr := strconv.FormatFloat(convQty, 'f', qtyPrec, 64)
-
-	side := "BUY"
-	if sell {
-		side = "SELL"
 	}
 
 	c.tradeUpdaterMtx.Lock()
@@ -905,14 +965,10 @@ func (c *coinbase) Trade(ctx context.Context, baseID, quoteID uint32, sell bool,
 
 	tradeID := c.generateTradeID()
 
-	ord := &cbtypes.OrderRequest{
-		ProductID:     productID,
-		Side:          side,
-		ClientOrderID: tradeID,
+	ord, err := buildOrderRequest(mkt, baseID, quoteID, sell, orderType, rate, qty, tradeID)
+	if err != nil {
+		return nil, fmt.Errorf("error building order request: %w", err)
 	}
-	limitConfig := &ord.OrderConfiguration.Limit
-	limitConfig.BaseSize = qtyStr
-	limitConfig.LimitPrice = rateStr
 
 	var res cbtypes.OrderResponse
 	if err := c.request(ctx, http.MethodPost, "api/v3/brokerage/orders", nil, ord, &res); err != nil {
@@ -941,6 +997,26 @@ func (c *coinbase) Trade(ctx context.Context, baseID, quoteID uint32, sell bool,
 		BaseID:  baseID,
 		QuoteID: quoteID,
 	}, nil
+}
+
+func (c *coinbase) ValidateTrade(baseID, quoteID uint32, sell bool, rate, qty uint64, orderType OrderType) error {
+	productID, err := c.newProductID(baseID, quoteID)
+	if err != nil {
+		return fmt.Errorf("error generating product ID: %w", err)
+	}
+
+	markets := c.markets.Load().(map[string]*cbtypes.Market)
+	mkt, found := markets[productID]
+	if !found {
+		return fmt.Errorf("no book found for %s", productID)
+	}
+
+	_, err = buildOrderRequest(mkt, baseID, quoteID, sell, orderType, rate, qty, "")
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // UnsubscribeMarket unsubscribes from order book updates on a market.
@@ -1018,7 +1094,26 @@ func (c *coinbase) VWAP(baseID, quoteID uint32, sell bool, qty uint64) (vwap, ex
 		return 0, 0, false, fmt.Errorf("no book found for %s", productID)
 	}
 
-	return book.vwap(sell, qty)
+	return book.vwap(!sell, qty)
+}
+
+// InvVWAP returns the inverse volume weighted average price for a certain
+// quantity of the quote asset on a market. SubscribeMarket must be called,
+// and the market must be synced before results can be expected.
+func (c *coinbase) InvVWAP(baseID, quoteID uint32, sell bool, qty uint64) (vwap, extrema uint64, filled bool, err error) {
+	productID, err := c.newProductID(baseID, quoteID)
+	if err != nil {
+		return 0, 0, false, fmt.Errorf("error generating product ID: %v", err)
+	}
+
+	c.booksMtx.RLock()
+	book, found := c.books[productID]
+	c.booksMtx.RUnlock()
+	if !found {
+		return 0, 0, false, fmt.Errorf("no book found for %s", productID)
+	}
+
+	return book.invVWAP(!sell, qty)
 }
 
 // MidGap returns the mid-gap price for a market.
@@ -1577,9 +1672,13 @@ func (c *coinbase) updateMarkets(ctx context.Context) (map[string]*Market, error
 		bui, _ := asset.UnitInfo(baseAssetID)
 		qui, _ := asset.UnitInfo(quoteAssetID)
 
-		mkt.LotSize = uint64(math.Round(parseFloat(mkt.BaseIncrement) * float64(bui.Conventional.ConversionFactor)))
-		mkt.MaxQty = uint64(math.Round(parseFloat(mkt.BaseMaxSize) * float64(bui.Conventional.ConversionFactor)))
-		mkt.MinQty = uint64(math.Round(parseFloat(mkt.BaseMinSize) * float64(bui.Conventional.ConversionFactor)))
+		mkt.BaseLotSize = uint64(math.Round(parseFloat(mkt.BaseIncrement) * float64(bui.Conventional.ConversionFactor)))
+		mkt.MaxBaseQty = uint64(math.Round(parseFloat(mkt.BaseMaxSize) * float64(bui.Conventional.ConversionFactor)))
+		mkt.MinBaseQty = uint64(math.Round(parseFloat(mkt.BaseMinSize) * float64(bui.Conventional.ConversionFactor)))
+		mkt.QuoteLotSize = uint64(math.Round(parseFloat(mkt.QuoteIncrement) * float64(qui.Conventional.ConversionFactor)))
+		mkt.MaxQuoteQty = uint64(math.Round(parseFloat(mkt.QuoteMaxSize) * float64(qui.Conventional.ConversionFactor)))
+		mkt.MinQuoteQty = uint64(math.Round(parseFloat(mkt.QuoteMinSize) * float64(qui.Conventional.ConversionFactor)))
+
 		conv := float64(qui.Conventional.ConversionFactor) / float64(bui.Conventional.ConversionFactor) * calc.RateEncodingFactor
 		mkt.RateStep = uint64(math.Round(parseFloat(mkt.PriceIncrement) * conv))
 		cbMarkets[mkt.ProductID] = mkt
