@@ -52,7 +52,7 @@ func (db *tEventLogDB) storedEventAtIndexEquals(e *MarketMakingEvent, idx int) b
 		return false
 	}
 	db.storedEvents[idx].TimeStamp = 0 // ignore timestamp
-	return !reflect.DeepEqual(db.storedEvents[idx], e)
+	return reflect.DeepEqual(db.storedEvents[idx], e)
 }
 func (db *tEventLogDB) latestStoredEventEquals(e *MarketMakingEvent) bool {
 	db.storedEventsMtx.Lock()
@@ -245,32 +245,56 @@ func TestSufficientBalanceForCEXTrade(t *testing.T) {
 		cexBalances map[uint32]uint64
 		sell        bool
 		rate, qty   uint64
+		orderType   libxc.OrderType
 	}
 
 	tests := []*test{
 		{
-			name: "sell",
+			name: "limit sell",
 			sell: true,
 			rate: 5e7,
 			qty:  1e8,
 			cexBalances: map[uint32]uint64{
 				baseID: 1e8,
 			},
+			orderType: libxc.OrderTypeLimit,
 		},
 		{
-			name: "buy",
+			name: "limit buy",
 			sell: false,
 			rate: 5e7,
 			qty:  1e8,
 			cexBalances: map[uint32]uint64{
 				quoteID: calc.BaseToQuote(5e7, 1e8),
 			},
+			orderType: libxc.OrderTypeLimit,
+		},
+		{
+			name: "market sell",
+			sell: true,
+			rate: 5e7,
+			qty:  1e8,
+			cexBalances: map[uint32]uint64{
+				baseID: 1e8,
+			},
+			orderType: libxc.OrderTypeMarket,
+		},
+		{
+			name: "market buy",
+			sell: false,
+			rate: 5e7,
+			qty:  1e8,
+			cexBalances: map[uint32]uint64{
+				quoteID: 1e8,
+			},
+			orderType: libxc.OrderTypeMarket,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			checkBalanceSufficient := func(expSufficient bool) {
+				t.Helper()
 				tCore := newTCore()
 				adaptor := mustParseAdaptor(&exchangeAdaptorCfg{
 					core:            tCore,
@@ -280,7 +304,7 @@ func TestSufficientBalanceForCEXTrade(t *testing.T) {
 						QuoteID: quoteID,
 					},
 				})
-				sufficient := adaptor.SufficientBalanceForCEXTrade(baseID, quoteID, test.sell, test.rate, test.qty)
+				sufficient := adaptor.SufficientBalanceForCEXTrade(baseID, quoteID, test.sell, test.rate, test.qty, test.orderType)
 				if sufficient != expSufficient {
 					t.Fatalf("expected sufficient=%v, got %v", expSufficient, sufficient)
 				}
@@ -592,8 +616,8 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 			},
 		})
 		addBaseFees, addQuoteFees = sellFundingFees, buyFundingFees
-		cex.asksVWAP[lotSize*buyLots] = vwapResult{avg: buyVWAP}
-		cex.bidsVWAP[lotSize*sellLots] = vwapResult{avg: sellVWAP}
+		cex.asksVWAP[lotSize*buyLots] = vwapResult{extrema: sellVWAP}
+		cex.bidsVWAP[lotSize*sellLots] = vwapResult{extrema: buyVWAP}
 		minDexBase = sellLots*lotSize + sellFundingFees
 		if baseID == u.baseFeeID {
 			minDexBase += sellLots * a.sellFees.BookingFeesPerLot
@@ -3190,6 +3214,41 @@ func TestMultiTrade(t *testing.T) {
 	}
 }
 
+func TestMultiTradeErrorPropagation(t *testing.T) {
+	tCore := newTCore()
+	adaptor := mustParseAdaptor(&exchangeAdaptorCfg{
+		core:            tCore,
+		baseDexBalances: nil,
+		baseCexBalances: nil,
+		mwh: &MarketWithHost{
+			Host:    "dex.com",
+			BaseID:  42,
+			QuoteID: 0,
+		},
+		eventLogDB: &tEventLogDB{},
+	})
+	adaptor.buyFees = tFees(1e5, 2e5, 3e5, 4e5)
+	adaptor.sellFees = tFees(5e5, 6e5, 7e5, 8e5)
+
+	placements := []*TradePlacement{
+		{Rate: 0, Lots: 0, Error: &BotProblems{UnknownError: "error to propagate"}},
+	}
+	res, orderReport := adaptor.multiTrade(placements, true, 0, 0)
+	if len(res) != 0 {
+		t.Fatalf("expected 0 orders, got %d", len(res))
+	}
+
+	if orderReport.Placements[0].Error == nil {
+		t.Fatalf("expected error to propagate, got nil")
+	}
+	if orderReport.Placements[0].Error.UnknownError != "error to propagate" {
+		t.Fatalf("expected error to propagate, got %v", orderReport.Placements[0].Error)
+	}
+	if orderReport.Error != nil {
+		t.Fatalf("expected no overall error, got %v", orderReport.Error)
+	}
+}
+
 func TestDEXTrade(t *testing.T) {
 	orderIDs := make([]order.OrderID, 5)
 	for i := range orderIDs {
@@ -3303,6 +3362,7 @@ func TestDEXTrade(t *testing.T) {
 		initialLockedFunds []*orderLockedFunds
 
 		postTradeBalances  map[uint32]*BotBalance
+		postTradeEvents    []*MarketMakingEvent
 		updatesAndBalances []*updatesAndBalances
 	}
 
@@ -3343,6 +3403,58 @@ func TestDEXTrade(t *testing.T) {
 			postTradeBalances: map[uint32]*BotBalance{
 				42: {1e8 - 10*basePerLot, 10 * basePerLot, 0, 0},
 				0:  {1e8, 0, 0, 0},
+			},
+			postTradeEvents: []*MarketMakingEvent{
+				{
+					ID:      1,
+					Pending: true,
+					BalanceEffects: &BalanceEffects{
+						Settled: map[uint32]int64{
+							42: -5 * basePerLot,
+							0:  0,
+						},
+						Locked: map[uint32]uint64{
+							42: 5 * basePerLot,
+							0:  0,
+						},
+						Reserved: map[uint32]uint64{
+							0: 0,
+						},
+						Pending: map[uint32]uint64{},
+					},
+					DEXOrderEvent: &DEXOrderEvent{
+						ID:           orderIDs[0].String(),
+						Rate:         rate1,
+						Qty:          5e6,
+						Sell:         true,
+						Transactions: []*asset.WalletTransaction{},
+					},
+				},
+				{
+					ID:      2,
+					Pending: true,
+					BalanceEffects: &BalanceEffects{
+						Settled: map[uint32]int64{
+							42: -5 * basePerLot,
+							0:  0,
+						},
+						Locked: map[uint32]uint64{
+							42: 5 * basePerLot,
+							0:  0,
+						},
+						Reserved: map[uint32]uint64{
+							0: 0,
+						},
+						Pending: map[uint32]uint64{},
+					},
+					DEXOrderEvent: &DEXOrderEvent{
+						ID:           orderIDs[1].String(),
+						Rate:         rate2,
+						Qty:          5e6,
+						Sell:         true,
+						Transactions: []*asset.WalletTransaction{},
+					},
+				},
 			},
 			updatesAndBalances: []*updatesAndBalances{
 				// First order has a match and sends a swap tx
@@ -3475,6 +3587,58 @@ func TestDEXTrade(t *testing.T) {
 				42: {1e8, 0, 0, 0},
 				0:  {1e8 - 5*quotePerLot1 - 5*quotePerLot2, 5*quotePerLot1 + 5*quotePerLot2, 0, 0},
 			},
+			postTradeEvents: []*MarketMakingEvent{
+				{
+					ID:      1,
+					Pending: true,
+					BalanceEffects: &BalanceEffects{
+						Settled: map[uint32]int64{
+							42: 0,
+							0:  -int64(5 * quotePerLot1),
+						},
+						Locked: map[uint32]uint64{
+							42: 0,
+							0:  uint64(5 * quotePerLot1),
+						},
+						Reserved: map[uint32]uint64{
+							42: 0,
+						},
+						Pending: map[uint32]uint64{},
+					},
+					DEXOrderEvent: &DEXOrderEvent{
+						ID:           orderIDs[0].String(),
+						Rate:         rate1,
+						Qty:          5e6,
+						Sell:         false,
+						Transactions: []*asset.WalletTransaction{},
+					},
+				},
+				{
+					ID:      2,
+					Pending: true,
+					BalanceEffects: &BalanceEffects{
+						Settled: map[uint32]int64{
+							42: 0,
+							0:  -int64(5 * quotePerLot2),
+						},
+						Locked: map[uint32]uint64{
+							42: 0,
+							0:  uint64(5 * quotePerLot2),
+						},
+						Reserved: map[uint32]uint64{
+							42: 0,
+						},
+						Pending: map[uint32]uint64{},
+					},
+					DEXOrderEvent: &DEXOrderEvent{
+						ID:           orderIDs[1].String(),
+						Rate:         rate2,
+						Qty:          5e6,
+						Sell:         false,
+						Transactions: []*asset.WalletTransaction{},
+					},
+				},
+			},
 			updatesAndBalances: []*updatesAndBalances{
 				// First order has a match and sends a swap tx
 				{
@@ -3606,13 +3770,67 @@ func TestDEXTrade(t *testing.T) {
 				{Lots: 5, Rate: rate2},
 			},
 			initialLockedFunds: []*orderLockedFunds{
-				newOrderLockedFunds(orderIDs[1], 5*basePerLot, 0, 5*redeemFees, 5*refundFees),
 				newOrderLockedFunds(orderIDs[0], 5*basePerLot, 0, 5*redeemFees, 5*refundFees),
+				newOrderLockedFunds(orderIDs[1], 5*basePerLot, 0, 5*redeemFees, 5*refundFees),
 			},
 			postTradeBalances: map[uint32]*BotBalance{
 				966001: {1e8, 0, 0, 0},
 				966:    {1e8 - 10*redeemFees, 10 * redeemFees, 0, 0},
 				60:     {1e8 - 10*(basePerLot+refundFees), 10 * (basePerLot + refundFees), 0, 0},
+			},
+			postTradeEvents: []*MarketMakingEvent{
+				{
+					ID:      1,
+					Pending: true,
+					BalanceEffects: &BalanceEffects{
+						Settled: map[uint32]int64{
+							966001: 0,
+							966:    -int64(5 * redeemFees),
+							60:     -int64(5 * (basePerLot + refundFees)),
+						},
+						Locked: map[uint32]uint64{
+							966: uint64(5 * redeemFees),
+							60:  uint64(5 * (basePerLot + refundFees)),
+						},
+						Reserved: map[uint32]uint64{
+							966001: 0,
+						},
+						Pending: map[uint32]uint64{},
+					},
+					DEXOrderEvent: &DEXOrderEvent{
+						ID:           orderIDs[0].String(),
+						Rate:         rate1,
+						Qty:          5e6,
+						Sell:         true,
+						Transactions: []*asset.WalletTransaction{},
+					},
+				},
+				{
+					ID:      2,
+					Pending: true,
+					BalanceEffects: &BalanceEffects{
+						Settled: map[uint32]int64{
+							966001: 0,
+							966:    -int64(5 * redeemFees),
+							60:     -int64(5 * (basePerLot + refundFees)),
+						},
+						Locked: map[uint32]uint64{
+							966: 5 * redeemFees,
+							60:  uint64(5 * (basePerLot + refundFees)),
+						},
+						Reserved: map[uint32]uint64{
+							966001: 0,
+						},
+						Pending: map[uint32]uint64{},
+					},
+					DEXOrderEvent: &DEXOrderEvent{
+						ID:           orderIDs[1].String(),
+						Rate:         rate2,
+						Qty:          5e6,
+						Sell:         true,
+						Transactions: []*asset.WalletTransaction{},
+					},
+				},
 			},
 			updatesAndBalances: []*updatesAndBalances{
 				// First order has a match and sends a swap tx
@@ -3757,6 +3975,62 @@ func TestDEXTrade(t *testing.T) {
 				966:    {1e8 - 10*(buyFees+refundFees), 10 * (buyFees + refundFees), 0, 0},
 				60:     {1e8 - 10*redeemFees, 10 * redeemFees, 0, 0},
 			},
+			postTradeEvents: []*MarketMakingEvent{
+				{
+					ID:      1,
+					Pending: true,
+					BalanceEffects: &BalanceEffects{
+						Settled: map[uint32]int64{
+							966001: -int64(5 * quoteLot1),
+							966:    -5 * int64(buyFees+refundFees),
+							60:     -int64(5 * redeemFees),
+						},
+						Locked: map[uint32]uint64{
+							966001: 5 * quoteLot1,
+							966:    5 * (buyFees + refundFees),
+							60:     5 * redeemFees,
+						},
+						Reserved: map[uint32]uint64{
+							60: 0,
+						},
+						Pending: map[uint32]uint64{},
+					},
+					DEXOrderEvent: &DEXOrderEvent{
+						ID:           orderIDs[0].String(),
+						Rate:         rate1,
+						Qty:          5e6,
+						Sell:         false,
+						Transactions: []*asset.WalletTransaction{},
+					},
+				},
+				{
+					ID:      2,
+					Pending: true,
+					BalanceEffects: &BalanceEffects{
+						Settled: map[uint32]int64{
+							966001: -int64(5 * quoteLot2),
+							966:    -5 * int64(buyFees+refundFees),
+							60:     -int64(5 * redeemFees),
+						},
+						Locked: map[uint32]uint64{
+							966001: 5 * quoteLot2,
+							966:    5 * (buyFees + refundFees),
+							60:     5 * redeemFees,
+						},
+						Reserved: map[uint32]uint64{
+							60: 0,
+						},
+						Pending: map[uint32]uint64{},
+					},
+					DEXOrderEvent: &DEXOrderEvent{
+						ID:           orderIDs[1].String(),
+						Rate:         rate2,
+						Qty:          5e6,
+						Sell:         false,
+						Transactions: []*asset.WalletTransaction{},
+					},
+				},
+			},
 			updatesAndBalances: []*updatesAndBalances{
 				// First order has a match and sends a swap tx
 				{
@@ -3894,6 +4168,33 @@ func TestDEXTrade(t *testing.T) {
 				42: {1e8 - 5*basePerLot, 5 * basePerLot, 0, 0},
 				0:  {1e8, 0, 0, 0},
 			},
+			postTradeEvents: []*MarketMakingEvent{
+				{
+					ID:      1,
+					Pending: true,
+					BalanceEffects: &BalanceEffects{
+						Settled: map[uint32]int64{
+							42: -int64(5 * basePerLot),
+							0:  0,
+						},
+						Locked: map[uint32]uint64{
+							42: 5 * basePerLot,
+							0:  0,
+						},
+						Reserved: map[uint32]uint64{
+							0: 0,
+						},
+						Pending: map[uint32]uint64{},
+					},
+					DEXOrderEvent: &DEXOrderEvent{
+						ID:           orderIDs[0].String(),
+						Rate:         rate1,
+						Qty:          5e6,
+						Sell:         true,
+						Transactions: []*asset.WalletTransaction{},
+					},
+				},
+			},
 			updatesAndBalances: []*updatesAndBalances{
 				// Order has two matches, sends one swap tx for both
 				{
@@ -4018,24 +4319,9 @@ func TestDEXTrade(t *testing.T) {
 		}
 
 		// Check that the correct initial events are logged
-		oidToEventID := make(map[order.OrderID]uint64)
-		for i, trade := range test.placements {
-			o := test.initialLockedFunds[i]
-			oidToEventID[o.id] = uint64(i + 1)
-			e := &MarketMakingEvent{
-				ID: uint64(i + 1),
-				DEXOrderEvent: &DEXOrderEvent{
-					ID:           o.id.String(),
-					Rate:         trade.Rate,
-					Qty:          trade.Lots * lotSize,
-					Sell:         test.sell,
-					Transactions: []*asset.WalletTransaction{},
-				},
-				Pending: true,
-			}
-
+		for i, e := range test.postTradeEvents {
 			if !eventLogDB.storedEventAtIndexEquals(e, i) {
-				t.Fatalf("%s: unexpected event logged. want:\n%+v,\ngot:\n%+v", test.name, e, eventLogDB.latestStoredEvent())
+				t.Fatalf("%s: unexpected event logged at index %d. want:\n%s,\ngot:\n%s", test.name, i, spew.Sdump(e), spew.Sdump(eventLogDB.storedEvents[i]))
 			}
 		}
 
@@ -4178,8 +4464,13 @@ func TestDeposit(t *testing.T) {
 				ID: 1,
 				BalanceEffects: &BalanceEffects{
 					Settled: map[uint32]int64{
-						42: -2000,
+						42: -1e6,
 					},
+					Pending: map[uint32]uint64{
+						42: 1e6 - 2000,
+					},
+					Locked:   map[uint32]uint64{},
+					Reserved: map[uint32]uint64{},
 				},
 				Pending: true,
 				DepositEvent: &DepositEvent{
@@ -4197,6 +4488,9 @@ func TestDeposit(t *testing.T) {
 					Settled: map[uint32]int64{
 						42: -2000,
 					},
+					Pending:  map[uint32]uint64{},
+					Locked:   map[uint32]uint64{},
+					Reserved: map[uint32]uint64{},
 				},
 				Pending: false,
 				DepositEvent: &DepositEvent{
@@ -4248,8 +4542,13 @@ func TestDeposit(t *testing.T) {
 				ID: 1,
 				BalanceEffects: &BalanceEffects{
 					Settled: map[uint32]int64{
-						42: -2000,
+						42: -1e6 - 2000,
 					},
+					Pending: map[uint32]uint64{
+						42: 1e6,
+					},
+					Locked:   map[uint32]uint64{},
+					Reserved: map[uint32]uint64{},
 				},
 				Pending: true,
 				DepositEvent: &DepositEvent{
@@ -4267,6 +4566,9 @@ func TestDeposit(t *testing.T) {
 					Settled: map[uint32]int64{
 						42: -2000,
 					},
+					Pending:  map[uint32]uint64{},
+					Locked:   map[uint32]uint64{},
+					Reserved: map[uint32]uint64{},
 				},
 				Pending: false,
 				DepositEvent: &DepositEvent{
@@ -4321,8 +4623,13 @@ func TestDeposit(t *testing.T) {
 				ID: 1,
 				BalanceEffects: &BalanceEffects{
 					Settled: map[uint32]int64{
-						42: -2000,
+						42: -1e6 - 4000,
 					},
+					Pending: map[uint32]uint64{
+						42: 1e6,
+					},
+					Locked:   map[uint32]uint64{},
+					Reserved: map[uint32]uint64{},
 				},
 				Pending: true,
 				DepositEvent: &DepositEvent{
@@ -4340,6 +4647,9 @@ func TestDeposit(t *testing.T) {
 					Settled: map[uint32]int64{
 						42: -2000,
 					},
+					Pending:  map[uint32]uint64{},
+					Locked:   map[uint32]uint64{},
+					Reserved: map[uint32]uint64{},
 				},
 				Pending: false,
 				DepositEvent: &DepositEvent{
@@ -4395,8 +4705,14 @@ func TestDeposit(t *testing.T) {
 				ID: 1,
 				BalanceEffects: &BalanceEffects{
 					Settled: map[uint32]int64{
-						966001: -4000,
+						966001: -1e6,
+						966:    -4000,
 					},
+					Pending: map[uint32]uint64{
+						966001: 1000000,
+					},
+					Locked:   map[uint32]uint64{},
+					Reserved: map[uint32]uint64{},
 				},
 				Pending: true,
 				DepositEvent: &DepositEvent{
@@ -4412,8 +4728,12 @@ func TestDeposit(t *testing.T) {
 				ID: 1,
 				BalanceEffects: &BalanceEffects{
 					Settled: map[uint32]int64{
-						966001: -2000,
+						966001: 0,
+						966:    -2000,
 					},
+					Pending:  map[uint32]uint64{},
+					Locked:   map[uint32]uint64{},
+					Reserved: map[uint32]uint64{},
 				},
 				Pending: false,
 				DepositEvent: &DepositEvent{
@@ -4507,7 +4827,7 @@ func TestDeposit(t *testing.T) {
 			}
 
 			if !eventLogDB.latestStoredEventEquals(test.initialEvent) {
-				t.Fatalf("%s: unexpected event logged. want:\n%+v,\ngot:\n%+v", test.name, test.initialEvent, eventLogDB.latestStoredEvent())
+				t.Fatalf("%s: unexpected initial event logged. want:\n%s,\ngot:\n%s", test.name, spew.Sdump(test.initialEvent), spew.Sdump(eventLogDB.latestStoredEvent()))
 			}
 
 			tCore.walletTxsMtx.Lock()
@@ -4557,7 +4877,7 @@ func TestDeposit(t *testing.T) {
 				}
 
 				if !eventLogDB.latestStoredEventEquals(test.postConfirmEvent) {
-					return fmt.Errorf("%s: unexpected event logged. want:\n%+v,\ngot:\n%+v", test.name, test.postConfirmEvent, eventLogDB.latestStoredEvent())
+					return fmt.Errorf("%s: unexpected post confirm event logged. want:\n%s,\ngot:\n%s", test.name, spew.Sdump(test.postConfirmEvent), spew.Sdump(eventLogDB.latestStoredEvent()))
 				}
 				return nil
 			})
@@ -4619,6 +4939,16 @@ func TestWithdraw(t *testing.T) {
 			initialEvent: &MarketMakingEvent{
 				ID:      1,
 				Pending: true,
+				BalanceEffects: &BalanceEffects{
+					Settled: map[uint32]int64{
+						42: -1e6,
+					},
+					Pending: map[uint32]uint64{
+						42: 1e6,
+					},
+					Locked:   map[uint32]uint64{},
+					Reserved: map[uint32]uint64{},
+				},
 				WithdrawalEvent: &WithdrawalEvent{
 					AssetID:  42,
 					CEXDebit: 1e6,
@@ -4632,6 +4962,9 @@ func TestWithdraw(t *testing.T) {
 					Settled: map[uint32]int64{
 						42: -(0.1e6 + 2000),
 					},
+					Pending:  map[uint32]uint64{},
+					Locked:   map[uint32]uint64{},
+					Reserved: map[uint32]uint64{},
 				},
 				WithdrawalEvent: &WithdrawalEvent{
 					AssetID:  42,
@@ -4700,7 +5033,7 @@ func TestWithdraw(t *testing.T) {
 		}
 
 		if !eventLogDB.latestStoredEventEquals(test.initialEvent) {
-			t.Fatalf("%s: unexpected event logged. want:\n%+v,\ngot:\n%+v", test.name, test.initialEvent, eventLogDB.latestStoredEvent())
+			t.Fatalf("%s: unexpected event logged. want:\n%s,\ngot:\n%s", test.name, spew.Sdump(test.initialEvent), spew.Sdump(eventLogDB.latestStoredEvent()))
 		}
 		preConfirmBal := adaptor.DEXBalance(assetID)
 		if *preConfirmBal != *test.preConfirmDEXBalance {
@@ -4750,8 +5083,8 @@ func TestWithdraw(t *testing.T) {
 }
 
 func TestCEXTrade(t *testing.T) {
-	baseID := uint32(42)
-	quoteID := uint32(0)
+	dexBaseID := uint32(42)
+	dexQuoteID := uint32(0)
 	tradeID := "123"
 
 	type updateAndStats struct {
@@ -4761,11 +5094,14 @@ func TestCEXTrade(t *testing.T) {
 	}
 
 	type test struct {
-		name     string
-		sell     bool
-		rate     uint64
-		qty      uint64
-		balances map[uint32]uint64
+		name      string
+		baseID    uint32
+		quoteID   uint32
+		sell      bool
+		rate      uint64
+		qty       uint64
+		orderType libxc.OrderType
+		balances  map[uint32]uint64
 
 		wantErr           bool
 		postTradeBalances map[uint32]*BotBalance
@@ -4777,10 +5113,13 @@ func TestCEXTrade(t *testing.T) {
 
 	tests := []*test{
 		{
-			name: "fully filled sell",
-			sell: true,
-			rate: 5e7,
-			qty:  5e6,
+			name:      "fully filled limit sell",
+			baseID:    dexBaseID,
+			quoteID:   dexQuoteID,
+			sell:      true,
+			rate:      5e7,
+			qty:       5e6,
+			orderType: libxc.OrderTypeLimit,
 			balances: map[uint32]uint64{
 				42: 1e7,
 				0:  1e7,
@@ -4797,11 +5136,24 @@ func TestCEXTrade(t *testing.T) {
 			postTradeEvent: &MarketMakingEvent{
 				ID:      1,
 				Pending: true,
+				BalanceEffects: &BalanceEffects{
+					Settled: map[uint32]int64{
+						42: -5e6,
+						0:  0,
+					},
+					Locked: map[uint32]uint64{
+						42: 5e6,
+					},
+					Reserved: map[uint32]uint64{},
+					Pending:  map[uint32]uint64{},
+				},
 				CEXOrderEvent: &CEXOrderEvent{
-					ID:   tradeID,
-					Rate: 5e7,
-					Qty:  5e6,
-					Sell: true,
+					BaseID:  dexBaseID,
+					QuoteID: dexQuoteID,
+					ID:      tradeID,
+					Rate:    5e7,
+					Qty:     5e6,
+					Sell:    true,
 				},
 			},
 			updates: []*updateAndStats{
@@ -4823,9 +5175,13 @@ func TestCEXTrade(t *testing.T) {
 							Locked: map[uint32]uint64{
 								42: 2e6,
 							},
+							Reserved: map[uint32]uint64{},
+							Pending:  map[uint32]uint64{},
 						},
 						CEXOrderEvent: &CEXOrderEvent{
 							ID:          tradeID,
+							BaseID:      dexBaseID,
+							QuoteID:     dexQuoteID,
 							Rate:        5e7,
 							Qty:         5e6,
 							Sell:        true,
@@ -4856,9 +5212,14 @@ func TestCEXTrade(t *testing.T) {
 								42: -5e6,
 								0:  2.8e6,
 							},
+							Locked:   map[uint32]uint64{},
+							Reserved: map[uint32]uint64{},
+							Pending:  map[uint32]uint64{},
 						},
 						CEXOrderEvent: &CEXOrderEvent{
 							ID:          tradeID,
+							BaseID:      dexBaseID,
+							QuoteID:     dexQuoteID,
 							Rate:        5e7,
 							Qty:         5e6,
 							Sell:        true,
@@ -4891,10 +5252,13 @@ func TestCEXTrade(t *testing.T) {
 			},
 		},
 		{
-			name: "partially filled sell",
-			sell: true,
-			rate: 5e7,
-			qty:  5e6,
+			name:      "partially filled limit sell",
+			baseID:    dexBaseID,
+			quoteID:   dexQuoteID,
+			sell:      true,
+			rate:      5e7,
+			qty:       5e6,
+			orderType: libxc.OrderTypeLimit,
 			balances: map[uint32]uint64{
 				42: 1e7,
 				0:  1e7,
@@ -4911,11 +5275,24 @@ func TestCEXTrade(t *testing.T) {
 			postTradeEvent: &MarketMakingEvent{
 				ID:      1,
 				Pending: true,
+				BalanceEffects: &BalanceEffects{
+					Settled: map[uint32]int64{
+						42: -5e6,
+						0:  0,
+					},
+					Locked: map[uint32]uint64{
+						42: 5e6,
+					},
+					Reserved: map[uint32]uint64{},
+					Pending:  map[uint32]uint64{},
+				},
 				CEXOrderEvent: &CEXOrderEvent{
-					ID:   tradeID,
-					Rate: 5e7,
-					Qty:  5e6,
-					Sell: true,
+					ID:      tradeID,
+					BaseID:  dexBaseID,
+					QuoteID: dexQuoteID,
+					Rate:    5e7,
+					Qty:     5e6,
+					Sell:    true,
 				},
 			},
 			updates: []*updateAndStats{
@@ -4935,9 +5312,14 @@ func TestCEXTrade(t *testing.T) {
 								42: -3e6,
 								0:  1.6e6,
 							},
+							Locked:   map[uint32]uint64{},
+							Reserved: map[uint32]uint64{},
+							Pending:  map[uint32]uint64{},
 						},
 						CEXOrderEvent: &CEXOrderEvent{
 							ID:          tradeID,
+							BaseID:      dexBaseID,
+							QuoteID:     dexQuoteID,
 							Rate:        5e7,
 							Qty:         5e6,
 							Sell:        true,
@@ -4955,10 +5337,13 @@ func TestCEXTrade(t *testing.T) {
 			},
 		},
 		{
-			name: "fully filled buy",
-			sell: false,
-			rate: 5e7,
-			qty:  5e6,
+			name:      "fully filled limit buy",
+			baseID:    dexBaseID,
+			quoteID:   dexQuoteID,
+			sell:      false,
+			rate:      5e7,
+			qty:       5e6,
+			orderType: libxc.OrderTypeLimit,
 			balances: map[uint32]uint64{
 				42: 1e7,
 				0:  1e7,
@@ -4975,11 +5360,24 @@ func TestCEXTrade(t *testing.T) {
 			postTradeEvent: &MarketMakingEvent{
 				ID:      1,
 				Pending: true,
+				BalanceEffects: &BalanceEffects{
+					Settled: map[uint32]int64{
+						42: 0,
+						0:  -int64(b2q(5e7, 5e6)),
+					},
+					Locked: map[uint32]uint64{
+						0: b2q(5e7, 5e6),
+					},
+					Reserved: map[uint32]uint64{},
+					Pending:  map[uint32]uint64{},
+				},
 				CEXOrderEvent: &CEXOrderEvent{
-					ID:   tradeID,
-					Rate: 5e7,
-					Qty:  5e6,
-					Sell: false,
+					ID:      tradeID,
+					BaseID:  dexBaseID,
+					QuoteID: dexQuoteID,
+					Rate:    5e7,
+					Qty:     5e6,
+					Sell:    false,
 				},
 			},
 			updates: []*updateAndStats{
@@ -4996,14 +5394,18 @@ func TestCEXTrade(t *testing.T) {
 						BalanceEffects: &BalanceEffects{
 							Settled: map[uint32]int64{
 								42: 3e6,
-								0:  -1.6e6,
+								0:  -int64(b2q(5e7, 5e6)),
 							},
 							Locked: map[uint32]uint64{
-								0: b2q(5e7, 2e6),
+								0: b2q(5e7, 5e6) - 1.6e6,
 							},
+							Reserved: map[uint32]uint64{},
+							Pending:  map[uint32]uint64{},
 						},
 						CEXOrderEvent: &CEXOrderEvent{
 							ID:          tradeID,
+							BaseID:      dexBaseID,
+							QuoteID:     dexQuoteID,
 							Rate:        5e7,
 							Qty:         5e6,
 							Sell:        false,
@@ -5034,9 +5436,14 @@ func TestCEXTrade(t *testing.T) {
 								42: 5.1e6,
 								0:  -int64(b2q(5e7, 5e6)),
 							},
+							Locked:   map[uint32]uint64{},
+							Reserved: map[uint32]uint64{},
+							Pending:  map[uint32]uint64{},
 						},
 						CEXOrderEvent: &CEXOrderEvent{
 							ID:          tradeID,
+							BaseID:      dexBaseID,
+							QuoteID:     dexQuoteID,
 							Rate:        5e7,
 							Qty:         5e6,
 							Sell:        false,
@@ -5069,10 +5476,13 @@ func TestCEXTrade(t *testing.T) {
 			},
 		},
 		{
-			name: "partially filled buy",
-			sell: false,
-			rate: 5e7,
-			qty:  5e6,
+			name:      "partially filled limit buy",
+			baseID:    dexBaseID,
+			quoteID:   dexQuoteID,
+			sell:      false,
+			rate:      5e7,
+			qty:       5e6,
+			orderType: libxc.OrderTypeLimit,
 			balances: map[uint32]uint64{
 				42: 1e7,
 				0:  1e7,
@@ -5089,11 +5499,24 @@ func TestCEXTrade(t *testing.T) {
 			postTradeEvent: &MarketMakingEvent{
 				ID:      1,
 				Pending: true,
+				BalanceEffects: &BalanceEffects{
+					Settled: map[uint32]int64{
+						42: 0,
+						0:  -int64(b2q(5e7, 5e6)),
+					},
+					Locked: map[uint32]uint64{
+						0: b2q(5e7, 5e6),
+					},
+					Reserved: map[uint32]uint64{},
+					Pending:  map[uint32]uint64{},
+				},
 				CEXOrderEvent: &CEXOrderEvent{
-					ID:   tradeID,
-					Rate: 5e7,
-					Qty:  5e6,
-					Sell: false,
+					ID:      tradeID,
+					BaseID:  dexBaseID,
+					QuoteID: dexQuoteID,
+					Rate:    5e7,
+					Qty:     5e6,
+					Sell:    false,
 				},
 			},
 			updates: []*updateAndStats{
@@ -5113,9 +5536,14 @@ func TestCEXTrade(t *testing.T) {
 								42: 3e6,
 								0:  -1.6e6,
 							},
+							Locked:   map[uint32]uint64{},
+							Reserved: map[uint32]uint64{},
+							Pending:  map[uint32]uint64{},
 						},
 						CEXOrderEvent: &CEXOrderEvent{
 							ID:          tradeID,
+							BaseID:      dexBaseID,
+							QuoteID:     dexQuoteID,
 							Rate:        5e7,
 							Qty:         5e6,
 							Sell:        false,
@@ -5132,12 +5560,193 @@ func TestCEXTrade(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:      "fully filled market sell",
+			baseID:    42,
+			quoteID:   60002,
+			sell:      true,
+			orderType: libxc.OrderTypeMarket,
+			qty:       5e6,
+			balances: map[uint32]uint64{
+				42: 1e7,
+				0:  1e7,
+			},
+			postTradeBalances: map[uint32]*BotBalance{
+				42: {
+					Available: 5e6,
+					Locked:    5e6,
+				},
+				0: {
+					Available: 1e7,
+				},
+			},
+			postTradeEvent: &MarketMakingEvent{
+				ID:      1,
+				Pending: true,
+				BalanceEffects: &BalanceEffects{
+					Settled: map[uint32]int64{
+						60002: 0,
+						42:    -5e6,
+					},
+					Locked: map[uint32]uint64{
+						42: 5e6,
+					},
+					Pending:  map[uint32]uint64{},
+					Reserved: map[uint32]uint64{},
+				},
+				CEXOrderEvent: &CEXOrderEvent{
+					BaseID:  42,
+					QuoteID: 60002,
+					ID:      tradeID,
+					Qty:     5e6,
+					Market:  true,
+					Sell:    true,
+				},
+			},
+			updates: []*updateAndStats{
+				{
+					update: &libxc.Trade{
+						ID:          tradeID,
+						BaseID:      42,
+						QuoteID:     60002,
+						Market:      true,
+						Sell:        true,
+						Qty:         5e6,
+						BaseFilled:  5e6,
+						QuoteFilled: 10e6,
+						Complete:    true,
+					},
+					event: &MarketMakingEvent{
+						ID:      1,
+						Pending: false,
+						BalanceEffects: &BalanceEffects{
+							Settled: map[uint32]int64{
+								42:    -5e6,
+								60002: 10e6,
+							},
+							Locked:   map[uint32]uint64{},
+							Pending:  map[uint32]uint64{},
+							Reserved: map[uint32]uint64{},
+						},
+						CEXOrderEvent: &CEXOrderEvent{
+							BaseID:      42,
+							QuoteID:     60002,
+							ID:          tradeID,
+							Qty:         5e6,
+							Market:      true,
+							Sell:        true,
+							BaseFilled:  5e6,
+							QuoteFilled: 10e6,
+						},
+					},
+					stats: &RunStats{
+						CEXBalances: map[uint32]*BotBalance{
+							42:    {5e6, 0, 0, 0},
+							0:     {1e7, 0, 0, 0},
+							60002: {10e6, 0, 0, 0},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:      "fully filled market buy",
+			baseID:    42,
+			quoteID:   60002,
+			sell:      false,
+			orderType: libxc.OrderTypeMarket,
+			qty:       100e6,
+			balances: map[uint32]uint64{
+				42:    1e7,
+				0:     1e7,
+				60002: 100e6,
+			},
+			postTradeBalances: map[uint32]*BotBalance{
+				42: {
+					Available: 1e7,
+				},
+				60002: {
+					Available: 0,
+					Locked:    100e6,
+				},
+				0: {
+					Available: 1e7,
+				},
+			},
+			postTradeEvent: &MarketMakingEvent{
+				ID:      1,
+				Pending: true,
+				BalanceEffects: &BalanceEffects{
+					Settled: map[uint32]int64{
+						60002: -100e6,
+						42:    0,
+					},
+					Locked: map[uint32]uint64{
+						60002: 100e6,
+					},
+					Pending:  map[uint32]uint64{},
+					Reserved: map[uint32]uint64{},
+				},
+				CEXOrderEvent: &CEXOrderEvent{
+					BaseID:  42,
+					QuoteID: 60002,
+					ID:      tradeID,
+					Qty:     100e6,
+					Sell:    false,
+					Market:  true,
+				},
+			},
+			updates: []*updateAndStats{
+				{
+					update: &libxc.Trade{
+						ID:          tradeID,
+						BaseID:      42,
+						QuoteID:     60002,
+						Qty:         100e6,
+						BaseFilled:  10e8,
+						QuoteFilled: 100e6,
+						Complete:    true,
+						Market:      true,
+					},
+					event: &MarketMakingEvent{
+						ID:      1,
+						Pending: false,
+						BalanceEffects: &BalanceEffects{
+							Settled: map[uint32]int64{
+								60002: -100e6,
+								42:    10e8,
+							},
+							Locked:   map[uint32]uint64{},
+							Pending:  map[uint32]uint64{},
+							Reserved: map[uint32]uint64{},
+						},
+						CEXOrderEvent: &CEXOrderEvent{
+							ID:          tradeID,
+							BaseID:      42,
+							QuoteID:     60002,
+							Qty:         100e6,
+							Sell:        false,
+							Market:      true,
+							BaseFilled:  10e8,
+							QuoteFilled: 100e6,
+						},
+					},
+					stats: &RunStats{
+						CEXBalances: map[uint32]*BotBalance{
+							42:    {1e7 + 10e8, 0, 0, 0},
+							0:     {1e7, 0, 0, 0},
+							60002: {0, 0, 0, 0},
+						},
+					},
+				},
+			},
+		},
 	}
 
 	botCfg := &BotConfig{
 		Host:    "host1",
-		BaseID:  baseID,
-		QuoteID: quoteID,
+		BaseID:  dexBaseID,
+		QuoteID: dexQuoteID,
 		CEXName: "Binance",
 	}
 
@@ -5173,7 +5782,7 @@ func TestCEXTrade(t *testing.T) {
 
 		adaptor.SubscribeTradeUpdates()
 
-		_, err = adaptor.CEXTrade(ctx, baseID, quoteID, test.sell, test.rate, test.qty)
+		_, err = adaptor.CEXTrade(ctx, test.baseID, test.quoteID, test.sell, test.rate, test.qty, test.orderType)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("%s: expected error but did not get", test.name)
@@ -5208,7 +5817,7 @@ func TestCEXTrade(t *testing.T) {
 				step = fmt.Sprintf("after update #%d", i)
 			}
 			if !eventLogDB.latestStoredEventEquals(expected) {
-				t.Fatalf("%s: unexpected event %s. want:\n%+v,\ngot:\n%+v", test.name, step, expected, eventLogDB.latestStoredEvent())
+				t.Fatalf("%s: unexpected event %s. want:\n%s,\ngot:\n%s", test.name, step, spew.Sdump(expected), spew.Sdump(eventLogDB.latestStoredEvent()))
 			}
 		}
 
@@ -5217,8 +5826,8 @@ func TestCEXTrade(t *testing.T) {
 		for i, updateAndStats := range test.updates {
 			update := updateAndStats.update
 			update.ID = tradeID
-			update.BaseID = baseID
-			update.QuoteID = quoteID
+			update.BaseID = test.baseID
+			update.QuoteID = test.quoteID
 			update.Sell = test.sell
 			eventLogDB.storedEventsMtx.Lock()
 			eventLogDB.storedEvents = []*MarketMakingEvent{}

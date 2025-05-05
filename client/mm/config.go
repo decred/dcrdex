@@ -199,7 +199,7 @@ func (c *BotConfig) validate() error {
 	} else if c.SimpleArbConfig != nil {
 		return c.SimpleArbConfig.validate()
 	} else if c.ArbMarketMakerConfig != nil {
-		return c.ArbMarketMakerConfig.validate()
+		return c.ArbMarketMakerConfig.validate(c.BaseID, c.QuoteID)
 	}
 
 	return fmt.Errorf("no bot config set")
