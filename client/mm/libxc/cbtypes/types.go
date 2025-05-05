@@ -54,16 +54,25 @@ type CancelResponse struct {
 }
 
 type OrderRequest struct {
-	ClientOrderID      string `json:"client_order_id"`
-	ProductID          string `json:"product_id"`
-	Side               string `json:"side"` // "BUY" or "SELL"
-	OrderConfiguration struct {
-		Limit struct {
-			BaseSize   string `json:"base_size"`
-			LimitPrice string `json:"limit_price"`
-			PostOnly   bool   `json:"post_only"`
-		} `json:"limit_limit_gtc"`
-	} `json:"order_configuration"`
+	ClientOrderID string `json:"client_order_id"`
+	ProductID     string `json:"product_id"`
+	Side          string `json:"side"`                         // "BUY" or "SELL"
+	OrderConfig   any    `json:"attached_order_configuration"` // LimitOrderConfig or MarketOrderConfig
+}
+
+type LimitOrderConfig struct {
+	Limit struct {
+		BaseSize   string `json:"base_size"`
+		LimitPrice string `json:"limit_price"`
+		PostOnly   bool   `json:"post_only"`
+	} `json:"limit_limit_gtc"`
+}
+
+type MarketOrderConfig struct {
+	Market struct {
+		BaseSize  string `json:"base_size"`
+		QuoteSize string `json:"quote_size"`
+	} `json:"market_market_ioc"`
 }
 
 type OrderResponse struct {
@@ -165,15 +174,15 @@ type AccountsResult struct {
 }
 
 type Market struct {
-	ProductID             string `json:"product_id"`
-	Price                 string `json:"price"`
-	DayPriceChangePctStr  string `json:"price_percentage_change_24h"`
-	Volume                string `json:"volume_24h"`
-	DayVolumeChangePctStr string `json:"volume_percentage_change_24h"`
-	BaseIncrement         string `json:"base_increment"`
-	// QuoteIncrement           float64 `json:"quote_increment,string"`
-	// QuoteMinSize             float64 `json:"quote_min_size,string"`
-	// QuoteMaxSize             float64 `json:"quote_max_size,string"`
+	ProductID                string `json:"product_id"`
+	Price                    string `json:"price"`
+	DayPriceChangePctStr     string `json:"price_percentage_change_24h"`
+	Volume                   string `json:"volume_24h"`
+	DayVolumeChangePctStr    string `json:"volume_percentage_change_24h"`
+	BaseIncrement            string `json:"base_increment"`
+	QuoteIncrement           string `json:"quote_increment"`
+	QuoteMinSize             string `json:"quote_min_size"`
+	QuoteMaxSize             string `json:"quote_max_size"`
 	BaseMinSize              string `json:"base_min_size"`
 	BaseMaxSize              string `json:"base_max_size"`
 	BaseName                 string `json:"base_name"`
@@ -205,10 +214,13 @@ type Market struct {
 	// FutureProductDetails struct { ... } `json:"future_product_details"`
 
 	// These are not in the response, but calculated.
-	RateStep uint64
-	LotSize  uint64
-	MaxQty   uint64
-	MinQty   uint64
+	RateStep     uint64
+	BaseLotSize  uint64
+	QuoteLotSize uint64
+	MaxBaseQty   uint64
+	MinBaseQty   uint64
+	MaxQuoteQty  uint64
+	MinQuoteQty  uint64
 }
 
 type ProductsResult struct {
