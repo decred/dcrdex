@@ -2254,7 +2254,7 @@ func (u *unifiedExchangeAdaptor) CEXTrade(ctx context.Context, baseID, quoteID u
 
 	if trade.Complete {
 		diffs := make(map[uint32]int64)
-		balanceEffects := cexTradeBalanceEffects(trade)
+		balanceEffects := cexTradeBalanceEffects(trade, u.log)
 		for assetID, v := range balanceEffects.Settled {
 			u.baseCexBalances[assetID] += v
 			diffs[assetID] = v
