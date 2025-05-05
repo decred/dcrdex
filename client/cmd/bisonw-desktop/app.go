@@ -432,7 +432,7 @@ func runWebview(url string) {
 
 	width, height := limitedWindowWidthAndHeight(float64(C.display_width()), float64(C.display_height()))
 
-	w.SetSize(width, height, webview.HintNone)
+	w.SetSize(int(width), int(height), webview.HintNone)
 	w.Navigate(url)
 	bindJSFunctions(w)
 	w.Run()
