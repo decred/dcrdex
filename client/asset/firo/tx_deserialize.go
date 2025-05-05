@@ -215,7 +215,8 @@ func deserializeTransaction(r io.Reader) (*txn, error) {
 		TransactionProviderUpdateRevoke,
 		TransactionCoinbase,
 		TransactionLelantus,
-		TransactionSpark:
+		TransactionSpark,
+		TransactionAlias:
 		{
 			deserializeTx(dec, &tx, tx.txType)
 		}
@@ -223,11 +224,13 @@ func deserializeTransaction(r io.Reader) (*txn, error) {
 		err = deserializeNonSpendingTx(dec, &tx, tx.txType)
 	case TransactionSpork:
 		err = deserializeNonSpendingTx(dec, &tx, tx.txType)
-	case TransactionAlias:
-		err = fmt.Errorf("TRANSACTION_ALIAS transaction type - wtf")
 	default:
 		err = fmt.Errorf("unknown transaction type %d", tx.txType)
 	}
+
+	// TRANSACTION_ALIAS is a regular spark spend transaction, but contains
+	// additional info, it is spark name transaction, so in that tx besides
+	// spark spend outputs you also have data about created/modified spark name.
 
 	return &tx, err
 }
