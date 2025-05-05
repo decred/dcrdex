@@ -787,6 +787,11 @@ func (m *MarketMaker) cexInUse(cexName string) bool {
 
 func (m *MarketMaker) newBot(cfg *BotConfig, adaptorCfg *exchangeAdaptorCfg) (bot, error) {
 	mktID := dexMarketID(cfg.Host, cfg.BaseID, cfg.QuoteID)
+
+	if err := cfg.validate(); err != nil {
+		return nil, fmt.Errorf("invalid bot config: %w", err)
+	}
+
 	switch {
 	case cfg.ArbMarketMakerConfig != nil:
 		return newArbMarketMaker(cfg, adaptorCfg, m.log.SubLogger(fmt.Sprintf("AMM-%s", mktID)))

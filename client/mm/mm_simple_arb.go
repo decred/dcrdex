@@ -148,7 +148,7 @@ func (a *simpleArbMarketMaker) arbExistsOnSide(sellOnDEX bool) (exists bool, lot
 			return false, 0, 0, 0, fmt.Errorf("error checking dex balance: %w", err)
 		}
 
-		cexSufficient := a.cex.SufficientBalanceForCEXTrade(a.baseID, a.quoteID, !sellOnDEX, cexExtrema, numLots*lotSize)
+		cexSufficient := a.cex.SufficientBalanceForCEXTrade(a.baseID, a.quoteID, !sellOnDEX, cexExtrema, numLots*lotSize, libxc.OrderTypeLimit)
 		if !dexSufficient || !cexSufficient {
 			if numLots == 1 {
 				return false, 0, 0, 0, nil
@@ -224,7 +224,7 @@ func (a *simpleArbMarketMaker) executeArb(sellOnDex bool, lotsToArb, dexRate, ce
 	defer a.activeArbsMtx.Unlock()
 
 	// Place cex order first. If placing dex order fails then can freely cancel cex order.
-	cexTrade, err := a.cex.CEXTrade(a.ctx, a.baseID, a.quoteID, !sellOnDex, cexRate, lotsToArb*lotSize)
+	cexTrade, err := a.cex.CEXTrade(a.ctx, a.baseID, a.quoteID, !sellOnDex, cexRate, lotsToArb*lotSize, libxc.OrderTypeLimit)
 	if err != nil {
 		a.log.Errorf("error placing cex order: %v", err)
 		return
@@ -426,7 +426,7 @@ func (a *simpleArbMarketMaker) rebalance(newEpoch uint64) {
 }
 
 func (a *simpleArbMarketMaker) distribution(additionalDEX, additionalCEX map[uint32]uint64) (dist *distribution, err error) {
-	sellVWAP, buyVWAP, err := a.cexCounterRates(1, 1)
+	sellVWAP, buyVWAP, err := a.cexCounterRates(1, 1, nil)
 	if err != nil {
 		return nil, fmt.Errorf("error getting cex counter-rates: %w", err)
 	}
@@ -527,7 +527,7 @@ func (a *simpleArbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, er
 }
 
 func (a *simpleArbMarketMaker) registerFeeGap() {
-	feeGap, err := feeGap(a.core, a.CEX, a.baseID, a.quoteID, a.lotSize.Load())
+	feeGap, err := feeGap(a.core, nil, a.CEX, a.market)
 	if err != nil {
 		a.log.Warnf("error getting fee-gap stats: %v", err)
 		return

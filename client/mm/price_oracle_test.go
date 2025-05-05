@@ -98,8 +98,12 @@ func testSpreader(t *testing.T, spreader Spreader, baseSymbol, quoteSymbol strin
 	fmt.Printf("Fetched: sell = %f, buy = %f \n", sell, buy)
 }
 
-func TestFetchBinanceSpread(t *testing.T) {
-	testSpreader(t, fetchBinanceSpread, "dcr", "btc")
+func TestFetchBinanceGlobalSpread(t *testing.T) {
+	testSpreader(t, fetchBinanceGlobalSpread, "dcr", "btc")
+}
+
+func TestFetchBinanceUSSpread(t *testing.T) {
+	testSpreader(t, fetchBinanceUSSpread, "dcr", "btc")
 }
 
 func TestFetchCoinbaseSpread(t *testing.T) {
