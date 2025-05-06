@@ -3018,7 +3018,7 @@ func (u *unifiedExchangeAdaptor) optimizeTransfers(dist *distribution, dexSellLo
 					return
 				}
 			}
-			// TODO: Use actual fee estimates.
+			// TODO: Use actual fee rate estimates.
 			if u.baseID == 0 || u.baseID == 42 {
 				fees++
 			}

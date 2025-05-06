@@ -151,7 +151,7 @@ func (input *Input) Confirmations(ctx context.Context) (int64, error) {
 
 // ID returns the coin ID.
 func (input *Input) ID() []byte {
-	return toCoinID(&input.tx.hash, input.vin)
+	return ToCoinID(&input.tx.hash, input.vin)
 }
 
 // spendsCoin checks whether a particular coin is spent in this coin's tx.
@@ -228,7 +228,7 @@ func (output *Output) SpendSize() uint32 {
 
 // ID returns the coin ID.
 func (output *Output) ID() []byte {
-	return toCoinID(&output.tx.hash, output.vout)
+	return ToCoinID(&output.tx.hash, output.vout)
 }
 
 // Value is the output value, in atoms.

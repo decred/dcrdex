@@ -2271,7 +2271,7 @@ export default class MarketsPage extends BasePage {
     const { page, market } = this
     if (!swap.estimate || !redeem.estimate) {
       Doc.hide(page.vPreorderEstimates)
-      return // preOrder may return just options, no fee estimates
+      return // preOrder may return just options, no fee rate estimates
     }
     Doc.show(page.vPreorderEstimates)
     const { baseUnitInfo, quoteUnitInfo, rateConversionFactor } = market
@@ -2326,7 +2326,7 @@ export default class MarketsPage extends BasePage {
     const swapped = swap.estimate.value || 0
     const swappedInParentUnits = fromExchangeRate > 0 ? swapped / fromExchangeRate : swapped
 
-    // Set swap fee estimates in the details pane.
+    // Set swap fee rate estimates in the details pane.
     const bestSwapPct = swap.estimate.realisticBestCase / swappedInParentUnits * 100
     page.vSwapFeesLowPct.textContent = fromExchangeRate <= 0 ? '' : `(${fmtPct(bestSwapPct)}%)`
     page.vSwapFeesLow.textContent = Doc.formatCoinValue(swap.estimate.realisticBestCase, fromFeeAssetUI)
@@ -2339,7 +2339,7 @@ export default class MarketsPage extends BasePage {
     page.vSwapFeesMaxPct.textContent = fromExchangeRate <= 0 ? '' : `(${fmtPct(swapFeesMaxPct)}%)`
     page.vSwapFeesMax.textContent = Doc.formatCoinValue(swap.estimate.maxFees, fromFeeAssetUI)
 
-    // Set redemption fee estimates in the details pane.
+    // Set redemption fee rate estimates in the details pane.
     const midGap = this.midGap()
     const estRate = midGap || order.rate / rateConversionFactor
     const received = order.sell ? swapped * estRate : swapped / estRate

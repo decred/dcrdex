@@ -345,7 +345,7 @@ func (op *output) Value() uint64 {
 // ID is the output's coin ID. Part of the asset.Coin interface. For DCR, the
 // coin ID is 36 bytes = 32 bytes tx hash + 4 bytes big-endian vout.
 func (op *output) ID() dex.Bytes {
-	return toCoinID(op.txHash(), op.vout())
+	return ToCoinID(op.txHash(), op.vout())
 }
 
 func (op *output) TxID() string {
@@ -1288,7 +1288,7 @@ func (dcr *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
 		if err != nil {
 			dcr.log.Warnf("Failed to get local fee rate estimate: %v", err)
 		} else { // dcrPerKB == 0
-			dcr.log.Warnf("Local fee estimate is zero.")
+			dcr.log.Warnf("Local fee rate estimate is zero.")
 		}
 	}
 
@@ -3334,7 +3334,7 @@ func (dcr *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 	coinIDs := make([]dex.Bytes, 0, len(form.Redemptions))
 	dcr.mempoolRedeemsMtx.Lock()
 	for i := range form.Redemptions {
-		coinIDs = append(coinIDs, toCoinID(txHash, uint32(i)))
+		coinIDs = append(coinIDs, ToCoinID(txHash, uint32(i)))
 		var secretHash [32]byte
 		copy(secretHash[:], form.Redemptions[i].Spends.SecretHash)
 		dcr.mempoolRedeems[secretHash] = &mempoolRedeem{txHash: *txHash, firstSeen: time.Now()}
@@ -3945,7 +3945,7 @@ func (dcr *ExchangeWallet) findRedemptionsInTx(scanPoint string, tx *wire.MsgTx,
 				dcr.log.Infof("Redemption for contract %s found in tx input %s:%d in %s",
 					contractOutpoint.String(), redeemTxHash, i, scanPoint)
 				req.resultChan <- &findRedemptionResult{
-					RedemptionCoinID: toCoinID(&redeemTxHash, uint32(i)),
+					RedemptionCoinID: ToCoinID(&redeemTxHash, uint32(i)),
 					Secret:           secret,
 				}
 			}
@@ -4009,7 +4009,7 @@ func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes, feeRate uint64) (d
 		Fees:   fee,
 	}, refundHash, true)
 
-	return toCoinID(refundHash, 0), nil
+	return ToCoinID(refundHash, 0), nil
 }
 
 // refundTx crates and signs a contract's refund transaction. If refundAddr is
@@ -4358,7 +4358,7 @@ func (dcr *ExchangeWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime 
 		Version:    ver,
 		AssetID:    BipID,
 		Amount:     amt,
-		CoinID:     toCoinID(txHash, 0),
+		CoinID:     ToCoinID(txHash, 0),
 		Data:       bondScript,
 		SignedTx:   signedTxBytes,
 		UnsignedTx: unsignedTxBytes,
@@ -4647,7 +4647,7 @@ func (dcr *ExchangeWallet) SendTransaction(rawTx []byte) ([]byte, error) {
 		return nil, translateRPCCancelErr(err)
 	}
 	dcr.markTxAsSubmitted(txHash)
-	return toCoinID(txHash, 0), nil
+	return ToCoinID(txHash, 0), nil
 }
 
 // Withdraw withdraws funds to the specified address. Fees are subtracted from
@@ -5306,7 +5306,7 @@ var dummyP2PKHScript = []byte{0x76, 0xa9, 0x14, 0xe4, 0x28, 0x61, 0xa,
 	0x58, 0x7a, 0xc9, 0xe7, 0x2c, 0x79, 0x7b, 0x88, 0xac,
 }
 
-// EstimateSendTxFee returns a tx fee estimate for sending or withdrawing the
+// EstimateSendTxFee returns a tx fee rate estimate for sending or withdrawing the
 // provided amount using the provided feeRate.
 func (dcr *ExchangeWallet) EstimateSendTxFee(address string, sendAmount, feeRate uint64, subtract, _ bool) (fee uint64, isValidAddress bool, err error) {
 	if sendAmount == 0 {
@@ -6868,8 +6868,8 @@ func toAtoms(v float64) uint64 {
 	return uint64(math.Round(v * conventionalConversionFactor))
 }
 
-// toCoinID converts the tx hash and vout to a coin ID, as a []byte.
-func toCoinID(txHash *chainhash.Hash, vout uint32) []byte {
+// ToCoinID converts the tx hash and vout to a coin ID, as a []byte.
+func ToCoinID(txHash *chainhash.Hash, vout uint32) []byte {
 	coinID := make([]byte, chainhash.HashSize+4)
 	copy(coinID[:chainhash.HashSize], txHash[:])
 	binary.BigEndian.PutUint32(coinID[chainhash.HashSize:], vout)
@@ -7176,7 +7176,7 @@ func (dcr *ExchangeWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset
 			return &asset.ConfirmRedemptionStatus{
 				Confs:  confs,
 				Req:    requiredRedeemConfirms,
-				CoinID: toCoinID(&hash, uint32(vin)),
+				CoinID: ToCoinID(&hash, uint32(vin)),
 			}, nil
 		}
 		dcr.log.Warnf("Contract coin %v spent by someone but not sure who.", redemption.Spends.Coin.ID())
@@ -7324,7 +7324,7 @@ func (dcr *ExchangeWallet) RedeemGeocode(code []byte, msg string) (dex.Bytes, ui
 		return nil, 0, fmt.Errorf("error broadcasting tx: %w", err)
 	}
 
-	return toCoinID(redeemHash, 0), win, nil
+	return ToCoinID(redeemHash, 0), win, nil
 }
 
 func getDcrdataTxs(ctx context.Context, addr string, net dex.Network) (txs []*wire.MsgTx, _ error) {

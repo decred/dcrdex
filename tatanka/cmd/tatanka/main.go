@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/feerates"
 	"decred.org/dcrdex/dex/fiatrates"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/tatanka"
@@ -30,6 +31,7 @@ const (
 	missingPort           = "missing port in address"
 	defaultHSHost         = defaultHost // should be a loopback address
 	defaultHSPort         = "7252"
+	defaultLogLevel       = "debug"
 )
 
 var (
@@ -106,12 +108,13 @@ type Config struct {
 	Testnet bool `long:"testnet" description:"Use the test network (default mainnet)."`
 	Simnet  bool `long:"simnet" description:"Use the simulation test network (default mainnet)."`
 
-	CertPath      string   `long:"tlscert" description:"TLS certificate file."`
-	KeyPath       string   `long:"tlskey" description:"TLS private key file."`
-	Listeners     []string `long:"listen" description:"IP addresses on which the RPC server should listen for incoming connections."`
-	NoTLS         bool     `long:"notls" description:"Run without TLS encryption."`
-	AltDNSNames   []string `long:"altdnsnames" description:"A list of hostnames to include in the RPC certificate (X509v3 Subject Alternative Name)."`
-	HiddenService string   `long:"hiddenservice" description:"A host:port on which the RPC server should listen for incoming hidden service connections. No TLS is used for these connections."`
+	CertPath         string   `long:"tlscert" description:"TLS certificate file."`
+	KeyPath          string   `long:"tlskey" description:"TLS private key file."`
+	Listeners        []string `long:"listen" description:"IP addresses on which the RPC server should listen for incoming connections."`
+	NoTLS            bool     `long:"notls" description:"Run without TLS encryption."`
+	AltDNSNames      []string `long:"altdnsnames" description:"A list of hostnames to include in the RPC certificate (X509v3 Subject Alternative Name)."`
+	HiddenService    string   `long:"hiddenservice" description:"A host:port on which the RPC server should listen for incoming hidden service connections. No TLS is used for these connections."`
+	feerateOracleCfg feerates.Config
 
 	WebAddr string `long:"webaddr" description:"The public facing address by which peers should connect."`
 
@@ -214,6 +217,10 @@ func config() (*dex.LoggerMaker, *Config) {
 		if err != nil {
 			emitConfigError(err.Error())
 		}
+	}
+
+	if cfg.DebugLevel == "" {
+		cfg.DebugLevel = defaultLogLevel
 	}
 
 	// Create the loggers: Parse and validate the debug level string, create the
