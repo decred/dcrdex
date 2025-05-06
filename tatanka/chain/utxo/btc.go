@@ -174,6 +174,7 @@ func (c *bitcoinChain) monitorFees(ctx context.Context) {
 		if tip != nil && *tip == *newTip {
 			continue
 		}
+		tip = newTip
 		c.connected.Store(true)
 		// estimatesmartfee 1 returns extremely high rates on DCR.
 		estimateFeeResult, err := c.cl.EstimateSmartFee(ctx, 2, chainjson.EstimateSmartFeeConservative)
@@ -195,9 +196,7 @@ func (c *bitcoinChain) monitorFees(ctx context.Context) {
 		case <-time.After(time.Second * 5):
 			c.log.Errorf("fee channel is blocking")
 		}
-
 	}
-
 }
 
 func (c *bitcoinChain) callHashGetter(ctx context.Context, method string, args []any) (*chainhash.Hash, error) {

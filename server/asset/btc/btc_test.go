@@ -438,7 +438,7 @@ func testRawTransactionVerbose(msgTx *wire.MsgTx, txid, blockHash *chainhash.Has
 }
 
 // Add a transaction output and it's getrawtransaction data.
-func testAddTxOut(msgTx *wire.MsgTx, vout uint32, txHash, blockHash *chainhash.Hash, blockHeight, confirmations int64) *btcjson.GetTxOutResult {
+func testAddTxOut(msgTx *wire.MsgTx, vout uint32, txHash, blockHash *chainhash.Hash, confirmations int64) *btcjson.GetTxOutResult {
 	testChainMtx.Lock()
 	defer testChainMtx.Unlock()
 	txOut := testGetTxOut(confirmations, msgTx.TxOut[vout].Value, msgTx.TxOut[vout].PkScript)
@@ -838,7 +838,7 @@ func TestUTXOs(t *testing.T) {
 	msg := testMakeMsgTx(false)
 	// For a regular test tx, the output is at output index 0. Pass nil for the
 	// block hash and 0 for the block height and confirmations for a mempool tx.
-	txout := testAddTxOut(msg.tx, msg.vout, txHash, nil, 0, 0)
+	txout := testAddTxOut(msg.tx, msg.vout, txHash, nil, 0)
 	// Set the value for this one.
 	txout.Value = 5.0
 	// There is no block info to add, since this is a mempool transaction
@@ -858,7 +858,7 @@ func TestUTXOs(t *testing.T) {
 	// Now "mine" the transaction.
 	testAddBlockVerbose(blockHash, nil, 1, txHeight)
 	// Overwrite the test blockchain transaction details.
-	testAddTxOut(msg.tx, 0, txHash, blockHash, int64(txHeight), 1)
+	testAddTxOut(msg.tx, 0, txHash, blockHash, 1)
 	// "mining" the block should cause a reorg.
 	confs, err := utxo.Confirmations(context.Background())
 	if err != nil {
@@ -881,7 +881,7 @@ func TestUTXOs(t *testing.T) {
 	blockHash = testAddBlockVerbose(nil, nil, 1, txHeight)
 	txHash = randomHash()
 	msg = testMakeMsgTx(false)
-	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), 1)
+	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, 1)
 	utxo, err = btc.utxo(txHash, msg.vout, nil)
 	if err != nil {
 		t.Fatalf("case 2 - unexpected error: %v", err)
@@ -905,7 +905,7 @@ func TestUTXOs(t *testing.T) {
 	msg = testMakeMsgTx(false)
 	// make the script nonsense.
 	msg.tx.TxOut[0].PkScript = []byte{0x00, 0x01, 0x02, 0x03}
-	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), 1)
+	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, 1)
 	_, err = btc.utxo(txHash, msg.vout, nil)
 	if err == nil {
 		t.Fatalf("case 4 - received no error for a UTXO with wrong script type")
@@ -916,7 +916,7 @@ func TestUTXOs(t *testing.T) {
 	txHash = randomHash()
 	blockHash = testAddBlockVerbose(nil, nil, 1, txHeight)
 	msg = testMakeMsgTx(false)
-	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), 1)
+	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, 1)
 	utxo, err = btc.utxo(txHash, msg.vout, nil)
 	if err != nil {
 		t.Fatalf("case 5 - received error for utxo")
@@ -935,7 +935,7 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 5 - received no error for orphaned transaction")
 	}
 	// Now put it back in mempool and check again.
-	testAddTxOut(msg.tx, msg.vout, txHash, nil, 0, 0)
+	testAddTxOut(msg.tx, msg.vout, txHash, nil, 0)
 	confs, err = utxo.Confirmations(context.Background())
 	if err != nil {
 		t.Fatalf("case 5 - error checking confirmations on orphaned transaction back in mempool: %v", err)
@@ -950,7 +950,7 @@ func TestUTXOs(t *testing.T) {
 	txHash = randomHash()
 	blockHash = testAddBlockVerbose(nil, nil, 1, txHeight)
 	msgMultiSig := testMsgTxP2SHMofN(1, 2, false)
-	testAddTxOut(msgMultiSig.tx, msgMultiSig.vout, txHash, blockHash, int64(txHeight), 1)
+	testAddTxOut(msgMultiSig.tx, msgMultiSig.vout, txHash, blockHash, 1)
 	// First try to get the UTXO without providing the raw script.
 	_, err = btc.utxo(txHash, msgMultiSig.vout, nil)
 	if err == nil {
@@ -979,7 +979,7 @@ func TestUTXOs(t *testing.T) {
 	txHash = randomHash()
 	blockHash = testAddBlockVerbose(nil, nil, 1, txHeight)
 	msgMultiSig = testMsgTxP2SHMofN(2, 2, false)
-	testAddTxOut(msgMultiSig.tx, msgMultiSig.vout, txHash, blockHash, int64(txHeight), 1)
+	testAddTxOut(msgMultiSig.tx, msgMultiSig.vout, txHash, blockHash, 1)
 	utxo, err = btc.utxo(txHash, msgMultiSig.vout, msgMultiSig.script)
 	if err != nil {
 		t.Fatalf("case 7 - received error for utxo: %v", err)
@@ -1000,7 +1000,7 @@ func TestUTXOs(t *testing.T) {
 	blockHash = testAddBlockVerbose(nil, nil, 1, txHeight)
 	txHash = randomHash()
 	msg = testMakeMsgTx(true) // true - P2WPKH at vout 0
-	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), 1)
+	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, 1)
 	utxo, err = btc.utxo(txHash, msg.vout, nil)
 	if err != nil {
 		t.Fatalf("case 8 - unexpected error: %v", err)
@@ -1020,7 +1020,7 @@ func TestUTXOs(t *testing.T) {
 	txHash = randomHash()
 	blockHash = testAddBlockVerbose(nil, nil, 1, txHeight)
 	msgMultiSig = testMsgTxP2SHMofN(2, 2, true)
-	testAddTxOut(msgMultiSig.tx, msgMultiSig.vout, txHash, blockHash, int64(txHeight), 1)
+	testAddTxOut(msgMultiSig.tx, msgMultiSig.vout, txHash, blockHash, 1)
 	utxo, err = btc.utxo(txHash, msgMultiSig.vout, msgMultiSig.script)
 	if err != nil {
 		t.Fatalf("case 9 - received error for utxo: %v", err)
@@ -1045,7 +1045,7 @@ func TestUTXOs(t *testing.T) {
 	blockHash = testAddBlockVerbose(nil, nil, 1, txHeight)
 	txHash = randomHash()
 	msg = testMakeMsgTx(false)
-	txOut := testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), 1)
+	txOut := testAddTxOut(msg.tx, msg.vout, txHash, blockHash, 1)
 	txOut.Coinbase = true
 	_, err = btc.utxo(txHash, msg.vout, nil)
 	if err == nil {
@@ -1072,7 +1072,7 @@ func TestUTXOs(t *testing.T) {
 	swap := testMsgTxSwapInit(val, btc.segwit)
 	testAddBlockVerbose(blockHash, nil, 1, txHeight)
 	btcVal := btcutil.Amount(val).ToBTC()
-	testAddTxOut(swap.tx, 0, txHash, blockHash, int64(txHeight), 1).Value = btcVal
+	testAddTxOut(swap.tx, 0, txHash, blockHash, 1).Value = btcVal
 	verboseTx := testChain.txRaws[*txHash]
 
 	spentTxHash := randomHash()
@@ -1309,7 +1309,7 @@ func TestReorg(t *testing.T) {
 	}
 	msg := testMakeMsgTx(false)
 	testAddBlockVerbose(&tip.hash, nil, 1, tipHeight)
-	testAddTxOut(msg.tx, 0, txHash, &tip.hash, int64(tipHeight), 1)
+	testAddTxOut(msg.tx, 0, txHash, &tip.hash, 1)
 	utxo, err := btc.utxo(txHash, msg.vout, nil)
 	if err != nil {
 		t.Fatalf("utxo error 1: %v", err)
@@ -1324,7 +1324,7 @@ func TestReorg(t *testing.T) {
 
 	// Orphan the block and move the transaction to mempool.
 	btc.blockCache.reorg(int64(ancestorHeight))
-	testAddTxOut(msg.tx, 0, txHash, nil, 0, 0)
+	testAddTxOut(msg.tx, 0, txHash, nil, 0)
 	confs, err = utxo.Confirmations(context.Background())
 	if err != nil {
 		t.Fatalf("Confirmations error after reorg: %v", err)
@@ -1341,7 +1341,7 @@ func TestReorg(t *testing.T) {
 		t.Fatalf("did not find newly connected block at height %d, likely cache sync issue", tipHeight)
 	}
 	testAddBlockVerbose(&tip.hash, nil, 1, tipHeight)
-	testAddTxOut(msg.tx, 0, txHash, &tip.hash, int64(tipHeight), 1)
+	testAddTxOut(msg.tx, 0, txHash, &tip.hash, 1)
 	utxo, err = btc.utxo(txHash, msg.vout, nil)
 	if err != nil {
 		t.Fatalf("utxo error 2: %v", err)
@@ -1350,7 +1350,7 @@ func TestReorg(t *testing.T) {
 	// Reorg and add a single block with the transaction.
 	btc.blockCache.reorg(int64(ancestorHeight))
 	newBlockHash := randomHash()
-	testAddTxOut(msg.tx, 0, txHash, newBlockHash, int64(ancestorHeight+1), 1)
+	testAddTxOut(msg.tx, 0, txHash, newBlockHash, 1)
 	testAddBlockVerbose(newBlockHash, ancestorHash, 1, ancestorHeight+1)
 	time.Sleep(blockPollDelay)
 	confs, err = utxo.Confirmations(context.Background())
@@ -1379,7 +1379,7 @@ func TestAuxiliary(t *testing.T) {
 	txHash, _ := chainhash.NewHashFromStr(txid)
 	txHeight := rand.Uint32()
 	blockHash := testAddBlockVerbose(nil, nil, 1, txHeight)
-	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), maturity)
+	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, maturity)
 	coinID := toCoinID(txHash, msg.vout)
 
 	verboseTx := testChain.txRaws[*txHash]
