@@ -31,7 +31,7 @@ func deserializeBlock(net *chaincfg.Params, blk []byte) (*wire.MsgBlock, error) 
 	// hash header
 	var header []byte
 	switch net.Name {
-	case "mainnet", "testnet3, testnet":
+	case "mainnet", "testnet3", "testnet":
 		header = make([]byte, ProgpowFullHeaderLength)
 		copy(header, blk[:ProgpowFullHeaderLength])
 	case "regtest":
