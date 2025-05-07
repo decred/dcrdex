@@ -219,9 +219,8 @@ func deserializeTransaction(r io.Reader) (*txn, error) {
 		{
 			deserializeTx(dec, &tx, tx.txType)
 		}
-	case TransactionQuorumCommitment:
-		err = deserializeNonSpendingTx(dec, &tx, tx.txType)
-	case TransactionSpork:
+	case TransactionQuorumCommitment,
+		TransactionSpork:
 		err = deserializeNonSpendingTx(dec, &tx, tx.txType)
 	default:
 		err = fmt.Errorf("unknown transaction type %d", tx.txType)
@@ -286,11 +285,7 @@ func deserializeTx(dec *decoder, tx *txn, txType TxType) error {
 
 	// read vExtraPayload
 	_, err = dec.readVarBytes()
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return err
 }
 
 // deserializeNonSpendingTx deserializes spork, quorum txs which have no inputs and
@@ -320,9 +315,5 @@ func deserializeNonSpendingTx(dec *decoder, tx *txn, txType TxType) error {
 	}
 
 	_, err = dec.readVarBytes()
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return err
 }
