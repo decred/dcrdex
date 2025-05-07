@@ -115,7 +115,7 @@ func (t *Tatanka) handleClientConnect(cl tanka.Sender, msg *msgjson.Message) *ms
 
 	pp := &peer{Peer: p, Sender: cl, rrs: rrs}
 	if pp.banned() {
-		return msgjson.NewError(mj.ErrBannned, "your tier is <= 0. post some bonds")
+		return msgjson.NewError(mj.ErrBanned, "your tier is <= 0. post some bonds")
 	}
 
 	bondTier := p.BondTier()

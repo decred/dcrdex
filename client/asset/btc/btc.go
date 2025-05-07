@@ -5477,8 +5477,9 @@ func (btc *intermediaryWallet) FindBond(
 		return nil, fmt.Errorf("invalid best block hash from %s node: %v", btc.symbol, err)
 	}
 	var (
-		blk   *wire.MsgBlock
-		msgTx *wire.MsgTx
+		blk      *wire.MsgBlock
+		msgTx    *wire.MsgTx
+		zeroHash = chainhash.Hash{}
 	)
 out:
 	for {
@@ -5500,7 +5501,7 @@ out:
 			}
 		}
 		blockHash = &blk.Header.PrevBlock
-		if blockHash == nil {
+		if blockHash == nil || *blockHash == zeroHash /* genesis */ {
 			return nil, fmt.Errorf("did not find the bond output %v:%d", txHash, vout)
 		}
 	}
