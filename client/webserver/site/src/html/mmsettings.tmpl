@@ -659,6 +659,7 @@
             <span class="ico-lever fs20 pe-2"></span>
             <span class="fs22">Knobs</span>
           </div>
+
           {{- /* CEX REBALANCE CHECKBOX */ -}}
           <label id="cexRebalanceSettings" for="cexRebalanceCheckbox" class="fs16 d-flex align-items-center justify-content-between mt-2 pt-2 border-top">
             <div class="flex-center">
@@ -666,6 +667,24 @@
               <span>[[[Arbitrage Rebalance]]]</span>
             </div>
             <span class="ico-info fs12" data-tooltip="[[[enable_rebalance_tooltip]]]"></span>
+          </label>
+
+          {{- /* ALLOW EXTERNAL TRANSFERS */ -}}
+          <label id="externalTransfersSettings" for="externalTransfersRadio" class="fs16 d-flex align-items-center justify-content-between mt-1 pt-1 ms-2">
+            <div class="flex-center">
+              <input type="radio" id="externalTransfersRadio" class="form-check-input me-2 mt-0">
+              <span>[[[Allow external transfers]]]</span>
+            </div>
+            <span class="ico-info fs12" data-tooltip="[[[external_transfers_tooltip]]]"></span>
+          </label>
+
+          {{- /* INTERNAL TRANSFERS ONLY */ -}}
+          <label id="internalOnlySettings" for="internalOnlyRadio" class="fs16 d-flex align-items-center justify-content-between mt-1 pt-1 ms-2">
+            <div class="flex-center">
+              <input type="radio" id="internalOnlyRadio" class="form-check-input me-2 mt-0" checked>
+              <span>[[[Internal transfers only]]]</span>
+            </div>
+            <span class="ico-info fs12" data-tooltip="[[[internal_only_tooltip]]]"></span>
           </label>
 
           {{- /* DRIFT TOLERANCE */ -}}
