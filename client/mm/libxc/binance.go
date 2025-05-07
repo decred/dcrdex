@@ -2101,9 +2101,7 @@ func (bnc *binance) checkSubs(ctx context.Context) error {
 
 	var sub []string
 	unsub := make([]string, len(subs))
-	for i, s := range subs {
-		unsub[i] = s
-	}
+	copy(unsub, subs)
 
 out:
 	for _, us := range streams {
