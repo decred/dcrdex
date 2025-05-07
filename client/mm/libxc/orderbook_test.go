@@ -64,7 +64,7 @@ func TestOrderbook(t *testing.T) {
 	if !filled {
 		t.Fatalf("should be filled")
 	}
-	expectedVWAP := uint64((30*bids[0].rate + 30*bids[1].rate + 5*bids[3].rate) / 65)
+	expectedVWAP := (30*bids[0].rate + 30*bids[1].rate + 5*bids[3].rate) / 65
 	if vwap != expectedVWAP {
 		t.Fatalf("wrong vwap. expected %d got %d", expectedVWAP, vwap)
 	}
@@ -76,7 +76,7 @@ func TestOrderbook(t *testing.T) {
 	if !filled {
 		t.Fatalf("should be filled")
 	}
-	expectedVWAP = uint64(400e8)
+	expectedVWAP = 400e8
 	if vwap != expectedVWAP {
 		t.Fatalf("wrong vwap. expected %d got %d", expectedVWAP, vwap)
 	}
@@ -85,7 +85,7 @@ func TestOrderbook(t *testing.T) {
 	}
 
 	quoteBidsQty := quoteBids[0].qty + quoteBids[1].qty
-	expVwap := uint64((quoteBids[0].qty*quoteBids[0].rate + quoteBids[1].qty*quoteBids[1].rate) / quoteBidsQty)
+	expVwap := (quoteBids[0].qty*quoteBids[0].rate + quoteBids[1].qty*quoteBids[1].rate) / quoteBidsQty
 	vwap, extrema, filled = ob.invVWAP(true, quoteBidsQty)
 	if !filled {
 		t.Fatalf("should be filled")
@@ -98,7 +98,7 @@ func TestOrderbook(t *testing.T) {
 	}
 
 	quoteAsksQty := quoteAsks[0].qty + quoteAsks[1].qty
-	expVwap = uint64((quoteAsks[0].qty*quoteAsks[0].rate + quoteAsks[1].qty*quoteAsks[1].rate) / quoteAsksQty)
+	expVwap = (quoteAsks[0].qty*quoteAsks[0].rate + quoteAsks[1].qty*quoteAsks[1].rate) / quoteAsksQty
 	vwap, extrema, filled = ob.invVWAP(false, quoteAsksQty)
 	if !filled {
 		t.Fatalf("should be filled")
@@ -135,11 +135,11 @@ func TestOrderbook(t *testing.T) {
 	if !filled {
 		t.Fatalf("should be filled")
 	}
-	expectedVWAP = uint64((50*uint64(4000e8) + 10*uint64(3000e8) + 5*uint64(400e8)) / 65)
+	expectedVWAP = (50*uint64(4000e8) + 10*uint64(3000e8) + 5*uint64(400e8)) / 65
 	if vwap != expectedVWAP {
 		t.Fatalf("wrong vwap. expected %d got %d", expectedVWAP, vwap)
 	}
-	if extrema != uint64(400e8) {
+	if extrema != 400e8 {
 		t.Fatalf("wrong extrema")
 	}
 
@@ -147,11 +147,11 @@ func TestOrderbook(t *testing.T) {
 	if !filled {
 		t.Fatalf("should be filled")
 	}
-	expectedVWAP = uint64((20*uint64(5000e8) + 35*uint64(4000e8) + 10*uint64(3000e8)) / 65)
+	expectedVWAP = (20*uint64(5000e8) + 35*uint64(4000e8) + 10*uint64(3000e8)) / 65
 	if vwap != expectedVWAP {
 		t.Fatalf("wrong vwap. expected %d got %d", expectedVWAP, vwap)
 	}
-	if extrema != uint64(5000e8) {
+	if extrema != 5000e8 {
 		t.Fatalf("wrong extrema")
 	}
 }
