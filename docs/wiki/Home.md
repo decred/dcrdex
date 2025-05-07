@@ -100,7 +100,7 @@ checkmark in the "native" column, no external software is required.
 | Dogecoin     | x      | [v1.14.7.0](https://dogecoin.com/)                          | x                                                             |                                                                                                   |
 | Zcash        | x      | [v5.4.2](https://z.cash/download/)                          | x                                                             |                                                                                                   |
 | Dash         | x      | [v20.1.1](https://github.com/dashpay/dash/releases)         | x                                                             |                                                                                                   |
-| Firo         | x      | [v0.14.14.0](https://github.com/firoorg/firo/releases)      | [v4.1.5.5](https://github.com/firoorg/electrum-firo/releases) |                                                                                                   |
+| Firo         | x      | [v0.14.14.1](https://github.com/firoorg/firo/releases)      | [v4.1.5.5](https://github.com/firoorg/electrum-firo/releases) |                                                                                                   |
 
 
 # Project History
