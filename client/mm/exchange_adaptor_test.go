@@ -3779,7 +3779,7 @@ func TestDEXTrade(t *testing.T) {
 						},
 						Locked: map[uint32]uint64{
 							42: 0,
-							0:  uint64(5 * quotePerLot1),
+							0:  5 * quotePerLot1,
 						},
 						Reserved: map[uint32]uint64{
 							42: 0,
@@ -3804,7 +3804,7 @@ func TestDEXTrade(t *testing.T) {
 						},
 						Locked: map[uint32]uint64{
 							42: 0,
-							0:  uint64(5 * quotePerLot2),
+							0:  5 * quotePerLot2,
 						},
 						Reserved: map[uint32]uint64{
 							42: 0,
