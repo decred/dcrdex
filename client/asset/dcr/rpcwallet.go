@@ -156,6 +156,7 @@ type rpcClient interface {
 	SetVoteChoice(ctx context.Context, agendaID, choiceID string) error
 	SetTxFee(ctx context.Context, fee dcrutil.Amount) error
 	ListSinceBlock(ctx context.Context, hash *chainhash.Hash) (*walletjson.ListSinceBlockResult, error)
+	GetReceivedByAddressMinConf(ctx context.Context, address stdaddr.Address, minConfs int) (dcrutil.Amount, error)
 }
 
 // newRPCWallet creates an rpcClient and uses it to construct a new instance
@@ -1215,6 +1216,19 @@ func (w *rpcWallet) SetVotingPreferences(ctx context.Context, choices, tSpendPol
 
 func (w *rpcWallet) SetTxFee(ctx context.Context, feePerKB dcrutil.Amount) error {
 	return w.rpcClient.SetTxFee(ctx, feePerKB)
+}
+
+func (w *rpcWallet) AddressUsed(ctx context.Context, addrStr string) (bool, error) {
+	addr, err := stdaddr.DecodeAddress(addrStr, w.chainParams)
+	if err != nil {
+		return false, err
+	}
+	const minConf = 0
+	recv, err := w.rpcClient.GetReceivedByAddressMinConf(ctx, addr, minConf)
+	if err != nil {
+		return false, err
+	}
+	return recv != 0, nil
 }
 
 // anylist is a list of RPC parameters to be converted to []json.RawMessage and

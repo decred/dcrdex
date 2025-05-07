@@ -4016,6 +4016,21 @@ func (c *Core) NewDepositAddress(assetID uint32) (string, error) {
 	return addr, nil
 }
 
+// AddressUsed checks whether an address for a NewAddresser has been used.
+func (c *Core) AddressUsed(assetID uint32, addr string) (bool, error) {
+	w, exists := c.wallet(assetID)
+	if !exists {
+		return false, newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
+	}
+
+	na, ok := w.Wallet.(asset.NewAddresser)
+	if !ok {
+		return false, errors.New("wallet is not a NewAddresser")
+	}
+
+	return na.AddressUsed(addr)
+}
+
 // AutoWalletConfig attempts to load setting from a wallet package's
 // asset.WalletInfo.DefaultConfigPath. If settings are not found, an empty map
 // is returned.
@@ -8328,6 +8343,7 @@ func (c *Core) handleReconnect(host string) {
 		c.log.Errorf("handleReconnect: Unable to apply new configuration for DEX at %s: %v", host, err)
 		return
 	}
+	c.notify(newServerConfigUpdateNote(host))
 
 	type market struct { // for book re-subscribe
 		name  string
