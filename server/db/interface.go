@@ -562,6 +562,35 @@ const (
 	OutcomeOrderCanceled
 )
 
+func (o Outcome) String() string {
+	switch o {
+	case OutcomeForgiven:
+		return "forgiveness"
+	case OutcomePreimageMiss:
+		return "preimage miss"
+	case OutcomePreimageSuccess:
+		return "preimage success"
+	case OutcomeSwapSuccess:
+		return "swap success"
+	case OutcomeNoSwapAsMaker:
+		return "no swap as maker"
+	case OutcomeNoSwapAsTaker:
+		return "no swap as taker"
+	case OutcomeNoRedeemAsMaker:
+		return "no redeem as maker"
+	case OutcomeNoRedeemAsTaker:
+		return "no redeem as taker"
+	case OutcomeOrderCanceled:
+		return "excessive cancels"
+	case OutcomeOrderComplete:
+		return "order complete"
+	case OutcomeInvalid:
+		return "invalid violation"
+	default:
+		return "unknown violation"
+	}
+}
+
 type Outcomer interface {
 	Outcome() Outcome
 	ID() int64

@@ -160,7 +160,7 @@ func (a *Archiver) UpgradeUserReputationV1(
 		}
 	}()
 
-	stmt, err := tx.Prepare(fmt.Sprintf(internal.InsertPoints, a.tables.pointsTable))
+	stmt, err := tx.Prepare(fmt.Sprintf(internal.InsertPoints, a.tables.points))
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("error constructing prepared statement for reputation points selection: %w", err)
 	}

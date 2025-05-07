@@ -12,7 +12,7 @@ const (
 		outcome INT2
 	);`
 
-	CreatePointsIndex = `CREATE INDEX idx_points ON %s (account, class);`
+	CreatePointsIndex = `CREATE INDEX IF NOT EXISTS idx_points ON %s (account, class);`
 
 	InsertPoints = `INSERT INTO %s (account, link, class, outcome) VALUES ($1, $2, $3, $4) RETURNING id;`
 
