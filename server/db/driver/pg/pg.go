@@ -59,7 +59,7 @@ type archiverTables struct {
 	accounts     string
 	bonds        string
 	prepaidBonds string
-	pointsTable  string
+	points       string
 }
 
 // Archiver must implement server/db.DEXArchivist.
@@ -153,7 +153,7 @@ func NewArchiverForRead(ctx context.Context, cfg *Config) (*Archiver, error) {
 		mktMap[marketSchema(mkt.Name)] = mkt
 	}
 
-	a := &Archiver{
+	return &Archiver{
 		ctx:          ctx,
 		db:           db,
 		dbName:       cfg.DBName,
@@ -164,12 +164,10 @@ func NewArchiverForRead(ctx context.Context, cfg *Config) (*Archiver, error) {
 			accounts:     fullTableName(cfg.DBName, publicSchema, accountsTableName),
 			bonds:        fullTableName(cfg.DBName, publicSchema, bondsTableName),
 			prepaidBonds: fullTableName(cfg.DBName, publicSchema, prepaidBondsTableName),
-			pointsTable:  fullTableName(cfg.DBName, publicSchema, pointsTableName),
+			points:       fullTableName(cfg.DBName, publicSchema, pointsTableName),
 		},
 		fatal: make(chan struct{}),
-	}
-
-	return a, nil
+	}, nil
 }
 
 // NewArchiver constructs a new Archiver. All tables are created, including
@@ -235,15 +233,15 @@ func (a *Archiver) marketSchema(base, quote uint32) (string, error) {
 }
 
 func (a *Archiver) prepareQueries() (err error) {
-	a.queries.selectPoints, err = a.db.Prepare(fmt.Sprintf(internal.SelectPoints, a.tables.pointsTable))
+	a.queries.selectPoints, err = a.db.Prepare(fmt.Sprintf(internal.SelectPoints, a.tables.points))
 	if err != nil {
 		return fmt.Errorf("error constructing prepared statement for reputation points selection: %w", err)
 	}
-	a.queries.insertPoints, err = a.db.Prepare(fmt.Sprintf(internal.InsertPoints, a.tables.pointsTable))
+	a.queries.insertPoints, err = a.db.Prepare(fmt.Sprintf(internal.InsertPoints, a.tables.points))
 	if err != nil {
 		return fmt.Errorf("error constructing prepared statement for reputation points insertion: %w", err)
 	}
-	a.queries.prunePoints, err = a.db.Prepare(fmt.Sprintf(internal.PrunePoints, a.tables.pointsTable))
+	a.queries.prunePoints, err = a.db.Prepare(fmt.Sprintf(internal.PrunePoints, a.tables.points))
 	if err != nil {
 		return fmt.Errorf("error constructing prepared statement for reputation points pruning: %w", err)
 	}

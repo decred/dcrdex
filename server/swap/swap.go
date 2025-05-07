@@ -1716,7 +1716,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 			ack.user, makerTaker(ack.isMaker), matchID)
 	})
 	if err != nil {
-		log.Debug("Couldn't send 'audit' request to user %v (%s) for match %v", ack.user, makerTaker(ack.isMaker), matchID)
+		log.Debugf("Couldn't send 'audit' request to user %v (%s) for match %v", ack.user, makerTaker(ack.isMaker), matchID)
 	}
 
 	return wait.DontTryAgain

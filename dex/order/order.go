@@ -735,9 +735,9 @@ func ValidateOrder(ord Order, status OrderStatus, lotSize uint64) error {
 
 	validateTrade := func(t *Trade) error {
 		if t.Quantity%lotSize != 0 || t.Remaining()%lotSize != 0 {
-			return fmt.Errorf("market sell order fails lot size requirement %d %% %d = %d", t.Quantity, lotSize, t.Quantity%lotSize)
+			return fmt.Errorf("order fails lot size requirement %d %% %d = %d", t.Quantity, lotSize, t.Quantity%lotSize)
 		}
-		if t.Quantity > math.MaxInt64 {
+		if t.Quantity > math.MaxInt64 { // PostgreSQL limitation
 			return fmt.Errorf("order quantity %d is greater than max allowed %d", t.Quantity, math.MaxInt64)
 		}
 		return nil
@@ -801,8 +801,8 @@ func ValidateOrder(ord Order, status OrderStatus, lotSize uint64) error {
 		}
 
 		// All limit orders must respect lot size.
-		if ot.Quantity%lotSize != 0 || ot.Remaining()%lotSize != 0 {
-			return fmt.Errorf("limit order fails lot size requirement %d %% %d = %d", ot.Quantity, lotSize, ot.Quantity%lotSize)
+		if err := validateTrade(&ot.T); err != nil {
+			return err
 		}
 	default:
 		// cannot validate an unknown order type
