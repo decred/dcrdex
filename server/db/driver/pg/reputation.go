@@ -5,6 +5,8 @@ package pg
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 
 	"decred.org/dcrdex/dex/order"
@@ -12,6 +14,8 @@ import (
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/db/driver/pg/internal"
 )
+
+const newReputationVersion int16 = 1
 
 var _ db.ReputationArchiver = (*Archiver)(nil)
 
@@ -141,7 +145,14 @@ func (a *Archiver) PruneOutcomes(ctx context.Context, user account.AccountID, ou
 }
 
 func (a *Archiver) GetUserReputationVersion(ctx context.Context, user account.AccountID) (ver int16, err error) {
-	return ver, a.queries.selectReputationVersion.QueryRowContext(ctx, user).Scan(&ver)
+	if err := a.queries.selectReputationVersion.QueryRowContext(ctx, user).Scan(&ver); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// New user.
+			return newReputationVersion, nil
+		}
+		return 0, err
+	}
+	return ver, nil
 }
 
 func (a *Archiver) UpgradeUserReputationV1(
@@ -170,12 +181,12 @@ func (a *Archiver) UpgradeUserReputationV1(
 		if o.Miss {
 			outcome = db.OutcomePreimageMiss
 		}
-		if err := stmt.QueryRowContext(ctx, user, o.OrderID, db.OutcomeClassPreimage, outcome).Scan(&o.DBID); err != nil {
+		if err = stmt.QueryRowContext(ctx, user, o.OrderID, db.OutcomeClassPreimage, outcome).Scan(&o.DBID); err != nil {
 			return nil, nil, nil, fmt.Errorf("error inserting preimage row during reputation upgrade: %w", err)
 		}
 	}
 	for _, o := range matches {
-		if err := stmt.QueryRowContext(ctx, user, o.MatchID, db.OutcomeClassMatch, o.MatchOutcome).Scan(&o.DBID); err != nil {
+		if err = stmt.QueryRowContext(ctx, user, o.MatchID, db.OutcomeClassMatch, o.MatchOutcome).Scan(&o.DBID); err != nil {
 			return nil, nil, nil, fmt.Errorf("error inserting match row during reputation upgrade: %w", err)
 		}
 	}
@@ -184,11 +195,10 @@ func (a *Archiver) UpgradeUserReputationV1(
 		if o.Canceled {
 			outcome = db.OutcomeOrderCanceled
 		}
-		if err := stmt.QueryRowContext(ctx, user, o.OrderID, db.OutcomeClassOrder, outcome).Scan(&o.DBID); err != nil {
+		if err = stmt.QueryRowContext(ctx, user, o.OrderID, db.OutcomeClassOrder, outcome).Scan(&o.DBID); err != nil {
 			return nil, nil, nil, fmt.Errorf("error inserting order row during reputation upgrade: %w", err)
 		}
 	}
-	const newReputationVersion int16 = 1
 	query := fmt.Sprintf(internal.UpdateReputationVersion, a.tables.accounts)
 	if _, err = tx.ExecContext(ctx, query, newReputationVersion, user); err != nil {
 		return nil, nil, nil, fmt.Errorf("error updating reputation version: %w", err)
