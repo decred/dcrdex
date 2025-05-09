@@ -1386,12 +1386,72 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) (re
 		ready = ready && !t.isSelfGoverned() && t.dc.status() == comms.Connected // NOTE: swapMatchGroup rechecks dc conn anyway
 	}()
 
+	checkInitialized := func() (stop bool) {
+		// There's a possibility that init happened but appeared to error
+		// with account based assets. Check if the swap is already
+		// initialized, and if it is, revoke and wait for refund.
+		if ic, is := wallet.Wallet.(asset.InitChecker); is && match.MetaData.Proof.SecretHash != nil {
+			value := match.Quantity
+			if !match.trade.Sell {
+				value = calc.BaseToQuote(match.Rate, match.Quantity)
+			}
+			matchTime := match.matchTime()
+			lockTime := matchTime.Add(t.lockTimeTaker).UTC().Unix()
+			if match.Side == order.Maker {
+				lockTime = matchTime.Add(t.lockTimeMaker).UTC().Unix()
+			}
+			contract := &asset.Contract{
+				Address:    match.Address,
+				Value:      value,
+				SecretHash: match.MetaData.Proof.SecretHash,
+				LockTime:   uint64(lockTime),
+			}
+			initialized, zeroHash, contractData, err := ic.AlreadyInitialized(t.metaData.FromVersion, contract)
+			if err != nil {
+				t.dc.log.Errorf("unable to check initialization: %v", err)
+				ready, shouldRevoke = false, false
+				return true
+			}
+			if initialized {
+				// TODO: Continue swap with missing tx. Only the
+				// swap contract status is important for account assets.
+				t.dc.log.Errorf("unable to swap match %s, swap was already initilized and we lost the init txid, revoking", match)
+				// Update the swap status so status stays active
+				// although we do not have the swap coin.
+				if match.Side == order.Taker {
+					match.MetaData.Proof.TakerSwap = zeroHash
+					match.Status = order.TakerSwapCast
+				} else {
+					match.MetaData.Proof.MakerSwap = zeroHash
+					match.Status = order.MakerSwapCast
+				}
+				match.MetaData.Proof.ContractData = contractData
+				if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
+					t.dc.log.Errorf("error storing swap details in database for match %s: %v",
+						match, err)
+					ready, shouldRevoke = false, false
+					return true
+				}
+				ready, shouldRevoke = false, true
+				return true
+			}
+		}
+		return false
+	}
+
 	switch match.Status {
 	case order.NewlyMatched:
-		return match.Side == order.Maker, false
+		isMaker := match.Side == order.Maker
+		if isMaker && checkInitialized() {
+			return
+		}
+		return isMaker, false
 	case order.MakerSwapCast:
 		// Get the confirmation count on the maker's coin.
 		if match.Side == order.Taker {
+			if checkInitialized() {
+				return
+			}
 			// If the maker is the counterparty, we can determine swappability
 			// based on the confirmations.
 			confs, req, changed, spent, expired, err := t.counterPartyConfirms(ctx, match)
@@ -2371,7 +2431,7 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, highestF
 		}
 		matchTime := match.matchTime()
 		lockTime := matchTime.Add(t.lockTimeTaker).UTC().Unix()
-		if match.Side == order.Maker {
+		if match.Side == order.Maker && match.MetaData.Proof.Secret == nil {
 			match.MetaData.Proof.Secret = encode.RandomBytes(32)
 			secretHash := sha256.Sum256(match.MetaData.Proof.Secret)
 			match.MetaData.Proof.SecretHash = secretHash[:]
