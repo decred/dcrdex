@@ -1,0 +1,51 @@
+{
+    "botConfigs": [
+        {
+            "host": "127.0.0.1:17273", // Address of your running DCRDEX client
+            "baseID": 60, // Example: ETH Asset ID (Check asset package for correct ID)
+            "quoteID": 0, // Example: BTC Asset ID (Check asset package for correct ID)
+            "baseWalletOptions": {
+                "multisplit": "true"
+            },
+            "quoteWalletOptions": {
+                "multisplit": "true",
+                "multisplitbuffer": "5"
+            },
+            "cexCfg": {
+                "name": "MEXC", // Use the name "MEXC" here
+                "autoRebalance": { // Adjust these thresholds for your desired assets/amounts
+                    "minBaseAmt": 3000000000, // Example: Min ETH on MEXC (atomic units)
+                    "minBaseTransfer" : 1000000000, // Example: Min ETH to transfer
+                    "minQuoteAmt": 20000000, // Example: Min BTC on MEXC (atomic units)
+                    "minQuoteTransfer": 10000000 // Example: Min BTC to transfer
+                }
+            },
+            "rpcConfig": {
+                "alloc": { // Adjust allocations for your assets
+                    "dex": {
+                        "60": 1000000000, // Example: ETH on DEX
+                        "0": 10000000   // Example: BTC on DEX
+                    },
+                    "cex": {
+                        "60": 1000000000, // Example: ETH on MEXC
+                        "0": 10000000   // Example: BTC on MEXC
+                    }
+                }
+            },
+            "simpleArbConfig": { // Adjust arbitrage strategy parameters
+                "profitTrigger": 0.01, // Minimum profit percentage to trigger an arb
+                "maxActiveArbs" : 5, // Maximum concurrent arbitrage attempts
+                "numEpochsLeaveOpen": 10 // How many DEX epochs to leave arb orders open
+            }
+        }
+        // Add more botConfigs objects here for other markets/hosts if needed
+    ],
+    "cexConfigs": [
+        {
+            "name": "MEXC", // Match the name used in botConfigs
+            "apiKey": "YOUR_MEXC_API_KEY", // <-- Replace with your actual MEXC API key
+            "apiSecret": "YOUR_MEXC_SECRET_KEY" // <-- Replace with your actual MEXC secret key
+        }
+        // Add other CEX configurations (e.g., for Binance) here if using multiple exchanges
+    ]
+}

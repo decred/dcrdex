@@ -740,7 +740,7 @@ export default class MarketMakerSettingsPage extends BasePage {
   adjustedBalances (baseWallet: WalletState, quoteWallet: WalletState) {
     const { cexBaseBalance, cexQuoteBalance } = this
     const [bInv, qInv] = [this.runningBotInventory(baseWallet.assetID), this.runningBotInventory(quoteWallet.assetID)]
-    const [cexBaseAvail, cexQuoteAvail] = [(cexBaseBalance?.available || 0) - bInv.cex.total, (cexQuoteBalance?.available || 0) - qInv.cex.total]
+    const [cexBaseAvail, cexQuoteAvail] = [(parseFloat(cexBaseBalance?.available || '0')) - bInv.cex.total, (parseFloat(cexQuoteBalance?.available || '0')) - qInv.cex.total]
     const [dexBaseAvail, dexQuoteAvail] = [baseWallet.balance.available - bInv.dex.total, quoteWallet.balance.available - qInv.dex.total]
     const baseAvail = dexBaseAvail + cexBaseAvail
     const quoteAvail = dexQuoteAvail + cexQuoteAvail
@@ -2304,20 +2304,38 @@ class AssetPane {
 
   updateBalances () {
     const { page, assetID, ui, feeAssetID, feeUI, pg: { specs: { cexName, baseID }, cexBaseBalance, cexQuoteBalance } } = this
-    const { balance: { available } } = app().walletMap[assetID]
+    // Check if wallet exists before trying to access its balance
+    const walletState = app().walletMap[assetID]
+    if (!walletState) {
+      // Optionally log a warning or handle appropriately if needed,
+      // but for now, just return as there's no balance to update UI with.
+      console.warn(`updateBalances called for assetID ${assetID} without a configured wallet.`)
+      return
+    }
+    const { balance: { available } } = walletState // Now safe to access
     const botInv = this.pg.runningBotInventory(assetID)
     const dexAvail = available - botInv.dex.total
     let cexAvail = 0
     Doc.setVis(cexName, page.balanceBreakdown)
     if (cexName) {
       page.dexAvail.textContent = Doc.formatFourSigFigs(dexAvail / ui.conventional.conversionFactor)
-      const { available: cexRawAvail } = assetID === baseID ? cexBaseBalance : cexQuoteBalance
-      cexAvail = cexRawAvail - botInv.cex.total
+      // Ensure cexBalance properties are accessed safely as well
+      const cexBalance = assetID === baseID ? cexBaseBalance : cexQuoteBalance
+      const cexRawAvail = parseFloat(cexBalance?.available || '0')
+      cexAvail = parseFloat(cexRawAvail.toString()) - botInv.cex.total // Ensure cexRawAvail is treated as number
       page.cexAvail.textContent = Doc.formatFourSigFigs(cexAvail / ui.conventional.conversionFactor)
     }
     page.avail.textContent = Doc.formatFourSigFigs((dexAvail + cexAvail) / ui.conventional.conversionFactor)
     if (assetID === feeAssetID) return
-    const { balance: { available: feeAvail } } = app().walletMap[feeAssetID]
+    // Also check fee asset wallet
+    const feeWalletState = app().walletMap[feeAssetID]
+    if (!feeWalletState) {
+      console.warn(`updateBalances attempting to access fee asset ${feeAssetID} without a configured wallet.`)
+      // Potentially hide feeAvail element or set to 'N/A'
+      page.feeAvail.textContent = 'N/A' // Or hide the element
+      return
+    }
+    const { balance: { available: feeAvail } } = feeWalletState
     page.feeAvail.textContent = Doc.formatFourSigFigs(feeAvail / feeUI.conventional.conversionFactor)
   }
 }

@@ -247,18 +247,45 @@ func (a *arbMarketMaker) processDEXOrderUpdate(o *core.Order) {
 func (a *arbMarketMaker) cancelExpiredCEXTrades() {
 	currEpoch := a.currEpoch.Load()
 
+	// Step 1: Identify expired trades without holding lock during API calls
 	a.cexTradesMtx.RLock()
-	defer a.cexTradesMtx.RUnlock()
-
+	expiredTradeIDs := make([]string, 0, len(a.cexTrades))
 	for tradeID, epoch := range a.cexTrades {
 		if currEpoch-epoch >= a.cfg().NumEpochsLeaveOpen {
-			err := a.cex.CancelTrade(a.ctx, a.baseID, a.quoteID, tradeID)
-			if err != nil {
-				a.log.Errorf("Error canceling CEX trade %s: %v", tradeID, err)
-			}
-
-			a.log.Infof("Cex trade %s was cancelled before it was filled", tradeID)
+			expiredTradeIDs = append(expiredTradeIDs, tradeID)
 		}
+	}
+	a.cexTradesMtx.RUnlock()
+
+	if len(expiredTradeIDs) == 0 {
+		return // Nothing to do
+	}
+
+	a.log.Debugf("Found %d potentially expired CEX trades to check/cancel.", len(expiredTradeIDs))
+
+	// Step 2: Process the identified expired trades
+	for _, tradeID := range expiredTradeIDs {
+		a.log.Infof("Attempting to cancel potentially expired CEX trade %s", tradeID)
+		err := a.cex.CancelTrade(a.ctx, a.baseID, a.quoteID, tradeID)
+
+		// Regardless of error, we might want to remove it if the error
+		// indicates it's already finished (-2011 for MEXC).
+		// The CEX adapter already logs the specific error/warning.
+
+		if err == nil {
+			// Log accurately: nil error means processed OR already inactive.
+			a.log.Infof("CEX trade %s cancel processed (order inactive or successfully cancelled). Removing from tracking.", tradeID)
+			// Remove from tracking map
+			a.cexTradesMtx.Lock()
+			delete(a.cexTrades, tradeID)
+			a.cexTradesMtx.Unlock()
+		} else {
+			// Log the error, but keep the trade in the map for now.
+			// WebSocket updates might clarify its status later, or subsequent
+			// cancel attempts might succeed if it was a temporary API issue.
+			a.log.Errorf("Error attempting to cancel CEX trade %s: %v. Will retry later if still present.", tradeID, err)
+		}
+		// DO NOT return here; process the next expired ID.
 	}
 }
 

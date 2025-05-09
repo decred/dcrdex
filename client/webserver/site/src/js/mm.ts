@@ -400,11 +400,16 @@ export default class MarketMakerPage extends BasePage {
     for (const [assetIDStr, bal] of Object.entries(status.balances)) {
       const assetID = parseInt(assetIDStr)
       const cexSymbol = Doc.bipCEXSymbol(assetID)
+      const fiatRate = app().fiatRatesMap[assetID]
       if (cexSymbolAdded[cexSymbol]) continue
       cexSymbolAdded[cexSymbol] = true
       const { unitInfo } = app().assets[assetID]
-      const fiatRate = app().fiatRatesMap[assetID]
-      if (fiatRate) usdBal += fiatRate * (bal.available + bal.locked) / unitInfo.conventional.conversionFactor
+      if (fiatRate) {
+        const availableAmt = parseFloat(bal.available) || 0 // Parse string, default to 0 if invalid
+        const lockedAmt = parseFloat(bal.locked) || 0 // Parse string, default to 0 if invalid
+        const assetUsdValue = fiatRate * (availableAmt + lockedAmt) / unitInfo.conventional.conversionFactor
+        usdBal += assetUsdValue
+      }
     }
     tmpl.usdBalance.textContent = Doc.formatFourSigFigs(usdBal)
   }

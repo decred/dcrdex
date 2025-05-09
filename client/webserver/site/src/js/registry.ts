@@ -1102,8 +1102,8 @@ export interface OracleReport {
 }
 
 export interface ExchangeBalance {
-  available: number
-  locked: number
+  available: string
+  locked: string
 }
 
 // changing the order of the elements in this enum will affect
