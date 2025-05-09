@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -91,12 +92,7 @@ func (w *xcWallet) setEncPW(encPW []byte) {
 }
 
 func (w *xcWallet) supportsVer(ver uint32) bool {
-	for _, v := range w.supportedVersions {
-		if v == ver {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(w.supportedVersions, ver)
 }
 
 // Unlock unlocks the wallet backend and caches the decrypted wallet password so

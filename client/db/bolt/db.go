@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -1104,12 +1105,7 @@ func (db *BoltDB) Orders(orderFilter *dexdb.OrderFilter) (ords []*dexdb.MetaOrde
 	if len(orderFilter.Statuses) > 0 {
 		filters = append(filters, func(_ []byte, oBkt *bbolt.Bucket) bool {
 			status := order.OrderStatus(intCoder.Uint16(oBkt.Get(statusKey)))
-			for _, acceptable := range orderFilter.Statuses {
-				if status == acceptable {
-					return true
-				}
-			}
-			return false
+			return slices.Contains(orderFilter.Statuses, status)
 		})
 		includeArchived = false
 		for _, status := range orderFilter.Statuses {
