@@ -94,6 +94,8 @@ type TankaCore interface {
 	// Config() *mj.TatankaConfig
 	Routes() []string
 	HandleMessage(tanka.Sender, *msgjson.Message) *msgjson.Error
+	HTTPRoutes() []string
+	HandleRequest(route string, thing any) (any, error)
 }
 
 func NewServer(cfg *comms.RPCConfig, t TankaCore, log dex.Logger) (*Server, error) {
@@ -112,6 +114,14 @@ func NewServer(cfg *comms.RPCConfig, t TankaCore, log dex.Logger) (*Server, erro
 		srv.Route(r, func(l comms.Link, msg *msgjson.Message) *msgjson.Error {
 			return t.HandleMessage(&linkWrapper{l}, msg)
 		})
+	}
+
+	for _, r := range t.HTTPRoutes() {
+		route := r
+		srv.RegisterHTTP(r, func(thing any) (any, error) {
+			return t.HandleRequest(route, thing)
+		})
+		srv.Mux().Get(fmt.Sprintf("/%s", r), srv.NewRouteHandler(r))
 	}
 
 	return s, nil
