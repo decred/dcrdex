@@ -5775,7 +5775,7 @@ func TestReconfigure(t *testing.T) {
 	}
 }
 
-func TestConfirmRedemption(t *testing.T) {
+func TestConfirmTransaction(t *testing.T) {
 	segwit := true
 	wallet, node, shutdown := tNewWallet(segwit, walletTypeRPC)
 	defer shutdown()
@@ -5792,10 +5792,7 @@ func TestConfirmRedemption(t *testing.T) {
 		Expiration: lockTime,
 	}
 
-	redemption := &asset.Redemption{
-		Spends: ci,
-		Secret: secret,
-	}
+	confirmTx := asset.NewRedeemConfTx(ci, secret)
 
 	coinID := coin.ID()
 
@@ -5811,7 +5808,7 @@ func TestConfirmRedemption(t *testing.T) {
 
 	tests := []struct {
 		name                 string
-		redemption           *asset.Redemption
+		confirmTx            *asset.ConfirmTx
 		coinID               []byte
 		wantErr              bool
 		wantConfs            uint64
@@ -5822,38 +5819,43 @@ func TestConfirmRedemption(t *testing.T) {
 	}{{
 		name:                 "ok and found",
 		coinID:               coinID,
-		redemption:           redemption,
+		confirmTx:            confirmTx,
 		getTransactionResult: new(GetTransactionResult),
 	}, {
-		name:       "ok spent by someone but not sure who",
-		coinID:     coinID,
-		redemption: redemption,
-		wantConfs:  requiredRedeemConfirms,
+		name:      "ok spent by someone but not sure who",
+		coinID:    coinID,
+		confirmTx: confirmTx,
+		wantConfs: requiredConfTxConfirms,
 	}, {
-		name:       "ok but sending new tx",
-		coinID:     coinID,
-		redemption: redemption,
-		txOutRes:   new(btcjson.GetTxOutResult),
+		name:      "ok but sending new tx",
+		coinID:    coinID,
+		confirmTx: confirmTx,
+		txOutRes:  new(btcjson.GetTxOutResult),
 	}, {
-		name:       "decode coin error",
-		redemption: redemption,
-		wantErr:    true,
+		name:      "ok but sending new refund tx",
+		coinID:    coinID,
+		confirmTx: asset.NewRefundConfTx(coin.ID(), contract, secret),
+		txOutRes:  newTxOutResult(nil, 1e8, 2),
 	}, {
-		name:       "error finding contract output",
-		coinID:     coinID,
-		redemption: redemption,
-		txOutErr:   errors.New(""),
-		wantErr:    true,
+		name:      "decode coin error",
+		confirmTx: confirmTx,
+		wantErr:   true,
+	}, {
+		name:      "error finding contract output",
+		coinID:    coinID,
+		confirmTx: confirmTx,
+		txOutErr:  errors.New(""),
+		wantErr:   true,
 	}, {
 		name:              "error finding redeem tx",
 		coinID:            coinID,
-		redemption:        redemption,
+		confirmTx:         confirmTx,
 		getTransactionErr: errors.New(""),
 		wantErr:           true,
 	}, {
-		name:   "redemption error",
+		name:   "redeem error",
 		coinID: coinID,
-		redemption: func() *asset.Redemption {
+		confirmTx: func() *asset.ConfirmTx {
 			ci := &asset.AuditInfo{
 				Coin: coin,
 				// Contract:   contract,
@@ -5861,13 +5863,16 @@ func TestConfirmRedemption(t *testing.T) {
 				Expiration: lockTime,
 			}
 
-			return &asset.Redemption{
-				Spends: ci,
-				Secret: secret,
-			}
+			return asset.NewRedeemConfTx(ci, secret)
 		}(),
 		txOutRes: new(btcjson.GetTxOutResult),
 		wantErr:  true,
+	}, {
+		name:      "refund error",
+		coinID:    coinID,
+		confirmTx: asset.NewRefundConfTx(coin.ID(), contract, secret),
+		txOutRes:  new(btcjson.GetTxOutResult), // fee too low
+		wantErr:   true,
 	}}
 	for _, test := range tests {
 		node.txOutRes = test.txOutRes
@@ -5875,7 +5880,7 @@ func TestConfirmRedemption(t *testing.T) {
 		node.getTransactionErr = test.getTransactionErr
 		node.getTransactionMap[tTxID] = test.getTransactionResult
 
-		status, err := wallet.ConfirmRedemption(test.coinID, test.redemption, 0)
+		status, err := wallet.ConfirmTransaction(test.coinID, test.confirmTx, 0)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("%q: expected error", test.name)

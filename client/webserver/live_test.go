@@ -2611,10 +2611,11 @@ func makeRequiredAction(assetID uint32, actionID string) *asset.ActionRequiredNo
 	txID := dex.Bytes(encode.RandomBytes(32)).String()
 	var payload any
 	if actionID == core.ActionIDRedeemRejected {
-		payload = core.RejectedRedemptionData{
+		payload = core.RejectedTxData{
 			AssetID: assetID,
 			CoinID:  encode.RandomBytes(32),
 			CoinFmt: "0x8909ec4aa707df569e62e2f8e2040094e2c88fe192b3b3e2dadfa383a41aa645",
+			TxType:  "redeem",
 		}
 	} else {
 		payload = &eth.TransactionActionNote{

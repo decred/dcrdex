@@ -234,9 +234,12 @@ const (
 	ErrConnectionDown = dex.ErrorKind("wallet not connected")
 	ErrNotImplemented = dex.ErrorKind("not implemented")
 	ErrUnsupported    = dex.ErrorKind("unsupported")
-	// ErrSwapRefunded is returned from ConfirmRedemption when the swap has
+	// ErrSwapRefunded is returned from ConfirmTransaction when the swap has
 	// been refunded before the user could redeem.
 	ErrSwapRefunded = dex.ErrorKind("swap refunded")
+	// ErrSwapRedeemed is returned from ConfirmTransaction when the swap has
+	// been redeemed before the user could refund.
+	ErrSwapRedeemed = dex.ErrorKind("swap redeemed")
 	// ErrNotEnoughConfirms is returned when a transaction is confirmed,
 	// but does not have enough confirmations to be trusted.
 	ErrNotEnoughConfirms = dex.ErrorKind("transaction does not have enough confirmations")
@@ -394,10 +397,10 @@ type WalletConfig struct {
 	DataDir string
 }
 
-// ConfirmRedemptionStatus contains the coinID which redeemed a swap, the
+// ConfirmTxStatus contains the coinID which redeemed or refunded a swap, the
 // number of confirmations the transaction has, and the number of confirmations
 // required for it to be considered confirmed.
-type ConfirmRedemptionStatus struct {
+type ConfirmTxStatus struct {
 	Confs  uint64
 	Req    uint64
 	CoinID dex.Bytes
@@ -541,15 +544,15 @@ type Wallet interface {
 	Send(address string, value, feeRate uint64) (Coin, error)
 	// ValidateAddress checks that the provided address is valid.
 	ValidateAddress(address string) bool
-	// ConfirmRedemption checks the status of a redemption. It returns the
-	// number of confirmations the redemption has, the number of confirmations
+	// ConfirmTransaction checks the status of a redemption or refund. It
+	// returns the number of confirmations the tx has, the number of confirmations
 	// that are required for it to be considered fully confirmed, and the
-	// CoinID used to do the redemption. If it is determined that a transaction
-	// will not be mined, this function will submit a new transaction to
-	// replace the old one. The caller is notified of this by having a
-	// different CoinID in the returned asset.ConfirmRedemptionStatus as was
-	// used to call the function.
-	ConfirmRedemption(coinID dex.Bytes, redemption *Redemption, feeSuggestion uint64) (*ConfirmRedemptionStatus, error)
+	// CoinID it is currently watching for confirms. If it is determined that
+	// a transaction will not be mined, this function will submit a new transaction
+	// to replace the old one. The caller is notified of this by having a
+	// different CoinID in the returned asset.ConfirmTxStatus as was used to
+	// call the function.
+	ConfirmTransaction(coinID dex.Bytes, confirmTx *ConfirmTx, feeSuggestion uint64) (*ConfirmTxStatus, error)
 	// SingleLotSwapRefundFees returns the fees for a swap and refund transaction for a single lot.
 	SingleLotSwapRefundFees(version uint32, feeRate uint64, useSafeTxSize bool) (uint64, uint64, error)
 	// SingleLotRedeemFees returns the fees for a redeem transaction for a single lot.
@@ -1436,6 +1439,107 @@ type Contract struct {
 	SecretHash dex.Bytes
 	// LockTime is the contract lock time in UNIX seconds.
 	LockTime uint64
+}
+
+// ConfirmTxType is the confirm tx type.
+type ConfirmTxType int
+
+const (
+	// CTRedeem is a redeem tx.
+	CTRedeem = iota
+	// CTRefund is a refund tx.
+	CTRefund
+)
+
+// String satisfies Stringer.
+func (ct ConfirmTxType) String() string {
+	switch ct {
+	case CTRedeem:
+		return "redeem"
+	case CTRefund:
+		return "refund"
+	}
+	return "unknown"
+}
+
+// ConfirmTx is a redemption transaction that spends a counter-party's swap
+// contract or a refund that spends our own swap.
+type ConfirmTx struct {
+	// spends is the AuditInfo for the swap output being spent. Only needed for redeems.
+	spends *AuditInfo
+	// secret is the secret key needed to satisfy the swap contract. Only needed for redeems.
+	secret dex.Bytes
+	// spendsCoinID is the tx to refund. Only needed for refunds.
+	spendsCoinID dex.Bytes
+	// contract is the contract to refund. Only needed for refunds.
+	contract dex.Bytes
+	// secretHash is the secret hash of the swap to refund. Only needed for refunds.
+	secretHash dex.Bytes
+	// confirmTxType is redeem or refund.
+	txType ConfirmTxType
+}
+
+// NewRedeemConfTx creates a new reddem conf tx.
+func NewRedeemConfTx(spends *AuditInfo, secret dex.Bytes) *ConfirmTx {
+	return &ConfirmTx{
+		spends: spends,
+		secret: secret,
+		txType: CTRedeem,
+	}
+}
+
+// NewRefundConfTx creates a new refund conf tx.
+func NewRefundConfTx(spendsCoinID, contract, secretHash dex.Bytes) *ConfirmTx {
+	return &ConfirmTx{
+		spendsCoinID: spendsCoinID,
+		contract:     contract,
+		secretHash:   secretHash,
+		txType:       CTRefund,
+	}
+}
+
+// Spends returns the conf tx spends. Only use for redeems.
+func (ct *ConfirmTx) Spends() *AuditInfo {
+	return ct.spends
+}
+
+// Secret returns the conf tx secret. Only use for redeems.
+func (ct *ConfirmTx) Secret() dex.Bytes {
+	return ct.secret
+}
+
+// SpendsCoinID returns the coin id the confirm tx spends.
+func (ct *ConfirmTx) SpendsCoinID() dex.Bytes {
+	if ct.txType == CTRedeem {
+		return ct.spends.Coin.ID()
+	}
+	return ct.spendsCoinID
+}
+
+// SecretHash returns the swap's secret hash.
+func (ct *ConfirmTx) SecretHash() dex.Bytes {
+	if ct.txType == CTRedeem {
+		return ct.spends.SecretHash
+	}
+	return ct.secretHash
+}
+
+// Contract returns the swap's contract.
+func (ct *ConfirmTx) Contract() dex.Bytes {
+	if ct.txType == CTRedeem {
+		return ct.spends.Contract
+	}
+	return ct.contract
+}
+
+// TxType returns the conf tx type.
+func (ct *ConfirmTx) TxType() ConfirmTxType {
+	return ct.txType
+}
+
+// IsRedeem return true if it is a redeem.
+func (ct *ConfirmTx) IsRedeem() bool {
+	return ct.txType == CTRedeem
 }
 
 // Redemption is a redemption transaction that spends a counter-party's swap
