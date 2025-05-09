@@ -12,7 +12,9 @@ import {
   SupportedAsset,
   BalanceEffects,
   MarketWithHost,
-  ProfitLoss
+  ProfitLoss,
+  MultiHopCfg,
+  BotConfig
 } from './registry'
 import { Forms } from './forms'
 import { postJSON } from './http'
@@ -28,6 +30,7 @@ interface LogsPageParams {
   quoteID: number
   baseID: number
   startTime: number
+  multiHopCfg?: MultiHopCfg
   returnPage: string
 }
 
@@ -76,6 +79,7 @@ export default class MarketMakerLogsPage extends BasePage {
   refID: number | undefined
   doneScrolling: boolean
   statsRows: Record<number, HTMLElement>
+  botCfg?: BotConfig
 
   constructor (main: HTMLElement, params: LogsPageParams) {
     super()
@@ -198,6 +202,10 @@ export default class MarketMakerLogsPage extends BasePage {
       profitLoss = overview.profitLoss
       endTime = overview.endTime
     }
+    if (overview.cfgs.length > 0) {
+      this.botCfg = overview.cfgs[overview.cfgs.length - 1].cfg
+    }
+
     this.populateStats(profitLoss, endTime)
     const assets = this.mktAssets()
     const parentHeader = page.sumUSDHeader.parentElement
@@ -284,6 +292,19 @@ export default class MarketMakerLogsPage extends BasePage {
     if (quoteAsset.token && !assetIDs[quoteAsset.token.parentID]) {
       const quoteTokenAsset = app().assets[quoteAsset.token.parentID]
       assets.push(quoteTokenAsset)
+    }
+
+    const multiHopCfg = this.botCfg?.arbMarketMakingConfig?.multiHop
+    if (multiHopCfg) {
+      let bridgeAsset = multiHopCfg.baseAssetMarket[0]
+      if (bridgeAsset === this.mkt.baseID) {
+        bridgeAsset = multiHopCfg.baseAssetMarket[1]
+      }
+      if (!assetIDs[bridgeAsset]) {
+        const bridgeAssetAsset = app().assets[bridgeAsset]
+        assetIDs[bridgeAsset] = true
+        assets.push(bridgeAssetAsset)
+      }
     }
 
     return assets
@@ -438,27 +459,46 @@ export default class MarketMakerLogsPage extends BasePage {
   }
 
   showCexOrderEventDetails (event: CEXOrderEvent) {
-    const { page, mkt: { baseID, quoteID } } = this
+    const { page, mkt } = this
+    const baseID = event.baseID ?? mkt.baseID
+    const quoteID = event.quoteID ?? mkt.quoteID
     const baseAsset = app().assets[baseID]
     const quoteAsset = app().assets[quoteID]
     const [bui, qui] = [baseAsset.unitInfo, quoteAsset.unitInfo]
-    const [baseTicker, quoteTicker] = [bui.conventional.unit, qui.conventional.unit]
+    const [baseTicker, quoteTicker] = [bui?.conventional.unit, qui?.conventional.unit]
 
     page.cexOrderID.textContent = trimStringWithEllipsis(event.id, 20)
+    page.cexOrderBaseAsset.textContent = baseAsset.symbol
+    page.cexOrderQuoteAsset.textContent = quoteAsset.symbol
     if (this.cexOrderIDCopyListener !== undefined) {
       page.copyCexOrderID.removeEventListener('click', this.cexOrderIDCopyListener)
     }
     this.cexOrderIDCopyListener = () => { setupCopyBtn(event.id, page.cexOrderID, page.copyCexOrderID, '#1e7d11') }
     page.copyCexOrderID.addEventListener('click', this.cexOrderIDCopyListener)
     page.cexOrderID.setAttribute('title', event.id)
-    const rate = app().conventionalRate(baseID, quoteID, event.rate)
-    page.cexOrderRate.textContent = `${rate} ${baseTicker}/${quoteTicker}`
-    page.cexOrderQty.textContent = `${event.qty / bui.conventional.conversionFactor} ${baseTicker}`
+
+    Doc.setVis(!event.market, page.cexOrderRateRow)
+    if (!event.market) {
+      const rate = app().conventionalRate(baseID, quoteID, event.rate)
+      page.cexOrderRate.textContent = `${rate} ${baseTicker}/${quoteTicker}`
+    }
+
+    const isMarketBuy = event.market && !event.sell
+    const qtyTicker = isMarketBuy ? quoteTicker : baseTicker
+    const qtyUnitInfo = isMarketBuy ? qui : bui
+
+    page.cexOrderQty.textContent = `${event.qty / qtyUnitInfo.conventional.conversionFactor} ${qtyTicker}`
     if (event.sell) {
       page.cexOrderSide.textContent = intl.prep(intl.ID_SELL)
     } else {
       page.cexOrderSide.textContent = intl.prep(intl.ID_BUY)
     }
+    if (event.market) {
+      page.cexOrderOrderType.textContent = intl.prep(intl.ID_MARKET_ORDER_CAPITALIZE)
+    } else {
+      page.cexOrderOrderType.textContent = intl.prep(intl.ID_LIMIT_ORDER_CAPITALIZE)
+    }
+
     page.cexOrderBaseFilled.textContent = `${event.baseFilled / bui.conventional.conversionFactor} ${baseTicker}`
     page.cexOrderQuoteFilled.textContent = `${event.quoteFilled / qui.conventional.conversionFactor} ${quoteTicker}`
     this.forms.show(page.cexOrderDetailsForm)

@@ -14,25 +14,37 @@ type Filter struct {
 	MinQty   float64 `json:"minQty,string"`
 	MaxQty   float64 `json:"maxQty,string"`
 	StepSize float64 `json:"stepSize,string"`
+
+	// Notional filter
+	MinNotional      float64 `json:"minNotional,string"`
+	ApplyMinToMarket bool    `json:"applyMinToMarket"`
+	ApplyToMarket    bool    `json:"applyToMarket"` // same as applyMinToMarket for binance us
+	MaxNotional      float64 `json:"maxNotional,string"`
+	ApplyMaxToMarket bool    `json:"applyMaxToMarket"`
 }
 
 type Market struct {
-	Symbol              string    `json:"symbol"`
-	Status              string    `json:"status"`
-	BaseAsset           string    `json:"baseAsset"`
-	BaseAssetPrecision  int       `json:"baseAssetPrecision"`
-	QuoteAsset          string    `json:"quoteAsset"`
-	QuoteAssetPrecision int       `json:"quoteAssetPrecision"`
-	OrderTypes          []string  `json:"orderTypes"`
-	Filters             []*Filter `json:"filters"`
+	Symbol                     string    `json:"symbol"`
+	Status                     string    `json:"status"`
+	BaseAsset                  string    `json:"baseAsset"`
+	BaseAssetPrecision         int       `json:"baseAssetPrecision"`
+	QuoteAsset                 string    `json:"quoteAsset"`
+	QuoteAssetPrecision        int       `json:"quoteAssetPrecision"`
+	OrderTypes                 []string  `json:"orderTypes"`
+	QuoteOrderQtyMarketAllowed bool      `json:"quoteOrderQtyMarketAllowed"`
+	Filters                    []*Filter `json:"filters"`
 
 	// Below fields are parsed from Filters.
-	LotSize  uint64
-	MinQty   uint64
-	MaxQty   uint64
-	RateStep uint64
-	MinPrice uint64
-	MaxPrice uint64
+	LotSize                  uint64
+	MinQty                   uint64
+	MaxQty                   uint64
+	RateStep                 uint64
+	MinPrice                 uint64
+	MaxPrice                 uint64
+	MinNotional              uint64
+	ApplyMinNotionalToMarket bool
+	MaxNotional              uint64
+	ApplyMaxNotionalToMarket bool
 }
 
 type Balance struct {
@@ -41,8 +53,14 @@ type Balance struct {
 	Locked float64 `json:"locked,string"`
 }
 
+type CommissionRates struct {
+	Maker float64 `json:"maker,string"`
+	Taker float64 `json:"taker,string"`
+}
+
 type Account struct {
-	Balances []*Balance `json:"balances"`
+	Balances        []*Balance       `json:"balances"`
+	CommissionRates *CommissionRates `json:"commissionRates"`
 }
 
 type NetworkInfo struct {
@@ -91,10 +109,14 @@ type OrderbookSnapshot struct {
 }
 
 type BookUpdate struct {
-	FirstUpdateID uint64           `json:"U"`
-	LastUpdateID  uint64           `json:"u"`
-	Bids          [][2]json.Number `json:"b"`
-	Asks          [][2]json.Number `json:"a"`
+	FirstUpdateID uint64           `json:"U,omitempty"`
+	LastUpdateID  uint64           `json:"u,omitempty"`
+	Bids          [][2]json.Number `json:"b,omitempty"`
+	Asks          [][2]json.Number `json:"a,omitempty"`
+	AvgPrice      float64          `json:"w,string,omitempty"`
+
+	// IsAvgPriceUpdate is populated based on the stream name.
+	IsAvgPriceUpdate bool
 }
 
 type BookNote struct {
@@ -124,6 +146,8 @@ type StreamUpdate struct {
 	CancelledOrderID   string       `json:"C"`
 	E                  int64        `json:"E"`
 	ListenKey          string       `json:"listenKey"`
+	Commission         float64      `json:"n,string"`
+	CommissionAsset    string       `json:"N"`
 }
 
 type RateLimit struct {
@@ -150,6 +174,11 @@ type StreamSubscription struct {
 	ID     uint64   `json:"id"`
 }
 
+type AvgPriceResponse struct {
+	Mins  int     `json:"mins"`
+	Price float64 `json:"price,string"`
+}
+
 type PendingDeposit struct {
 	Amount  float64 `json:"amount,string"`
 	Coin    string  `json:"coin"`
@@ -166,6 +195,13 @@ const (
 	DepositStatusWaitingUserConfirm = 8
 )
 
+type Fill struct {
+	Price           float64 `json:"price,string"`
+	Qty             float64 `json:"qty,string"`
+	Commission      float64 `json:"commission,string"`
+	CommissionAsset string  `json:"commissionAsset"`
+}
+
 type OrderResponse struct {
 	Symbol             string  `json:"symbol"`
 	Price              float64 `json:"price,string"`
@@ -174,6 +210,7 @@ type OrderResponse struct {
 	ExecutedQty        float64 `json:"executedQty,string"`
 	CumulativeQuoteQty float64 `json:"cummulativeQuoteQty,string"`
 	Status             string  `json:"status"`
+	Fills              []*Fill `json:"fills"`
 }
 
 type BookedOrder struct {
@@ -188,6 +225,8 @@ type BookedOrder struct {
 	Status             string  `json:"status"`
 	TimeInForce        string  `json:"timeInForce"`
 	Side               string  `json:"side"`
+	Type               string  `json:"type"`
+	Fills              []*Fill `json:"fills"`
 }
 
 type MarketTicker24 struct {
