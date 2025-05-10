@@ -117,7 +117,7 @@ type OrdersUpdated struct {
 	// they are filled again by a taker. This is because all status updates also
 	// update the filled amount.
 	TradesPartial []*order.LimitOrder
-	// TradesCanceled are limit orders that were removed from the the book by a
+	// TradesCanceled are limit orders that were removed from the book by a
 	// cancel order. These may also be in TradesBooked and TradesPartial, but
 	// not TradesCompleted.
 	TradesCanceled []*order.LimitOrder

@@ -891,7 +891,7 @@ func (a *dexAccount) setupCryptoV2(creds *db.PrimaryCredentials, crypter encrypt
 	kids := make([]uint32, 0, 11) // 1 x purpose, 1 x version (incl. oddness), 8 x 4-byte uint32s, 1 x acct key index.
 	// Hardened "purpose" key.
 	kids = append(kids, hdKeyPurposeAccts)
-	// Second child is the the format/oddness byte.
+	// Second child is the format/oddness byte.
 	kids = append(kids, uint32(dexPkB[0]))
 	byteSeq := dexPkB[1:]
 	// Generate uint32's from the 4-byte chunks of the pubkey.

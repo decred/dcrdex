@@ -1241,7 +1241,7 @@ func (c *Core) tickAsset(dc *dexConnection, assetID uint32) assetMap {
 	return updated
 }
 
-// Get the *dexConnection and connection status for the the host.
+// Get the *dexConnection and connection status for the host.
 func (c *Core) dex(addr string) (*dexConnection, bool, error) {
 	host, err := addrHost(addr)
 	if err != nil {

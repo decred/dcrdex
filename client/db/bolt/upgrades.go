@@ -182,7 +182,7 @@ func v2Upgrade(dbtx *bbolt.Tx) error {
 
 func v3Upgrade(dbtx *bbolt.Tx) error {
 	// Upgrade the match proof. We just have to retrieve and re-store the
-	// buckets. The decoder will recognize the the old version and add the new
+	// buckets. The decoder will recognize the old version and add the new
 	// field.
 	skipCancels := true // cancel matches have no tx data
 	matchesBucket := []byte("matches")

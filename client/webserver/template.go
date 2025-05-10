@@ -161,7 +161,7 @@ func (t *templates) buildErr() error {
 //
 // The template will be reloaded if using on-disk (not embedded) templates.
 //
-// DRAFT NOTE: Might consider writing directly to the the buffer here. Could
+// DRAFT NOTE: Might consider writing directly to the buffer here. Could
 // still set the error code appropriately.
 func (t *templates) exec(name string, data any) (string, error) {
 	tmpl, found := t.templates[name]

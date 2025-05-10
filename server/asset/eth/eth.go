@@ -672,7 +672,7 @@ func (be *AssetBackend) Contract(coinID, contractData []byte) (*asset.Contract, 
 		return nil, fmt.Errorf("unable to create coiner: %w", err)
 	}
 
-	// Confirmations performs some extra swap status checks if the the tx is
+	// Confirmations performs some extra swap status checks if the tx is
 	// mined. For init coins, this uses the contract account's state (if it is
 	// mined) to verify the value, counterparty, and lock time.
 	_, err = sc.Confirmations(be.ctx)
@@ -741,7 +741,7 @@ func (be *AssetBackend) Redemption(redeemCoinID, _, contractData []byte) (asset.
 		return nil, fmt.Errorf("unable to create coiner: %w", err)
 	}
 
-	// Confirmations performs some extra swap status checks if the the tx
+	// Confirmations performs some extra swap status checks if the tx
 	// is mined. For redeem coins, this is just a swap state check.
 	_, err = rc.Confirmations(be.ctx)
 	if err != nil {
