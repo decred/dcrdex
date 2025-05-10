@@ -20,6 +20,7 @@ import (
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	"github.com/decred/dcrd/txscript/v4/stdscript"
 	"github.com/decred/dcrd/wire"
+	"golang.org/x/crypto/ripemd160"
 )
 
 const (
@@ -302,6 +303,44 @@ func AddressSigType(addr stdaddr.Address) (sigType dcrec.SignatureType, err erro
 		err = fmt.Errorf("unsupported signature type")
 	}
 	return sigType, err
+}
+
+func MakePrivateContract(redeemPKH, refundPKH []byte, locktime int64) ([]byte, error) {
+	if len(redeemPKH) != 20 || len(refundPKH) != 20 {
+		return nil, fmt.Errorf("invalid PKH size")
+	}
+
+	b := txscript.NewScriptBuilder()
+
+	b.AddOp(txscript.OP_IF) // Normal redeem path
+	{
+		b.AddOp(txscript.OP_DUP)
+		b.AddOp(txscript.OP_HASH160)
+		b.AddData(redeemPKH[:])
+		b.AddOp(txscript.OP_EQUALVERIFY)
+		b.AddOp(txscript.OP_2)
+		b.AddOp(txscript.OP_CHECKSIGALTVERIFY)
+	}
+	b.AddOp(txscript.OP_ELSE) // Refund path
+	{
+		b.AddInt64(locktime)
+		b.AddOp(txscript.OP_CHECKLOCKTIMEVERIFY)
+		b.AddOp(txscript.OP_DROP)
+	}
+	b.AddOp(txscript.OP_ENDIF)
+	b.AddOp(txscript.OP_DUP)
+	b.AddOp(txscript.OP_HASH160)
+	b.AddData(refundPKH[:])
+	b.AddOp(txscript.OP_EQUALVERIFY)
+	b.AddOp(txscript.OP_2)
+	b.AddOp(txscript.OP_CHECKSIGALT)
+
+	script, err := b.Script()
+	if err != nil {
+		return nil, err
+	}
+
+	return script, nil
 }
 
 // MakeContract creates an atomic swap contract. The secretHash MUST be computed
@@ -660,6 +699,44 @@ func ExtractSwapDetails(pkScript []byte, chainParams *chaincfg.Params) (
 	}
 
 	err = fmt.Errorf("invalid swap contract")
+	return
+}
+
+func ExtractPrivateSwapDetails(script []byte) (refunder, redeemer [ripemd160.Size]byte, locktime int64, err error) {
+	if len(script) != 62 {
+		err = fmt.Errorf("invalid swap contract: length = %v", len(script))
+		return
+	}
+
+	if script[0] == txscript.OP_IF &&
+		script[1] == txscript.OP_DUP &&
+		script[2] == txscript.OP_HASH160 &&
+		script[3] == txscript.OP_DATA_20 &&
+		// creator's (20 bytes)
+		script[24] == txscript.OP_EQUALVERIFY &&
+		script[25] == txscript.OP_2 &&
+		script[26] == txscript.OP_CHECKSIGALTVERIFY &&
+		script[27] == txscript.OP_ELSE &&
+		script[28] == txscript.OP_DATA_4 &&
+		// lockTime (4 bytes)
+		script[33] == txscript.OP_CHECKLOCKTIMEVERIFY &&
+		script[34] == txscript.OP_DROP &&
+		script[35] == txscript.OP_ENDIF &&
+		script[36] == txscript.OP_DUP &&
+		script[37] == txscript.OP_HASH160 &&
+		script[38] == txscript.OP_DATA_20 &&
+
+		// participant's pkh (20 bytes)
+		script[59] == txscript.OP_EQUALVERIFY &&
+		script[60] == txscript.OP_2 &&
+		script[61] == txscript.OP_CHECKSIGALT {
+		copy(redeemer[:], script[4:24])
+		copy(refunder[:], script[39:59])
+		locktime = int64(binary.LittleEndian.Uint32(script[29:33]))
+	} else {
+		err = fmt.Errorf("invalid swap contract")
+	}
+
 	return
 }
 
