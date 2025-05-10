@@ -129,7 +129,7 @@ Depending on the asset, there may be a wallet setting on the Wallets page to
 pre-size funding UTXOs to avoid this over-locking, but (1) it involves an extra
 transaction that pays to yourself before placing the order, which has on-chain
 transaction fees that may be undesirable on chains like BTC, and (2) it is only
-applied for limit orders with standing time-in-force since the the UTXOs are
+applied for limit orders with standing time-in-force since the UTXOs are
 only locked until the swap transaction is broadcasted, which is relatively brief
 for taker-only orders that are never booked.
 

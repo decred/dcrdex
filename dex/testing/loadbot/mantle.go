@@ -737,7 +737,7 @@ type botWallet struct {
 // newBotWallet is the constructor for a botWallet. For a botWallet created
 // with Mantle.createWallet, the botWallet's balance will be replenished up to
 // once per epoch, if it falls outside of the range [minFunds, maxFunds].
-// Set numCoins to at least twice the the maximum number of (booked + epoch)
+// Set numCoins to at least twice the maximum number of (booked + epoch)
 // orders the wallet is expected to support.
 func newBotWallet(symbol, node, name string, port string, pass []byte, minFunds, maxFunds uint64, numCoins int) *botWallet {
 	var form, parentForm *core.WalletForm

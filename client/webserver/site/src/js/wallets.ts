@@ -784,7 +784,7 @@ export default class WalletsPage extends BasePage {
     this.showForm(page.managePeersForm)
   }
 
-  // submitAddPeers sends a request for the the wallet to connect to a new
+  // submitAddPeers sends a request for the wallet to connect to a new
   // peer.
   async submitAddPeer () {
     const page = this.page

@@ -92,7 +92,7 @@ func ParseInitiateDataV0(calldata []byte) (map[[SecretHashSize]byte]*Initiation,
 }
 
 // ParseRedeemDataV0 parses the calldata used to call the redeem function of a
-// specific version of the swap contract. It returns the the list of redemptions
+// specific version of the swap contract. It returns the list of redemptions
 // done in the call and errors if the call data does not call redeem with expected
 // argument types.
 func ParseRedeemDataV0(calldata []byte) (map[[SecretHashSize]byte]*Redemption, error) {

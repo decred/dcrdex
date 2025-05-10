@@ -273,7 +273,7 @@ func (ai *AccountInfo) EncKey() []byte {
 }
 
 // DecodeAccountInfo decodes the versioned blob into an *AccountInfo. The byte
-// slice fields of AccountInfo reference the underlying buffer of the the input.
+// slice fields of AccountInfo reference the underlying buffer of the input.
 func DecodeAccountInfo(b []byte) (*AccountInfo, error) {
 	ver, pushes, err := encode.DecodeBlob(b)
 	if err != nil {

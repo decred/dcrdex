@@ -3213,7 +3213,7 @@ type assetInventory struct {
 	toWithdraw uint64
 }
 
-// inventory generates a current view of the the bot's asset distribution.
+// inventory generates a current view of the bot's asset distribution.
 // Use optimizeTransfers to set toDeposit and toWithdraw.
 func (u *unifiedExchangeAdaptor) inventory(assetID uint32, dexLot, cexLot uint64) (b *assetInventory) {
 	b = new(assetInventory)
