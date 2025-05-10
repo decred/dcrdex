@@ -6,11 +6,14 @@ package btc
 import (
 	"bytes"
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -33,6 +36,7 @@ var blockPrefix = []byte("b")
 var pendingPrefix = []byte("c")
 var lastQueryKey = []byte("lq")
 var txPrefix = []byte("t")
+var secNoncePrefix = []byte("sn")
 var maxPendingKey = pendingKey(math.MaxUint64)
 
 // pendingKey maps an index to an extendedWalletTransaction. The index is
@@ -265,6 +269,135 @@ func (db *BadgerTxDB) StoreTx(tx *ExtendedWalletTx) error {
 	}
 
 	return db.handleConflictWithBackoff(func() error { return db.storeTx(tx) })
+}
+
+func (db *BadgerTxDB) deleteSecNonce(pubNonce []byte) error {
+	return db.Update(func(txn *badger.Txn) error {
+		secNonceKey := make([]byte, len(secNoncePrefix)+len(pubNonce))
+		copy(secNonceKey, secNoncePrefix)
+		copy(secNonceKey[len(secNoncePrefix):], pubNonce)
+		return txn.Delete(secNonceKey)
+	})
+}
+
+// DeleteSecNonce deletes the secret nonce for a given public nonce.
+// This is used to clean up the database after a private swap is complete.
+func (db *BadgerTxDB) DeleteSecNonce(pubNonce []byte) error {
+	db.wg.Add(1)
+	defer db.wg.Done()
+	if !db.running.Load() {
+		return fmt.Errorf("database is not running")
+	}
+
+	return db.handleConflictWithBackoff(func() error { return db.deleteSecNonce(pubNonce) })
+}
+
+func (db *BadgerTxDB) storeSecNonce(pubNonce, secNonce []byte) error {
+	return db.Update(func(txn *badger.Txn) error {
+		secNonceKey := make([]byte, len(secNoncePrefix)+len(pubNonce))
+		copy(secNonceKey, secNoncePrefix)
+		copy(secNonceKey[len(secNoncePrefix):], pubNonce)
+		return txn.Set(secNonceKey, secNonce)
+	})
+}
+
+const (
+	gcmNonceSize = 12
+)
+
+func encryptAES(key []byte, plaintext []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create AES cipher: %v", err)
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GCM: %v", err)
+	}
+
+	nonce := make([]byte, gcmNonceSize)
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, fmt.Errorf("failed to generate nonce: %v", err)
+	}
+
+	ciphertext := gcm.Seal(nonce, nonce, plaintext, nil)
+	return ciphertext, nil
+}
+
+func decryptAES(key []byte, ciphertext []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create AES cipher: %v", err)
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GCM: %v", err)
+	}
+
+	if len(ciphertext) < gcmNonceSize {
+		return nil, fmt.Errorf("ciphertext too short")
+	}
+	nonce, ciphertext := ciphertext[:gcmNonceSize], ciphertext[gcmNonceSize:]
+
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return nil, fmt.Errorf("decryption failed: %v", err)
+	}
+
+	return plaintext, nil
+}
+
+// StoreSecNonce stores the secret nonce for a given public nonce. encKey
+// is used to encrypt the secret nonce before it is stored in the database.
+func (db *BadgerTxDB) StoreSecNonce(pubNonce, secNonce, encKey []byte) error {
+	db.wg.Add(1)
+	defer db.wg.Done()
+	if !db.running.Load() {
+		return fmt.Errorf("database is not running")
+	}
+
+	encSecNonce, err := encryptAES(encKey, secNonce)
+	if err != nil {
+		return fmt.Errorf("error encrypting secret nonce: %w", err)
+	}
+
+	return db.handleConflictWithBackoff(func() error { return db.storeSecNonce(pubNonce, encSecNonce) })
+}
+
+func (db *BadgerTxDB) getSecNonce(pubNonce []byte) ([]byte, error) {
+	var secNonce []byte
+	err := db.View(func(txn *badger.Txn) error {
+		secNonceKey := make([]byte, len(secNoncePrefix)+len(pubNonce))
+		copy(secNonceKey, secNoncePrefix)
+		copy(secNonceKey[len(secNoncePrefix):], pubNonce)
+		item, err := txn.Get(secNonceKey)
+		if err != nil {
+			return err
+		}
+		secNonce, err = item.ValueCopy(nil)
+		return err
+	})
+	return secNonce, err
+}
+
+// GetSecNonce retrieves the secret nonce for a given public nonce. The
+// same encryption key must be used as the one used to encrypt the secret
+// nonce when it was stored.
+func (db *BadgerTxDB) GetSecNonce(pubNonce, encKey []byte) ([]byte, error) {
+	db.wg.Add(1)
+	defer db.wg.Done()
+	if !db.running.Load() {
+		return nil, fmt.Errorf("database is not running")
+	}
+
+	encSecNonce, err := db.getSecNonce(pubNonce)
+	if err != nil {
+		return nil, err
+	}
+
+	return decryptAES(encKey, encSecNonce)
 }
 
 func (db *BadgerTxDB) markTxAsSubmitted(txID string) error {

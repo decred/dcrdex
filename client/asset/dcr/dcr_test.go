@@ -27,8 +27,10 @@ import (
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
+	dcradaptor "decred.org/dcrdex/internal/adaptorsigs"
 	"decred.org/dcrwallet/v5/rpc/client/dcrwallet"
 	walletjson "decred.org/dcrwallet/v5/rpc/jsonrpc/types"
+	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec"
@@ -5060,4 +5062,1073 @@ func TestRescanSync(t *testing.T) {
 	wallet.rescan.progress = nil
 	checkProgress(true, 1)
 
+}
+
+func TestSwapPrivate(t *testing.T) {
+	wallet, node, shutdown := tNewWallet()
+	defer shutdown()
+
+	swapVal := toAtoms(5)
+	coins := asset.Coins{
+		newOutput(tTxHash, 0, toAtoms(3), wire.TxTreeRegular),
+		newOutput(tTxHash, 0, toAtoms(3), wire.TxTreeRegular),
+	}
+
+	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
+
+	node.changeAddr = tPKHAddr
+	var err error
+	node.privWIF, err = dcrutil.NewWIF(privBytes, tChainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
+	if err != nil {
+		t.Fatalf("NewWIF error: %v", err)
+	}
+
+	node.newAddr = tPKHAddr
+	node.changeAddr = tPKHAddr
+
+	redeemPubKey := randBytes(33) // Compressed public key
+	refundPubKey := randBytes(33) // Compressed public key
+	contract := &asset.PrivateContract{
+		LockTime:        uint64(time.Now().Unix()),
+		Value:           swapVal,
+		RedeemPublicKey: redeemPubKey,
+		RefundPublicKey: refundPubKey,
+	}
+
+	swaps := &asset.PrivateSwaps{
+		Version:    0,
+		Inputs:     coins,
+		Contracts:  []*asset.PrivateContract{contract},
+		LockChange: true,
+		FeeRate:    tDCR.MaxFeeRate,
+	}
+
+	// Aim for 3 signature cycles.
+	sigSizer := 0
+	signFunc := func(msgTx *wire.MsgTx) (*wire.MsgTx, bool, error) {
+		// Set the sigScripts to random bytes of the correct length for spending a
+		// p2pkh output.
+		scriptSize := dexdcr.P2PKHSigScriptSize
+		// Oscillate the signature size to work the fee optimization loop.
+		if sigSizer%2 == 0 {
+			scriptSize -= 2
+		}
+		sigSizer++
+		return signFunc(msgTx, scriptSize)
+	}
+
+	node.signFunc = signFunc
+	// reset the signFunc after this test so captured variables are free
+	defer func() { node.signFunc = defaultSignFunc }()
+
+	// This time should succeed.
+	receipts, changeCoin, txData, feesPaid, err := wallet.SwapPrivate(swaps)
+	if err != nil {
+		t.Fatalf("swap private error: %v", err)
+	}
+
+	// Check that we got the expected number of receipts
+	if len(receipts) != 1 {
+		t.Fatalf("expected 1 receipt, got %d", len(receipts))
+	}
+
+	// Check the receipt
+	receipt := receipts[0]
+	if receipt.Coin().Value() != swapVal {
+		t.Fatalf("receipt coin value %d != expected %d", receipt.Coin().Value(), swapVal)
+	}
+
+	// Check that the receipt has a signed refund
+	if len(receipt.SignedRefund()) == 0 {
+		t.Fatalf("receipt missing signed refund")
+	}
+
+	// Check expiration time
+	expectedExpiration := time.Unix(int64(contract.LockTime), 0).UTC()
+	if !receipt.Expiration().Equal(expectedExpiration) {
+		t.Fatalf("receipt expiration %v != expected %v", receipt.Expiration(), expectedExpiration)
+	}
+
+	// Make sure the change coin is locked.
+	if len(node.lockedCoins) != 1 {
+		t.Fatalf("change coin not locked")
+	}
+	txHash, _, _ := decodeCoinID(changeCoin.ID())
+	if txHash.String() != node.lockedCoins[0].Hash.String() {
+		t.Fatalf("wrong coin locked during swap")
+	}
+
+	// Fees should be returned.
+	minFees := tDCR.MaxFeeRate * uint64(node.sentRawTx.SerializeSize())
+	if feesPaid < minFees {
+		t.Fatalf("sent fees, %d, less than required fees, %d", feesPaid, minFees)
+	}
+
+	// Check that txData matches the sentRawTx
+	sentRawTxB, err := node.sentRawTx.Bytes()
+	if err != nil {
+		t.Fatalf("msgTxToHex error: %v", err)
+	}
+	if !bytes.Equal(txData, sentRawTxB) {
+		t.Fatalf("txData does not match sentRawTx")
+	}
+
+	// Test zero fee rate error
+	swaps.FeeRate = 0
+	_, _, _, _, err = wallet.SwapPrivate(swaps)
+	if err == nil {
+		t.Fatalf("no error for zero fee rate")
+	}
+	swaps.FeeRate = tDCR.MaxFeeRate
+
+	// Not enough funds
+	swaps.Inputs = coins[:1]
+	_, _, _, _, err = wallet.SwapPrivate(swaps)
+	if err == nil {
+		t.Fatalf("no error for insufficient funds")
+	}
+	swaps.Inputs = coins
+
+	// ChangeAddress error
+	node.changeAddrErr = tErr
+	_, _, _, _, err = wallet.SwapPrivate(swaps)
+	if err == nil {
+		t.Fatalf("no error for getrawchangeaddress rpc error")
+	}
+	node.changeAddrErr = nil
+
+	// SignTx error
+	node.signFunc = func(msgTx *wire.MsgTx) (*wire.MsgTx, bool, error) {
+		return nil, false, tErr
+	}
+	_, _, _, _, err = wallet.SwapPrivate(swaps)
+	if err == nil {
+		t.Fatalf("no error for signrawtransactionwithwallet rpc error")
+	}
+
+	// incomplete signatures
+	node.signFunc = func(msgTx *wire.MsgTx) (*wire.MsgTx, bool, error) {
+		return msgTx, false, nil
+	}
+	_, _, _, _, err = wallet.SwapPrivate(swaps)
+	if err == nil {
+		t.Fatalf("no error for incomplete signature rpc error")
+	}
+	node.signFunc = signFunc
+
+	// Test with multiple contracts
+	contract2 := &asset.PrivateContract{
+		LockTime:        uint64(time.Now().Unix()),
+		Value:           swapVal,
+		RedeemPublicKey: randBytes(33),
+		RefundPublicKey: randBytes(33),
+	}
+	// Add more coins to cover both contracts
+	swaps.Inputs = asset.Coins{
+		newOutput(tTxHash, 0, toAtoms(3), wire.TxTreeRegular),
+		newOutput(tTxHash, 1, toAtoms(3), wire.TxTreeRegular),
+		newOutput(tTxHash, 2, toAtoms(3), wire.TxTreeRegular),
+		newOutput(tTxHash, 3, toAtoms(3), wire.TxTreeRegular),
+	}
+	swaps.Contracts = []*asset.PrivateContract{contract, contract2}
+
+	// Reset locked coins to ensure we only check for coins locked by this test
+	node.lockedCoins = nil
+
+	receipts, changeCoin, txData, feesPaid, err = wallet.SwapPrivate(swaps)
+	if err != nil {
+		t.Fatalf("multi-contract swap private error: %v", err)
+	}
+
+	// Check that we got the expected number of receipts
+	if len(receipts) != 2 {
+		t.Fatalf("expected 2 receipts, got %d", len(receipts))
+	}
+
+	// Check that both receipts have the correct coin values
+	for i, receipt := range receipts {
+		if receipt.Coin().Value() != swapVal {
+			t.Fatalf("receipt %d coin value %d != expected %d", i, receipt.Coin().Value(), swapVal)
+		}
+	}
+
+	// Check that both receipts have signed refunds
+	for i, receipt := range receipts {
+		if len(receipt.SignedRefund()) == 0 {
+			t.Fatalf("receipt %d missing signed refund", i)
+		}
+	}
+
+	// Check expiration times for both receipts
+	for i, receipt := range receipts {
+		expectedExpiration := time.Unix(int64(swaps.Contracts[i].LockTime), 0).UTC()
+		if !receipt.Expiration().Equal(expectedExpiration) {
+			t.Fatalf("receipt %d expiration %v != expected %v", i, receipt.Expiration(), expectedExpiration)
+		}
+	}
+
+	// Make sure the change coin is locked.
+	if len(node.lockedCoins) != 1 {
+		t.Fatalf("change coin not locked")
+	}
+	txHash, _, _ = decodeCoinID(changeCoin.ID())
+	if txHash.String() != node.lockedCoins[0].Hash.String() {
+		t.Fatalf("wrong coin locked during swap")
+	}
+
+	// Fees should be returned.
+	minFees = tDCR.MaxFeeRate * uint64(node.sentRawTx.SerializeSize())
+	if feesPaid < minFees {
+		t.Fatalf("sent fees, %d, less than required fees, %d", feesPaid, minFees)
+	}
+
+	// Check that txData matches the sentRawTx
+	sentRawTxB, err = node.sentRawTx.Bytes()
+	if err != nil {
+		t.Fatalf("msgTxToHex error: %v", err)
+	}
+	if !bytes.Equal(txData, sentRawTxB) {
+		t.Fatalf("txData does not match sentRawTx")
+	}
+
+	// Test with fee bump
+	swaps.Options = map[string]string{"swapfeebump": "1.5"}
+	swaps.Contracts = []*asset.PrivateContract{contract}
+	// Reset inputs for single contract test
+	swaps.Inputs = asset.Coins{
+		newOutput(tTxHash, 0, toAtoms(3), wire.TxTreeRegular),
+		newOutput(tTxHash, 0, toAtoms(3), wire.TxTreeRegular),
+	}
+
+	// Reset locked coins to ensure we only check for coins locked by this test
+	node.lockedCoins = nil
+
+	receipts, changeCoin, txData, feesPaid, err = wallet.SwapPrivate(swaps)
+	if err != nil {
+		t.Fatalf("swap private with options error: %v", err)
+	}
+
+	// Check that we got the expected number of receipts
+	if len(receipts) != 1 {
+		t.Fatalf("expected 1 receipt, got %d", len(receipts))
+	}
+
+	// Check that fees are correctly bumped with the 1.5x multiplier
+	// The fee rate should be bumped by 1.5x, so the minimum fees should be 1.5x higher
+	bumpedMinFees := uint64(float64(tDCR.MaxFeeRate)*1.5) * uint64(node.sentRawTx.SerializeSize())
+	if feesPaid < bumpedMinFees {
+		t.Fatalf("sent fees, %d, less than required bumped fees, %d", feesPaid, bumpedMinFees)
+	}
+
+	// Check that txData matches the sentRawTx
+	sentRawTxB, err = node.sentRawTx.Bytes()
+	if err != nil {
+		t.Fatalf("msgTxToHex error: %v", err)
+	}
+	if !bytes.Equal(txData, sentRawTxB) {
+		t.Fatalf("txData does not match sentRawTx")
+	}
+
+	// Test with empty contracts
+	swaps.Options = nil
+	swaps.Contracts = []*asset.PrivateContract{}
+	_, _, _, _, err = wallet.SwapPrivate(swaps)
+	if err == nil {
+		t.Fatalf("no error for empty contracts")
+	}
+}
+
+func TestAuditPrivateContract(t *testing.T) {
+	wallet, _, shutdown := tNewWallet()
+	defer shutdown()
+
+	// Create test public keys (compressed format)
+	redeemPubKey := randBytes(33) // Compressed public key
+	refundPubKey := randBytes(33) // Compressed public key
+	lockTime := time.Now().Add(time.Hour * 12)
+
+	contract := &asset.PrivateContract{
+		LockTime:        uint64(lockTime.Unix()),
+		Value:           5 * tLotSize,
+		RedeemPublicKey: redeemPubKey,
+		RefundPublicKey: refundPubKey,
+	}
+
+	// Create the private contract script
+	redeemPKH := stdaddr.Hash160(contract.RedeemPublicKey)
+	refundPKH := stdaddr.Hash160(contract.RefundPublicKey)
+	contractScript, err := dexdcr.MakePrivateContract(redeemPKH, refundPKH, int64(contract.LockTime))
+	if err != nil {
+		t.Fatalf("error making private swap contract: %v", err)
+	}
+
+	// Create P2SH address from the contract script
+	addr, err := stdaddr.NewAddressScriptHashV0(contractScript, tChainParams)
+	if err != nil {
+		t.Fatalf("error creating script address: %v", err)
+	}
+	_, pkScript := addr.PaymentScript()
+
+	// Prepare the contract tx data
+	contractTx := wire.NewMsgTx()
+	contractTx.AddTxIn(&wire.TxIn{})
+	contractTx.AddTxOut(&wire.TxOut{
+		Value:    int64(contract.Value),
+		PkScript: pkScript,
+	})
+	contractTxData, err := contractTx.Bytes()
+	if err != nil {
+		t.Fatalf("error preparing contract txdata: %v", err)
+	}
+
+	contractHash := contractTx.TxHash()
+	contractVout := uint32(0)
+	contractCoinID := ToCoinID(&contractHash, contractVout)
+
+	// Test successful audit
+	err = wallet.AuditPrivateContract(contractCoinID, contractTxData, contract, true)
+	if err != nil {
+		t.Fatalf("audit error: %v", err)
+	}
+
+	// Test invalid coinID
+	err = wallet.AuditPrivateContract(make([]byte, 15), contractTxData, contract, false)
+	if err == nil {
+		t.Fatalf("no error for bad coinID")
+	}
+
+	// Test wrong redeem public key
+	wrongRedeemPubKey := randBytes(33)
+	wrongContract := &asset.PrivateContract{
+		LockTime:        uint64(lockTime.Unix()),
+		Value:           5 * tLotSize,
+		RedeemPublicKey: wrongRedeemPubKey,
+		RefundPublicKey: refundPubKey,
+	}
+	err = wallet.AuditPrivateContract(contractCoinID, contractTxData, wrongContract, false)
+	if err == nil {
+		t.Fatalf("no error for wrong redeem public key")
+	}
+
+	// Test wrong refund public key
+	wrongRefundPubKey := randBytes(33)
+	wrongContract = &asset.PrivateContract{
+		LockTime:        uint64(lockTime.Unix()),
+		Value:           5 * tLotSize,
+		RedeemPublicKey: redeemPubKey,
+		RefundPublicKey: wrongRefundPubKey,
+	}
+	err = wallet.AuditPrivateContract(contractCoinID, contractTxData, wrongContract, false)
+	if err == nil {
+		t.Fatalf("no error for wrong refund public key")
+	}
+
+	// Test wrong locktime
+	wrongLockTimeContract := &asset.PrivateContract{
+		LockTime:        uint64(time.Now().Add(time.Hour * 24).Unix()), // Different locktime
+		Value:           5 * tLotSize,
+		RedeemPublicKey: redeemPubKey,
+		RefundPublicKey: refundPubKey,
+	}
+	err = wallet.AuditPrivateContract(contractCoinID, contractTxData, wrongLockTimeContract, false)
+	if err == nil {
+		t.Fatalf("no error for wrong locktime")
+	}
+
+	// Test no txdata
+	err = wallet.AuditPrivateContract(contractCoinID, nil, contract, false)
+	if err == nil {
+		t.Fatalf("no error for no txdata")
+	}
+
+	// Test invalid txdata, zero inputs
+	contractTx.TxIn = nil
+	invalidContractTxData, err := contractTx.Bytes()
+	if err != nil {
+		t.Fatalf("error preparing invalid contract txdata: %v", err)
+	}
+	err = wallet.AuditPrivateContract(contractCoinID, invalidContractTxData, contract, false)
+	if err == nil {
+		t.Fatalf("no error for invalid txdata with zero inputs")
+	}
+
+	// Test wrong txdata, wrong output script (P2PKH instead of P2SH)
+	pkh, _ := hex.DecodeString("c6a704f11af6cbee8738ff19fc28cdc70aba0b82")
+	wrongAddr, _ := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(pkh, tChainParams)
+	_, wrongPkScript := wrongAddr.PaymentScript()
+	wrongContractTx := wire.NewMsgTx()
+	wrongContractTx.AddTxIn(&wire.TxIn{})
+	wrongContractTx.AddTxOut(&wire.TxOut{
+		Value:    int64(contract.Value),
+		PkScript: wrongPkScript,
+	})
+	wrongContractTxData, err := wrongContractTx.Bytes()
+	if err != nil {
+		t.Fatalf("error preparing wrong contract txdata: %v", err)
+	}
+	err = wallet.AuditPrivateContract(contractCoinID, wrongContractTxData, contract, false)
+	if err == nil {
+		t.Fatalf("no error for wrong output script")
+	}
+
+	// Test wrong txdata, wrong hash
+	wrongHash := chainhash.Hash{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20}
+	wrongCoinID := ToCoinID(&wrongHash, contractVout)
+	err = wallet.AuditPrivateContract(wrongCoinID, contractTxData, contract, false)
+	if err == nil {
+		t.Fatalf("no error for wrong tx hash")
+	}
+
+	// Test invalid vout
+	invalidVoutCoinID := ToCoinID(&contractHash, 999) // Non-existent vout
+	err = wallet.AuditPrivateContract(invalidVoutCoinID, contractTxData, contract, false)
+	if err == nil {
+		t.Fatalf("no error for invalid vout")
+	}
+}
+
+func TestGenerateUnsignedRedeemTx(t *testing.T) {
+	wallet, node, shutdown := tNewWallet()
+	defer shutdown()
+
+	// Test data
+	swapVal := toAtoms(5)
+	lockTime := time.Now().Add(time.Hour * 12)
+
+	// Create a private contract
+	privateContract := &asset.PrivateContract{
+		LockTime:        uint64(lockTime.Unix()),
+		Value:           swapVal,
+		RedeemPublicKey: randBytes(33), // Compressed public key
+		RefundPublicKey: randBytes(33), // Compressed public key
+	}
+
+	// Create a coin ID
+	txHash := &chainhash.Hash{}
+	copy(txHash[:], randBytes(32))
+	vout := uint32(0)
+	coinID := ToCoinID(txHash, vout)
+
+	// Mock the wallet's ExternalAddress method
+	node.newAddr = tPKHAddr
+
+	// Test successful generation
+	feeRate := uint64(10)
+	unsignedRedeemTx, err := wallet.GenerateUnsignedRedeemTx(coinID, privateContract, feeRate)
+	if err != nil {
+		t.Fatalf("GenerateUnsignedRedeemTx error: %v", err)
+	}
+
+	// Verify the returned transaction
+	if len(unsignedRedeemTx) == 0 {
+		t.Fatalf("unsigned redeem tx is empty")
+	}
+
+	// Deserialize and verify the transaction structure
+	msgTx, err := msgTxFromBytes(unsignedRedeemTx)
+	if err != nil {
+		t.Fatalf("failed to deserialize unsigned redeem tx: %v", err)
+	}
+
+	// Check that the transaction has exactly one input
+	if len(msgTx.TxIn) != 1 {
+		t.Fatalf("expected 1 input, got %d", len(msgTx.TxIn))
+	}
+
+	// Check that the input references the correct outpoint
+	input := msgTx.TxIn[0]
+	if !input.PreviousOutPoint.Hash.IsEqual(txHash) {
+		t.Fatalf("input hash mismatch. expected %v, got %v", txHash, input.PreviousOutPoint.Hash)
+	}
+	if input.PreviousOutPoint.Index != vout {
+		t.Fatalf("input vout mismatch. expected %d, got %d", vout, input.PreviousOutPoint.Index)
+	}
+	if input.PreviousOutPoint.Tree != wire.TxTreeRegular {
+		t.Fatalf("input tree mismatch. expected %d, got %d", wire.TxTreeRegular, input.PreviousOutPoint.Tree)
+	}
+
+	// Check that the transaction has exactly one output
+	if len(msgTx.TxOut) != 1 {
+		t.Fatalf("expected 1 output, got %d", len(msgTx.TxOut))
+	}
+
+	// Check that the output value is correct (contract value minus fees)
+	expectedTxSize := dexdcr.MsgTxOverhead + dexdcr.TxInOverhead + 1 + dexdcr.RedeemPrivateSwapSigScriptSize + dexdcr.P2PKHOutputSize
+	expectedFee := feeRate * uint64(expectedTxSize)
+	expectedOutputValue := privateContract.Value - expectedFee
+	output := msgTx.TxOut[0]
+	if uint64(output.Value) != expectedOutputValue {
+		t.Fatalf("output value mismatch. expected %d, got %d", expectedOutputValue, output.Value)
+	}
+
+	// Test with invalid coin ID
+	invalidCoinID := []byte{0x01, 0x02, 0x03} // Too short
+	_, err = wallet.GenerateUnsignedRedeemTx(invalidCoinID, privateContract, feeRate)
+	if err == nil {
+		t.Fatalf("expected error for invalid coin ID")
+	}
+
+	// Test with fee rate that makes the transaction not worth the fees
+	// Calculate a fee rate that would make the total fees exceed the contract value
+	maxFeeRate := (privateContract.Value / uint64(expectedTxSize))
+	_, err = wallet.GenerateUnsignedRedeemTx(coinID, privateContract, maxFeeRate)
+	if err != nil {
+		t.Fatalf("unexpected error for max fee rate: %v", err)
+	}
+	_, err = wallet.GenerateUnsignedRedeemTx(coinID, privateContract, maxFeeRate+1)
+	if err == nil {
+		t.Fatalf("expected error for fee rate too high")
+	}
+
+	// Test with ExternalAddress error
+	node.newAddrErr = tErr
+	_, err = wallet.GenerateUnsignedRedeemTx(coinID, privateContract, maxFeeRate)
+	if err == nil {
+		t.Fatalf("expected error for ExternalAddress failure")
+	}
+	node.newAddrErr = nil
+
+	// Test with zero fee rate
+	_, err = wallet.GenerateUnsignedRedeemTx(coinID, privateContract, 0)
+	if err != nil {
+		t.Fatalf("unexpected error for zero fee rate: %v", err)
+	}
+}
+
+// ValidateAdaptorSig verifies that the adaptor signature provided by the
+// counterparty enables the wallet to redeem the private swap once the secret
+// is recovered. This is used only for private-key-tweaked adaptor signatures.
+func TestGeneratePrivateKeyTweakedAdaptor(t *testing.T) {
+	wallet, node, shutdown := tNewWallet()
+	defer shutdown()
+
+	// Generate two random private keys
+	privKey1, err := secp256k1.GeneratePrivateKey()
+	if err != nil {
+		t.Fatalf("failed to generate private key 1: %v", err)
+	}
+	privKey2, err := secp256k1.GeneratePrivateKey()
+	if err != nil {
+		t.Fatalf("failed to generate private key 2: %v", err)
+	}
+
+	// Get the public keys
+	pubKey1 := privKey1.PubKey()
+	pubKey2 := privKey2.PubKey()
+
+	// Create a private contract with the public keys
+	lockTime := time.Now().Add(time.Hour * 12)
+	contract := &asset.PrivateContract{
+		LockTime:        uint64(lockTime.Unix()),
+		Value:           5 * tLotSize,
+		RedeemPublicKey: pubKey1.SerializeCompressed(),
+		RefundPublicKey: pubKey2.SerializeCompressed(),
+	}
+
+	// Generate a dummy unsigned redeem transaction
+	redeemTx := wire.NewMsgTx()
+	txHash := &chainhash.Hash{}
+	copy(txHash[:], randBytes(32))
+	redeemTx.AddTxIn(wire.NewTxIn(&wire.OutPoint{
+		Hash:  *txHash,
+		Index: 0,
+		Tree:  wire.TxTreeRegular,
+	}, int64(contract.Value), nil))
+
+	// Create a dummy output (P2PKH to a random address)
+	pkh := randBytes(20) // Random public key hash
+	addr, err := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(pkh, tChainParams)
+	if err != nil {
+		t.Fatalf("failed to create address: %v", err)
+	}
+	_, pkScript := addr.PaymentScript()
+
+	// Calculate fee and output value
+	feeRate := uint64(10)
+	txSize := redeemTx.SerializeSize() + dexdcr.RedeemPrivateSwapSigScriptSize + len(pkScript)
+	fee := feeRate * uint64(txSize)
+	outputValue := contract.Value - fee
+
+	redeemTx.AddTxOut(&wire.TxOut{
+		Value:    int64(outputValue),
+		PkScript: pkScript,
+	})
+
+	unsignedRedeemB, err := redeemTx.Bytes()
+	if err != nil {
+		t.Fatalf("failed to serialize redeem tx: %v", err)
+	}
+
+	// Generate a random adaptor secret
+	adaptorSecret := &btcec.ModNScalar{}
+	adaptorSecretBytes := randBytes(32)
+	adaptorSecret.SetByteSlice(adaptorSecretBytes)
+
+	// Override the wallet's AddressPrivKey function to return the private key needed
+	// We need to create an address that corresponds to the public key we want to sign with
+	pkh1 := dcrutil.Hash160(pubKey1.SerializeCompressed())
+	_, err = stdaddr.NewAddressPubKeyHashSchnorrSecp256k1V0(pkh1, tChainParams)
+	if err != nil {
+		t.Fatalf("failed to create signer address: %v", err)
+	}
+
+	// Create a WIF from the private key
+	privBytes := privKey1.Serialize()
+	wif, err := dcrutil.NewWIF(privBytes, tChainParams.PrivateKeyID, dcrec.STSchnorrSecp256k1)
+	if err != nil {
+		t.Fatalf("failed to create WIF: %v", err)
+	}
+
+	// Override the DumpPrivKey method to return our private key
+	node.privWIF = wif
+	node.privWIFErr = nil
+
+	// Test as redeemer (using redeem public key)
+	adaptorSigB, err := wallet.GeneratePrivateKeyTweakedAdaptor(unsignedRedeemB, contract, adaptorSecret, true)
+	if err != nil {
+		t.Fatalf("GeneratePrivateKeyTweakedAdaptor error: %v", err)
+	}
+
+	// Verify the adaptor signature
+	adaptorSig, err := dcradaptor.ParseAdaptorSignature(adaptorSigB)
+	if err != nil {
+		t.Fatalf("failed to parse adaptor signature: %v", err)
+	}
+
+	// Verify the adaptor signature is valid
+	contractScript, _, err := privateContractPkScript(contract, tChainParams)
+	if err != nil {
+		t.Fatalf("failed to create contract script: %v", err)
+	}
+
+	hash, err := txscript.CalcSignatureHash(contractScript, txscript.SigHashAll, redeemTx, 0, nil)
+	if err != nil {
+		t.Fatalf("failed to calculate signature hash: %v", err)
+	}
+
+	err = adaptorSig.Verify(hash, pubKey1)
+	if err != nil {
+		t.Fatalf("adaptor signature verification failed: %v", err)
+	}
+
+	// Validate the adaptor signature using the redeemer public key
+	valid, err := wallet.ValidateAdaptorSig(unsignedRedeemB, adaptorSigB, adaptorSig.PublicTweak(), contract, true)
+	if err != nil {
+		t.Fatalf("failed to validate adaptor signature: %v", err)
+	}
+	if !valid {
+		t.Fatalf("adaptor signature validation failed")
+	}
+
+	// Make sure ValidateAdaptorSig fails to validate using the incorrect
+	// public key.
+	valid, err = wallet.ValidateAdaptorSig(unsignedRedeemB, adaptorSigB, adaptorSig.PublicTweak(), contract, false)
+	if err != nil {
+		t.Fatalf("failed to validate adaptor signature: %v", err)
+	}
+	if valid {
+		t.Fatalf("adaptor signature validation for redeemer should have failed using refunder public key")
+	}
+
+	// Test as refunder (using refund public key)
+	// Create address for refund public key
+	pkh2 := dcrutil.Hash160(pubKey2.SerializeCompressed())
+	_, err = stdaddr.NewAddressPubKeyHashSchnorrSecp256k1V0(pkh2, tChainParams)
+	if err != nil {
+		t.Fatalf("failed to create refunder address: %v", err)
+	}
+
+	// Create WIF for refund private key
+	privBytes2 := privKey2.Serialize()
+	wif2, err := dcrutil.NewWIF(privBytes2, tChainParams.PrivateKeyID, dcrec.STSchnorrSecp256k1)
+	if err != nil {
+		t.Fatalf("failed to create WIF for refund key: %v", err)
+	}
+
+	// Override DumpPrivKey for refund address
+	node.privWIF = wif2
+	node.privWIFErr = nil
+
+	adaptorSigB2, err := wallet.GeneratePrivateKeyTweakedAdaptor(unsignedRedeemB, contract, adaptorSecret, false)
+	if err != nil {
+		t.Fatalf("GeneratePrivateKeyTweakedAdaptor as refunder error: %v", err)
+	}
+
+	// Verify the second adaptor signature
+	adaptorSig2, err := dcradaptor.ParseAdaptorSignature(adaptorSigB2)
+	if err != nil {
+		t.Fatalf("failed to parse second adaptor signature: %v", err)
+	}
+
+	err = adaptorSig2.Verify(hash, pubKey2)
+	if err != nil {
+		t.Fatalf("second adaptor signature verification failed: %v", err)
+	}
+
+	// Make sure ValidateAdaptorSig correctly validates
+	valid, err = wallet.ValidateAdaptorSig(unsignedRedeemB, adaptorSigB2, adaptorSig2.PublicTweak(), contract, false)
+	if err != nil {
+		t.Fatalf("failed to validate adaptor signature: %v", err)
+	}
+	if !valid {
+		t.Fatalf("adaptor signature validation failed")
+	}
+
+	// Make sure ValidateAdaptorSig fails to validate using the incorrect
+	// public key.
+	valid, err = wallet.ValidateAdaptorSig(unsignedRedeemB, adaptorSigB2, adaptorSig2.PublicTweak(), contract, true)
+	if err != nil {
+		t.Fatalf("failed to validate adaptor signature: %v", err)
+	}
+	if valid {
+		t.Fatalf("adaptor signature validation for refunder should have failed using redeemer public key")
+	}
+
+	// Test that we can decrypt the adaptor signature with the correct secret
+	decryptedSig, err := adaptorSig.Decrypt(adaptorSecret)
+	if err != nil {
+		t.Fatalf("failed to decrypt adaptor signature: %v", err)
+	}
+
+	// Verify the decrypted signature is valid
+	if !decryptedSig.Verify(hash, pubKey1) {
+		t.Fatalf("decrypted signature verification failed")
+	}
+
+	// Test error cases
+	// Test with invalid unsigned redeem transaction
+	_, err = wallet.GeneratePrivateKeyTweakedAdaptor([]byte{0x01, 0x02, 0x03}, contract, adaptorSecret, true)
+	if err == nil {
+		t.Fatalf("expected error for invalid unsigned redeem transaction")
+	}
+
+	// Test with invalid public key in contract
+	invalidContract := &asset.PrivateContract{
+		LockTime:        uint64(lockTime.Unix()),
+		Value:           5 * tLotSize,
+		RedeemPublicKey: []byte{0x01, 0x02, 0x03}, // Invalid public key
+		RefundPublicKey: pubKey2.SerializeCompressed(),
+	}
+	_, err = wallet.GeneratePrivateKeyTweakedAdaptor(unsignedRedeemB, invalidContract, adaptorSecret, true)
+	if err == nil {
+		t.Fatalf("expected error for invalid public key in contract")
+	}
+
+	// Test with address not found in wallet
+	node.privWIFErr = fmt.Errorf("address not found")
+	_, err = wallet.GeneratePrivateKeyTweakedAdaptor(unsignedRedeemB, contract, adaptorSecret, true)
+	if err == nil {
+		t.Fatalf("expected error when address not found in wallet")
+	}
+}
+
+func TestGeneratePublicKeyTweakedAdaptor(t *testing.T) {
+	wallet, node, shutdown := tNewWallet()
+	defer shutdown()
+
+	// Generate two random private keys
+	privKey1, err := secp256k1.GeneratePrivateKey()
+	if err != nil {
+		t.Fatalf("failed to generate private key 1: %v", err)
+	}
+	privKey2, err := secp256k1.GeneratePrivateKey()
+	if err != nil {
+		t.Fatalf("failed to generate private key 2: %v", err)
+	}
+
+	// Get the public keys
+	pubKey1 := privKey1.PubKey()
+	pubKey2 := privKey2.PubKey()
+
+	// Create a private contract with the public keys
+	lockTime := time.Now().Add(time.Hour * 12)
+	contract := &asset.PrivateContract{
+		LockTime:        uint64(lockTime.Unix()),
+		Value:           5 * tLotSize,
+		RedeemPublicKey: pubKey1.SerializeCompressed(),
+		RefundPublicKey: pubKey2.SerializeCompressed(),
+	}
+
+	// Generate a dummy unsigned redeem transaction
+	redeemTx := wire.NewMsgTx()
+	txHash := &chainhash.Hash{}
+	copy(txHash[:], randBytes(32))
+	redeemTx.AddTxIn(wire.NewTxIn(&wire.OutPoint{
+		Hash:  *txHash,
+		Index: 0,
+		Tree:  wire.TxTreeRegular,
+	}, int64(contract.Value), nil))
+	pkh := randBytes(20) // Random public key hash
+	addr, err := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(pkh, tChainParams)
+	if err != nil {
+		t.Fatalf("failed to create address: %v", err)
+	}
+	_, pkScript := addr.PaymentScript()
+
+	// Calculate fee and output value
+	feeRate := uint64(10)
+	txSize := redeemTx.SerializeSize() + dexdcr.RedeemPrivateSwapSigScriptSize + len(pkScript)
+	fee := feeRate * uint64(txSize)
+	outputValue := contract.Value - fee
+
+	redeemTx.AddTxOut(&wire.TxOut{
+		Value:    int64(outputValue),
+		PkScript: pkScript,
+	})
+
+	unsignedRedeemB, err := redeemTx.Bytes()
+	if err != nil {
+		t.Fatalf("failed to serialize redeem tx: %v", err)
+	}
+
+	// Generate a random adaptor secret
+	adaptorSecret := &btcec.ModNScalar{}
+	adaptorSecretBytes := randBytes(32)
+	adaptorSecret.SetByteSlice(adaptorSecretBytes)
+
+	// Create the adaptor public key (T = t * G)
+	adaptorPub := new(btcec.JacobianPoint)
+	btcec.ScalarBaseMultNonConst(adaptorSecret, adaptorPub)
+
+	// Override the wallet's AddressPrivKey function to return the private key needed
+	// We need to create an address that corresponds to the refund public key
+	pkh2 := dcrutil.Hash160(pubKey2.SerializeCompressed())
+	_, err = stdaddr.NewAddressPubKeyHashSchnorrSecp256k1V0(pkh2, tChainParams)
+	if err != nil {
+		t.Fatalf("failed to create refunder address: %v", err)
+	}
+
+	// Create a WIF from the refund private key
+	privBytes2 := privKey2.Serialize()
+	wif2, err := dcrutil.NewWIF(privBytes2, tChainParams.PrivateKeyID, dcrec.STSchnorrSecp256k1)
+	if err != nil {
+		t.Fatalf("failed to create WIF: %v", err)
+	}
+
+	// Override the DumpPrivKey method to return our private key
+	node.privWIF = wif2
+	node.privWIFErr = nil
+
+	// Generate the public key tweaked adaptor signature
+	adaptorSigB, err := wallet.GeneratePublicKeyTweakedAdaptor(unsignedRedeemB, contract, adaptorPub)
+	if err != nil {
+		t.Fatalf("GeneratePublicKeyTweakedAdaptor error: %v", err)
+	}
+
+	// Parse the adaptor signature
+	adaptorSig, err := dcradaptor.ParseAdaptorSignature(adaptorSigB)
+	if err != nil {
+		t.Fatalf("failed to parse adaptor signature: %v", err)
+	}
+
+	// Verify that the adaptor signature has the correct public tweak
+	if !adaptorSig.PublicTweak().EquivalentNonConst(adaptorPub) {
+		t.Fatalf("adaptor signature public tweak mismatch")
+	}
+
+	// Calculate the signature hash for verification
+	contractScript, _, err := privateContractPkScript(contract, tChainParams)
+	if err != nil {
+		t.Fatalf("failed to create contract script: %v", err)
+	}
+
+	hash, err := txscript.CalcSignatureHash(contractScript, txscript.SigHashAll, redeemTx, 0, nil)
+	if err != nil {
+		t.Fatalf("failed to calculate signature hash: %v", err)
+	}
+
+	// Decrypt the adaptor signature using the adaptor secret to get a valid signature
+	decryptedSig, err := adaptorSig.Decrypt(adaptorSecret)
+	if err != nil {
+		t.Fatalf("failed to decrypt adaptor signature: %v", err)
+	}
+
+	// Verify that the decrypted signature is valid
+	if !decryptedSig.Verify(hash, pubKey2) {
+		t.Fatalf("decrypted signature verification failed")
+	}
+
+	// Test that we can recover the adaptor secret from the decrypted signature
+	recoveredSecret, err := adaptorSig.RecoverTweak(decryptedSig)
+	if err != nil {
+		t.Fatalf("failed to recover adaptor secret: %v", err)
+	}
+
+	// Verify that the recovered secret matches the original
+	if !recoveredSecret.Equals(adaptorSecret) {
+		t.Fatalf("recovered adaptor secret does not match original")
+	}
+}
+
+func TestRedeemPrivate(t *testing.T) {
+	wallet, node, shutdown := tNewWallet()
+	defer shutdown()
+
+	// Generate redeem priv key, address, and WIF
+	redeemPrivKey, err := secp256k1.GeneratePrivateKey()
+	if err != nil {
+		t.Fatalf("error generating redeem private key: %v", err)
+	}
+	redeemAddr, err := stdaddr.NewAddressPubKeyHashSchnorrSecp256k1V0(dcrutil.Hash160(redeemPrivKey.PubKey().SerializeCompressed()), tChainParams)
+	if err != nil {
+		t.Fatalf("error creating redeem address: %v", err)
+	}
+	redeemWIF, err := dcrutil.NewWIF(redeemPrivKey.Serialize(), tChainParams.PrivateKeyID, dcrec.STSchnorrSecp256k1)
+	if err != nil {
+		t.Fatalf("error creating redeem WIF: %v", err)
+	}
+
+	// Generate refund priv key, address, and WIF
+	refundPrivKey, err := secp256k1.GeneratePrivateKey()
+	if err != nil {
+		t.Fatalf("error generating refund private key: %v", err)
+	}
+	refundAddr, err := stdaddr.NewAddressPubKeyHashSchnorrSecp256k1V0(dcrutil.Hash160(refundPrivKey.PubKey().SerializeCompressed()), tChainParams)
+	if err != nil {
+		t.Fatalf("error creating refund address: %v", err)
+	}
+	refundWIF, err := dcrutil.NewWIF(refundPrivKey.Serialize(), tChainParams.PrivateKeyID, dcrec.STSchnorrSecp256k1)
+	if err != nil {
+		t.Fatalf("error creating refund WIF: %v", err)
+	}
+
+	// Create a contract with both pub keys
+	contract := &asset.PrivateContract{
+		LockTime:        uint64(time.Now().Add(time.Hour * 12).Unix()),
+		Value:           5 * tLotSize,
+		RedeemPublicKey: redeemPrivKey.PubKey().SerializeCompressed(),
+		RefundPublicKey: refundPrivKey.PubKey().SerializeCompressed(),
+	}
+
+	// Generate an adaptor secret
+	adaptorSecret := &btcec.ModNScalar{}
+	adaptorSecretBytes := randBytes(32)
+	adaptorSecret.SetByteSlice(adaptorSecretBytes)
+
+	// Create the adaptor public key (T = t * G)
+	adaptorPub := new(btcec.JacobianPoint)
+	btcec.ScalarBaseMultNonConst(adaptorSecret, adaptorPub)
+
+	// Generate unsigned redeem transaction
+	node.privWIF = redeemWIF
+	node.newAddr = redeemAddr
+	node.privWIFErr = nil
+	coinID := ToCoinID(tTxHash, 0)
+	unsignedRedeemB, err := wallet.GenerateUnsignedRedeemTx(coinID, contract, optimalFeeRate)
+	if err != nil {
+		t.Fatalf("failed to generate unsigned redeem tx: %v", err)
+	}
+
+	// Generate the public key tweaked adaptor signature, using the refunder's private key
+	node.privWIF = refundWIF
+	node.newAddr = refundAddr
+	node.privWIFErr = nil
+	adaptorSigB, err := wallet.GeneratePublicKeyTweakedAdaptor(unsignedRedeemB, contract, adaptorPub)
+	if err != nil {
+		t.Fatalf("GeneratePublicKeyTweakedAdaptor error: %v", err)
+	}
+
+	// Now test RedeemPrivate - switch back to redeemer's private key
+	node.privWIF = redeemWIF
+	node.newAddr = redeemAddr
+	node.privWIFErr = nil
+
+	// Test successful redemption
+	out, feesPaid, txData, err := wallet.RedeemPrivate(contract, unsignedRedeemB, adaptorSigB, adaptorSecret)
+	if err != nil {
+		t.Fatalf("RedeemPrivate error: %v", err)
+	}
+
+	// Verify the returned values
+	if out == nil {
+		t.Fatalf("expected non-nil output coin")
+	}
+	expectedTxSize := dexdcr.MsgTxOverhead + dexdcr.TxInOverhead + 1 + dexdcr.RedeemPrivateSwapSigScriptSize + dexdcr.P2PKHOutputSize
+	expectedFee := optimalFeeRate * uint64(expectedTxSize)
+	if feesPaid != expectedFee {
+		t.Fatalf("expected %d fees paid, got %d", expectedFee, feesPaid)
+	}
+	if txData == nil {
+		t.Fatalf("expected non-nil tx data")
+	}
+	sentTxB, err := node.sentRawTx.Bytes()
+	if err != nil {
+		t.Fatalf("error serializing sent transaction: %v", err)
+	}
+	if !bytes.Equal(txData, sentTxB) {
+		t.Fatalf("expected tx data to be equal to sent transaction: %x != %x", txData, sentTxB)
+	}
+	// Test error cases
+
+	// Test with nil unsigned redeem transaction
+	_, _, _, err = wallet.RedeemPrivate(contract, nil, adaptorSigB, adaptorSecret)
+	if err == nil {
+		t.Fatalf("expected error for nil unsigned redeem transaction")
+	}
+
+	// Test with nil adaptor signature
+	_, _, _, err = wallet.RedeemPrivate(contract, unsignedRedeemB, nil, adaptorSecret)
+	if err == nil {
+		t.Fatalf("expected error for nil adaptor signature")
+	}
+
+	// Test with invalid unsigned redeem transaction
+	_, _, _, err = wallet.RedeemPrivate(contract, []byte("invalid"), adaptorSigB, adaptorSecret)
+	if err == nil {
+		t.Fatalf("expected error for invalid unsigned redeem transaction")
+	}
+
+	// Test with invalid adaptor signature
+	_, _, _, err = wallet.RedeemPrivate(contract, unsignedRedeemB, []byte("invalid"), adaptorSecret)
+	if err == nil {
+		t.Fatalf("expected error for invalid adaptor signature")
+	}
+
+	// Test with wrong adaptor secret
+	wrongSecret := new(btcec.ModNScalar)
+	wrongSecret.SetByteSlice(randBytes(32))
+	_, _, _, err = wallet.RedeemPrivate(contract, unsignedRedeemB, adaptorSigB, wrongSecret)
+	if err == nil {
+		t.Fatalf("expected error for wrong adaptor secret")
+	}
+
+	// Test with missing private key
+	node.privWIFErr = tErr
+	_, _, _, err = wallet.RedeemPrivate(contract, unsignedRedeemB, adaptorSigB, adaptorSecret)
+	if err == nil {
+		t.Fatalf("expected error for missing private key")
+	}
+	node.privWIFErr = nil
+
+	// Test with broadcast error
+	node.sendRawErr = tErr
+	_, _, _, err = wallet.RedeemPrivate(contract, unsignedRedeemB, adaptorSigB, adaptorSecret)
+	if err == nil {
+		t.Fatalf("expected error for broadcast failure")
+	}
+	node.sendRawErr = nil
+
+	// Test with wrong redeem public key in contract
+	invalidContract := &asset.PrivateContract{
+		LockTime:        contract.LockTime,
+		Value:           contract.Value,
+		RedeemPublicKey: []byte{0x01, 0x02, 0x03}, // Invalid public key
+		RefundPublicKey: contract.RefundPublicKey,
+	}
+	_, _, _, err = wallet.RedeemPrivate(invalidContract, unsignedRedeemB, adaptorSigB, adaptorSecret)
+	if err == nil {
+		t.Fatalf("expected error for invalid redeem public key in contract")
+	}
+
+	// Test with wrong refund public key in contract
+	invalidContract2 := &asset.PrivateContract{
+		LockTime:        contract.LockTime,
+		Value:           contract.Value,
+		RedeemPublicKey: contract.RedeemPublicKey,
+		RefundPublicKey: []byte{0x01, 0x02, 0x03}, // Invalid public key
+	}
+	_, _, _, err = wallet.RedeemPrivate(invalidContract2, unsignedRedeemB, adaptorSigB, adaptorSecret)
+	if err == nil {
+		t.Fatalf("expected error for invalid refund public key in contract")
+	}
 }

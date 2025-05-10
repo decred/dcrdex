@@ -238,6 +238,56 @@ func TestMakeContract(t *testing.T) {
 	}
 }
 
+func TestMakePrivateContract(t *testing.T) {
+	redeemPKH := randBytes(20)
+	refundPKH := randBytes(20)
+	locktime := int64(1234567890)
+
+	// Test with valid parameters
+	script, err := MakePrivateContract(redeemPKH, refundPKH, locktime)
+	if err != nil {
+		t.Fatalf("error for valid contract parameters: %v", err)
+	}
+	if len(script) != PrivateSwapContractSize {
+		t.Fatalf("expected script length %d, got %d", PrivateSwapContractSize, len(script))
+	}
+
+	// Test with invalid redeem PKH size
+	_, err = MakePrivateContract(randBytes(10), refundPKH, locktime)
+	if err == nil {
+		t.Fatalf("no error for invalid redeem PKH size")
+	}
+
+	// Test with invalid refund PKH size
+	_, err = MakePrivateContract(redeemPKH, randBytes(15), locktime)
+	if err == nil {
+		t.Fatalf("no error for invalid refund PKH size")
+	}
+
+	// Test with both invalid PKH sizes
+	_, err = MakePrivateContract(randBytes(10), randBytes(15), locktime)
+	if err == nil {
+		t.Fatalf("no error for both invalid PKH sizes")
+	}
+
+	// Verify the generated script can be parsed by ExtractPrivateSwapDetails
+	refunder, redeemer, extractedLocktime, err := ExtractPrivateSwapDetails(script)
+	if err != nil {
+		t.Fatalf("error extracting private swap details: %v", err)
+	}
+
+	// Verify extracted values match input values
+	if !bytes.Equal(refunder[:], refundPKH) {
+		t.Fatalf("refunder PKH mismatch: expected %x, got %x", refundPKH, refunder[:])
+	}
+	if !bytes.Equal(redeemer[:], redeemPKH) {
+		t.Fatalf("redeemer PKH mismatch: expected %x, got %x", redeemPKH, redeemer[:])
+	}
+	if extractedLocktime != locktime {
+		t.Fatalf("locktime mismatch: expected %d, got %d", locktime, extractedLocktime)
+	}
+}
+
 func TestIsDust(t *testing.T) {
 	pkScript := []byte{0x76, 0xa9, 0x21, 0x03, 0x2f, 0x7e, 0x43,
 		0x0a, 0xa4, 0xc9, 0xd1, 0x59, 0x43, 0x7e, 0x84, 0xb9,
@@ -661,7 +711,7 @@ func TestIsRefundScript(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if is := IsRefundScript(tt.scriptVersion, tt.sigScript, tt.contract); is != tt.want {
+			if is := IsRefundScript(tt.scriptVersion, tt.sigScript, tt.contract, false); is != tt.want {
 				t.Errorf("want %v, got %v", tt.want, is)
 			}
 		})

@@ -4,6 +4,7 @@
 package btc
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -224,5 +225,72 @@ func TestSetAndGetLastQuery(t *testing.T) {
 	}
 	if lastQuery != block {
 		t.Fatalf("Expected last query to be %d, but got %d", block, lastQuery)
+	}
+}
+
+func TestStoreAndGetSecNonce(t *testing.T) {
+	tempDir := t.TempDir()
+	tLogger := dex.StdOutLogger("TXDB", dex.LevelTrace)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	txHistoryStore := NewBadgerTxDB(tempDir, tLogger)
+	wg, err := txHistoryStore.Connect(ctx)
+	if err != nil {
+		t.Fatalf("error connecting to tx history store: %v", err)
+	}
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
+
+	// Generate random data for testing
+	pubNonce := encode.RandomBytes(32)
+	secNonce := encode.RandomBytes(32)
+	encKey := encode.RandomBytes(32)
+
+	// Store the secret nonce
+	err = txHistoryStore.StoreSecNonce(pubNonce, secNonce, encKey)
+	if err != nil {
+		t.Fatalf("failed to store secret nonce: %v", err)
+	}
+
+	// Retrieve the secret nonce
+	retrievedSecNonce, err := txHistoryStore.GetSecNonce(pubNonce, encKey)
+	if err != nil {
+		t.Fatalf("failed to get secret nonce: %v", err)
+	}
+
+	// Verify the retrieved nonce matches the original
+	if !bytes.Equal(secNonce, retrievedSecNonce) {
+		t.Fatalf("retrieved secret nonce does not match original: got %x, want %x",
+			retrievedSecNonce, secNonce)
+	}
+
+	// Test with wrong encryption key - should fail
+	wrongKey := encode.RandomBytes(32)
+	_, err = txHistoryStore.GetSecNonce(pubNonce, wrongKey)
+	if err == nil {
+		t.Fatalf("expected error when using wrong encryption key, but got none")
+	}
+
+	// Test with non-existent public nonce - should fail
+	nonExistentPubNonce := encode.RandomBytes(32)
+	_, err = txHistoryStore.GetSecNonce(nonExistentPubNonce, encKey)
+	if err == nil {
+		t.Fatalf("expected error when retrieving non-existent nonce, but got none")
+	}
+
+	// Delete the secret nonce
+	err = txHistoryStore.DeleteSecNonce(pubNonce)
+	if err != nil {
+		t.Fatalf("failed to delete secret nonce: %v", err)
+	}
+
+	// Verify the secret nonce is actually deleted by attempting to retrieve it
+	_, err = txHistoryStore.GetSecNonce(pubNonce, encKey)
+	if err == nil {
+		t.Fatalf("expected error when retrieving deleted nonce, but got none")
 	}
 }
