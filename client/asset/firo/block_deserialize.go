@@ -2,6 +2,7 @@ package firo
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 
 	"github.com/btcsuite/btcd/chaincfg"
@@ -19,6 +20,8 @@ const (
 	ProgpowFullHeaderLength = HeaderLength + ProgpowExtraLength
 )
 
+var errInvalidBlockLength = errors.New("invalid block length")
+
 // deserializeBlock deserializes the wire bytes passed in as blk and returns the
 // header for the network plus any Transparent transactions found parsed into a
 // wire.MsgBlock.
@@ -32,17 +35,23 @@ func deserializeBlock(net *chaincfg.Params, blk []byte) (*wire.MsgBlock, error) 
 	var header []byte
 	switch net.Name {
 	case "mainnet", "testnet3", "testnet":
+		if len(blk) < ProgpowFullHeaderLength {
+			return nil, errInvalidBlockLength
+		}
 		header = make([]byte, ProgpowFullHeaderLength)
 		copy(header, blk[:ProgpowFullHeaderLength])
+
 	case "regtest":
+		if len(blk) < HeaderLength {
+			return nil, errInvalidBlockLength
+		}
 		header = make([]byte, HeaderLength)
 		copy(header, blk[:HeaderLength])
+
 	default:
 		return nil, fmt.Errorf("unknown net: %s", net.Name)
 	}
 	hdrHash = chainhash.DoubleHashH(header)
-
-	fmt.Printf("firo block hash: %s\n", hdrHash.String()) // TODO: delete this
 
 	// make a reader over the full block
 	r := bytes.NewReader(blk)
@@ -75,8 +84,8 @@ func deserializeBlock(net *chaincfg.Params, blk []byte) (*wire.MsgBlock, error) 
 		return nil, fmt.Errorf("invalid transaction count 0 -- must at least have a coinbase")
 	}
 
-	txns := make([]*wire.MsgTx, 0, int(txnCount))
-	for i := 0; i < cap(txns); i++ {
+	txns := make([]*wire.MsgTx, 0, txnCount)
+	for i := 0; i < int(txnCount); i++ {
 		tx, err := deserializeTransaction(r)
 
 		if err != nil {

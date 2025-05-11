@@ -1,7 +1,6 @@
 package firo
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -42,7 +41,6 @@ const (
 type decoder struct {
 	buf [8]byte
 	rd  io.Reader
-	tee *bytes.Buffer // anything read from rd is Written to tee
 }
 
 func newDecoder(r io.Reader) *decoder {
@@ -53,9 +51,6 @@ func (d *decoder) Read(b []byte) (n int, err error) {
 	n, err = d.rd.Read(b)
 	if err != nil {
 		return 0, err
-	}
-	if d.tee != nil {
-		d.tee.Write(b)
 	}
 	return n, nil
 }
