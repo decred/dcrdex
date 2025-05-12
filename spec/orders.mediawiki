@@ -652,7 +652,7 @@ transaction and inform the server with an <code>init</code> notification
 | address    || varies || UTF-8 encoded receiving address for the match
 |}
 
-'''The <code>tserver</code> value is used as the basis for the the locktimes.'''
+'''The <code>tserver</code> value is used as the basis for the locktimes.'''
 If it is necessary to convert the time to seconds, the value should be rounded
 down.
 

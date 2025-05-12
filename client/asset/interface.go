@@ -377,7 +377,7 @@ type WalletConfig struct {
 	// available WalletDefinition.
 	Type string
 	// Settings is the key-value store of wallet connection parameters. The
-	// Settings are supplied by the user according the the WalletInfo's
+	// Settings are supplied by the user according the WalletInfo's
 	// ConfigOpts.
 	Settings map[string]string
 	// Emit is a WalletEmitter that manages a channel over which an asset may

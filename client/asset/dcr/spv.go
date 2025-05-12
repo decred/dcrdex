@@ -1600,7 +1600,7 @@ func logRotator(netDir string) (*rotator.Rotator, error) {
 // on subsequent invocations.
 //
 // TODO: See if the below precaution is even necessary for dcrwallet. In theory,
-// the the rotating file logger must be Close'd at some point, but there are
+// the rotating file logger must be Close'd at some point, but there are
 // concurrency issues with that since btcd and btcwallet have unsupervised
 // goroutines still running after shutdown. So we leave the rotator running at
 // the risk of losing some logs.

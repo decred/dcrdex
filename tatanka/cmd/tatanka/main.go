@@ -145,7 +145,7 @@ func config() (*dex.LoggerMaker, *Config) {
 	}
 
 	// If a non-default appdata folder is specified on the command line, it may
-	// be necessary adjust the config file location. If the the config file
+	// be necessary adjust the config file location. If the config file
 	// location was not specified on the command line, the default location
 	// should be under the non-default appdata directory. However, if the config
 	// file was specified on the command line, it should be used regardless of
