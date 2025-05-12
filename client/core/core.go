@@ -5746,7 +5746,7 @@ func (c *Core) MaxFundingFees(fromAsset uint32, host string, numTrades uint32, o
 	return wallet.MaxFundingFees(numTrades, asset.MaxFeeRate, options), nil
 }
 
-// PreOrder calculates fee estimates for a trade.
+// PreOrder calculates fee rate estimates for a trade.
 func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 	dc, err := c.registeredDEX(form.Host)
 	if err != nil {

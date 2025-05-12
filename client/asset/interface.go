@@ -577,7 +577,7 @@ type Authenticator interface {
 
 // TxFeeEstimator is a wallet implementation with fee estimation functionality.
 type TxFeeEstimator interface {
-	// EstimateSendTxFee returns a tx fee estimate for sending or withdrawing
+	// EstimateSendTxFee returns a tx fee rate estimate for sending or withdrawing
 	// the provided amount using the provided feeRate. This uses actual utxos to
 	// calculate the tx fee where possible and ensures the wallet has enough to
 	// cover send value and minimum fees.

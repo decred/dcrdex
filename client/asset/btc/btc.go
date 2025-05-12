@@ -5010,8 +5010,8 @@ var dummyP2PKHScript = []byte{0x76, 0xa9, 0x14, 0xe4, 0x28, 0x61, 0xa,
 	0x58, 0x7a, 0xc9, 0xe7, 0x2c, 0x79, 0x7b, 0x88, 0xac,
 }
 
-// EstimateSendTxFee returns a tx fee estimate for sending or withdrawing the
-// provided amount using the provided feeRate.
+// EstimateSendTxFee returns a tx fee rate estimate for sending or withdrawing
+// the provided amount using the provided feeRate.
 func (btc *intermediaryWallet) EstimateSendTxFee(address string, sendAmount, feeRate uint64, subtract, _ bool) (fee uint64, isValidAddress bool, err error) {
 	if sendAmount == 0 {
 		return 0, false, fmt.Errorf("cannot check fee: send amount = 0")

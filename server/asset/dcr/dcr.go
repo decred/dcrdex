@@ -239,7 +239,7 @@ func ParseBondTx(ver uint16, rawTx []byte) (bondCoinID []byte, amt int64, bondAd
 	// lock, pkh, _ := dexdcr.ExtractBondDetailsV0(bondOut.Version, bondScript)
 
 	txid := msgTx.TxHash()
-	bondCoinID = toCoinID(&txid, 0)
+	bondCoinID = ToCoinID(&txid, 0)
 	amt = bondOut.Value
 	bondAddr = addrs[0].String() // don't convert address, must match type we specified
 	lockTime = int64(lock)
@@ -459,7 +459,7 @@ func (dcr *Backend) SendRawTransaction(rawtx []byte) (coinID []byte, err error) 
 	if err != nil {
 		return
 	}
-	coinID = toCoinID(hash, 0)
+	coinID = ToCoinID(hash, 0)
 	return
 }
 
@@ -1350,8 +1350,8 @@ func decodeCoinID(coinID []byte) (*chainhash.Hash, uint32, error) {
 	return &txHash, binary.BigEndian.Uint32(coinID[32:]), nil
 }
 
-// toCoinID converts the outpoint to a coin ID.
-func toCoinID(txHash *chainhash.Hash, vout uint32) []byte {
+// ToCoinID converts the outpoint to a coin ID.
+func ToCoinID(txHash *chainhash.Hash, vout uint32) []byte {
 	hashLen := len(txHash)
 	b := make([]byte, hashLen+4)
 	copy(b[:hashLen], txHash[:])

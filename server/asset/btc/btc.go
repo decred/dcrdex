@@ -23,9 +23,9 @@ import (
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/dexnet"
+	"decred.org/dcrdex/dex/feeratefetcher"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	dexzec "decred.org/dcrdex/dex/networks/zec"
-	"decred.org/dcrdex/dex/txfee"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
 	srvdex "decred.org/dcrdex/server/dex"
@@ -211,7 +211,7 @@ func NewBackend(cfg *asset.BackendConfig) (asset.Backend, error) {
 		configPath = dexbtc.SystemConfigPath("bitcoin")
 	}
 
-	feeSources := make([]*txfee.SourceConfig, len(freeFeeSources), len(freeFeeSources)+1)
+	feeSources := make([]*feeratefetcher.SourceConfig, len(freeFeeSources), len(freeFeeSources)+1)
 	copy(feeSources, freeFeeSources)
 	b, err := os.ReadFile(configPath)
 	if err != nil {
@@ -225,26 +225,26 @@ func NewBackend(cfg *asset.BackendConfig) (asset.Backend, error) {
 		configPath = cfgV1.ConfigPath
 
 		if cfgV1.TatumKey != "" {
-			feeSources = append(feeSources, tatumFeeFetcher(cfgV1.TatumKey))
+			feeSources = append(feeSources, tatumFeeRateFetcher(cfgV1.TatumKey))
 		}
 		if cfgV1.BlockdaemonKey != "" {
-			feeSources = append(feeSources, blockDaemonFeeFetcher(cfgV1.BlockdaemonKey))
+			feeSources = append(feeSources, blockDaemonFeeRateFetcher(cfgV1.BlockdaemonKey))
 		}
 	}
-	var feeFetcher *txfee.FeeFetcher
+	var FeeRateFetcher *feeratefetcher.FeeRateFetcher
 	if !cfgV1.DisableAPIFees {
-		feeFetcher = txfee.NewFeeFetcher(feeSources, cfg.Logger)
+		FeeRateFetcher = feeratefetcher.NewFeeRateFetcher(feeSources, cfg.Logger)
 	}
 	return NewBTCClone(&BackendCloneConfig{
-		Name:        assetName,
-		Segwit:      true,
-		ConfigPath:  configPath,
-		Logger:      cfg.Logger,
-		Net:         cfg.Net,
-		ChainParams: params,
-		Ports:       dexbtc.RPCPorts,
-		RelayAddr:   cfg.RelayAddr,
-		FeeFetcher:  feeFetcher,
+		Name:           assetName,
+		Segwit:         true,
+		ConfigPath:     configPath,
+		Logger:         cfg.Logger,
+		Net:            cfg.Net,
+		ChainParams:    params,
+		Ports:          dexbtc.RPCPorts,
+		RelayAddr:      cfg.RelayAddr,
+		FeeRateFetcher: FeeRateFetcher,
 	})
 }
 
@@ -327,7 +327,7 @@ type BackendCloneConfig struct {
 	// DumbFeeEstimates is for asset's whose RPC is estimatefee instead of
 	// estimatesmartfee.
 	DumbFeeEstimates bool
-	// Argsless fee estimates are for assets who don't take an argument for
+	// Argsless fee rate estimates are for assets who don't take an argument for
 	// number of blocks to estimatefee.
 	ArglessFeeEstimates bool
 	// FeeConfs specifies the target number of confirmations to use for
@@ -358,8 +358,8 @@ type BackendCloneConfig struct {
 	// encodes valueBalanceOrchard in their getrawtransaction RPC results.
 	ShieldedIO func(tx *VerboseTxExtended) (in, out uint64, err error)
 	// RelayAddr is an address for a NodeRelay.
-	RelayAddr  string
-	FeeFetcher *txfee.FeeFetcher
+	RelayAddr      string
+	FeeRateFetcher *feeratefetcher.FeeRateFetcher
 }
 
 // NewBTCClone creates a BTC backend for a set of network parameters and default
@@ -458,8 +458,8 @@ func (btc *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 
 	var wg sync.WaitGroup
 
-	if fetcher := btc.cfg.FeeFetcher; fetcher != nil {
-		cm := dex.NewConnectionMaster(btc.cfg.FeeFetcher)
+	if fetcher := btc.cfg.FeeRateFetcher; fetcher != nil {
+		cm := dex.NewConnectionMaster(btc.cfg.FeeRateFetcher)
 		if err := cm.ConnectOnce(ctx); err != nil {
 			btc.shutdown()
 			return nil, fmt.Errorf("error starting fee fetcher: %w", err)
@@ -1497,7 +1497,7 @@ out:
 // case, an estimate is calculated from the median fees of the previous
 // block(s).
 func (btc *Backend) estimateFee(ctx context.Context) (satsPerB uint64, err error) {
-	if btc.cfg.FeeFetcher != nil {
+	if btc.cfg.FeeRateFetcher != nil {
 		const feeRateExpiry = time.Minute * 10
 		btc.feeRateCache.RLock()
 		stamp, feeRate := btc.feeRateCache.stamp, btc.feeRateCache.feeRate
@@ -1519,7 +1519,7 @@ func (btc *Backend) estimateFee(ctx context.Context) (satsPerB uint64, err error
 	} else if err != nil && !errors.Is(err, errNoFeeRate) {
 		btc.log.Debugf("Estimate fee failure: %v", err)
 	}
-	btc.log.Debugf("No fee estimate from node. Computing median fee rate from blocks...")
+	btc.log.Debugf("No fee rate estimate from node. Computing median fee rate from blocks...")
 
 	tip := btc.blockCache.tipHash()
 
@@ -1622,7 +1622,7 @@ func hashTx(tx *wire.MsgTx) *chainhash.Hash {
 	return &h
 }
 
-var freeFeeSources = []*txfee.SourceConfig{
+var freeFeeSources = []*feeratefetcher.SourceConfig{
 	{ // https://mempool.space/docs/api/rest#get-recommended-fees
 		Name:   "mempool.space",
 		Rank:   1,
@@ -1780,8 +1780,8 @@ var freeFeeSources = []*txfee.SourceConfig{
 	},
 }
 
-func tatumFeeFetcher(apiKey string) *txfee.SourceConfig {
-	return &txfee.SourceConfig{
+func tatumFeeRateFetcher(apiKey string) *feeratefetcher.SourceConfig {
+	return &feeratefetcher.SourceConfig{
 		Name:   "tatum",
 		Rank:   1,
 		Period: time.Minute * 1, // 1M credit / mo => 3 req / sec
@@ -1807,9 +1807,9 @@ func tatumFeeFetcher(apiKey string) *txfee.SourceConfig {
 	}
 }
 
-func blockDaemonFeeFetcher(apiKey string) *txfee.SourceConfig {
+func blockDaemonFeeRateFetcher(apiKey string) *feeratefetcher.SourceConfig {
 	// https://docs.blockdaemon.com/reference/getfeeestimate
-	return &txfee.SourceConfig{
+	return &feeratefetcher.SourceConfig{
 		Name:   "blockdaemon",
 		Rank:   1,
 		Period: time.Minute * 2, // 25 reqs/second, 3M compute units, request is 50 compute units => 1 req / 43 secs

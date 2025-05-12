@@ -1177,11 +1177,11 @@ func TestRedemption(t *testing.T) {
 	txHeight := uint32(32)
 	cleanTestChain()
 	txHash := randomHash()
-	redemptionID := toCoinID(txHash, 0)
+	redemptionID := ToCoinID(txHash, 0)
 	// blockHash := randomHash()
 	spentHash := randomHash()
 	spentVout := uint32(5)
-	spentID := toCoinID(spentHash, spentVout)
+	spentID := ToCoinID(spentHash, spentVout)
 	msg := testMsgTxRegular(dcrec.STEcdsaSecp256k1)
 	vin := chainjson.Vin{
 		Txid: spentHash.String(),
@@ -1406,7 +1406,7 @@ func TestAuxiliary(t *testing.T) {
 	txHeight := rand.Uint32()
 	blockHash := testAddBlockVerbose(nil, 1, txHeight, 1)
 	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), maturity)
-	coinID := toCoinID(txHash, msg.vout)
+	coinID := ToCoinID(txHash, msg.vout)
 	utxo, err := dcr.FundingCoin(ctx, coinID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1434,7 +1434,7 @@ func TestAuxiliary(t *testing.T) {
 	confs := int64(3)
 	verboseTx := testAddTxVerbose(msg.tx, txHash, blockHash, int64(txHeight), confs)
 
-	txAddr, v, confs, err := dcr.FeeCoin(toCoinID(txHash, 0))
+	txAddr, v, confs, err := dcr.FeeCoin(ToCoinID(txHash, 0))
 	if err != nil {
 		t.Fatalf("FeeCoin error: %v", err)
 	}
@@ -1451,12 +1451,12 @@ func TestAuxiliary(t *testing.T) {
 
 	var txHashBad chainhash.Hash
 	copy(txHashBad[:], randomBytes(32))
-	_, _, _, err = dcr.FeeCoin(toCoinID(&txHashBad, 0))
+	_, _, _, err = dcr.FeeCoin(ToCoinID(&txHashBad, 0))
 	if err == nil {
 		t.Fatal("FeeCoin found for non-existent txid")
 	}
 
-	_, _, _, err = dcr.FeeCoin(toCoinID(txHash, 1))
+	_, _, _, err = dcr.FeeCoin(ToCoinID(txHash, 1))
 	if err == nil {
 		t.Fatal("FeeCoin found for non-existent output")
 	}
@@ -1464,7 +1464,7 @@ func TestAuxiliary(t *testing.T) {
 	// make the output a stake hash
 	stakeScript, _ := newStakeP2PKHScript(txscript.OP_SSGEN)
 	verboseTx.Vout[0].ScriptPubKey.Hex = hex.EncodeToString(stakeScript)
-	_, _, _, err = dcr.FeeCoin(toCoinID(txHash, 0))
+	_, _, _, err = dcr.FeeCoin(ToCoinID(txHash, 0))
 	if err == nil {
 		t.Fatal("FeeCoin accepted a stake output")
 	}
@@ -1479,7 +1479,7 @@ func TestAuxiliary(t *testing.T) {
 	txHash = &msgHash
 	confs = int64(3)
 	testAddTxVerbose(msgP2SH.tx, txHash, blockHash, int64(txHeight), confs)
-	_, _, _, err = dcr.FeeCoin(toCoinID(txHash, 0))
+	_, _, _, err = dcr.FeeCoin(ToCoinID(txHash, 0))
 	if err != nil {
 		t.Fatal("FeeCoin rejected a p2sh output")
 	}
@@ -1498,7 +1498,7 @@ func TestAuxiliary(t *testing.T) {
 	msgTxPK.AddTxOut(wire.NewTxOut(1, pkScript))
 	chainHash := msgTxPK.TxHash()
 	testAddTxVerbose(msgTxPK, &chainHash, blockHash, int64(txHeight), confs)
-	_, _, _, err = dcr.FeeCoin(toCoinID(txHash, 0))
+	_, _, _, err = dcr.FeeCoin(ToCoinID(txHash, 0))
 	if err != nil {
 		t.Fatal("FeeCoin rejected a p2sh output")
 	}

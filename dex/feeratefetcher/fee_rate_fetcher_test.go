@@ -1,4 +1,4 @@
-package txfee
+package feeratefetcher
 
 import (
 	"testing"
@@ -34,11 +34,11 @@ func TestGroupedSources(t *testing.T) {
 }
 
 func TestPrioritizedFeeRate(t *testing.T) {
-	feeFetchers := func(priorityRates [][2]uint) [][]*feeFetchSource {
-		sources := make([]*feeFetchSource, len(priorityRates))
+	feeFetchers := func(priorityRates [][2]uint) [][]*feeRateFetchSource {
+		sources := make([]*feeRateFetchSource, len(priorityRates))
 		for i, rr := range priorityRates {
 			rank, rate := rr[0], rr[1]
-			sources[i] = &feeFetchSource{
+			sources[i] = &feeRateFetchSource{
 				SourceConfig: &SourceConfig{Rank: rank},
 				rate:         uint64(rate),
 				stamp:        time.Now(),
@@ -47,7 +47,7 @@ func TestPrioritizedFeeRate(t *testing.T) {
 		return groupSources(sources)
 	}
 
-	var fetchers [][]*feeFetchSource
+	var fetchers [][]*feeRateFetchSource
 	checkRate := func(expRate uint64) {
 		t.Helper()
 		if r := prioritizedFeeRate(fetchers); r != expRate {
@@ -63,10 +63,10 @@ func TestPrioritizedFeeRate(t *testing.T) {
 
 	// good until expired
 	f0 := fetchers[0][0]
-	f0.stamp = time.Now().Add(-feeExpiration + time.Second*10)
+	f0.stamp = time.Now().Add(-feeRateExpiration + time.Second*10)
 	checkRate(10)
 	// expired
-	f0.stamp = time.Now().Add(-feeExpiration)
+	f0.stamp = time.Now().Add(-feeRateExpiration)
 	checkRate(0)
 
 	// two at different priorities
@@ -78,7 +78,7 @@ func TestPrioritizedFeeRate(t *testing.T) {
 	checkRate(10)
 	// expire first
 	f0, f1 := fetchers[0][0], fetchers[1][0]
-	f0.stamp = time.Now().Add(-feeExpiration)
+	f0.stamp = time.Now().Add(-feeRateExpiration)
 	checkRate(20)
 	// first failed
 	f0.stamp = time.Now()
@@ -100,11 +100,11 @@ func TestPrioritizedFeeRate(t *testing.T) {
 	checkRate(10)
 	// second from group 1 half-decayed
 	f1.failUntil = time.Time{}
-	f1.stamp = time.Now().Add(-1 * (feeFetchFullValidityPeriod + (feeFetchValidityDecayPeriod / 2)))
+	f1.stamp = time.Now().Add(-1 * (feeRateFetchFullValidityPeriod + (feeRateFetchValidityDecayPeriod / 2)))
 	checkRate(17) // (10 + (0.5 * 30)) / 1.5 = 16.6666
 	// first from group 1  decayed by 75%
 	f1.stamp = time.Now()
-	f0.stamp = time.Now().Add(-1 * (feeFetchFullValidityPeriod + (feeFetchValidityDecayPeriod * 3 / 4)))
+	f0.stamp = time.Now().Add(-1 * (feeRateFetchFullValidityPeriod + (feeRateFetchValidityDecayPeriod * 3 / 4)))
 	checkRate(26) // (30 + (0.25 * 10)) / 1.25 = 26
 	// group 1 unusable
 	f0.failUntil = time.Now()

@@ -1,7 +1,7 @@
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
-package txfee
+package feeratefetcher
 
 import (
 	"context"
@@ -13,14 +13,14 @@ import (
 	"decred.org/dcrdex/dex"
 )
 
-// FeeFetchFunc is a function that fetches a fee rate. If an error is
-// encountered the FeeFetchFunc will indicate how long to wait until trying
+// FeeRateFetchFunc is a function that fetches a fee rate. If an error is
+// encountered the FeeRateFetchFunc will indicate how long to wait until trying
 // again.
-type FeeFetchFunc func(ctx context.Context) (rate uint64, errDelay time.Duration, err error)
+type FeeRateFetchFunc func(ctx context.Context) (rate uint64, errDelay time.Duration, err error)
 
 // SourceConfig defines a fee rate source.
 type SourceConfig struct {
-	F      FeeFetchFunc
+	F      FeeRateFetchFunc
 	Name   string
 	Period time.Duration
 	// Rank controls which priority group the source is in. Lower Rank is higher
@@ -30,7 +30,7 @@ type SourceConfig struct {
 	Rank uint
 }
 
-type feeFetchSource struct {
+type feeRateFetchSource struct {
 	*SourceConfig
 
 	log       dex.Logger
@@ -39,22 +39,22 @@ type feeFetchSource struct {
 	failUntil time.Time
 }
 
-type FeeFetcher struct {
+type FeeRateFetcher struct {
 	log     dex.Logger
 	c       chan uint64
-	sources [][]*feeFetchSource
+	sources [][]*feeRateFetchSource
 }
 
-func groupedSources(sources []*SourceConfig, log dex.Logger) [][]*feeFetchSource {
-	srcs := make([]*feeFetchSource, len(sources))
+func groupedSources(sources []*SourceConfig, log dex.Logger) [][]*feeRateFetchSource {
+	srcs := make([]*feeRateFetchSource, len(sources))
 	for i, cfg := range sources {
-		srcs[i] = &feeFetchSource{SourceConfig: cfg, log: log.SubLogger(cfg.Name)}
+		srcs[i] = &feeRateFetchSource{SourceConfig: cfg, log: log.SubLogger(cfg.Name)}
 	}
 	return groupSources(srcs)
 }
 
-func groupSources(sources []*feeFetchSource) [][]*feeFetchSource {
-	groupedSources := make([][]*feeFetchSource, 0)
+func groupSources(sources []*feeRateFetchSource) [][]*feeRateFetchSource {
+	groupedSources := make([][]*feeRateFetchSource, 0)
 next:
 	for _, src := range sources {
 		for i, group := range groupedSources {
@@ -63,7 +63,7 @@ next:
 				continue next
 			}
 		}
-		groupedSources = append(groupedSources, []*feeFetchSource{src})
+		groupedSources = append(groupedSources, []*feeRateFetchSource{src})
 	}
 	sort.Slice(groupedSources, func(i, j int) bool {
 		return groupedSources[i][0].Rank < groupedSources[j][0].Rank
@@ -71,9 +71,9 @@ next:
 	return groupedSources
 }
 
-// NewFeeFetcher creates and returns a new FeeFetcher.
-func NewFeeFetcher(sources []*SourceConfig, log dex.Logger) *FeeFetcher {
-	return &FeeFetcher{
+// NewFeeRateFetcher creates and returns a new FeeRateFetcher.
+func NewFeeRateFetcher(sources []*SourceConfig, log dex.Logger) *FeeRateFetcher {
+	return &FeeRateFetcher{
 		log:     log,
 		sources: groupedSources(sources, log),
 		c:       make(chan uint64, 1),
@@ -81,33 +81,33 @@ func NewFeeFetcher(sources []*SourceConfig, log dex.Logger) *FeeFetcher {
 }
 
 const (
-	feeFetchTimeout       = time.Second * 10
-	feeFetchDefaultTick   = time.Minute
-	minFeeFetchErrorDelay = time.Minute
-	// Fees are fully weighted for 5 minutes, then the weight decays to zero
+	feeRateFetchTimeout       = time.Second * 10
+	feeRateFetchDefaultTick   = time.Minute
+	minFeeRateFetchErrorDelay = time.Minute
+	// Fee Rates are fully weighted for 5 minutes, then the weight decays to zero
 	// over the next 10 minutes. Fee rates older than 15 minutes are not
 	// considered valid.
-	feeFetchFullValidityPeriod  = time.Minute * 5
-	feeFetchValidityDecayPeriod = time.Minute * 10
-	feeExpiration               = feeFetchFullValidityPeriod + feeFetchValidityDecayPeriod
+	feeRateFetchFullValidityPeriod  = time.Minute * 5
+	feeRateFetchValidityDecayPeriod = time.Minute * 10
+	feeRateExpiration               = feeRateFetchFullValidityPeriod + feeRateFetchValidityDecayPeriod
 )
 
-func prioritizedFeeRate(sources [][]*feeFetchSource) uint64 {
+func prioritizedFeeRate(sources [][]*feeRateFetchSource) uint64 {
 	for _, group := range sources {
 		var weightedRate float64
 		var weight float64
 		for _, src := range group {
 			age := time.Since(src.stamp)
-			if !src.failUntil.IsZero() || age >= feeExpiration {
+			if !src.failUntil.IsZero() || age >= feeRateExpiration {
 				continue
 			}
-			if age < feeFetchFullValidityPeriod {
+			if age < feeRateFetchFullValidityPeriod {
 				weight += 1
 				weightedRate += float64(src.rate)
 				continue
 			}
-			decayAge := age - feeFetchFullValidityPeriod
-			w := 1 - (float64(decayAge) / float64(feeFetchValidityDecayPeriod))
+			decayAge := age - feeRateFetchFullValidityPeriod
+			w := 1 - (float64(decayAge) / float64(feeRateFetchValidityDecayPeriod))
 			weight += w
 			weightedRate += w * float64(src.rate)
 		}
@@ -118,7 +118,7 @@ func prioritizedFeeRate(sources [][]*feeFetchSource) uint64 {
 	return 0
 }
 
-func nextSource(sources [][]*feeFetchSource) (src *feeFetchSource, delay time.Duration) {
+func nextSource(sources [][]*feeRateFetchSource) (src *feeRateFetchSource, delay time.Duration) {
 	delay = time.Duration(math.MaxInt64)
 	for _, group := range sources {
 		for _, s := range group {
@@ -139,7 +139,7 @@ func nextSource(sources [][]*feeFetchSource) (src *feeFetchSource, delay time.Du
 	return
 }
 
-func (f *FeeFetcher) Connect(ctx context.Context) (*sync.WaitGroup, error) {
+func (f *FeeRateFetcher) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	reportCompositeRate := func() {
 		r := prioritizedFeeRate(f.sources)
 		if r == 0 {
@@ -154,18 +154,18 @@ func (f *FeeFetcher) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		}
 	}
 
-	updateSource := func(src *feeFetchSource) bool {
-		ctx, cancel := context.WithTimeout(ctx, feeFetchTimeout)
+	updateSource := func(src *feeRateFetchSource) bool {
+		ctx, cancel := context.WithTimeout(ctx, feeRateFetchTimeout)
 		defer cancel()
 		r, errDelay, err := src.F(ctx)
 		if err != nil {
 			src.log.Meter("fetch-error", time.Minute*30).Errorf("Fetch error: %v", err)
-			src.failUntil = time.Now().Add(max(minFeeFetchErrorDelay, errDelay))
+			src.failUntil = time.Now().Add(max(minFeeRateFetchErrorDelay, errDelay))
 			return false
 		}
 		if r == 0 {
 			src.log.Meter("zero-rate", time.Minute*30).Error("Fee rate of zero")
-			src.failUntil = time.Now().Add(minFeeFetchErrorDelay)
+			src.failUntil = time.Now().Add(minFeeRateFetchErrorDelay)
 			return false
 		}
 		src.failUntil = time.Time{}
@@ -199,7 +199,7 @@ func (f *FeeFetcher) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 			var timeout *time.Timer
 			if src == nil {
 				f.log.Meter("all-failed", time.Minute*10).Error("All sources failed")
-				timeout = time.NewTimer(feeFetchDefaultTick)
+				timeout = time.NewTimer(feeRateFetchDefaultTick)
 			} else {
 				timeout = time.NewTimer(max(0, delay))
 			}
@@ -218,6 +218,6 @@ func (f *FeeFetcher) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	return &wg, nil
 }
 
-func (f *FeeFetcher) Next() <-chan uint64 {
+func (f *FeeRateFetcher) Next() <-chan uint64 {
 	return f.c
 }
