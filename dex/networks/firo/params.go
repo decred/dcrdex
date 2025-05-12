@@ -30,6 +30,13 @@ func mustHash(hash string) *chainhash.Hash {
 	return h
 }
 
+// Clone ports.
+var NetPorts = btc.NetPorts{
+	Mainnet: "8888",
+	Testnet: "18888",
+	Simnet:  "28888",
+}
+
 var (
 	UnitInfo = dex.UnitInfo{
 		AtomicUnit: "Sats",
