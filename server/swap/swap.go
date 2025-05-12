@@ -1073,7 +1073,7 @@ func (s *Swapper) failMatch(match *matchTracker, userFault bool) {
 	}
 
 	// Register the failure to act violation, adjusting the user's score.
-	if userFault {
+	if userFault && (match.Maker.User() != match.Taker.User()) {
 		s.authMgr.Inaction(orderAtFault.User(), outcome, db.MatchID(match.Match),
 			match.Quantity, refTime, orderAtFault.ID())
 	}

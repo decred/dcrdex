@@ -804,6 +804,9 @@ func ValidateOrder(ord Order, status OrderStatus, lotSize uint64) error {
 		if err := validateTrade(&ot.T); err != nil {
 			return err
 		}
+		if ot.Rate > math.MaxInt64 {
+			return fmt.Errorf("order rate %d is greater than max allowed %d", ot.Rate, math.MaxInt64)
+		}
 	default:
 		// cannot validate an unknown order type
 		return fmt.Errorf("unknown order type")

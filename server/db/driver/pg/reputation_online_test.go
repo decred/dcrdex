@@ -157,6 +157,9 @@ func TestReputation(t *testing.T) {
 		t.Fatal("Pruning orders failed")
 	}
 
+	// Only one success left for each class.
+	// Add a fail for each class.
+
 	oid := randomOrderID()
 	if pimg, err := archie.AddPreimageOutcome(ctx, user, oid, true); err != nil {
 		t.Fatalf("Error adding preimage outcome: %v", err)
@@ -177,10 +180,19 @@ func TestReputation(t *testing.T) {
 	}
 
 	loadedPimgs, loadedMatches, loadedOrds, _ = archie.GetUserReputationData(ctx, user, 100, 100, 100)
-	if err != nil {
-		t.Fatalf("Error loading reputation data: %v", err)
-	}
 	if len(loadedPimgs) != 2 || len(loadedMatches) != 2 || len(loadedOrds) != 2 {
 		t.Fatal("Wrong number of loaded outcomes", len(loadedPimgs), len(loadedMatches), len(loadedOrds))
+	}
+
+	if err := archie.ForgiveUser(ctx, user); err != nil {
+		t.Fatalf("Error forgiving user: %v", err)
+	}
+
+	loadedPimgs, loadedMatches, loadedOrds, _ = archie.GetUserReputationData(ctx, user, 100, 100, 100)
+	if len(loadedPimgs) != 1 || len(loadedMatches) != 1 || len(loadedOrds) != 1 {
+		t.Fatal("Wrong number of loaded outcomes after forgiveness", len(loadedPimgs), len(loadedMatches), len(loadedOrds))
+	}
+	if loadedPimgs[0].Miss || loadedMatches[0].MatchOutcome != db.OutcomeSwapSuccess || loadedOrds[0].Canceled {
+		t.Fatal("Forgiving didn't forgive", loadedPimgs[0].Miss, loadedMatches[0].MatchOutcome, loadedOrds[0].Canceled)
 	}
 }

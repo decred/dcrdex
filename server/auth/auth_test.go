@@ -174,6 +174,10 @@ func (s *TStorage) UpgradeUserReputationV1(
 	return pimgs, matches, ords, nil
 }
 
+func (s *TStorage) ForgiveUser(ctx context.Context, user account.AccountID) error {
+	return nil
+}
+
 // TSigner satisfies the Signer interface
 type TSigner struct {
 	sig *ecdsa.Signature

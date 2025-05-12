@@ -19,4 +19,6 @@ const (
 	SelectPoints = `SELECT id, link, class, outcome FROM %s WHERE account = $1 ORDER BY id;`
 
 	PrunePoints = `DELETE FROM %s WHERE account = $1 AND class = $2 AND id <= $3;`
+
+	ForgiveUser = `DELETE FROM %s WHERE account = $1 AND outcome NOT IN ($2, $3, $4);`
 )

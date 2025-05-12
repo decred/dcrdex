@@ -1044,6 +1044,35 @@ func (auth *AuthManager) AcctStatus(user account.AccountID) (connected bool, tie
 	return
 }
 
+func (auth *AuthManager) reRepUser(user account.AccountID) (*account.Reputation, error) {
+	// Reload outcomes from DB. NOTE: This does not use loadUserScore because we
+	// also need to update the matchOutcomes map if the user is online.
+	pimgs, matches, ords, err := auth.loadUserOutcomes(user)
+	if err != nil {
+		return nil, err
+	}
+	auth.violationMtx.Lock()
+	_, online := auth.matchOutcomes[user]
+	if online {
+		auth.preimgOutcomes[user] = pimgs
+		auth.matchOutcomes[user] = matches
+		auth.orderOutcomes[user] = ords
+	}
+	auth.violationMtx.Unlock()
+
+	// Recompute the user's score.
+	score, _, _ := auth.integrateOutcomes(matches, pimgs, ords)
+
+	// Recompute tier.
+	rep, tierChanged, scoreChanged := auth.computeUserReputation(user, score)
+	if tierChanged {
+		go auth.sendTierChanged(user, rep, "user forgiven")
+	} else if scoreChanged {
+		go auth.sendScoreChanged(user, rep)
+	}
+	return rep, nil
+}
+
 // ForgiveMatchFail forgives a user for a specific match failure, potentially
 // allowing them to resume trading if their score becomes passing. NOTE: This
 // may become deprecated with mesh, unless matches may be forgiven in some
@@ -1054,26 +1083,9 @@ func (auth *AuthManager) ForgiveMatchFail(user account.AccountID, mid order.Matc
 	if err != nil {
 		return
 	}
-
-	// Reload outcomes from DB. NOTE: This does not use loadUserScore because we
-	// also need to update the matchOutcomes map if the user is online.
-	latestPreimageResults, latestMatches, latestFinished, err := auth.loadUserOutcomes(user)
-	auth.violationMtx.Lock()
-	_, online := auth.matchOutcomes[user]
-	if online {
-		auth.matchOutcomes[user] = latestMatches
-	}
-	auth.violationMtx.Unlock()
-
-	// Recompute the user's score.
-	score, _, _ := auth.integrateOutcomes(latestMatches, latestPreimageResults, latestFinished)
-
-	// Recompute tier.
-	rep, tierChanged, scoreChanged := auth.computeUserReputation(user, score)
-	if tierChanged {
-		go auth.sendTierChanged(user, rep, "swap failure forgiven")
-	} else if scoreChanged {
-		go auth.sendScoreChanged(user, rep)
+	rep, err := auth.reRepUser(user)
+	if err != nil {
+		return
 	}
 
 	unbanned = rep.EffectiveTier() > 0
@@ -1413,6 +1425,8 @@ func (auth *AuthManager) upgradeUserOutcomesV0(user account.AccountID) (*latestO
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("error upgrading user reputation to v1: %w", err)
 	}
+
+	log.Infof("User %s reputation upgraded to version 1", user)
 
 	return newLatestOutcomes(pimgs, scoringOrderLimit),
 		newLatestOutcomes(matches, ScoringMatchLimit),
@@ -1935,6 +1949,16 @@ func (auth *AuthManager) handleMatchStatus(conn comms.Link, msg *msgjson.Message
 	err = conn.Send(resp)
 	if err != nil {
 		log.Error("error sending match_status response: " + err.Error())
+	}
+	return nil
+}
+
+func (auth *AuthManager) ForgiveUser(user account.AccountID) error {
+	if err := auth.storage.ForgiveUser(auth.ctx, user); err != nil {
+		return err
+	}
+	if _, err := auth.reRepUser(user); err != nil {
+		log.Errorf("Error updating user reputation after forgiveness: %v", err)
 	}
 	return nil
 }

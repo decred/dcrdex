@@ -530,6 +530,7 @@ type ReputationArchiver interface {
 	UpgradeUserReputationV1(
 		ctx context.Context, user account.AccountID, pimgOutcomes []*PreimageOutcome, matchOutcomes []*MatchResult, orderOutcomes []*OrderOutcome, /* Without DB IDs */
 	) ([]*PreimageOutcome, []*MatchResult, []*OrderOutcome, error) /* With DB IDs */
+	ForgiveUser(ctx context.Context, user account.AccountID) error
 }
 
 // OutcomeClass is the type of interaction for which the user's reputation

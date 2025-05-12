@@ -205,3 +205,11 @@ func (a *Archiver) UpgradeUserReputationV1(
 	}
 	return pimgs, matches, orders, nil
 }
+
+func (a *Archiver) ForgiveUser(ctx context.Context, user account.AccountID) error {
+	query := fmt.Sprintf(internal.ForgiveUser, a.tables.points)
+	if _, err := a.db.ExecContext(ctx, query, user, db.OutcomeSwapSuccess, db.OutcomePreimageSuccess, db.OutcomeOrderComplete); err != nil {
+		return fmt.Errorf("error forgiving user: %w", err)
+	}
+	return nil
+}
