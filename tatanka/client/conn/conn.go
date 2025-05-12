@@ -590,7 +590,7 @@ func (c *MeshConn) failoverToSecondary() bool {
 // there's no primary, and attempts to find new nodes if there is no primary
 // or secondary node.
 //
-// c.nodesMtx MUST locked when calling this function.
+// c.nodesMtx MUST be locked when calling this function.
 func (c *MeshConn) maintainMeshConnections() {
 	if !c.maintainingMeshConnections.CompareAndSwap(false, true) {
 		return
