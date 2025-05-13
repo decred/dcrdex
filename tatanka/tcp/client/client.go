@@ -16,22 +16,32 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
+type ConnectionStatus uint32
+
+const (
+	Disconnected ConnectionStatus = iota
+	Connected
+	InvalidCert
+)
+
 type Client struct {
-	ctx    context.Context
-	log    dex.Logger
-	url    *url.URL
-	cert   []byte
-	cl     comms.WsConn
-	cm     *dex.ConnectionMaster
-	handle func(*msgjson.Message)
+	ctx              context.Context
+	log              dex.Logger
+	url              *url.URL
+	cert             []byte
+	cl               comms.WsConn
+	cm               *dex.ConnectionMaster
+	handle           func(*msgjson.Message, func(*msgjson.Message))
+	connectEventFunc func(ConnectionStatus)
 }
 
 type Config struct {
-	Logger        dex.Logger
-	URL           string
-	Cert          []byte
-	PrivateKey    *secp256k1.PrivateKey
-	HandleMessage func(*msgjson.Message)
+	Logger           dex.Logger
+	URL              string
+	Cert             []byte
+	PrivateKey       *secp256k1.PrivateKey
+	HandleMessage    func(*msgjson.Message, func(*msgjson.Message))
+	ConnectEventFunc func(ConnectionStatus)
 }
 
 func New(cfg *Config) (*Client, error) {
@@ -45,26 +55,38 @@ func New(cfg *Config) (*Client, error) {
 		return nil, fmt.Errorf("protocol should be 'ws' or 'wss', not %q", u.Scheme)
 	}
 	return &Client{
-		log:    cfg.Logger,
-		url:    u,
-		cert:   cfg.Cert,
-		handle: cfg.HandleMessage,
+		log:              cfg.Logger,
+		url:              u,
+		cert:             cfg.Cert,
+		handle:           cfg.HandleMessage,
+		connectEventFunc: cfg.ConnectEventFunc,
 	}, nil
 }
 
 func (c *Client) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) {
 	c.ctx = ctx
 	if c.cl, err = comms.NewWsConn(&comms.WsCfg{
-		URL:      c.url.String(),
-		PingWait: 20 * time.Second,
-		Cert:     c.cert,
+		URL:                  c.url.String(),
+		PingWait:             20 * time.Second,
+		Cert:                 c.cert,
+		DisableAutoReconnect: true,
 		ReconnectSync: func() {
 			fmt.Println("## RECONNECTED RECONNECTED RECONNECTED RECONNECTED ")
 		},
 		ConnectEventFunc: func(status comms.ConnectionStatus) {
-			if status == comms.Disconnected {
-				// Remove it from the map.
-				c.log.Infof("WebSockets client for %s has disconnected", c.url)
+			if c.connectEventFunc == nil {
+				return
+			}
+
+			switch status {
+			case comms.Disconnected:
+				c.connectEventFunc(Disconnected)
+			case comms.Connected:
+				c.connectEventFunc(Connected)
+			case comms.InvalidCert:
+				c.connectEventFunc(InvalidCert)
+			default:
+				c.log.Errorf("Unknown connection status: %d", status)
 			}
 		},
 		Logger: c.log.SubLogger("TC"),
@@ -81,13 +103,26 @@ func (c *Client) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) {
 		return nil, fmt.Errorf("error connecting to %q: %w", c.url, err)
 	}
 
+	sendResponse := func(msg *msgjson.Message) {
+		c.log.Infof("Sending response: %v", msg)
+		err = c.cl.Send(msg)
+		if err != nil {
+			c.log.Errorf("Error sending response: %v", err)
+		}
+	}
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		for {
 			select {
 			case msg := <-msgs:
-				c.handle(msg)
+				if msg == nil {
+					c.log.Errorf("Received nil message")
+					continue
+				}
+				c.log.Infof("Received message: %v", msg)
+				c.handle(msg, sendResponse)
 			case <-ctx.Done():
 				return
 			}
