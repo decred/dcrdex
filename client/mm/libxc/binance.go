@@ -983,15 +983,15 @@ func (bnc *binance) ConfirmWithdrawal(ctx context.Context, withdrawalID string, 
 // Withdraw withdraws funds from the CEX to a certain address. onComplete
 // is called with the actual amount withdrawn (amt - fees) and the
 // transaction ID of the withdrawal.
-func (bnc *binance) Withdraw(ctx context.Context, assetID uint32, qty uint64, address string) (string, error) {
+func (bnc *binance) Withdraw(ctx context.Context, assetID uint32, qty uint64, address string) (string, uint64, error) {
 	assetCfg, err := bncAssetCfg(assetID)
 	if err != nil {
-		return "", fmt.Errorf("error getting symbol data for %d: %w", assetID, err)
+		return "", 0, fmt.Errorf("error getting symbol data for %d: %w", assetID, err)
 	}
 
 	lotSize, err := bnc.withdrawLotSize(assetID)
 	if err != nil {
-		return "", fmt.Errorf("error getting withdraw lot size for %d: %w", assetID, err)
+		return "", 0, fmt.Errorf("error getting withdraw lot size for %d: %w", assetID, err)
 	}
 
 	steppedQty := steppedRate(qty, lotSize)
@@ -1010,10 +1010,10 @@ func (bnc *binance) Withdraw(ctx context.Context, assetID uint32, qty uint64, ad
 	}{}
 	err = bnc.postAPI(ctx, "/sapi/v1/capital/withdraw/apply", nil, v, true, true, &withdrawResp)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 
-	return withdrawResp.ID, nil
+	return withdrawResp.ID, qty, nil
 }
 
 // GetDepositAddress returns a deposit address for an asset.
@@ -2072,28 +2072,30 @@ func (bnc *binance) book(baseID, quoteID uint32) (*binanceOrderBook, error) {
 	return book, nil
 }
 
+func convertSide(side []*obEntry, sell bool, baseFactor, quoteFactor uint64) []*core.MiniOrder {
+	ords := make([]*core.MiniOrder, len(side))
+	for i, e := range side {
+		ords[i] = &core.MiniOrder{
+			Qty:       float64(e.qty) / float64(baseFactor),
+			QtyAtomic: e.qty,
+			Rate:      calc.ConventionalRateAlt(e.rate, baseFactor, quoteFactor),
+			MsgRate:   e.rate,
+			Sell:      sell,
+		}
+	}
+	return ords
+}
+
 func (bnc *binance) Book(baseID, quoteID uint32) (buys, sells []*core.MiniOrder, _ error) {
 	book, err := bnc.book(baseID, quoteID)
 	if err != nil {
 		return nil, nil, err
 	}
 	bids, asks := book.book.snap()
-	bFactor := float64(book.baseConversionFactor)
-	convertSide := func(side []*obEntry, sell bool) []*core.MiniOrder {
-		ords := make([]*core.MiniOrder, len(side))
-		for i, e := range side {
-			ords[i] = &core.MiniOrder{
-				Qty:       float64(e.qty) / bFactor,
-				QtyAtomic: e.qty,
-				Rate:      calc.ConventionalRateAlt(e.rate, book.baseConversionFactor, book.quoteConversionFactor),
-				MsgRate:   e.rate,
-				Sell:      sell,
-			}
-		}
-		return ords
-	}
-	buys = convertSide(bids, false)
-	sells = convertSide(asks, true)
+	bFactor := book.baseConversionFactor
+	qFactor := book.quoteConversionFactor
+	buys = convertSide(bids, false, bFactor, qFactor)
+	sells = convertSide(asks, true, bFactor, qFactor)
 	return
 }
 

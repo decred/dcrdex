@@ -93,8 +93,6 @@ type CEX interface {
 	Balances(ctx context.Context) (map[uint32]*ExchangeBalance, error)
 	// CancelTrade cancels a trade on the CEX.
 	CancelTrade(ctx context.Context, baseID, quoteID uint32, tradeID string) error
-	// MatchedMarkets returns the list of markets at the CEX.
-	MatchedMarkets(ctx context.Context) ([]*MarketMatch, error)
 	// Markets returns the list of markets at the CEX.
 	Markets(ctx context.Context) (map[string]*Market, error)
 	// SubscribeMarket subscribes to order book updates on a market. This must
@@ -123,10 +121,11 @@ type CEX interface {
 	// ConfirmDeposit is an async function that calls onConfirm when the status
 	// of a deposit has been confirmed.
 	ConfirmDeposit(ctx context.Context, deposit *DepositData) (bool, uint64)
-	// Withdraw withdraws funds from the CEX to a certain address. onComplete
-	// is called with the actual amount withdrawn (amt - fees) and the
-	// transaction ID of the withdrawal.
-	Withdraw(ctx context.Context, assetID uint32, amt uint64, address string) (string, error)
+	// Withdraw withdraws funds from the CEX to a certain address. The txID
+	// and the amount the cex balance was reduced by are returned. This may
+	// be equal to or higher than the amount requested due to fees, depending
+	// on the CEX.
+	Withdraw(ctx context.Context, assetID uint32, amt uint64, address string) (string, uint64, error)
 	// ConfirmWithdrawal checks whether a withdrawal has been completed. If the
 	// withdrawal has not yet been sent, ErrWithdrawalPending is returned.
 	ConfirmWithdrawal(ctx context.Context, withdrawalID string, assetID uint32) (uint64, string, error)
@@ -139,6 +138,7 @@ type CEX interface {
 const (
 	Binance   = "Binance"
 	BinanceUS = "BinanceUS"
+	Coinbase  = "Coinbase"
 )
 
 // IsValidCEXName returns whether or not a cex name is supported.
@@ -161,6 +161,8 @@ func NewCEX(cexName string, cfg *CEXConfig) (CEX, error) {
 		return newBinance(cfg, false), nil
 	case BinanceUS:
 		return newBinance(cfg, true), nil
+	case Coinbase:
+		return newCoinbase(cfg)
 	default:
 		return nil, fmt.Errorf("unrecognized CEX: %v", cexName)
 	}

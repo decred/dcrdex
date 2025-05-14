@@ -514,7 +514,7 @@ func (a *arbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
 	}
 	a.book = book
 
-	err = a.cex.SubscribeMarket(ctx, a.baseID, a.quoteID)
+	err = a.cex.SubscribeMarket(a.ctx, a.baseID, a.quoteID)
 	if err != nil {
 		bookFeed.Close()
 		return nil, fmt.Errorf("failed to subscribe to cex market: %v", err)
