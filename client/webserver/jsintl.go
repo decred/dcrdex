@@ -221,6 +221,8 @@ const (
 	idCausesSelfMatch                = "CAUSES_SELF_MATCH"
 	idCexNotConnected                = "CEX_NOT_CONNECTED"
 	idDeleteBot                      = "DELETE_BOT"
+	idMarketOrderCapitalize          = "MARKET_ORDER_CAPITALIZE"
+	idLimitOrderCapitalize           = "LIMIT_ORDER_CAPITALIZE"
 )
 
 var enUS = map[string]*intl.Translation{
@@ -441,6 +443,8 @@ var enUS = map[string]*intl.Translation{
 	idCausesSelfMatch:                {T: "This order would cause a self-match"},
 	idCexNotConnected:                {T: "{{ cexName }} not connected"},
 	idDeleteBot:                      {T: "Are you sure you want to delete this bot for the {{ baseTicker }}-{{ quoteTicker }} market on {{ host }}?"},
+	idMarketOrderCapitalize:          {T: "Market"},
+	idLimitOrderCapitalize:           {T: "Limit"},
 }
 
 var ptBR = map[string]*intl.Translation{

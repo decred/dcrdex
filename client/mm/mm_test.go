@@ -21,6 +21,7 @@ import (
 	_ "decred.org/dcrdex/client/asset/btc"     // register btc asset
 	_ "decred.org/dcrdex/client/asset/dcr"     // register dcr asset
 	_ "decred.org/dcrdex/client/asset/eth"     // register eth asset
+	_ "decred.org/dcrdex/client/asset/ltc"     // register ltc asset
 	_ "decred.org/dcrdex/client/asset/polygon" // register polygon asset
 )
 
@@ -432,6 +433,10 @@ type tCEX struct {
 	confirmDepositMtx    sync.Mutex
 	confirmedDeposit     *uint64
 	tradeStatus          *libxc.Trade
+
+	// tradeStatusIsLastTrade if set to true, will set the return value of TradeStatus
+	// to be the last trade that was placed.
+	tradeStatusIsLastTrade bool
 }
 
 func newTCEX() *tCEX {
@@ -461,7 +466,10 @@ func (c *tCEX) Markets(ctx context.Context) (map[string]*libxc.Market, error) {
 func (c *tCEX) Balance(assetID uint32) (*libxc.ExchangeBalance, error) {
 	return c.balances[assetID], c.balanceErr
 }
-func (c *tCEX) Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, updaterID int) (*libxc.Trade, error) {
+func (c *tCEX) ValidateTrade(baseID, quoteID uint32, sell bool, rate, qty uint64, orderType libxc.OrderType) error {
+	return nil
+}
+func (c *tCEX) Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, orderType libxc.OrderType, updaterID int) (*libxc.Trade, error) {
 	if c.tradeErr != nil {
 		return nil, c.tradeErr
 	}
@@ -472,9 +480,16 @@ func (c *tCEX) Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rat
 		Rate:    rate,
 		Sell:    sell,
 		Qty:     qty,
+		Market:  orderType == libxc.OrderTypeMarket,
 	}
+
+	if c.tradeStatusIsLastTrade {
+		c.tradeStatus = c.lastTrade
+	}
+
 	return c.lastTrade, nil
 }
+
 func (c *tCEX) CancelTrade(ctx context.Context, seID, quoteID uint32, tradeID string) error {
 	if c.cancelTradeErr != nil {
 		return c.cancelTradeErr
@@ -507,6 +522,10 @@ func (c *tCEX) VWAP(baseID, quoteID uint32, sell bool, qty uint64) (vwap, extrem
 	}
 	return res.avg, res.extrema, true, nil
 }
+func (c *tCEX) InvVWAP(baseID, quoteID uint32, sell bool, qty uint64) (vwap, extrema uint64, filled bool, err error) {
+	return 0, 0, false, fmt.Errorf("not implemented")
+}
+
 func (c *tCEX) MidGap(baseID, quoteID uint32) uint64 { return 0 }
 func (c *tCEX) SubscribeTradeUpdates() (<-chan *libxc.Trade, func(), int) {
 	return c.tradeUpdates, func() {}, c.tradeUpdatesID
@@ -546,6 +565,9 @@ func (c *tCEX) ConfirmDeposit(ctx context.Context, deposit *libxc.DepositData) (
 }
 
 func (c *tCEX) TradeStatus(ctx context.Context, id string, baseID, quoteID uint32) (*libxc.Trade, error) {
+	if c.tradeStatus == nil {
+		return nil, fmt.Errorf("trade not found")
+	}
 	return c.tradeStatus, nil
 }
 
@@ -597,10 +619,16 @@ func (c *tBotCexAdaptor) CancelTrade(ctx context.Context, baseID, quoteID uint32
 func (c *tBotCexAdaptor) SubscribeMarket(ctx context.Context, baseID, quoteID uint32) error {
 	return nil
 }
+func (c *tBotCexAdaptor) UnsubscribeMarket(baseID, quoteID uint32) error {
+	return nil
+}
 func (c *tBotCexAdaptor) SubscribeTradeUpdates() (updates <-chan *libxc.Trade) {
 	return c.tradeUpdates
 }
-func (c *tBotCexAdaptor) CEXTrade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64) (*libxc.Trade, error) {
+func (c *tBotCexAdaptor) ValidateTrade(baseID, quoteID uint32, sell bool, rate, qty uint64, orderType libxc.OrderType) error {
+	return nil
+}
+func (c *tBotCexAdaptor) CEXTrade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, orderType libxc.OrderType) (*libxc.Trade, error) {
 	if c.tradeErr != nil {
 		return nil, c.tradeErr
 	}
@@ -612,14 +640,16 @@ func (c *tBotCexAdaptor) CEXTrade(ctx context.Context, baseID, quoteID uint32, s
 		Rate:    rate,
 		Sell:    sell,
 		Qty:     qty,
+		Market:  orderType == libxc.OrderTypeMarket,
 	}
 	return c.lastTrade, nil
 }
+
 func (c *tBotCexAdaptor) FreeUpFunds(assetID uint32, cex bool, amt uint64, currEpoch uint64) {
 }
 
 func (c *tBotCexAdaptor) MidGap(baseID, quoteID uint32) uint64 { return 0 }
-func (c *tBotCexAdaptor) SufficientBalanceForCEXTrade(baseID, quoteID uint32, sell bool, rate, qty uint64) bool {
+func (c *tBotCexAdaptor) SufficientBalanceForCEXTrade(baseID, quoteID uint32, sell bool, rate, qty uint64, orderType libxc.OrderType) bool {
 	if sell {
 		return qty <= c.maxSellQty
 	}

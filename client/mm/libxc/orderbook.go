@@ -7,6 +7,7 @@ import (
 	"math"
 	"sync"
 
+	"decred.org/dcrdex/dex/calc"
 	"github.com/huandu/skiplist"
 )
 
@@ -150,6 +151,49 @@ func (ob *orderbook) vwap(bids bool, qty uint64) (vwap, extrema uint64, filled b
 	}
 
 	return weightedSum / qty, extrema, filled
+}
+
+func (ob *orderbook) invVWAP(bids bool, qty uint64) (vwap, extrema uint64, filled bool) {
+	if qty == 0 { // avoid division by zero
+		return 0, 0, false
+	}
+
+	ob.mtx.RLock()
+	defer ob.mtx.RUnlock()
+
+	var list *skiplist.SkipList
+	if bids {
+		list = &ob.bids
+	} else {
+		list = &ob.asks
+	}
+
+	remaining := qty
+	var weightedSum, totalQty uint64
+	for curr := list.Front(); curr != nil; curr = curr.Next() {
+		if curr == nil {
+			break
+		}
+		entry := curr.Value.(*obEntry)
+		extrema = entry.rate
+		quoteQty := calc.BaseToQuote(entry.rate, entry.qty)
+
+		if quoteQty >= remaining {
+			filled = true
+			weightedSum += remaining * entry.rate
+			totalQty += remaining
+			break
+		}
+
+		remaining -= quoteQty
+		weightedSum += quoteQty * entry.rate
+		totalQty += quoteQty
+	}
+	if !filled {
+		return 0, 0, false
+	}
+
+	return weightedSum / totalQty, extrema, filled
 }
 
 func (ob *orderbook) midGap() uint64 {
