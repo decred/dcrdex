@@ -1269,15 +1269,16 @@ func (dcr *ExchangeWallet) SetBondReserves(reserves uint64) {
 func (dcr *ExchangeWallet) FeeRate() uint64 {
 	const confTarget = 2 // 1 historically gives crazy rates
 	rate, err := dcr.feeRate(confTarget)
-	if err != nil && dcr.network != dex.Simnet {
+	if err != nil {
 		dcr.log.Debugf("feeRate error: %v", err)
+		return 0
 	}
 	return rate
 }
 
 // feeRate returns the current optimal fee rate in atoms / byte.
 func (dcr *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
-	if dcr.ctx == nil {
+	if !dcr.connected.Load() {
 		return 0, errors.New("not connected")
 	}
 	if feeEstimator, is := dcr.wallet.(FeeRateEstimator); is && !dcr.wallet.SpvMode() {
@@ -1388,7 +1389,7 @@ func fetchFeeFromOracle(ctx context.Context, net dex.Network, nb uint64) (float6
 func (dcr *ExchangeWallet) targetFeeRateWithFallback(confTarget, feeSuggestion uint64) uint64 {
 	feeRate, err := dcr.feeRate(confTarget)
 	if err != nil {
-		dcr.log.Errorf("Failed to get fee rate: %v", err)
+		dcr.log.Debugf("Failed to get fee rate: %v", err)
 	} else if feeRate != 0 {
 		dcr.log.Tracef("Obtained estimate for %d-conf fee rate, %d", confTarget, feeRate)
 		return feeRate
