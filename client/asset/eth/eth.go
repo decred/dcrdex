@@ -127,7 +127,7 @@ var (
 				"pay on swap transactions. If gasfeelimit is lower than a market's " +
 				"maxfeerate, you will not be able to trade on that market with this " +
 				"wallet.  Units: gwei / gas",
-			DefaultValue: defaultGasFeeLimit,
+			DefaultValue: strconv.FormatUint(defaultGasFeeLimit, 10),
 		},
 	}
 	RPCOpts = []*asset.ConfigOption{

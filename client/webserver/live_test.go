@@ -714,7 +714,7 @@ func (c *TCore) PreOrder(*core.TradeForm) (*core.OrderEstimate, error) {
 						Key:          "moredough",
 						DisplayName:  "Get More Dough",
 						Description:  "Cast a magical incantation to double the amount of XYZ received.",
-						DefaultValue: true,
+						DefaultValue: "true",
 					},
 					Boolean: &asset.BooleanConfig{
 						Reason: "Cuz why not?",
@@ -725,7 +725,7 @@ func (c *TCore) PreOrder(*core.TradeForm) (*core.OrderEstimate, error) {
 						Key:          "awesomeness",
 						DisplayName:  "More Awesomeness",
 						Description:  "Crank up the awesomeness for next-level trading.",
-						DefaultValue: 1.0,
+						DefaultValue: "1.0",
 					},
 					XYRange: &asset.XYRange{
 						Start: asset.XYRangePoint{
@@ -755,7 +755,7 @@ func (c *TCore) PreOrder(*core.TradeForm) (*core.OrderEstimate, error) {
 						Key:          "lesshassle",
 						DisplayName:  "Smoother Experience",
 						Description:  "Select this option for a super-elite VIP DEX experience.",
-						DefaultValue: false,
+						DefaultValue: "false",
 					},
 					Boolean: &asset.BooleanConfig{
 						Reason: "Half the time, twice the service",
