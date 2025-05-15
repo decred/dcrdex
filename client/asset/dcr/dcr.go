@@ -1929,12 +1929,9 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 			// TODO
 			// 1.0: Error when no suggestion.
 			// return nil, false, fmt.Errorf("cannot do a split transaction without a fee rate suggestion from the server")
-			rawFeeRate = dcr.targetFeeRateWithFallback(cfg.redeemConfTarget, 0)
 			// We PreOrder checked this as <= MaxFeeRate, so use that as an
 			// upper limit.
-			if rawFeeRate > ord.MaxFeeRate {
-				rawFeeRate = ord.MaxFeeRate
-			}
+			rawFeeRate = min(dcr.targetFeeRateWithFallback(cfg.redeemConfTarget, 0), ord.MaxFeeRate)
 		}
 		splitFeeRate, err := calcBumpedRate(rawFeeRate, customCfg.FeeBump)
 		if err != nil {
@@ -4853,10 +4850,7 @@ func (dcr *ExchangeWallet) SyncStatus() (ss *asset.SyncStatus, err error) {
 	dcr.rescan.RUnlock()
 
 	if rescanProgress != nil {
-		height := dcr.cachedBestBlock().height
-		if height < rescanProgress.scannedThrough {
-			height = rescanProgress.scannedThrough
-		}
+		height := max(dcr.cachedBestBlock().height, rescanProgress.scannedThrough)
 		txHeight := uint64(rescanProgress.scannedThrough)
 		return &asset.SyncStatus{
 			Synced:         false,

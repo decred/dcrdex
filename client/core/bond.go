@@ -285,11 +285,8 @@ func (c *Core) minBondReserves(dc *dexConnection, bondAsset *BondAsset) uint64 {
 			continue
 		}
 
-		tiers := bond.Amount / ba.Amt
 		// We won't count any active bond strength > our tier target.
-		if tiers > targetTier-tierSum {
-			tiers = targetTier - tierSum
-		}
+		tiers := min(bond.Amount/ba.Amt, targetTier-tierSum)
 		tierSum += tiers
 		activeTiers = append(activeTiers, [2]uint64{weakTime, tiers})
 		if tierSum == targetTier {
@@ -443,10 +440,7 @@ func (c *Core) bondStateOfDEX(dc *dexConnection, bondCfg *dexBondCfg) *dexAcctBo
 	reportedServerTier := state.Rep.EffectiveTier()
 	if reportedServerTier < expectedServerTier {
 		state.toComp = expectedServerTier - reportedServerTier
-		penaltyCompRemainder := int64(dc.acct.penaltyComps) - state.Compensation
-		if penaltyCompRemainder <= 0 {
-			penaltyCompRemainder = 0
-		}
+		penaltyCompRemainder := max(int64(dc.acct.penaltyComps)-state.Compensation, 0)
 		if state.toComp > penaltyCompRemainder {
 			state.toComp = penaltyCompRemainder
 		}
