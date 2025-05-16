@@ -2521,12 +2521,9 @@ func (btc *baseWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, ui
 			// TODO
 			// 1.0: Error when no suggestion.
 			// return nil, nil, fmt.Errorf("cannot do a split transaction without a fee rate suggestion from the server")
-			splitFeeRate = btc.targetFeeRateWithFallback(btc.redeemConfTarget(), 0)
 			// We PreOrder checked this as <= MaxFeeRate, so use that as an
 			// upper limit.
-			if splitFeeRate > ord.MaxFeeRate {
-				splitFeeRate = ord.MaxFeeRate
-			}
+			splitFeeRate = min(btc.targetFeeRateWithFallback(btc.redeemConfTarget(), 0), ord.MaxFeeRate)
 		}
 		splitFeeRate, err = calcBumpedRate(splitFeeRate, customCfg.FeeBump)
 		if err != nil {

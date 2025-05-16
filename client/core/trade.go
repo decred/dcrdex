@@ -2603,12 +2603,10 @@ func (c *Core) sendInitAsync(t *trackedTrade, match *matchTracker, coinID, contr
 		}
 		// The DEX may wait up to its configured broadcast timeout, but we will
 		// retry on timeout or other error.
-		timeout := t.broadcastTimeout() / 4
-		if timeout < time.Minute { // sane minimum, or if we lack server config for any reason
-			// Send would fail right away anyway if the server is really down,
-			// but at least attempt it with a non-zero timeout.
-			timeout = time.Minute
-		}
+		// sane minimum, or if we lack server config for any reason
+		// Send would fail right away anyway if the server is really down,
+		// but at least attempt it with a non-zero timeout.
+		timeout := max(t.broadcastTimeout()/4, time.Minute)
 		err = t.dc.signAndRequest(init, msgjson.InitRoute, ack, timeout)
 		if err != nil {
 			var msgErr *msgjson.Error
@@ -2896,12 +2894,10 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 		ack := new(msgjson.Acknowledgement)
 		// The DEX may wait up to its configured broadcast timeout, but we will
 		// retry on timeout or other error.
-		timeout := t.broadcastTimeout() / 4
-		if timeout < time.Minute { // sane minimum, or if we lack server config for any reason
-			// Send would fail right away anyway if the server is really down,
-			// but at least attempt it with a non-zero timeout.
-			timeout = time.Minute
-		}
+		// sane minimum, or if we lack server config for any reason
+		// Send would fail right away anyway if the server is really down,
+		// but at least attempt it with a non-zero timeout.
+		timeout := max(t.broadcastTimeout()/4, time.Minute)
 		err = t.dc.signAndRequest(msgRedeem, msgjson.RedeemRoute, ack, timeout)
 		if err != nil {
 			var msgErr *msgjson.Error

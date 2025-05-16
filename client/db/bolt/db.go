@@ -2175,10 +2175,7 @@ func (db *BoltDB) DeleteInactiveOrders(ctx context.Context, olderThan *time.Time
 		}
 
 		// Check if this is the last batch.
-		end := i + batchSize
-		if end > len(keys) {
-			end = len(keys)
-		}
+		end := min(i+batchSize, len(keys))
 
 		nDeletedBatch := 0
 		err := db.Update(func(tx *bbolt.Tx) error {
@@ -2335,10 +2332,7 @@ func (db *BoltDB) DeleteInactiveMatches(ctx context.Context, olderThan *time.Tim
 		}
 
 		// Check if this is the last batch.
-		end := i + batchSize
-		if end > len(keys) {
-			end = len(keys)
-		}
+		end := min(i+batchSize, len(keys))
 
 		nDeletedBatch := 0
 		if err := db.Update(func(tx *bbolt.Tx) error {
