@@ -93,6 +93,7 @@ type DEXArchivist interface {
 	KeyIndexer
 	MatchArchiver
 	SwapArchiver
+	ReputationArchiver
 }
 
 // OrderArchiver is the interface required for storage and retrieval of all
@@ -513,4 +514,137 @@ type CancelRecord struct {
 	// was placed, where 0 means canceled in the same epoch, 1 means canceled in
 	// the next epoch, etc.
 	EpochGap int32
+}
+
+// Reputation
+
+// ReputationArchiver handles interactions with the points table as well as
+// upgrading the reputation version in the accounts table.
+type ReputationArchiver interface {
+	GetUserReputationData(ctx context.Context, user account.AccountID, pimgSz, matchSz, orderSz int) ([]*PreimageOutcome, []*MatchResult, []*OrderOutcome, error)
+	AddPreimageOutcome(ctx context.Context, user account.AccountID, oid order.OrderID, miss bool) (*PreimageOutcome, error)
+	AddMatchOutcome(ctx context.Context, user account.AccountID, mid order.MatchID, outcome Outcome) (*MatchResult, error)
+	AddOrderOutcome(ctx context.Context, user account.AccountID, oid order.OrderID, canceled bool) (*OrderOutcome, error)
+	PruneOutcomes(ctx context.Context, user account.AccountID, outcomeClass OutcomeClass, fromDBID int64) error
+	GetUserReputationVersion(ctx context.Context, user account.AccountID) (int16, error)
+	UpgradeUserReputationV1(
+		ctx context.Context, user account.AccountID, pimgOutcomes []*PreimageOutcome, matchOutcomes []*MatchResult, orderOutcomes []*OrderOutcome, /* Without DB IDs */
+	) ([]*PreimageOutcome, []*MatchResult, []*OrderOutcome, error) /* With DB IDs */
+	ForgiveUser(ctx context.Context, user account.AccountID) error
+}
+
+// OutcomeClass is the type of interaction for which the user's reputation
+// score is affected.
+type OutcomeClass int16
+
+const (
+	OutcomeClassInvalid OutcomeClass = iota
+	OutcomeClassPreimage
+	OutcomeClassOrder
+	OutcomeClassMatch
+)
+
+type Outcome int16
+
+const (
+	OutcomeInvalid Outcome = iota
+	OutcomeForgiven
+	// Match Outcomes
+	OutcomeSwapSuccess
+	OutcomeNoSwapAsMaker
+	OutcomeNoSwapAsTaker
+	OutcomeNoRedeemAsMaker
+	OutcomeNoRedeemAsTaker
+	// Preimage
+	OutcomePreimageSuccess
+	OutcomePreimageMiss
+	// Order cancel/complete
+	OutcomeOrderComplete
+	OutcomeOrderCanceled
+)
+
+func (o Outcome) String() string {
+	switch o {
+	case OutcomeForgiven:
+		return "forgiveness"
+	case OutcomePreimageMiss:
+		return "preimage miss"
+	case OutcomePreimageSuccess:
+		return "preimage success"
+	case OutcomeSwapSuccess:
+		return "swap success"
+	case OutcomeNoSwapAsMaker:
+		return "no swap as maker"
+	case OutcomeNoSwapAsTaker:
+		return "no swap as taker"
+	case OutcomeNoRedeemAsMaker:
+		return "no redeem as maker"
+	case OutcomeNoRedeemAsTaker:
+		return "no redeem as taker"
+	case OutcomeOrderCanceled:
+		return "excessive cancels"
+	case OutcomeOrderComplete:
+		return "order complete"
+	case OutcomeInvalid:
+		return "invalid violation"
+	default:
+		return "unknown violation"
+	}
+}
+
+type Outcomer interface {
+	Outcome() Outcome
+	ID() int64
+}
+
+// PreimageOutcome is the outcome of preimage collection for an order.
+type PreimageOutcome struct {
+	DBID    int64
+	OrderID order.OrderID
+	Miss    bool
+}
+
+func (p *PreimageOutcome) Outcome() Outcome {
+	if p.Miss {
+		return OutcomePreimageMiss
+	}
+	return OutcomePreimageSuccess
+}
+
+func (p *PreimageOutcome) ID() int64 {
+	return p.DBID
+}
+
+// MatchResult is the outcome of a swap.
+type MatchResult struct {
+	DBID         int64
+	MatchID      order.MatchID
+	MatchOutcome Outcome
+}
+
+func (m *MatchResult) Outcome() Outcome {
+	return m.MatchOutcome
+}
+
+func (m *MatchResult) ID() int64 {
+	return m.DBID
+}
+
+// OrderOutcome is the outcome of an order, either canceled before the epoch gap
+// or not.
+type OrderOutcome struct {
+	DBID     int64
+	OrderID  order.OrderID
+	Canceled bool
+}
+
+func (o *OrderOutcome) Outcome() Outcome {
+	if o.Canceled {
+		return OutcomeOrderCanceled
+	}
+	return OutcomeOrderComplete
+}
+
+func (o *OrderOutcome) ID() int64 {
+	return o.DBID
 }
