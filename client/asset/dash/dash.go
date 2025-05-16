@@ -5,6 +5,7 @@ package dash
 
 import (
 	"fmt"
+	"strconv"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
@@ -29,7 +30,7 @@ var (
 			Key:          "fallbackfee",
 			DisplayName:  "Fallback fee rate",
 			Description:  "Dash's 'fallbackfee' rate. Units: DASH/kB",
-			DefaultValue: dexdash.DefaultFee * 1000 / 1e8,
+			DefaultValue: strconv.FormatFloat(dexdash.DefaultFee*1000/1e8, 'f', -1, 64),
 		},
 		{
 			Key:         "feeratelimit",
@@ -38,7 +39,7 @@ var (
 				"pay on swap transactions. If feeratelimit is lower than a market's " +
 				"maxfeerate, you will not be able to trade on that market with this " +
 				"wallet.  Units: DASH/kB",
-			DefaultValue: dexdash.DefaultFeeRateLimit * 1000 / 1e8,
+			DefaultValue: strconv.FormatFloat(dexdash.DefaultFeeRateLimit*1000/1e8, 'f', -1, 64),
 		},
 		{
 			Key:         "redeemconftarget",
@@ -46,7 +47,7 @@ var (
 			Description: "The target number of blocks for the redeem transaction " +
 				"to be mined. Used to set the transaction's fee rate. " +
 				"(default: 2 blocks)",
-			DefaultValue: defaultRedeemConfTarget,
+			DefaultValue: strconv.FormatUint(defaultRedeemConfTarget, 10),
 		},
 		{
 			Key:         "txsplit",
@@ -56,7 +57,7 @@ var (
 				"during match settlement, or the order is canceled. This an extra transaction for which network mining fees are paid. " +
 				"Used only for standing-type orders, e.g. limit orders without immediate time-in-force.",
 			IsBoolean:    true,
-			DefaultValue: true,
+			DefaultValue: "true",
 		},
 	}...)
 

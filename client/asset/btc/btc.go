@@ -147,7 +147,7 @@ var (
 				Description: "Allow split funding transactions that pre-size outputs to " +
 					"prevent excessive overlock.",
 				IsBoolean:    true,
-				DefaultValue: true,
+				DefaultValue: "true",
 			},
 		},
 		{
@@ -156,7 +156,7 @@ var (
 				DisplayName: "Multi split buffer",
 				Description: "Add an integer percent buffer to split output amounts to " +
 					"facilitate output reuse. This is only required for quote assets.",
-				DefaultValue: 5,
+				DefaultValue: "5",
 				DependsOn:    multiSplitKey,
 			},
 			QuoteAssetOnly: true,
@@ -227,7 +227,7 @@ func apiFallbackOpt(defaultV bool) *asset.ConfigOption {
 			"This is useful as a fallback for SPV wallets and RPC wallets " +
 			"that have recently been started.",
 		IsBoolean:    true,
-		DefaultValue: defaultV,
+		DefaultValue: strconv.FormatBool(defaultV),
 	}
 }
 
@@ -239,7 +239,7 @@ func CommonConfigOpts(symbol string /* upper-case */, withApiFallback bool) []*a
 			DisplayName: "Fallback fee rate",
 			Description: fmt.Sprintf("The fee rate to use for sending or withdrawing funds and fee payment when"+
 				" estimatesmartfee is not available. Units: %s/kB", symbol),
-			DefaultValue: defaultFee * 1000 / 1e8,
+			DefaultValue: strconv.FormatFloat(defaultFee*1000/1e8, 'f', -1, 64),
 		},
 		{
 			Key:         "feeratelimit",
@@ -248,7 +248,7 @@ func CommonConfigOpts(symbol string /* upper-case */, withApiFallback bool) []*a
 				"pay on swap transactions. If feeratelimit is lower than a market's "+
 				"maxfeerate, you will not be able to trade on that market with this "+
 				"wallet.  Units: %s/kB", symbol),
-			DefaultValue: defaultFeeRateLimit * 1000 / 1e8,
+			DefaultValue: strconv.FormatFloat(defaultFeeRateLimit*1000/1e8, 'f', -1, 64),
 		},
 		{
 			Key:         "redeemconftarget",
@@ -256,7 +256,7 @@ func CommonConfigOpts(symbol string /* upper-case */, withApiFallback bool) []*a
 			Description: "The target number of blocks for the redeem transaction " +
 				"to be mined. Used to set the transaction's fee rate. " +
 				"(default: 2 blocks)",
-			DefaultValue: defaultRedeemConfTarget,
+			DefaultValue: strconv.FormatUint(defaultRedeemConfTarget, 10),
 		},
 		{
 			Key:         "txsplit",
@@ -268,7 +268,7 @@ func CommonConfigOpts(symbol string /* upper-case */, withApiFallback bool) []*a
 				"or the order is canceled. This an extra transaction for which network " +
 				"mining fees are paid.",
 			IsBoolean:    true,
-			DefaultValue: false,
+			DefaultValue: "false",
 		},
 	}
 
@@ -2158,7 +2158,7 @@ func (btc *baseWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
 				Key:          swapFeeBumpKey,
 				DisplayName:  "Faster Swaps",
 				Description:  desc,
-				DefaultValue: 1.0,
+				DefaultValue: "1.0",
 			},
 			XYRange: &asset.XYRange{
 				Start: asset.XYRangePoint{
@@ -2224,7 +2224,7 @@ func (btc *baseWallet) splitOption(req *asset.PreSwapForm, utxos []*CompositeUTX
 			Key:           splitKey,
 			DisplayName:   "Pre-size Funds",
 			IsBoolean:     true,
-			DefaultValue:  btc.useSplitTx(), // not nil interface
+			DefaultValue:  strconv.FormatBool(btc.useSplitTx()), // not nil interface
 			ShowByDefault: true,
 		},
 		Boolean: &asset.BooleanConfig{},
@@ -2250,7 +2250,7 @@ func (btc *baseWallet) splitOption(req *asset.PreSwapForm, utxos []*CompositeUTX
 		opt.Boolean.Reason = fmt.Sprintf("avoids no %s overlock for this order (ignored)", symbol)
 		opt.Description = fmt.Sprintf("A split transaction for this order avoids no %s overlock, "+
 			"but adds additional fees.", symbol)
-		opt.DefaultValue = false
+		opt.DefaultValue = "false"
 		return opt // not enabled by default, but explain why
 	}
 
@@ -2405,7 +2405,7 @@ func (btc *baseWallet) preRedeem(numLots, feeSuggestion uint64, options map[stri
 			Key:          redeemFeeBumpFee,
 			DisplayName:  "Change Redemption Fees",
 			Description:  "Bump the redemption transaction fees up to 2x for faster confirmation of your redemption transaction.",
-			DefaultValue: 1.0,
+			DefaultValue: "1.0",
 		},
 		XYRange: &asset.XYRange{
 			Start: asset.XYRangePoint{

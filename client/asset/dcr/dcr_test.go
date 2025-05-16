@@ -151,6 +151,7 @@ func tNewWalletMonitorBlocks(monitorBlocks bool) (*ExchangeWallet, *tRPCClient, 
 		shutdown()
 		panic(err.Error())
 	}
+	wallet.connected.Store(true)
 	rpcw := &rpcWallet{
 		rpcClient: client,
 		log:       log,

@@ -237,8 +237,8 @@ func handleNewWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 
 	// Apply default config options if they exist.
 	for _, opt := range walletDef.ConfigOpts {
-		if _, has := form.config[opt.Key]; !has && opt.DefaultValue != nil {
-			form.config[opt.Key] = fmt.Sprintf("%v", opt.DefaultValue)
+		if _, has := form.config[opt.Key]; !has {
+			form.config[opt.Key] = opt.DefaultValue
 		}
 	}
 
