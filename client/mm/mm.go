@@ -899,6 +899,7 @@ func (m *MarketMaker) startBot(startCfg *StartConfig, botCfg *BotConfig, cexCfg 
 		log:                 m.botSubLogger(botCfg),
 		botCfg:              botCfg,
 		eventLogDB:          m.eventLogDB,
+		internalTransfer:    m.internalTransfer,
 	}
 
 	bot, err := m.newBot(botCfg, adaptorCfg)
@@ -1097,6 +1098,29 @@ func validRunningBotCfgUpdate(oldCfg, newCfg *BotConfig) error {
 	}
 
 	return nil
+}
+
+// internalTransfer is called from the exchange adaptor when attempting an
+// internal transfer.
+//
+// ** IMPORTANT ** No mutexes in exchangeAdaptor should be locked when calling this
+// function.
+func (m *MarketMaker) internalTransfer(mkt *MarketWithHost, doTransfer doInternalTransferFunc) error {
+	m.startUpdateMtx.Lock()
+	defer m.startUpdateMtx.Unlock()
+
+	runningBots := m.runningBotsLookup()
+	rb, found := runningBots[*mkt]
+	if !found {
+		return fmt.Errorf("internalTransfer called for non-running bot %s", mkt)
+	}
+
+	dex, cex, err := m.availableBalances(mkt, rb.cexCfg)
+	if err != nil {
+		return fmt.Errorf("error getting available balances: %v", err)
+	}
+
+	return doTransfer(dex, cex)
 }
 
 // UpdateRunningBotInventory updates the inventory of a running bot.
@@ -1720,7 +1744,6 @@ func (m *MarketMaker) availableBalances(mkt *MarketWithHost, cexCfg *CEXConfig) 
 		if balancesEqual(updatedDEXBalances, totalDEXBalances) && balancesEqual(updatedCEXBalances, totalCEXBalances) {
 			for assetID, bal := range reservedDEXBalances {
 				if bal > totalDEXBalances[assetID] {
-					m.log.Warnf("reserved DEX balance for %s exceeds available balance: %d > %d", dex.BipIDSymbol(assetID), bal, totalDEXBalances[assetID])
 					totalDEXBalances[assetID] = 0
 				} else {
 					totalDEXBalances[assetID] -= bal
@@ -1728,7 +1751,6 @@ func (m *MarketMaker) availableBalances(mkt *MarketWithHost, cexCfg *CEXConfig) 
 			}
 			for assetID, bal := range reservedCEXBalances {
 				if bal > totalCEXBalances[assetID] {
-					m.log.Warnf("reserved CEX balance for %s exceeds available balance: %d > %d", dex.BipIDSymbol(assetID), bal, totalCEXBalances[assetID])
 					totalCEXBalances[assetID] = 0
 				} else {
 					totalCEXBalances[assetID] -= bal
