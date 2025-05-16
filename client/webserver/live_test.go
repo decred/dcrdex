@@ -1657,6 +1657,10 @@ func (c *TCore) NewDepositAddress(assetID uint32) (string, error) {
 	return ordertest.RandomAddress(), nil
 }
 
+func (c *TCore) AddressUsed(assetID uint32, addr string) (bool, error) {
+	return rand.Float32() > 0.5, nil
+}
+
 func (c *TCore) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) error { return nil }
 
 func (c *TCore) User() *core.User {
@@ -2145,7 +2149,7 @@ func (m *TMarketMaker) MarketReport(host string, baseID, quoteID uint32) (*mm.Ma
 	}, nil
 }
 
-func (m *TMarketMaker) StartBot(startCfg *mm.StartConfig, alternateConfigPath *string, appPW []byte) (err error) {
+func (m *TMarketMaker) StartBot(startCfg *mm.StartConfig, alternateConfigPath *string, appPW []byte, overrideLotSizeUpdate bool) (err error) {
 	m.runningBotsMtx.Lock()
 	defer m.runningBotsMtx.Unlock()
 
