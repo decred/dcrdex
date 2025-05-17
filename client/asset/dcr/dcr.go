@@ -5771,7 +5771,7 @@ func (dcr *ExchangeWallet) ListVSPs() ([]*asset.VotingServiceProvider, error) {
 			Closed:        vspi.VspClosed,
 			Voting:        vspi.Voting,
 			Voted:         vspi.Voted,
-			Revoked:       vspi.Revoked,
+			Revoked:       vspi.Expired + vspi.Missed,
 			VSPDVersion:   vspi.VspdVersion,
 			BlockHeight:   vspi.BlockHeight,
 			NetShare:      vspi.NetworkProportion,
