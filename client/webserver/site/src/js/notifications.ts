@@ -1,8 +1,8 @@
-import { CoreNote, PageElement } from './registry'
-import * as intl from './locales'
-import State from './state'
 import { setCoinHref } from './coinexplorers'
 import Doc from './doc'
+import * as intl from './locales'
+import { CoreNote, PageElement } from './registry'
+import State from './state'
 
 export const IGNORE = 0
 export const DATA = 1
@@ -133,6 +133,25 @@ function isDesktopWebview (): boolean {
 // It tests for the existence of the bwHandler webkit message handler.
 function isDesktopWebkit (): boolean {
   return window.webkit?.messageHandlers?.bwHandler !== undefined
+}
+
+// Bind the webview and webkit message handlers to the window object for darwin.
+// Linux and Windows handlers are binded in
+// client/cmd/bisonw-desktop/app.go#L399
+if (isDesktopWebkit()) {
+  window.isWebview = () => { return true }
+  window.sendOSNotification = async (title: string, body?: string) => {
+    await window.webkit.messageHandlers.bwHandler.postMessage(['sendOSNotification', title, body])
+  }
+  window.openUrl = async (url: string) => {
+    await window.webkit.messageHandlers.bwHandler.postMessage(['openURL', url.toString()])
+  }
+  window.open = (url?: string | URL, target?: string, feature?: string): Window | null => {
+    if (url === undefined) return null
+    if (target !== undefined || feature !== '') console.warn('open: target and feature are not supported in webview')
+    window.webkit.messageHandlers.bwHandler.postMessage(['openURL', url.toString()])
+    return null
+  }
 }
 
 // determine whether we're running in a webview or in browser, and export
