@@ -2,6 +2,7 @@ package eth
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"math/big"
@@ -218,13 +219,13 @@ func TestSwapV0(t *testing.T) {
 
 	// error path
 	abiContract.swapErr = fmt.Errorf("test error")
-	_, err := c.swap(nil, [32]byte{})
+	_, err := c.swap(context.TODO(), [32]byte{})
 	if err == nil {
 		t.Fatalf("swap error not transmitted")
 	}
 	abiContract.swapErr = nil
 
-	swap, err := c.swap(nil, [32]byte{})
+	swap, err := c.swap(context.TODO(), [32]byte{})
 	if err != nil {
 		t.Fatalf("swap error: %v", err)
 	}
