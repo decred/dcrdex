@@ -55,6 +55,14 @@ application,  making it the preferred option for new users.
 3. Drag the ``bisonw-desktop.app`` file into the link to your Applications folder within the 
 disk image.
 
+OR
+
+Install via Homebrew:
+
+```sh
+brew install bison-wallet
+```
+
 </details>
 <details>
 <summary><b>Linux (Debian / Ubuntu)</b></summary> 
