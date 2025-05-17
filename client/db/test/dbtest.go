@@ -5,7 +5,8 @@ package dbtest
 
 import (
 	"bytes"
-	"math/rand"
+	crand "crypto/rand"
+	mrand "math/rand/v2"
 	"strings"
 	"time"
 
@@ -15,9 +16,10 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
+var (
+	nowUnix = time.Now().Unix()
+	rand    = mrand.New(mrand.NewPCG(uint64(nowUnix), 0xdffe))
+)
 
 // Generate a public key on the secp256k1 curve.
 func randomPubKey() *secp256k1.PublicKey {
@@ -29,14 +31,6 @@ func randomPubKey() *secp256k1.PublicKey {
 	return priv.PubKey()
 }
 
-func randString(maxLen int) string {
-	s := string(randBytes(int(randBytes(1)[0])))
-	if len(s) > maxLen {
-		s = s[:maxLen]
-	}
-	return s
-}
-
 // RandomAccountInfo creates an AccountInfo with random values.
 func RandomAccountInfo() *db.AccountInfo {
 	return &db.AccountInfo{
@@ -44,10 +38,10 @@ func RandomAccountInfo() *db.AccountInfo {
 		// LegacyEncKey: randBytes(32),
 		EncKeyV2:         randBytes(32),
 		DEXPubKey:        randomPubKey(),
-		TargetTier:       uint64(rand.Intn(34)),
-		MaxBondedAmt:     uint64(rand.Intn(40e8)),
-		BondAsset:        uint32(rand.Intn(66)),
-		LegacyFeeAssetID: uint32(rand.Intn(64)),
+		TargetTier:       uint64(rand.IntN(34)),
+		MaxBondedAmt:     uint64(rand.IntN(40e8)),
+		BondAsset:        uint32(rand.IntN(66)),
+		LegacyFeeAssetID: uint32(rand.IntN(64)),
 		LegacyFeeCoin:    randBytes(32),
 		Cert:             randBytes(100),
 	}
@@ -68,7 +62,7 @@ func RandomPrimaryCredentials() *db.PrimaryCredentials {
 		EncInnerKey:    randBytes(10),
 		InnerKeyParams: randBytes(10),
 		OuterKeyParams: randBytes(10),
-		Birthday:       time.Unix(rand.Int63(), 0),
+		Birthday:       time.Unix(rand.Int64(), 0),
 		Version:        1,
 	}
 }
@@ -85,7 +79,7 @@ func RandomWallet() *db.Wallet {
 		},
 		Balance: &db.Balance{
 			Balance: *RandomBalance(),
-			Stamp:   time.Unix(rand.Int63()/(1<<31), 0),
+			Stamp:   time.Unix(rand.Int64()/(1<<31), 0),
 		},
 		Address: ordertest.RandomAddress(),
 	}
@@ -93,7 +87,7 @@ func RandomWallet() *db.Wallet {
 
 func randBytes(l int) []byte {
 	b := make([]byte, l)
-	rand.Read(b)
+	crand.Read(b)
 	return b
 }
 
@@ -102,7 +96,7 @@ func randBytes(l int) []byte {
 // supplied. 0 < sparsity < 1.
 func RandomMatchProof(sparsity float64) *db.MatchProof {
 	proof := new(db.MatchProof)
-	doZero := func() bool { return rand.Intn(1000) < int(sparsity*1000) }
+	doZero := func() bool { return rand.IntN(1000) < int(sparsity*1000) }
 	if !doZero() {
 		proof.CounterContract = randBytes(75)
 	}
@@ -166,8 +160,8 @@ func RandomNotification(maxTime uint64) *db.Notification {
 		SubjectText: ordertest.RandomAddress(),
 		DetailText:  ordertest.RandomAddress(),
 		// Since this is for DB tests, only use severity level >= Success.
-		Severeness: db.Severity(rand.Intn(3)) + db.Success,
-		TimeStamp:  uint64(rand.Int63n(int64(maxTime))),
+		Severeness: db.Severity(rand.IntN(3)) + db.Success,
+		TimeStamp:  uint64(rand.Int64N(int64(maxTime))),
 	}
 }
 

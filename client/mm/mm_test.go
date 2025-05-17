@@ -4,11 +4,9 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"math/rand"
 	"reflect"
 	"sync"
 	"testing"
-	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
@@ -23,10 +21,6 @@ import (
 	_ "decred.org/dcrdex/client/asset/eth"     // register eth asset
 	_ "decred.org/dcrdex/client/asset/polygon" // register polygon asset
 )
-
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
 
 type tBookFeed struct {
 	c chan *core.BookUpdate
