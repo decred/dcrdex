@@ -26,12 +26,9 @@ func shutdownRequested(ctx context.Context) bool {
 }
 
 var (
-	// shutdownRequest is used to initiate shutdown from one of the subsystems
-	// using the same code paths as when an interrupt signal is received.
-	shutdownRequest = make(chan struct{})
 	// shutdownSignal is closed whenever shutdown is invoked through an
-	// interrupt signal or via requestShutdown. Any contexts created using
-	// withShutdownChannel are canceled when this is closed.
+	// interrupt signal. Any contexts created using withShutdownChannel are
+	// canceled when this is closed.
 	shutdownSignal = make(chan struct{})
 )
 
@@ -47,12 +44,6 @@ func withShutdownCancel(ctx context.Context) context.Context {
 	return ctx
 }
 
-// requestShutdown signals for starting the clean shutdown of the process
-// through an internal component.
-func requestShutdown() {
-	shutdownRequest <- struct{}{}
-}
-
 // shutdownListener listens for shutdown requests and cancels all contexts
 // created from withShutdownCancel. This function never returns and is intended
 // to be spawned in a new goroutine.
@@ -61,12 +52,8 @@ func shutdownListener() {
 	signal.Notify(interruptChannel, os.Interrupt)
 
 	// Listen for the initial shutdown signal.
-	select {
-	case sig := <-interruptChannel:
-		fmt.Printf("Received signal (%s). Shutting down...\n", sig)
-	case <-shutdownRequest:
-		fmt.Println("Shutdown requested. Shutting down...")
-	}
+	sig := <-interruptChannel
+	fmt.Printf("Received signal (%s). Shutting down...\n", sig)
 
 	// Cancel all contexts created from withShutdownCancel.
 	close(shutdownSignal)
@@ -76,8 +63,7 @@ func shutdownListener() {
 	for {
 		select {
 		case <-interruptChannel:
-		case <-shutdownRequest:
+			log.Info("Shutdown signaled. Already shutting down...")
 		}
-		log.Info("Shutdown signaled. Already shutting down...")
 	}
 }
