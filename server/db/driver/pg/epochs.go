@@ -95,7 +95,7 @@ func (a *Archiver) LastEpochRate(base, quote uint32) (rate uint64, err error) {
 
 	epochReportsTableName := fullEpochReportsTableName(a.dbName, marketSchema)
 	stmt := fmt.Sprintf(internal.SelectLastEpochRate, epochReportsTableName)
-	if err = a.db.QueryRowContext(a.ctx, stmt).Scan(&rate); err != nil && !errors.Is(sql.ErrNoRows, err) {
+	if err = a.db.QueryRowContext(a.ctx, stmt).Scan(&rate); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return 0, err
 	}
 	return rate, nil
