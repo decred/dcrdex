@@ -379,15 +379,17 @@ func (m *MarketMaker) Status() *Status {
 		})
 	}
 	for _, cex := range m.cexList() {
-		s := &CEXStatus{Config: cex.CEXConfig}
-		if cex != nil {
-			cex.mtx.RLock()
-			s.Connected = cex.cm != nil && cex.cm.On()
-			s.Markets = cex.mkts
-			s.ConnectionError = cex.connectErr
-			s.Balances = cex.balancesCopy()
-			cex.mtx.RUnlock()
+		if cex == nil {
+			continue
 		}
+
+		s := &CEXStatus{Config: cex.CEXConfig}
+		cex.mtx.RLock()
+		s.Connected = cex.cm != nil && cex.cm.On()
+		s.Markets = cex.mkts
+		s.ConnectionError = cex.connectErr
+		s.Balances = cex.balancesCopy()
+		cex.mtx.RUnlock()
 		status.CEXes[cex.Name] = s
 	}
 	return status
