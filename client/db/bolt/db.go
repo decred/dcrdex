@@ -71,9 +71,9 @@ var (
 	credentialsBucket     = []byte("credentials")
 
 	// value keys
-	versionKey            = []byte("version")
-	linkedKey             = []byte("linked")
-	feeProofKey           = []byte("feecoin")
+	versionKey = []byte("version")
+	linkedKey  = []byte("linked")
+	// feeProofKey           = []byte("feecoin") unused
 	statusKey             = []byte("status")
 	baseKey               = []byte("base")
 	quoteKey              = []byte("quote")
@@ -123,14 +123,12 @@ var (
 	refundReservesKey     = []byte("refundReservesKey")
 	disabledRateSourceKey = []byte("disabledRateSources")
 	walletDisabledKey     = []byte("walletDisabled")
-	programKey            = []byte("program")
-	langKey               = []byte("lang")
+	// programKey            = []byte("program") unused
+	langKey = []byte("lang")
 
 	// values
-	byteTrue   = encode.ByteTrue
-	byteFalse  = encode.ByteFalse
-	byteEpoch  = uint16Bytes(uint16(order.OrderStatusEpoch))
-	byteBooked = uint16Bytes(uint16(order.OrderStatusBooked))
+	byteTrue  = encode.ByteTrue
+	byteFalse = encode.ByteFalse
 
 	backupDir = "backup"
 )
@@ -1855,11 +1853,6 @@ func (db *BoltDB) NotificationsN(n int) ([]*dexdb.Notification, error) {
 		}
 		return nil
 	})
-}
-
-// notesView is a convenience function to read from the notifications bucket.
-func (db *BoltDB) notesView(f bucketFunc) error {
-	return db.withBucket(notesBucket, db.View, f)
 }
 
 // notesUpdate is a convenience function for updating the notifications bucket.

@@ -82,7 +82,7 @@ const (
 	// where we don't have the necessary information to calculate our bonded
 	// tier, so we calculate our bonus/revoked tier from the score in the
 	// ConnectResult.
-	defaultPenaltyThreshold = 20
+	// defaultPenaltyThreshold = 20 unused
 
 	// legacySeedLength is the length of the generated app seed used for app protection.
 	legacySeedLength = 64

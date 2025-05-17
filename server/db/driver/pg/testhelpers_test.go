@@ -1,8 +1,8 @@
 package pg
 
 import (
+	"crypto/rand"
 	"fmt"
-	"math/rand"
 	"os"
 	"time"
 
@@ -71,26 +71,26 @@ func mktConfig() (markets []*dex.MarketInfo) {
 	return
 }
 
-func newMatch(maker *order.LimitOrder, taker order.Order, quantity uint64, epochID order.EpochID) *order.Match {
-	return &order.Match{
-		Maker:        maker,
-		Taker:        taker,
-		Quantity:     quantity,
-		Rate:         maker.Rate,
-		FeeRateBase:  12,
-		FeeRateQuote: 14,
-		Status:       order.NewlyMatched,
-		Sigs:         order.Signatures{},
-		Epoch:        epochID,
-	}
-}
+// func newMatch(maker *order.LimitOrder, taker order.Order, quantity uint64, epochID order.EpochID) *order.Match {
+// 	return &order.Match{
+// 		Maker:        maker,
+// 		Taker:        taker,
+// 		Quantity:     quantity,
+// 		Rate:         maker.Rate,
+// 		FeeRateBase:  12,
+// 		FeeRateQuote: 14,
+// 		Status:       order.NewlyMatched,
+// 		Sigs:         order.Signatures{},
+// 		Epoch:        epochID,
+// 	}
+// }
 
-func newLimitOrderRevealed(sell bool, rate, quantityLots uint64, force order.TimeInForce, timeOffset int64) (*order.LimitOrder, order.Preimage) {
-	lo := newLimitOrder(sell, rate, quantityLots, force, timeOffset)
-	pi := randomPreimage()
-	lo.Commit = pi.Commit()
-	return lo, pi
-}
+// func newLimitOrderRevealed(sell bool, rate, quantityLots uint64, force order.TimeInForce, timeOffset int64) (*order.LimitOrder, order.Preimage) {
+// 	lo := newLimitOrder(sell, rate, quantityLots, force, timeOffset)
+// 	pi := randomPreimage()
+// 	lo.Commit = pi.Commit()
+// 	return lo, pi
+// }
 
 func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce, timeOffset int64) *order.LimitOrder {
 	return newLimitOrderWithAssets(sell, rate, quantityLots, force, timeOffset, AssetDCR, AssetBTC)
@@ -125,57 +125,57 @@ func newLimitOrderWithAssets(sell bool, rate, quantityLots uint64, force order.T
 	}
 }
 
-func newMarketSellOrder(quantityLots uint64, timeOffset int64) *order.MarketOrder {
-	return &order.MarketOrder{
-		P: order.Prefix{
-			AccountID:  randomAccountID(),
-			BaseAsset:  AssetDCR,
-			QuoteAsset: AssetBTC,
-			OrderType:  order.MarketOrderType,
-			ClientTime: time.Unix(1566497653+timeOffset, 0).UTC(),
-			ServerTime: time.Unix(1566497656+timeOffset, 0).UTC(),
-			Commit:     randomCommitment(),
-		},
-		T: order.Trade{
-			Coins:    []order.CoinID{randomBytes(36)},
-			Sell:     true,
-			Quantity: quantityLots * LotSize,
-			Address:  "149RQGLaHf2gGiL4NXZdH7aA8nYEuLLrgm",
-		},
-	}
-}
+// func newMarketSellOrder(quantityLots uint64, timeOffset int64) *order.MarketOrder {
+// 	return &order.MarketOrder{
+// 		P: order.Prefix{
+// 			AccountID:  randomAccountID(),
+// 			BaseAsset:  AssetDCR,
+// 			QuoteAsset: AssetBTC,
+// 			OrderType:  order.MarketOrderType,
+// 			ClientTime: time.Unix(1566497653+timeOffset, 0).UTC(),
+// 			ServerTime: time.Unix(1566497656+timeOffset, 0).UTC(),
+// 			Commit:     randomCommitment(),
+// 		},
+// 		T: order.Trade{
+// 			Coins:    []order.CoinID{randomBytes(36)},
+// 			Sell:     true,
+// 			Quantity: quantityLots * LotSize,
+// 			Address:  "149RQGLaHf2gGiL4NXZdH7aA8nYEuLLrgm",
+// 		},
+// 	}
+// }
 
-func newMarketBuyOrder(quantityQuoteAsset uint64, timeOffset int64) *order.MarketOrder {
-	return &order.MarketOrder{
-		P: order.Prefix{
-			AccountID:  randomAccountID(),
-			BaseAsset:  AssetDCR,
-			QuoteAsset: AssetBTC,
-			OrderType:  order.MarketOrderType,
-			ClientTime: time.Unix(1566497653+timeOffset, 0).UTC(),
-			ServerTime: time.Unix(1566497656+timeOffset, 0).UTC(),
-			Commit:     randomCommitment(),
-		},
-		T: order.Trade{
-			Coins:    []order.CoinID{randomBytes(36)},
-			Sell:     false,
-			Quantity: quantityQuoteAsset,
-			Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
-		},
-	}
-}
+// func newMarketBuyOrder(quantityQuoteAsset uint64, timeOffset int64) *order.MarketOrder {
+// 	return &order.MarketOrder{
+// 		P: order.Prefix{
+// 			AccountID:  randomAccountID(),
+// 			BaseAsset:  AssetDCR,
+// 			QuoteAsset: AssetBTC,
+// 			OrderType:  order.MarketOrderType,
+// 			ClientTime: time.Unix(1566497653+timeOffset, 0).UTC(),
+// 			ServerTime: time.Unix(1566497656+timeOffset, 0).UTC(),
+// 			Commit:     randomCommitment(),
+// 		},
+// 		T: order.Trade{
+// 			Coins:    []order.CoinID{randomBytes(36)},
+// 			Sell:     false,
+// 			Quantity: quantityQuoteAsset,
+// 			Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
+// 		},
+// 	}
+// }
 
-func newCancelOrder(targetOrderID order.OrderID, base, quote uint32, timeOffset int64) *order.CancelOrder {
-	return &order.CancelOrder{
-		P: order.Prefix{
-			AccountID:  randomAccountID(),
-			BaseAsset:  base,
-			QuoteAsset: quote,
-			OrderType:  order.CancelOrderType,
-			ClientTime: time.Unix(1566497653+timeOffset, 0).UTC(),
-			ServerTime: time.Unix(1566497656+timeOffset, 0).UTC(),
-			Commit:     randomCommitment(),
-		},
-		TargetOrderID: targetOrderID,
-	}
-}
+// func newCancelOrder(targetOrderID order.OrderID, base, quote uint32, timeOffset int64) *order.CancelOrder {
+// 	return &order.CancelOrder{
+// 		P: order.Prefix{
+// 			AccountID:  randomAccountID(),
+// 			BaseAsset:  base,
+// 			QuoteAsset: quote,
+// 			OrderType:  order.CancelOrderType,
+// 			ClientTime: time.Unix(1566497653+timeOffset, 0).UTC(),
+// 			ServerTime: time.Unix(1566497656+timeOffset, 0).UTC(),
+// 			Commit:     randomCommitment(),
+// 		},
+// 		TargetOrderID: targetOrderID,
+// 	}
+// }

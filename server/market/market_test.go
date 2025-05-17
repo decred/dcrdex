@@ -100,12 +100,6 @@ func (ta *TArchivist) OrderWithCommit(ctx context.Context, commit order.Commitme
 	}
 	return
 }
-func (ta *TArchivist) failOnCommitWithOrder(ord order.Order) {
-	ta.mtx.Lock()
-	ta.commitForKnownOrder = ord.Commitment()
-	ta.orderWithKnownCommit = ord.ID()
-	ta.mtx.Unlock()
-}
 func (ta *TArchivist) CompletedUserOrders(aid account.AccountID, N int) (oids []order.OrderID, compTimes []int64, err error) {
 	return nil, nil, nil
 }

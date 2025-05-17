@@ -60,8 +60,6 @@ type TStorage struct {
 	acctErr             error
 	regAddr             string
 	regAsset            uint32
-	regErr              error
-	payErr              error
 	bonds               []*db.Bond
 	ratio               ratioData
 }

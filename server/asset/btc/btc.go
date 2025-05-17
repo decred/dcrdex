@@ -799,56 +799,6 @@ func (btc *Backend) BondCoin(ctx context.Context, ver uint16, coinID []byte) (am
 	return
 }
 
-// txOutData is transaction output data, including recipient addresses, value,
-// script type, and number of required signatures.
-type txOutData struct {
-	value        uint64
-	addresses    []string
-	sigsRequired int
-	scriptType   dexbtc.BTCScriptType
-}
-
-// outputSummary gets transaction output data, including recipient addresses,
-// value, script type, and number of required signatures, plus the current
-// confirmations of a transaction output. If the output does not exist, an error
-// will be returned. Non-standard scripts are not an error.
-func (btc *Backend) outputSummary(txHash *chainhash.Hash, vout uint32) (txOut *txOutData, confs int64, err error) {
-	var verboseTx *VerboseTxExtended
-	verboseTx, err = btc.node.GetRawTransactionVerbose(txHash)
-	if err != nil {
-		if isTxNotFoundErr(err) {
-			err = asset.CoinNotFoundError
-		}
-		return
-	}
-
-	if int(vout) > len(verboseTx.Vout)-1 {
-		err = asset.CoinNotFoundError // should be something fatal?
-		return
-	}
-
-	out := verboseTx.Vout[vout]
-
-	script, err := hex.DecodeString(out.ScriptPubKey.Hex)
-	if err != nil {
-		return nil, -1, dex.UnsupportedScriptError
-	}
-	scriptType, addrs, numRequired, err := dexbtc.ExtractScriptData(script, btc.chainParams)
-	if err != nil {
-		return nil, -1, dex.UnsupportedScriptError
-	}
-
-	txOut = &txOutData{
-		value:        toSat(out.Value),
-		addresses:    addrs,       // out.ScriptPubKey.Addresses
-		sigsRequired: numRequired, // out.ScriptPubKey.ReqSigs
-		scriptType:   scriptType,  // integer representation of the string in out.ScriptPubKey.Type
-	}
-
-	confs = int64(verboseTx.Confirmations)
-	return
-}
-
 // BlockChannel creates and returns a new channel on which to receive block
 // updates. If the returned channel is ever blocking, there will be no error
 // logged from the btc package. Part of the asset.Backend interface.

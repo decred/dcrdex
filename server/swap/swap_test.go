@@ -820,10 +820,8 @@ func (rig *testRig) sendSwap_taker(expectSuccess bool) (err error) {
 	if err != nil {
 		return fmt.Errorf("error sending taker swap request: %w", err)
 	}
+
 	matchInfo.db.takerSwap = swap
-	if err != nil {
-		return err
-	}
 	if expectSuccess {
 		err = rig.ensureSwapStatus("server received our swap -> counterparty got audit request",
 			order.TakerSwapCast, rig.auth.swapReceived, rig.auth.auditReq)

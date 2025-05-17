@@ -1463,10 +1463,6 @@ func makeMO(writer *ordertest.Writer, lots uint64) *order.MarketOrder {
 	return mo
 }
 
-func makeMORevealed(writer *ordertest.Writer, lots uint64) (*order.MarketOrder, order.Preimage) {
-	return ordertest.WriteMarketOrder(writer, lots, 0)
-}
-
 func makeCO(writer *ordertest.Writer, targetID order.OrderID) *order.CancelOrder {
 	co, _ := ordertest.WriteCancelOrder(writer, targetID, 0)
 	return co

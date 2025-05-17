@@ -162,10 +162,10 @@ func (c *decredChain) initialize(ctx context.Context) error {
 	return nil
 }
 
-type query struct {
-	Method string            `json:"method"`
-	Args   []json.RawMessage `json:"args"`
-}
+// type query struct {
+// 	Method string            `json:"method"`
+// 	Args   []json.RawMessage `json:"args"`
+// }
 
 // func (c *decredChain) Query(ctx context.Context, rawQuery chain.Query) (chain.Result, error) {
 // 	var q query
