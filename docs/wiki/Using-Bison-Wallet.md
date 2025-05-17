@@ -2,13 +2,13 @@
 
 _Last updated for Bison Wallet v1.0.0._
 
-This guide covers features and functions which are available in Bison Wallet. it assumes you 
+This guide covers features and functions which are available in Bison Wallet. it assumes you
 have already set up a Bison Wallet using the [Getting Started Guide](Getting-Started).
 
 - [Header](Header)
-   - [Notifications Panel](Header#notifications-panel)
-   - [Language switching](Header#language-switching)
-   - [Settings Panel](Header#settings-panel)
+  - [Notifications Panel](Header#notifications-panel)
+  - [Language switching](Header#language-switching)
+  - [Settings Panel](Header#settings-panel)
 - [Wallet](Wallet)
   - [Creating a new Wallet](Wallet#creating-a-new-wallet)
     - [Native Wallet](Wallet.md#native-wallet)
@@ -52,6 +52,7 @@ have already set up a Bison Wallet using the [Getting Started Guide](Getting-Sta
     - [Recovery](Troubleshooting-Problems#recovery)
     - [Forced Rescan](Troubleshooting-Problems#forced-rescan)
     - [Full Reinitialize](Troubleshooting-Problems#full-reinitialize)
+
 ---
 
 Next Section: [Header](Header)

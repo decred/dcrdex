@@ -14,8 +14,7 @@ _Last updated for Bison Wallet v1.0.0._
   - [Your Orders](#your-orders)
   - [Recent Matches](#recent-matches)
 
-
-This page is part of the [Using Bison Wallet](Using-Bison-Wallet) guide, it assumes you have already 
+This page is part of the [Using Bison Wallet](Using-Bison-Wallet) guide, it assumes you have already
 set up a Bison Wallet using the [Getting Started Guide](Getting-Started).
 
 # Markets
@@ -27,7 +26,7 @@ last price, and 24-hour percentage changes.
 
 # Order Book
 
-The order book panel displays active buy and sell orders for the selected market, showing rate and 
+The order book panel displays active buy and sell orders for the selected market, showing rate and
 quantities ordered by level. It’s split into ``Bids`` (buy orders) and ``Asks`` (sell orders).
 
 <img src="./images/using-bison-wallet/trade-orderbook.png" width="1200" alt="">
@@ -42,7 +41,6 @@ a visual representation of the order book, showing cumulative buy and sell order
 # Order Panel
 
 The order panel allows you to place orders, manage orders, view recent matches for the selected market, and access your trading tier and reputation with the associated DEX server.
-
 
 ## Submit Order
 
@@ -60,30 +58,28 @@ clicking the `Show Trading Tier Info` button.
 
 <img src="./images/using-bison-wallet/trade-tradingtier-1.png" width="1200" alt="">
 
-
 <img src="./images/using-bison-wallet/trade-tradingtier-2.png" width="400" alt="">
 
-* **Parcel Size:** A server-side configurable parameter on DCRDEX, set individually for each market. 
-It defines the number of [lots](Order-Management#lot-size) a user can trade based on their trading tier. 
-In markets with low-fee assets, lot sizes may be very small, resulting in a larger parcel size. 
-Conversely, markets with high-fee assets generally have larger lot sizes, where a smaller parcel 
+- **Parcel Size:** A server-side configurable parameter on DCRDEX, set individually for each market.
+It defines the number of [lots](Order-Management#lot-size) a user can trade based on their trading tier.
+In markets with low-fee assets, lot sizes may be very small, resulting in a larger parcel size.
+Conversely, markets with high-fee assets generally have larger lot sizes, where a smaller parcel
 size may be more appropriate.
-* **Trading Tier:** Reflects your account's current actual trading tier with the DCRDEX server,
+- **Trading Tier:** Reflects your account's current actual trading tier with the DCRDEX server,
 determined based on your active [bonds](Creating-a-DCRDEX-Server-Account#fidelity-bonds)
 and [reputation score](Managing-your-DCRDEX-Accounts#reputation-score).
 When your trading tier falls below 1, your booked orders will be revoked.
-* **Trading Limits:** The maximum number of lots you can trade in the selected market, 
+- **Trading Limits:** The maximum number of lots you can trade in the selected market,
 calculated based on the market’s parcel size and your actual trading tier.
-* **Current Usage:** Shows the proportion of trading limits used. The DCRDEX server tracks usage 
+- **Current Usage:** Shows the proportion of trading limits used. The DCRDEX server tracks usage
 across all markets, assessing trading limits globally for each account.
 
 ## Reputation
 
-The reputation score for the associated DCRDEX server account on the selected market 
+The reputation score for the associated DCRDEX server account on the selected market
 can be viewed by clicking the **Show Reputation** button.
 
 <img src="./images/using-bison-wallet/trade-reputation-1.png" width="1200" alt="">
-
 
 <img src="./images/using-bison-wallet/trade-reputation-2.png" width="400" alt="">
 
@@ -96,27 +92,27 @@ This section show your recent orders for the selected market.
 
 <img src="./images/using-bison-wallet/trade-yourOrders-1.png" width="1200" alt="">
 
-Clicking each order will expand it to display additional information. 
-If an order is still in booked status, it can be cancelled by the 
-<img src="./images/using-bison-wallet/button-cancel.png" width="20" alt=""> button, 
+Clicking each order will expand it to display additional information.
+If an order is still in booked status, it can be cancelled by the
+<img src="./images/using-bison-wallet/button-cancel.png" width="20" alt=""> button,
 while the [Order Details](#order-details-view) view can be accessed by clicking
-the <img src="./images/using-bison-wallet/button-link.png" width="20" alt=""> button. Stuck swap transactions can also be accelerated by clicking the 
+the <img src="./images/using-bison-wallet/button-link.png" width="20" alt=""> button. Stuck swap transactions can also be accelerated by clicking the
 <img src="./images/using-bison-wallet/button-accelerate.png" width="20" alt=""> button.
 
 <img src="./images/using-bison-wallet/trade-yourOrders-2.png" width="400" alt="">
 
-* **Type:** The type of order. "limit", "market", or "cancel".
-* **Side**: buy or sell.
-* **Status:** The status of the order: epoch, booked, executed, canceled, or revoked.
+- **Type:** The type of order. "limit", "market", or "cancel".
+- **Side**: buy or sell.
+- **Status:** The status of the order: epoch, booked, executed, canceled, or revoked.
 Read more about status in the [Order Details View](Order-Management#order-details) section of this wiki.
-* **Age:** The time that this order has been active in human readable form.
-* **Quantity:** The amount being traded.
-* **Filled:** The order quantity that has been matched.
-* **Settled:** The sum quantity of all completed matches.
+- **Age:** The time that this order has been active in human readable form.
+- **Quantity:** The amount being traded.
+- **Filled:** The order quantity that has been matched.
+- **Settled:** The sum quantity of all completed matches.
 
 ## Recent Matches
 
-This section displays a feed of recent matched orders for the selected market, 
+This section displays a feed of recent matched orders for the selected market,
 indicating the rate and quantity of each match.
 
 <img src="./images/using-bison-wallet/trade-recentmatches.png" width="1200" alt="">
