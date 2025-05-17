@@ -2373,8 +2373,6 @@ func (u *unifiedExchangeAdaptor) tryCancelOrders(ctx context.Context, epoch *uin
 	u.balancesMtx.RLock()
 	defer u.balancesMtx.RUnlock()
 
-	done := true
-
 	freeCancel := func(orderEpoch uint64) bool {
 		if epoch == nil {
 			return true
@@ -2382,8 +2380,9 @@ func (u *unifiedExchangeAdaptor) tryCancelOrders(ctx context.Context, epoch *uin
 		return *epoch-orderEpoch >= 2
 	}
 
-	cancels := make([]dex.Bytes, 0, len(u.pendingDEXOrders))
+	var dexCancels int
 
+	// Cancel DEX orders first.
 	for _, pendingOrder := range u.pendingDEXOrders {
 		o := pendingOrder.currentState().order
 
@@ -2396,13 +2395,12 @@ func (u *unifiedExchangeAdaptor) tryCancelOrders(ctx context.Context, epoch *uin
 			continue
 		}
 
-		done = false
 		if freeCancel(o.Epoch) {
 			err := u.clientCore.Cancel(o.ID)
 			if err != nil {
 				u.log.Errorf("Error canceling order %s: %v", o.ID, err)
 			} else {
-				cancels = append(cancels, o.ID)
+				dexCancels++
 			}
 		}
 	}
@@ -2411,6 +2409,9 @@ func (u *unifiedExchangeAdaptor) tryCancelOrders(ctx context.Context, epoch *uin
 		return false
 	}
 
+	var cexCancels int
+
+	// Cancel CEX orders.
 	for _, pendingOrder := range u.pendingCEXOrders {
 		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
@@ -2428,14 +2429,17 @@ func (u *unifiedExchangeAdaptor) tryCancelOrders(ctx context.Context, epoch *uin
 			continue
 		}
 
-		done = false
 		err = u.CEX.CancelTrade(ctx, baseID, quoteID, tradeID)
 		if err != nil {
 			u.log.Errorf("Error canceling CEX trade %s: %v", tradeID, err)
+		} else {
+			cexCancels++
 		}
 	}
 
-	return done
+	totalCancels := dexCancels + cexCancels
+	expectedCancels := len(u.pendingDEXOrders) + len(u.pendingCEXOrders)
+	return totalCancels == expectedCancels
 }
 
 func (u *unifiedExchangeAdaptor) cancelAllOrders(ctx context.Context) {
