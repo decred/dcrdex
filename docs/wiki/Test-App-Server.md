@@ -17,7 +17,6 @@ go test -tags live -timeout 60m
 
 In your browser, navigate to `http://localhost:54321`.
 
-
 ---
 
 [⤴ Back to Top](#top)

@@ -18,7 +18,7 @@ Check out these wiki pages for more information.
 - [Integrating New Assets](Integrating-New-Assets)
 - [Simnet Testing](Simnet-Testing) - Recommended for development.
 - [Testnet Testing](Testnet-Testing) - Recommended for poking around.
-- [Test App Server](Test-App-Server) - Useful for GUI development, or just to try everything out 
+- [Test App Server](Test-App-Server) - Useful for GUI development, or just to try everything out
 without needing to create wallets or connect to a **dcrdex** server.
 - [Getting Started with Fuzzing](Getting-Started-With-Fuzzing)
 - [Localization and Translations](Localization-and-Translation)

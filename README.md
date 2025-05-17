@@ -112,7 +112,7 @@ you want to set up a new DEX server and host markets of your choice, see
 We are in the process of adding the application to various OS package managers:
 
 - Arch Linux ([AUR](https://aur.archlinux.org/packages/dcrdex)). e.g. `$ yay dcrdex`.  Accessible to [Arch-based distros](https://wiki.archlinux.org/title/Arch-based_distributions) like Manjaro.
-- MacOS. Homebrew cask **coming soon**.
+- MacOS. Homebrew cask `brew install bison-wallet`.
 - Windows. `winget` package **coming soon**.
 - Debian/Fedora. apt repository **coming soon**.
 

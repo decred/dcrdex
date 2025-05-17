@@ -12,13 +12,12 @@ see the [Getting Started](Getting-Started) section.
 If you're a developer and interested in contributing, jump to the
  [Development and Contributing](Development-and-Contributing) section.
 
-
 # What is Bison Wallet?
 
-Bison Wallet is a multi-coin wallet developed in concert with [DCRDEX](#what-is-dcrdex) 
-and [Tatanka Mesh](#tatanka-mesh). Bison Wallet leverages state-of-the-art blockchain 
-technology to bring more features and more privacy for your favorite assets. DCRDEX is 
-built-in and has advanced trading features like market-making and arbitrage with funds 
+Bison Wallet is a multi-coin wallet developed in concert with [DCRDEX](#what-is-dcrdex)
+and [Tatanka Mesh](#tatanka-mesh). Bison Wallet leverages state-of-the-art blockchain
+technology to bring more features and more privacy for your favorite assets. DCRDEX is
+built-in and has advanced trading features like market-making and arbitrage with funds
 directlyfrom your wallet.
 
 Our goal is to find a balance of convenience and privacy that works for you,
@@ -28,9 +27,9 @@ directly with the blockchain network. This type of wallet is highly-resilient to
 data collection and censorship.
 
 We also focus on bringing advanced, asset-specific features for our wallets.
-With Decred, you can use decentralized StakeShuffle mixing to further anonymize 
-your funds, or stake your DCR and earn some block rewards. The Zcash wallet exposes 
-unified addresses and shielded pools, and operates on a shielded-first principle 
+With Decred, you can use decentralized StakeShuffle mixing to further anonymize
+your funds, or stake your DCR and earn some block rewards. The Zcash wallet exposes
+unified addresses and shielded pools, and operates on a shielded-first principle
 that makes privacy effortless.
 
 # What is DCRDEX?
@@ -41,25 +40,24 @@ familiar market-based API. DEX is a non-custodial solution for cross-chain
 exchange based on atomic swap technology. DEX matches trading parties and
 facilitates price discovery and the communication of swap details.
 
-
 Some key features of the protocol are:
 
-- **Fees** - No trading fees are collected and there is no superfluous token 
+- **Fees** - No trading fees are collected and there is no superfluous token
 or blockchain that is used to monetize the project.
-- **Fair** – orders are matched pseudorandomly within epochs to substantially 
-reduce manipulative, abusive trading practices by high frequency trading that 
+- **Fair** – orders are matched pseudorandomly within epochs to substantially
+reduce manipulative, abusive trading practices by high frequency trading that
 uses first-in-first-out matching.
-- **Secure** – Server operators never take custody of client funds. Non-custodial 
+- **Secure** – Server operators never take custody of client funds. Non-custodial
 exchange is accomplished using cross-chain atomic swaps.
-- **Permissionless** – The simple client-server architecture makes it easy to set 
+- **Permissionless** – The simple client-server architecture makes it easy to set
 up new servers and clients and enhances censorship resistance.
-- **No gatekeepers** – Projects can add support for their assets and run servers 
+- **No gatekeepers** – Projects can add support for their assets and run servers
 with the markets they require.
-- **Verifiable volume** – volume and trade data can be externally verified against 
-the corresponding blockchains and the atomic swaps that occur on-chain, preventing 
+- **Verifiable volume** – volume and trade data can be externally verified against
+the corresponding blockchains and the atomic swaps that occur on-chain, preventing
 wash trading.
 - **Private** – Know your customer (KYC) information is not required.
-- **Transparent** – By performing exchanges on-chain and using cryptographic 
+- **Transparent** – By performing exchanges on-chain and using cryptographic
 attestation, both clients and servers can be held accountable for malicious behavior.
 
 # Tatanka Mesh
@@ -83,7 +81,7 @@ censorship-resistance, privacy. and self-sovereignty.
 
 # Supported Assets
 
-Most users will use the native wallets that are already built into Bison Wallet. 
+Most users will use the native wallets that are already built into Bison Wallet.
 Depending on the asset, you may be able to choose from: (1) a native
 wallet, (2) an external full node wallet, or (3) an Electrum-based wallet.
 Consult the following table for a summary of wallet support. If there is a
@@ -102,11 +100,10 @@ checkmark in the "native" column, no external software is required.
 | Dash         | x      | [v20.1.1](https://github.com/dashpay/dash/releases)         | x                                                             |                                                                                                   |
 | Firo         | x      | [v0.14.14.1](https://github.com/firoorg/firo/releases)      | [v4.1.5.5](https://github.com/firoorg/electrum-firo/releases) |                                                                                                   |
 
-
 # Project History
 
 Initially proposed by Jake Yocom-Piatt in the
-[Decred blog](https://blog.decred.org/2018/06/05/A-New-Kind-of-DEX/) in 2018, 
+[Decred blog](https://blog.decred.org/2018/06/05/A-New-Kind-of-DEX/) in 2018,
 DCRDEX development started in 2019 and has been fully funded by the Decred treasury.
 
 **Project Timeline**
