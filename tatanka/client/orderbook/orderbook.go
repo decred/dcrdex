@@ -113,14 +113,14 @@ func (ob *OrderBook) addOrderAndSort(o *tanka.Order) {
 }
 
 // deleteSortedOrder must be called with the mtx held for writes.
-func (ob *OrderBook) deleteSortedOrder(o *tanka.Order) {
+func (ob *OrderBook) deleteSortedOrder(to *tanka.Order) {
 	ords := &ob.buys
-	if o.Sell {
+	if to.Sell {
 		ords = &ob.sells
 	}
 	for i, o := range *ords {
 		// Comparing pointers.
-		if o == o {
+		if o == to {
 			*ords = append((*ords)[:i], (*ords)[i+1:]...)
 			break
 		}
