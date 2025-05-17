@@ -2631,8 +2631,8 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 	}
 
 	var contractVer uint32 // require a consistent version since this is a single transaction
-	secrets := make([][32]byte, 0, n)
-	locators := make([][]byte, 0, n)
+	// secrets := make([][32]byte, 0, n)
+	// locators := make([][]byte, 0, n)
 	var redeemedValue uint64
 	for i, redemption := range form.Redemptions {
 		// NOTE: redemption.Spends.SecretHash is a dup of the hash extracted
@@ -2644,7 +2644,7 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 			return fail(fmt.Errorf("Redeem: invalid versioned swap contract data: %w", err))
 		}
 
-		locators = append(locators, locator)
+		// locators = append(locators, locator)
 		if i == 0 {
 			contractVer = ver
 		} else if contractVer != ver {
@@ -2658,7 +2658,7 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 		// are maker (the swap initiator).
 		var secret [32]byte
 		copy(secret[:], redemption.Secret)
-		secrets = append(secrets, secret)
+		// secrets = append(secrets, secret)
 		redeemable, err := w.isRedeemable(locator, secret, ver)
 		if err != nil {
 			return fail(fmt.Errorf("Redeem: failed to check if swap is redeemable: %w", err))
@@ -2698,7 +2698,7 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 	   before submitting the redeem transaction. This is not OK for maker.
 	   Disable for now.
 
-	if gasEst, err := w.estimateRedeemGas(w.ctx, secrets, contractVer); err != nil {
+	if gasEst, err := w.estimateRedeemGas(w.ctx, secrets, locators, contractVer); err != nil {
 		return fail(fmt.Errorf("error getting redemption estimate: %w", err))
 	} else if gasEst > gasLimit {
 		// This is sticky. We only reserved so much for redemption, so accepting
