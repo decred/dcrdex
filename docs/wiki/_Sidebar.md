@@ -1,4 +1,4 @@
-
+# Navigation
 - [Home](Home)
   - [What is Bison Wallet](Home#what-is-bison-wallet)
   - [What is DCRDEX?](Home#what-is-dcrdex)
@@ -69,3 +69,4 @@
     - [Getting Started with Fuzzing](Getting-Started-With-Fuzzing)
     - [Localization and Translations](Localization-and-Translation)
     - [Wiki Contribution Guide](Wiki-Contribution-Guide)
+    

@@ -50,7 +50,6 @@ should first
 only smaller jobs until you are comfortable navigating the code and have shown
 the ability to communicate and follow through.
 
-
 ---
 
 [⤴ Back to Top](#top)
