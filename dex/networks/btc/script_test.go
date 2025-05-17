@@ -2,10 +2,10 @@ package btc
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"math/rand"
 	"strings"
 	"testing"
 
