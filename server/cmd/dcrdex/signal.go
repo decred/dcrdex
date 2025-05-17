@@ -61,9 +61,7 @@ func shutdownListener() {
 	// Listen for any more shutdown signals and log that shutdown has already
 	// been signaled.
 	for {
-		select {
-		case <-interruptChannel:
-			log.Info("Shutdown signaled. Already shutting down...")
-		}
+		<-interruptChannel
+		log.Info("Shutdown signaled. Already shutting down...")
 	}
 }

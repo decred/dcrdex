@@ -7,11 +7,12 @@ package dcr
 import (
 	"bytes"
 	"context"
+	crand "crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -40,7 +41,9 @@ import (
 	flags "github.com/jessevdk/go-flags"
 )
 
-var tLogger = dex.StdOutLogger("TEST", dex.LevelTrace)
+var (
+	tLogger = dex.StdOutLogger("TEST", dex.LevelTrace)
+)
 
 func TestMain(m *testing.M) {
 	// Set the global chainParams.
@@ -136,7 +139,7 @@ func TestLoadConfig(t *testing.T) {
 
 func randomBytes(len int) []byte {
 	bytes := make([]byte, len)
-	rand.Read(bytes)
+	crand.Read(bytes)
 	return bytes
 }
 
