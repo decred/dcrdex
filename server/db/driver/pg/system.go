@@ -404,10 +404,11 @@ func retrieveSysSettings(stmt string, db *sql.DB) (PGSettings, error) {
 }
 
 // retrieveSysSettingsConfFile retrieves settings that are set by a
-// configuration file (rather than default, environment variable, etc.), unused.
-// func retrieveSysSettingsConfFile(db *sql.DB) (PGSettings, error) {
-//  return retrieveSysSettings(internal.RetrieveSysSettingsConfFile, db)
-// }
+// configuration file (rather than default, environment variable, etc.). Used in
+// online tests.
+func retrieveSysSettingsConfFile(db *sql.DB) (PGSettings, error) {
+	return retrieveSysSettings(internal.RetrieveSysSettingsConfFile, db)
+}
 
 // retrieveSysSettingsPerformance retrieves performance-related settings.
 func retrieveSysSettingsPerformance(db *sql.DB) (PGSettings, error) {

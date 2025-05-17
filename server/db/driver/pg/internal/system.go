@@ -32,6 +32,12 @@ const (
 			OR name='config_file'
 			OR name='listen_address';`
 
+	// RetrieveSysSettingsConfFile retrieves system settings that are set by a
+	// configuration file.
+	RetrieveSysSettingsConfFile = `SELECT name, setting, unit, short_desc, source, sourcefile, sourceline
+		FROM pg_settings
+		WHERE source='configuration file';`
+
 	// RetrieveSysSettingsPerformance retrieves postgres performance-related
 	// settings.
 	RetrieveSysSettingsPerformance = `SELECT name, setting, unit, short_desc, source, sourcefile, sourceline
