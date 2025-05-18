@@ -23,7 +23,7 @@ in the DCRDEX releases manifest. For detailed instructions, read about
 You will need to visit the [releases](https://github.com/decred/dcrdex/releases) page
 to download the manifest and manifest signature:
 
-```
+```txt
 bisonw-v1.0.0-manifest.txt
 bisonw-v1.0.0-manifest.txt.asc
 ```
@@ -130,7 +130,7 @@ Once the installation has completed, `Bison Wallet CLI` can be launched from a t
 using the command ``./bisonw`` from within the folder where it was extracted. Once initial
 configuration has completed, the following message will appear in the terminal:
 
-```
+```txt
 2024-10-15 10:38:04.710 [INF] WEB: Web server listening on 127.0.0.1:5758 (https = false)
 
         ****  OPEN IN YOUR BROWSER TO LOGIN AND TRADE  --->  http://127.0.0.1:5758  ****
@@ -172,7 +172,7 @@ go build
 3. Once initial configuration has completed, the following message will appear
 in the terminal:
 
-```
+```txt
 2024-10-15 10:38:04.710 [INF] WEB: Web server listening on 127.0.0.1:5758 (https = false)
 
         ****  OPEN IN YOUR BROWSER TO LOGIN AND TRADE  --->  http://127.0.0.1:5758  ****
