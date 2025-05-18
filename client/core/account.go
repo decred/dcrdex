@@ -82,9 +82,13 @@ func (c *Core) ToggleAccountStatus(pw []byte, host string, disable bool) error {
 		return newError(accountStatusUpdateErr, "error updating account status: %w", err)
 	}
 
+	topic := TopicDEXEnabled
+	status := comms.Connected
 	if disable {
 		dc.acct.toggleAccountStatus(true)
 		c.stopDEXConnection(dc)
+		topic = TopicDEXDisabled
+		status = comms.Disconnected
 	} else {
 		acctInfo, err := c.db.Account(host)
 		if err != nil {
@@ -96,6 +100,9 @@ func (c *Core) ToggleAccountStatus(pw []byte, host string, disable bool) error {
 		}
 		c.initializeDEXConnection(dc, crypter)
 	}
+
+	subject, details := c.formatDetails(topic, dc.acct.host)
+	dc.notify(newConnEventNote(topic, subject, dc.acct.host, status, details, db.Poke))
 
 	return nil
 }

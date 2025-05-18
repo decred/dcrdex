@@ -3005,10 +3005,10 @@ export default class MarketsPage extends BasePage {
    */
   async handleConnNote (note: ConnEventNote) {
     this.marketList.setConnectionStatus(note)
-    if (note.connectionStatus === ConnectionStatus.Connected) {
-      // Having been disconnected from a DEX server, anything may have changed,
-      // or this may be the first opportunity to get the server's config, so
-      // fetch it all before reloading the markets page.
+    if (note.topic === 'DEXDisabled' || note.topic === 'DEXEnabled' || note.connectionStatus === ConnectionStatus.Connected) {
+      // Having been disconnected or connected from a DEX server, anything may
+      // have changed, or this may be the first opportunity to get the server's
+      // config, so fetch it all before reloading the markets page.
       await app().fetchUser()
       await app().loadPage('markets')
     }
