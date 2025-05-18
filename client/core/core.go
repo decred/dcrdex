@@ -3290,8 +3290,8 @@ func (c *Core) RecoverWallet(assetID uint32, appPW []byte, force bool) error {
 
 	oldWallet, found := c.wallet(assetID)
 	if !found {
-		return fmt.Errorf("RecoverWallet: wallet not found for %d -> %s: %w",
-			assetID, unbip(assetID), err)
+		return fmt.Errorf("RecoverWallet: wallet not found for %d -> %s",
+			assetID, unbip(assetID))
 	}
 
 	recoverer, isRecoverer := oldWallet.Wallet.(asset.Recoverer)
