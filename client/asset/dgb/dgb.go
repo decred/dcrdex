@@ -5,6 +5,7 @@ package dgb
 
 import (
 	"fmt"
+	"strconv"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
@@ -36,7 +37,7 @@ var (
 			Key:          "fallbackfee",
 			DisplayName:  "Fallback fee rate",
 			Description:  "DigiByte's 'fallbackfee' rate. Units: DGB/kB",
-			DefaultValue: dexdgb.DefaultFee * 1000 / 1e8, // higher than BTC default
+			DefaultValue: strconv.FormatFloat(dexdgb.DefaultFee*1000/1e8, 'f', -1, 64), // higher than BTC default
 		},
 		{
 			Key:         "feeratelimit",
@@ -45,7 +46,7 @@ var (
 				"pay on swap transactions. If feeratelimit is lower than a market's " +
 				"maxfeerate, you will not be able to trade on that market with this " +
 				"wallet.  Units: BTC/kB",
-			DefaultValue: dexdgb.DefaultFeeRateLimit * 1000 / 1e8, // higher than BTC default
+			DefaultValue: strconv.FormatFloat(dexdgb.DefaultFeeRateLimit*1000/1e8, 'f', -1, 64), // higher than BTC default
 		},
 		{
 			Key:         "redeemconftarget",
@@ -53,7 +54,7 @@ var (
 			Description: "The target number of blocks for the redeem transaction " +
 				"to be mined. Used to set the transaction's fee rate. " +
 				"(default: 2 blocks)",
-			DefaultValue: defaultRedeemConfTarget,
+			DefaultValue: strconv.FormatUint(defaultRedeemConfTarget, 10),
 		},
 		{
 			Key:         "txsplit",
@@ -63,7 +64,7 @@ var (
 				"during match settlement, or the order is canceled. This an extra transaction for which network mining fees are paid. " +
 				"Used only for standing-type orders, e.g. limit orders without immediate time-in-force.",
 			IsBoolean:    true,
-			DefaultValue: true, // low fee, fast chain
+			DefaultValue: "true", // low fee, fast chain
 		}, // no ExternalFeeEstimator, so no apifeefallback option
 	}...)
 	// WalletInfo defines some general information about a DigiByte wallet.

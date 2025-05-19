@@ -2969,22 +2969,37 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		}()
 	}
 
+	// Ensure default settings are always supplied to the wallet as they
+	// may not be saved yet.
+	walletDef, err := asset.WalletDef(assetID, dbWallet.Type)
+	if err != nil {
+		return nil, newError(assetSupportErr, "asset.WalletDef error: %w", err)
+	}
+	defaultValues := make(map[string]string, len(walletDef.ConfigOpts))
+	for _, option := range walletDef.ConfigOpts {
+		defaultValues[strings.ToLower(option.Key)] = option.DefaultValue
+	}
+	settings := dbWallet.Settings
+	for k, v := range defaultValues {
+		if _, has := settings[k]; !has {
+			settings[k] = v
+		}
+	}
+
 	log := c.log.SubLogger(unbip(assetID))
 	var w asset.Wallet
-	var err error
 	if token == nil {
-
 		walletCfg := &asset.WalletConfig{
 			Type:        dbWallet.Type,
-			Settings:    dbWallet.Settings,
+			Settings:    settings,
 			Emit:        asset.NewWalletEmitter(c.notes, assetID, log),
 			PeersChange: peersChange,
 			DataDir:     c.assetDataDirectory(assetID),
 		}
 
-		walletCfg.Settings[asset.SpecialSettingActivelyUsed] =
+		settings[asset.SpecialSettingActivelyUsed] =
 			strconv.FormatBool(c.assetHasActiveOrders(dbWallet.AssetID))
-		defer delete(walletCfg.Settings, asset.SpecialSettingActivelyUsed)
+		defer delete(settings, asset.SpecialSettingActivelyUsed)
 
 		w, err = asset.OpenWallet(assetID, walletCfg, log, c.net)
 	} else {
@@ -3001,7 +3016,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 
 		w, err = tokenMaster.OpenTokenWallet(&asset.TokenConfig{
 			AssetID:     assetID,
-			Settings:    dbWallet.Settings,
+			Settings:    settings,
 			Emit:        asset.NewWalletEmitter(c.notes, assetID, log),
 			PeersChange: peersChange,
 		})
