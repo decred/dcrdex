@@ -39,7 +39,6 @@ When creating a dictionary for a new language, create the language dictionary ob
 
 When testing, remember to rebuild the site assets bundle with `npm ci && npm run build` and bump the cache with `./bust_caches.sh` in the **client/webserver/site** folder.
 
-
 ---
 
 [⤴ Back to Top](#top)

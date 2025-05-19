@@ -1,6 +1,5 @@
 <a id="top"/>
 
-
 1. Fork the dcrdex repo.
 
 2. Edit files in the `docs/wiki` directory.
