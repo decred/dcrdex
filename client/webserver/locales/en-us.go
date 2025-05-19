@@ -689,4 +689,8 @@ var EnUS = map[string]*intl.Translation{
 	"delete_bot":                  {T: "Delete Bot"},
 	"export_logs":                 {T: "Export Logs"},
 	"address has been used":       {T: "address has been used"},
+	"Allow external transfers":    {T: "Allow external transfers"},
+	"external_transfers_tooltip":  {T: "When enabled, the bot will be able to transfer funds between the DEX and the CEX."},
+	"Internal transfers only":     {T: "Internal transfers only"},
+	"internal_only_tooltip":       {T: "When enabled, the bot will be able to use any available funds in the wallet to simulate a transfer between the DEX and the CEX, (i.e. increase the bot's DEX balance and decrease the bot's CEX balance when a withdrawal needs to be made) but no actual transfers will be made."},
 }

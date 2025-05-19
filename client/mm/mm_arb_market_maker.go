@@ -364,7 +364,7 @@ func (a *arbMarketMaker) ordersToPlace() (buys, sells []*TradePlacement, err err
 
 // distribution parses the current inventory distribution and checks if better
 // distributions are possible via deposit or withdrawal.
-func (a *arbMarketMaker) distribution() (dist *distribution, err error) {
+func (a *arbMarketMaker) distribution(additionalDEX, additionalCEX map[uint32]uint64) (dist *distribution, err error) {
 	placements := a.cfg().placementLots()
 	if placements.baseLots == 0 && placements.quoteLots == 0 {
 		return nil, errors.New("zero placement lots?")
@@ -388,7 +388,7 @@ func (a *arbMarketMaker) distribution() (dist *distribution, err error) {
 		return nil, fmt.Errorf("error getting lot costs: %w", err)
 	}
 	dist = a.newDistribution(perLot)
-	a.optimizeTransfers(dist, dexSellLots, dexBuyLots, dexSellLots, dexBuyLots)
+	a.optimizeTransfers(dist, dexSellLots, dexBuyLots, dexSellLots, dexBuyLots, additionalDEX, additionalCEX)
 	return dist, nil
 }
 
@@ -416,7 +416,7 @@ func (a *arbMarketMaker) rebalance(epoch uint64, book *orderbook.OrderBook) {
 		return
 	}
 
-	actionTaken, err := a.tryTransfers(currEpoch)
+	actionTaken, err := a.tryTransfers(currEpoch, a.distribution)
 	if err != nil {
 		a.log.Errorf("Error performing transfers: %v", err)
 	} else if actionTaken {
@@ -454,15 +454,6 @@ func (a *arbMarketMaker) rebalance(epoch uint64, book *orderbook.OrderBook) {
 
 	a.cancelExpiredCEXTrades()
 	a.registerFeeGap()
-}
-
-func (a *arbMarketMaker) tryTransfers(currEpoch uint64) (actionTaken bool, err error) {
-	dist, err := a.distribution()
-	if err != nil {
-		a.log.Errorf("distribution calculation error: %v", err)
-		return
-	}
-	return a.transfer(dist, currEpoch)
 }
 
 func feeGap(core botCoreAdaptor, cex libxc.CEX, baseID, quoteID uint32, lotSize uint64) (*FeeGapStats, error) {
