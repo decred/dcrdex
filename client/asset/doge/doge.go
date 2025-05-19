@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
@@ -56,7 +57,7 @@ var (
 			Key:          fallbackFeeKey,
 			DisplayName:  "Fallback fee rate",
 			Description:  "Dogecoin's 'fallbackfee' rate. Units: DOGE/kB",
-			DefaultValue: dexdoge.DefaultFee * 1000 / 1e8,
+			DefaultValue: strconv.FormatFloat(dexdoge.DefaultFee*1000/1e8, 'f', -1, 64),
 		},
 		{
 			Key:         "feeratelimit",
@@ -65,7 +66,7 @@ var (
 				"pay on swap transactions. If feeratelimit is lower than a market's " +
 				"maxfeerate, you will not be able to trade on that market with this " +
 				"wallet.  Units: BTC/kB",
-			DefaultValue: dexdoge.DefaultFeeRateLimit * 1000 / 1e8,
+			DefaultValue: strconv.FormatFloat(dexdoge.DefaultFeeRateLimit*1000/1e8, 'f', -1, 64),
 		},
 		{
 			Key:         "txsplit",
@@ -83,7 +84,7 @@ var (
 				"This is useful as a fallback for SPV wallets and RPC wallets " +
 				"that have recently been started.",
 			IsBoolean:    true,
-			DefaultValue: true,
+			DefaultValue: "true",
 		},
 	}
 	// WalletInfo defines some general information about a Dogecoin wallet.

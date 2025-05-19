@@ -342,7 +342,7 @@ type ConfigOption struct {
 	Key          string `json:"key"`
 	DisplayName  string `json:"displayname"`
 	Description  string `json:"description"`
-	DefaultValue any    `json:"default"`
+	DefaultValue string `json:"default"`
 	// If MaxValue/MinValue are set to the string "now" for a date config, the
 	// UI will display the current date.
 	MaxValue          any `json:"max"`
