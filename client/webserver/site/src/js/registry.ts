@@ -13,6 +13,7 @@ declare global {
     isWebview?: () => boolean
     webkit: any | undefined
     openUrl: (url: string) => void
+    open: (url?: string | URL, target?: string, features?: string) => WindowProxy | null
     sendOSNotification (title: string, body?: string): void
     clearLocale (): void
   }
@@ -64,7 +65,7 @@ export interface Exchange {
   candleDurs: string[]
   maxScore: number
   penaltyThreshold: number
-  disabled:boolean
+  disabled: boolean
 }
 
 export interface Candle {
@@ -537,7 +538,7 @@ export interface AssetBookingFees extends LotFeeRange {
 
 export interface BookingFees {
   base: AssetBookingFees
-  quote:AssetBookingFees
+  quote: AssetBookingFees
 }
 
 export interface MarketReport {
@@ -1259,7 +1260,7 @@ export interface WalletTransaction {
 }
 
 export interface TxHistoryResult {
-  txs : WalletTransaction[]
+  txs: WalletTransaction[]
   lastTx: boolean
 }
 
