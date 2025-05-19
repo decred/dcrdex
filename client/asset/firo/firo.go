@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,7 +44,7 @@ var (
 			Key:          "fallbackfee",
 			DisplayName:  "Fallback fee rate",
 			Description:  "Firo's 'fallbackfee' rate. Units: FIRO/kB",
-			DefaultValue: dexfiro.DefaultFee * 1000 / 1e8,
+			DefaultValue: strconv.FormatFloat(dexfiro.DefaultFee*1000/1e8, 'f', -1, 64),
 		},
 		{
 			Key:         "feeratelimit",
@@ -52,7 +53,7 @@ var (
 				"pay on swap transactions. If feeratelimit is lower than a market's " +
 				"maxfeerate, you will not be able to trade on that market with this " +
 				"wallet.  Units: FIRO/kB",
-			DefaultValue: dexfiro.DefaultFeeRateLimit * 1000 / 1e8,
+			DefaultValue: strconv.FormatFloat(dexfiro.DefaultFeeRateLimit*1000/1e8, 'f', -1, 64),
 		},
 		{
 			Key:         "txsplit",
