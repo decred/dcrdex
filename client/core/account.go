@@ -69,7 +69,7 @@ func (c *Core) ToggleAccountStatus(pw []byte, host string, disable bool) error {
 	if disable {
 		// Check active orders or bonds.
 		if dc.hasActiveOrders() {
-			return fmt.Errorf("cannot disable account with active orders")
+			return errors.New("cannot disable account with active orders")
 		}
 
 		if dc.hasUnspentBond() {
@@ -96,7 +96,7 @@ func (c *Core) ToggleAccountStatus(pw []byte, host string, disable bool) error {
 		}
 		dc, connected := c.connectAccount(acctInfo)
 		if !connected {
-			return fmt.Errorf("failed to connected re-enabled account: %w", err)
+			return errors.New("failed to connected re-enabled account")
 		}
 		c.initializeDEXConnection(dc, crypter)
 	}

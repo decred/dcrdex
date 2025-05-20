@@ -361,7 +361,7 @@ var originLocale = map[Topic]*translation{
 	},
 	TopicDEXEnabled: {
 		subject:  intl.Translation{T: "DEX server status"},
-		template: intl.Translation{T: "DEX server %s has been enable.", Notes: "args: [host]"},
+		template: intl.Translation{T: "DEX server %s has been enabled.", Notes: "args: [host]"},
 	},
 }
 
