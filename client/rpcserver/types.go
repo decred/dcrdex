@@ -196,8 +196,8 @@ type addRemovePeerForm struct {
 }
 
 type mmAvailableBalancesForm struct {
-	cfgFilePath string
-	mkt         *mm.MarketWithHost
+	mkt     *mm.MarketWithHost
+	cexName *string
 }
 
 type startBotForm struct {
@@ -877,16 +877,18 @@ func parseMktWithHost(host, baseID, quoteID string) (*mm.MarketWithHost, error) 
 }
 
 func parseMMAvailableBalancesArgs(params *RawParams) (*mmAvailableBalancesForm, error) {
-	if err := checkNArgs(params, []int{0}, []int{4}); err != nil {
+	if err := checkNArgs(params, []int{0}, []int{3}); err != nil {
 		return nil, err
 	}
 	form := new(mmAvailableBalancesForm)
-	form.cfgFilePath = params.Args[0]
-	mkt, err := parseMktWithHost(params.Args[1], params.Args[2], params.Args[3])
+	mkt, err := parseMktWithHost(params.Args[0], params.Args[1], params.Args[2])
 	if err != nil {
 		return nil, err
 	}
 	form.mkt = mkt
+	if len(params.Args) > 3 {
+		form.cexName = &params.Args[3]
+	}
 	return form, nil
 }
 

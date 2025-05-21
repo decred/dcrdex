@@ -512,7 +512,7 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 	tCore := newTCore()
 	u.CEX = cex
 	u.clientCore = tCore
-	u.autoRebalanceCfg = &AutoRebalanceConfig{}
+	u.autoRebalanceCfgV.Store(&AutoRebalanceConfig{})
 	a := &arbMarketMaker{unifiedExchangeAdaptor: u}
 	u.botCfgV.Store(&BotConfig{
 		ArbMarketMakerConfig: &ArbMarketMakerConfig{Profit: profit},
@@ -628,8 +628,10 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 		if err != nil {
 			t.Fatalf("Error getting lot costs: %v", err)
 		}
-		a.autoRebalanceCfg.MinBaseTransfer = lotSize
-		a.autoRebalanceCfg.MinQuoteTransfer = min(perLot.cexQuote, perLot.dexQuote)
+		a.autoRebalanceCfgV.Store(&AutoRebalanceConfig{
+			MinBaseTransfer:  lotSize,
+			MinQuoteTransfer: min(perLot.cexQuote, perLot.dexQuote),
+		})
 	}
 
 	dexAvailableBalances := map[uint32]uint64{}
@@ -695,6 +697,15 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 		}
 	}
 
+	updateMinTransfer := func(asset string, value uint64) {
+		curr := a.autoRebalanceCfgV.Load().(*AutoRebalanceConfig)
+		if asset == "base" {
+			curr.MinBaseTransfer = value
+		} else {
+			curr.MinQuoteTransfer = value
+		}
+	}
+
 	setLots(1, 1)
 	// Base asset - perfect distribution - no action
 	setBals(minDexBase, minCexBase, minDexQuote, minCexQuote)
@@ -711,8 +722,8 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 	setAvailableBalances(minDexBase-1, 0, 0, 0)
 	checkDistribution(0, minDexBase, 0, 0, false, false)
 	setAvailableBalances(0, 0, 0, 0)
-	// Raise the transfer theshold by one atom and it should zero the withdraw.
-	a.autoRebalanceCfg.MinBaseTransfer = minDexBase + 1
+	// Raise the transfer threshold by one atom and it should zero the withdraw.
+	updateMinTransfer("base", minDexBase+1)
 	checkDistribution(0, 0, 0, 0, false, false)
 
 	// Same for quote
@@ -724,7 +735,7 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 	setAvailableBalances(0, 0, minDexQuote-1, 0)
 	checkDistribution(0, 0, 0, minDexQuote, false, false)
 	setAvailableBalances(0, 0, 0, 0)
-	a.autoRebalanceCfg.MinQuoteTransfer = minDexQuote + 1
+	updateMinTransfer("quote", minDexQuote+1)
 	checkDistribution(0, 0, 0, 0, false, false)
 
 	// Base deposit
@@ -790,7 +801,7 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 	// Quote withdraw. Extra is split for the quote asset. Gotta lower the min
 	// transfer a little bit to make this one happen.
 	setBals(minDexBase, minCexBase, minDexQuote-perLot.dexQuote+extra, minCexQuote+perLot.dexQuote)
-	a.autoRebalanceCfg.MinQuoteTransfer = perLot.dexQuote - extra/2
+	updateMinTransfer("quote", perLot.dexQuote-extra/2)
 	checkDistribution(0, 0, 0, perLot.dexQuote-extra/2, false, false)
 	// Quote deposit
 	setBals(minDexBase, minCexBase, minDexQuote+perLot.cexQuote+extra, minCexQuote-perLot.cexQuote)

@@ -4,13 +4,9 @@ import {
   MMBotStatus,
   RunStatsNote,
   RunEventNote,
-  StartConfig,
-  OrderPlacement,
-  AutoRebalanceConfig,
   EpochReportNote,
   CEXProblemsNote,
   MarketWithHost,
-  UIConfig,
   CEXNotification
 } from './registry'
 import {
@@ -22,151 +18,17 @@ import {
   botTypeBasicMM,
   setMarketElements,
   setCexElements,
-  PlacementsChart,
   BotMarket,
   hostedMarketID,
   RunningMarketMakerDisplay,
   RunningMMDisplayElements
 } from './mmutil'
-import Doc, { MiniSlider } from './doc'
+import Doc from './doc'
 import BasePage from './basepage'
 import * as OrderUtil from './orderutil'
 import { Forms, CEXConfigurationForm } from './forms'
 import * as intl from './locales'
-import { StatusBooked } from './orderutil'
 const mediumBreakpoint = 768
-
-interface FundingSlider {
-  left: {
-    cex: number
-    dex: number
-  }
-  right: {
-    cex: number
-    dex: number
-  }
-  cexRange: number
-  dexRange: number
-}
-
-const newSlider = () => {
-  return {
-    left: {
-      cex: 0,
-      dex: 0
-    },
-    right: {
-      cex: 0,
-      dex: 0
-    },
-    cexRange: 0,
-    dexRange: 0
-  }
-}
-
-interface FundingSource {
-  avail: number
-  req: number
-  funded: boolean
-}
-
-interface FundingOutlook {
-  dex: FundingSource
-  cex: FundingSource
-  transferable: number
-  fees: {
-    avail: number
-    req: number
-    funded: boolean
-  },
-  fundedAndBalanced: boolean
-  fundedAndNotBalanced: boolean
-}
-
-function parseFundingOptions (f: FundingOutlook): [number, number, FundingSlider | undefined] {
-  const { cex: { avail: cexAvail, req: cexReq }, dex: { avail: dexAvail, req: dexReq }, transferable } = f
-
-  let proposedDex = Math.min(dexAvail, dexReq)
-  let proposedCex = Math.min(cexAvail, cexReq)
-  let slider: FundingSlider | undefined
-  if (f.fundedAndNotBalanced) {
-    // We have everything we need, but not where we need it, and we can
-    // deposit and withdraw.
-    if (dexAvail > dexReq) {
-      // We have too much dex-side, so we'll have to draw on dex to balance
-      // cex's shortcomings.
-      const cexShort = cexReq - cexAvail
-      const dexRemain = dexAvail - dexReq
-      if (dexRemain < cexShort) {
-        // We did something really bad with math to get here.
-        throw Error('bad math has us with dex surplus + cex underfund invalid remains')
-      }
-      proposedDex += cexShort + transferable
-    } else {
-      // We don't have enough on dex, but we have enough on cex to cover the
-      // short.
-      const dexShort = dexReq - dexAvail
-      const cexRemain = cexAvail - cexReq
-      if (cexRemain < dexShort) {
-        throw Error('bad math got us with cex surplus + dex underfund invalid remains')
-      }
-      proposedCex += dexShort + transferable
-    }
-  } else if (f.fundedAndBalanced) {
-    // This asset is fully funded, but the user may choose to fund order
-    // reserves either cex or dex.
-    if (transferable > 0) {
-      const dexRemain = dexAvail - dexReq
-      const cexRemain = cexAvail - cexReq
-
-      slider = newSlider()
-
-      if (cexRemain > transferable && dexRemain > transferable) {
-        // Either one could fully fund order reserves. Let the user choose.
-        slider.left.cex = transferable + cexReq
-        slider.left.dex = dexReq
-        slider.right.cex = cexReq
-        slider.right.dex = transferable + dexReq
-      } else if (dexRemain < transferable && cexRemain < transferable) {
-        // => implied that cexRemain + dexRemain > transferable.
-        // CEX can contribute SOME and DEX can contribute SOME.
-        slider.left.cex = transferable - dexRemain + cexReq
-        slider.left.dex = dexRemain + dexReq
-        slider.right.cex = cexRemain + cexReq
-        slider.right.dex = transferable - cexRemain + dexReq
-      } else if (dexRemain > transferable) {
-        // So DEX has enough to cover reserves, but CEX could potentially
-        // constribute SOME. NOT ALL.
-        slider.left.cex = cexReq
-        slider.left.dex = transferable + dexReq
-        slider.right.cex = cexRemain + cexReq
-        slider.right.dex = transferable - cexRemain + dexReq
-      } else {
-        // CEX has enough to cover reserves, but DEX could contribute SOME,
-        // NOT ALL.
-        slider.left.cex = transferable - dexRemain + cexReq
-        slider.left.dex = dexRemain + dexReq
-        slider.right.cex = transferable + cexReq
-        slider.right.dex = dexReq
-      }
-      // We prefer the slider right in the center.
-      slider.cexRange = slider.right.cex - slider.left.cex
-      slider.dexRange = slider.right.dex - slider.left.dex
-      proposedDex = slider.left.dex + (slider.dexRange / 2)
-      proposedCex = slider.left.cex + (slider.cexRange / 2)
-    }
-  } else { // starved
-    if (cexAvail < cexReq) {
-      proposedDex = Math.min(dexAvail, dexReq + transferable + (cexReq - cexAvail))
-    } else if (dexAvail < dexReq) {
-      proposedCex = Math.min(cexAvail, cexReq + transferable + (dexReq - dexAvail))
-    } else { // just transferable wasn't covered
-      proposedDex = Math.min(dexAvail, dexReq + transferable)
-      proposedCex = Math.min(cexAvail, dexReq + cexReq + transferable - proposedDex)
-    }
-  }
-  return [proposedDex, proposedCex, slider]
-}
 
 interface CEXRow {
   cexName: string
@@ -437,16 +299,13 @@ class Bot extends BotMarket {
   pg: MarketMakerPage
   div: PageElement
   page: Record<string, PageElement>
-  placementsChart: PlacementsChart
-  baseAllocSlider: MiniSlider
-  quoteAllocSlider: MiniSlider
   row: BotRow
   runDisplay: RunningMarketMakerDisplay
 
   constructor (pg: MarketMakerPage, runningMMElements: RunningMMDisplayElements, status: MMBotStatus) {
     super(status.config)
     this.pg = pg
-    const { baseID, quoteID, host, botType, nBuyPlacements, nSellPlacements, cexName } = this
+    const { baseID, quoteID, host, botType, cexName } = this
     this.id = hostedMarketID(host, baseID, quoteID)
 
     const div = this.div = pg.page.botTmpl.cloneNode(true) as PageElement
@@ -465,32 +324,14 @@ class Bot extends BotMarket {
       page.botTypeDisplay.textContent = intl.prep(intl.ID_BOTTYPE_BASIC_MM)
     }
 
-    Doc.setVis(botType !== botTypeBasicArb, page.placementsChartBox, page.baseTokenSwapFeesBox)
-    if (botType !== botTypeBasicArb) {
-      this.placementsChart = new PlacementsChart(page.placementsChart)
-      page.buyPlacementCount.textContent = String(nBuyPlacements)
-      page.sellPlacementCount.textContent = String(nSellPlacements)
-    }
-
-    Doc.bind(page.startBttn, 'click', () => this.start())
-    Doc.bind(page.allocationBttn, 'click', () => this.allocate())
     Doc.bind(page.reconfigureBttn, 'click', () => this.reconfigure())
     Doc.bind(page.removeBttn, 'click', () => this.pg.confirmRemoveCfg(status.config))
-    Doc.bind(page.goBackFromAllocation, 'click', () => this.hideAllocationDialog())
     Doc.bind(page.marketLink, 'click', () => app().loadPage('markets', { host, baseID, quoteID }))
-
-    this.baseAllocSlider = new MiniSlider(page.baseAllocSlider, () => { /* callback set later */ })
-    this.quoteAllocSlider = new MiniSlider(page.quoteAllocSlider, () => { /* callback set later */ })
 
     const tr = pg.page.botRowTmpl.cloneNode(true) as PageElement
     setMarketElements(tr, baseID, quoteID, host)
     const tmpl = Doc.parseTemplate(tr)
     this.row = { tr, tmpl }
-    Doc.bind(tmpl.allocateBttn, 'click', (e: MouseEvent) => {
-      e.stopPropagation()
-      this.allocate()
-      pg.showBot(this.id)
-    })
     Doc.bind(tr, 'click', () => pg.showBot(this.id))
 
     this.initialize()
@@ -500,37 +341,9 @@ class Bot extends BotMarket {
     await super.initialize()
     this.runDisplay.setBotMarket(this)
     const {
-      page, host, cexName, botType, div,
-      cfg: { arbMarketMakingConfig, basicMarketMakingConfig }, mktID,
+      page, host, cexName, botType, div, mktID,
       baseFactor, quoteFactor, marketReport: { baseFiatRate }
     } = this
-
-    if (botType !== botTypeBasicArb) {
-      let buyPlacements: OrderPlacement[] = []
-      let sellPlacements: OrderPlacement[] = []
-      let profit = 0
-      if (arbMarketMakingConfig) {
-        buyPlacements = arbMarketMakingConfig.buyPlacements.map((p) => ({ lots: p.lots, gapFactor: p.multiplier }))
-        sellPlacements = arbMarketMakingConfig.sellPlacements.map((p) => ({ lots: p.lots, gapFactor: p.multiplier }))
-        profit = arbMarketMakingConfig.profit
-      } else if (basicMarketMakingConfig) {
-        buyPlacements = basicMarketMakingConfig.buyPlacements
-        sellPlacements = basicMarketMakingConfig.sellPlacements
-        let bestBuy: OrderPlacement | undefined
-        let bestSell : OrderPlacement | undefined
-        if (buyPlacements.length > 0) bestBuy = buyPlacements.reduce((prev: OrderPlacement, curr: OrderPlacement) => curr.gapFactor < prev.gapFactor ? curr : prev)
-        if (sellPlacements.length > 0) bestSell = sellPlacements.reduce((prev: OrderPlacement, curr: OrderPlacement) => curr.gapFactor < prev.gapFactor ? curr : prev)
-        if (bestBuy && bestSell) {
-          profit = (bestBuy.gapFactor + bestSell.gapFactor) / 2
-        } else if (bestBuy) {
-          profit = bestBuy.gapFactor
-        } else if (bestSell) {
-          profit = bestSell.gapFactor
-        }
-      }
-      const marketConfig = { cexName: cexName as string, botType, baseFiatRate: baseFiatRate, dict: { profit, buyPlacements, sellPlacements } }
-      this.placementsChart.setMarket(marketConfig)
-    }
 
     Doc.setVis(botType !== botTypeBasicMM, page.cexDataBox)
     if (botType !== botTypeBasicMM) {
@@ -564,7 +377,6 @@ class Bot extends BotMarket {
     const { row: { tmpl } } = this
     const { running, runStats } = this.status()
     Doc.setVis(running, tmpl.profitLossBox)
-    Doc.setVis(!running, tmpl.allocateBttnBox)
     if (runStats) {
       tmpl.profitLoss.textContent = Doc.formatFourSigFigs(runStats.profitLoss.profit, 2)
     }
@@ -584,292 +396,55 @@ class Bot extends BotMarket {
     else this.updateIdleDisplay()
   }
 
+  async updateIdleDisplay () {
+    const { page, baseID, quoteID, host, cexName, bui, qui, baseFeeUI, quoteFeeUI, baseFeeID, quoteFeeID } = this
+
+    const availableBalances = await MM.availableBalances({ host, baseID, quoteID }, cexName)
+    const { dexBalances, cexBalances } = availableBalances
+
+    const baseDexBalance = Doc.formatCoinValue(dexBalances[baseID] ?? 0, bui)
+    page.baseDexBalance.textContent = baseDexBalance
+    let totalBaseBalance = dexBalances[baseID] ?? 0
+
+    const quoteDexBalance = Doc.formatCoinValue(dexBalances[quoteID] ?? 0, qui)
+    page.quoteDexBalance.textContent = quoteDexBalance
+    let totalQuoteBalance = dexBalances[quoteID] ?? 0
+
+    Doc.setVis(cexName, page.baseCexBalanceSection, page.quoteCexBalanceSection)
+    if (cexName) {
+      const baseCexBalance = Doc.formatCoinValue(cexBalances[baseID] ?? 0, bui)
+      page.baseCexBalance.textContent = baseCexBalance
+      totalBaseBalance += cexBalances[baseID] ?? 0
+      const quoteCexBalance = Doc.formatCoinValue(cexBalances[quoteID] ?? 0, qui)
+      page.quoteCexBalance.textContent = quoteCexBalance
+      totalQuoteBalance += cexBalances[quoteID] ?? 0
+    }
+
+    page.baseTotalBalance.textContent = Doc.formatCoinValue(totalBaseBalance, bui)
+    page.quoteTotalBalance.textContent = Doc.formatCoinValue(totalQuoteBalance, qui)
+
+    const baseFeeAssetIsTraded = baseFeeID === baseID || baseFeeID === quoteID
+    const quoteFeeAssetIsTraded = quoteFeeID === baseID || quoteFeeID === quoteID
+
+    if (baseFeeAssetIsTraded) {
+      Doc.hide(page.baseFeeBalanceSection)
+    } else {
+      Doc.show(page.baseFeeBalanceSection)
+      const baseFeeBalance = Doc.formatCoinValue(dexBalances[baseFeeID] ?? 0, baseFeeUI)
+      page.baseFeeBalance.textContent = baseFeeBalance
+    }
+
+    if (quoteFeeAssetIsTraded) {
+      Doc.hide(page.quoteFeeBalanceSection)
+    } else {
+      Doc.show(page.quoteFeeBalanceSection)
+      const quoteFeeBalance = Doc.formatCoinValue(dexBalances[quoteFeeID] ?? 0, quoteFeeUI)
+      page.quoteFeeBalance.textContent = quoteFeeBalance
+    }
+  }
+
   updateRunningDisplay () {
     this.runDisplay.update()
-  }
-
-  updateIdleDisplay () {
-    const {
-      page, proj: { alloc, qProj, bProj }, baseID, quoteID, cexName, bui, qui, baseFeeID,
-      quoteFeeID, baseFactor, quoteFactor, baseFeeFactor, quoteFeeFactor,
-      marketReport: { baseFiatRate, quoteFiatRate }, cfg: { uiConfig: { baseConfig, quoteConfig } },
-      quoteFeeUI, baseFeeUI
-    } = this
-    page.baseAlloc.textContent = Doc.formatFullPrecision(alloc[baseID], bui)
-    const baseUSD = alloc[baseID] / baseFactor * baseFiatRate
-    let totalUSD = baseUSD
-    page.baseAllocUSD.textContent = Doc.formatFourSigFigs(baseUSD)
-    page.baseBookAlloc.textContent = Doc.formatFullPrecision(bProj.book * baseFactor, bui)
-    page.baseOrderReservesAlloc.textContent = Doc.formatFullPrecision(bProj.orderReserves * baseFactor, bui)
-    page.baseOrderReservesPct.textContent = String(Math.round(baseConfig.orderReservesFactor * 100))
-    Doc.setVis(cexName, page.baseCexAllocBox)
-    if (cexName) page.baseCexAlloc.textContent = Doc.formatFullPrecision(bProj.cex * baseFactor, bui)
-    Doc.setVis(baseFeeID === baseID, page.baseBookingFeesAllocBox)
-    Doc.setVis(baseFeeID !== baseID, page.baseTokenFeesAllocBox)
-    if (baseFeeID === baseID) {
-      const bookingFees = baseID === quoteFeeID ? bProj.bookingFees + qProj.bookingFees : bProj.bookingFees
-      page.baseBookingFeesAlloc.textContent = Doc.formatFullPrecision(bookingFees * baseFeeFactor, baseFeeUI)
-    } else {
-      const feeAlloc = alloc[baseFeeID]
-      page.baseTokenFeeAlloc.textContent = Doc.formatFullPrecision(feeAlloc, baseFeeUI)
-      const baseFeeUSD = feeAlloc / baseFeeFactor * app().fiatRatesMap[baseFeeID]
-      totalUSD += baseFeeUSD
-      page.baseTokenAllocUSD.textContent = Doc.formatFourSigFigs(baseFeeUSD)
-      const withQuote = baseFeeID === quoteFeeID
-      const bookingFees = bProj.bookingFees + (withQuote ? qProj.bookingFees : 0)
-      page.baseTokenBookingFees.textContent = Doc.formatFullPrecision(bookingFees * baseFeeFactor, baseFeeUI)
-      page.baseTokenSwapFeeN.textContent = String(baseConfig.swapFeeN + (withQuote ? quoteConfig.swapFeeN : 0))
-      const swapReserves = bProj.swapFeeReserves + (withQuote ? qProj.swapFeeReserves : 0)
-      page.baseTokenSwapFees.textContent = Doc.formatFullPrecision(swapReserves * baseFeeFactor, baseFeeUI)
-    }
-
-    page.quoteAlloc.textContent = Doc.formatFullPrecision(alloc[quoteID], qui)
-    const quoteUSD = alloc[quoteID] / quoteFactor * quoteFiatRate
-    totalUSD += quoteUSD
-    page.quoteAllocUSD.textContent = Doc.formatFourSigFigs(quoteUSD)
-    page.quoteBookAlloc.textContent = Doc.formatFullPrecision(qProj.book * quoteFactor, qui)
-    page.quoteOrderReservesAlloc.textContent = Doc.formatFullPrecision(qProj.orderReserves * quoteFactor, qui)
-    page.quoteOrderReservesPct.textContent = String(Math.round(quoteConfig.orderReservesFactor * 100))
-    page.quoteSlippageAlloc.textContent = Doc.formatFullPrecision(qProj.slippageBuffer * quoteFactor, qui)
-    page.slippageBufferFactor.textContent = String(Math.round(quoteConfig.slippageBufferFactor * 100))
-    Doc.setVis(cexName, page.quoteCexAllocBox)
-    if (cexName) page.quoteCexAlloc.textContent = Doc.formatFullPrecision(qProj.cex * quoteFactor, qui)
-    Doc.setVis(quoteID === quoteFeeID, page.quoteBookingFeesAllocBox)
-    Doc.setVis(quoteFeeID !== quoteID && quoteFeeID !== baseFeeID, page.quoteTokenFeesAllocBox)
-    if (quoteID === quoteFeeID) {
-      const bookingFees = quoteID === baseFeeID ? bProj.bookingFees + qProj.bookingFees : qProj.bookingFees
-      page.quoteBookingFeesAlloc.textContent = Doc.formatFullPrecision(bookingFees * quoteFeeFactor, quoteFeeUI)
-    } else if (quoteFeeID !== baseFeeID) {
-      page.quoteTokenFeeAlloc.textContent = Doc.formatFullPrecision(alloc[quoteFeeID], quoteFeeUI)
-      const quoteFeeUSD = alloc[quoteFeeID] / quoteFeeFactor * app().fiatRatesMap[quoteFeeID]
-      totalUSD += quoteFeeUSD
-      page.quoteTokenAllocUSD.textContent = Doc.formatFourSigFigs(quoteFeeUSD)
-      page.quoteTokenBookingFees.textContent = Doc.formatFullPrecision(qProj.bookingFees * quoteFeeFactor, quoteFeeUI)
-      page.quoteTokenSwapFeeN.textContent = String(quoteConfig.swapFeeN)
-      page.quoteTokenSwapFees.textContent = Doc.formatFullPrecision(qProj.swapFeeReserves * quoteFeeFactor, quoteFeeUI)
-    }
-    page.totalAllocUSD.textContent = Doc.formatFourSigFigs(totalUSD)
-  }
-
-  /*
-   * allocate opens a dialog to choose funding sources (if applicable) and
-   * confirm allocations and start the bot.
-   */
-  allocate () {
-    const {
-      page, marketReport: { baseFiatRate, quoteFiatRate }, baseID, quoteID,
-      baseFeeID, quoteFeeID, baseFeeFiatRate, quoteFeeFiatRate, cexName,
-      baseFactor, quoteFactor, baseFeeFactor, quoteFeeFactor, host, mktID
-    } = this
-
-    if (cexName) {
-      const cex = app().mmStatus.cexes[cexName]
-      if (!cex || !cex.connected) {
-        page.offError.textContent = intl.prep(intl.ID_CEX_NOT_CONNECTED, { cexName })
-        Doc.showTemporarily(3000, page.offError)
-        return
-      }
-    }
-
-    const f = this.fundingState()
-
-    const [proposedDexBase, proposedCexBase, baseSlider] = parseFundingOptions(f.base)
-    const [proposedDexQuote, proposedCexQuote, quoteSlider] = parseFundingOptions(f.quote)
-
-    const alloc = this.alloc = {
-      dex: {
-        [baseID]: proposedDexBase * baseFactor,
-        [quoteID]: proposedDexQuote * quoteFactor
-      },
-      cex: {
-        [baseID]: proposedCexBase * baseFactor,
-        [quoteID]: proposedCexQuote * quoteFactor
-      }
-    }
-
-    alloc.dex[baseFeeID] = Math.min((alloc.dex[baseFeeID] ?? 0) + (f.base.fees.req * baseFeeFactor), f.base.fees.avail * baseFeeFactor)
-    alloc.dex[quoteFeeID] = Math.min((alloc.dex[quoteFeeID] ?? 0) + (f.quote.fees.req * quoteFeeFactor), f.quote.fees.avail * quoteFeeFactor)
-
-    let totalUSD = (alloc.dex[baseID] / baseFactor * baseFiatRate) + (alloc.dex[quoteID] / quoteFactor * quoteFiatRate)
-    totalUSD += (alloc.cex[baseID] / baseFactor * baseFiatRate) + (alloc.cex[quoteID] / quoteFactor * quoteFiatRate)
-    if (baseFeeID !== baseID) totalUSD += alloc.dex[baseFeeID] / baseFeeFactor * baseFeeFiatRate
-    if (quoteFeeID !== quoteID && quoteFeeID !== baseFeeID) totalUSD += alloc.dex[quoteFeeID] / quoteFeeFactor * quoteFeeFiatRate
-    page.allocUSD.textContent = Doc.formatFourSigFigs(totalUSD)
-
-    Doc.setVis(cexName, ...Doc.applySelector(page.allocationDialog, '[data-cex-only]'))
-    Doc.setVis(f.fundedAndBalanced, page.fundedAndBalancedBox)
-    Doc.setVis(f.base.transferable + f.quote.transferable > 0, page.hasTransferable)
-    Doc.setVis(f.fundedAndNotBalanced, page.fundedAndNotBalancedBox)
-    Doc.setVis(f.starved, page.starvedBox)
-    page.startBttn.classList.toggle('go', f.fundedAndBalanced)
-    page.startBttn.classList.toggle('warning', !f.fundedAndBalanced)
-    page.proposedDexBaseAlloc.classList.toggle('text-warning', !(f.base.fundedAndBalanced || f.base.fundedAndNotBalanced))
-    page.proposedDexQuoteAlloc.classList.toggle('text-warning', !(f.quote.fundedAndBalanced || f.quote.fundedAndNotBalanced))
-
-    const setBaseProposal = (dex: number, cex: number) => {
-      page.proposedDexBaseAlloc.textContent = Doc.formatFourSigFigs(dex)
-      page.proposedDexBaseAllocUSD.textContent = Doc.formatFourSigFigs(dex * baseFiatRate)
-      page.proposedCexBaseAlloc.textContent = Doc.formatFourSigFigs(cex)
-      page.proposedCexBaseAllocUSD.textContent = Doc.formatFourSigFigs(cex * baseFiatRate)
-    }
-    setBaseProposal(proposedDexBase, proposedCexBase)
-
-    Doc.setVis(baseSlider, page.baseAllocSlider)
-    if (baseSlider) {
-      const dexRange = baseSlider.right.dex - baseSlider.left.dex
-      const cexRange = baseSlider.right.cex - baseSlider.left.cex
-      this.baseAllocSlider.setValue(0.5)
-      this.baseAllocSlider.changed = (r: number) => {
-        const dexAlloc = baseSlider.left.dex + r * dexRange
-        const cexAlloc = baseSlider.left.cex + r * cexRange
-        alloc.dex[baseID] = dexAlloc * baseFactor
-        alloc.cex[baseID] = cexAlloc * baseFactor
-        setBaseProposal(dexAlloc, cexAlloc)
-      }
-    }
-
-    const setQuoteProposal = (dex: number, cex: number) => {
-      page.proposedDexQuoteAlloc.textContent = Doc.formatFourSigFigs(dex)
-      page.proposedDexQuoteAllocUSD.textContent = Doc.formatFourSigFigs(dex * quoteFiatRate)
-      page.proposedCexQuoteAlloc.textContent = Doc.formatFourSigFigs(cex)
-      page.proposedCexQuoteAllocUSD.textContent = Doc.formatFourSigFigs(cex * quoteFiatRate)
-    }
-    setQuoteProposal(proposedDexQuote, proposedCexQuote)
-
-    Doc.setVis(quoteSlider, page.quoteAllocSlider)
-    if (quoteSlider) {
-      const dexRange = quoteSlider.right.dex - quoteSlider.left.dex
-      const cexRange = quoteSlider.right.cex - quoteSlider.left.cex
-      this.quoteAllocSlider.setValue(0.5)
-      this.quoteAllocSlider.changed = (r: number) => {
-        const dexAlloc = quoteSlider.left.dex + r * dexRange
-        const cexAlloc = quoteSlider.left.cex + r * cexRange
-        alloc.dex[quoteID] = dexAlloc * quoteFactor
-        alloc.cex[quoteID] = cexAlloc * quoteFactor
-        setQuoteProposal(dexAlloc, cexAlloc)
-      }
-    }
-
-    Doc.setVis(baseFeeID !== baseID, ...Doc.applySelector(page.allocationDialog, '[data-base-token-fees]'))
-    if (baseFeeID !== baseID) {
-      const reqFees = f.base.fees.req + (baseFeeID === quoteFeeID ? f.quote.fees.req : 0)
-      const proposedFees = Math.min(reqFees, f.base.fees.avail)
-      page.proposedDexBaseFeeAlloc.textContent = Doc.formatFourSigFigs(proposedFees)
-      page.proposedDexBaseFeeAllocUSD.textContent = Doc.formatFourSigFigs(proposedFees * baseFeeFiatRate)
-      page.proposedDexBaseFeeAlloc.classList.toggle('text-warning', !f.base.fees.funded)
-    }
-
-    const needQuoteTokenFees = quoteFeeID !== quoteID && quoteFeeID !== baseFeeID
-    Doc.setVis(needQuoteTokenFees, ...Doc.applySelector(page.allocationDialog, '[data-quote-token-fees]'))
-    if (needQuoteTokenFees) {
-      const proposedFees = Math.min(f.quote.fees.req, f.quote.fees.avail)
-      page.proposedDexQuoteFeeAlloc.textContent = Doc.formatFourSigFigs(proposedFees)
-      page.proposedDexQuoteFeeAllocUSD.textContent = Doc.formatFourSigFigs(proposedFees * quoteFeeFiatRate)
-      page.proposedDexQuoteFeeAlloc.classList.toggle('text-warning', !f.quote.fees.funded)
-    }
-
-    const mkt = app().exchanges[host]?.markets[mktID]
-    let existingOrders = false
-    if (mkt && mkt.orders) {
-      for (let i = 0; i < mkt.orders.length; i++) {
-        if (mkt.orders[i].status <= StatusBooked) {
-          existingOrders = true
-          break
-        }
-      }
-    }
-    Doc.setVis(existingOrders, page.existingOrdersBox)
-
-    Doc.show(page.allocationDialog)
-    const closeDialog = (e: MouseEvent) => {
-      if (Doc.mouseInElement(e, page.allocationDialog)) return
-      this.hideAllocationDialog()
-      Doc.unbind(document, 'click', closeDialog)
-    }
-    Doc.bind(document, 'click', closeDialog)
-  }
-
-  hideAllocationDialog () {
-    Doc.hide(this.page.allocationDialog)
-  }
-
-  async start () {
-    const { page, alloc, baseID, quoteID, host, cexName, cfg: { uiConfig } } = this
-
-    Doc.hide(page.errMsg)
-    if (cexName && !app().mmStatus.cexes[cexName]?.connected) {
-      page.errMsg.textContent = `${cexName} not connected`
-      Doc.show(page.errMsg)
-      return
-    }
-
-    // round allocations values.
-    for (const m of [alloc.dex, alloc.cex]) {
-      for (const [assetID, v] of Object.entries(m)) m[parseInt(assetID)] = Math.round(v)
-    }
-
-    const startConfig: StartConfig = {
-      baseID: baseID,
-      quoteID: quoteID,
-      host: host,
-      alloc: alloc
-    }
-
-    startConfig.autoRebalance = this.autoRebalanceSettings(uiConfig)
-
-    try {
-      app().log('mm', 'starting mm bot', startConfig)
-      const res = await MM.startBot(startConfig)
-      if (!app().checkResponse(res)) throw res
-    } catch (e) {
-      page.errMsg.textContent = intl.prep(intl.ID_API_ERROR, e)
-      Doc.show(page.errMsg)
-      return
-    }
-    this.hideAllocationDialog()
-  }
-
-  minTransferAmounts (): [number, number] {
-    const {
-      proj: { bProj, qProj, alloc }, baseFeeID, quoteFeeID, cfg: { uiConfig: { baseConfig, quoteConfig } },
-      baseID, quoteID, cexName, mktID
-    } = this
-
-    const totalBase = alloc[baseID]
-    let dexMinBase = bProj.book
-    if (baseID === baseFeeID) dexMinBase += bProj.bookingFees
-    if (baseID === quoteFeeID) dexMinBase += qProj.bookingFees
-    let dexMinQuote = qProj.book
-    if (quoteID === quoteFeeID) dexMinQuote += qProj.bookingFees
-    if (quoteID === baseFeeID) dexMinQuote += bProj.bookingFees
-    const maxBase = Math.max(totalBase - dexMinBase, totalBase - bProj.cex)
-    const totalQuote = alloc[quoteID]
-    const maxQuote = Math.max(totalQuote - dexMinQuote, totalQuote - qProj.cex)
-    if (maxBase < 0 || maxQuote < 0) {
-      throw Error(`rebalance math doesn't work: ${JSON.stringify({ bProj, qProj, maxBase, maxQuote })}`)
-    }
-    const cex = app().mmStatus.cexes[cexName]
-    const mkt = cex.markets[mktID]
-    const [minB, maxB] = [mkt.baseMinWithdraw, Math.max(mkt.baseMinWithdraw * 2, maxBase)]
-    const minBaseTransfer = Math.round(minB + baseConfig.transferFactor * (maxB - minB))
-    const [minQ, maxQ] = [mkt.quoteMinWithdraw, Math.max(mkt.quoteMinWithdraw * 2, maxQuote)]
-    const minQuoteTransfer = Math.round(minQ + quoteConfig.transferFactor * (maxQ - minQ))
-    return [minBaseTransfer, minQuoteTransfer]
-  }
-
-  autoRebalanceSettings (uiCfg: UIConfig) : AutoRebalanceConfig | undefined {
-    if (!uiCfg.cexRebalance && !uiCfg.internalTransfers) return
-    const cfg : AutoRebalanceConfig = {
-      minBaseTransfer: 0,
-      minQuoteTransfer: 0,
-      internalOnly: !uiCfg.cexRebalance
-    }
-    if (uiCfg.cexRebalance) {
-      const [minBaseTransfer, minQuoteTransfer] = this.minTransferAmounts()
-      cfg.minBaseTransfer = minBaseTransfer
-      cfg.minQuoteTransfer = minQuoteTransfer
-    }
-    return cfg
   }
 
   reconfigure () {
