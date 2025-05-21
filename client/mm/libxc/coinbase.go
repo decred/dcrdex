@@ -17,6 +17,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -205,11 +206,9 @@ func (c *cbWSConn) handleSubscriptionMessage(b []byte) {
 	var subbed bool
 	for channel, productIDs := range msg.Events[0].Subscriptions {
 		if channel == c.channel {
-			for _, productID := range productIDs {
-				if subscribed(productID) {
-					subbed = true
-					break
-				}
+			if slices.ContainsFunc(productIDs, subscribed) {
+				subbed = true
+				break
 			}
 		}
 	}
