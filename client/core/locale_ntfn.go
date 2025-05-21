@@ -355,6 +355,14 @@ var originLocale = map[Topic]*translation{
 			Notes: "args: [bond asset, dex host]",
 		},
 	},
+	TopicDEXDisabled: {
+		subject:  intl.Translation{T: "DEX server status"},
+		template: intl.Translation{T: "DEX server %s has been disabled.", Notes: "args: [host]"},
+	},
+	TopicDEXEnabled: {
+		subject:  intl.Translation{T: "DEX server status"},
+		template: intl.Translation{T: "DEX server %s has been enabled.", Notes: "args: [host]"},
+	},
 }
 
 var ptBR = map[Topic]*translation{

@@ -69,7 +69,7 @@ func (c *Core) ToggleAccountStatus(pw []byte, host string, disable bool) error {
 	if disable {
 		// Check active orders or bonds.
 		if dc.hasActiveOrders() {
-			return fmt.Errorf("cannot disable account with active orders")
+			return errors.New("cannot disable account with active orders")
 		}
 
 		if dc.hasUnspentBond() {
@@ -82,9 +82,13 @@ func (c *Core) ToggleAccountStatus(pw []byte, host string, disable bool) error {
 		return newError(accountStatusUpdateErr, "error updating account status: %w", err)
 	}
 
+	topic := TopicDEXEnabled
+	status := comms.Connected
 	if disable {
 		dc.acct.toggleAccountStatus(true)
 		c.stopDEXConnection(dc)
+		topic = TopicDEXDisabled
+		status = comms.Disconnected
 	} else {
 		acctInfo, err := c.db.Account(host)
 		if err != nil {
@@ -92,10 +96,13 @@ func (c *Core) ToggleAccountStatus(pw []byte, host string, disable bool) error {
 		}
 		dc, connected := c.connectAccount(acctInfo)
 		if !connected {
-			return fmt.Errorf("failed to connected re-enabled account: %w", err)
+			return errors.New("failed to connected re-enabled account")
 		}
 		c.initializeDEXConnection(dc, crypter)
 	}
+
+	subject, details := c.formatDetails(topic, dc.acct.host)
+	dc.notify(newConnEventNote(topic, subject, dc.acct.host, status, details, db.Poke))
 
 	return nil
 }
