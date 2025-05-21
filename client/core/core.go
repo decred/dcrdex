@@ -4658,7 +4658,6 @@ func (c *Core) Login(pw []byte) error {
 		c.resolveActiveTrades(crypter)
 		c.notify(newLoginNote("Connecting to DEX servers..."))
 		c.initializeDEXConnections(crypter)
-
 	}
 
 	return nil
