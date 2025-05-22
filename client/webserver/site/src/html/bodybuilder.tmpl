@@ -12,6 +12,15 @@
   <link href="/css/style.css?v={{commitHash true}}" rel="stylesheet">
 </head>
 <body class="dark{{if .UseDEXBranding}} dex-branding{{end}}">
+  {{if and (ne .Version .LatestVersion) .LatestVersion}}
+    <div class="p-2 d-flex justify-content-center">
+        <span class="fs15 green">[[[New Release Message]]]</span>
+        <a href="https://github.com/decred/dcrdex/releases/latest" target="_blank" rel="noopener noreferrer"
+          class="fs15 ps-2">
+          [[[View Release]]]
+        </a>
+    </div>
+  {{end}}
   <div class="popup-notes d-hide" id="popupNotes">
     <span data-tmpl="note" class="fs15">
       <div class="note-indicator d-inline-block" data-tmpl="indicator"></div>

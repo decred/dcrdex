@@ -59,6 +59,7 @@ type CommonArguments struct {
 	Title          string
 	UseDEXBranding bool
 	Version        string
+	LatestVersion  string
 }
 
 // Create the CommonArguments for the request.
@@ -68,6 +69,7 @@ func (s *WebServer) commonArgs(r *http.Request, title string) *CommonArguments {
 		Title:          title,
 		UseDEXBranding: s.useDEXBranding,
 		Version:        s.appVersion,
+		LatestVersion:  s.latestVersion,
 	}
 }
 

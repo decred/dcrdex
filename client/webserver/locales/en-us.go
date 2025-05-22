@@ -700,4 +700,6 @@ var EnUS = map[string]*intl.Translation{
 	"Total Profit":                {T: "Total Profit"},
 	"total_profit_tooltip":        {T: "Total profit only includes runs that have completed"},
 	"Number of Runs":              {T: "Number of Runs"},
+	"New Release Message":         {T: "<strong> 🚀 New release available!</strong> Get the latest version on GitHub."},
+	"View Release":                {T: "View Release"},
 }
