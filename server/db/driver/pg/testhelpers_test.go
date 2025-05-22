@@ -1,8 +1,8 @@
 package pg
 
 import (
+	"crypto/rand"
 	"fmt"
-	"math/rand"
 	"os"
 	"time"
 
@@ -71,6 +71,7 @@ func mktConfig() (markets []*dex.MarketInfo) {
 	return
 }
 
+// Used in online test.
 func newMatch(maker *order.LimitOrder, taker order.Order, quantity uint64, epochID order.EpochID) *order.Match {
 	return &order.Match{
 		Maker:        maker,
@@ -85,6 +86,7 @@ func newMatch(maker *order.LimitOrder, taker order.Order, quantity uint64, epoch
 	}
 }
 
+// Used in online test.
 func newLimitOrderRevealed(sell bool, rate, quantityLots uint64, force order.TimeInForce, timeOffset int64) (*order.LimitOrder, order.Preimage) {
 	lo := newLimitOrder(sell, rate, quantityLots, force, timeOffset)
 	pi := randomPreimage()
@@ -125,6 +127,7 @@ func newLimitOrderWithAssets(sell bool, rate, quantityLots uint64, force order.T
 	}
 }
 
+// Used in online test.
 func newMarketSellOrder(quantityLots uint64, timeOffset int64) *order.MarketOrder {
 	return &order.MarketOrder{
 		P: order.Prefix{
@@ -145,6 +148,7 @@ func newMarketSellOrder(quantityLots uint64, timeOffset int64) *order.MarketOrde
 	}
 }
 
+// Used in online test.
 func newMarketBuyOrder(quantityQuoteAsset uint64, timeOffset int64) *order.MarketOrder {
 	return &order.MarketOrder{
 		P: order.Prefix{
@@ -165,6 +169,7 @@ func newMarketBuyOrder(quantityQuoteAsset uint64, timeOffset int64) *order.Marke
 	}
 }
 
+// Used in online test.
 func newCancelOrder(targetOrderID order.OrderID, base, quote uint32, timeOffset int64) *order.CancelOrder {
 	return &order.CancelOrder{
 		P: order.Prefix{

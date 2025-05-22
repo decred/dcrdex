@@ -5,13 +5,14 @@ package btc
 import (
 	"bytes"
 	"context"
+	crand "crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"os"
 	"reflect"
 	"sort"
@@ -58,6 +59,7 @@ var (
 	tP2WPKH        []byte
 	tP2WPKHAddr           = "bc1qq49ypf420s0kh52l9pk7ha8n8nhsugdpculjas"
 	feeSuggestion  uint64 = 10
+	rnd                   = rand.New(rand.NewPCG(0x12345678, 0x87654321))
 )
 
 func boolPtr(v bool) *bool {
@@ -76,7 +78,7 @@ func btcAddr(segwit bool) btcutil.Address {
 
 func randBytes(l int) []byte {
 	b := make([]byte, l)
-	rand.Read(b)
+	crand.Read(b)
 	return b
 }
 
@@ -506,7 +508,7 @@ func (c *testData) addRawTx(blockHeight int64, tx *wire.MsgTx) (*chainhash.Hash,
 				prevBlock = &chainhash.Hash{}
 			}
 		}
-		nonce, bits := rand.Uint32(), rand.Uint32()
+		nonce, bits := rnd.Uint32(), rnd.Uint32()
 		header := wire.NewBlockHeader(0, prevBlock, &chainhash.Hash{} /* lie, maybe fix this */, bits, nonce)
 		header.Timestamp = generateTestBlockTime(blockHeight)
 		msgBlock := wire.NewMsgBlock(header) // only now do we know the block hash

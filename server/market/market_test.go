@@ -100,12 +100,6 @@ func (ta *TArchivist) OrderWithCommit(ctx context.Context, commit order.Commitme
 	}
 	return
 }
-func (ta *TArchivist) failOnCommitWithOrder(ord order.Order) {
-	ta.mtx.Lock()
-	ta.commitForKnownOrder = ord.Commitment()
-	ta.orderWithKnownCommit = ord.ID()
-	ta.mtx.Unlock()
-}
 func (ta *TArchivist) CompletedUserOrders(aid account.AccountID, N int) (oids []order.OrderID, compTimes []int64, err error) {
 	return nil, nil, nil
 }
@@ -648,7 +642,7 @@ func TestMarket_Suspend(t *testing.T) {
 
 	// Start up again (consumer resumes the Market manually)
 	startEpochIdx = 1 + time.Now().UnixMilli()/epochDurationMSec
-	startEpochTime = time.UnixMilli(startEpochIdx * epochDurationMSec)
+	// startEpochTime = time.UnixMilli(startEpochIdx * epochDurationMSec)
 
 	wg.Add(1)
 	go func() {
@@ -1854,8 +1848,7 @@ func TestMarket_CancelWhileSuspended(t *testing.T) {
 
 	// Insert a limit order into the book before the market has started
 	lo := makeLO(buyer3, mkRate3(1.0, 1.2), 1, order.StandingTiF)
-	mkt.book.Insert(lo)
-	if err != nil {
+	if !mkt.book.Insert(lo) {
 		t.Fatalf("Failed to Insert order into book.")
 	}
 

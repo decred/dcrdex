@@ -13,8 +13,6 @@ import (
 	"github.com/decred/dcrd/crypto/blake256"
 )
 
-const orderIDLen = 40
-
 type Order struct {
 	From    PeerID `json:"from"`
 	BaseID  uint32 `json:"baseID"`

@@ -27,8 +27,6 @@ var (
 	MaxDataLen = 0x00fe_ffff // top two bytes in big endian stop at 254, signalling 32-bit len
 )
 
-const maxU16 = int(^uint16(0))
-
 // Uint64Bytes converts the uint16 to a length-2, big-endian encoded byte slice.
 func Uint16Bytes(i uint16) []byte {
 	b := make([]byte, 2)

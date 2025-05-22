@@ -2394,8 +2394,7 @@ func (u *unifiedExchangeAdaptor) tryCancelOrders(ctx context.Context, epoch *uin
 		return *epoch-orderEpoch >= 2
 	}
 
-	cancels := make([]dex.Bytes, 0, len(u.pendingDEXOrders))
-
+	// Cancel DEX orders first.
 	for _, pendingOrder := range u.pendingDEXOrders {
 		o := pendingOrder.currentState().order
 
@@ -2413,8 +2412,6 @@ func (u *unifiedExchangeAdaptor) tryCancelOrders(ctx context.Context, epoch *uin
 			err := u.clientCore.Cancel(o.ID)
 			if err != nil {
 				u.log.Errorf("Error canceling order %s: %v", o.ID, err)
-			} else {
-				cancels = append(cancels, o.ID)
 			}
 		}
 	}
@@ -2423,6 +2420,7 @@ func (u *unifiedExchangeAdaptor) tryCancelOrders(ctx context.Context, epoch *uin
 		return false
 	}
 
+	// Cancel CEX orders.
 	for _, pendingOrder := range u.pendingCEXOrders {
 		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()

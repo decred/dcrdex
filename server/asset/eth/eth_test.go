@@ -918,7 +918,7 @@ func TestPoll(t *testing.T) {
 			}
 			close(wait)
 		}()
-		eth.poll(nil)
+		eth.poll(context.TODO())
 		<-wait
 		if test.blockNumErr != nil {
 			if bu.Err == nil {

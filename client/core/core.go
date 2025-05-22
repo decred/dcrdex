@@ -82,7 +82,7 @@ const (
 	// where we don't have the necessary information to calculate our bonded
 	// tier, so we calculate our bonus/revoked tier from the score in the
 	// ConnectResult.
-	defaultPenaltyThreshold = 20
+	// defaultPenaltyThreshold = 20 unused
 
 	// legacySeedLength is the length of the generated app seed used for app protection.
 	legacySeedLength = 64
@@ -3305,8 +3305,8 @@ func (c *Core) RecoverWallet(assetID uint32, appPW []byte, force bool) error {
 
 	oldWallet, found := c.wallet(assetID)
 	if !found {
-		return fmt.Errorf("RecoverWallet: wallet not found for %d -> %s: %w",
-			assetID, unbip(assetID), err)
+		return fmt.Errorf("RecoverWallet: wallet not found for %d -> %s",
+			assetID, unbip(assetID))
 	}
 
 	recoverer, isRecoverer := oldWallet.Wallet.(asset.Recoverer)

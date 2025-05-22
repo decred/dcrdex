@@ -733,16 +733,6 @@ func (auth *AuthManager) RequestWithTimeout(user account.AccountID, msg *msgjson
 	return auth.request(user, msg, f, expireTimeout, expire)
 }
 
-const (
-	// These coefficients are used to compute a user's swap limit adjustment via
-	// UserOrderLimitAdjustment based on the cumulative amounts in the different
-	// match outcomes.
-	successWeight    int64 = 3
-	stuckLongWeight  int64 = -5
-	stuckShortWeight int64 = -3
-	spoofedWeight    int64 = -1
-)
-
 func (auth *AuthManager) integrateOutcomes(
 	matchOutcomes *latestMatchOutcomes,
 	preimgOutcomes *latestPreimageOutcomes,
