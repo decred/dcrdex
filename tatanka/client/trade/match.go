@@ -4,6 +4,7 @@
 package trade
 
 import (
+	"decred.org/dcrdex/tatanka/client/orderbook"
 	"decred.org/dcrdex/tatanka/tanka"
 )
 
@@ -25,20 +26,20 @@ type MatchProposal struct {
 // that the order book side is correct for our choice of buy/sell, and that
 // the orders are ordered by rate, with low-to-high for sell orders, and
 // high-to-low for buy orders.
-func MatchBook(desire *DesiredTrade, p *FeeParameters, ords []*tanka.Order) (matches []*MatchProposal, remain uint64) {
+func MatchBook(desire *DesiredTrade, p *FeeParameters, findOrders func(filter *orderbook.Filter)) (matches []*MatchProposal, remain uint64) {
 	remain = desire.Qty
-	for _, ord := range ords {
+	check := func(ord *tanka.Order) (done bool) {
 		// Check rate compatibility.
 		if desire.Sell {
 			if ord.Rate < desire.Rate {
-				break
+				return true
 			}
 		} else if ord.Rate > desire.Rate {
-			break
+			return true
 		}
 		// Check lot size compatibility.
 		if compat, _ := OrderIsMatchable(desire.Qty, ord, p); !compat {
-			continue
+			return
 		}
 		// How much can we match?
 		maxQty := ord.Qty
@@ -49,9 +50,9 @@ func MatchBook(desire *DesiredTrade, p *FeeParameters, ords []*tanka.Order) (mat
 		qty := lots * ord.LotSize
 		matches = append(matches, &MatchProposal{Order: ord, Qty: qty})
 		remain -= qty
-		if remain == 0 {
-			break
-		}
+		return remain == 0
 	}
+	wantSell := !desire.Sell
+	findOrders(&orderbook.Filter{IsSell: &wantSell, Check: check})
 	return matches, remain
 }

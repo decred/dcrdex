@@ -73,16 +73,19 @@ type Match struct {
 	From    PeerID    `json:"from"`
 	OrderID ID40      `json:"orderID"`
 	Qty     uint64    `json:"qty"`
+	BaseID  uint32    `json:"baseID"`
+	QuoteID uint32    `json:"quoteID"`
 	Stamp   time.Time `json:"stamp"`
 }
 
 func (m *Match) ID() ID32 {
-	const msgLen = 32 + 32 + 8 + 8
+	const msgLen = 32 + 40 + 4 + 4 + 8
 	b := make([]byte, msgLen)
 	copy(b[:32], m.From[:])
-	copy(b[32:64], m.OrderID[:])
-	binary.BigEndian.PutUint64(b[64:72], m.Qty)
-	binary.BigEndian.PutUint64(b[72:80], uint64(m.Stamp.UnixMilli()))
+	copy(b[32:72], m.OrderID[:])
+	binary.BigEndian.PutUint32(b[72:76], m.BaseID)
+	binary.BigEndian.PutUint32(b[76:80], m.QuoteID)
+	binary.BigEndian.PutUint64(b[80:88], m.Qty)
 	return blake256.Sum256(b)
 }
 
