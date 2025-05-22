@@ -752,16 +752,14 @@ func (sc *shutdownCloser) Done() {
 }
 
 func sendDesktopNotification(title, msg string) {
-	objc.WithAutoreleasePool(func() {
-		// This API is deprecated but still functional.
-		notif := objc.Call[objc.Object](objc.GetClass("NSUserNotification"), objc.Sel("new"))
-		notif.Autorelease()
-		objc.Call[objc.Void](notif, objc.Sel("setTitle:"), title)
-		objc.Call[objc.Void](notif, objc.Sel("setInformativeText:"), msg)
+	// This API is deprecated but still functional.
+	notif := objc.Call[objc.Object](objc.GetClass("NSUserNotification"), objc.Sel("new"))
+	objc.Retain(&notif)
+	objc.Call[objc.Void](notif, objc.Sel("setTitle:"), title)
+	objc.Call[objc.Void](notif, objc.Sel("setInformativeText:"), msg)
 
-		center := objc.Call[objc.Object](objc.GetClass("NSUserNotificationCenter"), objc.Sel("defaultUserNotificationCenter"))
-		if center.Ptr() != nil {
-			objc.Call[objc.Void](center, objc.Sel("deliverNotification:"), notif)
-		}
-	})
+	center := objc.Call[objc.Object](objc.GetClass("NSUserNotificationCenter"), objc.Sel("defaultUserNotificationCenter"))
+	if center.Ptr() != nil {
+		objc.Call[objc.Void](center, objc.Sel("deliverNotification:"), notif)
+	}
 }
