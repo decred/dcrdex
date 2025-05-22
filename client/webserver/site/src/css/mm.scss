@@ -11,6 +11,10 @@ div[data-handler=mm] {
     max-width: 75px;
   }
 
+  .mw-500 {
+    max-width: 500px;
+  }
+
   [data-tmpl=value].wide {
     width: 3rem;
   }

@@ -203,6 +203,20 @@ EOF
 else echo "Polygon is not running. Configuring dcrdex markets without Polygon."
 fi
 
+if [ $ETH_ON -eq 0 ] && [ $POLYGON_ON -eq 0 ]; then
+    cat << EOF >> "${FILEPATH}"
+        },
+        {
+            "base": "USDC.ETH_simnet",
+            "quote": "USDC.POLYGON_simnet",
+            "lotSize": 1000000,
+            "rateStep": 10000,
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 4
+EOF
+fi
+
 if [ $DOGE_ON -eq 0 ]; then
     cat << EOF >> "${FILEPATH}"
         },
