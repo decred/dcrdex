@@ -9,7 +9,7 @@
   <link rel="icon" href="/img/favicon.png?v=AZ4AZX">
   <meta name="description" content="Bison Wallet">
   <title>{{.Title}}</title>
-  <link href="/css/style.css?v={{commitHash}}" rel="stylesheet">
+  <link href="/css/style.css?v={{commitHash true}}" rel="stylesheet">
 </head>
 <body class="dark{{if .UseDEXBranding}} dex-branding{{end}}">
   <div class="popup-notes d-hide" id="popupNotes">
@@ -264,7 +264,7 @@
   </div>
 </div>
 
-<script src="/js/entry.js?v={{commitHash}}"></script>
+<script src="/js/entry.js?v={{commitHash true}}"></script>
 </body>
 </html>
 {{end}}

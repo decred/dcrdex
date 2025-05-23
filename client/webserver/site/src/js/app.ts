@@ -187,14 +187,12 @@ export default class Application {
     this.notes = []
     this.pokes = []
     this.seedGenTime = 0
-    this.commitHash = process.env.COMMITHASH || ''
+    this.commitHash = ''
     this.noteReceivers = []
     this.fiatRatesMap = {}
     this.showPopups = State.fetchLocal(State.popupsLK) === '1'
     this.txHistoryMap = {}
     this.requiredActions = {}
-
-    console.log('Bison Wallet, Build', this.commitHash.substring(0, 7))
 
     // Set dark theme.
     document.body.classList.toggle('dark', State.isDark())
@@ -247,6 +245,9 @@ export default class Application {
    * point. Read the id = main element and attach handlers.
    */
   async start () {
+    await this.fetchBuildInfo()
+    console.log('Bison Wallet, Build', this.commitHash.substring(0, 8))
+
     // Handle back navigation from the browser.
     bind(window, 'popstate', (e: PopStateEvent) => {
       const page = e.state?.page
@@ -328,6 +329,12 @@ export default class Application {
 
     this.updateMenuItemsDisplay()
     return user
+  }
+
+  async fetchBuildInfo () {
+    const resp = await getJSON('/api/buildinfo')
+    if (!this.checkResponse(resp)) return
+    this.commitHash = resp.revision
   }
 
   async fetchMMStatus () {
