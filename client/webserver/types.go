@@ -144,3 +144,9 @@ type deleteRecordsForm struct {
 	SaveOrdersToFile  bool  `json:"saveOrdersToFile"`
 	SaveMatchesToFile bool  `json:"saveMatchesToFile"`
 }
+
+type buildInfoResponse struct {
+	OK       bool   `json:"ok"`
+	Version  string `json:"version"`
+	Revision string `json:"revision"`
+}
