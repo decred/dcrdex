@@ -30,9 +30,10 @@ import (
 )
 
 var (
-	tErr    = fmt.Errorf("expected dummy error")
-	tLogger dex.Logger
-	tCtx    context.Context
+	tErr           = fmt.Errorf("expected dummy error")
+	tLogger        dex.Logger
+	tCtx           context.Context
+	testAppVersion = "1.0.3"
 )
 
 type tCoin struct {
@@ -394,9 +395,10 @@ func newTServer(t *testing.T, start bool) (*WebServer, *TCore, func()) {
 	var shutdown func()
 	ctx, killCtx := context.WithCancel(tCtx)
 	s, err := New(&Config{
-		Core:   c,
-		Addr:   "127.0.0.1:0",
-		Logger: tLogger,
+		Core:       c,
+		Addr:       "127.0.0.1:0",
+		Logger:     tLogger,
+		AppVersion: testAppVersion,
 	})
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)
@@ -1076,4 +1078,25 @@ func Test_prepareAddr(t *testing.T) {
 			t.Fatalf("%s: allow in CSP: got %v, want %v", test.name, allowInCSP, test.allowInCSP)
 		}
 	}
+}
+
+func TestAPIBuildInfo(t *testing.T) {
+	s, _, shutdown := newTServer(t, false)
+	defer shutdown()
+
+	writer := new(TWriter)
+	reader := new(TReader)
+
+	expectedBody := &buildInfoResponse{
+		OK:       true,
+		Version:  s.appVersion,
+		Revision: commitHash, // this is not set in the test, so it will be empty
+	}
+
+	body, err := json.Marshal(expectedBody)
+	if err != nil {
+		t.Fatalf("error marshalling expected body: %v", err)
+	}
+
+	ensureResponse(t, s.apiBuildInfo, string(body), reader, writer, nil, nil)
 }

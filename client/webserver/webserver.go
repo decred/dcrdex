@@ -522,6 +522,7 @@ func New(cfg *Config) (*WebServer, error) {
 		r.Get("/user", s.apiUser)
 		r.Post("/locale", s.apiLocale)
 		r.Post("/setlocale", s.apiSetLocale)
+		r.Get("/buildinfo", s.apiBuildInfo)
 
 		r.Group(func(apiInit chi.Router) {
 			apiInit.Use(s.rejectUninited)

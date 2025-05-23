@@ -85,7 +85,7 @@
       <div class="mb-3 pb-3 border-bottom {{if not $authed}}d-hide{{end}}">
         <button id="companionAppBtn" class="fs15">[[[Pair companion app]]]</button>
       </div>
-      <p class="grey">[[[Build ID]]]: <span id="commitHash" class="mono"></span></p>
+      <p class="grey">[[[Build ID]]]: <span class="mono">{{commitHash false}}</span></p>
     </div>
   </section>
 
