@@ -1020,6 +1020,16 @@ func (s *WebServer) apiSetLocale(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck())
 }
 
+// apiBuildInfo is the handler for the '/buildinfo' API request.
+func (s *WebServer) apiBuildInfo(w http.ResponseWriter, r *http.Request) {
+	resp := buildInfoResponse{
+		OK:       true,
+		Version:  s.appVersion,
+		Revision: commitHash,
+	}
+	writeJSON(w, resp)
+}
+
 // apiLogin handles the 'login' API request.
 func (s *WebServer) apiLogin(w http.ResponseWriter, r *http.Request) {
 	login := new(loginForm)
