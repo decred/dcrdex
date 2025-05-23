@@ -61,7 +61,6 @@ export default class SettingsPage extends BasePage {
       app().showPopups = show
     })
 
-    page.commitHash.textContent = app().commitHash.substring(0, 7)
     Doc.bind(page.addADex, 'click', () => {
       this.dexAddrForm.refresh()
       this.showForm(page.dexAddrForm)
