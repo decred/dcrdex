@@ -632,11 +632,7 @@ func New(cfg *Config) (*WebServer, error) {
 // fetchLatestVersion is a helper function to retrieve the latest version of the app
 // from github.
 func (w *WebServer) fetchLatestVersion(ctx context.Context) {
-	if w.latestVersion != "" {
-		return // already set
-	}
-
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
 	for {
@@ -648,11 +644,12 @@ func (w *WebServer) fetchLatestVersion(ctx context.Context) {
 
 			err := dexnet.Get(ctx, "https://api.github.com/repos/decred/dcrdex/releases/latest", &response, dexnet.WithSizeLimit(1<<22))
 			if err != nil {
-				log.Errorf("Error getting latest version: %v", err)
+				log.Debugf("Error getting latest version: %v", err)
 				continue
 			}
 
 			w.latestVersion = strings.Trim(response.TagName, "v")
+			return
 
 		case <-ctx.Done():
 			return
@@ -830,7 +827,18 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+
+		// Perform initial fetch of the latest version.
 		s.fetchLatestVersion(ctx)
+
+		for {
+			select {
+			case <-time.After(24 * time.Hour):
+				s.fetchLatestVersion(ctx)
+			case <-ctx.Done():
+				return
+			}
+		}
 	}()
 
 	log.Infof("Web server listening on %s (https = %v)", s.addr, https)
