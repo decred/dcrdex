@@ -221,6 +221,7 @@ func (cfg *Config) Core(log dex.Logger) *core.Config {
 		NoAutoDBBackup:     cfg.NoAutoDBBackup,
 		ExtensionModeFile:  cfg.ExtensionModeFile,
 		TheOneHost:         cfg.TheOneHost,
+		Version:            Version,
 	}
 }
 

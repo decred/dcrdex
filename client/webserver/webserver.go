@@ -37,7 +37,6 @@ import (
 	"decred.org/dcrdex/client/webserver/locales"
 	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/dexnet"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
 	"github.com/decred/dcrd/certgen"
@@ -283,8 +282,7 @@ type WebServer struct {
 	bondBufMtx sync.Mutex
 	bondBuf    map[uint32]valStamp
 
-	appVersion    string
-	latestVersion string // latest version from github
+	appVersion string
 
 	useDEXBranding  bool
 	mainLogFilePath string
@@ -627,34 +625,6 @@ func New(cfg *Config) (*WebServer, error) {
 	return s, nil
 }
 
-// fetchLatestVersion is a helper function to retrieve the latest version of the app
-// from github.
-func (w *WebServer) fetchLatestVersion(ctx context.Context) {
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			var response struct {
-				TagName string `json:"tag_name"`
-			}
-
-			err := dexnet.Get(ctx, "https://api.github.com/repos/decred/dcrdex/releases/latest", &response, dexnet.WithSizeLimit(1<<22))
-			if err != nil {
-				log.Debugf("Error getting latest version: %v", err)
-				continue
-			}
-
-			w.latestVersion = strings.Trim(response.TagName, "v")
-			return
-
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
 // buildTemplates prepares the HTML templates, which are executed and served in
 // sendTemplate. An empty siteDir indicates that the embedded templates in the
 // htmlTmplSub FS should be used. If siteDir is set, the templates will be
@@ -820,23 +790,6 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	go func() {
 		defer wg.Done()
 		s.readNotifications(ctx)
-	}()
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-
-		// Perform initial fetch of the latest version.
-		s.fetchLatestVersion(ctx)
-
-		for {
-			select {
-			case <-time.After(24 * time.Hour):
-				s.fetchLatestVersion(ctx)
-			case <-ctx.Done():
-				return
-			}
-		}
 	}()
 
 	log.Infof("Web server listening on %s (https = %v)", s.addr, https)
