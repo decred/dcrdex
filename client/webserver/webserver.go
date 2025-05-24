@@ -236,7 +236,7 @@ type Config struct {
 	Language      string
 	Logger        dex.Logger
 	UTC           bool   // for stdout http request logging
-	AppVersion    string // user app version for UI
+	AppVersion    string // e.g. "1.0.4-pre", "1.0.4"
 	CertFile      string
 	KeyFile       string
 	// NoEmbed indicates to serve files from the system disk rather than the
@@ -411,7 +411,7 @@ func New(cfg *Config) (*WebServer, error) {
 		cachedPasswords: make(map[string]*cachedPassword),
 		tor:             cfg.Tor,
 		bondBuf:         map[uint32]valStamp{},
-		appVersion:      cfg.AppVersion,
+		appVersion:      userAppVersion(cfg.AppVersion, false),
 		useDEXBranding:  useDEXBranding,
 		mainLogFilePath: cfg.MainLogFilePath,
 	}
@@ -1167,6 +1167,20 @@ func writeJSONWithStatus(w http.ResponseWriter, thing any, code int) {
 func folderExists(fp string) bool {
 	stat, err := os.Stat(fp)
 	return err == nil && stat.IsDir()
+}
+
+// userAppVersion is a template function that returns the user-facing
+// application version, which is the full version without the build metadata. If
+// semVerOnly is true, it returns the version without the pre-release tag. The
+// full version is expected to be in the format
+// "MAJOR.MINOR.PATCH[-PRE-RELEASE][+BUILD-METADATA]". For example,
+// "1.0.4-pre+4ba3fd93b" would return "1.0.4-pre" if semVerOnly is false, and
+// "1.0.4" if semVerOnly is true.
+func userAppVersion(fullVersion string, semVerOnly bool) string {
+	if semVerOnly {
+		return strings.Split(fullVersion, "-")[0]
+	}
+	return strings.Split(fullVersion, "+")[0]
 }
 
 // chiLogger is an adaptor around dex.Logger that satisfies
