@@ -11291,3 +11291,58 @@ func TestTakeAction(t *testing.T) {
 	}
 
 }
+
+func Test_checkVersionAndNotify(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+
+	tests := []struct {
+		LatestVersionTag string
+		SendUpgradeNote  bool
+	}{{
+		LatestVersionTag: "v1.0.4",
+		SendUpgradeNote:  true,
+	}, {
+		LatestVersionTag: "dcrdex v1.0.4",
+		SendUpgradeNote:  true,
+	}, {
+		LatestVersionTag: "v1.0.4-rc1",
+		SendUpgradeNote:  true,
+	}, {
+		LatestVersionTag: "bison wallet v1.0.4",
+		SendUpgradeNote:  true,
+	}, {
+		LatestVersionTag: "dcrdex v1.0.4",
+		SendUpgradeNote:  false,
+	}, {
+		LatestVersionTag: "release-v1.0.4",
+		SendUpgradeNote:  true,
+	}, {
+		LatestVersionTag: "bison wallet v1.0.4",
+		SendUpgradeNote:  false,
+	}, {
+		LatestVersionTag: "v1.0.4",
+		SendUpgradeNote:  false,
+	}, {
+		LatestVersionTag: "v1.0.4-rc1",
+		SendUpgradeNote:  false,
+	}, {
+		LatestVersionTag: "release-v1.0.4",
+		SendUpgradeNote:  false,
+	}}
+
+	for _, test := range tests {
+		if test.SendUpgradeNote {
+			rig.core.cfg.Version = "1.0.3-pre+random"
+		} else {
+			rig.core.cfg.Version = "1.0.4-pre+random"
+		}
+
+		tName := fmt.Sprintf("Latest: %s, Current: %s", test.LatestVersionTag, rig.core.cfg.Version)
+		t.Run(tName, func(t *testing.T) {
+			if test.SendUpgradeNote != rig.core.checkVersionAndNotify(test.LatestVersionTag) {
+				t.Fatalf("expected upgrade %v, got %v", test.SendUpgradeNote, !test.SendUpgradeNote)
+			}
+		})
+	}
+}

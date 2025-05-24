@@ -36,6 +36,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/config"
+	"decred.org/dcrdex/dex/dexnet"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/msgjson"
@@ -1465,6 +1466,8 @@ type Config struct {
 	ExtensionModeFile string
 
 	TheOneHost string
+
+	Version string // version of the client, e.g. "1.0.0", "1.0.0-pre"
 }
 
 // locale is data associated with the currently selected language.
@@ -1770,6 +1773,23 @@ fetchers:
 			select {
 			case n := <-c.notes:
 				c.handleWalletNotification(n)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+
+		// Initial check for new release.
+		c.checkForNewRelease(ctx)
+
+		for {
+			select {
+			case <-time.After(24 * time.Hour):
+				c.checkForNewRelease(ctx)
 			case <-ctx.Done():
 				return
 			}
@@ -11138,4 +11158,43 @@ func (c *Core) TradingLimits(host string) (userParcels, parcelLimit uint32, err 
 	}
 
 	return userParcels, parcelLimit, nil
+}
+
+// checkForNewRelease checks for a new Bison Wallet realease by querying the
+// GitHub API for the latest release. If a new release is found, it notifies the
+// user with a TopicNewReleaseAvailable note.
+func (c *Core) checkForNewRelease(ctx context.Context) {
+	ticker := time.NewTicker(3 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			var response struct {
+				TagName string `json:"tag_name"`
+			}
+
+			err := dexnet.Get(ctx, "https://api.github.com/repos/decred/dcrdex/releases/latest", &response, dexnet.WithSizeLimit(1<<22))
+			if err != nil {
+				c.log.Debugf("Error getting latest version: %v", err)
+				continue
+			}
+
+			c.checkVersionAndNotify(response.TagName)
+			return
+
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (c *Core) checkVersionAndNotify(latestVersion string) bool {
+	currentVersion := strings.Split(c.cfg.Version, "-")[0]
+	if latestVersion > currentVersion && !strings.Contains(latestVersion, currentVersion) {
+		subject, details := c.formatDetails(TopicNewReleaseAvailable, latestVersion, currentVersion)
+		c.notify(newUpgradeNote(TopicNewReleaseAvailable, subject, details, db.Poke))
+		return true
+	}
+	return false
 }

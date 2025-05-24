@@ -363,6 +363,13 @@ var originLocale = map[Topic]*translation{
 		subject:  intl.Translation{T: "DEX server status"},
 		template: intl.Translation{T: "DEX server %s has been enabled.", Notes: "args: [host]"},
 	},
+	TopicNewReleaseAvailable: {
+		subject: intl.Translation{T: "🚀 New release available!"},
+		template: intl.Translation{
+			T:     `A new version of Bison Wallet is available: %s (current: %s). Update now to enjoy new features and improvements. You can get the latest version at <a href="https://bisonwallet.org#download" target="_blank" rel="noopener noreferrer">bisonwallet.org</a>`,
+			Notes: "args: [newVersion, currentVersion]",
+		},
+	},
 }
 
 var ptBR = map[Topic]*translation{
