@@ -1521,6 +1521,10 @@ func (dm *DEX) EnableDataAPI(yes bool) {
 	dm.server.EnableDataAPI(yes)
 }
 
+func (dm *DEX) ForgiveUser(user account.AccountID) error {
+	return dm.authMgr.ForgiveUser(user)
+}
+
 // candleParamsParser is middleware for the /candles routes. Parses the
 // *msgjson.CandlesRequest from the URL parameters.
 func candleParamsParser(next http.Handler) http.Handler {
