@@ -39,6 +39,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
+	"decred.org/dcrdex/dex/version"
 	"github.com/decred/dcrd/certgen"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -1177,10 +1178,17 @@ func folderExists(fp string) bool {
 // "1.0.4-pre+4ba3fd93b" would return "1.0.4-pre" if semVerOnly is false, and
 // "1.0.4" if semVerOnly is true.
 func userAppVersion(fullVersion string, semVerOnly bool) string {
-	if semVerOnly {
-		return strings.Split(fullVersion, "-")[0]
+	major, minor, patch, pre, _, err := version.ParseSemVer(fullVersion) // validate the version format
+	if err != nil {
+		log.Errorf("Invalid version %q: %v", fullVersion, err)
+		return fullVersion // return the full version as is
 	}
-	return strings.Split(fullVersion, "+")[0]
+
+	if semVerOnly {
+		return fmt.Sprintf("%d.%d.%d", major, minor, patch)
+	}
+
+	return fmt.Sprintf("%d.%d.%d-%s", major, minor, patch, pre)
 }
 
 // chiLogger is an adaptor around dex.Logger that satisfies
