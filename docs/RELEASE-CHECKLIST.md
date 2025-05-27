@@ -1,0 +1,68 @@
+# Release Checklist
+
+This checklist is designed to ensure a smooth and successful release process for the project. Each item should be completed before the release is finalized.
+
+- Release:
+  - [ ] Create a release branch of the form 'release-vMAJOR.MINOR'
+  - [ ] Modify the version variables on that branch to:
+    - Remove the pre-release portion (if any)
+    - Set the build metadata to 'release.local'
+    - Example: 'Version = "1.0.4+release.local"'
+    - See `Version Update` section below for details
+        on updating version variables.
+  - [ ] Update the version variable(s) on the `master` branch to the next
+        expected version while retaining a pre-release of `pre`
+  - [ ] Tag the release in Git of the form 'vMAJOR.MINOR.PATCH'
+  - [ ] Push the changes to the remote repository
+- Version Update:
+  - [ ] Ensure the version number follows semantic versioning (MAJOR.MINOR.PATCH)
+  - [ ] Update the version number in [client/app/version.go](../client/app/version.go)
+  - [ ] Update the version number in [server/cmd/dcrdex/version.go](../server/cmd/dcrdex/version.go)
+  - [ ] Update the version number in [client/cmd/bwctl/version.go](../client/cmd/bwctl/version.go)
+  - [ ] Update the version number in [client/webserver/webserver_test.go](../client/webserver/webserver_test.go)
+  - [ ] Update the version number in [client/cmd/bisonw-desktop/pkg/pkg-darwin.sh](../client/cmd/bisonw-desktop/pkg/pkg-darwin.sh)
+  - [ ] Update the version number in [client/cmd/bisonw-desktop/pkg/pkg-debian.sh](../client/cmd/bisonw-desktop/pkg/pkg-debian.sh)
+  - [ ] Update the version number in [client/cmd/bisonw-desktop/winres.json](../client/cmd/bisonw-desktop/winres.json)
+  - [ ] Update the version number in [lient/cmd/bisonw-desktop/pkg/windows-msi/BisonWallet.wxs](../client/cmd/bisonw-desktop/pkg/windows-msi/BisonWallet.wxs)
+  - [ ] Update the version number in [client/cmd/bisonw/winres.json](../client/cmd/bisonw/winres.json)
+  - [ ] Update the version number in [pkg.sh](../pkg.sh)
+- Documentation:
+  - [ ] Update the documentation to reflect any new features or changes
+  - [ ] Ensure all examples in the documentation are up-to-date
+  - [ ] Check for broken links in the documentation
+- Tests:
+  - [ ] Run all tests to ensure they pass
+  - [ ] Add new tests for any new features or changes
+  - [ ] Ensure test coverage is adequate
+- Build:
+  - [ ] Build the project for all supported platforms
+  - [ ] Ensure the build artifacts are correctly versioned
+  - [ ] Verify that the build artifacts are functional
+- Packaging:
+  - [ ] Create packages for all supported platforms (e.g., .deb, .rpm, .tar.gz)
+  - [ ] Ensure the packages include all necessary files and dependencies
+  - [ ] Verify that the packages can be installed and run successfully
+- Release Notes:
+  - [ ] Write release notes summarizing the changes in this release
+  - [ ] Include any breaking changes, new features, and bug fixes
+  - [ ] Highlight any important information for users upgrading from previous versions
+  - [ ] Ensure the release notes are clear and easy to understand
+  - [ ] Include links to relevant documentation or resources
+  - [ ] Acknowledge contributors in the release notes or documentation
+- Announcements:
+  - [ ] Announce the release on relevant channels (e.g., GitHub, Twitter, mailing list)
+  - [ ] Update the changelog with the release notes
+- Post-release:
+  - [ ] Update brew cask for the new version
+  - [ ] Update the project's website with the new release information
+  - [ ] Monitor for any issues or bugs reported after the release
+  - [ ] Address any critical issues promptly
+  - [ ] Gather feedback from users about the new release
+- Maintenance:
+  - [ ] Plan for the next release cycle
+  - [ ] Review and prioritize issues and feature requests
+  - [ ] Ensure the project remains active and maintained
+- Community:
+  - [ ] Engage with the community for feedback and suggestions
+  - [ ] Encourage contributions and participation in the project
+  - [ ] Consider hosting a Q&A session, a webinar, or preparing a blog article to discuss the new release
