@@ -8,24 +8,24 @@ This checklist is designed to ensure a smooth and successful release process for
     - Remove the pre-release portion (if any)
     - Set the build metadata to 'release.local'
     - Example: 'Version = "1.0.4+release.local"'
-      - See [Version Update](#version-update) section below for details
+    - See `Version Update` section below for details
         on updating version variables.
-  - [ ] Update the version varible(s) on the master branch to the next
-        expected version while retaining a pre-release of 'pre'
-    - [ ] Tag the release in Git of the form 'vMAJOR.MINOR.PATCH'
-    - [ ] Push the changes to the remote repository
+  - [ ] Update the version variable(s) on the `master` branch to the next
+        expected version while retaining a pre-release of `pre`
+  - [ ] Tag the release in Git of the form 'vMAJOR.MINOR.PATCH'
+  - [ ] Push the changes to the remote repository
 - Version Update:
   - [ ] Ensure the version number follows semantic versioning (MAJOR.MINOR.PATCH)
-  - [ ] Update the version number in [client/app/version.go](/client/app/version.go)
-  - [ ] Update the version number in [server/cmd/dcrdex/version.go](/server/cmd/dcrdex/version.go)
-  - [ ] Update the version number in [client/cmd/bwctl/version.go](/client/cmd/bwctl/version.go)
-  - [ ] Update the version number in [client/webserver/webserver_test.go](/client/webserver/webserver_test.go)
-  - [ ] Update the version number in [client/cmd/bisonw-desktop/pkg/pkg-darwin.sh](/client/cmd/bisonw-desktop/pkg/pkg-darwin.sh)
-  - [ ] Update the version number in [client/cmd/bisonw-desktop/pkg/pkg-debian.sh](/client/cmd/bisonw-desktop/pkg/pkg-debian.sh)
-  - [ ] Update the version number in [client/cmd/bisonw-desktop/winres.json](/client/cmd/bisonw-desktop/winres.json)
-  - [ ] Update the version number in [lient/cmd/bisonw-desktop/pkg/windows-msi/BisonWallet.wxs](/client/cmd/bisonw-desktop/pkg/windows-msi/BisonWallet.wxs)
-  - [ ] Update the version number in [client/cmd/bisonw/winres.json](/client/cmd/bisonw/winres.json)
-  - [ ] Update the version number in [pkg.sh](/pkg.sh)
+  - [ ] Update the version number in [client/app/version.go](../client/app/version.go)
+  - [ ] Update the version number in [server/cmd/dcrdex/version.go](../server/cmd/dcrdex/version.go)
+  - [ ] Update the version number in [client/cmd/bwctl/version.go](../client/cmd/bwctl/version.go)
+  - [ ] Update the version number in [client/webserver/webserver_test.go](../client/webserver/webserver_test.go)
+  - [ ] Update the version number in [client/cmd/bisonw-desktop/pkg/pkg-darwin.sh](../client/cmd/bisonw-desktop/pkg/pkg-darwin.sh)
+  - [ ] Update the version number in [client/cmd/bisonw-desktop/pkg/pkg-debian.sh](../client/cmd/bisonw-desktop/pkg/pkg-debian.sh)
+  - [ ] Update the version number in [client/cmd/bisonw-desktop/winres.json](../client/cmd/bisonw-desktop/winres.json)
+  - [ ] Update the version number in [lient/cmd/bisonw-desktop/pkg/windows-msi/BisonWallet.wxs](../client/cmd/bisonw-desktop/pkg/windows-msi/BisonWallet.wxs)
+  - [ ] Update the version number in [client/cmd/bisonw/winres.json](../client/cmd/bisonw/winres.json)
+  - [ ] Update the version number in [pkg.sh](../pkg.sh)
 - Documentation:
   - [ ] Update the documentation to reflect any new features or changes
   - [ ] Ensure all examples in the documentation are up-to-date
@@ -65,4 +65,4 @@ This checklist is designed to ensure a smooth and successful release process for
 - Community:
   - [ ] Engage with the community for feedback and suggestions
   - [ ] Encourage contributions and participation in the project
-  - [ ] Consider hosting a Q&A session or webinar to discuss the new release
+  - [ ] Consider hosting a Q&A session, a webinar, or preparing a blog article to discuss the new release
