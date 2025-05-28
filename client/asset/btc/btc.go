@@ -28,9 +28,12 @@ import (
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/dexnet"
+	"decred.org/dcrdex/dex/encode"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/ecdsa"
+	"github.com/btcsuite/btcd/btcec/v2/schnorr"
+	"github.com/btcsuite/btcd/btcec/v2/schnorr/musig2"
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -38,7 +41,6 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/wallet"
-	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/rpcclient/v8"
 )
 
@@ -936,6 +938,7 @@ var _ asset.Authenticator = (*ExchangeWalletCustom)(nil)
 var _ asset.AddressReturner = (*baseWallet)(nil)
 var _ asset.WalletHistorian = (*ExchangeWalletSPV)(nil)
 var _ asset.NewAddresser = (*baseWallet)(nil)
+var _ asset.PrivateSwapper = (*baseWallet)(nil)
 
 // RecoveryCfg is the information that is transferred from the old wallet
 // to the new one when the wallet is recovered.
@@ -3937,6 +3940,854 @@ func (btc *baseWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, ui
 	return receipts, changeCoin, fees, nil
 }
 
+// privateSwapPubKey encodes a public key and nonce to be used for a private
+// swap. The public key and nonce must be sent to the counterparty in order
+// for them to calculate the combined nonce used in musig2.
+type privateSwapPubKey struct {
+	pubKey   *btcec.PublicKey
+	pubNonce [66]byte
+}
+
+func (ps *privateSwapPubKey) encode() ([]byte, error) {
+	return encode.BuildyBytes{0}.
+		AddData(ps.pubKey.SerializeCompressed()).
+		AddData(ps.pubNonce[:]), nil
+}
+
+func (ps *privateSwapPubKey) decode(data []byte) error {
+	ver, pushes, err := encode.DecodeBlob(data)
+	if err != nil {
+		return fmt.Errorf("error decoding blob: %w", err)
+	}
+	if ver != 0 {
+		return fmt.Errorf("invalid version")
+	}
+	if len(pushes) != 2 {
+		return fmt.Errorf("expected 2 pushes")
+	}
+
+	ps.pubKey, err = btcec.ParsePubKey(pushes[0])
+	if err != nil {
+		return fmt.Errorf("error parsing public key: %w", err)
+	}
+
+	if len(pushes[1]) != 66 {
+		return fmt.Errorf("expected 66 byte public nonce")
+	}
+	copy(ps.pubNonce[:], pushes[1])
+	return nil
+}
+
+// PrivateSwapPubKey returns the public key and nonces to be used in a private
+// swap. The secret nonce should not be sent to the counterparty.
+//
+// TODO: The secret nonce should not be returned. Instead, it should be stored
+// in the wallet.
+func (btc *baseWallet) PrivateSwapPubKey() (pubKeyAndNonce []byte, secretNonce []byte, err error) {
+	if btc.node.Locked() {
+		return nil, nil, fmt.Errorf("wallet is locked")
+	}
+
+	addr, err := btc.node.ExternalAddress()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	addrStr, err := btc.stringAddr(addr, btc.chainParams)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	priv, err := btc.node.PrivKeyForAddress(addrStr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("private key unavailable for address %v: %w", addrStr, err)
+	}
+	defer priv.Zero()
+
+	nonces, err := musig2.GenNonces(musig2.WithPublicKey(priv.PubKey()))
+	if err != nil {
+		return nil, nil, fmt.Errorf("error generating nonces: %w", err)
+	}
+
+	ps := &privateSwapPubKey{
+		pubKey:   priv.PubKey(),
+		pubNonce: nonces.PubNonce,
+	}
+
+	pubKeyAndNonce, err = ps.encode()
+	if err != nil {
+		return nil, nil, fmt.Errorf("error encoding public key and nonce: %w", err)
+	}
+
+	return pubKeyAndNonce, nonces.SecNonce[:], nil
+}
+
+func pubKeyToP2WPKHAddress(pubKey *btcec.PublicKey, net *chaincfg.Params) (btcutil.Address, error) {
+	pkh := btcutil.Hash160(pubKey.SerializeCompressed())
+	addr, err := btcutil.NewAddressWitnessPubKeyHash(pkh, net)
+	if err != nil {
+		return nil, fmt.Errorf("error creating P2WPKH address: %v", err)
+	}
+
+	return addr, nil
+}
+
+func (btc *baseWallet) privKeyForPubKey(pubKey *btcec.PublicKey) (*btcec.PrivateKey, error) {
+	addr, err := pubKeyToP2WPKHAddress(pubKey, btc.chainParams)
+	if err != nil {
+		return nil, err
+	}
+
+	return btc.node.PrivKeyForAddress(addr.String())
+}
+
+// privateSwapOutputData contains the data related to a private swap
+// output.
+type privateSwapOutputData struct {
+	redeemPubKey      *privateSwapPubKey
+	refundPubKey      *privateSwapPubKey
+	refundScript      []byte
+	leaf              txscript.TapLeaf
+	controlBlock      *txscript.ControlBlock
+	tapscriptRootHash []byte
+	pkScript          []byte
+}
+
+func privateSwapOutputDataFromContract(contract *asset.PrivateContract) (*privateSwapOutputData, error) {
+	redeemPubKey := new(privateSwapPubKey)
+	redeemPubKey.decode(contract.RedeemPublicKey)
+	refundPubKey := new(privateSwapPubKey)
+	refundPubKey.decode(contract.RefundPublicKey)
+
+	// Create the combined key which is used to redeem the contract.
+	combinedKey, _, _, err := musig2.AggregateKeys([]*btcec.PublicKey{redeemPubKey.pubKey, refundPubKey.pubKey}, true)
+	if err != nil {
+		return nil, fmt.Errorf("error aggregating keys: %w", err)
+	}
+
+	// Create the refund script and the taproot script tree, which only
+	// contains one leaf.
+	refundScript, err := dexbtc.PrivateSwapRefundScript(refundPubKey.pubKey, int64(contract.LockTime))
+	if err != nil {
+		return nil, fmt.Errorf("error creating refund script: %w", err)
+	}
+	refundLeaf := txscript.NewBaseTapLeaf(refundScript)
+	tapScriptTree := txscript.AssembleTaprootScriptTree(refundLeaf)
+	tapScriptRootHash := tapScriptTree.RootNode.TapHash()
+	controlBlock := tapScriptTree.LeafMerkleProofs[0].ToControlBlock(combinedKey.FinalKey)
+	outputKey := txscript.ComputeTaprootOutputKey(combinedKey.FinalKey, tapScriptRootHash[:])
+	pkScript, err := dexbtc.PayToTaprootScript(outputKey)
+	if err != nil {
+		return nil, fmt.Errorf("error creating pay-to-taproot script: %w", err)
+	}
+
+	return &privateSwapOutputData{
+		refundScript:      refundScript,
+		leaf:              refundLeaf,
+		controlBlock:      &controlBlock,
+		pkScript:          pkScript,
+		tapscriptRootHash: tapScriptRootHash[:],
+		redeemPubKey:      redeemPubKey,
+		refundPubKey:      refundPubKey,
+	}, nil
+}
+
+// signPrivateSwapRefund signs a private swap refund transaction. It is assumed
+// that the wallet controls the private key for the refund pub key.
+func (btc *baseWallet) signPrivateSwapRefund(refundTx *wire.MsgTx, output *Output, outputData *privateSwapOutputData) ([]byte, error) {
+	prevOuts := txscript.NewMultiPrevOutFetcher(map[wire.OutPoint]*wire.TxOut{
+		*output.WireOutPoint(): {
+			Value:    int64(output.Val),
+			PkScript: outputData.pkScript,
+		},
+	})
+	sigHashes := txscript.NewTxSigHashes(refundTx, prevOuts)
+
+	addr, err := pubKeyToP2WPKHAddress(outputData.refundPubKey.pubKey, btc.chainParams)
+	if err != nil {
+		return nil, fmt.Errorf("error creating pubkey address: %w", err)
+	}
+	addrStr, err := btc.stringAddr(addr, btc.chainParams)
+	if err != nil {
+		return nil, err
+	}
+	privKey, err := btc.node.PrivKeyForAddress(addrStr)
+	if err != nil {
+		return nil, err
+	}
+	defer privKey.Zero()
+
+	return txscript.RawTxInTapscriptSignature(
+		refundTx, sigHashes, int(output.vout()), int64(output.Val), outputData.pkScript, outputData.leaf,
+		txscript.SigHashDefault, privKey)
+}
+
+// privateRefundTx creates a signed refund transaction for a private swap.
+func (btc *baseWallet) privateRefundTx(swapTxOut *Output, lockTime int64, outputData *privateSwapOutputData, feeRate uint64) ([]byte, error) {
+	// Create the tx and add the input.
+	refundTx := wire.NewMsgTx(btc.txVersion())
+	refundTx.LockTime = uint32(lockTime)
+	txIn := wire.NewTxIn(swapTxOut.WireOutPoint(), []byte{}, nil)
+	txIn.Sequence = 0
+	refundTx.AddTxIn(txIn)
+
+	// Calculate the fee.
+	// TODO: double check this size calculation
+	size := btc.calcTxSize(refundTx)
+	witnessVBytes := uint64((dexbtc.PrivateRefundWitnessSize + 2 + 3) / 4)
+	size += witnessVBytes + dexbtc.TxOutOverhead
+	fee := feeRate * size
+	if feeRate*size > swapTxOut.Val {
+		return nil, fmt.Errorf("refund tx not worth the fees")
+	}
+
+	// Add the output.
+	refundAddrStr, err := btc.recyclableAddress()
+	if err != nil {
+		return nil, fmt.Errorf("error creating revocation address: %w", err)
+	}
+	refundAddr, err := btc.decodeAddr(refundAddrStr, btc.chainParams)
+	if err != nil {
+		return nil, fmt.Errorf("refund address decode error: %v", err)
+	}
+	pkScript, err := txscript.PayToAddrScript(refundAddr)
+	if err != nil {
+		return nil, fmt.Errorf("error creating change script: %w", err)
+	}
+	refundTx.AddTxOut(wire.NewTxOut(int64(swapTxOut.Val-fee), pkScript))
+
+	// Sign the tx
+	sig, err := btc.signPrivateSwapRefund(refundTx, swapTxOut, outputData)
+	if err != nil {
+		return nil, fmt.Errorf("error creating tapscript signature: %w", err)
+	}
+	cbBytes, err := outputData.controlBlock.ToBytes()
+	if err != nil {
+		return nil, fmt.Errorf("error serializing control block: %w", err)
+	}
+	txIn.Witness = wire.TxWitness{sig, outputData.refundScript, cbBytes}
+
+	// Serialize the tx
+	refundBuff := new(bytes.Buffer)
+	err = refundTx.Serialize(refundBuff)
+	if err != nil {
+		return nil, fmt.Errorf("error serializing refund tx: %w", err)
+	}
+	return refundBuff.Bytes(), nil
+}
+
+// SwapPrivate sends a transaction initiating swaps.
+func (btc *baseWallet) SwapPrivate(swaps *asset.PrivateSwaps) (receipts []asset.Receipt, coin asset.Coin, txData []byte, fees uint64, err error) {
+	fail := func(err error) ([]asset.Receipt, asset.Coin, []byte, uint64, error) {
+		return nil, nil, nil, 0, err
+	}
+
+	if swaps.FeeRate == 0 {
+		return fail(fmt.Errorf("cannot send swap with with zero fee rate"))
+	}
+
+	var totalOut uint64
+	swapTx, totalIn, pts, err := btc.fundedTx(swaps.Inputs)
+	if err != nil {
+		return fail(err)
+	}
+
+	customCfg := new(swapOptions)
+	err = config.Unmapify(swaps.Options, customCfg)
+	if err != nil {
+		return fail(fmt.Errorf("error parsing swap options: %w", err))
+	}
+
+	outputDatas := make([]*privateSwapOutputData, 0, len(swaps.Contracts))
+
+	// Generate all the outputs for the swap transaction.
+	for _, contract := range swaps.Contracts {
+		outputData, err := privateSwapOutputDataFromContract(contract)
+		if err != nil {
+			return fail(fmt.Errorf("error getting private swap output data: %w", err))
+		}
+
+		totalOut += contract.Value
+		outputDatas = append(outputDatas, outputData)
+		swapTx.AddTxOut(wire.NewTxOut(int64(contract.Value), outputData.pkScript))
+	}
+
+	if totalIn < totalOut {
+		return fail(fmt.Errorf("unfunded contract. %d < %d", totalIn, totalOut))
+	}
+
+	// Grab a change address.
+	changeAddr, err := btc.node.ChangeAddress()
+	if err != nil {
+		return fail(fmt.Errorf("error creating change address: %w", err))
+	}
+
+	feeRate, err := calcBumpedRate(swaps.FeeRate, customCfg.FeeBump)
+	if err != nil {
+		btc.log.Errorf("ignoring invalid fee bump factor, %s: %v", float64PtrStr(customCfg.FeeBump), err)
+	}
+
+	// Sign, add change, but don't send the transaction yet until
+	// the individual swap refund txs are prepared and signed.
+	swapTx, change, fees, err := btc.signTxAndAddChange(swapTx, changeAddr, totalIn, totalOut, feeRate)
+	if err != nil {
+		return fail(err)
+	}
+	txHash := btc.hashTx(swapTx)
+
+	receipts = make([]asset.Receipt, 0, len(swaps.Contracts))
+	for i, contract := range swaps.Contracts {
+		output := NewOutput(txHash, uint32(i), contract.Value)
+		signedRefundTx, err := btc.privateRefundTx(output, int64(contract.LockTime), outputDatas[i], swaps.FeeRate)
+		if err != nil {
+			return fail(fmt.Errorf("error creating private refund tx: %w", err))
+		}
+		receipts = append(receipts, &SwapReceipt{
+			Output:            output,
+			SwapContract:      nil,
+			ExpirationTime:    time.Unix(int64(contract.LockTime), 0).UTC(),
+			SignedRefundBytes: signedRefundTx,
+		})
+	}
+
+	btc.cm.UnlockOutPoints(pts)
+
+	txData, err = btc.serializeTx(swapTx)
+	if err != nil {
+		return fail(fmt.Errorf("error serializing tx: %w", err))
+	}
+
+	_, err = btc.broadcastTx(swapTx)
+	if err != nil {
+		return fail(fmt.Errorf("error sending raw transaction: %w", err))
+	}
+
+	// TODO: add to tx history
+
+	return receipts, change, txData, fees, nil
+}
+
+// taprootSigHash returns the sig hash to sign to spend a taproot output.
+func tapRootSigHash(prevOutPKScript []byte, prevOutVal uint64, tx *wire.MsgTx) ([32]byte, error) {
+	a := txscript.NewCannedPrevOutputFetcher(prevOutPKScript, int64(prevOutVal))
+	sigHashes := txscript.NewTxSigHashes(tx, a)
+	sigHashB, err := txscript.CalcTaprootSignatureHash(sigHashes, txscript.SigHashDefault, tx, 0, a)
+	if err != nil {
+		return [32]byte{}, fmt.Errorf("failed to calculate taproot signature hash: %v", err)
+	}
+	var sigHash [32]byte
+	copy(sigHash[:], sigHashB[:])
+	return sigHash, nil
+}
+
+// AuditPriavateContract checks that the output encodes the expected private
+// swap contract.
+func (btc *baseWallet) AuditPrivateContract(coinID, txData []byte, contract *asset.PrivateContract, rebroadcast bool) error {
+	txHash, vout, err := decodeCoinID(coinID)
+	if err != nil {
+		return err
+	}
+
+	tx, err := btc.deserializeTx(txData)
+	if err != nil {
+		return fmt.Errorf("error deserializing tx: %w", err)
+	}
+	if tx.TxHash() != *txHash {
+		return fmt.Errorf("tx hash mismatch")
+	}
+	if vout >= uint32(len(tx.TxOut)) {
+		return fmt.Errorf("vout out of bounds")
+	}
+
+	txOut := tx.TxOut[vout]
+
+	outputData, err := privateSwapOutputDataFromContract(contract)
+	if err != nil {
+		return fmt.Errorf("error getting private swap output data: %w", err)
+	}
+	if !bytes.Equal(outputData.pkScript, txOut.PkScript) {
+		return fmt.Errorf("swap tx pk script mismatch")
+	}
+	if txOut.Value != int64(contract.Value) {
+		return fmt.Errorf("swap tx value mismatch")
+	}
+
+	if rebroadcast {
+		txHash, err := btc.node.SendRawTransaction(tx)
+		if err != nil {
+			btc.log.Debugf("Rebroadcasting counterparty contract %v (THIS MAY BE NORMAL): %v", txHash, err)
+		}
+	}
+
+	return nil
+}
+
+// GenerateUnsignedRedeemTx generates an unsigned redemption transaction for a
+// private swap used by the counterparty to sign an adaptor signature.
+func (btc *baseWallet) GenerateUnsignedRedeemTx(coinID []byte, contract *asset.PrivateContract, feeRate uint64) (redemption []byte, err error) {
+	txHash, vout, err := decodeCoinID(coinID)
+	if err != nil {
+		return nil, err
+	}
+
+	redeemTx := wire.NewMsgTx(btc.txVersion())
+	redeemTx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(txHash, vout), nil, nil))
+
+	redeemAddr, err := btc.node.ExternalAddress()
+	if err != nil {
+		return nil, fmt.Errorf("error getting external address: %w", err)
+	}
+	pkScript, err := txscript.PayToAddrScript(redeemAddr)
+	if err != nil {
+		return nil, fmt.Errorf("error creating redeem script: %w", err)
+	}
+
+	// TODO: double check this size calculation
+	size := btc.calcTxSize(redeemTx)
+	witnessVBytes := uint64((dexbtc.PrivateRedeemWitnessSize + 2 + 3) / 4)
+	size += witnessVBytes + dexbtc.TxOutOverhead
+	fee := feeRate * size
+	if fee > contract.Value {
+		return nil, fmt.Errorf("redeem tx not worth the fees")
+	}
+
+	redeemTx.AddTxOut(wire.NewTxOut(int64(contract.Value-fee), pkScript))
+
+	return serializeMsgTx(redeemTx)
+}
+
+// ValidateAdaptorSecret validates that the adaptor secret can be used for
+// the given redeem tx and contract. The adaptor point plus the signing nonce
+// must result in a point with an even y coordinate.
+func (btc *baseWallet) ValidateAdaptorSecret(adaptorSecret *btcec.ModNScalar, unsignedRedeemB []byte, contract *asset.PrivateContract) (bool, error) {
+	unsignedRedeem, err := msgTxFromBytes(unsignedRedeemB)
+	if err != nil {
+		return false, fmt.Errorf("error deserializing redeem tx: %w", err)
+	}
+
+	outputData, err := privateSwapOutputDataFromContract(contract)
+	if err != nil {
+		return false, fmt.Errorf("error getting private swap output data: %w", err)
+	}
+
+	sigHash, err := tapRootSigHash(outputData.pkScript, contract.Value, unsignedRedeem)
+	if err != nil {
+		return false, fmt.Errorf("error generating taproot signature hash: %w", err)
+	}
+
+	combinedNonce, err := musig2.AggregateNonces([][66]byte{outputData.redeemPubKey.pubNonce, outputData.refundPubKey.pubNonce})
+	if err != nil {
+		return false, fmt.Errorf("error aggregating nonces: %w", err)
+	}
+
+	combinedKey, _, _, err := musig2.AggregateKeys(
+		[]*btcec.PublicKey{outputData.redeemPubKey.pubKey, outputData.refundPubKey.pubKey},
+		true,
+		musig2.WithTaprootKeyTweak(outputData.tapscriptRootHash),
+	)
+	if err != nil {
+		return false, fmt.Errorf("error aggregating keys: %w", err)
+	}
+
+	signingNonce, _, err := musig2.ComputeSigningNonce(combinedNonce, combinedKey.FinalKey, sigHash)
+	if err != nil {
+		return false, fmt.Errorf("error computing signing nonce: %w", err)
+	}
+
+	adaptorPub := new(btcec.JacobianPoint)
+	btcec.ScalarBaseMultNonConst(adaptorSecret, adaptorPub)
+
+	adaptedNonce := new(btcec.JacobianPoint)
+	btcec.AddNonConst(signingNonce, adaptorPub, adaptedNonce)
+	adaptedNonce.ToAffine()
+
+	return !adaptedNonce.Y.IsOdd(), nil
+}
+
+func musig2SignSession(
+	ourPrivKey *btcec.PrivateKey,
+	ourNonces *musig2.Nonces,
+	cpPubNonce [66]byte,
+	cpPubKey *btcec.PublicKey,
+	adaptorSec *btcec.ModNScalar,
+	adaptorPub *btcec.JacobianPoint,
+	cpSig *musig2.PartialSignature,
+	tapScriptRootHash []byte,
+	msg [32]byte,
+) (*musig2.Session, *musig2.PartialSignature, error) {
+	ctx, err := musig2.NewContext(ourPrivKey,
+		true,
+		musig2.WithNumSigners(2),
+		musig2.WithTaprootTweakCtx(tapScriptRootHash),
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error creating musig2 context: %w", err)
+	}
+	ctx.RegisterSigner(cpPubKey)
+	session, err := ctx.NewSession(musig2.WithPreGeneratedNonce(ourNonces))
+	if err != nil {
+		return nil, nil, fmt.Errorf("error creating musig2 session: %w", err)
+	}
+	_, err = session.RegisterPubNonce(cpPubNonce)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error registering public nonce: %w", err)
+	}
+
+	if adaptorSec != nil {
+		err = session.SetAdaptorSecret(msg, adaptorSec)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error setting adaptor secret: %w", err)
+		}
+	}
+
+	if adaptorPub != nil {
+		err = session.SetAdaptorPoint(msg, adaptorPub)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error setting adaptor point: %w", err)
+		}
+	}
+
+	sig, err := session.Sign(msg, musig2.WithSortedKeys())
+	if err != nil {
+		return nil, nil, fmt.Errorf("error signing: %w", err)
+	}
+
+	if cpSig != nil {
+		_, err = session.CombineSig(cpSig)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error combining sigs: %w", err)
+		}
+	}
+
+	return session, sig, nil
+}
+
+func musig2Sign(
+	ourPrivKey *btcec.PrivateKey,
+	ourNonces *musig2.Nonces,
+	cpPubNonce [66]byte,
+	cpPubKey *btcec.PublicKey,
+	adaptorSec *btcec.ModNScalar,
+	adaptorPub *btcec.JacobianPoint,
+	tapScriptRootHash []byte,
+	msg [32]byte,
+) ([]byte, error) {
+	_, sig, err := musig2SignSession(ourPrivKey, ourNonces, cpPubNonce, cpPubKey, adaptorSec, adaptorPub, nil, tapScriptRootHash, msg)
+	if err != nil {
+		return nil, fmt.Errorf("error creating musig2 session: %w", err)
+	}
+
+	var sigB bytes.Buffer
+	err = sig.Encode(&sigB)
+	if err != nil {
+		return nil, fmt.Errorf("error encoding signature: %w", err)
+	}
+
+	return sigB.Bytes(), nil
+}
+
+// GeneratePrivateKeyTweakedAdaptor is used by the party that knows the adaptor
+// secret to create an adaptor signature for an unsigned redemption transaction.
+// IsRedeemer indicates whether this wallet is the redeemer or the refunder of
+// the contract.
+func (btc *baseWallet) GeneratePrivateKeyTweakedAdaptor(
+	unsignedRedeemB []byte,
+	contract *asset.PrivateContract,
+	adaptorSec *btcec.ModNScalar,
+	secretNonceB []byte,
+	isRedeemer bool,
+) (adaptorSigB []byte, err error) {
+	outputData, err := privateSwapOutputDataFromContract(contract)
+	if err != nil {
+		return nil, fmt.Errorf("error getting private swap output data: %w", err)
+	}
+
+	unsignedRedeem, err := msgTxFromBytes(unsignedRedeemB)
+	if err != nil {
+		return nil, fmt.Errorf("error deserializing redeem tx: %w", err)
+	}
+
+	var secNonce [97]byte
+	if len(secretNonceB) != 97 {
+		return nil, fmt.Errorf("secret nonce must be 97 bytes")
+	}
+	copy(secNonce[:], secretNonceB)
+
+	var ourPubKey, cpPubKey *privateSwapPubKey
+	if isRedeemer {
+		ourPubKey = outputData.redeemPubKey
+		cpPubKey = outputData.refundPubKey
+	} else {
+		ourPubKey = outputData.refundPubKey
+		cpPubKey = outputData.redeemPubKey
+	}
+
+	ourNonces := &musig2.Nonces{
+		PubNonce: ourPubKey.pubNonce,
+		SecNonce: secNonce,
+	}
+
+	ourPrivKey, err := btc.privKeyForPubKey(ourPubKey.pubKey)
+	if err != nil {
+		return nil, fmt.Errorf("error getting our private key: %w", err)
+	}
+
+	sigHash, err := tapRootSigHash(outputData.pkScript, contract.Value, unsignedRedeem)
+	if err != nil {
+		return nil, fmt.Errorf("error generating taproot signature hash: %w", err)
+	}
+
+	return musig2Sign(ourPrivKey, ourNonces, cpPubKey.pubNonce, cpPubKey.pubKey, adaptorSec, nil, outputData.tapscriptRootHash, sigHash)
+}
+
+func (btc *baseWallet) GeneratePublicKeyTweakedAdaptor(
+	unsignedRedeemB []byte,
+	contract *asset.PrivateContract,
+	adaptorPub *btcec.JacobianPoint,
+	secretNonceB []byte,
+) (adaptorSigB []byte, err error) {
+	outputData, err := privateSwapOutputDataFromContract(contract)
+	if err != nil {
+		return nil, fmt.Errorf("error getting private swap output data: %w", err)
+	}
+
+	unsignedRedeem, err := msgTxFromBytes(unsignedRedeemB)
+	if err != nil {
+		return nil, fmt.Errorf("error deserializing redeem tx: %w", err)
+	}
+
+	var secNonce [97]byte
+	if len(secretNonceB) != 97 {
+		return nil, fmt.Errorf("secret nonce must be 97 bytes")
+	}
+	copy(secNonce[:], secretNonceB)
+
+	ourPubKey := outputData.refundPubKey
+	cpPubKey := outputData.redeemPubKey
+
+	ourPrivKey, err := btc.privKeyForPubKey(ourPubKey.pubKey)
+	if err != nil {
+		return nil, fmt.Errorf("error getting our private key: %w", err)
+	}
+
+	ourNonces := &musig2.Nonces{
+		PubNonce: ourPubKey.pubNonce,
+		SecNonce: secNonce,
+	}
+
+	sigHash, err := tapRootSigHash(outputData.pkScript, contract.Value, unsignedRedeem)
+	if err != nil {
+		return nil, fmt.Errorf("error generating taproot signature hash: %w", err)
+	}
+
+	return musig2Sign(ourPrivKey, ourNonces, cpPubKey.pubNonce, cpPubKey.pubKey, nil, adaptorPub, outputData.tapscriptRootHash, sigHash)
+}
+
+// ValidateAdaptorSig validates that the adaptor signature is valid for the
+// given redeem tx and contract. It ensures that once the secret is recovered,
+// the adaptor signature will be able to be transformed into a valid signature.
+func (btc *baseWallet) ValidateAdaptorSig(
+	unsignedRedeemB []byte,
+	adaptorSigB []byte,
+	adaptorPub *btcec.JacobianPoint,
+	contract *asset.PrivateContract,
+	isRedeemer bool,
+) (bool, error) {
+	unsignedRedeem, err := msgTxFromBytes(unsignedRedeemB)
+	if err != nil {
+		return false, fmt.Errorf("error decoding unsigned redeem: %w", err)
+	}
+
+	adaptorSig := new(musig2.PartialSignature)
+	err = adaptorSig.Decode(bytes.NewReader(adaptorSigB))
+	if err != nil {
+		return false, fmt.Errorf("error decoding adaptor sig: %w", err)
+	}
+
+	outputData, err := privateSwapOutputDataFromContract(contract)
+	if err != nil {
+		return false, fmt.Errorf("error getting private swap output data: %w", err)
+	}
+	sigHash, err := tapRootSigHash(outputData.pkScript, contract.Value, unsignedRedeem)
+	if err != nil {
+		return false, fmt.Errorf("error generating taproot signature hash: %w", err)
+	}
+
+	combinedNonce, err := musig2.AggregateNonces([][66]byte{
+		outputData.redeemPubKey.pubNonce,
+		outputData.refundPubKey.pubNonce,
+	})
+	if err != nil {
+		return false, fmt.Errorf("error aggregating nonces: %w", err)
+	}
+
+	var pubKey *privateSwapPubKey
+	if isRedeemer {
+		pubKey = outputData.redeemPubKey
+	} else {
+		pubKey = outputData.refundPubKey
+	}
+
+	return adaptorSig.Verify(
+		pubKey.pubNonce,
+		combinedNonce,
+		[]*btcec.PublicKey{outputData.refundPubKey.pubKey, outputData.redeemPubKey.pubKey},
+		pubKey.pubKey,
+		sigHash,
+		musig2.WithTaprootSignTweak(outputData.tapscriptRootHash),
+		musig2.WithAdaptorSign(adaptorPub),
+		musig2.WithSortedKeys(),
+	), nil
+}
+
+// RedeemPrivate is used to redeem a private swap.
+func (btc *baseWallet) RedeemPrivate(
+	contract *asset.PrivateContract,
+	unsignedRedeemB []byte,
+	adaptorSigB []byte,
+	secNonceB []byte,
+	adaptorSecret *btcec.ModNScalar,
+) (out asset.Coin, feesPaid uint64, txData []byte, err error) {
+	outputData, err := privateSwapOutputDataFromContract(contract)
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("error getting private swap output data: %w", err)
+	}
+	redeemTx, err := msgTxFromBytes(unsignedRedeemB)
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("error deserializing redeem tx: %w", err)
+	}
+	if len(secNonceB) != 97 {
+		return nil, 0, nil, fmt.Errorf("secret nonce must be 97 bytes")
+	}
+	secNonce := [97]byte{}
+	copy(secNonce[:], secNonceB)
+
+	cpSig := new(musig2.PartialSignature)
+	err = cpSig.Decode(bytes.NewReader(adaptorSigB))
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("error decoding adaptor sig: %w", err)
+	}
+
+	ourPrivKey, err := btc.privKeyForPubKey(outputData.redeemPubKey.pubKey)
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("error getting our private key: %w", err)
+	}
+	ourNonces := &musig2.Nonces{
+		PubNonce: outputData.redeemPubKey.pubNonce,
+		SecNonce: secNonce,
+	}
+
+	tapRootSigHash, err := tapRootSigHash(outputData.pkScript, contract.Value, redeemTx)
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("error generating taproot signature hash: %w", err)
+	}
+
+	session, _, err := musig2SignSession(
+		ourPrivKey,
+		ourNonces,
+		outputData.refundPubKey.pubNonce,
+		outputData.refundPubKey.pubKey,
+		adaptorSecret,
+		nil,
+		cpSig,
+		outputData.tapscriptRootHash,
+		tapRootSigHash)
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("error creating musig2 session: %w", err)
+	}
+
+	finalSig, err := session.AdaptFinalSig()
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("error getting final sig: %w", err)
+	}
+
+	redeemTx.TxIn[0].Witness = wire.TxWitness{finalSig.Serialize()}
+	txHash, err := btc.broadcastTx(redeemTx)
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("error broadcasting redeem tx: %w", err)
+	}
+
+	txData, err = serializeMsgTx(redeemTx)
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("error serializing redeem tx: %w", err)
+	}
+
+	return NewOutput(txHash, 0, uint64(redeemTx.TxOut[0].Value)), 0, txData, nil
+}
+
+// RecoverAdaptorSecret recovers the adaptor secret using the counterparty's
+// redeem adaptor signature and their redeem transaction.
+func (btc *baseWallet) RecoverAdaptorSecret(
+	cpRedeemTxB []byte,
+	ourRefundAdaptorSigB []byte,
+	cpRedeemAdaptorSigB []byte,
+	ourSecNonceB []byte,
+	adaptorPub *btcec.JacobianPoint,
+	contract *asset.PrivateContract,
+) (*btcec.ModNScalar, error) {
+	redeemTx, err := msgTxFromBytes(cpRedeemTxB)
+	if err != nil {
+		return nil, fmt.Errorf("error deserializing redemption tx: %w", err)
+	}
+
+	outputData, err := privateSwapOutputDataFromContract(contract)
+	if err != nil {
+		return nil, fmt.Errorf("error getting private swap output data: %w", err)
+	}
+
+	privKey, err := btc.privKeyForPubKey(outputData.refundPubKey.pubKey)
+	if err != nil {
+		return nil, fmt.Errorf("error getting our private key: %w", err)
+	}
+	defer privKey.Zero()
+
+	cpAdaptorSig := new(musig2.PartialSignature)
+	err = cpAdaptorSig.Decode(bytes.NewReader(cpRedeemAdaptorSigB))
+	if err != nil {
+		return nil, fmt.Errorf("error decoding adaptor sig: %w", err)
+	}
+
+	cpRedeemSig, err := schnorr.ParseSignature(redeemTx.TxIn[0].Witness[0])
+	if err != nil {
+		return nil, fmt.Errorf("error parsing sig: %w", err)
+	}
+
+	msg, err := tapRootSigHash(outputData.pkScript, contract.Value, redeemTx)
+	if err != nil {
+		return nil, fmt.Errorf("error generating taproot signature hash: %w", err)
+	}
+
+	ourSecNonce := [97]byte{}
+	copy(ourSecNonce[:], ourSecNonceB)
+
+	ourNonces := &musig2.Nonces{
+		PubNonce: outputData.refundPubKey.pubNonce,
+		SecNonce: ourSecNonce,
+	}
+
+	session, _, err := musig2SignSession(
+		privKey,
+		ourNonces,
+		outputData.redeemPubKey.pubNonce,
+		outputData.redeemPubKey.pubKey,
+		nil,
+		adaptorPub,
+		cpAdaptorSig,
+		outputData.tapscriptRootHash,
+		msg,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("error creating musig2 session: %w", err)
+	}
+
+	adaptorSecret, err := session.RecoverAdaptorSecret(cpRedeemSig)
+	if err != nil {
+		return nil, fmt.Errorf("error recovering adaptor secret: %w", err)
+	}
+
+	return adaptorSecret, nil
+}
+
 // Redeem sends the redemption transaction, completing the atomic swap.
 func (btc *baseWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
 	// Create a transaction that spends the referenced contract.
@@ -4391,7 +5242,6 @@ func (btc *baseWallet) refundTx(txHash *chainhash.Hash, vout uint32, contract de
 			return nil, fmt.Errorf("createWitnessSig: %w", err)
 		}
 		txIn.Witness = dexbtc.RefundP2WSHContract(contract, refundSig, refundPubKey)
-
 	} else {
 		prevScript, err := btc.scriptHashScript(contract)
 		if err != nil {
@@ -4433,6 +5283,7 @@ func (btc *baseWallet) DepositAddress() (string, error) {
 		return "", fmt.Errorf("private key unavailable for address %v: %w", addrStr, err)
 	}
 	priv.Zero()
+
 	return addrStr, nil
 }
 
@@ -5104,7 +5955,7 @@ func bondPushDataScript(ver uint16, acctID []byte, lockTimeSec int64, pkh []byte
 // spends the bond output after lockTime passes, paying to an address for the
 // current underlying wallet; the bond private key should normally be used to
 // author a new transaction paying to a new address instead.
-func (btc *baseWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time.Time, bondKey *secp256k1.PrivateKey, acctID []byte) (*asset.Bond, func(), error) {
+func (btc *baseWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time.Time, bondKey *btcec.PrivateKey, acctID []byte) (*asset.Bond, func(), error) {
 	if ver != 0 {
 		return nil, nil, errors.New("only version 0 bonds supported")
 	}
@@ -5246,7 +6097,7 @@ func (btc *baseWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time
 }
 
 func (btc *baseWallet) makeBondRefundTxV0(txid *chainhash.Hash, vout uint32, amt uint64,
-	script []byte, priv *secp256k1.PrivateKey, feeRate uint64) (*wire.MsgTx, error) {
+	script []byte, priv *btcec.PrivateKey, feeRate uint64) (*wire.MsgTx, error) {
 	lockTime, pkhPush, err := dexbtc.ExtractBondDetailsV0(0, script)
 	if err != nil {
 		return nil, err
@@ -5324,7 +6175,7 @@ func (btc *baseWallet) makeBondRefundTxV0(txid *chainhash.Hash, vout uint32, amt
 // RefundBond refunds a bond output to a new wallet address given the redeem
 // script and private key. After broadcasting, the output paying to the wallet
 // is returned.
-func (btc *baseWallet) RefundBond(ctx context.Context, ver uint16, coinID, script []byte, amt uint64, privKey *secp256k1.PrivateKey) (asset.Coin, error) {
+func (btc *baseWallet) RefundBond(ctx context.Context, ver uint16, coinID, script []byte, amt uint64, privKey *btcec.PrivateKey) (asset.Coin, error) {
 	if ver != 0 {
 		return nil, errors.New("only version 0 bonds supported")
 	}
@@ -5406,7 +6257,7 @@ func (btc *baseWallet) decodeV0BondTx(msgTx *wire.MsgTx, txHash *chainhash.Hash,
 			// RedeemTx []byte
 		},
 		LockTime: time.Unix(int64(lockTime), 0),
-		CheckPrivKey: func(bondKey *secp256k1.PrivateKey) bool {
+		CheckPrivKey: func(bondKey *btcec.PrivateKey) bool {
 			pk := bondKey.PubKey().SerializeCompressed()
 			pkhB := btcutil.Hash160(pk)
 			return bytes.Equal(pkh[:], pkhB)
