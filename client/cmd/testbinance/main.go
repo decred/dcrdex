@@ -59,9 +59,10 @@ var (
 		ServerTime: time.Now().Unix(),
 		RateLimits: []*bntypes.RateLimit{},
 		Symbols: []*bntypes.Market{
-			makeMarket("dcr", "btc", 0.00001, 0.000001),
 			makeMarket("eth", "btc", 0.00001, 0.000001),
+			makeMarket("eth", "dcr", 0.00001, 0.000001),
 			makeMarket("dcr", "usdc", 0.01, 0.000001),
+			// makeMarket("btc", "usdc", 0.01, 0.000001),
 			makeMarket("zec", "btc", 0.00001, 0.000001),
 		},
 	}
