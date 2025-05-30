@@ -230,11 +230,11 @@ func TestOrderbookSubscription(t *testing.T) {
 
 	wg := sync.WaitGroup{}
 
-	runTest := func(baseID, quoteID uint32, vwapSell bool, vwapQty uint64) {
+	runTest := func(baseID, quoteID uint32, sell bool, vwapQty, invVWAPQty uint64) {
 		defer wg.Done()
 
 		if err := c.SubscribeMarket(c.ctx, baseID, quoteID); err != nil {
-			t.Errorf("Error subscribing to BTC-USDC order book: %v", err)
+			t.Errorf("Error subscribing to order book: %v", err)
 			return
 		}
 
@@ -243,7 +243,7 @@ func TestOrderbookSubscription(t *testing.T) {
 		for i := 0; i < 20; i++ {
 			select {
 			case <-time.After(time.Second * 1):
-				vwap, extrema, filled, err := c.VWAP(baseID, quoteID, vwapSell, vwapQty)
+				vwap, extrema, filled, err := c.VWAP(baseID, quoteID, sell, vwapQty)
 				if err != nil {
 					t.Errorf("VWAP error: %v", err)
 					return
@@ -251,20 +251,28 @@ func TestOrderbookSubscription(t *testing.T) {
 
 				midGap := c.MidGap(baseID, quoteID)
 
-				fmt.Printf("%d-%d VWAP: %v, Extrema: %v, Filled: %v, MidGap: %v\n", baseID, quoteID, vwap, extrema, filled, midGap)
+				invVWAP, invExtrema, invFilled, err := c.InvVWAP(baseID, quoteID, sell, invVWAPQty)
+				if err != nil {
+					t.Errorf("VWAP error: %v", err)
+					return
+				}
+
+				vwapLog := fmt.Sprintf("%d-%d VWAP: %v, Extrema: %v, Filled: %v, MidGap: %v\n", baseID, quoteID, vwap, extrema, filled, midGap)
+				invVwapLog := fmt.Sprintf("%d-%d invVWAP: %v, Extrema: %v, Filled: %v, MidGap: %v\n", baseID, quoteID, invVWAP, invExtrema, invFilled, midGap)
+				fmt.Printf("=========================\n%s%s\n", vwapLog, invVwapLog)
 			case <-c.ctx.Done():
 				return
 			}
 		}
 
 		if err := c.SubscribeMarket(c.ctx, baseID, quoteID); err != nil {
-			t.Errorf("Error subscribing to BTC-USDC order book: %v", err)
+			t.Errorf("Error subscribing to order book: %v", err)
 			return
 		}
 
 		c.UnsubscribeMarket(baseID, quoteID)
 
-		_, _, _, err := c.VWAP(baseID, quoteID, true, 1e8)
+		_, _, _, err := c.VWAP(baseID, quoteID, sell, 1e8)
 		if err != nil {
 			t.Errorf("VWAP error: %v", err)
 			return
@@ -272,7 +280,7 @@ func TestOrderbookSubscription(t *testing.T) {
 
 		c.UnsubscribeMarket(baseID, quoteID)
 
-		_, _, _, err = c.VWAP(baseID, quoteID, true, 1e8)
+		_, _, _, err = c.VWAP(baseID, quoteID, sell, 1e8)
 		if err == nil {
 			t.Errorf("Expected error after unsubscribing")
 			return
@@ -280,8 +288,9 @@ func TestOrderbookSubscription(t *testing.T) {
 	}
 
 	wg.Add(2)
-	go runTest(0, 60001, true, 1e8)
-	go runTest(60, 60001, true, 1e8)
+
+	go runTest(0, 60001, true, 10e8, 2000e6)
+	go runTest(60, 60001, true, 10e9, 2000e6)
 
 	wg.Wait()
 }
@@ -481,8 +490,8 @@ func TestBalances(t *testing.T) {
 	}
 }
 
-// Pass in BASE_ID, QUOTE_ID, RATE, AMOUNT, SELL, and CANCEL_TRADE env vars.
-func TestTrade(t *testing.T) {
+// Pass in BASE_ID, QUOTE_ID, RATE or MARKET, AMOUNT, SELL, and CANCEL_TRADE env vars.
+func TestPlaceTrade(t *testing.T) {
 	c, shutdown := tNewCoinbase(t)
 	defer shutdown()
 
@@ -517,13 +526,23 @@ func TestTrade(t *testing.T) {
 		t.Fatalf("Invalid QUOTE_ID: %v", err)
 	}
 
-	rateStr := os.Getenv("RATE")
-	if rateStr == "" {
-		t.Skip("RATE env var not set")
+	marketStr := os.Getenv("MARKET")
+	orderType := OrderTypeLimit
+	if marketStr == "true" {
+		orderType = OrderTypeMarket
 	}
-	rate, err := strconv.ParseFloat(rateStr, 64)
-	if err != nil {
-		t.Fatalf("Invalid RATE: %v", err)
+
+	rateStr := os.Getenv("RATE")
+	if orderType == OrderTypeLimit && rateStr == "" {
+		t.Fatalf("RATE env var not set")
+	}
+
+	var rate float64
+	if orderType == OrderTypeLimit {
+		rate, err = strconv.ParseFloat(rateStr, 64)
+		if err != nil {
+			t.Fatalf("Invalid RATE: %v", err)
+		}
 	}
 
 	amountStr := os.Getenv("AMOUNT")
@@ -578,7 +597,7 @@ func TestTrade(t *testing.T) {
 		}
 	}()
 
-	trade, err := c.Trade(ctx, uint32(baseID), uint32(quoteID), sell, msgRate, qty, updaterID)
+	trade, err := c.Trade(ctx, uint32(baseID), uint32(quoteID), sell, msgRate, qty, orderType, updaterID)
 	if err != nil {
 		t.Fatalf("Trade error: %v", err)
 	}
