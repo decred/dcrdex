@@ -44,6 +44,19 @@ func QuoteToBase(rate uint64, quote uint64) (base uint64) {
 	return bigQuote.Uint64()
 }
 
+// BaseQuoteToRate converts a base and quote asset amount to an exchange rate.
+// The rate is in message-rate encoding.
+func BaseQuoteToRate(base uint64, quote uint64) (rate uint64) {
+	if base == 0 {
+		return 0
+	}
+	bigQuote := big.NewInt(int64(quote))
+	bigBase := big.NewInt(int64(base))
+	bigQuote.Mul(bigQuote, bigRateConversionFactor)
+	bigQuote.Div(bigQuote, bigBase)
+	return bigQuote.Uint64()
+}
+
 // ConventionalRate converts an exchange rate in message-rate encoding to a
 // conventional exchange rate, using the base and quote assets' UnitInfo.
 func ConventionalRate(msgRate uint64, baseInfo, quoteInfo dex.UnitInfo) float64 {

@@ -552,6 +552,7 @@ func (c *coinbase) handleUserMessage(b []byte) {
 			Rate:        info.rate,
 			BaseID:      info.baseID,
 			QuoteID:     info.quoteID,
+			Market:      info.market,
 			BaseFilled:  toAtomic(order.CumulativeQty, &bui),
 			QuoteFilled: utils.SafeSub(filledValue, totalFees),
 			Complete:    order.Status != "OPEN" && order.Status != "PENDING",
@@ -877,7 +878,11 @@ func buildOrderRequest(mkt *cbtypes.Market, baseID, quoteID uint32, sell bool, o
 
 	getBaseQtyStr := func() (string, error) {
 		if qty < mkt.MinBaseQty || qty > mkt.MaxBaseQty {
-			return "", fmt.Errorf("quantity %v is out of bounds for market %v", qty, mkt.ProductID)
+			return "", fmt.Errorf("quantity %v is out of bounds for market %v. min: %v, max: %v",
+				bui.FormatConventional(qty),
+				mkt.ProductID,
+				bui.FormatConventional(mkt.MinBaseQty),
+				bui.FormatConventional(mkt.MaxBaseQty))
 		}
 		steppedQty := steppedRate(qty, mkt.BaseLotSize)
 		convQty := float64(steppedQty) / float64(bFactor)
@@ -887,7 +892,11 @@ func buildOrderRequest(mkt *cbtypes.Market, baseID, quoteID uint32, sell bool, o
 
 	getQuoteQtyStr := func() (string, error) {
 		if qty < mkt.MinQuoteQty || qty > mkt.MaxQuoteQty {
-			return "", fmt.Errorf("quantity %v is out of bounds for market %v", qty, mkt.ProductID)
+			return "", fmt.Errorf("quantity %v is out of bounds for market %v. min: %v, max: %v",
+				qui.FormatConventional(qty),
+				mkt.ProductID,
+				qui.FormatConventional(mkt.MinQuoteQty),
+				qui.FormatConventional(mkt.MaxQuoteQty))
 		}
 		steppedQty := steppedRate(qty, mkt.QuoteLotSize)
 		convQty := float64(steppedQty) / float64(qFactor)
@@ -898,7 +907,7 @@ func buildOrderRequest(mkt *cbtypes.Market, baseID, quoteID uint32, sell bool, o
 	getRateStr := func() string {
 		rate = steppedRate(rate, mkt.RateStep)
 		convRate := calc.ConventionalRateAlt(rate, bFactor, qFactor)
-		ratePrec := int(math.Round(math.Log10(calc.RateEncodingFactor * float64(bFactor) / float64(qFactor) / float64(mkt.RateStep))))
+		ratePrec := int(math.Round(math.Log10(float64(qFactor) / float64(mkt.RateStep))))
 		return strconv.FormatFloat(convRate, 'f', ratePrec, 64)
 	}
 
@@ -933,8 +942,12 @@ func buildOrderRequest(mkt *cbtypes.Market, baseID, quoteID uint32, sell bool, o
 		ord.OrderConfig = limitConfig
 	} else {
 		marketConfig := &cbtypes.MarketOrderConfig{}
-		marketConfig.Market.BaseSize = baseQtyStr
-		marketConfig.Market.QuoteSize = quoteQtyStr
+		if baseQtyStr != "" {
+			marketConfig.Market.BaseSize = &baseQtyStr
+		}
+		if quoteQtyStr != "" {
+			marketConfig.Market.QuoteSize = &quoteQtyStr
+		}
 		ord.OrderConfig = marketConfig
 	}
 
@@ -964,7 +977,6 @@ func (c *coinbase) Trade(ctx context.Context, baseID, quoteID uint32, sell bool,
 	}
 
 	tradeID := c.generateTradeID()
-
 	ord, err := buildOrderRequest(mkt, baseID, quoteID, sell, orderType, rate, qty, tradeID)
 	if err != nil {
 		return nil, fmt.Errorf("error building order request: %w", err)
@@ -980,6 +992,7 @@ func (c *coinbase) Trade(ctx context.Context, baseID, quoteID uint32, sell bool,
 		return nil, fmt.Errorf("error placing order: %s", e.Message)
 	}
 
+	market := orderType == OrderTypeMarket
 	c.tradeInfo[res.SuccessResponse.OrderID] = &tradeInfo{
 		updaterID: subscriptionID,
 		baseID:    baseID,
@@ -987,6 +1000,7 @@ func (c *coinbase) Trade(ctx context.Context, baseID, quoteID uint32, sell bool,
 		sell:      sell,
 		rate:      rate,
 		qty:       qty,
+		market:    market,
 	}
 
 	return &Trade{
@@ -996,9 +1010,11 @@ func (c *coinbase) Trade(ctx context.Context, baseID, quoteID uint32, sell bool,
 		Qty:     qty,
 		BaseID:  baseID,
 		QuoteID: quoteID,
+		Market:  market,
 	}, nil
 }
 
+// ValidateTrade validates a trade before it is executed.
 func (c *coinbase) ValidateTrade(baseID, quoteID uint32, sell bool, rate, qty uint64, orderType OrderType) error {
 	productID, err := c.newProductID(baseID, quoteID)
 	if err != nil {
@@ -1346,11 +1362,33 @@ func (c *coinbase) TradeStatus(ctx context.Context, id string, baseID, quoteID u
 	filledValue := toAtomic(res.Order.FilledValue, &qui)
 	totalFees := toAtomic(res.Order.TotalFees, &qui)
 
+	config, err := res.Config()
+	if err != nil {
+		return nil, fmt.Errorf("error getting order configuration: %w", err)
+	}
+
+	var qty, rate uint64
+	var market bool
+	switch config := config.(type) {
+	case *cbtypes.LimitCfgResponse:
+		qty = toAtomic(config.Limit.BaseSize, &bui)
+		rate = messageRate(config.Limit.LimitPrice, &bui, &qui)
+		market = false
+	case *cbtypes.MarketCfgResponse:
+		if res.Order.Side == "SELL" {
+			qty = toAtomic(config.Market.BaseSize, &bui)
+		} else {
+			qty = toAtomic(config.Market.QuoteSize, &qui)
+		}
+		market = true
+	}
+
 	return &Trade{
 		ID:          id,
 		Sell:        res.Order.Side == "SELL",
-		Qty:         toAtomic(res.Order.Config.LimitGTC.BaseSize, &bui),
-		Rate:        messageRate(res.Order.Config.LimitGTC.LimitPrice, &bui, &qui),
+		Qty:         qty,
+		Rate:        rate,
+		Market:      market,
 		BaseID:      baseID,
 		QuoteID:     quoteID,
 		BaseFilled:  toAtomic(res.Order.FilledSize, &bui),
@@ -1395,12 +1433,6 @@ func (c *coinbase) request(ctx context.Context, method, endpoint string, queryPa
 		return fmt.Errorf("prepareRequest error: %v", err)
 	}
 	defer cancel()
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("error requesting %q: %v", req.URL, err)
-	}
-	defer resp.Body.Close()
 
 	var errCode int
 	var errResp json.RawMessage
@@ -1669,6 +1701,7 @@ func (c *coinbase) updateMarkets(ctx context.Context) (map[string]*Market, error
 
 		baseAssetID := dexMarkets[0][0]
 		quoteAssetID := dexMarkets[0][1]
+
 		bui, _ := asset.UnitInfo(baseAssetID)
 		qui, _ := asset.UnitInfo(quoteAssetID)
 
