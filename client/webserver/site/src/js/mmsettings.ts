@@ -137,6 +137,15 @@ function defaultUIConfig (baseMinWithdraw: number, quoteMinWithdraw: number, bot
   }
 }
 
+function defaultMultiHopCfg (possibleArbMkts: string | MultiHopArbMarket[] | undefined) : MultiHopCfg | undefined {
+  if (!possibleArbMkts) return undefined
+  if (typeof possibleArbMkts === 'string') return undefined
+  return {
+    baseAssetMarket: possibleArbMkts[0].BaseMarket,
+    quoteAssetMarket: possibleArbMkts[0].QuoteMarket
+  }
+}
+
 const defaultMarketMakingConfig: ConfigState = {
   gapStrategy: GapStrategyPercentPlus,
   sellPlacements: [],
@@ -646,10 +655,120 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.availableCEXBalances = availableBalances.cexBalances
   }
 
+  minWithdrawals (arbMkt: string | MultiHopArbMarket | undefined, baseID: number, quoteID: number, cexName: string | undefined): { minBaseWithdraw: number, minQuoteWithdraw: number } {
+    if (!cexName || !arbMkt) {
+      return { minBaseWithdraw: 0, minQuoteWithdraw: 0 }
+    }
+
+    const cex = app().mmStatus.cexes[cexName]
+    if (typeof arbMkt === 'string') {
+      const mkt = cex.markets[arbMkt]
+      return { minBaseWithdraw: mkt.baseMinWithdraw, minQuoteWithdraw: mkt.quoteMinWithdraw }
+    }
+
+    const mktToSymbol = ([baseID, quoteID]: [number, number]) : string => {
+      const assetToSymbol = (assetID: number) : string => app().assets[assetID].symbol
+      return `${assetToSymbol(baseID)}_${assetToSymbol(quoteID)}`
+    }
+    const baseMkt = cex.markets[mktToSymbol(arbMkt.BaseMarket)]
+    const quoteMkt = cex.markets[mktToSymbol(arbMkt.QuoteMarket)]
+    return {
+      minBaseWithdraw: arbMkt.BaseMarket[0] === baseID ? baseMkt.baseMinWithdraw : baseMkt.quoteMinWithdraw,
+      minQuoteWithdraw: arbMkt.QuoteMarket[0] === quoteID ? quoteMkt.baseMinWithdraw : quoteMkt.quoteMinWithdraw
+    }
+  }
+
+  possibleArbMarkets (cexName: string | undefined, mmStatus: MarketMakingStatus, baseID: number, quoteID: number, baseSymbol: string, quoteSymbol: string, isArbMM: boolean) : string | MultiHopArbMarket[] | undefined {
+    if (!cexName) {
+      return undefined
+    }
+
+    const cexStatus = mmStatus.cexes[cexName]
+    if (!cexStatus) {
+      throw new Error(`CEX name not found in MM status: ${cexName}`)
+    }
+
+    const [supportsDirectArb, multiHopMarkets] = this.cexSupportsArbOnMarket(baseID, quoteID, cexStatus)
+    if (!supportsDirectArb && multiHopMarkets.length === 0) {
+      throw new Error(`CEX does not support arb on market: ${cexName} ${baseID} ${quoteID}`)
+    }
+
+    if (supportsDirectArb) {
+      return `${baseSymbol}_${quoteSymbol}`
+    }
+
+    if (!isArbMM) {
+      throw new Error(`Only arbMM bots can use multi-hop arb: ${cexName} ${baseID} ${quoteID}`)
+    }
+
+    return multiHopMarkets
+  }
+
+  originalMultiHopCfg (savedMultiHopCfg: MultiHopCfg | undefined, possibleArbMkts: string | MultiHopArbMarket[] | undefined) : MultiHopCfg | undefined {
+    if (!possibleArbMkts || typeof possibleArbMkts === 'string') return undefined
+    if (!savedMultiHopCfg) return { baseAssetMarket: possibleArbMkts[0].BaseMarket, quoteAssetMarket: possibleArbMkts[0].QuoteMarket }
+    let foundSavedMarket = false
+    const mktsEqual = (mkt1: [number, number], mkt2: [number, number]) => {
+      return mkt1[0] === mkt2[0] && mkt1[1] === mkt2[1]
+    }
+    for (const mkt of possibleArbMkts) {
+      if (mktsEqual(mkt.BaseMarket, savedMultiHopCfg.baseAssetMarket) && mktsEqual(mkt.QuoteMarket, savedMultiHopCfg.quoteAssetMarket)) {
+        foundSavedMarket = true
+        break
+      }
+    }
+    if (!foundSavedMarket) return { baseAssetMarket: possibleArbMkts[0].BaseMarket, quoteAssetMarket: possibleArbMkts[0].QuoteMarket }
+    return savedMultiHopCfg
+  }
+
+  // setOriginalConfigValues sets the initial values of the page's original config
+  // based on the savedBotCfg. This should be called after the originalConfig
+  // has been initialized with the default values.
+  setOriginalConfigValues (savedBotCfg: BotConfig | undefined, possibleArbMkts: string | MultiHopArbMarket[] | undefined) {
+    if (!savedBotCfg) return
+    const { basicMarketMakingConfig: mmCfg, arbMarketMakingConfig: arbMMCfg, simpleArbConfig: arbCfg } = savedBotCfg
+    const oldCfg = this.originalConfig
+
+    // This is kinda sloppy, but we'll copy any relevant issues from the
+    // old config into the originalConfig.
+    const idx = savedBotCfg as { [k: string]: any } // typescript
+    for (const [k, v] of Object.entries(savedBotCfg)) if (idx[k] !== undefined) idx[k] = v
+
+    oldCfg.baseOptions = savedBotCfg.baseWalletOptions || {}
+    oldCfg.quoteOptions = savedBotCfg.quoteWalletOptions || {}
+    if (savedBotCfg.uiConfig) oldCfg.uiConfig = savedBotCfg.uiConfig
+    if (this.runningBot && !savedBotCfg.uiConfig.usingQuickBalance) {
+      // If the bot is running and we are allocating manually, initialize
+      // the allocations to 0.
+      oldCfg.uiConfig.allocation = { dex: {}, cex: {} }
+    }
+    this.clampOriginalAllocations(oldCfg.uiConfig)
+
+    if (mmCfg) {
+      oldCfg.buyPlacements = mmCfg.buyPlacements
+      oldCfg.sellPlacements = mmCfg.sellPlacements
+      oldCfg.driftTolerance = mmCfg.driftTolerance
+      oldCfg.gapStrategy = mmCfg.gapStrategy
+    } else if (arbMMCfg) {
+      const { buyPlacements, sellPlacements } = arbMMCfg
+      oldCfg.buyPlacements = Array.from(buyPlacements, (p: ArbMarketMakingPlacement) => { return { lots: p.lots, gapFactor: p.multiplier } })
+      oldCfg.sellPlacements = Array.from(sellPlacements, (p: ArbMarketMakingPlacement) => { return { lots: p.lots, gapFactor: p.multiplier } })
+      oldCfg.profit = arbMMCfg.profit
+      oldCfg.driftTolerance = arbMMCfg.driftTolerance
+      oldCfg.orderPersistence = arbMMCfg.orderPersistence
+      oldCfg.multiHop = this.originalMultiHopCfg(arbMMCfg.multiHop, possibleArbMkts)
+    } else if (arbCfg) {
+      // TODO: expose maxActiveArbs
+      oldCfg.profit = arbCfg.profitTrigger
+      oldCfg.orderPersistence = arbCfg.numEpochsLeaveOpen
+    }
+  }
+
   async configureUI () {
     const { page, specs } = this
     const { host, baseID, quoteID, cexName, botType } = specs
 
+    // Set the visibility of fee asset sections.
     this.fundingFeesCache = {}
     const { baseFeeAssetID, quoteFeeAssetID, bui, qui, baseFeeUI, quoteFeeUI } = this.walletStuff()
     const baseFeeNotTraded = baseFeeAssetID !== baseID && baseFeeAssetID !== quoteID
@@ -658,29 +777,31 @@ export default class MarketMakerSettingsPage extends BasePage {
     Doc.setVis(baseFeeNotTraded, page.baseDexFeeBalanceSection)
     Doc.setVis(quoteFeeNotTraded && baseFeeAssetID !== quoteFeeAssetID, page.quoteDexFeeBalanceSection)
 
+    // Get all assets, and hide page if any fiat rates are missing.
     const [{ symbol: baseSymbol, token: baseToken }, { symbol: quoteSymbol, token: quoteToken }] = [app().assets[baseID], app().assets[quoteID]]
     this.dexMktID = `${baseSymbol}_${quoteSymbol}`
     Doc.hide(page.botSettingsContainer, page.marketBox, page.resetButton, page.noMarket, page.missingFiatRates, page.bridgeAssetBox)
-
     if ([baseID, quoteID, baseToken?.parentID ?? baseID, quoteToken?.parentID ?? quoteID].some((assetID: number) => !app().fiatRatesMap[assetID])) {
       Doc.show(page.missingFiatRates)
       return
     }
 
     await this.setAvailableBalances()
-
     Doc.show(page.marketLoading)
     State.storeLocal(specLK, specs)
 
+    // Allow deletion of bot if it is not running or we are not switching bot types.
     const mmStatus = app().mmStatus
     this.runningBot = botIsRunning(specs, mmStatus)
     Doc.setVis(this.runningBot, page.runningBotAllocationNote)
-    let botCfg = liveBotConfig(host, baseID, quoteID)
-    if (botCfg) {
-      const oldBotType = botCfg.arbMarketMakingConfig ? botTypeArbMM : botCfg.basicMarketMakingConfig ? botTypeBasicMM : botTypeBasicArb
-      if (oldBotType !== botType) botCfg = undefined
+    let savedBotCfg = liveBotConfig(host, baseID, quoteID)
+    if (savedBotCfg) {
+      const oldBotType = savedBotCfg.arbMarketMakingConfig ? botTypeArbMM : savedBotCfg.basicMarketMakingConfig ? botTypeBasicMM : botTypeBasicArb
+      if (oldBotType !== botType) savedBotCfg = undefined
     }
-    Doc.setVis(botCfg && !this.runningBot, page.deleteBttnBox)
+    Doc.setVis(savedBotCfg && !this.runningBot, page.deleteBttnBox)
+
+    // Only allow changing the bot type if the bot is not running.
     page.marketHeader.classList.remove('hoverbg', 'pointer')
     page.botTypeHeader.classList.remove('hoverbg', 'pointer')
     if (!this.runningBot) {
@@ -688,130 +809,54 @@ export default class MarketMakerSettingsPage extends BasePage {
       page.marketHeader.classList.add('hoverbg', 'pointer')
     }
 
-    let [baseMinWithdraw, quoteMinWithdraw] = [0, 0]
-    if (cexName) {
-      const mkt = app().mmStatus.cexes[cexName].markets[this.dexMktID]
-      baseMinWithdraw = mkt.baseMinWithdraw
-      quoteMinWithdraw = mkt.quoteMinWithdraw
+    // Check is this bot is able to arb on an exactly matching CEX market, needs
+    // to use multi-hop, or is not able to arb at all.
+    let possibleArbMkts: string | MultiHopArbMarket[] | undefined
+    try {
+      possibleArbMkts = this.possibleArbMarkets(cexName, mmStatus, baseID, quoteID, baseSymbol, quoteSymbol, botType === botTypeArbMM)
+    } catch (e) {
+      console.error(e)
+      Doc.show(page.missingFiatRates)
+      return
     }
 
+    // Set default original config values
+    if (typeof possibleArbMkts === 'string') this.arbMkt = possibleArbMkts
+    else if (possibleArbMkts !== undefined) this.arbMkt = possibleArbMkts[0]
+    const { minBaseWithdraw, minQuoteWithdraw } = this.minWithdrawals(this.arbMkt, baseID, quoteID, cexName)
     const oldCfg = this.originalConfig = Object.assign({}, defaultMarketMakingConfig, {
       baseOptions: this.defaultWalletOptions(baseID),
       quoteOptions: this.defaultWalletOptions(quoteID),
       buyPlacements: [],
       sellPlacements: [],
-      uiConfig: defaultUIConfig(baseMinWithdraw, quoteMinWithdraw, botType)
+      multiHop: defaultMultiHopCfg(possibleArbMkts),
+      uiConfig: defaultUIConfig(minBaseWithdraw, minQuoteWithdraw, botType)
     }) as ConfigState
 
-    if (cexName) {
-      const cexStatus = mmStatus.cexes[cexName]
-      if (!cexStatus) {
-        console.error('CEX name not found in MM status', cexName)
-        Doc.show(page.missingFiatRates)
-        return
-      }
-      const [supportsDirectArb, multiHopMarkets] = this.cexSupportsArbOnMarket(baseID, quoteID, cexStatus)
-      if (!supportsDirectArb && multiHopMarkets.length === 0) {
-        console.error('CEX does not support arb on market', cexName, baseID, quoteID)
-        Doc.show(page.missingFiatRates)
-        return
-      }
+    // Update original config values based on saved bot config
+    this.creatingNewBot = !savedBotCfg
+    this.setOriginalConfigValues(savedBotCfg, possibleArbMkts)
 
-      if (supportsDirectArb) {
-        this.arbMkt = `${baseSymbol}_${quoteSymbol}`
-      } else {
-        if (botType !== botTypeArbMM) {
-          console.error('CEX does not support direct arb on market', cexName, baseID, quoteID)
-          Doc.show(page.missingFiatRates)
-          return
+    // Setup the multi-hop market selection UI
+    if (possibleArbMkts !== undefined && typeof possibleArbMkts !== 'string') { // MultiHopArbMarket[]
+      this.multiHopMarkets = possibleArbMkts
+      Doc.empty(page.bridgeAssetSelect)
+      for (const market of possibleArbMkts) {
+        const bridgeSymbol = app().assets[market.BridgeAsset].symbol.toUpperCase()
+        const opt = document.createElement('option')
+        opt.value = String(market.BridgeAsset)
+        opt.textContent = bridgeSymbol
+        if (!oldCfg.multiHop) throw new Error('should have a multi hop config')
+        const mktsEqual = (mkt1: [number, number], mkt2: [number, number]) => {
+          return mkt1[0] === mkt2[0] && mkt1[1] === mkt2[1]
         }
-
-        let bridgeAssetID = 0
-        if (this.originalConfig.multiHop) {
-          const { baseAssetMarket, quoteAssetMarket } = this.originalConfig.multiHop
-          let found = false
-          for (const market of multiHopMarkets) {
-            if (market.BaseMarket[0] === baseAssetMarket[0] && market.BaseMarket[1] === baseAssetMarket[1] &&
-              market.QuoteMarket[0] === quoteAssetMarket[0] && market.QuoteMarket[1] === quoteAssetMarket[1]) {
-              found = true
-              bridgeAssetID = market.BridgeAsset
-              break
-            }
-          }
-          if (!found) {
-            this.originalConfig.multiHop = {
-              baseAssetMarket: multiHopMarkets[0].BaseMarket,
-              quoteAssetMarket: multiHopMarkets[0].QuoteMarket
-            }
-            bridgeAssetID = multiHopMarkets[0].BridgeAsset
-          }
-        } else {
-          const mkt = multiHopMarkets[0]
-          this.originalConfig.multiHop = {
-            baseAssetMarket: [mkt.BaseMarket[0], mkt.BaseMarket[1]],
-            quoteAssetMarket: [mkt.QuoteMarket[0], mkt.QuoteMarket[1]]
-          }
-          bridgeAssetID = mkt.BridgeAsset
+        if (mktsEqual(oldCfg.multiHop.baseAssetMarket, market.BaseMarket) && mktsEqual(oldCfg.multiHop.quoteAssetMarket, market.QuoteMarket)) {
+          this.arbMkt = market
+          opt.selected = true
         }
-        this.arbMkt = {
-          BaseMarket: this.originalConfig.multiHop.baseAssetMarket,
-          QuoteMarket: this.originalConfig.multiHop.quoteAssetMarket,
-          BridgeAsset: bridgeAssetID
-        }
-
-        Doc.empty(page.bridgeAssetSelect)
-        for (const market of multiHopMarkets) {
-          const bridgeSymbol = app().assets[market.BridgeAsset].symbol.toUpperCase()
-          const opt = document.createElement('option')
-          opt.value = String(market.BridgeAsset)
-          opt.textContent = bridgeSymbol
-          if (market.BridgeAsset === bridgeAssetID) opt.selected = true
-          page.bridgeAssetSelect.appendChild(opt)
-        }
-
-        Doc.show(page.bridgeAssetBox)
+        page.bridgeAssetSelect.appendChild(opt)
       }
-    }
-
-    if (botCfg) {
-      const { basicMarketMakingConfig: mmCfg, arbMarketMakingConfig: arbMMCfg, simpleArbConfig: arbCfg } = botCfg
-      this.creatingNewBot = false
-
-      // This is kinda sloppy, but we'll copy any relevant issues from the
-      // old config into the originalConfig.
-      const idx = oldCfg as { [k: string]: any } // typescript
-      for (const [k, v] of Object.entries(botCfg)) if (idx[k] !== undefined) idx[k] = v
-
-      oldCfg.baseOptions = botCfg.baseWalletOptions || {}
-      oldCfg.quoteOptions = botCfg.quoteWalletOptions || {}
-      oldCfg.uiConfig = botCfg.uiConfig || defaultUIConfig(baseMinWithdraw, quoteMinWithdraw, botType)
-      if (this.runningBot && !botCfg.uiConfig.usingQuickBalance) {
-        // If the bot is running and we are allocating manually, initialize
-        // the allocations to 0.
-        oldCfg.uiConfig.allocation = { dex: {}, cex: {} }
-      }
-      this.clampOriginalAllocations(oldCfg.uiConfig)
-
-      if (mmCfg) {
-        oldCfg.buyPlacements = mmCfg.buyPlacements
-        oldCfg.sellPlacements = mmCfg.sellPlacements
-        oldCfg.driftTolerance = mmCfg.driftTolerance
-        oldCfg.gapStrategy = mmCfg.gapStrategy
-      } else if (arbMMCfg) {
-        const { buyPlacements, sellPlacements } = arbMMCfg
-        oldCfg.buyPlacements = Array.from(buyPlacements, (p: ArbMarketMakingPlacement) => { return { lots: p.lots, gapFactor: p.multiplier } })
-        oldCfg.sellPlacements = Array.from(sellPlacements, (p: ArbMarketMakingPlacement) => { return { lots: p.lots, gapFactor: p.multiplier } })
-        oldCfg.profit = arbMMCfg.profit
-        oldCfg.driftTolerance = arbMMCfg.driftTolerance
-        oldCfg.orderPersistence = arbMMCfg.orderPersistence
-      } else if (arbCfg) {
-        // TODO: expose maxActiveArbs
-        oldCfg.profit = arbCfg.profitTrigger
-        oldCfg.orderPersistence = arbCfg.numEpochsLeaveOpen
-      }
-      Doc.show(page.resetButton)
-    } else {
-      this.creatingNewBot = true
+      Doc.show(page.bridgeAssetBox)
     }
 
     Doc.setVis(this.runningBot, page.updateRunningButton)
@@ -844,10 +889,9 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     if (cexName) {
       setCexElements(document.body, cexName)
-      const mkt = app().mmStatus.cexes[cexName].markets[this.dexMktID]
       const { bui, qui } = this.walletStuff()
-      this.baseMinTransferInput.min = mkt.baseMinWithdraw / bui.conventional.conversionFactor
-      this.quoteMinTransferInput.min = mkt.quoteMinWithdraw / qui.conventional.conversionFactor
+      this.baseMinTransferInput.min = minBaseWithdraw / bui.conventional.conversionFactor
+      this.quoteMinTransferInput.min = minQuoteWithdraw / qui.conventional.conversionFactor
       this.baseMinTransferInput.prec = Math.log10(bui.conventional.conversionFactor)
       this.quoteMinTransferInput.prec = Math.log10(qui.conventional.conversionFactor)
     }
@@ -882,8 +926,8 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.placementsChart.setMarket({ cexName: cexName as string, botType, baseFiatRate, dict: this.updatedConfig })
 
     // If this is a new bot, show the quick config form.
-    const isQuickPlacements = !botCfg || this.isQuickPlacements(this.updatedConfig.buyPlacements, this.updatedConfig.sellPlacements)
-    const gapStrategy = botCfg?.basicMarketMakingConfig?.gapStrategy ?? GapStrategyPercentPlus
+    const isQuickPlacements = !savedBotCfg || this.isQuickPlacements(this.updatedConfig.buyPlacements, this.updatedConfig.sellPlacements)
+    const gapStrategy = savedBotCfg?.basicMarketMakingConfig?.gapStrategy ?? GapStrategyPercentPlus
     page.gapStrategySelect.value = gapStrategy
     if (botType === botTypeBasicArb || (isQuickPlacements && gapStrategy === GapStrategyPercentPlus)) this.showQuickConfig()
     else this.showAdvancedConfig()
