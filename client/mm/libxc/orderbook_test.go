@@ -100,7 +100,7 @@ func TestOrderbook(t *testing.T) {
 
 	// Test vwap for bids and asks
 	expVWAP := (sortedBids[0].rate*30 + sortedBids[1].rate*30 + sortedBids[2].rate*5) / 65
-	checkVWAP(true, 65, uint64(expVWAP), 3000e8, true)
+	checkVWAP(true, 65, expVWAP, 3000e8, true)
 	checkVWAP(false, 65, 400e8, 400e8, true)
 
 	// Test inv vwap for bids and asks
