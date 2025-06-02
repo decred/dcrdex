@@ -317,7 +317,7 @@ func TestBuildTradeRequest(t *testing.T) {
 				"timeInForce":      []string{"GTC"},
 				"newClientOrderId": []string{"test123"},
 				"quantity":         []string{"5.0000"},
-				"price":            []string{"0.0010000"},
+				"price":            []string{"0.00100"},
 			},
 		},
 		{
@@ -383,7 +383,7 @@ func TestBuildTradeRequest(t *testing.T) {
 				"timeInForce":      []string{"GTC"},
 				"newClientOrderId": []string{"test123"},
 				"quantity":         []string{"5.0000"},
-				"price":            []string{"0.0050000"},
+				"price":            []string{"0.00500"},
 			},
 		},
 		{

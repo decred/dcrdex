@@ -950,7 +950,8 @@ func qtyToString(qty uint64, assetCfg *bncAssetConfig, lotSize uint64) string {
 func rateToString(rate uint64, baseCfg, quoteCfg *bncAssetConfig, rateStep uint64) string {
 	rate = steppedRate(rate, rateStep)
 	convRate := calc.ConventionalRateAlt(rate, baseCfg.conversionFactor, quoteCfg.conversionFactor)
-	ratePrec := int(math.Round(math.Log10(calc.RateEncodingFactor * float64(baseCfg.conversionFactor) / float64(quoteCfg.conversionFactor) / float64(rateStep))))
+	convRateStep := calc.ConventionalRate(rateStep, *baseCfg.ui, *quoteCfg.ui)
+	ratePrec := -int(math.Round(math.Log10(convRateStep)))
 	return strconv.FormatFloat(convRate, 'f', ratePrec, 64)
 }
 
