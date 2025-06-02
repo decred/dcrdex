@@ -3,7 +3,13 @@
 
 package libxc
 
-import "testing"
+import (
+	"reflect"
+	"sort"
+	"testing"
+
+	"decred.org/dcrdex/dex/calc"
+)
 
 func TestOrderbook(t *testing.T) {
 	ob := newOrderBook()
@@ -18,84 +24,167 @@ func TestOrderbook(t *testing.T) {
 		t.Fatalf("empty book should not be filled")
 	}
 
+	sortedEntries := func(bids bool, entries []*obEntry) []*obEntry {
+		sorted := make([]*obEntry, len(entries))
+		copy(sorted, entries)
+		sort.Slice(sorted, func(i, j int) bool {
+			if bids {
+				return sorted[i].rate > sorted[j].rate
+			}
+			return sorted[i].rate < sorted[j].rate
+		})
+		return sorted
+	}
+	convertToQuote := func(entries []*obEntry) []*obEntry {
+		convertedEntries := make([]*obEntry, len(entries))
+		for i, entry := range entries {
+			convertedEntries[i] = &obEntry{
+				rate: entry.rate,
+				qty:  calc.BaseToQuote(entry.rate, entry.qty),
+			}
+		}
+		return convertedEntries
+	}
+
 	// Populate the book with some bids and asks. They both
 	// have the same values, but VWAP for asks should be
-	// calculate from the lower values first.
-	ob.update([]*obEntry{
-		{qty: 30, rate: 4000},
-		{qty: 30, rate: 5000},
-		{qty: 80, rate: 400},
-		{qty: 10, rate: 3000},
-	}, []*obEntry{
-		{qty: 30, rate: 4000},
-		{qty: 30, rate: 5000},
-		{qty: 80, rate: 400},
-		{qty: 10, rate: 3000},
-	})
-	vwap, extrema, filled := ob.vwap(true, 65)
-	if !filled {
-		t.Fatalf("should be filled")
+	// calculated from the lower values first.
+	bids := []*obEntry{
+		{qty: 30, rate: 4000e8},
+		{qty: 30, rate: 5000e8},
+		{qty: 80, rate: 400e8},
+		{qty: 10, rate: 3000e8},
 	}
-	expectedVWAP := uint64((30*5000 + 30*4000 + 5*3000) / 65)
-	if vwap != expectedVWAP {
-		t.Fatalf("wrong vwap. expected %d got %d", expectedVWAP, vwap)
+	asks := []*obEntry{
+		{qty: 30, rate: 4000e8},
+		{qty: 30, rate: 5000e8},
+		{qty: 80, rate: 400e8},
+		{qty: 10, rate: 3000e8},
 	}
-	if extrema != 3000 {
-		t.Fatalf("wrong extrema")
+	ob.update(bids, asks)
+
+	sortedBids := sortedEntries(true, bids)
+	sortedAsks := sortedEntries(false, asks)
+	quoteBids := convertToQuote(sortedBids)
+	quoteAsks := convertToQuote(sortedAsks)
+	snapBids, snapAsks := ob.snap()
+	if !reflect.DeepEqual(snapBids, sortedBids) {
+		t.Fatalf("wrong snap bids. expected %v got %v", sortedBids, snapBids)
+	}
+	if !reflect.DeepEqual(snapAsks, sortedAsks) {
+		t.Fatalf("wrong snap asks. expected %v got %v", sortedAsks, snapAsks)
 	}
 
-	vwap, extrema, filled = ob.vwap(false, 65)
-	if !filled {
-		t.Fatalf("should be filled")
+	type vwapFn func(bids bool, qty uint64) (vwap, extrema uint64, filled bool)
+	checkVWAPFn := func(fn vwapFn, bids bool, qty uint64, expVWAP, expExtrema uint64, expFilled bool) {
+		t.Helper()
+		vwap, extrema, filled := fn(bids, qty)
+		if filled != expFilled {
+			t.Fatalf("wrong filled. expected %v got %v", expFilled, filled)
+		}
+		if vwap != expVWAP {
+			t.Fatalf("wrong vwap. expected %d got %d", expVWAP, vwap)
+		}
+		if extrema != expExtrema {
+			t.Fatalf("wrong extrema. expected %d got %d", expExtrema, extrema)
+		}
 	}
-	expectedVWAP = uint64(400)
-	if vwap != expectedVWAP {
-		t.Fatalf("wrong vwap. expected %d got %d", expectedVWAP, vwap)
+	checkVWAP := func(bids bool, qty uint64, expVWAP, expExtrema uint64, expFilled bool) {
+		t.Helper()
+		checkVWAPFn(ob.vwap, bids, qty, expVWAP, expExtrema, expFilled)
 	}
-	if extrema != 400 {
-		t.Fatalf("wrong extrema")
+	checkInvVWAP := func(bids bool, qty uint64, expVWAP, expExtrema uint64, expFilled bool) {
+		t.Helper()
+		checkVWAPFn(ob.invVWAP, bids, qty, expVWAP, expExtrema, expFilled)
 	}
 
-	// Tests querying more quantity than on books
-	_, _, filled = ob.vwap(true, 161)
-	if filled {
-		t.Fatalf("should not be filled")
-	}
-	_, _, filled = ob.vwap(false, 161)
-	if filled {
-		t.Fatalf("should not be filled")
-	}
+	// Test vwap for bids and asks
+	expVWAP := (sortedBids[0].rate*30 + sortedBids[1].rate*30 + sortedBids[2].rate*5) / 65
+	checkVWAP(true, 65, expVWAP, 3000e8, true)
+	checkVWAP(false, 65, 400e8, 400e8, true)
+
+	// Test inv vwap for bids and asks
+	quoteBidsQty := quoteBids[0].qty + quoteBids[1].qty
+	expVWAP = calc.BaseQuoteToRate(sortedBids[0].qty+sortedBids[1].qty, quoteBidsQty)
+	checkInvVWAP(true, quoteBidsQty, expVWAP, quoteBids[1].rate, true)
+	quoteAsksQty := quoteAsks[0].qty + quoteAsks[1].qty
+	expVWAP = calc.BaseQuoteToRate(sortedAsks[0].qty+sortedAsks[1].qty, quoteAsksQty)
+	checkInvVWAP(false, quoteAsksQty, expVWAP, quoteAsks[1].rate, true)
+
+	// Test vwap for qty > total qty
+	checkVWAP(true, 161, 0, 0, false)
+	checkVWAP(false, 161, 0, 0, false)
 
 	// Update quantities. Setting qty to 0 should delete.
-	ob.update([]*obEntry{
-		{qty: 0, rate: 5000},
-		{qty: 50, rate: 4000},
-	}, []*obEntry{
-		{qty: 0, rate: 400},
-		{qty: 35, rate: 4000},
-	})
+	bids = []*obEntry{
+		{qty: 0, rate: 5000e8},
+		{qty: 50, rate: 4000e8},
+	}
+	asks = []*obEntry{
+		{qty: 0, rate: 400e8},
+		{qty: 35, rate: 4000e8},
+	}
+	ob.update(bids, asks)
 
-	vwap, extrema, filled = ob.vwap(true, 65)
+	// Make sure snap returns the correct entries
+	expSnapBids := []*obEntry{
+		{qty: 50, rate: 4000e8},
+		{qty: 10, rate: 3000e8},
+		{qty: 80, rate: 400e8},
+	}
+	expSnapAsks := []*obEntry{
+		{qty: 10, rate: 3000e8},
+		{qty: 35, rate: 4000e8},
+		{qty: 30, rate: 5000e8},
+	}
+	snapBids, snapAsks = ob.snap()
+	if !reflect.DeepEqual(snapBids, expSnapBids) {
+		t.Fatalf("wrong snap bids. expected %v got %v", expSnapBids, snapBids)
+	}
+	if !reflect.DeepEqual(snapAsks, expSnapAsks) {
+		t.Fatalf("wrong snap asks. expected %v got %v", expSnapAsks, snapAsks)
+	}
+
+	// Test vwap with updated quantities
+	expVWAP = (50*uint64(4000e8) + 10*uint64(3000e8) + 5*uint64(400e8)) / 65
+	checkVWAP(true, 65, expVWAP, 400e8, true)
+	expVWAP = (10*uint64(3000e8) + 35*uint64(4000e8) + 20*uint64(5000e8)) / 65
+	checkVWAP(false, 65, expVWAP, 5000e8, true)
+}
+
+// Test vwap and inv vwap with values that would overflow uint64.
+func TestVWAPOverflow(t *testing.T) {
+	bids := []*obEntry{
+		{qty: 1e15, rate: 12e9},
+		{qty: 1e15, rate: 10e9},
+	}
+	ob := newOrderBook()
+	ob.update(bids, nil)
+
+	vwap, extrema, filled := ob.vwap(true, 2e15)
 	if !filled {
 		t.Fatalf("should be filled")
 	}
-	expectedVWAP = uint64((50*4000 + 10*3000 + 5*400) / 65)
-	if vwap != expectedVWAP {
-		t.Fatalf("wrong vwap. expected %d got %d", expectedVWAP, vwap)
+	if vwap != uint64(11e9) {
+		t.Fatalf("wrong vwap. expected %d got %d", uint64(11e9), vwap)
 	}
-	if extrema != 400 {
+	if extrema != uint64(10e9) {
 		t.Fatalf("wrong extrema")
 	}
 
-	vwap, extrema, filled = ob.vwap(false, 65)
+	var totalQuoteQty, totalBaseQty uint64
+	for _, bid := range bids {
+		totalQuoteQty += calc.BaseToQuote(bid.rate, bid.qty)
+		totalBaseQty += bid.qty
+	}
+	vwap, extrema, filled = ob.invVWAP(true, totalQuoteQty)
 	if !filled {
 		t.Fatalf("should be filled")
 	}
-	expectedVWAP = uint64((20*5000 + 35*4000 + 10*3000) / 65)
-	if vwap != expectedVWAP {
-		t.Fatalf("wrong vwap. expected %d got %d", expectedVWAP, vwap)
+	if calc.QuoteToBase(vwap, totalQuoteQty) != totalBaseQty {
+		t.Fatal("wrong inv vwap")
 	}
-	if extrema != 5000 {
+	if extrema != uint64(10e9) {
 		t.Fatalf("wrong extrema")
 	}
 }

@@ -787,6 +787,11 @@ func (m *MarketMaker) cexInUse(cexName string) bool {
 
 func (m *MarketMaker) newBot(cfg *BotConfig, adaptorCfg *exchangeAdaptorCfg) (bot, error) {
 	mktID := dexMarketID(cfg.Host, cfg.BaseID, cfg.QuoteID)
+
+	if err := cfg.validate(); err != nil {
+		return nil, fmt.Errorf("invalid bot config: %w", err)
+	}
+
 	switch {
 	case cfg.ArbMarketMakerConfig != nil:
 		return newArbMarketMaker(cfg, adaptorCfg, m.log.SubLogger(fmt.Sprintf("AMM-%s", mktID)))
@@ -1362,7 +1367,7 @@ func (m *MarketMaker) updateCEXOrderEvent(mkt *MarketWithHost, event *MarketMaki
 
 	orderEvent := event.CEXOrderEvent
 
-	trade, err := cex.TradeStatus(m.ctx, orderEvent.ID, mkt.BaseID, mkt.QuoteID)
+	trade, err := cex.TradeStatus(m.ctx, orderEvent.ID, orderEvent.BaseID, orderEvent.QuoteID)
 	if err != nil {
 		return nil, fmt.Errorf("error fetching trade status: %v", err)
 	}

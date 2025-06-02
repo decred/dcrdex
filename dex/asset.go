@@ -168,6 +168,19 @@ func (ui *UnitInfo) ConventionalString(v uint64) string {
 	return strconv.FormatFloat(float64(v)/float64(c), 'f', prec, 64)
 }
 
+func trimTrailingZeros(s string) string {
+	if !strings.Contains(s, ".") {
+		return s
+	}
+	return strings.TrimRight(strings.TrimRight(s, "0"), ".")
+}
+
+// FormatConventional formats the quantity to conventional units, and returns
+// the formatted float string with the unit.
+func (ui *UnitInfo) FormatConventional(v uint64) string {
+	return fmt.Sprintf("%s %s", trimTrailingZeros(ui.ConventionalString(v)), ui.Conventional.Unit)
+}
+
 // FormatAtoms formats the atomic value as a string with units. The number is
 // formatted with full precision. For small values, the value is formatted in
 // atomic units, while for larger values the value is formatted in conventional
