@@ -907,7 +907,8 @@ func buildOrderRequest(mkt *cbtypes.Market, baseID, quoteID uint32, sell bool, o
 	getRateStr := func() string {
 		rate = steppedRate(rate, mkt.RateStep)
 		convRate := calc.ConventionalRateAlt(rate, bFactor, qFactor)
-		ratePrec := int(math.Round(math.Log10(float64(qFactor) / float64(mkt.RateStep))))
+		convRateStep := calc.ConventionalRateAlt(mkt.RateStep, bFactor, qFactor)
+		ratePrec := -int(math.Round(math.Log10(convRateStep)))
 		return strconv.FormatFloat(convRate, 'f', ratePrec, 64)
 	}
 

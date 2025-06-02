@@ -394,7 +394,7 @@ func TestWithdrawal(t *testing.T) {
 	msgQty := uint64(math.Round(qty * float64(ui.Conventional.ConversionFactor)))
 
 	t.Logf("msgQty: %v", msgQty)
-	withdrawalID, err := bnc.Withdraw(ctx, uint32(assetID), msgQty, addr)
+	withdrawalID, _, err := bnc.Withdraw(ctx, uint32(assetID), msgQty, addr)
 	if err != nil {
 		fmt.Printf("withdrawal error: %v", err)
 		return
