@@ -170,4 +170,13 @@ div[data-handler=mm] {
       grid-column: 3;
     }
   }
+
+  section.datum {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: start;
+    text-align: center;
+    font-size: 15px;
+  }
 }

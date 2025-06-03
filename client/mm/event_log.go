@@ -70,6 +70,7 @@ type MarketMakingEvent struct {
 type MarketMakingRun struct {
 	StartTime int64           `json:"startTime"`
 	Market    *MarketWithHost `json:"market"`
+	Profit    float64         `json:"profit"`
 }
 
 // BalanceState contains the fiat rates and bot balances at the latest point of
@@ -510,9 +511,15 @@ func (db *boltEventLogDB) runs(n uint64, refStartTime *uint64, refMkt *MarketWit
 				return fmt.Errorf("nil run bucket for key %x", k)
 			}
 
+			overview, err := db.queryRunOverview(runBucket, false)
+			if err != nil {
+				return err
+			}
+
 			runs = append(runs, &MarketMakingRun{
 				StartTime: startTime,
 				Market:    mkt,
+				Profit:    overview.ProfitLoss.Profit,
 			})
 
 			if n > 0 && uint64(len(runs)) >= n {
@@ -548,6 +555,63 @@ func decodeFinalState(finalStateB []byte) (*BalanceState, error) {
 	return finalState, nil
 }
 
+func (db *boltEventLogDB) queryRunOverview(runBucket *bbolt.Bucket, includeCfgs bool) (*MarketMakingRunOverview, error) {
+	initialBalsB := runBucket.Get(initialBalsKey)
+	initialBals := make(map[uint32]uint64)
+	ver, pushes, err := encode.DecodeBlob(initialBalsB)
+	if err != nil {
+		return nil, err
+	}
+	if ver != 0 {
+		return nil, fmt.Errorf("unknown initial bals version %d", ver)
+	}
+	if len(pushes) != 1 {
+		return nil, fmt.Errorf("expected 1 push for initial bals, got %d", len(pushes))
+	}
+	err = json.Unmarshal(pushes[0], &initialBals)
+	if err != nil {
+		return nil, err
+	}
+
+	finalStateB := runBucket.Get(finalStateKey)
+	if finalStateB == nil {
+		return nil, fmt.Errorf("no final state found")
+	}
+
+	finalState, err := decodeFinalState(finalStateB)
+	if err != nil {
+		return nil, err
+	}
+
+	var cfgs []*CfgUpdate
+	if includeCfgs {
+		cfgs, err = db.cfgUpdates(runBucket)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	endTimeB := runBucket.Get(endTimeKey)
+	var endTime *int64
+	if len(endTimeB) == 8 {
+		endTime = new(int64)
+		*endTime = int64(binary.BigEndian.Uint64(endTimeB))
+	}
+
+	finalBals := make(map[uint32]uint64)
+	for assetID, bal := range finalState.Balances {
+		finalBals[assetID] = bal.Available + bal.Pending + bal.Locked + bal.Reserved
+	}
+
+	return &MarketMakingRunOverview{
+		EndTime:         endTime,
+		Cfgs:            cfgs,
+		InitialBalances: initialBals,
+		ProfitLoss:      newProfitLoss(initialBals, finalBals, finalState.InventoryMods, finalState.FiatRates),
+		FinalState:      finalState,
+	}, nil
+}
+
 // runOverview returns overview information about a run, not including the
 // events that took place.
 func (db *boltEventLogDB) runOverview(startTime int64, mkt *MarketWithHost) (*MarketMakingRunOverview, error) {
@@ -560,56 +624,10 @@ func (db *boltEventLogDB) runOverview(startTime int64, mkt *MarketWithHost) (*Ma
 			return fmt.Errorf("nil run bucket for key %x", key)
 		}
 
-		initialBalsB := runBucket.Get(initialBalsKey)
-		initialBals := make(map[uint32]uint64)
-		ver, pushes, err := encode.DecodeBlob(initialBalsB)
+		var err error
+		overview, err = db.queryRunOverview(runBucket, true)
 		if err != nil {
 			return err
-		}
-		if ver != 0 {
-			return fmt.Errorf("unknown initial bals version %d", ver)
-		}
-		if len(pushes) != 1 {
-			return fmt.Errorf("expected 1 push for initial bals, got %d", len(pushes))
-		}
-		err = json.Unmarshal(pushes[0], &initialBals)
-		if err != nil {
-			return err
-		}
-
-		finalStateB := runBucket.Get(finalStateKey)
-		if finalStateB == nil {
-			return fmt.Errorf("no final state found")
-		}
-
-		finalState, err := decodeFinalState(finalStateB)
-		if err != nil {
-			return err
-		}
-
-		cfgs, err := db.cfgUpdates(runBucket)
-		if err != nil {
-			return err
-		}
-
-		endTimeB := runBucket.Get(endTimeKey)
-		var endTime *int64
-		if len(endTimeB) == 8 {
-			endTime = new(int64)
-			*endTime = int64(binary.BigEndian.Uint64(endTimeB))
-		}
-
-		finalBals := make(map[uint32]uint64)
-		for assetID, bal := range finalState.Balances {
-			finalBals[assetID] = bal.Available + bal.Pending + bal.Locked + bal.Reserved
-		}
-
-		overview = &MarketMakingRunOverview{
-			EndTime:         endTime,
-			Cfgs:            cfgs,
-			InitialBalances: initialBals,
-			ProfitLoss:      newProfitLoss(initialBals, finalBals, finalState.InventoryMods, finalState.FiatRates),
-			FinalState:      finalState,
 		}
 
 		return nil

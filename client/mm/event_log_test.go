@@ -109,6 +109,15 @@ func TestEventLogDB(t *testing.T) {
 		}
 	}
 
+	currFinalBals := func() map[uint32]uint64 {
+		bs := currBalanceState()
+		bals := make(map[uint32]uint64, len(bs.Balances))
+		for k, v := range bs.Balances {
+			bals[k] = v.Available + v.Pending + v.Locked + v.Reserved
+		}
+		return bals
+	}
+
 	err = db.storeNewRun(startTime, mkt, cfg, currBalanceState())
 	if err != nil {
 		t.Fatalf("error storing new run: %v", err)
@@ -245,6 +254,8 @@ func TestEventLogDB(t *testing.T) {
 	if len(runs) != 1 {
 		t.Fatalf("expected 1 run, got %d", len(runs))
 	}
+	pl := newProfitLoss(initialBals, currFinalBals(), nil, fiatRates)
+	expectedRun.Profit = pl.Profit
 	if !reflect.DeepEqual(runs[0], expectedRun) {
 		t.Fatalf("expected run:\n%v\n\ngot:\n%v", expectedRun, runs[0])
 	}
@@ -285,6 +296,8 @@ func TestEventLogDB(t *testing.T) {
 	if len(runs) != 1 {
 		t.Fatalf("expected 1 run, got %d", len(runs))
 	}
+	pl = newProfitLoss(initialBals, currFinalBals(), nil, fiatRates)
+	expectedRun.Profit = pl.Profit
 	if !reflect.DeepEqual(runs[0], expectedRun) {
 		t.Fatalf("expected run:\n%v\n\ngot:\n%v", expectedRun, runs[0])
 	}
@@ -313,15 +326,10 @@ func TestEventLogDB(t *testing.T) {
 	if *overview.EndTime != startTime+1000 {
 		t.Fatalf("expected end time %d, got %d", startTime+1000, overview.EndTime)
 	}
-	bs := currBalanceState()
-	finalBals := map[uint32]uint64{
-		42: bs.Balances[42].Available + bs.Balances[42].Pending + bs.Balances[42].Locked + bs.Balances[42].Reserved,
-		60: bs.Balances[60].Available + bs.Balances[60].Pending + bs.Balances[60].Locked + bs.Balances[60].Reserved,
-	}
 	if !reflect.DeepEqual(overview.InitialBalances, initialBals) {
 		t.Fatalf("expected initial balances %v, got %v", initialBals, overview.InitialBalances)
 	}
-	expPL := newProfitLoss(initialBals, finalBals, nil, fiatRates)
+	expPL := newProfitLoss(initialBals, currFinalBals(), nil, fiatRates)
 	if overview.ProfitLoss.Profit != expPL.Profit {
 		t.Fatalf("expected profit loss %v, got %v", expPL, overview.ProfitLoss)
 	}
