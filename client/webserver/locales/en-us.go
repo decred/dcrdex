@@ -696,4 +696,8 @@ var EnUS = map[string]*intl.Translation{
 	"Internal transfers only":     {T: "Internal transfers only"},
 	"internal_only_tooltip":       {T: "When enabled, the bot will be able to use any available funds in the wallet to simulate a transfer between the DEX and the CEX, (i.e. increase the bot's DEX balance and decrease the bot's CEX balance when a withdrawal needs to be made) but no actual transfers will be made."},
 	"running_bot_allocation_note": {T: "This bot is already running. The numbers below are the allocation adjustments that will be made, not the total balance that will be allocated."},
+	"order_type":                  {T: "Order Type"},
+	"Total Profit":                {T: "Total Profit"},
+	"total_profit_tooltip":        {T: "Total profit only includes runs that have completed"},
+	"Number of Runs":              {T: "Number of Runs"},
 }
