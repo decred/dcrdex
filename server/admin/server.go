@@ -77,6 +77,7 @@ type SvrCore interface {
 	MarketMatchesStreaming(base, quote uint32, includeInactive bool, N int64, f func(*dexsrv.MatchData) error) (int, error)
 	EnableDataAPI(yes bool)
 	CreatePrepaidBonds(n int, strength uint32, durSecs int64) ([][]byte, error)
+	ForgiveUser(user account.AccountID) error
 }
 
 // Server is a multi-client https server.
@@ -155,6 +156,7 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 			rm.Get("/", s.apiAccountInfo)
 			rm.Get("/outcomes", s.apiMatchOutcomes)
 			rm.Get("/fails", s.apiMatchFails)
+			rm.Get("/forgive_user", s.forgiveUser)
 			rm.Get("/forgive_match/{"+matchIDKey+"}", s.apiForgiveMatchFail)
 			rm.Post("/notify", s.apiNotify)
 		})
