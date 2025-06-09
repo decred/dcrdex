@@ -197,7 +197,7 @@ func (cfg *Config) Web(c *core.Core, mm *mm.MarketMaker, log dex.Logger, utc boo
 		KeyFile:         keyFile,
 		NoEmbed:         cfg.NoEmbedSite,
 		HttpProf:        cfg.HTTPProfile,
-		AppVersion:      userAppVersion(Version),
+		AppVersion:      Version,
 		Language:        cfg.Language,
 		Tor:             cfg.Tor,
 		MainLogFilePath: cfg.LogPath,
@@ -355,12 +355,6 @@ func ResolveConfig(appData string, cfg *Config) error {
 	}
 
 	return nil
-}
-
-// userAppVersion returns a simple user-facing version: maj.min.patch.
-func userAppVersion(fullVersion string) string {
-	parts := strings.Split(fullVersion, "-")
-	return parts[0]
 }
 
 // setNet sets the filepath for the network directory and some network specific
