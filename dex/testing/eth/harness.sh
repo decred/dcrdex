@@ -251,11 +251,6 @@ cat > "${NODES_ROOT}/test_block1_hash.txt" <<EOF
 ${TEST_BLOCK1_HASH}
 EOF
 
-# Miner
-tmux new-window -t $SESSION:5 -n "miner" $SHELL
-tmux send-keys -t $SESSION:5 "cd ${NODES_ROOT}/harness-ctl" C-m
-tmux send-keys -t $SESSION:5 "watch -n 15 ./mine-alpha 1" C-m
-
 # Reenable history and attach to the control session.
 tmux select-window -t $SESSION:0
 tmux send-keys -t $SESSION:0 "set -o history" C-m

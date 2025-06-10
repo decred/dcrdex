@@ -118,7 +118,6 @@ type testNode struct {
 	signDataErr     error
 	privKey         *ecdsa.PrivateKey
 	swapVers        map[uint32]struct{} // For SwapConfirmations -> swap. TODO for other contractor methods
-	swapMap         map[[32]byte]*dexeth.SwapState
 	refundable      bool
 	baseFee         *big.Int
 	tip             *big.Int
@@ -4392,9 +4391,6 @@ func testRefundReserves(t *testing.T, assetID uint32) {
 	node.bal = dexeth.GweiToWei(1e9)
 	node.refundable = true
 	node.swapVers = map[uint32]struct{}{0: {}}
-
-	var secretHash [32]byte
-	node.swapMap = map[[32]byte]*dexeth.SwapState{secretHash: {}}
 
 	feeWallet := eth
 	gasesV0 := eth.versionedGases[0]
