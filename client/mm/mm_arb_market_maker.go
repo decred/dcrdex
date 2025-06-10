@@ -555,9 +555,9 @@ func multiHopArbTrades(mkt [2]uint32, sell bool, assetID uint32, minQty, maxQty,
 	}
 }
 
-// multiHopRate returns the aggregate rate that can be achieved by completing
-// a multi-hop trade, and the minimum and maximum quantities for the trades
-// on both the base and quote asset markets.
+// multiHopRateAndTrades returns the aggregate rate that can be achieved by
+// completing a multi-hop trade, and the minimum and maximum quantities for
+// the trades on both the base and quote asset markets.
 func multiHopRateAndTrades(sellOnDEX bool, depth, numLots uint64, multiHopCfg *MultiHopCfg, mkt *market, vwap, invVwap vwapFunc) (uint64, bool, []*arbTradeArgs, error) {
 	intermediateAsset := multiHopCfg.BaseAssetMarket[0]
 	if mkt.baseID == intermediateAsset {

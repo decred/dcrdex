@@ -50,16 +50,16 @@ func TestOrderbook(t *testing.T) {
 	// have the same values, but VWAP for asks should be
 	// calculated from the lower values first.
 	bids := []*obEntry{
-		{qty: 30, rate: 4000e8},
-		{qty: 30, rate: 5000e8},
-		{qty: 80, rate: 400e8},
-		{qty: 10, rate: 3000e8},
+		{qty: 30e8, rate: 4000},
+		{qty: 30e8, rate: 5000},
+		{qty: 80e8, rate: 400},
+		{qty: 10e8, rate: 3000},
 	}
 	asks := []*obEntry{
-		{qty: 30, rate: 4000e8},
-		{qty: 30, rate: 5000e8},
-		{qty: 80, rate: 400e8},
-		{qty: 10, rate: 3000e8},
+		{qty: 30e8, rate: 4000},
+		{qty: 30e8, rate: 5000},
+		{qty: 80e8, rate: 400},
+		{qty: 10e8, rate: 3000},
 	}
 	ob.update(bids, asks)
 
@@ -99,9 +99,9 @@ func TestOrderbook(t *testing.T) {
 	}
 
 	// Test vwap for bids and asks
-	expVWAP := (sortedBids[0].rate*30 + sortedBids[1].rate*30 + sortedBids[2].rate*5) / 65
-	checkVWAP(true, 65, expVWAP, 3000e8, true)
-	checkVWAP(false, 65, 400e8, 400e8, true)
+	expVWAP := (sortedBids[0].rate*30e8 + sortedBids[1].rate*30e8 + sortedBids[2].rate*5e8) / 65e8
+	checkVWAP(true, 65e8, expVWAP, 3000, true)
+	checkVWAP(false, 65e8, 400, 400, true)
 
 	// Test inv vwap for bids and asks
 	quoteBidsQty := quoteBids[0].qty + quoteBids[1].qty
@@ -112,30 +112,30 @@ func TestOrderbook(t *testing.T) {
 	checkInvVWAP(false, quoteAsksQty, expVWAP, quoteAsks[1].rate, true)
 
 	// Test vwap for qty > total qty
-	checkVWAP(true, 161, 0, 0, false)
-	checkVWAP(false, 161, 0, 0, false)
+	checkVWAP(true, 161e8, 0, 0, false)
+	checkVWAP(false, 161e8, 0, 0, false)
 
 	// Update quantities. Setting qty to 0 should delete.
 	bids = []*obEntry{
-		{qty: 0, rate: 5000e8},
-		{qty: 50, rate: 4000e8},
+		{qty: 0, rate: 5000},
+		{qty: 50e8, rate: 4000},
 	}
 	asks = []*obEntry{
-		{qty: 0, rate: 400e8},
-		{qty: 35, rate: 4000e8},
+		{qty: 0, rate: 400},
+		{qty: 35e8, rate: 4000},
 	}
 	ob.update(bids, asks)
 
 	// Make sure snap returns the correct entries
 	expSnapBids := []*obEntry{
-		{qty: 50, rate: 4000e8},
-		{qty: 10, rate: 3000e8},
-		{qty: 80, rate: 400e8},
+		{qty: 50e8, rate: 4000},
+		{qty: 10e8, rate: 3000},
+		{qty: 80e8, rate: 400},
 	}
 	expSnapAsks := []*obEntry{
-		{qty: 10, rate: 3000e8},
-		{qty: 35, rate: 4000e8},
-		{qty: 30, rate: 5000e8},
+		{qty: 10e8, rate: 3000},
+		{qty: 35e8, rate: 4000},
+		{qty: 30e8, rate: 5000},
 	}
 	snapBids, snapAsks = ob.snap()
 	if !reflect.DeepEqual(snapBids, expSnapBids) {
@@ -146,10 +146,10 @@ func TestOrderbook(t *testing.T) {
 	}
 
 	// Test vwap with updated quantities
-	expVWAP = (50*uint64(4000e8) + 10*uint64(3000e8) + 5*uint64(400e8)) / 65
-	checkVWAP(true, 65, expVWAP, 400e8, true)
-	expVWAP = (10*uint64(3000e8) + 35*uint64(4000e8) + 20*uint64(5000e8)) / 65
-	checkVWAP(false, 65, expVWAP, 5000e8, true)
+	expVWAP = (50e8*uint64(4000) + 10e8*uint64(3000) + 5e8*uint64(400)) / 65e8
+	checkVWAP(true, 65e8, expVWAP, 400, true)
+	expVWAP = (10e8*uint64(3000) + 35e8*uint64(4000) + 20e8*uint64(5000)) / 65e8
+	checkVWAP(false, 65e8, expVWAP, 5000, true)
 }
 
 // Test vwap and inv vwap with values that would overflow uint64.
