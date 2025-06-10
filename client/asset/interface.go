@@ -9,6 +9,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	dcrwalletjson "decred.org/dcrwallet/v5/rpc/jsonrpc/types"
+	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
@@ -573,6 +574,53 @@ type Authenticator interface {
 	Lock() error
 	// Locked will be true if the wallet is currently locked.
 	Locked() bool
+}
+
+// PrivateSwapper is a wallet implementation that supports private atomic
+// swaps using adaptor signatures.
+//
+// TODO: remove all secretNonce parameters and return values as this should be
+// stored by the wallet.
+type PrivateSwapper interface {
+	// PrivateSwapPubKey returns a public key to be used for a private
+	// adaptor signature based swap. This is sent to the counterparty and
+	// used in the RedeemPublicKey or RefundPublicKey fields of the
+	// PrivateContract.
+	PrivateSwapPubKey() ([]byte, []byte, error)
+	// SwapPrivate initiates swaps in a single transaction.
+	SwapPrivate(swaps *PrivateSwaps) (receipts []Receipt, coin Coin, txData []byte, fees uint64, err error)
+	// AuditPrivateContract verifies that coinID represents a valid private
+	// swap transaction as described by the contract.
+	AuditPrivateContract(coinID, txData []byte, contract *PrivateContract, rebroadcast bool) error
+	// GenerateUnsignedRedeemTx generates an unsigned redeem transaction to be sent
+	// to the counterparty, who uses it to generate an adaptor signature.
+	GenerateUnsignedRedeemTx(coinID []byte, contract *PrivateContract, feeRate uint64) ([]byte, error)
+	// ValidateAdaptorSecret checks if an adaptor secret is valid for the provided
+	// unsigned redemption transaction and public keys. For some assets, such as
+	// BTC using MuSig2 signatures, the sum of the adaptor point and combined
+	// nonce must have an even y-coordinate. Other assets, such as DCR which do
+	// not use aggregated schnorr signatures, can always return true because the
+	// nonce can be determined based on the adaptor secret.
+	ValidateAdaptorSecret(adaptorSecret *btcec.ModNScalar, unsignedRedeemB []byte, contract *PrivateContract) (bool, error)
+	// GeneratePrivateKeyTweakedAdaptor generates an adaptor signature for the provided
+	// unsigned redemption transaction. The isRedeemer flag indicates whether the wallet
+	// is the redeemer or refund initiator for this contract.
+	GeneratePrivateKeyTweakedAdaptor(unsignedRedeemB []byte, contract *PrivateContract, adaptorSec *btcec.ModNScalar, secretNonceB []byte, isRedeemer bool) ([]byte, error)
+	// ValidateAdaptorSig verifies that the adaptor signature provided by the
+	// counterparty enables the wallet to redeem the private swap once the secret
+	// is recovered. This is used only for private-key-tweaked adaptor signatures.
+	ValidateAdaptorSig(unsignedRedeemB []byte, adaptorSigB []byte, adaptorPub *btcec.JacobianPoint, contract *PrivateContract, isRedeemer bool) (bool, error)
+	// GeneratePublicKeyTweakedAdaptor generates a public-key-tweaked adaptor
+	// signature. The party knowing the secret can use this signature to redeem
+	// their private swap, revealing the secret to the other party.
+	GeneratePublicKeyTweakedAdaptor(unsignedRedeemB []byte, contract *PrivateContract, adaptorPub *btcec.JacobianPoint, secretNonceB []byte) ([]byte, error)
+	// RecoverAdaptorSecret recovers the adaptor secret from the public-key adaptor
+	// signature and the counterparty's redemption transaction.
+	RecoverAdaptorSecret(cpRedeemTxB []byte, ourRefundAdaptorSigB, cpRedeemAdaptorSigB []byte, ourSecNonceB []byte, adaptorPub *btcec.JacobianPoint, contract *PrivateContract) (*btcec.ModNScalar, error)
+	// RedeemPrivate redeems a private swap. Unlike regular atomic swaps, only
+	// one swap can be redeemed at a time because the redemption transaction was
+	// pre-generated using GenerateUnsignedRedeemTx.
+	RedeemPrivate(contract *PrivateContract, unsignedRedeemB []byte, adaptorSigB []byte, secNonceB []byte, adaptorSecret *btcec.ModNScalar) (out Coin, feesPaid uint64, txData []byte, err error)
 }
 
 // TxFeeEstimator is a wallet implementation with fee estimation functionality.
@@ -1417,6 +1465,37 @@ type Swaps struct {
 	Inputs Coins
 	// Contract is the contract data.
 	Contracts []*Contract
+	// FeeRate is the required fee rate in atoms/byte.
+	FeeRate uint64
+	// LockChange can be set to true if the change should be locked for
+	// subsequent matches.
+	LockChange bool
+	// Options are OrderOptions set or selected by the user at order time.
+	Options map[string]string
+}
+
+type PrivateContract struct {
+	// LockTime is the lock time for the contract.
+	LockTime uint64
+	// Value is the value of the contract.
+	Value uint64
+	// RedeemPublicKey is the public key of the wallet that will redeem the
+	// private swap.
+	RedeemPublicKey []byte
+	// RefundPublicKey is the public key of the wallet that will refund the
+	// swap if it expires. The signature of this key is also required to redeem
+	// the swap. The redeemer receives the signature using this public key using
+	// an adaptor signature.
+	RefundPublicKey []byte
+}
+
+type PrivateSwaps struct {
+	// Version is the asset version.
+	Version uint32
+	// Inputs are the Coins being spent.
+	Inputs Coins
+	// Contract is the contract data.
+	Contracts []*PrivateContract
 	// FeeRate is the required fee rate in atoms/byte.
 	FeeRate uint64
 	// LockChange can be set to true if the change should be locked for
