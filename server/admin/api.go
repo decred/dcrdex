@@ -35,7 +35,7 @@ func writeJSON(w http.ResponseWriter, thing any) {
 	writeJSONWithStatus(w, thing, http.StatusOK)
 }
 
-// writeJSON marshals the provided interface and writes the bytes to the
+// writeJSONWithStatus marshals the provided interface and writes the bytes to the
 // ResponseWriter with the specified response code.
 func writeJSONWithStatus(w http.ResponseWriter, thing any, code int) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
