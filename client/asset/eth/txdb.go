@@ -152,34 +152,21 @@ func NewTxDB(path string, log dex.Logger, baseChainID uint32) (*TxDB, error) {
 		return nil, err
 	}
 
-	txs, err := ldb.Table("txs")
-	if err != nil {
-		return nil, err
-	}
-
-	allAssetIndex, err := txs.AddUniqueIndex("allAssets", func(k, v lexi.KV) ([]byte, error) {
+	allAssetIndexFunc := func(k, v lexi.KV) ([]byte, error) {
 		wt, is := v.(*extendedWalletTx)
 		if !is {
 			return nil, fmt.Errorf("expected type *extendedWalletTx, got %T", wt)
 		}
 		return nonceIndexEntry(wt), nil
-	})
-	if err != nil {
-		return nil, err
 	}
-
-	assetIndex, err := txs.AddUniqueIndex("asset", func(k, v lexi.KV) ([]byte, error) {
+	assetIndexFunc := func(k, v lexi.KV) ([]byte, error) {
 		wt, is := v.(*extendedWalletTx)
 		if !is {
 			return nil, fmt.Errorf("expected type *extendedWalletTx, got %T", wt)
 		}
 		return assetIndexEntry(wt, baseChainID), nil
-	})
-	if err != nil {
-		return nil, err
 	}
-
-	bridgeInitiationIndex, err := txs.AddIndex("bridgeinit", func(k, v lexi.KV) ([]byte, error) {
+	bridgeInitiationIndexFunc := func(k, v lexi.KV) ([]byte, error) {
 		wt, is := v.(*extendedWalletTx)
 		if !is {
 			return nil, fmt.Errorf("expected type *extendedWalletTx, got %T", wt)
@@ -188,12 +175,8 @@ func NewTxDB(path string, log dex.Logger, baseChainID uint32) (*TxDB, error) {
 			return nil, lexi.ErrNotIndexed
 		}
 		return bridgeIndexEntry(wt), nil
-	})
-	if err != nil {
-		return nil, err
 	}
-
-	bridgeCompletionIndex, err := txs.AddUniqueIndex("bridgecomplete", func(k, v lexi.KV) ([]byte, error) {
+	bridgeCompletionIndexFunc := func(k, v lexi.KV) ([]byte, error) {
 		wt, is := v.(*extendedWalletTx)
 		if !is {
 			return nil, fmt.Errorf("expected type *extendedWalletTx, got %T", wt)
@@ -206,6 +189,34 @@ func NewTxDB(path string, log dex.Logger, baseChainID uint32) (*TxDB, error) {
 		}
 		txHash := common.HexToHash(wt.BridgeCounterpartTx.ID)
 		return txHash[:], nil
+	}
+
+	const allAssetsIndexName = "allAssets"
+	const assetIndexName = "asset"
+	const bridgeInitiationIndexName = "bridgeinit"
+	const bridgeCompletionIndexName = "bridgecomplete"
+	txs, err := ldb.Table("txs", &lexi.TableCfg{
+		Indexes: map[string]*lexi.IndexCfg{
+			allAssetsIndexName: {
+				Version: 1,
+				F:       allAssetIndexFunc,
+				Unique:  true,
+			},
+			assetIndexName: {
+				Version: 1,
+				F:       assetIndexFunc,
+				Unique:  true,
+			},
+			bridgeInitiationIndexName: {
+				Version: 1,
+				F:       bridgeInitiationIndexFunc,
+			},
+			bridgeCompletionIndexName: {
+				Version: 1,
+				F:       bridgeCompletionIndexFunc,
+				Unique:  true,
+			},
+		},
 	})
 	if err != nil {
 		return nil, err
@@ -214,10 +225,10 @@ func NewTxDB(path string, log dex.Logger, baseChainID uint32) (*TxDB, error) {
 	return &TxDB{
 		DB:                    ldb,
 		txs:                   txs,
-		allAssetIndex:         allAssetIndex,
-		assetIndex:            assetIndex,
-		bridgeInitiationIndex: bridgeInitiationIndex,
-		bridgeCompletionIndex: bridgeCompletionIndex,
+		allAssetIndex:         txs.Indexes[allAssetsIndexName],
+		assetIndex:            txs.Indexes[assetIndexName],
+		bridgeInitiationIndex: txs.Indexes[bridgeInitiationIndexName],
+		bridgeCompletionIndex: txs.Indexes[bridgeCompletionIndexName],
 		baseChainID:           baseChainID,
 	}, nil
 }

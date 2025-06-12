@@ -46,7 +46,7 @@ func New(dir string, log dex.Logger) (*DB, error) {
 		return nil, fmt.Errorf("error initializing db: %w", err)
 	}
 
-	metaTable, err := db.Table("meta")
+	metaTable, err := db.Table("meta", nil)
 	if err != nil {
 		return nil, fmt.Errorf("error initializing meta table: %w", err)
 	}
@@ -73,12 +73,8 @@ func New(dir string, log dex.Logger) (*DB, error) {
 	}
 
 	// Scores. Keyed on (scorer peer ID, scored peer ID).
-	scoreTable, err := db.Table("scores")
-	if err != nil {
-		return nil, fmt.Errorf("error constructing reputation table: %w", err)
-	}
 	// Scored peer index with timestamp sorting.
-	scoredIdx, err := scoreTable.AddIndex("scored-stamp", func(_, v lexi.KV) ([]byte, error) {
+	scoreIndexFunc := func(_, v lexi.KV) ([]byte, error) {
 		s, is := v.(*dbScore)
 		if !is {
 			return nil, fmt.Errorf("wrong type %T", v)
@@ -86,48 +82,61 @@ func New(dir string, log dex.Logger) (*DB, error) {
 		tB := make([]byte, 8)
 		binary.BigEndian.PutUint64(tB, uint64(s.stamp.UnixMilli()))
 		return append(s.scored[:], tB...), nil
+	}
+	scoreTable, err := db.Table("scores", &lexi.TableCfg{
+		Indexes: map[string]*lexi.IndexCfg{
+			"scored-stamp": {
+				Version: 1,
+				F:       scoreIndexFunc,
+			},
+		},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("error initializing reputation index: %w", err)
+		return nil, fmt.Errorf("error constructing reputation table: %w", err)
 	}
-	scoredIdx.UseDefaultIterationOptions(lexi.WithReverse())
+	scoreTable.Indexes["scored-stamp"].UseDefaultIterationOptions(lexi.WithReverse())
 
-	// Bonds. Keyed on coin ID
-	bondsTable, err := db.Table("bonds")
-	if err != nil {
-		return nil, fmt.Errorf("error initializing bonds table: %w", err)
-	}
-	// Retrieve bonds by peer ID.
-	bonderIdx, err := bondsTable.AddIndex("bonder", func(_, v lexi.KV) ([]byte, error) {
+	// Bonds. Keyed on coin ID, with index to retrieve bonds by peer ID
+	// and timestamp for pruning.
+	bonderIndexFunc := func(_, v lexi.KV) ([]byte, error) {
 		b, is := v.(*dbBond)
 		if !is {
 			return nil, fmt.Errorf("wrong type %T", v)
 		}
 		return b.PeerID[:], nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("error initializing bonder index: %w", err)
 	}
-	// We'll periodically prune expired bonds.
-	bondStampIdx, err := bondsTable.AddIndex("bond-stamp", func(_, v lexi.KV) ([]byte, error) {
+	bondStampIndexFunc := func(_, v lexi.KV) ([]byte, error) {
 		b, is := v.(*dbBond)
 		if !is {
 			return nil, fmt.Errorf("wrong type %T", v)
 		}
 		return encode.Uint64Bytes(uint64(b.Expiration.Unix())), nil
-	})
-	bondStampIdx.UseDefaultIterationOptions(lexi.WithReverse())
-	if err != nil {
-		return nil, fmt.Errorf("error initializing bond stamp index: %w", err)
 	}
+	bondsTable, err := db.Table("bonds", &lexi.TableCfg{
+		Indexes: map[string]*lexi.IndexCfg{
+			"bonder": {
+				Version: 1,
+				F:       bonderIndexFunc,
+			},
+			"bond-stamp": {
+				Version: 1,
+				F:       bondStampIndexFunc,
+			},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error initializing bonds table: %w", err)
+	}
+	bondsTable.Indexes["bond-stamp"].UseDefaultIterationOptions(lexi.WithReverse())
+
 	return &DB{
 		DB:           db,
 		scores:       scoreTable,
-		scoredIdx:    scoredIdx,
+		scoredIdx:    scoreTable.Indexes["scored-stamp"],
 		log:          log,
 		bonds:        bondsTable,
-		bonderIdx:    bonderIdx,
-		bondStampIdx: bondStampIdx,
+		bonderIdx:    bondsTable.Indexes["bonder"],
+		bondStampIdx: bondsTable.Indexes["bond-stamp"],
 	}, nil
 }
 
