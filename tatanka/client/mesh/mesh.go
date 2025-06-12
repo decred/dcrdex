@@ -137,7 +137,8 @@ func (m *Mesh) initializeDB() error {
 	}
 	m.db = db
 
-	m.bondTable, err = db.Table("bond")
+	m.bondTable, err = db.Table("bond", nil)
+
 	return err
 }
 
