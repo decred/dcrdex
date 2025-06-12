@@ -1352,7 +1352,7 @@ func (m *market) shuffle() (buys, sells [][2]json.Number) {
 	return convertSide(jsBuys), convertSide(jsSells)
 }
 
-// writeJSON marshals the provided interface and writes the bytes to the
+// writeJSONWithStatus marshals the provided interface and writes the bytes to the
 // ResponseWriter with the specified response code.
 func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
