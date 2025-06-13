@@ -49,7 +49,7 @@ require (
 	github.com/decred/go-socks v1.1.0
 	github.com/decred/slog v1.2.0
 	github.com/decred/vspd/types/v2 v2.1.0
-	github.com/dev-warrior777/go-monero v0.1.1-0.20250610085357-02623cbc17d2
+	github.com/dev-warrior777/go-monero v0.1.1
 	github.com/dgraph-io/badger v1.6.2
 	github.com/ethereum/go-ethereum v1.16.1
 	github.com/fatih/color v1.16.0
