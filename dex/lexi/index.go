@@ -29,44 +29,108 @@ type Index struct {
 	name                    string
 	table                   *Table
 	prefix                  keyPrefix
+	fBytes                  func(kB, vB []byte) ([]byte, error)
 	f                       func(k, v KV) ([]byte, error)
 	unique                  bool
 	defaultIterationOptions iteratorOpts
 }
 
-func (t *Table) addIndex(name string, f func(k, v KV) ([]byte, error), unique bool) (*Index, error) {
+func (t *Table) deleteIndex(txn *badger.Txn, indexName string) error {
+	p, err := t.prefixForName(t.name + "__idx__" + indexName)
+	if err != nil {
+		return err
+	}
+	return iteratePrefix(txn, prefixedKey(p, nil), nil, func(iter *badger.Iterator) error {
+		return txn.Delete(iter.Item().Key())
+	})
+}
+
+func (t *Table) updateIndex(txn *badger.Txn, idx *Index) error {
+	// Delete all existing index entries first
+	err := iteratePrefix(txn, prefixedKey(idx.prefix, nil), nil, func(iter *badger.Iterator) error {
+		return txn.Delete(iter.Item().Key())
+	})
+	if err != nil {
+		return fmt.Errorf("error deleting index: %w", err)
+	}
+
+	// Iterate over all table entries and reindex them
+	return iteratePrefix(txn, prefixedKey(t.prefix, nil), nil, func(iter *badger.Iterator) error {
+		tableKey := iter.Item().Key()
+
+		// Extract DBID from table key
+		if len(tableKey) != prefixSize+DBIDSize {
+			return fmt.Errorf("invalid table key length %d", len(tableKey))
+		}
+		var dbID DBID
+		copy(dbID[:], tableKey[prefixSize:])
+
+		// Get the original key from DBID
+		keyItem, err := txn.Get(prefixedKey(idToKeyPrefix, dbID[:]))
+		if err != nil {
+			return fmt.Errorf("error getting original key for DBID: %w", err)
+		}
+
+		var originalKey []byte
+		err = keyItem.Value(func(kB []byte) error {
+			originalKey = make([]byte, len(kB))
+			copy(originalKey, kB)
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+
+		// Get the datum and extract the original value
+		var originalValue []byte
+		err = iter.Item().Value(func(datumBytes []byte) error {
+			d, err := decodeDatum(datumBytes)
+			if err != nil {
+				return fmt.Errorf("error decoding datum: %w", err)
+			}
+			originalValue = make([]byte, len(d.v))
+			copy(originalValue, d.v)
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+
+		// Add to the new index using raw bytes
+		_, err = idx.add(txn, originalKey, originalValue, dbID)
+		return err
+	})
+}
+
+func (t *Table) addIndex(name string, fBytes func(k, v []byte) ([]byte, error), f func(k, v KV) ([]byte, error), unique bool, updateTxn *badger.Txn) error {
 	p, err := t.prefixForName(t.name + "__idx__" + name)
 	if err != nil {
-		return nil, err
+		return err
 	}
+
 	idx := &Index{
 		DB:     t.DB,
 		name:   name,
 		table:  t,
 		prefix: p,
+		fBytes: fBytes,
 		f:      f,
 		unique: unique,
 	}
-	t.indexes = append(t.indexes, idx)
-	return idx, nil
-}
+	t.Indexes[name] = idx
 
-// AddIndex adds an index to a Table. After an index is added, every item
-// added to the Table with Set will automatically generate a corresponding
-// entry in this index.
-func (t *Table) AddIndex(name string, f func(k, v KV) ([]byte, error)) (*Index, error) {
-	return t.addIndex(name, f, false)
-}
+	if updateTxn != nil {
+		if fBytes == nil {
+			return fmt.Errorf("cannot update an index with a nil fBytes")
+		}
 
-// AddUniqueIndex adds a unique index to a Table. After an index is added, every
-// item added to the Table with Set will automatically generate a corresponding
-// entry in this index. The unique index guarantees that no two entries in the
-// index have the same value. If you attempt to add an entry that would create a
-// duplicate in the unique index, an error will be returned. However, if Set() is
-// called with the WithReplace() option, the existing entry will be overwritten
-// instead.
-func (t *Table) AddUniqueIndex(name string, f func(k, v KV) ([]byte, error)) (*Index, error) {
-	return t.addIndex(name, f, true)
+		err = t.updateIndex(updateTxn, idx)
+		if err != nil {
+			return fmt.Errorf("error updating index: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // uniqueIndexConflictError is returned when a unique index conflict is encountered.
@@ -119,10 +183,30 @@ func (idx *Index) checkForIndexConflict(txn *badger.Txn, idxB []byte, updatingDB
 	return nil
 }
 
+func (idx *Index) getIndexValue(k, v KV) ([]byte, error) {
+	if idx.f != nil {
+		return idx.f(k, v)
+	}
+
+	// When creating the index, it was ensured that either fBytes or f is
+	// non-nil.
+
+	var kB, vB []byte
+	kB, err := parseKV(k)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing key: %w", err)
+	}
+	vB, err = parseKV(v)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing value: %w", err)
+	}
+	return idx.fBytes(kB, vB)
+}
+
 // add adds an entry to the index. If this element is not required to be
 // indexed, a nil byte slice is returned and no error is returned.
 func (idx *Index) add(txn *badger.Txn, k, v KV, dbID DBID) ([]byte, error) {
-	idxB, err := idx.f(k, v)
+	idxB, err := idx.getIndexValue(k, v)
 	if err != nil {
 		if errors.Is(err, ErrNotIndexed) {
 			return nil, nil
@@ -140,6 +224,7 @@ func (idx *Index) add(txn *badger.Txn, k, v KV, dbID DBID) ([]byte, error) {
 	if err := txn.Set(b, nil); err != nil {
 		return nil, fmt.Errorf("error writing index entry: %w", err)
 	}
+
 	return b, nil
 }
 

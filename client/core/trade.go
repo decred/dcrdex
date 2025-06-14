@@ -95,8 +95,9 @@ type matchTracker struct {
 	// redemptionConfs and redemptionConfsReq are updated while the redemption
 	// confirmation process is running. Their values are not updated after the
 	// match reaches MatchConfirmed status.
-	redemptionConfs    uint64
-	redemptionConfsReq uint64
+	redemptionConfs             uint64
+	redemptionConfsReq          uint64
+	redemptionPendingSubmission bool
 	// redemptionRejected will be true if a redemption tx was rejected. A
 	// a rejected tx may indicate a serious internal issue, so we will seek
 	// user approval before replacing the tx.
@@ -2183,7 +2184,7 @@ func (c *Core) resendPendingRequests(t *trackedTrade) {
 		}
 		if len(swapCoinID) != 0 && len(auth.InitSig) == 0 { // resend pending `init` request
 			c.sendInitAsync(t, match, swapCoinID, proof.ContractData)
-		} else if len(redeemCoinID) != 0 && len(auth.RedeemSig) == 0 { // resend pending `redeem` request
+		} else if len(redeemCoinID) != 0 && len(auth.RedeemSig) == 0 && !match.redemptionPendingSubmission { // resend pending `redeem` request
 			c.sendRedeemAsync(t, match, redeemCoinID, proof.Secret)
 		}
 	}
@@ -2746,11 +2747,27 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 		errs.add("%v", errWalletNotConnected)
 		return
 	}
-	coinIDs, outCoin, fees, err := redeemWallet.Redeem(&asset.RedeemForm{
-		Redemptions:   redemptions,
-		FeeSuggestion: t.redeemFee(), // fallback - wallet will try to get a rate internally for configured redeem conf target
-		Options:       t.options,
-	})
+
+	var coinIDs []dex.Bytes
+	var outCoin asset.Coin
+	var fees uint64
+	var submitted bool
+	var err error
+	if gaslessRedeemer, is := redeemWallet.Wallet.(asset.GaslessRedeemer); is && t.redemptionReserves == 0 {
+		coinIDs, outCoin, fees, submitted, err = gaslessRedeemer.GaslessRedeem(&asset.RedeemForm{
+			Redemptions:   redemptions,
+			FeeSuggestion: t.redeemFee(), // fallback - wallet will try to get a rate internally for configured redeem conf target
+			Options:       t.options,
+		})
+	} else {
+		coinIDs, outCoin, fees, err = redeemWallet.Redeem(&asset.RedeemForm{
+			Redemptions:   redemptions,
+			FeeSuggestion: t.redeemFee(), // fallback - wallet will try to get a rate internally for configured redeem conf target
+			Options:       t.options,
+		})
+		submitted = true
+	}
+
 	// If an error was encountered, fail all of the matches. A failed match will
 	// not run again on during ticks.
 	if err != nil {
@@ -2823,6 +2840,7 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 	for i, match := range matches {
 		proof := &match.MetaData.Proof
 		coinID := []byte(coinIDs[i])
+		match.redemptionPendingSubmission = !submitted
 		if match.Side == order.Taker {
 			// The match won't be retired before the redeem request succeeds
 			// because RedeemSig is required unless the match is revoked.
@@ -2848,7 +2866,7 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 			errs.add("error storing swap details in database for match %s, coin %s: %v",
 				match, coinIDString(t.wallets.fromWallet.AssetID, coinID), err)
 		}
-		if !match.matchCompleteSent {
+		if !match.matchCompleteSent && submitted {
 			c.sendRedeemAsync(t, match, coinIDs[i], proof.Secret)
 		}
 	}
@@ -2954,9 +2972,9 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 			} else {
 				match.Status = order.MatchComplete
 			}
-		} else if match.Side == order.Taker {
-			match.matchCompleteSent = true
 		}
+
+		match.matchCompleteSent = true // Why was this only for the taker??
 		err = t.db.UpdateMatch(&match.MetaMatch)
 		if err != nil {
 			err = fmt.Errorf("error storing redeem ack sig in database: %v", err)
@@ -3084,6 +3102,7 @@ func (c *Core) confirmRedemption(t *trackedTrade, match *matchTracker) (bool, er
 		c.requestedActionMtx.Unlock()
 		return false, fmt.Errorf("%s transaction %s was rejected. Seeking user approval before trying again",
 			unbip(toWallet.AssetID), coinIDString(toWallet.AssetID, redeemCoinID))
+
 	case errors.Is(err, asset.ErrTxLost):
 		// The transaction was nonce-replaced or otherwise lost without
 		// rejection or with user acknowlegement. Try again.
@@ -3103,15 +3122,19 @@ func (c *Core) confirmRedemption(t *trackedTrade, match *matchTracker) (bool, er
 			t.dc.log.Errorf("failed to update match after lost tx reported: %v", err)
 		}
 		return false, nil
+
 	default:
 		match.delayTicks(time.Minute * 15)
 		return false, fmt.Errorf("error confirming redemption for coin %v. already tried %d times, will retry later: %v",
 			redeemCoinID, match.confirmRedemptionNumTries, err)
 	}
 
+	justSubmitted := match.redemptionPendingSubmission && !redemptionStatus.PendingSubmission
 	var redemptionResubmitted, redemptionConfirmed bool
 	if !bytes.Equal(redeemCoinID, redemptionStatus.CoinID) {
-		redemptionResubmitted = true
+		if !justSubmitted {
+			redemptionResubmitted = true
+		}
 		if match.Side == order.Maker {
 			proof.MakerRedeem = order.CoinID(redemptionStatus.CoinID)
 		} else {
@@ -3119,7 +3142,12 @@ func (c *Core) confirmRedemption(t *trackedTrade, match *matchTracker) (bool, er
 		}
 	}
 
+	if justSubmitted || redemptionResubmitted {
+		c.sendRedeemAsync(t, match, redemptionStatus.CoinID, proof.Secret)
+	}
+
 	match.redemptionConfs, match.redemptionConfsReq = redemptionStatus.Confs, redemptionStatus.Req
+	match.redemptionPendingSubmission = redemptionStatus.PendingSubmission
 
 	if redemptionStatus.Confs >= redemptionStatus.Req &&
 		(len(match.MetaData.Proof.Auth.RedeemSig) > 0 || t.isSelfGoverned()) {
@@ -3463,7 +3491,6 @@ func (t *trackedTrade) searchAuditInfo(match *matchTracker, coinID []byte, contr
 			}
 			errChan <- err
 			return wait.DontTryAgain
-
 		},
 		ExpireFunc: func() {
 			errChan <- ExpirationErr(fmt.Sprintf("failed to find counterparty contract coin %v (%s). "+
@@ -3476,6 +3503,7 @@ func (t *trackedTrade) searchAuditInfo(match *matchTracker, coinID []byte, contr
 	if err != nil {
 		return nil, err
 	}
+
 	return auditInfo, nil
 }
 
@@ -3530,6 +3558,7 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID, contract, txDa
 
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
+
 	proof := &match.MetaData.Proof
 	if match.Side == order.Maker {
 		// Check that the secret hash is correct.

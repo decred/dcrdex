@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -26,10 +27,12 @@ import (
 	"decred.org/dcrdex/dex/encode"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
@@ -105,49 +108,50 @@ type tGetTxRes struct {
 }
 
 type testNode struct {
-	acct            *accounts.Account
-	addr            common.Address
-	connectErr      error
-	bestHdr         *types.Header
-	bestHdrErr      error
-	syncProg        ethereum.SyncProgress
-	syncProgT       uint64
-	syncProgErr     error
-	bal             *big.Int
-	balErr          error
-	signDataErr     error
-	privKey         *ecdsa.PrivateKey
-	swapVers        map[uint32]struct{} // For SwapConfirmations -> swap. TODO for other contractor methods
-	swapMap         map[[32]byte]*dexeth.SwapState
-	refundable      bool
-	baseFee         *big.Int
-	tip             *big.Int
-	netFeeStateErr  error
-	confNonce       uint64
-	confNonceErr    error
-	getTxRes        *types.Transaction
-	getTxResMap     map[common.Hash]*tGetTxRes
-	getTxHeight     int64
-	getTxErr        error
-	receipt         *types.Receipt
-	receiptTx       *types.Transaction
-	receiptErr      error
-	receipts        map[common.Hash]*types.Receipt
-	receiptTxs      map[common.Hash]*types.Transaction
-	receiptErrs     map[common.Hash]error
-	hdrByHash       *types.Header
-	lastSignedTx    *types.Transaction
-	sentTxs         int
-	sendTxTx        *types.Transaction
-	sendTxErr       error
-	simBackend      bind.ContractBackend
-	maxFeeRate      *big.Int
-	tContractor     *tContractor
-	tokenContractor *tTokenContractor
-	contractor      contractor
-	tokenParent     *assetWallet // only set for tokens
-	txConfirmations map[common.Hash]uint32
-	txConfsErr      map[common.Hash]error
+	acct                    *accounts.Account
+	addr                    common.Address
+	connectErr              error
+	bestHdr                 *types.Header
+	bestHdrErr              error
+	syncProg                ethereum.SyncProgress
+	syncProgT               uint64
+	syncProgErr             error
+	bal                     *big.Int
+	balErr                  error
+	signDataErr             error
+	privKey                 *ecdsa.PrivateKey
+	swapVers                map[uint32]struct{} // For SwapConfirmations -> swap. TODO for other contractor methods
+	swapMap                 map[[32]byte]*dexeth.SwapState
+	refundable              bool
+	baseFee                 *big.Int
+	tip                     *big.Int
+	netFeeStateErr          error
+	confNonce               uint64
+	confNonceErr            error
+	getTxRes                *types.Transaction
+	getTxResMap             map[common.Hash]*tGetTxRes
+	getTxHeight             int64
+	getTxErr                error
+	receipt                 *types.Receipt
+	receiptTx               *types.Transaction
+	receiptErr              error
+	receipts                map[common.Hash]*types.Receipt
+	receiptTxs              map[common.Hash]*types.Transaction
+	receiptErrs             map[common.Hash]error
+	hdrByHash               map[common.Hash]*types.Header
+	lastSignedTx            *types.Transaction
+	sentTxs                 int
+	sendTxTx                *types.Transaction
+	sendTxErr               error
+	simBackend              bind.ContractBackend
+	maxFeeRate              *big.Int
+	tContractor             *tContractor
+	tokenContractor         *tTokenContractor
+	gaslessRedeemContractor *tGaslessRedeemContractor
+	contractor              contractor
+	tokenParent             *assetWallet // only set for tokens
+	txConfirmations         map[common.Hash]uint32
+	txConfsErr              map[common.Hash]error
 }
 
 func newBalance(current, in, out uint64) *Balance {
@@ -289,8 +293,8 @@ func (n *testNode) transactionConfirmations(_ context.Context, txHash common.Has
 	return n.txConfirmations[txHash], n.txConfsErr[txHash]
 }
 
-func (n *testNode) headerByHash(_ context.Context, txHash common.Hash) (*types.Header, error) {
-	return n.hdrByHash, nil
+func (n *testNode) headerByHash(_ context.Context, blockHash common.Hash) (*types.Header, error) {
+	return n.hdrByHash[blockHash], nil
 }
 
 func (n *testNode) transactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
@@ -519,6 +523,23 @@ func (c *tContractor) isRefundable(locator []byte) (bool, error) {
 }
 
 func (c *tContractor) voidUnusedNonce() {}
+
+type tGaslessRedeemContractor struct {
+	*tContractor
+
+	epAddress common.Address
+	calldata  []byte
+}
+
+var _ contractor = (*tGaslessRedeemContractor)(nil)
+var _ gaslessRedeemContractor = (*tGaslessRedeemContractor)(nil)
+
+func (c *tGaslessRedeemContractor) gaslessRedeemCalldata(redeems []*asset.Redemption) ([]byte, error) {
+	return c.calldata, nil
+}
+func (c *tGaslessRedeemContractor) entrypointAddress() (common.Address, error) {
+	return c.epAddress, nil
+}
 
 type tTokenContractor struct {
 	*tContractor
@@ -808,6 +829,262 @@ func (db *tTxDB) getBridgeCompletion(initiationTxID string) (*extendedWalletTx, 
 // 	}
 // }
 
+type tBundler struct {
+	supportedEntrypointsResult []common.Address
+	supportedEntrypointsErr    error
+	sendUserOpResult           common.Hash
+	sendUserOpErr              error
+	lastUserOp                 *userOpParam
+	getUserOpReceiptResults    map[common.Hash]*getUserOpReceiptResult
+	getUserOpReceiptErrs       map[common.Hash]error
+	getNonceResult             *big.Int
+	getNonceErr                error
+	estimateGasResult          *estimateBundlerGasResult
+	estimateGasErr             error
+}
+
+var _ bundler = (*tBundler)(nil)
+
+func (b *tBundler) supportedEntryPoints(ctx context.Context) ([]common.Address, error) {
+	return b.supportedEntrypointsResult, b.supportedEntrypointsErr
+}
+
+func (b *tBundler) sendUserOp(ctx context.Context, userOp *userOpParam) (common.Hash, error) {
+	b.lastUserOp = userOp
+	return b.sendUserOpResult, b.sendUserOpErr
+}
+
+func (b *tBundler) getUserOpReceipt(ctx context.Context, userOpHash common.Hash) (*getUserOpReceiptResult, error) {
+	var err error
+	if b.getUserOpReceiptErrs != nil {
+		err = b.getUserOpReceiptErrs[userOpHash]
+	}
+	return b.getUserOpReceiptResults[userOpHash], err
+}
+
+func (b *tBundler) getNonce(opts *bind.CallOpts, ethSwapAddr, participantAddr common.Address) (*big.Int, error) {
+	return b.getNonceResult, b.getNonceErr
+}
+
+func (b *tBundler) estimateGas(ctx context.Context, userOp *userOpParam) (*estimateBundlerGasResult, error) {
+	return b.estimateGasResult, b.estimateGasErr
+}
+
+func TestCheckPendingUserOps(t *testing.T) {
+	type test struct {
+		name                    string
+		pendingUserOpsBefore    map[common.Hash]*extendedWalletTx
+		pendingUserOpsAfter     map[common.Hash]*extendedWalletTx
+		getUserOpReceiptResults map[common.Hash]*getUserOpReceiptResult
+		getUserOpReceiptErrs    map[common.Hash]error
+		getTxResults            map[common.Hash]*tGetTxRes
+		hdrByHash               map[common.Hash]*types.Header
+	}
+
+	userOpHashes := make([]common.Hash, 5)
+	txHashes := make([]common.Hash, 5)
+	blockHashes := make([]common.Hash, 5)
+	for i := range userOpHashes {
+		userOpHashes[i] = common.BytesToHash(encode.RandomBytes(32))
+		txHashes[i] = common.BytesToHash(encode.RandomBytes(32))
+		blockHashes[i] = common.BytesToHash(encode.RandomBytes(32))
+	}
+
+	tipHeight := uint64(100)
+
+	tests := []test{
+		{
+			name:                    "no user ops",
+			pendingUserOpsBefore:    map[common.Hash]*extendedWalletTx{},
+			pendingUserOpsAfter:     map[common.Hash]*extendedWalletTx{},
+			getUserOpReceiptResults: map[common.Hash]*getUserOpReceiptResult{},
+			getUserOpReceiptErrs:    map[common.Hash]error{},
+			getTxResults:            map[common.Hash]*tGetTxRes{},
+			hdrByHash:               map[common.Hash]*types.Header{},
+		},
+		{
+			name: "bundler not yet submitted, saving to db",
+			pendingUserOpsBefore: map[common.Hash]*extendedWalletTx{
+				userOpHashes[0]: {
+					WalletTransaction: &asset.WalletTransaction{
+						ID: userOpHashes[0].String(),
+					},
+				},
+			},
+			pendingUserOpsAfter: map[common.Hash]*extendedWalletTx{
+				userOpHashes[0]: {
+					WalletTransaction: &asset.WalletTransaction{
+						ID: userOpHashes[0].String(),
+					},
+					savedToDB: true,
+				},
+			},
+			getUserOpReceiptResults: map[common.Hash]*getUserOpReceiptResult{
+				userOpHashes[0]: {
+					receipt: nil,
+				},
+			},
+		},
+		{
+			name: "bundler submitted, not yet confirmed",
+			pendingUserOpsBefore: map[common.Hash]*extendedWalletTx{
+				userOpHashes[0]: {
+					WalletTransaction: &asset.WalletTransaction{
+						ID: userOpHashes[0].String(),
+					},
+				},
+			},
+			pendingUserOpsAfter: map[common.Hash]*extendedWalletTx{
+				userOpHashes[0]: {
+					WalletTransaction: &asset.WalletTransaction{
+						ID:          userOpHashes[0].String(),
+						BlockNumber: tipHeight - 1,
+						UserOpTxID:  txHashes[0].String(),
+						Fees:        3e6,
+					},
+					Receipt: &types.Receipt{
+						BlockNumber: big.NewInt(int64(tipHeight - 1)),
+						BlockHash:   blockHashes[0],
+						TxHash:      txHashes[0],
+					},
+					savedToDB: true,
+				},
+			},
+			getUserOpReceiptResults: map[common.Hash]*getUserOpReceiptResult{
+				userOpHashes[0]: {
+					success:       true,
+					actualGasCost: dexeth.GweiToWei(3e6),
+					receipt: &types.Receipt{
+						BlockNumber: big.NewInt(int64(tipHeight - 1)),
+						BlockHash:   blockHashes[0],
+						TxHash:      txHashes[0],
+					},
+				},
+			},
+			getTxResults: map[common.Hash]*tGetTxRes{
+				txHashes[0]: {
+					tx:     types.NewTx(&types.DynamicFeeTx{}),
+					height: int64(tipHeight - 1),
+				},
+			},
+			hdrByHash: map[common.Hash]*types.Header{
+				blockHashes[0]: {
+					Number: big.NewInt(int64(tipHeight - 1)),
+				},
+			},
+		},
+		{
+			name: "bundler submitted, rejected",
+			pendingUserOpsBefore: map[common.Hash]*extendedWalletTx{
+				userOpHashes[0]: {
+					WalletTransaction: &asset.WalletTransaction{
+						ID: userOpHashes[0].String(),
+					},
+				},
+			},
+			pendingUserOpsAfter: map[common.Hash]*extendedWalletTx{
+				userOpHashes[0]: {
+					WalletTransaction: &asset.WalletTransaction{
+						ID:          userOpHashes[0].String(),
+						BlockNumber: tipHeight - 1,
+						UserOpTxID:  txHashes[0].String(),
+						Fees:        3e6,
+						Rejected:    true,
+					},
+					Receipt: &types.Receipt{
+						BlockNumber: big.NewInt(int64(tipHeight - 1)),
+						BlockHash:   blockHashes[0],
+						TxHash:      txHashes[0],
+					},
+					savedToDB: true,
+				},
+			},
+			getUserOpReceiptResults: map[common.Hash]*getUserOpReceiptResult{
+				userOpHashes[0]: {
+					success:       false,
+					actualGasCost: dexeth.GweiToWei(3e6),
+					receipt: &types.Receipt{
+						BlockNumber: big.NewInt(int64(tipHeight - 1)),
+						BlockHash:   blockHashes[0],
+						TxHash:      txHashes[0],
+					},
+				},
+			},
+			getTxResults: map[common.Hash]*tGetTxRes{
+				txHashes[0]: {
+					tx:     types.NewTx(&types.DynamicFeeTx{}),
+					height: int64(tipHeight - 1),
+				},
+			},
+			hdrByHash: map[common.Hash]*types.Header{
+				blockHashes[0]: {
+					Number: big.NewInt(int64(tipHeight - 1)),
+				},
+			},
+		},
+		{
+			name: "confirmed",
+			pendingUserOpsBefore: map[common.Hash]*extendedWalletTx{
+				userOpHashes[0]: {
+					WalletTransaction: &asset.WalletTransaction{
+						ID: userOpHashes[0].String(),
+					},
+				},
+			},
+			pendingUserOpsAfter: map[common.Hash]*extendedWalletTx{},
+			getUserOpReceiptResults: map[common.Hash]*getUserOpReceiptResult{
+				userOpHashes[0]: {
+					success:       true,
+					actualGasCost: dexeth.GweiToWei(3e6),
+					receipt: &types.Receipt{
+						BlockNumber: big.NewInt(int64(tipHeight - txConfsNeededToConfirm + 1)),
+						BlockHash:   blockHashes[0],
+						TxHash:      txHashes[0],
+					},
+				},
+			},
+			getTxResults: map[common.Hash]*tGetTxRes{
+				txHashes[0]: {
+					tx:     types.NewTx(&types.DynamicFeeTx{}),
+					height: int64(tipHeight - txConfsNeededToConfirm + 1),
+				},
+			},
+			hdrByHash: map[common.Hash]*types.Header{
+				blockHashes[0]: {
+					Number: big.NewInt(int64(tipHeight - txConfsNeededToConfirm + 1)),
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, eth, node, shutdown := tassetWallet(BipID)
+			defer shutdown()
+			eth.bundler = &tBundler{
+				getUserOpReceiptResults: tt.getUserOpReceiptResults,
+				getUserOpReceiptErrs:    tt.getUserOpReceiptErrs,
+			}
+			eth.pendingUserOps = tt.pendingUserOpsBefore
+			eth.currentTip = &types.Header{Number: new(big.Int).SetUint64(tipHeight)}
+			node.hdrByHash = tt.hdrByHash
+			node.getTxResMap = tt.getTxResults
+
+			eth.checkPendingUserOps()
+
+			if len(eth.pendingUserOps) != len(tt.pendingUserOpsAfter) {
+				t.Fatalf("expected %d pending user ops, got %d", len(tt.pendingUserOpsAfter), len(eth.pendingUserOps))
+			}
+			for hash, exp := range tt.pendingUserOpsAfter {
+				tx := eth.pendingUserOps[hash]
+				if !reflect.DeepEqual(tx.WalletTransaction, exp.WalletTransaction) {
+					t.Fatalf("expected tx \n%+v\n\ngot\n%+v", spew.Sdump(exp.WalletTransaction), spew.Sdump(tx.WalletTransaction))
+				}
+			}
+		})
+	}
+}
+
 func TestCheckPendingTxs(t *testing.T) {
 	_, eth, node, shutdown := tassetWallet(BipID)
 	defer shutdown()
@@ -989,7 +1266,7 @@ func TestCheckPendingTxs(t *testing.T) {
 					node.receiptTxs[pendingTx.txHash], _ = pendingTx.tx()
 				}
 				if pendingTx.Timestamp == 0 && r.BlockNumber != nil && r.BlockNumber.Uint64() != 0 {
-					node.hdrByHash = &types.Header{
+					node.hdrByHash[r.BlockHash] = &types.Header{
 						Number: r.BlockNumber,
 						Time:   now,
 					}
@@ -1304,7 +1581,13 @@ func newTestNode(assetID uint32) *tMempoolNode {
 		valueOut:     make(map[common.Hash]uint64),
 	}
 
-	var c contractor = tc
+	gaslessRedeemContractor := &tGaslessRedeemContractor{
+		tContractor: tc,
+		epAddress:   common.Address{},
+		calldata:    []byte{},
+	}
+
+	var c contractor = gaslessRedeemContractor
 
 	ttc := &tTokenContractor{
 		tContractor: tc,
@@ -1317,20 +1600,22 @@ func newTestNode(assetID uint32) *tMempoolNode {
 
 	return &tMempoolNode{
 		testNode: &testNode{
-			acct:            acct,
-			addr:            acct.Address,
-			maxFeeRate:      dexeth.GweiToWei(100),
-			baseFee:         dexeth.GweiToWei(100),
-			tip:             dexeth.GweiToWei(2),
-			privKey:         privKey,
-			contractor:      c,
-			tContractor:     tc,
-			tokenContractor: ttc,
-			txConfirmations: make(map[common.Hash]uint32),
-			txConfsErr:      make(map[common.Hash]error),
-			receipts:        make(map[common.Hash]*types.Receipt),
-			receiptErrs:     make(map[common.Hash]error),
-			receiptTxs:      make(map[common.Hash]*types.Transaction),
+			acct:                    acct,
+			addr:                    acct.Address,
+			maxFeeRate:              dexeth.GweiToWei(100),
+			baseFee:                 dexeth.GweiToWei(100),
+			tip:                     dexeth.GweiToWei(2),
+			privKey:                 privKey,
+			contractor:              c,
+			tContractor:             tc,
+			gaslessRedeemContractor: gaslessRedeemContractor,
+			tokenContractor:         ttc,
+			txConfirmations:         make(map[common.Hash]uint32),
+			txConfsErr:              make(map[common.Hash]error),
+			receipts:                make(map[common.Hash]*types.Receipt),
+			receiptErrs:             make(map[common.Hash]error),
+			receiptTxs:              make(map[common.Hash]*types.Transaction),
+			hdrByHash:               make(map[common.Hash]*types.Header),
 		},
 	}
 }
@@ -1338,7 +1623,7 @@ func newTestNode(assetID uint32) *tMempoolNode {
 func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, context.CancelFunc) {
 	node := newTestNode(assetID)
 	ctx, cancel := context.WithCancel(context.Background())
-	var c contractor = node.tContractor
+	var c contractor = node.contractor
 	if assetID != BipID {
 		c = node.tokenContractor
 	}
@@ -1380,6 +1665,7 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 			pendingNonceAt:   new(big.Int),
 			confirmedNonceAt: new(big.Int),
 			pendingTxs:       make([]*extendedWalletTx, 0),
+			pendingUserOps:   make(map[common.Hash]*extendedWalletTx),
 			txDB:             &tTxDB{},
 			currentTip:       &types.Header{Number: new(big.Int), GasLimit: 30_000_000},
 			finalizeConfs:    txConfsNeededToConfirm,
@@ -2175,7 +2461,7 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 	copy(nonce[:], encode.RandomBytes(8))
 
 	differentKindaCoin := (&coin{
-		id: randomHash(), // e.g. tx hash
+		txHash: randomHash(), // e.g. tx hash
 	})
 	_, err = w2.FundingCoins([]dex.Bytes{differentKindaCoin.ID()})
 	if err == nil {
@@ -3041,7 +3327,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 	// }
 	var contractor *tContractor
 	if assetID == BipID {
-		contractor = eth.contractorV0.(*tContractor)
+		contractor = eth.contractorV0.(*tGaslessRedeemContractor).tContractor
 	} else {
 		contractor = eth.contractorV1.(*tTokenContractor).tContractor
 	}
@@ -3128,8 +3414,8 @@ func testRedeem(t *testing.T, assetID uint32) {
 				Contract:   dexeth.EncodeContractData(0, secretHashes[idx][:]),
 				SecretHash: secretHashes[idx][:], // redundant for all current assets, unused with eth
 				Coin: &coin{
-					id:    randomHash(),
-					value: value,
+					txHash: randomHash(),
+					value:  value,
 				},
 			},
 			Secret: secrets[idx][:],
@@ -3417,6 +3703,189 @@ func testRedeem(t *testing.T, assetID uint32) {
 		if contractor.lastRedeemOpts.GasFeeCap.Cmp(test.expectedGasFeeCap) != 0 {
 			t.Fatalf("%s: expected gas fee cap %v, but got %v", test.name, test.expectedGasFeeCap, contractor.lastRedeemOpts.GasFeeCap)
 		}
+	}
+}
+
+func TestGaslessRedeem(t *testing.T) {
+	numSecrets := 3
+	secrets := make([][32]byte, 0, numSecrets)
+	secretHashes := make([][32]byte, 0, numSecrets)
+	userOpHashes := make([]common.Hash, 0, numSecrets)
+	for i := 0; i < numSecrets; i++ {
+		var secret [32]byte
+		copy(secret[:], encode.RandomBytes(32))
+		secretHash := sha256.Sum256(secret[:])
+		secrets = append(secrets, secret)
+		secretHashes = append(secretHashes, secretHash)
+		userOpHashes = append(userOpHashes, randomHash())
+	}
+
+	const value = 1e9
+
+	calldata := []byte{0x01, 0x02, 0x03}
+	epAddress := common.HexToAddress("0x0000000000000000000000000000000000000123")
+
+	epNonce := big.NewInt(123)
+
+	dexeth.ContractAddresses[1][dex.Simnet] = common.BytesToAddress(encode.RandomBytes(20))
+
+	swapVector := &dexeth.SwapVector{
+		From:       common.HexToAddress("0x0000000000000000000000000000000000000000"),
+		To:         common.HexToAddress("0x0000000000000000000000000000000000000000"),
+		Value:      big.NewInt(value),
+		SecretHash: secretHashes[0],
+		LockTime:   0,
+	}
+
+	newRedeem := func(idx int) *asset.Redemption {
+		return &asset.Redemption{
+			Spends: &asset.AuditInfo{
+				Contract:   dexeth.EncodeContractData(1, swapVector.Locator()),
+				SecretHash: secretHashes[idx][:], // redundant for all current assets, unused with eth
+				Coin: &coin{
+					txHash: randomHash(),
+					value:  value,
+				},
+			},
+			Secret: secrets[idx][:],
+		}
+	}
+
+	baseFee := dexeth.GweiToWei(100)
+	tip := dexeth.GweiToWei(10)
+	maxFee := uint64(2*100 + 10)
+
+	preVerificationGas := "0x168d8"
+	verificationGasLimit := "0x1ecfa"
+	callGasLimit := "0xb770"
+	preVerificationGasInt, _ := hexutil.DecodeBig(preVerificationGas)
+	verificationGasLimitInt, _ := hexutil.DecodeBig(verificationGasLimit)
+	callGasLimitInt, _ := hexutil.DecodeBig(callGasLimit)
+	totalGasLimit := preVerificationGasInt.Add(preVerificationGasInt, verificationGasLimitInt).Add(preVerificationGasInt, callGasLimitInt)
+	totalFees := totalGasLimit.Mul(totalGasLimit, dexeth.GweiToWei(maxFee))
+
+	type test struct {
+		name              string
+		redemptions       []*asset.Redemption
+		swapState         map[[32]byte]*dexeth.SwapState
+		estimateGasResult *estimateBundlerGasResult
+		userOpHash        common.Hash
+		balance           uint64
+
+		expUserOp    *userOpParam
+		expIDs       []dex.Bytes
+		expCoin      *coin
+		expFees      uint64
+		expSubmitted bool
+		expError     bool
+	}
+
+	tests := []test{
+		{
+			name:    "sufficient funds for regular redeem",
+			balance: ethGasesV1.Redeem * maxFee,
+			redemptions: []*asset.Redemption{
+				newRedeem(0),
+			},
+			swapState: map[[32]byte]*dexeth.SwapState{
+				secretHashes[0]: {
+					State: dexeth.SSInitiated,
+					Value: dexeth.GweiToWei(value),
+				},
+			},
+			expSubmitted: true,
+		},
+		{
+			name:    "successful gasless redeem",
+			balance: ethGasesV1.Redeem*maxFee - 1,
+			redemptions: []*asset.Redemption{
+				newRedeem(0),
+			},
+			swapState: map[[32]byte]*dexeth.SwapState{
+				secretHashes[0]: {
+					State: dexeth.SSInitiated,
+					Value: dexeth.GweiToWei(value),
+				},
+			},
+			estimateGasResult: &estimateBundlerGasResult{
+				PreVerificationGas:   "0x168d8",
+				VerificationGasLimit: "0x1ecfa",
+				CallGasLimit:         "0xb770",
+			},
+			userOpHash: userOpHashes[0],
+			expUserOp: &userOpParam{
+				Nonce:                hexutil.EncodeBig(epNonce),
+				Sender:               dexeth.ContractAddresses[1][dex.Simnet].Hex(),
+				InitCode:             "0x",
+				CallData:             "0x" + common.Bytes2Hex(calldata),
+				Signature:            defaultUserOpSignature,
+				PreVerificationGas:   "0x168d8",
+				VerificationGasLimit: "0x1ecfa",
+				MaxFeePerGas:         "0x" + dexeth.GweiToWei(maxFee).Text(16),
+				MaxPriorityFeePerGas: "0x" + tip.Text(16),
+				CallGasLimit:         "0xb770",
+				PaymasterAndData:     "0x",
+			},
+			expIDs:  []dex.Bytes{userOpCoinID(userOpHashes[0], common.Hash{})},
+			expCoin: &coin{value: value},
+			expFees: dexeth.WeiToGweiCeil(totalFees),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			w, eth, node, shutdown := tassetWallet(BipID)
+			ethWallet := w.(*ETHWallet)
+			defer shutdown()
+			bundler := &tBundler{
+				sendUserOpResult:  test.userOpHash,
+				estimateGasResult: test.estimateGasResult,
+				getNonceResult:    epNonce,
+			}
+			eth.bundler = bundler
+			eth.versionedContracts = map[uint32]common.Address{
+				1: dexeth.ContractAddresses[1][dex.Simnet],
+			}
+			node.tContractor.swapMap = test.swapState
+			node.gaslessRedeemContractor.epAddress = epAddress
+			node.gaslessRedeemContractor.calldata = calldata
+			node.baseFee = baseFee
+			node.tip = tip
+			node.bal = dexeth.GweiToWei(test.balance)
+			node.tContractor.redeemTx = types.NewTx(&types.DynamicFeeTx{})
+
+			ids, out, fees, submitted, err := ethWallet.GaslessRedeem(&asset.RedeemForm{
+				Redemptions: test.redemptions,
+			})
+			if test.expError {
+				if err == nil {
+					t.Fatalf("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !reflect.DeepEqual(bundler.lastUserOp, test.expUserOp) {
+				t.Fatalf("expected user op: %v\n but got: %v", spew.Sdump(test.expUserOp), spew.Sdump(bundler.lastUserOp))
+			}
+			if test.expSubmitted != submitted {
+				t.Fatalf("expected submitted %v, but got %v", test.expSubmitted, submitted)
+			}
+			if submitted {
+				// Tested by TestRedeem
+				return
+			}
+			if out.Value() != test.expCoin.Value() {
+				t.Fatalf("expected coin value %v, but got %v", test.expCoin.Value(), out.Value())
+			}
+			if fees != test.expFees {
+				t.Fatalf("expected fees %v, but got %v", test.expFees, fees)
+			}
+			if !reflect.DeepEqual(ids, test.expIDs) {
+				t.Fatalf("expected IDs %v, but got %v", test.expIDs, ids)
+			}
+		})
 	}
 }
 
@@ -4837,6 +5306,205 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 
 	for _, test := range tests {
 		runTest(test)
+	}
+}
+
+func TestConfirmUserOpRedemption(t *testing.T) {
+	const tip = 12
+	const confBlock = tip - txConfsNeededToConfirm + 1
+
+	var secret, secretHash [32]byte
+	copy(secret[:], encode.RandomBytes(32))
+	copy(secretHash[:], encode.RandomBytes(32))
+	var userOpHash common.Hash
+	copy(userOpHash[:], encode.RandomBytes(32))
+	var txHash common.Hash
+	copy(txHash[:], encode.RandomBytes(32))
+
+	agedOutSubmission := time.Now().Add(-1*txAgeOut - 1)
+
+	redemption := &asset.Redemption{
+		Spends: &asset.AuditInfo{
+			Contract: dexeth.EncodeContractData(0, secretHash[:]),
+		},
+		Secret: secret[:],
+	}
+
+	pendingUserOp := func(confirmed bool, agedOut bool, rejected bool, hasReceipt bool) *extendedWalletTx {
+		blockNumber := confBlock
+		if !confirmed {
+			blockNumber = tip
+		}
+		submissionTime := time.Now()
+		if agedOut {
+			submissionTime = agedOutSubmission
+		}
+		receipt := &types.Receipt{
+			BlockNumber: big.NewInt(int64(blockNumber)),
+			TxHash:      txHash,
+		}
+		if !hasReceipt {
+			receipt = nil
+		}
+		return &extendedWalletTx{
+			WalletTransaction: &asset.WalletTransaction{
+				Confirmed:   confirmed,
+				ID:          userOpHash.String(),
+				BlockNumber: uint64(blockNumber),
+				Rejected:    rejected,
+				UserOpTxID:  txHash.String(),
+			},
+			Receipt:        receipt,
+			SubmissionTime: uint64(submissionTime.Unix()),
+		}
+	}
+
+	receiptResult := func(blockNumber uint64, success bool) *getUserOpReceiptResult {
+		return &getUserOpReceiptResult{
+			receipt: &types.Receipt{
+				BlockNumber: big.NewInt(int64(blockNumber)),
+				TxHash:      txHash,
+			},
+			success: success,
+		}
+	}
+
+	type test struct {
+		name           string
+		expectedResult *asset.ConfirmRedemptionStatus
+		expectedError  error
+
+		pendingUserOp  *extendedWalletTx
+		bundlerReceipt *getUserOpReceiptResult
+		bundlerErr     error
+		step           dexeth.SwapStep
+	}
+
+	tests := []test{
+		{
+			name: "success - confirmed - from pending",
+			expectedResult: &asset.ConfirmRedemptionStatus{
+				Confs:  txConfsNeededToConfirm,
+				Req:    txConfsNeededToConfirm,
+				CoinID: userOpCoinID(userOpHash, txHash),
+			},
+			pendingUserOp: pendingUserOp(true, false, false, true),
+			step:          dexeth.SSRedeemed,
+		},
+		{
+			name: "success - confirmed - from bundler",
+			expectedResult: &asset.ConfirmRedemptionStatus{
+				Confs:  txConfsNeededToConfirm,
+				Req:    txConfsNeededToConfirm,
+				CoinID: userOpCoinID(userOpHash, txHash),
+			},
+			bundlerReceipt: receiptResult(confBlock, true),
+			step:           dexeth.SSRedeemed,
+		},
+		{
+			name: "pending - not enough confirmations - from pending",
+			expectedResult: &asset.ConfirmRedemptionStatus{
+				Confs:  1,
+				Req:    txConfsNeededToConfirm,
+				CoinID: userOpCoinID(userOpHash, txHash),
+			},
+			pendingUserOp: pendingUserOp(false, false, false, true),
+			step:          dexeth.SSRedeemed,
+		},
+		{
+			name: "pending - not enough confirmations - from bundler",
+			expectedResult: &asset.ConfirmRedemptionStatus{
+				Confs:  1,
+				Req:    txConfsNeededToConfirm,
+				CoinID: userOpCoinID(userOpHash, txHash),
+			},
+			bundlerReceipt: receiptResult(tip, true),
+			step:           dexeth.SSRedeemed,
+		},
+		{
+			name:          "rejected tx - from pending",
+			expectedError: asset.ErrTxRejected,
+			pendingUserOp: pendingUserOp(true, false, true, true),
+			step:          dexeth.SSInitiated,
+		},
+		{
+			name:           "rejected tx - from bundler",
+			expectedError:  asset.ErrTxRejected,
+			bundlerReceipt: receiptResult(confBlock, false),
+			step:           dexeth.SSInitiated,
+		},
+		{
+			name:          "swap refunded - from pending",
+			expectedError: asset.ErrSwapRefunded,
+			pendingUserOp: pendingUserOp(true, true, false, false),
+			step:          dexeth.SSRefunded,
+		},
+		{
+			name:           "swap refunded - from bundler",
+			expectedError:  asset.ErrSwapRefunded,
+			bundlerReceipt: receiptResult(confBlock, false),
+			step:           dexeth.SSRefunded,
+		},
+		{
+			name: "swap redeemed, receipt not found - from pending",
+			expectedResult: &asset.ConfirmRedemptionStatus{
+				Confs:  txConfsNeededToConfirm,
+				Req:    txConfsNeededToConfirm,
+				CoinID: userOpCoinID(userOpHash, txHash),
+			},
+			pendingUserOp: pendingUserOp(false, true, false, false),
+			step:          dexeth.SSRedeemed,
+		},
+		{
+			name: "swap redeemed, receipt not found - from bundler",
+			expectedResult: &asset.ConfirmRedemptionStatus{
+				Confs:  txConfsNeededToConfirm,
+				Req:    txConfsNeededToConfirm,
+				CoinID: userOpCoinID(userOpHash, common.Hash{}),
+			},
+			bundlerReceipt: &getUserOpReceiptResult{},
+			step:           dexeth.SSRedeemed,
+		},
+		{
+			name:           "receipt not found, still initiated - from bundler",
+			expectedError:  asset.ErrTxLost,
+			bundlerReceipt: &getUserOpReceiptResult{},
+			step:           dexeth.SSInitiated,
+		},
+	}
+
+	runTest := func(test *test) {
+		wi, eth, node, shutdown := tassetWallet(BipID)
+		defer shutdown()
+		node.tContractor.swapMap = map[[32]byte]*dexeth.SwapState{
+			secretHash: {State: test.step, Value: big.NewInt(1)},
+		}
+		node.bal = big.NewInt(1e9)
+		eth.bundler = &tBundler{
+			getUserOpReceiptResults: map[common.Hash]*getUserOpReceiptResult{
+				userOpHash: test.bundlerReceipt,
+			},
+		}
+
+		eth.pendingUserOps = make(map[common.Hash]*extendedWalletTx)
+		if test.pendingUserOp != nil {
+			eth.pendingUserOps[userOpHash] = test.pendingUserOp
+		}
+		eth.currentTip = &types.Header{Number: big.NewInt(tip)}
+
+		result, err := wi.ConfirmRedemption(userOpCoinID(userOpHash, txHash), redemption, 0)
+		if err != test.expectedError {
+			t.Fatalf("%s: expected error %v != result %v", test.name, test.expectedError, err)
+		}
+		if !reflect.DeepEqual(test.expectedResult, result) {
+			t.Fatalf("%s: expected result %+v != result %+v", test.name, test.expectedResult, result)
+		}
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			runTest(&test)
+		})
 	}
 }
 
