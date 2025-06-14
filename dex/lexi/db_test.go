@@ -2,6 +2,7 @@ package lexi
 
 import (
 	"bytes"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -75,19 +76,28 @@ func TestIndex(t *testing.T) {
 	db, shutdown := newTestDB(t)
 	defer shutdown()
 
-	tbl, err := db.Table("T")
+	tbl, err := db.Table("T", &TableCfg{
+		Indexes: map[string]*IndexCfg{
+			"I": {
+				F: valueIndex,
+			},
+			"K": {
+				F: valueKey,
+			},
+		},
+	})
 	if err != nil {
 		t.Fatalf("Error creating table: %v", err)
 	}
 
-	idx, err := tbl.AddIndex("I", valueIndex)
-	if err != nil {
-		t.Fatalf("Error adding index: %v", err)
+	idx, ok := tbl.Indexes["I"]
+	if !ok {
+		t.Fatalf("I index not found")
 	}
 
-	keyIdx, err := tbl.AddIndex("K", valueKey)
-	if err != nil {
-		t.Fatalf("Error adding index: %v", err)
+	keyIdx, ok := tbl.Indexes["K"]
+	if !ok {
+		t.Fatalf("K index not found")
 	}
 
 	// Put 100 values in.
@@ -278,16 +288,24 @@ func TestUniqueIndex(t *testing.T) {
 	db, shutdown := newTestDB(t)
 	defer shutdown()
 
-	tbl, err := db.Table("UniqueTest")
+	uniqueIndexFunc := func(k, v KV) ([]byte, error) {
+		return v.(*tValue).idx, nil
+	}
+	tbl, err := db.Table("UniqueTest", &TableCfg{
+		Indexes: map[string]*IndexCfg{
+			"unique": {
+				F:      uniqueIndexFunc,
+				Unique: true,
+			},
+		},
+	})
 	if err != nil {
 		t.Fatalf("Error creating table: %v", err)
 	}
 
-	uniqueIdx, err := tbl.AddUniqueIndex("Unique", func(k, v KV) ([]byte, error) {
-		return v.(*tValue).idx, nil
-	})
-	if err != nil {
-		t.Fatalf("Error adding unique index: %v", err)
+	uniqueIdx, ok := tbl.Indexes["unique"]
+	if !ok {
+		t.Fatalf("Unique index not found")
 	}
 
 	key1 := []byte("key1")
@@ -392,22 +410,29 @@ func TestNotIndexed(t *testing.T) {
 	db, shutdown := newTestDB(t)
 	defer shutdown()
 
-	tbl, err := db.Table("NotIndexedTest")
-	if err != nil {
-		t.Fatalf("Error creating table: %v", err)
-	}
-
 	// Create an index that only indexes even values where the first byte is
 	// even.
-	idx, err := tbl.AddIndex("EvenOnly", func(k, v KV) ([]byte, error) {
+	evenOnlyIndexFunc := func(k, v KV) ([]byte, error) {
 		val := v.(*tValue)
 		if len(val.v) > 0 && val.v[0]%2 == 0 {
 			return []byte{val.v[0]}, nil
 		}
 		return nil, ErrNotIndexed
-	})
+	}
+	tableCfg := &TableCfg{
+		Indexes: map[string]*IndexCfg{
+			"evenOnly": {
+				F: evenOnlyIndexFunc,
+			},
+		},
+	}
+	tbl, err := db.Table("NotIndexedTest", tableCfg)
 	if err != nil {
-		t.Fatalf("Error adding index: %v", err)
+		t.Fatalf("Error creating table: %v", err)
+	}
+	idx, ok := tbl.Indexes["evenOnly"]
+	if !ok {
+		t.Fatalf("Index not found")
 	}
 
 	// Insert 10 values, with alternating even/odd first bytes
@@ -515,4 +540,453 @@ func TestNotIndexed(t *testing.T) {
 	if tableCount != 8 {
 		t.Fatalf("Expected 8 table entries after deletion, got %d", tableCount)
 	}
+}
+
+func TestTableIndexManagement(t *testing.T) {
+	db, shutdown := newTestDB(t)
+	defer shutdown()
+
+	createTestValue := func(i int) *tValue {
+		return &tValue{
+			k:   []byte{byte(i)},
+			v:   []byte{byte(i + 100)},
+			idx: []byte{byte(i)},
+		}
+	}
+
+	indexFunc := func(k, v KV) ([]byte, error) {
+		return v.(*tValue).idx, nil
+	}
+	// Upgraded index function that returns keys in reverse order by prepending 0xFF - idx
+	indexFuncBytes := func(kB, vB []byte) ([]byte, error) {
+		if len(vB) == 0 {
+			return nil, fmt.Errorf("empty value")
+		}
+		originalIdx := vB[0] - 100             // Convert back from value to index
+		return []byte{0xFF - originalIdx}, nil // This will reverse the sort order
+	}
+
+	// Test 1: Create new table with F function (should work)
+	t.Run("CreateTableWithF", func(t *testing.T) {
+		tbl, err := db.Table("TestTable1", &TableCfg{
+			Indexes: map[string]*IndexCfg{
+				"idx1": {
+					F: indexFunc,
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Error creating table with F: %v", err)
+		}
+
+		// Add some test data
+		for i := 0; i < 5; i++ {
+			if err := tbl.Set([]byte{byte(i)}, createTestValue(i)); err != nil {
+				t.Fatalf("Error setting value %d: %v", i, err)
+			}
+		}
+
+		// Verify index works
+		count := 0
+		tbl.Indexes["idx1"].Iterate(nil, func(it *Iter) error {
+			count++
+			return nil
+		})
+		if count != 5 {
+			t.Fatalf("Expected 5 items in index, got %d", count)
+		}
+	})
+
+	// Test 2: Error cases for index configuration
+	t.Run("IndexConfigErrors", func(t *testing.T) {
+		// Neither F nor FBytes provided
+		_, err := db.Table("ErrorTable1", &TableCfg{
+			Indexes: map[string]*IndexCfg{
+				"bad": {},
+			},
+		})
+		if err == nil || !strings.Contains(err.Error(), "has no F or FBytes") {
+			t.Fatalf("Expected error for missing F/FBytes, got: %v", err)
+		}
+
+		// Both F and FBytes provided
+		_, err = db.Table("ErrorTable2", &TableCfg{
+			Indexes: map[string]*IndexCfg{
+				"bad": {
+					F:      indexFunc,
+					FBytes: indexFuncBytes,
+				},
+			},
+		})
+		if err == nil || !strings.Contains(err.Error(), "has both F and FBytes") {
+			t.Fatalf("Expected error for both F/FBytes, got: %v", err)
+		}
+	})
+
+	// Test 3: Update existing table - upgrade index by using a new name
+	t.Run("UpgradeIndex", func(t *testing.T) {
+		// First create table with initial index
+		tbl, err := db.Table("UpgradeTable", &TableCfg{
+			Indexes: map[string]*IndexCfg{
+				"idx1": {
+					F: indexFunc,
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Error creating initial table: %v", err)
+		}
+
+		// Add test data
+		for i := 0; i < 3; i++ {
+			if err := tbl.Set([]byte{byte(i)}, createTestValue(i)); err != nil {
+				t.Fatalf("Error setting initial value %d: %v", i, err)
+			}
+		}
+
+		// Try to upgrade without FBytes (should fail)
+		_, err = db.Table("UpgradeTable", &TableCfg{
+			Indexes: map[string]*IndexCfg{
+				"idx1": {
+					F: indexFunc,
+				},
+				"idx1_v2": {
+					F: indexFunc,
+				},
+			},
+		})
+		if err == nil || !strings.Contains(err.Error(), "updating index") {
+			t.Fatalf("Expected error for upgrading without FBytes, got: %v", err)
+		}
+
+		// Upgrade with FBytes (should work)
+		tbl, err = db.Table("UpgradeTable", &TableCfg{
+			Indexes: map[string]*IndexCfg{
+				"idx1": {
+					F: indexFunc,
+				},
+				"idx1_v2": {
+					FBytes: indexFuncBytes,
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Error upgrading index: %v", err)
+		}
+
+		// Verify both indexes work and return values in correct order
+		count := 0
+		expectedOrder := []int{0, 1, 2} // Original order
+		actualOrder := make([]int, 0, 3)
+		tbl.Indexes["idx1"].Iterate(nil, func(it *Iter) error {
+			count++
+			return it.V(func(vB []byte) error {
+				if len(vB) > 0 {
+					actualOrder = append(actualOrder, int(vB[0]-100)) // Convert back to original index
+				}
+				return nil
+			})
+		})
+		if count != 3 {
+			t.Fatalf("Expected 3 items in original index, got %d", count)
+		}
+		if !reflect.DeepEqual(actualOrder, expectedOrder) {
+			t.Fatalf("Original index order failed: expected %v, got %v", expectedOrder, actualOrder)
+		}
+
+		count = 0
+		expectedOrder = []int{2, 1, 0} // Reverse order due to 0xFF - originalIdx transformation
+		actualOrder = make([]int, 0, 3)
+		tbl.Indexes["idx1_v2"].Iterate(nil, func(it *Iter) error {
+			count++
+			return it.V(func(vB []byte) error {
+				if len(vB) > 0 {
+					actualOrder = append(actualOrder, int(vB[0]-100)) // Convert back to original index
+				}
+				return nil
+			})
+		})
+		if count != 3 {
+			t.Fatalf("Expected 3 items in upgraded index, got %d", count)
+		}
+		if !reflect.DeepEqual(actualOrder, expectedOrder) {
+			t.Fatalf("Upgraded index order failed: expected %v, got %v", expectedOrder, actualOrder)
+		}
+	})
+
+	// Test 4: Add new index to existing table (requires FBytes)
+	t.Run("AddNewIndexToExistingTable", func(t *testing.T) {
+		// Create table with one index
+		tbl, err := db.Table("AddIndexTable", &TableCfg{
+			Indexes: map[string]*IndexCfg{
+				"original": {
+					F: indexFunc,
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Error creating table: %v", err)
+		}
+
+		// Add test data
+		for i := 0; i < 3; i++ {
+			if err := tbl.Set([]byte{byte(i)}, createTestValue(i)); err != nil {
+				t.Fatalf("Error setting value %d: %v", i, err)
+			}
+		}
+
+		// Try to add new index without FBytes (should fail)
+		_, err = db.Table("AddIndexTable", &TableCfg{
+			Indexes: map[string]*IndexCfg{
+				"original": {
+					F: indexFunc,
+				},
+				"new": {
+					F: indexFunc,
+				},
+			},
+		})
+		if err == nil || !strings.Contains(err.Error(), "updating index") {
+			t.Fatalf("Expected error for adding index without FBytes, got: %v", err)
+		}
+
+		// Add new index with FBytes (should work)
+		tbl, err = db.Table("AddIndexTable", &TableCfg{
+			Indexes: map[string]*IndexCfg{
+				"original": {
+					F: indexFunc,
+				},
+				"new": {
+					FBytes: indexFuncBytes,
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Error adding new index: %v", err)
+		}
+
+		// Verify both indexes work
+		count := 0
+		tbl.Indexes["original"].Iterate(nil, func(it *Iter) error {
+			count++
+			return nil
+		})
+		if count != 3 {
+			t.Fatalf("Expected 3 items in original index, got %d", count)
+		}
+
+		count = 0
+		tbl.Indexes["new"].Iterate(nil, func(it *Iter) error {
+			count++
+			return nil
+		})
+		if count != 3 {
+			t.Fatalf("Expected 3 items in new index, got %d", count)
+		}
+	})
+
+	// Test 5: Remove existing indexes
+	t.Run("RemoveExistingIndexes", func(t *testing.T) {
+		// Create table with two indexes
+		tbl, err := db.Table("RemoveTable", &TableCfg{
+			Indexes: map[string]*IndexCfg{
+				"keep": {
+					F: indexFunc,
+				},
+				"remove": {
+					F: indexFunc,
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Error creating table: %v", err)
+		}
+
+		// Add test data
+		for i := 0; i < 3; i++ {
+			if err := tbl.Set([]byte{byte(i)}, createTestValue(i)); err != nil {
+				t.Fatalf("Error setting value %d: %v", i, err)
+			}
+		}
+
+		// Verify both indexes exist
+		if _, ok := tbl.Indexes["keep"]; !ok {
+			t.Fatal("keep index should exist")
+		}
+		if _, ok := tbl.Indexes["remove"]; !ok {
+			t.Fatal("remove index should exist")
+		}
+
+		// Update table to remove one index
+		tbl, err = db.Table("RemoveTable", &TableCfg{
+			Indexes: map[string]*IndexCfg{
+				"keep": {
+					F: indexFunc,
+				},
+				// "remove" index is intentionally omitted
+			},
+		})
+		if err != nil {
+			t.Fatalf("Error removing index: %v", err)
+		}
+
+		// Verify only the kept index exists
+		if _, ok := tbl.Indexes["keep"]; !ok {
+			t.Fatal("keep index should still exist")
+		}
+		if _, ok := tbl.Indexes["remove"]; ok {
+			t.Fatal("remove index should not exist")
+		}
+
+		// Verify kept index still works
+		count := 0
+		tbl.Indexes["keep"].Iterate(nil, func(it *Iter) error {
+			count++
+			return nil
+		})
+		if count != 3 {
+			t.Fatalf("Expected 3 items in kept index, got %d", count)
+		}
+	})
+
+	// Test 6: Complex scenario - mix of add, remove, and upgrade
+	t.Run("ComplexIndexChanges", func(t *testing.T) {
+		// Initial table with two indexes
+		tbl, err := db.Table("ComplexTable", &TableCfg{
+			Indexes: map[string]*IndexCfg{
+				"upgrade": {
+					F: indexFunc,
+				},
+				"remove": {
+					F: indexFunc,
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Error creating complex table: %v", err)
+		}
+
+		// Add test data
+		for i := 0; i < 5; i++ {
+			if err := tbl.Set([]byte{byte(i)}, createTestValue(i)); err != nil {
+				t.Fatalf("Error setting value %d: %v", i, err)
+			}
+		}
+
+		// Complex update: upgrade one index, remove one, add one new
+		tbl, err = db.Table("ComplexTable", &TableCfg{
+			Indexes: map[string]*IndexCfg{
+				"upgrade": {
+					F: indexFunc,
+				},
+				"upgrade_v2": {
+					FBytes: indexFuncBytes,
+				},
+				// "remove" is omitted
+				"add": {
+					FBytes: indexFuncBytes, // New index
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Error in complex update: %v", err)
+		}
+
+		// Verify final state
+		if _, ok := tbl.Indexes["upgrade"]; !ok {
+			t.Fatal("upgrade index should exist")
+		}
+		if _, ok := tbl.Indexes["upgrade_v2"]; !ok {
+			t.Fatal("upgrade_v2 index should exist")
+		}
+		if _, ok := tbl.Indexes["remove"]; ok {
+			t.Fatal("remove index should not exist")
+		}
+		if _, ok := tbl.Indexes["add"]; !ok {
+			t.Fatal("add index should exist")
+		}
+
+		// Verify all remaining indexes work
+		count := 0
+		expectedUpgradeOrder := []int{0, 1, 2, 3, 4} // Original order
+		actualUpgradeOrder := make([]int, 0, 5)
+		tbl.Indexes["upgrade"].Iterate(nil, func(it *Iter) error {
+			count++
+			return it.V(func(vB []byte) error {
+				if len(vB) > 0 {
+					actualUpgradeOrder = append(actualUpgradeOrder, int(vB[0]-100)) // Convert back to original index
+				}
+				return nil
+			})
+		})
+		if count != 5 {
+			t.Fatalf("Expected 5 items in original upgrade index, got %d", count)
+		}
+		if !reflect.DeepEqual(actualUpgradeOrder, expectedUpgradeOrder) {
+			t.Fatalf("Original upgrade index order failed: expected %v, got %v", expectedUpgradeOrder, actualUpgradeOrder)
+		}
+
+		count = 0
+		expectedUpgradeOrder = []int{4, 3, 2, 1, 0} // Reverse order due to 0xFF - originalIdx transformation
+		actualUpgradeOrder = make([]int, 0, 5)
+		tbl.Indexes["upgrade_v2"].Iterate(nil, func(it *Iter) error {
+			count++
+			return it.V(func(vB []byte) error {
+				if len(vB) > 0 {
+					actualUpgradeOrder = append(actualUpgradeOrder, int(vB[0]-100)) // Convert back to original index
+				}
+				return nil
+			})
+		})
+		if count != 5 {
+			t.Fatalf("Expected 5 items in upgraded index, got %d", count)
+		}
+		if !reflect.DeepEqual(actualUpgradeOrder, expectedUpgradeOrder) {
+			t.Fatalf("Upgraded index order failed: expected %v, got %v", expectedUpgradeOrder, actualUpgradeOrder)
+		}
+
+		count = 0
+		tbl.Indexes["add"].Iterate(nil, func(it *Iter) error {
+			count++
+			return nil
+		})
+		if count != 5 {
+			t.Fatalf("Expected 5 items in added index, got %d", count)
+		}
+	})
+
+	// Test 7: Table with no indexes (should work)
+	t.Run("TableWithoutIndexes", func(t *testing.T) {
+		tbl, err := db.Table("NoIndexTable", nil)
+		if err != nil {
+			t.Fatalf("Error creating table without indexes: %v", err)
+		}
+
+		// Should be able to add data
+		if err := tbl.Set([]byte("key"), createTestValue(1)); err != nil {
+			t.Fatalf("Error setting value in table without indexes: %v", err)
+		}
+
+		// Later add indexes
+		tbl, err = db.Table("NoIndexTable", &TableCfg{
+			Indexes: map[string]*IndexCfg{
+				"new": {
+					FBytes: indexFuncBytes,
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Error adding index to previously index-less table: %v", err)
+		}
+
+		// Verify index works
+		count := 0
+		tbl.Indexes["new"].Iterate(nil, func(it *Iter) error {
+			count++
+			return nil
+		})
+		if count != 1 {
+			t.Fatalf("Expected 1 item in new index, got %d", count)
+		}
+	})
 }
