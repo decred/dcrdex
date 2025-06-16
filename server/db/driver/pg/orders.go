@@ -846,10 +846,10 @@ func (a *Archiver) PreimageStats(user account.AccountID, lastN int) ([]*db.Preim
 	}
 
 	sort.Slice(outcomes, func(i, j int) bool {
-		return outcomes[j].Time < outcomes[i].Time // descending
+		return outcomes[i].Time < outcomes[j].Time // ascending
 	})
 	if len(outcomes) > lastN {
-		outcomes = outcomes[:lastN]
+		outcomes = outcomes[len(outcomes)-lastN:]
 	}
 
 	return outcomes, nil

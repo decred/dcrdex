@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math"
+	"sort"
 	"sync"
 	"time"
 
@@ -33,6 +34,14 @@ const (
 	scoringOrderLimit  = 40  // last N orders to be considered in preimage miss scoring
 
 	maxIDsPerOrderStatusRequest = 10_000
+
+	// freeCancelThreshold is the minimum number of epochs a user should wait before
+	// placing a cancel order, if they want to avoid penalization. It is set to 2,
+	// which means if a user places a cancel order in the same epoch as its limit
+	// order, or the next epoch, the user will be penalized. This value is chosen
+	// because it is the minimum value such that the order remains booked for at
+	// least one full epoch and one full match cycle.
+	freeCancelThreshold = 2
 )
 
 var (
@@ -69,6 +78,8 @@ type Storage interface {
 	PreimageStats(user account.AccountID, lastN int) ([]*db.PreimageResult, error)
 	AllActiveUserMatches(aid account.AccountID) ([]*db.MatchData, error)
 	MatchStatuses(aid account.AccountID, base, quote uint32, matchIDs []order.MatchID) ([]*db.MatchStatus, error)
+
+	db.ReputationArchiver
 }
 
 // Signer signs messages. The message must be a 32-byte hash.
@@ -227,6 +238,7 @@ func (client *clientInfo) respHandler(id uint64) *respHandler {
 // the 'connect' route.
 type AuthManager struct {
 	wg             sync.WaitGroup
+	ctx            context.Context
 	storage        Storage
 	signer         Signer
 	parseBondTx    BondTxParser
@@ -254,9 +266,9 @@ type AuthManager struct {
 	unbookers map[account.AccountID]*time.Timer
 
 	violationMtx   sync.Mutex
-	matchOutcomes  map[account.AccountID]*latestMatchOutcomes
-	preimgOutcomes map[account.AccountID]*latestPreimageOutcomes
-	orderOutcomes  map[account.AccountID]*latestOrders // cancel/complete, was in clientInfo.recentOrders
+	matchOutcomes  map[account.AccountID]*latestOutcomes[*db.MatchResult]
+	preimgOutcomes map[account.AccountID]*latestOutcomes[*db.PreimageOutcome]
+	orderOutcomes  map[account.AccountID]*latestOutcomes[*db.OrderOutcome] // cancel/complete, was in clientInfo.recentOrders
 
 	txDataSources map[uint32]TxDataSource
 
@@ -266,98 +278,44 @@ type AuthManager struct {
 // violation badness
 const (
 	// preimage miss
-	preimageMissScore = -2 // book spoof, no match, no stuck funds
+	preimageMissScore    = -2 // book spoof, no match, no stuck funds
+	preimageSuccessScore = 0
 
 	// failure to act violations
+	matchCompletedScore  = 1   // offsets the violations
 	noSwapAsMakerScore   = -4  // book spoof, match with taker order affected, no stuck funds
 	noSwapAsTakerScore   = -11 // maker has contract stuck for 20 hrs
 	noRedeemAsMakerScore = -7  // taker has contract stuck for 8 hrs
 	noRedeemAsTakerScore = -1  // just dumb, counterparty not inconvenienced
 
 	// cancel rate exceeds threshold
-	excessiveCancels = -5
-
-	successScore = 1 // offsets the violations
+	excessiveCancelsScore = -5
+	orderCompleteScore    = 0
 
 	DefaultPenaltyThreshold = 20
 )
 
-// Violation represents a specific infraction. For example, not broadcasting a
-// swap contract transaction by the deadline as the maker.
-type Violation int32
+type Outcome = db.Outcome
 
-const (
-	ViolationInvalid Violation = iota - 2
-	ViolationForgiven
-	ViolationSwapSuccess
-	ViolationPreimageMiss
-	ViolationNoSwapAsMaker
-	ViolationNoSwapAsTaker
-	ViolationNoRedeemAsMaker
-	ViolationNoRedeemAsTaker
-	ViolationCancelRate
-)
+var outcomeScores = map[Outcome]int32{
+	db.OutcomeForgiven: 1,
 
-var violations = map[Violation]struct {
-	score int32
-	desc  string
-}{
-	ViolationSwapSuccess:     {successScore, "swap success"},
-	ViolationForgiven:        {1, "forgiveness"},
-	ViolationPreimageMiss:    {preimageMissScore, "preimage miss"},
-	ViolationNoSwapAsMaker:   {noSwapAsMakerScore, "no swap as maker"},
-	ViolationNoSwapAsTaker:   {noSwapAsTakerScore, "no swap as taker"},
-	ViolationNoRedeemAsMaker: {noRedeemAsMakerScore, "no redeem as maker"},
-	ViolationNoRedeemAsTaker: {noRedeemAsTakerScore, "no redeem as taker"},
-	ViolationCancelRate:      {excessiveCancels, "excessive cancels"},
-	ViolationInvalid:         {0, "invalid violation"},
-}
+	// preimage results
+	db.OutcomePreimageMiss:    preimageMissScore,
+	db.OutcomePreimageSuccess: preimageSuccessScore,
 
-// Score returns the Violation's score, which is a representation of the
-// relative severity of the infraction.
-func (v Violation) Score() int32 {
-	return violations[v].score
-}
+	// match results
+	db.OutcomeSwapSuccess:     matchCompletedScore,
+	db.OutcomeNoSwapAsMaker:   noSwapAsMakerScore,
+	db.OutcomeNoSwapAsTaker:   noSwapAsTakerScore,
+	db.OutcomeNoRedeemAsMaker: noRedeemAsMakerScore,
+	db.OutcomeNoRedeemAsTaker: noRedeemAsTakerScore,
 
-// String returns a description of the Violation.
-func (v Violation) String() string {
-	return violations[v].desc
-}
+	// orders cancellations (completed/canceled)
+	db.OutcomeOrderCanceled: excessiveCancelsScore,
+	db.OutcomeOrderComplete: orderCompleteScore,
 
-// NoActionStep is the action that the user failed to take. This is used to
-// define valid inputs to the Inaction method.
-type NoActionStep uint8
-
-const (
-	SwapSuccess NoActionStep = iota // success included for accounting purposes
-	NoSwapAsMaker
-	NoSwapAsTaker
-	NoRedeemAsMaker
-	NoRedeemAsTaker
-)
-
-// Violation returns the corresponding Violation for the misstep represented by
-// the NoActionStep.
-func (step NoActionStep) Violation() Violation {
-	switch step {
-	case SwapSuccess:
-		return ViolationSwapSuccess
-	case NoSwapAsMaker:
-		return ViolationNoSwapAsMaker
-	case NoSwapAsTaker:
-		return ViolationNoSwapAsTaker
-	case NoRedeemAsMaker:
-		return ViolationNoRedeemAsMaker
-	case NoRedeemAsTaker:
-		return ViolationNoRedeemAsTaker
-	default:
-		return ViolationInvalid
-	}
-}
-
-// String returns the description of the NoActionStep's corresponding Violation.
-func (step NoActionStep) String() string {
-	return step.Violation().String()
+	db.OutcomeInvalid: 0,
 }
 
 // Config is the configuration settings for the AuthManager, and the only
@@ -435,9 +393,9 @@ func NewAuthManager(cfg *Config) *AuthManager {
 		conns:            make(map[uint64]*clientInfo),
 		unbookers:        make(map[account.AccountID]*time.Timer),
 		bondWaiterIdx:    make(map[string]struct{}),
-		matchOutcomes:    make(map[account.AccountID]*latestMatchOutcomes),
-		preimgOutcomes:   make(map[account.AccountID]*latestPreimageOutcomes),
-		orderOutcomes:    make(map[account.AccountID]*latestOrders),
+		matchOutcomes:    make(map[account.AccountID]*latestOutcomes[*db.MatchResult]),
+		preimgOutcomes:   make(map[account.AccountID]*latestOutcomes[*db.PreimageOutcome]),
+		orderOutcomes:    make(map[account.AccountID]*latestOutcomes[*db.OrderOutcome]),
 		txDataSources:    cfg.TxDataSources,
 	}
 
@@ -524,14 +482,19 @@ func (auth *AuthManager) RecordCompletedOrder(user account.AccountID, oid order.
 // orders. The user's new score is returned, which can be used to compute the
 // user's tier with computeUserTier.
 func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.OrderID, target *order.OrderID, epochGap int32, tMS int64) (score int32) {
+	canceled := target != nil && epochGap >= 0 && epochGap < freeCancelThreshold
+	o, err := auth.storage.AddOrderOutcome(auth.ctx, user, oid, canceled)
+	if err != nil {
+		log.Errorf("Error storing order outcome for order %s, user %s: %v", oid, user, err)
+		return
+	}
 	auth.violationMtx.Lock()
 	if orderOutcomes, found := auth.orderOutcomes[user]; found {
-		orderOutcomes.add(&oidStamped{
-			OrderID:  oid,
-			time:     tMS,
-			target:   target,
-			epochGap: epochGap,
-		})
+		if popped := orderOutcomes.add(o); popped != 0 {
+			if err := auth.storage.PruneOutcomes(auth.ctx, user, db.OutcomeClassOrder, popped); err != nil {
+				log.Errorf("Error pruning order outcomes for user %s: %v", user, err)
+			}
+		}
 		score = auth.userScore(user)
 		auth.violationMtx.Unlock()
 		log.Debugf("Recorded order %v that has finished processing: user=%v, time=%v, target=%v",
@@ -543,7 +506,6 @@ func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.Order
 	// The user is currently not connected and authenticated. When the user logs
 	// back in, their history will be reloaded (loadUserScore) and their tier
 	// recomputed, but compute their score now from DB for the caller.
-	var err error
 	score, err = auth.loadUserScore(user)
 	if err != nil {
 		log.Errorf("Failed to load order and match outcomes for user %v: %v", user, err)
@@ -553,9 +515,10 @@ func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.Order
 	return
 }
 
-// Run runs the AuthManager until the context is canceled. Satisfies the
-// dex.Runner interface.
-func (auth *AuthManager) Run(ctx context.Context) {
+// Connect runs the AuthManager until the context is canceled. Satisfies the
+// dex.Connector interface.
+func (auth *AuthManager) Connect(ctx context.Context) (*sync.WaitGroup, error) {
+	auth.ctx = ctx
 	auth.wg.Add(1)
 	go func() {
 		defer auth.wg.Done()
@@ -578,17 +541,19 @@ func (auth *AuthManager) Run(ctx context.Context) {
 		auth.latencyQ.Run(ctx)
 	}()
 
-	<-ctx.Done()
-	auth.connMtx.Lock()
-	defer auth.connMtx.Unlock()
-	for user, ub := range auth.unbookers {
-		ub.Stop()
-		delete(auth.unbookers, user)
-	}
-
-	// Wait for latencyQ and checkBonds.
-	auth.wg.Wait()
+	auth.wg.Add(1)
+	go func() {
+		defer auth.wg.Done()
+		<-ctx.Done()
+		auth.connMtx.Lock()
+		defer auth.connMtx.Unlock()
+		for user, ub := range auth.unbookers {
+			ub.Stop()
+			delete(auth.unbookers, user)
+		}
+	}()
 	// TODO: wait for running comms route handlers and other DB writers.
+	return &auth.wg, nil
 }
 
 // Route wraps the comms.Route function, storing the response handler with the
@@ -734,28 +699,31 @@ func (auth *AuthManager) RequestWithTimeout(user account.AccountID, msg *msgjson
 }
 
 func (auth *AuthManager) integrateOutcomes(
-	matchOutcomes *latestMatchOutcomes,
-	preimgOutcomes *latestPreimageOutcomes,
-	orderOutcomes *latestOrders,
+	matchOutcomes *latestOutcomes[*db.MatchResult],
+	preimgOutcomes *latestOutcomes[*db.PreimageOutcome],
+	orderOutcomes *latestOutcomes[*db.OrderOutcome],
 ) (score, successCount, piMissCount int32) {
 
 	if matchOutcomes != nil {
 		matchCounts := matchOutcomes.binViolations()
 		for v, count := range matchCounts {
-			score += v.Score() * int32(count)
+			score += outcomeScores[v] * int32(count)
 		}
-		successCount = int32(matchCounts[ViolationSwapSuccess])
+		successCount = int32(matchCounts[db.OutcomeSwapSuccess])
 	}
 	if preimgOutcomes != nil {
-		piMissCount = preimgOutcomes.misses()
-		score += ViolationPreimageMiss.Score() * piMissCount
+		counts := preimgOutcomes.binViolations()
+		piMissCount = int32(counts[db.OutcomePreimageMiss])
+		score += outcomeScores[db.OutcomePreimageMiss] * piMissCount
 	}
 	if !auth.freeCancels {
-		totalOrds, cancels := orderOutcomes.counts() // completions := totalOrds - cancels
+		counts := orderOutcomes.binViolations()
+		successes, cancels := int32(counts[db.OutcomeOrderComplete]), int32(counts[db.OutcomeOrderCanceled])
+		totalOrds := int(successes + cancels)
 		if totalOrds > auth.GraceLimit() {
 			cancelRate := float64(cancels) / float64(totalOrds)
 			if cancelRate > auth.cancelThresh {
-				score += ViolationCancelRate.Score()
+				score += outcomeScores[db.OutcomeOrderCanceled]
 			}
 		}
 	}
@@ -871,19 +839,21 @@ func (auth *AuthManager) ComputeUserReputation(user account.AccountID) *account.
 	return r
 }
 
-func (auth *AuthManager) registerMatchOutcome(user account.AccountID, misstep NoActionStep, mmid db.MarketMatchID, value uint64, refTime time.Time) (score int32) {
-	violation := misstep.Violation()
+func (auth *AuthManager) registerMatchOutcome(user account.AccountID, outcome Outcome, mmid db.MarketMatchID) (score int32) {
+	o, err := auth.storage.AddMatchOutcome(auth.ctx, user, mmid.MatchID, outcome)
+	if err != nil {
+		log.Errorf("Error storing match outcome %s for user %s: %w", user, mmid.MatchID, err)
+		return
+	}
 
 	auth.violationMtx.Lock()
 	if matchOutcomes, found := auth.matchOutcomes[user]; found {
-		matchOutcomes.add(&matchOutcome{
-			time:    refTime.UnixMilli(),
-			mid:     mmid.MatchID,
-			outcome: violation,
-			value:   value,
-			base:    mmid.Base,
-			quote:   mmid.Quote,
-		})
+		if popped := matchOutcomes.add(o); popped != 0 {
+			if err := auth.storage.PruneOutcomes(auth.ctx, user, db.OutcomeClassMatch, popped); err != nil {
+				log.Errorf("Error pruning match outcomes for user %s: %v", user, err)
+			}
+		}
+
 		score = auth.userScore(user)
 		auth.violationMtx.Unlock()
 		return
@@ -893,7 +863,7 @@ func (auth *AuthManager) registerMatchOutcome(user account.AccountID, misstep No
 	// The user is currently not connected and authenticated. When the user logs
 	// back in, their history will be reloaded (loadUserScore) and their tier
 	// recomputed, but compute their score now from DB for the caller.
-	score, err := auth.loadUserScore(user)
+	score, err = auth.loadUserScore(user)
 	if err != nil {
 		log.Errorf("Failed to load order and match outcomes for user %v: %v", user, err)
 		return 0
@@ -906,7 +876,7 @@ func (auth *AuthManager) registerMatchOutcome(user account.AccountID, misstep No
 // TODO: provide lots instead of value, or convert to lots somehow. But, Swapper
 // has no clue about lot size, and neither does DB!
 func (auth *AuthManager) SwapSuccess(user account.AccountID, mmid db.MarketMatchID, value uint64, redeemTime time.Time) {
-	score := auth.registerMatchOutcome(user, SwapSuccess, mmid, value, redeemTime)
+	score := auth.registerMatchOutcome(user, db.OutcomeSwapSuccess, mmid)
 	rep, tierChanged, scoreChanged := auth.computeUserReputation(user, score) // may raise tier
 	effectiveTier := rep.EffectiveTier()
 	log.Debugf("Match success for user %v: strikes %d, bond tier %v => tier %v",
@@ -928,27 +898,22 @@ func (auth *AuthManager) SwapSuccess(user account.AccountID, mmid db.MarketMatch
 // the actor was first able to take the missed action.
 // TODO: provide lots instead of value, or convert to lots somehow. But, Swapper
 // has no clue about lot size, and neither does DB!
-func (auth *AuthManager) Inaction(user account.AccountID, misstep NoActionStep, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID) {
-	violation := misstep.Violation()
-	if violation == ViolationInvalid {
-		log.Errorf("Invalid inaction step %d", misstep)
-		return
-	}
-	score := auth.registerMatchOutcome(user, misstep, mmid, matchValue, refTime)
+func (auth *AuthManager) Inaction(user account.AccountID, outcome Outcome, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID) {
+	score := auth.registerMatchOutcome(user, outcome, mmid)
 
 	// Recompute tier.
 	rep, tierChanged, scoreChanged := auth.computeUserReputation(user, score)
 	effectiveTier := rep.EffectiveTier()
 	log.Infof("Match failure for user %v: %q (badness %v), strikes %d, bond tier %v => trading tier %v",
-		user, violation, violation.Score(), score, rep.BondedTier, effectiveTier)
+		user, outcome, outcomeScores[outcome], score, rep.BondedTier, effectiveTier)
 	// If their tier sinks below 1, unbook their orders and send a note.
 	if tierChanged && effectiveTier < 1 {
 		details := fmt.Sprintf("swap %v failure (%v) for order %v, new tier = %d",
-			mmid.MatchID, misstep, oid, effectiveTier)
+			mmid.MatchID, outcome, oid, effectiveTier)
 		auth.Penalize(user, account.FailureToAct, details)
 	}
 	if tierChanged {
-		reason := fmt.Sprintf("swap failure for match %v order %v: %v", mmid.MatchID, oid, misstep)
+		reason := fmt.Sprintf("swap failure for match %v order %v: %v", mmid.MatchID, oid, outcome)
 		go auth.sendTierChanged(user, rep, reason)
 	} else if scoreChanged {
 		go auth.sendScoreChanged(user, rep)
@@ -956,14 +921,20 @@ func (auth *AuthManager) Inaction(user account.AccountID, misstep NoActionStep, 
 }
 
 func (auth *AuthManager) registerPreimageOutcome(user account.AccountID, miss bool, oid order.OrderID, refTime time.Time) (score int32) {
+	o, err := auth.storage.AddPreimageOutcome(auth.ctx, user, oid, miss)
+	if err != nil {
+		log.Errorf("Error storing order outcome for order %s, user %s: %v", oid, user, err)
+		return
+	}
 	auth.violationMtx.Lock()
 	piOutcomes, found := auth.preimgOutcomes[user]
 	if found {
-		piOutcomes.add(&preimageOutcome{
-			time: refTime.UnixMilli(),
-			oid:  oid,
-			miss: miss,
-		})
+
+		if popped := piOutcomes.add(o); popped != 0 {
+			if err := auth.storage.PruneOutcomes(auth.ctx, user, db.OutcomeClassPreimage, popped); err != nil {
+				log.Errorf("Error pruning preimage outcomes for user %s: %v", user, err)
+			}
+		}
 		score = auth.userScore(user)
 		auth.violationMtx.Unlock()
 		return
@@ -973,7 +944,6 @@ func (auth *AuthManager) registerPreimageOutcome(user account.AccountID, miss bo
 	// The user is currently not connected and authenticated. When the user logs
 	// back in, their history will be reloaded (loadUserScore) and their tier
 	// recomputed, but compute their score now from DB for the caller.
-	var err error
 	score, err = auth.loadUserScore(user)
 	if err != nil {
 		log.Errorf("Failed to load order and match outcomes for user %v: %v", user, err)
@@ -1064,6 +1034,35 @@ func (auth *AuthManager) AcctStatus(user account.AccountID) (connected bool, tie
 	return
 }
 
+func (auth *AuthManager) reRepUser(user account.AccountID) (*account.Reputation, error) {
+	// Reload outcomes from DB. NOTE: This does not use loadUserScore because we
+	// also need to update the matchOutcomes map if the user is online.
+	pimgs, matches, ords, err := auth.loadUserOutcomes(user)
+	if err != nil {
+		return nil, err
+	}
+	auth.violationMtx.Lock()
+	_, online := auth.matchOutcomes[user]
+	if online {
+		auth.preimgOutcomes[user] = pimgs
+		auth.matchOutcomes[user] = matches
+		auth.orderOutcomes[user] = ords
+	}
+	auth.violationMtx.Unlock()
+
+	// Recompute the user's score.
+	score, _, _ := auth.integrateOutcomes(matches, pimgs, ords)
+
+	// Recompute tier.
+	rep, tierChanged, scoreChanged := auth.computeUserReputation(user, score)
+	if tierChanged {
+		go auth.sendTierChanged(user, rep, "user forgiven")
+	} else if scoreChanged {
+		go auth.sendScoreChanged(user, rep)
+	}
+	return rep, nil
+}
+
 // ForgiveMatchFail forgives a user for a specific match failure, potentially
 // allowing them to resume trading if their score becomes passing. NOTE: This
 // may become deprecated with mesh, unless matches may be forgiven in some
@@ -1074,26 +1073,9 @@ func (auth *AuthManager) ForgiveMatchFail(user account.AccountID, mid order.Matc
 	if err != nil {
 		return
 	}
-
-	// Reload outcomes from DB. NOTE: This does not use loadUserScore because we
-	// also need to update the matchOutcomes map if the user is online.
-	latestMatches, latestPreimageResults, latestFinished, err := auth.loadUserOutcomes(user)
-	auth.violationMtx.Lock()
-	_, online := auth.matchOutcomes[user]
-	if online {
-		auth.matchOutcomes[user] = latestMatches // other outcomes unchanged
-	}
-	auth.violationMtx.Unlock()
-
-	// Recompute the user's score.
-	score, _, _ := auth.integrateOutcomes(latestMatches, latestPreimageResults, latestFinished)
-
-	// Recompute tier.
-	rep, tierChanged, scoreChanged := auth.computeUserReputation(user, score)
-	if tierChanged {
-		go auth.sendTierChanged(user, rep, "swap failure forgiven")
-	} else if scoreChanged {
-		go auth.sendScoreChanged(user, rep)
+	rep, err := auth.reRepUser(user)
+	if err != nil {
+		return
 	}
 
 	unbanned = rep.EffectiveTier() > 0
@@ -1345,31 +1327,61 @@ func (auth *AuthManager) removeClient(client *clientInfo) {
 	auth.violationMtx.Unlock()
 }
 
-func matchStatusToViol(status order.MatchStatus) Violation {
-	switch status {
+func legacyMatchOutcomeToOutcome(m *db.MatchOutcome) Outcome {
+	if !m.Fail {
+		return db.OutcomeSwapSuccess
+	}
+	return matchStatusToOutcome(m.Status)
+}
+
+func matchStatusToOutcome(s order.MatchStatus) Outcome {
+	switch s {
 	case order.NewlyMatched:
-		return ViolationNoSwapAsMaker
+		return db.OutcomeNoSwapAsMaker
 	case order.MakerSwapCast:
-		return ViolationNoSwapAsTaker
+		return db.OutcomeNoSwapAsTaker
 	case order.TakerSwapCast:
-		return ViolationNoRedeemAsMaker
+		return db.OutcomeNoRedeemAsMaker
 	case order.MakerRedeemed:
-		return ViolationNoRedeemAsTaker
+		return db.OutcomeNoRedeemAsTaker
 	case order.MatchComplete:
-		return ViolationSwapSuccess // should be caught by Fail==false
+		return db.OutcomeSwapSuccess // should be caught by Fail==false
 	default:
-		return ViolationInvalid
+		return db.OutcomeInvalid
 	}
 }
 
 // loadUserOutcomes returns user's latest match and preimage outcomes from order
 // and swap data retrieved from the DB.
-func (auth *AuthManager) loadUserOutcomes(user account.AccountID) (*latestMatchOutcomes, *latestPreimageOutcomes, *latestOrders, error) {
+func (auth *AuthManager) loadUserOutcomes(user account.AccountID) (pimgs *latestOutcomes[*db.PreimageOutcome], matches *latestOutcomes[*db.MatchResult], ords *latestOutcomes[*db.OrderOutcome], err error) {
+	repVer, err := auth.storage.GetUserReputationVersion(auth.ctx, user)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("error getting current user reputation version: %w", err)
+	}
+	switch repVer {
+	case 0:
+		return auth.upgradeUserOutcomesV0(user)
+	case 1:
+		return auth.loadUserOutcomesV1(user)
+	default:
+		return nil, nil, nil, fmt.Errorf("unknown user reputation version %d", repVer)
+	}
+}
+
+func (auth *AuthManager) upgradeUserOutcomesV0(user account.AccountID) (*latestOutcomes[*db.PreimageOutcome], *latestOutcomes[*db.MatchResult], *latestOutcomes[*db.OrderOutcome], error) {
 	// Load the N most recent matches resulting in success or an at-fault match
 	// revocation for the user.
 	matchOutcomes, err := auth.storage.CompletedAndAtFaultMatchStats(user, ScoringMatchLimit)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("CompletedAndAtFaultMatchStats: %w", err)
+	}
+	// These are sorted in descending time, but we want ascending.
+	matches := make([]*db.MatchResult, 0, len(matchOutcomes))
+	for _, m := range matchOutcomes {
+		matches = append(matches, &db.MatchResult{
+			MatchID:      m.ID,
+			MatchOutcome: legacyMatchOutcomeToOutcome(m),
+		})
 	}
 
 	// Load the count of preimage misses in the N most recently placed orders.
@@ -1377,43 +1389,83 @@ func (auth *AuthManager) loadUserOutcomes(user account.AccountID) (*latestMatchO
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("PreimageStats: %w", err)
 	}
-
-	latestMatches := newLatestMatchOutcomes(ScoringMatchLimit)
-	for _, mo := range matchOutcomes {
-		// The Fail flag qualifies MakerRedeemed, which is always success for
-		// maker, but fail for taker if revoked.
-		v := ViolationSwapSuccess
-		if mo.Fail {
-			v = matchStatusToViol(mo.Status)
-		}
-		latestMatches.add(&matchOutcome{
-			time:    mo.Time,
-			mid:     mo.ID,
-			outcome: v,
-			value:   mo.Value, // Note: DB knows value, not number of lots!
-			base:    mo.Base,
-			quote:   mo.Quote,
+	pimgs := make([]*db.PreimageOutcome, 0, len(piOutcomes))
+	for _, p := range piOutcomes {
+		pimgs = append(pimgs, &db.PreimageOutcome{
+			OrderID: p.ID,
+			Miss:    p.Miss,
 		})
 	}
 
-	latestPreimageResults := newLatestPreimageOutcomes(scoringOrderLimit)
-	for _, po := range piOutcomes {
-		latestPreimageResults.add(&preimageOutcome{
-			time: po.Time,
-			oid:  po.ID,
-			miss: po.Miss,
-		})
-	}
-
-	// Retrieve the user's N latest finished (completed or canceled orders)
-	// and store them in a latestOrders.
-	orderOutcomes, err := auth.loadRecentFinishedOrders(user, cancelThreshWindow)
+	// Load the cancelThreshWindow latest successfully completed orders for the user.
+	oids, compTimes, err := auth.storage.CompletedUserOrders(user, cancelThreshWindow)
 	if err != nil {
-		log.Errorf("Unable to retrieve user's executed cancels and completed orders: %v", err)
 		return nil, nil, nil, err
 	}
 
-	return latestMatches, latestPreimageResults, orderOutcomes, nil
+	// Load the cancelThreshWindow latest executed cancel orders for the user.
+	cancels, err := auth.storage.ExecutedCancelsForUser(user, cancelThreshWindow)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	ords := assembleCanceledOrders(oids, compTimes, cancels)
+
+	pimgs, matches, ords, err = auth.storage.UpgradeUserReputationV1(auth.ctx, user, pimgs, matches, ords)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("error upgrading user reputation to v1: %w", err)
+	}
+
+	log.Infof("User %s reputation upgraded to version 1", user)
+
+	return newLatestOutcomes(pimgs, scoringOrderLimit),
+		newLatestOutcomes(matches, ScoringMatchLimit),
+		newLatestOutcomes(ords, cancelThreshWindow),
+		nil
+}
+
+func assembleCanceledOrders(oids /* completed */ []order.OrderID, compTimes []int64, cancels []*db.CancelRecord) []*db.OrderOutcome {
+	type stampedOrderOutcome struct {
+		Outcome *db.OrderOutcome
+		Stamp   int64
+	}
+	stampedOrds := make([]*stampedOrderOutcome, 0, 2*cancelThreshWindow)
+	for i := range oids {
+		stampedOrds = append(stampedOrds, &stampedOrderOutcome{
+			Outcome: &db.OrderOutcome{OrderID: oids[i]},
+			Stamp:   compTimes[i],
+		})
+	}
+	for _, o := range cancels {
+		stampedOrds = append(stampedOrds, &stampedOrderOutcome{
+			Outcome: &db.OrderOutcome{
+				OrderID:  o.ID,
+				Canceled: o.EpochGap >= 0 && o.EpochGap < freeCancelThreshold,
+			},
+			Stamp: o.MatchTime,
+		})
+	}
+	sort.Slice(stampedOrds, func(i, j int) bool {
+		return stampedOrds[i].Stamp > stampedOrds[j].Stamp
+	})
+	if len(stampedOrds) > cancelThreshWindow {
+		stampedOrds = stampedOrds[len(stampedOrds)-cancelThreshWindow:]
+	}
+	ords := make([]*db.OrderOutcome, len(stampedOrds))
+	for i, o := range stampedOrds {
+		ords[i] = o.Outcome
+	}
+	return ords
+}
+
+func (auth *AuthManager) loadUserOutcomesV1(user account.AccountID) (*latestOutcomes[*db.PreimageOutcome], *latestOutcomes[*db.MatchResult], *latestOutcomes[*db.OrderOutcome], error) {
+	pimgs, matches, ords, err := auth.storage.GetUserReputationData(auth.ctx, user, scoringOrderLimit, ScoringMatchLimit, cancelThreshWindow)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("error loading v1 user reputation data for user %s: %w", user, err)
+	}
+	return newLatestOutcomes(pimgs, scoringOrderLimit),
+		newLatestOutcomes(matches, ScoringMatchLimit),
+		newLatestOutcomes(ords, cancelThreshWindow), nil
 }
 
 // MatchOutcome is a JSON-friendly version of db.MatchOutcome.
@@ -1461,9 +1513,10 @@ func (auth *AuthManager) UserMatchFails(user account.AccountID, n int) ([]*Match
 	}
 	fails := make([]*MatchFail, len(matchFails))
 	for i, fail := range matchFails {
+		matchStatus := matchStatusToOutcome(fail.Status)
 		fails[i] = &MatchFail{
 			ID:      fail.ID[:],
-			Penalty: uint32(-1 * matchStatusToViol(fail.Status).Score()),
+			Penalty: uint32(-1 * outcomeScores[matchStatus]),
 		}
 	}
 	return fails, nil
@@ -1472,7 +1525,7 @@ func (auth *AuthManager) UserMatchFails(user account.AccountID, n int) ([]*Match
 // loadUserScore computes the user's current score from order and swap data
 // retrieved from the DB. Use this instead of userScore if the user is offline.
 func (auth *AuthManager) loadUserScore(user account.AccountID) (int32, error) {
-	latestMatches, latestPreimageResults, latestFinished, err := auth.loadUserOutcomes(user)
+	latestPreimageResults, latestMatches, latestFinished, err := auth.loadUserOutcomes(user)
 	if err != nil {
 		return 0, err
 	}
@@ -1532,7 +1585,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	}
 
 	// Compute the user's score, loading the preimage/order/match outcomes.
-	latestMatches, latestPreimageResults, latestFinished, err := auth.loadUserOutcomes(user)
+	latestPreimageResults, latestMatches, latestFinished, err := auth.loadUserOutcomes(user)
 	if err != nil {
 		log.Errorf("Failed to compute user %v score: %v", user, err)
 		return &msgjson.Error{
@@ -1542,7 +1595,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	}
 	score, successCount, piMissCount := auth.integrateOutcomes(latestMatches, latestPreimageResults, latestFinished)
 
-	successScore := successCount * successScore
+	successScore := successCount * matchCompletedScore
 	piMissScore := piMissCount * preimageMissScore
 	// score = violationScore + piMissScore + successScore
 	violationScore := score - piMissScore - successScore // work backwards as per above comment
@@ -1701,7 +1754,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	return nil
 }
 
-func (auth *AuthManager) loadRecentFinishedOrders(aid account.AccountID, N int) (*latestOrders, error) {
+func (auth *AuthManager) loadRecentFinishedOrders(aid account.AccountID, N int) (*latestOutcomes[*db.OrderOutcome], error) {
 	// Load the N latest successfully completed orders for the user.
 	oids, compTimes, err := auth.storage.CompletedUserOrders(aid, N)
 	if err != nil {
@@ -1715,28 +1768,7 @@ func (auth *AuthManager) loadRecentFinishedOrders(aid account.AccountID, N int) 
 	}
 
 	// Create the sorted list with capacity.
-	latestFinished := newLatestOrders(cancelThreshWindow)
-	// Insert the completed orders.
-	for i := range oids {
-		latestFinished.add(&oidStamped{
-			OrderID: oids[i],
-			time:    compTimes[i],
-			//target: nil,
-		})
-	}
-	// Insert the executed cancels, popping off older orders that do not fit in
-	// the list.
-	for _, c := range cancels {
-		tid := c.TargetID
-		latestFinished.add(&oidStamped{
-			OrderID:  c.ID,
-			time:     c.MatchTime,
-			target:   &tid,
-			epochGap: c.EpochGap,
-		})
-	}
-
-	return latestFinished, nil
+	return newLatestOutcomes(assembleCanceledOrders(oids, compTimes, cancels), cancelThreshWindow), nil
 }
 
 // handleResponse handles all responses for AuthManager registered routes,
@@ -1907,6 +1939,16 @@ func (auth *AuthManager) handleMatchStatus(conn comms.Link, msg *msgjson.Message
 	err = conn.Send(resp)
 	if err != nil {
 		log.Error("error sending match_status response: " + err.Error())
+	}
+	return nil
+}
+
+func (auth *AuthManager) ForgiveUser(user account.AccountID) error {
+	if err := auth.storage.ForgiveUser(auth.ctx, user); err != nil {
+		return err
+	}
+	if _, err := auth.reRepUser(user); err != nil {
+		log.Errorf("Error updating user reputation after forgiveness: %v", err)
 	}
 	return nil
 }

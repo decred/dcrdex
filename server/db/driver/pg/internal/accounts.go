@@ -11,7 +11,8 @@ const (
 	// CreateAccountsTable creates the account table.
 	CreateAccountsTable = `CREATE TABLE IF NOT EXISTS %s (
 		account_id BYTEA PRIMARY KEY,  -- UNIQUE INDEX
-		pubkey BYTEA
+		pubkey BYTEA,
+		reputation_ver INT2 DEFAULT 1
 		);`
 
 	CreateBondsTableV0 = `CREATE TABLE IF NOT EXISTS %s (
@@ -89,4 +90,8 @@ const (
 	DeletePrepaidBond = `DELETE FROM %s WHERE coin_id = $1;`
 
 	InsertPrepaidBond = `INSERT INTO %s (coin_id, strength, lock_time) VALUES ($1, $2, $3);`
+
+	SelectReputationVersion = `SELECT reputation_ver FROM %s WHERE account_id = $1;`
+
+	UpdateReputationVersion = `UPDATE %s SET reputation_ver = $1 WHERE account_id = $2;`
 )

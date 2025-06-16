@@ -20,6 +20,7 @@ const (
 	accountsTableName     = "accounts"
 	bondsTableName        = "bonds"
 	prepaidBondsTableName = "prepaid_bonds"
+	pointsTableName       = "points"
 
 	indexBondsOnAccountName  = "idx_bonds_on_acct"
 	indexBondsOnLockTimeName = "idx_bonds_on_locktime"
@@ -44,6 +45,7 @@ type tableStmt struct {
 var createDEXTableStatements = []tableStmt{
 	{marketsTableName, internal.CreateMarketsTable},
 	{metaTableName, internal.CreateMetaTable},
+	{pointsTableName, internal.CreatePointsTable},
 }
 
 var createAccountTableStatements = []tableStmt{
@@ -184,6 +186,13 @@ func prepareTables(ctx context.Context, db *sql.DB, mktConfig []*dex.MarketInfo)
 			return nil, fmt.Errorf("failed to set db version in meta table: %w", err)
 		}
 		log.Infof("Created new meta table at version %d", dbVersion)
+	}
+	// Prepare the reputation points table
+	if _, err = createTable(db, publicSchema, pointsTableName); err != nil {
+		return nil, fmt.Errorf("error creating points table: %w", err)
+	}
+	if _, err = db.Exec(fmt.Sprintf(internal.CreatePointsIndex, publicSchema+"."+pointsTableName)); err != nil {
+		return nil, fmt.Errorf("error creating index on points table: %w", err)
 	}
 	// Prepare the account and registration key counter tables.
 	if err = createAccountTables(db); err != nil {

@@ -21,7 +21,6 @@ import (
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
-	"decred.org/dcrdex/server/auth"
 	"decred.org/dcrdex/server/coinlock"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
@@ -62,7 +61,7 @@ type AuthManager interface {
 	RequestWithTimeout(user account.AccountID, req *msgjson.Message, handlerFunc func(comms.Link, *msgjson.Message),
 		expireTimeout time.Duration, expireFunc func()) error
 	SwapSuccess(user account.AccountID, mmid db.MarketMatchID, value uint64, refTime time.Time)
-	Inaction(user account.AccountID, misstep auth.NoActionStep, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID)
+	Inaction(user account.AccountID, misstep db.Outcome, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID)
 }
 
 // Storage updates match data in what is presumably a database.
@@ -1033,22 +1032,22 @@ func (s *Swapper) failMatch(match *matchTracker, userFault bool) {
 	// From the match status, determine maker/taker fault and the corresponding
 	// auth.NoActionStep.
 	var makerFault bool
-	var misstep auth.NoActionStep
+	var outcome db.Outcome
 	var refTime time.Time // a reference time found in the DB for reproducibly sorting outcomes
 	switch match.Status {
 	case order.NewlyMatched:
-		misstep = auth.NoSwapAsMaker
+		outcome = db.OutcomeNoSwapAsMaker
 		refTime = match.Epoch.End()
 		makerFault = true
 	case order.MakerSwapCast:
-		misstep = auth.NoSwapAsTaker
+		outcome = db.OutcomeNoSwapAsTaker
 		refTime = match.makerStatus.swapTime // swapConfirmed time is not in the DB
 	case order.TakerSwapCast:
-		misstep = auth.NoRedeemAsMaker
+		outcome = db.OutcomeNoRedeemAsMaker
 		refTime = match.takerStatus.swapTime // swapConfirmed time is not in the DB
 		makerFault = true
 	case order.MakerRedeemed:
-		misstep = auth.NoRedeemAsTaker
+		outcome = db.OutcomeNoRedeemAsTaker
 		refTime = match.makerStatus.redeemTime
 	default:
 		log.Errorf("Invalid failMatch status %v for match %v", match.Status, match.ID())
@@ -1060,7 +1059,7 @@ func (s *Swapper) failMatch(match *matchTracker, userFault bool) {
 		orderAtFault, otherOrder = match.Maker, match.Taker
 	}
 	log.Debugf("failMatch: swap %v failing at %v (%v), user fault = %v",
-		match.ID(), match.Status, misstep, userFault)
+		match.ID(), match.Status, outcome, userFault)
 
 	// Record the end of this match's processing.
 	s.storage.SetMatchInactive(db.MatchID(match.Match), !userFault)
@@ -1074,8 +1073,8 @@ func (s *Swapper) failMatch(match *matchTracker, userFault bool) {
 	}
 
 	// Register the failure to act violation, adjusting the user's score.
-	if userFault {
-		s.authMgr.Inaction(orderAtFault.User(), misstep, db.MatchID(match.Match),
+	if userFault && (match.Maker.User() != match.Taker.User()) {
+		s.authMgr.Inaction(orderAtFault.User(), outcome, db.MatchID(match.Match),
 			match.Quantity, refTime, orderAtFault.ID())
 	}
 
@@ -1717,7 +1716,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 			ack.user, makerTaker(ack.isMaker), matchID)
 	})
 	if err != nil {
-		log.Debug("Couldn't send 'audit' request to user %v (%s) for match %v", ack.user, makerTaker(ack.isMaker), matchID)
+		log.Debugf("Couldn't send 'audit' request to user %v (%s) for match %v", ack.user, makerTaker(ack.isMaker), matchID)
 	}
 
 	return wait.DontTryAgain

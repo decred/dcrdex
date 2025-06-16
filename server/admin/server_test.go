@@ -222,6 +222,7 @@ func (c *TCore) AccountMatchOutcomesN(user account.AccountID, n int) ([]*auth.Ma
 }
 func (c *TCore) Notify(_ account.AccountID, _ *msgjson.Message) {}
 func (c *TCore) NotifyAll(_ *msgjson.Message)                   {}
+func (c *TCore) ForgiveUser(account.AccountID) error            { return nil }
 
 // genCertPair generates a key/cert pair to the paths provided.
 func genCertPair(certFile, keyFile string) error {
