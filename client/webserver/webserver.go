@@ -21,6 +21,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -90,6 +91,8 @@ var (
 
 	//go:embed site/dist site/src/img site/src/font
 	staticSiteRes embed.FS
+
+	latestVersionRegex = regexp.MustCompile(`\d+(\.\d+)+`)
 )
 
 // clientCore is satisfied by core.Core.
@@ -284,8 +287,8 @@ type WebServer struct {
 	bondBufMtx sync.Mutex
 	bondBuf    map[uint32]valStamp
 
-	appVersion    string
-	latestVersion string // latest version from github
+	appVersion             string
+	newAppVersionAvailable bool
 
 	useDEXBranding  bool
 	mainLogFilePath string
@@ -632,29 +635,20 @@ func New(cfg *Config) (*WebServer, error) {
 // fetchLatestVersion is a helper function to retrieve the latest version of the app
 // from github.
 func (w *WebServer) fetchLatestVersion(ctx context.Context) {
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			var response struct {
-				TagName string `json:"tag_name"`
-			}
-
-			err := dexnet.Get(ctx, "https://api.github.com/repos/decred/dcrdex/releases/latest", &response, dexnet.WithSizeLimit(1<<22))
-			if err != nil {
-				log.Debugf("Error getting latest version: %v", err)
-				continue
-			}
-
-			w.latestVersion = strings.Trim(response.TagName, "v")
-			return
-
-		case <-ctx.Done():
-			return
-		}
+	var response struct {
+		TagName string `json:"tag_name"`
 	}
+
+	err := dexnet.Get(ctx, "https://api.github.com/repos/decred/dcrdex/releases/latest", &response, dexnet.WithSizeLimit(1<<22))
+	if err != nil {
+		log.Debugf("Error getting latest version: %v", err)
+		return
+	}
+
+	lastestVersion := latestVersionRegex.FindString(response.TagName)
+	appSemVersion := userAppVersion(w.appVersion, true)
+	w.newAppVersionAvailable = lastestVersion > appSemVersion
+	return
 }
 
 // buildTemplates prepares the HTML templates, which are executed and served in
