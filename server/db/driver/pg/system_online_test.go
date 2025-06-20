@@ -128,11 +128,6 @@ func detectMarkets(db *sql.DB) ([]string, error) {
 	return markets, nil
 }
 
-func dropTable(db sqlExecutor, tableName string) error {
-	_, err := db.Exec(fmt.Sprintf(`DROP TABLE IF EXISTS %s;`, tableName))
-	return err
-}
-
 // nukeAll removes all of the market schemas and the tables within them, as well
 // as all of the DEX tables in the public schema.
 // TODO: find a long term home for this once it is clear if and how it will be
