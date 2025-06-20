@@ -646,9 +646,23 @@ func (w *WebServer) fetchLatestVersion(ctx context.Context) {
 	}
 
 	lastestVersion := latestVersionRegex.FindString(response.TagName)
-	appSemVersion := userAppVersion(w.appVersion, true)
-	w.newAppVersionAvailable = lastestVersion > appSemVersion
-	return
+	lastestMajor, latestMinor, latestPatch, _, _, err := version.ParseSemVer(lastestVersion)
+	if err != nil {
+		log.Debugf("Error parsing latest version: %v", err)
+		return
+	}
+
+	currectMajor, currentMinor, currentPatch, _, _, err := version.ParseSemVer(w.appVersion)
+	if err != nil {
+		log.Debugf("Error parsing app version: %v", err)
+		return
+	}
+
+	if lastestMajor > currectMajor ||
+		(lastestMajor == currectMajor && latestMinor > currentMinor) ||
+		(latestMinor == currectMajor && latestMinor == currentMinor && latestPatch > currentPatch) {
+		w.newAppVersionAvailable = true
+	}
 }
 
 // buildTemplates prepares the HTML templates, which are executed and served in
