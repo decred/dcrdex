@@ -30,6 +30,7 @@ var (
 	primarySequencePrefix = keyPrefix{0x00, 0x02}
 	keyToIDPrefix         = keyPrefix{0x00, 0x03}
 	idToKeyPrefix         = keyPrefix{0x00, 0x04}
+	versionPrefix         = keyPrefix{0x00, 0x05}
 
 	firstAvailablePrefix = keyPrefix{0x01, 0x00}
 )

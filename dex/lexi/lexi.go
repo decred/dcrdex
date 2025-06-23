@@ -104,75 +104,35 @@ func (db *DB) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	return &db.wg, nil
 }
 
-const versionKey = "__version__"
-
-func (db *DB) getDBVersion() (version uint32, err error) {
+// GetDBVersion retrieves the current database version.
+// If the version was never set, 0 is returned.
+func (db *DB) GetDBVersion() (version uint32, err error) {
 	err = db.View(func(txn *badger.Txn) error {
-		prefix, err := db.prefixForName(versionKey)
+		versionItem, err := txn.Get(versionPrefix[:])
 		if err != nil {
+			if err == badger.ErrKeyNotFound {
+				version = 0
+				return nil
+			}
 			return err
 		}
-		item, err := txn.Get(prefix[:])
-		if errors.Is(err, badger.ErrKeyNotFound) {
-			// Version not found, so we'll assume it's 0
-			return nil
-		}
-		return item.Value(func(b []byte) error {
+		return versionItem.Value(func(b []byte) error {
 			version = binary.BigEndian.Uint32(b)
 			return nil
 		})
 	})
+	if err != nil {
+		return 0, err
+	}
 
 	return
 }
 
-func (db *DB) setDBVersion(version uint32) error {
-	return db.Update(func(txn *badger.Txn) error {
-		prefix, err := db.prefixForName(versionKey)
-		if err != nil {
-			return err
-		}
-		b := make([]byte, 4)
-		binary.BigEndian.PutUint32(b[:], version)
-		return txn.Set(prefix[:], b)
-	})
-}
-
-// Upgrade updates the schema of the database. It should be called right
-// after Connect, before any transactions are done. Each upgrade should
-// contain a call to one of the functions that change the schema of the
-// database, including DeleteIndex and ReIndex.
-//
-// As the schema evolves, additional upgrades should be added to the list
-// that is passed to Upgrade. When this function is called with a certain
-// amount of upgrades, each of them are applied in order and the version of
-// the database is incremented to the amount of upgrades that have been
-// applied. When the function is called again, the upgrades that have already
-// been applied are skipped.
-func (db *DB) Upgrade(upgrades []func() error) error {
-	version, err := db.getDBVersion()
-	if err != nil {
-		return err
-	}
-
-	if version > uint32(len(upgrades)) {
-		return fmt.Errorf("upgrade list is too short. expected at least %d upgrades, got %d",
-			version, len(upgrades))
-	}
-
-	for i, upgrade := range upgrades {
-		if i < int(version) {
-			continue
-		}
-		if err := upgrade(); err != nil {
-			return err
-		}
-		if err := db.setDBVersion(uint32(i + 1)); err != nil {
-			return err
-		}
-	}
-
-	return nil
+// SetDBVersion sets the current database version in the DB.
+func (db *DB) SetDBVersion(version uint32, txn *badger.Txn) error {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint32(b[:], version)
+	return txn.Set(versionPrefix[:], b)
 }
 
 // Update: badger can return an ErrConflict if a read and write happen
