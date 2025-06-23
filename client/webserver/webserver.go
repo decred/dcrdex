@@ -645,8 +645,8 @@ func (w *WebServer) fetchLatestVersion(ctx context.Context) {
 		return
 	}
 
-	lastestVersion := latestVersionRegex.FindString(response.TagName)
-	lastestMajor, latestMinor, latestPatch, _, _, err := version.ParseSemVer(lastestVersion)
+	latestVersion := latestVersionRegex.FindString(response.TagName)
+	latestMajor, latestMinor, latestPatch, _, _, err := version.ParseSemVer(latestVersion)
 	if err != nil {
 		log.Debugf("Error parsing latest version: %v", err)
 		return
@@ -658,9 +658,9 @@ func (w *WebServer) fetchLatestVersion(ctx context.Context) {
 		return
 	}
 
-	if lastestMajor > currentMajor ||
-		(lastestMajor == currentMajor && latestMinor > currentMinor) ||
-		(latestMinor == currentMajor && latestMinor == currentMinor && latestPatch > currentPatch) {
+	if latestMajor > currentMajor ||
+		(latestMajor == currentMajor && latestMinor > currentMinor) ||
+		(latestMajor == currentMajor && latestMinor == currentMinor && latestPatch > currentPatch) {
 		w.newAppVersionAvailable = true
 	}
 }
