@@ -181,6 +181,10 @@ func (b *DEXBalancer) CheckBalance(acctAddr string, assetID, redeemAssetID uint3
 				acctAddr, assetID, qty, lots, redeems, feeBalancer.assetInfo.Symbol)
 			return false
 		}
+	} else {
+		// Base chain doesn't have redeem requirement because it can be redeemed
+		// using EIP-4337 bundlers.
+		redeems = 0
 	}
 
 	var swapFees, redeemFees uint64
@@ -205,20 +209,26 @@ func (b *DEXBalancer) CheckBalance(acctAddr string, assetID, redeemAssetID uint3
 			return 0
 		}
 
+		isToken := ba.feeBalancer != nil
+
 		var l uint64
 		var r int
 		for _, mt := range ba.markets {
 			newQty, newLots, newRedeems := mt.AccountPending(acctAddr, assetID)
 			l += newLots
 			q += newQty
-			r += newRedeems
+			if isToken {
+				r += newRedeems
+			}
 		}
 
 		// Add in-process swaps.
 		newQty, newLots, newRedeems := b.matchNegotiator.AccountStats(acctAddr, assetID)
 		l += newLots
 		q += newQty
-		r += newRedeems
+		if isToken {
+			r += newRedeems
+		}
 
 		addFees(ba.assetInfo, l, r)
 		return
