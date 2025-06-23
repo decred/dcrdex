@@ -60,7 +60,7 @@ const (
 	// timeout is known (e.g. startup with down server).
 	defaultTickInterval = 30 * time.Second
 
-	marketBuyRedemptionSlippageBuffer = 2
+	marketTradeRedemptionSlippageBuffer = 2
 
 	// preimageReqTimeout the server's preimage request timeout period. When
 	// considered with a market's epoch duration, this is used to detect when an
@@ -6232,11 +6232,38 @@ func (c *Core) createTradeRequest(wallets *walletSet, coins asset.Coins, redeemS
 		if len(pubKeys) == 0 || len(sigs) == 0 {
 			return nil, newError(signatureErr, "wrong number of pubkeys or signatures, %d & %d", len(pubKeys), len(sigs))
 		}
+
+		// Calculate redemption lot size in order to ensure that the redemption
+		// size can cover the gas fees if we are using a bundler.
+		redemptionLotSize := mktConf.LotSize // Buys
+		if form.Sell && form.IsLimit {       // Limit Sells
+			redemptionLotSize = calc.BaseToQuote(form.Rate, mktConf.LotSize)
+		} else if form.Sell && !form.IsLimit { // Market Sells
+			mktID := marketName(form.Base, form.Quote)
+			book := dc.bookie(mktID)
+			if book != nil {
+				midGap, err := book.MidGap()
+				if err == nil {
+					// Divide because a smaller lot size is more restrictive.
+					// If the redemption size is too small, the bundler will
+					// not be able to use it to cover fees.
+					redemptionLotSize = calc.BaseToQuote(midGap, mktConf.LotSize) / marketTradeRedemptionSlippageBuffer
+				} else {
+					return nil, newError(orderParamsErr, "cannot estimate redemption lot size")
+				}
+			}
+		}
+
 		redemptionReserves, err = accountRedeemer.ReserveNRedemptions(redemptionRefundLots,
-			assetConfigs.toAsset.Version, assetConfigs.toAsset.MaxFeeRate)
-		if err != nil {
+			assetConfigs.toAsset.Version, assetConfigs.toAsset.MaxFeeRate, redemptionLotSize)
+		if errors.Is(err, asset.ErrInsufficientRedeemFunds) {
+			return nil, newError(insufficientRedeemFundsErr, "insufficient redeem funds, configure a bundler to redeem")
+		} else if errors.Is(err, asset.ErrBundlerRedemptionLotSizeTooSmall) {
+			return nil, newError(bundlerRedemptionLotSizeTooSmallErr, "bundler redemption lot size too small")
+		} else if err != nil {
 			return nil, codedError(walletErr, fmt.Errorf("ReserveNRedemptions error: %w", err))
 		}
+
 		defer func() {
 			if _, err := c.updateWalletBalance(toWallet); err != nil {
 				c.log.Errorf("updateWalletBalance error: %v", err)
@@ -6380,7 +6407,7 @@ func (c *Core) prepareTradeRequest(pw []byte, form *TradeForm) (*tradeRequest, e
 			if err == nil {
 				baseQty := calc.QuoteToBase(midGap, fundQty)
 				lots = baseQty / lotSize
-				redemptionRefundLots = lots * marketBuyRedemptionSlippageBuffer
+				redemptionRefundLots = lots * marketTradeRedemptionSlippageBuffer
 				if lots == 0 {
 					err = newError(orderParamsErr,
 						"order quantity is too low for current market rates. "+
@@ -10917,7 +10944,11 @@ func (c *Core) handleRetryRedemptionAction(actionB []byte) error {
 				if err := c.db.UpdateMatch(&match.MetaMatch); err != nil {
 					c.log.Errorf("Failed to update match in DB: %v", err)
 				}
-			} else if match.Side == order.Maker && match.Status == order.MakerRedeemed {
+				// For maker, the status could be either MakerRedeemed or
+				// MatchComplete because the redeem message may have gone
+				// through with correct secret, allowing the taker to redeem,
+				// even if the maker's redemption tx failed.
+			} else if match.Side == order.Maker && (match.Status == order.MakerRedeemed || match.Status == order.MatchComplete) {
 				match.redemptionRejected = false
 				match.MetaData.Proof.MakerRedeem = nil
 				match.Status = order.TakerSwapCast
