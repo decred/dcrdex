@@ -13,17 +13,41 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
-// DecodeCoinID decodes the coin ID into a common.Hash. For eth, there are no
+const UserOpCoinIDLength = common.HashLength * 2
+
+// ETHCoinID identifies a ETH transaction or user operation.
+type ETHCoinID struct {
+	IsUserOp   bool
+	UserOpHash common.Hash
+	TxHash     common.Hash
+}
+
+// DecodeCoinID decodes an eth coin ID into an ETHCoinID. For eth there are no
 // funding coin IDs, just an account address. Care should be taken not to use
 // DecodeCoinID or (Driver).DecodeCoinID for account addresses.
-func DecodeCoinID(coinID []byte) (common.Hash, error) {
-	if len(coinID) != common.HashLength {
-		return common.Hash{}, fmt.Errorf("wrong coin ID length. wanted %d, got %d",
-			common.HashLength, len(coinID))
+func DecodeCoinID(coinID []byte) (*ETHCoinID, error) {
+	if len(coinID) == UserOpCoinIDLength {
+		var userOpHash, txHash common.Hash
+		copy(userOpHash[:], coinID[:common.HashLength])
+		copy(txHash[:], coinID[common.HashLength:])
+		return &ETHCoinID{
+			IsUserOp:   true,
+			UserOpHash: userOpHash,
+			TxHash:     txHash,
+		}, nil
 	}
+
+	if len(coinID) != common.HashLength {
+		return nil, fmt.Errorf("wrong coin ID length. wanted %d or %d, got %d",
+			common.HashLength, UserOpCoinIDLength, len(coinID))
+	}
+
 	var h common.Hash
 	h.SetBytes(coinID)
-	return h, nil
+	return &ETHCoinID{
+		IsUserOp: false,
+		TxHash:   h,
+	}, nil
 }
 
 // SecretHashSize is the byte-length of the hash of the secret key used in
