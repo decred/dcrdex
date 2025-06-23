@@ -11,6 +11,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
+	"decred.org/dcrdex/dex/networks/eth/contracts/entrypoint"
 	"decred.org/dcrdex/server/asset"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
@@ -30,6 +31,8 @@ type baseCoin struct {
 	txData       []byte
 	serializedTx []byte
 	contractVer  uint32
+	isUserOp     bool
+	userOpHash   common.Hash
 }
 
 type swapCoin struct {
@@ -55,6 +58,10 @@ func (be *AssetBackend) newSwapCoin(coinID []byte, contractData []byte) (*swapCo
 	bc, err := be.baseCoin(coinID, contractData)
 	if err != nil {
 		return nil, err
+	}
+
+	if bc.isUserOp {
+		return nil, fmt.Errorf("user op coin not supported")
 	}
 
 	var sum uint64
@@ -171,6 +178,9 @@ func (be *AssetBackend) newRedeemCoin(coinID []byte, contractData []byte) (*rede
 	var secret [32]byte
 	switch bc.contractVer {
 	case 0:
+		if bc.isUserOp {
+			return nil, fmt.Errorf("user op coin not supported in v0")
+		}
 		secretHash, err := dexeth.ParseV0Locator(bc.locator)
 		if err != nil {
 			return nil, fmt.Errorf("error parsing vector from v0 locator '%x': %w", bc.locator, err)
@@ -214,12 +224,69 @@ func (be *AssetBackend) newRedeemCoin(coinID []byte, contractData []byte) (*rede
 	}, nil
 }
 
-// The baseCoin is basic tx and swap contract data.
-func (be *AssetBackend) baseCoin(coinID []byte, contractData []byte) (*baseCoin, error) {
-	txHash, err := dexeth.DecodeCoinID(coinID)
+// userOpBaseCoin creates a baseCoin from a user operation.
+func (be *AssetBackend) userOpBaseCoin(txHash, userOpHash common.Hash, contractData []byte) (*baseCoin, error) {
+	contractVer, locator, err := dexeth.DecodeContractData(contractData)
 	if err != nil {
 		return nil, err
 	}
+
+	tx, isMempool, err := be.node.transaction(be.ctx, txHash)
+	if err != nil {
+		if errors.Is(err, ethereum.NotFound) {
+			return nil, asset.CoinNotFoundError
+		}
+		return nil, fmt.Errorf("unable to fetch transaction: %v", err)
+	}
+	if isMempool {
+		return nil, asset.CoinNotFoundError
+	}
+
+	if *tx.To() != be.entryPointAddress {
+		return nil, fmt.Errorf("unknown entrypoint address: %s", tx.To().String())
+	}
+
+	handleOpsData, err := dexeth.ParseHandleOpsData(tx.Data())
+	if err != nil {
+		return nil, fmt.Errorf("unable to parse handle ops data: %v", err)
+	}
+
+	var userOp *entrypoint.UserOperation
+	for _, op := range handleOpsData {
+		hash, err := dexeth.HashUserOp(op, be.entryPointAddress, big.NewInt(int64(be.evmChainID)))
+		if err != nil {
+			return nil, fmt.Errorf("unable to hash user op: %v", err)
+		}
+		if hash == userOpHash {
+			userOp = &op
+			break
+		}
+	}
+	if userOp == nil {
+		return nil, fmt.Errorf("user op not found in tx %s", txHash)
+	}
+
+	return &baseCoin{
+		backend:     be,
+		tokenAddr:   be.tokenAddr,
+		locator:     locator,
+		txHash:      txHash,
+		isUserOp:    true,
+		txData:      userOp.CallData,
+		contractVer: contractVer,
+
+		// The following is not populated, but since user ops are only used
+		// for redemptions, and the following data is not used in confirming
+		// redemptions, it is not necessary to populate it.
+		gasFeeCap:    new(big.Int),
+		gasTipCap:    new(big.Int),
+		value:        0,
+		serializedTx: []byte{},
+	}, nil
+}
+
+// txBaseCoin creates a baseCoin from an ethereum transaction.
+func (be *AssetBackend) txBaseCoin(txHash common.Hash, contractData []byte) (*baseCoin, error) {
 	tx, _, err := be.node.transaction(be.ctx, txHash)
 	if err != nil {
 		if errors.Is(err, ethereum.NotFound) {
@@ -276,6 +343,20 @@ func (be *AssetBackend) baseCoin(coinID []byte, contractData []byte) (*baseCoin,
 		serializedTx: serializedTx,
 		contractVer:  contractVer,
 	}, nil
+}
+
+// The baseCoin is basic tx and swap contract data.
+func (be *AssetBackend) baseCoin(coinID []byte, contractData []byte) (*baseCoin, error) {
+	ethCoinID, err := dexeth.DecodeCoinID(coinID)
+	if err != nil {
+		return nil, err
+	}
+
+	if ethCoinID.IsUserOp {
+		return be.userOpBaseCoin(ethCoinID.TxHash, ethCoinID.UserOpHash, contractData)
+	}
+
+	return be.txBaseCoin(ethCoinID.TxHash, contractData)
 }
 
 // Confirmations returns the number of confirmations for a Coin's

@@ -3,444 +3,448 @@ package webserver
 import "decred.org/dcrdex/client/intl"
 
 const (
-	noPassErrMsgID                   = "NO_PASS_ERROR_MSG"
-	noAppPassErrMsgID                = "NO_APP_PASS_ERROR_MSG"
-	setButtonBuyID                   = "SET_BUTTON_BUY"
-	setButtonSellID                  = "SET_BUTTON_SELL"
-	offID                            = "OFF"
-	maxID                            = "MAX"
-	readyID                          = "READY"
-	noWalletID                       = "NO_WALLET"
-	disabledMsgID                    = "DISABLED_MSG"
-	walletSyncProgressID             = "WALLET_SYNC_PROGRESS"
-	hideAdditionalSettingsID         = "HIDE_ADDITIONAL_SETTINGS"
-	showAdditionalSettingsID         = "SHOW_ADDITIONAL_SETTINGS"
-	buyID                            = "BUY"
-	sellID                           = "SELL"
-	notSupportedID                   = "NOT_SUPPORTED"
-	versionNotSupportedID            = "VERSION_NOT_SUPPORTED"
-	connectionFailedID               = "CONNECTION_FAILED"
-	orderPreviewID                   = "ORDER_PREVIEW"
-	calculatingID                    = "CALCULATING"
-	estimateUnavailableID            = "ESTIMATE_UNAVAILABLE"
-	noZeroRateID                     = "NO_ZERO_RATE"
-	noZeroQuantityID                 = "NO_ZERO_QUANTITY"
-	tradeID                          = "TRADE"
-	noAssetWalletID                  = "NO_ASSET_WALLET"
-	executedID                       = "EXECUTED"
-	bookedID                         = "BOOKED"
-	cancelingID                      = "CANCELING"
-	passwordNotMatchID               = "PASSWORD_NOT_MATCH"
-	acctUndefinedID                  = "ACCT_UNDEFINED"
-	keepWalletPassID                 = "KEEP_WALLET_PASS"
-	newWalletPassID                  = "NEW_WALLET_PASS"
-	lotID                            = "LOT"
-	lotsID                           = "LOTS"
-	unknownID                        = "UNKNOWN"
-	epochID                          = "EPOCH"
-	orderSubmittingID                = "ORDER_SUBMITTING"
-	settlingID                       = "SETTLING"
-	noMatchID                        = "NO_MATCH"
-	canceledID                       = "CANCELED"
-	revokedID                        = "REVOKED"
-	waitingForConfsID                = "WAITING_FOR_CONFS"
-	noneSelectedID                   = "NONE_SELECTED"
-	regFeeSuccessID                  = "REGISTRATION_FEE_SUCCESS"
-	apiErrorID                       = "API_ERROR"
-	addID                            = "ADD"
-	createID                         = "CREATE"
-	setupWalletID                    = "SETUP_WALLET"
-	changeWalletTypeID               = "CHANGE_WALLET_TYPE"
-	keepWalletTypeID                 = "KEEP_WALLET_TYPE"
-	walletReadyID                    = "WALLET_READY"
-	walletPendingID                  = "WALLET_PENDING"
-	setupNeededID                    = "SETUP_NEEDED"
-	sendSuccessID                    = "SEND_SUCCESS"
-	reconfigSuccessID                = "RECONFIG_SUCCESS"
-	rescanStartedID                  = "RESCAN_STARTED"
-	newWalletSuccessID               = "NEW_WALLET_SUCCESS"
-	walletUnlockedID                 = "WALLET_UNLOCKED"
-	sellingID                        = "SELLING"
-	buyingID                         = "BUYING"
-	walletDisabledID                 = "WALLET_DISABLED"
-	walletEnabledID                  = "WALLET_ENABLED"
-	activeOrdersErrorID              = "ACTIVE_ORDERS_ERR_MSG"
-	availableID                      = "AVAILABLE"
-	lockedID                         = "LOCKED"
-	immatureID                       = "IMMATURE"
-	feeBalanceID                     = "FEE_BALANCE"
-	candlesLoadingID                 = "CANDLES_LOADING"
-	depthLoadingID                   = "DEPTH_LOADING"
-	invalidAddrressMsgID             = "INVALID_ADDRESS_MSG"
-	txFeeSupportedID                 = "TXFEE_UNSUPPORTED"
-	txFeeErrorMsgID                  = "TXFEE_ERR_MSG"
-	activeOrdersLogoutErrorID        = "ACTIVE_ORDERS_LOGOUT_ERR_MSG"
-	invalidDateErrorMsgID            = "INVALID_DATE_ERR_MSG"
-	noArchivedRecordsID              = "NO_ARCHIVED_RECORDS"
-	deleteArchivedRecordsID          = "DELETE_ARCHIVED_RECORDS_RESULT"
-	archivedRecordsPathID            = "ARCHIVED_RECORDS_PATH"
-	defaultID                        = "DEFAULT"
-	addedID                          = "ADDED"
-	discoveredID                     = "DISCOVERED"
-	unsupportedAssetInfoErrMsgID     = "UNSUPPORTED_ASSET_INFO_ERR_MSG"
-	limitOrderID                     = "LIMIT_ORDER"
-	limitOrderImmediateTifID         = "LIMIT_ORDER_IMMEDIATE_TIF"
-	marketOrderID                    = "MARKET_ORDER"
-	cancelOrderID                    = "CANCEL_ORDER"
-	matchStatusNewlyMatchedID        = "MATCH_STATUS_NEWLY_MATCHED"
-	matchStatusMakerSwapCastID       = "MATCH_STATUS_MAKER_SWAP_CAST"
-	matchStatusTakerSwapCastID       = "MATCH_STATUS_TAKER_SWAP_CAST"
-	matchStatusMakerRedeemedID       = "MATCH_STATUS_MAKER_REDEEMED"
-	matchStatusRedemptionSentID      = "MATCH_STATUS_REDEMPTION_SENT"
-	matchStatusRedemptionConfirmedID = "MATCH_REDEMPTION_CONFIRMED"
-	matchStatusRevokedID             = "MATCH_STATUS_REVOKED"
-	matchStatusRefundedID            = "MATCH_STATUS_REFUNDED"
-	matchStatusRefundPendingID       = "MATCH_STATUS_REFUND_PENDING"
-	matchStatusRedeemPendingID       = "MATCH_STATUS_REDEEM_PENDING"
-	matchStatusCompleteID            = "MATCH_STATUS_COMPLETE"
-	takerFoundMakerRedemptionID      = "TAKER_FOUND_MAKER_REDEMPTION"
-	openWalletErrMsgID               = "OPEN_WALLET_ERR_MSG"
-	orderAccelerationFeeErrMsgID     = "ORDER_ACCELERATION_FEE_ERR_MSG"
-	orderAccelerationErrMsgID        = "ORDER_ACCELERATION_ERR_MSG"
-	connectedID                      = "CONNECTED"
-	disconnectedID                   = "DISCONNECTED"
-	invalidCertID                    = "INVALID_CERTIFICATE"
-	confirmationsID                  = "CONFIRMATIONS"
-	takerID                          = "TAKER"
-	makerID                          = "MAKER"
-	emptyDexAddrID                   = "EMPTY_DEX_ADDRESS_MSG"
-	selectWalletForFeePaymentID      = "SELECT_WALLET_FOR_FEE_PAYMENT"
-	unavailableID                    = "UNAVAILABLE"
-	walletSyncFinishingID            = "WALLET_SYNC_FINISHING_UP"
-	connectWalletErrMsgID            = "CONNECTING_WALLET_ERR_MSG"
-	refundImminentID                 = "REFUND_IMMINENT"
-	refundWillHappenAfterID          = "REFUND_WILL_HAPPEN_AFTER"
-	availableTitleID                 = "AVAILABLE_TITLE"
-	lockedTitleID                    = "LOCKED_TITLE"
-	immatureTitleID                  = "IMMATURE_TITLE"
-	swappingID                       = "SWAPPING"
-	bondedID                         = "BONDED"
-	lockedBalMsgID                   = "LOCKED_BAL_MSG"
-	immatureBalMsgID                 = "IMMATURE_BAL_MSG"
-	lockedSwappingBalMsgID           = "LOCKED_SWAPPING_BAL_MSG"
-	lockedBonBalMsgID                = "LOCKED_BOND_BAL_MSG"
-	reservesDeficitID                = "RESERVES_DEFICIT"
-	reservesDeficitMsgID             = "RESERVES_DEFICIT_MSG"
-	bondReservesID                   = "BOND_RESERVES"
-	bondReservesMsgID                = "BOND_RESERVES_MSG"
-	shieldedID                       = "SHIELDED"
-	shieldedMsgID                    = "SHIELDED_MSG"
-	orderID                          = "ORDER"
-	lockedOrderBalMsgID              = "LOCKED_ORDER_BAL_MSG"
-	creatingWalletsID                = "CREATING_WALLETS"
-	addingServersID                  = "ADDING_SERVER"
-	walletRecoverySupportMsgID       = "WALLET_RECOVERY_SUPPORT_MSG"
-	ticketsPurchasedID               = "TICKETS_PURCHASED"
-	ticketStatusUnknownID            = "TICKET_STATUS_UNKNOWN"
-	ticketStatusUnminedID            = "TICKET_STATUS_UNMINED"
-	ticketStatusImmatureID           = "TICKET_STATUS_IMMATURE"
-	ticketStatusLiveID               = "TICKET_STATUS_LIVE"
-	ticketStatusVotedID              = "TICKET_STATUS_VOTED"
-	ticketStatusMissedID             = "TICKET_STATUS_MISSED"
-	ticketStatusExpiredID            = "TICKET_STATUS_EXPIRED"
-	ticketStatusUnspentID            = "TICKET_STATUS_UNSPENT"
-	ticketStatusRevokedID            = "TICKET_STATUS_REVOKED"
-	passwordResetSuccessMsgID        = "PASSWORD_RESET_SUCCESS_MSG"
-	browserNtfnEnabledID             = "BROWSER_NTFN_ENABLED"
-	browserNtfnOrdersID              = "BROWSER_NTFN_ORDERS"
-	browserNtfnMatchesID             = "BROWSER_NTFN_MATCHES"
-	browserNtfnBondsID               = "BROWSER_NTFN_BONDS"
-	browserNtfnConnectionsID         = "BROWSER_NTFN_CONNECTIONS"
-	orderBttnBuyBalErrID             = "ORDER_BUTTON_BUY_BALANCE_ERROR"
-	orderBttnSellBalErrID            = "ORDER_BUTTON_SELL_BALANCE_ERROR"
-	orderBttnQtyErrID                = "ORDER_BUTTON_QTY_ERROR"
-	orderBttnQtyRateErrID            = "ORDER_BUTTON_QTY_RATE_ERROR"
-	createAssetWalletMsgID           = "CREATE_ASSET_WALLET_MSG"
-	noWalletMsgID                    = "NO_WALLET_MSG"
-	tradingTierUpdateddID            = "TRADING_TIER_UPDATED"
-	invalidTierValueID               = "INVALID_TIER_VALUE"
-	invalidCompsValueID              = "INVALID_COMPS_VALUE"
-	txTypeUnknownID                  = "TX_TYPE_UNKNOWN"
-	txTypeSendID                     = "TX_TYPE_SEND"
-	txTypeReceiveID                  = "TX_TYPE_RECEIVE"
-	txTypeSwapID                     = "TX_TYPE_SWAP"
-	txTypeRedeemID                   = "TX_TYPE_REDEEM"
-	txTypeRefundID                   = "TX_TYPE_REFUND"
-	txTypeSplitID                    = "TX_TYPE_SPLIT"
-	txTypeCreateBondID               = "TX_TYPE_CREATE_BOND"
-	txTypeRedeemBondID               = "TX_TYPE_REDEEM_BOND"
-	txTypeApproveTokenID             = "TX_TYPE_APPROVE_TOKEN"
-	txTypeAccelerationID             = "TX_TYPE_ACCELERATION"
-	txTypeSelfTransferID             = "TX_TYPE_SELF_TRANSFER"
-	txTypeRevokeTokenApprovalID      = "TX_TYPE_REVOKE_TOKEN_APPROVAL"
-	txTypeTicketPurchaseID           = "TX_TYPE_TICKET_PURCHASE"
-	txTypeTicketVoteID               = "TX_TYPE_TICKET_VOTE"
-	txTypeTicketRevokeID             = "TX_TYPE_TICKET_REVOCATION"
-	txTypeSwapOrSendID               = "TX_TYPE_SWAP_OR_SEND"
-	txTypeMixID                      = "TX_TYPE_MIX"
-	txTypeBridgeInitiationID         = "TX_TYPE_BRIDGE_INITIATION"
-	txTypeBridgeCompletionID         = "TX_TYPE_BRIDGE_COMPLETION"
-	swapOrSendTooltipID              = "SWAP_OR_SEND_TOOLTIP"
-	missingCexCredsID                = "MISSING_CEX_CREDS"
-	matchBufferID                    = "MATCH_BUFFER"
-	noPlacementsID                   = "NO_PLACEMENTS"
-	invalidValueID                   = "INVALID_VALUE"
-	noZeroID                         = "NO_ZERO"
-	botTypeBasicMMID                 = "BOTTYPE_BASIC_MM"
-	botTypeArbMMID                   = "BOTTYPE_ARB_MM"
-	botTypeSimpleArbID               = "BOTTYPE_SIMPLE_ARB"
-	botTypeNoneID                    = "NO_BOTTYPE"
-	noCexID                          = "NO_CEX"
-	cexBalanceErrID                  = "CEXBALANCE_ERR"
-	pendingID                        = "PENDING"
-	completeID                       = "COMPLETE"
-	archivedSettingsID               = "ARCHIVED_SETTINGS"
-	idTransparent                    = "TRANSPARENT"
-	idNoCodeProvided                 = "NO_CODE_PROVIDED"
-	enableAccount                    = "ENABLE_ACCOUNT"
-	disableAccount                   = "DISABLE_ACCOUNT"
-	accountDisabledMsg               = "ACCOUNT_DISABLED_MSG"
-	dexDisabledMsg                   = "DEX_DISABLED_MSG"
-	idWalletNotSynced                = "WALLET_NOT_SYNCED"
-	idWalletNoPeers                  = "WALLET_NO_PEERS"
-	idDepositError                   = "DEPOSIT_ERROR"
-	idWithdrawError                  = "WITHDRAW_ERROR"
-	idDEXUnderfunded                 = "DEX_UNDERFUNDED"
-	idCEXUnderfunded                 = "CEX_UNDERFUNDED"
-	idCEXTooShallow                  = "CEX_TOO_SHALLOW"
-	idAccountSuspended               = "ACCOUNT_SUSPENDED"
-	idUserLimitTooLow                = "USER_LIMIT_TOO_LOW"
-	idNoPriceSource                  = "NO_PRICE_SOURCE"
-	idCEXOrderbookUnsynced           = "CEX_ORDERBOOK_UNSYNCED"
-	idDeterminePlacementsError       = "DETERMINE_PLACEMENTS_ERROR"
-	idPlaceBuyOrdersError            = "PLACE_BUY_ORDERS_ERROR"
-	idPlaceSellOrdersError           = "PLACE_SELL_ORDERS_ERROR"
-	idCEXTradeError                  = "CEX_TRADE_ERROR"
-	idOrderReportTitle               = "ORDER_REPORT_TITLE"
-	idCEXBalances                    = "CEX_BALANCES"
-	idCausesSelfMatch                = "CAUSES_SELF_MATCH"
-	idCexNotConnected                = "CEX_NOT_CONNECTED"
-	idDeleteBot                      = "DELETE_BOT"
+	noPassErrMsgID                         = "NO_PASS_ERROR_MSG"
+	noAppPassErrMsgID                      = "NO_APP_PASS_ERROR_MSG"
+	setButtonBuyID                         = "SET_BUTTON_BUY"
+	setButtonSellID                        = "SET_BUTTON_SELL"
+	offID                                  = "OFF"
+	maxID                                  = "MAX"
+	readyID                                = "READY"
+	noWalletID                             = "NO_WALLET"
+	disabledMsgID                          = "DISABLED_MSG"
+	walletSyncProgressID                   = "WALLET_SYNC_PROGRESS"
+	hideAdditionalSettingsID               = "HIDE_ADDITIONAL_SETTINGS"
+	showAdditionalSettingsID               = "SHOW_ADDITIONAL_SETTINGS"
+	buyID                                  = "BUY"
+	sellID                                 = "SELL"
+	notSupportedID                         = "NOT_SUPPORTED"
+	versionNotSupportedID                  = "VERSION_NOT_SUPPORTED"
+	connectionFailedID                     = "CONNECTION_FAILED"
+	orderPreviewID                         = "ORDER_PREVIEW"
+	calculatingID                          = "CALCULATING"
+	estimateUnavailableID                  = "ESTIMATE_UNAVAILABLE"
+	noZeroRateID                           = "NO_ZERO_RATE"
+	noZeroQuantityID                       = "NO_ZERO_QUANTITY"
+	tradeID                                = "TRADE"
+	noAssetWalletID                        = "NO_ASSET_WALLET"
+	executedID                             = "EXECUTED"
+	bookedID                               = "BOOKED"
+	cancelingID                            = "CANCELING"
+	passwordNotMatchID                     = "PASSWORD_NOT_MATCH"
+	acctUndefinedID                        = "ACCT_UNDEFINED"
+	keepWalletPassID                       = "KEEP_WALLET_PASS"
+	newWalletPassID                        = "NEW_WALLET_PASS"
+	lotID                                  = "LOT"
+	lotsID                                 = "LOTS"
+	unknownID                              = "UNKNOWN"
+	epochID                                = "EPOCH"
+	orderSubmittingID                      = "ORDER_SUBMITTING"
+	settlingID                             = "SETTLING"
+	noMatchID                              = "NO_MATCH"
+	canceledID                             = "CANCELED"
+	revokedID                              = "REVOKED"
+	waitingForConfsID                      = "WAITING_FOR_CONFS"
+	noneSelectedID                         = "NONE_SELECTED"
+	regFeeSuccessID                        = "REGISTRATION_FEE_SUCCESS"
+	apiErrorID                             = "API_ERROR"
+	addID                                  = "ADD"
+	createID                               = "CREATE"
+	setupWalletID                          = "SETUP_WALLET"
+	changeWalletTypeID                     = "CHANGE_WALLET_TYPE"
+	keepWalletTypeID                       = "KEEP_WALLET_TYPE"
+	walletReadyID                          = "WALLET_READY"
+	walletPendingID                        = "WALLET_PENDING"
+	setupNeededID                          = "SETUP_NEEDED"
+	sendSuccessID                          = "SEND_SUCCESS"
+	reconfigSuccessID                      = "RECONFIG_SUCCESS"
+	rescanStartedID                        = "RESCAN_STARTED"
+	newWalletSuccessID                     = "NEW_WALLET_SUCCESS"
+	walletUnlockedID                       = "WALLET_UNLOCKED"
+	sellingID                              = "SELLING"
+	buyingID                               = "BUYING"
+	walletDisabledID                       = "WALLET_DISABLED"
+	walletEnabledID                        = "WALLET_ENABLED"
+	activeOrdersErrorID                    = "ACTIVE_ORDERS_ERR_MSG"
+	availableID                            = "AVAILABLE"
+	lockedID                               = "LOCKED"
+	immatureID                             = "IMMATURE"
+	feeBalanceID                           = "FEE_BALANCE"
+	candlesLoadingID                       = "CANDLES_LOADING"
+	depthLoadingID                         = "DEPTH_LOADING"
+	invalidAddrressMsgID                   = "INVALID_ADDRESS_MSG"
+	txFeeSupportedID                       = "TXFEE_UNSUPPORTED"
+	txFeeErrorMsgID                        = "TXFEE_ERR_MSG"
+	activeOrdersLogoutErrorID              = "ACTIVE_ORDERS_LOGOUT_ERR_MSG"
+	invalidDateErrorMsgID                  = "INVALID_DATE_ERR_MSG"
+	noArchivedRecordsID                    = "NO_ARCHIVED_RECORDS"
+	deleteArchivedRecordsID                = "DELETE_ARCHIVED_RECORDS_RESULT"
+	archivedRecordsPathID                  = "ARCHIVED_RECORDS_PATH"
+	defaultID                              = "DEFAULT"
+	addedID                                = "ADDED"
+	discoveredID                           = "DISCOVERED"
+	unsupportedAssetInfoErrMsgID           = "UNSUPPORTED_ASSET_INFO_ERR_MSG"
+	limitOrderID                           = "LIMIT_ORDER"
+	limitOrderImmediateTifID               = "LIMIT_ORDER_IMMEDIATE_TIF"
+	marketOrderID                          = "MARKET_ORDER"
+	cancelOrderID                          = "CANCEL_ORDER"
+	matchStatusNewlyMatchedID              = "MATCH_STATUS_NEWLY_MATCHED"
+	matchStatusMakerSwapCastID             = "MATCH_STATUS_MAKER_SWAP_CAST"
+	matchStatusTakerSwapCastID             = "MATCH_STATUS_TAKER_SWAP_CAST"
+	matchStatusMakerRedeemedID             = "MATCH_STATUS_MAKER_REDEEMED"
+	matchStatusRedemptionSentID            = "MATCH_STATUS_REDEMPTION_SENT"
+	matchStatusRedemptionConfirmedID       = "MATCH_REDEMPTION_CONFIRMED"
+	matchStatusRevokedID                   = "MATCH_STATUS_REVOKED"
+	matchStatusRefundedID                  = "MATCH_STATUS_REFUNDED"
+	matchStatusRefundPendingID             = "MATCH_STATUS_REFUND_PENDING"
+	matchStatusRedeemPendingID             = "MATCH_STATUS_REDEEM_PENDING"
+	matchStatusCompleteID                  = "MATCH_STATUS_COMPLETE"
+	takerFoundMakerRedemptionID            = "TAKER_FOUND_MAKER_REDEMPTION"
+	openWalletErrMsgID                     = "OPEN_WALLET_ERR_MSG"
+	orderAccelerationFeeErrMsgID           = "ORDER_ACCELERATION_FEE_ERR_MSG"
+	orderAccelerationErrMsgID              = "ORDER_ACCELERATION_ERR_MSG"
+	connectedID                            = "CONNECTED"
+	disconnectedID                         = "DISCONNECTED"
+	invalidCertID                          = "INVALID_CERTIFICATE"
+	confirmationsID                        = "CONFIRMATIONS"
+	takerID                                = "TAKER"
+	makerID                                = "MAKER"
+	emptyDexAddrID                         = "EMPTY_DEX_ADDRESS_MSG"
+	selectWalletForFeePaymentID            = "SELECT_WALLET_FOR_FEE_PAYMENT"
+	unavailableID                          = "UNAVAILABLE"
+	walletSyncFinishingID                  = "WALLET_SYNC_FINISHING_UP"
+	connectWalletErrMsgID                  = "CONNECTING_WALLET_ERR_MSG"
+	refundImminentID                       = "REFUND_IMMINENT"
+	refundWillHappenAfterID                = "REFUND_WILL_HAPPEN_AFTER"
+	availableTitleID                       = "AVAILABLE_TITLE"
+	lockedTitleID                          = "LOCKED_TITLE"
+	immatureTitleID                        = "IMMATURE_TITLE"
+	swappingID                             = "SWAPPING"
+	bondedID                               = "BONDED"
+	lockedBalMsgID                         = "LOCKED_BAL_MSG"
+	immatureBalMsgID                       = "IMMATURE_BAL_MSG"
+	lockedSwappingBalMsgID                 = "LOCKED_SWAPPING_BAL_MSG"
+	lockedBonBalMsgID                      = "LOCKED_BOND_BAL_MSG"
+	reservesDeficitID                      = "RESERVES_DEFICIT"
+	reservesDeficitMsgID                   = "RESERVES_DEFICIT_MSG"
+	bondReservesID                         = "BOND_RESERVES"
+	bondReservesMsgID                      = "BOND_RESERVES_MSG"
+	shieldedID                             = "SHIELDED"
+	shieldedMsgID                          = "SHIELDED_MSG"
+	orderID                                = "ORDER"
+	lockedOrderBalMsgID                    = "LOCKED_ORDER_BAL_MSG"
+	creatingWalletsID                      = "CREATING_WALLETS"
+	addingServersID                        = "ADDING_SERVER"
+	walletRecoverySupportMsgID             = "WALLET_RECOVERY_SUPPORT_MSG"
+	ticketsPurchasedID                     = "TICKETS_PURCHASED"
+	ticketStatusUnknownID                  = "TICKET_STATUS_UNKNOWN"
+	ticketStatusUnminedID                  = "TICKET_STATUS_UNMINED"
+	ticketStatusImmatureID                 = "TICKET_STATUS_IMMATURE"
+	ticketStatusLiveID                     = "TICKET_STATUS_LIVE"
+	ticketStatusVotedID                    = "TICKET_STATUS_VOTED"
+	ticketStatusMissedID                   = "TICKET_STATUS_MISSED"
+	ticketStatusExpiredID                  = "TICKET_STATUS_EXPIRED"
+	ticketStatusUnspentID                  = "TICKET_STATUS_UNSPENT"
+	ticketStatusRevokedID                  = "TICKET_STATUS_REVOKED"
+	passwordResetSuccessMsgID              = "PASSWORD_RESET_SUCCESS_MSG"
+	browserNtfnEnabledID                   = "BROWSER_NTFN_ENABLED"
+	browserNtfnOrdersID                    = "BROWSER_NTFN_ORDERS"
+	browserNtfnMatchesID                   = "BROWSER_NTFN_MATCHES"
+	browserNtfnBondsID                     = "BROWSER_NTFN_BONDS"
+	browserNtfnConnectionsID               = "BROWSER_NTFN_CONNECTIONS"
+	orderBttnBuyBalErrID                   = "ORDER_BUTTON_BUY_BALANCE_ERROR"
+	orderBttnSellBalErrID                  = "ORDER_BUTTON_SELL_BALANCE_ERROR"
+	orderBttnQtyErrID                      = "ORDER_BUTTON_QTY_ERROR"
+	orderBttnQtyRateErrID                  = "ORDER_BUTTON_QTY_RATE_ERROR"
+	createAssetWalletMsgID                 = "CREATE_ASSET_WALLET_MSG"
+	noWalletMsgID                          = "NO_WALLET_MSG"
+	tradingTierUpdateddID                  = "TRADING_TIER_UPDATED"
+	invalidTierValueID                     = "INVALID_TIER_VALUE"
+	invalidCompsValueID                    = "INVALID_COMPS_VALUE"
+	txTypeUnknownID                        = "TX_TYPE_UNKNOWN"
+	txTypeSendID                           = "TX_TYPE_SEND"
+	txTypeReceiveID                        = "TX_TYPE_RECEIVE"
+	txTypeSwapID                           = "TX_TYPE_SWAP"
+	txTypeRedeemID                         = "TX_TYPE_REDEEM"
+	txTypeRefundID                         = "TX_TYPE_REFUND"
+	txTypeSplitID                          = "TX_TYPE_SPLIT"
+	txTypeCreateBondID                     = "TX_TYPE_CREATE_BOND"
+	txTypeRedeemBondID                     = "TX_TYPE_REDEEM_BOND"
+	txTypeApproveTokenID                   = "TX_TYPE_APPROVE_TOKEN"
+	txTypeAccelerationID                   = "TX_TYPE_ACCELERATION"
+	txTypeSelfTransferID                   = "TX_TYPE_SELF_TRANSFER"
+	txTypeRevokeTokenApprovalID            = "TX_TYPE_REVOKE_TOKEN_APPROVAL"
+	txTypeTicketPurchaseID                 = "TX_TYPE_TICKET_PURCHASE"
+	txTypeTicketVoteID                     = "TX_TYPE_TICKET_VOTE"
+	txTypeTicketRevokeID                   = "TX_TYPE_TICKET_REVOCATION"
+	txTypeSwapOrSendID                     = "TX_TYPE_SWAP_OR_SEND"
+	txTypeMixID                            = "TX_TYPE_MIX"
+	txTypeBridgeInitiationID               = "TX_TYPE_BRIDGE_INITIATION"
+	txTypeBridgeCompletionID               = "TX_TYPE_BRIDGE_COMPLETION"
+	swapOrSendTooltipID                    = "SWAP_OR_SEND_TOOLTIP"
+	missingCexCredsID                      = "MISSING_CEX_CREDS"
+	matchBufferID                          = "MATCH_BUFFER"
+	noPlacementsID                         = "NO_PLACEMENTS"
+	invalidValueID                         = "INVALID_VALUE"
+	noZeroID                               = "NO_ZERO"
+	botTypeBasicMMID                       = "BOTTYPE_BASIC_MM"
+	botTypeArbMMID                         = "BOTTYPE_ARB_MM"
+	botTypeSimpleArbID                     = "BOTTYPE_SIMPLE_ARB"
+	botTypeNoneID                          = "NO_BOTTYPE"
+	noCexID                                = "NO_CEX"
+	cexBalanceErrID                        = "CEXBALANCE_ERR"
+	pendingID                              = "PENDING"
+	completeID                             = "COMPLETE"
+	archivedSettingsID                     = "ARCHIVED_SETTINGS"
+	idTransparent                          = "TRANSPARENT"
+	idNoCodeProvided                       = "NO_CODE_PROVIDED"
+	enableAccount                          = "ENABLE_ACCOUNT"
+	disableAccount                         = "DISABLE_ACCOUNT"
+	accountDisabledMsg                     = "ACCOUNT_DISABLED_MSG"
+	dexDisabledMsg                         = "DEX_DISABLED_MSG"
+	idWalletNotSynced                      = "WALLET_NOT_SYNCED"
+	idWalletNoPeers                        = "WALLET_NO_PEERS"
+	idDepositError                         = "DEPOSIT_ERROR"
+	idWithdrawError                        = "WITHDRAW_ERROR"
+	idDEXUnderfunded                       = "DEX_UNDERFUNDED"
+	idCEXUnderfunded                       = "CEX_UNDERFUNDED"
+	idCEXTooShallow                        = "CEX_TOO_SHALLOW"
+	idAccountSuspended                     = "ACCOUNT_SUSPENDED"
+	idUserLimitTooLow                      = "USER_LIMIT_TOO_LOW"
+	idNoPriceSource                        = "NO_PRICE_SOURCE"
+	idCEXOrderbookUnsynced                 = "CEX_ORDERBOOK_UNSYNCED"
+	idDeterminePlacementsError             = "DETERMINE_PLACEMENTS_ERROR"
+	idPlaceBuyOrdersError                  = "PLACE_BUY_ORDERS_ERROR"
+	idPlaceSellOrdersError                 = "PLACE_SELL_ORDERS_ERROR"
+	idCEXTradeError                        = "CEX_TRADE_ERROR"
+	idOrderReportTitle                     = "ORDER_REPORT_TITLE"
+	idCEXBalances                          = "CEX_BALANCES"
+	idCausesSelfMatch                      = "CAUSES_SELF_MATCH"
+	idCexNotConnected                      = "CEX_NOT_CONNECTED"
+	idDeleteBot                            = "DELETE_BOT"
+	idInsufficientRedeemFundsErrMsg        = "INSUFFICIENT_REDEEM_FUNDS_ERR_MSG"
+	idInsufficientRedeemFundsBundlerErrMsg = "INSUFFICIENT_REDEEM_FUNDS_BUNDLER_ERR_MSG"
 )
 
 var enUS = map[string]*intl.Translation{
-	noPassErrMsgID:                   {T: "password cannot be empty"},
-	noAppPassErrMsgID:                {T: "app password cannot be empty"},
-	passwordNotMatchID:               {T: "passwords do not match"},
-	setButtonBuyID:                   {T: "Place order to buy  {{ asset }}"},
-	setButtonSellID:                  {T: "Place order to sell {{ asset }}"},
-	orderBttnBuyBalErrID:             {T: "Insufficient balance to buy."},
-	orderBttnSellBalErrID:            {T: "Insufficient balance to sell."},
-	orderBttnQtyErrID:                {T: "Order quantity must be specified."},
-	orderBttnQtyRateErrID:            {T: "Order quantity and price must be specified."},
-	offID:                            {T: "off"},
-	readyID:                          {T: "ready"},
-	lockedID:                         {T: "locked"},
-	noWalletID:                       {T: "no wallet"},
-	walletSyncProgressID:             {T: "wallet is {{ syncProgress }}% synced"},
-	hideAdditionalSettingsID:         {T: "hide additional settings"},
-	showAdditionalSettingsID:         {T: "show additional settings"},
-	buyID:                            {T: "Buy"},
-	sellID:                           {T: "Sell"},
-	notSupportedID:                   {T: "{{ asset }} is not supported"},
-	versionNotSupportedID:            {T: "{{ asset }} (v{{version}}) is not supported"},
-	connectionFailedID:               {T: "Connection to dex server failed. You can close bisonw and try again later or wait for it to reconnect."},
-	orderPreviewID:                   {T: "Total: {{ total }} {{ asset }}"},
-	calculatingID:                    {T: "calculating..."},
-	estimateUnavailableID:            {T: "estimate unavailable"},
-	noZeroRateID:                     {T: "zero rate not allowed"},
-	noZeroQuantityID:                 {T: "zero quantity not allowed"},
-	tradeID:                          {T: "trade"},
-	noAssetWalletID:                  {T: "No {{ asset }} wallet"},
-	executedID:                       {T: "executed"},
-	bookedID:                         {T: "booked"},
-	cancelingID:                      {T: "canceling"},
-	acctUndefinedID:                  {T: "Account undefined."},
-	keepWalletPassID:                 {T: "keep current wallet password"},
-	newWalletPassID:                  {T: "set a new wallet password"},
-	lotID:                            {T: "lot"},
-	lotsID:                           {T: "lots"},
-	unknownID:                        {T: "unknown"},
-	epochID:                          {T: "epoch"},
-	settlingID:                       {T: "settling"},
-	noMatchID:                        {T: "no match"},
-	canceledID:                       {T: "canceled"},
-	revokedID:                        {T: "revoked"},
-	waitingForConfsID:                {T: "Waiting for confirmations..."},
-	noneSelectedID:                   {T: "none selected"},
-	regFeeSuccessID:                  {Version: 1, T: "Fidelity bond accepted!"},
-	addID:                            {T: "Add"},
-	createID:                         {T: "Create"},
-	walletReadyID:                    {T: "Ready"},
-	setupWalletID:                    {T: "Setup"},
-	changeWalletTypeID:               {T: "change the wallet type"},
-	keepWalletTypeID:                 {T: "don't change the wallet type"},
-	setupNeededID:                    {T: "Setup Needed"},
-	walletPendingID:                  {T: "Creating Wallet"},
-	sendSuccessID:                    {T: "{{ assetName }} Sent!"},
-	reconfigSuccessID:                {T: "Wallet Reconfigured!"},
-	rescanStartedID:                  {T: "Wallet Rescan Running"},
-	newWalletSuccessID:               {T: "{{ assetName }} Wallet Created!"},
-	walletUnlockedID:                 {T: "Wallet Unlocked"},
-	sellingID:                        {T: "Selling"},
-	buyingID:                         {T: "Buying"},
-	walletEnabledID:                  {T: "{{ assetName }} Wallet Enabled"},
-	walletDisabledID:                 {T: "{{ assetName }} Wallet Disabled"},
-	disabledMsgID:                    {T: "wallet is disabled"},
-	activeOrdersErrorID:              {T: "{{ assetName }} wallet is actively managing orders"},
-	availableID:                      {T: "available"},
-	immatureID:                       {T: "immature"},
-	feeBalanceID:                     {T: "fee balance"},
-	candlesLoadingID:                 {T: "waiting for candlesticks"},
-	depthLoadingID:                   {T: "retrieving depth data"},
-	invalidAddrressMsgID:             {T: "invalid address: {{ address }}"},
-	txFeeSupportedID:                 {T: "fee estimation is not supported for this wallet type"},
-	txFeeErrorMsgID:                  {T: "fee estimation failed: {{ err }}"},
-	activeOrdersLogoutErrorID:        {T: "cannot logout with active orders"},
-	invalidDateErrorMsgID:            {T: "error: invalid date or time"},
-	noArchivedRecordsID:              {T: "No archived records found"},
-	deleteArchivedRecordsID:          {T: "Message: {{ nRecords }} archived records has been deleted"},
-	archivedRecordsPathID:            {T: "File Location: {{ path }}"},
-	orderSubmittingID:                {T: "submitting"},
-	defaultID:                        {T: "Default"},
-	addedID:                          {T: "Added"},
-	discoveredID:                     {T: "Discovered"},
-	unsupportedAssetInfoErrMsgID:     {T: "no supported asset info for id = {{ assetID }}, and no exchange info provided"},
-	limitOrderID:                     {T: "limit"},
-	limitOrderImmediateTifID:         {T: "limit (i)", Notes: "i = immediate"},
-	marketOrderID:                    {T: "market"},
-	cancelOrderID:                    {T: "cancel"},
-	matchStatusNewlyMatchedID:        {T: "Newly Matched"},
-	matchStatusMakerSwapCastID:       {T: "Maker Swap Sent"},
-	matchStatusTakerSwapCastID:       {T: "Taker Swap Sent"},
-	matchStatusMakerRedeemedID:       {T: "Maker Redeemed"},
-	matchStatusRedemptionSentID:      {T: "Redemption Sent"},
-	matchStatusRevokedID:             {T: "Revoked - {{ status }}"},
-	matchStatusRefundPendingID:       {T: "Refund PENDING"},
-	matchStatusRefundedID:            {T: "Refunded"},
-	matchStatusRedeemPendingID:       {T: "Redeem PENDING"},
-	matchStatusRedemptionConfirmedID: {T: "Redemption Confirmed"},
-	matchStatusCompleteID:            {T: "Complete"},
-	openWalletErrMsgID:               {T: "Error opening wallet: {{ msg }}"},
-	orderAccelerationFeeErrMsgID:     {T: "Error estimating acceleration fee: {{ msg }}"},
-	orderAccelerationErrMsgID:        {T: "Error accelerating order: {{ msg }}"},
-	connectedID:                      {T: "Connected"},
-	disconnectedID:                   {T: "Disconnected"},
-	invalidCertID:                    {T: "Invalid Certificate"},
-	confirmationsID:                  {T: "confirmations"},
-	takerID:                          {T: "Taker"},
-	makerID:                          {T: "Maker"},
-	unavailableID:                    {T: "unavailable"},
-	emptyDexAddrID:                   {T: "DEX address cannot be empty"},
-	selectWalletForFeePaymentID:      {T: "Select a valid wallet to post a bond"},
-	walletSyncFinishingID:            {T: "finishing up"},
-	connectWalletErrMsgID:            {T: "Failed to connect {{ assetName }} wallet: {{ errMsg }}"},
-	takerFoundMakerRedemptionID:      {T: "Redeemed by {{ makerAddr }}"},
-	refundImminentID:                 {T: "Will happen in the next few blocks"},
-	refundWillHappenAfterID:          {T: "Refund will happen after {{ refundAfterTime }}"},
-	availableTitleID:                 {T: "Available"},
-	lockedTitleID:                    {T: "Locked"},
-	immatureTitleID:                  {T: "Immature"},
-	swappingID:                       {T: "Swapping"},
-	bondedID:                         {T: "Bonded"},
-	lockedBalMsgID:                   {T: "Total funds temporarily locked to cover the costs of your bond maintenance, live orders, matches and other activities"},
-	immatureBalMsgID:                 {T: "Incoming funds awaiting confirmation"},
-	lockedSwappingBalMsgID:           {T: "Funds currently locked in settling matches"},
-	lockedBonBalMsgID:                {T: "Funds locked in active bonds"},
-	reservesDeficitID:                {T: "Reserves Deficit"},
-	reservesDeficitMsgID:             {T: "The apparent wallet balance shortcoming to maintain bonding level. If this persists, you may need to add funds to stay fully bonded."},
-	bondReservesID:                   {T: "Bond Reserves"},
-	bondReservesMsgID:                {T: "Funds reserved to cover the expenses associated with bond maintenance"},
-	shieldedID:                       {T: "Shielded"},
-	shieldedMsgID:                    {T: "Total funds kept shielded"},
-	orderID:                          {T: "Order"},
-	lockedOrderBalMsgID:              {T: "Funds locked in unmatched orders"},
-	creatingWalletsID:                {T: "Creating wallets"},
-	addingServersID:                  {T: "Connecting to servers"},
-	walletRecoverySupportMsgID:       {T: "Native {{ walletSymbol }} wallet failed to load properly. Try clicking the 'Recover' button below to fix it"},
-	ticketsPurchasedID:               {T: "Purchasing {{ n }} Tickets!"},
-	ticketStatusUnknownID:            {T: "unknown"},
-	ticketStatusUnminedID:            {T: "unmined"},
-	ticketStatusImmatureID:           {T: "immature"},
-	ticketStatusLiveID:               {T: "live"},
-	ticketStatusVotedID:              {T: "voted"},
-	ticketStatusMissedID:             {T: "missed"},
-	ticketStatusExpiredID:            {T: "expired"},
-	ticketStatusUnspentID:            {T: "unspent"},
-	ticketStatusRevokedID:            {T: "revoked"},
-	passwordResetSuccessMsgID:        {T: "Your password reset was successful. You can proceed to login with your new password."},
-	browserNtfnEnabledID:             {T: "Bison Wallet notifications enabled"},
-	browserNtfnOrdersID:              {T: "Orders"},
-	browserNtfnMatchesID:             {T: "Matches"},
-	browserNtfnBondsID:               {T: "Bonds"},
-	browserNtfnConnectionsID:         {T: "Server connections"},
-	createAssetWalletMsgID:           {T: "Create a {{ asset }} wallet to trade"},
-	noWalletMsgID:                    {T: "Create {{ asset1 }} and {{ asset2 }} wallet to trade"},
-	tradingTierUpdateddID:            {T: "Trading Tier Updated"},
-	invalidTierValueID:               {T: "Invalid tier value"},
-	invalidCompsValueID:              {T: "Invalid comps value"},
-	apiErrorID:                       {T: "api error: {{ msg }}"},
-	txTypeUnknownID:                  {T: "Unknown"},
-	txTypeSendID:                     {T: "Send"},
-	txTypeReceiveID:                  {T: "Receive"},
-	txTypeSwapID:                     {T: "Swap"},
-	txTypeRedeemID:                   {T: "Redeem"},
-	txTypeRefundID:                   {T: "Refund"},
-	txTypeSplitID:                    {T: "Split"},
-	txTypeCreateBondID:               {T: "Create bond"},
-	txTypeRedeemBondID:               {T: "Redeem bond"},
-	txTypeApproveTokenID:             {T: "Approve token"},
-	txTypeAccelerationID:             {T: "Acceleration"},
-	txTypeSelfTransferID:             {T: "Self transfer"},
-	txTypeRevokeTokenApprovalID:      {T: "Revoke token approval"},
-	txTypeTicketPurchaseID:           {T: "Ticket purchase"},
-	txTypeTicketVoteID:               {T: "Ticket vote"},
-	txTypeTicketRevokeID:             {T: "Ticket revocation"},
-	txTypeSwapOrSendID:               {T: "Swap / Send"},
-	txTypeMixID:                      {T: "Mix"},
-	txTypeBridgeInitiationID:         {T: "Bridge initiation"},
-	txTypeBridgeCompletionID:         {T: "Bridge completion"},
-	swapOrSendTooltipID:              {T: "The wallet was unable to determine if this transaction was a swap or a send."},
-	missingCexCredsID:                {T: "specify both key and secret"},
-	matchBufferID:                    {T: "Match buffer"},
-	noPlacementsID:                   {T: "must specify 1 or more placements"},
-	invalidValueID:                   {T: "invalid value"},
-	noZeroID:                         {T: "zero not allowed"},
-	botTypeBasicMMID:                 {T: "Market Maker"},
-	botTypeArbMMID:                   {T: "Market Maker + Arbitrage"},
-	botTypeSimpleArbID:               {Version: 1, T: "Arbitrage"},
-	botTypeNoneID:                    {T: "choose a bot type"},
-	noCexID:                          {T: "choose an exchange for arbitrage"},
-	cexBalanceErrID:                  {T: "error fetching {{ cexName }} balance for {{ assetID }}: {{ err }}"},
-	pendingID:                        {T: "Pending"},
-	completeID:                       {T: "Complete"},
-	archivedSettingsID:               {T: "Archived Settings"},
-	idTransparent:                    {T: "Transparent"},
-	idNoCodeProvided:                 {T: "no code provided"},
-	enableAccount:                    {T: "Enable Account"},
-	disableAccount:                   {T: "Disable Account"},
-	accountDisabledMsg:               {T: "account disabled - re-enable to update settings"},
-	dexDisabledMsg:                   {T: "DEX server is disabled. Visit the settings page to enable and connect to this server."},
-	idWalletNotSynced:                {T: "{{ assetSymbol }} wallet not synced."},
-	idWalletNoPeers:                  {T: "{{ assetSymbol }} wallet has no peers."},
-	idDepositError:                   {T: "The last attempted deposit of {{ assetSymbol }} at {{ time }} failed with the following error: {{ error }}"},
-	idWithdrawError:                  {T: "The last attempted withdrawal of {{ assetSymbol }} at {{ time }} failed with the following error: {{ error }}"},
-	idDEXUnderfunded:                 {T: "The {{ assetSymbol }} wallet is underfunded by {{ amount }}"},
-	idCEXUnderfunded:                 {T: "The {{ cexName }} {{ assetSymbol }} wallet is underfunded by {{ amount }}"},
-	idCEXTooShallow:                  {T: "The {{ cexName }} market on the {{ side }} side is too shallow for arbitrages as specified by the configuration."},
-	idAccountSuspended:               {T: "Your account at {{ dexHost }} is suspended."},
-	idUserLimitTooLow:                {T: "Your account at {{ dexHost }} has a limit too low to place all the orders required by the configuration."},
-	idNoPriceSource:                  {T: "No oracle or fiat rate sources are available for this market."},
-	idCEXOrderbookUnsynced:           {T: "The {{ cexName }} orderbook is not synced."},
-	idDeterminePlacementsError:       {T: "Error determining placements: {{ error }}"},
-	idPlaceBuyOrdersError:            {T: "Error placing buy orders: {{ error }}"},
-	idPlaceSellOrdersError:           {T: "Error placing sell orders: {{ error }}"},
-	idCEXTradeError:                  {T: "The last attempted CEX trade at {{ time }} failed with the following error: {{ error }}"},
-	idOrderReportTitle:               {T: "{{ side }} orders report for epoch #{{ epochNum }}"},
-	idCEXBalances:                    {T: "{{ cexName }} Balances"},
-	idCausesSelfMatch:                {T: "This order would cause a self-match"},
-	idCexNotConnected:                {T: "{{ cexName }} not connected"},
-	idDeleteBot:                      {T: "Are you sure you want to delete this bot for the {{ baseTicker }}-{{ quoteTicker }} market on {{ host }}?"},
+	noPassErrMsgID:                         {T: "password cannot be empty"},
+	noAppPassErrMsgID:                      {T: "app password cannot be empty"},
+	passwordNotMatchID:                     {T: "passwords do not match"},
+	setButtonBuyID:                         {T: "Place order to buy  {{ asset }}"},
+	setButtonSellID:                        {T: "Place order to sell {{ asset }}"},
+	orderBttnBuyBalErrID:                   {T: "Insufficient balance to buy."},
+	orderBttnSellBalErrID:                  {T: "Insufficient balance to sell."},
+	orderBttnQtyErrID:                      {T: "Order quantity must be specified."},
+	orderBttnQtyRateErrID:                  {T: "Order quantity and price must be specified."},
+	offID:                                  {T: "off"},
+	readyID:                                {T: "ready"},
+	lockedID:                               {T: "locked"},
+	noWalletID:                             {T: "no wallet"},
+	walletSyncProgressID:                   {T: "wallet is {{ syncProgress }}% synced"},
+	hideAdditionalSettingsID:               {T: "hide additional settings"},
+	showAdditionalSettingsID:               {T: "show additional settings"},
+	buyID:                                  {T: "Buy"},
+	sellID:                                 {T: "Sell"},
+	notSupportedID:                         {T: "{{ asset }} is not supported"},
+	versionNotSupportedID:                  {T: "{{ asset }} (v{{version}}) is not supported"},
+	connectionFailedID:                     {T: "Connection to dex server failed. You can close bisonw and try again later or wait for it to reconnect."},
+	orderPreviewID:                         {T: "Total: {{ total }} {{ asset }}"},
+	calculatingID:                          {T: "calculating..."},
+	estimateUnavailableID:                  {T: "estimate unavailable"},
+	noZeroRateID:                           {T: "zero rate not allowed"},
+	noZeroQuantityID:                       {T: "zero quantity not allowed"},
+	tradeID:                                {T: "trade"},
+	noAssetWalletID:                        {T: "No {{ asset }} wallet"},
+	executedID:                             {T: "executed"},
+	bookedID:                               {T: "booked"},
+	cancelingID:                            {T: "canceling"},
+	acctUndefinedID:                        {T: "Account undefined."},
+	keepWalletPassID:                       {T: "keep current wallet password"},
+	newWalletPassID:                        {T: "set a new wallet password"},
+	lotID:                                  {T: "lot"},
+	lotsID:                                 {T: "lots"},
+	unknownID:                              {T: "unknown"},
+	epochID:                                {T: "epoch"},
+	settlingID:                             {T: "settling"},
+	noMatchID:                              {T: "no match"},
+	canceledID:                             {T: "canceled"},
+	revokedID:                              {T: "revoked"},
+	waitingForConfsID:                      {T: "Waiting for confirmations..."},
+	noneSelectedID:                         {T: "none selected"},
+	regFeeSuccessID:                        {Version: 1, T: "Fidelity bond accepted!"},
+	addID:                                  {T: "Add"},
+	createID:                               {T: "Create"},
+	walletReadyID:                          {T: "Ready"},
+	setupWalletID:                          {T: "Setup"},
+	changeWalletTypeID:                     {T: "change the wallet type"},
+	keepWalletTypeID:                       {T: "don't change the wallet type"},
+	setupNeededID:                          {T: "Setup Needed"},
+	walletPendingID:                        {T: "Creating Wallet"},
+	sendSuccessID:                          {T: "{{ assetName }} Sent!"},
+	reconfigSuccessID:                      {T: "Wallet Reconfigured!"},
+	rescanStartedID:                        {T: "Wallet Rescan Running"},
+	newWalletSuccessID:                     {T: "{{ assetName }} Wallet Created!"},
+	walletUnlockedID:                       {T: "Wallet Unlocked"},
+	sellingID:                              {T: "Selling"},
+	buyingID:                               {T: "Buying"},
+	walletEnabledID:                        {T: "{{ assetName }} Wallet Enabled"},
+	walletDisabledID:                       {T: "{{ assetName }} Wallet Disabled"},
+	disabledMsgID:                          {T: "wallet is disabled"},
+	activeOrdersErrorID:                    {T: "{{ assetName }} wallet is actively managing orders"},
+	availableID:                            {T: "available"},
+	immatureID:                             {T: "immature"},
+	feeBalanceID:                           {T: "fee balance"},
+	candlesLoadingID:                       {T: "waiting for candlesticks"},
+	depthLoadingID:                         {T: "retrieving depth data"},
+	invalidAddrressMsgID:                   {T: "invalid address: {{ address }}"},
+	txFeeSupportedID:                       {T: "fee estimation is not supported for this wallet type"},
+	txFeeErrorMsgID:                        {T: "fee estimation failed: {{ err }}"},
+	activeOrdersLogoutErrorID:              {T: "cannot logout with active orders"},
+	invalidDateErrorMsgID:                  {T: "error: invalid date or time"},
+	noArchivedRecordsID:                    {T: "No archived records found"},
+	deleteArchivedRecordsID:                {T: "Message: {{ nRecords }} archived records has been deleted"},
+	archivedRecordsPathID:                  {T: "File Location: {{ path }}"},
+	orderSubmittingID:                      {T: "submitting"},
+	defaultID:                              {T: "Default"},
+	addedID:                                {T: "Added"},
+	discoveredID:                           {T: "Discovered"},
+	unsupportedAssetInfoErrMsgID:           {T: "no supported asset info for id = {{ assetID }}, and no exchange info provided"},
+	limitOrderID:                           {T: "limit"},
+	limitOrderImmediateTifID:               {T: "limit (i)", Notes: "i = immediate"},
+	marketOrderID:                          {T: "market"},
+	cancelOrderID:                          {T: "cancel"},
+	matchStatusNewlyMatchedID:              {T: "Newly Matched"},
+	matchStatusMakerSwapCastID:             {T: "Maker Swap Sent"},
+	matchStatusTakerSwapCastID:             {T: "Taker Swap Sent"},
+	matchStatusMakerRedeemedID:             {T: "Maker Redeemed"},
+	matchStatusRedemptionSentID:            {T: "Redemption Sent"},
+	matchStatusRevokedID:                   {T: "Revoked - {{ status }}"},
+	matchStatusRefundPendingID:             {T: "Refund PENDING"},
+	matchStatusRefundedID:                  {T: "Refunded"},
+	matchStatusRedeemPendingID:             {T: "Redeem PENDING"},
+	matchStatusRedemptionConfirmedID:       {T: "Redemption Confirmed"},
+	matchStatusCompleteID:                  {T: "Complete"},
+	openWalletErrMsgID:                     {T: "Error opening wallet: {{ msg }}"},
+	orderAccelerationFeeErrMsgID:           {T: "Error estimating acceleration fee: {{ msg }}"},
+	orderAccelerationErrMsgID:              {T: "Error accelerating order: {{ msg }}"},
+	connectedID:                            {T: "Connected"},
+	disconnectedID:                         {T: "Disconnected"},
+	invalidCertID:                          {T: "Invalid Certificate"},
+	confirmationsID:                        {T: "confirmations"},
+	takerID:                                {T: "Taker"},
+	makerID:                                {T: "Maker"},
+	unavailableID:                          {T: "unavailable"},
+	emptyDexAddrID:                         {T: "DEX address cannot be empty"},
+	selectWalletForFeePaymentID:            {T: "Select a valid wallet to post a bond"},
+	walletSyncFinishingID:                  {T: "finishing up"},
+	connectWalletErrMsgID:                  {T: "Failed to connect {{ assetName }} wallet: {{ errMsg }}"},
+	takerFoundMakerRedemptionID:            {T: "Redeemed by {{ makerAddr }}"},
+	refundImminentID:                       {T: "Will happen in the next few blocks"},
+	refundWillHappenAfterID:                {T: "Refund will happen after {{ refundAfterTime }}"},
+	availableTitleID:                       {T: "Available"},
+	lockedTitleID:                          {T: "Locked"},
+	immatureTitleID:                        {T: "Immature"},
+	swappingID:                             {T: "Swapping"},
+	bondedID:                               {T: "Bonded"},
+	lockedBalMsgID:                         {T: "Total funds temporarily locked to cover the costs of your bond maintenance, live orders, matches and other activities"},
+	immatureBalMsgID:                       {T: "Incoming funds awaiting confirmation"},
+	lockedSwappingBalMsgID:                 {T: "Funds currently locked in settling matches"},
+	lockedBonBalMsgID:                      {T: "Funds locked in active bonds"},
+	reservesDeficitID:                      {T: "Reserves Deficit"},
+	reservesDeficitMsgID:                   {T: "The apparent wallet balance shortcoming to maintain bonding level. If this persists, you may need to add funds to stay fully bonded."},
+	bondReservesID:                         {T: "Bond Reserves"},
+	bondReservesMsgID:                      {T: "Funds reserved to cover the expenses associated with bond maintenance"},
+	shieldedID:                             {T: "Shielded"},
+	shieldedMsgID:                          {T: "Total funds kept shielded"},
+	orderID:                                {T: "Order"},
+	lockedOrderBalMsgID:                    {T: "Funds locked in unmatched orders"},
+	creatingWalletsID:                      {T: "Creating wallets"},
+	addingServersID:                        {T: "Connecting to servers"},
+	walletRecoverySupportMsgID:             {T: "Native {{ walletSymbol }} wallet failed to load properly. Try clicking the 'Recover' button below to fix it"},
+	ticketsPurchasedID:                     {T: "Purchasing {{ n }} Tickets!"},
+	ticketStatusUnknownID:                  {T: "unknown"},
+	ticketStatusUnminedID:                  {T: "unmined"},
+	ticketStatusImmatureID:                 {T: "immature"},
+	ticketStatusLiveID:                     {T: "live"},
+	ticketStatusVotedID:                    {T: "voted"},
+	ticketStatusMissedID:                   {T: "missed"},
+	ticketStatusExpiredID:                  {T: "expired"},
+	ticketStatusUnspentID:                  {T: "unspent"},
+	ticketStatusRevokedID:                  {T: "revoked"},
+	passwordResetSuccessMsgID:              {T: "Your password reset was successful. You can proceed to login with your new password."},
+	browserNtfnEnabledID:                   {T: "Bison Wallet notifications enabled"},
+	browserNtfnOrdersID:                    {T: "Orders"},
+	browserNtfnMatchesID:                   {T: "Matches"},
+	browserNtfnBondsID:                     {T: "Bonds"},
+	browserNtfnConnectionsID:               {T: "Server connections"},
+	createAssetWalletMsgID:                 {T: "Create a {{ asset }} wallet to trade"},
+	noWalletMsgID:                          {T: "Create {{ asset1 }} and {{ asset2 }} wallet to trade"},
+	tradingTierUpdateddID:                  {T: "Trading Tier Updated"},
+	invalidTierValueID:                     {T: "Invalid tier value"},
+	invalidCompsValueID:                    {T: "Invalid comps value"},
+	apiErrorID:                             {T: "api error: {{ msg }}"},
+	txTypeUnknownID:                        {T: "Unknown"},
+	txTypeSendID:                           {T: "Send"},
+	txTypeReceiveID:                        {T: "Receive"},
+	txTypeSwapID:                           {T: "Swap"},
+	txTypeRedeemID:                         {T: "Redeem"},
+	txTypeRefundID:                         {T: "Refund"},
+	txTypeSplitID:                          {T: "Split"},
+	txTypeCreateBondID:                     {T: "Create bond"},
+	txTypeRedeemBondID:                     {T: "Redeem bond"},
+	txTypeApproveTokenID:                   {T: "Approve token"},
+	txTypeAccelerationID:                   {T: "Acceleration"},
+	txTypeSelfTransferID:                   {T: "Self transfer"},
+	txTypeRevokeTokenApprovalID:            {T: "Revoke token approval"},
+	txTypeTicketPurchaseID:                 {T: "Ticket purchase"},
+	txTypeTicketVoteID:                     {T: "Ticket vote"},
+	txTypeTicketRevokeID:                   {T: "Ticket revocation"},
+	txTypeSwapOrSendID:                     {T: "Swap / Send"},
+	txTypeMixID:                            {T: "Mix"},
+	txTypeBridgeInitiationID:               {T: "Bridge initiation"},
+	txTypeBridgeCompletionID:               {T: "Bridge completion"},
+	swapOrSendTooltipID:                    {T: "The wallet was unable to determine if this transaction was a swap or a send."},
+	missingCexCredsID:                      {T: "specify both key and secret"},
+	matchBufferID:                          {T: "Match buffer"},
+	noPlacementsID:                         {T: "must specify 1 or more placements"},
+	invalidValueID:                         {T: "invalid value"},
+	noZeroID:                               {T: "zero not allowed"},
+	botTypeBasicMMID:                       {T: "Market Maker"},
+	botTypeArbMMID:                         {T: "Market Maker + Arbitrage"},
+	botTypeSimpleArbID:                     {Version: 1, T: "Arbitrage"},
+	botTypeNoneID:                          {T: "choose a bot type"},
+	noCexID:                                {T: "choose an exchange for arbitrage"},
+	cexBalanceErrID:                        {T: "error fetching {{ cexName }} balance for {{ assetID }}: {{ err }}"},
+	pendingID:                              {T: "Pending"},
+	completeID:                             {T: "Complete"},
+	archivedSettingsID:                     {T: "Archived Settings"},
+	idTransparent:                          {T: "Transparent"},
+	idNoCodeProvided:                       {T: "no code provided"},
+	enableAccount:                          {T: "Enable Account"},
+	disableAccount:                         {T: "Disable Account"},
+	accountDisabledMsg:                     {T: "account disabled - re-enable to update settings"},
+	dexDisabledMsg:                         {T: "DEX server is disabled. Visit the settings page to enable and connect to this server."},
+	idWalletNotSynced:                      {T: "{{ assetSymbol }} wallet not synced."},
+	idWalletNoPeers:                        {T: "{{ assetSymbol }} wallet has no peers."},
+	idDepositError:                         {T: "The last attempted deposit of {{ assetSymbol }} at {{ time }} failed with the following error: {{ error }}"},
+	idWithdrawError:                        {T: "The last attempted withdrawal of {{ assetSymbol }} at {{ time }} failed with the following error: {{ error }}"},
+	idDEXUnderfunded:                       {T: "The {{ assetSymbol }} wallet is underfunded by {{ amount }}"},
+	idCEXUnderfunded:                       {T: "The {{ cexName }} {{ assetSymbol }} wallet is underfunded by {{ amount }}"},
+	idCEXTooShallow:                        {T: "The {{ cexName }} market on the {{ side }} side is too shallow for arbitrages as specified by the configuration."},
+	idAccountSuspended:                     {T: "Your account at {{ dexHost }} is suspended."},
+	idUserLimitTooLow:                      {T: "Your account at {{ dexHost }} has a limit too low to place all the orders required by the configuration."},
+	idNoPriceSource:                        {T: "No oracle or fiat rate sources are available for this market."},
+	idCEXOrderbookUnsynced:                 {T: "The {{ cexName }} orderbook is not synced."},
+	idDeterminePlacementsError:             {T: "Error determining placements: {{ error }}"},
+	idPlaceBuyOrdersError:                  {T: "Error placing buy orders: {{ error }}"},
+	idPlaceSellOrdersError:                 {T: "Error placing sell orders: {{ error }}"},
+	idCEXTradeError:                        {T: "The last attempted CEX trade at {{ time }} failed with the following error: {{ error }}"},
+	idOrderReportTitle:                     {T: "{{ side }} orders report for epoch #{{ epochNum }}"},
+	idCEXBalances:                          {T: "{{ cexName }} Balances"},
+	idCausesSelfMatch:                      {T: "This order would cause a self-match"},
+	idCexNotConnected:                      {T: "{{ cexName }} not connected"},
+	idDeleteBot:                            {T: "Are you sure you want to delete this bot for the {{ baseTicker }}-{{ quoteTicker }} market on {{ host }}?"},
+	idInsufficientRedeemFundsErrMsg:        {T: "Insufficient gas for redemption. Configure an ERC-4337 bundler to do a gasless redemption."},
+	idInsufficientRedeemFundsBundlerErrMsg: {T: "Redemption lot size is too small to cover the gas fees in a gasless redemption."},
 }
 
 var ptBR = map[string]*intl.Translation{

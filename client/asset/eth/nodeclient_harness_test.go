@@ -89,6 +89,8 @@ var (
 	participantContractor      contractor
 	simnetTokenContractor      tokenContractor
 	participantTokenContractor tokenContractor
+	simnetETHWallet            *ETHWallet
+	participantETHWallet       *ETHWallet
 	ethGases                   *dexeth.Gases
 	tokenGases                 *dexeth.Gases
 	testnetSecPerBlock         = 15 * time.Second
@@ -98,7 +100,8 @@ var (
 	secPerBlock = time.Second
 	// If you are testing on testnet, you must specify the rpcNode. You can also
 	// specify it in the testnet-credentials.json file.
-	rpcProviders []string
+	rpcProviders    []string
+	bundlerProvider string
 
 	// isTestnet can be set to true to perform tests on the sepolia testnet.
 	// May need some setup including sending testnet coins to the addresses
@@ -288,12 +291,12 @@ func runSimnet(m *testing.M) (int, error) {
 
 	providers := rpcEndpoints(dex.Simnet)
 
-	err = setupWallet(simnetWalletDir, simnetWalletSeed, "localhost:30355", providers, dex.Simnet)
+	simnetETHWallet, err = setupWallet(simnetWalletDir, simnetWalletSeed, providers, dex.Simnet)
 	if err != nil {
 		return 1, err
 	}
 
-	err = setupWallet(participantWalletDir, participantWalletSeed, "localhost:30356", providers, dex.Simnet)
+	participantETHWallet, err = setupWallet(participantWalletDir, participantWalletSeed, providers, dex.Simnet)
 	if err != nil {
 		return 1, err
 	}
@@ -396,11 +399,11 @@ func runTestnet(m *testing.M) (int, error) {
 
 	rpc := rpcEndpoints(dex.Testnet)
 
-	err = setupWallet(testnetWalletDir, testnetWalletSeed, "localhost:30355", rpc, dex.Testnet)
+	simnetETHWallet, err = setupWallet(testnetWalletDir, testnetWalletSeed, rpc, dex.Testnet)
 	if err != nil {
 		return 1, err
 	}
-	err = setupWallet(testnetParticipantWalletDir, testnetParticipantWalletSeed, "localhost:30356", rpc, dex.Testnet)
+	participantETHWallet, err = setupWallet(testnetParticipantWalletDir, testnetParticipantWalletSeed, rpc, dex.Testnet)
 	if err != nil {
 		return 1, err
 	}
@@ -561,6 +564,9 @@ func useTestnet() error {
 	testnetWalletSeed = hex.EncodeToString(creds.Seed)
 	testnetParticipantWalletSeed = hex.EncodeToString(seed2[:])
 	rpcProviders = creds.Providers["eth"][dex.Testnet.String()]
+	if bundlers, ok := creds.Bundlers["eth"]; ok {
+		bundlerProvider = bundlers[dex.Testnet.String()]
+	}
 	return nil
 }
 
@@ -619,7 +625,7 @@ func TestMain(m *testing.M) {
 	os.Exit(exitCode)
 }
 
-func setupWallet(walletDir, seed, listenAddress string, providers []string, net dex.Network) error {
+func setupWallet(walletDir, seed string, providers []string, net dex.Network) (*ETHWallet, error) {
 	walletType := walletTypeRPC
 	settings := map[string]string{
 		providersKey: strings.Join(providers, " "),
@@ -636,9 +642,48 @@ func setupWallet(walletDir, seed, listenAddress string, providers []string, net 
 	}
 	compat, err := NetworkCompatibilityData(net)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return CreateEVMWallet(dexeth.ChainIDs[net], &createWalletParams, &compat, true)
+
+	err = CreateEVMWallet(dexeth.ChainIDs[net], &createWalletParams, &compat, true)
+	if err != nil {
+		return nil, err
+	}
+
+	emit := make(chan asset.WalletNotification, 10)
+	go func() {
+		for {
+			select {
+			case note := <-emit:
+				fmt.Printf("wallet notification: %v\n", note)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	cfg := &asset.WalletConfig{
+		Type:    walletTypeRPC,
+		DataDir: walletDir,
+		Settings: map[string]string{
+			providersKey: strings.Join(providers, " "),
+		},
+		Emit:        asset.NewWalletEmitter(emit, BipID, tLogger),
+		PeersChange: func(uint32, error) {},
+	}
+	if bundlerProvider != "" {
+		cfg.Settings[bundlerKey] = bundlerProvider
+		fmt.Printf("using bundler: %s\n", bundlerProvider)
+	} else {
+		fmt.Printf("no bundler set\n")
+	}
+
+	wallet, err := newWallet(cfg, tLogger, net)
+	if err != nil {
+		return nil, err
+	}
+
+	return wallet.(*ETHBridgeWallet).ETHWallet, nil
 }
 
 func prepareTokenClients(t *testing.T) {
@@ -784,6 +829,10 @@ func testBestHeader(t *testing.T) {
 		t.Fatal(err)
 	}
 	spew.Dump(bh)
+}
+
+func TestAddressBalance(t *testing.T) {
+	t.Run("testAddressBalance", testAddressBalance)
 }
 
 func testAddressBalance(t *testing.T) {
@@ -1753,6 +1802,196 @@ func testRedeem(t *testing.T, assetID uint32) {
 				t.Fatalf("unexpected swap state for test %v [%d]: want %s got %s",
 					test.name, i, test.finalStates[i], status.Step)
 			}
+		}
+	}
+}
+
+func genSecretsAndHashes(numSecrets int) ([][32]byte, [][32]byte) {
+	secrets := make([][32]byte, 0, numSecrets)
+	secretHashes := make([][32]byte, 0, numSecrets)
+	for i := 0; i < numSecrets; i++ {
+		var secret [32]byte
+		copy(secret[:], encode.RandomBytes(32))
+		secretHash := sha256.Sum256(secret[:])
+		secrets = append(secrets, secret)
+		secretHashes = append(secretHashes, secretHash)
+	}
+	return secrets, secretHashes
+}
+
+// TestGaslessRedeem is used to manually test the gasless redeem functionality.
+// It is a convenient way to test various bundler providers. The test initiates
+// the specified number of swaps of the specified value then submits a gasless
+// redemption to the bundler. Some code in the test can be commented out in order
+// to print the gas estimates for each number of redemptions.
+func TestGaslessRedeem(t *testing.T) {
+	numSwaps := 1
+	swapValue := uint64(1e7)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Setup wallet and contractor
+	gases := ethGases
+
+	// FROM:
+	client := ethClient
+	contractor := simnetContractor
+	fromAddr := simnetAddr
+
+	// TO:
+	wallet := simnetETHWallet
+	_, err := wallet.Connect(ctx)
+	if err != nil {
+		t.Fatalf("connect error: %v", err)
+	}
+	toAddr := simnetAddr
+
+	// Create swap tx
+	secrets, secretHashes := genSecretsAndHashes(numSwaps)
+	lockTime := uint64(time.Now().Add(12 * secPerBlock).Unix())
+
+	var skipSwap bool
+
+	/*
+		~~~~~  Uncomment this to manually provide secrets and secret hashes.  ~~~~~
+
+		secretStrings := []string{
+			"47a4e8c5ffb550711ad86967d05d3320a10deff159a87b6718898c1e6c15da6d",
+		}
+		secretHashesStrings := []string{
+			"b59da941021b53bbc7577ad8a77890516ffcca9495f176af9dfd575b834eb427",
+		}
+		lockTime = uint64(1750432924)
+
+		secrets = make([][32]byte, len(secretStrings))
+		secretHashes = make([][32]byte, len(secretHashesStrings))
+		for i := 0; i < len(secretStrings); i++ {
+			secretB, _ := hex.DecodeString(secretStrings[i])
+			secretHashB, _ := hex.DecodeString(secretHashesStrings[i])
+			copy(secrets[i][:], secretB)
+			copy(secretHashes[i][:], secretHashB)
+		}
+
+		skipSwap = true
+	*/
+
+	for i := 0; i < len(secrets); i++ {
+		fmt.Printf("Secret #%d: %s\n", i, hex.EncodeToString(secrets[i][:]))
+		fmt.Printf("Secret hash #%d: %s\n", i, hex.EncodeToString(secretHashes[i][:]))
+	}
+	fmt.Println("Lock time", lockTime)
+
+	swapVectors := make([]*dexeth.SwapVector, 0, len(secrets))
+	totalGwei := uint64(0)
+	for i := 0; i < len(secrets); i++ {
+		totalGwei += swapValue
+		swapVector := &dexeth.SwapVector{
+			From:       fromAddr,
+			To:         toAddr,
+			Value:      dexeth.GweiToWei(swapValue),
+			SecretHash: secretHashes[i],
+			LockTime:   lockTime,
+		}
+		swapVectors = append(swapVectors, swapVector)
+	}
+
+	if !skipSwap {
+		swapTxOpts, err := client.txOpts(ctx, totalGwei, gases.SwapN(numSwaps), dexeth.GweiToWei(maxFeeRate), nil, nil)
+		if err != nil {
+			t.Fatalf("txOpts error: %v", err)
+		}
+
+		contracts := make([]*asset.Contract, 0, len(swapVectors))
+		for _, swapVector := range swapVectors {
+			contract := newContract(swapVector.LockTime, swapVector.SecretHash, dexeth.WeiToGwei(swapVector.Value))
+			contract.Address = toAddr.String()
+			contracts = append(contracts, contract)
+		}
+
+		swapTx, err := contractor.initiate(swapTxOpts, contracts)
+		if err != nil {
+			t.Fatalf("initiate error: %v ", err)
+		}
+		if err := waitForMined(); err != nil {
+			t.Fatalf("post-init mining error: %v", err)
+		}
+		swapReceipt, err := waitForReceipt(ethClient, swapTx)
+		if err != nil {
+			t.Fatalf("failed to get swap receipt: %v", err)
+		}
+		spew.Dump("Swap tx receipt", swapReceipt)
+	}
+
+	/*
+		~~~~~  Uncomment this to print the bundler's gas estimates for each number of redemptions.  ~~~~~
+
+		for numRedeems := len(swapVectors); numRedeems >= 1; numRedeems-- {
+			redemptions := make([]*asset.Redemption, 0, numRedeems)
+			for i := 0; i < numRedeems; i++ {
+				redemptions = append(redemptions, &asset.Redemption{
+					Spends: &asset.AuditInfo{
+						Contract:   dexeth.EncodeContractData(1, swapVectors[i].Locator()),
+						SecretHash: secretHashes[i][:],
+					},
+					Secret: secrets[i][:],
+				})
+			}
+
+			userOp, _, _, err := wallet.generateUserOp(wallet.bundler, redemptions, 1)
+			if err != nil {
+				t.Fatalf("failed to generate user op with %d redemptions: %v", numRedeems, err)
+			}
+
+			verificationGasLimit, _ := new(big.Int).SetString(userOp.VerificationGasLimit, 0)
+			preVerificationGas, _ := new(big.Int).SetString(userOp.PreVerificationGas, 0)
+			callGasLimit, _ := new(big.Int).SetString(userOp.CallGasLimit, 0)
+			fmt.Printf("%d redemptions: VerificationGasLimit: %s, PreVerificationGas: %s, CallGasLimit: %s \n", numRedeems, verificationGasLimit, preVerificationGas, callGasLimit)
+		}
+
+		return
+	*/
+
+	// Submit a gasless redeem
+	redemptions := make([]*asset.Redemption, 0, len(swapVectors))
+
+	for i := 0; i < len(swapVectors); i++ {
+		redemptions = append(redemptions, &asset.Redemption{
+			Spends: &asset.AuditInfo{
+				Contract:   dexeth.EncodeContractData(1, swapVectors[i].Locator()),
+				SecretHash: secretHashes[i][:],
+			},
+			Secret: secrets[i][:],
+		})
+	}
+	redeemForm := &asset.RedeemForm{
+		Redemptions: redemptions,
+	}
+
+	_, opCoin, _, err := wallet.gaslessRedeem(redeemForm, wallet.bundler)
+	if err != nil {
+		t.Fatalf("gasless redeem error: %v", err)
+	}
+	coin := opCoin.(*coin)
+
+	// Wait for the gasless redeem to be submitted by the bundler
+	ticker := time.NewTicker(10 * time.Second)
+checkLoop:
+	for {
+		select {
+		case <-ticker.C:
+			tx, err := wallet.WalletTransaction(ctx, coin.userOpHash.String())
+			if err != nil {
+				t.Fatalf("wallet transaction error: %v", err)
+			}
+
+			if tx.UserOpTxID != "" {
+				spew.Dump("Gasless redeem submitted by bundler", tx)
+				break checkLoop
+			}
+
+		case <-ctx.Done():
+			return
 		}
 	}
 }

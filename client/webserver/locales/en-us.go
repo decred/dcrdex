@@ -700,4 +700,6 @@ var EnUS = map[string]*intl.Translation{
 	"Total Profit":                {T: "Total Profit"},
 	"total_profit_tooltip":        {T: "Total profit only includes runs that have completed"},
 	"Number of Runs":              {T: "Number of Runs"},
+	"user_op_id":                  {T: "User Op ID"},
+	"user_op_required":            {T: "You do not have enough funds for redemption. A bundler will be used for gasless redemption."},
 }
