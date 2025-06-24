@@ -3,6 +3,7 @@ package adaptorsigs
 import (
 	"bytes"
 	"fmt"
+	"math/big"
 
 	"decred.org/dcrdex/dex/utils"
 	filipEdwards "filippo.io/edwards25519"
@@ -16,17 +17,16 @@ import (
 
 // ProveDLEQ generates a proof that the public keys generated from the provided
 // secret on the secp256k1 and edwards25519 curves are derived from the same
-// secret.
+// secret. Secret should be passed in as a 32-byte big-endian array, and should
+// at most have 252 bits set.
 func ProveDLEQ(secret []byte) ([]byte, error) {
 	if len(secret) != 32 {
 		return nil, fmt.Errorf("secret must be 32 bytes")
 	}
 
-	secretCopy := make([]byte, len(secret))
-	copy(secretCopy, secret)
-	utils.ReverseSlice(secretCopy)
 	secretB := [32]byte{}
-	copy(secretB[:], secretCopy)
+	copy(secretB[:], secret)
+	utils.ReverseSlice(secretB[:])
 
 	proof, err := dleq.NewProof(dleqEdwards.NewCurve(), dleqSecp.NewCurve(), secretB)
 	if err != nil {
@@ -36,21 +36,38 @@ func ProveDLEQ(secret []byte) ([]byte, error) {
 	return proof.Serialize(), nil
 }
 
+// bigIntToLittleEndian32 converts a big.Int to a 32-byte little-endian byte array.
+func bigIntToLittleEndian32(i *big.Int) [32]byte {
+	var p [32]byte
+	// Get the big-endian bytes of the integer.
+	b := i.Bytes()
+	// Copy the bytes into our 32-byte array, right-aligned.
+	// This effectively left-pads with zeros.
+	copy(p[32-len(b):], b)
+	// Reverse the bytes to convert from big-endian to little-endian.
+	utils.ReverseSlice(p[:])
+	return p
+}
+
 // edwardsPointsEqual checks equality of edwards curve points in the dcrec
 // and go-dleq libraries.
 func edwardsPointsEqual(dcrPK *dcrEdwards.PublicKey, dleqPK *dleqEdwards.PointImpl) bool {
-	xB := dcrPK.GetX().Bytes()
-	yB := dcrPK.GetY().Bytes()
-	utils.ReverseSlice(xB)
-	utils.ReverseSlice(yB)
+	xB := bigIntToLittleEndian32(dcrPK.GetX())
+	yB := bigIntToLittleEndian32(dcrPK.GetY())
 
 	x := new(field.Element)
 	y := new(field.Element)
 	z := new(field.Element)
 	t := new(field.Element)
 
-	x.SetBytes(xB)
-	y.SetBytes(yB)
+	if _, err := x.SetBytes(xB[:]); err != nil {
+		return false
+	}
+
+	if _, err := y.SetBytes(yB[:]); err != nil {
+		return false
+	}
+
 	z.One()
 	t.Multiply(x, y)
 
