@@ -1765,3 +1765,10 @@ func (e *WalletEmitter) ActionResolved(uniqueID string) {
 		UniqueID: uniqueID,
 	})
 }
+
+// InitChecker is an account wallet that checks the status of a swap init.
+type InitChecker interface {
+	// AlreadyInitialized returns if the swap was already initialized and
+	// some data needed to interact with the contract later.
+	AlreadyInitialized(assetVersion uint32, contract *Contract) (initialized bool, zeroHash, contractData []byte, err error)
+}

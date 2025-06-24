@@ -1226,8 +1226,8 @@ func (w *assetWallet) withNonce(ctx context.Context, f transactionGenerator) (er
 	w.log.Trace("Nonce chosen for tx generator =", n)
 
 	// Make a first attempt with our best-known nonce.
-	genTxResult, err := f(n)
-	if err != nil && strings.Contains(err.Error(), "nonce too low") {
+	genTxResult, submitErr := f(n)
+	if submitErr != nil && strings.Contains(submitErr.Error(), "nonce too low") {
 		w.log.Warnf("Too-low nonce detected. Attempting recovery")
 		confirmedNonceAt, pendingNonceAt, err := w.node.nonce(ctx)
 		if err != nil {
@@ -1235,17 +1235,19 @@ func (w *assetWallet) withNonce(ctx context.Context, f transactionGenerator) (er
 		}
 		w.confirmedNonceAt = confirmedNonceAt
 		w.pendingNonceAt = pendingNonceAt
-		if newNonce := nonce(); newNonce != n {
-			n = newNonce
-			// Try again.
-			genTxResult, err = f(n)
-			if err != nil {
-				return err
-			}
-			w.log.Info("Nonce recovered and transaction broadcast")
-		} else {
+		newNonce := nonce()
+		if newNonce == n {
 			return fmt.Errorf("best RPC nonce %d not better than our best nonce %d", newNonce, n)
 		}
+		n = newNonce
+		// Try again.
+		genTxResult, submitErr = f(n)
+		if submitErr == nil {
+			w.log.Info("Nonce recovered and transaction broadcast")
+		}
+	}
+	if submitErr != nil {
+		return submitErr
 	}
 
 	if genTxResult != nil {
@@ -1257,7 +1259,8 @@ func (w *assetWallet) withNonce(ctx context.Context, f transactionGenerator) (er
 		w.emitTransactionNote(et.WalletTransaction, true)
 		w.log.Tracef("Transaction %s generated for nonce %s", et.ID, n)
 	}
-	return err
+
+	return nil
 }
 
 // nonceIsSane performs sanity checks on pending txs.
@@ -2149,7 +2152,7 @@ func (w *assetWallet) initGasEstimate(n int, initContractVer, redeemContractVer,
 	if redeemW := w.wallet(redeemAssetID); redeemW != nil {
 		var er error
 		est.Redeem, est.nRedeem, er = redeemW.redeemGas(n, redeemContractVer)
-		if err != nil {
+		if er != nil {
 			return nil, fmt.Errorf("error calculating fee-family redeem gas: %w", er)
 		}
 		est.oneGas += est.Redeem
@@ -2341,6 +2344,22 @@ func (w *TokenWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 
 	success = true
 	return coins, nil
+}
+
+// AlreadyInitialized returns if the swap was already initialized and some data
+// needed to interact with the contract later.
+func (w *assetWallet) AlreadyInitialized(assetVersion uint32, contract *asset.Contract) (initialized bool, zeroHash, contractData []byte, err error) {
+	contractVer := contractVersion(assetVersion)
+	locator := acToLocator(contractVer, contract, w.evmify(contract.Value), w.addr)
+	status, _, err := w.statusAndVector(w.ctx, locator, contractVer)
+	if err != nil {
+		return false, nil, nil, fmt.Errorf("unable to get status: %v", err)
+	}
+
+	// We sent an initate transaction that seemed to fail at the time, but
+	// went through.
+	zh := common.Hash{}
+	return status.Step >= dexeth.SSInitiated, zh[:], dexeth.EncodeContractData(contractVer, locator), nil
 }
 
 // swapReceipt implements the asset.Receipt interface for ETH.
@@ -2562,13 +2581,13 @@ func (w *TokenWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uin
 		return fail("Swap: failed to get network tip cap: %w", err)
 	}
 
+	if w.netToken.SwapContracts[swaps.AssetVersion] == nil {
+		return fail("unable to find contract address for asset %d contract version %d", w.assetID, swaps.AssetVersion)
+	}
+
 	tx, err := w.initiate(w.ctx, w.assetID, swaps.Contracts, gasLimit, maxFeeRate, tipRate, contractVer)
 	if err != nil {
 		return fail("Swap: initiate error: %w", err)
-	}
-
-	if w.netToken.SwapContracts[swaps.AssetVersion] == nil {
-		return fail("unable to find contract address for asset %d contract version %d", w.assetID, swaps.AssetVersion)
 	}
 
 	contractAddr := w.netToken.SwapContracts[contractVer].Address.String()
@@ -4536,13 +4555,12 @@ func (w *assetWallet) confirmRedemption(coinID dex.Bytes, redemption *asset.Rede
 
 	// If we have local information, use that.
 	if found, s := w.localTxStatus(txHash); found {
-		if s.assumedLost || len(s.nonceReplacement) > 0 {
-			if !s.feeReplacement {
-				// Tell core to update it's coin ID.
-				txHash = common.HexToHash(s.nonceReplacement)
-			} else {
-				return nil, asset.ErrTxLost
-			}
+		if s.assumedLost {
+			return nil, asset.ErrTxLost
+		}
+		if len(s.nonceReplacement) > 0 {
+			// Tell core to update it's coin ID.
+			txHash = common.HexToHash(s.nonceReplacement)
 		}
 
 		var confirmStatus *asset.ConfirmRedemptionStatus
@@ -5798,6 +5816,10 @@ func (w *assetWallet) userActionNonceReplacement(actionB []byte) error {
 			w.log.Infof("Abandoning transaction %s via user action", txHash)
 			wt.AssumedLost = true
 			w.tryStoreDBTx(wt)
+			pendingTx := w.pendingTxs[idx]
+			if pendingTx.Nonce.Cmp(w.confirmedNonceAt) == 0 {
+				w.pendingNonceAt.Add(w.pendingNonceAt, big.NewInt(-1))
+			}
 			copy(w.pendingTxs[idx:], w.pendingTxs[idx+1:])
 			w.pendingTxs = w.pendingTxs[:len(w.pendingTxs)-1]
 			return nil
@@ -5864,6 +5886,7 @@ func (w *assetWallet) userActionRecoverNonces(actionB []byte) error {
 	if !*action.Recover {
 		// Don't reset recoveryRequestSent. They won't see this message again until
 		// they reboot.
+		w.emit.ActionResolved(w.missingNoncesActionID())
 		return nil
 	}
 	maxFeeRate, tipRate, err := w.recommendedMaxFeeRate(w.ctx)
@@ -5874,6 +5897,7 @@ func (w *assetWallet) userActionRecoverNonces(actionB []byte) error {
 	defer w.nonceMtx.Unlock()
 	missingNonces := findMissingNonces(w.confirmedNonceAt, w.pendingNonceAt, w.pendingTxs)
 	if len(missingNonces) == 0 {
+		w.emit.ActionResolved(w.missingNoncesActionID())
 		return nil
 	}
 	for i, n := range missingNonces {
