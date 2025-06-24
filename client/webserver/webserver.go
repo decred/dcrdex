@@ -21,6 +21,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -36,8 +37,10 @@ import (
 	"decred.org/dcrdex/client/webserver/locales"
 	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/dexnet"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
+	"decred.org/dcrdex/dex/version"
 	"github.com/decred/dcrd/certgen"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -87,6 +90,8 @@ var (
 
 	//go:embed site/dist site/src/img site/src/font
 	staticSiteRes embed.FS
+
+	latestVersionRegex = regexp.MustCompile(`\d+(\.\d+)+`)
 )
 
 // clientCore is satisfied by core.Core.
@@ -272,7 +277,8 @@ type WebServer struct {
 	bondBufMtx sync.Mutex
 	bondBuf    map[uint32]valStamp
 
-	appVersion string
+	appVersion             string
+	newAppVersionAvailable bool
 
 	useDEXBranding bool
 }
@@ -597,6 +603,39 @@ func New(cfg *Config) (*WebServer, error) {
 	return s, nil
 }
 
+// fetchLatestVersion is a helper function to retrieve the latest version of the app
+// from github.
+func (w *WebServer) fetchLatestVersion(ctx context.Context) {
+	var response struct {
+		TagName string `json:"tag_name"`
+	}
+
+	err := dexnet.Get(ctx, "https://api.github.com/repos/decred/dcrdex/releases/latest", &response, dexnet.WithSizeLimit(1<<22))
+	if err != nil {
+		log.Debugf("Error getting latest version: %v", err)
+		return
+	}
+
+	latestVersion := latestVersionRegex.FindString(response.TagName)
+	latestMajor, latestMinor, latestPatch, _, _, err := version.ParseSemVer(latestVersion)
+	if err != nil {
+		log.Debugf("Error parsing latest version: %v", err)
+		return
+	}
+
+	currentMajor, currentMinor, currentPatch, _, _, err := version.ParseSemVer(w.appVersion)
+	if err != nil {
+		log.Debugf("Error parsing app version: %v", err)
+		return
+	}
+
+	if latestMajor > currentMajor ||
+		(latestMajor == currentMajor && latestMinor > currentMinor) ||
+		(latestMajor == currentMajor && latestMinor == currentMinor && latestPatch > currentPatch) {
+		w.newAppVersionAvailable = true
+	}
+}
+
 // buildTemplates prepares the HTML templates, which are executed and served in
 // sendTemplate. An empty siteDir indicates that the embedded templates in the
 // htmlTmplSub FS should be used. If siteDir is set, the templates will be
@@ -724,6 +763,23 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	go func() {
 		defer wg.Done()
 		s.readNotifications(ctx)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		// Perform initial fetch of the latest version.
+		s.fetchLatestVersion(ctx)
+
+		for {
+			select {
+			case <-time.After(24 * time.Hour):
+				s.fetchLatestVersion(ctx)
+			case <-ctx.Done():
+				return
+			}
+		}
 	}()
 
 	log.Infof("Web server listening on %s (https = %v)", s.addr, https)

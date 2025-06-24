@@ -11,7 +11,16 @@
   <title>{{.Title}}</title>
   <link href="/css/style.css?v={{commitHash true}}" rel="stylesheet">
 </head>
-<body {{if .UseDEXBranding}}class="dex-branding"{{end}}>
+<body class="dark{{if .UseDEXBranding}} dex-branding{{end}}">
+  {{if .NewAppVersionAvailable}}
+    <div class="p-2 d-flex justify-content-center">
+        <span class="fs15 green">[[[New Release Message]]]</span>
+        <a href="https://bisonwallet.org/#download" target="_blank" rel="noopener noreferrer"
+          class="fs15 ps-2">
+          [[[View Website]]]
+        </a>
+    </div>
+  {{end}}
   <div class="popup-notes d-hide" id="popupNotes">
     <span data-tmpl="note" class="fs15">
       <div class="note-indicator d-inline-block" data-tmpl="indicator"></div>
