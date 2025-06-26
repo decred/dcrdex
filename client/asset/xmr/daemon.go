@@ -1,14 +1,14 @@
 package xmr
 
-func (r *xmrRpc) getBlockHeightFast() (uint64, string, bool, error) {
+func (r *xmrRpc) getBlockHeightFast() (uint64, error) {
 	if r.isReScanning() {
-		return 0, "OK", r.daemonState.untrusted, errRescanning
+		return 0, errRescanning
 	}
 	bhfResp, err := r.daemon.DaemonGetBlockCount(r.ctx)
 	if err != nil {
-		return 0, bhfResp.Status, bhfResp.Untrusted, err
+		return 0, err
 	}
-	return bhfResp.Count, bhfResp.Status, bhfResp.Untrusted, nil
+	return bhfResp.Count, nil
 }
 
 // getFeeRate gives an estimation on fees (atoms) per byte.

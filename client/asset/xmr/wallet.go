@@ -19,6 +19,12 @@ const (
 
 var errRescanning = errors.New("currently rescanning wallet")
 
+// stopWallet RPC stores the current state of any open wallet and exits the
+// running monero-wallet-rpc process.
+func (r *xmrRpc) stopWallet() error {
+	return r.wallet.StopWallet(r.ctx)
+}
+
 func (r *xmrRpc) keysFileMissing() bool {
 	walletKeyFile := path.Join(r.dataDir, WalletKeyfileName)
 	if _, err := os.Stat(walletKeyFile); errors.Is(err, os.ErrNotExist) {
@@ -70,12 +76,14 @@ func (r *xmrRpc) getWalletHeight() (uint64, error) {
 
 func (r *xmrRpc) syncStatus() (*asset.SyncStatus, error) {
 	var walletSynced = false
+	r.daemonStateMtx.RLock()
+	defer r.daemonStateMtx.RUnlock()
 	if r.daemonState.synchronized && !r.daemonState.busySyncing {
 		walletHeight, err := r.getWalletHeight()
 		if err != nil {
 			return nil, err
 		}
-		if walletHeight == r.daemonState.height {
+		if walletHeight >= r.daemonState.height {
 			walletSynced = true
 		}
 	}
@@ -299,11 +307,13 @@ func (r *xmrRpc) withdrawSimple(toAddress string, value uint64, priority rpc.Pri
 	return transferResp.TxHash, nil
 }
 
-// rescanSpents checks wallet key images against daemon .. only trusted server
+// rescanSpents checks wallet key images against daemon .. only if wallet trusts the server
 func (r *xmrRpc) rescanSpents(rescanCtx context.Context) error {
 	r.rescanning.Store(true)
 	defer r.rescanning.Store(false)
+	r.daemonStateMtx.Lock()
 	r.daemonState.synchronized = false
+	r.daemonStateMtx.Unlock()
 	err := r.wallet.RescanSpent(rescanCtx) // synchronous
 	if err != nil {
 		r.log.Errorf("rescanSpents - %v", err)
