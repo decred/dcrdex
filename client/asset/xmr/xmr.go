@@ -32,38 +32,26 @@ var (
 		{
 			Key:          "toolsdir",
 			DisplayName:  "Monero CLI tools folder",
-			Description:  "The path to the Monero CLI folder you downloaded from Monero github. A linux example is '/home/<user>/monero-x86_64-linux-gnu-v0.18.4'",
+			Description:  "Required. The path to the Monero CLI folder you downloaded from Monero github. A linux example is '/home/<user>/monero-x86_64-linux-gnu-v0.18.4'",
 			DefaultValue: "/home/dev/monero-x86_64-linux-gnu-v0.18.4.0", // dev TODO(xmr) remove
 			// DefaultValue: "", // the real default
 			ShowByDefault: true,
 			Required:      true,
 		},
 		{
-			Key:         "serveraddr",
-			DisplayName: "Daemon Address:Port",
-			Description: "Address and port of a Monero daemon: http://<address>:<port>. The default is 'http://localhost:18081'." +
-				" Using the default implies a local Monero daemon for which you have downloaded the full chain. Any other will be" +
-				" a remote daemon",
-			DefaultValue: "http://node.monerodevs.org:18089", // dev TODO(xmr) remove
-			// DefaultValue: "http://localhost:18081", // the real default
+			Key:           "serveraddr",
+			DisplayName:   "Daemon Address:Port",
+			Description:   "Required: Address and port of a Monero daemon: http://<address>:<port>.",
+			DefaultValue:  "http://node.monerodevs.org:18089", // currently working
 			ShowByDefault: true,
 			Required:      true,
-		},
-		{
-			Key:           "serverpass",
-			DisplayName:   "Daemon JSON-RPC Password",
-			Description:   "RPC 'username:password' to access the Monero daemon (usually none) .. Should match the daemon's requirement.",
-			DefaultValue:  "",
-			ShowByDefault: false,
-			NoEcho:        true,
-			// https://localmonero.co/knowledge/remote-nodes-privacy
 		},
 		{
 			Key:         "feepriority",
 			DisplayName: "Transaction Priority",
 			Description: "Set a priority for transaction fees. This will result in more or less fees." +
 				" Accepted Values are: 0-4 for: 'default', 'unimportant', 'normal', 'elevated', 'priority'." +
-				" You could change the value here but unless there is severe congestion just use 0-default. ",
+				" You could change the value here at any time but unless there is severe congestion just use 0-default. ",
 			DefaultValue:  "0",
 			MinValue:      0,
 			MaxValue:      4,
@@ -85,7 +73,7 @@ var (
 			Description: "Connect to Monero over RPC",
 			ConfigOpts:  configOpts,
 			NoAuth:      false,
-			GuideLink:   "https://monero.fail",
+			GuideLink:   "https://monero.fail", // TODO(xmr) better doc link
 		}},
 	}
 )
@@ -107,7 +95,7 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Ne
 // DecodeCoinID creates a human-readable representation of a coin ID for Monero.
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 	// Monero transactions don't have bitcoin-like outputs, so the coinID
-	// will just be the tx hash.
+	// will just be the tx hash. TODO(xmr) identify outputs
 	if len(coinID) == chainhash.HashSize {
 		var txHash chainhash.Hash
 		copy(txHash[:], coinID)
@@ -166,7 +154,6 @@ func newWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 type xmrConfigSettings struct {
 	CliToolsDir    string `ini:"toolsdir"`
 	ServerAddr     string `ini:"serveraddr"`
-	ServerRpcPass  string `ini:"serverpass"`
 	FeePriorityStr string `ini:"feepriority"`
 }
 

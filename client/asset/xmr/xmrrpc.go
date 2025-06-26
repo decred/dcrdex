@@ -3,6 +3,7 @@ package xmr
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"strings"
@@ -37,7 +38,6 @@ type rpcDaemon struct {
 type rpcWallet struct {
 	isOpen        bool
 	birthdayBlock uint64
-	height        uint64
 }
 
 type xmrRpc struct {
@@ -50,10 +50,10 @@ type xmrRpc struct {
 	cliToolsDir      string
 	serverIsLocal    bool
 	serverAddr       string
-	serverPass       string
 	walletRpcProcess *os.Process
 	daemon           *rpc.Client
 	daemonState      *rpcDaemon
+	daemonStateMtx   sync.RWMutex
 	wallet           *rpc.Client
 	walletState      *rpcWallet
 	connected        atomic.Bool
@@ -75,18 +75,14 @@ func newXmrRpc(cfg *asset.WalletConfig, settings *xmrConfigSettings, network dex
 	}
 	var svrIsLocal bool
 	var svrAddr string
-	var svrPass string
 	switch network {
 	case dex.Mainnet:
 		svrAddr = settings.ServerAddr
-		svrPass = settings.ServerRpcPass
 	case dex.Testnet:
-		svrAddr = "http://node3.monerodevs.org:38089" // remote
-		// svrAddr = "http://localhost:18081"         // local
-		svrPass = ""
+		svrAddr = "http://node3.monerodevs.org:38089" // stagenet remote
+		// svrAddr = "http://localhost:38081"         // stagenet local
 	case dex.Simnet:
 		svrAddr = "http://localhost:18081"
-		svrPass = ""
 	}
 	svrIsLocal, err := isLocalAddress(svrAddr)
 	if err != nil {
@@ -103,7 +99,6 @@ func newXmrRpc(cfg *asset.WalletConfig, settings *xmrConfigSettings, network dex
 		cliToolsDir:      settings.CliToolsDir,
 		serverIsLocal:    svrIsLocal,
 		serverAddr:       svrAddr,
-		serverPass:       svrPass,
 		walletRpcProcess: nil,
 		daemon:           nil,
 		daemonState: &rpcDaemon{
@@ -121,7 +116,6 @@ func newXmrRpc(cfg *asset.WalletConfig, settings *xmrConfigSettings, network dex
 		walletState: &rpcWallet{
 			isOpen:        false,
 			birthdayBlock: 0,
-			height:        0,
 		},
 	}
 	xrpc.connected.Store(false)
@@ -141,7 +135,7 @@ func (r *xmrRpc) connect(ctx context.Context) (*sync.WaitGroup, error) {
 
 	// take a short rest here before accessing wallet server .. was getting
 	// 'connection refused' The log showing a lot of activity on start up.
-	r.log.Trace("sleeping 3s after start wallet server")
+	r.log.Trace("sleeping 3s after starting wallet server")
 	time.Sleep(3 * time.Second)
 
 	if r.keysFileMissing() {
@@ -149,11 +143,12 @@ func (r *xmrRpc) connect(ctx context.Context) (*sync.WaitGroup, error) {
 		err = r.createWallet()
 		if err != nil {
 			r.log.Errorf("create_wallet - %v", err)
-			return nil, err
+			r.stopWalletServer()
+			return nil, fmt.Errorf(": %w - daemon user/pass correct?", err)
 		}
 		r.log.Infof("new monero wallet created on %s", r.net.String())
-		count, status, untrusted, err := r.getBlockHeightFast()
-		r.log.Tracef("getBlockHeightFast: bday height: %d, status: %s untrusted: %v error: %v", count, status, untrusted, err)
+		count, err := r.getBlockHeightFast()
+		r.log.Tracef("getBlockHeightFast: bday height: %d, error: %v", count, err)
 		if err != nil { // other options also
 			return nil, err
 		}
@@ -165,6 +160,7 @@ func (r *xmrRpc) connect(ctx context.Context) (*sync.WaitGroup, error) {
 	err = r.openWallet()
 	if err != nil {
 		r.log.Errorf("cannot open wallet - %v", err)
+		r.stopWalletServer()
 		return nil, err
 	}
 	r.log.Trace("opened xmr wallet")
@@ -173,6 +169,7 @@ func (r *xmrRpc) connect(ctx context.Context) (*sync.WaitGroup, error) {
 	if err != nil {
 		r.log.Errorf("cannot set auto refresh - %v", err)
 		r.closeWallet()
+		r.stopWalletServer()
 		return nil, err
 	}
 
@@ -226,6 +223,8 @@ func (r *xmrRpc) checkDaemon(ctx context.Context) {
 		r.log.Warnf("DaemonGetInfo: bad status: %s", giResp.Status)
 		return
 	}
+	r.daemonStateMtx.Lock()
+	defer r.daemonStateMtx.Unlock()
 	// r.log.Tracef("daemon %s -- synced: %v, busy syncing: %v, restricted: %v, untrusted: %v", r.serverAddr, giResp.Sychronized, giResp.BusySyncing, giResp.Restricted, giResp.Untrusted)
 	r.daemonState.synchronized = giResp.Sychronized
 	r.daemonState.busySyncing = giResp.BusySyncing
