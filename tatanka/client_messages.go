@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"time"
 
 	"decred.org/dcrdex/dex"
@@ -144,6 +143,12 @@ func (t *Tatanka) handleClientConnect(cl tanka.Sender, msg *msgjson.Message) *ms
 		return msgjson.NewError(mj.ErrBannned, "your tier is <= 0. post some bonds")
 	}*/
 
+	// Since this is ultimately a comms.Link, we definitely have a Done channel.
+	dunner, is := cl.(interface{ Done() <-chan struct{} })
+	if !is {
+		return msgjson.NewError(mj.ErrInternal, "internal error: client does not implement Done")
+	}
+
 	bondTier := p.BondTier()
 
 	t.clientMtx.Lock()
@@ -154,6 +159,11 @@ func (t *Tatanka) handleClientConnect(cl tanka.Sender, msg *msgjson.Message) *ms
 		t.setSubscriptions(conn.ID, conn.InitialSubs)
 	}
 	t.clientMtx.Unlock()
+
+	go func() {
+		<-dunner.Done()
+		t.handleClientDisconnect(conn.ID)
+	}()
 
 	if oldClient != nil {
 		t.log.Debugf("new connection for already connected client %q", conn.ID)
@@ -404,10 +414,6 @@ func (t *Tatanka) storeSubscription(
 }
 
 func (t *Tatanka) handleUpdateSubscriptions(c *client, msg *msgjson.Message) *msgjson.Error {
-	if t.skipRelay(msg) {
-		return nil
-	}
-
 	var updateSubs *mj.UpdateSubscriptions
 	if err := msg.Unmarshal(&updateSubs); err != nil || updateSubs == nil {
 		t.log.Errorf("error unmarshaling update subscriptions from %s: %w", c.ID, err)
@@ -426,13 +432,6 @@ func (t *Tatanka) handleUpdateSubscriptions(c *client, msg *msgjson.Message) *ms
 // map if it doesn't exist. It then distributes a NewSubscriber broadcast
 // to all current subscribers and remote tatankas.
 func (t *Tatanka) handleSubscription(c *client, msg *msgjson.Message) *msgjson.Error {
-	if t.skipRelay(msg) {
-		return nil
-	}
-
-	fmt.Println("--handleSubscription.0")
-	defer fmt.Println("--handleSubscription.done")
-
 	var sub *mj.Subscription
 	if err := msg.Unmarshal(&sub); err != nil || sub == nil || sub.Topic == "" {
 		t.log.Errorf("error unmarshaling subscription from %s: %w", c.ID, err)

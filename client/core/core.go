@@ -2555,9 +2555,7 @@ func (c *Core) asset(assetID uint32) *SupportedAsset {
 
 // User is a thread-safe getter for the User.
 func (c *Core) User() *User {
-	fmt.Println("--User.0")
 	m := c.coreMesh()
-	fmt.Println("--User.1")
 	return &User{
 		Assets:             c.assetMap(),
 		Exchanges:          c.Exchanges(),
@@ -4634,8 +4632,6 @@ func (c *Core) Login(pw []byte) error {
 
 	var meshPriv *secp256k1.PrivateKey
 	login := func() (needInit bool, err error) {
-		fmt.Println("--login.Login.0")
-		defer fmt.Println("--login.Login.done")
 		c.loginMtx.Lock()
 		defer c.loginMtx.Unlock()
 		if !c.loggedIn {

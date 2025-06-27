@@ -1,8 +1,6 @@
 package core
 
 import (
-	"fmt"
-
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/keygen"
 	"decred.org/dcrdex/tatanka/mj"
@@ -46,7 +44,6 @@ func (c *Core) coreMesh() *Mesh {
 
 }
 func (c *Core) connectMesh() {
-	fmt.Println("--connectMesh.0")
 	if c.net != dex.Simnet {
 		return
 	}
@@ -55,10 +52,9 @@ func (c *Core) connectMesh() {
 		c.log.Errorf("error connecting mesh: %v", err)
 		return
 	}
-	fmt.Println("--connectMesh.1")
 	defer func() {
 		if err != nil {
-			c.log.Errorf("Failed to initialize mesh subscriptions. Closing connection:", err)
+			c.log.Error("Failed to initialize mesh subscriptions. Closing connection: %v", err)
 			c.meshCM.Disconnect()
 		}
 	}()
@@ -69,16 +65,14 @@ func (c *Core) connectMesh() {
 		c.log.Errorf("error subscribing to mesh fee rate estimates: %v", err)
 		return
 	}
-	fmt.Println("--connectMesh.2")
 	if err := c.mesh.SubscribeToFiatRates(); err != nil {
 		c.log.Error("error subscribing to mesh fiat rates: %v", err)
 		return
 	}
-	fmt.Println("--connectMesh.3")
 }
 
 func deriveMeshPriv(seed []byte) (*secp256k1.PrivateKey, error) {
-	xKey, err := keygen.GenDeepChild(seed, []uint32{hdKeyPurposeBonds})
+	xKey, err := keygen.GenDeepChild(seed, []uint32{hdKeyPurposeMesh})
 	if err != nil {
 		return nil, err
 	}

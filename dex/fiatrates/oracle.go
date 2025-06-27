@@ -103,6 +103,9 @@ func (o *Oracle) Run(ctx context.Context) {
 		// Fetch rates now.
 		newRates, err := fiatSource.getRates(ctx, o.tickers(), o.log)
 		if err != nil {
+			if strings.Contains(err.Error(), "451 Unavailable For Legal Reasons") {
+				fiatSource.deactivate()
+			}
 			o.log.Errorf("failed to retrieve rate from %s: %v", fiatSource.name, err)
 			continue
 		}
