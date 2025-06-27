@@ -873,8 +873,6 @@ func (c *MeshConn) RequestMesh(msg *msgjson.Message, thing any, opts ...RequestO
 		opt(cfg)
 	}
 
-	fmt.Println("--RequestMesh.0", msg.Route)
-
 	c.nodesMtx.RLock()
 	primaryNode := c.primaryNode
 	c.nodesMtx.RUnlock()
@@ -888,13 +886,9 @@ func (c *MeshConn) RequestMesh(msg *msgjson.Message, thing any, opts ...RequestO
 		return err
 	}
 
-	fmt.Println("--RequestMesh.1")
-
 	if cfg.examineFunc != nil && !cfg.examineFunc(primaryNode.url, primaryNode.peerID) {
 		return fmt.Errorf("request failed examination")
 	}
-
-	fmt.Println("--RequestMesh.2")
 
 	return nil
 }

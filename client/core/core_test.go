@@ -1920,7 +1920,7 @@ func TestCreateWallet(t *testing.T) {
 		wallet:        wallet.Wallet,
 		decodedCoinID: "ilt-coin",
 		winfo:         tWalletInfo,
-	})
+	}, true)
 
 	// Connection error.
 	tWallet.connectErr = tErr

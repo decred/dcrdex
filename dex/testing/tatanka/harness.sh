@@ -27,14 +27,7 @@ cat > "${ROOT}/chains.json" <<EOF
         "rpclisten": "127.0.0.1:19561",
         "rpccert": "${DCR_CERT}"
       }
-    },
-    { "symbol": "btc", "config": {} },
-    { "symbol": "bch" , "config": {}},
-    { "symbol": "firo", "config": {} },
-    { "symbol": "ltc", "config": {} },
-    { "symbol": "zec", "config": {} },
-    { "symbol": "eth", "config": {} },
-    { "symbol": "polygon" }
+    }
   ]
 }
 EOF

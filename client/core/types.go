@@ -38,6 +38,8 @@ const (
 	// scheme to locate them on-chain:
 	//  m / hdKeyPurposeBonds / assetID' / bondIndex
 	hdKeyPurposeBonds uint32 = hdkeychain.HardenedKeyStart + 0x626f6e64 // ASCII "bond"
+	// hdKeyPurposeMesh is the BIP-43 purpose field for mesh keys.
+	hdKeyPurposeMesh uint32 = hdkeychain.HardenedKeyStart + 0x6d657368 // ASCII "mesh"
 )
 
 // errorSet is a slice of orders with a prefix prepended to the Error output.

@@ -19,27 +19,26 @@ import (
 	"decred.org/dcrdex/dex/fiatrates"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/tatanka"
+	_ "decred.org/dcrdex/tatanka/chain/utxo"
 	"github.com/jessevdk/go-flags"
 	"github.com/jrick/logrotate/rotator"
 )
 
 const (
-	Version               = 0
-	defaultConfigFilename = "tatanka.conf"
-	defaultHost           = "127.0.0.1"
-	defaultPort           = "7232"
-	missingPort           = "missing port in address"
-	defaultHSHost         = defaultHost // should be a loopback address
-	defaultHSPort         = "7252"
-	defaultLogLevel       = "debug"
-	defaultMaxClients     = 1000
+	Version                    = 0
+	defaultConfigFilename      = "tatanka.conf"
+	defaultChainConfigFilename = "chains.json"
+	defaultHost                = "127.0.0.1"
+	defaultPort                = "7323"
+	missingPort                = "missing port in address"
+	defaultHSHost              = defaultHost // should be a loopback address
+	defaultHSPort              = "7525"
+	defaultLogLevel            = "debug"
+	defaultMaxClients          = 1000
 )
 
 var (
-	log              = dex.Disabled
-	subsystemLoggers = map[string]dex.Logger{
-		"MAIN": dex.Disabled,
-	}
+	log = dex.Disabled
 )
 
 func main() {
@@ -78,11 +77,11 @@ func mainErr() (err error) {
 	}
 
 	t, err := tatanka.New(&tatanka.Config{
-		Net:        net,
-		DataDir:    cfg.AppDataDir,
-		Logger:     logMaker.Logger("🦬"),
-		ConfigPath: cfg.ConfigFile,
-		MaxClients: maxClients,
+		Net:         net,
+		DataDir:     cfg.AppDataDir,
+		Logger:      logMaker.Logger("🦬"),
+		ChainConfig: cfg.ChainConfig,
+		MaxClients:  maxClients,
 		RPC: comms.RPCConfig{
 			HiddenServiceAddr: cfg.HiddenService,
 			ListenAddrs:       cfg.Listeners,
@@ -108,6 +107,7 @@ func mainErr() (err error) {
 type Config struct {
 	AppDataDir  string `short:"A" long:"appdata" description:"Path to application home directory."`
 	ConfigFile  string `short:"C" long:"configfile" description:"Path to configuration file."`
+	ChainConfig string `long:"chainconfig" description:"Path to chain configuration file."`
 	DebugLevel  string `short:"d" long:"debuglevel" description:"Logging level {trace, debug, info, warn, error, critical}."`
 	LocalLogs   bool   `long:"loglocal" description:"Use local time zone time stamps in log entries."`
 	ShowVersion bool   `short:"v" long:"version" description:"Display version information and exit."`
@@ -201,6 +201,13 @@ func config() (*dex.LoggerMaker, *Config) {
 		configFile = preCfg.ConfigFile
 	}
 
+	isDefaultChainConfigFile := preCfg.ChainConfig == ""
+	if isDefaultChainConfigFile {
+		cfg.ChainConfig = filepath.Join(cfg.AppDataDir, defaultChainConfigFilename)
+	} else if !filepath.IsAbs(preCfg.ChainConfig) {
+		cfg.ChainConfig = filepath.Join(cfg.AppDataDir, preCfg.ChainConfig)
+	}
+
 	// Parse command line options again to ensure they take precedence.
 	_, err = parser.Parse()
 	if err != nil {
@@ -258,13 +265,9 @@ func parseAndSetDebugLevels(debugLevel string, UTC bool) (*dex.LoggerMaker, erro
 		return nil, err
 	}
 
-	// Create subsystem loggers.
-	for subsysID := range subsystemLoggers {
-		subsystemLoggers[subsysID] = lm.Logger(subsysID)
-	}
-
 	// Set main's Logger.
-	log = subsystemLoggers["MAIN"]
+	log = lm.Logger("TANKA")
+	comms.UseLogger(lm.Logger("COMMS"))
 
 	return lm, nil
 }
