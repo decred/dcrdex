@@ -3,7 +3,9 @@
 
 package btc
 
-import "decred.org/dcrdex/dex"
+import (
+	"decred.org/dcrdex/dex"
+)
 
 var UnitInfo = dex.UnitInfo{
 	AtomicUnit: "Sats",

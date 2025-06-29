@@ -20,6 +20,7 @@ import (
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	"github.com/decred/dcrd/txscript/v4/stdscript"
 	"github.com/decred/dcrd/wire"
+	"golang.org/x/crypto/ripemd160"
 )
 
 const (
@@ -46,6 +47,8 @@ const (
 	// transaction as used in execution of an atomic swap.
 	// See ExtractSwapDetails for a breakdown of the bytes.
 	SwapContractSize = 97
+
+	PrivateSwapContractSize = 62
 
 	// TxInOverhead is the overhead for a wire.TxIn with a scriptSig length <
 	// 254. prefix (41 bytes) + ValueIn (8 bytes) + BlockHeight (4 bytes) +
@@ -104,6 +107,20 @@ const (
 	//   - 97 bytes contract script
 	RedeemSwapSigScriptSize = 1 + DERSigLength + 1 + pubkeyLength + 1 + 32 + 1 + 2 + SwapContractSize // 241
 
+	// RedeemPrivateSwapSigScriptSize is the worst case (largest) serialize size
+	// of a transaction signature script that redeems a private swap output contract.
+	// It is calculated as:
+	//
+	//   - OP_DATA_73
+	//   - 72 bytes DER signature + 1 byte sighash type
+	//   - OP_DATA_33
+	//   - OP_DATA_73
+	//   - 72 bytes DER signature + 1 byte sighash type
+	//   - OP_DATA_33
+	//   - varint 62 => OP_PUSHDATA1(0x4c) + 0x3e
+	//   - 62 bytes contract script
+	RedeemPrivateSwapSigScriptSize = 2*(1+DERSigLength+1+pubkeyLength) + 1 + 2 + PrivateSwapContractSize // 281
+
 	// RefundSigScriptSize is the worst case (largest) serialize size
 	// of a transaction input script that refunds a compressed P2PKH output.
 	// It is calculated as:
@@ -116,6 +133,8 @@ const (
 	//   - varint 97 => OP_PUSHDATA1(0x4c) + 0x61
 	//   - 97 bytes contract script
 	RefundSigScriptSize = 1 + DERSigLength + 1 + pubkeyLength + 1 + 2 + SwapContractSize // 208
+
+	PrivateRefundSigScriptSize = 1 + DERSigLength + 1 + pubkeyLength + 1 + 2 + PrivateSwapContractSize // 173
 
 	// BondScriptSize is the maximum size of a DEX time-locked fidelity bond
 	// output script to which a bond P2SH pays:
@@ -304,6 +323,44 @@ func AddressSigType(addr stdaddr.Address) (sigType dcrec.SignatureType, err erro
 	return sigType, err
 }
 
+func MakePrivateContract(redeemPKH, refundPKH []byte, locktime int64) ([]byte, error) {
+	if len(redeemPKH) != 20 || len(refundPKH) != 20 {
+		return nil, fmt.Errorf("invalid PKH size")
+	}
+
+	b := txscript.NewScriptBuilder()
+
+	b.AddOp(txscript.OP_IF) // Normal redeem path
+	{
+		b.AddOp(txscript.OP_DUP)
+		b.AddOp(txscript.OP_HASH160)
+		b.AddData(redeemPKH[:])
+		b.AddOp(txscript.OP_EQUALVERIFY)
+		b.AddOp(txscript.OP_2)
+		b.AddOp(txscript.OP_CHECKSIGALTVERIFY)
+	}
+	b.AddOp(txscript.OP_ELSE) // Refund path
+	{
+		b.AddInt64(locktime)
+		b.AddOp(txscript.OP_CHECKLOCKTIMEVERIFY)
+		b.AddOp(txscript.OP_DROP)
+	}
+	b.AddOp(txscript.OP_ENDIF)
+	b.AddOp(txscript.OP_DUP)
+	b.AddOp(txscript.OP_HASH160)
+	b.AddData(refundPKH[:])
+	b.AddOp(txscript.OP_EQUALVERIFY)
+	b.AddOp(txscript.OP_2)
+	b.AddOp(txscript.OP_CHECKSIGALT)
+
+	script, err := b.Script()
+	if err != nil {
+		return nil, err
+	}
+
+	return script, nil
+}
+
 // MakeContract creates an atomic swap contract. The secretHash MUST be computed
 // from a secret of length SecretKeySize bytes or the resulting contract will be
 // invalid.
@@ -374,6 +431,20 @@ func RedeemP2SHContract(contract, sig, pubkey, secret []byte) ([]byte, error) {
 		AddInt64(1).
 		AddData(contract).
 		Script()
+}
+
+// RedeemP2SHPrivateContract returns the signature script using both the
+// redeemer and refunder's signatures. This function assumes P2SH and appends
+// the contract as the final data push.
+func RedeemP2SHPrivateContract(contract, redeemPK, redeemSig, refundPK, refundSig []byte) ([]byte, error) {
+	b := txscript.NewScriptBuilder()
+	b.AddData(refundSig)
+	b.AddData(refundPK)
+	b.AddData(redeemSig)
+	b.AddData(redeemPK)
+	b.AddInt64(1)
+	b.AddData(contract)
+	return b.Script()
 }
 
 // RefundP2SHContract returns the signature script to refund a contract output
@@ -663,6 +734,44 @@ func ExtractSwapDetails(pkScript []byte, chainParams *chaincfg.Params) (
 	return
 }
 
+func ExtractPrivateSwapDetails(script []byte) (refunder, redeemer [ripemd160.Size]byte, locktime int64, err error) {
+	if len(script) != 62 {
+		err = fmt.Errorf("invalid swap contract: length = %v", len(script))
+		return
+	}
+
+	if script[0] == txscript.OP_IF &&
+		script[1] == txscript.OP_DUP &&
+		script[2] == txscript.OP_HASH160 &&
+		script[3] == txscript.OP_DATA_20 &&
+		// creator's (20 bytes)
+		script[24] == txscript.OP_EQUALVERIFY &&
+		script[25] == txscript.OP_2 &&
+		script[26] == txscript.OP_CHECKSIGALTVERIFY &&
+		script[27] == txscript.OP_ELSE &&
+		script[28] == txscript.OP_DATA_4 &&
+		// lockTime (4 bytes)
+		script[33] == txscript.OP_CHECKLOCKTIMEVERIFY &&
+		script[34] == txscript.OP_DROP &&
+		script[35] == txscript.OP_ENDIF &&
+		script[36] == txscript.OP_DUP &&
+		script[37] == txscript.OP_HASH160 &&
+		script[38] == txscript.OP_DATA_20 &&
+
+		// participant's pkh (20 bytes)
+		script[59] == txscript.OP_EQUALVERIFY &&
+		script[60] == txscript.OP_2 &&
+		script[61] == txscript.OP_CHECKSIGALT {
+		copy(redeemer[:], script[4:24])
+		copy(refunder[:], script[39:59])
+		locktime = int64(binary.LittleEndian.Uint32(script[29:33]))
+	} else {
+		err = fmt.Errorf("invalid swap contract")
+	}
+
+	return
+}
+
 // IsDust returns whether or not the passed transaction output amount is
 // considered dust or not based on the passed minimum transaction relay fee.
 // Dust is defined in terms of the minimum transaction relay fee.
@@ -858,7 +967,7 @@ func InputInfo(version uint16, pkScript, redeemScript []byte, chainParams *chain
 // not validated other than ensuring they are data pushes. The provided contract
 // must correspond to the final data push in the sigScript, but it is otherwise
 // not validated either.
-func IsRefundScript(scriptVersion uint16, sigScript, contract []byte) bool {
+func IsRefundScript(scriptVersion uint16, sigScript, contract []byte, privateRefund bool) bool {
 	tokenizer := txscript.MakeScriptTokenizer(scriptVersion, sigScript)
 	// sig
 	if !tokenizer.Next() {
@@ -888,8 +997,12 @@ func IsRefundScript(scriptVersion uint16, sigScript, contract []byte) bool {
 	if !tokenizer.Next() {
 		return false
 	}
+	expContractLength := SwapContractSize
+	if privateRefund {
+		expContractLength = PrivateSwapContractSize
+	}
 	push := tokenizer.Data()
-	if len(push) != SwapContractSize {
+	if len(push) != expContractLength {
 		return false
 	}
 	if !bytes.Equal(push, contract) {
