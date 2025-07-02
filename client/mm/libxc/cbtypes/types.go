@@ -1,6 +1,10 @@
 package cbtypes
 
-import "time"
+import (
+	"encoding/json"
+	"fmt"
+	"time"
+)
 
 type SubscriptionMessage struct {
 	Channel     string    `json:"channel"`
@@ -54,16 +58,29 @@ type CancelResponse struct {
 }
 
 type OrderRequest struct {
-	ClientOrderID      string `json:"client_order_id"`
-	ProductID          string `json:"product_id"`
-	Side               string `json:"side"` // "BUY" or "SELL"
-	OrderConfiguration struct {
-		Limit struct {
-			BaseSize   string `json:"base_size"`
-			LimitPrice string `json:"limit_price"`
-			PostOnly   bool   `json:"post_only"`
-		} `json:"limit_limit_gtc"`
-	} `json:"order_configuration"`
+	ClientOrderID string `json:"client_order_id"`
+	ProductID     string `json:"product_id"`
+	Side          string `json:"side"`                // "BUY" or "SELL"
+	OrderConfig   any    `json:"order_configuration"` // LimitOrderConfig or MarketOrderConfig
+}
+
+type LimitOrderConfigData struct {
+	BaseSize   string `json:"base_size"`
+	LimitPrice string `json:"limit_price"`
+	PostOnly   bool   `json:"post_only"`
+}
+
+type LimitOrderConfig struct {
+	Limit LimitOrderConfigData `json:"limit_limit_gtc"`
+}
+
+type MarketOrderConfigData struct {
+	BaseSize  *string `json:"base_size"`
+	QuoteSize *string `json:"quote_size"`
+}
+
+type MarketOrderConfig struct {
+	Market MarketOrderConfigData `json:"market_market_ioc"`
 }
 
 type OrderResponse struct {
@@ -121,6 +138,20 @@ type SendTransactionRequest struct {
 	Network  string `json:"network"`
 }
 
+type LimitCfgResponse struct {
+	Limit struct {
+		BaseSize   float64 `json:"base_size,string"`
+		LimitPrice float64 `json:"limit_price,string"`
+	} `json:"limit_limit_gtc"`
+}
+
+type MarketCfgResponse struct {
+	Market struct {
+		BaseSize  float64 `json:"base_size,string"`
+		QuoteSize float64 `json:"quote_size,string"`
+	} `json:"market_market_ioc"`
+}
+
 type TradeStatusResponse struct {
 	Order struct {
 		Status              string  `json:"status"`
@@ -129,13 +160,34 @@ type TradeStatusResponse struct {
 		TotalFees           float64 `json:"total_fees,string"`
 		TotalValueAfterFees float64 `json:"total_value_after_fees,string"`
 		Side                string  `json:"side"`
-		Config              struct {
-			LimitGTC struct {
-				BaseSize   float64 `json:"base_size,string"`
-				LimitPrice float64 `json:"limit_price,string"`
-			} `json:"limit_limit_gtc"`
-		} `json:"order_configuration"`
+		Config              any     `json:"order_configuration"`
 	} `json:"order"`
+}
+
+// Config returns the order configuration for the trade status response.
+// Possible types are *LimitCfgResponse or *MarketCfgResponse.
+func (t *TradeStatusResponse) Config() (any, error) {
+	configMap, ok := t.Order.Config.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("invalid order configuration")
+	}
+	if _, ok := configMap["limit_limit_gtc"]; ok {
+		limitGTCBytes, _ := json.Marshal(configMap)
+		var limitConfig LimitCfgResponse
+		if err := json.Unmarshal(limitGTCBytes, &limitConfig); err != nil {
+			return nil, fmt.Errorf("error unmarshaling LimitGTC: %w", err)
+		}
+		return &limitConfig, nil
+	} else if _, ok := configMap["market_market_ioc"]; ok {
+		marketCfgBytes, _ := json.Marshal(configMap)
+		var marketConfig MarketCfgResponse
+		if err := json.Unmarshal(marketCfgBytes, &marketConfig); err != nil {
+			return nil, fmt.Errorf("error unmarshaling MarketCfg: %w", err)
+		}
+		return &marketConfig, nil
+	} else {
+		return nil, fmt.Errorf("unsupported order configuration")
+	}
 }
 
 type AssetBalance struct {
@@ -165,15 +217,15 @@ type AccountsResult struct {
 }
 
 type Market struct {
-	ProductID             string `json:"product_id"`
-	Price                 string `json:"price"`
-	DayPriceChangePctStr  string `json:"price_percentage_change_24h"`
-	Volume                string `json:"volume_24h"`
-	DayVolumeChangePctStr string `json:"volume_percentage_change_24h"`
-	BaseIncrement         string `json:"base_increment"`
-	// QuoteIncrement           float64 `json:"quote_increment,string"`
-	// QuoteMinSize             float64 `json:"quote_min_size,string"`
-	// QuoteMaxSize             float64 `json:"quote_max_size,string"`
+	ProductID                string `json:"product_id"`
+	Price                    string `json:"price"`
+	DayPriceChangePctStr     string `json:"price_percentage_change_24h"`
+	Volume                   string `json:"volume_24h"`
+	DayVolumeChangePctStr    string `json:"volume_percentage_change_24h"`
+	BaseIncrement            string `json:"base_increment"`
+	QuoteIncrement           string `json:"quote_increment"`
+	QuoteMinSize             string `json:"quote_min_size"`
+	QuoteMaxSize             string `json:"quote_max_size"`
 	BaseMinSize              string `json:"base_min_size"`
 	BaseMaxSize              string `json:"base_max_size"`
 	BaseName                 string `json:"base_name"`
@@ -205,10 +257,13 @@ type Market struct {
 	// FutureProductDetails struct { ... } `json:"future_product_details"`
 
 	// These are not in the response, but calculated.
-	RateStep uint64
-	LotSize  uint64
-	MaxQty   uint64
-	MinQty   uint64
+	RateStep     uint64
+	BaseLotSize  uint64
+	QuoteLotSize uint64
+	MaxBaseQty   uint64
+	MinBaseQty   uint64
+	MaxQuoteQty  uint64
+	MinQuoteQty  uint64
 }
 
 type ProductsResult struct {

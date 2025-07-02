@@ -948,7 +948,6 @@ export class RunningMarketMakerDisplay {
         rowTmpl.standingLots.classList.add('text-warning')
         rowTmpl.orderedLots.classList.add('text-warning')
       }
-      Doc.setVis(placement.counterTradeRate > 0, rowTmpl.counterTradeRate)
       rowTmpl.counterTradeRate.textContent = Doc.formatRateFullPrecision(placement.counterTradeRate, baseUI, quoteUI, this.mkt.rateStep)
       for (const assetID of assetIDs) {
         const asset = app().assets[assetID]
@@ -968,7 +967,7 @@ export class RunningMarketMakerDisplay {
         rowTmpl.requiredDEX.appendChild(requiredRow)
         rowTmpl.usedDEX.appendChild(usedRow)
       }
-      Doc.setVis(this.mkt.cexName, rowTmpl.requiredCEX, rowTmpl.usedCEX)
+      Doc.setVis(this.mkt.cexName, rowTmpl.counterTradeRate, rowTmpl.requiredCEX, rowTmpl.usedCEX)
       if (this.mkt.cexName) {
         const requiredAmt = Doc.formatCoinValue(placement.requiredCex, cexAsset.unitInfo)
         rowTmpl.requiredCEX.textContent = `${requiredAmt} ${cexAsset.symbol.toUpperCase()}`

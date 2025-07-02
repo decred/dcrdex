@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+
+	"decred.org/dcrdex/dex/calc"
 )
 
 func TestOrderbook(t *testing.T) {
@@ -33,6 +35,16 @@ func TestOrderbook(t *testing.T) {
 		})
 		return sorted
 	}
+	convertToQuote := func(entries []*obEntry) []*obEntry {
+		convertedEntries := make([]*obEntry, len(entries))
+		for i, entry := range entries {
+			convertedEntries[i] = &obEntry{
+				rate: entry.rate,
+				qty:  calc.BaseToQuote(entry.rate, entry.qty),
+			}
+		}
+		return convertedEntries
+	}
 
 	// Populate the book with some bids and asks. They both
 	// have the same values, but VWAP for asks should be
@@ -53,6 +65,8 @@ func TestOrderbook(t *testing.T) {
 
 	sortedBids := sortedEntries(true, bids)
 	sortedAsks := sortedEntries(false, asks)
+	quoteBids := convertToQuote(sortedBids)
+	quoteAsks := convertToQuote(sortedAsks)
 	snapBids, snapAsks := ob.snap()
 	if !reflect.DeepEqual(snapBids, sortedBids) {
 		t.Fatalf("wrong snap bids. expected %v got %v", sortedBids, snapBids)
@@ -79,11 +93,23 @@ func TestOrderbook(t *testing.T) {
 		t.Helper()
 		checkVWAPFn(ob.vwap, bids, qty, expVWAP, expExtrema, expFilled)
 	}
+	checkInvVWAP := func(bids bool, qty uint64, expVWAP, expExtrema uint64, expFilled bool) {
+		t.Helper()
+		checkVWAPFn(ob.invVWAP, bids, qty, expVWAP, expExtrema, expFilled)
+	}
 
 	// Test vwap for bids and asks
 	expVWAP := (sortedBids[0].rate*30e8 + sortedBids[1].rate*30e8 + sortedBids[2].rate*5e8) / 65e8
 	checkVWAP(true, 65e8, expVWAP, 3000, true)
 	checkVWAP(false, 65e8, 400, 400, true)
+
+	// Test inv vwap for bids and asks
+	quoteBidsQty := quoteBids[0].qty + quoteBids[1].qty
+	expVWAP = calc.BaseQuoteToRate(sortedBids[0].qty+sortedBids[1].qty, quoteBidsQty)
+	checkInvVWAP(true, quoteBidsQty, expVWAP, quoteBids[1].rate, true)
+	quoteAsksQty := quoteAsks[0].qty + quoteAsks[1].qty
+	expVWAP = calc.BaseQuoteToRate(sortedAsks[0].qty+sortedAsks[1].qty, quoteAsksQty)
+	checkInvVWAP(false, quoteAsksQty, expVWAP, quoteAsks[1].rate, true)
 
 	// Test vwap for qty > total qty
 	checkVWAP(true, 161e8, 0, 0, false)
@@ -126,7 +152,7 @@ func TestOrderbook(t *testing.T) {
 	checkVWAP(false, 65e8, expVWAP, 5000, true)
 }
 
-// Test vwap with values that would overflow uint64.
+// Test vwap and inv vwap with values that would overflow uint64.
 func TestVWAPOverflow(t *testing.T) {
 	bids := []*obEntry{
 		{qty: 1e15, rate: 12e9},
@@ -141,6 +167,22 @@ func TestVWAPOverflow(t *testing.T) {
 	}
 	if vwap != uint64(11e9) {
 		t.Fatalf("wrong vwap. expected %d got %d", uint64(11e9), vwap)
+	}
+	if extrema != uint64(10e9) {
+		t.Fatalf("wrong extrema")
+	}
+
+	var totalQuoteQty, totalBaseQty uint64
+	for _, bid := range bids {
+		totalQuoteQty += calc.BaseToQuote(bid.rate, bid.qty)
+		totalBaseQty += bid.qty
+	}
+	vwap, extrema, filled = ob.invVWAP(true, totalQuoteQty)
+	if !filled {
+		t.Fatalf("should be filled")
+	}
+	if calc.QuoteToBase(vwap, totalQuoteQty) != totalBaseQty {
+		t.Fatal("wrong inv vwap")
 	}
 	if extrema != uint64(10e9) {
 		t.Fatalf("wrong extrema")
