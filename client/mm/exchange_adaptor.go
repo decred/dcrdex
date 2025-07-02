@@ -164,13 +164,14 @@ type pendingWithdrawal struct {
 	timestamp    int64
 	withdrawalID string
 	assetID      uint32
-	// amtWithdrawn is the amount the CEX balance is decreased by.
-	// It will not be the same as the amount received in the dex wallet.
-	amtWithdrawn uint64
 
 	txMtx sync.RWMutex
-	txID  string
-	tx    *asset.WalletTransaction
+	// amtWithdrawn is the amount the CEX balance is decreased by.
+	// It will not be the same as the amount received in the dex wallet. It
+	// will be updated when the transaction is confirmed.
+	amtWithdrawn uint64
+	txID         string
+	tx           *asset.WalletTransaction
 }
 
 func withdrawalBalanceEffects(tx *asset.WalletTransaction, cexDebit uint64, assetID uint32) (dex, cex *BalanceEffects) {
@@ -859,6 +860,9 @@ func combineBalanceEffects(dex, cex *BalanceEffects) *BalanceEffects {
 // pending withdrawal and sends an event notification.
 func (u *unifiedExchangeAdaptor) updateWithdrawalEvent(withdrawal *pendingWithdrawal, tx *asset.WalletTransaction) {
 	complete := tx != nil && tx.Confirmed
+	withdrawal.txMtx.RLock()
+	amt := withdrawal.amtWithdrawn
+	withdrawal.txMtx.RUnlock()
 	e := &MarketMakingEvent{
 		ID:             withdrawal.eventLogID,
 		TimeStamp:      withdrawal.timestamp,
@@ -868,7 +872,7 @@ func (u *unifiedExchangeAdaptor) updateWithdrawalEvent(withdrawal *pendingWithdr
 			AssetID:     withdrawal.assetID,
 			ID:          withdrawal.withdrawalID,
 			Transaction: tx,
-			CEXDebit:    withdrawal.amtWithdrawn,
+			CEXDebit:    amt,
 		},
 	}
 
