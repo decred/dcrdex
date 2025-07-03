@@ -69,6 +69,147 @@ func (t *Table) AddUniqueIndex(name string, f func(k, v KV) ([]byte, error)) (*I
 	return t.addIndex(name, f, true)
 }
 
+// DeleteIndex deletes all index entries for any index of this table with the
+// given name.
+func (db *DB) DeleteIndex(tableName, indexName string) error {
+	tablePrefix, err := db.existingPrefixForName(tableName)
+	if errors.Is(err, badger.ErrKeyNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	indexPrefix, err := db.existingPrefixForName(tableName + "__idx__" + indexName)
+	if errors.Is(err, badger.ErrKeyNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	return db.Update(func(txn *badger.Txn) error {
+		// Delete all the index entries
+		if err := iteratePrefix(txn, indexPrefix[:], nil, func(i *badger.Iterator) error {
+			return txn.Delete(i.Item().Key())
+		}); err != nil {
+			return fmt.Errorf("error deleting index entries: %w", err)
+		}
+
+		// Update all the datums to no longer reference the deleted index
+		return iteratePrefix(txn, tablePrefix[:], nil, func(iter *badger.Iterator) error {
+			return iter.Item().Value(func(dB []byte) error {
+				d, err := decodeDatum(dB)
+				if err != nil {
+					return fmt.Errorf("error decoding datum during index deletion: %w", err)
+				}
+
+				// Filter out indexes that match the deleted index prefix
+				newIndexes := make([][]byte, 0, len(d.indexes)-1)
+				for _, idxB := range d.indexes {
+					if !bytes.Equal(idxB[:prefixSize], indexPrefix[:]) {
+						newIndexes = append(newIndexes, idxB)
+					}
+				}
+				d.indexes = newIndexes
+
+				b, err := d.bytes()
+				if err != nil {
+					return fmt.Errorf("error encoding datum after index deletion: %w", err)
+				}
+				if err := txn.Set(iter.Item().Key(), b); err != nil {
+					return fmt.Errorf("error storing new datum after index deletion: %w", err)
+				}
+				return nil
+			})
+		})
+	})
+}
+
+// ReIndex updates the index entries on this index for all items in the table.
+// decoder should generate the value that would be passed to the index
+// generation function supplied to (*Table).AddIndex for this index.
+func (db *DB) ReIndex(tableName, indexName string, f func(k, v []byte) ([]byte, error)) error {
+	tablePrefix, err := db.existingPrefixForName(tableName)
+	if errors.Is(err, badger.ErrKeyNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	indexPrefix, err := db.existingPrefixForName(tableName + "__idx__" + indexName)
+	if errors.Is(err, badger.ErrKeyNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	return db.Update(func(txn *badger.Txn) error {
+		return iteratePrefix(txn, tablePrefix[:], nil, func(iter *badger.Iterator) error {
+			return iter.Item().Value(func(dB []byte) error {
+				d, err := decodeDatum(dB)
+				if err != nil {
+					return fmt.Errorf("error decoding datum: %w", err)
+				}
+
+				tableKey := iter.Item().Key()
+				dbIDB := tableKey[prefixSize:]
+
+				// Get the original key for this datum
+				keyItem, err := txn.Get(prefixedKey(idToKeyPrefix, dbIDB))
+				if err != nil {
+					return fmt.Errorf("error finding key for entry: %w", err)
+				}
+				k, err := keyItem.ValueCopy(nil)
+				if err != nil {
+					return err
+				}
+
+				// Generate the new index entry
+				idxB, err := f(k, d.v)
+				if err != nil {
+					return fmt.Errorf("indexer function error: %w", err)
+				}
+				indexEntry := prefixedKey(indexPrefix, append(idxB, dbIDB...))
+
+				// Remove old index entries for this index and add the new one
+				var replaced bool
+				for j, idxBi := range d.indexes {
+					if bytes.Equal(idxBi[:prefixSize], indexPrefix[:]) {
+						// Delete the old index entry from the database
+						if err := txn.Delete(idxBi); err != nil {
+							return fmt.Errorf("error deleting old index entry during reindex: %w", err)
+						}
+						d.indexes[j] = indexEntry
+						replaced = true
+						break
+					}
+				}
+				if !replaced {
+					d.indexes = append(d.indexes, indexEntry)
+				}
+
+				// Update the datum with the new index references
+				b, err := d.bytes()
+				if err != nil {
+					return fmt.Errorf("error encoding datum after index reindex: %w", err)
+				}
+				if err := txn.Set(tableKey, b); err != nil {
+					return fmt.Errorf("error storing new datum after reindex: %w", err)
+				}
+
+				// Store the new index entry
+				if err := txn.Set(indexEntry, nil); err != nil {
+					return fmt.Errorf("error storing index entry for reindex: %w", err)
+				}
+				return nil
+			})
+		})
+	})
+}
+
 // uniqueIndexConflictError is returned when a unique index conflict is encountered.
 // The caller should delete the table entry identified by conflictDBID before adding
 // the new entry.
