@@ -43,6 +43,8 @@ decred.org/cspp/v2 v2.4.0/go.mod h1:9nO3bfvCheOPIFZw5f6sRQ42CjBFB5RKSaJ9Iq6G4MA=
 decred.org/dcrwallet/v5 v5.0.0-20250407130412-4f0acd20d74c h1:wc3FHQvr9AP7Ez3+OeLZy8XknIHCAn+PHCXAhBzBq0o=
 decred.org/dcrwallet/v5 v5.0.0-20250407130412-4f0acd20d74c/go.mod h1:V882rfzLgahFYxtXbhitoHRXIWFVCQSwXfZC1NZyHTY=
 dmitri.shuralyov.com/gpu/mtl v0.0.0-20190408044501-666a987793e9/go.mod h1:H6x//7gZCb22OMCxBHrMx7a5I7Hp++hsVxbQ4BYO7hU=
+filippo.io/edwards25519 v1.0.0 h1:0wAIcmJUqRdI8IJ/3eGi5/HwXZWPujYXXlkrQogz0Ek=
+filippo.io/edwards25519 v1.0.0/go.mod h1:N1IkdkCkiLB6tki+MYJoSx2JTY9NUlxZE7eHn5EwJns=
 fyne.io/systray v1.10.1-0.20230403195833-7dc3c09283d6 h1:lHt8dm97Uy9ggtnt9N6XOlsp76wXmRAh3SjReWm1e2Q=
 fyne.io/systray v1.10.1-0.20230403195833-7dc3c09283d6/go.mod h1:oM2AQqGJ1AMo4nNqZFYU8xYygSBZkW2hmdJ7n4yjedE=
 github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 h1:cTp8I5+VIoKjsnZuH8vjyaysT/ses3EvZeaV/1UkF2M=
@@ -100,6 +102,8 @@ github.com/ashanbrown/forbidigo v1.1.0/go.mod h1:vVW7PEdqEFqapJe95xHkTfB1+XvZXBF
 github.com/ashanbrown/forbidigo v1.2.0/go.mod h1:vVW7PEdqEFqapJe95xHkTfB1+XvZXBFg8t0sG2FIxmI=
 github.com/ashanbrown/makezero v0.0.0-20210308000810-4155955488a0/go.mod h1:oG9Dnez7/ESBqc4EdrdNlryeo7d0KcW1ftXHm7nU/UU=
 github.com/ashanbrown/makezero v0.0.0-20210520155254-b6261585ddde/go.mod h1:oG9Dnez7/ESBqc4EdrdNlryeo7d0KcW1ftXHm7nU/UU=
+github.com/athanorlabs/go-dleq v0.1.0 h1:0/llWZG8fz2uintMBKOiBC502zCsDA8nt8vxI73W9Qc=
+github.com/athanorlabs/go-dleq v0.1.0/go.mod h1:DWry6jSD7A13MKmeZA0AX3/xBeQCXDoygX99VPwL3yU=
 github.com/aws/aws-lambda-go v1.13.3/go.mod h1:4UKl9IzQMoD+QF79YdCuzCwp8VbmG4VAQwij/eHl5CU=
 github.com/aws/aws-sdk-go v1.23.20/go.mod h1:KmX6BPdI08NWTb3/sm4ZGu5ShLoqVDhKgpiN924inxo=
 github.com/aws/aws-sdk-go v1.25.37/go.mod h1:KmX6BPdI08NWTb3/sm4ZGu5ShLoqVDhKgpiN924inxo=
@@ -128,8 +132,6 @@ github.com/btcsuite/btcd v0.24.2-beta.rc1.0.20240625142744-cc26860b4026 h1:s8/96
 github.com/btcsuite/btcd v0.24.2-beta.rc1.0.20240625142744-cc26860b4026/go.mod h1:5C8ChTkl5ejr3WHj8tkQSCmydiMEPB0ZhQhehpq7Dgg=
 github.com/btcsuite/btcd/btcec/v2 v2.1.0/go.mod h1:2VzYrv4Gm4apmbVVsSq5bqf1Ec8v56E48Vt0Y/umPgA=
 github.com/btcsuite/btcd/btcec/v2 v2.1.3/go.mod h1:ctjw4H1kknNJmRN4iP1R7bTQ+v3GJkZBd6mui8ZsAZE=
-github.com/btcsuite/btcd/btcec/v2 v2.3.4 h1:3EJjcN70HCu/mwqlUsGK8GcNVyLVxFDlWurTXGPFfiQ=
-github.com/btcsuite/btcd/btcec/v2 v2.3.4/go.mod h1:zYzJ8etWJQIv1Ogk7OzpWjowwOdXY1W/17j2MW85J04=
 github.com/btcsuite/btcd/btcutil v1.0.0/go.mod h1:Uoxwv0pqYWhD//tfTiipkxNfdhG9UrLwaeswfjfdF0A=
 github.com/btcsuite/btcd/btcutil v1.1.0/go.mod h1:5OapHB7A2hBBWLm48mmw4MOHNJCcUBTwmWH/0Jn8VHE=
 github.com/btcsuite/btcd/btcutil v1.1.5 h1:+wER79R5670vs/ZusMTF1yTcRYE5GUsFbdjdisflzM8=
@@ -772,6 +774,8 @@ github.com/magiconair/properties v1.8.0/go.mod h1:PppfXfuXeibc/6YijjN8zIbojt8czP
 github.com/magiconair/properties v1.8.1/go.mod h1:PppfXfuXeibc/6YijjN8zIbojt8czPbwD3XqdrwzmxQ=
 github.com/magiconair/properties v1.8.5/go.mod h1:y3VJvCyxH9uVvJTWEGAELF3aiYNyPKd5NZ3oSwXrF60=
 github.com/maratori/testpackage v1.0.1/go.mod h1:ddKdw+XG0Phzhx8BFDTKgpWP4i7MpApTE5fXSKAqwDU=
+github.com/martonp/btcd/btcec/v2 v2.0.0-20250528172049-6b252bb1b6a1 h1:B5wUyPCVOFp6GIQ9IyUYAWPC34t9ej8q8Y739IRhpSo=
+github.com/martonp/btcd/btcec/v2 v2.0.0-20250528172049-6b252bb1b6a1/go.mod h1:m22FrOAiuxl/tht9wIqAoGHcbnCCaPWyauO8y2LGGtQ=
 github.com/matoous/godox v0.0.0-20210227103229-6504466cf951/go.mod h1:1BELzlh859Sh1c6+90blK8lbYy0kwQf1bYlBhBysy1s=
 github.com/mattn/go-colorable v0.0.9/go.mod h1:9vuHe8Xs5qXnSaW/c/ABM9alt+Vo+STaOChaDxuIBZU=
 github.com/mattn/go-colorable v0.1.4/go.mod h1:U0ppj6V5qS13XJ6of8GYAs25YV2eR4EVcfRqFIhoBtE=
