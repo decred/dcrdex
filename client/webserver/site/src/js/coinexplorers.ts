@@ -48,6 +48,17 @@ const polygonExplorers: Record<number, (cid: string) => string> = {
   }
 }
 
+const optimismExplorers: Record<number, (cid: string) => string> = {
+  [Mainnet]: (cid: string) => {
+    const [arg, isAddr] = ethBasedExplorerArg(cid)
+    return isAddr ? `https://basescan.org/address/${arg}` : `https://basescan.org/tx/${arg}`
+  },
+  [Testnet]: (cid: string) => {
+    const [arg, isAddr] = ethBasedExplorerArg(cid)
+    return isAddr ? `https://base-sepolia.blockscout.com/address/${arg}` : `https://base-sepolia.blockscout.com/tx/${arg}`
+  }
+}
+
 export const CoinExplorers: Record<number, Record<number, (cid: string) => string>> = {
   42: { // dcr
     [Mainnet]: (cid: string) => {
@@ -84,6 +95,8 @@ export const CoinExplorers: Record<number, Record<number, (cid: string) => strin
   60: ethExplorers,
   60001: ethExplorers,
   60002: ethExplorers,
+  61000: optimismExplorers,
+  61001: optimismExplorers,
   3: { // doge
     [Mainnet]: (cid: string) => `https://dogeblocks.com/tx/${cid.split(':')[0]}`,
     [Testnet]: (cid: string) => `https://blockexplorer.one/dogecoin/testnet/tx/${cid.split(':')[0]}`,
