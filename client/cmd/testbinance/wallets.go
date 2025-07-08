@@ -113,7 +113,7 @@ type evmWallet struct {
 
 func newEvmWallet(ctx context.Context, symbol string) (*evmWallet, error) {
 	symbol = strings.ToLower(symbol)
-	rpcAddr := "http://localhost:38556"
+	rpcAddr := "http://localhost:38553"
 	switch symbol {
 	case "matic", "polygon":
 		symbol = "polygon"
