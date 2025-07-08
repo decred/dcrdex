@@ -1,0 +1,30 @@
+participants:
+  - el_type: geth
+    count: 2
+    cl_max_mem: 500
+    cl_max_mem: 500
+    el_max_mem: 500
+    el_max_mem: 500
+
+# Default configuration parameters for the network
+network_params:
+  network_id: "1337"
+
+  prefunded_accounts: '{"0x7B0E74365D34C02B707B3CD6A9317E4BCF757638": {"balance": "1000000000000ETH"}}'
+
+# Global parameter to set the exit ip address of services and public ports
+port_publisher:
+  # Execution Layer public port exposed to your local machine
+  # Disabled by default
+  # Public port start defaults to 32000
+  # You can't run multiple enclaves on the same port settings
+  el:
+    enabled: true
+    public_port_start: 38550
+  # Consensus Layer public port exposed to your local machine
+  # Disabled by default
+  # Public port start defaults to 33000
+  # You can't run multiple enclaves on the same port settings
+  cl:
+    enabled: true
+    public_port_start: 39550

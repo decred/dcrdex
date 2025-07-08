@@ -74,7 +74,7 @@ var (
 	testnetParticipantWalletDir string
 
 	alphaNodeDir               = filepath.Join(homeDir, "dextest", "eth", "alpha", "node")
-	alphaWSEndpoint            = "ws://127.0.0.1:38557"
+	alphaWSEndpoint            = "ws://127.0.0.1:38554"
 	ctx                        context.Context
 	tLogger                    = dex.StdOutLogger("ETHTEST", dex.LevelWarn)
 	simnetWalletSeed           = "0812f5244004217452059e2fd11603a511b5d0870ead753df76c966ce3c71531"

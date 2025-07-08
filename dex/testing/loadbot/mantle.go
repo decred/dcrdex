@@ -855,7 +855,7 @@ func newBotWallet(symbol, node, name string, port string, pass []byte, minFunds,
 			},
 		}
 	case eth, usdc:
-		rpcProvider := "ws://127.0.0.1:38557"
+		rpcProvider := "ws://127.0.0.1:38554"
 		form = &core.WalletForm{
 			Type:    "rpc",
 			AssetID: ethID,

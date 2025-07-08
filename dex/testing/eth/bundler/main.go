@@ -38,7 +38,7 @@ import (
 )
 
 var (
-	ethAlphaHTTPAddress     = "http://localhost:38556"
+	ethAlphaHTTPAddress     = "http://localhost:38553"
 	polygonAlphaHTTPAddress = "http://localhost:48296"
 )
 
