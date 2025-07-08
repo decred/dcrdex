@@ -21,6 +21,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -36,8 +37,10 @@ import (
 	"decred.org/dcrdex/client/webserver/locales"
 	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/dexnet"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
+	"decred.org/dcrdex/dex/version"
 	"github.com/decred/dcrd/certgen"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -87,6 +90,8 @@ var (
 
 	//go:embed site/dist site/src/img site/src/font
 	staticSiteRes embed.FS
+
+	latestVersionRegex = regexp.MustCompile(`\d+(\.\d+)+`)
 )
 
 // clientCore is satisfied by core.Core.
@@ -115,6 +120,7 @@ type clientCore interface {
 	ChangeAppPass([]byte, []byte) error
 	ResetAppPass(newPass []byte, seed string) error
 	NewDepositAddress(assetID uint32) (string, error)
+	AddressUsed(assetID uint32, addr string) (bool, error)
 	AutoWalletConfig(assetID uint32, walletType string) (map[string]string, error)
 	User() *core.User
 	GetDEXConfig(dexAddr string, certI any) (*core.Exchange, error)
@@ -175,7 +181,7 @@ type clientCore interface {
 
 type MMCore interface {
 	MarketReport(host string, base, quote uint32) (*mm.MarketReport, error)
-	StartBot(mkt *mm.StartConfig, alternateConfigPath *string, pw []byte) (err error)
+	StartBot(mkt *mm.StartConfig, alternateConfigPath *string, pw []byte, overrideLotSizeChange bool) (err error)
 	StopBot(mkt *mm.MarketWithHost) error
 	UpdateCEXConfig(updatedCfg *mm.CEXConfig) error
 	CEXBalance(cexName string, assetID uint32) (*libxc.ExchangeBalance, error)
@@ -229,7 +235,8 @@ type Config struct {
 	CustomSiteDir string
 	Language      string
 	Logger        dex.Logger
-	UTC           bool // for stdout http request logging
+	UTC           bool   // for stdout http request logging
+	AppVersion    string // user app version for UI
 	CertFile      string
 	KeyFile       string
 	// NoEmbed indicates to serve files from the system disk rather than the
@@ -269,6 +276,9 @@ type WebServer struct {
 
 	bondBufMtx sync.Mutex
 	bondBuf    map[uint32]valStamp
+
+	appVersion             string
+	newAppVersionAvailable bool
 
 	useDEXBranding bool
 }
@@ -391,6 +401,7 @@ func New(cfg *Config) (*WebServer, error) {
 		authTokens:      make(map[string]bool),
 		cachedPasswords: make(map[string]*cachedPassword),
 		bondBuf:         map[uint32]valStamp{},
+		appVersion:      cfg.AppVersion,
 		useDEXBranding:  useDEXBranding,
 	}
 	s.lang.Store(lang)
@@ -493,6 +504,7 @@ func New(cfg *Config) (*WebServer, error) {
 		r.Get("/user", s.apiUser)
 		r.Post("/locale", s.apiLocale)
 		r.Post("/setlocale", s.apiSetLocale)
+		r.Get("/buildinfo", s.apiBuildInfo)
 
 		r.Group(func(apiInit chi.Router) {
 			apiInit.Use(s.rejectUninited)
@@ -513,6 +525,7 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/newwallet", s.apiNewWallet)
 			apiAuth.Post("/openwallet", s.apiOpenWallet)
 			apiAuth.Post("/depositaddress", s.apiNewDepositAddress)
+			apiAuth.Post("/addressused", s.apiAddressUsed)
 			apiAuth.Post("/closewallet", s.apiCloseWallet)
 			apiAuth.Post("/connectwallet", s.apiConnectWallet)
 			apiAuth.Post("/rescanwallet", s.apiRescanWallet)
@@ -588,6 +601,39 @@ func New(cfg *Config) (*WebServer, error) {
 	fileServer(mux, "/font", siteDir, "src/font", "")
 
 	return s, nil
+}
+
+// fetchLatestVersion is a helper function to retrieve the latest version of the app
+// from github.
+func (w *WebServer) fetchLatestVersion(ctx context.Context) {
+	var response struct {
+		TagName string `json:"tag_name"`
+	}
+
+	err := dexnet.Get(ctx, "https://api.github.com/repos/decred/dcrdex/releases/latest", &response, dexnet.WithSizeLimit(1<<22))
+	if err != nil {
+		log.Debugf("Error getting latest version: %v", err)
+		return
+	}
+
+	latestVersion := latestVersionRegex.FindString(response.TagName)
+	latestMajor, latestMinor, latestPatch, _, _, err := version.ParseSemVer(latestVersion)
+	if err != nil {
+		log.Debugf("Error parsing latest version: %v", err)
+		return
+	}
+
+	currentMajor, currentMinor, currentPatch, _, _, err := version.ParseSemVer(w.appVersion)
+	if err != nil {
+		log.Debugf("Error parsing app version: %v", err)
+		return
+	}
+
+	if latestMajor > currentMajor ||
+		(latestMajor == currentMajor && latestMinor > currentMinor) ||
+		(latestMajor == currentMajor && latestMinor == currentMinor && latestPatch > currentPatch) {
+		w.newAppVersionAvailable = true
+	}
 }
 
 // buildTemplates prepares the HTML templates, which are executed and served in
@@ -717,6 +763,23 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	go func() {
 		defer wg.Done()
 		s.readNotifications(ctx)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		// Perform initial fetch of the latest version.
+		s.fetchLatestVersion(ctx)
+
+		for {
+			select {
+			case <-time.After(24 * time.Hour):
+				s.fetchLatestVersion(ctx)
+			case <-ctx.Done():
+				return
+			}
+		}
 	}()
 
 	log.Infof("Web server listening on %s (https = %v)", s.addr, https)

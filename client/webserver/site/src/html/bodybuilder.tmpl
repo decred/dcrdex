@@ -9,9 +9,18 @@
   <link rel="icon" href="/img/favicon.png?v=AZ4AZX">
   <meta name="description" content="Bison Wallet">
   <title>{{.Title}}</title>
-  <link href="/css/style.css?v={{commitHash}}" rel="stylesheet">
+  <link href="/css/style.css?v={{commitHash true}}" rel="stylesheet">
 </head>
-<body {{if .UseDEXBranding}}class="dex-branding"{{end}}>
+<body class="dark{{if .UseDEXBranding}} dex-branding{{end}}">
+  {{if .NewAppVersionAvailable}}
+    <div class="p-2 d-flex justify-content-center">
+        <span class="fs15 green">[[[New Release Message]]]</span>
+        <a href="https://bisonwallet.org/#download" target="_blank" rel="noopener noreferrer"
+          class="fs15 ps-2">
+          [[[View Website]]]
+        </a>
+    </div>
+  {{end}}
   <div class="popup-notes d-hide" id="popupNotes">
     <span data-tmpl="note" class="fs15">
       <div class="note-indicator d-inline-block" data-tmpl="indicator"></div>
@@ -97,7 +106,7 @@
       <span class="ico-barchart fs16 me-2"></span>
       [[[Market Making]]]
     </a>
-    <a href="/settings" class="demi hoverbright plainlink d-flex align-items-center py-1">
+    <a href="/settings" class="demi hoverbright plainlink d-flex align-items-center py-1 authed-only">
       <span class="ico-settings fs16 me-2"></span>
       [[[Settings]]]
     </a>
@@ -118,7 +127,14 @@
       <span class="ico-profile fs16 me-2"></span>
       [[[Sign Out]]]
     </div>
+    <div class="border-bottom py-2"></div>
+    <div class="demi-sans d-flex align-items-center py-1" id="version">
+      <div class="flex-center">
+        [[[Version]]] {{.Version}}
+      </div>
+    </div>
   </div>
+
 
 </header>
 {{end}}
@@ -257,7 +273,7 @@
   </div>
 </div>
 
-<script src="/js/entry.js?v={{commitHash}}"></script>
+<script src="/js/entry.js?v={{commitHash true}}"></script>
 </body>
 </html>
 {{end}}

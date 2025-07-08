@@ -185,19 +185,15 @@ export default class Application {
     this.notes = []
     this.pokes = []
     this.seedGenTime = 0
-    this.commitHash = process.env.COMMITHASH || ''
+    this.commitHash = ''
     this.noteReceivers = []
     this.fiatRatesMap = {}
     this.showPopups = State.fetchLocal(State.popupsLK) === '1'
     this.txHistoryMap = {}
     this.requiredActions = {}
 
-    console.log('Bison Wallet, Build', this.commitHash.substring(0, 7))
-
-    // Set Bootstrap dark theme attribute if dark mode is enabled.
-    if (State.isDark()) {
-      document.body.classList.add('dark')
-    }
+    // Set dark theme.
+    document.body.classList.toggle('dark', State.isDark())
 
     // Loggers can be enabled by setting a truthy value to the loggerID using
     // enableLogger. Settings are stored across sessions. See docstring for the
@@ -247,6 +243,9 @@ export default class Application {
    * point. Read the id = main element and attach handlers.
    */
   async start () {
+    await this.fetchBuildInfo()
+    console.log('Bison Wallet, Build', this.commitHash.substring(0, 8))
+
     // Handle back navigation from the browser.
     bind(window, 'popstate', (e: PopStateEvent) => {
       const page = e.state?.page
@@ -327,6 +326,12 @@ export default class Application {
 
     this.updateMenuItemsDisplay()
     return user
+  }
+
+  async fetchBuildInfo () {
+    const resp = await getJSON('/api/buildinfo')
+    if (!this.checkResponse(resp)) return
+    this.commitHash = resp.revision
   }
 
   async fetchMMStatus () {

@@ -115,7 +115,7 @@ func findExePath() string {
 	return s
 }
 
-func limitedWindowWidthAndHeight(width int, height int) (int, int) {
+func limitedWindowWidthAndHeight(width float64, height float64) (float64, float64) {
 	if width <= 0 || width > 1920 {
 		width = 1920
 	}

@@ -55,17 +55,21 @@ func (s *WebServer) sendTemplate(w http.ResponseWriter, tmplID string, data any)
 // CommonArguments are common page arguments that must be supplied to every
 // page to populate the <title> and <header> elements.
 type CommonArguments struct {
-	UserInfo       *userInfo
-	Title          string
-	UseDEXBranding bool
+	UserInfo               *userInfo
+	Title                  string
+	UseDEXBranding         bool
+	Version                string
+	NewAppVersionAvailable bool
 }
 
 // Create the CommonArguments for the request.
 func (s *WebServer) commonArgs(r *http.Request, title string) *CommonArguments {
 	return &CommonArguments{
-		UserInfo:       extractUserInfo(r),
-		Title:          title,
-		UseDEXBranding: s.useDEXBranding,
+		UserInfo:               extractUserInfo(r),
+		Title:                  title,
+		UseDEXBranding:         s.useDEXBranding,
+		Version:                s.appVersion,
+		NewAppVersionAvailable: s.newAppVersionAvailable,
 	}
 }
 
@@ -77,7 +81,7 @@ func (s *WebServer) handleHome(w http.ResponseWriter, r *http.Request) {
 
 // handleLogin is the handler for the '/login' page request.
 func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
-	cArgs := s.commonArgs(r, "Login | Decred DEX")
+	cArgs := s.commonArgs(r, "Login | Bison Wallet")
 	if cArgs.UserInfo.Authed {
 		http.Redirect(w, r, walletsRoute, http.StatusSeeOther)
 		return
@@ -97,7 +101,7 @@ type registerTmplData struct {
 
 // handleRegister is the handler for the '/register' page request.
 func (s *WebServer) handleRegister(w http.ResponseWriter, r *http.Request) {
-	common := s.commonArgs(r, "Register | Decred DEX")
+	common := s.commonArgs(r, "Register | Bison Wallet")
 	host, _ := getHostCtx(r)
 	s.sendTemplate(w, "register", &registerTmplData{
 		CommonArguments: *common,
@@ -129,12 +133,12 @@ func (s *WebServer) knownUnregisteredExchanges(registeredExchanges map[string]*c
 
 // handleMarkets is the handler for the '/markets' page request.
 func (s *WebServer) handleMarkets(w http.ResponseWriter, r *http.Request) {
-	s.sendTemplate(w, "markets", s.commonArgs(r, "Markets | Decred DEX"))
+	s.sendTemplate(w, "markets", s.commonArgs(r, "Markets | Bison Wallet"))
 }
 
 // handleMarketMaking is the handler for the '/mm' page request.
 func (s *WebServer) handleMarketMaking(w http.ResponseWriter, r *http.Request) {
-	s.sendTemplate(w, "mm", s.commonArgs(r, "Market Making | Decred DEX"))
+	s.sendTemplate(w, "mm", s.commonArgs(r, "Market Making | Bison Wallet"))
 }
 
 // handleWallets is the handler for the '/wallets' page request.
@@ -158,7 +162,7 @@ func (s *WebServer) handleWallets(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(nowallets, func(i, j int) bool {
 		return nowallets[i].Name < nowallets[j].Name
 	})
-	s.sendTemplate(w, "wallets", s.commonArgs(r, "Wallets | Decred DEX"))
+	s.sendTemplate(w, "wallets", s.commonArgs(r, "Wallets | Bison Wallet"))
 }
 
 // handleWalletLogFile is the handler for the '/wallets/logfile' page request.
@@ -246,12 +250,12 @@ func (s *WebServer) handleGenerateQRCode(w http.ResponseWriter, r *http.Request)
 
 // handleInit is the handler for the '/init' page request
 func (s *WebServer) handleInit(w http.ResponseWriter, r *http.Request) {
-	s.sendTemplate(w, "init", s.commonArgs(r, "Welcome | Decred DEX"))
+	s.sendTemplate(w, "init", s.commonArgs(r, "Welcome | Bison Wallet"))
 }
 
 // handleSettings is the handler for the '/settings' page request.
 func (s *WebServer) handleSettings(w http.ResponseWriter, r *http.Request) {
-	common := s.commonArgs(r, "Settings | Decred DEX")
+	common := s.commonArgs(r, "Settings | Bison Wallet")
 	xcs := s.core.Exchanges()
 	data := &struct {
 		CommonArguments
@@ -287,7 +291,7 @@ func (s *WebServer) handleDexSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	common := *s.commonArgs(r, fmt.Sprintf("%v Settings | Decred DEX", host))
+	common := *s.commonArgs(r, fmt.Sprintf("%v Settings | Bison Wallet", host))
 	data := &struct {
 		CommonArguments
 		Exchange       *core.Exchange
@@ -303,19 +307,19 @@ func (s *WebServer) handleDexSettings(w http.ResponseWriter, r *http.Request) {
 
 // handleMMSettings is the handler for the '/mmsettings' page request.
 func (s *WebServer) handleMMSettings(w http.ResponseWriter, r *http.Request) {
-	common := *s.commonArgs(r, "Market Making Settings | Decred DEX")
+	common := *s.commonArgs(r, "Market Making Settings | Bison Wallet")
 	s.sendTemplate(w, "mmsettings", common)
 }
 
 // handleMMArchives is the handler for the '/mmarchives' page request.
 func (s *WebServer) handleMMArchives(w http.ResponseWriter, r *http.Request) {
-	common := *s.commonArgs(r, "Market Making Archives | Decred DEX")
+	common := *s.commonArgs(r, "Market Making Archives | Bison Wallet")
 	s.sendTemplate(w, "mmarchives", common)
 }
 
 // handleMMLogs is the handler for the '/mmlogs' page request.
 func (s *WebServer) handleMMLogs(w http.ResponseWriter, r *http.Request) {
-	common := *s.commonArgs(r, "Market Making Logs | Decred DEX")
+	common := *s.commonArgs(r, "Market Making Logs | Bison Wallet")
 	s.sendTemplate(w, "mmlogs", common)
 }
 
@@ -343,7 +347,7 @@ func (s *WebServer) handleOrders(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.sendTemplate(w, "orders", &ordersTmplData{
-		CommonArguments: *s.commonArgs(r, "Orders | Decred DEX"),
+		CommonArguments: *s.commonArgs(r, "Orders | Bison Wallet"),
 		Assets:          s.core.SupportedAssets(),
 		Hosts:           hosts,
 		Statuses:        allStatuses,
@@ -483,7 +487,7 @@ func (s *WebServer) handleOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.sendTemplate(w, "order", &orderTmplData{
-		CommonArguments: *s.commonArgs(r, "Order | Decred DEX"),
+		CommonArguments: *s.commonArgs(r, "Order | Bison Wallet"),
 		Order:           s.orderReader(ord),
 	})
 }

@@ -11,44 +11,14 @@ package main
 #import <AppKit/AppKit.h>
 #import <UserNotifications/UserNotifications.h>
 
-// NavigationActionPolicyCancel is an integer used in Go code to represent
-// WKNavigationActionPolicyCancel
-const int NavigationActionPolicyCancel = 1;
-
 // CompletionHandlerDelegate implements methods required for executing
 // completion and decision handlers.
 @interface CompletionHandlerDelegate:NSObject
-- (void)completionHandler:(void (^)(NSArray<NSURL *> * _Nullable URLs))completionHandler withURLs:(NSArray<NSURL *> * _Nullable)URLs;
-- (void)decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler withPolicy:(int)policy;
-- (void)authenticationCompletionHandler:(void (^)(NSURLSessionAuthChallengeDisposition disposition, NSURLCredential *credential))completionHandler withChallenge:(NSURLAuthenticationChallenge *)challenge;
 - (void)deliverNotificationWithTitle:(NSString *)title message:(NSString *)message icon:(NSImage *)icon;
+- (WKWebView *)newWebView;
 @end
 
 @implementation CompletionHandlerDelegate
-// "completionHandler:withURLs" accepts a completion handler function from
-// "webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:" and
-// executes it with the provided URLs.
-- (void)completionHandler:(void (^)(NSArray<NSURL *> * _Nullable URLs))completionHandler withURLs:(NSArray<NSURL *> * _Nullable)URLs {
-	completionHandler(URLs);
-}
-
-// "decisionHandler:withPolicy" accepts a decision handler function from
-// "webView:decidePolicyForNavigationAction:decisionHandler" and executes
-// it with the provided policy.
-- (void)decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler withPolicy:(int)policy {
-	policy == NavigationActionPolicyCancel ? decisionHandler(WKNavigationActionPolicyCancel) : decisionHandler(WKNavigationActionPolicyAllow);
-}
-
-// Implements "authenticationCompletionHandler:withChallenge" for "webView:didReceiveAuthenticationChallenge:completionHandler".
-// See: https://developer.apple.com/forums/thread/15610.
-- (void)authenticationCompletionHandler:(void (^)(NSURLSessionAuthChallengeDisposition disposition, NSURLCredential *credential))completionHandler withChallenge:(NSURLAuthenticationChallenge *)challenge {
-	SecTrustRef serverTrust = challenge.protectionSpace.serverTrust;
-	CFDataRef exceptions = SecTrustCopyExceptions(serverTrust);
-	SecTrustSetExceptions(serverTrust, exceptions);
-	CFRelease(exceptions);
-	completionHandler(NSURLSessionAuthChallengeUseCredential, [NSURLCredential credentialForTrust:serverTrust]);
-}
-
 // Implements "deliverNotificationWithTitle:message:icon:" handler with the NSUserNotification
 // and NSUserNotificationCenter classes which have been marked deprecated
 // but it is what works atm for macOS apps. The newer UNUserNotificationCenter has some
@@ -66,6 +36,19 @@ const int NavigationActionPolicyCancel = 1;
     [notification setValue:@(false) forKey:@"_identityImageHasBorder"];
 	[notification setValue:@YES forKey:@"_ignoresDoNotDisturb"];
 	[[NSUserNotificationCenter defaultUserNotificationCenter]deliverNotification:notification];
+}
+
+// Implements "newWebview". This is because the inspectable property is not available via
+// darwinkit at the time of writing. Only MacOs 13.3+ has this property.
+// This means that the webview is not inspectable on older versions of macOS.
+// See: https://stackoverflow.com/a/75984167
+- (WKWebView *)newWebview {
+	WKWebViewConfiguration *webConfiguration = [WKWebViewConfiguration new];
+	WKWebView *webView = [[WKWebView alloc] initWithFrame:CGRectZero configuration:webConfiguration];
+	if (@available(macOS 13.3, *)) {
+		webView.inspectable = YES;
+	}
+	return webView;
 }
 @end
 
@@ -93,32 +76,36 @@ import (
 	"syscall"
 	"time"
 
-	"decred.org/dcrdex/client/app"
+	bwapp "decred.org/dcrdex/client/app"
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/mm"
 	"decred.org/dcrdex/client/rpcserver"
 	"decred.org/dcrdex/client/webserver"
 	"decred.org/dcrdex/dex"
-	"github.com/progrium/macdriver/cocoa"
-	mdCore "github.com/progrium/macdriver/core"
-	"github.com/progrium/macdriver/objc"
-	"github.com/progrium/macdriver/webkit"
+	"github.com/progrium/darwinkit/macos/appkit"
+	"github.com/progrium/darwinkit/macos/foundation"
+	"github.com/progrium/darwinkit/macos/webkit"
+	"github.com/progrium/darwinkit/objc"
 )
 
 var (
-	webviewConfig  = webkit.WKWebViewConfiguration_New()
 	width, height  = windowWidthAndHeight()
 	maxOpenWindows = 5          // what would they want to do with more than 5 😂?
 	nOpenWindows   atomic.Int32 // number of open windows
 
 	// Initialized when bisonw-desktop has been started.
-	appURL *url.URL
+	appHost string
+	appURL  *url.URL
+	logDir  string
 
 	// completionHandler handles Objective-C callback functions for some
 	// delegate methods.
-	completionHandler = objc.Object_fromPointer(C.createCompletionHandlerDelegate())
-	dexcAppIcon       = cocoa.NSImage_InitWithData(mdCore.NSData_WithBytes(Icon, uint64(len(Icon))))
+	completionHandler = objc.ObjectFrom(C.createCompletionHandlerDelegate())
+
+	bisonwAppIcon  = appkit.NewImageWithData(Icon)
+	windowDelegate = appkit.WindowDelegate{}
+	dw             = &delegateWrapper{}
 )
 
 const (
@@ -126,16 +113,10 @@ const (
 	// of the main menu.
 	macOSAppTitle = "Bison Wallet"
 
-	// selOpenLogs is the selector for the "Open Logs" menu item.
-	selOpenLogs = "openLogs:"
-	// selNewWindow is the selector for the "New Window" menu item.
-	selNewWindow = "newWindow:"
-	// selIsNewWebview is the selector for a webview that require a new window.
-	selIsNewWebview = "isNewWebView:"
-
-	// NavigationActionPolicyCancel is used in Objective-C code to represent
-	// WKNavigationActionPolicyCancel.
-	NavigationActionPolicyCancel = 1
+	// The name of the Bison Wallet Js Handler. To access this function in the
+	// browser window, do:
+	// window.webkit.messageHandlers.<name>.postMessage(<messageBody>)
+	bwJsHandlerName = "bwHandler"
 )
 
 func init() {
@@ -144,23 +125,9 @@ func init() {
 	// mdCore.Dispatch(func()) to execute any function that needs to run in the
 	// "main" thread.
 	runtime.LockOSThread()
-
-	// Set the user controller. This object coordinates interactions the app’s
-	// native code and the webpage’s scripts and other content. See:
-	// https://developer.apple.com/documentation/webkit/wkwebviewconfiguration/1395668-usercontentcontroller?language=objc.
-	webviewConfig.Set("userContentController:", objc.Get("WKUserContentController").Alloc().Init())
-	// Set "developerExtrasEnabled" to true to allow viewing the developer
-	// console.
-	webviewConfig.Preferences().SetValueForKey(mdCore.True, mdCore.String("developerExtrasEnabled"))
-	// Set "DOMPasteAllowed" to true to allow user's paste text.
-	webviewConfig.Preferences().SetValueForKey(mdCore.True, mdCore.String("DOMPasteAllowed"))
-
-	// Set to false in order to prevent bisonw-desktop from exiting when the last
-	// window is closed.
-	cocoa.TerminateAfterWindowsClose = false
 }
 
-// mainCore is the darwin entry point for the DEX Desktop client.
+// mainCore is the darwin entry point for the Bison Wallet Desktop client.
 func mainCore() error {
 	appCtx, cancel := context.WithCancel(context.Background())
 	defer cancel() // don't leak on the earliest returns
@@ -211,11 +178,11 @@ func mainCore() error {
 	defer shutdownCloser.Done() // execute deferred functions if we return early
 	// Initialize logging.
 	utc := !cfg.LocalLogs
-	logMaker, closeLogger := app.InitLogging(cfg.LogPath, cfg.DebugLevel, cfg.LogStdout, utc)
+	logMaker, closeLogger := bwapp.InitLogging(cfg.LogPath, cfg.DebugLevel, cfg.LogStdout, utc)
 	shutdownCloser.Add(closeLogger)
 
 	log = logMaker.Logger("APP")
-	log.Infof("%s version %s (Go version %s)", appName, app.Version, runtime.Version())
+	log.Infof("%s version %s (Go version %s)", appName, bwapp.Version, runtime.Version())
 	if utc {
 		log.Infof("Logging with UTC time stamps. Current local time is %v",
 			time.Now().Local().Format("15:04:05 MST"))
@@ -334,24 +301,18 @@ func mainCore() error {
 		return fmt.Errorf("url.ParseRequestURI error: %w", err)
 	}
 
-	logDir := filepath.Dir(cfg.LogPath)
-	classWrapper := initCocoaDefaultDelegateClassWrapper(logDir)
+	// Set the appHost to the host part of the URL. This is used to determine if
+	// the URL should be opened in the webview or in the user's default browser.
+	appHost, _, _ = strings.Cut(appURL.Host, ":")
 
-	// MacOS will always execute this method when bisonw-desktop is about to exit
-	// so we should use this opportunity to cleanup. See:
-	// https://developer.apple.com/documentation/appkit/nsapplicationdelegate/1428642-applicationshouldterminate?language=objc
-	classWrapper.AddMethod("applicationShouldTerminate:", func(s objc.Object) mdCore.NSUInteger {
-		cancel()              // no-op with clean rpc/web server setup
-		wg.Wait()             // no-op with clean setup and shutdown
-		shutdownCloser.Done() // execute shutdown functions
-		return mdCore.NSUInteger(1)
-	})
+	logDir = filepath.Dir(cfg.LogPath)
+
+	app := appkit.Application_SharedApplication()
 
 	// MacOS will always execute this method when bisonw-desktop window is about
-	// to close See:
-	// https://developer.apple.com/documentation/appkit/nswindowdelegate/1419605-windowwillclose?language=objc
+	// to close.
 	var noteSent bool
-	classWrapper.AddMethod("windowWillClose:", func(_ objc.Object) {
+	windowDelegate.SetWindowWillClose(func(_ foundation.Notification) {
 		windowsOpen := nOpenWindows.Add(-1)
 		if windowsOpen > 0 {
 			return // nothing to do
@@ -367,31 +328,32 @@ func mainCore() error {
 			return
 		}
 
-		if !noteSent && cocoa.NSApp().IsRunning() { // last window has been closed but app is still running
+		if !noteSent && app.IsRunning() { // last window has been closed but app is still running
 			noteSent = true
 			sendDesktopNotification("Bison Wallet still running", "Bison Wallet is still resolving active DEX orders")
 		}
 	})
 
-	// Bind JS callback function handler.
-	bindJSFunctionHandler()
-
-	app := cocoa.NSApp()
-	// Set the "ActivationPolicy" to "NSApplicationActivationPolicyRegular" in
+	// Set the "ActivationPolicy" to "ApplicationActivationPolicyRegular" in
 	// order to run bisonw-desktop as a regular MacOS app (i.e as a non-cli
-	// application). See:
-	// https://developer.apple.com/documentation/appkit/nsapplication/1428621-setactivationpolicy?language=objc
-	app.SetActivationPolicy(cocoa.NSApplicationActivationPolicyRegular)
+	// application).
+	app.SetActivationPolicy(appkit.ApplicationActivationPolicyRegular)
 	// Set "ActivateIgnoringOtherApps" to "false" in order to block other
 	// attempt at opening bisonw-desktop from creating a new instance when
-	// bisonw-desktop is already running. See:
-	// https://developer.apple.com/documentation/appkit/nsapplication/1428468-activateignoringotherapps/.
-	// "ActivateIgnoringOtherApps" is deprecated but still allowed until macOS
-	// version 14. Ventura is macOS version 13.
+	// bisonw-desktop is already running. "ActivateIgnoringOtherApps" is
+	// deprecated but still allowed until macOS version 14. Ventura is macOS
+	// version 13.
 	app.ActivateIgnoringOtherApps(false)
+
+	delegate := newAppDelegate(logDir, func() {
+		log.Infof("Shutting down...")
+		cancel()
+		wg.Wait()             // no-op with clean setup and shutdown
+		shutdownCloser.Done() // execute shutdown functions
+	})
 	// Set bisonw-desktop delegate to manage bisonw-desktop behavior. See:
 	// https://developer.apple.com/documentation/appkit/nsapplication/1428705-delegate?language=objc
-	app.SetDelegate(cocoa.DefaultDelegate)
+	app.SetDelegate(&delegate)
 
 	wg.Add(1)
 	go func() {
@@ -399,7 +361,7 @@ func mainCore() error {
 		for {
 			select {
 			case <-appCtx.Done():
-				cocoa.NSApp().Terminate()
+				app.Terminate(nil)
 				return
 			}
 		}
@@ -417,143 +379,101 @@ func hasOpenWindows() bool {
 	return nOpenWindows.Load() > 0
 }
 
-// createNewWebView creates a new webview with the specified URL. The actual
-// window will be created when the webview is loaded (i.e the
-// "webView:didFinishNavigation:" method have been executed).
+// createNewWebView creates a new webview and window.
 func createNewWebView() {
 	if int(nOpenWindows.Load()) >= maxOpenWindows {
 		log.Debugf("Ignoring open new window request, max number of (%d) open windows exceeded", maxOpenWindows)
 		return
 	}
 
-	// Create a new webview and loads the appURL.
-	req := mdCore.NSURLRequest_Init(mdCore.URL(appURL.String()))
-	webView := webkit.WKWebView_Init(mdCore.Rect(0, 0, float64(width), float64(height)), webviewConfig)
-	webView.Object.Class().AddMethod(selIsNewWebview, func(_ objc.Object) objc.Object { return mdCore.True })
-	webView.LoadRequest(req)
-	webView.SetAllowsBackForwardNavigationGestures_(true)
-	webView.SetUIDelegate_(cocoa.DefaultDelegate)
-	webView.SetNavigationDelegate_(cocoa.DefaultDelegate)
+	webView := objc.Call[webkit.WebView](completionHandler, objc.Sel("newWebview"))
+	webView.SetFrameSize(foundation.Size{Width: width, Height: height})
+	webView.SetAllowsBackForwardNavigationGestures(true)
+	webView.SetUIDelegate(newUIDelegate())
+	webView.SetNavigationDelegate(newNavigationDelegate())
+	webView.Configuration().Preferences().SetJavaScriptCanOpenWindowsAutomatically(true)
+	webkit.AddScriptMessageHandler(webView, bwJsHandlerName, userContentControllerDidReceiveScriptMessageHandler)
+	webkit.LoadURL(webView, appURL.String())
+
+	// Create a new window.
+	win := appkit.NewWindowWithSize(width, height)
+	objc.Retain(&win)
+
+	win.SetTitle(appTitle)
+	win.SetMovable(true)
+	win.SetContentView(webView)
+	win.MakeKeyAndOrderFront(win)
+	win.SetDelegate(&windowDelegate)
+	win.SetMinSize(foundation.Size{Width: 600, Height: 600})
+	win.Center()
+
+	nOpenWindows.Add(1)
 }
 
-// cocoaDefaultDelegateClassWrapper wraps cocoa.DefaultDelegateClass.
-type cocoaDefaultDelegateClassWrapper struct {
-	objc.Class
-}
+// newAppDelegate creates a new appkit.ApplicationDelegate and sets required
+// methods. Other methods can be added to the returned
+// appkit.ApplicationDelegate.
+func newAppDelegate(logDir string, shutdownCallback func()) appkit.ApplicationDelegate {
+	ad := appkit.ApplicationDelegate{}
 
-// initCocoaDefaultDelegateClassWrapper creates a new
-// *cocoaDefaultDelegateClassWrapper and adds required Object-C methods. Other
-// methods can be added to the returned *cocoaDefaultDelegateClassWrapper.
-func initCocoaDefaultDelegateClassWrapper(logDir string) *cocoaDefaultDelegateClassWrapper {
-	ad := &cocoaDefaultDelegateClassWrapper{
-		Class: cocoa.DefaultDelegateClass,
-	}
+	ad.SetApplicationWillFinishLaunching(dw.handleApplicationWillFinishLaunching)
 
-	// Set the app's main and status bar menu when we receive
-	// NSApplicationWillFinishLaunchingNotification. See:
-	//  - https://github.com/go-gl/glfw/blob/master/v3.3/glfw/glfw/src/cocoa_init.m#L427-L443
-	//  - https://developer.apple.com/documentation/appkit/nsapplicationwillfinishlaunchingnotification?language=objc
-	ad.AddMethod("applicationWillFinishLaunching:", ad.handleApplicationWillFinishLaunching)
-	// MacOS will always send a notification named
-	// "NSApplicationDidFinishLaunchingNotification" when an application has
-	// finished launching. See:
-	// https://developer.apple.com/documentation/appkit/nsapplicationdidfinishlaunchingnotification?language=objc
-	ad.AddMethod("applicationDidFinishLaunching:", ad.handleApplicationDidFinishLaunching)
-	// MacOS will always execute this method when bisonw-desktop icon on the dock
-	// is clicked or a new process is about to start, so we hijack the action
-	// and create new windows if all windows have been closed. See:
-	// https://developer.apple.com/documentation/appkit/nsapplicationdelegate/1428638-applicationshouldhandlereopen?language=objc
-	ad.AddMethod("applicationShouldHandleReopen:hasVisibleWindows:", ad.handleApplicationShouldHandleReopenHasVisibleWindows)
-	// "applicationDockMenu:" method returns the app's dock menu. See:
-	// https://developer.apple.com/documentation/appkit/nsapplicationdelegate/1428564-applicationdockmenu?language=objc
-	ad.AddMethod("applicationDockMenu:", ad.handleApplicationDockMenu)
-	// WebView will execute this method when the page has loaded. We can then
-	// create a new window to avoid a temporary blank window. See:
-	// https://developer.apple.com/documentation/webkit/wknavigationdelegate/1455629-webview?language=objc
-	// NOTE: This method actually receives three argument but the docs said to
-	// expect two (webView and navigation).
-	ad.AddMethod("webView:didFinishNavigation:", ad.handleWebViewDidFinishNavigation)
-	// MacOS will execute this method when a file upload button is clicked. See:
-	// https://developer.apple.com/documentation/webkit/wkuidelegate/1641952-webview?language=objc
-	ad.AddMethod("webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:", ad.handleWebViewRunOpenPanelWithParametersInitiatedByFrameCompletionHandler)
-	// MacOS will execute this method for each navigation in webview to decide
-	// if to open the URL in webview or in the user's default browser. See:
-	// https://developer.apple.com/documentation/webkit/wknavigationdelegate/1455641-webview?language=objc
-	ad.AddMethod("webView:decidePolicyForNavigationAction:decisionHandler:", ad.handleWebViewDecidePolicyForNavigationActionDecisionHandler)
-	// MacOS will execute this method when bisonw-desktop is started with a
-	// self-signed certificate and a new webview is requested. See:
-	// https://developer.apple.com/documentation/webkit/wknavigationdelegate/1455638-webview?language=objc
-	// and https://developer.apple.com/forums/thread/15610.
-	ad.AddMethod("webView:didReceiveAuthenticationChallenge:completionHandler:", ad.handleWebViewDidReceiveAuthenticationChallengeCompletionHandler)
+	ad.SetApplicationDidFinishLaunching(dw.handleApplicationDidFinishLaunching)
 
-	// Add custom selectors to the app delegate since there are reused in
-	// different menus. App delegates methods should be added before NSApp is
-	// initialized.
-	ad.AddMethod(selOpenLogs, func(_ objc.Object) {
-		logDirURL, err := app.FilePathToURL(logDir)
-		if err != nil {
-			log.Errorf("error constructing log directory URL: %v", err)
-		} else {
-			openURL(logDirURL)
-		}
+	ad.SetApplicationShouldHandleReopenHasVisibleWindows(dw.handleApplicationShouldHandleReopenHasVisibleWindows)
+
+	ad.SetApplicationDockMenu(dw.handleApplicationDockMenu)
+
+	ad.SetApplicationShouldTerminateAfterLastWindowClosed(func(appkit.Application) bool {
+		return false
 	})
-	ad.AddMethod(selNewWindow, func(_ objc.Object) {
-		windows := cocoa.NSApp().OrderedWindows()
-		len := windows.Count()
-		if len < uint64(maxOpenWindows) {
-			createNewWebView()
-		} else {
-			// Show the last window if maxOpenWindows has been exceeded.
-			winObj := windows.ObjectAtIndex(len - 1)
-			win := cocoa.NSWindow_fromRef(winObj)
-			win.MakeMainWindow()
-		}
+
+	// MacOS will always execute this method when bisonw-desktop is about to exit
+	// so we should use this opportunity to cleanup.
+	ad.SetApplicationShouldTerminate(func(_ appkit.Application) appkit.ApplicationTerminateReply {
+		shutdownCallback()
+		return appkit.TerminateNow
 	})
 
 	return ad
 }
 
-func (ad *cocoaDefaultDelegateClassWrapper) handleApplicationWillFinishLaunching(_ objc.Object) {
-	// Create the status bar menu. We want users to notice bisonw desktop is
-	// still running (even with the dot below the dock icon).
-	obj := cocoa.NSStatusBar_System().StatusItemWithLength(cocoa.NSVariableStatusItemLength)
-	obj.Retain()
-	obj.Button().SetImage(cocoa.NSImage_InitWithData(mdCore.NSData_WithBytes(Icon, uint64(len(Icon)))))
-	obj.Button().Image().SetSize(mdCore.Size(18, 18))
-	obj.Button().SetToolTip("Self-custodial multi-wallet")
-
-	runningItem := cocoa.NSMenuItem_New()
-	runningItem.SetTitle("Bison Wallet is running")
-	runningItem.SetEnabled(false)
-
-	menu := cocoa.NSMenu_New()
-	menu.AddItem(runningItem)
-	quitMenuItem := cocoa.NSMenuItem_Init("Quit "+macOSAppTitle, objc.Sel("terminate:"), "q")
-	quitMenuItem.SetToolTip("Quit Bison Wallet")
-	menu.AddItem(quitMenuItem)
-	obj.SetMenu(menu)
-
-	setAppMainMenuBar()
-
-	// Hide the application until it is ready to be shown when we receive
-	// the "NSApplicationDidFinishLaunchingNotification" below. This also
-	// allows us to ensure the menu bar is redrawn.
-	cocoa.NSApp().TryToPerform_with_(objc.Sel("hide:"), nil)
+func newUIDelegate() *webkit.UIDelegate {
+	wd := &webkit.UIDelegate{}
+	// MacOS will execute this method when a file upload button is clicked. See:
+	wd.SetWebViewRunOpenPanelWithParametersInitiatedByFrameCompletionHandler(dw.handleWebViewRunOpenPanelWithParametersInitiatedByFrameCompletionHandler)
+	return wd
 }
 
-func (ad *cocoaDefaultDelegateClassWrapper) handleApplicationDidFinishLaunching(_, _ objc.Object) {
-	// Unhide the app on the main thread after it has finished launching we need
-	// to give this priority before creating the window to ensure the window is
-	// immediately visible when it's created. This also has the side effect of
-	// redrawing the menu bar which will be unresponsive until it is redrawn.
-	mdCore.Dispatch(func() {
-		cocoa.NSApp().TryToPerform_with_(objc.Sel("unhide:"), nil)
-	})
+func newNavigationDelegate() *webkit.NavigationDelegate {
+	navigationDelegate := &webkit.NavigationDelegate{}
 
+	// MacOS will execute this method when bisonw-desktop is started with a
+	// self-signed certificate and a new webview is requested.
+	navigationDelegate.SetWebViewDidReceiveAuthenticationChallengeCompletionHandler(dw.handleWebViewDidReceiveAuthenticationChallengeCompletionHandler)
+
+	// MacOS will execute this method for each navigation in webview to decide
+	// if to open the URL in webview or in the user's default browser.
+	navigationDelegate.SetWebViewDecidePolicyForNavigationActionDecisionHandler(dw.handleWebViewDecidePolicyForNavigationActionDecisionHandler)
+
+	return navigationDelegate
+}
+
+// delegateWrapper implements methods that a added to an
+// appkit.ApplicationDelegate.
+type delegateWrapper struct{}
+
+func (_ *delegateWrapper) handleApplicationWillFinishLaunching(_ foundation.Notification) {
+	app := appkit.Application_SharedApplication()
+	setSystemBar(app)
+	setAppMainMenuBar(app)
+}
+
+func (_ *delegateWrapper) handleApplicationDidFinishLaunching(_ foundation.Notification) {
 	createNewWebView()
 }
 
-func (ad *cocoaDefaultDelegateClassWrapper) handleApplicationShouldHandleReopenHasVisibleWindows(_ objc.Object) bool {
+func (_ *delegateWrapper) handleApplicationShouldHandleReopenHasVisibleWindows(_ appkit.Application, hasVisibleWindows bool) bool {
 	if !hasOpenWindows() {
 		// bisonw-desktop is already running but there are no windows open so
 		// we should create a new window.
@@ -567,174 +487,180 @@ func (ad *cocoaDefaultDelegateClassWrapper) handleApplicationShouldHandleReopenH
 	return true
 }
 
-func (ad *cocoaDefaultDelegateClassWrapper) handleApplicationDockMenu(_ objc.Object) objc.Object {
-	menu := cocoa.NSMenu_New()
-	newWindowMenuItem := cocoa.NSMenuItem_Init("New Window", objc.Sel(selNewWindow), "n")
-	logsMenuItem := cocoa.NSMenuItem_Init("Open Logs", objc.Sel(selOpenLogs), "l")
-	menu.AddItem(newWindowMenuItem)
-	menu.AddItem(logsMenuItem)
+func (_ *delegateWrapper) handleApplicationDockMenu(_ appkit.Application) appkit.Menu {
+	menu := appkit.NewMenu()
+	menu.AddItem(appkit.NewMenuItemWithAction("New Window", "n", menuItemActionNewWindow))
+	menu.AddItem(appkit.NewMenuItemWithAction("Open Logs", "l", menuItemActionOpenLogs))
 	return menu
 }
 
-func (ad *cocoaDefaultDelegateClassWrapper) handleWebViewRunOpenPanelWithParametersInitiatedByFrameCompletionHandler(_ objc.Object, webview objc.Object, param objc.Object, fram objc.Object, completionHandlerFn objc.Object) {
-	panel := objc.Get("NSOpenPanel").Send("openPanel")
-	openFiles := panel.Send("runModal").Bool()
-	if !openFiles {
-		completionHandler.Send("completionHandler:withURLs:", completionHandlerFn, nil)
+// handleWebViewRunOpenPanelWithParametersInitiatedByFrameCompletionHandler
+// handles file selection requests from the webview. This is used to open a file
+// selection dialog when the user clicks on a file upload button in the webview.
+func (_ *delegateWrapper) handleWebViewRunOpenPanelWithParametersInitiatedByFrameCompletionHandler(_ webkit.WebView, p webkit.OpenPanelParameters, _ webkit.FrameInfo, completionHandler func(URLs []foundation.URL)) {
+	panel := appkit.OpenPanel_OpenPanel()
+	panel.SetAllowsMultipleSelection(p.AllowsMultipleSelection())
+	panel.SetCanChooseDirectories(p.AllowsDirectories())
+	resp := panel.RunModal()
+	if resp == appkit.ModalResponseOK {
+		completionHandler(panel.URLs())
 		return
 	}
-	completionHandler.Send("completionHandler:withURLs:", completionHandlerFn, panel.Send("URLs"))
+	completionHandler([]foundation.URL{})
 }
 
-func (ad *cocoaDefaultDelegateClassWrapper) handleWebViewDidReceiveAuthenticationChallengeCompletionHandler(_ objc.Object, webview objc.Object, challenge objc.Object, challengeCompletionHandler objc.Object) {
-	completionHandler.Send("authenticationCompletionHandler:withChallenge:", challengeCompletionHandler, challenge)
+func (_ *delegateWrapper) handleWebViewDidReceiveAuthenticationChallengeCompletionHandler(_ webkit.WebView, challenge foundation.URLAuthenticationChallenge, challengeCompletionHandler func(disposition foundation.URLSessionAuthChallengeDisposition, credential foundation.URLCredential)) {
+	challengeCompletionHandler(foundation.URLSessionAuthChallengeUseCredential, challenge.ProposedCredential())
 }
 
-func (ad *cocoaDefaultDelegateClassWrapper) handleWebViewDidFinishNavigation(_ objc.Object /* delegate */, webView objc.Object, _ objc.Object /* navigation */) {
-	// Return early if we already created a window for this webview.
-	if !mdCore.True.Equals(webView.Send(selIsNewWebview)) {
-		return // Nothing to do. This is just a normal window refresh.
+func (_ *delegateWrapper) handleWebViewDecidePolicyForNavigationActionDecisionHandler(webView webkit.WebView, navigationAction webkit.NavigationAction, decisionHandler func(arg0 webkit.NavigationActionPolicy)) {
+	decisionPolicy := webkit.NavigationActionPolicyAllow
+	reqURL := navigationAction.Request().URL()
+	host, _, _ := strings.Cut(reqURL.Host(), ":")
+	isLogExport := reqURL.Path() == "/api/exportapplog"
+	if host != appHost || isLogExport {
+		decisionPolicy = webkit.NavigationActionPolicyCancel
+		if isLogExport {
+			openLogs()
+		} else {
+			openURL(reqURL.AbsoluteString())
+		}
 	}
-
-	// Overwrite the webview "selIsNewWebview" method to return false. This will
-	// prevent this new webview from opening new windows later.
-	webView.Class().AddMethod(selIsNewWebview, func(_ objc.Object) objc.Object { return mdCore.False })
-	nOpenWindows.Add(1) // increment the number of open windows
-
-	// Create a new window and set the webview as its content view.
-	win := cocoa.NSWindow_Init(mdCore.NSMakeRect(0, 0, float64(width), float64(height)), cocoa.NSClosableWindowMask|cocoa.NSTitledWindowMask|cocoa.NSResizableWindowMask|cocoa.NSFullSizeContentViewWindowMask|cocoa.NSMiniaturizableWindowMask, cocoa.NSBackingStoreBuffered, false)
-	win.SetTitle(appTitle)
-	win.Center()
-	win.SetMovable_(true)
-	win.SetContentView(webkit.WKWebView_fromRef(webView))
-	win.SetMinSize_(mdCore.NSSize{Width: 600, Height: 600})
-	win.MakeKeyAndOrderFront(nil)
-	win.SetDelegate_(cocoa.DefaultDelegate)
+	decisionHandler(decisionPolicy)
 }
 
-func (ad *cocoaDefaultDelegateClassWrapper) handleWebViewDecidePolicyForNavigationActionDecisionHandler(delegate objc.Object, webview objc.Object, navigation objc.Object, decisionHandler objc.Object) {
-	reqURL := mdCore.NSURLRequest_fromRef(navigation.Send("request")).URL()
-	destinationHost := reqURL.Host().String()
-	var decisionPolicy int
-	if appURL.Hostname() != destinationHost {
-		decisionPolicy = NavigationActionPolicyCancel
-		openURL(reqURL.String())
+func menuItemActionNewWindow(_ objc.Object) {
+	windows := appkit.Application_SharedApplication().OrderedWindows()
+	len := len(windows)
+	if len < maxOpenWindows {
+		createNewWebView()
+		return
 	}
-	completionHandler.Send("decisionHandler:withPolicy:", decisionHandler, decisionPolicy)
+	// Show the last window if maxOpenWindows has been exceeded.
+	windows[len-1].MakeMainWindow()
+}
+
+func menuItemActionOpenLogs(_ objc.Object) {
+	openLogs()
+}
+
+func openLogs() {
+	logDirURL, err := bwapp.FilePathToURL(logDir)
+	if err != nil {
+		log.Errorf("error constructing log directory URL: %v", err)
+		return
+
+	}
+	openURL(logDirURL)
+}
+
+// setSystemBar creates and sets the system bar menu items for the app.
+func setSystemBar(app appkit.Application) {
+	runningMenuItem := appkit.NewMenuItem()
+	runningMenuItem.SetTitle("Bison Wallet is running")
+	runningMenuItem.SetEnabled(false)
+
+	hideMenuItem := appkit.NewMenuItemWithAction("Hide", "h", func(_ objc.Object) { app.Hide(nil) })
+	hideMenuItem.SetToolTip("Hide Bison Wallet")
+
+	quitMenuItem := appkit.NewMenuItemWithAction("Quit "+macOSAppTitle, "q", func(_ objc.Object) { app.Terminate(nil) })
+	quitMenuItem.SetToolTip("Quit Bison Wallet")
+
+	// Create the status bar menu item.
+	menu := appkit.NewMenuWithTitle("main")
+	menu.AddItem(runningMenuItem)
+	menu.AddItem(hideMenuItem)
+	menu.AddItem(quitMenuItem)
+
+	// Create the status bar icon.
+	icon := appkit.NewImageWithData(Icon)
+	icon.SetSize(foundation.Size{Width: 18, Height: 18})
+
+	// Create the status bar menu. We want users to notice bisonw desktop is
+	// still running (even with the dot below the dock icon).
+	item := appkit.StatusBar_SystemStatusBar().StatusItemWithLength(appkit.VariableStatusItemLength)
+	objc.Retain(&item)
+
+	item.Button().SetImage(icon)
+	item.Button().SetToolTip("Self-custodial multi-wallet")
+	item.SetMenu(menu)
 }
 
 // setAppMainMenuBar creates and sets the main menu items for the app menu.
-func setAppMainMenuBar() {
+func setAppMainMenuBar(app appkit.Application) {
 	// Create the App menu.
-	appMenu := cocoa.NSMenu_Init(macOSAppTitle)
-
-	// Create the menu items.
-	hideMenuItem := cocoa.NSMenuItem_Init("Hide "+macOSAppTitle, objc.Sel("hide:"), "h")
-	hideOthersMenuItem := cocoa.NSMenuItem_Init("Hide Others", objc.Sel("hideOtherApplications:"), "")
-	showAllMenuItem := cocoa.NSMenuItem_Init("Show All", objc.Sel("unhideAllApplications:"), "")
-	quitMenuItem := cocoa.NSMenuItem_Init("Quit "+macOSAppTitle, objc.Sel("terminate:"), "q")
-	quitMenuItem.SetToolTip("Quit Bison Wallet")
-
-	// Add the menu items.
-	appMenu.AddItem(hideMenuItem)
-	appMenu.AddItem(hideOthersMenuItem)
-	appMenu.AddItem(showAllMenuItem)
-	appMenu.AddItem(cocoa.NSMenuItem_Separator())
+	appMenu := appkit.NewMenuWithTitle(macOSAppTitle)
+	appMenu.AddItem(appkit.NewMenuItemWithAction("Hide "+macOSAppTitle, "h", func(_ objc.Object) { app.Hide(nil) }))
+	appMenu.AddItem(appkit.NewMenuItemWithAction("Hide Others", "", func(_ objc.Object) { app.HideOtherApplications(nil) }))
+	appMenu.AddItem(appkit.NewMenuItemWithAction("Show All", "", func(_ objc.Object) { app.UnhideAllApplications(nil) }))
+	appMenu.AddItem(appkit.MenuItem_SeparatorItem())
+	quitMenuItem := appkit.NewMenuItemWithAction("Quit "+macOSAppTitle, "q", func(_ objc.Object) { app.Terminate(nil) })
+	quitMenuItem.SetToolTip("Quit " + macOSAppTitle)
 	appMenu.AddItem(quitMenuItem)
 
 	// Create the "Window" menu.
-	windowMenu := cocoa.NSMenu_Init("Window")
+	windowMenu := appkit.NewMenuWithTitle("Window")
+	windowMenu.AddItem(appkit.NewMenuItemWithAction("New Window", "n", menuItemActionNewWindow))
+	windowMenu.AddItem(appkit.MenuItem_SeparatorItem())
+	windowMenu.AddItem(appkit.NewMenuItemWithSelector("Minimize", "m", objc.Sel("performMiniaturize:")))
+	windowMenu.AddItem(appkit.NewMenuItemWithSelector("Zoom", "z", objc.Sel("performZoom:")))
+	windowMenu.AddItem(appkit.NewMenuItemWithSelector("Bring All to Front", "", objc.Sel("arrangeInFront:")))
+	windowMenu.AddItem(appkit.MenuItem_SeparatorItem())
+	windowMenu.AddItem(appkit.NewMenuItemWithSelector("Enter Full Screen", "f", objc.Sel("toggleFullScreen:")))
+	windowMenu.Delegate()
 
-	// Create the "Window" menu items.
-	newWindowMenuItem := cocoa.NSMenuItem_Init("New Window", objc.Sel(selNewWindow), "n")
-	minimizeMenuItem := cocoa.NSMenuItem_Init("Minimize", objc.Sel("performMiniaturize:"), "m")
-	zoomMenuItem := cocoa.NSMenuItem_Init("Zoom", objc.Sel("performZoom:"), "z")
-	frontMenuItem := cocoa.NSMenuItem_Init("Bring All to Front", objc.Sel("arrangeInFront:"), "")
-	fullScreenMenuItem := cocoa.NSMenuItem_Init("Enter Full Screen", objc.Sel("toggleFullScreen:"), "f")
-
-	// Add the "Window" menu items.
-	windowMenu.AddItem(newWindowMenuItem)
-	windowMenu.AddItem(cocoa.NSMenuItem_Separator())
-	windowMenu.AddItem(minimizeMenuItem)
-	windowMenu.AddItem(zoomMenuItem)
-	windowMenu.AddItem(frontMenuItem)
-	windowMenu.AddItem(cocoa.NSMenuItem_Separator())
-	windowMenu.AddItem(fullScreenMenuItem)
+	// Create the "Edit" menu.
+	editMenu := appkit.NewMenuWithTitle("Edit")
+	editMenu.AddItem(appkit.NewMenuItemWithSelector("Select All", "a", objc.Sel("selectAll:")))
+	editMenu.AddItem(appkit.MenuItem_SeparatorItem())
+	editMenu.AddItem(appkit.NewMenuItemWithSelector("Copy", "c", objc.Sel("copy:")))
+	editMenu.AddItem(appkit.NewMenuItemWithSelector("Paste", "v", objc.Sel("paste:")))
+	editMenu.AddItem(appkit.NewMenuItemWithSelector("Cut", "x", objc.Sel("cut:")))
+	editMenu.AddItem(appkit.NewMenuItemWithSelector("Undo", "z", objc.Sel("undo:")))
+	editMenu.AddItem(appkit.NewMenuItemWithSelector("Redo", "Z", objc.Sel("redo:")))
 
 	// Create the "Others" menu.
-	othersMenu := cocoa.NSMenu_Init("Others")
-
-	// Create the "Others" menu items.
-	logsMenuItem := cocoa.NSMenuItem_Init("Open Logs", objc.Sel(selOpenLogs), "l")
-
-	// Add the "Others" menu item.
-	othersMenu.AddItem(logsMenuItem)
+	othersMenu := appkit.NewMenuWithTitle("Others")
+	othersMenu.AddItem(appkit.NewMenuItemWithAction("Open Logs", "l", menuItemActionOpenLogs))
 
 	// Create the main menu bar.
-	menuBar := cocoa.NSMenu_New()
-	app := cocoa.NSApp()
-	for _, menu := range []cocoa.NSMenu{appMenu, windowMenu, othersMenu} {
-		// Create a menu item for the menuBar and set the menu as the
-		// submenu. See:
-		// https://developer.apple.com/documentation/appkit/nsmenuitem/1514845-submenu?language=objc
-		mainBarItem := cocoa.NSMenuItem_New()
-		mainBarItem.SetTitle(menu.Title())
-		mainBarItem.SetSubmenu(menu)
-		menuBar.AddItem(mainBarItem)
+	menu := appkit.NewMenuWithTitle("main")
+	for _, m := range []appkit.Menu{appMenu, editMenu, windowMenu, othersMenu} {
+		menuItem := appkit.NewMenuItemWithSelector(m.Title(), "", objc.Selector{})
+		menuItem.SetSubmenu(m)
+		menu.AddItem(menuItem)
 
 		if menu.Title() == "Window" {
-			// Set NSApp's WindowsMenu to the Window menu. This will allow
-			// windows to be grouped together in the dock icon and in the
-			// Window menu. Also, MacOS will automatically add other default
-			// Window menu items. See:
-			// https://developer.apple.com/documentation/appkit/nsapplication/1428547-windowsmenu?language=objc
-			app.Set("WindowsMenu:", menu)
+			// Set app's WindowsMenu to the Window menu. This will allow windows
+			// to be grouped together in the dock icon and in the Window menu.
+			// Also, MacOS will automatically add other default Window menu
+			// items. See:
+			// https://developer.apple.com/documentation/appkit/nsapplication/1428547-windowsmenu?language=objc.
+			// TODO: Since the new update, this is not working as expected. The
+			// windows are not beingg grouped.
+			app.SetWindowsMenu(m)
 		}
 	}
 
-	app.SetMainMenu(menuBar)
+	app.SetMainMenu(menu)
 	return
 }
 
-func windowWidthAndHeight() (width, height int) {
-	frame := cocoa.NSScreen_Main().Frame()
-	return limitedWindowWidthAndHeight(int(math.Round(frame.Size.Width)), int(math.Round(frame.Size.Height)))
+func windowWidthAndHeight() (width, height float64) {
+	frame := appkit.Screen_MainScreen().Frame()
+	return limitedWindowWidthAndHeight(math.Round(frame.Size.Width), math.Round(frame.Size.Height))
 }
 
-// bindJSFunctionHandler exports a function handler callable in the frontend.
-// The exported function will appear under the given name as a global JavaScript
-// function window.webkit.messageHandlers.bwHandler.postMessage([fnName,
-// args...]).
-// Expected arguments is an array of:
-// 1. jsFunctionName as first argument
-// 2. jsFunction arguments
-func bindJSFunctionHandler() {
-	const fnName = "bwHandler"
-
-	// Create and register a new objc class for the function handler.
-	fnClass := objc.NewClass(fnName, "NSObject")
-	objc.RegisterClass(fnClass)
-
-	// JS function handler must implement the WKScriptMessageHandler protocol.
-	// See:
-	// https://developer.apple.com/documentation/webkit/wkscriptmessagehandler?language=objc
-	fnClass.AddMethod("userContentController:didReceiveScriptMessage:", handleJSFunctionsCallback)
-
-	// The name of this function in the browser window is
-	// window.webkit.messageHandlers.<name>.postMessage(<messageBody>), where
-	// <name> corresponds to the value of this parameter. See:
-	// https://developer.apple.com/documentation/webkit/wkusercontentcontroller/1537172-addscriptmessagehandler?language=objc
-	webviewConfig.Get("userContentController").Send("addScriptMessageHandler:name:", objc.Get(fnName).Alloc().Init(), mdCore.String(fnName))
-}
-
-// handleJSFunctionsCallback handles function calls from a javascript
-// environment.
-func handleJSFunctionsCallback(f_ objc.Object /* functionHandler */, ct objc.Object /* WKUserContentController */, msg objc.Object, wv objc.Object /* webview */) {
+// userContentControllerDidReceiveScriptMessageHandler is called when a script message
+// is received from the webview. Expected arguments is an array of: 1.
+// jsFunctionName as first argument, 2. jsFunction arguments (e.g function
+// window.webkit.messageHandlers.bwHandler.postMessage([fnName, args...])).
+// Satifies the webkit.PScriptMessageHandler interface.
+func userContentControllerDidReceiveScriptMessageHandler(msgBody objc.Object) {
 	// Arguments must be provided as an array(NSSingleObjectArrayI or NSArrayI).
-	msgBody := msg.Get("body")
-	msgClass := msgBody.Class().String()
+	msgClass := msgBody.Class().Name()
 	if !strings.Contains(msgClass, "Array") {
-		log.Errorf("Received unexpected argument type %s (content: %s)", msgClass, msgBody.String())
+		log.Errorf("Received unexpected argument type %s (content: %s)", msgClass, msgBody.Description())
 		return // do nothing
 	}
 
@@ -744,7 +670,7 @@ func handleJSFunctionsCallback(f_ objc.Object /* functionHandler */, ct objc.Obj
 	// = "myName"; }.
 	args := parseJSCallbackArgsString(msgBody)
 	if len(args) == 0 {
-		log.Errorf("Received unexpected argument type %s (content: %s)", msgClass, msgBody.String())
+		log.Errorf("Received unexpected argument type %s (content: %s)", msgClass, msgBody.Description())
 		return // do nothing
 	}
 
@@ -758,7 +684,7 @@ func handleJSFunctionsCallback(f_ objc.Object /* functionHandler */, ct objc.Obj
 	case fnName == "sendOSNotification" && nArgs > minArg:
 		sendDesktopNotificationJSCallback(args[1:])
 	default:
-		log.Errorf("Received unexpected JS function type %s (message content: %s)", fnName, msgBody.String())
+		log.Errorf("Received unexpected JS function type %s (message content: %s)", fnName, msgBody.Description())
 	}
 }
 
@@ -778,12 +704,12 @@ func sendDesktopNotificationJSCallback(msg []string) {
 // the "path" is opened with the appropriate app (e.g a valid HTTP URL will be
 // opened in the user's default browser)
 func openURL(path string) {
-	// See: https://developer.apple.com/documentation/appkit/nsworkspace?language=objc
-	cocoa.NSWorkspace_sharedWorkspace().Send("openURL:", mdCore.NSURL_Init(path))
+	url := foundation.NewURLWithString(path)
+	appkit.Workspace_SharedWorkspace().OpenURL(url)
 }
 
 func parseJSCallbackArgsString(msg objc.Object) []string {
-	args := mdCore.NSArray_fromRef(msg)
+	args := foundation.ArrayFrom(msg.Ptr())
 	count := args.Count()
 	if count == 0 {
 		return nil
@@ -791,11 +717,11 @@ func parseJSCallbackArgsString(msg objc.Object) []string {
 
 	var argsAsStr []string
 	for i := 0; i < int(count); i++ {
-		ob := args.ObjectAtIndex(uint64(i))
-		if ob.Class().String() == "NSNull" /* this is the string representation of the null type in objc. */ {
+		ob := args.ObjectAtIndex(uint(i))
+		if ob.IsNil() {
 			continue // ignore
 		}
-		argsAsStr = append(argsAsStr, ob.String())
+		argsAsStr = append(argsAsStr, ob.Description())
 	}
 	return argsAsStr
 }
@@ -848,7 +774,5 @@ func (sc *shutdownCloser) Done() {
 }
 
 func sendDesktopNotification(title, msg string) {
-	nsTitle := mdCore.NSString_FromString(title)
-	nsMessage := mdCore.NSString_FromString(msg)
-	completionHandler.Send("deliverNotificationWithTitle:message:icon:", nsTitle, nsMessage, dexcAppIcon)
+	objc.Call[objc.Void](completionHandler, objc.Sel("deliverNotificationWithTitle:message:icon:"), title, msg, bisonwAppIcon)
 }

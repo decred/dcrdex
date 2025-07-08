@@ -597,6 +597,36 @@ func (s *WebServer) apiNewDepositAddress(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+// apiAddressUsed checks whether an address has been used.
+func (s *WebServer) apiAddressUsed(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		AssetID *uint32 `json:"assetID"`
+		Addr    string  `json:"addr"`
+	}{}
+	if !readPost(w, r, form) {
+		return
+	}
+	if form.AssetID == nil {
+		s.writeAPIError(w, errors.New("missing asset ID"))
+		return
+	}
+	assetID := *form.AssetID
+
+	used, err := s.core.AddressUsed(assetID, form.Addr)
+	if err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+
+	writeJSON(w, &struct {
+		OK   bool `json:"ok"`
+		Used bool `json:"used"`
+	}{
+		OK:   true,
+		Used: used,
+	})
+}
+
 // apiConnectWallet is the handler for the '/connectwallet' API request.
 // Connects to a specified wallet, but does not unlock it.
 func (s *WebServer) apiConnectWallet(w http.ResponseWriter, r *http.Request) {
@@ -988,6 +1018,16 @@ func (s *WebServer) apiSetLocale(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, simpleAck())
+}
+
+// apiBuildInfo is the handler for the '/buildinfo' API request.
+func (s *WebServer) apiBuildInfo(w http.ResponseWriter, r *http.Request) {
+	resp := buildInfoResponse{
+		OK:       true,
+		Version:  s.appVersion,
+		Revision: commitHash,
+	}
+	writeJSON(w, resp)
 }
 
 // apiLogin handles the 'login' API request.
@@ -1908,7 +1948,7 @@ func (s *WebServer) apiStartMarketMakingBot(w http.ResponseWriter, r *http.Reque
 		s.writeAPIError(w, errors.New("config missing"))
 		return
 	}
-	if err = s.mm.StartBot(form.Config, nil, appPW); err != nil {
+	if err = s.mm.StartBot(form.Config, nil, appPW, true); err != nil {
 		s.writeAPIError(w, fmt.Errorf("error starting market making: %v", err))
 		return
 	}

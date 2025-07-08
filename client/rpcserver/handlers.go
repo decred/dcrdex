@@ -226,8 +226,8 @@ func handleNewWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 
 	// Apply default config options if they exist.
 	for _, opt := range walletDef.ConfigOpts {
-		if _, has := form.config[opt.Key]; !has && opt.DefaultValue != nil {
-			form.config[opt.Key] = fmt.Sprintf("%v", opt.DefaultValue)
+		if _, has := form.config[opt.Key]; !has {
+			form.config[opt.Key] = opt.DefaultValue
 		}
 	}
 
@@ -884,7 +884,7 @@ func handleStartBot(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		return usage(startBotRoute, err)
 	}
 
-	err = s.mm.StartBot(&mm.StartConfig{MarketWithHost: *form.mkt}, &form.cfgFilePath, form.appPass)
+	err = s.mm.StartBot(&mm.StartConfig{MarketWithHost: *form.mkt}, &form.cfgFilePath, form.appPass, true)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCStartMarketMakingError, "unable to start market making: %v", err)
 		return createResponse(startBotRoute, nil, resErr)

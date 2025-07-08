@@ -198,6 +198,7 @@ func (cfg *Config) Web(c *core.Core, mm *mm.MarketMaker, log dex.Logger, utc boo
 		KeyFile:       keyFile,
 		NoEmbed:       cfg.NoEmbedSite,
 		HttpProf:      cfg.HTTPProfile,
+		AppVersion:    userAppVersion(Version),
 		Language:      cfg.Language,
 	}
 }
@@ -352,7 +353,14 @@ func ResolveConfig(appData string, cfg *Config) error {
 	if cfg.MMConfig.EventLogDBPath == "" {
 		cfg.MMConfig.EventLogDBPath = defaultMMEventLogDBPath
 	}
+
 	return nil
+}
+
+// userAppVersion returns a simple user-facing version: maj.min.patch.
+func userAppVersion(fullVersion string) string {
+	parts := strings.Split(fullVersion, "-")
+	return parts[0]
 }
 
 // setNet sets the filepath for the network directory and some network specific

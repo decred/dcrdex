@@ -34,9 +34,9 @@ import (
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/dexnet"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
-	walletjson "decred.org/dcrwallet/v4/rpc/jsonrpc/types"
-	"decred.org/dcrwallet/v4/wallet"
-	_ "decred.org/dcrwallet/v4/wallet/drivers/bdb"
+	walletjson "decred.org/dcrwallet/v5/rpc/jsonrpc/types"
+	"decred.org/dcrwallet/v5/wallet"
+	_ "decred.org/dcrwallet/v5/wallet/drivers/bdb"
 	"github.com/decred/dcrd/blockchain/stake/v5"
 	blockchain "github.com/decred/dcrd/blockchain/standalone/v2"
 	"github.com/decred/dcrd/chaincfg/chainhash"
@@ -126,13 +126,13 @@ var (
 	// be tried over and over with wallet in SPV mode.
 	maxRedeemMempoolAge = time.Hour * 2
 
-	walletOpts = []*asset.ConfigOption{
+	WalletOpts = []*asset.ConfigOption{
 		{
 			Key:         "fallbackfee",
 			DisplayName: "Fallback fee rate",
 			Description: "The fee rate to use for fee payment and withdrawals when " +
 				"estimatesmartfee is not available. Units: DCR/kB",
-			DefaultValue: defaultFee * 1000 / 1e8,
+			DefaultValue: strconv.FormatFloat(defaultFee*1000/1e8, 'f', -1, 64),
 		},
 		{
 			Key:         "feeratelimit",
@@ -141,7 +141,7 @@ var (
 				"pay on swap transactions. If feeratelimit is lower than a market's " +
 				"maxfeerate, you will not be able to trade on that market with this " +
 				"wallet.  Units: DCR/kB",
-			DefaultValue: defaultFeeRateLimit * 1000 / 1e8,
+			DefaultValue: strconv.FormatFloat(defaultFeeRateLimit*1000/1e8, 'f', -1, 64),
 		},
 		{
 			Key:         "redeemconftarget",
@@ -149,13 +149,13 @@ var (
 			Description: "The target number of blocks for the redeem transaction " +
 				"to get a confirmation. Used to set the transaction's fee rate." +
 				" (default: 1 block)",
-			DefaultValue: defaultRedeemConfTarget,
+			DefaultValue: strconv.FormatUint(defaultRedeemConfTarget, 10),
 		},
 		{
 			Key:          "gaplimit",
 			DisplayName:  "Address Gap Limit",
 			Description:  "The gap limit for used address discovery",
-			DefaultValue: wallet.DefaultGapLimit,
+			DefaultValue: strconv.FormatUint(uint64(wallet.DefaultGapLimit), 10),
 		},
 		{
 			Key:         "txsplit",
@@ -167,7 +167,7 @@ var (
 				"the order is canceled. This an extra transaction for which network " +
 				"mining fees are paid.",
 			IsBoolean:    true,
-			DefaultValue: true, // cheap fees, helpful for bond reserves, and adjustable at order-time
+			DefaultValue: "true", // cheap fees, helpful for bond reserves, and adjustable at order-time
 		},
 		{
 			Key:         "apifeefallback",
@@ -176,7 +176,7 @@ var (
 				"This is useful as a fallback for SPV wallets and RPC wallets " +
 				"that have recently been started.",
 			IsBoolean:    true,
-			DefaultValue: true,
+			DefaultValue: "true",
 		},
 	}
 
@@ -234,7 +234,7 @@ var (
 				Description: "Allow split funding transactions that pre-size outputs to " +
 					"prevent excessive overlock.",
 				IsBoolean:    true,
-				DefaultValue: true,
+				DefaultValue: "true",
 			},
 		},
 		{
@@ -243,7 +243,7 @@ var (
 				DisplayName: "Multi split buffer",
 				Description: "Add an integer percent buffer to split output amounts to " +
 					"facilitate output reuse. This is only required for quote assets.",
-				DefaultValue: 5,
+				DefaultValue: "5",
 				DependsOn:    multiSplitKey,
 			},
 			QuoteAssetOnly: true,
@@ -276,7 +276,7 @@ var (
 				Type:             walletTypeSPV,
 				Tab:              "Native",
 				Description:      "Use the built-in SPV wallet",
-				ConfigOpts:       walletOpts,
+				ConfigOpts:       WalletOpts,
 				Seeded:           true,
 				MultiFundingOpts: multiFundingOpts,
 			},
@@ -285,7 +285,7 @@ var (
 				Tab:               "External",
 				Description:       "Connect to dcrwallet",
 				DefaultConfigPath: defaultConfigPath,
-				ConfigOpts:        append(rpcOpts, walletOpts...),
+				ConfigOpts:        append(rpcOpts, WalletOpts...),
 				MultiFundingOpts:  multiFundingOpts,
 			},
 		},
@@ -707,6 +707,7 @@ var _ asset.Bonder = (*ExchangeWallet)(nil)
 var _ asset.Authenticator = (*ExchangeWallet)(nil)
 var _ asset.TicketBuyer = (*ExchangeWallet)(nil)
 var _ asset.WalletHistorian = (*ExchangeWallet)(nil)
+var _ asset.NewAddresser = (*ExchangeWallet)(nil)
 
 type block struct {
 	height int64
@@ -1268,15 +1269,16 @@ func (dcr *ExchangeWallet) SetBondReserves(reserves uint64) {
 func (dcr *ExchangeWallet) FeeRate() uint64 {
 	const confTarget = 2 // 1 historically gives crazy rates
 	rate, err := dcr.feeRate(confTarget)
-	if err != nil && dcr.network != dex.Simnet { // log and return 0
-		dcr.log.Errorf("feeRate error: %v", err)
+	if err != nil {
+		dcr.log.Debugf("feeRate error: %v", err)
+		return 0
 	}
 	return rate
 }
 
 // feeRate returns the current optimal fee rate in atoms / byte.
 func (dcr *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
-	if dcr.ctx == nil {
+	if !dcr.connected.Load() {
 		return 0, errors.New("not connected")
 	}
 	if feeEstimator, is := dcr.wallet.(FeeRateEstimator); is && !dcr.wallet.SpvMode() {
@@ -1387,7 +1389,7 @@ func fetchFeeFromOracle(ctx context.Context, net dex.Network, nb uint64) (float6
 func (dcr *ExchangeWallet) targetFeeRateWithFallback(confTarget, feeSuggestion uint64) uint64 {
 	feeRate, err := dcr.feeRate(confTarget)
 	if err != nil {
-		dcr.log.Errorf("Failed to get fee rate: %v", err)
+		dcr.log.Debugf("Failed to get fee rate: %v", err)
 	} else if feeRate != 0 {
 		dcr.log.Tracef("Obtained estimate for %d-conf fee rate, %d", confTarget, feeRate)
 		return feeRate
@@ -1652,7 +1654,7 @@ func (dcr *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 				Key:          swapFeeBumpKey,
 				DisplayName:  "Faster Swaps",
 				Description:  desc,
-				DefaultValue: 1.0,
+				DefaultValue: "1.0",
 			},
 			XYRange: &asset.XYRange{
 				Start: asset.XYRangePoint{
@@ -1715,7 +1717,7 @@ func (dcr *ExchangeWallet) splitOption(req *asset.PreSwapForm, utxos []*composit
 			Key:           splitKey,
 			DisplayName:   "Pre-size Funds",
 			IsBoolean:     true,
-			DefaultValue:  dcr.config().useSplitTx, // not nil interface
+			DefaultValue:  strconv.FormatBool(dcr.config().useSplitTx), // not nil interface
 			ShowByDefault: true,
 		},
 		Boolean: &asset.BooleanConfig{},
@@ -1739,7 +1741,7 @@ func (dcr *ExchangeWallet) splitOption(req *asset.PreSwapForm, utxos []*composit
 	if !splitUsed || splitLocked >= noSplitLocked { // locked check should be redundant
 		opt.Boolean.Reason = "avoids no DCR overlock for this order (ignored)"
 		opt.Description = "A split transaction for this order avoids no DCR overlock, but adds additional fees."
-		opt.DefaultValue = false
+		opt.DefaultValue = "false"
 		return opt // not enabled by default, but explain why
 	}
 
@@ -1796,7 +1798,7 @@ func (dcr *ExchangeWallet) preRedeem(numLots, feeSuggestion uint64, options map[
 			Key:          redeemFeeBumpFee,
 			DisplayName:  "Faster Redemption",
 			Description:  "Bump the redemption transaction fees up to 2x for faster confirmations on your redemption transaction.",
-			DefaultValue: 1.0,
+			DefaultValue: "1.0",
 		},
 		XYRange: &asset.XYRange{
 			Start: asset.XYRangePoint{
@@ -4125,6 +4127,11 @@ func (dcr *ExchangeWallet) RedemptionAddress() (string, error) {
 // NewAddresser interface.
 func (dcr *ExchangeWallet) NewAddress() (string, error) {
 	return dcr.DepositAddress()
+}
+
+// AddressUsed checks if a wallet address has been used.
+func (dcr *ExchangeWallet) AddressUsed(addrStr string) (bool, error) {
+	return dcr.wallet.AddressUsed(dcr.ctx, addrStr)
 }
 
 // Unlock unlocks the exchange wallet.

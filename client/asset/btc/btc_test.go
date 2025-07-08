@@ -33,6 +33,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcwallet/wallet"
 )
 
 var (
@@ -77,34 +78,6 @@ func randBytes(l int) []byte {
 	b := make([]byte, l)
 	rand.Read(b)
 	return b
-}
-
-func signFuncRaw(t *testing.T, params []json.RawMessage, sizeTweak int, sigComplete, segwit bool) (json.RawMessage, error) {
-	signTxRes := SignTxResult{
-		Complete: sigComplete,
-	}
-	var msgHex string
-	err := json.Unmarshal(params[0], &msgHex)
-	if err != nil {
-		t.Fatalf("error unmarshaling transaction hex: %v", err)
-	}
-	msgBytes, _ := hex.DecodeString(msgHex)
-	txReader := bytes.NewReader(msgBytes)
-	msgTx := wire.NewMsgTx(wire.TxVersion)
-	err = msgTx.Deserialize(txReader)
-	if err != nil {
-		t.Fatalf("error deserializing contract: %v", err)
-	}
-
-	signFunc(msgTx, sizeTweak, segwit)
-
-	buf := new(bytes.Buffer)
-	err = msgTx.Serialize(buf)
-	if err != nil {
-		t.Fatalf("error serializing contract: %v", err)
-	}
-	signTxRes.Hex = buf.Bytes()
-	return mustMarshal(signTxRes), nil
 }
 
 func signFunc(tx *wire.MsgTx, sizeTweak int, segwit bool) {
@@ -184,7 +157,7 @@ type testData struct {
 	// spv
 	fetchInputInfoTx  *wire.MsgTx
 	getCFilterScripts map[chainhash.Hash][][]byte
-	checkpoints       map[OutPoint]*scanCheckpoint
+	checkpoints       map[OutPoint]*ScanCheckpoint
 	confs             uint32
 	confsSpent        bool
 	confsErr          error
@@ -211,10 +184,14 @@ func newTestData() *testData {
 		fetchInputInfoTx:  dummyTx(),
 		getCFilterScripts: make(map[chainhash.Hash][][]byte),
 		confsErr:          WalletTransactionNotFound,
-		checkpoints:       make(map[OutPoint]*scanCheckpoint),
+		checkpoints:       make(map[OutPoint]*ScanCheckpoint),
 		tipChanged:        make(chan asset.WalletNotification, 1),
 		getTransactionMap: make(map[string]*GetTransactionResult),
 	}
+}
+
+func (c *testData) GetTransactions(startHeight, endHeight int32, accountName string, cancel <-chan struct{}) (*wallet.GetTransactionsResult, error) {
+	return nil, fmt.Errorf("not implemented")
 }
 
 func (c *testData) getBlock(blockHash chainhash.Hash) *msgBlockWithHeight {
@@ -548,12 +525,6 @@ func (c *testData) addRawTx(blockHeight int64, tx *wire.MsgTx) (*chainhash.Hash,
 	return blockHash, block.msgBlock
 }
 
-func (c *testData) addDBBlockForTx(txHash, blockHash *chainhash.Hash) {
-	c.blockchainMtx.Lock()
-	defer c.blockchainMtx.Unlock()
-	c.dbBlockForTx[*txHash] = &hashEntry{hash: *blockHash}
-}
-
 func (c *testData) getBlockAtHeight(blockHeight int64) (*chainhash.Hash, *msgBlockWithHeight) {
 	c.blockchainMtx.RLock()
 	defer c.blockchainMtx.RUnlock()
@@ -719,7 +690,7 @@ func tNewWallet(segwit bool, walletType string) (*intermediaryWallet, *testData,
 		panic(err.Error())
 	}
 	// Initialize the best block.
-	bestHash, err := wallet.node.getBestBlockHash()
+	bestHash, err := wallet.node.GetBestBlockHash()
 	if err != nil {
 		shutdown()
 		os.RemoveAll(dataDir)
@@ -3747,7 +3718,6 @@ func testLockUnlock(t *testing.T, segwit bool, walletType string) {
 			t.Fatalf("no error for walletlock rpc error")
 		}
 	}
-
 }
 
 type tSenderType byte
@@ -5745,7 +5715,7 @@ type tReconfigurer struct {
 	err     error
 }
 
-func (r *tReconfigurer) reconfigure(walletCfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error) {
+func (r *tReconfigurer) Reconfigure(walletCfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error) {
 	return r.restart, r.err
 }
 

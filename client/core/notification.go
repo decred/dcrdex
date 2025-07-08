@@ -502,6 +502,8 @@ const (
 	TopicDEXConnected    Topic = "DEXConnected"
 	TopicDEXDisconnected Topic = "DEXDisconnected"
 	TopicDexConnectivity Topic = "DEXConnectivity"
+	TopicDEXDisabled     Topic = "DEXDisabled"
+	TopicDEXEnabled      Topic = "DEXEnabled"
 )
 
 func newConnEventNote(topic Topic, subject, host string, status comms.ConnectionStatus, details string, severity db.Severity) *ConnEventNote {
@@ -683,6 +685,21 @@ const (
 func newUpgradeNote(topic Topic, subject, details string, severity db.Severity) *UpgradeNote {
 	return &UpgradeNote{
 		Notification: db.NewNotification(NoteTypeUpgrade, topic, subject, details, severity),
+	}
+}
+
+// ServerConfigUpdateNote is sent when a server's configuration is updated.
+type ServerConfigUpdateNote struct {
+	db.Notification
+	Host string `json:"host"`
+}
+
+const TopicServerConfigUpdate Topic = "ServerConfigUpdate"
+
+func newServerConfigUpdateNote(host string) *ServerConfigUpdateNote {
+	return &ServerConfigUpdateNote{
+		Notification: db.NewNotification(NoteTypeServerNotify, TopicServerConfigUpdate, "", "", db.Data),
+		Host:         host,
 	}
 }
 

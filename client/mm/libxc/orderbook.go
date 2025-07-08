@@ -5,6 +5,7 @@ package libxc
 import (
 	"fmt"
 	"math"
+	"math/big"
 	"sync"
 
 	"github.com/huandu/skiplist"
@@ -106,6 +107,7 @@ func (ob *orderbook) update(bids []*obEntry, asks []*obEntry) {
 	}
 }
 
+// clear clears the orderbook.
 func (ob *orderbook) clear() {
 	ob.mtx.Lock()
 	defer ob.mtx.Unlock()
@@ -114,8 +116,8 @@ func (ob *orderbook) clear() {
 	ob.asks = *skiplist.New(asksComparable)
 }
 
-func (ob *orderbook) vwap(bids bool, qty uint64) (vwap, extrema uint64, filled bool) {
-	if qty == 0 { // avoid division by zero
+func (ob *orderbook) vwap(bids bool, baseQty uint64) (vwap, extrema uint64, filled bool) {
+	if baseQty == 0 { // avoid division by zero
 		return 0, 0, false
 	}
 
@@ -129,27 +131,32 @@ func (ob *orderbook) vwap(bids bool, qty uint64) (vwap, extrema uint64, filled b
 		list = &ob.asks
 	}
 
-	remaining := qty
-	var weightedSum uint64
+	weightedTotal := big.NewInt(0)
+	bigQty := big.NewInt(0)
+	bigRate := big.NewInt(0)
+	addToWeightedTotal := func(rate uint64, qty uint64) {
+		bigRate.SetUint64(rate)
+		bigQty.SetUint64(qty)
+		weightedTotal.Add(weightedTotal, bigRate.Mul(bigRate, bigQty))
+	}
+
+	remaining := baseQty
 	for curr := list.Front(); curr != nil; curr = curr.Next() {
-		if curr == nil {
-			break
-		}
 		entry := curr.Value.(*obEntry)
-		extrema = entry.rate
 		if entry.qty >= remaining {
 			filled = true
-			weightedSum += remaining * extrema
+			extrema = entry.rate
+			addToWeightedTotal(entry.rate, remaining)
 			break
 		}
 		remaining -= entry.qty
-		weightedSum += entry.qty * extrema
+		addToWeightedTotal(entry.rate, entry.qty)
 	}
 	if !filled {
 		return 0, 0, false
 	}
 
-	return weightedSum / qty, extrema, filled
+	return weightedTotal.Div(weightedTotal, big.NewInt(int64(baseQty))).Uint64(), extrema, filled
 }
 
 func (ob *orderbook) midGap() uint64 {

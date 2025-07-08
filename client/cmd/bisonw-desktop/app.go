@@ -70,9 +70,9 @@ import (
 	"decred.org/dcrdex/client/webserver"
 	"decred.org/dcrdex/dex"
 	"fyne.io/systray"
+	webview "github.com/bisoncraft/webview_go"
 	"github.com/gen2brain/beeep"
 	"github.com/pkg/browser"
-	"github.com/webview/webview"
 )
 
 func mainCore() error {
@@ -430,9 +430,9 @@ func runWebview(url string) {
 		useIconBytes(w, Icon) // useIcon(w, "src/dexc.png")
 	}
 
-	width, height := limitedWindowWidthAndHeight(int(C.display_width()), int(C.display_height()))
+	width, height := limitedWindowWidthAndHeight(float64(C.display_width()), float64(C.display_height()))
 
-	w.SetSize(width, height, webview.HintNone)
+	w.SetSize(int(width), int(height), webview.HintNone)
 	w.Navigate(url)
 	bindJSFunctions(w)
 	w.Run()

@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -105,7 +106,7 @@ var (
 			Key:          "fallbackfee",
 			DisplayName:  "Fallback fee rate",
 			Description:  "Zcash's 'fallbackfee' rate. Units: ZEC/kB",
-			DefaultValue: defaultFee * 1000 / 1e8,
+			DefaultValue: strconv.FormatFloat(defaultFee*1000/1e8, 'f', -1, 64),
 		},
 		{
 			Key:         "feeratelimit",
@@ -114,7 +115,7 @@ var (
 				"pay on swap transactions. If feeratelimit is lower than a market's " +
 				"maxfeerate, you will not be able to trade on that market with this " +
 				"wallet.  Units: BTC/kB",
-			DefaultValue: defaultFeeRateLimit * 1000 / 1e8,
+			DefaultValue: strconv.FormatFloat(defaultFeeRateLimit*1000/1e8, 'f', -1, 64),
 		},
 		{
 			Key:         "txsplit",
@@ -336,6 +337,7 @@ type zecWallet struct {
 var _ asset.FeeRater = (*zecWallet)(nil)
 var _ asset.Wallet = (*zecWallet)(nil)
 var _ asset.WalletHistorian = (*zecWallet)(nil)
+var _ asset.NewAddresser = (*zecWallet)(nil)
 
 // TODO: Implement LiveReconfigurer
 // var _ asset.LiveReconfigurer = (*zecWallet)(nil)
@@ -1166,7 +1168,7 @@ func (w *zecWallet) splitOption(req *asset.PreSwapForm, utxos []*btc.CompositeUT
 			Key:           "swapsplit",
 			DisplayName:   "Pre-size Funds",
 			IsBoolean:     true,
-			DefaultValue:  w.useSplitTx(), // not nil interface
+			DefaultValue:  strconv.FormatBool(w.useSplitTx()), // not nil interface
 			ShowByDefault: true,
 		},
 		Boolean: &asset.BooleanConfig{},
@@ -1191,7 +1193,7 @@ func (w *zecWallet) splitOption(req *asset.PreSwapForm, utxos []*btc.CompositeUT
 		opt.Boolean.Reason = "avoids no ZEC overlock for this order (ignored)"
 		opt.Description = "A split transaction for this order avoids no ZEC overlock, " +
 			"but adds additional fees."
-		opt.DefaultValue = false
+		opt.DefaultValue = "false"
 		return opt // not enabled by default, but explain why
 	}
 
@@ -1678,6 +1680,13 @@ func (w *zecWallet) DepositAddress() (string, error) {
 
 func (w *zecWallet) NewAddress() (string, error) {
 	return w.DepositAddress()
+}
+
+// AddressUsed checks if a wallet address has been used.
+func (w *zecWallet) AddressUsed(addrStr string) (bool, error) {
+	// TODO: Resolve with new unified address encoding in https://github.com/decred/dcrdex/pull/2675
+	recv, err := getReceivedByAddress(w, addrStr)
+	return recv != 0, err
 }
 
 func (w *zecWallet) FindRedemption(ctx context.Context, coinID, contract dex.Bytes) (redemptionCoin, secret dex.Bytes, err error) {

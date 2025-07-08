@@ -153,6 +153,18 @@ func (t *templates) buildErr() error {
 	return err
 }
 
+var commitHash = func() string {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, setting := range info.Settings {
+			if setting.Key == "vcs.revision" && len(setting.Value) >= 8 {
+				return setting.Value
+			}
+		}
+	}
+
+	return ""
+}()
+
 // exec executes the specified input template using the supplied data, and
 // writes the result into a string. If the template fails to execute or isn't
 // found, a non-nil error will be returned. Check it before writing to the
@@ -188,18 +200,6 @@ func (t *templates) exec(name string, data any) (string, error) {
 	return page.String(), err
 }
 
-var commit = func() string {
-	if info, ok := debug.ReadBuildInfo(); ok {
-		for _, setting := range info.Settings {
-			if setting.Key == "vcs.revision" && len(setting.Value) >= 8 {
-				return setting.Value
-			}
-		}
-	}
-
-	return hex.EncodeToString(encode.RandomBytes(4))
-}()
-
 // templateFuncs are able to be called during template execution.
 var templateFuncs = template.FuncMap{
 	"toUpper": strings.ToUpper,
@@ -228,7 +228,17 @@ var templateFuncs = template.FuncMap{
 		}
 		return parts[0]
 	},
-	"commitHash": func() string {
-		return commit[:8]
+	"commitHash": func(allowRandom bool) string {
+		if commitHash != "" {
+			return commitHash[:8]
+		}
+
+		if allowRandom {
+			// If the commit hash is not available, return a random string.
+			// This is useful in invalidating JS and CSS file caches.
+			return hex.EncodeToString(encode.RandomBytes(4))
+		}
+
+		return "unknown"
 	},
 }

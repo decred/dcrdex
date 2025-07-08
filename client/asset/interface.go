@@ -9,7 +9,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/utils"
-	dcrwalletjson "decred.org/dcrwallet/v4/rpc/jsonrpc/types"
+	dcrwalletjson "decred.org/dcrwallet/v5/rpc/jsonrpc/types"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
@@ -342,7 +342,7 @@ type ConfigOption struct {
 	Key          string `json:"key"`
 	DisplayName  string `json:"displayname"`
 	Description  string `json:"description"`
-	DefaultValue any    `json:"default"`
+	DefaultValue string `json:"default"`
 	// If MaxValue/MinValue are set to the string "now" for a date config, the
 	// UI will display the current date.
 	MaxValue          any `json:"max"`
@@ -708,6 +708,7 @@ type Sweeper interface {
 // NewAddresser is a wallet that can generate new deposit addresses.
 type NewAddresser interface {
 	NewAddress() (string, error)
+	AddressUsed(string) (bool, error)
 }
 
 // AddressReturner is a wallet that allows recycling of unused redemption or refund

@@ -352,9 +352,7 @@ func (b *bookie) send(u *BookUpdate) {
 		select {
 		case feed.c <- u:
 		default:
-			b.log.Warnf("bookie %p: Closing book update feed %d with no receiver. "+
-				"The receiver should have closed the feed before going away.", b, fid)
-			go b.closeFeed(feed.id) // delete it and maybe start a delayed bookie close
+			b.log.Errorf("bookie %p: feed %d is blocking and book update was thrown away.", b, fid)
 		}
 	}
 }

@@ -2969,22 +2969,37 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		}()
 	}
 
+	// Ensure default settings are always supplied to the wallet as they
+	// may not be saved yet.
+	walletDef, err := asset.WalletDef(assetID, dbWallet.Type)
+	if err != nil {
+		return nil, newError(assetSupportErr, "asset.WalletDef error: %w", err)
+	}
+	defaultValues := make(map[string]string, len(walletDef.ConfigOpts))
+	for _, option := range walletDef.ConfigOpts {
+		defaultValues[strings.ToLower(option.Key)] = option.DefaultValue
+	}
+	settings := dbWallet.Settings
+	for k, v := range defaultValues {
+		if _, has := settings[k]; !has {
+			settings[k] = v
+		}
+	}
+
 	log := c.log.SubLogger(unbip(assetID))
 	var w asset.Wallet
-	var err error
 	if token == nil {
-
 		walletCfg := &asset.WalletConfig{
 			Type:        dbWallet.Type,
-			Settings:    dbWallet.Settings,
+			Settings:    settings,
 			Emit:        asset.NewWalletEmitter(c.notes, assetID, log),
 			PeersChange: peersChange,
 			DataDir:     c.assetDataDirectory(assetID),
 		}
 
-		walletCfg.Settings[asset.SpecialSettingActivelyUsed] =
+		settings[asset.SpecialSettingActivelyUsed] =
 			strconv.FormatBool(c.assetHasActiveOrders(dbWallet.AssetID))
-		defer delete(walletCfg.Settings, asset.SpecialSettingActivelyUsed)
+		defer delete(settings, asset.SpecialSettingActivelyUsed)
 
 		w, err = asset.OpenWallet(assetID, walletCfg, log, c.net)
 	} else {
@@ -3001,7 +3016,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 
 		w, err = tokenMaster.OpenTokenWallet(&asset.TokenConfig{
 			AssetID:     assetID,
-			Settings:    dbWallet.Settings,
+			Settings:    settings,
 			Emit:        asset.NewWalletEmitter(c.notes, assetID, log),
 			PeersChange: peersChange,
 		})
@@ -4016,6 +4031,21 @@ func (c *Core) NewDepositAddress(assetID uint32) (string, error) {
 	return addr, nil
 }
 
+// AddressUsed checks whether an address for a NewAddresser has been used.
+func (c *Core) AddressUsed(assetID uint32, addr string) (bool, error) {
+	w, exists := c.wallet(assetID)
+	if !exists {
+		return false, newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
+	}
+
+	na, ok := w.Wallet.(asset.NewAddresser)
+	if !ok {
+		return false, errors.New("wallet is not a NewAddresser")
+	}
+
+	return na.AddressUsed(addr)
+}
+
 // AutoWalletConfig attempts to load setting from a wallet package's
 // asset.WalletInfo.DefaultConfigPath. If settings are not found, an empty map
 // is returned.
@@ -4628,7 +4658,6 @@ func (c *Core) Login(pw []byte) error {
 		c.resolveActiveTrades(crypter)
 		c.notify(newLoginNote("Connecting to DEX servers..."))
 		c.initializeDEXConnections(crypter)
-
 	}
 
 	return nil
@@ -8328,6 +8357,7 @@ func (c *Core) handleReconnect(host string) {
 		c.log.Errorf("handleReconnect: Unable to apply new configuration for DEX at %s: %v", host, err)
 		return
 	}
+	c.notify(newServerConfigUpdateNote(host))
 
 	type market struct { // for book re-subscribe
 		name  string

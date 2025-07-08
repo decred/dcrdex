@@ -51,11 +51,10 @@ import (
 )
 
 const (
-	DefaultM        uint64 = 784931 // From bchutil. Used for gcs filters.
-	logDirName             = "logs"
-	neutrinoDBName         = "neutrino.db"
-	defaultAcctNum         = 0
-	defaultAcctName        = "default"
+	DefaultM       uint64 = 784931 // From bchutil. Used for gcs filters.
+	logDirName            = "logs"
+	neutrinoDBName        = "neutrino.db"
+	defaultAcctNum        = 0
 )
 
 var (
@@ -247,15 +246,6 @@ func (w *bchSPVWallet) txDetails(txHash *bchchainhash.Hash) (*bchwtxmgr.TxDetail
 }
 
 var _ btc.BTCWallet = (*bchSPVWallet)(nil)
-
-// AccountInfo returns the account information of the wallet for use by the
-// exchange wallet.
-func (w *bchSPVWallet) AccountInfo() btc.XCWalletAccount {
-	return btc.XCWalletAccount{
-		AccountName:   defaultAcctName,
-		AccountNumber: defaultAcctNum,
-	}
-}
 
 func (w *bchSPVWallet) PublishTransaction(btcTx *wire.MsgTx, label string) error {
 	bchTx, err := convertMsgTxToBCH(btcTx)
@@ -800,6 +790,18 @@ func (w *bchSPVWallet) AddPeer(addr string) error {
 
 func (w *bchSPVWallet) RemovePeer(addr string) error {
 	return w.peerManager.RemovePeer(addr)
+}
+
+func (w *bchSPVWallet) TotalReceivedForAddr(btcAddr btcutil.Address, minConf int32) (btcutil.Amount, error) {
+	bchAddr, err := dexbch.BTCAddrToBCHAddr(btcAddr, w.btcParams)
+	if err != nil {
+		return 0, err
+	}
+	amt, err := w.Wallet.TotalReceivedForAddr(bchAddr, 0)
+	if err != nil {
+		return 0, err
+	}
+	return btcutil.Amount(amt), nil
 }
 
 // secretSource is used to locate keys and redemption scripts while signing a

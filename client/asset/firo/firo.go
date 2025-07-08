@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,14 +23,15 @@ import (
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/wire"
 )
 
 const (
 	version = 0
 	// Zcoin XZC
 	BipID = 136
-	// Consensus changes v0.14.14.0
-	minNetworkVersion   = 141400
+	//  https://github.com/firoorg/firo/releases/tag/v0.14.14.1
+	minNetworkVersion   = 141401
 	walletTypeRPC       = "firodRPC"
 	walletTypeElectrum  = "electrumRPC"
 	estimateFeeConfs    = 2 // 2 blocks should be enough
@@ -42,7 +44,7 @@ var (
 			Key:          "fallbackfee",
 			DisplayName:  "Fallback fee rate",
 			Description:  "Firo's 'fallbackfee' rate. Units: FIRO/kB",
-			DefaultValue: dexfiro.DefaultFee * 1000 / 1e8,
+			DefaultValue: strconv.FormatFloat(dexfiro.DefaultFee*1000/1e8, 'f', -1, 64),
 		},
 		{
 			Key:         "feeratelimit",
@@ -51,7 +53,7 @@ var (
 				"pay on swap transactions. If feeratelimit is lower than a market's " +
 				"maxfeerate, you will not be able to trade on that market with this " +
 				"wallet.  Units: FIRO/kB",
-			DefaultValue: dexfiro.DefaultFeeRateLimit * 1000 / 1e8,
+			DefaultValue: strconv.FormatFloat(dexfiro.DefaultFeeRateLimit*1000/1e8, 'f', -1, 64),
 		},
 		{
 			Key:         "txsplit",
@@ -137,13 +139,6 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		return nil, fmt.Errorf("unknown network ID %v", network)
 	}
 
-	// Designate the clone ports.
-	ports := dexbtc.NetPorts{
-		Mainnet: "8888",
-		Testnet: "18888",
-		Simnet:  "28888",
-	}
-
 	cloneCFG := &btc.BTCCloneCFG{
 		WalletCFG:                cfg,
 		MinNetworkVersion:        minNetworkVersion,
@@ -152,7 +147,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		Logger:                   logger,
 		Network:                  network,
 		ChainParams:              params,
-		Ports:                    ports,
+		Ports:                    dexfiro.NetPorts,
 		DefaultFallbackFee:       dexfiro.DefaultFee,
 		DefaultFeeRateLimit:      dexfiro.DefaultFeeRateLimit,
 		Segwit:                   false,
@@ -172,14 +167,17 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		ExternalFeeEstimator:     externalFeeRate,
 		AddressDecoder:           decodeAddress,
 		PrivKeyFunc:              nil, // set only for walletTypeRPC below
+		BlockDeserializer:        nil, // set only for walletTypeRPC below
 	}
 
 	switch cfg.Type {
 	case walletTypeRPC:
 		var exw *btc.ExchangeWalletFullNode
-		// override PrivKeyFunc - we need our own Firo dumpprivkey fn
 		cloneCFG.PrivKeyFunc = func(addr string) (*btcec.PrivateKey, error) {
 			return privKeyForAddress(exw, addr)
+		}
+		cloneCFG.BlockDeserializer = func(blk []byte) (*wire.MsgBlock, error) {
+			return deserializeBlock(params, blk)
 		}
 		var err error
 		exw, err = btc.BTCCloneWallet(cloneCFG)

@@ -3,7 +3,7 @@ package dcr
 import (
 	"context"
 
-	"decred.org/dcrwallet/v4/wallet/udb"
+	"decred.org/dcrwallet/v5/wallet/udb"
 	"github.com/decred/dcrd/dcrutil/v4"
 )
 
@@ -50,7 +50,9 @@ func (w *spvWallet) mix(ctx context.Context) {
 
 	// Don't perform any actions while transactions are not synced
 	// through the tip block.
+	w.spvMtx.RLock()
 	synced, _ := w.spv.Synced(ctx)
+	w.spvMtx.RUnlock()
 	if !synced {
 		w.log.Tracef("Skipping account mixing: transactions are not synced")
 		return
