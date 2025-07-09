@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
@@ -110,7 +111,7 @@ type eventLogDB interface {
 	// storeEvent stores/updates a market making event.
 	storeEvent(startTime int64, mkt *MarketWithHost, e *MarketMakingEvent, fs *BalanceState)
 	// endRun stores the time that a market making run was ended.
-	endRun(startTime int64, mkt *MarketWithHost, endTime int64) error
+	endRun(startTime int64, mkt *MarketWithHost) error
 	// runs returns a list of runs in the database. If n == 0, all of the runs
 	// will be returned. If refStartTime and refMkt are not nil, the runs
 	// including and before the run with the start time and market will be
@@ -326,6 +327,11 @@ func (db *boltEventLogDB) updateEvent(update *eventUpdate) {
 			}
 		}
 
+		err = storeEndTime(runBucket)
+		if err != nil {
+			return err
+		}
+
 		// Update the final state.
 		bsJSON, err := json.Marshal(bs)
 		if err != nil {
@@ -453,7 +459,15 @@ func (db *boltEventLogDB) storeNewRun(startTime int64, mkt *MarketWithHost, cfg 
 			return err
 		}
 
-		runBucket.Put(startTimeKey, encode.Uint64Bytes(uint64(startTime)))
+		err = runBucket.Put(startTimeKey, encode.Uint64Bytes(uint64(startTime)))
+		if err != nil {
+			return err
+		}
+
+		err = storeEndTime(runBucket)
+		if err != nil {
+			return err
+		}
 
 		if err := db.storeCfgUpdate(runBucket, cfg, startTime); err != nil {
 			return err
@@ -638,8 +652,13 @@ func (db *boltEventLogDB) runOverview(startTime int64, mkt *MarketWithHost) (*Ma
 	})
 }
 
+// storeEndTime updates the end time of a run to the current time.
+func storeEndTime(runBucket *bbolt.Bucket) error {
+	return runBucket.Put(endTimeKey, encode.Uint64Bytes(uint64(time.Now().Unix())))
+}
+
 // endRun stores the time that a market making run was ended.
-func (db *boltEventLogDB) endRun(startTime int64, mkt *MarketWithHost, endTime int64) error {
+func (db *boltEventLogDB) endRun(startTime int64, mkt *MarketWithHost) error {
 	return db.Update(func(tx *bbolt.Tx) error {
 		botRuns := tx.Bucket(botRunsBucket)
 		key := runKey(startTime, mkt)
@@ -648,7 +667,7 @@ func (db *boltEventLogDB) endRun(startTime int64, mkt *MarketWithHost, endTime i
 			return fmt.Errorf("nil run bucket for key %x", key)
 		}
 
-		return runBucket.Put(endTimeKey, encode.Uint64Bytes(uint64(endTime)))
+		return storeEndTime(runBucket)
 	})
 }
 
