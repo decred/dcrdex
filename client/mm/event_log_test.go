@@ -301,7 +301,7 @@ func TestEventLogDB(t *testing.T) {
 		t.Fatalf("expected event:\n%v\n\ngot:\n%v", event2, runEvents[0])
 	}
 
-	err = db.endRun(startTime, mkt, startTime+1000)
+	err = db.endRun(startTime, mkt)
 	if err != nil {
 		t.Fatalf("error ending run: %v", err)
 	}
@@ -310,8 +310,8 @@ func TestEventLogDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error getting run overview: %v", err)
 	}
-	if *overview.EndTime != startTime+1000 {
-		t.Fatalf("expected end time %d, got %d", startTime+1000, overview.EndTime)
+	if *overview.EndTime < startTime || *overview.EndTime > time.Now().Unix() {
+		t.Fatalf("expected end time %d, got %d", startTime, overview.EndTime)
 	}
 	bs := currBalanceState()
 	finalBals := map[uint32]uint64{

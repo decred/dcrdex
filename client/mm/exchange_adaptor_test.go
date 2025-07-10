@@ -40,7 +40,7 @@ func newTEventLogDB() *tEventLogDB {
 func (db *tEventLogDB) storeNewRun(startTime int64, mkt *MarketWithHost, cfg *BotConfig, initialState *BalanceState) error {
 	return nil
 }
-func (db *tEventLogDB) endRun(startTime int64, mkt *MarketWithHost, endTime int64) error { return nil }
+func (db *tEventLogDB) endRun(startTime int64, mkt *MarketWithHost) error { return nil }
 func (db *tEventLogDB) storeEvent(startTime int64, mkt *MarketWithHost, e *MarketMakingEvent, fs *BalanceState) {
 	db.storedEventsMtx.Lock()
 	defer db.storedEventsMtx.Unlock()
