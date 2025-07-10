@@ -33,10 +33,13 @@ import (
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/dexnet"
+	dcradaptor "decred.org/dcrdex/internal/adaptorsigs"
+
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	walletjson "decred.org/dcrwallet/v5/rpc/jsonrpc/types"
 	"decred.org/dcrwallet/v5/wallet"
 	_ "decred.org/dcrwallet/v5/wallet/drivers/bdb"
+	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/decred/dcrd/blockchain/stake/v5"
 	blockchain "github.com/decred/dcrd/blockchain/standalone/v2"
 	"github.com/decred/dcrd/chaincfg/chainhash"
@@ -44,6 +47,7 @@ import (
 	"github.com/decred/dcrd/dcrec"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4/schnorr"
 	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/decred/dcrd/hdkeychain/v3"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v4"
@@ -708,6 +712,7 @@ var _ asset.Authenticator = (*ExchangeWallet)(nil)
 var _ asset.TicketBuyer = (*ExchangeWallet)(nil)
 var _ asset.WalletHistorian = (*ExchangeWallet)(nil)
 var _ asset.NewAddresser = (*ExchangeWallet)(nil)
+var _ asset.PrivateSwapper = (*ExchangeWallet)(nil)
 
 type block struct {
 	height int64
@@ -3087,6 +3092,683 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	return coins, nil
 }
 
+// PrivateSwapPubKey returns a public key controlled by the wallet.
+func (dcr *ExchangeWallet) PrivateSwapPubKey() ([]byte, error) {
+	addr, err := dcr.wallet.ExternalAddress(dcr.ctx, dcr.depositAccount())
+	if err != nil {
+		return nil, err
+	}
+
+	priv, err := dcr.wallet.AddressPrivKey(dcr.ctx, addr)
+	if err != nil {
+		return nil, err
+	}
+	defer priv.Zero()
+
+	return priv.PubKey().SerializeCompressed(), nil
+}
+
+// privateRefundTx creates and signs a private swap contract's refund transaction.
+// If refundAddr is not supplied, one will be requested from the wallet. If val
+// is not supplied it will be retrieved with gettxout.
+func (dcr *ExchangeWallet) privateRefundTx(coinID, contract dex.Bytes, val uint64, refundAddr stdaddr.Address, feeRate uint64) (tx *wire.MsgTx, refundVal, txFee uint64, err error) {
+	txHash, vout, err := decodeCoinID(coinID)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+
+	// Grab the output, make sure it's unspent and get the value if not supplied.
+	if val == 0 {
+		utxo, _, spent, err := dcr.lookupTxOutput(dcr.ctx, txHash, vout)
+		if err != nil {
+			return nil, 0, 0, fmt.Errorf("error finding unspent contract: %w", err)
+		}
+		if utxo == nil {
+			return nil, 0, 0, asset.CoinNotFoundError
+		}
+		val = uint64(utxo.Value)
+
+		switch spent {
+		case 0: // unspent, proceed to create refund tx
+		case 1, -1: // spent or unknown
+			// Attempt to identify if it was manually refunded with the backup
+			// transaction, in which case we can skip broadcast and record the
+			// spending transaction we may locate as below.
+
+			// First find the block containing the output itself.
+			scriptAddr, err := stdaddr.NewAddressScriptHashV0(contract, dcr.chainParams)
+			if err != nil {
+				return nil, 0, 0, fmt.Errorf("error encoding contract address: %w", err)
+			}
+			_, pkScript := scriptAddr.PaymentScript()
+			outFound, _, err := dcr.externalTxOutput(dcr.ctx, newOutPoint(txHash, vout),
+				pkScript, time.Now().Add(-60*24*time.Hour)) // search up to 60 days ago
+			if err != nil {
+				return nil, 0, 0, err // possibly the contract is still in mempool
+			}
+			// Try to find a transaction that spends it.
+			spent, err := dcr.isOutputSpent(dcr.ctx, outFound) // => findTxOutSpender
+			if err != nil {
+				return nil, 0, 0, fmt.Errorf("error checking if contract %v:%d is spent: %w", txHash, vout, err)
+			}
+			if spent {
+				spendTx := outFound.spenderTx
+				// Refunds are not batched, so input 0 is always the spender.
+				if dexdcr.IsRefundScript(utxo.Version, spendTx.TxIn[0].SignatureScript, contract, true) {
+					return spendTx, 0, 0, nil
+				} // otherwise it must be a redeem
+				return nil, 0, 0, fmt.Errorf("contract %s:%d is spent in %v (%w)",
+					txHash, vout, spendTx.TxHash(), asset.CoinNotFoundError)
+			}
+		}
+	}
+
+	refunder, _, lockTime, err := dexdcr.ExtractPrivateSwapDetails(contract)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("error extracting swap addresses: %w", err)
+	}
+
+	// Create the transaction that spends the contract.
+	msgTx := wire.NewMsgTx()
+	msgTx.LockTime = uint32(lockTime)
+	prevOut := wire.NewOutPoint(txHash, vout, wire.TxTreeRegular)
+	txIn := wire.NewTxIn(prevOut, int64(val), []byte{})
+	// Enable the OP_CHECKLOCKTIMEVERIFY opcode to be used.
+	//
+	// https://github.com/decred/dcrd/blob/8f5270b707daaa1ecf24a1ba02b3ff8a762674d3/txscript/opcode.go#L981-L998
+	txIn.Sequence = wire.MaxTxInSequenceNum - 1
+	msgTx.AddTxIn(txIn)
+
+	// Calculate fees and add the change output.
+	size := msgTx.SerializeSize() + dexdcr.RefundPrivateScriptSigSize + dexdcr.P2PKHOutputSize
+	fee := feeRate * uint64(size)
+	if fee > val {
+		return nil, 0, 0, fmt.Errorf("refund tx not worth the fees")
+	}
+
+	if refundAddr == nil {
+		refundAddr, err = dcr.wallet.ExternalAddress(dcr.ctx, dcr.depositAccount())
+		if err != nil {
+			return nil, 0, 0, fmt.Errorf("error getting new address from the wallet: %w", err)
+		}
+	}
+
+	pkScriptVer, pkScript := refundAddr.PaymentScript()
+	txOut := newTxOut(int64(val-fee), pkScriptVer, pkScript)
+	// One last check for dust.
+	if dexdcr.IsDust(txOut, feeRate) {
+		return nil, 0, 0, fmt.Errorf("refund output is dust")
+	}
+	msgTx.AddTxOut(txOut)
+
+	// Sign it.
+	refunderAddr, err := stdaddr.NewAddressPubKeyHashSchnorrSecp256k1V0(refunder[:], dcr.chainParams)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("error encoding refunder address: %w", err)
+	}
+	refundSig, refundPubKey, err := dcr.createSig(msgTx, 0, contract, refunderAddr)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	redeemSigScript, err := dexdcr.RefundP2SHContract(contract, refundSig, refundPubKey)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+
+	txIn.SignatureScript = redeemSigScript
+
+	return msgTx, val, fee, nil
+}
+
+// SwapPrivate initiates private swaps in a single transaction.
+func (dcr *ExchangeWallet) SwapPrivate(swaps *asset.PrivateSwaps) (receipts []asset.Receipt, coin asset.Coin, txData []byte, fees uint64, err error) {
+	if swaps.FeeRate == 0 {
+		return nil, nil, nil, 0, fmt.Errorf("cannot send swap with with zero fee rate")
+	}
+	if len(swaps.Contracts) == 0 {
+		return nil, nil, nil, 0, fmt.Errorf("no contracts provided")
+	}
+
+	customCfg := new(swapOptions)
+	err = config.Unmapify(swaps.Options, customCfg)
+	if err != nil {
+		return nil, nil, nil, 0, fmt.Errorf("error parsing swap options: %w", err)
+	}
+
+	feeRate, err := calcBumpedRate(swaps.FeeRate, customCfg.FeeBump)
+	if err != nil {
+		dcr.log.Errorf("ignoring invalid fee bump factor, %s: %v", float64PtrStr(customCfg.FeeBump), err)
+	}
+
+	// Create the swap transaction and add the inputs.
+	baseTx := wire.NewMsgTx()
+	totalIn, err := dcr.addInputCoins(baseTx, swaps.Inputs)
+	if err != nil {
+		return nil, nil, nil, 0, err
+	}
+
+	// Loop through each contract and add the outputs to the base tx.
+	var totalOut uint64
+	contracts := make([][]byte, 0, len(swaps.Contracts))
+	refundAddrs := make([]stdaddr.Address, 0, len(swaps.Contracts))
+	for _, contract := range swaps.Contracts {
+		totalOut += contract.Value
+
+		redeemPKH := stdaddr.Hash160(contract.RedeemPublicKey)
+		refundPKH := stdaddr.Hash160(contract.RefundPublicKey)
+		contractScript, err := dexdcr.MakePrivateContract(redeemPKH, refundPKH, int64(contract.LockTime))
+		if err != nil {
+			return nil, nil, nil, 0, fmt.Errorf("unable to create pubkey script: %w", err)
+		}
+		contracts = append(contracts, contractScript)
+
+		refundAddr, err := stdaddr.NewAddressPubKeyHashSchnorrSecp256k1V0(refundPKH[:], dcr.chainParams)
+		if err != nil {
+			return nil, nil, nil, 0, fmt.Errorf("error encoding refund address: %w", err)
+		}
+		refundAddrs = append(refundAddrs, refundAddr)
+
+		scriptAddr, err := stdaddr.NewAddressScriptHashV0(contractScript, dcr.chainParams)
+		if err != nil {
+			return nil, nil, nil, 0, fmt.Errorf("error encoding script address: %w", err)
+		}
+		p2shScriptVer, p2shScript := scriptAddr.PaymentScript()
+		baseTx.AddTxOut(newTxOut(int64(contract.Value), p2shScriptVer, p2shScript))
+	}
+	if totalIn < totalOut {
+		return nil, nil, nil, 0, fmt.Errorf("unfunded contract. %d < %d", totalIn, totalOut)
+	}
+
+	// Add change, sign, and send the transaction.
+	dcr.fundingMtx.Lock()         // before generating change output
+	defer dcr.fundingMtx.Unlock() // hold until after returnCoins and lockFundingCoins(change)
+
+	changeAcct := dcr.depositAccount()
+	tradingAccount := dcr.wallet.Accounts().TradingAccount
+	if swaps.LockChange && tradingAccount != "" {
+		// Change will likely be used to fund more swaps, send to trading
+		// account.
+		changeAcct = tradingAccount
+	}
+
+	// Sign the tx but don't send the transaction yet until
+	// the individual swap refund txs are prepared and signed.
+	msgTx, change, changeAddr, fees, err := dcr.signTxAndAddChange(baseTx, feeRate, -1, changeAcct)
+	if err != nil {
+		return nil, nil, nil, 0, err
+	}
+
+	// Create the receipts, which includes a signed refund tx for each contract.
+	receipts = make([]asset.Receipt, 0, len(swaps.Contracts))
+	txHash := msgTx.CachedTxHash()
+	for i, contract := range swaps.Contracts {
+		output := newOutput(txHash, uint32(i), contract.Value, wire.TxTreeRegular)
+		signedRefundTx, _, _, err := dcr.privateRefundTx(output.ID(), contracts[i], contract.Value, refundAddrs[i], swaps.FeeRate)
+		if err != nil {
+			return nil, nil, nil, 0, fmt.Errorf("error creating refund tx: %w", err)
+		}
+		refundB, err := signedRefundTx.Bytes()
+		if err != nil {
+			return nil, nil, nil, 0, fmt.Errorf("error serializing refund tx: %w", err)
+		}
+		receipts = append(receipts, &swapReceipt{
+			output:       output,
+			contract:     contracts[i],
+			expiration:   time.Unix(int64(contract.LockTime), 0).UTC(),
+			signedRefund: refundB,
+		})
+	}
+
+	// Refund txs prepared and signed. Can now broadcast the swap(s).
+	_, err = dcr.broadcastTx(msgTx)
+	if err != nil {
+		return nil, nil, nil, 0, err
+	}
+
+	dcr.addTxToHistory(&asset.WalletTransaction{
+		Type:   asset.Swap,
+		ID:     txHash.String(),
+		Amount: totalOut,
+		Fees:   fees,
+	}, txHash, true)
+
+	// Return spent outputs.
+	_, err = dcr.returnCoins(swaps.Inputs)
+	if err != nil {
+		dcr.log.Errorf("error unlocking swapped coins", swaps.Inputs)
+	}
+
+	// Lock the change coin, if requested.
+	if swaps.LockChange {
+		dcr.log.Debugf("locking change coin %s", change)
+		err = dcr.lockFundingCoins([]*fundingCoin{{
+			op:   change,
+			addr: changeAddr,
+		}})
+		if err != nil {
+			dcr.log.Warnf("Failed to lock dcr change coin %s", change)
+		}
+	}
+
+	// If change is nil, return a nil asset.Coin.
+	var changeCoin asset.Coin
+	if change != nil {
+		changeCoin = change
+	}
+
+	serializedTx, err := msgTx.Bytes()
+	if err != nil {
+		return nil, nil, nil, 0, fmt.Errorf("error serializing transaction: %w", err)
+	}
+
+	return receipts, changeCoin, serializedTx, fees, nil
+}
+
+// AuditPrivateContract verifies that coinID represents a valid private
+// swap transaction as described by the contract.
+func (dcr *ExchangeWallet) AuditPrivateContract(coinID, txData []byte, contract *asset.PrivateContract, rebroadcast bool) error {
+	txHash, vout, err := decodeCoinID(coinID)
+	if err != nil {
+		return err
+	}
+	contractTx, err := msgTxFromBytes(txData)
+	if err != nil {
+		return fmt.Errorf("error deserializing transaction: %w", err)
+	}
+	if err = blockchain.CheckTransactionSanity(contractTx, uint64(dcr.chainParams.MaxTxSize)); err != nil {
+		return fmt.Errorf("invalid contract tx data: %w", err)
+	}
+	if checkHash := contractTx.TxHash(); checkHash != *txHash {
+		return fmt.Errorf("invalid contract tx data: expected hash %s, got %s", txHash, checkHash)
+	}
+	if int(vout) >= len(contractTx.TxOut) {
+		return fmt.Errorf("invalid contract tx data: no output at %d", vout)
+	}
+	contractTxOut := contractTx.TxOut[vout]
+
+	// Validate contract output.
+	// Script must be P2SH, with 1 address and 1 required signature.
+	scriptClass, addrs := stdscript.ExtractAddrs(contractTxOut.Version, contractTxOut.PkScript, dcr.chainParams)
+	if scriptClass != stdscript.STScriptHash {
+		return fmt.Errorf("unexpected script class %d", scriptClass)
+	}
+	if len(addrs) != 1 {
+		return fmt.Errorf("unexpected number of addresses for P2SH script: %d", len(addrs))
+	}
+
+	redeemPKH := stdaddr.Hash160(contract.RedeemPublicKey)
+	refundPKH := stdaddr.Hash160(contract.RefundPublicKey)
+	expectedContractScript, err := dexdcr.MakePrivateContract(redeemPKH, refundPKH, int64(contract.LockTime))
+	if err != nil {
+		return fmt.Errorf("unable to create pubkey script: %w", err)
+	}
+
+	// Compare the contract hash to the P2SH address.
+	contractHash := dcrutil.Hash160(expectedContractScript)
+	addr := addrs[0]
+	addrScript, err := dexdcr.AddressScript(addr)
+	if err != nil {
+		return fmt.Errorf("error encoding script address: %w", err)
+	}
+	if !bytes.Equal(contractHash, addrScript) {
+		return fmt.Errorf("contract hash doesn't match script address. %x != %x",
+			contractHash, addrScript)
+	}
+
+	// The counter-party should have broadcasted the contract tx but rebroadcast
+	// just in case to ensure that the tx is sent to the network. Do not block
+	// because this is not required and does not affect the audit result.
+	if rebroadcast && contractTx != nil {
+		go func() {
+			if hashSent, err := dcr.wallet.SendRawTransaction(dcr.ctx, contractTx, true); err != nil {
+				dcr.log.Debugf("Rebroadcasting counterparty contract %v (THIS MAY BE NORMAL): %v", txHash, err)
+			} else if !hashSent.IsEqual(txHash) {
+				dcr.log.Errorf("Counterparty contract %v was rebroadcast as %v!", txHash, hashSent)
+			}
+		}()
+	}
+
+	return nil
+}
+
+// GenerateUnsignedRedeemTx generates an unsigned redeem transaction to be sent
+// to the counterparty, who uses it to generate an adaptor signature.
+func (dcr *ExchangeWallet) GenerateUnsignedRedeemTx(coinID []byte, contract *asset.PrivateContract, feeRate uint64) ([]byte, error) {
+	txHash, vout, err := decodeCoinID(coinID)
+	if err != nil {
+		return nil, err
+	}
+
+	redeemTx := wire.NewMsgTx()
+	redeemTx.AddTxIn(wire.NewTxIn(&wire.OutPoint{Hash: *txHash, Index: vout}, int64(contract.Value), nil))
+
+	size := redeemTx.SerializeSize() + dexdcr.RedeemPrivateSwapSigScriptSize + dexdcr.P2PKHOutputSize
+	fee := feeRate * uint64(size)
+	if fee > contract.Value {
+		return nil, fmt.Errorf("redeem tx not worth the fees")
+	}
+
+	txOut, _, err := dcr.makeExternalOut(dcr.depositAccount(), contract.Value-fee)
+	if err != nil {
+		return nil, err
+	}
+
+	redeemTx.AddTxOut(txOut)
+
+	return redeemTx.Bytes()
+}
+
+// ValidateAdaptorSecret is a no-op for Decred and always returns true.
+//
+// Decred's multisignature scripts do not use a nonce-aggregation scheme like
+// MuSig2. Instead, each party generates their signature nonce independently.
+// This allows a signer to adjust their nonce to accommodate any adaptor secret,
+// making pre-validation unnecessary.
+func (dcr *ExchangeWallet) ValidateAdaptorSecret(adaptorSecret *btcec.ModNScalar, unsignedRedeemB []byte, contract *asset.PrivateContract) (bool, error) {
+	return true, nil
+}
+
+func privateContractPkScript(contract *asset.PrivateContract, params stdaddr.AddressParamsV0) (contractScript, pkScript []byte, err error) {
+	redeemPKH := stdaddr.Hash160(contract.RedeemPublicKey)
+	refundPKH := stdaddr.Hash160(contract.RefundPublicKey)
+	contractScript, err = dexdcr.MakePrivateContract(redeemPKH, refundPKH, int64(contract.LockTime))
+	if err != nil {
+		return nil, nil, fmt.Errorf("unable to create pubkey script: %w", err)
+	}
+	addr, err := stdaddr.NewAddressScriptHashV0(contractScript, params)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error encoding script address: %w", err)
+	}
+	_, pkScript = addr.PaymentScript()
+	return contractScript, pkScript, nil
+}
+
+// GeneratePrivateKeyTweakedAdaptor generates an adaptor signature for the provided
+// unsigned redemption transaction. The isRedeemer flag indicates whether the wallet
+// is the redeemer or refunder for this contract.
+func (dcr *ExchangeWallet) GeneratePrivateKeyTweakedAdaptor(unsignedRedeemB []byte, contract *asset.PrivateContract, adaptorSec *btcec.ModNScalar, isRedeemer bool) ([]byte, error) {
+	var pubKeyB []byte
+	if isRedeemer {
+		pubKeyB = contract.RedeemPublicKey
+	} else {
+		pubKeyB = contract.RefundPublicKey
+	}
+
+	pubKey, err := secp256k1.ParsePubKey(pubKeyB)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing pubkey: %w", err)
+	}
+
+	redeemTx, err := msgTxFromBytes(unsignedRedeemB)
+	if err != nil {
+		return nil, fmt.Errorf("error deserializing transaction: %w", err)
+	}
+
+	contractScript, _, err := privateContractPkScript(contract, dcr.chainParams)
+	if err != nil {
+		return nil, fmt.Errorf("error encoding script address: %w", err)
+	}
+
+	pkh := dcrutil.Hash160(pubKey.SerializeCompressed())
+	signerAddr, err := stdaddr.NewAddressPubKeyHashSchnorrSecp256k1V0(pkh, dcr.chainParams)
+	if err != nil {
+		return nil, fmt.Errorf("error encoding script address: %w", err)
+	}
+
+	sig, _, err := dcr.createSig(redeemTx, 0, contractScript, signerAddr)
+	if err != nil {
+		return nil, fmt.Errorf("error creating signature: %w", err)
+	}
+	schnorrSig, err := schnorr.ParseSignature(sig[:64])
+	if err != nil {
+		return nil, fmt.Errorf("error parsing signature: %w", err)
+	}
+
+	adaptorSig := dcradaptor.PrivateKeyTweakedAdaptorSig(schnorrSig, pubKey, adaptorSec)
+	return adaptorSig.Serialize(), nil
+}
+
+// ValidateAdaptorSig verifies that the adaptor signature provided by the
+// counterparty enables the wallet to redeem the private swap once the secret
+// is recovered. This is used only for private-key-tweaked adaptor signatures.
+func (dcr *ExchangeWallet) ValidateAdaptorSig(unsignedRedeemB []byte, adaptorSigB []byte, adaptorPub *btcec.JacobianPoint, contract *asset.PrivateContract, isRedeemer bool) (bool, error) {
+	adaptorSig, err := dcradaptor.ParseAdaptorSignature(adaptorSigB)
+	if err != nil {
+		return false, fmt.Errorf("error parsing adaptor signature: %w", err)
+	}
+	if !adaptorSig.PublicTweak().EquivalentNonConst(adaptorPub) {
+		return false, fmt.Errorf("adaptor public key mismatch")
+	}
+
+	pubKeyB := contract.RefundPublicKey
+	if isRedeemer {
+		pubKeyB = contract.RedeemPublicKey
+	}
+	pubKey, err := secp256k1.ParsePubKey(pubKeyB)
+	if err != nil {
+		return false, fmt.Errorf("error parsing pubkey: %w", err)
+	}
+
+	redeemTx, err := msgTxFromBytes(unsignedRedeemB)
+	if err != nil {
+		return false, fmt.Errorf("error deserializing transaction: %w", err)
+	}
+
+	contractScript, _, err := privateContractPkScript(contract, dcr.chainParams)
+	if err != nil {
+		return false, fmt.Errorf("error encoding script address: %w", err)
+	}
+
+	hash, err := txscript.CalcSignatureHash(contractScript, txscript.SigHashAll, redeemTx, 0, nil)
+	if err != nil {
+		return false, err
+	}
+
+	return adaptorSig.Verify(hash, pubKey) == nil, nil
+}
+
+// GeneratePublicKeyTweakedAdaptor generates a public-key-tweaked adaptor
+// signature. The party knowing the secret can use this signature to redeem
+// their private swap, revealing the secret to the other party.
+func (dcr *ExchangeWallet) GeneratePublicKeyTweakedAdaptor(unsignedRedeemB []byte, contract *asset.PrivateContract, adaptorPub *btcec.JacobianPoint) ([]byte, error) {
+	pubKeyB := contract.RefundPublicKey
+	pubKey, err := secp256k1.ParsePubKey(pubKeyB)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing pubkey: %w", err)
+	}
+	pkh := dcrutil.Hash160(pubKey.SerializeCompressed())
+	addr, err := stdaddr.NewAddressPubKeyHashSchnorrSecp256k1V0(pkh, dcr.chainParams)
+	if err != nil {
+		return nil, fmt.Errorf("error encoding script address: %w", err)
+	}
+	priv, err := dcr.wallet.AddressPrivKey(dcr.ctx, addr)
+	if err != nil {
+		return nil, err
+	}
+	defer priv.Zero()
+
+	redeemTx, err := msgTxFromBytes(unsignedRedeemB)
+	if err != nil {
+		return nil, fmt.Errorf("error deserializing transaction: %w", err)
+	}
+	contractScript, _, err := privateContractPkScript(contract, dcr.chainParams)
+	if err != nil {
+		return nil, fmt.Errorf("error encoding script address: %w", err)
+	}
+	hash, err := txscript.CalcSignatureHash(contractScript, txscript.SigHashAll, redeemTx, 0, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	adaptorSig, err := dcradaptor.PublicKeyTweakedAdaptorSig(priv, hash, adaptorPub)
+	if err != nil {
+		return nil, fmt.Errorf("error creating adaptor signature: %w", err)
+	}
+
+	return adaptorSig.Serialize(), nil
+}
+
+// RedeemPrivate redeems a private swap. Unlike HTLC atomic swaps, only one
+// swap can be redeemed at a time because the redemption transaction was
+// pre-generated using GenerateUnsignedRedeemTx.
+func (dcr *ExchangeWallet) RedeemPrivate(contract *asset.PrivateContract, unsignedRedeemB []byte, adaptorSigB []byte, adaptorSecret *btcec.ModNScalar) (out asset.Coin, feesPaid uint64, txData []byte, err error) {
+	adaptorSig, err := dcradaptor.ParseAdaptorSignature(adaptorSigB)
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("error parsing adaptor signature: %w", err)
+	}
+
+	redeemTx, err := msgTxFromBytes(unsignedRedeemB)
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("error deserializing transaction: %w", err)
+	}
+	redeemPK, err := secp256k1.ParsePubKey(contract.RedeemPublicKey)
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("error parsing redeem public key: %w", err)
+	}
+	refundPK, err := secp256k1.ParsePubKey(contract.RefundPublicKey)
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("error parsing refund public key: %w", err)
+	}
+
+	cpSig, err := adaptorSig.Decrypt(adaptorSecret)
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("error decrypting adaptor signature: %w", err)
+	}
+
+	contractScript, _, err := privateContractPkScript(contract, dcr.chainParams)
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("error encoding script address: %w", err)
+	}
+	hash, err := txscript.CalcSignatureHash(contractScript, txscript.SigHashAll, redeemTx, 0, nil)
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("error calculating signature hash: %w", err)
+	}
+
+	addr, err := stdaddr.NewAddressPubKeyHashSchnorrSecp256k1V0(dcrutil.Hash160(redeemPK.SerializeCompressed()), dcr.chainParams)
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("error encoding script address: %w", err)
+	}
+	priv, err := dcr.wallet.AddressPrivKey(dcr.ctx, addr)
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("error getting private key: %w", err)
+	}
+	defer priv.Zero()
+	sig, err := schnorr.Sign(priv, hash)
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("error signing hash: %w", err)
+	}
+
+	ourSig := append(sig.Serialize(), byte(txscript.SigHashAll))
+	theirSig := append(cpSig.Serialize(), byte(txscript.SigHashAll))
+
+	redeemScript, err := dexdcr.RedeemP2SHPrivateContract(contractScript,
+		redeemPK.SerializeCompressed(),
+		ourSig,
+		refundPK.SerializeCompressed(),
+		theirSig,
+	)
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("error creating redeem script: %w", err)
+	}
+	redeemTx.TxIn[0].SignatureScript = redeemScript
+
+	txData, err = redeemTx.Bytes()
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("error serializing transaction: %w", err)
+	}
+
+	txHash, err := dcr.broadcastTx(redeemTx)
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("error broadcasting transaction: %w", err)
+	}
+
+	if contract.Value > uint64(redeemTx.TxOut[0].Value) {
+		feesPaid = contract.Value - uint64(redeemTx.TxOut[0].Value)
+	}
+
+	return newOutput(txHash, 0, uint64(redeemTx.TxOut[0].Value), wire.TxTreeRegular), feesPaid, txData, nil
+}
+
+// MarkPrivateSwapComplete is a no-op for Decred.
+func (dcr *ExchangeWallet) MarkPrivateSwapComplete(contract *asset.PrivateContract, isRedeemer bool) {
+}
+
+// RefundPrivate refunds a private swap. This can only be used after the time
+// lock has expired AND if the contract has not been redeemed/refunded. This
+// method MUST return an asset.CoinNotFoundError error if the swap is already
+// spent, which is used to indicate if FindRedemption should be used and the
+// counterparty's swap redeemed.
+func (dcr *ExchangeWallet) RefundPrivate(coinID dex.Bytes, contract *asset.PrivateContract, feeRate uint64) (dex.Bytes, error) {
+	// Caller should provide a non-zero fee rate, so we could just do
+	// dcr.feeRateWithFallback(feeRate), but be permissive for now.
+	if feeRate == 0 {
+		feeRate = dcr.targetFeeRateWithFallback(2, 0)
+	}
+
+	contractB, _, err := privateContractPkScript(contract, dcr.chainParams)
+	if err != nil {
+		return nil, fmt.Errorf("error encoding script address: %w", err)
+	}
+
+	msgTx, refundVal, fee, err := dcr.privateRefundTx(coinID, contractB, 0, nil, feeRate)
+	if err != nil {
+		return nil, fmt.Errorf("error creating private refund tx: %w", err)
+	}
+
+	refundHash, err := dcr.broadcastTx(msgTx)
+	if err != nil {
+		return nil, err
+	}
+	dcr.addTxToHistory(&asset.WalletTransaction{
+		Type:   asset.Refund,
+		ID:     refundHash.String(),
+		Amount: refundVal,
+		Fees:   fee,
+	}, refundHash, true)
+
+	return ToCoinID(refundHash, 0), nil
+}
+
+func parseRedeemPrivateContract(script []byte) (pkRedeemer, sigRedeemer, pkRefund, sigRefund []byte, err error) {
+	if len(script) < dexdcr.RefundPrivateScriptSigSize {
+		err = fmt.Errorf("invalid swap redemption: length = %v", len(script))
+		return
+	}
+
+	sigRefund = script[1:66]
+	pkRefund = script[67:100]
+	sigRedeemer = script[101:167]
+	pkRedeemer = script[168:201]
+
+	return
+}
+
+// RecoverAdaptorSecret recovers the adaptor secret from the public-key adaptor
+// signature and the counterparty's redemption transaction.
+func (dcr *ExchangeWallet) RecoverAdaptorSecret(cpRedeemTxB, ourAdaptorSigB, _ []byte, adaptorPub *btcec.JacobianPoint, contract *asset.PrivateContract) (*btcec.ModNScalar, error) {
+	cpRedeemTx, err := msgTxFromBytes(cpRedeemTxB)
+	if err != nil {
+		return nil, fmt.Errorf("error deserializing transaction: %w", err)
+	}
+
+	cpAdaptorSig, err := dcradaptor.ParseAdaptorSignature(ourAdaptorSigB)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing adaptor signature: %w", err)
+	}
+
+	_, _, _, sigRefunderB, err := parseRedeemPrivateContract(cpRedeemTx.TxIn[0].SignatureScript)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing redeem script: %w", err)
+	}
+
+	sigRefunder, err := schnorr.ParseSignature(sigRefunderB[:64])
+	if err != nil {
+		return nil, fmt.Errorf("error parsing signature: %w", err)
+	}
+
+	return cpAdaptorSig.RecoverTweak(sigRefunder)
+}
+
 // Swap sends the swaps in a single transaction. The Receipts returned can be
 // used to refund a failed transaction. The Input coins are manually unlocked
 // because they're not auto-unlocked by the wallet and therefore inaccurately
@@ -4055,7 +4737,7 @@ func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refu
 			if spent {
 				spendTx := outFound.spenderTx
 				// Refunds are not batched, so input 0 is always the spender.
-				if dexdcr.IsRefundScript(utxo.Version, spendTx.TxIn[0].SignatureScript, contract) {
+				if dexdcr.IsRefundScript(utxo.Version, spendTx.TxIn[0].SignatureScript, contract, false) {
 					return spendTx, 0, 0, nil
 				} // otherwise it must be a redeem
 				return nil, 0, 0, fmt.Errorf("contract %s:%d is spent in %v (%w)",
