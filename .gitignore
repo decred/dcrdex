@@ -55,3 +55,4 @@ internal/cmd/xmrswap/xmrswap
 internal/cmd/xmrswap/config.json
 internal/libsecp256k1/secp256k1
 server/cmd/dcrdex/evm-protocol-overrides.json
+client/bworg/bworg
