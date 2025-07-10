@@ -19,7 +19,7 @@ Please read the [v1.0.0 release notes](https://github.com/decred/dcrdex/releases
 - Fix Ethereum wallet user action resolution handling ([#3178](https://github.com/decred/dcrdex/pull/3178))
 - Account for multi-split buffer when making MultiTrade ([#3156](https://github.com/decred/dcrdex/pull/3156))
 - Fix market-maker balance handling for shared txs across matches ([#3138](https://github.com/decred/dcrdex/pull/3138))
-- Fix Polygon polygon symbol conversion ([#3118](https://github.com/decred/dcrdex/pull/3118))
+- Fix Polygon symbol conversion ([#3118](https://github.com/decred/dcrdex/pull/3118))
 - Update static chinese translations ([#3071](https://github.com/decred/dcrdex/pull/3071))
 - Translation German translations ([#3124](https://github.com/decred/dcrdex/pull/3124))
 - Store correct Bitcoin tx history refund hash ([#3142](https://github.com/decred/dcrdex/pull/3142))
