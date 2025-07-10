@@ -527,18 +527,18 @@ func TestPlaceTrade(t *testing.T) {
 	}
 
 	marketStr := os.Getenv("MARKET")
-	orderType := OrderTypeLimit
+	orderType := OrderTypeLimitIOC
 	if marketStr == "true" {
 		orderType = OrderTypeMarket
 	}
 
 	rateStr := os.Getenv("RATE")
-	if orderType == OrderTypeLimit && rateStr == "" {
+	if orderType != OrderTypeMarket && rateStr == "" {
 		t.Fatalf("RATE env var not set")
 	}
 
 	var rate float64
-	if orderType == OrderTypeLimit {
+	if orderType != OrderTypeMarket {
 		rate, err = strconv.ParseFloat(rateStr, 64)
 		if err != nil {
 			t.Fatalf("Invalid RATE: %v", err)

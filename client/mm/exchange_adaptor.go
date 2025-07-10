@@ -84,9 +84,9 @@ type botCexAdaptor interface {
 	SubscribeMarket(ctx context.Context, baseID, quoteID uint32) error
 	UnsubscribeMarket(baseID, quoteID uint32) error
 	SubscribeTradeUpdates() <-chan *libxc.Trade
-	CEXTrade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, orderType libxc.OrderType) (*libxc.Trade, error)
-	ValidateTrade(baseID, quoteID uint32, sell bool, rate, qty uint64, orderType libxc.OrderType) error
-	SufficientBalanceForCEXTrade(baseID, quoteID uint32, sell bool, rate, qty uint64, orderType libxc.OrderType) bool
+	CEXTrade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty, quoteQty uint64, orderType libxc.OrderType) (*libxc.Trade, error)
+	ValidateTrade(baseID, quoteID uint32, sell bool, rate, qty, quoteQty uint64, orderType libxc.OrderType) error
+	SufficientBalanceForCEXTrade(baseID, quoteID uint32, sell bool, rate, qty, quoteQty uint64, orderType libxc.OrderType) bool
 	MidGap(baseID, quoteID uint32) uint64
 	Book() (buys, sells []*core.MiniOrder, _ error)
 }
@@ -695,15 +695,20 @@ func (u *unifiedExchangeAdaptor) SufficientBalanceForDEXTrade(rate, qty uint64, 
 // SufficientBalanceOnCEXTrade returns whether the bot has sufficient balance
 // to place a CEX trade. qty is in the base asset, except for market buys,
 // where it is in the quote asset.
-func (u *unifiedExchangeAdaptor) SufficientBalanceForCEXTrade(baseID, quoteID uint32, sell bool, rate, qty uint64, orderType libxc.OrderType) bool {
+func (u *unifiedExchangeAdaptor) SufficientBalanceForCEXTrade(baseID, quoteID uint32, sell bool, rate, qty, quoteQty uint64, orderType libxc.OrderType) bool {
 	fromAssetID := quoteID
 	if sell {
 		fromAssetID = baseID
 	}
-
 	fromAssetBal := u.CEXBalance(fromAssetID)
+
 	fromAssetReq := qty
-	if orderType == libxc.OrderTypeLimit && !sell {
+	if quoteQty > 0 {
+		fromAssetReq = quoteQty
+	}
+
+	// Only limit buys can be specified not in the from asset
+	if orderType != libxc.OrderTypeMarket && !sell && qty > 0 {
 		fromAssetReq = calc.BaseToQuote(rate, qty)
 	}
 
@@ -713,8 +718,12 @@ func (u *unifiedExchangeAdaptor) SufficientBalanceForCEXTrade(baseID, quoteID ui
 // dexOrderInfo is used by MultiTrade to keep track of the placement index
 // and counter trade rate of an order.
 type dexOrderInfo struct {
-	placementIndex   uint64
+	placementIndex uint64
+	// counterTradeRate will be the rate of the arbitrage trade on the CEX,
+	// if this is a single-hop arb. Otherwise it will be the aggregate of
+	// the multi-hop rates.
 	counterTradeRate uint64
+	multiHopRates    [2]uint64
 	placement        *core.QtyRate
 }
 
@@ -1067,6 +1076,7 @@ type TradePlacement struct {
 	StandingLots     uint64            `json:"standingLots"`
 	OrderedLots      uint64            `json:"orderedLots"`
 	CounterTradeRate uint64            `json:"counterTradeRate"`
+	MultiHopRates    [2]uint64         `json:"multiHopRates"`
 	RequiredDEX      map[uint32]uint64 `json:"requiredDex"`
 	RequiredCEX      uint64            `json:"requiredCex"`
 	UsedDEX          map[uint32]uint64 `json:"usedDex"`
@@ -1129,6 +1139,7 @@ func newOrderReport(placements []*TradePlacement) *OrderReport {
 			Rate:             p.Rate,
 			Lots:             p.Lots,
 			CounterTradeRate: p.CounterTradeRate,
+			MultiHopRates:    p.MultiHopRates,
 			RequiredDEX:      make(map[uint32]uint64),
 			UsedDEX:          make(map[uint32]uint64),
 			Error:            p.Error,
@@ -1350,6 +1361,7 @@ func (u *unifiedExchangeAdaptor) multiTrade(
 			orderInfos = append(orderInfos, &dexOrderInfo{
 				placementIndex:   uint64(i),
 				counterTradeRate: placement.CounterTradeRate,
+				multiHopRates:    placement.MultiHopRates,
 				placement: &core.QtyRate{
 					Qty:  lotsToPlace * lotSize,
 					Rate: placement.Rate,
@@ -2226,8 +2238,8 @@ func (w *unifiedExchangeAdaptor) SubscribeTradeUpdates() <-chan *libxc.Trade {
 // CEXTrade executes a trade on the CEX.
 // - qty is in the base asset, except for market buys, where it is in the quote asset.
 // - rate is ignored for market orders.
-func (u *unifiedExchangeAdaptor) CEXTrade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, orderType libxc.OrderType) (*libxc.Trade, error) {
-	if !u.SufficientBalanceForCEXTrade(baseID, quoteID, sell, rate, qty, orderType) {
+func (u *unifiedExchangeAdaptor) CEXTrade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty, quoteQty uint64, orderType libxc.OrderType) (*libxc.Trade, error) {
+	if !u.SufficientBalanceForCEXTrade(baseID, quoteID, sell, rate, qty, quoteQty, orderType) {
 		return nil, fmt.Errorf("insufficient balance")
 	}
 
@@ -2251,7 +2263,7 @@ func (u *unifiedExchangeAdaptor) CEXTrade(ctx context.Context, baseID, quoteID u
 	u.balancesMtx.Lock()
 	defer u.balancesMtx.Unlock()
 
-	trade, err := u.CEX.Trade(ctx, baseID, quoteID, sell, rate, qty, orderType, *subscriptionID)
+	trade, err := u.CEX.Trade(ctx, baseID, quoteID, sell, rate, qty, quoteQty, orderType, *subscriptionID)
 	if err != nil {
 		return nil, err
 	}
@@ -3421,7 +3433,7 @@ func (u *unifiedExchangeAdaptor) cexCounterRates(cexBuyLots, cexSellLots uint64,
 		if s == 0 {
 			s = 1
 		}
-		buyRate, filled, _, err := arbMMExtremaAndTrades(false, lotSize*s, b, multiHopCfg, u.market, u.CEX.VWAP, u.CEX.InvVWAP)
+		filled, buyRate, _, _, err := arbMMExtremaAndTrades(false, lotSize*s, b, multiHopCfg, u.market, u.CEX.VWAP, u.CEX.InvVWAP)
 		if err != nil {
 			return 0, 0, false, fmt.Errorf("error calculating dex buy price for quote conversion: %w", err)
 		}
@@ -3429,7 +3441,7 @@ func (u *unifiedExchangeAdaptor) cexCounterRates(cexBuyLots, cexSellLots uint64,
 			return 0, 0, false, nil
 		}
 
-		sellRate, filled, _, err := arbMMExtremaAndTrades(true, lotSize*b, s, multiHopCfg, u.market, u.CEX.VWAP, u.CEX.InvVWAP)
+		filled, sellRate, _, _, err := arbMMExtremaAndTrades(true, lotSize*b, s, multiHopCfg, u.market, u.CEX.VWAP, u.CEX.InvVWAP)
 		if err != nil {
 			return 0, 0, false, fmt.Errorf("error calculating dex sell price for quote conversion: %w", err)
 		}

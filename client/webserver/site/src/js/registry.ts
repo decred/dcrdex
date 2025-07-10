@@ -779,6 +779,8 @@ export interface ArbMarketMakingPlacement {
 export interface MultiHopCfg {
   baseAssetMarket: [number, number]
   quoteAssetMarket: [number, number]
+  marketOrders: boolean
+  limitOrdersBuffer: number
 }
 
 export interface ArbMarketMakingConfig {
@@ -960,6 +962,7 @@ export interface TradePlacement {
   standingLots: number
   orderedLots: number
   counterTradeRate: number
+  multiHopRates: [number, number]
   requiredDex: Record<number, number>
   requiredCex: number
   usedDex: Record<number, number>

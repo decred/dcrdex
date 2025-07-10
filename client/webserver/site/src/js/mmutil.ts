@@ -891,9 +891,12 @@ export class RunningMarketMakerDisplay {
     }
     setDeficiencyVisibility(totalDeficiency > 0, rows)
 
-    Doc.setVis(this.mkt.cexName, form.cexSection, form.counterTradeRateHeader, form.requiredCEXHeader, form.usedCEXHeader)
+    Doc.setVis(this.mkt.cexName, form.cexSection, form.counterTradeRateHeader, form.multiHopRatesHeader, form.requiredCEXHeader, form.usedCEXHeader)
     let cexAsset: SupportedAsset
     if (this.mkt.cexName) {
+      const isMultiHop = this.mkt.cfg.arbMarketMakingConfig && this.mkt.cfg.arbMarketMakingConfig.multiHop
+      Doc.setVis(isMultiHop, form.multiHopRatesHeader)
+      Doc.setVis(!isMultiHop, form.counterTradeRateHeader)
       const cexDisplayInfo = CEXDisplayInfos[this.mkt.cexName]
       if (cexDisplayInfo) {
         form.cexLogo.src = cexDisplayInfo.logo
@@ -948,7 +951,32 @@ export class RunningMarketMakerDisplay {
         rowTmpl.standingLots.classList.add('text-warning')
         rowTmpl.orderedLots.classList.add('text-warning')
       }
-      rowTmpl.counterTradeRate.textContent = Doc.formatRateFullPrecision(placement.counterTradeRate, baseUI, quoteUI, this.mkt.rateStep)
+      if (this.mkt.cfg.arbMarketMakingConfig && this.mkt.cfg.arbMarketMakingConfig.multiHop) {
+        Doc.hide(rowTmpl.counterTradeRate)
+        Doc.show(rowTmpl.multiHopRates)
+        const multiHopCfg = this.mkt.cfg.arbMarketMakingConfig.multiHop
+        let leg1: [number, number], leg2: [number, number]
+        if (side === 'buys') {
+          leg1 = multiHopCfg.baseAssetMarket
+          leg2 = multiHopCfg.quoteAssetMarket
+        } else {
+          leg1 = multiHopCfg.quoteAssetMarket
+          leg2 = multiHopCfg.baseAssetMarket
+        }
+        const [leg1Base, leg1Quote] = leg1
+        const [leg2Base, leg2Quote] = leg2
+        const leg1BaseSymbol = app().assets[leg1Base].symbol.toUpperCase()
+        const leg1QuoteSymbol = app().assets[leg1Quote].symbol.toUpperCase()
+        const leg2BaseSymbol = app().assets[leg2Base].symbol.toUpperCase()
+        const leg2QuoteSymbol = app().assets[leg2Quote].symbol.toUpperCase()
+        rowTmpl.aggRate.textContent = `${Doc.formatRateFullPrecision(placement.counterTradeRate, baseUI, quoteUI, this.mkt.rateStep)} ${app().assets[this.mkt.baseID].symbol.toUpperCase()}/${app().assets[this.mkt.quoteID].symbol.toUpperCase()}`
+        rowTmpl.leg1Rate.textContent = `${Doc.formatRateFullPrecision(placement.multiHopRates[0], app().assets[leg1Base].unitInfo, app().assets[leg1Quote].unitInfo, this.mkt.rateStep)} ${leg1BaseSymbol}/${leg1QuoteSymbol}`
+        rowTmpl.leg2Rate.textContent = `${Doc.formatRateFullPrecision(placement.multiHopRates[1], app().assets[leg2Base].unitInfo, app().assets[leg2Quote].unitInfo, this.mkt.rateStep)} ${leg2BaseSymbol}/${leg2QuoteSymbol}`
+      } else {
+        Doc.show(rowTmpl.counterTradeRate)
+        Doc.hide(rowTmpl.multiHopRates)
+        rowTmpl.counterTradeRate.textContent = `${Doc.formatRateFullPrecision(placement.counterTradeRate, baseUI, quoteUI, this.mkt.rateStep)} ${app().assets[this.mkt.baseID].symbol.toUpperCase()}/${app().assets[this.mkt.quoteID].symbol.toUpperCase()}`
+      }
       for (const assetID of assetIDs) {
         const asset = app().assets[assetID]
         const unitInfo = asset.unitInfo
@@ -967,7 +995,7 @@ export class RunningMarketMakerDisplay {
         rowTmpl.requiredDEX.appendChild(requiredRow)
         rowTmpl.usedDEX.appendChild(usedRow)
       }
-      Doc.setVis(this.mkt.cexName, rowTmpl.counterTradeRate, rowTmpl.requiredCEX, rowTmpl.usedCEX)
+      Doc.setVis(this.mkt.cexName, rowTmpl.requiredCEX, rowTmpl.usedCEX)
       if (this.mkt.cexName) {
         const requiredAmt = Doc.formatCoinValue(placement.requiredCex, cexAsset.unitInfo)
         rowTmpl.requiredCEX.textContent = `${requiredAmt} ${cexAsset.symbol.toUpperCase()}`
