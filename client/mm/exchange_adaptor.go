@@ -3409,7 +3409,7 @@ func (u *unifiedExchangeAdaptor) Connect(ctx context.Context) (*sync.WaitGroup, 
 	go func() {
 		defer u.wg.Done()
 		<-ctx.Done()
-		u.eventLogDB.endRun(startTime, u.mwh, time.Now().Unix())
+		u.eventLogDB.endRun(startTime, u.mwh)
 	}()
 
 	u.wg.Add(1)
