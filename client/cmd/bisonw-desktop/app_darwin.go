@@ -443,13 +443,12 @@ type delegateWrapper struct{}
 
 func (_ *delegateWrapper) handleApplicationWillFinishLaunching(_ foundation.Notification) {
 	app := appkit.Application_SharedApplication()
+	setSystemBar(app)
 	setAppMainMenuBar(app)
-	createNewWebView()
 }
 
 func (_ *delegateWrapper) handleApplicationDidFinishLaunching(_ foundation.Notification) {
-	app := appkit.Application_SharedApplication()
-	setSystemBar(app)
+	createNewWebView()
 }
 
 func (_ *delegateWrapper) handleApplicationShouldHandleReopenHasVisibleWindows(_ appkit.Application, hasVisibleWindows bool) bool {
