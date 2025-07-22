@@ -52,7 +52,7 @@ const (
 	// https://data.messari.io/api/v1/assets/DCR/metrics/market-data. From a
 	// previous research by buck, say "Without an API key requests are rate
 	// limited to 20 requests per minute". That means we are limited to 20
-	// requests for tickers per minute but with with a 10min refresh interval,
+	// requests for tickers per minute but with a 10min refresh interval,
 	// we'd only exhaust 2880 call assuming we are fetching data for 20 tickers
 	// (assets supported by dex are still below 20, revisit if we implement up
 	// to 20 assets).
