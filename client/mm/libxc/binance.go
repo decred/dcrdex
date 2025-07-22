@@ -338,50 +338,101 @@ func (b *binanceOrderBook) midGap() uint64 {
 	return b.book.midGap()
 }
 
-// TODO: check all symbols
-var dexToBinanceSymbol = map[string]string{
-	"polygon": "MATIC",
+// dexToBinanceCoinSymbol maps DEX asset symbols to Binance coin symbols
+// Only include mappings that are NOT simple case conversions
+var dexToBinanceCoinSymbol = map[string]string{
+	"polygon": "POL",
 	"weth":    "ETH",
 }
 
+// binanceToDexCoinSymbol maps Binance coin symbols to DEX coin symbols.
+// These override the reverse mappings from dexToBinanceCoinSymbol.
+var binanceToDexCoinSymbol = map[string]string{
+	"ETH": "eth",
+}
+
+// dexToBinanceNetworkSymbol maps DEX network symbols to Binance network symbols
+var dexToBinanceNetworkSymbol = map[string]string{
+	"polygon": "MATIC",
+}
+
+// dexCoinToWrappedSymbol maps DEX coin symbols to their wrapped version when
+// on different networks
+var dexCoinToWrappedSymbol = map[string]string{
+	"eth": "weth",
+}
+
+// binanceToDexSymbol is the complete mapping from Binance symbols to DEX symbols
+// Built in init() from all the other mappings
 var binanceToDexSymbol = make(map[string]string)
 
 // convertBnCoin converts a binance coin symbol to a dex symbol.
 func convertBnCoin(coin string) string {
-	symbol := strings.ToLower(coin)
 	if convertedSymbol, found := binanceToDexSymbol[strings.ToUpper(coin)]; found {
-		symbol = convertedSymbol
+		return convertedSymbol
 	}
-	if symbol == "weth" {
-		return "eth"
+	return strings.ToLower(coin)
+}
+
+// convertBnNetwork converts a binance network symbol to a dex symbol.
+func convertBnNetwork(network string) string {
+	for key, value := range dexToBinanceNetworkSymbol {
+		if value == strings.ToUpper(network) {
+			return key
+		}
 	}
-	return symbol
+	return convertBnCoin(network)
 }
 
 // binanceCoinNetworkToDexSymbol takes the coin name and its network name as
 // returned by the binance API and returns the DEX symbol.
 func binanceCoinNetworkToDexSymbol(coin, network string) string {
-	symbol, netSymbol := convertBnCoin(coin), convertBnCoin(network)
+	symbol, netSymbol := convertBnCoin(coin), convertBnNetwork(network)
 	if symbol == netSymbol {
 		return symbol
 	}
-	if symbol == "eth" {
-		symbol = "weth"
+	// Convert coin to wrapped version if it has a wrapped equivalent
+	// Only apply to the coin symbol, not the network symbol
+	if wrappedSymbol, found := dexCoinToWrappedSymbol[symbol]; found {
+		symbol = wrappedSymbol
 	}
 	return symbol + "." + netSymbol
 }
 
-func init() {
-	for key, value := range dexToBinanceSymbol {
-		binanceToDexSymbol[value] = key
-	}
-}
-
-func mapDexToBinanceSymbol(symbol string) string {
-	if binanceSymbol, found := dexToBinanceSymbol[strings.ToLower(symbol)]; found {
+func mapDexSymbolToBinanceCoin(symbol string) string {
+	if binanceSymbol, found := dexToBinanceCoinSymbol[strings.ToLower(symbol)]; found {
 		return binanceSymbol
 	}
 	return strings.ToUpper(symbol)
+}
+
+func mapDexSymbolToBinanceNetwork(symbol string) string {
+	if binanceSymbol, found := dexToBinanceNetworkSymbol[strings.ToLower(symbol)]; found {
+		return binanceSymbol
+	}
+	return strings.ToUpper(symbol)
+}
+
+func init() {
+	// Build the binanceToDexSymbol map for coin symbols only
+	// Network symbols are handled separately by convertBnNetwork.
+	// This is to avoid network symbols affecting coin symbol conversions.
+	// The specific reason for this is that the MATIC coin ticker was changed
+	// to POL, but the network symbol for Polygon POS is still MATIC. However,
+	// MATIC is still returned with a balance of 0 in the balances response.
+
+	// Direct Binance -> DEX coin symbol mappings (highest priority)
+	for key, value := range binanceToDexCoinSymbol {
+		binanceToDexSymbol[key] = value
+	}
+
+	// From coin symbol mappings (DEX -> Binance, reverse to Binance -> DEX)
+	for key, value := range dexToBinanceCoinSymbol {
+		// Only add if not already present (lower priority)
+		if _, exists := binanceToDexSymbol[value]; !exists {
+			binanceToDexSymbol[value] = key
+		}
+	}
 }
 
 type bncAssetConfig struct {
@@ -411,10 +462,13 @@ func bncAssetCfg(assetID uint32) (*bncAssetConfig, error) {
 	}
 
 	parts := strings.Split(symbol, ".")
-	coin := mapDexToBinanceSymbol(parts[0])
-	chain := coin
+	coin := mapDexSymbolToBinanceCoin(parts[0])
+
+	var chain string
 	if len(parts) > 1 {
-		chain = mapDexToBinanceSymbol(parts[1])
+		chain = mapDexSymbolToBinanceNetwork(parts[1])
+	} else {
+		chain = mapDexSymbolToBinanceNetwork(parts[0])
 	}
 
 	return &bncAssetConfig{
