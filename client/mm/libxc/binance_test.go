@@ -33,13 +33,13 @@ func TestSubscribeTradeUpdates(t *testing.T) {
 
 func TestBinanceToDexSymbol(t *testing.T) {
 	tests := map[[2]string]string{
-		{"ETH", "ETH"}:     "eth",
-		{"ETH", "MATIC"}:   "weth.polygon",
-		{"MATIC", "MATIC"}: "polygon",
-		{"USDC", "ETH"}:    "usdc.eth",
-		{"USDC", "MATIC"}:  "usdc.polygon",
-		{"BTC", "BTC"}:     "btc",
-		{"WBTC", "ETH"}:    "wbtc.eth",
+		{"ETH", "ETH"}:    "eth",
+		{"ETH", "MATIC"}:  "weth.polygon",
+		{"USDC", "ETH"}:   "usdc.eth",
+		{"USDC", "MATIC"}: "usdc.polygon",
+		{"BTC", "BTC"}:    "btc",
+		{"WBTC", "ETH"}:   "wbtc.eth",
+		{"POL", "MATIC"}:  "polygon",
 	}
 
 	for test, expected := range tests {
@@ -105,6 +105,13 @@ func TestBncAssetCfg(t *testing.T) {
 			assetID:          966002,
 			symbol:           "weth.polygon",
 			coin:             "ETH",
+			chain:            "MATIC",
+			conversionFactor: 1e9,
+		},
+		966: {
+			assetID:          966,
+			symbol:           "polygon",
+			coin:             "POL",
 			chain:            "MATIC",
 			conversionFactor: 1e9,
 		},
