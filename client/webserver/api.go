@@ -427,7 +427,7 @@ func (s *WebServer) apiRedeemPrepaidBond(w http.ResponseWriter, r *http.Request)
 		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
-	tier, err := s.core.RedeemPrepaidBond(appPW, req.Code, req.Host, req.Cert)
+	tier, err := s.core.RedeemPrepaidBond(appPW, req.Code, req.Host, []byte(req.Cert))
 	if err != nil {
 		s.writeAPIError(w, err)
 		return
