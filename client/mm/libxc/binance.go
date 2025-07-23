@@ -737,6 +737,7 @@ func (bnc *binance) readCoins(coins []*bntypes.CoinInfo) {
 	for _, nfo := range coins {
 		for _, netInfo := range nfo.NetworkList {
 			symbol := binanceCoinNetworkToDexSymbol(nfo.Coin, netInfo.Network)
+
 			assetID, found := dex.BipSymbolID(symbol)
 			if !found {
 				continue
@@ -987,15 +988,26 @@ func (bnc *binance) generateTradeID() string {
 // steppedRate rounds the rate to the nearest integer multiple of the step.
 // The minimum returned value is step.
 func steppedRate(r, step uint64) uint64 {
-	steps := math.Round(float64(r) / float64(step))
+	steps := uint64(math.Round(float64(r) / float64(step)))
 	if steps == 0 {
 		return step
 	}
-	return uint64(math.Round(steps * float64(step)))
+	return steps * step
+}
+
+// steppedQty rounds the quantity to the nearest integer multiple of the step
+// that is less than or equal to the quantity. This is in order to avoid
+// attempting to place a higher quantity order than the user has available.
+func steppedQty(qty, step uint64) uint64 {
+	steps := uint64(math.Floor(float64(qty) / float64(step)))
+	if steps == 0 {
+		return step
+	}
+	return steps * step
 }
 
 func qtyToString(qty uint64, assetCfg *bncAssetConfig, lotSize uint64) string {
-	steppedQty := steppedRate(qty, lotSize)
+	steppedQty := steppedQty(qty, lotSize)
 	convQty := float64(steppedQty) / float64(assetCfg.conversionFactor)
 	qtyPrec := int(math.Round(math.Log10(float64(assetCfg.conversionFactor) / float64(lotSize))))
 	return strconv.FormatFloat(convQty, 'f', qtyPrec, 64)
@@ -1009,7 +1021,17 @@ func rateToString(rate uint64, baseCfg, quoteCfg *bncAssetConfig, rateStep uint6
 	return strconv.FormatFloat(convRate, 'f', ratePrec, 64)
 }
 
-func buildTradeRequest(baseCfg, quoteCfg *bncAssetConfig, market *bntypes.Market, avgPrice uint64, sell bool, orderType OrderType, rate, qty uint64, tradeID string) (url.Values, error) {
+func buildTradeRequest(baseCfg, quoteCfg *bncAssetConfig, market *bntypes.Market, avgPrice uint64, sell bool, orderType OrderType, rate, qty, quoteQty uint64, tradeID string) (url.Values, uint64, error) {
+	if qty > 0 && quoteQty > 0 {
+		return nil, 0, fmt.Errorf("cannot specify both quantity and quote quantity")
+	}
+	if sell && quoteQty > 0 {
+		return nil, 0, fmt.Errorf("quote quantity cannot be used for sell orders")
+	}
+	if !sell && orderType == OrderTypeMarket && qty > 0 {
+		return nil, 0, fmt.Errorf("quoteQty MUST be used for market buys")
+	}
+
 	side := "BUY"
 	if sell {
 		side = "SELL"
@@ -1020,65 +1042,72 @@ func buildTradeRequest(baseCfg, quoteCfg *bncAssetConfig, market *bntypes.Market
 	}
 
 	var rateStr, qtyStr, quoteQtyStr string
-	if orderType == OrderTypeLimit {
+	var qtyToReturn uint64
+
+	if orderType == OrderTypeLimit || orderType == OrderTypeLimitIOC {
 		if rate < market.MinPrice || rate > market.MaxPrice {
-			return nil, fmt.Errorf("rate %v is out of bounds. min: %d, max: %d", rate, market.MinPrice, market.MaxPrice)
+			return nil, 0, fmt.Errorf("rate %v is out of bounds. min: %d, max: %d", rate, market.MinPrice, market.MaxPrice)
 		}
-		if qty < market.MinQty || qty > market.MaxQty {
-			return nil, fmt.Errorf("quantity %s is out of bounds. min: %s, max: %s",
-				baseCfg.ui.FormatConventional(qty),
+
+		qtyToReturn = qty
+		if quoteQty > 0 {
+			qtyToReturn = steppedQty(calc.QuoteToBase(rate, quoteQty), market.LotSize)
+		}
+
+		if qtyToReturn < market.MinQty || qtyToReturn > market.MaxQty {
+			return nil, 0, fmt.Errorf("quantity %s is out of bounds. min: %s, max: %s",
+				baseCfg.ui.FormatConventional(qtyToReturn),
 				baseCfg.ui.FormatConventional(market.MinQty),
 				baseCfg.ui.FormatConventional(market.MaxQty))
 		}
-		quoteQty := calc.BaseToQuote(rate, qty)
-		if quoteQty < market.MinNotional {
-			return nil, fmt.Errorf("notional %s < min %s",
-				quoteCfg.ui.FormatConventional(quoteQty),
+		notional := calc.BaseToQuote(rate, qtyToReturn)
+		if notional < market.MinNotional {
+			return nil, 0, fmt.Errorf("notional %s < min %s",
+				quoteCfg.ui.FormatConventional(notional),
 				quoteCfg.ui.FormatConventional(market.MinNotional))
 		}
-		if quoteQty > market.MaxNotional {
-			return nil, fmt.Errorf("notional %s > max %s",
-				quoteCfg.ui.FormatConventional(quoteQty),
+		if notional > market.MaxNotional {
+			return nil, 0, fmt.Errorf("notional %s > max %s",
+				quoteCfg.ui.FormatConventional(notional),
 				quoteCfg.ui.FormatConventional(market.MaxNotional))
 		}
+
 		rateStr = rateToString(rate, baseCfg, quoteCfg, market.RateStep)
-		qtyStr = qtyToString(qty, baseCfg, market.LotSize)
-	} else if sell { // market sell
-		if qty < market.MinQty || qty > market.MaxQty {
-			return nil, fmt.Errorf("quantity %s is out of bounds. min: %s, max: %s",
-				baseCfg.ui.FormatConventional(qty),
-				baseCfg.ui.FormatConventional(market.MinQty),
-				baseCfg.ui.FormatConventional(market.MaxQty))
+		qtyStr = qtyToString(qtyToReturn, baseCfg, market.LotSize)
+	} else { // market
+		var notional uint64
+		if quoteQty > 0 {
+			notional = quoteQty
+			quoteQtyStr = qtyToString(quoteQty, quoteCfg, 1)
+			qtyToReturn = quoteQty
+		} else {
+			if qty < market.MinQty || qty > market.MaxQty {
+				return nil, 0, fmt.Errorf("quantity %s is out of bounds. min: %s, max: %s",
+					baseCfg.ui.FormatConventional(qty),
+					baseCfg.ui.FormatConventional(market.MinQty),
+					baseCfg.ui.FormatConventional(market.MaxQty))
+			}
+			notional = calc.BaseToQuote(avgPrice, qty)
+			qtyStr = qtyToString(qty, baseCfg, market.LotSize)
+			qtyToReturn = qty
 		}
-		quoteQty := calc.BaseToQuote(avgPrice, qty)
-		if market.ApplyMinNotionalToMarket && quoteQty < market.MinNotional {
-			return nil, fmt.Errorf("notional %s < min %s",
-				quoteCfg.ui.FormatConventional(quoteQty),
+		if market.ApplyMinNotionalToMarket && notional < market.MinNotional {
+			return nil, 0, fmt.Errorf("notional %s < min %s",
+				quoteCfg.ui.FormatConventional(notional),
 				quoteCfg.ui.FormatConventional(market.MinNotional))
 		}
-		if market.ApplyMaxNotionalToMarket && quoteQty > market.MaxNotional {
-			return nil, fmt.Errorf("notional %s > max %s",
-				quoteCfg.ui.FormatConventional(quoteQty),
+		if market.ApplyMaxNotionalToMarket && notional > market.MaxNotional {
+			return nil, 0, fmt.Errorf("notional %s > max %s",
+				quoteCfg.ui.FormatConventional(notional),
 				quoteCfg.ui.FormatConventional(market.MaxNotional))
 		}
-		qtyStr = qtyToString(qty, baseCfg, market.LotSize)
-	} else { // market buy
-		if market.ApplyMinNotionalToMarket && qty < market.MinNotional {
-			return nil, fmt.Errorf("notional %s < min %s",
-				quoteCfg.ui.FormatConventional(qty),
-				quoteCfg.ui.FormatConventional(market.MinNotional))
-		}
-		if market.ApplyMaxNotionalToMarket && qty > market.MaxNotional {
-			return nil, fmt.Errorf("notional %s > max %s",
-				quoteCfg.ui.FormatConventional(qty),
-				quoteCfg.ui.FormatConventional(market.MaxNotional))
-		}
-		quoteQtyStr = qtyToString(qty, quoteCfg, 1)
 	}
 
 	var timeInForceStr string
 	if orderType == OrderTypeLimit {
 		timeInForceStr = "GTC"
+	} else if orderType == OrderTypeLimitIOC {
+		timeInForceStr = "IOC"
 	}
 
 	// Build the request body
@@ -1100,7 +1129,7 @@ func buildTradeRequest(baseCfg, quoteCfg *bncAssetConfig, market *bntypes.Market
 		v.Add("timeInForce", timeInForceStr)
 	}
 
-	return v, nil
+	return v, qtyToReturn, nil
 }
 
 // calcFees returns the total base and quote fees for a trade based on the
@@ -1141,7 +1170,7 @@ func (bnc *binance) cachedAvgPrice(mktID string) (uint64, error) {
 
 // ValidateTrade returns an error if the parameters for this trade are not
 // allowed.
-func (bnc *binance) ValidateTrade(baseID, quoteID uint32, sell bool, rate, qty uint64, orderType OrderType) error {
+func (bnc *binance) ValidateTrade(baseID, quoteID uint32, sell bool, rate, qty, quoteQty uint64, orderType OrderType) error {
 	baseCfg, err := bncAssetCfg(baseID)
 	if err != nil {
 		return fmt.Errorf("error getting asset cfg for %d: %w", baseID, err)
@@ -1163,7 +1192,7 @@ func (bnc *binance) ValidateTrade(baseID, quoteID uint32, sell bool, rate, qty u
 		return fmt.Errorf("error getting avg price for %s: %w", slug, err)
 	}
 
-	_, err = buildTradeRequest(baseCfg, quoteCfg, market, avgPrice, sell, orderType, rate, qty, "")
+	_, _, err = buildTradeRequest(baseCfg, quoteCfg, market, avgPrice, sell, orderType, rate, qty, quoteQty, "")
 	if err != nil {
 		return err
 	}
@@ -1174,9 +1203,11 @@ func (bnc *binance) ValidateTrade(baseID, quoteID uint32, sell bool, rate, qty u
 // Trade executes a trade on the CEX.
 //   - subscriptionID takes an ID returned from SubscribeTradeUpdates.
 //   - Rate is ignored for market orders.
-//   - Qty is in unit of base asset, except for market buys where it is in units
-//     of quote asset.
-func (bnc *binance) Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, orderType OrderType, subscriptionID int) (*Trade, error) {
+//   - Qty is in units of base asset, quoteQty is in units of quote asset.
+//     Only one of qty or quoteQty should be non-zero.
+//   - QuoteQty is only allowed for BUY orders, and it is required for market
+//     buy orders.
+func (bnc *binance) Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty, quoteQty uint64, orderType OrderType, subscriptionID int) (*Trade, error) {
 	baseCfg, err := bncAssetCfg(baseID)
 	if err != nil {
 		return nil, fmt.Errorf("error getting asset cfg for %d: %w", baseID, err)
@@ -1200,7 +1231,7 @@ func (bnc *binance) Trade(ctx context.Context, baseID, quoteID uint32, sell bool
 		return nil, fmt.Errorf("error getting avg price for %s: %w", slug, err)
 	}
 
-	v, err := buildTradeRequest(baseCfg, quoteCfg, market, avgPrice, sell, orderType, rate, qty, tradeID)
+	v, qtyInRequest, err := buildTradeRequest(baseCfg, quoteCfg, market, avgPrice, sell, orderType, rate, qty, quoteQty, tradeID)
 	if err != nil {
 		return nil, fmt.Errorf("error building trade request: %w", err)
 	}
@@ -1217,7 +1248,7 @@ func (bnc *binance) Trade(ctx context.Context, baseID, quoteID uint32, sell bool
 		quoteID:   quoteID,
 		sell:      sell,
 		rate:      rate,
-		qty:       qty,
+		qty:       qtyInRequest,
 		market:    orderType == OrderTypeMarket,
 	}
 	bnc.tradeUpdaterMtx.Unlock()
@@ -1315,7 +1346,7 @@ func (bnc *binance) Withdraw(ctx context.Context, assetID uint32, qty uint64, ad
 		return "", 0, fmt.Errorf("error getting withdraw lot size for %d: %w", assetID, err)
 	}
 
-	steppedQty := steppedRate(qty, lotSize)
+	steppedQty := steppedQty(qty, lotSize)
 	convQty := float64(steppedQty) / float64(assetCfg.conversionFactor)
 	prec := int(math.Round(math.Log10(float64(assetCfg.conversionFactor) / float64(lotSize))))
 	qtyStr := strconv.FormatFloat(convQty, 'f', prec, 64)

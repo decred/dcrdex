@@ -702,4 +702,8 @@ var EnUS = map[string]*intl.Translation{
 	"Number of Runs":              {T: "Number of Runs"},
 	"New Release Message":         {T: "<strong> 🚀 New release available!</strong> Get the latest version now."},
 	"View Website":                {T: "View Website"},
+	"multi_hop_completion_order":  {T: "Multi-Hop Completion Order"},
+	"mh_completion_tooltip":       {T: "This specifies the type of order to execute on the second leg of a multi-hop arb. Market orders will always be filled, ensuring that the bot never has any funds stuck in the intermediate asset, but may result in losses if the price suddenly moves against the bot."},
+	"limit_order_buffer":          {T: "Limit Order Buffer"},
+	"limit_order_buffer_tooltip":  {T: "This specifies the buffer to apply to the limit order rate for the second leg of a multi-hop arb. The buffer will make the rate 'worse' (lower for sell orders, higher for buy orders) resulting in a higher probability of the trade being filled in order to avoid having funds stuck in the intermediate asset."},
 }

@@ -89,6 +89,7 @@ type OrderType uint8
 const (
 	OrderTypeLimit OrderType = iota
 	OrderTypeMarket
+	OrderTypeLimitIOC
 )
 
 // CEX implements a set of functions that can be used to interact with a
@@ -117,13 +118,15 @@ type CEX interface {
 	// Trade executes a trade on the CEX.
 	//   - subscriptionID takes an ID returned from SubscribeTradeUpdates.
 	//   - Rate is ignored for market orders.
-	//   - Qty is in units of base asset, except for market buys where it is in
-	//     units of quote asset.
-	Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, orderType OrderType, subscriptionID int) (*Trade, error)
+	//   - Qty is in units of base asset, quoteQty is in units of quote asset.
+	//     Only one of qty or quoteQty should be non-zero.
+	//   - QuoteQty is only allowed for BUY orders, and it is required for market
+	//     buy orders.
+	Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty, quoteQty uint64, orderType OrderType, subscriptionID int) (*Trade, error)
 	// ValidateTrade validates a trade before it is executed. This is used to
 	// ensure that the trade will be able to be executed on the CEX before trades
 	// are placed on the DEX orderbook expecting to be able to be arbitraged.
-	ValidateTrade(baseID, quoteID uint32, sell bool, rate, qty uint64, orderType OrderType) error
+	ValidateTrade(baseID, quoteID uint32, sell bool, rate, qty, quoteQty uint64, orderType OrderType) error
 	// UnsubscribeMarket unsubscribes from order book updates on a market.
 	UnsubscribeMarket(baseID, quoteID uint32) error
 	// VWAP returns the volume weighted average price for a certain quantity

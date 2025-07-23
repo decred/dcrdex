@@ -1140,6 +1140,7 @@
           <th class="border text-center">[[[Ordered Lots]]]</th>
           <th class="border text-center">[[[Rate]]]</th>
           <th class="border text-center" id="counterTradeRateHeader">[[[Arb Rate]]]</th>
+          <th class="border text-center" id="multiHopRatesHeader">Multi-hop Rates</th>
           <th class="border text-center">[[[Required DEX]]]</th>
           <th class="border text-center">[[[Used DEX]]]</th>
           <th class="border text-center" id="requiredCEXHeader">[[[Required CEX]]]</th>
@@ -1155,6 +1156,17 @@
           <td data-tmpl="orderedLots" class="text-center border"></td>
           <td data-tmpl="rate" class="text-center border"></td>
           <td data-tmpl="counterTradeRate" class="text-center border"></td>
+          <td data-tmpl="multiHopRates" class="text-center border">
+            <div>
+              <span class="me-1"><small>Aggregate:</small></span><span data-tmpl="aggRate"></span>
+            </div>
+            <div>
+              <span class="me-1"><small>Leg 1:</small></span><span data-tmpl="leg1Rate"></span>
+            </div>
+            <div>
+              <span class="me-1"><small>Leg 2:</small></span><span data-tmpl="leg2Rate"></span>
+            </div>
+          </td>
           <td data-tmpl="requiredDEX" class="text-center border">
             <span id="placementAmtRowTmpl" class="d-flex justify-content-end">
               <span data-tmpl="amt"></span>

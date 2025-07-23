@@ -74,6 +74,15 @@ type LimitOrderConfig struct {
 	Limit LimitOrderConfigData `json:"limit_limit_gtc"`
 }
 
+type LimitIocConfigData struct {
+	BaseSize   string `json:"base_size"`
+	LimitPrice string `json:"limit_price"`
+}
+
+type LimitIocConfig struct {
+	SorLimitIoc LimitIocConfigData `json:"sor_limit_ioc"`
+}
+
 type MarketOrderConfigData struct {
 	BaseSize  *string `json:"base_size"`
 	QuoteSize *string `json:"quote_size"`

@@ -148,7 +148,7 @@ func (a *simpleArbMarketMaker) arbExistsOnSide(sellOnDEX bool) (exists bool, lot
 			return false, 0, 0, 0, fmt.Errorf("error checking dex balance: %w", err)
 		}
 
-		cexSufficient := a.cex.SufficientBalanceForCEXTrade(a.baseID, a.quoteID, !sellOnDEX, cexExtrema, numLots*lotSize, libxc.OrderTypeLimit)
+		cexSufficient := a.cex.SufficientBalanceForCEXTrade(a.baseID, a.quoteID, !sellOnDEX, cexExtrema, numLots*lotSize, 0 /* quoteQty */, libxc.OrderTypeLimit)
 		if !dexSufficient || !cexSufficient {
 			if numLots == 1 {
 				return false, 0, 0, 0, nil
@@ -224,7 +224,7 @@ func (a *simpleArbMarketMaker) executeArb(sellOnDex bool, lotsToArb, dexRate, ce
 	defer a.activeArbsMtx.Unlock()
 
 	// Place cex order first. If placing dex order fails then can freely cancel cex order.
-	cexTrade, err := a.cex.CEXTrade(a.ctx, a.baseID, a.quoteID, !sellOnDex, cexRate, lotsToArb*lotSize, libxc.OrderTypeLimit)
+	cexTrade, err := a.cex.CEXTrade(a.ctx, a.baseID, a.quoteID, !sellOnDex, cexRate, lotsToArb*lotSize, 0 /* quoteQty */, libxc.OrderTypeLimit)
 	if err != nil {
 		a.log.Errorf("error placing cex order: %v", err)
 		return

@@ -114,6 +114,13 @@ const defaultLotsPerLevel = {
 const defaultUSDPerSide = {
   prec: 2
 }
+const defaultLimitOrderBuffer = {
+  prec: 2,
+  value: 1,
+  minV: 0,
+  maxV: 20,
+  range: 20
+}
 
 function defaultUIConfig (baseMinWithdraw: number, quoteMinWithdraw: number, botType: string) : UIConfig {
   const buffer = botType === botTypeBasicArb ? 1 : 0
@@ -142,7 +149,9 @@ function defaultMultiHopCfg (possibleArbMkts: string | MultiHopArbMarket[] | und
   if (typeof possibleArbMkts === 'string') return undefined
   return {
     baseAssetMarket: possibleArbMkts[0].BaseMarket,
-    quoteAssetMarket: possibleArbMkts[0].QuoteMarket
+    quoteAssetMarket: possibleArbMkts[0].QuoteMarket,
+    marketOrders: false,
+    limitOrdersBuffer: 0.01
   }
 }
 
@@ -253,6 +262,8 @@ export default class MarketMakerSettingsPage extends BasePage {
   driftToleranceSlider: MiniSlider
   orderPersistence: NumberInput
   orderPersistenceSlider: MiniSlider
+  limitOrderBuffer: NumberInput
+  limitOrderBufferSlider: MiniSlider
   availableDEXBalances: Record<number, number>
   availableCEXBalances: Record<number, number>
   buyBufferSlider: MiniSlider
@@ -356,10 +367,12 @@ export default class MarketMakerSettingsPage extends BasePage {
         console.error('Bridge asset not found in multi-hop markets', bridgeAssetID)
         return
       }
-      this.updatedConfig.multiHop = {
-        baseAssetMarket: multiHopMkts.BaseMarket,
-        quoteAssetMarket: multiHopMkts.QuoteMarket
+      if (!this.updatedConfig.multiHop) {
+        console.error('Multi-hop config not found')
+        return
       }
+      this.updatedConfig.multiHop.baseAssetMarket = multiHopMkts.BaseMarket
+      this.updatedConfig.multiHop.quoteAssetMarket = multiHopMkts.QuoteMarket
     })
 
     // Buy/Sell placements
@@ -413,6 +426,51 @@ export default class MarketMakerSettingsPage extends BasePage {
       const [v] = toPrecision(rawV, prec)
       this.updatedConfig.orderPersistence = v
       this.orderPersistence.setValue(v)
+    })
+
+    this.limitOrderBuffer = new NumberInput(page.limitOrderBufferInput, {
+      prec: defaultLimitOrderBuffer.prec,
+      min: defaultLimitOrderBuffer.minV * 100,
+      changed: (bufferPct: number) => {
+        const { minV, range } = defaultLimitOrderBuffer
+        const pct = Math.max(minV, Math.min(range, bufferPct))
+        this.limitOrderBuffer.setValue(pct)
+        if (this.updatedConfig.multiHop && typeof this.updatedConfig.multiHop === 'object') {
+          this.updatedConfig.multiHop.limitOrdersBuffer = pct / 100
+        }
+        this.limitOrderBufferSlider.setValue((pct - minV) / range)
+        this.updateModifiedMarkers()
+      }
+    })
+
+    this.limitOrderBufferSlider = new MiniSlider(page.limitOrderBufferSlider, (r: number) => {
+      const { minV, range } = defaultLimitOrderBuffer
+      const pct = minV + r * range
+      this.limitOrderBuffer.setValue(pct)
+      if (this.updatedConfig.multiHop && typeof this.updatedConfig.multiHop === 'object') {
+        this.updatedConfig.multiHop.limitOrdersBuffer = pct / 100
+      }
+      this.updateModifiedMarkers()
+    })
+
+    Doc.bind(page.multiHopMarketOrder, 'change', () => {
+      if (page.multiHopMarketOrder.checked) {
+        if (this.updatedConfig.multiHop && typeof this.updatedConfig.multiHop === 'object') {
+          this.updatedConfig.multiHop.marketOrders = true
+        }
+        Doc.hide(page.limitOrderBufferSection)
+        this.updateModifiedMarkers()
+      }
+    })
+
+    Doc.bind(page.multiHopLimitOrder, 'change', () => {
+      if (page.multiHopLimitOrder.checked) {
+        if (this.updatedConfig.multiHop && typeof this.updatedConfig.multiHop === 'object') {
+          this.updatedConfig.multiHop.marketOrders = false
+        }
+        Doc.show(page.limitOrderBufferSection)
+        this.updateModifiedMarkers()
+      }
     })
 
     this.qcProfit = new NumberInput(page.qcProfit, {
@@ -706,7 +764,7 @@ export default class MarketMakerSettingsPage extends BasePage {
 
   originalMultiHopCfg (savedMultiHopCfg: MultiHopCfg | undefined, possibleArbMkts: string | MultiHopArbMarket[] | undefined) : MultiHopCfg | undefined {
     if (!possibleArbMkts || typeof possibleArbMkts === 'string') return undefined
-    if (!savedMultiHopCfg) return { baseAssetMarket: possibleArbMkts[0].BaseMarket, quoteAssetMarket: possibleArbMkts[0].QuoteMarket }
+    if (!savedMultiHopCfg) return defaultMultiHopCfg(possibleArbMkts)
     let foundSavedMarket = false
     const mktsEqual = (mkt1: [number, number], mkt2: [number, number]) => {
       return mkt1[0] === mkt2[0] && mkt1[1] === mkt2[1]
@@ -717,7 +775,14 @@ export default class MarketMakerSettingsPage extends BasePage {
         break
       }
     }
-    if (!foundSavedMarket) return { baseAssetMarket: possibleArbMkts[0].BaseMarket, quoteAssetMarket: possibleArbMkts[0].QuoteMarket }
+    if (!foundSavedMarket) {
+      return {
+        baseAssetMarket: possibleArbMkts[0].BaseMarket,
+        quoteAssetMarket: possibleArbMkts[0].QuoteMarket,
+        marketOrders: savedMultiHopCfg.marketOrders,
+        limitOrdersBuffer: savedMultiHopCfg.limitOrdersBuffer
+      }
+    }
     return savedMultiHopCfg
   }
 
@@ -859,6 +924,10 @@ export default class MarketMakerSettingsPage extends BasePage {
       Doc.show(page.bridgeAssetBox)
     }
 
+    // Show/hide multi-hop completion section based on whether multi-hop is required
+    const requiresMultiHop = possibleArbMkts !== undefined && typeof possibleArbMkts !== 'string' && possibleArbMkts.length > 0
+    Doc.setVis(requiresMultiHop, page.multiHopCompletionBox)
+
     Doc.setVis(this.runningBot, page.updateRunningButton)
     Doc.setVis(!this.runningBot, page.updateStartButton, page.updateButton)
 
@@ -933,6 +1002,19 @@ export default class MarketMakerSettingsPage extends BasePage {
     else this.showAdvancedConfig()
 
     this.setOriginalValues()
+
+    // Initialize multi-hop order type radio buttons and limit order buffer section visibility
+    if (this.updatedConfig.multiHop && typeof this.updatedConfig.multiHop === 'object' && Doc.isDisplayed(page.multiHopCompletionBox)) {
+      if (this.updatedConfig.multiHop.marketOrders) {
+        page.multiHopMarketOrder.checked = true
+        page.multiHopLimitOrder.checked = false
+        Doc.hide(page.limitOrderBufferSection)
+      } else {
+        page.multiHopMarketOrder.checked = false
+        page.multiHopLimitOrder.checked = true
+        Doc.show(page.limitOrderBufferSection)
+      }
+    }
 
     Doc.hide(page.marketLoading)
     Doc.show(page.botSettingsContainer, page.marketBox)
@@ -2332,6 +2414,24 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.quoteSettings.clear()
     this.baseSettings.init(cfg.baseOptions, this.specs.baseID, false)
     this.quoteSettings.init(cfg.quoteOptions, this.specs.quoteID, true)
+
+    // Initialize multi-hop order type radio buttons and limit order buffer section visibility
+    if (cfg.multiHop && typeof cfg.multiHop === 'object' && Doc.isDisplayed(page.multiHopCompletionBox)) {
+      if (cfg.multiHop.marketOrders) {
+        page.multiHopMarketOrder.checked = true
+        page.multiHopLimitOrder.checked = false
+        Doc.hide(page.limitOrderBufferSection)
+      } else {
+        page.multiHopMarketOrder.checked = false
+        page.multiHopLimitOrder.checked = true
+        Doc.show(page.limitOrderBufferSection)
+      }
+
+      // Set the limit order buffer value
+      const bufferPct = cfg.multiHop.limitOrdersBuffer * 100
+      this.limitOrderBuffer.setValue(bufferPct)
+      this.limitOrderBufferSlider.setValue(bufferPct / 20)
+    }
 
     this.updateModifiedMarkers()
     if (Doc.isDisplayed(page.quickConfig)) this.switchToQuickConfig()
