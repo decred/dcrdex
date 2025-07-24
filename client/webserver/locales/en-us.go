@@ -702,4 +702,6 @@ var EnUS = map[string]*intl.Translation{
 	"Number of Runs":              {T: "Number of Runs"},
 	"New Release Message":         {T: "<strong> 🚀 New release available!</strong> Get the latest version now."},
 	"View Website":                {T: "View Website"},
+	"user_op_id":                  {T: "User Op ID"},
+	"user_op_required":            {T: "You do not have enough funds for redemption. A bundler will be used for gasless redemption."},
 }

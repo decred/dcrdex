@@ -246,6 +246,10 @@ func (n *testNode) accountBalance(ctx context.Context, assetID uint32, addr comm
 	return n.acctBal, n.acctBalErr
 }
 
+func (n *testNode) getUserOpEvent(ctx context.Context, epAddress common.Address, userOpHash common.Hash, swapContractAddress common.Address, blockNumber uint64) (*userOpEvent, error) {
+	return nil, nil
+}
+
 func tSwap(bn, locktime int64, value uint64, secret [32]byte, state dexeth.SwapStep, participantAddr *common.Address) *dexeth.SwapState {
 	return &dexeth.SwapState{
 		Secret:      secret,
@@ -312,7 +316,7 @@ func TestDecodeCoinID(t *testing.T) {
 		wantErr: true,
 	}, {
 		name:    "too long",
-		input:   append(txHashB, txHashB...),
+		input:   append(append(txHashB, txHashB...), byte(1)),
 		wantErr: true,
 	}}
 
@@ -336,7 +340,7 @@ func TestDecodeCoinID(t *testing.T) {
 
 func TestRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	backend, err := unconnectedETH(BipID, defaultProtocolVersion.ContractVersion(), common.Address{}, common.Address{}, registeredTokens, tLogger, dex.Simnet)
+	backend, err := unconnectedETH(BipID, 1, defaultProtocolVersion.ContractVersion(), common.Address{}, common.Address{}, registeredTokens, tLogger, dex.Simnet)
 	if err != nil {
 		t.Fatalf("unconnectedETH error: %v", err)
 	}

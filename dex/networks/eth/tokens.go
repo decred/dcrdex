@@ -389,6 +389,7 @@ var Tokens = map[uint32]*Token{
 							Approve:   32_303,
 							Transfer:  66_953,
 						}},
+					1: {},
 				},
 			},
 			// No USDC version 1 gases on simnet, for testing purposes.
@@ -470,17 +471,17 @@ var Tokens = map[uint32]*Token{
 // simnet harness to populate swap contract and token addresses in
 // ContractAddresses and Tokens.
 func MaybeReadSimnetAddrs() {
-	MaybeReadSimnetAddrsDir("eth", ContractAddresses, MultiBalanceAddresses, Tokens[usdcTokenID].NetTokens[dex.Simnet], Tokens[usdtTokenID].NetTokens[dex.Simnet])
+	MaybeReadSimnetAddrsDir("eth", ContractAddresses, MultiBalanceAddresses, EntryPoints, Tokens[usdcTokenID].NetTokens[dex.Simnet], Tokens[usdtTokenID].NetTokens[dex.Simnet])
 }
 
 func MaybeReadSimnetAddrsDir(
 	dir string,
 	contractAddrs map[uint32]map[dex.Network]common.Address,
 	multiBalandAddresses map[dex.Network]common.Address,
+	entryPoints map[dex.Network]common.Address,
 	usdcToken *NetToken,
 	usdtToken *NetToken,
 ) {
-
 	usr, err := user.Current()
 	if err != nil {
 		return
@@ -502,15 +503,20 @@ func MaybeReadSimnetAddrsDir(
 	testUSDTSwapContractAddrFileV0 := filepath.Join(harnessDir, "usdt_swap_contract_address.txt")
 	testUSDTContractAddrFile := filepath.Join(harnessDir, "test_usdt_contract_address.txt")
 	multiBalanceContractAddrFile := filepath.Join(harnessDir, "multibalance_address.txt")
+	entryPointAddrFile := filepath.Join(harnessDir, "entrypoint_contract_address.txt")
 
 	contractAddrs[0][dex.Simnet] = maybeGetContractAddrFromFile(ethSwapContractAddrFileV0)
 	contractAddrs[1][dex.Simnet] = maybeGetContractAddrFromFile(ethSwapContractAddrFileV1)
 	multiBalandAddresses[dex.Simnet] = maybeGetContractAddrFromFile(multiBalanceContractAddrFile)
 
+	entryPoints[dex.Simnet] = maybeGetContractAddrFromFile(entryPointAddrFile)
+
 	usdcToken.SwapContracts[0].Address = maybeGetContractAddrFromFile(testUSDCSwapContractAddrFileV0)
+	usdcToken.SwapContracts[1].Address = contractAddrs[1][dex.Simnet]
 	usdcToken.Address = maybeGetContractAddrFromFile(testUSDCContractAddrFile)
 
 	usdtToken.SwapContracts[0].Address = maybeGetContractAddrFromFile(testUSDTSwapContractAddrFileV0)
+	usdtToken.SwapContracts[1].Address = contractAddrs[1][dex.Simnet]
 	usdtToken.Address = maybeGetContractAddrFromFile(testUSDTContractAddrFile)
 }
 

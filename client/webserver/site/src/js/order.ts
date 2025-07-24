@@ -269,7 +269,18 @@ export default class OrderPage extends BasePage {
         Doc.show(pendingEl)
         return
       }
-      coinLink.textContent = formatCoinID(coin.stringID)
+      const formattedCoinIDParts = formatCoinID(coin.stringID)
+      Doc.empty(coinLink)
+      if (formattedCoinIDParts.length > 1) {
+        for (let i = 0; i < formattedCoinIDParts.length; i++) {
+          const span = document.createElement('span')
+          span.textContent = formattedCoinIDParts[i]
+          coinLink.appendChild(span)
+          if (i < formattedCoinIDParts.length - 1) coinLink.appendChild(document.createElement('br'))
+        }
+      } else {
+        coinLink.textContent = formattedCoinIDParts[0]
+      }
       coinLink.dataset.explorerCoin = coin.stringID
       setCoinHref(coin.assetID, coinLink)
       Doc.show(coinLink)
@@ -297,7 +308,7 @@ export default class OrderPage extends BasePage {
       Doc.hide(tmpl.refundCoin)
       Doc.show(tmpl.refundPending)
     } else {
-      tmpl.refundCoin.textContent = formatCoinID(m.refund.stringID)
+      tmpl.refundCoin.textContent = formatCoinID(m.refund.stringID)[0]
       tmpl.refundCoin.dataset.explorerCoin = m.refund.stringID
       setCoinHref(m.refund.assetID, tmpl.refundCoin)
       Doc.show(tmpl.refundCoin)

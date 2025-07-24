@@ -11,6 +11,11 @@ if [ -d "${NODES_ROOT}" ]; then
   rm -R "${NODES_ROOT}"
 fi
 
+POLYGON_TEST_DIR=$(
+  cd $(dirname "$0")
+  pwd
+)
+
 mkdir -p "${HARNESS_DIR}"
 
 # Shutdown script
@@ -48,6 +53,9 @@ BETA_HTTP_PORT="48297"
 BETA_WS_PORT="34985"
 BETA_GRPC_PORT="34986"
 
+BUNDLER_PRIV_KEY="dcfb54294baf3c746e15a85ca375dc7d5eb97fa7c87f838206daf93eaab2b7cc"
+BUNDLER_ADDRESS="0x65797B6518F6694e86efceAdE581d2aC5a22b287"
+
 fileToHex () {
   echo $(xxd -p "$1" | tr -d '\n')
 }
@@ -56,6 +64,7 @@ ERC20_SWAP_V0=$(fileToHex "../../networks/erc20/contracts/v0/swap_contract.bin")
 TEST_TOKEN=$(fileToHex "../../networks/erc20/contracts/v0/token_contract.bin")
 MULTIBALANCE_BIN=$(fileToHex "../../networks/eth/contracts/multibalance/contract.bin")
 ETH_SWAP_V1=$(fileToHex "../../networks/eth/contracts/v1/contract.bin")
+ENTRYPOINT_V06=$(fileToHex "../../networks/eth/contracts/entrypoint/entrypoint.bin")
 
 MODULES='["eth","txpool"]' # "eth,net,web3,debug,admin,personal,txpool,clique"
 
@@ -92,6 +101,9 @@ cat > "${NODES_ROOT}/genesis.json" <<EOF
   "alloc": {
     "18d65fb8d60c1199bb1ad381be47aa692b482605": {
       "balance": "50000000000000000000000"
+    },
+    "${BUNDLER_ADDRESS}": {
+      "balance": "100000000000000000000"
     }
   }
 }
@@ -357,12 +369,12 @@ cat > "${NODES_ROOT}/test_block10_hash.txt" <<EOF
 ${TEST_BLOCK10_HASH}
 EOF
 
-echo "Deploying ETHSwapV0 contract."
+echo "Deploying Entrypoint contract."
+ENTRYPOINT_CONTRACT_HASH=$("${HARNESS_DIR}/alpha" "--preload ${HARNESS_DIR}/deploy.js --exec deploy(\"${ALPHA_ADDRESS}\",\"${ENTRYPOINT_V06}\")" | sed 's/"//g')
+echo "Entrypoint contract hash is ${ENTRYPOINT_CONTRACT_HASH}."
+
 echo "Deploying ETHSwapV0 contract."
 ETH_SWAP_CONTRACT_HASH_V0=$("${HARNESS_DIR}/alpha" "--preload ${HARNESS_DIR}/deploy.js --exec deploy(\"${ALPHA_ADDRESS}\",\"${ETH_SWAP_V0}\")" | sed 's/"//g')
-
-echo "Deploying ETHSwapV1 contract."
-ETH_SWAP_CONTRACT_HASH_V1=$("${HARNESS_DIR}/alpha" "--preload ${HARNESS_DIR}/deploy.js --exec deploy(\"${ALPHA_ADDRESS}\",\"${ETH_SWAP_V1}\")" | sed 's/"//g')
 
 echo "Deploying USDC contract."
 TEST_USDC_CONTRACT_HASH=$("${HARNESS_DIR}/alpha" "--preload ${HARNESS_DIR}/deploy.js --exec deployERC20(\"${ALPHA_ADDRESS}\",\"${TEST_TOKEN}\",6)" | sed 's/"//g')
@@ -374,6 +386,17 @@ echo "TEST USDT contract hash is ${TEST_USDT_CONTRACT_HASH}."
 
 echo "Deploying MultiBalance contract."
 MULTIBALANCE_CONTRACT_HASH=$("${HARNESS_DIR}/alpha" "--preload ${HARNESS_DIR}/deploy.js --exec deploy(\"${ALPHA_ADDRESS}\",\"${MULTIBALANCE_BIN}\")" | sed 's/"//g')
+
+mine_pending_txs
+
+ENTRYPOINT_CONTRACT_ADDR=$("${HARNESS_DIR}/alpha" "--preload ${HARNESS_DIR}/contractAddress.js --exec contractAddress(\"${ENTRYPOINT_CONTRACT_HASH}\")" | sed 's/"//g')
+echo "Entrypoint contract address is ${ENTRYPOINT_CONTRACT_ADDR}. Saving to ${NODES_ROOT}/entrypoint_contract_address.txt"
+cat > "${NODES_ROOT}/entrypoint_contract_address.txt" <<EOF
+${ENTRYPOINT_CONTRACT_ADDR}
+EOF
+
+echo "Deploying ETHSwapV1 contract."
+ETH_SWAP_CONTRACT_HASH_V1=$("${HARNESS_DIR}/alpha" "--preload ${HARNESS_DIR}/deploy.js --exec deployERC20Swap(\"${ALPHA_ADDRESS}\",\"${ETH_SWAP_V1}\",\"${ENTRYPOINT_CONTRACT_ADDR}\")" | sed 's/"//g')
 
 mine_pending_txs
 
@@ -473,6 +496,14 @@ EOF
 tmux new-window -t $SESSION:3 -n "miner" $SHELL
 tmux send-keys -t $SESSION:3 "cd ${NODES_ROOT}/harness-ctl" C-m
 tmux send-keys -t $SESSION:3 "watch -n 15 ./mine-alpha 1" C-m
+
+# Set up bundler
+echo "Setting up bundler"
+cd ${POLYGON_TEST_DIR}/../eth/bundler
+go build
+tmux new-window -t $SESSION:6 -n "bundler" $SHELL
+tmux send-keys -t $SESSION:6 "cd ${HARNESS_DIR}/bundler" C-m
+tmux send-keys -t $SESSION:6 "./bundler --privkey ${BUNDLER_PRIV_KEY} --chain polygon" C-m
 
 tmux select-window -t $SESSION:0
 tmux send-keys -t $SESSION:0 "set -o history" C-m

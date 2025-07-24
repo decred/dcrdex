@@ -17,9 +17,11 @@ import (
 
 	"decred.org/dcrdex/dex"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
+	"decred.org/dcrdex/dex/networks/eth/contracts/entrypoint"
 	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	swapv1 "decred.org/dcrdex/dex/networks/eth/contracts/v1"
 	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -526,6 +528,46 @@ func (c *rpcclient) loadToken(ctx context.Context, assetID uint32, vToken *Versi
 		cl.tokens[assetID] = tkn
 	}
 	return nil
+}
+
+type userOpEvent struct {
+	sender        common.Address
+	success       bool
+	actualGasCost *big.Int
+	actualGasUsed *big.Int
+}
+
+func (c *rpcclient) getUserOpEvent(ctx context.Context, epAddress common.Address,
+	userOpHash common.Hash, swapContractAddress common.Address, blockNumber uint64) (*userOpEvent, error) {
+	userOpEvent := &userOpEvent{}
+	return nil, c.withClient(func(ec *ethConn) error {
+		ep, err := entrypoint.NewEntrypoint(epAddress, ec)
+		if err != nil {
+			return fmt.Errorf("error creating entrypoint: %v", err)
+		}
+		iter, err := ep.FilterUserOperationEvent(&bind.FilterOpts{
+			Start: blockNumber,
+			End:   &blockNumber,
+		}, [][32]byte{userOpHash}, []common.Address{swapContractAddress}, []common.Address{})
+		if err != nil {
+			return fmt.Errorf("error filtering user operation event: %v", err)
+		}
+		foundEvent := false
+		for iter.Next() {
+			if iter.Event.UserOpHash == userOpHash {
+				foundEvent = true
+				break
+			}
+		}
+		if !foundEvent {
+			return fmt.Errorf("user op event not found")
+		}
+		userOpEvent.sender = iter.Event.Sender
+		userOpEvent.success = iter.Event.Success
+		userOpEvent.actualGasCost = iter.Event.ActualGasCost
+		userOpEvent.actualGasUsed = iter.Event.ActualGasUsed
+		return nil
+	})
 }
 
 func (c *rpcclient) withTokener(assetID uint32, f func(*tokener) error) error {
