@@ -1178,9 +1178,6 @@ func (u *unifiedExchangeAdaptor) multiTrade(
 	currEpoch uint64,
 ) (_ map[order.OrderID]*dexOrderInfo, or *OrderReport) {
 	or = newOrderReport(placements)
-	if len(placements) == 0 {
-		return nil, or
-	}
 
 	buyFees, sellFees, err := u.orderFees()
 	if err != nil {
@@ -1207,7 +1204,10 @@ func (u *unifiedExchangeAdaptor) multiTrade(
 
 	// If the placements include a counterTradeRate, the CEX balance must also
 	// be taken into account to determine how many trades can be placed.
-	accountForCEXBal := placements[0].CounterTradeRate > 0
+	var accountForCEXBal bool
+	if len(placements) > 0 {
+		accountForCEXBal = placements[0].CounterTradeRate > 0
+	}
 	if accountForCEXBal {
 		or.AvailableCEXBal = u.CEXBalance(toID).copy()
 		or.RemainingCEXBal = or.AvailableCEXBal.Available
