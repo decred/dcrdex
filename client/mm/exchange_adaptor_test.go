@@ -3193,6 +3193,47 @@ func TestMultiTrade(t *testing.T) {
 				orderIDs[3], orderIDs[4],
 			},
 		},
+		{
+			name:    "no placements, pending orders should be cancelled",
+			baseID:  42,
+			quoteID: 0,
+			// ---- Sell ----
+			sellDexBalances: map[uint32]uint64{
+				42: 100 * lotSize,
+				0:  0,
+			},
+			sellCexBalances: map[uint32]uint64{
+				42: 0,
+				0:  100 * lotSize,
+			},
+			sellPlacements: []*TradePlacement{},
+			sellPendingOrders: func() map[order.OrderID]*pendingDEXOrder {
+				return pendingOrders(true, 42, 0)
+			}(),
+			expectedSellPlacements:              []*core.QtyRate{},
+			expectedSellPlacementsWithDecrement: []*core.QtyRate{},
+			expectedCancels: []order.OrderID{
+				orderIDs[1], orderIDs[2], orderIDs[3],
+			},
+			expectedCancelsWithDecrement: []order.OrderID{
+				orderIDs[1], orderIDs[2], orderIDs[3],
+			},
+			// ---- Buy ----
+			buyDexBalances: map[uint32]uint64{
+				42: 0,
+				0:  100 * lotSize,
+			},
+			buyCexBalances: map[uint32]uint64{
+				42: 100 * lotSize,
+				0:  0,
+			},
+			buyPlacements: []*TradePlacement{},
+			buyPendingOrders: func() map[order.OrderID]*pendingDEXOrder {
+				return pendingOrders(false, 42, 0)
+			}(),
+			expectedBuyPlacements:              []*core.QtyRate{},
+			expectedBuyPlacementsWithDecrement: []*core.QtyRate{},
+		},
 	}
 
 	for _, test := range tests {
