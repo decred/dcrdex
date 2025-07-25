@@ -870,7 +870,7 @@ func (wc *rpcClient) WalletLock() error {
 func (wc *rpcClient) Locked() bool {
 	walletInfo, err := wc.GetWalletInfo()
 	if err != nil {
-		wc.log.Errorf("GetWalletInfo error: %w", err)
+		wc.log.Errorf("GetWalletInfo error: %v", err)
 		return false
 	}
 	if walletInfo.UnlockedUntil == nil {
