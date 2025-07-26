@@ -5715,7 +5715,15 @@ func (c *Core) SingleLotFees(form *SingleLotFeesForm) (swapFees, redeemFees, ref
 		}
 		swapFeeRate, redeemFeeRate = swapAsset.MaxFeeRate, redeemAsset.MaxFeeRate
 	} else {
-		swapFeeRate = c.feeSuggestion(dc, wallets.fromWallet.AssetID) // server rates only for the swap init
+		// For dynamic swappers, use the wallet rate, becuase the server sends
+		// the max fee rate. For non-dynamic swappers use the server rates,
+		// because this is what swaps will need to use.
+		_, isDynamicSwapper := wallets.fromWallet.Wallet.(asset.DynamicSwapper)
+		if isDynamicSwapper {
+			swapFeeRate = c.feeSuggestionAny(wallets.fromWallet.AssetID) // wallet rate or server rate
+		} else {
+			swapFeeRate = c.feeSuggestion(dc, wallets.fromWallet.AssetID) // server rates only for the swap init
+		}
 		if swapFeeRate == 0 {
 			return 0, 0, 0, fmt.Errorf("failed to get swap fee suggestion for %s at %s", wallets.fromWallet.Symbol, form.Host)
 		}
