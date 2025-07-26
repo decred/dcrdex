@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math/big"
 	"os"
 	"os/exec"
@@ -3721,9 +3722,7 @@ func (w *assetWallet) findRedemptionRequests() map[string]*findRedemptionRequest
 	w.findRedemptionMtx.RLock()
 	defer w.findRedemptionMtx.RUnlock()
 	reqs := make(map[string]*findRedemptionRequest, len(w.findRedemptionReqs))
-	for loc, req := range w.findRedemptionReqs {
-		reqs[loc] = req
-	}
+	maps.Copy(reqs, w.findRedemptionReqs)
 	return reqs
 }
 

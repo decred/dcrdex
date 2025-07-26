@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
@@ -1200,9 +1201,7 @@ func (w *spvWallet) SearchBlockForRedemptions(ctx context.Context, reqs map[OutP
 
 	for _, msgTx := range block.MsgBlock().Transactions {
 		newlyDiscovered := FindRedemptionsInTxWithHasher(ctx, true, reqs, msgTx, w.chainParams, hashTx)
-		for outPt, res := range newlyDiscovered {
-			discovered[outPt] = res
-		}
+		maps.Copy(discovered, newlyDiscovered)
 	}
 	return
 }
