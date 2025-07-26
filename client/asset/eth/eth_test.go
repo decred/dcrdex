@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"math/big"
 	"math/rand"
 	"sort"
@@ -1344,9 +1345,7 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 
 	versionedGases := make(map[uint32]*dexeth.Gases)
 	if assetID == BipID { // just make a copy
-		for ver, g := range dexeth.VersionedGases {
-			versionedGases[ver] = g
-		}
+		maps.Copy(versionedGases, dexeth.VersionedGases)
 	} else {
 		netToken := dexeth.Tokens[assetID].NetTokens[dex.Simnet]
 		for ver, c := range netToken.SwapContracts {
