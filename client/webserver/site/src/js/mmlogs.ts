@@ -346,7 +346,7 @@ export default class MarketMakerLogsPage extends BasePage {
       }
       el.textContent = Doc.formatCoinValue(sum, asset.unitInfo)
       const factor = asset.unitInfo.conventional.conversionFactor
-      usd += sum / factor * this.fiatRates[asset.id] ?? 0
+      usd += sum / factor * this.fiatRates[asset.id] || 0
     }
     tmpl.sumUSD.textContent = Doc.formatFourSigFigs(usd)
     Doc.bind(tmpl.details, 'click', () => { this.showEventDetails(event.id) })

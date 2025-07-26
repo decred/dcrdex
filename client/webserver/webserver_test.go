@@ -33,7 +33,7 @@ var (
 	tErr           = fmt.Errorf("expected dummy error")
 	tLogger        dex.Logger
 	tCtx           context.Context
-	testAppVersion = "1.0.3"
+	testAppVersion = "1.0.4"
 )
 
 type tCoin struct {
