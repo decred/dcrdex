@@ -3,7 +3,9 @@
 package eth
 
 import (
+	"fmt"
 	"math/big"
+	"math/rand"
 	"reflect"
 	"testing"
 	"time"
@@ -177,6 +179,57 @@ func TestTxDB(t *testing.T) {
 		t.Fatalf("error retrieving txs: %v", err)
 	}
 	expectedTxs = []*asset.WalletTransaction{wt1.WalletTransaction}
+	if !reflect.DeepEqual(expectedTxs, txs) {
+		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
+	}
+}
+
+func TestTxDB_userOp(t *testing.T) {
+	tempDir := t.TempDir()
+	tLogger := dex.StdOutLogger("TXDB", dex.LevelTrace)
+
+	// Grab these for the tx generation utilities
+	_, eth, node, shutdown := tassetWallet(BipID)
+	shutdown()
+
+	txHistoryStore, err := NewTxDB(tempDir, tLogger, BipID)
+	if err != nil {
+		t.Fatalf("error connecting to tx history store: %v", err)
+	}
+
+	newTx := func(nonce uint64, blockNumber uint64, isUserOp bool) *extendedWalletTx {
+		tx := eth.extendedTx(&genTxResult{
+			tx:     node.newTransaction(nonce, big.NewInt(1)),
+			txType: asset.Send,
+			amt:    1,
+		})
+		tx.BlockNumber = blockNumber
+		tx.IsUserOp = isUserOp
+		tx.ID = fmt.Sprintf("%d", rand.Intn(1000000))
+		if blockNumber > 0 {
+			tx.Confirmed = true
+		}
+		return tx
+	}
+
+	wt1 := newTx(1, 100, false)
+	wt2 := newTx(2, 101, false)
+	wt2UserOp := newTx(1, 101, true)
+	wt3 := newTx(3, 102, false)
+	wt4 := newTx(4, 103, false)
+
+	for _, wt := range []*extendedWalletTx{wt1, wt2, wt2UserOp, wt3, wt4} {
+		err := txHistoryStore.storeTx(wt)
+		if err != nil {
+			t.Fatalf("error storing tx: %v", err)
+		}
+	}
+
+	expectedTxs := []*asset.WalletTransaction{wt4.WalletTransaction, wt3.WalletTransaction, wt2UserOp.WalletTransaction, wt2.WalletTransaction, wt1.WalletTransaction}
+	txs, err := txHistoryStore.getTxs(0, nil, true, nil)
+	if err != nil {
+		t.Fatalf("error retrieving txs: %v", err)
+	}
 	if !reflect.DeepEqual(expectedTxs, txs) {
 		t.Fatalf("expected txs %+v but got %+v", expectedTxs, txs)
 	}

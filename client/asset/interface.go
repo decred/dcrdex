@@ -253,6 +253,14 @@ const (
 	// that has not been approved.
 	ErrUnapprovedToken = dex.ErrorKind("token not approved")
 	ErrApprovalPending = dex.ErrorKind("approval pending")
+	// ErrInsufficientRedeemFunds is returned when there is insufficient funds
+	// to redeem a swap, but configuring a bundler to redeem would fix the
+	// issue.
+	ErrInsufficientRedeemFunds = dex.ErrorKind("insufficient redeem funds")
+
+	// ErrBundlerRedemptionLotSizeTooSmall is returned when the lot size is
+	// too small to cover the gas fees when using a bundler.
+	ErrBundlerRedemptionLotSizeTooSmall = dex.ErrorKind("bundler redemption lot size too small")
 
 	// InternalNodeLoggerName is the name for a logger that is used to fine
 	// tune log levels for only loggers using this name.
@@ -401,6 +409,10 @@ type ConfirmRedemptionStatus struct {
 	Confs  uint64
 	Req    uint64
 	CoinID dex.Bytes
+	// PendingSubmission is true for ETH redemptions using a user op before
+	// the bundler has submitted the transaction. The redemption message
+	// should only be sent to the server once this is true.
+	PendingSubmission bool
 }
 
 // Wallet is a common interface to be implemented by cryptocurrency wallet
@@ -916,8 +928,10 @@ type AccountLocker interface {
 	// redeems to an account-based asset. The wallet will set aside the
 	// appropriate amount of funds so that we can redeem N swaps using the
 	// specified fee and asset version. It is an error to request funds >
-	// spendable balance.
-	ReserveNRedemptions(n uint64, ver uint32, maxFeeRate uint64) (uint64, error)
+	// spendable balance. The lotSize parameter is used to ensure that when
+	// doing a redemption with a bundler, the size of the redemption will be
+	// able to cover the gas fees.
+	ReserveNRedemptions(n uint64, ver uint32, maxFeeRate uint64, lotSize uint64) (uint64, error)
 	// ReReserveRedemption is used when reconstructing existing orders on
 	// startup. It is an error to request funds > spendable balance.
 	ReReserveRedemption(amt uint64) error
@@ -936,6 +950,23 @@ type AccountLocker interface {
 	// when an order was cancelled or revoked before a swap was initiated,
 	// completed successfully, or after a refund was done.
 	UnlockRefundReserves(uint64)
+}
+
+// GaslessRedeemer is implemented by wallets that support gasless redemption.
+// This is a subset of wallets that implement AccountLocker.
+type GaslessRedeemer interface {
+	// GaslessRedeem will redeem swaps without requiring funds in the wallet.
+	// It should be called if ReserveNRedemptions returned a zero value. The
+	// submitted bool will be true if the wallet received funds since the
+	// wallet attempted to reserve funds, and is able to pay for the redemption
+	// on its own, otherwise if a user operation was sent to a bundler, it will
+	// be false.
+	//
+	// The redemption message should only be sent the the server if submitted is
+	// true. If it is false, an updated coin ID will be returned from
+	// ConfirmRedemption when the transaction is submitted by the bundler,
+	// and the server should be notified using that coin ID.
+	GaslessRedeem(redeems *RedeemForm) (ins []dex.Bytes, out Coin, feesPaid uint64, submitted bool, err error)
 }
 
 // LiveReconfigurer is a wallet that can possibly handle a reconfiguration
@@ -1245,6 +1276,11 @@ type WalletTransaction struct {
 	// It contains the ID and asset ID of the transaction that either initiated
 	// the bridge or completed it.
 	BridgeCounterpartTx *BridgeCounterpartTx `json:"bridgeCounterpartTx,omitempty"`
+	// UserOpTxID is the id of the transaction that the bundler submitted
+	// for a user op.
+	UserOpTxID string `json:"userOpTxID,omitempty"`
+	// IsUserOp will be true if the transaction is a user op.
+	IsUserOp bool `json:"isUserOp"`
 }
 
 // WalletHistorian is a wallet that is able to retrieve the history of all

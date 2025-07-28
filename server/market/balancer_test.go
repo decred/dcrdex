@@ -17,11 +17,9 @@ func TestBalancer(t *testing.T) {
 
 	ethTunnel := &TMarketTunnel{base: assetETH.ID}
 	ethBackend := &tAccountBackend{}
-	ethRedeemCost := tRedeemSize * assetETH.MaxFeeRate
 
 	tokenTunnel := &TMarketTunnel{quote: assetToken.ID}
 	tokenBackend := &tAccountBackend{}
-	// tokenRedeemCost := assetToken.RedeemSize * assetToken.MaxFeeRate
 
 	ethBalancer := &backedBalancer{
 		balancer:  ethBackend,
@@ -52,7 +50,7 @@ func TestBalancer(t *testing.T) {
 		matchNegotiator: swapper,
 	}
 
-	ethNineFive := calc.RequiredOrderFunds(lotSize*9, 0, 9, tInitTxSize, tInitTxSize, assetETH.Asset.MaxFeeRate) + ethRedeemCost*5
+	ethNine := calc.RequiredOrderFunds(lotSize*9, 0, 9, tInitTxSize, tInitTxSize, assetETH.Asset.MaxFeeRate)
 
 	type qlr struct {
 		qty, lots uint64
@@ -93,21 +91,15 @@ func TestBalancer(t *testing.T) {
 			name: "no existing - 1 new redeem - pass",
 			eth: assetParams{
 				new: qlr{0, 0, 1},
-				bal: ethRedeemCost,
+				bal: 0,
 			},
 			pass: true,
-		}, {
-			name: "no existing - 1 new redeem - fail",
-			eth: assetParams{
-				new: qlr{0, 0, 1},
-				bal: ethRedeemCost - 1,
-			},
 		}, {
 			name: "1 each swapper - 1 new lot - pass",
 			eth: assetParams{
 				new:     qlr{lotSize, 1, 0},
 				swapper: qlr{lotSize, 1, 1},
-				bal:     calc.RequiredOrderFunds(lotSize*2, 0, 2, tInitTxSize, tInitTxSize, assetETH.Asset.MaxFeeRate) + ethRedeemCost,
+				bal:     calc.RequiredOrderFunds(lotSize*2, 0, 2, tInitTxSize, tInitTxSize, assetETH.Asset.MaxFeeRate),
 			},
 			pass: true,
 		}, {
@@ -115,7 +107,7 @@ func TestBalancer(t *testing.T) {
 			eth: assetParams{
 				new: qlr{lotSize, 1, 0},
 				mkt: qlr{lotSize, 1, 1},
-				bal: calc.RequiredOrderFunds(lotSize*2, 0, 2, tInitTxSize, tInitTxSize, assetETH.Asset.MaxFeeRate) + ethRedeemCost,
+				bal: calc.RequiredOrderFunds(lotSize*2, 0, 2, tInitTxSize, tInitTxSize, assetETH.Asset.MaxFeeRate),
 			},
 			pass: true,
 		},
@@ -124,7 +116,7 @@ func TestBalancer(t *testing.T) {
 			eth: assetParams{
 				new: qlr{lotSize, 1, 0},
 				mkt: qlr{lotSize, 1, 1},
-				bal: calc.RequiredOrderFunds(lotSize*2, 0, 2, tInitTxSize, tInitTxSize, assetETH.Asset.MaxFeeRate) + ethRedeemCost - 1,
+				bal: calc.RequiredOrderFunds(lotSize*2, 0, 2, tInitTxSize, tInitTxSize, assetETH.Asset.MaxFeeRate) - 1,
 			},
 		},
 		{
@@ -133,7 +125,7 @@ func TestBalancer(t *testing.T) {
 				new:     qlr{lotSize * 2, 2, 0},
 				mkt:     qlr{lotSize * 3, 3, 2},
 				swapper: qlr{lotSize * 4, 4, 3},
-				bal:     ethNineFive,
+				bal:     ethNine,
 			},
 			pass: true,
 		},
@@ -143,7 +135,7 @@ func TestBalancer(t *testing.T) {
 				new:     qlr{lotSize * 2, 2, 0},
 				mkt:     qlr{lotSize * 3, 3, 2},
 				swapper: qlr{lotSize * 4, 4, 3},
-				bal:     ethNineFive - 1,
+				bal:     ethNine - 1,
 			},
 		},
 		{
@@ -152,7 +144,7 @@ func TestBalancer(t *testing.T) {
 				new:     qlr{lotSize * 2, 2, 0},
 				mkt:     qlr{lotSize * 3, 3, 2},
 				swapper: qlr{lotSize * 4, 4, 3},
-				bal:     ethNineFive + assetToken.MaxFeeRate*(tInitTxSize+tRedeemSize),
+				bal:     ethNine + assetToken.MaxFeeRate*(tInitTxSize+tRedeemSize),
 			},
 			token: assetParams{
 				mkt: qlr{lotSize * 5000, 1, 1}, // qty doesn't shouldn't matter.
@@ -165,14 +157,13 @@ func TestBalancer(t *testing.T) {
 				new:     qlr{lotSize * 2, 2, 0},
 				mkt:     qlr{lotSize * 3, 3, 2},
 				swapper: qlr{lotSize * 4, 4, 3},
-				bal:     ethNineFive + assetToken.MaxFeeRate*(tInitTxSize+tRedeemSize) - 1,
+				bal:     ethNine + assetToken.MaxFeeRate*(tInitTxSize+tRedeemSize) - 1,
 			},
 			token: assetParams{
 				mkt: qlr{lotSize * 5000, 1, 1},
 			},
 		}, {
-			name:     "1 new lot token - pass",
-			useToken: true,
+			name: "1 new lot token - pass",
 			token: assetParams{
 				new: qlr{lotSize, 1, 0},
 				bal: lotSize,

@@ -223,6 +223,8 @@ const (
 	idDeleteBot                      = "DELETE_BOT"
 	idMarketOrderCapitalize          = "MARKET_ORDER_CAPITALIZE"
 	idLimitOrderCapitalize           = "LIMIT_ORDER_CAPITALIZE"
+	idInsuffRedeemFundsErrMsg        = "INSUFFICIENT_REDEEM_FUNDS_ERR_MSG"
+	idInsuffRedeemFundsBundErrMsg    = "INSUFFICIENT_REDEEM_FUNDS_BUNDLER_ERR_MSG"
 )
 
 var enUS = map[string]*intl.Translation{
@@ -445,6 +447,8 @@ var enUS = map[string]*intl.Translation{
 	idDeleteBot:                      {T: "Are you sure you want to delete this bot for the {{ baseTicker }}-{{ quoteTicker }} market on {{ host }}?"},
 	idMarketOrderCapitalize:          {T: "Market"},
 	idLimitOrderCapitalize:           {T: "Limit"},
+	idInsuffRedeemFundsErrMsg:        {T: "Insufficient gas for redemption. Configure an ERC-4337 bundler to do a gasless redemption."},
+	idInsuffRedeemFundsBundErrMsg:    {T: "Redemption lot size is too small to cover the gas fees in a gasless redemption."},
 }
 
 var ptBR = map[string]*intl.Translation{

@@ -52,6 +52,8 @@ const (
 	bondTimeErr
 	bondAssetErr
 	bondPostErr // TODO
+	insufficientRedeemFundsErr
+	bundlerRedemptionLotSizeTooSmallErr
 )
 
 // Error is an error code and a wrapped error.

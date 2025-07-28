@@ -86,6 +86,7 @@ type contractV1 interface {
 	Status(opts *bind.CallOpts, token common.Address, c swapv1.ETHSwapVector) (swapv1.ETHSwapStatus, error)
 	Refund(opts *bind.TransactOpts, token common.Address, c swapv1.ETHSwapVector) (*types.Transaction, error)
 	IsRedeemable(opts *bind.CallOpts, token common.Address, c swapv1.ETHSwapVector) (bool, error)
+	EntryPoint(opts *bind.CallOpts) (common.Address, error)
 
 	ContractKey(opts *bind.CallOpts, token common.Address, v swapv1.ETHSwapVector) ([32]byte, error)
 	Swaps(opts *bind.CallOpts, arg0 [32]byte) ([32]byte, error)
@@ -594,6 +595,17 @@ func (c *tokenContractorV0) tokenAddress() common.Address {
 	return c.tokenContractAddr
 }
 
+// gaslessRedeemContractor is a contractor that supports gasless redemptions
+// using ERC-4337 account abstraction.
+type gaslessRedeemContractor interface {
+	// gaslessRedeemCalldata creates the calldata to be sent to the bundler
+	// for a gasless redemption.
+	gaslessRedeemCalldata(redeems []*asset.Redemption) ([]byte, error)
+	// entrypointAddress returns the address of the entrypoint contract specified
+	// in the ETH Swap contract.
+	entrypointAddress() (common.Address, error)
+}
+
 type contractorV1 struct {
 	contractV1
 	net              dex.Network
@@ -608,6 +620,7 @@ type contractorV1 struct {
 }
 
 var _ contractor = (*contractorV1)(nil)
+var _ gaslessRedeemContractor = (*contractorV1)(nil)
 
 func newV1Contractor(net dex.Network, swapContractAddr, acctAddr common.Address, cb bind.ContractBackend) (contractor, error) {
 	c, err := swapv1.NewETHSwap(swapContractAddr, cb)
@@ -687,7 +700,7 @@ func (c *contractorV1) initiate(txOpts *bind.TransactOpts, contracts []*asset.Co
 	return c.Initiate(txOpts, c.tokenAddr, versionedContracts)
 }
 
-func (c *contractorV1) redeem(txOpts *bind.TransactOpts, redeems []*asset.Redemption) (*types.Transaction, error) {
+func (c *contractorV1) convertRedeems(redeems []*asset.Redemption) ([]swapv1.ETHSwapRedemption, error) {
 	versionedRedemptions := make([]swapv1.ETHSwapRedemption, 0, len(redeems))
 	secretHashes := make(map[[32]byte]bool, len(redeems))
 	for _, r := range redeems {
@@ -717,7 +730,27 @@ func (c *contractorV1) redeem(txOpts *bind.TransactOpts, redeems []*asset.Redemp
 			Secret: secret,
 		})
 	}
+	return versionedRedemptions, nil
+}
+
+func (c *contractorV1) redeem(txOpts *bind.TransactOpts, redeems []*asset.Redemption) (*types.Transaction, error) {
+	versionedRedemptions, err := c.convertRedeems(redeems)
+	if err != nil {
+		return nil, err
+	}
 	return c.Redeem(txOpts, c.tokenAddr, versionedRedemptions)
+}
+
+func (c *contractorV1) gaslessRedeemCalldata(redeems []*asset.Redemption) ([]byte, error) {
+	versionedRedemptions, err := c.convertRedeems(redeems)
+	if err != nil {
+		return nil, err
+	}
+	return c.abi.Pack("redeemAA", versionedRedemptions)
+}
+
+func (c *contractorV1) entrypointAddress() (common.Address, error) {
+	return c.EntryPoint(&bind.CallOpts{From: c.acctAddr})
 }
 
 func (c *contractorV1) refund(txOpts *bind.TransactOpts, locator []byte) (*types.Transaction, error) {
