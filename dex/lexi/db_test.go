@@ -556,9 +556,7 @@ func TestDeleteIndex(t *testing.T) {
 		t.Fatalf("Expected 10 values, got %d", count)
 	}
 
-	err = db.Update(func(tx *badger.Txn) error {
-		return db.DeleteIndex(tx, "DeleteIndexTest", "I")
-	})
+	err = db.DeleteIndex("DeleteIndexTest", "I")
 	if err != nil {
 		t.Fatalf("Error deleting index: %v", err)
 	}
@@ -616,14 +614,14 @@ func TestReIndex(t *testing.T) {
 	}
 
 	// Reindex the indexes.
-	err = db.Update(func(tx *badger.Txn) error {
-		err = db.ReIndex(tx, "DeleteIndexTest", "K", func(k, v []byte) ([]byte, error) {
+	err = db.Upgrade(func() error {
+		err = db.ReIndex("DeleteIndexTest", "K", func(k, v []byte) ([]byte, error) {
 			return k, nil
 		})
 		if err != nil {
 			return err
 		}
-		return db.ReIndex(tx, "DeleteIndexTest", "V", func(k, v []byte) ([]byte, error) {
+		return db.ReIndex("DeleteIndexTest", "V", func(k, v []byte) ([]byte, error) {
 			return v, nil
 		})
 	})
@@ -669,6 +667,71 @@ func TestReIndex(t *testing.T) {
 	}
 	if count != 10 {
 		t.Fatalf("Expected 10 values, got %d", count)
+	}
+}
+
+// TestUpgradeTransaction verifies that the same transaction is used for all
+// db.Update calls within a single upgrade, and that different upgrade calls
+// use different transactions.
+func TestUpgradeTransaction(t *testing.T) {
+	db, shutdown := newTestDB(t)
+	defer shutdown()
+
+	var firstUpgradeTxn *badger.Txn
+	var secondUpgradeTxn *badger.Txn
+
+	err := db.Upgrade(func() error {
+		err := db.Update(func(txn *badger.Txn) error {
+			firstUpgradeTxn = txn
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+
+		err = db.Update(func(txn *badger.Txn) error {
+			if txn != firstUpgradeTxn {
+				t.Fatal("Second db.Update should use the same transaction as the first")
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("First upgrade failed: %v", err)
+	}
+
+	err = db.Upgrade(func() error {
+		err := db.Update(func(txn *badger.Txn) error {
+			secondUpgradeTxn = txn
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+
+		err = db.Update(func(txn *badger.Txn) error {
+			if txn != secondUpgradeTxn {
+				t.Fatal("Second db.Update should use the same transaction as the first")
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Second upgrade failed: %v", err)
+	}
+
+	if firstUpgradeTxn == secondUpgradeTxn {
+		t.Fatal("The two upgrade calls should use different transactions")
 	}
 }
 
