@@ -5800,6 +5800,7 @@ func TestSwapOrRedemptionFeesPaid(t *testing.T) {
 			s := [32]byte{}
 			copy(s[:], secretHs[i])
 			init := &dexeth.Initiation{
+				LockTime:   time.Now(),
 				SecretHash: s,
 				Value:      big.NewInt(0),
 			}

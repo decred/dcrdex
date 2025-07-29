@@ -6253,9 +6253,14 @@ func (w *baseWallet) updatePendingTx(tip uint64, pendingTx *extendedWalletTx) {
 			w.log.Errorf("Header for hash %v is nil", receipt.BlockHash)
 			return
 		}
+		gasTip, err := tx.EffectiveGasTip(hdr.BaseFee)
+		if err != nil {
+			w.log.Errorf("Error getting effective gas tip: %v", err)
+			return
+		}
 		pendingTx.Timestamp = hdr.Time
 		if effectiveGasPrice == nil {
-			effectiveGasPrice = new(big.Int).Add(hdr.BaseFee, tx.EffectiveGasTipValue(hdr.BaseFee))
+			effectiveGasPrice = new(big.Int).Add(hdr.BaseFee, gasTip)
 		}
 	}
 
