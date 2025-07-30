@@ -11,6 +11,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
+	"github.com/dgraph-io/badger"
 )
 
 func newTestDB(t *testing.T) (*DB, func()) {
@@ -613,12 +614,20 @@ func TestReIndex(t *testing.T) {
 	}
 
 	// Reindex the indexes.
-	db.ReIndex("DeleteIndexTest", "K", func(k, v []byte) ([]byte, error) {
-		return k, nil
+	err = db.Upgrade(func() error {
+		err = db.ReIndex("DeleteIndexTest", "K", func(k, v []byte) ([]byte, error) {
+			return k, nil
+		})
+		if err != nil {
+			return err
+		}
+		return db.ReIndex("DeleteIndexTest", "V", func(k, v []byte) ([]byte, error) {
+			return v, nil
+		})
 	})
-	db.ReIndex("DeleteIndexTest", "V", func(k, v []byte) ([]byte, error) {
-		return v, nil
-	})
+	if err != nil {
+		t.Fatalf("Error reindexing index: %v", err)
+	}
 
 	// Check the key index.
 	var count int
@@ -661,172 +670,112 @@ func TestReIndex(t *testing.T) {
 	}
 }
 
-func TestUpgrade(t *testing.T) {
+// TestUpgradeTransaction verifies that the same transaction is used for all
+// db.Update calls within a single upgrade, and that different upgrade calls
+// use different transactions.
+func TestUpgradeTransaction(t *testing.T) {
 	db, shutdown := newTestDB(t)
 	defer shutdown()
 
-	var expectedError string
+	var firstUpgradeTxn *badger.Txn
+	var secondUpgradeTxn *badger.Txn
 
-	// Test that a fresh database starts with version 0
-	version, err := db.getDBVersion()
-	if err != nil {
-		t.Fatalf("Error getting initial DB version: %v", err)
-	}
-	if version != 0 {
-		t.Fatalf("Expected initial DB version to be 0, got %d", version)
-	}
+	err := db.Upgrade(func() error {
+		err := db.Update(func(txn *badger.Txn) error {
+			firstUpgradeTxn = txn
+			return nil
+		})
+		if err != nil {
+			return err
+		}
 
-	// Create some test upgrade functions that track their execution
-	var upgrade1Called, upgrade2Called, upgrade3Called bool
+		err = db.Update(func(txn *badger.Txn) error {
+			if txn != firstUpgradeTxn {
+				t.Fatal("Second db.Update should use the same transaction as the first")
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
 
-	upgrade1 := func() error {
-		upgrade1Called = true
 		return nil
+	})
+	if err != nil {
+		t.Fatalf("First upgrade failed: %v", err)
 	}
 
-	upgrade2 := func() error {
-		upgrade2Called = true
+	err = db.Upgrade(func() error {
+		err := db.Update(func(txn *badger.Txn) error {
+			secondUpgradeTxn = txn
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+
+		err = db.Update(func(txn *badger.Txn) error {
+			if txn != secondUpgradeTxn {
+				t.Fatal("Second db.Update should use the same transaction as the first")
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+
 		return nil
-	}
-
-	upgrade3 := func() error {
-		upgrade3Called = true
-		return nil
-	}
-
-	upgrades := []func() error{upgrade1, upgrade2, upgrade3}
-
-	// Test successful upgrade of all upgrades
-	err = db.Upgrade(upgrades)
+	})
 	if err != nil {
-		t.Fatalf("Error during upgrade: %v", err)
+		t.Fatalf("Second upgrade failed: %v", err)
 	}
 
-	// Verify all upgrades were called
-	if !upgrade1Called {
-		t.Fatal("Upgrade 1 was not called")
+	if firstUpgradeTxn == secondUpgradeTxn {
+		t.Fatal("The two upgrade calls should use different transactions")
 	}
-	if !upgrade2Called {
-		t.Fatal("Upgrade 2 was not called")
-	}
-	if !upgrade3Called {
-		t.Fatal("Upgrade 3 was not called")
-	}
+}
 
-	// Verify database version was updated to 3
-	version, err = db.getDBVersion()
+func TestDBVersion(t *testing.T) {
+	db, shutdown := newTestDB(t)
+	defer shutdown()
+
+	// Initially, the version should be 0
+	got, err := db.GetDBVersion()
 	if err != nil {
-		t.Fatalf("Error getting DB version after upgrade: %v", err)
+		t.Fatalf("unexpected error when getting unset DB version: %v", err)
 	}
-	if version != 3 {
-		t.Fatalf("Expected DB version to be 3 after upgrade, got %d", version)
-	}
-
-	// Test that calling Upgrade again with the same upgrades (version == len(upgrades)) succeeds and skips all
-	upgrade1Called, upgrade2Called, upgrade3Called = false, false, false
-	err = db.Upgrade(upgrades)
-	if err != nil {
-		t.Fatalf("Error during second upgrade call: %v", err)
-	}
-	// Verify no upgrades were called this time
-	if upgrade1Called {
-		t.Fatal("Upgrade 1 was called again when it should have been skipped")
-	}
-	if upgrade2Called {
-		t.Fatal("Upgrade 2 was called again when it should have been skipped")
-	}
-	if upgrade3Called {
-		t.Fatal("Upgrade 3 was called again when it should have been skipped")
-	}
-	// Verify database version is still 3
-	version, err = db.getDBVersion()
-	if err != nil {
-		t.Fatalf("Error getting DB version after second upgrade call: %v", err)
-	}
-	if version != 3 {
-		t.Fatalf("Expected DB version to remain 3 after second upgrade call, got %d", version)
+	if got != 0 {
+		t.Fatalf("expected initial version 0, got %d", got)
 	}
 
-	// Test that calling Upgrade with fewer upgrades than the current version returns an error
-	upgrade1Called, upgrade2Called = false, false
-	err = db.Upgrade([]func() error{upgrade1, upgrade2})
-	if err == nil {
-		t.Fatal("Expected error when upgrade list is too short, but got none")
-	}
-	expectedError = "upgrade list is too short. expected at least 3 upgrades, got 2"
-	if err.Error() != expectedError {
-		t.Fatalf("Expected error '%s', got '%v'", expectedError, err)
-	}
-	// Verify no upgrades were called
-	if upgrade1Called {
-		t.Fatal("Upgrade 1 was called when it should have been skipped")
-	}
-	if upgrade2Called {
-		t.Fatal("Upgrade 2 was called when it should have been skipped")
-	}
-	// Verify database version is still 3
-	version, err = db.getDBVersion()
-	if err != nil {
-		t.Fatalf("Error getting DB version after upgrade with fewer functions: %v", err)
-	}
-	if version != 3 {
-		t.Fatalf("Expected DB version to remain 3 after upgrade with fewer functions, got %d", version)
+	// Set a version
+	var version uint32 = 2
+	if err := db.Update(func(tx *badger.Txn) error {
+		return db.SetDBVersion(version, tx)
+	}); err != nil {
+		t.Fatalf("SetDBVersion error: %v", err)
 	}
 
-	// Test that calling Upgrade with more upgrades applies only the new ones
-	upgrade4Called := false
-	upgrade4 := func() error {
-		upgrade4Called = true
-		return nil
+	got, err = db.GetDBVersion()
+	if err != nil {
+		t.Fatalf("GetDBVersion error: %v", err)
+	}
+	if got != version {
+		t.Fatalf("expected version %d, got %d", version, got)
 	}
 
-	err = db.Upgrade([]func() error{upgrade1, upgrade2, upgrade3, upgrade4})
+	// Set a new version
+	version = 3
+	if err := db.Update(func(tx *badger.Txn) error {
+		return db.SetDBVersion(version, tx)
+	}); err != nil {
+		t.Fatalf("SetDBVersion error: %v", err)
+	}
+	got, err = db.GetDBVersion()
 	if err != nil {
-		t.Fatalf("Error during upgrade with additional function: %v", err)
+		t.Fatalf("GetDBVersion error: %v", err)
 	}
-	// Verify only upgrade4 was called
-	if upgrade1Called {
-		t.Fatal("Upgrade 1 was called when it should have been skipped")
-	}
-	if upgrade2Called {
-		t.Fatal("Upgrade 2 was called when it should have been skipped")
-	}
-	if upgrade3Called {
-		t.Fatal("Upgrade 3 was called when it should have been skipped")
-	}
-	if !upgrade4Called {
-		t.Fatal("Upgrade 4 was not called")
-	}
-	// Verify database version was updated to 4
-	version, err = db.getDBVersion()
-	if err != nil {
-		t.Fatalf("Error getting DB version after upgrade with additional function: %v", err)
-	}
-	if version != 4 {
-		t.Fatalf("Expected DB version to be 4 after upgrade with additional function, got %d", version)
-	}
-
-	// Test that an upgrade function that errors doesn't update the version
-	upgrade5Called := false
-	upgrade5 := func() error {
-		upgrade5Called = true
-		return fmt.Errorf("upgrade 5 failed")
-	}
-
-	err = db.Upgrade([]func() error{upgrade1, upgrade2, upgrade3, upgrade4, upgrade5})
-	if err == nil {
-		t.Fatal("Expected error when upgrade 5 fails, but got none")
-	}
-	// Verify upgrade5 was called
-	if !upgrade5Called {
-		t.Fatal("Upgrade 5 was not called")
-	}
-	// Verify database version is still 4 (not updated due to error)
-	version, err = db.getDBVersion()
-	if err != nil {
-		t.Fatalf("Error getting DB version after failed upgrade: %v", err)
-	}
-	if version != 4 {
-		t.Fatalf("Expected DB version to remain 4 after failed upgrade, got %d", version)
+	if got != version {
+		t.Fatalf("expected version %d, got %d", version, got)
 	}
 }

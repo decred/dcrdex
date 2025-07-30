@@ -33,10 +33,11 @@ func convertError(err error) error {
 // the ability to add indexed data.
 type DB struct {
 	*badger.DB
-	log      dex.Logger
-	idSeq    *badger.Sequence
-	wg       sync.WaitGroup
-	updateWG sync.WaitGroup
+	log        dex.Logger
+	idSeq      *badger.Sequence
+	wg         sync.WaitGroup
+	updateWG   sync.WaitGroup
+	upgradeTxn *badger.Txn
 }
 
 // Config is the configuration settings for the Lexi DB.
@@ -104,75 +105,35 @@ func (db *DB) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	return &db.wg, nil
 }
 
-const versionKey = "__version__"
-
-func (db *DB) getDBVersion() (version uint32, err error) {
+// GetDBVersion retrieves the current database version.
+// If the version was never set, 0 is returned.
+func (db *DB) GetDBVersion() (version uint32, err error) {
 	err = db.View(func(txn *badger.Txn) error {
-		prefix, err := db.prefixForName(versionKey)
+		versionItem, err := txn.Get(versionPrefix[:])
 		if err != nil {
+			if err == badger.ErrKeyNotFound {
+				version = 0
+				return nil
+			}
 			return err
 		}
-		item, err := txn.Get(prefix[:])
-		if errors.Is(err, badger.ErrKeyNotFound) {
-			// Version not found, so we'll assume it's 0
-			return nil
-		}
-		return item.Value(func(b []byte) error {
+		return versionItem.Value(func(b []byte) error {
 			version = binary.BigEndian.Uint32(b)
 			return nil
 		})
 	})
+	if err != nil {
+		return 0, err
+	}
 
 	return
 }
 
-func (db *DB) setDBVersion(version uint32) error {
-	return db.Update(func(txn *badger.Txn) error {
-		prefix, err := db.prefixForName(versionKey)
-		if err != nil {
-			return err
-		}
-		b := make([]byte, 4)
-		binary.BigEndian.PutUint32(b[:], version)
-		return txn.Set(prefix[:], b)
-	})
-}
-
-// Upgrade updates the schema of the database. It should be called right
-// after Connect, before any transactions are done. Each upgrade should
-// contain a call to one of the functions that change the schema of the
-// database, including DeleteIndex and ReIndex.
-//
-// As the schema evolves, additional upgrades should be added to the list
-// that is passed to Upgrade. When this function is called with a certain
-// amount of upgrades, each of them are applied in order and the version of
-// the database is incremented to the amount of upgrades that have been
-// applied. When the function is called again, the upgrades that have already
-// been applied are skipped.
-func (db *DB) Upgrade(upgrades []func() error) error {
-	version, err := db.getDBVersion()
-	if err != nil {
-		return err
-	}
-
-	if version > uint32(len(upgrades)) {
-		return fmt.Errorf("upgrade list is too short. expected at least %d upgrades, got %d",
-			version, len(upgrades))
-	}
-
-	for i, upgrade := range upgrades {
-		if i < int(version) {
-			continue
-		}
-		if err := upgrade(); err != nil {
-			return err
-		}
-		if err := db.setDBVersion(uint32(i + 1)); err != nil {
-			return err
-		}
-	}
-
-	return nil
+// SetDBVersion sets the current database version in the DB.
+func (db *DB) SetDBVersion(version uint32, txn *badger.Txn) error {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint32(b[:], version)
+	return txn.Set(versionPrefix[:], b)
 }
 
 // Update: badger can return an ErrConflict if a read and write happen
@@ -187,14 +148,33 @@ func (db *DB) Update(f func(txn *badger.Txn) error) (err error) {
 	sleepTime := 5 * time.Millisecond
 
 	for i := 0; i < maxRetries; i++ {
-		if err = db.DB.Update(f); err == nil || !errors.Is(err, badger.ErrConflict) {
+		if db.upgradeTxn == nil {
+			err = db.DB.Update(f)
+		} else {
+			err = f(db.upgradeTxn)
+		}
+		if err == nil || !errors.Is(err, badger.ErrConflict) {
 			return err
 		}
+
 		sleepTime *= 2
 		time.Sleep(sleepTime)
 	}
 
 	return err
+}
+
+// Upgrade provides a way to perform a series of db updates under a single
+// transaction. All calls to Upgrade must happen synchronously when the
+// database is initialized and not being used by any other goroutines.
+func (db *DB) Upgrade(upgrade func() error) error {
+	return db.DB.Update(func(txn *badger.Txn) error {
+		db.upgradeTxn = txn
+		defer func() {
+			db.upgradeTxn = nil
+		}()
+		return upgrade()
+	})
 }
 
 func (db *DB) prefixForNameImpl(name string, existing bool) (prefix keyPrefix, _ error) {
