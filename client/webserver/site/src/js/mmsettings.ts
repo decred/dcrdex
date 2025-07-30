@@ -3334,6 +3334,7 @@ function toAllocateRunning (
       result.cex[assetID].amount = result.cex[assetID].calculation.available
     }
 
+    // If dex is insufficient, increase cex allocation
     if (canRebalance && dexSurplus < 0 && cexSurplus > 0) {
       const dexDeficit = -dexSurplus
       const additionalCEX = Math.min(dexDeficit, cexSurplus)
@@ -3342,12 +3343,13 @@ function toAllocateRunning (
       if (cexSurplus >= dexDeficit) result.dex[assetID].status = 'sufficient-with-rebalance'
     }
 
-    if (canRebalance && dexSurplus < 0 && cexSurplus > 0) {
-      const dexDeficit = -dexSurplus
-      const additionalCEX = Math.min(dexDeficit, cexSurplus)
-      result.cex[assetID].calculation.rebalanceAdjustment = additionalCEX
-      result.cex[assetID].amount += additionalCEX
-      if (cexSurplus >= dexDeficit) result.dex[assetID].status = 'sufficient-with-rebalance'
+    // If cex is insufficient, increase dex allocation
+    if (canRebalance && cexSurplus < 0 && dexSurplus > 0) {
+      const cexDeficit = -cexSurplus
+      const additionalDEX = Math.min(cexDeficit, dexSurplus)
+      result.dex[assetID].calculation.rebalanceAdjustment = additionalDEX
+      result.dex[assetID].amount += additionalDEX
+      if (dexSurplus >= cexDeficit) result.cex[assetID].status = 'sufficient-with-rebalance'
     }
   }
 
