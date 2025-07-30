@@ -1047,12 +1047,18 @@ func (w *ETHBridgeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) 
 		return nil, err
 	}
 
-	var bridge bridge
+	bridges := make(map[uint32]bridge)
 	switch w.assetID {
 	case ethID:
-		bridge, err = newPolygonBridgeEth(ctx, w.node.contractBackend(), w.net, w.addr, w.node, w.log)
+		bridges[baseID], err = newEthBridgeBase(w.node.contractBackend(), w.net, w.addr, w.log)
+		if err != nil {
+			return nil, err
+		}
+		bridges[wethPolygonID], err = newPolygonBridgeEth(ctx, w.node.contractBackend(), w.net, w.addr, w.node, w.log)
 	case polygonID:
-		bridge, err = newPolygonBridgePolygonPOLToken(ctx, w.node.contractBackend(), w.net, w.addr, w.log)
+		bridges[maticEthID], err = newPolygonBridgePolygonPOLToken(ctx, w.node.contractBackend(), w.net, w.addr, w.log)
+	case baseID:
+		bridges[ethID], err = newBaseBridgeEth(w.node.contractBackend(), w.net, w.addr, w.log)
 	default:
 		err = fmt.Errorf("bridge not supported for asset %d", w.assetID)
 	}
@@ -1060,9 +1066,12 @@ func (w *ETHBridgeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) 
 		return nil, err
 	}
 
-	w.manager, err = newBridgeManager(ctx, w.assetID, w.assetID, bridge, w.ETHWallet.emit, w.txDB, time.Minute, w.log)
-	if err != nil {
-		return nil, err
+	w.managers = make(map[uint32]*bridgeManager)
+	for assetID, bridge := range bridges {
+		w.managers[assetID], err = newBridgeManager(ctx, w.assetID, w.assetID, bridge, w.ETHWallet.emit, w.txDB, time.Minute, w.log)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return wg, nil
@@ -1075,16 +1084,19 @@ func (w *TokenBridgeWallet) Connect(ctx context.Context) (wg *sync.WaitGroup, er
 		return nil, err
 	}
 
-	var bridge bridge
+	bridges := make(map[uint32]bridge)
 	switch {
 	case isUSDCBridgeSupported(w.assetID, w.net):
+		var bridge bridge
 		bridge, err = newUsdcBridge(w.assetID, w.net, w.netToken.Address, w.node.contractBackend(), w.addr, w.node)
+		bridges[usdcEthID] = bridge
+		bridges[usdcPolygonID] = bridge
 	case w.baseChainID == polygonID:
-		bridge, err = newPolygonBridgePolygonErc20(w.node.contractBackend(), w.assetID, w.netToken.Address, w.log, w.net)
+		bridges[maticEthID], err = newPolygonBridgePolygonErc20(w.node.contractBackend(), w.assetID, w.netToken.Address, w.log, w.net)
 	case w.assetID == maticEthID:
-		bridge, err = newPolygonBridgeEthPOL(ctx, w.node.contractBackend(), w.assetID, w.netToken.Address, w.net, w.addr, w.node, w.log)
+		bridges[polygonID], err = newPolygonBridgeEthPOL(ctx, w.node.contractBackend(), w.assetID, w.netToken.Address, w.net, w.addr, w.node, w.log)
 	case w.baseChainID == ethID:
-		bridge, err = newPolygonBridgeEthErc20(ctx, w.node.contractBackend(), w.assetID, w.netToken.Address, w.net, w.addr, w.node, w.log)
+		bridges[wethPolygonID], err = newPolygonBridgeEthErc20(ctx, w.node.contractBackend(), w.assetID, w.netToken.Address, w.net, w.addr, w.node, w.log)
 	default:
 		err = fmt.Errorf("bridge not supported for asset %d", w.assetID)
 	}
@@ -1092,9 +1104,12 @@ func (w *TokenBridgeWallet) Connect(ctx context.Context) (wg *sync.WaitGroup, er
 		return nil, err
 	}
 
-	w.manager, err = newBridgeManager(ctx, w.assetID, w.baseChainID, bridge, w.TokenWallet.emit, w.txDB, time.Minute, w.log)
-	if err != nil {
-		return nil, err
+	w.managers = make(map[uint32]*bridgeManager)
+	for assetID, bridge := range bridges {
+		w.managers[assetID], err = newBridgeManager(ctx, w.assetID, w.baseChainID, bridge, w.TokenWallet.emit, w.txDB, time.Minute, w.log)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return wg, nil
@@ -1495,7 +1510,8 @@ func (bm *bridgeManager) startMonitoring() {
 
 // ETHBridgeWallet is an ETHWallet that supports bridging funds to other chains.
 type ETHBridgeWallet struct {
-	manager *bridgeManager
+	// managers mapped by destination assetID
+	managers map[uint32]*bridgeManager
 
 	*ETHWallet
 }
@@ -1505,7 +1521,8 @@ var _ asset.Bridger = (*ETHBridgeWallet)(nil)
 // TokenBridgeWallet is a TokenWallet that supports bridging funds to other
 // chains.
 type TokenBridgeWallet struct {
-	manager *bridgeManager
+	// managers mapped by destination assetID
+	managers map[uint32]*bridgeManager
 
 	*TokenWallet
 }
@@ -3059,14 +3076,22 @@ func (w *assetWallet) bridgeContractApprovalStatus(ctx context.Context, bridge b
 
 // BridgeContractApprovalStatus returns whether the bridge contract has been
 // approved to spend tokens on behalf of the account handled by the wallet.
-func (w *TokenBridgeWallet) BridgeContractApprovalStatus(ctx context.Context) (asset.ApprovalStatus, error) {
-	return w.bridgeContractApprovalStatus(ctx, w.manager.bridge)
+func (w *TokenBridgeWallet) BridgeContractApprovalStatus(ctx context.Context, destID uint32) (asset.ApprovalStatus, error) {
+	manager := w.managers[destID]
+	if manager == nil {
+		return 0, fmt.Errorf("unable to find manager with destID %d", destID)
+	}
+	return w.bridgeContractApprovalStatus(ctx, manager.bridge)
 }
 
 // BridgeContractApprovalStatus returns whether the bridge contract has been
 // approved to spend tokens on behalf of the account handled by the wallet.
-func (w *ETHBridgeWallet) BridgeContractApprovalStatus(ctx context.Context) (asset.ApprovalStatus, error) {
-	return w.bridgeContractApprovalStatus(ctx, w.manager.bridge)
+func (w *ETHBridgeWallet) BridgeContractApprovalStatus(ctx context.Context, destID uint32) (asset.ApprovalStatus, error) {
+	manager := w.managers[destID]
+	if manager == nil {
+		return 0, fmt.Errorf("unable to find manager with destID %d", destID)
+	}
+	return w.bridgeContractApprovalStatus(ctx, manager.bridge)
 }
 
 func (w *assetWallet) approveBridgeContract(ctx context.Context, bridge bridge) (string, error) {
@@ -3132,14 +3157,22 @@ func (w *assetWallet) approveBridgeContract(ctx context.Context, bridge bridge) 
 
 // ApproveBridgeContract approves the bridge contract to spend tokens on behalf
 // of the account handled by the wallet.
-func (w *ETHBridgeWallet) ApproveBridgeContract(ctx context.Context) (string, error) {
-	return w.approveBridgeContract(ctx, w.manager.bridge)
+func (w *ETHBridgeWallet) ApproveBridgeContract(ctx context.Context, destID uint32) (string, error) {
+	manager := w.managers[destID]
+	if manager == nil {
+		return "", fmt.Errorf("unable to find manager with destID %d", destID)
+	}
+	return w.approveBridgeContract(ctx, manager.bridge)
 }
 
 // ApproveBridgeContract approves the bridge contract to spend tokens on behalf
 // of the account handled by the wallet.
-func (w *TokenBridgeWallet) ApproveBridgeContract(ctx context.Context) (string, error) {
-	return w.approveBridgeContract(ctx, w.manager.bridge)
+func (w *TokenBridgeWallet) ApproveBridgeContract(ctx context.Context, destID uint32) (string, error) {
+	manager := w.managers[destID]
+	if manager == nil {
+		return "", fmt.Errorf("unable to find manager with destID %d", destID)
+	}
+	return w.approveBridgeContract(ctx, manager.bridge)
 }
 
 func (w *assetWallet) unapproveBridgeContract(ctx context.Context, bridge bridge) (string, error) {
@@ -3201,13 +3234,21 @@ func (w *assetWallet) unapproveBridgeContract(ctx context.Context, bridge bridge
 }
 
 // UnapproveBridgeContract removes the approval for the bridge contract.
-func (w *ETHBridgeWallet) UnapproveBridgeContract(ctx context.Context) (string, error) {
-	return w.unapproveBridgeContract(ctx, w.manager.bridge)
+func (w *ETHBridgeWallet) UnapproveBridgeContract(ctx context.Context, destID uint32) (string, error) {
+	manager := w.managers[destID]
+	if manager == nil {
+		return "", fmt.Errorf("unable to find manager with destID %d", destID)
+	}
+	return w.unapproveBridgeContract(ctx, manager.bridge)
 }
 
 // UnapproveBridgeContract removes the approval for the bridge contract.
-func (w *TokenBridgeWallet) UnapproveBridgeContract(ctx context.Context) (string, error) {
-	return w.unapproveBridgeContract(ctx, w.manager.bridge)
+func (w *TokenBridgeWallet) UnapproveBridgeContract(ctx context.Context, destID uint32) (string, error) {
+	manager := w.managers[destID]
+	if manager == nil {
+		return "", fmt.Errorf("unable to find manager with destID %d", destID)
+	}
+	return w.unapproveBridgeContract(ctx, manager.bridge)
 }
 
 func (w *assetWallet) initiateBridge(ctx context.Context, amt uint64, dest uint32, bridge bridge) (txID string, err error) {
@@ -3249,24 +3290,34 @@ func (w *assetWallet) initiateBridge(ctx context.Context, amt uint64, dest uint3
 
 // InitiateBridge initiates bridging funds from one chain to another.
 func (w *ETHBridgeWallet) InitiateBridge(ctx context.Context, amt uint64, dest uint32) (string, error) {
-	txID, err := w.initiateBridge(ctx, amt, dest, w.manager.bridge)
+	manager := w.managers[dest]
+	if manager == nil {
+		return "", fmt.Errorf("unable to find manager with destID %d", dest)
+	}
+
+	txID, err := w.initiateBridge(ctx, amt, dest, manager.bridge)
 	if err != nil {
 		return "", err
 	}
 
-	w.manager.addPendingBridge(txID, dest, amt)
+	manager.addPendingBridge(txID, dest, amt)
 
 	return txID, nil
 }
 
 // Bridge initiates bridging funds from one chain to another.
 func (w *TokenBridgeWallet) InitiateBridge(ctx context.Context, amt uint64, dest uint32) (string, error) {
-	txID, err := w.initiateBridge(ctx, amt, dest, w.manager.bridge)
+	manager := w.managers[dest]
+	if manager == nil {
+		return "", fmt.Errorf("unable to find manager with destID %d", dest)
+	}
+
+	txID, err := w.initiateBridge(ctx, amt, dest, manager.bridge)
 	if err != nil {
 		return "", err
 	}
 
-	w.manager.addPendingBridge(txID, dest, amt)
+	manager.addPendingBridge(txID, dest, amt)
 
 	return txID, nil
 }
@@ -3274,13 +3325,41 @@ func (w *TokenBridgeWallet) InitiateBridge(ctx context.Context, amt uint64, dest
 // MarkBridgeComplete is called when the bridge completion transaction has
 // been confirmed on the destination chain.
 func (w *ETHBridgeWallet) MarkBridgeComplete(initiationTxID, completionTxID string) {
-	w.manager.markBridgeComplete(initiationTxID, completionTxID)
+	var manager *bridgeManager
+	for _, m := range w.managers {
+		m.mtx.RLock()
+		_, has := m.pendingBridges[initiationTxID]
+		m.mtx.RUnlock()
+		if has {
+			manager = m
+			break
+		}
+	}
+	if manager == nil {
+		w.log.Errorf("unable to find manager for tx %s", initiationTxID)
+		return
+	}
+	manager.markBridgeComplete(initiationTxID, completionTxID)
 }
 
 // MarkBridgeComplete is called when the bridge completion transaction has
 // been confirmed on the destination chain.
 func (w *TokenBridgeWallet) MarkBridgeComplete(initiationTxID, completionTxID string) {
-	w.manager.markBridgeComplete(initiationTxID, completionTxID)
+	var manager *bridgeManager
+	for _, m := range w.managers {
+		m.mtx.RLock()
+		_, has := m.pendingBridges[initiationTxID]
+		m.mtx.RUnlock()
+		if has {
+			manager = m
+			break
+		}
+	}
+	if manager == nil {
+		w.log.Errorf("unable to find manager for tx %s", initiationTxID)
+		return
+	}
+	manager.markBridgeComplete(initiationTxID, completionTxID)
 }
 
 func (w *assetWallet) pendingBridges() ([]*asset.WalletTransaction, error) {
@@ -3441,14 +3520,22 @@ func (w *assetWallet) completeBrigdeIfNeeded(ctx context.Context, bridgeTx *asse
 
 // CompleteBridges completes a bridge by submitting a transaction that mints
 // or unlocks coins on the destination chain.
-func (w *ETHBridgeWallet) CompleteBridge(ctx context.Context, bridgeTx *asset.BridgeCounterpartTx, amount uint64, data []byte) error {
-	return w.completeBrigdeIfNeeded(ctx, bridgeTx, amount, data, w.manager.bridge)
+func (w *ETHBridgeWallet) CompleteBridge(ctx context.Context, bridgeTx *asset.BridgeCounterpartTx, amount uint64, data []byte, destID uint32) error {
+	manager := w.managers[destID]
+	if manager == nil {
+		return fmt.Errorf("unable to find manager with destID %d", destID)
+	}
+	return w.completeBrigdeIfNeeded(ctx, bridgeTx, amount, data, manager.bridge)
 }
 
 // CompleteBridges completes a bridge by submitting a transaction that mints
 // or unlocks coins on the destination chain.
-func (w *TokenBridgeWallet) CompleteBridge(ctx context.Context, bridgeTx *asset.BridgeCounterpartTx, amount uint64, data []byte) error {
-	return w.completeBrigdeIfNeeded(ctx, bridgeTx, amount, data, w.manager.bridge)
+func (w *TokenBridgeWallet) CompleteBridge(ctx context.Context, bridgeTx *asset.BridgeCounterpartTx, amount uint64, data []byte, destID uint32) error {
+	manager := w.managers[destID]
+	if manager == nil {
+		return fmt.Errorf("unable to find manager with destID %d", destID)
+	}
+	return w.completeBrigdeIfNeeded(ctx, bridgeTx, amount, data, manager.bridge)
 }
 
 // ReserveNRedemptions locks funds for redemption. It is an error if there

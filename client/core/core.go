@@ -5541,17 +5541,17 @@ func (c *Core) ApproveTokenFee(assetID uint32, version uint32, approval bool) (u
 
 // BridgeContractApprovalStatus returns the approval status of the bridge
 // contract for the specified asset.
-func (c *Core) BridgeContractApprovalStatus(assetID uint32) (asset.ApprovalStatus, error) {
+func (c *Core) BridgeContractApprovalStatus(assetID, destID uint32) (asset.ApprovalStatus, error) {
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
 		return 0, err
 	}
 
-	return wallet.BridgeContractApprovalStatus(c.ctx)
+	return wallet.BridgeContractApprovalStatus(c.ctx, destID)
 }
 
 // ApproveBridgeContract approves the bridge contract for the specified asset.
-func (c *Core) ApproveBridgeContract(assetID uint32) (string, error) {
+func (c *Core) ApproveBridgeContract(assetID uint32, destID uint32) (string, error) {
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
 		return "", err
@@ -5566,7 +5566,7 @@ func (c *Core) ApproveBridgeContract(assetID uint32) (string, error) {
 		return "", err
 	}
 
-	txID, err := wallet.ApproveBridgeContract(c.ctx)
+	txID, err := wallet.ApproveBridgeContract(c.ctx, destID)
 	if err != nil {
 		return "", err
 	}
@@ -5576,7 +5576,7 @@ func (c *Core) ApproveBridgeContract(assetID uint32) (string, error) {
 
 // UnapproveBridgeContract unapproves the bridge contract for the specified
 // asset.
-func (c *Core) UnapproveBridgeContract(assetID uint32) (string, error) {
+func (c *Core) UnapproveBridgeContract(assetID uint32, destID uint32) (string, error) {
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
 		return "", err
@@ -5591,7 +5591,7 @@ func (c *Core) UnapproveBridgeContract(assetID uint32) (string, error) {
 		return "", err
 	}
 
-	txID, err := wallet.UnapproveBridgeContract(c.ctx)
+	txID, err := wallet.UnapproveBridgeContract(c.ctx, destID)
 	if err != nil {
 		return "", err
 	}
@@ -9609,7 +9609,7 @@ func (c *Core) handleBridgeReadyToComplete(n *asset.BridgeReadyToCompleteNote) {
 		ID:      n.InitiateBridgeTxID,
 	}
 
-	err = destWallet.CompleteBridge(c.ctx, bridgeTx, n.Amount, n.Data)
+	err = destWallet.CompleteBridge(c.ctx, bridgeTx, n.Amount, n.Data, n.DestAssetID)
 	if err != nil {
 		c.log.Errorf("Error completing bridge: %v", err)
 	}

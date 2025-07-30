@@ -133,6 +133,12 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Networ
 		return nil, err
 	}
 
+	if _, supported := eth.BaseBridgeSupportedAsset(BipID, net); supported {
+		return &eth.ETHBridgeWallet{
+			ETHWallet: evmWallet,
+		}, nil
+	}
+
 	return evmWallet, nil
 }
 

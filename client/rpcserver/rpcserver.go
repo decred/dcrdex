@@ -86,9 +86,9 @@ type clientCore interface {
 	MultiTrade(pw []byte, form *core.MultiTradeForm) []*core.MultiTradeResult
 	TxHistory(assetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error)
 	WalletTransaction(assetID uint32, txID string) (*asset.WalletTransaction, error)
-	BridgeContractApprovalStatus(assetID uint32) (asset.ApprovalStatus, error)
-	ApproveBridgeContract(assetID uint32) (string, error)
-	UnapproveBridgeContract(assetID uint32) (string, error)
+	BridgeContractApprovalStatus(assetID, destID uint32) (asset.ApprovalStatus, error)
+	ApproveBridgeContract(assetID, destID uint32) (string, error)
+	UnapproveBridgeContract(assetID, destID uint32) (string, error)
 	Bridge(fromAssetID, toAssetID uint32, amt uint64) (txID string, err error)
 	PendingBridges(assetID uint32) ([]*asset.WalletTransaction, error)
 	BridgeHistory(assetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error)
