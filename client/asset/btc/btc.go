@@ -2444,6 +2444,9 @@ func (btc *baseWallet) SingleLotRedeemFees(_ uint32, feeSuggestion uint64) (uint
 	if err != nil {
 		return 0, err
 	}
+
+	btc.log.Tracef("SingleLotRedeemFees: worst case = %d, feeSuggestion = %d", preRedeem.Estimate.RealisticWorstCase, feeSuggestion)
+
 	return preRedeem.Estimate.RealisticWorstCase, nil
 }
 
