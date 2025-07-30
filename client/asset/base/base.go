@@ -124,21 +124,20 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Networ
 		FinalizeConfs:      3,
 		Logger:             logger,
 		BaseChainContracts: contracts,
-		// MultiBalAddress:    dexbase.MultiBalanceAddresses[net],
-		WalletInfo:       WalletInfo,
-		Net:              net,
-		DefaultProviders: defaultProviders,
-		MaxTxFeeGwei:     1000 * dexeth.GweiFactor,
+		WalletInfo:         WalletInfo,
+		Net:                net,
+		DefaultProviders:   defaultProviders,
+		MaxTxFeeGwei:       1000 * dexeth.GweiFactor,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	// if _, supported := eth.PolygonBridgeSupportedAsset(BipID, net); supported {
-	// 	return &eth.ETHBridgeWallet{
-	// 		ETHWallet: evmWallet,
-	// 	}, nil
-	// }
+	if _, supported := eth.BaseBridgeSupportedAsset(BipID, net); supported {
+		return &eth.ETHBridgeWallet{
+			ETHWallet: evmWallet,
+		}, nil
+	}
 
 	return evmWallet, nil
 }

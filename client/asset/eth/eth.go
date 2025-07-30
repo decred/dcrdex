@@ -1050,7 +1050,8 @@ func (w *ETHBridgeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) 
 	var bridge bridge
 	switch w.assetID {
 	case ethID:
-		bridge, err = newPolygonBridgeEth(w.node.contractBackend(), w.net, w.addr, w.log)
+		bridge, err = newBaseBridgeEth(w.node.contractBackend(), w.net, w.addr, w.log)
+		//bridge, err = newPolygonBridgeEth(w.node.contractBackend(), w.net, w.addr, w.log)
 	default:
 		err = fmt.Errorf("bridge not supported for asset %d", w.assetID)
 	}
