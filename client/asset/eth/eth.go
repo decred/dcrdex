@@ -1050,7 +1050,8 @@ func (w *ETHBridgeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) 
 	var bridge bridge
 	switch w.assetID {
 	case ethID:
-		bridge, err = newPolygonBridgeEth(w.node.contractBackend(), w.net, w.addr, w.log)
+		bridge, err = newBaseBridgeEth(w.node.contractBackend(), w.net, w.addr, w.log)
+		//bridge, err = newPolygonBridgeEth(w.node.contractBackend(), w.net, w.addr, w.log)
 	default:
 		err = fmt.Errorf("bridge not supported for asset %d", w.assetID)
 	}
@@ -5495,9 +5496,14 @@ func (w *baseWallet) updatePendingTx(tip uint64, pendingTx *extendedWalletTx) {
 			w.log.Errorf("Header for hash %v is nil", receipt.BlockHash)
 			return
 		}
+		gasTip, err := tx.EffectiveGasTip(hdr.BaseFee)
+		if err != nil {
+			w.log.Errorf("Error getting effective gas tip: %v", err)
+			return
+		}
 		pendingTx.Timestamp = hdr.Time
 		if effectiveGasPrice == nil {
-			effectiveGasPrice = new(big.Int).Add(hdr.BaseFee, tx.EffectiveGasTipValue(hdr.BaseFee))
+			effectiveGasPrice = new(big.Int).Add(hdr.BaseFee, gasTip)
 		}
 	}
 
