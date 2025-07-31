@@ -261,32 +261,33 @@ func TestTxDB_GetBridges(t *testing.T) {
 	}
 	defer db.Close()
 
+	now := time.Now()
 	txs := []*extendedWalletTx{
-		// Completed bridge, block 100
+		// Completed bridge, older submission time
 		{
 			WalletTransaction: &asset.WalletTransaction{
 				ID:   "0x1111111111111111111111111111111111111111111111111111111111111111",
 				Type: asset.InitiateBridge,
 				BridgeCounterpartTx: &asset.BridgeCounterpartTx{
-					CompletionTime: 100,
+					ID: "0x1111111111111111111111111111111111111111111111111111111111111112",
 				},
 			},
 			Nonce:          big.NewInt(1),
-			SubmissionTime: uint64(time.Now().Add(-24 * time.Hour).Unix()),
+			SubmissionTime: uint64(now.Add(-24 * time.Hour).Unix()),
 		},
-		// Completed bridge, block 99
+		// Completed bridge, newer submission time
 		{
 			WalletTransaction: &asset.WalletTransaction{
 				ID:   "0x2222222222222222222222222222222222222222222222222222222222222222",
 				Type: asset.InitiateBridge,
 				BridgeCounterpartTx: &asset.BridgeCounterpartTx{
-					CompletionTime: 99,
+					ID: "0x2222222222222222222222222222222222222222222222222222222222222223",
 				},
 			},
 			Nonce:          big.NewInt(2),
-			SubmissionTime: uint64(time.Now().Add(-20 * time.Hour).Unix()),
+			SubmissionTime: uint64(now.Add(-20 * time.Hour).Unix()),
 		},
-		// Pending bridge
+		// Pending bridge, older
 		{
 			WalletTransaction: &asset.WalletTransaction{
 				ID:                  "0x3333333333333333333333333333333333333333333333333333333333333333",
@@ -294,16 +295,26 @@ func TestTxDB_GetBridges(t *testing.T) {
 				BridgeCounterpartTx: nil,
 			},
 			Nonce:          big.NewInt(3),
-			SubmissionTime: uint64(time.Now().Add(-18 * time.Hour).Unix()),
+			SubmissionTime: uint64(now.Add(-18 * time.Hour).Unix()),
+		},
+		// Pending bridge, newer
+		{
+			WalletTransaction: &asset.WalletTransaction{
+				ID:                  "0x4444444444444444444444444444444444444444444444444444444444444444",
+				Type:                asset.InitiateBridge,
+				BridgeCounterpartTx: nil,
+			},
+			Nonce:          big.NewInt(4),
+			SubmissionTime: uint64(now.Add(-10 * time.Hour).Unix()),
 		},
 		// Non-bridge transaction
 		{
 			WalletTransaction: &asset.WalletTransaction{
-				ID:   "0x4444444444444444444444444444444444444444444444444444444444444444",
+				ID:   "0x5555555555555555555555555555555555555555555555555555555555555555",
 				Type: asset.Send,
 			},
 			Nonce:          big.NewInt(5),
-			SubmissionTime: uint64(time.Now().Add(-10 * time.Hour).Unix()),
+			SubmissionTime: uint64(now.Add(-5 * time.Hour).Unix()),
 		},
 	}
 
@@ -319,11 +330,14 @@ func TestTxDB_GetBridges(t *testing.T) {
 		if err != nil {
 			t.Fatalf("getBridges failed: %v", err)
 		}
-		if len(result) != 3 {
-			t.Fatalf("expected 3 bridge initiations, got %d", len(result))
+		if len(result) != 4 {
+			t.Fatalf("expected 4 bridge initiations, got %d", len(result))
 		}
-		if result[0].ID != txs[2].ID || result[1].ID != txs[0].ID ||
-			result[2].ID != txs[1].ID {
+		// Expected order: pending bridges first (sorted by submission time, newest first),
+		// then completed bridges (sorted by submission time, newest first)
+		// So: txs[3] (pending, newer), txs[2] (pending, older), txs[1] (completed, newer), txs[0] (completed, older)
+		if result[0].ID != txs[3].ID || result[1].ID != txs[2].ID ||
+			result[2].ID != txs[1].ID || result[3].ID != txs[0].ID {
 			t.Fatalf("getBridges returned incorrect order of transactions")
 		}
 	})
@@ -337,7 +351,8 @@ func TestTxDB_GetBridges(t *testing.T) {
 			t.Fatalf("expected 2 bridge initiations, got %d", len(result))
 		}
 
-		if result[0].ID != txs[2].ID || result[1].ID != txs[0].ID {
+		// Expected order: first two pending bridges (newest first)
+		if result[0].ID != txs[3].ID || result[1].ID != txs[2].ID {
 			t.Fatalf("getBridges returned incorrect transactions")
 		}
 	})
@@ -352,7 +367,8 @@ func TestTxDB_GetBridges(t *testing.T) {
 			t.Fatalf("expected 2 bridge initiations, got %d", len(result))
 		}
 
-		if result[0].ID != txs[0].ID || result[1].ID != txs[2].ID {
+		// Forward iteration from txs[0]: should get txs[0], then txs[1] (next in chronological order)
+		if result[0].ID != txs[0].ID || result[1].ID != txs[1].ID {
 			t.Fatalf("getBridges returned incorrect transactions")
 		}
 	})
@@ -363,11 +379,29 @@ func TestTxDB_GetBridges(t *testing.T) {
 		if err != nil {
 			t.Fatalf("getBridges failed: %v", err)
 		}
+		if len(result) != 1 {
+			t.Fatalf("expected 1 bridge transaction, got %d", len(result))
+		}
+
+		// Only txs[0] should be returned since it's the oldest completed bridge
+		if result[0].ID != txs[0].ID {
+			t.Fatalf("getBridges returned incorrect transactions")
+		}
+	})
+
+	t.Run("getBridges with refID and past=true from newer bridge", func(t *testing.T) {
+		// Use txs[1] as reference to test past=true with older transactions available
+		refID := common.HexToHash(txs[1].ID)
+		result, err := db.getBridges(2, &refID, true)
+		if err != nil {
+			t.Fatalf("getBridges failed: %v", err)
+		}
 		if len(result) != 2 {
 			t.Fatalf("expected 2 bridge transactions, got %d", len(result))
 		}
 
-		if result[0].ID != txs[0].ID || result[1].ID != txs[1].ID {
+		// Should return txs[1] (reference) then txs[0] (older) in reverse chronological order
+		if result[0].ID != txs[1].ID || result[1].ID != txs[0].ID {
 			t.Fatalf("getBridges returned incorrect transactions")
 		}
 	})
@@ -381,7 +415,7 @@ func TestTxDB_GetBridges(t *testing.T) {
 	})
 
 	t.Run("getBridges with non-bridge refID", func(t *testing.T) {
-		nonBridgeID := common.HexToHash(txs[3].ID)
+		nonBridgeID := common.HexToHash(txs[4].ID)
 		_, err := db.getBridges(2, &nonBridgeID, false)
 		if err == nil {
 			t.Fatalf("expected error for non-bridge refID, got nil")
@@ -393,11 +427,12 @@ func TestTxDB_GetBridges(t *testing.T) {
 		if err != nil {
 			t.Fatalf("getPendingBridges failed: %v", err)
 		}
-		if len(result) != 1 {
+		if len(result) != 2 {
 			t.Fatalf("expected 2 pending bridge transactions, got %d", len(result))
 		}
-		if result[0].ID != txs[2].ID {
-			t.Fatalf("expected pending bridge %s but got %s", txs[2].ID, result[0].ID)
+		// Should be in reverse chronological order (newest first)
+		if result[0].ID != txs[3].ID || result[1].ID != txs[2].ID {
+			t.Fatalf("getPendingBridges returned incorrect order")
 		}
 	})
 }

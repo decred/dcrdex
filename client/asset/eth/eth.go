@@ -1050,7 +1050,9 @@ func (w *ETHBridgeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) 
 	var bridge bridge
 	switch w.assetID {
 	case ethID:
-		bridge, err = newPolygonBridgeEth(w.node.contractBackend(), w.net, w.addr, w.log)
+		bridge, err = newPolygonBridgeEth(ctx, w.node.contractBackend(), w.net, w.addr, w.node, w.log)
+	case polygonID:
+		bridge, err = newPolygonBridgePolygonPOLToken(ctx, w.node.contractBackend(), w.net, w.addr, w.log)
 	default:
 		err = fmt.Errorf("bridge not supported for asset %d", w.assetID)
 	}
@@ -1080,9 +1082,9 @@ func (w *TokenBridgeWallet) Connect(ctx context.Context) (wg *sync.WaitGroup, er
 	case w.baseChainID == polygonID:
 		bridge, err = newPolygonBridgePolygonErc20(w.node.contractBackend(), w.assetID, w.netToken.Address, w.log, w.net)
 	case w.assetID == maticEthID:
-		bridge, err = newPolygonBridgeEthPOL(w.node.contractBackend(), w.assetID, w.netToken.Address, w.net, w.addr, w.log)
+		bridge, err = newPolygonBridgeEthPOL(ctx, w.node.contractBackend(), w.assetID, w.netToken.Address, w.net, w.addr, w.node, w.log)
 	case w.baseChainID == ethID:
-		bridge, err = newPolygonBridgeEthErc20(ctx, w.node.contractBackend(), w.assetID, w.netToken.Address, w.net, w.addr, w.log)
+		bridge, err = newPolygonBridgeEthErc20(ctx, w.node.contractBackend(), w.assetID, w.netToken.Address, w.net, w.addr, w.node, w.log)
 	default:
 		err = fmt.Errorf("bridge not supported for asset %d", w.assetID)
 	}
@@ -1190,7 +1192,6 @@ type genTxResult struct {
 	recipient                *string
 	bridgeCounterpartAssetID *uint32
 	bridgeCounterpartTxID    *string
-	bridgeCompletionTime     *uint64
 }
 
 // transactionGenerator is an action that uses a nonce and returns a tx, it's
@@ -1332,8 +1333,9 @@ func (w *baseWallet) CreateTokenWallet(tokenID uint32, _ map[string]string) erro
 }
 
 type pendingBridge struct {
-	destAssetID uint32
-	amount      uint64
+	destAssetID    uint32
+	amount         uint64
+	completionData atomic.Value // []byte
 }
 
 // bridgeManager manages pending bridges. It periodically checks if the bridges
@@ -1411,27 +1413,36 @@ func (bm *bridgeManager) addPendingBridge(initiationTxID string, destAssetID uin
 }
 
 // checkPendingBridges checks if completion data is available for any pending
-// bridges, and if so, emits a BridgeReadyToComplete notification.
+// bridges, and if so, emits a BridgeReadyToComplete notification. The
+// completion data is cached to avoid fetching it multiple times for the same
+// bridge.
 func (bm *bridgeManager) checkPendingBridges(ctx context.Context) {
 	bm.mtx.RLock()
 	pendingBridges := utils.CopyMap(bm.pendingBridges)
 	bm.mtx.RUnlock()
 
 	for initiationTxID, pendingBridge := range pendingBridges {
-		data, err := bm.bridge.getCompletionData(ctx, initiationTxID)
-		if err != nil {
-			bm.log.Tracef("Unable to get mint info for bridge with initiation tx ID %s: %v", initiationTxID, err)
-			continue
+		var completionData []byte
+		if dataVal := pendingBridge.completionData.Load(); dataVal != nil {
+			completionData = dataVal.([]byte)
+		} else {
+			var err error
+			completionData, err = bm.bridge.getCompletionData(ctx, initiationTxID)
+			if err != nil {
+				bm.log.Infof("Unable to get mint info for bridge with initiation tx ID %s: %v", initiationTxID, err)
+				continue
+			}
+			pendingBridge.completionData.Store(completionData)
 		}
 
-		bm.emit.BridgeReadyToComplete(pendingBridge.destAssetID, initiationTxID, pendingBridge.amount, data)
+		bm.emit.BridgeReadyToComplete(pendingBridge.destAssetID, initiationTxID, pendingBridge.amount, completionData)
 	}
 }
 
 // markBridgeComplete is called when the destination wallet has confirmed the
 // completion of a bridge. The pending bridge is removed from the manager and
 // the db is updated to reflect the completion.
-func (bm *bridgeManager) markBridgeComplete(initiationTxID, completionTxID string, completionTime uint64) {
+func (bm *bridgeManager) markBridgeComplete(initiationTxID, completionTxID string) {
 	bm.mtx.Lock()
 	delete(bm.pendingBridges, initiationTxID)
 	if len(bm.pendingBridges) == 0 && bm.stopMonitoring != nil {
@@ -1453,7 +1464,6 @@ func (bm *bridgeManager) markBridgeComplete(initiationTxID, completionTxID strin
 	}
 
 	bridgeTx.BridgeCounterpartTx.ID = completionTxID
-	bridgeTx.BridgeCounterpartTx.CompletionTime = completionTime
 	if err := bm.txDB.storeTx(bridgeTx); err != nil {
 		bm.log.Errorf("error storing completed bridge tx: %v", err)
 	}
@@ -3200,39 +3210,30 @@ func (w *TokenBridgeWallet) UnapproveBridgeContract(ctx context.Context) (string
 	return w.unapproveBridgeContract(ctx, w.manager.bridge)
 }
 
-func (w *assetWallet) initiateBridge(ctx context.Context, amt uint64, dest uint32, bridge bridge) (txID string, completionTxRequired bool, err error) {
+func (w *assetWallet) initiateBridge(ctx context.Context, amt uint64, dest uint32, bridge bridge) (txID string, err error) {
 	approvalStatus, err := w.bridgeContractApprovalStatus(ctx, bridge)
 	if err != nil {
-		return "", false, fmt.Errorf("error checking approval status: %w", err)
+		return "", fmt.Errorf("error checking approval status: %w", err)
 	}
 	if approvalStatus != asset.Approved {
-		return "", false, fmt.Errorf("bridge contract is not approved")
+		return "", fmt.Errorf("bridge contract is not approved")
 	}
 
 	maxFeeRate, tipRate, err := w.recommendedMaxFeeRate(ctx)
 	if err != nil {
-		return "", false, fmt.Errorf("error calculating bridge fee rate: %w", err)
+		return "", fmt.Errorf("error calculating bridge fee rate: %w", err)
 	}
 
-	return txID, completionTxRequired, w.withNonce(ctx, func(nonce *big.Int) (*genTxResult, error) {
+	return txID, w.withNonce(ctx, func(nonce *big.Int) (*genTxResult, error) {
 		txOpts, err := w.node.txOpts(ctx, 0, bridge.initiateBridgeGas(), maxFeeRate, tipRate, nonce)
 		if err != nil {
 			return nil, fmt.Errorf("txOpts error: %w", err)
 		}
 
 		var tx *types.Transaction
-		tx, completionTxRequired, err = bridge.initiateBridge(txOpts, dest, w.evmify(amt))
+		tx, err = bridge.initiateBridge(txOpts, dest, w.evmify(amt))
 		if err != nil {
 			return nil, err
-		}
-
-		var bridgeCounterpartyTxID *string
-		var bridgeCompletionTime *uint64
-		if !completionTxRequired {
-			id := asset.NoCompletionRequiredBridgeTxID
-			bridgeCounterpartyTxID = &id
-			tip := w.tip()
-			bridgeCompletionTime = &tip.Time
 		}
 
 		txID = tx.Hash().Hex()
@@ -3242,50 +3243,44 @@ func (w *assetWallet) initiateBridge(ctx context.Context, amt uint64, dest uint3
 			txType:                   asset.InitiateBridge,
 			amt:                      amt,
 			bridgeCounterpartAssetID: &dest,
-			bridgeCounterpartTxID:    bridgeCounterpartyTxID,
-			bridgeCompletionTime:     bridgeCompletionTime,
 		}, nil
 	})
 }
 
 // InitiateBridge initiates bridging funds from one chain to another.
 func (w *ETHBridgeWallet) InitiateBridge(ctx context.Context, amt uint64, dest uint32) (string, error) {
-	txID, completionTxRequired, err := w.initiateBridge(ctx, amt, dest, w.manager.bridge)
+	txID, err := w.initiateBridge(ctx, amt, dest, w.manager.bridge)
 	if err != nil {
 		return "", err
 	}
 
-	if completionTxRequired {
-		w.manager.addPendingBridge(txID, dest, amt)
-	}
+	w.manager.addPendingBridge(txID, dest, amt)
 
 	return txID, nil
 }
 
 // Bridge initiates bridging funds from one chain to another.
 func (w *TokenBridgeWallet) InitiateBridge(ctx context.Context, amt uint64, dest uint32) (string, error) {
-	txID, completionTxRequired, err := w.initiateBridge(ctx, amt, dest, w.manager.bridge)
+	txID, err := w.initiateBridge(ctx, amt, dest, w.manager.bridge)
 	if err != nil {
 		return "", err
 	}
 
-	if completionTxRequired {
-		w.manager.addPendingBridge(txID, dest, amt)
-	}
+	w.manager.addPendingBridge(txID, dest, amt)
 
 	return txID, nil
 }
 
 // MarkBridgeComplete is called when the bridge completion transaction has
 // been confirmed on the destination chain.
-func (w *ETHBridgeWallet) MarkBridgeComplete(initiationTxID, completionTxID string, completionTime uint64) {
-	w.manager.markBridgeComplete(initiationTxID, completionTxID, completionTime)
+func (w *ETHBridgeWallet) MarkBridgeComplete(initiationTxID, completionTxID string) {
+	w.manager.markBridgeComplete(initiationTxID, completionTxID)
 }
 
 // MarkBridgeComplete is called when the bridge completion transaction has
 // been confirmed on the destination chain.
-func (w *TokenBridgeWallet) MarkBridgeComplete(initiationTxID, completionTxID string, completionTime uint64) {
-	w.manager.markBridgeComplete(initiationTxID, completionTxID, completionTime)
+func (w *TokenBridgeWallet) MarkBridgeComplete(initiationTxID, completionTxID string) {
+	w.manager.markBridgeComplete(initiationTxID, completionTxID)
 }
 
 func (w *assetWallet) pendingBridges() ([]*asset.WalletTransaction, error) {
@@ -3403,7 +3398,28 @@ func (w *assetWallet) getBridgeCompletion(initiationTxID string) (*extendedWalle
 	return w.txDB.getBridgeCompletion(initiationTxID)
 }
 
+// verifyBridgeCompletion checks if the funds have been allocated on the
+// destination chain. It is called for bridges that do not require a
+// completion transaction, such as using the polygon bridge to bridge
+// from ethereum to polygon POS.
+func (w *assetWallet) verifyBridgeCompletion(ctx context.Context, bridgeTx *asset.BridgeCounterpartTx, data []byte, bridge bridge) error {
+	complete, err := bridge.verifyBridgeCompletion(ctx, data)
+	if err != nil {
+		return fmt.Errorf("error verifying bridge completion: %w", err)
+	}
+
+	if complete {
+		w.emit.BridgeCompleted(bridgeTx.AssetID, bridgeTx.ID, asset.NoCompletionRequiredBridgeTxID)
+	}
+
+	return nil
+}
+
 func (w *assetWallet) completeBrigdeIfNeeded(ctx context.Context, bridgeTx *asset.BridgeCounterpartTx, amount uint64, data []byte, bridge bridge) error {
+	if !bridge.requiresCompletion() {
+		return w.verifyBridgeCompletion(ctx, bridgeTx, data, bridge)
+	}
+
 	wt, err := w.getBridgeCompletion(bridgeTx.ID)
 	if err != nil {
 		return fmt.Errorf("error getting bridge completion: %w", err)
@@ -5380,7 +5396,7 @@ func (w *baseWallet) emitBridgeCompletedNote(tx *asset.WalletTransaction) {
 		return
 	}
 
-	wallet.emit.BridgeCompleted(tx.BridgeCounterpartTx.AssetID, tx.BridgeCounterpartTx.ID, tx.ID, tx.Timestamp)
+	wallet.emit.BridgeCompleted(tx.BridgeCounterpartTx.AssetID, tx.BridgeCounterpartTx.ID, tx.ID)
 }
 func findMissingNonces(confirmedAt, pendingAt *big.Int, pendingTxs []*extendedWalletTx) (ns []uint64) {
 	pendingTxMap := make(map[uint64]struct{})
@@ -6052,21 +6068,12 @@ func (w *baseWallet) extendAndStoreTx(genTxResult *genTxResult, tokenAssetID *ui
 
 	if genTxResult.bridgeCounterpartAssetID != nil {
 		var cpTxID string
-		var cpAssetID uint32
-		var completionTime uint64
 		if genTxResult.bridgeCounterpartTxID != nil {
 			cpTxID = *genTxResult.bridgeCounterpartTxID
 		}
-		if genTxResult.bridgeCounterpartAssetID != nil {
-			cpAssetID = *genTxResult.bridgeCounterpartAssetID
-		}
-		if genTxResult.bridgeCompletionTime != nil {
-			completionTime = *genTxResult.bridgeCompletionTime
-		}
 		wt.BridgeCounterpartTx = &asset.BridgeCounterpartTx{
-			AssetID:        cpAssetID,
-			ID:             cpTxID,
-			CompletionTime: completionTime,
+			AssetID: *genTxResult.bridgeCounterpartAssetID,
+			ID:      cpTxID,
 		}
 	}
 

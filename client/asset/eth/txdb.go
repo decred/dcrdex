@@ -126,19 +126,20 @@ func assetIndexEntry(wt *extendedWalletTx, baseChainID uint32) []byte {
 }
 
 // bridgeIndexEntry generates an index entry for iterating over bridge initiation
-// transactions. The index is sorted in chronological order based on the time
-// in which the corresponding bridge completion transaction was mined.
-// Pending bridges appear at the end of the index. Pending bridges are those
-// where the counterpart tx is not yet confirmed. Max uint64 is used to indicate
-// a pending bridge.
+// transactions. The index is sorted in chronological order based on the
+// submission time of the bridge initiation transaction. Pending bridges appear
+// at the end of the index. Pending bridges are those where the counterpart tx
+// is not yet confirmed. A pending flag byte is used to separate pending from
+// completed bridges while allowing both to be sorted by submission time.
 func bridgeIndexEntry(wt *extendedWalletTx) []byte {
-	var bridgeCompletionTime uint64 = ^uint64(0)
-	if wt.BridgeCounterpartTx != nil && wt.BridgeCounterpartTx.CompletionTime != 0 {
-		bridgeCompletionTime = wt.BridgeCounterpartTx.CompletionTime
+	var pendingFlag byte = 0 // 0 for completed bridges
+	if wt.BridgeCounterpartTx == nil || wt.BridgeCounterpartTx.ID == "" {
+		pendingFlag = 1 // 1 for pending bridges
 	}
 
-	entry := make([]byte, 8)
-	binary.BigEndian.PutUint64(entry[:8], bridgeCompletionTime)
+	entry := make([]byte, 9) // 1 byte for pending flag + 8 bytes for submission time
+	entry[0] = pendingFlag
+	binary.BigEndian.PutUint64(entry[1:9], wt.SubmissionTime)
 	return entry
 }
 
@@ -350,7 +351,7 @@ func (db *TxDB) getPendingTxs() (txs []*extendedWalletTx, err error) {
 // getBridges fetches n bridge initiations.
 //
 // If n=0, getBridges returns all bridge initiations in chronological order based
-// on bridge completion block.
+// on bridge initiation submission time, with pending bridges at the end.
 //
 // If no refID is provided:
 // - Returns the n most recent bridge initiations
@@ -418,11 +419,10 @@ func (db *TxDB) getPendingBridges() (txs []*extendedWalletTx, err error) {
 			return nil
 		}
 
-		// A bridge is pending if it doesn't have a counterpart tx or the counterpart isn't confirmed
-		isPending := wt.BridgeCounterpartTx == nil || wt.BridgeCounterpartTx.CompletionTime == 0
-		if isPending {
+		if wt.BridgeCounterpartTx == nil || wt.BridgeCounterpartTx.ID == "" {
 			txs = append(txs, wt)
 		}
+
 		return nil
 	}, lexi.WithReverse())
 	return
