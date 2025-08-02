@@ -65,6 +65,12 @@ func (v *tValue) MarshalBinary() ([]byte, error) {
 	return v.v, nil
 }
 
+func (v *tValue) UnmarshalBinary(data []byte) error {
+	v.v = make([]byte, len(data))
+	copy(v.v, data)
+	return nil
+}
+
 func valueIndex(k, v KV) ([]byte, error) {
 	return v.(*tValue).idx, nil
 }
@@ -777,5 +783,53 @@ func TestDBVersion(t *testing.T) {
 	}
 	if got != version {
 		t.Fatalf("expected version %d, got %d", version, got)
+	}
+}
+
+// TestTransactionOptions tests the new WithTxn and WithGetTxn options for
+// Set and Get operations.
+func TestTransactionOptions(t *testing.T) {
+	db, shutdown := newTestDB(t)
+	defer shutdown()
+
+	tbl, err := db.Table("TxnTest")
+	if err != nil {
+		t.Fatalf("Error creating table: %v", err)
+	}
+
+	key := []byte("key")
+	val := &tValue{
+		k:   key,
+		v:   []byte("val"),
+		idx: []byte{0x99},
+	}
+
+	// This transaction should rollback and not persist the value
+	err = db.Update(func(txn *badger.Txn) error {
+		if err := tbl.Set(key, val, WithTxn(txn)); err != nil {
+			return err
+		}
+
+		// Verify we can read it within the transaction
+		var retrievedVal tValue
+		if err := tbl.Get(key, &retrievedVal, WithGetTxn(txn)); err != nil {
+			return fmt.Errorf("unexpected error reading within txn: %w", err)
+		}
+
+		// Force rollback by returning an error
+		return fmt.Errorf("intentional rollback")
+	})
+	if err == nil || !strings.Contains(err.Error(), "intentional rollback") {
+		t.Fatalf("Expected intentional rollback error, got: %v", err)
+	}
+
+	// Verify the value was not persisted
+	var retrievedVal tValue
+	err = tbl.Get(key, &retrievedVal)
+	if err == nil {
+		t.Fatalf("Expected error when getting rolled back value, but got none")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "key not found") {
+		t.Fatalf("Expected key not found error, got: %v", err)
 	}
 }

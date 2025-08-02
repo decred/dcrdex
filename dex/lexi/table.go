@@ -36,13 +36,34 @@ func (db *DB) Table(name string) (*Table, error) {
 	}, nil
 }
 
+type getOpts struct {
+	txn *badger.Txn
+}
+
+// GetOption is a knob to control how items are retrieved from the table with
+// Get.
+type GetOption func(opts *getOpts)
+
+// WithGetTxn allows specifying a transaction to use for Get operations.
+func WithGetTxn(txn *badger.Txn) GetOption {
+	return func(opts *getOpts) {
+		opts.txn = txn
+	}
+}
+
 // GetRaw retrieves a value from the Table as raw bytes.
-func (t *Table) GetRaw(k KV) (b []byte, err error) {
+func (t *Table) GetRaw(k KV, options ...GetOption) (b []byte, err error) {
 	kB, err := parseKV(k)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling key: %w", err)
 	}
-	err = t.View(func(txn *badger.Txn) error {
+
+	var opts getOpts
+	for i := range options {
+		options[i](&opts)
+	}
+
+	getTxnFunc := func(txn *badger.Txn) error {
 		dbID, err := t.keyID(txn, kB, true)
 		if err != nil {
 			return convertError(err)
@@ -53,13 +74,19 @@ func (t *Table) GetRaw(k KV) (b []byte, err error) {
 		}
 		b = d.v
 		return nil
-	})
+	}
+
+	if opts.txn != nil {
+		err = getTxnFunc(opts.txn)
+	} else {
+		err = t.View(getTxnFunc)
+	}
 	return
 }
 
 // Get retrieves a value from the Table.
-func (t *Table) Get(k KV, thing encoding.BinaryUnmarshaler) error {
-	b, err := t.GetRaw(k)
+func (t *Table) Get(k KV, thing encoding.BinaryUnmarshaler, options ...GetOption) error {
+	b, err := t.GetRaw(k, options...)
 	if err != nil {
 		return err
 	}
@@ -93,6 +120,7 @@ func (t *Table) get(txn *badger.Txn, dbID DBID) (d *datum, err error) {
 
 type setOpts struct {
 	replace bool
+	txn     *badger.Txn
 }
 
 // SetOptions is an knob to control how items are inserted into the table with
@@ -103,6 +131,13 @@ type SetOption func(opts *setOpts)
 func WithReplace() SetOption {
 	return func(opts *setOpts) {
 		opts.replace = true
+	}
+}
+
+// WithTxn allows specifying a transaction to use for Set operations.
+func WithTxn(txn *badger.Txn) SetOption {
+	return func(opts *setOpts) {
+		opts.txn = txn
 	}
 }
 
@@ -133,7 +168,8 @@ func (t *Table) Set(k, v KV, setOpts ...SetOption) error {
 		setOpts[i](&opts)
 	}
 	d := &datum{v: vB, indexes: make([][]byte, 0, len(t.indexes))}
-	return t.Update(func(txn *badger.Txn) error {
+
+	updateFunc := func(txn *badger.Txn) error {
 		dbID, err := t.keyID(txn, kB, false)
 		if err != nil {
 			return convertError(err)
@@ -195,7 +231,12 @@ func (t *Table) Set(k, v KV, setOpts ...SetOption) error {
 		}
 
 		return txn.Set(prefixedKey(t.prefix, dbID[:]), dB)
-	})
+	}
+
+	if opts.txn != nil {
+		return updateFunc(opts.txn)
+	}
+	return t.Update(updateFunc)
 }
 
 // Delete deletes the data associated with the key, including any index entries
