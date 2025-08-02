@@ -6,8 +6,8 @@ set -ex
 SESSION="eth-harness"
 
 ALPHA_AUTHRPC_PORT="8552"
-ALPHA_HTTP_PORT="38556"
-ALPHA_WS_PORT="38557"
+ALPHA_HTTP_PORT="38553"
+ALPHA_WS_PORT="38554"
 ALPHA_WS_MODULES="eth"
 
 # TESTING_ADDRESS is used by the client's internal node.

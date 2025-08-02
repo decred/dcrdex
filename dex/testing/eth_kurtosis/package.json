@@ -1,0 +1,18 @@
+{
+  "name": "eth_kurtosis",
+  "version": "1.0.0",
+  "description": "",
+  "main": "sign.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@ethereumjs/common": "^10.0.0",
+    "@ethereumjs/tx": "^10.0.0",
+    "@ethereumjs/util": "^10.0.0",
+    "web3-eth-contract": "^4.7.2"
+  }
+}
