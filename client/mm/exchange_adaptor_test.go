@@ -304,7 +304,7 @@ func TestSufficientBalanceForCEXTrade(t *testing.T) {
 						QuoteID: quoteID,
 					},
 				})
-				sufficient := adaptor.SufficientBalanceForCEXTrade(baseID, quoteID, test.sell, test.rate, test.qty, test.orderType)
+				sufficient := adaptor.SufficientBalanceForCEXTrade(baseID, quoteID, test.sell, test.rate, test.qty, 0 /* quoteQty */, test.orderType)
 				if sufficient != expSufficient {
 					t.Fatalf("expected sufficient=%v, got %v", expSufficient, sufficient)
 				}
@@ -5322,6 +5322,7 @@ func TestCEXTrade(t *testing.T) {
 		sell      bool
 		rate      uint64
 		qty       uint64
+		quoteQty  uint64
 		orderType libxc.OrderType
 		balances  map[uint32]uint64
 
@@ -5877,7 +5878,7 @@ func TestCEXTrade(t *testing.T) {
 			quoteID:   60002,
 			sell:      false,
 			orderType: libxc.OrderTypeMarket,
-			qty:       100e6,
+			quoteQty:  100e6,
 			balances: map[uint32]uint64{
 				42:    1e7,
 				0:     1e7,
@@ -6004,7 +6005,7 @@ func TestCEXTrade(t *testing.T) {
 
 		adaptor.SubscribeTradeUpdates()
 
-		_, err = adaptor.CEXTrade(ctx, test.baseID, test.quoteID, test.sell, test.rate, test.qty, test.orderType)
+		_, err = adaptor.CEXTrade(ctx, test.baseID, test.quoteID, test.sell, test.rate, test.qty, test.quoteQty, test.orderType)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("%s: expected error but did not get", test.name)

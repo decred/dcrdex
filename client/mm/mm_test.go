@@ -14,6 +14,7 @@ import (
 	"decred.org/dcrdex/client/mm/libxc"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/order"
 
 	_ "decred.org/dcrdex/client/asset/btc"     // register btc asset
@@ -465,20 +466,38 @@ func (c *tCEX) Balance(assetID uint32) (*libxc.ExchangeBalance, error) {
 
 	return c.balances[assetID], c.balanceErr
 }
-func (c *tCEX) ValidateTrade(baseID, quoteID uint32, sell bool, rate, qty uint64, orderType libxc.OrderType) error {
+func (c *tCEX) ValidateTrade(baseID, quoteID uint32, sell bool, rate, qty, quoteQty uint64, orderType libxc.OrderType) error {
 	return nil
 }
-func (c *tCEX) Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, orderType libxc.OrderType, updaterID int) (*libxc.Trade, error) {
+func (c *tCEX) Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty, quoteQty uint64, orderType libxc.OrderType, updaterID int) (*libxc.Trade, error) {
+	if qty > 0 && quoteQty > 0 {
+		return nil, fmt.Errorf("cannot specify both quantity and quote quantity")
+	}
+	if sell && quoteQty > 0 {
+		return nil, fmt.Errorf("quote quantity cannot be used for sell orders")
+	}
+	if !sell && orderType == libxc.OrderTypeMarket && qty > 0 {
+		return nil, fmt.Errorf("quoteQty MUST be used for market buys")
+	}
 	if c.tradeErr != nil {
 		return nil, c.tradeErr
 	}
+
+	qtyToReturn := qty
+	if quoteQty > 0 {
+		qtyToReturn = quoteQty
+	}
+	if !sell && orderType != libxc.OrderTypeMarket && quoteQty > 0 {
+		qtyToReturn = calc.QuoteToBase(rate, quoteQty)
+	}
+
 	c.lastTrade = &libxc.Trade{
 		ID:      c.tradeID,
 		BaseID:  baseID,
 		QuoteID: quoteID,
 		Rate:    rate,
 		Sell:    sell,
-		Qty:     qty,
+		Qty:     qtyToReturn,
 		Market:  orderType == libxc.OrderTypeMarket,
 	}
 
@@ -624,12 +643,29 @@ func (c *tBotCexAdaptor) UnsubscribeMarket(baseID, quoteID uint32) error {
 func (c *tBotCexAdaptor) SubscribeTradeUpdates() (updates <-chan *libxc.Trade) {
 	return c.tradeUpdates
 }
-func (c *tBotCexAdaptor) ValidateTrade(baseID, quoteID uint32, sell bool, rate, qty uint64, orderType libxc.OrderType) error {
+func (c *tBotCexAdaptor) ValidateTrade(baseID, quoteID uint32, sell bool, rate, qty, quoteQty uint64, orderType libxc.OrderType) error {
 	return nil
 }
-func (c *tBotCexAdaptor) CEXTrade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, orderType libxc.OrderType) (*libxc.Trade, error) {
+func (c *tBotCexAdaptor) CEXTrade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty, quoteQty uint64, orderType libxc.OrderType) (*libxc.Trade, error) {
+	if qty > 0 && quoteQty > 0 {
+		return nil, fmt.Errorf("cannot specify both quantity and quote quantity")
+	}
+	if sell && quoteQty > 0 {
+		return nil, fmt.Errorf("quote quantity cannot be used for sell orders")
+	}
+	if !sell && orderType == libxc.OrderTypeMarket && qty > 0 {
+		return nil, fmt.Errorf("quoteQty MUST be used for market buys")
+	}
 	if c.tradeErr != nil {
 		return nil, c.tradeErr
+	}
+
+	qtyToReturn := qty
+	if quoteQty > 0 {
+		qtyToReturn = quoteQty
+	}
+	if !sell && orderType != libxc.OrderTypeMarket && quoteQty > 0 {
+		qtyToReturn = calc.QuoteToBase(rate, quoteQty)
 	}
 
 	c.lastTrade = &libxc.Trade{
@@ -638,7 +674,7 @@ func (c *tBotCexAdaptor) CEXTrade(ctx context.Context, baseID, quoteID uint32, s
 		QuoteID: quoteID,
 		Rate:    rate,
 		Sell:    sell,
-		Qty:     qty,
+		Qty:     qtyToReturn,
 		Market:  orderType == libxc.OrderTypeMarket,
 	}
 	return c.lastTrade, nil
@@ -648,7 +684,7 @@ func (c *tBotCexAdaptor) FreeUpFunds(assetID uint32, cex bool, amt uint64, currE
 }
 
 func (c *tBotCexAdaptor) MidGap(baseID, quoteID uint32) uint64 { return 0 }
-func (c *tBotCexAdaptor) SufficientBalanceForCEXTrade(baseID, quoteID uint32, sell bool, rate, qty uint64, orderType libxc.OrderType) bool {
+func (c *tBotCexAdaptor) SufficientBalanceForCEXTrade(baseID, quoteID uint32, sell bool, rate, qty, quoteQty uint64, orderType libxc.OrderType) bool {
 	if sell {
 		return qty <= c.maxSellQty
 	}
