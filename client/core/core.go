@@ -9622,7 +9622,7 @@ func (c *Core) handleBridgeCompleted(n *asset.BridgeCompletedNote) {
 		return
 	}
 
-	sourceWallet.MarkBridgeComplete(n.InitiationTxID, n.CompletionTxID, n.CompletionTime)
+	sourceWallet.MarkBridgeComplete(n.InitiationTxID, n.CompletionTxID)
 }
 
 // handleWalletNotification processes an asynchronous wallet notification.

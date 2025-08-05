@@ -41,7 +41,7 @@ type bridge interface {
 	// initiateBridge burns or locks the asset in order to bridge it to the destination.
 	// requiresCompletion is true if a transaction must be executed on the destination
 	// chain to mint the asset.
-	initiateBridge(txOpts *bind.TransactOpts, destAssetID uint32, amount *big.Int) (tx *types.Transaction, requiresMint bool, err error)
+	initiateBridge(txOpts *bind.TransactOpts, destAssetID uint32, amount *big.Int) (tx *types.Transaction, err error)
 
 	// getCompletionData retrieves the data required by the destination chain
 	// to complete the bridge.
@@ -56,6 +56,15 @@ type bridge interface {
 
 	// completeBridgeGas returns the gas cost of the mint transaction.
 	completeBridgeGas() uint64
+
+	// requiresCompletion is true if a transaction must be executed on the destination
+	// chain to mint the asset. This is called on the destination chain. If this
+	// returns false, verifyBridgeCompletion should be called.
+	requiresCompletion() bool
+
+	// verifyBridgeCompletion verifies that the bridge was completed successfully.
+	// This is required for bridges that do not require a completion transaction.
+	verifyBridgeCompletion(ctx context.Context, data []byte) (bool, error)
 }
 
 var (
@@ -219,10 +228,10 @@ func (b *usdcBridge) approveBridgeContract(txOpts *bind.TransactOpts, amount *bi
 	return b.tokenContract.Approve(txOpts, b.tokenMessengerAddr, amount)
 }
 
-func (b *usdcBridge) initiateBridge(txOpts *bind.TransactOpts, destAssetID uint32, amount *big.Int) (tx *types.Transaction, requiresMint bool, err error) {
+func (b *usdcBridge) initiateBridge(txOpts *bind.TransactOpts, destAssetID uint32, amount *big.Int) (tx *types.Transaction, err error) {
 	destBridgeInfo, err := getUsdcBridgeInfo(destAssetID, b.net)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 
 	var recipient [32]byte
@@ -230,10 +239,10 @@ func (b *usdcBridge) initiateBridge(txOpts *bind.TransactOpts, destAssetID uint3
 
 	tx, err = b.tokenMessenger.DepositForBurn(txOpts, amount, destBridgeInfo.domainID, recipient, b.tokenAddress)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 
-	return tx, true, nil
+	return tx, nil
 }
 
 // usdcMintInfo is the data required to mint the USDC on the destination chain.
@@ -354,4 +363,12 @@ func (b *usdcBridge) completeBridgeGas() uint64 {
 	// message received generally requires ~142k, but if this is the first
 	// time the user owns this asset, it will be ~160k
 	return 210_000
+}
+
+func (b *usdcBridge) requiresCompletion() bool {
+	return true
+}
+
+func (b *usdcBridge) verifyBridgeCompletion(ctx context.Context, data []byte) (bool, error) {
+	return false, fmt.Errorf("a completion transaction is for usdc")
 }

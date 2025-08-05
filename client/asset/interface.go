@@ -723,7 +723,7 @@ type Bridger interface {
 	// MarkBridgeComplete should be invoked after the completion transaction
 	// is confirmed on the destination chain to update the bridge status.
 	// Without this, the bridge will still be in the pending state.
-	MarkBridgeComplete(initiationTxID string, completionTxID string, completionTime uint64)
+	MarkBridgeComplete(initiationTxID string, completionTxID string)
 
 	// PendingBridges lists all uncompleted bridge transactions on the blockchain.
 	// For token wallets, this includes pending bridges for other tokens on the same chain.
@@ -1206,11 +1206,11 @@ const NoCompletionRequiredBridgeTxID = "no-completion-required"
 // completion transaction, or a completion transaction if it is part of an
 // initiation transaction.
 type BridgeCounterpartTx struct {
-	ID      string `json:"id"`
 	AssetID uint32 `json:"assetID"`
-	// CompletionTime is only populated for initiation transactions. It is the
-	// time when the completion transaction was mined.
-	CompletionTime uint64 `json:"completionTime"`
+	// ID is the transaction ID of the transaction of the other chain.
+	// If the transaction is an initiation transaction, and ID is
+	// populated, it means that the bridge is complete.
+	ID string `json:"id"`
 }
 
 // WalletTransaction represents a transaction that was made by a wallet.
@@ -1590,7 +1590,6 @@ type BridgeCompletedNote struct {
 	SourceAssetID  uint32 `json:"sourceAssetID"`
 	InitiationTxID string `json:"initiationTxID"`
 	CompletionTxID string `json:"completionTxIDs"`
-	CompletionTime uint64 `json:"completionTime"`
 }
 
 // BalanceChangeNote can be sent when the wallet detects a balance change
@@ -1743,7 +1742,7 @@ func (e *WalletEmitter) BridgeReadyToComplete(destAssetID uint32, bridgeTxID str
 
 // BridgeCompleted is emitted by the wallet which completed a bridge to
 // notify that the bridge has been completed.
-func (e *WalletEmitter) BridgeCompleted(sourceAssetID uint32, initiationTxID string, completionTxID string, completionTime uint64) {
+func (e *WalletEmitter) BridgeCompleted(sourceAssetID uint32, initiationTxID string, completionTxID string) {
 	e.emit(&BridgeCompletedNote{
 		baseWalletNotification: baseWalletNotification{
 			AssetID: e.assetID,
@@ -1752,7 +1751,6 @@ func (e *WalletEmitter) BridgeCompleted(sourceAssetID uint32, initiationTxID str
 		SourceAssetID:  sourceAssetID,
 		InitiationTxID: initiationTxID,
 		CompletionTxID: completionTxID,
-		CompletionTime: completionTime,
 	})
 }
 
