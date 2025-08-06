@@ -92,6 +92,7 @@ type clientCore interface {
 	Bridge(fromAssetID, toAssetID uint32, amt uint64) (txID string, err error)
 	PendingBridges(assetID uint32) ([]*asset.WalletTransaction, error)
 	BridgeHistory(assetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error)
+	SupportedBridgeDestinations(assetID uint32) ([]uint32, error)
 
 	// These are core's ticket buying interface.
 	StakeStatus(assetID uint32) (*asset.TicketStakingStatus, error)

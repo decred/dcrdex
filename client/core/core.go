@@ -5652,6 +5652,22 @@ func (c *Core) BridgeHistory(assetID uint32, n int, refID *string, past bool) ([
 	return wallet.BridgeHistory(n, refID, past)
 }
 
+// SupportedBridgeDestinations returns the list of asset IDs that are supported
+// as bridge destinations for the specified asset.
+func (c *Core) SupportedBridgeDestinations(assetID uint32) ([]uint32, error) {
+	wallet, found := c.wallet(assetID)
+	if !found {
+		return nil, newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
+	}
+
+	bridger, ok := wallet.Wallet.(asset.Bridger)
+	if !ok {
+		return nil, fmt.Errorf("wallet for asset %s does not support bridging", unbip(assetID))
+	}
+
+	return bridger.SupportedDestinations(assetID)
+}
+
 // EstimateSendTxFee returns an estimate of the tx fee needed to send or
 // withdraw the specified amount.
 func (c *Core) EstimateSendTxFee(address string, assetID uint32, amount uint64, subtract, maxWithdraw bool) (fee uint64, isValidAddress bool, err error) {

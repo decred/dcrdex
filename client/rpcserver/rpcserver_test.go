@@ -219,6 +219,9 @@ func (c *TCore) BridgeHistory(fromAssetID uint32, n int, refID *string, past boo
 func (c *TCore) PendingBridges(fromAssetID uint32) ([]*asset.WalletTransaction, error) {
 	return nil, nil
 }
+func (c *TCore) SupportedBridgeDestinations(assetID uint32) ([]uint32, error) {
+	return nil, nil
+}
 
 type tBookFeed struct{}
 
