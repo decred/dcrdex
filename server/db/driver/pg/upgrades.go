@@ -17,7 +17,7 @@ import (
 	"decred.org/dcrdex/server/db/driver/pg/internal"
 )
 
-const dbVersion = 6
+const dbVersion = 7
 
 // The number of upgrades defined MUST be equal to dbVersion.
 var upgrades = []func(db *sql.Tx) error{
@@ -48,6 +48,11 @@ var upgrades = []func(db *sql.Tx) error{
 	// old_fee_coin column to the accounts table for when a manual refund is
 	// processed.
 	v6Upgrade,
+
+	// v7 upgrade adds a reputation_ver column to the accounts table. This
+	// facilitates a rolling upgrade of reputation tracking to address an issue
+	// with the DB design.
+	v7Upgrade,
 }
 
 // v1Upgrade adds the schema_version column and removes the state_hash column
@@ -354,6 +359,22 @@ func v6Upgrade(tx *sql.Tx) error {
 		return fmt.Errorf("failed to drop the accounts.broken_rule column: %w", err)
 	}
 
+	return nil
+}
+
+func v7Upgrade(tx *sql.Tx) error {
+	const columnName = "reputation_ver"
+	const tableName = publicSchema + "." + accountsTableName
+	// Create the column, setting existing entries to false.
+	query := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s INT2 DEFAULT 0;", tableName, columnName)
+	if _, err := tx.Exec(query); err != nil {
+		return fmt.Errorf("error adding reputation_ver column: %w", err)
+	}
+	// New entries should be true.
+	query = fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s SET DEFAULT 1;", tableName, columnName)
+	if _, err := tx.Exec(query); err != nil {
+		return fmt.Errorf("error updating reputation_ver default value: %w", err)
+	}
 	return nil
 }
 

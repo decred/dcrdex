@@ -55,7 +55,6 @@ const (
 var (
 	homeDir    = os.Getenv("HOME")
 	dextestDir = filepath.Join(homeDir, "dextest")
-	bobDir     = filepath.Join(dextestDir, "xmr", "wallets", "bob")
 	curve      = edwards.Edwards()
 
 	// These should be wallets with funds.
@@ -105,13 +104,13 @@ type client struct {
 	xmr *rpc.Client
 	dcr *combinedClient
 
-	viewKey                                                                *edwards.PrivateKey
-	pubSpendKeyf, pubSpendKey                                              *edwards.PublicKey
-	pubInitSignKeyHalf, pubPartSignKeyHalf, pubSpendKeyProof, pubSpendKeyl *secp256k1.PublicKey
-	partSpendKeyHalfDleag, initSpendKeyHalfDleag                           []byte
-	lockTxEsig                                                             *adaptorsigs.AdaptorSignature
-	lockTx                                                                 *wire.MsgTx
-	vIn                                                                    int
+	viewKey                                            *edwards.PrivateKey
+	pubSpendKeyf, pubSpendKey                          *edwards.PublicKey
+	pubPartSignKeyHalf, pubSpendKeyProof, pubSpendKeyl *secp256k1.PublicKey
+	partSpendKeyHalfDleag, initSpendKeyHalfDleag       []byte
+	lockTxEsig                                         *adaptorsigs.AdaptorSignature
+	lockTx                                             *wire.MsgTx
+	vIn                                                int
 }
 
 // initClient is the swap initiator.

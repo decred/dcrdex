@@ -5,6 +5,7 @@ package asset
 
 import (
 	"fmt"
+	"maps"
 
 	"decred.org/dcrdex/dex"
 )
@@ -163,9 +164,7 @@ func IsToken(assetID uint32) (is bool, parentID uint32) {
 // Tokens returns the child tokens registered for a base chain asset.
 func Tokens(assetID uint32) map[uint32]*dex.Token {
 	m := make(map[uint32]*dex.Token, len(childTokens[assetID]))
-	for k, v := range childTokens[assetID] {
-		m[k] = v
-	}
+	maps.Copy(m, childTokens[assetID])
 	return m
 }
 

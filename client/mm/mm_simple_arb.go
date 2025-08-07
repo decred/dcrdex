@@ -148,7 +148,7 @@ func (a *simpleArbMarketMaker) arbExistsOnSide(sellOnDEX bool) (exists bool, lot
 			return false, 0, 0, 0, fmt.Errorf("error checking dex balance: %w", err)
 		}
 
-		cexSufficient := a.cex.SufficientBalanceForCEXTrade(a.baseID, a.quoteID, !sellOnDEX, cexExtrema, numLots*lotSize)
+		cexSufficient := a.cex.SufficientBalanceForCEXTrade(a.baseID, a.quoteID, !sellOnDEX, cexExtrema, numLots*lotSize, libxc.OrderTypeLimit)
 		if !dexSufficient || !cexSufficient {
 			if numLots == 1 {
 				return false, 0, 0, 0, nil
@@ -224,7 +224,7 @@ func (a *simpleArbMarketMaker) executeArb(sellOnDex bool, lotsToArb, dexRate, ce
 	defer a.activeArbsMtx.Unlock()
 
 	// Place cex order first. If placing dex order fails then can freely cancel cex order.
-	cexTrade, err := a.cex.CEXTrade(a.ctx, a.baseID, a.quoteID, !sellOnDex, cexRate, lotsToArb*lotSize)
+	cexTrade, err := a.cex.CEXTrade(a.ctx, a.baseID, a.quoteID, !sellOnDex, cexRate, lotsToArb*lotSize, libxc.OrderTypeLimit)
 	if err != nil {
 		a.log.Errorf("error placing cex order: %v", err)
 		return
@@ -389,7 +389,7 @@ func (a *simpleArbMarketMaker) rebalance(newEpoch uint64) {
 	defer a.rebalanceRunning.Store(false)
 	a.log.Tracef("rebalance: epoch %d", newEpoch)
 
-	actionTaken, err := a.tryTransfers(newEpoch)
+	actionTaken, err := a.tryTransfers(newEpoch, a.distribution)
 	if err != nil {
 		a.log.Errorf("Error performing transfers: %v", err)
 	} else if actionTaken {
@@ -425,8 +425,8 @@ func (a *simpleArbMarketMaker) rebalance(newEpoch uint64) {
 	a.registerFeeGap()
 }
 
-func (a *simpleArbMarketMaker) distribution() (dist *distribution, err error) {
-	sellVWAP, buyVWAP, err := a.cexCounterRates(1, 1)
+func (a *simpleArbMarketMaker) distribution(additionalDEX, additionalCEX map[uint32]uint64) (dist *distribution, err error) {
+	sellVWAP, buyVWAP, err := a.cexCounterRates(1, 1, nil)
 	if err != nil {
 		return nil, fmt.Errorf("error getting cex counter-rates: %w", err)
 	}
@@ -452,17 +452,8 @@ func (a *simpleArbMarketMaker) distribution() (dist *distribution, err error) {
 	avgBaseLot, avgQuoteLot := float64(perLot.dexBase+perLot.cexBase)/2, float64(perLot.dexQuote+perLot.cexQuote)/2
 	baseLots := uint64(math.Round(float64(dist.baseInv.total) / avgBaseLot / 2))
 	quoteLots := uint64(math.Round(float64(dist.quoteInv.total) / avgQuoteLot / 2))
-	a.optimizeTransfers(dist, baseLots, quoteLots, baseLots*2, quoteLots*2)
+	a.optimizeTransfers(dist, baseLots, quoteLots, baseLots*2, quoteLots*2, additionalDEX, additionalCEX)
 	return dist, nil
-}
-
-func (a *simpleArbMarketMaker) tryTransfers(currEpoch uint64) (actionTaken bool, err error) {
-	dist, err := a.distribution()
-	if err != nil {
-		a.log.Errorf("distribution calculation error: %v", err)
-		return
-	}
-	return a.transfer(dist, currEpoch)
 }
 
 func (a *simpleArbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
@@ -472,7 +463,7 @@ func (a *simpleArbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, er
 	}
 	a.book = book
 
-	err = a.cex.SubscribeMarket(ctx, a.baseID, a.quoteID)
+	err = a.cex.SubscribeMarket(a.ctx, a.baseID, a.quoteID)
 	if err != nil {
 		bookFeed.Close()
 		return nil, fmt.Errorf("failed to subscribe to cex market: %v", err)
@@ -536,7 +527,7 @@ func (a *simpleArbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, er
 }
 
 func (a *simpleArbMarketMaker) registerFeeGap() {
-	feeGap, err := feeGap(a.core, a.CEX, a.baseID, a.quoteID, a.lotSize.Load())
+	feeGap, err := feeGap(a.core, nil, a.CEX, a.market)
 	if err != nil {
 		a.log.Warnf("error getting fee-gap stats: %v", err)
 		return

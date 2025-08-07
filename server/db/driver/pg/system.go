@@ -127,22 +127,6 @@ func sqlExec(db sqlExecutor, stmt string, args ...any) (int64, error) {
 	return N, err
 }
 
-// sqlExecStmt executes the prepared SQL statement with any optional arguments,
-// and returns the number of rows affected.
-func sqlExecStmt(stmt *sql.Stmt, args ...any) (int64, error) {
-	res, err := stmt.Exec(args...)
-	if err != nil {
-		return 0, err
-	}
-
-	var N int64
-	N, err = res.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf(`error in RowsAffected: %w`, err)
-	}
-	return N, err
-}
-
 // namespacedTableExists checks if the specified table exists.
 func namespacedTableExists(db sqlQueryer, schema, tableName string) (bool, error) {
 	rows, err := db.Query(`SELECT 1
@@ -231,26 +215,6 @@ func createTableStmt(db sqlQueryExecutor, fmtStmt, schema, tableName string) (bo
 	}
 
 	return created, nil
-}
-
-func dropTable(db sqlExecutor, tableName string) error {
-	_, err := db.Exec(fmt.Sprintf(`DROP TABLE IF EXISTS %s;`, tableName))
-	return err
-}
-
-// existsIndex checks if the specified index name exists.
-func existsIndex(db *sql.DB, indexName string) (exists bool, err error) {
-	err = db.QueryRow(internal.IndexExists, indexName, publicSchema).Scan(&exists)
-	if errors.Is(err, sql.ErrNoRows) {
-		err = nil
-	}
-	return
-}
-
-// isUniqueIndex checks if the given index name is defined as UNIQUE.
-func isUniqueIndex(db *sql.DB, indexName string) (isUnique bool, err error) {
-	err = db.QueryRow(internal.IndexIsUnique, indexName, publicSchema).Scan(&isUnique)
-	return
 }
 
 // parseUnit is used to separate a "unit" from pg_settings such as "8kB" into a
@@ -440,7 +404,8 @@ func retrieveSysSettings(stmt string, db *sql.DB) (PGSettings, error) {
 }
 
 // retrieveSysSettingsConfFile retrieves settings that are set by a
-// configuration file (rather than default, environment variable, etc.).
+// configuration file (rather than default, environment variable, etc.). Used in
+// online tests.
 func retrieveSysSettingsConfFile(db *sql.DB) (PGSettings, error) {
 	return retrieveSysSettings(internal.RetrieveSysSettingsConfFile, db)
 }

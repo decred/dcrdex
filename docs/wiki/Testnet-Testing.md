@@ -177,8 +177,6 @@ some DCR or reach out to us on matrix.
 Testnet BTC is hard to come by. If you can't get your hands on any, place an
 order on testnet DEX to sell some DCR for BTC.
 
-
-
 ---
 
 [⤴ Back to Top](#top)

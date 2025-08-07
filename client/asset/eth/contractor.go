@@ -738,7 +738,7 @@ func (c *contractorV1) estimateInitGas(ctx context.Context, n int) (uint64, erro
 			SecretHash:      secretHash,
 			Initiator:       c.acctAddr,
 			Participant:     common.BytesToAddress(encode.RandomBytes(20)),
-			Value:           big.NewInt(dexeth.GweiFactor),
+			Value:           c.evmify(1),
 		})
 	}
 

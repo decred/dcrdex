@@ -129,7 +129,7 @@ func (sl *swapLocker) LockOrdersCoins(orders []order.Order) []order.Order {
 	return sl.swapLock.LockOrdersCoins(orders)
 }
 
-// LockOrdersCoins locks coins associated with certain orders.
+// LockCoins locks coins associated with certain orders.
 func (sl *swapLocker) LockCoins(orderCoins map[order.OrderID][]CoinID) map[order.OrderID][]CoinID {
 	return sl.swapLock.LockCoins(orderCoins)
 }

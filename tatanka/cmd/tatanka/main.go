@@ -32,6 +32,7 @@ const (
 	defaultHSHost         = defaultHost // should be a loopback address
 	defaultHSPort         = "7252"
 	defaultLogLevel       = "debug"
+	defaultMaxClients     = 1000
 )
 
 var (
@@ -71,11 +72,17 @@ func mainErr() (err error) {
 		net = dex.Testnet
 	}
 
+	maxClients := defaultMaxClients
+	if cfg.MaxClients > 0 {
+		maxClients = cfg.MaxClients
+	}
+
 	t, err := tatanka.New(&tatanka.Config{
 		Net:        net,
 		DataDir:    cfg.AppDataDir,
 		Logger:     logMaker.Logger("🦬"),
 		ConfigPath: cfg.ConfigFile,
+		MaxClients: maxClients,
 		RPC: comms.RPCConfig{
 			HiddenServiceAddr: cfg.HiddenService,
 			ListenAddrs:       cfg.Listeners,
@@ -116,7 +123,8 @@ type Config struct {
 	HiddenService    string   `long:"hiddenservice" description:"A host:port on which the RPC server should listen for incoming hidden service connections. No TLS is used for these connections."`
 	feerateOracleCfg feerates.Config
 
-	WebAddr string `long:"webaddr" description:"The public facing address by which peers should connect."`
+	WebAddr    string `long:"webaddr" description:"The public facing address by which peers should connect."`
+	MaxClients int    `long:"maxclients" description:"The maximum number of clients that can connect to this node."`
 
 	FiatOracleConfig fiatrates.Config `group:"Fiat Oracle Config"`
 }

@@ -818,10 +818,6 @@ func handleTradeResumptionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	return nil
 }
 
-func (dc *dexConnection) apiVersion() int32 {
-	return atomic.LoadInt32(&dc.apiVer)
-}
-
 // refreshServerConfig fetches and replaces server configuration data. It also
 // initially checks that a server's API version is one of serverAPIVers.
 func (dc *dexConnection) refreshServerConfig() (*msgjson.ConfigResult, error) {

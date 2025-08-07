@@ -24,8 +24,6 @@ var (
 
 const (
 	HashSize = blake256.Size
-
-	peSize = order.PreimageSize
 )
 
 type Matcher struct{}
@@ -659,13 +657,6 @@ func midGap(book Booker) uint64 {
 		return b.Rate
 	}
 	return (b.Rate + s.Rate) / 2
-}
-
-func sideVolume(ords []*order.LimitOrder) (q uint64) {
-	for _, ord := range ords {
-		q += ord.Remaining()
-	}
-	return
 }
 
 func bookVolumes(book Booker, stats *MatchCycleStats) {

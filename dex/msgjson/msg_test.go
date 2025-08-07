@@ -2,10 +2,10 @@ package msgjson
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"math/rand"
 	"strings"
 	"testing"
 

@@ -6,7 +6,6 @@ package auth
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"time"
 
 	"decred.org/dcrdex/dex"
@@ -475,18 +474,4 @@ func (auth *AuthManager) waitBondConfs(ctx context.Context, conn comms.Link, bon
 	auth.storeBondAndRespond(conn, bond, acct, newAcct, reqID, postBondRes)
 
 	return wait.DontTryAgain
-}
-
-// coinNotFound sends an error response for a coin not found.
-func (auth *AuthManager) coinNotFound(acctID account.AccountID, msgID uint64, coinID []byte) {
-	resp, err := msgjson.NewResponse(msgID, nil, &msgjson.Error{
-		Code:    msgjson.TransactionUndiscovered,
-		Message: fmt.Sprintf("failed to find transaction %x", coinID),
-	})
-	if err != nil {
-		log.Error("NewResponse error in (Swapper).loop: %v", err)
-	}
-	if err := auth.Send(acctID, resp); err != nil {
-		log.Infof("Failed to send coin-not-found error to user %s: %v", acctID, err)
-	}
 }

@@ -11,6 +11,10 @@ div[data-handler=mm] {
     max-width: 75px;
   }
 
+  .mw-500 {
+    max-width: 500px;
+  }
+
   [data-tmpl=value].wide {
     width: 3rem;
   }
@@ -165,5 +169,14 @@ div[data-handler=mm] {
     .third {
       grid-column: 3;
     }
+  }
+
+  section.datum {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: start;
+    text-align: center;
+    font-size: 15px;
   }
 }

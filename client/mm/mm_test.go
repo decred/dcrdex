@@ -4,11 +4,9 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"math/rand"
 	"reflect"
 	"sync"
 	"testing"
-	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
@@ -21,12 +19,9 @@ import (
 	_ "decred.org/dcrdex/client/asset/btc"     // register btc asset
 	_ "decred.org/dcrdex/client/asset/dcr"     // register dcr asset
 	_ "decred.org/dcrdex/client/asset/eth"     // register eth asset
+	_ "decred.org/dcrdex/client/asset/ltc"     // register ltc asset
 	_ "decred.org/dcrdex/client/asset/polygon" // register polygon asset
 )
-
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
 
 type tBookFeed struct {
 	c chan *core.BookUpdate
@@ -432,6 +427,10 @@ type tCEX struct {
 	confirmDepositMtx    sync.Mutex
 	confirmedDeposit     *uint64
 	tradeStatus          *libxc.Trade
+
+	// tradeStatusIsLastTrade if set to true, will set the return value of TradeStatus
+	// to be the last trade that was placed.
+	tradeStatusIsLastTrade bool
 }
 
 func newTCEX() *tCEX {
@@ -450,18 +449,26 @@ func (c *tCEX) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	return &sync.WaitGroup{}, nil
 }
 func (c *tCEX) Balances(ctx context.Context) (map[uint32]*libxc.ExchangeBalance, error) {
-	return nil, nil
-}
-func (c *tCEX) MatchedMarkets(ctx context.Context) ([]*libxc.MarketMatch, error) {
-	return nil, nil
+	return c.balances, nil
 }
 func (c *tCEX) Markets(ctx context.Context) (map[string]*libxc.Market, error) {
 	return nil, nil
 }
 func (c *tCEX) Balance(assetID uint32) (*libxc.ExchangeBalance, error) {
+	if c.balanceErr != nil {
+		return nil, c.balanceErr
+	}
+
+	if c.balances[assetID] == nil {
+		return &libxc.ExchangeBalance{}, nil
+	}
+
 	return c.balances[assetID], c.balanceErr
 }
-func (c *tCEX) Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, updaterID int) (*libxc.Trade, error) {
+func (c *tCEX) ValidateTrade(baseID, quoteID uint32, sell bool, rate, qty uint64, orderType libxc.OrderType) error {
+	return nil
+}
+func (c *tCEX) Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, orderType libxc.OrderType, updaterID int) (*libxc.Trade, error) {
 	if c.tradeErr != nil {
 		return nil, c.tradeErr
 	}
@@ -472,9 +479,16 @@ func (c *tCEX) Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rat
 		Rate:    rate,
 		Sell:    sell,
 		Qty:     qty,
+		Market:  orderType == libxc.OrderTypeMarket,
 	}
+
+	if c.tradeStatusIsLastTrade {
+		c.tradeStatus = c.lastTrade
+	}
+
 	return c.lastTrade, nil
 }
+
 func (c *tCEX) CancelTrade(ctx context.Context, seID, quoteID uint32, tradeID string) error {
 	if c.cancelTradeErr != nil {
 		return c.cancelTradeErr
@@ -507,6 +521,10 @@ func (c *tCEX) VWAP(baseID, quoteID uint32, sell bool, qty uint64) (vwap, extrem
 	}
 	return res.avg, res.extrema, true, nil
 }
+func (c *tCEX) InvVWAP(baseID, quoteID uint32, sell bool, qty uint64) (vwap, extrema uint64, filled bool, err error) {
+	return 0, 0, false, fmt.Errorf("not implemented")
+}
+
 func (c *tCEX) MidGap(baseID, quoteID uint32) uint64 { return 0 }
 func (c *tCEX) SubscribeTradeUpdates() (<-chan *libxc.Trade, func(), int) {
 	return c.tradeUpdates, func() {}, c.tradeUpdatesID
@@ -515,14 +533,14 @@ func (c *tCEX) GetDepositAddress(ctx context.Context, assetID uint32) (string, e
 	return c.depositAddress, nil
 }
 
-func (c *tCEX) Withdraw(ctx context.Context, assetID uint32, qty uint64, address string) (string, error) {
+func (c *tCEX) Withdraw(ctx context.Context, assetID uint32, qty uint64, address string) (string, uint64, error) {
 	c.withdrawals = append(c.withdrawals, &withdrawArgs{
 		address: address,
 		amt:     qty,
 		assetID: assetID,
 	})
 
-	return c.withdrawalID, nil
+	return c.withdrawalID, qty, nil
 }
 
 func (c *tCEX) ConfirmWithdrawal(ctx context.Context, withdrawalID string, assetID uint32) (uint64, string, error) {
@@ -546,6 +564,9 @@ func (c *tCEX) ConfirmDeposit(ctx context.Context, deposit *libxc.DepositData) (
 }
 
 func (c *tCEX) TradeStatus(ctx context.Context, id string, baseID, quoteID uint32) (*libxc.Trade, error) {
+	if c.tradeStatus == nil {
+		return nil, fmt.Errorf("trade not found")
+	}
 	return c.tradeStatus, nil
 }
 
@@ -597,10 +618,16 @@ func (c *tBotCexAdaptor) CancelTrade(ctx context.Context, baseID, quoteID uint32
 func (c *tBotCexAdaptor) SubscribeMarket(ctx context.Context, baseID, quoteID uint32) error {
 	return nil
 }
+func (c *tBotCexAdaptor) UnsubscribeMarket(baseID, quoteID uint32) error {
+	return nil
+}
 func (c *tBotCexAdaptor) SubscribeTradeUpdates() (updates <-chan *libxc.Trade) {
 	return c.tradeUpdates
 }
-func (c *tBotCexAdaptor) CEXTrade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64) (*libxc.Trade, error) {
+func (c *tBotCexAdaptor) ValidateTrade(baseID, quoteID uint32, sell bool, rate, qty uint64, orderType libxc.OrderType) error {
+	return nil
+}
+func (c *tBotCexAdaptor) CEXTrade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, orderType libxc.OrderType) (*libxc.Trade, error) {
 	if c.tradeErr != nil {
 		return nil, c.tradeErr
 	}
@@ -612,14 +639,16 @@ func (c *tBotCexAdaptor) CEXTrade(ctx context.Context, baseID, quoteID uint32, s
 		Rate:    rate,
 		Sell:    sell,
 		Qty:     qty,
+		Market:  orderType == libxc.OrderTypeMarket,
 	}
 	return c.lastTrade, nil
 }
+
 func (c *tBotCexAdaptor) FreeUpFunds(assetID uint32, cex bool, amt uint64, currEpoch uint64) {
 }
 
 func (c *tBotCexAdaptor) MidGap(baseID, quoteID uint32) uint64 { return 0 }
-func (c *tBotCexAdaptor) SufficientBalanceForCEXTrade(baseID, quoteID uint32, sell bool, rate, qty uint64) bool {
+func (c *tBotCexAdaptor) SufficientBalanceForCEXTrade(baseID, quoteID uint32, sell bool, rate, qty uint64, orderType libxc.OrderType) bool {
 	if sell {
 		return qty <= c.maxSellQty
 	}
@@ -657,7 +686,7 @@ func (t *tExchangeAdaptor) CEXBalance(assetID uint32) *BotBalance {
 	return t.cexBalances[assetID]
 }
 func (t *tExchangeAdaptor) stats() *RunStats { return nil }
-func (t *tExchangeAdaptor) updateConfig(cfg *BotConfig) error {
+func (t *tExchangeAdaptor) updateConfig(cfg *BotConfig, autoRebalanceCfg *AutoRebalanceConfig) error {
 	t.cfg = cfg
 	return nil
 }
@@ -771,9 +800,9 @@ func TestAvailableBalances(t *testing.T) {
 		60001: 6e5,
 	})
 
-	checkAvailableBalances := func(mkt *MarketWithHost, expDex, expCex map[uint32]uint64) {
+	checkAvailableBalances := func(mkt *MarketWithHost, cexName *string, expDex, expCex map[uint32]uint64) {
 		t.Helper()
-		dexBalances, cexBalances, err := mm.AvailableBalances(mkt, nil)
+		dexBalances, cexBalances, err := mm.AvailableBalances(mkt, cexName)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -785,11 +814,14 @@ func TestAvailableBalances(t *testing.T) {
 		}
 	}
 
+	binanceName := libxc.Binance
+	binanceUSName := libxc.BinanceUS
+
 	// No running bots
-	checkAvailableBalances(dcrBtc, map[uint32]uint64{42: 9e5, 0: 7e5}, map[uint32]uint64{})
-	checkAvailableBalances(ethBtc, map[uint32]uint64{60: 8e5, 0: 7e5}, map[uint32]uint64{60: 9e5, 0: 8e5})
-	checkAvailableBalances(btcUsdc, map[uint32]uint64{0: 7e5, 60: 8e5, 60001: 6e5}, map[uint32]uint64{0: 8e5, 60001: 6e5})
-	checkAvailableBalances(dcrUsdc, map[uint32]uint64{42: 9e5, 60: 8e5, 60001: 6e5}, map[uint32]uint64{42: 7e5, 60001: 6e5})
+	checkAvailableBalances(dcrBtc, nil, map[uint32]uint64{42: 9e5, 0: 7e5}, map[uint32]uint64{})
+	checkAvailableBalances(ethBtc, &binanceName, map[uint32]uint64{60: 8e5, 0: 7e5}, map[uint32]uint64{60: 9e5, 0: 8e5})
+	checkAvailableBalances(btcUsdc, &binanceName, map[uint32]uint64{0: 7e5, 60: 8e5, 60001: 6e5}, map[uint32]uint64{0: 8e5, 60001: 6e5})
+	checkAvailableBalances(dcrUsdc, &binanceUSName, map[uint32]uint64{42: 9e5, 60: 8e5, 60001: 6e5}, map[uint32]uint64{42: 7e5, 60001: 6e5})
 
 	rb := &runningBot{
 		bot: &tExchangeAdaptor{
@@ -807,8 +839,8 @@ func TestAvailableBalances(t *testing.T) {
 	}
 	mm.runningBots[*btcUsdc] = rb
 
-	checkAvailableBalances(dcrBtc, map[uint32]uint64{42: 9e5, 0: 3e5}, map[uint32]uint64{})
-	checkAvailableBalances(ethBtc, map[uint32]uint64{60: 7e5, 0: 3e5}, map[uint32]uint64{60: 9e5, 0: 5e5})
-	checkAvailableBalances(btcUsdc, map[uint32]uint64{0: 3e5, 60: 7e5, 60001: 4e5}, map[uint32]uint64{0: 5e5, 60001: 4e5})
-	checkAvailableBalances(dcrUsdc, map[uint32]uint64{42: 9e5, 60: 7e5, 60001: 4e5}, map[uint32]uint64{42: 7e5, 60001: 6e5})
+	checkAvailableBalances(dcrBtc, nil, map[uint32]uint64{42: 9e5, 0: 3e5}, map[uint32]uint64{})
+	checkAvailableBalances(ethBtc, &binanceName, map[uint32]uint64{60: 7e5, 0: 3e5}, map[uint32]uint64{60: 9e5, 0: 5e5})
+	checkAvailableBalances(btcUsdc, &binanceName, map[uint32]uint64{0: 3e5, 60: 7e5, 60001: 4e5}, map[uint32]uint64{0: 5e5, 60001: 4e5})
+	checkAvailableBalances(dcrUsdc, &binanceUSName, map[uint32]uint64{42: 9e5, 60: 7e5, 60001: 4e5}, map[uint32]uint64{42: 7e5, 60001: 6e5})
 }

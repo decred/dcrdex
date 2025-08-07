@@ -2,6 +2,7 @@ package lexi
 
 import (
 	"bytes"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -10,6 +11,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
+	"github.com/dgraph-io/badger"
 )
 
 func newTestDB(t *testing.T) (*DB, func()) {
@@ -514,5 +516,266 @@ func TestNotIndexed(t *testing.T) {
 	}
 	if tableCount != 8 {
 		t.Fatalf("Expected 8 table entries after deletion, got %d", tableCount)
+	}
+}
+
+func TestDeleteIndex(t *testing.T) {
+	db, shutdown := newTestDB(t)
+	defer shutdown()
+
+	tbl, err := db.Table("DeleteIndexTest")
+	if err != nil {
+		t.Fatalf("Error creating table: %v", err)
+	}
+
+	idx, err := tbl.AddIndex("I", func(k, v KV) ([]byte, error) {
+		return v.(*tValue).idx, nil
+	})
+	if err != nil {
+		t.Fatalf("Error adding index: %v", err)
+	}
+
+	for i := range 10 {
+		k := []byte{byte(i)}
+		v := &tValue{
+			k:   k,
+			v:   append([]byte{byte(i)}, encode.RandomBytes(5)...),
+			idx: []byte{byte(i)},
+		}
+		if err := tbl.Set(k, v); err != nil {
+			t.Fatalf("Error setting value %d: %v", i, err)
+		}
+	}
+
+	var count int
+	idx.Iterate(nil, func(it *Iter) error {
+		count++
+		return nil
+	})
+	if count != 10 {
+		t.Fatalf("Expected 10 values, got %d", count)
+	}
+
+	err = db.DeleteIndex("DeleteIndexTest", "I")
+	if err != nil {
+		t.Fatalf("Error deleting index: %v", err)
+	}
+
+	count = 0
+	idx.Iterate(nil, func(it *Iter) error {
+		count++
+		return nil
+	})
+	if count != 0 {
+		t.Fatalf("Expected 0 values, got %d", count)
+	}
+}
+
+func TestReIndex(t *testing.T) {
+	db, shutdown := newTestDB(t)
+	defer shutdown()
+
+	// Create a table with no indexes.
+	tbl, err := db.Table("DeleteIndexTest")
+	if err != nil {
+		t.Fatalf("Error creating table: %v", err)
+	}
+
+	// Add 10 values to the table.
+	values := make([][]byte, 10)
+	for i := range 10 {
+		k := []byte{byte(i)}
+		v := &tValue{
+			k:   k,
+			v:   append([]byte{byte(i)}, encode.RandomBytes(5)...),
+			idx: []byte{byte(i)},
+		}
+		values[i] = v.v
+		if err := tbl.Set(k, v); err != nil {
+			t.Fatalf("Error setting value %d: %v", i, err)
+		}
+	}
+	sort.Slice(values, func(i, j int) bool {
+		return bytes.Compare(values[i], values[j]) < 0
+	})
+
+	// Create two indexes, one on the key and one on the value.
+	kIdx, err := tbl.AddIndex("K", func(k, v KV) ([]byte, error) {
+		return k.([]byte), nil
+	})
+	if err != nil {
+		t.Fatalf("Error adding index: %v", err)
+	}
+	vIdx, err := tbl.AddIndex("V", func(k, v KV) ([]byte, error) {
+		return v.([]byte), nil
+	})
+	if err != nil {
+		t.Fatalf("Error adding index: %v", err)
+	}
+
+	// Reindex the indexes.
+	err = db.Upgrade(func() error {
+		err = db.ReIndex("DeleteIndexTest", "K", func(k, v []byte) ([]byte, error) {
+			return k, nil
+		})
+		if err != nil {
+			return err
+		}
+		return db.ReIndex("DeleteIndexTest", "V", func(k, v []byte) ([]byte, error) {
+			return v, nil
+		})
+	})
+	if err != nil {
+		t.Fatalf("Error reindexing index: %v", err)
+	}
+
+	// Check the key index.
+	var count int
+	var expKey int
+	kIdx.Iterate(nil, func(it *Iter) error {
+		k, err := it.K()
+		if err != nil {
+			return err
+		}
+		if int(k[0]) != expKey {
+			return fmt.Errorf("expected key %d, got %d", expKey, k[0])
+		}
+		count++
+		expKey++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Error iterating index: %v", err)
+	}
+	if count != 10 {
+		t.Fatalf("Expected 10 values, got %d", count)
+	}
+
+	// Check the value index.
+	count = 0
+	err = vIdx.Iterate(nil, func(it *Iter) error {
+		return it.V(func(v []byte) error {
+			if !bytes.Equal(v, values[count]) {
+				return fmt.Errorf("expected value %d, got %d", values[count], v)
+			}
+			count++
+			return nil
+		})
+	})
+	if err != nil {
+		t.Fatalf("Error iterating index: %v", err)
+	}
+	if count != 10 {
+		t.Fatalf("Expected 10 values, got %d", count)
+	}
+}
+
+// TestUpgradeTransaction verifies that the same transaction is used for all
+// db.Update calls within a single upgrade, and that different upgrade calls
+// use different transactions.
+func TestUpgradeTransaction(t *testing.T) {
+	db, shutdown := newTestDB(t)
+	defer shutdown()
+
+	var firstUpgradeTxn *badger.Txn
+	var secondUpgradeTxn *badger.Txn
+
+	err := db.Upgrade(func() error {
+		err := db.Update(func(txn *badger.Txn) error {
+			firstUpgradeTxn = txn
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+
+		err = db.Update(func(txn *badger.Txn) error {
+			if txn != firstUpgradeTxn {
+				t.Fatal("Second db.Update should use the same transaction as the first")
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("First upgrade failed: %v", err)
+	}
+
+	err = db.Upgrade(func() error {
+		err := db.Update(func(txn *badger.Txn) error {
+			secondUpgradeTxn = txn
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+
+		err = db.Update(func(txn *badger.Txn) error {
+			if txn != secondUpgradeTxn {
+				t.Fatal("Second db.Update should use the same transaction as the first")
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Second upgrade failed: %v", err)
+	}
+
+	if firstUpgradeTxn == secondUpgradeTxn {
+		t.Fatal("The two upgrade calls should use different transactions")
+	}
+}
+
+func TestDBVersion(t *testing.T) {
+	db, shutdown := newTestDB(t)
+	defer shutdown()
+
+	// Initially, the version should be 0
+	got, err := db.GetDBVersion()
+	if err != nil {
+		t.Fatalf("unexpected error when getting unset DB version: %v", err)
+	}
+	if got != 0 {
+		t.Fatalf("expected initial version 0, got %d", got)
+	}
+
+	// Set a version
+	var version uint32 = 2
+	if err := db.Update(func(tx *badger.Txn) error {
+		return db.SetDBVersion(version, tx)
+	}); err != nil {
+		t.Fatalf("SetDBVersion error: %v", err)
+	}
+
+	got, err = db.GetDBVersion()
+	if err != nil {
+		t.Fatalf("GetDBVersion error: %v", err)
+	}
+	if got != version {
+		t.Fatalf("expected version %d, got %d", version, got)
+	}
+
+	// Set a new version
+	version = 3
+	if err := db.Update(func(tx *badger.Txn) error {
+		return db.SetDBVersion(version, tx)
+	}); err != nil {
+		t.Fatalf("SetDBVersion error: %v", err)
+	}
+	got, err = db.GetDBVersion()
+	if err != nil {
+		t.Fatalf("GetDBVersion error: %v", err)
+	}
+	if got != version {
+		t.Fatalf("expected version %d, got %d", version, got)
 	}
 }

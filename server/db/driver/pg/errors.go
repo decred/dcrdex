@@ -10,7 +10,6 @@ import (
 // These errors are specific to the pg backend; they are not generic DEX
 // archivist errors.
 var (
-	errNoRows      = errors.New("no rows")
 	errTooManyRows = errors.New("too many rows")
 )
 

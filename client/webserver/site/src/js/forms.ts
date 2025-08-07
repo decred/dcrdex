@@ -619,6 +619,7 @@ export class WalletConfigForm {
       input.value = dateToString(date)
     } else input.value = opt.default !== null ? opt.default : ''
     input.disabled = Boolean(opt.disablewhenactive && this.assetHasActiveOrders)
+    app().bindTooltips(el)
     return el
   }
 

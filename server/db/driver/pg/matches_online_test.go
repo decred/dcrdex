@@ -772,35 +772,35 @@ func TestCompletedAndAtFaultMatchStats(t *testing.T) {
 		{
 			"maker",
 			maker,
-			[]*db.MatchOutcome{ // descending by time (MatchID field TODO)
+			[]*db.MatchOutcome{ // ascending by time (MatchID field TODO)
 				{
-					Status: matches[7].match.Status,
-					Fail:   false,
-					Time:   epochTime(matches[7]),
-				}, {
-					Status: matches[6].match.Status,
+					Status: matches[0].match.Status,
 					Fail:   true,
-					Time:   epochTime(matches[6]),
-				}, {
-					Status: matches[4].match.Status,
-					Fail:   true,
-					Time:   epochTime(matches[4]),
-				}, {
-					Status: matches[3].match.Status,
-					Fail:   false,
-					Time:   epochTime(matches[3]),
-				}, {
-					Status: matches[2].match.Status,
-					Fail:   false,
-					Time:   epochTime(matches[2]),
+					Time:   epochTime(matches[0]),
 				}, {
 					Status: matches[1].match.Status,
 					Fail:   false,
 					Time:   epochTime(matches[1]),
 				}, {
-					Status: matches[0].match.Status,
+					Status: matches[2].match.Status,
+					Fail:   false,
+					Time:   epochTime(matches[2]),
+				}, {
+					Status: matches[3].match.Status,
+					Fail:   false,
+					Time:   epochTime(matches[3]),
+				}, {
+					Status: matches[4].match.Status,
 					Fail:   true,
-					Time:   epochTime(matches[0]),
+					Time:   epochTime(matches[4]),
+				}, {
+					Status: matches[6].match.Status,
+					Fail:   true,
+					Time:   epochTime(matches[6]),
+				}, {
+					Status: matches[7].match.Status,
+					Fail:   false,
+					Time:   epochTime(matches[7]),
 				},
 			},
 			nil,
@@ -810,17 +810,17 @@ func TestCompletedAndAtFaultMatchStats(t *testing.T) {
 			taker,
 			[]*db.MatchOutcome{
 				{
-					Status: matches[5].match.Status,
-					Fail:   true,
-					Time:   epochTime(matches[5]),
+					Status: matches[1].match.Status,
+					Fail:   false,
+					Time:   epochTime(matches[1]),
 				}, {
 					Status: matches[3].match.Status,
 					Fail:   true,
 					Time:   epochTime(matches[3]),
 				}, {
-					Status: matches[1].match.Status,
-					Fail:   false,
-					Time:   epochTime(matches[1]),
+					Status: matches[5].match.Status,
+					Fail:   true,
+					Time:   epochTime(matches[5]),
 				},
 			},
 			nil,
@@ -1271,6 +1271,21 @@ func TestEpochReport(t *testing.T) {
 		t.Fatalf("error inserting first epoch: %v", err)
 	}
 
+	startStamp := uint64(epochIdx * epochDur)
+	endStamp := startStamp + uint64(epochDur)
+	candle := &candles.Candle{
+		StartStamp:  startStamp,
+		EndStamp:    endStamp,
+		MatchVolume: 1,
+		HighRate:    2,
+		LowRate:     3,
+		StartRate:   4,
+		EndRate:     5,
+		QuoteVolume: 6,
+	}
+	addCandles := make([]*candles.Candle, 3)
+	addCandles[0] = candle
+
 	lastRate, err = archie.LastEpochRate(42, 0)
 	if err != nil {
 		t.Fatalf("error getting last epoch rate from after first epoch: %v", err)
@@ -1306,6 +1321,20 @@ func TestEpochReport(t *testing.T) {
 		t.Fatalf("error inserting second epoch: %v", err)
 	}
 
+	startStamp = uint64((epochIdx + 1) * epochDur)
+	endStamp = startStamp + uint64(epochDur)
+	candle = &candles.Candle{
+		StartStamp:  startStamp,
+		EndStamp:    endStamp,
+		MatchVolume: 11,
+		HighRate:    12,
+		LowRate:     13,
+		StartRate:   14,
+		EndRate:     15,
+		QuoteVolume: 16,
+	}
+	addCandles[1] = candle
+
 	lastRate, err = archie.LastEpochRate(42, 0)
 	if err != nil {
 		t.Fatalf("error getting last epoch rate from after second-to-last epoch: %v", err)
@@ -1326,6 +1355,41 @@ func TestEpochReport(t *testing.T) {
 		EndRate:     100,
 		QuoteVolume: 100,
 	})
+
+	startStamp = uint64((epochIdx + 2) * epochDur)
+	endStamp = startStamp + uint64(epochDur)
+	candle = &candles.Candle{
+		StartStamp:  startStamp,
+		EndStamp:    endStamp,
+		MatchVolume: 100,
+		HighRate:    100,
+		LowRate:     100,
+		StartRate:   100,
+		EndRate:     100,
+		QuoteVolume: 100,
+	}
+	addCandles[2] = candle
+
+	startStamp = uint64((epochIdx + 2) * epochDur)
+	endStamp = startStamp + uint64(epochDur)
+	dayCandle := &candles.Candle{
+		StartStamp:  startStamp,
+		EndStamp:    endStamp,
+		MatchVolume: 112,
+		HighRate:    100,
+		LowRate:     3,
+		StartRate:   4,
+		EndRate:     100,
+		QuoteVolume: 122,
+	}
+
+	if err = archie.InsertCandles(42, 0, uint64(epochDur), addCandles); err != nil {
+		t.Fatalf("error inserting candles: %v", err)
+	}
+
+	if err = archie.InsertCandles(42, 0, uint64(time.Hour*24/time.Millisecond), []*candles.Candle{dayCandle}); err != nil {
+		t.Fatalf("error inserting candle: %v", err)
+	}
 
 	epochCache := candles.NewCache(3, uint64(epochDur))
 	dayCache := candles.NewCache(2, uint64(time.Hour*24/time.Millisecond))

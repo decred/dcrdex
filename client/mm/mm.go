@@ -106,7 +106,7 @@ type bot interface {
 	stats() *RunStats
 	latestEpoch() *EpochReport
 	latestCEXProblems() *CEXProblems
-	updateConfig(cfg *BotConfig) error
+	updateConfig(cfg *BotConfig, autoRebalanceCfg *AutoRebalanceConfig) error
 	updateInventory(balanceDiffs *BotInventoryDiffs)
 	withPause(func() error) error
 	timeStart() int64
@@ -379,15 +379,17 @@ func (m *MarketMaker) Status() *Status {
 		})
 	}
 	for _, cex := range m.cexList() {
-		s := &CEXStatus{Config: cex.CEXConfig}
-		if cex != nil {
-			cex.mtx.RLock()
-			s.Connected = cex.cm != nil && cex.cm.On()
-			s.Markets = cex.mkts
-			s.ConnectionError = cex.connectErr
-			s.Balances = cex.balancesCopy()
-			cex.mtx.RUnlock()
+		if cex == nil {
+			continue
 		}
+
+		s := &CEXStatus{Config: cex.CEXConfig}
+		cex.mtx.RLock()
+		s.Connected = cex.cm != nil && cex.cm.On()
+		s.Markets = cex.mkts
+		s.ConnectionError = cex.connectErr
+		s.Balances = cex.balancesCopy()
+		cex.mtx.RUnlock()
 		status.CEXes[cex.Name] = s
 	}
 	return status
@@ -475,6 +477,21 @@ func (m *MarketMaker) MarketReport(host string, baseID, quoteID uint32) (*Market
 			Estimated: quoteFeesEst,
 		},
 	}, nil
+}
+
+// MaxFundingFees returns the maximum funding fees for a bot on a market.
+func (m *MarketMaker) MaxFundingFees(mwh *MarketWithHost, maxBuyPlacements, maxSellPlacements uint32, baseOptions, quoteOptions map[string]string) (buyFees, sellFees uint64, err error) {
+	buyFundingFees, err := m.core.MaxFundingFees(mwh.QuoteID, mwh.Host, maxBuyPlacements, quoteOptions)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to get buy funding fees: %w", err)
+	}
+
+	sellFundingFees, err := m.core.MaxFundingFees(mwh.BaseID, mwh.Host, maxSellPlacements, baseOptions)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to get sell funding fees: %w", err)
+	}
+
+	return buyFundingFees, sellFundingFees, nil
 }
 
 func (m *MarketMaker) loginAndUnlockWallets(pw []byte, cfg *BotConfig) error {
@@ -770,6 +787,11 @@ func (m *MarketMaker) cexInUse(cexName string) bool {
 
 func (m *MarketMaker) newBot(cfg *BotConfig, adaptorCfg *exchangeAdaptorCfg) (bot, error) {
 	mktID := dexMarketID(cfg.Host, cfg.BaseID, cfg.QuoteID)
+
+	if err := cfg.validate(); err != nil {
+		return nil, fmt.Errorf("invalid bot config: %w", err)
+	}
+
 	switch {
 	case cfg.ArbMarketMakerConfig != nil:
 		return newArbMarketMaker(cfg, adaptorCfg, m.log.SubLogger(fmt.Sprintf("AMM-%s", mktID)))
@@ -899,6 +921,7 @@ func (m *MarketMaker) startBot(startCfg *StartConfig, botCfg *BotConfig, cexCfg 
 		log:                 m.botSubLogger(botCfg),
 		botCfg:              botCfg,
 		eventLogDB:          m.eventLogDB,
+		internalTransfer:    m.internalTransfer,
 	}
 
 	bot, err := m.newBot(botCfg, adaptorCfg)
@@ -1099,6 +1122,29 @@ func validRunningBotCfgUpdate(oldCfg, newCfg *BotConfig) error {
 	return nil
 }
 
+// internalTransfer is called from the exchange adaptor when attempting an
+// internal transfer.
+//
+// ** IMPORTANT ** No mutexes in exchangeAdaptor should be locked when calling this
+// function.
+func (m *MarketMaker) internalTransfer(mkt *MarketWithHost, doTransfer doInternalTransferFunc) error {
+	m.startUpdateMtx.Lock()
+	defer m.startUpdateMtx.Unlock()
+
+	runningBots := m.runningBotsLookup()
+	rb, found := runningBots[*mkt]
+	if !found {
+		return fmt.Errorf("internalTransfer called for non-running bot %s", mkt)
+	}
+
+	dex, cex, err := m.availableBalances(mkt, rb.cexCfg)
+	if err != nil {
+		return fmt.Errorf("error getting available balances: %v", err)
+	}
+
+	return doTransfer(dex, cex)
+}
+
 // UpdateRunningBotInventory updates the inventory of a running bot.
 func (m *MarketMaker) UpdateRunningBotInventory(mkt *MarketWithHost, balanceDiffs *BotInventoryDiffs) error {
 	m.startUpdateMtx.Lock()
@@ -1116,19 +1162,20 @@ func (m *MarketMaker) UpdateRunningBotInventory(mkt *MarketWithHost, balanceDiff
 	}
 
 	if err := rb.withPause(func() error {
-		rb.bot.updateInventory(balanceDiffs)
+		rb.updateInventory(balanceDiffs)
 		return nil
 	}); err != nil {
 		rb.cm.Disconnect()
 		return fmt.Errorf("configuration update error. bot stopped: %w", err)
 	}
+
 	return nil
 }
 
 // UpdateRunningBotCfg updates the configuration and balance allocation for a
 // running bot. If saveUpdate is true, the update configuration will be saved
 // to the default config file.
-func (m *MarketMaker) UpdateRunningBotCfg(cfg *BotConfig, balanceDiffs *BotInventoryDiffs, saveUpdate bool) error {
+func (m *MarketMaker) UpdateRunningBotCfg(cfg *BotConfig, balanceDiffs *BotInventoryDiffs, autoRebalanceCfg *AutoRebalanceConfig, saveUpdate bool) error {
 	m.startUpdateMtx.Lock()
 	defer m.startUpdateMtx.Unlock()
 
@@ -1157,12 +1204,15 @@ func (m *MarketMaker) UpdateRunningBotCfg(cfg *BotConfig, balanceDiffs *BotInven
 
 	var stoppedOracle, startedOracle, updateSuccess bool
 	defer func() {
-		if updateSuccess {
-			return
+		if updateSuccess && saveUpdate {
+			m.updateDefaultBotConfig(cfg)
 		}
-		if startedOracle {
+
+		if !updateSuccess && startedOracle {
 			m.oracle.stopAutoSyncingMarket(cfg.BaseID, cfg.QuoteID)
-		} else if stoppedOracle {
+		}
+
+		if !updateSuccess && stoppedOracle {
 			err := m.oracle.startAutoSyncingMarket(oldCfg.BaseID, oldCfg.QuoteID)
 			if err != nil {
 				m.log.Errorf("Error restarting oracle for %s: %v", mkt, err)
@@ -1182,7 +1232,7 @@ func (m *MarketMaker) UpdateRunningBotCfg(cfg *BotConfig, balanceDiffs *BotInven
 	}
 
 	if err := rb.withPause(func() error {
-		if err := rb.updateConfig(cfg); err != nil {
+		if err := rb.updateConfig(cfg, autoRebalanceCfg); err != nil {
 			return err
 		}
 		if balanceDiffs != nil {
@@ -1317,12 +1367,12 @@ func (m *MarketMaker) updateCEXOrderEvent(mkt *MarketWithHost, event *MarketMaki
 
 	orderEvent := event.CEXOrderEvent
 
-	trade, err := cex.TradeStatus(m.ctx, orderEvent.ID, mkt.BaseID, mkt.QuoteID)
+	trade, err := cex.TradeStatus(m.ctx, orderEvent.ID, orderEvent.BaseID, orderEvent.QuoteID)
 	if err != nil {
 		return nil, fmt.Errorf("error fetching trade status: %v", err)
 	}
 
-	return cexOrderEvent(trade, event.ID, event.TimeStamp), nil
+	return cexOrderEvent(trade, event.ID, event.TimeStamp, m.log), nil
 }
 
 func (m *MarketMaker) updateDepositEvent(event *MarketMakingEvent, cexName string) (*MarketMakingEvent, error) {
@@ -1636,13 +1686,18 @@ func (m *MarketMaker) availableBalances(mkt *MarketWithHost, cexCfg *CEXConfig) 
 				return nil, nil, err
 			}
 
-			for assetID := range cexAssets {
-				balance, err := cex.Balance(assetID)
-				if err != nil {
-					return nil, nil, err
-				}
+			balances, err := cex.Balances(m.ctx)
+			if err != nil {
+				return nil, nil, err
+			}
 
-				cexBals[assetID] = balance.Available
+			for assetID := range cexAssets {
+				bal, found := balances[assetID]
+				if !found {
+					cexBals[assetID] = 0
+					continue
+				}
+				cexBals[assetID] = bal.Available
 			}
 		}
 
@@ -1715,7 +1770,6 @@ func (m *MarketMaker) availableBalances(mkt *MarketWithHost, cexCfg *CEXConfig) 
 		if balancesEqual(updatedDEXBalances, totalDEXBalances) && balancesEqual(updatedCEXBalances, totalCEXBalances) {
 			for assetID, bal := range reservedDEXBalances {
 				if bal > totalDEXBalances[assetID] {
-					m.log.Warnf("reserved DEX balance for %s exceeds available balance: %d > %d", dex.BipIDSymbol(assetID), bal, totalDEXBalances[assetID])
 					totalDEXBalances[assetID] = 0
 				} else {
 					totalDEXBalances[assetID] -= bal
@@ -1723,7 +1777,6 @@ func (m *MarketMaker) availableBalances(mkt *MarketWithHost, cexCfg *CEXConfig) 
 			}
 			for assetID, bal := range reservedCEXBalances {
 				if bal > totalCEXBalances[assetID] {
-					m.log.Warnf("reserved CEX balance for %s exceeds available balance: %d > %d", dex.BipIDSymbol(assetID), bal, totalCEXBalances[assetID])
 					totalCEXBalances[assetID] = 0
 				} else {
 					totalCEXBalances[assetID] -= bal
@@ -1742,10 +1795,14 @@ func (m *MarketMaker) availableBalances(mkt *MarketWithHost, cexCfg *CEXConfig) 
 // AvailableBalances returns the available balances of assets relevant to
 // market making on the specified market on the DEX (including fee assets),
 // and optionally a CEX depending on the configured strategy.
-func (m *MarketMaker) AvailableBalances(mkt *MarketWithHost, alternateConfigPath *string) (dexBalances, cexBalances map[uint32]uint64, _ error) {
-	_, cexCfg, err := m.configsForMarket(mkt, alternateConfigPath)
-	if err != nil {
-		return nil, nil, err
+func (m *MarketMaker) AvailableBalances(mkt *MarketWithHost, cexName *string) (dexBalances, cexBalances map[uint32]uint64, _ error) {
+	var cexCfg *CEXConfig
+	if cexName != nil && *cexName != "" {
+		cex := m.cexes[*cexName]
+		if cex == nil {
+			return nil, nil, fmt.Errorf("CEX %s not found", *cexName)
+		}
+		cexCfg = cex.CEXConfig
 	}
 
 	return m.availableBalances(mkt, cexCfg)

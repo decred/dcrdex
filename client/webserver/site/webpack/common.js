@@ -1,5 +1,4 @@
 const path = require('path')
-const webpack = require('webpack')
 const { CleanWebpackPlugin } = require('clean-webpack-plugin')
 const MiniCssExtractPlugin = require('mini-css-extract-plugin')
 const StyleLintPlugin = require('stylelint-webpack-plugin')
@@ -38,9 +37,6 @@ module.exports = {
     ]
   },
   plugins: [
-    new webpack.EnvironmentPlugin({
-      COMMITHASH: git('rev-parse HEAD'),
-    }),
     new CleanWebpackPlugin(),
     new MiniCssExtractPlugin({
       filename: '../dist/style.css'

@@ -167,6 +167,11 @@ func nukeAll(db *sql.DB) error {
 	return dropPublic(createAccountTableStatements)
 }
 
+func dropTable(db sqlExecutor, tableName string) error {
+	_, err := db.Exec(fmt.Sprintf(`DROP TABLE IF EXISTS %s;`, tableName))
+	return err
+}
+
 func cleanTables(db *sql.DB) error {
 	err := nukeAll(db)
 	if err != nil {

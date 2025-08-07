@@ -11,7 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/rand"
+	mrand "math/rand/v2"
 	"os"
 	"reflect"
 	"sort"
@@ -42,6 +42,8 @@ import (
 	"golang.org/x/text/message"
 )
 
+var rand = mrand.New(mrand.NewPCG(0xbadc0de, 0xdeadbeef))
+
 func init() {
 	asset.Register(tUTXOAssetA.ID, &tDriver{
 		decodedCoinID: tUTXOAssetA.Symbol + "-coin",
@@ -59,7 +61,6 @@ func init() {
 			winfo:         tWalletInfo,
 		},
 	})
-	rand.Seed(time.Now().UnixNano())
 }
 
 var (
@@ -9928,10 +9929,10 @@ func TestCoreAssetSeedAndPass(t *testing.T) {
 	}
 }
 
-var randU32 = func() uint32 { return uint32(rand.Int31()) }
+var randU32 = func() uint32 { return uint32(rand.Int32()) }
 
 func randOrderForMarket(base, quote uint32) order.Order {
-	switch rand.Intn(3) {
+	switch rand.IntN(3) {
 	case 0:
 		o, _ := ordertest.RandomCancelOrder()
 		o.BaseAsset = base
@@ -9952,7 +9953,7 @@ func randOrderForMarket(base, quote uint32) order.Order {
 
 func randBytes(n int) []byte {
 	b := make([]byte, n)
-	rand.Read(b)
+	crand.Read(b)
 	return b
 }
 
@@ -9966,7 +9967,7 @@ func TestDeleteOrderFn(t *testing.T) {
 		acct2 := dbtest.RandomAccountInfo()
 		base1, quote1 := tUTXOAssetA.ID, tUTXOAssetB.ID
 		base2, quote2 := tACCTAsset.ID, tUTXOAssetA.ID
-		n := rand.Intn(9) + 1
+		n := rand.IntN(9) + 1
 		orders := make([]*db.MetaOrder, n)
 		for i := 0; i < n; i++ {
 			acct := acct1
@@ -9978,7 +9979,7 @@ func TestDeleteOrderFn(t *testing.T) {
 			ord := randOrderForMarket(base, quote)
 			orders[i] = &db.MetaOrder{
 				MetaData: &db.OrderMetaData{
-					Status:             order.OrderStatus(rand.Intn(5) + 1),
+					Status:             order.OrderStatus(rand.IntN(5) + 1),
 					Host:               acct.Host,
 					Proof:              db.OrderProof{DEXSig: randBytes(73)},
 					SwapFeesPaid:       rand.Uint64(),
@@ -10043,7 +10044,7 @@ func TestDeleteMatchFn(t *testing.T) {
 	randomMtchs := func() []*db.MetaMatch {
 		base, quote := tUTXOAssetA.ID, tUTXOAssetB.ID
 		acct := dbtest.RandomAccountInfo()
-		n := rand.Intn(9) + 1
+		n := rand.IntN(9) + 1
 		metaMatches := make([]*db.MetaMatch, 0, n)
 		for i := 0; i < n; i++ {
 			m := &db.MetaMatch{
@@ -10057,7 +10058,7 @@ func TestDeleteMatchFn(t *testing.T) {
 				UserMatch: ordertest.RandomUserMatch(),
 			}
 			if i%2 == 1 {
-				m.Status = order.MatchStatus(rand.Intn(4))
+				m.Status = order.MatchStatus(rand.IntN(4))
 			} else {
 				m.Status = order.MatchComplete              // inactive
 				m.MetaData.Proof.Auth.RedeemSig = []byte{0} // redeemSig required for MatchComplete to be considered inactive

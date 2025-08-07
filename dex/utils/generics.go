@@ -3,7 +3,11 @@
 
 package utils
 
-import "golang.org/x/exp/constraints"
+import (
+	"maps"
+
+	"golang.org/x/exp/constraints"
+)
 
 func ReverseSlice[T any](s []T) {
 	for i, j := 0, len(s)-1; i < j; i, j = i+1, j-1 {
@@ -13,9 +17,7 @@ func ReverseSlice[T any](s []T) {
 
 func CopyMap[K comparable, V any](m map[K]V) map[K]V {
 	r := make(map[K]V, len(m))
-	for k, v := range m {
-		r[k] = v
-	}
+	maps.Copy(r, m)
 	return r
 }
 

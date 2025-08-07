@@ -15,13 +15,16 @@ import {
   MarketMakingStatus,
   MMCEXStatus,
   BalanceNote,
-  BotAssetConfig,
   ApprovalStatus,
   SupportedAsset,
-  WalletState,
+  StartConfig,
+  MMBotStatus,
+  RunStats,
+  UIConfig,
   UnitInfo,
-  ProjectedAlloc,
-  AssetBookingFees
+  AutoRebalanceConfig,
+  BotBalanceAllocation,
+  MultiHopCfg
 } from './registry'
 import Doc, {
   NumberInput,
@@ -50,8 +53,7 @@ import {
   GapStrategyAbsolute,
   GapStrategyAbsolutePlus,
   GapStrategyPercent,
-  GapStrategyPercentPlus,
-  feesAndCommit
+  GapStrategyPercentPlus
 } from './mmutil'
 import { Forms, bind as bindForm, NewWalletForm, TokenApprovalForm, DepositAddress, CEXConfigurationForm } from './forms'
 import * as intl from './locales'
@@ -62,34 +64,6 @@ const lastBotsLK = 'lastBots'
 const lastArbExchangeLK = 'lastArbExchange'
 const arbMMRowCacheKey = 'arbmm'
 
-const defaultSwapReserves = {
-  n: 50,
-  prec: 0,
-  inc: 10,
-  minR: 0,
-  maxR: 1000,
-  range: 1000
-}
-const defaultOrderReserves = {
-  factor: 1.0,
-  minR: 0,
-  maxR: 3,
-  range: 3,
-  prec: 3
-}
-const defaultTransfer = {
-  factor: 0.1,
-  minR: 0,
-  maxR: 1,
-  range: 1
-}
-const defaultSlippage = {
-  factor: 0.05,
-  minR: 0,
-  maxR: 0.3,
-  range: 0.3,
-  prec: 3
-}
 const defaultDriftTolerance = {
   value: 0.002,
   minV: 0,
@@ -141,23 +115,45 @@ const defaultUSDPerSide = {
   prec: 2
 }
 
+function defaultUIConfig (baseMinWithdraw: number, quoteMinWithdraw: number, botType: string) : UIConfig {
+  const buffer = botType === botTypeBasicArb ? 1 : 0
+  return {
+    allocation: {
+      dex: {},
+      cex: {}
+    },
+    quickBalance: {
+      buysBuffer: buffer,
+      sellsBuffer: buffer,
+      buyFeeReserve: 0,
+      sellFeeReserve: 0,
+      slippageBuffer: 5
+    },
+    usingQuickBalance: true,
+    internalTransfers: true,
+    baseMinTransfer: baseMinWithdraw,
+    quoteMinTransfer: quoteMinWithdraw,
+    cexRebalance: false
+  }
+}
+
+function defaultMultiHopCfg (possibleArbMkts: string | MultiHopArbMarket[] | undefined) : MultiHopCfg | undefined {
+  if (!possibleArbMkts) return undefined
+  if (typeof possibleArbMkts === 'string') return undefined
+  return {
+    baseAssetMarket: possibleArbMkts[0].BaseMarket,
+    quoteAssetMarket: possibleArbMkts[0].QuoteMarket
+  }
+}
+
 const defaultMarketMakingConfig: ConfigState = {
   gapStrategy: GapStrategyPercentPlus,
   sellPlacements: [],
   buyPlacements: [],
   driftTolerance: defaultDriftTolerance.value,
   profit: 0.02,
-  orderPersistence: defaultOrderPersistence.value,
-  cexRebalance: true,
-  simpleArbLots: 1
+  orderPersistence: defaultOrderPersistence.value
 } as any as ConfigState
-
-const defaultBotAssetConfig: BotAssetConfig = {
-  swapFeeN: defaultSwapReserves.n,
-  orderReservesFactor: defaultOrderReserves.factor,
-  slippageBufferFactor: defaultSlippage.factor,
-  transferFactor: defaultTransfer.factor
-}
 
 // cexButton stores parts of a CEX selection button.
 interface cexButton {
@@ -178,15 +174,12 @@ interface ConfigState {
   profit: number
   driftTolerance: number
   orderPersistence: number // epochs
-  cexRebalance: boolean
-  disabled: boolean
   buyPlacements: OrderPlacement[]
   sellPlacements: OrderPlacement[]
   baseOptions: Record<string, string>
   quoteOptions: Record<string, string>
-  baseConfig: BotAssetConfig
-  quoteConfig: BotAssetConfig
-  simpleArbLots: number
+  uiConfig: UIConfig
+  multiHop?: MultiHopCfg
 }
 
 interface BotSpecs {
@@ -212,10 +205,17 @@ interface UIOpts {
   usingUSDPerSide?: boolean
 }
 
+interface MultiHopArbMarket {
+  BaseMarket: [number, number]
+  QuoteMarket: [number, number]
+  BridgeAsset: number
+}
+
 export default class MarketMakerSettingsPage extends BasePage {
   page: Record<string, PageElement>
   forms: Forms
   opts: UIOpts
+  runningBot: boolean
   newWalletForm: NewWalletForm
   approveTokenForm: TokenApprovalForm
   walletAddrForm: DepositAddress
@@ -237,7 +237,9 @@ export default class MarketMakerSettingsPage extends BasePage {
   cexBaseBalance: ExchangeBalance
   cexQuoteBalance: ExchangeBalance
   specs: BotSpecs
-  mktID: string
+  dexMktID: string
+  arbMkt: string | MultiHopArbMarket
+  multiHopMarkets: MultiHopArbMarket[]
   formSpecs: BotSpecs
   formCexes: Record<string, cexButton>
   placementsCache: Record<string, [OrderPlacement[], OrderPlacement[]]>
@@ -245,17 +247,47 @@ export default class MarketMakerSettingsPage extends BasePage {
   marketRows: MarketRow[]
   lotsPerLevelIncrement: number
   placementsChart: PlacementsChart
-  basePane: AssetPane
-  quotePane: AssetPane
+  baseSettings: WalletSettings
+  quoteSettings: WalletSettings
   driftTolerance: NumberInput
   driftToleranceSlider: MiniSlider
   orderPersistence: NumberInput
   orderPersistenceSlider: MiniSlider
+  availableDEXBalances: Record<number, number>
+  availableCEXBalances: Record<number, number>
+  buyBufferSlider: MiniSlider
+  buyBufferInput: NumberInput
+  sellBufferSlider: MiniSlider
+  sellBufferInput: NumberInput
+  slippageBufferSlider: MiniSlider
+  slippageBufferInput: NumberInput
+  buyFeeReserveSlider: MiniSlider
+  buyFeeReserveInput: NumberInput
+  sellFeeReserveSlider: MiniSlider
+  sellFeeReserveInput: NumberInput
+  baseMinTransferSlider: MiniSlider
+  baseMinTransferInput: NumberInput
+  quoteMinTransferSlider: MiniSlider
+  quoteMinTransferInput: NumberInput
+  baseDexBalanceSlider: MiniSlider
+  baseDexBalanceInput: NumberInput
+  quoteDexBalanceSlider: MiniSlider
+  quoteDexBalanceInput: NumberInput
+  baseFeeBalanceSlider: MiniSlider
+  baseFeeBalanceInput: NumberInput
+  quoteFeeBalanceSlider: MiniSlider
+  quoteFeeBalanceInput: NumberInput
+  baseCexBalanceSlider: MiniSlider
+  baseCexBalanceInput: NumberInput
+  quoteCexBalanceSlider: MiniSlider
+  quoteCexBalanceInput: NumberInput
+  fundingFeesCache: Record<string, [number, number]>
 
   constructor (main: HTMLElement, specs: BotSpecs) {
     super()
 
     this.placementsCache = {}
+    this.fundingFeesCache = {}
     this.opts = {}
 
     const page = this.page = Doc.idDescendants(main)
@@ -270,23 +302,23 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.approveTokenForm = new TokenApprovalForm(page.approveTokenForm, () => { this.submitBotType() })
     this.walletAddrForm = new DepositAddress(page.walletAddrForm)
     this.cexConfigForm = new CEXConfigurationForm(page.cexConfigForm, (cexName: string) => this.cexConfigured(cexName))
-    page.quotePane = page.basePane.cloneNode(true) as PageElement
-    page.assetPaneBox.appendChild(page.quotePane)
-    this.basePane = new AssetPane(this, page.basePane)
-    this.quotePane = new AssetPane(this, page.quotePane)
+    page.quoteSettings = page.baseSettings.cloneNode(true) as PageElement
+    page.walletSettingsBox.appendChild(page.quoteSettings)
+    this.baseSettings = new WalletSettings(this, page.baseSettings, () => { this.updateAllocations() })
+    this.quoteSettings = new WalletSettings(this, page.quoteSettings, () => { this.updateAllocations() })
 
     app().headerSpace.appendChild(page.mmTitle)
 
     setOptionTemplates(page)
     Doc.cleanTemplates(
       page.orderOptTmpl, page.booleanOptTmpl, page.rangeOptTmpl, page.placementRowTmpl,
-      page.oracleTmpl, page.cexOptTmpl, page.arbBttnTmpl, page.marketRowTmpl, page.needRegTmpl
-    )
-    page.basePane.removeAttribute('id') // don't remove from layout
+      page.oracleTmpl, page.cexOptTmpl, page.arbBttnTmpl, page.marketRowTmpl, page.needRegTmpl)
+    page.baseSettings.removeAttribute('id') // don't remove from layout
 
     Doc.bind(page.resetButton, 'click', () => { this.setOriginalValues() })
-    Doc.bind(page.updateButton, 'click', () => { this.saveSettings() })
-    Doc.bind(page.createButton, 'click', async () => { this.saveSettings() })
+    Doc.bind(page.updateButton, 'click', () => { this.updateSettings() })
+    Doc.bind(page.updateStartButton, 'click', () => { this.saveSettingsAndStart() })
+    Doc.bind(page.updateRunningButton, 'click', () => { this.updateSettings() })
     Doc.bind(page.deleteBttn, 'click', () => { this.delete() })
     bindForm(page.botTypeForm, page.botTypeSubmit, () => { this.submitBotType() })
     Doc.bind(page.noMarketBttn, 'click', () => { this.showMarketSelectForm() })
@@ -294,12 +326,17 @@ export default class MarketMakerSettingsPage extends BasePage {
     Doc.bind(page.botTypeChangeMarket, 'click', () => { this.showMarketSelectForm() })
     Doc.bind(page.marketHeader, 'click', () => { this.showMarketSelectForm() })
     Doc.bind(page.marketFilterInput, 'input', () => { this.sortMarketRows() })
-    Doc.bind(page.cexRebalanceCheckbox, 'change', () => { this.autoRebalanceChanged() })
+    Doc.bind(page.internalOnlyRadio, 'change', () => { this.internalOnlyChanged() })
+    Doc.bind(page.externalTransfersRadio, 'change', () => { this.externalTransfersChanged() })
     Doc.bind(page.switchToAdvanced, 'click', () => { this.showAdvancedConfig() })
     Doc.bind(page.switchToQuickConfig, 'click', () => { this.switchToQuickConfig() })
     Doc.bind(page.qcMatchBuffer, 'change', () => { this.matchBufferChanged() })
     Doc.bind(page.switchToUSDPerSide, 'click', () => { this.changeSideCommitmentDialog() })
     Doc.bind(page.switchToLotsPerLevel, 'click', () => { this.changeSideCommitmentDialog() })
+    Doc.bind(page.manuallyAllocateBttn, 'click', () => { this.setAllocationTechnique(false) })
+    Doc.bind(page.quickConfigBttn, 'click', () => { this.setAllocationTechnique(true) })
+    Doc.bind(page.enableRebalance, 'change', () => { this.autoRebalanceChanged() })
+
     // Gap Strategy
     Doc.bind(page.gapStrategySelect, 'change', () => {
       if (!page.gapStrategySelect.value) return
@@ -309,6 +346,20 @@ export default class MarketMakerSettingsPage extends BasePage {
       this.updatedConfig.gapStrategy = gapStrategy
       this.setGapFactorLabels(gapStrategy)
       this.updateModifiedMarkers()
+    })
+    Doc.bind(page.bridgeAssetSelect, 'change', () => {
+      if (!page.bridgeAssetSelect.value) return
+      const bridgeAsset = page.bridgeAssetSelect.value
+      const bridgeAssetID = parseInt(bridgeAsset)
+      const multiHopMkts = this.multiHopMarkets.find(m => m.BridgeAsset === bridgeAssetID)
+      if (!multiHopMkts) {
+        console.error('Bridge asset not found in multi-hop markets', bridgeAssetID)
+        return
+      }
+      this.updatedConfig.multiHop = {
+        baseAssetMarket: multiHopMkts.BaseMarket,
+        quoteAssetMarket: multiHopMkts.QuoteMarket
+      }
     })
 
     // Buy/Sell placements
@@ -462,6 +513,33 @@ export default class MarketMakerSettingsPage extends BasePage {
       }
     })
 
+    this.buyBufferSlider = new MiniSlider(page.buyBufferSlider, (amt: number) => this.quickBalanceSliderChanged(amt, 'buyBuffer'))
+    this.buyBufferInput = new NumberInput(page.buyBuffer, { prec: 0, min: 0, changed: (amt: number) => this.quickBalanceInputChanged(amt, 'buyBuffer') })
+    this.sellBufferSlider = new MiniSlider(page.sellBufferSlider, (amt: number) => this.quickBalanceSliderChanged(amt, 'sellBuffer'))
+    this.sellBufferInput = new NumberInput(page.sellBuffer, { prec: 0, min: 0, changed: (amt: number) => this.quickBalanceInputChanged(amt, 'sellBuffer') })
+    this.slippageBufferSlider = new MiniSlider(page.slippageBufferSlider, (amt: number) => this.quickBalanceSliderChanged(amt, 'slippageBuffer'))
+    this.slippageBufferInput = new NumberInput(page.slippageBuffer, { prec: 3, min: 0, changed: (amt: number) => this.quickBalanceInputChanged(amt, 'slippageBuffer') })
+    this.buyFeeReserveSlider = new MiniSlider(page.buyFeeReserveSlider, (amt: number) => this.quickBalanceSliderChanged(amt, 'buyFeeReserve'))
+    this.buyFeeReserveInput = new NumberInput(page.buyFeeReserve, { prec: 0, min: 0, changed: (amt: number) => this.quickBalanceInputChanged(amt, 'buyFeeReserve') })
+    this.sellFeeReserveSlider = new MiniSlider(page.sellFeeReserveSlider, (amt: number) => this.quickBalanceSliderChanged(amt, 'sellFeeReserve'))
+    this.sellFeeReserveInput = new NumberInput(page.sellFeeReserve, { prec: 0, min: 0, changed: (amt: number) => this.quickBalanceInputChanged(amt, 'sellFeeReserve') })
+    this.baseMinTransferSlider = new MiniSlider(page.baseMinTransferSlider, (amt: number) => this.minTransferSliderChanged(amt, 'base'))
+    this.baseMinTransferInput = new NumberInput(page.baseMinTransfer, { prec: 0, min: 0, changed: (amt: number) => this.minTransferInputChanged(amt, 'base') })
+    this.quoteMinTransferSlider = new MiniSlider(page.quoteMinTransferSlider, (amt: number) => this.minTransferSliderChanged(amt, 'quote'))
+    this.quoteMinTransferInput = new NumberInput(page.quoteMinTransfer, { prec: 0, min: 0, changed: (amt: number) => this.minTransferInputChanged(amt, 'quote') })
+    this.baseDexBalanceSlider = new MiniSlider(page.baseDexBalanceSlider, (amt: number) => this.balanceSliderChanged(amt, 'base', 'dex'))
+    this.baseDexBalanceInput = new NumberInput(page.baseDexBalance, { prec: 0, min: 0, changed: (amt: number) => this.balanceInputChanged(amt, 'base', 'dex') })
+    this.quoteDexBalanceSlider = new MiniSlider(page.quoteDexBalanceSlider, (amt: number) => this.balanceSliderChanged(amt, 'quote', 'dex'))
+    this.quoteDexBalanceInput = new NumberInput(page.quoteDexBalance, { prec: 0, min: 0, changed: (amt: number) => this.balanceInputChanged(amt, 'quote', 'dex') })
+    this.baseFeeBalanceSlider = new MiniSlider(page.baseFeeBalanceSlider, (amt: number) => this.balanceSliderChanged(amt, 'baseFee', 'dex'))
+    this.baseFeeBalanceInput = new NumberInput(page.baseFeeBalance, { prec: 0, min: 0, changed: (amt: number) => this.balanceInputChanged(amt, 'baseFee', 'dex') })
+    this.quoteFeeBalanceSlider = new MiniSlider(page.quoteFeeBalanceSlider, (amt: number) => this.balanceSliderChanged(amt, 'quoteFee', 'dex'))
+    this.quoteFeeBalanceInput = new NumberInput(page.quoteFeeBalance, { prec: 0, min: 0, changed: (amt: number) => this.balanceInputChanged(amt, 'quoteFee', 'dex') })
+    this.baseCexBalanceSlider = new MiniSlider(page.baseCexBalanceSlider, (amt: number) => this.balanceSliderChanged(amt, 'base', 'cex'))
+    this.baseCexBalanceInput = new NumberInput(page.baseCexBalance, { prec: 0, min: 0, changed: (amt: number) => this.balanceInputChanged(amt, 'base', 'cex') })
+    this.quoteCexBalanceSlider = new MiniSlider(page.quoteCexBalanceSlider, (amt: number) => this.balanceSliderChanged(amt, 'quote', 'cex'))
+    this.quoteCexBalanceInput = new NumberInput(page.quoteCexBalance, { prec: 0, min: 0, changed: (amt: number) => this.balanceInputChanged(amt, 'quote', 'cex') })
+
     const maybeSubmitBuyRow = (e: KeyboardEvent) => {
       if (e.key !== 'Enter') return
       if (
@@ -555,81 +633,234 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.configureUI()
   }
 
+  // clampOriginalAllocations sets the allocations to be within the valid range
+  // based on the available balances.
+  clampOriginalAllocations (uiConfig: UIConfig) {
+    const { baseID, quoteID, baseFeeAssetID, quoteFeeAssetID } = this.walletStuff()
+    const assetIDs = Array.from(new Set([baseID, quoteID, baseFeeAssetID, quoteFeeAssetID]))
+    for (const assetID of assetIDs) {
+      const [dexMin, dexMax] = this.validManualBalanceRange(assetID, 'dex', false)
+      uiConfig.allocation.dex[assetID] = Math.min(Math.max(uiConfig.allocation.dex[assetID], dexMin), dexMax)
+      if (this.specs.cexName) {
+        const [cexMin, cexMax] = this.validManualBalanceRange(assetID, 'cex', false)
+        uiConfig.allocation.cex[assetID] = Math.min(Math.max(uiConfig.allocation.cex[assetID], cexMin), cexMax)
+      }
+    }
+  }
+
+  async setAvailableBalances () {
+    const { specs } = this
+    const availableBalances = await MM.availableBalances({ host: specs.host, baseID: specs.baseID, quoteID: specs.quoteID }, specs.cexName)
+    this.availableDEXBalances = availableBalances.dexBalances
+    this.availableCEXBalances = availableBalances.cexBalances
+  }
+
+  minWithdrawals (arbMkt: string | MultiHopArbMarket | undefined, baseID: number, quoteID: number, cexName: string | undefined): { minBaseWithdraw: number, minQuoteWithdraw: number } {
+    if (!cexName || !arbMkt) {
+      return { minBaseWithdraw: 0, minQuoteWithdraw: 0 }
+    }
+
+    const cex = app().mmStatus.cexes[cexName]
+    if (typeof arbMkt === 'string') {
+      const mkt = cex.markets[arbMkt]
+      return { minBaseWithdraw: mkt.baseMinWithdraw, minQuoteWithdraw: mkt.quoteMinWithdraw }
+    }
+
+    const mktToSymbol = ([baseID, quoteID]: [number, number]) : string => {
+      const assetToSymbol = (assetID: number) : string => app().assets[assetID].symbol
+      return `${assetToSymbol(baseID)}_${assetToSymbol(quoteID)}`
+    }
+    const baseMkt = cex.markets[mktToSymbol(arbMkt.BaseMarket)]
+    const quoteMkt = cex.markets[mktToSymbol(arbMkt.QuoteMarket)]
+    return {
+      minBaseWithdraw: arbMkt.BaseMarket[0] === baseID ? baseMkt.baseMinWithdraw : baseMkt.quoteMinWithdraw,
+      minQuoteWithdraw: arbMkt.QuoteMarket[0] === quoteID ? quoteMkt.baseMinWithdraw : quoteMkt.quoteMinWithdraw
+    }
+  }
+
+  possibleArbMarkets (cexName: string | undefined, mmStatus: MarketMakingStatus, baseID: number, quoteID: number, baseSymbol: string, quoteSymbol: string, isArbMM: boolean) : string | MultiHopArbMarket[] | undefined {
+    if (!cexName) {
+      return undefined
+    }
+
+    const cexStatus = mmStatus.cexes[cexName]
+    if (!cexStatus) {
+      throw new Error(`CEX name not found in MM status: ${cexName}`)
+    }
+
+    const [supportsDirectArb, multiHopMarkets] = this.cexSupportsArbOnMarket(baseID, quoteID, cexStatus)
+    if (!supportsDirectArb && multiHopMarkets.length === 0) {
+      throw new Error(`CEX does not support arb on market: ${cexName} ${baseID} ${quoteID}`)
+    }
+
+    if (supportsDirectArb) {
+      return `${baseSymbol}_${quoteSymbol}`
+    }
+
+    if (!isArbMM) {
+      throw new Error(`Only arbMM bots can use multi-hop arb: ${cexName} ${baseID} ${quoteID}`)
+    }
+
+    return multiHopMarkets
+  }
+
+  originalMultiHopCfg (savedMultiHopCfg: MultiHopCfg | undefined, possibleArbMkts: string | MultiHopArbMarket[] | undefined) : MultiHopCfg | undefined {
+    if (!possibleArbMkts || typeof possibleArbMkts === 'string') return undefined
+    if (!savedMultiHopCfg) return { baseAssetMarket: possibleArbMkts[0].BaseMarket, quoteAssetMarket: possibleArbMkts[0].QuoteMarket }
+    let foundSavedMarket = false
+    const mktsEqual = (mkt1: [number, number], mkt2: [number, number]) => {
+      return mkt1[0] === mkt2[0] && mkt1[1] === mkt2[1]
+    }
+    for (const mkt of possibleArbMkts) {
+      if (mktsEqual(mkt.BaseMarket, savedMultiHopCfg.baseAssetMarket) && mktsEqual(mkt.QuoteMarket, savedMultiHopCfg.quoteAssetMarket)) {
+        foundSavedMarket = true
+        break
+      }
+    }
+    if (!foundSavedMarket) return { baseAssetMarket: possibleArbMkts[0].BaseMarket, quoteAssetMarket: possibleArbMkts[0].QuoteMarket }
+    return savedMultiHopCfg
+  }
+
+  // setOriginalConfigValues sets the initial values of the page's original config
+  // based on the savedBotCfg. This should be called after the originalConfig
+  // has been initialized with the default values.
+  setOriginalConfigValues (savedBotCfg: BotConfig | undefined, possibleArbMkts: string | MultiHopArbMarket[] | undefined) {
+    if (!savedBotCfg) return
+    const { basicMarketMakingConfig: mmCfg, arbMarketMakingConfig: arbMMCfg, simpleArbConfig: arbCfg } = savedBotCfg
+    const oldCfg = this.originalConfig
+
+    // This is kinda sloppy, but we'll copy any relevant issues from the
+    // old config into the originalConfig.
+    const idx = savedBotCfg as { [k: string]: any } // typescript
+    for (const [k, v] of Object.entries(savedBotCfg)) if (idx[k] !== undefined) idx[k] = v
+
+    oldCfg.baseOptions = savedBotCfg.baseWalletOptions || {}
+    oldCfg.quoteOptions = savedBotCfg.quoteWalletOptions || {}
+    if (savedBotCfg.uiConfig) oldCfg.uiConfig = savedBotCfg.uiConfig
+    if (this.runningBot && !savedBotCfg.uiConfig.usingQuickBalance) {
+      // If the bot is running and we are allocating manually, initialize
+      // the allocations to 0.
+      oldCfg.uiConfig.allocation = { dex: {}, cex: {} }
+    }
+    this.clampOriginalAllocations(oldCfg.uiConfig)
+
+    if (mmCfg) {
+      oldCfg.buyPlacements = mmCfg.buyPlacements
+      oldCfg.sellPlacements = mmCfg.sellPlacements
+      oldCfg.driftTolerance = mmCfg.driftTolerance
+      oldCfg.gapStrategy = mmCfg.gapStrategy
+    } else if (arbMMCfg) {
+      const { buyPlacements, sellPlacements } = arbMMCfg
+      oldCfg.buyPlacements = Array.from(buyPlacements, (p: ArbMarketMakingPlacement) => { return { lots: p.lots, gapFactor: p.multiplier } })
+      oldCfg.sellPlacements = Array.from(sellPlacements, (p: ArbMarketMakingPlacement) => { return { lots: p.lots, gapFactor: p.multiplier } })
+      oldCfg.profit = arbMMCfg.profit
+      oldCfg.driftTolerance = arbMMCfg.driftTolerance
+      oldCfg.orderPersistence = arbMMCfg.orderPersistence
+      oldCfg.multiHop = this.originalMultiHopCfg(arbMMCfg.multiHop, possibleArbMkts)
+    } else if (arbCfg) {
+      // TODO: expose maxActiveArbs
+      oldCfg.profit = arbCfg.profitTrigger
+      oldCfg.orderPersistence = arbCfg.numEpochsLeaveOpen
+    }
+  }
+
   async configureUI () {
     const { page, specs } = this
     const { host, baseID, quoteID, cexName, botType } = specs
 
-    const [{ symbol: baseSymbol, token: baseToken }, { symbol: quoteSymbol, token: quoteToken }] = [app().assets[baseID], app().assets[quoteID]]
-    this.mktID = `${baseSymbol}_${quoteSymbol}`
-    Doc.hide(
-      page.botSettingsContainer, page.marketBox, page.updateButton, page.resetButton,
-      page.createButton, page.noMarket, page.missingFiatRates
-    )
+    // Set the visibility of fee asset sections.
+    this.fundingFeesCache = {}
+    const { baseFeeAssetID, quoteFeeAssetID, bui, qui, baseFeeUI, quoteFeeUI } = this.walletStuff()
+    const baseFeeNotTraded = baseFeeAssetID !== baseID && baseFeeAssetID !== quoteID
+    const quoteFeeNotTraded = quoteFeeAssetID !== baseID && quoteFeeAssetID !== quoteID
+    Doc.setVis(baseFeeNotTraded || quoteFeeNotTraded, page.buyFeeReserveSection, page.sellFeeReserveSection)
+    Doc.setVis(baseFeeNotTraded, page.baseDexFeeBalanceSection)
+    Doc.setVis(quoteFeeNotTraded && baseFeeAssetID !== quoteFeeAssetID, page.quoteDexFeeBalanceSection)
 
+    // Get all assets, and hide page if any fiat rates are missing.
+    const [{ symbol: baseSymbol, token: baseToken }, { symbol: quoteSymbol, token: quoteToken }] = [app().assets[baseID], app().assets[quoteID]]
+    this.dexMktID = `${baseSymbol}_${quoteSymbol}`
+    Doc.hide(page.botSettingsContainer, page.marketBox, page.resetButton, page.noMarket, page.missingFiatRates, page.bridgeAssetBox)
     if ([baseID, quoteID, baseToken?.parentID ?? baseID, quoteToken?.parentID ?? quoteID].some((assetID: number) => !app().fiatRatesMap[assetID])) {
       Doc.show(page.missingFiatRates)
       return
     }
 
+    await this.setAvailableBalances()
     Doc.show(page.marketLoading)
     State.storeLocal(specLK, specs)
 
+    // Allow deletion of bot if it is not running or we are not switching bot types.
     const mmStatus = app().mmStatus
-    const viewOnly = isViewOnly(specs, mmStatus)
-    let botCfg = liveBotConfig(host, baseID, quoteID)
-    if (botCfg) {
-      const oldBotType = botCfg.arbMarketMakingConfig ? botTypeArbMM : botCfg.basicMarketMakingConfig ? botTypeBasicMM : botTypeBasicArb
-      if (oldBotType !== botType) botCfg = undefined
+    this.runningBot = botIsRunning(specs, mmStatus)
+    Doc.setVis(this.runningBot, page.runningBotAllocationNote)
+    let savedBotCfg = liveBotConfig(host, baseID, quoteID)
+    if (savedBotCfg) {
+      const oldBotType = savedBotCfg.arbMarketMakingConfig ? botTypeArbMM : savedBotCfg.basicMarketMakingConfig ? botTypeBasicMM : botTypeBasicArb
+      if (oldBotType !== botType) savedBotCfg = undefined
     }
-    Doc.setVis(botCfg, page.deleteBttnBox)
+    Doc.setVis(savedBotCfg && !this.runningBot, page.deleteBttnBox)
 
+    // Only allow changing the bot type if the bot is not running.
+    page.marketHeader.classList.remove('hoverbg', 'pointer')
+    page.botTypeHeader.classList.remove('hoverbg', 'pointer')
+    if (!this.runningBot) {
+      page.botTypeHeader.classList.add('hoverbg', 'pointer')
+      page.marketHeader.classList.add('hoverbg', 'pointer')
+    }
+
+    // Check is this bot is able to arb on an exactly matching CEX market, needs
+    // to use multi-hop, or is not able to arb at all.
+    let possibleArbMkts: string | MultiHopArbMarket[] | undefined
+    try {
+      possibleArbMkts = this.possibleArbMarkets(cexName, mmStatus, baseID, quoteID, baseSymbol, quoteSymbol, botType === botTypeArbMM)
+    } catch (e) {
+      console.error(e)
+      Doc.show(page.missingFiatRates)
+      return
+    }
+
+    // Set default original config values
+    if (typeof possibleArbMkts === 'string') this.arbMkt = possibleArbMkts
+    else if (possibleArbMkts !== undefined) this.arbMkt = possibleArbMkts[0]
+    const { minBaseWithdraw, minQuoteWithdraw } = this.minWithdrawals(this.arbMkt, baseID, quoteID, cexName)
     const oldCfg = this.originalConfig = Object.assign({}, defaultMarketMakingConfig, {
-      disabled: viewOnly,
       baseOptions: this.defaultWalletOptions(baseID),
       quoteOptions: this.defaultWalletOptions(quoteID),
       buyPlacements: [],
       sellPlacements: [],
-      baseConfig: Object.assign({}, defaultBotAssetConfig),
-      quoteConfig: Object.assign({}, defaultBotAssetConfig)
+      multiHop: defaultMultiHopCfg(possibleArbMkts),
+      uiConfig: defaultUIConfig(minBaseWithdraw, minQuoteWithdraw, botType)
     }) as ConfigState
 
-    if (botCfg) {
-      const { basicMarketMakingConfig: mmCfg, arbMarketMakingConfig: arbMMCfg, simpleArbConfig: arbCfg, uiConfig: { cexRebalance } } = botCfg
-      this.creatingNewBot = false
-      // This is kinda sloppy, but we'll copy any relevant issues from the
-      // old config into the originalConfig.
-      const idx = oldCfg as { [k: string]: any } // typescript
-      for (const [k, v] of Object.entries(botCfg)) if (idx[k] !== undefined) idx[k] = v
+    // Update original config values based on saved bot config
+    this.creatingNewBot = !savedBotCfg
+    this.setOriginalConfigValues(savedBotCfg, possibleArbMkts)
 
-      oldCfg.baseConfig = Object.assign({}, defaultBotAssetConfig, botCfg.uiConfig.baseConfig)
-      oldCfg.quoteConfig = Object.assign({}, defaultBotAssetConfig, botCfg.uiConfig.quoteConfig)
-      oldCfg.baseOptions = botCfg.baseWalletOptions || {}
-      oldCfg.quoteOptions = botCfg.quoteWalletOptions || {}
-      oldCfg.cexRebalance = cexRebalance
-
-      if (mmCfg) {
-        oldCfg.buyPlacements = mmCfg.buyPlacements
-        oldCfg.sellPlacements = mmCfg.sellPlacements
-        oldCfg.driftTolerance = mmCfg.driftTolerance
-        oldCfg.gapStrategy = mmCfg.gapStrategy
-      } else if (arbMMCfg) {
-        const { buyPlacements, sellPlacements } = arbMMCfg
-        oldCfg.buyPlacements = Array.from(buyPlacements, (p: ArbMarketMakingPlacement) => { return { lots: p.lots, gapFactor: p.multiplier } })
-        oldCfg.sellPlacements = Array.from(sellPlacements, (p: ArbMarketMakingPlacement) => { return { lots: p.lots, gapFactor: p.multiplier } })
-        oldCfg.profit = arbMMCfg.profit
-        oldCfg.driftTolerance = arbMMCfg.driftTolerance
-        oldCfg.orderPersistence = arbMMCfg.orderPersistence
-      } else if (arbCfg) {
-        // TODO: expose maxActiveArbs
-        oldCfg.profit = arbCfg.profitTrigger
-        oldCfg.orderPersistence = arbCfg.numEpochsLeaveOpen
-        oldCfg.simpleArbLots = botCfg.uiConfig.simpleArbLots ?? 1
+    // Setup the multi-hop market selection UI
+    if (possibleArbMkts !== undefined && typeof possibleArbMkts !== 'string') { // MultiHopArbMarket[]
+      this.multiHopMarkets = possibleArbMkts
+      Doc.empty(page.bridgeAssetSelect)
+      for (const market of possibleArbMkts) {
+        const bridgeSymbol = app().assets[market.BridgeAsset].symbol.toUpperCase()
+        const opt = document.createElement('option')
+        opt.value = String(market.BridgeAsset)
+        opt.textContent = bridgeSymbol
+        if (!oldCfg.multiHop) throw new Error('should have a multi hop config')
+        const mktsEqual = (mkt1: [number, number], mkt2: [number, number]) => {
+          return mkt1[0] === mkt2[0] && mkt1[1] === mkt2[1]
+        }
+        if (mktsEqual(oldCfg.multiHop.baseAssetMarket, market.BaseMarket) && mktsEqual(oldCfg.multiHop.quoteAssetMarket, market.QuoteMarket)) {
+          this.arbMkt = market
+          opt.selected = true
+        }
+        page.bridgeAssetSelect.appendChild(opt)
       }
-      Doc.setVis(!viewOnly, page.updateButton, page.resetButton)
-    } else {
-      this.creatingNewBot = true
-      Doc.setVis(!viewOnly, page.createButton)
+      Doc.show(page.bridgeAssetBox)
     }
+
+    Doc.setVis(this.runningBot, page.updateRunningButton)
+    Doc.setVis(!this.runningBot, page.updateStartButton, page.updateButton)
 
     // Now that we've updated the originalConfig, we'll copy it.
     this.updatedConfig = JSON.parse(JSON.stringify(oldCfg))
@@ -646,14 +877,44 @@ export default class MarketMakerSettingsPage extends BasePage {
     }
 
     setMarketElements(document.body, baseID, quoteID, host)
-    Doc.setVis(botType !== botTypeBasicArb, page.driftToleranceBox, page.switchToAdvanced)
+    Doc.setVis(botType === botTypeBasicArb, page.numBuysLabel, page.numSellsLabel)
+    Doc.setVis(botType !== botTypeBasicArb, page.driftToleranceBox, page.switchToAdvanced, page.qcTitle,
+      page.buyBufferLabel, page.sellBufferLabel)
     Doc.setVis(Boolean(cexName), ...Doc.applySelector(document.body, '[data-cex-show]'))
 
-    Doc.setVis(viewOnly, page.viewOnlyRunning)
-    Doc.setVis(cexName, page.cexRebalanceSettings)
-    if (cexName) setCexElements(document.body, cexName)
+    Doc.setVis(this.runningBot, page.botRunningMsg)
 
     await this.fetchMarketReport()
+    await this.updateAllocations()
+
+    if (cexName) {
+      setCexElements(document.body, cexName)
+      const { bui, qui } = this.walletStuff()
+      this.baseMinTransferInput.min = minBaseWithdraw / bui.conventional.conversionFactor
+      this.quoteMinTransferInput.min = minQuoteWithdraw / qui.conventional.conversionFactor
+      this.baseMinTransferInput.prec = Math.log10(bui.conventional.conversionFactor)
+      this.quoteMinTransferInput.prec = Math.log10(qui.conventional.conversionFactor)
+    }
+    Doc.setVis(cexName, page.rebalanceSection, page.adjustManuallyCexBalances)
+
+    this.baseDexBalanceInput.prec = Math.log10(bui.conventional.conversionFactor)
+    const [baseDexMin] = this.validManualBalanceRange(baseID, 'dex', false)
+    this.baseDexBalanceInput.min = baseDexMin / bui.conventional.conversionFactor
+    this.quoteDexBalanceInput.prec = Math.log10(qui.conventional.conversionFactor)
+    const [quoteDexMin] = this.validManualBalanceRange(quoteID, 'dex', false)
+    this.quoteDexBalanceInput.min = quoteDexMin / qui.conventional.conversionFactor
+    this.baseCexBalanceInput.prec = Math.log10(bui.conventional.conversionFactor)
+    const [baseCexMin] = this.validManualBalanceRange(baseID, 'cex', false)
+    this.baseCexBalanceInput.min = baseCexMin / bui.conventional.conversionFactor
+    this.quoteCexBalanceInput.prec = Math.log10(qui.conventional.conversionFactor)
+    const [quoteCexMin] = this.validManualBalanceRange(quoteID, 'cex', false)
+    this.quoteCexBalanceInput.min = quoteCexMin / qui.conventional.conversionFactor
+    this.baseFeeBalanceInput.prec = Math.log10(baseFeeUI.conventional.conversionFactor)
+    const [baseFeeMin] = this.validManualBalanceRange(baseFeeAssetID, 'dex', false)
+    this.baseFeeBalanceInput.min = baseFeeMin / baseFeeUI.conventional.conversionFactor
+    this.quoteFeeBalanceInput.prec = Math.log10(quoteFeeUI.conventional.conversionFactor)
+    const [quoteFeeMin] = this.validManualBalanceRange(quoteFeeAssetID, 'dex', false)
+    this.quoteFeeBalanceInput.min = quoteFeeMin / quoteFeeUI.conventional.conversionFactor
 
     const lotSizeUSD = this.lotSizeUSD()
     this.lotsPerLevelIncrement = Math.round(Math.max(1, defaultLotsPerLevel.usdIncrement / lotSizeUSD))
@@ -661,14 +922,12 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.qcUSDPerSide.inc = this.lotsPerLevelIncrement * lotSizeUSD
     this.qcUSDPerSide.min = lotSizeUSD
 
-    this.basePane.setAsset(baseID, false)
-    this.quotePane.setAsset(quoteID, true)
     const { marketReport: { baseFiatRate } } = this
     this.placementsChart.setMarket({ cexName: cexName as string, botType, baseFiatRate, dict: this.updatedConfig })
 
     // If this is a new bot, show the quick config form.
-    const isQuickPlacements = !botCfg || this.isQuickPlacements(this.updatedConfig.buyPlacements, this.updatedConfig.sellPlacements)
-    const gapStrategy = botCfg?.basicMarketMakingConfig?.gapStrategy ?? GapStrategyPercentPlus
+    const isQuickPlacements = !savedBotCfg || this.isQuickPlacements(this.updatedConfig.buyPlacements, this.updatedConfig.sellPlacements)
+    const gapStrategy = savedBotCfg?.basicMarketMakingConfig?.gapStrategy ?? GapStrategyPercentPlus
     page.gapStrategySelect.value = gapStrategy
     if (botType === botTypeBasicArb || (isQuickPlacements && gapStrategy === GapStrategyPercentPlus)) this.showQuickConfig()
     else this.showAdvancedConfig()
@@ -737,23 +996,399 @@ export default class MarketMakerSettingsPage extends BasePage {
     return runningBotInventory(assetID)
   }
 
-  adjustedBalances (baseWallet: WalletState, quoteWallet: WalletState) {
-    const { cexBaseBalance, cexQuoteBalance } = this
-    const [bInv, qInv] = [this.runningBotInventory(baseWallet.assetID), this.runningBotInventory(quoteWallet.assetID)]
-    const [cexBaseAvail, cexQuoteAvail] = [(cexBaseBalance?.available || 0) - bInv.cex.total, (cexQuoteBalance?.available || 0) - qInv.cex.total]
-    const [dexBaseAvail, dexQuoteAvail] = [baseWallet.balance.available - bInv.dex.total, quoteWallet.balance.available - qInv.dex.total]
-    const baseAvail = dexBaseAvail + cexBaseAvail
-    const quoteAvail = dexQuoteAvail + cexQuoteAvail
-    return { baseAvail, quoteAvail, dexBaseAvail, dexQuoteAvail, cexBaseAvail, cexQuoteAvail }
+  setAllocationTechnique (quick: boolean) {
+    const { page, updatedConfig } = this
+    updatedConfig.uiConfig.usingQuickBalance = quick
+    this.updateAllocations()
+    Doc.setVis(quick, page.quickAllocateSection)
+    Doc.setVis(!quick, page.manuallyAllocateSection)
+  }
+
+  quickBalanceMin (config: 'buyBuffer' | 'sellBuffer' | 'slippageBuffer' | 'buyFeeReserve' | 'sellFeeReserve') : number {
+    const { botType } = this.marketStuff()
+    switch (config) {
+      case 'buyBuffer': return botType === botTypeBasicArb ? 1 : 0
+      case 'sellBuffer': return botType === botTypeBasicArb ? 1 : 0
+      case 'slippageBuffer': return 0
+      case 'buyFeeReserve': return botType === botTypeBasicArb ? 1 : 0
+      case 'sellFeeReserve': return botType === botTypeBasicArb ? 1 : 0
+    }
+  }
+
+  quickBalanceMax (config: 'buyBuffer' | 'sellBuffer' | 'slippageBuffer' | 'buyFeeReserve' | 'sellFeeReserve') : number {
+    const { buyLots, sellLots, botType } = this.marketStuff()
+    switch (config) {
+      case 'buyBuffer': return botType === botTypeBasicArb ? 20 : 3 * buyLots
+      case 'sellBuffer': return botType === botTypeBasicArb ? 20 : 3 * sellLots
+      case 'slippageBuffer': return 100
+      case 'buyFeeReserve': return 1000
+      case 'sellFeeReserve': return 1000
+    }
+  }
+
+  quickBalanceInput (config: 'buyBuffer' | 'sellBuffer' | 'slippageBuffer' | 'buyFeeReserve' | 'sellFeeReserve') : NumberInput {
+    switch (config) {
+      case 'buyBuffer': return this.buyBufferInput
+      case 'sellBuffer': return this.sellBufferInput
+      case 'slippageBuffer': return this.slippageBufferInput
+      case 'buyFeeReserve': return this.buyFeeReserveInput
+      case 'sellFeeReserve': return this.sellFeeReserveInput
+    }
+  }
+
+  quickBalanceSlider (config: 'buyBuffer' | 'sellBuffer' | 'slippageBuffer' | 'buyFeeReserve' | 'sellFeeReserve') : MiniSlider {
+    switch (config) {
+      case 'buyBuffer': return this.buyBufferSlider
+      case 'sellBuffer': return this.sellBufferSlider
+      case 'slippageBuffer': return this.slippageBufferSlider
+      case 'buyFeeReserve': return this.buyFeeReserveSlider
+      case 'sellFeeReserve': return this.sellFeeReserveSlider
+    }
+  }
+
+  // fundingFees fetches the funding fees (fees for split transactions) required
+  // for a given number of buys and sells. To avoid excessive calls, the results
+  // are cached.
+  async fundingFees (numBuys: number, numSells: number) : Promise<[number, number]> {
+    const { updatedConfig: { baseOptions, quoteOptions }, fundingFeesCache, specs: { host, baseID, quoteID } } = this
+    const cacheKey = `${numBuys}-${numSells}-${JSON.stringify(baseOptions)}-${JSON.stringify(quoteOptions)}`
+    if (fundingFeesCache[cacheKey] !== undefined) return fundingFeesCache[cacheKey]
+    const res = await MM.maxFundingFees({ host, baseID, quoteID }, numBuys, numSells, baseOptions, quoteOptions)
+    fundingFeesCache[cacheKey] = [res.buyFees, res.sellFees]
+    return [res.buyFees, res.sellFees]
+  }
+
+  // updateAllocates updates the required allocations if quick balance config is
+  // being used.
+  async updateAllocations () {
+    const { page, specs, updatedConfig } = this
+
+    Doc.setVis(this.specs.cexName && updatedConfig.uiConfig.cexRebalance, page.baseMinTransferSection, page.quoteMinTransferSection)
+
+    if (!updatedConfig.uiConfig.usingQuickBalance) return
+
+    const {
+      sellLots, buyLots, baseID, quoteID, baseFeeAssetID, quoteFeeAssetID,
+      baseIsAccountLocker, quoteIsAccountLocker, bui, qui, baseFeeUI, quoteFeeUI,
+      numBuys, numSells, lotSize, quoteLot
+    } = this.marketStuff()
+
+    const {
+      slippageBuffer, buysBuffer, sellsBuffer, buyFeeReserve, sellFeeReserve
+    } = this.updatedConfig.uiConfig.quickBalance
+    const totalBuyLots = buysBuffer + buyLots
+    const totalSellLots = sellsBuffer + sellLots
+
+    const availableFunds = { dex: this.availableDEXBalances, cex: this.availableCEXBalances }
+    const [oneTradeBuyFundingFees, oneTradeSellFundingFees] = await this.fundingFees(1, 1)
+    const [buyFundingFees, sellFundingFees] = await this.fundingFees(numBuys, numSells)
+
+    const canRebalance = !!specs.cexName && updatedConfig.uiConfig.cexRebalance
+
+    let toAlloc : AllocationResult
+    if (this.runningBot) {
+      const { runStats } = this.status()
+      if (!runStats) {
+        console.error('cannot find run stats for running bot')
+        return
+      }
+      toAlloc = toAllocateRunning(totalBuyLots, totalSellLots, lotSize, quoteLot, slippageBuffer, this.quoteMultiSplitBuffer(), buyFeeReserve, sellFeeReserve,
+        this.marketReport, availableFunds, canRebalance, baseID, quoteID, baseFeeAssetID, quoteFeeAssetID,
+        baseIsAccountLocker, quoteIsAccountLocker, runStats, buyFundingFees, sellFundingFees, oneTradeBuyFundingFees, oneTradeSellFundingFees)
+    } else {
+      toAlloc = toAllocate(totalBuyLots, totalSellLots, lotSize, quoteLot, slippageBuffer, this.quoteMultiSplitBuffer(), buyFeeReserve, sellFeeReserve,
+        this.marketReport, availableFunds, canRebalance, baseID, quoteID, baseFeeAssetID, quoteFeeAssetID,
+        baseIsAccountLocker, quoteIsAccountLocker, buyFundingFees, sellFundingFees, oneTradeBuyFundingFees, oneTradeSellFundingFees)
+    }
+
+    populateAllocationTable(page.minAllocationTable, baseID, quoteID, baseFeeAssetID, quoteFeeAssetID, this.specs.cexName || '',
+      toAlloc, bui, qui, baseFeeUI, quoteFeeUI, this.specs.host)
+
+    const assets = Array.from(new Set([baseID, baseFeeAssetID, quoteID, quoteFeeAssetID]))
+    for (const assetID of assets) {
+      const dexAlloc = toAlloc.dex[assetID] ? toAlloc.dex[assetID].amount : 0
+      const cexAlloc = toAlloc.cex[assetID] ? toAlloc.cex[assetID].amount : 0
+      if (assetID === this.specs.baseID) {
+        this.baseDexBalanceInput.setValue(dexAlloc / bui.conventional.conversionFactor)
+        this.setManualBalanceSliderValue(dexAlloc, 'base', 'dex')
+        this.setConfigAllocation(dexAlloc, 'base', 'dex')
+
+        this.baseCexBalanceInput.setValue(cexAlloc / bui.conventional.conversionFactor)
+        this.setManualBalanceSliderValue(cexAlloc, 'base', 'cex')
+        this.setConfigAllocation(cexAlloc, 'base', 'cex')
+      }
+      if (assetID === quoteID) {
+        this.quoteDexBalanceInput.setValue(dexAlloc / qui.conventional.conversionFactor)
+        this.setManualBalanceSliderValue(dexAlloc, 'quote', 'dex')
+        this.setConfigAllocation(dexAlloc, 'quote', 'dex')
+
+        this.quoteCexBalanceInput.setValue(cexAlloc / qui.conventional.conversionFactor)
+        this.setManualBalanceSliderValue(cexAlloc, 'quote', 'cex')
+        this.setConfigAllocation(cexAlloc, 'quote', 'cex')
+      }
+      if (assetID === baseFeeAssetID && baseFeeAssetID !== baseID && baseFeeAssetID !== quoteID) {
+        this.baseFeeBalanceInput.setValue(dexAlloc / baseFeeUI.conventional.conversionFactor)
+        this.setManualBalanceSliderValue(dexAlloc, 'baseFee', 'dex')
+        this.setConfigAllocation(dexAlloc, 'baseFee', 'dex')
+      }
+      if (assetID === quoteFeeAssetID && quoteFeeAssetID !== quoteID && quoteFeeAssetID !== baseID) {
+        this.quoteFeeBalanceInput.setValue(dexAlloc / quoteFeeUI.conventional.conversionFactor)
+        this.setManualBalanceSliderValue(dexAlloc, 'quoteFee', 'dex')
+        this.setConfigAllocation(dexAlloc, 'quoteFee', 'dex')
+      }
+    }
+
+    if (this.specs.cexName) {
+      this.minTransferInputChanged(updatedConfig.uiConfig.baseMinTransfer / bui.conventional.conversionFactor, 'base')
+      this.minTransferInputChanged(updatedConfig.uiConfig.quoteMinTransfer / qui.conventional.conversionFactor, 'quote')
+    }
+  }
+
+  setQuickBalanceConfig (config: 'buyBuffer' | 'sellBuffer' | 'slippageBuffer' | 'buyFeeReserve' | 'sellFeeReserve', amt: number) {
+    switch (config) {
+      case 'buyBuffer': this.updatedConfig.uiConfig.quickBalance.buysBuffer = amt; break
+      case 'sellBuffer': this.updatedConfig.uiConfig.quickBalance.sellsBuffer = amt; break
+      case 'slippageBuffer': this.updatedConfig.uiConfig.quickBalance.slippageBuffer = amt; break
+      case 'buyFeeReserve': this.updatedConfig.uiConfig.quickBalance.buyFeeReserve = amt; break
+      case 'sellFeeReserve': this.updatedConfig.uiConfig.quickBalance.sellFeeReserve = amt; break
+    }
+  }
+
+  quickBalanceSliderChanged (amt: number, config: 'buyBuffer' | 'sellBuffer' | 'slippageBuffer' | 'buyFeeReserve' | 'sellFeeReserve') {
+    const [min, max] = [this.quickBalanceMin(config), this.quickBalanceMax(config)]
+    const input = this.quickBalanceInput(config)
+    const val = Math.floor((max - min) * amt + min)
+    input.setValue(val)
+    this.setQuickBalanceConfig(config, val)
+    this.updateAllocations()
+  }
+
+  setQuickBalanceSliderValue (amt: number, config: 'buyBuffer' | 'sellBuffer' | 'slippageBuffer' | 'buyFeeReserve' | 'sellFeeReserve') {
+    const slider = this.quickBalanceSlider(config)
+    const [min, max] = [this.quickBalanceMin(config), this.quickBalanceMax(config)]
+    const val = (max - min) === 0 ? 0 : (amt - min) / (max - min)
+    slider.setValue(val)
+  }
+
+  quickBalanceInputChanged (amt: number, sliderName: 'buyBuffer' | 'sellBuffer' | 'slippageBuffer' | 'buyFeeReserve' | 'sellFeeReserve') {
+    this.setQuickBalanceSliderValue(amt, sliderName)
+    this.setQuickBalanceConfig(sliderName, amt)
+    this.updateAllocations()
+  }
+
+  // runningBotAllocations returns the total amount allocated to a running bot.
+  runningBotAllocations () : BotBalanceAllocation | undefined {
+    const { baseID, quoteID, baseFeeAssetID, quoteFeeAssetID } = this.walletStuff()
+    const assetIDs = Array.from(new Set([baseID, quoteID, baseFeeAssetID, quoteFeeAssetID]))
+
+    const botStatus = app().mmStatus.bots.find((s: MMBotStatus) =>
+      s.config.baseID === this.specs.baseID && s.config.quoteID === this.specs.quoteID
+    )
+    if (!botStatus || !botStatus.runStats) {
+      console.error('cannot find run stats for running bot')
+      return undefined
+    }
+
+    const result : BotBalanceAllocation = { dex: {}, cex: {} }
+
+    for (const assetID of assetIDs) {
+      const { dexBalances, cexBalances } = botStatus.runStats
+      let totalDEX = 0
+      totalDEX += dexBalances[assetID]?.available ?? 0
+      totalDEX += dexBalances[assetID]?.locked ?? 0
+      totalDEX += dexBalances[assetID]?.pending ?? 0
+      totalDEX += dexBalances[assetID]?.reserved ?? 0
+      result.dex[assetID] = totalDEX
+
+      if (cexBalances) {
+        let totalCEX = 0
+        totalCEX += cexBalances[assetID]?.available ?? 0
+        totalCEX += cexBalances[assetID]?.locked ?? 0
+        totalCEX += cexBalances[assetID]?.pending ?? 0
+        totalCEX += cexBalances[assetID]?.reserved ?? 0
+        result.cex[assetID] = totalCEX
+      }
+    }
+
+    return result
+  }
+
+  minTransferValidRange (asset: 'base' | 'quote') : [number, number] {
+    const totalAlloc : number = (() => {
+      const { bui, qui } = this.walletStuff()
+      const ui = asset === 'base' ? bui : qui
+      const assetID = asset === 'base' ? this.specs.baseID : this.specs.quoteID
+      const { dex, cex } = this.updatedConfig.uiConfig.allocation
+      let total = dex[assetID] + cex[assetID]
+
+      if (!this.runningBot) return total / ui.conventional.conversionFactor
+
+      const botAlloc = this.runningBotAllocations()
+      if (botAlloc) {
+        total += botAlloc.dex[assetID] ?? 0
+        total += botAlloc.cex[assetID] ?? 0
+      }
+
+      return total / ui.conventional.conversionFactor
+    })()
+
+    const min = asset === 'base' ? this.baseMinTransferInput.min : this.quoteMinTransferInput.min
+    const max = Math.max(min * 2, totalAlloc)
+    return [min, max]
+  }
+
+  setMinTransferCfg (asset: 'base' | 'quote', amt: number) {
+    const { updatedConfig: cfg } = this
+    const { bui, qui } = this.walletStuff()
+    const ui = asset === 'base' ? bui : qui
+    const msgAmt = Math.floor(amt * ui.conventional.conversionFactor)
+    if (asset === 'base') cfg.uiConfig.baseMinTransfer = msgAmt
+    else cfg.uiConfig.quoteMinTransfer = msgAmt
+  }
+
+  minTransferSliderChanged (r: number, asset: 'base' | 'quote') {
+    const input = asset === 'base' ? this.baseMinTransferInput : this.quoteMinTransferInput
+    const [min, max] = this.minTransferValidRange(asset)
+    const amt = min + (max - min) * r
+    input.setValue(amt)
+    this.setMinTransferCfg(asset, amt)
+  }
+
+  minTransferInputChanged (amt: number, asset: 'base' | 'quote') {
+    const [min, max] = this.minTransferValidRange(asset)
+    amt = Math.min(Math.max(amt, min), max) // clamp
+    const slider = asset === 'base' ? this.baseMinTransferSlider : this.quoteMinTransferSlider
+    const input = asset === 'base' ? this.baseMinTransferInput : this.quoteMinTransferInput
+    slider.setValue((amt - min) / (max - min))
+    input.setValue(amt)
+    this.setMinTransferCfg(asset, amt)
+  }
+
+  manualBalanceSlider (asset: 'base' | 'quote' | 'baseFee' | 'quoteFee', location: 'dex' | 'cex') : MiniSlider | undefined {
+    switch (asset) {
+      case 'base': return location === 'dex' ? this.baseDexBalanceSlider : this.baseCexBalanceSlider
+      case 'quote': return location === 'dex' ? this.quoteDexBalanceSlider : this.quoteCexBalanceSlider
+      case 'baseFee': return location === 'dex' ? this.baseFeeBalanceSlider : undefined
+      case 'quoteFee': return location === 'dex' ? this.quoteFeeBalanceSlider : undefined
+    }
+  }
+
+  manualBalanceInput (asset: 'base' | 'quote' | 'baseFee' | 'quoteFee', location: 'dex' | 'cex') : NumberInput | undefined {
+    switch (asset) {
+      case 'base': return location === 'dex' ? this.baseDexBalanceInput : this.baseCexBalanceInput
+      case 'quote': return location === 'dex' ? this.quoteDexBalanceInput : this.quoteCexBalanceInput
+      case 'baseFee': return location === 'dex' ? this.baseFeeBalanceInput : undefined
+      case 'quoteFee': return location === 'dex' ? this.quoteFeeBalanceInput : undefined
+    }
+  }
+
+  assetID (asset: 'base' | 'quote' | 'baseFee' | 'quoteFee') : number {
+    const { baseFeeAssetID, quoteFeeAssetID } = this.walletStuff()
+    switch (asset) {
+      case 'base': return this.specs.baseID
+      case 'quote': return this.specs.quoteID
+      case 'baseFee': return baseFeeAssetID
+      case 'quoteFee': return quoteFeeAssetID
+    }
+  }
+
+  // validManualBalanceRange returns the valid range for a manual balance slider.
+  // For running bots, this ranges from the negative the bot's unused balance to
+  // the available balance, and for non-running bots, it ranges from 0 to the
+  // available balance.
+  validManualBalanceRange (assetID: number, location: 'dex' | 'cex', conventional: boolean) : [number, number] {
+    const conventionalRange = (min: number, max: number): [number, number] => {
+      if (!conventional) return [min, max]
+      const ui = app().assets[assetID].unitInfo
+      return [min / ui.conventional.conversionFactor, max / ui.conventional.conversionFactor]
+    }
+
+    const max = location === 'cex'
+      ? this.availableCEXBalances[assetID] ?? 0
+      : this.availableDEXBalances[assetID] ?? 0
+
+    if (!this.runningBot) return conventionalRange(0, max)
+
+    const botStatus = app().mmStatus.bots.find((s: MMBotStatus) =>
+      s.config.baseID === this.specs.baseID && s.config.quoteID === this.specs.quoteID
+    )
+
+    if (!botStatus?.runStats) return conventionalRange(0, max)
+
+    const min = location === 'cex'
+      ? -botStatus.runStats.cexBalances?.[assetID]?.available ?? 0
+      : -botStatus.runStats.dexBalances?.[assetID]?.available ?? 0
+
+    return conventionalRange(min, max)
+  }
+
+  setConfigAllocation (amt: number, asset: 'base' | 'quote' | 'baseFee' | 'quoteFee', location: 'dex' | 'cex') {
+    const { updatedConfig: cfg } = this
+    const assetID = this.assetID(asset)
+    if (location === 'dex') {
+      cfg.uiConfig.allocation.dex[assetID] = amt
+    } else {
+      cfg.uiConfig.allocation.cex[assetID] = amt
+    }
+  }
+
+  balanceSliderChanged (amt: number, asset: 'base' | 'quote' | 'baseFee' | 'quoteFee', location: 'dex' | 'cex') {
+    const assetID = this.assetID(asset)
+    const [min, max] = this.validManualBalanceRange(assetID, location, false)
+    const input = this.manualBalanceInput(asset, location)
+    const ui = app().assets[assetID].unitInfo
+    if (input) {
+      amt = (max - min) * amt + min
+      if (amt < 0) amt = Math.ceil(amt)
+      else amt = Math.floor(amt)
+      input.setValue(amt / ui.conventional.conversionFactor)
+    }
+    this.setConfigAllocation(amt, asset, location)
+  }
+
+  setManualBalanceSliderValue (amt: number, asset: 'base' | 'quote' | 'baseFee' | 'quoteFee', location: 'dex' | 'cex') {
+    const assetID = this.assetID(asset)
+    const [min, max] = this.validManualBalanceRange(assetID, location, false)
+    const slider = this.manualBalanceSlider(asset, location)
+    if (slider) slider.setValue((amt - min) / (max - min))
+  }
+
+  balanceInputChanged (amt: number, asset: 'base' | 'quote' | 'baseFee' | 'quoteFee', location: 'dex' | 'cex') {
+    const assetID = this.assetID(asset)
+    const [min, max] = this.validManualBalanceRange(assetID, location, false)
+    const ui = app().assets[assetID].unitInfo
+    amt = amt * ui.conventional.conversionFactor
+    if (amt > max || amt < min) {
+      if (amt > max) amt = max
+      else amt = min
+      const input = this.manualBalanceInput(asset, location)
+      if (input) input.setValue(amt / ui.conventional.conversionFactor)
+    }
+    this.setManualBalanceSliderValue(amt, asset, location)
+    this.setConfigAllocation(amt, asset, location)
+  }
+
+  status () {
+    const { specs: { baseID, quoteID } } = this
+    const botStatus = app().mmStatus.bots.find((s: MMBotStatus) => s.config.baseID === baseID && s.config.quoteID === quoteID)
+    if (!botStatus) return { botCfg: {} as BotConfig, running: false, runStats: {} as RunStats }
+    const { config: botCfg, running, runStats, latestEpoch, cexProblems } = botStatus
+    return { botCfg, running, runStats, latestEpoch, cexProblems }
   }
 
   lotSizeUSD () {
-    const { specs: { host, baseID }, mktID, marketReport: { baseFiatRate } } = this
+    const { specs: { host, baseID }, dexMktID, marketReport: { baseFiatRate } } = this
     const xc = app().exchanges[host]
-    const market = xc.markets[mktID]
+    const market = xc.markets[dexMktID]
     const { lotsize: lotSize } = market
     const { unitInfo: ui } = app().assets[baseID]
     return lotSize / ui.conventional.conversionFactor * baseFiatRate
+  }
+
+  quoteMultiSplitBuffer () : number {
+    if (!this.updatedConfig.quoteOptions) return 0
+    if (this.updatedConfig.quoteOptions.multisplit !== 'true') return 0
+    return Number(this.updatedConfig.quoteOptions.multisplitbuffer || '0')
   }
 
   /*
@@ -762,14 +1397,14 @@ export default class MarketMakerSettingsPage extends BasePage {
     */
   marketStuff () {
     const {
-      page, specs: { host, baseID, quoteID, cexName, botType }, basePane, quotePane,
+      page, specs: { host, baseID, quoteID, cexName, botType },
       marketReport: { baseFiatRate, quoteFiatRate, baseFees, quoteFees },
-      lotsPerLevelIncrement, updatedConfig: cfg, originalConfig: oldCfg, mktID
+      lotsPerLevelIncrement, updatedConfig: cfg, originalConfig: oldCfg, dexMktID
     } = this
     const { symbol: baseSymbol, unitInfo: bui } = app().assets[baseID]
     const { symbol: quoteSymbol, unitInfo: qui } = app().assets[quoteID]
     const xc = app().exchanges[host]
-    const market = xc.markets[mktID]
+    const market = xc.markets[dexMktID]
     const { lotsize: lotSize, spot } = market
     const lotSizeUSD = lotSize / bui.conventional.conversionFactor * baseFiatRate
     const atomicRate = 1 / bui.conventional.conversionFactor * baseFiatRate / quoteFiatRate * qui.conventional.conversionFactor
@@ -780,25 +1415,19 @@ export default class MarketMakerSettingsPage extends BasePage {
       spot
     }
 
-    let [dexBaseLots, dexQuoteLots] = [cfg.simpleArbLots, cfg.simpleArbLots]
+    let [sellLots, buyLots, numBuys, numSells] = [0, 0, 0, 0]
     if (botType !== botTypeBasicArb) {
-      dexBaseLots = this.updatedConfig.sellPlacements.reduce((lots: number, p: OrderPlacement) => lots + p.lots, 0)
-      dexQuoteLots = this.updatedConfig.buyPlacements.reduce((lots: number, p: OrderPlacement) => lots + p.lots, 0)
+      sellLots = this.updatedConfig.sellPlacements.reduce((lots: number, p: OrderPlacement) => lots + p.lots, 0)
+      buyLots = this.updatedConfig.buyPlacements.reduce((lots: number, p: OrderPlacement) => lots + p.lots, 0)
+      numBuys = this.updatedConfig.buyPlacements.length
+      numSells = this.updatedConfig.sellPlacements.length
     }
     const quoteLot = calculateQuoteLot(lotSize, baseID, quoteID, spot)
-    const walletStuff = this.walletStuff()
-    const { baseFeeAssetID, quoteFeeAssetID, baseIsAccountLocker, quoteIsAccountLocker } = walletStuff
-
-    const { commit, fees } = feesAndCommit(
-      baseID, quoteID, baseFees, quoteFees, lotSize, dexBaseLots, dexQuoteLots,
-      baseFeeAssetID, quoteFeeAssetID, baseIsAccountLocker, quoteIsAccountLocker,
-      cfg.baseConfig.orderReservesFactor, cfg.quoteConfig.orderReservesFactor
-    )
 
     return {
-      page, cfg, oldCfg, host, xc, baseID, quoteID, botType, cexName, baseFiatRate, quoteFiatRate,
-      xcRate, baseSymbol, quoteSymbol, mktID, lotSize, lotSizeUSD, lotsPerLevelIncrement,
-      quoteLot, commit, basePane, quotePane, fees, ...walletStuff
+      page, cfg, oldCfg, host, xc, botType, cexName, baseFiatRate, quoteFiatRate,
+      xcRate, baseSymbol, quoteSymbol, dexMktID, lotSize, lotSizeUSD, lotsPerLevelIncrement,
+      quoteLot, baseFees, quoteFees, sellLots, buyLots, numBuys, numSells, ...this.walletStuff()
     }
   }
 
@@ -815,7 +1444,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     return {
       baseWallet, quoteWallet, baseFeeUI, quoteFeeUI, baseToken, quoteToken,
       bui, qui, baseFeeAssetID, quoteFeeAssetID, baseIsAccountLocker, quoteIsAccountLocker,
-      ...this.adjustedBalances(baseWallet, quoteWallet)
+      baseID, quoteID
     }
   }
 
@@ -867,7 +1496,7 @@ export default class MarketMakerSettingsPage extends BasePage {
       this.qcUSDPerSide.setValue(lotsPerLevel * levelsPerSide * lotSizeUSD)
       this.qcLevelsPerSide.setValue(levelsPerSide)
     } else if (botType === botTypeBasicArb) {
-      this.qcLotsPerLevel.setValue(cfg.simpleArbLots)
+      this.qcLotsPerLevel.setValue(1)
     }
     this.showQuickConfig()
     this.quickConfigUpdated()
@@ -900,29 +1529,30 @@ export default class MarketMakerSettingsPage extends BasePage {
     const { page, opts: { usingUSDPerSide } } = this
     Doc.hide(
       page.matchMultiplierBox, page.placementsChartBox, page.placementChartLegend,
-      page.lotsPerLevelLabel, page.levelSpacingBox, page.arbLotsLabel, page.qcLevelPerSideBox
+      page.lotsPerLevelLabel, page.levelSpacingBox, page.arbLotsLabel, page.qcLevelPerSideBox,
+      page.qcUSDPerSideBox, page.qcLotsBox
     )
-    Doc.setVis(usingUSDPerSide, page.qcUSDPerSideBox)
-    Doc.setVis(!usingUSDPerSide, page.qcLotsBox)
     switch (botType) {
       case botTypeArbMM:
         Doc.show(
           page.qcLevelPerSideBox, page.matchMultiplierBox, page.placementsChartBox,
           page.placementChartLegend, page.lotsPerLevelLabel
         )
+        Doc.setVis(usingUSDPerSide, page.qcUSDPerSideBox)
+        Doc.setVis(!usingUSDPerSide, page.qcLotsBox)
         break
       case botTypeBasicMM:
         Doc.show(
           page.qcLevelPerSideBox, page.levelSpacingBox, page.placementsChartBox,
           page.lotsPerLevelLabel
         )
+        Doc.setVis(usingUSDPerSide, page.qcUSDPerSideBox)
+        Doc.setVis(!usingUSDPerSide, page.qcLotsBox)
         break
-      case botTypeBasicArb:
-        Doc.show(page.arbLotsLabel)
     }
   }
 
-  quickConfigUpdated () {
+  async quickConfigUpdated () {
     const { page, cfg, botType, cexName } = this.marketStuff()
 
     Doc.hide(page.qcError)
@@ -960,7 +1590,6 @@ export default class MarketMakerSettingsPage extends BasePage {
     const levelSpacingDisabled = levelsPerSide === 1
     page.levelSpacingBox.classList.toggle('disabled', levelSpacingDisabled)
     page.qcLevelSpacing.disabled = levelSpacingDisabled
-    cfg.simpleArbLots = lotsPerLevel
 
     if (botType !== botTypeBasicArb) {
       this.clearPlacements(cexName ? arbMMRowCacheKey : cfg.gapStrategy)
@@ -977,26 +1606,7 @@ export default class MarketMakerSettingsPage extends BasePage {
       this.placementsChart.render()
     }
 
-    this.updateAllocations()
-  }
-
-  updateAllocations () {
-    this.updateBaseAllocations()
-    this.updateQuoteAllocations()
-  }
-
-  updateBaseAllocations () {
-    const { commit, lotSize, basePane, fees } = this.marketStuff()
-
-    basePane.updateInventory(commit.dex.base.lots, commit.dex.quote.lots, lotSize, commit.dex.base.val, commit.cex.base.val, fees.base)
-    basePane.updateCommitTotal()
-  }
-
-  updateQuoteAllocations () {
-    const { commit, quoteLot: lotSize, quotePane, fees } = this.marketStuff()
-
-    quotePane.updateInventory(commit.dex.quote.lots, commit.dex.base.lots, lotSize, commit.dex.quote.val, commit.cex.quote.val, fees.quote)
-    quotePane.updateCommitTotal()
+    await this.updateAllocations()
   }
 
   matchBufferChanged () {
@@ -1020,8 +1630,8 @@ export default class MarketMakerSettingsPage extends BasePage {
   async showBotTypeForm (host: string, baseID: number, quoteID: number, botType?: string, configuredCEX?: string) {
     const { page } = this
     this.formSpecs = { host, baseID, quoteID, botType: '' }
-    const viewOnly = isViewOnly(this.formSpecs, app().mmStatus)
-    if (viewOnly) {
+    const botRunning = botIsRunning(this.formSpecs, app().mmStatus)
+    if (botRunning) {
       const botCfg = liveBotConfig(host, baseID, quoteID)
       const specs = this.specs = this.formSpecs
       switch (true) {
@@ -1100,7 +1710,7 @@ export default class MarketMakerSettingsPage extends BasePage {
   }
 
   reshowBotTypeForm () {
-    if (isViewOnly(this.specs, app().mmStatus)) this.showMarketSelectForm()
+    if (this.runningBot) return
     const { baseID, quoteID, host, cexName, botType } = this.specs
     this.showBotTypeForm(host, baseID, quoteID, botType, cexName)
   }
@@ -1141,6 +1751,7 @@ export default class MarketMakerSettingsPage extends BasePage {
   }
 
   showMarketSelectForm () {
+    if (this.runningBot) return
     this.page.marketFilterInput.value = ''
     this.sortMarketRows()
     this.forms.show(this.page.marketSelectForm)
@@ -1157,20 +1768,58 @@ export default class MarketMakerSettingsPage extends BasePage {
     }
   }
 
-  handleBalanceNote (n: BalanceNote) {
-    this.approveTokenForm.handleBalanceNote(n)
+  async handleBalanceNote (note: BalanceNote) {
     if (!this.marketReport) return
-    const { baseID, quoteID, quoteToken, baseToken } = this.marketStuff()
-    if (n.assetID === baseID || n.assetID === baseToken?.parentID) {
-      this.basePane.updateBalances()
-    } else if (n.assetID === quoteID || n.assetID === quoteToken?.parentID) {
-      this.quotePane.updateBalances()
+    const { assetID } = note
+    const { baseID, quoteID, baseFeeAssetID, quoteFeeAssetID } = this.walletStuff()
+    if ([baseID, quoteID, baseFeeAssetID, quoteFeeAssetID].indexOf(assetID) >= 0) {
+      await this.setAvailableBalances()
+      this.updateAllocations()
     }
+  }
+
+  internalOnlyChanged () {
+    const checked = Boolean(this.page.internalOnlyRadio.checked)
+    this.page.externalTransfersRadio.checked = !checked
+    this.updatedConfig.uiConfig.cexRebalance = !checked
+    this.updatedConfig.uiConfig.internalTransfers = checked
+    this.updateAllocations()
+  }
+
+  externalTransfersChanged () {
+    const checked = Boolean(this.page.externalTransfersRadio.checked)
+    this.page.internalOnlyRadio.checked = !checked
+    this.updatedConfig.uiConfig.cexRebalance = checked
+    this.updatedConfig.uiConfig.internalTransfers = !checked
+    this.updateAllocations()
   }
 
   autoRebalanceChanged () {
     const { page, updatedConfig: cfg } = this
-    cfg.cexRebalance = page.cexRebalanceCheckbox?.checked ?? false
+    const checked = page.enableRebalance.checked
+    Doc.setVis(checked, page.internalOnlySettings, page.externalTransfersSettings)
+    if (checked && !cfg.uiConfig.cexRebalance && !cfg.uiConfig.internalTransfers) {
+      // default to external transfers
+      cfg.uiConfig.cexRebalance = true
+      page.externalTransfersRadio.checked = true
+      page.internalOnlyRadio.checked = false
+    } else if (!checked) {
+      cfg.uiConfig.cexRebalance = false
+      cfg.uiConfig.internalTransfers = false
+      page.externalTransfersRadio.checked = false
+      page.internalOnlyRadio.checked = false
+    } else if (cfg.uiConfig.cexRebalance && cfg.uiConfig.internalTransfers) {
+      // should not happen.. set to default
+      cfg.uiConfig.internalTransfers = false
+      page.externalTransfersRadio.checked = true
+      page.internalOnlyRadio.checked = false
+    } else {
+      // set to current values. This case should only be called when the form
+      // is loaded.
+      page.externalTransfersRadio.checked = cfg.uiConfig.cexRebalance
+      page.internalOnlyRadio.checked = cfg.uiConfig.internalTransfers
+    }
+
     this.updateAllocations()
   }
 
@@ -1620,7 +2269,9 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.qcProfitSlider.setValue((profit - defaultProfit.minV) / defaultProfit.range)
 
     if (cexName) {
-      page.cexRebalanceCheckbox.checked = cfg.cexRebalance
+      page.enableRebalance.checked = cfg.uiConfig.cexRebalance || cfg.uiConfig.internalTransfers
+      page.internalOnlyRadio.checked = cfg.uiConfig.internalTransfers
+      page.externalTransfersRadio.checked = cfg.uiConfig.cexRebalance
       this.autoRebalanceChanged()
     }
 
@@ -1643,8 +2294,44 @@ export default class MarketMakerSettingsPage extends BasePage {
     oldCfg.buyPlacements.forEach((p) => { this.addPlacement(true, p) })
     oldCfg.sellPlacements.forEach((p) => { this.addPlacement(false, p) })
 
-    this.basePane.setupWalletSettings()
-    this.quotePane.setupWalletSettings()
+    // Quick balance
+    this.buyBufferInput.setValue(cfg.uiConfig.quickBalance.buysBuffer)
+    this.sellBufferInput.setValue(cfg.uiConfig.quickBalance.sellsBuffer)
+    this.buyFeeReserveInput.setValue(cfg.uiConfig.quickBalance.buyFeeReserve)
+    this.sellFeeReserveInput.setValue(cfg.uiConfig.quickBalance.sellFeeReserve)
+    this.slippageBufferInput.setValue(cfg.uiConfig.quickBalance.slippageBuffer)
+    this.setQuickBalanceSliderValue(cfg.uiConfig.quickBalance.buysBuffer, 'buyBuffer')
+    this.setQuickBalanceSliderValue(cfg.uiConfig.quickBalance.sellsBuffer, 'sellBuffer')
+    this.setQuickBalanceSliderValue(cfg.uiConfig.quickBalance.buyFeeReserve, 'buyFeeReserve')
+    this.setQuickBalanceSliderValue(cfg.uiConfig.quickBalance.sellFeeReserve, 'sellFeeReserve')
+    this.setQuickBalanceSliderValue(cfg.uiConfig.quickBalance.slippageBuffer, 'slippageBuffer')
+
+    // Manual balance
+    const { bui, qui, baseFeeUI, quoteFeeUI } = this.walletStuff()
+    const { baseID, quoteID, baseFeeAssetID, quoteFeeAssetID } = this.marketStuff()
+    this.baseDexBalanceInput.setValue(cfg.uiConfig.allocation.dex[baseID] / bui.conventional.conversionFactor)
+    this.quoteDexBalanceInput.setValue(cfg.uiConfig.allocation.dex[quoteID] / qui.conventional.conversionFactor)
+    this.baseCexBalanceInput.setValue(cfg.uiConfig.allocation.cex[baseID] / bui.conventional.conversionFactor)
+    this.quoteCexBalanceInput.setValue(cfg.uiConfig.allocation.cex[quoteID] / qui.conventional.conversionFactor)
+    this.baseFeeBalanceInput.setValue(cfg.uiConfig.allocation.dex[baseFeeAssetID] / baseFeeUI.conventional.conversionFactor)
+    this.quoteFeeBalanceInput.setValue(cfg.uiConfig.allocation.dex[quoteFeeAssetID] / quoteFeeUI.conventional.conversionFactor)
+    this.setManualBalanceSliderValue(cfg.uiConfig.allocation.dex[quoteID], 'quote', 'dex')
+    this.setManualBalanceSliderValue(cfg.uiConfig.allocation.cex[baseID], 'base', 'cex')
+    this.setManualBalanceSliderValue(cfg.uiConfig.allocation.cex[quoteID], 'quote', 'cex')
+    this.setManualBalanceSliderValue(cfg.uiConfig.allocation.dex[baseFeeAssetID], 'base', 'dex')
+    this.setManualBalanceSliderValue(cfg.uiConfig.allocation.dex[quoteFeeAssetID], 'quote', 'dex')
+
+    this.setAllocationTechnique(cfg.uiConfig.usingQuickBalance)
+
+    if (cfg.uiConfig.cexRebalance) {
+      this.minTransferInputChanged(cfg.uiConfig.baseMinTransfer / bui.conventional.conversionFactor, 'base')
+      this.minTransferInputChanged(cfg.uiConfig.quoteMinTransfer / qui.conventional.conversionFactor, 'quote')
+    }
+
+    this.baseSettings.clear()
+    this.quoteSettings.clear()
+    this.baseSettings.init(cfg.baseOptions, this.specs.baseID, false)
+    this.quoteSettings.init(cfg.quoteOptions, this.specs.quoteID, true)
 
     this.updateModifiedMarkers()
     if (Doc.isDisplayed(page.quickConfig)) this.switchToQuickConfig()
@@ -1682,11 +2369,17 @@ export default class MarketMakerSettingsPage extends BasePage {
     return ok
   }
 
-  /*
-   * saveSettings updates the settings in the backend, and sets the originalConfig
-   * to be equal to the updatedConfig.
-   */
-  async saveSettings () {
+  autoRebalanceSettings () : AutoRebalanceConfig | undefined {
+    const { updatedConfig: cfg } = this
+    if (!cfg.uiConfig.cexRebalance && !cfg.uiConfig.internalTransfers) return
+    return {
+      minBaseTransfer: cfg.uiConfig.baseMinTransfer,
+      minQuoteTransfer: cfg.uiConfig.quoteMinTransfer,
+      internalOnly: !cfg.uiConfig.cexRebalance
+    }
+  }
+
+  async doSave () {
     // Make a copy and delete either the basic mm config or the arb-mm config,
     // depending on whether a cex is selected.
     if (!this.validateFields(true)) return
@@ -1697,12 +2390,7 @@ export default class MarketMakerSettingsPage extends BasePage {
       baseID: baseID,
       quoteID: quoteID,
       cexName: cexName ?? '',
-      uiConfig: {
-        simpleArbLots: cfg.simpleArbLots,
-        baseConfig: cfg.baseConfig,
-        quoteConfig: cfg.quoteConfig,
-        cexRebalance: cfg.cexRebalance
-      },
+      uiConfig: cfg.uiConfig,
       baseWalletOptions: cfg.baseOptions,
       quoteWalletOptions: cfg.quoteOptions
     }
@@ -1718,7 +2406,22 @@ export default class MarketMakerSettingsPage extends BasePage {
     }
 
     app().log('mm', 'saving bot config', botCfg)
-    await MM.updateBotConfig(botCfg)
+
+    // When loading a running bot with balances configured manually, we set
+    // all the diffs initially to 0. However, we save the UI with the total
+    // allocations for each asset, so that if the bot is stopped and then the
+    // settings are reloaded, the total allocations will be shown.
+    const updatedAllocation = cfg.uiConfig.allocation
+    if (!botCfg.uiConfig.usingQuickBalance && this.runningBot) {
+      const botAlloc = this.runningBotAllocations()
+      if (botAlloc) {
+        botCfg.uiConfig.allocation = combineBotAllocations(botAlloc, updatedAllocation)
+      }
+    }
+
+    if (this.runningBot) await MM.updateRunningBot(botCfg, updatedAllocation, this.autoRebalanceSettings())
+    else await MM.updateBotConfig(botCfg)
+
     await app().fetchMMStatus()
     this.originalConfig = JSON.parse(JSON.stringify(cfg))
     this.updateModifiedMarkers()
@@ -1726,6 +2429,26 @@ export default class MarketMakerSettingsPage extends BasePage {
     lastBots[`${baseID}_${quoteID}_${host}`] = this.specs
     State.storeLocal(lastBotsLK, lastBots)
     if (cexName) State.storeLocal(lastArbExchangeLK, cexName)
+  }
+
+  async updateSettings () {
+    await this.doSave()
+    app().loadPage('mm')
+  }
+
+  async saveSettingsAndStart () {
+    const { specs: { host, baseID, quoteID }, updatedConfig: cfg } = this
+    await this.doSave()
+
+    const startConfig: StartConfig = {
+      baseID: baseID,
+      quoteID: quoteID,
+      host: host,
+      alloc: cfg.uiConfig.allocation,
+      autoRebalance: this.autoRebalanceSettings()
+    }
+
+    await MM.startBot(startConfig)
     app().loadPage('mm')
   }
 
@@ -1757,7 +2480,8 @@ export default class MarketMakerSettingsPage extends BasePage {
       sellPlacements: [],
       profit: cfg.profit,
       driftTolerance: cfg.driftTolerance,
-      orderPersistence: cfg.orderPersistence
+      orderPersistence: cfg.orderPersistence,
+      multiHop: cfg.multiHop
     }
     for (const p of cfg.buyPlacements) arbCfg.buyPlacements.push({ lots: p.lots, multiplier: p.gapFactor })
     for (const p of cfg.sellPlacements) arbCfg.sellPlacements.push({ lots: p.lots, multiplier: p.gapFactor })
@@ -1932,6 +2656,63 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.forms.show(page.cexConfigForm)
   }
 
+  cexSupportsArbOnMarket (baseID: number, quoteID: number, cexStatus: MMCEXStatus): [boolean, MultiHopArbMarket[]] {
+    let supportsDirectArb = false
+
+    const baseMarkets = new Set<number>()
+    const quoteMarkets = new Set<number>()
+
+    // Find all markets that trade either base or quote asset
+    for (const { baseID: b, quoteID: q } of Object.values(cexStatus.markets ?? [])) {
+      if (b === baseID && q === quoteID) {
+        supportsDirectArb = true
+        break
+      }
+
+      if (b === baseID) {
+        baseMarkets.add(q)
+      } else if (q === baseID) {
+        baseMarkets.add(b)
+      }
+      if (b === quoteID) {
+        quoteMarkets.add(q)
+      } else if (q === quoteID) {
+        quoteMarkets.add(b)
+      }
+    }
+
+    // Find all bridge assets that connect base and quote
+    const multiHopMarkets: MultiHopArbMarket[] = []
+    for (const bridgeAsset of baseMarkets) {
+      if (quoteMarkets.has(bridgeAsset)) {
+        // Check if bridge asset exists as base or quote in both markets
+        const markets = Object.values(cexStatus.markets ?? {})
+        let baseMarket = null
+        let quoteMarket = null
+        for (const market of markets) {
+          if ((market.baseID === baseID && market.quoteID === bridgeAsset) ||
+              (market.baseID === bridgeAsset && market.quoteID === baseID)) {
+            baseMarket = market
+          }
+          if ((market.baseID === quoteID && market.quoteID === bridgeAsset) ||
+              (market.baseID === bridgeAsset && market.quoteID === quoteID)) {
+            quoteMarket = market
+          }
+        }
+
+        if (baseMarket && quoteMarket) {
+          multiHopMarkets.push({
+            BaseMarket: [baseMarket.baseID, baseMarket.quoteID],
+            QuoteMarket: [quoteMarket.baseID, quoteMarket.quoteID],
+            BridgeAsset: bridgeAsset
+          })
+        }
+      }
+    }
+
+    return [supportsDirectArb, multiHopMarkets]
+  }
+
   /*
    * cexMarketSupportFilter returns a lookup CEXes that have a matching market
    * for the currently selected base and quote assets.
@@ -1939,18 +2720,16 @@ export default class MarketMakerSettingsPage extends BasePage {
   cexMarketSupportFilter (baseID: number, quoteID: number) {
     const cexes: Record<string, boolean> = {}
     for (const [cexName, cexStatus] of Object.entries(app().mmStatus.cexes)) {
-      for (const { baseID: b, quoteID: q } of Object.values(cexStatus.markets ?? [])) {
-        if (b === baseID && q === quoteID) {
-          cexes[cexName] = true
-          break
-        }
+      const [supportsDirectArb, bridgeAssets] = this.cexSupportsArbOnMarket(baseID, quoteID, cexStatus)
+      if (supportsDirectArb || bridgeAssets.length > 0) {
+        cexes[cexName] = true
       }
     }
     return (cexName: string) => Boolean(cexes[cexName])
   }
 }
 
-function isViewOnly (specs: BotSpecs, mmStatus: MarketMakingStatus): boolean {
+function botIsRunning (specs: BotSpecs, mmStatus: MarketMakingStatus): boolean {
   const botStatus = mmStatus.bots.find(({ config: cfg }) => cfg.host === specs.host && cfg.baseID === specs.baseID && cfg.quoteID === specs.quoteID)
   return Boolean(botStatus?.running)
 }
@@ -1988,247 +2767,32 @@ function tokenAssetApprovalStatuses (host: string, b: SupportedAsset, q: Support
   ]
 }
 
-class AssetPane {
+class WalletSettings {
   pg: MarketMakerSettingsPage
   div: PageElement
   page: Record<string, PageElement>
-  assetID: number
-  ui: UnitInfo
-  walletConfig: Record<string, string>
-  feeAssetID: number
-  feeUI: UnitInfo
-  isQuote: boolean
-  isToken: boolean
-  lotSize: number // might be quote converted
-  lotSizeConv: number
-  cfg: BotAssetConfig
-  inv: ProjectedAlloc
-  nSwapFees: IncrementalInput
-  nSwapFeesSlider: MiniSlider
-  orderReserves: NumberInput
-  orderReservesSlider: MiniSlider
-  slippageBuffer: NumberInput
-  slippageBufferSlider: MiniSlider
-  minTransfer: NumberInput
-  minTransferSlider: MiniSlider
+  updated: () => void
+  optElements: Record<string, PageElement | NumberInput>
 
-  constructor (pg: MarketMakerSettingsPage, div: PageElement) {
+  constructor (pg: MarketMakerSettingsPage, div: PageElement, updated: () => void) {
     this.pg = pg
     this.div = div
-    const page = this.page = Doc.parseTemplate(div)
-
-    this.nSwapFees = new IncrementalInput(page.nSwapFees, {
-      prec: defaultSwapReserves.prec,
-      inc: defaultSwapReserves.inc,
-      changed: (v: number) => {
-        const { minR, range } = defaultSwapReserves
-        this.cfg.swapFeeN = v
-        this.nSwapFeesSlider.setValue((v - minR) / range)
-        this.pg.updateAllocations()
-      }
-    })
-
-    this.nSwapFeesSlider = new MiniSlider(page.nSwapFeesSlider, (r: number) => {
-      const { minR, range, prec } = defaultSwapReserves
-      const [v] = toPrecision(minR + r * range, prec)
-      this.cfg.swapFeeN = v
-      this.nSwapFees.setValue(v)
-      this.pg.updateAllocations()
-    })
-    this.orderReserves = new NumberInput(page.orderReservesFactor, {
-      prec: defaultOrderReserves.prec,
-      min: 0,
-      changed: (v: number) => {
-        const { minR, range } = defaultOrderReserves
-        this.cfg.orderReservesFactor = v
-        this.orderReservesSlider.setValue((v - minR) / range)
-        this.pg.updateAllocations()
-      }
-    })
-    this.orderReservesSlider = new MiniSlider(page.orderReservesSlider, (r: number) => {
-      const { minR, range, prec } = defaultOrderReserves
-      const [v] = toPrecision(minR + r * range, prec)
-      this.orderReserves.setValue(v)
-      this.cfg.orderReservesFactor = v
-      this.pg.updateAllocations()
-    })
-    this.slippageBuffer = new NumberInput(page.slippageBufferFactor, {
-      prec: defaultSlippage.prec,
-      min: 0,
-      changed: (v: number) => {
-        const { minR, range } = defaultSlippage
-        this.cfg.slippageBufferFactor = v
-        this.slippageBufferSlider.setValue((v - minR) / range)
-        this.pg.updateAllocations()
-      }
-    })
-    this.slippageBufferSlider = new MiniSlider(page.slippageBufferSlider, (r: number) => {
-      const { minR, range, prec } = defaultSlippage
-      const [v] = toPrecision(minR + r * range, prec)
-      this.slippageBuffer.setValue(minR + r * range)
-      this.cfg.slippageBufferFactor = v
-      this.pg.updateAllocations()
-    })
-    this.minTransfer = new NumberInput(page.minTransfer, {
-      sigFigs: true,
-      min: 0,
-      changed: (v: number) => {
-        const { cfg } = this
-        const totalInventory = this.commit()
-        const [minV, maxV] = [this.minTransfer.min, Math.max(this.minTransfer.min * 2, totalInventory)]
-        cfg.transferFactor = (v - minV) / (maxV - minV)
-        this.minTransferSlider.setValue(cfg.transferFactor)
-      }
-    })
-    this.minTransferSlider = new MiniSlider(page.minTransferSlider, (r: number) => {
-      const { cfg } = this
-      const totalInventory = this.commit()
-      const [minV, maxV] = [this.minTransfer.min, Math.max(this.minTransfer.min, totalInventory)]
-      cfg.transferFactor = r
-      this.minTransfer.setValue(minV + r * (maxV - minV))
-    })
-
-    Doc.bind(page.showBalance, 'click', () => { pg.showAddress(this.assetID) })
+    this.page = Doc.parseTemplate(div)
+    this.updated = updated
   }
 
-  // lot size can change if this is the quote asset, keep it updated.
-  setLotSize (lotSize: number) {
-    const { ui } = this
-    this.lotSize = lotSize
-    this.lotSizeConv = lotSize / ui.conventional.conversionFactor
+  clear () {
+    Doc.empty(this.page.walletSettings)
   }
 
-  setAsset (assetID: number, isQuote: boolean) {
-    this.assetID = assetID
-    this.isQuote = isQuote
-    const cfg = this.cfg = isQuote ? this.pg.updatedConfig.quoteConfig : this.pg.updatedConfig.baseConfig
-    const { page, div, pg: { specs: { botType, baseID, cexName }, mktID, updatedConfig: { baseOptions, quoteOptions } } } = this
-    const { symbol, name, token, unitInfo: ui } = app().assets[assetID]
-    this.ui = ui
-    this.walletConfig = assetID === baseID ? baseOptions : quoteOptions
-    const { conventional: { unit: ticker } } = ui
-    this.feeAssetID = token ? token.parentID : assetID
-    const { unitInfo: feeUI, name: feeName, symbol: feeSymbol } = app().assets[this.feeAssetID]
-    this.feeUI = feeUI
-    this.inv = { book: 0, bookingFees: 0, swapFeeReserves: 0, cex: 0, orderReserves: 0, slippageBuffer: 0 }
-    this.isToken = Boolean(token)
-    Doc.setVis(this.isToken, page.feeTotalBox, page.feeReservesBox, page.feeBalances)
-    Doc.setVis(isQuote, page.slippageBufferBox)
-    Doc.setSrc(div, '[data-logo]', Doc.logoPath(symbol))
-    Doc.setText(div, '[data-name]', name)
-    Doc.setText(div, '[data-ticker]', ticker)
-    const { conventional: { unit: feeTicker } } = feeUI
-    Doc.setText(div, '[data-fee-ticker]', feeTicker)
-    Doc.setText(div, '[data-fee-name]', feeName)
-    Doc.setSrc(div, '[data-fee-logo]', Doc.logoPath(feeSymbol))
-    Doc.setVis(botType !== botTypeBasicMM, page.cexMinInvBox)
-    Doc.setVis(botType !== botTypeBasicArb, page.orderReservesBox)
-    this.nSwapFees.setValue(cfg.swapFeeN ?? defaultSwapReserves.n)
-    this.nSwapFeesSlider.setValue(cfg.swapFeeN / defaultSwapReserves.maxR)
-    if (botType !== botTypeBasicArb) {
-      const [v] = toPrecision(cfg.orderReservesFactor ?? defaultOrderReserves.factor, defaultOrderReserves.prec)
-      this.orderReserves.setValue(v)
-      this.orderReservesSlider.setValue((v - defaultOrderReserves.minR) / defaultOrderReserves.range)
-    }
-    if (botType !== botTypeBasicMM) {
-      this.minTransfer.prec = Math.log10(ui.conventional.conversionFactor)
-      const mkt = app().mmStatus.cexes[cexName as string].markets[mktID]
-      this.minTransfer.min = ((isQuote ? mkt.quoteMinWithdraw : mkt.baseMinWithdraw) / ui.conventional.conversionFactor)
-    }
-    this.slippageBuffer.setValue(cfg.slippageBufferFactor)
-    const { minR, range } = defaultSlippage
-    this.slippageBufferSlider.setValue((cfg.slippageBufferFactor - minR) / range)
-    this.setupWalletSettings()
-    this.updateBalances()
-  }
-
-  commit () {
-    const { inv, isToken } = this
-    let commit = inv.book + inv.cex + inv.orderReserves + inv.slippageBuffer
-    if (!isToken) commit += inv.bookingFees + inv.swapFeeReserves
-    return commit
-  }
-
-  updateInventory (lots: number, counterLots: number, lotSize: number, dexCommit: number, cexCommit: number, fees: AssetBookingFees) {
-    this.setLotSize(lotSize)
-    const { page, cfg, lotSizeConv, inv, ui, feeUI, isToken, isQuote, pg: { specs: { cexName, botType } } } = this
-    page.bookLots.textContent = String(lots)
-    page.bookLotSize.textContent = Doc.formatFourSigFigs(lotSizeConv)
-    inv.book = lots * lotSizeConv
-    page.bookCommitment.textContent = Doc.formatFourSigFigs(inv.book)
-    const feesPerLotConv = fees.bookingFeesPerLot / feeUI.conventional.conversionFactor
-    page.bookingFeesPerLot.textContent = Doc.formatFourSigFigs(feesPerLotConv)
-    page.swapReservesFactor.textContent = fees.swapReservesFactor.toFixed(2)
-    page.bookingFeesLots.textContent = String(lots)
-    inv.bookingFees = fees.bookingFees / feeUI.conventional.conversionFactor
-    page.bookingFees.textContent = Doc.formatFourSigFigs(inv.bookingFees)
-    if (cexName) {
-      inv.cex = cexCommit / ui.conventional.conversionFactor
-      page.cexMinInv.textContent = Doc.formatFourSigFigs(inv.cex)
-    }
-    if (botType !== botTypeBasicArb) {
-      const totalInventory = Math.max(cexCommit, dexCommit) / ui.conventional.conversionFactor
-      page.orderReservesBasis.textContent = Doc.formatFourSigFigs(totalInventory)
-      const orderReserves = totalInventory * cfg.orderReservesFactor
-      inv.orderReserves = orderReserves
-      page.orderReserves.textContent = Doc.formatFourSigFigs(orderReserves)
-    }
-    if (isToken) {
-      const feesPerSwapConv = fees.tokenFeesPerSwap / feeUI.conventional.conversionFactor
-      page.feeReservesPerSwap.textContent = Doc.formatFourSigFigs(feesPerSwapConv)
-      inv.swapFeeReserves = feesPerSwapConv * cfg.swapFeeN
-      page.feeReserves.textContent = Doc.formatFourSigFigs(inv.swapFeeReserves)
-    }
-    if (isQuote) {
-      const basis = inv.book + inv.cex + inv.orderReserves
-      page.slippageBufferBasis.textContent = Doc.formatCoinValue(basis * ui.conventional.conversionFactor, ui)
-      inv.slippageBuffer = basis * cfg.slippageBufferFactor
-      page.slippageBuffer.textContent = Doc.formatCoinValue(inv.slippageBuffer * ui.conventional.conversionFactor, ui)
-    }
-    Doc.setVis(fees.bookingFeesPerCounterLot > 0, page.redemptionFeesBox)
-    if (fees.bookingFeesPerCounterLot > 0) {
-      const feesPerLotConv = fees.bookingFeesPerCounterLot / feeUI.conventional.conversionFactor
-      page.redemptionFeesPerLot.textContent = Doc.formatFourSigFigs(feesPerLotConv)
-      page.redemptionFeesLots.textContent = String(counterLots)
-      page.redeemReservesFactor.textContent = fees.redeemReservesFactor.toFixed(2)
-    }
-    this.updateCommitTotal()
-    this.updateTokenFees()
-    this.updateRebalance()
-  }
-
-  updateCommitTotal () {
-    const { page, assetID, ui } = this
-    const commit = this.commit()
-    page.commitTotal.textContent = Doc.formatCoinValue(Math.round(commit * ui.conventional.conversionFactor), ui)
-    page.commitTotalFiat.textContent = Doc.formatFourSigFigs(commit * app().fiatRatesMap[assetID])
-  }
-
-  updateTokenFees () {
-    const { page, inv, feeAssetID, feeUI, isToken } = this
-    if (!isToken) return
-    const feeReserves = inv.bookingFees + inv.swapFeeReserves
-    page.feeTotal.textContent = Doc.formatCoinValue(feeReserves * feeUI.conventional.conversionFactor, feeUI)
-    page.feeTotalFiat.textContent = Doc.formatFourSigFigs(feeReserves * app().fiatRatesMap[feeAssetID])
-  }
-
-  updateRebalance () {
-    const { page, cfg, pg: { updatedConfig: { cexRebalance }, specs: { cexName } } } = this
-    const showRebalance = cexName && cexRebalance
-    Doc.setVis(showRebalance, page.rebalanceOpts)
-    if (!showRebalance) return
-    const totalInventory = this.commit()
-    const [minV, maxV] = [this.minTransfer.min, Math.max(this.minTransfer.min * 2, totalInventory)]
-    const rangeV = maxV - minV
-    this.minTransfer.setValue(minV + cfg.transferFactor * rangeV)
-    this.minTransferSlider.setValue((cfg.transferFactor - defaultTransfer.minR) / defaultTransfer.range)
-  }
-
-  setupWalletSettings () {
-    const { page, assetID, walletConfig } = this
+  init (walletConfig: Record<string, string>, assetID: number, isQuote: boolean) {
+    const { page } = this
     const walletSettings = app().currentWalletDefinition(assetID)
     Doc.empty(page.walletSettings)
     Doc.setVis(!walletSettings.multifundingopts, page.walletSettingsNone)
+    const { symbol } = app().assets[assetID]
+    page.ticker.textContent = symbol.toUpperCase()
+    page.logo.src = Doc.logoPath(symbol)
     if (!walletSettings.multifundingopts) return
     const optToDiv: Record<string, PageElement> = {}
     const dependentOpts: Record<string, string[]> = {}
@@ -2242,8 +2806,9 @@ class AssetPane {
       if (!optKeys) return
       for (const optKey of optKeys) Doc.setVis(vis, optToDiv[optKey])
     }
+    this.optElements = {}
     const addOpt = (opt: OrderOption) => {
-      if (opt.quoteAssetOnly && !this.isQuote) return
+      if (opt.quoteAssetOnly && !isQuote) return
       const currVal = walletConfig[opt.key]
       let div: PageElement | undefined
       if (opt.isboolean) {
@@ -2254,8 +2819,10 @@ class AssetPane {
         Doc.bind(tmpl.input, 'change', () => {
           walletConfig[opt.key] = tmpl.input.checked ? 'true' : 'false'
           setDependentOptsVis(opt.key, Boolean(tmpl.input.checked))
+          this.updated()
         })
         if (opt.description) tmpl.tooltip.dataset.tooltip = opt.description
+        this.optElements[opt.key] = tmpl.input
       } else if (opt.xyRange) {
         const { start, end, xUnit } = opt.xyRange
         const range = end.x - start.x
@@ -2272,6 +2839,7 @@ class AssetPane {
             const [v, s] = toFourSigFigs(rawV, 1)
             walletConfig[opt.key] = s
             slider.setValue((v - start.x) / range)
+            this.updated()
           }
         })
         const slider = new MiniSlider(tmpl.slider, (r: number) => {
@@ -2279,6 +2847,7 @@ class AssetPane {
           const [v, s] = toFourSigFigs(rawV, 1)
           walletConfig[opt.key] = s
           input.setValue(v)
+          this.updated()
         })
         // TODO: default value should be smaller or none for base asset.
         const [v, s] = toFourSigFigs(parseFloatDefault(currVal, start.x), 3)
@@ -2286,6 +2855,7 @@ class AssetPane {
         slider.setValue((v - start.x) / range)
         input.setValue(v)
         tmpl.value.textContent = s
+        this.optElements[opt.key] = input
       }
       if (!div) return console.error("don't know how to handle opt", opt)
       page.walletSettings.appendChild(div)
@@ -2295,29 +2865,517 @@ class AssetPane {
         Doc.setVis(parentOptVal === 'true', div)
       }
     }
-
     if (walletSettings.multifundingopts && walletSettings.multifundingopts.length > 0) {
       for (const opt of walletSettings.multifundingopts) addOpt(opt)
     }
     app().bindTooltips(page.walletSettings)
   }
+}
 
-  updateBalances () {
-    const { page, assetID, ui, feeAssetID, feeUI, pg: { specs: { cexName, baseID }, cexBaseBalance, cexQuoteBalance } } = this
-    const { balance: { available } } = app().walletMap[assetID]
-    const botInv = this.pg.runningBotInventory(assetID)
-    const dexAvail = available - botInv.dex.total
-    let cexAvail = 0
-    Doc.setVis(cexName, page.balanceBreakdown)
-    if (cexName) {
-      page.dexAvail.textContent = Doc.formatFourSigFigs(dexAvail / ui.conventional.conversionFactor)
-      const { available: cexRawAvail } = assetID === baseID ? cexBaseBalance : cexQuoteBalance
-      cexAvail = cexRawAvail - botInv.cex.total
-      page.cexAvail.textContent = Doc.formatFourSigFigs(cexAvail / ui.conventional.conversionFactor)
+function populateAllocationTable (
+  div: PageElement, baseID: number, quoteID: number, baseFeeID: number,
+  quoteFeeID: number, cexName: string, allocationResult: AllocationResult,
+  baseUI: UnitInfo, quoteUI: UnitInfo, baseFeeUI: UnitInfo,
+  quoteFeeUI: UnitInfo, host: string) {
+  const dexBalances: Record<number, number> = {}
+  const cexBalances: Record<number, number> = {}
+  const page = Doc.parseTemplate(div)
+
+  const setColor = (el: PageElement, status: AllocationStatus) => {
+    el.classList.remove('text-buycolor', 'text-danger', 'text-warning')
+    switch (status) {
+      case 'sufficient': el.classList.add('text-buycolor'); break
+      case 'insufficient': el.classList.add('text-danger'); break
+      case 'sufficient-with-rebalance': el.classList.add('text-warning'); break
     }
-    page.avail.textContent = Doc.formatFourSigFigs((dexAvail + cexAvail) / ui.conventional.conversionFactor)
-    if (assetID === feeAssetID) return
-    const { balance: { available: feeAvail } } = app().walletMap[feeAssetID]
-    page.feeAvail.textContent = Doc.formatFourSigFigs(feeAvail / feeUI.conventional.conversionFactor)
   }
+
+  for (const [key, value] of Object.entries(allocationResult.dex)) {
+    const assetID = Number(key)
+    if (assetID === baseID) setColor(page.dexBaseAlloc, value.status)
+    if (assetID === quoteID) setColor(page.dexQuoteAlloc, value.status)
+    if (assetID === baseFeeID) setColor(page.dexBaseFeeAlloc, value.status)
+    if (assetID === quoteFeeID) setColor(page.dexQuoteFeeAlloc, value.status)
+    dexBalances[assetID] = value.amount
+  }
+  for (const [key, value] of Object.entries(allocationResult.cex)) {
+    const assetID = Number(key)
+    if (assetID === baseID) setColor(page.cexBaseAlloc, value.status)
+    if (assetID === quoteID) setColor(page.cexQuoteAlloc, value.status)
+    cexBalances[assetID] = value.amount
+  }
+
+  const baseFeeNotTraded = baseFeeID !== baseID && baseFeeID !== quoteID
+  const quoteFeeNotTraded = quoteFeeID !== quoteID && quoteFeeID !== baseID
+
+  Doc.setVis(baseFeeNotTraded, page.baseFeeHeader, page.dexBaseFeeAlloc)
+  Doc.setVis(quoteFeeNotTraded && baseFeeID !== quoteFeeID, page.quoteFeeHeader, page.dexQuoteFeeAlloc)
+  Doc.setVis(cexName, page.cexRow)
+
+  const format = (v: number, unitInfo: UnitInfo) => v ? Doc.formatCoinValue(v, unitInfo) : '0'
+
+  page.dexBaseAlloc.textContent = format(dexBalances[baseID], baseUI)
+  page.dexQuoteAlloc.textContent = format(dexBalances[quoteID], quoteUI)
+  if (baseFeeNotTraded) page.dexBaseFeeAlloc.textContent = format(dexBalances[baseFeeID], baseFeeUI)
+  if (quoteFeeNotTraded) page.dexQuoteFeeAlloc.textContent = format(dexBalances[quoteFeeID], quoteFeeUI)
+
+  if (cexBalances && cexName) {
+    page.cexBaseAlloc.textContent = format(cexBalances[baseID], baseUI)
+    page.cexQuoteAlloc.textContent = format(cexBalances[quoteID], quoteUI)
+    setCexElements(div, cexName)
+  }
+
+  setMarketElements(div, baseID, quoteID, host)
+}
+
+type Fees = {
+  swap: number
+  redeem: number
+  refund: number
+  funding: number
+}
+
+interface PerLotBreakdown {
+  totalAmount: number
+  tradedAmount: number
+  fees: Fees
+  slippageBuffer: number
+  multiSplitBuffer: number
+}
+
+function newPerLotBreakdown () : PerLotBreakdown {
+  return {
+    totalAmount: 0,
+    tradedAmount: 0,
+    fees: { swap: 0, redeem: 0, refund: 0, funding: 0 },
+    slippageBuffer: 0,
+    multiSplitBuffer: 0
+  }
+}
+
+interface PerLot {
+  cex: Record<number, PerLotBreakdown>
+  dex: Record<number, PerLotBreakdown>
+}
+
+interface FeeReserveBreakdown {
+  buyReserves: Fees
+  sellReserves: Fees
+}
+
+type AllocationStatus = 'sufficient' | 'insufficient' | 'sufficient-with-rebalance'
+
+interface CalculationBreakdown {
+  totalRequired: number
+
+  feeReserves: FeeReserveBreakdown
+  numBuyFeeReserves: number
+  numSellFeeReserves: number
+
+  numBuyLots: number
+  buyLot: PerLotBreakdown
+  numSellLots: number
+  sellLot: PerLotBreakdown
+
+  // initialFundingFees are the fees to initially place
+  // every buy and sell lot.
+  initialBuyFundingFees: number
+  initialSellFundingFees: number
+
+  available: number
+  allocated: number
+  rebalanceAdjustment: number
+
+  // For running bots only
+  runningBotAvailable: number
+  runningBotTotal: number
+}
+
+function newCalculationBreakdown () : CalculationBreakdown {
+  return {
+    buyLot: newPerLotBreakdown(),
+    sellLot: newPerLotBreakdown(),
+    feeReserves: {
+      buyReserves: { swap: 0, redeem: 0, refund: 0, funding: 0 },
+      sellReserves: { swap: 0, redeem: 0, refund: 0, funding: 0 }
+    },
+    numBuyFeeReserves: 0,
+    numSellFeeReserves: 0,
+    numBuyLots: 0,
+    numSellLots: 0,
+    initialBuyFundingFees: 0,
+    initialSellFundingFees: 0,
+    totalRequired: 0,
+    available: 0,
+    allocated: 0,
+    rebalanceAdjustment: 0,
+    runningBotAvailable: 0,
+    runningBotTotal: 0
+  }
+}
+
+interface AllocationDetail {
+  amount: number
+  status: AllocationStatus
+  calculation: CalculationBreakdown
+}
+
+function newAllocationDetail () : AllocationDetail {
+  return {
+    amount: 0,
+    status: 'sufficient',
+    calculation: newCalculationBreakdown()
+  }
+}
+
+type AllocationResult = {
+  dex: Record<number, AllocationDetail>
+  cex: Record<number, AllocationDetail>
+}
+
+export type AvailableFunds = {
+  dex: Record<number, number>
+  cex?: Record<number, number>
+}
+
+// perLotRequirements calculates the funding requirements for a single buy and sell lot.
+function perLotRequirements (
+  baseID: number,
+  quoteID: number,
+  baseFeeID: number,
+  quoteFeeID: number,
+  lotSize: number,
+  quoteLot: number,
+  marketReport: MarketReport,
+  slippageBuffer: number,
+  multiSplitBuffer: number,
+  oneTradeBuyFundingFees: number,
+  oneTradeSellFundingFees: number,
+  baseIsAccountLocker: boolean,
+  quoteIsAccountLocker: boolean): { perSellLot: PerLot, perBuyLot: PerLot } {
+  const perSellLot: PerLot = { cex: {}, dex: {} }
+  const perBuyLot: PerLot = { cex: {}, dex: {} }
+  const assetIDs = Array.from(new Set([baseID, quoteID, baseFeeID, quoteFeeID]))
+  for (const assetID of assetIDs) {
+    perSellLot.dex[assetID] = newPerLotBreakdown()
+    perBuyLot.dex[assetID] = newPerLotBreakdown()
+    perSellLot.cex[assetID] = newPerLotBreakdown()
+    perBuyLot.cex[assetID] = newPerLotBreakdown()
+  }
+
+  perSellLot.dex[baseID].tradedAmount = lotSize
+  perSellLot.dex[baseFeeID].fees.swap = marketReport.baseFees.max.swap
+  perSellLot.cex[quoteID].tradedAmount = quoteLot
+  perSellLot.cex[quoteID].slippageBuffer = slippageBuffer
+  perSellLot.dex[baseFeeID].fees.funding = oneTradeSellFundingFees
+  if (baseIsAccountLocker) perSellLot.dex[baseFeeID].fees.refund = marketReport.baseFees.max.refund
+  if (quoteIsAccountLocker) perSellLot.dex[quoteFeeID].fees.redeem = marketReport.quoteFees.max.redeem
+
+  perBuyLot.dex[quoteID].tradedAmount = quoteLot
+  perBuyLot.dex[quoteID].multiSplitBuffer = multiSplitBuffer
+  perBuyLot.dex[quoteID].slippageBuffer = slippageBuffer
+  perBuyLot.cex[baseID].tradedAmount = lotSize
+  perBuyLot.dex[quoteFeeID].fees.swap = marketReport.quoteFees.max.swap
+  perBuyLot.dex[quoteFeeID].fees.funding = oneTradeBuyFundingFees
+  if (baseIsAccountLocker) perBuyLot.dex[baseFeeID].fees.redeem = marketReport.baseFees.max.redeem
+  if (quoteIsAccountLocker) perBuyLot.dex[quoteFeeID].fees.refund = marketReport.quoteFees.max.refund
+
+  const calculateTotalAmount = (perLot: PerLotBreakdown) : number => {
+    let total = perLot.tradedAmount
+    const slippagePercentage = perLot.slippageBuffer / 100
+    const multiSplitPercentage = perLot.multiSplitBuffer / 100
+    total *= (1 + slippagePercentage + multiSplitPercentage)
+    total = Math.floor(total)
+    total += perLot.fees.swap + perLot.fees.redeem + perLot.fees.refund + perLot.fees.funding
+    return total
+  }
+
+  for (const assetID of assetIDs) {
+    perSellLot.dex[assetID].totalAmount = calculateTotalAmount(perSellLot.dex[assetID])
+    perBuyLot.dex[assetID].totalAmount = calculateTotalAmount(perBuyLot.dex[assetID])
+    perSellLot.cex[assetID].totalAmount = calculateTotalAmount(perSellLot.cex[assetID])
+    perBuyLot.cex[assetID].totalAmount = calculateTotalAmount(perBuyLot.cex[assetID])
+  }
+
+  return { perSellLot, perBuyLot }
+}
+
+// requiredFunds calculates the total funds required for a bot based on the quick
+// allocation settings.
+function requiredFunds (
+  numBuyLots: number,
+  numSellLots: number,
+  lotSize: number,
+  quoteLot: number,
+  slippageBuffer: number,
+  multiSplitBuffer: number,
+  buyFeeBuffer: number,
+  sellFeeBuffer: number,
+  marketReport: MarketReport,
+  baseIsAccountLocker: boolean,
+  quoteIsAccountLocker: boolean,
+  baseID: number,
+  quoteID: number,
+  baseFeeID: number,
+  quoteFeeID: number,
+  buyFundingFees: number,
+  sellFundingFees: number,
+  oneTradeBuyFundingFees: number,
+  oneTradeSellFundingFees: number) : AllocationResult {
+  const toAllocate: AllocationResult = { dex: {}, cex: {} }
+  const assetIDs = Array.from(new Set([baseID, quoteID, baseFeeID, quoteFeeID]))
+
+  for (const assetID of assetIDs) {
+    toAllocate.dex[assetID] = newAllocationDetail()
+    toAllocate.cex[assetID] = newAllocationDetail()
+  }
+
+  const { perBuyLot, perSellLot } = perLotRequirements(baseID, quoteID, baseFeeID, quoteFeeID,
+    lotSize, quoteLot, marketReport, slippageBuffer, multiSplitBuffer, oneTradeBuyFundingFees,
+    oneTradeSellFundingFees, baseIsAccountLocker, quoteIsAccountLocker)
+
+  for (const assetID of assetIDs) {
+    toAllocate.dex[assetID].calculation.buyLot = perBuyLot.dex[assetID]
+    toAllocate.dex[assetID].calculation.sellLot = perSellLot.dex[assetID]
+    toAllocate.cex[assetID].calculation.buyLot = perBuyLot.cex[assetID]
+    toAllocate.cex[assetID].calculation.sellLot = perSellLot.cex[assetID]
+    toAllocate.dex[assetID].calculation.numBuyLots = numBuyLots
+    toAllocate.dex[assetID].calculation.numSellLots = numSellLots
+    toAllocate.cex[assetID].calculation.numBuyLots = numBuyLots
+    toAllocate.cex[assetID].calculation.numSellLots = numSellLots
+
+    if (assetID === baseFeeID) {
+      toAllocate.dex[assetID].calculation.feeReserves.sellReserves.swap = marketReport.baseFees.estimated.swap
+      if (baseIsAccountLocker) {
+        toAllocate.dex[assetID].calculation.feeReserves.buyReserves.redeem = marketReport.baseFees.estimated.redeem
+        toAllocate.dex[assetID].calculation.feeReserves.sellReserves.refund = marketReport.baseFees.estimated.refund
+      }
+      toAllocate.dex[assetID].calculation.initialSellFundingFees = sellFundingFees
+    }
+
+    if (assetID === quoteFeeID) {
+      toAllocate.dex[assetID].calculation.feeReserves.buyReserves.swap = marketReport.quoteFees.estimated.swap
+      if (quoteIsAccountLocker) {
+        toAllocate.dex[assetID].calculation.feeReserves.sellReserves.redeem = marketReport.quoteFees.estimated.redeem
+        toAllocate.dex[assetID].calculation.feeReserves.buyReserves.refund = marketReport.quoteFees.estimated.refund
+      }
+      toAllocate.dex[assetID].calculation.initialBuyFundingFees = buyFundingFees
+      toAllocate.dex[assetID].calculation.initialSellFundingFees = sellFundingFees
+    }
+    toAllocate.dex[assetID].calculation.numBuyFeeReserves = buyFeeBuffer
+    toAllocate.dex[assetID].calculation.numSellFeeReserves = sellFeeBuffer
+  }
+
+  const totalFees = (fees: Fees) : number => {
+    return fees.swap + fees.redeem + fees.refund + fees.funding
+  }
+
+  const calculateTotalRequired = (breakdown: CalculationBreakdown) : number => {
+    let total = 0
+    total += breakdown.buyLot.totalAmount * breakdown.numBuyLots
+    total += breakdown.sellLot.totalAmount * breakdown.numSellLots
+    total += totalFees(breakdown.feeReserves.buyReserves) * breakdown.numBuyFeeReserves
+    total += totalFees(breakdown.feeReserves.sellReserves) * breakdown.numSellFeeReserves
+    total += breakdown.initialBuyFundingFees
+    total += breakdown.initialSellFundingFees
+    return total
+  }
+
+  for (const assetID of assetIDs) {
+    toAllocate.dex[assetID].calculation.totalRequired = calculateTotalRequired(toAllocate.dex[assetID].calculation)
+    toAllocate.cex[assetID].calculation.totalRequired = calculateTotalRequired(toAllocate.cex[assetID].calculation)
+  }
+
+  return toAllocate
+}
+
+// toAllocation calculates the quick allocations for a bot that is not running.
+function toAllocate (
+  numBuyLots: number,
+  numSellLots: number,
+  lotSize: number,
+  quoteLot: number,
+  slippageBuffer: number,
+  multiSplitBuffer: number,
+  buyFeeBuffer: number,
+  sellFeeBuffer: number,
+  marketReport: MarketReport,
+  availableFunds: AvailableFunds,
+  canRebalance: boolean,
+  baseID: number,
+  quoteID: number,
+  baseFeeID: number,
+  quoteFeeID: number,
+  baseIsAccountLocker: boolean,
+  quoteIsAccountLocker: boolean,
+  buyFundingFees: number,
+  sellFundingFees: number,
+  oneTradeBuyFundingFees: number,
+  oneTradeSellFundingFees: number
+) : AllocationResult {
+  const result = requiredFunds(numBuyLots, numSellLots, lotSize, quoteLot, slippageBuffer, multiSplitBuffer,
+    buyFeeBuffer, sellFeeBuffer, marketReport, baseIsAccountLocker, quoteIsAccountLocker, baseID, quoteID,
+    baseFeeID, quoteFeeID, buyFundingFees, sellFundingFees, oneTradeBuyFundingFees, oneTradeSellFundingFees)
+
+  const assetIDs = Array.from(new Set([baseID, quoteID, baseFeeID, quoteFeeID]))
+
+  // For each asset, check if allocation is sufficient and set status
+  for (const assetID of assetIDs) {
+    result.dex[assetID].calculation.available = availableFunds.dex[assetID] ?? 0
+    result.cex[assetID].calculation.available = availableFunds.cex?.[assetID] ?? 0
+
+    // dexSurplus / cexSurplus may be negative
+    const dexSurplus = result.dex[assetID].calculation.available - result.dex[assetID].calculation.totalRequired
+    const cexSurplus = result.cex[assetID].calculation.available - result.cex[assetID].calculation.totalRequired
+
+    if (dexSurplus >= 0) {
+      result.dex[assetID].amount = result.dex[assetID].calculation.totalRequired
+    } else {
+      result.dex[assetID].status = 'insufficient'
+      result.dex[assetID].amount = result.dex[assetID].calculation.available
+    }
+
+    if (cexSurplus >= 0) {
+      result.cex[assetID].amount = result.cex[assetID].calculation.totalRequired
+    } else {
+      result.cex[assetID].status = 'insufficient'
+      result.cex[assetID].amount = result.cex[assetID].calculation.available
+    }
+
+    // If dex is insufficient, increase cex allocation
+    if (canRebalance && dexSurplus < 0 && cexSurplus > 0) {
+      const dexDeficit = -dexSurplus
+      const additionalCEX = Math.min(dexDeficit, cexSurplus)
+      result.cex[assetID].calculation.rebalanceAdjustment = additionalCEX
+      result.cex[assetID].amount += additionalCEX
+      if (cexSurplus >= dexDeficit) result.dex[assetID].status = 'sufficient-with-rebalance'
+    }
+
+    // If cex is insufficient, increase dex allocation
+    if (canRebalance && cexSurplus < 0 && dexSurplus > 0) {
+      const cexDeficit = -cexSurplus
+      const additionalDEX = Math.min(cexDeficit, dexSurplus)
+      result.dex[assetID].calculation.rebalanceAdjustment = additionalDEX
+      result.dex[assetID].amount += additionalDEX
+      if (dexSurplus >= cexDeficit) result.cex[assetID].status = 'sufficient-with-rebalance'
+    }
+  }
+
+  return result
+}
+
+// toAllocateRunning calculates the quick allocations for a running bot.
+function toAllocateRunning (
+  numBuyLots: number,
+  numSellLots: number,
+  lotSize: number,
+  quoteLot: number,
+  slippageBuffer: number,
+  multiSplitBuffer: number,
+  buyFeeBuffer: number,
+  sellFeeBuffer: number,
+  marketReport: MarketReport,
+  availableFunds: AvailableFunds,
+  canRebalance: boolean,
+  baseID: number,
+  quoteID: number,
+  baseFeeID: number,
+  quoteFeeID: number,
+  baseIsAccountLocker: boolean,
+  quoteIsAccountLocker: boolean,
+  runStats: RunStats,
+  buyFundingFees: number,
+  sellFundingFees: number,
+  oneTradeBuyFundingFees: number,
+  oneTradeSellFundingFees: number) : AllocationResult {
+  const result = requiredFunds(numBuyLots, numSellLots, lotSize, quoteLot, slippageBuffer, multiSplitBuffer, buyFeeBuffer, sellFeeBuffer,
+    marketReport, baseIsAccountLocker, quoteIsAccountLocker, baseID, quoteID, baseFeeID, quoteFeeID,
+    buyFundingFees, sellFundingFees, oneTradeBuyFundingFees, oneTradeSellFundingFees)
+
+  const assetIDs = Array.from(new Set([baseID, quoteID, baseFeeID, quoteFeeID]))
+
+  const totalBotBalance = (source: 'cex' | 'dex', assetID: number) => {
+    let bals
+    if (source === 'dex') {
+      bals = runStats.dexBalances[assetID] ?? { available: 0, locked: 0, pending: 0, reserved: 0 }
+    } else {
+      bals = runStats.cexBalances[assetID] ?? { available: 0, locked: 0, pending: 0, reserved: 0 }
+    }
+    return bals.available + bals.locked + bals.pending + bals.reserved
+  }
+
+  for (const assetID of assetIDs) {
+    result.dex[assetID].calculation.runningBotTotal = totalBotBalance('dex', assetID)
+    result.cex[assetID].calculation.runningBotTotal = totalBotBalance('cex', assetID)
+    result.dex[assetID].calculation.runningBotAvailable = runStats.dexBalances[assetID]?.available ?? 0
+    result.cex[assetID].calculation.runningBotAvailable = runStats.cexBalances[assetID]?.available ?? 0
+    result.dex[assetID].calculation.available = availableFunds.dex[assetID] ?? 0
+    result.cex[assetID].calculation.available = availableFunds.cex?.[assetID] ?? 0
+
+    const dexTotalAvailable = result.dex[assetID].calculation.runningBotTotal + result.dex[assetID].calculation.available
+    const dexSurplus = dexTotalAvailable - result.dex[assetID].calculation.totalRequired
+
+    const cexTotalAvailable = result.cex[assetID].calculation.runningBotTotal + result.cex[assetID].calculation.available
+    const cexSurplus = cexTotalAvailable - result.cex[assetID].calculation.totalRequired
+
+    if (dexSurplus >= 0) {
+      result.dex[assetID].amount = result.dex[assetID].calculation.totalRequired - result.dex[assetID].calculation.runningBotTotal
+      if (result.dex[assetID].amount < 0) result.dex[assetID].amount = -Math.min(-result.dex[assetID].amount, result.dex[assetID].calculation.runningBotAvailable)
+    } else {
+      result.dex[assetID].status = 'insufficient'
+      result.dex[assetID].amount = result.dex[assetID].calculation.available
+    }
+
+    if (cexSurplus >= 0) {
+      result.cex[assetID].amount = result.cex[assetID].calculation.totalRequired - result.cex[assetID].calculation.runningBotTotal
+      if (result.cex[assetID].amount < 0) result.cex[assetID].amount = -Math.min(-result.cex[assetID].amount, result.cex[assetID].calculation.runningBotAvailable)
+    } else {
+      result.cex[assetID].status = 'insufficient'
+      result.cex[assetID].amount = result.cex[assetID].calculation.available
+    }
+
+    // If dex is insufficient, increase cex allocation
+    if (canRebalance && dexSurplus < 0 && cexSurplus > 0) {
+      const dexDeficit = -dexSurplus
+      const additionalCEX = Math.min(dexDeficit, cexSurplus)
+      result.cex[assetID].calculation.rebalanceAdjustment = additionalCEX
+      result.cex[assetID].amount += additionalCEX
+      if (cexSurplus >= dexDeficit) result.dex[assetID].status = 'sufficient-with-rebalance'
+    }
+
+    // If cex is insufficient, increase dex allocation
+    if (canRebalance && cexSurplus < 0 && dexSurplus > 0) {
+      const cexDeficit = -cexSurplus
+      const additionalDEX = Math.min(cexDeficit, dexSurplus)
+      result.dex[assetID].calculation.rebalanceAdjustment = additionalDEX
+      result.dex[assetID].amount += additionalDEX
+      if (dexSurplus >= cexDeficit) result.cex[assetID].status = 'sufficient-with-rebalance'
+    }
+  }
+
+  return result
+}
+
+// combineBotAllocations combines two allocations. If the result of an allocation
+// is negative, it is set to 0.
+function combineBotAllocations (alloc1: BotBalanceAllocation, alloc2: BotBalanceAllocation) : BotBalanceAllocation {
+  const result: BotBalanceAllocation = { dex: {}, cex: {} }
+
+  for (const assetIDStr of Object.keys(alloc1.dex)) {
+    const assetID = Number(assetIDStr)
+    result.dex[assetID] = (alloc1.dex?.[assetID] ?? 0) + (alloc2.dex?.[assetID] ?? 0)
+    if (result.dex[assetID] < 0) {
+      result.dex[assetID] = 0
+    }
+  }
+
+  for (const assetIDStr of Object.keys(alloc1.cex)) {
+    const assetID = Number(assetIDStr)
+    result.cex[assetID] = (alloc1.cex?.[assetID] ?? 0) + (alloc2.cex?.[assetID] ?? 0)
+    if (result.cex[assetID] < 0) {
+      result.cex[assetID] = 0
+    }
+  }
+
+  return result
 }

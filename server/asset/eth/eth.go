@@ -363,7 +363,7 @@ func parseEndpoints(cfg *asset.BackendConfig) ([]endpoint, error) {
 		if len(parts) == 2 {
 			priority64, err := strconv.ParseUint(strings.TrimSpace(parts[1]), 10, 16)
 			if err != nil {
-				return nil, fmt.Errorf(ethCfgInstructions, line)
+				return nil, fmt.Errorf(ethCfgInstructions, assetName, line)
 			}
 			priority = uint16(priority64)
 		}

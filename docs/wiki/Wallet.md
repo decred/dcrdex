@@ -186,7 +186,7 @@ Send and Receive functionality.
 - **Available:** are unlocked funds that can be immediately used.
 - **Locked:** Total funds temporarily locked to cover the costs of your bond maintenance,
   live orders, matches and other activities.
-  _ **Bonded:** Funds locked in active bonds.
+  _**Bonded:** Funds locked in active bonds.
   _ **Bond Reserves:** Funds reserved to cover the expenses associated with bond maintenance.
 - **Status:** Indicates the wallet status.
 - **Wallet Type:** Indicates if the configured wallet is [Native](#native-wallet) or [External](#external-wallet).

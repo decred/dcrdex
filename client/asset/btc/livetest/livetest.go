@@ -15,10 +15,10 @@ package livetest
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"math/rand"
 	"os"
 	"os/exec"
 	"os/user"

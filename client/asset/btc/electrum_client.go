@@ -498,10 +498,7 @@ func (ew *electrumWallet) MedianTime() (time.Time, error) {
 }
 
 func (ew *electrumWallet) calcMedianTime(ctx context.Context, height int64) (time.Time, error) {
-	startHeight := height - medianTimeBlocks + 1
-	if startHeight < 0 {
-		startHeight = 0
-	}
+	startHeight := max(height-medianTimeBlocks+1, 0)
 
 	// TODO: check a block hash => median time cache
 

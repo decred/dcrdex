@@ -8,12 +8,13 @@ package btc
 import (
 	"bytes"
 	"context"
+	crand "crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"net"
 	"os"
 	"path/filepath"
@@ -265,7 +266,7 @@ func TestConfig(t *testing.T) {
 
 func randomBytes(len int) []byte {
 	bytes := make([]byte, len)
-	rand.Read(bytes)
+	crand.Read(bytes)
 	return bytes
 }
 

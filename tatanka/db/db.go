@@ -68,7 +68,8 @@ func New(dir string, log dex.Logger) (*DB, error) {
 		return nil, fmt.Errorf("database reporting version from the future")
 	}
 	if ver < DBVersion {
-		// Do lexi upgrade stuff.
+		log.Warn("database version is older than current version. Upgrading...")
+		// TODO: implement lexi upgrade logic
 	}
 
 	// Scores. Keyed on (scorer peer ID, scored peer ID).

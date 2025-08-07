@@ -118,7 +118,6 @@ type testNode struct {
 	signDataErr     error
 	privKey         *ecdsa.PrivateKey
 	swapVers        map[uint32]struct{} // For SwapConfirmations -> swap. TODO for other contractor methods
-	swapMap         map[[32]byte]*dexeth.SwapState
 	refundable      bool
 	baseFee         *big.Int
 	tip             *big.Int
@@ -4393,9 +4392,6 @@ func testRefundReserves(t *testing.T, assetID uint32) {
 	node.refundable = true
 	node.swapVers = map[uint32]struct{}{0: {}}
 
-	var secretHash [32]byte
-	node.swapMap = map[[32]byte]*dexeth.SwapState{secretHash: {}}
-
 	feeWallet := eth
 	gasesV0 := eth.versionedGases[0]
 	gasesV1 := eth.versionedGases[1]
@@ -5282,7 +5278,7 @@ func (m *mockBridge) approveBridgeContract(txOpts *bind.TransactOpts, amount *bi
 	panic("not implemented")
 }
 func (m *mockBridge) requiresBridgeContractApproval() bool { panic("not implemented") }
-func (m *mockBridge) initiateBridge(txOpts *bind.TransactOpts, destAssetID uint32, amount *big.Int) (*types.Transaction, bool, error) {
+func (m *mockBridge) initiateBridge(txOpts *bind.TransactOpts, destAssetID uint32, amount *big.Int) (*types.Transaction, error) {
 	panic("not implemented")
 }
 func (m *mockBridge) completeBridge(txOpts *bind.TransactOpts, completionData []byte) (*types.Transaction, error) {
@@ -5291,6 +5287,10 @@ func (m *mockBridge) completeBridge(txOpts *bind.TransactOpts, completionData []
 }
 func (m *mockBridge) initiateBridgeGas() uint64 { return 0 }
 func (m *mockBridge) completeBridgeGas() uint64 { return 0 }
+func (m *mockBridge) requiresCompletion() bool  { return true }
+func (m *mockBridge) verifyBridgeCompletion(ctx context.Context, data []byte) (bool, error) {
+	return false, nil
+}
 
 func TestBridgeManager(t *testing.T) {
 	setupWithPendingBridges := func(t *testing.T, pendingBridges []*extendedWalletTx) (*bridgeManager, *mockBridge, chan asset.WalletNotification, *tTxDB, dex.Logger) {
@@ -5400,7 +5400,7 @@ func TestBridgeManager(t *testing.T) {
 		}
 
 		// Remove the bridge
-		bm.markBridgeComplete(burnTxID, "mintTxID", 1)
+		bm.markBridgeComplete(burnTxID, "mintTxID")
 
 		// Wait and ensure no more calls occur
 		time.Sleep(300 * time.Millisecond) // Longer than 2 monitor intervals
@@ -5560,9 +5560,6 @@ func TestCompleteBridge(t *testing.T) {
 			}
 
 			if note != nil {
-				if note.CompletionTime != timestamp {
-					t.Fatalf("expected CompletionTime = %d, got %d", timestamp, note.CompletionTime)
-				}
 				if note.InitiationTxID != initiationTx.ID {
 					t.Fatalf("expected InitiationTxID = %s, got %s", initiationTx.ID, note.InitiationTxID)
 				}

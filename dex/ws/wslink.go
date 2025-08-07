@@ -263,6 +263,9 @@ out:
 				websocket.CloseNormalClosure, websocket.CloseNoStatusReceived) {
 				break out // clean Close from client
 			}
+
+			// TODO: this error check is not working. The error is not an OpError,
+			// but the text is still the same.
 			var opErr *net.OpError
 			if errors.As(err, &opErr) && opErr.Op == "read" &&
 				(strings.Contains(opErr.Err.Error(), "use of closed network connection") || // we hung up

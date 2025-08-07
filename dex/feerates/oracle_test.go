@@ -62,7 +62,6 @@ func TestOracleRun(t *testing.T) {
 				}
 			}
 			return
-		default: // Continue waiting for updates.
 		}
 	}
 }

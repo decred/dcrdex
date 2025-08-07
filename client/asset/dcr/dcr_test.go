@@ -5,13 +5,13 @@ package dcr
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
-	"math/rand"
 	"os"
 	"reflect"
 	"sort"
@@ -151,6 +151,7 @@ func tNewWalletMonitorBlocks(monitorBlocks bool) (*ExchangeWallet, *tRPCClient, 
 		shutdown()
 		panic(err.Error())
 	}
+	wallet.connected.Store(true)
 	rpcw := &rpcWallet{
 		rpcClient: client,
 		log:       log,

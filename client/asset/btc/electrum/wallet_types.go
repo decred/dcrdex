@@ -70,7 +70,7 @@ type Balance struct {
 	Immature    float64
 }
 
-// TransactionResult is is an element of the array treturned by the
+// TransactionResult is an element of the array treturned by the
 // onchainhistory RPC.
 type TransactionResult struct {
 	BcBalance          string  `json:"bc_balance"`

@@ -353,7 +353,7 @@ func (sc *ServerConn) deleteSubscriptions() {
 // Request performs a request to the remote server for the given method using
 // the provided arguments, which may either be positional (e.g.
 // []interface{arg1, arg2}), named (any struct), or nil if there are no
-// arguments. args may not be any other basic type. The the response does not
+// arguments. args may not be any other basic type. The response does not
 // include an error, the result will be unmarshalled into result, unless the
 // provided result is nil in which case the response payload will be ignored.
 func (sc *ServerConn) Request(ctx context.Context, method string, args any, result any) error {

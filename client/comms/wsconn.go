@@ -275,7 +275,6 @@ func (conn *wsConn) connect(ctx context.Context) error {
 	}
 
 	echoPing := conn.cfg.EchoPingData
-
 	ws.SetPingHandler(func(appData string) error {
 		now := time.Now()
 
@@ -402,7 +401,13 @@ func (conn *wsConn) readRaw(ctx context.Context) {
 			conn.handleReadError(err)
 			return
 		}
+
 		conn.cfg.RawHandler(msgBytes)
+
+		err = ws.SetReadDeadline(time.Now().Add(conn.cfg.PingWait))
+		if err != nil {
+			conn.log.Errorf("set read deadline failed: %v", err)
+		}
 	}
 }
 
@@ -454,6 +459,11 @@ func (conn *wsConn) read(ctx context.Context) {
 			continue
 		}
 		conn.readCh <- msg
+
+		err = ws.SetReadDeadline(time.Now().Add(conn.cfg.PingWait))
+		if err != nil {
+			conn.log.Errorf("set read deadline failed: %v", err)
+		}
 	}
 }
 

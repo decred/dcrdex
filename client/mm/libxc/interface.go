@@ -18,9 +18,12 @@ type ExchangeBalance struct {
 
 // Trade represents a trade made on a CEX.
 type Trade struct {
-	ID          string
-	Sell        bool
+	ID   string
+	Sell bool
+	// Qty will be in the base asset, except for market buys, it will
+	// be the quote asset.
 	Qty         uint64
+	Market      bool
 	Rate        uint64
 	BaseID      uint32
 	QuoteID     uint32
@@ -81,6 +84,13 @@ var (
 	ErrUnsyncedOrderbook = errors.New("orderbook not synced")
 )
 
+type OrderType uint8
+
+const (
+	OrderTypeLimit OrderType = iota
+	OrderTypeMarket
+)
+
 // CEX implements a set of functions that can be used to interact with a
 // centralized exchange's spot trading API. All rates and quantities
 // when interacting with the CEX interface will adhere to the standard
@@ -93,8 +103,6 @@ type CEX interface {
 	Balances(ctx context.Context) (map[uint32]*ExchangeBalance, error)
 	// CancelTrade cancels a trade on the CEX.
 	CancelTrade(ctx context.Context, baseID, quoteID uint32, tradeID string) error
-	// MatchedMarkets returns the list of markets at the CEX.
-	MatchedMarkets(ctx context.Context) ([]*MarketMatch, error)
 	// Markets returns the list of markets at the CEX.
 	Markets(ctx context.Context) (map[string]*Market, error)
 	// SubscribeMarket subscribes to order book updates on a market. This must
@@ -106,9 +114,16 @@ type CEX interface {
 	// Trade, then updates to the trade will be sent on the updated channel
 	// returned from this function.
 	SubscribeTradeUpdates() (updates <-chan *Trade, unsubscribe func(), subscriptionID int)
-	// Trade executes a trade on the CEX. updaterID takes a subscriptionID
-	// returned from SubscribeTradeUpdates.
-	Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, subscriptionID int) (*Trade, error)
+	// Trade executes a trade on the CEX.
+	//   - subscriptionID takes an ID returned from SubscribeTradeUpdates.
+	//   - Rate is ignored for market orders.
+	//   - Qty is in units of base asset, except for market buys where it is in
+	//     units of quote asset.
+	Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, orderType OrderType, subscriptionID int) (*Trade, error)
+	// ValidateTrade validates a trade before it is executed. This is used to
+	// ensure that the trade will be able to be executed on the CEX before trades
+	// are placed on the DEX orderbook expecting to be able to be arbitraged.
+	ValidateTrade(baseID, quoteID uint32, sell bool, rate, qty uint64, orderType OrderType) error
 	// UnsubscribeMarket unsubscribes from order book updates on a market.
 	UnsubscribeMarket(baseID, quoteID uint32) error
 	// VWAP returns the volume weighted average price for a certain quantity
@@ -116,6 +131,10 @@ type CEX interface {
 	// the market on which to get the average price. SubscribeMarket must be
 	// called, and the market must be synced before results can be expected.
 	VWAP(baseID, quoteID uint32, sell bool, qty uint64) (vwap, extrema uint64, filled bool, err error)
+	// InvVWAP returns the inverse volume weighted average price for a certain
+	// quantity of the quote asset on a market. SubscribeMarket must be called,
+	// and the market must be synced before results can be expected.
+	InvVWAP(baseID, quoteID uint32, sell bool, qty uint64) (vwap, extrema uint64, filled bool, err error)
 	// MidGap returns the mid-gap price for an order book.
 	MidGap(baseID, quoteID uint32) uint64
 	// GetDepositAddress returns a deposit address for an asset.
@@ -123,10 +142,11 @@ type CEX interface {
 	// ConfirmDeposit is an async function that calls onConfirm when the status
 	// of a deposit has been confirmed.
 	ConfirmDeposit(ctx context.Context, deposit *DepositData) (bool, uint64)
-	// Withdraw withdraws funds from the CEX to a certain address. onComplete
-	// is called with the actual amount withdrawn (amt - fees) and the
-	// transaction ID of the withdrawal.
-	Withdraw(ctx context.Context, assetID uint32, amt uint64, address string) (string, error)
+	// Withdraw withdraws funds from the CEX to a certain address. The txID
+	// and the amount the cex balance was reduced by are returned. This may
+	// be equal to or higher than the amount requested due to fees, depending
+	// on the CEX.
+	Withdraw(ctx context.Context, assetID uint32, amt uint64, address string) (string, uint64, error)
 	// ConfirmWithdrawal checks whether a withdrawal has been completed. If the
 	// withdrawal has not yet been sent, ErrWithdrawalPending is returned.
 	ConfirmWithdrawal(ctx context.Context, withdrawalID string, assetID uint32) (uint64, string, error)
@@ -139,6 +159,7 @@ type CEX interface {
 const (
 	Binance   = "Binance"
 	BinanceUS = "BinanceUS"
+	Coinbase  = "Coinbase"
 )
 
 // IsValidCEXName returns whether or not a cex name is supported.
@@ -161,6 +182,8 @@ func NewCEX(cexName string, cfg *CEXConfig) (CEX, error) {
 		return newBinance(cfg, false), nil
 	case BinanceUS:
 		return newBinance(cfg, true), nil
+	case Coinbase:
+		return newCoinbase(cfg)
 	default:
 		return nil, fmt.Errorf("unrecognized CEX: %v", cexName)
 	}

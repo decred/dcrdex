@@ -502,6 +502,8 @@ const (
 	TopicDEXConnected    Topic = "DEXConnected"
 	TopicDEXDisconnected Topic = "DEXDisconnected"
 	TopicDexConnectivity Topic = "DEXConnectivity"
+	TopicDEXDisabled     Topic = "DEXDisabled"
+	TopicDEXEnabled      Topic = "DEXEnabled"
 )
 
 func newConnEventNote(topic Topic, subject, host string, status comms.ConnectionStatus, details string, severity db.Severity) *ConnEventNote {

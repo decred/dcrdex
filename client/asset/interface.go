@@ -336,7 +336,7 @@ type ConfigOption struct {
 	Key          string `json:"key"`
 	DisplayName  string `json:"displayname"`
 	Description  string `json:"description"`
-	DefaultValue any    `json:"default"`
+	DefaultValue string `json:"default"`
 	// If MaxValue/MinValue are set to the string "now" for a date config, the
 	// UI will display the current date.
 	MaxValue          any `json:"max"`
@@ -723,7 +723,7 @@ type Bridger interface {
 	// MarkBridgeComplete should be invoked after the completion transaction
 	// is confirmed on the destination chain to update the bridge status.
 	// Without this, the bridge will still be in the pending state.
-	MarkBridgeComplete(initiationTxID string, completionTxID string, completionTime uint64)
+	MarkBridgeComplete(initiationTxID string, completionTxID string)
 
 	// PendingBridges lists all uncompleted bridge transactions on the blockchain.
 	// For token wallets, this includes pending bridges for other tokens on the same chain.
@@ -1206,11 +1206,11 @@ const NoCompletionRequiredBridgeTxID = "no-completion-required"
 // completion transaction, or a completion transaction if it is part of an
 // initiation transaction.
 type BridgeCounterpartTx struct {
-	ID      string `json:"id"`
 	AssetID uint32 `json:"assetID"`
-	// CompletionTime is only populated for initiation transactions. It is the
-	// time when the completion transaction was mined.
-	CompletionTime uint64 `json:"completionTime"`
+	// ID is the transaction ID of the transaction of the other chain.
+	// If the transaction is an initiation transaction, and ID is
+	// populated, it means that the bridge is complete.
+	ID string `json:"id"`
 }
 
 // WalletTransaction represents a transaction that was made by a wallet.
@@ -1590,7 +1590,6 @@ type BridgeCompletedNote struct {
 	SourceAssetID  uint32 `json:"sourceAssetID"`
 	InitiationTxID string `json:"initiationTxID"`
 	CompletionTxID string `json:"completionTxIDs"`
-	CompletionTime uint64 `json:"completionTime"`
 }
 
 // BalanceChangeNote can be sent when the wallet detects a balance change
@@ -1743,7 +1742,7 @@ func (e *WalletEmitter) BridgeReadyToComplete(destAssetID uint32, bridgeTxID str
 
 // BridgeCompleted is emitted by the wallet which completed a bridge to
 // notify that the bridge has been completed.
-func (e *WalletEmitter) BridgeCompleted(sourceAssetID uint32, initiationTxID string, completionTxID string, completionTime uint64) {
+func (e *WalletEmitter) BridgeCompleted(sourceAssetID uint32, initiationTxID string, completionTxID string) {
 	e.emit(&BridgeCompletedNote{
 		baseWalletNotification: baseWalletNotification{
 			AssetID: e.assetID,
@@ -1752,7 +1751,6 @@ func (e *WalletEmitter) BridgeCompleted(sourceAssetID uint32, initiationTxID str
 		SourceAssetID:  sourceAssetID,
 		InitiationTxID: initiationTxID,
 		CompletionTxID: completionTxID,
-		CompletionTime: completionTime,
 	})
 }
 
@@ -1764,4 +1762,11 @@ func (e *WalletEmitter) ActionResolved(uniqueID string) {
 		},
 		UniqueID: uniqueID,
 	})
+}
+
+// InitChecker is an account wallet that checks the status of a swap init.
+type InitChecker interface {
+	// AlreadyInitialized returns if the swap was already initialized and
+	// some data needed to interact with the contract later.
+	AlreadyInitialized(assetVersion uint32, contract *Contract) (initialized bool, zeroHash, contractData []byte, err error)
 }

@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"sort"
 
 	"decred.org/dcrdex/dex"

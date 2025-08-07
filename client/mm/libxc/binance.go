@@ -64,6 +64,7 @@ type binanceOrderBook struct {
 	cm             *dex.ConnectionMaster
 
 	getSnapshot func() (*bntypes.OrderbookSnapshot, error)
+	getAvgPrice func() (float64, error)
 
 	book                  *orderbook
 	updateQueue           chan *bntypes.BookUpdate
@@ -71,6 +72,7 @@ type binanceOrderBook struct {
 	baseConversionFactor  uint64
 	quoteConversionFactor uint64
 	log                   dex.Logger
+	avgPrice              atomic.Uint64
 
 	connectedChan chan bool
 }
@@ -79,9 +81,12 @@ func newBinanceOrderBook(
 	baseConversionFactor, quoteConversionFactor uint64,
 	mktID string,
 	getSnapshot func() (*bntypes.OrderbookSnapshot, error),
+	getAvgPrice func() (float64, error),
+	initialAvgPrice float64,
 	log dex.Logger,
 ) *binanceOrderBook {
-	return &binanceOrderBook{
+	msgAvgPrice := calc.MessageRateAlt(initialAvgPrice, baseConversionFactor, quoteConversionFactor)
+	book := &binanceOrderBook{
 		book:                  newOrderBook(),
 		mktID:                 mktID,
 		updateQueue:           make(chan *bntypes.BookUpdate, 1024),
@@ -90,8 +95,11 @@ func newBinanceOrderBook(
 		quoteConversionFactor: quoteConversionFactor,
 		log:                   log,
 		getSnapshot:           getSnapshot,
+		getAvgPrice:           getAvgPrice,
 		connectedChan:         make(chan bool),
 	}
+	book.avgPrice.Store(msgAvgPrice)
+	return book
 }
 
 // convertBinanceBook converts bids and asks in the binance format,
@@ -317,6 +325,34 @@ func (b *binanceOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error 
 		}
 	}()
 
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		const updateInterval = time.Minute
+		timer := time.NewTimer(updateInterval)
+		defer timer.Stop()
+
+		for {
+			select {
+			case <-timer.C:
+				avgPrice, err := b.getAvgPrice()
+				if err != nil {
+					b.log.Errorf("Error getting avg price for %s: %v", b.mktID, err)
+					timer.Reset(updateInterval)
+					continue
+				}
+
+				b.log.Debugf("Updating %s avg price to %v", b.mktID, avgPrice)
+				msgAvgPrice := calc.MessageRateAlt(avgPrice, b.baseConversionFactor, b.quoteConversionFactor)
+				b.avgPrice.Store(msgAvgPrice)
+				timer.Reset(updateInterval)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
 	return &wg, nil
 }
 
@@ -334,54 +370,117 @@ func (b *binanceOrderBook) vwap(bids bool, qty uint64) (vwap, extrema uint64, fi
 	return
 }
 
+func (b *binanceOrderBook) invVWAP(bids bool, qty uint64) (vwap, extrema uint64, filled bool, err error) {
+	b.mtx.RLock()
+	defer b.mtx.RUnlock()
+
+	if !b.synced.Load() {
+		return 0, 0, filled, ErrUnsyncedOrderbook
+	}
+
+	vwap, extrema, filled = b.book.invVWAP(bids, qty)
+	return
+}
+
 func (b *binanceOrderBook) midGap() uint64 {
 	return b.book.midGap()
 }
 
-// TODO: check all symbols
-var dexToBinanceSymbol = map[string]string{
-	"polygon": "MATIC",
+// dexToBinanceCoinSymbol maps DEX asset symbols to Binance coin symbols
+// Only include mappings that are NOT simple case conversions
+var dexToBinanceCoinSymbol = map[string]string{
+	"polygon": "POL",
 	"weth":    "ETH",
 }
 
+// binanceToDexCoinSymbol maps Binance coin symbols to DEX coin symbols.
+// These override the reverse mappings from dexToBinanceCoinSymbol.
+var binanceToDexCoinSymbol = map[string]string{
+	"ETH": "eth",
+}
+
+// dexToBinanceNetworkSymbol maps DEX network symbols to Binance network symbols
+var dexToBinanceNetworkSymbol = map[string]string{
+	"polygon": "MATIC",
+}
+
+// dexCoinToWrappedSymbol maps DEX coin symbols to their wrapped version when
+// on different networks
+var dexCoinToWrappedSymbol = map[string]string{
+	"eth": "weth",
+}
+
+// binanceToDexSymbol is the complete mapping from Binance symbols to DEX symbols
+// Built in init() from all the other mappings
 var binanceToDexSymbol = make(map[string]string)
 
 // convertBnCoin converts a binance coin symbol to a dex symbol.
 func convertBnCoin(coin string) string {
-	symbol := strings.ToLower(coin)
 	if convertedSymbol, found := binanceToDexSymbol[strings.ToUpper(coin)]; found {
-		symbol = convertedSymbol
+		return convertedSymbol
 	}
-	if symbol == "weth" {
-		return "eth"
+	return strings.ToLower(coin)
+}
+
+// convertBnNetwork converts a binance network symbol to a dex symbol.
+func convertBnNetwork(network string) string {
+	for key, value := range dexToBinanceNetworkSymbol {
+		if value == strings.ToUpper(network) {
+			return key
+		}
 	}
-	return symbol
+	return convertBnCoin(network)
 }
 
 // binanceCoinNetworkToDexSymbol takes the coin name and its network name as
 // returned by the binance API and returns the DEX symbol.
 func binanceCoinNetworkToDexSymbol(coin, network string) string {
-	symbol, netSymbol := convertBnCoin(coin), convertBnCoin(network)
+	symbol, netSymbol := convertBnCoin(coin), convertBnNetwork(network)
 	if symbol == netSymbol {
 		return symbol
 	}
-	if symbol == "eth" {
-		symbol = "weth"
+	// Convert coin to wrapped version if it has a wrapped equivalent
+	// Only apply to the coin symbol, not the network symbol
+	if wrappedSymbol, found := dexCoinToWrappedSymbol[symbol]; found {
+		symbol = wrappedSymbol
 	}
 	return symbol + "." + netSymbol
 }
 
-func init() {
-	for key, value := range dexToBinanceSymbol {
-		binanceToDexSymbol[value] = key
-	}
-}
-
-func mapDexToBinanceSymbol(symbol string) string {
-	if binanceSymbol, found := dexToBinanceSymbol[strings.ToLower(symbol)]; found {
+func mapDexSymbolToBinanceCoin(symbol string) string {
+	if binanceSymbol, found := dexToBinanceCoinSymbol[strings.ToLower(symbol)]; found {
 		return binanceSymbol
 	}
 	return strings.ToUpper(symbol)
+}
+
+func mapDexSymbolToBinanceNetwork(symbol string) string {
+	if binanceSymbol, found := dexToBinanceNetworkSymbol[strings.ToLower(symbol)]; found {
+		return binanceSymbol
+	}
+	return strings.ToUpper(symbol)
+}
+
+func init() {
+	// Build the binanceToDexSymbol map for coin symbols only
+	// Network symbols are handled separately by convertBnNetwork.
+	// This is to avoid network symbols affecting coin symbol conversions.
+	// The specific reason for this is that the MATIC coin ticker was changed
+	// to POL, but the network symbol for Polygon POS is still MATIC. However,
+	// MATIC is still returned with a balance of 0 in the balances response.
+
+	// Direct Binance -> DEX coin symbol mappings (highest priority)
+	for key, value := range binanceToDexCoinSymbol {
+		binanceToDexSymbol[key] = value
+	}
+
+	// From coin symbol mappings (DEX -> Binance, reverse to Binance -> DEX)
+	for key, value := range dexToBinanceCoinSymbol {
+		// Only add if not already present (lower priority)
+		if _, exists := binanceToDexSymbol[value]; !exists {
+			binanceToDexSymbol[value] = key
+		}
+	}
 }
 
 type bncAssetConfig struct {
@@ -397,6 +496,7 @@ type bncAssetConfig struct {
 	// that the token is hosted such as "ETH".
 	chain            string
 	conversionFactor uint64
+	ui               *dex.UnitInfo
 }
 
 func bncAssetCfg(assetID uint32) (*bncAssetConfig, error) {
@@ -411,10 +511,13 @@ func bncAssetCfg(assetID uint32) (*bncAssetConfig, error) {
 	}
 
 	parts := strings.Split(symbol, ".")
-	coin := mapDexToBinanceSymbol(parts[0])
-	chain := coin
+	coin := mapDexSymbolToBinanceCoin(parts[0])
+
+	var chain string
 	if len(parts) > 1 {
-		chain = mapDexToBinanceSymbol(parts[1])
+		chain = mapDexSymbolToBinanceNetwork(parts[1])
+	} else {
+		chain = mapDexSymbolToBinanceNetwork(parts[0])
 	}
 
 	return &bncAssetConfig{
@@ -423,6 +526,7 @@ func bncAssetCfg(assetID uint32) (*bncAssetConfig, error) {
 		coin:             coin,
 		chain:            chain,
 		conversionFactor: ui.Conventional.ConversionFactor,
+		ui:               &ui,
 	}, nil
 }
 
@@ -447,6 +551,7 @@ type tradeInfo struct {
 	sell      bool
 	rate      uint64
 	qty       uint64
+	market    bool
 }
 
 type withdrawInfo struct {
@@ -500,6 +605,8 @@ type binance struct {
 
 	balanceMtx sync.RWMutex
 	balances   map[uint32]*ExchangeBalance
+
+	commissionRates atomic.Value // *bntypes.CommissionRates
 
 	marketStreamMtx sync.RWMutex
 	marketStream    comms.WsConn
@@ -587,6 +694,8 @@ func (bnc *binance) refreshBalances(ctx context.Context) error {
 		return err
 	}
 
+	bnc.commissionRates.Store(resp.CommissionRates)
+
 	tokenIDsI := bnc.tokenIDs.Load()
 	if tokenIDsI == nil {
 		return errors.New("cannot set balances before coin info is fetched")
@@ -645,9 +754,14 @@ func (bnc *binance) readCoins(coins []*bntypes.CoinInfo) {
 				tokenIDs[nfo.Coin] = append(tokenIDs[nfo.Coin], assetID)
 			}
 			minimum := uint64(math.Round(float64(ui.Conventional.ConversionFactor) * netInfo.WithdrawMin))
+			lotSize := uint64(math.Round(netInfo.WithdrawIntegerMultiple * float64(ui.Conventional.ConversionFactor)))
+			if minimum == 0 || lotSize == 0 {
+				bnc.log.Errorf("invalid withdraw minimum or lot size for %s network %s", netInfo.Coin, netInfo.Network)
+				continue
+			}
 			minWithdraw[assetID] = &withdrawInfo{
 				minimum: minimum,
-				lotSize: uint64(math.Round(netInfo.WithdrawIntegerMultiple * float64(ui.Conventional.ConversionFactor))),
+				lotSize: lotSize,
 			}
 		}
 	}
@@ -668,6 +782,54 @@ func (bnc *binance) getCoinInfo(ctx context.Context) error {
 	return nil
 }
 
+func parseMarketFilters(market *bntypes.Market, bui, qui dex.UnitInfo) (*bntypes.Market, error) {
+	var rateStepFound, lotSizeFound bool
+
+	market.MaxNotional = math.MaxUint64
+
+	for _, filter := range market.Filters {
+		switch filter.Type {
+		case "PRICE_FILTER":
+			rateStepFound = true
+			conv := float64(qui.Conventional.ConversionFactor) / float64(bui.Conventional.ConversionFactor) * calc.RateEncodingFactor
+			if filter.TickSize == 0 {
+				market.RateStep = 1
+			} else {
+				market.RateStep = uint64(math.Round(filter.TickSize * conv))
+			}
+			market.MinPrice = uint64(math.Round(filter.MinPrice * conv))
+			if filter.MaxPrice == 0 {
+				market.MaxPrice = math.MaxUint64
+			} else {
+				market.MaxPrice = uint64(math.Round(filter.MaxPrice * conv))
+			}
+		case "LOT_SIZE":
+			lotSizeFound = true
+			if filter.StepSize == 0 {
+				market.LotSize = 1
+			} else {
+				market.LotSize = uint64(math.Round(filter.StepSize * float64(bui.Conventional.ConversionFactor)))
+			}
+			market.MinQty = uint64(math.Round(filter.MinQty * float64(bui.Conventional.ConversionFactor)))
+			market.MaxQty = uint64(math.Round(filter.MaxQty * float64(bui.Conventional.ConversionFactor)))
+		case "NOTIONAL":
+			market.MinNotional = uint64(math.Round(filter.MinNotional * float64(qui.Conventional.ConversionFactor)))
+			market.MaxNotional = uint64(math.Round(filter.MaxNotional * float64(qui.Conventional.ConversionFactor)))
+			market.ApplyMinNotionalToMarket = filter.ApplyMinToMarket
+			market.ApplyMaxNotionalToMarket = filter.ApplyMaxToMarket
+		case "MIN_NOTIONAL":
+			market.MinNotional = uint64(math.Round(filter.MinNotional * float64(qui.Conventional.ConversionFactor)))
+			market.ApplyMinNotionalToMarket = filter.ApplyToMarket
+		}
+	}
+
+	if !rateStepFound || !lotSizeFound {
+		return nil, errors.New("missing rate step or lot size filter")
+	}
+
+	return market, nil
+}
+
 func (bnc *binance) getMarkets(ctx context.Context) (map[string]*bntypes.Market, error) {
 	var exchangeInfo bntypes.ExchangeInfo
 	err := bnc.getAPI(ctx, "/api/v3/exchangeInfo", nil, false, false, &exchangeInfo)
@@ -679,35 +841,30 @@ func (bnc *binance) getMarkets(ctx context.Context) (map[string]*bntypes.Market,
 	tokenIDs := bnc.tokenIDs.Load().(map[string][]uint32)
 
 	for _, market := range exchangeInfo.Symbols {
+		// Skip markets that are not trading or do not allow you to specify a
+		// quote order qty. All markets other than a few margin related markets
+		// allow quote order qty for market orders.
+		if market.Status != "TRADING" || !market.QuoteOrderQtyMarketAllowed {
+			continue
+		}
+
+		// Check to see if the assets on this market are supported by the DEX.
+		// If not, skip the market.
+		//
+		// TODO: In the future, we should be able to support markets that the
+		// DEX does not support in order to allow more flexibility in multi-hop
+		// arbitrage.
 		dexMarkets := binanceMarketToDexMarkets(market.BaseAsset, market.QuoteAsset, tokenIDs, bnc.isUS)
 		if len(dexMarkets) == 0 {
 			continue
 		}
 		dexMkt := dexMarkets[0]
-
 		bui, _ := asset.UnitInfo(dexMkt.BaseID)
 		qui, _ := asset.UnitInfo(dexMkt.QuoteID)
 
-		var rateStepFound, lotSizeFound bool
-		for _, filter := range market.Filters {
-			if filter.Type == "PRICE_FILTER" {
-				rateStepFound = true
-				conv := float64(qui.Conventional.ConversionFactor) / float64(bui.Conventional.ConversionFactor) * calc.RateEncodingFactor
-				market.RateStep = uint64(math.Round(filter.TickSize * conv))
-				market.MinPrice = uint64(math.Round(filter.MinPrice * conv))
-				market.MaxPrice = uint64(math.Round(filter.MaxPrice * conv))
-			} else if filter.Type == "LOT_SIZE" {
-				lotSizeFound = true
-				market.LotSize = uint64(math.Round(filter.StepSize * float64(bui.Conventional.ConversionFactor)))
-				market.MinQty = uint64(math.Round(filter.MinQty * float64(bui.Conventional.ConversionFactor)))
-				market.MaxQty = uint64(math.Round(filter.MaxQty * float64(bui.Conventional.ConversionFactor)))
-			}
-			if rateStepFound && lotSizeFound {
-				break
-			}
-		}
-		if !rateStepFound || !lotSizeFound {
-			bnc.log.Errorf("missing filter for market %s, rate step found = %t, lot size found = %t", dexMkt.MarketID, rateStepFound, lotSizeFound)
+		market, err := parseMarketFilters(market, bui, qui)
+		if err != nil {
+			bnc.log.Errorf("error parsing market filters for %s: %v", market.Symbol, err)
 			continue
 		}
 
@@ -837,58 +994,216 @@ func steppedRate(r, step uint64) uint64 {
 	return uint64(math.Round(steps * float64(step)))
 }
 
-// Trade executes a trade on the CEX. subscriptionID takes an ID returned from
-// SubscribeTradeUpdates.
-func (bnc *binance) Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, subscriptionID int) (*Trade, error) {
+func qtyToString(qty uint64, assetCfg *bncAssetConfig, lotSize uint64) string {
+	steppedQty := steppedRate(qty, lotSize)
+	convQty := float64(steppedQty) / float64(assetCfg.conversionFactor)
+	qtyPrec := int(math.Round(math.Log10(float64(assetCfg.conversionFactor) / float64(lotSize))))
+	return strconv.FormatFloat(convQty, 'f', qtyPrec, 64)
+}
+
+func rateToString(rate uint64, baseCfg, quoteCfg *bncAssetConfig, rateStep uint64) string {
+	rate = steppedRate(rate, rateStep)
+	convRate := calc.ConventionalRateAlt(rate, baseCfg.conversionFactor, quoteCfg.conversionFactor)
+	convRateStep := calc.ConventionalRate(rateStep, *baseCfg.ui, *quoteCfg.ui)
+	ratePrec := -int(math.Round(math.Log10(convRateStep)))
+	return strconv.FormatFloat(convRate, 'f', ratePrec, 64)
+}
+
+func buildTradeRequest(baseCfg, quoteCfg *bncAssetConfig, market *bntypes.Market, avgPrice uint64, sell bool, orderType OrderType, rate, qty uint64, tradeID string) (url.Values, error) {
 	side := "BUY"
 	if sell {
 		side = "SELL"
 	}
+	orderTypeStr := "LIMIT"
+	if orderType == OrderTypeMarket {
+		orderTypeStr = "MARKET"
+	}
 
+	var rateStr, qtyStr, quoteQtyStr string
+	if orderType == OrderTypeLimit {
+		if rate < market.MinPrice || rate > market.MaxPrice {
+			return nil, fmt.Errorf("rate %v is out of bounds. min: %d, max: %d", rate, market.MinPrice, market.MaxPrice)
+		}
+		if qty < market.MinQty || qty > market.MaxQty {
+			return nil, fmt.Errorf("quantity %s is out of bounds. min: %s, max: %s",
+				baseCfg.ui.FormatConventional(qty),
+				baseCfg.ui.FormatConventional(market.MinQty),
+				baseCfg.ui.FormatConventional(market.MaxQty))
+		}
+		quoteQty := calc.BaseToQuote(rate, qty)
+		if quoteQty < market.MinNotional {
+			return nil, fmt.Errorf("notional %s < min %s",
+				quoteCfg.ui.FormatConventional(quoteQty),
+				quoteCfg.ui.FormatConventional(market.MinNotional))
+		}
+		if quoteQty > market.MaxNotional {
+			return nil, fmt.Errorf("notional %s > max %s",
+				quoteCfg.ui.FormatConventional(quoteQty),
+				quoteCfg.ui.FormatConventional(market.MaxNotional))
+		}
+		rateStr = rateToString(rate, baseCfg, quoteCfg, market.RateStep)
+		qtyStr = qtyToString(qty, baseCfg, market.LotSize)
+	} else if sell { // market sell
+		if qty < market.MinQty || qty > market.MaxQty {
+			return nil, fmt.Errorf("quantity %s is out of bounds. min: %s, max: %s",
+				baseCfg.ui.FormatConventional(qty),
+				baseCfg.ui.FormatConventional(market.MinQty),
+				baseCfg.ui.FormatConventional(market.MaxQty))
+		}
+		quoteQty := calc.BaseToQuote(avgPrice, qty)
+		if market.ApplyMinNotionalToMarket && quoteQty < market.MinNotional {
+			return nil, fmt.Errorf("notional %s < min %s",
+				quoteCfg.ui.FormatConventional(quoteQty),
+				quoteCfg.ui.FormatConventional(market.MinNotional))
+		}
+		if market.ApplyMaxNotionalToMarket && quoteQty > market.MaxNotional {
+			return nil, fmt.Errorf("notional %s > max %s",
+				quoteCfg.ui.FormatConventional(quoteQty),
+				quoteCfg.ui.FormatConventional(market.MaxNotional))
+		}
+		qtyStr = qtyToString(qty, baseCfg, market.LotSize)
+	} else { // market buy
+		if market.ApplyMinNotionalToMarket && qty < market.MinNotional {
+			return nil, fmt.Errorf("notional %s < min %s",
+				quoteCfg.ui.FormatConventional(qty),
+				quoteCfg.ui.FormatConventional(market.MinNotional))
+		}
+		if market.ApplyMaxNotionalToMarket && qty > market.MaxNotional {
+			return nil, fmt.Errorf("notional %s > max %s",
+				quoteCfg.ui.FormatConventional(qty),
+				quoteCfg.ui.FormatConventional(market.MaxNotional))
+		}
+		quoteQtyStr = qtyToString(qty, quoteCfg, 1)
+	}
+
+	var timeInForceStr string
+	if orderType == OrderTypeLimit {
+		timeInForceStr = "GTC"
+	}
+
+	// Build the request body
+	v := url.Values{}
+	v.Add("symbol", market.Symbol)
+	v.Add("side", side)
+	v.Add("type", orderTypeStr)
+	v.Add("newClientOrderId", tradeID)
+	if qtyStr != "" {
+		v.Add("quantity", qtyStr)
+	}
+	if rateStr != "" {
+		v.Add("price", rateStr)
+	}
+	if quoteQtyStr != "" {
+		v.Add("quoteOrderQty", quoteQtyStr)
+	}
+	if timeInForceStr != "" {
+		v.Add("timeInForce", timeInForceStr)
+	}
+
+	return v, nil
+}
+
+// calcFees returns the total base and quote fees for a trade based on the
+// fills. Only one of the two fees, the one the user is receiving in the trade,
+// will be non-zero.
+func (bnc *binance) calcFees(fills []*bntypes.Fill, baseCfg, quoteCfg *bncAssetConfig) (feeBase, feeQuote uint64) {
+	for _, fill := range fills {
+		if fill.CommissionAsset == baseCfg.coin {
+			feeBase += uint64(fill.Commission * float64(baseCfg.conversionFactor))
+		} else if fill.CommissionAsset == quoteCfg.coin {
+			feeQuote += uint64(fill.Commission * float64(quoteCfg.conversionFactor))
+		}
+	}
+
+	if feeBase > 0 && feeQuote > 0 {
+		bnc.log.Errorf("calcFees: both base and quote fees are non-zero: %d %d", feeBase, feeQuote)
+	}
+
+	return feeBase, feeQuote
+}
+
+func (bnc *binance) cachedAvgPrice(mktID string) (uint64, error) {
+	bnc.booksMtx.RLock()
+	defer bnc.booksMtx.RUnlock()
+
+	book, found := bnc.books[mktID]
+	if !found {
+		return 0, fmt.Errorf("book not found for %s", mktID)
+	}
+
+	avgPrice := book.avgPrice.Load()
+	if avgPrice == 0 {
+		return 0, fmt.Errorf("avg price not found for %s", mktID)
+	}
+
+	return avgPrice, nil
+}
+
+// ValidateTrade returns an error if the parameters for this trade are not
+// allowed.
+func (bnc *binance) ValidateTrade(baseID, quoteID uint32, sell bool, rate, qty uint64, orderType OrderType) error {
+	baseCfg, err := bncAssetCfg(baseID)
+	if err != nil {
+		return fmt.Errorf("error getting asset cfg for %d: %w", baseID, err)
+	}
+	quoteCfg, err := bncAssetCfg(quoteID)
+	if err != nil {
+		return fmt.Errorf("error getting asset cfg for %d: %w", quoteID, err)
+	}
+
+	slug := baseCfg.coin + quoteCfg.coin
+	marketsMap := bnc.markets.Load().(map[string]*bntypes.Market)
+	market, found := marketsMap[slug]
+	if !found {
+		return fmt.Errorf("market not found: %v", slug)
+	}
+
+	avgPrice, err := bnc.cachedAvgPrice(slug)
+	if err != nil {
+		return fmt.Errorf("error getting avg price for %s: %w", slug, err)
+	}
+
+	_, err = buildTradeRequest(baseCfg, quoteCfg, market, avgPrice, sell, orderType, rate, qty, "")
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Trade executes a trade on the CEX.
+//   - subscriptionID takes an ID returned from SubscribeTradeUpdates.
+//   - Rate is ignored for market orders.
+//   - Qty is in unit of base asset, except for market buys where it is in units
+//     of quote asset.
+func (bnc *binance) Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, orderType OrderType, subscriptionID int) (*Trade, error) {
 	baseCfg, err := bncAssetCfg(baseID)
 	if err != nil {
 		return nil, fmt.Errorf("error getting asset cfg for %d: %w", baseID, err)
 	}
-
 	quoteCfg, err := bncAssetCfg(quoteID)
 	if err != nil {
 		return nil, fmt.Errorf("error getting asset cfg for %d: %w", quoteID, err)
 	}
 
 	slug := baseCfg.coin + quoteCfg.coin
-
 	marketsMap := bnc.markets.Load().(map[string]*bntypes.Market)
 	market, found := marketsMap[slug]
 	if !found {
 		return nil, fmt.Errorf("market not found: %v", slug)
 	}
 
-	if rate < market.MinPrice || rate > market.MaxPrice {
-		return nil, fmt.Errorf("rate %v is out of bounds for market %v", rate, slug)
-	}
-	rate = steppedRate(rate, market.RateStep)
-	convRate := calc.ConventionalRateAlt(rate, baseCfg.conversionFactor, quoteCfg.conversionFactor)
-	ratePrec := int(math.Round(math.Log10(calc.RateEncodingFactor * float64(baseCfg.conversionFactor) / float64(quoteCfg.conversionFactor) / float64(market.RateStep))))
-	rateStr := strconv.FormatFloat(convRate, 'f', ratePrec, 64)
-
-	if qty < market.MinQty || qty > market.MaxQty {
-		return nil, fmt.Errorf("quantity %v is out of bounds for market %v", qty, slug)
-	}
-	steppedQty := steppedRate(qty, market.LotSize)
-	convQty := float64(steppedQty) / float64(baseCfg.conversionFactor)
-	qtyPrec := int(math.Round(math.Log10(float64(baseCfg.conversionFactor) / float64(market.LotSize))))
-	qtyStr := strconv.FormatFloat(convQty, 'f', qtyPrec, 64)
-
 	tradeID := bnc.generateTradeID()
 
-	v := make(url.Values)
-	v.Add("symbol", slug)
-	v.Add("side", side)
-	v.Add("type", "LIMIT")
-	v.Add("timeInForce", "GTC")
-	v.Add("newClientOrderId", tradeID)
-	v.Add("quantity", qtyStr)
-	v.Add("price", rateStr)
+	avgPrice, err := bnc.cachedAvgPrice(slug)
+	if err != nil {
+		return nil, fmt.Errorf("error getting avg price for %s: %w", slug, err)
+	}
+
+	v, err := buildTradeRequest(baseCfg, quoteCfg, market, avgPrice, sell, orderType, rate, qty, tradeID)
+	if err != nil {
+		return nil, fmt.Errorf("error building trade request: %w", err)
+	}
 
 	bnc.tradeUpdaterMtx.Lock()
 	_, found = bnc.tradeUpdaters[subscriptionID]
@@ -903,6 +1218,7 @@ func (bnc *binance) Trade(ctx context.Context, baseID, quoteID uint32, sell bool
 		sell:      sell,
 		rate:      rate,
 		qty:       qty,
+		market:    orderType == OrderTypeMarket,
 	}
 	bnc.tradeUpdaterMtx.Unlock()
 
@@ -923,6 +1239,10 @@ func (bnc *binance) Trade(ctx context.Context, baseID, quoteID uint32, sell bool
 
 	success = true
 
+	baseFees, quoteFees := bnc.calcFees(orderResponse.Fills, baseCfg, quoteCfg)
+	baseFilled := uint64(orderResponse.ExecutedQty * float64(baseCfg.conversionFactor))
+	quoteFilled := uint64(orderResponse.CumulativeQuoteQty * float64(quoteCfg.conversionFactor))
+
 	return &Trade{
 		ID:          tradeID,
 		Sell:        sell,
@@ -930,8 +1250,9 @@ func (bnc *binance) Trade(ctx context.Context, baseID, quoteID uint32, sell bool
 		Qty:         qty,
 		BaseID:      baseID,
 		QuoteID:     quoteID,
-		BaseFilled:  uint64(orderResponse.ExecutedQty * float64(baseCfg.conversionFactor)),
-		QuoteFilled: uint64(orderResponse.CumulativeQuoteQty * float64(quoteCfg.conversionFactor)),
+		Market:      orderType == OrderTypeMarket,
+		BaseFilled:  utils.SafeSub(baseFilled, baseFees),
+		QuoteFilled: utils.SafeSub(quoteFilled, quoteFees),
 		Complete:    orderResponse.Status != "NEW" && orderResponse.Status != "PARTIALLY_FILLED",
 	}, err
 }
@@ -983,15 +1304,15 @@ func (bnc *binance) ConfirmWithdrawal(ctx context.Context, withdrawalID string, 
 // Withdraw withdraws funds from the CEX to a certain address. onComplete
 // is called with the actual amount withdrawn (amt - fees) and the
 // transaction ID of the withdrawal.
-func (bnc *binance) Withdraw(ctx context.Context, assetID uint32, qty uint64, address string) (string, error) {
+func (bnc *binance) Withdraw(ctx context.Context, assetID uint32, qty uint64, address string) (string, uint64, error) {
 	assetCfg, err := bncAssetCfg(assetID)
 	if err != nil {
-		return "", fmt.Errorf("error getting symbol data for %d: %w", assetID, err)
+		return "", 0, fmt.Errorf("error getting symbol data for %d: %w", assetID, err)
 	}
 
 	lotSize, err := bnc.withdrawLotSize(assetID)
 	if err != nil {
-		return "", fmt.Errorf("error getting withdraw lot size for %d: %w", assetID, err)
+		return "", 0, fmt.Errorf("error getting withdraw lot size for %d: %w", assetID, err)
 	}
 
 	steppedQty := steppedRate(qty, lotSize)
@@ -1010,10 +1331,10 @@ func (bnc *binance) Withdraw(ctx context.Context, assetID uint32, qty uint64, ad
 	}{}
 	err = bnc.postAPI(ctx, "/sapi/v1/capital/withdraw/apply", nil, v, true, true, &withdrawResp)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 
-	return withdrawResp.ID, nil
+	return withdrawResp.ID, qty, nil
 }
 
 // GetDepositAddress returns a deposit address for an asset.
@@ -1451,13 +1772,27 @@ func (bnc *binance) handleExecutionReport(update *bntypes.StreamUpdate) {
 		return
 	}
 
+	baseFilled := uint64(update.Filled * float64(baseCfg.conversionFactor))
+	quoteFilled := uint64(update.QuoteFilled * float64(quoteCfg.conversionFactor))
+	var baseFee, quoteFee uint64
+	if update.Commission > 0 {
+		if update.CommissionAsset == baseCfg.coin {
+			baseFee = uint64(update.Commission * float64(baseCfg.conversionFactor))
+		} else if update.CommissionAsset == quoteCfg.coin {
+			quoteFee = uint64(update.Commission * float64(quoteCfg.conversionFactor))
+		} else {
+			bnc.log.Errorf("unknown commission asset %q", update.CommissionAsset)
+		}
+	}
+
 	updater <- &Trade{
 		ID:          id,
 		Complete:    complete,
 		Rate:        tradeInfo.rate,
 		Qty:         tradeInfo.qty,
-		BaseFilled:  uint64(update.Filled * float64(baseCfg.conversionFactor)),
-		QuoteFilled: uint64(update.QuoteFilled * float64(quoteCfg.conversionFactor)),
+		Market:      tradeInfo.market,
+		BaseFilled:  utils.SafeSub(baseFilled, baseFee),
+		QuoteFilled: utils.SafeSub(quoteFilled, quoteFee),
 		BaseID:      tradeInfo.baseID,
 		QuoteID:     tradeInfo.quoteID,
 		Sell:        tradeInfo.sell,
@@ -1614,14 +1949,17 @@ func binanceMktID(baseCfg, quoteCfg *bncAssetConfig) string {
 	return baseCfg.coin + quoteCfg.coin
 }
 
-func marketDataStreamID(mktID string) string {
-	return strings.ToLower(mktID) + "@depth"
+func marketDataStreams(mktID string) []string {
+	mktID = strings.ToLower(mktID)
+	return []string{
+		mktID + "@depth",
+	}
 }
 
 // subUnsubDepth sends a subscription or unsubscription request to the market
 // data stream.
 // The marketStreamMtx MUST be held when calling this function.
-func (bnc *binance) subUnsubDepth(subscribe bool, mktStreamID string) error {
+func (bnc *binance) subUnsubMktStreams(subscribe bool, streamIDs []string) error {
 	method := "SUBSCRIBE"
 	if !subscribe {
 		method = "UNSUBSCRIBE"
@@ -1629,7 +1967,7 @@ func (bnc *binance) subUnsubDepth(subscribe bool, mktStreamID string) error {
 
 	req := &bntypes.StreamSubscription{
 		Method: method,
-		Params: []string{mktStreamID},
+		Params: streamIDs,
 		ID:     atomic.AddUint64(&subscribeID, 1),
 	}
 
@@ -1638,7 +1976,7 @@ func (bnc *binance) subUnsubDepth(subscribe bool, mktStreamID string) error {
 		return fmt.Errorf("error marshaling subscription stream request: %w", err)
 	}
 
-	bnc.log.Debugf("Sending %v for market %v", method, mktStreamID)
+	bnc.log.Debugf("Sending %v for %v", method, streamIDs)
 	if err := bnc.marketStream.SendRaw(b); err != nil {
 		return fmt.Errorf("error sending subscription stream request: %w", err)
 	}
@@ -1681,6 +2019,7 @@ func (bnc *binance) handleMarketDataNote(b []byte) {
 		bnc.log.Errorf("Unknown stream name %q", note.StreamName)
 		return
 	}
+
 	slug := parts[0] // will be lower-case
 	mktID := strings.ToUpper(slug)
 
@@ -1692,6 +2031,7 @@ func (bnc *binance) handleMarketDataNote(b []byte) {
 		bnc.log.Errorf("No book for stream %q", note.StreamName)
 		return
 	}
+
 	book.updateQueue <- note.Data
 }
 
@@ -1713,7 +2053,6 @@ func (bnc *binance) subscribeToAdditionalMarketDataStream(ctx context.Context, b
 	}
 
 	mktID := binanceMktID(baseCfg, quoteCfg)
-	streamID := marketDataStreamID(mktID)
 
 	defer func() {
 		bnc.marketStream.UpdateURL(bnc.streamURL())
@@ -1730,14 +2069,21 @@ func (bnc *binance) subscribeToAdditionalMarketDataStream(ctx context.Context, b
 		return nil
 	}
 
-	if err := bnc.subUnsubDepth(true, streamID); err != nil {
-		return fmt.Errorf("error subscribing to %s: %v", streamID, err)
+	if err := bnc.subUnsubMktStreams(true, marketDataStreams(mktID)); err != nil {
+		return fmt.Errorf("error subscribing to %s: %v", mktID, err)
 	}
 
 	getSnapshot := func() (*bntypes.OrderbookSnapshot, error) {
 		return bnc.getOrderbookSnapshot(ctx, mktID)
 	}
-	book = newBinanceOrderBook(baseCfg.conversionFactor, quoteCfg.conversionFactor, mktID, getSnapshot, bnc.log)
+	getAvgPrice := func() (float64, error) {
+		return bnc.getAvgPrice(ctx, mktID)
+	}
+	initialAvgPrice, err := bnc.getAvgPrice(ctx, mktID)
+	if err != nil {
+		return fmt.Errorf("error getting avg price for %s: %v", mktID, err)
+	}
+	book = newBinanceOrderBook(baseCfg.conversionFactor, quoteCfg.conversionFactor, mktID, getSnapshot, getAvgPrice, initialAvgPrice, bnc.log)
 	bnc.books[mktID] = book
 	book.sync(ctx)
 
@@ -1749,7 +2095,7 @@ func (bnc *binance) streams() []string {
 	defer bnc.booksMtx.RUnlock()
 	streamNames := make([]string, 0, len(bnc.books))
 	for mktID := range bnc.books {
-		streamNames = append(streamNames, marketDataStreamID(mktID))
+		streamNames = append(streamNames, marketDataStreams(mktID)...)
 	}
 	return streamNames
 }
@@ -1810,9 +2156,7 @@ func (bnc *binance) checkSubs(ctx context.Context) error {
 
 	var sub []string
 	unsub := make([]string, len(subs))
-	for i, s := range subs {
-		unsub[i] = strings.ToLower(s)
-	}
+	copy(unsub, subs)
 
 out:
 	for _, us := range streams {
@@ -1826,17 +2170,17 @@ out:
 		sub = append(sub, us)
 	}
 
-	for _, s := range sub {
-		bnc.log.Warnf("Subbing to previously unsubbed stream %s", s)
-		if err := bnc.subUnsubDepth(true, s); err != nil {
-			bnc.log.Errorf("Error subscribing to %s: %v", s, err)
+	if len(sub) > 0 {
+		bnc.log.Warnf("Subbing to previously unsubbed streams %v", subs)
+		if err := bnc.subUnsubMktStreams(true, sub); err != nil {
+			bnc.log.Errorf("Error subscribing to %v: %v", sub, err)
 		}
 	}
 
-	for _, s := range unsub {
-		bnc.log.Warnf("Unsubbing to previously subbed stream %s", s)
-		if err := bnc.subUnsubDepth(false, s); err != nil {
-			bnc.log.Errorf("Error unsubscribing to %s: %v", s, err)
+	if len(unsub) > 0 {
+		bnc.log.Warnf("Unsubbing from previously subbed streams %v", unsub)
+		if err := bnc.subUnsubMktStreams(false, unsub); err != nil {
+			bnc.log.Errorf("Error unsubscribing from %v: %v", unsub, err)
 		}
 	}
 
@@ -1912,7 +2256,14 @@ func (bnc *binance) connectToMarketDataStream(ctx context.Context, baseID, quote
 	getSnapshot := func() (*bntypes.OrderbookSnapshot, error) {
 		return bnc.getOrderbookSnapshot(ctx, mktID)
 	}
-	book := newBinanceOrderBook(baseCfg.conversionFactor, quoteCfg.conversionFactor, mktID, getSnapshot, bnc.log)
+	getAvgPrice := func() (float64, error) {
+		return bnc.getAvgPrice(ctx, mktID)
+	}
+	initialAvgPrice, err := bnc.getAvgPrice(ctx, mktID)
+	if err != nil {
+		return fmt.Errorf("error getting avg price for %s: %v", mktID, err)
+	}
+	book := newBinanceOrderBook(baseCfg.conversionFactor, quoteCfg.conversionFactor, mktID, getSnapshot, getAvgPrice, initialAvgPrice, bnc.log)
 	bnc.books[mktID] = book
 	bnc.booksMtx.Unlock()
 
@@ -1995,7 +2346,6 @@ func (bnc *binance) UnsubscribeMarket(baseID, quoteID uint32) (err error) {
 		return err
 	}
 	mktID := binanceMktID(baseCfg, quoteCfg)
-	streamID := marketDataStreamID(mktID)
 
 	bnc.marketStreamMtx.Lock()
 	defer bnc.marketStreamMtx.Unlock()
@@ -2019,7 +2369,7 @@ func (bnc *binance) UnsubscribeMarket(baseID, quoteID uint32) (err error) {
 		}
 
 		if unsubscribe {
-			if err := bnc.subUnsubDepth(false, streamID); err != nil {
+			if err := bnc.subUnsubMktStreams(false, marketDataStreams(mktID)); err != nil {
 				bnc.log.Errorf("error unsubscribing from market data stream", err)
 			}
 		}
@@ -2056,6 +2406,19 @@ func (bnc *binance) SubscribeMarket(ctx context.Context, baseID, quoteID uint32)
 	return bnc.subscribeToAdditionalMarketDataStream(ctx, baseID, quoteID)
 }
 
+func (bnc *binance) getAvgPrice(ctx context.Context, mktID string) (float64, error) {
+	v := make(url.Values)
+	v.Add("symbol", mktID)
+
+	var resp bntypes.AvgPriceResponse
+	err := bnc.getAPI(ctx, "/api/v3/avgPrice", v, false, false, &resp)
+	if err != nil {
+		return 0, err
+	}
+
+	return resp.Price, nil
+}
+
 func (bnc *binance) book(baseID, quoteID uint32) (*binanceOrderBook, error) {
 	baseCfg, quoteCfg, err := bncAssetCfgs(baseID, quoteID)
 	if err != nil {
@@ -2072,28 +2435,30 @@ func (bnc *binance) book(baseID, quoteID uint32) (*binanceOrderBook, error) {
 	return book, nil
 }
 
+func convertSide(side []*obEntry, sell bool, baseFactor, quoteFactor uint64) []*core.MiniOrder {
+	ords := make([]*core.MiniOrder, len(side))
+	for i, e := range side {
+		ords[i] = &core.MiniOrder{
+			Qty:       float64(e.qty) / float64(baseFactor),
+			QtyAtomic: e.qty,
+			Rate:      calc.ConventionalRateAlt(e.rate, baseFactor, quoteFactor),
+			MsgRate:   e.rate,
+			Sell:      sell,
+		}
+	}
+	return ords
+}
+
 func (bnc *binance) Book(baseID, quoteID uint32) (buys, sells []*core.MiniOrder, _ error) {
 	book, err := bnc.book(baseID, quoteID)
 	if err != nil {
 		return nil, nil, err
 	}
 	bids, asks := book.book.snap()
-	bFactor := float64(book.baseConversionFactor)
-	convertSide := func(side []*obEntry, sell bool) []*core.MiniOrder {
-		ords := make([]*core.MiniOrder, len(side))
-		for i, e := range side {
-			ords[i] = &core.MiniOrder{
-				Qty:       float64(e.qty) / bFactor,
-				QtyAtomic: e.qty,
-				Rate:      calc.ConventionalRateAlt(e.rate, book.baseConversionFactor, book.quoteConversionFactor),
-				MsgRate:   e.rate,
-				Sell:      sell,
-			}
-		}
-		return ords
-	}
-	buys = convertSide(bids, false)
-	sells = convertSide(asks, true)
+	bFactor := book.baseConversionFactor
+	qFactor := book.quoteConversionFactor
+	buys = convertSide(bids, false, bFactor, qFactor)
+	sells = convertSide(asks, true, bFactor, qFactor)
 	return
 }
 
@@ -2106,6 +2471,17 @@ func (bnc *binance) VWAP(baseID, quoteID uint32, sell bool, qty uint64) (avgPric
 		return 0, 0, false, err
 	}
 	return book.vwap(!sell, qty)
+}
+
+// InvVWAP returns the inverse volume weighted average price for a certain
+// quantity of the quote asset on a market. SubscribeMarket must be called,
+// and the market must be synced before results can be expected.
+func (bnc *binance) InvVWAP(baseID, quoteID uint32, sell bool, qty uint64) (vwap, extrema uint64, filled bool, err error) {
+	book, err := bnc.book(baseID, quoteID)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	return book.invVWAP(!sell, qty)
 }
 
 func (bnc *binance) MidGap(baseID, quoteID uint32) uint64 {
@@ -2139,16 +2515,44 @@ func (bnc *binance) TradeStatus(ctx context.Context, tradeID string, baseID, quo
 		return nil, err
 	}
 
+	market := resp.Type == "MARKET"
+	sell := resp.Side == "SELL"
+
+	var qty uint64
+	if market && !sell {
+		qty = uint64(resp.OrigQuoteQty * float64(quoteAsset.conversionFactor))
+	} else {
+		qty = uint64(resp.OrigQty * float64(baseAsset.conversionFactor))
+	}
+
+	baseFilled := uint64(resp.ExecutedQty * float64(baseAsset.conversionFactor))
+	quoteFilled := uint64(resp.CumulativeQuoteQty * float64(quoteAsset.conversionFactor))
+
+	// The GET /api/v3/order response does not include how much commission was paid.
+	// We need to calculate it based on the commission rates.
+	commissionRates := bnc.commissionRates.Load().(*bntypes.CommissionRates)
+	if commissionRates != nil {
+		maxCommission := math.Max(commissionRates.Maker, commissionRates.Taker)
+		if sell {
+			quoteFilled = uint64(float64(quoteFilled) * (1 - maxCommission))
+		} else {
+			baseFilled = uint64(float64(baseFilled) * (1 - maxCommission))
+		}
+	} else {
+		bnc.log.Errorf("commission rates not set")
+	}
+
 	return &Trade{
 		ID:          tradeID,
-		Sell:        resp.Side == "SELL",
+		Sell:        sell,
 		Rate:        calc.MessageRateAlt(resp.Price, baseAsset.conversionFactor, quoteAsset.conversionFactor),
-		Qty:         uint64(resp.OrigQty * float64(baseAsset.conversionFactor)),
+		Qty:         qty,
 		BaseID:      baseID,
 		QuoteID:     quoteID,
-		BaseFilled:  uint64(resp.ExecutedQty * float64(baseAsset.conversionFactor)),
-		QuoteFilled: uint64(resp.CumulativeQuoteQty * float64(quoteAsset.conversionFactor)),
+		BaseFilled:  baseFilled,
+		QuoteFilled: quoteFilled,
 		Complete:    resp.Status != "NEW" && resp.Status != "PARTIALLY_FILLED",
+		Market:      market,
 	}, nil
 }
 

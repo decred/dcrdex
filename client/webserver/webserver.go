@@ -21,6 +21,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -37,8 +38,10 @@ import (
 	"decred.org/dcrdex/client/webserver/locales"
 	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/dexnet"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
+	"decred.org/dcrdex/dex/version"
 	"github.com/decred/dcrd/certgen"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -88,6 +91,8 @@ var (
 
 	//go:embed site/dist site/src/img site/src/font
 	staticSiteRes embed.FS
+
+	latestVersionRegex = regexp.MustCompile(`\d+(\.\d+)+`)
 )
 
 // clientCore is satisfied by core.Core.
@@ -188,6 +193,9 @@ type MMCore interface {
 	RunOverview(startTime int64, mkt *mm.MarketWithHost) (*mm.MarketMakingRunOverview, error)
 	RunLogs(startTime int64, mkt *mm.MarketWithHost, n uint64, refID *uint64, filter *mm.RunLogFilters) (events, updatedEvents []*mm.MarketMakingEvent, overview *mm.MarketMakingRunOverview, err error)
 	CEXBook(host string, baseID, quoteID uint32) (buys, sells []*core.MiniOrder, _ error)
+	UpdateRunningBotCfg(cfg *mm.BotConfig, balanceDiffs *mm.BotInventoryDiffs, autoRebalanceCfg *mm.AutoRebalanceConfig, saveUpdate bool) error
+	AvailableBalances(mkt *mm.MarketWithHost, cexName *string) (dexBalances, cexBalances map[uint32]uint64, _ error)
+	MaxFundingFees(mkt *mm.MarketWithHost, maxBuyPlacements, maxSellPlacements uint32, baseOptions, quoteOptions map[string]string) (buyFees, sellFees uint64, err error)
 }
 
 // genCertPair generates a key/cert pair to the paths provided.
@@ -233,7 +241,7 @@ type Config struct {
 	Language      string
 	Logger        dex.Logger
 	UTC           bool   // for stdout http request logging
-	AppVersion    string // user app version for UI
+	AppVersion    string // e.g. "1.0.4-pre", "1.0.4"
 	CertFile      string
 	KeyFile       string
 	// NoEmbed indicates to serve files from the system disk rather than the
@@ -279,7 +287,8 @@ type WebServer struct {
 	bondBufMtx sync.Mutex
 	bondBuf    map[uint32]valStamp
 
-	appVersion string
+	appVersion             string
+	newAppVersionAvailable bool
 
 	useDEXBranding  bool
 	mainLogFilePath string
@@ -408,7 +417,7 @@ func New(cfg *Config) (*WebServer, error) {
 		cachedPasswords: make(map[string]*cachedPassword),
 		tor:             cfg.Tor,
 		bondBuf:         map[uint32]valStamp{},
-		appVersion:      cfg.AppVersion,
+		appVersion:      userAppVersion(cfg.AppVersion, false),
 		useDEXBranding:  useDEXBranding,
 		mainLogFilePath: cfg.MainLogFilePath,
 	}
@@ -519,6 +528,7 @@ func New(cfg *Config) (*WebServer, error) {
 		r.Get("/user", s.apiUser)
 		r.Post("/locale", s.apiLocale)
 		r.Post("/setlocale", s.apiSetLocale)
+		r.Get("/buildinfo", s.apiBuildInfo)
 
 		r.Group(func(apiInit chi.Router) {
 			apiInit.Use(s.rejectUninited)
@@ -598,6 +608,7 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/startmarketmakingbot", s.apiStartMarketMakingBot)
 			apiAuth.Post("/stopmarketmakingbot", s.apiStopMarketMakingBot)
 			apiAuth.Post("/updatebotconfig", s.apiUpdateBotConfig)
+			apiAuth.Post("/updaterunningbot", s.apiUpdateRunningBot)
 			apiAuth.Post("/updatecexconfig", s.apiUpdateCEXConfig)
 			apiAuth.Post("/removebotconfig", s.apiRemoveBotConfig)
 			apiAuth.Get("/marketmakingstatus", s.apiMarketMakingStatus)
@@ -606,6 +617,9 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Get("/archivedmmruns", s.apiArchivedRuns)
 			apiAuth.Post("/mmrunlogs", s.apiRunLogs)
 			apiAuth.Post("/cexbook", s.apiCEXBook)
+			apiAuth.Post("/availablebalances", s.apiAvailableBalances)
+			apiAuth.Post("/maxfundingfees", s.apiMaxFundingFees)
+
 		})
 	})
 
@@ -616,6 +630,39 @@ func New(cfg *Config) (*WebServer, error) {
 	fileServer(mux, "/font", siteDir, "src/font", "")
 
 	return s, nil
+}
+
+// fetchLatestVersion is a helper function to retrieve the latest version of the app
+// from github.
+func (w *WebServer) fetchLatestVersion(ctx context.Context) {
+	var response struct {
+		TagName string `json:"tag_name"`
+	}
+
+	err := dexnet.Get(ctx, "https://api.github.com/repos/decred/dcrdex/releases/latest", &response, dexnet.WithSizeLimit(1<<22))
+	if err != nil {
+		log.Debugf("Error getting latest version: %v", err)
+		return
+	}
+
+	latestVersion := latestVersionRegex.FindString(response.TagName)
+	latestMajor, latestMinor, latestPatch, _, _, err := version.ParseSemVer(latestVersion)
+	if err != nil {
+		log.Debugf("Error parsing latest version: %v", err)
+		return
+	}
+
+	currentMajor, currentMinor, currentPatch, _, _, err := version.ParseSemVer(w.appVersion)
+	if err != nil {
+		log.Debugf("Error parsing app version: %v", err)
+		return
+	}
+
+	if latestMajor > currentMajor ||
+		(latestMajor == currentMajor && latestMinor > currentMinor) ||
+		(latestMajor == currentMajor && latestMinor == currentMinor && latestPatch > currentPatch) {
+		w.newAppVersionAvailable = true
+	}
 }
 
 // buildTemplates prepares the HTML templates, which are executed and served in
@@ -783,6 +830,23 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	go func() {
 		defer wg.Done()
 		s.readNotifications(ctx)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		// Perform initial fetch of the latest version.
+		s.fetchLatestVersion(ctx)
+
+		for {
+			select {
+			case <-time.After(24 * time.Hour):
+				s.fetchLatestVersion(ctx)
+			case <-ctx.Done():
+				return
+			}
+		}
 	}()
 
 	log.Infof("Web server listening on %s (https = %v)", s.addr, https)
@@ -1159,6 +1223,27 @@ func writeJSONWithStatus(w http.ResponseWriter, thing any, code int) {
 func folderExists(fp string) bool {
 	stat, err := os.Stat(fp)
 	return err == nil && stat.IsDir()
+}
+
+// userAppVersion is a template function that returns the user-facing
+// application version, which is the full version without the build metadata. If
+// semVerOnly is true, it returns the version without the pre-release tag. The
+// full version is expected to be in the format
+// "MAJOR.MINOR.PATCH[-PRE-RELEASE][+BUILD-METADATA]". For example,
+// "1.0.4-pre+4ba3fd93b" would return "1.0.4-pre" if semVerOnly is false, and
+// "1.0.4" if semVerOnly is true.
+func userAppVersion(fullVersion string, semVerOnly bool) string {
+	major, minor, patch, pre, _, err := version.ParseSemVer(fullVersion) // validate the version format
+	if err != nil {
+		log.Errorf("Invalid version %q: %v", fullVersion, err)
+		return fullVersion // return the full version as is
+	}
+
+	if semVerOnly {
+		return fmt.Sprintf("%d.%d.%d", major, minor, patch)
+	}
+
+	return fmt.Sprintf("%d.%d.%d-%s", major, minor, patch, pre)
 }
 
 // chiLogger is an adaptor around dex.Logger that satisfies

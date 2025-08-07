@@ -237,8 +237,8 @@ func handleNewWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 
 	// Apply default config options if they exist.
 	for _, opt := range walletDef.ConfigOpts {
-		if _, has := form.config[opt.Key]; !has && opt.DefaultValue != nil {
-			form.config[opt.Key] = fmt.Sprintf("%v", opt.DefaultValue)
+		if _, has := form.config[opt.Key]; !has {
+			form.config[opt.Key] = opt.DefaultValue
 		}
 	}
 
@@ -872,7 +872,7 @@ func handleMMAvailableBalances(s *RPCServer, params *RawParams) *msgjson.Respons
 		return usage(mmAvailableBalancesRoute, err)
 	}
 
-	dexBalances, cexBalances, err := s.mm.AvailableBalances(form.mkt, &form.cfgFilePath)
+	dexBalances, cexBalances, err := s.mm.AvailableBalances(form.mkt, form.cexName)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCMMAvailableBalancesError, "unable to get available balances: %v", err)
 		return createResponse(mmAvailableBalancesRoute, nil, resErr)
@@ -951,7 +951,7 @@ func handleUpdateRunningBotCfg(s *RPCServer, params *RawParams) *msgjson.Respons
 		return createResponse(updateRunningBotCfgRoute, nil, resErr)
 	}
 
-	err = s.mm.UpdateRunningBotCfg(botCfg, form.balances, false)
+	err = s.mm.UpdateRunningBotCfg(botCfg, form.balances, nil, false)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotCfgError, "unable to update running bot: %v", err)
 		return createResponse(updateRunningBotCfgRoute, nil, resErr)

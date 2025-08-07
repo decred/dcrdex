@@ -6,7 +6,6 @@ import (
 )
 
 var (
-	bEqual = bytes.Equal
 	tEmpty = []byte{}
 	tA     = []byte{0xaa}
 	tB     = []byte{0xbb, 0xbb}

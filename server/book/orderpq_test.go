@@ -1,9 +1,9 @@
 package book
 
 import (
+	crand "crypto/rand"
 	"flag"
-	"math/rand"
-	crand "math/rand"
+	"math/rand/v2"
 	"os"
 	"sort"
 	"testing"
@@ -17,11 +17,11 @@ type Order = order.LimitOrder
 var (
 	bigList []*Order
 	orders  []*Order
-	rnd     = rand.New(rand.NewSource(1))
+	rnd     = rand.New(rand.NewPCG(0x12345678, 0x87654321))
 )
 
 func randomAccount() (user account.AccountID) {
-	crand.Read(user[:])
+	crand.Read(user[:]) // nolint:errcheck
 	return
 }
 
@@ -29,7 +29,7 @@ func newFakeAddr() string {
 	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 	b := make([]byte, 35)
 	for i := range b {
-		b[i] = letters[rnd.Int63()%int64(len(letters))]
+		b[i] = letters[rnd.Int64()%int64(len(letters))]
 	}
 	b[0], b[1] = 'D', 's' // at least have it resemble an address
 	return string(b)
@@ -39,8 +39,8 @@ func genBigList(listSize int) {
 	if bigList != nil {
 		return
 	}
-	seed := int64(-3405439173988651889)
-	rnd.Seed(seed)
+	seed := uint64(3405439173988651889)
+	rnd = rand.New(rand.NewPCG(seed, seed))
 
 	dupRate := 800
 	if listSize < dupRate {
@@ -52,7 +52,7 @@ func genBigList(listSize int) {
 
 	bigList = make([]*Order, 0, listSize)
 	for i := 0; i < listSize; i++ {
-		lo := newLimitOrder(false, uint64(rnd.Int63n(90000000)), uint64(rnd.Int63n(6))+1, order.StandingTiF, rnd.Int63n(240)-120)
+		lo := newLimitOrder(false, uint64(rnd.Int64N(90000000)), uint64(rnd.Int64N(6))+1, order.StandingTiF, rnd.Int64N(240)-120)
 		lo.Address = newFakeAddr()
 		// duplicate some prices
 		if (i+1)%(listSize/dupRate) == 0 {
@@ -70,8 +70,8 @@ const (
 )
 
 func TestMain(m *testing.M) {
-	flag.Parse() // for -short
-	rnd.Seed(4)  // some predetermined and reproducible order IDs
+	flag.Parse()                      // for -short
+	rnd = rand.New(rand.NewPCG(4, 4)) // some predetermined and reproducible order IDs
 	orders = []*Order{
 		newLimitOrder(false, 42000000, 2, order.StandingTiF, 0),
 		newLimitOrder(false, 10000, 2, order.StandingTiF, 0),

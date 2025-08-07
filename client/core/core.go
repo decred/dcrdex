@@ -82,7 +82,7 @@ const (
 	// where we don't have the necessary information to calculate our bonded
 	// tier, so we calculate our bonus/revoked tier from the score in the
 	// ConnectResult.
-	defaultPenaltyThreshold = 20
+	// defaultPenaltyThreshold = 20 unused
 
 	// legacySeedLength is the length of the generated app seed used for app protection.
 	legacySeedLength = 64
@@ -2965,22 +2965,37 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		}()
 	}
 
+	// Ensure default settings are always supplied to the wallet as they
+	// may not be saved yet.
+	walletDef, err := asset.WalletDef(assetID, dbWallet.Type)
+	if err != nil {
+		return nil, newError(assetSupportErr, "asset.WalletDef error: %w", err)
+	}
+	defaultValues := make(map[string]string, len(walletDef.ConfigOpts))
+	for _, option := range walletDef.ConfigOpts {
+		defaultValues[strings.ToLower(option.Key)] = option.DefaultValue
+	}
+	settings := dbWallet.Settings
+	for k, v := range defaultValues {
+		if _, has := settings[k]; !has {
+			settings[k] = v
+		}
+	}
+
 	log := c.log.SubLogger(unbip(assetID))
 	var w asset.Wallet
-	var err error
 	if token == nil {
-
 		walletCfg := &asset.WalletConfig{
 			Type:        dbWallet.Type,
-			Settings:    dbWallet.Settings,
+			Settings:    settings,
 			Emit:        asset.NewWalletEmitter(c.notes, assetID, log),
 			PeersChange: peersChange,
 			DataDir:     c.assetDataDirectory(assetID),
 		}
 
-		walletCfg.Settings[asset.SpecialSettingActivelyUsed] =
+		settings[asset.SpecialSettingActivelyUsed] =
 			strconv.FormatBool(c.assetHasActiveOrders(dbWallet.AssetID))
-		defer delete(walletCfg.Settings, asset.SpecialSettingActivelyUsed)
+		defer delete(settings, asset.SpecialSettingActivelyUsed)
 
 		w, err = asset.OpenWallet(assetID, walletCfg, log, c.net)
 	} else {
@@ -2997,7 +3012,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 
 		w, err = tokenMaster.OpenTokenWallet(&asset.TokenConfig{
 			AssetID:     assetID,
-			Settings:    dbWallet.Settings,
+			Settings:    settings,
 			Emit:        asset.NewWalletEmitter(c.notes, assetID, log),
 			PeersChange: peersChange,
 		})
@@ -3290,8 +3305,8 @@ func (c *Core) RecoverWallet(assetID uint32, appPW []byte, force bool) error {
 
 	oldWallet, found := c.wallet(assetID)
 	if !found {
-		return fmt.Errorf("RecoverWallet: wallet not found for %d -> %s: %w",
-			assetID, unbip(assetID), err)
+		return fmt.Errorf("RecoverWallet: wallet not found for %d -> %s",
+			assetID, unbip(assetID))
 	}
 
 	recoverer, isRecoverer := oldWallet.Wallet.(asset.Recoverer)
@@ -4639,7 +4654,6 @@ func (c *Core) Login(pw []byte) error {
 		c.resolveActiveTrades(crypter)
 		c.notify(newLoginNote("Connecting to DEX servers..."))
 		c.initializeDEXConnections(crypter)
-
 	}
 
 	return nil
@@ -5701,7 +5715,15 @@ func (c *Core) SingleLotFees(form *SingleLotFeesForm) (swapFees, redeemFees, ref
 		}
 		swapFeeRate, redeemFeeRate = swapAsset.MaxFeeRate, redeemAsset.MaxFeeRate
 	} else {
-		swapFeeRate = c.feeSuggestion(dc, wallets.fromWallet.AssetID) // server rates only for the swap init
+		// For dynamic swappers, use the wallet rate, becuase the server sends
+		// the max fee rate. For non-dynamic swappers use the server rates,
+		// because this is what swaps will need to use.
+		_, isDynamicSwapper := wallets.fromWallet.Wallet.(asset.DynamicSwapper)
+		if isDynamicSwapper {
+			swapFeeRate = c.feeSuggestionAny(wallets.fromWallet.AssetID) // wallet rate or server rate
+		} else {
+			swapFeeRate = c.feeSuggestion(dc, wallets.fromWallet.AssetID) // server rates only for the swap init
+		}
 		if swapFeeRate == 0 {
 			return 0, 0, 0, fmt.Errorf("failed to get swap fee suggestion for %s at %s", wallets.fromWallet.Symbol, form.Host)
 		}
@@ -7259,7 +7281,7 @@ func (c *Core) AssetBalance(assetID uint32) (*WalletBalance, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%d -> %s wallet error: %w", assetID, unbip(assetID), err)
 	}
-	return c.updateWalletBalance(wallet)
+	return c.walletBalance(wallet)
 }
 
 func pluralize(n int) string {
@@ -9337,10 +9359,8 @@ func (c *Core) schedTradeTick(tracker *trackedTrade) {
 	}
 
 	// Schedule a tick for this trade.
-	delay := 2*time.Second + time.Duration(numMatches)*time.Second/10 // 1 sec extra delay for every 10 active matches
-	if delay > 5*time.Second {
-		delay = 5 * time.Second
-	}
+	// 1 sec extra delay for every 10 active matches
+	delay := min(2*time.Second+time.Duration(numMatches)*time.Second/10, 5*time.Second)
 	c.log.Debugf("Waiting %v to tick trade %v with %d active matches", delay, oid, numMatches)
 	c.tickSched[oid] = time.AfterFunc(delay, func() {
 		c.tickSchedMtx.Lock()
@@ -9602,7 +9622,7 @@ func (c *Core) handleBridgeCompleted(n *asset.BridgeCompletedNote) {
 		return
 	}
 
-	sourceWallet.MarkBridgeComplete(n.InitiationTxID, n.CompletionTxID, n.CompletionTime)
+	sourceWallet.MarkBridgeComplete(n.InitiationTxID, n.CompletionTxID)
 }
 
 // handleWalletNotification processes an asynchronous wallet notification.

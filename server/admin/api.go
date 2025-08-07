@@ -35,7 +35,7 @@ func writeJSON(w http.ResponseWriter, thing any) {
 	writeJSONWithStatus(w, thing, http.StatusOK)
 }
 
-// writeJSON marshals the provided interface and writes the bytes to the
+// writeJSONWithStatus marshals the provided interface and writes the bytes to the
 // ResponseWriter with the specified response code.
 func writeJSONWithStatus(w http.ResponseWriter, thing any, code int) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -451,20 +451,26 @@ func (s *Server) apiEnableDataAPI(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, msg)
 }
 
-// apiAccountInfo is the handler for the '/account/{account id}' API request.
-func (s *Server) apiAccountInfo(w http.ResponseWriter, r *http.Request) {
+func extractAccountID(r *http.Request) (acctID account.AccountID, _ error) {
 	acctIDStr := chi.URLParam(r, accountIDKey)
 	acctIDSlice, err := hex.DecodeString(acctIDStr)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("could not decode account id: %v", err), http.StatusBadRequest)
-		return
+		return acctID, fmt.Errorf("could not decode account id: %v", err)
 	}
 	if len(acctIDSlice) != account.HashSize {
-		http.Error(w, "account id has incorrect length", http.StatusBadRequest)
+		return acctID, errors.New("account id has incorrect length")
+	}
+	copy(acctID[:], acctIDSlice)
+	return acctID, nil
+}
+
+// apiAccountInfo is the handler for the '/account/{account id}' API request.
+func (s *Server) apiAccountInfo(w http.ResponseWriter, r *http.Request) {
+	acctID, err := extractAccountID(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	var acctID account.AccountID
-	copy(acctID[:], acctIDSlice)
 	acctInfo, err := s.core.AccountInfo(acctID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to retrieve account: %v", err), http.StatusInternalServerError)
@@ -521,6 +527,19 @@ func (s *Server) prepayBonds(w http.ResponseWriter, r *http.Request) {
 		res[i] = coinIDs[i]
 	}
 	writeJSON(w, res)
+}
+
+func (s *Server) forgiveUser(w http.ResponseWriter, r *http.Request) {
+	acctID, err := extractAccountID(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.core.ForgiveUser(acctID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, "ok")
 }
 
 // decodeAcctID checks a string as being both hex and the right length and

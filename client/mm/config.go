@@ -50,6 +50,10 @@ type CEXConfig struct {
 type AutoRebalanceConfig struct {
 	MinBaseTransfer  uint64 `json:"minBaseTransfer"`
 	MinQuoteTransfer uint64 `json:"minQuoteTransfer"`
+	// InternalOnly means that the bot will only simulate transfers by
+	// allocating unallocated funds to the bot's balance and never actually
+	// perform deposits and withdrawals with the CEX.
+	InternalOnly bool `json:"internalOnly"`
 }
 
 func (a *AutoRebalanceConfig) copy() *AutoRebalanceConfig {
@@ -199,7 +203,7 @@ func (c *BotConfig) validate() error {
 	} else if c.SimpleArbConfig != nil {
 		return c.SimpleArbConfig.validate()
 	} else if c.ArbMarketMakerConfig != nil {
-		return c.ArbMarketMakerConfig.validate()
+		return c.ArbMarketMakerConfig.validate(c.BaseID, c.QuoteID)
 	}
 
 	return fmt.Errorf("no bot config set")

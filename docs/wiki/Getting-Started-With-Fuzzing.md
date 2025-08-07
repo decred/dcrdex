@@ -1,4 +1,5 @@
 <a id="top"></a>
+
 # Getting Started With Fuzzing
 
 Go started supporting fuzzing in its standard toolchain [beginning in Go 1.18](https://go.dev/doc/fuzz/). Fuzzing is a type of automated testing which continuously manipulates inputs to a program to find issues such as panics or bugs. These semi-random data mutations can discover new code coverage that existing unit tests may miss, and uncover edge case bugs which would otherwise go unnoticed. Since fuzzing can reach these edge cases, fuzz testing is particularly valuable for finding security exploits and vulnerabilities.

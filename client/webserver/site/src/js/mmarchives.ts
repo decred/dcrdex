@@ -11,6 +11,7 @@ import { setMarketElements } from './mmutil'
 interface MarketMakingRun {
   startTime: number
   market: MarketWithHost
+  profit: number
 }
 
 export default class MarketMakerArchivesPage extends BasePage {
@@ -37,13 +38,27 @@ export default class MarketMakerArchivesPage extends BasePage {
 
     const runs : MarketMakingRun[] = res.runs
 
+    const profitStr = (profit: number) : [string, string] => {
+      const profitStr = profit.toFixed(2)
+      if (profitStr === '-0.00' || profitStr === '0.00') {
+        return ['$0.00', '']
+      } else if (profit < 0) {
+        return [`-$${profitStr.substring(1)}`, 'sellcolor']
+      }
+      return [`$${profitStr}`, 'buycolor']
+    }
+
+    let totalProfit = 0
     for (let i = 0; i < runs.length; i++) {
-      const { startTime, market: { baseID, quoteID, host } } = runs[i]
+      const { startTime, market: { baseID, quoteID, host }, profit } = runs[i]
       const row = this.page.runTableRowTmpl.cloneNode(true) as HTMLElement
       const tmpl = Doc.parseTemplate(row)
       tmpl.startTime.textContent = new Date(startTime * 1000).toLocaleString()
       setMarketElements(row, baseID, quoteID, host)
-
+      const [profitText, profitColor] = profitStr(profit)
+      tmpl.profit.textContent = profitText
+      if (profitColor) tmpl.profit.classList.add(profitColor)
+      totalProfit += profit
       Doc.bind(tmpl.logs, 'click', () => {
         app().loadPage('mmlogs', { baseID, quoteID, host, startTime, returnPage: 'mmarchives' })
       })
@@ -54,5 +69,10 @@ export default class MarketMakerArchivesPage extends BasePage {
 
       this.page.runTableBody.appendChild(row)
     }
+
+    const [profitText, profitColor] = profitStr(totalProfit)
+    this.page.totalProfit.textContent = profitText
+    if (profitColor) this.page.totalProfit.classList.add(profitColor)
+    this.page.numRuns.textContent = `${runs.length}`
   }
 }

@@ -79,10 +79,6 @@ func newLimit(sell bool, rate, quantityLots uint64, force order.TimeInForce, tim
 	}
 }
 
-func newMarketSellOrder(quantityLots uint64, timeOffset int64) *order.MarketOrder {
-	return newMarketSell(quantityLots, timeOffset).Order.(*order.MarketOrder)
-}
-
 func newMarketSell(quantityLots uint64, timeOffset int64) *matcher.OrderRevealed {
 	pi := randomPreimage()
 	return &matcher.OrderRevealed{
@@ -105,10 +101,6 @@ func newMarketSell(quantityLots uint64, timeOffset int64) *matcher.OrderRevealed
 		},
 		Preimage: pi,
 	}
-}
-
-func newMarketBuyOrder(quantityQuoteAsset uint64, timeOffset int64) *order.MarketOrder {
-	return newMarketBuy(quantityQuoteAsset, timeOffset).Order.(*order.MarketOrder)
 }
 
 func newMarketBuy(quantityQuoteAsset uint64, timeOffset int64) *matcher.OrderRevealed {
@@ -149,9 +141,9 @@ func newCancel(targetOrderID order.OrderID, serverTime time.Time) *matcher.Order
 	}
 }
 
-func newCancelOrder(targetOrderID order.OrderID, serverTime time.Time) *order.CancelOrder {
-	return newCancel(targetOrderID, serverTime).Order.(*order.CancelOrder)
-}
+// func newCancelOrder(targetOrderID order.OrderID, serverTime time.Time) *order.CancelOrder {
+// 	return newCancel(targetOrderID, serverTime).Order.(*order.CancelOrder)
+// }
 
 var (
 	// Create a coherent order book of standing orders and sorted rates.

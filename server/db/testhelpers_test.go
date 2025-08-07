@@ -22,7 +22,7 @@ var (
 	AssetBTC uint32
 )
 
-func startLogger() {
+func init() {
 	logger := dex.StdOutLogger("ORDER_DB_TEST", dex.LevelTrace)
 	UseLogger(logger)
 }
@@ -83,24 +83,24 @@ func newMarketSellOrder(quantityLots uint64, timeOffset int64) *order.MarketOrde
 	}
 }
 
-func newMarketBuyOrder(quantityQuoteAsset uint64, timeOffset int64) *order.MarketOrder {
-	return &order.MarketOrder{
-		P: order.Prefix{
-			AccountID:  acct0,
-			BaseAsset:  AssetDCR,
-			QuoteAsset: AssetBTC,
-			OrderType:  order.MarketOrderType,
-			ClientTime: time.Unix(1566497653+timeOffset, 0),
-			ServerTime: time.Unix(1566497656+timeOffset, 0),
-		},
-		T: order.Trade{
-			Coins:    []order.CoinID{},
-			Sell:     false,
-			Quantity: quantityQuoteAsset,
-			Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
-		},
-	}
-}
+// func newMarketBuyOrder(quantityQuoteAsset uint64, timeOffset int64) *order.MarketOrder {
+// 	return &order.MarketOrder{
+// 		P: order.Prefix{
+// 			AccountID:  acct0,
+// 			BaseAsset:  AssetDCR,
+// 			QuoteAsset: AssetBTC,
+// 			OrderType:  order.MarketOrderType,
+// 			ClientTime: time.Unix(1566497653+timeOffset, 0),
+// 			ServerTime: time.Unix(1566497656+timeOffset, 0),
+// 		},
+// 		T: order.Trade{
+// 			Coins:    []order.CoinID{},
+// 			Sell:     false,
+// 			Quantity: quantityQuoteAsset,
+// 			Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
+// 		},
+// 	}
+// }
 
 func newCancelOrder(targetOrderID order.OrderID, base, quote uint32, timeOffset int64) *order.CancelOrder {
 	return &order.CancelOrder{

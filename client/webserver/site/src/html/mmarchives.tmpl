@@ -7,13 +7,27 @@
     </div>
     <div class="flex-center fs24 p-2 flex-grow-1">[[[previous_mm_runs]]]</div>
   </div>
-  <div class="px-5 py-3 w-100">
+  <div class="d-flex flex-wrap px-5 py-1">
+    <section class="datum border me-2">
+      <div class="border-bottom py-1 px-3">[[[Number of Runs]]]</div>
+      <div class="py-1 px-3" id="numRuns"></div>
+    </section>
+    <section class="datum border me-2">
+      <div class="border-bottom py-1 px-3">
+        [[[Total Profit]]]
+        <span class="ico-info fs12 ms-1" data-tooltip="[[[total_profit_tooltip]]]"></span>
+      </div>
+      <div class="py-1 px-3" id="totalProfit"></div>
+    </section>
+  </div>
+  <div class="px-5 py-1 w-100">
     <section>
       <table id="runTable" class="striped row-hover row-border">
         <thead>
           <th scope="col">[[[start_time]]]</th>
           <th scope="col">[[[Host]]]</th>
           <th scope="col">[[[Market]]]</th>
+          <th scope="col">[[[Profit]]]</th>
           <th scope="col">[[[logs]]]</th>
           <th scope="col">[[[Settings]]]</th>
         </thead>
@@ -27,8 +41,9 @@
               <img class="mini-icon" data-quote-logo>
               <span data-quote-ticker></span>
             </td>
+            <td data-tmpl="profit"></td>
             <td><button data-tmpl="logs">[[[view_logs]]]</button></td>
-            <td><span class="ico-settings fs20 pointer mx-2" data-tmpl="settings"></span></td>        
+            <td><span class="ico-settings fs20 pointer mx-2" data-tmpl="settings"></span></td>
           </tr>
         </tbody>
       </table>

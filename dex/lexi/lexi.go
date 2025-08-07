@@ -33,10 +33,11 @@ func convertError(err error) error {
 // the ability to add indexed data.
 type DB struct {
 	*badger.DB
-	log      dex.Logger
-	idSeq    *badger.Sequence
-	wg       sync.WaitGroup
-	updateWG sync.WaitGroup
+	log        dex.Logger
+	idSeq      *badger.Sequence
+	wg         sync.WaitGroup
+	updateWG   sync.WaitGroup
+	upgradeTxn *badger.Txn
 }
 
 // Config is the configuration settings for the Lexi DB.
@@ -48,7 +49,6 @@ type Config struct {
 // New constructs a new Lexi DB.
 func New(cfg *Config) (*DB, error) {
 	opts := badger.DefaultOptions(cfg.Path).WithLogger(&badgerLoggerWrapper{cfg.Log.SubLogger("BADG")})
-	var err error
 	bdb, err := badger.Open(opts)
 	if err == badger.ErrTruncateNeeded {
 		// Probably a Windows thing.
@@ -105,6 +105,37 @@ func (db *DB) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	return &db.wg, nil
 }
 
+// GetDBVersion retrieves the current database version.
+// If the version was never set, 0 is returned.
+func (db *DB) GetDBVersion() (version uint32, err error) {
+	err = db.View(func(txn *badger.Txn) error {
+		versionItem, err := txn.Get(versionPrefix[:])
+		if err != nil {
+			if err == badger.ErrKeyNotFound {
+				version = 0
+				return nil
+			}
+			return err
+		}
+		return versionItem.Value(func(b []byte) error {
+			version = binary.BigEndian.Uint32(b)
+			return nil
+		})
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	return
+}
+
+// SetDBVersion sets the current database version in the DB.
+func (db *DB) SetDBVersion(version uint32, txn *badger.Txn) error {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint32(b[:], version)
+	return txn.Set(versionPrefix[:], b)
+}
+
 // Update: badger can return an ErrConflict if a read and write happen
 // concurrently. This bugs the hell out of me, because I though that if a
 // database was ACID-compliant, this was impossible, but I guess not. Either
@@ -117,9 +148,15 @@ func (db *DB) Update(f func(txn *badger.Txn) error) (err error) {
 	sleepTime := 5 * time.Millisecond
 
 	for i := 0; i < maxRetries; i++ {
-		if err = db.DB.Update(f); err == nil || !errors.Is(err, badger.ErrConflict) {
+		if db.upgradeTxn == nil {
+			err = db.DB.Update(f)
+		} else {
+			err = f(db.upgradeTxn)
+		}
+		if err == nil || !errors.Is(err, badger.ErrConflict) {
 			return err
 		}
+
 		sleepTime *= 2
 		time.Sleep(sleepTime)
 	}
@@ -127,10 +164,20 @@ func (db *DB) Update(f func(txn *badger.Txn) error) (err error) {
 	return err
 }
 
-// prefixForName returns a unique prefix for the provided name and logs the
-// relationship in the DB. Repeated calls to prefixForName with the same name
-// will return the same prefix, including through restarts.
-func (db *DB) prefixForName(name string) (prefix keyPrefix, _ error) {
+// Upgrade provides a way to perform a series of db updates under a single
+// transaction. All calls to Upgrade must happen synchronously when the
+// database is initialized and not being used by any other goroutines.
+func (db *DB) Upgrade(upgrade func() error) error {
+	return db.DB.Update(func(txn *badger.Txn) error {
+		db.upgradeTxn = txn
+		defer func() {
+			db.upgradeTxn = nil
+		}()
+		return upgrade()
+	})
+}
+
+func (db *DB) prefixForNameImpl(name string, existing bool) (prefix keyPrefix, _ error) {
 	nameKey := prefixedKey(nameToPrefixPrefix, []byte(name))
 	return prefix, db.Update(func(txn *badger.Txn) error {
 		it, err := txn.Get(nameKey)
@@ -139,6 +186,9 @@ func (db *DB) prefixForName(name string) (prefix keyPrefix, _ error) {
 				prefix = bytesToPrefix(b)
 				return nil
 			})
+		}
+		if errors.Is(err, badger.ErrKeyNotFound) && existing {
+			return badger.ErrKeyNotFound
 		}
 		if !errors.Is(err, badger.ErrKeyNotFound) {
 			return fmt.Errorf("error getting name: %w", err)
@@ -157,6 +207,20 @@ func (db *DB) prefixForName(name string) (prefix keyPrefix, _ error) {
 		}
 		return nil
 	})
+}
+
+// existingPrefixForName is like prefixForName, but it does not create a
+// new prefix if the name is not found. Instead, it returns
+// badger.ErrKeyNotFound.
+func (db *DB) existingPrefixForName(name string) (prefix keyPrefix, _ error) {
+	return db.prefixForNameImpl(name, true)
+}
+
+// prefixForName returns a unique prefix for the provided name and logs the
+// relationship in the DB. Repeated calls to prefixForName with the same name
+// will return the same prefix, including through restarts.
+func (db *DB) prefixForName(name string) (prefix keyPrefix, _ error) {
+	return db.prefixForNameImpl(name, false)
 }
 
 func (db *DB) nextID() (dbID DBID, _ error) {

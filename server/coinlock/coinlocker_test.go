@@ -26,28 +26,8 @@ func randomOrderID() order.OrderID {
 	return id
 }
 
-// utxo implements order.Outpoint
-type utxo struct {
-	txHash []byte
-	vout   uint32
-}
-
-func (u *utxo) TxHash() []byte { return u.txHash }
-func (u *utxo) Vout() uint32   { return u.vout }
-
 func randcomCoinID() order.CoinID {
 	return randomBytes(36)
-}
-
-func verifyLocked(cl CoinLockChecker, coins []CoinID, wantLocked bool, t *testing.T) bool {
-	for _, coin := range coins {
-		locked := cl.CoinLocked(coin)
-		if locked != wantLocked {
-			t.Errorf("Coin %v locked=%v, wanted=%v.", coin, locked, wantLocked)
-			return false
-		}
-	}
-	return true
 }
 
 func Test_swapLocker_LockOrderCoins(t *testing.T) {

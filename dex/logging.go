@@ -6,6 +6,7 @@ package dex
 import (
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -188,9 +189,7 @@ func NewLoggerMaker(writer io.Writer, debugLevel string, utc ...bool) (*LoggerMa
 // SetLevelsFromMap sets all logs for certain subsystems with the same name to
 // the corresponding log level in the map.
 func (lm *LoggerMaker) SetLevelsFromMap(lvls map[string]slog.Level) {
-	for name, lvl := range lvls {
-		lm.Levels[name] = lvl
-	}
+	maps.Copy(lm.Levels, lvls)
 }
 
 // SetLevels either set the DefaultLevel or resets the Levels map for future

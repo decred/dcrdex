@@ -355,7 +355,7 @@ func MustCompareUserMatch(t testKiller, m1, m2 *order.UserMatch) {
 	}
 }
 
-// MustCompareUserMatch compares the LimitOrders field-by-field and calls the
+// MustCompareLimitOrders compares the LimitOrders field-by-field and calls the
 // Fatalf method on the supplied testKiller if a mismatch is encountered.
 func MustCompareLimitOrders(t testKiller, l1, l2 *order.LimitOrder) {
 	t.Helper()
