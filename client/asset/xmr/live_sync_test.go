@@ -1,4 +1,4 @@
-///go:build xmrlive
+//go:build xmrlive
 
 package xmr
 
