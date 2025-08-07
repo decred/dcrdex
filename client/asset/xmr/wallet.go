@@ -6,65 +6,119 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"time"
 
 	"decred.org/dcrdex/client/asset"
+	"decred.org/dcrdex/dex"
 	"github.com/dev-warrior777/go-monero/rpc"
 )
 
 const (
-	WalletFileName    = "dex"
-	WalletKeyfileName = "dex.keys"
 	MainAccountIndex  = 0
+	GetVersionTimeout = 3 * time.Second
 )
 
+const (
+	CheckpointMainnet  = 3375700
+	CheckpointStagenet = 550000
+)
+
+var errSyncing = errors.New("currently syncing wallet")
 var errRescanning = errors.New("currently rescanning wallet")
 
-// stopWallet RPC stores the current state of any open wallet and exits the
-// running monero-wallet-rpc process.
-func (r *xmrRpc) stopWallet() error {
-	return r.wallet.StopWallet(r.ctx)
-}
-
-func (r *xmrRpc) keysFileMissing() bool {
-	walletKeyFile := path.Join(r.dataDir, WalletKeyfileName)
-	if _, err := os.Stat(walletKeyFile); errors.Is(err, os.ErrNotExist) {
+// walletFilesMissing checks if either or both wallet db files are missing
+func walletFilesMissing(dataDir string) bool {
+	walletFile := path.Join(dataDir, WalletFileName)
+	walletKeysFile := path.Join(dataDir, WalletKeysFileName)
+	exists := func(dbFile string) bool {
+		_, err := os.Stat(dbFile)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return false
+			}
+			// other stat error
+			// Overwriting these files trashes existing wallet db. Consider backup
+			return true
+		}
 		return true
 	}
-	return false
+	if exists(walletFile) && exists(walletKeysFile) {
+		return false
+	}
+	return true
 }
 
-func (r *xmrRpc) openWallet() error {
-	if r.isReScanning() {
-		return errRescanning
-	}
+func (r *xmrRpc) openWallet(ctx context.Context, pw string) error {
 	openRq := rpc.OpenWalletRequest{
 		Filename: WalletFileName,
-		Password: "",
+		Password: pw,
 	}
-	return r.wallet.OpenWallet(r.ctx, &openRq)
+	return r.wallet.OpenWallet(ctx, &openRq)
 }
 
-func (r *xmrRpc) closeWallet() error {
-	if r.isReScanning() {
-		return errRescanning
+func (r *xmrRpc) walletServerRunning() bool {
+	verCtx, cancel := context.WithTimeout(r.ctx, GetVersionTimeout)
+	defer cancel()
+	_, err := r.wallet.GetVersion(verCtx)
+	// just assume error means RPC or net error and the process is not running
+	if err != nil {
+		return false
 	}
-	return r.wallet.CloseWallet(r.ctx)
+	return true
 }
 
-func (r *xmrRpc) createWallet() error {
-	if r.isReScanning() {
-		return errRescanning
+func (r *xmrRpc) walletSynced() (uint64, uint64, bool, error) {
+	r.daemonState.RLock()
+	daemonHeight := r.daemonState.height
+	r.daemonState.RUnlock()
+	walletHeight, err := r.getWalletHeight()
+	if err != nil {
+		return 0, 0, false, err
 	}
-	createRq := rpc.CreateWalletRequest{
-		Filename: WalletFileName,
-		Password: "",
-		Language: "English", // mnemonic words language
+	return daemonHeight, walletHeight, walletHeight == daemonHeight, nil
+}
+
+func (r *xmrRpc) syncStatus() (*asset.SyncStatus, error) {
+	checkpoint := getCheckpoint(r.net)
+
+	r.daemonState.RLock()
+	numPeers := r.daemonState.numPeers
+	r.daemonState.RUnlock()
+
+	daemonHeight, walletHeight, walletSynced, err := r.walletSynced()
+	if err != nil {
+		return nil, err
 	}
-	return r.wallet.CreateWallet(r.ctx, &createRq)
+
+	if walletSynced {
+		r.sync.Store(false)
+	}
+
+	r.synclog.Debugf("syncStatus: numPeers: %d daemonHeight: %d walletHeight: %d start: %d walletSynced %v",
+		numPeers, daemonHeight, walletHeight, checkpoint, walletSynced)
+
+	ss := &asset.SyncStatus{
+		Synced:         walletSynced && (numPeers > 0),
+		TargetHeight:   daemonHeight,
+		StartingBlocks: checkpoint,
+		Blocks:         walletHeight,
+	}
+	return ss, nil
+}
+
+func getCheckpoint(net dex.Network) uint64 {
+	var cp = uint64(0)
+	switch net {
+	case dex.Mainnet:
+		cp = CheckpointMainnet
+	case dex.Testnet:
+		cp = CheckpointStagenet
+	}
+	return cp
 }
 
 func (r *xmrRpc) getWalletHeight() (uint64, error) {
-	if r.isReScanning() {
+	if r.rescanning() {
 		return 0, errRescanning
 	}
 	ghResp, err := r.wallet.GetHeight(r.ctx)
@@ -74,55 +128,12 @@ func (r *xmrRpc) getWalletHeight() (uint64, error) {
 	return ghResp.Height, nil
 }
 
-func (r *xmrRpc) syncStatus() (*asset.SyncStatus, error) {
-	var walletSynced = false
-	r.daemonStateMtx.RLock()
-	defer r.daemonStateMtx.RUnlock()
-	if r.daemonState.synchronized && !r.daemonState.busySyncing {
-		walletHeight, err := r.getWalletHeight()
-		if err != nil {
-			return nil, err
-		}
-		if walletHeight >= r.daemonState.height {
-			walletSynced = true
-		}
-	}
-
-	ss := &asset.SyncStatus{
-		Synced:         walletSynced && r.daemonState.numPeers > 0,
-		TargetHeight:   r.daemonState.targetHeight,
-		StartingBlocks: r.daemonState.connectHeight,
-		Blocks:         r.daemonState.height,
-	}
-	return ss, nil
-}
-
-// refresh can be used as an immediate manual alternative to auto-refresh
-func (r *xmrRpc) refresh() (uint64, bool, error) {
-	if r.isReScanning() {
-		return 0, false, errRescanning
-	}
-	refreshRq := rpc.RefreshRequest{}
-	refreshResp, err := r.wallet.Refresh(r.ctx, &refreshRq)
-	if err != nil {
-		return 0, false, err
-	}
-	return refreshResp.BlocksFetched, refreshResp.ReceivedMoney, nil
-}
-
-// setAutoRefresh enables auto-refresh between monerod and wallet-rpc. It is on
-// by default anyway but 20s interval
-func (r *xmrRpc) setAutoRefresh() error {
-	autoRq := rpc.AutoRefreshRequest{
-		Enable: true,
-		Period: AutoRefreshInterval,
-	}
-	return r.wallet.AutoRefresh(r.ctx, &autoRq)
-}
-
 func (r *xmrRpc) getBalance() (uint64, uint64, error) {
-	if r.isReScanning() {
-		return 0, 0, errRescanning
+	if r.syncing() {
+		return 0, 0, nil
+	}
+	if r.rescanning() {
+		return 0, 0, nil
 	}
 	gbRq := rpc.GetBalanceRequest{
 		AccountIndex: MainAccountIndex,
@@ -134,19 +145,39 @@ func (r *xmrRpc) getBalance() (uint64, uint64, error) {
 	return gbResp.Balance, gbResp.UnlockedBalance, nil
 }
 
+func (r *xmrRpc) getPrimaryAddress() (string, error) {
+	if r.syncing() {
+		return "wallet syncing", nil
+	}
+	if r.rescanning() {
+		return "wallet busy recanning", nil
+	}
+	gaRq := rpc.GetAddressRequest{
+		AccountIndex: 0,
+		AddressIndex: []uint64{0},
+	}
+	gaResp, err := r.wallet.GetAddress(r.ctx, &gaRq)
+	if err != nil {
+		return "", err
+	}
+	return gaResp.Address, err
+}
+
 func (r *xmrRpc) getAddressUsage(accountIdx uint64, address string) (bool, error) {
-	if r.isReScanning() {
+	if r.syncing() {
+		return false, errSyncing
+	}
+	if r.rescanning() {
 		return false, errRescanning
 	}
 	gaRq := rpc.GetAddressRequest{
 		AccountIndex: accountIdx,
-		// AddressIndex: empty => return all subaddresses
 	}
 	gaResp, err := r.wallet.GetAddress(r.ctx, &gaRq)
 	if err != nil {
 		return false, err
 	}
-	for _, a := range gaResp.Addresses {
+	for _, a := range gaResp.Addresses { // TODO(xmr) cache latest
 		if a.Address == address {
 			return a.Used, nil
 		}
@@ -155,9 +186,16 @@ func (r *xmrRpc) getAddressUsage(accountIdx uint64, address string) (bool, error
 }
 
 func (r *xmrRpc) getNewAddress(accountIdx uint64) (string, error) {
-	if r.isReScanning() {
-		return "", errRescanning
+	if r.syncing() {
+		r.walletInfo.Lock()
+		primaryAddress := r.walletInfo.primaryAddress
+		r.walletInfo.Unlock()
+		return primaryAddress, nil
 	}
+	if r.rescanning() {
+		return "wallet busy recanning", nil
+	}
+
 	caRq := rpc.CreateAddressRequest{
 		AccountIndex: accountIdx,
 		Count:        1,
@@ -170,8 +208,10 @@ func (r *xmrRpc) getNewAddress(accountIdx uint64) (string, error) {
 }
 
 func (r *xmrRpc) validateAddress(address string) bool {
-	if r.isReScanning() {
-		r.log.Debugf("rescanning: failed to validate address: %s", address)
+	if r.syncing() {
+		return false
+	}
+	if r.rescanning() {
 		return false
 	}
 	valRq := rpc.ValidateAddressRequest{
@@ -188,12 +228,14 @@ func (r *xmrRpc) validateAddress(address string) bool {
 }
 
 func (r *xmrRpc) isOurAddress(accountIdx uint64, address string) (bool, error) {
-	if r.isReScanning() {
+	if r.syncing() {
+		return true, nil
+	}
+	if r.rescanning() {
 		return false, errRescanning
 	}
 	gaRq := rpc.GetAddressRequest{
 		AccountIndex: accountIdx,
-		// AddressIndex: empty => return all subaddresses
 	}
 	gaResp, err := r.wallet.GetAddress(r.ctx, &gaRq)
 	if err != nil {
@@ -208,7 +250,10 @@ func (r *xmrRpc) isOurAddress(accountIdx uint64, address string) (bool, error) {
 }
 
 func (r *xmrRpc) estimateTxFeeAtoms(amount uint64, toAddress string, subtract bool, priority rpc.Priority) (uint64, error) {
-	if r.isReScanning() {
+	if r.syncing() {
+		return 0, errSyncing
+	}
+	if r.rescanning() {
 		return 0, errRescanning
 	}
 	destinations := []rpc.Destination{
@@ -226,7 +271,6 @@ func (r *xmrRpc) estimateTxFeeAtoms(amount uint64, toAddress string, subtract bo
 		AccountIndex:           MainAccountIndex, // transfer from all subaddresses
 		SubtractFeeFromOutputs: subtractFeeFromOutputs,
 		Priority:               priority,
-		RingSize:               16,    // only for stagenet, regtest
 		DoNotRelay:             true,  // not default - do not broadcast
 		GetTxHex:               false, // default - not needed
 		GetTxMetadata:          false, // default - not needed as we will not send
@@ -242,7 +286,10 @@ func (r *xmrRpc) estimateTxFeeAtoms(amount uint64, toAddress string, subtract bo
 }
 
 func (r *xmrRpc) transferSimple(amount uint64, toAddress string, priority rpc.Priority) (string, error) {
-	if r.isReScanning() {
+	if r.syncing() {
+		return "", errSyncing
+	}
+	if r.rescanning() {
 		return "", errRescanning
 	}
 	// Send from account 0 from any subaddresses; to 1 destination. You do not get to pre-determine the fee.
@@ -256,7 +303,6 @@ func (r *xmrRpc) transferSimple(amount uint64, toAddress string, priority rpc.Pr
 		Destinations:  destinations,
 		AccountIndex:  MainAccountIndex, // transfer from all subaddresses
 		Priority:      priority,
-		RingSize:      16,    // only for stagenet, regtest
 		UnlockTime:    0,     // no spend lock
 		GetTxHex:      true,  // not default and needed later
 		GetTxMetadata: false, // default
@@ -272,7 +318,10 @@ func (r *xmrRpc) transferSimple(amount uint64, toAddress string, priority rpc.Pr
 }
 
 func (r *xmrRpc) withdrawSimple(toAddress string, value uint64, priority rpc.Priority) (string, error) {
-	if r.isReScanning() {
+	if r.syncing() {
+		return "", errSyncing
+	}
+	if r.rescanning() {
 		return "", errRescanning
 	}
 	// Withdraw from account 0 from all subaddresses; to 1 destination charging the fee to the destination .
@@ -293,8 +342,7 @@ func (r *xmrRpc) withdrawSimple(toAddress string, value uint64, priority rpc.Pri
 		AccountIndex:           MainAccountIndex, // transfer from all subaddresses
 		SubtractFeeFromOutputs: []uint64{0},
 		Priority:               priority,
-		RingSize:               16, // only for stagenet, regtest
-		UnlockTime:             0,  // no spend lock
+		UnlockTime:             0, // no spend lock
 		GetTxHex:               true,
 	}
 	transferResp, err := r.wallet.Transfer(r.ctx, &transferRq)
@@ -307,21 +355,31 @@ func (r *xmrRpc) withdrawSimple(toAddress string, value uint64, priority rpc.Pri
 	return transferResp.TxHash, nil
 }
 
-// rescanSpents checks wallet key images against daemon .. only if wallet trusts the server
-func (r *xmrRpc) rescanSpents(rescanCtx context.Context) error {
-	r.rescanning.Store(true)
-	defer r.rescanning.Store(false)
-	r.daemonStateMtx.Lock()
+// rescanBlockchain rescans the blockchain from scratch, losing any information
+// which can not be recovered from the blockchain itself.
+//
+// Not for restricted daemon.
+func (r *xmrRpc) rescanBlockchain(rescanCtx context.Context) error {
+	if !r.daemonIsLocal {
+		r.log.Warn("rescan blockchain is only available for a local daemon")
+		return nil
+	}
+	if r.syncing() {
+		r.synclog.Warn("trying a rescan while syncing")
+		return nil
+	}
+	if r.rescanning() {
+		return fmt.Errorf("wallet busy rescanning")
+	}
+	r.rescan.Store(true)
+	defer r.rescan.Store(false)
+	r.daemonState.Lock()
 	r.daemonState.synchronized = false
-	r.daemonStateMtx.Unlock()
-	err := r.wallet.RescanSpent(rescanCtx) // synchronous
+	r.daemonState.Unlock()
+	err := r.wallet.RescanBlockchain(rescanCtx) // synchronous
 	if err != nil {
-		r.log.Errorf("rescanSpents - %v", err)
+		r.log.Errorf("rescanBlockchain - %v", err)
 		return err
 	}
 	return nil
-}
-
-func (r *xmrRpc) isReScanning() bool {
-	return r.rescanning.Load()
 }

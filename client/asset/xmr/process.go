@@ -1,28 +1,37 @@
 package xmr
 
 import (
-	"errors"
+	"context"
 	"fmt"
-	"net/http"
 	"os/exec"
 	"path"
+	"runtime"
+	"strings"
 
 	"decred.org/dcrdex/dex"
-	"github.com/dev-warrior777/go-monero/rpc"
 )
 
 const (
 	WalletServerRpcName = "monero-wallet-rpc"
 	WalletLogfileName   = WalletServerRpcName + ".log"
-	WalletLogLevel      = "1"
+	WalletLogLevel      = "2"
+	WalletFileName      = "dex"
+	WalletKeysFileName  = "dex.keys"
 )
 
 const (
-	HttpLocalhost               = "http://127.0.0.1:"
-	Json2query                  = "/json_rpc"
-	MainnetWalletServerRpcPort  = "18083"
-	StagenetWalletServerRpcPort = "38083"
-	RegtestWalletServerRpcPort  = MainnetWalletServerRpcPort
+	CliName        = "monero-wallet-cli"
+	CliLogfileName = CliName + ".log"
+	CliLogLevel    = "3"
+)
+
+const (
+	HttpLocalhost                       = "http://127.0.0.1:"
+	Json2query                          = "/json_rpc"
+	MainnetWalletServerRpcPort          = "18083"
+	StagenetWalletServerRpcPort         = "38083"
+	DefaultRegtestWalletServerRpcPort   = "18083"
+	AlternateRegtestWalletServerRpcPort = "18087"
 )
 
 const (
@@ -31,70 +40,67 @@ const (
 	StagenetParam                     = "--stagenet"
 	TrustedDaemonParam                = "--trusted-daemon"
 	WalletDirParam                    = "--wallet-dir="
+	WalletFileParam                   = "--wallet-file="
 	DisableRpcLoginParam              = "--disable-rpc-login"
-	DaemonLoginParam                  = "--daemon-login=" // currently unused
 	AllowMismatchedDaemonVersionParam = "--allow-mismatched-daemon-version"
 	LogFileParam                      = "--log-file="
 	LogLevelParam                     = "--log-level="
 )
 
-func (r *xmrRpc) startWalletServer() error {
-	r.log.Trace("startWalletServer")
-	// first check out the daemon which should be up and running remotely or up
-	// and running on localhost if it is the end user's personal monerod server.
-	daemonAddress := r.serverAddr + Json2query
-	daemon := rpc.New(rpc.Config{
-		Address: daemonAddress,
-		Client:  &http.Client{ /*default no auth HTTP client*/ },
-	})
-	giResp, err := daemon.DaemonGetInfo(r.ctx)
+const (
+	CliGenerateNewWalletParam       = "--generate-new-wallet"
+	CliMnemonicLanguageEnglishParam = "--mnemonic-language=English" // hard code
+	CliPasswordParam                = "--password="
+	CliPasswordFileParam            = "--password-file=" //TODO(xmr)
+	CliOfflineParam                 = "--offline"
+	CliCommandBalanceParam          = "--command=balance"
+	CliCommandAddressParam          = "--command=address"
+	CliCommandRefreshParam          = "--command=refresh"
+)
+
+func (r *xmrRpc) probeDaemon() error {
+	r.log.Trace("probeDaemon")
+	info, err := r.getInfo()
 	if err != nil {
 		return err
 	}
-	if giResp.Status != "OK" {
-		r.log.Debug("DaemonGetInfo: bad status: %s", giResp.Status)
-		return errBadDaemonStatus
+	if info.Status != "OK" {
+		return fmt.Errorf("daemon bad status: %w - expected 'OK'", err)
 	}
+	r.daemonState.Lock()
+	r.daemonState.height = info.Height
+	r.daemonState.blockHash = info.TopBlockHash
+	r.daemonState.synchronized = info.Sychronized
+	r.daemonState.restricted = info.Restricted
+	r.daemonState.untrusted = info.Untrusted
+	r.log.Debugf("daemon %s -- height: %d, synchronized: %v, restricted: %v, untrusted: %v", r.daemonAddr,
+		r.daemonState.height, r.daemonState.synchronized, r.daemonState.restricted, r.daemonState.untrusted)
+	r.daemonState.Unlock()
+	return nil
+}
 
-	r.daemonStateMtx.Lock() // future
-	r.daemonState.height = giResp.Height
-	r.daemonState.connectHeight = giResp.Height
-	r.daemonState.blockHash = giResp.TopBlockHash
-	r.daemonState.targetHeight = giResp.TargetHeight
-	r.daemonState.busySyncing = giResp.BusySyncing
-	r.daemonState.synchronized = giResp.Sychronized
-	r.daemonState.restricted = giResp.Restricted
-	r.daemonState.untrusted = giResp.Untrusted
-	r.log.Tracef("daemon %s -- height: %d, height connected: %d busy_syncing: %v, synchronized: %v, restricted: %v, untrusted: %v", r.serverAddr,
-		r.daemonState.height, r.daemonState.connectHeight, r.daemonState.busySyncing, r.daemonState.synchronized, r.daemonState.restricted, r.daemonState.untrusted)
-	r.daemonStateMtx.Unlock() // future
-
-	// store daemon rpc client
-	r.daemon = daemon
-
-	// start wallet server and connect it to the running daemon
+// startWalletServer starts the wallet server and connects it to the running daemon
+func (r *xmrRpc) startWalletServer(ctx context.Context) error {
 	walletRpc := path.Join(r.cliToolsDir, WalletServerRpcName)
-	cmd := exec.Command(walletRpc)
-	serverAddr := DaemonAddressParam + r.serverAddr
+	cmd := exec.CommandContext(ctx, walletRpc)
+	serverAddr := DaemonAddressParam + r.daemonAddr
 	cmd.Args = append(cmd.Args, serverAddr)
 	switch r.net {
 	case dex.Mainnet:
-		// mainnet
 		cmd.Args = append(cmd.Args, RpcBindPortParam+MainnetWalletServerRpcPort)
-		if r.serverIsLocal {
+		if r.daemonIsLocal {
 			cmd.Args = append(cmd.Args, TrustedDaemonParam) // wallet trusts the daemon
 		}
 	case dex.Testnet:
 		// stagenet
 		cmd.Args = append(cmd.Args, StagenetParam)
 		cmd.Args = append(cmd.Args, RpcBindPortParam+StagenetWalletServerRpcPort)
-		if r.serverIsLocal {
+		if r.daemonIsLocal {
 			cmd.Args = append(cmd.Args, TrustedDaemonParam)
 		}
 	case dex.Simnet:
-		// regtest - iff wallet server connects to a daemon which is started
-		// with the --regtest parameter
-		cmd.Args = append(cmd.Args, RpcBindPortParam+RegtestWalletServerRpcPort) // harness2
+		// regtest - iff wallet server connects to a daemon which is started with the --regtest parameter
+		cmd.Args = append(cmd.Args, RpcBindPortParam+getRegtestWalletServerRpcPort(r.dataDir)) // harness-beta
 		cmd.Args = append(cmd.Args, TrustedDaemonParam)
 	default:
 		return fmt.Errorf("unknown network")
@@ -106,43 +112,73 @@ func (r *xmrRpc) startWalletServer() error {
 	logfilePath := path.Join(r.dataDir, WalletLogfileName)
 	cmd.Args = append(cmd.Args, LogFileParam+logfilePath)
 	cmd.Args = append(cmd.Args, LogLevelParam+WalletLogLevel)
-	err = cmd.Start()
+	err := cmd.Start()
 	if err != nil {
 		return fmt.Errorf("child process start: %v", err)
 	}
 	// started
 	r.walletRpcProcess = cmd.Process
 	r.log.Debug("wallet rpc server is started")
-
-	// make a wallet rpc client; always local
-	switch r.net {
-	case dex.Mainnet:
-		r.wallet = rpc.New(rpc.Config{
-			Address: HttpLocalhost + MainnetWalletServerRpcPort + Json2query,
-			Client:  &http.Client{ /*default no auth HTTP client*/ },
-		})
-	case dex.Testnet: // stagenet
-		r.wallet = rpc.New(rpc.Config{
-			Address: HttpLocalhost + StagenetWalletServerRpcPort + Json2query,
-			Client:  &http.Client{ /*default no auth HTTP client*/ },
-		})
-	case dex.Simnet:
-		r.wallet = rpc.New(rpc.Config{
-			Address: HttpLocalhost + RegtestWalletServerRpcPort + Json2query,
-			Client:  &http.Client{ /*default no auth HTTP client*/ },
-		})
-	}
 	return nil
 }
 
-// stopWalletServer kills the child wallet server process
-func (r *xmrRpc) stopWalletServer() error {
-	r.log.Trace("stopWalletServer")
-	if r.walletRpcProcess == nil {
-		return errors.New("no process")
+func getRegtestWalletServerRpcPort(dataDir string) string {
+	if runtime.GOOS == "windows" {
+		return ""
 	}
-	err := r.stopWallet()
-	r.walletRpcProcess.Release()
-	r.walletRpcProcess = nil
-	return err
+	if strings.Contains(dataDir, "/simnet-walletpair/dexc1/") {
+		return DefaultRegtestWalletServerRpcPort
+	}
+	if strings.Contains(dataDir, "/simnet-walletpair/dexc2/") {
+		return AlternateRegtestWalletServerRpcPort
+	}
+	return "bad-path"
+}
+
+func cliGenerateRefreshWallet(ctx context.Context, trustedDaemon string, net dex.Network, dataDir, cliToolsDir, pw string, refresh bool) error {
+	cli := path.Join(cliToolsDir, CliName)
+	cmd := exec.CommandContext(ctx, cli)
+	switch net {
+	case dex.Mainnet:
+		// do nothing
+	case dex.Testnet: // stagenet
+		cmd.Args = append(cmd.Args, StagenetParam)
+	case dex.Simnet: // regtest
+		return fmt.Errorf("there is no --regtest parameter for monero-wallet-cli - create & sync a wallet manually with simnet tool provided and put into: %s", dataDir)
+	default:
+		return fmt.Errorf("unknown network")
+	}
+	cmd.Args = append(cmd.Args, CliGenerateNewWalletParam)
+	walletFilePath := path.Join(dataDir, WalletFileName)
+	cmd.Args = append(cmd.Args, walletFilePath)
+	cmd.Args = append(cmd.Args, CliPasswordParam+pw)
+	cmd.Args = append(cmd.Args, CliMnemonicLanguageEnglishParam)
+	serverAddr := DaemonAddressParam + trustedDaemon
+	cmd.Args = append(cmd.Args, serverAddr)
+	cmd.Args = append(cmd.Args, TrustedDaemonParam) // wallet trusts the daemon
+	cmd.Args = append(cmd.Args, AllowMismatchedDaemonVersionParam)
+	logfilePath := path.Join(dataDir, CliLogfileName)
+	cmd.Args = append(cmd.Args, LogFileParam+logfilePath)
+	cmd.Args = append(cmd.Args, LogLevelParam+CliLogLevel)
+	if refresh {
+		cmd.Args = append(cmd.Args, CliCommandRefreshParam)
+	} else {
+		cmd.Args = append(cmd.Args, CliCommandBalanceParam)
+	}
+
+	var sb strings.Builder
+	for _, arg := range cmd.Args {
+		sb.WriteString(arg)
+		sb.WriteString(" ")
+	}
+
+	err := cmd.Start()
+	if err != nil {
+		return fmt.Errorf("cli create wallet process start %w", err)
+	}
+	err = cmd.Wait()
+	if err != nil {
+		return fmt.Errorf("create wallet command exited with status %d", cmd.ProcessState.ExitCode())
+	}
+	return nil
 }

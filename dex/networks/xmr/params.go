@@ -4,8 +4,6 @@
 package xmr
 
 import (
-	"fmt"
-
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/networks/btc"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -25,7 +23,6 @@ func mustHash(hash string) *chainhash.Hash {
 	return h
 }
 
-// RPC ports.
 var NetRpcPorts = btc.NetPorts{
 	Mainnet: "18081",
 	Testnet: "38081", // stagenet
@@ -90,5 +87,4 @@ func init() {
 			panic("failed to register xmr parameters: " + err.Error())
 		}
 	}
-	fmt.Printf("registered XMR chaincfg params for main, stage & regtest nets\n")
 }
