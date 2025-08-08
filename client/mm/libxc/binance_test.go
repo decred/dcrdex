@@ -281,7 +281,7 @@ func TestBuildTradeRequest(t *testing.T) {
 		MinPrice:                 calc.MessageRate(0.00001000, bui, qui),
 		MaxPrice:                 calc.MessageRate(922327, bui, qui),
 		RateStep:                 calc.MessageRate(0.00001, bui, qui),
-		MinQty:                   uint64(math.Round(0.0001 * float64(bui.Conventional.ConversionFactor))),
+		MinQty:                   uint64(math.Round(0.001 * float64(bui.Conventional.ConversionFactor))),
 		MaxQty:                   uint64(math.Round(100000 * float64(bui.Conventional.ConversionFactor))),
 		LotSize:                  uint64(math.Round(0.0001 * float64(bui.Conventional.ConversionFactor))),
 		MinNotional:              uint64(math.Round(0.0001 * float64(qui.Conventional.ConversionFactor))),
@@ -301,14 +301,16 @@ func TestBuildTradeRequest(t *testing.T) {
 	}
 
 	tests := []struct {
-		name      string
-		sell      bool
-		orderType OrderType
-		rate      uint64
-		qty       uint64
-		avgPrice  uint64
-		wantErr   string
-		wantVals  url.Values
+		name       string
+		sell       bool
+		orderType  OrderType
+		rate       uint64
+		qty        uint64
+		quoteQty   uint64
+		avgPrice   uint64
+		wantErr    string
+		wantVals   url.Values
+		wantQtyRet uint64
 	}{
 		// =================== limit buy ===========================
 		{
@@ -326,6 +328,7 @@ func TestBuildTradeRequest(t *testing.T) {
 				"quantity":         []string{"5.0000"},
 				"price":            []string{"0.00100"},
 			},
+			wantQtyRet: 5e9,
 		},
 		{
 			name:      "limit buy, rate too low",
@@ -375,6 +378,40 @@ func TestBuildTradeRequest(t *testing.T) {
 			qty:       market.MaxQty,
 			wantErr:   "notional",
 		},
+		// =================== limit buy with quote qty ===========================
+		{
+			name:      "limit buy with quote qty",
+			sell:      false,
+			orderType: OrderTypeLimit,
+			rate:      10000,
+			quoteQty:  500000,
+			wantVals: url.Values{
+				"symbol":           []string{"ETHBTC"},
+				"side":             []string{"BUY"},
+				"type":             []string{"LIMIT"},
+				"timeInForce":      []string{"GTC"},
+				"newClientOrderId": []string{"test123"},
+				"quantity":         []string{"5.0000"},
+				"price":            []string{"0.00100"},
+			},
+			wantQtyRet: steppedQty(calc.QuoteToBase(10000, 500000), market.LotSize),
+		},
+		{
+			name:      "limit buy, quote qty leads to quantity too low",
+			sell:      false,
+			orderType: OrderTypeLimit,
+			rate:      1e8,
+			quoteQty:  calc.BaseToQuote(1e8, market.LotSize),
+			wantErr:   "quantity",
+		},
+		{
+			name:      "limit buy, quote qty leads to quantity too high",
+			sell:      false,
+			orderType: OrderTypeLimit,
+			rate:      market.MinPrice,    // Use minimum valid rate
+			quoteQty:  market.MaxNotional, // Use maximum notional as quote quantity
+			wantErr:   "quantity",
+		},
 
 		// =================== limit sell ===========================
 		{
@@ -392,6 +429,7 @@ func TestBuildTradeRequest(t *testing.T) {
 				"quantity":         []string{"5.0000"},
 				"price":            []string{"0.00500"},
 			},
+			wantQtyRet: 5e9,
 		},
 		{
 			name:      "limit sell, rate too low",
@@ -441,13 +479,164 @@ func TestBuildTradeRequest(t *testing.T) {
 			qty:       market.MaxQty,
 			wantErr:   "notional",
 		},
-
-		// =================== market buy ===========================
+		// =================== limit ioc buy ===========================
 		{
-			name:      "market buy",
+			name:      "limit ioc buy",
+			sell:      false,
+			orderType: OrderTypeLimitIOC,
+			rate:      10000,
+			qty:       5e9,
+			wantVals: url.Values{
+				"symbol":           []string{"ETHBTC"},
+				"side":             []string{"BUY"},
+				"type":             []string{"LIMIT"},
+				"timeInForce":      []string{"IOC"},
+				"newClientOrderId": []string{"test123"},
+				"quantity":         []string{"5.0000"},
+				"price":            []string{"0.00100"},
+			},
+			wantQtyRet: 5e9,
+		},
+		{
+			name:      "limit ioc buy, rate too low",
+			sell:      false,
+			orderType: OrderTypeLimitIOC,
+			rate:      market.MinPrice - 1,
+			qty:       5e9,
+			wantErr:   "rate",
+		},
+		{
+			name:      "limit ioc buy, rate too high",
+			sell:      false,
+			orderType: OrderTypeLimitIOC,
+			rate:      market.MaxPrice + 1,
+			qty:       5e9,
+			wantErr:   "rate",
+		},
+		{
+			name:      "limit ioc buy, quantity too low",
+			sell:      false,
+			orderType: OrderTypeLimitIOC,
+			rate:      1000,
+			qty:       market.MinQty - 1,
+			wantErr:   "quantity",
+		},
+		{
+			name:      "limit ioc buy, quantity too high",
+			sell:      false,
+			orderType: OrderTypeLimitIOC,
+			rate:      1000,
+			qty:       market.MaxQty + 1,
+			wantErr:   "quantity",
+		},
+		{
+			name:      "limit ioc buy, notional too low",
+			sell:      false,
+			orderType: OrderTypeLimitIOC,
+			rate:      qtysToRate(5e9, market.MinNotional-1),
+			qty:       5e9,
+			wantErr:   "notional",
+		},
+		{
+			name:      "limit ioc buy, notional too high",
+			sell:      false,
+			orderType: OrderTypeLimitIOC,
+			rate:      qtysToRate(market.MaxQty, market.MaxNotional+1e6),
+			qty:       market.MaxQty,
+			wantErr:   "notional",
+		},
+		// =================== limit ioc buy with quote qty ===========================
+		{
+			name:      "limit ioc buy with quote qty",
+			sell:      false,
+			orderType: OrderTypeLimitIOC,
+			rate:      10000,
+			quoteQty:  500000,
+			wantVals: url.Values{
+				"symbol":           []string{"ETHBTC"},
+				"side":             []string{"BUY"},
+				"type":             []string{"LIMIT"},
+				"timeInForce":      []string{"IOC"},
+				"newClientOrderId": []string{"test123"},
+				"quantity":         []string{"5.0000"},
+				"price":            []string{"0.00100"},
+			},
+			wantQtyRet: 5e9,
+		},
+
+		// =================== limit ioc sell ===========================
+		{
+			name:      "limit ioc sell",
+			sell:      true,
+			orderType: OrderTypeLimitIOC,
+			rate:      50000,
+			qty:       5e9,
+			wantVals: url.Values{
+				"symbol":           []string{"ETHBTC"},
+				"side":             []string{"SELL"},
+				"type":             []string{"LIMIT"},
+				"timeInForce":      []string{"IOC"},
+				"newClientOrderId": []string{"test123"},
+				"quantity":         []string{"5.0000"},
+				"price":            []string{"0.00500"},
+			},
+			wantQtyRet: 5e9,
+		},
+		{
+			name:      "limit ioc sell, rate too low",
+			sell:      true,
+			orderType: OrderTypeLimitIOC,
+			rate:      market.MinPrice - 1,
+			qty:       5e9,
+			wantErr:   "rate",
+		},
+		{
+			name:      "limit ioc sell, rate too high",
+			sell:      true,
+			orderType: OrderTypeLimitIOC,
+			rate:      market.MaxPrice + 1,
+			qty:       5e9,
+			wantErr:   "rate",
+		},
+		{
+			name:      "limit ioc sell, quantity too low",
+			sell:      true,
+			orderType: OrderTypeLimitIOC,
+			rate:      1000,
+			qty:       market.MinQty - 1,
+			wantErr:   "quantity",
+		},
+		{
+			name:      "limit ioc sell, quantity too high",
+			sell:      true,
+			orderType: OrderTypeLimitIOC,
+			rate:      1000,
+			qty:       market.MaxQty + 1,
+			wantErr:   "quantity",
+		},
+		{
+			name:      "limit ioc sell, notional too low",
+			sell:      true,
+			orderType: OrderTypeLimitIOC,
+			rate:      qtysToRate(5e9, market.MinNotional-1),
+			qty:       5e9,
+			wantErr:   "notional",
+		},
+		{
+			name:      "limit ioc sell, notional too high",
+			sell:      true,
+			orderType: OrderTypeLimitIOC,
+			rate:      qtysToRate(market.MaxQty, market.MaxNotional+1e6),
+			qty:       market.MaxQty,
+			wantErr:   "notional",
+		},
+
+		// =================== market buy with quote qty ===========================
+		{
+			name:      "market buy with quote qty",
 			sell:      false,
 			orderType: OrderTypeMarket,
-			qty:       5e7,
+			quoteQty:  5e7,
 			wantVals: url.Values{
 				"symbol":           []string{"ETHBTC"},
 				"side":             []string{"BUY"},
@@ -455,25 +644,26 @@ func TestBuildTradeRequest(t *testing.T) {
 				"newClientOrderId": []string{"test123"},
 				"quoteOrderQty":    []string{"0.50000000"},
 			},
+			wantQtyRet: 5e7,
 		},
 		{
-			name:      "market buy, notional too low",
+			name:      "market buy with quote qty, notional too low",
 			sell:      false,
 			orderType: OrderTypeMarket,
-			qty:       market.MinNotional - 1,
+			quoteQty:  market.MinNotional - 1,
 			wantErr:   "notional",
 		},
 		{
-			name:      "market buy, notional too high",
+			name:      "market buy with quote qty, notional too high",
 			sell:      false,
 			orderType: OrderTypeMarket,
-			qty:       market.MaxNotional + 1,
+			quoteQty:  market.MaxNotional + 1,
 			wantErr:   "notional",
 		},
 
-		// =================== market sell ===========================
+		// =================== market sell with base qty ===========================
 		{
-			name:      "market sell",
+			name:      "market sell with base qty",
 			sell:      true,
 			orderType: OrderTypeMarket,
 			qty:       5e9,
@@ -485,37 +675,39 @@ func TestBuildTradeRequest(t *testing.T) {
 				"newClientOrderId": []string{"test123"},
 				"quantity":         []string{"5.0000"},
 			},
+			wantQtyRet: 5e9,
 		},
 		{
-			name:      "market sell, min qty",
+			name:      "market sell with base qty, min qty",
 			sell:      true,
 			orderType: OrderTypeMarket,
-			qty:       1e5,
+			qty:       market.MinQty,
 			avgPrice:  1e8,
 			wantVals: url.Values{
 				"symbol":           []string{"ETHBTC"},
 				"side":             []string{"SELL"},
 				"type":             []string{"MARKET"},
 				"newClientOrderId": []string{"test123"},
-				"quantity":         []string{"0.0001"},
+				"quantity":         []string{"0.0010"},
 			},
+			wantQtyRet: market.MinQty,
 		},
 		{
-			name:      "market sell, quantity too low",
+			name:      "market sell with base qty, quantity too low",
 			sell:      true,
 			orderType: OrderTypeMarket,
 			qty:       market.MinQty - 1,
 			wantErr:   "quantity",
 		},
 		{
-			name:      "market sell, quantity too high",
+			name:      "market sell with base qty, quantity too high",
 			sell:      true,
 			orderType: OrderTypeMarket,
 			qty:       market.MaxQty + 1,
 			wantErr:   "quantity",
 		},
 		{
-			name:      "market sell, notional too low",
+			name:      "market sell with base qty, notional too low",
 			sell:      true,
 			orderType: OrderTypeMarket,
 			avgPrice:  qtysToRate(5e9, market.MinNotional-1),
@@ -523,18 +715,43 @@ func TestBuildTradeRequest(t *testing.T) {
 			wantErr:   "notional",
 		},
 		{
-			name:      "market sell, notional too high",
+			name:      "market sell with base qty, notional too high",
 			sell:      true,
 			orderType: OrderTypeMarket,
 			avgPrice:  qtysToRate(market.MaxQty, market.MaxNotional+1e6),
 			qty:       market.MaxQty,
 			wantErr:   "notional",
 		},
+
+		// =================== mutual exclusivity ===========================
+		{
+			name:      "cannot specify both qty and quote qty",
+			sell:      false,
+			orderType: OrderTypeLimit,
+			rate:      10000,
+			qty:       5e9,
+			quoteQty:  500000,
+			wantErr:   "cannot specify both",
+		},
+		{
+			name:      "quote quantity cannot be used for sell orders",
+			sell:      true,
+			orderType: OrderTypeMarket,
+			quoteQty:  5e7,
+			wantErr:   "quote quantity cannot be used for sell orders",
+		},
+		{
+			name:      "quoteQty MUST be used for market buys",
+			sell:      false,
+			orderType: OrderTypeMarket,
+			qty:       5e9,
+			wantErr:   "quoteQty MUST be used for market buys",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			vals, err := buildTradeRequest(baseCfg, quoteCfg, market, tt.avgPrice, tt.sell, tt.orderType, tt.rate, tt.qty, tradeID)
+			vals, qtyRet, err := buildTradeRequest(baseCfg, quoteCfg, market, tt.avgPrice, tt.sell, tt.orderType, tt.rate, tt.qty, tt.quoteQty, tradeID)
 			if (err != nil) != (tt.wantErr != "") {
 				t.Errorf("buildTradeRequest() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -555,6 +772,9 @@ func TestBuildTradeRequest(t *testing.T) {
 				if len(got) != 1 || got[0] != want[0] {
 					t.Errorf("buildTradeRequest() key %q = %v, want %v", k, got, want)
 				}
+			}
+			if qtyRet != tt.wantQtyRet {
+				t.Errorf("buildTradeRequest() qtyRet = %v, want %v", qtyRet, tt.wantQtyRet)
 			}
 		})
 	}

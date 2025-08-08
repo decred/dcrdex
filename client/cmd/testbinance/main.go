@@ -61,7 +61,7 @@ var (
 		Symbols: []*bntypes.Market{
 			makeMarket("dcr", "btc", 0.00001, 0.000001),
 			makeMarket("eth", "btc", 0.00001, 0.000001),
-			makeMarket("eth", "dcr", 0.00001, 0.000001),
+			// makeMarket("eth", "dcr", 0.00001, 0.000001),
 			makeMarket("dcr", "usdc", 0.01, 0.000001),
 			makeMarket("btc", "usdc", 0.01, 0.000001),
 			makeMarket("zec", "btc", 0.00001, 0.000001),
@@ -282,6 +282,7 @@ type userOrder struct {
 	apiKey string
 	stamp  time.Time
 	status string
+	tif    string
 }
 
 type fakeBinance struct {
@@ -1083,6 +1084,7 @@ func (f *fakeBinance) handlePostOrder(w http.ResponseWriter, r *http.Request) {
 	side := q.Get("side")
 	tradeID := q.Get("newClientOrderId")
 	market := q.Get("type") == "MARKET"
+	tif := q.Get("timeInForce")
 
 	qtyStr := q.Get("quantity")
 	quoteQtyStr := q.Get("quoteOrderQty")
@@ -1101,6 +1103,11 @@ func (f *fakeBinance) handlePostOrder(w http.ResponseWriter, r *http.Request) {
 	if quoteQtyStr != "" && qtyStr != "" {
 		log.Errorf("Received both quantity and quoteOrderQty for order %s", tradeID)
 		http.Error(w, "Received both quantity and quoteOrderQty", http.StatusBadRequest)
+		return
+	}
+	if tif != "GTC" && tif != "IOC" && !market {
+		log.Errorf("Received invalid timeInForce %q for order %s", tif, tradeID)
+		http.Error(w, "Invalid timeInForce", http.StatusBadRequest)
 		return
 	}
 
@@ -1140,7 +1147,7 @@ func (f *fakeBinance) handlePostOrder(w http.ResponseWriter, r *http.Request) {
 		OrigQuoteQty: quoteQty,
 	}
 
-	bookIt := rand.Float32() < 0.2 && !market
+	bookIt := rand.Float32() < 0.2 && !market && tif == "GTC"
 	if bookIt {
 		resp.Status = "NEW"
 		log.Tracef("Booking %s order on %s for %.8f for user %s", side, slug, qty, apiKey)
@@ -1185,6 +1192,7 @@ func (f *fakeBinance) handlePostOrder(w http.ResponseWriter, r *http.Request) {
 		apiKey: apiKey,
 		stamp:  time.Now(),
 		status: resp.Status,
+		tif:    tif,
 	}
 	f.bookedOrdersMtx.Unlock()
 

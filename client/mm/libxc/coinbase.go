@@ -863,42 +863,52 @@ func (bnc *coinbase) generateTradeID() string {
 	return hex.EncodeToString(append(bnc.tradeIDNoncePrefix, nonceB...))
 }
 
-func buildOrderRequest(mkt *cbtypes.Market, baseID, quoteID uint32, sell bool, orderType OrderType, rate, qty uint64, tradeID string) (*cbtypes.OrderRequest, error) {
+func buildOrderRequest(mkt *cbtypes.Market, baseID, quoteID uint32, sell bool, orderType OrderType, rate, qty, quoteQty uint64, tradeID string) (*cbtypes.OrderRequest, uint64, error) {
+	if qty > 0 && quoteQty > 0 {
+		return nil, 0, fmt.Errorf("cannot specify both quantity and quote quantity")
+	}
+	if sell && quoteQty > 0 {
+		return nil, 0, fmt.Errorf("quote quantity cannot be used for sell orders")
+	}
+	if !sell && orderType == OrderTypeMarket && qty > 0 {
+		return nil, 0, fmt.Errorf("quoteQty MUST be used for market buys")
+	}
+
 	bui, err := asset.UnitInfo(baseID)
 	if err != nil {
-		return nil, fmt.Errorf("error getting unit info for base asset ID %d: %v", baseID, err)
+		return nil, 0, fmt.Errorf("error getting unit info for base asset ID %d: %v", baseID, err)
 	}
 	qui, err := asset.UnitInfo(quoteID)
 	if err != nil {
-		return nil, fmt.Errorf("error getting unit info for quote asset ID %d: %v", quoteID, err)
+		return nil, 0, fmt.Errorf("error getting unit info for quote asset ID %d: %v", quoteID, err)
 	}
 
 	bFactor := bui.Conventional.ConversionFactor
 	qFactor := qui.Conventional.ConversionFactor
 
-	getBaseQtyStr := func() (string, error) {
-		if qty < mkt.MinBaseQty || qty > mkt.MaxBaseQty {
+	getBaseQtyStr := func(baseQty uint64) (string, error) {
+		if baseQty < mkt.MinBaseQty || baseQty > mkt.MaxBaseQty {
 			return "", fmt.Errorf("quantity %v is out of bounds for market %v. min: %v, max: %v",
-				bui.FormatConventional(qty),
+				bui.FormatConventional(baseQty),
 				mkt.ProductID,
 				bui.FormatConventional(mkt.MinBaseQty),
 				bui.FormatConventional(mkt.MaxBaseQty))
 		}
-		steppedQty := steppedRate(qty, mkt.BaseLotSize)
+		steppedQty := steppedQty(baseQty, mkt.BaseLotSize)
 		convQty := float64(steppedQty) / float64(bFactor)
 		qtyPrec := int(math.Round(math.Log10(float64(bFactor) / float64(mkt.BaseLotSize))))
 		return strconv.FormatFloat(convQty, 'f', qtyPrec, 64), nil
 	}
 
-	getQuoteQtyStr := func() (string, error) {
-		if qty < mkt.MinQuoteQty || qty > mkt.MaxQuoteQty {
+	getQuoteQtyStr := func(quoteQty uint64) (string, error) {
+		if quoteQty < mkt.MinQuoteQty || quoteQty > mkt.MaxQuoteQty {
 			return "", fmt.Errorf("quantity %v is out of bounds for market %v. min: %v, max: %v",
-				qui.FormatConventional(qty),
+				qui.FormatConventional(quoteQty),
 				mkt.ProductID,
 				qui.FormatConventional(mkt.MinQuoteQty),
 				qui.FormatConventional(mkt.MaxQuoteQty))
 		}
-		steppedQty := steppedRate(qty, mkt.QuoteLotSize)
+		steppedQty := steppedQty(quoteQty, mkt.QuoteLotSize)
 		convQty := float64(steppedQty) / float64(qFactor)
 		qtyPrec := int(math.Round(math.Log10(float64(qFactor) / float64(mkt.QuoteLotSize))))
 		return strconv.FormatFloat(convQty, 'f', qtyPrec, 64), nil
@@ -913,16 +923,35 @@ func buildOrderRequest(mkt *cbtypes.Market, baseID, quoteID uint32, sell bool, o
 	}
 
 	var baseQtyStr, quoteQtyStr, rateStr string
-	if orderType == OrderTypeLimit {
+	var qtyToReturn uint64
+
+	if orderType == OrderTypeLimit || orderType == OrderTypeLimitIOC {
+		if quoteQty > 0 {
+			qty = calc.QuoteToBase(rate, quoteQty)
+		}
+		if qty == 0 {
+			return nil, 0, fmt.Errorf("must specify quantity or quote quantity")
+		}
+		qtyToReturn = qty
+		baseQtyStr, err = getBaseQtyStr(qty)
+		if err != nil {
+			return nil, 0, err
+		}
 		rateStr = getRateStr()
-		baseQtyStr, err = getBaseQtyStr()
-	} else if sell {
-		baseQtyStr, err = getBaseQtyStr()
-	} else {
-		quoteQtyStr, err = getQuoteQtyStr()
-	}
-	if err != nil {
-		return nil, err
+	} else { // market
+		if quoteQty > 0 {
+			quoteQtyStr, err = getQuoteQtyStr(quoteQty)
+			if err != nil {
+				return nil, 0, err
+			}
+			qtyToReturn = quoteQty
+		} else {
+			baseQtyStr, err = getBaseQtyStr(qty)
+			if err != nil {
+				return nil, 0, err
+			}
+			qtyToReturn = qty
+		}
 	}
 
 	side := "BUY"
@@ -941,6 +970,11 @@ func buildOrderRequest(mkt *cbtypes.Market, baseID, quoteID uint32, sell bool, o
 		limitConfig.Limit.BaseSize = baseQtyStr
 		limitConfig.Limit.LimitPrice = rateStr
 		ord.OrderConfig = limitConfig
+	} else if orderType == OrderTypeLimitIOC {
+		iocConfig := &cbtypes.LimitIocConfig{}
+		iocConfig.SorLimitIoc.BaseSize = baseQtyStr
+		iocConfig.SorLimitIoc.LimitPrice = rateStr
+		ord.OrderConfig = iocConfig
 	} else {
 		marketConfig := &cbtypes.MarketOrderConfig{}
 		if baseQtyStr != "" {
@@ -952,12 +986,17 @@ func buildOrderRequest(mkt *cbtypes.Market, baseID, quoteID uint32, sell bool, o
 		ord.OrderConfig = marketConfig
 	}
 
-	return ord, nil
+	return ord, qtyToReturn, nil
 }
 
-// Trade executes a trade on the CEX. updaterID takes a subscriptionID
-// returned from SubscribeTradeUpdates.
-func (c *coinbase) Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty uint64, orderType OrderType, subscriptionID int) (*Trade, error) {
+// Trade executes a trade on the CEX.
+//   - subscriptionID takes an ID returned from SubscribeTradeUpdates.
+//   - Rate is ignored for market orders.
+//   - Qty is in units of base asset, quoteQty is in units of quote asset.
+//     Only one of qty or quoteQty should be non-zero.
+//   - QuoteQty is only allowed for BUY orders, and it is required for market
+//     buy orders.
+func (c *coinbase) Trade(ctx context.Context, baseID, quoteID uint32, sell bool, rate, qty, quoteQty uint64, orderType OrderType, subscriptionID int) (*Trade, error) {
 	productID, err := c.newProductID(baseID, quoteID)
 	if err != nil {
 		return nil, fmt.Errorf("error generating product ID: %w", err)
@@ -978,7 +1017,7 @@ func (c *coinbase) Trade(ctx context.Context, baseID, quoteID uint32, sell bool,
 	}
 
 	tradeID := c.generateTradeID()
-	ord, err := buildOrderRequest(mkt, baseID, quoteID, sell, orderType, rate, qty, tradeID)
+	ord, qtyToReturn, err := buildOrderRequest(mkt, baseID, quoteID, sell, orderType, rate, qty, quoteQty, tradeID)
 	if err != nil {
 		return nil, fmt.Errorf("error building order request: %w", err)
 	}
@@ -1000,7 +1039,7 @@ func (c *coinbase) Trade(ctx context.Context, baseID, quoteID uint32, sell bool,
 		quoteID:   quoteID,
 		sell:      sell,
 		rate:      rate,
-		qty:       qty,
+		qty:       qtyToReturn,
 		market:    market,
 	}
 
@@ -1008,7 +1047,7 @@ func (c *coinbase) Trade(ctx context.Context, baseID, quoteID uint32, sell bool,
 		ID:      res.SuccessResponse.OrderID,
 		Sell:    sell,
 		Rate:    rate,
-		Qty:     qty,
+		Qty:     qtyToReturn,
 		BaseID:  baseID,
 		QuoteID: quoteID,
 		Market:  market,
@@ -1016,7 +1055,7 @@ func (c *coinbase) Trade(ctx context.Context, baseID, quoteID uint32, sell bool,
 }
 
 // ValidateTrade validates a trade before it is executed.
-func (c *coinbase) ValidateTrade(baseID, quoteID uint32, sell bool, rate, qty uint64, orderType OrderType) error {
+func (c *coinbase) ValidateTrade(baseID, quoteID uint32, sell bool, rate, qty, quoteQty uint64, orderType OrderType) error {
 	productID, err := c.newProductID(baseID, quoteID)
 	if err != nil {
 		return fmt.Errorf("error generating product ID: %w", err)
@@ -1028,7 +1067,7 @@ func (c *coinbase) ValidateTrade(baseID, quoteID uint32, sell bool, rate, qty ui
 		return fmt.Errorf("no book found for %s", productID)
 	}
 
-	_, err = buildOrderRequest(mkt, baseID, quoteID, sell, orderType, rate, qty, "")
+	_, _, err = buildOrderRequest(mkt, baseID, quoteID, sell, orderType, rate, qty, quoteQty, "")
 	if err != nil {
 		return err
 	}

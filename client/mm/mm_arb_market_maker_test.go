@@ -6,6 +6,7 @@ package mm
 import (
 	"context"
 	"fmt"
+	"math"
 	"reflect"
 	"sync"
 	"testing"
@@ -52,7 +53,8 @@ func TestArbMMRebalance(t *testing.T) {
 		unifiedExchangeAdaptor: u,
 		cex:                    newTBotCEXAdaptor(),
 		core:                   newTBotCoreAdaptor(c),
-		pendingOrders:          make(map[order.OrderID]uint64),
+		orderArbRates:          make(map[order.OrderID][2]uint64),
+		orderIndex:             make(map[bool]map[order.OrderID]int),
 	}
 	a.buyFees = &OrderFees{
 		LotFeeRange: &LotFeeRange{
@@ -204,7 +206,7 @@ func TestArbMarketMakerDEXUpdates(t *testing.T) {
 
 	type test struct {
 		name              string
-		pendingOrders     map[order.OrderID]uint64
+		pendingOrders     map[order.OrderID][2]uint64
 		orderUpdates      []*core.Order
 		expectedCEXTrades []*libxc.Trade
 	}
@@ -212,9 +214,9 @@ func TestArbMarketMakerDEXUpdates(t *testing.T) {
 	tests := []*test{
 		{
 			name: "one buy and one sell match, repeated",
-			pendingOrders: map[order.OrderID]uint64{
-				orderIDs[0]: 7.9e5,
-				orderIDs[1]: 6.1e5,
+			pendingOrders: map[order.OrderID][2]uint64{
+				orderIDs[0]: {7.9e5, 0},
+				orderIDs[1]: {6.1e5, 0},
 			},
 			orderUpdates: []*core.Order{
 				{
@@ -304,8 +306,9 @@ func TestArbMarketMakerDEXUpdates(t *testing.T) {
 			cex:                    cex,
 			core:                   coreAdaptor,
 			matchesSeen:            make(map[order.MatchID]bool),
-			cexTrades:              make(map[string]uint64),
-			pendingOrders:          test.pendingOrders,
+			cexTrades:              make(map[string]*cexTradeInfo),
+			orderArbRates:          test.pendingOrders,
+			orderIndex:             make(map[bool]map[order.OrderID]int),
 		}
 		arbMM.CEX = newTCEX()
 		arbMM.ctx = ctx
@@ -370,20 +373,21 @@ func TestArbMarketMakerMultiHopDexUpdates(t *testing.T) {
 	}
 
 	type test struct {
-		name string
-		// order -> rate
-		pendingOrders     map[order.OrderID]uint64
+		name              string
+		pendingOrders     map[order.OrderID][2]uint64
+		marketOrders      bool
 		orderUpdates      []*core.Order
 		expectedCEXTrades []*libxc.Trade
 	}
 
 	tests := []*test{
 		{
-			name: "one buy and one sell match, repeated",
-			pendingOrders: map[order.OrderID]uint64{
-				orderIDs[0]: 7.9e5,
-				orderIDs[1]: 6.1e5,
+			name: "one buy and one sell match, repeated, market",
+			pendingOrders: map[order.OrderID][2]uint64{
+				orderIDs[0]: {7.9e5, 0},
+				orderIDs[1]: {6.1e5, 0},
 			},
+			marketOrders: true,
 			orderUpdates: []*core.Order{
 				{
 					ID:   orderIDs[0][:],
@@ -442,16 +446,100 @@ func TestArbMarketMakerMultiHopDexUpdates(t *testing.T) {
 				{
 					BaseID:  0,
 					QuoteID: 60002,
+					Rate:    7.9e5,
 					Qty:     calc.BaseToQuote(8e5, lotSize),
 					Sell:    true,
-					Market:  true,
+					Market:  false,
 				},
 				{
 					BaseID:  42,
 					QuoteID: 60002,
+					Rate:    6.1e5,
 					Qty:     lotSize,
 					Sell:    true,
-					Market:  true,
+					Market:  false,
+				},
+				nil,
+				nil,
+			},
+		},
+		{
+			name: "one buy and one sell match, repeated, limit",
+			pendingOrders: map[order.OrderID][2]uint64{
+				orderIDs[0]: {7.9e5, 1e5},
+				orderIDs[1]: {6.1e5, 1e5},
+			},
+			marketOrders: false,
+			orderUpdates: []*core.Order{
+				{
+					ID:   orderIDs[0][:],
+					Sell: true,
+					Qty:  lotSize,
+					Rate: 8e5,
+					Matches: []*core.Match{
+						{
+							MatchID: matchIDs[0][:],
+							Qty:     lotSize,
+							Rate:    8e5,
+						},
+					},
+				},
+				{
+					ID:   orderIDs[1][:],
+					Sell: false,
+					Qty:  lotSize,
+					Rate: 6e5,
+					Matches: []*core.Match{
+						{
+							MatchID: matchIDs[1][:],
+							Qty:     lotSize,
+							Rate:    6e5,
+						},
+					},
+				},
+				{
+					ID:   orderIDs[0][:],
+					Sell: true,
+					Qty:  lotSize,
+					Rate: 8e5,
+					Matches: []*core.Match{
+						{
+							MatchID: matchIDs[0][:],
+							Qty:     lotSize,
+							Rate:    8e5,
+						},
+					},
+				},
+				{
+					ID:   orderIDs[1][:],
+					Sell: false,
+					Qty:  lotSize,
+					Rate: 6e5,
+					Matches: []*core.Match{
+						{
+							MatchID: matchIDs[1][:],
+							Qty:     lotSize,
+							Rate:    6e5,
+						},
+					},
+				},
+			},
+			expectedCEXTrades: []*libxc.Trade{
+				{
+					BaseID:  0,
+					QuoteID: 60002,
+					Rate:    7.9e5,
+					Qty:     calc.BaseToQuote(8e5, lotSize),
+					Sell:    true,
+					Market:  false,
+				},
+				{
+					BaseID:  42,
+					QuoteID: 60002,
+					Rate:    6.1e5,
+					Qty:     lotSize,
+					Sell:    true,
+					Market:  false,
 				},
 				nil,
 				nil,
@@ -472,8 +560,9 @@ func TestArbMarketMakerMultiHopDexUpdates(t *testing.T) {
 			cex:                    cex,
 			core:                   coreAdaptor,
 			matchesSeen:            make(map[order.MatchID]bool),
-			cexTrades:              make(map[string]uint64),
-			pendingOrders:          test.pendingOrders,
+			cexTrades:              make(map[string]*cexTradeInfo),
+			orderArbRates:          test.pendingOrders,
+			orderIndex:             make(map[bool]map[order.OrderID]int),
 		}
 		arbMM.CEX = newTCEX()
 		arbMM.ctx = ctx
@@ -484,6 +573,7 @@ func TestArbMarketMakerMultiHopDexUpdates(t *testing.T) {
 				MultiHop: &MultiHopCfg{
 					BaseAssetMarket:  [2]uint32{42, 60002},
 					QuoteAssetMarket: [2]uint32{0, 60002},
+					MarketOrders:     test.marketOrders,
 				},
 			},
 		})
@@ -548,33 +638,36 @@ func TestMultiHopRate(t *testing.T) {
 	}
 
 	type test struct {
-		name             string
-		depth            uint64
-		cfg              *ArbMarketMakerConfig
-		vwapResults      map[[2]uint32]map[bool]map[uint64]vwapResult
-		invVwapResults   map[[2]uint32]map[bool]map[uint64]vwapResult
-		expectedSellRate uint64
-		expectedBuyRate  uint64
-		expectedBuyArbs  []*arbTradeArgs
-		expectedSellArbs []*arbTradeArgs
-		expectedOk       bool
-		expectedError    string
+		name                      string
+		depth                     uint64
+		cfg                       *ArbMarketMakerConfig
+		marketOrders              bool
+		limitOrdersBuffer         float64
+		vwapResults               map[[2]uint32]map[bool]map[uint64]vwapResult
+		invVwapResults            map[[2]uint32]map[bool]map[uint64]vwapResult
+		expectedSellRate          uint64
+		expectedBuyRate           uint64
+		expectedBuyArbs           []*arbTradeArgs
+		expectedSellArbs          []*arbTradeArgs
+		expectedSellMultiHopRates [2]uint64
+		expectedBuyMultiHopRates  [2]uint64
+		expectedFilled            bool
+		expectedError             string
 	}
 
-	inverseRate := func(rate uint64, baseConvFactor, quoteConvFactor uint64) uint64 {
-		convRate := calc.ConventionalRateAlt(rate, baseConvFactor, quoteConvFactor)
-		return calc.MessageRateAlt(1/convRate, baseConvFactor, quoteConvFactor)
+	inverseRate := func(rate uint64, baseConvFactor, quoteConvFactor float64) uint64 {
+		convRate := float64(rate) / calc.RateEncodingFactor * baseConvFactor / quoteConvFactor
+		return uint64(math.Round((1 / convRate) * quoteConvFactor / baseConvFactor * calc.RateEncodingFactor))
 	}
 
-	dcrUSDTMidGap := calc.MessageRateAlt(20, 1e8, 1e6)
-	dcrUSDTBuyRate := dcrUSDTMidGap * 101 / 100
-	dcrUSDTSellRate := dcrUSDTMidGap * 99 / 100
+	dcrUSDTMidGap := uint64(20000000)
+	dcrUSDTBuyRate := dcrUSDTMidGap * 101 / 100 // 20200000
+	dcrUSDTSellRate := dcrUSDTMidGap * 99 / 100 // 19800000
 	usdtDCRBuyRate := inverseRate(dcrUSDTSellRate, 1e6, 1e8)
 	usdtDCRSellRate := inverseRate(dcrUSDTBuyRate, 1e6, 1e8)
-
-	btcUSDTMidGapRate := calc.MessageRateAlt(98000, 1e8, 1e6)
-	btcUSDTBuyRate := btcUSDTMidGapRate * 101 / 100
-	btcUSDTSellRate := btcUSDTMidGapRate * 99 / 100
+	btcUSDTMidGap := uint64(98000000000)
+	btcUSDTBuyRate := btcUSDTMidGap * 101 / 100 // 98980000000
+	btcUSDTSellRate := btcUSDTMidGap * 99 / 100 // 97020000000
 	usdtBTCBuyRate := inverseRate(btcUSDTSellRate, 1e6, 1e8)
 	usdtBTCSellRate := inverseRate(btcUSDTBuyRate, 1e6, 1e8)
 
@@ -582,41 +675,39 @@ func TestMultiHopRate(t *testing.T) {
 
 	tests := []*test{
 		{
-			name:  "dcr/usdt,btc/usdt",
-			depth: lotSize,
-			cfg:   cfg,
+			name:              "dcr/usdt,btc/usdt",
+			depth:             lotSize,
+			cfg:               cfg,
+			marketOrders:      false,
+			limitOrdersBuffer: 0,
 			vwapResults: map[[2]uint32]map[bool]map[uint64]vwapResult{
 				{baseID, intermediateID}: {
-					true: {
+					true: { // sell
 						lotSize: {
 							rate:   dcrUSDTSellRate,
 							filled: true,
-							err:    nil,
 						},
 					},
-					false: {
+					false: { // buy
 						lotSize: {
 							rate:   dcrUSDTBuyRate,
 							filled: true,
-							err:    nil,
 						},
 					},
 				},
 			},
 			invVwapResults: map[[2]uint32]map[bool]map[uint64]vwapResult{
 				{quoteID, intermediateID}: {
-					true: {
+					true: { // sell
 						calc.BaseToQuote(dcrUSDTBuyRate, lotSize): {
 							rate:   btcUSDTSellRate,
 							filled: true,
-							err:    nil,
 						},
 					},
-					false: {
+					false: { // buy
 						calc.BaseToQuote(dcrUSDTSellRate, lotSize): {
 							rate:   btcUSDTBuyRate,
 							filled: true,
-							err:    nil,
 						},
 					},
 				},
@@ -627,29 +718,33 @@ func TestMultiHopRate(t *testing.T) {
 				{
 					baseID:    baseID,
 					quoteID:   intermediateID,
-					orderType: libxc.OrderTypeMarket,
+					orderType: libxc.OrderTypeLimitIOC,
+					rate:      dcrUSDTBuyRate,
 					qty:       lotSize,
 					sell:      true,
 				},
 				{
 					baseID:    baseID,
 					quoteID:   intermediateID,
-					orderType: libxc.OrderTypeMarket,
+					orderType: libxc.OrderTypeLimitIOC,
+					rate:      dcrUSDTBuyRate,
 					qty:       lotSize * numLots,
 					sell:      true,
 				},
 				{
 					baseID:    quoteID,
 					quoteID:   intermediateID,
-					orderType: libxc.OrderTypeMarket,
-					qty:       calc.BaseToQuote(dcrUSDTBuyRate, lotSize),
+					orderType: libxc.OrderTypeLimit,
+					rate:      btcUSDTSellRate,
+					quoteQty:  calc.BaseToQuote(dcrUSDTBuyRate, lotSize),
 					sell:      false,
 				},
 				{
 					baseID:    quoteID,
 					quoteID:   intermediateID,
-					orderType: libxc.OrderTypeMarket,
-					qty:       calc.BaseToQuote(dcrUSDTBuyRate, lotSize*numLots),
+					orderType: libxc.OrderTypeLimit,
+					rate:      btcUSDTSellRate,
+					quoteQty:  calc.BaseToQuote(dcrUSDTBuyRate, lotSize*numLots),
 					sell:      false,
 				},
 			},
@@ -657,70 +752,74 @@ func TestMultiHopRate(t *testing.T) {
 				{
 					baseID:    baseID,
 					quoteID:   intermediateID,
-					orderType: libxc.OrderTypeMarket,
-					qty:       calc.BaseToQuote(dcrUSDTSellRate, lotSize),
+					orderType: libxc.OrderTypeLimit,
+					rate:      dcrUSDTSellRate,
+					quoteQty:  calc.BaseToQuote(dcrUSDTSellRate, lotSize),
 					sell:      false,
 				},
 				{
 					baseID:    baseID,
 					quoteID:   intermediateID,
-					orderType: libxc.OrderTypeMarket,
-					qty:       calc.BaseToQuote(dcrUSDTSellRate, lotSize*numLots),
+					orderType: libxc.OrderTypeLimit,
+					rate:      dcrUSDTSellRate,
+					quoteQty:  calc.BaseToQuote(dcrUSDTSellRate, lotSize*numLots),
 					sell:      false,
 				},
 				{
 					baseID:    quoteID,
 					quoteID:   intermediateID,
-					orderType: libxc.OrderTypeMarket,
+					orderType: libxc.OrderTypeLimitIOC,
+					rate:      btcUSDTBuyRate,
 					qty:       calc.QuoteToBase(btcUSDTBuyRate, calc.BaseToQuote(dcrUSDTSellRate, lotSize)),
 					sell:      true,
 				},
 				{
 					baseID:    quoteID,
 					quoteID:   intermediateID,
-					orderType: libxc.OrderTypeMarket,
+					orderType: libxc.OrderTypeLimitIOC,
+					rate:      btcUSDTBuyRate,
 					qty:       calc.QuoteToBase(btcUSDTBuyRate, calc.BaseToQuote(dcrUSDTSellRate, lotSize*numLots)),
 					sell:      true,
 				},
 			},
-			expectedOk: true,
+			expectedSellMultiHopRates: [2]uint64{btcUSDTBuyRate, dcrUSDTSellRate},
+			expectedBuyMultiHopRates:  [2]uint64{dcrUSDTBuyRate, btcUSDTSellRate},
+			expectedFilled:            true,
 		},
 		{
-			name:  "usdt/dcr,usdt/btc",
-			depth: lotSize,
-			cfg:   inverseCfg,
+			name:              "usdt/dcr,usdt/btc",
+			depth:             lotSize,
+			cfg:               inverseCfg,
+			marketOrders:      false,
+			limitOrdersBuffer: 0,
 			vwapResults: map[[2]uint32]map[bool]map[uint64]vwapResult{
 				inverseCfg.MultiHop.QuoteAssetMarket: {
-					true: {
+					true: { // sell
 						calc.QuoteToBase(usdtDCRBuyRate, lotSize): {
 							rate:   usdtBTCSellRate,
 							filled: true,
-							err:    nil,
 						},
 					},
-					false: {
+					false: { // buy
 						calc.QuoteToBase(usdtDCRSellRate, lotSize): {
 							rate:   usdtBTCBuyRate,
 							filled: true,
-							err:    nil,
 						},
 					},
 				},
 			},
 			invVwapResults: map[[2]uint32]map[bool]map[uint64]vwapResult{
 				inverseCfg.MultiHop.BaseAssetMarket: {
-					true: {
+					true: { // sell
 						lotSize: {
 							rate:   usdtDCRSellRate,
 							filled: true,
-							err:    nil,
 						},
 					},
-					false: {
+					false: { // buy
 						lotSize: {
 							rate:   usdtDCRBuyRate,
 							filled: true,
-							err:    nil,
 						},
 					},
 				},
@@ -731,21 +830,248 @@ func TestMultiHopRate(t *testing.T) {
 				{
 					baseID:    intermediateID,
 					quoteID:   baseID,
-					orderType: libxc.OrderTypeMarket,
-					qty:       lotSize,
+					orderType: libxc.OrderTypeLimitIOC,
+					rate:      usdtDCRSellRate,
+					qty:       calc.QuoteToBase(usdtDCRSellRate, lotSize),
 					sell:      false,
 				},
 				{
 					baseID:    intermediateID,
 					quoteID:   baseID,
-					orderType: libxc.OrderTypeMarket,
+					orderType: libxc.OrderTypeLimitIOC,
+					rate:      usdtDCRSellRate,
+					qty:       calc.QuoteToBase(usdtDCRSellRate, lotSize*numLots),
+					sell:      false,
+				},
+				{
+					baseID:    intermediateID,
+					quoteID:   quoteID,
+					orderType: libxc.OrderTypeLimit,
+					rate:      usdtBTCBuyRate,
+					qty:       calc.QuoteToBase(usdtDCRSellRate, lotSize),
+					sell:      true,
+				},
+				{
+					baseID:    intermediateID,
+					quoteID:   quoteID,
+					orderType: libxc.OrderTypeLimit,
+					rate:      usdtBTCBuyRate,
+					qty:       calc.QuoteToBase(usdtDCRSellRate, lotSize*numLots),
+					sell:      true,
+				},
+			},
+			expectedSellArbs: []*arbTradeArgs{
+				{
+					baseID:    intermediateID,
+					quoteID:   baseID,
+					orderType: libxc.OrderTypeLimit,
+					rate:      usdtDCRBuyRate,
+					qty:       calc.QuoteToBase(usdtDCRBuyRate, lotSize),
+					sell:      true,
+				},
+				{
+					baseID:    intermediateID,
+					quoteID:   baseID,
+					orderType: libxc.OrderTypeLimit,
+					rate:      usdtDCRBuyRate,
+					qty:       calc.QuoteToBase(usdtDCRBuyRate, lotSize*numLots),
+					sell:      true,
+				},
+				{
+					baseID:    intermediateID,
+					quoteID:   quoteID,
+					orderType: libxc.OrderTypeLimitIOC,
+					rate:      usdtBTCSellRate,
+					qty:       calc.QuoteToBase(usdtDCRBuyRate, lotSize),
+					sell:      false,
+				},
+				{
+					baseID:    intermediateID,
+					quoteID:   quoteID,
+					orderType: libxc.OrderTypeLimitIOC,
+					rate:      usdtBTCSellRate,
+					qty:       calc.QuoteToBase(usdtDCRBuyRate, lotSize*numLots),
+					sell:      false,
+				},
+			},
+			expectedSellMultiHopRates: [2]uint64{usdtBTCSellRate, usdtDCRBuyRate},
+			expectedBuyMultiHopRates:  [2]uint64{usdtDCRSellRate, usdtBTCBuyRate},
+			expectedFilled:            true,
+		},
+		{
+			name:              "dcr/usdt,btc/usdt,market",
+			depth:             lotSize,
+			cfg:               cfg,
+			marketOrders:      true,
+			limitOrdersBuffer: 0,
+			vwapResults: map[[2]uint32]map[bool]map[uint64]vwapResult{
+				{baseID, intermediateID}: {
+					true: { // sell
+						lotSize: {
+							rate:   dcrUSDTSellRate,
+							filled: true,
+						},
+					},
+					false: { // buy
+						lotSize: {
+							rate:   dcrUSDTBuyRate,
+							filled: true,
+						},
+					},
+				},
+			},
+			invVwapResults: map[[2]uint32]map[bool]map[uint64]vwapResult{
+				{quoteID, intermediateID}: {
+					true: { // sell
+						calc.BaseToQuote(dcrUSDTBuyRate, lotSize): {
+							rate:   btcUSDTSellRate,
+							filled: true,
+						},
+					},
+					false: { // buy
+						calc.BaseToQuote(dcrUSDTSellRate, lotSize): {
+							rate:   btcUSDTBuyRate,
+							filled: true,
+						},
+					},
+				},
+			},
+			expectedBuyRate:  aggregateRates(dcrUSDTBuyRate, btcUSDTSellRate, mkt, cfg.MultiHop.BaseAssetMarket, cfg.MultiHop.QuoteAssetMarket),
+			expectedSellRate: aggregateRates(dcrUSDTSellRate, btcUSDTBuyRate, mkt, cfg.MultiHop.BaseAssetMarket, cfg.MultiHop.QuoteAssetMarket),
+			expectedBuyArbs: []*arbTradeArgs{
+				{
+					baseID:    baseID,
+					quoteID:   intermediateID,
+					orderType: libxc.OrderTypeLimitIOC,
+					rate:      dcrUSDTBuyRate,
+					qty:       lotSize,
+					sell:      true,
+				},
+				{
+					baseID:    baseID,
+					quoteID:   intermediateID,
+					orderType: libxc.OrderTypeLimitIOC,
+					rate:      dcrUSDTBuyRate,
 					qty:       lotSize * numLots,
+					sell:      true,
+				},
+				{
+					baseID:    quoteID,
+					quoteID:   intermediateID,
+					orderType: libxc.OrderTypeMarket,
+					rate:      0,
+					quoteQty:  calc.BaseToQuote(dcrUSDTBuyRate, lotSize),
+					sell:      false,
+				},
+				{
+					baseID:    quoteID,
+					quoteID:   intermediateID,
+					orderType: libxc.OrderTypeMarket,
+					rate:      0,
+					quoteQty:  calc.BaseToQuote(dcrUSDTBuyRate, lotSize*numLots),
+					sell:      false,
+				},
+			},
+			expectedSellArbs: []*arbTradeArgs{
+				{
+					baseID:    baseID,
+					quoteID:   intermediateID,
+					orderType: libxc.OrderTypeMarket,
+					rate:      0,
+					quoteQty:  calc.BaseToQuote(dcrUSDTSellRate, lotSize),
+					sell:      false,
+				},
+				{
+					baseID:    baseID,
+					quoteID:   intermediateID,
+					orderType: libxc.OrderTypeMarket,
+					rate:      0,
+					quoteQty:  calc.BaseToQuote(dcrUSDTSellRate, lotSize*numLots),
+					sell:      false,
+				},
+				{
+					baseID:    quoteID,
+					quoteID:   intermediateID,
+					orderType: libxc.OrderTypeLimitIOC,
+					rate:      btcUSDTBuyRate,
+					qty:       calc.QuoteToBase(btcUSDTBuyRate, calc.BaseToQuote(dcrUSDTSellRate, lotSize)),
+					sell:      true,
+				},
+				{
+					baseID:    quoteID,
+					quoteID:   intermediateID,
+					orderType: libxc.OrderTypeLimitIOC,
+					rate:      btcUSDTBuyRate,
+					qty:       calc.QuoteToBase(btcUSDTBuyRate, calc.BaseToQuote(dcrUSDTSellRate, lotSize*numLots)),
+					sell:      true,
+				},
+			},
+			expectedSellMultiHopRates: [2]uint64{btcUSDTBuyRate, dcrUSDTSellRate},
+			expectedBuyMultiHopRates:  [2]uint64{dcrUSDTBuyRate, btcUSDTSellRate},
+			expectedFilled:            true,
+		},
+		{
+			name:              "usdt/dcr,usdt/btc,market",
+			depth:             lotSize,
+			cfg:               inverseCfg,
+			marketOrders:      true,
+			limitOrdersBuffer: 0,
+			vwapResults: map[[2]uint32]map[bool]map[uint64]vwapResult{
+				inverseCfg.MultiHop.QuoteAssetMarket: {
+					true: { // sell
+						calc.QuoteToBase(usdtDCRBuyRate, lotSize): {
+							rate:   usdtBTCSellRate,
+							filled: true,
+						},
+					},
+					false: { // buy
+						calc.QuoteToBase(usdtDCRSellRate, lotSize): {
+							rate:   usdtBTCBuyRate,
+							filled: true,
+						},
+					},
+				},
+			},
+			invVwapResults: map[[2]uint32]map[bool]map[uint64]vwapResult{
+				inverseCfg.MultiHop.BaseAssetMarket: {
+					true: { // sell
+						lotSize: {
+							rate:   usdtDCRSellRate,
+							filled: true,
+						},
+					},
+					false: { // buy
+						lotSize: {
+							rate:   usdtDCRBuyRate,
+							filled: true,
+						},
+					},
+				},
+			},
+			expectedBuyRate:  aggregateRates(usdtDCRSellRate, usdtBTCBuyRate, mkt, inverseCfg.MultiHop.BaseAssetMarket, inverseCfg.MultiHop.QuoteAssetMarket),
+			expectedSellRate: aggregateRates(usdtDCRBuyRate, usdtBTCSellRate, mkt, inverseCfg.MultiHop.BaseAssetMarket, inverseCfg.MultiHop.QuoteAssetMarket),
+			expectedBuyArbs: []*arbTradeArgs{
+				{
+					baseID:    intermediateID,
+					quoteID:   baseID,
+					orderType: libxc.OrderTypeLimitIOC,
+					rate:      usdtDCRSellRate,
+					qty:       calc.QuoteToBase(usdtDCRSellRate, lotSize),
+					sell:      false,
+				},
+				{
+					baseID:    intermediateID,
+					quoteID:   baseID,
+					orderType: libxc.OrderTypeLimitIOC,
+					rate:      usdtDCRSellRate,
+					qty:       calc.QuoteToBase(usdtDCRSellRate, lotSize*numLots),
 					sell:      false,
 				},
 				{
 					baseID:    intermediateID,
 					quoteID:   quoteID,
 					orderType: libxc.OrderTypeMarket,
+					rate:      0,
 					qty:       calc.QuoteToBase(usdtDCRSellRate, lotSize),
 					sell:      true,
 				},
@@ -753,6 +1079,7 @@ func TestMultiHopRate(t *testing.T) {
 					baseID:    intermediateID,
 					quoteID:   quoteID,
 					orderType: libxc.OrderTypeMarket,
+					rate:      0,
 					qty:       calc.QuoteToBase(usdtDCRSellRate, lotSize*numLots),
 					sell:      true,
 				},
@@ -762,6 +1089,7 @@ func TestMultiHopRate(t *testing.T) {
 					baseID:    intermediateID,
 					quoteID:   baseID,
 					orderType: libxc.OrderTypeMarket,
+					rate:      0,
 					qty:       calc.QuoteToBase(usdtDCRBuyRate, lotSize),
 					sell:      true,
 				},
@@ -769,30 +1097,38 @@ func TestMultiHopRate(t *testing.T) {
 					baseID:    intermediateID,
 					quoteID:   baseID,
 					orderType: libxc.OrderTypeMarket,
+					rate:      0,
 					qty:       calc.QuoteToBase(usdtDCRBuyRate, lotSize*numLots),
 					sell:      true,
 				},
 				{
 					baseID:    intermediateID,
 					quoteID:   quoteID,
-					orderType: libxc.OrderTypeMarket,
-					qty:       calc.BaseToQuote(usdtBTCSellRate, calc.QuoteToBase(usdtDCRBuyRate, lotSize)),
+					orderType: libxc.OrderTypeLimitIOC,
+					rate:      usdtBTCSellRate,
+					qty:       calc.QuoteToBase(usdtDCRBuyRate, lotSize),
 					sell:      false,
 				},
 				{
 					baseID:    intermediateID,
 					quoteID:   quoteID,
-					orderType: libxc.OrderTypeMarket,
-					qty:       calc.BaseToQuote(usdtBTCSellRate, calc.QuoteToBase(usdtDCRBuyRate, lotSize*numLots)),
+					orderType: libxc.OrderTypeLimitIOC,
+					rate:      usdtBTCSellRate,
+					qty:       calc.QuoteToBase(usdtDCRBuyRate, lotSize*numLots),
 					sell:      false,
 				},
 			},
-			expectedOk: true,
+			expectedSellMultiHopRates: [2]uint64{usdtBTCSellRate, usdtDCRBuyRate},
+			expectedBuyMultiHopRates:  [2]uint64{usdtDCRSellRate, usdtBTCBuyRate},
+			expectedFilled:            true,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			test.cfg.MultiHop.MarketOrders = test.marketOrders
+			test.cfg.MultiHop.LimitOrdersBuffer = test.limitOrdersBuffer
+
 			mockVWAP := func(baseID, quoteID uint32, sell bool, qty uint64) (uint64, uint64, bool, error) {
 				market := [2]uint32{baseID, quoteID}
 				res := test.vwapResults[market][sell][qty]
@@ -805,8 +1141,9 @@ func TestMultiHopRate(t *testing.T) {
 				return 0, res.rate, res.filled, res.err
 			}
 
-			testRate := func(sell bool, expectedRate uint64, expectedArbs []*arbTradeArgs) {
-				rate, filled, arbs, err := multiHopRateAndTrades(sell, test.depth, numLots, test.cfg.MultiHop, mkt, mockVWAP, mockInvVWAP)
+			testRate := func(sell bool, expectedRate uint64, expectedArbs []*arbTradeArgs, expectedMultiHopRates [2]uint64) {
+				side := map[bool]string{true: "sell", false: "buy"}[sell]
+				filled, rate, multiHopRates, arbs, err := multiHopRateAndTrades(sell, test.depth, numLots, test.cfg.MultiHop, mkt, mockVWAP, mockInvVWAP)
 				if test.expectedError != "" {
 					if err == nil || err.Error() != test.expectedError {
 						t.Fatalf("expected error %q, got %v", test.expectedError, err)
@@ -817,24 +1154,27 @@ func TestMultiHopRate(t *testing.T) {
 					t.Errorf("unexpected error: %v", err)
 					return
 				}
-				if filled != test.expectedOk {
-					t.Errorf("expected filled = %v, got %v", test.expectedOk, filled)
+				if filled != test.expectedFilled {
+					t.Errorf("%s expected filled = %v, got %v", side, test.expectedFilled, filled)
 					return
 				}
 				if filled && rate != expectedRate {
-					t.Errorf("expected %s rate %d, got %d", sellStr(sell), expectedRate, rate)
+					t.Errorf("%s expected rate %d, got %d", side, expectedRate, rate)
 					return
 				}
 				if filled && !reflect.DeepEqual(arbs, expectedArbs) {
-					t.Errorf("expected arbs %s, got %s", spew.Sdump(expectedArbs), spew.Sdump(arbs))
+					t.Errorf("%s expected arbs %s, got %s", side, spew.Sdump(expectedArbs), spew.Sdump(arbs))
+				}
+				if !reflect.DeepEqual(multiHopRates, expectedMultiHopRates) {
+					t.Errorf("%s expected multiHopRates %s, got %s", side, spew.Sdump(expectedMultiHopRates), spew.Sdump(multiHopRates))
 				}
 			}
 
 			t.Run("sell", func(t *testing.T) {
-				testRate(true, test.expectedSellRate, test.expectedSellArbs)
+				testRate(true, test.expectedSellRate, test.expectedSellArbs, test.expectedSellMultiHopRates)
 			})
 			t.Run("buy", func(t *testing.T) {
-				testRate(false, test.expectedBuyRate, test.expectedBuyArbs)
+				testRate(false, test.expectedBuyRate, test.expectedBuyArbs, test.expectedBuyMultiHopRates)
 			})
 		})
 	}
@@ -1061,7 +1401,8 @@ func TestMultiHopArbCompletionParams(t *testing.T) {
 		unifiedExchangeAdaptor: u,
 		cex:                    newTBotCEXAdaptor(),
 		core:                   newTBotCoreAdaptor(c),
-		pendingOrders:          make(map[order.OrderID]uint64),
+		orderArbRates:          make(map[order.OrderID][2]uint64),
+		orderIndex:             make(map[bool]map[order.OrderID]int),
 	}
 
 	tests := []struct {
@@ -1069,14 +1410,20 @@ func TestMultiHopArbCompletionParams(t *testing.T) {
 		trade            *libxc.Trade
 		baseAssetMarket  [2]uint32
 		quoteAssetMarket [2]uint32
-		wantIntermediate bool
+		marketOrders     bool
+		buffer           float64
+		followUpRate     uint64
+		wantMakeTrade    bool
+		wantOrderType    libxc.OrderType
 		wantBaseID       uint32
 		wantQuoteID      uint32
 		wantSell         bool
 		wantQty          uint64
+		wantQuoteQty     uint64
+		wantRate         uint64
 	}{
 		{
-			name: "dcr/usdt, btc/usdt, sell dcr",
+			name: "dcr/usdt, btc/usdt, sell dcr, market",
 			trade: &libxc.Trade{
 				BaseID:      42,
 				QuoteID:     60002,
@@ -1084,15 +1431,45 @@ func TestMultiHopArbCompletionParams(t *testing.T) {
 				Sell:        true,
 				BaseFilled:  1e8,
 				QuoteFilled: 100e6,
-				Market:      true,
+				Complete:    true,
 			},
 			baseAssetMarket:  [2]uint32{42, 60002},
 			quoteAssetMarket: [2]uint32{0, 60002},
-			wantIntermediate: true,
+			marketOrders:     true,
+			buffer:           0,
+			followUpRate:     0,
+			wantMakeTrade:    true,
+			wantOrderType:    libxc.OrderTypeMarket,
 			wantBaseID:       0,
 			wantQuoteID:      60002,
 			wantSell:         false,
-			wantQty:          100e6,
+			wantQuoteQty:     100e6,
+			wantRate:         0,
+		},
+		{
+			name: "dcr/usdt, btc/usdt, sell dcr, limit",
+			trade: &libxc.Trade{
+				BaseID:      42,
+				QuoteID:     60002,
+				Qty:         1e8,
+				Sell:        true,
+				BaseFilled:  1e8,
+				QuoteFilled: 100e6,
+				Complete:    true,
+			},
+			baseAssetMarket:  [2]uint32{42, 60002},
+			quoteAssetMarket: [2]uint32{0, 60002},
+			marketOrders:     false,
+			buffer:           0.01,
+			followUpRate:     100000000,
+			wantMakeTrade:    true,
+			wantOrderType:    libxc.OrderTypeLimit,
+			wantBaseID:       0,
+			wantQuoteID:      60002,
+			wantSell:         false,
+			wantQty:          0,
+			wantQuoteQty:     100e6,
+			wantRate:         101000000,
 		},
 		{
 			name: "dcr/usdt, btc/usdt, buy dcr",
@@ -1103,11 +1480,20 @@ func TestMultiHopArbCompletionParams(t *testing.T) {
 				Qty:         100e6,
 				BaseFilled:  1e8,
 				QuoteFilled: 100e6,
-				Market:      true,
+				Complete:    true,
 			},
 			baseAssetMarket:  [2]uint32{42, 60002},
 			quoteAssetMarket: [2]uint32{0, 60002},
-			wantIntermediate: false,
+			marketOrders:     true,
+			buffer:           0,
+			followUpRate:     0,
+			wantMakeTrade:    false,
+			wantOrderType:    libxc.OrderTypeLimit,
+			wantBaseID:       0,
+			wantQuoteID:      0,
+			wantSell:         false,
+			wantQty:          0,
+			wantRate:         0,
 		},
 		{
 			name: "dcr/usdt, btc/usdt, buy btc",
@@ -1118,14 +1504,23 @@ func TestMultiHopArbCompletionParams(t *testing.T) {
 				Qty:         1000e6,
 				BaseFilled:  1e7,
 				QuoteFilled: 1000e6,
-				Market:      true,
+				Complete:    true,
 			},
 			baseAssetMarket:  [2]uint32{42, 60002},
 			quoteAssetMarket: [2]uint32{0, 60002},
-			wantIntermediate: false,
+			marketOrders:     true,
+			buffer:           0,
+			followUpRate:     0,
+			wantMakeTrade:    false,
+			wantOrderType:    libxc.OrderTypeLimit,
+			wantBaseID:       0,
+			wantQuoteID:      0,
+			wantSell:         false,
+			wantQty:          0,
+			wantRate:         0,
 		},
 		{
-			name: "dcr/usdt, btc/usdt, sell btc",
+			name: "dcr/usdt, btc/usdt, sell btc, market",
 			trade: &libxc.Trade{
 				BaseID:      0,
 				QuoteID:     60002,
@@ -1133,15 +1528,46 @@ func TestMultiHopArbCompletionParams(t *testing.T) {
 				Sell:        true,
 				BaseFilled:  1e7,
 				QuoteFilled: 1000e6,
-				Market:      true,
+				Complete:    true,
 			},
 			baseAssetMarket:  [2]uint32{42, 60002},
 			quoteAssetMarket: [2]uint32{0, 60002},
-			wantIntermediate: true,
+			marketOrders:     true,
+			buffer:           0,
+			followUpRate:     0,
+			wantMakeTrade:    true,
+			wantOrderType:    libxc.OrderTypeMarket,
 			wantBaseID:       42,
 			wantQuoteID:      60002,
 			wantSell:         false,
-			wantQty:          1000e6,
+			wantQty:          0,
+			wantQuoteQty:     1000e6,
+			wantRate:         0,
+		},
+		{
+			name: "dcr/usdt, btc/usdt, sell btc, limit",
+			trade: &libxc.Trade{
+				BaseID:      0,
+				QuoteID:     60002,
+				Qty:         1e7,
+				Sell:        true,
+				BaseFilled:  1e7,
+				QuoteFilled: 1000e6,
+				Complete:    true,
+			},
+			baseAssetMarket:  [2]uint32{42, 60002},
+			quoteAssetMarket: [2]uint32{0, 60002},
+			marketOrders:     false,
+			buffer:           0.01,
+			followUpRate:     100000000,
+			wantMakeTrade:    true,
+			wantOrderType:    libxc.OrderTypeLimit,
+			wantBaseID:       42,
+			wantQuoteID:      60002,
+			wantSell:         false,
+			wantQty:          0,
+			wantQuoteQty:     1000e6,
+			wantRate:         101000000,
 		},
 		{
 			name: "usdt/dcr, usdt/btc, sell usdt for dcr",
@@ -1152,14 +1578,23 @@ func TestMultiHopArbCompletionParams(t *testing.T) {
 				Sell:        true,
 				BaseFilled:  100e6,
 				QuoteFilled: 1e8,
-				Market:      true,
+				Complete:    true,
 			},
 			baseAssetMarket:  [2]uint32{60002, 42},
 			quoteAssetMarket: [2]uint32{60002, 0},
-			wantIntermediate: false,
+			marketOrders:     true,
+			buffer:           0,
+			followUpRate:     0,
+			wantMakeTrade:    false,
+			wantOrderType:    libxc.OrderTypeLimit,
+			wantBaseID:       0,
+			wantQuoteID:      0,
+			wantSell:         false,
+			wantQty:          0,
+			wantRate:         0,
 		},
 		{
-			name: "usdt/dcr, usdt/btc, buy usdt with dcr",
+			name: "usdt/dcr, usdt/btc, buy usdt with dcr, market",
 			trade: &libxc.Trade{
 				BaseID:      60002,
 				QuoteID:     42,
@@ -1167,15 +1602,44 @@ func TestMultiHopArbCompletionParams(t *testing.T) {
 				Qty:         1e8,
 				BaseFilled:  100e6,
 				QuoteFilled: 1e8,
-				Market:      true,
+				Complete:    true,
 			},
 			baseAssetMarket:  [2]uint32{60002, 42},
 			quoteAssetMarket: [2]uint32{60002, 0},
-			wantIntermediate: true,
+			marketOrders:     true,
+			buffer:           0,
+			followUpRate:     0,
+			wantMakeTrade:    true,
+			wantOrderType:    libxc.OrderTypeMarket,
 			wantBaseID:       60002,
 			wantQuoteID:      0,
 			wantSell:         true,
 			wantQty:          100e6,
+			wantRate:         0,
+		},
+		{
+			name: "usdt/dcr, usdt/btc, buy usdt with dcr, limit",
+			trade: &libxc.Trade{
+				BaseID:      60002,
+				QuoteID:     42,
+				Sell:        false,
+				Qty:         1e8,
+				BaseFilled:  100e6,
+				QuoteFilled: 1e8,
+				Complete:    true,
+			},
+			baseAssetMarket:  [2]uint32{60002, 42},
+			quoteAssetMarket: [2]uint32{60002, 0},
+			marketOrders:     false,
+			buffer:           0.01,
+			followUpRate:     100000000,
+			wantMakeTrade:    true,
+			wantOrderType:    libxc.OrderTypeLimit,
+			wantBaseID:       60002,
+			wantQuoteID:      0,
+			wantSell:         true,
+			wantQty:          100e6,    // since sell=true, no qty adjust
+			wantRate:         99000000, // floor(100000000 * 0.99)
 		},
 		{
 			name: "usdt/dcr, usdt/btc, sell usdt for btc",
@@ -1186,14 +1650,23 @@ func TestMultiHopArbCompletionParams(t *testing.T) {
 				Sell:        true,
 				BaseFilled:  1000e6,
 				QuoteFilled: 1e7,
-				Market:      true,
+				Complete:    true,
 			},
 			baseAssetMarket:  [2]uint32{60002, 42},
 			quoteAssetMarket: [2]uint32{60002, 0},
-			wantIntermediate: false,
+			marketOrders:     true,
+			buffer:           0,
+			followUpRate:     0,
+			wantMakeTrade:    false,
+			wantOrderType:    libxc.OrderTypeLimit,
+			wantBaseID:       0,
+			wantQuoteID:      0,
+			wantSell:         false,
+			wantQty:          0,
+			wantRate:         0,
 		},
 		{
-			name: "usdt/dcr, usdt/btc, buy usdt with btc",
+			name: "usdt/dcr, usdt/btc, buy usdt with btc, market",
 			trade: &libxc.Trade{
 				BaseID:      60002,
 				QuoteID:     0,
@@ -1201,15 +1674,44 @@ func TestMultiHopArbCompletionParams(t *testing.T) {
 				Qty:         1e7,
 				BaseFilled:  1000e6,
 				QuoteFilled: 1e7,
-				Market:      true,
+				Complete:    true,
 			},
 			baseAssetMarket:  [2]uint32{60002, 42},
 			quoteAssetMarket: [2]uint32{60002, 0},
-			wantIntermediate: true,
+			marketOrders:     true,
+			buffer:           0,
+			followUpRate:     0,
+			wantMakeTrade:    true,
+			wantOrderType:    libxc.OrderTypeMarket,
 			wantBaseID:       60002,
 			wantQuoteID:      42,
 			wantSell:         true,
 			wantQty:          1000e6,
+			wantRate:         0,
+		},
+		{
+			name: "usdt/dcr, usdt/btc, buy usdt with btc, limit",
+			trade: &libxc.Trade{
+				BaseID:      60002,
+				QuoteID:     0,
+				Sell:        false,
+				Qty:         1e7,
+				BaseFilled:  1000e6,
+				QuoteFilled: 1e7,
+				Complete:    true,
+			},
+			baseAssetMarket:  [2]uint32{60002, 42},
+			quoteAssetMarket: [2]uint32{60002, 0},
+			marketOrders:     false,
+			buffer:           0.01,
+			followUpRate:     100000000,
+			wantMakeTrade:    true,
+			wantOrderType:    libxc.OrderTypeLimit,
+			wantBaseID:       60002,
+			wantQuoteID:      42,
+			wantSell:         true,
+			wantQty:          1000e6, // sell=true, no adjust
+			wantRate:         99000000,
 		},
 	}
 
@@ -1217,16 +1719,21 @@ func TestMultiHopArbCompletionParams(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &ArbMarketMakerConfig{
 				MultiHop: &MultiHopCfg{
-					BaseAssetMarket:  tt.baseAssetMarket,
-					QuoteAssetMarket: tt.quoteAssetMarket,
+					BaseAssetMarket:   tt.baseAssetMarket,
+					QuoteAssetMarket:  tt.quoteAssetMarket,
+					MarketOrders:      tt.marketOrders,
+					LimitOrdersBuffer: tt.buffer,
 				},
 			}
 			a.botCfgV.Store(&BotConfig{
 				ArbMarketMakerConfig: cfg,
 			})
-			isIntermediate, baseID, quoteID, sell, qty := a.multiHopArbCompletionParams(tt.trade)
-			if isIntermediate != tt.wantIntermediate {
-				t.Errorf("isIntermediate = %v, want %v", isIntermediate, tt.wantIntermediate)
+			makeTrade, orderType, baseID, quoteID, sell, qty, quoteQty, rate := a.multiHopArbCompletionParams(tt.trade, tt.followUpRate)
+			if makeTrade != tt.wantMakeTrade {
+				t.Errorf("makeTrade = %v, want %v", makeTrade, tt.wantMakeTrade)
+			}
+			if orderType != tt.wantOrderType {
+				t.Errorf("orderType = %v, want %v", orderType, tt.wantOrderType)
 			}
 			if baseID != tt.wantBaseID {
 				t.Errorf("baseID = %v, want %v", baseID, tt.wantBaseID)
@@ -1240,10 +1747,15 @@ func TestMultiHopArbCompletionParams(t *testing.T) {
 			if qty != tt.wantQty {
 				t.Errorf("qty = %v, want %v", qty, tt.wantQty)
 			}
+			if quoteQty != tt.wantQuoteQty {
+				t.Errorf("quoteQty = %v, want %v", quoteQty, tt.wantQuoteQty)
+			}
+			if rate != tt.wantRate {
+				t.Errorf("rate = %v, want %v", rate, tt.wantRate)
+			}
 		})
 	}
 }
-
 func mustParseMarket(m *core.Market) *market {
 	mkt, err := parseMarket("host.com", m)
 	if err != nil {
