@@ -4,6 +4,7 @@ pragma solidity = 0.8.18;
 
 import "@account-abstraction/contracts/interfaces/IAccount.sol";
 import "@account-abstraction/contracts/core/EntryPoint.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 // ETHSwap creates a contract to be deployed on an ethereum network. After
 // deployed, it keeps a record of the state of a contract and enables
@@ -260,7 +261,7 @@ contract ETHSwap is IAccount {
         } else {
             bool success;
             bytes memory data;
-            (success, data) = token.call(abi.encodeWithSelector(TRANSFER_SELECTOR, msg.sender, v.value));
+            (success, data) = token.call(abi.encodeWithSelector(TRANSFER_SELECTOR, v.initiator, v.value));
             require(success && (data.length == 0 || abi.decode(data, (bool))), 'transfer failed');
         }
     }
@@ -283,7 +284,7 @@ contract ETHSwap is IAccount {
 
     // validateUserOp validates a user operation for redeeming swaps via account abstraction, 
     // and transfers the amount required for gas fees to the entrypoint.
-    function validateUserOp(UserOperation calldata userOp, bytes32, uint256 missingAccountFunds) 
+    function validateUserOp(UserOperation calldata userOp, bytes32 userOpHash, uint256 missingAccountFunds)
         external
         senderIsEntryPoint()
         returns (uint256 validationData) {
@@ -292,6 +293,7 @@ contract ETHSwap is IAccount {
             return 1;
         }
 
+        // 0x919835a4 is the function selector for redeemAA.
         if (bytes4(userOp.callData[0:4]) != bytes4(0x919835a4)) {
             return 2;
         }
@@ -317,6 +319,10 @@ contract ETHSwap is IAccount {
 
         if (missingAccountFunds > amountToRedeem) {
             return 5;
+        }
+
+        if (participant != ECDSA.recover(userOpHash, userOp.signature)) {
+            return 6;
         }
 
         _payPrefund(missingAccountFunds);
@@ -363,6 +369,8 @@ contract ETHSwap is IAccount {
         }
 
         uint256 fees = redeemPrepayments[redemptions[0].v.secretHash];
+        delete redeemPrepayments[redemptions[0].v.secretHash];
+
         (bool ok, ) = payable(recipient).call{value: amountToRedeem - fees}("");
         require(ok == true, "transfer failed");
     }

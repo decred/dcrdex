@@ -78,7 +78,7 @@ func init() {
 
 	registerToken(usdcID, ProtocolVersion(usdcID))
 	registerToken(usdtID, ProtocolVersion(usdtID))
-	// registerToken(maticID, ProtocolVersion(maticID))
+	registerToken(maticID, ProtocolVersion(maticID))
 }
 
 // ProtocolVersion returns the default protocol version unless a reversion is

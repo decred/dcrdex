@@ -64,8 +64,7 @@ func credentialsFromKeyStore(ks *keystore.KeyStore) (*accountCredentials, error)
 	}, nil
 }
 
-func signData(creds *accountCredentials, data []byte) (sig, pubKey []byte, err error) {
-	h := crypto.Keccak256(data)
+func signHash(creds *accountCredentials, h []byte) (sig, pubKey []byte, err error) {
 	sig, err = creds.ks.SignHash(*creds.acct, h)
 	if err != nil {
 		return nil, nil, err
@@ -79,9 +78,12 @@ func signData(creds *accountCredentials, data []byte) (sig, pubKey []byte, err e
 		return nil, nil, fmt.Errorf("SignMessage: error recovering pubkey %w", err)
 	}
 
-	// Lop off the "recovery id", since we already recovered the pub key and
-	// it's not used for validation.
-	sig = sig[:64]
+	// Adjust the recovery identifier 'v' (at sig[64]) by adding 27 to match Ethereum's
+	// expected signature format. The SignHash function outputs v as 0 or 1 (raw
+	// secp256k1), but Solidity's ecrecover and OpenZeppelin's ECDSA.recover expect
+	// v to be 27 or 28 (with chain offset). Without this, the signature fails
+	// validation.
+	sig[64] += 27
 
 	return
 }
