@@ -356,6 +356,7 @@ type ethFetcher interface {
 	sendSignedTransaction(ctx context.Context, tx *types.Transaction, filts ...acceptabilityFilter) error
 	sendTransaction(ctx context.Context, txOpts *bind.TransactOpts, to common.Address, data []byte, filts ...acceptabilityFilter) (*types.Transaction, error)
 	signData(data []byte) (sig, pubKey []byte, err error)
+	signHash(hash []byte) (sig, pubKey []byte, err error)
 	syncProgress(context.Context) (progress *ethereum.SyncProgress, tipTime uint64, err error)
 	transactionConfirmations(context.Context, common.Hash) (uint32, error)
 	getTransaction(context.Context, common.Hash) (*types.Transaction, int64, error)
@@ -1053,17 +1054,21 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	return &wg, nil
 }
 
-func (w *ETHWallet) setBundler(bundlerAddr string) error {
+func (w *ETHWallet) entrypointAddress() (common.Address, error) {
 	if w.contractorV1 == nil {
-		return fmt.Errorf("v1 contractor not defined")
+		return common.Address{}, fmt.Errorf("v1 contractor not defined")
 	}
 
 	gaslessRedeemContractor, is := w.contractorV1.(gaslessRedeemContractor)
 	if !is {
-		return fmt.Errorf("contractorV1 does not implement gaslessRedeemContractor")
+		return common.Address{}, fmt.Errorf("contractorV1 does not implement gaslessRedeemContractor")
 	}
 
-	entrypoint, err := gaslessRedeemContractor.entrypointAddress()
+	return gaslessRedeemContractor.entrypointAddress()
+}
+
+func (w *ETHWallet) setBundler(bundlerAddr string) error {
+	entrypoint, err := w.entrypointAddress()
 	if err != nil {
 		return fmt.Errorf("error getting entrypoint address: %v", err)
 	}
@@ -2744,9 +2749,9 @@ func (w *TokenWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uin
 
 const dummyUserOpSignature = "0xfffffffffffffffffffffffffffffff0000000000000000000000000000000007aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c"
 
-// gaslessRedeemGasEstimates returns estimates for the gas limits of a user op
-// that redeems a number of swaps. This estimate is based on pre-calculated
-// values.
+// precalculatedGaslessRedeemGasEstimates returns estimates for the gas limits
+// of a user op that redeems a number of swaps. This estimate is based on
+// pre-calculated values.
 func precalculatedGaslessRedeemGasEstimates(numRedemptions uint64, gases *dexeth.Gases) *estimateBundlerGasResult {
 	verification := gases.GaslessRedeemVerification + gases.GaslessRedeemVerificationAdd*(numRedemptions-1)
 	preVerification := gases.GaslessRedeemPreVerification + gases.GaslessRedeemPreVerificationAdd*(numRedemptions-1)
@@ -2823,6 +2828,21 @@ func (w *ETHWallet) generateUserOp(nonce *big.Int, bundler bundler, redemptions 
 	op.CallGasLimit = gasEstimate.CallGasLimit
 	op.VerificationGasLimit = gasEstimate.VerificationGasLimit
 	op.PreVerificationGas = gasEstimate.PreVerificationGas
+
+	// Sign the user op.
+	entrypoint, err := w.entrypointAddress()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("error getting entrypoint address: %v", err)
+	}
+	signingHash, err := op.hash(entrypoint, big.NewInt(w.chainID))
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("error getting user op hash: %v", err)
+	}
+	sig, _, err := w.node.signHash(signingHash.Bytes())
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("error signing user operation: %v", err)
+	}
+	op.Signature = "0x" + common.Bytes2Hex(sig)
 
 	// Calculate the max fee for the user op.
 	totalGas := gasEstimate.totalGas()
@@ -3972,6 +3992,11 @@ func (eth *baseWallet) SignMessage(_ asset.Coin, msg dex.Bytes) (pubkeys, sigs [
 	sig, pubKey, err := eth.node.signData(msg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("SignMessage: error signing data: %w", err)
+	}
+
+	// Strip the recovery ID if it's present.
+	if len(sig) == 65 {
+		sig = sig[:64]
 	}
 
 	return []dex.Bytes{pubKey}, []dex.Bytes{sig}, nil

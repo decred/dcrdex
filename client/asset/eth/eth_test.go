@@ -250,6 +250,10 @@ func (n *testNode) peerCount() uint32 {
 }
 
 func (n *testNode) signData(data []byte) (sig, pubKey []byte, err error) {
+	return n.signHash(crypto.Keccak256(data))
+}
+
+func (n *testNode) signHash(hash []byte) (sig, pubKey []byte, err error) {
 	if n.signDataErr != nil {
 		return nil, nil, n.signDataErr
 	}
@@ -258,13 +262,14 @@ func (n *testNode) signData(data []byte) (sig, pubKey []byte, err error) {
 		return nil, nil, nil
 	}
 
-	sig, err = crypto.Sign(crypto.Keccak256(data), n.privKey)
+	sig, err = crypto.Sign(hash, n.privKey)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	return sig, crypto.FromECDSAPub(&n.privKey.PublicKey), nil
 }
+
 func (n *testNode) sendTransaction(ctx context.Context, txOpts *bind.TransactOpts, to common.Address, data []byte, filts ...acceptabilityFilter) (*types.Transaction, error) {
 	n.sentTxs++
 	return n.sendTxTx, n.sendTxErr
@@ -3754,6 +3759,18 @@ func TestGaslessRedeem(t *testing.T) {
 	epNonce := big.NewInt(123)
 	dexeth.ContractAddresses[1][dex.Simnet] = common.BytesToAddress(encode.RandomBytes(20))
 
+	calculateExpectedSignature := func(op *userOp, entrypoint common.Address, chainID *big.Int, privKey *ecdsa.PrivateKey) string {
+		signingHash, err := op.hash(entrypoint, chainID)
+		if err != nil {
+			t.Fatalf("error getting signing hash: %v", err)
+		}
+		sig, err := crypto.Sign(signingHash.Bytes(), privKey)
+		if err != nil {
+			t.Fatalf("error signing user operation: %v", err)
+		}
+		return "0x" + common.Bytes2Hex(sig)
+	}
+
 	swapVector := &dexeth.SwapVector{
 		From:       common.HexToAddress("0x0000000000000000000000000000000000000000"),
 		To:         common.HexToAddress("0x0000000000000000000000000000000000000000"),
@@ -3852,7 +3869,7 @@ func TestGaslessRedeem(t *testing.T) {
 				Sender:               dexeth.ContractAddresses[1][dex.Simnet].Hex(),
 				InitCode:             "0x",
 				CallData:             "0x" + common.Bytes2Hex(calldata),
-				Signature:            dummyUserOpSignature,
+				Signature:            "",
 				PreVerificationGas:   bundlerGasEstimate.PreVerificationGas,
 				VerificationGasLimit: bundlerGasEstimate.VerificationGasLimit,
 				CallGasLimit:         bundlerGasEstimate.CallGasLimit,
@@ -3883,7 +3900,7 @@ func TestGaslessRedeem(t *testing.T) {
 				Sender:               dexeth.ContractAddresses[1][dex.Simnet].Hex(),
 				InitCode:             "0x",
 				CallData:             "0x" + common.Bytes2Hex(calldata),
-				Signature:            dummyUserOpSignature,
+				Signature:            "",
 				PreVerificationGas:   precalculatedOneRedeemGas.PreVerificationGas,
 				VerificationGasLimit: precalculatedOneRedeemGas.VerificationGasLimit,
 				CallGasLimit:         precalculatedOneRedeemGas.CallGasLimit,
@@ -3916,7 +3933,7 @@ func TestGaslessRedeem(t *testing.T) {
 					Sender:               dexeth.ContractAddresses[1][dex.Simnet].Hex(),
 					InitCode:             "0x",
 					CallData:             "0x" + common.Bytes2Hex(calldata),
-					Signature:            dummyUserOpSignature,
+					Signature:            "",
 					PreVerificationGas:   bundlerGasEstimate.PreVerificationGas,
 					VerificationGasLimit: bundlerGasEstimate.VerificationGasLimit,
 					CallGasLimit:         bundlerGasEstimate.CallGasLimit,
@@ -3929,7 +3946,7 @@ func TestGaslessRedeem(t *testing.T) {
 					Sender:               dexeth.ContractAddresses[1][dex.Simnet].Hex(),
 					InitCode:             "0x",
 					CallData:             "0x" + common.Bytes2Hex(calldata),
-					Signature:            dummyUserOpSignature,
+					Signature:            "",
 					PreVerificationGas:   precalculatedOneRedeemGas.PreVerificationGas,
 					VerificationGasLimit: precalculatedOneRedeemGas.VerificationGasLimit,
 					CallGasLimit:         precalculatedOneRedeemGas.CallGasLimit,
@@ -3982,6 +3999,11 @@ func TestGaslessRedeem(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
+			}
+			for _, expOp := range test.expUserOps {
+				if expOp.Signature == "" {
+					expOp.Signature = calculateExpectedSignature(expOp, epAddress, big.NewInt(ethWallet.chainID), node.privKey)
+				}
 			}
 			if !reflect.DeepEqual(tb.submittedUserOps, test.expUserOps) {
 				t.Fatalf("expected user ops: %s\n but got: %s", spew.Sdump(test.expUserOps), spew.Sdump(tb.submittedUserOps))
@@ -4529,7 +4551,7 @@ func TestSignMessage(t *testing.T) {
 	if len(sigs) != 1 {
 		t.Fatalf("expected 1 signature but got %v", len(sigs))
 	}
-	if !crypto.VerifySignature(pubKeys[0], crypto.Keccak256(msg), sigs[0][:len(sigs[0])-1]) {
+	if !crypto.VerifySignature(pubKeys[0], crypto.Keccak256(msg), sigs[0][:len(sigs[0])]) {
 		t.Fatalf("failed to verify signature")
 	}
 }

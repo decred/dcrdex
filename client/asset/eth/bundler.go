@@ -9,9 +9,11 @@ import (
 	"sync"
 
 	"decred.org/dcrdex/dex/networks/eth/contracts/entrypoint"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
@@ -165,6 +167,65 @@ type userOp struct {
 	MaxPriorityFeePerGas string `json:"maxPriorityFeePerGas"`
 	PaymasterAndData     string `json:"paymasterAndData"`
 	Signature            string `json:"signature"`
+}
+
+func (op *userOp) hash(entryPoint common.Address, chainID *big.Int) (common.Hash, error) {
+	parseBigInt := func(hexStr string) *big.Int {
+		intB := common.FromHex(hexStr)
+		result := new(big.Int)
+		result.SetBytes(intB)
+		return result
+	}
+
+	address, _ := abi.NewType("address", "", nil)
+	uint256, _ := abi.NewType("uint256", "", nil)
+	bytes32, _ := abi.NewType("bytes32", "", nil)
+
+	args := abi.Arguments{
+		{Name: "sender", Type: address},
+		{Name: "nonce", Type: uint256},
+		{Name: "hashInitCode", Type: bytes32},
+		{Name: "hashCallData", Type: bytes32},
+		{Name: "callGasLimit", Type: uint256},
+		{Name: "verificationGasLimit", Type: uint256},
+		{Name: "preVerificationGas", Type: uint256},
+		{Name: "maxFeePerGas", Type: uint256},
+		{Name: "maxPriorityFeePerGas", Type: uint256},
+		{Name: "hashPaymasterAndData", Type: bytes32},
+	}
+
+	sender := common.HexToAddress(op.Sender)
+	nonce := parseBigInt(op.Nonce)
+	callGasLimit := parseBigInt(op.CallGasLimit)
+	verificationGasLimit := parseBigInt(op.VerificationGasLimit)
+	preVerificationGas := parseBigInt(op.PreVerificationGas)
+	maxFeePerGas := parseBigInt(op.MaxFeePerGas)
+	maxPriorityFeePerGas := parseBigInt(op.MaxPriorityFeePerGas)
+	initCodeHash := crypto.Keccak256Hash(common.FromHex(op.InitCode))
+	callDataHash := crypto.Keccak256Hash(common.FromHex(op.CallData))
+	paymasterAndDataHash := crypto.Keccak256Hash(common.FromHex(op.PaymasterAndData))
+
+	packed, err := args.Pack(
+		sender,
+		nonce,
+		initCodeHash,
+		callDataHash,
+		callGasLimit,
+		verificationGasLimit,
+		preVerificationGas,
+		maxFeePerGas,
+		maxPriorityFeePerGas,
+		paymasterAndDataHash,
+	)
+	if err != nil {
+		return common.Hash{}, err
+	}
+
+	return crypto.Keccak256Hash(
+		crypto.Keccak256(packed),
+		common.LeftPadBytes(entryPoint.Bytes(), 32),
+		common.LeftPadBytes(chainID.Bytes(), 32),
+	), nil
 }
 
 // sendUserOp sends a user operation to the bundler via the eth_sendUserOperation RPC method.
