@@ -720,13 +720,9 @@ func newWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		return nil, err
 	}
 
-	if _, supported := PolygonBridgeSupportedAsset(BipID, net); supported {
-		return &ETHBridgeWallet{
-			ETHWallet: evmWallet,
-		}, nil
-	}
-
-	return evmWallet, nil
+	return &ETHBridgeWallet{
+		ETHWallet: evmWallet,
+	}, nil
 }
 
 // EVMWalletConfig is the configuration for an evm-compatible wallet.
@@ -1048,10 +1044,10 @@ func (w *ETHBridgeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) 
 	}
 
 	var bridge bridge
-	switch w.assetID {
-	case ethID:
-		bridge, err = newPolygonBridgeEth(ctx, w.node.contractBackend(), w.net, w.addr, w.node, w.log)
-	case polygonID:
+	switch {
+	case w.assetID == BipID:
+		bridge, err = newAcrossBridge(ctx, w.node.contractBackend(), w.node, w.assetID, w.net, w.addr, common.Address{}, w.log)
+	case w.assetID == polygonID:
 		bridge, err = newPolygonBridgePolygonPOLToken(ctx, w.node.contractBackend(), w.net, w.addr, w.log)
 	default:
 		err = fmt.Errorf("bridge not supported for asset %d", w.assetID)
@@ -1078,13 +1074,11 @@ func (w *TokenBridgeWallet) Connect(ctx context.Context) (wg *sync.WaitGroup, er
 	var bridge bridge
 	switch {
 	case isUSDCBridgeSupported(w.assetID, w.net):
-		bridge, err = newUsdcBridge(w.assetID, w.net, w.netToken.Address, w.node.contractBackend(), w.addr, w.node)
-	case w.baseChainID == polygonID:
-		bridge, err = newPolygonBridgePolygonErc20(w.node.contractBackend(), w.assetID, w.netToken.Address, w.log, w.net)
+		bridge, err = newUsdcBridge(w.assetID, w.net, w.tokenAddr, w.node.contractBackend(), w.addr, w.node)
+	case isAcrossBridgeSupported(ctx, w.assetID, w.net, w.log):
+		bridge, err = newAcrossBridge(ctx, w.node.contractBackend(), w.node, w.assetID, w.net, w.addr, w.netToken.Address, w.log)
 	case w.assetID == maticEthID:
 		bridge, err = newPolygonBridgeEthPOL(ctx, w.node.contractBackend(), w.assetID, w.netToken.Address, w.net, w.addr, w.node, w.log)
-	case w.baseChainID == ethID:
-		bridge, err = newPolygonBridgeEthErc20(ctx, w.node.contractBackend(), w.assetID, w.netToken.Address, w.net, w.addr, w.node, w.log)
 	default:
 		err = fmt.Errorf("bridge not supported for asset %d", w.assetID)
 	}
@@ -3449,6 +3443,16 @@ func (w *ETHBridgeWallet) CompleteBridge(ctx context.Context, bridgeTx *asset.Br
 // or unlocks coins on the destination chain.
 func (w *TokenBridgeWallet) CompleteBridge(ctx context.Context, bridgeTx *asset.BridgeCounterpartTx, amount uint64, data []byte) error {
 	return w.completeBrigdeIfNeeded(ctx, bridgeTx, amount, data, w.manager.bridge)
+}
+
+// SupportedDestinations returns the list of asset IDs that the wallet can bridge funds to.
+func (w *ETHBridgeWallet) SupportedDestinations(assetID uint32) ([]uint32, error) {
+	return w.manager.bridge.supportedDestinations(), nil
+}
+
+// SupportedDestinations returns the list of asset IDs that the wallet can bridge funds to.
+func (w *TokenBridgeWallet) SupportedDestinations(assetID uint32) ([]uint32, error) {
+	return w.manager.bridge.supportedDestinations(), nil
 }
 
 // ReserveNRedemptions locks funds for redemption. It is an error if there

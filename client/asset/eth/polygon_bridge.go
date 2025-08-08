@@ -111,6 +111,7 @@ func (b *polygonBridgePolygonERC20) initiateBridge(opts *bind.TransactOpts, dest
 	if expectedDestAssetID != destAssetID {
 		return nil, fmt.Errorf("%s cannot be bridged to %s", dex.BipIDSymbol(b.assetID), dex.BipIDSymbol(expectedDestAssetID))
 	}
+
 	tx, err := b.childERC20.Withdraw(opts, amount)
 	return tx, err
 }
@@ -145,6 +146,10 @@ func (b *polygonBridgePolygonERC20) getCompletionData(ctx context.Context, bridg
 
 func (b *polygonBridgePolygonERC20) requiresCompletion() bool {
 	return false
+}
+
+func (b *polygonBridgePolygonERC20) supportedDestinations() []uint32 {
+	return []uint32{polygonBridgeSupportedAssets[b.net][b.assetID]}
 }
 
 // verifyPolygonBridgeCompletion is called for bridges from ethereum to polygon
@@ -290,6 +295,10 @@ func (b *polygonBridgeEth) completeBridgeGas() uint64 {
 	return 600_000
 }
 
+func (b *polygonBridgeEth) supportedDestinations() []uint32 {
+	return []uint32{wethPolygonID}
+}
+
 // polygonBridgePolygonPOLToken is used to manage the bridge operations on
 // Polygon for the native POL asset.
 type polygonBridgePolygonPOLToken struct {
@@ -371,6 +380,10 @@ func (b *polygonBridgePolygonPOLToken) initiateBridgeGas() uint64 {
 
 func (b *polygonBridgePolygonPOLToken) completeBridgeGas() uint64 {
 	return 0
+}
+
+func (b *polygonBridgePolygonPOLToken) supportedDestinations() []uint32 {
+	return []uint32{}
 }
 
 // polygonBridgeEthErc20 is the bridge operations on Ethereum for ERC20
@@ -522,6 +535,10 @@ func (b *polygonBridgeEthErc20) completeBridgeGas() uint64 {
 	return 600_000
 }
 
+func (b *polygonBridgeEthErc20) supportedDestinations() []uint32 {
+	return []uint32{polygonBridgeSupportedAssets[b.net][b.assetID]}
+}
+
 // polygonBridgeEthPOLToken is the bridge operations on Ethereum for POL/MATIC
 // tokens.
 type polygonBridgeEthPOLToken struct {
@@ -622,4 +639,8 @@ func (b *polygonBridgeEthPOLToken) initiateBridgeGas() uint64 {
 
 func (b *polygonBridgeEthPOLToken) completeBridgeGas() uint64 {
 	panic("not implemented")
+}
+
+func (b *polygonBridgeEthPOLToken) supportedDestinations() []uint32 {
+	return []uint32{polygonID}
 }

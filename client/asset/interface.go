@@ -732,6 +732,9 @@ type Bridger interface {
 	// BridgeHistory retrieves a record of bridge transactions on the blockchain.
 	// For token wallets, this includes history for other tokens on the same chain.
 	BridgeHistory(n int, refID *string, past bool) ([]*WalletTransaction, error)
+
+	// SupportedDestinations returns the list of asset IDs that are supported as destinations for the origin asset.
+	SupportedDestinations(assetID uint32) ([]uint32, error)
 }
 
 // Sweeper is a wallet that can clear the entire balance of the wallet/account

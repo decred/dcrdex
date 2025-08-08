@@ -65,6 +65,9 @@ type bridge interface {
 	// verifyBridgeCompletion verifies that the bridge was completed successfully.
 	// This is required for bridges that do not require a completion transaction.
 	verifyBridgeCompletion(ctx context.Context, data []byte) (bool, error)
+
+	// supportedDestinations returns the list of asset IDs that are supported as destinations for the origin asset.
+	supportedDestinations() []uint32
 }
 
 var (
@@ -161,6 +164,7 @@ type usdcBridge struct {
 	net                    dex.Network
 	addr                   common.Address
 	node                   ethFetcher
+	assetID                uint32
 }
 
 var _ bridge = (*usdcBridge)(nil)
@@ -203,6 +207,7 @@ func newUsdcBridge(assetID uint32, net dex.Network, tokenAddress common.Address,
 		attestationUrl:         attestationUrl,
 		addr:                   addr,
 		node:                   node,
+		assetID:                assetID,
 	}, nil
 }
 
@@ -371,4 +376,11 @@ func (b *usdcBridge) requiresCompletion() bool {
 
 func (b *usdcBridge) verifyBridgeCompletion(ctx context.Context, data []byte) (bool, error) {
 	return false, fmt.Errorf("a completion transaction is for usdc")
+}
+
+func (b *usdcBridge) supportedDestinations() []uint32 {
+	if usdcEthID == b.assetID {
+		return []uint32{usdcPolygonID}
+	}
+	return []uint32{usdcEthID}
 }

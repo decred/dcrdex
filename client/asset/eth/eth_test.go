@@ -5291,6 +5291,9 @@ func (m *mockBridge) requiresCompletion() bool  { return true }
 func (m *mockBridge) verifyBridgeCompletion(ctx context.Context, data []byte) (bool, error) {
 	return false, nil
 }
+func (m *mockBridge) supportedDestinations() []uint32 {
+	return []uint32{}
+}
 
 func TestBridgeManager(t *testing.T) {
 	setupWithPendingBridges := func(t *testing.T, pendingBridges []*extendedWalletTx) (*bridgeManager, *mockBridge, chan asset.WalletNotification, *tTxDB, dex.Logger) {
