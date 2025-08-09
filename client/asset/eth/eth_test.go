@@ -5008,6 +5008,7 @@ func TestSwapOrRedemptionFeesPaid(t *testing.T) {
 			s := [32]byte{}
 			copy(s[:], secretHs[i])
 			init := &dexeth.Initiation{
+				LockTime:   time.Now(),
 				SecretHash: s,
 				Value:      big.NewInt(0),
 			}
@@ -5507,9 +5508,10 @@ func TestCompleteBridge(t *testing.T) {
 
 			bridgeWallet := &ETHBridgeWallet{ETHWallet: w.(*ETHWallet)}
 			bridge := &mockBridge{}
-			bridgeWallet.manager = &bridgeManager{
+			const destID = 0
+			bridgeWallet.managers = map[uint32]*bridgeManager{destID: {
 				bridge: bridge,
-			}
+			}}
 
 			emitChan := make(chan asset.WalletNotification, 1)
 			bridgeWallet.emit = asset.NewWalletEmitter(emitChan, BipID, bridgeWallet.log)
@@ -5526,7 +5528,7 @@ func TestCompleteBridge(t *testing.T) {
 				bridgeWallet.pendingTxs = []*extendedWalletTx{}
 			}
 
-			err := bridgeWallet.CompleteBridge(context.Background(), initiationTx, 1e9, []byte("completionData"))
+			err := bridgeWallet.CompleteBridge(context.Background(), initiationTx, 1e9, []byte("completionData"), destID)
 
 			if tt.expectErr {
 				if err == nil {

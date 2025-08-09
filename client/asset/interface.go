@@ -699,15 +699,15 @@ type Bridger interface {
 	// ApproveBridgeContract submits a transaction to authorize the bridge contract
 	// to manage the user's tokens. This step is optional for some assets.
 	// Use BridgeContractApprovalStatus to determine if approval is necessary.
-	ApproveBridgeContract(ctx context.Context) (string, error)
+	ApproveBridgeContract(ctx context.Context, dest uint32) (string, error)
 
 	// UnapproveBridgeContract submits a transaction to revoke the bridge contract's
 	// permission to manage the user's tokens.
-	UnapproveBridgeContract(ctx context.Context) (string, error)
+	UnapproveBridgeContract(ctx context.Context, dest uint32) (string, error)
 
 	// BridgeContractApprovalStatus retrieves the current approval state of the bridge contract.
 	// Returns Approved for assets that don't require explicit approval.
-	BridgeContractApprovalStatus(ctx context.Context) (ApprovalStatus, error)
+	BridgeContractApprovalStatus(ctx context.Context, dest uint32) (ApprovalStatus, error)
 
 	// InitiateBridge starts a fund transfer to the specified destination chain.
 	// If a completion transaction is needed, a BridgeReadyToCompleteNote will
@@ -718,7 +718,7 @@ type Bridger interface {
 	// destination chain to issue the user's tokens. Some assets require
 	// multiple transactions to complete the bridge. Once all the transactions
 	// are confirmed, a BridgeCompletedNote will be emitted.
-	CompleteBridge(ctx context.Context, bridgeTx *BridgeCounterpartTx, amount uint64, mintData []byte) error
+	CompleteBridge(ctx context.Context, bridgeTx *BridgeCounterpartTx, amount uint64, mintData []byte, dest uint32) error
 
 	// MarkBridgeComplete should be invoked after the completion transaction
 	// is confirmed on the destination chain to update the bridge status.
@@ -1590,6 +1590,7 @@ type BridgeCompletedNote struct {
 	SourceAssetID  uint32 `json:"sourceAssetID"`
 	InitiationTxID string `json:"initiationTxID"`
 	CompletionTxID string `json:"completionTxIDs"`
+	DestAssetID    uint32 `json:"destAssetID"`
 }
 
 // BalanceChangeNote can be sent when the wallet detects a balance change

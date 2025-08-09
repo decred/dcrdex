@@ -201,13 +201,13 @@ func (c *TCore) WalletTransaction(assetID uint32, txID string) (*asset.WalletTra
 func (c *TCore) GenerateBCHRecoveryTransaction(appPW []byte, recipient string) ([]byte, error) {
 	return nil, nil
 }
-func (c *TCore) BridgeContractApprovalStatus(assetID uint32) (asset.ApprovalStatus, error) {
+func (c *TCore) BridgeContractApprovalStatus(assetID, destID uint32) (asset.ApprovalStatus, error) {
 	return 0, nil
 }
-func (c *TCore) ApproveBridgeContract(assetID uint32) (string, error) {
+func (c *TCore) ApproveBridgeContract(assetID, destID uint32) (string, error) {
 	return "", nil
 }
-func (c *TCore) UnapproveBridgeContract(assetID uint32) (string, error) {
+func (c *TCore) UnapproveBridgeContract(assetID, destID uint32) (string, error) {
 	return "", nil
 }
 func (c *TCore) Bridge(fromAssetID, toAssetID uint32, amt uint64) (txID string, err error) {

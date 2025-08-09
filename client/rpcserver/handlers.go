@@ -1086,7 +1086,7 @@ func handleWithdrawBchSpv(s *RPCServer, params *RawParams) *msgjson.ResponsePayl
 }
 
 func handleCheckBridgeApproval(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 1 {
+	if len(params.Args) != 2 {
 		return usage(checkBridgeApprovalRoute, fmt.Errorf("expected 1 args, got %d", len(params.Args)))
 	}
 
@@ -1097,7 +1097,14 @@ func handleCheckBridgeApproval(s *RPCServer, params *RawParams) *msgjson.Respons
 
 	assetID := uint32(i)
 
-	approvalStatus, err := s.core.BridgeContractApprovalStatus(assetID)
+	i, err = strconv.ParseUint(params.Args[1], 10, 32)
+	if err != nil {
+		return usage(checkBridgeApprovalRoute, fmt.Errorf("error parsing assetID: %v", err))
+	}
+
+	destID := uint32(i)
+
+	approvalStatus, err := s.core.BridgeContractApprovalStatus(assetID, destID)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCBridgeError, "unable to check bridge approval: %v", err)
 		return createResponse(checkBridgeApprovalRoute, nil, resErr)
@@ -1107,7 +1114,7 @@ func handleCheckBridgeApproval(s *RPCServer, params *RawParams) *msgjson.Respons
 }
 
 func handleApproveBridge(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 2 {
+	if len(params.Args) != 3 {
 		return usage(approveBridgeContractRoute, fmt.Errorf("expected 2 args, got %d", len(params.Args)))
 	}
 
@@ -1118,16 +1125,23 @@ func handleApproveBridge(s *RPCServer, params *RawParams) *msgjson.ResponsePaylo
 
 	assetID := uint32(i)
 
-	approve, err := strconv.ParseBool(params.Args[1])
+	i, err = strconv.ParseUint(params.Args[1], 10, 32)
+	if err != nil {
+		return usage(approveBridgeContractRoute, fmt.Errorf("error parsing assetID: %v", err))
+	}
+
+	destID := uint32(i)
+
+	approve, err := strconv.ParseBool(params.Args[2])
 	if err != nil {
 		return usage(approveBridgeContractRoute, fmt.Errorf("error parsing approve: %v", err))
 	}
 
 	var txID string
 	if approve {
-		txID, err = s.core.ApproveBridgeContract(assetID)
+		txID, err = s.core.ApproveBridgeContract(assetID, destID)
 	} else {
-		txID, err = s.core.UnapproveBridgeContract(assetID)
+		txID, err = s.core.UnapproveBridgeContract(assetID, destID)
 	}
 
 	if err != nil {
@@ -1986,16 +2000,18 @@ an spv wallet and enables options to view and set the vsp.
 		value (int): The amount of tokens to bridge.`,
 	},
 	checkBridgeApprovalRoute: {
-		argsShort:  `assetID`,
+		argsShort:  `assetID, destID`,
 		cmdSummary: "Check if the bridge contract is approved.",
 		argsLong: `Args:
-		assetID (int): The BIP-44 registered coin index of the asset from where the bridge will be initiated.`,
+		assetID (int): The BIP-44 registered coin index of the asset from where the bridge will be initiated.
+		destID (int): The asset's BIP-44 registered coin index on the "to" chain.`,
 	},
 	approveBridgeContractRoute: {
-		argsShort:  `assetID approve`,
+		argsShort:  `assetID destID approve`,
 		cmdSummary: "Approve the bridge contract.",
 		argsLong: `Args:
 		assetID (int): The asset's BIP-44 registered coin index on the "from" chain.
+		destID (int): The asset's BIP-44 registered coin index on the "to" chain.
 		approve (bool): True to approve, false to unapprove.`,
 	},
 	pendingBridgesRoute: {
