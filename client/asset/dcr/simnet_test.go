@@ -34,6 +34,7 @@ import (
 	"decred.org/dcrdex/dex/encode"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	"decred.org/dcrwallet/v5/wallet"
+	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -912,4 +913,603 @@ func testWalletTxBalanceSync(t *testing.T, fromWallet, toWallet *ExchangeWallet)
 	}
 
 	confirmSync(balance.Available, coin.ID())
+}
+
+type privateSwapper struct {
+	isMaker bool
+
+	order *asset.Order
+
+	ourSwapTx       []byte
+	ourSwapTxCoinID []byte
+	cpSwapTx        []byte
+	cpSwapTxCoinID  []byte
+
+	ourUnsignedRedeem []byte
+	cpUnsignedRedeem  []byte
+
+	ourRedeemPubKey []byte
+	ourRefundPubKey []byte
+
+	cpRedeemPubKey []byte
+	cpRefundPubKey []byte
+
+	cpRedeemAdaptorSig []byte
+	cpRefundAdaptorSig []byte
+
+	ourRedeemAdaptorSig []byte
+	ourRefundAdaptorSig []byte
+
+	adaptorSecret *btcec.ModNScalar
+	adaptorPub    *btcec.JacobianPoint
+
+	lockTime time.Time
+
+	wallet *ExchangeWallet
+}
+
+type takerPreSwapMsg struct {
+	redeemPubKey []byte
+	refundPubKey []byte
+}
+
+func (s *privateSwapper) generateTakerPreSwapMsg() (*takerPreSwapMsg, error) {
+	if s.isMaker {
+		return nil, fmt.Errorf("not taker")
+	}
+
+	var err error
+	s.ourRedeemPubKey, err = s.wallet.PrivateSwapPubKey()
+	if err != nil {
+		return nil, err
+	}
+	s.ourRefundPubKey, err = s.wallet.PrivateSwapPubKey()
+	if err != nil {
+		return nil, err
+	}
+
+	return &takerPreSwapMsg{
+		redeemPubKey: s.ourRedeemPubKey,
+		refundPubKey: s.ourRefundPubKey,
+	}, nil
+}
+
+type mkrInitSwapMsg struct {
+	swapTx       []byte
+	swapTxCoinID []byte
+	redeemPubKey []byte
+	refundPubKey []byte
+}
+
+func (s *privateSwapper) handleTakerPreSwapMsg(msg *takerPreSwapMsg) (*mkrInitSwapMsg, error) {
+	if !s.isMaker {
+		return nil, fmt.Errorf("not maker")
+	}
+
+	s.cpRedeemPubKey = msg.redeemPubKey
+	s.cpRefundPubKey = msg.refundPubKey
+
+	var err error
+	s.ourRefundPubKey, err = s.wallet.PrivateSwapPubKey()
+	if err != nil {
+		return nil, err
+	}
+	s.ourRedeemPubKey, err = s.wallet.PrivateSwapPubKey()
+	if err != nil {
+		return nil, err
+	}
+
+	coins, _, _, err := s.wallet.FundOrder(s.order)
+	if err != nil {
+		return nil, err
+	}
+	contract := &asset.PrivateContract{
+		LockTime:        uint64(s.lockTime.Unix()),
+		Value:           s.order.Value,
+		RedeemPublicKey: s.cpRedeemPubKey,
+		RefundPublicKey: s.ourRefundPubKey,
+	}
+	swaps := &asset.PrivateSwaps{
+		Version:    0,
+		Contracts:  []*asset.PrivateContract{contract},
+		FeeRate:    s.order.MaxFeeRate,
+		Inputs:     coins,
+		LockChange: false,
+	}
+	receipts, _, swapTx, _, err := s.wallet.SwapPrivate(swaps)
+	if err != nil {
+		return nil, err
+	}
+	s.ourSwapTx = swapTx
+	ourSwapTxCoinID := receipts[0].Coin().ID()
+
+	fmt.Printf("refund tx: %s\n", receipts[0].SignedRefund())
+
+	return &mkrInitSwapMsg{
+		swapTx:       swapTx,
+		swapTxCoinID: ourSwapTxCoinID,
+		redeemPubKey: s.ourRedeemPubKey,
+		refundPubKey: s.ourRefundPubKey,
+	}, nil
+}
+
+type takerInitSwapMsg struct {
+	swapTx         []byte
+	swapCoinID     []byte
+	unsignedRedeem []byte
+}
+
+func (s *privateSwapper) handleMkrInitSwapMsg(msg *mkrInitSwapMsg) (*takerInitSwapMsg, error) {
+	if s.isMaker {
+		return nil, fmt.Errorf("not taker")
+	}
+
+	s.cpSwapTx = msg.swapTx
+	s.cpSwapTxCoinID = msg.swapTxCoinID
+	s.cpRedeemPubKey = msg.redeemPubKey
+	s.cpRefundPubKey = msg.refundPubKey
+
+	cpContract := &asset.PrivateContract{
+		LockTime:        uint64(s.lockTime.Unix()),
+		Value:           s.order.Value,
+		RedeemPublicKey: s.ourRedeemPubKey,
+		RefundPublicKey: s.cpRefundPubKey,
+	}
+	err := s.wallet.AuditPrivateContract(s.cpSwapTxCoinID, s.cpSwapTx, cpContract, false)
+	if err != nil {
+		return nil, fmt.Errorf("error auditing contract: %w", err)
+	}
+
+	unsignedRedeem, err := s.wallet.GenerateUnsignedRedeemTx(s.cpSwapTxCoinID, cpContract, s.order.MaxFeeRate)
+	if err != nil {
+		return nil, fmt.Errorf("error generating unsigned redeem: %w", err)
+	}
+	s.ourUnsignedRedeem = unsignedRedeem
+
+	coins, _, _, err := s.wallet.FundOrder(s.order)
+	if err != nil {
+		return nil, fmt.Errorf("error funding order: %w", err)
+	}
+	contract := &asset.PrivateContract{
+		LockTime:        uint64(s.lockTime.Unix()),
+		Value:           s.order.Value,
+		RedeemPublicKey: s.cpRedeemPubKey,
+		RefundPublicKey: s.ourRefundPubKey,
+	}
+	swaps := &asset.PrivateSwaps{
+		Version:    0,
+		Contracts:  []*asset.PrivateContract{contract},
+		FeeRate:    s.order.MaxFeeRate,
+		Inputs:     coins,
+		LockChange: false,
+	}
+	receipts, _, swapTx, _, err := s.wallet.SwapPrivate(swaps)
+	if err != nil {
+		return nil, fmt.Errorf("error swapping: %w", err)
+	}
+	s.ourSwapTxCoinID = receipts[0].Coin().ID()
+	s.ourSwapTx = swapTx
+
+	return &takerInitSwapMsg{
+		swapTx:         swapTx,
+		swapCoinID:     s.ourSwapTxCoinID,
+		unsignedRedeem: s.ourUnsignedRedeem,
+	}, nil
+}
+
+type makerAdaptorsMsg struct {
+	adaptorSigRefund []byte
+	adaptorSigRedeem []byte
+	adaptorPub       *btcec.JacobianPoint
+	unsignedRedeem   []byte
+}
+
+func (s *privateSwapper) handleTakerInitSwapMsg(msg *takerInitSwapMsg) (*makerAdaptorsMsg, error) {
+	if !s.isMaker {
+		return nil, fmt.Errorf("not maker")
+	}
+
+	s.cpSwapTx = msg.swapTx
+	s.cpSwapTxCoinID = msg.swapCoinID
+	s.cpUnsignedRedeem = msg.unsignedRedeem
+
+	cpContract := &asset.PrivateContract{
+		LockTime:        uint64(s.lockTime.Unix()),
+		Value:           s.order.Value,
+		RedeemPublicKey: s.ourRedeemPubKey,
+		RefundPublicKey: s.cpRefundPubKey,
+	}
+
+	err := s.wallet.AuditPrivateContract(s.cpSwapTxCoinID, s.cpSwapTx, cpContract, false)
+	if err != nil {
+		return nil, fmt.Errorf("error auditing contract: %w", err)
+	}
+	unsignedRedeem, err := s.wallet.GenerateUnsignedRedeemTx(s.cpSwapTxCoinID, cpContract, s.order.MaxFeeRate)
+	if err != nil {
+		return nil, fmt.Errorf("error generating unsigned redeem: %w", err)
+	}
+	s.ourUnsignedRedeem = unsignedRedeem
+
+	ourSwapContract := &asset.PrivateContract{
+		LockTime:        uint64(s.lockTime.Unix()),
+		Value:           s.order.Value,
+		RedeemPublicKey: s.cpRedeemPubKey,
+		RefundPublicKey: s.ourRefundPubKey,
+	}
+
+	var adaptorSecret btcec.ModNScalar
+	for i := 0; i < 100; i++ {
+		var secretB [32]byte
+		_, err := rand.Read(secretB[:])
+		if err != nil {
+			return nil, fmt.Errorf("error generating random secret: %w", err)
+		}
+		adaptorSecret.SetBytes(&secretB)
+
+		if ok, err := s.wallet.ValidateAdaptorSecret(&adaptorSecret, unsignedRedeem, cpContract); err != nil {
+			return nil, fmt.Errorf("error validating adaptor secret: %w", err)
+		} else if !ok {
+			continue
+		}
+
+		if ok, err := s.wallet.ValidateAdaptorSecret(&adaptorSecret, s.cpUnsignedRedeem, ourSwapContract); err != nil {
+			return nil, fmt.Errorf("error validating adaptor secret: %w", err)
+		} else if !ok {
+			continue
+		}
+
+		fmt.Println("Found valid adaptor secret after", i, "attempts")
+		break
+	}
+
+	redeemAdaptorSig, err := s.wallet.GeneratePrivateKeyTweakedAdaptor(unsignedRedeem, cpContract, &adaptorSecret, true)
+	if err != nil {
+		return nil, fmt.Errorf("error generating redeem adaptor: %w", err)
+	}
+
+	refundAdaptorSig, err := s.wallet.GeneratePrivateKeyTweakedAdaptor(s.cpUnsignedRedeem, ourSwapContract, &adaptorSecret, false)
+	if err != nil {
+		return nil, fmt.Errorf("error generating refund adaptor: %w", err)
+	}
+
+	s.adaptorSecret = &adaptorSecret
+	var adaptorPub btcec.JacobianPoint
+	btcec.ScalarBaseMultNonConst(&adaptorSecret, &adaptorPub)
+
+	return &makerAdaptorsMsg{
+		adaptorPub:       &adaptorPub,
+		adaptorSigRedeem: redeemAdaptorSig,
+		adaptorSigRefund: refundAdaptorSig,
+		unsignedRedeem:   unsignedRedeem,
+	}, nil
+}
+
+type takerAdaptorMsg struct {
+	adaptorSig []byte
+}
+
+func (s *privateSwapper) handleMakerAdaptorsMsg(msg *makerAdaptorsMsg) (*takerAdaptorMsg, error) {
+	if s.isMaker {
+		return nil, fmt.Errorf("not taker")
+	}
+
+	s.cpUnsignedRedeem = msg.unsignedRedeem
+	s.adaptorPub = msg.adaptorPub
+	s.cpRefundAdaptorSig = msg.adaptorSigRefund
+	s.cpRedeemAdaptorSig = msg.adaptorSigRedeem
+
+	ourSwapContract := &asset.PrivateContract{
+		LockTime:        uint64(s.lockTime.Unix()),
+		Value:           s.order.Value,
+		RedeemPublicKey: s.cpRedeemPubKey,
+		RefundPublicKey: s.ourRefundPubKey,
+	}
+
+	ourRedeemContract := &asset.PrivateContract{
+		LockTime:        uint64(s.lockTime.Unix()),
+		Value:           s.order.Value,
+		RedeemPublicKey: s.ourRedeemPubKey,
+		RefundPublicKey: s.cpRefundPubKey,
+	}
+
+	valid, err := s.wallet.ValidateAdaptorSig(s.ourUnsignedRedeem, msg.adaptorSigRefund, msg.adaptorPub, ourRedeemContract, false)
+	if err != nil {
+		return nil, fmt.Errorf("error validating cp refund adaptor: %v", err)
+	}
+	if !valid {
+		return nil, fmt.Errorf("cp refund adaptor invalid")
+	}
+
+	valid, err = s.wallet.ValidateAdaptorSig(s.cpUnsignedRedeem, msg.adaptorSigRedeem, msg.adaptorPub, ourSwapContract, true)
+	if err != nil {
+		return nil, fmt.Errorf("error validating cp redeem adaptor: %v", err)
+	}
+	if !valid {
+		return nil, fmt.Errorf("cp redeem adaptor invalid")
+	}
+
+	s.ourRefundAdaptorSig, err = s.wallet.GeneratePublicKeyTweakedAdaptor(s.cpUnsignedRedeem, ourSwapContract, s.adaptorPub)
+	if err != nil {
+		return nil, fmt.Errorf("error generating adaptor sig: %w", err)
+	}
+
+	return &takerAdaptorMsg{
+		adaptorSig: s.ourRefundAdaptorSig,
+	}, nil
+}
+
+type makerRedeemMsg struct {
+	redeemTx []byte
+}
+
+func (s *privateSwapper) handleTakerAdaptorMsg(msg *takerAdaptorMsg) (*makerRedeemMsg, error) {
+	if !s.isMaker {
+		return nil, fmt.Errorf("not maker")
+	}
+
+	cpSwapContract := &asset.PrivateContract{
+		LockTime:        uint64(s.lockTime.Unix()),
+		Value:           s.order.Value,
+		RedeemPublicKey: s.ourRedeemPubKey,
+		RefundPublicKey: s.cpRefundPubKey,
+	}
+	_, _, txData, err := s.wallet.RedeemPrivate(cpSwapContract, s.ourUnsignedRedeem, msg.adaptorSig, s.adaptorSecret)
+	if err != nil {
+		return nil, fmt.Errorf("error redeeming: %w", err)
+	}
+
+	return &makerRedeemMsg{
+		redeemTx: txData,
+	}, nil
+}
+
+func (s *privateSwapper) handleMakerRedeemMsg(msg *makerRedeemMsg) error {
+	if s.isMaker {
+		return fmt.Errorf("not taker")
+	}
+
+	ourSwapContract := &asset.PrivateContract{
+		LockTime:        uint64(s.lockTime.Unix()),
+		Value:           s.order.Value,
+		RedeemPublicKey: s.cpRedeemPubKey,
+		RefundPublicKey: s.ourRefundPubKey,
+	}
+	adaptorSecret, err := s.wallet.RecoverAdaptorSecret(msg.redeemTx, s.ourRefundAdaptorSig, s.cpRedeemAdaptorSig, s.adaptorPub, ourSwapContract)
+	if err != nil {
+		return fmt.Errorf("error recovering adaptor secret: %w", err)
+	}
+
+	cpSwapContract := &asset.PrivateContract{
+		LockTime:        uint64(s.lockTime.Unix()),
+		Value:           s.order.Value,
+		RedeemPublicKey: s.ourRedeemPubKey,
+		RefundPublicKey: s.cpRefundPubKey,
+	}
+	_, _, _, err = s.wallet.RedeemPrivate(cpSwapContract, s.ourUnsignedRedeem, s.cpRefundAdaptorSig, adaptorSecret)
+	if err != nil {
+		return fmt.Errorf("error redeeming: %w", err)
+	}
+
+	return nil
+}
+
+func TestPrivateSwap(t *testing.T) {
+	rig := newTestRig(t, func(name string) {
+		tLogger.Infof("%s has reported a new block", name)
+	})
+	defer rig.close(t)
+
+	beta := rig.alpha()
+	gamma := rig.beta()
+	err := beta.Unlock(walletPassword)
+	if err != nil {
+		t.Fatalf("error unlocking beta wallet: %v", err)
+	}
+	err = gamma.Unlock(walletPassword)
+	if err != nil {
+		t.Fatalf("error unlocking gamma wallet: %v", err)
+	}
+	makerStr := "beta"
+	takerStr := "gamma"
+	testData := map[string]*privateSwapper{
+		makerStr: {
+			isMaker: true,
+			wallet:  beta,
+			order: &asset.Order{
+				AssetVersion:  version,
+				FeeSuggestion: 10,
+				MaxSwapCount:  1,
+				MaxFeeRate:    20,
+				Value:         toAtoms(1),
+			},
+			lockTime: time.Now().Add(time.Hour * -48),
+		},
+		takerStr: {
+			isMaker: false,
+			wallet:  gamma,
+			order: &asset.Order{
+				AssetVersion:  version,
+				FeeSuggestion: 10,
+				MaxSwapCount:  1,
+				MaxFeeRate:    20,
+				Value:         toAtoms(1),
+			},
+			lockTime: time.Now().Add(time.Hour * -48),
+		},
+	}
+	maker := testData[makerStr]
+	taker := testData[takerStr]
+
+	preSwapMsg, err := taker.generateTakerPreSwapMsg()
+	if err != nil {
+		t.Fatalf("error generating taker pre-swap msg: %v", err)
+	}
+
+	makerSwapMsg, err := maker.handleTakerPreSwapMsg(preSwapMsg)
+	if err != nil {
+		t.Fatalf("error handling taker pre-swap msg: %v", err)
+	}
+
+	takerInitSwapMsg, err := taker.handleMkrInitSwapMsg(makerSwapMsg)
+	if err != nil {
+		t.Fatalf("error handling maker init swap msg: %v", err)
+	}
+
+	time.Sleep(time.Second * 16)
+
+	makerAdaptorsMsg, err := maker.handleTakerInitSwapMsg(takerInitSwapMsg)
+	if err != nil {
+		t.Fatalf("error handling maker adaptors msg: %v", err)
+	}
+
+	takerAdaptorMsg, err := taker.handleMakerAdaptorsMsg(makerAdaptorsMsg)
+	if err != nil {
+		t.Fatalf("error handling taker adaptor msg: %v", err)
+	}
+
+	makerRedeemMsg, err := maker.handleTakerAdaptorMsg(takerAdaptorMsg)
+	if err != nil {
+		t.Fatalf("error handling maker redeem msg: %v", err)
+	}
+
+	time.Sleep(time.Second * 16)
+
+	err = taker.handleMakerRedeemMsg(makerRedeemMsg)
+	if err != nil {
+		t.Fatalf("error handling maker redeem msg: %v", err)
+	}
+}
+
+func TestRefundPrivateSwap(t *testing.T) {
+	rig := newTestRig(t, func(name string) {
+		tLogger.Infof("%s has reported a new block", name)
+	})
+	defer rig.close(t)
+
+	beta := rig.alpha()
+	gamma := rig.beta()
+	err := beta.Unlock(walletPassword)
+	if err != nil {
+		t.Fatalf("error unlocking beta wallet: %v", err)
+	}
+	err = gamma.Unlock(walletPassword)
+	if err != nil {
+		t.Fatalf("error unlocking gamma wallet: %v", err)
+	}
+
+	// Get initial balance
+	initialBalance, err := beta.Balance()
+	if err != nil {
+		t.Fatalf("error getting initial balance: %v", err)
+	}
+
+	// Create a private swap
+	order := &asset.Order{
+		AssetVersion:  version,
+		FeeSuggestion: 10,
+		MaxSwapCount:  1,
+		MaxFeeRate:    20,
+		Value:         toAtoms(1),
+	}
+
+	// Fund the order
+	coins, _, _, err := beta.FundOrder(order)
+	if err != nil {
+		t.Fatalf("error funding order: %v", err)
+	}
+
+	redeemPubKey, err := gamma.PrivateSwapPubKey()
+	if err != nil {
+		t.Fatalf("error getting private swap pubkey: %v", err)
+	}
+
+	refundPubKey, err := beta.PrivateSwapPubKey()
+	if err != nil {
+		t.Fatalf("error getting private swap pubkey: %v", err)
+	}
+
+	// Create a private contract with a past lock time (so it can be refunded immediately)
+	lockTime := time.Now().Add(time.Hour * -48) // 48 hours in the past
+	contract := &asset.PrivateContract{
+		LockTime:        uint64(lockTime.Unix()),
+		Value:           order.Value,
+		RedeemPublicKey: redeemPubKey,
+		RefundPublicKey: refundPubKey,
+	}
+
+	// Create private swaps
+	swaps := &asset.PrivateSwaps{
+		Version:    0,
+		Contracts:  []*asset.PrivateContract{contract},
+		FeeRate:    order.MaxFeeRate,
+		Inputs:     coins,
+		LockChange: false,
+	}
+
+	// Perform the private swap
+	receipts, _, _, _, err := beta.SwapPrivate(swaps)
+	if err != nil {
+		t.Fatalf("error performing private swap: %v", err)
+	}
+
+	if len(receipts) == 0 {
+		t.Fatalf("no receipts returned from private swap")
+	}
+
+	receipt := receipts[0]
+	coinID := receipt.Coin().ID()
+
+	// Wait a bit for the transaction to be processed
+	time.Sleep(time.Second * 2)
+
+	// Get balance after swap
+	afterSwapBalance, err := beta.Balance()
+	if err != nil {
+		t.Fatalf("error getting balance after swap: %v", err)
+	}
+
+	// Check that balance decreased (due to the swap)
+	if afterSwapBalance.Available >= initialBalance.Available {
+		t.Fatalf("balance should have decreased after swap. Initial: %d, After swap: %d",
+			initialBalance.Available, afterSwapBalance.Available)
+	}
+
+	// Perform the refund
+	refundCoinID, err := beta.RefundPrivate(coinID, contract, order.MaxFeeRate)
+	if err != nil {
+		t.Fatalf("error performing refund: %v", err)
+	}
+
+	// Wait a bit for the refund transaction to be processed
+	time.Sleep(time.Second * 2)
+
+	// Get balance after refund
+	afterRefundBalance, err := beta.Balance()
+	if err != nil {
+		t.Fatalf("error getting balance after refund: %v", err)
+	}
+
+	// Check that balance increased from before the refund
+	if afterRefundBalance.Available <= afterSwapBalance.Available {
+		t.Fatalf("balance should have increased after refund. After swap: %d, After refund: %d",
+			afterSwapBalance.Available, afterRefundBalance.Available)
+	}
+
+	// Wait 15 seconds (block time)
+	time.Sleep(time.Second * 15)
+
+	// Call RefundPrivate again and ensure the same coinID is returned
+	refundCoinID2, err := beta.RefundPrivate(coinID, contract, order.MaxFeeRate)
+	if err != nil {
+		t.Fatalf("error calling RefundPrivate after already refunded.: %v", err)
+	}
+
+	// Check that the same coinID is returned
+	if !bytes.Equal(refundCoinID, refundCoinID2) {
+		t.Fatalf("second refund should return the same coinID. First: %x, Second: %x",
+			refundCoinID, refundCoinID2)
+	}
+
+	t.Logf("Test completed successfully. Initial balance: %d, After swap: %d, After refund: %d",
+		initialBalance.Available, afterSwapBalance.Available, afterRefundBalance.Available)
 }

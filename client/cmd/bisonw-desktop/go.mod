@@ -12,7 +12,9 @@ require (
 )
 
 require (
+	filippo.io/edwards25519 v1.0.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
+	github.com/athanorlabs/go-dleq v0.1.0 // indirect
 	github.com/bits-and-blooms/bitset v1.13.0 // indirect
 	github.com/consensys/bavard v0.1.13 // indirect
 	github.com/consensys/gnark-crypto v0.12.1 // indirect
@@ -41,6 +43,8 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect
 )
+
+replace github.com/btcsuite/btcd/btcec/v2 v2.3.4 => github.com/martonp/btcd/btcec/v2 v2.0.0-20250528172049-6b252bb1b6a1
 
 require (
 	decred.org/cspp/v2 v2.4.0 // indirect
