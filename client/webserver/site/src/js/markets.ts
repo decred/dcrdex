@@ -13,7 +13,7 @@ import {
   DepthMarker,
   Wave
 } from './charts'
-import { postJSON } from './http'
+import { postJSON, Errors } from './http'
 import {
   NewWalletForm,
   AccelerateOrderForm,
@@ -2231,6 +2231,7 @@ export default class MarketsPage extends BasePage {
     }
     for (const opt of swap.options || []) addOption(opt, true)
     for (const opt of redeem.options || []) addOption(opt, false)
+    Doc.setVis(redeem.userOpRequired, page.vUserOpWarning)
     app().bindTooltips(page.vDefaultOrderOpts)
     app().bindTooltips(page.vOtherOrderOpts)
   }
@@ -2717,7 +2718,13 @@ export default class MarketsPage extends BasePage {
     page.vLoader.classList.add('d-hide')
     // If error, display error on confirmation modal.
     if (!app().checkResponse(res)) {
-      page.vErr.textContent = res.msg
+      if (res.code === Errors.insufficientRedeemFundsErr) {
+        page.vErr.textContent = intl.prep(intl.ID_INSUFFICIENT_REDEEM_FUNDS_ERR_MSG)
+      } else if (res.code === Errors.insufficientRedeemFundsBundlerErr) {
+        page.vErr.textContent = intl.prep(intl.ID_INSUFFICIENT_REDEEM_FUNDS_BUNDLER_ERR_MSG)
+      } else {
+        page.vErr.textContent = res.msg
+      }
       Doc.show(page.vErr)
       return
     }

@@ -38,6 +38,7 @@ export async function getJSON (addr: string): Promise<any> {
 export enum Errors {
   walletErr,
   walletAuthErr,
+  noAuthErr,
   walletBalanceErr,
   dupeDEXErr,
   assetSupportErr,
@@ -73,4 +74,10 @@ export enum Errors {
   createWalletErr,
   activeOrdersErr,
   newAddrErr,
+  bondAmtErr,
+  bondTimeErr,
+  bondAssetErr,
+  bondPostErr,
+  insufficientRedeemFundsErr,
+  insufficientRedeemFundsBundlerErr,
 }
