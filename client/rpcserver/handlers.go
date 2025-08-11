@@ -70,6 +70,7 @@ const (
 	approveBridgeContractRoute = "approvebridgecontract"
 	pendingBridgesRoute        = "pendingbridges"
 	bridgeHistoryRoute         = "bridgehistory"
+	supportedBridgesRoute      = "supportedbridges"
 )
 
 const (
@@ -152,6 +153,7 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	approveBridgeContractRoute: handleApproveBridge,
 	pendingBridgesRoute:        handlePendingBridges,
 	bridgeHistoryRoute:         handleBridgeHistory,
+	supportedBridgesRoute:      handleSupportedBridges,
 }
 
 // handleHelp handles requests for help. Returns general help for all commands
@@ -1207,6 +1209,31 @@ func handleBridgeHistory(s *RPCServer, params *RawParams) *msgjson.ResponsePaylo
 	return createResponse(bridgeHistoryRoute, bridges, nil)
 }
 
+func handleSupportedBridges(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	if len(params.Args) != 1 {
+		return usage(supportedBridgesRoute, fmt.Errorf("expected 1 arg, got %d", len(params.Args)))
+	}
+
+	assetID, err := strconv.ParseUint(params.Args[0], 10, 32)
+	if err != nil {
+		return usage(supportedBridgesRoute, fmt.Errorf("error parsing assetID: %v", err))
+	}
+
+	destAssetIDs, err := s.core.SupportedBridgeDestinations(uint32(assetID))
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCBridgeError, "unable to get supported bridge destinations: %v", err)
+		return createResponse(supportedBridgesRoute, nil, resErr)
+	}
+
+	// Convert asset IDs to symbols
+	symbols := make([]string, len(destAssetIDs))
+	for i, destID := range destAssetIDs {
+		symbols[i] = dex.BipIDSymbol(destID)
+	}
+
+	return createResponse(supportedBridgesRoute, symbols, nil)
+}
+
 // format concatenates thing and tail. If thing is empty, returns an empty
 // string.
 func format(thing, tail string) string {
@@ -2014,5 +2041,11 @@ an spv wallet and enables options to view and set the vsp.
 		will be returned.
 		past (bool): If true, the transactions before the reference tx will be returned. If false, the
 		transactions after the reference tx will be returned.`,
+	},
+	supportedBridgesRoute: {
+		argsShort:  `assetID`,
+		cmdSummary: "Get supported bridge destinations.",
+		argsLong: `Args:
+		assetID (int): The asset's BIP-44 registered coin index to get bridge destinations for.`,
 	},
 }
