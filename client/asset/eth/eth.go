@@ -744,9 +744,13 @@ func newWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		return nil, err
 	}
 
-	return &ETHBridgeWallet{
-		ETHWallet: evmWallet,
-	}, nil
+	if AcrossBridgeSupportedAsset(BipID, net) {
+		return &ETHBridgeWallet{
+			ETHWallet: evmWallet,
+		}, nil
+	}
+
+	return evmWallet, nil
 }
 
 // EVMWalletConfig is the configuration for an evm-compatible wallet.
@@ -1122,7 +1126,7 @@ func (w *ETHBridgeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) 
 
 	var bridge bridge
 	switch {
-	case w.assetID == BipID:
+	case w.assetID == BipID || w.assetID == baseID:
 		bridge, err = newAcrossBridge(ctx, w.node.contractBackend(), w.node, w.assetID, w.net, w.addr, common.Address{}, w.log)
 	case w.assetID == polygonID:
 		bridge, err = newPolygonBridgePolygonPOLToken(ctx, w.node.contractBackend(), w.net, w.addr, w.log)
@@ -1656,7 +1660,8 @@ func (w *ETHWallet) OpenTokenWallet(tokenCfg *asset.TokenConfig) (asset.Wallet, 
 
 	usdcBridgeSupported := isUSDCBridgeSupported(tokenCfg.AssetID, w.net)
 	_, polygonBridgeSupported := PolygonBridgeSupportedAsset(tokenCfg.AssetID, w.net)
-	if usdcBridgeSupported || polygonBridgeSupported {
+	acrossBridgeSupported := AcrossBridgeSupportedAsset(tokenCfg.AssetID, w.net)
+	if usdcBridgeSupported || polygonBridgeSupported || acrossBridgeSupported {
 		return &TokenBridgeWallet{
 			TokenWallet: tokenWallet,
 		}, nil

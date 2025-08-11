@@ -6,12 +6,14 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
+	dexbase "decred.org/dcrdex/dex/networks/base"
+	dexeth "decred.org/dcrdex/dex/networks/eth"
 	dexpolygon "decred.org/dcrdex/dex/networks/polygon"
 	"github.com/ethereum/go-ethereum/common"
 )
 
-func registerPolygonToken(tokenID uint32, desc string, nets ...dex.Network) {
-	token, found := dexpolygon.Tokens[tokenID]
+func regToken(tokens map[uint32]*dexeth.Token, tokenID uint32, desc string, nets ...dex.Network) {
+	token, found := tokens[tokenID]
 	if !found {
 		panic("token " + strconv.Itoa(int(tokenID)) + " not known")
 	}
@@ -31,17 +33,18 @@ func registerPolygonToken(tokenID uint32, desc string, nets ...dex.Network) {
 	}, netAddrs, netVersions)
 }
 
-func registerPolygonTokens() {
+func registerTokens() {
 	asset.Register(966, &Driver{})
-	registerPolygonToken(966001, "The USDC Ethereum ERC20 token.", dex.Mainnet)
-	registerPolygonToken(966004, "The USDT Ethereum ERC20 token.", dex.Mainnet)
-	registerPolygonToken(966003, "Wrapped BTC.", dex.Mainnet)
-	registerPolygonToken(966002, "Wrapped ETH.", dex.Mainnet)
-
+	regToken(dexpolygon.Tokens, 966001, "The USDC Ethereum ERC20 token.", dex.Mainnet)
+	regToken(dexpolygon.Tokens, 966004, "The USDT Ethereum ERC20 token.", dex.Mainnet)
+	regToken(dexpolygon.Tokens, 966003, "Wrapped BTC.", dex.Mainnet)
+	regToken(dexpolygon.Tokens, 966002, "Wrapped ETH.", dex.Mainnet)
+	asset.Register(8453, &Driver{})
+	regToken(dexbase.Tokens, 61000, "The USDC Base ERC20 token.", dex.Mainnet)
 }
 
 func TestAcrossAssetToID(t *testing.T) {
-	registerPolygonTokens()
+	registerTokens()
 	asset.SetNetwork(dex.Mainnet)
 
 	expectedMappings := map[uint32]*acrossAsset{
@@ -79,6 +82,16 @@ func TestAcrossAssetToID(t *testing.T) {
 			chainID: 137,
 			symbol:  "USDT",
 			address: common.HexToAddress("0xc2132D05D31c914a87C6611C10748AEb04B58e8F"),
+		},
+		8453: {
+			chainID: 8453,
+			symbol:  "WETH",
+			address: common.HexToAddress("0x4200000000000000000000000000000000000006"),
+		},
+		61000: {
+			chainID: 8453,
+			symbol:  "USDC",
+			address: common.HexToAddress("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"),
 		},
 	}
 
