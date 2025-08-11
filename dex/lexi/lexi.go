@@ -130,10 +130,12 @@ func (db *DB) GetDBVersion() (version uint32, err error) {
 }
 
 // SetDBVersion sets the current database version in the DB.
-func (db *DB) SetDBVersion(version uint32, txn *badger.Txn) error {
-	b := make([]byte, 4)
-	binary.BigEndian.PutUint32(b[:], version)
-	return txn.Set(versionPrefix[:], b)
+func (db *DB) SetDBVersion(version uint32) error {
+	return db.Update(func(txn *badger.Txn) error {
+		b := make([]byte, 4)
+		binary.BigEndian.PutUint32(b[:], version)
+		return txn.Set(versionPrefix[:], b)
+	})
 }
 
 // Update: badger can return an ErrConflict if a read and write happen

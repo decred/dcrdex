@@ -756,9 +756,7 @@ func TestDBVersion(t *testing.T) {
 
 	// Set a version
 	var version uint32 = 2
-	if err := db.Update(func(tx *badger.Txn) error {
-		return db.SetDBVersion(version, tx)
-	}); err != nil {
+	if err := db.SetDBVersion(version); err != nil {
 		t.Fatalf("SetDBVersion error: %v", err)
 	}
 
@@ -772,9 +770,7 @@ func TestDBVersion(t *testing.T) {
 
 	// Set a new version
 	version = 3
-	if err := db.Update(func(tx *badger.Txn) error {
-		return db.SetDBVersion(version, tx)
-	}); err != nil {
+	if err := db.SetDBVersion(version); err != nil {
 		t.Fatalf("SetDBVersion error: %v", err)
 	}
 	got, err = db.GetDBVersion()
