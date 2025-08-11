@@ -78,8 +78,8 @@ var (
 		},
 		1: {
 			dex.Mainnet: common.HexToAddress("0xa958d5B8a3a29E3f5f41742Fbb939A0dd93EB418"), // tx 0x4adf0314237c454acee1f8d33e97f84126af612245cad0794471693f0906610e
-			dex.Testnet: common.HexToAddress("0x9CDe3c347021F0AA63E2780dAD867B5949c5E083"), // tx 0x90f18e70121598a48fc49a5d5b0328358eb34441e2c5dee439dda2dfc7bf3dd8
-			dex.Simnet:  common.HexToAddress("0x2f68e723b8989ba1c6a9f03e42f33cb7dc9d606f"),
+			dex.Testnet: common.HexToAddress("0x043c806891b74255567718B9F59885896f0c5b2B"), // tx 0x7095a4bc715992b690728eff34b24eb1936a477fcca0796f1fac3f8cc844cb0f
+			dex.Simnet:  common.HexToAddress("0xdb0e7d9cfd4460abd84e38dc8fa5b72d8a4b72f0"),
 		},
 	}
 
@@ -97,6 +97,37 @@ var v0Gases = &Gases{
 	Refund:    57000,  // 43,014 actual -- https://goerli.etherscan.io/tx/0x586ed4cb7dab043f98d4cc08930d9eb291b0052d140d949b20232ceb6ad15f25
 }
 
+/*
+	Gasless redeem estimates by provider:
+
+	- Alchemy:
+		5 redemptions: VerificationGasLimit: 87711, PreVerificationGas: 54756, CallGasLimit: 51401
+		4 redemptions: VerificationGasLimit: 83281, PreVerificationGas: 52596, CallGasLimit: 43927
+		3 redemptions: VerificationGasLimit: 78867, PreVerificationGas: 50460, CallGasLimit: 40636
+		2 redemptions: VerificationGasLimit: 70687, PreVerificationGas: 48312, CallGasLimit: 32232
+		1 redemptions: VerificationGasLimit: 63310, PreVerificationGas: 46164, CallGasLimit: 23830
+
+	- Etherspot:
+		5 redemptions: VerificationGasLimit: 77859, PreVerificationGas: 64220, CallGasLimit: 81295
+		4 redemptions: VerificationGasLimit: 69711, PreVerificationGas: 62060, CallGasLimit: 74244
+		3 redemptions: VerificationGasLimit: 61566, PreVerificationGas: 59924, CallGasLimit: 67195
+		2 redemptions: VerificationGasLimit: 53422, PreVerificationGas: 57764, CallGasLimit: 60147
+		1 redemptions: VerificationGasLimit: 45282, PreVerificationGas: 55616, CallGasLimit: 53100
+
+	- Pimlico:
+		5 redemptions: VerificationGasLimit: 89537, PreVerificationGas: 65648, CallGasLimit: 134762
+		4 redemptions: VerificationGasLimit: 80167, PreVerificationGas: 63285, CallGasLimit: 126654
+		3 redemptions: VerificationGasLimit: 70800, PreVerificationGas: 60935, CallGasLimit: 118547
+			nodeclient_harness_test.go:1948: failed to generate user op with 2 redemptions: error estimating gas: UserOperation reverted during simulation with reason: AA40 over verificationGasLimit
+
+	- Zerodev:
+		5 redemptions: VerificationGasLimit: 89537, PreVerificationGas: 65621, CallGasLimit: 134762
+		4 redemptions: VerificationGasLimit: 80167, PreVerificationGas: 63258, CallGasLimit: 126654
+		3 redemptions: VerificationGasLimit: 70800, PreVerificationGas: 60922, CallGasLimit: 118547
+		2 nodeclient_harness_test.go:1949: failed to generate user op with 2 redemptions: error estimating gas: UserOperation reverted during simulation with reason: AA40 over verificationGasLimit
+
+*/
+
 var v1Gases = &Gases{
 	// First swap used 48801 gas Recommended Gases.Swap = 63441
 	Swap: 63_441,
@@ -113,6 +144,13 @@ var v1Gases = &Gases{
 	// Average of 5 refunds: 40390. Recommended Gases.Refund = 52507
 	// 	[40381 40393 40393 40393 40393]
 	Refund: 52_507,
+
+	GaslessRedeemVerification:       83_000,
+	GaslessRedeemVerificationAdd:    11_000,
+	GaslessRedeemPreVerification:    70_000,
+	GaslessRedeemPreVerificationAdd: 6_000,
+	GaslessRedeemCall:               120_000,
+	GaslessRedeemCallAdd:            13_000,
 }
 
 // LoadGenesisFile loads a Genesis config from a json file.
@@ -409,6 +447,15 @@ type Gases struct {
 	RedeemAdd uint64 `json:"redeemAdd"`
 	// Refund is the amount of gas needed to refund a swap.
 	Refund uint64 `json:"refund"`
+
+	GaslessRedeemVerification    uint64 `json:"gaslessRedeemVerification"`
+	GaslessRedeemVerificationAdd uint64 `json:"gaslessRedeemVerificationAdd"`
+
+	GaslessRedeemPreVerification    uint64 `json:"gaslessRedeemPreVerification"`
+	GaslessRedeemPreVerificationAdd uint64 `json:"gaslessRedeemPreVerificationAdd"`
+
+	GaslessRedeemCall    uint64 `json:"gaslessRedeemCall"`
+	GaslessRedeemCallAdd uint64 `json:"gaslessRedeemCallAdd"`
 }
 
 // SwapN calculates the gas needed to initiate n swaps.
@@ -464,6 +511,13 @@ func SwapVectorToAbigen(v *SwapVector) swapv1.ETHSwapVector {
 		Participant:     v.To,
 		Value:           v.Value,
 	}
+}
+
+// EntryPoints is a map of network to the ERC-4337 entrypoint address.
+// Currently only the v0.6 entrypoint is supported.
+var EntryPoints = map[dex.Network]common.Address{
+	// dex.Simnet:  common.Address{}, // populated by MaybeReadSimnetAddrs
+	dex.Testnet: common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
 }
 
 // ProtocolVersion assists in mapping the dex.Asset.Version to a contract

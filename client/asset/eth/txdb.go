@@ -27,6 +27,7 @@ type extendedWalletTx struct {
 	Nonce          *big.Int       `json:"nonce"`
 	Receipt        *types.Receipt `json:"receipt,omitempty"`
 	RawTx          dex.Bytes      `json:"rawTx"`
+	CallData       dex.Bytes      `json:"callData"`
 	// NonceReplacement is a transaction with the same nonce that was accepted
 	// by the network, meaning this tx was not applied.
 	NonceReplacement string `json:"nonceReplacement,omitempty"`
@@ -48,6 +49,15 @@ type extendedWalletTx struct {
 	indexed         bool
 }
 
+const (
+	dbVersion                 = 1
+	txsTable                  = "txs"
+	allAssetIndexName         = "allAssets"
+	assetIndexName            = "asset"
+	bridgeInitiationIndexName = "bridgeinit"
+	bridgeCompletionIndexName = "bridgecomplete"
+)
+
 func (wt *extendedWalletTx) MarshalBinary() ([]byte, error) {
 	return json.Marshal(wt)
 }
@@ -67,6 +77,9 @@ func (t *extendedWalletTx) age() time.Duration {
 }
 
 func (t *extendedWalletTx) tx() (*types.Transaction, error) {
+	if t.IsUserOp {
+		return nil, fmt.Errorf("cannot get raw tx for user op")
+	}
 	tx := new(types.Transaction)
 	return tx, tx.UnmarshalBinary(t.RawTx)
 }
@@ -95,33 +108,49 @@ type TxDB struct {
 	bridgeCompletionIndex *lexi.Index
 
 	baseChainID uint32
+	log         dex.Logger
 }
 
 var _ txDB = (*TxDB)(nil)
 
-// nonceIndexEntry creates an index entry for iterating over all
-// transactions.
-// The entry is 8 bytes total:
-// - 8 bytes: nonce
-func nonceIndexEntry(wt *extendedWalletTx) []byte {
-	entry := make([]byte, 8)
-	binary.BigEndian.PutUint64(entry[:8], wt.Nonce.Uint64())
+// allAssetIndexEntry is used to iterate over all transactions regardless of
+// asset ID. The included data are:
+//   - blockNumber: the block number of the transaction. If the transaction is pending
+//     then the block number is set to ^uint64(0) in order to place pending
+//     transactions at the end of the index.
+//   - isUserOp: 1 if the transaction is a user op, 0 otherwise.
+//   - nonce: the nonce of the transaction, so that pending transactions and
+//     transactions within the same block are ordered by nonce.
+func allAssetIndexEntry(wt *extendedWalletTx) []byte {
+	entry := make([]byte, 8+1+8)
+	blockNumber := wt.BlockNumber
+	if blockNumber == 0 {
+		blockNumber = ^uint64(0)
+	}
+	isUserOp := byte(0)
+	if wt.IsUserOp {
+		isUserOp = byte(1)
+	}
+	binary.BigEndian.PutUint64(entry[:8], blockNumber)
+	entry[8] = isUserOp
+	if wt.Nonce != nil {
+		binary.BigEndian.PutUint64(entry[9:], wt.Nonce.Uint64())
+	}
 	return entry
 }
 
-// assetIndexEntry creates an index entry for iterating over transactions of a
-// specific asset.
-// The entry is 12 bytes total:
-// - 4 bytes: asset ID
-// - 8 bytes: nonce
-func assetIndexEntry(wt *extendedWalletTx, baseChainID uint32) []byte {
+// assetSpecificIndexEntry is used to iterate over all transactions for a
+// specific asset ID. It is the same as allAssetIndexEntry, prepended with
+// the asset ID
+func assetSpecificIndexEntry(wt *extendedWalletTx, baseChainID uint32) []byte {
 	var assetID uint32 = baseChainID
 	if wt.TokenID != nil {
 		assetID = *wt.TokenID
 	}
-	assetKey := make([]byte, 4+8)
+	allAssetIndexKey := allAssetIndexEntry(wt)
+	assetKey := make([]byte, 4+len(allAssetIndexKey))
 	binary.BigEndian.PutUint32(assetKey[:4], assetID)
-	binary.BigEndian.PutUint64(assetKey[4:], wt.Nonce.Uint64())
+	copy(assetKey[4:], allAssetIndexKey)
 	return assetKey
 }
 
@@ -153,34 +182,34 @@ func NewTxDB(path string, log dex.Logger, baseChainID uint32) (*TxDB, error) {
 		return nil, err
 	}
 
-	txs, err := ldb.Table("txs")
+	txs, err := ldb.Table(txsTable)
 	if err != nil {
 		return nil, err
 	}
 
-	allAssetIndex, err := txs.AddUniqueIndex("allAssets", func(k, v lexi.KV) ([]byte, error) {
+	allAssetIndex, err := txs.AddUniqueIndex(allAssetIndexName, func(k, v lexi.KV) ([]byte, error) {
 		wt, is := v.(*extendedWalletTx)
 		if !is {
 			return nil, fmt.Errorf("expected type *extendedWalletTx, got %T", wt)
 		}
-		return nonceIndexEntry(wt), nil
+		return allAssetIndexEntry(wt), nil
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	assetIndex, err := txs.AddUniqueIndex("asset", func(k, v lexi.KV) ([]byte, error) {
+	assetIndex, err := txs.AddUniqueIndex(assetIndexName, func(k, v lexi.KV) ([]byte, error) {
 		wt, is := v.(*extendedWalletTx)
 		if !is {
 			return nil, fmt.Errorf("expected type *extendedWalletTx, got %T", wt)
 		}
-		return assetIndexEntry(wt, baseChainID), nil
+		return assetSpecificIndexEntry(wt, baseChainID), nil
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	bridgeInitiationIndex, err := txs.AddIndex("bridgeinit", func(k, v lexi.KV) ([]byte, error) {
+	bridgeInitiationIndex, err := txs.AddIndex(bridgeInitiationIndexName, func(k, v lexi.KV) ([]byte, error) {
 		wt, is := v.(*extendedWalletTx)
 		if !is {
 			return nil, fmt.Errorf("expected type *extendedWalletTx, got %T", wt)
@@ -194,7 +223,7 @@ func NewTxDB(path string, log dex.Logger, baseChainID uint32) (*TxDB, error) {
 		return nil, err
 	}
 
-	bridgeCompletionIndex, err := txs.AddUniqueIndex("bridgecomplete", func(k, v lexi.KV) ([]byte, error) {
+	bridgeCompletionIndex, err := txs.AddUniqueIndex(bridgeCompletionIndexName, func(k, v lexi.KV) ([]byte, error) {
 		wt, is := v.(*extendedWalletTx)
 		if !is {
 			return nil, fmt.Errorf("expected type *extendedWalletTx, got %T", wt)
@@ -212,7 +241,7 @@ func NewTxDB(path string, log dex.Logger, baseChainID uint32) (*TxDB, error) {
 		return nil, err
 	}
 
-	return &TxDB{
+	db := &TxDB{
 		DB:                    ldb,
 		txs:                   txs,
 		allAssetIndex:         allAssetIndex,
@@ -220,19 +249,61 @@ func NewTxDB(path string, log dex.Logger, baseChainID uint32) (*TxDB, error) {
 		bridgeInitiationIndex: bridgeInitiationIndex,
 		bridgeCompletionIndex: bridgeCompletionIndex,
 		baseChainID:           baseChainID,
-	}, nil
+		log:                   log,
+	}
+
+	return db, db.upgrade()
+}
+
+func (db *TxDB) v1Upgrade() error {
+	err := db.ReIndex(txsTable, allAssetIndexName, func(k, v []byte) ([]byte, error) {
+		wt := new(extendedWalletTx)
+		if err := wt.UnmarshalBinary(v); err != nil {
+			return nil, err
+		}
+		return allAssetIndexEntry(wt), nil
+	})
+	if err != nil {
+		return err
+	}
+
+	return db.ReIndex(txsTable, assetIndexName, func(k, v []byte) ([]byte, error) {
+		wt := new(extendedWalletTx)
+		if err := wt.UnmarshalBinary(v); err != nil {
+			return nil, err
+		}
+		return assetSpecificIndexEntry(wt, db.baseChainID), nil
+	})
+}
+
+func (db *TxDB) upgrade() error {
+	version, err := db.GetDBVersion()
+	if err != nil {
+		return err
+	}
+	if version == dbVersion {
+		return nil
+	}
+	if version > dbVersion {
+		return fmt.Errorf("unknown database version %d, wallet recognizes up to %d", version, dbVersion)
+	}
+
+	db.log.Infof("Upgrading database from version %d to %d", version, dbVersion)
+
+	return db.Upgrade(func() error {
+		err := db.v1Upgrade()
+		if err != nil {
+			return err
+		}
+		return db.SetDBVersion(dbVersion)
+	})
 }
 
 // storeTx stores a transaction in the database. If a transaction with the
 // same hash or nonce already exists, it is replaced.
 func (db *TxDB) storeTx(wt *extendedWalletTx) error {
 	hash := common.HexToHash(wt.ID)
-	err := db.txs.Set(hash[:], wt, lexi.WithReplace())
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return db.txs.Set(hash[:], wt, lexi.WithReplace())
 }
 
 // getTx gets a single transaction. It is not an error if the tx is not known.
@@ -276,7 +347,7 @@ func (db *TxDB) getTxs(n int, refID *common.Hash, past bool, assetID *uint32) ([
 
 		var entry []byte
 		if assetID == nil {
-			entry = nonceIndexEntry(wt)
+			entry = allAssetIndexEntry(wt)
 		} else {
 			var refTxAssetID uint32 = db.baseChainID
 			if wt.TokenID != nil {
@@ -285,7 +356,7 @@ func (db *TxDB) getTxs(n int, refID *common.Hash, past bool, assetID *uint32) ([
 			if refTxAssetID != *assetID {
 				return nil, fmt.Errorf("token ID mismatch: %d != %d", refTxAssetID, *assetID)
 			}
-			entry = assetIndexEntry(wt, db.baseChainID)
+			entry = assetSpecificIndexEntry(wt, db.baseChainID)
 		}
 
 		opts = append(opts, lexi.WithSeek(entry))

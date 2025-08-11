@@ -9,16 +9,19 @@ import (
 	"strings"
 	"time"
 
+	"decred.org/dcrdex/dex/networks/eth/contracts/entrypoint"
 	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	swapv1 "decred.org/dcrdex/dex/networks/eth/contracts/v1"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
 const (
 	InitiateMethodName = "initiate"
 	RedeemMethodName   = "redeem"
 	RefundMethodName   = "refund"
+	RedeemAAMethodName = "redeemAA"
 )
 
 // ABIs maps each swap contract's version to that version's parsed ABI.
@@ -231,25 +234,36 @@ func ParseRedeemDataV1(calldata []byte) (common.Address, map[[SecretHashSize]byt
 	if err != nil {
 		return common.Address{}, nil, fmt.Errorf("unable to parse call data: %v", err)
 	}
-	if decoded.Name != RedeemMethodName {
+	if decoded.Name != RedeemMethodName && decoded.Name != RedeemAAMethodName {
 		return common.Address{}, nil, fmt.Errorf("expected %v function but got %v", RedeemMethodName, decoded.Name)
 	}
+
 	args := decoded.inputs
 	// Any difference in number of args and types than what we expect
 	// should be caught by parseCallData, but checking again anyway.
 	//
 	// TODO: If any of the checks prove redundant, remove them.
-	const numArgs = 2
+
+	numArgs := 2
+	if decoded.Name == RedeemAAMethodName {
+		numArgs = 1
+	}
 	if len(args) != numArgs {
 		return common.Address{}, nil, fmt.Errorf("expected %v redeem args but got %v", numArgs, len(args))
 	}
 
-	tokenAddr, ok := args[0].value.(common.Address)
-	if !ok {
-		return common.Address{}, nil, fmt.Errorf("expected first redeem arg to be an address but was %T", args[0].value)
+	redemptionsIndex := 0
+	var tokenAddr common.Address
+	if decoded.Name == RedeemMethodName {
+		var ok bool
+		tokenAddr, ok = args[0].value.(common.Address)
+		if !ok {
+			return common.Address{}, nil, fmt.Errorf("expected first redeem arg to be an address but was %T", args[0].value)
+		}
+		redemptionsIndex = 1
 	}
 
-	redemptions, ok := args[1].value.([]struct {
+	redemptions, ok := args[redemptionsIndex].value.([]struct {
 		V struct {
 			SecretHash      [32]uint8      `json:"secretHash"`
 			Value           *big.Int       `json:"value"`
@@ -260,7 +274,7 @@ func ParseRedeemDataV1(calldata []byte) (common.Address, map[[SecretHashSize]byt
 		Secret [32]uint8 `json:"secret"`
 	})
 	if !ok {
-		return common.Address{}, nil, fmt.Errorf("expected second arg of type []swapv1.ETHSwapRedemption but got %T", args[0].value)
+		return common.Address{}, nil, fmt.Errorf("expected %d arg of type []swapv1.ETHSwapRedemption but got %T", redemptionsIndex, args[redemptionsIndex].value)
 	}
 
 	// This is done for the compiler to ensure that the type defined above and
@@ -320,4 +334,92 @@ func ParseRefundDataV1(calldata []byte) (*SwapVector, error) {
 		LockTime:   contract.RefundTimestamp,
 		SecretHash: contract.SecretHash,
 	}, nil
+}
+
+// ParseHandleOpsData parses the calldata used to call the handleOps function of a
+// version 0.6 entrypoint.
+func ParseHandleOpsData(calldata []byte) ([]entrypoint.UserOperation, error) {
+	abi, err := entrypoint.EntrypointMetaData.GetAbi()
+	if err != nil {
+		return nil, fmt.Errorf("unable to get abi: %v", err)
+	}
+
+	decoded, err := ParseCallData(calldata, abi)
+	if err != nil {
+		return nil, fmt.Errorf("unable to parse call data: %v", err)
+	}
+
+	userOps, ok := decoded.inputs[0].value.([]struct {
+		Sender               common.Address `json:"sender"`
+		Nonce                *big.Int       `json:"nonce"`
+		InitCode             []uint8        `json:"initCode"`
+		CallData             []uint8        `json:"callData"`
+		CallGasLimit         *big.Int       `json:"callGasLimit"`
+		VerificationGasLimit *big.Int       `json:"verificationGasLimit"`
+		PreVerificationGas   *big.Int       `json:"preVerificationGas"`
+		MaxFeePerGas         *big.Int       `json:"maxFeePerGas"`
+		MaxPriorityFeePerGas *big.Int       `json:"maxPriorityFeePerGas"`
+		PaymasterAndData     []uint8        `json:"paymasterAndData"`
+		Signature            []uint8        `json:"signature"`
+	})
+	if !ok {
+		return nil, fmt.Errorf("invalid user op type: %T", decoded.inputs[0].value)
+	}
+
+	toReturn := make([]entrypoint.UserOperation, len(userOps))
+	for i, userOp := range userOps {
+		toReturn[i] = entrypoint.UserOperation{
+			Sender:               userOp.Sender,
+			Nonce:                userOp.Nonce,
+			InitCode:             userOp.InitCode,
+			CallData:             userOp.CallData,
+			CallGasLimit:         userOp.CallGasLimit,
+			VerificationGasLimit: userOp.VerificationGasLimit,
+			PreVerificationGas:   userOp.PreVerificationGas,
+			MaxFeePerGas:         userOp.MaxFeePerGas,
+			MaxPriorityFeePerGas: userOp.MaxPriorityFeePerGas,
+			PaymasterAndData:     userOp.PaymasterAndData,
+		}
+	}
+
+	return toReturn, nil
+}
+
+// HashUserOp hashes a user operation for a version 0.6 entrypoint.
+func HashUserOp(op entrypoint.UserOperation, epAddress common.Address, chainID *big.Int) (common.Hash, error) {
+	address, _ := abi.NewType("address", "", nil)
+	uint256, _ := abi.NewType("uint256", "", nil)
+	bytes32, _ := abi.NewType("bytes32", "", nil)
+
+	args := abi.Arguments{
+		{Name: "sender", Type: address},
+		{Name: "nonce", Type: uint256},
+		{Name: "hashInitCode", Type: bytes32},
+		{Name: "hashCallData", Type: bytes32},
+		{Name: "callGasLimit", Type: uint256},
+		{Name: "verificationGasLimit", Type: uint256},
+		{Name: "preVerificationGas", Type: uint256},
+		{Name: "maxFeePerGas", Type: uint256},
+		{Name: "maxPriorityFeePerGas", Type: uint256},
+		{Name: "hashPaymasterAndData", Type: bytes32},
+	}
+
+	packed, _ := args.Pack(
+		op.Sender,
+		op.Nonce,
+		crypto.Keccak256Hash(op.InitCode),
+		crypto.Keccak256Hash(op.CallData),
+		op.CallGasLimit,
+		op.VerificationGasLimit,
+		op.PreVerificationGas,
+		op.MaxFeePerGas,
+		op.MaxPriorityFeePerGas,
+		crypto.Keccak256Hash(op.PaymasterAndData),
+	)
+
+	return crypto.Keccak256Hash(
+		crypto.Keccak256(packed),
+		common.LeftPadBytes(epAddress[:], 32),
+		common.LeftPadBytes(chainID.Bytes(), 32),
+	), nil
 }
