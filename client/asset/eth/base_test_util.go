@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"decred.org/dcrdex/dex"
 	ethereum "github.com/bisoncraft/op-geth"
 	basecommon "github.com/bisoncraft/op-geth/common"
 	basehexutil "github.com/bisoncraft/op-geth/common/hexutil"
@@ -14,6 +15,8 @@ import (
 	baserpc "github.com/bisoncraft/op-geth/rpc"
 	"github.com/ethereum/go-ethereum/rpc"
 )
+
+var baseID, _ = dex.BipSymbolID("base") // really weth.base
 
 func toBlockNumArg(number *big.Int) string {
 	if number == nil {

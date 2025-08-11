@@ -26,10 +26,12 @@ var (
 		dex.Mainnet: {
 			ethID:     1,
 			polygonID: 137,
+			baseID:    8453,
 		},
 		dex.Testnet: {
 			ethID:     11155111,
 			polygonID: 80002,
+			baseID:    84532,
 		},
 	}
 
@@ -41,22 +43,26 @@ var (
 
 	acrossSpokePoolAddrs = map[dex.Network]map[uint64]common.Address{
 		dex.Mainnet: {
-			1:   common.HexToAddress("0x5c7BCd6E7De5423a257D81B442095A1a6ced35C5"),
-			137: common.HexToAddress("0x69B5c72837769eF1e7C164Abc6515c75a4251251"),
+			1:    common.HexToAddress("0x5c7BCd6E7De5423a257D81B442095A1a6ced35C5"),
+			137:  common.HexToAddress("0x69B5c72837769eF1e7C164Abc6515c75a4251251"),
+			8453: common.HexToAddress("0x09aea4b2242abC8bb4BB78D537A67a245A7bEC64"),
 		},
 		dex.Testnet: {
 			11155111: common.HexToAddress("0x5ef6C01E11889d86803e0B23e3cB3F9E9d97B662"),
 			80002:    common.HexToAddress("0xd08baaE74D6d2eAb1F3320B2E1a53eeb391ce8e5"),
+			84532:    common.HexToAddress("0x82B564983aE7274c86695917BBf8C99ECb6F0F8F"),
 		},
 	}
 
 	// native token addresses for each chain. i.e. weth on ethereum.
 	chainIDToNativeTokenAddr = map[dex.Network]map[uint64]common.Address{
 		dex.Mainnet: {
-			1: common.HexToAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),
+			1:    common.HexToAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),
+			8453: common.HexToAddress("0x4200000000000000000000000000000000000006"),
 		},
 		dex.Testnet: {
 			11155111: common.HexToAddress("0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14"),
+			84532:    common.HexToAddress("0x4200000000000000000000000000000000000006"),
 		},
 	}
 
@@ -71,6 +77,10 @@ func init() {
 			idToChainAssetID[net][acrossChainID] = chainAssetID
 		}
 	}
+}
+
+func AcrossBridgeSupportedAsset(assetID uint32, net dex.Network) (supported bool) {
+	return assetIDToAcrossAsset(net, assetID) != nil
 }
 
 func acrossBaseURL(net dex.Network) string {
@@ -130,6 +140,9 @@ func assetIDToAcrossAsset(net dex.Network, assetID uint32) *acrossAsset {
 	if assetName == "eth" {
 		assetName = "weth"
 	}
+	if assetName == "base" {
+		assetName = "weth"
+	}
 
 	return &acrossAsset{chainID: chainID, symbol: strings.ToUpper(assetName), address: address}
 }
@@ -149,6 +162,9 @@ func acrossAssetToAssetID(net dex.Network, symbol string, chainID uint64) (uint3
 
 	if fullSymbol == "weth.eth" {
 		fullSymbol = "eth"
+	}
+	if fullSymbol == "weth.base" {
+		fullSymbol = "base"
 	}
 
 	return dex.BipSymbolID(fullSymbol)
