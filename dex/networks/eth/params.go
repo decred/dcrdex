@@ -419,10 +419,10 @@ type Redemption struct {
 }
 
 var (
-	usdcTokenID, _  = dex.BipSymbolID("usdc.eth")
-	usdtTokenID, _  = dex.BipSymbolID("usdt.eth")
-	maticTokenID, _ = dex.BipSymbolID("matic.eth") // old matic 0x7d1afa7b718fb893db30a3abc0cfc608aacfebb0
-	polTokenID, _   = dex.BipSymbolID("pol.eth")
+	usdcTokenID, _    = dex.BipSymbolID("usdc.eth")
+	usdtTokenID, _    = dex.BipSymbolID("usdt.eth")
+	polygonTokenID, _ = dex.BipSymbolID("polygon.eth")
+	maticTokenID, _   = dex.BipSymbolID("matic.eth") // old matic 0x7d1afa7b718fb893db30a3abc0cfc608aacfebb0
 )
 
 // Gases lists the expected gas required for various DEX and wallet operations.

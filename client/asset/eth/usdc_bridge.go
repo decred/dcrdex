@@ -44,12 +44,21 @@ type bridge interface {
 	initiateBridge(txOpts *bind.TransactOpts, destAssetID uint32, amount *big.Int) (tx *types.Transaction, err error)
 
 	// getCompletionData retrieves the data required by the destination chain
-	// to complete the bridge.
+	// to complete the bridge. If the data is not yet available, nil is returned
+	// for both the data and the error.
 	getCompletionData(ctx context.Context, bridgeTxID string) ([]byte, error)
 
 	// completeBridge executes a transaction on the destination chain to complete
 	// the bridge.
 	completeBridge(txOpts *bind.TransactOpts, mintInfoB []byte) (tx *types.Transaction, err error)
+
+	// getFollowUpCompletionData retrieves the data required by the destination
+	// chain to complete the follow-up bridge.
+	getFollowUpCompletionData(ctx context.Context, completionTxID string) (required bool, data []byte, err error)
+
+	// completeFollowUpBridge takes a confirmed initial completion transaction
+	// and executes a follow-up transaction to complete the bridge.
+	completeFollowUpBridge(txOpts *bind.TransactOpts, data []byte) (tx *types.Transaction, err error)
 
 	// initiateBridgeGas returns the gas cost of the bridge transaction.
 	initiateBridgeGas() uint64
@@ -57,10 +66,19 @@ type bridge interface {
 	// completeBridgeGas returns the gas cost of the mint transaction.
 	completeBridgeGas() uint64
 
+	// followUpCompleteBridgeGas returns the gas cost of the follow-up bridge
+	// transaction.
+	followUpCompleteBridgeGas() uint64
+
 	// requiresCompletion is true if a transaction must be executed on the destination
 	// chain to mint the asset. This is called on the destination chain. If this
 	// returns false, verifyBridgeCompletion should be called.
 	requiresCompletion() bool
+
+	// requiresFollowUpCompletion returns true if this bridge requires a
+	// follow-up completion transaction (e.g., initiate exit, then process
+	// exit).
+	requiresFollowUpCompletion() bool
 
 	// verifyBridgeCompletion verifies that the bridge was completed successfully.
 	// This is required for bridges that do not require a completion transaction.
@@ -375,7 +393,23 @@ func (b *usdcBridge) requiresCompletion() bool {
 }
 
 func (b *usdcBridge) verifyBridgeCompletion(ctx context.Context, data []byte) (bool, error) {
-	return false, fmt.Errorf("a completion transaction is for usdc")
+	return false, fmt.Errorf("a completion transaction is required for usdc")
+}
+
+func (b *usdcBridge) requiresFollowUpCompletion() bool {
+	return false
+}
+
+func (b *usdcBridge) getFollowUpCompletionData(ctx context.Context, completionTxID string) (required bool, data []byte, err error) {
+	return false, nil, fmt.Errorf("not implemented for single-step completion")
+}
+
+func (b *usdcBridge) completeFollowUpBridge(txOpts *bind.TransactOpts, data []byte) (tx *types.Transaction, err error) {
+	return nil, fmt.Errorf("not implemented for single-step completion")
+}
+
+func (b *usdcBridge) followUpCompleteBridgeGas() uint64 {
+	return 0
 }
 
 func (b *usdcBridge) supportedDestinations() []uint32 {
