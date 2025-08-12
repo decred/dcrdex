@@ -30,6 +30,7 @@ import (
 	"decred.org/dcrdex/dex/keygen"
 	"decred.org/dcrdex/dex/networks/erc20"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
+	"decred.org/dcrdex/dex/networks/eth/contracts/entrypoint"
 	multibal "decred.org/dcrdex/dex/networks/eth/contracts/multibalance"
 	"decred.org/dcrdex/dex/utils"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
@@ -38,6 +39,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	ethmath "github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -86,6 +88,7 @@ const (
 	walletTypeToken = "token"
 
 	providersKey = "providers"
+	bundlerKey   = "bundler"
 
 	// onChainDataFetchTimeout is the max amount of time allocated to fetching
 	// on-chain data. Testing on testnet has shown spikes up to 2.5 seconds
@@ -139,6 +142,15 @@ var (
 				"is supported. For a local node, use the filepath to an IPC file.",
 			Repeatable:   providerDelimiter,
 			RepeatN:      2,
+			DefaultValue: "",
+		},
+		{
+			Key:         bundlerKey,
+			DisplayName: "Bundler",
+			Description: "Specify a bundler to use for gasless redemptions. " +
+				"If not specified, you will be required to have a balance to pay for " +
+				"gas for a redemption. This should only be used for initially acquiring " +
+				"a balance on the chain, because gasless redemptions cost more than regular ones.",
 			DefaultValue: "",
 		},
 	}
@@ -259,6 +271,10 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 		var txHash common.Hash
 		copy(txHash[:], coinID)
 		return txHash.String(), nil
+	case dexeth.UserOpCoinIDLength:
+		var userOpHash common.Hash
+		copy(userOpHash[:], coinID[:common.HashLength])
+		return userOpHash.String(), nil
 	case fundingCoinIDSize:
 		c, err := decodeFundingCoin(coinID)
 		if err != nil {
@@ -340,6 +356,7 @@ type ethFetcher interface {
 	sendSignedTransaction(ctx context.Context, tx *types.Transaction, filts ...acceptabilityFilter) error
 	sendTransaction(ctx context.Context, txOpts *bind.TransactOpts, to common.Address, data []byte, filts ...acceptabilityFilter) (*types.Transaction, error)
 	signData(data []byte) (sig, pubKey []byte, err error)
+	signHash(hash []byte) (sig, pubKey []byte, err error)
 	syncProgress(context.Context) (progress *ethereum.SyncProgress, tipTime uint64, err error)
 	transactionConfirmations(context.Context, common.Hash) (uint32, error)
 	getTransaction(context.Context, common.Hash) (*types.Transaction, int64, error)
@@ -398,6 +415,9 @@ type baseWallet struct {
 	dir        string
 	walletType string
 
+	bundlerMtx sync.RWMutex
+	bundler    bundler
+
 	finalizeConfs uint64
 
 	multiBalanceAddress  common.Address
@@ -428,6 +448,9 @@ type baseWallet struct {
 	confirmedNonceAt    *big.Int
 	pendingNonceAt      *big.Int
 	recoveryRequestSent bool
+
+	userOpsMtx     sync.RWMutex
+	pendingUserOps map[common.Hash]*extendedWalletTx
 
 	balances struct {
 		sync.Mutex
@@ -665,6 +688,7 @@ func newWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		return nil, fmt.Errorf("failed to locate Ethereum compatibility data: %s", net)
 	}
 	contracts := make(map[uint32]common.Address, 1)
+
 	for ver, netAddrs := range dexeth.ContractAddresses {
 		for netw, addr := range netAddrs {
 			if netw == net {
@@ -934,10 +958,21 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 		return nil, err
 	}
 
-	pendingTxs, err := w.txDB.getPendingTxs()
+	pendingTxsAndUserOps, err := w.txDB.getPendingTxs()
 	if err != nil {
 		return nil, err
 	}
+
+	pendingTxs := make([]*extendedWalletTx, 0, len(pendingTxsAndUserOps))
+	pendingUserOps := make(map[common.Hash]*extendedWalletTx)
+	for _, tx := range pendingTxsAndUserOps {
+		if tx.IsUserOp {
+			pendingUserOps[common.HexToHash(tx.ID)] = tx
+		} else {
+			pendingTxs = append(pendingTxs, tx)
+		}
+	}
+
 	sort.Slice(pendingTxs, func(i, j int) bool {
 		return pendingTxs[i].Nonce.Cmp(pendingTxs[j].Nonce) < 0
 	})
@@ -962,6 +997,17 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	w.confirmedNonceAt = confirmedNonce
 	w.pendingNonceAt = nextNonce
 	w.nonceMtx.Unlock()
+
+	w.userOpsMtx.Lock()
+	w.pendingUserOps = pendingUserOps
+	w.userOpsMtx.Unlock()
+
+	// Setting the bundler depends on the tip already being set.
+	if bundlerDef, found := w.settings[bundlerKey]; found && len(bundlerDef) > 0 {
+		if err := w.setBundler(bundlerDef); err != nil {
+			return nil, fmt.Errorf("error setting bundler: %v", err)
+		}
+	}
 
 	if w.log.Level() <= dex.LevelDebug {
 		var highestPendingNonce, lowestPendingNonce uint64
@@ -1006,6 +1052,37 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	}()
 
 	return &wg, nil
+}
+
+func (w *ETHWallet) entrypointAddress() (common.Address, error) {
+	if w.contractorV1 == nil {
+		return common.Address{}, fmt.Errorf("v1 contractor not defined")
+	}
+
+	gaslessRedeemContractor, is := w.contractorV1.(gaslessRedeemContractor)
+	if !is {
+		return common.Address{}, fmt.Errorf("contractorV1 does not implement gaslessRedeemContractor")
+	}
+
+	return gaslessRedeemContractor.entrypointAddress()
+}
+
+func (w *ETHWallet) setBundler(bundlerAddr string) error {
+	entrypoint, err := w.entrypointAddress()
+	if err != nil {
+		return fmt.Errorf("error getting entrypoint address: %v", err)
+	}
+
+	bundler, err := newBundler(w.ctx, bundlerAddr, entrypoint, w.node.contractBackend(), w.currentBaseFee)
+	if err != nil {
+		return fmt.Errorf("error connecting to bundler: %v", err)
+	}
+
+	w.bundlerMtx.Lock()
+	w.bundler = bundler
+	w.bundlerMtx.Unlock()
+
+	return nil
 }
 
 // Connect waits for context cancellation and closes the WaitGroup. Satisfies
@@ -1138,6 +1215,16 @@ func (w *ETHWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, cu
 		if err := rpc.reconfigure(ctx, endpoints, w.compat, walletDir, defaultProviders); err != nil {
 			return false, err
 		}
+	}
+
+	if bundlerDef, found := cfg.Settings[bundlerKey]; found && len(bundlerDef) > 0 {
+		if err := w.setBundler(bundlerDef); err != nil {
+			return false, fmt.Errorf("error setting bundler: %v", err)
+		}
+	} else {
+		w.bundlerMtx.Lock()
+		w.bundler = nil
+		w.bundlerMtx.Unlock()
 	}
 
 	w.settingsMtx.Lock()
@@ -1633,6 +1720,8 @@ func (w *assetWallet) fundReserveOfType(t fundReserveType) *uint64 {
 	}
 }
 
+var errInsufficientFunds = errors.New("insufficient funds")
+
 // lockFunds locks funds for a use case.
 func (w *assetWallet) lockFunds(amt uint64, t fundReserveType) error {
 	balance, err := w.balance()
@@ -1641,8 +1730,8 @@ func (w *assetWallet) lockFunds(amt uint64, t fundReserveType) error {
 	}
 
 	if balance.Available < amt {
-		return fmt.Errorf("attempting to lock more %s for %s than is currently available. %d > %d %s",
-			dex.BipIDSymbol(w.assetID), t, amt, balance.Available, w.ui.AtomicUnit)
+		return fmt.Errorf("%w: attempting to lock more %s for %s than is currently available. %d > %d %s",
+			errInsufficientFunds, dex.BipIDSymbol(w.assetID), t, amt, balance.Available, w.ui.AtomicUnit)
 	}
 
 	w.lockedFunds.mtx.Lock()
@@ -1865,11 +1954,28 @@ func (w *assetWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, err
 		return nil, err
 	}
 
+	bestCase := nRedeem * req.FeeSuggestion
+	worstCase := oneRedeem * req.Lots * req.FeeSuggestion
+	userOpRequired := false
+
+	w.bundlerMtx.RLock()
+	bundlerConfigured := w.bundler != nil
+	w.bundlerMtx.RUnlock()
+
+	if w.assetID == w.baseChainID && bundlerConfigured {
+		balance, err := w.Balance()
+		if err != nil {
+			return nil, err
+		}
+		userOpRequired = balance.Available < worstCase
+	}
+
 	return &asset.PreRedeem{
 		Estimate: &asset.RedeemEstimate{
-			RealisticBestCase:  nRedeem * req.FeeSuggestion,
-			RealisticWorstCase: oneRedeem * req.Lots * req.FeeSuggestion,
+			RealisticBestCase:  bestCase,
+			RealisticWorstCase: worstCase,
 		},
+		UserOpRequired: userOpRequired,
 	}, nil
 }
 
@@ -1884,27 +1990,46 @@ func (w *assetWallet) SingleLotRedeemFees(assetVer uint32, feeSuggestion uint64)
 
 // coin implements the asset.Coin interface for ETH
 type coin struct {
-	id common.Hash
+	isUserOp   bool
+	userOpHash common.Hash
+	txHash     common.Hash
 	// the value can be determined from the coin id, but for some
 	// coin ids a lookup would be required from the blockchain to
 	// determine its value, so this field is used as a cache.
 	value uint64
 }
 
+// userOpCoinID returns the coin ID for a user operation, concatenating the
+// user op hash and the tx hash.
+func userOpCoinID(userOpHash, txHash common.Hash) dex.Bytes {
+	coinID := make(dex.Bytes, dexeth.UserOpCoinIDLength)
+	copy(coinID, userOpHash[:])
+	copy(coinID[common.HashLength:], txHash[:])
+	return coinID
+}
+
 // ID is the ETH coins ID. For functions related to funding an order,
 // the ID must contain an encoded fundingCoinID, but when returned from
 // Swap, it will contain the transaction hash used to initiate the swap.
+// For user ops, the ID is the user op hash and the tx hash. The tx hash
+// may be empty if the user op has not yet been submitted by the bundler.
 func (c *coin) ID() dex.Bytes {
-	return c.id[:]
+	if c.isUserOp {
+		return userOpCoinID(c.userOpHash, c.txHash)
+	}
+	return c.txHash[:]
 }
 
 func (c *coin) TxID() string {
-	return c.String()
+	if c.isUserOp {
+		return "userOp:" + c.userOpHash.String()
+	}
+	return c.txHash.String()
 }
 
 // String is a string representation of the coin.
 func (c *coin) String() string {
-	return c.id.String()
+	return c.txHash.String()
 }
 
 // Value returns the value in gwei of the coin.
@@ -2387,8 +2512,8 @@ func (r *swapReceipt) Expiration() time.Time {
 // Coin returns the coin used to fund the swap.
 func (r *swapReceipt) Coin() asset.Coin {
 	return &coin{
-		value: r.value,
-		id:    r.txHash, // server's idea of ETH coin ID encoding
+		value:  r.value,
+		txHash: r.txHash, // server's idea of ETH coin ID encoding
 	}
 }
 
@@ -2622,6 +2747,183 @@ func (w *TokenWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uin
 	return receipts, change, fees, nil
 }
 
+const dummyUserOpSignature = "0xfffffffffffffffffffffffffffffff0000000000000000000000000000000007aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c"
+
+// precalculatedGaslessRedeemGasEstimates returns estimates for the gas limits
+// of a user op that redeems a number of swaps. This estimate is based on
+// pre-calculated values.
+func precalculatedGaslessRedeemGasEstimates(numRedemptions uint64, gases *dexeth.Gases) *estimateBundlerGasResult {
+	verification := gases.GaslessRedeemVerification + gases.GaslessRedeemVerificationAdd*(numRedemptions-1)
+	preVerification := gases.GaslessRedeemPreVerification + gases.GaslessRedeemPreVerificationAdd*(numRedemptions-1)
+	call := gases.GaslessRedeemCall + gases.GaslessRedeemCallAdd*(numRedemptions-1)
+
+	return &estimateBundlerGasResult{
+		VerificationGasLimit: hexutil.EncodeBig(big.NewInt(int64(verification))),
+		PreVerificationGas:   hexutil.EncodeBig(big.NewInt(int64(preVerification))),
+		CallGasLimit:         hexutil.EncodeBig(big.NewInt(int64(call))),
+	}
+}
+
+// generateUserOp generates a user operation to redeem some swaps.
+func (w *ETHWallet) generateUserOp(nonce *big.Int, bundler bundler, redemptions []*asset.Redemption, swapContractVersion uint32, estimateGasUsingBundler bool) (*userOp, []byte, *big.Int, error) {
+	swapContractAddress, exists := w.versionedContracts[swapContractVersion]
+	if !exists {
+		return nil, nil, nil, fmt.Errorf("contract address for version %d not found", swapContractVersion)
+	}
+
+	gases := w.gases(swapContractVersion)
+	if gases == nil {
+		return nil, nil, nil, fmt.Errorf("no gas table")
+	}
+
+	contractor, is := w.contractorV1.(gaslessRedeemContractor)
+	if !is {
+		return nil, nil, nil, fmt.Errorf("contractor does not support gasless redeems")
+	}
+	callData, err := contractor.gaslessRedeemCalldata(redemptions)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("error getting calldata: %v", err)
+	}
+	maxFeeRateStr, maxTipRateStr, err := bundler.getGasPrice(w.ctx)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("error getting max fee rate: %v", err)
+	}
+	maxFeeRate, ok := new(big.Int).SetString(strings.TrimPrefix(maxFeeRateStr, "0x"), 16)
+	if !ok {
+		return nil, nil, nil, fmt.Errorf("error parsing max fee rate: %v", maxFeeRateStr)
+	}
+
+	op := &userOp{
+		Nonce:                hexutil.EncodeBig(nonce),
+		Sender:               swapContractAddress.Hex(),
+		InitCode:             "0x",
+		CallData:             "0x" + hex.EncodeToString(callData),
+		Signature:            dummyUserOpSignature,
+		MaxFeePerGas:         maxFeeRateStr,
+		MaxPriorityFeePerGas: maxTipRateStr,
+		CallGasLimit:         "0x0",
+		VerificationGasLimit: "0x0",
+		PreVerificationGas:   "0x0",
+		PaymasterAndData:     "0x",
+	}
+
+	// Get the estimated gas required for each stage of the user op, and
+	// update the user ops with the estimated values. There are cases in which
+	// the bundler's gas estimation fails due to "AA40 over verificationGasLimit",
+	// which is clearly a bug because you shouldn't be running into a gas limit
+	// when you are estimating the gas limit.. so we fall back to the
+	// precalculated values.
+	var gasEstimate *estimateBundlerGasResult
+	if estimateGasUsingBundler {
+		gasEstimate, err = bundler.estimateGas(w.ctx, op)
+		if err != nil {
+			w.log.Errorf("bundler gas estimation failed, using precalculated values: %v", err)
+			gasEstimate = precalculatedGaslessRedeemGasEstimates(uint64(len(redemptions)), gases)
+		}
+	} else {
+		gasEstimate = precalculatedGaslessRedeemGasEstimates(uint64(len(redemptions)), gases)
+	}
+
+	// Update the user op with the estimated gas limits.
+	op.CallGasLimit = gasEstimate.CallGasLimit
+	op.VerificationGasLimit = gasEstimate.VerificationGasLimit
+	op.PreVerificationGas = gasEstimate.PreVerificationGas
+
+	// Sign the user op.
+	entrypoint, err := w.entrypointAddress()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("error getting entrypoint address: %v", err)
+	}
+	signingHash, err := op.hash(entrypoint, big.NewInt(w.chainID))
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("error getting user op hash: %v", err)
+	}
+	sig, _, err := w.node.signHash(signingHash.Bytes())
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("error signing user operation: %v", err)
+	}
+	op.Signature = "0x" + common.Bytes2Hex(sig)
+
+	// Calculate the max fee for the user op.
+	totalGas := gasEstimate.totalGas()
+	maxFee := maxFeeRate.Mul(maxFeeRate, big.NewInt(int64(totalGas)))
+
+	return op, callData, maxFee, nil
+}
+
+// gaslessRedeem creates a user operation to redeem swaps and sends it to the
+// bundler.
+func (w *ETHWallet) gaslessRedeem(form *asset.RedeemForm, bundler bundler) ([]dex.Bytes, asset.Coin, uint64, error) {
+	fail := func(err error) ([]dex.Bytes, asset.Coin, uint64, error) {
+		return nil, nil, 0, err
+	}
+
+	contractVer, redeemedValue, err := w.validateRedemptions(form.Redemptions)
+	if err != nil {
+		return fail(fmt.Errorf("Redeem: failed to validate redemptions: %w", err))
+	}
+	if contractVer < 1 {
+		return fail(fmt.Errorf("version 0 does not support gasless redeems"))
+	}
+
+	swapContractAddress, exists := w.versionedContracts[contractVer]
+	if !exists {
+		return fail(fmt.Errorf("contract address for version %d not found", contractVer))
+	}
+
+	var callData []byte
+	var maxFee *big.Int
+	var userOpHash common.Hash
+	var userOpNonce *big.Int
+	err = bundler.withNonce(&bind.CallOpts{Pending: false}, swapContractAddress, w.addr, func(nonce *big.Int) error {
+		var err error
+		var op *userOp
+		userOpNonce = nonce
+		// Some bundlers have bugs where the user op fails to be submitted due to
+		// an "AA40 over verificationGasLimit" when using the bundler's gas
+		// estimate. This is clearly a bug, so it it fails, we try again using
+		// the precalculated values.
+		op, callData, maxFee, err = w.generateUserOp(nonce, bundler, form.Redemptions, contractVer, true)
+		if err != nil {
+			return fmt.Errorf("error generating user operation: %v", err)
+		}
+
+		userOpHash, err = bundler.sendUserOp(w.ctx, op)
+		if err == nil {
+			return nil
+		}
+
+		w.log.Errorf("Error sending user operation with bundler's gas estimates, trying again with precalculated values: %v", err)
+
+		op, callData, maxFee, err = w.generateUserOp(nonce, bundler, form.Redemptions, contractVer, false)
+		if err != nil {
+			return fmt.Errorf("error generating user operation: %v", err)
+		}
+
+		userOpHash, err = bundler.sendUserOp(w.ctx, op)
+		return err
+	})
+	if err != nil {
+		return fail(fmt.Errorf("error sending user operation: %v", err))
+	}
+
+	w.extendAndStoreGaslessRedeem(callData, userOpHash, redeemedValue, userOpNonce)
+
+	txs := make([]dex.Bytes, len(form.Redemptions))
+	for i := range txs {
+		txs[i] = userOpCoinID(userOpHash, common.Hash{})
+	}
+
+	outputCoin := &coin{
+		txHash:     common.Hash{},
+		userOpHash: userOpHash,
+		value:      redeemedValue,
+		isUserOp:   true,
+	}
+
+	return txs, outputCoin, dexeth.WeiToGweiCeil(maxFee), nil
+}
+
 // Redeem sends the redemption transaction, which may contain more than one
 // redemption. All redemptions must be for the same contract version because the
 // current API requires a single transaction reported (asset.Coin output), but
@@ -2632,10 +2934,118 @@ func (w *ETHWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uin
 	return w.assetWallet.Redeem(form, nil, nil)
 }
 
+// GaslessRedeem redeems swaps by using a EIP-4337 bundler in order to be able
+// to redeem without already having funds in the wallet. It will check if there
+// are sufficient funds in the wallet to redeem using a regular redemption tx.
+// If the funds are insufficient, it will send a user operation to the bundler.
+// Submitted will be true if a regular transaction was sent to the network, and
+// false if a user operation was sent to the bundler.
+func (w *ETHWallet) GaslessRedeem(form *asset.RedeemForm) (ins []dex.Bytes, out asset.Coin, fees uint64, submitted bool, err error) {
+	fail := func(err error) ([]dex.Bytes, asset.Coin, uint64, bool, error) {
+		return nil, nil, 0, false, err
+	}
+
+	// Check the amount of gas it costs to redeem the swaps.
+	numRedemptions := uint64(len(form.Redemptions))
+	if numRedemptions == 0 {
+		return fail(errors.New("GaslessRedeem must be called with at least 1 redemption"))
+	}
+	maxFeeRate, _, err := w.recommendedMaxFeeRate(w.ctx)
+	if err != nil {
+		return nil, nil, 0, false, err
+	}
+	feeRateGwei := dexeth.WeiToGweiCeil(maxFeeRate)
+	ver, _, err := dexeth.DecodeContractData(form.Redemptions[0].Spends.Contract)
+	if err != nil {
+		return fail(fmt.Errorf("invalid versioned swap contract data: %w", err))
+	}
+	g := w.gases(ver)
+	if g == nil {
+		return fail(fmt.Errorf("no gas table"))
+	}
+	redeemGas := g.Redeem + g.RedeemAdd*(numRedemptions-1)
+	reserve := redeemGas * feeRateGwei
+
+	// Check if we have enough funds the redeem the swaps. If not, we will
+	// send a user operation to the bundler.
+	err = w.lockFunds(reserve, redemptionReserve)
+	if errors.Is(err, errInsufficientFunds) {
+		w.bundlerMtx.RLock()
+		bundler := w.bundler
+		w.bundlerMtx.RUnlock()
+		if bundler == nil {
+			return fail(fmt.Errorf("bundler not configured"))
+		}
+		txs, coin, fees, err := w.gaslessRedeem(form, bundler)
+		return txs, coin, fees, false, err
+	}
+	if err != nil {
+		return fail(err)
+	}
+	defer w.unlockFunds(reserve, redemptionReserve)
+
+	// We did have enough funds so we can pay for the redemption
+	// ourselves.
+	txs, coin, fees, err := w.assetWallet.Redeem(form, nil, nil)
+	if err != nil {
+		return nil, nil, 0, false, err
+	}
+
+	return txs, coin, fees, true, nil
+}
+
 // Redeem sends the redemption transaction, which may contain more than one
 // redemption.
 func (w *TokenWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
 	return w.assetWallet.Redeem(form, w.parent, nil)
+}
+
+// validateRedemptions checks that all redemptions use the same contract version
+// and that they are all redeemable.
+func (w *assetWallet) validateRedemptions(redemptions []*asset.Redemption) (contractVer uint32, redeemedValue uint64, err error) {
+	for i, redemption := range redemptions {
+		// NOTE: redemption.Spends.SecretHash is a dup of the hash extracted
+		// from redemption.Spends.Contract. Even for scriptable UTXO assets, the
+		// redeem script in this Contract field is redundant with the SecretHash
+		// field as ExtractSwapDetails can be applied to extract the hash.
+		ver, locator, err := dexeth.DecodeContractData(redemption.Spends.Contract)
+		if err != nil {
+			return 0, 0, fmt.Errorf("Redeem: invalid versioned swap contract data: %w", err)
+		}
+
+		if i == 0 {
+			contractVer = ver
+		} else if contractVer != ver {
+			return 0, 0, fmt.Errorf("Redeem: inconsistent contract versions in RedeemForm.Redemptions: "+
+				"%d != %d", contractVer, ver)
+		}
+
+		// Use the contract's free public view function to validate the secret
+		// against the secret hash, and ensure the swap is otherwise redeemable
+		// before broadcasting our secrets, which is especially important if we
+		// are maker (the swap initiator).
+		var secret [32]byte
+		copy(secret[:], redemption.Secret)
+		redeemable, err := w.isRedeemable(locator, secret, ver)
+		if err != nil {
+			return 0, 0, fmt.Errorf("Redeem: failed to check if swap is redeemable: %w", err)
+		}
+		if !redeemable {
+			return 0, 0, fmt.Errorf("Redeem: version %d locator %x not redeemable with secret %x",
+				ver, locator, secret)
+		}
+
+		status, vector, err := w.statusAndVector(w.ctx, locator, contractVer)
+		if err != nil {
+			return 0, 0, fmt.Errorf("error finding swap state: %w", err)
+		}
+		if status.Step != dexeth.SSInitiated {
+			return 0, 0, asset.ErrSwapNotInitiated
+		}
+		redeemedValue += w.atomize(vector.Value)
+	}
+
+	return
 }
 
 // Redeem sends the redemption transaction, which may contain more than one
@@ -2653,52 +3063,9 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 		return fail(errors.New("Redeem: must be called with at least 1 redemption"))
 	}
 
-	var contractVer uint32 // require a consistent version since this is a single transaction
-	// secrets := make([][32]byte, 0, n)
-	// locators := make([][]byte, 0, n)
-	var redeemedValue uint64
-	for i, redemption := range form.Redemptions {
-		// NOTE: redemption.Spends.SecretHash is a dup of the hash extracted
-		// from redemption.Spends.Contract. Even for scriptable UTXO assets, the
-		// redeem script in this Contract field is redundant with the SecretHash
-		// field as ExtractSwapDetails can be applied to extract the hash.
-		ver, locator, err := dexeth.DecodeContractData(redemption.Spends.Contract)
-		if err != nil {
-			return fail(fmt.Errorf("Redeem: invalid versioned swap contract data: %w", err))
-		}
-
-		// locators = append(locators, locator)
-		if i == 0 {
-			contractVer = ver
-		} else if contractVer != ver {
-			return fail(fmt.Errorf("Redeem: inconsistent contract versions in RedeemForm.Redemptions: "+
-				"%d != %d", contractVer, ver))
-		}
-
-		// Use the contract's free public view function to validate the secret
-		// against the secret hash, and ensure the swap is otherwise redeemable
-		// before broadcasting our secrets, which is especially important if we
-		// are maker (the swap initiator).
-		var secret [32]byte
-		copy(secret[:], redemption.Secret)
-		// secrets = append(secrets, secret)
-		redeemable, err := w.isRedeemable(locator, secret, ver)
-		if err != nil {
-			return fail(fmt.Errorf("Redeem: failed to check if swap is redeemable: %w", err))
-		}
-		if !redeemable {
-			return fail(fmt.Errorf("Redeem: version %d locator %x not redeemable with secret %x",
-				ver, locator, secret))
-		}
-
-		status, vector, err := w.statusAndVector(w.ctx, locator, contractVer)
-		if err != nil {
-			return nil, nil, 0, fmt.Errorf("error finding swap state: %w", err)
-		}
-		if status.Step != dexeth.SSInitiated {
-			return nil, nil, 0, asset.ErrSwapNotInitiated
-		}
-		redeemedValue += w.atomize(vector.Value)
+	contractVer, redeemedValue, err := w.validateRedemptions(form.Redemptions)
+	if err != nil {
+		return fail(fmt.Errorf("Redeem: failed to validate redemptions: %w", err))
 	}
 
 	g := w.gases(contractVer)
@@ -2711,7 +3078,7 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 	}
 	bal, err := feeWallet.Balance()
 	if err != nil {
-		return nil, nil, 0, fmt.Errorf("error getting balance in excessive gas fee recovery: %v", err)
+		return fail(fmt.Errorf("error getting balance in excessive gas fee recovery: %v", err))
 	}
 
 	gasLimit, gasFeeCap := g.Redeem*n, form.FeeSuggestion
@@ -2774,12 +3141,12 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 	}
 
 	outputCoin := &coin{
-		id:    txHash,
-		value: redeemedValue,
+		txHash: txHash,
+		value:  redeemedValue,
 	}
 
-	// This is still a fee rate estimate. If we add a redemption confirmation
-	// method as has been discussed, then maybe the fees can be updated there.
+	// This is still a fee estimate. The actual gas cost will be returned in the
+	// receipt.
 	fees := g.RedeemN(len(form.Redemptions)) * form.FeeSuggestion
 
 	return txs, outputCoin, fees, nil
@@ -3455,18 +3822,57 @@ func (w *TokenBridgeWallet) SupportedDestinations(assetID uint32) ([]uint32, err
 	return w.manager.bridge.supportedDestinations(), nil
 }
 
+func (w *ETHWallet) canRedeemWithBundler(lotSize uint64, gases *dexeth.Gases, n uint64) (bool, error) {
+	w.bundlerMtx.RLock()
+	bundler := w.bundler
+	w.bundlerMtx.RUnlock()
+
+	if bundler == nil {
+		return false, nil
+	}
+
+	// Check if the bundler can handle the redemption by ensuring the lot size
+	// is large enough to cover the gas fees.
+
+	maxFeePerGas, _, err := bundler.getGasPrice(w.ctx)
+	if err != nil {
+		return false, fmt.Errorf("error getting gas price from bundler: %w", err)
+	}
+	maxFeeRateBig, ok := big.NewInt(0).SetString(strings.TrimPrefix(maxFeePerGas, "0x"), 16)
+	if !ok {
+		return false, fmt.Errorf("error parsing max fee per gas: %w", err)
+	}
+	maxFeeRate := dexeth.WeiToGwei(maxFeeRateBig)
+
+	// Double the fee rate for safety
+	maxFeeRate *= 2
+
+	gasEstimate := precalculatedGaslessRedeemGasEstimates(n, gases)
+	if lotSize < gasEstimate.totalGas()*maxFeeRate {
+		return false, asset.ErrBundlerRedemptionLotSizeTooSmall
+	}
+
+	return true, nil
+}
+
 // ReserveNRedemptions locks funds for redemption. It is an error if there
 // is insufficient spendable balance. Part of the AccountLocker interface.
-func (w *ETHWallet) ReserveNRedemptions(n uint64, ver uint32, maxFeeRate uint64) (uint64, error) {
+func (w *ETHWallet) ReserveNRedemptions(n uint64, ver uint32, maxFeeRate uint64, lotSize uint64) (uint64, error) {
 	g := w.gases(ver)
 	if g == nil {
 		return 0, fmt.Errorf("no gas table")
 	}
+
 	redeemCost := g.Redeem * maxFeeRate
 	reserve := redeemCost * n
 
-	if err := w.lockFunds(reserve, redemptionReserve); err != nil {
-		return 0, err
+	err := w.lockFunds(reserve, redemptionReserve)
+	if errors.Is(err, errInsufficientFunds) {
+		can, err := w.canRedeemWithBundler(lotSize, g, n)
+		if err != nil || can {
+			return 0, err
+		}
+		return 0, asset.ErrInsufficientRedeemFunds
 	}
 
 	return reserve, nil
@@ -3475,7 +3881,7 @@ func (w *ETHWallet) ReserveNRedemptions(n uint64, ver uint32, maxFeeRate uint64)
 // ReserveNRedemptions locks funds for redemption. It is an error if there
 // is insufficient spendable balance.
 // Part of the AccountLocker interface.
-func (w *TokenWallet) ReserveNRedemptions(n uint64, assetVer uint32, maxFeeRate uint64) (uint64, error) {
+func (w *TokenWallet) ReserveNRedemptions(n uint64, assetVer uint32, maxFeeRate uint64, lotSize uint64) (uint64, error) {
 	g := w.gases(contractVersion(assetVer))
 	if g == nil {
 		return 0, fmt.Errorf("no gas table")
@@ -3588,6 +3994,11 @@ func (eth *baseWallet) SignMessage(_ asset.Coin, msg dex.Bytes) (pubkeys, sigs [
 		return nil, nil, fmt.Errorf("SignMessage: error signing data: %w", err)
 	}
 
+	// Strip the recovery ID if it's present.
+	if len(sig) == 65 {
+		sig = sig[:64]
+	}
+
 	return []dex.Bytes{pubKey}, []dex.Bytes{sig}, nil
 }
 
@@ -3665,8 +4076,8 @@ func (w *assetWallet) AuditContract(coinID, contract, serializedTx dex.Bytes, re
 	}
 
 	coin := &coin{
-		id:    txHash,
-		value: val,
+		txHash: txHash,
+		value:  val,
 	}
 
 	return &asset.AuditInfo{
@@ -4164,7 +4575,7 @@ func (w *ETHWallet) Send(addr string, value, _ uint64) (asset.Coin, error) {
 
 	txHash := tx.Hash()
 
-	return &coin{id: txHash, value: value}, nil
+	return &coin{txHash: txHash, value: value}, nil
 }
 
 // Send sends the exact value to the specified address. Fees are taken from the
@@ -4185,7 +4596,7 @@ func (w *TokenWallet) Send(addr string, value, _ uint64) (asset.Coin, error) {
 		return nil, err
 	}
 
-	return &coin{id: tx.Hash(), value: value}, nil
+	return &coin{txHash: tx.Hash(), value: value}, nil
 }
 
 // ValidateSecret checks that the secret satisfies the contract.
@@ -4238,6 +4649,124 @@ func (eth *assetWallet) DynamicRedemptionFeesPaid(ctx context.Context, coinID, c
 	return eth.swapOrRedemptionFeesPaid(ctx, coinID, contractData, false)
 }
 
+// swapOrRedemptionFeesPaidOnChainTx returns exactly how much gwei was used to
+// do a redemption using an on-chain transaction (not a user op). This is only
+// called if the transaction was not in the transaction DB.
+func (w *baseWallet) swapOrRedemptionFeesPaidOnChainTx(ctx context.Context, txHash common.Hash, contractVer uint32, isInit bool, locator []byte) (uint64, [][]byte, error) {
+	receipt, tx, err := w.node.transactionAndReceipt(ctx, txHash)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	tip := w.tipHeight()
+
+	if confs := safeConfsBig(tip, receipt.BlockNumber); confs < w.finalizeConfs {
+		return 0, nil, asset.ErrNotEnoughConfirms
+	}
+
+	bigFees := new(big.Int).Mul(receipt.EffectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
+	fee := dexeth.WeiToGweiCeil(bigFees)
+	locators, _, err := extractSecretHashes(tx.Data(), contractVer, isInit)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	sort.Slice(locators, func(i, j int) bool { return bytes.Compare(locators[i], locators[j]) < 0 })
+	var found bool
+	for i := range locators {
+		if bytes.Equal(locator, locators[i]) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return 0, nil, fmt.Errorf("locator %x not found in transaction", locator)
+	}
+
+	return fee, locators, nil
+}
+
+// swapOrRedemptionFeesPaidUserOp returns exactly how much gwei was used to
+// do a redemption using a user op. This is only called if the transaciton
+// was not in the transaction DB.
+func (w *baseWallet) swapOrRedemptionFeesPaidUserOp(ctx context.Context, userOpHash, txHash common.Hash, contractVer uint32, locator []byte) (fee uint64, locators [][]byte, err error) {
+	defer func() {
+		w.log.Infof("manually found swap or redemption fees for user op %s. fee: %d, locators: %v, err: %v", userOpHash, fee, locators, err)
+	}()
+
+	// User op was not yet submitted by the bundler.
+	if txHash == (common.Hash{}) {
+		return 0, nil, asset.ErrNotEnoughConfirms
+	}
+
+	receipt, tx, err := w.node.transactionAndReceipt(ctx, txHash)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	tip := w.tipHeight()
+
+	if confs := safeConfsBig(tip, receipt.BlockNumber); confs < w.finalizeConfs {
+		return 0, nil, asset.ErrNotEnoughConfirms
+	}
+
+	userOps, err := dexeth.ParseHandleOpsData(tx.Data())
+	if err != nil {
+		return 0, nil, err
+	}
+
+	// Loop through all the user ops that were submitted in this transaction,
+	// and find the one that matches our user op hash.
+	var ourUserOp *entrypoint.UserOperation
+	for _, userOp := range userOps {
+		hash, err := dexeth.HashUserOp(userOp, *tx.To(), w.chainCfg.ChainID)
+		if err != nil {
+			return 0, nil, err
+		}
+		if hash == userOpHash {
+			ourUserOp = &userOp
+			break
+		}
+	}
+	if ourUserOp == nil {
+		return 0, nil, fmt.Errorf("user op not found in transaction")
+	}
+
+	// Extract the secret hashes from the user op call data.
+	locators, _, err = extractSecretHashes(ourUserOp.CallData, contractVer, false)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	ep, err := entrypoint.NewEntrypoint(*tx.To(), w.node.contractBackend())
+	if err != nil {
+		return 0, nil, err
+	}
+
+	// Find the event log related to our user op to retrieve the gas cost.
+	blockNumber := receipt.BlockNumber.Uint64()
+	iter, err := ep.FilterUserOperationEvent(&bind.FilterOpts{
+		Start:   blockNumber,
+		End:     &blockNumber,
+		Context: ctx,
+	}, [][32]byte{userOpHash}, []common.Address{ourUserOp.Sender}, []common.Address{})
+	if err != nil {
+		return 0, nil, err
+	}
+	var event *entrypoint.EntrypointUserOperationEvent
+	for iter.Next() {
+		event = iter.Event
+		if event.UserOpHash == userOpHash {
+			break
+		}
+	}
+	if event == nil {
+		return 0, nil, fmt.Errorf("user op event not found in transaction")
+	}
+
+	return dexeth.WeiToGweiCeil(event.ActualGasCost), locators, nil
+}
+
 // swapOrRedemptionFeesPaid returns exactly how much gwei was used to send an
 // initiation or redemption transaction. It also returns the secret hashes
 // included with this init or redeem. Secret hashes are sorted so returns are
@@ -4258,64 +4787,45 @@ func (w *baseWallet) swapOrRedemptionFeesPaid(
 		return 0, nil, err
 	}
 
-	var txHash common.Hash
-	copy(txHash[:], coinID)
+	var txHashOrUserOpHash common.Hash
+	copy(txHashOrUserOpHash[:], coinID)
 
 	tip := w.tipHeight()
 
 	var blockNum uint64
-	var tx *types.Transaction
-	if w.withLocalTxRead(txHash, func(wt *extendedWalletTx) {
+	var calldata dex.Bytes
+	if w.withLocalTxRead(txHashOrUserOpHash, func(wt *extendedWalletTx) {
 		blockNum = wt.BlockNumber
 		fee = wt.Fees
-		tx, err = wt.tx()
+		calldata = wt.CallData
 		if err != nil {
-			w.log.Errorf("Error decoding wallet transaction %s: %v", txHash, err)
+			w.log.Errorf("Error decoding wallet transaction %s: %v", txHashOrUserOpHash, err)
 		}
 	}) && err == nil {
 		if confs := safeConfs(tip, blockNum); confs < w.finalizeConfs {
 			return 0, nil, asset.ErrNotEnoughConfirms
 		}
-		locators, _, err = extractSecretHashes(tx, contractVer, isInit)
+		locators, _, err = extractSecretHashes(calldata, contractVer, isInit)
 		return
 	}
 
 	// We don't have information locally. This really shouldn't happen anymore,
 	// but let's look on-chain anyway.
 
-	receipt, tx, err := w.node.transactionAndReceipt(ctx, txHash)
-	if err != nil {
-		return 0, nil, err
+	isUserOp := len(coinID) == dexeth.UserOpCoinIDLength
+	if isUserOp {
+		var userOpHash, txHash common.Hash
+		copy(userOpHash[:], coinID[:common.HashLength])
+		copy(txHash[:], coinID[common.HashLength:])
+		return w.swapOrRedemptionFeesPaidUserOp(ctx, userOpHash, txHash, contractVer, locator)
 	}
 
-	if confs := safeConfsBig(tip, receipt.BlockNumber); confs < w.finalizeConfs {
-		return 0, nil, asset.ErrNotEnoughConfirms
-	}
-
-	bigFees := new(big.Int).Mul(receipt.EffectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
-	fee = dexeth.WeiToGweiCeil(bigFees)
-	locators, _, err = extractSecretHashes(tx, contractVer, isInit)
-	if err != nil {
-		return 0, nil, err
-	}
-
-	sort.Slice(locators, func(i, j int) bool { return bytes.Compare(locators[i], locators[j]) < 0 })
-	var found bool
-	for i := range locators {
-		if bytes.Equal(locator, locators[i]) {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return 0, nil, fmt.Errorf("locator %x not found in transaction", locator)
-	}
-	return dexeth.WeiToGweiCeil(bigFees), locators, nil
+	return w.swapOrRedemptionFeesPaidOnChainTx(ctx, txHashOrUserOpHash, contractVer, isInit, locator)
 }
 
 // extractSecretHashes extracts the secret hashes from the reedeem or swap tx
 // data. The returned hashes are sorted lexicographically.
-func extractSecretHashes(tx *types.Transaction, contractVer uint32, isInit bool) (locators, secretHashes [][]byte, err error) {
+func extractSecretHashes(calldata dex.Bytes, contractVer uint32, isInit bool) (locators, secretHashes [][]byte, err error) {
 	defer func() {
 		sort.Slice(secretHashes, func(i, j int) bool { return bytes.Compare(secretHashes[i], secretHashes[j]) < 0 })
 	}()
@@ -4323,7 +4833,7 @@ func extractSecretHashes(tx *types.Transaction, contractVer uint32, isInit bool)
 	switch contractVer {
 	case 0:
 		if isInit {
-			inits, err := dexeth.ParseInitiateDataV0(tx.Data())
+			inits, err := dexeth.ParseInitiateDataV0(calldata)
 			if err != nil {
 				return nil, nil, fmt.Errorf("invalid initiate data: %v", err)
 			}
@@ -4333,7 +4843,7 @@ func extractSecretHashes(tx *types.Transaction, contractVer uint32, isInit bool)
 				locators = append(locators, copyK[:])
 			}
 		} else {
-			redeems, err := dexeth.ParseRedeemDataV0(tx.Data())
+			redeems, err := dexeth.ParseRedeemDataV0(calldata)
 			if err != nil {
 				return nil, nil, fmt.Errorf("invalid redeem data: %v", err)
 			}
@@ -4346,7 +4856,7 @@ func extractSecretHashes(tx *types.Transaction, contractVer uint32, isInit bool)
 		return locators, locators, nil
 	case 1:
 		if isInit {
-			_, vectors, err := dexeth.ParseInitiateDataV1(tx.Data())
+			_, vectors, err := dexeth.ParseInitiateDataV1(calldata)
 			if err != nil {
 				return nil, nil, fmt.Errorf("invalid initiate data: %v", err)
 			}
@@ -4357,7 +4867,7 @@ func extractSecretHashes(tx *types.Transaction, contractVer uint32, isInit bool)
 				secretHashes = append(secretHashes, vec.SecretHash[:])
 			}
 		} else {
-			_, redeems, err := dexeth.ParseRedeemDataV1(tx.Data())
+			_, redeems, err := dexeth.ParseRedeemDataV1(calldata)
 			if err != nil {
 				return nil, nil, fmt.Errorf("invalid redeem data: %v", err)
 			}
@@ -4387,6 +4897,14 @@ func (w *baseWallet) RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) 
 	}
 
 	return w.node.transactionConfirmations(ctx, txHash)
+}
+
+func (w *baseWallet) currentBaseFee(ctx context.Context) (*big.Int, error) {
+	base, _, err := w.currentNetworkFees(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return base, nil
 }
 
 // currentNetworkFees give the current base fee rate (from the best header),
@@ -4524,6 +5042,8 @@ func (eth *ETHWallet) checkForNewBlocks(ctx context.Context) {
 		currentTipHash, bestHdr.Number, bestHash)
 
 	eth.checkPendingTxs()
+	eth.checkPendingUserOps()
+
 	for _, w := range eth.connectedWallets() {
 		w.checkFindRedemptions()
 		w.checkPendingApprovals()
@@ -4537,7 +5057,130 @@ func (eth *ETHWallet) checkForNewBlocks(ctx context.Context) {
 // function. Fee argument is ignored since it is calculated from the best
 // header.
 func (w *ETHWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset.Redemption, _ uint64) (*asset.ConfirmRedemptionStatus, error) {
+	if len(coinID) == dexeth.UserOpCoinIDLength {
+		return w.confirmUserOpRedemption(coinID, redemption)
+	}
 	return w.confirmRedemption(coinID, redemption)
+}
+
+func (w *ETHWallet) confirmUserOpRedemption(coinID dex.Bytes, redemption *asset.Redemption) (*asset.ConfirmRedemptionStatus, error) {
+	tip := w.tipHeight()
+	var userOpHash common.Hash
+	copy(userOpHash[:], coinID[:common.HashLength])
+
+	contractVer, locator, err := dexeth.DecodeContractData(redemption.Spends.Contract)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode contract data: %w", err)
+	}
+
+	errBasedOnStatus := func(errIfUnresolved error) error {
+		status, err := w.status(w.ctx, locator, contractVer)
+		if err != nil {
+			return fmt.Errorf("error pulling swap data from contract: %v", err)
+		}
+		switch status.Step {
+		case dexeth.SSRedeemed:
+			w.log.Infof("Redemption in user op %s was apparently redeemed by another tx. OK.", userOpHash)
+			return nil
+		case dexeth.SSRefunded:
+			return asset.ErrSwapRefunded
+		}
+		return errIfUnresolved
+	}
+
+	if found, s := w.localTxStatus(userOpHash); found {
+		var txHash common.Hash
+		if s.userOpTxID != "" {
+			txHash = common.HexToHash(s.userOpTxID)
+		}
+
+		if s.rejected && s.confirmed {
+			if err := errBasedOnStatus(asset.ErrTxRejected); err != nil {
+				return nil, err
+			}
+			return &asset.ConfirmRedemptionStatus{
+				Confs:             w.finalizeConfs,
+				Req:               w.finalizeConfs,
+				CoinID:            userOpCoinID(userOpHash, txHash),
+				PendingSubmission: false,
+			}, nil
+		}
+
+		// Aged out and we have no receipt.
+		if txAgeOut <= time.Since(time.Unix(int64(s.submissionTime), 0)) && s.receipt == nil {
+			if err := errBasedOnStatus(asset.ErrTxLost); err != nil {
+				return nil, err
+			}
+			return &asset.ConfirmRedemptionStatus{
+				Confs:             w.finalizeConfs,
+				Req:               w.finalizeConfs,
+				CoinID:            userOpCoinID(userOpHash, txHash),
+				PendingSubmission: false,
+			}, nil
+		}
+
+		return &asset.ConfirmRedemptionStatus{
+			Confs:             safeConfs(tip, s.blockNum),
+			Req:               w.finalizeConfs,
+			CoinID:            userOpCoinID(userOpHash, txHash),
+			PendingSubmission: s.userOpTxID == "",
+		}, nil
+	}
+
+	// We know nothing of the tx locally. This shouldn't really happen, but
+	// we'll look for it anyway.
+	w.bundlerMtx.RLock()
+	bundler := w.bundler
+	w.bundlerMtx.RUnlock()
+	if bundler == nil {
+		return nil, fmt.Errorf("confirming user op redemption without bundler configured")
+	}
+
+	receipt, err := bundler.getUserOpReceipt(w.ctx, userOpHash)
+	if err != nil {
+		return nil, fmt.Errorf("error getting user op receipt: %w", err)
+	}
+
+	if receipt.receipt == nil {
+		if err := errBasedOnStatus(asset.ErrTxLost); err != nil {
+			return nil, err
+		}
+		return &asset.ConfirmRedemptionStatus{
+			Confs:             w.finalizeConfs,
+			Req:               w.finalizeConfs,
+			CoinID:            userOpCoinID(userOpHash, common.Hash{}),
+			PendingSubmission: false,
+		}, nil
+	}
+
+	confs := safeConfsBig(tip, receipt.receipt.BlockNumber)
+	if confs >= w.finalizeConfs {
+		if receipt.success {
+			return &asset.ConfirmRedemptionStatus{
+				Confs:             w.finalizeConfs,
+				Req:               w.finalizeConfs,
+				CoinID:            userOpCoinID(userOpHash, receipt.receipt.TxHash),
+				PendingSubmission: false,
+			}, nil
+		}
+
+		if err := errBasedOnStatus(asset.ErrTxRejected); err != nil {
+			return nil, err
+		}
+		return &asset.ConfirmRedemptionStatus{
+			Confs:             w.finalizeConfs,
+			Req:               w.finalizeConfs,
+			CoinID:            userOpCoinID(userOpHash, receipt.receipt.TxHash),
+			PendingSubmission: false,
+		}, nil
+	}
+
+	return &asset.ConfirmRedemptionStatus{
+		Confs:             confs,
+		Req:               w.finalizeConfs,
+		CoinID:            userOpCoinID(userOpHash, receipt.receipt.TxHash),
+		PendingSubmission: false,
+	}, nil
 }
 
 // ConfirmRedemption checks the status of a redemption. If a transaction has
@@ -4656,6 +5299,22 @@ func (w *baseWallet) withLocalTxRead(txHash common.Hash, f func(*extendedWalletT
 	if withPendingTxRead(txHash, f) {
 		return true
 	}
+
+	withPendingUserOpRead := func(userOpHash common.Hash, f func(*extendedWalletTx)) bool {
+		w.userOpsMtx.RLock()
+		defer w.userOpsMtx.RUnlock()
+		for _, userOpTx := range w.pendingUserOps {
+			if userOpTx.ID == userOpHash.Hex() {
+				f(userOpTx)
+				return true
+			}
+		}
+		return false
+	}
+	if withPendingUserOpRead(txHash, f) {
+		return true
+	}
+
 	// Could be finalized and in the database.
 	if confirmedTx, err := w.txDB.getTx(txHash); err != nil {
 		w.log.Errorf("Error getting DB transaction: %v", err)
@@ -4679,6 +5338,9 @@ type walletTxStatus struct {
 	feeReplacement   bool
 	receipt          *types.Receipt
 	assumedLost      bool
+	userOpTxID       string
+	rejected         bool
+	submissionTime   uint64
 }
 
 // localTxStatus looks for an extendedWalletTx and copies critical values to
@@ -4692,6 +5354,9 @@ func (w *baseWallet) localTxStatus(txHash common.Hash) (_ bool, s *walletTxStatu
 			feeReplacement:   wt.FeeReplacement,
 			receipt:          wt.Receipt,
 			assumedLost:      wt.AssumedLost,
+			userOpTxID:       wt.UserOpTxID,
+			rejected:         wt.Rejected,
+			submissionTime:   wt.SubmissionTime,
 		}
 	}), s
 }
@@ -5527,6 +6192,111 @@ func (w *baseWallet) updatePendingTx(tip uint64, pendingTx *extendedWalletTx) {
 	pendingTx.Confirmed = safeConfs(tip, pendingTx.BlockNumber) >= w.finalizeConfs
 }
 
+// w.userOpsMtx must be held for writes
+func (w *baseWallet) updatePendingUserOp(tip uint64, wt *extendedWalletTx) {
+	var updated bool
+	defer func() {
+		if updated || !wt.savedToDB {
+			w.tryStoreDBTx(wt)
+			w.emitTransactionNote(wt.WalletTransaction, false)
+		}
+	}()
+
+	// Only check once per block.
+	if wt.lastCheck == tip {
+		return
+	}
+	wt.lastCheck = tip
+
+	waitingOnConfs := wt.BlockNumber > 0 && safeConfs(tip, wt.BlockNumber) < w.finalizeConfs
+	if waitingOnConfs {
+		return
+	}
+
+	w.bundlerMtx.RLock()
+	bundler := w.bundler
+	w.bundlerMtx.RUnlock()
+	if bundler == nil {
+		w.log.Errorf("Need to check pending user op, but bundler is not configured.")
+		return
+	}
+
+	res, err := bundler.getUserOpReceipt(w.ctx, common.HexToHash(wt.ID))
+	if err != nil {
+		w.log.Errorf("Error getting user op receipt: %v", err)
+		return
+	}
+	if res == nil || res.receipt == nil {
+		if wt.BlockNumber > 0 {
+			w.log.Warnf("User op tx %s was previously mined but is now unconfirmed", wt.UserOpTxID)
+			wt.Nonce = nil
+			wt.Receipt = nil
+			wt.BlockNumber = 0
+			wt.Timestamp = 0
+			wt.Confirmed = false
+			wt.UserOpTxID = ""
+			updated = true
+		}
+		return
+	}
+
+	if res.receipt.BlockNumber.Uint64() != wt.BlockNumber || res.receipt.TxHash != wt.txHash {
+		hdr, err := w.node.headerByHash(w.ctx, res.receipt.BlockHash)
+		if err != nil {
+			w.log.Errorf("Error getting header for hash %v: %v", res.receipt.BlockHash, err)
+			return
+		}
+		if hdr == nil {
+			w.log.Errorf("Header for hash %v is nil", res.receipt.BlockHash)
+			return
+		}
+		wt.Nonce = res.nonce
+		wt.Receipt = res.receipt
+		wt.BlockNumber = res.receipt.BlockNumber.Uint64()
+		wt.Timestamp = hdr.Time
+		wt.Confirmed = safeConfs(tip, wt.BlockNumber) >= w.finalizeConfs
+		wt.Rejected = !res.success
+		wt.UserOpTxID = res.receipt.TxHash.Hex()
+		wt.txHash = res.receipt.TxHash
+		if res.actualGasCost != nil {
+			wt.Fees = dexeth.WeiToGweiCeil(res.actualGasCost)
+		}
+		updated = true
+		return
+	}
+
+	confirmed := safeConfs(tip, wt.BlockNumber) >= w.finalizeConfs
+	if confirmed != wt.Confirmed {
+		wt.Confirmed = confirmed
+		updated = true
+	}
+}
+
+func (w *baseWallet) checkPendingUserOps() {
+	tip := w.tipHeight()
+
+	w.userOpsMtx.Lock()
+	defer w.userOpsMtx.Unlock()
+
+	for _, pendingUserOp := range w.pendingUserOps {
+		if w.ctx.Err() != nil {
+			return
+		}
+
+		w.updatePendingUserOp(tip, pendingUserOp)
+		age := pendingUserOp.age()
+		if age >= txAgeOut && !pendingUserOp.Confirmed {
+			// TODO: give up? delete pending tx?
+		}
+	}
+
+	for userOpHash, pendingUserOp := range w.pendingUserOps {
+		if pendingUserOp.Confirmed {
+			delete(w.pendingUserOps, userOpHash)
+		}
+	}
+}
+
 // checkPendingTxs checks the confirmation status of all pending transactions.
 func (w *baseWallet) checkPendingTxs() {
 	tip := w.tipHeight()
@@ -5541,7 +6311,6 @@ func (w *baseWallet) checkPendingTxs() {
 				w.log.Tracef("Checked %d pending txs. Finalized %d", nPending, nPending-len(w.pendingTxs))
 			}()
 		}
-
 	}
 
 	// keepFromIndex will be the index of the first un-finalized tx.
@@ -6062,6 +6831,7 @@ func (w *baseWallet) extendAndStoreTx(genTxResult *genTxResult, tokenAssetID *ui
 			},
 		},
 		SubmissionTime: uint64(now.Unix()),
+		CallData:       genTxResult.tx.Data(),
 		RawTx:          rawTx,
 		Nonce:          big.NewInt(int64(nonce)),
 		txHash:         genTxResult.tx.Hash(),
@@ -6082,6 +6852,37 @@ func (w *baseWallet) extendAndStoreTx(genTxResult *genTxResult, tokenAssetID *ui
 	}
 
 	w.tryStoreDBTx(wt)
+
+	return wt
+}
+
+func (w *baseWallet) extendAndStoreGaslessRedeem(callData dex.Bytes, userOpHash common.Hash, amt uint64, userOpNonce *big.Int) *extendedWalletTx {
+	now := time.Now()
+
+	wt := &extendedWalletTx{
+		WalletTransaction: &asset.WalletTransaction{
+			Type:      asset.Redeem,
+			ID:        userOpHash.String(),
+			Amount:    amt,
+			Fees:      0,
+			TokenID:   nil,
+			Recipient: nil,
+			IsUserOp:  true,
+		},
+		SubmissionTime: uint64(now.Unix()),
+		CallData:       callData,
+		savedToDB:      true,
+		lastBroadcast:  now,
+		lastFeeCheck:   now,
+		Nonce:          userOpNonce,
+	}
+
+	w.userOpsMtx.Lock()
+	w.pendingUserOps[userOpHash] = wt
+	w.userOpsMtx.Unlock()
+
+	w.tryStoreDBTx(wt)
+	w.emitTransactionNote(wt.WalletTransaction, true)
 
 	return wt
 }
@@ -6230,6 +7031,7 @@ func (w *TokenWallet) WalletTransaction(ctx context.Context, txID string) (*asse
 type providersFile struct {
 	Seed      dex.Bytes                                                   `json:"seed"`
 	Providers map[string] /* symbol */ map[string] /* network */ []string `json:"providers"`
+	Bundlers  map[string] /* symbol */ map[string] /* network */ string   `json:"bundlers"`
 }
 
 // getFileCredentials reads the file at path and extracts the seed and the

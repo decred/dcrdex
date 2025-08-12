@@ -991,15 +991,9 @@ func TestLimit(t *testing.T) {
 	oRig.eth.bal = reqFunds
 	ensureSuccess("well-funded account-based backend")
 
-	// Just enough for the order, but not enough because there are pending
-	// redeems in Swapper.
-	redeemCost := tRedeemSize * assetETH.MaxFeeRate
+	// Redeems don't get affected
 	oRig.matchNegotiator.redeems[assetETH.ID] = 1
-	oRig.eth.bal = reqFunds + redeemCost - 1
-	ensureErr("not enough for active redeems", sendLimit(), msgjson.FundingError)
-
-	// Enough for redeem too.
-	oRig.eth.bal = reqFunds + redeemCost
+	oRig.eth.bal = reqFunds
 	ensureSuccess("well-funded account-based backend with redeems")
 
 	// If we're buying, and the base asset is account-based, then it's the
@@ -1007,11 +1001,7 @@ func TestLimit(t *testing.T) {
 	limit.Side = msgjson.BuyOrderNum
 	// Start with no active redeems. 10 lots should be 10 redeems.
 	oRig.matchNegotiator.redeems[assetETH.ID] = 0
-	oRig.eth.bal = lots*redeemCost - 1
-	ensureErr("not enough to redeem", sendLimit(), msgjson.FundingError)
-
-	// Now with enough
-	oRig.eth.bal = lots * redeemCost
+	oRig.eth.bal = 0 // lots*redeemCost - 1
 	ensureSuccess("redeem to account-based")
 
 	// With funding from account based quote asset. Fail first.
@@ -1028,12 +1018,8 @@ func TestLimit(t *testing.T) {
 	limit.Side = msgjson.SellOrderNum
 	oRig.eth.bal = calc.RequiredOrderFunds(qty, 0, lots, tInitTxSize, tInitTxSize, assetETH.Asset.MaxFeeRate)
 
-	// Not enough to redeem.
-	redeemCost = tRedeemSize * assetETH.MaxFeeRate
-	oRig.polygon.bal = lots*redeemCost - 1
-	ensureErr("not enough to redeem account-based quote", sendLimit(), msgjson.FundingError)
-
-	oRig.polygon.bal = lots * redeemCost
+	// None needed to redeem.
+	oRig.polygon.bal = 0
 	ensureSuccess("enough to redeem account-based quote")
 }
 
@@ -1123,21 +1109,11 @@ func TestMarketStartProcessStop(t *testing.T) {
 	oRig.dcr.confsMinus2 = 0
 	oRig.dcr.invalidFeeRate = false
 
-	// Redeem to a quote asset.
+	// Redeem to a quote asset, no RedeemSig is an error
 	mkt.Quote = assetETH.ID
-	mkt.RedeemSig = &msgjson.RedeemSig{}
-	redeemCost := tRedeemSize * assetETH.MaxFeeRate
-	oRig.eth.bal = sellLots*redeemCost - 1
-	ensureErr("can't redeem to acct-based quote", sendMarket(), msgjson.FundingError)
-
-	// No RedeemSig is an error
 	mkt.RedeemSig = nil
 	ensureErr("no redeem sig", sendMarket(), msgjson.OrderParameterError)
 	mkt.RedeemSig = &msgjson.RedeemSig{}
-
-	// Now with enough
-	oRig.eth.bal = sellLots * redeemCost
-	ensureSuccess("redeem to acct-based quote")
 
 	// Now switch it to a buy order, and ensure it passes
 	// Clear the sends cache first.

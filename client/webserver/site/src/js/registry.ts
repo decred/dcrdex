@@ -669,6 +669,7 @@ export interface PreSwap {
 
 export interface PreRedeem {
   estimate: RedeemEstimate
+  userOpRequired: boolean
   options: OrderOption[]
 }
 
@@ -1243,6 +1244,8 @@ export interface WalletTransaction {
   recipient?: string
   bondInfo?: BondTxInfo
   additionalData: Record<string, string>
+  isUserOp: boolean
+  userOpTxID: string
 }
 
 export interface TxHistoryResult {

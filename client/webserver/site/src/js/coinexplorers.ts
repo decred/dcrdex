@@ -11,8 +11,13 @@ export const Simnet = 2
 const coinIDTakerFoundMakerRedemption = 'TakerFoundMakerRedemption:'
 
 /* ethBasedExplorerArg returns the explorer argument for ETH, ERC20 and EVM
-Compatible assets and whether the return value is an address. */
+   compatible assets, whether the return value is an address, and whether a
+   link should be returned. */
 function ethBasedExplorerArg (cid: string): [string, boolean] {
+  if (cid.startsWith('userOpHash')) {
+    const parts = cid.split(',')
+    return [parts[0].substring('userOpHash:'.length), false]
+  }
   if (cid.startsWith(coinIDTakerFoundMakerRedemption)) return [cid.substring(coinIDTakerFoundMakerRedemption.length), true]
   else if (cid.length === 42) return [cid, true]
   else return [cid, false]
@@ -120,12 +125,15 @@ export const CoinExplorers: Record<number, Record<number, (cid: string) => strin
   966004: polygonExplorers
 }
 
-export function formatCoinID (cid: string) {
+export function formatCoinID (cid: string) : string[] {
   if (cid.startsWith(coinIDTakerFoundMakerRedemption)) {
     const makerAddr = cid.substring(coinIDTakerFoundMakerRedemption.length)
-    return intl.prep(intl.ID_TAKER_FOUND_MAKER_REDEMPTION, { makerAddr: makerAddr })
+    return [intl.prep(intl.ID_TAKER_FOUND_MAKER_REDEMPTION, { makerAddr: makerAddr })]
   }
-  return cid
+  if (cid.startsWith('userOpHash:')) {
+    return cid.split(',')
+  }
+  return [cid]
 }
 
 /*

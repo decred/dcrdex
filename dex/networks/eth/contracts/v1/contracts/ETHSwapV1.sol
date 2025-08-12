@@ -2,6 +2,10 @@
 // pragma should be as specific as possible to allow easier validation.
 pragma solidity = 0.8.18;
 
+import "@account-abstraction/contracts/interfaces/IAccount.sol";
+import "@account-abstraction/contracts/core/EntryPoint.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+
 // ETHSwap creates a contract to be deployed on an ethereum network. After
 // deployed, it keeps a record of the state of a contract and enables
 // redemption and refund of the contract when conditions are met.
@@ -21,7 +25,7 @@ pragma solidity = 0.8.18;
 // This code should be verifiable as resulting in a certain on-chain contract
 // by compiling with the correct version of solidity and comparing the
 // resulting byte code to the data in the original transaction.
-contract ETHSwap {
+contract ETHSwap is IAccount {
     bytes4 private constant TRANSFER_FROM_SELECTOR = bytes4(keccak256("transferFrom(address,address,uint256)"));
     bytes4 private constant TRANSFER_SELECTOR = bytes4(keccak256("transfer(address,uint256)"));
     // Step is a type that hold's a contract's current step. Empty is the
@@ -37,6 +41,8 @@ contract ETHSwap {
     bytes32 constant RefundRecord = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
     bytes32 constant RefundRecordHash = 0xAF9613760F72635FBDB44A5A0A63C39F12AF30F950A6EE5C971BE188E89C4051;
 
+    address payable public entryPoint;
+
     // swaps is a map of contract hashes to the "swap record". The swap record
     // has the following interpretation.
     //   if (record == bytes32(0x00)): contract is uninitiated
@@ -46,6 +52,8 @@ contract ETHSwap {
     //   else if (record == RefundRecord): contract has been refunded
     //   else: invalid record. Should be impossible by construction
     mapping(bytes32 => bytes32) public swaps;
+
+    mapping(bytes32 => uint256) public redeemPrepayments;
 
     // Vector is the information necessary for initialization and redemption
     // or refund. The Vector itself is not stored on-chain. Instead, a key
@@ -61,7 +69,7 @@ contract ETHSwap {
 
     // contractKey generates a key hash which commits to the contract data. The
     // generated hash is used as a key in the swaps map.
-    function contractKey(address token, Vector calldata v) public pure returns (bytes32) {
+    function contractKey(address token, Vector memory v) public pure returns (bytes32) {
         return sha256(
             bytes.concat(
                 v.secretHash,
@@ -86,10 +94,9 @@ contract ETHSwap {
         return sha256(bytes.concat(secret)) == secretHash;
     }
 
-    // constructor is empty. This contract has no connection to the original
-    // sender after deployed. It can only be interacted with by users
-    // initiating, redeeming, and refunding swaps.
-    constructor() {}
+    constructor(address payable _entryPoint) {
+        entryPoint = _entryPoint;
+    }
 
     // senderIsOrigin ensures that this contract cannot be used by other
     // contracts, which reduces possible attack vectors.
@@ -99,7 +106,7 @@ contract ETHSwap {
     }
 
     // retrieveStatus retrieves the current swap record for the contract.
-    function retrieveStatus(address token, Vector calldata v)
+    function retrieveStatus(address token, Vector memory v)
         private view returns (bytes32, bytes32, uint256)
     {
         bytes32 k = contractKey(token, v);
@@ -254,8 +261,117 @@ contract ETHSwap {
         } else {
             bool success;
             bytes memory data;
-            (success, data) = token.call(abi.encodeWithSelector(TRANSFER_SELECTOR, msg.sender, v.value));
+            (success, data) = token.call(abi.encodeWithSelector(TRANSFER_SELECTOR, v.initiator, v.value));
             require(success && (data.length == 0 || abi.decode(data, (bool))), 'transfer failed');
         }
+    }
+
+    modifier senderIsEntryPoint() {
+        require(entryPoint == msg.sender, "sender != entryPoint");
+        _;
+    }
+
+    function _payPrefund(uint256 missingAccountFunds) internal {
+        if (missingAccountFunds != 0) {
+            (bool success, ) = payable(msg.sender).call{
+                value: missingAccountFunds,
+                gas: type(uint256).max
+            }("");
+            (success);
+            //ignore failure (its EntryPoint's job to verify, not account.)
+        }
+    }
+
+    // validateUserOp validates a user operation for redeeming swaps via account abstraction, 
+    // and transfers the amount required for gas fees to the entrypoint.
+    function validateUserOp(UserOperation calldata userOp, bytes32 userOpHash, uint256 missingAccountFunds)
+        external
+        senderIsEntryPoint()
+        returns (uint256 validationData) {
+
+        if (userOp.callData.length < 4) {
+            return 1;
+        }
+
+        // 0x919835a4 is the function selector for redeemAA.
+        if (bytes4(userOp.callData[0:4]) != bytes4(0x919835a4)) {
+            return 2;
+        }
+
+        (Redemption[] memory redemptions) = abi.decode(userOp.callData[4:], (Redemption[]));
+
+        address participant;
+        uint256 amountToRedeem;
+        for (uint i = 0; i < redemptions.length; i++) {
+            Redemption memory redemption = redemptions[i];
+            (, bytes32 record, uint256 blockNum) = retrieveStatus(address(0), redemption.v);
+            if (blockNum == 0 || secretValidates(record, redemption.v.secretHash)) {
+                return 3;
+            }
+            if (i == 0) {
+                participant = redemption.v.participant;
+                redeemPrepayments[redemption.v.secretHash] = missingAccountFunds;
+            } else if (redemption.v.participant != participant) {
+                return 4;
+            }
+            amountToRedeem += redemption.v.value;
+        }
+
+        if (missingAccountFunds > amountToRedeem) {
+            return 5;
+        }
+
+        if (participant != ECDSA.recover(userOpHash, userOp.signature)) {
+            return 6;
+        }
+
+        _payPrefund(missingAccountFunds);
+
+        return 0;
+    }
+
+    // redeemAA redeems multiple swaps via account abstraction. It verifies that:
+    // 1. All redemptions are for the same participant
+    // 2. Each swap exists and hasn't been redeemed yet
+    // 3. The provided secret matches the secret hash
+    // After validation, it records the redemption and transfers the funds minus fees
+    // to the participant.
+    function redeemAA(Redemption[] calldata redemptions)
+        public
+        senderIsEntryPoint() {
+
+        uint amountToRedeem = 0;
+        address recipient;
+
+        for (uint i = 0; i < redemptions.length; i++) {
+            Redemption calldata r = redemptions[i];
+
+            if (i == 0) {
+                recipient = r.v.participant;
+            } else {
+                require(r.v.participant == recipient, "bad participant");
+            }
+
+            (bytes32 k, bytes32 record, uint256 blockNum) = retrieveStatus(address(0), r.v);
+
+            // To be redeemable, the record needs to represent a valid block
+            // number.
+            require(blockNum > 0 && blockNum < block.number, "unfilled swap");
+
+            // Can't already be redeemed.
+            require(!secretValidates(record, r.v.secretHash), "already redeemed");
+
+            // Are they presenting the correct secret?
+            require(secretValidates(r.secret, r.v.secretHash), "invalid secret");
+
+            swaps[k] = r.secret;
+            amountToRedeem += r.v.value;
+        }
+
+        uint256 fees = redeemPrepayments[redemptions[0].v.secretHash];
+        delete redeemPrepayments[redemptions[0].v.secretHash];
+
+        (bool ok, ) = payable(recipient).call{value: amountToRedeem - fees}("");
+        require(ok == true, "transfer failed");
     }
 }

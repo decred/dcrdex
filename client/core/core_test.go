@@ -1161,7 +1161,7 @@ func newTAccountLocker(assetID uint32) (*xcWallet, *TAccountLocker) {
 	return xcWallet, accountLocker
 }
 
-func (w *TAccountLocker) ReserveNRedemptions(n uint64, ver uint32, maxFeeRate uint64) (uint64, error) {
+func (w *TAccountLocker) ReserveNRedemptions(n uint64, ver uint32, maxFeeRate uint64, lotSize uint64) (uint64, error) {
 	return w.reserveNRedemptions, w.reserveNRedemptionsErr
 }
 

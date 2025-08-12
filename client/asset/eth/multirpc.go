@@ -33,6 +33,7 @@ import (
 	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/eth/ethconfig"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/params"
@@ -1336,8 +1337,12 @@ func (m *multiRPCClient) sendTransaction(ctx context.Context, txOpts *bind.Trans
 	return tx, m.sendSignedTransaction(ctx, tx, filts...)
 }
 
+func (m *multiRPCClient) signHash(hash []byte) (sig, pubKey []byte, err error) {
+	return signHash(m.creds, hash)
+}
+
 func (m *multiRPCClient) signData(data []byte) (sig, pubKey []byte, err error) {
-	return signData(m.creds, data)
+	return signHash(m.creds, crypto.Keccak256(data))
 }
 
 // syncProgress: Current and Highest blocks are not very useful for the caller,

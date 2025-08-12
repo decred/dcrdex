@@ -205,7 +205,7 @@ func (contractDeployer) DeployContract(
 			}
 		case 1:
 			deployer = func(txOpts *bind.TransactOpts, cb bind.ContractBackend) (common.Address, *types.Transaction, error) {
-				contractAddr, tx, _, err := ethv1.DeployETHSwap(txOpts, cb)
+				contractAddr, tx, _, err := ethv1.DeployETHSwap(txOpts, cb, common.Address{} /* TODO: populate entrypoint */)
 				return contractAddr, tx, err
 			}
 		}
