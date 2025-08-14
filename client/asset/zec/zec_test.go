@@ -1411,19 +1411,16 @@ func TestConfirmRedemption(t *testing.T) {
 		Expiration: lockTime,
 	}
 
-	redemption := &asset.Redemption{
-		Spends: ci,
-		Secret: secret,
-	}
+	confirmTx := asset.NewRedeemConfTx(ci, secret)
 
 	walletTx := &btc.GetTransactionResult{
 		Confirmations: 1,
 	}
 
 	cl.queueResponse("gettransaction", walletTx)
-	st, err := w.ConfirmRedemption(coinID, redemption, 0)
+	st, err := w.ConfirmTransaction(coinID, confirmTx, 0)
 	if err != nil {
-		t.Fatalf("Initial ConfirmRedemption error: %v", err)
+		t.Fatalf("Initial ConfirmTransaction error: %v", err)
 	}
 	if st.Confs != walletTx.Confirmations {
 		t.Fatalf("wrongs confs, %d != %d", st.Confs, walletTx.Confirmations)
@@ -1431,19 +1428,19 @@ func TestConfirmRedemption(t *testing.T) {
 
 	cl.queueResponse("gettransaction", tErr)
 	cl.queueResponse("gettxout", tErr)
-	_, err = w.ConfirmRedemption(coinID, redemption, 0)
+	_, err = w.ConfirmTransaction(coinID, confirmTx, 0)
 	if !errorHasCode(err, errNoTx) {
 		t.Fatalf("wrong error for gettxout error: %v", err)
 	}
 
 	cl.queueResponse("gettransaction", tErr)
 	cl.queueResponse("gettxout", nil)
-	st, err = w.ConfirmRedemption(coinID, redemption, 0)
+	st, err = w.ConfirmTransaction(coinID, confirmTx, 0)
 	if err != nil {
-		t.Fatalf("ConfirmRedemption error for spent redemption: %v", err)
+		t.Fatalf("ConfirmTransaction error for spent redemption: %v", err)
 	}
-	if st.Confs != requiredRedeemConfirms {
-		t.Fatalf("wrong confs for spent redemption: %d != %d", st.Confs, requiredRedeemConfirms)
+	if st.Confs != requiredConfTxConfirms {
+		t.Fatalf("wrong confs for spent redemption: %d != %d", st.Confs, requiredConfTxConfirms)
 	}
 
 	// Re-submission path is tested by TestRedemption
