@@ -536,3 +536,19 @@ func (b *acrossBridge) verifyBridgeCompletion(ctx context.Context, data []byte) 
 func (b *acrossBridge) supportedDestinations() []uint32 {
 	return b.supportedDests
 }
+
+func (b *acrossBridge) requiresFollowUpCompletion() bool {
+	return false
+}
+
+func (b *acrossBridge) getFollowUpCompletionData(ctx context.Context, completionTxID string) (required bool, data []byte, err error) {
+	panic("not implemented")
+}
+
+func (b *acrossBridge) completeFollowUpBridge(txOpts *bind.TransactOpts, data []byte) (tx *types.Transaction, err error) {
+	return nil, fmt.Errorf("no follow-up completion is required for across protocol")
+}
+
+func (b *acrossBridge) followUpCompleteBridgeGas() uint64 {
+	return 0
+}

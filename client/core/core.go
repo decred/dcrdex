@@ -9649,7 +9649,7 @@ func (c *Core) handleBridgeReadyToComplete(n *asset.BridgeReadyToCompleteNote) {
 
 	bridgeTx := &asset.BridgeCounterpartTx{
 		AssetID: n.AssetID,
-		ID:      n.InitiateBridgeTxID,
+		IDs:     []string{n.InitiateBridgeTxID},
 	}
 
 	err = destWallet.CompleteBridge(c.ctx, bridgeTx, n.Amount, n.Data)
@@ -9665,7 +9665,7 @@ func (c *Core) handleBridgeCompleted(n *asset.BridgeCompletedNote) {
 		return
 	}
 
-	sourceWallet.MarkBridgeComplete(n.InitiationTxID, n.CompletionTxID)
+	sourceWallet.MarkBridgeComplete(n.InitiationTxID, n.CompletionTxIDs, n.Complete)
 }
 
 // handleWalletNotification processes an asynchronous wallet notification.

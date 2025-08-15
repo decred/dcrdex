@@ -752,14 +752,14 @@ func (w *xcWallet) CompleteBridge(ctx context.Context, bridgeTx *asset.BridgeCou
 
 // MarkBridgeComplete marks the bridge as complete on the source chain if the
 // wallet is a Bridger.
-func (w *xcWallet) MarkBridgeComplete(initiationTxID string, completionTxID string) {
+func (w *xcWallet) MarkBridgeComplete(initiationTxID string, completionTxIDs []string, complete bool) {
 	bridger, ok := w.Wallet.(asset.Bridger)
 	if !ok {
 		w.log.Errorf("MarkBridgeComplete: %s wallet is not a Bridger", unbip(w.AssetID))
 		return
 	}
 
-	bridger.MarkBridgeComplete(initiationTxID, completionTxID)
+	bridger.MarkBridgeComplete(initiationTxID, completionTxIDs, complete)
 }
 
 // PendingBridges returns the pending bridges originating on the chain of the
