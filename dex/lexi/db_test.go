@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -452,9 +453,7 @@ func TestNotIndexed(t *testing.T) {
 	if count != 5 {
 		t.Fatalf("Expected 5 indexed values, got %d", count)
 	}
-	sort.Slice(foundValues, func(i, j int) bool {
-		return foundValues[i] < foundValues[j]
-	})
+	slices.Sort(foundValues)
 	if !reflect.DeepEqual(foundValues, expectedValues) {
 		t.Fatalf("Expected values %v, got %v", expectedValues, foundValues)
 	}
@@ -504,9 +503,7 @@ func TestNotIndexed(t *testing.T) {
 	if count != 4 {
 		t.Fatalf("Expected 4 indexed values after deletion, got %d", count)
 	}
-	sort.Slice(foundValues, func(i, j int) bool {
-		return foundValues[i] < foundValues[j]
-	})
+	slices.Sort(foundValues)
 	if !reflect.DeepEqual(foundValues, expectedValues) {
 		t.Fatalf("Expected values %v after deletion, got %v", expectedValues, foundValues)
 	}

@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
-	"sort"
+	"slices"
 
 	"decred.org/dcrdex/dex"
 	"github.com/btcsuite/btcd/btcjson"
@@ -542,7 +542,7 @@ out:
 		rates[i] = r
 	}
 
-	sort.Slice(rates, func(i, j int) bool { return rates[i] < rates[j] })
+	slices.Sort(rates)
 	return rates[len(rates)/2], nil
 }
 
