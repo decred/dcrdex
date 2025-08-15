@@ -13,6 +13,8 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/server/account"
+	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/txscript"
@@ -84,6 +86,25 @@ const (
 	//   - varint 97 => OP_PUSHDATA1(0x4c) + 0x61
 	//   - 97 bytes contract
 	RefundSigScriptSize = 1 + DERSigLength + 1 + 33 + 1 + 2 + 97
+
+	// PrivateRefundWitnessSize is the size of the witness for a private refund
+	// transaction.
+	// It is calculated as:
+	//   - OP_DATA_3
+	//   - OP_DATA_73
+	//   - 64 bytes schnorr signature
+	//   - OP_DATA_41
+	//   - 41 bytes refund script
+	//   - OP_DATA_33
+	//   - 33 control block for tapscript tree with one level
+	PrivateRefundWitnessSize = 1 + 1 + 64 + 1 + 39 + 1 + 33
+
+	// PrivateRedeemWitnessSize is the size of the witness for a private redeem
+	// It is calculated as:
+	//   - OP_DATA_1
+	//   - OP_DATA_64
+	//   - 64 bytes schnorr signature
+	PrivateRedeemWitnessSize = 1 + 1 + 64
 
 	// Overhead for a wire.TxIn. See wire.TxIn.SerializeSize.
 	// hash 32 bytes + index 4 bytes + sequence 4 bytes.
@@ -1107,4 +1128,25 @@ func ExtractScriptHash(script []byte) []byte {
 		return script[2:34]
 	}
 	return nil
+}
+
+// PrivateSwapRefundScript is the script placed into a leaf of the taproot
+// tree when creating a private swap that allows the contract to be refunded
+// by the creator after locktime has expired.
+func PrivateSwapRefundScript(pubKey *btcec.PublicKey, lockTime int64) ([]byte, error) {
+	return txscript.NewScriptBuilder().
+		AddInt64(lockTime).
+		AddOp(txscript.OP_CHECKLOCKTIMEVERIFY).
+		AddOp(txscript.OP_DROP).
+		AddData(schnorr.SerializePubKey(pubKey)).
+		AddOp(txscript.OP_CHECKSIG).
+		Script()
+}
+
+// PayToTaprootScript returns the PKScript for a pay-to-taproot output.
+func PayToTaprootScript(taprootKey *btcec.PublicKey) ([]byte, error) {
+	return txscript.NewScriptBuilder().
+		AddOp(txscript.OP_1).
+		AddData(schnorr.SerializePubKey(taprootKey)).
+		Script()
 }

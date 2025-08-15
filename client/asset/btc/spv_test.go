@@ -168,7 +168,8 @@ func (c *tBtcWallet) PrivKeyForAddress(a btcutil.Address) (*btcec.PrivateKey, er
 	if c.privKeyForAddrErr != nil {
 		return nil, c.privKeyForAddrErr
 	}
-	return c.privKeyForAddr.PrivKey, nil
+	privKeyCopy, _ := btcec.PrivKeyFromBytes(c.privKeyForAddr.PrivKey.Serialize())
+	return privKeyCopy, nil
 }
 
 func (c *tBtcWallet) Database() walletdb.DB {
