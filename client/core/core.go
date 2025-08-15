@@ -10633,7 +10633,14 @@ func (c *Core) fiatConversions() map[uint32]float64 {
 		var rateSum float64
 		var sources int
 		for _, source := range c.fiatSources() {
-			rateInfo := source.assetRate(assetID)
+			// Adjust a couple custom bip ids to get the eth equivalent.
+			getAssetID := assetID
+			switch assetID {
+			case 8453:
+				// base -> eth
+				getAssetID = 60
+			}
+			rateInfo := source.assetRate(getAssetID)
 			if rateInfo != nil && time.Since(rateInfo.lastUpdate) < fiatRateDataExpiry && rateInfo.rate > 0 {
 				sources++
 				rateSum += rateInfo.rate
