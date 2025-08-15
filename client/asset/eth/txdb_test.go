@@ -322,7 +322,8 @@ func TestTxDB_GetBridges(t *testing.T) {
 				ID:   "0x1111111111111111111111111111111111111111111111111111111111111111",
 				Type: asset.InitiateBridge,
 				BridgeCounterpartTx: &asset.BridgeCounterpartTx{
-					ID: "0x1111111111111111111111111111111111111111111111111111111111111112",
+					IDs:      []string{"0x1111111111111111111111111111111111111111111111111111111111111112"},
+					Complete: true,
 				},
 			},
 			Nonce:          big.NewInt(1),
@@ -334,7 +335,8 @@ func TestTxDB_GetBridges(t *testing.T) {
 				ID:   "0x2222222222222222222222222222222222222222222222222222222222222222",
 				Type: asset.InitiateBridge,
 				BridgeCounterpartTx: &asset.BridgeCounterpartTx{
-					ID: "0x2222222222222222222222222222222222222222222222222222222222222223",
+					IDs:      []string{"0x2222222222222222222222222222222222222222222222222222222222222223"},
+					Complete: true,
 				},
 			},
 			Nonce:          big.NewInt(2),
@@ -343,9 +345,11 @@ func TestTxDB_GetBridges(t *testing.T) {
 		// Pending bridge, older
 		{
 			WalletTransaction: &asset.WalletTransaction{
-				ID:                  "0x3333333333333333333333333333333333333333333333333333333333333333",
-				Type:                asset.InitiateBridge,
-				BridgeCounterpartTx: nil,
+				ID:   "0x3333333333333333333333333333333333333333333333333333333333333333",
+				Type: asset.InitiateBridge,
+				BridgeCounterpartTx: &asset.BridgeCounterpartTx{
+					Complete: false,
+				},
 			},
 			Nonce:          big.NewInt(3),
 			SubmissionTime: uint64(now.Add(-18 * time.Hour).Unix()),
@@ -353,9 +357,11 @@ func TestTxDB_GetBridges(t *testing.T) {
 		// Pending bridge, newer
 		{
 			WalletTransaction: &asset.WalletTransaction{
-				ID:                  "0x4444444444444444444444444444444444444444444444444444444444444444",
-				Type:                asset.InitiateBridge,
-				BridgeCounterpartTx: nil,
+				ID:   "0x4444444444444444444444444444444444444444444444444444444444444444",
+				Type: asset.InitiateBridge,
+				BridgeCounterpartTx: &asset.BridgeCounterpartTx{
+					Complete: false,
+				},
 			},
 			Nonce:          big.NewInt(4),
 			SubmissionTime: uint64(now.Add(-10 * time.Hour).Unix()),
@@ -490,7 +496,7 @@ func TestTxDB_GetBridges(t *testing.T) {
 	})
 }
 
-func TestTxDB_GetBridgeMint(t *testing.T) {
+func TestTxDB_GetBridgeCompletions(t *testing.T) {
 	tempDir := t.TempDir()
 	db, err := NewTxDB(tempDir, tLogger, BipID)
 	if err != nil {
@@ -500,74 +506,85 @@ func TestTxDB_GetBridgeMint(t *testing.T) {
 
 	burnTxID := "0x1111111111111111111111111111111111111111111111111111111111111111"
 
-	// Create a mint transaction that references the burn transaction
-	mintTx := &extendedWalletTx{
+	// Create first mint transaction that references the burn transaction
+	mintTx1 := &extendedWalletTx{
 		WalletTransaction: &asset.WalletTransaction{
 			ID:   "0x2222222222222222222222222222222222222222222222222222222222222222",
 			Type: asset.CompleteBridge,
 			BridgeCounterpartTx: &asset.BridgeCounterpartTx{
-				ID: burnTxID,
+				IDs: []string{burnTxID},
 			},
 		},
 		Nonce:          big.NewInt(2),
 		SubmissionTime: uint64(time.Now().Add(-20 * time.Hour).Unix()),
 	}
 
-	// Create another mint transaction that references a different burn ID
-	anotherMintTx := &extendedWalletTx{
+	// Create second mint transaction that references the same burn ID
+	mintTx2 := &extendedWalletTx{
 		WalletTransaction: &asset.WalletTransaction{
 			ID:   "0x3333333333333333333333333333333333333333333333333333333333333333",
 			Type: asset.CompleteBridge,
 			BridgeCounterpartTx: &asset.BridgeCounterpartTx{
-				ID: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				IDs: []string{burnTxID},
 			},
 		},
 		Nonce:          big.NewInt(3),
 		SubmissionTime: uint64(time.Now().Add(-18 * time.Hour).Unix()),
 	}
 
-	// Create a regular transaction (non-bridge)
-	regularTx := &extendedWalletTx{
-		WalletTransaction: &asset.WalletTransaction{
-			ID:   "0x4444444444444444444444444444444444444444444444444444444444444444",
-			Type: asset.Send,
-		},
-		Nonce:          big.NewInt(4),
-		SubmissionTime: uint64(time.Now().Add(-16 * time.Hour).Unix()),
+	// Store first completion and verify single result
+	if err := db.storeTx(mintTx1); err != nil {
+		t.Fatalf("error storing first mint tx: %v", err)
 	}
 
-	// Store all transactions
-	if err := db.storeTx(mintTx); err != nil {
-		t.Fatalf("error storing mint tx: %v", err)
+	result, err := db.getBridgeCompletions(burnTxID)
+	if err != nil {
+		t.Fatalf("getBridgeCompletions failed: %v", err)
 	}
-	if err := db.storeTx(anotherMintTx); err != nil {
-		t.Fatalf("error storing another mint tx: %v", err)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 completion transaction, got %d", len(result))
 	}
-	if err := db.storeTx(regularTx); err != nil {
-		t.Fatalf("error storing regular tx: %v", err)
+	if result[0].ID != mintTx1.ID {
+		t.Fatalf("expected first mint tx %s, got %s", mintTx1.ID, result[0].ID)
 	}
 
-	t.Run("get completion transaction with valid burn ID", func(t *testing.T) {
-		result, err := db.getBridgeCompletion(burnTxID)
-		if err != nil {
-			t.Fatalf("getBridgeCompletion failed: %v", err)
-		}
-		if result == nil {
-			t.Fatalf("expected mint transaction, got nil")
-		}
-		if result.ID != mintTx.ID {
-			t.Fatalf("expected mint tx %s, got %s", mintTx.ID, result.ID)
-		}
-	})
+	// Store second completion and verify both results in correct order
+	if err := db.storeTx(mintTx2); err != nil {
+		t.Fatalf("error storing second mint tx: %v", err)
+	}
 
-	t.Run("get completion transaction with unknown burn ID", func(t *testing.T) {
-		unknownID := "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
-		result, err := db.getBridgeCompletion(unknownID)
-		if err != nil {
-			t.Fatalf("getBridgeCompletion should return nil, not error for unknown ID: %v", err)
-		}
-		if result != nil {
-			t.Fatalf("expected nil result for unknown burn ID, got %+v", result)
-		}
-	})
+	result, err = db.getBridgeCompletions(burnTxID)
+	if err != nil {
+		t.Fatalf("getBridgeCompletions failed: %v", err)
+	}
+	if len(result) != 2 {
+		t.Fatalf("expected 2 completion transactions, got %d", len(result))
+	}
+	// Should be in order they were stored
+	if result[0].ID != mintTx1.ID {
+		t.Fatalf("expected first result to be %s, got %s", mintTx1.ID, result[0].ID)
+	}
+	if result[1].ID != mintTx2.ID {
+		t.Fatalf("expected second result to be %s, got %s", mintTx2.ID, result[1].ID)
+	}
+
+	// Store duplicate and verify no change
+	if err := db.storeTx(mintTx1); err != nil {
+		t.Fatalf("error storing duplicate mint tx: %v", err)
+	}
+
+	result, err = db.getBridgeCompletions(burnTxID)
+	if err != nil {
+		t.Fatalf("getBridgeCompletions failed after duplicate: %v", err)
+	}
+	if len(result) != 2 {
+		t.Fatalf("expected 2 completion transactions after duplicate, got %d", len(result))
+	}
+	// Should still be in same order
+	if result[0].ID != mintTx1.ID {
+		t.Fatalf("expected first result to be %s after duplicate, got %s", mintTx1.ID, result[0].ID)
+	}
+	if result[1].ID != mintTx2.ID {
+		t.Fatalf("expected second result to be %s after duplicate, got %s", mintTx2.ID, result[1].ID)
+	}
 }
