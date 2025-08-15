@@ -86,13 +86,13 @@ type clientCore interface {
 	MultiTrade(pw []byte, form *core.MultiTradeForm) []*core.MultiTradeResult
 	TxHistory(assetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error)
 	WalletTransaction(assetID uint32, txID string) (*asset.WalletTransaction, error)
-	BridgeContractApprovalStatus(assetID uint32) (asset.ApprovalStatus, error)
-	ApproveBridgeContract(assetID uint32) (string, error)
-	UnapproveBridgeContract(assetID uint32) (string, error)
-	Bridge(fromAssetID, toAssetID uint32, amt uint64) (txID string, err error)
+	BridgeContractApprovalStatus(assetID uint32, bridgeName string) (asset.ApprovalStatus, error)
+	ApproveBridgeContract(assetID uint32, bridgeName string) (string, error)
+	UnapproveBridgeContract(assetID uint32, bridgeName string) (string, error)
+	Bridge(fromAssetID, toAssetID uint32, amt uint64, bridgeName string) (txID string, err error)
 	PendingBridges(assetID uint32) ([]*asset.WalletTransaction, error)
 	BridgeHistory(assetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error)
-	SupportedBridgeDestinations(assetID uint32) ([]uint32, error)
+	SupportedBridgeDestinations(assetID uint32) (map[string][]uint32, error)
 
 	// These are core's ticket buying interface.
 	StakeStatus(assetID uint32) (*asset.TicketStakingStatus, error)

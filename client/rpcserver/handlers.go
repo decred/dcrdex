@@ -1088,8 +1088,8 @@ func handleWithdrawBchSpv(s *RPCServer, params *RawParams) *msgjson.ResponsePayl
 }
 
 func handleCheckBridgeApproval(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 1 {
-		return usage(checkBridgeApprovalRoute, fmt.Errorf("expected 1 args, got %d", len(params.Args)))
+	if len(params.Args) != 2 {
+		return usage(checkBridgeApprovalRoute, fmt.Errorf("expected 2 args, got %d", len(params.Args)))
 	}
 
 	i, err := strconv.ParseUint(params.Args[0], 10, 32)
@@ -1098,8 +1098,9 @@ func handleCheckBridgeApproval(s *RPCServer, params *RawParams) *msgjson.Respons
 	}
 
 	assetID := uint32(i)
+	bridgeName := params.Args[1]
 
-	approvalStatus, err := s.core.BridgeContractApprovalStatus(assetID)
+	approvalStatus, err := s.core.BridgeContractApprovalStatus(assetID, bridgeName)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCBridgeError, "unable to check bridge approval: %v", err)
 		return createResponse(checkBridgeApprovalRoute, nil, resErr)
@@ -1109,8 +1110,8 @@ func handleCheckBridgeApproval(s *RPCServer, params *RawParams) *msgjson.Respons
 }
 
 func handleApproveBridge(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 2 {
-		return usage(approveBridgeContractRoute, fmt.Errorf("expected 2 args, got %d", len(params.Args)))
+	if len(params.Args) != 3 {
+		return usage(approveBridgeContractRoute, fmt.Errorf("expected 3 args, got %d", len(params.Args)))
 	}
 
 	i, err := strconv.ParseUint(params.Args[0], 10, 32)
@@ -1119,17 +1120,18 @@ func handleApproveBridge(s *RPCServer, params *RawParams) *msgjson.ResponsePaylo
 	}
 
 	assetID := uint32(i)
+	bridgeName := params.Args[1]
 
-	approve, err := strconv.ParseBool(params.Args[1])
+	approve, err := strconv.ParseBool(params.Args[2])
 	if err != nil {
 		return usage(approveBridgeContractRoute, fmt.Errorf("error parsing approve: %v", err))
 	}
 
 	var txID string
 	if approve {
-		txID, err = s.core.ApproveBridgeContract(assetID)
+		txID, err = s.core.ApproveBridgeContract(assetID, bridgeName)
 	} else {
-		txID, err = s.core.UnapproveBridgeContract(assetID)
+		txID, err = s.core.UnapproveBridgeContract(assetID, bridgeName)
 	}
 
 	if err != nil {
@@ -1141,8 +1143,8 @@ func handleApproveBridge(s *RPCServer, params *RawParams) *msgjson.ResponsePaylo
 }
 
 func handleBridge(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 3 {
-		return usage(bridgeRoute, fmt.Errorf("expected 3 args, got %d", len(params.Args)))
+	if len(params.Args) != 4 {
+		return usage(bridgeRoute, fmt.Errorf("expected 4 args, got %d", len(params.Args)))
 	}
 
 	fromAssetID, err := strconv.ParseUint(params.Args[0], 10, 32)
@@ -1160,13 +1162,15 @@ func handleBridge(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		return usage(bridgeRoute, fmt.Errorf("error parsing value: %v", err))
 	}
 
+	bridgeName := params.Args[3]
+
 	unitInfo, err := asset.UnitInfo(uint32(fromAssetID))
 	if err != nil {
 		return usage(bridgeRoute, fmt.Errorf("error getting unit info: %v", err))
 	}
 	atomValue := uint64(value * float64(unitInfo.Conventional.ConversionFactor))
 
-	txID, err := s.core.Bridge(uint32(fromAssetID), uint32(toAssetID), atomValue)
+	txID, err := s.core.Bridge(uint32(fromAssetID), uint32(toAssetID), atomValue, bridgeName)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCBridgeError, "unable to initiate bridge: %v", err)
 		return createResponse(bridgeRoute, nil, resErr)
@@ -1219,19 +1223,23 @@ func handleSupportedBridges(s *RPCServer, params *RawParams) *msgjson.ResponsePa
 		return usage(supportedBridgesRoute, fmt.Errorf("error parsing assetID: %v", err))
 	}
 
-	destAssetIDs, err := s.core.SupportedBridgeDestinations(uint32(assetID))
+	bridgeDestinations, err := s.core.SupportedBridgeDestinations(uint32(assetID))
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCBridgeError, "unable to get supported bridge destinations: %v", err)
 		return createResponse(supportedBridgesRoute, nil, resErr)
 	}
 
-	// Convert asset IDs to symbols
-	symbols := make([]string, len(destAssetIDs))
-	for i, destID := range destAssetIDs {
-		symbols[i] = dex.BipIDSymbol(destID)
+	// Convert asset IDs to symbols for each bridge
+	result := make(map[string][]string)
+	for bridgeName, destAssetIDs := range bridgeDestinations {
+		symbols := make([]string, len(destAssetIDs))
+		for i, destID := range destAssetIDs {
+			symbols[i] = dex.BipIDSymbol(destID)
+		}
+		result[bridgeName] = symbols
 	}
 
-	return createResponse(supportedBridgesRoute, symbols, nil)
+	return createResponse(supportedBridgesRoute, result, nil)
 }
 
 // format concatenates thing and tail. If thing is empty, returns an empty
@@ -2005,24 +2013,27 @@ an spv wallet and enables options to view and set the vsp.
 		  recipient (string): The Bitcoin Cash address to withdraw the funds to`,
 	},
 	bridgeRoute: {
-		argsShort:  `fromAssetID toAssetID value`,
+		argsShort:  `fromAssetID toAssetID value bridgeName`,
 		cmdSummary: "Bridge tokens from one chain to another",
 		argsLong: `Args:
 		fromAssetID (int): The asset's BIP-44 registered coin index on the "from" chain.
 		toAssetID (int): The asset's BIP-44 registered coin index on the "to" chain.
-		value (int): The amount of tokens to bridge.`,
+		value (int): The amount of tokens to bridge.
+		bridgeName (string): The name of the bridge to use.`,
 	},
 	checkBridgeApprovalRoute: {
-		argsShort:  `assetID`,
+		argsShort:  `assetID bridgeName`,
 		cmdSummary: "Check if the bridge contract is approved.",
 		argsLong: `Args:
-		assetID (int): The BIP-44 registered coin index of the asset from where the bridge will be initiated.`,
+		assetID (int): The BIP-44 registered coin index of the asset from where the bridge will be initiated.
+		bridgeName (string): The name of the bridge to check.`,
 	},
 	approveBridgeContractRoute: {
-		argsShort:  `assetID approve`,
+		argsShort:  `assetID bridgeName approve`,
 		cmdSummary: "Approve the bridge contract.",
 		argsLong: `Args:
 		assetID (int): The asset's BIP-44 registered coin index on the "from" chain.
+		bridgeName (string): The name of the bridge to approve/unapprove.
 		approve (bool): True to approve, false to unapprove.`,
 	},
 	pendingBridgesRoute: {

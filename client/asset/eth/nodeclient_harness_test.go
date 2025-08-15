@@ -683,7 +683,7 @@ func setupWallet(walletDir, seed string, providers []string, net dex.Network) (*
 		return nil, err
 	}
 
-	return wallet.(*ETHBridgeWallet).ETHWallet, nil
+	return wallet.(*ETHWallet), nil
 }
 
 func prepareTokenClients(t *testing.T) {

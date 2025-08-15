@@ -22,21 +22,21 @@ import (
 )
 
 var (
-	chainSuffixToID = map[dex.Network]map[string]uint64{
+	chainAssetIDToAcrossChainID = map[dex.Network]map[uint32]uint64{
 		dex.Mainnet: {
-			"eth":     1,
-			"polygon": 137,
+			ethID:     1,
+			polygonID: 137,
 		},
 		dex.Testnet: {
-			"eth":     11155111,
-			"polygon": 80002,
+			ethID:     11155111,
+			polygonID: 80002,
 		},
 	}
 
 	// Reverse of chainSuffixToID. Populated in init().
-	idToChainSuffix = map[dex.Network]map[uint64]string{
-		dex.Mainnet: make(map[uint64]string),
-		dex.Testnet: make(map[uint64]string),
+	idToChainAssetID = map[dex.Network]map[uint64]uint32{
+		dex.Mainnet: make(map[uint64]uint32),
+		dex.Testnet: make(map[uint64]uint32),
 	}
 
 	acrossSpokePoolAddrs = map[dex.Network]map[uint64]common.Address{
@@ -66,9 +66,9 @@ var (
 )
 
 func init() {
-	for net, suffixToID := range chainSuffixToID {
-		for suffix, id := range suffixToID {
-			idToChainSuffix[net][id] = suffix
+	for net, chainAssetIDToAcrossChainID := range chainAssetIDToAcrossChainID {
+		for chainAssetID, acrossChainID := range chainAssetIDToAcrossChainID {
+			idToChainAssetID[net][acrossChainID] = chainAssetID
 		}
 	}
 }
@@ -104,7 +104,12 @@ func assetIDToAcrossAsset(net dex.Network, assetID uint32) *acrossAsset {
 	assetName := parts[0]
 	chainName := parts[len(parts)-1]
 
-	chainID, found := chainSuffixToID[net][chainName]
+	chainAssetID, found := dex.BipSymbolID(chainName)
+	if !found {
+		return nil
+	}
+
+	chainID, found := chainAssetIDToAcrossChainID[net][chainAssetID]
 	if !found {
 		return nil
 	}
@@ -130,13 +135,13 @@ func assetIDToAcrossAsset(net dex.Network, assetID uint32) *acrossAsset {
 }
 
 func acrossAssetToAssetID(net dex.Network, symbol string, chainID uint64) (uint32, bool) {
-	chainSymbol := idToChainSuffix[net][chainID]
-	if chainSymbol == "" {
+	chainAssetID, found := idToChainAssetID[net][chainID]
+	if !found {
 		return 0, false
 	}
 
+	chainSymbol := dex.BipIDSymbol(chainAssetID)
 	assetSymbol := strings.ToLower(symbol)
-
 	fullSymbol := assetSymbol
 	if chainSymbol != assetSymbol {
 		fullSymbol = fmt.Sprintf("%s.%s", assetSymbol, chainSymbol)
@@ -226,64 +231,26 @@ func acrossSupportedDestinations(ctx context.Context, assetID uint32, net dex.Ne
 	return destinations, nil
 }
 
-func isAcrossBridgeSupported(ctx context.Context, assetID uint32, net dex.Network, log dex.Logger) bool {
-	res, err := getAcrossAvailableRoutes(ctx, net)
-	if err != nil {
-		log.Errorf("Across bridge: failed to fetch available routes: %v", err)
-		return false
-	}
-
-	originAsset := assetIDToAcrossAsset(net, assetID)
-	if originAsset == nil {
-		return false
-	}
-
-	for _, route := range res {
-		if originAsset.chainID != uint64(route.OriginChainID) || originAsset.symbol != route.OriginTokenSymbol {
-			continue
-		}
-
-		if common.HexToAddress(route.OriginToken) != originAsset.address {
-			log.Errorf("token info mismatch for asset %d: %s != %s", assetID, route.OriginToken, originAsset.address.Hex())
-			return false
-		}
-
-		return true
-	}
-
-	return false
-}
-
 // acrossBridge implements the bridge interface for the Across protocol.
 type acrossBridge struct {
-	cb             bind.ContractBackend
-	spokePool      *across.SpokePool
-	spokePoolAddr  common.Address
-	tokenAddr      common.Address
-	tokenContract  *erc20.IERC20
-	isNative       bool
-	log            dex.Logger
-	assetID        uint32
-	net            dex.Network
-	chainID        uint64
-	addr           common.Address
-	node           ethFetcher
-	apiBaseURL     string
-	supportedDests []uint32
+	cb            bind.ContractBackend
+	spokePool     *across.SpokePool
+	spokePoolAddr common.Address
+	log           dex.Logger
+	net           dex.Network
+	chainAssetID  uint32
+	chainID       uint64
+	addr          common.Address
+	node          ethFetcher
+	apiBaseURL    string
 }
 
 var _ bridge = (*acrossBridge)(nil)
 
-func newAcrossBridge(ctx context.Context, cb bind.ContractBackend, node ethFetcher, assetID uint32, net dex.Network, walletAddr, tokenAddr common.Address, log dex.Logger) (*acrossBridge, error) {
-	asset := assetIDToAcrossAsset(net, assetID)
-	if asset == nil {
-		return nil, fmt.Errorf("unknown asset %d", assetID)
-	}
-	chainID := asset.chainID
-
-	supportedDestinations, err := acrossSupportedDestinations(ctx, assetID, net, log)
-	if err != nil {
-		return nil, err
+func newAcrossBridge(ctx context.Context, cb bind.ContractBackend, node ethFetcher, chainAssetID uint32, net dex.Network, walletAddr common.Address, log dex.Logger) (*acrossBridge, error) {
+	chainID, found := chainAssetIDToAcrossChainID[net][chainAssetID]
+	if !found {
+		return nil, fmt.Errorf("unknown chain asset ID %d", chainAssetID)
 	}
 
 	spokePoolAddr, err := getSpokePoolAddr(net, chainID)
@@ -295,71 +262,74 @@ func newAcrossBridge(ctx context.Context, cb bind.ContractBackend, node ethFetch
 		return nil, err
 	}
 
-	isNative := tokenAddr == common.Address{}
-	if isNative {
-		tokenAddr = chainIDToNativeTokenAddr[net][chainID]
-		if tokenAddr == (common.Address{}) {
-			return nil, fmt.Errorf("no native token address for chain %d", chainID)
-		}
-	}
-
-	var tokenContract *erc20.IERC20
-	if !isNative {
-		tokenContract, err = erc20.NewIERC20(tokenAddr, cb)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	apiBaseURL := acrossBaseURL(net)
 
 	return &acrossBridge{
-		cb:             cb,
-		spokePool:      spokePool,
-		spokePoolAddr:  spokePoolAddr,
-		tokenAddr:      tokenAddr,
-		tokenContract:  tokenContract,
-		isNative:       isNative,
-		log:            log,
-		assetID:        assetID,
-		net:            net,
-		chainID:        chainID,
-		addr:           walletAddr,
-		node:           node,
-		apiBaseURL:     apiBaseURL,
-		supportedDests: supportedDestinations,
+		cb:            cb,
+		spokePool:     spokePool,
+		spokePoolAddr: spokePoolAddr,
+		log:           log,
+		net:           net,
+		chainAssetID:  chainAssetID,
+		chainID:       chainID,
+		addr:          walletAddr,
+		node:          node,
+		apiBaseURL:    apiBaseURL,
 	}, nil
 }
 
-func (b *acrossBridge) bridgeContractAddr() common.Address {
-	if b.isNative {
-		return common.Address{}
+func (b *acrossBridge) bridgeContractAddr(ctx context.Context, sourceAssetID uint32) (common.Address, error) {
+	if sourceAssetID == b.chainAssetID {
+		return common.Address{}, fmt.Errorf("no bridge contract approval required for native asset on chain")
 	}
-	return b.spokePoolAddr
+
+	return b.spokePoolAddr, nil
 }
 
-func (b *acrossBridge) bridgeContractAllowance(ctx context.Context) (*big.Int, error) {
-	if b.isNative {
-		return nil, fmt.Errorf("no bridge contract")
+func (b *acrossBridge) bridgeContractAllowance(ctx context.Context, sourceAssetID uint32) (*big.Int, error) {
+	if sourceAssetID == b.chainAssetID {
+		return nil, fmt.Errorf("no bridge contract approval required for native asset on chain")
 	}
+
+	tokenInfo := asset.TokenInfo(sourceAssetID)
+	if tokenInfo == nil {
+		return nil, fmt.Errorf("no token info for asset %d", sourceAssetID)
+	}
+	tokenAddr := common.HexToAddress(tokenInfo.ContractAddress)
+	tokenContract, err := erc20.NewIERC20(tokenAddr, b.cb)
+	if err != nil {
+		return nil, err
+	}
+
 	_, pendingUnavailable := b.cb.(*multiRPCClient)
 	callOpts := &bind.CallOpts{
 		Pending: !pendingUnavailable,
 		From:    b.addr,
 		Context: ctx,
 	}
-	return b.tokenContract.Allowance(callOpts, b.addr, b.spokePoolAddr)
+	return tokenContract.Allowance(callOpts, b.addr, b.spokePoolAddr)
 }
 
-func (b *acrossBridge) approveBridgeContract(txOpts *bind.TransactOpts, amount *big.Int) (*types.Transaction, error) {
-	if b.isNative {
-		return nil, fmt.Errorf("no bridge contract")
+func (b *acrossBridge) approveBridgeContract(txOpts *bind.TransactOpts, amount *big.Int, sourceAssetID uint32) (*types.Transaction, error) {
+	if sourceAssetID == b.chainAssetID {
+		return nil, fmt.Errorf("no bridge contract approval required for native asset on chain")
 	}
-	return b.tokenContract.Approve(txOpts, b.spokePoolAddr, amount)
+
+	tokenInfo := asset.TokenInfo(sourceAssetID)
+	if tokenInfo == nil {
+		return nil, fmt.Errorf("no token info for asset %d", sourceAssetID)
+	}
+	tokenAddr := common.HexToAddress(tokenInfo.ContractAddress)
+	tokenContract, err := erc20.NewIERC20(tokenAddr, b.cb)
+	if err != nil {
+		return nil, err
+	}
+
+	return tokenContract.Approve(txOpts, b.spokePoolAddr, amount)
 }
 
-func (b *acrossBridge) requiresBridgeContractApproval() bool {
-	return !b.isNative
+func (b *acrossBridge) requiresBridgeContractApproval(sourceAssetID uint32) bool {
+	return sourceAssetID != b.chainAssetID
 }
 
 // suggestedFeesRes is the response structure for the Across suggested-fees API.
@@ -395,9 +365,18 @@ type suggestedFeesRes struct {
 	} `json:"limits"`
 }
 
-func (b *acrossBridge) initiateBridge(txOpts *bind.TransactOpts, destAssetID uint32, amount *big.Int) (*types.Transaction, error) {
-	if !slices.Contains(b.supportedDests, destAssetID) {
-		return nil, fmt.Errorf("destination asset %d not supported", destAssetID)
+func (b *acrossBridge) initiateBridge(txOpts *bind.TransactOpts, sourceAssetID, destAssetID uint32, amount *big.Int) (*types.Transaction, error) {
+	supportedDestinations, err := acrossSupportedDestinations(txOpts.Context, sourceAssetID, b.net, b.log)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch available routes: %w", err)
+	}
+	if !slices.Contains(supportedDestinations, destAssetID) {
+		return nil, fmt.Errorf("bridging from %s to %s is not supported", dex.BipIDSymbol(sourceAssetID), dex.BipIDSymbol(destAssetID))
+	}
+
+	sourceAsset := assetIDToAcrossAsset(b.net, sourceAssetID)
+	if sourceAsset == nil {
+		return nil, fmt.Errorf("unknown source asset %d", sourceAssetID)
 	}
 
 	destAsset := assetIDToAcrossAsset(b.net, destAssetID)
@@ -406,7 +385,7 @@ func (b *acrossBridge) initiateBridge(txOpts *bind.TransactOpts, destAssetID uin
 	}
 
 	url := fmt.Sprintf("%s/api/suggested-fees?inputToken=%s&outputToken=%s&originChainId=%d&destinationChainId=%d&amount=%s",
-		b.apiBaseURL, b.tokenAddr.Hex(), destAsset.address.Hex(), b.chainID, destAsset.chainID, amount.String())
+		b.apiBaseURL, sourceAsset.address.Hex(), destAsset.address.Hex(), b.chainID, destAsset.chainID, amount.String())
 
 	var res suggestedFeesRes
 	ctx := txOpts.Context
@@ -445,7 +424,7 @@ func (b *acrossBridge) initiateBridge(txOpts *bind.TransactOpts, destAssetID uin
 	recipient := b.addr
 	depositor := b.addr
 	destChainIdBig := big.NewInt(int64(destAsset.chainID))
-	if b.isNative {
+	if sourceAssetID == b.chainAssetID {
 		txOpts.Value = amount
 	}
 
@@ -453,12 +432,12 @@ func (b *acrossBridge) initiateBridge(txOpts *bind.TransactOpts, destAssetID uin
 	// On the UI the expected fee can be displayed and the user can approve it before proceeding, but some
 	// other mechanism will be needed for market making.
 
-	return b.spokePool.DepositV3(txOpts, depositor, recipient, b.tokenAddr, destAsset.address,
+	return b.spokePool.DepositV3(txOpts, depositor, recipient, sourceAsset.address, destAsset.address,
 		amount, outputAmount, destChainIdBig, exclusiveRelayer, uint32(quoteTimestamp.Uint64()),
 		uint32(fillDeadline.Uint64()), exclusivityDeadline, message)
 }
 
-func (b *acrossBridge) getCompletionData(ctx context.Context, bridgeTxID string) ([]byte, error) {
+func (b *acrossBridge) getCompletionData(ctx context.Context, sourceAssetID uint32, bridgeTxID string) ([]byte, error) {
 	hash := common.HexToHash(bridgeTxID)
 	receipt, err := b.node.transactionReceipt(ctx, hash)
 	if err != nil {
@@ -489,19 +468,19 @@ func (b *acrossBridge) getCompletionData(ctx context.Context, bridgeTxID string)
 	return nil, fmt.Errorf("no V3FundsDeposited event found in transaction %s", bridgeTxID)
 }
 
-func (b *acrossBridge) completeBridge(txOpts *bind.TransactOpts, mintInfoB []byte) (*types.Transaction, error) {
+func (b *acrossBridge) completeBridge(*bind.TransactOpts, uint32, []byte) (*types.Transaction, error) {
 	return nil, fmt.Errorf("no completion transaction is required for across protocol")
 }
 
-func (b *acrossBridge) initiateBridgeGas() uint64 {
+func (b *acrossBridge) initiateBridgeGas(uint32) uint64 {
 	return 150_000
 }
 
-func (b *acrossBridge) completeBridgeGas() uint64 {
+func (b *acrossBridge) completeBridgeGas(uint32) uint64 {
 	return 0
 }
 
-func (b *acrossBridge) requiresCompletion() bool {
+func (b *acrossBridge) requiresCompletion(uint32) bool {
 	return false
 }
 
@@ -533,11 +512,16 @@ func (b *acrossBridge) verifyBridgeCompletion(ctx context.Context, data []byte) 
 	return res.Status == "filled", nil
 }
 
-func (b *acrossBridge) supportedDestinations() []uint32 {
-	return b.supportedDests
+func (b *acrossBridge) supportedDestinations(sourceAssetID uint32) []uint32 {
+	destinations, err := acrossSupportedDestinations(context.Background(), sourceAssetID, b.net, b.log)
+	if err != nil {
+		b.log.Errorf("Across bridge: failed to fetch supported destinations: %v", err)
+		return nil
+	}
+	return destinations
 }
 
-func (b *acrossBridge) requiresFollowUpCompletion() bool {
+func (b *acrossBridge) requiresFollowUpCompletion(uint32) bool {
 	return false
 }
 

@@ -799,26 +799,26 @@ type Bridger interface {
 	// ApproveBridgeContract submits a transaction to authorize the bridge contract
 	// to manage the user's tokens. This step is optional for some assets.
 	// Use BridgeContractApprovalStatus to determine if approval is necessary.
-	ApproveBridgeContract(ctx context.Context) (string, error)
+	ApproveBridgeContract(ctx context.Context, bridgeName string) (string, error)
 
 	// UnapproveBridgeContract submits a transaction to revoke the bridge contract's
 	// permission to manage the user's tokens.
-	UnapproveBridgeContract(ctx context.Context) (string, error)
+	UnapproveBridgeContract(ctx context.Context, bridgeName string) (string, error)
 
 	// BridgeContractApprovalStatus retrieves the current approval state of the bridge contract.
 	// Returns Approved for assets that don't require explicit approval.
-	BridgeContractApprovalStatus(ctx context.Context) (ApprovalStatus, error)
+	BridgeContractApprovalStatus(ctx context.Context, bridgeName string) (ApprovalStatus, error)
 
 	// InitiateBridge starts a fund transfer to the specified destination chain.
 	// If a completion transaction is needed, a BridgeReadyToCompleteNote will
 	// be emitted. Some assets do not require a completion transaction.
-	InitiateBridge(ctx context.Context, amt uint64, dest uint32) (txID string, err error)
+	InitiateBridge(ctx context.Context, amt uint64, dest uint32, bridgeName string) (txID string, err error)
 
 	// CompleteBridge finalizes a bridge by executing a transaction on the
 	// destination chain to issue the user's tokens. Some assets require
 	// multiple transactions to complete the bridge. Once all the transactions
 	// are confirmed, a BridgeCompletedNote will be emitted.
-	CompleteBridge(ctx context.Context, bridgeTx *BridgeCounterpartTx, amount uint64, mintData []byte) error
+	CompleteBridge(ctx context.Context, bridgeTx *BridgeCounterpartTx, amount uint64, mintData []byte, bridgeName string) error
 
 	// MarkBridgeComplete is called when the destination chain sends a
 	// notification regarding the completion of a bridge. The completionTxIDs
@@ -836,7 +836,7 @@ type Bridger interface {
 	BridgeHistory(n int, refID *string, past bool) ([]*WalletTransaction, error)
 
 	// SupportedDestinations returns the list of asset IDs that are supported as destinations for the origin asset.
-	SupportedDestinations(assetID uint32) ([]uint32, error)
+	SupportedDestinations() (map[string][]uint32, error)
 }
 
 // Sweeper is a wallet that can clear the entire balance of the wallet/account
@@ -1361,6 +1361,9 @@ type WalletTransaction struct {
 	// It contains the ID and asset ID of the transaction that either initiated
 	// the bridge or completed it.
 	BridgeCounterpartTx *BridgeCounterpartTx `json:"bridgeCounterpartTx,omitempty"`
+	// BridgeName is the name of the bridge. It is only populated for bridge
+	// related transactions.
+	BridgeName string `json:"bridgeName,omitempty"`
 	// UserOpTxID is the id of the transaction that the bundler submitted
 	// for a user op.
 	UserOpTxID string `json:"userOpTxID,omitempty"`
@@ -1735,6 +1738,7 @@ type BridgeReadyToCompleteNote struct {
 	InitiateBridgeTxID string `json:"bridgeTxID"`
 	Amount             uint64 `json:"amount"`
 	Data               []byte `json:"data"`
+	BridgeName         string `json:"bridgeName"`
 }
 
 // BridgeCompletedNote is emitted by the wallet that completed a bridge to
@@ -1882,7 +1886,7 @@ func (e *WalletEmitter) ActionRequired(uniqueID, actionID string, payload any) {
 
 // BridgeReadyToComplete is emitted by the wallet which initiated a bridge to
 // notify that the destination chain is ready to complete the bridge.
-func (e *WalletEmitter) BridgeReadyToComplete(destAssetID uint32, bridgeTxID string, amount uint64, data []byte) {
+func (e *WalletEmitter) BridgeReadyToComplete(destAssetID uint32, bridgeTxID string, amount uint64, data []byte, bridgeName string) {
 	e.emit(&BridgeReadyToCompleteNote{
 		baseWalletNotification: baseWalletNotification{
 			AssetID: e.assetID,
@@ -1892,6 +1896,7 @@ func (e *WalletEmitter) BridgeReadyToComplete(destAssetID uint32, bridgeTxID str
 		InitiateBridgeTxID: bridgeTxID,
 		Amount:             amount,
 		Data:               data,
+		BridgeName:         bridgeName,
 	})
 }
 
