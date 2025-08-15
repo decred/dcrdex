@@ -201,16 +201,16 @@ func (c *TCore) WalletTransaction(assetID uint32, txID string) (*asset.WalletTra
 func (c *TCore) GenerateBCHRecoveryTransaction(appPW []byte, recipient string) ([]byte, error) {
 	return nil, nil
 }
-func (c *TCore) BridgeContractApprovalStatus(assetID uint32) (asset.ApprovalStatus, error) {
+func (c *TCore) BridgeContractApprovalStatus(assetID uint32, bridgeName string) (asset.ApprovalStatus, error) {
 	return 0, nil
 }
-func (c *TCore) ApproveBridgeContract(assetID uint32) (string, error) {
+func (c *TCore) ApproveBridgeContract(assetID uint32, bridgeName string) (string, error) {
 	return "", nil
 }
-func (c *TCore) UnapproveBridgeContract(assetID uint32) (string, error) {
+func (c *TCore) UnapproveBridgeContract(assetID uint32, bridgeName string) (string, error) {
 	return "", nil
 }
-func (c *TCore) Bridge(fromAssetID, toAssetID uint32, amt uint64) (txID string, err error) {
+func (c *TCore) Bridge(fromAssetID, toAssetID uint32, amt uint64, bridgeName string) (txID string, err error) {
 	return "", nil
 }
 func (c *TCore) BridgeHistory(fromAssetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
@@ -219,7 +219,7 @@ func (c *TCore) BridgeHistory(fromAssetID uint32, n int, refID *string, past boo
 func (c *TCore) PendingBridges(fromAssetID uint32) ([]*asset.WalletTransaction, error) {
 	return nil, nil
 }
-func (c *TCore) SupportedBridgeDestinations(assetID uint32) ([]uint32, error) {
+func (c *TCore) SupportedBridgeDestinations(assetID uint32) (map[string][]uint32, error) {
 	return nil, nil
 }
 

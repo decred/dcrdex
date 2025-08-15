@@ -5541,17 +5541,17 @@ func (c *Core) ApproveTokenFee(assetID uint32, version uint32, approval bool) (u
 
 // BridgeContractApprovalStatus returns the approval status of the bridge
 // contract for the specified asset.
-func (c *Core) BridgeContractApprovalStatus(assetID uint32) (asset.ApprovalStatus, error) {
+func (c *Core) BridgeContractApprovalStatus(assetID uint32, bridgeName string) (asset.ApprovalStatus, error) {
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
 		return 0, err
 	}
 
-	return wallet.BridgeContractApprovalStatus(c.ctx)
+	return wallet.BridgeContractApprovalStatus(c.ctx, bridgeName)
 }
 
 // ApproveBridgeContract approves the bridge contract for the specified asset.
-func (c *Core) ApproveBridgeContract(assetID uint32) (string, error) {
+func (c *Core) ApproveBridgeContract(assetID uint32, bridgeName string) (string, error) {
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
 		return "", err
@@ -5566,7 +5566,7 @@ func (c *Core) ApproveBridgeContract(assetID uint32) (string, error) {
 		return "", err
 	}
 
-	txID, err := wallet.ApproveBridgeContract(c.ctx)
+	txID, err := wallet.ApproveBridgeContract(c.ctx, bridgeName)
 	if err != nil {
 		return "", err
 	}
@@ -5576,7 +5576,7 @@ func (c *Core) ApproveBridgeContract(assetID uint32) (string, error) {
 
 // UnapproveBridgeContract unapproves the bridge contract for the specified
 // asset.
-func (c *Core) UnapproveBridgeContract(assetID uint32) (string, error) {
+func (c *Core) UnapproveBridgeContract(assetID uint32, bridgeName string) (string, error) {
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
 		return "", err
@@ -5591,7 +5591,7 @@ func (c *Core) UnapproveBridgeContract(assetID uint32) (string, error) {
 		return "", err
 	}
 
-	txID, err := wallet.UnapproveBridgeContract(c.ctx)
+	txID, err := wallet.UnapproveBridgeContract(c.ctx, bridgeName)
 	if err != nil {
 		return "", err
 	}
@@ -5600,7 +5600,7 @@ func (c *Core) UnapproveBridgeContract(assetID uint32) (string, error) {
 }
 
 // Bridge initiates a bridge.
-func (c *Core) Bridge(fromAssetID, toAssetID uint32, amt uint64) (txID string, err error) {
+func (c *Core) Bridge(fromAssetID, toAssetID uint32, amt uint64, bridgeName string) (txID string, err error) {
 	// Connect and unlock the source wallet.
 	sourceWallet, err := c.connectedWallet(fromAssetID)
 	if err != nil {
@@ -5628,7 +5628,7 @@ func (c *Core) Bridge(fromAssetID, toAssetID uint32, amt uint64) (txID string, e
 	}
 
 	// Initiate the bridge.
-	return sourceWallet.InitiateBridge(c.ctx, amt, toAssetID)
+	return sourceWallet.InitiateBridge(c.ctx, amt, toAssetID, bridgeName)
 }
 
 // PendingBridges returns the pending bridges originating on the chain of the
@@ -5654,7 +5654,7 @@ func (c *Core) BridgeHistory(assetID uint32, n int, refID *string, past bool) ([
 
 // SupportedBridgeDestinations returns the list of asset IDs that are supported
 // as bridge destinations for the specified asset.
-func (c *Core) SupportedBridgeDestinations(assetID uint32) ([]uint32, error) {
+func (c *Core) SupportedBridgeDestinations(assetID uint32) (map[string][]uint32, error) {
 	wallet, found := c.wallet(assetID)
 	if !found {
 		return nil, newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
@@ -5665,7 +5665,7 @@ func (c *Core) SupportedBridgeDestinations(assetID uint32) ([]uint32, error) {
 		return nil, fmt.Errorf("wallet for asset %s does not support bridging", unbip(assetID))
 	}
 
-	return bridger.SupportedDestinations(assetID)
+	return bridger.SupportedDestinations()
 }
 
 // EstimateSendTxFee returns an estimate of the tx fee needed to send or
@@ -9652,7 +9652,7 @@ func (c *Core) handleBridgeReadyToComplete(n *asset.BridgeReadyToCompleteNote) {
 		IDs:     []string{n.InitiateBridgeTxID},
 	}
 
-	err = destWallet.CompleteBridge(c.ctx, bridgeTx, n.Amount, n.Data)
+	err = destWallet.CompleteBridge(c.ctx, bridgeTx, n.Amount, n.Data, n.BridgeName)
 	if err != nil {
 		c.log.Errorf("Error completing bridge: %v", err)
 	}

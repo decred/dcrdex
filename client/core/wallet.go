@@ -701,53 +701,53 @@ func (w *xcWallet) feeRate() uint64 {
 
 // BridgeContractApprovalStatus returns the approval status of the bridge
 // contract if the wallet is a Bridger.
-func (w *xcWallet) BridgeContractApprovalStatus(ctx context.Context) (asset.ApprovalStatus, error) {
+func (w *xcWallet) BridgeContractApprovalStatus(ctx context.Context, bridgeName string) (asset.ApprovalStatus, error) {
 	approver, ok := w.Wallet.(asset.Bridger)
 	if !ok {
 		return 0, fmt.Errorf("%s wallet is not a Bridger", unbip(w.AssetID))
 	}
-	return approver.BridgeContractApprovalStatus(ctx)
+	return approver.BridgeContractApprovalStatus(ctx, bridgeName)
 }
 
 // ApproveBridgeContract approves the bridge contract if the wallet is a
 // Bridger.
-func (w *xcWallet) ApproveBridgeContract(ctx context.Context) (string, error) {
+func (w *xcWallet) ApproveBridgeContract(ctx context.Context, bridgeName string) (string, error) {
 	approver, ok := w.Wallet.(asset.Bridger)
 	if !ok {
 		return "", fmt.Errorf("%s wallet is not a Bridger", unbip(w.AssetID))
 	}
-	return approver.ApproveBridgeContract(ctx)
+	return approver.ApproveBridgeContract(ctx, bridgeName)
 }
 
 // UnapproveBridgeContract removes approval of the bridge contract if the
 // wallet is a Bridger.
-func (w *xcWallet) UnapproveBridgeContract(ctx context.Context) (string, error) {
+func (w *xcWallet) UnapproveBridgeContract(ctx context.Context, bridgeName string) (string, error) {
 	approver, ok := w.Wallet.(asset.Bridger)
 	if !ok {
 		return "", fmt.Errorf("%s wallet is not a Bridger", unbip(w.AssetID))
 	}
-	return approver.UnapproveBridgeContract(ctx)
+	return approver.UnapproveBridgeContract(ctx, bridgeName)
 }
 
 // InitiateBridge initiates the bridge on the source chain if the wallet is a
 // Bridger.
-func (w *xcWallet) InitiateBridge(ctx context.Context, amt uint64, dest uint32) (txID string, err error) {
+func (w *xcWallet) InitiateBridge(ctx context.Context, amt uint64, dest uint32, bridgeName string) (txID string, err error) {
 	bridger, ok := w.Wallet.(asset.Bridger)
 	if !ok {
 		return "", fmt.Errorf("%s wallet is not a Bridger", unbip(w.AssetID))
 	}
-	return bridger.InitiateBridge(ctx, amt, dest)
+	return bridger.InitiateBridge(ctx, amt, dest, bridgeName)
 }
 
 // CompleteBridge completes the bridge on the destination chain if the wallet
 // is a Bridger.
-func (w *xcWallet) CompleteBridge(ctx context.Context, bridgeTx *asset.BridgeCounterpartTx, amount uint64, mintData []byte) error {
+func (w *xcWallet) CompleteBridge(ctx context.Context, bridgeTx *asset.BridgeCounterpartTx, amount uint64, mintData []byte, bridgeName string) error {
 	bridger, ok := w.Wallet.(asset.Bridger)
 	if !ok {
 		return fmt.Errorf("%s wallet is not a Bridger", unbip(w.AssetID))
 	}
 
-	return bridger.CompleteBridge(ctx, bridgeTx, amount, mintData)
+	return bridger.CompleteBridge(ctx, bridgeTx, amount, mintData, bridgeName)
 }
 
 // MarkBridgeComplete marks the bridge as complete on the source chain if the

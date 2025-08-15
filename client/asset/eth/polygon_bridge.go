@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/dexnet"
 	"decred.org/dcrdex/dex/networks/erc20"
@@ -28,22 +29,30 @@ var (
 	maticEthID, _    = dex.BipSymbolID("matic.eth")
 )
 
-var polygonBridgeSupportedAssets = map[dex.Network]map[uint32]uint32{
+// network -> chainAssetID -> sourceAssetID -> destAssetID
+var polygonBridgeSupportedAssets = map[dex.Network]map[uint32]map[uint32]uint32{
 	dex.Mainnet: {
-		usdtEthID:     usdtPolygonID,
-		usdtPolygonID: usdtEthID,
-		ethID:         wethPolygonID,
-		wethPolygonID: ethID,
-		maticEthID:    polygonID,
-		polygonEthID:  polygonID,
-		polygonID:     polygonEthID,
+		ethID: {
+			usdtEthID:    usdtPolygonID,
+			ethID:        wethPolygonID,
+			maticEthID:   polygonID,
+			polygonEthID: polygonID,
+		},
+		polygonID: {
+			usdtPolygonID: usdtEthID,
+			wethPolygonID: ethID,
+			polygonID:     polygonEthID,
+		},
 	},
 	dex.Testnet: {
-		ethID:         wethPolygonID,
-		wethPolygonID: ethID,
-		maticEthID:    polygonID,
-		polygonEthID:  polygonID,
-		polygonID:     polygonEthID,
+		ethID: {
+			ethID:        wethPolygonID,
+			polygonEthID: polygonID,
+		},
+		polygonID: {
+			wethPolygonID: ethID,
+			polygonID:     polygonEthID,
+		},
 	},
 }
 
@@ -57,67 +66,66 @@ const (
 	healthCheckURL         = proofGeneratorURL + "/health-check"
 )
 
-func PolygonBridgeSupportedAsset(sourceAssetID uint32, net dex.Network) (destAssetID uint32, supported bool) {
-	supportedAssets, found := polygonBridgeSupportedAssets[net]
-	if !found {
-		return 0, false
-	}
-
-	destAssetID, supported = supportedAssets[sourceAssetID]
-	return
-}
-
-// polygonBridgePolygonERC20 performs bridge operations on Polygon for ERC20s.
-type polygonBridgePolygonERC20 struct {
+// polygonBridgePolygon performs bridge operations on the polygon POS chain.
+type polygonBridgePolygon struct {
 	cb            bind.ContractBackend
-	tokenAddress  common.Address
-	childERC20    *polygonbridge.ChildERC20
 	stateReceiver *polygonbridge.StateReceiver
 	log           dex.Logger
-	assetID       uint32
 	net           dex.Network
 }
 
-var _ bridge = (*polygonBridgePolygonERC20)(nil)
+var _ bridge = (*polygonBridgePolygon)(nil)
 
-func newPolygonBridgePolygonErc20(cb bind.ContractBackend, assetID uint32, tokenAddress common.Address, log dex.Logger, net dex.Network) (*polygonBridgePolygonERC20, error) {
-	childERC20, err := polygonbridge.NewChildERC20(tokenAddress, cb)
-	if err != nil {
-		return nil, err
-	}
-
+func newPolygonBridgePolygon(cb bind.ContractBackend, net dex.Network, log dex.Logger) (*polygonBridgePolygon, error) {
 	stateReceiver, err := polygonbridge.NewStateReceiver(stateSyncAddress, cb)
 	if err != nil {
 		return nil, err
 	}
 
-	return &polygonBridgePolygonERC20{cb: cb, tokenAddress: tokenAddress, childERC20: childERC20, stateReceiver: stateReceiver, log: log, assetID: assetID, net: net}, nil
+	return &polygonBridgePolygon{cb: cb, stateReceiver: stateReceiver, log: log, net: net}, nil
 }
 
-func (b *polygonBridgePolygonERC20) approveBridgeContract(opts *bind.TransactOpts, amount *big.Int) (*types.Transaction, error) {
-	return nil, fmt.Errorf("no bridge contract")
+func (b *polygonBridgePolygon) approveBridgeContract(opts *bind.TransactOpts, amount *big.Int, assetID uint32) (*types.Transaction, error) {
+	return nil, fmt.Errorf("no bridge contract for polygon withdrawals")
 }
 
-func (b *polygonBridgePolygonERC20) bridgeContractAllowance(ctx context.Context) (*big.Int, error) {
-	return nil, fmt.Errorf("no bridge contract")
+func (b *polygonBridgePolygon) bridgeContractAllowance(ctx context.Context, assetID uint32) (*big.Int, error) {
+	return nil, fmt.Errorf("no bridge contract for polygon withdrawals")
 }
 
-func (b *polygonBridgePolygonERC20) requiresBridgeContractApproval() bool {
+func (b *polygonBridgePolygon) requiresBridgeContractApproval(uint32) bool {
 	return false
 }
 
-func (b *polygonBridgePolygonERC20) bridgeContractAddr() common.Address {
-	return common.Address{}
+func (b *polygonBridgePolygon) bridgeContractAddr(ctx context.Context, assetID uint32) (common.Address, error) {
+	return common.Address{}, fmt.Errorf("no bridge contract for polygon withdrawals")
 }
 
-func (b *polygonBridgePolygonERC20) initiateBridge(opts *bind.TransactOpts, destAssetID uint32, amount *big.Int) (*types.Transaction, error) {
-	expectedDestAssetID := polygonBridgeSupportedAssets[b.net][b.assetID]
+func (b *polygonBridgePolygon) initiateBridge(opts *bind.TransactOpts, sourceAssetID, destAssetID uint32, amount *big.Int) (*types.Transaction, error) {
+	expectedDestAssetID := polygonBridgeSupportedAssets[b.net][polygonID][sourceAssetID]
 	if expectedDestAssetID != destAssetID {
-		return nil, fmt.Errorf("%s cannot be bridged to %s", dex.BipIDSymbol(b.assetID), dex.BipIDSymbol(expectedDestAssetID))
+		return nil, fmt.Errorf("%s cannot be bridged to %s", dex.BipIDSymbol(sourceAssetID), dex.BipIDSymbol(destAssetID))
 	}
 
-	tx, err := b.childERC20.Withdraw(opts, amount)
-	return tx, err
+	if sourceAssetID == polygonID {
+		burnContract, err := polygonbridge.NewChildERC20(polygonBurnAddress, b.cb)
+		if err != nil {
+			return nil, err
+		}
+		opts.Value = amount
+		return burnContract.Withdraw(opts, amount)
+	}
+
+	tokenInfo := asset.TokenInfo(sourceAssetID)
+	if tokenInfo == nil {
+		return nil, fmt.Errorf("token info not found for assetID %d", sourceAssetID)
+	}
+	contractAddress := common.HexToAddress(tokenInfo.ContractAddress)
+	childERC20, err := polygonbridge.NewChildERC20(contractAddress, b.cb)
+	if err != nil {
+		return nil, err
+	}
+	return childERC20.Withdraw(opts, amount)
 }
 
 func getPolygonWithdrawalCompletionData(ctx context.Context, bridgeTxID string, isToken bool, network dex.Network) ([]byte, error) {
@@ -156,16 +164,36 @@ func getPolygonWithdrawalCompletionData(ctx context.Context, bridgeTxID string, 
 	return common.Hex2Bytes(strings.TrimPrefix(res.Result, "0x")), nil
 }
 
-func (b *polygonBridgePolygonERC20) getCompletionData(ctx context.Context, bridgeTxID string) ([]byte, error) {
-	return getPolygonWithdrawalCompletionData(ctx, bridgeTxID, true, b.net)
+func (b *polygonBridgePolygon) getCompletionData(ctx context.Context, sourceAssetID uint32, bridgeTxID string) ([]byte, error) {
+	isToken := sourceAssetID != polygonID
+	return getPolygonWithdrawalCompletionData(ctx, bridgeTxID, isToken, b.net)
 }
 
-func (b *polygonBridgePolygonERC20) requiresCompletion() bool {
+func (b *polygonBridgePolygon) requiresCompletion(uint32) bool {
 	return false
 }
 
-func (b *polygonBridgePolygonERC20) supportedDestinations() []uint32 {
-	return []uint32{polygonBridgeSupportedAssets[b.net][b.assetID]}
+func (b *polygonBridgePolygon) requiresFollowUpCompletion(uint32) bool {
+	return false
+}
+
+func (b *polygonBridgePolygon) getFollowUpCompletionData(ctx context.Context, completionTxID string) (required bool, data []byte, err error) {
+	return false, nil, fmt.Errorf("not implemented")
+}
+
+func (b *polygonBridgePolygon) completeFollowUpBridge(txOpts *bind.TransactOpts, data []byte) (tx *types.Transaction, err error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (b *polygonBridgePolygon) followUpCompleteBridgeGas() uint64 {
+	return 0
+}
+
+func (b *polygonBridgePolygon) supportedDestinations(sourceAssetID uint32) []uint32 {
+	if dest, found := polygonBridgeSupportedAssets[b.net][polygonID][sourceAssetID]; found {
+		return []uint32{dest}
+	}
+	return nil
 }
 
 // verifyPolygonBridgeCompletion is called for bridges from ethereum to polygon
@@ -188,35 +216,19 @@ func verifyPolygonBridgeCompletion(ctx context.Context, cb bind.ContractBackend,
 	return lastStateID.Cmp(stateID) >= 0, nil
 }
 
-func (b *polygonBridgePolygonERC20) verifyBridgeCompletion(ctx context.Context, completionData []byte) (bool, error) {
+func (b *polygonBridgePolygon) verifyBridgeCompletion(ctx context.Context, completionData []byte) (bool, error) {
 	return verifyPolygonBridgeCompletion(ctx, b.cb, b.stateReceiver, completionData)
 }
 
-func (b *polygonBridgePolygonERC20) completeBridge(opts *bind.TransactOpts, mintInfoB []byte) (*types.Transaction, error) {
+func (b *polygonBridgePolygon) completeBridge(opts *bind.TransactOpts, destAssetID uint32, mintInfoB []byte) (*types.Transaction, error) {
 	return nil, fmt.Errorf("no completion transaction is required when bridging from eth -> pol")
 }
 
-func (b *polygonBridgePolygonERC20) initiateBridgeGas() uint64 {
+func (b *polygonBridgePolygon) initiateBridgeGas(uint32) uint64 {
 	return 60_000
 }
 
-func (b *polygonBridgePolygonERC20) completeBridgeGas() uint64 {
-	return 0
-}
-
-func (b *polygonBridgePolygonERC20) requiresFollowUpCompletion() bool {
-	return false
-}
-
-func (b *polygonBridgePolygonERC20) getFollowUpCompletionData(ctx context.Context, completionTxID string) (required bool, data []byte, err error) {
-	return false, nil, fmt.Errorf("not implemented for single-step completion")
-}
-
-func (b *polygonBridgePolygonERC20) completeFollowUpBridge(txOpts *bind.TransactOpts, data []byte) (tx *types.Transaction, err error) {
-	return nil, fmt.Errorf("not implemented for single-step completion")
-}
-
-func (b *polygonBridgePolygonERC20) followUpCompleteBridgeGas() uint64 {
+func (b *polygonBridgePolygon) completeBridgeGas(uint32) uint64 {
 	return 0
 }
 
@@ -229,34 +241,36 @@ type polygonBridgeAddresses struct {
 	// is part of the original plasma bridge, and is used to deposit MATIC and
 	// POL to Polygon POS.
 	depositManagerAddr         common.Address
-	erc20PredicateBurnOnlyAddr common.Address
 	withdrawManagerAddr        common.Address
+	erc20PredicateBurnOnlyAddr common.Address
 }
 
 var polygonBridgeAddrs = map[dex.Network]*polygonBridgeAddresses{
 	dex.Mainnet: {
 		rootChainManagerAddr:       common.HexToAddress("0xA0c68C638235ee32657e8f720a23ceC1bFc77C77"),
 		depositManagerAddr:         common.HexToAddress("0x401f6c983ea34274ec46f84d70b31c151321188b"),
-		erc20PredicateBurnOnlyAddr: common.HexToAddress("0x626fb210bf50e201ed62ca2705c16de2a53dc966"),
 		withdrawManagerAddr:        common.HexToAddress("0x2A88696e0fFA76bAA1338F2C74497cC013495922"),
+		erc20PredicateBurnOnlyAddr: common.HexToAddress("0x626fb210bf50e201ed62ca2705c16de2a53dc966"),
 	},
 	dex.Testnet: {
 		rootChainManagerAddr:       common.HexToAddress("0x34f5a25b627f50bb3f5cab72807c4d4f405a9232"),
 		depositManagerAddr:         common.HexToAddress("0x44Ad17990F9128C6d823Ee10dB7F0A5d40a731A4"),
-		erc20PredicateBurnOnlyAddr: common.HexToAddress("0x15EA6c538cF4b4A4f51999F433557285D5639820"),
 		withdrawManagerAddr:        common.HexToAddress("0x822db7e79096E7247d9273E5782ecAec464Eb96C"),
+		erc20PredicateBurnOnlyAddr: common.HexToAddress("0x15EA6c538cF4b4A4f51999F433557285D5639820"),
 	},
 }
 
-// polygonBridgeEth is used to manage the bridge operations on Ethereum
-// for the native ETH asset.
+// polygonBridgeEth is used to manage the bridge operations on Ethereum.
 type polygonBridgeEth struct {
-	rootChainManager *polygonbridge.RootChainManager
-	cb               bind.ContractBackend
-	log              dex.Logger
-	addr             common.Address
-	net              dex.Network
-	node             ethFetcher
+	rootChainManager       *polygonbridge.RootChainManager
+	cb                     bind.ContractBackend
+	log                    dex.Logger
+	addr                   common.Address
+	net                    dex.Network
+	node                   ethFetcher
+	withdrawManager        *polygonbridge.WithdrawManager
+	exitNFT                *polygonbridge.ExitNFT
+	erc20PredicateBurnOnly *polygonbridge.Erc20PredicateBurnOnly
 }
 
 var _ bridge = (*polygonBridgeEth)(nil)
@@ -272,305 +286,174 @@ func newPolygonBridgeEth(ctx context.Context, cb bind.ContractBackend, net dex.N
 		return nil, err
 	}
 
+	withdrawManager, err := polygonbridge.NewWithdrawManager(addrs.withdrawManagerAddr, cb)
+	if err != nil {
+		return nil, err
+	}
+
+	exitNFTAddr, err := withdrawManager.ExitNft(&bind.CallOpts{})
+	if err != nil {
+		return nil, err
+	}
+
+	exitNFT, err := polygonbridge.NewExitNFT(exitNFTAddr, cb)
+	if err != nil {
+		return nil, err
+	}
+
+	erc20PredicateBurnOnly, err := polygonbridge.NewErc20PredicateBurnOnly(addrs.erc20PredicateBurnOnlyAddr, cb)
+	if err != nil {
+		return nil, err
+	}
+
 	return &polygonBridgeEth{
-		rootChainManager: rootChainManager,
-		cb:               cb,
-		log:              log,
-		addr:             addr,
-		net:              net,
-		node:             node,
+		rootChainManager:       rootChainManager,
+		cb:                     cb,
+		log:                    log,
+		addr:                   addr,
+		net:                    net,
+		node:                   node,
+		withdrawManager:        withdrawManager,
+		exitNFT:                exitNFT,
+		erc20PredicateBurnOnly: erc20PredicateBurnOnly,
 	}, nil
 }
 
-func (b *polygonBridgeEth) bridgeContractAddr() common.Address {
-	return common.Address{}
-}
-
-func (b *polygonBridgeEth) approveBridgeContract(opts *bind.TransactOpts, amt *big.Int) (*types.Transaction, error) {
-	return nil, fmt.Errorf("no bridge contract")
-}
-
-func (b *polygonBridgeEth) bridgeContractAllowance(ctx context.Context) (*big.Int, error) {
-	return nil, fmt.Errorf("no bridge contract")
-}
-
-func (b *polygonBridgeEth) requiresBridgeContractApproval() bool {
-	return false
-}
-
-func (b *polygonBridgeEth) initiateBridge(opts *bind.TransactOpts, destAssetID uint32, amt *big.Int) (*types.Transaction, error) {
-	expectedDestAssetID, _ := PolygonBridgeSupportedAsset(ethID, b.net)
-	if expectedDestAssetID != destAssetID {
-		return nil, fmt.Errorf("%s cannot be bridged to %s", dex.BipIDSymbol(ethID), dex.BipIDSymbol(expectedDestAssetID))
+func (b *polygonBridgeEth) bridgeContractAddr(ctx context.Context, assetID uint32) (common.Address, error) {
+	if polygonBridgeSupportedAssets[b.net][ethID][assetID] == 0 {
+		return common.Address{}, fmt.Errorf("%d is not supported by the polygon bridge", assetID)
 	}
 
-	opts.Value = amt
-	tx, err := b.rootChainManager.DepositEtherFor(opts, opts.From)
-	return tx, err
-}
-
-func (b *polygonBridgeEth) getCompletionData(ctx context.Context, bridgeTxID string) ([]byte, error) {
-	return getPolygonBridgeCompletionData(ctx, b.node, bridgeTxID)
-}
-
-func (b *polygonBridgeEth) requiresCompletion() bool {
-	return true
-}
-
-func (b *polygonBridgeEth) completeBridge(opts *bind.TransactOpts, mintInfo []byte) (tx *types.Transaction, err error) {
-	return b.rootChainManager.Exit(opts, mintInfo)
-}
-
-func (b *polygonBridgeEth) verifyBridgeCompletion(ctx context.Context, data []byte) (bool, error) {
-	return false, fmt.Errorf("a completion transaction is required when bridging from eth -> pol")
-}
-
-func (b *polygonBridgeEth) initiateBridgeGas() uint64 {
-	return 130_000
-}
-
-func (b *polygonBridgeEth) completeBridgeGas() uint64 {
-	return 600_000
-}
-
-func (b *polygonBridgeEth) supportedDestinations() []uint32 {
-	return []uint32{wethPolygonID}
-}
-
-func (b *polygonBridgeEth) requiresFollowUpCompletion() bool {
-	return false
-}
-
-func (b *polygonBridgeEth) getFollowUpCompletionData(ctx context.Context, completionTxID string) (required bool, data []byte, err error) {
-	return false, nil, fmt.Errorf("not implemented for single-step completion")
-}
-
-func (b *polygonBridgeEth) completeFollowUpBridge(txOpts *bind.TransactOpts, data []byte) (tx *types.Transaction, err error) {
-	return nil, fmt.Errorf("not implemented for single-step completion")
-}
-
-func (b *polygonBridgeEth) followUpCompleteBridgeGas() uint64 {
-	return 0
-}
-
-// polygonBridgePolygonPOLToken is used to manage the bridge operations on
-// Polygon for the native POL asset.
-type polygonBridgePolygonPOLToken struct {
-	rootChainManager *polygonbridge.RootChainManager
-	cb               bind.ContractBackend
-	log              dex.Logger
-	addr             common.Address
-	net              dex.Network
-	burnContract     *polygonbridge.ChildERC20
-	stateReceiver    *polygonbridge.StateReceiver
-}
-
-var _ bridge = (*polygonBridgePolygonPOLToken)(nil)
-
-func newPolygonBridgePolygonPOLToken(ctx context.Context, cb bind.ContractBackend, net dex.Network, addr common.Address, log dex.Logger) (*polygonBridgePolygonPOLToken, error) {
-	addrs, found := polygonBridgeAddrs[net]
-	if !found {
-		return nil, fmt.Errorf("no root chain manager address found for network %s", net)
+	// ETH does not require a bridge contract approval
+	if assetID == ethID {
+		return common.Address{}, fmt.Errorf("eth does not require a bridge contract approval")
 	}
 
-	burnContract, err := polygonbridge.NewChildERC20(polygonBurnAddress, cb)
-	if err != nil {
-		return nil, err
+	// MATIC and POL have their own special bridge contract address
+	if assetID == maticEthID || assetID == polygonEthID {
+		polygonBridgeAddrs, found := polygonBridgeAddrs[b.net]
+		if !found {
+			return common.Address{}, fmt.Errorf("no root chain manager address found for network %s", b.net)
+		}
+		return polygonBridgeAddrs.depositManagerAddr, nil
 	}
 
-	rootChainManager, err := polygonbridge.NewRootChainManager(addrs.rootChainManagerAddr, cb)
-	if err != nil {
-		return nil, err
+	// Each other ERC20 address has a corresponding erc20Predicate address
+	tokenInfo := asset.TokenInfo(assetID)
+	if tokenInfo == nil {
+		return common.Address{}, fmt.Errorf("token info not found for assetID %d", assetID)
 	}
-
-	stateReceiver, err := polygonbridge.NewStateReceiver(stateSyncAddress, cb)
-	if err != nil {
-		return nil, err
-	}
-
-	return &polygonBridgePolygonPOLToken{
-		rootChainManager: rootChainManager,
-		cb:               cb,
-		log:              log,
-		addr:             addr,
-		net:              net,
-		burnContract:     burnContract,
-		stateReceiver:    stateReceiver,
-	}, nil
-}
-
-func (b *polygonBridgePolygonPOLToken) bridgeContractAddr() common.Address {
-	return common.Address{}
-}
-
-func (b *polygonBridgePolygonPOLToken) approveBridgeContract(opts *bind.TransactOpts, amt *big.Int) (*types.Transaction, error) {
-	return nil, fmt.Errorf("no bridge contract")
-}
-
-func (b *polygonBridgePolygonPOLToken) bridgeContractAllowance(ctx context.Context) (*big.Int, error) {
-	return nil, fmt.Errorf("no bridge contract")
-}
-
-func (b *polygonBridgePolygonPOLToken) requiresBridgeContractApproval() bool {
-	return false
-}
-
-func (b *polygonBridgePolygonPOLToken) initiateBridge(opts *bind.TransactOpts, destAssetID uint32, amt *big.Int) (*types.Transaction, error) {
-	expectedDestAssetID := polygonBridgeSupportedAssets[b.net][polygonID]
-	if expectedDestAssetID != destAssetID {
-		return nil, fmt.Errorf("%s cannot be bridged to %s", dex.BipIDSymbol(polygonID), dex.BipIDSymbol(expectedDestAssetID))
-	}
-	opts.Value = amt
-	return b.burnContract.Withdraw(opts, amt)
-}
-
-func (b *polygonBridgePolygonPOLToken) getCompletionData(ctx context.Context, bridgeTxID string) ([]byte, error) {
-	return getPolygonWithdrawalCompletionData(ctx, bridgeTxID, false, b.net)
-}
-
-func (b *polygonBridgePolygonPOLToken) requiresCompletion() bool {
-	return false
-}
-
-func (b *polygonBridgePolygonPOLToken) completeBridge(opts *bind.TransactOpts, mintInfo []byte) (tx *types.Transaction, err error) {
-	return nil, fmt.Errorf("no completion transaction is required when bridging from eth -> pol")
-}
-
-func (b *polygonBridgePolygonPOLToken) verifyBridgeCompletion(ctx context.Context, data []byte) (bool, error) {
-	return verifyPolygonBridgeCompletion(ctx, b.cb, b.stateReceiver, data)
-}
-
-func (b *polygonBridgePolygonPOLToken) initiateBridgeGas() uint64 {
-	return 0
-}
-
-func (b *polygonBridgePolygonPOLToken) completeBridgeGas() uint64 {
-	return 0
-}
-
-func (b *polygonBridgePolygonPOLToken) supportedDestinations() []uint32 {
-	return []uint32{polygonEthID}
-}
-
-func (b *polygonBridgePolygonPOLToken) requiresFollowUpCompletion() bool {
-	return false
-}
-
-func (b *polygonBridgePolygonPOLToken) getFollowUpCompletionData(ctx context.Context, completionTxID string) (required bool, data []byte, err error) {
-	return false, nil, fmt.Errorf("not implemented")
-}
-
-func (b *polygonBridgePolygonPOLToken) completeFollowUpBridge(txOpts *bind.TransactOpts, stepData []byte) (tx *types.Transaction, err error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (b *polygonBridgePolygonPOLToken) followUpCompleteBridgeGas() uint64 {
-	return 0
-}
-
-// polygonBridgeEthErc20 is the bridge operations on Ethereum for ERC20
-// tokens.
-type polygonBridgeEthErc20 struct {
-	rootChainManager   *polygonbridge.RootChainManager
-	tokenAddress       common.Address
-	tokenContract      *erc20.IERC20
-	erc20PredicateAddr common.Address
-	cb                 bind.ContractBackend
-	log                dex.Logger
-	addr               common.Address
-	assetID            uint32
-	net                dex.Network
-	node               ethFetcher
-}
-
-var _ bridge = (*polygonBridgeEthErc20)(nil)
-
-func newPolygonBridgeEthErc20(ctx context.Context, cb bind.ContractBackend, assetID uint32, tokenAddress common.Address, net dex.Network, addr common.Address, node ethFetcher, log dex.Logger) (*polygonBridgeEthErc20, error) {
-	addrs, found := polygonBridgeAddrs[net]
-	if !found {
-		return nil, fmt.Errorf("no root chain manager address found for network %s", net)
-	}
-
-	tokenContract, err := erc20.NewIERC20(tokenAddress, cb)
-	if err != nil {
-		return nil, err
-	}
-
-	rootChainManager, err := polygonbridge.NewRootChainManager(addrs.rootChainManagerAddr, cb)
-	if err != nil {
-		return nil, err
-	}
-
+	tokenAddress := common.HexToAddress(tokenInfo.ContractAddress)
 	callOpts := &bind.CallOpts{
-		From:    addr,
+		From:    b.addr,
 		Context: ctx,
 	}
-
-	tokenType, err := rootChainManager.TokenToType(callOpts, tokenAddress)
+	tokenType, err := b.rootChainManager.TokenToType(callOpts, tokenAddress)
 	if err != nil {
-		return nil, err
+		return common.Address{}, err
 	}
-
-	erc20PredicateAddr, err := rootChainManager.TypeToPredicate(callOpts, tokenType)
+	erc20PredicateAddr, err := b.rootChainManager.TypeToPredicate(callOpts, tokenType)
 	if err != nil {
-		return nil, err
+		return common.Address{}, err
 	}
-
 	if erc20PredicateAddr == (common.Address{}) {
-		return nil, fmt.Errorf("no erc20 predicate address found for token %s", tokenAddress.Hex())
+		return common.Address{}, fmt.Errorf("no erc20 predicate address found for token %s", tokenAddress.Hex())
 	}
 
-	return &polygonBridgeEthErc20{
-		rootChainManager:   rootChainManager,
-		tokenAddress:       tokenAddress,
-		tokenContract:      tokenContract,
-		erc20PredicateAddr: erc20PredicateAddr,
-		cb:                 cb,
-		log:                log,
-		addr:               addr,
-		assetID:            assetID,
-		net:                net,
-		node:               node,
-	}, nil
+	return erc20PredicateAddr, nil
 }
 
-func (b *polygonBridgeEthErc20) bridgeContractAddr() common.Address {
-	return b.erc20PredicateAddr
+func (b *polygonBridgeEth) approveBridgeContract(txOpts *bind.TransactOpts, amount *big.Int, assetID uint32) (*types.Transaction, error) {
+	contractAddr, err := b.bridgeContractAddr(txOpts.Context, assetID)
+	if err != nil {
+		return nil, err
+	}
+
+	tokenInfo := asset.TokenInfo(assetID)
+	if tokenInfo == nil {
+		return nil, fmt.Errorf("token info not found for assetID %d", assetID)
+	}
+
+	tokenAddress := common.HexToAddress(tokenInfo.ContractAddress)
+	tokenContract, err := erc20.NewIERC20(tokenAddress, b.cb)
+	if err != nil {
+		return nil, err
+	}
+
+	return tokenContract.Approve(txOpts, contractAddr, amount)
 }
 
-func (b *polygonBridgeEthErc20) approveBridgeContract(opts *bind.TransactOpts, amt *big.Int) (*types.Transaction, error) {
-	return b.tokenContract.Approve(opts, b.erc20PredicateAddr, amt)
-}
+func (b *polygonBridgeEth) bridgeContractAllowance(ctx context.Context, assetID uint32) (*big.Int, error) {
+	contractAddr, err := b.bridgeContractAddr(ctx, assetID)
+	if err != nil {
+		return nil, err
+	}
 
-func (b *polygonBridgeEthErc20) bridgeContractAllowance(ctx context.Context) (*big.Int, error) {
+	tokenInfo := asset.TokenInfo(assetID)
+	if tokenInfo == nil {
+		return nil, fmt.Errorf("token info not found for assetID %d", assetID)
+	}
+
+	tokenAddress := common.HexToAddress(tokenInfo.ContractAddress)
+	tokenContract, err := erc20.NewIERC20(tokenAddress, b.cb)
+	if err != nil {
+		return nil, err
+	}
+
 	_, pendingUnavailable := b.cb.(*multiRPCClient)
 	callOpts := &bind.CallOpts{
 		Pending: !pendingUnavailable,
 		From:    b.addr,
 		Context: ctx,
 	}
-	return b.tokenContract.Allowance(callOpts, b.addr, b.erc20PredicateAddr)
+
+	return tokenContract.Allowance(callOpts, b.addr, contractAddr)
 }
 
-func (b *polygonBridgeEthErc20) requiresBridgeContractApproval() bool {
-	return true
+func (b *polygonBridgeEth) requiresBridgeContractApproval(assetID uint32) bool {
+	return assetID != ethID
 }
 
-func (b *polygonBridgeEthErc20) verifyBridgeCompletion(ctx context.Context, data []byte) (bool, error) {
-	return false, fmt.Errorf("a completion transaction is required when bridging from pol -> eth")
-}
-
-func (b *polygonBridgeEthErc20) initiateBridge(opts *bind.TransactOpts, destAssetID uint32, amt *big.Int) (*types.Transaction, error) {
-	expectedDestAssetID, _ := PolygonBridgeSupportedAsset(b.assetID, b.net)
+func (b *polygonBridgeEth) initiateBridge(opts *bind.TransactOpts, sourceAssetID, destAssetID uint32, amt *big.Int) (*types.Transaction, error) {
+	expectedDestAssetID := polygonBridgeSupportedAssets[b.net][ethID][sourceAssetID]
 	if expectedDestAssetID != destAssetID {
-		return nil, fmt.Errorf("%s cannot be bridged to %s", dex.BipIDSymbol(b.assetID), dex.BipIDSymbol(expectedDestAssetID))
+		return nil, fmt.Errorf("%s cannot be bridged to %s", dex.BipIDSymbol(sourceAssetID), dex.BipIDSymbol(destAssetID))
 	}
 
+	if sourceAssetID == ethID {
+		opts.Value = amt
+		return b.rootChainManager.DepositEtherFor(opts, opts.From)
+	}
+
+	if sourceAssetID == maticEthID || sourceAssetID == polygonEthID {
+		polygonBridgeAddrs, found := polygonBridgeAddrs[b.net]
+		if !found {
+			return nil, fmt.Errorf("no root chain manager address found for network %s", b.net)
+		}
+		depositManager, err := polygonbridge.NewDepositManager(polygonBridgeAddrs.depositManagerAddr, b.cb)
+		if err != nil {
+			return nil, err
+		}
+		tokenInfo := asset.TokenInfo(sourceAssetID)
+		if tokenInfo == nil {
+			return nil, fmt.Errorf("token info not found for assetID %d", sourceAssetID)
+		}
+		tokenAddress := common.HexToAddress(tokenInfo.ContractAddress)
+
+		return depositManager.DepositERC20ForUser(opts, tokenAddress, b.addr, amt)
+	}
+
+	// All other ERC20s
 	depositData := make([]byte, 32)
 	amtBytes := amt.Bytes()
 	copy(depositData[32-len(amtBytes):], amtBytes)
-	tx, err := b.rootChainManager.DepositFor(opts, opts.From, b.tokenAddress, depositData)
-	return tx, err
+
+	tokenInfo := asset.TokenInfo(sourceAssetID)
+	if tokenInfo == nil {
+		return nil, fmt.Errorf("token info not found for assetID %d", sourceAssetID)
+	}
+	tokenAddress := common.HexToAddress(tokenInfo.ContractAddress)
+	return b.rootChainManager.DepositFor(opts, opts.From, tokenAddress, depositData)
 }
 
 // getPolygonBridgeCompletionData is called for bridges from ethereum to polygon
@@ -597,171 +480,39 @@ func getPolygonBridgeCompletionData(ctx context.Context, node ethFetcher, bridge
 	return nil, fmt.Errorf("no ID log found for bridge %s", bridgeTxID)
 }
 
-func (b *polygonBridgeEthErc20) getCompletionData(ctx context.Context, bridgeTxID string) ([]byte, error) {
+func (b *polygonBridgeEth) getCompletionData(ctx context.Context, sourceAssetID uint32, bridgeTxID string) ([]byte, error) {
 	return getPolygonBridgeCompletionData(ctx, b.node, bridgeTxID)
 }
 
-func (b *polygonBridgeEthErc20) requiresCompletion() bool {
+func (b *polygonBridgeEth) requiresCompletion(uint32) bool {
 	return true
 }
 
-func (b *polygonBridgeEthErc20) completeBridge(opts *bind.TransactOpts, mintInfo []byte) (tx *types.Transaction, err error) {
+func (b *polygonBridgeEth) completeBridge(opts *bind.TransactOpts, destAssetID uint32, mintInfo []byte) (*types.Transaction, error) {
+	if destAssetID == polygonEthID || destAssetID == maticEthID {
+		return b.erc20PredicateBurnOnly.StartExitWithBurntTokens(opts, mintInfo)
+	}
 	return b.rootChainManager.Exit(opts, mintInfo)
 }
 
-func (b *polygonBridgeEthErc20) initiateBridgeGas() uint64 {
+func (b *polygonBridgeEth) initiateBridgeGas(sourceAssetID uint32) uint64 {
+	if sourceAssetID == ethID {
+		return 130_000
+	}
+	if sourceAssetID == maticEthID {
+		return 600_000
+	}
+
+	// All other ERC20s
 	return 160_000
 }
 
-func (b *polygonBridgeEthErc20) completeBridgeGas() uint64 {
+func (b *polygonBridgeEth) completeBridgeGas(uint32) uint64 {
 	return 600_000
 }
 
-func (b *polygonBridgeEthErc20) supportedDestinations() []uint32 {
-	return []uint32{polygonBridgeSupportedAssets[b.net][b.assetID]}
-}
-func (b *polygonBridgeEthErc20) requiresFollowUpCompletion() bool {
-	return false
-}
-
-func (b *polygonBridgeEthErc20) getFollowUpCompletionData(ctx context.Context, completionTxID string) (required bool, data []byte, err error) {
-	return false, nil, fmt.Errorf("not implemented for single-step completion")
-}
-
-func (b *polygonBridgeEthErc20) completeFollowUpBridge(txOpts *bind.TransactOpts, data []byte) (tx *types.Transaction, err error) {
-	return nil, fmt.Errorf("not implemented for single-step completion")
-}
-
-func (b *polygonBridgeEthErc20) followUpCompleteBridgeGas() uint64 {
-	return 0
-}
-
-// polygonBridgeEthPOLToken is the bridge operations on Ethereum for POL/MATIC
-// tokens.
-type polygonBridgeEthPOLToken struct {
-	tokenAddress           common.Address
-	tokenContract          *erc20.IERC20
-	depositManager         *polygonbridge.DepositManager
-	depositManagerAddr     common.Address
-	erc20PredicateBurnOnly *polygonbridge.Erc20PredicateBurnOnly
-	withdrawManager        *polygonbridge.WithdrawManager
-	exitNFT                *polygonbridge.ExitNFT
-	cb                     bind.ContractBackend
-	log                    dex.Logger
-	addr                   common.Address
-	assetID                uint32
-	net                    dex.Network
-	node                   ethFetcher
-}
-
-var _ bridge = (*polygonBridgeEthPOLToken)(nil)
-
-func newPolygonBridgeEthPOL(ctx context.Context, cb bind.ContractBackend, assetID uint32, tokenAddress common.Address, net dex.Network, addr common.Address, node ethFetcher, log dex.Logger) (*polygonBridgeEthPOLToken, error) {
-	addrs, found := polygonBridgeAddrs[net]
-	if !found {
-		return nil, fmt.Errorf("no root chain manager address found for network %s", net)
-	}
-
-	tokenContract, err := erc20.NewIERC20(tokenAddress, cb)
-	if err != nil {
-		return nil, err
-	}
-
-	depositManager, err := polygonbridge.NewDepositManager(addrs.depositManagerAddr, cb)
-	if err != nil {
-		return nil, err
-	}
-
-	erc20PredicateBurnOnly, err := polygonbridge.NewErc20PredicateBurnOnly(addrs.erc20PredicateBurnOnlyAddr, cb)
-	if err != nil {
-		return nil, err
-	}
-
-	withdrawManager, err := polygonbridge.NewWithdrawManager(addrs.withdrawManagerAddr, cb)
-	if err != nil {
-		return nil, err
-	}
-
-	exitNFTAddr, err := withdrawManager.ExitNft(&bind.CallOpts{})
-	if err != nil {
-		return nil, err
-	}
-
-	exitNFT, err := polygonbridge.NewExitNFT(exitNFTAddr, cb)
-	if err != nil {
-		return nil, err
-	}
-
-	return &polygonBridgeEthPOLToken{
-		tokenAddress:           tokenAddress,
-		tokenContract:          tokenContract,
-		depositManager:         depositManager,
-		depositManagerAddr:     addrs.depositManagerAddr,
-		erc20PredicateBurnOnly: erc20PredicateBurnOnly,
-		withdrawManager:        withdrawManager,
-		exitNFT:                exitNFT,
-		cb:                     cb,
-		log:                    log,
-		addr:                   addr,
-		assetID:                assetID,
-		net:                    net,
-		node:                   node,
-	}, nil
-}
-
-func (b *polygonBridgeEthPOLToken) bridgeContractAddr() common.Address {
-	return b.depositManagerAddr
-}
-
-func (b *polygonBridgeEthPOLToken) approveBridgeContract(opts *bind.TransactOpts, amt *big.Int) (*types.Transaction, error) {
-	return b.tokenContract.Approve(opts, b.depositManagerAddr, amt)
-}
-
-func (b *polygonBridgeEthPOLToken) bridgeContractAllowance(ctx context.Context) (*big.Int, error) {
-	_, pendingUnavailable := b.cb.(*multiRPCClient)
-	callOpts := &bind.CallOpts{
-		Pending: !pendingUnavailable,
-		From:    b.addr,
-		Context: ctx,
-	}
-	return b.tokenContract.Allowance(callOpts, b.addr, b.depositManagerAddr)
-}
-
-func (b *polygonBridgeEthPOLToken) requiresBridgeContractApproval() bool {
-	return true
-}
-
-func (b *polygonBridgeEthPOLToken) initiateBridge(opts *bind.TransactOpts, destAssetID uint32, amt *big.Int) (*types.Transaction, error) {
-	expectedDestAssetID, _ := PolygonBridgeSupportedAsset(b.assetID, b.net)
-	if expectedDestAssetID != destAssetID {
-		return nil, fmt.Errorf("%s cannot be bridged to %s", dex.BipIDSymbol(b.assetID), dex.BipIDSymbol(expectedDestAssetID))
-	}
-	tx, err := b.depositManager.DepositERC20ForUser(opts, b.tokenAddress, b.addr, amt)
-	return tx, err
-}
-
-func (b *polygonBridgeEthPOLToken) getCompletionData(ctx context.Context, bridgeTxID string) ([]byte, error) {
-	return getPolygonBridgeCompletionData(ctx, b.node, bridgeTxID)
-}
-
-func (b *polygonBridgeEthPOLToken) requiresCompletion() bool {
-	return true
-}
-
-func (b *polygonBridgeEthPOLToken) completeBridge(opts *bind.TransactOpts, mintInfo []byte) (tx *types.Transaction, err error) {
-	return b.erc20PredicateBurnOnly.StartExitWithBurntTokens(opts, mintInfo)
-}
-
-func (b *polygonBridgeEthPOLToken) initiateBridgeGas() uint64 {
-	return 160_000
-}
-
-func (b *polygonBridgeEthPOLToken) completeBridgeGas() uint64 {
-	return 600_000
-}
-
-func (b *polygonBridgeEthPOLToken) requiresFollowUpCompletion() bool {
-	return true
+func (b *polygonBridgeEth) requiresFollowUpCompletion(destAssetID uint32) bool {
+	return destAssetID == polygonEthID || destAssetID == maticEthID
 }
 
 type polWithdrawalFollowUpData struct {
@@ -769,7 +520,7 @@ type polWithdrawalFollowUpData struct {
 	Token  common.Address `json:"token"`
 }
 
-func (b *polygonBridgeEthPOLToken) getFollowUpCompletionData(ctx context.Context, completionTxID string) (required bool, data []byte, err error) {
+func (b *polygonBridgeEth) getFollowUpCompletionData(ctx context.Context, completionTxID string) (required bool, data []byte, err error) {
 	receipt, err := b.node.transactionReceipt(ctx, common.HexToHash(completionTxID))
 	if err != nil {
 		return false, nil, err
@@ -800,7 +551,7 @@ func (b *polygonBridgeEthPOLToken) getFollowUpCompletionData(ctx context.Context
 	return false, nil, fmt.Errorf("no exit log found for completion tx %s", completionTxID)
 }
 
-func (b *polygonBridgeEthPOLToken) verifyBridgeCompletion(ctx context.Context, data []byte) (bool, error) {
+func (b *polygonBridgeEth) verifyBridgeCompletion(ctx context.Context, data []byte) (bool, error) {
 	followUpData := polWithdrawalFollowUpData{}
 	err := json.Unmarshal(data, &followUpData)
 	if err != nil {
@@ -820,7 +571,7 @@ func (b *polygonBridgeEthPOLToken) verifyBridgeCompletion(ctx context.Context, d
 	return !exists, nil
 }
 
-func (b *polygonBridgeEthPOLToken) completeFollowUpBridge(txOpts *bind.TransactOpts, data []byte) (tx *types.Transaction, err error) {
+func (b *polygonBridgeEth) completeFollowUpBridge(txOpts *bind.TransactOpts, data []byte) (tx *types.Transaction, err error) {
 	followUpData := polWithdrawalFollowUpData{}
 	err = json.Unmarshal(data, &followUpData)
 	if err != nil {
@@ -830,10 +581,13 @@ func (b *polygonBridgeEthPOLToken) completeFollowUpBridge(txOpts *bind.TransactO
 	return b.withdrawManager.ProcessExits(txOpts, followUpData.Token)
 }
 
-func (b *polygonBridgeEthPOLToken) followUpCompleteBridgeGas() uint64 {
+func (b *polygonBridgeEth) followUpCompleteBridgeGas() uint64 {
 	return 600_000
 }
 
-func (b *polygonBridgeEthPOLToken) supportedDestinations() []uint32 {
-	return []uint32{polygonID}
+func (b *polygonBridgeEth) supportedDestinations(sourceAssetID uint32) []uint32 {
+	if dest, found := polygonBridgeSupportedAssets[b.net][ethID][sourceAssetID]; found {
+		return []uint32{dest}
+	}
+	return nil
 }
