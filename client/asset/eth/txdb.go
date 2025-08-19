@@ -50,9 +50,8 @@ type extendedWalletTx struct {
 	// PreviousBridgeCompletionID will be set to the ID of the initial bridge
 	// completion. It is only populated for follow-up bridge completions.
 	PreviousBridgeCompletionID string `json:"previousBridgeCompletionID,omitempty"`
-	// BridgeFollowUpVerificationData is the data required to submit and verify
-	// a follow-up bridge completion. It is only populated for follow-up bridge
-	// completions.
+	// BridgeFollowUpData is the data required to submit and verify a follow-up
+	// bridge completion. It is only populated for follow-up bridge completions.
 	BridgeFollowUpData dex.Bytes `json:"bridgeFollowUpData,omitempty"`
 	// RequiresFollowUp is true if the bridge requires a follow-up completion. It
 	// is set to true for the initial bridge completion.
@@ -365,12 +364,7 @@ func (db *TxDB) addBridgeCompletion(wt *extendedWalletTx, txn *badger.Txn) error
 	// Add this completion to the list
 	buildy = buildy.AddData([]byte(wt.ID))
 
-	err = db.bridgeCompletions.Set(initiationTxHash[:], []byte(buildy), lexi.WithReplace(), lexi.WithTxn(txn))
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return db.bridgeCompletions.Set(initiationTxHash[:], []byte(buildy), lexi.WithReplace(), lexi.WithTxn(txn))
 }
 
 // getTx gets a single transaction. It is not an error if the tx is not known.
