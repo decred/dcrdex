@@ -820,10 +820,12 @@ type Bridger interface {
 	// are confirmed, a BridgeCompletedNote will be emitted.
 	CompleteBridge(ctx context.Context, bridgeTx *BridgeCounterpartTx, amount uint64, mintData []byte) error
 
-	// MarkBridgeComplete should be invoked after the completion transaction
-	// is confirmed on the destination chain to update the bridge status.
-	// Without this, the bridge will still be in the pending state.
-	MarkBridgeComplete(initiationTxID string, completionTxID string)
+	// MarkBridgeComplete is called when the destination chain sends a
+	// notification regarding the completion of a bridge. The completionTxIDs
+	// are the IDs of the transactions that completed the bridge. The complete
+	// boolean is true if the bridge has fully completed and the funds are
+	// allocated on the destination chain.
+	MarkBridgeComplete(initiationTxID string, completionTxIDs []string, complete bool)
 
 	// PendingBridges lists all uncompleted bridge transactions on the blockchain.
 	// For token wallets, this includes pending bridges for other tokens on the same chain.
@@ -1318,21 +1320,13 @@ type BondTxInfo struct {
 	BondID dex.Bytes `json:"bondID"`
 }
 
-// NoCompletionRequiredBridgeTxID is a placeholder ID used when a bridge
-// transaction does not require a corresponding completion transaction. This
-// typically occurs when bridging from a base chain to a Layer 2, where the
-// network automatically allocates tokens to the recipient without a mint step.
-const NoCompletionRequiredBridgeTxID = "no-completion-required"
-
 // BridgeCounterpartTx identifies an initiation transaction if it is part of a
 // completion transaction, or a completion transaction if it is part of an
 // initiation transaction.
 type BridgeCounterpartTx struct {
-	AssetID uint32 `json:"assetID"`
-	// ID is the transaction ID of the transaction of the other chain.
-	// If the transaction is an initiation transaction, and ID is
-	// populated, it means that the bridge is complete.
-	ID string `json:"id"`
+	AssetID  uint32   `json:"assetID"`
+	IDs      []string `json:"id"`
+	Complete bool     `json:"complete"`
 }
 
 // WalletTransaction represents a transaction that was made by a wallet.
@@ -1747,9 +1741,10 @@ type BridgeReadyToCompleteNote struct {
 // notify that the bridge has been completed.
 type BridgeCompletedNote struct {
 	baseWalletNotification
-	SourceAssetID  uint32 `json:"sourceAssetID"`
-	InitiationTxID string `json:"initiationTxID"`
-	CompletionTxID string `json:"completionTxIDs"`
+	SourceAssetID   uint32   `json:"sourceAssetID"`
+	InitiationTxID  string   `json:"initiationTxID"`
+	CompletionTxIDs []string `json:"completionTxIDs"`
+	Complete        bool     `json:"complete"`
 }
 
 // BalanceChangeNote can be sent when the wallet detects a balance change
@@ -1902,15 +1897,16 @@ func (e *WalletEmitter) BridgeReadyToComplete(destAssetID uint32, bridgeTxID str
 
 // BridgeCompleted is emitted by the wallet which completed a bridge to
 // notify that the bridge has been completed.
-func (e *WalletEmitter) BridgeCompleted(sourceAssetID uint32, initiationTxID string, completionTxID string) {
+func (e *WalletEmitter) BridgeCompleted(sourceAssetID uint32, initiationTxID string, completionTxIDs []string, complete bool) {
 	e.emit(&BridgeCompletedNote{
 		baseWalletNotification: baseWalletNotification{
 			AssetID: e.assetID,
 			Route:   "bridgeCompleted",
 		},
-		SourceAssetID:  sourceAssetID,
-		InitiationTxID: initiationTxID,
-		CompletionTxID: completionTxID,
+		SourceAssetID:   sourceAssetID,
+		InitiationTxID:  initiationTxID,
+		CompletionTxIDs: completionTxIDs,
+		Complete:        complete,
 	})
 }
 

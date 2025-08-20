@@ -13,7 +13,9 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/lexi"
+	"github.com/dgraph-io/badger"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 )
@@ -39,6 +41,22 @@ type extendedWalletTx struct {
 	// ActionRequiredNote.
 	AssumedLost bool `json:"assumedLost,omitempty"`
 
+	// The following fields are used for bridge completions that require a follow-up
+	// transaction. This is currently only required for withdrawing POL from Polygon
+	// POS to Ethereum. Hopefully (probably) no other bridges will require this and
+	// eventually Polygon will upgrade their system to not require it in the
+	// future as well.
+
+	// PreviousBridgeCompletionID will be set to the ID of the initial bridge
+	// completion. It is only populated for follow-up bridge completions.
+	PreviousBridgeCompletionID string `json:"previousBridgeCompletionID,omitempty"`
+	// BridgeFollowUpData is the data required to submit and verify a follow-up
+	// bridge completion. It is only populated for follow-up bridge completions.
+	BridgeFollowUpData dex.Bytes `json:"bridgeFollowUpData,omitempty"`
+	// RequiresFollowUp is true if the bridge requires a follow-up completion. It
+	// is set to true for the initial bridge completion.
+	RequiresFollowUp bool `json:"requiresFollowUp,omitempty"`
+
 	txHash          common.Hash
 	lastCheck       uint64
 	savedToDB       bool
@@ -52,10 +70,10 @@ type extendedWalletTx struct {
 const (
 	dbVersion                 = 1
 	txsTable                  = "txs"
+	bridgeCompletionsTable    = "bridgeCompletions"
 	allAssetIndexName         = "allAssets"
 	assetIndexName            = "asset"
 	bridgeInitiationIndexName = "bridgeinit"
-	bridgeCompletionIndexName = "bridgecomplete"
 )
 
 func (wt *extendedWalletTx) MarshalBinary() ([]byte, error) {
@@ -96,16 +114,18 @@ type txDB interface {
 	getPendingTxs() ([]*extendedWalletTx, error)
 	getBridges(n int, refID *common.Hash, past bool) ([]*asset.WalletTransaction, error)
 	getPendingBridges() ([]*extendedWalletTx, error)
-	getBridgeCompletion(initiationTxID string) (*extendedWalletTx, error)
+	getBridgeCompletions(initiationTxID string) ([]*extendedWalletTx, error)
 }
 
 type TxDB struct {
 	*lexi.DB
-	txs                   *lexi.Table
+
+	txs               *lexi.Table
+	bridgeCompletions *lexi.Table
+
 	allAssetIndex         *lexi.Index
 	assetIndex            *lexi.Index
 	bridgeInitiationIndex *lexi.Index
-	bridgeCompletionIndex *lexi.Index
 
 	baseChainID uint32
 	log         dex.Logger
@@ -162,7 +182,7 @@ func assetSpecificIndexEntry(wt *extendedWalletTx, baseChainID uint32) []byte {
 // completed bridges while allowing both to be sorted by submission time.
 func bridgeIndexEntry(wt *extendedWalletTx) []byte {
 	var pendingFlag byte = 0 // 0 for completed bridges
-	if wt.BridgeCounterpartTx == nil || wt.BridgeCounterpartTx.ID == "" {
+	if wt.BridgeCounterpartTx == nil || !wt.BridgeCounterpartTx.Complete {
 		pendingFlag = 1 // 1 for pending bridges
 	}
 
@@ -183,6 +203,11 @@ func NewTxDB(path string, log dex.Logger, baseChainID uint32) (*TxDB, error) {
 	}
 
 	txs, err := ldb.Table(txsTable)
+	if err != nil {
+		return nil, err
+	}
+
+	bridgeCompletions, err := ldb.Table(bridgeCompletionsTable)
 	if err != nil {
 		return nil, err
 	}
@@ -223,31 +248,13 @@ func NewTxDB(path string, log dex.Logger, baseChainID uint32) (*TxDB, error) {
 		return nil, err
 	}
 
-	bridgeCompletionIndex, err := txs.AddUniqueIndex(bridgeCompletionIndexName, func(k, v lexi.KV) ([]byte, error) {
-		wt, is := v.(*extendedWalletTx)
-		if !is {
-			return nil, fmt.Errorf("expected type *extendedWalletTx, got %T", wt)
-		}
-		if wt.Type != asset.CompleteBridge {
-			return nil, lexi.ErrNotIndexed
-		}
-		if wt.BridgeCounterpartTx == nil {
-			return nil, lexi.ErrNotIndexed
-		}
-		txHash := common.HexToHash(wt.BridgeCounterpartTx.ID)
-		return txHash[:], nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
 	db := &TxDB{
 		DB:                    ldb,
 		txs:                   txs,
+		bridgeCompletions:     bridgeCompletions,
 		allAssetIndex:         allAssetIndex,
 		assetIndex:            assetIndex,
 		bridgeInitiationIndex: bridgeInitiationIndex,
-		bridgeCompletionIndex: bridgeCompletionIndex,
 		baseChainID:           baseChainID,
 		log:                   log,
 	}
@@ -303,7 +310,61 @@ func (db *TxDB) upgrade() error {
 // same hash or nonce already exists, it is replaced.
 func (db *TxDB) storeTx(wt *extendedWalletTx) error {
 	hash := common.HexToHash(wt.ID)
-	return db.txs.Set(hash[:], wt, lexi.WithReplace())
+
+	return db.Update(func(txn *badger.Txn) error {
+		err := db.txs.Set(hash[:], wt, lexi.WithReplace(), lexi.WithTxn(txn))
+		if err != nil {
+			return err
+		}
+
+		// If this is a bridge completion, update the bridge completions table
+		if wt.WalletTransaction.Type == asset.CompleteBridge {
+			return db.addBridgeCompletion(wt, txn)
+		}
+
+		return nil
+	})
+}
+
+// addBridgeCompletion adds a bridge completion transaction to the bridge completions table.
+func (db *TxDB) addBridgeCompletion(wt *extendedWalletTx, txn *badger.Txn) error {
+	if wt.WalletTransaction.BridgeCounterpartTx == nil || len(wt.WalletTransaction.BridgeCounterpartTx.IDs) < 1 {
+		return fmt.Errorf("bridge completion missing initiation transaction ID")
+	}
+
+	initiationTxID := wt.WalletTransaction.BridgeCounterpartTx.IDs[0]
+	initiationTxHash := common.HexToHash(initiationTxID)
+
+	// Get the current list of bridge completions
+	existingData, err := db.bridgeCompletions.GetRaw(initiationTxHash[:], lexi.WithGetTxn(txn))
+	if err != nil && !errors.Is(err, lexi.ErrKeyNotFound) {
+		return err
+	}
+
+	// Start with version 0
+	buildy := encode.BuildyBytes{0}
+
+	// Check if this completion is already in the list and rebuild the list
+	if len(existingData) > 0 {
+		_, pushes, err := encode.DecodeBlob(existingData)
+		if err != nil {
+			return fmt.Errorf("error decoding existing bridge completions: %w", err)
+		}
+
+		for _, push := range pushes {
+			if string(push) == wt.ID {
+				// Already exists, no need to add
+				return nil
+			}
+			// Add existing completion back to the list
+			buildy = buildy.AddData(push)
+		}
+	}
+
+	// Add this completion to the list
+	buildy = buildy.AddData([]byte(wt.ID))
+
+	return db.bridgeCompletions.Set(initiationTxHash[:], []byte(buildy), lexi.WithReplace(), lexi.WithTxn(txn))
 }
 
 // getTx gets a single transaction. It is not an error if the tx is not known.
@@ -490,7 +551,7 @@ func (db *TxDB) getPendingBridges() (txs []*extendedWalletTx, err error) {
 			return nil
 		}
 
-		if wt.BridgeCounterpartTx == nil || wt.BridgeCounterpartTx.ID == "" {
+		if wt.BridgeCounterpartTx == nil || !wt.BridgeCounterpartTx.Complete {
 			txs = append(txs, wt)
 		}
 
@@ -499,28 +560,39 @@ func (db *TxDB) getPendingBridges() (txs []*extendedWalletTx, err error) {
 	return
 }
 
-// getBridgeCompletion checks the bridge completion index for a completion
-// transaction with the given bridge initiation transaction ID.
-func (db *TxDB) getBridgeCompletion(initiationTxID string) (*extendedWalletTx, error) {
+// getBridgeCompletions retrieves all bridge completion transactions for the
+// given bridge initiation transaction ID.
+func (db *TxDB) getBridgeCompletions(initiationTxID string) ([]*extendedWalletTx, error) {
 	txHash := common.HexToHash(initiationTxID)
 
-	var wt extendedWalletTx
-	found := false
-	err := db.bridgeCompletionIndex.Iterate(txHash[:], func(it *lexi.Iter) error {
-		found = true
-		return it.V(func(vB []byte) error {
-			return wt.UnmarshalBinary(vB)
-		})
-	})
+	data, err := db.bridgeCompletions.GetRaw(txHash[:])
 	if err != nil {
 		if errors.Is(err, lexi.ErrKeyNotFound) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	if !found {
+
+	if len(data) <= 1 { // version byte only or empty
 		return nil, nil
 	}
 
-	return &wt, nil
+	_, pushes, err := encode.DecodeBlob(data)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding bridge completions: %w", err)
+	}
+
+	var txs []*extendedWalletTx
+	for _, push := range pushes {
+		completionTxHash := string(push)
+		wt, err := db.getTx(common.HexToHash(completionTxHash))
+		if err != nil {
+			return nil, err
+		}
+		if wt != nil {
+			txs = append(txs, wt)
+		}
+	}
+
+	return txs, nil
 }

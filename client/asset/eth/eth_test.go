@@ -646,8 +646,8 @@ func (db *tTxDB) getBridges(n int, refID *common.Hash, past bool) ([]*asset.Wall
 func (db *tTxDB) getPendingBridges() ([]*extendedWalletTx, error) {
 	return db.pendingBridges, nil
 }
-func (db *tTxDB) getBridgeCompletion(initiationTxID string) (*extendedWalletTx, error) {
-	return db.txToGet, db.getTxErr
+func (db *tTxDB) getBridgeCompletions(initiationTxID string) ([]*extendedWalletTx, error) {
+	return []*extendedWalletTx{db.txToGet}, db.getTxErr
 }
 
 // func TestCheckUnconfirmedTxs(t *testing.T) {
@@ -1146,16 +1146,6 @@ func TestCheckPendingTxs(t *testing.T) {
 		return pendingTx
 	}
 
-	const initiationTxID = "initiationTx"
-	updateToBridgeCompletion := func(tx *extendedWalletTx) *extendedWalletTx {
-		tx.Type = asset.CompleteBridge
-		tx.BridgeCounterpartTx = &asset.BridgeCounterpartTx{
-			ID:      initiationTxID,
-			AssetID: BipID,
-		}
-		return tx
-	}
-
 	newReceipt := func(confs uint64) *types.Receipt {
 		r := &types.Receipt{
 			EffectiveGasPrice: big.NewInt(1),
@@ -1178,19 +1168,6 @@ func TestCheckPendingTxs(t *testing.T) {
 				}
 			default:
 				t.Fatalf("no ActionRequiredNote found")
-			}
-		}
-	}
-
-	getBridgeCompleteNote := func(t *testing.T) *asset.BridgeCompletedNote {
-		for {
-			select {
-			case ni := <-emitChan:
-				if n, ok := ni.(*asset.BridgeCompletedNote); ok {
-					return n
-				}
-			default:
-				return nil
 			}
 		}
 	}
@@ -1233,22 +1210,6 @@ func TestCheckPendingTxs(t *testing.T) {
 				extendedTx(4, 0, 0, finalizedStamp),
 			},
 			receipts: []*types.Receipt{newReceipt(txConfsNeededToConfirm)},
-		},
-		{
-			name: "bridge completion not yet confirmed",
-			pendingTxs: []*extendedWalletTx{
-				updateToBridgeCompletion(extendedTx(4, 0, 0, finalizedStamp)),
-			},
-			noncesAfter: []uint64{4},
-			receipts:    []*types.Receipt{newReceipt(txConfsNeededToConfirm - 1)},
-		},
-		{
-			name: "confirm bridge completion",
-			pendingTxs: []*extendedWalletTx{
-				updateToBridgeCompletion(extendedTx(4, 0, 0, finalizedStamp)),
-			},
-			receipts:   []*types.Receipt{newReceipt(txConfsNeededToConfirm)},
-			bridgeDone: initiationTxID,
 		},
 		{
 			name: "old and unindexed",
@@ -1321,17 +1282,6 @@ func TestCheckPendingTxs(t *testing.T) {
 			}
 			if tt.recast != (node.lastSignedTx != nil) {
 				t.Fatalf("wrong recast result recast = %t, lastSignedTx = %t", tt.recast, node.lastSignedTx != nil)
-			}
-			if tt.bridgeDone != "" {
-				if bridgeNote := getBridgeCompleteNote(t); bridgeNote == nil {
-					t.Fatalf("expected bridge completion, got none")
-				} else if bridgeNote.InitiationTxID != tt.bridgeDone {
-					t.Fatalf("expected bridge completion for %s, got %s", tt.bridgeDone, bridgeNote.InitiationTxID)
-				}
-			} else {
-				if bridgeNote := getBridgeCompleteNote(t); bridgeNote != nil {
-					t.Fatalf("expected no bridge completion, got %s", bridgeNote.InitiationTxID)
-				}
 			}
 		})
 	}
@@ -6099,9 +6049,19 @@ func TestFreshProviderList(t *testing.T) {
 }
 
 type mockBridge struct {
-	getCompletionDataFunc   func(ctx context.Context, txID string) ([]byte, error)
-	getCompletionDataCalled chan struct{}
-	completeBridgeCalled    bool
+	getCompletionDataFunc            func(ctx context.Context, txID string) ([]byte, error)
+	getCompletionDataCalled          chan struct{}
+	completeBridgeCalled             common.Hash
+	requiresCompletionResult         bool
+	requiresFollowUpCompletionResult bool
+	verifyBridgeCompletionResult     bool
+	verifyBridgeCompletionError      error
+	getFollowUpCompletionDataResult  struct {
+		required bool
+		data     []byte
+		err      error
+	}
+	completeFollowUpBridgeCalled common.Hash
 }
 
 var _ bridge = (*mockBridge)(nil)
@@ -6124,18 +6084,33 @@ func (m *mockBridge) initiateBridge(txOpts *bind.TransactOpts, destAssetID uint3
 	panic("not implemented")
 }
 func (m *mockBridge) completeBridge(txOpts *bind.TransactOpts, completionData []byte) (*types.Transaction, error) {
-	m.completeBridgeCalled = true
-	return types.NewTransaction(0, common.Address{}, big.NewInt(0), 0, nil, []byte{}), nil
+	tx := types.NewTransaction(0, common.Address{}, big.NewInt(0), 0, nil, encode.RandomBytes(32))
+	m.completeBridgeCalled = tx.Hash()
+	return tx, nil
 }
 func (m *mockBridge) initiateBridgeGas() uint64 { return 0 }
 func (m *mockBridge) completeBridgeGas() uint64 { return 0 }
-func (m *mockBridge) requiresCompletion() bool  { return true }
+func (m *mockBridge) requiresCompletion() bool {
+	return m.requiresCompletionResult
+}
 func (m *mockBridge) verifyBridgeCompletion(ctx context.Context, data []byte) (bool, error) {
-	return false, nil
+	return m.verifyBridgeCompletionResult, m.verifyBridgeCompletionError
 }
 func (m *mockBridge) supportedDestinations() []uint32 {
 	return []uint32{}
 }
+func (m *mockBridge) requiresFollowUpCompletion() bool {
+	return m.requiresFollowUpCompletionResult
+}
+func (m *mockBridge) getFollowUpCompletionData(ctx context.Context, completionTxID string) (required bool, data []byte, err error) {
+	return m.getFollowUpCompletionDataResult.required, m.getFollowUpCompletionDataResult.data, m.getFollowUpCompletionDataResult.err
+}
+func (m *mockBridge) completeFollowUpBridge(txOpts *bind.TransactOpts, data []byte) (tx *types.Transaction, err error) {
+	tx = types.NewTransaction(0, common.Address{}, big.NewInt(0), 0, nil, encode.RandomBytes(32))
+	m.completeFollowUpBridgeCalled = tx.Hash()
+	return tx, nil
+}
+func (m *mockBridge) followUpCompleteBridgeGas() uint64 { return 0 }
 
 func TestBridgeManager(t *testing.T) {
 	setupWithPendingBridges := func(t *testing.T, pendingBridges []*extendedWalletTx) (*bridgeManager, *mockBridge, chan asset.WalletNotification, *tTxDB, dex.Logger) {
@@ -6245,7 +6220,7 @@ func TestBridgeManager(t *testing.T) {
 		}
 
 		// Remove the bridge
-		bm.markBridgeComplete(burnTxID, "mintTxID")
+		bm.markBridgeComplete(burnTxID, []string{"mintTxID"}, true)
 
 		// Wait and ensure no more calls occur
 		time.Sleep(300 * time.Millisecond) // Longer than 2 monitor intervals
@@ -6256,8 +6231,8 @@ func TestBridgeManager(t *testing.T) {
 			// No additional calls, as expected
 		}
 
-		if db.storedTx.BridgeCounterpartTx.ID != "mintTxID" {
-			t.Errorf("expected BridgeCounterpartTx.ID to be mintTxID, got %s", db.storedTx.BridgeCounterpartTx.ID)
+		if len(db.storedTx.BridgeCounterpartTx.IDs) == 0 || db.storedTx.BridgeCounterpartTx.IDs[len(db.storedTx.BridgeCounterpartTx.IDs)-1] != "mintTxID" {
+			t.Errorf("expected last BridgeCounterpartTx.ID to be mintTxID, got %v", db.storedTx.BridgeCounterpartTx.IDs)
 		}
 	})
 
@@ -6287,7 +6262,7 @@ func TestBridgeManager(t *testing.T) {
 
 func TestCompleteBridge(t *testing.T) {
 	initiationTx := &asset.BridgeCounterpartTx{
-		ID:      "initiation-tx-id",
+		IDs:     []string{"initiation-tx-id"},
 		AssetID: 123,
 	}
 	timestamp := uint64(time.Now().Unix())
@@ -6303,9 +6278,23 @@ func TestCompleteBridge(t *testing.T) {
 		Nonce:     new(big.Int),
 		savedToDB: true,
 	}
+	confirmedTxWithFollowUpData := &extendedWalletTx{
+		WalletTransaction: &asset.WalletTransaction{
+			ID:                  "follow-up-tx-id",
+			Amount:              1e9,
+			Confirmed:           true,
+			Type:                asset.CompleteBridge,
+			BridgeCounterpartTx: initiationTx,
+			Timestamp:           timestamp,
+		},
+		Nonce:                      new(big.Int),
+		PreviousBridgeCompletionID: "initial-completion-tx-id",
+		BridgeFollowUpData:         []byte("verification-data"),
+		savedToDB:                  true,
+	}
 	pendingTx := &extendedWalletTx{
 		WalletTransaction: &asset.WalletTransaction{
-			ID:                  "complete-tx-id",
+			ID:                  "pending-tx-id",
 			Amount:              1e9,
 			Confirmed:           false,
 			Type:                asset.CompleteBridge,
@@ -6317,31 +6306,144 @@ func TestCompleteBridge(t *testing.T) {
 	}
 
 	tests := []struct {
-		name           string
-		dbTx           *extendedWalletTx
-		pendingTx      *extendedWalletTx
-		dbErr          error
-		expectComplete bool
-		expectNote     bool
-		expectErr      bool
+		name                    string
+		dbTx                    *extendedWalletTx
+		pendingTx               *extendedWalletTx
+		dbErr                   error
+		bridge                  *mockBridge
+		expectComplete          bool
+		expectCompleteFollowUp  bool
+		expectErr               bool
+		expectNote              bool
+		expectedCompletionTxIDs []string
+		expectedIsComplete      bool
 	}{
 		{
-			name:           "new completion",
-			expectComplete: true,
+			name: "new completion - requires completion",
+			bridge: &mockBridge{
+				requiresCompletionResult: true,
+			},
+			expectComplete:          true,
+			expectNote:              true,
+			expectedCompletionTxIDs: []string{"mock-tx-id"}, // Will be generated by mock
+			expectedIsComplete:      false,                  // Not complete until confirmed
+		},
+		{
+			name: "bridge does not require completion - verification successful",
+			bridge: &mockBridge{
+				requiresCompletionResult:     false,
+				verifyBridgeCompletionResult: true,
+			},
+			expectNote:              true,
+			expectedCompletionTxIDs: []string{}, // No completion transactions
+			expectedIsComplete:      true,
+		},
+		{
+			name: "bridge does not require completion - verification failed",
+			bridge: &mockBridge{
+				requiresCompletionResult:     false,
+				verifyBridgeCompletionResult: false,
+			},
+			expectNote:              false,      // No note when verification fails
+			expectedCompletionTxIDs: []string{}, // No completion transactions
+			expectedIsComplete:      false,
 		},
 		{
 			name:      "pending completion",
 			pendingTx: pendingTx,
+			bridge: &mockBridge{
+				requiresCompletionResult: true,
+			},
+			expectNote:              false,      // No note when pending
+			expectedCompletionTxIDs: []string{}, // No completion TxIDs when pending
+			expectedIsComplete:      false,
 		},
 		{
-			name:       "confirmed completion",
-			dbTx:       confirmedTx,
-			expectNote: true,
+			name: "confirmed completion - no follow-up required",
+			dbTx: confirmedTx,
+			bridge: &mockBridge{
+				requiresCompletionResult:         true,
+				requiresFollowUpCompletionResult: false,
+			},
+			expectNote:              true,
+			expectedCompletionTxIDs: []string{"complete-tx-id"},
+			expectedIsComplete:      true,
 		},
 		{
-			name:      "db error",
-			dbErr:     errors.New("db error"),
-			expectErr: true,
+			name: "confirmed completion - follow-up required, verification complete",
+			dbTx: confirmedTxWithFollowUpData,
+			bridge: &mockBridge{
+				requiresCompletionResult:         true,
+				requiresFollowUpCompletionResult: true,
+				verifyBridgeCompletionResult:     true,
+			},
+			expectNote:              true,
+			expectedCompletionTxIDs: []string{"initial-completion-tx-id", "follow-up-tx-id"},
+			expectedIsComplete:      true,
+		},
+		{
+			name: "confirmed completion - follow-up required, verification incomplete",
+			dbTx: confirmedTxWithFollowUpData,
+			bridge: &mockBridge{
+				requiresCompletionResult:         true,
+				requiresFollowUpCompletionResult: true,
+				verifyBridgeCompletionResult:     false,
+			},
+			expectNote:              false, // No note when verification incomplete
+			expectedCompletionTxIDs: []string{"initial-completion-tx-id", "follow-up-tx-id"},
+			expectedIsComplete:      false,
+		},
+		{
+			name: "confirmed completion - follow-up required, no verification data, not required",
+			dbTx: confirmedTx,
+			bridge: &mockBridge{
+				requiresCompletionResult:         true,
+				requiresFollowUpCompletionResult: true,
+				getFollowUpCompletionDataResult: struct {
+					required bool
+					data     []byte
+					err      error
+				}{
+					required: false,
+					data:     nil,
+					err:      nil,
+				},
+			},
+			expectNote:              true,
+			expectedCompletionTxIDs: []string{"complete-tx-id"},
+			expectedIsComplete:      true,
+		},
+		{
+			name: "confirmed completion - follow-up required, no verification data, follow-up required",
+			dbTx: confirmedTx,
+			bridge: &mockBridge{
+				requiresCompletionResult:         true,
+				requiresFollowUpCompletionResult: true,
+				getFollowUpCompletionDataResult: struct {
+					required bool
+					data     []byte
+					err      error
+				}{
+					required: true,
+					data:     []byte("follow-up-data"),
+					err:      nil,
+				},
+			},
+			expectNote:              true,
+			expectCompleteFollowUp:  true,
+			expectedCompletionTxIDs: []string{"complete-tx-id", "mock-tx-id"}, // Initial + new follow-up
+			expectedIsComplete:      false,                                    // Not complete until follow-up verified
+		},
+		{
+			name:  "db error",
+			dbErr: errors.New("db error"),
+			bridge: &mockBridge{
+				requiresCompletionResult: true,
+			},
+			expectErr:               true,
+			expectNote:              false,      // No note on error
+			expectedCompletionTxIDs: []string{}, // Error before any completion
+			expectedIsComplete:      false,
 		},
 	}
 
@@ -6351,12 +6453,11 @@ func TestCompleteBridge(t *testing.T) {
 			defer shutdown()
 
 			bridgeWallet := &ETHBridgeWallet{ETHWallet: w.(*ETHWallet)}
-			bridge := &mockBridge{}
 			bridgeWallet.manager = &bridgeManager{
-				bridge: bridge,
+				bridge: tt.bridge,
 			}
 
-			emitChan := make(chan asset.WalletNotification, 1)
+			emitChan := make(chan asset.WalletNotification, 128)
 			bridgeWallet.emit = asset.NewWalletEmitter(emitChan, BipID, bridgeWallet.log)
 
 			txDB := &tTxDB{
@@ -6377,16 +6478,24 @@ func TestCompleteBridge(t *testing.T) {
 				if err == nil {
 					t.Fatalf("expected error but got none")
 				}
-				return
-			}
-			if err != nil {
+			} else if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			if tt.expectComplete != bridge.completeBridgeCalled {
-				t.Fatalf("completeBridge called = %v, want %v", bridge.completeBridgeCalled, tt.expectComplete)
+			var expectedMockTxID common.Hash
+			if tt.expectCompleteFollowUp {
+				expectedMockTxID = tt.bridge.completeFollowUpBridgeCalled
+			} else {
+				expectedMockTxID = tt.bridge.completeBridgeCalled
+			}
+			if tt.expectComplete == (tt.bridge.completeBridgeCalled == (common.Hash{})) {
+				t.Fatalf("completeBridge called = %v, want %v", tt.bridge.completeBridgeCalled, tt.expectComplete)
+			}
+			if tt.expectCompleteFollowUp == (tt.bridge.completeFollowUpBridgeCalled == (common.Hash{})) {
+				t.Fatalf("completeFollowUpBridge called = %v, want %v", tt.bridge.completeFollowUpBridgeCalled, tt.expectCompleteFollowUp)
 			}
 
+			// Check if notification was emitted based on expectNote
 			var note *asset.BridgeCompletedNote
 		noteLoop:
 			for {
@@ -6394,25 +6503,49 @@ func TestCompleteBridge(t *testing.T) {
 				case n := <-emitChan:
 					if n, ok := n.(*asset.BridgeCompletedNote); ok {
 						note = n
+						break noteLoop
 					}
 				default:
 					break noteLoop
 				}
 			}
 
-			if tt.expectNote != (note != nil) {
-				t.Fatalf("expected note = %v, got %v", tt.expectNote, (note != nil))
+			if tt.expectNote {
+				if note == nil {
+					t.Fatalf("expected BridgeCompletedNote to be emitted, but got none")
+				}
+			} else {
+				if note != nil {
+					t.Fatalf("expected no BridgeCompletedNote to be emitted, but got one: %+v", note)
+				}
+				return
 			}
 
-			if note != nil {
-				if note.InitiationTxID != initiationTx.ID {
-					t.Fatalf("expected InitiationTxID = %s, got %s", initiationTx.ID, note.InitiationTxID)
-				}
-				if note.CompletionTxID != confirmedTx.ID {
-					t.Fatalf("expected CompletionTxID = %s, got %s", confirmedTx.ID, note.CompletionTxID)
-				}
-				if note.SourceAssetID != initiationTx.AssetID {
-					t.Fatalf("expected SourceAssetID = %d, got %d", initiationTx.AssetID, note.SourceAssetID)
+			expectedInitiationTxID := initiationTx.IDs[0]
+			if note.InitiationTxID != expectedInitiationTxID {
+				t.Fatalf("expected InitiationTxID = %s, got %s", expectedInitiationTxID, note.InitiationTxID)
+			}
+
+			if note.SourceAssetID != initiationTx.AssetID {
+				t.Fatalf("expected SourceAssetID = %d, got %d", initiationTx.AssetID, note.SourceAssetID)
+			}
+
+			if note.Complete != tt.expectedIsComplete {
+				t.Fatalf("expected Complete = %v, got %v", tt.expectedIsComplete, note.Complete)
+			}
+
+			if len(note.CompletionTxIDs) != len(tt.expectedCompletionTxIDs) {
+				t.Fatalf("expected %d completion TxIDs, got %d: %v", len(tt.expectedCompletionTxIDs), len(note.CompletionTxIDs), note.CompletionTxIDs)
+			}
+
+			for i, expectedID := range tt.expectedCompletionTxIDs {
+				actualID := note.CompletionTxIDs[i]
+				if expectedID == "mock-tx-id" {
+					if actualID != expectedMockTxID.Hex() {
+						t.Fatalf("expected mock-tx-id = %s, got %s", expectedMockTxID.Hex(), actualID)
+					}
+				} else if actualID != expectedID {
+					t.Fatalf("expected CompletionTxID[%d] = %s, got %s", i, expectedID, actualID)
 				}
 			}
 		})
