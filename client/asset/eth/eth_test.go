@@ -4602,9 +4602,9 @@ func TestDriverOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("driver open error: %v", err)
 	}
-	eth, ok := wallet.(*ETHBridgeWallet)
+	eth, ok := wallet.(*ETHWallet)
 	if !ok {
-		t.Fatalf("failed to cast wallet as assetWallet")
+		t.Fatalf("failed to cast wallet as ETHWallet")
 	}
 	if eth.gasFeeLimit() != defaultGasFeeLimit {
 		t.Fatalf("expected gasFeeLimit to be default, but got %v", eth.gasFeeLimit())
@@ -4616,9 +4616,9 @@ func TestDriverOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("driver open error: %v", err)
 	}
-	eth, ok = wallet.(*ETHBridgeWallet)
+	eth, ok = wallet.(*ETHWallet)
 	if !ok {
-		t.Fatalf("failed to cast wallet as assetWallet")
+		t.Fatalf("failed to cast wallet as ETHWallet")
 	}
 	if eth.gasFeeLimit() != 150 {
 		t.Fatalf("expected gasFeeLimit to be 150, but got %v", eth.gasFeeLimit())
@@ -6066,40 +6066,42 @@ type mockBridge struct {
 
 var _ bridge = (*mockBridge)(nil)
 
-func (m *mockBridge) getCompletionData(ctx context.Context, bridgeTxID string) ([]byte, error) {
+func (m *mockBridge) getCompletionData(ctx context.Context, sourceAssetID uint32, bridgeTxID string) ([]byte, error) {
 	if m.getCompletionDataCalled != nil {
 		m.getCompletionDataCalled <- struct{}{}
 	}
 	return m.getCompletionDataFunc(ctx, bridgeTxID)
 }
-func (m *mockBridge) bridgeContractAddr() common.Address { panic("not implemented") }
-func (m *mockBridge) bridgeContractAllowance(ctx context.Context) (*big.Int, error) {
+func (m *mockBridge) bridgeContractAddr(ctx context.Context, assetID uint32) (common.Address, error) {
 	panic("not implemented")
 }
-func (m *mockBridge) approveBridgeContract(txOpts *bind.TransactOpts, amount *big.Int) (*types.Transaction, error) {
+func (m *mockBridge) bridgeContractAllowance(ctx context.Context, assetID uint32) (*big.Int, error) {
 	panic("not implemented")
 }
-func (m *mockBridge) requiresBridgeContractApproval() bool { panic("not implemented") }
-func (m *mockBridge) initiateBridge(txOpts *bind.TransactOpts, destAssetID uint32, amount *big.Int) (*types.Transaction, error) {
+func (m *mockBridge) approveBridgeContract(txOpts *bind.TransactOpts, amount *big.Int, assetID uint32) (*types.Transaction, error) {
 	panic("not implemented")
 }
-func (m *mockBridge) completeBridge(txOpts *bind.TransactOpts, completionData []byte) (*types.Transaction, error) {
+func (m *mockBridge) requiresBridgeContractApproval(assetID uint32) bool { panic("not implemented") }
+func (m *mockBridge) initiateBridge(txOpts *bind.TransactOpts, sourceAssetID, destAssetID uint32, amount *big.Int) (*types.Transaction, error) {
+	panic("not implemented")
+}
+func (m *mockBridge) completeBridge(txOpts *bind.TransactOpts, destAssetID uint32, mintInfo []byte) (*types.Transaction, error) {
 	tx := types.NewTransaction(0, common.Address{}, big.NewInt(0), 0, nil, encode.RandomBytes(32))
 	m.completeBridgeCalled = tx.Hash()
 	return tx, nil
 }
-func (m *mockBridge) initiateBridgeGas() uint64 { return 0 }
-func (m *mockBridge) completeBridgeGas() uint64 { return 0 }
-func (m *mockBridge) requiresCompletion() bool {
+func (m *mockBridge) initiateBridgeGas(sourceAssetID uint32) uint64 { return 0 }
+func (m *mockBridge) completeBridgeGas(destAssetID uint32) uint64   { return 0 }
+func (m *mockBridge) requiresCompletion(destAssetID uint32) bool {
 	return m.requiresCompletionResult
 }
 func (m *mockBridge) verifyBridgeCompletion(ctx context.Context, data []byte) (bool, error) {
 	return m.verifyBridgeCompletionResult, m.verifyBridgeCompletionError
 }
-func (m *mockBridge) supportedDestinations() []uint32 {
+func (m *mockBridge) supportedDestinations(sourceAssetID uint32) []uint32 {
 	return []uint32{}
 }
-func (m *mockBridge) requiresFollowUpCompletion() bool {
+func (m *mockBridge) requiresFollowUpCompletion(destAssetID uint32) bool {
 	return m.requiresFollowUpCompletionResult
 }
 func (m *mockBridge) getFollowUpCompletionData(ctx context.Context, completionTxID string) (required bool, data []byte, err error) {
@@ -6128,7 +6130,8 @@ func TestBridgeManager(t *testing.T) {
 
 		db := &tTxDB{}
 		db.pendingBridges = pendingBridges
-		bm, err := newBridgeManager(context.Background(), BipID, BipID, mb, emitter, db, 100*time.Millisecond, log)
+		bridges := map[string]bridge{"mock": mb}
+		bm, err := newBridgeManager(context.Background(), BipID, bridges, emitter, db, 100*time.Millisecond, log)
 		if err != nil {
 			t.Fatalf("error creating bridge manager: %v", err)
 		}
@@ -6147,8 +6150,11 @@ func TestBridgeManager(t *testing.T) {
 
 		// Add a pending bridge
 		burnTxID := "tx1"
+		sourceAssetID := uint32(BipID)
 		destAssetID := uint32(123)
-		bm.addPendingBridge(burnTxID, destAssetID, 1)
+		amount := uint64(1e9)
+		bridgeName := "mock"
+		bm.addPendingBridge(burnTxID, sourceAssetID, destAssetID, amount, bridgeName)
 
 		// Wait for getMintInfo to be called at least twice
 		for i := 0; i < 2; i++ {
@@ -6173,8 +6179,11 @@ func TestBridgeManager(t *testing.T) {
 
 		// Add a pending bridge
 		burnTxID := "tx2"
+		sourceAssetID := uint32(BipID)
 		destAssetID := uint32(60001)
-		bm.addPendingBridge(burnTxID, destAssetID, 1)
+		amount := uint64(2e9)
+		bridgeName := "mock"
+		bm.addPendingBridge(burnTxID, sourceAssetID, destAssetID, amount, bridgeName)
 
 		// Wait for and verify the notification
 		select {
@@ -6199,8 +6208,11 @@ func TestBridgeManager(t *testing.T) {
 
 		// Add a pending bridge
 		burnTxID := "tx3"
+		sourceAssetID := uint32(BipID)
 		destAssetID := uint32(789)
-		bm.addPendingBridge(burnTxID, destAssetID, 1)
+		amount := uint64(3e9)
+		bridgeName := "mock"
+		bm.addPendingBridge(burnTxID, sourceAssetID, destAssetID, amount, bridgeName)
 
 		db.txToGet = &extendedWalletTx{
 			WalletTransaction: &asset.WalletTransaction{
@@ -6452,27 +6464,26 @@ func TestCompleteBridge(t *testing.T) {
 			w, _, _, shutdown := tassetWallet(BipID)
 			defer shutdown()
 
-			bridgeWallet := &ETHBridgeWallet{ETHWallet: w.(*ETHWallet)}
-			bridgeWallet.manager = &bridgeManager{
-				bridge: tt.bridge,
-			}
+			ethWallet := w.(*ETHWallet)
+			// Set up bridges map with the test bridge
+			ethWallet.bridges = map[string]bridge{"mock": tt.bridge}
 
 			emitChan := make(chan asset.WalletNotification, 128)
-			bridgeWallet.emit = asset.NewWalletEmitter(emitChan, BipID, bridgeWallet.log)
+			ethWallet.emit = asset.NewWalletEmitter(emitChan, BipID, ethWallet.log)
 
 			txDB := &tTxDB{
 				txToGet:  tt.dbTx,
 				getTxErr: tt.dbErr,
 			}
-			bridgeWallet.txDB = txDB
+			ethWallet.txDB = txDB
 
 			if tt.pendingTx != nil {
-				bridgeWallet.pendingTxs = []*extendedWalletTx{tt.pendingTx}
+				ethWallet.pendingTxs = []*extendedWalletTx{tt.pendingTx}
 			} else {
-				bridgeWallet.pendingTxs = []*extendedWalletTx{}
+				ethWallet.pendingTxs = []*extendedWalletTx{}
 			}
 
-			err := bridgeWallet.CompleteBridge(context.Background(), initiationTx, 1e9, []byte("completionData"))
+			err := ethWallet.CompleteBridge(context.Background(), initiationTx, 1e9, []byte("completionData"), "mock")
 
 			if tt.expectErr {
 				if err == nil {
