@@ -126,13 +126,8 @@ require (
 	github.com/ferranbt/fastssz v0.1.2 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
-<<<<<<< HEAD
-	github.com/godbus/dbus/v5 v5.0.4 // indirect
-	github.com/gofrs/flock v0.12.1 // indirect
-=======
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
-	github.com/gofrs/flock v0.8.1 // indirect
->>>>>>> 356f46ce (multi: Wallet sync working and type changed to seeded)
+	github.com/gofrs/flock v0.12.1 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/golang/snappy v0.0.5-0.20220116011046-fa5810519dcb // indirect
 	github.com/google/uuid v1.3.0 // indirect

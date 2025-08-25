@@ -17,7 +17,7 @@ func TestCliGenerateRefreshWalletCmd(t *testing.T) {
 	home, _ := os.UserHomeDir()
 	installedToolsDir := path.Join(home, InstalledToolsDir)
 	testDir := path.Join(home, TestDir)
-	net := dex.Testnet // Testnet 5m from checkpoint 550000; Mainnet 5s from checkpoint 3375700
+	net := dex.Testnet // Stagenet 5m from checkpoint 550000; Mainnet 5s from checkpoint 3375700
 	cliToolsDir := installedToolsDir
 	dataDir := testDir
 	trustedDaemons := getTrustedDaemons(net, true, dataDir)

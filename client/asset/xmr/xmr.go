@@ -22,7 +22,7 @@ import (
 const (
 	version           = 0
 	BipID             = 128
-	minNetworkVersion = 180400 // v0.18.4.0-release
+	minNetworkVersion = 180401 // v0.18.4.1-release
 	walletTypeRPC     = "XmrRPC"
 	TxMeanSize        = 2000 // https://xmrchain.net/txpool
 )
