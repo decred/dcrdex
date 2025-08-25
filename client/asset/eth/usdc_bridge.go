@@ -93,6 +93,7 @@ type bridge interface {
 var (
 	usdcEthID, _     = dex.BipSymbolID("usdc.eth")
 	usdcPolygonID, _ = dex.BipSymbolID("usdc.polygon")
+	usdcBaseID, _    = dex.BipSymbolID("usdc.base")
 )
 
 type usdcBridgeInfo struct {
@@ -131,11 +132,26 @@ var usdcBridgeInfos = map[uint32]map[dex.Network]*usdcBridgeInfo{
 			usdcAssetID:            usdcPolygonID,
 		},
 	},
+	usdcBaseID: {
+		dex.Mainnet: {
+			tokenMessengerAddr:     common.HexToAddress("0x9daF8c91AEFAE50b9c0E69629D3F6Ca40cA3B3FE"),
+			messageTransmitterAddr: common.HexToAddress("0xF3be9355363857F3e001be68856A2f96b4C39Ba9"),
+			domainID:               6,
+			usdcAssetID:            usdcBaseID,
+		},
+		dex.Testnet: {
+			tokenMessengerAddr:     common.HexToAddress("0x9f3B8679c73C2Fef8b59B4f3444d4e156fb70AA5"),
+			messageTransmitterAddr: common.HexToAddress("0x7865fAfC2db2093669d92c0F33AeEF291086BEFD"),
+			domainID:               6,
+			usdcAssetID:            usdcBaseID,
+		},
+	},
 }
 
 var baseChainToUSDCAssetID = map[uint32]uint32{
 	ethID:     usdcEthID,
 	polygonID: usdcPolygonID,
+	baseID:    usdcBaseID,
 }
 
 var usdcBridgeAttestationUrl = map[dex.Network]string{
@@ -450,10 +466,13 @@ func (b *usdcBridge) followUpCompleteBridgeGas() uint64 {
 }
 
 func (b *usdcBridge) supportedDestinations(sourceAssetID uint32) []uint32 {
-	if sourceAssetID == usdcEthID {
-		return []uint32{usdcPolygonID}
-	} else if sourceAssetID == usdcPolygonID {
-		return []uint32{usdcEthID}
+	switch sourceAssetID {
+	case usdcEthID:
+		return []uint32{usdcPolygonID, usdcBaseID}
+	case usdcPolygonID:
+		return []uint32{usdcEthID, usdcBaseID}
+	case usdcBaseID:
+		return []uint32{usdcEthID, usdcPolygonID}
 	}
 	return nil
 }

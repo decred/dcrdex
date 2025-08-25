@@ -575,6 +575,7 @@ var bipIDs = map[uint32]string{
 	6969:  "roger",
 	7777:  "btv",
 	8339:  "btq",
+	8453:  "base", // actually weth.base
 	8888:  "sbtc",
 	8964:  "nuls",
 	8999:  "btp",
@@ -610,6 +611,9 @@ var bipIDs = map[uint32]string{
 	60003: "matic.eth", // Old MATIC token on Ethereum, not POL token
 	60004: "polygon.eth",
 	// END Ethereum reserved token range
+	// Base reserved token range 61000-61999
+	61000: "usdc.base",
+	// END Base reserved token range
 	65536:  "keth",
 	88888:  "ryo[c0ban]",
 	99999:  "wicc",

@@ -328,6 +328,47 @@ func (m *MRPCTest) TestReceiptsHaveEffectiveGasPrice(t *testing.T) {
 	})
 }
 
+func (m *MRPCTest) TestBaseReceiptsHaveEffectiveGasPrice(t *testing.T) {
+	m.withClient(t, dex.Mainnet, func(ctx context.Context, cl *multiRPCClient) {
+		if err := cl.withAny(ctx, func(ctx context.Context, p *provider) error {
+			blk, err := p.ec.BaseBlockByNumber(ctx, nil)
+			if err != nil {
+				return fmt.Errorf("BlockByNumber error: %v", err)
+			}
+			h := blk.Number()
+			const m = 10 // how many txs
+			var n int
+			for n < m {
+				txs := blk.Transactions()
+				fmt.Printf("##### Block %d has %d transactions", h, len(txs))
+				for _, tx := range txs {
+					n++
+					var txHash common.Hash
+					th := tx.Hash()
+					txHash.SetBytes(th[:])
+					r, err := cl.transactionReceipt(ctx, txHash)
+					if err != nil {
+						return fmt.Errorf("transactionReceipt error: %v", err)
+					}
+					if r.EffectiveGasPrice != nil {
+						fmt.Printf("##### Effective gas price: %s \n", r.EffectiveGasPrice)
+					} else {
+						fmt.Printf("##### No effective gas price for tx %s \n", tx.Hash())
+					}
+				}
+				h.Add(h, big.NewInt(-1))
+				blk, err = p.ec.BaseBlockByNumber(ctx, h)
+				if err != nil {
+					return fmt.Errorf("error getting block %d: %w", h, err)
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
 func (m *MRPCTest) withClient(t *testing.T, net dex.Network, f func(context.Context, *multiRPCClient)) {
 	seed, providers := m.readProviderFile(t, net)
 	dir := t.TempDir()
@@ -396,6 +437,42 @@ func (m *MRPCTest) BlockStats(t *testing.T, steps, skipN int, net dex.Network) {
 			for step := 0; step < steps; step++ {
 				if step != 0 {
 					blk, err = p.ec.BlockByNumber(ctx, tip.Add(tip, big.NewInt(int64(-skipN*step))))
+					if err != nil {
+						return err
+					}
+				}
+				txs := blk.Transactions()
+				fmt.Printf("##### Block %d, %d transactions, gas limit = %d \n", blk.Number(), len(txs), blk.GasLimit())
+				const maxTxs = 10
+				var n int
+				for _, tx := range txs {
+
+					fmt.Println("##### Tx tip cap =", fmtFee(tx.GasTipCap()))
+					n++
+					if n >= maxTxs {
+						break
+					}
+				}
+			}
+
+			return nil
+		}); err != nil {
+			t.Fatalf("Error getting block: %v", err)
+		}
+	})
+}
+
+func (m *MRPCTest) BaseBlockStats(t *testing.T, steps, skipN int, net dex.Network) {
+	m.withClient(t, net, func(ctx context.Context, cl *multiRPCClient) {
+		if err := cl.withAny(ctx, func(ctx context.Context, p *provider) error {
+			blk, err := p.ec.BaseBlockByNumber(ctx, nil)
+			if err != nil {
+				return err
+			}
+			tip := blk.Number()
+			for step := 0; step < steps; step++ {
+				if step != 0 {
+					blk, err = p.ec.BaseBlockByNumber(ctx, tip.Add(tip, big.NewInt(int64(-skipN*step))))
 					if err != nil {
 						return err
 					}
