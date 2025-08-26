@@ -54,7 +54,7 @@ func TestUserDaemons(t *testing.T) {
 	}
 	f.Close()
 
-	fmt.Println("Can be used for CLI generate refresh") // TODO(xmr) maybe check output == expected
+	// fmt.Println("Can be used for CLI generate refresh") // TODO(xmr) maybe check output == expected
 	td := getTrustedDaemons(dex.Mainnet, true, dataDir)
 	for _, t := range td {
 		fmt.Println(t)
@@ -117,6 +117,83 @@ func TestSimnetFilepaths(t *testing.T) {
 	portBad := getRegtestWalletServerRpcPort(dataDirBad)
 	if portBad != "bad-path" {
 		t.Fatalf("bad path dataDirBad=%s", dataDirBad)
+	}
+}
+
+func TestToolsVersion(t *testing.T) {
+	var toolsDir = "monero-win-x64-v0.18.4.1"
+	err := checkToolsVersion(toolsDir)
+	if err != nil {
+		t.Fatalf("bad tools version %s", toolsDir)
+	}
+	toolsDir = "monero-mac-x64-v0.18.4.1"
+	err = checkToolsVersion(toolsDir)
+	if err != nil {
+		t.Fatalf("bad tools version %s", toolsDir)
+	}
+	toolsDir = "monero-linux-x64-v0.18.4.1"
+	err = checkToolsVersion(toolsDir)
+	if err != nil {
+		t.Fatalf("bad tools version %s", toolsDir)
+	}
+	toolsDir = "monero-linux-armv8-v0.18.4.1"
+	err = checkToolsVersion(toolsDir)
+	if err != nil {
+		t.Fatalf("bad tools version %s", toolsDir)
+	}
+	toolsDir = "monero-freebsd-x64-v0.18.4.1"
+	err = checkToolsVersion(toolsDir)
+	if err != nil {
+		t.Fatalf("bad tools version %s", toolsDir)
+	}
+	toolsDir = "freebsd-x64-v0.18.4.1"
+	err = checkToolsVersion(toolsDir)
+	if err == nil {
+		t.Fatalf("expected bad tools version %s", toolsDir)
+	}
+}
+
+func TestMoneroVersion(t *testing.T) {
+	_, err := newMoneroVersionFromVersionString("x.y.3.6")
+	if err == nil {
+		t.Fatal("expected x.y.3.6 invalid version")
+	}
+	_, err = newMoneroVersionFromVersionString("7.3.6")
+	if err == nil {
+		t.Fatal("expected 7.3.6 invalid version")
+	}
+	m0, err := newMoneroVersionFromVersionString("0.7.3.6")
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	if m0.valid() {
+		t.Fatalf("%v", err)
+	}
+
+	m1, err := newMoneroVersionFromVersionString("0.18.4.0")
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	if !m1.valid() {
+		t.Fatalf("0.18.4.0 - expected valid got invalid")
+	}
+
+	m2, err := newMoneroVersionFromVersionString("0.18.4.1")
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	if !m2.valid() {
+		t.Fatalf("0.18.4.1 - expected valid got invalid")
+	}
+	if m1.compare(m2) > 0 {
+		t.Fatal("compare error")
+
+	}
+	if m1.compare(m2) == 0 {
+		t.Fatal("compare error")
+	}
+	if !(m1.compare(m2) < 0) {
+		t.Fatal("compare error")
 	}
 }
 

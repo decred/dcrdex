@@ -82,6 +82,9 @@ func (r *xmrRpc) probeDaemon() error {
 // startWalletServer starts the wallet server and connects it to the running daemon
 func (r *xmrRpc) startWalletServer(ctx context.Context) error {
 	walletRpc := path.Join(r.cliToolsDir, WalletServerRpcName)
+	if runtime.GOOS == "windows" {
+		walletRpc += ".exe"
+	}
 	cmd := exec.CommandContext(ctx, walletRpc)
 	serverAddr := DaemonAddressParam + r.daemonAddr
 	cmd.Args = append(cmd.Args, serverAddr)
@@ -137,6 +140,9 @@ func getRegtestWalletServerRpcPort(dataDir string) string {
 
 func cliGenerateRefreshWallet(ctx context.Context, trustedDaemon string, net dex.Network, dataDir, cliToolsDir, pw string, refresh bool) error {
 	cli := path.Join(cliToolsDir, CliName)
+	if runtime.GOOS == "windows" {
+		cli += ".exe"
+	}
 	cmd := exec.CommandContext(ctx, cli)
 	switch net {
 	case dex.Mainnet:

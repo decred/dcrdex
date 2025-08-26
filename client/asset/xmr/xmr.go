@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,11 +22,10 @@ import (
 )
 
 const (
-	version           = 0
-	BipID             = 128
-	minNetworkVersion = 180401 // v0.18.4.1-release
-	walletTypeRPC     = "XmrRPC"
-	TxMeanSize        = 2000 // https://xmrchain.net/txpool
+	version       = 0
+	BipID         = 128
+	walletTypeRPC = "XmrRPC"
+	TxMeanSize    = 2000 // https://xmrchain.net/txpool
 )
 
 var (
@@ -33,6 +34,7 @@ var (
 			Key:         "toolsdir",
 			DisplayName: "Monero CLI tools folder",
 			Description: "Required. The path to the Monero CLI folder you downloaded from Monero github." +
+				" This should be the Latest release version." +
 				" A linux example is '/home/<user>/monero-x86_64-linux-gnu-v0.18.4.1'." +
 				" If you later change this setting you need restart bisonw for the changes to take effect.",
 			DefaultValue:  "",
@@ -158,12 +160,76 @@ func parseWalletConfig(settings map[string]string) (*configSettings, error) {
 
 // checkConfig does some basic checking of incoming settings
 func checkConfig(s *configSettings) error {
-	_, file := filepath.Split(s.CliToolsDir)
-	if !strings.HasPrefix(file, "monero") {
+	_, dir := filepath.Split(s.CliToolsDir)
+	err := checkToolsVersion(dir)
+	if err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(s.CliToolsDir)
+	if err != nil {
+		return err
+	}
+	if len(entries) == 0 {
+		return fmt.Errorf("empty folder %s", dir)
+	}
+	walletRpc := WalletServerRpcName
+	cli := CliName
+	if runtime.GOOS == "windows" {
+		walletRpc += ".exe"
+		cli += ".exe"
+	}
+	gotWalletRpc := false
+	gotCli := false
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if walletRpc == entry.Name() {
+			gotWalletRpc = true
+			continue
+		}
+		if cli == entry.Name() {
+			gotCli = true
+			continue
+		}
+		if gotWalletRpc && gotCli {
+			break
+		}
+	}
+	if !gotWalletRpc || !gotCli {
+		var missingWalletRpc string
+		if !gotWalletRpc {
+			missingWalletRpc = walletRpc
+		}
+		var missingCli string
+		if !gotCli {
+			missingCli = cli
+		}
+		return fmt.Errorf("missing wallet tools: %s %s in folder %s", missingWalletRpc, missingCli, dir)
+	}
+	return nil
+}
+
+func checkToolsVersion(dir string) error {
+	if !strings.HasPrefix(dir, "monero") {
 		return fmt.Errorf("tools folder does not start with 'monero'")
 	}
-	// TODO(xmr) more checks
-	// - check user installed monero tools dir and the 2 needed files inside
+	i := strings.LastIndex(dir, "v")
+	if i < 0 {
+		return fmt.Errorf("start of version string 'v' not found in %s", dir)
+	}
+	last := dir[i:]
+	if len(last) <= 1 {
+		return fmt.Errorf("version too short %s", dir)
+	}
+	ver := last[1:]
+	mv, err := newMoneroVersionFromVersionString(ver)
+	if err != nil {
+		return err
+	}
+	if !mv.valid() {
+		return fmt.Errorf("invalid version %s", ver)
+	}
 	return nil
 }
 
