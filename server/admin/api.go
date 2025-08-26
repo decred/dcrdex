@@ -83,11 +83,8 @@ func (s *Server) apiAsset(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		errs = append(errs, fmt.Sprintf("unable to get current fee rate: %v", err))
 	} else {
-		scaledFeeRate = s.core.ScaleFeeRate(assetID, currentFeeRate)
 		// Limit the scaled fee rate just as in (*Market).processReadyEpoch.
-		if scaledFeeRate > asset.MaxFeeRate {
-			scaledFeeRate = asset.MaxFeeRate
-		}
+		scaledFeeRate = min(s.core.ScaleFeeRate(assetID, currentFeeRate), asset.MaxFeeRate)
 	}
 
 	synced, err := backend.Synced()
