@@ -159,7 +159,7 @@ func (s *SPVPeerManager) resolveAddress(addr string) (string, error) {
 	return net.JoinHostPort(ip, strPort), nil
 }
 
-// peerWithResolvedAddress checks to see if there is a peer with a resolved
+// peerWithResolvedAddr checks to see if there is a peer with a resolved
 // address in s.peers, and if so, returns the address that was user to add
 // the peer.
 func (s *SPVPeerManager) peerWithResolvedAddr(resolvedAddr string) (string, bool) {
