@@ -1081,10 +1081,7 @@ func marketBuyQuoteAmt(lots uint64) uint64 {
 	nSell := len(bookSellOrders)
 	for lots > 0 && i < nSell {
 		sellOrder := bookSellOrders[nSell-1-i]
-		orderLots := sellOrder.Quantity / LotSize
-		if orderLots > lots {
-			orderLots = lots
-		}
+		orderLots := min(sellOrder.Quantity/LotSize, lots)
 		lots -= orderLots
 
 		amt += matcher.BaseToQuote(sellOrder.Rate, orderLots*LotSize)

@@ -185,10 +185,7 @@ out:
 	t.Logf("%d unexpected empty scriptSig", stats.empty)
 	numUnknown := len(unknowns)
 	if numUnknown > 0 {
-		numToShow := 5
-		if numUnknown < numToShow {
-			numToShow = numUnknown
-		}
+		numToShow := min(numUnknown, 5)
 		t.Logf("showing %d of %d unknown scripts", numToShow, numUnknown)
 		for i, unknown := range unknowns {
 			if i == numToShow {
@@ -310,10 +307,7 @@ out:
 	t.Logf("%d P2PK(H) UTXO retrieval errors", stats.utxoErr)
 	numUnknown := len(unknowns)
 	if numUnknown > 0 {
-		numToShow := 5
-		if numUnknown < numToShow {
-			numToShow = numUnknown
-		}
+		numToShow := min(numUnknown, 5)
 		t.Logf("showing %d of %d unknown scripts", numToShow, numUnknown)
 		for i, unknown := range unknowns {
 			if i == numToShow {

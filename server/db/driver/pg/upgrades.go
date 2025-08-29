@@ -212,10 +212,7 @@ func v2Upgrade(tx *sql.Tx) error {
 			endIdx := ends[i]
 			for idx := starts[i]; idx <= endIdx; idx++ {
 				if idx%50000 == 0 {
-					to := idx + 50000
-					if to > endIdx+1 {
-						to = endIdx + 1
-					}
+					to := min(idx+50000, endIdx+1)
 					log.Infof(" - Processing epochs [%d, %d)...", idx, to)
 				}
 				var rates, quantities []uint64 // don't shadow err from outer scope

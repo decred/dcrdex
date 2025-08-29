@@ -581,11 +581,7 @@ func (m *Market) ResumeEpoch(asSoonAs time.Time) (startEpochIdx int64) {
 	nextEpochIdx := 1 + now/dur
 
 	ms := asSoonAs.UnixMilli()
-	startEpochIdx = 1 + ms/dur
-
-	if startEpochIdx < nextEpochIdx {
-		startEpochIdx = nextEpochIdx
-	}
+	startEpochIdx = max(1+ms/dur, nextEpochIdx)
 	return
 }
 
