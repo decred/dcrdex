@@ -132,9 +132,7 @@ func (d *Driver) Create(cwp *asset.CreateWalletParams) error {
 	if len(cwp.Pass) != 32 {
 		return fmt.Errorf("bad password length %d expected 32", len(cwp.Pass))
 	}
-	fmt.Printf("cwp.Pass = %x(as string:%s\n", cwp.Pass, string(cwp.Pass))
 	pw := hex.EncodeToString(cwp.Pass)
-	fmt.Printf("Hex string cwp.Pass = %s(as byte enc string:%x\n", pw, []byte(cwp.Pass))
 	ks := new(keystore)
 	err = ks.put(pw, cwp.Net)
 	if err != nil {

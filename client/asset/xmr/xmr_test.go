@@ -54,7 +54,6 @@ func TestUserDaemons(t *testing.T) {
 	}
 	f.Close()
 
-	// fmt.Println("Can be used for CLI generate refresh") // TODO(xmr) maybe check output == expected
 	td := getTrustedDaemons(dex.Mainnet, true, dataDir)
 	for _, t := range td {
 		fmt.Println(t)
