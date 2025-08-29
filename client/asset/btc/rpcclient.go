@@ -345,7 +345,7 @@ func (wc *rpcClient) GetTxOut(txHash *chainhash.Hash, index uint32, _ []byte, _ 
 	return wire.NewTxOut(int64(toSatoshi(txOut.Value)), outputScript), uint32(txOut.Confirmations), nil
 }
 
-// getTxOut returns the transaction output info if it's unspent and
+// getTxOutput returns the transaction output info if it's unspent and
 // nil, otherwise.
 func (wc *rpcClient) getTxOutput(txHash *chainhash.Hash, index uint32) (*btcjson.GetTxOutResult, error) {
 	// Note that we pass to call pointer to a pointer (&res) so that

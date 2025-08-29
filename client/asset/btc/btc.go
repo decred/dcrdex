@@ -4330,7 +4330,7 @@ func (btc *baseWallet) SwapPrivate(swaps *asset.PrivateSwaps) (receipts []asset.
 	return receipts, change, txData, fees, nil
 }
 
-// taprootSigHash returns the sig hash to sign to spend a taproot output.
+// tapRootSigHash returns the sig hash to sign to spend a taproot output.
 func tapRootSigHash(prevOutPKScript []byte, prevOutVal uint64, tx *wire.MsgTx) ([32]byte, error) {
 	a := txscript.NewCannedPrevOutputFetcher(prevOutPKScript, int64(prevOutVal))
 	sigHashes := txscript.NewTxSigHashes(tx, a)
