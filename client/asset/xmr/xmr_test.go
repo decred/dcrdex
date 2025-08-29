@@ -1,6 +1,8 @@
 package xmr
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path"
@@ -197,47 +199,62 @@ func TestMoneroVersion(t *testing.T) {
 	}
 }
 
-// WARNING THIS TEST WILL DESTROY ANY EXISTING DEX XMR WALLET PW
-//
-// func TestKeystore(t *testing.T) {
-// 	fmt.Println(runtime.GOOS)
-// 	b := make([]byte, 32)
-// 	rand.Read(b)
-// 	pass := hex.EncodeToString(b)
+// WARNING THIS TEST WILL DESTROY ANY EXISTING DEX XMR WALLET PW ON SIMNET
+func TestKeystore(t *testing.T) {
+	var net dex.Network = dex.Simnet
+	fmt.Println(runtime.GOOS)
+	fmt.Println("network =", net)
 
-// 	s := new(keystore)
-// 	err := s.put(pass)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
+	b := make([]byte, 32)
+	rand.Read(b)
+	pass := hex.EncodeToString(b)
 
-// 	s2 := new(keystore)
-// 	err = s2.put(pass)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
+	s := new(keystore)
+	err := s.put(pass, net)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-// 	pw, err := s.get()
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	fmt.Println(pw)
+	s2 := new(keystore)
+	pass2, err := s2.get(net)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-// 	pw, err = s.get()
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	fmt.Println(pw)
+	if pass != pass2 {
+		t.Fatalf("unexpected stored password mismatch pass %s pass2 %x", pass, pass2)
+	}
 
-// 	err = s.delete()
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	fmt.Println("pw deleted")
+	err = s2.put(pass, net)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-// 	err = s.delete()
-// 	if err == nil {
-// 		fmt.Println("pw deleted again")
-// 		t.Fatal(err)
-// 	}
-// }
+	pw, err := s.get(net)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Println(pw)
+
+	pw2, err := s.get(net)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Println(pw2)
+
+	if pw2 != pw {
+		t.Fatalf("unexpected stored password mismatch pw %s pw2 %s", pw, pw2)
+	}
+
+	err = s.delete(net)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Println("pw deleted")
+
+	err = s.delete(net)
+	if err == nil {
+		fmt.Println("pw deleted again")
+		t.Fatalf("pw deleted again %v", err)
+	}
+}

@@ -54,7 +54,6 @@ type xmrRpc struct {
 	wallet           *rpc.Client
 	walletInfo       *rpcWallet
 	sync             atomic.Bool
-	rescan           atomic.Bool
 }
 
 func newXmrRpc(cfg *asset.WalletConfig, settings *configSettings, network dex.Network,
@@ -129,12 +128,10 @@ func newXmrRpc(cfg *asset.WalletConfig, settings *configSettings, network dex.Ne
 		},
 	}
 	xrpc.sync.Store(false)
-	xrpc.rescan.Store(false)
 	return xrpc, nil
 }
 
-func (r *xmrRpc) syncing() bool    { return r.sync.Load() }
-func (r *xmrRpc) rescanning() bool { return r.rescan.Load() }
+func (r *xmrRpc) syncing() bool { return r.sync.Load() }
 
 func (r *xmrRpc) connect(ctx context.Context) (*sync.WaitGroup, error) {
 	var wg sync.WaitGroup
@@ -184,12 +181,10 @@ func (r *xmrRpc) connect(ctx context.Context) (*sync.WaitGroup, error) {
 }
 
 func (r *xmrRpc) doOpenWallet(ctx context.Context) error {
-	ks := new(keystore)
-	pw, err := ks.get()
+	pw, err := r.getKeystorePw()
 	if err != nil {
-		return fmt.Errorf("failed to retrieve pw %w", err)
+		return err
 	}
-
 	err = r.openWallet(ctx, pw)
 	if err != nil {
 		r.log.Errorf("cannot open wallet - %w", err)
@@ -254,4 +249,27 @@ func (r *xmrRpc) checkDaemon() {
 		r.peersChange(peersNow, nil)
 		r.daemonState.numPeers = peersNow
 	}
+}
+
+func (r *xmrRpc) getKeystorePw() (string, error) {
+	k := new(keystore)
+	p, err := k.get(r.net)
+	if err != nil {
+		return "", fmt.Errorf("keystore error %v", err)
+	}
+	return p, nil
+}
+
+func (r *xmrRpc) unlockApp(spw string) error {
+	p, err := r.getKeystorePw()
+	if err != nil {
+		return fmt.Errorf("keystore error - %v", err)
+	}
+	if p != spw {
+		return fmt.Errorf("incorrect password")
+	}
+	if r.syncing() {
+		return fmt.Errorf("cannot unlock wallet function while syncing")
+	}
+	return nil
 }

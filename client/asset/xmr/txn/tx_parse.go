@@ -7,21 +7,9 @@ import (
 	"fmt"
 )
 
-// This is a minimal parser to get to Vout and count the outputs.
-// There should be exactly 2.
-// - Less than 2 is an error as monero create_tx_2 ensures 2 outputs
-//   even if the second one contains nothing but a 0 amount (blinded)
-//   The outputs order is also shuffled so index 0 is not necessarily
-//   a payment output.
-//   See also: monero wallet2::create_tx_2.
-// - Greater than 2 is not an error in monero but with our simple
-//   usage is only going to happen *extremely* rarely and our code
-//   will have mitigations and assurances that some monero variables
-//   are set to defaults plus other mitigations.
-//   2 or more non-change outputs *can* be combined into one payment.
-//   See also: create_tx_2 and the TX::add method.
-//   So if we see > 2 outputs from a monero constructed but not yet
-//   broadcasted transfer/tx the tx will not be sent by this code.
+// This is a minimal parser to inspect Vin and Vout and maybe grab key images
+// to freeze unspents for private swaps. So far the structs map to monero rpc.
+// We do not parse RCT Signatures, CSLAG or Bulletproof plus fields.
 
 const CurrentTransactionVersion = 2
 

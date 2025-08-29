@@ -109,9 +109,6 @@ func (r *xmrRpc) getInfo() (*rpc.DemonGetInfoResponse, error) {
 
 // getFeeRate gives an estimation for fees (atoms) per byte.
 func (r *xmrRpc) getFeeRate() (uint64, error) {
-	if r.rescanning() {
-		return 0, errRescanning
-	}
 	feeResp, err := r.daemon.DaemonGetFeeEstimate(r.ctx)
 	if err != nil {
 		r.log.Errorf("getFeeRate - %v", err)

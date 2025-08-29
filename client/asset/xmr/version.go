@@ -7,9 +7,9 @@ import (
 )
 
 const (
-	// monero README 0.18.4.1
+	// monero README
 	MinimumVersion     = "0.18.4.0"
-	RecommendedVersion = "0.18.4.1"
+	RecommendedVersion = "0.18.4.2"
 )
 
 var minimumVersion *moneroVersion

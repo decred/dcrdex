@@ -35,7 +35,7 @@ var (
 			DisplayName: "Monero CLI tools folder",
 			Description: "Required. The path to the Monero CLI folder you downloaded from Monero github." +
 				" This should be the Latest release version." +
-				" A linux example is '/home/<user>/monero-x86_64-linux-gnu-v0.18.4.1'." +
+				" A linux example is '/home/<user>/monero-x86_64-linux-gnu-v0.18.4.2'." +
 				" If you later change this setting you need restart bisonw for the changes to take effect.",
 			DefaultValue:  "",
 			ShowByDefault: true,
@@ -96,7 +96,7 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 	if len(coinID) == chainhash.HashSize {
 		var txHash chainhash.Hash
 		copy(txHash[:], coinID)
-		return txHash.String(), nil // TODO(xmr) return stealth outputs
+		return txHash.String(), nil // TODO(xmr) return key images maybe
 	}
 	return (&btc.Driver{}).DecodeCoinID(coinID)
 }
@@ -132,9 +132,11 @@ func (d *Driver) Create(cwp *asset.CreateWalletParams) error {
 	if len(cwp.Pass) != 32 {
 		return fmt.Errorf("bad password length %d expected 32", len(cwp.Pass))
 	}
+	fmt.Printf("cwp.Pass = %x(as string:%s\n", cwp.Pass, string(cwp.Pass))
 	pw := hex.EncodeToString(cwp.Pass)
+	fmt.Printf("Hex string cwp.Pass = %s(as byte enc string:%x\n", pw, []byte(cwp.Pass))
 	ks := new(keystore)
-	err = ks.put(pw)
+	err = ks.put(pw, cwp.Net)
 	if err != nil {
 		return fmt.Errorf("failed to store pw %w", err)
 	}
@@ -142,7 +144,7 @@ func (d *Driver) Create(cwp *asset.CreateWalletParams) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cliToolsDir := configSettings.CliToolsDir
-	trustedDaemons := getTrustedDaemons(cwp.Net, true, cwp.DataDir) // can be used for cli
+	trustedDaemons := getTrustedDaemons(cwp.Net, true, cwp.DataDir) // true: can be used for cli
 	if len(trustedDaemons) == 0 {
 		return fmt.Errorf("no trusted damons")
 	}
@@ -158,7 +160,6 @@ func parseWalletConfig(settings map[string]string) (*configSettings, error) {
 	return xwSettings, nil
 }
 
-// checkConfig does some basic checking of incoming settings
 func checkConfig(s *configSettings) error {
 	_, dir := filepath.Split(s.CliToolsDir)
 	err := checkToolsVersion(dir)
@@ -255,10 +256,12 @@ func newWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		return nil, err
 	}
 	xw := wallet{
-		xmrpc:       xmrpc,
+		net:         network,
 		log:         logger,
 		walletInfo:  *WalletInfo,
 		feePriority: rpc.Priority(feePriority),
+		locked:      true,
+		xmrpc:       xmrpc,
 	}
 	return &xw, nil
 }
@@ -295,10 +298,12 @@ func (c *coin) Value() uint64  { return c.value }
 func (c *coin) TxID() string   { return c.txid }
 
 type wallet struct {
-	xmrpc       *xmrRpc
+	net         dex.Network
 	log         dex.Logger
 	walletInfo  asset.WalletInfo
 	feePriority rpc.Priority
+	locked      bool
+	xmrpc       *xmrRpc
 }
 
 //////////////////
@@ -524,25 +529,6 @@ func (x *wallet) AddressUsed(address string) (bool, error) {
 	return x.xmrpc.getAddressUsage(MainAccountIndex, address)
 }
 
-/////////////////////
-// asset.Rescanner //
-/////////////////////
-
-// wallet implements asset.Rescanner
-var _ asset.Rescanner = (*wallet)(nil)
-
-// Rescan performs a rescan and blocks until it is done.
-//
-// NOTE: only for local daemons - remote daemons with the restricted flag cannot
-// use this. Any remote daemon which does Not have the restricted flag could be
-// mined by anyone or is a spy node anyway.
-//
-// I am going to leave this in for now as monero users may actually wish to run a
-// full node locally and that is possible by configuring a json file.
-func (x *wallet) Rescan(rescanCtx context.Context, bday /* unix time seconds */ uint64) error {
-	return x.xmrpc.rescanBlockchain(rescanCtx)
-}
-
 ////////////////////////////
 // asset.LiveReconfigurer //
 ////////////////////////////
@@ -559,9 +545,6 @@ var _ asset.LiveReconfigurer = (*wallet)(nil)
 func (x *wallet) Reconfigure(reconfCtx context.Context, cfg *asset.WalletConfig, _ /*currentAddress*/ string) (bool, error) {
 	if x.xmrpc.syncing() {
 		return false, errSyncing
-	}
-	if x.xmrpc.rescanning() {
-		return false, errRescanning
 	}
 	configSettings, err := parseWalletConfig(cfg.Settings)
 	if err != nil {
@@ -580,4 +563,33 @@ func (x *wallet) Reconfigure(reconfCtx context.Context, cfg *asset.WalletConfig,
 	}
 	x.feePriority = rpc.Priority(feePriority)
 	return false, nil
+}
+
+/////////////////////////
+// asset.Authenticator //
+/////////////////////////
+
+// Authenticator is a wallet that requires authentication to allow some user functionality.
+var _ asset.Authenticator = (*wallet)(nil)
+
+// Unlock unlocks the exchange wallet if not syncing.
+func (x *wallet) Unlock(pw []byte) error {
+	spw := hex.EncodeToString(pw)
+	err := x.xmrpc.unlockApp(spw)
+	if err != nil {
+		return err
+	}
+	x.locked = false
+	return nil
+}
+
+// Lock locks the exchange wallet.
+func (x *wallet) Lock() error {
+	x.locked = true
+	return nil
+}
+
+// Locked will be true if the wallet is currently locked.
+func (x *wallet) Locked() bool {
+	return x.locked
 }
