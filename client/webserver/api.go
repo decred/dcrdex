@@ -949,16 +949,19 @@ func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
 	if len(init.Seed) > 0 {
 		seed = &init.Seed
 	}
+	fmt.Println("--apiInit.0")
 	mnemonicSeed, err := s.core.InitializeClient(init.Pass, seed)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("initialization error: %w", err))
 		return
 	}
+	fmt.Println("--apiInit.1")
 	err = s.actuallyLogin(w, r, &loginForm{Pass: init.Pass})
 	if err != nil {
 		s.writeAPIError(w, err)
 		return
 	}
+	fmt.Println("--apiInit.2")
 
 	writeJSON(w, struct {
 		OK           bool     `json:"ok"`

@@ -154,6 +154,7 @@ type Config struct {
 }
 
 func New(cfg *Config) (*Tatanka, error) {
+	fmt.Println("--tatanka.New", cfg.ConfigPath)
 	chainCfg, err := loadConfig(cfg.ConfigPath)
 	if err != nil {
 		return nil, fmt.Errorf("error loading config %w", err)

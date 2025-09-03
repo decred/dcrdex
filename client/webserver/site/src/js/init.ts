@@ -60,6 +60,7 @@ export default class InitPage extends BasePage {
   }
 
   async appInited (pw: string, hosts: string[], mnemonic?: string) {
+    console.log("--appInited.0")
     this.mnemonic = mnemonic
     const page = this.page
     await this.quickConfigForm.update(pw, hosts)
@@ -126,10 +127,12 @@ class AppInitForm {
     const loaded = app().loading(this.form)
     // const seed = page.seedInput.value?.replace(/\s+/g, '') // strip whitespace
     const seed = page.seedInput.value ?? ''
+    console.log("--setAppPass.10")
     const res: InitResponse = await postJSON('/api/init', {
       pass: pw,
       seed: seed
     })
+    console.log("--setAppPass.11")
     loaded()
     if (!app().checkResponse(res)) {
       page.appPWErrMsg.textContent = res.msg

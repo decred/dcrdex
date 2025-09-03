@@ -121,7 +121,6 @@ func (c *Client) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) {
 					c.log.Errorf("Received nil message")
 					continue
 				}
-				c.log.Infof("Received message: %v", msg)
 				c.handle(msg, sendResponse)
 			case <-ctx.Done():
 				return
