@@ -48,19 +48,19 @@ func init() {
 	asset.Register(tUTXOAssetA.ID, &tDriver{
 		decodedCoinID: tUTXOAssetA.Symbol + "-coin",
 		winfo:         tWalletInfo,
-	})
+	}, true)
 	asset.Register(tUTXOAssetB.ID, &tCreator{
 		tDriver: &tDriver{
 			decodedCoinID: tUTXOAssetB.Symbol + "-coin",
 			winfo:         tWalletInfo,
 		},
-	})
+	}, true)
 	asset.Register(tACCTAsset.ID, &tCreator{
 		tDriver: &tDriver{
 			decodedCoinID: tACCTAsset.Symbol + "-coin",
 			winfo:         tWalletInfo,
 		},
-	})
+	}, true)
 }
 
 var (

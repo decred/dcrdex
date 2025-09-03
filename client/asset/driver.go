@@ -67,14 +67,14 @@ func withDriver(assetID uint32, f func(Driver) error) error {
 }
 
 // Register should be called by the init function of an asset's package.
-func Register(assetID uint32, driver Driver) {
+func Register(assetID uint32, driver Driver, overwrite ...bool) {
 	driversMtx.Lock()
 	defer driversMtx.Unlock()
 
 	if driver == nil {
 		panic("asset: Register driver is nil")
 	}
-	if _, dup := drivers[assetID]; dup {
+	if _, dup := drivers[assetID]; dup && !(len(overwrite) > 0 && overwrite[0]) {
 		panic(fmt.Sprint("asset: Register called twice for asset driver ", assetID))
 	}
 	if driver.Info().UnitInfo.Conventional.ConversionFactor == 0 {

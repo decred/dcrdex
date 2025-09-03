@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"decred.org/dcrdex/dex"
@@ -428,6 +429,9 @@ func (t *Tatanka) handleSubscription(c *client, msg *msgjson.Message) *msgjson.E
 	if t.skipRelay(msg) {
 		return nil
 	}
+
+	fmt.Println("--handleSubscription.0")
+	defer fmt.Println("--handleSubscription.done")
 
 	var sub *mj.Subscription
 	if err := msg.Unmarshal(&sub); err != nil || sub == nil || sub.Topic == "" {

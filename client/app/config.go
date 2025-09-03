@@ -108,6 +108,8 @@ type CoreConfig struct {
 	UnlockCoinsOnLogin bool `long:"release-wallet-coins" description:"On login or wallet creation, instruct the wallet to release any coins that it may have locked."`
 
 	ExtensionModeFile string `long:"extension-mode-file" description:"path to a file that specifies options for running core as an extension."`
+
+	Mesh bool `long:"mesh" description:"Enable Tatanka Mesh for peer-to-peer trading. This is experimental and not recommended for production use."`
 }
 
 // WebConfig encapsulates the configuration needed for the web server.
@@ -221,6 +223,7 @@ func (cfg *Config) Core(log dex.Logger) *core.Config {
 		NoAutoDBBackup:     cfg.NoAutoDBBackup,
 		ExtensionModeFile:  cfg.ExtensionModeFile,
 		TheOneHost:         cfg.TheOneHost,
+		Mesh:               cfg.Mesh,
 	}
 }
 
