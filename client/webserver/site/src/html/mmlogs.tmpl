@@ -204,17 +204,28 @@
       <div>
         <table class="compact">
           <tr>
-            <td class="grey">[[[ID]]]</td>
-            <td><span><span id="depositID" class="ease-color" ></span><span id="copyDepositID" class="ease-color ico-copy mx-1 pt-0"></span></span></td>
-          </tr>
-          <tr>
             <td class="grey">[[[Amount]]]</td>
             <td><span id="depositAmt"></span></td>
           </tr>
-          <tr>
-            <td class="grey">[[[Fees]]]</td>
+          <tr id="depositTxIdRow" class="d-hide">
+            <td class="grey">[[[deposit_tx_id]]]</td>
+            <td><span><span id="depositTxID" class="ease-color" ></span><span id="copyDepositTxID" class="ease-color ico-copy mx-1 pt-0"></span></span></td>
+          </tr>
+          <tr id="depositFeesRow" class="d-hide">
+            <td class="grey">[[[deposit_tx_fees]]]</td>
             <td><span id="depositFees"></span></td>
           </tr>
+          <tr id="bridgeTxIdRow" class="d-hide">
+            <td class="grey">[[[bridge_tx_id]]]</td>
+            <td><span><span id="bridgeTxID" class="ease-color" ></span><span id="copyBridgeTxID" class="ease-color ico-copy mx-1 pt-0"></span></span></td>
+          </tr>
+          <tr>
+          <tbody id="depositBridgeFeesSection" class="d-hide">
+            <tr id="bridgeFeeRowTmpl">
+              <td class="grey" data-tmpl="label">[[[bridge_fees]]]</td>
+              <td data-tmpl="amount"></td>
+            </tr>
+          </tbody>
           <tr>
             <td class="grey">[[[Status]]]</td>
             <td><span id="depositStatus"></span></td>
@@ -246,11 +257,22 @@
             <td class="grey">[[[Status]]]</td>
             <td><span id="withdrawalStatus"></span></td>
           </tr>
-          <tr>
-            <td class="grey">[[[tx_id]]]</td>
-            <td><span id="withdrawalTxID"></span></td>
+          <tr id="withdrawalTxIdRow" class="d-hide">
+            <td class="grey">[[[withdrawal_tx_id]]]</td>
+            <td><span><span id="withdrawalTxID" class="ease-color"></span><span id="copyWithdrawalTxID" class="ease-color ico-copy mx-1 pt-0"></span></span></td>
+          </tr>
+          <tr id="withdrawalFeesRow" class="d-hide">
+            <td class="grey">[[[withdrawal_tx_fees]]]</td>
+            <td><span id="withdrawalFees"></span></td>
+          </tr>
+          <tr id="withdrawalBridgeTxIdRow" class="d-hide">
+            <td class="grey">[[[bridge_tx_id]]]</td>
+            <td><span><span id="withdrawalBridgeTxID" class="ease-color"></span><span id="copyWithdrawalBridgeTxID" class="ease-color ico-copy mx-1 pt-0"></span></span></td>
           </tr>
           <tr>
+          <tbody id="withdrawalBridgeFeesSection" class="d-hide">
+          </tbody>
+          <tr id="withdrawalReceivedRow" class="d-hide">
             <td class="grey">[[[amt_received]]]</td>
             <td><span id="withdrawalReceived"></span></td>
           </tr>

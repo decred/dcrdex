@@ -1039,7 +1039,16 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 		}
 	}
 
-	w.bridgeManager, err = newBridgeManager(ctx, w.baseChainID, w.bridges, w.emit, w.txDB, time.Minute, w.log)
+	w.bridgeManager, err = newBridgeManager(&bridgeManagerConfig{
+		ctx:             ctx,
+		baseChainID:     w.baseChainID,
+		bridges:         w.bridges,
+		emit:            w.emit,
+		txDB:            w.txDB,
+		monitorInterval: time.Minute,
+		log:             w.log,
+		getTxFunc:       w.withLocalTxRead,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -1418,24 +1427,37 @@ type bridgeManager struct {
 	monitorInterval time.Duration
 	txDB            txDB
 	bridges         map[string]bridge
+	getTxFunc       func(common.Hash, func(*extendedWalletTx)) bool
 
 	mtx            sync.RWMutex
 	stopMonitoring context.CancelFunc
 	pendingBridges map[string]*pendingBridge
 }
 
-func newBridgeManager(ctx context.Context, baseChainID uint32, bridges map[string]bridge, emit *asset.WalletEmitter, txDB txDB, monitorInterval time.Duration, log dex.Logger) (*bridgeManager, error) {
+type bridgeManagerConfig struct {
+	ctx             context.Context
+	baseChainID     uint32
+	bridges         map[string]bridge
+	emit            *asset.WalletEmitter
+	txDB            txDB
+	monitorInterval time.Duration
+	log             dex.Logger
+	getTxFunc       func(common.Hash, func(*extendedWalletTx)) bool
+}
+
+func newBridgeManager(cfg *bridgeManagerConfig) (*bridgeManager, error) {
 	manager := &bridgeManager{
-		ctx:             ctx,
-		emit:            emit,
-		txDB:            txDB,
-		bridges:         bridges,
+		ctx:             cfg.ctx,
+		emit:            cfg.emit,
+		txDB:            cfg.txDB,
+		getTxFunc:       cfg.getTxFunc,
+		bridges:         cfg.bridges,
 		pendingBridges:  make(map[string]*pendingBridge),
-		log:             log.SubLogger("BridgeManager"),
-		monitorInterval: monitorInterval,
+		log:             cfg.log.SubLogger("BridgeManager"),
+		monitorInterval: cfg.monitorInterval,
 	}
 
-	pendingBridges, err := txDB.getPendingBridges()
+	pendingBridges, err := cfg.txDB.getPendingBridges()
 	if err != nil {
 		return nil, fmt.Errorf("error getting pending bridges: %v", err)
 	}
@@ -1447,7 +1469,7 @@ func newBridgeManager(ctx context.Context, baseChainID uint32, bridges map[strin
 			continue
 		}
 
-		sourceAssetID := baseChainID
+		sourceAssetID := cfg.baseChainID
 		if tx.TokenID != nil {
 			sourceAssetID = *tx.TokenID
 		}
@@ -1491,6 +1513,18 @@ func (bm *bridgeManager) checkPendingBridges(ctx context.Context) {
 	bm.mtx.RUnlock()
 
 	for initiationTxID, pendingBridge := range pendingBridges {
+		var initiationTx *extendedWalletTx
+		if !bm.getTxFunc(common.HexToHash(initiationTxID), func(tx *extendedWalletTx) {
+			initiationTx = tx
+		}) {
+			bm.log.Errorf("unable to get initiation tx %s", initiationTxID)
+			continue
+		}
+
+		if !initiationTx.Confirmed {
+			continue
+		}
+
 		var completionData []byte
 		if dataVal := pendingBridge.completionData.Load(); dataVal != nil {
 			completionData = dataVal.([]byte)
@@ -1520,7 +1554,7 @@ func (bm *bridgeManager) checkPendingBridges(ctx context.Context) {
 // markBridgeComplete is called when the destination wallet has confirmed the
 // completion of a bridge. The pending bridge is removed from the manager and
 // the db is updated to reflect the completion.
-func (bm *bridgeManager) markBridgeComplete(initiationTxID string, completionTxIDs []string, isComplete bool) {
+func (bm *bridgeManager) markBridgeComplete(initiationTxID string, completionTxIDs []string, amtReceived uint64, isComplete bool) {
 	var deletePendingBridge bool
 	defer func() {
 		if !deletePendingBridge {
@@ -1550,6 +1584,7 @@ func (bm *bridgeManager) markBridgeComplete(initiationTxID string, completionTxI
 
 	bridgeTx.BridgeCounterpartTx.IDs = completionTxIDs
 	bridgeTx.BridgeCounterpartTx.Complete = isComplete
+	bridgeTx.BridgeCounterpartTx.AmountReceived = amtReceived
 	if err := bm.txDB.storeTx(bridgeTx); err != nil {
 		bm.log.Errorf("error storing completed bridge tx: %v", err)
 		return
@@ -3436,7 +3471,11 @@ func (w *assetWallet) approveBridgeContract(ctx context.Context, bridge bridge) 
 		return "", fmt.Errorf("error calculating approval gas: %w", err)
 	}
 
-	ethBal, err := w.balance()
+	baseAssetWallet, err := w.baseAssetWallet()
+	if err != nil {
+		return "", fmt.Errorf("error getting base asset wallet: %w", err)
+	}
+	ethBal, err := baseAssetWallet.balance()
 	if err != nil {
 		return "", fmt.Errorf("error getting eth balance: %w", err)
 	}
@@ -3509,7 +3548,11 @@ func (w *assetWallet) unapproveBridgeContract(ctx context.Context, bridge bridge
 		return "", fmt.Errorf("error calculating approval gas: %w", err)
 	}
 
-	ethBal, err := w.balance()
+	baseAssetWallet, err := w.baseAssetWallet()
+	if err != nil {
+		return "", fmt.Errorf("error getting base asset wallet: %w", err)
+	}
+	ethBal, err := baseAssetWallet.balance()
 	if err != nil {
 		return "", fmt.Errorf("error getting eth balance: %w", err)
 	}
@@ -3568,6 +3611,7 @@ func (w *assetWallet) initiateBridge(ctx context.Context, amt uint64, dest uint3
 		return "", fmt.Errorf("bridge %s not found", bridgeName)
 	}
 
+	// Check that the bridge contract is approved
 	approvalStatus, err := w.bridgeContractApprovalStatus(ctx, bridge)
 	if err != nil {
 		return "", fmt.Errorf("error checking approval status: %w", err)
@@ -3576,11 +3620,27 @@ func (w *assetWallet) initiateBridge(ctx context.Context, amt uint64, dest uint3
 		return "", fmt.Errorf("bridge contract is not approved")
 	}
 
+	// Make sure that the amount is within the bridge's limits
+	bigMin, bigMax, hasLimits, err := bridge.bridgeLimits(w.assetID, dest)
+	if err != nil {
+		return "", fmt.Errorf("error getting bridge limits: %w", err)
+	}
+	min := w.atomize(bigMin)
+	max := w.atomize(bigMax)
+	if hasLimits {
+		if amt < min {
+			return "", fmt.Errorf("amount %d is less than the minimum limit %d", amt, min)
+		}
+		if amt > max {
+			return "", fmt.Errorf("amount %d is greater than the maximum limit %d", amt, max)
+		}
+	}
+
+	// Initiate the bridge
 	maxFeeRate, tipRate, err := w.recommendedMaxFeeRate(ctx)
 	if err != nil {
 		return "", fmt.Errorf("error calculating bridge fee rate: %w", err)
 	}
-
 	return txID, w.withNonce(ctx, func(nonce *big.Int) (*genTxResult, error) {
 		txOpts, err := w.node.txOpts(ctx, 0, bridge.initiateBridgeGas(w.assetID), maxFeeRate, tipRate, nonce)
 		if err != nil {
@@ -3609,6 +3669,14 @@ func (w *assetWallet) initiateBridge(ctx context.Context, amt uint64, dest uint3
 
 // InitiateBridge initiates bridging funds from one chain to another.
 func (w *assetWallet) InitiateBridge(ctx context.Context, amt uint64, dest uint32, bridgeName string) (string, error) {
+	balance, err := w.balance()
+	if err != nil {
+		return "", fmt.Errorf("error getting balance: %w", err)
+	}
+	if balance.Available < amt {
+		return "", fmt.Errorf("insufficient balance: %d < %d", balance.Available, amt)
+	}
+
 	txID, err := w.initiateBridge(ctx, amt, dest, bridgeName)
 	if err != nil {
 		return "", err
@@ -3621,8 +3689,8 @@ func (w *assetWallet) InitiateBridge(ctx context.Context, amt uint64, dest uint3
 
 // MarkBridgeComplete is called when the bridge completion transaction has
 // been confirmed on the destination chain.
-func (w *assetWallet) MarkBridgeComplete(initiationTxID string, completionTxIDs []string, complete bool) {
-	w.bridgeManager.markBridgeComplete(initiationTxID, completionTxIDs, complete)
+func (w *assetWallet) MarkBridgeComplete(initiationTxID string, completionTxIDs []string, amtReceived uint64, complete bool) {
+	w.bridgeManager.markBridgeComplete(initiationTxID, completionTxIDs, amtReceived, complete)
 }
 
 func (w *assetWallet) pendingBridges() ([]*asset.WalletTransaction, error) {
@@ -3813,7 +3881,7 @@ func (w *assetWallet) completeBridgeIfNeeded(ctx context.Context, bridgeTx *asse
 	var sendNote, isComplete bool
 	defer func() {
 		if sendNote {
-			w.emit.BridgeCompleted(bridgeTx.AssetID, bridgeTx.IDs[0], completionTxIDs, isComplete)
+			w.emit.BridgeCompleted(bridgeTx.AssetID, bridgeTx.IDs[0], completionTxIDs, amount, isComplete)
 		}
 	}()
 
@@ -3911,12 +3979,68 @@ func (w *assetWallet) CompleteBridge(ctx context.Context, bridgeTx *asset.Bridge
 }
 
 // SupportedDestinations returns the list of asset IDs that the wallet can bridge funds to.
-func (w *assetWallet) SupportedDestinations() (map[string][]uint32, error) {
-	destinations := map[string][]uint32{}
-	for name, bridge := range w.bridges {
-		destinations[name] = bridge.supportedDestinations(w.assetID)
+func (w *assetWallet) SupportedDestinations() (map[uint32][]string, error) {
+	allBridgeDestinations := map[uint32][]string{}
+
+	for bridgeName, bridge := range w.bridges {
+		destinations := bridge.supportedDestinations(w.assetID)
+		if len(destinations) == 0 {
+			continue
+		}
+		for _, destination := range destinations {
+			if _, ok := allBridgeDestinations[destination]; !ok {
+				allBridgeDestinations[destination] = []string{}
+			}
+			allBridgeDestinations[destination] = append(allBridgeDestinations[destination], bridgeName)
+		}
 	}
-	return destinations, nil
+	return allBridgeDestinations, nil
+}
+
+// BridgeInitiationFeesAndLimits returns the estimated fees, limits, and whether the
+// bridge has limits.
+func (w *assetWallet) BridgeInitiationFeesAndLimits(bridgeName string, destAssetID uint32) (fees uint64, limits [2]uint64, hasLimits bool, err error) {
+	bridge, found := w.bridges[bridgeName]
+	if !found {
+		return 0, [2]uint64{}, false, fmt.Errorf("bridge %s not found", bridgeName)
+	}
+
+	initiateGas := bridge.initiateBridgeGas(w.assetID)
+
+	maxFeeRateWei, _, err := w.recommendedMaxFeeRate(w.ctx)
+	if err != nil {
+		return 0, [2]uint64{}, false, fmt.Errorf("error calculating bridge fee rate: %w", err)
+	}
+	maxFeeRateGwei := dexeth.WeiToGwei(maxFeeRateWei)
+
+	minBig, maxBig, hasLimits, err := bridge.bridgeLimits(w.assetID, destAssetID)
+	if err != nil {
+		return 0, [2]uint64{}, false, fmt.Errorf("error getting bridge limits: %w", err)
+	}
+
+	min := w.atomize(minBig)
+	max := w.atomize(maxBig)
+
+	return initiateGas * maxFeeRateGwei, [2]uint64{min, max}, hasLimits, nil
+}
+
+// BridgeCompletionFees returns the estimated fees for completing a bridge.
+func (w *assetWallet) BridgeCompletionFees(bridgeName string) (uint64, error) {
+	bridge, found := w.bridges[bridgeName]
+	if !found {
+		return 0, fmt.Errorf("bridge %s not found", bridgeName)
+	}
+
+	completeGas := bridge.completeBridgeGas(w.assetID)
+	followUpCompleteGas := bridge.followUpCompleteBridgeGas()
+
+	maxFeeRateWei, _, err := w.recommendedMaxFeeRate(w.ctx)
+	if err != nil {
+		return 0, fmt.Errorf("error calculating bridge fee rate: %w", err)
+	}
+	maxFeeRateGwei := dexeth.WeiToGwei(maxFeeRateWei)
+
+	return (completeGas + followUpCompleteGas) * maxFeeRateGwei, nil
 }
 
 func (w *ETHWallet) canRedeemWithBundler(lotSize uint64, gases *dexeth.Gases, n uint64) (bool, error) {
@@ -5065,6 +5189,19 @@ func (eth *baseWallet) FeeRate() uint64 {
 		return 0
 	}
 	return r
+}
+
+// baseAssetWallet returns the assetWallet of the base asset on the chain.
+func (eth *baseWallet) baseAssetWallet() (*assetWallet, error) {
+	eth.walletsMtx.RLock()
+	defer eth.walletsMtx.RUnlock()
+
+	wallet, ok := eth.wallets[eth.baseChainID]
+	if !ok {
+		return nil, fmt.Errorf("base asset wallet not found")
+	}
+
+	return wallet, nil
 }
 
 func (eth *ETHWallet) checkPeers() {

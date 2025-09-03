@@ -47,6 +47,7 @@ import (
 var supportedCoinbaseTokens = map[uint32]struct{}{
 	60001:  {}, // USDC on ETH
 	60002:  {}, // USDT on ETH
+	61000:  {}, // USDC on BASE
 	966001: {}, // USDC on POLYGON
 }
 
@@ -463,6 +464,8 @@ func newCoinbase(cfg *CEXConfig) (*coinbase, error) {
 		}
 		idTicker[assetID] = ticker
 	}
+
+	addTicker(8453, "ETH")
 
 	for _, a := range asset.Assets() {
 		if a.ID != 966 {
@@ -1338,6 +1341,8 @@ func (c *coinbase) Withdraw(ctx context.Context, assetID uint32, amt uint64, add
 			req.Network = "ethereum"
 		} else if token.ParentID == 966 {
 			req.Network = "polygon"
+		} else if token.ParentID == 8453 {
+			req.Network = "base"
 		} else {
 			return "", 0, fmt.Errorf("unsupported network token: %s", token.Name)
 		}
@@ -1452,6 +1457,13 @@ func (c *coinbase) newProductID(baseID, quoteID uint32) (string, error) {
 	quoteTicker, found := c.idTicker[quoteID]
 	if !found {
 		return "", fmt.Errorf("ticker not found for quote asset ID %d", baseID)
+	}
+
+	if baseTicker == "WETH" {
+		baseTicker = "ETH"
+	}
+	if quoteTicker == "WETH" {
+		quoteTicker = "ETH"
 	}
 
 	return baseTicker + "-" + quoteTicker, nil

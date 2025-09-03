@@ -42,17 +42,21 @@ type CEXOrderEvent struct {
 
 // DepositEvent represents a deposit that a bot made.
 type DepositEvent struct {
-	Transaction *asset.WalletTransaction `json:"transaction"`
-	AssetID     uint32                   `json:"assetID"`
-	CEXCredit   uint64                   `json:"cexCredit"`
+	DepositTx  *asset.WalletTransaction `json:"transaction,omitempty"`
+	BridgeTx   *asset.WalletTransaction `json:"bridgeTx,omitempty"`
+	DexAssetID uint32                   `json:"assetID"`
+	CEXAssetID uint32                   `json:"cexAssetID"`
+	CEXCredit  uint64                   `json:"cexCredit"`
 }
 
 // WithdrawalEvent represents a withdrawal that a bot made.
 type WithdrawalEvent struct {
-	ID          string                   `json:"id"`
-	AssetID     uint32                   `json:"assetID"`
-	Transaction *asset.WalletTransaction `json:"transaction"`
-	CEXDebit    uint64                   `json:"cexDebit"`
+	ID           string                   `json:"id"`
+	DEXAssetID   uint32                   `json:"assetID"`
+	CEXAssetID   uint32                   `json:"cexAssetID"`
+	WithdrawalTx *asset.WalletTransaction `json:"transaction"`
+	BridgeTx     *asset.WalletTransaction `json:"bridgeTx,omitempty"`
+	CEXDebit     uint64                   `json:"cexDebit"`
 }
 
 // MarketMakingEvent represents an action that a market making bot takes.
@@ -172,8 +176,6 @@ var (
 	noPendingKey   = []byte("np")
 )
 
-const balanceStateDBVersion uint32 = 1
-
 func newBoltEventLogDB(ctx context.Context, path string, log dex.Logger) (*boltEventLogDB, error) {
 	db, err := bbolt.Open(path, 0600, nil)
 	if err != nil {
@@ -258,33 +260,6 @@ func calcFinalStateBasedOnEventDiff(runBucket, eventsBucket *bbolt.Bucket, event
 	}
 
 	return finalState, nil
-}
-
-func (db *boltEventLogDB) upgradeDB() error {
-	return db.Update(func(tx *bbolt.Tx) error {
-		botRuns := tx.Bucket(botRunsBucket)
-		versionB := botRuns.Get(versionKey)
-
-		var version uint32
-		if versionB != nil {
-			version = encode.BytesToUint32(versionB)
-		}
-
-		if version < balanceStateDBVersion {
-			err := botRuns.ForEachBucket(func(k []byte) error {
-				err := botRuns.DeleteBucket(k)
-				if err != nil {
-					return err
-				}
-				return nil
-			})
-			if err != nil {
-				return err
-			}
-		}
-
-		return botRuns.Put(versionKey, encode.Uint32Bytes(balanceStateDBVersion))
-	})
 }
 
 // updateEvent is called for each event that is popped off the updateEvent. If
@@ -410,6 +385,22 @@ func (db *boltEventLogDB) storeCfgUpdate(runBucket *bbolt.Bucket, newCfg *BotCon
 	return cfgsBucket.Put(encode.Uint64Bytes(uint64(timestamp)), versionedBytes(0).AddData(cfgB))
 }
 
+func decodeBotConfig(b []byte) (*BotConfig, error) {
+	ver, pushes, err := encode.DecodeBlob(b)
+	if err != nil {
+		return nil, err
+	}
+	if ver != 0 {
+		return nil, fmt.Errorf("unknown version %d", ver)
+	}
+	if len(pushes) != 1 {
+		return nil, fmt.Errorf("expected 1 push for cfg, got %d", len(pushes))
+	}
+
+	cfg := new(BotConfig)
+	return cfg, json.Unmarshal(pushes[0], cfg)
+}
+
 func (db *boltEventLogDB) cfgUpdates(runBucket *bbolt.Bucket) ([]*CfgUpdate, error) {
 	cfgsBucket := runBucket.Bucket(cfgsBucket)
 	if cfgsBucket == nil {
@@ -420,18 +411,7 @@ func (db *boltEventLogDB) cfgUpdates(runBucket *bbolt.Bucket) ([]*CfgUpdate, err
 	cursor := cfgsBucket.Cursor()
 	for k, v := cursor.First(); k != nil; k, v = cursor.Next() {
 		timestamp := int64(binary.BigEndian.Uint64(k))
-		cfg := new(BotConfig)
-		ver, pushes, err := encode.DecodeBlob(v)
-		if err != nil {
-			return nil, err
-		}
-		if ver != 0 {
-			return nil, fmt.Errorf("unknown version %d", ver)
-		}
-		if len(pushes) != 1 {
-			return nil, fmt.Errorf("expected 1 push for cfg, got %d", len(pushes))
-		}
-		err = json.Unmarshal(pushes[0], cfg)
+		cfg, err := decodeBotConfig(v)
 		if err != nil {
 			return nil, err
 		}
@@ -694,11 +674,7 @@ func decodeMarketMakingEvent(eventB []byte) (*MarketMakingEvent, error) {
 	if len(pushes) != 1 {
 		return nil, fmt.Errorf("expected 1 push for event, got %d", len(pushes))
 	}
-	err = json.Unmarshal(pushes[0], e)
-	if err != nil {
-		return nil, err
-	}
-	return e, nil
+	return e, json.Unmarshal(pushes[0], e)
 }
 
 // runEvents returns the events that took place during a run. If n == 0, all of the

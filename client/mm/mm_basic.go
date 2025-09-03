@@ -217,7 +217,7 @@ var errOracleFiatMismatch = errors.New("oracle rate and fiat rate mismatch")
 // If there is no fiat rate available, the empty market rate in the
 // configuration is used.
 func (b *basicMMCalculatorImpl) basisPrice() (uint64, error) {
-	oracleRate := b.msgRate(b.oracle.getMarketPrice(b.baseID, b.quoteID))
+	oracleRate := b.msgRate(b.oracle.getMarketPrice(b.dexBaseID, b.dexQuoteID))
 	b.log.Tracef("oracle rate = %s", b.fmtRate(oracleRate))
 
 	rateFromFiat := b.core.ExchangeRateFromFiatSources()
@@ -453,7 +453,7 @@ func (m *basicMarketMaker) rebalance(newEpoch uint64) {
 }
 
 func (m *basicMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
-	_, bookFeed, err := m.core.SyncBook(m.host, m.baseID, m.quoteID)
+	_, bookFeed, err := m.core.SyncBook(m.host, m.dexBaseID, m.dexQuoteID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sync book: %v", err)
 	}

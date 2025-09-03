@@ -151,6 +151,14 @@ type FeeState struct {
 	StampMS int64  `json:"stampMS"`
 }
 
+// BridgeFeesAndLimits contains the fees and limits for a bridge operation.
+type BridgeFeesAndLimits struct {
+	Fees      map[uint32]uint64 `json:"fees"`
+	MinLimit  uint64            `json:"minLimit"`
+	MaxLimit  uint64            `json:"maxLimit"`
+	HasLimits bool              `json:"hasLimits"`
+}
+
 // ExtensionModeConfig is configuration for running core in extension mode,
 // primarily for restricting certain wallet reconfiguration options.
 type ExtensionModeConfig struct {

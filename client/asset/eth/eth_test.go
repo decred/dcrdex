@@ -6114,6 +6114,9 @@ func (m *mockBridge) completeFollowUpBridge(txOpts *bind.TransactOpts, data []by
 	return tx, nil
 }
 func (m *mockBridge) followUpCompleteBridgeGas() uint64 { return 0 }
+func (m *mockBridge) bridgeLimits(sourceAssetID, destAssetID uint32) (min, max *big.Int, hasLimits bool, err error) {
+	return nil, nil, false, nil
+}
 
 func TestBridgeManager(t *testing.T) {
 	setupWithPendingBridges := func(t *testing.T, pendingBridges []*extendedWalletTx) (*bridgeManager, *mockBridge, chan asset.WalletNotification, *tTxDB, dex.Logger) {
@@ -6132,7 +6135,28 @@ func TestBridgeManager(t *testing.T) {
 		db := &tTxDB{}
 		db.pendingBridges = pendingBridges
 		bridges := map[string]bridge{"mock": mb}
-		bm, err := newBridgeManager(context.Background(), BipID, bridges, emitter, db, 100*time.Millisecond, log)
+
+		getConfirmedTxFunc := func(txHash common.Hash, callback func(*extendedWalletTx)) bool {
+			tx := &extendedWalletTx{
+				WalletTransaction: &asset.WalletTransaction{
+					ID:        txHash.Hex(),
+					Confirmed: true,
+				},
+			}
+			callback(tx)
+			return true
+		}
+
+		bm, err := newBridgeManager(&bridgeManagerConfig{
+			ctx:             context.Background(),
+			baseChainID:     BipID,
+			bridges:         bridges,
+			emit:            emitter,
+			txDB:            db,
+			monitorInterval: 100 * time.Millisecond,
+			log:             log,
+			getTxFunc:       getConfirmedTxFunc,
+		})
 		if err != nil {
 			t.Fatalf("error creating bridge manager: %v", err)
 		}
@@ -6233,7 +6257,7 @@ func TestBridgeManager(t *testing.T) {
 		}
 
 		// Remove the bridge
-		bm.markBridgeComplete(burnTxID, []string{"mintTxID"}, true)
+		bm.markBridgeComplete(burnTxID, []string{"mintTxID"}, 1000000, true)
 
 		// Wait and ensure no more calls occur
 		time.Sleep(300 * time.Millisecond) // Longer than 2 monitor intervals
@@ -6269,6 +6293,73 @@ func TestBridgeManager(t *testing.T) {
 		}
 		if bm.pendingBridges[burnTxID].destAssetID != destAssetID {
 			t.Fatalf("expected pending bridge ID to be %s, and dest asset ID to be %d", burnTxID, destAssetID)
+		}
+	})
+
+	t.Run("SkipUnconfirmedTx", func(t *testing.T) {
+		log := dex.StdOutLogger("TEST", dex.LevelDebug)
+		notificationChan := make(chan asset.WalletNotification, 10)
+		emitter := asset.NewWalletEmitter(notificationChan, BipID, log)
+
+		mb := &mockBridge{
+			getCompletionDataFunc: func(ctx context.Context, txID string) ([]byte, error) {
+				return []byte("completion data"), nil
+			},
+			getCompletionDataCalled: make(chan struct{}, 10),
+		}
+
+		db := &tTxDB{}
+		bridges := map[string]bridge{"mock": mb}
+
+		// Create getTxFunc that returns an unconfirmed transaction
+		getTxFunc := func(txHash common.Hash, callback func(*extendedWalletTx)) bool {
+			tx := &extendedWalletTx{
+				WalletTransaction: &asset.WalletTransaction{
+					ID:        txHash.Hex(),
+					Confirmed: false, // Not confirmed
+				},
+			}
+			callback(tx)
+			return true
+		}
+
+		bm, err := newBridgeManager(&bridgeManagerConfig{
+			ctx:             context.Background(),
+			baseChainID:     BipID,
+			bridges:         bridges,
+			emit:            emitter,
+			txDB:            db,
+			monitorInterval: 100 * time.Millisecond,
+			log:             log,
+			getTxFunc:       getTxFunc,
+		})
+		if err != nil {
+			t.Fatalf("error creating bridge manager: %v", err)
+		}
+
+		// Add a pending bridge
+		burnTxID := "unconfirmed_tx"
+		sourceAssetID := uint32(BipID)
+		destAssetID := uint32(456)
+		amount := uint64(1e9)
+		bridgeName := "mock"
+		bm.addPendingBridge(burnTxID, sourceAssetID, destAssetID, amount, bridgeName)
+
+		// Wait a bit and ensure getCompletionData is NOT called
+		time.Sleep(300 * time.Millisecond)
+		select {
+		case <-mb.getCompletionDataCalled:
+			t.Error("getCompletionData was called for unconfirmed transaction")
+		default:
+			// Expected behavior - no call made
+		}
+
+		// Ensure no notification is sent
+		select {
+		case <-notificationChan:
+			t.Error("unexpected notification for unconfirmed transaction")
+		default:
+			// Expected behavior - no notification
 		}
 	})
 }

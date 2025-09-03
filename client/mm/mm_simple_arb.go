@@ -116,7 +116,8 @@ func (a *simpleArbMarketMaker) arbExistsOnSide(sellOnDEX bool) (exists bool, lot
 		if err != nil {
 			return false, 0, 0, 0, fmt.Errorf("error calculating dex VWAP: %w", err)
 		}
-		cexAvg, cexExtrema, cexFilled, err := a.CEX.VWAP(a.baseID, a.quoteID, sellOnDEX, numLots*lotSize)
+		botCfg := a.botCfg()
+		cexAvg, cexExtrema, cexFilled, err := a.CEX.VWAP(botCfg.CEXBaseID, botCfg.CEXQuoteID, sellOnDEX, numLots*lotSize)
 		if err != nil {
 			return false, 0, 0, 0, fmt.Errorf("error calculating cex VWAP: %w", err)
 		}
@@ -148,7 +149,7 @@ func (a *simpleArbMarketMaker) arbExistsOnSide(sellOnDEX bool) (exists bool, lot
 			return false, 0, 0, 0, fmt.Errorf("error checking dex balance: %w", err)
 		}
 
-		cexSufficient := a.cex.SufficientBalanceForCEXTrade(a.baseID, a.quoteID, !sellOnDEX, cexExtrema, numLots*lotSize, 0 /* quoteQty */, libxc.OrderTypeLimit)
+		cexSufficient := a.cex.SufficientBalanceForCEXTrade(botCfg.CEXBaseID, botCfg.CEXQuoteID, !sellOnDEX, cexExtrema, numLots*lotSize, 0 /* quoteQty */, libxc.OrderTypeLimit)
 		if !dexSufficient || !cexSufficient {
 			if numLots == 1 {
 				return false, 0, 0, 0, nil
@@ -224,7 +225,8 @@ func (a *simpleArbMarketMaker) executeArb(sellOnDex bool, lotsToArb, dexRate, ce
 	defer a.activeArbsMtx.Unlock()
 
 	// Place cex order first. If placing dex order fails then can freely cancel cex order.
-	cexTrade, err := a.cex.CEXTrade(a.ctx, a.baseID, a.quoteID, !sellOnDex, cexRate, lotsToArb*lotSize, 0 /* quoteQty */, libxc.OrderTypeLimit)
+	botCfg := a.botCfg()
+	cexTrade, err := a.cex.CEXTrade(a.ctx, botCfg.CEXBaseID, botCfg.CEXQuoteID, !sellOnDex, cexRate, lotsToArb*lotSize, 0 /* quoteQty */, libxc.OrderTypeLimit)
 	if err != nil {
 		a.log.Errorf("error placing cex order: %v", err)
 		return
@@ -236,7 +238,7 @@ func (a *simpleArbMarketMaker) executeArb(sellOnDex bool, lotsToArb, dexRate, ce
 			a.log.Errorf("error placing dex order: %v", err)
 		}
 
-		err := a.cex.CancelTrade(a.ctx, a.baseID, a.quoteID, cexTrade.ID)
+		err := a.cex.CancelTrade(a.ctx, botCfg.CEXBaseID, botCfg.CEXQuoteID, cexTrade.ID)
 		if err != nil {
 			a.log.Errorf("error canceling cex order: %v", err)
 			// TODO: keep retrying failed cancel
@@ -293,7 +295,8 @@ func (a *simpleArbMarketMaker) selfMatch(sell bool, rate uint64) bool {
 // if they have not yet been filled.
 func (a *simpleArbMarketMaker) cancelArbSequence(arb *arbSequence) {
 	if !arb.cexOrderFilled {
-		err := a.cex.CancelTrade(a.ctx, a.baseID, a.quoteID, arb.cexOrderID)
+		botCfg := a.botCfg()
+		err := a.cex.CancelTrade(a.ctx, botCfg.CEXBaseID, botCfg.CEXQuoteID, arb.cexOrderID)
 		if err != nil {
 			a.log.Errorf("failed to cancel cex trade ID %s: %v", arb.cexOrderID, err)
 		}
@@ -457,13 +460,14 @@ func (a *simpleArbMarketMaker) distribution(additionalDEX, additionalCEX map[uin
 }
 
 func (a *simpleArbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, error) {
-	book, bookFeed, err := a.core.SyncBook(a.host, a.baseID, a.quoteID)
+	book, bookFeed, err := a.core.SyncBook(a.host, a.dexBaseID, a.dexQuoteID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sync book: %v", err)
 	}
 	a.book = book
 
-	err = a.cex.SubscribeMarket(a.ctx, a.baseID, a.quoteID)
+	botCfg := a.botCfg()
+	err = a.cex.SubscribeMarket(a.ctx, botCfg.CEXBaseID, botCfg.CEXQuoteID)
 	if err != nil {
 		bookFeed.Close()
 		return nil, fmt.Errorf("failed to subscribe to cex market: %v", err)
@@ -527,7 +531,7 @@ func (a *simpleArbMarketMaker) botLoop(ctx context.Context) (*sync.WaitGroup, er
 }
 
 func (a *simpleArbMarketMaker) registerFeeGap() {
-	feeGap, err := feeGap(a.core, nil, a.CEX, a.market)
+	feeGap, err := feeGap(a.core, nil, a.CEX, a.market, a.botCfg())
 	if err != nil {
 		a.log.Warnf("error getting fee-gap stats: %v", err)
 		return
