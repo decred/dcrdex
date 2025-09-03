@@ -698,7 +698,7 @@ func (c *MeshConn) sendConnectRequest(cl *tatankaNode, updateSubscriptions bool)
 	mj.SignMessage(c.priv, connectReq)
 
 	var tatankaConfig *mj.TatankaConfig
-	if err := c.requestTT(cl, connectReq, &tatankaConfig, DefaultRequestTimeout); err != nil {
+	if err := c.requestTT(cl, connectReq, &tatankaConfig, DefaultRequestTimeout, true); err != nil {
 		return nil, fmt.Errorf("error requesting tatanka config: %w", err)
 	}
 
@@ -773,12 +773,6 @@ func (c *MeshConn) connectToTatankaNode(ctx context.Context, creds *TatankaCrede
 func (c *MeshConn) handleTatankaMessage(tatankaID tanka.PeerID, pub *secp256k1.PublicKey, msg *msgjson.Message, sendResponse func(*msgjson.Message)) {
 	if c.log.Level() == dex.LevelTrace {
 		c.log.Tracef("Client handling message from tatanka node: route = %s", msg.Route)
-	}
-
-	if err := mj.CheckSig(msg, pub); err != nil {
-		// DRAFT TODO: Record for reputation somehow, no?
-		c.log.Errorf("tatanka node %s sent a bad signature. disconnecting", tatankaID)
-		return
 	}
 
 	if msg.Type == msgjson.Request && msg.Route == mj.RouteTankagram {
@@ -899,10 +893,15 @@ func (c *MeshConn) RequestMesh(msg *msgjson.Message, thing any, opts ...RequestO
 	return nil
 }
 
-func (c *MeshConn) requestTT(tt NetworkBackend, msg *msgjson.Message, thing any, timeout time.Duration) (err error) {
+func (c *MeshConn) requestTT(tt *tatankaNode, msg *msgjson.Message, thing any, timeout time.Duration, checkSig ...bool) (err error) {
 	errChan := make(chan error)
 	if err := tt.Request(msg, func(msg *msgjson.Message) {
-		c.log.Infof("received response: %v", msg)
+		if len(checkSig) > 0 && checkSig[0] {
+			if err := mj.CheckSig(msg, tt.pub); err != nil {
+				errChan <- fmt.Errorf("signature check failed: %w", err)
+				return
+			}
+		}
 		if thing != nil {
 			errChan <- msg.UnmarshalResult(thing)
 		} else {
