@@ -6,15 +6,15 @@ A Monero daemon harness for Dex application development.
 
 ## Prerequisites
 
-- **monero-x86_64-linux-gnu-v0.18.4.0** or later <https://github.com/monero-project/monero/releases>
+- **monero-x86_64-linux-gnu-v0.18.4.2** or later <https://github.com/monero-project/monero/releases>
 - **linux** (tested on Ubuntu 22.04, 24.04)
 - **jq** (1.6)
 
 ## Setup
 
-**monero-x86_64-linux-gnu-v0.18.4.0** should be in PATH
+**monero-x86_64-linux-gnu-v0.18.4.2** folder should be in PATH
 
-`export PATH=$PATH:[path-to]/monero-x86_64-linux-gnu-v0.18.4.0`
+`export PATH=$PATH:[path-to]/monero-x86_64-linux-gnu-v0.18.4.2`
 
 ## Run
 
@@ -22,13 +22,16 @@ A Monero daemon harness for Dex application development.
 
 ## Usage With simnet-walletpair
 
-Run once for each time `simnet-walletpair` folder tree is deleted and recreated. _Each run creates a new chain_.
+This harness is designed to be used with `simnet-walletpair` ensuring most development is directly using golang.
+
+Run `harness-beta` once for each time `simnet-walletpair` folder tree is deleted and recreated. _Each run creates a new chain_.
 
 - start _this_ harness so that the daemon is running
-- start all other needed harnesses: dcr, btc, ... dcrdex, simnet-walletpair ...
-- create new dex monero wallet
-- get the wallet primary address from **monero-rpc-log** or **bisonw log** on wallet creation - this is the only wallet address that can be mined to
-- `start-mining` to the wallet primary address to fund the wallet
+- start all other needed harnesses: `dcr`, `btc`, ... `dcrdex`.
+- start simnet-walletpair ...
+- create new dex monero wallet(s) - the password always will be 'sim'.
+- get the wallet primary address from **monero-rpc-log** or **bisonw log** on wallet creation - this is the only wallet address that can be mined to.
+- `start-mining <wallet-primary-address>` to the wallet primary address to fund the wallet.
 
 When continuous mining into the wallet is not desired `stop-mining` to the wallet primary address. Continuous mining into a random but primary wallet address can be done. For example you could `start-mining 4B2u3Ba6Fwu8mebFKELcDc1mjVUkDzMxdYwaAQUmi3G6fhcw9gU5NHp7WiYZ9hJmFvFogHYnEHu3ian8jJhukySDF4GnFcH 30` to progress the chain every 30 seconds.
 

@@ -13,11 +13,10 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/asset"
-	"decred.org/dcrdex/client/asset/btc"
+	"decred.org/dcrdex/client/asset/xmr/txn"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
 	dexxmr "decred.org/dcrdex/dex/networks/xmr"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/dev-warrior777/go-monero/rpc"
 )
 
@@ -90,15 +89,13 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Ne
 
 // DecodeCoinID creates a human-readable representation of a coin ID for Monero.
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
-	// Monero transactions don't have bitcoin-like outputs, so the coinID
-	// will just be the tx hash for now.
-	// TODO(xmr) identify outputs from parsing the tx
-	if len(coinID) == chainhash.HashSize {
-		var txHash chainhash.Hash
-		copy(txHash[:], coinID)
-		return txHash.String(), nil // TODO(xmr) return key images maybe
+	// Monero transactions have outputs but no amounts so so the coinID
+	// will just be the tx hash for now; representing the full output
+	// amount sent. Change is unknown but the fee is known.
+	if len(coinID) != txn.KeyLen {
+		return "", fmt.Errorf("bad tx_hash size")
 	}
-	return (&btc.Driver{}).DecodeCoinID(coinID)
+	return hex.EncodeToString(coinID), nil
 }
 
 // Info returns basic information about the wallet and asset.
@@ -132,7 +129,12 @@ func (d *Driver) Create(cwp *asset.CreateWalletParams) error {
 	if len(cwp.Pass) != 32 {
 		return fmt.Errorf("bad password length %d expected 32", len(cwp.Pass))
 	}
-	pw := hex.EncodeToString(cwp.Pass)
+	var pw string
+	if cwp.Net == dex.Simnet {
+		pw = "sim"
+	} else {
+		pw = hex.EncodeToString(cwp.Pass)
+	}
 	ks := new(keystore)
 	err = ks.put(pw, cwp.Net)
 	if err != nil {
@@ -572,7 +574,12 @@ var _ asset.Authenticator = (*wallet)(nil)
 
 // Unlock unlocks the exchange wallet if not syncing.
 func (x *wallet) Unlock(pw []byte) error {
-	spw := hex.EncodeToString(pw)
+	var spw string
+	if x.net == dex.Simnet {
+		spw = "sim"
+	} else {
+		spw = hex.EncodeToString(pw)
+	}
 	err := x.xmrpc.unlockApp(spw)
 	if err != nil {
 		return err

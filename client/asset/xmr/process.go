@@ -150,7 +150,7 @@ func cliGenerateRefreshWallet(ctx context.Context, trustedDaemon string, net dex
 	case dex.Testnet: // stagenet
 		cmd.Args = append(cmd.Args, StagenetParam)
 	case dex.Simnet: // regtest
-		return fmt.Errorf("there is no --regtest parameter for monero-wallet-cli - create & sync a wallet manually with simnet tool provided and put into: %s", dataDir)
+		// do nothing - regtest is mimicking mainnet with a daemon started with the --regtest param
 	default:
 		return fmt.Errorf("unknown network")
 	}
@@ -177,6 +177,7 @@ func cliGenerateRefreshWallet(ctx context.Context, trustedDaemon string, net dex
 		sb.WriteString(arg)
 		sb.WriteString(" ")
 	}
+	fmt.Println(sb.String())
 
 	err := cmd.Start()
 	if err != nil {

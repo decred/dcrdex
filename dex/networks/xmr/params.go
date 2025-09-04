@@ -73,7 +73,7 @@ var (
 	// RegressionNetParams are the parameters for simnet.
 	RegressionNetParams = &chaincfg.Params{
 		Name:             "regtest",
-		DefaultPort:      "18080", // usually made the same as mainnet
+		DefaultPort:      "18080", // usually made the same as mainnet but with a daemon started with --regtest
 		CoinbaseMaturity: 10,
 		Net:              0x77bb11a2,
 		GenesisHash:      mustHash("0000000000000000000000000000000000000000000000000000000000000000"), // fakechain

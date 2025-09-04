@@ -223,7 +223,6 @@ func (r *xmrRpc) checkDaemon() {
 	}
 	r.daemonState.Lock()
 	defer r.daemonState.Unlock()
-	// r.log.Tracef("daemon %s --  height: %d, synced: %v, restricted: %v, untrusted: %v", r.daemonAddr, info.Height, info.Sychronized, info.Restricted, info.Untrusted)
 	r.daemonState.synchronized = info.Sychronized
 	// check height change
 	heightNow := info.Height
