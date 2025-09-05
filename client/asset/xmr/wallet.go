@@ -260,7 +260,7 @@ func (r *xmrRpc) estimateTxFeeAtoms(amount uint64, toAddress string, subtract bo
 	return transferEstResp.Fee, nil
 }
 
-func (r *xmrRpc) transferSimple(amount uint64, toAddress string, priority rpc.Priority) (string, error) {
+func (r *xmrRpc) transferSimple(amount uint64, toAddress string, unlock uint64, priority rpc.Priority) (string, error) {
 	if r.syncing() {
 		return "", errSyncing
 	}
@@ -275,9 +275,9 @@ func (r *xmrRpc) transferSimple(amount uint64, toAddress string, priority rpc.Pr
 		Destinations:  destinations,
 		AccountIndex:  MainAccountIndex, // transfer from all subaddresses
 		Priority:      priority,
-		UnlockTime:    0,     // no spend lock
-		GetTxHex:      true,  // not default and needed later
-		GetTxMetadata: false, // default
+		UnlockTime:    unlock, // 0 = no spend lock for n blocks; after the 10 required confirmations
+		GetTxHex:      true,   // not default and needed later
+		GetTxMetadata: false,  // default
 	}
 	transferResp, err := r.wallet.Transfer(r.ctx, &transferRq)
 	if err != nil {

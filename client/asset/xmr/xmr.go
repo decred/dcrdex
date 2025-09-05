@@ -361,8 +361,8 @@ func (x *wallet) SyncStatus() (*asset.SyncStatus, error) {
 // Send sends the exact value to the specified address. This is different
 // from Withdraw, which subtracts the tx fees from the amount sent.
 // The feerate param is ignored and the currently configured priority used.
-func (x *wallet) Send(address string, value uint64, _ uint64) (asset.Coin, error) {
-	txHash, err := x.xmrpc.transferSimple(value, address, x.feePriority)
+func (x *wallet) Send(address string, value uint64 /*feeRate*/, _ uint64) (asset.Coin, error) {
+	txHash, err := x.xmrpc.transferSimple(value, address, 0, x.feePriority)
 	if err != nil {
 		return nil, err
 	}
@@ -597,4 +597,20 @@ func (x *wallet) Lock() error {
 // Locked will be true if the wallet is currently locked.
 func (x *wallet) Locked() bool {
 	return x.locked
+}
+
+//////////////////
+// asset.Sender //
+//////////////////
+
+// Sender does wallet sends with more granular control parameters
+
+var _ asset.Sender = (*wallet)(nil)
+
+func (x *wallet) SendAndLock(address string, value uint64, unlock uint64, feeRate uint64) (asset.Coin, error) {
+	txHash, err := x.xmrpc.transferSimple(value, address, unlock, x.feePriority)
+	if err != nil {
+		return nil, err
+	}
+	return newCoin(txHash, value)
 }
