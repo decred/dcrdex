@@ -12,7 +12,7 @@
 # Development
 ################################################################################
 
-export PATH=$PATH:~/monero-x86_64-linux-gnu-v0.18.4.2
+# export PATH=$PATH:~/monero-x86_64-linux-gnu-v0.18.4.2
 
 export DUMMY=45GjcbHh1fvEyXEA6mDAKqNDMmy1Gon6CNHrdhp9hghfLXQNQj4J76TLtwYGoooKApWLM7kaZwdAxLycceHmuVcELCSFPHq
 
@@ -214,7 +214,7 @@ get_info ${BETA_NODE_RPC_PORT}
 # Watch miner - window 2
 # use 'start-mining address period' to start
 tmux new-window -t $SESSION:2 -n "miner" $SHELL
-tmux send-keys -t $SESSION:2 "echo Mining address is currently limbo: ${MINE_TO}" C-m
+tmux send-keys -t $SESSION:2 "echo Mining address is currently limbo: ${DUMMY}" C-m
 tmux send-keys -t $SESSION:2 "cd ${NODES_ROOT}/harness-ctl" C-m
 
 ################################################################################
