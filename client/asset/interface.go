@@ -1931,3 +1931,10 @@ type InitChecker interface {
 	// some data needed to interact with the contract later.
 	AlreadyInitialized(assetVersion uint32, contract *Contract) (initialized bool, zeroHash, contractData []byte, err error)
 }
+
+// Sender sends with more granular control parameters
+type Sender interface {
+	// SendAndLock sends the exact value to the specified address with an unlock time.
+	// This can be n blocks or n milliseconds depending on interpretation.
+	SendAndLock(address string, value uint64, unlock uint64, feeRate uint64) (Coin, error)
+}

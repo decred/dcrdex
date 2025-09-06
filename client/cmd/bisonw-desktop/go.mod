@@ -14,6 +14,7 @@ require (
 )
 
 require (
+	al.essio.dev/pkg/shellescape v1.5.1 // indirect
 	filippo.io/edwards25519 v1.0.0 // indirect
 	github.com/BurntSushi/toml v1.4.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
@@ -23,12 +24,14 @@ require (
 	github.com/consensys/gnark-crypto v0.18.0 // indirect
 	github.com/crate-crypto/go-eth-kzg v1.3.0 // indirect
 	github.com/crate-crypto/go-ipa v0.0.0-20240724233137-53bbb0ceb27a // indirect
+	github.com/danieljoos/wincred v1.2.2 // indirect
 	github.com/dcrlabs/ltcwallet v0.0.0-20240823165752-3e026e8da010 // indirect
 	github.com/decred/dcrd/container/lru v1.0.0 // indirect
 	github.com/decred/dcrd/crypto/rand v1.0.1 // indirect
 	github.com/decred/dcrd/mixing v0.5.1-0.20250319155359-2b7d311f4a81 // indirect
 	github.com/decred/vspd/client/v4 v4.0.1 // indirect
 	github.com/decred/vspd/types/v3 v3.0.0 // indirect
+	github.com/dev-warrior777/go-monero v0.1.1 // indirect
 	github.com/ethereum/c-kzg-4844/v2 v2.1.0 // indirect
 	github.com/ethereum/go-verkle v0.2.2 // indirect
 	github.com/ferranbt/fastssz v0.1.2 // indirect
@@ -47,6 +50,7 @@ require (
 	github.com/stretchr/testify v1.10.0 // indirect
 	github.com/supranational/blst v0.3.14 // indirect
 	github.com/tadvi/systray v0.0.0-20190226123456-11a2b8fa57af // indirect
+	github.com/zalando/go-keyring v0.2.6 // indirect
 	gopkg.in/square/go-jose.v2 v2.6.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
