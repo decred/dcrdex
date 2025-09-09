@@ -259,7 +259,7 @@ func GweiToWei(v uint64) *big.Int {
 	return new(big.Int).Mul(big.NewInt(int64(v)), gweiFactorBig)
 }
 
-// WeiToGweiFloor converts *big.Int Wei to uint64 Gwei. If v is determined to be
+// WeiToGwei converts *big.Int Wei to uint64 Gwei. If v is determined to be
 // unsuitable for a uint64, zero is returned. For values that are not even
 // multiples of 1 gwei, this function returns the floor.
 func WeiToGwei(v *big.Int) uint64 {

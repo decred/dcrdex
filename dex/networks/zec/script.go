@@ -19,7 +19,7 @@ func TransparentTxFeesZIP317(txInSize, txOutSize uint64) uint64 {
 	return TxFeesZIP317(txInSize, txOutSize, 0, 0, 0, 0)
 }
 
-// TxFeexZIP317 calculates fees for a transaction. The caller must sum up the
+// TxFeesZIP317 calculates fees for a transaction. The caller must sum up the
 // txin and txout, which is the entire serialization size associated with the
 // respective field, including the size of the count varint.
 func TxFeesZIP317(transparentTxInsSize, transparentTxOutsSize uint64, nSpendsSapling, nOutputsSapling, nJoinSplit, nActionsOrchard uint64) uint64 {
