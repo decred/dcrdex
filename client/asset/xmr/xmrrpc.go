@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	WalletServerInitializeWait = 3 * time.Second
+	WalletServerInitializeWait = 5 * time.Second
 	BlockTickerInterval        = 15 * time.Second // ~2m blocks
 )
 
@@ -53,7 +53,7 @@ type xmrRpc struct {
 	daemonState      *rpcDaemon
 	wallet           *rpc.Client
 	walletInfo       *rpcWallet
-	sync             atomic.Bool
+	syncing          atomic.Bool
 }
 
 func newXmrRpc(cfg *asset.WalletConfig, settings *configSettings, network dex.Network,
@@ -127,11 +127,11 @@ func newXmrRpc(cfg *asset.WalletConfig, settings *configSettings, network dex.Ne
 			birthdayBlock:  0,
 		},
 	}
-	xrpc.sync.Store(false)
+	xrpc.syncing.Store(true)
 	return xrpc, nil
 }
 
-func (r *xmrRpc) syncing() bool { return r.sync.Load() }
+func (r *xmrRpc) isSyncing() bool { return r.syncing.Load() }
 
 func (r *xmrRpc) connect(ctx context.Context) (*sync.WaitGroup, error) {
 	var wg sync.WaitGroup
@@ -149,8 +149,15 @@ func (r *xmrRpc) connect(ctx context.Context) (*sync.WaitGroup, error) {
 		err = r.startWalletServer(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("cannot start the wallet server - %w", err)
+		} else {
+			r.log.Debug("started wallet server - waiting for it to initialize")
+			select {
+			case <-ctx.Done():
+				return nil, nil
+			case <-time.After(WalletServerInitializeWait): // must wait before open wallet below
+				r.log.Trace("waited 5s for the wallet server to fully initialize")
+			}
 		}
-		time.Sleep(WalletServerInitializeWait)
 	} else {
 		r.log.Warn("re-entered connect")
 	}
@@ -168,7 +175,7 @@ func (r *xmrRpc) connect(ctx context.Context) (*sync.WaitGroup, error) {
 
 	if !walletSynced {
 		// see also: wallet syncStatus
-		r.sync.Store(true)
+		r.syncing.Store(true)
 	}
 
 	wg.Add(1)
@@ -267,7 +274,7 @@ func (r *xmrRpc) unlockApp(spw string) error {
 	if p != spw {
 		return fmt.Errorf("incorrect password")
 	}
-	if r.syncing() {
+	if r.isSyncing() {
 		return fmt.Errorf("cannot unlock wallet function while syncing")
 	}
 	return nil

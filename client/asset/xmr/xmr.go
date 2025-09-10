@@ -89,7 +89,7 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Ne
 
 // DecodeCoinID creates a human-readable representation of a coin ID for Monero.
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
-	// Monero transactions have outputs but no amounts so so the coinID
+	// Monero transactions have outputs but no amounts so the coinID
 	// will just be the tx hash for now; representing the full output
 	// amount sent. Change is unknown but the fee is known.
 	if len(coinID) != txn.KeyLen {
@@ -182,6 +182,9 @@ func checkConfig(s *configSettings) error {
 	gotWalletRpc := false
 	gotCli := false
 	for _, entry := range entries {
+		if gotWalletRpc && gotCli {
+			break
+		}
 		if entry.IsDir() {
 			continue
 		}
@@ -192,9 +195,6 @@ func checkConfig(s *configSettings) error {
 		if cli == entry.Name() {
 			gotCli = true
 			continue
-		}
-		if gotWalletRpc && gotCli {
-			break
 		}
 	}
 	if !gotWalletRpc || !gotCli {
@@ -260,7 +260,7 @@ func newWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		log:         logger,
 		walletInfo:  *WalletInfo,
 		feePriority: rpc.Priority(feePriority),
-		locked:      true,
+		locked:      false,
 		xmrpc:       xmrpc,
 	}
 	return &xw, nil
@@ -543,7 +543,7 @@ var _ asset.LiveReconfigurer = (*wallet)(nil)
 // - currentAddress ignored.
 // - no restart
 func (x *wallet) Reconfigure(reconfCtx context.Context, cfg *asset.WalletConfig, _ /*currentAddress*/ string) (bool, error) {
-	if x.xmrpc.syncing() {
+	if x.xmrpc.isSyncing() {
 		return false, errSyncing
 	}
 	configSettings, err := parseWalletConfig(cfg.Settings)
@@ -569,21 +569,13 @@ func (x *wallet) Reconfigure(reconfCtx context.Context, cfg *asset.WalletConfig,
 // asset.Authenticator //
 /////////////////////////
 
-// Authenticator is a wallet that requires authentication to allow some user functionality.
+// This is a dummy implementation just to make the ui look nicer otherwise
+// it would not show [Ready] after startup and clicking [Unlock].
+
 var _ asset.Authenticator = (*wallet)(nil)
 
-// Unlock unlocks the exchange wallet if not syncing.
+// Unlock unlocks the exchange wallet.
 func (x *wallet) Unlock(pw []byte) error {
-	var spw string
-	if x.net == dex.Simnet {
-		spw = "sim"
-	} else {
-		spw = hex.EncodeToString(pw)
-	}
-	err := x.xmrpc.unlockApp(spw)
-	if err != nil {
-		return err
-	}
 	x.locked = false
 	return nil
 }

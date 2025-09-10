@@ -141,8 +141,6 @@ func (p *TxParser) readUnlockTime() error {
 }
 
 func (p *TxParser) readVinVout() error {
-	var inputs = p.tx.Prefix.Vin
-	var outputs = p.tx.Prefix.Vout
 	var isCoinbase = false
 
 	// inputs
@@ -153,8 +151,8 @@ func (p *TxParser) readVinVout() error {
 	if numInputs == 0 {
 		return fmt.Errorf("inputs length 0")
 	}
+	var inputs = make([]Input, numInputs)
 	for i := range numInputs {
-		inputs = append(inputs, Input{})
 		vinType, err := p.rdr.ReadByte()
 		if err != nil {
 			return err
@@ -180,15 +178,15 @@ func (p *TxParser) readVinVout() error {
 			if err != nil {
 				return err
 			}
-			var keyOffsets = inputs[i].Key.KeyOffsets
-			for range numMixins {
+			var keyOffsets = make([]uint64, numMixins) //inputs[i].Key.KeyOffsets
+			for mxn := range numMixins {
 				keyOffset, err := binary.ReadUvarint(p.rdr)
 				if err != nil {
 					return err
 				}
-				keyOffsets = append(keyOffsets, keyOffset)
+				keyOffsets[mxn] = keyOffset
 			}
-			inputs[i].Key.KeyOffsets = append(inputs[i].Key.KeyOffsets, keyOffsets...)
+			inputs[i].Key.KeyOffsets = keyOffsets
 
 		case TxinToScript, TxinToScripthash:
 			return fmt.Errorf("vin type valid but old and not supported %d", vinType)
@@ -203,12 +201,12 @@ func (p *TxParser) readVinVout() error {
 				return err
 			}
 			if n != KeyLen {
-				return fmt.Errorf("not emough bytes read for a key image %d, expected %d", n, KeyLen)
+				return fmt.Errorf("not enough bytes read for a key image %d, expected %d", n, KeyLen)
 			}
 			inputs[i].Key.KeyImage = hex.EncodeToString(kiB)
 		}
 	}
-	p.tx.Prefix.Vin = append(p.tx.Prefix.Vin, inputs...)
+	p.tx.Prefix.Vin = inputs
 
 	// outputs
 	numOutputs, err := binary.ReadUvarint(p.rdr)
@@ -218,8 +216,8 @@ func (p *TxParser) readVinVout() error {
 	if numOutputs == 0 {
 		return fmt.Errorf("outputs length 0")
 	}
-	for o := range numOutputs {
-		outputs = append(outputs, Output{})
+	var outputs = make([]Output, numOutputs)
+	for i := range numOutputs {
 		amount, err := binary.ReadUvarint(p.rdr)
 		if err != nil {
 			return err
@@ -227,7 +225,7 @@ func (p *TxParser) readVinVout() error {
 		if !isCoinbase && amount != 0 {
 			return fmt.Errorf("bad amount %d - non-coinbase v2 transactions do not publish amounts", amount)
 		}
-		outputs[o].AmountCoinbase = amount
+		outputs[i].AmountCoinbase = amount
 
 		voutType, err := p.rdr.ReadByte()
 		if err != nil {
@@ -243,7 +241,7 @@ func (p *TxParser) readVinVout() error {
 			if n != KeyLen {
 				return fmt.Errorf("not enough bytes read for a stealth key %d, expected %d", n, KeyLen)
 			}
-			outputs[o].Target.TaggedKey.StealthKey = hex.EncodeToString(kiB)
+			outputs[i].Target.TaggedKey.StealthKey = hex.EncodeToString(kiB)
 		case TxoutToTaggedKey:
 			kiB := make([]byte, KeyLen)
 			n, err := p.rdr.Read(kiB)
@@ -251,14 +249,14 @@ func (p *TxParser) readVinVout() error {
 				return err
 			}
 			if n != KeyLen {
-				return fmt.Errorf("not emough bytes read for a stealth key %d, expected %d", n, KeyLen)
+				return fmt.Errorf("not enough bytes read for a stealth key %d, expected %d", n, KeyLen)
 			}
-			outputs[o].Target.TaggedKey.StealthKey = hex.EncodeToString(kiB)
+			outputs[i].Target.TaggedKey.StealthKey = hex.EncodeToString(kiB)
 			tag, err := p.rdr.ReadByte()
 			if err != nil {
 				return err
 			}
-			outputs[o].Target.TaggedKey.ViewTag = hex.EncodeToString([]byte{tag})
+			outputs[i].Target.TaggedKey.ViewTag = hex.EncodeToString([]byte{tag})
 
 		case TxoutToScript, TxoutToScripthash:
 			return fmt.Errorf("vout type valid but not supported %d", voutType)
@@ -266,7 +264,7 @@ func (p *TxParser) readVinVout() error {
 			return fmt.Errorf("vout type invalid %d", voutType)
 		}
 	}
-	p.tx.Prefix.Vout = append(p.tx.Prefix.Vout, outputs...)
+	p.tx.Prefix.Vout = outputs
 	p.tx.Coinbase = isCoinbase
 	return nil
 }

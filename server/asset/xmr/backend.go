@@ -86,7 +86,6 @@ func (b *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 // BlockChannel creates and returns a new channel on which to receive updates
 // when new blocks are connected.
 func (b *Backend) BlockChannel(size int) <-chan *asset.BlockUpdate {
-	fmt.Println("BlockChannel called")
 	c := make(chan *asset.BlockUpdate, size)
 	b.blockChansMtx.Lock()
 	defer b.blockChansMtx.Unlock()

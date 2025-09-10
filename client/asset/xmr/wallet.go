@@ -61,6 +61,7 @@ func (r *xmrRpc) walletServerRunning() bool {
 	_, err := r.wallet.GetVersion(verCtx)
 	// just assume error means RPC or net error and the process is not running
 	if err != nil {
+		r.log.Debugf("get_version from the wallet server: %v", err)
 		return false
 	}
 	return true
@@ -74,7 +75,7 @@ func (r *xmrRpc) walletSynced() (uint64, uint64, bool, error) {
 	if err != nil {
 		return 0, 0, false, err
 	}
-	return daemonHeight, walletHeight, walletHeight == daemonHeight, nil
+	return daemonHeight, walletHeight, walletHeight >= daemonHeight, nil
 }
 
 func (r *xmrRpc) syncStatus() (*asset.SyncStatus, error) {
@@ -90,7 +91,7 @@ func (r *xmrRpc) syncStatus() (*asset.SyncStatus, error) {
 	}
 
 	if walletSynced {
-		r.sync.Store(false)
+		r.syncing.Store(false)
 	}
 
 	r.synclog.Debugf("syncStatus: numPeers: %d daemonHeight: %d walletHeight: %d start: %d walletSynced %v",
@@ -125,7 +126,7 @@ func (r *xmrRpc) getWalletHeight() (uint64, error) {
 }
 
 func (r *xmrRpc) getBalance() (uint64, uint64, error) {
-	if r.syncing() {
+	if r.isSyncing() {
 		return 0, 0, nil
 	}
 	gbRq := rpc.GetBalanceRequest{
@@ -139,9 +140,6 @@ func (r *xmrRpc) getBalance() (uint64, uint64, error) {
 }
 
 func (r *xmrRpc) getPrimaryAddress() (string, error) {
-	if r.syncing() {
-		return "wallet syncing", nil
-	}
 	gaRq := rpc.GetAddressRequest{
 		AccountIndex: 0,
 		AddressIndex: []uint64{0},
@@ -154,7 +152,7 @@ func (r *xmrRpc) getPrimaryAddress() (string, error) {
 }
 
 func (r *xmrRpc) getAddressUsage(accountIdx uint64, address string) (bool, error) {
-	if r.syncing() {
+	if r.isSyncing() {
 		return false, errSyncing
 	}
 	gaRq := rpc.GetAddressRequest{
@@ -164,7 +162,7 @@ func (r *xmrRpc) getAddressUsage(accountIdx uint64, address string) (bool, error
 	if err != nil {
 		return false, err
 	}
-	for _, a := range gaResp.Addresses { // TODO(xmr) cache latest
+	for _, a := range gaResp.Addresses {
 		if a.Address == address {
 			return a.Used, nil
 		}
@@ -173,7 +171,7 @@ func (r *xmrRpc) getAddressUsage(accountIdx uint64, address string) (bool, error
 }
 
 func (r *xmrRpc) getNewAddress(accountIdx uint64) (string, error) {
-	if r.syncing() {
+	if r.isSyncing() {
 		r.walletInfo.Lock()
 		primaryAddress := r.walletInfo.primaryAddress
 		r.walletInfo.Unlock()
@@ -192,7 +190,7 @@ func (r *xmrRpc) getNewAddress(accountIdx uint64) (string, error) {
 }
 
 func (r *xmrRpc) validateAddress(address string) bool {
-	if r.syncing() {
+	if r.isSyncing() {
 		return false
 	}
 	valRq := rpc.ValidateAddressRequest{
@@ -209,7 +207,7 @@ func (r *xmrRpc) validateAddress(address string) bool {
 }
 
 func (r *xmrRpc) isOurAddress(accountIdx uint64, address string) (bool, error) {
-	if r.syncing() {
+	if r.isSyncing() {
 		return true, nil
 	}
 	gaRq := rpc.GetAddressRequest{
@@ -228,7 +226,7 @@ func (r *xmrRpc) isOurAddress(accountIdx uint64, address string) (bool, error) {
 }
 
 func (r *xmrRpc) estimateTxFeeAtoms(amount uint64, toAddress string, subtract bool, priority rpc.Priority) (uint64, error) {
-	if r.syncing() {
+	if r.isSyncing() {
 		return 0, errSyncing
 	}
 	destinations := []rpc.Destination{
@@ -261,7 +259,7 @@ func (r *xmrRpc) estimateTxFeeAtoms(amount uint64, toAddress string, subtract bo
 }
 
 func (r *xmrRpc) transferSimple(amount uint64, toAddress string, unlock uint64, priority rpc.Priority) (string, error) {
-	if r.syncing() {
+	if r.isSyncing() {
 		return "", errSyncing
 	}
 	// Send from account 0 from any subaddresses; to 1 destination. You do not get to pre-determine the fee.
@@ -290,7 +288,7 @@ func (r *xmrRpc) transferSimple(amount uint64, toAddress string, unlock uint64, 
 }
 
 func (r *xmrRpc) withdrawSimple(toAddress string, value uint64, priority rpc.Priority) (string, error) {
-	if r.syncing() {
+	if r.isSyncing() {
 		return "", errSyncing
 	}
 	// Withdraw from account 0 from all subaddresses; to 1 destination charging the fee to the destination .

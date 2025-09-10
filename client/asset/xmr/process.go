@@ -172,13 +172,6 @@ func cliGenerateRefreshWallet(ctx context.Context, trustedDaemon string, net dex
 		cmd.Args = append(cmd.Args, CliCommandBalanceParam)
 	}
 
-	var sb strings.Builder
-	for _, arg := range cmd.Args {
-		sb.WriteString(arg)
-		sb.WriteString(" ")
-	}
-	fmt.Println(sb.String())
-
 	err := cmd.Start()
 	if err != nil {
 		return fmt.Errorf("cli create wallet process start %w", err)

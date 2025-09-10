@@ -35,7 +35,7 @@ func (d *Driver) Setup(cfg *asset.BackendConfig) (asset.Backend, error) {
 
 // DecodeCoinID creates a human-readable representation of a coin ID for Monero.
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
-	// Monero transactions have outputs but no amounts so so the coinID
+	// Monero transactions have outputs but no amounts so the coinID
 	// will just be the tx hash for now; representing the full output
 	// amount sent. Change is unknown but the fee is known.
 	if len(coinID) != KeyLen {
