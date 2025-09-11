@@ -149,14 +149,13 @@ func (r *xmrRpc) connect(ctx context.Context) (*sync.WaitGroup, error) {
 		err = r.startWalletServer(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("cannot start the wallet server - %w", err)
-		} else {
-			r.log.Debug("started wallet server - waiting for it to initialize")
-			select {
-			case <-ctx.Done():
-				return nil, nil
-			case <-time.After(WalletServerInitializeWait): // must wait before open wallet below
-				r.log.Trace("waited 5s for the wallet server to fully initialize")
-			}
+		}
+		r.log.Debug("started wallet server - waiting for it to initialize")
+		select {
+		case <-ctx.Done():
+			return nil, nil
+		case <-time.After(WalletServerInitializeWait): // must wait before open wallet below
+			r.log.Trace("waited 5s for the wallet server to fully initialize")
 		}
 	} else {
 		r.log.Warn("re-entered connect")
