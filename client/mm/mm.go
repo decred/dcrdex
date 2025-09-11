@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"sync"
 	"time"
 
@@ -45,6 +46,9 @@ type clientCore interface {
 	TradingLimits(host string) (userParcels, parcelLimit uint32, err error)
 	WalletState(assetID uint32) *core.WalletState
 	Exchange(host string) (*core.Exchange, error)
+	Bridge(fromAssetID, toAssetID uint32, amt uint64, bridgeName string) (txID string, err error)
+	SupportedBridgeDestinations(assetID uint32) (map[uint32][]string, error)
+	BridgeContractApprovalStatus(assetID uint32, bridgeName string) (asset.ApprovalStatus, error)
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -510,6 +514,20 @@ func (m *MarketMaker) loginAndUnlockWallets(pw []byte, cfg *BotConfig) error {
 		return fmt.Errorf("failed to unlock wallet for asset %d: %w", cfg.QuoteID, err)
 	}
 
+	if cfg.BaseID != cfg.CEXBaseID {
+		err = m.core.OpenWallet(cfg.CEXBaseID, pw)
+		if err != nil {
+			return fmt.Errorf("failed to unlock wallet for asset %d: %w", cfg.CEXBaseID, err)
+		}
+	}
+
+	if cfg.QuoteID != cfg.CEXQuoteID {
+		err = m.core.OpenWallet(cfg.CEXQuoteID, pw)
+		if err != nil {
+			return fmt.Errorf("failed to unlock wallet for asset %d: %w", cfg.CEXQuoteID, err)
+		}
+	}
+
 	return nil
 }
 
@@ -703,8 +721,8 @@ func (m *MarketMaker) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	return &wg, nil
 }
 
-func (m *MarketMaker) balancesSufficient(balances *BotBalanceAllocation, mkt *MarketWithHost, cexCfg *CEXConfig) error {
-	availableDEXBalances, availableCEXBalances, err := m.availableBalances(mkt, cexCfg)
+func (m *MarketMaker) balancesSufficient(balances *BotBalanceAllocation, mkt *MarketWithHost, botCfg *BotConfig, cexCfg *CEXConfig) error {
+	availableDEXBalances, availableCEXBalances, err := m.availableBalances(mkt, botCfg.CEXBaseID, botCfg.CEXQuoteID, cexCfg)
 	if err != nil {
 		return fmt.Errorf("error getting available balances: %v", err)
 	}
@@ -719,7 +737,7 @@ func (m *MarketMaker) balancesSufficient(balances *BotBalanceAllocation, mkt *Ma
 	for assetID, amount := range balances.CEX {
 		availableBalance := availableCEXBalances[assetID]
 		if amount > availableBalance {
-			return fmt.Errorf("insufficient CEX balance for %s: %d < %d", dex.BipIDSymbol(assetID), availableBalance, amount)
+			return fmt.Errorf("insufficient CEX balance for %d %s: %d < %d", assetID, dex.BipIDSymbol(assetID), availableBalance, amount)
 		}
 	}
 
@@ -785,10 +803,55 @@ func (m *MarketMaker) cexInUse(cexName string) bool {
 	return false
 }
 
+type configuredBridge struct {
+	dexAssetID uint32
+	cexAssetID uint32
+	bridgeName string
+}
+
+func (m *MarketMaker) configuredBridgesSupported(bridges []*configuredBridge) error {
+	supportedPath := func(from, to uint32, bridgeName string) bool {
+		supportedDestinations, err := m.core.SupportedBridgeDestinations(from)
+		if err != nil {
+			return false
+		}
+		bridgeNames, ok := supportedDestinations[to]
+		return ok && slices.Contains(bridgeNames, bridgeName)
+	}
+
+	checkApprovalStatus := func(assetID uint32, bridgeName string) error {
+		approvalStatus, err := m.core.BridgeContractApprovalStatus(assetID, bridgeName)
+		if err != nil {
+			return fmt.Errorf("error checking bridge contract approval status for %s: %w", dex.BipIDSymbol(assetID), err)
+		}
+		if approvalStatus != asset.Approved {
+			return fmt.Errorf("bridge contract for %s on %s is not approved (status: %s)", dex.BipIDSymbol(assetID), bridgeName, approvalStatus.String())
+		}
+		return nil
+	}
+
+	for _, bridge := range bridges {
+		if !supportedPath(bridge.dexAssetID, bridge.cexAssetID, bridge.bridgeName) {
+			return fmt.Errorf("bridge %s does not support bridging %s to %s", bridge.bridgeName, dex.BipIDSymbol(bridge.dexAssetID), dex.BipIDSymbol(bridge.cexAssetID))
+		}
+		if !supportedPath(bridge.cexAssetID, bridge.dexAssetID, bridge.bridgeName) {
+			return fmt.Errorf("bridge %s does not support bridging %s to %s", bridge.bridgeName, dex.BipIDSymbol(bridge.cexAssetID), dex.BipIDSymbol(bridge.dexAssetID))
+		}
+		if err := checkApprovalStatus(bridge.dexAssetID, bridge.bridgeName); err != nil {
+			return err
+		}
+		if err := checkApprovalStatus(bridge.cexAssetID, bridge.bridgeName); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (m *MarketMaker) newBot(cfg *BotConfig, adaptorCfg *exchangeAdaptorCfg) (bot, error) {
 	mktID := dexMarketID(cfg.Host, cfg.BaseID, cfg.QuoteID)
 
-	if err := cfg.validate(); err != nil {
+	if err := cfg.validate(m.configuredBridgesSupported); err != nil {
 		return nil, fmt.Errorf("invalid bot config: %w", err)
 	}
 
@@ -879,7 +942,7 @@ func (m *MarketMaker) StartBot(startCfg *StartConfig, alternateConfigPath *strin
 
 func (m *MarketMaker) startBot(startCfg *StartConfig, botCfg *BotConfig, cexCfg *CEXConfig, appPW []byte) (err error) {
 	mwh := &startCfg.MarketWithHost
-	if err := m.balancesSufficient(startCfg.Alloc, mwh, cexCfg); err != nil {
+	if err := m.balancesSufficient(startCfg.Alloc, mwh, botCfg, cexCfg); err != nil {
 		return err
 	}
 
@@ -922,6 +985,7 @@ func (m *MarketMaker) startBot(startCfg *StartConfig, botCfg *BotConfig, cexCfg 
 		botCfg:              botCfg,
 		eventLogDB:          m.eventLogDB,
 		internalTransfer:    m.internalTransfer,
+		bridgesSupported:    m.configuredBridgesSupported,
 	}
 
 	bot, err := m.newBot(botCfg, adaptorCfg)
@@ -1137,7 +1201,7 @@ func (m *MarketMaker) internalTransfer(mkt *MarketWithHost, doTransfer doInterna
 		return fmt.Errorf("internalTransfer called for non-running bot %s", mkt)
 	}
 
-	dex, cex, err := m.availableBalances(mkt, rb.cexCfg)
+	dex, cex, err := m.availableBalances(mkt, rb.botCfg().CEXBaseID, rb.botCfg().CEXQuoteID, rb.cexCfg)
 	if err != nil {
 		return fmt.Errorf("error getting available balances: %v", err)
 	}
@@ -1157,7 +1221,7 @@ func (m *MarketMaker) UpdateRunningBotInventory(mkt *MarketWithHost, balanceDiff
 		return fmt.Errorf("no bot running on market: %s", mkt)
 	}
 
-	if err := m.balancesSufficient(balanceDiffsToAllocation(balanceDiffs), mkt, rb.cexCfg); err != nil {
+	if err := m.balancesSufficient(balanceDiffsToAllocation(balanceDiffs), mkt, rb.botCfg(), rb.cexCfg); err != nil {
 		return err
 	}
 
@@ -1197,7 +1261,7 @@ func (m *MarketMaker) UpdateRunningBotCfg(cfg *BotConfig, balanceDiffs *BotInven
 	}
 
 	if balanceDiffs != nil {
-		if err := m.balancesSufficient(balanceDiffsToAllocation(balanceDiffs), &mkt, rb.cexCfg); err != nil {
+		if err := m.balancesSufficient(balanceDiffsToAllocation(balanceDiffs), &mkt, rb.botCfg(), rb.cexCfg); err != nil {
 			return err
 		}
 	}
@@ -1273,7 +1337,7 @@ func (m *MarketMaker) RunOverview(startTime int64, mkt *MarketWithHost) (*Market
 	return m.eventLogDB.runOverview(startTime, mkt)
 }
 
-func (m *MarketMaker) updateDEXOrderEvent(mkt *MarketWithHost, event *MarketMakingEvent) (*MarketMakingEvent, error) {
+func (m *MarketMaker) updateDEXOrderEvent(mkt *MarketWithHost, event *MarketMakingEvent, cexBaseID, cexQuoteID uint32) (*MarketMakingEvent, error) {
 	orderEvent := event.DEXOrderEvent
 
 	findEventTx := func(txid string) *asset.WalletTransaction {
@@ -1295,7 +1359,8 @@ func (m *MarketMaker) updateDEXOrderEvent(mkt *MarketWithHost, event *MarketMaki
 	}
 
 	swapIDs, redeemIDs, refundIDs := orderCoinIDs(o)
-	fromAsset, _, toAsset, _ := orderAssets(mkt.BaseID, mkt.QuoteID, o.Sell)
+
+	fromAsset, _, toAsset, _, _, _ := orderAssets(mkt.BaseID, mkt.QuoteID, cexBaseID, cexQuoteID, o.Sell)
 	swaps := make(map[string]*asset.WalletTransaction, len(swapIDs))
 	redeems := make(map[string]*asset.WalletTransaction, len(redeemIDs))
 	refunds := make(map[string]*asset.WalletTransaction, len(refundIDs))
@@ -1348,7 +1413,7 @@ func (m *MarketMaker) updateDEXOrderEvent(mkt *MarketWithHost, event *MarketMaki
 		ID:             event.ID,
 		TimeStamp:      event.TimeStamp,
 		Pending:        pendingTx || o.Status <= order.OrderStatusBooked || activeMatches,
-		BalanceEffects: combineBalanceEffects(dexOrderEffects(o, swaps, redeems, refunds, 0, baseTraits, quoteTraits)),
+		BalanceEffects: combineBalanceEffects(dexOrderEffects(o, swaps, redeems, refunds, 0, baseTraits, quoteTraits, cexBaseID, cexQuoteID)),
 		DEXOrderEvent: &DEXOrderEvent{
 			ID:           orderEvent.ID,
 			Sell:         o.Sell,
@@ -1359,7 +1424,7 @@ func (m *MarketMaker) updateDEXOrderEvent(mkt *MarketWithHost, event *MarketMaki
 	}, nil
 }
 
-func (m *MarketMaker) updateCEXOrderEvent(mkt *MarketWithHost, event *MarketMakingEvent, cexName string) (*MarketMakingEvent, error) {
+func (m *MarketMaker) updateCEXOrderEvent(event *MarketMakingEvent, cexName string) (*MarketMakingEvent, error) {
 	cex, err := m.connectedCEX(cexName)
 	if err != nil {
 		return nil, fmt.Errorf("error connecting to CEX: %v", err)
@@ -1376,62 +1441,88 @@ func (m *MarketMaker) updateCEXOrderEvent(mkt *MarketWithHost, event *MarketMaki
 }
 
 func (m *MarketMaker) updateDepositEvent(event *MarketMakingEvent, cexName string) (*MarketMakingEvent, error) {
-	wt := event.DepositEvent.Transaction
-	if wt == nil {
-		return nil, fmt.Errorf("nil transaction")
-	}
+	bridgeTx := event.DepositEvent.BridgeTx
+	depositTx := event.DepositEvent.DepositTx
 
-	if !wt.Confirmed {
-		tx, err := m.core.WalletTransaction(event.DepositEvent.AssetID, wt.ID)
+	if bridgeTx != nil && !bridgeTx.BridgeCounterpartTx.Complete {
+		tx, err := m.core.WalletTransaction(event.DepositEvent.DexAssetID, bridgeTx.ID)
 		if err != nil {
 			return nil, fmt.Errorf("error fetching transaction: %v", err)
 		}
-		wt = tx
+		if tx.Confirmed {
+			bridgeTx = tx
+		}
 	}
 
-	cex, err := m.connectedCEX(cexName)
-	if err != nil {
-		return nil, fmt.Errorf("error connecting to CEX: %v", err)
+	if depositTx != nil && !depositTx.Confirmed {
+		tx, err := m.core.WalletTransaction(event.DepositEvent.CEXAssetID, depositTx.ID)
+		if err != nil {
+			return nil, fmt.Errorf("error fetching transaction: %v", err)
+		}
+		if tx.Confirmed {
+			depositTx = tx
+		}
 	}
 
-	unitInfo, err := asset.UnitInfo(event.DepositEvent.AssetID)
-	if err != nil {
-		return nil, fmt.Errorf("error getting unit info: %v", err)
+	var cexConfirmed bool
+	var cexCredit uint64
+	if depositTx != nil && depositTx.Confirmed {
+		cex, err := m.connectedCEX(cexName)
+		if err != nil {
+			return nil, fmt.Errorf("error connecting to CEX: %v", err)
+		}
+
+		unitInfo, err := asset.UnitInfo(event.DepositEvent.DexAssetID)
+		if err != nil {
+			return nil, fmt.Errorf("error getting unit info: %v", err)
+		}
+
+		convAmount := float64(depositTx.Amount) / float64(unitInfo.Conventional.ConversionFactor)
+		cexConfirmed, cexCredit = cex.ConfirmDeposit(m.ctx, &libxc.DepositData{
+			AssetID:            event.DepositEvent.CEXAssetID,
+			TxID:               depositTx.ID,
+			AmountConventional: convAmount,
+		})
 	}
 
-	convAmount := float64(wt.Amount) / float64(unitInfo.Conventional.ConversionFactor)
-	confirmed, cexCredit := cex.ConfirmDeposit(m.ctx, &libxc.DepositData{
-		AssetID:            event.DepositEvent.AssetID,
-		AmountConventional: convAmount,
-		TxID:               wt.ID,
-	})
+	// The event is complete if the CEX confirmed the deposit, or if the bridge
+	// is complete but the deposit was never made during market making.
+	bridgeComplete := bridgeTx != nil && bridgeTx.BridgeCounterpartTx.Complete
+	eventComplete := cexConfirmed || (bridgeComplete && depositTx == nil)
+	dexEffects, cexEffects := depositBalanceEffects(event.DepositEvent.DexAssetID, event.DepositEvent.CEXAssetID, bridgeTx, depositTx, cexCredit, cexConfirmed)
 
 	return &MarketMakingEvent{
 		ID:             event.ID,
 		TimeStamp:      event.TimeStamp,
-		Pending:        !confirmed,
-		BalanceEffects: combineBalanceEffects(depositBalanceEffects(event.DepositEvent.AssetID, wt, confirmed)),
+		Pending:        !eventComplete,
+		BalanceEffects: combineBalanceEffects(dexEffects, cexEffects),
 		DepositEvent: &DepositEvent{
-			Transaction: wt,
-			AssetID:     event.DepositEvent.AssetID,
-			CEXCredit:   cexCredit,
+			DexAssetID: event.DepositEvent.DexAssetID,
+			CEXAssetID: event.DepositEvent.CEXAssetID,
+			BridgeTx:   bridgeTx,
+			DepositTx:  depositTx,
+			CEXCredit:  cexCredit,
 		},
 	}, nil
 }
 
-func (m *MarketMaker) updateWithdrawalEvent(mkt *MarketWithHost, event *MarketMakingEvent, cexName string) (*MarketMakingEvent, error) {
-	tx := event.WithdrawalEvent.Transaction
+func (m *MarketMaker) updateWithdrawalEvent(event *MarketMakingEvent, cexName string) (*MarketMakingEvent, error) {
+	withdrawalTx := event.WithdrawalEvent.WithdrawalTx
+	bridgeTx := event.WithdrawalEvent.BridgeTx
 	withdrawalID := event.WithdrawalEvent.ID
-	assetID := event.WithdrawalEvent.AssetID
+	dexAssetID := event.WithdrawalEvent.DEXAssetID
+	cexAssetID := event.WithdrawalEvent.CEXAssetID
 	var cexDebit uint64
-	if tx == nil {
+
+	// If we don't have the withdrawal transaction yet, check with the CEX
+	if withdrawalTx == nil {
 		cex, err := m.connectedCEX(cexName)
 		if err != nil {
 			return nil, fmt.Errorf("error connecting to CEX: %v", err)
 		}
 
 		var txID string
-		cexDebit, txID, err = cex.ConfirmWithdrawal(m.ctx, withdrawalID, assetID)
+		cexDebit, txID, err = cex.ConfirmWithdrawal(m.ctx, withdrawalID, cexAssetID)
 		if errors.Is(err, libxc.ErrWithdrawalPending) {
 			return event, nil
 		}
@@ -1439,7 +1530,7 @@ func (m *MarketMaker) updateWithdrawalEvent(mkt *MarketWithHost, event *MarketMa
 			return nil, fmt.Errorf("error confirming withdrawal: %v", err)
 		}
 
-		tx, err = m.core.WalletTransaction(assetID, txID)
+		withdrawalTx, err = m.core.WalletTransaction(cexAssetID, txID)
 		if err != nil {
 			return nil, fmt.Errorf("error fetching transaction: %v", err)
 		}
@@ -1447,16 +1538,45 @@ func (m *MarketMaker) updateWithdrawalEvent(mkt *MarketWithHost, event *MarketMa
 		cexDebit = event.WithdrawalEvent.CEXDebit
 	}
 
+	// If the withdrawal tx is not yet confirmed, check if it is confirmed
+	if withdrawalTx != nil && !withdrawalTx.Confirmed {
+		tx, err := m.core.WalletTransaction(cexAssetID, withdrawalTx.ID)
+		if err != nil {
+			return nil, fmt.Errorf("error fetching transaction: %v", err)
+		}
+		if tx.Confirmed {
+			withdrawalTx = tx
+		}
+	}
+
+	// If we have a bridge tx but it's not complete, check if it's complete
+	if bridgeTx != nil && !bridgeTx.BridgeCounterpartTx.Complete {
+		tx, err := m.core.WalletTransaction(cexAssetID, bridgeTx.ID)
+		if err != nil {
+			return nil, fmt.Errorf("error fetching transaction: %v", err)
+		}
+		if tx.BridgeCounterpartTx.Complete {
+			bridgeTx = tx
+		}
+	}
+
+	withdrawalTxConfirmed := withdrawalTx != nil && withdrawalTx.Confirmed
+	bridgeComplete := bridgeTx != nil && bridgeTx.BridgeCounterpartTx.Complete
+	eventComplete := withdrawalTxConfirmed && (bridgeComplete || bridgeTx == nil)
+	dexEffects, cexEffects := withdrawalBalanceEffects(bridgeTx, withdrawalTx, cexDebit, dexAssetID, cexAssetID)
+
 	return &MarketMakingEvent{
 		ID:             event.ID,
 		TimeStamp:      event.TimeStamp,
-		BalanceEffects: combineBalanceEffects(withdrawalBalanceEffects(tx, cexDebit, event.WithdrawalEvent.AssetID)),
-		Pending:        tx == nil || !tx.Confirmed,
+		Pending:        !eventComplete,
+		BalanceEffects: combineBalanceEffects(dexEffects, cexEffects),
 		WithdrawalEvent: &WithdrawalEvent{
-			AssetID:     assetID,
-			ID:          withdrawalID,
-			Transaction: tx,
-			CEXDebit:    cexDebit,
+			ID:           withdrawalID,
+			DEXAssetID:   dexAssetID,
+			CEXAssetID:   cexAssetID,
+			WithdrawalTx: withdrawalTx,
+			BridgeTx:     bridgeTx,
+			CEXDebit:     cexDebit,
 		},
 	}, nil
 }
@@ -1483,17 +1603,22 @@ func (m *MarketMaker) updatePendingEvent(mkt *MarketWithHost, event *MarketMakin
 	if len(overview.Cfgs) == 0 {
 		return nil, fmt.Errorf("no bot config found for %s", mkt)
 	}
+
 	cexName := overview.Cfgs[0].Cfg.CEXName // may be empty string, but that's OK
+
+	// cexBaseID and cexQuoteID are not allowed to change over the course of the run.
+	cexBaseID := overview.Cfgs[0].Cfg.CEXBaseID
+	cexQuoteID := overview.Cfgs[0].Cfg.CEXQuoteID
 
 	switch {
 	case event.DEXOrderEvent != nil:
-		return m.updateDEXOrderEvent(mkt, event)
+		return m.updateDEXOrderEvent(mkt, event, cexBaseID, cexQuoteID)
 	case event.CEXOrderEvent != nil:
-		return m.updateCEXOrderEvent(mkt, event, cexName)
+		return m.updateCEXOrderEvent(event, cexName)
 	case event.DepositEvent != nil:
 		return m.updateDepositEvent(event, cexName)
 	case event.WithdrawalEvent != nil:
-		return m.updateWithdrawalEvent(mkt, event, cexName)
+		return m.updateWithdrawalEvent(event, cexName)
 	default:
 		return event, nil
 	}
@@ -1654,7 +1779,7 @@ func marketFees(c clientCore, host string, baseID, quoteID uint32, useMaxFeeRate
 		}, nil
 }
 
-func (m *MarketMaker) availableBalances(mkt *MarketWithHost, cexCfg *CEXConfig) (dexBalances, cexBalances map[uint32]uint64, _ error) {
+func (m *MarketMaker) availableBalances(mkt *MarketWithHost, cexBaseID, cexQuoteID uint32, cexCfg *CEXConfig) (dexBalances, cexBalances map[uint32]uint64, _ error) {
 	dexAssets := make(map[uint32]interface{})
 	cexAssets := make(map[uint32]interface{})
 
@@ -1664,8 +1789,13 @@ func (m *MarketMaker) availableBalances(mkt *MarketWithHost, cexCfg *CEXConfig) 
 	dexAssets[feeAssetID(mkt.QuoteID)] = struct{}{}
 
 	if cexCfg != nil {
-		cexAssets[mkt.BaseID] = struct{}{}
-		cexAssets[mkt.QuoteID] = struct{}{}
+		cexAssets[cexBaseID] = struct{}{}
+		cexAssets[cexQuoteID] = struct{}{}
+
+		dexAssets[cexBaseID] = struct{}{}
+		dexAssets[cexQuoteID] = struct{}{}
+		dexAssets[feeAssetID(cexBaseID)] = struct{}{}
+		dexAssets[feeAssetID(cexQuoteID)] = struct{}{}
 	}
 
 	checkTotalBalances := func() (dexBals, cexBals map[uint32]uint64, err error) {
@@ -1795,7 +1925,7 @@ func (m *MarketMaker) availableBalances(mkt *MarketWithHost, cexCfg *CEXConfig) 
 // AvailableBalances returns the available balances of assets relevant to
 // market making on the specified market on the DEX (including fee assets),
 // and optionally a CEX depending on the configured strategy.
-func (m *MarketMaker) AvailableBalances(mkt *MarketWithHost, cexName *string) (dexBalances, cexBalances map[uint32]uint64, _ error) {
+func (m *MarketMaker) AvailableBalances(mkt *MarketWithHost, cexBaseID, cexQuoteID uint32, cexName *string) (dexBalances, cexBalances map[uint32]uint64, _ error) {
 	var cexCfg *CEXConfig
 	if cexName != nil && *cexName != "" {
 		cex := m.cexes[*cexName]
@@ -1805,7 +1935,7 @@ func (m *MarketMaker) AvailableBalances(mkt *MarketWithHost, cexName *string) (d
 		cexCfg = cex.CEXConfig
 	}
 
-	return m.availableBalances(mkt, cexCfg)
+	return m.availableBalances(mkt, cexBaseID, cexQuoteID, cexCfg)
 }
 
 func sellStr(sell bool) string {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/mm/libxc"
 	"decred.org/dcrdex/dex/msgjson"
@@ -69,4 +70,12 @@ func updateBotProblemsBasedOnError(problems *BotProblems, err error) {
 	}
 
 	problems.UnknownError = err.Error()
+}
+
+func feeAssetID(assetID uint32) uint32 {
+	token := asset.TokenInfo(assetID)
+	if token != nil {
+		return token.ParentID
+	}
+	return assetID
 }

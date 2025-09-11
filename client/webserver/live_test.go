@@ -2038,6 +2038,14 @@ func (*TCore) ExtensionModeConfig() *core.ExtensionModeConfig {
 	return nil
 }
 
+func (c *TCore) AllBridgePaths() (map[uint32]map[uint32][]string, error) {
+	return nil, nil
+}
+
+func (c *TCore) BridgeFeesAndLimits(fromAssetID, toAssetID uint32, bridgeName string) (*core.BridgeFeesAndLimits, error) {
+	return nil, nil
+}
+
 func newMarketDay() *libxc.MarketDay {
 	avgPrice := tenToThe(7)
 	return &libxc.MarketDay{
@@ -2570,9 +2578,10 @@ func (m *TMarketMaker) RunLogs(startTime int64, mkt *mm.MarketWithHost, n uint64
 			}
 			amt := uint64(maxQty * 0.2 * rand.Float64())
 			ev.DepositEvent = &mm.DepositEvent{
-				Transaction: randomWalletTransaction(asset.Send, amt),
-				AssetID:     assetID,
-				CEXCredit:   amt,
+				DepositTx:  randomWalletTransaction(asset.Send, amt),
+				DexAssetID: assetID,
+				CEXAssetID: assetID,
+				CEXCredit:  amt,
 			}
 		default: // withdrawal
 			assetID := mkt.BaseID
@@ -2581,9 +2590,10 @@ func (m *TMarketMaker) RunLogs(startTime int64, mkt *mm.MarketWithHost, n uint64
 			}
 			amt := uint64(maxQty * 0.2 * rand.Float64())
 			ev.WithdrawalEvent = &mm.WithdrawalEvent{
-				Transaction: randomWalletTransaction(asset.Receive, amt),
-				AssetID:     assetID,
-				CEXDebit:    amt,
+				WithdrawalTx: randomWalletTransaction(asset.Receive, amt),
+				DEXAssetID:   assetID,
+				CEXAssetID:   assetID,
+				CEXDebit:     amt,
 			}
 		}
 		events = append(events, ev)
@@ -2603,7 +2613,7 @@ func (m *TMarketMaker) CEXBook(host string, baseID, quoteID uint32) (buys, sells
 	return book.Buys, book.Sells, nil
 }
 
-func (m *TMarketMaker) AvailableBalances(mkt *mm.MarketWithHost, cexName *string) (dexBalances, cexBalances map[uint32]uint64, _ error) {
+func (m *TMarketMaker) AvailableBalances(mkt *mm.MarketWithHost, cexBaseID, cexQuoteID uint32, cexName *string) (dexBalances, cexBalances map[uint32]uint64, _ error) {
 	return map[uint32]uint64{mkt.BaseID: 1e6, mkt.QuoteID: 1e6}, map[uint32]uint64{mkt.BaseID: 1e6, mkt.QuoteID: 1e6}, nil
 }
 

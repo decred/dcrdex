@@ -822,10 +822,11 @@ type Bridger interface {
 
 	// MarkBridgeComplete is called when the destination chain sends a
 	// notification regarding the completion of a bridge. The completionTxIDs
-	// are the IDs of the transactions that completed the bridge. The complete
+	// are the IDs of the transactions that completed the bridge. The amtReceived
+	// is the amount of tokens received on the destination chain. The complete
 	// boolean is true if the bridge has fully completed and the funds are
 	// allocated on the destination chain.
-	MarkBridgeComplete(initiationTxID string, completionTxIDs []string, complete bool)
+	MarkBridgeComplete(initiationTxID string, completionTxIDs []string, amtReceived uint64, complete bool)
 
 	// PendingBridges lists all uncompleted bridge transactions on the blockchain.
 	// For token wallets, this includes pending bridges for other tokens on the same chain.
@@ -836,7 +837,14 @@ type Bridger interface {
 	BridgeHistory(n int, refID *string, past bool) ([]*WalletTransaction, error)
 
 	// SupportedDestinations returns the list of asset IDs that are supported as destinations for the origin asset.
-	SupportedDestinations() (map[string][]uint32, error)
+	SupportedDestinations() (map[uint32][]string, error)
+
+	// BridgeInitiationFeesAndLimits returns the estimated for initiating a bridge, and the
+	// min and mix limits for the bridge, if any.
+	BridgeInitiationFeesAndLimits(bridgeName string, destAssetID uint32) (estimatedFee uint64, limits [2]uint64, hasLimits bool, err error)
+
+	// BridgeCompletionFees returns the estimated fees for completing a bridge.
+	BridgeCompletionFees(bridgeName string) (uint64, error)
 }
 
 // Sweeper is a wallet that can clear the entire balance of the wallet/account
@@ -1325,8 +1333,13 @@ type BondTxInfo struct {
 // initiation transaction.
 type BridgeCounterpartTx struct {
 	AssetID  uint32   `json:"assetID"`
-	IDs      []string `json:"id"`
+	IDs      []string `json:"ids"`
 	Complete bool     `json:"complete"`
+	// AmountReceived is the amount of the asset that was minted
+	// on the destination chain.
+	AmountReceived uint64 `json:"amountReceived"`
+	// Fees are the network fees paid on the destination chain.
+	Fees uint64 `json:"fees"`
 }
 
 // WalletTransaction represents a transaction that was made by a wallet.
@@ -1748,6 +1761,7 @@ type BridgeCompletedNote struct {
 	SourceAssetID   uint32   `json:"sourceAssetID"`
 	InitiationTxID  string   `json:"initiationTxID"`
 	CompletionTxIDs []string `json:"completionTxIDs"`
+	AmtReceived     uint64   `json:"amtReceived"`
 	Complete        bool     `json:"complete"`
 }
 
@@ -1902,7 +1916,7 @@ func (e *WalletEmitter) BridgeReadyToComplete(destAssetID uint32, bridgeTxID str
 
 // BridgeCompleted is emitted by the wallet which completed a bridge to
 // notify that the bridge has been completed.
-func (e *WalletEmitter) BridgeCompleted(sourceAssetID uint32, initiationTxID string, completionTxIDs []string, complete bool) {
+func (e *WalletEmitter) BridgeCompleted(sourceAssetID uint32, initiationTxID string, completionTxIDs []string, amtReceived uint64, complete bool) {
 	e.emit(&BridgeCompletedNote{
 		baseWalletNotification: baseWalletNotification{
 			AssetID: e.assetID,
@@ -1911,6 +1925,7 @@ func (e *WalletEmitter) BridgeCompleted(sourceAssetID uint32, initiationTxID str
 		SourceAssetID:   sourceAssetID,
 		InitiationTxID:  initiationTxID,
 		CompletionTxIDs: completionTxIDs,
+		AmtReceived:     amtReceived,
 		Complete:        complete,
 	})
 }

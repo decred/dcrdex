@@ -141,6 +141,20 @@ type BotConfig struct {
 	QuoteWalletOptions map[string]string `json:"quoteWalletOptions"`
 
 	CEXName string `json:"cexName"`
+	// CEXBaseID will be different from BaseID if the bot is configured to arbitrage
+	// with a CEX, but the DEX base asset must be bridged to the CEX base asset before
+	// deposits and after withdrawals.
+	CEXBaseID uint32 `json:"cexBaseID,omitempty"`
+	// CEXQuoteID will be different from QuoteID if the bot is configured to arbitrage
+	// with a CEX, but the DEX quote asset must be bridged to the CEX quote asset before
+	// deposits and after withdrawals.
+	CEXQuoteID uint32 `json:"cexQuoteID,omitempty"`
+	// BaseBridgeName is the name of the bridge to use for deposits and withdrawals
+	// of the base asset.
+	BaseBridgeName string `json:"baseBridgeName,omitempty"`
+	// QuoteBridgeName is the name of the bridge to use for deposits and withdrawals
+	// of the quote asset.
+	QuoteBridgeName string `json:"quoteBridgeName,omitempty"`
 
 	// UIConfig is settings defined and used by the front end to determine
 	// allocations.
@@ -197,7 +211,26 @@ func (c *BotConfig) updateLotSize(oldLotSize, newLotSize uint64) {
 	}
 }
 
-func (c *BotConfig) validate() error {
+func (c *BotConfig) validate(configuredBridgesSupported func([]*configuredBridge) error) error {
+	bridges := make([]*configuredBridge, 0, 2)
+	if c.BaseID != c.CEXBaseID {
+		bridges = append(bridges, &configuredBridge{
+			dexAssetID: c.BaseID,
+			cexAssetID: c.CEXBaseID,
+			bridgeName: c.BaseBridgeName,
+		})
+	}
+	if c.QuoteID != c.CEXQuoteID {
+		bridges = append(bridges, &configuredBridge{
+			dexAssetID: c.QuoteID,
+			cexAssetID: c.CEXQuoteID,
+			bridgeName: c.QuoteBridgeName,
+		})
+	}
+	if err := configuredBridgesSupported(bridges); err != nil {
+		return err
+	}
+
 	if c.BasicMMConfig != nil {
 		return c.BasicMMConfig.validate()
 	} else if c.SimpleArbConfig != nil {
@@ -209,22 +242,23 @@ func (c *BotConfig) validate() error {
 	return fmt.Errorf("no bot config set")
 }
 
-func validateConfigUpdate(old, new *BotConfig) error {
+func validateConfigUpdate(old, new *BotConfig, bridgesSupported func([]*configuredBridge) error) error {
 	if (old.BasicMMConfig == nil) != (new.BasicMMConfig == nil) ||
 		(old.SimpleArbConfig == nil) != (new.SimpleArbConfig == nil) ||
 		(old.ArbMarketMakerConfig == nil) != (new.ArbMarketMakerConfig == nil) {
 		return fmt.Errorf("cannot change bot type")
 	}
 
-	return new.validate()
+	if old.BaseID != new.BaseID || old.QuoteID != new.QuoteID ||
+		old.CEXBaseID != new.CEXBaseID || old.CEXQuoteID != new.CEXQuoteID {
+		return fmt.Errorf("cannot change assets of a running bot")
+	}
+
+	return new.validate(bridgesSupported)
 }
 
 func (c *BotConfig) requiresPriceOracle() bool {
 	return c.BasicMMConfig != nil
-}
-
-func (c *BotConfig) requiresCEX() bool {
-	return c.SimpleArbConfig != nil || c.ArbMarketMakerConfig != nil
 }
 
 // multiSplitBuffer returns the additional buffer to add to the order size

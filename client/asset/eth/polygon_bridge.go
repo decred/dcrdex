@@ -196,6 +196,11 @@ func (b *polygonBridgePolygon) supportedDestinations(sourceAssetID uint32) []uin
 	return nil
 }
 
+func (b *polygonBridgePolygon) bridgeLimits(sourceAssetID, destAssetID uint32) (*big.Int, *big.Int, bool, error) {
+	// Polygon bridge doesn't have limits
+	return big.NewInt(0), big.NewInt(0), false, nil
+}
+
 // verifyPolygonBridgeCompletion is called for bridges from ethereum to polygon
 // POS, which do not require a completion transaction. It checks if the funds
 // have been allocated on polygon POS. The initiation transaction contained a log
@@ -590,4 +595,9 @@ func (b *polygonBridgeEth) supportedDestinations(sourceAssetID uint32) []uint32 
 		return []uint32{dest}
 	}
 	return nil
+}
+
+func (b *polygonBridgeEth) bridgeLimits(sourceAssetID, destAssetID uint32) (*big.Int, *big.Int, bool, error) {
+	// Polygon bridge doesn't have limits
+	return big.NewInt(0), big.NewInt(0), false, nil
 }

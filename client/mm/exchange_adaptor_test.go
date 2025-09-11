@@ -20,6 +20,7 @@ import (
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/dex/utils"
 	"github.com/davecgh/go-spew/spew"
 )
 
@@ -45,6 +46,26 @@ func (db *tEventLogDB) storeEvent(startTime int64, mkt *MarketWithHost, e *Marke
 	defer db.storedEventsMtx.Unlock()
 	db.storedEvents = append(db.storedEvents, e)
 }
+
+func normalizeMap[K comparable, V int64 | uint64](m map[K]V) {
+	if m == nil {
+		return
+	}
+	for k, v := range m {
+		if v == V(0) {
+			delete(m, k)
+		}
+	}
+}
+
+// normalizeBalanceEffects removes zero values from the BalanceEffects map.
+func normalizeBalanceEffects(e *BalanceEffects) {
+	normalizeMap(e.Settled)
+	normalizeMap(e.Locked)
+	normalizeMap(e.Pending)
+	normalizeMap(e.Reserved)
+}
+
 func (db *tEventLogDB) storedEventAtIndexEquals(e *MarketMakingEvent, idx int) bool {
 	db.storedEventsMtx.Lock()
 	defer db.storedEventsMtx.Unlock()
@@ -52,6 +73,10 @@ func (db *tEventLogDB) storedEventAtIndexEquals(e *MarketMakingEvent, idx int) b
 		return false
 	}
 	db.storedEvents[idx].TimeStamp = 0 // ignore timestamp
+
+	normalizeBalanceEffects(e.BalanceEffects)
+	normalizeBalanceEffects(db.storedEvents[idx].BalanceEffects)
+
 	return reflect.DeepEqual(db.storedEvents[idx], e)
 }
 func (db *tEventLogDB) latestStoredEventEquals(e *MarketMakingEvent) bool {
@@ -386,8 +411,8 @@ func TestCEXBalanceCounterTrade(t *testing.T) {
 		QuoteID: 0,
 	}
 
-	pendingOrder0.updateState(order0, adaptor.WalletTransaction, 0, 0)
-	pendingOrder1.updateState(order1, adaptor.WalletTransaction, 0, 0)
+	pendingOrder0.updateState(order0, order0.BaseID, order0.QuoteID, adaptor.WalletTransaction, 0, 0)
+	pendingOrder1.updateState(order1, order1.BaseID, order1.QuoteID, adaptor.WalletTransaction, 0, 0)
 
 	dcrBalance := adaptor.CEXBalance(42)
 	expDCR := &BotBalance{
@@ -539,6 +564,10 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 	u.autoRebalanceCfgV.Store(&AutoRebalanceConfig{})
 	a := &arbMarketMaker{unifiedExchangeAdaptor: u}
 	u.botCfgV.Store(&BotConfig{
+		BaseID:               baseID,
+		QuoteID:              quoteID,
+		CEXBaseID:            baseID,
+		CEXQuoteID:           quoteID,
 		ArbMarketMakerConfig: &ArbMarketMakerConfig{Profit: profit},
 	})
 	fiatRates := map[uint32]float64{baseID: 1, quoteID: 1}
@@ -613,6 +642,10 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 	setLots := func(b, s uint64) {
 		buyLots, sellLots = b, s
 		u.botCfgV.Store(&BotConfig{
+			BaseID:     baseID,
+			QuoteID:    quoteID,
+			CEXBaseID:  baseID,
+			CEXQuoteID: quoteID,
 			ArbMarketMakerConfig: &ArbMarketMakerConfig{
 				Profit: profit,
 				BuyPlacements: []*ArbMarketMakingPlacement{
@@ -990,7 +1023,7 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 	coinID := []byte{0xa0}
 	coin := &tCoin{coinID: coinID, value: 1}
 	txID := coin.TxID()
-	tCore.sendCoin = coin
+	tCore.sendCoinID = coinID
 	tCore.walletTxs[txID] = &asset.WalletTransaction{Confirmed: true}
 	cex.confirmedDeposit = &coin.value
 
@@ -1072,7 +1105,8 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 
 	setBals(0, totalBase /* being withdrawn */, minDexQuote, minCexQuote)
 	u.pendingWithdrawals["a"] = &pendingWithdrawal{
-		assetID:      baseID,
+		dexAssetID:   baseID,
+		cexAssetID:   baseID,
 		amtWithdrawn: totalBase,
 	}
 	// Distribution should indicate a deposit.
@@ -1082,7 +1116,8 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 
 	setBals(minDexBase, minCexBase, 0, totalQuote)
 	u.pendingWithdrawals["a"] = &pendingWithdrawal{
-		assetID:      quoteID,
+		dexAssetID:   quoteID,
+		cexAssetID:   quoteID,
 		amtWithdrawn: totalQuote,
 	}
 	checkDistribution(0, 0, minCexQuote, 0, false, false)
@@ -2934,7 +2969,7 @@ func TestMultiTrade(t *testing.T) {
 				60:     4 * sellFees.Max.Redeem,
 			},
 			sellCexBalances: map[uint32]uint64{
-				96601: 0,
+				966001: 0,
 				60: b2q(sellPlacements[0].CounterTradeRate, lotSize) +
 					b2q(sellPlacements[1].CounterTradeRate, 2*lotSize) +
 					b2q(sellPlacements[2].CounterTradeRate, 3*lotSize) +
@@ -3272,6 +3307,8 @@ func TestMultiTrade(t *testing.T) {
 						},
 						eventLogDB: &tEventLogDB{},
 					})
+					adaptor.botCfg().CEXBaseID = test.baseID
+					adaptor.botCfg().CEXQuoteID = test.quoteID
 
 					if test.multiSplitBuffer > 0 {
 						adaptor.botCfg().QuoteWalletOptions = map[string]string{
@@ -4621,353 +4658,295 @@ func TestDEXTrade(t *testing.T) {
 	}
 }
 
+type botBalanceDiffs struct {
+	available int64
+	pending   int64
+	locked    int64
+	reserved  int64
+}
+
+func addBalanceDiffs(a, b *botBalanceDiffs) *botBalanceDiffs {
+	return &botBalanceDiffs{
+		available: a.available + b.available,
+		pending:   a.pending + b.pending,
+		locked:    a.locked + b.locked,
+		reserved:  a.reserved + b.reserved,
+	}
+}
+
+func subBalanceDiffs(a, b *botBalanceDiffs) *botBalanceDiffs {
+	return &botBalanceDiffs{
+		available: a.available - b.available,
+		pending:   a.pending - b.pending,
+		locked:    a.locked - b.locked,
+		reserved:  a.reserved - b.reserved,
+	}
+}
+
+func opBalanceDiffsMaps(op func(a, b *botBalanceDiffs) *botBalanceDiffs, a, b map[uint32]*botBalanceDiffs) map[uint32]*botBalanceDiffs {
+	res := make(map[uint32]*botBalanceDiffs)
+	for assetID, diff := range a {
+		if b[assetID] == nil {
+			res[assetID] = diff
+		} else {
+			res[assetID] = op(diff, b[assetID])
+		}
+	}
+	return res
+}
+
+func (b *botBalanceDiffs) botBalance() *BotBalance {
+	return &BotBalance{
+		Available: uint64(b.available),
+		Pending:   uint64(b.pending),
+		Locked:    uint64(b.locked),
+		Reserved:  uint64(b.reserved),
+	}
+}
+
+func balanceEffectsFromDiffs(dexDiffs, cexDiffs map[uint32]*botBalanceDiffs) *BalanceEffects {
+	effects := newBalanceEffects()
+	for assetID, diff := range dexDiffs {
+		effects.Settled[assetID] += diff.available
+		effects.Pending[assetID] += uint64(diff.pending)
+		effects.Locked[assetID] += uint64(diff.locked)
+		effects.Reserved[assetID] += uint64(diff.reserved)
+	}
+	for assetID, diff := range cexDiffs {
+		effects.Settled[assetID] += diff.available
+		effects.Pending[assetID] += uint64(diff.pending)
+		effects.Locked[assetID] += uint64(diff.locked)
+		effects.Reserved[assetID] += uint64(diff.reserved)
+	}
+	return effects
+}
+
 func TestDeposit(t *testing.T) {
 	type test struct {
-		name              string
-		isWithdrawer      bool
-		isDynamicSwapper  bool
-		depositAmt        uint64
-		sendCoin          *tCoin
-		unconfirmedTx     *asset.WalletTransaction
-		confirmedTx       *asset.WalletTransaction
-		receivedAmt       uint64
-		initialDEXBalance uint64
-		initialCEXBalance uint64
-		assetID           uint32
-		initialEvent      *MarketMakingEvent
-		postConfirmEvent  *MarketMakingEvent
+		name string
 
-		preConfirmDEXBalance  *BotBalance
-		preConfirmCEXBalance  *BotBalance
-		postConfirmDEXBalance *BotBalance
-		postConfirmCEXBalance *BotBalance
+		// Test parameters
+		assetID              uint32
+		cexAssetID           uint32
+		bridgeRequired       bool
+		isWithdrawer         bool
+		isDynamicSwapper     bool
+		depositAmt           uint64
+		unconfirmedBridgeTx  *asset.WalletTransaction
+		confirmedBridgeTx    *asset.WalletTransaction
+		unconfirmedDepositTx *asset.WalletTransaction
+		confirmedDepositTx   *asset.WalletTransaction
+		cexCreditedAmt       uint64
+		initialDEXBalances   map[uint32]uint64
+		initialCEXBalances   map[uint32]uint64
+
+		// Expected balance updates
+		preConfirmBridgeDEXBalances   map[uint32]*botBalanceDiffs
+		preConfirmBridgeCEXBalances   map[uint32]*botBalanceDiffs
+		postConfirmBridgeDEXBalances  map[uint32]*botBalanceDiffs
+		postConfirmBridgeCEXBalances  map[uint32]*botBalanceDiffs
+		preConfirmDepositDEXBalances  map[uint32]*botBalanceDiffs
+		preConfirmDepositCEXBalances  map[uint32]*botBalanceDiffs
+		postConfirmDepositDEXBalances map[uint32]*botBalanceDiffs
+		postConfirmDepositCEXBalances map[uint32]*botBalanceDiffs
 	}
-
-	coinID := encode.RandomBytes(32)
-	txID := hex.EncodeToString(coinID)
 
 	tests := []test{
 		{
-			name:         "withdrawer, not dynamic swapper",
-			assetID:      42,
-			isWithdrawer: true,
-			depositAmt:   1e6,
-			sendCoin: &tCoin{
-				coinID: coinID,
-				value:  1e6 - 2000,
-			},
-			unconfirmedTx: &asset.WalletTransaction{
-				ID:     txID,
+			name:       "withdrawer, not dynamic swapper",
+			assetID:    42,
+			cexAssetID: 42,
+			depositAmt: 1e6,
+			unconfirmedDepositTx: &asset.WalletTransaction{
+				ID:     "deposit_tx_id",
 				Amount: 1e6 - 2000,
 				Fees:   2000,
 			},
-			confirmedTx: &asset.WalletTransaction{
-				ID:     txID,
-				Amount: 1e6 - 2000,
-				Fees:   2000,
+			confirmedDepositTx: &asset.WalletTransaction{
+				ID:        "deposit_tx_id",
+				Amount:    1e6 - 2000,
+				Fees:      2000,
+				Confirmed: true,
 			},
-			receivedAmt:       1e6 - 2000,
-			initialDEXBalance: 3e6,
-			initialCEXBalance: 1e6,
-			preConfirmDEXBalance: &BotBalance{
-				Available: 2e6,
+			cexCreditedAmt:     1e6 - 2000,
+			initialDEXBalances: map[uint32]uint64{42: 3e6},
+			initialCEXBalances: map[uint32]uint64{42: 1e6},
+			preConfirmDepositDEXBalances: map[uint32]*botBalanceDiffs{
+				42: {available: -1e6},
 			},
-			preConfirmCEXBalance: &BotBalance{
-				Available: 1e6,
-				Pending:   1e6 - 2000,
+			preConfirmDepositCEXBalances: map[uint32]*botBalanceDiffs{
+				42: {pending: 1e6 - 2000},
 			},
-			postConfirmDEXBalance: &BotBalance{
-				Available: 2e6,
-			},
-			postConfirmCEXBalance: &BotBalance{
-				Available: 2e6 - 2000,
-			},
-			initialEvent: &MarketMakingEvent{
-				ID: 1,
-				BalanceEffects: &BalanceEffects{
-					Settled: map[uint32]int64{
-						42: -1e6,
-					},
-					Pending: map[uint32]uint64{
-						42: 1e6 - 2000,
-					},
-					Locked:   map[uint32]uint64{},
-					Reserved: map[uint32]uint64{},
-				},
-				Pending: true,
-				DepositEvent: &DepositEvent{
-					AssetID: 42,
-					Transaction: &asset.WalletTransaction{
-						ID:     txID,
-						Amount: 1e6 - 2000,
-						Fees:   2000,
-					},
-				},
-			},
-			postConfirmEvent: &MarketMakingEvent{
-				ID: 1,
-				BalanceEffects: &BalanceEffects{
-					Settled: map[uint32]int64{
-						42: -2000,
-					},
-					Pending:  map[uint32]uint64{},
-					Locked:   map[uint32]uint64{},
-					Reserved: map[uint32]uint64{},
-				},
-				Pending: false,
-				DepositEvent: &DepositEvent{
-					AssetID: 42,
-					Transaction: &asset.WalletTransaction{
-						ID:     txID,
-						Amount: 1e6 - 2000,
-						Fees:   2000,
-					},
-					CEXCredit: 1e6 - 2000,
-				},
+			postConfirmDepositDEXBalances: map[uint32]*botBalanceDiffs{},
+			postConfirmDepositCEXBalances: map[uint32]*botBalanceDiffs{
+				42: {available: 1e6 - 2000, pending: -(1e6 - 2000)},
 			},
 		},
 		{
 			name:       "not withdrawer, not dynamic swapper",
 			assetID:    42,
+			cexAssetID: 42,
 			depositAmt: 1e6,
-			sendCoin: &tCoin{
-				coinID: coinID,
-				value:  1e6,
-			},
-			unconfirmedTx: &asset.WalletTransaction{
-				ID:     txID,
+			unconfirmedDepositTx: &asset.WalletTransaction{
+				ID:     "deposit_tx_id",
 				Amount: 1e6,
 				Fees:   2000,
 			},
-			confirmedTx: &asset.WalletTransaction{
-				ID:     txID,
-				Amount: 1e6,
-				Fees:   2000,
+			confirmedDepositTx: &asset.WalletTransaction{
+				ID:        "deposit_tx_id",
+				Amount:    1e6,
+				Fees:      2000,
+				Confirmed: true,
 			},
-			receivedAmt:       1e6,
-			initialDEXBalance: 3e6,
-			initialCEXBalance: 1e6,
-			preConfirmDEXBalance: &BotBalance{
-				Available: 2e6 - 2000,
+			cexCreditedAmt:     1e6,
+			initialDEXBalances: map[uint32]uint64{42: 3e6},
+			initialCEXBalances: map[uint32]uint64{42: 1e6},
+			preConfirmDepositDEXBalances: map[uint32]*botBalanceDiffs{
+				42: {available: -1e6 - 2000},
 			},
-			preConfirmCEXBalance: &BotBalance{
-				Available: 1e6,
-				Pending:   1e6,
+			preConfirmDepositCEXBalances: map[uint32]*botBalanceDiffs{
+				42: {pending: 1e6},
 			},
-			postConfirmDEXBalance: &BotBalance{
-				Available: 2e6 - 2000,
-			},
-			postConfirmCEXBalance: &BotBalance{
-				Available: 2e6,
-			},
-			initialEvent: &MarketMakingEvent{
-				ID: 1,
-				BalanceEffects: &BalanceEffects{
-					Settled: map[uint32]int64{
-						42: -1e6 - 2000,
-					},
-					Pending: map[uint32]uint64{
-						42: 1e6,
-					},
-					Locked:   map[uint32]uint64{},
-					Reserved: map[uint32]uint64{},
-				},
-				Pending: true,
-				DepositEvent: &DepositEvent{
-					AssetID: 42,
-					Transaction: &asset.WalletTransaction{
-						ID:     txID,
-						Amount: 1e6,
-						Fees:   2000,
-					},
-				},
-			},
-			postConfirmEvent: &MarketMakingEvent{
-				ID: 1,
-				BalanceEffects: &BalanceEffects{
-					Settled: map[uint32]int64{
-						42: -2000,
-					},
-					Pending:  map[uint32]uint64{},
-					Locked:   map[uint32]uint64{},
-					Reserved: map[uint32]uint64{},
-				},
-				Pending: false,
-				DepositEvent: &DepositEvent{
-					AssetID: 42,
-					Transaction: &asset.WalletTransaction{
-						ID:     txID,
-						Amount: 1e6,
-						Fees:   2000,
-					},
-					CEXCredit: 1e6,
-				},
+			postConfirmDepositDEXBalances: map[uint32]*botBalanceDiffs{},
+			postConfirmDepositCEXBalances: map[uint32]*botBalanceDiffs{
+				42: {available: 1e6, pending: -1e6},
 			},
 		},
 		{
 			name:             "not withdrawer, dynamic swapper",
 			assetID:          42,
+			cexAssetID:       42,
 			isDynamicSwapper: true,
 			depositAmt:       1e6,
-			sendCoin: &tCoin{
-				coinID: coinID,
-				value:  1e6,
+			unconfirmedDepositTx: &asset.WalletTransaction{
+				ID:     "deposit_tx_id",
+				Amount: 1e6,
+				Fees:   4000,
 			},
-			unconfirmedTx: &asset.WalletTransaction{
-				ID:        txID,
-				Amount:    1e6,
-				Fees:      4000,
-				Confirmed: false,
-			},
-			confirmedTx: &asset.WalletTransaction{
-				ID:        txID,
+			confirmedDepositTx: &asset.WalletTransaction{
+				ID:        "deposit_tx_id",
 				Amount:    1e6,
 				Fees:      2000,
 				Confirmed: true,
 			},
-			receivedAmt:       1e6,
-			initialDEXBalance: 3e6,
-			initialCEXBalance: 1e6,
-			preConfirmDEXBalance: &BotBalance{
-				Available: 2e6 - 4000,
+			cexCreditedAmt:     1e6,
+			initialDEXBalances: map[uint32]uint64{42: 3e6},
+			initialCEXBalances: map[uint32]uint64{42: 1e6},
+			preConfirmDepositDEXBalances: map[uint32]*botBalanceDiffs{
+				42: {available: -1e6 - 4000},
 			},
-			preConfirmCEXBalance: &BotBalance{
-				Available: 1e6,
-				Pending:   1e6,
+			preConfirmDepositCEXBalances: map[uint32]*botBalanceDiffs{
+				42: {pending: 1e6},
 			},
-			postConfirmDEXBalance: &BotBalance{
-				Available: 2e6 - 2000,
+			postConfirmDepositDEXBalances: map[uint32]*botBalanceDiffs{
+				42: {available: 2000},
 			},
-			postConfirmCEXBalance: &BotBalance{
-				Available: 2e6,
-			},
-			initialEvent: &MarketMakingEvent{
-				ID: 1,
-				BalanceEffects: &BalanceEffects{
-					Settled: map[uint32]int64{
-						42: -1e6 - 4000,
-					},
-					Pending: map[uint32]uint64{
-						42: 1e6,
-					},
-					Locked:   map[uint32]uint64{},
-					Reserved: map[uint32]uint64{},
-				},
-				Pending: true,
-				DepositEvent: &DepositEvent{
-					AssetID: 42,
-					Transaction: &asset.WalletTransaction{
-						ID:     txID,
-						Amount: 1e6,
-						Fees:   4000,
-					},
-				},
-			},
-			postConfirmEvent: &MarketMakingEvent{
-				ID: 1,
-				BalanceEffects: &BalanceEffects{
-					Settled: map[uint32]int64{
-						42: -2000,
-					},
-					Pending:  map[uint32]uint64{},
-					Locked:   map[uint32]uint64{},
-					Reserved: map[uint32]uint64{},
-				},
-				Pending: false,
-				DepositEvent: &DepositEvent{
-					AssetID: 42,
-					Transaction: &asset.WalletTransaction{
-						ID:        txID,
-						Amount:    1e6,
-						Fees:      2000,
-						Confirmed: true,
-					},
-					CEXCredit: 1e6,
-				},
+			postConfirmDepositCEXBalances: map[uint32]*botBalanceDiffs{
+				42: {available: 1e6, pending: -1e6},
 			},
 		},
 		{
 			name:             "not withdrawer, dynamic swapper, token",
 			assetID:          966001,
+			cexAssetID:       966001,
 			isDynamicSwapper: true,
 			depositAmt:       1e6,
-			sendCoin: &tCoin{
-				coinID: coinID,
-				value:  1e6,
+			unconfirmedDepositTx: &asset.WalletTransaction{
+				ID:     "deposit_tx_id",
+				Amount: 1e6,
+				Fees:   4000,
 			},
-			unconfirmedTx: &asset.WalletTransaction{
-				ID:        txID,
-				Amount:    1e6,
-				Fees:      4000,
-				Confirmed: false,
-			},
-			confirmedTx: &asset.WalletTransaction{
-				ID:        txID,
+			confirmedDepositTx: &asset.WalletTransaction{
+				ID:        "deposit_tx_id",
 				Amount:    1e6,
 				Fees:      2000,
 				Confirmed: true,
 			},
-			receivedAmt:       1e6,
-			initialDEXBalance: 3e6,
-			initialCEXBalance: 1e6,
-			preConfirmDEXBalance: &BotBalance{
-				Available: 2e6,
+			cexCreditedAmt:     1e6,
+			initialDEXBalances: map[uint32]uint64{966001: 3e6, 966: 1e8},
+			initialCEXBalances: map[uint32]uint64{966001: 1e6},
+			preConfirmDepositDEXBalances: map[uint32]*botBalanceDiffs{
+				966001: {available: -1e6},
+				966:    {available: -4000},
 			},
-			preConfirmCEXBalance: &BotBalance{
-				Available: 1e6,
-				Pending:   1e6,
+			preConfirmDepositCEXBalances: map[uint32]*botBalanceDiffs{
+				966001: {pending: 1e6},
 			},
-			postConfirmDEXBalance: &BotBalance{
-				Available: 2e6,
+			postConfirmDepositDEXBalances: map[uint32]*botBalanceDiffs{
+				966: {available: 2000},
 			},
-			postConfirmCEXBalance: &BotBalance{
-				Available: 2e6,
+			postConfirmDepositCEXBalances: map[uint32]*botBalanceDiffs{
+				966001: {available: 1e6, pending: -1e6},
 			},
-			initialEvent: &MarketMakingEvent{
-				ID: 1,
-				BalanceEffects: &BalanceEffects{
-					Settled: map[uint32]int64{
-						966001: -1e6,
-						966:    -4000,
-					},
-					Pending: map[uint32]uint64{
-						966001: 1000000,
-					},
-					Locked:   map[uint32]uint64{},
-					Reserved: map[uint32]uint64{},
-				},
-				Pending: true,
-				DepositEvent: &DepositEvent{
+		},
+		{
+			name:           "bridge deposit - USDC Ethereum to USDC Polygon",
+			assetID:        60001,  // USDC on Ethereum
+			cexAssetID:     966001, // USDC on Polygon
+			bridgeRequired: true,
+			depositAmt:     1e6,
+			unconfirmedBridgeTx: &asset.WalletTransaction{
+				ID:     "bridge_tx_id",
+				Amount: 1e6,
+				Fees:   2000,
+				BridgeCounterpartTx: &asset.BridgeCounterpartTx{
 					AssetID: 966001,
-					Transaction: &asset.WalletTransaction{
-						ID:     txID,
-						Amount: 1e6,
-						Fees:   4000,
-					},
 				},
 			},
-			postConfirmEvent: &MarketMakingEvent{
-				ID: 1,
-				BalanceEffects: &BalanceEffects{
-					Settled: map[uint32]int64{
-						966001: 0,
-						966:    -2000,
-					},
-					Pending:  map[uint32]uint64{},
-					Locked:   map[uint32]uint64{},
-					Reserved: map[uint32]uint64{},
+			confirmedBridgeTx: &asset.WalletTransaction{
+				ID:     "bridge_tx_id",
+				Amount: 1e6,
+				Fees:   2000,
+				BridgeCounterpartTx: &asset.BridgeCounterpartTx{
+					AssetID:        966001,
+					IDs:            []string{"counterpart_tx_id"},
+					Complete:       true,
+					AmountReceived: 9.9e5,
+					Fees:           1000,
 				},
-				Pending: false,
-				DepositEvent: &DepositEvent{
-					AssetID: 966001,
-					Transaction: &asset.WalletTransaction{
-						ID:        txID,
-						Amount:    1e6,
-						Fees:      2000,
-						Confirmed: true,
-					},
-					CEXCredit: 1e6,
-				},
+			},
+			unconfirmedDepositTx: &asset.WalletTransaction{
+				ID:     "deposit_tx_id",
+				Amount: 9.9e5,
+				Fees:   1000,
+			},
+			confirmedDepositTx: &asset.WalletTransaction{
+				ID:        "deposit_tx_id",
+				Amount:    9.9e5,
+				Fees:      1000,
+				Confirmed: true,
+			},
+			cexCreditedAmt: 9.9e5,
+			initialDEXBalances: map[uint32]uint64{
+				60001:  1e7,
+				966001: 1e7,
+				966:    1e7,
+				60:     1e7,
+			},
+			initialCEXBalances: map[uint32]uint64{
+				966001: 1e7,
+			},
+			preConfirmBridgeDEXBalances: map[uint32]*botBalanceDiffs{
+				60001:  {available: -1e6},
+				60:     {available: -2000},
+				966001: {pending: 1e6},
+			},
+			preConfirmBridgeCEXBalances: map[uint32]*botBalanceDiffs{},
+			postConfirmBridgeDEXBalances: map[uint32]*botBalanceDiffs{
+				966001: {pending: -1e6, available: 9.9e5},
+				966:    {available: -1000},
+			},
+			postConfirmBridgeCEXBalances: map[uint32]*botBalanceDiffs{},
+			preConfirmDepositDEXBalances: map[uint32]*botBalanceDiffs{
+				966001: {available: -9.9e5},
+				966:    {available: -1000},
+			},
+			preConfirmDepositCEXBalances: map[uint32]*botBalanceDiffs{
+				966001: {pending: 9.9e5},
+			},
+			postConfirmDepositDEXBalances: map[uint32]*botBalanceDiffs{},
+			postConfirmDepositCEXBalances: map[uint32]*botBalanceDiffs{
+				966001: {available: 9.9e5, pending: -9.9e5},
 			},
 		},
 	}
@@ -4977,31 +4956,22 @@ func TestDeposit(t *testing.T) {
 			tCore := newTCore()
 			tCore.isWithdrawer[test.assetID] = test.isWithdrawer
 			tCore.isDynamicSwapper[test.assetID] = test.isDynamicSwapper
-			tCore.setAssetBalances(map[uint32]uint64{test.assetID: test.initialDEXBalance, 0: 2e6, 966: 2e6})
+			tCore.setAssetBalances(test.initialDEXBalances)
 			tCore.walletTxsMtx.Lock()
-			tCore.walletTxs[test.unconfirmedTx.ID] = test.unconfirmedTx
+			if test.unconfirmedBridgeTx != nil {
+				tCore.walletTxs[test.unconfirmedBridgeTx.ID] = test.unconfirmedBridgeTx
+			}
+			if test.unconfirmedDepositTx != nil {
+				tCore.walletTxs[test.unconfirmedDepositTx.ID] = test.unconfirmedDepositTx
+			}
 			tCore.walletTxsMtx.Unlock()
-			tCore.sendCoin = test.sendCoin
+			tCore.sendCoinID = []byte(test.unconfirmedDepositTx.ID)
 
 			tCEX := newTCEX()
-			tCEX.balances[test.assetID] = &libxc.ExchangeBalance{
-				Available: test.initialCEXBalance,
-			}
-			tCEX.balances[0] = &libxc.ExchangeBalance{
-				Available: 2e6,
-			}
-			tCEX.balances[966] = &libxc.ExchangeBalance{
-				Available: 1e8,
-			}
-
-			dexBalances := map[uint32]uint64{
-				test.assetID: test.initialDEXBalance,
-				0:            2e6,
-				966:          2e6,
-			}
-			cexBalances := map[uint32]uint64{
-				0:   2e6,
-				966: 1e8,
+			for assetID, balance := range test.initialCEXBalances {
+				tCEX.balances[assetID] = &libxc.ExchangeBalance{
+					Available: balance * 2,
+				}
 			}
 
 			ctx, cancel := context.WithCancel(context.Background())
@@ -5013,14 +4983,18 @@ func TestDeposit(t *testing.T) {
 				botID:           botID,
 				core:            tCore,
 				cex:             tCEX,
-				baseDexBalances: dexBalances,
-				baseCexBalances: cexBalances,
+				baseDexBalances: test.initialDEXBalances,
+				baseCexBalances: test.initialCEXBalances,
 				mwh: &MarketWithHost{
 					Host:    "host1",
 					BaseID:  test.assetID,
 					QuoteID: 0,
 				},
 				eventLogDB: eventLogDB,
+				botCfg: &BotConfig{
+					BaseID:    test.assetID,
+					CEXBaseID: test.cexAssetID,
+				},
 			})
 
 			tCore.singleLotBuyFees = tFees(0, 0, 0, 0)
@@ -5036,44 +5010,64 @@ func TestDeposit(t *testing.T) {
 				t.Fatalf("%s: unexpected error: %v", test.name, err)
 			}
 
-			preConfirmBal := adaptor.DEXBalance(test.assetID)
-			if *preConfirmBal != *test.preConfirmDEXBalance {
-				t.Fatalf("%s: unexpected pre confirm dex balance. want %d, got %d", test.name, test.preConfirmDEXBalance, preConfirmBal.Available)
+			expectedDexBalances := map[uint32]*botBalanceDiffs{}
+			expectedCexBalances := map[uint32]*botBalanceDiffs{}
+			for assetID, bal := range test.initialDEXBalances {
+				expectedDexBalances[assetID] = &botBalanceDiffs{
+					available: int64(bal),
+				}
 			}
-
-			if test.assetID == 966001 {
-				preConfirmParentBal := adaptor.DEXBalance(966)
-				if preConfirmParentBal.Available != 2e6-test.unconfirmedTx.Fees {
-					t.Fatalf("%s: unexpected pre confirm dex balance. want %d, got %d", test.name, test.preConfirmDEXBalance, preConfirmBal.Available)
+			for assetID, bal := range test.initialCEXBalances {
+				expectedCexBalances[assetID] = &botBalanceDiffs{
+					available: int64(bal),
 				}
 			}
 
-			if !eventLogDB.latestStoredEventEquals(test.initialEvent) {
-				t.Fatalf("%s: unexpected initial event logged. want:\n%s,\ngot:\n%s", test.name, spew.Sdump(test.initialEvent), spew.Sdump(eventLogDB.latestStoredEvent()))
+			initialDexBalances := utils.CopyMap(expectedDexBalances)
+			initialCexBalances := utils.CopyMap(expectedCexBalances)
+
+			updateExpectedBalances := func(dexDiffs, cexDiffs map[uint32]*botBalanceDiffs) {
+				expectedDexBalances = opBalanceDiffsMaps(addBalanceDiffs, expectedDexBalances, dexDiffs)
+				expectedCexBalances = opBalanceDiffsMaps(addBalanceDiffs, expectedCexBalances, cexDiffs)
 			}
 
-			tCore.walletTxsMtx.Lock()
-			tCore.walletTxs[test.unconfirmedTx.ID] = test.confirmedTx
-			tCore.walletTxsMtx.Unlock()
-
-			tCEX.confirmDepositMtx.Lock()
-			tCEX.confirmedDeposit = &test.receivedAmt
-			tCEX.confirmDepositMtx.Unlock()
-
-			adaptor.confirmDeposit(ctx, txID)
-
-			checkPostConfirmBalance := func() error {
-				postConfirmBal := adaptor.DEXBalance(test.assetID)
-				if *postConfirmBal != *test.postConfirmDEXBalance {
-					return fmt.Errorf("%s: unexpected post confirm dex balance. want %d, got %d", test.name, test.postConfirmDEXBalance, postConfirmBal.Available)
-				}
-
-				if test.assetID == 966001 {
-					postConfirmParentBal := adaptor.DEXBalance(966)
-					if postConfirmParentBal.Available != 2e6-test.confirmedTx.Fees {
-						return fmt.Errorf("%s: unexpected post confirm fee balance. want %d, got %d", test.name, 2e6-test.confirmedTx.Fees, postConfirmParentBal.Available)
+			checkExpectedBalances := func() error {
+				for assetID, bal := range expectedDexBalances {
+					actualBal := adaptor.DEXBalance(assetID)
+					if *actualBal != *bal.botBalance() {
+						return fmt.Errorf("%s: unexpected dex balance for asset %d. want %+v, got %+v", test.name, assetID, bal.botBalance(), actualBal)
 					}
 				}
+				for assetID, bal := range expectedCexBalances {
+					actualBal := adaptor.CEXBalance(assetID)
+					if *actualBal != *bal.botBalance() {
+						return fmt.Errorf("%s: unexpected cex balance for asset %d. want %d, got %d", test.name, assetID, bal.botBalance(), actualBal)
+					}
+				}
+
+				return nil
+			}
+
+			checkLatestEvent := func(pending bool, cexCredit uint64, bridgeTx *asset.WalletTransaction, depositTx *asset.WalletTransaction) error {
+				dexBalanceEffects := opBalanceDiffsMaps(subBalanceDiffs, expectedDexBalances, initialDexBalances)
+				cexBalanceEffects := opBalanceDiffsMaps(subBalanceDiffs, expectedCexBalances, initialCexBalances)
+				expectedEvent := &MarketMakingEvent{
+					ID:             1,
+					BalanceEffects: balanceEffectsFromDiffs(dexBalanceEffects, cexBalanceEffects),
+					Pending:        pending,
+					DepositEvent: &DepositEvent{
+						DexAssetID: test.assetID,
+						CEXAssetID: test.cexAssetID,
+						BridgeTx:   bridgeTx,
+						DepositTx:  depositTx,
+						CEXCredit:  cexCredit,
+					},
+				}
+
+				if !eventLogDB.latestStoredEventEquals(expectedEvent) {
+					return fmt.Errorf("%s: unexpected latest event logged. want:\n%s,\ngot:\n%s", test.name, spew.Sdump(expectedEvent), spew.Sdump(eventLogDB.latestStoredEvent()))
+				}
+
 				return nil
 			}
 
@@ -5090,19 +5084,52 @@ func TestDeposit(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			// Synchronizing because the event may not yet be when confirmDeposit
-			// returns if two calls to confirmDeposit happen in parallel.
-			tryWithTimeout(func() error {
-				err = checkPostConfirmBalance()
-				if err != nil {
-					return err
+			var depositID string
+			if test.bridgeRequired {
+				updateExpectedBalances(test.preConfirmBridgeDEXBalances, test.preConfirmBridgeCEXBalances)
+				if err := checkExpectedBalances(); err != nil {
+					t.Fatal(err)
+				}
+				if err := checkLatestEvent(true, 0, test.unconfirmedBridgeTx, nil); err != nil {
+					t.Fatal(err)
 				}
 
-				if !eventLogDB.latestStoredEventEquals(test.postConfirmEvent) {
-					return fmt.Errorf("%s: unexpected post confirm event logged. want:\n%s,\ngot:\n%s", test.name, spew.Sdump(test.postConfirmEvent), spew.Sdump(eventLogDB.latestStoredEvent()))
+				tCore.walletTxsMtx.Lock()
+				tCore.walletTxs[test.unconfirmedBridgeTx.ID] = test.confirmedBridgeTx
+				tCore.walletTxs[test.unconfirmedDepositTx.ID] = test.unconfirmedDepositTx
+				tCore.walletTxsMtx.Unlock()
+
+				depositID = test.unconfirmedBridgeTx.ID
+				adaptor.confirmDeposit(ctx, depositID, adaptor.pendingDeposits[test.unconfirmedBridgeTx.ID])
+				updateExpectedBalances(test.postConfirmBridgeDEXBalances, test.postConfirmBridgeCEXBalances)
+				updateExpectedBalances(test.preConfirmDepositDEXBalances, test.preConfirmDepositCEXBalances)
+				tryWithTimeout(checkExpectedBalances)
+				if err := checkLatestEvent(true, 0, test.confirmedBridgeTx, test.unconfirmedDepositTx); err != nil {
+					t.Fatal(err)
 				}
-				return nil
-			})
+			} else {
+				updateExpectedBalances(test.preConfirmDepositDEXBalances, test.preConfirmDepositCEXBalances)
+				tryWithTimeout(checkExpectedBalances)
+				if err := checkLatestEvent(true, 0, nil, test.unconfirmedDepositTx); err != nil {
+					t.Fatal(err)
+				}
+				depositID = test.unconfirmedDepositTx.ID
+			}
+
+			tCore.walletTxsMtx.Lock()
+			tCore.walletTxs[test.unconfirmedDepositTx.ID] = test.confirmedDepositTx
+			tCore.walletTxsMtx.Unlock()
+
+			tCEX.confirmDepositMtx.Lock()
+			tCEX.confirmedDeposit = &test.cexCreditedAmt
+			tCEX.confirmDepositMtx.Unlock()
+
+			adaptor.confirmDeposit(ctx, depositID, adaptor.pendingDeposits[depositID])
+			updateExpectedBalances(test.postConfirmDepositDEXBalances, test.postConfirmDepositCEXBalances)
+			tryWithTimeout(checkExpectedBalances)
+			if err := checkLatestEvent(false, test.cexCreditedAmt, test.confirmedBridgeTx, test.confirmedDepositTx); err != nil {
+				t.Fatal(err)
+			}
 		})
 	}
 
@@ -5112,190 +5139,329 @@ func TestDeposit(t *testing.T) {
 }
 
 func TestWithdraw(t *testing.T) {
-	assetID := uint32(42)
 	coinID := encode.RandomBytes(32)
 	txID := hex.EncodeToString(coinID)
 	withdrawalID := hex.EncodeToString(encode.RandomBytes(32))
 
 	type test struct {
-		name              string
-		withdrawAmt       uint64
-		tx                *asset.WalletTransaction
-		initialDEXBalance uint64
-		initialCEXBalance uint64
+		name string
 
-		preConfirmDEXBalance  *BotBalance
-		preConfirmCEXBalance  *BotBalance
-		postConfirmDEXBalance *BotBalance
-		postConfirmCEXBalance *BotBalance
+		// Test parameters
+		assetID                 uint32
+		cexAssetID              uint32
+		bridgeRequired          bool
+		withdrawAmt             uint64
+		unconfirmedWithdrawalTx *asset.WalletTransaction
+		confirmedWithdrawalTx   *asset.WalletTransaction
+		unconfirmedBridgeTx     *asset.WalletTransaction
+		confirmedBridgeTx       *asset.WalletTransaction
+		cexDebitAmt             uint64
+		initialDEXBalances      map[uint32]uint64
+		initialCEXBalances      map[uint32]uint64
 
-		initialEvent     *MarketMakingEvent
-		postConfirmEvent *MarketMakingEvent
+		// Expected balance updates
+		preConfirmWithdrawalDEXBalances  map[uint32]*botBalanceDiffs
+		preConfirmWithdrawalCEXBalances  map[uint32]*botBalanceDiffs
+		postConfirmWithdrawalDEXBalances map[uint32]*botBalanceDiffs
+		postConfirmWithdrawalCEXBalances map[uint32]*botBalanceDiffs
+		postConfirmBridgeDEXBalances     map[uint32]*botBalanceDiffs
+		postConfirmBridgeCEXBalances     map[uint32]*botBalanceDiffs
 	}
 
 	tests := []test{
 		{
 			name:        "ok",
+			assetID:     42,
+			cexAssetID:  42,
 			withdrawAmt: 1e6,
-			tx: &asset.WalletTransaction{
+			unconfirmedWithdrawalTx: &asset.WalletTransaction{
+				ID:        txID,
+				Amount:    0.9e6 - 2000,
+				Fees:      2000,
+				Confirmed: false,
+			},
+			confirmedWithdrawalTx: &asset.WalletTransaction{
 				ID:        txID,
 				Amount:    0.9e6 - 2000,
 				Fees:      2000,
 				Confirmed: true,
 			},
-			initialCEXBalance: 3e6,
-			initialDEXBalance: 1e6,
-			preConfirmDEXBalance: &BotBalance{
-				Available: 1e6,
-				Pending:   1e6,
+			cexDebitAmt: 1e6,
+			initialDEXBalances: map[uint32]uint64{
+				42: 1e6,
+				0:  2e6,
 			},
-			preConfirmCEXBalance: &BotBalance{
-				Available: 1.9e6,
+			initialCEXBalances: map[uint32]uint64{
+				42:  3e6,
+				966: 1e8,
 			},
-			postConfirmDEXBalance: &BotBalance{
-				Available: 1.9e6 - 2000,
+			preConfirmWithdrawalDEXBalances: map[uint32]*botBalanceDiffs{
+				42: {pending: 1e6},
 			},
-			postConfirmCEXBalance: &BotBalance{
-				Available: 2e6,
+			preConfirmWithdrawalCEXBalances: map[uint32]*botBalanceDiffs{
+				42: {available: -1e6},
 			},
-			initialEvent: &MarketMakingEvent{
-				ID:      1,
-				Pending: true,
-				BalanceEffects: &BalanceEffects{
-					Settled: map[uint32]int64{
-						42: -1e6,
-					},
-					Pending: map[uint32]uint64{
-						42: 1e6,
-					},
-					Locked:   map[uint32]uint64{},
-					Reserved: map[uint32]uint64{},
-				},
-				WithdrawalEvent: &WithdrawalEvent{
-					AssetID:  42,
-					CEXDebit: 1e6,
-					ID:       withdrawalID,
-				},
+			postConfirmWithdrawalDEXBalances: map[uint32]*botBalanceDiffs{
+				42: {pending: -1e6, available: 0.9e6 - 2000},
 			},
-			postConfirmEvent: &MarketMakingEvent{
-				ID:      1,
-				Pending: false,
-				BalanceEffects: &BalanceEffects{
-					Settled: map[uint32]int64{
-						42: -(0.1e6 + 2000),
-					},
-					Pending:  map[uint32]uint64{},
-					Locked:   map[uint32]uint64{},
-					Reserved: map[uint32]uint64{},
-				},
-				WithdrawalEvent: &WithdrawalEvent{
-					AssetID:  42,
-					CEXDebit: 1e6,
-					ID:       withdrawalID,
-					Transaction: &asset.WalletTransaction{
-						ID:        txID,
-						Amount:    0.9e6 - 2000,
-						Fees:      2000,
-						Confirmed: true,
-					},
+			postConfirmWithdrawalCEXBalances: map[uint32]*botBalanceDiffs{},
+		},
+		{
+			name:           "bridge withdrawal - USDC Polygon to USDC Ethereum",
+			assetID:        60001,  // USDC on Ethereum (target)
+			cexAssetID:     966001, // USDC on Polygon (source)
+			bridgeRequired: true,
+			withdrawAmt:    1e6,
+			unconfirmedWithdrawalTx: &asset.WalletTransaction{
+				ID:        "withdrawal_tx_id",
+				Amount:    9.9e5,
+				Fees:      1000,
+				Confirmed: false,
+			},
+			confirmedWithdrawalTx: &asset.WalletTransaction{
+				ID:        "withdrawal_tx_id",
+				Amount:    9.9e5,
+				Fees:      1000,
+				Confirmed: true,
+			},
+			unconfirmedBridgeTx: &asset.WalletTransaction{
+				ID:     "bridge_tx_id",
+				Amount: 9.9e5,
+				Fees:   2000,
+				BridgeCounterpartTx: &asset.BridgeCounterpartTx{
+					AssetID: 60001,
 				},
 			},
+			confirmedBridgeTx: &asset.WalletTransaction{
+				ID:     "bridge_tx_id",
+				Amount: 9.9e5,
+				Fees:   2000,
+				BridgeCounterpartTx: &asset.BridgeCounterpartTx{
+					AssetID:        60001,
+					IDs:            []string{"counterpart_tx_id"},
+					Complete:       true,
+					AmountReceived: 9.8e5,
+					Fees:           1500,
+				},
+			},
+			cexDebitAmt: 1e6,
+			initialDEXBalances: map[uint32]uint64{
+				60001:  1e7,
+				966001: 1e7,
+				966:    1e7,
+				60:     1e7,
+			},
+			initialCEXBalances: map[uint32]uint64{
+				966001: 1e7,
+			},
+			preConfirmWithdrawalDEXBalances: map[uint32]*botBalanceDiffs{
+				966001: {pending: 1e6},
+			},
+			preConfirmWithdrawalCEXBalances: map[uint32]*botBalanceDiffs{
+				966001: {available: -1e6},
+			},
+			postConfirmWithdrawalDEXBalances: map[uint32]*botBalanceDiffs{
+				966001: {pending: -1e6},
+				966:    {available: -2000},
+				60001:  {pending: 9.9e5},
+			},
+			postConfirmWithdrawalCEXBalances: map[uint32]*botBalanceDiffs{},
+			postConfirmBridgeDEXBalances: map[uint32]*botBalanceDiffs{
+				60001: {pending: -9.9e5, available: 9.8e5},
+				60:    {available: -1500},
+			},
+			postConfirmBridgeCEXBalances: map[uint32]*botBalanceDiffs{},
 		},
 	}
 
 	runTest := func(test *test) {
-		tCore := newTCore()
+		t.Run(test.name, func(t *testing.T) {
+			tCore := newTCore()
+			tCore.setAssetBalances(test.initialDEXBalances)
+			tCore.walletTxsMtx.Lock()
 
-		tCore.walletTxsMtx.Lock()
-		tCore.walletTxs[test.tx.ID] = test.tx
-		tCore.walletTxsMtx.Unlock()
+			if test.unconfirmedWithdrawalTx != nil {
+				tCore.walletTxs[test.unconfirmedWithdrawalTx.ID] = test.unconfirmedWithdrawalTx
+			}
+			if test.unconfirmedBridgeTx != nil {
+				tCore.walletTxs[test.unconfirmedBridgeTx.ID] = test.unconfirmedBridgeTx
+			}
+			tCore.walletTxsMtx.Unlock()
 
-		tCEX := newTCEX()
-
-		dexBalances := map[uint32]uint64{
-			assetID: test.initialDEXBalance,
-			0:       2e6,
-		}
-		cexBalances := map[uint32]uint64{
-			assetID: test.initialCEXBalance,
-			966:     1e8,
-		}
-
-		tCEX.withdrawalID = withdrawalID
-
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		botID := dexMarketID("host1", assetID, 0)
-		eventLogDB := newTEventLogDB()
-		adaptor := mustParseAdaptor(&exchangeAdaptorCfg{
-			botID:           botID,
-			core:            tCore,
-			cex:             tCEX,
-			baseDexBalances: dexBalances,
-			baseCexBalances: cexBalances,
-			mwh: &MarketWithHost{
-				Host:    "host1",
-				BaseID:  assetID,
-				QuoteID: 0,
-			},
-			eventLogDB: eventLogDB,
-		})
-		tCore.singleLotBuyFees = tFees(0, 0, 0, 0)
-		tCore.singleLotSellFees = tFees(0, 0, 0, 0)
-
-		_, err := adaptor.Connect(ctx)
-		if err != nil {
-			t.Fatalf("%s: Connect error: %v", test.name, err)
-		}
-
-		err = adaptor.withdraw(ctx, assetID, test.withdrawAmt)
-		if err != nil {
-			t.Fatalf("%s: unexpected error: %v", test.name, err)
-		}
-
-		if !eventLogDB.latestStoredEventEquals(test.initialEvent) {
-			t.Fatalf("%s: unexpected event logged. want:\n%s,\ngot:\n%s", test.name, spew.Sdump(test.initialEvent), spew.Sdump(eventLogDB.latestStoredEvent()))
-		}
-		preConfirmBal := adaptor.DEXBalance(assetID)
-		if *preConfirmBal != *test.preConfirmDEXBalance {
-			t.Fatalf("%s: unexpected pre confirm dex balance. want %+v, got %+v", test.name, test.preConfirmDEXBalance, preConfirmBal)
-		}
-
-		tCEX.confirmWithdrawalMtx.Lock()
-		tCEX.confirmWithdrawal = &withdrawArgs{
-			assetID: assetID,
-			amt:     test.withdrawAmt,
-			txID:    test.tx.ID,
-		}
-		tCEX.confirmWithdrawalMtx.Unlock()
-
-		adaptor.confirmWithdrawal(ctx, withdrawalID)
-
-		tryWithTimeout := func(f func() error) {
-			t.Helper()
-			var err error
-			for i := 0; i < 20; i++ {
-				time.Sleep(100 * time.Millisecond)
-				err = f()
-				if err == nil {
-					return
+			tCEX := newTCEX()
+			for assetID, balance := range test.initialCEXBalances {
+				tCEX.balances[assetID] = &libxc.ExchangeBalance{
+					Available: balance * 2,
 				}
 			}
-			t.Fatal(err)
-		}
 
-		// Synchronizing because the event may not yet be when confirmWithdrawal
-		// returns if two calls to confirmWithdrawal happen in parallel.
-		tryWithTimeout(func() error {
-			postConfirmBal := adaptor.DEXBalance(assetID)
-			if *postConfirmBal != *test.postConfirmDEXBalance {
-				return fmt.Errorf("%s: unexpected post confirm dex balance. want %+v, got %+v", test.name, test.postConfirmDEXBalance, postConfirmBal)
+			tCEX.withdrawalID = withdrawalID
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			botID := dexMarketID("host1", test.assetID, 0)
+			eventLogDB := newTEventLogDB()
+			adaptor := mustParseAdaptor(&exchangeAdaptorCfg{
+				botID:           botID,
+				core:            tCore,
+				cex:             tCEX,
+				baseDexBalances: test.initialDEXBalances,
+				baseCexBalances: test.initialCEXBalances,
+				mwh: &MarketWithHost{
+					Host:    "host1",
+					BaseID:  test.assetID,
+					QuoteID: 0,
+				},
+				eventLogDB: eventLogDB,
+				botCfg: &BotConfig{
+					BaseID:    test.assetID,
+					CEXBaseID: test.cexAssetID,
+				},
+			})
+
+			tCore.singleLotBuyFees = tFees(0, 0, 0, 0)
+			tCore.singleLotSellFees = tFees(0, 0, 0, 0)
+
+			_, err := adaptor.Connect(ctx)
+			if err != nil {
+				t.Fatalf("%s: Connect error: %v", test.name, err)
 			}
-			if !eventLogDB.latestStoredEventEquals(test.postConfirmEvent) {
-				return fmt.Errorf("%s: unexpected event logged. want:\n%s,\ngot:\n%s", test.name, spew.Sdump(test.postConfirmEvent), spew.Sdump(eventLogDB.latestStoredEvent()))
+
+			err = adaptor.withdraw(ctx, test.cexAssetID, test.withdrawAmt)
+			if err != nil {
+				t.Fatalf("%s: unexpected error: %v", test.name, err)
 			}
-			return nil
+
+			expectedDexBalances := map[uint32]*botBalanceDiffs{}
+			expectedCexBalances := map[uint32]*botBalanceDiffs{}
+			for assetID, bal := range test.initialDEXBalances {
+				expectedDexBalances[assetID] = &botBalanceDiffs{
+					available: int64(bal),
+				}
+			}
+			for assetID, bal := range test.initialCEXBalances {
+				expectedCexBalances[assetID] = &botBalanceDiffs{
+					available: int64(bal),
+				}
+			}
+
+			initialDexBalances := utils.CopyMap(expectedDexBalances)
+			initialCexBalances := utils.CopyMap(expectedCexBalances)
+
+			updateExpectedBalances := func(dexDiffs, cexDiffs map[uint32]*botBalanceDiffs) {
+				expectedDexBalances = opBalanceDiffsMaps(addBalanceDiffs, expectedDexBalances, dexDiffs)
+				expectedCexBalances = opBalanceDiffsMaps(addBalanceDiffs, expectedCexBalances, cexDiffs)
+			}
+
+			checkExpectedBalances := func() error {
+				for assetID, bal := range expectedDexBalances {
+					actualBal := adaptor.DEXBalance(assetID)
+					if *actualBal != *bal.botBalance() {
+						return fmt.Errorf("%s: unexpected dex balance for asset %d. want %+v, got %+v", test.name, assetID, bal.botBalance(), actualBal)
+					}
+				}
+				for assetID, bal := range expectedCexBalances {
+					actualBal := adaptor.CEXBalance(assetID)
+					if *actualBal != *bal.botBalance() {
+						return fmt.Errorf("%s: unexpected cex balance for asset %d. want %+v, got %+v", test.name, assetID, bal.botBalance(), actualBal)
+					}
+				}
+
+				return nil
+			}
+
+			checkLatestEvent := func(pending bool, withdrawalTx *asset.WalletTransaction, bridgeTx *asset.WalletTransaction) error {
+				dexBalanceEffects := opBalanceDiffsMaps(subBalanceDiffs, expectedDexBalances, initialDexBalances)
+				cexBalanceEffects := opBalanceDiffsMaps(subBalanceDiffs, expectedCexBalances, initialCexBalances)
+				expectedEvent := &MarketMakingEvent{
+					ID:             1,
+					BalanceEffects: balanceEffectsFromDiffs(dexBalanceEffects, cexBalanceEffects),
+					Pending:        pending,
+					WithdrawalEvent: &WithdrawalEvent{
+						DEXAssetID:   test.assetID,
+						CEXAssetID:   test.cexAssetID,
+						WithdrawalTx: withdrawalTx,
+						BridgeTx:     bridgeTx,
+						CEXDebit:     test.cexDebitAmt,
+						ID:           withdrawalID,
+					},
+				}
+
+				if !eventLogDB.latestStoredEventEquals(expectedEvent) {
+					return fmt.Errorf("%s: unexpected latest event logged. want:\n%s,\ngot:\n%s", test.name, spew.Sdump(expectedEvent), spew.Sdump(eventLogDB.latestStoredEvent()))
+				}
+
+				return nil
+			}
+
+			tryWithTimeout := func(f func() error) {
+				t.Helper()
+				var err error
+				for i := 0; i < 20; i++ {
+					time.Sleep(100 * time.Millisecond)
+					err = f()
+					if err == nil {
+						return
+					}
+				}
+				t.Fatal(err)
+			}
+
+			// Check initial state after withdrawal
+			updateExpectedBalances(test.preConfirmWithdrawalDEXBalances, test.preConfirmWithdrawalCEXBalances)
+			if err := checkExpectedBalances(); err != nil {
+				t.Fatal(err)
+			}
+			if err := checkLatestEvent(true, nil, nil); err != nil {
+				t.Fatal(err)
+			}
+
+			// Confirm withdrawal transaction
+			tCEX.confirmWithdrawalMtx.Lock()
+			tCEX.confirmWithdrawal = &withdrawArgs{
+				assetID: test.cexAssetID,
+				amt:     test.cexDebitAmt,
+				txID:    test.unconfirmedWithdrawalTx.ID,
+			}
+			tCEX.confirmWithdrawalMtx.Unlock()
+
+			tCore.walletTxsMtx.Lock()
+			if test.confirmedWithdrawalTx != nil {
+				tCore.walletTxs[test.unconfirmedWithdrawalTx.ID] = test.confirmedWithdrawalTx
+			}
+			tCore.walletTxsMtx.Unlock()
+
+			adaptor.confirmWithdrawal(ctx, withdrawalID)
+			updateExpectedBalances(test.postConfirmWithdrawalDEXBalances, test.postConfirmWithdrawalCEXBalances)
+			tryWithTimeout(checkExpectedBalances)
+
+			// After withdrawal confirmation, if bridge is required, it should be initiated automatically
+			var expectedBridgeTx *asset.WalletTransaction
+			if test.bridgeRequired {
+				expectedBridgeTx = test.unconfirmedBridgeTx
+			}
+			if err := checkLatestEvent(test.bridgeRequired, test.confirmedWithdrawalTx, expectedBridgeTx); err != nil {
+				t.Fatal(err)
+			}
+
+			// Handle bridge if required
+			if test.bridgeRequired {
+				// Bridge was already initiated automatically, now confirm the bridge transaction
+				tCore.walletTxsMtx.Lock()
+				if test.confirmedBridgeTx != nil {
+					tCore.walletTxs[test.unconfirmedBridgeTx.ID] = test.confirmedBridgeTx
+				}
+				tCore.walletTxsMtx.Unlock()
+
+				// Trigger bridge confirmation by calling confirmWithdrawal again
+				adaptor.confirmWithdrawal(ctx, withdrawalID)
+				updateExpectedBalances(test.postConfirmBridgeDEXBalances, test.postConfirmBridgeCEXBalances)
+				tryWithTimeout(checkExpectedBalances)
+				if err := checkLatestEvent(false, test.confirmedWithdrawalTx, test.confirmedBridgeTx); err != nil {
+					t.Fatal(err)
+				}
+			}
 		})
 	}
 
@@ -6407,14 +6573,14 @@ func TestRefreshPendingEvents(t *testing.T) {
 	// Add a pending deposit, then refresh pending events
 	depositTxID := hex.EncodeToString(encode.RandomBytes(32))
 	adaptor.pendingDeposits[depositTxID] = &pendingDeposit{
-		assetID: 42,
-		tx: &asset.WalletTransaction{
+		dexAssetID: 42,
+		cexAssetID: 42,
+		depositTx: &asset.WalletTransaction{
 			ID:        depositTxID,
 			Fees:      1000,
 			Amount:    1e7,
 			Confirmed: true,
 		},
-		feeConfirmed: true,
 	}
 	amtReceived := uint64(1e7 - 1000)
 	tCEX.confirmDepositMtx.Lock()
@@ -6429,7 +6595,8 @@ func TestRefreshPendingEvents(t *testing.T) {
 	withdrawalID := "456"
 	adaptor.pendingWithdrawals[withdrawalID] = &pendingWithdrawal{
 		withdrawalID: withdrawalID,
-		assetID:      42,
+		dexAssetID:   42,
+		cexAssetID:   42,
 		amtWithdrawn: 2e7,
 	}
 

@@ -179,4 +179,21 @@ div[data-handler=mm] {
     text-align: center;
     font-size: 15px;
   }
+
+  .buffer-input,
+  .transfer-input {
+    width: 30%;
+  }
+
+  .bridge-label {
+    min-width: 120px;
+  }
+
+  .bridge-select {
+    max-width: 200px;
+  }
+
+  #limitOrderBufferSection {
+    display: none;
+  }
 }

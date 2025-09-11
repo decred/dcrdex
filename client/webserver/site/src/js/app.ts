@@ -62,7 +62,8 @@ import {
   CEXNotification,
   CEXBalanceUpdate,
   EpochReportNote,
-  CEXProblemsNote
+  CEXProblemsNote,
+  BridgeFeesAndLimits
 } from './registry'
 import { setCoinHref } from './coinexplorers'
 
@@ -1638,6 +1639,18 @@ export default class Application {
     }
     const settings = res.map as Record<string, string>
     return !settings.providers
+  }
+
+  async allBridgePaths (): Promise<Record<number, Record<number, string[]>>> {
+    const resp = await getJSON('/api/allbridgepaths')
+    if (!this.checkResponse(resp)) return {}
+    return resp.paths
+  }
+
+  async bridgeFeesAndLimits (fromAssetID: number, toAssetID: number, bridgeName: string): Promise<BridgeFeesAndLimits | null> {
+    const resp = await postJSON('/api/bridgefeesandlimits', { fromAssetID, toAssetID, bridgeName })
+    if (!this.checkResponse(resp)) return null
+    return resp.result
   }
 }
 

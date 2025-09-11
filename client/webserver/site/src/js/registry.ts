@@ -814,6 +814,7 @@ export interface QuickBalanceConfig {
   sellsBuffer: number
   buyFeeReserve: number
   sellFeeReserve: number
+  bridgeFeeReserve: number
   slippageBuffer: number
 }
 
@@ -836,6 +837,10 @@ export interface BotConfig {
   host: string
   baseID: number
   quoteID: number
+  cexBaseID: number
+  cexQuoteID: number
+  baseBridgeName: string
+  quoteBridgeName: string
   baseWalletOptions?: Record<string, string>
   quoteWalletOptions?: Record<string, string>
   cexName: string
@@ -1033,14 +1038,18 @@ export interface CEXOrderEvent {
 
 export interface DepositEvent {
   assetID: number
-  transaction: WalletTransaction
+  cexAssetID: number
+  transaction?: WalletTransaction
+  bridgeTx?: WalletTransaction
   cexCredit: number
 }
 
 export interface WithdrawalEvent {
   id: string
   assetID: number
+  cexAssetID: number
   transaction: WalletTransaction
+  bridgeTx?: WalletTransaction
   cexDebit: number
 }
 
@@ -1233,6 +1242,21 @@ export interface BondTxInfo {
   accountID: string
 }
 
+export interface BridgeCounterpartTx {
+  assetID: number
+  ids: string[]
+  complete: boolean
+  amountReceived: number
+  fees: number
+}
+
+export interface BridgeFeesAndLimits {
+  fees: Record<number, number>
+  minLimit: number
+  maxLimit: number
+  hasLimits: boolean
+}
+
 export interface WalletTransaction {
   type: number
   id: string
@@ -1246,6 +1270,7 @@ export interface WalletTransaction {
   additionalData: Record<string, string>
   isUserOp: boolean
   userOpTxID: string
+  bridgeCounterpartTx?: BridgeCounterpartTx
 }
 
 export interface TxHistoryResult {
@@ -1315,6 +1340,8 @@ export interface Application {
   clearTxHistory(assetID: number): void
   parentAsset(assetID: number): SupportedAsset
   needsCustomProvider (assetID: number): Promise<boolean>
+  allBridgePaths (): Promise<Record<number, Record<number, string[]>>>
+  bridgeFeesAndLimits (fromAssetID: number, toAssetID: number, bridgeName: string): Promise<BridgeFeesAndLimits | null>
 }
 
 // TODO: Define an interface for Application?

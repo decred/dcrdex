@@ -1796,13 +1796,15 @@ func (s *WebServer) apiStakeStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *WebServer) apiAvailableBalances(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Market  *mm.MarketWithHost `json:"market"`
-		CEXName *string            `json:"cexName,omitempty"`
+		Market     *mm.MarketWithHost `json:"market"`
+		CEXBaseID  uint32             `json:"cexBaseID"`
+		CEXQuoteID uint32             `json:"cexQuoteID"`
+		CEXName    *string            `json:"cexName,omitempty"`
 	}
 	if !readPost(w, r, &req) {
 		return
 	}
-	dexBalances, cexBalances, err := s.mm.AvailableBalances(req.Market, req.CEXName)
+	dexBalances, cexBalances, err := s.mm.AvailableBalances(req.Market, req.CEXBaseID, req.CEXQuoteID, req.CEXName)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error fetching available balances: %w", err))
 		return
@@ -2278,4 +2280,46 @@ func (s *WebServer) resolvePass(appPW []byte, r *http.Request) ([]byte, error) {
 		return nil, fmt.Errorf("error retrieving cached pw: %w", err)
 	}
 	return cachedPass, nil
+}
+
+func (s *WebServer) apiAllBridgePaths(w http.ResponseWriter, r *http.Request) {
+	paths, err := s.core.AllBridgePaths()
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error fetching bridge paths: %w", err))
+		return
+	}
+
+	writeJSON(w, &struct {
+		OK    bool                           `json:"ok"`
+		Paths map[uint32]map[uint32][]string `json:"paths"`
+	}{
+		OK:    true,
+		Paths: paths,
+	})
+}
+
+// apiBridgeFeesAndLimits is the handler for the '/bridgefeesandlimits' API request.
+func (s *WebServer) apiBridgeFeesAndLimits(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		FromAssetID uint32 `json:"fromAssetID"`
+		ToAssetID   uint32 `json:"toAssetID"`
+		BridgeName  string `json:"bridgeName"`
+	}{}
+	if !readPost(w, r, form) {
+		return
+	}
+
+	result, err := s.core.BridgeFeesAndLimits(form.FromAssetID, form.ToAssetID, form.BridgeName)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("unable to get bridge fees and limits: %w", err))
+		return
+	}
+
+	writeJSON(w, &struct {
+		OK     bool                      `json:"ok"`
+		Result *core.BridgeFeesAndLimits `json:"result"`
+	}{
+		OK:     true,
+		Result: result,
+	})
 }
