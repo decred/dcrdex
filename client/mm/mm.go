@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"sync"
 	"time"
@@ -89,9 +90,7 @@ type centralizedExchange struct {
 // mtx must be locked
 func (c *centralizedExchange) balancesCopy() map[uint32]*libxc.ExchangeBalance {
 	bs := make(map[uint32]*libxc.ExchangeBalance, len(c.balances))
-	for assetID, bal := range c.balances {
-		bs[assetID] = bal
-	}
+	maps.Copy(bs, c.balances)
 	return bs
 }
 
@@ -191,9 +190,7 @@ func (m *MarketMaker) runningBotsLookup() map[MarketWithHost]*runningBot {
 	defer m.runningBotsMtx.RUnlock()
 
 	mkts := make(map[MarketWithHost]*runningBot, len(m.runningBots))
-	for mkt, rb := range m.runningBots {
-		mkts[mkt] = rb
-	}
+	maps.Copy(mkts, m.runningBots)
 
 	return mkts
 }

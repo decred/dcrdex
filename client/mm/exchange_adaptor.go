@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"sort"
 	"strconv"
@@ -128,9 +129,7 @@ func newBalanceEffectsDiff() *balanceEffectsDiff {
 func (b *BalanceEffects) sub(other *BalanceEffects) *balanceEffectsDiff {
 	res := newBalanceEffectsDiff()
 
-	for assetID, v := range b.Settled {
-		res.settled[assetID] = v
-	}
+	maps.Copy(res.settled, b.Settled)
 	for assetID, v := range b.Locked {
 		res.locked[assetID] = int64(v)
 	}
@@ -1517,21 +1516,13 @@ func (u *unifiedExchangeAdaptor) refreshAllPendingEvents(ctx context.Context) {
 	// Make copies of all maps to avoid locking balancesMtx for the entire process
 	u.balancesMtx.Lock()
 	pendingDEXOrders := make(map[order.OrderID]*pendingDEXOrder, len(u.pendingDEXOrders))
-	for oid, pendingOrder := range u.pendingDEXOrders {
-		pendingDEXOrders[oid] = pendingOrder
-	}
+	maps.Copy(pendingDEXOrders, u.pendingDEXOrders)
 	pendingCEXOrders := make(map[string]*pendingCEXOrder, len(u.pendingCEXOrders))
-	for tradeID, pendingOrder := range u.pendingCEXOrders {
-		pendingCEXOrders[tradeID] = pendingOrder
-	}
+	maps.Copy(pendingCEXOrders, u.pendingCEXOrders)
 	pendingWithdrawals := make(map[string]*pendingWithdrawal, len(u.pendingWithdrawals))
-	for withdrawalID, pendingWithdrawal := range u.pendingWithdrawals {
-		pendingWithdrawals[withdrawalID] = pendingWithdrawal
-	}
+	maps.Copy(pendingWithdrawals, u.pendingWithdrawals)
 	pendingDeposits := make(map[string]*pendingDeposit, len(u.pendingDeposits))
-	for txID, pendingDeposit := range u.pendingDeposits {
-		pendingDeposits[txID] = pendingDeposit
-	}
+	maps.Copy(pendingDeposits, u.pendingDeposits)
 	u.balancesMtx.Unlock()
 
 	for _, pendingOrder := range pendingDEXOrders {
@@ -1697,9 +1688,7 @@ func (u *unifiedExchangeAdaptor) balanceState() *BalanceState {
 	}
 
 	mods := make(map[uint32]int64, len(u.inventoryMods))
-	for assetID, mod := range u.inventoryMods {
-		mods[assetID] = mod
-	}
+	maps.Copy(mods, u.inventoryMods)
 
 	return &BalanceState{
 		FiatRates:     u.fiatRates.Load().(map[uint32]float64),
@@ -4047,9 +4036,7 @@ type exchangeAdaptorCfg struct {
 // newUnifiedExchangeAdaptor is the constructor for a unifiedExchangeAdaptor.
 func newUnifiedExchangeAdaptor(cfg *exchangeAdaptorCfg) (*unifiedExchangeAdaptor, error) {
 	initialBalances := make(map[uint32]uint64, len(cfg.baseDexBalances))
-	for assetID, balance := range cfg.baseDexBalances {
-		initialBalances[assetID] = balance
-	}
+	maps.Copy(initialBalances, cfg.baseDexBalances)
 	for assetID, balance := range cfg.baseCexBalances {
 		initialBalances[assetID] += balance
 	}

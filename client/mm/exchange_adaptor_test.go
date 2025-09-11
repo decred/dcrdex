@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"math"
 	"reflect"
 	"sort"
@@ -3287,9 +3288,7 @@ func TestMultiTrade(t *testing.T) {
 					}
 
 					pendingOrdersCopy := make(map[order.OrderID]*pendingDEXOrder)
-					for id, order := range pendingOrders {
-						pendingOrdersCopy[id] = order
-					}
+					maps.Copy(pendingOrdersCopy, pendingOrders)
 					adaptor.pendingDEXOrders = pendingOrdersCopy
 
 					adaptor.buyFees = buyFees

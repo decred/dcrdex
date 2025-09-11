@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -99,9 +100,7 @@ func TestEventLogDB(t *testing.T) {
 			}
 		}
 		rates := make(map[uint32]float64, len(fiatRates))
-		for k, v := range fiatRates {
-			rates[k] = v
-		}
+		maps.Copy(rates, fiatRates)
 		return &BalanceState{
 			Balances:      balances,
 			FiatRates:     rates,
