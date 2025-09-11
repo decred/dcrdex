@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"net/http"
 	"net/url"
@@ -470,9 +471,7 @@ func init() {
 	// MATIC is still returned with a balance of 0 in the balances response.
 
 	// Direct Binance -> DEX coin symbol mappings (highest priority)
-	for key, value := range binanceToDexCoinSymbol {
-		binanceToDexSymbol[key] = value
-	}
+	maps.Copy(binanceToDexSymbol, binanceToDexCoinSymbol)
 
 	// From coin symbol mappings (DEX -> Binance, reverse to Binance -> DEX)
 	for key, value := range dexToBinanceCoinSymbol {
