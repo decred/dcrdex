@@ -194,6 +194,15 @@ func TestMoneroVersion(t *testing.T) {
 	if !(m1.compare(m2) < 0) {
 		t.Fatal("compare error")
 	}
+
+	// greater than recommended
+	m3, err := newMoneroVersionFromVersionString("0.18.4.7")
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	if !m3.valid() {
+		t.Fatalf("0.18.4.7 - expected valid got invalid")
+	}
 }
 
 // No keystore service running on CI so commented out.

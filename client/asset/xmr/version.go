@@ -13,11 +13,9 @@ const (
 )
 
 var minimumVersion *moneroVersion
-var recommendedVersion *moneroVersion
 
 func init() {
 	minimumVersion, _ = newMoneroVersionFromVersionString(MinimumVersion)
-	recommendedVersion, _ = newMoneroVersionFromVersionString(RecommendedVersion)
 }
 
 type moneroVersion struct {
@@ -89,9 +87,5 @@ func (m *moneroVersion) compare(other *moneroVersion) int {
 
 func (m *moneroVersion) valid() bool {
 	c := m.compare(minimumVersion)
-	if c < 0 {
-		return false
-	}
-	c = m.compare(recommendedVersion)
-	return c <= 0
+	return c >= 0
 }
