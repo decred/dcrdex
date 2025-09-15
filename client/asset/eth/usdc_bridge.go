@@ -88,6 +88,9 @@ type bridge interface {
 
 	// supportedDestinations returns the list of asset IDs that are supported as destinations for the origin asset.
 	supportedDestinations(sourceAssetID uint32) []uint32
+
+	// bridgeLimits returns the minimum and maximum amounts that can be bridged.
+	bridgeLimits(sourceAssetID, destAssetID uint32) (min, max *big.Int, hasLimits bool, err error)
 }
 
 var (
@@ -475,4 +478,9 @@ func (b *usdcBridge) supportedDestinations(sourceAssetID uint32) []uint32 {
 		return []uint32{usdcEthID, usdcPolygonID}
 	}
 	return nil
+}
+
+func (b *usdcBridge) bridgeLimits(sourceAssetID, destAssetID uint32) (*big.Int, *big.Int, bool, error) {
+	// USDC bridge doesn't have limits
+	return big.NewInt(0), big.NewInt(0), false, nil
 }

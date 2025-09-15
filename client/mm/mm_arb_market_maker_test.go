@@ -44,7 +44,10 @@ func TestArbMMRebalance(t *testing.T) {
 	cex := newTCEX()
 	u := mustParseAdaptorFromMarket(mkt)
 	u.CEX = cex
-	u.botCfgV.Store(&BotConfig{})
+	u.botCfgV.Store(&BotConfig{
+		CEXBaseID:  baseID,
+		CEXQuoteID: quoteID,
+	})
 	c := newTCore()
 	c.setWalletsAndExchange(mkt)
 	u.clientCore = c
@@ -81,6 +84,8 @@ func TestArbMMRebalance(t *testing.T) {
 	setLots := func(buy, sell uint64) {
 		buyLots, sellLots = buy, sell
 		u.botCfgV.Store(&BotConfig{
+			CEXBaseID:  baseID,
+			CEXQuoteID: quoteID,
 			ArbMarketMakerConfig: &ArbMarketMakerConfig{
 				Profit: 0,
 				BuyPlacements: []*ArbMarketMakingPlacement{
@@ -314,6 +319,8 @@ func TestArbMarketMakerDEXUpdates(t *testing.T) {
 		arbMM.ctx = ctx
 		arbMM.setBotLoop(arbMM.botLoop)
 		arbMM.unifiedExchangeAdaptor.botCfgV.Store(&BotConfig{
+			CEXBaseID:  mkt.BaseID,
+			CEXQuoteID: mkt.QuoteID,
 			ArbMarketMakerConfig: &ArbMarketMakerConfig{
 				Profit: profit,
 			},
@@ -568,6 +575,8 @@ func TestArbMarketMakerMultiHopDexUpdates(t *testing.T) {
 		arbMM.ctx = ctx
 		arbMM.setBotLoop(arbMM.botLoop)
 		arbMM.botCfgV.Store(&BotConfig{
+			CEXBaseID:  mkt.BaseID,
+			CEXQuoteID: mkt.QuoteID,
 			ArbMarketMakerConfig: &ArbMarketMakerConfig{
 				Profit: profit,
 				MultiHop: &MultiHopCfg{
@@ -610,12 +619,6 @@ func TestMultiHopRate(t *testing.T) {
 	const lotSize uint64 = 50e8
 	const baseID, quoteID uint32 = 42, 0
 	const intermediateID uint32 = 60002
-
-	mkt := &market{
-		baseID:  baseID,
-		quoteID: quoteID,
-	}
-	mkt.lotSize.Store(lotSize)
 
 	cfg := &ArbMarketMakerConfig{
 		MultiHop: &MultiHopCfg{
@@ -712,8 +715,8 @@ func TestMultiHopRate(t *testing.T) {
 					},
 				},
 			},
-			expectedBuyRate:  aggregateRates(dcrUSDTBuyRate, btcUSDTSellRate, mkt, cfg.MultiHop.BaseAssetMarket, cfg.MultiHop.QuoteAssetMarket),
-			expectedSellRate: aggregateRates(dcrUSDTSellRate, btcUSDTBuyRate, mkt, cfg.MultiHop.BaseAssetMarket, cfg.MultiHop.QuoteAssetMarket),
+			expectedBuyRate:  aggregateRates(dcrUSDTBuyRate, btcUSDTSellRate, baseID, quoteID, cfg.MultiHop.BaseAssetMarket, cfg.MultiHop.QuoteAssetMarket),
+			expectedSellRate: aggregateRates(dcrUSDTSellRate, btcUSDTBuyRate, baseID, quoteID, cfg.MultiHop.BaseAssetMarket, cfg.MultiHop.QuoteAssetMarket),
 			expectedBuyArbs: []*arbTradeArgs{
 				{
 					baseID:    baseID,
@@ -824,8 +827,8 @@ func TestMultiHopRate(t *testing.T) {
 					},
 				},
 			},
-			expectedBuyRate:  aggregateRates(usdtDCRSellRate, usdtBTCBuyRate, mkt, inverseCfg.MultiHop.BaseAssetMarket, inverseCfg.MultiHop.QuoteAssetMarket),
-			expectedSellRate: aggregateRates(usdtDCRBuyRate, usdtBTCSellRate, mkt, inverseCfg.MultiHop.BaseAssetMarket, inverseCfg.MultiHop.QuoteAssetMarket),
+			expectedBuyRate:  aggregateRates(usdtDCRSellRate, usdtBTCBuyRate, baseID, quoteID, inverseCfg.MultiHop.BaseAssetMarket, inverseCfg.MultiHop.QuoteAssetMarket),
+			expectedSellRate: aggregateRates(usdtDCRBuyRate, usdtBTCSellRate, baseID, quoteID, inverseCfg.MultiHop.BaseAssetMarket, inverseCfg.MultiHop.QuoteAssetMarket),
 			expectedBuyArbs: []*arbTradeArgs{
 				{
 					baseID:    intermediateID,
@@ -936,8 +939,8 @@ func TestMultiHopRate(t *testing.T) {
 					},
 				},
 			},
-			expectedBuyRate:  aggregateRates(dcrUSDTBuyRate, btcUSDTSellRate, mkt, cfg.MultiHop.BaseAssetMarket, cfg.MultiHop.QuoteAssetMarket),
-			expectedSellRate: aggregateRates(dcrUSDTSellRate, btcUSDTBuyRate, mkt, cfg.MultiHop.BaseAssetMarket, cfg.MultiHop.QuoteAssetMarket),
+			expectedBuyRate:  aggregateRates(dcrUSDTBuyRate, btcUSDTSellRate, baseID, quoteID, cfg.MultiHop.BaseAssetMarket, cfg.MultiHop.QuoteAssetMarket),
+			expectedSellRate: aggregateRates(dcrUSDTSellRate, btcUSDTBuyRate, baseID, quoteID, cfg.MultiHop.BaseAssetMarket, cfg.MultiHop.QuoteAssetMarket),
 			expectedBuyArbs: []*arbTradeArgs{
 				{
 					baseID:    baseID,
@@ -1048,8 +1051,8 @@ func TestMultiHopRate(t *testing.T) {
 					},
 				},
 			},
-			expectedBuyRate:  aggregateRates(usdtDCRSellRate, usdtBTCBuyRate, mkt, inverseCfg.MultiHop.BaseAssetMarket, inverseCfg.MultiHop.QuoteAssetMarket),
-			expectedSellRate: aggregateRates(usdtDCRBuyRate, usdtBTCSellRate, mkt, inverseCfg.MultiHop.BaseAssetMarket, inverseCfg.MultiHop.QuoteAssetMarket),
+			expectedBuyRate:  aggregateRates(usdtDCRSellRate, usdtBTCBuyRate, baseID, quoteID, inverseCfg.MultiHop.BaseAssetMarket, inverseCfg.MultiHop.QuoteAssetMarket),
+			expectedSellRate: aggregateRates(usdtDCRBuyRate, usdtBTCSellRate, baseID, quoteID, inverseCfg.MultiHop.BaseAssetMarket, inverseCfg.MultiHop.QuoteAssetMarket),
 			expectedBuyArbs: []*arbTradeArgs{
 				{
 					baseID:    intermediateID,
@@ -1143,7 +1146,7 @@ func TestMultiHopRate(t *testing.T) {
 
 			testRate := func(sell bool, expectedRate uint64, expectedArbs []*arbTradeArgs, expectedMultiHopRates [2]uint64) {
 				side := map[bool]string{true: "sell", false: "buy"}[sell]
-				filled, rate, multiHopRates, arbs, err := multiHopRateAndTrades(sell, test.depth, numLots, test.cfg.MultiHop, mkt, mockVWAP, mockInvVWAP)
+				filled, rate, multiHopRates, arbs, err := multiHopRateAndTrades(sell, test.depth, numLots, test.cfg.MultiHop, baseID, quoteID, lotSize, mockVWAP, mockInvVWAP)
 				if test.expectedError != "" {
 					if err == nil || err.Error() != test.expectedError {
 						t.Fatalf("expected error %q, got %v", test.expectedError, err)
@@ -1195,6 +1198,7 @@ func TestAggregateRates(t *testing.T) {
 		LotSize:  5e6,
 		RateStep: 1e4,
 	})
+
 	expDcrUsdtRate := calc.MessageRateAlt(float64(20), 1e8, 1e6)
 
 	tests := []struct {
@@ -1282,7 +1286,7 @@ func TestAggregateRates(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rate := aggregateRates(tt.intMarketRate, tt.targetMarketRate, tt.mkt, tt.intMarket, tt.targetMarket)
+			rate := aggregateRates(tt.intMarketRate, tt.targetMarketRate, tt.mkt.dexBaseID, tt.mkt.dexQuoteID, tt.intMarket, tt.targetMarket)
 			if rate < (tt.expRate*99999/100000) || rate > (tt.expRate*100001/100000) {
 				t.Fatalf("expected rate %d but got %d", tt.expRate, rate)
 			}
@@ -1727,6 +1731,10 @@ func TestMultiHopArbCompletionParams(t *testing.T) {
 			}
 			a.botCfgV.Store(&BotConfig{
 				ArbMarketMakerConfig: cfg,
+				BaseID:               baseID,
+				QuoteID:              quoteID,
+				CEXBaseID:            baseID,
+				CEXQuoteID:           quoteID,
 			})
 			makeTrade, orderType, baseID, quoteID, sell, qty, quoteQty, rate := a.multiHopArbCompletionParams(tt.trade, tt.followUpRate)
 			if makeTrade != tt.wantMakeTrade {
@@ -1789,8 +1797,8 @@ func mustParseAdaptorFromMarket(m *core.Market) *unifiedExchangeAdaptor {
 
 	u.botCfgV.Store(&BotConfig{
 		Host:    u.host,
-		BaseID:  u.baseID,
-		QuoteID: u.quoteID,
+		BaseID:  u.dexBaseID,
+		QuoteID: u.dexQuoteID,
 	})
 
 	return u
@@ -1817,7 +1825,11 @@ func mustParseAdaptor(cfg *exchangeAdaptorCfg) *unifiedExchangeAdaptor {
 	}
 	adaptor.ctx = context.Background()
 	adaptor.botLooper = botLooper(dummyLooper)
-	adaptor.botCfgV.Store(&BotConfig{})
+	if cfg.botCfg != nil {
+		adaptor.botCfgV.Store(cfg.botCfg)
+	} else {
+		adaptor.botCfgV.Store(&BotConfig{})
+	}
 	return adaptor
 }
 

@@ -44,7 +44,7 @@ var (
 	acrossSpokePoolAddrs = map[dex.Network]map[uint64]common.Address{
 		dex.Mainnet: {
 			1:    common.HexToAddress("0x5c7BCd6E7De5423a257D81B442095A1a6ced35C5"),
-			137:  common.HexToAddress("0x69B5c72837769eF1e7C164Abc6515c75a4251251"),
+			137:  common.HexToAddress("0x9295ee1d8C5b022Be115A2AD3c30C72E34e7F096"),
 			8453: common.HexToAddress("0x09aea4b2242abC8bb4BB78D537A67a245A7bEC64"),
 		},
 		dex.Testnet: {
@@ -268,7 +268,6 @@ func newAcrossBridge(ctx context.Context, cb bind.ContractBackend, node ethFetch
 	if !found {
 		return nil, fmt.Errorf("unknown chain asset ID %d", chainAssetID)
 	}
-
 	spokePoolAddr, err := getSpokePoolAddr(net, chainID)
 	if err != nil {
 		return nil, err
@@ -323,6 +322,7 @@ func (b *acrossBridge) bridgeContractAllowance(ctx context.Context, sourceAssetI
 		From:    b.addr,
 		Context: ctx,
 	}
+
 	return tokenContract.Allowance(callOpts, b.addr, b.spokePoolAddr)
 }
 
@@ -551,4 +551,42 @@ func (b *acrossBridge) completeFollowUpBridge(txOpts *bind.TransactOpts, data []
 
 func (b *acrossBridge) followUpCompleteBridgeGas() uint64 {
 	return 0
+}
+
+func (b *acrossBridge) bridgeLimits(sourceAssetID, destAssetID uint32) (*big.Int, *big.Int, bool, error) {
+	sourceAsset := assetIDToAcrossAsset(b.net, sourceAssetID)
+	if sourceAsset == nil {
+		return nil, nil, false, fmt.Errorf("unknown source asset %d", sourceAssetID)
+	}
+
+	destAsset := assetIDToAcrossAsset(b.net, destAssetID)
+	if destAsset == nil {
+		return nil, nil, false, fmt.Errorf("unknown destination asset %d", destAssetID)
+	}
+
+	url := fmt.Sprintf("%s/api/limits?inputToken=%s&outputToken=%s&originChainId=%d&destinationChainId=%d",
+		b.apiBaseURL, sourceAsset.address.Hex(), destAsset.address.Hex(), b.chainID, destAsset.chainID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var res struct {
+		MinDeposit string `json:"minDeposit"`
+		MaxDeposit string `json:"maxDeposit"`
+	}
+	if err := dexnet.Get(ctx, url, &res); err != nil {
+		return nil, nil, false, fmt.Errorf("failed to fetch bridge limits: %w", err)
+	}
+
+	minDeposit, ok := new(big.Int).SetString(res.MinDeposit, 10)
+	if !ok {
+		return nil, nil, false, fmt.Errorf("invalid min deposit value: %s", res.MinDeposit)
+	}
+
+	maxDeposit, ok := new(big.Int).SetString(res.MaxDeposit, 10)
+	if !ok {
+		return nil, nil, false, fmt.Errorf("invalid max deposit value: %s", res.MaxDeposit)
+	}
+
+	return minDeposit, maxDeposit, true, nil
 }

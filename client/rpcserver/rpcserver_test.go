@@ -219,7 +219,10 @@ func (c *TCore) BridgeHistory(fromAssetID uint32, n int, refID *string, past boo
 func (c *TCore) PendingBridges(fromAssetID uint32) ([]*asset.WalletTransaction, error) {
 	return nil, nil
 }
-func (c *TCore) SupportedBridgeDestinations(assetID uint32) (map[string][]uint32, error) {
+func (c *TCore) SupportedBridgeDestinations(assetID uint32) (map[uint32][]string, error) {
+	return nil, nil
+}
+func (c *TCore) BridgeFeesAndLimits(fromAssetID, toAssetID uint32, bridgeName string) (*core.BridgeFeesAndLimits, error) {
 	return nil, nil
 }
 

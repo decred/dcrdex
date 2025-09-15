@@ -51,7 +51,7 @@ func (c *tCoin) Value() uint64 {
 	return c.value
 }
 func (c *tCoin) TxID() string {
-	return hex.EncodeToString(c.coinID)
+	return string(c.coinID)
 }
 
 type sendArgs struct {
@@ -79,7 +79,7 @@ type tCore struct {
 	book              *orderbook.OrderBook
 	bookFeed          *tBookFeed
 	sends             []*sendArgs
-	sendCoin          *tCoin
+	sendCoinID        []byte
 	newDepositAddress string
 	orders            map[order.OrderID]*core.Order
 	walletTxsMtx      sync.Mutex
@@ -201,7 +201,10 @@ func (c *tCore) Send(pw []byte, assetID uint32, value uint64, address string, su
 		address:  address,
 		subtract: subtract,
 	})
-	return c.sendCoin, nil
+	return &tCoin{
+		coinID: c.sendCoinID,
+		value:  value,
+	}, nil
 }
 func (c *tCore) NewDepositAddress(assetID uint32) (string, error) {
 	return c.newDepositAddress, nil
@@ -221,6 +224,10 @@ func (c *tCore) Exchange(host string) (*core.Exchange, error) {
 
 func (c *tCore) WalletState(assetID uint32) *core.WalletState {
 	return c.walletStates[assetID]
+}
+
+func (c *tCore) Bridge(fromAssetID, toAssetID uint32, amt uint64, bridgeName string) (txID string, err error) {
+	return "bridge_tx_id", nil
 }
 
 func (c *tCore) setWalletsAndExchange(m *core.Market) {
@@ -250,6 +257,14 @@ func (c *tCore) setAssetBalances(balances map[uint32]uint64) {
 			},
 		}
 	}
+}
+
+func (c *tCore) SupportedBridgeDestinations(assetID uint32) (map[uint32][]string, error) {
+	return nil, nil
+}
+
+func (c *tCore) BridgeContractApprovalStatus(assetID uint32, bridgeName string) (asset.ApprovalStatus, error) {
+	return asset.Approved, nil
 }
 
 type dexOrder struct {
@@ -838,7 +853,7 @@ func TestAvailableBalances(t *testing.T) {
 
 	checkAvailableBalances := func(mkt *MarketWithHost, cexName *string, expDex, expCex map[uint32]uint64) {
 		t.Helper()
-		dexBalances, cexBalances, err := mm.AvailableBalances(mkt, cexName)
+		dexBalances, cexBalances, err := mm.AvailableBalances(mkt, mkt.BaseID, mkt.QuoteID, cexName)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

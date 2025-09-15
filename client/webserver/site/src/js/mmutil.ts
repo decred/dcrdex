@@ -143,8 +143,8 @@ class MarketMakerBot {
     return cexBalance
   }
 
-  async availableBalances (market: MarketWithHost, cexName?: string) : Promise<{ dexBalances: Record<number, number>, cexBalances: Record<number, number> }> {
-    return await postJSON('/api/availablebalances', { market, cexName })
+  async availableBalances (market: MarketWithHost, cexBaseID: number, cexQuoteID: number, cexName?: string) : Promise<{ dexBalances: Record<number, number>, cexBalances: Record<number, number> }> {
+    return await postJSON('/api/availablebalances', { market, cexBaseID, cexQuoteID, cexName })
   }
 }
 
@@ -376,6 +376,12 @@ export function liveBotStatus (host: string, baseID: number, quoteID: number): M
     return s.config.baseID === baseID && s.config.quoteID === quoteID && s.config.host === host
   })
   if (statuses.length) return statuses[0]
+}
+
+export function feeAssetID (assetID: number) {
+  const asset = app().assets[assetID]
+  if (asset.token) return asset.token.parentID
+  return assetID
 }
 
 export class BotMarket {
@@ -717,6 +723,8 @@ export class RunningMarketMakerDisplay {
     } = this
     // Get fresh stats
     const { botCfg: { cexName, basicMarketMakingConfig: bmmCfg }, runStats, latestEpoch, cexProblems } = this.mkt.status()
+    const { cexBaseID, cexQuoteID } = this.mkt.cfg
+
     this.latestEpoch = latestEpoch
     this.cexProblems = cexProblems
 
@@ -755,10 +763,10 @@ export class RunningMarketMakerDisplay {
     if (cexName) {
       Doc.show(page.pendingDepositBox, page.pendingWithdrawalBox)
       setCexElements(div, cexName)
-      const cexBaseInv = summedBalance(runStats.cexBalances[baseID]) / baseFactor
+      const cexBaseInv = summedBalance(runStats.cexBalances[cexBaseID]) / baseFactor
       page.cexBaseInventory.textContent = Doc.formatFourSigFigs(cexBaseInv)
       page.cexBaseInventoryFiat.textContent = Doc.formatFourSigFigs(cexBaseInv * baseFiatRate, 2)
-      const cexQuoteInv = summedBalance(runStats.cexBalances[quoteID]) / quoteFactor
+      const cexQuoteInv = summedBalance(runStats.cexBalances[cexQuoteID]) / quoteFactor
       page.cexQuoteInventory.textContent = Doc.formatFourSigFigs(cexQuoteInv)
       page.cexQuoteInventoryFiat.textContent = Doc.formatFourSigFigs(cexQuoteInv * quoteFiatRate, 2)
     }
