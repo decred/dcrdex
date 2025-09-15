@@ -62,6 +62,9 @@ ETH_ON=$?
 ~/dextest/polygon/harness-ctl/alpha --exec 'eth.blockNumber' &> /dev/null
 POLYGON_ON=$?
 
+m=$(pgrep -a monerod)
+XMR_ON=$?
+
 echo "Writing markets.json and dcrdex.conf"
 
 # Write markets.json.
@@ -80,13 +83,28 @@ cat > "${FILEPATH}" <<EOF
             "parcelSize": 4
 EOF
 
+if [ $XMR_ON -eq 0 ]; then
+    cat << EOF >> "${FILEPATH}"
+        },
+        {
+            "base": "XMR_simnet",
+            "quote": "DCR_simnet",
+            "lotSize": 100000000,
+            "rateStep": 100,
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 5
+EOF
+else echo "Monero is not running. Configuring dcrdex markets without Monero."
+fi
+
 if [ $LTC_ON -eq 0 ]; then
     cat << EOF >> "${FILEPATH}"
         },
         {
             "base": "LTC_simnet",
             "quote": "DCR_simnet",
-            "lotSize": 5000000,
+            "lotSize": 1000000000,
             "rateStep": 100000,
             "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2,
@@ -337,6 +355,18 @@ cat << EOF >> "${FILEPATH}"
             "bondConfs": 1,
             "nodeRelayID": "${BTC_NODERELAY_ID}"
 EOF
+
+if [ $XMR_ON -eq 0 ]; then
+    cat << EOF >> "${FILEPATH}"
+         },
+        "XMR_simnet": {
+            "bip44symbol": "xmr",
+            "network": "simnet",
+            "maxFeeRate": 20,
+            "swapConf": 2,
+            "configPath": "${TEST_ROOT}/xmr-beta/beta/beta.conf"
+EOF
+fi
 
 if [ $LTC_ON -eq 0 ]; then
     cat << EOF >> "${FILEPATH}"
