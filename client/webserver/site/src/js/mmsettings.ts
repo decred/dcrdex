@@ -1398,8 +1398,8 @@ export default class MarketMakerSettingsPage extends BasePage {
     if (!botStatus?.runStats) return conventionalRange(0, max)
 
     const min = location === 'cex'
-      ? -botStatus.runStats.cexBalances?.[assetID]?.available ?? 0
-      : -botStatus.runStats.dexBalances?.[assetID]?.available ?? 0
+      ? -botStatus.runStats.cexBalances?.[assetID]?.available || 0
+      : -botStatus.runStats.dexBalances?.[assetID]?.available || 0
 
     return conventionalRange(min, max)
   }
