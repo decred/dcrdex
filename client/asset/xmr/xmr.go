@@ -87,7 +87,8 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Ne
 	return newWallet(cfg, logger, network)
 }
 
-// DecodeCoinID creates a human-readable representation of a coin ID for Monero.
+// DecodeCoinID creates a human-readable representation of a coin ID for Monero
+// which should be the output's stealth address.
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 	// Monero transactions have outputs but no amounts so the coinID
 	// will just be the tx hash for now; representing the full output
