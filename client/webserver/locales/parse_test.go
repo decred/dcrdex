@@ -2,7 +2,7 @@ package locales
 
 import (
 	"reflect"
-	"sort"
+	"slices"
 	"testing"
 )
 
@@ -48,9 +48,7 @@ func TestTokens(t *testing.T) {
 		"[[[Import Account]]]",
 		"[[[ and Lets tRy: a_different  _HARDER_  .pattern. ::.-_-. ]]]",
 	}
-	sort.Slice(wantTokens, func(i, j int) bool {
-		return wantTokens[i] < wantTokens[j]
-	})
+	slices.Sort(wantTokens)
 	wantKeys := []string{
 		"Show pop-up notifications",
 		"fiat_exchange_rate_msg",
@@ -60,9 +58,7 @@ func TestTokens(t *testing.T) {
 		"Import Account",
 		" and Lets tRy: a_different  _HARDER_  .pattern. ::.-_-. ",
 	}
-	sort.Slice(wantKeys, func(i, j int) bool {
-		return wantKeys[i] < wantKeys[j]
-	})
+	slices.Sort(wantKeys)
 
 	got := Tokens(tmplFile)
 	var (
@@ -77,12 +73,8 @@ func TestTokens(t *testing.T) {
 		gotTokens = append(gotTokens, token)
 		gotKeys = append(gotKeys, key)
 	}
-	sort.Slice(gotTokens, func(i, j int) bool {
-		return gotTokens[i] < gotTokens[j]
-	})
-	sort.Slice(gotKeys, func(i, j int) bool {
-		return gotKeys[i] < gotKeys[j]
-	})
+	slices.Sort(gotTokens)
+	slices.Sort(gotKeys)
 
 	if !reflect.DeepEqual(wantTokens, gotTokens) {
 		t.Fatalf("expected tokens: %+v, got: %+v", wantTokens, gotTokens)

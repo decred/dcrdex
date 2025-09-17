@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -542,9 +543,7 @@ func (ew *electrumWallet) calcMedianTime(ctx context.Context, height int64) (tim
 	// 	timestamps = append(timestamps, hdr.Timestamp.Unix())
 	// }
 
-	sort.Slice(timestamps, func(i, j int) bool {
-		return timestamps[i] < timestamps[j]
-	})
+	slices.Sort(timestamps)
 
 	medianTimestamp := timestamps[len(timestamps)/2]
 	return time.Unix(medianTimestamp, 0), nil
