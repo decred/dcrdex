@@ -13,7 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -815,9 +815,7 @@ func (w *spvWallet) medianTime(ctx context.Context, iBlkHeader *wire.BlockHeader
 			return 0, fmt.Errorf("info not found for previous block: %v", err)
 		}
 	}
-	sort.Slice(timestamps, func(i, j int) bool {
-		return timestamps[i] < timestamps[j]
-	})
+	slices.Sort(timestamps)
 	return timestamps[len(timestamps)/2], nil
 }
 

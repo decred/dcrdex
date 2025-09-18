@@ -3,7 +3,7 @@ package btc
 import (
 	"context"
 	"fmt"
-	"sort"
+	"slices"
 	"sync"
 	"time"
 
@@ -104,9 +104,7 @@ func CalcMedianTime(stamper chainStamper, blockHash *chainhash.Hash) (time.Time,
 		h = prevHash
 	}
 
-	sort.Slice(timestamps, func(i, j int) bool {
-		return timestamps[i] < timestamps[j]
-	})
+	slices.Sort(timestamps)
 
 	medianTimestamp := timestamps[len(timestamps)/2]
 	return time.Unix(medianTimestamp, 0), nil
