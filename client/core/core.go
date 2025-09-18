@@ -235,6 +235,9 @@ func (dc *dexConnection) bondAsset(assetID uint32) (*msgjson.BondAsset, uint64) 
 	assetSymb := dex.BipIDSymbol(assetID)
 	dc.cfgMtx.RLock()
 	defer dc.cfgMtx.RUnlock()
+	if dc.cfg == nil {
+		return nil, 0
+	}
 	bondExpiry := dc.cfg.BondExpiry
 	bondAsset := dc.cfg.BondAssets[assetSymb]
 	return bondAsset, bondExpiry // bondAsset may be nil
