@@ -4,40 +4,18 @@ package main
 
 /*
 #cgo CFLAGS: -x objective-c
-#cgo LDFLAGS: -lobjc -framework WebKit -framework AppKit -framework UserNotifications
+#cgo LDFLAGS: -lobjc -framework WebKit
 
 #import <objc/runtime.h>
 #import <WebKit/WebKit.h>
-#import <AppKit/AppKit.h>
-#import <UserNotifications/UserNotifications.h>
 
 // CompletionHandlerDelegate implements methods required for executing
 // completion and decision handlers.
 @interface CompletionHandlerDelegate:NSObject
-- (void)deliverNotificationWithTitle:(NSString *)title message:(NSString *)message icon:(NSImage *)icon;
 - (WKWebView *)newWebView;
 @end
 
 @implementation CompletionHandlerDelegate
-// Implements "deliverNotificationWithTitle:message:icon:" handler with the NSUserNotification
-// and NSUserNotificationCenter classes which have been marked deprecated
-// but it is what works atm for macOS apps. The newer UNUserNotificationCenter has some
-// implementation issues and very little information to aid debugging.
-// See: https://developer.apple.com/documentation/foundation/nsusernotification?language=objc and
-// https://github.com/progrium/macdriver/discussions/258
-- (void)deliverNotificationWithTitle:(NSString *)title message:(NSString *)message icon:(NSImage *)icon{
-    NSUserNotification *notification = [NSUserNotification new];
-    notification.title = title;
-    notification.informativeText = message;
-	notification.actionButtonTitle = @"Ok";
-    notification.hasActionButton = 1;
-	notification.soundName = NSUserNotificationDefaultSoundName;
-	[notification setValue:icon forKey:@"_identityImage"];
-    [notification setValue:@(false) forKey:@"_identityImageHasBorder"];
-	[notification setValue:@YES forKey:@"_ignoresDoNotDisturb"];
-	[[NSUserNotificationCenter defaultUserNotificationCenter]deliverNotification:notification];
-}
-
 // Implements "newWebview". This is because the inspectable property is not available via
 // darwinkit at the time of writing. Only MacOs 13.3+ has this property.
 // This means that the webview is not inspectable on older versions of macOS.
@@ -607,7 +585,6 @@ func setAppMainMenuBar(app appkit.Application) {
 	windowMenu.AddItem(appkit.NewMenuItemWithSelector("Bring All to Front", "", objc.Sel("arrangeInFront:")))
 	windowMenu.AddItem(appkit.MenuItem_SeparatorItem())
 	windowMenu.AddItem(appkit.NewMenuItemWithSelector("Enter Full Screen", "f", objc.Sel("toggleFullScreen:")))
-	windowMenu.Delegate()
 
 	// Create the "Edit" menu.
 	editMenu := appkit.NewMenuWithTitle("Edit")
@@ -636,8 +613,8 @@ func setAppMainMenuBar(app appkit.Application) {
 			// Also, MacOS will automatically add other default Window menu
 			// items. See:
 			// https://developer.apple.com/documentation/appkit/nsapplication/1428547-windowsmenu?language=objc.
-			// TODO: Since the new update, this is not working as expected. The
-			// windows are not beingg grouped.
+			// TODO: Since the new update, this is not working as expected, the
+			// windows are not grouped as expected.
 			app.SetWindowsMenu(m)
 		}
 	}
@@ -718,7 +695,7 @@ func parseJSCallbackArgsString(msg objc.Object) []string {
 	var argsAsStr []string
 	for i := 0; i < int(count); i++ {
 		ob := args.ObjectAtIndex(uint(i))
-		if ob.IsNil() {
+		if ob.IsNil() || ob.Description() == "<null>" {
 			continue // ignore
 		}
 		argsAsStr = append(argsAsStr, ob.Description())
@@ -774,5 +751,14 @@ func (sc *shutdownCloser) Done() {
 }
 
 func sendDesktopNotification(title, msg string) {
-	objc.Call[objc.Void](completionHandler, objc.Sel("deliverNotificationWithTitle:message:icon:"), title, msg, bisonwAppIcon)
+	// This API is deprecated but still functional.
+	notif := objc.Call[objc.Object](objc.GetClass("NSUserNotification"), objc.Sel("new"))
+	objc.Retain(&notif)
+	objc.Call[objc.Void](notif, objc.Sel("setTitle:"), title)
+	objc.Call[objc.Void](notif, objc.Sel("setInformativeText:"), msg)
+
+	center := objc.Call[objc.Object](objc.GetClass("NSUserNotificationCenter"), objc.Sel("defaultUserNotificationCenter"))
+	if center.Ptr() != nil {
+		objc.Call[objc.Void](center, objc.Sel("deliverNotification:"), notif)
+	}
 }
