@@ -1,8 +1,6 @@
 module decred.org/dcrdex/dex/testing/loadbot
 
-go 1.23.0
-
-toolchain go1.24.4
+go 1.24
 
 replace decred.org/dcrdex => ../../../
 
@@ -19,7 +17,7 @@ require (
 
 require (
 	decred.org/cspp/v2 v2.4.0 // indirect
-	decred.org/dcrwallet/v5 v5.0.0-20250407130412-4f0acd20d74c // indirect
+	decred.org/dcrwallet/v5 v5.0.0-20250918081013-7d12bcf5816b // indirect
 	filippo.io/edwards25519 v1.0.0 // indirect
 	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 // indirect
 	github.com/BurntSushi/toml v1.4.0 // indirect
@@ -79,7 +77,7 @@ require (
 	github.com/decred/dcrd/gcs/v4 v4.1.0 // indirect
 	github.com/decred/dcrd/hdkeychain/v3 v3.1.2 // indirect
 	github.com/decred/dcrd/lru v1.1.2 // indirect
-	github.com/decred/dcrd/mixing v0.5.1-0.20250319155359-2b7d311f4a81 // indirect
+	github.com/decred/dcrd/mixing v0.5.1-0.20250908140125-6c4185b8275a // indirect
 	github.com/decred/dcrd/rpc/jsonrpc/types/v4 v4.3.0 // indirect
 	github.com/decred/dcrd/rpcclient/v8 v8.0.1 // indirect
 	github.com/decred/dcrd/txscript/v4 v4.1.1 // indirect
