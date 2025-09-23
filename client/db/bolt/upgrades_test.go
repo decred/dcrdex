@@ -41,7 +41,6 @@ func TestUpgrades(t *testing.T) {
 	upgradeLog = tLogger
 	t.Run("group", func(t *testing.T) {
 		for _, tc := range dbUpgradeTests {
-			tc := tc // capture range variable
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				dbPath := unpack(t, tc.filename)
