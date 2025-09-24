@@ -5259,12 +5259,12 @@ func testSend(t *testing.T, assetID uint32) {
 	}
 }
 
-func TestConfirmRedemption(t *testing.T) {
-	t.Run("eth", func(t *testing.T) { testConfirmRedemption(t, BipID) })
-	t.Run("token", func(t *testing.T) { testConfirmRedemption(t, usdcEthID) })
+func TestConfirmTransaction(t *testing.T) {
+	t.Run("eth", func(t *testing.T) { testConfirmTransaction(t, BipID) })
+	t.Run("token", func(t *testing.T) { testConfirmTransaction(t, usdcEthID) })
 }
 
-func testConfirmRedemption(t *testing.T, assetID uint32) {
+func testConfirmTransaction(t *testing.T, assetID uint32) {
 	wi, eth, node, shutdown := tassetWallet(assetID)
 	defer shutdown()
 
@@ -5279,12 +5279,9 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 	var txHash common.Hash
 	copy(txHash[:], encode.RandomBytes(32))
 
-	redemption := &asset.Redemption{
-		Spends: &asset.AuditInfo{
-			Contract: dexeth.EncodeContractData(0, secretHash[:]),
-		},
-		Secret: secret[:],
-	}
+	confirmTx := asset.NewRedeemConfTx(&asset.AuditInfo{
+		Contract: dexeth.EncodeContractData(0, secretHash[:]),
+	}, secret[:])
 
 	pendingTx := &extendedWalletTx{
 		WalletTransaction: &asset.WalletTransaction{
@@ -5312,6 +5309,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 		step                      dexeth.SwapStep
 		receipt                   *types.Receipt
 		receiptErr                error
+		confirmTx                 *asset.ConfirmTx
 	}
 
 	tests := []*test{
@@ -5321,6 +5319,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 				Status:      types.ReceiptStatusSuccessful,
 				BlockNumber: big.NewInt(confBlock + 1),
 			},
+			confirmTx:     confirmTx,
 			expectedConfs: txConfsNeededToConfirm - 1,
 		},
 		{
@@ -5331,11 +5330,13 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 				Status:      types.ReceiptStatusSuccessful,
 				BlockNumber: big.NewInt(confBlock),
 			},
+			confirmTx: confirmTx,
 		},
 		{
 			name:          "found in pending txs",
 			step:          dexeth.SSRedeemed,
 			pendingTx:     pendingTx,
+			confirmTx:     confirmTx,
 			expectedConfs: txConfsNeededToConfirm - 1,
 		},
 		{
@@ -5343,6 +5344,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 			step:          dexeth.SSRedeemed,
 			dbTx:          dbTx,
 			expectedConfs: txConfsNeededToConfirm,
+			confirmTx:     confirmTx,
 			receipt: &types.Receipt{
 				Status:      types.ReceiptStatusSuccessful,
 				BlockNumber: big.NewInt(confBlock),
@@ -5353,6 +5355,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 			step:          dexeth.SSRedeemed,
 			dbErr:         errors.New("test error"),
 			expectedConfs: txConfsNeededToConfirm - 1,
+			confirmTx:     confirmTx,
 			receipt: &types.Receipt{
 				Status:      types.ReceiptStatusSuccessful,
 				BlockNumber: big.NewInt(confBlock + 1),
@@ -5363,6 +5366,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 			step:                      dexeth.SSInitiated,
 			expectErr:                 true,
 			expectRedemptionFailedErr: true,
+			confirmTx:                 confirmTx,
 			receipt: &types.Receipt{
 				Status:      types.ReceiptStatusFailed,
 				BlockNumber: big.NewInt(confBlock),
@@ -5375,7 +5379,38 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 				Status:      types.ReceiptStatusFailed,
 				BlockNumber: big.NewInt(confBlock),
 			},
+			confirmTx:     confirmTx,
 			expectedConfs: txConfsNeededToConfirm,
+		},
+		{
+			name: "refund found on-chain. refunded by another unknown transaction",
+			step: dexeth.SSRefunded,
+			receipt: &types.Receipt{
+				Status:      types.ReceiptStatusFailed,
+				BlockNumber: big.NewInt(confBlock),
+			},
+			confirmTx:     asset.NewRefundConfTx(txHash[:], dexeth.EncodeContractData(0, secretHash[:]), secret[:]),
+			expectedConfs: txConfsNeededToConfirm,
+		},
+		{
+			name: "redeem refunded by another unknown transaction",
+			step: dexeth.SSRefunded,
+			receipt: &types.Receipt{
+				Status:      types.ReceiptStatusFailed,
+				BlockNumber: big.NewInt(confBlock),
+			},
+			confirmTx: confirmTx,
+			expectErr: true,
+		},
+		{
+			name: "refund redeemed by another unknown transaction",
+			step: dexeth.SSRedeemed,
+			receipt: &types.Receipt{
+				Status:      types.ReceiptStatusFailed,
+				BlockNumber: big.NewInt(confBlock),
+			},
+			confirmTx: asset.NewRefundConfTx(txHash[:], dexeth.EncodeContractData(0, secretHash[:]), secret[:]),
+			expectErr: true,
 		},
 	}
 
@@ -5402,7 +5437,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 		node.receipt = test.receipt
 		node.receiptErr = test.receiptErr
 
-		result, err := wi.ConfirmRedemption(txHash[:], redemption, 0)
+		result, err := wi.ConfirmTransaction(txHash[:], test.confirmTx, 0)
 		if test.expectErr {
 			if err == nil {
 				t.Fatalf("%s: expected error but did not get", test.name)
@@ -5445,12 +5480,10 @@ func TestConfirmUserOpRedemption(t *testing.T) {
 
 	agedOutSubmission := time.Now().Add(-1*txAgeOut - 1)
 
-	redemption := &asset.Redemption{
-		Spends: &asset.AuditInfo{
-			Contract: dexeth.EncodeContractData(0, secretHash[:]),
-		},
-		Secret: secret[:],
+	ci := &asset.AuditInfo{
+		Contract: dexeth.EncodeContractData(0, secretHash[:]),
 	}
+	confirmTx := asset.NewRedeemConfTx(ci, secret[:])
 
 	pendingUserOp := func(confirmed bool, agedOut bool, rejected bool, hasReceipt bool) *extendedWalletTx {
 		blockNumber := confBlock
@@ -5493,7 +5526,7 @@ func TestConfirmUserOpRedemption(t *testing.T) {
 
 	type test struct {
 		name           string
-		expectedResult *asset.ConfirmRedemptionStatus
+		expectedResult *asset.ConfirmTxStatus
 		expectedError  error
 
 		pendingUserOp  *extendedWalletTx
@@ -5505,7 +5538,7 @@ func TestConfirmUserOpRedemption(t *testing.T) {
 	tests := []test{
 		{
 			name: "success - confirmed - from pending",
-			expectedResult: &asset.ConfirmRedemptionStatus{
+			expectedResult: &asset.ConfirmTxStatus{
 				Confs:  txConfsNeededToConfirm,
 				Req:    txConfsNeededToConfirm,
 				CoinID: userOpCoinID(userOpHash, txHash),
@@ -5515,7 +5548,7 @@ func TestConfirmUserOpRedemption(t *testing.T) {
 		},
 		{
 			name: "success - confirmed - from bundler",
-			expectedResult: &asset.ConfirmRedemptionStatus{
+			expectedResult: &asset.ConfirmTxStatus{
 				Confs:  txConfsNeededToConfirm,
 				Req:    txConfsNeededToConfirm,
 				CoinID: userOpCoinID(userOpHash, txHash),
@@ -5525,7 +5558,7 @@ func TestConfirmUserOpRedemption(t *testing.T) {
 		},
 		{
 			name: "pending - not enough confirmations - from pending",
-			expectedResult: &asset.ConfirmRedemptionStatus{
+			expectedResult: &asset.ConfirmTxStatus{
 				Confs:  1,
 				Req:    txConfsNeededToConfirm,
 				CoinID: userOpCoinID(userOpHash, txHash),
@@ -5535,7 +5568,7 @@ func TestConfirmUserOpRedemption(t *testing.T) {
 		},
 		{
 			name: "pending - not enough confirmations - from bundler",
-			expectedResult: &asset.ConfirmRedemptionStatus{
+			expectedResult: &asset.ConfirmTxStatus{
 				Confs:  1,
 				Req:    txConfsNeededToConfirm,
 				CoinID: userOpCoinID(userOpHash, txHash),
@@ -5569,7 +5602,7 @@ func TestConfirmUserOpRedemption(t *testing.T) {
 		},
 		{
 			name: "swap redeemed, receipt not found - from pending",
-			expectedResult: &asset.ConfirmRedemptionStatus{
+			expectedResult: &asset.ConfirmTxStatus{
 				Confs:  txConfsNeededToConfirm,
 				Req:    txConfsNeededToConfirm,
 				CoinID: userOpCoinID(userOpHash, txHash),
@@ -5579,7 +5612,7 @@ func TestConfirmUserOpRedemption(t *testing.T) {
 		},
 		{
 			name: "swap redeemed, receipt not found - from bundler",
-			expectedResult: &asset.ConfirmRedemptionStatus{
+			expectedResult: &asset.ConfirmTxStatus{
 				Confs:  txConfsNeededToConfirm,
 				Req:    txConfsNeededToConfirm,
 				CoinID: userOpCoinID(userOpHash, common.Hash{}),
@@ -5612,7 +5645,7 @@ func TestConfirmUserOpRedemption(t *testing.T) {
 		}
 		eth.currentTip = &types.Header{Number: big.NewInt(tip)}
 
-		result, err := wi.ConfirmRedemption(userOpCoinID(userOpHash, txHash), redemption, 0)
+		result, err := wi.ConfirmTransaction(userOpCoinID(userOpHash, txHash), confirmTx, 0)
 		if err != test.expectedError {
 			t.Fatalf("%s: expected error %v != result %v", test.name, test.expectedError, err)
 		}

@@ -513,11 +513,6 @@ func MatchIsActive(match *order.UserMatch, proof *MatchProof) bool {
 		return false
 	}
 
-	// Refunded matches are inactive regardless of status.
-	if len(proof.RefundCoin) > 0 {
-		return false
-	}
-
 	// Revoked matches may need to be refunded or auto-redeemed first.
 	if proof.IsRevoked() {
 		// - NewlyMatched requires no further action from either side
