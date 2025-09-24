@@ -139,12 +139,12 @@ type Tatanka struct {
 
 // Config is the configuration of the Tatanka.
 type Config struct {
-	Net        dex.Network
-	DataDir    string
-	Logger     dex.Logger
-	RPC        comms.RPCConfig
-	ConfigPath string
-	MaxClients int
+	Net         dex.Network
+	DataDir     string
+	Logger      dex.Logger
+	RPC         comms.RPCConfig
+	ChainConfig string
+	MaxClients  int
 
 	feeRatesOracleCfg feerates.Config
 
@@ -154,9 +154,9 @@ type Config struct {
 }
 
 func New(cfg *Config) (*Tatanka, error) {
-	chainCfg, err := loadConfig(cfg.ConfigPath)
+	chainCfg, err := loadConfig(cfg.ChainConfig)
 	if err != nil {
-		return nil, fmt.Errorf("error loading config %w", err)
+		return nil, fmt.Errorf("error loading config from %q: %w", cfg.ChainConfig, err)
 	}
 
 	chains := make(map[uint32]chain.Chain)
@@ -607,7 +607,7 @@ func (t *Tatanka) batchSend(peers map[tanka.PeerID]struct{}, msg *msgjson.Messag
 	t.clientMtx.RUnlock()
 	if len(disconnects) > 0 {
 		for peerID := range disconnects {
-			t.clientDisconnected(peerID)
+			t.handleClientDisconnect(peerID)
 		}
 	}
 }
@@ -617,7 +617,7 @@ func (t *Tatanka) send(s tanka.Sender, msg *msgjson.Message) error {
 	mj.SignMessage(t.priv, msg)
 	err := s.Send(msg)
 	if err != nil {
-		t.clientDisconnected(s.PeerID())
+		t.handleClientDisconnect(s.PeerID())
 	}
 	return err
 }
@@ -627,7 +627,7 @@ func (t *Tatanka) request(s tanka.Sender, msg *msgjson.Message, respHandler func
 	mj.SignMessage(t.priv, msg)
 	err := s.Request(msg, respHandler)
 	if err != nil {
-		t.clientDisconnected(s.PeerID())
+		t.handleClientDisconnect(s.PeerID())
 	}
 	return err
 }
@@ -708,9 +708,9 @@ func (t *tcpCore) HandleRequest(route string, thing any) (any, error) {
 	return handler(thing)
 }
 
-// clientDisconnected handle a client disconnect, removing the client from the
-// clients map and unsubscribing from all topics.
-func (t *Tatanka) clientDisconnected(peerID tanka.PeerID) {
+// handleClientDisconnect handle a client disconnect, removing the client from
+// the clients map and unsubscribing from all topics.
+func (t *Tatanka) handleClientDisconnect(peerID tanka.PeerID) {
 	unsubs := make(map[tanka.Topic]*Topic)
 
 	t.clientMtx.Lock()
