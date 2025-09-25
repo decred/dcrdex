@@ -426,7 +426,6 @@ func (auth *AuthManager) unbookUserOrders(user account.AccountID) {
 func (auth *AuthManager) ExpectUsers(users map[account.AccountID]struct{}, within time.Duration) {
 	log.Debugf("Expecting %d users with booked orders to connect within %v", len(users), within)
 	for user := range users {
-		user := user // bad go
 		auth.unbookers[user] = time.AfterFunc(within, func() { auth.unbookUserOrders(user) })
 	}
 }
