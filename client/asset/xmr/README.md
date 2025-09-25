@@ -8,13 +8,16 @@ This is information for running a Monero XMR exchange wallet on Dex.
 
 Download the Monero CLI tools from <https://github.com/monero-project/monero/releases>.
 
-The latest CLI tools release (August 2025) is <https://github.com/monero-project/monero/releases/tag/v0.18.4.1>
+The latest CLI tools release (August 2025) is <https://github.com/monero-project/monero/releases/tag/v0.18.4.2>
 
 Download and verify the binary hashes and PGP signature then extract the `CLI tools` binaries to your home folder.
 
+Click "Create Monero Wallet" then click "show additional settings".
+
 Enter the full path to the folder where you put the CLI tools in the dialog shown on the "Create Monero Wallet" page when first creating a Dex Monero wallet.
 
-![Configuration](img/image_config.png)
+
+![Configuration](img/config.png)
 
 ## Remote Chain
 
@@ -68,6 +71,6 @@ Restart BisonW app and your preferred daemon will be used.
 
 This process can take some time.
 
-![Synchronization](img/image_sync.png)
+![Synchronization](img/sync.png)
 
 While the wallet is syncing wallet functions are mostly not available.
