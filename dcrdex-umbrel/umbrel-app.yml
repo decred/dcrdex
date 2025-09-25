@@ -1,0 +1,29 @@
+manifestVersion: 1
+id: dcrdex-umbrel
+category: Finance
+name: Bison Wallet
+version: "1.0.3"
+tagline: Multi-asset cryptocurrency wallet with integrated DEX
+description: >-
+  Trade Bitcoin, USDC, Ethereum, Decred, Dogecoin, Zcash and more peer-to-peer using atomic swaps.
+
+
+  No trading fees. No KYC. You stay in control of your assets throughout the entire trading process.
+developer: The Decred Developers
+website: https://dex.decred.org
+dependencies: []
+repo: https://github.com/decred/dcrdex
+support: https://github.com/decred/dcrdex
+port: 5758
+icon: https://raw.githubusercontent.com/decred/dcrdex/master/dcrdex-umbrel/images/bison.svg
+gallery:
+  - https://raw.githubusercontent.com/decred/dcrdex/master/dcrdex-umbrel/images/screenshot_1.jpg
+  - https://raw.githubusercontent.com/decred/dcrdex/master/dcrdex-umbrel/images/screenshot_2.jpg
+  - https://raw.githubusercontent.com/decred/dcrdex/master/dcrdex-umbrel/images/screenshot_3.jpg
+  - https://raw.githubusercontent.com/decred/dcrdex/master/dcrdex-umbrel/images/screenshot_4.jpg
+path: ""
+defaultUsername: ""
+defaultPassword: ""
+torOnly: false
+submitter: Decred
+
