@@ -398,8 +398,7 @@ class Bot extends BotMarket {
 
   async updateIdleDisplay () {
     const { page, baseID, quoteID, host, cexName, bui, qui, baseFeeUI, quoteFeeUI, baseFeeID, quoteFeeID } = this
-
-    const availableBalances = await MM.availableBalances({ host, baseID, quoteID }, cexName)
+    const availableBalances = await MM.availableBalances({ host, baseID, quoteID }, this.cfg.cexBaseID, this.cfg.cexQuoteID, cexName)
     const { dexBalances, cexBalances } = availableBalances
 
     const baseDexBalance = Doc.formatCoinValue(dexBalances[baseID] ?? 0, bui)

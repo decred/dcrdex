@@ -177,6 +177,8 @@ type clientCore interface {
 	Language() string
 	TakeAction(assetID uint32, actionID string, actionB json.RawMessage) error
 	RedeemGeocode(appPW, code []byte, msg string) (dex.Bytes, uint64, error)
+	BridgeFeesAndLimits(fromAssetID, toAssetID uint32, bridgeName string) (*core.BridgeFeesAndLimits, error)
+	AllBridgePaths() (map[uint32]map[uint32][]string, error)
 	ExtensionModeConfig() *core.ExtensionModeConfig
 }
 
@@ -194,7 +196,7 @@ type MMCore interface {
 	RunLogs(startTime int64, mkt *mm.MarketWithHost, n uint64, refID *uint64, filter *mm.RunLogFilters) (events, updatedEvents []*mm.MarketMakingEvent, overview *mm.MarketMakingRunOverview, err error)
 	CEXBook(host string, baseID, quoteID uint32) (buys, sells []*core.MiniOrder, _ error)
 	UpdateRunningBotCfg(cfg *mm.BotConfig, balanceDiffs *mm.BotInventoryDiffs, autoRebalanceCfg *mm.AutoRebalanceConfig, saveUpdate bool) error
-	AvailableBalances(mkt *mm.MarketWithHost, cexName *string) (dexBalances, cexBalances map[uint32]uint64, _ error)
+	AvailableBalances(mkt *mm.MarketWithHost, cexBaseID, cexQuoteID uint32, cexName *string) (dexBalances, cexBalances map[uint32]uint64, _ error)
 	MaxFundingFees(mkt *mm.MarketWithHost, maxBuyPlacements, maxSellPlacements uint32, baseOptions, quoteOptions map[string]string) (buyFees, sellFees uint64, err error)
 }
 
@@ -619,7 +621,8 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/cexbook", s.apiCEXBook)
 			apiAuth.Post("/availablebalances", s.apiAvailableBalances)
 			apiAuth.Post("/maxfundingfees", s.apiMaxFundingFees)
-
+			apiAuth.Get("/allbridgepaths", s.apiAllBridgePaths)
+			apiAuth.Post("/bridgefeesandlimits", s.apiBridgeFeesAndLimits)
 		})
 	})
 

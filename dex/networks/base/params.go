@@ -36,6 +36,7 @@ var (
 	ContractAddresses = map[uint32]map[dex.Network]common.Address{
 		1: {
 			dex.Testnet: common.HexToAddress("0x4F8024dd716E4ec9AC8E0CD971616F73e3f6625d"), // txid: https://base-sepolia.blockscout.com/tx/0xa8137a8f84b28149f27045a4d6c15cceb784f3886f8a476790002e4da4728979
+			dex.Mainnet: common.HexToAddress("0x4F8024dd716E4ec9AC8E0CD971616F73e3f6625d"), // txid: https://base-sepolia.blockscout.com/tx/0xa8137a8f84b28149f27045a4d6c15cceb784f3886f8a476790002e4da4728979
 		},
 	}
 
@@ -69,8 +70,10 @@ var (
 		},
 		NetTokens: map[dex.Network]*dexeth.NetToken{
 			dex.Mainnet: {
-				Address:       common.HexToAddress("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"),
-				SwapContracts: map[uint32]*dexeth.SwapContract{},
+				Address: common.HexToAddress("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"),
+				SwapContracts: map[uint32]*dexeth.SwapContract{
+					1: {},
+				},
 			},
 			dex.Testnet: {
 				Address: common.HexToAddress("0x036CbD53842c5426634e7929541eC2318f3dCF7e"),

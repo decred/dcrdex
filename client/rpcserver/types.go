@@ -196,8 +196,10 @@ type addRemovePeerForm struct {
 }
 
 type mmAvailableBalancesForm struct {
-	mkt     *mm.MarketWithHost
-	cexName *string
+	mkt        *mm.MarketWithHost
+	cexBaseID  uint32
+	cexQuoteID uint32
+	cexName    *string
 }
 
 type startBotForm struct {
@@ -886,8 +888,25 @@ func parseMMAvailableBalancesArgs(params *RawParams) (*mmAvailableBalancesForm, 
 		return nil, err
 	}
 	form.mkt = mkt
+
 	if len(params.Args) > 3 {
-		form.cexName = &params.Args[3]
+		cexBaseID, err := checkUIntArg(params.Args[3], "cexBaseID", 32)
+		if err != nil {
+			return nil, fmt.Errorf("invalid cexBaseID: %v", err)
+		}
+		form.cexBaseID = uint32(cexBaseID)
+	}
+
+	if len(params.Args) > 4 {
+		cexQuoteID, err := checkUIntArg(params.Args[4], "cexQuoteID", 32)
+		if err != nil {
+			return nil, fmt.Errorf("invalid cexQuoteID: %v", err)
+		}
+		form.cexQuoteID = uint32(cexQuoteID)
+	}
+
+	if len(params.Args) > 5 {
+		form.cexName = &params.Args[5]
 	}
 	return form, nil
 }

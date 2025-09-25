@@ -81,7 +81,7 @@ var (
 
 	ContractAddresses = map[uint32]map[dex.Network]common.Address{
 		0: {
-			dex.Mainnet: common.HexToAddress("0xd45e648D97Beb2ee0045E5e91d1C2C751Cd0Bc00"), // txid: 0xbb7d09fb3832b35fbbed641453a90f217a2736cf1419848887dfee2dbb14187e
+			dex.Mainnet: common.HexToAddress("0x74922db9f530b22d7ebea8e6920e256cf3cc0542"), // txid: 0x9ef5e128119da8e66d364b7e656758ea7232d2dfb14c8463abac1f5ac62c986f
 			dex.Testnet: common.HexToAddress("0x73bc803A2604b2c58B8680c3CE1b14489842EF16"), // txid: 0x88f656a8e432fdd50f33e67bdc39a66d24f663e33792bfab16b033dd2c609a99
 			dex.Simnet:  common.HexToAddress(""),                                           // Filled in by MaybeReadSimnetAddrs
 		},

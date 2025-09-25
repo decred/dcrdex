@@ -545,6 +545,8 @@ func TestArbRebalance(t *testing.T) {
 			}
 			// arbEngine.setBotLoop(arbEngine.botLoop)
 			a.unifiedExchangeAdaptor.botCfgV.Store(&BotConfig{
+				CEXBaseID:  baseID,
+				CEXQuoteID: quoteID,
 				SimpleArbConfig: &SimpleArbConfig{
 					ProfitTrigger:      profitTrigger,
 					MaxActiveArbs:      maxActiveArbs,

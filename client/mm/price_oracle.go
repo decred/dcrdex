@@ -303,7 +303,7 @@ func oracleAverage(mkts []*OracleReport, log dex.Logger) (rate, usdVolume float6
 }
 
 func getRates(ctx context.Context, url string, thing any) (err error) {
-	return dexnet.Get(ctx, url, thing, dexnet.WithSizeLimit(1<<22))
+	return dexnet.Get(ctx, url, thing, dexnet.WithSizeLimit(1<<30))
 }
 
 func getHTTPWithCode(ctx context.Context, url string, thing any) (int, error) {

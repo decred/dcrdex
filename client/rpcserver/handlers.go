@@ -71,6 +71,7 @@ const (
 	pendingBridgesRoute        = "pendingbridges"
 	bridgeHistoryRoute         = "bridgehistory"
 	supportedBridgesRoute      = "supportedbridges"
+	bridgeFeesAndLimitsRoute   = "bridgefeesandlimits"
 )
 
 const (
@@ -154,6 +155,7 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	pendingBridgesRoute:        handlePendingBridges,
 	bridgeHistoryRoute:         handleBridgeHistory,
 	supportedBridgesRoute:      handleSupportedBridges,
+	bridgeFeesAndLimitsRoute:   handleBridgeFeesAndLimits,
 }
 
 // handleHelp handles requests for help. Returns general help for all commands
@@ -874,7 +876,7 @@ func handleMMAvailableBalances(s *RPCServer, params *RawParams) *msgjson.Respons
 		return usage(mmAvailableBalancesRoute, err)
 	}
 
-	dexBalances, cexBalances, err := s.mm.AvailableBalances(form.mkt, form.cexName)
+	dexBalances, cexBalances, err := s.mm.AvailableBalances(form.mkt, form.cexBaseID, form.cexQuoteID, form.cexName)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCMMAvailableBalancesError, "unable to get available balances: %v", err)
 		return createResponse(mmAvailableBalancesRoute, nil, resErr)
@@ -1229,17 +1231,40 @@ func handleSupportedBridges(s *RPCServer, params *RawParams) *msgjson.ResponsePa
 		return createResponse(supportedBridgesRoute, nil, resErr)
 	}
 
-	// Convert asset IDs to symbols for each bridge
+	// Convert asset IDs to symbols for each destination
 	result := make(map[string][]string)
-	for bridgeName, destAssetIDs := range bridgeDestinations {
-		symbols := make([]string, len(destAssetIDs))
-		for i, destID := range destAssetIDs {
-			symbols[i] = dex.BipIDSymbol(destID)
-		}
-		result[bridgeName] = symbols
+	for destAssetID, bridgeNames := range bridgeDestinations {
+		destSymbol := dex.BipIDSymbol(destAssetID)
+		result[destSymbol] = bridgeNames
 	}
 
 	return createResponse(supportedBridgesRoute, result, nil)
+}
+
+func handleBridgeFeesAndLimits(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	if len(params.Args) != 3 {
+		return usage(bridgeFeesAndLimitsRoute, fmt.Errorf("expected 3 args, got %d", len(params.Args)))
+	}
+
+	fromAssetID, err := strconv.ParseUint(params.Args[0], 10, 32)
+	if err != nil {
+		return usage(bridgeFeesAndLimitsRoute, fmt.Errorf("error parsing fromAssetID: %v", err))
+	}
+
+	toAssetID, err := strconv.ParseUint(params.Args[1], 10, 32)
+	if err != nil {
+		return usage(bridgeFeesAndLimitsRoute, fmt.Errorf("error parsing toAssetID: %v", err))
+	}
+
+	bridgeName := params.Args[2]
+
+	result, err := s.core.BridgeFeesAndLimits(uint32(fromAssetID), uint32(toAssetID), bridgeName)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCBridgeError, "unable to get bridge fees and limits: %v", err)
+		return createResponse(bridgeFeesAndLimitsRoute, nil, resErr)
+	}
+
+	return createResponse(bridgeFeesAndLimitsRoute, result, nil)
 }
 
 // format concatenates thing and tail. If thing is empty, returns an empty
@@ -1865,12 +1890,15 @@ needed to complete a swap.`,
 	},
 	mmAvailableBalancesRoute: {
 		cmdSummary: `Get available balances for starting a bot or adding additional balance to a running bot.`,
-		argsShort:  `(cfgPath) (host) (baseID) (quoteID)`,
+		argsShort:  `(cfgPath) (host) (baseID) (quoteID) [cexBaseID] [cexQuoteID] [cexName]`,
 		argsLong: `Args:
 		cfgPath (string): The path to the market maker config file.
 		host (string): The DEX address.
 		baseID (int): The base asset's BIP-44 registered coin index.
-		quoteID (int): The quote asset's BIP-44 registered coin index.`,
+		quoteID (int): The quote asset's BIP-44 registered coin index.
+		cexBaseID (int, optional): The CEX base asset's BIP-44 registered coin index for bridging.
+		cexQuoteID (int, optional): The CEX quote asset's BIP-44 registered coin index for bridging.
+		cexName (string, optional): The name of the CEX to get balances for.`,
 	},
 	mmStatusRoute: {
 		cmdSummary: `Get market making status.`,
@@ -2056,5 +2084,13 @@ an spv wallet and enables options to view and set the vsp.
 		cmdSummary: "Get supported bridge destinations.",
 		argsLong: `Args:
 		assetID (int): The asset's BIP-44 registered coin index to get bridge destinations for.`,
+	},
+	bridgeFeesAndLimitsRoute: {
+		argsShort:  `fromAssetID toAssetID bridgeName`,
+		cmdSummary: "Get bridge fees and limits.",
+		argsLong: `Args:
+		fromAssetID (int): The asset's BIP-44 registered coin index on the "from" chain.
+		toAssetID (int): The asset's BIP-44 registered coin index on the "to" chain.
+		bridgeName (string): The name of the bridge to query.`,
 	},
 }

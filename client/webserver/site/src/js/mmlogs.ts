@@ -14,13 +14,14 @@ import {
   MarketWithHost,
   ProfitLoss,
   MultiHopCfg,
-  BotConfig
+  BotConfig,
+  WalletTransaction
 } from './registry'
 import { Forms } from './forms'
 import { postJSON } from './http'
 import Doc, { setupCopyBtn } from './doc'
 import BasePage from './basepage'
-import { setMarketElements, liveBotStatus } from './mmutil'
+import { setMarketElements, liveBotStatus, feeAssetID } from './mmutil'
 import * as intl from './locales'
 import * as wallets from './wallets'
 import { CoinExplorers } from './coinexplorers'
@@ -72,8 +73,11 @@ export default class MarketMakerLogsPage extends BasePage {
   forms: Forms
   dexOrderIDCopyListener: () => void | undefined
   cexOrderIDCopyListener: () => void | undefined
-  depositIDCopyListener: () => void | undefined
+  depositTxIDCopyListener: () => void | undefined
+  bridgeTxIDCopyListener: () => void | undefined
   withdrawalIDCopyListener: () => void | undefined
+  withdrawalTxIDCopyListener: () => void | undefined
+  withdrawalBridgeTxIDCopyListener: () => void | undefined
   filters: logFilters
   loading: boolean
   refID: number | undefined
@@ -85,7 +89,7 @@ export default class MarketMakerLogsPage extends BasePage {
     super()
     const page = this.page = Doc.idDescendants(main)
     net = app().user.net
-    Doc.cleanTemplates(page.eventTableRowTmpl, page.dexOrderTxRowTmpl, page.performanceTableRowTmpl)
+    Doc.cleanTemplates(page.bridgeFeeRowTmpl, page.eventTableRowTmpl, page.dexOrderTxRowTmpl, page.performanceTableRowTmpl)
     Doc.bind(this.page.backButton, 'click', () => { app().loadPage(params.returnPage ?? 'mm') })
     Doc.bind(this.page.filterButton, 'click', () => { this.applyFilters() })
     if (params?.host) {
@@ -277,37 +281,32 @@ export default class MarketMakerLogsPage extends BasePage {
   }
 
   mktAssets () : SupportedAsset[] {
-    const baseAsset = app().assets[this.mkt.baseID]
-    const quoteAsset = app().assets[this.mkt.quoteID]
+    // Add DEX asset IDs
+    const assetIDs : Record<number, boolean> = {}
+    assetIDs[this.mkt.baseID] = true
+    assetIDs[this.mkt.quoteID] = true
+    assetIDs[feeAssetID(this.mkt.baseID)] = true
+    assetIDs[feeAssetID(this.mkt.quoteID)] = true
 
-    const assets = [baseAsset, quoteAsset]
-    const assetIDs = { [baseAsset.id]: true, [quoteAsset.id]: true }
-
-    if (baseAsset.token && !assetIDs[baseAsset.token.parentID]) {
-      const baseTokenAsset = app().assets[baseAsset.token.parentID]
-      assetIDs[baseTokenAsset.id] = true
-      assets.push(baseTokenAsset)
+    // Add CEX asset IDs
+    if (this.botCfg) {
+      assetIDs[this.botCfg.cexBaseID] = true
+      assetIDs[this.botCfg.cexQuoteID] = true
+      assetIDs[feeAssetID(this.botCfg.cexBaseID)] = true
+      assetIDs[feeAssetID(this.botCfg.cexQuoteID)] = true
     }
 
-    if (quoteAsset.token && !assetIDs[quoteAsset.token.parentID]) {
-      const quoteTokenAsset = app().assets[quoteAsset.token.parentID]
-      assets.push(quoteTokenAsset)
-    }
-
+    // Add intermediate asset ID if multi-hop is enabled
     const multiHopCfg = this.botCfg?.arbMarketMakingConfig?.multiHop
     if (multiHopCfg) {
-      let bridgeAsset = multiHopCfg.baseAssetMarket[0]
-      if (bridgeAsset === this.mkt.baseID) {
-        bridgeAsset = multiHopCfg.baseAssetMarket[1]
+      let intermediateAssetID = multiHopCfg.baseAssetMarket[0]
+      if (intermediateAssetID === this.mkt.baseID) {
+        intermediateAssetID = multiHopCfg.baseAssetMarket[1]
       }
-      if (!assetIDs[bridgeAsset]) {
-        const bridgeAssetAsset = app().assets[bridgeAsset]
-        assetIDs[bridgeAsset] = true
-        assets.push(bridgeAssetAsset)
-      }
+      assetIDs[intermediateAssetID] = true
     }
 
-    return assets
+    return Object.keys(assetIDs).map(id => app().assets[parseInt(id)])
   }
 
   updateExistingRows (updatedLogs: MarketMakingEvent[]) {
@@ -337,7 +336,7 @@ export default class MarketMakerLogsPage extends BasePage {
     tmpl.eventType.textContent = this.eventType(event)
     let id
     if (event.depositEvent) {
-      id = event.depositEvent.transaction.id
+      id = event.depositEvent.transaction?.id
     } else if (event.withdrawalEvent) {
       id = event.withdrawalEvent.id
     } else if (event.dexOrderEvent) {
@@ -367,7 +366,7 @@ export default class MarketMakerLogsPage extends BasePage {
       }
       el.textContent = Doc.formatCoinValue(sum, asset.unitInfo)
       const factor = asset.unitInfo.conventional.conversionFactor
-      usd += sum / factor * this.fiatRates[asset.id] ?? 0
+      usd += sum / factor * (this.fiatRates[asset.id] ?? 0)
     }
     tmpl.sumUSD.textContent = Doc.formatFourSigFigs(usd)
     Doc.bind(tmpl.details, 'click', () => { this.showEventDetails(event.id) })
@@ -506,23 +505,105 @@ export default class MarketMakerLogsPage extends BasePage {
 
   showDepositEventDetails (event: DepositEvent, pending: boolean) {
     const page = this.page
-    page.depositID.textContent = trimStringWithEllipsis(event.transaction.id, 20)
-    if (this.depositIDCopyListener !== undefined) {
-      page.copyDepositID.removeEventListener('click', this.depositIDCopyListener)
-    }
-    this.depositIDCopyListener = () => { setupCopyBtn(event.transaction.id, page.depositID, page.copyDepositID, '#1e7d11') }
-    page.copyDepositID.addEventListener('click', this.depositIDCopyListener)
-    page.depositID.setAttribute('title', event.transaction.id)
     const unitInfo = app().assets[event.assetID].unitInfo
     const unit = unitInfo.conventional.unit
-    page.depositAmt.textContent = `${Doc.formatCoinValue(event.transaction.amount, unitInfo)} ${unit}`
-    page.depositFees.textContent = `${Doc.formatCoinValue(event.transaction.fees, unitInfo)} ${unit}`
+
+    // Handle deposit transaction ID and fees
+    Doc.setVis(event.transaction, page.depositTxIdRow, page.depositFeesRow)
+    if (event.transaction) {
+      page.depositTxID.textContent = trimStringWithEllipsis(event.transaction.id, 20)
+      page.depositTxID.setAttribute('title', event.transaction.id)
+
+      if (this.depositTxIDCopyListener !== undefined) {
+        page.copyDepositTxID.removeEventListener('click', this.depositTxIDCopyListener)
+      }
+      const txID = event.transaction.id
+      this.depositTxIDCopyListener = () => { setupCopyBtn(txID, page.depositTxID, page.copyDepositTxID, '#1e7d11') }
+      page.copyDepositTxID.addEventListener('click', this.depositTxIDCopyListener)
+
+      const feeAsset = app().assets[feeAssetID(event.assetID)]
+      const feeUnit = feeAsset.unitInfo.conventional.unit
+      page.depositFees.textContent = `${Doc.formatCoinValue(event.transaction.fees, feeAsset.unitInfo)} ${feeUnit}`
+    }
+
+    // Handle bridge transaction ID and fees
+    Doc.setVis(event.bridgeTx, page.bridgeTxIdRow, page.depositBridgeFeesSection)
+    if (event.bridgeTx) {
+      page.bridgeTxID.textContent = trimStringWithEllipsis(event.bridgeTx.id, 20)
+      page.bridgeTxID.setAttribute('title', event.bridgeTx.id)
+
+      if (this.bridgeTxIDCopyListener !== undefined) {
+        page.copyBridgeTxID.removeEventListener('click', this.bridgeTxIDCopyListener)
+      }
+      const txID = event.bridgeTx.id
+      this.bridgeTxIDCopyListener = () => { setupCopyBtn(txID, page.bridgeTxID, page.copyBridgeTxID, '#1e7d11') }
+      page.copyBridgeTxID.addEventListener('click', this.bridgeTxIDCopyListener)
+
+      this.populateBridgeFees(event.assetID, event.bridgeTx, page.depositBridgeFeesSection)
+    }
+
+    // Set amount and other fields
+    let totalAmount = 0
+    if (event.transaction) totalAmount += event.transaction.amount
+    if (event.bridgeTx && (event.bridgeTx as any).bridgeCounterpartTx?.amountReceived) {
+      totalAmount = (event.bridgeTx as any).bridgeCounterpartTx.amountReceived
+    }
+    if (totalAmount > 0) {
+      page.depositAmt.textContent = `${Doc.formatCoinValue(totalAmount, unitInfo)} ${unit}`
+    }
+
     page.depositStatus.textContent = pending ? intl.prep(intl.ID_PENDING) : intl.prep(intl.ID_COMPLETE)
     Doc.setVis(!pending, page.depositCreditSection)
     if (!pending) {
       page.depositCredit.textContent = `${Doc.formatCoinValue(event.cexCredit, unitInfo)} ${unit}`
     }
     this.forms.show(page.depositDetailsForm)
+  }
+
+  populateBridgeFees (assetID: number, bridgeTx: WalletTransaction, bridgeFeesSection: HTMLElement) {
+    const page = this.page
+
+    // Clear existing bridge fee rows
+    Doc.empty(bridgeFeesSection)
+
+    if (!bridgeTx.bridgeCounterpartTx) return
+
+    // Determine all the fees. They may come from three sources:
+    // 1. The fee of the bridge transaction
+    // 2. The fee of the bridge counterpart transaction
+    // 3. The difference between the amount of the bridge transaction and the amount received
+    const fees: Record<number, number> = {}
+    const addFees = (assetID: number, amount: number) => {
+      fees[feeAssetID(assetID)] = (fees[feeAssetID(assetID)] || 0) + amount
+    }
+    if (bridgeTx.fees > 0) {
+      addFees(feeAssetID(assetID), bridgeTx.fees)
+    }
+    if (bridgeTx.bridgeCounterpartTx.fees > 0) {
+      addFees(feeAssetID(bridgeTx.bridgeCounterpartTx.assetID), bridgeTx.bridgeCounterpartTx.fees)
+    }
+    if (bridgeTx.bridgeCounterpartTx.amountReceived > 0) {
+      addFees(bridgeTx.bridgeCounterpartTx.assetID, bridgeTx.amount - bridgeTx.bridgeCounterpartTx.amountReceived)
+    }
+    const assetIDs = Object.keys(fees).map(Number)
+    if (assetIDs.length === 0) return
+
+    // Create the rows
+    for (let i = 0; i < assetIDs.length; i++) {
+      const assetID = assetIDs[i]
+      const feeAmount = fees[assetID]
+      const asset = app().assets[assetID]
+      if (!asset || feeAmount <= 0) continue
+
+      const row = page.bridgeFeeRowTmpl.cloneNode(true) as HTMLElement
+      const tmpl = Doc.parseTemplate(row)
+      // Only show "Bridge Fees" label on the first row
+      Doc.setVis(i === 0, tmpl.label)
+
+      const unit = asset.unitInfo.conventional.unit
+      tmpl.amount.textContent = `${Doc.formatCoinValue(feeAmount, asset.unitInfo)} ${unit}`
+      bridgeFeesSection.appendChild(row)
+    }
   }
 
   showWithdrawalEventDetails (event: WithdrawalEvent, pending: boolean) {
@@ -536,13 +617,44 @@ export default class MarketMakerLogsPage extends BasePage {
     page.withdrawalID.setAttribute('title', event.id)
     const unitInfo = app().assets[event.assetID].unitInfo
     const unit = unitInfo.conventional.unit
-    page.withdrawalAmt.textContent = `${Doc.formatCoinValue(event.cexDebit, unitInfo)} ${unit}`
-    page.withdrawalStatus.textContent = pending ? intl.prep(intl.ID_PENDING) : intl.prep(intl.ID_COMPLETE)
+
+    // Handle withdrawal transaction ID and fees
+    Doc.setVis(event.transaction, page.withdrawalTxIdRow, page.withdrawalFeesRow, page.withdrawalReceivedRow)
     if (event.transaction) {
       page.withdrawalTxID.textContent = trimStringWithEllipsis(event.transaction.id, 20)
       page.withdrawalTxID.setAttribute('title', event.transaction.id)
+
+      if (this.withdrawalTxIDCopyListener !== undefined) {
+        page.copyWithdrawalTxID.removeEventListener('click', this.withdrawalTxIDCopyListener)
+      }
+      const txID = event.transaction.id
+      this.withdrawalTxIDCopyListener = () => { setupCopyBtn(txID, page.withdrawalTxID, page.copyWithdrawalTxID, '#1e7d11') }
+      page.copyWithdrawalTxID.addEventListener('click', this.withdrawalTxIDCopyListener)
+
+      const feeAsset = app().assets[feeAssetID(event.assetID)]
+      const feeUnit = feeAsset.unitInfo.conventional.unit
+      page.withdrawalFees.textContent = `${Doc.formatCoinValue(event.transaction.fees, feeAsset.unitInfo)} ${feeUnit}`
       page.withdrawalReceived.textContent = `${Doc.formatCoinValue(event.transaction.amount, unitInfo)} ${unit}`
     }
+
+    // Handle bridge transaction ID and fees
+    Doc.setVis(event.bridgeTx, page.withdrawalBridgeTxIdRow, page.withdrawalBridgeFeesSection)
+    if (event.bridgeTx) {
+      page.withdrawalBridgeTxID.textContent = trimStringWithEllipsis(event.bridgeTx.id, 20)
+      page.withdrawalBridgeTxID.setAttribute('title', event.bridgeTx.id)
+
+      if (this.withdrawalBridgeTxIDCopyListener !== undefined) {
+        page.copyWithdrawalBridgeTxID.removeEventListener('click', this.withdrawalBridgeTxIDCopyListener)
+      }
+      const txID = event.bridgeTx.id
+      this.withdrawalBridgeTxIDCopyListener = () => { setupCopyBtn(txID, page.withdrawalBridgeTxID, page.copyWithdrawalBridgeTxID, '#1e7d11') }
+      page.copyWithdrawalBridgeTxID.addEventListener('click', this.withdrawalBridgeTxIDCopyListener)
+
+      this.populateBridgeFees(event.assetID, event.bridgeTx, page.withdrawalBridgeFeesSection)
+    }
+
+    page.withdrawalAmt.textContent = `${Doc.formatCoinValue(event.cexDebit, unitInfo)} ${unit}`
+    page.withdrawalStatus.textContent = pending ? intl.prep(intl.ID_PENDING) : intl.prep(intl.ID_COMPLETE)
     this.forms.show(page.withdrawalDetailsForm)
   }
 

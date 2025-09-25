@@ -5656,8 +5656,9 @@ func (c *Core) BridgeHistory(assetID uint32, n int, refID *string, past bool) ([
 }
 
 // SupportedBridgeDestinations returns the list of asset IDs that are supported
-// as bridge destinations for the specified asset.
-func (c *Core) SupportedBridgeDestinations(assetID uint32) (map[string][]uint32, error) {
+// as bridge destinations for the specified asset and the names of the bridges
+// that can be used for each destination.
+func (c *Core) SupportedBridgeDestinations(assetID uint32) (map[uint32][]string, error) {
 	wallet, found := c.wallet(assetID)
 	if !found {
 		return nil, newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
@@ -5669,6 +5670,86 @@ func (c *Core) SupportedBridgeDestinations(assetID uint32) (map[string][]uint32,
 	}
 
 	return bridger.SupportedDestinations()
+}
+
+// BridgeFeesAndLimits returns the estimated fees and limits for bridging between two assets.
+func (c *Core) BridgeFeesAndLimits(fromAssetID, toAssetID uint32, bridgeName string) (*BridgeFeesAndLimits, error) {
+	sourceWallet, err := c.connectedWallet(fromAssetID)
+	if err != nil {
+		return nil, err
+	}
+	bridger, ok := sourceWallet.Wallet.(asset.Bridger)
+	if !ok {
+		return nil, fmt.Errorf("wallet for asset %s does not support bridging", unbip(fromAssetID))
+	}
+
+	destWallet, err := c.connectedWallet(toAssetID)
+	if err != nil {
+		return nil, err
+	}
+	destBridger, ok := destWallet.Wallet.(asset.Bridger)
+	if !ok {
+		return nil, fmt.Errorf("wallet for asset %s does not support bridging", unbip(toAssetID))
+	}
+
+	initiationFee, limits, hasLimits, err := bridger.BridgeInitiationFeesAndLimits(bridgeName, toAssetID)
+	if err != nil {
+		return nil, err
+	}
+
+	completionFee, err := destBridger.BridgeCompletionFees(bridgeName)
+	if err != nil {
+		return nil, err
+	}
+
+	fees := make(map[uint32]uint64, 2)
+
+	if initiationFee > 0 {
+		fromFeeAssetID := fromAssetID
+		if token := asset.TokenInfo(fromAssetID); token != nil {
+			fromFeeAssetID = token.ParentID
+		}
+		fees[fromFeeAssetID] += initiationFee
+	}
+
+	if completionFee > 0 {
+		toFeeAssetID := toAssetID
+		if token := asset.TokenInfo(toAssetID); token != nil {
+			toFeeAssetID = token.ParentID
+		}
+		fees[toFeeAssetID] += completionFee
+	}
+
+	return &BridgeFeesAndLimits{
+		Fees:      fees,
+		MinLimit:  limits[0],
+		MaxLimit:  limits[1],
+		HasLimits: hasLimits,
+	}, nil
+}
+
+// AllBridgePaths returns a map of all supported bridge paths.
+// The return value maps source asset -> destination asset -> bridge names.
+func (c *Core) AllBridgePaths() (map[uint32]map[uint32][]string, error) {
+	paths := make(map[uint32]map[uint32][]string)
+
+	c.walletMtx.RLock()
+	defer c.walletMtx.RUnlock()
+
+	for assetID, wallet := range c.wallets {
+		bridger, ok := wallet.Wallet.(asset.Bridger)
+		if !ok {
+			continue
+		}
+
+		var err error
+		paths[assetID], err = bridger.SupportedDestinations()
+		if err != nil {
+			return nil, fmt.Errorf("error getting supported destinations for %s: %w", unbip(assetID), err)
+		}
+	}
+
+	return paths, nil
 }
 
 // EstimateSendTxFee returns an estimate of the tx fee needed to send or
@@ -9668,7 +9749,7 @@ func (c *Core) handleBridgeCompleted(n *asset.BridgeCompletedNote) {
 		return
 	}
 
-	sourceWallet.MarkBridgeComplete(n.InitiationTxID, n.CompletionTxIDs, n.Complete)
+	sourceWallet.MarkBridgeComplete(n.InitiationTxID, n.CompletionTxIDs, n.AmtReceived, n.Complete)
 }
 
 // handleWalletNotification processes an asynchronous wallet notification.
