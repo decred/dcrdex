@@ -24,9 +24,8 @@ import (
 )
 
 var (
-	wsEndpoint   = "ws://localhost:38559" // beta ws port, with txpool api namespace enabled
-	homeDir      = os.Getenv("HOME")
-	alphaIPCFile = filepath.Join(homeDir, "dextest", "eth", "alpha", "node", "geth.ipc")
+	wsEndpoint = "ws://localhost:38554" // alpha ws port
+	homeDir    = os.Getenv("HOME")
 
 	contractAddrFile   = filepath.Join(homeDir, "dextest", "eth", "eth_swap_contract_address.txt")
 	tokenSwapAddrFile  = filepath.Join(homeDir, "dextest", "eth", "usdc_swap_contract_address.txt")
@@ -54,7 +53,7 @@ func TestMain(m *testing.M) {
 		netAddrsV1 := dexeth.ContractAddresses[1]
 		ethContractAddrV1 := netAddrsV1[dex.Simnet]
 
-		ethClient = newRPCClient(BipID, 42, dex.Simnet, []endpoint{{url: wsEndpoint}, {url: alphaIPCFile}}, contractVer, ethContractAddr, ethContractAddrV1, log)
+		ethClient = newRPCClient(BipID, 42, dex.Simnet, []endpoint{{url: wsEndpoint}}, contractVer, ethContractAddr, ethContractAddrV1, log)
 
 		dexeth.ContractAddresses[0][dex.Simnet] = getContractAddrFromFile(contractAddrFile)
 
@@ -110,7 +109,17 @@ func TestSuggestGasTipCap(t *testing.T) {
 func TestStatus(t *testing.T) {
 	var secretHash [32]byte
 	copy(secretHash[:], encode.RandomBytes(32))
-	_, err := ethClient.status(ctx, BipID, common.Address{}, secretHash[:])
+	initiatorAddr := common.HexToAddress("0x2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27")
+	participantAddr := common.HexToAddress("345853e21b1d475582E71cC269124eD5e2dD3422")
+	swapVector := &dexeth.SwapVector{
+		From:       initiatorAddr,
+		To:         participantAddr,
+		Value:      new(big.Int),
+		SecretHash: secretHash,
+		LockTime:   0,
+	}
+	locator := swapVector.Locator()
+	_, err := ethClient.status(ctx, BipID, common.Address{}, locator)
 	if err != nil {
 		t.Fatal(err)
 	}
