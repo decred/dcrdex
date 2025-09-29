@@ -13,7 +13,7 @@ import (
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	dexfiro "decred.org/dcrdex/dex/networks/firo"
 	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/decred/dcrd/rpcclient"
+	"github.com/decred/dcrd/rpcclient/v8"
 )
 
 // TestScanMainnetBlocks tests the firo MTP mining algo change to progpow at block 419_269

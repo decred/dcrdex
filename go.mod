@@ -82,19 +82,6 @@ require (
 	lukechampine.com/blake3 v1.3.0
 )
 
-require (
-	github.com/dchest/blake256 v1.0.0 // indirect
-	github.com/decred/dcrd/blockchain/stake v1.0.1 // indirect
-	github.com/decred/dcrd/chaincfg v1.1.1 // indirect
-	github.com/decred/dcrd/database v1.0.1 // indirect
-	github.com/decred/dcrd/dcrec/edwards v0.0.0-20180721031028-5369a485acf6 // indirect
-	github.com/decred/dcrd/dcrec/secp256k1 v1.0.0 // indirect
-	github.com/decred/dcrd/dcrjson v1.0.0 // indirect
-	github.com/decred/dcrd/dcrutil v1.1.1 // indirect
-	github.com/decred/dcrd/gcs v1.0.1 // indirect
-	github.com/decred/dcrd/txscript v1.0.1 // indirect
-)
-
 replace github.com/btcsuite/btcd/btcec/v2 v2.3.4 => github.com/martonp/btcd/btcec/v2 v2.0.0-20250528172049-6b252bb1b6a1
 
 require (
@@ -125,7 +112,6 @@ require (
 	github.com/decred/dcrd/database/v3 v3.0.2 // indirect
 	github.com/decred/dcrd/lru v1.1.2 // indirect
 	github.com/decred/dcrd/mixing v0.5.1-0.20250319155359-2b7d311f4a81 // indirect
-	github.com/decred/dcrd/rpcclient v1.1.1
 	github.com/decred/vspd/client/v4 v4.0.1 // indirect
 	github.com/decred/vspd/types/v3 v3.0.0 // indirect
 	github.com/dgraph-io/ristretto v0.0.2 // indirect
