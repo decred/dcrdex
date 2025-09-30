@@ -3,9 +3,7 @@
 package firo
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
 	"os/user"
 	"path/filepath"
 	"testing"
@@ -13,13 +11,10 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
+	dexfiro "decred.org/dcrdex/dex/networks/firo"
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/decred/dcrd/rpcclient/v8"
 )
-
-func TestScanTestnetBlocks(t *testing.T) {
-	// Testnet switched to ProgPOW at 37_310
-	testScanBlocks(t, dex.Testnet, 35_000, 40_000, "18888")
-}
 
 // TestScanMainnetBlocks tests the firo MTP mining algo change to progpow at block 419_269
 // We only support firo on dex after progpow as dex firo code was released late 2023.
@@ -30,7 +25,7 @@ func TestScanMainnetBlocks(t *testing.T) {
 // TestScanMainnetRecentBlocks tests more recent blocks after hard fork at 958_655
 // https://github.com/firoorg/firo/releases/tag/v0.14.14.0
 func TestScanMainnetRecentBlocks(t *testing.T) {
-	testScanBlocks(t, dex.Mainnet, 900_000, 1_173_927, "8888") // 1173924
+	testScanBlocks(t, dex.Mainnet, 900_000, 1_173_927, "8888") // 1173927 2025-09-26
 }
 
 func testScanBlocks(t *testing.T, net dex.Network, startHeight, endHeight int64, port string) {
@@ -53,18 +48,15 @@ func testScanBlocks(t *testing.T, net dex.Network, startHeight, endHeight int64,
 		t.Fatalf("rpcclient.New error: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	deserializeBlockAtHeight := func(blockHeight int64) {
-		blockHash, err := cl.GetBlockHash(ctx, blockHeight)
+		blockHash, err := cl.GetBlockHash(blockHeight)
 		if err != nil {
 			t.Fatalf("Error getting block hash for ")
 		}
 
 		hashStr, _ := json.Marshal(blockHash.String())
 
-		b, err := cl.RawRequest(ctx, "getblock", []json.RawMessage{hashStr, []byte("false")})
+		b, err := cl.RawRequest("getblock", []json.RawMessage{hashStr, []byte("false")})
 		if err != nil {
 			t.Fatalf("RawRequest error: %v", err)
 		}
@@ -72,14 +64,21 @@ func testScanBlocks(t *testing.T, net dex.Network, startHeight, endHeight int64,
 		if err := json.Unmarshal(b, &blockB); err != nil {
 			t.Fatalf("Error unmarshalling hash string: %v", err)
 		}
-		firoBlock, err := deserializeFiroBlock(blockB, net)
+		var params *chaincfg.Params
+		switch net {
+		case dex.Mainnet:
+			params = dexfiro.MainNetParams
+		case dex.Testnet:
+			params = dexfiro.TestNetParams
+		case dex.Regtest:
+			params = dexfiro.RegressionNetParams
+		default:
+			t.Fatalf("unknown network ID %v", net)
+		}
+
+		_, err = deserializeBlock(params, blockB)
 		if err != nil {
 			t.Fatalf("Deserialize error for block %s at height %d: %v", blockHash, blockHeight, err)
-		}
-		if firoBlock.HashRootMTP != [16]byte{} {
-			// None found on testnet or mainnet. I think the MTP proof stuff
-			// was cleaned out in an upgrade or something. (buck) - Yes .. Pruned (warrior)
-			fmt.Printf("##### Block %d has MTP proofs \n", blockHeight)
 		}
 	}
 
