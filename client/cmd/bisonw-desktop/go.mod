@@ -1,8 +1,6 @@
 module decred.org/dcrdex/client/cmd/bisonw-desktop
 
-go 1.23.0
-
-toolchain go1.24.4
+go 1.24
 
 replace decred.org/dcrdex => ../../..
 
@@ -26,7 +24,7 @@ require (
 	github.com/dcrlabs/ltcwallet v0.0.0-20240823165752-3e026e8da010 // indirect
 	github.com/decred/dcrd/container/lru v1.0.0 // indirect
 	github.com/decred/dcrd/crypto/rand v1.0.1 // indirect
-	github.com/decred/dcrd/mixing v0.5.1-0.20250319155359-2b7d311f4a81 // indirect
+	github.com/decred/dcrd/mixing v0.5.1-0.20250908140125-6c4185b8275a // indirect
 	github.com/decred/vspd/client/v4 v4.0.1 // indirect
 	github.com/decred/vspd/types/v3 v3.0.0 // indirect
 	github.com/ethereum/c-kzg-4844/v2 v2.1.0 // indirect
@@ -56,7 +54,7 @@ replace github.com/btcsuite/btcd/btcec/v2 v2.3.4 => github.com/martonp/btcd/btce
 
 require (
 	decred.org/cspp/v2 v2.4.0 // indirect
-	decred.org/dcrwallet/v5 v5.0.0-20250407130412-4f0acd20d74c // indirect
+	decred.org/dcrwallet/v5 v5.0.0-20250918081013-7d12bcf5816b // indirect
 	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 // indirect
 	github.com/StackExchange/wmi v1.2.1 // indirect
 	github.com/VictoriaMetrics/fastcache v1.12.2 // indirect
