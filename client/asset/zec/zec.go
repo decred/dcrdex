@@ -47,7 +47,7 @@ const (
 	// structure.
 	defaultFee          = 10
 	defaultFeeRateLimit = 1000
-	minNetworkVersion   = 5090150 // v5.9.1
+	minNetworkVersion   = 6030050 // v5.9.1	=>  v6.3.0
 	walletTypeRPC       = "zcashdRPC"
 
 	// defaultConfTarget is the amount of confirmations required to consider
@@ -374,7 +374,7 @@ func (w *zecWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		return nil, fmt.Errorf("error getting locked zats: %w", err)
 	}
 
-	if acctBal.Transparent+locked != fullTBalance {
+	if acctBal.Transparent+locked != fullTBalance { // TODO(zec) fix failure here..
 		return nil, errors.New(
 			"there appears to be some transparent balance that is not in the zeroth account. " +
 				"To operate correctly, all balance must be in the zeroth account. " +
