@@ -912,8 +912,8 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     const baseBridgeAssets = Object.keys(this.baseBridges ?? {}).map(Number)
     const quoteBridgeAssets = Object.keys(this.quoteBridges ?? {}).map(Number)
-    const defaultCEXBaseID = baseBridgeAssets.length > 0 ? baseBridgeAssets[0] : this.marketStuff().baseID
-    const defaultCEXQuoteID = quoteBridgeAssets.length > 0 ? quoteBridgeAssets[0] : this.marketStuff().quoteID
+    const defaultCEXBaseID = baseBridgeAssets.length > 0 ? baseBridgeAssets[0] : this.specs.baseID
+    const defaultCEXQuoteID = quoteBridgeAssets.length > 0 ? quoteBridgeAssets[0] : this.specs.quoteID
 
     // If there is no saved multi-hop config, use the default.
     if (!savedBotCfg || !savedBotCfg.arbMarketMakingConfig || !savedBotCfg.arbMarketMakingConfig.multiHop) {
