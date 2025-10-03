@@ -765,8 +765,10 @@ export interface AutoRebalanceConfig {
   internalOnly: boolean
 }
 
+export type GapStrategy = 'multiplier' | 'absolute' | 'absolute-plus' | 'percent' | 'percent-plus'
+
 export interface BasicMarketMakingConfig {
-  gapStrategy: string
+  gapStrategy: GapStrategy
   sellPlacements: OrderPlacement[]
   buyPlacements: OrderPlacement[]
   driftTolerance: number
@@ -820,8 +822,8 @@ export interface QuickBalanceConfig {
 
 export interface UIConfig {
   quickBalance: QuickBalanceConfig
-  allocation: BotBalanceAllocation
   usingQuickBalance: boolean
+  allocation: BotBalanceAllocation
   baseMinTransfer: number
   quoteMinTransfer: number
   cexRebalance: boolean
@@ -841,8 +843,8 @@ export interface BotConfig {
   cexQuoteID: number
   baseBridgeName: string
   quoteBridgeName: string
-  baseWalletOptions?: Record<string, string>
-  quoteWalletOptions?: Record<string, string>
+  baseWalletOptions: Record<string, string> | null
+  quoteWalletOptions: Record<string, string> | null
   cexName: string
   uiConfig: UIConfig
   basicMarketMakingConfig?: BasicMarketMakingConfig
@@ -1342,6 +1344,7 @@ export interface Application {
   needsCustomProvider (assetID: number): Promise<boolean>
   allBridgePaths (): Promise<Record<number, Record<number, string[]>>>
   bridgeFeesAndLimits (fromAssetID: number, toAssetID: number, bridgeName: string): Promise<BridgeFeesAndLimits | null>
+  prettyPrintAssetID(assetID: number): string
 }
 
 // TODO: Define an interface for Application?

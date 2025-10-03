@@ -437,7 +437,7 @@ export default class WalletsPage extends BasePage {
     this.setSelectedAsset(selectedAsset)
 
     setInterval(() => {
-      for (const row of this.page.txHistoryTableBody.children) {
+      for (const row of Array.from(this.page.txHistoryTableBody.children)) {
         const age = Doc.tmplElement(row as PageElement, 'age')
         age.textContent = Doc.timeSince(parseInt(age.dataset.timestamp as string))
       }
@@ -982,7 +982,7 @@ export default class WalletsPage extends BasePage {
 
   async setSelectedAsset (assetID: number) {
     const { assetSelect } = this.page
-    for (const b of assetSelect.children) b.classList.remove('selected')
+    for (const b of Array.from(assetSelect.children)) b.classList.remove('selected')
     this.assetButtons[assetID].bttn.classList.add('selected')
     this.selectedAssetID = assetID
     this.page.hideMixTxsCheckbox.checked = true
@@ -1889,7 +1889,7 @@ export default class WalletsPage extends BasePage {
       }
       return
     }
-    for (const row of this.page.txHistoryTableBody.children) {
+    for (const row of Array.from(this.page.txHistoryTableBody.children)) {
       const peRow = row as PageElement
       if (peRow.dataset.txid === tx.id) {
         this.updateTxHistoryRow(peRow, tx, assetID)
