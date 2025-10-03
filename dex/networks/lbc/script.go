@@ -14,12 +14,12 @@ import (
 	"decred.org/dcrdex/server/account"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/lbryio/lbcd/btcec"
-	"github.com/lbryio/lbcd/chaincfg/v3"
-	"github.com/lbryio/lbcd/txscript/v4"
-	"github.com/lbryio/lbcd/txscript/v4/stdaddr"
-	"github.com/lbryio/lbcd/txscript/v4/stdscript"
+	"github.com/lbryio/lbcd/chaincfg"
+	"github.com/lbryio/lbcd/txscript"
+	"github.com/lbryio/lbcd/txscript/stdaddr"
+	"github.com/lbryio/lbcd/txscript/stdscript"
 	"github.com/lbryio/lbcd/wire"
-	"github.com/lbryio/lbcwallet/v5/wallet/txsizes"
+	"github.com/lbryio/lbcwallet/wallet/txsizes"
 	"golang.org/x/crypto/ripemd160"
 )
 

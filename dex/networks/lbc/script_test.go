@@ -11,11 +11,11 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"github.com/btcsuite/btcd/btcutil"
-	"github.com/lbryio/lbcd/btcec/secp256k1/v4"
+	"github.com/lbryio/lbcd/btcec/secp256k1"
+	"github.com/lbryio/lbcd/chaincfg"
 	"github.com/lbryio/lbcd/chaincfg/chainhash"
-	"github.com/lbryio/lbcd/chaincfg/v3"
-	"github.com/lbryio/lbcd/txscript/v4"
-	"github.com/lbryio/lbcd/txscript/v4/stdaddr"
+	"github.com/lbryio/lbcd/txscript"
+	"github.com/lbryio/lbcd/txscript/stdaddr"
 	"github.com/lbryio/lbcd/wire"
 )
 
