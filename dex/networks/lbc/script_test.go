@@ -10,10 +10,10 @@ import (
 	"testing"
 
 	"decred.org/dcrdex/dex"
+	"github.com/btcsuite/btcd/btcutil"
+	"github.com/lbryio/lbcd/btcec/secp256k1/v4"
 	"github.com/lbryio/lbcd/chaincfg/chainhash"
 	"github.com/lbryio/lbcd/chaincfg/v3"
-	"github.com/lbryio/lbcd/btcec/secp256k1/v4"
-	"github.com/lbryio/lbcd/lbcutil/v4"
 	"github.com/lbryio/lbcd/txscript/v4"
 	"github.com/lbryio/lbcd/txscript/v4/stdaddr"
 	"github.com/lbryio/lbcd/wire"
@@ -382,7 +382,7 @@ func Test_nonstandardScript(t *testing.T) {
 	if scriptHash == nil {
 		t.Fatalf("ExtractScriptHash failed")
 	}
-	if !bytes.Equal(lbcutil.Hash160(contractScript), scriptHash) {
+	if !bytes.Equal(btcutil.Hash160(contractScript), scriptHash) {
 		t.Fatalf("script hash check failed for output %s,%d", contractTx, vout)
 	}
 
@@ -564,7 +564,7 @@ func TestFindKeyPush(t *testing.T) {
 	secret := randBytes(32)
 	secretHash := sha256.Sum256(secret)
 	contract, _ := MakeContract(recipient, sender, secretHash[:], tStamp, tParams)
-	contractHash := lbcutil.Hash160(contract)
+	contractHash := btcutil.Hash160(contract)
 	sigScript, err := RedeemP2SHContract(contract, randBytes(73), randBytes(33), secret)
 	if err != nil {
 		t.Fatalf("error creating redeem script: %v", err)

@@ -12,14 +12,14 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/server/account"
-	"github.com/lbryio/lbcwallet/v5/wallet/txsizes"
-	"github.com/lbryio/lbcd/chaincfg/v3"
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/lbryio/lbcd/btcec"
-	"github.com/lbryio/lbcd/lbcutil/v4"
+	"github.com/lbryio/lbcd/chaincfg/v3"
 	"github.com/lbryio/lbcd/txscript/v4"
 	"github.com/lbryio/lbcd/txscript/v4/stdaddr"
 	"github.com/lbryio/lbcd/txscript/v4/stdscript"
 	"github.com/lbryio/lbcd/wire"
+	"github.com/lbryio/lbcwallet/v5/wallet/txsizes"
 	"golang.org/x/crypto/ripemd160"
 )
 
@@ -1052,7 +1052,7 @@ func FindKeyPush(scriptVersion uint16, sigScript, contractHash []byte, chainPara
 
 		// Only hash if ExtractSwapDetails will recognize it.
 		if len(push) == SwapContractSize {
-			h := lbcutil.Hash160(push)
+			h := btcutil.Hash160(push)
 			if bytes.Equal(h, contractHash) {
 				_, _, _, keyHash, err = ExtractSwapDetails(push, chainParams)
 				if err != nil {
