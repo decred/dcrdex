@@ -16,10 +16,8 @@ import (
 	"github.com/lbryio/lbcd/btcec"
 	"github.com/lbryio/lbcd/chaincfg"
 	"github.com/lbryio/lbcd/txscript"
-	"github.com/lbryio/lbcd/txscript/stdaddr"
-	"github.com/lbryio/lbcd/txscript/stdscript"
 	"github.com/lbryio/lbcd/wire"
-	"github.com/lbryio/lbcwallet/wallet/txsizes"
+	"github.com/btcsuite/btcwallet/wallet/txsizes"
 	"golang.org/x/crypto/ripemd160"
 )
 
@@ -301,45 +299,6 @@ func convertScriptType(st stdscript.ScriptType) ScriptType {
 	return scriptType
 }
 
-// AddressScript returns the raw bytes of the address to be used when inserting
-// the address into a txout's script. This is currently the address' pubkey or
-// script hash160. Other address types are unsupported.
-func AddressScript(addr stdaddr.Address) ([]byte, error) {
-	switch addr := addr.(type) {
-	case stdaddr.SerializedPubKeyer:
-		return addr.SerializedPubKey(), nil
-	case stdaddr.Hash160er:
-		return addr.Hash160()[:], nil
-	default:
-		return nil, fmt.Errorf("unsupported address type %T", addr)
-	}
-}
-
-// AddressSigType returns the digital signature algorithm for the specified
-// address.
-func AddressSigType(addr stdaddr.Address) (sigType btcec.SignatureType, err error) {
-	switch addr.(type) {
-	case *stdaddr.AddressPubKeyEcdsaSecp256k1V0:
-		sigType = btcec.STEcdsaSecp256k1
-	case *stdaddr.AddressPubKeyHashEcdsaSecp256k1V0:
-		sigType = btcec.STEcdsaSecp256k1
-
-	case *stdaddr.AddressPubKeyEd25519V0:
-		sigType = btcec.STEd25519
-	case *stdaddr.AddressPubKeyHashEd25519V0:
-		sigType = btcec.STEd25519
-
-	case *stdaddr.AddressPubKeySchnorrSecp256k1V0:
-		sigType = btcec.STSchnorrSecp256k1
-	case *stdaddr.AddressPubKeyHashSchnorrSecp256k1V0:
-		sigType = btcec.STSchnorrSecp256k1
-
-	default:
-		err = fmt.Errorf("unsupported signature type")
-	}
-	return sigType, err
-}
-
 // MakePrivateContract creates a private swap contract that can be redeemed
 // using both the redeemer and refunder's signatures, or just the refunder's
 // signature if the locktime has been reached.
@@ -379,65 +338,6 @@ func MakePrivateContract(redeemPKH, refundPKH []byte, locktime int64) ([]byte, e
 	}
 
 	return script, nil
-}
-
-// MakeContract creates an atomic swap contract. The secretHash MUST be computed
-// from a secret of length SecretKeySize bytes or the resulting contract will be
-// invalid.
-func MakeContract(recipient, sender string, secretHash []byte, lockTime int64, chainParams *chaincfg.Params) ([]byte, error) {
-	parseAddress := func(address string) (*stdaddr.AddressPubKeyHashEcdsaSecp256k1V0, error) {
-		addr, err := stdaddr.DecodeAddress(address, chainParams)
-		if err != nil {
-			return nil, fmt.Errorf("error decoding address %s: %w", address, err)
-		}
-		if addr, ok := addr.(*stdaddr.AddressPubKeyHashEcdsaSecp256k1V0); ok {
-			return addr, nil
-		} else {
-			return nil, fmt.Errorf("address %s is not a pubkey-hash address or "+
-				"signature algorithm is unsupported", address)
-		}
-	}
-
-	rAddr, err := parseAddress(recipient)
-	if err != nil {
-		return nil, fmt.Errorf("invalid recipient address: %w", err)
-	}
-	sAddr, err := parseAddress(sender)
-	if err != nil {
-		return nil, fmt.Errorf("invalid sender address: %w", err)
-	}
-
-	if len(secretHash) != SecretHashSize {
-		return nil, fmt.Errorf("secret hash of length %d not supported", len(secretHash))
-	}
-
-	return txscript.NewScriptBuilder().
-		AddOps([]byte{
-			txscript.OP_IF,
-			txscript.OP_SIZE,
-		}).AddInt64(SecretKeySize).
-		AddOps([]byte{
-			txscript.OP_EQUALVERIFY,
-			txscript.OP_SHA256,
-		}).AddData(secretHash).
-		AddOps([]byte{
-			txscript.OP_EQUALVERIFY,
-			txscript.OP_DUP,
-			txscript.OP_HASH160,
-		}).AddData(rAddr.Hash160()[:]).
-		AddOp(txscript.OP_ELSE).
-		AddInt64(lockTime).
-		AddOps([]byte{
-			txscript.OP_CHECKLOCKTIMEVERIFY,
-			txscript.OP_DROP,
-			txscript.OP_DUP,
-			txscript.OP_HASH160,
-		}).AddData(sAddr.Hash160()[:]).
-		AddOps([]byte{
-			txscript.OP_ENDIF,
-			txscript.OP_EQUALVERIFY,
-			txscript.OP_CHECKSIG,
-		}).Script()
 }
 
 // RedeemP2SHContract returns the signature script to redeem a contract output
@@ -673,87 +573,6 @@ func ExtractBondDetailsV0(scriptVersion uint16, bondScript []byte) (lockTime uin
 	return
 }
 
-// ExtractSwapDetails extacts the sender and receiver addresses from a swap
-// contract. If the provided script is not a swap contract, an error will be
-// returned.
-func ExtractSwapDetails(pkScript []byte, chainParams *chaincfg.Params) (
-	sender, receiver stdaddr.Address, lockTime uint64, secretHash []byte, err error) {
-	// A swap redemption sigScript is <pubkey> <secret> and satisfies the
-	// following swap contract, allowing only for a secret of size
-	//
-	// OP_IF
-	//  OP_SIZE OP_DATA_1 secretSize OP_EQUALVERIFY OP_SHA256 OP_DATA_32 secretHash OP_EQUALVERIFY OP_DUP OP_HASH160 OP_DATA20 pkHashReceiver
-	//     1   +   1     +    1     +      1       +    1    +    1     +    32    +      1       +   1  +    1     +    1    +    20
-	// OP_ELSE
-	//  OP_DATA4 lockTime OP_CHECKLOCKTIMEVERIFY OP_DROP OP_DUP OP_HASH160 OP_DATA_20 pkHashSender
-	//     1    +    4   +           1          +   1   +  1   +    1     +   1      +    20
-	// OP_ENDIF
-	// OP_EQUALVERIFY
-	// OP_CHECKSIG
-	//
-	// 5 bytes if-else-endif-equalverify-checksig
-	// 1 + 1 + 1 + 1 + 1 + 1 + 32 + 1 + 1 + 1 + 1 + 20 = 62 bytes for redeem block
-	// 1 + 4 + 1 + 1 + 1 + 1 + 1 + 20 = 30 bytes for refund block
-	// 5 + 62 + 30 = 97 bytes
-	//
-	// Note that this allows for a secret size of up to 75 bytes, but the secret
-	// must be 32 bytes to be considered valid.
-	if len(pkScript) != SwapContractSize {
-		err = fmt.Errorf("incorrect swap contract length. expected %d, got %d",
-			SwapContractSize, len(pkScript))
-		return
-	}
-
-	if pkScript[0] == txscript.OP_IF &&
-		pkScript[1] == txscript.OP_SIZE &&
-		pkScript[2] == txscript.OP_DATA_1 &&
-		// secretSize (1 bytes)
-		pkScript[4] == txscript.OP_EQUALVERIFY &&
-		pkScript[5] == txscript.OP_SHA256 &&
-		pkScript[6] == txscript.OP_DATA_32 &&
-		// secretHash (32 bytes)
-		pkScript[39] == txscript.OP_EQUALVERIFY &&
-		pkScript[40] == txscript.OP_DUP &&
-		pkScript[41] == txscript.OP_HASH160 &&
-		pkScript[42] == txscript.OP_DATA_20 &&
-		// receiver's pkh (20 bytes)
-		pkScript[63] == txscript.OP_ELSE &&
-		pkScript[64] == txscript.OP_DATA_4 &&
-		// lockTime (4 bytes)
-		pkScript[69] == txscript.OP_CHECKLOCKTIMEVERIFY &&
-		pkScript[70] == txscript.OP_DROP &&
-		pkScript[71] == txscript.OP_DUP &&
-		pkScript[72] == txscript.OP_HASH160 &&
-		pkScript[73] == txscript.OP_DATA_20 &&
-		// sender's pkh (20 bytes)
-		pkScript[94] == txscript.OP_ENDIF &&
-		pkScript[95] == txscript.OP_EQUALVERIFY &&
-		pkScript[96] == txscript.OP_CHECKSIG {
-
-		if ssz := pkScript[3]; ssz != SecretKeySize {
-			return nil, nil, 0, nil, fmt.Errorf("invalid secret size %d", ssz)
-		}
-
-		receiver, err = stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(pkScript[43:63], chainParams)
-		if err != nil {
-			return nil, nil, 0, nil, fmt.Errorf("error decoding address from recipient's pubkey hash")
-		}
-
-		sender, err = stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(pkScript[74:94], chainParams)
-		if err != nil {
-			return nil, nil, 0, nil, fmt.Errorf("error decoding address from sender's pubkey hash")
-		}
-
-		lockTime = uint64(binary.LittleEndian.Uint32(pkScript[65:69]))
-		secretHash = pkScript[7:39]
-
-		return
-	}
-
-	err = fmt.Errorf("invalid swap contract")
-	return
-}
-
 // ExtractPrivateSwapDetails extracts the pub key hashes of the refunder and
 // redeemer, and the locktime from a private swap contract.
 func ExtractPrivateSwapDetails(script []byte) (refunder, redeemer [ripemd160.Size]byte, locktime int64, err error) {
@@ -851,46 +670,41 @@ func ExtractScriptData(version uint16, script []byte, chainParams *chaincfg.Para
 	return scriptType, addresses, int(numRequired)
 }
 
-// ScriptAddrs is information about the pubkeys or pubkey hashes present in a
-// scriptPubKey (and the redeem script, for p2sh). This information can be used
-// to estimate the spend script size, e.g. pubkeys in a redeem script don't
-// require pubkeys in the scriptSig, but pubkey hashes do.
-type ScriptAddrs struct {
-	PubKeys   []stdaddr.Address
-	PkHashes  []stdaddr.Address
-	NRequired int
-}
-
 // ExtractScriptAddrs extracts the addresses from script. Addresses are
 // separated into pubkey and pubkey hash, where the pkh addresses are actually a
 // catch all for non-P2PK addresses. As such, this function is not intended for
 // use on P2SH pkScripts. Rather, the corresponding redeem script should be
 // processed with ExtractScriptAddrs. The returned bool indicates if the script
 // is non-standard.
-func ExtractScriptAddrs(version uint16, script []byte, chainParams *chaincfg.Params) (ScriptType, *ScriptAddrs) {
-	pubkeys := make([]stdaddr.Address, 0)
-	pkHashes := make([]stdaddr.Address, 0)
-	class, addrs := stdscript.ExtractAddrs(version, script, chainParams)
-	if class == stdscript.STNonStandard {
-		return ScriptUnsupported, &ScriptAddrs{}
+func ExtractScriptAddrs(script []byte, chainParams *chaincfg.Params) (*BtcScriptAddrs, bool, error) {
+	pubkeys := make([]btcutil.Address, 0)
+	pkHashes := make([]btcutil.Address, 0)
+	// For P2SH and non-P2SH multi-sig, pull the addresses from the pubkey script.
+	class, addrs, numRequired, err := txscript.ExtractPkScriptAddrs(script, chainParams)
+	nonStandard := class == txscript.NonStandardTy
+	if err != nil { // txscript.ExtractPkScriptAddrs always returns a nil error now, so this should not happen
+		return nil, nonStandard, fmt.Errorf("ExtractScriptAddrs: %w", err)
+	}
+	if nonStandard {
+		return &BtcScriptAddrs{}, nonStandard, nil
 	}
 	for _, addr := range addrs {
-		// If the address is an unhashed public key, is won't need a pubkey as
-		// part of its sigScript, so count them separately.
-		_, isPubkey := addr.(stdaddr.SerializedPubKeyer)
+		// If the address is an unhashed public key, is won't need a pubkey as part
+		// of its sigScript, so count them separately.
+		_, isPubkey := addr.(*btcutil.AddressPubKey)
 		if isPubkey {
 			pubkeys = append(pubkeys, addr)
 		} else {
 			pkHashes = append(pkHashes, addr)
 		}
 	}
-	numRequired := stdscript.DetermineRequiredSigs(version, script)
-	scriptType := convertScriptType(class)
-	return scriptType, &ScriptAddrs{
+	return &BtcScriptAddrs{
 		PubKeys:   pubkeys,
+		NumPK:     len(pubkeys),
 		PkHashes:  pkHashes,
-		NRequired: int(numRequired),
-	}
+		NumPKH:    len(pkHashes),
+		NRequired: numRequired,
+	}, false, nil
 }
 
 // SpendInfo is information about an input and it's previous outpoint.
