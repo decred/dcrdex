@@ -1,8 +1,8 @@
 //go:build harness
 
-package doge
+package lbc
 
-// Regnet tests expect the DOGE test harness to be running.
+// Regnet tests expect the LBC test harness to be running.
 
 import (
 	"context"
@@ -16,9 +16,9 @@ import (
 
 var (
 	tLotSize uint64 = 1e12
-	tDOGE           = &dex.Asset{
+	tLBC            = &dex.Asset{
 		ID:         BipID,
-		Symbol:     "doge",
+		Symbol:     "lbc",
 		MaxFeeRate: 1e6,
 		SwapConf:   1,
 	}
@@ -28,7 +28,7 @@ func TestWallet(t *testing.T) {
 	livetest.Run(t, &livetest.Config{
 		NewWallet: NewWallet,
 		LotSize:   tLotSize,
-		Asset:     tDOGE,
+		Asset:     tLBC,
 		FirstWallet: &livetest.WalletName{
 			Node: "alpha",
 		},

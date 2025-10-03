@@ -1,7 +1,7 @@
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
-package doge
+package lbc
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/dex"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
-	dexdoge "decred.org/dcrdex/dex/networks/doge"
+	dexlbc "decred.org/dcrdex/dex/networks/lbc"
 	"github.com/btcsuite/btcd/chaincfg"
 )
 
@@ -22,10 +22,10 @@ const (
 	version = 0
 	BipID   = 3
 
-	dustLimit = 1_000_000 // sats => 0.01 DOGE, the "soft" limit (DEFAULT_DUST_LIMIT)
+	dustLimit = 1_000_000 // sats => 0.01 LBC, the "soft" limit (DEFAULT_DUST_LIMIT)
 
 	minNetworkVersion = 1140700 // v1.14.7.0-a6d122013
-	walletTypeRPC     = "dogecoindRPC"
+	walletTypeRPC     = "lbcdRPC"
 	feeConfs          = 10
 )
 
@@ -35,12 +35,12 @@ var (
 		{
 			Key:         "rpcuser",
 			DisplayName: "JSON-RPC Username",
-			Description: "Dogecoin's 'rpcuser' setting",
+			Description: "LBC's 'rpcuser' setting",
 		},
 		{
 			Key:         "rpcpassword",
 			DisplayName: "JSON-RPC Password",
-			Description: "Dogecoin's 'rpcpassword' setting",
+			Description: "LBC's 'rpcpassword' setting",
 			NoEcho:      true,
 		},
 		{
@@ -56,8 +56,8 @@ var (
 		{
 			Key:          fallbackFeeKey,
 			DisplayName:  "Fallback fee rate",
-			Description:  "Dogecoin's 'fallbackfee' rate. Units: DOGE/kB",
-			DefaultValue: strconv.FormatFloat(dexdoge.DefaultFee*1000/1e8, 'f', -1, 64),
+			Description:  "LBC's 'fallbackfee' rate. Units: LBC/kB",
+			DefaultValue: strconv.FormatFloat(dexlbc.DefaultFee*1000/1e8, 'f', -1, 64),
 		},
 		{
 			Key:         "feeratelimit",
@@ -66,7 +66,7 @@ var (
 				"pay on swap transactions. If feeratelimit is lower than a market's " +
 				"maxfeerate, you will not be able to trade on that market with this " +
 				"wallet.  Units: BTC/kB",
-			DefaultValue: strconv.FormatFloat(dexdoge.DefaultFeeRateLimit*1000/1e8, 'f', -1, 64),
+			DefaultValue: strconv.FormatFloat(dexlbc.DefaultFeeRateLimit*1000/1e8, 'f', -1, 64),
 		},
 		{
 			Key:         "txsplit",
@@ -87,16 +87,16 @@ var (
 			DefaultValue: "true",
 		},
 	}
-	// WalletInfo defines some general information about a Dogecoin wallet.
+	// WalletInfo defines some general information about a LBC wallet.
 	WalletInfo = &asset.WalletInfo{
-		Name:              "Dogecoin",
+		Name:              "LBC",
 		SupportedVersions: []uint32{version},
-		UnitInfo:          dexdoge.UnitInfo,
+		UnitInfo:          dexlbc.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{{
 			Type:              walletTypeRPC,
 			Tab:               "External",
-			Description:       "Connect to dogecoind",
-			DefaultConfigPath: dexbtc.SystemConfigPath("dogecoin"),
+			Description:       "Connect to lbcd",
+			DefaultConfigPath: dexbtc.SystemConfigPath("lbcd"),
 			ConfigOpts:        configOpts,
 		}},
 	}
@@ -109,15 +109,15 @@ func init() {
 // Driver implements asset.Driver.
 type Driver struct{}
 
-// Open creates the DOGE exchange wallet. Start the wallet with its Run method.
+// Open creates the LBC exchange wallet. Start the wallet with its Run method.
 func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
 	return NewWallet(cfg, logger, network)
 }
 
 // DecodeCoinID creates a human-readable representation of a coin ID for
-// Dogecoin.
+// LBC.
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
-	// Dogecoin and Bitcoin have the same tx hash and output format.
+	// LBC and Bitcoin have the same tx hash and output format.
 	return (&btc.Driver{}).DecodeCoinID(coinID)
 }
 
@@ -136,16 +136,16 @@ func (d *Driver) MinLotSize(maxFeeRate uint64) uint64 {
 // NewWallet is the exported constructor by which the DEX will import the
 // exchange wallet. The wallet will shut down when the provided context is
 // canceled. The configPath can be an empty string, in which case the standard
-// system location of the dogecoind config file is assumed.
+// system location of the lbcd config file is assumed.
 func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
 	var params *chaincfg.Params
 	switch network {
 	case dex.Mainnet:
-		params = dexdoge.MainNetParams
+		params = dexlbc.MainNetParams
 	case dex.Testnet:
-		params = dexdoge.TestNet4Params
+		params = dexlbc.TestNet4Params
 	case dex.Regtest:
-		params = dexdoge.RegressionNetParams
+		params = dexlbc.RegressionNetParams
 	default:
 		return nil, fmt.Errorf("unknown network ID %v", network)
 	}
@@ -153,21 +153,21 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	// Designate the clone ports. These will be overwritten by any explicit
 	// settings in the configuration file.
 	ports := dexbtc.NetPorts{
-		Mainnet: "22555",
-		Testnet: "44555",
-		Simnet:  "18332",
+		Mainnet: "9245",
+		Testnet: "19245",
+		Simnet:  "39245",
 	}
 	cloneCFG := &btc.BTCCloneCFG{
 		WalletCFG:                cfg,
 		MinNetworkVersion:        minNetworkVersion,
 		WalletInfo:               WalletInfo,
-		Symbol:                   "doge",
+		Symbol:                   "lbc",
 		Logger:                   logger,
 		Network:                  network,
 		ChainParams:              params,
 		Ports:                    ports,
-		DefaultFallbackFee:       dexdoge.DefaultFee,
-		DefaultFeeRateLimit:      dexdoge.DefaultFeeRateLimit,
+		DefaultFallbackFee:       dexlbc.DefaultFee,
+		DefaultFeeRateLimit:      dexlbc.DefaultFeeRateLimit,
 		LegacyBalance:            true,
 		Segwit:                   false,
 		InitTxSize:               dexbtc.InitTxSize,
@@ -181,7 +181,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		ConstantDustLimit:        dustLimit,
 		FeeEstimator:             estimateFee,
 		ExternalFeeEstimator:     externalFeeRate,
-		BlockDeserializer:        dexdoge.DeserializeBlock,
+		BlockDeserializer:        dexlbc.DeserializeBlock,
 		AssetID:                  BipID,
 	}
 
@@ -210,14 +210,14 @@ func estimateFee(ctx context.Context, cl btc.RawRequester, _ uint64) (uint64, er
 	}
 	// estimatefee is f#$%ed
 	// https://github.com/decred/dcrdex/pull/1558#discussion_r850061882
-	if feeRate > dexdoge.DefaultFeeRateLimit/1e5 {
-		return dexdoge.DefaultFee, nil
+	if feeRate > dexlbc.DefaultFeeRateLimit/1e5 {
+		return dexlbc.DefaultFee, nil
 	}
 	return uint64(math.Round(feeRate * 1e5)), nil
 }
 
 // DRAFT TODO: Fee rate -1 for testnet. Just use mainnet?
-var bitcoreFeeRate = btc.BitcoreRateFetcher("DOGE")
+var bitcoreFeeRate = btc.BitcoreRateFetcher("LBC")
 
 // externalFeeRate returns a fee rate for the network. If an error is
 // encountered fetching the testnet fee rate, we will try to return the
