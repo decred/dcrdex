@@ -44,7 +44,7 @@ func initAbis() map[uint32]*abi.ABI {
 	}
 }
 
-// ParseInitiateData parses the calldata used to call the initiate function of a
+// ParseInitiateDataV0 parses the calldata used to call the initiate function of a
 // specific version of the swap contract. It returns the list of initiations
 // done in the call and errors if the call data does not call initiate with
 // expected argument types.
