@@ -125,7 +125,7 @@ func defaultMumbaiGenesisBlock() *core.Genesis {
 	}
 }
 
-// DefaultBorMainnet returns the Bor Mainnet network gensis block. See:
+// DefaultBorMainnetGenesisBlock returns the Bor Mainnet network gensis block. See:
 // https://github.com/maticnetwork/bor/blob/891ec7fef619cac0a796e3e29d5b2d4c095bdd9b/core/genesis.go#L509
 func DefaultBorMainnetGenesisBlock() *core.Genesis {
 	return &core.Genesis{
