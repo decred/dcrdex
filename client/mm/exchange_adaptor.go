@@ -2544,7 +2544,7 @@ func (u *unifiedExchangeAdaptor) fiatRate(assetID uint32) float64 {
 func (u *unifiedExchangeAdaptor) ExchangeRateFromFiatSources() uint64 {
 	atomicCFactor, err := u.atomicConversionRateFromFiat(u.dexBaseID, u.dexQuoteID)
 	if err != nil {
-		u.log.Errorf("Error genrating atomic conversion rate: %v", err)
+		u.log.Errorf("Error generating atomic conversion rate: %v", err)
 		return 0
 	}
 	return uint64(math.Round(atomicCFactor * calc.RateEncodingFactor))

@@ -202,7 +202,7 @@ func (c *cbWSConn) handleSubscriptionMessage(b []byte) {
 		return eq(parts[0], targetParts[0]) && eq(parts[1], targetParts[1])
 	}
 
-	// If there is no subcription to the channel, it means we have gone out of
+	// If there is no subscription to the channel, it means we have gone out of
 	// sync, unsubscribed, and now need to resubscribe.
 	var subbed bool
 	for channel, productIDs := range msg.Events[0].Subscriptions {

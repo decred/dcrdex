@@ -732,26 +732,26 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 			t.Fatalf("wrong base deposit size. wanted %d, got %d", expBaseExternalDeposit, dist.baseInv.toDeposit)
 		}
 		if dist.baseInv.toWithdraw != expBaseExternalWithdraw {
-			t.Fatalf("wrong base withrawal size. wanted %d, got %d", expBaseExternalWithdraw, dist.baseInv.toWithdraw)
+			t.Fatalf("wrong base withdrawal size. wanted %d, got %d", expBaseExternalWithdraw, dist.baseInv.toWithdraw)
 		}
 		if dist.quoteInv.toDeposit != expQuoteExternalDeposit {
 			t.Fatalf("wrong quote deposit size. wanted %d, got %d", expQuoteExternalDeposit, dist.quoteInv.toDeposit)
 		}
 		if dist.quoteInv.toWithdraw != expQuoteExternalWithdraw {
-			t.Fatalf("wrong quote withrawal size. wanted %d, got %d", expQuoteExternalWithdraw, dist.quoteInv.toWithdraw)
+			t.Fatalf("wrong quote withdrawal size. wanted %d, got %d", expQuoteExternalWithdraw, dist.quoteInv.toWithdraw)
 		}
 
 		if dist.baseInv.toInternalDeposit != expBaseInternalDeposit {
 			t.Fatalf("wrong base internal deposit size. wanted %d, got %d", expBaseInternalDeposit, dist.baseInv.toInternalDeposit)
 		}
 		if dist.baseInv.toInternalWithdraw != expBaseInternalWithdraw {
-			t.Fatalf("wrong base internal withrawal size. wanted %d, got %d", expBaseInternalWithdraw, dist.baseInv.toInternalWithdraw)
+			t.Fatalf("wrong base internal withdrawal size. wanted %d, got %d", expBaseInternalWithdraw, dist.baseInv.toInternalWithdraw)
 		}
 		if dist.quoteInv.toInternalDeposit != expQuoteInternalDeposit {
 			t.Fatalf("wrong quote internal deposit size. wanted %d, got %d", expQuoteInternalDeposit, dist.quoteInv.toInternalDeposit)
 		}
 		if dist.quoteInv.toInternalWithdraw != expQuoteInternalWithdraw {
-			t.Fatalf("wrong quote internal withrawal size. wanted %d, got %d", expQuoteInternalWithdraw, dist.quoteInv.toInternalWithdraw)
+			t.Fatalf("wrong quote internal withdrawal size. wanted %d, got %d", expQuoteInternalWithdraw, dist.quoteInv.toInternalWithdraw)
 		}
 	}
 
