@@ -2179,7 +2179,8 @@ func (s *WebServer) apiExportAppLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	defer lf.Close()
 
-	iow, err := zipWriter.Create("bwlog.txt") // only 1 file in zip header
+	logFile := fmt.Sprintf("bwlog_%s.log", timeString)
+	iow, err := zipWriter.Create(logFile) // only 1 file in zip header
 	if err != nil {
 		log.Errorf("error creating an io.Writer: %v", err)
 		return
