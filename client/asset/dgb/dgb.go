@@ -27,6 +27,7 @@ const (
 	// 7.17, so I guess we'll support both and let the chain decide when to
 	// kill 7.17 wallets.
 	minNetworkVersion       = 82200
+	minDescriptorVersion    = 82200 // DGB v8.22+ supports descriptors
 	walletTypeRPC           = "digibytedRPC"
 	defaultRedeemConfTarget = 2
 )
@@ -142,6 +143,8 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	cloneCFG := &btc.BTCCloneCFG{
 		WalletCFG:           cfg,
 		MinNetworkVersion:   minNetworkVersion,
+		MinDescriptorVersion: minDescriptorVersion,
+		
 		WalletInfo:          WalletInfo,
 		Symbol:              "dgb",
 		Logger:              logger,

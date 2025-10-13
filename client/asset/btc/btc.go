@@ -430,6 +430,11 @@ type BTCCloneCFG struct {
 	OmitRPCOptionsArg bool
 	// AssetID is the asset ID of the clone.
 	AssetID uint32
+	// MinDescriptorVersion is the minimum node version required for descriptor
+	// wallet support. If not set, defaults to Bitcoin's minDescriptorVersion (220000).
+	// This allows Bitcoin forks and related codebases with different versioning schemes
+	// (e.g., DigiByte v8.26 = 82600) to specify their own minimum descriptor version.
+	MinDescriptorVersion uint64
 }
 
 // PaymentScripter can be implemented to make non-standard payment scripts.
@@ -1198,6 +1203,12 @@ func newRPCWallet(requester RawRequester, cfg *BTCCloneCFG, parsedCfg *RPCWallet
 		blockDeserializer = deserializeBlock
 	}
 
+	// Use asset-specific minDescriptorVersion if set, otherwise use Bitcoin's default
+	descriptorVersion := cfg.MinDescriptorVersion
+	if descriptorVersion == 0 {
+		descriptorVersion = minDescriptorVersion
+	}
+
 	core := &rpcCore{
 		rpcConfig:         &parsedCfg.RPCConfig,
 		cloneParams:       cfg,
@@ -1207,6 +1218,8 @@ func newRPCWallet(requester RawRequester, cfg *BTCCloneCFG, parsedCfg *RPCWallet
 		deserializeBlock:  blockDeserializer,
 		legacyRawSends:    cfg.LegacyRawFeeLimit,
 		minNetworkVersion: cfg.MinNetworkVersion,
+		minDescriptorVersion: descriptorVersion,
+		
 		log:               cfg.Logger.SubLogger("RPC"),
 		chainParams:       cfg.ChainParams,
 		omitAddressType:   cfg.OmitAddressType,
