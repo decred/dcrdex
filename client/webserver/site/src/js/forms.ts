@@ -1966,8 +1966,10 @@ export class DepositAddress {
   }
 
   async copyAddress () {
-    const { page, addr } = this
-    navigator.clipboard.writeText(addr)
+    const { page } = this
+    const address = page.depositAddress.innerText
+    console.log('copying: [ %s ] to clipboard for asset %d', address, this.assetID)
+    navigator.clipboard.writeText(address)
       .then(() => {
         Doc.show(page.copyAlert)
         setTimeout(() => {
