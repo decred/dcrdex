@@ -99,22 +99,22 @@ type RawRequester interface {
 type anylist []any
 
 type rpcCore struct {
-	rpcConfig         *RPCConfig
-	cloneParams       *BTCCloneCFG
-	requesterV        atomic.Value // RawRequester
-	segwit            bool
-	decodeAddr        dexbtc.AddressDecoder
-	stringAddr        dexbtc.AddressStringer
-	legacyRawSends    bool
-	minNetworkVersion uint64
+	rpcConfig            *RPCConfig
+	cloneParams          *BTCCloneCFG
+	requesterV           atomic.Value // RawRequester
+	segwit               bool
+	decodeAddr           dexbtc.AddressDecoder
+	stringAddr           dexbtc.AddressStringer
+	legacyRawSends       bool
+	minNetworkVersion    uint64
 	minDescriptorVersion uint64
-	
-	log               dex.Logger
-	chainParams       *chaincfg.Params
-	omitAddressType   bool
-	legacySignTx      bool
-	booleanGetBlock   bool
-	unlockSpends      bool
+
+	log             dex.Logger
+	chainParams     *chaincfg.Params
+	omitAddressType bool
+	legacySignTx    bool
+	booleanGetBlock bool
+	unlockSpends    bool
 
 	deserializeTx      func([]byte) (*wire.MsgTx, error)
 	serializeTx        func(*wire.MsgTx) ([]byte, error)
