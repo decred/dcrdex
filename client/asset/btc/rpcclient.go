@@ -107,6 +107,8 @@ type rpcCore struct {
 	stringAddr        dexbtc.AddressStringer
 	legacyRawSends    bool
 	minNetworkVersion uint64
+	minDescriptorVersion uint64
+	
 	log               dex.Logger
 	chainParams       *chaincfg.Params
 	omitAddressType   bool
@@ -188,9 +190,9 @@ func (wc *rpcClient) Connect(ctx context.Context, _ *sync.WaitGroup) error {
 	}
 	wc.descriptors = wiRes.Descriptors
 	if wc.descriptors {
-		if netVer < minDescriptorVersion {
+		if netVer < wc.minDescriptorVersion {
 			return fmt.Errorf("reported node version %d is less than minimum %d"+
-				" for descriptor wallets", netVer, minDescriptorVersion)
+				" for descriptor wallets", netVer, wc.minDescriptorVersion)
 		}
 		wc.log.Debug("Using a descriptor wallet.")
 	}
