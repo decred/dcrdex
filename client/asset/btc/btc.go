@@ -1210,22 +1210,22 @@ func newRPCWallet(requester RawRequester, cfg *BTCCloneCFG, parsedCfg *RPCWallet
 	}
 
 	core := &rpcCore{
-		rpcConfig:         &parsedCfg.RPCConfig,
-		cloneParams:       cfg,
-		segwit:            cfg.Segwit,
-		decodeAddr:        btc.decodeAddr,
-		stringAddr:        btc.stringAddr,
-		deserializeBlock:  blockDeserializer,
-		legacyRawSends:    cfg.LegacyRawFeeLimit,
-		minNetworkVersion: cfg.MinNetworkVersion,
+		rpcConfig:            &parsedCfg.RPCConfig,
+		cloneParams:          cfg,
+		segwit:               cfg.Segwit,
+		decodeAddr:           btc.decodeAddr,
+		stringAddr:           btc.stringAddr,
+		deserializeBlock:     blockDeserializer,
+		legacyRawSends:       cfg.LegacyRawFeeLimit,
+		minNetworkVersion:    cfg.MinNetworkVersion,
 		minDescriptorVersion: descriptorVersion,
-		
-		log:               cfg.Logger.SubLogger("RPC"),
-		chainParams:       cfg.ChainParams,
-		omitAddressType:   cfg.OmitAddressType,
-		legacySignTx:      cfg.LegacySignTxRPC,
-		booleanGetBlock:   cfg.BooleanGetBlockRPC,
-		unlockSpends:      cfg.UnlockSpends,
+
+		log:             cfg.Logger.SubLogger("RPC"),
+		chainParams:     cfg.ChainParams,
+		omitAddressType: cfg.OmitAddressType,
+		legacySignTx:    cfg.LegacySignTxRPC,
+		booleanGetBlock: cfg.BooleanGetBlockRPC,
+		unlockSpends:    cfg.UnlockSpends,
 
 		deserializeTx:      btc.deserializeTx,
 		serializeTx:        btc.serializeTx,

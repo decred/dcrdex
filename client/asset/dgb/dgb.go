@@ -141,10 +141,10 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		Simnet:  "18443",
 	}
 	cloneCFG := &btc.BTCCloneCFG{
-		WalletCFG:           cfg,
-		MinNetworkVersion:   minNetworkVersion,
+		WalletCFG:            cfg,
+		MinNetworkVersion:    minNetworkVersion,
 		MinDescriptorVersion: minDescriptorVersion,
-		
+
 		WalletInfo:          WalletInfo,
 		Symbol:              "dgb",
 		Logger:              logger,
