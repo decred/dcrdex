@@ -25,6 +25,15 @@ chmod +x "${ROOT}/build"
 
 "${ROOT}/build"
 
+cat > "${HARNESS_DIR}/quit" <<EOF
+#!/usr/bin/env bash
+tmux send-keys -t $SESSION:1 C-c
+tmux wait-for alpha_tatanka
+# seppuku
+tmux kill-session
+EOF
+chmod +x "${HARNESS_DIR}/quit"
+
 cp "priv.key" "${ROOT}"
 
 cat > "${ROOT}/tatanka.conf" <<EOF
@@ -54,6 +63,6 @@ tmux new-session -d -s $SESSION $SHELL
 tmux rename-window -t $SESSION:0 'harness'
 tmux new-window -t $SESSION:1 -n 'alpha' $SHELL
 tmux send-keys -t $SESSION:1 "cd ${ROOT}" C-m
-tmux send-keys -t $SESSION:1 "./tatanka --appdata=${ROOT}" C-m
+tmux send-keys -t $SESSION:1 "./tatanka --appdata=${ROOT}; tmux wait-for -S alpha_tatanka" C-m
 tmux select-window -t $SESSION:0
 tmux attach-session -t $SESSION
