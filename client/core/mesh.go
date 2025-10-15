@@ -34,8 +34,7 @@ func (c *Core) handleMeshBroadcast(bcast *mj.Broadcast) {
 
 func (c *Core) coreMesh() *Mesh {
 	c.meshMtx.RLock()
-	mesh := c.mesh
-	meshCM := c.meshCM
+	mesh, meshCM := c.mesh, c.meshCM
 	c.meshMtx.RUnlock()
 	if mesh == nil || !meshCM.On() {
 		return nil
@@ -43,29 +42,33 @@ func (c *Core) coreMesh() *Mesh {
 	return &Mesh{}
 
 }
+
 func (c *Core) connectMesh() {
-	if c.net != dex.Simnet {
+	if c.net != dex.Simnet || !c.cfg.Mesh {
 		return
 	}
+	c.meshMtx.RLock()
+	mesh, meshCM := c.mesh, c.meshCM
+	c.meshMtx.RUnlock()
 	var err error
-	if err = c.meshCM.ConnectOnce(c.ctx); err != nil {
+	if err = meshCM.ConnectOnce(c.ctx); err != nil {
 		c.log.Errorf("error connecting mesh: %v", err)
 		return
 	}
 	defer func() {
 		if err != nil {
 			c.log.Error("Failed to initialize mesh subscriptions. Closing connection: %v", err)
-			c.meshCM.Disconnect()
+			meshCM.Disconnect()
 		}
 	}()
 
 	c.log.Infof("Connected to Mesh")
 
-	if err = c.mesh.SubscribeToFeeRateEstimates(); err != nil {
+	if err = mesh.SubscribeToFeeRateEstimates(); err != nil {
 		c.log.Errorf("error subscribing to mesh fee rate estimates: %v", err)
 		return
 	}
-	if err := c.mesh.SubscribeToFiatRates(); err != nil {
+	if err = mesh.SubscribeToFiatRates(); err != nil {
 		c.log.Error("error subscribing to mesh fiat rates: %v", err)
 		return
 	}

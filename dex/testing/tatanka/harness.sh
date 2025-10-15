@@ -8,6 +8,23 @@ if [ -d "${ROOT}" ]; then
 fi
 mkdir -p "${ROOT}"
 
+HARNESS_DIR=$(
+  cd $(dirname "$0")
+  pwd
+)
+
+CMD_DIR=$(realpath "${HARNESS_DIR}/../../../tatanka/cmd/tatanka")
+
+# Build script
+cat > "${ROOT}/build" <<EOF
+#!/usr/bin/env bash
+cd ${CMD_DIR}
+go build -o ${ROOT}/tatanka
+EOF
+chmod +x "${ROOT}/build"
+
+"${ROOT}/build"
+
 cp "priv.key" "${ROOT}"
 
 cat > "${ROOT}/tatanka.conf" <<EOF
@@ -34,7 +51,9 @@ EOF
 
 echo "Starting harness"
 tmux new-session -d -s $SESSION $SHELL
-tmux rename-window -t $SESSION:0 'tatanka'
-tmux send-keys -t $SESSION:0 "cd ${ROOT}" C-m
-tmux send-keys -t $SESSION:0 "tatanka --appdata=${ROOT}" C-m
+tmux rename-window -t $SESSION:0 'harness'
+tmux new-window -t $SESSION:1 -n 'alpha' $SHELL
+tmux send-keys -t $SESSION:1 "cd ${ROOT}" C-m
+tmux send-keys -t $SESSION:1 "./tatanka --appdata=${ROOT}" C-m
+tmux select-window -t $SESSION:0
 tmux attach-session -t $SESSION
