@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.decred.dcrdex</id>
+  <launchable type="desktop-id">org.decred.dcrdex.desktop</launchable>
+  <name>Decred DEX Client</name>
+  <summary>Multi-wallet backed by Decred DEX</summary>
+  <metadata_license>MIT</metadata_license>
+  <project_license>BlueOak-1.0.0</project_license>
+  <url type="homepage">https://dex.decred.org</url>
+  <url type="help">https://chat.decred.org/#/room/#dex:decred.org</url>
+  <developer_name>The Decred Developers</developer_name>
+  <description>
+    <p>
+      Self-custodial multi-wallet with built-in peer-to-peer exchange.
+    </p>
+  </description>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/decred/umbrel-app-store/master/decred-dcrdex/images/screenshot_1.png</image>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/decred/umbrel-app-store/master/decred-dcrdex/images/screenshot_2.png</image>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/decred/umbrel-app-store/master/decred-dcrdex/images/screenshot_3.png</image>
+    </screenshot>
+  </screenshots>
+</component>
