@@ -21,7 +21,7 @@ do
 
 	# Run `go mod tidy` and fail if the git status of go.mod and/or
 	# go.sum changes. Only do this for the latest Go version.
-	if [[ "$GV" =~ ^1.24 ]]; then
+	if [[ "$GV" =~ ^1.25 ]]; then
 		MOD_STATUS=$(git status --porcelain go.mod go.sum)
 		go mod tidy
 		UPDATED_MOD_STATUS=$(git status --porcelain go.mod go.sum)
