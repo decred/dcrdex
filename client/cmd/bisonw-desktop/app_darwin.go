@@ -20,7 +20,7 @@ package main
 // darwinkit at the time of writing. Only MacOs 13.3+ has this property.
 // This means that the webview is not inspectable on older versions of macOS.
 // See: https://stackoverflow.com/a/75984167
-- (WKWebView *)newWebview {
+- (WKWebView *)newWebView {
 	WKWebViewConfiguration *webConfiguration = [WKWebViewConfiguration new];
 	WKWebView *webView = [[WKWebView alloc] initWithFrame:CGRectZero configuration:webConfiguration];
 	if (@available(macOS 13.3, *)) {
@@ -81,9 +81,10 @@ var (
 	// delegate methods.
 	completionHandler = objc.ObjectFrom(C.createCompletionHandlerDelegate())
 
-	bisonwAppIcon  = appkit.NewImageWithData(Icon)
-	windowDelegate = appkit.WindowDelegate{}
-	dw             = &delegateWrapper{}
+	bisonwAppIcon = appkit.NewImageWithData(Icon)
+	dw            = &delegateWrapper{}
+
+	clientCore *core.Core
 )
 
 const (
@@ -186,7 +187,7 @@ func mainCore() error {
 	}()
 
 	// Prepare the core.
-	clientCore, err := core.New(cfg.Core(logMaker.Logger("CORE")))
+	clientCore, err = core.New(cfg.Core(logMaker.Logger("CORE")))
 	if err != nil {
 		return fmt.Errorf("error creating client core: %w", err)
 	}
@@ -287,31 +288,6 @@ func mainCore() error {
 
 	app := appkit.Application_SharedApplication()
 
-	// MacOS will always execute this method when bisonw-desktop window is about
-	// to close.
-	var noteSent bool
-	windowDelegate.SetWindowWillClose(func(_ foundation.Notification) {
-		windowsOpen := nOpenWindows.Add(-1)
-		if windowsOpen > 0 {
-			return // nothing to do
-		}
-
-		err := clientCore.Logout()
-		if err == nil {
-			return // nothing to do
-		}
-
-		if !errors.Is(err, core.ActiveOrdersLogoutErr) {
-			log.Errorf("Core logout error: %v", err)
-			return
-		}
-
-		if !noteSent && app.IsRunning() { // last window has been closed but app is still running
-			noteSent = true
-			sendDesktopNotification("Bison Wallet still running", "Bison Wallet is still resolving active DEX orders")
-		}
-	})
-
 	// Set the "ActivationPolicy" to "ApplicationActivationPolicyRegular" in
 	// order to run bisonw-desktop as a regular MacOS app (i.e as a non-cli
 	// application).
@@ -357,6 +333,12 @@ func hasOpenWindows() bool {
 	return nOpenWindows.Load() > 0
 }
 
+var (
+	windowPool           []*appkit.Window
+	windowPoolMutex      sync.Mutex
+	activeOrdersNoteSent bool
+)
+
 // createNewWebView creates a new webview and window.
 func createNewWebView() {
 	if int(nOpenWindows.Load()) >= maxOpenWindows {
@@ -364,7 +346,19 @@ func createNewWebView() {
 		return
 	}
 
-	webView := objc.Call[webkit.WebView](completionHandler, objc.Sel("newWebview"))
+	windowPoolMutex.Lock()
+	if len(windowPool) > 0 {
+		windowPtr := windowPool[len(windowPool)-1]
+		windowPool = windowPool[:len(windowPool)-1]
+		windowPoolMutex.Unlock()
+
+		windowPtr.MakeKeyAndOrderFront(nil)
+		nOpenWindows.Add(1)
+		return
+	}
+	windowPoolMutex.Unlock()
+
+	webView := objc.Call[webkit.WebView](completionHandler, objc.Sel("newWebView"))
 	webView.SetFrameSize(foundation.Size{Width: width, Height: height})
 	webView.SetAllowsBackForwardNavigationGestures(true)
 	webView.SetUIDelegate(newUIDelegate())
@@ -373,9 +367,39 @@ func createNewWebView() {
 	webkit.AddScriptMessageHandler(webView, bwJsHandlerName, userContentControllerDidReceiveScriptMessageHandler)
 	webkit.LoadURL(webView, appURL.String())
 
-	// Create a new window.
 	win := appkit.NewWindowWithSize(width, height)
 	objc.Retain(&win)
+
+	windowDelegate := appkit.WindowDelegate{}
+	windowDelegate.SetWindowShouldClose(func(sender appkit.Window) bool {
+		sender.OrderOut(nil)
+		windowPoolMutex.Lock()
+		windowPool = append(windowPool, &win)
+		windowPoolMutex.Unlock()
+
+		windowsOpen := nOpenWindows.Add(-1)
+		if windowsOpen > 0 {
+			return false
+		}
+
+		err := clientCore.Logout()
+		if err == nil {
+			return false
+		}
+
+		if !errors.Is(err, core.ActiveOrdersLogoutErr) {
+			log.Infof("logout error: %v", err)
+			return false
+		}
+
+		app := appkit.Application_SharedApplication()
+		if !activeOrdersNoteSent && app.IsRunning() {
+			activeOrdersNoteSent = true
+			sendDesktopNotification("Bison Wallet still running", "Bison Wallet is still resolving active DEX orders")
+		}
+
+		return false
+	})
 
 	win.SetTitle(appTitle)
 	win.SetMovable(true)
@@ -508,14 +532,7 @@ func (_ *delegateWrapper) handleWebViewDecidePolicyForNavigationActionDecisionHa
 }
 
 func menuItemActionNewWindow(_ objc.Object) {
-	windows := appkit.Application_SharedApplication().OrderedWindows()
-	len := len(windows)
-	if len < maxOpenWindows {
-		createNewWebView()
-		return
-	}
-	// Show the last window if maxOpenWindows has been exceeded.
-	windows[len-1].MakeMainWindow()
+	createNewWebView()
 }
 
 func menuItemActionOpenLogs(_ objc.Object) {

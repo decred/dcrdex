@@ -24,8 +24,8 @@ APP_NAME="Bison Wallet"
 VOLUME_NAME="Bison Wallet ${VER}${META:++${META}}"
 
 # Filepaths to important directories.
-SRC_DIR="$(cd ../src && pwd && cd ../pkg)"
 SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
+SRC_DIR="${SCRIPTPATH}/../src"
 INSTALLERS_DIR="$SCRIPTPATH/installers"
 APP_DIR="${SCRIPTPATH}/${APP_NAME}.app"
 CONTENTS_DIR="${APP_DIR}/Contents"
@@ -84,7 +84,7 @@ function prepare() {
 # Build the webpack bundle prior to building the webserver package, which embeds
 # the files. Don't do this for release builds because the assets are committed.
 if [ "${META}" != "release" ]; then
-	pushd ../../../webserver/site
+	pushd ${SCRIPTPATH}/../../../webserver/site
 	go generate # just check, no write
 	npm ci
 	npm run build
@@ -106,10 +106,11 @@ function build_targets() {
 
 	# Potentially want to run with CGO_CXXFLAGS="-mmacosx-version-min=10.11.0"
 
-    pushd ..
+    pushd "${SCRIPTPATH}/.."
     GOOS=${OS} GOARCH=${ARCH} CGO_ENABLED=1 go build -v -trimpath -o "${APP_EXCE_DIR}/${APP_NAME}" -ldflags "${LDFLAGS_DEXC:-${LDFLAGS_BASE}}"
     popd
 
+	pushd "${SCRIPTPATH}"
 	./create-dmg.sh \
 		--volname "${VOLUME_NAME}" \
 		--volicon "${VOLUME_ICON_FILE}" \
@@ -122,15 +123,16 @@ function build_targets() {
 		--app-drop-link 380 210 \
 		"${INSTALLERS_DIR}/${TARGET_NAME}.dmg" \
 		"${APP_DIR}"
+	popd
 
   done
 }
 
-TARGETS="darwin/amd64 darwin/arm64"
+TARGETS=${TARGETS:-"darwin/arm64"}
 prepare
 build_targets
 cleanup
 
-pushd ./installers
+pushd "${INSTALLERS_DIR}"
 shasum -a 256 *.dmg > dexc-v${VER}-manifest.txt
 popd
