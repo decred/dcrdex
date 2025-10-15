@@ -48,3 +48,5 @@ The snap can be uploaded to the Snap Store using `./pkg/publish-snap.sh`.  This 
 ## macOS (darwin)
 
 Build with `./pkg/pkg-darwin.sh` for `amd64` MacOS machines. If running on an `arm64` machine, you'll need to build with `TARGETS=darwin/arm64 ./pkg/pkg-darwin.sh` instead. The `.dmg` click installer can be located in **./pkg/installers** after a successful build.
+
+Due to a problem with darwinkit, the maximum golang version that can be used to build the darwin application is 1.24.8.
