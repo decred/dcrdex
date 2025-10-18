@@ -6,7 +6,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/server/asset"
-	"github.com/dev-warrior777/go-monero/rpc"
+	"github.com/bisoncraft/go-monero/rpc"
 )
 
 const BlockTickerInterval = 15 * time.Second // ~2m blocks

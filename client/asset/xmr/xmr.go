@@ -17,7 +17,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
 	dexxmr "decred.org/dcrdex/dex/networks/xmr"
-	"github.com/dev-warrior777/go-monero/rpc"
+	"github.com/bisoncraft/go-monero/rpc"
 )
 
 const (
@@ -152,6 +152,16 @@ func (d *Driver) Create(cwp *asset.CreateWalletParams) error {
 	return cliGenerateRefreshWallet(ctx, trustedDaemons[0], cwp.Net, cwp.DataDir, cliToolsDir, pw, true)
 }
 
+func checkWalletCfg(cfg *asset.WalletConfig) error {
+	if cfg.Emit == nil {
+		return fmt.Errorf("wallet cfg - Emit notifier callback is nil")
+	}
+	if cfg.PeersChange == nil {
+		return fmt.Errorf("wallet cfg - PeersChange callback is nil")
+	}
+	return nil
+}
+
 func parseWalletConfig(settings map[string]string) (*configSettings, error) {
 	xwSettings := new(configSettings)
 	err := config.Unmapify(settings, &xwSettings)
@@ -237,6 +247,10 @@ func checkToolsVersion(dir string) error {
 
 // newWallet constructs an unconnected exchange wallet.
 func newWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
+	err := checkWalletCfg(cfg)
+	if err != nil {
+		return nil, err
+	}
 	configSettings, err := parseWalletConfig(cfg.Settings)
 	if err != nil {
 		return nil, err

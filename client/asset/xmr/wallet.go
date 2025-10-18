@@ -10,7 +10,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
-	"github.com/dev-warrior777/go-monero/rpc"
+	"github.com/bisoncraft/go-monero/rpc"
 )
 
 const (

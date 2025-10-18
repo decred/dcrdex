@@ -19,6 +19,7 @@ require (
 	github.com/BurntSushi/toml v1.4.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/athanorlabs/go-dleq v0.1.0 // indirect
+	github.com/bisoncraft/go-monero v0.1.1 // indirect
 	github.com/bisoncraft/op-geth v0.0.0-20250729074358-3cfe4f15e91c // indirect
 	github.com/bits-and-blooms/bitset v1.20.0 // indirect
 	github.com/consensys/gnark-crypto v0.18.0 // indirect
@@ -31,7 +32,6 @@ require (
 	github.com/decred/dcrd/mixing v0.5.1-0.20250319155359-2b7d311f4a81 // indirect
 	github.com/decred/vspd/client/v4 v4.0.1 // indirect
 	github.com/decred/vspd/types/v3 v3.0.0 // indirect
-	github.com/dev-warrior777/go-monero v0.1.1 // indirect
 	github.com/ethereum/c-kzg-4844/v2 v2.1.0 // indirect
 	github.com/ethereum/go-verkle v0.2.2 // indirect
 	github.com/ferranbt/fastssz v0.1.2 // indirect

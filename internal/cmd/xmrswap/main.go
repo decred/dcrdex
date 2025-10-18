@@ -22,6 +22,7 @@ import (
 	"decred.org/dcrwallet/v5/rpc/client/dcrwallet"
 	dcrwalletjson "decred.org/dcrwallet/v5/rpc/jsonrpc/types"
 	"github.com/agl/ed25519/edwards25519"
+	"github.com/bisoncraft/go-monero/rpc"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec"
@@ -34,7 +35,6 @@ import (
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	"github.com/decred/dcrd/wire"
 	"github.com/decred/slog"
-	"github.com/dev-warrior777/go-monero/rpc"
 	"github.com/fatih/color"
 	"github.com/haven-protocol-org/monero-go-utils/base58"
 )

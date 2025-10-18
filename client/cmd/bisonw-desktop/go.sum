@@ -120,6 +120,8 @@ github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
 github.com/bgentry/go-netrc v0.0.0-20140422174119-9fd32a8b3d3d/go.mod h1:6QX/PXZ00z/TKoufEY6K/a0k6AhaJrQKdFe6OfVXsa4=
 github.com/bgentry/speakeasy v0.1.0/go.mod h1:+zsyZBPWlz7T6j88CTgSN5bM796AkVf0kBD4zp0CCIs=
+github.com/bisoncraft/go-monero v0.1.1 h1:XfZYfUigkdTeU8oVq5X08X8tO59EyVwRKDIXbkwhCIY=
+github.com/bisoncraft/go-monero v0.1.1/go.mod h1:HE9dCbZhK0tVgMfQoYOVX8cP0lihcg6pHojBF+YeOXo=
 github.com/bisoncraft/op-geth v0.0.0-20250729074358-3cfe4f15e91c h1:cmK4HxTpEutYvsKiRlsibMuzdgAr9vRokgFLTvrCMZ0=
 github.com/bisoncraft/op-geth v0.0.0-20250729074358-3cfe4f15e91c/go.mod h1:AVdw4MgxUWZ0mhB+VxKOfXH2Z6WJA6rX6YrYrY2bii0=
 github.com/bisoncraft/webview_go v0.1.0 h1:F0ZiJSYzDqE4HJhI1u5I+Y7H51bYzprDum0tAtMnOw4=
@@ -341,8 +343,6 @@ github.com/deepmap/oapi-codegen v1.8.2 h1:SegyeYGcdi0jLLrpbCMoJxnUUn8GBXHsvr4rbz
 github.com/deepmap/oapi-codegen v1.8.2/go.mod h1:YLgSKSDv/bZQB7N4ws6luhozi3cEdRktEqrX88CvjIw=
 github.com/denis-tingajkin/go-header v0.4.2/go.mod h1:eLRHAVXzE5atsKAnNRDB90WHCFFnBUn4RN0nRcs1LJA=
 github.com/desertbit/timer v0.0.0-20180107155436-c41aec40b27f/go.mod h1:xH/i4TFMt8koVQZ6WFms69WAsDWr2XsYL3Hkl7jkoLE=
-github.com/dev-warrior777/go-monero v0.1.1 h1:EMXeh5FM0MkEfohNVu50Up0EW45yQC7rRa4urb5RACE=
-github.com/dev-warrior777/go-monero v0.1.1/go.mod h1:DSf/k695WklA8lTl1EzqNLhtKP3BE3x5KU6tsPrXp4k=
 github.com/dgraph-io/badger v1.6.2 h1:mNw0qs90GVgGGWylh0umH5iag1j6n/PeJtNvL6KY/x8=
 github.com/dgraph-io/badger v1.6.2/go.mod h1:JW2yswe3V058sS0kZ2h/AXeDSqFjxnZcRrVH//y2UQE=
 github.com/dgraph-io/ristretto v0.0.2/go.mod h1:KPxhHT9ZxKefz+PCeOGsrHpl1qZ7i70dGTu2u+Ahh6E=
