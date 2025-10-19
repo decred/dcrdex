@@ -1547,7 +1547,7 @@ const (
 	providerRivetCloud  = "rivet.cloud"
 	providerAlchemy     = "alchemy.com"
 	providerAnkr        = "ankr.com"
-	providerdRPC       = "drpc.org"
+	providerdRPC        = "drpc.org"
 
 	// Non-compliant providers
 	// providerCloudflareETH = "cloudflare-eth.com" // "SuggestGasTipCap" error: Method not found
@@ -1563,7 +1563,7 @@ var compliantProviders = map[string]struct{}{
 	providerRivetCloud:  {},
 	providerAlchemy:     {},
 	providerAnkr:        {},
-	providerdRPC:       {},
+	providerdRPC:        {},
 }
 
 type rpcTest struct {
