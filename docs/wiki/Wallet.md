@@ -465,7 +465,7 @@ A handful that we have tested:
 - [Alchemy](https://www.alchemy.com/overviews/private-rpc-endpoint) - personal API key
 - [LlamaNodes](https://llamanodes.com/) - personal API key, wss, web3 sign-in, no testnet
 - [Rivet](https://rivet.cloud/) - personal API key, wss, web3 sign-in
-- [Blast](https://blastapi.io/login?app=consumer) - personal API key, wss, web3 sign-in
+- [dRPC](https://drpc.org/nodecloud-multichain-rpc-management) - generic endpoint, personal API Key,  http, wss, web3 sign-in
 - [OmniaTech](https://app.omniatech.io/dashboard/generate-endpoints) - personal API key, wss, web3 sign-in
 - [Ankr](https://www.ankr.com/rpc/) - generic endpoint, often behind a few blocks, possibly http-only
 - [Publicnode](https://ethereum.publicnode.com/) - generic endpoint, possibly http-only

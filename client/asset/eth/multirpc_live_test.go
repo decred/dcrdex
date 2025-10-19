@@ -59,6 +59,7 @@ var freeServers = []string{
 	// https://www.alchemy.com/chain-connect/chain/ethereum
 	// Passing 03-26-2024
 	"https://rpc.builder0x69.io",                                          // Limits unknown
+	"https://eth.drpc.org",                                                // 210 million Compute Units (CU) per 30-day period - 20 CU/req
 	"https://rpc.ankr.com/eth",                                            // 30 req per second, no WebSockets (premium-only)
 	"https://ethereum.blockpi.network/v1/rpc/public",                      // 10 req per sec, no WebSockets (premium-only)
 	"https://rpc.flashbots.net",                                           // Limits unknown
@@ -68,7 +69,6 @@ var freeServers = []string{
 	"https://eth-mainnet.gateway.pokt.network/v1/5f3453978e354ab992c4da79", // connect error: failed to connect to even a single provider among: pokt.network
 	"https://ethereum.publicnode.com",                                      // "TransactionReceipt" error: not found
 	"https://nodes.mewapi.io/rpc/eth",                                      // connect error: failed to connect to even a single provider among: mewapi.io
-	"https://eth-mainnet.public.blastapi.io",                               // "TransactionReceipt" error: not found
 	"https://eth.api.onfinality.io/public",                                 // connect error: failed to connect to even a single provider among: onfinality.io
 	"https://eth-mainnet-public.unifra.io",                                 // connect error: failed to connect to even a single provider among: unifra.io
 	"https://cloudflare-eth.com/",                                          // "SuggestGasTipCap" error: Method not found
@@ -84,7 +84,7 @@ var freeTestnetServers = []string{
 	// Passing 03-27-2024
 	"https://rpc.ankr.com/eth_sepolia",
 	"https://ethereum-sepolia.blockpi.network/v1/rpc/public",
-	"https://eth-sepolia.public.blastapi.io",
+	"https://sepolia.drpc.org",
 	"https://endpoints.omniatech.io/v1/eth/sepolia/public",
 	"https://rpc-sepolia.rockx.com",
 	"https://rpc.sepolia.org",
@@ -96,7 +96,6 @@ var freeTestnetServers = []string{
 	// Goerli
 	// // Passing 03-26-2024
 	// "https://goerli.blockpi.network/v1/rpc/public",
-	// "https://eth-goerli.public.blastapi.io",
 	// "https://goerli.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161",
 	// // Failing 03-26-2024
 	// "https://rpc.ankr.com/eth_goerli",

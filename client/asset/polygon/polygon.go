@@ -127,12 +127,13 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Networ
 			"https://rpc-amoy.polygon.technology",
 			"wss://polygon-amoy-bor-rpc.publicnode.com",
 			"https://polygon-amoy.blockpi.network/v1/rpc/public",
+			"https://polygon-amoy.drpc.org",
 		}
 	case dex.Mainnet:
 		defaultProviders = []string{
 			"https://1rpc.io/matic",
 			"https://rpc.ankr.com/polygon",
-			"https://polygon-mainnet.public.blastapi.io",
+			"https://polygon.drpc.org",
 			"https://polygon.blockpi.network/v1/rpc/public",
 			"https://polygon.llamarpc.com",
 			"https://endpoints.omniatech.io/v1/matic/mainnet/public",
