@@ -182,7 +182,7 @@ var (
 				Description: "Infrastructure providers (e.g. Infura) or local nodes",
 				ConfigOpts:  append(RPCOpts, walletOpts...),
 				Seeded:      true,
-				GuideLink:   "https://github.com/decred/dcrdex/blob/master/docs/wiki/Ethereum.md",
+				GuideLink:   "https://github.com/decred/dcrdex/wiki/Wallet#rpc-providers-for-evm-compatible-networks",
 			},
 		},
 		IsAccountBased: true,
