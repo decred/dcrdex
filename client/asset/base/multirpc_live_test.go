@@ -43,7 +43,6 @@ func TestFreeServers(t *testing.T) {
 	freeServers := []string{
 		"https://base-rpc.publicnode.com",
 		"https://mainnet.base.org",
-		"https://base-mainnet.public.blastapi.io",
 		"https://base.drpc.org",
 		"https://base.llamarpc.com",
 		"https://base.api.onfinality.io/public",
@@ -55,7 +54,6 @@ func TestFreeTestnetServers(t *testing.T) {
 	freeServers := []string{
 		"https://base-sepolia-rpc.publicnode.com",
 		"https://sepolia.base.org",
-		"https://base-sepolia.public.blastapi.io",
 		"https://base-sepolia.drpc.org",
 		"https://base-sepolia.api.onfinality.io/public",
 		"https://base-sepolia.gateway.tenderly.co",

@@ -67,7 +67,6 @@ func TestFreeServers(t *testing.T) {
 		// Passing
 		"https://1rpc.io/matic",
 		"https://rpc.ankr.com/polygon",
-		"https://polygon-mainnet.public.blastapi.io",
 		"https://polygon.blockpi.network/v1/rpc/public",
 		"https://polygon.llamarpc.com",
 		"https://endpoints.omniatech.io/v1/matic/mainnet/public",

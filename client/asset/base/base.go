@@ -115,7 +115,6 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Networ
 		defaultProviders = []string{
 			"https://base-sepolia-rpc.publicnode.com",
 			"https://sepolia.base.org",
-			"https://base-sepolia.public.blastapi.io",
 			"https://base-sepolia.drpc.org",
 			"https://base-sepolia.api.onfinality.io/public", // heavily rate limited, mainnet seems fine
 			"https://base-sepolia.gateway.tenderly.co",
@@ -124,7 +123,6 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Networ
 		defaultProviders = []string{
 			"https://base-rpc.publicnode.com", // not for production use
 			"https://mainnet.base.org",
-			"https://base-mainnet.public.blastapi.io",
 			"https://base.drpc.org",
 			"https://base.llamarpc.com",
 			"https://base.api.onfinality.io/public",
