@@ -478,8 +478,8 @@ export default class SettingsPage extends BasePage {
   async exportLogs () {
     const url = new URL(window.location.href)
     url.pathname = '/api/exportapplog'
-    if (window.isWebview !== undefined) {
-      window.location.href = url.toString()
+    if (window.electron !== undefined || window.isWebview !== undefined) {
+      window.open(url.toString(), '_self')
     } else {
       window.open(url.toString())
     }

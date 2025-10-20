@@ -115,43 +115,21 @@ class OSDesktopNotifier {
   }
 
   static async sendDesktopNotification (title: string, body?: string): Promise<void> {
-    // webview/linux or webview/windows
-    if (isDesktopWebview()) await window.sendOSNotification(title, body)
-    // webkit/darwin
-    // See: client/cmd/bisonw-desktop/app_darwin.go#L673-#L697
-    else if (isDesktopWebkit()) await window.webkit.messageHandlers.bwHandler.postMessage(['sendOSNotification', title, body])
+    if (window.electron) await window.electron.sendOSNotification(title, body)
+    else if (isDesktopWebview()) await window.sendOSNotification(title, body) // webview/linux or webview/windows
     else console.error('sendDesktopNotification: unknown environment')
   }
 }
 
-// isDesktopWebview checks if we are running in webview
+// isDesktopWebview checks if we are running in webview or electron environment.
 function isDesktopWebview (): boolean {
-  return window.isWebview !== undefined
+  return window.isWebview !== undefined || window.electron !== undefined || (typeof navigator === 'object' && typeof navigator.userAgent === 'string' && navigator.userAgent.indexOf('Electron') >= 0)
 }
 
-// isDesktopDarwin returns true if we are running in a webview on darwin
+// isDesktopWebkit returns true if we are running in a webview on darwin
 // It tests for the existence of the bwHandler webkit message handler.
 function isDesktopWebkit (): boolean {
   return window.webkit?.messageHandlers?.bwHandler !== undefined
-}
-
-// Bind the webview and webkit message handlers to the window object for darwin.
-// Linux and Windows handlers are binded in
-// client/cmd/bisonw-desktop/app.go#L399
-if (isDesktopWebkit()) {
-  window.isWebview = () => { return true }
-  window.sendOSNotification = async (title: string, body?: string) => {
-    await window.webkit.messageHandlers.bwHandler.postMessage(['sendOSNotification', title, body])
-  }
-  window.openUrl = async (url: string) => {
-    await window.webkit.messageHandlers.bwHandler.postMessage(['openURL', url.toString()])
-  }
-  window.open = (url?: string | URL, target?: string, feature?: string): Window | null => {
-    if (url === undefined) return null
-    if (target !== undefined || feature !== '') console.warn('open: target and feature are not supported in webview')
-    window.webkit.messageHandlers.bwHandler.postMessage(['openURL', url.toString()])
-    return null
-  }
 }
 
 // determine whether we're running in a webview or in browser, and export
