@@ -520,10 +520,13 @@ func (_ *delegateWrapper) handleWebViewDecidePolicyForNavigationActionDecisionHa
 	reqURL := navigationAction.Request().URL()
 	host, _, _ := strings.Cut(reqURL.Host(), ":")
 	isLogExport := reqURL.Path() == "/api/exportapplog"
-	if host != appHost || isLogExport {
+	isWalletLogExport := reqURL.Path() == "/wallets/logfile"
+	if host != appHost || isLogExport || isWalletLogExport {
 		decisionPolicy = webkit.NavigationActionPolicyCancel
 		if isLogExport {
 			openLogs()
+		} else if isWalletLogExport {
+			openWalletLogFolder(reqURL.AbsoluteString())
 		} else {
 			openURL(reqURL.AbsoluteString())
 		}
@@ -546,6 +549,44 @@ func openLogs() {
 		return
 
 	}
+	openURL(logDirURL)
+}
+
+// openWalletLogFolder intercepts the request to download the
+// wallet log file and opens the folder containing the log file.
+func openWalletLogFolder(urlString string) {
+	parsedURL, err := url.Parse(urlString)
+	if err != nil {
+		log.Errorf("error parsing wallet log URL: %v", err)
+		return
+	}
+
+	assetIDStr := parsedURL.Query().Get("assetid")
+	if assetIDStr == "" {
+		log.Error("assetid not found in wallet log URL query parameters")
+		return
+	}
+
+	assetID, err := strconv.ParseUint(assetIDStr, 10, 32)
+	if err != nil {
+		log.Errorf("error parsing assetid: %v", err)
+		return
+	}
+
+	logFilePath, err := clientCore.WalletLogFilePath(uint32(assetID))
+	if err != nil {
+		log.Errorf("error getting wallet log file path: %v", err)
+		return
+	}
+
+	logDir := filepath.Dir(logFilePath)
+
+	logDirURL, err := bwapp.FilePathToURL(logDir)
+	if err != nil {
+		log.Errorf("error constructing wallet log directory URL: %v", err)
+		return
+	}
+
 	openURL(logDirURL)
 }
 

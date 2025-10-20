@@ -2192,6 +2192,27 @@ func (s *WebServer) apiExportAppLogs(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *WebServer) apiWalletLogFilePath(w http.ResponseWriter, r *http.Request) {
+	var form struct {
+		AssetID uint32 `json:"assetID"`
+	}
+	if !readPost(w, r, &form) {
+		return
+	}
+	logFilePath, err := s.core.WalletLogFilePath(form.AssetID)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error getting wallet log file path: %w", err))
+		return
+	}
+	writeJSON(w, &struct {
+		OK   bool   `json:"ok"`
+		Path string `json:"path"`
+	}{
+		OK:   true,
+		Path: logFilePath,
+	})
+}
+
 func (s *WebServer) redeemGameCode(w http.ResponseWriter, r *http.Request) {
 	var form struct {
 		Code  dex.Bytes        `json:"code"`
