@@ -12,6 +12,7 @@ declare global {
     mmStatus: () => MarketMakingStatus
     isWebview?: () => boolean
     webkit: any | undefined
+    electron: any | undefined
     openUrl: (url: string) => void
     open: (url?: string | URL, target?: string, features?: string) => WindowProxy | null
     sendOSNotification (title: string, body?: string): void

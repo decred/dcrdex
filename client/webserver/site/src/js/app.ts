@@ -388,10 +388,9 @@ export default class Application {
     // Bind the tooltips.
     this.bindTooltips(this.main)
 
-    if (window.isWebview) {
-      // Bind webview URL handlers
-      this.bindUrlHandlers(this.main)
-    }
+    // Bind electron/webview URL handlers. Binding document.body
+    // ensures eternal links in the nav bar are detected.
+    this.bindUrlHandlers(document.body)
 
     this.bindUnits(this.main)
   }
@@ -463,11 +462,12 @@ export default class Application {
   }
 
   bindUrlHandlers (ancestor: HTMLElement) {
-    if (!window.openUrl) return
+    if (!window.openUrl && !window.electron) return
     for (const link of Doc.applySelector(ancestor, 'a[target=_blank]')) {
       Doc.bind(link, 'click', (e: MouseEvent) => {
         e.preventDefault()
-        window.openUrl(link.href ?? '')
+        if (window.electron) window.electron.openUrl(link.href ?? '')
+        else window.openUrl(link.href ?? '')
       })
     }
   }

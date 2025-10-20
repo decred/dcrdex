@@ -2,3 +2,8 @@ build/
 certs/
 pkg/windows-msi/bin
 pkg/windows-msi/obj
+electron/node_modules/
+electron/resources/
+electron/out
+installers/
+resources/
