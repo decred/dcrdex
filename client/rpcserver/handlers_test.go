@@ -25,7 +25,7 @@ func init() {
 	asset.Register(tUTXOAssetA.ID, &tDriver{
 		decodedCoinID: tUTXOAssetA.Symbol,
 		winfo:         tWalletInfo,
-	})
+	}, true)
 }
 
 func verifyResponse(payload *msgjson.ResponsePayload, res any, wantErrCode int) error {
