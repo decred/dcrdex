@@ -162,6 +162,11 @@ export class Chart {
     this.report = reporters
     this.theme = State.isDark() ? darkTheme : lightTheme
     this.canvas = document.createElement('canvas')
+    this.canvas.style.position = 'absolute'
+    this.canvas.style.left = '0'
+    this.canvas.style.top = '0'
+    this.canvas.style.width = '100%'
+    this.canvas.style.height = '100%'
     this.visible = true
     parent.appendChild(this.canvas)
     const ctx = this.canvas.getContext('2d')
@@ -237,8 +242,9 @@ export class Chart {
    * but before the clientHeight has been updated.
    */
   resize () {
-    this.canvas.width = this.parent.clientWidth
-    this.canvas.height = this.parent.clientHeight
+    const rect = this.parent.getBoundingClientRect()
+    this.canvas.width = rect.width
+    this.canvas.height = rect.height
     const xLblHeight = 30
     const yGuess = 40 // y label width guess. Will be adjusted when drawn.
     const plotExtents = new Extents(0, this.canvas.width, 0, this.canvas.height - xLblHeight)
