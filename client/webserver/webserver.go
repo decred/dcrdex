@@ -606,6 +606,7 @@ func New(cfg *Config) (*WebServer, error) {
 
 			apiAuth.Post("/mixingstats", s.apiMixingStats)
 			apiAuth.Post("/configuremixer", s.apiConfigureMixer)
+			apiAuth.Post("/walletlogfilepath", s.apiWalletLogFilePath)
 
 			apiAuth.Post("/startmarketmakingbot", s.apiStartMarketMakingBot)
 			apiAuth.Post("/stopmarketmakingbot", s.apiStopMarketMakingBot)
