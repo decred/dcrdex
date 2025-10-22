@@ -8,7 +8,7 @@ module.exports = {
     extraResource: ['../resources/'+require('./utils.js').getPlatform()],
     icon: '../src/bisonw.icns',
     appVersion: require('./package.json').version,
-    executableName: 'Bison Wallet',
+    executableName: 'BisonWallet',
     asar: true,
     junk: true,
     platforms: ['darwin', 'win32', 'linux'],
@@ -38,7 +38,7 @@ module.exports = {
       name: '@electron-forge/maker-dmg',
       config: {
         format: 'ULFO',
-        name: 'Bison Wallet',
+        name: 'BisonWallet',
         icon: '../src/bisonw.icns',
         overwrite: true,
       }

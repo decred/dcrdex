@@ -52,7 +52,7 @@ build_targets (){
 
     npm run make --platform=${OS} --arch=${ARCH}
 
-    cp -R "./out/make" "../installers/bisonw-${OS}-${ARCH}"
+    cp -R "./out/make/BisonWallet.dmg" "../installers/bisonw-desktop-${OS}-${ARCH}-v${VER}.dmg"
 
     rm -rf "./out"
 
