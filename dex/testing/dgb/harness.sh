@@ -32,10 +32,10 @@ export EXTRA_ARGS="-deprecatedrpc=create_bdb -rpcbind=0.0.0.0 -rpcallowip=0.0.0.
 # Background watch mining by default:
 # Set 'export NOMINER="1"' to disable the miner window.
 # Must use 'export' keyword to pass variable to base-harness.sh child process.
-#
+
 # TODO: Cannot presently continuously mine on simnet but when we can comment
 # this out.
-export NOMINER="1"
+# export NOMINER="1"
 
 # Run the harness
 ../btc/base-harness.sh
