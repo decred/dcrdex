@@ -25,12 +25,22 @@ rm -rf out # This is the default output dir for electron-forge make
 # Use folders outside of pwd to prevent electron-forge from adding them to build.
 # The "ignore" packaging config seems to malfunction: https://github.com/electron/forge/issues/673#issuecomment-697180654
 pushd ..
-rm -rf resources
+rm -rf bin
 rm -rf installers
 mkdir -p installers
 popd
 
-PLATFORM=$(./platform.sh)
+function getPlatform() {
+  case "$(uname -s)" in
+    Linux) platform="linux" ;;
+    Darwin) platform="mac" ;;
+    CYGWIN*|MSYS*|MINGW*) platform="win" ;;
+    *) platform="linux" ;;
+  esac
+  echo "${platform}"
+}
+
+PLATFORM=$(getPlatform)
 
 build_targets (){
   for TARGET in ${TARGETS}; do
@@ -39,22 +49,25 @@ build_targets (){
     echo "Building for ${OS}-${ARCH}"
 
     pushd ..
-    mkdir -p "resources/${PLATFORM}"
+    mkdir -p "bin"
     popd
 
     pushd ../../../../client/cmd/bisonw
-    GOOS=${OS} GOARCH=${ARCH} go build -trimpath ${TAGS_BISONW:+-tags ${TAGS_BISONW}} -o  "../bisonw-desktop/resources/${PLATFORM}/${BISONW_EXE}" -ldflags "${LDFLAGS_BISONW:-${LDFLAGS_BASE}}"
+    GOOS=${OS} GOARCH=${ARCH} go build -trimpath ${TAGS_BISONW:+-tags ${TAGS_BISONW}} -o  "../bisonw-desktop/bin/${BISONW_EXE}" -ldflags "${LDFLAGS_BISONW:-${LDFLAGS_BASE}}"
     popd
 
-    pushd ../src
-    cp bisonw-16.png ../resources/${PLATFORM}/bisonw-16.png
-    popd
+    npm run make --platform=$([[ "$OS" == "windows" ]] && echo "win32" || echo "$OS") --arch=${ARCH}
 
-    npm run make --platform=${OS} --arch=${ARCH}
-
-    cp -R "./out/make/BisonWallet.dmg" "../installers/bisonw-desktop-${OS}-${ARCH}-v${VER}.dmg"
+    if [[ "$PLATFORM" == "win" ]]; then
+      cp -R "./out/make/squirrel.windows/x64/BisonWallet.exe" "../installers/bisonw-desktop-${OS}-${ARCH}-v${VER}.exe"
+    elif [[ "$PLATFORM" == "mac" ]]; then
+      cp -R "./out/make/BisonWallet.dmg" "../installers/bisonw-desktop-${OS}-${ARCH}-v${VER}.dmg"
+    else
+      cp -R "./out/make" "../installers/bisonw-desktop-${OS}-${ARCH}-v${VER}"
+    fi
 
     rm -rf "./out"
+    rm -rf "../bin" # clear bin dir for next build
 
   done
 }
@@ -62,13 +75,11 @@ build_targets (){
 # Vanilla builds on all supported os/arch targets
 TARGETS="linux/amd64 linux/arm64"
 if [[ "$PLATFORM" == "win" ]]; then
-  TARGETS="win32/amd64"
+  TARGETS="windows/amd64"
 elif [[ "$PLATFORM" == "mac" ]]; then
   TARGETS="darwin/amd64" #darwin/arm64"
 fi
 build_targets
-
-rm -rf "../resources"
 
 # echo "Files embedded in the Go webserver package:"
 # go list -f '{{ .EmbedFiles }}' decred.org/dcrdex/client/webserver

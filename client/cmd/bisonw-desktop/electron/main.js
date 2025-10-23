@@ -12,8 +12,13 @@ const path = require("node:path");
 const { shell, nativeImage } = require("electron/common");
 const { getPlatform } = require("./utils.js");
 
+// installations on windows require this, see https://www.electronforge.io/config/makers/squirrel.windows#handling-startup-events
+if (require("electron-squirrel-startup")) app.quit();
+
 // defaultWebAddress is the local address where the bisonw web server listens.
 const defaultWebAddress = "http://127.0.0.1:5758";
+const platform = getPlatform();
+const resourcePath = getResourcePath();
 
 // save a reference to the Tray object globally to avoid garbage collection
 let tray;
@@ -25,7 +30,7 @@ let isShuttingDown = false;
 const activeOrdersLogoutErr = "cannot log out with active orders";
 
 // "bisonw" is the binary that we will package.
-const bisonwPath = path.resolve(path.join(getExtraFilesPath(), "./bisonw"));
+const bisonwPath = path.resolve(path.join(getBinDir(), "./bisonw"));
 
 // Spawn the bisonw process
 bisonwProcess = spawn(bisonwPath);
@@ -115,12 +120,12 @@ ipcMain.on("notify", (_, { title, body }) => {
 });
 
 ipcMain.on("openUrl", (_, url) => {
-  shell.openExternal(url)
+  shell.openExternal(url);
 });
 
 // Quit when all windows are closed, except on macOS.
 app.on("window-all-closed", () => {
-  if (getPlatform() !== "mac") app.quit();
+  if (platform !== "mac") app.quit();
 });
 
 app.on("before-quit", (e) => {
@@ -138,9 +143,10 @@ function createWindow() {
     width: 1000,
     height: 700,
     show: false,
+    icon: appIconPath(),
     backgroundColor: "rgb(5, 16, 27)",
     webPreferences: {
-      preload: __dirname + "/preload.js",
+      preload: path.join(resourcePath, "preload.js"),
     },
   });
 
@@ -149,11 +155,20 @@ function createWindow() {
   win.loadURL(defaultWebAddress);
 }
 
+function appIconPath() {
+  let iconExt;
+  if (platform === "win") iconExt = ".ico";
+  else if (platform === "linux") iconExt = ".png";
+  return iconExt !== ""
+    ? path.join(resourcePath, "assets/bisonw" + iconExt)
+    : undefined;
+}
+
 function setTrayMenu() {
-  const bisonwIcon = path.resolve(
-    path.join(getExtraFilesPath(), "./bisonw-16.png")
+  const icon = nativeImage.createFromPath(
+    path.join(resourcePath, "assets/bisonw-tray.png")
   );
-  const icon = nativeImage.createFromPath(bisonwIcon);
+
   tray = new Tray(icon);
   const trayTemplate = Menu.buildFromTemplate([
     {
@@ -284,24 +299,21 @@ function setApplicationMenu() {
 
 // openLog opens the log directory in the system file explorer.
 function openLog() {
-  const logPath = path.join(
-    app.getPath("appData"),
-    "Dexc",
-    network || "mainnet",
-    "logs"
-  );
+  let appDir = app.getPath("appData");
+  if (platform === "win") appDir = path.resolve(appDir, "../Local");
+  const logPath = path.join(appDir, "Dexc", network || "mainnet", "logs");
   shell.openPath(logPath);
 }
 
-// getExtraFilesPath is a helper to get the path to the extra files (binaries & icon).
-function getExtraFilesPath() {
-  const IS_DEV = process.env.NODE_ENV === "development";
-  const { isPackaged } = app;
+// getBinDir is a helper to get the path to the bisonw exec.
+function getBinDir() {
+  return process.env.NODE_ENV === "development"
+    ? path.join(app.getAppPath(), "..", "bin")
+    : path.join(process.resourcesPath, "bin");
+}
 
-  const extraFilesPath =
-    !IS_DEV && isPackaged
-      ? path.join(process.resourcesPath, getPlatform())
-      : path.join(app.getAppPath(), "..", "resources", getPlatform());
-
-  return extraFilesPath;
+function getResourcePath() {
+  return process.env.NODE_ENV === "development"
+    ? app.getAppPath()
+    : process.resourcesPath;
 }

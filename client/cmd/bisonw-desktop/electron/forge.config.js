@@ -5,8 +5,8 @@ module.exports = {
   packagerConfig: {
     name: 'Bison Wallet',
     appBundleId: 'com.bisonwallet.desktop',
-    extraResource: ['../resources/'+require('./utils.js').getPlatform()],
-    icon: '../src/bisonw.icns',
+    extraResource: ['../bin'],
+    icon: __dirname + '/assets/bisonw',
     appVersion: require('./package.json').version,
     executableName: 'BisonWallet',
     asar: true,
@@ -26,10 +26,11 @@ module.exports = {
     {
       name: '@electron-forge/maker-squirrel',
       config: {
-        name: 'Bison Wallet',
+        name: 'BisonWallet',
         authors: 'The Decred Developers',
         description: 'A multi-coin wallet with DEX in-built.',
-        setupIcon: '../src/favicon-32.ico',
+        iconUrl: 'https://github.com/decred/dcrdex/blob/master/client/cmd/bisonw-desktop/src/favicon-32.ico',
+        setupIcon: __dirname + '/assets/bisonw.ico',
         setupExe: 'BisonWallet.exe',
         noMsi: true,
       },
@@ -38,8 +39,8 @@ module.exports = {
       name: '@electron-forge/maker-dmg',
       config: {
         format: 'ULFO',
-        name: 'BisonWallet',
-        icon: '../src/bisonw.icns',
+        name: 'Bison Wallet',
+        icon: __dirname + '/assets/bisonw.icns',
         overwrite: true,
       }
     },
@@ -49,7 +50,7 @@ module.exports = {
         options: {
           maintainer: 'The Decred Developers',
           homepage: 'https://bisonwallet.com',
-          icon: '../src/bisonw.png',
+          icon: __dirname + '/assets/bisonw.png',
           categories: ['Office', 'Finance'],
           description: 'A multi-coin wallet with DEX in-built.',
         },
@@ -61,15 +62,11 @@ module.exports = {
         options: {
           maintainer: 'The Decred Developers',
           summary: 'A multi-coin wallet with DEX in-built.',
-          icon: '../src/bisonw.png',
+          icon: __dirname + '/assets/bisonw.png',
           categories: ['Office', 'Finance'],
         },
       },
     }
-    // {
-    //   name: '@electron-forge/maker-zip',
-    //   platforms: ['darwin', 'win32', 'linux'],
-    // }
   ],
   plugins: [
     {
