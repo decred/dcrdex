@@ -63,6 +63,10 @@ export const CEXDisplayInfos: Record<string, CEXDisplayInfo> = {
   'Coinbase': {
     name: 'Coinbase',
     logo: '/img/coinbase.com.png'
+  },
+  'MEXC': {
+    name: 'MEXC',
+    logo: '/img/mexc.com.png'
   }
 }
 
