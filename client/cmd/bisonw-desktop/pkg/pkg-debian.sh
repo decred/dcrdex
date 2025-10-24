@@ -6,10 +6,8 @@
 # turn this on for debugging, keep noise low for prod builds
 # set -ex
 
-APP="bisonw"
+source pkg/common.sh
 VER="1.0.4-pre" # pre, beta, rc1, etc.
-META= #"release"
-ARCH="amd64"
 
 # A directory containing metadata files
 SRC_DIR="./src"
