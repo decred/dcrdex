@@ -687,11 +687,11 @@ func newWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		defaultProviders = []string{
 			"https://rpc.ankr.com/eth_sepolia",
 			"https://ethereum-sepolia.blockpi.network/v1/rpc/public",
-			"https://eth-sepolia.public.blastapi.io",
 			"https://endpoints.omniatech.io/v1/eth/sepolia/public",
 			"https://rpc-sepolia.rockx.com",
 			"https://rpc.sepolia.org",
 			"https://eth-sepolia-public.unifra.io",
+			"https://sepolia.drpc.org",
 		}
 	case dex.Mainnet:
 		defaultProviders = []string{
@@ -701,6 +701,7 @@ func newWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 			"https://rpc.builder0x69.io",
 			"https://rpc.flashbots.net",
 			"wss://eth.llamarpc.com",
+			"https://eth.drpc.org",
 		}
 	}
 
