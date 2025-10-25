@@ -1014,6 +1014,13 @@ func (wc *rpcClient) SwapConfirmations(txHash *chainhash.Hash, vout uint32, _ []
 		}
 		return 0, false, err
 	}
+
+	// If the transaction is confirmed (confirmations > 0) and gettxout didn't
+	// find it, then it's likely spent.
+	if tx.Confirmations == 0 {
+		return 0, false, nil
+	}
+
 	return uint32(tx.Confirmations), true, nil
 }
 
