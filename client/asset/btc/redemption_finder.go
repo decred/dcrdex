@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"sync"
 	"time"
@@ -331,9 +332,7 @@ func (r *RedemptionFinder) tryRedemptionRequests(ctx context.Context, startBlock
 	}
 
 	// Check mempool for any remaining undiscovered requests.
-	for outPt, req := range undiscovered {
-		mempoolReqs[outPt] = req
-	}
+	maps.Copy(mempoolReqs, undiscovered)
 
 	if len(mempoolReqs) == 0 {
 		return

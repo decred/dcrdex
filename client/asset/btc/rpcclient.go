@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1144,10 +1145,7 @@ func FindRedemptionsInMempool(
 			return
 		}
 		newlyDiscovered := FindRedemptionsInTxWithHasher(ctx, segwit, reqs, tx, chainParams, hashTx)
-		for outPt, res := range newlyDiscovered {
-			discovered[outPt] = res
-		}
-
+		maps.Copy(discovered, newlyDiscovered)
 	}
 	return
 }
@@ -1176,9 +1174,7 @@ func SearchBlockForRedemptions(
 
 	for _, msgTx := range msgBlock.Transactions {
 		newlyDiscovered := FindRedemptionsInTxWithHasher(ctx, segwit, reqs, msgTx, chainParams, hashTx)
-		for outPt, res := range newlyDiscovered {
-			discovered[outPt] = res
-		}
+		maps.Copy(discovered, newlyDiscovered)
 	}
 	return
 }

@@ -3,6 +3,7 @@ package btc
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"sort"
 	"sync"
@@ -140,9 +141,7 @@ func (c *CoinManager) fundWithUTXOs(
 		if err != nil {
 			return nil, nil, nil, nil, 0, 0, fmt.Errorf("LockUnspent error: %w", err)
 		}
-		for pt, utxo := range fundingCoins {
-			c.lockedOutputs[pt] = utxo
-		}
+		maps.Copy(c.lockedOutputs, fundingCoins)
 	}
 
 	return coins, fundingCoins, spents, redeemScripts, size, sum, err
@@ -541,9 +540,7 @@ func (c *CoinManager) LockUTXOs(utxos []*UTxO) {
 // LockOutputsMap locks the utxos in the provided mapping.
 func (c *CoinManager) LockOutputsMap(utxos map[OutPoint]*UTxO) {
 	c.mtx.Lock()
-	for pt, utxo := range utxos {
-		c.lockedOutputs[pt] = utxo
-	}
+	maps.Copy(c.lockedOutputs, utxos)
 	c.mtx.Unlock()
 }
 

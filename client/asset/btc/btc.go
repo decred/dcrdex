@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
@@ -7080,9 +7081,7 @@ func (btc *intermediaryWallet) syncTxHistory(tip uint64) {
 
 	pendingTxsCopy := make(map[chainhash.Hash]ExtendedWalletTx, len(btc.pendingTxs))
 	btc.pendingTxsMtx.RLock()
-	for hash, tx := range btc.pendingTxs {
-		pendingTxsCopy[hash] = tx
-	}
+	maps.Copy(pendingTxsCopy, btc.pendingTxs)
 	btc.pendingTxsMtx.RUnlock()
 
 	handlePendingTx := func(txHash chainhash.Hash, tx *ExtendedWalletTx) {
