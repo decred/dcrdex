@@ -100,7 +100,7 @@ Pick **just one** method:
 4. [Use Decrediton](https://docs.decred.org/wallets/decrediton/decrediton-setup/),
    the official graphical Decred wallet, which integrates Bison Wallet, and go
    to the DEX tab.
-5. Build the standalone client [from source](https://github.com/decred/dcrdex/wiki/Development-and-Contributing).
+5. Build the standalone client [from source](https://github.com/decred/dcrdex/wiki/Download-and-Install#building-from-source).
 
 Almost everyone will just want the client to trade on existing markets, but if
 you want to set up a new DEX server and host markets of your choice, see
