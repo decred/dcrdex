@@ -3,6 +3,7 @@ package dex
 import (
 	"context"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -66,6 +67,15 @@ func (m *FeeManager) LastRate(assetID uint32) uint64 {
 type feeFetcher struct {
 	*asset.BackedAsset
 	lastRate *uint64
+
+	// Stash the old rate for a short time to avoid a race condition where
+	// a client gets a rate right before the server gets a higher rate, then the
+	// client tries to use the old rate and is rejected.
+	stashedRate struct {
+		sync.RWMutex
+		rate  uint64
+		stamp time.Time
+	}
 }
 
 var _ market.FeeFetcher = (*feeFetcher)(nil)
@@ -77,6 +87,9 @@ func newFeeFetcher(asset *asset.BackedAsset, lastRate *uint64) *feeFetcher {
 		lastRate:    lastRate,
 	}
 }
+
+// Use the lower rate for a minute after a rate increase to avoid races.
+const stashedRateExpiry = time.Minute
 
 // FeeRate fetches a new fee rate and updates the cache.
 func (f *feeFetcher) FeeRate(ctx context.Context) uint64 {
@@ -91,14 +104,32 @@ func (f *feeFetcher) FeeRate(ctx context.Context) uint64 {
 	if r > f.Asset.MaxFeeRate {
 		r = f.Asset.MaxFeeRate
 	}
-	atomic.StoreUint64(f.lastRate, r)
+	oldRate := atomic.SwapUint64(f.lastRate, r)
+	if oldRate < r {
+		f.stashedRate.Lock()
+		f.stashedRate.rate = oldRate
+		f.stashedRate.stamp = time.Now()
+		f.stashedRate.Unlock()
+		return oldRate
+	}
+	f.stashedRate.RLock()
+	if time.Since(f.stashedRate.stamp) < stashedRateExpiry && f.stashedRate.rate < r {
+		r = f.stashedRate.rate
+	}
+	f.stashedRate.RUnlock()
 	return r
 }
 
 // LastRate is the last rate cached. This may be used as a fallback if FeeRate
 // times out, or as a quick rate when rate freshness is not critical.
 func (f *feeFetcher) LastRate() uint64 {
-	return atomic.LoadUint64(f.lastRate)
+	r := atomic.LoadUint64(f.lastRate)
+	f.stashedRate.RLock()
+	if time.Since(f.stashedRate.stamp) < stashedRateExpiry && f.stashedRate.rate < r {
+		r = f.stashedRate.rate
+	}
+	f.stashedRate.RUnlock()
+	return r
 }
 
 // MaxFeeRate is a getter for the BackedAsset's dex.Asset.MaxFeeRate. This is
