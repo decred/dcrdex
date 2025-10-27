@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"net"
 	"net/url"
@@ -504,9 +505,7 @@ func (c *Core) exchangeInfo(dc *dexConnection) *Exchange {
 
 	dc.assetsMtx.RLock()
 	assets := make(map[uint32]*dex.Asset, len(dc.assets))
-	for assetID, dexAsset := range dc.assets {
-		assets[assetID] = dexAsset
-	}
+	maps.Copy(assets, dc.assets)
 	dc.assetsMtx.RUnlock()
 
 	bondCfg := c.dexBondConfig(dc, time.Now().Unix())
@@ -3353,9 +3352,7 @@ func (c *Core) RecoverWallet(assetID uint32, appPW []byte, force bool) error {
 			c.log.Errorf("RecoverWallet: unable to get recovery config: %v", err)
 		} else {
 			// merge recoveryCfg with dbWallet.Settings
-			for key, val := range recoveryCfg {
-				dbWallet.Settings[key] = val
-			}
+			maps.Copy(dbWallet.Settings, recoveryCfg)
 		}
 		oldWallet.Disconnect() // wallet now shut down and w.hookedUp == false -> connected() returns false
 	}

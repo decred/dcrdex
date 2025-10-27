@@ -6,6 +6,7 @@ package core
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -906,9 +907,7 @@ func (dc *dexConnection) subPriceFeed() {
 
 	// We expect there to be a map in handlePriceUpdateNote.
 	spotsCopy := make(map[string]*msgjson.Spot, len(spots))
-	for mkt, spot := range spots {
-		spotsCopy[mkt] = spot
-	}
+	maps.Copy(spotsCopy, spots)
 	dc.notify(newSpotPriceNote(dc.acct.host, spotsCopy)) // consumers read spotsCopy async with this call
 
 	dc.spotsMtx.Lock()
