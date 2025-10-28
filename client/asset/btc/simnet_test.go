@@ -369,6 +369,7 @@ func testWalletTxBalanceSync(t *testing.T, fromWallet, toWallet *ExchangeWalletF
 
 	order := &asset.Order{
 		AssetVersion:  version,
+		Value:         toSatoshi(1),
 		FeeSuggestion: 10,
 		MaxSwapCount:  1,
 		MaxFeeRate:    20,
