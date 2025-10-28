@@ -4300,8 +4300,9 @@ func testConfirmations(t *testing.T, segwit bool, walletType string) {
 
 	node.getTransactionMap = map[string]*GetTransactionResult{
 		"any": {
-			BlockHash: blockHash.String(),
-			Bytes:     txB,
+			BlockHash:     blockHash.String(),
+			Bytes:         txB,
+			Confirmations: 1,
 		}}
 
 	node.getCFilterScripts[*spendingBlockHash] = [][]byte{pkScript}
