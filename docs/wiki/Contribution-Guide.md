@@ -8,6 +8,8 @@ Development is coordinated via [github issues](/../issues) and the
 You can access the room at [chat.decred.org](https://chat.decred.org),
 [riot.im](https://riot.im), or with any other Matrix client.
 
+If you are yet to set up or want to build from source, please see [build from source guide](https://github.com/decred/dcrdex/wiki/Download-and-Install#building-from-source) for build instructions.
+
 ## Contributing code
 
 1. Fork the repo.

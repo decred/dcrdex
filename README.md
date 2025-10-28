@@ -87,10 +87,12 @@ censorship-resistance, privacy. and self-sovereignty.
 
 To trade on DCRDEX, you can use Bison Wallet. There are a few simple options
 for obtaining Bison Wallet. The standalone wallet is strongly recommended as
-it is the easiest to setup and generally has the most up-to-date downloads. Pick
-**just one** method:
+it is the easiest to setup and generally has the most up-to-date downloads. From version 1.0, installers are available for all major operating systems.
 
-1. From version 1.0, installers are available for all major operating systems
+Pick **just one** method:
+
+1. Visit [bisonwallet.com](https://bisonwallet.com) and download the
+   appropriate installer for your operating system.
 2. Download standalone Bison Wallet for your operating system for the
    [latest release on GitHub](https://github.com/decred/dcrdex/releases).
 3. Use your operating system's package manager. See [OS Packages](#os-packages)
@@ -98,10 +100,7 @@ it is the easiest to setup and generally has the most up-to-date downloads. Pick
 4. [Use Decrediton](https://docs.decred.org/wallets/decrediton/decrediton-setup/),
    the official graphical Decred wallet, which integrates Bison Wallet, and go
    to the DEX tab.
-5. Build the standalone client [from source](https://github.com/decred/dcrdex/wiki/Client-Installation-and-Configuration#advanced-client-installation).
-
-See the [Client Installation and Configuration](https://github.com/decred/dcrdex/wiki/Client-Installation-and-Configuration)
-page on the wiki for more information and a detailed walk-through of the initial setup.
+5. Build the standalone client [from source](https://github.com/decred/dcrdex/wiki/Download-and-Install#building-from-source).
 
 Almost everyone will just want the client to trade on existing markets, but if
 you want to set up a new DEX server and host markets of your choice, see
@@ -189,7 +188,7 @@ your pull requests moving through the review process.
 
 Check out these wiki pages for more information.
 
-- [Getting Started Contributing](../../wiki/Contribution-Guide)
+- [Getting Started Contributing](../../wiki/Development-and-Contributing)
 - [Backend Development](../../wiki/Backend-Development)
 - [Run **dcrdex** and **bisonw** on simnet](../../wiki/Simnet-Testing). Recommended for development.
 - [Run **bisonw** on testnet](../../wiki/Testnet-Testing). Recommended for poking around.

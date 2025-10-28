@@ -10,6 +10,10 @@ Before beginning work, chat with us in the
 The pace of development is pretty fast right now, so you'll be expected to keep
 your pull requests moving through the review process.
 
+To learn about project requirements and how to build from source read the [build from source guide](https://github.com/decred/dcrdex/wiki/Download-and-Install#building-from-source).
+
+### Additional Resources
+
 Check out these wiki pages for more information.
 
 - [Contribution Guide](Contribution-Guide)
