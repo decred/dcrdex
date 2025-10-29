@@ -2,6 +2,7 @@ package xmr
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -137,38 +138,8 @@ func (r *xmrRpc) connect(ctx context.Context) (*sync.WaitGroup, error) {
 	var wg sync.WaitGroup
 	r.ctx = ctx
 
-	r.log.Trace("connect xmr")
-
-	err := r.probeDaemon()
-	if err != nil {
-		r.log.Errorf("probeDaemon - %v", err)
-		return nil, err
-	}
-
-	if !r.walletServerRunning() {
-		err = r.startWalletServer(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("cannot start the wallet server - %w", err)
-		}
-		r.log.Debug("started wallet server - waiting for it to initialize")
-		select {
-		case <-ctx.Done():
-			return nil, nil
-		case <-time.After(WalletServerInitializeWait): // must wait before open wallet below
-			r.log.Trace("waited 5s for the wallet server to fully initialize")
-		}
-	} else {
-		r.log.Warn("re-entered connect")
-	}
-
-	err = r.doOpenWallet(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	_, _, walletSynced, err := r.walletSynced()
 	if err != nil {
-		r.wallet.CloseWallet(ctx)
 		return nil, err
 	}
 
@@ -186,19 +157,31 @@ func (r *xmrRpc) connect(ctx context.Context) (*sync.WaitGroup, error) {
 	return &wg, nil
 }
 
-func (r *xmrRpc) doOpenWallet(ctx context.Context) error {
-	pw, err := r.getKeystorePw()
+func (r *xmrRpc) openWithPW(ctx context.Context, pw []byte) error {
+	err := r.probeDaemon(ctx)
 	if err != nil {
+		return fmt.Errorf("unable to probe daemon: %v", err)
+	}
+
+	if !r.walletServerRunning(ctx) {
+		err = r.startWalletServer(ctx)
+		if err != nil {
+			return fmt.Errorf("cannot start the wallet server - %w", err)
+		}
+		r.log.Debug("xmr started wallet server - waiting for it to initialize")
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(WalletServerInitializeWait): // must wait before open wallet below
+			r.log.Trace("xmr waited 5s for the wallet server to fully initialize")
+		}
+	} else {
+		r.log.Warn("xmr re-entered open with pw")
+	}
+	if err := r.openWallet(ctx, hex.EncodeToString(pw)); err != nil {
 		return err
 	}
-	err = r.openWallet(ctx, pw)
-	if err != nil {
-		r.log.Errorf("cannot open wallet - %w", err)
-		return err
-	}
-	r.log.Debug("opened xmr wallet")
 	r.walletInfo.primaryAddress, _ = r.getPrimaryAddress()
-	r.log.Infof("Primary Address: %s", r.walletInfo.primaryAddress)
 	return nil
 }
 
@@ -209,23 +192,22 @@ func (r *xmrRpc) monitorDaemon(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
-			r.checkDaemon()
+			if err := r.checkDaemon(ctx); err != nil {
+				r.log.Errorf("error checking xmr daemon: %v", err)
+			}
 		case <-ctx.Done():
-			r.log.Trace("Ctx Done in monitorDaemon")
 			return
 		}
 	}
 }
 
-func (r *xmrRpc) checkDaemon() {
-	info, err := r.getInfo()
+func (r *xmrRpc) checkDaemon(ctx context.Context) error {
+	info, err := r.getInfo(ctx)
 	if err != nil {
-		r.log.Errorf("DaemonGetInfo: %v", err)
-		return
+		return fmt.Errorf("DaemonGetInfo: %v", err)
 	}
 	if info.Status != "OK" {
-		r.log.Warnf("DaemonGetInfo: bad status: %s - expected OK", info.Status)
-		return
+		return fmt.Errorf("DaemonGetInfo: bad status: %s - expected OK", info.Status)
 	}
 	r.daemonState.Lock()
 	defer r.daemonState.Unlock()
@@ -253,28 +235,6 @@ func (r *xmrRpc) checkDaemon() {
 	if peersNow != r.daemonState.numPeers {
 		r.peersChange(peersNow, nil)
 		r.daemonState.numPeers = peersNow
-	}
-}
-
-func (r *xmrRpc) getKeystorePw() (string, error) {
-	k := new(keystore)
-	p, err := k.get(r.net)
-	if err != nil {
-		return "", fmt.Errorf("keystore error %v", err)
-	}
-	return p, nil
-}
-
-func (r *xmrRpc) unlockApp(spw string) error {
-	p, err := r.getKeystorePw()
-	if err != nil {
-		return fmt.Errorf("keystore error - %v", err)
-	}
-	if p != spw {
-		return fmt.Errorf("incorrect password")
-	}
-	if r.isSyncing() {
-		return fmt.Errorf("cannot unlock wallet function while syncing")
 	}
 	return nil
 }

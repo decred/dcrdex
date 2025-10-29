@@ -791,3 +791,53 @@ func (w *xcWallet) BridgeHistory(n int, refID *string, past bool) ([]*asset.Wall
 
 	return bridger.BridgeHistory(n, refID, past)
 }
+
+// OpenWithPW opens a wallet for use if it is an asset.Opener. Otherwise does
+// nothing.
+func (w *xcWallet) OpenWithPW(ctx context.Context, crypter encrypt.Crypter) error {
+	opener, ok := w.Wallet.(asset.Opener)
+	if !ok {
+		return nil
+	}
+
+	if opener.IsOpen() {
+		return nil
+	}
+
+	if w.isDisabled() {
+		return fmt.Errorf(walletDisabledErrStr, strings.ToUpper(unbip(w.AssetID)))
+	}
+
+	if crypter == nil {
+		return newError(noAuthError, "no password provided for open")
+	}
+
+	if len(w.encPW()) == 0 {
+		return fmt.Errorf("no password has been set for open")
+	}
+
+	pw, err := crypter.Decrypt(w.encPW())
+	if err != nil {
+		return fmt.Errorf("%s open wallet decryption error: %w", unbip(w.AssetID), err)
+	}
+
+	return opener.OpenWithPW(ctx, pw)
+}
+
+// Close closes a wallet if it is an asset.Opener. Otherwise does nothing.
+func (w *xcWallet) Close(ctx context.Context) error {
+	opener, ok := w.Wallet.(asset.Opener)
+	if !ok {
+		return nil
+	}
+
+	if !opener.IsOpen() {
+		return nil
+	}
+
+	if w.isDisabled() {
+		return fmt.Errorf(walletDisabledErrStr, strings.ToUpper(unbip(w.AssetID)))
+	}
+
+	return opener.Close(ctx)
+}
