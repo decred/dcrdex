@@ -58,9 +58,8 @@ const (
 	CliCommandRefreshParam          = "--command=refresh"
 )
 
-func (r *xmrRpc) probeDaemon() error {
-	r.log.Trace("probeDaemon")
-	info, err := r.getInfo()
+func (r *xmrRpc) probeDaemon(ctx context.Context) error {
+	info, err := r.getInfo(ctx)
 	if err != nil {
 		return err
 	}
@@ -135,7 +134,7 @@ func getRegtestWalletServerRpcPort(dataDir string) string {
 	if strings.Contains(dataDir, "/simnet-walletpair/dexc2/") {
 		return AlternateRegtestWalletServerRpcPort
 	}
-	return "bad-path"
+	return DefaultRegtestWalletServerRpcPort
 }
 
 func cliGenerateRefreshWallet(ctx context.Context, trustedDaemon string, net dex.Network, dataDir, cliToolsDir, pw string, refresh bool) error {
