@@ -10,7 +10,7 @@ import (
 	"decred.org/dcrdex/server/market"
 )
 
-// FeeManager manages fee fetchers and a fee cache.
+// FeeManager manages FeeFetchers.
 type FeeManager struct {
 	fetchers map[uint32]*feeFetcher
 }
@@ -24,15 +24,12 @@ func NewFeeManager() *FeeManager {
 	}
 }
 
-// AddFetcher adds a fee fetcher (a *BackedAsset) and primes the cache. The
-// asset's MaxFeeRate are used to limit the rates returned by the LastRate
-// method as well as the rates returned by child FeeFetchers.
+// AddFetcher adds a FeeFetcher for an asset.
 func (m *FeeManager) AddFetcher(asset *asset.BackedAsset) {
 	m.fetchers[asset.ID] = newFeeFetcher(asset)
 }
 
-// FeeFetcher creates and returns an asset-specific fetcher that satisfies
-// market.FeeFetcher, implemented by *feeFetcher.
+// FeeFetcher returns the specified asset's FeeFetcher.
 func (m *FeeManager) FeeFetcher(assetID uint32) market.FeeFetcher {
 	return m.fetchers[assetID]
 }
