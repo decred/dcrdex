@@ -2,7 +2,8 @@
 
 package doge
 
-// Regnet tests expect the DOGE test harness to be running.
+// Regnet tests expect the DOGE test harness to be running. The harness miner
+// must be OFF.
 
 import (
 	"context"
