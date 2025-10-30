@@ -2,7 +2,8 @@
 
 package firo
 
-// Regnet tests expect the Firo test harness to be running.
+// Regnet tests expect the Firo test harness to be running. The harness miner
+// must be OFF.
 //
 // Sim harness info:
 // The harness has four nodes: alpha, beta, gamma and delta with one wallet

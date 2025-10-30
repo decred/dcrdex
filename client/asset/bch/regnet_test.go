@@ -2,7 +2,8 @@
 
 package bch
 
-// Regnet tests expect the BCH test harness to be running.
+// Regnet tests expect the BCH test harness to be running. The harness miner
+// must be OFF.
 //
 // Sim harness info:
 // The harness has three wallets, alpha, beta, and gamma.

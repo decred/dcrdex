@@ -2,7 +2,13 @@
 
 package dgb
 
-// Regnet tests expect the DGB test harness to be running.
+// Regnet tests expect the DGB test harness to be running. The harness miner
+// must be OFF.
+//
+// NOTE: After mining blocks, DigiByte node must do 2 things so tests will not
+// pass until the harness is done with:
+//  1. Update Wallet DB (fast): Write transaction to wallet database
+//  2. Update UTXO Index (slow): Rebuild index of all unspent outputs
 //
 // Sim harness info:
 // The harness has three wallets, alpha, beta, and gamma.
