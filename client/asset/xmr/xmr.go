@@ -2,7 +2,9 @@ package xmr
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -133,9 +135,12 @@ func (d *Driver) Create(cwp *asset.CreateWalletParams) error {
 	cliToolsDir := configSettings.CliToolsDir
 	trustedDaemons := getTrustedDaemons(cwp.Net, true, cwp.DataDir) // true: can be used for cli
 	if len(trustedDaemons) == 0 {
-		return fmt.Errorf("no trusted damons")
+		return errors.New("no trusted damons")
 	}
-	return cliGenerateRefreshWallet(ctx, trustedDaemons[0], cwp.Net, cwp.DataDir, cliToolsDir, hex.EncodeToString(cwp.Pass), true)
+	if len(cwp.Seed) != ed25519.SeedSize {
+		return fmt.Errorf("expected seed size of %d but got %d", ed25519.SeedSize, len(cwp.Seed))
+	}
+	return cliGenerateRefreshWallet(ctx, trustedDaemons[0], cwp.Net, cwp.DataDir, cliToolsDir, cwp.Pass, cwp.Seed)
 }
 
 func checkWalletCfg(cfg *asset.WalletConfig) error {

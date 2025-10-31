@@ -2,11 +2,14 @@ package xmr
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os/exec"
 	"path"
 	"runtime"
 	"strings"
+	"time"
 
 	"decred.org/dcrdex/dex"
 )
@@ -15,8 +18,8 @@ const (
 	WalletServerRpcName = "monero-wallet-rpc"
 	WalletLogfileName   = WalletServerRpcName + ".log"
 	WalletLogLevel      = "2"
-	WalletFileName      = "dex"
-	WalletKeysFileName  = "dex.keys"
+	WalletFileName      = "rpcwallet"
+	WalletKeysFileName  = "rpcwallet.keys"
 )
 
 const (
@@ -48,12 +51,10 @@ const (
 )
 
 const (
-	CliGenerateNewWalletParam       = "--generate-new-wallet"
+	CliGenFromSpendKeyParam         = "--generate-from-spend-key"
 	CliMnemonicLanguageEnglishParam = "--mnemonic-language=English" // hard code
 	CliPasswordParam                = "--password="
-	CliPasswordFileParam            = "--password-file=" //TODO(xmr)
 	CliOfflineParam                 = "--offline"
-	CliCommandBalanceParam          = "--command=balance"
 	CliCommandAddressParam          = "--command=address"
 	CliCommandRefreshParam          = "--command=refresh"
 )
@@ -137,7 +138,7 @@ func getRegtestWalletServerRpcPort(dataDir string) string {
 	return DefaultRegtestWalletServerRpcPort
 }
 
-func cliGenerateRefreshWallet(ctx context.Context, trustedDaemon string, net dex.Network, dataDir, cliToolsDir, pw string, refresh bool) error {
+func cliGenerateRefreshWallet(ctx context.Context, trustedDaemon string, net dex.Network, dataDir, cliToolsDir string, pw, seed []byte) error {
 	cli := path.Join(cliToolsDir, CliName)
 	if runtime.GOOS == "windows" {
 		cli += ".exe"
@@ -153,10 +154,10 @@ func cliGenerateRefreshWallet(ctx context.Context, trustedDaemon string, net dex
 	default:
 		return fmt.Errorf("unknown network")
 	}
-	cmd.Args = append(cmd.Args, CliGenerateNewWalletParam)
+	cmd.Args = append(cmd.Args, CliGenFromSpendKeyParam)
 	walletFilePath := path.Join(dataDir, WalletFileName)
 	cmd.Args = append(cmd.Args, walletFilePath)
-	cmd.Args = append(cmd.Args, CliPasswordParam+pw)
+	cmd.Args = append(cmd.Args, CliPasswordParam+hex.EncodeToString(pw))
 	cmd.Args = append(cmd.Args, CliMnemonicLanguageEnglishParam)
 	serverAddr := DaemonAddressParam + trustedDaemon
 	cmd.Args = append(cmd.Args, serverAddr)
@@ -165,17 +166,39 @@ func cliGenerateRefreshWallet(ctx context.Context, trustedDaemon string, net dex
 	logfilePath := path.Join(dataDir, CliLogfileName)
 	cmd.Args = append(cmd.Args, LogFileParam+logfilePath)
 	cmd.Args = append(cmd.Args, LogLevelParam+CliLogLevel)
-	if refresh {
-		cmd.Args = append(cmd.Args, CliCommandRefreshParam)
-	} else {
-		cmd.Args = append(cmd.Args, CliCommandBalanceParam)
-	}
-
-	err := cmd.Start()
+	cmd.Args = append(cmd.Args, CliCommandRefreshParam)
+	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return fmt.Errorf("cli create wallet process start %w", err)
+		return fmt.Errorf("unable to create stdin pipe: %v", err)
 	}
+	err = cmd.Start()
+	if err != nil {
+		return fmt.Errorf("cli create wallet process start: %w", err)
+	}
+	// TODO: Find a way to send these that doesn't involve sleeping. Tried
+	// using a reader on stdout but it was getting stuck for me. After
+	// sending the spend key, there is a long wait.
+	//
+	// Respond to seed prompt.
+	time.Sleep(time.Second)
+	io.WriteString(stdin, hex.EncodeToString(seed)+"\n")
+	// Respond to birthday prompt.
+	// TODO: Respond with the birthday. YYYY-MM-DD
+	done := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Second):
+				io.WriteString(stdin, "\n")
+			}
+		}
+	}()
 	err = cmd.Wait()
+	close(done)
 	if err != nil {
 		return fmt.Errorf("create wallet command exited with status %d", cmd.ProcessState.ExitCode())
 	}
