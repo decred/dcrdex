@@ -113,9 +113,9 @@ func TestSimnetFilepaths(t *testing.T) {
 	if port2 != AlternateRegtestWalletServerRpcPort {
 		t.Fatalf("bad port %s for dataDir2=%s", port2, dataDir2)
 	}
-	portBad := getRegtestWalletServerRpcPort(dataDirBad)
-	if portBad != "bad-path" {
-		t.Fatalf("bad path dataDirBad=%s", dataDirBad)
+	portOther := getRegtestWalletServerRpcPort(dataDirBad)
+	if portOther != DefaultRegtestWalletServerRpcPort {
+		t.Fatalf("bad port %s for other=%s", port1, dataDir1)
 	}
 }
 

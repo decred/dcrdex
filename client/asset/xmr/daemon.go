@@ -1,6 +1,7 @@
 package xmr
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path"
@@ -99,8 +100,8 @@ func getUserDamons(td []string, net dex.Network, cli bool, dataDir string) []str
 }
 
 // getInfo retrieves daemon info
-func (r *xmrRpc) getInfo() (*rpc.DemonGetInfoResponse, error) {
-	giResp, err := r.daemon.DaemonGetInfo(r.ctx)
+func (r *xmrRpc) getInfo(ctx context.Context) (*rpc.DemonGetInfoResponse, error) {
+	giResp, err := r.daemon.DaemonGetInfo(ctx)
 	if err != nil {
 		return nil, err
 	}
