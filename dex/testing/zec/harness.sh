@@ -67,9 +67,11 @@ cd ${NODES_ROOT} && tmux new-session -d -s $SESSION $SHELL
 # Write config files.
 ################################################################################
 
-# These config files aren't actually used here, but can be used by other
-# programs. I would use them here, but bitcoind seems to have some issues
-# reading from the file when using regtest.
+# Activation logic updated for NU6.1.
+
+# There is zcash logic around a low probability reorg at activation time for
+# NU6 and NU6.1 which can reference <activation height -1> so we activate NU6
+# at block 5 (2 blocks gap) and NU6.1 at block 7.
 
 cat > "${ALPHA_DIR}/alpha.conf" <<EOF
 rpcuser=user
@@ -87,6 +89,8 @@ nuparams=2bb40e60:1
 nuparams=f5b9230b:1
 nuparams=e9ff75a6:2
 nuparams=c2d6d0b4:3
+nuparams=c8e71055:5
+nuparams=4dec4df0:7
 EOF
 
 cat > "${BETA_DIR}/beta.conf" <<EOF
@@ -103,6 +107,8 @@ nuparams=2bb40e60:1
 nuparams=f5b9230b:1
 nuparams=e9ff75a6:2
 nuparams=c2d6d0b4:3
+nuparams=c8e71055:5
+nuparams=4dec4df0:7
 EOF
 
 cat > "${DELTA_DIR}/delta.conf" <<EOF
@@ -118,6 +124,8 @@ nuparams=2bb40e60:1
 nuparams=f5b9230b:1
 nuparams=e9ff75a6:2
 nuparams=c2d6d0b4:3
+nuparams=c8e71055:5
+nuparams=4dec4df0:7
 EOF
 
 cat > "${GAMMA_DIR}/gamma.conf" <<EOF
@@ -133,6 +141,8 @@ nuparams=2bb40e60:1
 nuparams=f5b9230b:1
 nuparams=e9ff75a6:2
 nuparams=c2d6d0b4:3
+nuparams=c8e71055:5
+nuparams=4dec4df0:7
 EOF
 
 ################################################################################
@@ -146,10 +156,12 @@ echo "Starting simnet alpha node"
 tmux send-keys -t $SESSION:0 "${DAEMON} -rpcuser=user -rpcpassword=pass \
   -rpcport=${ALPHA_RPC_PORT} -datadir=${ALPHA_DIR} -conf=alpha.conf \
   -debug=rpc -debug=net -debug=mempool -debug=walletdb -debug=addrman -debug=mempoolrej \
-  -whitelist=127.0.0.0/8 -whitelist=::1 -preferredtxversion=5 \
+  -whitelist=127.0.0.0/8 -whitelist=::1  \
+  -wallet=alphawallet \
   -txindex=1 -regtest=1 -port=${ALPHA_LISTEN_PORT} -fallbackfee=0.00001 \
-  -printtoconsole; tmux wait-for -S alpha${SYMBOL}" C-m
-
+  -allowdeprecated=getnewaddress  -printtoconsole"  C-m
+sleep 8
+tmux wait-for -S alpha${SYMBOL}
 ################################################################################
 # Setup the beta node.
 ################################################################################
@@ -162,9 +174,11 @@ echo "Starting simnet beta node"
 tmux send-keys -t $SESSION:1 "${DAEMON} -rpcuser=user -rpcpassword=pass \
   -rpcport=${BETA_RPC_PORT} -datadir=${BETA_DIR} -conf=beta.conf -txindex=1 -regtest=1 \
   -debug=rpc -debug=net -debug=mempool -debug=walletdb -debug=addrman -debug=mempoolrej \
-  -whitelist=127.0.0.0/8 -whitelist=::1 -preferredtxversion=5 \
-  -port=${BETA_LISTEN_PORT} -fallbackfee=0.00001 -printtoconsole; \
-  tmux wait-for -S beta${SYMBOL}" C-m
+  -whitelist=127.0.0.0/8 -whitelist=::1  \
+  -wallet=betawallet \
+  -port=${BETA_LISTEN_PORT} -fallbackfee=0.00001 -allowdeprecated=getnewaddress  -printtoconsole" C-m
+sleep 8
+tmux wait-for -S beta${SYMBOL}
 
 ################################################################################
 # Setup the delta node.
@@ -178,9 +192,11 @@ echo "Starting simnet delta node"
 tmux send-keys -t $SESSION:2 "${DAEMON} -rpcuser=user -rpcpassword=pass \
   -rpcport=${DELTA_RPC_PORT} -datadir=${DELTA_DIR} -conf=delta.conf -regtest=1 \
   -debug=rpc -debug=net -debug=mempool -debug=walletdb -debug=addrman -debug=mempoolrej \
-  -whitelist=127.0.0.0/8 -whitelist=::1 -preferredtxversion=5 \
-  -port=${DELTA_LISTEN_PORT} -fallbackfee=0.00001 -printtoconsole; \
-  tmux wait-for -S delta${SYMBOL}" C-m
+  -whitelist=127.0.0.0/8 -whitelist=::1  \
+  -wallet=deltawallet \
+  -port=${DELTA_LISTEN_PORT} -fallbackfee=0.00001 -allowdeprecated=getnewaddress  -printtoconsole" C-m
+sleep 8
+tmux wait-for -S delta${SYMBOL}
 
 ################################################################################
 # Setup the gamma node.
@@ -194,9 +210,13 @@ echo "Starting simnet gamma node"
 tmux send-keys -t $SESSION:3 "${DAEMON} -rpcuser=user -rpcpassword=pass \
   -rpcport=${GAMMA_RPC_PORT} -datadir=${GAMMA_DIR} -conf=gamma.conf -regtest=1 \
   -debug=rpc -debug=net -debug=mempool -debug=walletdb -debug=addrman -debug=mempoolrej \
-  -whitelist=127.0.0.0/8 -whitelist=::1 -preferredtxversion=5 \
-  -port=${GAMMA_LISTEN_PORT} -fallbackfee=0.00001 -printtoconsole; \
-  tmux wait-for -S gamma${SYMBOL}" C-m
+  -whitelist=127.0.0.0/8 -whitelist=::1  \
+  -wallet=gammawallet \
+  -port=${GAMMA_LISTEN_PORT} -fallbackfee=0.00001 -allowdeprecated=getnewaddress  -printtoconsole" C-m
+sleep 8
+tmux wait-for -S gamma${SYMBOL}
+
+# maybe reduce
 sleep 30
 
 ################################################################################
@@ -222,8 +242,9 @@ printf "rpcuser=user\nrpcpassword=pass\nregtest=1\nrpcport=\$2\nexportdir=${SOUR
 ${DAEMON} -rpcuser=user -rpcpassword=pass \
 -rpcport=\$2 -datadir=${NODES_ROOT}/\$1 -regtest=1 -conf=\$1.conf \
 -debug=rpc -debug=net -debug=mempool -debug=walletdb -debug=addrman -debug=mempoolrej \
--whitelist=127.0.0.0/8 -whitelist=::1 -preferredtxversion=5 \
--port=\$3 -fallbackfee=0.00001 -printtoconsole
+-whitelist=127.0.0.0/8 -whitelist=::1  \
+-wallet=alphawallet \
+-port=\$3 -fallbackfee=0.00001  -allowdeprecated=getnewaddress  -printtoconsole
 EOF
 chmod +x "./start-wallet"
 
@@ -320,10 +341,13 @@ echo "Generating the genesis block"
 tmux send-keys -t $SESSION:4 "./alpha generate 1${DONE}" C-m\; ${WAIT}
 sleep 1
 
-tmux send-keys -t $SESSION:4 "./alpha z_importwallet ${SOURCE_DIR}/alphawallet ${DONE}" C-m\; ${WAIT}
-tmux send-keys -t $SESSION:4 "./beta z_importwallet ${SOURCE_DIR}/betawallet ${DONE}" C-m\; ${WAIT}
-tmux send-keys -t $SESSION:4 "./delta z_importwallet ${SOURCE_DIR}/deltawallet ${DONE}" C-m\; ${WAIT}
-tmux send-keys -t $SESSION:4 "./gamma z_importwallet ${SOURCE_DIR}/gammawallet ${DONE}" C-m\; ${WAIT}
+# 
+# TODO(zec) -- uncomment after clean NU6.1 exported wallets
+# 
+# tmux send-keys -t $SESSION:4 "./alpha z_importwallet ${SOURCE_DIR}/alphawallet ${DONE}" C-m\; ${WAIT}
+# tmux send-keys -t $SESSION:4 "./beta z_importwallet ${SOURCE_DIR}/betawallet ${DONE}" C-m\; ${WAIT}
+# tmux send-keys -t $SESSION:4 "./delta z_importwallet ${SOURCE_DIR}/deltawallet ${DONE}" C-m\; ${WAIT}
+# tmux send-keys -t $SESSION:4 "./gamma z_importwallet ${SOURCE_DIR}/gammawallet ${DONE}" C-m\; ${WAIT}
 
 echo "Generating 600 blocks for alpha"
 tmux send-keys -t $SESSION:4 "./alpha generate 600${DONE}" C-m\; ${WAIT}
@@ -332,15 +356,25 @@ tmux send-keys -t $SESSION:4 "./alpha generate 600${DONE}" C-m\; ${WAIT}
 # Send gamma and delta some coin
 ################################################################################
 
+# getaddr () {
+#   cd ${HARNESS_DIR}
+#   NODE=$1
+#   ./${NODE} z_getnewaccount > /dev/null
+#   R=$(./${NODE} z_getaddressforaccount 0)
+#   UADDR=$(sed -rn 's/.*"address": "([^"]+)".*/\1/p' <<< "${R}")
+#   R=$(./${NODE} z_listunifiedreceivers ${UADDR})
+#   ADDR=$(sed -rn 's/.*"p2pkh": "([^"]+)".*/\1/p' <<< "${R}")
+#   echo $ADDR
+# }
 getaddr () {
   cd ${HARNESS_DIR}
   NODE=$1
-  ./${NODE} z_getnewaccount > /dev/null
-  R=$(./${NODE} z_getaddressforaccount 0)
-  UADDR=$(sed -rn 's/.*"address": "([^"]+)".*/\1/p' <<< "${R}")
-  R=$(./${NODE} z_listunifiedreceivers ${UADDR})
-  ADDR=$(sed -rn 's/.*"p2pkh": "([^"]+)".*/\1/p' <<< "${R}")
-  echo $ADDR
+  ADDR=$(./${NODE} getnewaddress)
+  if [ -z "$ADDR" ]; then
+    echo "ERROR: getnewaddress failed for $NODE" >&2
+    return 1
+  fi
+  echo "$ADDR"
 }
 
 ALPHA_ADDR="tmEgW8c44RQQfft9FHXnqGp8XEcQQSRcUXD"
@@ -356,16 +390,19 @@ echo "gamma address ${GAMMA_ADDR}"
 echo "Sending 74 ZEC to beta in 8 blocks"
 for i in 18 5 7 1 15 3 25
 do
-    tmux send-keys -t $SESSION:4 "./alpha sendtoaddress ${BETA_ADDR} ${i}${DONE}" C-m\; ${WAIT}
-    tmux send-keys -t $SESSION:4 "./alpha sendtoaddress ${DELTA_ADDR} ${i}${DONE}" C-m\; ${WAIT}
-    tmux send-keys -t $SESSION:4 "./alpha sendtoaddress ${GAMMA_ADDR} ${i}${DONE}" C-m\; ${WAIT}
+    # tmux send-keys -t $SESSION:4 "./alpha sendtoaddress ${BETA_ADDR} ${i}${DONE}" C-m\; ${WAIT}
+    # tmux send-keys -t $SESSION:4 "./alpha sendtoaddress ${DELTA_ADDR} ${i}${DONE}" C-m\; ${WAIT}
+    # tmux send-keys -t $SESSION:4 "./alpha sendtoaddress ${GAMMA_ADDR} ${i}${DONE}" C-m\; ${WAIT}
+    tmux send-keys -t $SESSION:4 "./alpha sendtoaddress ${BETA_ADDR} ${i} ${DONE}" C-m\; ${WAIT}
+    tmux send-keys -t $SESSION:4 "./alpha sendtoaddress ${DELTA_ADDR} ${i} ${DONE}" C-m\; ${WAIT}
+    tmux send-keys -t $SESSION:4 "./alpha sendtoaddress ${GAMMA_ADDR} ${i} ${DONE}" C-m\; ${WAIT}
 done
 
 tmux send-keys -t $SESSION:4 "./mine-alpha 2${DONE}" C-m\; ${WAIT}
 
 tmux new-window -t $SESSION:5 -n 'miner' $SHELL
 tmux send-keys -t $SESSION:5 "cd ${HARNESS_DIR}" C-m
-tmux send-keys -t $SESSION:5 "watch -n 15 ./mine-alpha 1" C-m
+# tmux send-keys -t $SESSION:5 "watch -n 15 ./mine-alpha 1" C-m
 
 # Reenable history and attach to the control session.
 tmux select-window -t $SESSION:4
