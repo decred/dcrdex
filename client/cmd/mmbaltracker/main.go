@@ -147,26 +147,26 @@ func main() {
 			currBalances[*mkt].CEXBalances[assetID] = newBal
 		}
 
-		logStr := ""
+		var logStr strings.Builder
 
 		if len(dexDiffs) > 0 || len(cexDiffs) > 0 {
-			logStr += "================================================\n"
-			logStr += fmt.Sprintf("\nDiffs on Market: %s-%d-%d", mkt.Host, mkt.BaseID, mkt.QuoteID)
+			logStr.WriteString("================================================\n")
+			logStr.WriteString(fmt.Sprintf("\nDiffs on Market: %s-%d-%d", mkt.Host, mkt.BaseID, mkt.QuoteID))
 			if len(dexDiffs) > 0 {
-				logStr += "\n  DEX diffs:"
+				logStr.WriteString("\n  DEX diffs:")
 				for _, d := range dexDiffs {
-					logStr += fmt.Sprintf("\n    %s: %d -> %d (%d)", dex.BipIDSymbol(d.assetID), d.oldBal, d.newBal, int64(d.newBal)-int64(d.oldBal))
+					logStr.WriteString(fmt.Sprintf("\n    %s: %d -> %d (%d)", dex.BipIDSymbol(d.assetID), d.oldBal, d.newBal, int64(d.newBal)-int64(d.oldBal)))
 				}
 			}
 
 			if len(cexDiffs) > 0 {
-				logStr += "\n  CEX diffs:"
+				logStr.WriteString("\n  CEX diffs:")
 				for _, d := range cexDiffs {
-					logStr += fmt.Sprintf("\n    %s: %d -> %d (%d)", dex.BipIDSymbol(d.assetID), d.oldBal, d.newBal, int64(d.newBal)-int64(d.oldBal))
+					logStr.WriteString(fmt.Sprintf("\n    %s: %d -> %d (%d)", dex.BipIDSymbol(d.assetID), d.oldBal, d.newBal, int64(d.newBal)-int64(d.oldBal)))
 				}
 			}
-			logStr += "\n\n"
-			log.Infof(logStr)
+			logStr.WriteString("\n\n")
+			log.Infof(logStr.String())
 		}
 	}
 
