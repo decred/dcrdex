@@ -732,6 +732,21 @@ func parseRescanWalletArgs(params *RawParams) (uint32, bool, error) {
 	return uint32(assetID), force, nil
 }
 
+func parseAbandonTxArgs(params *RawParams) (uint32, string, error) {
+	if err := checkNArgs(params, []int{0}, []int{2}); err != nil {
+		return 0, "", err
+	}
+	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
+	if err != nil {
+		return 0, "", err
+	}
+	txID := params.Args[1]
+	if txID == "" {
+		return 0, "", fmt.Errorf("txID cannot be empty")
+	}
+	return uint32(assetID), txID, nil
+}
+
 func parseOrderBookArgs(params *RawParams) (*orderBookForm, error) {
 	if err := checkNArgs(params, []int{0}, []int{3, 4}); err != nil {
 		return nil, err

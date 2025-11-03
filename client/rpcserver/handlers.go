@@ -43,6 +43,7 @@ const (
 	versionRoute               = "version"
 	walletsRoute               = "wallets"
 	rescanWalletRoute          = "rescanwallet"
+	abandonTxRoute             = "abandontx"
 	withdrawRoute              = "withdraw"
 	sendRoute                  = "send"
 	appSeedRoute               = "appseed"
@@ -127,6 +128,7 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	versionRoute:               handleVersion,
 	walletsRoute:               handleWallets,
 	rescanWalletRoute:          handleRescanWallet,
+	abandonTxRoute:             handleAbandonTx,
 	withdrawRoute:              handleWithdraw,
 	sendRoute:                  handleSend,
 	appSeedRoute:               handleAppSeed,
@@ -623,6 +625,23 @@ func handleRescanWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayloa
 		return createResponse(rescanWalletRoute, nil, resErr)
 	}
 	return createResponse(rescanWalletRoute, "started", nil)
+}
+
+// handleAbandonTx handles requests to abandon an unconfirmed transaction.
+// This marks the transaction and all its descendants as abandoned, allowing
+// the wallet to forget about it. *msgjson.ResponsePayload.Error is empty if
+// successful.
+func handleAbandonTx(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	assetID, txID, err := parseAbandonTxArgs(params)
+	if err != nil {
+		return usage(abandonTxRoute, err)
+	}
+	err = s.core.AbandonTransaction(assetID, txID)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCWalletRescanError, "unable to abandon transaction: %v", err)
+		return createResponse(abandonTxRoute, nil, resErr)
+	}
+	return createResponse(abandonTxRoute, "transaction abandoned successfully", nil)
 }
 
 // handleLogout logs out Bison Wallet. *msgjson.ResponsePayload.Error is empty
@@ -1691,6 +1710,23 @@ needed to complete a swap.`,
       https://github.com/satoshilabs/slips/blob/master/slip-0044.md
     force (bool): Force a wallet rescan even if their are active orders. The
       default is false.`,
+	},
+	abandonTxRoute: {
+		argsShort: `assetID "txID"`,
+		cmdSummary: `Abandon an unconfirmed transaction. This marks the transaction and all
+its descendants as abandoned, allowing the wallet to forget about it and
+potentially spend its inputs in a different transaction. This is useful when
+a transaction gets stuck (e.g., due to low fees).
+
+Note: This only works for unconfirmed transactions. Returns an error if the
+transaction is confirmed or does not exist in the wallet. Currently only
+supported for DCR wallets.`,
+		argsLong: `Args:
+    assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
+      See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
+    txID (string): The transaction ID (hash) to abandon.`,
+		returns: `Returns:
+    string: Success message on completion.`,
 	},
 	withdrawRoute: {
 		pwArgsShort: `"appPass"`,

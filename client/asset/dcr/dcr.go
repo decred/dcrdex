@@ -8004,6 +8004,26 @@ func (dcr *ExchangeWallet) RedeemGeocode(code []byte, msg string) (dex.Bytes, ui
 	return ToCoinID(redeemHash, 0), win, nil
 }
 
+// AbandonTransaction implements asset.TxAbandoner, marking an unconfirmed
+// transaction and all its descendants as abandoned. This allows the wallet to
+// forget about the transaction and potentially spend its inputs in a different
+// transaction.
+func (dcr *ExchangeWallet) AbandonTransaction(ctx context.Context, txID string) error {
+	txHash, err := chainhash.NewHashFromStr(txID)
+	if err != nil {
+		return fmt.Errorf("invalid transaction ID %q: %w", txID, err)
+	}
+
+	abandoner, ok := dcr.wallet.(interface {
+		AbandonTransaction(context.Context, *chainhash.Hash) error
+	})
+	if !ok {
+		return fmt.Errorf("wallet does not support abandoning transactions")
+	}
+
+	return abandoner.AbandonTransaction(ctx, txHash)
+}
+
 func getDcrdataTxs(ctx context.Context, addr string, net dex.Network) (txs []*wire.MsgTx, _ error) {
 	apiRoot := "https://dcrdata.decred.org/api/"
 	switch net {

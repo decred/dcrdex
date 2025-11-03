@@ -785,6 +785,18 @@ type Recoverer interface {
 	Move(backupdir string) error
 }
 
+// TxAbandoner is a wallet that can abandon (forget about) unconfirmed
+// transactions. This is useful when a transaction gets stuck (e.g., due to
+// low fees) and the wallet needs to stop tracking it to allow the funds to
+// be spent again.
+type TxAbandoner interface {
+	// AbandonTransaction marks an unconfirmed transaction and all its
+	// descendants as abandoned. This allows the wallet to forget about the
+	// transaction and potentially spend its inputs in a different transaction.
+	// Returns an error if the transaction is confirmed or does not exist.
+	AbandonTransaction(ctx context.Context, txID string) error
+}
+
 // Withdrawer is a wallet that can withdraw a certain amount from the
 // source wallet/account.
 type Withdrawer interface {
