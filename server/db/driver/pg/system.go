@@ -322,14 +322,15 @@ func (pgs PGSettings) String() string {
 		"s | %10.10s | %" + strconv.Itoa(fileWidth) + "s | %5s | %-48.48s\n"
 
 	// Write the headers and a horizontal bar.
-	out := fmt.Sprintf(format, "Name", "Setting", "Source", "File", "Line", "Description")
+	var out strings.Builder
+	out.WriteString(fmt.Sprintf(format, "Name", "Setting", "Source", "File", "Line", "Description"))
 	hBar := strings.Repeat(string([]rune{0x2550}), nameWidth+1) + string([]rune{0x256A}) +
 		strings.Repeat(string([]rune{0x2550}), settingWidth+2) + string([]rune{0x256A}) +
 		strings.Repeat(string([]rune{0x2550}), 12) + string([]rune{0x256A}) +
 		strings.Repeat(string([]rune{0x2550}), fileWidth+2) + string([]rune{0x256A}) +
 		strings.Repeat(string([]rune{0x2550}), 7) + string([]rune{0x256A}) +
 		strings.Repeat(string([]rune{0x2550}), 50)
-	out += hBar + "\n"
+	out.WriteString(hBar + "\n")
 
 	// Write each row.
 	for i := range names {
@@ -338,10 +339,10 @@ func (pgs PGSettings) String() string {
 			log.Warnf("(PGSettings).String is not thread-safe!")
 			continue
 		}
-		out += fmt.Sprintf(format, s.Name, fullSettings[i], s.Source,
-			s.SourceFile, s.SourceLine, s.ShortDesc)
+		out.WriteString(fmt.Sprintf(format, s.Name, fullSettings[i], s.Source,
+			s.SourceFile, s.SourceLine, s.ShortDesc))
 	}
-	return out
+	return out.String()
 }
 
 // retrievePGVersion retrieves the version of the connected PostgreSQL server.

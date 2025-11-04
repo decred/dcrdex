@@ -624,12 +624,12 @@ func (wc *rpcClient) SignTx(inTx *wire.MsgTx) (*wire.MsgTx, error) {
 	}
 	if !res.Complete {
 		sep := ""
-		errMsg := ""
+		var errMsg strings.Builder
 		for _, e := range res.Errors {
-			errMsg += e.Error + sep
+			errMsg.WriteString(e.Error + sep)
 			sep = ";"
 		}
-		return nil, fmt.Errorf("signing incomplete. %d signing errors encountered: %s", len(res.Errors), errMsg)
+		return nil, fmt.Errorf("signing incomplete. %d signing errors encountered: %s", len(res.Errors), errMsg.String())
 	}
 	outTx, err := wc.deserializeTx(res.Hex)
 	if err != nil {

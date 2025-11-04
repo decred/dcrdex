@@ -252,11 +252,11 @@ func fiatSources(cfg Config) []*source {
 }
 
 func parseTickers(tickerSymbols ...string) string {
-	var tickers string
+	var tickers strings.Builder
 	for _, ticker := range tickerSymbols {
-		tickers += parseTicker(ticker) + ","
+		tickers.WriteString(parseTicker(ticker) + ",")
 	}
-	return strings.Trim(tickers, ",")
+	return strings.Trim(tickers.String(), ",")
 }
 
 func parseTicker(ticker string) string {
@@ -269,13 +269,13 @@ func parseTicker(ticker string) string {
 }
 
 func parseBinanceTickers(tickerSymbols []string) string {
-	var tickers string
+	var tickers strings.Builder
 	for _, ticker := range tickerSymbols {
 		ticker = parseTicker(ticker)
 		if strings.EqualFold(ticker, "zcl") { // not supported on binance as of writing
 			continue
 		}
-		tickers += fmt.Sprintf("%q,", ticker+"USDT")
+		tickers.WriteString(fmt.Sprintf("%q,", ticker+"USDT"))
 	}
-	return strings.Trim(tickers, ",")
+	return strings.Trim(tickers.String(), ",")
 }

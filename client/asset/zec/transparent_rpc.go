@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
@@ -92,12 +93,12 @@ func signTxByRPC(c rpcCaller, inTx *dexzec.Tx) (*dexzec.Tx, error) {
 	}
 	if !res.Complete {
 		sep := ""
-		errMsg := ""
+		var errMsg strings.Builder
 		for _, e := range res.Errors {
-			errMsg += e.Error + sep
+			errMsg.WriteString(e.Error + sep)
 			sep = ";"
 		}
-		return nil, fmt.Errorf("signing incomplete. %d signing errors encountered: %s", len(res.Errors), errMsg)
+		return nil, fmt.Errorf("signing incomplete. %d signing errors encountered: %s", len(res.Errors), errMsg.String())
 	}
 	outTx, err := dexzec.DeserializeTx(res.Hex)
 	if err != nil {
