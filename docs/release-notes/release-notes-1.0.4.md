@@ -6,7 +6,7 @@ Please read the [v1.0.0 release notes](https://github.com/decred/dcrdex/releases
 
 ## Fixes and Improvements
 
-- Updated dcrwallet dependency to 4.3.1. ([#3387](https://github.com/decred/dcrdex/pull/3387))
+- Updated dcrwallet dependency to 4.3.1 ([#3387](https://github.com/decred/dcrdex/pull/3387))
 - Fixed a seg fault bug on window close on Darwin ([#3366](https://github.com/decred/dcrdex/pull/3366))
 - Implemented snap package ([#2580](https://github.com/decred/dcrdex/pull/2580))
 - Updated libwebkitgtk deps ([#3232](https://github.com/decred/dcrdex/pull/3232))
@@ -18,7 +18,7 @@ Please read the [v1.0.0 release notes](https://github.com/decred/dcrdex/releases
 - Deserialize Firo blocks from bytes ([#3263](https://github.com/decred/dcrdex/pull/3263))
 - Fixed a bug where we were using a closed book feed channel ([#3254](https://github.com/decred/dcrdex/pull/3254))
 - Fixed GetBlockHash for Firo compatibility ([#3251](https://github.com/decred/dcrdex/pull/3251))
-- Added ` ExchangeWalletCustom` to support external btc-clone wallets ([#2855](https://github.com/decred/dcrdex/pull/2855))
+- Added `ExchangeWalletCustom` to support external btc-clone wallets ([#2855](https://github.com/decred/dcrdex/pull/2855))
 - Fixed electrum wallet transaction DB panic ([#3248](https://github.com/decred/dcrdex/pull/3248))
 - Enabled mixing for v5 wallet. ([#3242](https://github.com/decred/dcrdex/pull/3242))
 - Check for used addresses ([#2690](https://github.com/decred/dcrdex/pull/2690))
