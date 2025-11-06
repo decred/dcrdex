@@ -71,6 +71,7 @@ type TCore struct {
 	stakeStatus              *asset.TicketStakingStatus
 	stakeStatusErr           error
 	setVotingPrefErr         error
+	abandonTransactionErr    error
 }
 
 func (c *TCore) Balance(uint32) (uint64, error) {
@@ -224,6 +225,9 @@ func (c *TCore) SupportedBridgeDestinations(assetID uint32) (map[uint32][]string
 }
 func (c *TCore) BridgeFeesAndLimits(fromAssetID, toAssetID uint32, bridgeName string) (*core.BridgeFeesAndLimits, error) {
 	return nil, nil
+}
+func (c *TCore) AbandonTransaction(assetID uint32, txID string) error {
+	return c.abandonTransactionErr
 }
 
 type tBookFeed struct{}
