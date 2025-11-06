@@ -64,5 +64,5 @@ go list -f '{{ .EmbedFiles }}' decred.org/dcrdex/client/webserver
 # NOTE: before embedding, we needed to grab: dist, src/font, src/html, src/img.
 
 pushd bin
-sha256sum *.gz *.zip > bisonw-v${VER}-manifest.txt
+sha256sum *.gz *.zip *.deb *.msi *.dmg > bisonw-v${VER}-manifest.txt
 popd
