@@ -677,7 +677,7 @@ export default class Application {
     switch (req.actionID) {
       case 'tooCheap': {
         Doc.show(tmpl.newFeesRow)
-        tmpl.newFees.textContent = Doc.formatCoinValue(n.tx.fees, parentUI)
+        tmpl.newFees.textContent = Doc.formatCoinValue(n.newFees, parentUI)
         tmpl.newFeesUnit.textContent = parentUI.conventional.unit
         break
       }
