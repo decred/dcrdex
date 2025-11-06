@@ -23,12 +23,12 @@ Please read the [v1.0.0 release notes](https://github.com/decred/dcrdex/releases
 - Enabled mixing for v5 wallet. ([#3242](https://github.com/decred/dcrdex/pull/3242))
 - Check for used addresses ([#2690](https://github.com/decred/dcrdex/pull/2690))
 - Hide copy button on unsecure connection ([#3226](https://github.com/decred/dcrdex/pull/3226))
-- Switchedto custom bisoncraft version for webview dependency ([#3230](https://github.com/decred/dcrdex/pull/3230))
+- Switched to custom bisoncraft version for webview dependency ([#3230](https://github.com/decred/dcrdex/pull/3230))
 - Changed HTML titles to Bison Wallet ([#3223](https://github.com/decred/dcrdex/pull/3223))
 - Updated btcwallet dependency to v0.16.10 ([#3206](https://github.com/decred/dcrdex/pull/3206))
 - Created new syncer on Run error ([#3215](https://github.com/decred/dcrdex/pull/3215))
 - Handle market parameters update ([#2846](https://github.com/decred/dcrdex/pull/2846))
-- Use the app build version as Version in UI i([ hamburger menu](https://github.com/decred/dcrdex/pull/menu))
+- Use the app build version as Version in UI in hamburger menu
 
 ## Code Summary
 
