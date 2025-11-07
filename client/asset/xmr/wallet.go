@@ -55,8 +55,8 @@ func (r *xmrRpc) openWallet(ctx context.Context, pw string) error {
 	return r.wallet.OpenWallet(ctx, &openRq)
 }
 
-func (r *xmrRpc) walletServerRunning() bool {
-	verCtx, cancel := context.WithTimeout(r.ctx, GetVersionTimeout)
+func (r *xmrRpc) walletServerRunning(ctx context.Context) bool {
+	verCtx, cancel := context.WithTimeout(ctx, GetVersionTimeout)
 	defer cancel()
 	_, err := r.wallet.GetVersion(verCtx)
 	// just assume error means RPC or net error and the process is not running

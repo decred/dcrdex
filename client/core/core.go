@@ -2706,6 +2706,10 @@ func (c *Core) createWalletOrToken(crypter encrypt.Crypter, walletPW []byte, for
 	// Block PeersChange until we know this wallet is ready.
 	atomic.StoreUint32(wallet.broadcasting, 0)
 
+	if err = wallet.OpenWithPW(c.ctx, crypter); err != nil {
+		return nil, err
+	}
+
 	dbWallet.Address, err = c.connectWallet(wallet)
 	if err != nil {
 		return nil, err
@@ -3469,6 +3473,10 @@ func (c *Core) CloseWallet(assetID uint32) error {
 		return fmt.Errorf("wallet not found for %d -> %s: %w", assetID, unbip(assetID), err)
 	}
 	err = wallet.Lock(walletLockTimeout)
+	if err != nil {
+		return err
+	}
+	err = wallet.Close(c.ctx)
 	if err != nil {
 		return err
 	}
@@ -4778,7 +4786,16 @@ func (c *Core) connectWallets(crypter encrypt.Crypter) {
 			return
 		}
 		if !wallet.connected() {
-			err := c.connectAndUpdateWallet(wallet)
+			err := wallet.OpenWithPW(c.ctx, crypter)
+			if err != nil {
+				c.log.Errorf("Unable to open %s wallet: %v", unbip(wallet.AssetID), err)
+				// TODO: Make an open wallet specific topic.
+				subject, _ := c.formatDetails(TopicWalletConnectionWarning)
+				c.notify(newWalletConfigNote(TopicWalletConnectionWarning, subject, err.Error(),
+					db.ErrorLevel, wallet.state()))
+				return
+			}
+			err = c.connectAndUpdateWallet(wallet)
 			if err != nil {
 				c.log.Errorf("Unable to connect to %s wallet (start and sync wallets BEFORE starting dex!): %v",
 					unbip(wallet.AssetID), err)

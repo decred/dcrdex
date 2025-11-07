@@ -2,7 +2,9 @@ package xmr
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -127,29 +130,17 @@ func (d *Driver) Create(cwp *asset.CreateWalletParams) error {
 	if err != nil {
 		return err
 	}
-	if len(cwp.Pass) != 32 {
-		return fmt.Errorf("bad password length %d expected 32", len(cwp.Pass))
-	}
-	var pw string
-	if cwp.Net == dex.Simnet {
-		pw = "sim"
-	} else {
-		pw = hex.EncodeToString(cwp.Pass)
-	}
-	ks := new(keystore)
-	err = ks.put(pw, cwp.Net)
-	if err != nil {
-		return fmt.Errorf("failed to store pw %w", err)
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cliToolsDir := configSettings.CliToolsDir
 	trustedDaemons := getTrustedDaemons(cwp.Net, true, cwp.DataDir) // true: can be used for cli
 	if len(trustedDaemons) == 0 {
-		return fmt.Errorf("no trusted damons")
+		return errors.New("no trusted damons")
 	}
-	return cliGenerateRefreshWallet(ctx, trustedDaemons[0], cwp.Net, cwp.DataDir, cliToolsDir, pw, true)
+	if len(cwp.Seed) != ed25519.SeedSize {
+		return fmt.Errorf("expected seed size of %d but got %d", ed25519.SeedSize, len(cwp.Seed))
+	}
+	return cliGenerateRefreshWallet(ctx, trustedDaemons[0], cwp.Net, cwp.DataDir, cliToolsDir, cwp.Pass, cwp.Seed)
 }
 
 func checkWalletCfg(cfg *asset.WalletConfig) error {
@@ -275,7 +266,6 @@ func newWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		log:         logger,
 		walletInfo:  *WalletInfo,
 		feePriority: rpc.Priority(feePriority),
-		locked:      false,
 		xmrpc:       xmrpc,
 	}
 	return &xw, nil
@@ -317,8 +307,34 @@ type wallet struct {
 	log         dex.Logger
 	walletInfo  asset.WalletInfo
 	feePriority rpc.Priority
-	locked      bool
 	xmrpc       *xmrRpc
+	isOpen      atomic.Bool
+}
+
+var _ asset.Opener = (*wallet)(nil)
+
+// OpenWithPW opens a wallet that needs a password. Should be done before
+// connecting to the wallet.
+func (x *wallet) OpenWithPW(ctx context.Context, pw []byte) error {
+	if err := x.xmrpc.openWithPW(ctx, pw); err != nil {
+		return err
+	}
+	x.isOpen.Store(true)
+	return nil
+}
+
+// IsOpen returns whether the wallet is open.
+func (x *wallet) IsOpen() bool {
+	return x.isOpen.Load()
+}
+
+// Close should be called when done using the wallet.
+func (x *wallet) Close(ctx context.Context) error {
+	if err := x.xmrpc.wallet.CloseWallet(ctx); err != nil {
+		return err
+	}
+	x.isOpen.Store(false)
+	return nil
 }
 
 //////////////////
@@ -578,32 +594,6 @@ func (x *wallet) Reconfigure(reconfCtx context.Context, cfg *asset.WalletConfig,
 	}
 	x.feePriority = rpc.Priority(feePriority)
 	return false, nil
-}
-
-/////////////////////////
-// asset.Authenticator //
-/////////////////////////
-
-// This is a dummy implementation just to make the ui look nicer otherwise
-// it would not show [Ready] after startup and clicking [Unlock].
-
-var _ asset.Authenticator = (*wallet)(nil)
-
-// Unlock unlocks the exchange wallet.
-func (x *wallet) Unlock(pw []byte) error {
-	x.locked = false
-	return nil
-}
-
-// Lock locks the exchange wallet.
-func (x *wallet) Lock() error {
-	x.locked = true
-	return nil
-}
-
-// Locked will be true if the wallet is currently locked.
-func (x *wallet) Locked() bool {
-	return x.locked
 }
 
 //////////////////

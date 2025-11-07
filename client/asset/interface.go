@@ -690,6 +690,17 @@ type Broadcaster interface {
 	SendTransaction(rawTx []byte) ([]byte, error)
 }
 
+// Opener is used by wallets that need a password to open the wallet for the first time.
+type Opener interface {
+	// OpenWithPW opens a wallet that needs a password. Should be done before
+	// connecting to the wallet.
+	OpenWithPW(ctx context.Context, pw []byte) error
+	// IsOpen returns whether the wallet is currently open.
+	IsOpen() bool
+	// Close should be called when done using the wallet.
+	Close(ctx context.Context) error
+}
+
 // SyncStatus is the status of wallet syncing.
 type SyncStatus struct {
 	Synced         bool    `json:"synced"`
