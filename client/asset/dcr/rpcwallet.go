@@ -59,6 +59,7 @@ const (
 	methodSyncStatus         = "syncstatus"
 	methodGetPeerInfo        = "getpeerinfo"
 	methodWalletInfo         = "walletinfo"
+	methodAbandonTransaction = "abandontransaction"
 )
 
 // rpcWallet implements Wallet functionality using an rpc client to communicate
@@ -110,17 +111,6 @@ func (cc *combinedClient) ValidateAddress(ctx context.Context, address stdaddr.A
 	return cc.walletClient.ValidateAddress(ctx, address)
 }
 
-// AbandonTransaction calls the abandontransaction RPC method.
-func (cc *combinedClient) AbandonTransaction(ctx context.Context, hash *chainhash.Hash) error {
-	hashStr := hash.String()
-	param, err := json.Marshal(hashStr)
-	if err != nil {
-		return fmt.Errorf("error marshaling hash: %w", err)
-	}
-	_, err = cc.Client.RawRequest(ctx, "abandontransaction", []json.RawMessage{param})
-	return err
-}
-
 // rpcConnector defines methods required by *rpcWallet for connecting and
 // disconnecting the rpcClient to/from the json-rpc server.
 type rpcConnector interface {
@@ -168,7 +158,6 @@ type rpcClient interface {
 	SetTxFee(ctx context.Context, fee dcrutil.Amount) error
 	ListSinceBlock(ctx context.Context, hash *chainhash.Hash) (*walletjson.ListSinceBlockResult, error)
 	GetReceivedByAddressMinConf(ctx context.Context, address stdaddr.Address, minConfs int) (dcrutil.Amount, error)
-	AbandonTransaction(ctx context.Context, hash *chainhash.Hash) error
 }
 
 // newRPCWallet creates an rpcClient and uses it to construct a new instance
@@ -1301,4 +1290,9 @@ var _ ticketPager = (*rpcWallet)(nil)
 
 func (w *rpcWallet) TicketPage(ctx context.Context, scanStart int32, n, skipN int) ([]*asset.Ticket, error) {
 	return make([]*asset.Ticket, 0), nil
+}
+
+// AbandonTransaction calls the abandontransaction RPC method.
+func (w *rpcWallet) AbandonTransaction(ctx context.Context, hash *chainhash.Hash) error {
+	return w.rpcClientRawRequest(ctx, methodAbandonTransaction, anylist{hash}, nil)
 }

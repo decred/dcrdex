@@ -713,6 +713,8 @@ var _ asset.TicketBuyer = (*ExchangeWallet)(nil)
 var _ asset.WalletHistorian = (*ExchangeWallet)(nil)
 var _ asset.NewAddresser = (*ExchangeWallet)(nil)
 var _ asset.PrivateSwapper = (*ExchangeWallet)(nil)
+var _ asset.GeocodeRedeemer = (*ExchangeWallet)(nil)
+var _ asset.TxAbandoner = (*ExchangeWallet)(nil)
 
 type block struct {
 	height int64
@@ -7902,8 +7904,6 @@ func (dcr *ExchangeWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset
 	}, nil
 }
 
-var _ asset.GeocodeRedeemer = (*ExchangeWallet)(nil)
-
 // RedeemGeocode redeems funds from a geocode game tx to this wallet.
 func (dcr *ExchangeWallet) RedeemGeocode(code []byte, msg string) (dex.Bytes, uint64, error) {
 	msgLen := len([]byte(msg))
@@ -8014,14 +8014,7 @@ func (dcr *ExchangeWallet) AbandonTransaction(ctx context.Context, txID string) 
 		return fmt.Errorf("invalid transaction ID %q: %w", txID, err)
 	}
 
-	abandoner, ok := dcr.wallet.(interface {
-		AbandonTransaction(context.Context, *chainhash.Hash) error
-	})
-	if !ok {
-		return fmt.Errorf("wallet does not support abandoning transactions")
-	}
-
-	return abandoner.AbandonTransaction(ctx, txHash)
+	return dcr.wallet.AbandonTransaction(ctx, txHash)
 }
 
 func getDcrdataTxs(ctx context.Context, addr string, net dex.Network) (txs []*wire.MsgTx, _ error) {
