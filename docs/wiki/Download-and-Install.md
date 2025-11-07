@@ -156,21 +156,21 @@ release branch such as `release-v1.0`.
 ## Building
 
 1. Build the web assets from `client/webserver/site/`.
-If building from the `master` branch, bundle the CSS and JavaScript with Webpack:
+   If building from the `master` branch, bundle the CSS and JavaScript with Webpack:
 
-```sh
-npm clean-install && npm run build
-```
+   ```sh
+   npm clean-install && npm run build
+   ```
 
 2. Build and run the client from `client/cmd/bisonw`.
 
-```sh
-go build
-./bisonw
-```
+   ```sh
+   go build
+   ./bisonw
+   ```
 
 3. Once initial configuration has completed, the following message will appear
-in the terminal:
+   in the terminal:
 
 ```txt
 2024-10-15 10:38:04.710 [INF] WEB: Web server listening on 127.0.0.1:5758 (https = false)
@@ -185,19 +185,19 @@ through the Bison Wallet setup.
 
 # Docker
 
-**Build the docker image**
+## Build the docker image
 
 ```sh
 docker build -t user/dcrdex -f client/Dockerfile .
 ```
 
-**Create docker volume**
+## Create docker volume
 
 ```sh
 docker volume create --name=dcrdex_data
 ```
 
-**Run image**
+## Run image
 
 ```sh
 docker run -d --rm -p 127.0.0.1:5758:5758 -v dcrdex_data:/root/.bisonw user/dcrdex
