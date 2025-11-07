@@ -15,28 +15,22 @@ jobs:
           packages: git-restore-mtime libgtk-3-dev libwebkit2gtk-4.1-dev
           version: 1.0
 
-      - name: Set up Go
-        uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 #v5.3.0
-        with:
-          go-version: ${{ matrix.go }}
-
       - name: Check out source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 #v4.2.2
         with:
           fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 #v5.3.0
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+
       # Restore original file modification times for test cache reasons
       - name: restore timestamps
         run: git restore-mtime
       - name: Install Linters
         run: "curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.0.2"
-      - name: Use test and module cache
-        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 #v4.2.0
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: go-test-${{ matrix.go }}-${{ github.sha }}
-          restore-keys: go-test-${{ matrix.go }}
 
       - name: Test
         run: |
