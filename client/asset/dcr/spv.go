@@ -106,6 +106,7 @@ type dcrWallet interface {
 	RescanPoint(ctx context.Context) (*chainhash.Hash, error)
 	TotalReceivedForAddr(ctx context.Context, addr stdaddr.Address, minConf int32) (dcrutil.Amount, error)
 	NewVSPClient(cfg wallet.VSPClientConfig, log slog.Logger, dialer wallet.DialFunc) (*wallet.VSPClient, error)
+	AbandonTransaction(ctx context.Context, hash *chainhash.Hash) error
 }
 
 // Interface for *spv.Syncer so that we can test with a stub.

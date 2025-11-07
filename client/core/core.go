@@ -3277,6 +3277,26 @@ func (c *Core) RescanWallet(assetID uint32, force bool) error {
 	return nil
 }
 
+// AbandonTransaction marks an unconfirmed transaction and all its descendants
+// as abandoned. This allows the wallet to forget about the transaction and
+// potentially spend its inputs in a different transaction. This is useful for
+// transactions that are stuck due to low fees. Returns an error if the wallet
+// does not support transaction abandonment, if the transaction is confirmed,
+// or if the transaction does not exist.
+func (c *Core) AbandonTransaction(assetID uint32, txID string) error {
+	wallet, err := c.connectedWallet(assetID)
+	if err != nil {
+		return fmt.Errorf("wallet not found for %d -> %s: %w", assetID, unbip(assetID), err)
+	}
+
+	abandoner, ok := wallet.Wallet.(asset.TxAbandoner)
+	if !ok {
+		return fmt.Errorf("%s wallet does not support abandoning transactions", unbip(assetID))
+	}
+
+	return abandoner.AbandonTransaction(c.ctx, txID)
+}
+
 func (c *Core) removeWallet(assetID uint32) {
 	c.walletMtx.Lock()
 	defer c.walletMtx.Unlock()

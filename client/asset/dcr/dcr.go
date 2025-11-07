@@ -713,6 +713,8 @@ var _ asset.TicketBuyer = (*ExchangeWallet)(nil)
 var _ asset.WalletHistorian = (*ExchangeWallet)(nil)
 var _ asset.NewAddresser = (*ExchangeWallet)(nil)
 var _ asset.PrivateSwapper = (*ExchangeWallet)(nil)
+var _ asset.GeocodeRedeemer = (*ExchangeWallet)(nil)
+var _ asset.TxAbandoner = (*ExchangeWallet)(nil)
 
 type block struct {
 	height int64
@@ -7902,8 +7904,6 @@ func (dcr *ExchangeWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset
 	}, nil
 }
 
-var _ asset.GeocodeRedeemer = (*ExchangeWallet)(nil)
-
 // RedeemGeocode redeems funds from a geocode game tx to this wallet.
 func (dcr *ExchangeWallet) RedeemGeocode(code []byte, msg string) (dex.Bytes, uint64, error) {
 	msgLen := len([]byte(msg))
@@ -8002,6 +8002,19 @@ func (dcr *ExchangeWallet) RedeemGeocode(code []byte, msg string) (dex.Bytes, ui
 	}
 
 	return ToCoinID(redeemHash, 0), win, nil
+}
+
+// AbandonTransaction implements asset.TxAbandoner, marking an unconfirmed
+// transaction and all its descendants as abandoned. This allows the wallet to
+// forget about the transaction and potentially spend its inputs in a different
+// transaction.
+func (dcr *ExchangeWallet) AbandonTransaction(ctx context.Context, txID string) error {
+	txHash, err := chainhash.NewHashFromStr(txID)
+	if err != nil {
+		return fmt.Errorf("invalid transaction ID %q: %w", txID, err)
+	}
+
+	return dcr.wallet.AbandonTransaction(ctx, txHash)
 }
 
 func getDcrdataTxs(ctx context.Context, addr string, net dex.Network) (txs []*wire.MsgTx, _ error) {

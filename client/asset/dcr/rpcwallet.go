@@ -59,6 +59,7 @@ const (
 	methodSyncStatus         = "syncstatus"
 	methodGetPeerInfo        = "getpeerinfo"
 	methodWalletInfo         = "walletinfo"
+	methodAbandonTransaction = "abandontransaction"
 )
 
 // rpcWallet implements Wallet functionality using an rpc client to communicate
@@ -1289,4 +1290,9 @@ var _ ticketPager = (*rpcWallet)(nil)
 
 func (w *rpcWallet) TicketPage(ctx context.Context, scanStart int32, n, skipN int) ([]*asset.Ticket, error) {
 	return make([]*asset.Ticket, 0), nil
+}
+
+// AbandonTransaction calls the abandontransaction RPC method.
+func (w *rpcWallet) AbandonTransaction(ctx context.Context, hash *chainhash.Hash) error {
+	return w.rpcClientRawRequest(ctx, methodAbandonTransaction, anylist{hash.String()}, nil)
 }

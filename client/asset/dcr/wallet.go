@@ -177,6 +177,9 @@ type Wallet interface {
 	Reconfigure(ctx context.Context, cfg *asset.WalletConfig, net dex.Network, currentAddress string) (restart bool, err error)
 	WalletOwnsAddress(ctx context.Context, addr stdaddr.Address) (bool, error)
 	AddressUsed(ctx context.Context, addrStr string) (bool, error)
+	// AbandonTransaction implements asset.TxAbandoner, marking an unconfirmed
+	// transaction and all its descendants as abandoned.
+	AbandonTransaction(context.Context, *chainhash.Hash) error
 }
 
 // WalletTransaction is a pared down version of walletjson.GetTransactionResult.

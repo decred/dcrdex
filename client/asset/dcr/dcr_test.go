@@ -225,6 +225,7 @@ type tRPCClient struct {
 	purchaseTicketsErr error
 	stakeInfo          walletjson.GetStakeInfoResult
 	validateAddress    map[string]*walletjson.ValidateAddressResult
+	abandonTxErr       error
 }
 
 type wireTxWithHeight struct {
@@ -730,6 +731,10 @@ func (c *tRPCClient) GetReceivedByAddressMinConf(ctx context.Context, address st
 
 func (c *tRPCClient) ListSinceBlock(ctx context.Context, hash *chainhash.Hash) (*walletjson.ListSinceBlockResult, error) {
 	return nil, nil
+}
+
+func (c *tRPCClient) AbandonTransaction(_ context.Context, hash *chainhash.Hash) error {
+	return c.abandonTxErr
 }
 
 func TestMain(m *testing.M) {
