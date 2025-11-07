@@ -2,8 +2,8 @@
 
 Adding support for an asset is accomplished by writing a
 [Go](https://golang.org/) package with types that implement a particular set of
-interfaces, defined [here](https://github.com/decred/dcrdex/blob/master/server/asset/common.go)
-and [here](https://github.com/decred/dcrdex/blob/master/server/asset/driver.go).
+interfaces, defined in [common.go](https://github.com/decred/dcrdex/blob/master/server/asset/common.go)
+and [driver.go](https://github.com/decred/dcrdex/blob/master/server/asset/driver.go).
 There are then two ways to import the asset backend into the server software.
 
 1. The package is compiled with -``buildmode=plugin`` and imported at runtime by specifying
@@ -15,7 +15,7 @@ initial phases of DEX development, it is expected that development communities
 will release their own appropriately vetted plugins.
 
 Existing implementations for supported assets are located
-[here](https://github.com/decred/dcrdex/tree/master/server/asset).
+[in the server/asset directory](https://github.com/decred/dcrdex/tree/master/server/asset).
 
 ---
 

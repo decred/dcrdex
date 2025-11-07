@@ -206,4 +206,4 @@ the specification. This undertaking was approved via a second DEX
 
 ## FAQS
 
-- How can I integrate new assets? To add new assets, follow the instructions [here](https://github.com/decred/dcrdex/blob/master/spec/fundamentals.mediawiki/#adding-new-assets) and see existing implementations [here](https://github.com/decred/dcrdex/tree/master/server/asset).
+- How can I integrate new assets? To add new assets, follow the instructions [in the fundamentals specification](https://github.com/decred/dcrdex/blob/master/spec/fundamentals.mediawiki/#adding-new-assets) and see existing implementations [in the server/asset directory](https://github.com/decred/dcrdex/tree/master/server/asset).

@@ -19,7 +19,7 @@ permanently - we recommend backing it up via the [Settings Panel](Header#setting
   - [Recovery](#recovery)
   - [Forced Rescan](#forced-rescan)
   - [Full Reinitialize](#full-reinitialize)
-  - [Private Key Export](#native-wallet-export)
+  - [Private Key Export](#private-key-export)
 
 # Location of Application and Log files
 
