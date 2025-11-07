@@ -1294,5 +1294,5 @@ func (w *rpcWallet) TicketPage(ctx context.Context, scanStart int32, n, skipN in
 
 // AbandonTransaction calls the abandontransaction RPC method.
 func (w *rpcWallet) AbandonTransaction(ctx context.Context, hash *chainhash.Hash) error {
-	return w.rpcClientRawRequest(ctx, methodAbandonTransaction, anylist{hash}, nil)
+	return w.rpcClientRawRequest(ctx, methodAbandonTransaction, anylist{hash.String()}, nil)
 }
