@@ -11,7 +11,7 @@ along with an
 > If you have lost your seed, you are in serious danger of losing access to your funds
 permanently - we recommend backing it up via the [Settings Panel](Header#settings-panel).
 
-**Contents**
+## Contents
 
 - [Location of Application and Log files](#location-of-application-and-log-files)
 - [Native Wallets](#native-wallets)

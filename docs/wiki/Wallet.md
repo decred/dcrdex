@@ -2,7 +2,7 @@
 
 _Last updated for Bison Wallet v1.0.0._
 
-**Contents**
+## Contents
 
 - [Asset Selection](#asset-selection)
   - [Creating a New Wallet](#creating-a-new-wallet)

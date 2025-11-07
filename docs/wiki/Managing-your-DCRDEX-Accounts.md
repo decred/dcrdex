@@ -2,7 +2,7 @@
 
 _Last updated for Bison Wallet v1.0.0._
 
-**Contents**
+## Contents
 
 - [Changing Trading Tier](#changing-trading-tier)
 - [Reputation Score](#reputation-score)

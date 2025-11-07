@@ -2,7 +2,7 @@
 
 _Last updated for Bison Wallet v1.0.0._
 
-**Contents**
+## Contents
 
 - [New Password](#new-password)
 - [Restore Existing Seed](#restore-existing-seed)

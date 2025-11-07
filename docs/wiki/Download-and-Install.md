@@ -2,7 +2,7 @@
 
 _Last updated for Bison Wallet v1.0.0._
 
-**Contents**
+## Contents
 
 - [Download](#download)
 - [Bison Wallet Desktop](#bison-wallet-desktop)
@@ -143,7 +143,7 @@ through the Bison Wallet setup.
 
 # Building from Source
 
-**Dependencies**
+## Dependencies
 
 1. [Go 1.23 - 1.24](https://golang.org/doc/install)
 2. (optional) [Node 18 or 20](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm)
@@ -151,9 +151,9 @@ is used to bundle resources for the browser interface. It's important to note th
 external JavaScript dependencies. The client doesn't import any Node packages. We only use Node to lint
 and compile our own JavaScript and css resources. This build step is not required if building from a
 release branch such as `release-v1.0`.
-1. At least 2 GB of available system memory.
+3. At least 2 GB of available system memory.
 
-**Building**
+## Building
 
 1. Build the web assets from `client/webserver/site/`.
 If building from the `master` branch, bundle the CSS and JavaScript with Webpack:

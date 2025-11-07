@@ -2,7 +2,7 @@
 
 _Last updated for Bison Wallet v1.0.0._
 
-**Contents**
+## Contents
 
 - [Order Types](#order-types)
 - [Placing an Order](#placing-an-order)

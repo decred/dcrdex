@@ -2,7 +2,7 @@
 
 _Last updated for Bison Wallet v1.0.0._
 
-**Contents**
+## Contents
 
 - [Notifications Panel](#notifications-panel)
   - [Notifications Tab](#notifications-tab)
