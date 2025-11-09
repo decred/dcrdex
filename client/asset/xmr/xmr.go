@@ -140,7 +140,7 @@ func (d *Driver) Create(cwp *asset.CreateWalletParams) error {
 	if len(cwp.Seed) != ed25519.SeedSize {
 		return fmt.Errorf("expected seed size of %d but got %d", ed25519.SeedSize, len(cwp.Seed))
 	}
-	return cliGenerateRefreshWallet(ctx, trustedDaemons[0], cwp.Net, cwp.DataDir, cliToolsDir, cwp.Pass, cwp.Seed)
+	return cliGenerateRefreshWallet(ctx, trustedDaemons[0], cwp.Net, cwp.DataDir, cliToolsDir, cwp.Pass, cwp.Seed, cwp.Birthday)
 }
 
 func checkWalletCfg(cfg *asset.WalletConfig) error {
