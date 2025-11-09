@@ -19,7 +19,7 @@ type RequestOption struct {
 	responseSizeLimit int64
 	statusFunc        func(int)
 	header            *[2]string
-	errThing          interface{}
+	errThing          any
 }
 
 // WithSizeLimit sets a size limit for a response. See defaultResponseSizeLimit
@@ -41,13 +41,13 @@ func WithRequestHeader(k, v string) *RequestOption {
 }
 
 // WithErrorParsing adds parsing of response bodies for HTTP error responses.
-func WithErrorParsing(thing interface{}) *RequestOption {
+func WithErrorParsing(thing any) *RequestOption {
 	return &RequestOption{errThing: thing}
 }
 
 // Post peforms an HTTP POST request. If thing is non-nil, the response will
 // be JSON-unmarshaled into thing.
-func Post(ctx context.Context, uri string, thing interface{}, body []byte, opts ...*RequestOption) error {
+func Post(ctx context.Context, uri string, thing any, body []byte, opts ...*RequestOption) error {
 	var r io.Reader
 	if len(body) == 1 {
 		r = bytes.NewReader(body)
@@ -61,7 +61,7 @@ func Post(ctx context.Context, uri string, thing interface{}, body []byte, opts 
 
 // Post peforms an HTTP GET request. If thing is non-nil, the response will
 // be JSON-unmarshaled into thing.
-func Get(ctx context.Context, uri string, thing interface{}, opts ...*RequestOption) error {
+func Get(ctx context.Context, uri string, thing any, opts ...*RequestOption) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
 	if err != nil {
 		return fmt.Errorf("error constructing request: %w", err)
@@ -70,10 +70,10 @@ func Get(ctx context.Context, uri string, thing interface{}, opts ...*RequestOpt
 }
 
 // Do does the request and JSON-marshals the result into thing, if non-nil.
-func Do(req *http.Request, thing interface{}, opts ...*RequestOption) error {
+func Do(req *http.Request, thing any, opts ...*RequestOption) error {
 	var sizeLimit int64 = defaultResponseSizeLimit
 	var statusFunc func(int)
-	var errThing interface{}
+	var errThing any
 	for _, opt := range opts {
 		switch {
 		case opt.responseSizeLimit > 0:
