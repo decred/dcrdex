@@ -824,10 +824,9 @@ func (auth *AuthManager) computeUserReputation(user account.AccountID, score int
 	return
 }
 
-// ComputeUserTier computes the user's tier from their active bonds and conduct
-// score. The bondTier is also returned. The DB is always consulted for
-// computing the conduct score. Summing bond amounts may access the DB if the
-// user is not presently connected. The tier for an unknown user is -1.
+// ComputeUserReputation computes the user's reputation from their active bonds and conduct
+// score. The DB is always consulted for computing the conduct score. Summing bond amounts
+// may access the DB if the user is not presently connected. Returns nil for an unknown user.
 func (auth *AuthManager) ComputeUserReputation(user account.AccountID) *account.Reputation {
 	score, err := auth.loadUserScore(user)
 	if err != nil {
