@@ -2,7 +2,7 @@
 
 _Last updated for Bison Wallet v1.0.0._
 
-**Contents**
+## Contents
 
 - [Markets](#markets)
 - [Order Book](#order-book)
@@ -95,7 +95,7 @@ This section show your recent orders for the selected market.
 Clicking each order will expand it to display additional information.
 If an order is still in booked status, it can be cancelled by the
 <img src="./images/using-bison-wallet/button-cancel.png" width="20" alt=""> button,
-while the [Order Details](#order-details-view) view can be accessed by clicking
+while the [Order Details](Order-Management#order-details) view can be accessed by clicking
 the <img src="./images/using-bison-wallet/button-link.png" width="20" alt=""> button. Stuck swap transactions can also be accelerated by clicking the
 <img src="./images/using-bison-wallet/button-accelerate.png" width="20" alt=""> button.
 

@@ -2,7 +2,7 @@
 
 _Last updated for Bison Wallet v1.0.0._
 
-**Contents**
+## Contents
 
 - [Download](#download)
 - [Bison Wallet Desktop](#bison-wallet-desktop)
@@ -143,7 +143,7 @@ through the Bison Wallet setup.
 
 # Building from Source
 
-**Dependencies**
+## Dependencies
 
 1. [Go 1.23 - 1.24](https://golang.org/doc/install)
 2. (optional) [Node 18 or 20](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm)
@@ -151,26 +151,26 @@ is used to bundle resources for the browser interface. It's important to note th
 external JavaScript dependencies. The client doesn't import any Node packages. We only use Node to lint
 and compile our own JavaScript and css resources. This build step is not required if building from a
 release branch such as `release-v1.0`.
-1. At least 2 GB of available system memory.
+3. At least 2 GB of available system memory.
 
-**Building**
+## Building
 
 1. Build the web assets from `client/webserver/site/`.
-If building from the `master` branch, bundle the CSS and JavaScript with Webpack:
+   If building from the `master` branch, bundle the CSS and JavaScript with Webpack:
 
-```sh
-npm clean-install && npm run build
-```
+   ```sh
+   npm clean-install && npm run build
+   ```
 
 2. Build and run the client from `client/cmd/bisonw`.
 
-```sh
-go build
-./bisonw
-```
+   ```sh
+   go build
+   ./bisonw
+   ```
 
 3. Once initial configuration has completed, the following message will appear
-in the terminal:
+   in the terminal:
 
 ```txt
 2024-10-15 10:38:04.710 [INF] WEB: Web server listening on 127.0.0.1:5758 (https = false)
@@ -185,19 +185,19 @@ through the Bison Wallet setup.
 
 # Docker
 
-**Build the docker image**
+## Build the docker image
 
 ```sh
 docker build -t user/dcrdex -f client/Dockerfile .
 ```
 
-**Create docker volume**
+## Create docker volume
 
 ```sh
 docker volume create --name=dcrdex_data
 ```
 
-**Run image**
+## Run image
 
 ```sh
 docker run -d --rm -p 127.0.0.1:5758:5758 -v dcrdex_data:/root/.bisonw user/dcrdex

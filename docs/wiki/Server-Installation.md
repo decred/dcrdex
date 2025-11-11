@@ -81,7 +81,7 @@ command line argument or in the *dcrdex.conf* file. The
 [**Exchange Variables**](https://github.com/decred/dcrdex/blob/master/spec/admin.mediawiki) section of the specification has
 additional information on a few key options.
 
-**Run the server.**
+### Run the server
 
 `./dcrdex --testnet`
 

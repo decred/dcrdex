@@ -2,7 +2,7 @@
 
 _Last updated for Bison Wallet v1.0.0._
 
-**Contents**
+## Contents
 
 - [Notifications Panel](#notifications-panel)
   - [Notifications Tab](#notifications-tab)
@@ -23,7 +23,7 @@ the different features Bison Wallet offers.
 # Notifications Panel
 
 The notifications' panel can be opened by clicking the notifications icon
-on the [header](#header).
+on the [header](#top).
 
 <img src="./images/using-bison-wallet/header-notifications.png" width="400" alt="">
 
@@ -42,7 +42,7 @@ The Recent Activity tab displays lower severity notifications that are not persi
 
 # Language Switching
 
-Language Switching can be accessed by clicking the hamburger menu in the [header](#header).
+Language Switching can be accessed by clicking the hamburger menu in the [header](#top).
 
 <img src="./images/using-bison-wallet/header-hamburger.png" width="400" alt="">
 
@@ -57,7 +57,7 @@ will change the language to ``German``.
 
 # Settings Panel
 
-The Settings can be accessed by clicking the hamburger menu in the [header](#header).
+The Settings can be accessed by clicking the hamburger menu in the [header](#top).
 
 <img src="./images/using-bison-wallet/header-hamburger.png" width="400" alt="">
 

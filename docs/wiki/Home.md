@@ -106,7 +106,7 @@ Initially proposed by Jake Yocom-Piatt in the
 [Decred blog](https://blog.decred.org/2018/06/05/A-New-Kind-of-DEX/) in 2018,
 DCRDEX development started in 2019 and has been fully funded by the Decred treasury.
 
-**Project Timeline**
+## Project Timeline
 
 | Date    | Milestone                                                                                                               |
 |---------|-------------------------------------------------------------------------------------------------------------------------|
