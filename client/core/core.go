@@ -1596,7 +1596,9 @@ func New(cfg *Config) (*Core, error) {
 		case language.High, language.Low:
 			cfg.Logger.Infof("Using language %v", tag)
 		case language.No:
-			return language.Und, fmt.Errorf("no match for %q in recognized languages %v", cfg.Language, langs)
+			// Fallback to English instead of returning error
+			cfg.Logger.Warnf("Language %q not supported, falling back to %s", langStr, originLang)
+			return language.AmericanEnglish, nil
 		}
 		return tag, nil
 	}
@@ -1629,7 +1631,9 @@ func New(cfg *Config) (*Core, error) {
 
 	translations, found := locales[lang.String()]
 	if !found {
-		return nil, fmt.Errorf("no translations for language %s", lang)
+		cfg.Logger.Warnf("Language %q not supported, falling back to %s", lang, originLang)
+		lang = language.AmericanEnglish
+		translations = locales[originLang]
 	}
 
 	// Try to get the primary credentials, but ignore no-credentials error here
@@ -1871,7 +1875,10 @@ func (c *Core) SetLanguage(lang string) error {
 
 	translations, found := locales[lang]
 	if !found {
-		return fmt.Errorf("no translations for language %s", lang)
+		c.log.Warnf("Language %q not supported, using %s", lang, originLang)
+		lang = originLang
+		tag, _ = language.Parse(originLang) // Safe to ignore error, originLang is known valid
+		translations = locales[originLang]
 	}
 	if err := c.db.SetLanguage(lang); err != nil {
 		return fmt.Errorf("error storing language: %w", err)
