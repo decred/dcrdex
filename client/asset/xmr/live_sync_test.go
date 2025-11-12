@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"github.com/decred/slog"
 )
 
 // Test constants
@@ -42,6 +43,8 @@ func TestCliGenerateRefreshWalletCmd(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background()) // used by exec.CommandContext
 	defer cancel()
+
+	logger := dex.StdOutLogger("test", slog.LevelTrace)
 	home, _ := os.UserHomeDir()
 	userToolsDir := path.Join(home, MoneroToolsDir)
 	pwB := []byte(TestPw)
@@ -50,6 +53,7 @@ func TestCliGenerateRefreshWalletCmd(t *testing.T) {
 	err = cliGenerateRefreshWallet(
 		ctx,
 		CakeMainnetDaemon,
+		logger,
 		dex.Mainnet,
 		dataDir,
 		userToolsDir,

@@ -2706,7 +2706,7 @@ func (c *Core) createWalletOrToken(crypter encrypt.Crypter, walletPW []byte, for
 	// Block PeersChange until we know this wallet is ready.
 	atomic.StoreUint32(wallet.broadcasting, 0)
 
-	if err = wallet.OpenWithPW(c.ctx, crypter); err != nil {
+	if err = c.openWithPW(assetID, wallet, crypter); err != nil {
 		return nil, err
 	}
 
@@ -2759,6 +2759,17 @@ func (c *Core) createWalletOrToken(crypter encrypt.Crypter, walletPW []byte, for
 	c.walletCheckAndNotify(wallet)
 
 	return wallet, nil
+}
+
+func (c *Core) openWithPW(assetID uint32, wallet *xcWallet, crypter encrypt.Crypter) error {
+	_, p, err := c.assetSeedAndPass(assetID, crypter)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		encode.ClearBytes(p)
+	}()
+	return wallet.OpenWithPW(c.ctx, p)
 }
 
 func (c *Core) createWallet(crypter encrypt.Crypter, walletPW []byte, assetID uint32, form *WalletForm) (*db.Wallet, error) {
@@ -4786,7 +4797,7 @@ func (c *Core) connectWallets(crypter encrypt.Crypter) {
 			return
 		}
 		if !wallet.connected() {
-			err := wallet.OpenWithPW(c.ctx, crypter)
+			err := c.openWithPW(wallet.AssetID, wallet, crypter)
 			if err != nil {
 				c.log.Errorf("Unable to open %s wallet: %v", unbip(wallet.AssetID), err)
 				// TODO: Make an open wallet specific topic.
