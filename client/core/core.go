@@ -1884,6 +1884,7 @@ func (c *Core) SetLanguage(lang string) error {
 		return fmt.Errorf("error storing language: %w", err)
 	}
 	c.intl.Store(&locale{
+		lang:    tag,
 		m:       translations,
 		printer: message.NewPrinter(tag),
 	})
