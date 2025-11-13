@@ -2766,6 +2766,10 @@ func (c *Core) openWithPW(assetID uint32, wallet *xcWallet, crypter encrypt.Cryp
 	if err != nil {
 		return err
 	}
+	hashSize := blake256.New().Size()
+	if len(p) != hashSize {
+		return fmt.Errorf("bad hash length: %d, expected: %d", len(p), hashSize)
+	}
 	defer func() {
 		encode.ClearBytes(p)
 	}()

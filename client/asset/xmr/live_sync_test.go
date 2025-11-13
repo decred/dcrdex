@@ -31,15 +31,7 @@ const (
 // go test -v -count=1 -tags=xmrlive -run=TestCliGenerateRefreshWalletCmd
 
 func TestCliGenerateRefreshWalletCmd(t *testing.T) {
-	dataDir, err := os.MkdirTemp("", "dataDir_")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := os.RemoveAll(dataDir); err != nil {
-			t.Logf("error removing temporary directory %s: %v", dataDir, err)
-		}
-	}()
+	dataDir := t.TempDir() // will be cleaned up by T
 
 	ctx, cancel := context.WithCancel(context.Background()) // used by exec.CommandContext
 	defer cancel()
@@ -50,7 +42,7 @@ func TestCliGenerateRefreshWalletCmd(t *testing.T) {
 	pwB := []byte(TestPw)
 	seedB, _ := hex.DecodeString(TestSeed)
 
-	err = cliGenerateRefreshWallet(
+	err := cliGenerateRefreshWallet(
 		ctx,
 		CakeMainnetDaemon,
 		logger,
