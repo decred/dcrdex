@@ -11,8 +11,8 @@ import (
 )
 
 // adjust if needed
-const InstalledToolsDir = "/monero-x86_64-linux-gnu-v0.18.4.1"
-const TestDir = "/dex/dcrdex/client/asset/xmr/tmp_dir" // TODO(xmr) compare td against expected
+const InstalledToolsDir = "/monero-x86_64-linux-gnu-v0.18.4.3"
+const TestDir = "/dex/dcrdex/client/asset/xmr/tmp_dir" // shared with test_generate_refresh.sh
 
 var userDaemons = `
 [
@@ -204,66 +204,3 @@ func TestMoneroVersion(t *testing.T) {
 		t.Fatalf("0.18.4.7 - expected valid got invalid")
 	}
 }
-
-// No keystore service running on CI so commented out.
-//
-// WARNING THIS TEST WILL DESTROY ANY EXISTING DEX XMR WALLET PW ON SIMNET
-
-// func TestKeystore(t *testing.T) {
-// 	var net dex.Network = dex.Simnet
-// 	fmt.Println(runtime.GOOS)
-// 	fmt.Println("network =", net)
-
-// 	b := make([]byte, 32)
-// 	rand.Read(b)
-// 	pass := hex.EncodeToString(b)
-
-// 	s := new(keystore)
-// 	err := s.put(pass, net)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-
-// 	s2 := new(keystore)
-// 	pass2, err := s2.get(net)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-
-// 	if pass != pass2 {
-// 		t.Fatalf("unexpected stored password mismatch pass %s pass2 %x", pass, pass2)
-// 	}
-
-// 	err = s2.put(pass, net)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-
-// 	pw, err := s.get(net)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	fmt.Println(pw)
-
-// 	pw2, err := s.get(net)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	fmt.Println(pw2)
-
-// 	if pw2 != pw {
-// 		t.Fatalf("unexpected stored password mismatch pw %s pw2 %s", pw, pw2)
-// 	}
-
-// 	err = s.delete(net)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	fmt.Println("pw deleted")
-
-// 	err = s.delete(net)
-// 	if err == nil {
-// 		fmt.Println("pw deleted again")
-// 		t.Fatalf("pw deleted again %v", err)
-// 	}
-// }

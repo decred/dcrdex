@@ -136,7 +136,6 @@ func (r *xmrRpc) isSyncing() bool { return r.syncing.Load() }
 
 func (r *xmrRpc) connect(ctx context.Context) (*sync.WaitGroup, error) {
 	var wg sync.WaitGroup
-	r.ctx = ctx
 
 	_, _, walletSynced, err := r.walletSynced()
 	if err != nil {
@@ -158,6 +157,7 @@ func (r *xmrRpc) connect(ctx context.Context) (*sync.WaitGroup, error) {
 }
 
 func (r *xmrRpc) openWithPW(ctx context.Context, pw []byte) error {
+	r.ctx = ctx
 	err := r.probeDaemon(ctx)
 	if err != nil {
 		return fmt.Errorf("unable to probe daemon: %v", err)
@@ -178,10 +178,15 @@ func (r *xmrRpc) openWithPW(ctx context.Context, pw []byte) error {
 	} else {
 		r.log.Warn("xmr re-entered open with pw")
 	}
-	if err := r.openWallet(ctx, hex.EncodeToString(pw)); err != nil {
+	err = r.openWallet(ctx, hex.EncodeToString(pw))
+	if err != nil {
 		return err
 	}
-	r.walletInfo.primaryAddress, _ = r.getPrimaryAddress()
+	r.walletInfo.primaryAddress, err = r.getPrimaryAddress(ctx)
+	if err != nil {
+		return err
+	}
+	r.log.Infof("primary public address: %s", r.walletInfo.primaryAddress)
 	return nil
 }
 

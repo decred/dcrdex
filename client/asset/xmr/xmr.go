@@ -122,6 +122,11 @@ func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, 
 
 // Create creates a new wallet.
 func (d *Driver) Create(cwp *asset.CreateWalletParams) error {
+	// check if user re-entered from create UI but wallet files already made
+	if !walletFilesMissing(cwp.DataDir) {
+		return fmt.Errorf("Create entered but wallet files already exist")
+	}
+
 	configSettings, err := parseWalletConfig(cwp.Settings)
 	if err != nil {
 		return err
@@ -140,7 +145,7 @@ func (d *Driver) Create(cwp *asset.CreateWalletParams) error {
 	if len(cwp.Seed) != ed25519.SeedSize {
 		return fmt.Errorf("expected seed size of %d but got %d", ed25519.SeedSize, len(cwp.Seed))
 	}
-	return cliGenerateRefreshWallet(ctx, trustedDaemons[0], cwp.Net, cwp.DataDir, cliToolsDir, cwp.Pass, cwp.Seed)
+	return cliGenerateRefreshWallet(ctx, trustedDaemons[0], cwp.Logger, cwp.Net, cwp.DataDir, cliToolsDir, cwp.Pass, cwp.Seed, cwp.Birthday)
 }
 
 func checkWalletCfg(cfg *asset.WalletConfig) error {
@@ -311,6 +316,11 @@ type wallet struct {
 	isOpen      atomic.Bool
 }
 
+//////////////////
+// asset.Opener //
+//////////////////
+
+// wallet implements asset.Opener
 var _ asset.Opener = (*wallet)(nil)
 
 // OpenWithPW opens a wallet that needs a password. Should be done before
