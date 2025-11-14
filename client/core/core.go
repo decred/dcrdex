@@ -11079,9 +11079,9 @@ func (c *Core) deleteRequestedAction(uniqueID string) {
 	c.requestedActionMtx.Unlock()
 }
 
-// handleRetryRedemptionAction handles a response to a user response to an
-// ActionRequiredNote for a rejected redemption transaction.
-func (c *Core) handleRetryRedemptionAction(actionB []byte) error {
+// handleRetryTxAction handles a response to a user response to an
+// ActionRequiredNote for a rejected redemption or refund transaction.
+func (c *Core) handleRetryTxAction(actionB []byte, isRedeem bool) error {
 	var req struct {
 		OrderID dex.Bytes `json:"orderID"`
 		CoinID  dex.Bytes `json:"coinID"`
@@ -11112,32 +11112,49 @@ func (c *Core) handleRetryRedemptionAction(actionB []byte) error {
 	defer tracker.mtx.Unlock()
 
 	for _, match := range tracker.matches {
-		coinID := match.MetaData.Proof.TakerRedeem
-		if match.Side == order.Maker {
-			coinID = match.MetaData.Proof.MakerRedeem
+		var coinID order.CoinID
+		if isRedeem {
+			coinID = match.MetaData.Proof.TakerRedeem
+			if match.Side == order.Maker {
+				coinID = match.MetaData.Proof.MakerRedeem
+			}
+		} else {
+			coinID = match.MetaData.Proof.RefundCoin
 		}
 		if bytes.Equal(coinID, req.CoinID) {
-			if match.Side == order.Taker && match.Status == order.MatchComplete {
-				// Try to redeem again.
-				match.redemptionRejected = false
-				match.MetaData.Proof.TakerRedeem = nil
-				match.Status = order.MakerRedeemed
-				if err := c.db.UpdateMatch(&match.MetaMatch); err != nil {
-					c.log.Errorf("Failed to update match in DB: %v", err)
-				}
-				// For maker, the status could be either MakerRedeemed or
-				// MatchComplete because the redeem message may have gone
-				// through with correct secret, allowing the taker to redeem,
-				// even if the maker's redemption tx failed.
-			} else if match.Side == order.Maker && (match.Status == order.MakerRedeemed || match.Status == order.MatchComplete) {
-				match.redemptionRejected = false
-				match.MetaData.Proof.MakerRedeem = nil
-				match.Status = order.TakerSwapCast
-				if err := c.db.UpdateMatch(&match.MetaMatch); err != nil {
-					c.log.Errorf("Failed to update match in DB: %v", err)
+			// Make sure this is not called after confirmed.
+			if match.Status == order.MatchConfirmed {
+				return nil
+			}
+			if isRedeem {
+				if match.Side == order.Taker && match.Status == order.MatchComplete {
+					// Try to redeem again.
+					match.redemptionRejected = false
+					match.MetaData.Proof.TakerRedeem = nil
+					match.Status = order.MakerRedeemed
+					if err := c.db.UpdateMatch(&match.MetaMatch); err != nil {
+						c.log.Errorf("Failed to update match in DB: %v", err)
+					}
+					// For maker, the status could be either MakerRedeemed or
+					// MatchComplete because the redeem message may have gone
+					// through with correct secret, allowing the taker to redeem,
+					// even if the maker's redemption tx failed.
+				} else if match.Side == order.Maker && (match.Status == order.MakerRedeemed || match.Status == order.MatchComplete) {
+					match.redemptionRejected = false
+					match.MetaData.Proof.MakerRedeem = nil
+					match.Status = order.TakerSwapCast
+					if err := c.db.UpdateMatch(&match.MetaMatch); err != nil {
+						c.log.Errorf("Failed to update match in DB: %v", err)
+					}
+				} else {
+					c.log.Errorf("Redemption retry attempted for order side %s status %s", match.Side, match.Status)
 				}
 			} else {
-				c.log.Errorf("Redemption retry attempted for order side %s status %s", match.Side, match.Status)
+				match.MetaData.Proof.RefundCoin = nil
+				match.refundRejected = false
+				if err := c.db.UpdateMatch(&match.MetaMatch); err != nil {
+					c.log.Errorf("Failed to update match in DB: %v", err)
+				}
 			}
 		}
 	}
@@ -11149,7 +11166,9 @@ func (c *Core) handleRetryRedemptionAction(actionB []byte) error {
 func (c *Core) handleCoreAction(actionID string, actionB json.RawMessage) ( /* handled */ bool, error) {
 	switch actionID {
 	case ActionIDRedeemRejected:
-		return true, c.handleRetryRedemptionAction(actionB)
+		return true, c.handleRetryTxAction(actionB, true)
+	case ActionIDRefundRejected:
+		return true, c.handleRetryTxAction(actionB, false)
 	}
 	return false, nil
 }
