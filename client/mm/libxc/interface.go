@@ -164,19 +164,21 @@ const (
 	BinanceUS = "BinanceUS"
 	Coinbase  = "Coinbase"
 	MEXC      = "MEXC"
+	Bitget    = "Bitget"
 )
 
 // IsValidCEXName returns whether or not a cex name is supported.
 func IsValidCexName(cexName string) bool {
-	return cexName == Binance || cexName == BinanceUS || cexName == MEXC
+	return cexName == Binance || cexName == BinanceUS || cexName == MEXC || cexName == Bitget
 }
 
 type CEXConfig struct {
-	Net       dex.Network
-	APIKey    string
-	SecretKey string
-	Logger    dex.Logger
-	Notify    func(any)
+	Net           dex.Network
+	APIKey        string
+	SecretKey     string
+	APIPassphrase string // Required by some exchanges like Bitget
+	Logger        dex.Logger
+	Notify        func(interface{})
 }
 
 // NewCEX creates a new CEX.
@@ -190,6 +192,8 @@ func NewCEX(cexName string, cfg *CEXConfig) (CEX, error) {
 		return newCoinbase(cfg)
 	case MEXC:
 		return newMEXC(cfg)
+	case Bitget:
+		return newBitget(cfg), nil
 	default:
 		return nil, fmt.Errorf("unrecognized CEX: %v", cexName)
 	}
