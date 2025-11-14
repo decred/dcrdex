@@ -29,7 +29,8 @@ import {
   WalletCreationNote,
   CoreNote,
   PrepaidBondID,
-  WalletTransaction
+  WalletTransaction,
+  CEXConfig
 } from './registry'
 import { XYRangeHandler } from './opts'
 import { CoinExplorers } from './coinexplorers'
@@ -2174,6 +2175,10 @@ export class CEXConfigurationForm {
     Doc.hide(page.cexConfigPrompt, page.cexConnectErrBox, page.cexFormErr)
     page.cexApiKeyInput.value = ''
     page.cexSecretInput.value = ''
+    page.cexPassphraseInput.value = ''
+    // Show passphrase field for exchanges that require it (currently only Bitget)
+    const requiresPassphrase = cexName === 'Bitget'
+    Doc.setVis(requiresPassphrase, page.cexPassphraseBox)
     const cexStatus = app().mmStatus.cexes[cexName]
     const connectErr = cexStatus?.connectErr
     if (connectErr) {
@@ -2181,6 +2186,9 @@ export class CEXConfigurationForm {
       page.cexConnectErr.textContent = connectErr
       page.cexApiKeyInput.value = cexStatus.config.apiKey
       page.cexSecretInput.value = cexStatus.config.apiSecret
+      if (cexStatus.config.apiPassphrase) {
+        page.cexPassphraseInput.value = cexStatus.config.apiPassphrase
+      }
     } else {
       Doc.show(page.cexConfigPrompt)
     }
@@ -2194,18 +2202,29 @@ export class CEXConfigurationForm {
     Doc.hide(page.cexFormErr)
     const apiKey = page.cexApiKeyInput.value
     const apiSecret = page.cexSecretInput.value
+    const apiPassphrase = page.cexPassphraseInput.value
     if (!apiKey || !apiSecret) {
       Doc.show(page.cexFormErr)
       page.cexFormErr.textContent = intl.prep(intl.ID_NO_PASS_ERROR_MSG)
       return
     }
+    // Validate passphrase for exchanges that require it
+    if (cexName === 'Bitget' && !apiPassphrase) {
+      Doc.show(page.cexFormErr)
+      page.cexFormErr.textContent = 'Bitget requires an API Passphrase'
+      return
+    }
     const loaded = app().loading(form)
     try {
-      const res = await MM.updateCEXConfig({
+      const cfg: CEXConfig = {
         name: cexName,
         apiKey: apiKey,
         apiSecret: apiSecret
-      })
+      }
+      if (apiPassphrase) {
+        cfg.apiPassphrase = apiPassphrase
+      }
+      const res = await MM.updateCEXConfig(cfg)
       if (!app().checkResponse(res)) throw res
       this.updated(cexName, true)
     } catch (e) {

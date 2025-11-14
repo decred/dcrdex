@@ -550,6 +550,7 @@ var ZhCN = map[string]*intl.Translation{
 	"configure_cex_prompt":        {T: "配置您的交易所 API 以启用套利功能。"},
 	"API Key":                     {T: "API 密钥"},
 	"API Secret":                  {T: "API 密钥"},
+	"API Passphrase":              {T: "API 密码"},
 	"Available":                   {T: "可用"},
 	"Locked":                      {T: "已锁定"},
 	"profit_loss":                 {T: "利润 / 损失"},
