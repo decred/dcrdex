@@ -88,6 +88,7 @@ var (
 				MultiFundingOpts: btc.MultiFundingOpts,
 			},
 		},
+		BlockchainClass: asset.BlockchainClassUTXO,
 	}
 )
 

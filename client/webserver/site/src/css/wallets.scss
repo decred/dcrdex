@@ -1,4 +1,4 @@
-.walletspage {
+[data-handler=wallets] {
   .ico-unlocked {
     color: var(--indicator-good);
   }
@@ -110,21 +110,9 @@
 
   #walletInfo {
     border-left: none;
-
-    table#walletInfoTable {
-      td {
-        padding: 2px 5px 2px 0;
-        line-height: 1;
-
-        &:last-child {
-          text-align: right;
-          padding-left: 1rem;
-        }
-      }
-    }
   }
 
-  #earlierTxs, #txViewBlockExplorer {
+  #txViewBlockExplorer {
     text-decoration: underline;
     cursor: pointer;
   }
@@ -162,6 +150,20 @@
     }
   }
 
+  #tickerBox {
+    &:not(.multinet) .multinetonly {
+      display: none !important;
+    }
+  
+    &.multinet .uninetonly {
+      display: none !important;
+    }
+  
+    &:not(.token) .tokenonly {
+      display: none !important;
+    }
+  }
+
   .peers-table-icon {
     padding-left: 30%;
   }
@@ -185,7 +187,14 @@
   }
 
   .negative-tx {
-    color: $danger;
+    color: inherit;
+  }
+
+  #docs {
+    .plainlink:visited,
+    .plainlink:hover {
+      text-decoration: none;
+    }
   }
 }
 
@@ -209,7 +218,7 @@
     @include stylish-overflow;
   }
 
-  .walletspage {
+  [data-handler=wallets] {
     #walletDetailsBox {
       border-bottom: none !important;
     }
@@ -225,7 +234,7 @@
 }
 
 @include media-breakpoint-up(sm) {
-  .walletspage {
+  [data-handler=wallets] {
     #walletDetailsBox {
       #assetLogo {
         width: 40px;
@@ -278,7 +287,7 @@
 }
 
 @include media-breakpoint-up(md) {
-  .walletspage {
+  [data-handler=wallets] {
     #sendReceive {
       border-bottom: none;
     }
