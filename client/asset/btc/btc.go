@@ -5708,7 +5708,7 @@ func (btc *baseWallet) send(address string, val uint64, feeRate uint64, subtract
 		Fees:      totalIn - totalOut,
 		Recipient: &address,
 		Timestamp: uint64(time.Now().Unix()),
-		Confirms:  &asset.Confirms{Target: requiredRedeemConfirms},
+		Confirms:  &asset.Confirms{Target: confTxFinality},
 	}, txHash, true)
 
 	return txHash, 0, toSend, nil
@@ -6448,7 +6448,7 @@ func (btc *baseWallet) RefundBond(ctx context.Context, ver uint16, coinID, scrip
 			BondID:   pkhPush,
 		},
 		Timestamp: uint64(time.Now().Unix()),
-		Confirms:  &asset.Confirms{Target: requiredRedeemConfirms},
+		Confirms:  &asset.Confirms{Target: confTxFinality},
 	}, txID, true)
 
 	return NewOutput(txHash, 0, uint64(msgTx.TxOut[0].Value)), nil
@@ -7148,7 +7148,7 @@ func (btc *intermediaryWallet) syncTxHistory(tip uint64) {
 			updated = tx.Confirms == nil || tx.Confirms.Current != uint32(confs)
 			tx.Confirms = &asset.Confirms{
 				Current: uint32(confs),
-				Target:  requiredRedeemConfirms,
+				Target:  confTxFinality,
 			}
 		}
 

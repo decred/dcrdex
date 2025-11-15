@@ -52,7 +52,8 @@
 {{end}}
 
 {{define "walletCfgGuideTemplate"}}
-<a data-tmpl="walletCfgGuide" class="d-flex justify-content-start align-items-center pt-2 mx-3 pointer hoverbg" target="_blank">
+<a data-tmpl="walletCfgGuide" class="d-flex justify-content-start align-items-center pt-2 mx-3 pointer hoverbg"
+  target="_blank">
   <span class="ico-textfile me-2"></span>
   <span class="pointer">[[[configuration guide]]]</span>
 </a>
@@ -130,7 +131,7 @@
   <div data-tmpl="unifiedReceivers" class="d-flex align-items-stretch">
     <div data-tmpl="unifiedReceiverTmpl" class="p-1 me-2 hoverbg lh1 fs15 pointer brdr selectable"></div>
   </div>
-  <div id="addrUsed" class="my-1 text-center fs15 grey lh1 text-warning">
+  <div data-tmpl="addrUsed" class="my-1 text-center fs15 grey lh1 text-warning">
     [[[address has been used]]]
   </div>
   <div data-tmpl="newDepAddrBttnBox" class="flex-stretch-column">
@@ -162,7 +163,7 @@
 </div>
 <div data-tmpl="knownXCs" class="flex-stretch-column">
   {{range .KnownExchanges}}
-    <div class="known-exchange" data-host="{{.}}"><img class="micro-icon me-1" src={{dummyExchangeLogo .}}> {{.}}</div>
+  <div class="known-exchange" data-host="{{.}}"><img class="micro-icon me-1" src={{dummyExchangeLogo .}}> {{.}}</div>
   {{end}}
 </div>
 <div data-tmpl="skipRegistrationBox" class="fs14">
@@ -170,7 +171,8 @@
   <label for="skipRegistration" class="ps-1">[[[Skip Registration]]]</label>
 </div>
 <div data-tmpl="showCustom">
-  <div class="px-1 mb-2 fs14 pointer d-flex justify-content-start align-items-center {{if eq (len .KnownExchanges) 0}}d-hide{{end}}">
+  <div
+    class="px-1 mb-2 fs14 pointer d-flex justify-content-start align-items-center {{if eq (len .KnownExchanges) 0}}d-hide{{end}}">
     <span class="ico-plus fs11"></span>
     <div class="ps-2">[[[add a different server]]]</div>
   </div>
@@ -277,8 +279,10 @@
         <input data-tmpl="tradingTierInput" type="number" class="text-center fs24 p-2" value="1" min="0" step="1">
         <input type="text" class="d-hide"> <!--two inputs to prevent auto form submission-->
         <div class="flex-stretch-column border-top border-end border-bottom">
-          <div data-tmpl="tierUp" class="hoveropaque flex-grow-1 flex-center ico-arrowup pointer hoverbg border-bottom px-2"></div>
-          <div data-tmpl="tierDown" class="hoveropaque flex-grow-1 flex-center ico-arrowdown pointer hoverbg px-2"></div>
+          <div data-tmpl="tierUp"
+            class="hoveropaque flex-grow-1 flex-center ico-arrowup pointer hoverbg border-bottom px-2"></div>
+          <div data-tmpl="tierDown" class="hoveropaque flex-grow-1 flex-center ico-arrowdown pointer hoverbg px-2">
+          </div>
         </div>
       </div>
     </div>
@@ -478,7 +482,8 @@
 <div data-tmpl="text" class="fs16 reg-conf-msg mt-3 border-top">
   <span class="ico-info"></span> [[[reg_confirm_submit]]]
 </div>
-<div class="hoverbg pointer grey pt-2" data-tmpl="goBack"><span class="ico-arrowleft fs12 me-1"></span> [[[pick a different asset]]]</div>
+<div class="hoverbg pointer grey pt-2" data-tmpl="goBack"><span class="ico-arrowleft fs12 me-1"></span> [[[pick a
+  different asset]]]</div>
 {{end}}
 
 {{define "authorizeAccountImportForm"}}
@@ -496,7 +501,8 @@
   </small>
 </div>
 <div class="flex-stretch-column">
-  <button id="authorizeImportAccountConfirm" type="button" class="mt-2 mx-3 mb-3 feature">[[[Authorize Import]]]</button>
+  <button id="authorizeImportAccountConfirm" type="button" class="mt-2 mx-3 mb-3 feature">[[[Authorize
+    Import]]]</button>
 </div>
 <div class="fs15 text-center d-hide text-danger text-break" id="importAccountErr"></div>
 {{end}}
@@ -535,7 +541,7 @@
   <div class="col-14">
     <div id="companionAppTorEnabled" class="d-hide">
       <img class="mb-3" id="companionAppQrcode" />
-    </div>    
+    </div>
     <div id="companionAppTorDisabled">
       <p>[[[companion_app_tor_needed]]]</p>
     </div>
@@ -592,7 +598,7 @@
   <div class="d-hide" id="earlyAccelerationDiv">
     <div id="recentAccelerationMsg">[[[recent_acceleration_msg]]]</div>
     <div id="recentSwapMsg">[[[recent_swap_msg]]]</div>
-    <br/>
+    <br />
     [[[early_acceleration_help_msg]]]
     <div class="d-flex flex-row align-items-end justify-content-end pb-4">
       <div class="col-12 pt-2">
@@ -602,7 +608,7 @@
   </div>
   <div class="fs15 pt-3 text-center d-hide text-danger text-break" id="accelerateErr"></div>
 </div>
-  {{/* range option template goes here */}}
+{{/* range option template goes here */}}
 <div id="accelerateMsgDiv" class="d-hide">
   <div class="fs15 pt-3 text-center d-hide text-danger text-break" id="preAccelerateErr"></div>
   <div class="fs15 pt-3 text-left d-hide text-break" id="accelerateSuccess">
@@ -653,7 +659,8 @@
       <span class="grey unit">XYZ</span>
     </div>
     <div data-tmpl="bondCostBreakdown" class="mb-2 grey">[[[bond_cost_breakdown]]]</div>
-    <span data-tmpl="sendEnoughWithEst" class="grey">[[[Send enough with estimate]]]</span> {{- /* NOTE: includes totalForBond */}}
+    <span data-tmpl="sendEnoughWithEst" class="grey">[[[Send enough with estimate]]]</span> {{- /* NOTE: includes
+    totalForBond */}}
     <span data-tmpl="sendEnoughForToken" class="grey">[[[Send funds for token]]]</span>
     <div class="mb-1 flex-center flex-row d-hide" data-tmpl="txFeeBox">
       <span class="fs16 me-1">[[[Reserves for tx fees]]]</span>
@@ -668,7 +675,8 @@
     <hr class="dashed w-100 mb-3">
     <div class="mb-2">[[[Your Deposit Address]]]</div>
     <div class="mono fs15 p-2 border word-break-all border user-select-all" data-tmpl="depoAddr"></div>
-    <span data-tmpl="sendEnough">[[[Send enough for bonds]]]</span> {{- /* generic message if the fee buffer is unknown */}}
+    <span data-tmpl="sendEnough">[[[Send enough for bonds]]]</span> {{- /* generic message if the fee buffer is unknown
+    */}}
   </div>
 </div>
 
@@ -716,12 +724,12 @@
 {{define "toggleWalletStatusConfirm"}}
 <div class="form-closer"><span class="ico-cross"></span></div>
 <header>
-   <span id="walletStatusDisable" class="d-hide">[[[disable_wallet]]]</span>
-    <span id="walletStatusEnable" class="d-hide">[[[enable_wallet]]]</span>
+  <span id="walletStatusDisable" class="d-hide">[[[disable_wallet]]]</span>
+  <span id="walletStatusEnable" class="d-hide">[[[enable_wallet]]]</span>
 </header>
 <div class="fs15 text-left">
- <span id="disableWalletMsg" class="hide">[[[disable_wallet_warning]]]</span>
- <span id="enableWalletMsg" class="hide">[[[enable_wallet_message]]]</span>
+  <span id="disableWalletMsg" class="hide">[[[disable_wallet_warning]]]</span>
+  <span id="enableWalletMsg" class="hide">[[[enable_wallet_message]]]</span>
 </div>
 <div class="flex-stretch-column">
   <button id="toggleWalletStatusSubmit" type="button" class="feature">[[[Submit]]]</button>
@@ -730,26 +738,26 @@
 {{end}}
 
 {{define "appPassResetForm"}}
- <div class="form-closer" id="resetPassFormCloser"><span class="ico-cross"></span></div>
- <header>[[[Reset App Password]]]</header>
- <div>[[[reset_app_pw_msg]]]</div>
- <div class="mt-3 border-top">
-   <label for="newAppPassword">[[[New Password]]]</label>
-   <input type="password" id="newAppPassword" autocomplete="new-password">
- </div>
- <div>
-   <label for="confirmNewAppPassword">[[[Confirm New Password]]]</label>
-   <input type="password" id="confirmNewAppPassword" autocomplete="off">
- </div>
- <div>
-   <label for="seedInput">[[[Restoration Seed]]]</label>
-   <textarea class="mono" id="seedInput" rows="4" autocomplete="off" spellcheck="false"></textarea>
- </div>
- <div class="flex-stretch-column">
-    <button id="resetAppPWSubmitBtn" type="button" class="feature">[[[Submit]]]</button>
- </div>
- <div class="fs15 text-center d-hide text-danger text-break" id="appPWResetErrMsg"></div>
- <div id="appPWResetSuccessMsg" class="d-hide text-break text-center fs15"></div> 
+<div class="form-closer" id="resetPassFormCloser"><span class="ico-cross"></span></div>
+<header>[[[Reset App Password]]]</header>
+<div>[[[reset_app_pw_msg]]]</div>
+<div class="mt-3 border-top">
+  <label for="newAppPassword">[[[New Password]]]</label>
+  <input type="password" id="newAppPassword" autocomplete="new-password">
+</div>
+<div>
+  <label for="confirmNewAppPassword">[[[Confirm New Password]]]</label>
+  <input type="password" id="confirmNewAppPassword" autocomplete="off">
+</div>
+<div>
+  <label for="seedInput">[[[Restoration Seed]]]</label>
+  <textarea class="mono" id="seedInput" rows="4" autocomplete="off" spellcheck="false"></textarea>
+</div>
+<div class="flex-stretch-column">
+  <button id="resetAppPWSubmitBtn" type="button" class="feature">[[[Submit]]]</button>
+</div>
+<div class="fs15 text-center d-hide text-danger text-break" id="appPWResetErrMsg"></div>
+<div id="appPWResetSuccessMsg" class="d-hide text-break text-center fs15"></div>
 {{end}}
 
 {{define "reputationMeter"}}
@@ -799,7 +807,8 @@
 </div>
 <div class="fs15 text-center d-hide text-danger text-break" data-tmpl="errMsg"></div>
 <div data-tmpl="balanceBox" class="flex-center w-100 py-2 mt-2 px-3 border-top fs15">
-  [[[Available fee balance]]]: <span data-tmpl="balance" class="ms-2"></span> <span data-tmpl="parentTicker" class="grey ms-1"></span>
+  [[[Available fee balance]]]: <span data-tmpl="balance" class="ms-2"></span> <span data-tmpl="parentTicker"
+    class="grey ms-1"></span>
 </div>
 <div data-tmpl="addressBox" class="flex-center fs15 d-hide">
   [[[approve_token_wallet_addr]]] <span data-tmpl="address" class="ms-2 px-2"></span>
@@ -1062,7 +1071,8 @@
   <header id="orderReportTitle"></header>
   <div id="orderReportError" class="text-danger d-flex flex-column"></div>
   <div id="orderReportDetails" class="d-flex flex-column">
-    <div class="fs18 mt-3 align-self-start"><img class="logo-square small"><span class="ms-2">[[[Wallet Balances]]]</span></div>
+    <div class="fs18 mt-3 align-self-start"><img class="logo-square small"><span class="ms-2">[[[Wallet
+        Balances]]]</span></div>
     <table class="table striped border mt-3 w-auto mx-auto">
       <thead>
         <tr>
@@ -1079,7 +1089,8 @@
       </thead>
       <tbody id="dexBalancesBody">
         <tr id="dexBalancesRowTmpl">
-          <td class="border text-center"><img data-tmpl="assetLogo" class="micro-icon me-1"><span data-tmpl="asset"></span></td>
+          <td class="border text-center"><img data-tmpl="assetLogo" class="micro-icon me-1"><span
+              data-tmpl="asset"></span></td>
           <td class="border text-center" data-tmpl="available"></td>
           <td class="border text-center" data-tmpl="locked"></td>
           <td class="border text-center" data-tmpl="pending"></td>
@@ -1094,32 +1105,34 @@
 
     <div id="cexSection">
       <hr>
-      <div class="fs18 align-self-start"><img id="cexLogo" class="small-icon"><span class="ms-2" id="cexBalancesTitle"></span></div>
+      <div class="fs18 align-self-start"><img id="cexLogo" class="small-icon"><span class="ms-2"
+          id="cexBalancesTitle"></span></div>
       <table id="cexBalancesTable" class="table striped border mt-3 w-auto mx-auto">
-      <thead>
-        <tr>
-          <th class="border text-center">[[[Asset]]]</th>
-          <th class="border text-center">[[[Available]]]</th>
-          <th class="border text-center">[[[Locked]]]</th>
-          <th class="border text-center">[[[Pending]]]</th>
-          <th class="border text-center">[[[Required]]]</th>
-          <th class="border text-center">[[[Used]]]</th>
-          <th class="border text-center">[[[Remaining]]]</th>
-          <th id="cexDeficiencyHeader" class="border text-center">[[[Deficiency]]]</th>
-          <th id="cexDeficiencyWithPendingHeader" class="border text-center">[[[Deficiency with Pending]]]</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td class="border text-center"><img id="cexAssetLogo" class="micro-icon me-1"><span id="cexAsset"></span></td>
-          <td id="cexAvailable" class="border text-center"></td>
-          <td id="cexLocked" class="border text-center"></td>
-          <td id="cexPending" class="border text-center"></td>
-          <td id="cexRequired" class="border text-center"></td>
-          <td id="cexUsed" class="border text-center"></td>
-          <td id="cexRemaining" class="border text-center"></td>
-          <td id="cexDeficiency" class="border text-center text-warning"></td>
-          <td id="cexDeficiencyWithPending" class="border text-center"></td>
+        <thead>
+          <tr>
+            <th class="border text-center">[[[Asset]]]</th>
+            <th class="border text-center">[[[Available]]]</th>
+            <th class="border text-center">[[[Locked]]]</th>
+            <th class="border text-center">[[[Pending]]]</th>
+            <th class="border text-center">[[[Required]]]</th>
+            <th class="border text-center">[[[Used]]]</th>
+            <th class="border text-center">[[[Remaining]]]</th>
+            <th id="cexDeficiencyHeader" class="border text-center">[[[Deficiency]]]</th>
+            <th id="cexDeficiencyWithPendingHeader" class="border text-center">[[[Deficiency with Pending]]]</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="border text-center"><img id="cexAssetLogo" class="micro-icon me-1"><span id="cexAsset"></span>
+            </td>
+            <td id="cexAvailable" class="border text-center"></td>
+            <td id="cexLocked" class="border text-center"></td>
+            <td id="cexPending" class="border text-center"></td>
+            <td id="cexRequired" class="border text-center"></td>
+            <td id="cexUsed" class="border text-center"></td>
+            <td id="cexRemaining" class="border text-center"></td>
+            <td id="cexDeficiency" class="border text-center text-warning"></td>
+            <td id="cexDeficiencyWithPending" class="border text-center"></td>
           </tr>
         </tbody>
       </table>

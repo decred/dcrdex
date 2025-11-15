@@ -25,6 +25,18 @@
 
   #content {
     flex-direction: column;
+
+    &:not(.multinet) .multinetonly {
+      display: none !important;
+    }
+
+    &.multinet .uninetonly {
+      display: none !important;
+    }
+
+    &:not(.token) .tokenonly {
+      display: none !important;
+    }
   }
 
   #assetSelect {
@@ -77,7 +89,7 @@
       line-height: 1;
     }
 
-    tr.itemized > td {
+    tr.itemized>td {
       padding-bottom: 0.25rem;
     }
 
@@ -92,15 +104,15 @@
     tr.sub {
       font-size: 0.9rem;
 
-      &.last > td:first-child::before {
+      &.last>td:first-child::before {
         content: '└─ ',
       }
 
-      & > td:first-child::before {
+      &>td:first-child::before {
         content: '├─ ',
       }
 
-      & > td:last-child {
+      &>td:last-child {
         @include border-right;
 
         padding-right: 0.5rem;
@@ -122,6 +134,7 @@
   }
 
   #walletDetailsBox {
+
     // Asset name and balance sizes for mobile. Redefined for > sm below.
     #assetLogo {
       width: 30px;
@@ -147,20 +160,6 @@
     #tokenParentLogo {
       width: 18px;
       height: 18px;
-    }
-  }
-
-  #tickerBox {
-    &:not(.multinet) .multinetonly {
-      display: none !important;
-    }
-  
-    &.multinet .uninetonly {
-      display: none !important;
-    }
-  
-    &:not(.token) .tokenonly {
-      display: none !important;
     }
   }
 
@@ -307,5 +306,3 @@
 #submitReconfig[disabled] {
   cursor: not-allowed;
 }
-
-

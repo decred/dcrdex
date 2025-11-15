@@ -3545,7 +3545,7 @@ func (w *zecWallet) syncTxHistory(tip uint64) {
 			updated = tx.Confirms == nil || tx.Confirms.Current != uint32(confs)
 			tx.Confirms = &asset.Confirms{
 				Current: uint32(confs),
-				Target:  requiredRedeemConfirms,
+				Target:  confTxFinality,
 			}
 		}
 
