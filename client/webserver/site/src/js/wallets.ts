@@ -10,6 +10,7 @@ import {
 import State from './state'
 import * as intl from './locales'
 import * as OrderUtil from './orderutil'
+import { NetworkAsset, TickerAsset, normalizedTicker } from './assets'
 import {
   app,
   PageElement,
@@ -39,8 +40,7 @@ import {
   TxHistoryResult,
   TxHistoryRequest,
   TransactionNote,
-  WalletTransaction,
-  WalletInfo
+  WalletTransaction
 } from './registry'
 import { CoinExplorers } from './coinexplorers'
 
@@ -55,143 +55,6 @@ interface TicketPurchaseUpdate extends BaseWalletNote {
   remaining: number
   tickets?: Ticket[]
   stats?: TicketStats
-}
-
-class ChainAsset {
-  assetID: number
-  symbol: string
-  ui: UnitInfo
-  chainName: string
-  chainLogo: string
-  ticker: string
-  token?: {
-    parentMade: boolean
-    parentID: number
-    feeUI: UnitInfo
-  }
-
-  constructor (a: SupportedAsset) {
-    const { id: assetID, symbol, name, token, unitInfo: ui, unitInfo: { conventional: { unit: ticker } } } = a
-    this.assetID = assetID
-    this.ticker = ticker
-    this.symbol = symbol
-    this.ui = ui
-    this.chainName = token ? app().assets[token.parentID].name : name
-    this.chainLogo = token ? Doc.logoPath(app().assets[token.parentID].symbol) : Doc.logoPath(symbol)
-    if (token) this.token = { parentID: token.parentID, feeUI: app().unitInfo(token.parentID), parentMade: Boolean(app().assets[token.parentID].wallet) }
-  }
-
-  get bal () {
-    const w = app().assets[this.assetID].wallet
-    return w?.balance ?? { available: 0, locked: 0, immature: 0 }
-  }
-
-  updateTokenParentMade () {
-    if (!this.token) return false
-    this.token.parentMade = Boolean(app().assets[this.token.parentID].wallet)
-  }
-}
-
-class TickerAsset {
-  ticker: string // normalized e.g. WETH -> ETH
-  hasWallets: boolean
-  cFactor: number
-  bestID: number
-  logoSymbol: string
-  name: string
-  chainAssets: ChainAsset[]
-  chainAssetLookup: Record<number, ChainAsset>
-  haveAllFiatRates: boolean
-  isMultiNet: boolean
-  hasTokens: boolean
-  ui: UnitInfo
-
-  constructor (a: SupportedAsset) {
-    const { id: assetID, name, symbol, unitInfo: ui, unitInfo: { conventional: { conversionFactor: cFactor } } } = a
-    this.ticker = normalizedTicker(a)
-    this.cFactor = cFactor
-    this.chainAssets = []
-    this.chainAssetLookup = {}
-    this.bestID = assetID
-    this.name = name
-    this.logoSymbol = symbol
-    this.ui = ui
-    this.addChainAsset(a)
-  }
-
-  addChainAsset (a: SupportedAsset) {
-    const { id: assetID, symbol, name, wallet: w, token, unitInfo: ui } = a
-    const xcRate = app().fiatRatesMap[assetID]
-    if (!xcRate) this.haveAllFiatRates = false
-    this.hasTokens = this.hasTokens || Boolean(token)
-    if (!token) { // prefer the native asset data, e.g. weth.polygon -> eth}
-      this.bestID = assetID
-      this.logoSymbol = symbol
-      this.name = name
-      this.ui = ui
-    }
-    const ca = new ChainAsset(a)
-    this.hasWallets = this.hasWallets || Boolean(w) || Boolean(ca.token?.parentMade)
-    this.chainAssets.push(ca)
-    this.chainAssetLookup[a.id] = ca
-    this.chainAssets.sort((a: ChainAsset, b: ChainAsset) => {
-      if (a.token && !b.token) return 1
-      if (!a.token && b.token) return -1
-      return a.ticker.localeCompare(b.ticker)
-    })
-    this.isMultiNet = this.chainAssets.length > 1
-  }
-
-  walletInfo (): WalletInfo | undefined {
-    for (const { assetID } of this.chainAssets) {
-      const { info } = app().assets[assetID]
-      if (info) return info
-    }
-  }
-
-  updateHasWallets () {
-    for (const ta of this.chainAssets) {
-      ta.updateTokenParentMade()
-      const { assetID, token } = ta
-      if (app().walletMap[assetID] || token?.parentMade) {
-        this.hasWallets = true
-        return
-      }
-    }
-  }
-
-  /*
-   * blockchainWallet returns the assetID and wallet for the blockchain for
-   * which this ticker is a native asset, if it exists.
-   */
-  blockchainWallet () {
-    for (const { assetID } of this.chainAssets) {
-      const { wallet, token } = app().assets[assetID]
-      if (!token) return { assetID, wallet }
-    }
-  }
-
-  get avail () {
-    return this.chainAssets.reduce((sum: number, ca: ChainAsset) => sum + ca.bal.available, 0)
-  }
-
-  get immature () {
-    return this.chainAssets.reduce((sum: number, ca: ChainAsset) => sum + ca.bal.immature, 0)
-  }
-
-  get locked () {
-    return this.chainAssets.reduce((sum: number, ca: ChainAsset) => sum + ca.bal.locked, 0)
-  }
-
-  get total () {
-    return this.chainAssets.reduce((sum: number, { bal: { available, locked, immature } }: ChainAsset) => {
-      return sum + available + locked + immature
-    }, 0)
-  }
-
-  get xcRate () {
-    return app().fiatRatesMap[this.bestID]
-  }
 }
 
 const animationLength = 300
@@ -351,7 +214,7 @@ interface reconfigSettings {
 }
 
 interface PendingTx extends WalletTransaction {
-  chainAsset: ChainAsset
+  networkAsset: NetworkAsset
   tr: PageElement
   tmpl: Record<string, PageElement>
 }
@@ -455,7 +318,7 @@ export default class WalletsPage extends BasePage {
     Doc.bind(page.reconfigureBttn, 'click', () => this.showReconfig(this.selectedWalletID))
     Doc.bind(page.rescanWallet, 'click', () => this.rescanWallet(this.selectedWalletID))
 
-    const getTxID = () : string => {
+    const getTxID = (): string => {
       if (!this.currTx) return ''
       if (this.currTx.isUserOp) return this.currTx.userOpTxID
       return this.currTx.id
@@ -482,7 +345,7 @@ export default class WalletsPage extends BasePage {
       this.refreshBalances()
       this.sortTickers()
       this.updateGlobalBalance()
-      if (this.selectedTicker.chainAssetLookup[assetID]) this.updateDisplayedTicker()
+      if (this.selectedTicker.networkAssetLookup[assetID]) this.updateDisplayedTicker()
       this.updateTicketBuyer()
       this.updatePrivacy()
     })
@@ -1042,12 +905,11 @@ export default class WalletsPage extends BasePage {
   prepareTickerAssets () {
     const tickerList: TickerAsset[] = []
     const tickerMap: Record<string, TickerAsset> = {}
-
     for (const a of Object.values(app().user.assets)) {
       const normedTicker = normalizedTicker(a)
       let ta = tickerMap[normedTicker]
       if (ta) {
-        ta.addChainAsset(a)
+        ta.addNetworkAsset(a)
         continue
       }
       ta = new TickerAsset(a)
@@ -1142,8 +1004,8 @@ export default class WalletsPage extends BasePage {
     Doc.setText(page.secondColumn, '[data-ticker]', ticker)
     Doc.setText(page.walletDetailsBox, '[data-asset-name]', name)
     Doc.setSrc(page.walletDetailsBox, '[data-logo]', Doc.logoPath(logoSymbol))
-    page.tickerBox.classList.toggle('multinet', isMultiNet)
-    page.tickerBox.classList.toggle('token', hasTokens)
+    page.content.classList.toggle('multinet', isMultiNet)
+    page.content.classList.toggle('token', hasTokens)
     for (const div of Array.from(page.docs.children) as PageElement[]) Doc.setVis(div.dataset.docTicker === ticker, div)
     this.updateDisplayedTicker()
     this.showAvailableMarkets()
@@ -1191,7 +1053,7 @@ export default class WalletsPage extends BasePage {
     if (!showBalanceBreakdown) return
 
     Doc.empty(page.balanceBreakdown)
-    for (const { assetID, chainName, chainLogo, bal: { available, locked, immature }, token } of ta.chainAssets) {
+    for (const { assetID, chainName, chainLogo, bal: { available, locked, immature }, token } of ta.networkAssets) {
       const { wallet: w } = app().assets[assetID]
       const tr = Doc.clone(page.blockchainBalanceTmpl)
       page.balanceBreakdown.appendChild(tr)
@@ -1265,7 +1127,7 @@ export default class WalletsPage extends BasePage {
 
   updateFeeState () {
     const { page, selectedTicker: ta } = this
-    const { ui, xcRate, chainAssets } = ta
+    const { ui, xcRate, networkAssets } = ta
 
     page.feeStateXcRate.textContent = Doc.formatFourSigFigs(xcRate)
 
@@ -1276,7 +1138,7 @@ export default class WalletsPage extends BasePage {
       tmpl.value.textContent = Doc.formatFourSigFigs(Math.max(fv, 0.001), fv >= 0.1 ? 2 : 3)
     }
 
-    const feeAssetStuff = (ca: ChainAsset): [number, UnitInfo, number] => {
+    const feeAssetStuff = (ca: NetworkAsset): [number, UnitInfo, number] => {
       const { assetID, token } = ca
       const feeAssetID = token ? token.parentID : assetID
       const feeUI = token?.feeUI ?? ui
@@ -1287,7 +1149,7 @@ export default class WalletsPage extends BasePage {
     Doc.setVis(ta.hasWallets, page.txFeesBox)
     if (ta.isMultiNet) {
       Doc.empty(page.netTxFees)
-      for (const ca of chainAssets) {
+      for (const ca of networkAssets) {
         const { assetID, chainName, chainLogo } = ca
         const [feeAssetID, feeUI, feeFiatRate] = feeAssetStuff(ca)
         const tr = Doc.clone(page.netTxFeeTmpl)
@@ -1319,7 +1181,7 @@ export default class WalletsPage extends BasePage {
       }
       app().bindUnits(page.netTxFees)
     } else {
-      const [feeAssetID, feeUI, feeFiatRate] = feeAssetStuff(chainAssets[0])
+      const [feeAssetID, feeUI, feeFiatRate] = feeAssetStuff(networkAssets[0])
       const w = app().walletMap[feeAssetID]
       if (!w?.feeState) return
       const { rate, send, swap, redeem } = w.feeState
@@ -1750,13 +1612,13 @@ export default class WalletsPage extends BasePage {
   }
 
   showAvailableMarkets () {
-    const { page, selectedTicker: { chainAssetLookup } } = this
+    const { page, selectedTicker: { networkAssetLookup } } = this
     const exchanges = app().user.exchanges
-    const markets: [string, Exchange, Market, ChainAsset][] = []
+    const markets: [string, Exchange, Market, NetworkAsset][] = []
     for (const xc of Object.values(exchanges)) {
       for (const mkt of Object.values(xc.markets ?? [])) {
-        if (chainAssetLookup[mkt.baseid]) markets.push([xc.host, xc, mkt, chainAssetLookup[mkt.baseid]])
-        else if (chainAssetLookup[mkt.quoteid]) markets.push([xc.host, xc, mkt, chainAssetLookup[mkt.quoteid]])
+        if (networkAssetLookup[mkt.baseid]) markets.push([xc.host, xc, mkt, networkAssetLookup[mkt.baseid]])
+        else if (networkAssetLookup[mkt.quoteid]) markets.push([xc.host, xc, mkt, networkAssetLookup[mkt.quoteid]])
       }
     }
 
@@ -1768,7 +1630,7 @@ export default class WalletsPage extends BasePage {
       return volume / conversionFactor
     }
 
-    markets.sort((a: [string, Exchange, Market, ChainAsset], b: [string, Exchange, Market, ChainAsset]): number => {
+    markets.sort((a: [string, Exchange, Market, NetworkAsset], b: [string, Exchange, Market, NetworkAsset]): number => {
       const [hostA, , mktA, caA] = a
       const [hostB, , mktB, caB] = b
       if (!mktA.spot && !mktB.spot) return hostA.localeCompare(hostB)
@@ -1802,15 +1664,15 @@ export default class WalletsPage extends BasePage {
   }
 
   showPendingTxs () {
-    const { page, selectedTicker: { chainAssets } } = this
+    const { page, selectedTicker: { networkAssets } } = this
     const pendingTxs: PendingTx[] = []
     this.pendingTxs = {}
-    for (const ca of chainAssets) {
-      const w = app().walletMap[ca.assetID]
+    for (const na of networkAssets) {
+      const w = app().walletMap[na.assetID]
       if (!w) continue
       for (const tx of Object.values(w.pendingTxs)) {
         if (tx.timestamp === 0) continue
-        const pt = { ...tx, chainAsset: ca } as PendingTx
+        const pt = { ...tx, networkAsset: na } as PendingTx
         pendingTxs.push(pt)
         this.pendingTxs[tx.id] = pt
       }
@@ -1828,7 +1690,7 @@ export default class WalletsPage extends BasePage {
   initializePendingTx (pt: PendingTx) {
     pt.tr = Doc.clone(this.page.pendingTxTmpl)
     const tmpl = pt.tmpl = Doc.parseTemplate(pt.tr)
-    const { type: txType, id: txID, chainAsset: { assetID, chainLogo, chainName } } = pt
+    const { type: txType, id: txID, networkAsset: { assetID, chainLogo, chainName } } = pt
     tmpl.chainLogo.src = chainLogo
     tmpl.chainName.textContent = chainName
     tmpl.type.textContent = txTypeString(txType)
@@ -1842,7 +1704,7 @@ export default class WalletsPage extends BasePage {
     const loaded = app().loading(page.orderActivityBox)
     const filter: OrderFilter = {
       n: 20,
-      assets: ta.chainAssets.map((ca: ChainAsset) => ca.assetID),
+      assets: ta.networkAssets.map((ca: NetworkAsset) => ca.assetID),
       hosts: [],
       statuses: []
     }
@@ -2061,7 +1923,7 @@ export default class WalletsPage extends BasePage {
     return (new Date(tx.timestamp * 1000)).toLocaleDateString()
   }
 
-  handleTxNote (ca: ChainAsset, tx: WalletTransaction) {
+  handleTxNote (na: NetworkAsset, tx: WalletTransaction) {
     const { page, selectedWalletID, pendingTxs } = this
     this.depositAddrForm.handleTx(selectedWalletID, tx)
     const pt = pendingTxs[tx.id]
@@ -2073,7 +1935,7 @@ export default class WalletsPage extends BasePage {
         Object.assign(pt, tx)
         updatePendingTx(pt)
       } else {
-        const newPT = { ...tx, chainAsset: ca } as PendingTx
+        const newPT = { ...tx, networkAsset: na } as PendingTx
         pendingTxs[tx.id] = newPT
         this.initializePendingTx(newPT)
         page.pendingTxs.prepend(newPT.tr)
@@ -2356,19 +2218,19 @@ export default class WalletsPage extends BasePage {
 
   /* Display a deposit address. */
   async showDeposit () {
-    const { page, selectedTicker: { chainAssets } } = this
-    const assetIDs = chainAssets.map(({ assetID }: ChainAsset) => assetID)
+    const { page, selectedTicker: { networkAssets } } = this
+    const assetIDs = networkAssets.map(({ assetID }: NetworkAsset) => assetID)
     this.depositAddrForm.setAssetSelect(assetIDs)
     this.forms.show(page.deposit)
   }
 
   async showSendForm () {
-    const { page, selectedTicker: { chainAssets } } = this
-    const fundedAssets: ChainAsset[] = []
-    for (const ca of chainAssets) if (ca.bal.available > 0) fundedAssets.push(ca)
+    const { page, selectedTicker: { networkAssets } } = this
+    const fundedAssets: NetworkAsset[] = []
+    for (const ca of networkAssets) if (ca.bal.available > 0) fundedAssets.push(ca)
     if (fundedAssets.length === 1) return this.showSendAssetForm(fundedAssets[0].assetID)
     Doc.empty(page.netSelectBox)
-    for (const { assetID, chainLogo, chainName, bal, ui } of chainAssets) {
+    for (const { assetID, chainLogo, chainName, bal, ui } of networkAssets) {
       const bttn = Doc.clone(page.netSelectBttnTmpl)
       page.netSelectBox.appendChild(bttn)
       const tmpl = Doc.parseTemplate(bttn)
@@ -2463,7 +2325,7 @@ export default class WalletsPage extends BasePage {
   }
 
   assetUpdated (assetID: number, oldForm?: PageElement, successMsg?: string) {
-    if (this.selectedTicker.chainAssetLookup[assetID]) this.updateDisplayedTicker()
+    if (this.selectedTicker.networkAssetLookup[assetID]) this.updateDisplayedTicker()
     this.updateAssetBalance(assetID)
     if (oldForm && Object.is(this.forms.currentForm, oldForm)) {
       if (successMsg) this.forms.showSuccess(successMsg)
@@ -2671,7 +2533,7 @@ export default class WalletsPage extends BasePage {
   . */
   handleBalanceNote (note: BalanceNote): void {
     this.updateAssetBalance(note.assetID)
-    if (this.selectedTicker.chainAssetLookup[note.assetID]) this.updateDisplayedTickerBalance()
+    if (this.selectedTicker.networkAssetLookup[note.assetID]) this.updateDisplayedTickerBalance()
   }
 
   /* handleRatesNote handles fiat rate notifications, updating the fiat value of
@@ -2690,7 +2552,7 @@ export default class WalletsPage extends BasePage {
    */
   handleWalletStateNote (note: WalletStateNote): void {
     const { assetID } = note.wallet
-    if (this.selectedTicker.chainAssetLookup[assetID]) this.updateDisplayedTicker()
+    if (this.selectedTicker.networkAssetLookup[assetID]) this.updateDisplayedTicker()
     if (assetID === this.selectedWalletID) this.updateFeeState()
     if (note.topic === 'WalletPeersUpdate' &&
       assetID === this.selectedWalletID &&
@@ -2703,7 +2565,7 @@ export default class WalletsPage extends BasePage {
    * handleCreateWalletNote is a handler for 'createwallet' notifications.
    */
   handleCreateWalletNote (note: WalletCreationNote) {
-    if (this.selectedTicker.chainAssetLookup[note.assetID]) this.updateDisplayedTicker()
+    if (this.selectedTicker.networkAssetLookup[note.assetID]) this.updateDisplayedTicker()
   }
 
   handleCustomWalletNote (note: WalletNote) {
@@ -2731,7 +2593,7 @@ export default class WalletsPage extends BasePage {
       }
       case 'transaction': {
         const n = walletNote as TransactionNote
-        const ca = this.selectedTicker.chainAssetLookup[n.assetID]
+        const ca = this.selectedTicker.networkAssetLookup[n.assetID]
         if (ca) this.handleTxNote(ca, n.transaction)
         break
       }
@@ -2760,7 +2622,7 @@ function updatePendingTx (pt: PendingTx) {
     tmpl.amount.textContent = '-'
   } else {
     const [u, c] = txTypeSignAndClass(pt.type)
-    const amt = Doc.formatCoinValue(pt.amount, pt.chainAsset.ui)
+    const amt = Doc.formatCoinValue(pt.amount, pt.networkAsset.ui)
     tmpl.amount.textContent = `${u}${amt}`
     if (c !== '') tmpl.amount.classList.add(c)
   }
@@ -2770,9 +2632,4 @@ function updatePendingTx (pt: PendingTx) {
 function trimStringWithEllipsis (str: string, maxLen: number): string {
   if (str.length <= maxLen) return str
   return `${str.substring(0, maxLen / 2)}...${str.substring(str.length - maxLen / 2)}`
-}
-
-function normalizedTicker (a: SupportedAsset): string {
-  const ticker = a.unitInfo.conventional.unit
-  return ticker === 'WETH' ? 'ETH' : ticker === 'WBTC' ? 'BTC' : ticker
 }

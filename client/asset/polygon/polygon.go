@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"strconv"
 
 	"decred.org/dcrdex/client/asset"
@@ -21,7 +22,7 @@ func init() {
 	dexpolygon.MaybeReadSimnetAddrs()
 }
 
-func registerToken(tokenID uint32, desc string, nets ...dex.Network) {
+func registerToken(tokenID uint32, desc string, allowedNets ...dex.Network) {
 	token, found := dexpolygon.Tokens[tokenID]
 	if !found {
 		panic("token " + strconv.Itoa(int(tokenID)) + " not known")
@@ -29,6 +30,9 @@ func registerToken(tokenID uint32, desc string, nets ...dex.Network) {
 	netAddrs := make(map[dex.Network]string)
 	netVersions := make(map[dex.Network][]uint32, 3)
 	for net, netToken := range token.NetTokens {
+		if !slices.Contains(allowedNets, net) {
+			continue
+		}
 		netAddrs[net] = netToken.Address.String()
 		netVersions[net] = make([]uint32, 0, 1)
 		for ver := range netToken.SwapContracts {

@@ -5396,7 +5396,7 @@ func (dcr *ExchangeWallet) Send(address string, value, feeRate uint64) (asset.Co
 		Fees:      fee,
 		Recipient: &address,
 		Timestamp: uint64(time.Now().Unix()),
-		Confirms:  &asset.Confirms{Target: requiredRedeemConfirms},
+		Confirms:  &asset.Confirms{Target: confTxFinality},
 	}, msgTx.CachedTxHash(), true)
 	return newOutput(msgTx.CachedTxHash(), 0, sentVal, wire.TxTreeRegular), nil
 }
@@ -6426,7 +6426,7 @@ func (dcr *ExchangeWallet) runTicketBuyer() {
 			Amount:    ticket.Tx.TicketPrice,
 			Fees:      ticket.Tx.Fees,
 			Timestamp: uint64(time.Now().Unix()),
-			Confirms:  &asset.Confirms{Target: requiredRedeemConfirms},
+			Confirms:  &asset.Confirms{Target: confTxFinality},
 		}, txHash, true)
 	}
 	ok = true
@@ -7168,7 +7168,7 @@ func (dcr *ExchangeWallet) syncTxHistory(ctx context.Context, tip uint64) {
 			confs = tip - tx.BlockNumber + 1
 		}
 
-		if confs >= requiredRedeemConfirms {
+		if confs >= confTxFinality {
 			tx.Confirmed = true
 			tx.Confirms = nil
 			updated = true
@@ -7177,7 +7177,7 @@ func (dcr *ExchangeWallet) syncTxHistory(ctx context.Context, tip uint64) {
 			updated = tx.Confirms == nil || tx.Confirms.Current != uint32(confs)
 			tx.Confirms = &asset.Confirms{
 				Current: uint32(confs),
-				Target:  requiredRedeemConfirms,
+				Target:  confTxFinality,
 			}
 		}
 

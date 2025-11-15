@@ -2534,39 +2534,6 @@ func (c *Core) assetMap() map[uint32]*SupportedAsset {
 	return assets
 }
 
-func (c *Core) asset(assetID uint32) *SupportedAsset {
-	var wallet *WalletState
-	w, _ := c.wallet(assetID)
-	if w != nil {
-		wallet = w.state()
-	}
-	regAsset := asset.Asset(assetID)
-	if regAsset != nil {
-		return &SupportedAsset{
-			ID:       assetID,
-			Symbol:   regAsset.Symbol,
-			Wallet:   wallet,
-			Info:     regAsset.Info,
-			Name:     regAsset.Info.Name,
-			UnitInfo: regAsset.Info.UnitInfo,
-		}
-	}
-
-	token := asset.TokenInfo(assetID)
-	if token == nil {
-		return nil
-	}
-
-	return &SupportedAsset{
-		ID:       assetID,
-		Symbol:   dex.BipIDSymbol(assetID),
-		Wallet:   wallet,
-		Token:    token,
-		Name:     token.Name,
-		UnitInfo: token.UnitInfo,
-	}
-}
-
 // User is a thread-safe getter for the User.
 func (c *Core) User() *User {
 	m := c.coreMesh()
