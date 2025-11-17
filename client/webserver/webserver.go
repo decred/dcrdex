@@ -243,7 +243,7 @@ type Config struct {
 	Language      string
 	Logger        dex.Logger
 	UTC           bool   // for stdout http request logging
-	AppVersion    string // e.g. "1.0.4-pre", "1.0.4"
+	AppVersion    string // e.g. "1.1.0-pre", "1.1.0"
 	CertFile      string
 	KeyFile       string
 	// NoEmbed indicates to serve files from the system disk rather than the
@@ -1234,8 +1234,8 @@ func folderExists(fp string) bool {
 // semVerOnly is true, it returns the version without the pre-release tag. The
 // full version is expected to be in the format
 // "MAJOR.MINOR.PATCH[-PRE-RELEASE][+BUILD-METADATA]". For example,
-// "1.0.4-pre+4ba3fd93b" would return "1.0.4-pre" if semVerOnly is false, and
-// "1.0.4" if semVerOnly is true.
+// "1.1.0-pre+4ba3fd93b" would return "1.1.0-pre" if semVerOnly is false, and
+// "1.1.0" if semVerOnly is true.
 func userAppVersion(fullVersion string, semVerOnly bool) string {
 	major, minor, patch, pre, _, err := version.ParseSemVer(fullVersion) // validate the version format
 	if err != nil {

@@ -14,22 +14,22 @@
     "#1": {
       "0000": {
         "fixed": {
-          "file_version": "1.0.4.0",
-          "product_version": "1.0.4.0 pre"
+          "file_version": "1.1.0.0",
+          "product_version": "1.1.0.0 pre"
         },
         "info": {
           "0409": {
             "Comments": "",
             "CompanyName": "Decred",
             "FileDescription": "Bison Wallet",
-            "FileVersion": "1.0.4",
+            "FileVersion": "1.1.0",
             "InternalName": "bisonw",
             "LegalCopyright": "© The Decred Developers. Blue Oak Model License 1.0.0",
             "LegalTrademarks": "",
             "OriginalFilename": "bisonw.exe",
             "PrivateBuild": "",
             "ProductName": "Bison Wallet",
-            "ProductVersion": "1.0.4.0 pre",
+            "ProductVersion": "1.1.0.0 pre",
             "SpecialBuild": ""
           }
         }
