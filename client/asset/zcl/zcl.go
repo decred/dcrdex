@@ -187,7 +187,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 		BalanceFunc: func(ctx context.Context, locked uint64) (*asset.Balance, error) {
 			var bal float64
 			// args: "(dummy)" minconf includeWatchonly
-			if err := w.CallRPC("getbalance", []interface{}{"", 0, false}, &bal); err != nil {
+			if err := w.CallRPC("getbalance", []any{"", 0, false}, &bal); err != nil {
 				return nil, err
 			}
 			return &asset.Balance{
@@ -208,7 +208,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 		UnlockSpends:             true,
 		FeeEstimator: func(_ context.Context, _ btc.RawRequester, nBlocks uint64) (uint64, error) {
 			var r float64
-			if err := w.CallRPC("estimatefee", []interface{}{nBlocks}, &r); err != nil {
+			if err := w.CallRPC("estimatefee", []any{nBlocks}, &r); err != nil {
 				return 0, fmt.Errorf("error calling 'estimatefee': %v", err)
 			}
 			if r < 0 {

@@ -45,7 +45,7 @@ import (
 // MEXC Spot v3 CEX adaptor.
 type mexc struct {
 	log       dex.Logger
-	notify    func(interface{})
+	notify    func(any)
 	apiKey    string
 	secretKey string
 	ctx       context.Context
@@ -735,27 +735,27 @@ func (m *mexc) getOrderbookSnapshot(ctx context.Context, symbol string) (*mxctyp
 	return &resp, nil
 }
 
-func (m *mexc) getAPI(ctx context.Context, endpoint string, query url.Values, sign bool, thing interface{}) error {
+func (m *mexc) getAPI(ctx context.Context, endpoint string, query url.Values, sign bool, thing any) error {
 	return m.request(ctx, http.MethodGet, endpoint, query, nil, sign, thing)
 }
 
 // postAPI performs a signed POST request.
-func (m *mexc) postAPI(ctx context.Context, endpoint string, query url.Values, sign bool, thing interface{}) error {
+func (m *mexc) postAPI(ctx context.Context, endpoint string, query url.Values, sign bool, thing any) error {
 	return m.request(ctx, http.MethodPost, endpoint, query, nil, sign, thing)
 }
 
 // putAPI performs a signed PUT request.
-func (m *mexc) putAPI(ctx context.Context, endpoint string, query url.Values, sign bool, thing interface{}) error {
+func (m *mexc) putAPI(ctx context.Context, endpoint string, query url.Values, sign bool, thing any) error {
 	return m.request(ctx, http.MethodPut, endpoint, query, nil, sign, thing)
 }
 
 // deleteAPI performs a signed DELETE request.
-func (m *mexc) deleteAPI(ctx context.Context, endpoint string, query url.Values, sign bool, thing interface{}) error {
+func (m *mexc) deleteAPI(ctx context.Context, endpoint string, query url.Values, sign bool, thing any) error {
 	return m.request(ctx, http.MethodDelete, endpoint, query, nil, sign, thing)
 }
 
 // request performs an HTTP request with optional HMAC signature.
-func (m *mexc) request(ctx context.Context, method, endpoint string, query, form url.Values, sign bool, thing interface{}) error {
+func (m *mexc) request(ctx context.Context, method, endpoint string, query, form url.Values, sign bool, thing any) error {
 	m.initHTTPClient()
 
 	fullURL := mexcHTTPURL + endpoint
@@ -1380,7 +1380,7 @@ func (m *mexc) handleMarketRaw(b []byte) {
 	if err := json.Unmarshal(b, &msg); err == nil {
 		// Handle server PING - respond with PONG
 		if msg.Method == "PING" {
-			pong := map[string]interface{}{
+			pong := map[string]any{
 				"id":   0,
 				"code": 0,
 				"msg":  "PONG",
@@ -1586,7 +1586,7 @@ func (m *mexc) handlePrivateRaw(b []byte) {
 		m.log.Tracef("Parsed as JSON control message: method=%s, code=%d, msg=%s", msg.Method, msg.Code, msg.Msg)
 		// Handle server PING - respond with PONG
 		if msg.Method == "PING" {
-			pong := map[string]interface{}{
+			pong := map[string]any{
 				"id":   0,
 				"code": 0,
 				"msg":  "PONG",

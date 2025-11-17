@@ -103,8 +103,8 @@ type Tatanka struct {
 	db              *db.DB
 	nets            atomic.Value // []uint32
 	specialHandlers map[string]func(tanka.Sender, *msgjson.Message) *msgjson.Error
-	clientHandlers  map[string]interface{} // clientRequestHandler | clientNotificationHandler
-	tatankaHandlers map[string]interface{} // tatankaRequestHandler | tatankaNotificationHandler
+	clientHandlers  map[string]any // clientRequestHandler | clientNotificationHandler
+	tatankaHandlers map[string]any // tatankaRequestHandler | tatankaNotificationHandler
 	routes          []string
 	httpReqHandlers map[string]comms.HTTPHandler
 	httpRoutes      []string
@@ -231,8 +231,8 @@ func New(cfg *Config) (*Tatanka, error) {
 		topics:          make(map[tanka.Topic]*Topic),
 		recentRelays:    make(map[[32]byte]time.Time),
 		clientJobs:      make(chan *clientJob, 128),
-		clientHandlers:  make(map[string]interface{}),
-		tatankaHandlers: make(map[string]interface{}),
+		clientHandlers:  make(map[string]any),
+		tatankaHandlers: make(map[string]any),
 		httpReqHandlers: make(map[string]comms.HTTPHandler),
 		maxClients:      cfg.MaxClients,
 	}
@@ -286,7 +286,7 @@ func (t *Tatanka) prepareHandlers() {
 		mj.RoutePostBond: t.handlePostBond,
 	}
 	// Tatanka routes
-	registerTatankaHandler := func(route string, handler interface{}) {
+	registerTatankaHandler := func(route string, handler any) {
 		if _, is := handler.(tatankaRequestHandler); !is {
 			if _, is := handler.(tatankaNotificationHandler); !is {
 				panic("unknown handler type for " + route)
@@ -294,7 +294,7 @@ func (t *Tatanka) prepareHandlers() {
 		}
 		t.tatankaHandlers[route] = handler
 	}
-	for route, handler := range map[string]interface{}{
+	for route, handler := range map[string]any{
 		mj.RouteTatankaConfig:    t.handleTatankaConfig,
 		mj.RouteRelayBroadcast:   t.handleRelayBroadcast,
 		mj.RouteNewClient:        t.handleNewRemoteClientNotification,
@@ -306,7 +306,7 @@ func (t *Tatanka) prepareHandlers() {
 		registerTatankaHandler(route, handler)
 	}
 	// Client routes
-	registerClientHandler := func(route string, handler interface{}) {
+	registerClientHandler := func(route string, handler any) {
 		if _, is := handler.(clientRequestHandler); !is {
 			if _, is := handler.(clientNotificationHandler); !is {
 				panic("unknown handler type for " + route)
@@ -314,7 +314,7 @@ func (t *Tatanka) prepareHandlers() {
 		}
 		t.clientHandlers[route] = handler
 	}
-	for route, handler := range map[string]interface{}{
+	for route, handler := range map[string]any{
 		mj.RouteSubscribe:           t.handleSubscription,
 		mj.RouteUpdateSubscriptions: t.handleUpdateSubscriptions,
 		// mj.RouteUnsubscribe: t.handleUnsubscribe,
@@ -576,7 +576,7 @@ func (t *Tatanka) monitorChainFees(ctx context.Context, assetID uint32, c chain.
 }
 
 // sendResult sends the response to a request and logs errors.
-func (t *Tatanka) sendResult(cl tanka.Sender, msgID uint64, result interface{}) {
+func (t *Tatanka) sendResult(cl tanka.Sender, msgID uint64, result any) {
 	resp := mj.MustResponse(msgID, result, nil)
 	if err := t.send(cl, resp); err != nil {
 		peerID := cl.PeerID()

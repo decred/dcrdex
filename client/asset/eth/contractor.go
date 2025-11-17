@@ -783,7 +783,7 @@ func (c *contractorV1) estimateInitGas(ctx context.Context, n int) (uint64, erro
 	return c.estimateGas(ctx, value, "initiate", c.tokenAddr, initiations)
 }
 
-func (c *contractorV1) estimateGas(ctx context.Context, value *big.Int, method string, args ...interface{}) (uint64, error) {
+func (c *contractorV1) estimateGas(ctx context.Context, value *big.Int, method string, args ...any) (uint64, error) {
 	return estimateGas(ctx, c.acctAddr, c.swapContractAddr, c.abi, c.cb, value, method, args...)
 }
 
@@ -957,7 +957,7 @@ func (c *tokenContractorV1) tokenAddress() common.Address {
 var _ contractor = (*tokenContractorV1)(nil)
 var _ tokenContractor = (*tokenContractorV1)(nil)
 
-func estimateGas(ctx context.Context, from, to common.Address, abi *abi.ABI, cb bind.ContractBackend, value *big.Int, method string, args ...interface{}) (uint64, error) {
+func estimateGas(ctx context.Context, from, to common.Address, abi *abi.ABI, cb bind.ContractBackend, value *big.Int, method string, args ...any) (uint64, error) {
 	data, err := abi.Pack(method, args...)
 	if err != nil {
 		return 0, fmt.Errorf("Pack error: %v", err)

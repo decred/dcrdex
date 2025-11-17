@@ -70,7 +70,7 @@ func testWallet(t *testing.T, ctx context.Context, w Wallet) {
 	t.Fatal("Failed to get confirmations")
 }
 
-func getInto(method, endpoint string, thing interface{}) error {
+func getInto(method, endpoint string, thing any) error {
 	req, err := http.NewRequest(method, "http://localhost:37346"+endpoint, nil)
 	if err != nil {
 		return err
@@ -78,7 +78,7 @@ func getInto(method, endpoint string, thing interface{}) error {
 	return requestInto(req, thing)
 }
 
-func requestInto(req *http.Request, thing interface{}) error {
+func requestInto(req *http.Request, thing any) error {
 	req.Header.Add("X-MBX-APIKEY", testAPIKey)
 
 	resp, err := http.DefaultClient.Do(req)
@@ -90,7 +90,7 @@ func requestInto(req *http.Request, thing interface{}) error {
 	return json.Unmarshal(b, thing)
 }
 
-func printThing(name string, thing interface{}) {
+func printThing(name string, thing any) {
 	b, _ := json.MarshalIndent(thing, "", "    ")
 	fmt.Println("#####", name, ":", string(b))
 }

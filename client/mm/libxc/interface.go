@@ -176,7 +176,7 @@ type CEXConfig struct {
 	APIKey    string
 	SecretKey string
 	Logger    dex.Logger
-	Notify    func(interface{})
+	Notify    func(any)
 }
 
 // NewCEX creates a new CEX.

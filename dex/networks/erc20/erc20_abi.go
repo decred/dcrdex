@@ -157,7 +157,7 @@ func bindIERC20(address common.Address, caller bind.ContractCaller, transactor b
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_IERC20 *IERC20Raw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_IERC20 *IERC20Raw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _IERC20.Contract.IERC20Caller.contract.Call(opts, result, method, params...)
 }
 
@@ -168,7 +168,7 @@ func (_IERC20 *IERC20Raw) Transfer(opts *bind.TransactOpts) (*types.Transaction,
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_IERC20 *IERC20Raw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
+func (_IERC20 *IERC20Raw) Transact(opts *bind.TransactOpts, method string, params ...any) (*types.Transaction, error) {
 	return _IERC20.Contract.IERC20Transactor.contract.Transact(opts, method, params...)
 }
 
@@ -176,7 +176,7 @@ func (_IERC20 *IERC20Raw) Transact(opts *bind.TransactOpts, method string, param
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_IERC20 *IERC20CallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_IERC20 *IERC20CallerRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _IERC20.Contract.contract.Call(opts, result, method, params...)
 }
 
@@ -187,7 +187,7 @@ func (_IERC20 *IERC20TransactorRaw) Transfer(opts *bind.TransactOpts) (*types.Tr
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_IERC20 *IERC20TransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
+func (_IERC20 *IERC20TransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (*types.Transaction, error) {
 	return _IERC20.Contract.contract.Transact(opts, method, params...)
 }
 
@@ -195,7 +195,7 @@ func (_IERC20 *IERC20TransactorRaw) Transact(opts *bind.TransactOpts, method str
 //
 // Solidity: function allowance(address owner, address spender) view returns(uint256)
 func (_IERC20 *IERC20Caller) Allowance(opts *bind.CallOpts, owner common.Address, spender common.Address) (*big.Int, error) {
-	var out []interface{}
+	var out []any
 	err := _IERC20.contract.Call(opts, &out, "allowance", owner, spender)
 
 	if err != nil {
@@ -226,7 +226,7 @@ func (_IERC20 *IERC20CallerSession) Allowance(owner common.Address, spender comm
 //
 // Solidity: function balanceOf(address account) view returns(uint256)
 func (_IERC20 *IERC20Caller) BalanceOf(opts *bind.CallOpts, account common.Address) (*big.Int, error) {
-	var out []interface{}
+	var out []any
 	err := _IERC20.contract.Call(opts, &out, "balanceOf", account)
 
 	if err != nil {
@@ -257,7 +257,7 @@ func (_IERC20 *IERC20CallerSession) BalanceOf(account common.Address) (*big.Int,
 //
 // Solidity: function totalSupply() view returns(uint256)
 func (_IERC20 *IERC20Caller) TotalSupply(opts *bind.CallOpts) (*big.Int, error) {
-	var out []interface{}
+	var out []any
 	err := _IERC20.contract.Call(opts, &out, "totalSupply")
 
 	if err != nil {
@@ -427,11 +427,11 @@ type IERC20Approval struct {
 // Solidity: event Approval(address indexed owner, address indexed spender, uint256 value)
 func (_IERC20 *IERC20Filterer) FilterApproval(opts *bind.FilterOpts, owner []common.Address, spender []common.Address) (*IERC20ApprovalIterator, error) {
 
-	var ownerRule []interface{}
+	var ownerRule []any
 	for _, ownerItem := range owner {
 		ownerRule = append(ownerRule, ownerItem)
 	}
-	var spenderRule []interface{}
+	var spenderRule []any
 	for _, spenderItem := range spender {
 		spenderRule = append(spenderRule, spenderItem)
 	}
@@ -448,11 +448,11 @@ func (_IERC20 *IERC20Filterer) FilterApproval(opts *bind.FilterOpts, owner []com
 // Solidity: event Approval(address indexed owner, address indexed spender, uint256 value)
 func (_IERC20 *IERC20Filterer) WatchApproval(opts *bind.WatchOpts, sink chan<- *IERC20Approval, owner []common.Address, spender []common.Address) (event.Subscription, error) {
 
-	var ownerRule []interface{}
+	var ownerRule []any
 	for _, ownerItem := range owner {
 		ownerRule = append(ownerRule, ownerItem)
 	}
-	var spenderRule []interface{}
+	var spenderRule []any
 	for _, spenderItem := range spender {
 		spenderRule = append(spenderRule, spenderItem)
 	}
@@ -581,11 +581,11 @@ type IERC20Transfer struct {
 // Solidity: event Transfer(address indexed from, address indexed to, uint256 value)
 func (_IERC20 *IERC20Filterer) FilterTransfer(opts *bind.FilterOpts, from []common.Address, to []common.Address) (*IERC20TransferIterator, error) {
 
-	var fromRule []interface{}
+	var fromRule []any
 	for _, fromItem := range from {
 		fromRule = append(fromRule, fromItem)
 	}
-	var toRule []interface{}
+	var toRule []any
 	for _, toItem := range to {
 		toRule = append(toRule, toItem)
 	}
@@ -602,11 +602,11 @@ func (_IERC20 *IERC20Filterer) FilterTransfer(opts *bind.FilterOpts, from []comm
 // Solidity: event Transfer(address indexed from, address indexed to, uint256 value)
 func (_IERC20 *IERC20Filterer) WatchTransfer(opts *bind.WatchOpts, sink chan<- *IERC20Transfer, from []common.Address, to []common.Address) (event.Subscription, error) {
 
-	var fromRule []interface{}
+	var fromRule []any
 	for _, fromItem := range from {
 		fromRule = append(fromRule, fromItem)
 	}
-	var toRule []interface{}
+	var toRule []any
 	for _, toItem := range to {
 		toRule = append(toRule, toItem)
 	}

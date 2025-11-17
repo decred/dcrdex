@@ -123,8 +123,8 @@ type runningBot struct {
 	cexCfg *CEXConfig
 }
 
-func (rb *runningBot) assets() map[uint32]interface{} {
-	assets := make(map[uint32]interface{})
+func (rb *runningBot) assets() map[uint32]any {
+	assets := make(map[uint32]any)
 	cfg := rb.botCfg()
 	assets[cfg.BaseID] = struct{}{}
 	assets[cfg.QuoteID] = struct{}{}
@@ -607,7 +607,7 @@ func (m *MarketMaker) loadCEX(ctx context.Context, cfg *CEXConfig) (*centralized
 		SecretKey: cfg.APISecret,
 		Logger:    logger,
 		Net:       m.core.Network(),
-		Notify: func(n interface{}) {
+		Notify: func(n any) {
 			m.handleCEXUpdate(cfg.Name, n)
 		},
 	})
@@ -634,7 +634,7 @@ func (m *MarketMaker) loadCEX(ctx context.Context, cfg *CEXConfig) (*centralized
 	return c, nil
 }
 
-func (m *MarketMaker) handleCEXUpdate(cexName string, ni interface{}) {
+func (m *MarketMaker) handleCEXUpdate(cexName string, ni any) {
 	switch n := ni.(type) {
 	case *libxc.BalanceUpdate:
 		m.cexMtx.RLock()
@@ -1777,8 +1777,8 @@ func marketFees(c clientCore, host string, baseID, quoteID uint32, useMaxFeeRate
 }
 
 func (m *MarketMaker) availableBalances(mkt *MarketWithHost, cexBaseID, cexQuoteID uint32, cexCfg *CEXConfig) (dexBalances, cexBalances map[uint32]uint64, _ error) {
-	dexAssets := make(map[uint32]interface{})
-	cexAssets := make(map[uint32]interface{})
+	dexAssets := make(map[uint32]any)
+	cexAssets := make(map[uint32]any)
 
 	dexAssets[mkt.BaseID] = struct{}{}
 	dexAssets[mkt.QuoteID] = struct{}{}

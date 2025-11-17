@@ -74,7 +74,7 @@ func tNewCoinbase(t *testing.T) (*coinbase, func()) {
 		APIKey:    creds.Name,
 		SecretKey: creds.PrivateKey,
 		Logger:    dex.StdOutLogger("T", dex.LevelInfo),
-		Notify:    func(interface{}) {},
+		Notify:    func(any) {},
 	})
 	if err != nil {
 		t.Fatalf("error creating coinbase: %v", err)

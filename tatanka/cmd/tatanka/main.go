@@ -130,7 +130,7 @@ type Config struct {
 }
 
 func config() (*dex.LoggerMaker, *Config) {
-	emitConfigError := func(s string, a ...interface{}) {
+	emitConfigError := func(s string, a ...any) {
 		fmt.Fprintln(os.Stderr, fmt.Errorf(s, a...))
 		os.Exit(0)
 	}

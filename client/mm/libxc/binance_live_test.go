@@ -80,7 +80,7 @@ func tNewBinance() *binance {
 		APIKey:    apiKey,
 		SecretKey: apiSecret,
 		Logger:    log,
-		Notify: func(n interface{}) {
+		Notify: func(n any) {
 			log.Infof("Notification sent: %+v", n)
 		},
 	}

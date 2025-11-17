@@ -52,9 +52,9 @@ type rpcRequest struct {
 
 // rpcResponse represents a JSON-RPC response.
 type rpcResponse struct {
-	JSONRPC string      `json:"jsonrpc"`
-	ID      int         `json:"id"`
-	Result  interface{} `json:"result"`
+	JSONRPC string `json:"jsonrpc"`
+	ID      int    `json:"id"`
+	Result  any    `json:"result"`
 }
 
 // storedUserOp stores user operation data with its transaction hash.

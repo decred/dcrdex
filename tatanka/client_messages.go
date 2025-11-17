@@ -19,8 +19,8 @@ import (
 
 // clientJob is a job for the remote clients loop.
 type clientJob struct {
-	task interface{}
-	res  chan interface{}
+	task any
+	res  chan any
 }
 
 // clientJobNewRemote is a clientJob task that adds a remote client to the
@@ -87,7 +87,7 @@ func (t *Tatanka) registerRemoteClient(tankaID, clientID tanka.PeerID) {
 			clientID: clientID,
 			tankaID:  tankaID,
 		},
-		res: make(chan interface{}, 1),
+		res: make(chan any, 1),
 	}
 	t.clientJobs <- job
 	select {
@@ -687,7 +687,7 @@ func (t *Tatanka) findPath(peerID tanka.PeerID) []*remoteTatanka {
 		task: &clientJobFindRemotes{
 			clientID: peerID,
 		},
-		res: make(chan interface{}),
+		res: make(chan any),
 	}
 	t.clientJobs <- job
 	ttIDs := (<-job.res).(map[tanka.PeerID]struct{})
@@ -819,7 +819,7 @@ func (t *Tatanka) handleSetScore(c *client, msg *msgjson.Message) {
 const ErrNoPath = dex.ErrorKind("no path")
 
 // requestAnyOne tries to request from the senders in order until one succeeds.
-func (t *Tatanka) requestAnyOne(senders []tanka.Sender, msg *msgjson.Message, resp interface{}) (sent bool, clientErr, err error) {
+func (t *Tatanka) requestAnyOne(senders []tanka.Sender, msg *msgjson.Message, resp any) (sent bool, clientErr, err error) {
 	mj.SignMessage(t.priv, msg)
 	rawMsg, err := json.Marshal(msg)
 	if err != nil {
@@ -828,7 +828,7 @@ func (t *Tatanka) requestAnyOne(senders []tanka.Sender, msg *msgjson.Message, re
 	return t.requestAnyOneRaw(senders, msg.ID, rawMsg, resp)
 }
 
-func (t *Tatanka) requestAnyOneRaw(senders []tanka.Sender, msgID uint64, rawMsg []byte, resp interface{}) (sent bool, clientErr, err error) {
+func (t *Tatanka) requestAnyOneRaw(senders []tanka.Sender, msgID uint64, rawMsg []byte, resp any) (sent bool, clientErr, err error) {
 	for _, sender := range senders {
 		var errChan = make(chan error)
 		if err := sender.RequestRaw(msgID, rawMsg, func(msg *msgjson.Message) {

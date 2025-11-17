@@ -145,7 +145,7 @@ func (cc *combinedRPCClient) BaseBlockByNumber(ctx context.Context, number *big.
 		for i := range reqs {
 			reqs[i] = rpc.BatchElem{
 				Method: "eth_getUncleByBlockHashAndIndex",
-				Args:   []interface{}{body.Hash, basehexutil.EncodeUint64(uint64(i))},
+				Args:   []any{body.Hash, basehexutil.EncodeUint64(uint64(i))},
 				Result: &uncles[i],
 			}
 		}
