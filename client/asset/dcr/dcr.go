@@ -79,6 +79,11 @@ const (
 	// using a split transaction to fund a swap.
 	splitTxBaggage = dexdcr.MsgTxOverhead + dexdcr.P2PKHInputSize + 2*dexdcr.P2PKHOutputSize
 
+	// softMaxTxSize is the soft limit for transaction size during coin selection.
+	// Set to 90% of MaxStandardTxSize (100,000 bytes) to provide a buffer for
+	// fees and prevent hitting the hard limit during broadcast.
+	softMaxTxSize = uint32(90000) // 90 KB
+
 	walletTypeDcrwRPC = "dcrwalletRPC"
 	walletTypeLegacy  = "" // dcrwallet RPC prior to wallet types
 	walletTypeSPV     = "SPV"
@@ -2630,6 +2635,18 @@ func tryFund(utxos []*compositeUTXO,
 			return fmt.Errorf("error decoding redeem script for %s, script = %s: %w",
 				unspent.rpc.TxID, unspent.rpc.RedeemScript, err)
 		}
+
+		// Soft limit: Check if adding this input would make transaction too large.
+		// Estimate final tx size: current inputs + this input + overhead + typical 2 outputs
+		estimatedSize := size + unspent.input.Size() + dexdcr.MsgTxOverhead + (2 * dexdcr.P2PKHOutputSize)
+		if estimatedSize > softMaxTxSize {
+			return fmt.Errorf(
+				"transaction would exceed recommended size limit (%d inputs selected, ~%d bytes). "+
+					"Cannot fund this transaction with available UTXOs. "+
+					"Consider consolidating UTXOs or sending a smaller amount",
+				len(coins)+1, estimatedSize)
+		}
+
 		op := newOutput(txHash, unspent.rpc.Vout, v, unspent.rpc.Tree)
 		coins = append(coins, op)
 		spents = append(spents, &fundingCoin{
@@ -6526,6 +6543,23 @@ func (dcr *ExchangeWallet) TicketPage(scanStart int32, n, skipN int) ([]*asset.T
 }
 
 func (dcr *ExchangeWallet) broadcastTx(signedTx *wire.MsgTx) (*chainhash.Hash, error) {
+	// Hard limit: Validate transaction size before broadcasting to prevent
+	// transactions from getting stuck in mempool.
+	txSize := signedTx.SerializeSize()
+	maxSize := uint64(dcr.chainParams.MaxTxSize)
+
+	if uint64(txSize) > maxSize {
+		return nil, fmt.Errorf(
+			"transaction size (%d bytes) exceeds maximum allowed size (%d bytes). "+
+				"This transaction contains %d inputs. "+
+				"Suggestions:\n"+
+				"  1. Send a smaller amount\n"+
+				"  2. Consolidate UTXOs using wallet settings\n"+
+				"  3. Temporarily disable mixing if enabled\n"+
+				"  4. Split the transaction into multiple smaller sends",
+			txSize, maxSize, len(signedTx.TxIn))
+	}
+
 	txHash, err := dcr.wallet.SendRawTransaction(dcr.ctx, signedTx, false)
 	if err != nil {
 		return nil, fmt.Errorf("sendrawtx error: %w, raw tx: %x", err, dcr.wireBytes(signedTx))
