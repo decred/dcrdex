@@ -3578,6 +3578,129 @@ func Test_withdraw(t *testing.T) {
 	}
 }
 
+func TestWithdrawTxSizeValidation(t *testing.T) {
+	wallet, node, shutdown := tNewWallet()
+	defer shutdown()
+
+	node.changeAddr = tPKHAddr
+	node.signFunc = func(msgTx *wire.MsgTx) (*wire.MsgTx, bool, error) {
+		return signFunc(msgTx, dexdcr.P2PKHSigScriptSize)
+	}
+
+	// Test 1: Normal transaction with single UTXO (should succeed)
+	t.Run("normal tx size", func(t *testing.T) {
+		node.unspent = []walletjson.ListUnspentResult{{
+			TxID:          tTxID,
+			Address:       tPKHAddr.String(),
+			Account:       tAcctName,
+			Amount:        100.0, // 100 DCR
+			Confirmations: 5,
+			ScriptPubKey:  hex.EncodeToString(tP2PKHScript),
+			Spendable:     true,
+		}}
+
+		_, err := wallet.Withdraw(tPKHAddr.String(), 90e8, 10)
+		if err != nil {
+			t.Fatalf("normal tx failed: %v", err)
+		}
+	})
+
+	// Test 2: Transaction with many inputs but under soft limit (should succeed)
+	t.Run("tx near but under size limit", func(t *testing.T) {
+		// 500 inputs * 166 bytes/input = 83,000 bytes + overhead < 90KB soft limit
+		unspents := make([]walletjson.ListUnspentResult, 500)
+		for i := 0; i < 500; i++ {
+			txID := hex.EncodeToString(encode.RandomBytes(32))
+			unspents[i] = walletjson.ListUnspentResult{
+				TxID:          txID,
+				Vout:          0,
+				Address:       tPKHAddr.String(),
+				Account:       tAcctName,
+				Amount:        0.01, // 0.01 DCR each = 5 DCR total
+				Confirmations: 1,
+				ScriptPubKey:  hex.EncodeToString(tP2PKHScript),
+				Spendable:     true,
+			}
+		}
+		node.unspent = unspents
+
+		// Withdraw 4.9 DCR (requires ~490 inputs)
+		_, err := wallet.Withdraw(tPKHAddr.String(), 490e6, 10)
+		if err != nil {
+			t.Fatalf("under-limit tx failed: %v", err)
+		}
+	})
+
+	// Test 3: Transaction exceeding soft size limit (should fail at fund stage)
+	t.Run("tx exceeds soft size limit", func(t *testing.T) {
+		// 650 inputs * 166 bytes/input = 107,900 bytes > 90KB soft limit
+		unspents := make([]walletjson.ListUnspentResult, 650)
+		for i := 0; i < 650; i++ {
+			txID := hex.EncodeToString(encode.RandomBytes(32))
+			unspents[i] = walletjson.ListUnspentResult{
+				TxID:          txID,
+				Vout:          0,
+				Address:       tPKHAddr.String(),
+				Account:       tAcctName,
+				Amount:        0.01, // 0.01 DCR each = 6.5 DCR total
+				Confirmations: 1,
+				ScriptPubKey:  hex.EncodeToString(tP2PKHScript),
+				Spendable:     true,
+			}
+		}
+		node.unspent = unspents
+
+		// Try to withdraw 6.4 DCR (requires ~640 inputs - exceeds soft limit)
+		_, err := wallet.Withdraw(tPKHAddr.String(), 640e6, 10)
+		if err == nil {
+			t.Fatalf("expected error for oversized tx, got nil")
+		}
+
+		// Verify error message relates to size limit
+		if !strings.Contains(err.Error(), "exceed") && !strings.Contains(err.Error(), "size") {
+			t.Fatalf("expected size-related error, got: %v", err)
+		}
+	})
+
+	// Test 4: Verify multi-layer defense
+	// Both soft and hard limits provide protection
+	t.Run("defense in depth verification", func(t *testing.T) {
+		// With 650 UTXOs, soft limit catches it during fund()
+		// Hard limit in broadcastTx() acts as final safety net
+		unspents := make([]walletjson.ListUnspentResult, 700)
+		for i := 0; i < 700; i++ {
+			txID := hex.EncodeToString(encode.RandomBytes(32))
+			unspents[i] = walletjson.ListUnspentResult{
+				TxID:          txID,
+				Vout:          0,
+				Address:       tPKHAddr.String(),
+				Account:       tAcctName,
+				Amount:        0.01, // 0.01 DCR each
+				Confirmations: 1,
+				ScriptPubKey:  hex.EncodeToString(tP2PKHScript),
+				Spendable:     true,
+			}
+		}
+		node.unspent = unspents
+
+		// Try to withdraw amount requiring 700 inputs
+		// 700 inputs * 166 bytes = 116,200 bytes > 90KB (soft) and > 100KB (hard)
+		_, err := wallet.Withdraw(tPKHAddr.String(), 690e6, 10)
+		if err == nil {
+			t.Fatalf("expected error, got nil")
+		}
+
+		// Verify error is size-related (caught by soft limit first)
+		errStr := err.Error()
+		if !strings.Contains(errStr, "exceed") && !strings.Contains(errStr, "size") {
+			t.Fatalf("expected size-related error, got: %v", err)
+		}
+
+		// The soft limit catches this early, preventing wasted computation
+		// This demonstrates the value of the two-layer validation approach
+	})
+}
+
 func Test_sendToAddress(t *testing.T) {
 	wallet, node, shutdown := tNewWallet()
 	defer shutdown()

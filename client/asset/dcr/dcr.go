@@ -6551,12 +6551,7 @@ func (dcr *ExchangeWallet) broadcastTx(signedTx *wire.MsgTx) (*chainhash.Hash, e
 	if uint64(txSize) > maxSize {
 		return nil, fmt.Errorf(
 			"transaction size (%d bytes) exceeds maximum allowed size (%d bytes). "+
-				"This transaction contains %d inputs. "+
-				"Suggestions:\n"+
-				"  1. Send a smaller amount\n"+
-				"  2. Consolidate UTXOs using wallet settings\n"+
-				"  3. Temporarily disable mixing if enabled\n"+
-				"  4. Split the transaction into multiple smaller sends",
+				"This transaction contains %d inputs. Please send a smaller amount",
 			txSize, maxSize, len(signedTx.TxIn))
 	}
 
