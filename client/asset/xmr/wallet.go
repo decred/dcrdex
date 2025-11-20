@@ -139,12 +139,12 @@ func (r *xmrRpc) getBalance() (uint64, uint64, error) {
 	return gbResp.Balance, gbResp.UnlockedBalance, nil
 }
 
-func (r *xmrRpc) getPrimaryAddress() (string, error) {
+func (r *xmrRpc) getPrimaryAddress(ctx context.Context) (string, error) {
 	gaRq := rpc.GetAddressRequest{
 		AccountIndex: 0,
 		AddressIndex: []uint64{0},
 	}
-	gaResp, err := r.wallet.GetAddress(r.ctx, &gaRq)
+	gaResp, err := r.wallet.GetAddress(ctx, &gaRq)
 	if err != nil {
 		return "", err
 	}

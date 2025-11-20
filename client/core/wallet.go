@@ -794,7 +794,7 @@ func (w *xcWallet) BridgeHistory(n int, refID *string, past bool) ([]*asset.Wall
 
 // OpenWithPW opens a wallet for use if it is an asset.Opener. Otherwise does
 // nothing.
-func (w *xcWallet) OpenWithPW(ctx context.Context, crypter encrypt.Crypter) error {
+func (w *xcWallet) OpenWithPW(ctx context.Context, pw []byte) error {
 	opener, ok := w.Wallet.(asset.Opener)
 	if !ok {
 		return nil
@@ -808,17 +808,8 @@ func (w *xcWallet) OpenWithPW(ctx context.Context, crypter encrypt.Crypter) erro
 		return fmt.Errorf(walletDisabledErrStr, strings.ToUpper(unbip(w.AssetID)))
 	}
 
-	if crypter == nil {
+	if pw == nil {
 		return newError(noAuthError, "no password provided for open")
-	}
-
-	if len(w.encPW()) == 0 {
-		return fmt.Errorf("no password has been set for open")
-	}
-
-	pw, err := crypter.Decrypt(w.encPW())
-	if err != nil {
-		return fmt.Errorf("%s open wallet decryption error: %w", unbip(w.AssetID), err)
 	}
 
 	return opener.OpenWithPW(ctx, pw)
