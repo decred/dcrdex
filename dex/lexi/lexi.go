@@ -291,7 +291,7 @@ func (db *DB) deleteDBID(txn *badger.Txn, dbID DBID) error {
 
 // KV is any one of a number of common types whose binary encoding is
 // straight-forward.
-type KV interface{}
+type KV any
 
 func parseKV(i KV) (b []byte, err error) {
 	switch it := i.(type) {

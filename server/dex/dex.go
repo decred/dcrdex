@@ -308,7 +308,7 @@ func ValidateConfigFile(cfgPath string, net dex.Network, log dex.Logger) error {
 	}
 	parsedAssets := make(map[uint32]*parsedAsset, len(assets))
 
-	printSuccess := func(s string, a ...interface{}) {
+	printSuccess := func(s string, a ...any) {
 		fmt.Printf(s+"\n", a...)
 	}
 

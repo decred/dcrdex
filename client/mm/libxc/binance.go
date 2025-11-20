@@ -586,7 +586,7 @@ type binance struct {
 	net                dex.Network
 	tradeIDNonce       atomic.Uint32
 	tradeIDNoncePrefix dex.Bytes
-	broadcast          func(interface{})
+	broadcast          func(any)
 	isUS               bool
 
 	markets atomic.Value // map[string]*binanceMarket
@@ -1635,15 +1635,15 @@ func (bnc *binance) MatchedMarkets(ctx context.Context) (_ []*MarketMatch, err e
 	return markets, nil
 }
 
-func (bnc *binance) getAPI(ctx context.Context, endpoint string, query url.Values, key, sign bool, thing interface{}) error {
+func (bnc *binance) getAPI(ctx context.Context, endpoint string, query url.Values, key, sign bool, thing any) error {
 	return bnc.request(ctx, http.MethodGet, endpoint, query, nil, key, sign, thing)
 }
 
-func (bnc *binance) postAPI(ctx context.Context, endpoint string, query, form url.Values, key, sign bool, thing interface{}) error {
+func (bnc *binance) postAPI(ctx context.Context, endpoint string, query, form url.Values, key, sign bool, thing any) error {
 	return bnc.request(ctx, http.MethodPost, endpoint, query, form, key, sign, thing)
 }
 
-func (bnc *binance) request(ctx context.Context, method, endpoint string, query, form url.Values, key, sign bool, thing interface{}) error {
+func (bnc *binance) request(ctx context.Context, method, endpoint string, query, form url.Values, key, sign bool, thing any) error {
 	var fullURL string
 	if strings.Contains(endpoint, "sapi") {
 		fullURL = bnc.accountsURL + endpoint

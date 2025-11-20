@@ -428,7 +428,7 @@ type coinbase struct {
 	books    map[string]*cbBook
 
 	cexUpdatersMtx sync.RWMutex
-	cexUpdaters    map[chan interface{}]struct{}
+	cexUpdaters    map[chan any]struct{}
 
 	tradeUpdaterMtx    sync.RWMutex
 	tradeInfo          map[string]*tradeInfo
@@ -438,7 +438,7 @@ type coinbase struct {
 	tradeIDNonce       atomic.Uint32
 	tradeIDNoncePrefix dex.Bytes
 
-	broadcast func(interface{})
+	broadcast func(any)
 }
 
 var _ CEX = (*coinbase)(nil)
@@ -503,7 +503,7 @@ func newCoinbase(cfg *CEXConfig) (*coinbase, error) {
 		idTicker:           idTicker,
 		tradeIDNoncePrefix: encode.RandomBytes(10),
 		books:              make(map[string]*cbBook),
-		cexUpdaters:        make(map[chan interface{}]struct{}),
+		cexUpdaters:        make(map[chan any]struct{}),
 		tradeInfo:          make(map[string]*tradeInfo),
 		tradeUpdaters:      make(map[int]chan *Trade),
 		broadcast:          cfg.Notify,
@@ -764,8 +764,8 @@ func (c *coinbase) Markets(ctx context.Context) (map[string]*Market, error) {
 
 // SubscribeCEXUpdates returns a channel which sends an empty struct when
 // the balance of an asset on the CEX has been updated.
-func (c *coinbase) SubscribeCEXUpdates() (<-chan interface{}, func()) {
-	updater := make(chan interface{}, 128)
+func (c *coinbase) SubscribeCEXUpdates() (<-chan any, func()) {
+	updater := make(chan any, 128)
 	c.cexUpdatersMtx.Lock()
 	c.cexUpdaters[updater] = struct{}{}
 	c.cexUpdatersMtx.Unlock()
@@ -1479,7 +1479,7 @@ func isSuccessfulStatusCode(resp *http.Response) bool {
 	return resp.StatusCode >= http.StatusOK && resp.StatusCode <= http.StatusIMUsed
 }
 
-func (c *coinbase) request(ctx context.Context, method, endpoint string, queryParams url.Values, bodyParams, res interface{}) error {
+func (c *coinbase) request(ctx context.Context, method, endpoint string, queryParams url.Values, bodyParams, res any) error {
 	req, cancel, err := c.prepareRequest(ctx, method, endpoint, queryParams, bodyParams)
 	if err != nil {
 		return fmt.Errorf("prepareRequest error: %v", err)
@@ -1540,7 +1540,7 @@ func buildJWT(apiName, uri string, privKey *ecdsa.PrivateKey) (string, error) {
 	return jwtString, nil
 }
 
-func (c *coinbase) prepareRequest(ctx context.Context, method, endpoint string, queryParams url.Values, bodyParams interface{}) (_ *http.Request, _ context.CancelFunc, err error) {
+func (c *coinbase) prepareRequest(ctx context.Context, method, endpoint string, queryParams url.Values, bodyParams any) (_ *http.Request, _ context.CancelFunc, err error) {
 	var body []byte
 	if bodyParams != nil {
 		body, err = json.Marshal(bodyParams)

@@ -237,7 +237,7 @@ func (t *Tatanka) handleRemoteClientDisconnect(tt *remoteTatanka, msg *msgjson.M
 			clientID: dconn.ID,
 			tankaID:  tt.ID,
 		},
-		res: make(chan interface{}, 1),
+		res: make(chan any, 1),
 	}
 	t.clientJobs <- job
 	<-job.res

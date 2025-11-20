@@ -835,7 +835,7 @@ func (db *tTxDB) getBridgeCompletions(initiationTxID string) ([]*extendedWalletT
 // }
 
 type tBundler struct {
-	supportedEntrypointsResult map[common.Address]interface{}
+	supportedEntrypointsResult map[common.Address]any
 	supportedEntrypointsErr    error
 	// if both are set, on the first call the error will be returned, and on the
 	// second call, the result will be returned.
@@ -855,7 +855,7 @@ type tBundler struct {
 
 var _ bundler = (*tBundler)(nil)
 
-func (b *tBundler) supportedEntryPoints(ctx context.Context) (map[common.Address]interface{}, error) {
+func (b *tBundler) supportedEntryPoints(ctx context.Context) (map[common.Address]any, error) {
 	return b.supportedEntrypointsResult, b.supportedEntrypointsErr
 }
 
@@ -896,7 +896,7 @@ func (b *tBundler) getGasPrice(ctx context.Context) (string, string, error) {
 
 func newTBundler() *tBundler {
 	return &tBundler{
-		supportedEntrypointsResult: make(map[common.Address]interface{}),
+		supportedEntrypointsResult: make(map[common.Address]any),
 		getUserOpReceiptResults:    make(map[common.Hash]*getUserOpReceiptResult),
 		getUserOpReceiptErrs:       make(map[common.Hash]error),
 		submittedUserOps:           make([]*userOp, 0),

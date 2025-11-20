@@ -40,7 +40,7 @@ type Mesh struct {
 	log       dex.Logger
 	entryNode *TatankaCredentials
 	conn      *meshConn
-	payloads  chan interface{}
+	payloads  chan any
 
 	dataDir   string
 	db        *lexi.DB
@@ -72,7 +72,7 @@ func New(cfg *Config) (*Mesh, error) {
 		log:       cfg.Logger,
 		dataDir:   cfg.DataDir,
 		entryNode: cfg.EntryNode,
-		payloads:  make(chan interface{}, 128),
+		payloads:  make(chan any, 128),
 		markets:   make(map[string]*market),
 		fiatRates: make(map[string]*fiatrates.FiatRateInfo),
 	}
@@ -184,7 +184,7 @@ func (m *Mesh) handlePeerRequest(peerID tanka.PeerID, route string, payload json
 	}
 }
 
-func (m *Mesh) Broadcast(topic tanka.Topic, subject tanka.Subject, msgType mj.BroadcastMessageType, thing interface{}) error {
+func (m *Mesh) Broadcast(topic tanka.Topic, subject tanka.Subject, msgType mj.BroadcastMessageType, thing any) error {
 	payload, err := json.Marshal(thing)
 	if err != nil {
 		return fmt.Errorf("error marshaling broadcast payload: %v", err)
@@ -326,7 +326,7 @@ func (m *Mesh) ConnectPeer(peerID tanka.PeerID) error {
 	return m.conn.ConnectPeer(peerID)
 }
 
-func (m *Mesh) RequestPeer(peerID tanka.PeerID, msg *msgjson.Message, thing interface{}) error {
+func (m *Mesh) RequestPeer(peerID tanka.PeerID, msg *msgjson.Message, thing any) error {
 	return m.conn.RequestPeer(peerID, msg, thing)
 }
 

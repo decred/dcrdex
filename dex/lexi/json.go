@@ -25,7 +25,7 @@ func JSON(thing any) BinaryMarshal {
 
 // UnJSON can be used in index entry generator functions for some syntactic
 // sugar.
-func UnJSON(thing any) interface{} {
+func UnJSON(thing any) any {
 	if lj, is := thing.(*lexiJSON); is {
 		return lj.thing
 	}

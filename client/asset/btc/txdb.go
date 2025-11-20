@@ -93,17 +93,17 @@ type badgerLoggerWrapper struct {
 var _ badger.Logger = (*badgerLoggerWrapper)(nil)
 
 // Debugf -> dex.Logger.Tracef
-func (log *badgerLoggerWrapper) Debugf(s string, a ...interface{}) {
+func (log *badgerLoggerWrapper) Debugf(s string, a ...any) {
 	log.Tracef(s, a...)
 }
 
 // Infof -> dex.Logger.Debugf
-func (log *badgerLoggerWrapper) Infof(s string, a ...interface{}) {
+func (log *badgerLoggerWrapper) Infof(s string, a ...any) {
 	log.Debugf(s, a...)
 }
 
 // Warningf -> dex.Logger.Warnf
-func (log *badgerLoggerWrapper) Warningf(s string, a ...interface{}) {
+func (log *badgerLoggerWrapper) Warningf(s string, a ...any) {
 	log.Warnf(s, a...)
 }
 

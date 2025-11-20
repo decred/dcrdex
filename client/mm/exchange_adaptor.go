@@ -575,7 +575,7 @@ func (u *unifiedExchangeAdaptor) logBalanceAdjustments(dexDiffs, cexDiffs map[ui
 	}
 
 	var msg strings.Builder
-	writeLine := func(s string, a ...interface{}) {
+	writeLine := func(s string, a ...any) {
 		msg.WriteString("\n" + fmt.Sprintf(s, a...))
 	}
 	writeLine("")
@@ -1693,7 +1693,7 @@ func (u *unifiedExchangeAdaptor) CEXBalance(assetID uint32) *BotBalance {
 
 // allAssets returns a list of all the assets this bot uses.
 func (u *unifiedExchangeAdaptor) allAssets() []uint32 {
-	assets := make(map[uint32]interface{}, 6)
+	assets := make(map[uint32]any, 6)
 	assets[u.dexBaseID] = struct{}{}
 	assets[u.dexQuoteID] = struct{}{}
 	assets[feeAssetID(u.dexBaseID)] = struct{}{}

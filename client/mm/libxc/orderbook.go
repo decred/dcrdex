@@ -26,7 +26,7 @@ const asksComparable = obEntryComparable(1)
 
 var _ skiplist.Comparable = (*obEntryComparable)(nil)
 
-func (o obEntryComparable) Compare(lhs, rhs interface{}) int {
+func (o obEntryComparable) Compare(lhs, rhs any) int {
 	lhsEntry := lhs.(*obEntry)
 	rhsEntry := rhs.(*obEntry)
 
@@ -45,7 +45,7 @@ func (o obEntryComparable) Compare(lhs, rhs interface{}) int {
 	return toReturn
 }
 
-func (o obEntryComparable) CalcScore(key interface{}) float64 {
+func (o obEntryComparable) CalcScore(key any) float64 {
 	if o == bidsComparable {
 		return math.MaxFloat64 - float64(key.(*obEntry).rate)
 	} else {

@@ -58,15 +58,15 @@ func newRunEventNote(host string, baseID, quoteID uint32, startTime int64, event
 
 type cexNotification struct {
 	db.Notification
-	CEXName string      `json:"cexName"`
-	Note    interface{} `json:"note"`
+	CEXName string `json:"cexName"`
+	Note    any    `json:"note"`
 }
 
 const (
 	TopicBalanceUpdate = "BalanceUpdate"
 )
 
-func newCexUpdateNote(cexName string, topic db.Topic, note interface{}) *cexNotification {
+func newCexUpdateNote(cexName string, topic db.Topic, note any) *cexNotification {
 	return &cexNotification{
 		Notification: db.NewNotification(NoteTypeCEXNotification, topic, "", "", db.Data),
 		CEXName:      cexName,

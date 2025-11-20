@@ -77,7 +77,7 @@ func genKeyPair() (*secp256k1.PrivateKey, tanka.PeerID) {
 	return priv, peerID
 }
 
-func mustEncode(thing interface{}) json.RawMessage {
+func mustEncode(thing any) json.RawMessage {
 	b, err := json.Marshal(thing)
 	if err != nil {
 		panic("mustEncode: " + err.Error())

@@ -54,7 +54,7 @@ const (
 
 // bundler is an interface to interact with an ERC-4337 bundler.
 type bundler interface {
-	supportedEntryPoints(ctx context.Context) (map[common.Address]interface{}, error)
+	supportedEntryPoints(ctx context.Context) (map[common.Address]any, error)
 	sendUserOp(ctx context.Context, userOp *userOp) (common.Hash, error)
 	getUserOpReceipt(ctx context.Context, userOpHash common.Hash) (*getUserOpReceiptResult, error)
 	withNonce(opts *bind.CallOpts, ethSwapAddr, participantAddr common.Address, f func(*big.Int) error) error
@@ -118,14 +118,14 @@ func newBundler(ctx context.Context, endpoint string, entryPointAddr common.Addr
 }
 
 // supportedEntryPoints returns the entry points supported by the bundler.
-func (b *rpcBundler) supportedEntryPoints(ctx context.Context) (map[common.Address]interface{}, error) {
+func (b *rpcBundler) supportedEntryPoints(ctx context.Context) (map[common.Address]any, error) {
 	var res []string
 	err := b.rpcClient.CallContext(ctx, &res, "eth_supportedEntryPoints")
 	if err != nil {
 		return nil, err
 	}
 
-	entryPoints := make(map[common.Address]interface{}, len(res))
+	entryPoints := make(map[common.Address]any, len(res))
 	for _, v := range res {
 		entryPoints[common.HexToAddress(v)] = true
 	}

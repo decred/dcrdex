@@ -97,8 +97,8 @@ func tNewTatanka() *Tatanka {
 		topics:          make(map[tanka.Topic]*Topic),
 		recentRelays:    make(map[[32]byte]time.Time),
 		clientJobs:      make(chan *clientJob, 128),
-		clientHandlers:  make(map[string]interface{}),
-		tatankaHandlers: make(map[string]interface{}),
+		clientHandlers:  make(map[string]any),
+		tatankaHandlers: make(map[string]any),
 		httpReqHandlers: make(map[string]comms.HTTPHandler),
 	}
 }

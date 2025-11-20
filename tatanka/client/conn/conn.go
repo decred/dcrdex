@@ -1011,7 +1011,7 @@ func (c *MeshConn) ConnectPeer(peerID tanka.PeerID) error {
 }
 
 // RequestPeer sends a request to an already-connected peer.
-func (c *MeshConn) RequestPeer(peerID tanka.PeerID, msg *msgjson.Message, thing interface{}) error {
+func (c *MeshConn) RequestPeer(peerID tanka.PeerID, msg *msgjson.Message, thing any) error {
 	c.peersMtx.RLock()
 	p, known := c.peers[peerID]
 	c.peersMtx.RUnlock()
