@@ -2368,7 +2368,7 @@ export default class WalletsPage extends BasePage {
     url.search = search.toString()
     url.pathname = '/wallets/logfile'
 
-    if (window.isWebview !== undefined) {
+    if (window.isWebview !== undefined || window.electron !== undefined) {
       window.location.href = url.toString()
     } else {
       window.open(url.toString())
