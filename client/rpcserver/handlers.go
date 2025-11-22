@@ -1068,7 +1068,11 @@ func handleTxHistory(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		return usage(txHistoryRoute, err)
 	}
 
-	txs, err := s.core.TxHistory(form.assetID, form.num, form.refID, form.past)
+	txs, err := s.core.TxHistory(form.assetID, &asset.TxHistoryRequest{
+		N:     form.num,
+		RefID: form.refID,
+		Past:  form.past,
+	})
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCTxHistoryError, "unable to get tx history: %v", err)
 		return createResponse(txHistoryRoute, nil, resErr)

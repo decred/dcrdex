@@ -464,20 +464,11 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer zero(pass)
-	var parentForm *core.WalletForm
-	if f := form.ParentForm; f != nil {
-		parentForm = &core.WalletForm{
-			AssetID: f.AssetID,
-			Config:  f.Config,
-			Type:    f.WalletType,
-		}
-	}
 	// Wallet does not exist yet. Try to create it.
 	err = s.core.CreateWallet(pass, form.Pass, &core.WalletForm{
-		AssetID:    form.AssetID,
-		Type:       form.WalletType,
-		Config:     form.Config,
-		ParentForm: parentForm,
+		AssetID: form.AssetID,
+		Type:    form.WalletType,
+		Config:  form.Config,
 	})
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error creating %s wallet: %w", unbip(form.AssetID), err))
@@ -2116,31 +2107,26 @@ func (s *WebServer) apiMarketMakingStatus(w http.ResponseWriter, r *http.Request
 
 func (s *WebServer) apiTxHistory(w http.ResponseWriter, r *http.Request) {
 	var form struct {
+		asset.TxHistoryRequest
 		AssetID uint32 `json:"assetID"`
-		N       int    `json:"n"`
-		RefID   string `json:"refID"`
-		Past    bool   `json:"past"`
 	}
 	if !readPost(w, r, &form) {
 		return
 	}
 
-	var refID *string
-	if len(form.RefID) > 0 {
-		refID = &form.RefID
-	}
-
-	txs, err := s.core.TxHistory(form.AssetID, form.N, refID, form.Past)
+	resp, err := s.core.TxHistory(form.AssetID, &form.TxHistoryRequest)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error getting transaction history: %w", err))
 		return
 	}
 	writeJSON(w, &struct {
-		OK  bool                       `json:"ok"`
-		Txs []*asset.WalletTransaction `json:"txs"`
+		OK            bool                       `json:"ok"`
+		Txs           []*asset.WalletTransaction `json:"txs"`
+		MoreAvailable bool                       `json:"moreAvailable"`
 	}{
-		OK:  true,
-		Txs: txs,
+		OK:            true,
+		Txs:           resp.Txs,
+		MoreAvailable: resp.MoreAvailable,
 	})
 }
 

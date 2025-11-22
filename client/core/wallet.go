@@ -17,6 +17,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
+	"decred.org/dcrdex/dex/utils"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
@@ -67,6 +68,9 @@ type xcWallet struct {
 	hookedUp   bool
 	syncStatus *asset.SyncStatus
 	disabled   bool
+
+	pendingTxsMtx sync.RWMutex
+	pendingTxs    map[string]*asset.WalletTransaction
 
 	// When wallets are being reconfigured and especially when the wallet type
 	// or host is being changed, we want to suppress "walletstate" notes to
@@ -257,13 +261,6 @@ func (w *xcWallet) amtString(amt uint64) string {
 	return fmt.Sprintf("%s %s", ui.ConventionalString(amt), ui.Conventional.Unit)
 }
 
-func (w *xcWallet) amtStringSigned(amt int64) string {
-	if amt >= 0 {
-		return w.amtString(uint64(amt))
-	}
-	return "-" + w.amtString(uint64(-amt))
-}
-
 // state returns the current WalletState.
 func (w *xcWallet) state() *WalletState {
 	winfo := w.Info()
@@ -291,17 +288,18 @@ func (w *xcWallet) state() *WalletState {
 		Running:      w.connector.On(),
 		Balance:      w.balance,
 		Address:      w.address,
-		Units:        winfo.UnitInfo.AtomicUnit,
 		Encrypted:    len(w.encPass) > 0,
 		PeerCount:    peerCount,
 		Synced:       w.syncStatus.Synced,
 		SyncProgress: w.syncStatus.BlockProgress(),
 		SyncStatus:   w.syncStatus,
 		WalletType:   w.walletType,
+		Class:        winfo.BlockchainClass,
 		Traits:       w.traits,
 		Disabled:     w.disabled,
 		Approved:     tokenApprovals,
 		FeeState:     feeState,
+		PendingTxs:   w.pendingTxsCopy(),
 	}
 	w.mtx.RUnlock()
 
@@ -551,17 +549,12 @@ func (w *xcWallet) swapConfirmations(ctx context.Context, coinID []byte, contrac
 // refID are returned, otherwise the transactions after the refID are
 // returned. n is the number of transactions to return. If n is <= 0,
 // all the transactions will be returned.
-func (w *xcWallet) TxHistory(n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
+func (w *xcWallet) TxHistory(req *asset.TxHistoryRequest) (*asset.TxHistoryResponse, error) {
 	if !w.connected() {
 		return nil, errWalletNotConnected
 	}
 
-	historian, ok := w.Wallet.(asset.WalletHistorian)
-	if !ok {
-		return nil, fmt.Errorf("wallet does not support transaction history")
-	}
-
-	return historian.TxHistory(n, refID, past)
+	return w.Wallet.TxHistory(req)
 }
 
 // WalletTransaction returns information about a transaction that the wallet
@@ -571,12 +564,25 @@ func (w *xcWallet) WalletTransaction(ctx context.Context, txID string) (*asset.W
 		return nil, errWalletNotConnected
 	}
 
-	historian, ok := w.Wallet.(asset.WalletHistorian)
-	if !ok {
-		return nil, fmt.Errorf("wallet does not support transaction history")
-	}
+	return w.WalletTransaction(ctx, txID)
+}
 
-	return historian.WalletTransaction(ctx, txID)
+func (w *xcWallet) processWalletTransactions(txs []*asset.WalletTransaction) {
+	w.pendingTxsMtx.Lock()
+	defer w.pendingTxsMtx.Unlock()
+	for _, tx := range txs {
+		if tx.Confirmed {
+			delete(w.pendingTxs, tx.ID)
+		} else {
+			w.pendingTxs[tx.ID] = tx
+		}
+	}
+}
+
+func (w *xcWallet) pendingTxsCopy() map[string]*asset.WalletTransaction {
+	w.pendingTxsMtx.RLock()
+	defer w.pendingTxsMtx.RUnlock()
+	return utils.CopyMap(w.pendingTxs)
 }
 
 // MakeBondTx authors a DEX time-locked fidelity bond transaction if the
