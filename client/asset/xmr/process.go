@@ -1,14 +1,18 @@
 package xmr
 
 import (
+	"bufio"
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"decred.org/dcrdex/dex"
@@ -25,7 +29,7 @@ const (
 const (
 	CliName        = "monero-wallet-cli"
 	CliLogfileName = CliName + ".log"
-	CliLogLevel    = "3"
+	CliLogLevel    = "0"
 )
 
 const (
@@ -54,9 +58,13 @@ const (
 	CliGenFromSpendKeyParam         = "--generate-from-spend-key"
 	CliMnemonicLanguageEnglishParam = "--mnemonic-language=English" // hard code
 	CliPasswordParam                = "--password="
-	CliOfflineParam                 = "--offline"
-	CliCommandAddressParam          = "--command=address"
 	CliCommandRefreshParam          = "--command=refresh"
+)
+
+const (
+	CliSeedTrigger    = "Logging to"
+	CliDateTrigger    = "Restore from specific blockchain height"
+	CliDateYesTrigger = "Restore height is:"
 )
 
 func (r *xmrRpc) probeDaemon(ctx context.Context) error {
@@ -76,6 +84,7 @@ func (r *xmrRpc) probeDaemon(ctx context.Context) error {
 	r.log.Debugf("daemon %s -- height: %d, synchronized: %v, restricted: %v, untrusted: %v", r.daemonAddr,
 		r.daemonState.height, r.daemonState.synchronized, r.daemonState.restricted, r.daemonState.untrusted)
 	r.daemonState.Unlock()
+
 	return nil
 }
 
@@ -138,11 +147,36 @@ func getRegtestWalletServerRpcPort(dataDir string) string {
 	return DefaultRegtestWalletServerRpcPort
 }
 
-func cliGenerateRefreshWallet(ctx context.Context, trustedDaemon string, net dex.Network, dataDir, cliToolsDir string, pw, seed []byte) error {
+// cliGenerateRefreshWallet generates a monero wallet from a given spendkey (seed)
+// and password bytes with a given birthday. Birthday should not be later than now.
+// Seed and password will be zeroed out on function exit.
+func cliGenerateRefreshWallet(
+	ctx context.Context,
+	trustedDaemon string,
+	log dex.Logger,
+	net dex.Network,
+	dataDir,
+	cliToolsDir string,
+	pw, seed []byte,
+	birthday uint64) error {
+
+	zero := func(bb []byte) {
+		for i := range len(bb) {
+			bb[i] = 0
+		}
+	}
+	defer func() {
+		zero(pw)
+		zero(seed)
+	}()
+
 	cli := path.Join(cliToolsDir, CliName)
 	if runtime.GOOS == "windows" {
 		cli += ".exe"
 	}
+
+	// changing any of these parameters will change the behavior of monero-wallet-cli
+	// and the state machine goroutine below should be updated.
 	cmd := exec.CommandContext(ctx, cli)
 	switch net {
 	case dex.Mainnet:
@@ -167,40 +201,191 @@ func cliGenerateRefreshWallet(ctx context.Context, trustedDaemon string, net dex
 	cmd.Args = append(cmd.Args, LogFileParam+logfilePath)
 	cmd.Args = append(cmd.Args, LogLevelParam+CliLogLevel)
 	cmd.Args = append(cmd.Args, CliCommandRefreshParam)
-	stdin, err := cmd.StdinPipe()
+
+	cliSpendkeyAnswer := hex.EncodeToString(seed)
+	if runtime.GOOS == "windows" {
+		cliSpendkeyAnswer += "\r"
+	}
+	cliSpendkeyAnswer += "\n"
+
+	timeString := time.Unix(int64(birthday), 0).String()
+	cliDateAnswer := strings.Split(timeString, " ")[0]
+	if runtime.GOOS == "windows" {
+		cliDateAnswer += "\r"
+	}
+	cliDateAnswer += "\n"
+
+	cliDateAnswerYes := "Yes"
+	if runtime.GOOS == "windows" {
+		cliDateAnswerYes += "\r"
+	}
+	cliDateAnswerYes += "\n"
+
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("unable to create stdin pipe: %v", err)
 	}
-	err = cmd.Start()
-	if err != nil {
-		return fmt.Errorf("cli create wallet process start: %w", err)
-	}
-	// TODO: Find a way to send these that doesn't involve sleeping. Tried
-	// using a reader on stdout but it was getting stuck for me. After
-	// sending the spend key, there is a long wait.
+	stdoutScanner := bufio.NewScanner(stdout)
+
+	// scanner uses this buffer not it's internal one while reading from the
+	// child STDOUT pipe.
+	// The extra +1 is to allow scanner to allocate on any edge case such as
+	// a very long string in the buffer.
+	// Monero does this when printing refresh status on the same cli terminal
+	// line, e.g.
 	//
-	// Respond to seed prompt.
-	time.Sleep(time.Second)
-	io.WriteString(stdin, hex.EncodeToString(seed)+"\n")
-	// Respond to birthday prompt.
-	// TODO: Respond with the birthday. YYYY-MM-DD
-	done := make(chan struct{})
+	// "Height 3516301 / 3541634\rHeight 3526300 / 3541634\r..."
+	//
+	// Using CR to overwrite can make a very long token before any '\n' and the
+	// refresh (sync) is very long, say from the last checkpoint.
+	buf := make([]byte, 0, bufio.MaxScanTokenSize)
+	stdoutScanner.Buffer(buf, bufio.MaxScanTokenSize+1)
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("unable to create stdout pipe: %v", err)
+	}
+	stdinWriter := bufio.NewWriter(stdin)
+
+	var wg sync.WaitGroup
+
+	// Start up the child process
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("child process start failed: %v", err)
+	}
+
+	const (
+		seedState    = 0
+		dateState    = 1
+		dateYesState = 2
+		doneState    = 3
+	)
+
+	wg.Add(1)
+	var state = seedState
+	next := make(chan int)
+
+	// Handle child STDOUT
 	go func() {
-		for {
-			select {
-			case <-done:
-				return
-			case <-ctx.Done():
-				return
-			case <-time.After(time.Second):
-				io.WriteString(stdin, "\n")
+		defer wg.Done()
+		for stdoutScanner.Scan() {
+			line := stdoutScanner.Text()
+
+			if state == seedState && strings.Contains(line, CliSeedTrigger) {
+				next <- state
+				state = dateState
+				continue
+			}
+
+			if state == dateState && strings.Contains(line, CliDateTrigger) {
+				next <- state
+				state = dateYesState
+				continue
+			}
+
+			if state == dateYesState && strings.Contains(line, CliDateYesTrigger) {
+				next <- state
+				state = doneState
 			}
 		}
+		close(next)
+
+		// EOF or Error
+		if err := stdoutScanner.Err(); err != nil && err != io.EOF {
+			log.Errorf("stdoutScanner error: %v\n", err)
+			log.Errorf("current state: %d\n", state)
+		}
 	}()
-	err = cmd.Wait()
-	close(done)
-	if err != nil {
-		return fmt.Errorf("create wallet command exited with status %d", cmd.ProcessState.ExitCode())
+
+	// Handle child STDIN
+out:
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case s := <-next:
+			switch s {
+			case seedState:
+				log.Debugf("seed state: %d", s)
+				stdinWriter.WriteString(cliSpendkeyAnswer)
+				stdinWriter.Flush()
+
+			case dateState:
+				log.Debugf("date state: %d", s)
+				stdinWriter.WriteString(cliDateAnswer)
+				stdinWriter.Flush()
+
+			case dateYesState:
+				log.Debugf("yes state: %d", s)
+				stdinWriter.WriteString(cliDateAnswerYes)
+				stdinWriter.Flush()
+
+				break out
+
+			default:
+				log.Errorf("unknown state: %d", s)
+			}
+		}
 	}
+
+	log.Debug("wallet syncing")
+
+	// wait for the scanner goroutine
+	wg.Wait()
+
+	log.Debug("scanner finished reading")
+
+	// tell the child process we are finished sending input.
+	stdin.Close()
+
+	log.Debug("wrote all data to child's stdin and closed stdin pipe")
+
+	// wait for the child process to exit; closes stdout
+	processErr := cmd.Wait()
+
+	if processErr != nil {
+		log.Errorf("exec: cmd.Wait finished with error: %v, end state: %d", processErr, state)
+
+		// If we are past the seed entry state - then fail - there will be maybe valid wallet files in
+		// the data dir with a balance of 0.000000000000.
+		//
+		// If user tries again to create monero-wallet-cli will return "wallet already esists" exit(1).
+		//
+		// Delete the generated wallet files!
+		deleteWalletFiles(dataDir, log)
+
+		return fmt.Errorf("failed to create wallet - error: %w", processErr)
+	}
+
+	log.Debugf("exec: done, state: %d\n", state)
 	return nil
+}
+
+// deleteWalletFiles deletes wallet & wallet.keys from the data dir.
+// This is Dangerous function; current users:
+// - cliGenerateRefreshWallet
+func deleteWalletFiles(dataDir string, log dex.Logger) {
+	log.Warn("deleting both monero wallet files")
+
+	walletFile := path.Join(dataDir, WalletFileName)
+	err := os.Remove(walletFile)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			log.Warnf("%s does not exist", walletFile)
+		} else {
+			log.Errorf("error: %v deleting %s", walletFile)
+		}
+	}
+
+	walletKeysFile := path.Join(dataDir, WalletKeysFileName)
+	err = os.Remove(walletKeysFile)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			log.Warnf("%s does not exist", walletKeysFile)
+		} else {
+			log.Errorf("error: %v deleting %s", walletKeysFile)
+		}
+	}
+
+	log.Warnf("deleted any existing wallet files in %s", dataDir)
 }
