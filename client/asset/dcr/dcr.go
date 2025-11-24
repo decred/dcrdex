@@ -80,9 +80,9 @@ const (
 	splitTxBaggage = dexdcr.MsgTxOverhead + dexdcr.P2PKHInputSize + 2*dexdcr.P2PKHOutputSize
 
 	// softMaxTxSize is the soft limit for transaction size during coin selection.
-	// Set to 90% of MaxStandardTxSize (100,000 bytes) to provide a buffer for
+	// Set to 90% of MaxStandardTxSize to provide a buffer for
 	// fees and prevent hitting the hard limit during broadcast.
-	softMaxTxSize = uint32(90000) // 90 KB
+	softMaxTxSize = uint32(dexdcr.MaxStandardTxSize * 9 / 10)
 
 	walletTypeDcrwRPC = "dcrwalletRPC"
 	walletTypeLegacy  = "" // dcrwallet RPC prior to wallet types
@@ -6545,13 +6545,18 @@ func (dcr *ExchangeWallet) TicketPage(scanStart int32, n, skipN int) ([]*asset.T
 func (dcr *ExchangeWallet) broadcastTx(signedTx *wire.MsgTx, feeRate uint64) (*chainhash.Hash, error) {
 	// Hard limit: Validate transaction size before broadcasting to prevent
 	// transactions from getting stuck in mempool.
+	// Use MaxStandardTxSize (100KB) not chainParams.MaxTxSize (393KB) because
+	// the mempool enforces a 100KB policy limit for transaction relay.
+	// Transactions larger than 100KB will be rejected by the mempool even though
+	// they would be valid according to consensus rules.
 	txSize := signedTx.SerializeSize()
-	maxSize := uint64(dcr.chainParams.MaxTxSize)
+	maxSize := uint64(dexdcr.MaxStandardTxSize)
 
 	if uint64(txSize) > maxSize {
 		return nil, fmt.Errorf(
-			"transaction size (%d bytes) exceeds maximum allowed size (%d bytes). "+
-				"This transaction contains %d inputs. Please send a smaller amount",
+			"transaction size (%d bytes) exceeds maximum standard size (%d bytes). "+
+				"This transaction contains %d inputs and would be rejected by the mempool. "+
+				"Please consolidate UTXOs or send a smaller amount",
 			txSize, maxSize, len(signedTx.TxIn))
 	}
 
