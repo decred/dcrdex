@@ -3701,6 +3701,142 @@ func TestWithdrawTxSizeValidation(t *testing.T) {
 	})
 }
 
+func TestBroadcastTxDustValidation(t *testing.T) {
+	wallet, _, shutdown := tNewWallet()
+	defer shutdown()
+
+	feeRate := uint64(10) // 10 atoms/byte
+
+	// Helper to create a simple P2PKH output
+	createP2PKHOutput := func(value int64) *wire.TxOut {
+		return newTxOut(value, 0, tP2PKHScript)
+	}
+
+	// Helper to create OP_RETURN output
+	createOPReturnOutput := func() *wire.TxOut {
+		// OP_RETURN script
+		builder := txscript.NewScriptBuilder()
+		builder.AddOp(txscript.OP_RETURN)
+		builder.AddData([]byte("test data"))
+		script, _ := builder.Script()
+		return newTxOut(0, 0, script)
+	}
+
+	// Test 1: Normal transaction with non-dust output (should succeed)
+	t.Run("normal tx with non-dust output", func(t *testing.T) {
+		tx := wire.NewMsgTx()
+		// Add dummy input
+		tx.AddTxIn(wire.NewTxIn(&wire.OutPoint{}, 1e8, nil))
+		// Add non-dust output (1 DCR = 100,000,000 atoms)
+		tx.AddTxOut(createP2PKHOutput(1e8))
+
+		_, err := wallet.broadcastTx(tx, feeRate)
+		if err != nil {
+			// Error might be from SendRawTransaction, but should not be dust error
+			if strings.Contains(err.Error(), "dust") {
+				t.Fatalf("normal tx should not trigger dust error: %v", err)
+			}
+			// Other errors (like sendrawtx connection issues) are okay in test
+		}
+	})
+
+	// Test 2: Transaction with dust output (should fail)
+	t.Run("tx with dust output", func(t *testing.T) {
+		tx := wire.NewMsgTx()
+		tx.AddTxIn(wire.NewTxIn(&wire.OutPoint{}, 10000, nil))
+		// Add dust output
+		// For P2PKH (36 bytes), at 10 atoms/byte: min = 10 * (36 + 165) * 3 = 6,030 atoms
+		// 5000 atoms is below threshold
+		tx.AddTxOut(createP2PKHOutput(5000))
+
+		_, err := wallet.broadcastTx(tx, feeRate)
+		if err == nil {
+			t.Fatal("expected dust error, got nil")
+		}
+
+		errStr := err.Error()
+		if !strings.Contains(errStr, "dust") {
+			t.Fatalf("expected dust error, got: %v", err)
+		}
+		if !strings.Contains(errStr, "output 0") {
+			t.Fatalf("error should identify output index, got: %v", err)
+		}
+	})
+
+	// Test 3: Transaction with OP_RETURN output (should succeed)
+	t.Run("tx with OP_RETURN output", func(t *testing.T) {
+		tx := wire.NewMsgTx()
+		tx.AddTxIn(wire.NewTxIn(&wire.OutPoint{}, 1e8, nil))
+		// OP_RETURN outputs are allowed to be zero value
+		tx.AddTxOut(createOPReturnOutput())
+		// Add a normal non-dust output as well
+		tx.AddTxOut(createP2PKHOutput(1e8))
+
+		_, err := wallet.broadcastTx(tx, feeRate)
+		if err != nil {
+			// Should not be dust error since OP_RETURN is skipped
+			if strings.Contains(err.Error(), "dust") {
+				t.Fatalf("OP_RETURN should not trigger dust error: %v", err)
+			}
+		}
+	})
+
+	// Test 4: Transaction at dust boundary (edge case)
+	t.Run("tx at dust boundary", func(t *testing.T) {
+		tx := wire.NewMsgTx()
+		tx.AddTxIn(wire.NewTxIn(&wire.OutPoint{}, 10000, nil))
+		// Exactly at dust threshold
+		// For P2PKH: min = 10 * (36 + 165) * 3 = 6,030 atoms
+		tx.AddTxOut(createP2PKHOutput(6030))
+
+		_, err := wallet.broadcastTx(tx, feeRate)
+		// At exact boundary, should NOT be dust
+		if err != nil && strings.Contains(err.Error(), "dust") {
+			t.Fatalf("boundary value should not be dust: %v", err)
+		}
+	})
+
+	// Test 5: Multiple outputs, one is dust (should fail and identify correct output)
+	t.Run("multiple outputs with one dust", func(t *testing.T) {
+		tx := wire.NewMsgTx()
+		tx.AddTxIn(wire.NewTxIn(&wire.OutPoint{}, 2e8, nil))
+		// Output 0: Non-dust
+		tx.AddTxOut(createP2PKHOutput(1e8))
+		// Output 1: Dust
+		tx.AddTxOut(createP2PKHOutput(5000))
+		// Output 2: Non-dust
+		tx.AddTxOut(createP2PKHOutput(1e8))
+
+		_, err := wallet.broadcastTx(tx, feeRate)
+		if err == nil {
+			t.Fatal("expected dust error, got nil")
+		}
+
+		errStr := err.Error()
+		if !strings.Contains(errStr, "dust") {
+			t.Fatalf("expected dust error, got: %v", err)
+		}
+		// Should identify output 1 as dust
+		if !strings.Contains(errStr, "output 1") {
+			t.Fatalf("error should identify output 1 as dust, got: %v", err)
+		}
+	})
+
+	// Test 6: Zero fee rate should use fallback (should not panic)
+	t.Run("zero fee rate uses fallback", func(t *testing.T) {
+		tx := wire.NewMsgTx()
+		tx.AddTxIn(wire.NewTxIn(&wire.OutPoint{}, 1e8, nil))
+		tx.AddTxOut(createP2PKHOutput(1e8))
+
+		// Pass zero fee rate - should use fallback
+		_, err := wallet.broadcastTx(tx, 0)
+		if err != nil && strings.Contains(err.Error(), "dust") {
+			t.Fatalf("fallback fee rate should not cause dust error for 1 DCR: %v", err)
+		}
+		// Other errors are fine, just testing dust logic doesn't panic
+	})
+}
+
 func Test_sendToAddress(t *testing.T) {
 	wallet, node, shutdown := tNewWallet()
 	defer shutdown()
