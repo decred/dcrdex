@@ -122,6 +122,10 @@ func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, 
 
 // Create creates a new wallet.
 func (d *Driver) Create(cwp *asset.CreateWalletParams) error {
+	// TODO(seq) ->
+	fmt.Printf("enter create, cwp.Pass %x %s\n", cwp.Pass, hex.EncodeToString(cwp.Pass))
+	fmt.Printf("monero wallet will be created with pw=%s\n", hex.EncodeToString(cwp.Pass))
+	// <-
 	// check if user re-entered from create UI but wallet files already made
 	if !walletFilesMissing(cwp.DataDir) {
 		return fmt.Errorf("Create entered but wallet files already exist")

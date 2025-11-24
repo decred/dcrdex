@@ -51,7 +51,7 @@ func TestCliGenerateRefreshWalletCmd(t *testing.T) {
 		userToolsDir,
 		pwB,
 		seedB,
-		uint64(time.Now().Unix())) // this may be wrong .. are we using UTC date elsewhere for comparison?
+		uint64(time.Now().Unix()))
 	if err != nil {
 		t.Fatal(err)
 	}
