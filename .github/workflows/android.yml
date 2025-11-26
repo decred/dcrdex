@@ -13,7 +13,7 @@ jobs:
     steps:
       # Checkout project code
       - name: Checking out branch
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 #v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           # Use sparse checkout to only select files in mobile app directory
           # Turning off cone mode ensures that files in the project root are not included during checkout
@@ -30,7 +30,7 @@ jobs:
           ls -lah
 
       - name: Setup Java
-        uses: actions/setup-java@7a6d8a8234af8eb26422e24e3006232cccaa061b #v4.6.0
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
         with:
           distribution: 'temurin'
           java-version: 17
@@ -46,7 +46,7 @@ jobs:
         run: echo "apkfile=$(find app/build/outputs/apk/debug/*.apk)" >> $GITHUB_OUTPUT
 
       - name: Upload Debug Build to Artifacts
-        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 #v4.6.0
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: debug-apk
           path: ${{ steps.debugApk.outputs.apkfile }}
