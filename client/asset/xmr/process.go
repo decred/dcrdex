@@ -247,7 +247,6 @@ func cliGenerateRefreshWallet(
 		seedState    = "seed"
 		dateState    = "date"
 		dateYesState = "yes"
-		doneState    = "done"
 	)
 
 	wg.Add(1)
@@ -276,8 +275,13 @@ func cliGenerateRefreshWallet(
 			}
 
 			if state == dateYesState && strings.Contains(line, CliDateYesTrigger) {
+				// removing this hangs; whether it is done or the same state
+				// monero log shows it waiting for an answer to a question that
+				// it has not yet printed "(Q) Do you want to ... (A) Yes, No.."
+				//
+				// Maybe run monero-wallet-cli with same params directly to see
+				// the sequence.
 				next <- state
-				state = doneState
 			}
 		}
 		close(next)
@@ -295,19 +299,17 @@ out:
 		case <-ctx.Done():
 			return nil
 		case s := <-next:
+			log.Tracef("state: %s", s)
 			switch s {
 			case seedState:
-				log.Tracef("state: %s", s)
 				stdinWriter.WriteString(cliSpendkeyAnswer)
 				stdinWriter.Flush()
 
 			case dateState:
-				log.Tracef("state: %s", s)
 				stdinWriter.WriteString(cliDateAnswer)
 				stdinWriter.Flush()
 
 			case dateYesState:
-				log.Tracef("state: %s", s)
 				stdinWriter.WriteString(cliDateAnswerYes)
 				stdinWriter.Flush()
 
