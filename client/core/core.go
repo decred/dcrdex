@@ -5050,13 +5050,43 @@ func (c *Core) Orders(filter *OrderFilter) ([]*Order, error) {
 		}
 	}
 
+	// Smart filter expansion: When filtering for "executed" orders,
+	// also include "canceled" orders so we can show partially filled ones.
+	dbStatuses := filter.Statuses
+	includePartiallyCanceled := false
+	canceledWasAutoAdded := false
+	if len(filter.Statuses) > 0 {
+		for _, status := range filter.Statuses {
+			if status == order.OrderStatusExecuted {
+				includePartiallyCanceled = true
+				break
+			}
+		}
+	}
+
+	if includePartiallyCanceled {
+		// Expand filter to include canceled orders
+		alreadyHasCanceled := false
+		for _, status := range dbStatuses {
+			if status == order.OrderStatusCanceled {
+				alreadyHasCanceled = true
+				break
+			}
+		}
+		if !alreadyHasCanceled {
+			dbStatuses = append([]order.OrderStatus(nil), dbStatuses...)
+			dbStatuses = append(dbStatuses, order.OrderStatusCanceled)
+			canceledWasAutoAdded = true
+		}
+	}
+
 	ords, err := c.db.Orders(&db.OrderFilter{
 		N:        filter.N,
 		Offset:   oid,
 		Hosts:    filter.Hosts,
 		Assets:   filter.Assets,
 		Market:   mkt,
-		Statuses: filter.Statuses,
+		Statuses: dbStatuses,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("UserOrders error: %w", err)
@@ -5068,6 +5098,41 @@ func (c *Core) Orders(filter *OrderFilter) ([]*Order, error) {
 		if err != nil {
 			return nil, err
 		}
+
+		// Post-filter: If we expanded the filter for partially filled canceled orders,
+		// exclude orders that have 0% filled based on the filter type.
+		if includePartiallyCanceled {
+			// Calculate filled amount (excluding cancel matches)
+			var filledAmt uint64
+			for _, match := range corder.Matches {
+				if match.IsCancel {
+					continue
+				}
+				if corder.Sell {
+					filledAmt += match.Qty
+				} else {
+					filledAmt += calc.BaseToQuote(match.Rate, match.Qty)
+				}
+			}
+
+			shouldSkip := false
+
+			// Always filter "no match" orders (executed with 0% filled)
+			if corder.Status == order.OrderStatusExecuted && filledAmt == 0 {
+				shouldSkip = true
+			}
+
+			// Only filter canceled(0%) if we auto-added the canceled status
+			// (i.e., user didn't explicitly select "canceled")
+			if corder.Status == order.OrderStatusCanceled && canceledWasAutoAdded && filledAmt == 0 {
+				shouldSkip = true
+			}
+
+			if shouldSkip {
+				continue
+			}
+		}
+
 		baseWallet, baseOK := c.wallet(corder.BaseID)
 		quoteWallet, quoteOK := c.wallet(corder.QuoteID)
 		corder.ReadyToTick = baseOK && baseWallet.connected() && baseWallet.unlocked() &&
