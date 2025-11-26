@@ -38,7 +38,7 @@ func TestOrderReader_StatusString(t *testing.T) {
 				{IsCancel: false, Qty: 500, Rate: 1e8, Active: false}, // Actual fill
 				{IsCancel: true, Qty: 500, Rate: 1e8, Active: false},  // Cancel match
 			},
-			want: "canceled(partially filled)",
+			want: "canceled/partially filled",
 		},
 		{
 			name:      "cancelled with active matches",

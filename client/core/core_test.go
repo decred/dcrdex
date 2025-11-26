@@ -11321,7 +11321,7 @@ func TestTakeAction(t *testing.T) {
 }
 
 // TestCore_Orders_SmartFilterExecuted tests that filtering for "executed"
-// orders also includes "canceled(partially filled)" orders.
+// orders also includes "canceled/partially filled" orders.
 func TestCore_Orders_SmartFilterExecuted(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()

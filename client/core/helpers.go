@@ -315,7 +315,7 @@ func (ord *OrderReader) StatusString() string {
 			return "canceled/settling"
 		}
 		if ord.sumFrom(filledNonCancelFilter) > 0 {
-			return "canceled(partially filled)"
+			return "canceled/partially filled"
 		}
 		return "canceled"
 	case order.OrderStatusRevoked:
