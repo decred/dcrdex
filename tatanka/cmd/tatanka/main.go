@@ -223,14 +223,14 @@ func config() (*dex.LoggerMaker, *Config) {
 	for i := range cfg.Listeners {
 		listen, err := normalizeNetworkAddress(cfg.Listeners[i], defaultHost, defaultPort)
 		if err != nil {
-			emitConfigError(err.Error())
+			emitConfigError("error parsing Listeners: %v", err.Error())
 		}
 		cfg.Listeners[i] = listen
 	}
 	if cfg.HiddenService != "" {
 		cfg.HiddenService, err = normalizeNetworkAddress(cfg.HiddenService, defaultHSHost, defaultHSPort)
 		if err != nil {
-			emitConfigError(err.Error())
+			emitConfigError("error parsing HiddenService: %v", err.Error())
 		}
 	}
 
