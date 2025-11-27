@@ -37,8 +37,7 @@ import (
 
 var (
 	compatibleWalletRPCVersions = []dex.Semver{
-		{Major: 9, Minor: 0, Patch: 0}, // 1.8-pre
-		{Major: 8, Minor: 8, Patch: 0}, // 1.7 release, min for getcurrentnet
+		{Major: 11, Minor: 0, Patch: 0}, // 2.1.0 release
 	}
 	compatibleNodeRPCVersions = []dex.Semver{
 		{Major: 8, Minor: 0, Patch: 0}, // 1.8-pre, just dropped unused ticket RPCs
@@ -149,7 +148,7 @@ type rpcClient interface {
 	WalletInfo(ctx context.Context) (*walletjson.WalletInfoResult, error)
 	ValidateAddress(ctx context.Context, address stdaddr.Address) (*walletjson.ValidateAddressWalletResult, error)
 	GetStakeInfo(ctx context.Context) (*walletjson.GetStakeInfoResult, error)
-	PurchaseTicket(ctx context.Context, fromAccount string, spendLimit dcrutil.Amount, minConf *int,
+	PurchaseTicket(ctx context.Context, fromAccount string, minConf *int,
 		numTickets *int,
 		expiry *int, ticketChange *bool, ticketFee *dcrutil.Amount) ([]*chainhash.Hash, error)
 	GetTickets(ctx context.Context, includeImmature bool) ([]*chainhash.Hash, error)
@@ -1026,7 +1025,6 @@ func (w *rpcWallet) PurchaseTickets(ctx context.Context, n int, _, _ string, _ b
 	hashes, err := w.rpcClient.PurchaseTicket(
 		ctx,
 		"default",
-		0,   // spendLimit
 		nil, // minConf
 		&n,  // numTickets
 		nil, // expiry
