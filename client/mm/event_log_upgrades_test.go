@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -42,7 +43,8 @@ func TestEventLogV2Upgrade(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	db2, err := newBoltEventLogDB(ctx, dbPath, dex.StdOutLogger("TEST", dex.LevelError))
+	var wg sync.WaitGroup
+	db2, err := newBoltEventLogDB(ctx, dbPath, &wg, dex.StdOutLogger("TEST", dex.LevelError))
 	if err != nil {
 		t.Fatalf("Failed to create DB for upgrade: %v", err)
 	}
@@ -56,8 +58,6 @@ func TestEventLogV2Upgrade(t *testing.T) {
 		t.Fatalf("Expected version 2 after upgrade, got %d", version)
 	}
 	verifyV2EventLogUpgrade(t, db2.DB)
-
-	db2.Close()
 }
 
 func setupV1EventLogData(tx *bbolt.Tx) error {

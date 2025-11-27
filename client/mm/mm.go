@@ -685,15 +685,14 @@ func (m *MarketMaker) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		}
 	}
 
-	eventLogDB, err := newBoltEventLogDB(ctx, m.eventLogDBPath, m.log.SubLogger("eventlogdb"))
+	var wg sync.WaitGroup
+	eventLogDB, err := newBoltEventLogDB(ctx, m.eventLogDBPath, &wg, m.log.SubLogger("eventlogdb"))
 	if err != nil {
 		return nil, fmt.Errorf("error creating event log DB: %v", err)
 	}
 	m.eventLogDB = eventLogDB
 
 	m.oracle = newPriceOracle(m.ctx, m.log.SubLogger("oracle"))
-
-	var wg sync.WaitGroup
 
 	wg.Add(1)
 	go func() {

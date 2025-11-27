@@ -10,6 +10,7 @@ import (
 	"maps"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -36,7 +37,8 @@ func TestEventLogDB(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	db, err := newBoltEventLogDB(ctx, filepath.Join(dir, "event_log.db"), tLogger)
+	var wg sync.WaitGroup
+	db, err := newBoltEventLogDB(ctx, filepath.Join(dir, "event_log.db"), &wg, tLogger)
 	if err != nil {
 		t.Fatalf("error creating event log db: %v", err)
 	}
@@ -457,7 +459,8 @@ func TestUpdateFinalBalanceDueToEventDiff(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	db, err := newBoltEventLogDB(ctx, filepath.Join(dir, "event_log.db"), tLogger)
+	var wg sync.WaitGroup
+	db, err := newBoltEventLogDB(ctx, filepath.Join(dir, "event_log.db"), &wg, tLogger)
 	if err != nil {
 		t.Fatalf("error creating event log db: %v", err)
 	}
