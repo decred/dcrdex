@@ -85,7 +85,7 @@ func main() {
 				var toTitle bool
 				var found bool
 				var replacement *intl.Translation
-				if titleKey := strings.TrimPrefix(key, ":title:"); titleKey != key {
+				if titleKey, ok := strings.CutPrefix(key, ":title:"); ok {
 					// Check if there's a value for :title:key. Especially for languages
 					// that do not work well with cases.Caser, e.g zh-cn.
 					if replacement, found = dict[key]; !found {
