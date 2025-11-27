@@ -145,7 +145,7 @@ through the Bison Wallet setup.
 
 ## Dependencies
 
-1. [Go 1.23 - 1.24](https://golang.org/doc/install)
+1. [Go 1.24 - 1.25](https://golang.org/doc/install)
 2. (optional) [Node 18 or 20](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm)
 is used to bundle resources for the browser interface. It's important to note that Bison Wallet has no
 external JavaScript dependencies. The client doesn't import any Node packages. We only use Node to lint
