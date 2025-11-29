@@ -592,14 +592,14 @@ func (u *unifiedExchangeAdaptor) logBalanceAdjustments(dexDiffs, cexDiffs map[ui
 	if len(dexDiffs) > 0 {
 		writeLine("  DEX:")
 		for assetID, dexDiff := range dexDiffs {
-			writeLine("    " + format(assetID, dexDiff, true))
+			writeLine("    %s", format(assetID, dexDiff, true))
 		}
 	}
 
 	if len(cexDiffs) > 0 {
 		writeLine("  CEX:")
 		for assetID, cexDiff := range cexDiffs {
-			writeLine("    " + format(assetID, cexDiff, true))
+			writeLine("    %s", format(assetID, cexDiff, true))
 		}
 	}
 
@@ -607,12 +607,12 @@ func (u *unifiedExchangeAdaptor) logBalanceAdjustments(dexDiffs, cexDiffs map[ui
 	writeLine("  DEX:")
 
 	for assetID, bal := range u.baseDexBalances {
-		writeLine("    " + format(assetID, bal, false))
+		writeLine("    %s", format(assetID, bal, false))
 	}
 	if len(u.baseCexBalances) > 0 {
 		writeLine("  CEX:")
 		for assetID, bal := range u.baseCexBalances {
-			writeLine("    " + format(assetID, bal, false))
+			writeLine("    %s", format(assetID, bal, false))
 		}
 	}
 
@@ -639,14 +639,14 @@ func (u *unifiedExchangeAdaptor) logBalanceAdjustments(dexDiffs, cexDiffs map[ui
 	if len(dexPending) > 0 {
 		writeLine("  DEX pending:")
 		for assetID, v := range dexPending {
-			writeLine("    " + format(assetID, int64(v), true))
+			writeLine("    %s", format(assetID, int64(v), true))
 		}
 	}
 
 	if len(cexPending) > 0 {
 		writeLine("  CEX pending:")
 		for assetID, v := range cexPending {
-			writeLine("    " + format(assetID, int64(v), true))
+			writeLine("    %s", format(assetID, int64(v), true))
 		}
 	}
 
