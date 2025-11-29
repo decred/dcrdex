@@ -257,7 +257,7 @@ export default class OrdersPage extends BasePage {
     url.search = search.toString()
     url.pathname = '/orders/export'
     if (window.electron !== undefined || window.isWebview !== undefined) {
-      window.electron.open(url.toString(), '_self')
+      window.open(url.toString(), '_self')
     } else {
       window.open(url.toString())
     }

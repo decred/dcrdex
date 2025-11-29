@@ -35,4 +35,4 @@ pushd ../src
 cp bisonw-16.png ../resources/${PLATFORM}/bisonw-16.png
 popd
 
-echo "Preparation complete. If you're running this for the first time, proceed to run npm ci before npm run start or npm run make."
+echo "Preparation complete. Proceed proceed to run npm run start or npm run make."
