@@ -69,11 +69,3 @@ fi
 build_targets
 
 rm -rf "../resources"
-
-# echo "Files embedded in the Go webserver package:"
-# go list -f '{{ .EmbedFiles }}' decred.org/dcrdex/client/webserver
-# # NOTE: before embedding, we needed to grab: dist, src/font, src/html, src/img.
-
-# pushd bin
-# shasum -a 256 *.gz *.zip > bisonw-v${VER}-manifest.txt
-# popd
