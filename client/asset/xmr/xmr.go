@@ -468,7 +468,16 @@ func (x *wallet) ValidateSecret(secret []byte, secretHash []byte) bool {
 func (x *wallet) RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) (confs uint32, err error) {
 	return 0, asset.ErrUnsupported
 }
-func (x *wallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset.Redemption, feeSuggestion uint64) (*asset.ConfirmRedemptionStatus, error) {
+
+// ConfirmTransaction checks the status of a redemption or refund. It
+// returns the number of confirmations the tx has, the number of confirmations
+// that are required for it to be considered fully confirmed, and the
+// CoinID it is currently watching for confirms. If it is determined that
+// a transaction will not be mined, this function will submit a new transaction
+// to replace the old one. The caller is notified of this by having a
+// different CoinID in the returned asset.ConfirmTxStatus as was used to
+// call the function.
+func (x *wallet) ConfirmTransaction(coinID dex.Bytes, confirmTx *asset.ConfirmTx, feeSuggestion uint64) (*asset.ConfirmTxStatus, error) {
 	return nil, asset.ErrUnsupported
 }
 func (x *wallet) SingleLotSwapRefundFees(version uint32, feeRate uint64, useSafeTxSize bool) (uint64, uint64, error) {

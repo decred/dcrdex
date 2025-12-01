@@ -93,7 +93,7 @@ const (
 	// sent the details to the maker.
 	MatchComplete // 4
 	// MatchConfirmed is a status used only by the client that represents
-	// that the user's redemption transaction has been confirmed.
+	// that the user's redemption or refund transaction has been confirmed.
 	MatchConfirmed // 5
 )
 

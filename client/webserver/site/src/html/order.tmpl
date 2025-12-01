@@ -188,10 +188,15 @@
                 <a target="_blank" class="mono plainlink" data-tmpl="takerRedeemCoin"></a>
               </div>
             </div>
-            <div class="px-3 pb-3 d-hide" data-tmpl="refund">
-              <span class="match-data-label text-danger">[[[Refund]]] (<span data-tmpl="refundAsset"></span>, [[[you]]])</span><br>
-              <span data-tmpl="refundPending"></span>
-              <a target="_blank" class="mono plainlink" data-tmpl="refundCoin"></a>
+             <div class="px-3 pb-3 d-hide" data-tmpl="refund">
+              <div class="d-inline-block">
+                <div class="d-flex align-items-center justify-content-between">
+                  <span class="match-data-label text-danger">[[[Refund]]] (<span data-tmpl="refundAsset"></span>, [[[you]]])</span>
+                  <span class="match-data-label" data-tmpl="refundMsg"></span>
+                </div>
+                <span data-tmpl="refundPending"></span>
+                <a target="_blank" class="mono plainlink" data-tmpl="refundCoin"></a>
+              </div>
             </div>
           </div>
         </div>

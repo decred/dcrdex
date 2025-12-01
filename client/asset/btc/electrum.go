@@ -493,7 +493,7 @@ func (btc *ExchangeWalletElectrum) syncTxHistory(tip uint64) {
 		if tx.BlockNumber > 0 && tip >= tx.BlockNumber {
 			confs = tip - tx.BlockNumber + 1
 		}
-		if confs >= requiredRedeemConfirms {
+		if confs >= confTxFinality {
 			tx.Confirmed = true
 			updated = true
 		}

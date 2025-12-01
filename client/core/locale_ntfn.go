@@ -298,6 +298,10 @@ var originLocale = map[Topic]*translation{
 		subject:  intl.Translation{T: "Redemption Resubmitted"},
 		template: intl.Translation{T: "Your redemption for match %s in order %s was resubmitted."},
 	},
+	TopicRefundResubmitted: {
+		subject:  intl.Translation{T: "Refund Resubmitted"},
+		template: intl.Translation{T: "Your refund for match %s in order %s was resubmitted."},
+	},
 	TopicSwapRefunded: {
 		subject:  intl.Translation{T: "Swap Refunded"},
 		template: intl.Translation{T: "Match %s in order %s was refunded by the counterparty."},
@@ -305,6 +309,10 @@ var originLocale = map[Topic]*translation{
 	TopicRedemptionConfirmed: {
 		subject:  intl.Translation{T: "Redemption Confirmed"},
 		template: intl.Translation{T: "Your redemption for match %s in order %s was confirmed"},
+	},
+	TopicRefundConfirmed: {
+		subject:  intl.Translation{T: "Refund Confirmed"},
+		template: intl.Translation{T: "Your refund for match %s in order %s was confirmed"},
 	},
 	TopicWalletTypeDeprecated: {
 		subject:  intl.Translation{T: "Wallet Disabled"},
