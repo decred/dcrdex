@@ -22,8 +22,9 @@ require (
 	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 // indirect
 	github.com/BurntSushi/toml v1.4.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
+	github.com/ProjectZKM/Ziren/crates/go-runtime/zkvm_runtime v0.0.0-20251001021608-1fe7b43fc4d6 // indirect
 	github.com/StackExchange/wmi v1.2.1 // indirect
-	github.com/VictoriaMetrics/fastcache v1.12.2 // indirect
+	github.com/VictoriaMetrics/fastcache v1.13.0 // indirect
 	github.com/aead/siphash v1.0.1 // indirect
 	github.com/agl/ed25519 v0.0.0-20170116200512-5312a6153412 // indirect
 	github.com/athanorlabs/go-dleq v0.1.0 // indirect
@@ -49,7 +50,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/companyzero/sntrup4591761 v0.0.0-20220309191932-9e0f3af2f07a // indirect
 	github.com/consensys/gnark-crypto v0.18.0 // indirect
-	github.com/crate-crypto/go-eth-kzg v1.3.0 // indirect
+	github.com/crate-crypto/go-eth-kzg v1.4.0 // indirect
 	github.com/crate-crypto/go-ipa v0.0.0-20240724233137-53bbb0ceb27a // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dchest/blake2b v1.0.0 // indirect
@@ -90,11 +91,13 @@ require (
 	github.com/decred/vspd/types/v3 v3.0.0 // indirect
 	github.com/dgraph-io/badger v1.6.2 // indirect
 	github.com/dgraph-io/ristretto v0.0.2 // indirect
-	github.com/dustin/go-humanize v1.0.0 // indirect
-	github.com/ethereum/c-kzg-4844/v2 v2.1.0 // indirect
-	github.com/ethereum/go-ethereum v1.16.1 // indirect
+	github.com/dustin/go-humanize v1.0.1-0.20210705192016-249ff6c91207 // indirect
+	github.com/emicklei/dot v1.6.2 // indirect
+	github.com/ethereum/c-kzg-4844/v2 v2.1.5 // indirect
+	github.com/ethereum/go-bigmodexpfix v0.0.0-20250911101455-f9e208c548ab // indirect
+	github.com/ethereum/go-ethereum v1.16.7 // indirect
 	github.com/ethereum/go-verkle v0.2.2 // indirect
-	github.com/ferranbt/fastssz v0.1.2 // indirect
+	github.com/ferranbt/fastssz v0.1.4 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/gcash/bchd v0.19.0 // indirect
 	github.com/gcash/bchlog v0.0.0-20180913005452-b4f036f92fa6 // indirect
@@ -103,10 +106,10 @@ require (
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/gofrs/flock v0.12.1 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
-	github.com/golang/snappy v0.0.5-0.20220116011046-fa5810519dcb // indirect
-	github.com/google/uuid v1.3.0 // indirect
+	github.com/golang/snappy v1.0.0 // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.1 // indirect
-	github.com/holiman/billy v0.0.0-20240216141850-2abb0c79d3c4 // indirect
+	github.com/holiman/billy v0.0.0-20250707135307-f2f9b9aae7db // indirect
 	github.com/holiman/bloomfilter/v2 v2.0.3 // indirect
 	github.com/holiman/uint256 v1.3.2 // indirect
 	github.com/jrick/bitset v1.0.0 // indirect
@@ -130,7 +133,7 @@ require (
 	github.com/ltcsuite/ltcd/btcec/v2 v2.3.2 // indirect
 	github.com/ltcsuite/ltcd/ltcutil v1.1.4-0.20240131072528-64dfa402637a // indirect
 	github.com/ltcsuite/ltcd/ltcutil/psbt v1.1.1-0.20240131072528-64dfa402637a // indirect
-	github.com/mattn/go-runewidth v0.0.13 // indirect
+	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/minio/sha256-simd v1.0.0 // indirect
 	github.com/mitchellh/mapstructure v1.4.1 // indirect
 	github.com/naoina/go-stringutil v0.1.0 // indirect
@@ -142,7 +145,7 @@ require (
 	github.com/shirou/gopsutil v3.21.4-0.20210419000835-c7a38de76ee5+incompatible // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/stretchr/testify v1.10.0 // indirect
-	github.com/supranational/blst v0.3.14 // indirect
+	github.com/supranational/blst v0.3.16-0.20250831170142-f48500c1fdbe // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
 	github.com/tyler-smith/go-bip39 v1.1.0 // indirect
