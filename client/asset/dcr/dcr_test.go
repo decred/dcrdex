@@ -542,7 +542,7 @@ func (c *tRPCClient) GetStakeInfo(ctx context.Context) (*walletjson.GetStakeInfo
 	return &c.stakeInfo, nil
 }
 
-func (c *tRPCClient) PurchaseTicket(ctx context.Context, fromAccount string, spendLimit dcrutil.Amount, minConf *int,
+func (c *tRPCClient) PurchaseTicket(ctx context.Context, fromAccount string, minConf *int,
 	numTickets *int,
 	expiry *int, ticketChange *bool, ticketFee *dcrutil.Amount) (tix []*chainhash.Hash, _ error) {
 
