@@ -14,7 +14,7 @@ import (
 
 const defaultResponseSizeLimit = 1 << 20 // 1 MiB = 1,048,576 bytes
 
-// RequestOption are optional arguemnts to Get, Post, or Do.
+// RequestOption are optional arguments to Get, Post, or Do.
 type RequestOption struct {
 	responseSizeLimit int64
 	statusFunc        func(int)
@@ -45,11 +45,11 @@ func WithErrorParsing(thing interface{}) *RequestOption {
 	return &RequestOption{errThing: thing}
 }
 
-// Post peforms an HTTP POST request. If thing is non-nil, the response will
+// Post performs an HTTP POST request. If thing is non-nil, the response will
 // be JSON-unmarshaled into thing.
 func Post(ctx context.Context, uri string, thing interface{}, body []byte, opts ...*RequestOption) error {
 	var r io.Reader
-	if len(body) == 1 {
+	if len(body) > 0 {
 		r = bytes.NewReader(body)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, uri, r)
@@ -59,7 +59,7 @@ func Post(ctx context.Context, uri string, thing interface{}, body []byte, opts 
 	return Do(req, thing, opts...)
 }
 
-// Post peforms an HTTP GET request. If thing is non-nil, the response will
+// Post performs an HTTP GET request. If thing is non-nil, the response will
 // be JSON-unmarshaled into thing.
 func Get(ctx context.Context, uri string, thing interface{}, opts ...*RequestOption) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
