@@ -275,13 +275,8 @@ func cliGenerateRefreshWallet(
 			}
 
 			if state == dateYesState && strings.Contains(line, CliDateYesTrigger) {
-				// removing this hangs; whether it is done or the same state
-				// monero log shows it waiting for an answer to a question that
-				// it has not yet printed "(Q) Do you want to ... (A) Yes, No.."
-				//
-				// Maybe run monero-wallet-cli with same params directly to see
-				// the sequence.
 				next <- state
+				break
 			}
 		}
 		close(next)
@@ -321,24 +316,24 @@ out:
 		}
 	}
 
-	log.Debug("Wallet syncing")
+	log.Trace("Wallet initial sync")
 
 	// wait for the scanner goroutine
 	wg.Wait()
 
-	log.Debug("Scanner finished reading")
+	log.Trace("Scanner finished reading")
 
 	// tell the child process we are finished sending input.
 	stdin.Close()
 
-	log.Debug("Wrote all data to child's stdin and closed stdin pipe")
+	log.Tracef("Wrote all data to child's stdin and closed stdin pipe")
 
 	// wait for the child process to exit; closes stdout
 	processErr := cmd.Wait()
 
 	if processErr != nil {
-		// If we are past the seed entry state - then fail - there will be maybe valid wallet files in
-		// the data dir with a balance of 0.000000000000.
+		// If we are past the seed entry state - then fail - there will probably be valid wallet files
+		// in the data dir with a balance of 0.000000000000.
 		//
 		// If user tries again to create monero-wallet-cli will return "wallet already esists" exit(1).
 		//

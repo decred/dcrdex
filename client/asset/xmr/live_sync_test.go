@@ -21,7 +21,7 @@ const (
 
 	CakeMainnetDaemon = "https://xmr-node.cakewallet.com:18081"
 
-	TestPw   = "abc"
+	TestPw   = "ab" // can decode before re-encoding to "ab"
 	TestSeed = "d92f4e072b78eb782c06ae73ab2fed5ea31b5858b150791d927303af61d38401"
 
 	MoneroCliLogfile    = "monero-wallet-cli.log"
@@ -39,7 +39,7 @@ func TestCliGenerateRefreshWalletCmd(t *testing.T) {
 	logger := dex.StdOutLogger("test", slog.LevelTrace)
 	home, _ := os.UserHomeDir()
 	userToolsDir := path.Join(home, MoneroToolsDir)
-	pwB := []byte(TestPw)
+	pwB, _ := hex.DecodeString(TestPw)
 	seedB, _ := hex.DecodeString(TestSeed)
 
 	err := cliGenerateRefreshWallet(
