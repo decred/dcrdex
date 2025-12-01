@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -176,7 +177,7 @@ var (
 	noPendingKey   = []byte("np")
 )
 
-func newBoltEventLogDB(ctx context.Context, path string, log dex.Logger) (*boltEventLogDB, error) {
+func newBoltEventLogDB(ctx context.Context, path string, wg *sync.WaitGroup, log dex.Logger) (*boltEventLogDB, error) {
 	db, err := bbolt.Open(path, 0600, nil)
 	if err != nil {
 		return nil, err
@@ -201,8 +202,9 @@ func newBoltEventLogDB(ctx context.Context, path string, log dex.Logger) (*boltE
 	if err != nil {
 		return nil, err
 	}
-
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		eventLogDB.listenForStoreEvents(ctx)
 		db.Close()
 	}()
@@ -264,7 +266,8 @@ func calcFinalStateBasedOnEventDiff(runBucket, eventsBucket *bbolt.Bucket, event
 
 // updateEvent is called for each event that is popped off the updateEvent. If
 // the event already exists, it is updated. If it does not exist, it is added.
-// The stats for the run are also updated based on the event.
+// The stats for the run are also updated based on the event. update must not
+// be nil.
 func (db *boltEventLogDB) updateEvent(update *eventUpdate) {
 	if err := db.Update(func(tx *bbolt.Tx) error {
 		botRuns := tx.Bucket(botRunsBucket)
@@ -366,11 +369,6 @@ func parseRunKey(key []byte) (startTime int64, mkt *MarketWithHost, err error) {
 		Host:    string(pushes[3]),
 	}
 	return
-}
-
-func (db *boltEventLogDB) Close() error {
-	close(db.eventUpdates)
-	return db.DB.Close()
 }
 
 func (db *boltEventLogDB) storeCfgUpdate(runBucket *bbolt.Bucket, newCfg *BotConfig, timestamp int64) error {
