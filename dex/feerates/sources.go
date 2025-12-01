@@ -18,6 +18,7 @@ import (
 	"decred.org/dcrdex/client/asset/ltc"
 	"decred.org/dcrdex/client/asset/zec"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/dexnet"
 	"decred.org/dcrdex/server/asset/dash"
 	"github.com/decred/dcrd/dcrutil/v4"
 )
@@ -436,7 +437,7 @@ func getFeeRateEstimateWithHeader(ctx context.Context, url string, thing any, he
 		req.Header.Add(key, value)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := dexnet.Client.Do(req)
 	if err != nil {
 		return err
 	}

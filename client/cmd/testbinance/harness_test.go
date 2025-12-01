@@ -17,6 +17,7 @@ import (
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/mm/libxc/bntypes"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/dexnet"
 )
 
 const testAPIKey = "Test Client 3000"
@@ -49,7 +50,7 @@ func TestEvmWallet(t *testing.T) {
 func testWallet(t *testing.T, ctx context.Context, w Wallet) {
 	addr := w.DepositAddress()
 	fmt.Println("##### Deposit address:", addr)
-	txID, err := w.Send(ctx, addr, 0.1)
+	txID, err := w.Send(ctx, addr, "", 0.1)
 	if err != nil {
 		t.Fatalf("Send error: %v", err)
 	}
@@ -81,7 +82,7 @@ func getInto(method, endpoint string, thing any) error {
 func requestInto(req *http.Request, thing any) error {
 	req.Header.Add("X-MBX-APIKEY", testAPIKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := dexnet.Client.Do(req)
 	if err != nil || thing == nil {
 		return err
 	}
@@ -211,7 +212,7 @@ func TestAccountFeed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error constructing btc wallet: %v", err)
 	}
-	txID, err := w.Send(ctx, addrResp.Address, 0.1)
+	txID, err := w.Send(ctx, addrResp.Address, "", 0.1)
 	if err != nil {
 		t.Fatalf("Send error: %v", err)
 	}

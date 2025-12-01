@@ -8052,7 +8052,7 @@ func getDcrdataTxs(ctx context.Context, addr string, net dex.Network) (txs []*wi
 		txID := tx.TxID
 
 		// tx/hex response is a hex string but is not JSON encoded.
-		r, err := http.DefaultClient.Get(apiRoot + "tx/hex/" + txID)
+		r, err := dexnet.Client.Get(apiRoot + "tx/hex/" + txID)
 		if err != nil {
 			return nil, fmt.Errorf("error getting transaction %q: %w", txID, err)
 		}

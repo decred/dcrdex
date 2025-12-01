@@ -29,6 +29,7 @@ import (
 
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/dexnet"
 	"decred.org/dcrdex/server/noderelay"
 )
 
@@ -158,7 +159,7 @@ func mainErr() (err error) {
 	}()
 
 	localNodeURL := "http://127.0.0.1" + ":" + port
-	httpClient := http.DefaultClient
+	httpClient := dexnet.Client
 	if localNodeCert != "" {
 		localNodeURL = "https://127.0.0.1" + ":" + port
 		pem, err := os.ReadFile(localNodeCert)
