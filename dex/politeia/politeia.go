@@ -116,7 +116,7 @@ func (p *Politeia) WalletProposalVoteDetails(ctx context.Context, wallet VotingW
 		return nil, err
 	}
 
-	hashes := make([]*chainhash.Hash, len(votesResults.Votes))
+	hashes := make([]*chainhash.Hash, 0, len(votesResults.Votes))
 	castVotes := make(map[string]string)
 	for _, v := range votesResults.Votes {
 		hash, err := chainhash.NewHashFromStr(v.Ticket)
