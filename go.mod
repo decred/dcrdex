@@ -1,11 +1,9 @@
 module decred.org/dcrdex
 
-go 1.23
-
-toolchain go1.23.2
+go 1.24.0
 
 require (
-	decred.org/dcrwallet/v5 v5.0.0-20250407130412-4f0acd20d74c
+	decred.org/dcrwallet/v5 v5.0.1
 	filippo.io/edwards25519 v1.0.0
 	fyne.io/systray v1.10.1-0.20220621085403-9a2652634e93
 	github.com/btcsuite/btcd v0.24.2-beta.rc1.0.20240625142744-cc26860b4026
@@ -23,26 +21,26 @@ require (
 	github.com/dcrlabs/bchwallet v0.0.0-20240114124852-0e95005810be
 	github.com/dcrlabs/ltcwallet v0.0.0-20240823165752-3e026e8da010
 	github.com/dcrlabs/neutrino-bch v0.0.0-20240114121828-d656bce11095
-	github.com/decred/base58 v1.0.5
-	github.com/decred/dcrd/addrmgr/v2 v2.0.4
-	github.com/decred/dcrd/blockchain/stake/v5 v5.0.1
-	github.com/decred/dcrd/blockchain/standalone/v2 v2.2.1
+	github.com/decred/base58 v1.0.6
+	github.com/decred/dcrd/addrmgr/v3 v3.0.0
+	github.com/decred/dcrd/blockchain/stake/v5 v5.0.2
+	github.com/decred/dcrd/blockchain/standalone/v2 v2.2.2
 	github.com/decred/dcrd/certgen v1.2.0
-	github.com/decred/dcrd/chaincfg/chainhash v1.0.4
-	github.com/decred/dcrd/chaincfg/v3 v3.2.1
-	github.com/decred/dcrd/connmgr/v3 v3.1.2
+	github.com/decred/dcrd/chaincfg/chainhash v1.0.5
+	github.com/decred/dcrd/chaincfg/v3 v3.3.0
+	github.com/decred/dcrd/connmgr/v3 v3.1.3
 	github.com/decred/dcrd/crypto/blake256 v1.1.0
 	github.com/decred/dcrd/dcrec v1.0.1
-	github.com/decred/dcrd/dcrec/edwards/v2 v2.0.3
-	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0
-	github.com/decred/dcrd/dcrjson/v4 v4.1.0
-	github.com/decred/dcrd/dcrutil/v4 v4.0.2
-	github.com/decred/dcrd/gcs/v4 v4.1.0
-	github.com/decred/dcrd/hdkeychain/v3 v3.1.2
-	github.com/decred/dcrd/rpc/jsonrpc/types/v4 v4.3.0
-	github.com/decred/dcrd/rpcclient/v8 v8.0.1
-	github.com/decred/dcrd/txscript/v4 v4.1.1
-	github.com/decred/dcrd/wire v1.7.0
+	github.com/decred/dcrd/dcrec/edwards/v2 v2.0.4
+	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0
+	github.com/decred/dcrd/dcrjson/v4 v4.2.0
+	github.com/decred/dcrd/dcrutil/v4 v4.0.3
+	github.com/decred/dcrd/gcs/v4 v4.1.1
+	github.com/decred/dcrd/hdkeychain/v3 v3.1.3
+	github.com/decred/dcrd/rpc/jsonrpc/types/v4 v4.4.0
+	github.com/decred/dcrd/rpcclient/v8 v8.1.0
+	github.com/decred/dcrd/txscript/v4 v4.1.2
+	github.com/decred/dcrd/wire v1.7.1
 	github.com/decred/go-socks v1.1.0
 	github.com/decred/slog v1.2.0
 	github.com/decred/vspd/types/v2 v2.1.0
@@ -65,13 +63,14 @@ require (
 	github.com/pkg/browser v0.0.0-20210911075715-681adbf594b8
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/tyler-smith/go-bip39 v1.1.0
-	go.etcd.io/bbolt v1.3.11
-	golang.org/x/crypto v0.33.0
+	go.etcd.io/bbolt v1.3.12
+	golang.org/x/crypto v0.45.0
 	golang.org/x/exp v0.0.0-20231110203233-9a3e6036ecaa
-	golang.org/x/sync v0.11.0
-	golang.org/x/term v0.29.0
-	golang.org/x/text v0.22.0
-	golang.org/x/time v0.5.0
+	golang.org/x/sync v0.18.0
+	golang.org/x/term v0.37.0
+	golang.org/x/text v0.31.0
+	golang.org/x/time v0.9.0
+	google.golang.org/protobuf v1.36.10
 	gopkg.in/ini.v1 v1.67.0
 	lukechampine.com/blake3 v1.3.0
 )
@@ -110,9 +109,9 @@ require (
 	github.com/decred/dcrd/container/lru v1.0.0 // indirect
 	github.com/decred/dcrd/crypto/rand v1.0.1 // indirect
 	github.com/decred/dcrd/crypto/ripemd160 v1.0.2 // indirect
-	github.com/decred/dcrd/database/v3 v3.0.2 // indirect
+	github.com/decred/dcrd/database/v3 v3.0.3 // indirect
 	github.com/decred/dcrd/lru v1.1.2 // indirect
-	github.com/decred/dcrd/mixing v0.5.1-0.20250319155359-2b7d311f4a81 // indirect
+	github.com/decred/dcrd/mixing v0.6.0 // indirect
 	github.com/decred/vspd/client/v4 v4.0.1 // indirect
 	github.com/decred/vspd/types/v3 v3.0.0 // indirect
 	github.com/dgraph-io/ristretto v0.0.3-0.20200630154024-f66de99634de // indirect
@@ -179,9 +178,9 @@ require (
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
 	github.com/zquestz/grab v0.0.0-20190224022517-abcee96e61b1 // indirect
-	golang.org/x/net v0.34.0 // indirect
-	golang.org/x/sys v0.30.0 // indirect
-	google.golang.org/protobuf v1.36.5 // indirect
+	golang.org/x/net v0.47.0 // indirect
+	golang.org/x/sys v0.38.0 // indirect
+	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect
 )
