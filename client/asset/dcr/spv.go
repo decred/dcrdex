@@ -28,7 +28,7 @@ import (
 	"decred.org/dcrwallet/v5/spv"
 	"decred.org/dcrwallet/v5/wallet"
 	"decred.org/dcrwallet/v5/wallet/udb"
-	"github.com/decred/dcrd/addrmgr/v2"
+	"github.com/decred/dcrd/addrmgr/v3"
 	"github.com/decred/dcrd/blockchain/stake/v5"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
@@ -1489,7 +1489,7 @@ func (w *spvWallet) newSpvSyncer() *spv.Syncer {
 		connectPeers = []string{"localhost:19560"}
 	}
 	addr := &net.TCPAddr{IP: net.ParseIP("::1"), Port: 0}
-	amgr := addrmgr.New(w.dir, net.LookupIP)
+	amgr := addrmgr.New(w.dir)
 	lp := p2p.NewLocalPeer(dcrw.ChainParams(), addr, amgr)
 	syncer := spv.NewSyncer(dcrw, lp)
 	if len(connectPeers) > 0 {
