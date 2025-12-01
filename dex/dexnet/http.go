@@ -10,9 +10,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
 
 const defaultResponseSizeLimit = 1 << 20 // 1 MiB = 1,048,576 bytes
+
+// Client is the default HTTP client used for requests.
+var Client = &http.Client{
+	Timeout: 20 * time.Second, // 20 seconds
+}
 
 // RequestOption are optional arguments to Get, Post, or Do.
 type RequestOption struct {
@@ -88,7 +94,7 @@ func Do(req *http.Request, thing interface{}, opts ...*RequestOption) error {
 			errThing = opt.errThing
 		}
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := Client.Do(req)
 	if err != nil {
 		return fmt.Errorf("error performing request: %w", err)
 	}

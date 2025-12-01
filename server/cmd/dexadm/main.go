@@ -15,6 +15,7 @@ import (
 
 	"decred.org/dcrdex/client/app"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/dexnet"
 	"decred.org/dcrdex/server/comms"
 	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/go-chi/chi/v5"
@@ -63,7 +64,7 @@ func mainErr() error {
 		return fmt.Errorf("error parsing adminsrvurl: %w", err)
 	}
 
-	cl := http.DefaultClient
+	cl := dexnet.Client
 
 	if len(cfg.AdminSrvCertPath) > 0 {
 		certB, err := os.ReadFile(cfg.AdminSrvCertPath)

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +16,7 @@ import (
 
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/dexnet"
 )
 
 func TestNexus(t *testing.T) {
@@ -127,7 +127,7 @@ func TestNexus(t *testing.T) {
 
 	// Now act like an asset backend and send a request through the relay node.
 	relayURL := "http://" + relayAddr
-	resp, err := http.DefaultClient.Post(relayURL, "application/json", strings.NewReader(firstRequest))
+	resp, err := dexnet.Client.Post(relayURL, "application/json", strings.NewReader(firstRequest))
 	if err != nil {
 		t.Fatalf("Post error: %v", err)
 	}

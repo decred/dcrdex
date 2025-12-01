@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/dexnet"
 	"decred.org/dcrdex/dex/encode"
 )
 
@@ -97,7 +98,7 @@ func synchronize(syncDir string) (startServer bool, err error) {
 		// Just start the server then.
 		return true, nil
 	}
-	resp, err := http.Get("http://" + addr)
+	resp, err := dexnet.Client.Get("http://" + addr)
 	if err == nil {
 		if resp.StatusCode == http.StatusOK {
 			// Other instance will open the window.

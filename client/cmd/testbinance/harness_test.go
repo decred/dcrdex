@@ -17,6 +17,7 @@ import (
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/mm/libxc/bntypes"
 	"decred.org/dcrdex/dex"
+	"github.com/ukane-philemon/dcrdex/dex/dexnet"
 )
 
 const testAPIKey = "Test Client 3000"
@@ -81,7 +82,7 @@ func getInto(method, endpoint string, thing interface{}) error {
 func requestInto(req *http.Request, thing interface{}) error {
 	req.Header.Add("X-MBX-APIKEY", testAPIKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := dexnet.Client.Do(req)
 	if err != nil || thing == nil {
 		return err
 	}

@@ -26,6 +26,7 @@ import (
 
 	"decred.org/dcrdex/client/mm/libxc/bntypes"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/dexnet"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/fiatrates"
 	"decred.org/dcrdex/dex/msgjson"
@@ -179,7 +180,7 @@ func sendBalanceUpdateRequest(coin string, balanceUpdate float64) {
 
 	url := fmt.Sprintf("http://localhost:37346/testbinance/updatebalance?coin=%s&amt=%f",
 		coin, balanceUpdate)
-	resp, err := http.Get(url)
+	resp, err := dexnet.Client.Get(url)
 	if err != nil {
 		log.Errorf("Error sending balance update request: %v", err)
 		return
