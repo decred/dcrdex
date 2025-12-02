@@ -10,8 +10,8 @@ import (
 	"sync"
 
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrwallet/v4/errors"
-	"decred.org/dcrwallet/v4/wallet/udb"
+	"decred.org/dcrwallet/v5/errors"
+	"decred.org/dcrwallet/v5/wallet/udb"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	gov "github.com/decred/dcrdata/gov/v5/politeia"
@@ -35,6 +35,7 @@ type Politeia struct {
 	files  sync.Map         // token -> decoded index.md file contents
 }
 
+// New creates and returns a new instance of *Politeia.
 func New(politeiaURL string, dbPath string, log dex.Logger) (*Politeia, error) {
 	gov.UseLogger(log)
 
@@ -55,6 +56,7 @@ func New(politeiaURL string, dbPath string, log dex.Logger) (*Politeia, error) {
 	}, nil
 }
 
+// FetchProposalDescription retrieves the complete written text description of a proposal.
 func (p *Politeia) FetchProposalDescription(token string) (string, error) {
 	// Ensure proposal exists in our db.
 	proposal, err := p.ProposalByToken(token)
