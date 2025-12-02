@@ -1,6 +1,7 @@
 package adaptorsigs
 
 import (
+	"fmt"
 	"testing"
 
 	"decred.org/dcrdex/dex/encode"
@@ -9,6 +10,7 @@ import (
 )
 
 func TestDleqProof(t *testing.T) {
+	t.Parallel()
 	pubKeysFromSecret := func(secret [32]byte) (*edwards.PublicKey, *secp256k1.PublicKey) {
 		epk, _, err := edwards.PrivKeyFromScalar(secret[:])
 		if err != nil {
@@ -25,7 +27,8 @@ func TestDleqProof(t *testing.T) {
 		return epk.PubKey(), spk.PubKey()
 	}
 
-	for i := 0; i < 10; i++ {
+	test := func(t *testing.T) {
+		t.Parallel()
 		var secret [32]byte
 		copy(secret[1:], encode.RandomBytes(31))
 
@@ -36,7 +39,7 @@ func TestDleqProof(t *testing.T) {
 		}
 		err = VerifyDLEQ(spk, epk, proof)
 		if err != nil {
-			t.Fatalf("%d: VerifyDLEQ error: %v", i, err)
+			t.Fatalf("VerifyDLEQ error: %v", err)
 		}
 
 		secret[31] += 1
@@ -58,5 +61,11 @@ func TestDleqProof(t *testing.T) {
 		if !extractedSecp.IsEqual(spk) {
 			t.Fatalf("extractedSecp != spk")
 		}
+	}
+
+	// Run the test 10 times.
+	for i := range 10 {
+		testName := fmt.Sprintf("%d", i)
+		t.Run(testName, test)
 	}
 }
