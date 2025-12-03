@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	alphaHTTPPort = "38556"
-	alphaWSPort   = "38557"
+	alphaHTTPPort = "38553"
+	alphaWSPort   = "38554"
 )
 
 var mt *MRPCTest

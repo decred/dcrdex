@@ -102,8 +102,27 @@ func ETHConfig(net dex.Network) (c ethconfig.Config, err error) {
 	case dex.Testnet:
 		c.Genesis = ethcore.DefaultSepoliaGenesisBlock()
 	case dex.Simnet:
-		// Args are gasLimit, faucet address.
-		c.Genesis = ethcore.DeveloperGenesisBlock(30000000, nil)
+		// Check if there is a simnet genesis. It is ok if missing.
+		tDir, err := simnetDataDir()
+		if err != nil {
+			return c, err
+		}
+		tGenesisFile := filepath.Join(tDir, "genesis", "genesis.json")
+		b, err := os.ReadFile(tGenesisFile)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				return c, err
+			}
+			// Args are gasLimit, faucet address.
+			c.Genesis = ethcore.DeveloperGenesisBlock(30000000, nil)
+			break
+		}
+		genesis := new(ethcore.Genesis)
+		err = genesis.UnmarshalJSON(b)
+		if err != nil {
+			return c, fmt.Errorf("unable to unmarshal genesis %v", err)
+		}
+		c.Genesis = genesis
 	default:
 		return c, fmt.Errorf("unknown network %d", net)
 

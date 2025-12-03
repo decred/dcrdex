@@ -706,8 +706,7 @@ func newWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 	var defaultProviders []string
 	switch net {
 	case dex.Simnet:
-		u, _ := user.Current()
-		defaultProviders = []string{filepath.Join(u.HomeDir, "dextest", "eth", "alpha", "node", "geth.ipc")}
+		defaultProviders = []string{"ws://127.0.0.1:38554"}
 	case dex.Testnet:
 		defaultProviders = []string{
 			"https://rpc.ankr.com/eth_sepolia",
@@ -7291,7 +7290,7 @@ func getFileCredentials(chain, path string, net dex.Network) (seed []byte, provi
 		case "polygon":
 			providers = []string{filepath.Join(u.HomeDir, "dextest", chain, "alpha", "bor", "bor.ipc")}
 		default:
-			providers = []string{filepath.Join(u.HomeDir, "dextest", chain, "alpha", "node", "geth.ipc")}
+			providers = []string{"ws://127.0.0.1:38554"}
 		}
 	}
 	return
