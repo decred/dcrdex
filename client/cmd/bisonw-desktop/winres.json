@@ -18,7 +18,7 @@
       "0000": {
         "fixed": {
           "file_version": "1.0.0.0",
-          "product_version": "1.0.4.0"
+          "product_version": "1.0.5.0"
         },
         "info": {
           "0409": {
@@ -32,7 +32,7 @@
             "OriginalFilename": "bisonw-desktop.exe",
             "PrivateBuild": "",
             "ProductName": "Bison Wallet",
-            "ProductVersion": "1.0.4.0",
+            "ProductVersion": "1.0.5.0",
             "SpecialBuild": ""
           }
         }
