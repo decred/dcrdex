@@ -322,6 +322,9 @@ func (ord *OrderReader) StatusString() string {
 		if isLive {
 			return "revoked/settling"
 		}
+		if ord.sumFrom(filledNonCancelFilter) > 0 {
+			return "revoked/partially filled"
+		}
 		return "revoked"
 	}
 	return "unknown"

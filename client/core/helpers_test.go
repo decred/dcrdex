@@ -101,6 +101,37 @@ func TestOrderReader_StatusString(t *testing.T) {
 			matches:    []*Match{},
 			want:       "cancelling",
 		},
+		{
+			name:      "revoked - no fills",
+			status:    order.OrderStatusRevoked,
+			qty:       1000,
+			orderType: order.LimitOrderType,
+			sell:      true,
+			matches:   []*Match{},
+			want:      "revoked",
+		},
+		{
+			name:      "revoked - partially filled",
+			status:    order.OrderStatusRevoked,
+			qty:       1000,
+			orderType: order.LimitOrderType,
+			sell:      true,
+			matches: []*Match{
+				{IsCancel: false, Qty: 500, Rate: 1e8, Active: false},
+			},
+			want: "revoked/partially filled",
+		},
+		{
+			name:      "revoked - with active matches",
+			status:    order.OrderStatusRevoked,
+			qty:       1000,
+			orderType: order.LimitOrderType,
+			sell:      true,
+			matches: []*Match{
+				{IsCancel: false, Qty: 500, Rate: 1e8, Active: true},
+			},
+			want: "revoked/settling",
+		},
 	}
 
 	for _, tt := range tests {
