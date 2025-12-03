@@ -20,19 +20,17 @@ npm ci
 npm run build
 popd
 
-PLATFORM=$(./platform.sh)
-
 pushd ..
 rm -rf resources
-mkdir -p "resources/${PLATFORM}"
+mkdir -p "resources/mac"
 popd
 
 pushd ../../../../client/cmd/bisonw
-go build -trimpath ${TAGS_BISONW:+-tags ${TAGS_BISONW}} -o  "../bisonw-desktop/resources/${PLATFORM}/${BISONW_EXE}" -ldflags "${LDFLAGS_BISONW:-${LDFLAGS_BASE}}"
+go build -trimpath ${TAGS_BISONW:+-tags ${TAGS_BISONW}} -o  "../bisonw-desktop/resources/mac/${BISONW_EXE}" -ldflags "${LDFLAGS_BISONW:-${LDFLAGS_BASE}}"
 popd
 
 pushd ../src
-cp bisonw-16.png ../resources/${PLATFORM}/bisonw-16.png
+cp bisonw-16.png ../resources/mac/bisonw-16.png
 popd
 
 echo "Preparation complete. Proceed proceed to run npm run start or npm run make."

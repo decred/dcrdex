@@ -30,8 +30,6 @@ rm -rf installers
 mkdir -p installers
 popd
 
-PLATFORM=$(./platform.sh)
-
 build_targets (){
   for TARGET in ${TARGETS}; do
     OS=${TARGET%%/*}
@@ -39,15 +37,15 @@ build_targets (){
     echo "Building for ${OS}-${ARCH}"
 
     pushd ..
-    mkdir -p "resources/${PLATFORM}"
+    mkdir -p "resources/mac"
     popd
 
     pushd ../../../../client/cmd/bisonw
-    GOOS=${OS} GOARCH=${ARCH} go build -trimpath ${TAGS_BISONW:+-tags ${TAGS_BISONW}} -o  "../bisonw-desktop/resources/${PLATFORM}/${BISONW_EXE}" -ldflags "${LDFLAGS_BISONW:-${LDFLAGS_BASE}}"
+    GOOS=${OS} GOARCH=${ARCH} go build -trimpath ${TAGS_BISONW:+-tags ${TAGS_BISONW}} -o  "../bisonw-desktop/resources/mac/${BISONW_EXE}" -ldflags "${LDFLAGS_BISONW:-${LDFLAGS_BASE}}"
     popd
 
     pushd ../src
-    cp bisonw-16.png ../resources/${PLATFORM}/bisonw-16.png
+    cp bisonw-16.png ../resources/mac/bisonw-16.png
     popd
 
     npm run make --platform=${OS} --arch=${ARCH}
@@ -59,13 +57,7 @@ build_targets (){
   done
 }
 
-# Vanilla builds on all supported os/arch targets
-TARGETS="linux/amd64 linux/arm64"
-if [[ "$PLATFORM" == "win" ]]; then
-  TARGETS="win32/amd64"
-elif [[ "$PLATFORM" == "mac" ]]; then
-  TARGETS="darwin/amd64" #darwin/arm64"
-fi
+TARGETS="darwin/amd64 darwin/arm64"
 build_targets
 
 rm -rf "../resources"
