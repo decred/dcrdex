@@ -3605,9 +3605,9 @@ func TestWithdrawTxSizeValidation(t *testing.T) {
 		}
 	})
 
-	// Test 2: Transaction with many inputs but under soft limit (should succeed)
+	// Test 2: Transaction with many inputs but under hard limit (should succeed)
 	t.Run("tx near but under size limit", func(t *testing.T) {
-		// 500 inputs * 166 bytes/input = 83,000 bytes + overhead < 90KB soft limit
+		// 500 inputs * 166 bytes/input = 83,000 bytes + overhead < 100KB hard limit
 		unspents := make([]walletjson.ListUnspentResult, 500)
 		for i := 0; i < 500; i++ {
 			txID := hex.EncodeToString(encode.RandomBytes(32))
@@ -3631,9 +3631,9 @@ func TestWithdrawTxSizeValidation(t *testing.T) {
 		}
 	})
 
-	// Test 3: Transaction exceeding soft size limit (should fail at fund stage)
-	t.Run("tx exceeds soft size limit", func(t *testing.T) {
-		// 650 inputs * 166 bytes/input = 107,900 bytes > 90KB soft limit
+	// Test 3: Transaction exceeding hard size limit (should fail at broadcast stage)
+	t.Run("tx exceeds hard size limit", func(t *testing.T) {
+		// 650 inputs * 166 bytes/input = 107,900 bytes > 100KB hard limit
 		unspents := make([]walletjson.ListUnspentResult, 650)
 		for i := 0; i < 650; i++ {
 			txID := hex.EncodeToString(encode.RandomBytes(32))
@@ -3650,7 +3650,7 @@ func TestWithdrawTxSizeValidation(t *testing.T) {
 		}
 		node.unspent = unspents
 
-		// Try to withdraw 6.4 DCR (requires ~640 inputs - exceeds soft limit)
+		// Try to withdraw 6.4 DCR (requires ~640 inputs - exceeds hard limit)
 		_, err := wallet.Withdraw(tPKHAddr.String(), 640e6, 10)
 		if err == nil {
 			t.Fatalf("expected error for oversized tx, got nil")
@@ -3662,11 +3662,9 @@ func TestWithdrawTxSizeValidation(t *testing.T) {
 		}
 	})
 
-	// Test 4: Verify multi-layer defense
-	// Both soft and hard limits provide protection
-	t.Run("defense in depth verification", func(t *testing.T) {
-		// With 650 UTXOs, soft limit catches it during fund()
-		// Hard limit in broadcastTx() acts as final safety net
+	// Test 4: Verify hard limit protection
+	t.Run("hard limit verification", func(t *testing.T) {
+		// Hard limit in broadcastTx() prevents oversized transactions
 		unspents := make([]walletjson.ListUnspentResult, 700)
 		for i := 0; i < 700; i++ {
 			txID := hex.EncodeToString(encode.RandomBytes(32))
@@ -3684,20 +3682,17 @@ func TestWithdrawTxSizeValidation(t *testing.T) {
 		node.unspent = unspents
 
 		// Try to withdraw amount requiring 700 inputs
-		// 700 inputs * 166 bytes = 116,200 bytes > 90KB (soft) and > 100KB (hard)
+		// 700 inputs * 166 bytes = 116,200 bytes > 100KB hard limit
 		_, err := wallet.Withdraw(tPKHAddr.String(), 690e6, 10)
 		if err == nil {
 			t.Fatalf("expected error, got nil")
 		}
 
-		// Verify error is size-related (caught by soft limit first)
+		// Verify error is size-related (caught by hard limit in broadcastTx)
 		errStr := err.Error()
 		if !strings.Contains(errStr, "exceed") && !strings.Contains(errStr, "size") {
 			t.Fatalf("expected size-related error, got: %v", err)
 		}
-
-		// The soft limit catches this early, preventing wasted computation
-		// This demonstrates the value of the two-layer validation approach
 	})
 
 	// Test 5: Verify hard limit uses MaxStandardTxSize (100KB) not MaxTxSize (393KB)
@@ -3727,10 +3722,7 @@ func TestWithdrawTxSizeValidation(t *testing.T) {
 		// This should succeed (just under 100KB)
 		_, err := wallet.Withdraw(tPKHAddr.String(), 595e6, 10)
 		if err != nil {
-			// If soft limit catches it, that's also acceptable
-			if !strings.Contains(err.Error(), "exceed") {
-				t.Fatalf("unexpected error: %v", err)
-			}
+			t.Fatalf("expected success for tx under 100KB limit, got: %v", err)
 		}
 
 		// Test 5b: Transaction just over 100KB limit (should fail with specific error)

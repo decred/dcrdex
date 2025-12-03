@@ -79,11 +79,6 @@ const (
 	// using a split transaction to fund a swap.
 	splitTxBaggage = dexdcr.MsgTxOverhead + dexdcr.P2PKHInputSize + 2*dexdcr.P2PKHOutputSize
 
-	// softMaxTxSize is the soft limit for transaction size during coin selection.
-	// Set to 90% of MaxStandardTxSize to provide a buffer for
-	// fees and prevent hitting the hard limit during broadcast.
-	softMaxTxSize = uint32(dexdcr.MaxStandardTxSize * 9 / 10)
-
 	walletTypeDcrwRPC = "dcrwalletRPC"
 	walletTypeLegacy  = "" // dcrwallet RPC prior to wallet types
 	walletTypeSPV     = "SPV"
@@ -2635,18 +2630,6 @@ func tryFund(utxos []*compositeUTXO,
 			return fmt.Errorf("error decoding redeem script for %s, script = %s: %w",
 				unspent.rpc.TxID, unspent.rpc.RedeemScript, err)
 		}
-
-		// Soft limit: Check if adding this input would make transaction too large.
-		// Estimate final tx size: current inputs + this input + overhead + typical 2 outputs
-		estimatedSize := size + unspent.input.Size() + dexdcr.MsgTxOverhead + (2 * dexdcr.P2PKHOutputSize)
-		if estimatedSize > softMaxTxSize {
-			return fmt.Errorf(
-				"transaction would exceed recommended size limit (%d inputs selected, ~%d bytes, max %d bytes). "+
-					"Cannot fund this transaction with available UTXOs. "+
-					"Consider consolidating UTXOs or sending a smaller amount",
-				len(coins)+1, estimatedSize, softMaxTxSize)
-		}
-
 		op := newOutput(txHash, unspent.rpc.Vout, v, unspent.rpc.Tree)
 		coins = append(coins, op)
 		spents = append(spents, &fundingCoin{
