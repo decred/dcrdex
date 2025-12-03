@@ -36,9 +36,9 @@ RUN npm run build
 FROM golang@sha256:445f34008a77b0b98bf1821bf7ef5e37bb63cc42d22ee7c21cc17041070d134f AS gobuilder
 COPY --from=nodebuilder /root/dex/ /root/dex/
 WORKDIR /root/dex/client/cmd/bisonw/
-RUN CGO_ENABLED=0 GOOS=linux GO111MODULE=on go build
+RUN CGO_ENABLED=0 GOOS=linux go build
 WORKDIR /root/dex/client/cmd/bwctl/
-RUN CGO_ENABLED=0 GOOS=linux GO111MODULE=on go build
+RUN CGO_ENABLED=0 GOOS=linux go build
 
 # Final image
 FROM debian:bookworm-slim

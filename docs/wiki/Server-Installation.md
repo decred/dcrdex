@@ -3,7 +3,7 @@
 ## Server Dependencies
 
 1. Linux or MacOS
-2. [Go >= 1.19](https://golang.org/doc/install)
+2. [Go >= 1.23](https://golang.org/doc/install)
 3. [PostgreSQL 11+](https://www.postgresql.org/download/), [tuned](https://pgtune.leopard.in.ua/) and running.
 4. Decred (dcrd) and Bitcoin (bitcoind) full nodes, and any other assets' full nodes, both with `txindex` enabled.
 

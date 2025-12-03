@@ -1011,8 +1011,10 @@ func (s *WebServer) apiSetLocale(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.lang.Store(lang)
-	if err := s.buildTemplates(lang); err != nil {
+	// Get actual language after SetLanguage (in case of fallback)
+	actualLang := s.core.Language()
+	s.lang.Store(actualLang)
+	if err := s.buildTemplates(actualLang); err != nil {
 		s.writeAPIError(w, err)
 		return
 	}
