@@ -57,3 +57,4 @@ internal/libsecp256k1/secp256k1
 server/cmd/dcrdex/evm-protocol-overrides.json
 client/bworg/bworg
 tatanka/cmd/tatanka/tatanka
+dex/politeia/politeia_test.db
