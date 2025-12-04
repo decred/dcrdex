@@ -256,7 +256,11 @@ export default class OrdersPage extends BasePage {
     setQuery('statuses')
     url.search = search.toString()
     url.pathname = '/orders/export'
-    window.open(url.toString())
+    if (window.electron !== undefined || window.isWebview !== undefined) {
+      window.open(url.toString(), '_self')
+    } else {
+      window.open(url.toString())
+    }
   }
 
   /* deleteArchivedRecords removes the user's archived orders and matches

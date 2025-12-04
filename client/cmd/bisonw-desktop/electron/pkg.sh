@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+
+set -e
+
+# For release, remove pre-release info, and set metadata to "release".
+VER="1.0.4-pre" # pre, beta, rc1, etc.
+META= # "release"
+
+export CGO_ENABLED=0
+export GOWORK=off
+
+# if META set, append "+${META}", otherwise nothing.
+LDFLAGS_BASE="-buildid= -s -w -X main.Version=${VER}${META:++${META}}"
+
+# Build the webpack bundle prior to building the webserver package, which embeds
+# the files.
+pushd ../../../../client/webserver/site
+go generate # just check, no write
+npm ci
+npm run build
+popd
+
+rm -rf out # This is the default output dir for electron-forge make
+
+# Use folders outside of pwd to prevent electron-forge from adding them to build.
+# The "ignore" packaging config seems to malfunction: https://github.com/electron/forge/issues/673#issuecomment-697180654
+pushd ..
+rm -rf resources
+rm -rf installers
+mkdir -p installers
+popd
+
+build_targets (){
+  for TARGET in ${TARGETS}; do
+    OS=${TARGET%%/*}
+    ARCH=${TARGET##*/}
+    echo "Building for ${OS}-${ARCH}"
+
+    pushd ..
+    mkdir -p "resources/mac"
+    popd
+
+    pushd ../../../../client/cmd/bisonw
+    GOOS=${OS} GOARCH=${ARCH} go build -trimpath ${TAGS_BISONW:+-tags ${TAGS_BISONW}} -o  "../bisonw-desktop/resources/mac/${BISONW_EXE}" -ldflags "${LDFLAGS_BISONW:-${LDFLAGS_BASE}}"
+    popd
+
+    pushd ../src
+    cp bisonw-16.png ../resources/mac/bisonw-16.png
+    popd
+
+    npm run make --platform=${OS} --arch=${ARCH}
+
+    cp -R "./out/make/BisonWallet.dmg" "../installers/bisonw-desktop-${OS}-${ARCH}-v${VER}.dmg"
+
+    rm -rf "./out"
+
+  done
+}
+
+TARGETS="darwin/amd64 darwin/arm64"
+build_targets
+
+rm -rf "../resources"
