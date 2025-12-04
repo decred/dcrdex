@@ -5051,12 +5051,13 @@ func (c *Core) Orders(filter *OrderFilter) ([]*Order, error) {
 	}
 
 	ords, err := c.db.Orders(&db.OrderFilter{
-		N:        filter.N,
-		Offset:   oid,
-		Hosts:    filter.Hosts,
-		Assets:   filter.Assets,
-		Market:   mkt,
-		Statuses: filter.Statuses,
+		N:              filter.N,
+		Offset:         oid,
+		Hosts:          filter.Hosts,
+		Assets:         filter.Assets,
+		Market:         mkt,
+		Statuses:       filter.Statuses,
+		IncludePartial: filter.IncludePartial,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("UserOrders error: %w", err)
@@ -5068,6 +5069,7 @@ func (c *Core) Orders(filter *OrderFilter) ([]*Order, error) {
 		if err != nil {
 			return nil, err
 		}
+
 		baseWallet, baseOK := c.wallet(corder.BaseID)
 		quoteWallet, quoteOK := c.wallet(corder.QuoteID)
 		corder.ReadyToTick = baseOK && baseWallet.connected() && baseWallet.unlocked() &&

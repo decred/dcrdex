@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -22,6 +23,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/order"
 )
 
 var zero = encode.ClearBytes
@@ -1223,6 +1225,12 @@ func (s *WebServer) apiOrders(w http.ResponseWriter, r *http.Request) {
 	filter := new(core.OrderFilter)
 	if !readPost(w, r, filter) {
 		return
+	}
+
+	// Auto-enable IncludePartial when filtering for executed to include
+	// partially filled canceled/revoked orders.
+	if slices.Contains(filter.Statuses, order.OrderStatusExecuted) {
+		filter.IncludePartial = true
 	}
 
 	ords, err := s.core.Orders(filter)

@@ -1213,6 +1213,9 @@ type OrderFilter struct {
 	// Statuses is a list of acceptable statuses. A zero-length Statuses means
 	// all statuses are accepted.
 	Statuses []order.OrderStatus
+	// IncludePartial will return canceled/revoked orders that have partial
+	// fills when OrderStatusExecuted is one of the Statuses.
+	IncludePartial bool
 }
 
 // noteKeySize must be <= 32.
