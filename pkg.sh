@@ -31,11 +31,11 @@ build_targets (){
     mkdir -p "bin/bisonw-${OS}-${ARCH}-v${VER}"
 
     pushd client/cmd/bisonw
-    GOOS=${OS} GOARCH=${ARCH} go build -trimpath ${TAGS_BISONW:+-tags ${TAGS_BISONW}} -o "../bison-desktop/electron/bin/bisonw-${OS}-${ARCH}-v${VER}/${BISONW_EXE}" -ldflags "${LDFLAGS_BISONW:-${LDFLAGS_BASE}}"
+    GOOS=${OS} GOARCH=${ARCH} go build -trimpath ${TAGS_BISONW:+-tags ${TAGS_BISONW}} -o "../../../bin/bisonw-${OS}-${ARCH}-v${VER}/${BISONW_EXE}" -ldflags "${LDFLAGS_BISONW:-${LDFLAGS_BASE}}"
     popd
 
     pushd client/cmd/bwctl
-    GOOS=${OS} GOARCH=${ARCH} go build -trimpath -o "../bison-desktop/electron/bin/bisonw-${OS}-${ARCH}-v${VER}" -ldflags "${LDFLAGS_BASE}"
+    GOOS=${OS} GOARCH=${ARCH} go build -trimpath -o "../../../bin/bisonw-${OS}-${ARCH}-v${VER}" -ldflags "${LDFLAGS_BASE}"
     popd
 
     pushd bin
