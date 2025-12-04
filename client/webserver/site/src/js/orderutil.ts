@@ -99,11 +99,11 @@ export function statusString (order: Order): string {
       return intl.prep(intl.ID_EXECUTED)
     case StatusCanceled:
       if (isLive) return `${intl.prep(intl.ID_CANCELED)}/${intl.prep(intl.ID_SETTLING)}`
-      if (filled(order) > 0) return 'canceled/partially filled'
+      if (filled(order) > 0) return intl.prep(intl.ID_CANCELED_PARTIALLY_FILLED)
       return intl.prep(intl.ID_CANCELED)
     case StatusRevoked:
       if (isLive) return `${intl.prep(intl.ID_REVOKED)}/${intl.prep(intl.ID_SETTLING)}`
-      if (filled(order) > 0) return 'revoked/partially filled'
+      if (filled(order) > 0) return intl.prep(intl.ID_REVOKED_PARTIALLY_FILLED)
       return intl.prep(intl.ID_REVOKED)
   }
   return intl.prep(intl.ID_UNKNOWN)

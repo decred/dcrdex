@@ -1157,7 +1157,7 @@ type OrderFilter struct {
 		Quote uint32 `json:"quoteID"`
 	} `json:"market"`
 	// IncludePartial will return canceled/revoked orders that have partial
-	// fills if OrderStatusExecuted or OrderStatusRevoked is one of the Statuses.
+	// fills when OrderStatusExecuted is one of the Statuses.
 	IncludePartial bool `json:"includepartial"`
 }
 

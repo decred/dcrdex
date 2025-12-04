@@ -1657,10 +1657,13 @@ var errFound = errors.New("found")
 // A trade match has a non-empty Address (not a cancel match for maker)
 // and has InitSig (not a cancel match for taker).
 // Returns true immediately upon finding the first trade match (early exit).
+// Checks both archived and active buckets, prioritizing archived since
+// canceled/revoked orders typically have confirmed matches there.
 func (db *BoltDB) hasTradeMatch(oid order.OrderID) bool {
 	found := false
-	db.matchesView(func(mb, archivedMB *bbolt.Bucket) error {
-		for _, bucket := range []*bbolt.Bucket{mb, archivedMB} {
+	err := db.matchesView(func(mb, archivedMB *bbolt.Bucket) error {
+		// Check both buckets, prioritizing archived (most common case for canceled orders)
+		for _, bucket := range []*bbolt.Bucket{archivedMB, mb} {
 			if bucket == nil {
 				continue
 			}
@@ -1681,7 +1684,8 @@ func (db *BoltDB) hasTradeMatch(oid order.OrderID) bool {
 				}
 				match, _, err := order.DecodeMatch(matchB)
 				if err != nil {
-					return nil // Skip on error
+					db.log.Errorf("DecodeMatch error for match %x: %v", k, err)
+					return nil // Continue checking other matches
 				}
 
 				// Cancel match for maker has empty Address
@@ -1705,12 +1709,15 @@ func (db *BoltDB) hasTradeMatch(oid order.OrderID) bool {
 				found = true
 				return errFound
 			})
-			if err == errFound {
+			if errors.Is(err, errFound) {
 				return errFound // Propagate to outer loop
 			}
 		}
 		return nil
 	})
+	if err != nil && !errors.Is(err, errFound) {
+		db.log.Errorf("hasTradeMatch error for order %s: %v", oid, err)
+	}
 	return found
 }
 

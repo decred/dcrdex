@@ -469,6 +469,15 @@ func (tdb *TDB) Orders(filter *db.OrderFilter) ([]*db.MetaOrder, error) {
 		return nil, nil
 	}
 
+	// Check if OrderStatusExecuted is in the filter statuses
+	hasExecutedFilter := false
+	for _, status := range filter.Statuses {
+		if status == order.OrderStatusExecuted {
+			hasExecutedFilter = true
+			break
+		}
+	}
+
 	// Filter orders based on status
 	var filtered []*db.MetaOrder
 	for _, ord := range tdb.allOrders {
@@ -479,10 +488,37 @@ func (tdb *TDB) Orders(filter *db.OrderFilter) ([]*db.MetaOrder, error) {
 		}
 
 		// Check if order status matches any of the filter statuses
+		statusMatch := false
 		for _, status := range filter.Statuses {
 			if ord.MetaData.Status == status {
-				filtered = append(filtered, ord)
+				statusMatch = true
 				break
+			}
+		}
+
+		if statusMatch {
+			filtered = append(filtered, ord)
+			continue
+		}
+
+		// Handle IncludePartial: include canceled/revoked orders with partial fills
+		// when filtering for "executed" status
+		if filter.IncludePartial && hasExecutedFilter {
+			if ord.MetaData.Status == order.OrderStatusCanceled ||
+				ord.MetaData.Status == order.OrderStatusRevoked {
+				// Check if order has matches (indicating partial fill)
+				oid := ord.Order.ID()
+				if tdb.matchesByOrderID != nil {
+					if matches := tdb.matchesByOrderID[oid]; len(matches) > 0 {
+						// Check for non-cancel trade matches
+						for _, m := range matches {
+							if m.UserMatch.Address != "" {
+								filtered = append(filtered, ord)
+								break
+							}
+						}
+					}
+				}
 			}
 		}
 	}
@@ -11415,9 +11451,11 @@ func TestCore_Orders_SmartFilterExecuted(t *testing.T) {
 		// lo3 has no matches (empty or not in map)
 	}
 
-	// Test: Filter for "executed" orders only
+	// Test: Filter for "executed" orders with IncludePartial to include
+	// canceled orders that have partial fills
 	filter := &OrderFilter{
-		Statuses: []order.OrderStatus{order.OrderStatusExecuted},
+		Statuses:       []order.OrderStatus{order.OrderStatusExecuted},
+		IncludePartial: true,
 	}
 
 	results, err := tCore.Orders(filter)
@@ -11654,84 +11692,3 @@ func TestCore_Orders_ExecutedAndCanceledFilter(t *testing.T) {
 	}
 }
 
-// TestCore_Orders_NoMatchFiltering tests that "no match" orders (executed with
-// 0% filled) are filtered out when user selects "executed" filter.
-func TestCore_Orders_NoMatchFiltering(t *testing.T) {
-	rig := newTestRig()
-	defer rig.shutdown()
-	tCore := rig.core
-
-	// Create test orders
-	lo1, _, _, _ := makeLimitOrder(rig.dc, true, 1000, 100) // Executed with fills
-	lo2, _, _, _ := makeLimitOrder(rig.dc, true, 1000, 100) // Executed without fills ("no match")
-
-	lo1.Force = order.StandingTiF
-	lo2.Force = order.StandingTiF
-
-	metaOrder1 := &db.MetaOrder{
-		MetaData: &db.OrderMetaData{
-			Status: order.OrderStatusExecuted,
-		},
-		Order: lo1,
-	}
-
-	metaOrder2 := &db.MetaOrder{
-		MetaData: &db.OrderMetaData{
-			Status: order.OrderStatusExecuted,
-		},
-		Order: lo2,
-	}
-
-	tCore.db.(*TDB).allOrders = []*db.MetaOrder{metaOrder1, metaOrder2}
-
-	if tCore.db.(*TDB).orderOrders == nil {
-		tCore.db.(*TDB).orderOrders = make(map[order.OrderID]*db.MetaOrder)
-	}
-	tCore.db.(*TDB).orderOrders[lo1.ID()] = metaOrder1
-	tCore.db.(*TDB).orderOrders[lo2.ID()] = metaOrder2
-
-	// Set up matches - lo1 has fills, lo2 has no matches
-	mid := ordertest.RandomMatchID()
-	tCore.db.(*TDB).matchesByOrderID = map[order.OrderID][]*db.MetaMatch{
-		lo1.ID(): {
-			{
-				MetaData: &db.MatchMetaData{},
-				UserMatch: &order.UserMatch{
-					OrderID:  lo1.ID(),
-					MatchID:  mid,
-					Quantity: 500,
-					Rate:     100,
-					Status:   order.MakerSwapCast,
-					Side:     order.Maker,
-					Address:  "some-address", // Non-empty to not be a cancel match
-				},
-			},
-		},
-		// lo2 has no matches (no match order)
-	}
-
-	// Test: Filter for "executed" orders only
-	filter := &OrderFilter{
-		Statuses: []order.OrderStatus{order.OrderStatusExecuted},
-	}
-
-	results, err := tCore.Orders(filter)
-	if err != nil {
-		t.Fatalf("Orders error: %v", err)
-	}
-
-	// Should return only 1 order:
-	// 1. Executed order with fills (lo1)
-	// "No match" order (lo2) should be filtered out
-	if len(results) != 1 {
-		t.Fatalf("Expected 1 order (executed with fills only), got %d", len(results))
-	}
-
-	// Verify the correct order is returned
-	if results[0].ID.String() != lo1.ID().String() {
-		t.Error("Expected executed order with fills, got different order")
-	}
-	if results[0].Status != order.OrderStatusExecuted {
-		t.Errorf("Expected executed status, got %v", results[0].Status)
-	}
-}

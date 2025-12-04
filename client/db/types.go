@@ -1219,7 +1219,7 @@ type OrderFilter struct {
 	// all statuses are accepted.
 	Statuses []order.OrderStatus
 	// IncludePartial will return canceled/revoked orders that have partial
-	// fills if OrderStatusExecuted or OrderStatusRevoked is one of the Statuses.
+	// fills when OrderStatusExecuted is one of the Statuses.
 	IncludePartial bool
 }
 
