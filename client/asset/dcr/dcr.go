@@ -3324,7 +3324,7 @@ func (dcr *ExchangeWallet) SwapPrivate(swaps *asset.PrivateSwaps) (receipts []as
 	}
 
 	// Refund txs prepared and signed. Can now broadcast the swap(s).
-	_, err = dcr.broadcastTx(msgTx)
+	_, err = dcr.broadcastTx(msgTx, feeRate)
 	if err != nil {
 		return nil, nil, nil, 0, err
 	}
@@ -3681,7 +3681,7 @@ func (dcr *ExchangeWallet) RedeemPrivate(contract *asset.PrivateContract, unsign
 		return nil, 0, nil, fmt.Errorf("error serializing transaction: %w", err)
 	}
 
-	txHash, err := dcr.broadcastTx(redeemTx)
+	txHash, err := dcr.broadcastTx(redeemTx, 0) // Use fallback fee rate for pre-generated tx
 	if err != nil {
 		return nil, 0, nil, fmt.Errorf("error broadcasting transaction: %w", err)
 	}
@@ -3719,7 +3719,7 @@ func (dcr *ExchangeWallet) RefundPrivate(coinID dex.Bytes, contract *asset.Priva
 		return nil, fmt.Errorf("error creating private refund tx: %w", err)
 	}
 
-	refundHash, err := dcr.broadcastTx(msgTx)
+	refundHash, err := dcr.broadcastTx(msgTx, feeRate)
 	if err != nil {
 		return nil, err
 	}
@@ -3878,7 +3878,7 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	}
 
 	// Refund txs prepared and signed. Can now broadcast the swap(s).
-	_, err = dcr.broadcastTx(msgTx)
+	_, err = dcr.broadcastTx(msgTx, feeRate)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -4003,7 +4003,7 @@ func (dcr *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 		msgTx.TxIn[i].SignatureScript = redeemSigScript
 	}
 	// Send the transaction.
-	txHash, err := dcr.broadcastTx(msgTx)
+	txHash, err := dcr.broadcastTx(msgTx, feeRate)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -4682,7 +4682,7 @@ func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes, feeRate uint64) (d
 		return nil, fmt.Errorf("error creating refund tx: %w", err)
 	}
 
-	refundHash, err := dcr.broadcastTx(msgTx)
+	refundHash, err := dcr.broadcastTx(msgTx, feeRate)
 	if err != nil {
 		return nil, err
 	}
@@ -5817,7 +5817,7 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, feeRate uint64, su
 		return nil, err
 	}
 
-	_, err = dcr.broadcastTx(signedTx)
+	_, err = dcr.broadcastTx(signedTx, feeRate)
 	return signedTx, err
 }
 
@@ -6527,7 +6527,51 @@ func (dcr *ExchangeWallet) TicketPage(scanStart int32, n, skipN int) ([]*asset.T
 	return pager.TicketPage(dcr.ctx, scanStart, n, skipN)
 }
 
-func (dcr *ExchangeWallet) broadcastTx(signedTx *wire.MsgTx) (*chainhash.Hash, error) {
+func (dcr *ExchangeWallet) broadcastTx(signedTx *wire.MsgTx, feeRate uint64) (*chainhash.Hash, error) {
+	// Hard limit: Validate transaction size before broadcasting to prevent
+	// transactions from getting stuck in mempool.
+	// Use MaxStandardTxSize (100KB) not chainParams.MaxTxSize (393KB) because
+	// the mempool enforces a 100KB policy limit for transaction relay.
+	// Transactions larger than 100KB will be rejected by the mempool even though
+	// they would be valid according to consensus rules.
+	txSize := signedTx.SerializeSize()
+	maxSize := uint64(dexdcr.MaxStandardTxSize)
+
+	if uint64(txSize) > maxSize {
+		return nil, fmt.Errorf(
+			"transaction size (%d bytes) exceeds maximum standard size (%d bytes). "+
+				"This transaction contains %d inputs and would be rejected by the mempool. "+
+				"Please consolidate UTXOs or send a smaller amount",
+			txSize, maxSize, len(signedTx.TxIn))
+	}
+
+	// Validate outputs are not dust to prevent mempool rejection.
+	// Use fallback fee rate if not provided. This check acts as a final
+	// safety net before broadcasting. See dcrd/mempool/policy isDust for
+	// dust policy documentation.
+	if feeRate == 0 {
+		feeRate = dcr.targetFeeRateWithFallback(2, 0)
+	}
+
+	for i, txOut := range signedTx.TxOut {
+		// Skip provably unspendable outputs (e.g., OP_RETURN) which are
+		// allowed to have any value including zero. OP_RETURN is opcode 0x6a.
+		if len(txOut.PkScript) > 0 && txOut.PkScript[0] == txscript.OP_RETURN {
+			continue
+		}
+
+		if dexdcr.IsDust(txOut, feeRate) {
+			// Calculate minimum non-dust value for error message.
+			totalSize := uint64(txOut.SerializeSize()) + 165
+			minValue := feeRate * totalSize * 3
+
+			return nil, fmt.Errorf(
+				"output %d is dust: value %d atoms is below dust threshold of %d atoms "+
+					"at fee rate %d atoms/byte. Consider sending at least %.8f DCR or consolidating inputs",
+				i, txOut.Value, minValue, feeRate, float64(minValue)/1e8)
+		}
+	}
+
 	txHash, err := dcr.wallet.SendRawTransaction(dcr.ctx, signedTx, false)
 	if err != nil {
 		return nil, fmt.Errorf("sendrawtx error: %w, raw tx: %x", err, dcr.wireBytes(signedTx))
@@ -8010,7 +8054,7 @@ func (dcr *ExchangeWallet) RedeemGeocode(code []byte, msg string) (dex.Bytes, ui
 		}
 	}
 
-	redeemHash, err := dcr.broadcastTx(redeemTx)
+	redeemHash, err := dcr.broadcastTx(redeemTx, feeRate)
 	if err != nil {
 		return nil, 0, fmt.Errorf("error broadcasting tx: %w", err)
 	}

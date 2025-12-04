@@ -3578,6 +3578,324 @@ func Test_withdraw(t *testing.T) {
 	}
 }
 
+func TestWithdrawTxSizeValidation(t *testing.T) {
+	wallet, node, shutdown := tNewWallet()
+	defer shutdown()
+
+	node.changeAddr = tPKHAddr
+	node.signFunc = func(msgTx *wire.MsgTx) (*wire.MsgTx, bool, error) {
+		return signFunc(msgTx, dexdcr.P2PKHSigScriptSize)
+	}
+
+	// Test 1: Normal transaction with single UTXO (should succeed)
+	t.Run("normal tx size", func(t *testing.T) {
+		node.unspent = []walletjson.ListUnspentResult{{
+			TxID:          tTxID,
+			Address:       tPKHAddr.String(),
+			Account:       tAcctName,
+			Amount:        100.0, // 100 DCR
+			Confirmations: 5,
+			ScriptPubKey:  hex.EncodeToString(tP2PKHScript),
+			Spendable:     true,
+		}}
+
+		_, err := wallet.Withdraw(tPKHAddr.String(), 90e8, 10)
+		if err != nil {
+			t.Fatalf("normal tx failed: %v", err)
+		}
+	})
+
+	// Test 2: Transaction with many inputs but under hard limit (should succeed)
+	t.Run("tx near but under size limit", func(t *testing.T) {
+		// 500 inputs * 166 bytes/input = 83,000 bytes + overhead < 100KB hard limit
+		unspents := make([]walletjson.ListUnspentResult, 500)
+		for i := 0; i < 500; i++ {
+			txID := hex.EncodeToString(encode.RandomBytes(32))
+			unspents[i] = walletjson.ListUnspentResult{
+				TxID:          txID,
+				Vout:          0,
+				Address:       tPKHAddr.String(),
+				Account:       tAcctName,
+				Amount:        0.01, // 0.01 DCR each = 5 DCR total
+				Confirmations: 1,
+				ScriptPubKey:  hex.EncodeToString(tP2PKHScript),
+				Spendable:     true,
+			}
+		}
+		node.unspent = unspents
+
+		// Withdraw 4.9 DCR (requires ~490 inputs)
+		_, err := wallet.Withdraw(tPKHAddr.String(), 490e6, 10)
+		if err != nil {
+			t.Fatalf("under-limit tx failed: %v", err)
+		}
+	})
+
+	// Test 3: Transaction exceeding hard size limit (should fail at broadcast stage)
+	t.Run("tx exceeds hard size limit", func(t *testing.T) {
+		// 650 inputs * 166 bytes/input = 107,900 bytes > 100KB hard limit
+		unspents := make([]walletjson.ListUnspentResult, 650)
+		for i := 0; i < 650; i++ {
+			txID := hex.EncodeToString(encode.RandomBytes(32))
+			unspents[i] = walletjson.ListUnspentResult{
+				TxID:          txID,
+				Vout:          0,
+				Address:       tPKHAddr.String(),
+				Account:       tAcctName,
+				Amount:        0.01, // 0.01 DCR each = 6.5 DCR total
+				Confirmations: 1,
+				ScriptPubKey:  hex.EncodeToString(tP2PKHScript),
+				Spendable:     true,
+			}
+		}
+		node.unspent = unspents
+
+		// Try to withdraw 6.4 DCR (requires ~640 inputs - exceeds hard limit)
+		_, err := wallet.Withdraw(tPKHAddr.String(), 640e6, 10)
+		if err == nil {
+			t.Fatalf("expected error for oversized tx, got nil")
+		}
+
+		// Verify error message relates to size limit
+		if !strings.Contains(err.Error(), "exceed") && !strings.Contains(err.Error(), "size") {
+			t.Fatalf("expected size-related error, got: %v", err)
+		}
+	})
+
+	// Test 4: Verify hard limit protection
+	t.Run("hard limit verification", func(t *testing.T) {
+		// Hard limit in broadcastTx() prevents oversized transactions
+		unspents := make([]walletjson.ListUnspentResult, 700)
+		for i := 0; i < 700; i++ {
+			txID := hex.EncodeToString(encode.RandomBytes(32))
+			unspents[i] = walletjson.ListUnspentResult{
+				TxID:          txID,
+				Vout:          0,
+				Address:       tPKHAddr.String(),
+				Account:       tAcctName,
+				Amount:        0.01, // 0.01 DCR each
+				Confirmations: 1,
+				ScriptPubKey:  hex.EncodeToString(tP2PKHScript),
+				Spendable:     true,
+			}
+		}
+		node.unspent = unspents
+
+		// Try to withdraw amount requiring 700 inputs
+		// 700 inputs * 166 bytes = 116,200 bytes > 100KB hard limit
+		_, err := wallet.Withdraw(tPKHAddr.String(), 690e6, 10)
+		if err == nil {
+			t.Fatalf("expected error, got nil")
+		}
+
+		// Verify error is size-related (caught by hard limit in broadcastTx)
+		errStr := err.Error()
+		if !strings.Contains(errStr, "exceed") && !strings.Contains(errStr, "size") {
+			t.Fatalf("expected size-related error, got: %v", err)
+		}
+	})
+
+	// Test 5: Verify hard limit uses MaxStandardTxSize (100KB) not MaxTxSize (393KB)
+	// This test ensures the bug fix is working correctly
+	t.Run("hard limit at maxstandardtxsize boundary", func(t *testing.T) {
+		// Test transactions at exactly 100KB boundary
+		// 602 inputs × 166 bytes ≈ 99,932 bytes (under limit) - should PASS
+		// 603 inputs × 166 bytes ≈ 100,098 bytes (over limit) - should FAIL
+
+		// Test 5a: Transaction just under 100KB limit (should succeed)
+		unspents := make([]walletjson.ListUnspentResult, 602)
+		for i := 0; i < 602; i++ {
+			txID := hex.EncodeToString(encode.RandomBytes(32))
+			unspents[i] = walletjson.ListUnspentResult{
+				TxID:          txID,
+				Vout:          0,
+				Address:       tPKHAddr.String(),
+				Account:       tAcctName,
+				Amount:        0.01,
+				Confirmations: 1,
+				ScriptPubKey:  hex.EncodeToString(tP2PKHScript),
+				Spendable:     true,
+			}
+		}
+		node.unspent = unspents
+
+		// This should succeed (just under 100KB)
+		_, err := wallet.Withdraw(tPKHAddr.String(), 595e6, 10)
+		if err != nil {
+			t.Fatalf("expected success for tx under 100KB limit, got: %v", err)
+		}
+
+		// Test 5b: Transaction just over 100KB limit (should fail with specific error)
+		unspents = make([]walletjson.ListUnspentResult, 650)
+		for i := 0; i < 650; i++ {
+			txID := hex.EncodeToString(encode.RandomBytes(32))
+			unspents[i] = walletjson.ListUnspentResult{
+				TxID:          txID,
+				Vout:          0,
+				Address:       tPKHAddr.String(),
+				Account:       tAcctName,
+				Amount:        0.01,
+				Confirmations: 1,
+				ScriptPubKey:  hex.EncodeToString(tP2PKHScript),
+				Spendable:     true,
+			}
+		}
+		node.unspent = unspents
+
+		// This should fail (over 100KB)
+		_, err = wallet.Withdraw(tPKHAddr.String(), 640e6, 10)
+		if err == nil {
+			t.Fatal("expected error for transaction > 100KB, got nil")
+		}
+
+		// Verify error mentions size limit
+		errStr := err.Error()
+		if !strings.Contains(errStr, "exceed") && !strings.Contains(errStr, "size") {
+			t.Errorf("error should mention exceeding size limit, got: %v", err)
+		}
+
+		// This test confirms hard limit is aligned with mempool policy (100KB)
+		// not consensus limit (393KB), fixing the bug where transactions
+		// between 100-393KB could pass validation but get stuck in mempool
+	})
+}
+
+func TestBroadcastTxDustValidation(t *testing.T) {
+	wallet, _, shutdown := tNewWallet()
+	defer shutdown()
+
+	feeRate := uint64(10) // 10 atoms/byte
+
+	// Helper to create a simple P2PKH output
+	createP2PKHOutput := func(value int64) *wire.TxOut {
+		return newTxOut(value, 0, tP2PKHScript)
+	}
+
+	// Helper to create OP_RETURN output
+	createOPReturnOutput := func() *wire.TxOut {
+		// OP_RETURN script
+		builder := txscript.NewScriptBuilder()
+		builder.AddOp(txscript.OP_RETURN)
+		builder.AddData([]byte("test data"))
+		script, _ := builder.Script()
+		return newTxOut(0, 0, script)
+	}
+
+	// Test 1: Normal transaction with non-dust output (should succeed)
+	t.Run("normal tx with non-dust output", func(t *testing.T) {
+		tx := wire.NewMsgTx()
+		// Add dummy input
+		tx.AddTxIn(wire.NewTxIn(&wire.OutPoint{}, 1e8, nil))
+		// Add non-dust output (1 DCR = 100,000,000 atoms)
+		tx.AddTxOut(createP2PKHOutput(1e8))
+
+		_, err := wallet.broadcastTx(tx, feeRate)
+		if err != nil {
+			// Error might be from SendRawTransaction, but should not be dust error
+			if strings.Contains(err.Error(), "dust") {
+				t.Fatalf("normal tx should not trigger dust error: %v", err)
+			}
+			// Other errors (like sendrawtx connection issues) are okay in test
+		}
+	})
+
+	// Test 2: Transaction with dust output (should fail)
+	t.Run("tx with dust output", func(t *testing.T) {
+		tx := wire.NewMsgTx()
+		tx.AddTxIn(wire.NewTxIn(&wire.OutPoint{}, 10000, nil))
+		// Add dust output
+		// For P2PKH (36 bytes), at 10 atoms/byte: min = 10 * (36 + 165) * 3 = 6,030 atoms
+		// 5000 atoms is below threshold
+		tx.AddTxOut(createP2PKHOutput(5000))
+
+		_, err := wallet.broadcastTx(tx, feeRate)
+		if err == nil {
+			t.Fatal("expected dust error, got nil")
+		}
+
+		errStr := err.Error()
+		if !strings.Contains(errStr, "dust") {
+			t.Fatalf("expected dust error, got: %v", err)
+		}
+		if !strings.Contains(errStr, "output 0") {
+			t.Fatalf("error should identify output index, got: %v", err)
+		}
+	})
+
+	// Test 3: Transaction with OP_RETURN output (should succeed)
+	t.Run("tx with OP_RETURN output", func(t *testing.T) {
+		tx := wire.NewMsgTx()
+		tx.AddTxIn(wire.NewTxIn(&wire.OutPoint{}, 1e8, nil))
+		// OP_RETURN outputs are allowed to be zero value
+		tx.AddTxOut(createOPReturnOutput())
+		// Add a normal non-dust output as well
+		tx.AddTxOut(createP2PKHOutput(1e8))
+
+		_, err := wallet.broadcastTx(tx, feeRate)
+		if err != nil {
+			// Should not be dust error since OP_RETURN is skipped
+			if strings.Contains(err.Error(), "dust") {
+				t.Fatalf("OP_RETURN should not trigger dust error: %v", err)
+			}
+		}
+	})
+
+	// Test 4: Transaction at dust boundary (edge case)
+	t.Run("tx at dust boundary", func(t *testing.T) {
+		tx := wire.NewMsgTx()
+		tx.AddTxIn(wire.NewTxIn(&wire.OutPoint{}, 10000, nil))
+		// Exactly at dust threshold
+		// For P2PKH: min = 10 * (36 + 165) * 3 = 6,030 atoms
+		tx.AddTxOut(createP2PKHOutput(6030))
+
+		_, err := wallet.broadcastTx(tx, feeRate)
+		// At exact boundary, should NOT be dust
+		if err != nil && strings.Contains(err.Error(), "dust") {
+			t.Fatalf("boundary value should not be dust: %v", err)
+		}
+	})
+
+	// Test 5: Multiple outputs, one is dust (should fail and identify correct output)
+	t.Run("multiple outputs with one dust", func(t *testing.T) {
+		tx := wire.NewMsgTx()
+		tx.AddTxIn(wire.NewTxIn(&wire.OutPoint{}, 2e8, nil))
+		// Output 0: Non-dust
+		tx.AddTxOut(createP2PKHOutput(1e8))
+		// Output 1: Dust
+		tx.AddTxOut(createP2PKHOutput(5000))
+		// Output 2: Non-dust
+		tx.AddTxOut(createP2PKHOutput(1e8))
+
+		_, err := wallet.broadcastTx(tx, feeRate)
+		if err == nil {
+			t.Fatal("expected dust error, got nil")
+		}
+
+		errStr := err.Error()
+		if !strings.Contains(errStr, "dust") {
+			t.Fatalf("expected dust error, got: %v", err)
+		}
+		// Should identify output 1 as dust
+		if !strings.Contains(errStr, "output 1") {
+			t.Fatalf("error should identify output 1 as dust, got: %v", err)
+		}
+	})
+
+	// Test 6: Zero fee rate should use fallback (should not panic)
+	t.Run("zero fee rate uses fallback", func(t *testing.T) {
+		tx := wire.NewMsgTx()
+		tx.AddTxIn(wire.NewTxIn(&wire.OutPoint{}, 1e8, nil))
+		tx.AddTxOut(createP2PKHOutput(1e8))
+
+		// Pass zero fee rate - should use fallback
+		_, err := wallet.broadcastTx(tx, 0)
+		if err != nil && strings.Contains(err.Error(), "dust") {
+			t.Fatalf("fallback fee rate should not cause dust error for 1 DCR: %v", err)
+		}
+		// Other errors are fine, just testing dust logic doesn't panic
+	})
+}
+
 func Test_sendToAddress(t *testing.T) {
 	wallet, node, shutdown := tNewWallet()
 	defer shutdown()

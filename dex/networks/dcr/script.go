@@ -167,6 +167,13 @@ const (
 	// BondPushDataSize is the size of the nulldata in a bond commitment output:
 	//  OP_RETURN <pushData: ver[2] | account_id[32] | lockTime[4] | pkh[20]>
 	BondPushDataSize = 2 + account.HashSize + 4 + 20
+
+	// MaxStandardTxSize is the maximum size allowed for transactions that
+	// are relayed and accepted into the mempool. This matches the dcrd
+	// mempool policy limit defined in dcrd/internal/mempool/policy.go.
+	// Transactions larger than this will be rejected by the mempool even
+	// if they are below the consensus MaxTxSize limit (393,216 bytes).
+	MaxStandardTxSize = 100000 // 100 KB
 )
 
 // redeemP2SHTxSize calculates the size of the redeeming transaction for a
