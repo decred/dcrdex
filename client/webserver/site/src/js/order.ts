@@ -1,7 +1,7 @@
 import Doc from './doc'
 import BasePage from './basepage'
 import * as OrderUtil from './orderutil'
-import { bind as bindForm, AccelerateOrderForm } from './forms'
+import { AccelerateOrderForm } from './forms'
 import { postJSON } from './http'
 import * as intl from './locales'
 import {
@@ -100,7 +100,7 @@ export default class OrderPage extends BasePage {
     })
 
     // Cancel order form
-    bindForm(page.cancelForm, page.cancelSubmit, async () => { this.submitCancel() })
+    Doc.bind(page.cancelSubmit, 'click', async () => { this.submitCancel() })
 
     this.secondTicker = window.setInterval(() => {
       setStamp()

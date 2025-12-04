@@ -45,7 +45,7 @@ func NetworkCompatibilityData(net dex.Network) (c eth.CompatibilityData, err err
 		return testnetCompatibilityData, nil
 	case dex.Simnet:
 	default:
-		return c, fmt.Errorf("No compatibility data for network # %d", net)
+		return c, fmt.Errorf("no compatibility data for network # %d", net)
 	}
 	// simnet
 	tDir, err := simnetDataDir()

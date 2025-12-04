@@ -19,7 +19,6 @@ import {
   AccelerateOrderForm,
   DepositAddress,
   TokenApprovalForm,
-  bind as bindForm,
   Forms
 } from './forms'
 import * as OrderUtil from './orderutil'
@@ -274,8 +273,6 @@ export default class MarketsPage extends BasePage {
       bind(wgt.quote.tmpl.newWalletBttn, 'click', () => { this.showCreate(this.market.quote) })
       bind(wgt.base.tmpl.walletAddr, 'click', () => { this.showDeposit(this.market.base.id) })
       bind(wgt.quote.tmpl.walletAddr, 'click', () => { this.showDeposit(this.market.quote.id) })
-      bind(wgt.base.tmpl.wantProviders, 'click', () => { this.showCustomProviderDialog(this.market.base.id) })
-      bind(wgt.quote.tmpl.wantProviders, 'click', () => { this.showCustomProviderDialog(this.market.quote.id) })
       this.depositAddrForm = new DepositAddress(page.deposit)
     }
 
@@ -291,7 +288,7 @@ export default class MarketsPage extends BasePage {
     this.reputationMeter = new ReputationMeter(page.reputationMeter)
 
     // Bind toggle wallet status form.
-    bindForm(page.toggleWalletStatusConfirm, page.toggleWalletStatusSubmit, async () => { this.toggleWalletStatus() })
+    Doc.bind(page.toggleWalletStatusSubmit, 'click', async () => { this.toggleWalletStatus() })
 
     // Prepare templates for the buy and sell tables and the user's order table.
     setOptionTemplates(page)
@@ -375,11 +372,11 @@ export default class MarketsPage extends BasePage {
     // Create a wallet
     this.newWalletForm = new NewWalletForm(page.newWalletForm, async () => { this.createWallet() })
     // Main order form.
-    bindForm(page.orderForm, page.submitBttn, async () => { this.stepSubmit() })
+    Doc.bind(page.submitBttn, 'click', async () => { this.stepSubmit() })
     // Order verification form.
-    bindForm(page.verifyForm, page.vSubmit, async () => { this.submitOrder() })
+    Doc.bind(page.vSubmit, 'click', async () => { this.submitOrder() })
     // Cancel order form.
-    bindForm(page.cancelForm, page.cancelSubmit, async () => { this.submitCancel() })
+    Doc.bind(page.cancelSubmit, 'click', async () => { this.submitCancel() })
     // Order detail view.
     Doc.bind(page.vFeeDetails, 'click', () => this.forms.show(page.vDetailPane))
     Doc.bind(page.closeDetailPane, 'click', () => this.showVerifyForm())
@@ -2457,10 +2454,6 @@ export default class MarketsPage extends BasePage {
     this.forms.show(this.page.deposit)
   }
 
-  showCustomProviderDialog (assetID: number) {
-    app().loadPage('wallets', { promptProvider: assetID, goBack: 'markets' })
-  }
-
   /*
    * handlePriceUpdate is the handler for the 'spots' notification.
    */
@@ -3328,9 +3321,8 @@ class BalanceWidget {
     // Just hide everything to start.
     Doc.hide(
       tmpl.newWalletRow, tmpl.expired, tmpl.unsupported, tmpl.connect, tmpl.spinner,
-      tmpl.walletState, tmpl.balanceRows, tmpl.walletAddr, tmpl.wantProvidersBox
+      tmpl.walletState, tmpl.balanceRows, tmpl.walletAddr
     )
-    this.checkNeedsProvider(assetID, tmpl.wantProvidersBox)
     tmpl.logo.src = Doc.logoPath(cfg.symbol)
     tmpl.addWalletSymbol.textContent = cfg.symbol.toUpperCase()
     Doc.empty(tmpl.symbol)
@@ -3346,10 +3338,6 @@ class BalanceWidget {
     stateIcons.readWallet(wallet)
     // Handle no wallet configured.
     if (!wallet) {
-      if (asset.walletCreationPending) {
-        Doc.show(tmpl.spinner)
-        return
-      }
       Doc.show(tmpl.newWalletRow)
       return
     }
@@ -3401,10 +3389,6 @@ class BalanceWidget {
       Doc.show(tmpl.expired)
       if (wallet.running) app().fetchBalance(assetID)
     } else Doc.hide(tmpl.expired)
-  }
-
-  async checkNeedsProvider (assetID: number, el: PageElement) {
-    Doc.setVis(await app().needsCustomProvider(assetID), el)
   }
 
   /* updateParent updates the side's parent asset balance. */

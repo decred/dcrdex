@@ -185,7 +185,7 @@ var (
 				GuideLink:   "https://github.com/decred/dcrdex/wiki/Wallet#rpc-providers-for-evm-compatible-networks",
 			},
 		},
-		IsAccountBased: true,
+		BlockchainClass: asset.BlockchainClassEVM,
 	}
 
 	// unlimitedAllowance is the maximum supported allowance for an erc20
@@ -403,8 +403,6 @@ var _ asset.DynamicSwapper = (*ETHWallet)(nil)
 var _ asset.DynamicSwapper = (*TokenWallet)(nil)
 var _ asset.Authenticator = (*ETHWallet)(nil)
 var _ asset.TokenApprover = (*TokenWallet)(nil)
-var _ asset.WalletHistorian = (*ETHWallet)(nil)
-var _ asset.WalletHistorian = (*TokenWallet)(nil)
 
 type baseWallet struct {
 	// The asset subsystem starts with Connect(ctx). This ctx will be initialized
@@ -686,7 +684,7 @@ func CreateEVMWallet(chainID int64, createWalletParams *asset.CreateWalletParams
 func newWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network) (w asset.Wallet, err error) {
 	chainCfg, err := ChainConfig(net)
 	if err != nil {
-		return nil, fmt.Errorf("failed to locate Ethereum genesis configuration for network %s", net)
+		return nil, fmt.Errorf("failed to locate Ethereum genesis configuration for network %s: %v", net, err)
 	}
 	comp, err := NetworkCompatibilityData(net)
 	if err != nil {
@@ -1330,6 +1328,8 @@ func (w *assetWallet) withNonce(ctx context.Context, f transactionGenerator) (er
 
 	if genTxResult != nil {
 		et := w.extendedTx(genTxResult)
+		et.Confirms = &asset.Confirms{Target: uint32(w.finalizeConfs)}
+		et.Timestamp = uint64(time.Now().Unix())
 		w.pendingTxs = append(w.pendingTxs, et)
 		if n.Cmp(w.pendingNonceAt) >= 0 {
 			w.pendingNonceAt.Add(n, big.NewInt(1))
@@ -1666,6 +1666,7 @@ func (w *ETHWallet) OpenTokenWallet(tokenCfg *asset.TokenConfig) (asset.Wallet, 
 			Name:              token.Name,
 			SupportedVersions: supportedAssetVersions,
 			UnitInfo:          token.UnitInfo,
+			BlockchainClass:   asset.BlockchainClassEVM,
 		},
 		tokenAddr:         netToken.Address,
 		pendingTxCheckBal: new(big.Int),
@@ -6326,10 +6327,19 @@ func (w *baseWallet) updatePendingTx(tip uint64, pendingTx *extendedWalletTx) {
 	if pendingTx.Confirmed && pendingTx.savedToDB {
 		return
 	}
-	waitingOnConfs := pendingTx.BlockNumber > 0 && safeConfs(tip, pendingTx.BlockNumber) < w.finalizeConfs
+	confs := safeConfs(tip, pendingTx.BlockNumber)
+	waitingOnConfs := pendingTx.BlockNumber > 0 && confs < w.finalizeConfs
 	if waitingOnConfs {
 		// We're just waiting on confs. Don't check again until we expect to be
 		// finalized.
+		confsChanged := pendingTx.Confirms == nil || pendingTx.Confirms.Current != uint32(confs)
+		pendingTx.Confirms = &asset.Confirms{
+			Current: uint32(confs),
+			Target:  uint32(w.finalizeConfs),
+		}
+		if confsChanged {
+			w.emitTransactionNote(pendingTx.WalletTransaction, false)
+		}
 		return
 	}
 	// Only check when the tip has changed.
@@ -6412,7 +6422,22 @@ func (w *baseWallet) updatePendingTx(tip uint64, pendingTx *extendedWalletTx) {
 	bigFees := new(big.Int).Mul(effectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
 	pendingTx.Fees = dexeth.WeiToGweiCeil(bigFees)
 	pendingTx.BlockNumber = receipt.BlockNumber.Uint64()
-	pendingTx.Confirmed = safeConfs(tip, pendingTx.BlockNumber) >= w.finalizeConfs
+	if confs := safeConfs(tip, pendingTx.BlockNumber); confs >= w.finalizeConfs {
+		updated = !pendingTx.Confirmed
+		pendingTx.Confirmed = true
+		pendingTx.Confirms = nil
+	} else {
+		pendingTx.Confirmed = false
+		var oldConfs uint32
+		if pendingTx.Confirms != nil {
+			oldConfs = pendingTx.Confirms.Current
+		}
+		updated = confs != uint64(oldConfs)
+		pendingTx.Confirms = &asset.Confirms{
+			Current: uint32(confs),
+			Target:  uint32(w.finalizeConfs),
+		}
+	}
 }
 
 // w.userOpsMtx must be held for writes
@@ -6547,6 +6572,7 @@ func (w *baseWallet) checkPendingTxs() {
 			return
 		}
 		w.updatePendingTx(tip, pendingTx)
+
 		if pendingTx.Confirmed {
 			lastConfirmed = i
 			if pendingTx.Nonce.Cmp(w.confirmedNonceAt) == 0 {
@@ -7121,8 +7147,8 @@ func (w *baseWallet) extendAndStoreGaslessRedeem(callData dex.Bytes, userOpHash 
 // If past is true, the transactions prior to the refID are returned, otherwise
 // the transactions after the refID are returned. n is the number of
 // transactions to return. If n is <= 0, all the transactions will be returned.
-func (w *ETHWallet) TxHistory(n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
-	return w.txHistory(n, refID, past, nil)
+func (w *ETHWallet) TxHistory(req *asset.TxHistoryRequest) (*asset.TxHistoryResponse, error) {
+	return w.txDB.getTxs(nil, req)
 }
 
 // TxHistory returns all the transactions the token wallet has made. If refID
@@ -7131,20 +7157,8 @@ func (w *ETHWallet) TxHistory(n int, refID *string, past bool) ([]*asset.WalletT
 // returned, otherwise the transactions after the refID are returned. n is the
 // number of transactions to return. If n is <= 0, all the transactions will be
 // returned.
-func (w *TokenWallet) TxHistory(n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
-	return w.txHistory(n, refID, past, &w.assetID)
-}
-
-func (w *baseWallet) txHistory(n int, refID *string, past bool, assetID *uint32) ([]*asset.WalletTransaction, error) {
-	var hashID *common.Hash
-	if refID != nil {
-		h := common.HexToHash(*refID)
-		if h == (common.Hash{}) {
-			return nil, fmt.Errorf("invalid reference ID %q provided", *refID)
-		}
-		hashID = &h
-	}
-	return w.txDB.getTxs(n, hashID, past, assetID)
+func (w *TokenWallet) TxHistory(req *asset.TxHistoryRequest) (*asset.TxHistoryResponse, error) {
+	return w.txDB.getTxs(&w.assetID, req)
 }
 
 func (w *ETHWallet) getReceivingTransaction(ctx context.Context, txHash common.Hash) (*asset.WalletTransaction, error) {
@@ -7250,6 +7264,25 @@ func (w *TokenWallet) WalletTransaction(ctx context.Context, txID string) (*asse
 		return &localTx, nil
 	}
 	return w.getReceivingTransaction(ctx, txHash)
+}
+
+// PendingTransactions loads wallet transactions that are not yet confirmed.
+func (w *assetWallet) PendingTransactions(ctx context.Context) []*asset.WalletTransaction {
+	w.nonceMtx.RLock()
+	defer w.nonceMtx.RUnlock()
+	txs := make([]*asset.WalletTransaction, 0)
+	for _, tx := range w.pendingTxs {
+		txAssetID := w.baseChainID
+		if tx.TokenID != nil {
+			txAssetID = *tx.TokenID
+		}
+		if w.assetID != txAssetID {
+			continue
+		}
+		txCopy := *tx.WalletTransaction
+		txs = append(txs, &txCopy)
+	}
+	return txs
 }
 
 // providersFile reads a file located at ~/dextest/credentials.json.

@@ -293,6 +293,7 @@ var (
 				MultiFundingOpts:  multiFundingOpts,
 			},
 		},
+		BlockchainClass: asset.BlockchainClassUTXO,
 	}
 	swapFeeBumpKey      = "swapfeebump"
 	splitKey            = "swapsplit"
@@ -712,7 +713,6 @@ var _ asset.TxFeeEstimator = (*ExchangeWallet)(nil)
 var _ asset.Bonder = (*ExchangeWallet)(nil)
 var _ asset.Authenticator = (*ExchangeWallet)(nil)
 var _ asset.TicketBuyer = (*ExchangeWallet)(nil)
-var _ asset.WalletHistorian = (*ExchangeWallet)(nil)
 var _ asset.NewAddresser = (*ExchangeWallet)(nil)
 var _ asset.PrivateSwapper = (*ExchangeWallet)(nil)
 var _ asset.GeocodeRedeemer = (*ExchangeWallet)(nil)
@@ -5395,8 +5395,9 @@ func (dcr *ExchangeWallet) Send(address string, value, feeRate uint64) (asset.Co
 		Amount:    sentVal,
 		Fees:      fee,
 		Recipient: &address,
+		Timestamp: uint64(time.Now().Unix()),
+		Confirms:  &asset.Confirms{Target: confTxFinality},
 	}, msgTx.CachedTxHash(), true)
-
 	return newOutput(msgTx.CachedTxHash(), 0, sentVal, wire.TxTreeRegular), nil
 }
 
@@ -6420,10 +6421,12 @@ func (dcr *ExchangeWallet) runTicketBuyer() {
 		}
 		tb.unconfirmedTickets[*txHash] = struct{}{}
 		dcr.addTxToHistory(&asset.WalletTransaction{
-			Type:   asset.TicketPurchase,
-			ID:     txHash.String(),
-			Amount: ticket.Tx.TicketPrice,
-			Fees:   ticket.Tx.Fees,
+			Type:      asset.TicketPurchase,
+			ID:        txHash.String(),
+			Amount:    ticket.Tx.TicketPrice,
+			Fees:      ticket.Tx.Fees,
+			Timestamp: uint64(time.Now().Unix()),
+			Confirms:  &asset.Confirms{Target: confTxFinality},
 		}, txHash, true)
 	}
 	ok = true
@@ -7060,6 +7063,8 @@ func (dcr *ExchangeWallet) addUnknownTransactionsToHistory(tip uint64) {
 		if tx.BlockIndex != nil && *tx.BlockIndex > 0 && *tx.BlockIndex < int64(tip-blockQueryBuffer) {
 			wt.BlockNumber = uint64(*tx.BlockIndex)
 			wt.Timestamp = uint64(tx.BlockTime)
+		} else {
+			wt.Timestamp = uint64(time.Now().Unix())
 		}
 
 		// Don't send notifications for the initial sync to avoid spamming the
@@ -7152,21 +7157,28 @@ func (dcr *ExchangeWallet) syncTxHistory(ctx context.Context, tip uint64) {
 			if tx.BlockNumber != uint64(blockHeight) || tx.Timestamp != uint64(block.Timestamp.Unix()) {
 				tx.BlockNumber = uint64(blockHeight)
 				tx.Timestamp = uint64(block.Timestamp.Unix())
-				updated = true
 			}
 		} else if gtr.BlockHash == "" && tx.BlockNumber != 0 {
 			tx.BlockNumber = 0
 			tx.Timestamp = 0
-			updated = true
 		}
 
 		var confs uint64
 		if tx.BlockNumber > 0 && tip >= tx.BlockNumber {
 			confs = tip - tx.BlockNumber + 1
 		}
-		if confs >= defaultRedeemConfTarget {
+
+		if confs >= confTxFinality {
 			tx.Confirmed = true
+			tx.Confirms = nil
 			updated = true
+		} else {
+			tx.Confirmed = false
+			updated = tx.Confirms == nil || tx.Confirms.Current != uint32(confs)
+			tx.Confirms = &asset.Confirms{
+				Current: uint32(confs),
+				Target:  confTxFinality,
+			}
 		}
 
 		if updated {
@@ -7739,18 +7751,33 @@ func (dcr *ExchangeWallet) WalletTransaction(ctx context.Context, txID string) (
 	return tx, nil
 }
 
+// PendingTransactions loads wallet transactions that are not yet confirmed.
+func (dcr *ExchangeWallet) PendingTransactions(ctx context.Context) []*asset.WalletTransaction {
+	dcr.pendingTxsMtx.RLock()
+	defer dcr.pendingTxsMtx.RUnlock()
+	txs := make([]*asset.WalletTransaction, 0, len(dcr.pendingTxs))
+	for _, tx := range dcr.pendingTxs {
+		if tx.Confirmed {
+			continue
+		}
+		txCopy := *tx.WalletTransaction
+		txs = append(txs, &txCopy)
+	}
+	return txs
+}
+
 // TxHistory returns all the transactions the wallet has made. If refID is nil,
 // then transactions starting from the most recent are returned (past is ignored).
 // If past is true, the transactions prior to the refID are returned, otherwise
 // the transactions after the refID are returned. n is the number of
 // transactions to return. If n is <= 0, all the transactions will be returned.
-func (dcr *ExchangeWallet) TxHistory(n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
+func (dcr *ExchangeWallet) TxHistory(req *asset.TxHistoryRequest) (*asset.TxHistoryResponse, error) {
 	txHistoryDB := dcr.txDB()
 	if txHistoryDB == nil {
 		return nil, fmt.Errorf("tx database not initialized")
 	}
 
-	return txHistoryDB.GetTxs(n, refID, past)
+	return txHistoryDB.GetTxs(req)
 }
 
 // ConfirmTransaction returns how many confirmations a redemption or refund has.

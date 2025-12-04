@@ -57,10 +57,9 @@ const (
 
 var (
 	tCtx                  context.Context
-	maxDelay                     = time.Second * 4
-	epochDuration                = time.Second * 30 // milliseconds
-	feedPeriod                   = time.Second * 10
-	creationPendingAsset  uint32 = 0xFFFFFFFF
+	maxDelay              = time.Second * 4
+	epochDuration         = time.Second * 30 // milliseconds
+	feedPeriod            = time.Second * 10
 	forceDisconnectWallet bool
 	wipeWalletBalance     bool
 	gapWidthFactor        = 1.0 // Should be 0 < gapWidthFactor <= 1.0
@@ -226,14 +225,13 @@ func mkSupportedAsset(symbol string, state *core.WalletState) *core.SupportedAss
 	}
 
 	return &core.SupportedAsset{
-		ID:                    assetID,
-		Symbol:                symbol,
-		Info:                  winfo,
-		Wallet:                state,
-		Token:                 tinfos[assetID],
-		Name:                  name,
-		UnitInfo:              unitInfo,
-		WalletCreationPending: assetID == atomic.LoadUint32(&creationPendingAsset),
+		ID:       assetID,
+		Symbol:   symbol,
+		Info:     winfo,
+		Wallet:   state,
+		Token:    tinfos[assetID],
+		Name:     name,
+		UnitInfo: unitInfo,
 	}
 }
 
@@ -774,7 +772,7 @@ func (c *TCore) AccountImport(pw []byte, account *core.Account, bond []*db.Bond)
 }
 func (c *TCore) ToggleAccountStatus(pw []byte, host string, disable bool) error { return nil }
 
-func (c *TCore) TxHistory(assetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
+func (c *TCore) TxHistory(uint32, *asset.TxHistoryRequest) (*asset.TxHistoryResponse, error) {
 	return nil, nil
 }
 
@@ -1371,7 +1369,6 @@ func (c *TCore) walletState(assetID uint32) *core.WalletState {
 		Running:      w.running,
 		Address:      ordertest.RandomAddress(),
 		Balance:      c.balances[assetID],
-		Units:        unitInfo(assetID).AtomicUnit,
 		Encrypted:    true,
 		PeerCount:    10,
 		Synced:       syncPct == 100,
@@ -1389,35 +1386,7 @@ func (c *TCore) CreateWallet(appPW, walletPW []byte, form *core.WalletForm) erro
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
 
-	// If this is a token, simulate parent syncing.
-	token := asset.TokenInfo(form.AssetID)
-	if token == nil || form.ParentForm == nil {
-		c.createWallet(form, false)
-		return nil
-	}
-
-	atomic.StoreUint32(&creationPendingAsset, form.AssetID)
-
-	synced := c.createWallet(form.ParentForm, false)
-
-	c.noteFeed <- &core.WalletCreationNote{
-		Notification: db.NewNotification(core.NoteTypeCreateWallet, core.TopicCreationQueued, "", "", db.Data),
-		AssetID:      form.AssetID,
-	}
-
-	go func() {
-		<-synced
-		defer atomic.StoreUint32(&creationPendingAsset, 0xFFFFFFFF)
-		if doubleCreateAsyncErr {
-			c.noteFeed <- &core.WalletCreationNote{
-				Notification: db.NewNotification(core.NoteTypeCreateWallet, core.TopicQueuedCreationFailed,
-					"Test Error", "This failed because doubleCreateAsyncErr is true in live_test.go", db.Data),
-				AssetID: form.AssetID,
-			}
-			return
-		}
-		c.createWallet(form, true)
-	}()
+	c.createWallet(form, false)
 	return nil
 }
 
@@ -1595,7 +1564,6 @@ func (c *TCore) Wallets() []*core.WalletState {
 			Disabled:  wallet.disabled,
 			Address:   ordertest.RandomAddress(),
 			Balance:   c.balances[assetID],
-			Units:     unitInfo(assetID).AtomicUnit,
 			Encrypted: true,
 			Traits:    asset.WalletTrait(rand.Uint32()),
 		})
@@ -1995,7 +1963,7 @@ func (c *TCore) TicketPage(assetID uint32, scanStart int32, n, skipN int) ([]*as
 }
 
 func (c *TCore) FundsMixingStats(assetID uint32) (*asset.FundsMixingStats, error) {
-	return nil, nil
+	return &asset.FundsMixingStats{}, nil
 }
 
 func (c *TCore) ConfigureFundsMixer(appPW []byte, assetID uint32, enabled bool) error {
@@ -2676,8 +2644,8 @@ func TestServer(t *testing.T) {
 	numBuys = 10
 	numSells = 10
 	feedPeriod = 5000 * time.Millisecond
-	initialize := false
-	register := false
+	initialize := true
+	register := true
 	forceDisconnectWallet = true
 	gapWidthFactor = 0.2
 	randomPokes = false

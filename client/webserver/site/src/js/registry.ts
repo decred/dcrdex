@@ -208,7 +208,6 @@ export interface SupportedAsset {
   info?: WalletInfo
   token?: Token
   unitInfo: UnitInfo
-  walletCreationPending: boolean
 }
 
 export interface Token {
@@ -248,13 +247,13 @@ export interface WalletState {
   assetID: number
   version: number
   type: string
+  class: string
   traits: number
   open: boolean
   running: boolean
   disabled: boolean
   balance: WalletBalance
   address: string
-  units: string
   encrypted: boolean
   peerCount: number
   synced: boolean
@@ -262,6 +261,7 @@ export interface WalletState {
   syncStatus: SyncStatus
   approved: Record<number, ApprovalStatus>
   feeState?: FeeState
+  pendingTxs: Record<string, WalletTransaction>
 }
 
 export interface WalletInfo {
@@ -1284,11 +1284,24 @@ export interface WalletTransaction {
   isUserOp: boolean
   userOpTxID: string
   bridgeCounterpartTx?: BridgeCounterpartTx
+  confirmed: boolean
+  confirms?: {
+    current: number
+    target: number
+  }
+  rejected: boolean
+}
+
+export interface TxHistoryRequest {
+  n: number
+  refID?: string
+  past: boolean
+  ignoreTypes?: number[]
 }
 
 export interface TxHistoryResult {
-  txs: WalletTransaction[]
-  lastTx: boolean
+  txs : WalletTransaction[]
+  moreAvailable: boolean
 }
 
 export const PrepaidBondID = 2147483647
@@ -1348,13 +1361,10 @@ export interface Application {
   checkResponse (resp: APIResponse): boolean
   signOut (): Promise<void>
   registerNoteFeeder (receivers: Record<string, (n: CoreNote) => void>): void
-  txHistory(assetID: number, n: number, after?: string): Promise<TxHistoryResult>
-  getWalletTx(assetID: number, txid: string): WalletTransaction | undefined
-  clearTxHistory(assetID: number): void
   parentAsset(assetID: number): SupportedAsset
-  needsCustomProvider (assetID: number): Promise<boolean>
   allBridgePaths (): Promise<Record<number, Record<number, string[]>>>
   bridgeFeesAndLimits (fromAssetID: number, toAssetID: number, bridgeName: string): Promise<BridgeFeesAndLimits | null>
+  bindUnits (ancestor: PageElement): void
 }
 
 // TODO: Define an interface for Application?
