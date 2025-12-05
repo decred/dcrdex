@@ -704,8 +704,7 @@ func newWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 	var defaultProviders []string
 	switch net {
 	case dex.Simnet:
-		u, _ := user.Current()
-		defaultProviders = []string{filepath.Join(u.HomeDir, "dextest", "eth", "alpha", "node", "geth.ipc")}
+		defaultProviders = []string{"http://127.0.0.1:38556"}
 	case dex.Testnet:
 		defaultProviders = []string{
 			"https://rpc.ankr.com/eth_sepolia",

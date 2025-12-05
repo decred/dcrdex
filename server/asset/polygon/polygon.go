@@ -73,7 +73,7 @@ func (d *Driver) Setup(cfg *asset.BackendConfig) (asset.Backend, error) {
 	case dex.Testnet:
 		chainID = dexpolygon.AmoyChainConfig.ChainID.Uint64()
 	default:
-		chainID = 90001
+		chainID = 1337
 	}
 
 	return eth.NewEVMBackend(cfg, chainID, dexpolygon.ContractAddresses, registeredTokens, dexpolygon.EntryPoints[cfg.Net])
