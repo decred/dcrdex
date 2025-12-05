@@ -1271,6 +1271,10 @@ func (w *spvWallet) SetVotingPreferences(ctx context.Context, choices, tspendPol
 			return err
 		}
 	}
+	// The vspd client will do this for the other two maps.
+	if choices == nil {
+		choices = make(map[string]string)
+	}
 	strToPolicy := func(s, t string) (stake.TreasuryVoteT, error) {
 		var policy stake.TreasuryVoteT
 		switch s {
