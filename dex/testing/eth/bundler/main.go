@@ -40,6 +40,7 @@ import (
 var (
 	ethAlphaHTTPAddress     = "http://localhost:38556"
 	polygonAlphaHTTPAddress = "http://localhost:48296"
+	baseAlphaHTTPAddress    = "http://localhost:39556"
 )
 
 // rpcRequest represents an incoming JSON-RPC request.
@@ -83,7 +84,20 @@ type evmChain string
 const (
 	eth     evmChain = "eth"
 	polygon evmChain = "polygon"
+	base    evmChain = "base"
 )
+
+func (c evmChain) port() string {
+	switch c {
+	case eth:
+		return "40000"
+	case polygon:
+		return "40001"
+	case base:
+		return "40002"
+	}
+	return ""
+}
 
 // simnetDataDir returns the test data directory for Ethereum simnet.
 func simnetDataDir(chain evmChain) (string, error) {
@@ -101,6 +115,8 @@ func httpAddress(chain evmChain) string {
 		return ethAlphaHTTPAddress
 	case polygon:
 		return polygonAlphaHTTPAddress
+	case base:
+		return baseAlphaHTTPAddress
 	}
 	panic("invalid chain")
 }
@@ -769,18 +785,8 @@ func mainErr() error {
 	flag.StringVar(&chainName, "chain", "eth", "chain to run on")
 	flag.Parse()
 
-	var chain evmChain
-	var port string
-	switch chainName {
-	case "eth":
-		chain = eth
-		port = "40000"
-	case "polygon":
-		chain = polygon
-		port = "40001"
-	default:
-		return fmt.Errorf("invalid chain: %s", chainName)
-	}
+	chain := evmChain(chainName)
+	port := chain.port()
 
 	bundler, err := newBundler(privKey, chain)
 	if err != nil {
