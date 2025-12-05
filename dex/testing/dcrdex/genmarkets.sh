@@ -59,7 +59,7 @@ DASH_ON=$?
 ~/dextest/eth/harness-ctl/alpha attach --exec 'eth.blockNumber' &> /dev/null
 ETH_ON=$?
 
-~/dextest/polygon/harness-ctl/alpha --exec 'eth.blockNumber' &> /dev/null
+~/dextest/polygon/harness-ctl/alpha attach --exec 'eth.blockNumber' &> /dev/null
 POLYGON_ON=$?
 
 m=$(pgrep -a monerod)
@@ -432,13 +432,9 @@ fi # end if ETH_ON
 
 if [ $POLYGON_ON -eq 0 ]; then
 POLYGON_CONFIG_PATH=${TEST_ROOT}/polygon.conf
-POLYGON_IPC_FILE=${TEST_ROOT}/polygon/alpha/bor/bor.ipc
 
 cat > $POLYGON_CONFIG_PATH <<EOF
-ws://localhost:34985 , 2000
-# comments are respected
-; http://localhost:48297
-${POLYGONf_IPC_FILE},2
+ws://localhost:34983 , 2000
 EOF
 
 cat << EOF >> "${FILEPATH}"
