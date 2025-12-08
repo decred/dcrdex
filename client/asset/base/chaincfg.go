@@ -4,9 +4,12 @@
 package base
 
 import (
-	"errors"
 	"fmt"
 	"math/big"
+	"os"
+	"os/user"
+	"path/filepath"
+	"strings"
 
 	"decred.org/dcrdex/client/asset/eth"
 	"decred.org/dcrdex/dex"
@@ -33,6 +36,16 @@ var (
 	}
 )
 
+// simnetDataDir returns the data directory for Base simnet.
+func simnetDataDir() (string, error) {
+	u, err := user.Current()
+	if err != nil {
+		return "", fmt.Errorf("error getting current user: %w", err)
+	}
+
+	return filepath.Join(u.HomeDir, "dextest", "base"), nil
+}
+
 // NetworkCompatibilityData returns the CompatibilityData for the specified
 // network. If using simnet, make sure the simnet harness is running.
 func NetworkCompatibilityData(net dex.Network) (c eth.CompatibilityData, err error) {
@@ -42,16 +55,43 @@ func NetworkCompatibilityData(net dex.Network) (c eth.CompatibilityData, err err
 	case dex.Testnet:
 		return testnetCompatibilityData, nil
 	case dex.Simnet:
-		// TODO: Add simnet.
-		return c, errors.New("simnet not implemented yet")
 	default:
 		return c, fmt.Errorf("No compatibility data for network # %d", net)
 	}
+	// simnet
+	tDir, err := simnetDataDir()
+	if err != nil {
+		return
+	}
+
+	addr := common.HexToAddress("18d65fb8d60c1199bb1ad381be47aa692b482605")
+	var (
+		tTxHashFile    = filepath.Join(tDir, "test_tx_hash.txt")
+		tBlockHashFile = filepath.Join(tDir, "test_block1_hash.txt")
+		tContractFile  = filepath.Join(tDir, "test_usdc_contract_address.txt")
+	)
+	readIt := func(path string) string {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			panic(fmt.Sprintf("Problem reading simnet testing file %q: %v", path, err))
+		}
+		return strings.TrimSpace(string(b)) // mainly the trailing "\r\n"
+	}
+	return eth.CompatibilityData{
+		Addr:      addr,
+		TokenAddr: common.HexToAddress(readIt(tContractFile)),
+		TxHash:    common.HexToHash(readIt(tTxHashFile)),
+		BlockHash: common.HexToHash(readIt(tBlockHashFile)),
+	}, nil
 }
 
 // ChainConfig returns the core configuration for the blockchain.
 func ChainConfig(net dex.Network) (c *params.ChainConfig, err error) {
 	c = new(params.ChainConfig)
+	if net == dex.Simnet {
+		c.ChainID = big.NewInt(1337)
+		return
+	}
 	c.ChainID = big.NewInt(dexbase.ChainIDs[net])
 	return
 }
