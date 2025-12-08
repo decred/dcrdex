@@ -10,8 +10,10 @@
 package main
 
 import (
+	dexbase "decred.org/dcrdex/dex/networks/base"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	dexpolygon "decred.org/dcrdex/dex/networks/polygon"
+	_ "decred.org/dcrdex/server/asset/base"    // register base asset
 	_ "decred.org/dcrdex/server/asset/eth"     // register eth asset
 	_ "decred.org/dcrdex/server/asset/polygon" // register polygon asset
 )
@@ -19,4 +21,5 @@ import (
 func init() {
 	dexeth.MaybeReadSimnetAddrs()
 	dexpolygon.MaybeReadSimnetAddrs()
+	dexbase.MaybeReadSimnetAddrs()
 }
