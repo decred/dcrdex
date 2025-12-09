@@ -28,7 +28,7 @@ require (
 	github.com/decred/dcrd/container/lru v1.0.0 // indirect
 	github.com/decred/dcrd/crypto/rand v1.0.1 // indirect
 	github.com/decred/dcrd/mixing v0.6.0 // indirect
-	github.com/decred/vspd/client/v4 v4.0.1 // indirect
+	github.com/decred/vspd/client/v4 v4.0.2 // indirect
 	github.com/decred/vspd/types/v3 v3.0.0 // indirect
 	github.com/emicklei/dot v1.6.2 // indirect
 	github.com/ethereum/c-kzg-4844/v2 v2.1.5 // indirect
@@ -59,7 +59,7 @@ replace github.com/btcsuite/btcd/btcec/v2 v2.3.4 => github.com/martonp/btcd/btce
 
 require (
 	decred.org/cspp/v2 v2.4.0 // indirect
-	decred.org/dcrwallet/v5 v5.0.1 // indirect
+	decred.org/dcrwallet/v5 v5.0.2 // indirect
 	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 // indirect
 	github.com/StackExchange/wmi v1.2.1 // indirect
 	github.com/VictoriaMetrics/fastcache v1.13.0 // indirect
@@ -110,7 +110,7 @@ require (
 	github.com/decred/dcrd/rpc/jsonrpc/types/v4 v4.4.0 // indirect
 	github.com/decred/dcrd/rpcclient/v8 v8.1.0 // indirect
 	github.com/decred/dcrd/txscript/v4 v4.1.2 // indirect
-	github.com/decred/dcrd/wire v1.7.1 // indirect
+	github.com/decred/dcrd/wire v1.7.2 // indirect
 	github.com/decred/go-socks v1.1.0 // indirect
 	github.com/decred/slog v1.2.0 // indirect
 	github.com/decred/vspd/types/v2 v2.1.0 // indirect
