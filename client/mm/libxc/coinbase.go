@@ -51,7 +51,7 @@ var supportedCoinbaseTokens = map[uint32]struct{}{
 	966001: {}, // USDC on POLYGON
 }
 
-// cbWsConn manages a websocket connection to the Coinbase API. As per
+// cbWSConn manages a websocket connection to the Coinbase API. As per
 // Coinbase's recommendation, a separate connection is created for the
 // subscription to each market. cbWSConn subscribes to a single channel
 // and also the heartbeats channel. If a message arrives out of order,

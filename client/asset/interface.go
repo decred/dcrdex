@@ -1870,7 +1870,7 @@ type TipChangeNote struct {
 	Data any    `json:"data"`
 }
 
-// BridgeReadyToCompleteNode is emitted by the wallet that initiated a bridge
+// BridgeReadyToCompleteNote is emitted by the wallet that initiated a bridge
 // to indicate that the destination wallet can complete the bridge.
 type BridgeReadyToCompleteNote struct {
 	baseWalletNotification
