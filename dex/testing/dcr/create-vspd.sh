@@ -9,7 +9,13 @@ FEE_XPUB=$3
 
 VSPD_DIR="${NODES_ROOT}/vspd"
 
-git clone -b release-v1.3.2 --depth 1 https://github.com/decred/vspd ${VSPD_DIR}
+git clone -b release-v1.4.0 --depth 1 https://github.com/decred/vspd ${VSPD_DIR}
+
+cd ${VSPD_DIR}/cmd/vspadmin
+go build
+cd ${VSPD_DIR}/cmd/vspd
+go build
+
 
 DCRD_PORT="${ALPHA_NODE_RPC_PORT}"
 DCRD_CERT="${NODES_ROOT}/alpha/rpc.cert"
@@ -24,7 +30,7 @@ WALLET_CERT="${NODES_ROOT}/vspdwallet/rpc.cert"
 cat > "${VSPD_DIR}/vspd.conf" <<EOF
 listen=127.0.0.1:${PORT}
 network=simnet
-vspfee=2.0
+vspfee=30.0
 dcrdhost=127.0.0.1:${DCRD_PORT}
 dcrduser=${USER}
 dcrdpass=${PASS}
