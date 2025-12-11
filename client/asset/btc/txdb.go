@@ -499,7 +499,7 @@ func (db *BadgerTxDB) GetTxs(req *asset.TxHistoryRequest) (*asset.TxHistoryRespo
 			if !(it.ValidForPrefix(blockPrefix) || it.ValidForPrefix(pendingPrefix)) {
 				return false
 			}
-			return n <= 0 || (len(txs) <= n && !moreAvailable)
+			return n <= 0 || len(txs) <= n
 		}
 		for it.Seek(startKey); canIterate(); it.Next() {
 			item := it.Item()
