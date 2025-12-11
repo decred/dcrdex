@@ -36,7 +36,7 @@ func TestCliGenerateRefreshWalletCmd(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background()) // used by exec.CommandContext
 	defer cancel()
 
-	logger := dex.StdOutLogger("test", slog.LevelTrace)
+	logger := dex.StdOutLogger("Test", slog.LevelTrace)
 	home, _ := os.UserHomeDir()
 	userToolsDir := path.Join(home, MoneroToolsDir)
 	pwB, _ := hex.DecodeString(TestPw)
