@@ -29,17 +29,6 @@ const (
 
 var (
 	configOpts = []*asset.ConfigOption{
-		// {
-		// 	Key:         "toolsdir",
-		// 	DisplayName: "Monero CLI tools folder",
-		// 	Description: "Required. The path to the Monero CLI folder you downloaded from Monero github." +
-		// 		" This should be the Latest release version." +
-		// 		" A linux example is '/home/<user>/monero-x86_64-linux-gnu-v0.18.4.2'." +
-		// 		" If you later change this setting you need restart bisonw for the changes to take effect.",
-		// 	DefaultValue:  "",
-		// 	ShowByDefault: true,
-		// 	Required:      true,
-		// },
 		{
 			Key:         "feepriority",
 			DisplayName: "Transaction Priority",

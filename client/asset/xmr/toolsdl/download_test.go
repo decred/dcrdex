@@ -51,7 +51,7 @@ func TestGetLatestCanonicalVersion(t *testing.T) {
 	fmt.Printf("latest canonical version from hashes.txt is %s\n", mv.string())
 }
 
-func TestToolsDl(t *testing.T) {
+func TestToolsDownload(t *testing.T) {
 	dl := new(Download)
 	dl.SetLogger(dex.StdOutLogger("Test", slog.LevelTrace))
 	_, err := dl.Run(context.Background())

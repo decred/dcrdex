@@ -10,7 +10,7 @@ var minimumVersion *moneroVersionV0
 
 func init() {
 	// monero README
-	minimumVersion, _ = newMoneroVersionFromParts("v0", "18", "4", "0")
+	minimumVersion, _ = newMoneroVersionFromParts("v0", "18", "4", "3")
 }
 
 type moneroVersionV0 struct {
@@ -23,7 +23,8 @@ type moneroVersionV0 struct {
 // converts from "major", "minor", "patch". Errors if sys has been updated past 'v0'
 func newMoneroVersionFromParts(sys, maj, min, patch string) (*moneroVersionV0, error) {
 	if sys != "v0" {
-		// Too much change - needs investigating further
+		// Too much change - they did not change 'v0.' for a decade or more.
+		// So this needs investigating further
 		return nil, fmt.Errorf("system version has changed from 'v0' to '%s'", sys)
 	}
 	v1, err := strconv.ParseUint(maj, 10, 8)
@@ -65,21 +66,6 @@ func newMoneroVersionDir(moneroToolsDir string) (*moneroVersionV0, error) {
 	}
 	return newMoneroVersionFromParts(parts[0], parts[1], parts[2], parts[3])
 }
-
-// func newMoneroVersionFromHashedZip(hzip *hashedZip) (*moneroVersionV0, error) {
-// 	tkns := strings.Split(hzip.zip, Dash)
-// 	lenTkns := len(tkns)
-// 	if lenTkns < 3 || lenTkns > 4 {
-// 		return nil, fmt.Errorf("incorrect number of tokens: %d expected 3 or 4", lenTkns)
-// 	}
-// 	lastTkn := tkns[lenTkns-1]
-// 	parts := strings.SplitN(lastTkn, Dot, 4)
-// 	lenParts := len(parts)
-// 	if lenParts != 5 {
-// 		return nil, fmt.Errorf("incorrect number of parts: %d expected 5", lenTkns)
-// 	}
-// 	return newMoneroVersionFromParts(parts[0], parts[1], parts[2], parts[3])
-// }
 
 func (m *moneroVersionV0) string() string {
 	sep := Dot

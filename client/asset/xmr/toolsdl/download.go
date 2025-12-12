@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"decred.org/dcrdex/dex"
 )
@@ -34,9 +35,9 @@ import (
 // from where they are subsequently run.
 
 const (
-	HashesLink                = "https://www.getmonero.org/downloads/hashes.txt"
-	MoneroHashesFilename      = "hashes.txt"
-	DexMoneroUserToolsPathDir = ".dex-monero-tools"
+	HashesLink           = "https://www.getmonero.org/downloads/hashes.txt"
+	MoneroHashesFilename = "hashes.txt"
+	DexMoneroToolsPath   = ".dex-monero-tools"
 )
 
 func getToolsBasePath() (string, error) {
@@ -44,7 +45,7 @@ func getToolsBasePath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(userPath, DexMoneroUserToolsPathDir), nil
+	return filepath.Join(userPath, DexMoneroToolsPath), nil
 }
 
 type machine struct {
@@ -158,7 +159,10 @@ func (d *Download) Run(ctx context.Context) (string, error) {
 	d.m = getMachine()
 	d.cleanAll()
 
-	hashFilePath, err := downloadHashesFile(context.Background())
+	hashesCtx, hashesCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer hashesCancel()
+
+	hashFilePath, err := downloadHashesFile(hashesCtx)
 	if err != nil {
 		return "", err
 	}
@@ -177,10 +181,14 @@ func (d *Download) Run(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	d.log.Tracef("Chose zip for %s %s", d.m.os, d.m.arch)
+	d.log.Tracef("Chose zip for machine: %s %s", d.m.os, d.m.arch)
 
 	// zip selected
-	fp, err := d.downloadFile(context.Background())
+
+	zipCtx, zipCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer zipCancel()
+
+	fp, err := d.downloadFile(zipCtx)
 	if err != nil {
 		d.cleanAll()
 		return "", err
@@ -232,8 +240,7 @@ func downloadHashesFile(ctx context.Context) (string, error) {
 	}
 	defer hashesFile.Close()
 
-	// HTTP GET - TODO(dl) certs
-	resp, err := http.Get(url)
+	resp, err := urlGet(ctx, url)
 	if err != nil {
 		return "", err
 	}
@@ -295,7 +302,7 @@ func (d *Download) checkHashedZips() error {
 			d.z[i].valid = false
 			continue
 		}
-		if tkns[1] == "source" || tkns[1] == "android" { // unused os's
+		if tkns[1] == "source" || tkns[1] == "android" { // unused os tokens
 			d.z[i].valid = false
 			continue
 		}
@@ -322,33 +329,29 @@ func (d *Download) checkHashedZips() error {
 		if err != nil {
 			return err
 		}
+		if !mv.valid() {
+			return fmt.Errorf("invalid monero version for zip %s", mv.string())
+		}
 		d.z[i].version = mv
 	}
 	return nil
 }
 
+// chooseHashedZip maps a runtime.GOOS/GOARCH for this machine onto monero zip
+// dirname.
 func (d *Download) chooseHashedZip() error {
-
-	// // Test Windows Hack
-	// // =================
-	// for i, zip := range d.z {
-	// 	if zip.os == "win" && zip.arch == "x64" {
-	// 		d.z[i].selected = true
-	// 		d.z[i].ext = "zip"
-	// 		return nil
-	// 	}
-	// }
-
 	for i, zip := range d.z {
 		if !zip.valid {
 			continue
 		}
-		// similar os's - TODO(dl) some edge cases here maybe?
-		if !strings.Contains(d.m.os, zip.os) {
+		// similar os's
+		if !(d.m.os == zip.os) &&
+			!(d.m.os == "darwin" && zip.os == "mac") && !(d.m.os == "windows" && zip.os == "win") {
 			continue
 		}
-		// similar arch's - TODO(dl) some more edge cases here?
-		if !strings.Contains(d.m.arch, zip.arch) && !(d.m.arch == "amd64" && zip.arch == "x64") {
+		// similar arch's
+		if !(d.m.arch == zip.arch) &&
+			!(d.m.arch == "amd64" && zip.arch == "x64") && !(d.m.arch == "arm64" && zip.arch == "armv8") {
 			continue
 		}
 		d.z[i].selected = true
@@ -389,8 +392,8 @@ func (d *Download) downloadFile(ctx context.Context) (string, error) {
 	}
 	defer zipFile.Close()
 
-	// HTTP GET - TODO(dl) certs & use ctx
-	resp, err := http.Get(url)
+	resp, err := urlGet(ctx, url)
+	// resp, err := http.Get(url)
 	if err != nil {
 		return "", err
 	}
@@ -405,6 +408,16 @@ func (d *Download) downloadFile(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return filePath, nil
+}
+
+// HTTP GET - TODO(dl) certs
+func urlGet(ctx context.Context, url string) (*http.Response, error) {
+	client := http.Client{ /*default no auth HTTP client*/ }
+	getRqCtx, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	return client.Do(getRqCtx)
 }
 
 func (d *Download) checkDownloadedFileHash(filePath string) error {
@@ -609,5 +622,5 @@ func (d *Download) cleanup() {
 }
 
 func (d *Download) cleanAll() {
-	os.RemoveAll(DexMoneroUserToolsPathDir)
+	os.RemoveAll(DexMoneroToolsPath)
 }
