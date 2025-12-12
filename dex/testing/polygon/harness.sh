@@ -90,7 +90,12 @@ cat > "${NODES_ROOT}/genesis.json" <<EOF
     "muirGlacierBlock": 0,
     "berlinBlock": 0,
     "londonBlock": 0,
+    "mergeForkBlock": 0,
+    "terminalTotalDifficulty": 0,
+    "terminalTotalDifficultyPassed": true,
     "bor": {
+      "period": {"0": 5},
+      "sprint": {"0": 64},
       "burntContract": {
         "0": "0x000000000000000000000000000000000000dead"
       }

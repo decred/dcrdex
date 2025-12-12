@@ -53,7 +53,6 @@ const (
 	changeWalletTypeID               = "CHANGE_WALLET_TYPE"
 	keepWalletTypeID                 = "KEEP_WALLET_TYPE"
 	walletReadyID                    = "WALLET_READY"
-	walletPendingID                  = "WALLET_PENDING"
 	setupNeededID                    = "SETUP_NEEDED"
 	sendSuccessID                    = "SEND_SUCCESS"
 	reconfigSuccessID                = "RECONFIG_SUCCESS"
@@ -280,7 +279,6 @@ var enUS = map[string]*intl.Translation{
 	changeWalletTypeID:               {T: "change the wallet type"},
 	keepWalletTypeID:                 {T: "don't change the wallet type"},
 	setupNeededID:                    {T: "Setup Needed"},
-	walletPendingID:                  {T: "Creating Wallet"},
 	sendSuccessID:                    {T: "{{ assetName }} Sent!"},
 	reconfigSuccessID:                {T: "Wallet Reconfigured!"},
 	rescanStartedID:                  {T: "Wallet Rescan Running"},
@@ -560,7 +558,6 @@ var zhCN = map[string]*intl.Translation{
 	changeWalletTypeID:               {T: "切换钱包类型"},
 	keepWalletTypeID:                 {T: "不要切换钱包类型"},
 	setupNeededID:                    {T: "需要设置"},
-	walletPendingID:                  {T: "创建钱包"},
 	sendSuccessID:                    {T: "{{ assetName }} 发送!"},
 	reconfigSuccessID:                {T: "钱包重置!"},
 	rescanStartedID:                  {T: "钱包扫描运行中"},
@@ -784,7 +781,6 @@ var plPL = map[string]*intl.Translation{
 	txTypeAccelerationID:             {T: "Przyspieszenie"},
 	orderBttnQtyErrID:                {T: "Ilość zamówień musi zostać określona."},
 	botTypeSimpleArbID:               {T: "Prosty arbitraż"},
-	walletPendingID:                  {T: "Tworzenie portfela"},
 	bondReservesID:                   {T: "Rezerwy kaucji"},
 	invalidValueID:                   {T: "nieprawidłowa wartość"},
 	disabledMsgID:                    {T: "portfel jest wyłączony"},
@@ -958,7 +954,6 @@ var deDE = map[string]*intl.Translation{
 	changeWalletTypeID:               {T: "den Wallet-Typ ändern"},
 	keepWalletTypeID:                 {T: "den Wallet-Typ nicht ändern"},
 	setupNeededID:                    {T: "Einrichtung erforderlich"},
-	walletPendingID:                  {T: "Erstelle Wallet"},
 	sendSuccessID:                    {T: "{{ assetName }} gesendet!"},
 	reconfigSuccessID:                {T: "Wallet neu konfiguriert!"},
 	rescanStartedID:                  {T: "Wallet Rescan läuft"},
@@ -1171,7 +1166,6 @@ var ar = map[string]*intl.Translation{
 	keepWalletTypeID:                 {T: "لا تغير نوع المحفظة"},
 	walletReadyID:                    {T: "المحفظة جاهزة"},
 	setupNeededID:                    {T: "الإعداد مطلوب"},
-	walletPendingID:                  {T: "إنشاء المحفظة"},
 	sendSuccessID:                    {T: "{{ assetName }} تم الإرسال!"},
 	reconfigSuccessID:                {T: "تمت إعادة تهيئة المحفظة!!"},
 	rescanStartedID:                  {T: "إعادة فحص المحفظة قيد التشغيل"},

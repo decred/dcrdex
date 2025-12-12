@@ -40,7 +40,6 @@ type ExchangeWalletElectrum struct {
 
 var _ asset.Wallet = (*ExchangeWalletElectrum)(nil)
 var _ asset.Authenticator = (*ExchangeWalletElectrum)(nil)
-var _ asset.WalletHistorian = (*ExchangeWalletElectrum)(nil)
 
 // ElectrumWallet creates a new ExchangeWalletElectrum for the provided
 // configuration, which must contain the necessary details for accessing the
@@ -605,10 +604,10 @@ func (btc *ExchangeWalletElectrum) WalletTransaction(ctx context.Context, txID s
 // If past is true, the transactions prior to the refID are returned, otherwise
 // the transactions after the refID are returned. n is the number of
 // transactions to return. If n is <= 0, all the transactions will be returned.
-func (btc *ExchangeWalletElectrum) TxHistory(n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
+func (btc *ExchangeWalletElectrum) TxHistory(req *asset.TxHistoryRequest) (*asset.TxHistoryResponse, error) {
 	txHistoryDB := btc.txDB()
 	if txHistoryDB == nil {
 		return nil, fmt.Errorf("tx database not initialized")
 	}
-	return txHistoryDB.GetTxs(n, refID, past)
+	return txHistoryDB.GetTxs(req)
 }

@@ -79,6 +79,7 @@ var (
 			rpcWalletDefinition,
 			electrumWalletDefinition,
 		},
+		BlockchainClass: asset.BlockchainClassUTXO,
 	}
 )
 

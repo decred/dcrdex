@@ -155,6 +155,12 @@
   display: inline-block;
 }
 
+.ico-wide-headed-right-arrow::before {
+  content: "\e919";
+  display: inline-block;
+  transform: rotate(180deg);
+}
+
 .ico-wide-headed-down-arrow::before {
   content: "\e919";
   display: inline-block;
@@ -225,6 +231,14 @@
 
 .ico-lever::before {
   content: "\e91c";
+}
+
+.ico-global::before {
+  content: "\e91d";
+}
+
+.ico-sort::before {
+  content: "\e91e";
 }
 
 .ico-cogs::before {

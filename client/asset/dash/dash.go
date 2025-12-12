@@ -75,6 +75,7 @@ var (
 				ConfigOpts:        configOpts,
 			},
 		},
+		BlockchainClass: asset.BlockchainClassUTXO,
 	}
 )
 

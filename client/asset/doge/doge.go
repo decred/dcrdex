@@ -99,6 +99,7 @@ var (
 			DefaultConfigPath: dexbtc.SystemConfigPath("dogecoin"),
 			ConfigOpts:        configOpts,
 		}},
+		BlockchainClass: asset.BlockchainClassUTXO,
 	}
 )
 

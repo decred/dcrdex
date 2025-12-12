@@ -459,7 +459,7 @@ func (db *BadgerTxDB) MarkTxAsSubmitted(txID string) error {
 // are returned, and the value of past is ignored. If the transaction with
 // ID refID is not in the database, asset.CoinNotFoundError is returned.
 // Unsubmitted transactions are not returned.
-func (db *BadgerTxDB) GetTxs(n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
+func (db *BadgerTxDB) GetTxs(req *asset.TxHistoryRequest) (*asset.TxHistoryResponse, error) {
 	db.wg.Add(1)
 	defer db.wg.Done()
 	if !db.running.Load() {
@@ -467,10 +467,12 @@ func (db *BadgerTxDB) GetTxs(n int, refID *string, past bool) ([]*asset.WalletTr
 	}
 
 	var txs []*asset.WalletTransaction
-	err := db.View(func(txn *badger.Txn) error {
+	var moreAvailable bool
+	ignoreTypes := req.IngoreTypesLookup()
+	if err := db.View(func(txn *badger.Txn) error {
 		var startKey []byte
-		if refID != nil {
-			txKey := txKey(*refID)
+		if req.RefID != nil {
+			txKey := txKey(*req.RefID)
 			txKeyItem, err := txn.Get(txKey)
 			if err != nil {
 				return asset.CoinNotFoundError
@@ -481,6 +483,8 @@ func (db *BadgerTxDB) GetTxs(n int, refID *string, past bool) ([]*asset.WalletTr
 				return err
 			}
 		}
+		n := req.N
+		past := req.Past
 		if startKey == nil {
 			past = true
 			startKey = maxPendingKey
@@ -492,9 +496,10 @@ func (db *BadgerTxDB) GetTxs(n int, refID *string, past bool) ([]*asset.WalletTr
 		defer it.Close()
 
 		canIterate := func() bool {
-			validPrefix := it.ValidForPrefix(blockPrefix) || it.ValidForPrefix(pendingPrefix)
-			withinLimit := n <= 0 || len(txs) < n
-			return validPrefix && withinLimit
+			if !(it.ValidForPrefix(blockPrefix) || it.ValidForPrefix(pendingPrefix)) {
+				return false
+			}
+			return n <= 0 || len(txs) <= n
 		}
 		for it.Seek(startKey); canIterate(); it.Next() {
 			item := it.Item()
@@ -506,8 +511,15 @@ func (db *BadgerTxDB) GetTxs(n int, refID *string, past bool) ([]*asset.WalletTr
 			if err := json.Unmarshal(wtB, &wt); err != nil {
 				return err
 			}
+			if ignoreTypes[wt.Type] {
+				continue
+			}
 			if !wt.Submitted {
 				continue
+			}
+			if n > 0 && len(txs) == n {
+				moreAvailable = true
+				break
 			}
 			if past {
 				txs = append(txs, wt.WalletTransaction)
@@ -517,8 +529,13 @@ func (db *BadgerTxDB) GetTxs(n int, refID *string, past bool) ([]*asset.WalletTr
 		}
 
 		return nil
-	})
-	return txs, err
+	}); err != nil {
+		return nil, err
+	}
+	return &asset.TxHistoryResponse{
+		Txs:           txs,
+		MoreAvailable: moreAvailable,
+	}, nil
 }
 
 // GetTx retrieves a transaction by its ID. If the transaction is not in
@@ -529,16 +546,18 @@ func (db *BadgerTxDB) GetTx(txID string) (*asset.WalletTransaction, error) {
 	if !db.running.Load() {
 		return nil, fmt.Errorf("database is not running")
 	}
-
-	txs, err := db.GetTxs(1, &txID, false)
+	r, err := db.GetTxs(&asset.TxHistoryRequest{
+		N:     1,
+		RefID: &txID,
+	})
 	if err != nil {
 		return nil, err
 	}
-	if len(txs) == 0 {
+	if len(r.Txs) == 0 {
 		// This should never happen.
 		return nil, fmt.Errorf("no results returned from getTxs")
 	}
-	return txs[0], nil
+	return r.Txs[0], nil
 }
 
 // GetPendingTxs returns all transactions that have not yet been confirmed.

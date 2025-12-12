@@ -46,13 +46,12 @@ import {
   APIResponse,
   RateNote,
   InFlightOrder,
-  WalletTransaction,
-  TxHistoryResult,
   WalletNote,
   TransactionNote,
   PageElement,
   ActionRequiredNote,
   ActionResolvedNote,
+  TipChangeNote,
   TransactionActionNote,
   CoreActionRequiredNote,
   RejectedTxData,
@@ -180,9 +179,12 @@ export default class Application {
   popupNotes: HTMLElement
   popupTmpl: HTMLElement
   noteReceivers: Record<string, (n: CoreNote) => void>[]
-  txHistoryMap: Record<number, TxHistoryResult>
   requiredActions: Record<string, requiredAction>
   onionUrl: string
+  dynamicUnits: {
+    div: PageElement
+    rows: PageElement
+  }
 
   constructor () {
     this.notes = []
@@ -192,11 +194,17 @@ export default class Application {
     this.noteReceivers = []
     this.fiatRatesMap = {}
     this.showPopups = State.fetchLocal(State.popupsLK) === '1'
-    this.txHistoryMap = {}
     this.requiredActions = {}
 
     // Set dark theme.
     document.body.classList.toggle('dark', State.isDark())
+
+    const div = document.createElement('div') as PageElement
+    div.classList.add('position-absolute', 'p-3')
+    const rows = document.createElement('div') as PageElement
+    div.appendChild(rows)
+    rows.classList.add('body-bg', 'border')
+    this.dynamicUnits = { div, rows }
 
     // Loggers can be enabled by setting a truthy value to the loggerID using
     // enableLogger. Settings are stored across sessions. See docstring for the
@@ -380,6 +388,8 @@ export default class Application {
       return
     }
     this.attachCommon(this.main)
+    // Nix annoying auto-typing of form buttons.
+    for (const bttn of Doc.applySelector(this.main, 'form button')) bttn.setAttribute('type', 'button')
     if (this.loadedPage) this.loadedPage.unload()
     const constructor = constructors[handlerID]
     if (constructor) this.loadedPage = new constructor(this.main, data)
@@ -419,13 +429,8 @@ export default class Application {
    * display elements. The menu gives users an option to convert the value
    * to their preferred units.
    */
-  bindUnits (main: PageElement) {
-    const div = document.createElement('div') as PageElement
-    div.classList.add('position-absolute', 'p-3')
-    // div.style.backgroundColor = 'yellow'
-    const rows = document.createElement('div') as PageElement
-    div.appendChild(rows)
-    rows.classList.add('body-bg', 'border')
+  bindUnits (ancestor: PageElement) {
+    const { div, rows } = this.dynamicUnits
     const addRow = (el: PageElement, unit: string, cFactor: number) => {
       const box = Doc.safeSelector(el, '[data-unit-box]')
       const atoms = parseInt(box.dataset.atoms as string)
@@ -438,9 +443,9 @@ export default class Application {
         Doc.setText(el, '[data-unit]', unit)
       })
     }
-    for (const el of Doc.applySelector(main, '[data-conversion-value]')) {
+    for (const el of Doc.applySelector(ancestor, '[data-conversion-value]')) {
       const box = Doc.safeSelector(el, '[data-unit-box]')
-      Doc.bind(box, 'mouseenter', () => {
+      Doc.bind(box, 'click', () => {
         Doc.empty(rows)
         box.appendChild(div)
         const lyt = Doc.layoutMetrics(box)
@@ -977,24 +982,11 @@ export default class Application {
    * or updates an existing transaction.
    */
   handleTransactionNote (assetID: number, note: TransactionNote) {
-    const txHistory = this.txHistoryMap[assetID]
-    if (!txHistory) return
-
-    if (note.new) {
-      txHistory.txs.unshift(note.transaction)
-      return
-    }
-
-    for (let i = 0; i < txHistory.txs.length; i++) {
-      if (txHistory.txs[i].id === note.transaction.id) {
-        txHistory.txs[i] = note.transaction
-        break
-      }
-    }
-  }
-
-  handleTxHistorySyncedNote (assetID: number) {
-    delete this.txHistoryMap[assetID]
+    const w = this.walletMap[assetID]
+    if (!w) return
+    const tx = note.transaction
+    if (tx.confirmed) delete w.pendingTxs[tx.id]
+    else w.pendingTxs[tx.id] = tx
   }
 
   loggedIn (notes: CoreNote[], pokes: CoreNote[]) {
@@ -1171,10 +1163,13 @@ export default class Application {
           }
           case 'actionResolved': {
             this.resolveAction(n.payload as ActionResolvedNote)
+            break
           }
-        }
-        if (n.payload.route === 'transactionHistorySynced') {
-          this.handleTxHistorySyncedNote(n.payload.assetID)
+          case 'tipChange': {
+            const note = n.payload as TipChangeNote
+            const w = this.assets[note.assetID].wallet
+            if (w) w.syncStatus.blocks = note.tip
+          }
         }
         break
       }
@@ -1542,105 +1537,6 @@ export default class Application {
     State.removeCookie(State.pwKeyCK)
     State.removeLocal(State.notificationsLK) // Notification storage was DEPRECATED pre-v1.
     window.location.href = '/login'
-  }
-
-  /*
-   * txHistory loads the tx history for an asset. If the results are not
-   * already cached, they are cached. If we have reached the oldest tx,
-   * this fact is also cached. If the exact amount of transactions as have been
-   * made are requested, we will not know if we have reached the last tx until
-   * a subsequent call.
-  */
-  async txHistory (assetID: number, n: number, after?: string): Promise<TxHistoryResult> {
-    const url = '/api/txhistory'
-    const cachedTxHistory = this.txHistoryMap[assetID]
-    if (!cachedTxHistory) {
-      const res = await postJSON(url, {
-        n: n,
-        assetID: assetID
-      })
-      if (!this.checkResponse(res)) {
-        throw new Error(res.msg)
-      }
-      let txs : WalletTransaction[] | null | undefined = res.txs
-      if (!txs) {
-        txs = []
-      }
-      this.txHistoryMap[assetID] = {
-        txs: txs,
-        lastTx: txs.length < n
-      }
-      return this.txHistoryMap[assetID]
-    }
-    const txs : WalletTransaction[] = []
-    let lastTx = false
-    const startIndex = after ? cachedTxHistory.txs.findIndex(tx => tx.id === after) + 1 : 0
-    if (after && startIndex === -1) {
-      throw new Error('invalid after tx ' + after)
-    }
-    let lastIndex = startIndex
-    for (let i = startIndex; i < cachedTxHistory.txs.length && txs.length < n; i++) {
-      txs.push(cachedTxHistory.txs[i])
-      lastIndex = i
-      after = cachedTxHistory.txs[i].id
-    }
-    if (cachedTxHistory.lastTx && lastIndex === cachedTxHistory.txs.length - 1) {
-      lastTx = true
-    }
-    if (txs.length < n && !cachedTxHistory.lastTx) {
-      const res = await postJSON(url, {
-        n: n - txs.length + 1, // + 1 because first result will be refID
-        assetID: assetID,
-        refID: after,
-        past: true
-      })
-      if (!this.checkResponse(res)) {
-        throw new Error(res.msg)
-      }
-      let resTxs : WalletTransaction[] | null | undefined = res.txs
-      if (!resTxs) {
-        resTxs = []
-      }
-      if (resTxs.length > 0 && after) {
-        if (resTxs[0].id === after) {
-          resTxs.shift()
-        } else {
-          // Implies a bug in the client
-          console.error('First tx history element != refID')
-        }
-      }
-      cachedTxHistory.lastTx = resTxs.length < n - txs.length
-      lastTx = cachedTxHistory.lastTx
-      txs.push(...resTxs)
-      cachedTxHistory.txs.push(...resTxs)
-    }
-    return { txs, lastTx }
-  }
-
-  getWalletTx (assetID: number, txID: string): WalletTransaction | undefined {
-    const cachedTxHistory = this.txHistoryMap[assetID]
-    if (!cachedTxHistory) return undefined
-    return cachedTxHistory.txs.find(tx => tx.id === txID)
-  }
-
-  clearTxHistory (assetID: number) {
-    delete this.txHistoryMap[assetID]
-  }
-
-  async needsCustomProvider (assetID: number): Promise<boolean> {
-    const baseChainID = this.assets[assetID]?.token?.parentID ?? assetID
-    if (!baseChainID) return false
-    const w = this.walletMap[baseChainID]
-    if (!w) return false
-    const traitAccountLocker = 1 << 14
-    if ((w.traits & traitAccountLocker) === 0) return false
-    const res = await postJSON('/api/walletsettings', { assetID: baseChainID })
-    if (!this.checkResponse(res)) {
-      console.error(res.msg)
-      return false
-    }
-    const settings = res.map as Record<string, string>
-    return !settings.providers
   }
 
   async allBridgePaths (): Promise<Record<number, Record<number, string[]>>> {

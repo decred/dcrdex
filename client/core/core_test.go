@@ -1124,8 +1124,15 @@ func (w *TXCWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time.Ti
 	}, func() {}, nil
 }
 
-func (w *TXCWallet) WalletTransaction(context.Context, dex.Bytes) (*asset.WalletTransaction, error) {
+func (w *TXCWallet) TxHistory(*asset.TxHistoryRequest) (*asset.TxHistoryResponse, error) {
 	return nil, nil
+}
+func (w *TXCWallet) WalletTransaction(ctx context.Context, txID string) (*asset.WalletTransaction, error) {
+	return nil, nil
+}
+
+func (w *TXCWallet) PendingTransactions(ctx context.Context) []*asset.WalletTransaction {
+	return nil
 }
 
 var _ asset.MaxMatchesCounter = (*TXCWallet)(nil)
@@ -2056,7 +2063,7 @@ func TestPostBond(t *testing.T) {
 							tWallet.setConfs(tWallet.bondTxCoinID, confs+1, nil)
 						}
 
-						tCore.tipChange(tUTXOAssetA.ID)
+						tCore.tipChange(tUTXOAssetA.ID, 100)
 						return
 					}
 				case <-timeout.C:

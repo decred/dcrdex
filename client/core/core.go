@@ -1535,9 +1535,6 @@ type Core struct {
 
 	reFiat chan struct{}
 
-	pendingWalletsMtx sync.RWMutex
-	pendingWallets    map[uint32]bool
-
 	notes chan asset.WalletNotification
 
 	pokesCache *pokesCache
@@ -1686,7 +1683,6 @@ func New(cfg *Config) (*Core, error) {
 
 		fiatRateSources: make(map[string]*commonRateSource),
 		reFiat:          make(chan struct{}, 1),
-		pendingWallets:  make(map[uint32]bool),
 
 		notes:            make(chan asset.WalletNotification, 128),
 		requestedActions: make(map[string]*asset.ActionRequiredNote),
@@ -2038,9 +2034,39 @@ func (c *Core) dexConnections() []*dexConnection {
 // wallet gets the wallet for the specified asset ID in a thread-safe way.
 func (c *Core) wallet(assetID uint32) (*xcWallet, bool) {
 	c.walletMtx.RLock()
-	defer c.walletMtx.RUnlock()
 	w, found := c.wallets[assetID]
+	c.walletMtx.RUnlock()
 	return w, found
+}
+
+func (c *Core) initializeTokenWallet(tokenID uint32, tkn *asset.Token) error {
+	if _, found := c.wallet(tkn.ParentID); !found {
+		return fmt.Errorf("no parent wallet %d for token %s", tkn.ParentID, tkn.Name)
+	}
+	dbWallet, err := c.createTokenDBWallet(tokenID, tkn, &WalletForm{
+		AssetID: tokenID,
+		Config:  make(map[string]string),
+		Type:    tkn.Definition.Type,
+	})
+	if err != nil {
+		return fmt.Errorf("error creating %s token wallet with existing %s parent wallet: %w",
+			dex.BipIDSymbol(tokenID), dex.BipIDSymbol(tkn.ParentID), err)
+	}
+	w, err := c.loadXCWallet(dbWallet)
+	if err != nil {
+		return fmt.Errorf("error loading newly created %s token wallet: %w", tkn.Name, err)
+	}
+	bals := &WalletBalance{Balance: &db.Balance{Balance: asset.Balance{Other: make(map[asset.BalanceCategory]asset.CustomBalance)}}}
+	w.setBalance(bals) // update xcWallet's WalletBalance
+	dbWallet.Balance = bals.Balance
+	// Store the wallet in the database.
+	err = c.db.UpdateWallet(dbWallet)
+	if err != nil {
+		return fmt.Errorf("error storing new token wallet credentials: %w", err)
+	}
+	c.log.Infof("Token wallet for %s automatically created", dex.BipIDSymbol(tokenID))
+	c.updateWallet(tokenID, w)
+	return nil
 }
 
 // encryptionKey retrieves the application encryption key. The password is used
@@ -2160,6 +2186,8 @@ func (c *Core) connectWalletResumeTrades(w *xcWallet, resumeTrades bool) (deposi
 	if err != nil {
 		return "", newError(connectWalletErr, "failed to connect %s wallet: %w", w.Symbol, err)
 	}
+
+	w.processWalletTransactions(w.PendingTransactions(c.ctx))
 
 	// This may be a wallet that does not require a password, so we can attempt
 	// to resume any active trades.
@@ -2467,28 +2495,6 @@ func (c *Core) SupportedAssets() map[uint32]*SupportedAsset {
 	return c.assetMap()
 }
 
-func (c *Core) walletCreationPending(tokenID uint32) bool {
-	c.pendingWalletsMtx.RLock()
-	defer c.pendingWalletsMtx.RUnlock()
-	return c.pendingWallets[tokenID]
-}
-
-func (c *Core) setWalletCreationPending(tokenID uint32) error {
-	c.pendingWalletsMtx.Lock()
-	defer c.pendingWalletsMtx.Unlock()
-	if c.pendingWallets[tokenID] {
-		return fmt.Errorf("creation already pending for %s", unbip(tokenID))
-	}
-	c.pendingWallets[tokenID] = true
-	return nil
-}
-
-func (c *Core) setWalletCreationComplete(tokenID uint32) {
-	c.pendingWalletsMtx.Lock()
-	delete(c.pendingWallets, tokenID)
-	c.pendingWalletsMtx.Unlock()
-}
-
 // assetMap returns a map of asset information for supported assets.
 func (c *Core) assetMap() map[uint32]*SupportedAsset {
 	supported := asset.Assets()
@@ -2516,51 +2522,16 @@ func (c *Core) assetMap() map[uint32]*SupportedAsset {
 				wallet = w.state()
 			}
 			assets[tokenID] = &SupportedAsset{
-				ID:                    tokenID,
-				Symbol:                dex.BipIDSymbol(tokenID),
-				Wallet:                wallet,
-				Token:                 token,
-				Name:                  token.Name,
-				UnitInfo:              token.UnitInfo,
-				WalletCreationPending: c.walletCreationPending(tokenID),
+				ID:       tokenID,
+				Symbol:   dex.BipIDSymbol(tokenID),
+				Wallet:   wallet,
+				Token:    token,
+				Name:     token.Name,
+				UnitInfo: token.UnitInfo,
 			}
 		}
 	}
 	return assets
-}
-
-func (c *Core) asset(assetID uint32) *SupportedAsset {
-	var wallet *WalletState
-	w, _ := c.wallet(assetID)
-	if w != nil {
-		wallet = w.state()
-	}
-	regAsset := asset.Asset(assetID)
-	if regAsset != nil {
-		return &SupportedAsset{
-			ID:       assetID,
-			Symbol:   regAsset.Symbol,
-			Wallet:   wallet,
-			Info:     regAsset.Info,
-			Name:     regAsset.Info.Name,
-			UnitInfo: regAsset.Info.UnitInfo,
-		}
-	}
-
-	token := asset.TokenInfo(assetID)
-	if token == nil {
-		return nil
-	}
-
-	return &SupportedAsset{
-		ID:                    assetID,
-		Symbol:                dex.BipIDSymbol(assetID),
-		Wallet:                wallet,
-		Token:                 token,
-		Name:                  token.Name,
-		UnitInfo:              token.UnitInfo,
-		WalletCreationPending: c.walletCreationPending(assetID),
-	}
 }
 
 // User is a thread-safe getter for the User.
@@ -2591,6 +2562,14 @@ func (c *Core) requestedActionsList() []*asset.ActionRequiredNote {
 
 // CreateWallet creates a new exchange wallet.
 func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
+	crypter, err := c.encryptionKey(appPW)
+	if err != nil {
+		return err
+	}
+	return c.createWallet(crypter, walletPW, form)
+}
+
+func (c *Core) createWallet(crypter encrypt.Crypter, walletPW []byte, form *WalletForm) (err error) {
 	assetID := form.AssetID
 	symbol := unbip(assetID)
 	_, exists := c.wallet(assetID)
@@ -2598,129 +2577,31 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 		return fmt.Errorf("%s wallet already exists", symbol)
 	}
 
-	crypter, err := c.encryptionKey(appPW)
-	if err != nil {
-		return err
-	}
-
-	var creationQueued bool
-	defer func() {
-		if !creationQueued {
-			crypter.Close()
-		}
-	}()
-
-	// If this isn't a token, easy route.
-	token := asset.TokenInfo(assetID)
-	if token == nil {
-		_, err = c.createWalletOrToken(crypter, walletPW, form)
-		return err
-	}
-
-	// Prevent two different tokens from trying to create the parent simultaneously.
-	if err = c.setWalletCreationPending(token.ParentID); err != nil {
-		return err
-	}
-	defer c.setWalletCreationComplete(token.ParentID)
-
-	// If the parent already exists, easy route.
-	_, found := c.wallet(token.ParentID)
-	if found {
-		_, err = c.createWalletOrToken(crypter, walletPW, form)
-		return err
-	}
-
-	// Double-registration mode. The parent wallet will be created
-	// synchronously, then a goroutine is launched to wait for the parent to
-	// sync before creating the token wallet. The caller can get information
-	// about the asynchronous creation from WalletCreationNote notifications.
-
-	// First check that they configured the parent asset.
-	if form.ParentForm == nil {
-		return fmt.Errorf("no parent wallet %d for token %d (%s), and no parent asset configuration provided",
-			token.ParentID, assetID, unbip(assetID))
-	}
-	if form.ParentForm.AssetID != token.ParentID {
-		return fmt.Errorf("parent form asset ID %d is not expected value %d",
-			form.ParentForm.AssetID, token.ParentID)
-	}
-
-	// Create the parent synchronously.
-	parentWallet, err := c.createWalletOrToken(crypter, walletPW, form.ParentForm)
-	if err != nil {
-		return fmt.Errorf("error creating parent wallet: %v", err)
-	}
-
-	if err = c.setWalletCreationPending(assetID); err != nil {
-		return err
-	}
-
-	// Start a goroutine to wait until the parent wallet is synced, and then
-	// begin creation of the token wallet.
-	c.wg.Add(1)
-
-	c.notify(newWalletCreationNote(TopicCreationQueued, "", "", db.Data, assetID))
-
-	go func() {
-		defer c.wg.Done()
-		defer c.setWalletCreationComplete(assetID)
-		defer crypter.Close()
-
-		for {
-			parentWallet.mtx.RLock()
-			synced := parentWallet.syncStatus.Synced
-			parentWallet.mtx.RUnlock()
-			if synced {
-				break
-			}
-			select {
-			case <-c.ctx.Done():
-				return
-			case <-time.After(time.Second):
-			}
-		}
-		// If there was a walletPW provided, it was for the parent wallet, so
-		// use nil here.
-		if _, err := c.createWalletOrToken(crypter, nil, form); err != nil {
-			c.log.Errorf("failed to create token wallet: %v", err)
-			subject, details := c.formatDetails(TopicQueuedCreationFailed, unbip(token.ParentID), symbol)
-			c.notify(newWalletCreationNote(TopicQueuedCreationFailed, subject, details, db.ErrorLevel, assetID))
-		} else {
-			c.notify(newWalletCreationNote(TopicQueuedCreationSuccess, "", "", db.Data, assetID))
-		}
-	}()
-	creationQueued = true
-	return nil
-}
-
-func (c *Core) createWalletOrToken(crypter encrypt.Crypter, walletPW []byte, form *WalletForm) (wallet *xcWallet, err error) {
-	assetID := form.AssetID
-	symbol := unbip(assetID)
 	token := asset.TokenInfo(assetID)
 	var dbWallet *db.Wallet
-	if token != nil {
-		dbWallet, err = c.createTokenWallet(assetID, token, form)
+	if token == nil {
+		dbWallet, err = c.createDBWallet(crypter, form, walletPW)
 	} else {
-		dbWallet, err = c.createWallet(crypter, walletPW, assetID, form)
+		dbWallet, err = c.createTokenDBWallet(assetID, token, form)
 	}
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	wallet, err = c.loadWallet(dbWallet)
+	wallet, err := c.loadXCWallet(dbWallet)
 	if err != nil {
-		return nil, fmt.Errorf("error loading wallet for %d -> %s: %w", assetID, symbol, err)
+		return fmt.Errorf("error loading wallet for %d -> %s: %w", assetID, symbol, err)
 	}
 	// Block PeersChange until we know this wallet is ready.
 	atomic.StoreUint32(wallet.broadcasting, 0)
 
 	if err = wallet.OpenWithPW(c.ctx, crypter); err != nil {
-		return nil, err
+		return err
 	}
 
 	dbWallet.Address, err = c.connectWallet(wallet)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	if c.cfg.UnlockCoinsOnLogin {
@@ -2729,16 +2610,16 @@ func (c *Core) createWalletOrToken(crypter encrypt.Crypter, walletPW []byte, for
 		}
 	}
 
-	initErr := func(s string, a ...any) (*xcWallet, error) {
+	initErr := func(s string, a ...any) error {
 		_ = wallet.Lock(2 * time.Second) // just try, but don't confuse the user with an error
 		wallet.Disconnect()
-		return nil, fmt.Errorf(s, a...)
+		return fmt.Errorf(s, a...)
 	}
 
 	err = c.unlockWallet(crypter, wallet) // no-op if !wallet.Wallet.Locked() && len(encPW) == 0
 	if err != nil {
 		wallet.Disconnect()
-		return nil, fmt.Errorf("%s wallet authentication error: %w", symbol, err)
+		return fmt.Errorf("%s wallet authentication error: %w", symbol, err)
 	}
 
 	balances, err := c.walletBalance(wallet)
@@ -2766,11 +2647,25 @@ func (c *Core) createWalletOrToken(crypter encrypt.Crypter, walletPW []byte, for
 	c.notify(newWalletStateNote(wallet.state()))
 	c.walletCheckAndNotify(wallet)
 
-	return wallet, nil
+	// Create all token wallets
+	if token == nil {
+		for tokenID, tkn := range asset.Asset(assetID).Tokens {
+			form := &WalletForm{
+				AssetID: tokenID,
+				Config:  make(map[string]string),
+				Type:    tkn.Definition.Type,
+			}
+			if err := c.createWallet(crypter, nil, form); err != nil {
+				c.log.Errorf("Error creating token %s wallet for parent %s", tkn.Name, symbol)
+			}
+		}
+	}
+
+	return nil
 }
 
-func (c *Core) createWallet(crypter encrypt.Crypter, walletPW []byte, assetID uint32, form *WalletForm) (*db.Wallet, error) {
-	walletDef, err := asset.WalletDef(assetID, form.Type)
+func (c *Core) createDBWallet(crypter encrypt.Crypter, form *WalletForm, walletPW []byte) (*db.Wallet, error) {
+	walletDef, err := asset.WalletDef(form.AssetID, form.Type)
 	if err != nil {
 		return nil, newError(assetSupportErr, "asset.WalletDef error: %w", err)
 	}
@@ -2800,7 +2695,7 @@ func (c *Core) createWallet(crypter encrypt.Crypter, walletPW []byte, assetID ui
 		if len(walletPW) > 0 {
 			return nil, errors.New("external password incompatible with seeded wallet")
 		}
-		walletPW, err = c.createSeededWallet(assetID, crypter, form)
+		walletPW, err = c.createSeededWallet(form.AssetID, crypter, form)
 		if err != nil {
 			return nil, err
 		}
@@ -2816,14 +2711,14 @@ func (c *Core) createWallet(crypter encrypt.Crypter, walletPW []byte, assetID ui
 
 	return &db.Wallet{
 		Type:        walletDef.Type,
-		AssetID:     assetID,
+		AssetID:     form.AssetID,
 		Settings:    form.Config,
 		EncryptedPW: encPW,
 		// Balance and Address are set after connect.
 	}, nil
 }
 
-func (c *Core) createTokenWallet(tokenID uint32, token *asset.Token, form *WalletForm) (*db.Wallet, error) {
+func (c *Core) createTokenDBWallet(tokenID uint32, token *asset.Token, form *WalletForm) (*db.Wallet, error) {
 	wallet, found := c.wallet(token.ParentID)
 	if !found {
 		return nil, fmt.Errorf("no parent wallet %d for token %d (%s)", token.ParentID, tokenID, unbip(tokenID))
@@ -2913,14 +2808,14 @@ func (c *Core) assetSeedAndPass(assetID uint32, crypter encrypt.Crypter) (seed, 
 func AssetSeedAndPass(assetID uint32, appSeed []byte) ([]byte, []byte) {
 	const accountBasedSeedAssetID = 60 // ETH
 	seedAssetID := assetID
-	if ai, _ := asset.Info(assetID); ai != nil && ai.IsAccountBased {
+	if ai, _ := asset.Info(assetID); ai != nil && ai.BlockchainClass.IsEVM() {
 		seedAssetID = accountBasedSeedAssetID
 	}
 	// Tokens asset IDs shouldn't be passed in, but if they are, return the seed
 	// for the parent ID.
 	if tkn := asset.TokenInfo(assetID); tkn != nil {
 		if ai, _ := asset.Info(tkn.ParentID); ai != nil {
-			if ai.IsAccountBased {
+			if ai.BlockchainClass.IsEVM() {
 				seedAssetID = accountBasedSeedAssetID
 			}
 		}
@@ -2948,7 +2843,7 @@ func (c *Core) assetDataBackupDirectory(assetID uint32) string {
 
 // loadWallet uses the data from the database to construct a new exchange
 // wallet. The returned wallet is running but not connected.
-func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
+func (c *Core) loadXCWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	var parent *xcWallet
 	assetID := dbWallet.AssetID
 
@@ -2973,6 +2868,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		broadcasting: new(uint32),
 		disabled:     dbWallet.Disabled,
 		syncStatus:   &asset.SyncStatus{},
+		pendingTxs:   make(map[string]*asset.WalletTransaction),
 	}
 
 	token := asset.TokenInfo(assetID)
@@ -3408,7 +3304,7 @@ func (c *Core) RecoverWallet(assetID uint32, appPW []byte, force bool) error {
 		return fmt.Errorf("error creating wallet: %w", err)
 	}
 
-	newWallet, err := c.loadWallet(dbWallet)
+	newWallet, err := c.loadXCWallet(dbWallet)
 	if err != nil {
 		return newError(walletErr, "error loading wallet for %d -> %s: %w",
 			assetID, unbip(assetID), err)
@@ -3777,7 +3673,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 	}
 
 	// Reload the wallet with the new settings.
-	wallet, err := c.loadWallet(dbWallet)
+	wallet, err := c.loadXCWallet(dbWallet)
 	if err != nil {
 		return newError(walletErr, "error loading wallet for %d -> %s: %w",
 			assetID, unbip(assetID), err)
@@ -3880,7 +3776,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 				continue
 			}
 			tokenWallet.Disconnect()
-			tokenWallet, err = c.loadWallet(tokenDBWallet)
+			tokenWallet, err = c.loadXCWallet(tokenDBWallet)
 			if err != nil {
 				c.log.Errorf("Error loading wallet for token %s: %w", unbip(tokenID), err)
 				continue
@@ -6136,13 +6032,13 @@ func (c *Core) MultiTrade(pw []byte, form *MultiTradeForm) []*MultiTradeResult {
 // refID are returned, otherwise the transactions after the refID are
 // returned. n is the number of transactions to return. If n is <= 0,
 // all the transactions will be returned
-func (c *Core) TxHistory(assetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
+func (c *Core) TxHistory(assetID uint32, req *asset.TxHistoryRequest) (*asset.TxHistoryResponse, error) {
 	wallet, found := c.wallet(assetID)
 	if !found {
 		return nil, newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
 	}
 
-	return wallet.TxHistory(n, refID, past)
+	return wallet.TxHistory(req)
 }
 
 // WalletTransaction returns information about a transaction that the wallet
@@ -7553,13 +7449,15 @@ func (c *Core) initialize() error {
 	wg.Wait()
 	c.log.Infof("Connected to %d of %d DEX servers", liveConns, len(accts))
 
+	existingTokenWallets := make(map[uint32]bool)
 	for _, dbWallet := range dbWallets {
-		if asset.Asset(dbWallet.AssetID) == nil && asset.TokenInfo(dbWallet.AssetID) == nil {
+		tkn := asset.TokenInfo(dbWallet.AssetID)
+		if asset.Asset(dbWallet.AssetID) == nil && tkn == nil {
 			c.log.Infof("Wallet for asset %s no longer supported", dex.BipIDSymbol(dbWallet.AssetID))
 			continue
 		}
 		assetID := dbWallet.AssetID
-		wallet, err := c.loadWallet(dbWallet)
+		wallet, err := c.loadXCWallet(dbWallet)
 		if err != nil {
 			c.log.Errorf("error loading %d -> %s wallet: %v", assetID, unbip(assetID), err)
 			continue
@@ -7567,6 +7465,27 @@ func (c *Core) initialize() error {
 		// Wallet is loaded from the DB, but not yet connected.
 		c.log.Tracef("Loaded %s wallet configuration.", unbip(assetID))
 		c.updateWallet(assetID, wallet)
+
+		if tkn != nil {
+			existingTokenWallets[dbWallet.AssetID] = true
+		}
+	}
+
+	// Check for missing token wallets
+	for _, dbWallet := range dbWallets {
+		a := asset.Asset(dbWallet.AssetID)
+		if a == nil {
+			continue
+		}
+		for tokenID, tkn := range a.Tokens {
+			if existingTokenWallets[tokenID] {
+				continue
+			}
+			// Let's create the missing token wallet
+			if err := c.initializeTokenWallet(tokenID, tkn); err != nil {
+				c.log.Errorf("Couldn't create missing token wallet: %v", err)
+			}
+		}
 	}
 
 	// Check DB for active orders on any DEX.
@@ -9846,7 +9765,7 @@ func (c *Core) handleBridgeCompleted(n *asset.BridgeCompletedNote) {
 func (c *Core) handleWalletNotification(ni asset.WalletNotification) {
 	switch n := ni.(type) {
 	case *asset.TipChangeNote:
-		c.tipChange(n.AssetID)
+		c.tipChange(n.AssetID, n.Tip)
 	case *asset.BalanceChangeNote:
 		w, ok := c.wallet(n.AssetID)
 		if !ok {
@@ -9876,6 +9795,12 @@ func (c *Core) handleWalletNotification(ni asset.WalletNotification) {
 		c.handleBridgeReadyToComplete(n)
 	case *asset.BridgeCompletedNote:
 		c.handleBridgeCompleted(n)
+	case *asset.TransactionNote:
+		w, ok := c.wallet(n.AssetID)
+		if !ok {
+			return
+		}
+		w.processWalletTransactions([]*asset.WalletTransaction{n.Transaction})
 	}
 	c.notify(newWalletNote(ni))
 }
@@ -9883,7 +9808,7 @@ func (c *Core) handleWalletNotification(ni asset.WalletNotification) {
 // tipChange is called by a wallet backend when the tip block changes, or when
 // a connection error is encountered such that tip change reporting may be
 // adversely affected.
-func (c *Core) tipChange(assetID uint32) {
+func (c *Core) tipChange(assetID uint32, tip uint64) {
 	c.log.Tracef("Processing tip change for %s", unbip(assetID))
 	c.waiterMtx.RLock()
 	for id, waiter := range c.blockWaiters {
@@ -9904,6 +9829,15 @@ func (c *Core) tipChange(assetID uint32) {
 		}(id, waiter)
 	}
 	c.waiterMtx.RUnlock()
+
+	w, found := c.wallet(assetID)
+	if found {
+		w.mtx.Lock()
+		ss := *w.syncStatus
+		ss.Blocks = tip
+		w.syncStatus = &ss
+		w.mtx.Unlock()
+	}
 
 	assets := make(assetMap)
 	for _, dc := range c.dexConnections() {

@@ -34,7 +34,7 @@ const (
 	WalletTraitTokenApprover                          // The wallet is a TokenApprover
 	WalletTraitAccountLocker                          // The wallet must have enough balance for redemptions before a trade.
 	WalletTraitTicketBuyer                            // The wallet can participate in decred staking.
-	WalletTraitHistorian                              // This wallet can return its transaction history
+	WalletTraitHistorian                              // This wallet can return its transaction history // DEPRECATED
 	WalletTraitFundsMixer                             // The wallet can mix funds.
 	WalletTraitDynamicSwapper                         // The wallet has dynamic fees.
 )
@@ -129,12 +129,6 @@ func (wt WalletTrait) IsTicketBuyer() bool {
 	return wt&WalletTraitTicketBuyer != 0
 }
 
-// IsHistorian tests if the WalletTrait has the WalletTraitHistorian bit set,
-// which indicates the wallet implements the WalletHistorian interface.
-func (wt WalletTrait) IsHistorian() bool {
-	return wt&WalletTraitHistorian != 0
-}
-
 // IsFundsMixer tests if the WalletTrait has the WalletTraitFundsMixer bit set,
 // which indicates the wallet implements the FundsMixer interface.
 func (wt WalletTrait) IsFundsMixer() bool {
@@ -196,9 +190,6 @@ func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	}
 	if _, is := w.(TicketBuyer); is {
 		t |= WalletTraitTicketBuyer
-	}
-	if _, is := w.(WalletHistorian); is {
-		t |= WalletTraitHistorian
 	}
 	if _, is := w.(FundsMixer); is {
 		t |= WalletTraitFundsMixer
@@ -316,6 +307,17 @@ type Token struct {
 	SupportedAssetVersions []uint32          `json:"supportedAssetVersions"`
 }
 
+type BlockchainClass string
+
+const (
+	BlockchainClassUTXO BlockchainClass = "UTXO"
+	BlockchainClassEVM  BlockchainClass = "EVM"
+)
+
+func (c BlockchainClass) IsEVM() bool {
+	return c == BlockchainClassEVM
+}
+
 // WalletInfo is auxiliary information about an ExchangeWallet.
 type WalletInfo struct {
 	// Name is the display name for the currency, e.g. "Decred"
@@ -337,10 +339,8 @@ type WalletInfo struct {
 	// UnitInfo is the information about unit names and conversion factors for
 	// the asset.
 	UnitInfo dex.UnitInfo `json:"unitinfo"`
-	// IsAccountBased should be set to true for account-based (EVM) assets, so
-	// that a common seed will be generated and wallets will generate the
-	// same address.
-	IsAccountBased bool
+	// BlockchainClass is the type of the wallet's blockchain.
+	BlockchainClass BlockchainClass
 }
 
 // ConfigOption is a wallet configuration option.
@@ -417,6 +417,26 @@ type ConfirmTxStatus struct {
 	// the bundler has submitted the transaction. The redemption message
 	// should only be sent to the server once this is true.
 	PendingSubmission bool
+}
+
+type TxHistoryRequest struct {
+	N           int               `json:"n"`
+	RefID       *string           `json:"refID"`
+	Past        bool              `json:"past"`
+	IgnoreTypes []TransactionType `json:"ignoreTypes"`
+}
+
+func (r *TxHistoryRequest) IngoreTypesLookup() map[TransactionType]bool {
+	m := make(map[TransactionType]bool)
+	for _, txType := range r.IgnoreTypes {
+		m[txType] = true
+	}
+	return m
+}
+
+type TxHistoryResponse struct {
+	Txs           []*WalletTransaction `json:"txs"`
+	MoreAvailable bool                 `json:"moreAvailable"`
 }
 
 // Wallet is a common interface to be implemented by cryptocurrency wallet
@@ -579,6 +599,21 @@ type Wallet interface {
 	FundMultiOrder(ord *MultiOrder, maxLock uint64) (coins []Coins, redeemScripts [][]dex.Bytes, fundingFees uint64, err error)
 	// MaxFundingFees returns the max fees that could be paid for funding a swap.
 	MaxFundingFees(numTrades uint32, feeRate uint64, options map[string]string) uint64
+	// TxHistory returns all the transactions a wallet has made. If refID
+	// is nil, then transactions starting from the most recent are returned
+	// (past is ignored). If past is true, the transactions prior to the
+	// refID are returned, otherwise the transactions after the refID are
+	// returned. n is the number of transactions to return. If n is <= 0,
+	// all the transactions will be returned.
+	TxHistory(*TxHistoryRequest) (*TxHistoryResponse, error)
+	// WalletTransaction returns a single transaction that either a wallet
+	// has made or in which the wallet has received funds. This function may
+	// support more transactions than are returned by TxHistory. For example,
+	// ETH/token wallets do not return receiving transactions in TxHistory,
+	// but WalletTransaction will return them.
+	WalletTransaction(ctx context.Context, txID string) (*WalletTransaction, error)
+	// PendingTransactions loads wallet transactions that are not yet confirmed.
+	PendingTransactions(ctx context.Context) []*WalletTransaction
 }
 
 // Authenticator is a wallet implementation that require authentication.
@@ -1368,6 +1403,11 @@ type BridgeCounterpartTx struct {
 	Fees uint64 `json:"fees"`
 }
 
+type Confirms struct {
+	Current uint32 `json:"current"`
+	Target  uint32 `json:"target"`
+}
+
 // WalletTransaction represents a transaction that was made by a wallet.
 type WalletTransaction struct {
 	Type   TransactionType `json:"type"`
@@ -1393,6 +1433,9 @@ type WalletTransaction struct {
 	// Confirmed transactions are no longer updated and will be considered
 	// finalized forever.
 	Confirmed bool `json:"confirmed"`
+	// Confirms is the number of current confirmations and the number of
+	// confirmations required for finalization.
+	Confirms *Confirms `json:"confirms"`
 	// Rejected will be true the transaction was rejected and did not have any
 	// effect, though fees were incurred.
 	Rejected bool `json:"rejected,omitempty"`
@@ -1408,24 +1451,6 @@ type WalletTransaction struct {
 	UserOpTxID string `json:"userOpTxID,omitempty"`
 	// IsUserOp will be true if the transaction is a user op.
 	IsUserOp bool `json:"isUserOp"`
-}
-
-// WalletHistorian is a wallet that is able to retrieve the history of all
-// transactions it has made.
-type WalletHistorian interface {
-	// TxHistory returns all the transactions a wallet has made. If refID
-	// is nil, then transactions starting from the most recent are returned
-	// (past is ignored). If past is true, the transactions prior to the
-	// refID are returned, otherwise the transactions after the refID are
-	// returned. n is the number of transactions to return. If n is <= 0,
-	// all the transactions will be returned.
-	TxHistory(n int, refID *string, past bool) ([]*WalletTransaction, error)
-	// WalletTransaction returns a single transaction that either a wallet
-	// has made or in which the wallet has received funds. This function may
-	// support more transactions than are returned by TxHistory. For example,
-	// ETH/token wallets do not return receiving transactions in TxHistory,
-	// but WalletTransaction will return them.
-	WalletTransaction(ctx context.Context, txID string) (*WalletTransaction, error)
 }
 
 // Bond is the fidelity bond info generated for a certain account ID, amount,

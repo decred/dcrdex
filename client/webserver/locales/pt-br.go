@@ -162,7 +162,7 @@ var PtBr = map[string]*intl.Translation{
 	"dont_share":                 {T: "Não compartilhe e não perca sua seed."},
 	"Show Me":                    {T: "Mostre me"},
 	"Wallet Settings":            {T: "Configurações da Carteira"},
-	"add_a_x_wallet":             {T: `Adicionar uma carteira <img data-tmpl="assetLogo" class="small-icon mx-1"> <span data-tmpl="assetName"></span>`},
+	"add_a_x_wallet":             {T: `Adicionar uma carteira <img data-tmpl="assetLogo" class="small-icon mx-1"> <span data-tmpl="assetName" class="me-1"></span>`},
 	"ready":                      {T: "destrancado"},
 	"off":                        {T: "desligado"},
 	"Export Trades":              {T: "Exportar Trocas"},

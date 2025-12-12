@@ -135,10 +135,10 @@ export default class SettingsPage extends BasePage {
     })
 
     Doc.bind(page.importAccount, 'click', () => this.prepareAccountImport(page.authorizeAccountImportForm))
-    forms.bind(page.authorizeAccountImportForm, page.authorizeImportAccountConfirm, () => this.importAccount())
+    Doc.bind(page.authorizeImportAccountConfirm, 'click', () => this.importAccount())
 
     Doc.bind(page.changeAppPW, 'click', () => this.showForm(page.changeAppPWForm))
-    forms.bind(page.changeAppPWForm, page.submitNewPW, () => this.changeAppPW())
+    Doc.bind(page.submitNewPW, 'click', () => this.changeAppPW())
 
     this.appPassResetForm = new forms.AppPassResetForm(page.resetAppPWForm, async () => {
       await app().loadPage('login')
@@ -170,7 +170,7 @@ export default class SettingsPage extends BasePage {
       Doc.hide(page.exportSeedErr)
       this.showForm(page.exportSeedAuth)
     })
-    forms.bind(page.exportSeedAuth, page.exportSeedSubmit, () => this.submitExportSeedReq())
+    Doc.bind(page.exportSeedSubmit, 'click', () => this.submitExportSeedReq())
 
     Doc.bind(page.exportLogs, 'click', () => this.exportLogs())
 

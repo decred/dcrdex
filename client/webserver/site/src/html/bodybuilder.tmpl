@@ -1,6 +1,7 @@
 {{define "top"}}
 <!DOCTYPE html>
 <html lang="[[[Language]]]">
+
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Type" content="text/html;charset=UTF-8">
@@ -11,15 +12,15 @@
   <title>{{.Title}}</title>
   <link href="/css/style.css?v={{commitHash true}}" rel="stylesheet">
 </head>
+
 <body class="dark{{if .UseDEXBranding}} dex-branding{{end}}">
   {{if .NewAppVersionAvailable}}
-    <div class="p-2 d-flex justify-content-center">
-        <span class="fs15 green">[[[New Release Message]]]</span>
-        <a href="https://bisonwallet.org/#download" target="_blank" rel="noopener noreferrer"
-          class="fs15 ps-2">
-          [[[View Website]]]
-        </a>
-    </div>
+  <div class="p-2 d-flex justify-content-center">
+    <span class="fs15 green">[[[New Release Message]]]</span>
+    <a href="https://bisonwallet.org/#download" target="_blank" rel="noopener noreferrer" class="fs15 ps-2">
+      [[[View Website]]]
+    </a>
+  </div>
   {{end}}
   <div class="popup-notes d-hide" id="popupNotes">
     <span data-tmpl="note" class="fs15">
@@ -29,251 +30,253 @@
   </div>
   <div id="tooltip" class="flex-center"></div>
   {{template "header" .}}
-{{end}}
+  {{end}}
 
-{{define "header"}}
-<header id="header" class="border-bottom mb-2">
-  {{$authed := .UserInfo.Authed}}
-  <a href="/" class="d-none d-md-block pointer hoverbg mx-2">
-    <img class="logo-full">
-  </a>
-  <a href="/" class="d-block d-md-none pointer hoverbg mx-2">
-    <img class="logo-square">
-  </a>
-  <div id="headerSpace"></div>
-  <div class="mainlinks fs18 pe-2 text-nowrap">
+  {{define "header"}}
+  <header id="header" class="border-bottom mb-2">
+    {{$authed := .UserInfo.Authed}}
+    <a href="/" class="d-none d-md-block pointer hoverbg mx-2">
+      <img class="logo-full">
+    </a>
+    <a href="/" class="d-block d-md-none pointer hoverbg mx-2">
+      <img class="logo-square">
+    </a>
+    <div id="headerSpace"></div>
+    <div class="mainlinks fs18 pe-2 text-nowrap">
 
-    <a href="/wallets" class="demi hoverbg{{if not $authed}} d-hide{{end}}" id="walletsMenuEntry">[[[Wallet]]]</a>
+      <a href="/wallets" class="demi hoverbg{{if not $authed}} d-hide{{end}}" id="walletsMenuEntry">[[[Wallet]]]</a>
 
-    <a href="/markets" class="demi hoverbg d-hide" id="marketsMenuEntry">[[[Trade]]]</a>
+      <a href="/markets" class="demi hoverbg d-hide" id="marketsMenuEntry">[[[Trade]]]</a>
 
-    <a href="/mm" class="ico-robot lh1 fs32 hoverbg d-hide" id="mmLink"></a>
+      <a href="/mm" class="ico-robot lh1 fs32 hoverbg d-hide" id="mmLink"></a>
 
-    <div class="d-inline-block position-relative pointer hoverbg{{if not $authed}} d-hide{{end}}" id="noteBell">
-      <span class="ico-bell fs20 p-2"></span>
-      <div id="noteIndicator" class="d-hide"></div>
+      <div class="d-inline-block position-relative pointer hoverbg{{if not $authed}} d-hide{{end}}" id="noteBell">
+        <span class="ico-bell fs20 p-2"></span>
+        <div id="noteIndicator" class="d-hide"></div>
+      </div>
+
+      <div class="d-inline-block hoverbg position-relative pointer" id="burgerIcon">
+        <span class="ico-hamburger fs20 p-2"></span>
+      </div>
+
     </div>
-
-    <div class="d-inline-block hoverbg position-relative pointer" id="burgerIcon">
-      <span class="ico-hamburger fs20 p-2"></span>
-    </div>
-
-  </div>
-  <div id="loader" class="fill-abs d-hide">
-    <div class="fill-abs flex-center blurry-bg">
-      <img class="d-inline-block logo-square small spinner">
-      <div id="loaderMsg" class="mx-2 d-hide"></div>
-    </div>
-  </div>
-
-  <div id="noteBox" class="d-hide">
-    <div class="icon fs20 ico-bell p-1" id="innerNoteIcon"></div>
-    <div class="header d-flex align-items-center justify-content-start fs17 demi px-3 py-2 min-fit">
-      <div id="noteCat" class="active me-3">[[[Notifications]]]</div>
-      <div id="pokeCat">[[[Recent Activity]]]</div>
-    </div>
-    <div id="noteList" class="flex-grow-1 stylish-overflow">
-      <div id="noteTmpl" class="note firstview p-2">
-        <div class="d-flex justify-content-center align-items-center px-1">
-          <div class="note-indicator d-inline-block me-2"></div>
-          <div class="note-subject flex-grow-1 d-inline-block fs16 demi"></div>
-          <span class="note-time text-nowrap pe-2"></span>
-        </div>
-        <div class="note-details fs15 px-3"></div>
+    <div id="loader" class="fill-abs d-hide">
+      <div class="fill-abs flex-center blurry-bg">
+        <img class="d-inline-block logo-square small spinner">
+        <div id="loaderMsg" class="mx-2 d-hide"></div>
       </div>
     </div>
-    <div id="pokeList" class="d-hide flex-grow-1 stylish-overflow">
-      <div id="pokeTmpl" class="note fs15 p-2">
-        <div class="d-flex justify-content-center align-items-start px-1">
-          <div class="fs15 px-1 flex-grow-1">
-            <span data-tmpl="subject"></span>
-            <span data-tmpl="details"></span>
+
+    <div id="noteBox" class="d-hide">
+      <div class="icon fs20 ico-bell p-1" id="innerNoteIcon"></div>
+      <div class="header d-flex align-items-center justify-content-start fs17 demi px-3 py-2 min-fit">
+        <div id="noteCat" class="active me-3">[[[Notifications]]]</div>
+        <div id="pokeCat">[[[Recent Activity]]]</div>
+      </div>
+      <div id="noteList" class="flex-grow-1 stylish-overflow">
+        <div id="noteTmpl" class="note firstview p-2">
+          <div class="d-flex justify-content-center align-items-center px-1">
+            <div class="note-indicator d-inline-block me-2"></div>
+            <div class="note-subject flex-grow-1 d-inline-block fs16 demi"></div>
+            <span class="note-time text-nowrap pe-2"></span>
           </div>
-          <span class="note-time text-nowrap"></span>
+          <div class="note-details fs15 px-3"></div>
         </div>
+      </div>
+      <div id="pokeList" class="d-hide flex-grow-1 stylish-overflow">
+        <div id="pokeTmpl" class="note fs15 p-2">
+          <div class="d-flex justify-content-center align-items-start px-1">
+            <div class="fs15 px-1 flex-grow-1">
+              <span data-tmpl="subject"></span>
+              <span data-tmpl="details"></span>
+            </div>
+            <span class="note-time text-nowrap"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="profileBox" class="d-hide p-3 fs15">
+      <div class="icon fs20 ico-hamburger p-1" id="innerBurgerIcon"></div>
+      <span class="text-danger" id="logoutErr"></span>
+      <a href="/orders" class="demi hoverbright plainlink d-flex align-items-center py-1 authed-only">
+        <span class="ico-settings fs16 me-2"></span>
+        [[[Order History]]]
+      </a>
+      <a href="/mm" class="demi hoverbright plainlink d-flex align-items-center py-1 authed-only">
+        <span class="ico-barchart fs16 me-2"></span>
+        [[[Market Making]]]
+      </a>
+      <a href="/settings" class="demi hoverbright plainlink d-flex align-items-center py-1 authed-only">
+        <span class="ico-settings fs16 me-2"></span>
+        [[[Settings]]]
+      </a>
+      <div class="d-flex flex-column align-items-start">
+        <div class="flex-center">
+          <span id="langFlag" class="fs20"></span>
+          <span id="langName" class="demi fs16 ms-1"></span>
+        </div>
+        <div id="langBttns" class="d-flex align-items-center flex-wrap">
+          <div id="langBttnTmpl" class="pointer fs18 me-2"></div>
+        </div>
+      </div>
+      <a href="https://github.com/decred/dcrdex" class="demi hoverbright plainlink d-flex align-items-center py-1"
+        target="_blank">
+        <span class="ico-open fs16 me-2"></span>
+        Homepage / Docs
+      </a>
+      <div class="demi hoverbright pointer d-flex align-items-center py-1 authed-only" id="profileSignout">
+        <span class="ico-profile fs16 me-2"></span>
+        [[[Sign Out]]]
+      </div>
+      <div class="border-bottom py-2"></div>
+      <div class="demi-sans d-flex align-items-center pt-3 lh-1" id="version">
+        <div class="flex-center">
+          [[[Version]]] {{.Version}}
+        </div>
+      </div>
+    </div>
+
+
+  </header>
+  {{end}}
+
+  {{define "bottom"}}
+  <div id="requiredActions">
+    <div id="actionDialogCollapsed" class="d-inline-block text-center p-2 m-1 pointer hoverbg d-hide">
+      <span class="text-warning fs20">
+        <span class="ico-info ms-0 me-1"></span>
+        <span id="actionDialogCount">4</span>
+      </span>
+    </div>
+    <div id="actionDialog" class="mw-375 rounded3 m-3 p-3 d-hide">
+      <div class="d-flex justify-content-between">
+        <div class="fs22">
+          <span class="ico-info text-warning me-2"></span>
+          Action Required
+        </div>
+        <div id="actionsCollapse" class="fs16 p-2 ico-arrowdown hoverbg pointer"></div>
+      </div>
+      <div id="actionDialogContent">
+
+        <table id="actionTxTableTmpl" class="compact border cell-border mt-2">
+          <thead>
+            <tr>
+              <th colspan="2">
+                <a data-tmpl="lostTxID" class="word-break-all"></a>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>[[[Amount]]]</td>
+              <td>
+                <span data-tmpl="txAmt"></span>
+                <span data-tmpl="amtUnit" class="fs15 grey"></span>
+              </td>
+            </tr>
+            <tr>
+              <td>[[[Fees]]]</td>
+              <td>
+                <span data-tmpl="feeAmount"></span>
+                <span data-tmpl="feeUnit" class="fs15 grey"></span>
+              </td>
+            </tr>
+            <tr data-tmpl="newFeesRow" class="d-hide">
+              <td>New Fees</td>
+              <td>
+                <span data-tmpl="newFees"></span>
+                <span data-tmpl="newFeesUnit" class="fs15 grey"></span>
+              </td>
+            </tr>
+            <tr>
+              <td>Tx Type</td>
+              <td data-tmpl="type"></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div id="missingNoncesTmpl" class="flex-stretch-column mt-2">
+          <div class="text-justify">
+            <span data-tmpl="assetName"></span> nonces are missing. Would you like
+            to attempt recovery?
+          </div>
+          <div class="d-flex align-items-stretch mt-3">
+            <button data-tmpl="doNothingBttn" class="flex-grow-1 me-2 danger">Do Nothing</button>
+            <button data-tmpl="recoverBttn" class="flex-grow-1 ms-2">Attempt Recovery</button>
+          </div>
+          <div data-tmpl="errMsg" class="p-2 text-warning d-hide"></div>
+        </div>
+
+        <div id="tooCheapTmpl" class="flex-stretch-column mt-2">
+          <div class="text-justify">
+            A <span data-tmpl="assetName"></span>
+            transaction is stuck and has low fees. Should we replace it with a new
+            transaction?
+          </div>
+          <div data-tmpl="txTable"></div>
+          <div class="d-flex align-items-stretch mt-3">
+            <button data-tmpl="keepWaitingBttn" class="flex-grow-1 me-2">Keep Waiting</button>
+            <button data-tmpl="addFeesBttn" class="flex-grow-1 ms-2">Add Fees</button>
+          </div>
+          <div data-tmpl="errMsg" class="p-2 text-warning d-hide"></div>
+        </div>
+
+        <div id="lostNonceTmpl" class="flex-stretch-column mt-2">
+          <div class="text-justify">
+            A <span data-tmpl="assetName"></span>
+            transaction might be lost. A different transaction with the same
+            nonce was confirmed first. You can abandon the transaction
+          </div>
+          <div data-tmpl="txTable"></div>
+          <div class="d-flex mt-2">
+            <button data-tmpl="keepWaitingBttn" class="flex-grow-1 me-1">Keep Waiting</button>
+            <button data-tmpl="abandonBttn" class="danger flex-grow-1 ms-1">Abandon</button>
+          </div>
+          <hr>
+          <div class="mt-2">
+            or you can tell us which transaction has nonce <span data-tmpl="nonce"></span>
+          </div>
+          <div class="d-flex align-items-stretch mt-2">
+            <input type="text" data-tmpl="idInput" class="flex-grow-1">
+            <button data-tmpl="replaceBttn" class="ms-2">Submit</button>
+          </div>
+          <div data-tmpl="errMsg" class="p-2 text-warning d-hide"></div>
+        </div>
+
+        <div id="rejectedTxTmpl" class="flex-stretch-column mt-2">
+          <div class="text-justify">
+            A <span data-tmpl="assetName"></span> trade <span data-tmpl="txType"></span>
+            was rejected by the network. Network transaction fees were incurred.
+            You can try to <span data-tmpl="txType"></span> again, but it will
+            likely incur more fees and it may be rejected again.
+          </div>
+          <a data-tmpl="txid" class="d-block fs12 mono word-break-all border p-2 mt-2"></a>
+          <div class="d-flex align-items-stretch mt-3">
+            <button data-tmpl="doNothingBttn" class="flex-grow-1 me-2">Do Nothing</button>
+            <button data-tmpl="tryAgainBttn" class="flex-grow-1 ms-2">Try Again</button>
+          </div>
+          <div class="flex-center fs14 mt-2">
+            <a href="https://docs.decred.org/getting-started/joining-matrix-channels/" target="_blank">
+              Find technical support
+            </a>
+          </div>
+          <div data-tmpl="errMsg" class="p-2 text-warning mt-2 d-hide"></div>
+        </div>
+
+      </div>
+      <div id="actionsNavigator" class="flex-center mt-2 lh1 fs16 user-select-none">
+        <span id="prevAction" class="p-1 ico-arrowleft pointer hoverbg"></span>
+        <span id="currentAction" class="mx-1"></span>
+        <span>/</span>
+        <span id="actionCount" class="mx-1"></span>
+        <span id="nextAction" class="p-1 ico-arrowright pointer hoverbg"></span>
       </div>
     </div>
   </div>
 
-  <div id="profileBox" class="d-hide p-3 fs15">
-    <div class="icon fs20 ico-hamburger p-1" id="innerBurgerIcon"></div>
-    <span class="text-danger" id="logoutErr"></span>
-    <a href="/orders" class="demi hoverbright plainlink d-flex align-items-center py-1 authed-only">
-      <span class="ico-settings fs16 me-2"></span>
-      [[[Order History]]]
-    </a>
-    <a href="/mm" class="demi hoverbright plainlink d-flex align-items-center py-1 authed-only">
-      <span class="ico-barchart fs16 me-2"></span>
-      [[[Market Making]]]
-    </a>
-    <a href="/settings" class="demi hoverbright plainlink d-flex align-items-center py-1 authed-only">
-      <span class="ico-settings fs16 me-2"></span>
-      [[[Settings]]]
-    </a>
-    <div class="d-flex flex-column align-items-start">
-      <div class="flex-center">
-        <span id="langFlag" class="fs20"></span>
-        <span id="langName" class="demi fs16 ms-1"></span>
-      </div>
-      <div id="langBttns" class="d-flex align-items-center flex-wrap">
-        <div id="langBttnTmpl" class="pointer fs18 me-2"></div>
-      </div>
-    </div>
-    <a href="https://github.com/decred/dcrdex" class="demi hoverbright plainlink d-flex align-items-center py-1"  target="_blank">
-      <span class="ico-open fs16 me-2"></span>
-      Homepage / Docs
-    </a>
-    <div class="demi hoverbright pointer d-flex align-items-center py-1 authed-only" id="profileSignout">
-      <span class="ico-profile fs16 me-2"></span>
-      [[[Sign Out]]]
-    </div>
-    <div class="border-bottom py-2"></div>
-    <div class="demi-sans d-flex align-items-center py-1" id="version">
-      <div class="flex-center">
-        [[[Version]]] {{.Version}}
-      </div>
-    </div>
-  </div>
-
-
-</header>
-{{end}}
-
-{{define "bottom"}}
-<div id="requiredActions">
-  <div id="actionDialogCollapsed" class="d-inline-block text-center p-2 m-1 pointer hoverbg d-hide">
-    <span class="text-warning fs20">
-      <span class="ico-info ms-0 me-1"></span>
-      <span id="actionDialogCount">4</span>
-    </span>
-  </div>
-  <div id="actionDialog" class="mw-375 rounded3 m-3 p-3 d-hide">
-    <div class="d-flex justify-content-between">
-      <div class="fs22">
-        <span class="ico-info text-warning me-2"></span>
-        Action Required
-      </div>
-      <div id="actionsCollapse" class="fs16 p-2 ico-arrowdown hoverbg pointer"></div>
-    </div>
-    <div id="actionDialogContent">
-
-      <table id="actionTxTableTmpl" class="compact border cell-border mt-2">
-        <thead>
-          <tr>
-            <th colspan="2">
-              <a data-tmpl="lostTxID" class="word-break-all"></a>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>[[[Amount]]]</td>
-            <td>
-              <span data-tmpl="txAmt"></span>
-              <span data-tmpl="amtUnit" class="fs15 grey"></span>
-            </td>
-          </tr>
-          <tr>
-            <td>[[[Fees]]]</td>
-            <td>
-              <span data-tmpl="feeAmount"></span>
-              <span data-tmpl="feeUnit" class="fs15 grey"></span>
-            </td>
-          </tr>
-          <tr data-tmpl="newFeesRow" class="d-hide">
-            <td>New Fees</td>
-            <td>
-              <span data-tmpl="newFees"></span>
-              <span data-tmpl="newFeesUnit" class="fs15 grey"></span>
-            </td>
-          </tr>
-          <tr>
-            <td>Tx Type</td>
-            <td data-tmpl="type"></td>
-          </tr>
-        </tbody>
-      </table>
-
-      <div id="missingNoncesTmpl" class="flex-stretch-column mt-2">
-        <div class="text-justify">
-          <span data-tmpl="assetName"></span> nonces are missing. Would you like
-           to attempt recovery?
-        </div>
-        <div class="d-flex align-items-stretch mt-3">
-          <button data-tmpl="doNothingBttn" class="flex-grow-1 me-2 danger">Do Nothing</button>
-          <button data-tmpl="recoverBttn" class="flex-grow-1 ms-2">Attempt Recovery</button>
-        </div>
-        <div data-tmpl="errMsg" class="p-2 text-warning d-hide"></div>
-      </div>
-
-      <div id="tooCheapTmpl" class="flex-stretch-column mt-2">
-        <div class="text-justify">
-          A <span data-tmpl="assetName"></span>
-          transaction is stuck and has low fees. Should we replace it with a new
-          transaction?
-        </div>
-        <div data-tmpl="txTable"></div>
-        <div class="d-flex align-items-stretch mt-3">
-          <button data-tmpl="keepWaitingBttn" class="flex-grow-1 me-2">Keep Waiting</button>
-          <button data-tmpl="addFeesBttn" class="flex-grow-1 ms-2">Add Fees</button>
-        </div>
-        <div data-tmpl="errMsg" class="p-2 text-warning d-hide"></div>
-      </div>
-
-      <div id="lostNonceTmpl" class="flex-stretch-column mt-2">
-        <div class="text-justify">
-          A <span data-tmpl="assetName"></span>
-          transaction might be lost. A different transaction with the same
-          nonce was confirmed first. You can abandon the transaction
-        </div>
-        <div data-tmpl="txTable"></div>
-        <div class="d-flex mt-2">
-          <button data-tmpl="keepWaitingBttn" class="flex-grow-1 me-1">Keep Waiting</button>
-          <button data-tmpl="abandonBttn" class="danger flex-grow-1 ms-1">Abandon</button>
-        </div>
-        <hr>
-        <div class="mt-2">
-          or you can tell us which transaction has nonce <span data-tmpl="nonce"></span>
-        </div>
-        <div class="d-flex align-items-stretch mt-2">
-          <input type="text" data-tmpl="idInput" class="flex-grow-1">
-          <button data-tmpl="replaceBttn" class="ms-2">Submit</button>
-        </div>
-        <div data-tmpl="errMsg" class="p-2 text-warning d-hide"></div>
-      </div>
-
-      <div id="rejectedTxTmpl" class="flex-stretch-column mt-2">
-        <div class="text-justify">
-          A <span data-tmpl="assetName"></span> trade <span data-tmpl="txType"></span>
-	  was rejected by the network. Network transaction fees were incurred.
-	  You can try to <span data-tmpl="txType"></span> again, but it will
-	  likely incur more fees and it may be rejected again.
-        </div>
-        <a data-tmpl="txid" class="d-block fs12 mono word-break-all border p-2 mt-2"></a>
-        <div class="d-flex align-items-stretch mt-3">
-          <button data-tmpl="doNothingBttn" class="flex-grow-1 me-2">Do Nothing</button>
-          <button data-tmpl="tryAgainBttn" class="flex-grow-1 ms-2">Try Again</button>
-        </div>
-        <div class="flex-center fs14 mt-2">
-          <a href="https://docs.decred.org/getting-started/joining-matrix-channels/" target="_blank">
-            Find technical support
-          </a>
-        </div>
-        <div data-tmpl="errMsg" class="p-2 text-warning mt-2 d-hide"></div>
-      </div>
-
-    </div>
-    <div id="actionsNavigator" class="flex-center mt-2 lh1 fs16 user-select-none">
-      <span id="prevAction" class="p-1 ico-arrowleft pointer hoverbg"></span>
-      <span id="currentAction" class="mx-1"></span>
-      <span>/</span>
-      <span id="actionCount" class="mx-1"></span>
-      <span id="nextAction" class="p-1 ico-arrowright pointer hoverbg"></span>
-    </div>
-  </div>
-</div>
-
-<script src="/js/entry.js?v={{commitHash true}}"></script>
+  <script src="/js/entry.js?v={{commitHash true}}"></script>
 </body>
+
 </html>
 {{end}}
