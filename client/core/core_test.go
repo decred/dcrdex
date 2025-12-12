@@ -358,7 +358,9 @@ type TDB struct {
 	addBondErr               error
 	updateOrderErr           error
 	activeDEXOrders          []*db.MetaOrder
+	allOrders                []*db.MetaOrder
 	matchesForOID            []*db.MetaMatch
+	matchesByOrderID         map[order.OrderID][]*db.MetaMatch
 	matchesForOIDErr         error
 	updateMatchChan          chan order.MatchStatus
 	activeMatchOIDs          []order.OrderID
@@ -462,8 +464,78 @@ func (tdb *TDB) Order(oid order.OrderID) (*db.MetaOrder, error) {
 	return tdb.orderOrders[oid], nil
 }
 
-func (tdb *TDB) Orders(*db.OrderFilter) ([]*db.MetaOrder, error) {
-	return nil, nil
+func (tdb *TDB) Orders(filter *db.OrderFilter) ([]*db.MetaOrder, error) {
+	if tdb.allOrders == nil {
+		return nil, nil
+	}
+
+	// Check if OrderStatusExecuted is in the filter statuses
+	hasExecutedFilter := false
+	for _, status := range filter.Statuses {
+		if status == order.OrderStatusExecuted {
+			hasExecutedFilter = true
+			break
+		}
+	}
+
+	// Filter orders based on status
+	var filtered []*db.MetaOrder
+	for _, ord := range tdb.allOrders {
+		// If no status filter, include all
+		if len(filter.Statuses) == 0 {
+			filtered = append(filtered, ord)
+			continue
+		}
+
+		// Check if order status matches any of the filter statuses
+		statusMatch := false
+		for _, status := range filter.Statuses {
+			if ord.MetaData.Status == status {
+				statusMatch = true
+				break
+			}
+		}
+
+		if statusMatch {
+			filtered = append(filtered, ord)
+			continue
+		}
+
+		// Handle IncludePartial: include canceled/revoked orders with partial fills
+		// when filtering for "executed" status
+		if filter.IncludePartial && hasExecutedFilter {
+			if ord.MetaData.Status == order.OrderStatusCanceled ||
+				ord.MetaData.Status == order.OrderStatusRevoked {
+				// Check if order has trade matches (non-cancel matches indicating partial fill)
+				oid := ord.Order.ID()
+				if tdb.matchesByOrderID != nil {
+					if matches := tdb.matchesByOrderID[oid]; len(matches) > 0 {
+						// Check for non-cancel trade matches
+						// A trade match has:
+						// - Non-empty Address (not a cancel match for maker)
+						// - If Status == MatchComplete, must have InitSig (not a cancel match for taker)
+						for _, m := range matches {
+							// Cancel match for maker has empty Address
+							if m.UserMatch.Address == "" {
+								continue
+							}
+							// Cancel match for taker has no InitSig and status MatchComplete
+							if m.UserMatch.Status == order.MatchComplete {
+								if m.MetaData == nil || len(m.MetaData.Proof.Auth.InitSig) == 0 {
+									continue
+								}
+							}
+							// Found a trade match - include this order
+							filtered = append(filtered, ord)
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return filtered, nil
 }
 
 func (tdb *TDB) MarketOrders(dex string, base, quote uint32, n int, since uint64) ([]*db.MetaOrder, error) {
@@ -498,6 +570,10 @@ func (tdb *TDB) ActiveMatches() ([]*db.MetaMatch, error) {
 }
 
 func (tdb *TDB) MatchesForOrder(oid order.OrderID, excludeCancels bool) ([]*db.MetaMatch, error) {
+	// Use matchesByOrderID map if available for more accurate testing
+	if tdb.matchesByOrderID != nil {
+		return tdb.matchesByOrderID[oid], tdb.matchesForOIDErr
+	}
 	return tdb.matchesForOID, tdb.matchesForOIDErr
 }
 
@@ -11494,4 +11570,340 @@ func TestTakeAction(t *testing.T) {
 		t.Fatalf("maker redemption not cleared")
 	}
 
+}
+
+// TestCore_Orders_SmartFilterExecuted tests that filtering for "executed"
+// orders also includes "canceled/partially filled" orders.
+func TestCore_Orders_SmartFilterExecuted(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	tCore := rig.core
+
+	// Create test orders with different statuses
+	lo1, _, _, _ := makeLimitOrder(rig.dc, true, 1000, 100)
+	lo2, _, _, _ := makeLimitOrder(rig.dc, true, 1000, 100)
+	lo3, _, _, _ := makeLimitOrder(rig.dc, true, 1000, 100)
+	lo4, _, _, _ := makeLimitOrder(rig.dc, true, 1000, 100)
+
+	// Set order statuses
+	lo1.Force = order.StandingTiF
+	lo2.Force = order.StandingTiF
+	lo3.Force = order.StandingTiF
+	lo4.Force = order.StandingTiF
+
+	// Create MetaOrders
+	metaOrder1 := &db.MetaOrder{
+		MetaData: &db.OrderMetaData{
+			Status: order.OrderStatusExecuted,
+		},
+		Order: lo1,
+	}
+
+	metaOrder2 := &db.MetaOrder{
+		MetaData: &db.OrderMetaData{
+			Status: order.OrderStatusCanceled,
+		},
+		Order: lo2,
+	}
+
+	metaOrder3 := &db.MetaOrder{
+		MetaData: &db.OrderMetaData{
+			Status: order.OrderStatusCanceled,
+		},
+		Order: lo3,
+	}
+
+	metaOrder4 := &db.MetaOrder{
+		MetaData: &db.OrderMetaData{
+			Status: order.OrderStatusBooked,
+		},
+		Order: lo4,
+	}
+
+	// Set up TDB with orders
+	tCore.db.(*TDB).allOrders = []*db.MetaOrder{metaOrder1, metaOrder2, metaOrder3, metaOrder4}
+
+	// Set up orderOrders map for coreOrderFromMetaOrder
+	if tCore.db.(*TDB).orderOrders == nil {
+		tCore.db.(*TDB).orderOrders = make(map[order.OrderID]*db.MetaOrder)
+	}
+	tCore.db.(*TDB).orderOrders[lo1.ID()] = metaOrder1
+	tCore.db.(*TDB).orderOrders[lo2.ID()] = metaOrder2
+	tCore.db.(*TDB).orderOrders[lo3.ID()] = metaOrder3
+	tCore.db.(*TDB).orderOrders[lo4.ID()] = metaOrder4
+
+	// Set up matches - lo1 has fills (executed), lo2 has fills (canceled), lo3 has no fills
+	mid1 := ordertest.RandomMatchID()
+	mid2 := ordertest.RandomMatchID()
+	tCore.db.(*TDB).matchesByOrderID = map[order.OrderID][]*db.MetaMatch{
+		lo1.ID(): {
+			{
+				MetaData: &db.MatchMetaData{},
+				UserMatch: &order.UserMatch{
+					OrderID:  lo1.ID(),
+					MatchID:  mid1,
+					Quantity: 800,
+					Rate:     100,
+					Status:   order.MakerSwapCast,
+					Side:     order.Maker,
+					Address:  "some-address", // Must be non-empty to not be a cancel match
+				},
+			},
+		},
+		lo2.ID(): {
+			{
+				MetaData: &db.MatchMetaData{},
+				UserMatch: &order.UserMatch{
+					OrderID:  lo2.ID(),
+					MatchID:  mid2,
+					Quantity: 500,
+					Rate:     100,
+					Status:   order.MakerSwapCast,
+					Side:     order.Maker,
+					Address:  "some-address", // Must be non-empty to not be a cancel match
+				},
+			},
+		},
+		// lo3 has no matches (empty or not in map)
+	}
+
+	// Test: Filter for "executed" orders with IncludePartial to include
+	// canceled orders that have partial fills
+	filter := &OrderFilter{
+		Statuses:       []order.OrderStatus{order.OrderStatusExecuted},
+		IncludePartial: true,
+	}
+
+	results, err := tCore.Orders(filter)
+	if err != nil {
+		t.Fatalf("Orders error: %v", err)
+	}
+
+	// Should return 2 orders:
+	// 1. Executed order (lo1)
+	// 2. Canceled with fills (lo2) - partially filled
+	if len(results) != 2 {
+		t.Fatalf("Expected 2 orders, got %d", len(results))
+	}
+
+	// Verify the correct orders are returned
+	foundExecuted := false
+	foundPartiallyCanceled := false
+	for _, ord := range results {
+		if ord.ID.String() == lo1.ID().String() {
+			foundExecuted = true
+			if ord.Status != order.OrderStatusExecuted {
+				t.Errorf("Expected executed status, got %v", ord.Status)
+			}
+		}
+		if ord.ID.String() == lo2.ID().String() {
+			foundPartiallyCanceled = true
+			if ord.Status != order.OrderStatusCanceled {
+				t.Errorf("Expected canceled status, got %v", ord.Status)
+			}
+		}
+	}
+
+	if !foundExecuted {
+		t.Error("Did not find executed order in results")
+	}
+	if !foundPartiallyCanceled {
+		t.Error("Did not find partially canceled order in results")
+	}
+}
+
+// TestCore_Orders_CanceledFilterStillWorks tests that explicitly filtering
+// for "canceled" returns ALL canceled orders (with and without fills).
+func TestCore_Orders_CanceledFilterStillWorks(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	tCore := rig.core
+
+	// Create canceled orders with and without fills
+	lo1, _, _, _ := makeLimitOrder(rig.dc, true, 1000, 100)
+	lo2, _, _, _ := makeLimitOrder(rig.dc, true, 1000, 100)
+
+	lo1.Force = order.StandingTiF
+	lo2.Force = order.StandingTiF
+
+	metaOrder1 := &db.MetaOrder{
+		MetaData: &db.OrderMetaData{
+			Status: order.OrderStatusCanceled,
+		},
+		Order: lo1,
+	}
+
+	metaOrder2 := &db.MetaOrder{
+		MetaData: &db.OrderMetaData{
+			Status: order.OrderStatusCanceled,
+		},
+		Order: lo2,
+	}
+
+	tCore.db.(*TDB).allOrders = []*db.MetaOrder{metaOrder1, metaOrder2}
+
+	if tCore.db.(*TDB).orderOrders == nil {
+		tCore.db.(*TDB).orderOrders = make(map[order.OrderID]*db.MetaOrder)
+	}
+	tCore.db.(*TDB).orderOrders[lo1.ID()] = metaOrder1
+	tCore.db.(*TDB).orderOrders[lo2.ID()] = metaOrder2
+
+	// Test: Filter for "canceled" orders only
+	filter := &OrderFilter{
+		Statuses: []order.OrderStatus{order.OrderStatusCanceled},
+	}
+
+	results, err := tCore.Orders(filter)
+	if err != nil {
+		t.Fatalf("Orders error: %v", err)
+	}
+
+	// Should return ALL canceled orders (both with and without fills)
+	if len(results) != 2 {
+		t.Fatalf("Expected 2 canceled orders, got %d", len(results))
+	}
+
+	for _, ord := range results {
+		if ord.Status != order.OrderStatusCanceled {
+			t.Errorf("Expected canceled status, got %v", ord.Status)
+		}
+	}
+}
+
+// TestCore_Orders_ExecutedAndCanceledFilter tests that when user explicitly
+// selects BOTH "executed" AND "canceled" filters, ALL canceled orders are
+// returned (including those with 0% filled), because the user explicitly
+// selected "canceled" status.
+func TestCore_Orders_ExecutedAndCanceledFilter(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	tCore := rig.core
+
+	// Create test orders
+	lo1, _, _, _ := makeLimitOrder(rig.dc, true, 1000, 100) // Executed
+	lo2, _, _, _ := makeLimitOrder(rig.dc, true, 1000, 100) // Canceled with fills
+	lo3, _, _, _ := makeLimitOrder(rig.dc, true, 1000, 100) // Canceled without fills
+	lo4, _, _, _ := makeLimitOrder(rig.dc, true, 1000, 100) // Booked (should not be returned)
+
+	lo1.Force = order.StandingTiF
+	lo2.Force = order.StandingTiF
+	lo3.Force = order.StandingTiF
+	lo4.Force = order.StandingTiF
+
+	metaOrder1 := &db.MetaOrder{
+		MetaData: &db.OrderMetaData{
+			Status: order.OrderStatusExecuted,
+		},
+		Order: lo1,
+	}
+
+	metaOrder2 := &db.MetaOrder{
+		MetaData: &db.OrderMetaData{
+			Status: order.OrderStatusCanceled,
+		},
+		Order: lo2,
+	}
+
+	metaOrder3 := &db.MetaOrder{
+		MetaData: &db.OrderMetaData{
+			Status: order.OrderStatusCanceled,
+		},
+		Order: lo3,
+	}
+
+	metaOrder4 := &db.MetaOrder{
+		MetaData: &db.OrderMetaData{
+			Status: order.OrderStatusBooked,
+		},
+		Order: lo4,
+	}
+
+	tCore.db.(*TDB).allOrders = []*db.MetaOrder{metaOrder1, metaOrder2, metaOrder3, metaOrder4}
+
+	if tCore.db.(*TDB).orderOrders == nil {
+		tCore.db.(*TDB).orderOrders = make(map[order.OrderID]*db.MetaOrder)
+	}
+	tCore.db.(*TDB).orderOrders[lo1.ID()] = metaOrder1
+	tCore.db.(*TDB).orderOrders[lo2.ID()] = metaOrder2
+	tCore.db.(*TDB).orderOrders[lo3.ID()] = metaOrder3
+	tCore.db.(*TDB).orderOrders[lo4.ID()] = metaOrder4
+
+	// Set up matches - lo1 has fills (executed), lo2 has fills (canceled), lo3 has no fills (canceled)
+	mid1 := ordertest.RandomMatchID()
+	mid2 := ordertest.RandomMatchID()
+	tCore.db.(*TDB).matchesByOrderID = map[order.OrderID][]*db.MetaMatch{
+		lo1.ID(): {
+			{
+				MetaData: &db.MatchMetaData{},
+				UserMatch: &order.UserMatch{
+					OrderID:  lo1.ID(),
+					MatchID:  mid1,
+					Quantity: 800,
+					Rate:     100,
+					Status:   order.MakerSwapCast,
+					Side:     order.Maker,
+					Address:  "some-address", // Non-empty to not be a cancel match
+				},
+			},
+		},
+		lo2.ID(): {
+			{
+				MetaData: &db.MatchMetaData{},
+				UserMatch: &order.UserMatch{
+					OrderID:  lo2.ID(),
+					MatchID:  mid2,
+					Quantity: 500,
+					Rate:     100,
+					Status:   order.MakerSwapCast,
+					Side:     order.Maker,
+					Address:  "some-address", // Non-empty to not be a cancel match
+				},
+			},
+		},
+		// lo3 has no matches
+	}
+
+	// Test: Filter for BOTH "executed" AND "canceled"
+	filter := &OrderFilter{
+		Statuses: []order.OrderStatus{order.OrderStatusExecuted, order.OrderStatusCanceled},
+	}
+
+	results, err := tCore.Orders(filter)
+	if err != nil {
+		t.Fatalf("Orders error: %v", err)
+	}
+
+	// Should return 3 orders:
+	// 1. Executed order (lo1)
+	// 2. Canceled with fills (lo2)
+	// 3. Canceled without fills (lo3) - Should NOT be filtered because user explicitly selected "canceled"
+	if len(results) != 3 {
+		t.Fatalf("Expected 3 orders (executed + all canceled), got %d", len(results))
+	}
+
+	// Verify the correct orders are returned
+	foundExecuted := false
+	foundCanceledWithFills := false
+	foundCanceledNoFills := false
+	for _, ord := range results {
+		if ord.ID.String() == lo1.ID().String() {
+			foundExecuted = true
+		}
+		if ord.ID.String() == lo2.ID().String() {
+			foundCanceledWithFills = true
+		}
+		if ord.ID.String() == lo3.ID().String() {
+			foundCanceledNoFills = true
+		}
+	}
+
+	if !foundExecuted {
+		t.Error("Did not find executed order in results")
+	}
+	if !foundCanceledWithFills {
+		t.Error("Did not find canceled order with fills in results")
+	}
+	if !foundCanceledNoFills {
+		t.Error("Did not find canceled order without fills in results - should NOT be filtered when user explicitly selects 'canceled'")
+	}
 }
