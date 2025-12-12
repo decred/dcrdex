@@ -506,16 +506,28 @@ func (tdb *TDB) Orders(filter *db.OrderFilter) ([]*db.MetaOrder, error) {
 		if filter.IncludePartial && hasExecutedFilter {
 			if ord.MetaData.Status == order.OrderStatusCanceled ||
 				ord.MetaData.Status == order.OrderStatusRevoked {
-				// Check if order has matches (indicating partial fill)
+				// Check if order has trade matches (non-cancel matches indicating partial fill)
 				oid := ord.Order.ID()
 				if tdb.matchesByOrderID != nil {
 					if matches := tdb.matchesByOrderID[oid]; len(matches) > 0 {
 						// Check for non-cancel trade matches
+						// A trade match has:
+						// - Non-empty Address (not a cancel match for maker)
+						// - If Status == MatchComplete, must have InitSig (not a cancel match for taker)
 						for _, m := range matches {
-							if m.UserMatch.Address != "" {
-								filtered = append(filtered, ord)
-								break
+							// Cancel match for maker has empty Address
+							if m.UserMatch.Address == "" {
+								continue
 							}
+							// Cancel match for taker has no InitSig and status MatchComplete
+							if m.UserMatch.Status == order.MatchComplete {
+								if m.MetaData == nil || len(m.MetaData.Proof.Auth.InitSig) == 0 {
+									continue
+								}
+							}
+							// Found a trade match - include this order
+							filtered = append(filtered, ord)
+							break
 						}
 					}
 				}
@@ -11691,4 +11703,3 @@ func TestCore_Orders_ExecutedAndCanceledFilter(t *testing.T) {
 		t.Error("Did not find canceled order without fills in results - should NOT be filtered when user explicitly selects 'canceled'")
 	}
 }
-
