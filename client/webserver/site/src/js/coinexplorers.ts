@@ -102,6 +102,8 @@ export const CoinExplorers: Record<number, Record<number, (cid: string) => strin
   60002: ethExplorers,
   8453: optimismExplorers,
   61000: optimismExplorers,
+  61001: optimismExplorers,
+  61002: optimismExplorers,
   3: { // doge
     [Mainnet]: (cid: string) => `https://dogeblocks.com/tx/${cid.split(':')[0]}`,
     [Testnet]: (cid: string) => `https://blockexplorer.one/dogecoin/testnet/tx/${cid.split(':')[0]}`,

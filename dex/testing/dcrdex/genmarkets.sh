@@ -59,8 +59,11 @@ DASH_ON=$?
 ~/dextest/eth/harness-ctl/alpha attach --exec 'eth.blockNumber' &> /dev/null
 ETH_ON=$?
 
-~/dextest/polygon/harness-ctl/alpha --exec 'eth.blockNumber' &> /dev/null
+~/dextest/polygon/harness-ctl/alpha attach --exec 'eth.blockNumber' &> /dev/null
 POLYGON_ON=$?
+
+~/dextest/base/harness-ctl/alpha attach --exec 'eth.blockNumber' &> /dev/null
+BASE_ON=$?
 
 m=$(pgrep -a monerod)
 XMR_ON=$?
@@ -221,12 +224,73 @@ EOF
 else echo "Polygon is not running. Configuring dcrdex markets without Polygon."
 fi
 
+if [ $BASE_ON -eq 0 ]; then
+    cat << EOF >> "${FILEPATH}"
+        },
+        {
+            "base": "BASE_simnet",
+            "quote": "DCR_simnet",
+            "lotSize": 100000000,
+            "rateStep": 1000,
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 2500
+        },
+        {
+            "base": "DCR_simnet",
+            "quote": "USDC.BASE_simnet",
+            "lotSize": 10000000,
+            "rateStep": 100,
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 500
+        },
+        {
+            "base": "DCR_simnet",
+            "quote": "USDT.BASE_simnet",
+            "lotSize": 1000000,
+            "rateStep": 10000,
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 4
+EOF
+else echo "Base is not running. Configuring dcrdex markets without Base."
+fi
+
 if [ $ETH_ON -eq 0 ] && [ $POLYGON_ON -eq 0 ]; then
     cat << EOF >> "${FILEPATH}"
         },
         {
             "base": "USDC.ETH_simnet",
             "quote": "USDC.POLYGON_simnet",
+            "lotSize": 1000000,
+            "rateStep": 10000,
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 4
+EOF
+fi
+
+if [ $ETH_ON -eq 0 ] && [ $BASE_ON -eq 0 ]; then
+    cat << EOF >> "${FILEPATH}"
+        },
+        {
+            "base": "USDC.ETH_simnet",
+            "quote": "USDC.BASE_simnet",
+            "lotSize": 1000000,
+            "rateStep": 10000,
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 4
+EOF
+fi
+
+if [ $POLYGON_ON -eq 0 ] && [ $BASE_ON -eq 0 ]; then
+    cat << EOF >> "${FILEPATH}"
+        },
+        {
+            "base": "USDC.POLYGON_simnet",
+            "quote": "USDC.BASE_simnet",
             "lotSize": 1000000,
             "rateStep": 10000,
             "epochDuration": ${EPOCH_DURATION},
@@ -432,13 +496,9 @@ fi # end if ETH_ON
 
 if [ $POLYGON_ON -eq 0 ]; then
 POLYGON_CONFIG_PATH=${TEST_ROOT}/polygon.conf
-POLYGON_IPC_FILE=${TEST_ROOT}/polygon/alpha/bor/bor.ipc
 
 cat > $POLYGON_CONFIG_PATH <<EOF
-ws://localhost:34985 , 2000
-# comments are respected
-; http://localhost:48297
-${POLYGONf_IPC_FILE},2
+ws://localhost:34983 , 2000
 EOF
 
 cat << EOF >> "${FILEPATH}"
@@ -463,6 +523,36 @@ cat << EOF >> "${FILEPATH}"
             "swapConf": 2
 EOF
 fi # end if POLYGON_ON
+
+if [ $BASE_ON -eq 0 ]; then
+BASE_CONFIG_PATH=${TEST_ROOT}/base.conf
+
+cat > $BASE_CONFIG_PATH <<EOF
+ws://localhost:39557 , 2000
+EOF
+
+cat << EOF >> "${FILEPATH}"
+         },
+        "BASE_simnet": {
+            "bip44symbol": "base",
+            "network": "simnet",
+            "maxFeeRate": 200,
+            "swapConf": 2,
+            "configPath": "$BASE_CONFIG_PATH"
+        },
+        "USDC.BASE_simnet": {
+            "bip44symbol": "usdc.base",
+            "network": "simnet",
+            "maxFeeRate": 200,
+            "swapConf": 2
+        },
+        "USDT.BASE_simnet": {
+            "bip44symbol": "usdt.base",
+            "network": "simnet",
+            "maxFeeRate": 200,
+            "swapConf": 2
+EOF
+fi # end if BASE_ON
 
 if [ $DOGE_ON -eq 0 ]; then
     cat << EOF >> "${FILEPATH}"

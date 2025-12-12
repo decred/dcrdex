@@ -5,8 +5,6 @@ package polygon
 
 import (
 	"fmt"
-	"os/user"
-	"path/filepath"
 	"slices"
 	"strconv"
 
@@ -124,8 +122,7 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Networ
 	var defaultProviders []string
 	switch net {
 	case dex.Simnet:
-		u, _ := user.Current()
-		defaultProviders = []string{filepath.Join(u.HomeDir, "dextest", "polygon", "alpha", "bor", "bor.ipc")}
+		defaultProviders = []string{"http://127.0.0.1:48296"}
 	case dex.Testnet:
 		defaultProviders = []string{
 			"https://rpc-amoy.polygon.technology",
