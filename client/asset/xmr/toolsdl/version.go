@@ -24,7 +24,7 @@ type moneroVersionV0 struct {
 func newMoneroVersionFromParts(sys, maj, min, patch string) (*moneroVersionV0, error) {
 	if sys != "v0" {
 		// Too much change - they did not change 'v0.' for a decade or more.
-		// So this needs investigating further
+		// So this change needs investigating further
 		return nil, fmt.Errorf("system version has changed from 'v0' to '%s'", sys)
 	}
 	v1, err := strconv.ParseUint(maj, 10, 8)
@@ -48,6 +48,15 @@ func newMoneroVersionFromParts(sys, maj, min, patch string) (*moneroVersionV0, e
 	return m, nil
 }
 
+func moneroVersionZeroV0() *moneroVersionV0 {
+	return &moneroVersionV0{
+		sys:   "v0",
+		major: 0,
+		minor: 0,
+		patch: 0,
+	}
+}
+
 func newMoneroVersionDir(moneroToolsDir string) (*moneroVersionV0, error) {
 	tkns := strings.Split(moneroToolsDir, Dash)
 	lenTkns := len(tkns)
@@ -62,7 +71,7 @@ func newMoneroVersionDir(moneroToolsDir string) (*moneroVersionV0, error) {
 	parts := strings.SplitN(lastTkn, Dot, 4)
 	lenParts := len(parts)
 	if lenParts < 4 {
-		return nil, fmt.Errorf("incorrect number of parts: %d expected at least 4", lenTkns)
+		return nil, fmt.Errorf("incorrect number of parts: %d expected at least 4", lenParts)
 	}
 	return newMoneroVersionFromParts(parts[0], parts[1], parts[2], parts[3])
 }

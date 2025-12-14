@@ -32,12 +32,30 @@ import (
 //
 // That file (tar/bz2 or zip) is checked against it's sha256 hash. If correct the file is
 // decompressed and the 2 specific binaries above are extracted to the user directory
-// from where they are subsequently run.
+// from where they can be subsequently run.
+
+// This is the relevant part of hashes.txt:
+//
+// ## CLI
+// 7c2ad18ca3a1ad5bc603630ca935a753537a38a803e98d645edd6a3b94a5f036  monero-android-armv7-v0.18.4.4.tar.bz2
+// eb81b71f029884ab5fec76597be583982c95fd7dc3fc5f5083a422669cee311e  monero-android-armv8-v0.18.4.4.tar.bz2
+// bc539178df23d1ae8b69569d9c328b5438ae585c0aacbebe12d8e7d387a745b0  monero-freebsd-x64-v0.18.4.4.tar.bz2
+// 2040dc22748ef39ed8a755324d2515261b65315c67b91f449fa1617c5978910b  monero-linux-armv7-v0.18.4.4.tar.bz2
+// b9daede195a24bdd05bba68cb5cb21e42c2e18b82d4d134850408078a44231c5  monero-linux-armv8-v0.18.4.4.tar.bz2
+// c939ea6e8002798f24a56ac03cbfc4ff586f70d7d9c3321b7794b3bcd1fa4c45  monero-linux-riscv64-v0.18.4.4.tar.bz2
+// 7fe45ee9aade429ccdcfcad93b905ba45da5d3b46d2dc8c6d5afc48bd9e7f108  monero-linux-x64-v0.18.4.4.tar.bz2
+// 8c174b756e104534f3d3a69fe68af66d6dc4d66afa97dfe31735f8d069d20570  monero-linux-x86-v0.18.4.4.tar.bz2
+// 645e9bbae0275f555b2d72a9aa30d5f382df787ca9528d531521750ce2da9768  monero-mac-armv8-v0.18.4.4.tar.bz2
+// af3d98f09da94632db3e2f53c62cc612e70bf94aa5942d2a5200b4393cd9c842  monero-mac-x64-v0.18.4.4.tar.bz2
+// 7eb3b87a105b3711361dd2b3e492ad14219d21ed8fd3dd726573a6cbd96e83a6  monero-win-x64-v0.18.4.4.zip
+// a148a2bd2b14183fb36e2cf917fce6f33fb687564db2ed53193b8432097ab398  monero-win-x86-v0.18.4.4.zip
+// 84570eee26238d8f686605b5e31d59569488a3406f32e7045852de91f35508a2  monero-source-v0.18.4.4.tar.bz2
+// #
 
 const (
 	HashesLink           = "https://www.getmonero.org/downloads/hashes.txt"
 	MoneroHashesFilename = "hashes.txt"
-	DexMoneroToolsPath   = ".dex-monero-tools"
+	DexMoneroToolsPath   = ".dexc/share/monero-tools"
 )
 
 func getToolsBasePath() (string, error) {
@@ -96,8 +114,12 @@ func (d *Download) SetLogger(logger dex.Logger) {
 var ErrNoLocalVersion = errors.New("cannot find current version in local tools path")
 var ErrNoRemoteVersion = errors.New("cannot find appropriate tools version in hashes.txt")
 
-// GetCurrentLocalToolsDir retreives latest downloaded and running version directory
-// from ToolsPath.
+// GetCurrentLocalToolsDir retrieves latest downloaded and running version directory
+// from ToolsPath. Returns full path, dir. If the dir does not exist ErrNoLocalVersion
+// is returned.
+//
+// It also checks for multiple dir versions. However it does not check explicitly for
+// directories for a different os/arch which I have only created in testing.
 func (d *Download) GetCurrentLocalToolsDir() (string, string, error) {
 	toolsPath, err := getToolsBasePath()
 	if err != nil {
@@ -107,22 +129,83 @@ func (d *Download) GetCurrentLocalToolsDir() (string, string, error) {
 	if err != nil {
 		return "", "", ErrNoLocalVersion
 	}
+
+	hasMoneroBinaries := func(dirPath string) bool {
+		var gotCli, gotRpc bool
+		entries, _ := os.ReadDir(dirPath)
+		for _, entry := range entries {
+			switch entry.Name() {
+			case "monero-wallet-cli":
+				gotCli = true
+			case "monero-wallet-rpc":
+				gotRpc = true
+			}
+		}
+		return gotCli && gotRpc
+	}
+
+	var numDirs = 0
+	var dirs []os.DirEntry
 	for _, entry := range entries {
 		if entry.IsDir() {
-			_, ok := strings.CutPrefix(entry.Name(), "monero")
-			if ok {
-				return filepath.Join(toolsPath, entry.Name()), entry.Name(), nil
+			numDirs++
+			if entry.IsDir() && strings.HasPrefix(entry.Name(), "monero") {
+				dirs = append(dirs, entry)
 			}
 		}
 	}
+	if numDirs == 0 {
+		return "", "", ErrNoLocalVersion
+	}
+
+	if numDirs == 1 {
+		dirPath := filepath.Join(toolsPath, dirs[0].Name())
+		if hasMoneroBinaries(dirPath) {
+			return dirPath, dirs[0].Name(), nil
+		}
+		return "", "", ErrNoLocalVersion
+	}
+
+	// >1 dir
+
+	// find the one dir that is most up to date and which has monero binaries
+	type latestVer struct {
+		mv      *moneroVersionV0
+		dirname string
+	}
+	latest := &latestVer{
+		mv:      moneroVersionZeroV0(), // v0.0.0.0
+		dirname: "",
+	}
+
+	laterFound := false
+	for _, dentry := range dirs {
+		mv, err := newMoneroVersionDir(dentry.Name())
+		if err != nil {
+			continue
+		}
+		rc := mv.compare(latest.mv)
+		fmt.Println("rc", rc)
+		dirPath := filepath.Join(toolsPath, dentry.Name())
+		if rc >= 0 && hasMoneroBinaries(dirPath) {
+			// this entry version is >= latest looked at .. and has monero binaries we need
+			latest.dirname = dentry.Name()
+			latest.mv = mv
+			laterFound = true
+		}
+	}
+	if laterFound {
+		return filepath.Join(toolsPath, latest.dirname), latest.dirname, nil
+	}
+
 	return "", "", ErrNoLocalVersion
 }
 
 // ========================================
 
-// GetLatestRemoteCanonicalVersion downloads hashes.txt from getmonero.org and
+// getLatestRemoteCanonicalVersion downloads hashes.txt from getmonero.org and
 // checks it's version.
-func (d *Download) GetLatestRemoteCanonicalVersion(ctx context.Context) (*moneroVersionV0, error) {
+func (d *Download) getLatestRemoteCanonicalVersion(ctx context.Context) (*moneroVersionV0, error) {
 	d.m = getMachine()
 
 	hashFilePath, err := downloadHashesFile(ctx)
@@ -153,10 +236,50 @@ func (d *Download) GetLatestRemoteCanonicalVersion(ctx context.Context) (*monero
 
 // ========================================
 
+func (d *Download) latestToolsNeeded(ctx context.Context) (string, bool, error) {
+	// get latest local if any
+	localToolsDir, dir, err := d.GetCurrentLocalToolsDir()
+	if err != nil {
+		if errors.Is(err, ErrNoLocalVersion) {
+			return "", true, nil
+		}
+		return "", false, err
+	}
+	localVer, err := newMoneroVersionDir(dir)
+	if err != nil {
+		return "", false, err
+	}
+	// get latest remote if gettable ..
+	remVer, err := d.getLatestRemoteCanonicalVersion(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	rc := remVer.compare(localVer)
+	if rc > 0 {
+		// remote version higher
+		return localToolsDir, true, nil
+	}
+	return localToolsDir, false, nil
+}
+
+// ========================================
+
 // Run performs a full download and check of the latest canonical version of the
 // monero-wallet-cli & monero-wallet-rpc tools and installs in ToolsDir if valid.
 func (d *Download) Run(ctx context.Context) (string, error) {
 	d.m = getMachine()
+
+	// tools status check:
+	//  - do we already have latest good tools version locally
+	//  - is a higher version available remotely & thus 'needed'
+	localToolsDir, needed, err := d.latestToolsNeeded(ctx)
+	if err != nil {
+		return "", err
+	}
+	if !needed {
+		return localToolsDir, nil
+	}
+
 	d.cleanAll()
 
 	hashesCtx, hashesCancel := context.WithTimeout(context.Background(), 15*time.Second)

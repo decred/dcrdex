@@ -136,7 +136,7 @@ func (d *Driver) Create(cwp *asset.CreateWalletParams) error {
 func downloadTools(log dex.Logger) (string, error) {
 	dl := &toolsdl.Download{}
 	dl.SetLogger(log)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute) // HTTP context, time 4..5 x testing
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	return dl.Run(ctx)
 }

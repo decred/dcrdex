@@ -1,4 +1,4 @@
-//go:build xmrdl
+//////go:build xmrdl
 
 package toolsdl
 
@@ -39,7 +39,7 @@ func TestGetCurrentLocalToolsDir(t *testing.T) {
 func TestGetLatestCanonicalVersion(t *testing.T) {
 	dl := new(Download)
 	dl.SetLogger(dex.StdOutLogger("Test", slog.LevelTrace))
-	mv, err := dl.GetLatestRemoteCanonicalVersion(context.Background())
+	mv, err := dl.getLatestRemoteCanonicalVersion(context.Background())
 	if err != nil {
 		if errors.Is(err, ErrNoRemoteVersion) {
 			// bad - ask for alternative on IRC
