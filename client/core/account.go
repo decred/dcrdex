@@ -68,7 +68,7 @@ func (c *Core) ToggleAccountStatus(pw []byte, host string, disable bool) error {
 
 	if disable {
 		// Check active orders or bonds.
-		if dc.hasActiveOrders() {
+		if c.hasActiveOrders(host) {
 			return errors.New("cannot disable account with active orders")
 		}
 
@@ -364,7 +364,7 @@ func (c *Core) UpdateDEXHost(oldHost, newHost string, appPW []byte, certI any) (
 		return nil, err
 	}
 
-	if oldDc.hasActiveOrders() {
+	if c.hasActiveOrders(oldHost) {
 		return nil, fmt.Errorf("cannot update host while dex has active orders")
 	}
 

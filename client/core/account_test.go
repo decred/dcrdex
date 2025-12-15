@@ -61,7 +61,7 @@ func TestAccountExport(t *testing.T) {
 
 func TestToggleAccountStatus(t *testing.T) {
 	activeTrades := map[order.OrderID]*trackedTrade{
-		{}: {metaData: &db.OrderMetaData{Status: order.OrderStatusBooked}},
+		{}: {metaData: &db.OrderMetaData{Status: order.OrderStatusBooked}, dc: &dexConnection{acct: &dexAccount{host: tDexHost}}},
 	}
 
 	tests := []struct {
@@ -124,7 +124,7 @@ func TestToggleAccountStatus(t *testing.T) {
 		rig.db.disabledHost = nil
 		rig.db.disableAccountErr = test.disableAcctErr
 		tCore.connMtx.Lock()
-		tCore.conns[tDexHost].trades = test.activeTrades
+		tCore.trades = test.activeTrades
 
 		if test.loseConns {
 			// Lose the dexConnection
