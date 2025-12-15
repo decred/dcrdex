@@ -57,7 +57,7 @@ func moneroVersionZeroV0() *moneroVersionV0 {
 	}
 }
 
-func newMoneroVersionDir(moneroToolsDir string) (*moneroVersionV0, error) {
+func newMoneroVersionFromDir(moneroToolsDir string) (*moneroVersionV0, error) {
 	tkns := strings.Split(moneroToolsDir, Dash)
 	lenTkns := len(tkns)
 	if lenTkns < 3 || lenTkns > 4 {
@@ -110,7 +110,20 @@ func (m *moneroVersionV0) compare(other *moneroVersionV0) int {
 	return 0
 }
 
+// This changes when v0.18.x.x changes to v0.19.x.x which will invalidate v0.19.x.x
+// Consider making a policy object that can be updated via json file.
+func (m *moneroVersionV0) majorsEqual(other *moneroVersionV0) bool {
+	if m.major > other.major {
+		return false
+	}
+	if m.major < other.major {
+		return false
+	}
+	return true
+}
+
+// valid returns true if m >= minimumVersion and major version v0.18.x.x
 func (m *moneroVersionV0) valid() bool {
 	c := m.compare(minimumVersion)
-	return c >= 0
+	return c >= 0 && m.majorsEqual(minimumVersion)
 }

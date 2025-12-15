@@ -57,7 +57,7 @@ type xmrRpc struct {
 	syncing          atomic.Bool
 }
 
-func newXmrRpc(cfg *asset.WalletConfig, settings *configSettings, network dex.Network, toolsDir string, logger dex.Logger) (*xmrRpc, error) {
+func newXmrRpc(cfg *asset.WalletConfig, network dex.Network, toolsDir string, logger dex.Logger) (*xmrRpc, error) {
 	isLocalAddress := func(address string) (bool, error) {
 		parsedURL, err := url.Parse(address)
 		if err != nil {

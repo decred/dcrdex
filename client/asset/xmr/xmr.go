@@ -113,7 +113,7 @@ func (d *Driver) Create(cwp *asset.CreateWalletParams) error {
 		return fmt.Errorf("create entered but wallet files already exist")
 	}
 
-	toolsDir, err := downloadTools(cwp.Logger)
+	toolsDir, err := downloadTools(cwp.Logger, cwp.DataDir)
 	if err != nil {
 		return err
 	}
@@ -133,17 +133,21 @@ func (d *Driver) Create(cwp *asset.CreateWalletParams) error {
 }
 
 // downloadTools gets the latest tools and clears any remaining older tools.
-func downloadTools(log dex.Logger) (string, error) {
-	dl := &toolsdl.Download{}
-	dl.SetLogger(log)
+func downloadTools(log dex.Logger, dataDir string) (string, error) {
+	dl := &toolsdl.Download{
+		DataDir: dataDir,
+		Log:     log,
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	return dl.Run(ctx)
 }
 
 // getToolsDir gets the current tools full-path and dir
-func getToolsDir() (string, string, error) {
-	dl := &toolsdl.Download{}
+func getToolsDir(dataDir string) (string, string, error) {
+	dl := &toolsdl.Download{
+		DataDir: dataDir,
+	}
 	return dl.GetCurrentLocalToolsDir()
 }
 
@@ -184,12 +188,12 @@ func newWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		return nil, fmt.Errorf("invalid fee priority %d", feePriority)
 	}
 
-	toolsDir, _, err := getToolsDir()
+	toolsDir, _, err := getToolsDir(cfg.DataDir)
 	if err != nil {
 		return nil, err
 	}
 
-	xmrpc, err := newXmrRpc(cfg, configSettings, network, toolsDir, logger)
+	xmrpc, err := newXmrRpc(cfg, network, toolsDir, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -205,7 +209,6 @@ func newWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 }
 
 type configSettings struct {
-	CliToolsDir    string `ini:"toolsdir"`
 	FeePriorityStr string `ini:"feepriority"`
 }
 
