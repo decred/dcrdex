@@ -7,7 +7,7 @@
 # set -ex
 
 source pkg/common.sh
-VER="1.0.4-pre" # pre, beta, rc1, etc.
+VER="1.1.0-pre" # pre, beta, rc1, etc.
 
 # A directory containing metadata files
 SRC_DIR="./src"
