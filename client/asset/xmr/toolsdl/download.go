@@ -1,5 +1,3 @@
-//////////////////////////////////////////////////////////////////////////go:build xmrlive
-
 package toolsdl
 
 import (
@@ -51,12 +49,15 @@ import (
 // a148a2bd2b14183fb36e2cf917fce6f33fb687564db2ed53193b8432097ab398  monero-win-x86-v0.18.4.4.zip
 // 84570eee26238d8f686605b5e31d59569488a3406f32e7045852de91f35508a2  monero-source-v0.18.4.4.tar.bz2
 // #
+//
+// A hashedZip struct (below) represents one line '[sha hash] [monero-<os>-<arch>-<version>.<extension>]'
+// from the above snippet.
 
 const (
-	HashesLink           = "https://www.getmonero.org/downloads/hashes.txt"
-	MoneroHashesFilename = "hashes.txt"
-	ShareDir             = "share"
-	MoneroToolsDir       = "monero-tools"
+	HashesLink     = "https://www.getmonero.org/downloads/hashes.txt"
+	HashesFilename = "hashes.txt"
+	ShareDir       = "share"
+	MoneroToolsDir = "monero-tools"
 )
 
 type machine struct {
@@ -79,8 +80,7 @@ const (
 	Dot               = "."
 )
 
-// represents a '[sha hash] [monero-<os>-<arch>-<version>.<extension>]' line
-// from getmonero.org/downloads/hashes.txt
+// See Also: relevant part of hashes.txt above.
 type hashedZip struct {
 	hash     string
 	zip      string
@@ -101,8 +101,18 @@ type Download struct {
 	z       hashedZips
 }
 
+// getToolsBasePath gets --appdir/defaultApplicationDirectory back from DataDir
+// since we only have DataDir. Then we add the required additional  directories
+// for tools base.
+//
+// This relies on (*Core),assetDataDirectory having created the specific extra
+// three directories which we work back from so there are no validity checks.
 func (d *Download) getToolsBasePath() string {
-	return filepath.Join(d.DataDir, ShareDir, MoneroToolsDir)
+	dataDirPath := d.DataDir
+	assetdbDirPath := filepath.Dir(dataDirPath)
+	netDirPath := filepath.Dir(assetdbDirPath)
+	appDirPath := filepath.Dir(netDirPath)
+	return filepath.Join(appDirPath, ShareDir, MoneroToolsDir)
 }
 
 var ErrNoLocalVersion = errors.New("cannot find current version in local tools path")
@@ -113,7 +123,7 @@ var ErrNoRemoteVersion = errors.New("cannot find appropriate tools version in ha
 // is returned.
 //
 // It also checks for multiple dir versions. However it does not check explicitly for
-// directories for a different os/arch which I have only created in testing.
+// directories for a different os/arch which have only been created in testing.
 func (d *Download) GetCurrentLocalToolsDir() (string, string, error) {
 	toolsPath := d.getToolsBasePath()
 	entries, err := os.ReadDir(toolsPath)
@@ -169,7 +179,7 @@ func (d *Download) GetCurrentLocalToolsDir() (string, string, error) {
 		dirname: "",
 	}
 
-	laterFound := false
+	laterVersionFound := false
 	for _, dentry := range dirs {
 		mv, err := newMoneroVersionFromDir(dentry.Name())
 		if err != nil {
@@ -182,10 +192,10 @@ func (d *Download) GetCurrentLocalToolsDir() (string, string, error) {
 			// this entry version is >= latest looked at .. and has monero binaries we need
 			latest.dirname = dentry.Name()
 			latest.mv = mv
-			laterFound = true
+			laterVersionFound = true
 		}
 	}
-	if laterFound {
+	if laterVersionFound {
 		return filepath.Join(toolsPath, latest.dirname), latest.dirname, nil
 	}
 
@@ -236,6 +246,7 @@ func (d *Download) latestToolsNeeded(ctx context.Context) (string, bool, error) 
 	if err != nil {
 		return "", false, err
 	}
+
 	// get latest remote if gettable ..
 	remVer, err := d.getLatestRemoteCanonicalVersion(ctx)
 	if err != nil {
@@ -266,6 +277,8 @@ func (d *Download) Run(ctx context.Context) (string, error) {
 	if !needed {
 		return localToolsDir, nil
 	}
+
+	// go...
 
 	d.cleanAll()
 
@@ -309,7 +322,8 @@ func (d *Download) Run(ctx context.Context) (string, error) {
 		d.cleanAll()
 		return "", err
 	}
-	d.Log.Trace("Checked file hash")
+	d.Log.Trace("Checked file hash, ok!")
+	d.Log.Trace("Starting to decompress zip ...")
 	toolsDir, isWin, err := d.decompressDownloadedFile(fp)
 	if err != nil {
 		d.cleanAll()
@@ -340,7 +354,7 @@ func (d *Download) downloadHashesFile(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	hashesFilePath := filepath.Join(toolsPath, MoneroHashesFilename)
+	hashesFilePath := filepath.Join(toolsPath, HashesFilename)
 	hashesFile, err := os.Create(hashesFilePath)
 	if err != nil {
 		return "", err
@@ -722,12 +736,12 @@ func (d *Download) cleanup() {
 		return
 	}
 	toolsPath := d.getToolsBasePath()
-	os.Remove(filepath.Join(toolsPath, MoneroHashesFilename))
+	os.Remove(filepath.Join(toolsPath, HashesFilename))                            // 'hashes.txt'
 	os.Remove(filepath.Join(toolsPath, zip.zip))                                   // '.tar.bz2'
 	os.Remove(filepath.Join(toolsPath, zip.zip[:strings.LastIndex(zip.zip, Dot)])) // '.tar'
 }
 
 func (d *Download) cleanAll() {
 	toolsPath := d.getToolsBasePath()
-	os.RemoveAll(filepath.Join(toolsPath, MoneroToolsDir))
+	os.RemoveAll(filepath.Join(toolsPath, MoneroToolsDir)) // 'monero-tools' dir.
 }

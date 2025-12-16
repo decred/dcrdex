@@ -1,4 +1,4 @@
-//////go:build xmrdl
+//go:build xmrdl
 
 package toolsdl
 
@@ -21,7 +21,7 @@ func TestMachine(t *testing.T) {
 }
 
 func TestGetCurrentLocalToolsDir(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := filepath.Join(t.TempDir(), "mainnet", "assetdb", "xmr")
 	dl := &Download{
 		DataDir: dataDir,
 		Log:     dex.StdOutLogger("Test", slog.LevelTrace),
@@ -42,7 +42,7 @@ func TestGetCurrentLocalToolsDir(t *testing.T) {
 }
 
 func TestGetLatestCanonicalVersion(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := filepath.Join(t.TempDir(), "mainnet", "assetdb", "xmr")
 	dl := &Download{
 		DataDir: dataDir,
 		Log:     dex.StdOutLogger("Test", slog.LevelTrace),
@@ -60,7 +60,7 @@ func TestGetLatestCanonicalVersion(t *testing.T) {
 }
 
 func TestToolsDownload(t *testing.T) {
-	dataDir := t.TempDir() // cleaned up by T
+	dataDir := filepath.Join(t.TempDir(), "netnet", "assetdb", "xmr")
 	dl := &Download{
 		DataDir: dataDir,
 		Log:     dex.StdOutLogger("Test", slog.LevelTrace),
@@ -101,4 +101,61 @@ func TestToolsDownload(t *testing.T) {
 	}
 
 	fmt.Println("Download success!")
+}
+
+func TestToolsBasePath(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	var dataDir = filepath.Join(home, ".dexc", "mainnet", "assetdb", "xmr")
+	dl := &Download{
+		DataDir: dataDir,
+	}
+	tbp := dl.getToolsBasePath()
+	if tbp != filepath.Join(home, ".dexc", "share", "monero-tools") {
+		t.Fatalf("bad tools path %s", tbp)
+	}
+
+	dataDir = filepath.Join(home, ".dexc", "simnet", "assetdb", "xmr")
+	dl = &Download{
+		DataDir: dataDir,
+	}
+	tbp = dl.getToolsBasePath()
+	if tbp != filepath.Join(home, ".dexc", "share", "monero-tools") {
+		t.Fatalf("bad tools path %s", tbp)
+	}
+
+	dataDir = filepath.Join(home, ".dexc", "testnet", "assetdb", "xmr")
+	dl = &Download{
+		DataDir: dataDir,
+	}
+	tbp = dl.getToolsBasePath()
+	if tbp != filepath.Join(home, ".dexc", "share", "monero-tools") {
+		t.Fatalf("bad tools path %s", tbp)
+	}
+
+	dataDir = filepath.Join(home, "testnet", "assetdb", "xmr")
+	dl = &Download{
+		DataDir: dataDir,
+	}
+	tbp = dl.getToolsBasePath()
+	if tbp != filepath.Join(home, "share", "monero-tools") {
+		t.Fatalf("bad tools path %s", tbp)
+	}
+
+	dataDir = filepath.Join(string(os.PathSeparator), "testnet", "assetdb", "xmr")
+	dl = &Download{
+		DataDir: dataDir,
+	}
+	tbp = dl.getToolsBasePath()
+	if tbp != filepath.Join(string(os.PathSeparator), "share", "monero-tools") {
+		t.Fatalf("bad tools path %s", tbp)
+	}
+
+	dataDir = filepath.Join(home, "dextest", "simnet-walletpair", "dexc2", "regtestsimnet", "assetdb", "xmr")
+	dl = &Download{
+		DataDir: dataDir,
+	}
+	tbp = dl.getToolsBasePath()
+	if tbp != filepath.Join(home, "dextest", "simnet-walletpair", "dexc2", "share", "monero-tools") {
+		t.Fatalf("bad tools path %s", tbp)
+	}
 }
