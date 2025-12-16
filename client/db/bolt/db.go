@@ -1657,65 +1657,55 @@ var errFound = errors.New("found")
 // A trade match has a non-empty Address (not a cancel match for maker)
 // and has InitSig (not a cancel match for taker).
 // Returns true immediately upon finding the first trade match (early exit).
-// Checks archived bucket first since canceled/revoked orders typically have
-// settled matches there. Also checks active bucket for matches still settling.
+// Only checks archived bucket since canceled/revoked orders have all their
+// matches settled and archived (active matches would keep the order live).
 func (db *BoltDB) hasTradeMatch(oid order.OrderID) bool {
 	found := false
-	err := db.matchesView(func(mb, archivedMB *bbolt.Bucket) error {
-		// Check archived bucket first (most common case for canceled orders)
-		for _, bucket := range []*bbolt.Bucket{archivedMB, mb} {
-			if bucket == nil {
-				continue
+	err := db.matchesView(func(_, archivedMB *bbolt.Bucket) error {
+		if archivedMB == nil {
+			return nil
+		}
+		return archivedMB.ForEach(func(k, _ []byte) error {
+			mBkt := archivedMB.Bucket(k)
+			if mBkt == nil {
+				return nil
 			}
-			isArchived := bucket == archivedMB
-			err := bucket.ForEach(func(k, _ []byte) error {
-				mBkt := bucket.Bucket(k)
-				if mBkt == nil {
-					return nil
-				}
-				// Check if match belongs to this order
-				if !bytes.Equal(mBkt.Get(orderIDKey), oid[:]) {
-					return nil
-				}
+			// Check if match belongs to this order
+			if !bytes.Equal(mBkt.Get(orderIDKey), oid[:]) {
+				return nil
+			}
 
-				// Decode match (lightweight - only UserMatch)
-				matchB := mBkt.Get(matchKey)
-				if matchB == nil {
-					return nil
-				}
-				match, _, err := order.DecodeMatch(matchB)
-				if err != nil {
-					db.log.Errorf("DecodeMatch error for match %x: %v", k, err)
-					return nil // Continue checking other matches
-				}
+			// Decode match (lightweight - only UserMatch)
+			matchB := mBkt.Get(matchKey)
+			if matchB == nil {
+				return nil
+			}
+			match, _, err := order.DecodeMatch(matchB)
+			if err != nil {
+				db.log.Errorf("DecodeMatch error for match %x: %v", k, err)
+				return nil // Continue checking other matches
+			}
 
-				// Cancel match for maker has empty Address
-				if match.Address == "" {
-					return nil
-				}
+			// Cancel match for maker has empty Address
+			if match.Address == "" {
+				return nil
+			}
 
-				// Cancel match for taker has no InitSig and status MatchComplete
-				// Only check this for archived bucket since inactive matches
-				// (MatchComplete without InitSig) should be archived
-				if isArchived && match.Status == order.MatchComplete {
-					proofB := mBkt.Get(proofKey)
-					if len(proofB) > 0 {
-						proof, _, err := dexdb.DecodeMatchProof(proofB)
-						if err == nil && len(proof.Auth.InitSig) == 0 {
-							return nil // Cancel match for taker
-						}
+			// Cancel match for taker has no InitSig and status MatchComplete
+			if match.Status == order.MatchComplete {
+				proofB := mBkt.Get(proofKey)
+				if len(proofB) > 0 {
+					proof, _, err := dexdb.DecodeMatchProof(proofB)
+					if err == nil && len(proof.Auth.InitSig) == 0 {
+						return nil // Cancel match for taker
 					}
 				}
-
-				// Found a trade match - early exit!
-				found = true
-				return errFound
-			})
-			if errors.Is(err, errFound) {
-				return errFound // Propagate to outer loop
 			}
-		}
-		return nil
+
+			// Found a trade match - early exit!
+			found = true
+			return errFound
+		})
 	})
 	if err != nil && !errors.Is(err, errFound) {
 		db.log.Errorf("hasTradeMatch error for order %s: %v", oid, err)
