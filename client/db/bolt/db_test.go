@@ -824,6 +824,9 @@ func TestIncludePartialFilter(t *testing.T) {
 	}
 
 	// Create a trade match for an order
+	// For match to be archived (inactive), it needs MatchConfirmed status.
+	// hasTradeMatch only checks archived bucket since canceled/revoked orders
+	// should have all matches settled.
 	makeTradeMatch := func(orderID order.OrderID) {
 		m := &db.MetaMatch{
 			MetaData: &db.MatchMetaData{
@@ -841,8 +844,8 @@ func TestIncludePartialFilter(t *testing.T) {
 				MatchID:  ordertest.RandomMatchID(),
 				Quantity: 1000,
 				Rate:     1e8,
-				Address:  "someaddress", // Non-empty address means not a cancel match for maker
-				Status:   order.MakerRedeemed,
+				Address:  "someaddress",        // Non-empty address means not a cancel match for maker
+				Status:   order.MatchConfirmed, // Inactive status -> stored in archived bucket
 				Side:     order.Maker,
 			},
 		}
