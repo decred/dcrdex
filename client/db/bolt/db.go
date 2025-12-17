@@ -1101,9 +1101,30 @@ func (db *BoltDB) Orders(orderFilter *dexdb.OrderFilter) (ords []*dexdb.MetaOrde
 
 	includeArchived := true
 	if len(orderFilter.Statuses) > 0 {
-		filters = append(filters, func(_ []byte, oBkt *bbolt.Bucket) bool {
+		filters = append(filters, func(oidB []byte, oBkt *bbolt.Bucket) bool {
 			status := order.OrderStatus(intCoder.Uint16(oBkt.Get(statusKey)))
-			return slices.Contains(orderFilter.Statuses, status)
+
+			// Direct status match
+			if slices.Contains(orderFilter.Statuses, status) {
+				return true
+			}
+
+			// Check for partially filled canceled/revoked orders
+			if orderFilter.IncludePartial {
+				// When filtering for "executed", include partially filled canceled/revoked
+				if slices.Contains(orderFilter.Statuses, order.OrderStatusExecuted) {
+					if status == order.OrderStatusCanceled || status == order.OrderStatusRevoked {
+						// Check if order has trade matches (partial fill)
+						var oid order.OrderID
+						copy(oid[:], oidB)
+						if db.hasTradeMatch(oid) {
+							return true
+						}
+					}
+				}
+			}
+
+			return false
 		})
 		includeArchived = false
 		for _, status := range orderFilter.Statuses {
@@ -1627,6 +1648,69 @@ func loadMatchBucket(mBkt *bbolt.Bucket, excludeCancels bool) (*dexdb.MetaMatch,
 		},
 		UserMatch: match,
 	}, nil
+}
+
+// errFound is used to break ForEach early when a match is found.
+var errFound = errors.New("found")
+
+// hasTradeMatch checks if an order has any non-cancel trade matches.
+// A trade match has a non-empty Address (not a cancel match for maker)
+// and has InitSig (not a cancel match for taker).
+// Returns true immediately upon finding the first trade match (early exit).
+// Only checks archived bucket since canceled/revoked orders have all their
+// matches settled and archived (active matches would keep the order live).
+func (db *BoltDB) hasTradeMatch(oid order.OrderID) bool {
+	found := false
+	err := db.matchesView(func(_, archivedMB *bbolt.Bucket) error {
+		if archivedMB == nil {
+			return nil
+		}
+		return archivedMB.ForEach(func(k, _ []byte) error {
+			mBkt := archivedMB.Bucket(k)
+			if mBkt == nil {
+				return nil
+			}
+			// Check if match belongs to this order
+			if !bytes.Equal(mBkt.Get(orderIDKey), oid[:]) {
+				return nil
+			}
+
+			// Decode match (lightweight - only UserMatch)
+			matchB := mBkt.Get(matchKey)
+			if matchB == nil {
+				return nil
+			}
+			match, _, err := order.DecodeMatch(matchB)
+			if err != nil {
+				db.log.Errorf("DecodeMatch error for match %x: %v", k, err)
+				return nil // Continue checking other matches
+			}
+
+			// Cancel match for maker has empty Address
+			if match.Address == "" {
+				return nil
+			}
+
+			// Cancel match for taker has no InitSig and status MatchComplete
+			if match.Status == order.MatchComplete {
+				proofB := mBkt.Get(proofKey)
+				if len(proofB) > 0 {
+					proof, _, err := dexdb.DecodeMatchProof(proofB)
+					if err == nil && len(proof.Auth.InitSig) == 0 {
+						return nil // Cancel match for taker
+					}
+				}
+			}
+
+			// Found a trade match - early exit!
+			found = true
+			return errFound
+		})
+	})
+	if err != nil && !errors.Is(err, errFound) {
+		db.log.Errorf("hasTradeMatch error for order %s: %v", oid, err)
+	}
+	return found
 }
 
 // matchesView is a convenience function for reading from the match bucket.

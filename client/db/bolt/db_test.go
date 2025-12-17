@@ -788,6 +788,167 @@ func TestOrderFilters(t *testing.T) {
 	}
 }
 
+func TestIncludePartialFilter(t *testing.T) {
+	boltdb, shutdown := newTestDB(t)
+	defer shutdown()
+
+	acct := dbtest.RandomAccountInfo()
+	err := boltdb.CreateAccount(acct)
+	if err != nil {
+		t.Fatalf("CreateAccount error: %v", err)
+	}
+
+	base, quote := randU32(), randU32()
+
+	// Create orders with different statuses
+	makeOrder := func(status order.OrderStatus) *db.MetaOrder {
+		mord := &db.MetaOrder{
+			MetaData: &db.OrderMetaData{
+				Status: status,
+				Host:   acct.Host,
+				Proof:  db.OrderProof{DEXSig: randBytes(73)},
+			},
+			Order: &order.LimitOrder{
+				P: order.Prefix{
+					BaseAsset:  base,
+					QuoteAsset: quote,
+					ServerTime: time.Now(),
+				},
+			},
+		}
+		err := boltdb.UpdateOrder(mord)
+		if err != nil {
+			t.Fatalf("error inserting order: %v", err)
+		}
+		return mord
+	}
+
+	// Create a trade match for an order
+	// For match to be archived (inactive), it needs MatchConfirmed status.
+	// hasTradeMatch only checks archived bucket since canceled/revoked orders
+	// should have all matches settled.
+	makeTradeMatch := func(orderID order.OrderID) {
+		m := &db.MetaMatch{
+			MetaData: &db.MatchMetaData{
+				Proof: db.MatchProof{
+					Auth: db.MatchAuth{
+						InitSig: randBytes(73), // Non-empty InitSig means trade match
+					},
+				},
+				DEX:   acct.Host,
+				Base:  base,
+				Quote: quote,
+			},
+			UserMatch: &order.UserMatch{
+				OrderID:  orderID,
+				MatchID:  ordertest.RandomMatchID(),
+				Quantity: 1000,
+				Rate:     1e8,
+				Address:  "someaddress",        // Non-empty address means not a cancel match for maker
+				Status:   order.MatchConfirmed, // Inactive status -> stored in archived bucket
+				Side:     order.Maker,
+			},
+		}
+		err := boltdb.UpdateMatch(m)
+		if err != nil {
+			t.Fatalf("error inserting match: %v", err)
+		}
+	}
+
+	// Create a cancel match for an order (empty address for maker)
+	makeCancelMatch := func(orderID order.OrderID) {
+		m := &db.MetaMatch{
+			MetaData: &db.MatchMetaData{
+				Proof: db.MatchProof{},
+				DEX:   acct.Host,
+				Base:  base,
+				Quote: quote,
+			},
+			UserMatch: &order.UserMatch{
+				OrderID:  orderID,
+				MatchID:  ordertest.RandomMatchID(),
+				Quantity: 1000,
+				Rate:     1e8,
+				Address:  "", // Empty address means cancel match for maker
+				Status:   order.MatchComplete,
+				Side:     order.Maker,
+			},
+		}
+		err := boltdb.UpdateMatch(m)
+		if err != nil {
+			t.Fatalf("error inserting match: %v", err)
+		}
+	}
+
+	// Order 1: Executed (should always be included when filtering executed)
+	ord1 := makeOrder(order.OrderStatusExecuted)
+
+	// Order 2: Canceled with trade match (partially filled)
+	ord2 := makeOrder(order.OrderStatusCanceled)
+	makeTradeMatch(ord2.Order.ID())
+
+	// Order 3: Canceled without trade match (no fill)
+	ord3 := makeOrder(order.OrderStatusCanceled)
+	makeCancelMatch(ord3.Order.ID())
+
+	// Order 4: Revoked with trade match (partially filled)
+	ord4 := makeOrder(order.OrderStatusRevoked)
+	makeTradeMatch(ord4.Order.ID())
+
+	// Order 5: Revoked without trade match (no fill)
+	ord5 := makeOrder(order.OrderStatusRevoked)
+
+	// Test 1: Filter executed without IncludePartial - should only get executed order
+	ords, err := boltdb.Orders(&db.OrderFilter{
+		N:              10,
+		Statuses:       []order.OrderStatus{order.OrderStatusExecuted},
+		IncludePartial: false,
+	})
+	if err != nil {
+		t.Fatalf("Orders error: %v", err)
+	}
+	if len(ords) != 1 {
+		t.Fatalf("expected 1 order, got %d", len(ords))
+	}
+	if ords[0].Order.ID() != ord1.Order.ID() {
+		t.Fatalf("wrong order ID")
+	}
+
+	// Test 2: Filter executed with IncludePartial - should get executed + partially filled canceled/revoked
+	ords, err = boltdb.Orders(&db.OrderFilter{
+		N:              10,
+		Statuses:       []order.OrderStatus{order.OrderStatusExecuted},
+		IncludePartial: true,
+	})
+	if err != nil {
+		t.Fatalf("Orders error: %v", err)
+	}
+	// Should get: ord1 (executed), ord2 (canceled with trade), ord4 (revoked with trade)
+	if len(ords) != 3 {
+		t.Fatalf("expected 3 orders, got %d", len(ords))
+	}
+	orderIDs := make(map[order.OrderID]bool)
+	for _, o := range ords {
+		orderIDs[o.Order.ID()] = true
+	}
+	if !orderIDs[ord1.Order.ID()] {
+		t.Fatalf("missing executed order")
+	}
+	if !orderIDs[ord2.Order.ID()] {
+		t.Fatalf("missing partially filled canceled order")
+	}
+	if !orderIDs[ord4.Order.ID()] {
+		t.Fatalf("missing partially filled revoked order")
+	}
+	// Should NOT include ord3 (canceled with no trade) or ord5 (revoked with no trade)
+	if orderIDs[ord3.Order.ID()] {
+		t.Fatalf("should not include canceled order without trade match")
+	}
+	if orderIDs[ord5.Order.ID()] {
+		t.Fatalf("should not include revoked order without trade match")
+	}
+}
+
 func TestOrderChange(t *testing.T) {
 	boltdb, shutdown := newTestDB(t)
 	defer shutdown()

@@ -306,7 +306,7 @@ func (ord *OrderReader) StatusString() string {
 		if isLive {
 			return "settling"
 		}
-		if ord.Filled == 0 && ord.Type != order.CancelOrderType {
+		if ord.sumFrom(filledNonCancelFilter) == 0 && ord.Type != order.CancelOrderType {
 			return "no match"
 		}
 		return "executed"
@@ -314,10 +314,16 @@ func (ord *OrderReader) StatusString() string {
 		if isLive {
 			return "canceled/settling"
 		}
+		if ord.sumFrom(filledNonCancelFilter) > 0 {
+			return "canceled/partially filled"
+		}
 		return "canceled"
 	case order.OrderStatusRevoked:
 		if isLive {
 			return "revoked/settling"
+		}
+		if ord.sumFrom(filledNonCancelFilter) > 0 {
+			return "revoked/partially filled"
 		}
 		return "revoked"
 	}

@@ -1147,6 +1147,9 @@ type OrderFilter struct {
 		Base  uint32 `json:"baseID"`
 		Quote uint32 `json:"quoteID"`
 	} `json:"market"`
+	// IncludePartial will return canceled/revoked orders that have partial
+	// fills when OrderStatusExecuted is one of the Statuses.
+	IncludePartial bool `json:"includepartial"`
 }
 
 // Account holds data returned from AccountExport.
