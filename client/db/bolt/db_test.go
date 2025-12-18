@@ -813,6 +813,7 @@ func TestIncludePartialFilter(t *testing.T) {
 					BaseAsset:  base,
 					QuoteAsset: quote,
 					ServerTime: time.Now(),
+					Commit:     ordertest.RandomCommitment(),
 				},
 			},
 		}
