@@ -1358,6 +1358,7 @@ export default class MarketsPage extends BasePage {
     this.drawChartLines()
     if (!show || !adjusted || !order.qty) {
       page.orderPreview.textContent = ''
+      Doc.hide(page.orderPreviewFiat)
       this.drawChartLines()
       return
     }
@@ -1366,6 +1367,7 @@ export default class MarketsPage extends BasePage {
     const total = Doc.formatCoinValue(quoteQty, this.market.quoteUnitInfo)
 
     page.orderPreview.textContent = intl.prep(intl.ID_ORDER_PREVIEW, { total, asset: unit })
+    this.showFiatValue(this.market.quote.id, quoteQty, page.orderPreviewFiatValue)
     if (this.isSell()) this.preSell()
     else this.preBuy()
   }
