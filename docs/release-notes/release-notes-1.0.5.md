@@ -19,6 +19,6 @@ Please read the [v1.0.0 release notes](https://github.com/decred/dcrdex/releases
 
 43 files changed, 497 insertions(+), 482 deletions(-)
 
-- JamieHoldstock: +464, -475, total: -11
-- JoeGruffins: +87, -71, total: 16
-- JustinDo: +15, -5, total: 10
+- JamieHoldstock (@jholdstock): +464, -475, total: -11
+- JoeGruffins (@JoeGruffins): +87, -71, total: 16
+- JustinDo (@JustinBeBoy): +15, -5, total: 10
