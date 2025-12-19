@@ -2497,7 +2497,7 @@ func (dcr *ExchangeWallet) FundMultiOrder(mo *asset.MultiOrder, maxLock uint64) 
 	return dcr.fundMulti(maxLock, mo.Values, mo.FeeSuggestion, mo.MaxFeeRate, customCfg.Split, customCfg.SplitBuffer)
 }
 
-// fundOrder finds coins from a set of UTXOs for a specified value. This method
+// fundInternalWithUTXOs finds coins from a set of UTXOs for a specified value. This method
 // is the same as "fund", except the UTXOs must be passed in, and fundingMtx
 // must be held by the caller.
 func (dcr *ExchangeWallet) fundInternalWithUTXOs(utxos []*compositeUTXO, keep uint64, // leave utxos for this reserve amt
