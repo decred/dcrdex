@@ -195,11 +195,20 @@ func (sob *stringOrderbook) update(bids, asks [][]string) {
 
 // insertBid inserts a bid maintaining descending price order
 func (sob *stringOrderbook) insertBid(price, qty string) [][]string {
-	priceFloat, _ := strconv.ParseFloat(price, 64)
+	priceFloat, err := strconv.ParseFloat(price, 64)
+	if err != nil {
+		// If price parsing fails, append at end as fallback
+		// This should not happen with valid Bitget data, but we handle it gracefully
+		return append(sob.bids, []string{price, qty})
+	}
 	newBid := []string{price, qty}
 
 	for i, level := range sob.bids {
-		levelPrice, _ := strconv.ParseFloat(level[0], 64)
+		levelPrice, err := strconv.ParseFloat(level[0], 64)
+		if err != nil {
+			// Skip invalid price level and continue
+			continue
+		}
 		if priceFloat > levelPrice {
 			// Insert here
 			return append(sob.bids[:i], append([][]string{newBid}, sob.bids[i:]...)...)
@@ -211,11 +220,20 @@ func (sob *stringOrderbook) insertBid(price, qty string) [][]string {
 
 // insertAsk inserts an ask maintaining ascending price order
 func (sob *stringOrderbook) insertAsk(price, qty string) [][]string {
-	priceFloat, _ := strconv.ParseFloat(price, 64)
+	priceFloat, err := strconv.ParseFloat(price, 64)
+	if err != nil {
+		// If price parsing fails, append at end as fallback
+		// This should not happen with valid Bitget data, but we handle it gracefully
+		return append(sob.asks, []string{price, qty})
+	}
 	newAsk := []string{price, qty}
 
 	for i, level := range sob.asks {
-		levelPrice, _ := strconv.ParseFloat(level[0], 64)
+		levelPrice, err := strconv.ParseFloat(level[0], 64)
+		if err != nil {
+			// Skip invalid price level and continue
+			continue
+		}
 		if priceFloat < levelPrice {
 			// Insert here
 			return append(sob.asks[:i], append([][]string{newAsk}, sob.asks[i:]...)...)
@@ -402,7 +420,7 @@ func (b *bitgetOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error) 
 		}
 	}
 
-	acceptUpdate := func(update *bgtypes.BookUpdate, isSnapshot bool) bool {
+	acceptUpdate := func(update *bgtypes.BookUpdate) bool {
 		if !b.synced.Load() {
 			// Book is still syncing. Discard this update.
 			return true
@@ -428,7 +446,7 @@ func (b *bitgetOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error) 
 			}
 		}
 
-		if isSnapshot {
+		if update.IsSnapshot {
 			// Full snapshot: clear and replace entire orderbook
 			b.bookStrings.clear()
 		}
@@ -491,7 +509,7 @@ func (b *bitgetOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error) 
 		processUpdate := func(update *bgtypes.BookUpdate) bool {
 			syncMtx.Lock()
 			defer syncMtx.Unlock()
-			return acceptUpdate(update, update.IsSnapshot)
+			return acceptUpdate(update)
 		}
 
 		defer wg.Done()
@@ -1000,6 +1018,7 @@ func (bg *bitget) readCoins(coins []*bgtypes.CoinInfo) {
 
 			ui, err := asset.UnitInfo(assetID)
 			if err != nil {
+				// Asset ID not found in DEX - skip this coin
 				continue
 			}
 
@@ -1008,8 +1027,16 @@ func (bg *bitget) readCoins(coins []*bgtypes.CoinInfo) {
 			}
 
 			// Parse both deposit and withdrawal minimums
-			minDepositAmt, _ := strconv.ParseFloat(chain.MinDepositAmount, 64)
-			minWithdrawAmt, _ := strconv.ParseFloat(chain.MinWithdrawAmount, 64)
+			minDepositAmt, err := strconv.ParseFloat(chain.MinDepositAmount, 64)
+			if err != nil {
+				bg.log.Warnf("Failed to parse min deposit amount for %s: %v", coin.Coin, err)
+				minDepositAmt = 0
+			}
+			minWithdrawAmt, err := strconv.ParseFloat(chain.MinWithdrawAmount, 64)
+			if err != nil {
+				bg.log.Warnf("Failed to parse min withdraw amount for %s: %v", coin.Coin, err)
+				minWithdrawAmt = 0
+			}
 
 			// Use the MAXIMUM of deposit and withdrawal minimums
 			// This ensures we never transfer less than either minimum:
@@ -1022,7 +1049,9 @@ func (bg *bitget) readCoins(coins []*bgtypes.CoinInfo) {
 			var lotSize uint64 = 1
 			if chain.WithdrawIntegerMultiple != "" {
 				withdrawStep, err := strconv.ParseFloat(chain.WithdrawIntegerMultiple, 64)
-				if err == nil && withdrawStep > 0 {
+				if err != nil {
+					bg.log.Warnf("Failed to parse withdraw step for %s: %v", coin.Coin, err)
+				} else if withdrawStep > 0 {
 					lotSize = uint64(math.Round(withdrawStep * float64(ui.Conventional.ConversionFactor)))
 				}
 			}
@@ -1088,14 +1117,42 @@ func (bg *bitget) getMarkets(ctx context.Context) (map[string]*bgtypes.Market, e
 		}
 
 		dexMkt := dexMarkets[0]
-		bui, _ := asset.UnitInfo(dexMkt.BaseID)
-		qui, _ := asset.UnitInfo(dexMkt.QuoteID)
+		bui, err := asset.UnitInfo(dexMkt.BaseID)
+		if err != nil {
+			bg.log.Warnf("Failed to get unit info for base asset %d: %v", dexMkt.BaseID, err)
+			continue
+		}
+		qui, err := asset.UnitInfo(dexMkt.QuoteID)
+		if err != nil {
+			bg.log.Warnf("Failed to get unit info for quote asset %d: %v", dexMkt.QuoteID, err)
+			continue
+		}
 
-		minTradeAmount, _ := strconv.ParseFloat(sym.MinTradeAmount, 64)
-		maxTradeAmount, _ := strconv.ParseFloat(sym.MaxTradeAmount, 64)
-		minTradeUSDT, _ := strconv.ParseFloat(sym.MinTradeUSDT, 64)
-		pricePrecision, _ := strconv.Atoi(sym.PricePrecision)
-		quantityPrecision, _ := strconv.Atoi(sym.QuantityPrecision)
+		minTradeAmount, err := strconv.ParseFloat(sym.MinTradeAmount, 64)
+		if err != nil {
+			bg.log.Warnf("Failed to parse min trade amount for %s: %v", sym.Symbol, err)
+			minTradeAmount = 0
+		}
+		maxTradeAmount, err := strconv.ParseFloat(sym.MaxTradeAmount, 64)
+		if err != nil {
+			bg.log.Warnf("Failed to parse max trade amount for %s: %v", sym.Symbol, err)
+			maxTradeAmount = 0
+		}
+		minTradeUSDT, err := strconv.ParseFloat(sym.MinTradeUSDT, 64)
+		if err != nil {
+			bg.log.Warnf("Failed to parse min trade USDT for %s: %v", sym.Symbol, err)
+			minTradeUSDT = 0
+		}
+		pricePrecision, err := strconv.Atoi(sym.PricePrecision)
+		if err != nil {
+			bg.log.Warnf("Failed to parse price precision for %s: %v", sym.Symbol, err)
+			pricePrecision = 8 // Default to 8 decimal places
+		}
+		quantityPrecision, err := strconv.Atoi(sym.QuantityPrecision)
+		if err != nil {
+			bg.log.Warnf("Failed to parse quantity precision for %s: %v", sym.Symbol, err)
+			quantityPrecision = 8 // Default to 8 decimal places
+		}
 
 		// Calculate step sizes
 		priceStep := calc.MessageRateAlt(math.Pow10(-pricePrecision), bui.Conventional.ConversionFactor, qui.Conventional.ConversionFactor)
@@ -1501,8 +1558,21 @@ func (bg *bitget) handleAccountUpdate(msg *bgtypes.WsDataMessage) {
 		}
 
 		// Update balance cache
-		available, _ := strconv.ParseFloat(accountData.Available, 64)
-		frozen, _ := strconv.ParseFloat(accountData.Frozen, 64)
+		// Empty strings should not occur for balances, but handle gracefully
+		available, err := strconv.ParseFloat(accountData.Available, 64)
+		if err != nil {
+			if accountData.Available != "" {
+				bg.log.Warnf("Failed to parse available balance for %s: %v", accountData.Coin, err)
+			}
+			available = 0
+		}
+		frozen, err := strconv.ParseFloat(accountData.Frozen, 64)
+		if err != nil {
+			if accountData.Frozen != "" {
+				bg.log.Warnf("Failed to parse frozen balance for %s: %v", accountData.Coin, err)
+			}
+			frozen = 0
+		}
 
 		// Note: Frozen = funds locked in open orders
 		// Locked = funds locked for other purposes (fiat merchant, etc.)
@@ -1519,6 +1589,8 @@ func (bg *bitget) handleAccountUpdate(msg *bgtypes.WsDataMessage) {
 		for _, assetID := range assetIDs {
 			ui, err := asset.UnitInfo(assetID)
 			if err != nil {
+				// Asset ID not found in DEX - skip this asset
+				bg.log.Tracef("Asset ID %d not found in DEX unit info: %v", assetID, err)
 				continue
 			}
 
@@ -1583,8 +1655,16 @@ func (bg *bitget) processOrderUpdate(order *bgtypes.WsOrderData) {
 	complete := order.Status == bitgetOrderStatusFullFill || order.Status == bitgetOrderStatusCancelled
 
 	// Use AccBaseVolume (cumulative total) instead of BaseVolume (latest fill only)
-	accBaseQty, _ := strconv.ParseFloat(order.AccBaseVolume, 64)
-	avgPrice, _ := strconv.ParseFloat(order.PriceAvg, 64)
+	accBaseQty, err := strconv.ParseFloat(order.AccBaseVolume, 64)
+	if err != nil {
+		bg.log.Warnf("Failed to parse accumulated base volume for order %s: %v", order.OrderId, err)
+		accBaseQty = 0
+	}
+	avgPrice, err := strconv.ParseFloat(order.PriceAvg, 64)
+	if err != nil {
+		bg.log.Warnf("Failed to parse average price for order %s: %v", order.OrderId, err)
+		avgPrice = 0
+	}
 
 	// Calculate quote volume from cumulative base * average price
 	accQuoteQty := accBaseQty * avgPrice
@@ -2084,7 +2164,10 @@ func (bg *bitget) handleOrderbookUpdate(msg *bgtypes.WsDataMessage) {
 
 		// Update timestamp tracking
 		if bookData.Ts != "" {
-			if ts, err := strconv.ParseInt(bookData.Ts, 10, 64); err == nil {
+			ts, err := strconv.ParseInt(bookData.Ts, 10, 64)
+			if err != nil {
+				bg.log.Warnf("%s: Failed to parse timestamp %s: %v", symbol, bookData.Ts, err)
+			} else {
 				book.lastUpdateTs.Store(ts)
 			}
 		}
@@ -2112,6 +2195,21 @@ func (bg *bitget) handleOrderbookUpdate(msg *bgtypes.WsDataMessage) {
 	}
 }
 
+// parseFloatOrZero parses a string to float64, returning 0 for empty strings
+// and logging warnings only for actual parsing errors (non-empty strings that fail to parse)
+func parseFloatOrZero(s string, fieldName, symbol string, log dex.Logger) float64 {
+	if s == "" {
+		// Empty strings are expected for some ticker fields (e.g., new markets, no recent activity)
+		return 0
+	}
+	val, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		log.Warnf("Failed to parse %s for %s: %v", fieldName, symbol, err)
+		return 0
+	}
+	return val
+}
+
 // convertStringArrayToFloat converts [][]string to [][]float64
 func convertStringArrayToFloat(arr [][]string) [][]float64 {
 	result := make([][]float64, 0, len(arr))
@@ -2119,8 +2217,16 @@ func convertStringArrayToFloat(arr [][]string) [][]float64 {
 		if len(item) < 2 {
 			continue
 		}
-		price, _ := strconv.ParseFloat(item[0], 64)
-		qty, _ := strconv.ParseFloat(item[1], 64)
+		price, err := strconv.ParseFloat(item[0], 64)
+		if err != nil {
+			// Skip invalid price - this should not happen with valid Bitget data
+			continue
+		}
+		qty, err := strconv.ParseFloat(item[1], 64)
+		if err != nil {
+			// Skip invalid quantity - this should not happen with valid Bitget data
+			continue
+		}
 		result = append(result, []float64{price, qty})
 	}
 	return result
@@ -2237,6 +2343,8 @@ func (bg *bitget) Balances(ctx context.Context) (map[uint32]*ExchangeBalance, er
 	for assetID, bal := range bg.balances {
 		assetConfig, err := bitgetAssetCfg(assetID)
 		if err != nil {
+			// Asset ID not found in Bitget config - skip this balance
+			bg.log.Tracef("Asset ID %d not found in Bitget config: %v", assetID, err)
 			continue
 		}
 		balances[assetConfig.assetID] = bal
@@ -2284,8 +2392,21 @@ func (bg *bitget) refreshBalances(ctx context.Context) error {
 				continue
 			}
 
-			available, _ := strconv.ParseFloat(bal.Available, 64)
-			locked, _ := strconv.ParseFloat(bal.Locked, 64)
+			// Parse balances - empty strings should not occur for balances, but handle gracefully
+			available, err := strconv.ParseFloat(bal.Available, 64)
+			if err != nil {
+				if bal.Available != "" {
+					bg.log.Warnf("Failed to parse available balance for %s: %v", bal.Coin, err)
+				}
+				available = 0
+			}
+			locked, err := strconv.ParseFloat(bal.Locked, 64)
+			if err != nil {
+				if bal.Locked != "" {
+					bg.log.Warnf("Failed to parse locked balance for %s: %v", bal.Coin, err)
+				}
+				locked = 0
+			}
 
 			updatedBalance := &ExchangeBalance{
 				Available: uint64(math.Round(available * float64(ui.Conventional.ConversionFactor))),
@@ -2362,13 +2483,14 @@ func (bg *bitget) Markets(ctx context.Context) (map[string]*Market, error) {
 		for _, mkt := range ms {
 			baseMinWithdraw, quoteMinWithdraw := bg.minimumWithdraws(mkt.BaseID, mkt.QuoteID)
 
-			high24h, _ := strconv.ParseFloat(ticker.High24h, 64)
-			low24h, _ := strconv.ParseFloat(ticker.Low24h, 64)
-			close, _ := strconv.ParseFloat(ticker.Close, 64)
-			quoteVol, _ := strconv.ParseFloat(ticker.QuoteVol, 64)
-			baseVol, _ := strconv.ParseFloat(ticker.BaseVol, 64)
-			openUtc, _ := strconv.ParseFloat(ticker.OpenUtc, 64)
-			changeUtc24h, _ := strconv.ParseFloat(ticker.ChangeUtc24h, 64)
+			// Parse ticker data - empty strings are expected for some fields and handled gracefully
+			high24h := parseFloatOrZero(ticker.High24h, "high24h", ticker.Symbol, bg.log)
+			low24h := parseFloatOrZero(ticker.Low24h, "low24h", ticker.Symbol, bg.log)
+			close := parseFloatOrZero(ticker.Close, "close", ticker.Symbol, bg.log)
+			quoteVol := parseFloatOrZero(ticker.QuoteVol, "quoteVol", ticker.Symbol, bg.log)
+			baseVol := parseFloatOrZero(ticker.BaseVol, "baseVol", ticker.Symbol, bg.log)
+			openUtc := parseFloatOrZero(ticker.OpenUtc, "openUtc", ticker.Symbol, bg.log)
+			changeUtc24h := parseFloatOrZero(ticker.ChangeUtc24h, "changeUtc24h", ticker.Symbol, bg.log)
 
 			// Calculate PriceChangePct with division by zero safety
 			var priceChangePct float64
@@ -2803,10 +2925,26 @@ func (bg *bitget) TradeStatus(ctx context.Context, tradeID string, baseID, quote
 	market := orderDetail.OrderType == "market"
 
 	// Parse quantities
-	size, _ := strconv.ParseFloat(orderDetail.Size, 64)
-	baseFilled, _ := strconv.ParseFloat(orderDetail.BaseVolume, 64)
-	quoteFilled, _ := strconv.ParseFloat(orderDetail.QuoteVolume, 64)
-	priceAvg, _ := strconv.ParseFloat(orderDetail.PriceAvg, 64)
+	size, err := strconv.ParseFloat(orderDetail.Size, 64)
+	if err != nil {
+		bg.log.Warnf("Failed to parse order size for %s: %v", tradeID, err)
+		size = 0
+	}
+	baseFilled, err := strconv.ParseFloat(orderDetail.BaseVolume, 64)
+	if err != nil {
+		bg.log.Warnf("Failed to parse base volume for order %s: %v", tradeID, err)
+		baseFilled = 0
+	}
+	quoteFilled, err := strconv.ParseFloat(orderDetail.QuoteVolume, 64)
+	if err != nil {
+		bg.log.Warnf("Failed to parse quote volume for order %s: %v", tradeID, err)
+		quoteFilled = 0
+	}
+	priceAvg, err := strconv.ParseFloat(orderDetail.PriceAvg, 64)
+	if err != nil {
+		bg.log.Warnf("Failed to parse average price for order %s: %v", tradeID, err)
+		priceAvg = 0
+	}
 
 	// Convert to internal units
 	qty := uint64(size * float64(baseCfg.conversionFactor))
@@ -2955,7 +3093,11 @@ func (bg *bitget) ConfirmDeposit(ctx context.Context, deposit *DepositData) (boo
 				switch status.Status {
 				case "success":
 					// Deposit confirmed
-					sizeFloat, _ := strconv.ParseFloat(status.Size, 64)
+					sizeFloat, err := strconv.ParseFloat(status.Size, 64)
+					if err != nil {
+						bg.log.Errorf("Failed to parse deposit size for %s: %v", assetCfg.coin, err)
+						return false, 0
+					}
 					amount := uint64(sizeFloat * float64(ui.Conventional.ConversionFactor))
 					bg.log.Infof("Deposit confirmed: %s %f credited", assetCfg.coin, sizeFloat)
 					return true, amount
@@ -3111,7 +3253,11 @@ func (bg *bitget) ConfirmWithdrawal(ctx context.Context, withdrawalID string, as
 					return 0, "", ErrWithdrawalPending
 				}
 
-				sizeFloat, _ := strconv.ParseFloat(status.Size, 64)
+				sizeFloat, err := strconv.ParseFloat(status.Size, 64)
+				if err != nil {
+					bg.log.Errorf("Failed to parse withdrawal size for %s: %v", assetCfg.coin, err)
+					return 0, "", fmt.Errorf("failed to parse withdrawal size: %w", err)
+				}
 				amt := sizeFloat * float64(assetCfg.conversionFactor)
 				bg.log.Infof("Withdrawal confirmed: %s %f, txID=%s", assetCfg.coin, sizeFloat, status.TxId)
 				return uint64(amt), status.TxId, nil
