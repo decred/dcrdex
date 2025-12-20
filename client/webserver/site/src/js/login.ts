@@ -33,6 +33,12 @@ export default class LoginPage extends BasePage {
     Doc.bind(page.forms, 'mousedown', (e: MouseEvent) => {
       if (!Doc.mouseInElement(e, page.resetAppPWForm) && Doc.isDisplayed(page.resetAppPWForm)) { prepAndDisplayLoginForm() }
     })
+    Doc.bind(page.forms, 'keydown', (e: KeyboardEvent) => {
+      if (e.key !== 'Enter') return
+      e.preventDefault()
+      if (Doc.isDisplayed(page.resetAppPWForm)) { this.appPassResetForm.resetAppPW() }
+      if (Doc.isDisplayed(page.loginForm)) { this.loginForm.submit() }
+    })
   }
 
   /* login submits the sign-in form and parses the result. */
