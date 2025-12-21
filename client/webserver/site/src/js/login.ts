@@ -36,6 +36,10 @@ export default class LoginPage extends BasePage {
     Doc.bind(page.forms, 'keydown', (e: KeyboardEvent) => {
       if (e.key !== 'Enter') return
       e.preventDefault()
+    })
+    Doc.bind(page.forms, 'keyup', (e: KeyboardEvent) => {
+      if (e.key !== 'Enter') return
+      e.preventDefault()
       if (Doc.isDisplayed(page.resetAppPWForm)) { this.appPassResetForm.resetAppPW() }
       if (Doc.isDisplayed(page.loginForm)) { this.loginForm.submit() }
     })
