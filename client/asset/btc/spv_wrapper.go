@@ -1147,7 +1147,7 @@ func (w *spvWallet) GetTxOut(txHash *chainhash.Hash, vout uint32, pkScript []byt
 	return utxo.TxOut, confs, nil
 }
 
-// matchPkScript pulls the filter for the block and attempts to match the
+// MatchPkScript pulls the filter for the block and attempts to match the
 // supplied scripts.
 func (w *spvWallet) MatchPkScript(blockHash *chainhash.Hash, scripts [][]byte) (bool, error) {
 	filter, err := w.cl.GetCFilter(*blockHash, wire.GCSFilterRegular)
