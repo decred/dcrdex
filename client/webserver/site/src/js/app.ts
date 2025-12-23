@@ -388,8 +388,9 @@ export default class Application {
       return
     }
     this.attachCommon(this.main)
-    // Nix annoying auto-typing of form buttons.
+    // Nix form auto-submit behavior.
     for (const bttn of Doc.applySelector(this.main, 'form button')) bttn.setAttribute('type', 'button')
+    for (const form of Doc.applySelector(this.main, 'form')) Doc.bind(form, 'submit', (e) => e.preventDefault())
     if (this.loadedPage) this.loadedPage.unload()
     const constructor = constructors[handlerID]
     if (constructor) this.loadedPage = new constructor(this.main, data)
