@@ -29,9 +29,9 @@ The credentials file should have the JSON format in the example below. The seed 
     }
 }
 ```
-- Select the blockchain with `--chain`. The default is `--chain eth`, but `--chain polygon` can be selected as well.
+- Select the blockchain with `--chain`. The default is `--chain eth`, but `--chain polygon` or `--chain base` can be selected as well.
 
-- Use the `--readcreds` utility to check the validity of the credentials file and to print the address. e.g. `./getgas --readcreds --mainnet`. 
+- Use the `--readcreds` utility to check the validity of the credentials file and to print the address. e.g. `./getgas --readcreds --mainnet`.
 
 - Decide the maximum number of swaps you want in the largest initiation transaction, `--n`. Minimum is 2. `getgas` will check initiations with from 1 up to `n` swaps. There is a balance between cost and precision. Using more than 2 generates an average over `n - 1` intiations to calculate the cost of additional swaps (`Gases.SwapAdd`) and redeems (`Gases.RedeemAdd`).
 

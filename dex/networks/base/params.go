@@ -33,24 +33,22 @@ var (
 		FeeRateDenom: "gas",
 	}
 
-	// TODO: Fix these. Taken from polygon.
 	v1Gases = &dexeth.Gases{
-		// First swap used 48801 gas Recommended Gases.Swap = 63441
-		Swap: 63_441,
-		// 	4 additional swaps averaged 26695 gas each. Recommended Gases.SwapAdd = 34703
-		// 	[48801 75511 102209 128895 155582]
-		SwapAdd: 34_703,
-		// First redeem used 40032 gas. Recommended Gases.Redeem = 52041
-		Redeem: 52_041,
-		// 	4 additional redeems averaged 10950 gas each. recommended Gases.RedeemAdd = 14235
-		// 	[40032 50996 61949 72890 83832]
-		RedeemAdd: 14_235,
-		// *** Compare expected Swap + Redeem = 88k with UniSwap v2: 102k, v3: 127k
-		// *** A 1-match order is cheaper than UniSwap.
-		// Average of 5 refunds: 40390. Recommended Gases.Refund = 52507
-		// 	[40381 40393 40393 40393 40393]
-		Refund: 52_507,
+		// First swap used 49054 gas Recommended Gases.Swap = 63770
+		Swap: 63_770,
+		// 4 additional swaps averaged 26895 gas each. Recommended Gases.SwapAdd = 34963
+		// [49054 75949 102844 129728 156637]
+		SwapAdd: 34_963,
+		// First redeem used 40247 gas. Recommended Gases.Redeem = 52321
+		Redeem: 52_321,
+		// 4 additional redeems averaged 11115 gas each. recommended Gases.RedeemAdd = 14449
+		// [40247 51349 62476 73568 84710]
+		RedeemAdd: 14_449,
+		// Average of 5 refunds: 40589. Recommended Gases.Refund = 52765
+		// [40589 40589 40589 40589 40589]
+		Refund: 52_765,
 
+		// TODO: Fix these. Taken from polygon.
 		GaslessRedeemVerification:       83_000,
 		GaslessRedeemVerificationAdd:    11_000,
 		GaslessRedeemPreVerification:    70_000,
