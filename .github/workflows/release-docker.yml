@@ -32,7 +32,8 @@ jobs:
       - name: Build and Push Docker Image
         run: |
           docker buildx build  \
-            -f client/Dockerfile.release \
+            -f client/Dockerfile \
             --platform linux/arm64,linux/amd64 \
             --tag ${{ env.IMAGE_NAME }}:${{ github.ref_name }} \
+            --build-arg VERSION=${{ github.ref_name }} \
             --output "type=registry" .

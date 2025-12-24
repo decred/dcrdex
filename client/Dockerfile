@@ -1,6 +1,6 @@
 #
 # Build the docker image
-# $ docker build -t user/bisonw -f client/Dockerfile .
+# $ docker build -t user/bisonw -f client/Dockerfile --build-arg VERSION=v1.x.x .
 #
 # Create docker volume to store client data
 # $ docker volume create --name=bisonw_data
@@ -18,12 +18,12 @@
 #    `docker pull node:<new version>`
 #    Docker will print the digest of the new image after the pull has finished.
 FROM node@sha256:809972647175c30a4c7763d3e6cc064dec588972af57e540e5a6f27442bb0845 AS nodebuilder
-WORKDIR /root/dex
-COPY . .
-RUN apk add git
-WORKDIR /root/dex/client/webserver/site/
-RUN npm clean-install
-RUN npm run build
+ARG VERSION="v1.0.5"
+RUN apk add git && \
+    git clone --depth 1 --branch $VERSION https://github.com/decred/dcrdex.git && \
+    cd /dcrdex/client/webserver/site/ && \
+    npm clean-install && \
+    npm run build
 
 # bisonw binary build
 
@@ -34,11 +34,11 @@ RUN npm run build
 #    `docker pull golang:<new version>`
 #    Docker will print the digest of the new image after the pull has finished.
 FROM golang@sha256:aee43c3ccbf24fdffb7295693b6e33b21e01baec1b2a55acc351fde345e9ec34 AS gobuilder
-COPY --from=nodebuilder /root/dex/ /root/dex/
-WORKDIR /root/dex/client/cmd/bisonw/
-RUN CGO_ENABLED=0 GOOS=linux go build
-WORKDIR /root/dex/client/cmd/bwctl/
-RUN CGO_ENABLED=0 GOOS=linux go build
+COPY --from=nodebuilder /dcrdex/ /dcrdex/
+RUN cd /dcrdex/client/cmd/bisonw/ && \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags "-s -w" && \
+    cd /dcrdex/client/cmd/bwctl/ && \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags "-s -w"
 
 # Final image
 FROM debian:bookworm-slim
@@ -47,8 +47,9 @@ WORKDIR /dex
 ENV HOME=/dex
 RUN mkdir -p /dex/.dexc && chown 1000 /dex/.dexc
 USER 1000
-COPY --from=gobuilder /root/dex/client/cmd/bisonw/bisonw ./
-COPY --from=gobuilder /root/dex/client/cmd/bwctl/bwctl ./
+COPY --from=gobuilder /dcrdex/client/cmd/bisonw/bisonw ./
+COPY --from=gobuilder /dcrdex/client/cmd/bwctl/bwctl ./
+# Using the local entrypoint.sh
 COPY ./client/entrypoint.sh ./
 EXPOSE 5758
 ENTRYPOINT [ "./entrypoint.sh" ]
