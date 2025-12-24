@@ -708,23 +708,26 @@ func newWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		defaultProviders = []string{filepath.Join(u.HomeDir, "dextest", "eth", "alpha", "node", "geth.ipc")}
 	case dex.Testnet:
 		defaultProviders = []string{
-			"https://rpc.ankr.com/eth_sepolia",
-			"https://ethereum-sepolia.blockpi.network/v1/rpc/public",
-			"https://endpoints.omniatech.io/v1/eth/sepolia/public",
-			"https://rpc-sepolia.rockx.com",
-			"https://rpc.sepolia.org",
-			"https://eth-sepolia-public.unifra.io",
-			"https://sepolia.drpc.org",
+			"https://ethereum-sepolia-rpc.publicnode.com",            // PublicNode - no rate limits
+			"https://sepolia.drpc.org",                               // dRPC
+			"https://rpc.sepolia.org",                                // Community primary
+			"https://1rpc.io/sepolia",                                // 1RPC - privacy focused
+			"https://ethereum-sepolia.blockpi.network/v1/rpc/public", // BlockPI
+			"https://endpoints.omniatech.io/v1/eth/sepolia/public",   // Omniatech
+			"https://rpc2.sepolia.org",                               // Community backup
+			"https://rpc-sepolia.rockx.com",                          // RockX
+			"https://rpc.sepolia.ethpandaops.io",                     // Ethereum Foundation
+			"https://eth-sepolia-public.unifra.io",                   // Unifra
 		}
 	case dex.Mainnet:
 		defaultProviders = []string{
-			"https://rpc.ankr.com/eth",
-			"https://ethereum.blockpi.network/v1/rpc/public",
-			"https://eth-mainnet.nodereal.io/v1/1659dfb40aa24bbb8153a677b98064d7",
-			"https://rpc.builder0x69.io",
-			"https://rpc.flashbots.net",
-			"wss://eth.llamarpc.com",
-			"https://eth.drpc.org",
+			"https://ethereum-rpc.publicnode.com", // PublicNode - 99.9% uptime, no rate limits
+			"https://eth.drpc.org",                // dRPC - 210M CU/30 days
+			"https://1rpc.io/eth",                 // 1RPC - privacy focused
+			"https://eth-mainnet.nodereal.io/v1/1659dfb40aa24bbb8153a677b98064d7", // NodeReal
+			"https://ethereum.blockpi.network/v1/rpc/public",                      // BlockPI - 10 req/sec
+			"https://rpc.flashbots.net",                                           // Flashbots - 80 req/sec
+			"https://rpc.builder0x69.io",                                          // MEV builder
 		}
 	}
 

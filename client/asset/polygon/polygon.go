@@ -128,6 +128,7 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Networ
 		defaultProviders = []string{filepath.Join(u.HomeDir, "dextest", "polygon", "alpha", "bor", "bor.ipc")}
 	case dex.Testnet:
 		defaultProviders = []string{
+			"https://polygon-amoy-bor-rpc.publicnode.com", // PublicNode HTTPS - no rate limits
 			"https://rpc-amoy.polygon.technology",
 			"wss://polygon-amoy-bor-rpc.publicnode.com",
 			"https://polygon-amoy.blockpi.network/v1/rpc/public",
@@ -135,14 +136,15 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Networ
 		}
 	case dex.Mainnet:
 		defaultProviders = []string{
-			"https://1rpc.io/matic",
-			"https://rpc.ankr.com/polygon",
-			"https://polygon.drpc.org",
-			"https://polygon.blockpi.network/v1/rpc/public",
-			"https://polygon.llamarpc.com",
-			"https://endpoints.omniatech.io/v1/matic/mainnet/public",
-			"https://rpc-mainnet.matic.quiknode.pro",
-			"https://gateway.tenderly.co/public/polygon",
+			"https://polygon-bor-rpc.publicnode.com",                 // PublicNode - 99.9% uptime, no rate limits
+			"https://polygon.drpc.org",                               // dRPC - 210M CU/30 days
+			"https://1rpc.io/matic",                                  // 1RPC - privacy focused
+			"https://polygon.blockpi.network/v1/rpc/public",          // BlockPI
+			"https://polygon-rpc.com",                                // Ankr official - 312M+ req/day
+			"https://polygon-public.nodies.app",                      // Nodies
+			"https://endpoints.omniatech.io/v1/matic/mainnet/public", // Omniatech
+			"https://rpc-mainnet.matic.quiknode.pro",                 // QuikNode
+			"https://gateway.tenderly.co/public/polygon",             // Tenderly
 		}
 	}
 
