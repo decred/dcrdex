@@ -58,7 +58,6 @@ func TestRPC(t *testing.T) {
 var freeServers = []string{
 	"https://ethereum-rpc.publicnode.com",
 	"https://eth-mainnet.nodereal.io/v1/1659dfb40aa24bbb8153a677b98064d7",
-	"https://ethereum.publicnode.com",
 	"https://eth.api.onfinality.io/public",
 	"https://eth.drpc.org",
 	"https://1rpc.io/eth",
