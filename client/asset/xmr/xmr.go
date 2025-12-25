@@ -132,23 +132,32 @@ func (d *Driver) Create(cwp *asset.CreateWalletParams) error {
 	return cliGenerateRefreshWallet(ctx, trustedDaemons[0], cwp.Logger, cwp.Net, cwp.DataDir, toolsDir, cwp.Pass, cwp.Seed, cwp.Birthday)
 }
 
-// downloadTools gets the latest tools and clears any remaining older tools.
+// downloadTools gets the latest tools.
 func downloadTools(log dex.Logger, dataDir string) (string, error) {
 	dl := &toolsdl.Download{
 		DataDir: dataDir,
 		Log:     log,
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	return dl.Run(ctx)
+	hasPath, toolsPath, _, _ := dl.GetBestCurrentLocalToolsDir()
+	if !hasPath {
+		return dl.Run()
+	}
+	return toolsPath, nil
 }
 
-// getToolsDir gets the current tools full-path and dir
+// getToolsDir gets the current tools full-path if any, and dir
 func getToolsDir(dataDir string) (string, string, error) {
 	dl := &toolsdl.Download{
 		DataDir: dataDir,
 	}
-	return dl.GetCurrentLocalToolsDir()
+	hasPath, toolsPath, dir, err := dl.GetBestCurrentLocalToolsDir()
+	if err != nil {
+		return "", "", err
+	}
+	if !hasPath {
+		return "", "", err
+	}
+	return toolsPath, dir, nil
 }
 
 func checkWalletCfg(cfg *asset.WalletConfig) error {

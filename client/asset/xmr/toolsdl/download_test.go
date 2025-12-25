@@ -3,9 +3,6 @@
 package toolsdl
 
 import (
-	"context"
-	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -16,8 +13,7 @@ import (
 
 func TestMachine(t *testing.T) {
 	m := getMachine()
-	fmt.Println("OS:", m.os)
-	fmt.Println("ARCH:", m.arch)
+	t.Logf("OS: %s, Arch: %s", m.os, m.arch)
 }
 
 func TestGetCurrentLocalToolsDir(t *testing.T) {
@@ -26,52 +22,59 @@ func TestGetCurrentLocalToolsDir(t *testing.T) {
 		DataDir: dataDir,
 		Log:     dex.StdOutLogger("Test", slog.LevelTrace),
 	}
-	_, dir, err := dl.GetCurrentLocalToolsDir()
+	// no tools dir
+
+	hasPath, path, _, err := dl.GetBestCurrentLocalToolsDir()
 	if err != nil {
-		if errors.Is(err, ErrNoLocalVersion) {
-			fmt.Println("Current local version does mot exist")
-			return
-		}
+		t.Fatal(err)
+	}
+	if hasPath {
+		t.Fatalf("got unexpected path: %s", path)
+	}
+
+	// set up a tools dir
+	newDir := filepath.Join(dl.getToolsBasePath(), "monero-linux-x64-v0.18.4.3")
+	err = os.MkdirAll(newDir, 0700)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = os.Create(filepath.Join(newDir, "monero-wallet-cli"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = os.Create(filepath.Join(newDir, "monero-wallet-rpc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	//
+	hasPath, _, dir, err := dl.GetBestCurrentLocalToolsDir()
+	if err != nil {
 		t.Fatalf("get current version: - error: %v", err)
+	}
+	if !hasPath {
+		t.Log("Current local version does not exist")
 	}
 	mv, err := newMoneroVersionFromDir(dir)
 	if err != nil {
 		t.Fatalf("new monero version: - error: %v", err)
 	}
-	fmt.Printf("current stored version is %s\n", mv.string())
+	t.Logf("Current stored version is %s\n", mv.string())
 }
 
-func TestGetLatestCanonicalVersion(t *testing.T) {
-	dataDir := filepath.Join(t.TempDir(), "mainnet", "assetdb", "xmr")
-	dl := &Download{
-		DataDir: dataDir,
-		Log:     dex.StdOutLogger("Test", slog.LevelTrace),
-	}
-	mv, err := dl.getLatestRemoteCanonicalVersion(context.Background())
-	if err != nil {
-		if errors.Is(err, ErrNoRemoteVersion) {
-			// bad - ask for alternative on IRC
-			fmt.Println("Canonical remote version does mot esist")
-			return
-		}
-		t.Fatalf("get current version: - error: %v", err)
-	}
-	fmt.Printf("latest canonical version from hashes.txt is %s\n", mv.string())
-}
-
-func TestToolsDownload(t *testing.T) {
+func TestAllToolsDownload(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "netnet", "assetdb", "xmr")
 	dl := &Download{
 		DataDir: dataDir,
 		Log:     dex.StdOutLogger("Test", slog.LevelTrace),
 	}
-	toolsDir, err := dl.Run(context.Background())
+
+	toolsDir, err := dl.Run()
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	cli := "monero-wallet-cli"
-	if dl.m.os == "windows" {
+	if dl.machine.os == "windows" {
 		cli += ".exe"
 	}
 	s, err := os.Stat(filepath.Join(toolsDir, cli))
@@ -83,7 +86,7 @@ func TestToolsDownload(t *testing.T) {
 	}
 
 	rpc := "monero-wallet-rpc"
-	if dl.m.os == "windows" {
+	if dl.machine.os == "windows" {
 		rpc += ".exe"
 	}
 	s1, err := os.Stat(filepath.Join(toolsDir, rpc))
@@ -99,8 +102,28 @@ func TestToolsDownload(t *testing.T) {
 	if err == nil {
 		t.Fatalf("hashes.txt should have been deleted after use - %v", err)
 	}
+	t.Log("Download success!")
+}
 
-	fmt.Println("Download success!")
+func TestToolsMAVDownload(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "netnet", "assetdb", "xmr")
+	dl := &Download{
+		DataDir: dataDir,
+		Log:     dex.StdOutLogger("Test", slog.LevelTrace),
+	}
+	// normally done in 'Run'
+	dl.machine = getMachine()
+	tempDir, err := os.MkdirTemp("", "share-mtools-mav")
+	if err != nil {
+		t.Fatalf("error making temp dir - %v", err)
+	}
+	dl.tempDir = tempDir
+	// hard coded
+	toolsDir, err := dl.runMavDownload()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("toolsDir: %s", toolsDir)
 }
 
 func TestToolsBasePath(t *testing.T) {
@@ -108,6 +131,7 @@ func TestToolsBasePath(t *testing.T) {
 	var dataDir = filepath.Join(home, ".dexc", "mainnet", "assetdb", "xmr")
 	dl := &Download{
 		DataDir: dataDir,
+		Log:     dex.StdOutLogger("Test", slog.LevelTrace),
 	}
 	tbp := dl.getToolsBasePath()
 	if tbp != filepath.Join(home, ".dexc", "share", "monero-tools") {
@@ -158,4 +182,18 @@ func TestToolsBasePath(t *testing.T) {
 	if tbp != filepath.Join(home, "dextest", "simnet-walletpair", "dexc2", "share", "monero-tools") {
 		t.Fatalf("bad tools path %s", tbp)
 	}
+}
+
+func TestDownloadHashesFile(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "mainnet", "assetdb", "xmr")
+	dl := &Download{
+		DataDir: dataDir,
+		Log:     dex.StdOutLogger("Test", slog.LevelTrace),
+		tempDir: dataDir,
+	}
+	hashFilePath, err := dl.downloadHashesFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("%s\n", hashFilePath)
 }

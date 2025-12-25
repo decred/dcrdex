@@ -8,11 +8,6 @@ import (
 
 var minimumVersion *moneroVersionV0
 
-func init() {
-	// monero README
-	minimumVersion, _ = newMoneroVersionFromParts("v0", "18", "4", "3")
-}
-
 type moneroVersionV0 struct {
 	sys   string
 	major uint64
