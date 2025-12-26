@@ -448,7 +448,7 @@ func (x *wallet) Swap(_ *asset.Swaps) (receipts []asset.Receipt, changeCoin asse
 func (x *wallet) Redeem(redeems *asset.RedeemForm) (ins []dex.Bytes, out asset.Coin, feesPaid uint64, err error) {
 	return nil, nil, 0, asset.ErrUnsupported
 }
-func (x *wallet) SignMessage(_ asset.Coin, _ dex.Bytes) (pubkeys []dex.Bytes, sigs []dex.Bytes, err error) {
+func (x *wallet) SignCoinMessage(_ asset.Coin, _ dex.Bytes) (pubkeys []dex.Bytes, sigs []dex.Bytes, err error) {
 	return nil, nil, asset.ErrUnsupported
 }
 func (x *wallet) AuditContract(coinID dex.Bytes, contract dex.Bytes, txData dex.Bytes, rebroadcast bool) (*asset.AuditInfo, error) {

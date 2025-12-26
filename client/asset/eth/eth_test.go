@@ -4463,7 +4463,7 @@ func TestOwnsAddress(t *testing.T) {
 	}
 }
 
-func TestSignMessage(t *testing.T) {
+func TestSignCoinMessage(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -4483,14 +4483,14 @@ func TestSignMessage(t *testing.T) {
 
 	// SignData error
 	node.signDataErr = errors.New("test error")
-	_, _, err := eth.SignMessage(nil, msg)
+	_, _, err := eth.SignCoinMessage(nil, msg)
 	if err == nil {
 		t.Fatalf("expected error due to error in rpcclient signData")
 	}
 	node.signDataErr = nil
 
 	// Test no error
-	pubKeys, sigs, err := eth.SignMessage(nil, msg)
+	pubKeys, sigs, err := eth.SignCoinMessage(nil, msg)
 	if err != nil {
 		t.Fatalf("unexpected error signing message: %v", err)
 	}
