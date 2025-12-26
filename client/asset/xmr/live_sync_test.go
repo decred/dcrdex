@@ -16,8 +16,15 @@ import (
 
 // Test constants
 const (
-	// adjust as needed to run a different version
-	MoneroToolsDir = "monero-x86_64-linux-gnu-v0.18.4.3"
+	// Note: paths to 'monero-wallet-cli' & 'monero-wallet-rpc' have changed to:
+	// User home-dir/.dex-monero-tools.
+	//
+	// If you do not have the tools yet run TestToolsDownload in the toolsdl pkg.
+
+	// Adjust as needed to run a different version / os / arch.
+	// Ex: MoneroToolsDir = "monero-win-x64-v0.18.4.4" from downloaded tools
+	// in os.UserHomeDir()/.dex-monero-tools/monero-win-x64-v0.18.4.4
+	MoneroToolsDir = ".dex-monero-tools/monero-linux-x64-v0.18.4.4"
 
 	CakeMainnetDaemon = "https://xmr-node.cakewallet.com:18081"
 
@@ -36,7 +43,7 @@ func TestCliGenerateRefreshWalletCmd(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background()) // used by exec.CommandContext
 	defer cancel()
 
-	logger := dex.StdOutLogger("test", slog.LevelTrace)
+	logger := dex.StdOutLogger("Test", slog.LevelTrace)
 	home, _ := os.UserHomeDir()
 	userToolsDir := path.Join(home, MoneroToolsDir)
 	pwB, _ := hex.DecodeString(TestPw)
