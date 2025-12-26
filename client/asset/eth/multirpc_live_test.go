@@ -61,6 +61,8 @@ var freeServers = []string{
 	"https://eth.api.onfinality.io/public",                                // OnFinality
 	"https://eth-mainnet.public.blastapi.io",                              // Blast API
 	"https://ethereum-rpc.publicnode.com",                                 // PublicNode
+	"https://eth.llamarpc.com",                                            // LlamaRPC
+	"https://eth.drpc.org",                                                // dRPC
 }
 
 func TestFreeServers(t *testing.T) {

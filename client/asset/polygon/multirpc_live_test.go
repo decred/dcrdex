@@ -68,6 +68,7 @@ func TestFreeServers(t *testing.T) {
 		"https://polygon-rpc.com",                    // Polygon Labs official
 		"https://rpc-mainnet.matic.quiknode.pro",     // QuikNode
 		"https://gateway.tenderly.co/public/polygon", // Tenderly
+		"https://polygon-bor-rpc.publicnode.com",     // PublicNode
 	}
 	mt.TestFreeServers(t, freeServers, dex.Mainnet)
 }
