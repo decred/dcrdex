@@ -31,8 +31,8 @@ var (
 		// Vitalik's address from https://twitter.com/VitalikButerin/status/1050126908589887488
 		Addr:      common.HexToAddress("0xab5801a7d398351b8be11c439e05c5b3259aec9b"),
 		TokenAddr: common.HexToAddress("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"),
-		TxHash:    common.HexToHash("0xea1a717af9fad5702f189d6f760bb9a5d6861b4ee915976fe7732c0c95cd8a0e"),
-		BlockHash: common.HexToHash("0x44ebd6f66b4fd546bccdd700869f6a433ef9a47e296a594fa474228f86eeb353"),
+		TxHash:    common.HexToHash("0x67b27503aa20dd35bc2ae18fabfec477cf4d089b32173a590dc8d7319cbd0184"),
+		BlockHash: common.HexToHash("0x95118897eba948a62df72765e20186081f2554d90a146403ba93da690b322e06"),
 	}
 
 	testnetCompatibilityData = CompatibilityData{

@@ -1548,6 +1548,9 @@ const (
 	providerAlchemy     = "alchemy.com"
 	providerAnkr        = "ankr.com"
 	providerdRPC        = "drpc.org"
+	providerBlastAPI    = "blastapi.io"
+	providerLlamaRPC    = "llamarpc.com"
+	providerPublicNode  = "publicnode.com"
 
 	// Non-compliant providers
 	// providerCloudflareETH = "cloudflare-eth.com" // "SuggestGasTipCap" error: Method not found
@@ -1564,6 +1567,9 @@ var compliantProviders = map[string]struct{}{
 	providerAlchemy:     {},
 	providerAnkr:        {},
 	providerdRPC:        {},
+	providerBlastAPI:    {},
+	providerLlamaRPC:    {},
+	providerPublicNode:  {},
 }
 
 type rpcTest struct {

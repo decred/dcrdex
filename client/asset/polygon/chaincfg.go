@@ -22,15 +22,15 @@ var (
 	mainnetCompatibilityData = eth.CompatibilityData{
 		Addr:      common.HexToAddress("0x5973918275C01F50555d44e92c9d9b353CaDAD54"),
 		TokenAddr: common.HexToAddress("0x2791bca1f2de4661ed88a30c99a7a9449aa84174"), // usdc
-		TxHash:    common.HexToHash("0xc388210f83679f9841e34fb3cdee0294f885846de3e01211e50f77d508a0d6ec"),
-		BlockHash: common.HexToHash("0xa603d7354686269521e8d561d6ffa4aa92aad80e01f3b4cc9745fdb54342f85b"),
+		TxHash:    common.HexToHash("0xa93416441cf73752767d145364d1bed5b76ed0b0dc531fa7127e63b277e9f537"),
+		BlockHash: common.HexToHash("0xc2d5c6ffae606a71a05160d0457825b01d9747737381761aa88e9a5b7b3da743"),
 	}
 
 	testnetCompatibilityData = eth.CompatibilityData{
 		Addr:      common.HexToAddress("0x248528f5A2C3731fb598E8cc1dc5dB5f997E74BC"),
 		TokenAddr: common.HexToAddress("0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582"), // usdc
-		TxHash:    common.HexToHash("0x4097fc20d8566702f40323f19e351d5e2feb70dc2c99b90ababdb660351b5247"),
-		BlockHash: common.HexToHash("0x813a2898f25530a634fdaff7c3ceda786c934f476e6cd5556c32025ac103a90f"),
+		TxHash:    common.HexToHash("0xebf36a0c1ccbddc4b1670766278284789bf6cbebd6447b26fe45ade2ee5d4fbf"),
+		BlockHash: common.HexToHash("0x98d056da91e376570dc1ab04bc9b13e3c1806961460a29c6268455b9c449b14b"),
 	}
 )
 

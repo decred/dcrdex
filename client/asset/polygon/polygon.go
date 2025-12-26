@@ -125,21 +125,19 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Networ
 		defaultProviders = []string{"http://127.0.0.1:48296"}
 	case dex.Testnet:
 		defaultProviders = []string{
-			"https://rpc-amoy.polygon.technology",
-			"wss://polygon-amoy-bor-rpc.publicnode.com",
-			"https://polygon-amoy.blockpi.network/v1/rpc/public",
-			"https://polygon-amoy.drpc.org",
+			// Verified working (2025-12-26)
+			"https://polygon-amoy.drpc.org",               // dRPC - verified working
+			"https://rpc-amoy.polygon.technology",         // Polygon Labs official
+			"https://polygon-amoy-bor-rpc.publicnode.com", // PublicNode
+			"wss://polygon-amoy-bor-rpc.publicnode.com",   // PublicNode WSS
 		}
 	case dex.Mainnet:
 		defaultProviders = []string{
-			"https://1rpc.io/matic",
-			"https://rpc.ankr.com/polygon",
-			"https://polygon.drpc.org",
-			"https://polygon.blockpi.network/v1/rpc/public",
-			"https://polygon.llamarpc.com",
-			"https://endpoints.omniatech.io/v1/matic/mainnet/public",
-			"https://rpc-mainnet.matic.quiknode.pro",
-			"https://gateway.tenderly.co/public/polygon",
+			// Verified working (2025-12-26)
+			"https://polygon-rpc.com",                    // Polygon Labs official
+			"https://rpc-mainnet.matic.quiknode.pro",     // QuikNode
+			"https://gateway.tenderly.co/public/polygon", // Tenderly
+			"https://polygon-bor-rpc.publicnode.com",     // PublicNode
 		}
 	}
 

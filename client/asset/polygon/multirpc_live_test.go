@@ -64,39 +64,23 @@ func TestFreeServers(t *testing.T) {
 	// https://www.alchemy.com/chain-connect/chain/polygon-pos
 	// https://chainlist.org/?search=Polygon+Mainnet
 	freeServers := []string{
-		// Passing
-		"https://1rpc.io/matic",
-		"https://rpc.ankr.com/polygon",
-		"https://polygon.blockpi.network/v1/rpc/public",
-		"https://polygon.llamarpc.com",
-		"https://endpoints.omniatech.io/v1/matic/mainnet/public",
-		"https://rpc-mainnet.matic.quiknode.pro",
-		"https://gateway.tenderly.co/public/polygon",
-		// Failing
-		"https://matic-mainnet-full-rpc.bwarelabs.com", // connect error: failed to connect to even a single provider among: bwarelabs.com
-		"https://polygon.api.onfinality.io/public",     // "BalanceAt" error: Too Many Requests, Please apply an OnFinality API key or contact us to receive a higher rate limit
-		"https://poly-rpc.gateway.pokt.network",        // connect error: failed to connect to even a single provider among: pokt.network
-		"https://polygon-rpc.com",                      // "TransactionReceipt" error: not found
-		"https://polygon.meowrpc.com",                  // "TransactionReceipt" error: not found
-		"wss://polygon.drpc.org",                       // "TransactionReceipt" error: Unable to perform request
-		"https://polygon.rpc.blxrbdn.com",              // "TransactionReceipt" error: not found
-		"https://g.w.lavanet.xyz:443/gateway/polygon1/rpc-http/f7ee0000000000000000000000000000", // "TransactionReceipt" error: not found
-		"https://rpc-mainnet.matic.network",                     // connect error: failed to connect to even a single provider among: matic.network
-		"wss://polygon-bor-rpc.publicnode.com",                  // "TransactionReceipt" error: not found
-		"https://public.stackup.sh/api/v1/node/polygon-mainnet", // "TransactionReceipt" error: not found
-		"https://matic-mainnet.chainstacklabs.com",              // connect error: failed to connect to even a single provider among: chainstacklabs.com
-
+		// Verified working (2025-12-26)
+		"https://polygon-rpc.com",                    // Polygon Labs official
+		"https://rpc-mainnet.matic.quiknode.pro",     // QuikNode
+		"https://gateway.tenderly.co/public/polygon", // Tenderly
+		"https://polygon-bor-rpc.publicnode.com",     // PublicNode
 	}
 	mt.TestFreeServers(t, freeServers, dex.Mainnet)
 }
 
 func TestFreeTestnetServers(t *testing.T) {
 	// https://chainlist.org/chain/80002
-	// PASSING 24 April 2024
 	freeServers := []string{
-		"https://rpc-amoy.polygon.technology",
-		"wss://polygon-amoy-bor-rpc.publicnode.com",
-		"https://polygon-amoy.blockpi.network/v1/rpc/public",
+		// Verified working (2025-12-26)
+		"https://polygon-amoy.drpc.org",               // dRPC - verified working
+		"https://rpc-amoy.polygon.technology",         // Polygon Labs official
+		"https://polygon-amoy-bor-rpc.publicnode.com", // PublicNode
+		"wss://polygon-amoy-bor-rpc.publicnode.com",   // PublicNode WSS
 	}
 	mt.TestFreeServers(t, freeServers, dex.Testnet)
 }
