@@ -6295,9 +6295,9 @@ func (c *Core) createTradeRequest(wallets *walletSet, coins asset.Coins, redeemS
 	// funds.
 	var redemptionReserves uint64
 	if isAccountRedemption {
-		pubKeys, sigs, err := toWallet.SignMessage(nil, msgOrder.Serialize())
+		pubKeys, sigs, err := toWallet.SignCoinMessage(nil, msgOrder.Serialize())
 		if err != nil {
-			return nil, codedError(signatureErr, fmt.Errorf("SignMessage error: %w", err))
+			return nil, codedError(signatureErr, fmt.Errorf("SignCoinMessage error: %w", err))
 		}
 		if len(pubKeys) == 0 || len(sigs) == 0 {
 			return nil, newError(signatureErr, "wrong number of pubkeys or signatures, %d & %d", len(pubKeys), len(sigs))
@@ -6371,7 +6371,7 @@ func (c *Core) createTradeRequest(wallets *walletSet, coins asset.Coins, redeemS
 	// first coin is an address and the entire serialized message needs to
 	// be signed with that address's private key.
 	if changeID != nil {
-		if _, msgTrade.Coins[0].Sigs, err = fromWallet.SignMessage(nil, msgOrder.Serialize()); err != nil {
+		if _, msgTrade.Coins[0].Sigs, err = fromWallet.SignCoinMessage(nil, msgOrder.Serialize()); err != nil {
 			return nil, fmt.Errorf("%v wallet failed to sign for redeem: %w",
 				assetConfigs.fromAsset.Symbol, err)
 		}
@@ -10277,9 +10277,9 @@ func messageCoins(wallet *xcWallet, coins asset.Coins, redeemScripts []dex.Bytes
 	msgCoins := make([]*msgjson.Coin, 0, len(coins))
 	for i, coin := range coins {
 		coinID := coin.ID()
-		pubKeys, sigs, err := wallet.SignMessage(coin, coinID)
+		pubKeys, sigs, err := wallet.SignCoinMessage(coin, coinID)
 		if err != nil {
-			return nil, fmt.Errorf("%s SignMessage error: %w", unbip(wallet.AssetID), err)
+			return nil, fmt.Errorf("%s SignCoinMessage error: %w", unbip(wallet.AssetID), err)
 		}
 		msgCoins = append(msgCoins, &msgjson.Coin{
 			ID:      coinID,

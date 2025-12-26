@@ -783,7 +783,7 @@ func TestAccount(t *testing.T) {
 	t.Run("testAddressBalance", testAddressBalance)
 	t.Run("testSendTransaction", testSendTransaction)
 	t.Run("testSendSignedTransaction", testSendSignedTransaction)
-	t.Run("testSignMessage", testSignMessage)
+	t.Run("testSignCoinMessage", testSignCoinMessage)
 }
 
 // TestContract tests methods that interact with the contract.
@@ -2409,7 +2409,7 @@ func testApproveGas(t *testing.T) {
 	fmt.Printf("replacement tx hash: %s\n", tx.Hash())
 }*/
 
-func testSignMessage(t *testing.T) {
+func testSignCoinMessage(t *testing.T) {
 	msg := []byte("test message")
 	sig, pubKey, err := ethClient.signData(msg)
 	if err != nil {

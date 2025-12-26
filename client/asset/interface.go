@@ -497,10 +497,10 @@ type Wallet interface {
 	// Redeem sends the redemption transaction, which may contain more than one
 	// redemption. The input coin IDs and the output Coin are returned.
 	Redeem(redeems *RedeemForm) (ins []dex.Bytes, out Coin, feesPaid uint64, err error)
-	// SignMessage signs the coin ID with the private key associated with the
+	// SignCoinMessage signs the coin ID with the private key associated with the
 	// specified Coin. A slice of pubkeys required to spend the Coin and a
 	// signature for each pubkey are returned.
-	SignMessage(Coin, dex.Bytes) (pubkeys, sigs []dex.Bytes, err error)
+	SignCoinMessage(Coin, dex.Bytes) (pubkeys, sigs []dex.Bytes, err error)
 	// AuditContract retrieves information about a swap contract from the
 	// provided txData and broadcasts the txData to ensure the contract is
 	// propagated to the blockchain. The information returned would be used

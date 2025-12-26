@@ -998,7 +998,7 @@ func (w *TXCWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uin
 	return w.redeemCoins, &tCoin{id: []byte{0x0c, 0x0d}}, tRedemptionFeesPaid, nil
 }
 
-func (w *TXCWallet) SignMessage(asset.Coin, dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
+func (w *TXCWallet) SignCoinMessage(asset.Coin, dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
 	return w.pubKeys, w.sigs, w.signCoinErr
 }
 
