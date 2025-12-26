@@ -708,26 +708,19 @@ func newWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		defaultProviders = []string{filepath.Join(u.HomeDir, "dextest", "eth", "alpha", "node", "geth.ipc")}
 	case dex.Testnet:
 		defaultProviders = []string{
-			"https://ethereum-sepolia-rpc.publicnode.com",            // PublicNode - no rate limits
-			"https://sepolia.drpc.org",                               // dRPC
-			"https://rpc.sepolia.org",                                // Community primary
-			"https://1rpc.io/sepolia",                                // 1RPC - privacy focused
-			"https://ethereum-sepolia.blockpi.network/v1/rpc/public", // BlockPI
-			"https://endpoints.omniatech.io/v1/eth/sepolia/public",   // Omniatech
-			"https://rpc2.sepolia.org",                               // Community backup
-			"https://rpc-sepolia.rockx.com",                          // RockX
-			"https://rpc.sepolia.ethpandaops.io",                     // Ethereum Foundation
-			"https://eth-sepolia-public.unifra.io",                   // Unifra
+			// Verified working (2025-12-26)
+			"https://ethereum-sepolia-rpc.publicnode.com",          // PublicNode - no rate limits
+			"https://sepolia.drpc.org",                             // dRPC - verified working
+			"https://endpoints.omniatech.io/v1/eth/sepolia/public", // Omniatech - verified working
+			"https://rpc-sepolia.rockx.com",                        // RockX - verified working
 		}
 	case dex.Mainnet:
 		defaultProviders = []string{
-			"https://ethereum-rpc.publicnode.com", // PublicNode - 99.9% uptime, no rate limits
-			"https://eth.drpc.org",                // dRPC - 210M CU/30 days
-			"https://1rpc.io/eth",                 // 1RPC - privacy focused
-			"https://eth-mainnet.nodereal.io/v1/1659dfb40aa24bbb8153a677b98064d7", // NodeReal
-			"https://ethereum.blockpi.network/v1/rpc/public",                      // BlockPI - 10 req/sec
-			"https://rpc.flashbots.net",                                           // Flashbots - 80 req/sec
-			"https://rpc.builder0x69.io",                                          // MEV builder
+			// Verified working (2025-12-26)
+			"https://eth-mainnet.nodereal.io/v1/1659dfb40aa24bbb8153a677b98064d7", // NodeReal - verified working
+			"https://eth.api.onfinality.io/public",                                // OnFinality - verified working
+			"https://eth-mainnet.public.blastapi.io",                              // Blast API - verified working
+			"https://ethereum-rpc.publicnode.com",                                 // PublicNode - verified working
 		}
 	}
 

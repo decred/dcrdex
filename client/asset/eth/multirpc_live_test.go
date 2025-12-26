@@ -56,18 +56,11 @@ func TestRPC(t *testing.T) {
 }
 
 var freeServers = []string{
-	"https://ethereum-rpc.publicnode.com",
-	"https://eth-mainnet.nodereal.io/v1/1659dfb40aa24bbb8153a677b98064d7",
-	"https://eth.api.onfinality.io/public",
-	"https://eth.drpc.org",
-	"https://1rpc.io/eth",
-	"https://ethereum.blockpi.network/v1/rpc/public",
-	"https://rpc.flashbots.net",
-	"https://rpc.builder0x69.io",
-	"https://eth-mainnet.gateway.pokt.network/v1/5f3453978e354ab992c4da79",
-	"https://nodes.mewapi.io/rpc/eth",
-	"https://eth-mainnet-public.unifra.io",
-	"https://cloudflare-eth.com/",
+	// Verified working (2025-12-26)
+	"https://eth-mainnet.nodereal.io/v1/1659dfb40aa24bbb8153a677b98064d7", // NodeReal
+	"https://eth.api.onfinality.io/public",                                // OnFinality
+	"https://eth-mainnet.public.blastapi.io",                              // Blast API
+	"https://ethereum-rpc.publicnode.com",                                 // PublicNode
 }
 
 func TestFreeServers(t *testing.T) {
@@ -75,17 +68,11 @@ func TestFreeServers(t *testing.T) {
 }
 
 var freeTestnetServers = []string{
-	"https://ethereum-sepolia-rpc.publicnode.com",
-	"https://sepolia.drpc.org",
-	"https://rpc.sepolia.org",
-	"https://1rpc.io/sepolia",
-	"https://ethereum-sepolia.blockpi.network/v1/rpc/public",
-	"https://endpoints.omniatech.io/v1/eth/sepolia/public",
-	"https://rpc2.sepolia.org",
-	"https://rpc-sepolia.rockx.com",
-	"https://rpc.sepolia.ethpandaops.io",
-	"https://eth-sepolia-public.unifra.io",
-	"https://relay-sepolia.flashbots.net",
+	// Verified working (2025-12-26)
+	"https://ethereum-sepolia-rpc.publicnode.com",          // PublicNode
+	"https://sepolia.drpc.org",                             // dRPC
+	"https://endpoints.omniatech.io/v1/eth/sepolia/public", // Omniatech
+	"https://rpc-sepolia.rockx.com",                        // RockX
 }
 
 func TestFreeTestnetServers(t *testing.T) {

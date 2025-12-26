@@ -30,8 +30,8 @@ var (
 	testnetCompatibilityData = eth.CompatibilityData{
 		Addr:      common.HexToAddress("0x248528f5A2C3731fb598E8cc1dc5dB5f997E74BC"),
 		TokenAddr: common.HexToAddress("0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582"), // usdc
-		TxHash:    common.HexToHash("0x4097fc20d8566702f40323f19e351d5e2feb70dc2c99b90ababdb660351b5247"),
-		BlockHash: common.HexToHash("0x813a2898f25530a634fdaff7c3ceda786c934f476e6cd5556c32025ac103a90f"),
+		TxHash:    common.HexToHash("0xebf36a0c1ccbddc4b1670766278284789bf6cbebd6447b26fe45ade2ee5d4fbf"),
+		BlockHash: common.HexToHash("0x98d056da91e376570dc1ab04bc9b13e3c1806961460a29c6268455b9c449b14b"),
 	}
 )
 
