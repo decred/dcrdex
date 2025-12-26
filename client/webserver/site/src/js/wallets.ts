@@ -1695,7 +1695,14 @@ export default class WalletsPage extends BasePage {
     tmpl.chainName.textContent = chainName
     tmpl.type.textContent = txTypeString(txType)
     tmpl.id.textContent = trimStringWithEllipsis(txID, 12)
-    const coinLink = CoinExplorers[assetID][net]
+    const coinEx = CoinExplorers[assetID]
+    if (coinEx == null) {
+      return
+    }
+    const coinLink = coinEx[net]
+    if (coinLink == null) {
+      return
+    }
     tmpl.id.href = coinLink(txID)
   }
 

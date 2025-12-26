@@ -12,9 +12,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"decred.org/dcrdex/client/asset/base"
 	"decred.org/dcrdex/client/asset/eth"
 	"decred.org/dcrdex/client/asset/polygon"
 	"decred.org/dcrdex/dex"
+	dexbase "decred.org/dcrdex/dex/networks/base"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	dexpolygon "decred.org/dcrdex/dex/networks/polygon"
 	"github.com/ethereum/go-ethereum/common"
@@ -67,8 +69,14 @@ func mainErr() error {
 	net := dex.Mainnet
 	if useSimnet {
 		net = dex.Simnet
-		dexeth.MaybeReadSimnetAddrs()
-		dexpolygon.MaybeReadSimnetAddrs()
+		switch chain {
+		case "eth":
+			dexeth.MaybeReadSimnetAddrs()
+		case "polygon":
+			dexpolygon.MaybeReadSimnetAddrs()
+		case "base":
+			dexbase.MaybeReadSimnetAddrs()
+		}
 	}
 	if useTestnet {
 		net = dex.Testnet
@@ -181,6 +189,9 @@ func mainErr() error {
 	case "polygon":
 		wParams, err = walletParams(dexpolygon.VersionedGases, dexpolygon.ContractAddresses, dexpolygon.Tokens,
 			polygon.NetworkCompatibilityData, polygon.ChainConfig, &dexpolygon.UnitInfo)
+	case "base":
+		wParams, err = walletParams(dexbase.VersionedGases, dexbase.ContractAddresses, dexbase.Tokens,
+			base.NetworkCompatibilityData, base.ChainConfig, &dexbase.UnitInfo)
 	default:
 		return fmt.Errorf("chain %s not known", chain)
 	}

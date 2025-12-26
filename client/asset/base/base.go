@@ -42,8 +42,11 @@ func registerToken(tokenID uint32, desc string, allowedNets ...dex.Network) {
 }
 
 func init() {
+	dexbase.MaybeReadSimnetAddrs()
 	asset.Register(BipID, &Driver{})
-	registerToken(usdcTokenID, "The USDC Base ERC20 token.", dex.Mainnet, dex.Testnet)
+	registerToken(usdcTokenID, "The USDC Base ERC20 token.", dex.Mainnet, dex.Testnet, dex.Simnet)
+	registerToken(usdtTokenID, "The USDT Base ERC20 token.", dex.Mainnet, dex.Testnet, dex.Simnet)
+	registerToken(wbtcTokenID, "Wrapped BTC.", dex.Mainnet, dex.Testnet)
 }
 
 const (
@@ -56,6 +59,8 @@ const (
 
 var (
 	usdcTokenID, _ = dex.BipSymbolID("usdc.base")
+	usdtTokenID, _ = dex.BipSymbolID("usdt.base")
+	wbtcTokenID, _ = dex.BipSymbolID("wbtc.base")
 	// WalletInfo defines some general information about a Base Wallet(EVM
 	// Compatible).
 
@@ -72,7 +77,7 @@ var (
 	}
 	WalletInfo = asset.WalletInfo{
 		Name:              "Base",
-		SupportedVersions: []uint32{},
+		SupportedVersions: []uint32{1},
 		UnitInfo:          dexbase.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{
 			{
@@ -90,10 +95,10 @@ var (
 
 type Driver struct{}
 
-// Open opens the Polygon exchange wallet. Start the wallet with its Run method.
+// Open opens the Base exchange wallet. Start the wallet with its Run method.
 func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (asset.Wallet, error) {
-	if net == dex.Simnet {
-		return nil, errors.New("simnet not implemented yet")
+	if net == dex.Mainnet {
+		return nil, errors.New("base is disable until we get L1 security fees worked out")
 	}
 	chainCfg, err := ChainConfig(net)
 	if err != nil {
@@ -115,6 +120,8 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Networ
 
 	var defaultProviders []string
 	switch net {
+	case dex.Simnet:
+		defaultProviders = []string{"http://127.0.0.1:39556"}
 	case dex.Testnet:
 		defaultProviders = []string{
 			"https://base-sepolia-rpc.publicnode.com",

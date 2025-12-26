@@ -704,8 +704,7 @@ func newWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 	var defaultProviders []string
 	switch net {
 	case dex.Simnet:
-		u, _ := user.Current()
-		defaultProviders = []string{filepath.Join(u.HomeDir, "dextest", "eth", "alpha", "node", "geth.ipc")}
+		defaultProviders = []string{"http://127.0.0.1:38556"}
 	case dex.Testnet:
 		defaultProviders = []string{
 			"https://rpc.ankr.com/eth_sepolia",
@@ -7310,7 +7309,11 @@ func getFileCredentials(chain, path string, net dex.Network) (seed []byte, provi
 		return nil, nil, fmt.Errorf("must provide both seeds in credentials file")
 	}
 	seed = p.Seed
-	for _, uri := range p.Providers[chain][net.String()] {
+	assetName := chain
+	if assetName == "base" {
+		assetName = "weth.base"
+	}
+	for _, uri := range p.Providers[assetName][net.String()] {
 		if !strings.HasPrefix(uri, "#") && !strings.HasPrefix(uri, ";") {
 			providers = append(providers, uri)
 		}
@@ -7319,12 +7322,13 @@ func getFileCredentials(chain, path string, net dex.Network) (seed []byte, provi
 		return nil, nil, fmt.Errorf("no providers in the file at %s for chain %s, network %s", path, chain, net)
 	}
 	if net == dex.Simnet && len(providers) == 0 {
-		u, _ := user.Current()
 		switch chain {
+		case "base":
+			providers = []string{"http://127.0.0.1:39556"}
 		case "polygon":
-			providers = []string{filepath.Join(u.HomeDir, "dextest", chain, "alpha", "bor", "bor.ipc")}
+			providers = []string{"http://127.0.0.1:48296"}
 		default:
-			providers = []string{filepath.Join(u.HomeDir, "dextest", chain, "alpha", "node", "geth.ipc")}
+			providers = []string{"http://127.0.0.1:38556"}
 		}
 	}
 	return
