@@ -721,8 +721,6 @@ func newWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 			"https://eth.api.onfinality.io/public",                                // OnFinality - verified working
 			"https://eth-mainnet.public.blastapi.io",                              // Blast API - verified working
 			"https://ethereum-rpc.publicnode.com",                                 // PublicNode - verified working
-			"https://eth.llamarpc.com",                                            // LlamaRPC - community RPC
-			"https://eth.drpc.org",                                                // dRPC - decentralized RPC
 		}
 	}
 
