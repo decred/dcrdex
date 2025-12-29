@@ -489,10 +489,12 @@ func (d *Download) Run() (string, error) {
 
 	switch {
 	case noLocal && noZip:
+		defer os.RemoveAll(d.tempDir)
 		// only hard coded
 		return d.runMavDownload()
 
 	case noLocal && !noZip:
+		defer os.RemoveAll(d.tempDir)
 		// canon first, hard coded second
 		toolsDir, err := d.runDownload()
 		if err != nil {
@@ -501,6 +503,7 @@ func (d *Download) Run() (string, error) {
 		return toolsDir, nil
 
 	case !noLocal && noZip:
+		defer os.RemoveAll(d.tempDir)
 		// local unless hard coded higher version
 		if hardCodedIsHigherVersionThan(localVer) {
 			mavToolsDir, err := d.runMavDownload()
@@ -512,6 +515,7 @@ func (d *Download) Run() (string, error) {
 		return bestLocalToolsDir, nil
 
 	case !noLocal && !noZip:
+		defer os.RemoveAll(d.tempDir)
 		// got a best local, a valid hashedZip set and maybe mav.
 		remVer := hzip.version
 		if remVer.greaterThan(localVer) {
@@ -528,7 +532,7 @@ func (d *Download) Run() (string, error) {
 			}
 			return toolsDir, nil
 		}
-		// remote is lower or equal than local
+		// remote is lower than or equal to local
 		if hardCodedIsHigherVersionThan(localVer) {
 			mavToolsDir, err := d.runMavDownload()
 			if err != nil {
