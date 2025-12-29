@@ -168,7 +168,7 @@ func (d *Download) GetBestCurrentLocalToolsDir() (bool, string, error) {
 		dirname string
 	}
 	latest := &latestVer{
-		mv:      moneroVersionZeroV0(), // v0.0.0.0
+		mv:      moneroVersionV0Zero(), // v0.0.0.0
 		dirname: "",
 	}
 
@@ -432,7 +432,7 @@ func (d *Download) chooseHashedZip() error {
 // and download also fails then we download of one of our JSON version sets.
 // =============================================================================
 func (d *Download) Run() (string, error) {
-	var localVer = moneroVersionZeroV0()
+	var localVer = moneroVersionV0Zero()
 
 	noLocal := false
 	noZip := false
@@ -443,6 +443,7 @@ func (d *Download) Run() (string, error) {
 		return "", fmt.Errorf("failed to make temp working dir - %w", err)
 	}
 	d.tempDir = tempDir
+	defer os.RemoveAll(d.tempDir)
 
 	// what do we have locally
 	hasPath, bestLocalToolsDir, err := d.GetBestCurrentLocalToolsDir()
@@ -460,7 +461,7 @@ func (d *Download) Run() (string, error) {
 		if err != nil {
 			// policy is to try find something even though this err indicates bad dirname on valid local
 			d.log.Debugf("continuing after new monero version from dir errored: %v", err)
-			localVer = moneroVersionZeroV0()
+			localVer = moneroVersionV0Zero()
 			noLocal = true
 		}
 	}
@@ -477,7 +478,7 @@ func (d *Download) Run() (string, error) {
 			d.log.Warnf("ignoring error getting monero version set - %v", err)
 			return false
 		}
-		var highestHcVer = moneroVersionZeroV0()
+		var highestHcVer = moneroVersionV0Zero()
 		for _, hcmv := range hcmvs {
 			if hcmv.greaterThan(ver) {
 				// This cannot happen yet from the existing hard coded json
@@ -489,12 +490,10 @@ func (d *Download) Run() (string, error) {
 
 	switch {
 	case noLocal && noZip:
-		defer os.RemoveAll(d.tempDir)
 		// only hard coded
 		return d.runMavDownload()
 
 	case noLocal && !noZip:
-		defer os.RemoveAll(d.tempDir)
 		// canon first, hard coded second
 		toolsDir, err := d.runDownload()
 		if err != nil {
@@ -503,7 +502,6 @@ func (d *Download) Run() (string, error) {
 		return toolsDir, nil
 
 	case !noLocal && noZip:
-		defer os.RemoveAll(d.tempDir)
 		// local unless hard coded higher version
 		if hardCodedIsHigherVersionThan(localVer) {
 			mavToolsDir, err := d.runMavDownload()
@@ -515,7 +513,6 @@ func (d *Download) Run() (string, error) {
 		return bestLocalToolsDir, nil
 
 	case !noLocal && !noZip:
-		defer os.RemoveAll(d.tempDir)
 		// got a best local, a valid hashedZip set and maybe mav.
 		remVer := hzip.version
 		if remVer.greaterThan(localVer) {

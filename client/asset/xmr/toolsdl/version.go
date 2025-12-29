@@ -43,7 +43,7 @@ func newMoneroVersionFromParts(sys, maj, min, patch string) (*moneroVersionV0, e
 	return m, nil
 }
 
-func moneroVersionZeroV0() *moneroVersionV0 {
+func moneroVersionV0Zero() *moneroVersionV0 {
 	return &moneroVersionV0{
 		sys:   "v0",
 		major: 0,
