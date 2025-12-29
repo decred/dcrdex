@@ -132,15 +132,14 @@ func (v *Version) getHashedZips() hashedZips {
 			continue
 		}
 		hzip := hashedZip{
-			hash:     acceptableZip.Hash,
-			zip:      acceptableZip.Zip,
-			dir:      acceptableZip.Dir,
-			ext:      acceptableZip.Ext,
-			os:       acceptableZip.Os,
-			arch:     acceptableZip.Arch,
-			valid:    true,
-			selected: false,
-			version:  mv,
+			hash:    acceptableZip.Hash,
+			zip:     acceptableZip.Zip,
+			dir:     acceptableZip.Dir,
+			ext:     acceptableZip.Ext,
+			os:      acceptableZip.Os,
+			arch:    acceptableZip.Arch,
+			valid:   true,
+			version: mv,
 		}
 		hzips[i] = hzip
 	}

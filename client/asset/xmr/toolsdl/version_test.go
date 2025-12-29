@@ -3,6 +3,9 @@ package toolsdl
 import (
 	"encoding/json"
 	"testing"
+
+	"decred.org/dcrdex/dex"
+	"github.com/decred/slog"
 )
 
 // moneroVersionV0 tests
@@ -57,7 +60,7 @@ func TestToolsVersion(t *testing.T) {
 
 func TestAcceptableVersion(t *testing.T) {
 	dataDir := t.TempDir()
-	dl := &Download{DataDir: dataDir}
+	dl := NewDownload(dataDir, dex.StdOutLogger("Test", slog.LevelTrace))
 	vset, err := getOtherAcceptableVersions(dl.getToolsBasePath())
 	if err != nil || vset == nil {
 		t.Fatal(err)
@@ -72,7 +75,7 @@ func TestAcceptableVersion(t *testing.T) {
 		t.Logf("%v \n", hzips)
 		// should be in same order
 		for i, az := range v.AcceptableZips {
-			if az.Hash != hzips[i].hash || az.Zip != hzips[i].zip || az.Os != hzips[i].os || az.Arch != hzips[i].arch ||
+			if az.Hash != hzips[i].hash || az.Zip != hzips[i].zip || az.Dir != hzips[i].dir || az.Os != hzips[i].os || az.Arch != hzips[i].arch ||
 				az.Ext != hzips[i].ext {
 				t.Fatal("acceptable zip and hashedZip do not have the same contents")
 			}
@@ -80,7 +83,7 @@ func TestAcceptableVersion(t *testing.T) {
 			if err != nil {
 				t.Fatalf("bad acceptableVersion monero version from Dir: %s", az.Dir)
 			}
-			if mv.compare(hzips[i].version) != 0 {
+			if mv.notEqual(hzips[i].version) {
 				t.Fatalf("acceptableVersion version %s is not the same as hashedZip version %s", az.Dir, hzips[i].version.string())
 			}
 		}

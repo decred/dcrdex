@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -132,25 +133,21 @@ func (d *Driver) Create(cwp *asset.CreateWalletParams) error {
 	return cliGenerateRefreshWallet(ctx, trustedDaemons[0], cwp.Logger, cwp.Net, cwp.DataDir, toolsDir, cwp.Pass, cwp.Seed, cwp.Birthday)
 }
 
-// downloadTools gets the latest tools.
+// downloadTools downloads the latest tools if needed. Used by Create.
 func downloadTools(log dex.Logger, dataDir string) (string, error) {
-	dl := &toolsdl.Download{
-		DataDir: dataDir,
-		Log:     log,
-	}
-	hasPath, toolsPath, _, _ := dl.GetBestCurrentLocalToolsDir()
+	dl := toolsdl.NewDownload(dataDir, log)
+	hasPath, toolsPath, _ := dl.GetBestCurrentLocalToolsDir()
 	if !hasPath {
 		return dl.Run()
 	}
 	return toolsPath, nil
 }
 
-// getToolsDir gets the current tools full-path if any, and dir
-func getToolsDir(dataDir string) (string, string, error) {
-	dl := &toolsdl.Download{
-		DataDir: dataDir,
-	}
-	hasPath, toolsPath, dir, err := dl.GetBestCurrentLocalToolsDir()
+// getToolsDir gets the current tools full-path and dir. Used by newWallet.
+func getToolsDir(dataDir string, log dex.Logger) (string, string, error) {
+	dl := toolsdl.NewDownload(dataDir, log)
+	hasPath, toolsPath, err := dl.GetBestCurrentLocalToolsDir()
+	dir := filepath.Base(toolsPath)
 	if err != nil {
 		return "", "", err
 	}
@@ -197,7 +194,7 @@ func newWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		return nil, fmt.Errorf("invalid fee priority %d", feePriority)
 	}
 
-	toolsDir, _, err := getToolsDir(cfg.DataDir)
+	toolsDir, _, err := getToolsDir(cfg.DataDir, logger)
 	if err != nil {
 		return nil, err
 	}

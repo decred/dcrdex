@@ -105,6 +105,30 @@ func (m *moneroVersionV0) compare(other *moneroVersionV0) int {
 	return 0
 }
 
+func (m *moneroVersionV0) equal(other *moneroVersionV0) bool {
+	return m.compare(other) == 0
+}
+
+func (m *moneroVersionV0) notEqual(other *moneroVersionV0) bool {
+	return m.compare(other) != 0
+}
+
+func (m *moneroVersionV0) greaterThan(other *moneroVersionV0) bool {
+	return m.compare(other) > 0
+}
+
+func (m *moneroVersionV0) greaterOrEqual(other *moneroVersionV0) bool {
+	return m.compare(other) >= 0
+}
+
+func (m *moneroVersionV0) lessThan(other *moneroVersionV0) bool {
+	return m.compare(other) < 0
+}
+
+func (m *moneroVersionV0) lessOrEqual(other *moneroVersionV0) bool {
+	return m.compare(other) <= 0
+}
+
 // This changes when v0.18.x.x changes to v0.19.x.x which will invalidate v0.19.x.x
 // Consider making a policy object that can be updated via json file.
 func (m *moneroVersionV0) majorsEqual(other *moneroVersionV0) bool {

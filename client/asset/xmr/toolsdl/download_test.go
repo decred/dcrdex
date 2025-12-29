@@ -3,9 +3,11 @@
 package toolsdl
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"decred.org/dcrdex/dex"
 	"github.com/decred/slog"
@@ -16,15 +18,12 @@ func TestMachine(t *testing.T) {
 	t.Logf("OS: %s, Arch: %s", m.os, m.arch)
 }
 
-func TestGetCurrentLocalToolsDir(t *testing.T) {
+func TestGetBestCurrentLocalToolsDir(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "mainnet", "assetdb", "xmr")
-	dl := &Download{
-		DataDir: dataDir,
-		Log:     dex.StdOutLogger("Test", slog.LevelTrace),
-	}
-	// no tools dir
+	dl := NewDownload(dataDir, dex.StdOutLogger("Test", slog.LevelTrace))
 
-	hasPath, path, _, err := dl.GetBestCurrentLocalToolsDir()
+	// no tools dir
+	hasPath, path, err := dl.GetBestCurrentLocalToolsDir()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,8 +45,9 @@ func TestGetCurrentLocalToolsDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	//
-	hasPath, _, dir, err := dl.GetBestCurrentLocalToolsDir()
+	// test with a tools dir
+	hasPath, path, err = dl.GetBestCurrentLocalToolsDir()
+	dir := filepath.Base(path)
 	if err != nil {
 		t.Fatalf("get current version: - error: %v", err)
 	}
@@ -63,10 +63,7 @@ func TestGetCurrentLocalToolsDir(t *testing.T) {
 
 func TestAllToolsDownload(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "netnet", "assetdb", "xmr")
-	dl := &Download{
-		DataDir: dataDir,
-		Log:     dex.StdOutLogger("Test", slog.LevelTrace),
-	}
+	dl := NewDownload(dataDir, dex.StdOutLogger("Test", slog.LevelTrace))
 
 	toolsDir, err := dl.Run()
 	if err != nil {
@@ -107,12 +104,8 @@ func TestAllToolsDownload(t *testing.T) {
 
 func TestToolsMAVDownload(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "netnet", "assetdb", "xmr")
-	dl := &Download{
-		DataDir: dataDir,
-		Log:     dex.StdOutLogger("Test", slog.LevelTrace),
-	}
+	dl := NewDownload(dataDir, dex.StdOutLogger("Test", slog.LevelTrace))
 	// normally done in 'Run'
-	dl.machine = getMachine()
 	tempDir, err := os.MkdirTemp("", "share-mtools-mav")
 	if err != nil {
 		t.Fatalf("error making temp dir - %v", err)
@@ -129,55 +122,42 @@ func TestToolsMAVDownload(t *testing.T) {
 func TestToolsBasePath(t *testing.T) {
 	home, _ := os.UserHomeDir()
 	var dataDir = filepath.Join(home, ".dexc", "mainnet", "assetdb", "xmr")
-	dl := &Download{
-		DataDir: dataDir,
-		Log:     dex.StdOutLogger("Test", slog.LevelTrace),
-	}
+	dl := NewDownload(dataDir, dex.StdOutLogger("Test", slog.LevelTrace))
 	tbp := dl.getToolsBasePath()
 	if tbp != filepath.Join(home, ".dexc", "share", "monero-tools") {
 		t.Fatalf("bad tools path %s", tbp)
 	}
 
 	dataDir = filepath.Join(home, ".dexc", "simnet", "assetdb", "xmr")
-	dl = &Download{
-		DataDir: dataDir,
-	}
+	dl = NewDownload(dataDir, dex.StdOutLogger("Test", slog.LevelTrace))
 	tbp = dl.getToolsBasePath()
 	if tbp != filepath.Join(home, ".dexc", "share", "monero-tools") {
 		t.Fatalf("bad tools path %s", tbp)
 	}
 
 	dataDir = filepath.Join(home, ".dexc", "testnet", "assetdb", "xmr")
-	dl = &Download{
-		DataDir: dataDir,
-	}
+	dl = NewDownload(dataDir, dex.StdOutLogger("Test", slog.LevelTrace))
 	tbp = dl.getToolsBasePath()
 	if tbp != filepath.Join(home, ".dexc", "share", "monero-tools") {
 		t.Fatalf("bad tools path %s", tbp)
 	}
 
 	dataDir = filepath.Join(home, "testnet", "assetdb", "xmr")
-	dl = &Download{
-		DataDir: dataDir,
-	}
+	dl = NewDownload(dataDir, dex.StdOutLogger("Test", slog.LevelTrace))
 	tbp = dl.getToolsBasePath()
 	if tbp != filepath.Join(home, "share", "monero-tools") {
 		t.Fatalf("bad tools path %s", tbp)
 	}
 
 	dataDir = filepath.Join(string(os.PathSeparator), "testnet", "assetdb", "xmr")
-	dl = &Download{
-		DataDir: dataDir,
-	}
+	dl = NewDownload(dataDir, dex.StdOutLogger("Test", slog.LevelTrace))
 	tbp = dl.getToolsBasePath()
 	if tbp != filepath.Join(string(os.PathSeparator), "share", "monero-tools") {
 		t.Fatalf("bad tools path %s", tbp)
 	}
 
 	dataDir = filepath.Join(home, "dextest", "simnet-walletpair", "dexc2", "regtestsimnet", "assetdb", "xmr")
-	dl = &Download{
-		DataDir: dataDir,
-	}
+	dl = NewDownload(dataDir, dex.StdOutLogger("Test", slog.LevelTrace))
 	tbp = dl.getToolsBasePath()
 	if tbp != filepath.Join(home, "dextest", "simnet-walletpair", "dexc2", "share", "monero-tools") {
 		t.Fatalf("bad tools path %s", tbp)
@@ -186,14 +166,21 @@ func TestToolsBasePath(t *testing.T) {
 
 func TestDownloadHashesFile(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "mainnet", "assetdb", "xmr")
-	dl := &Download{
-		DataDir: dataDir,
-		Log:     dex.StdOutLogger("Test", slog.LevelTrace),
-		tempDir: dataDir,
-	}
+	dl := NewDownload(dataDir, dex.StdOutLogger("Test", slog.LevelTrace))
+	dl.tempDir = dataDir // download here
 	hashFilePath, err := dl.downloadHashesFile()
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("%s\n", hashFilePath)
+}
+
+func TestUrlGet(t *testing.T) {
+	hashesCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	resp, err := urlGet(hashesCtx, hashesLink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
 }
