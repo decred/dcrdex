@@ -1537,33 +1537,25 @@ func (m *multiRPCClient) SubscribeFilterLogs(ctx context.Context, query ethereum
 
 const (
 	// Compliant providers
-	providerIPC         = "IPC"
-	providerLinkPool    = "linkpool.io"
-	providerMewAPI      = "mewapi.io"
-	providerFlashBots   = "flashbots.net"
-	providerMyCryptoAPI = "mycryptoapi.com"
-	providerRunOnFlux   = "runonflux.io"
-	providerInfura      = "infura.io"
-	providerRivetCloud  = "rivet.cloud"
-	providerAlchemy     = "alchemy.com"
-	providerAnkr        = "ankr.com"
-	providerdRPC        = "drpc.org"
+	providerIPC        = "IPC"
+	providerInfura     = "infura.io"
+	providerRivetCloud = "rivet.cloud"
+	providerAlchemy    = "alchemy.com"
+	providerdRPC       = "drpc.org"
+	providerBlastAPI   = "blastapi.io"
+	providerPublicNode = "publicnode.com"
 
 	// Non-compliant providers
 	// providerCloudflareETH = "cloudflare-eth.com" // "SuggestGasTipCap" error: Method not found
 )
 
 var compliantProviders = map[string]struct{}{
-	providerLinkPool:    {},
-	providerMewAPI:      {},
-	providerFlashBots:   {},
-	providerMyCryptoAPI: {},
-	providerRunOnFlux:   {},
-	providerInfura:      {},
-	providerRivetCloud:  {},
-	providerAlchemy:     {},
-	providerAnkr:        {},
-	providerdRPC:        {},
+	providerInfura:     {},
+	providerRivetCloud: {},
+	providerAlchemy:    {},
+	providerdRPC:       {},
+	providerBlastAPI:   {},
+	providerPublicNode: {},
 }
 
 type rpcTest struct {

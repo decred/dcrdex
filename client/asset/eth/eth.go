@@ -707,23 +707,19 @@ func newWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		defaultProviders = []string{"http://127.0.0.1:38556"}
 	case dex.Testnet:
 		defaultProviders = []string{
-			"https://rpc.ankr.com/eth_sepolia",
-			"https://ethereum-sepolia.blockpi.network/v1/rpc/public",
-			"https://endpoints.omniatech.io/v1/eth/sepolia/public",
-			"https://rpc-sepolia.rockx.com",
-			"https://rpc.sepolia.org",
-			"https://eth-sepolia-public.unifra.io",
-			"https://sepolia.drpc.org",
+			// Verified working (2025-12-26)
+			"https://ethereum-sepolia-rpc.publicnode.com",          // PublicNode - no rate limits
+			"https://sepolia.drpc.org",                             // dRPC - verified working
+			"https://endpoints.omniatech.io/v1/eth/sepolia/public", // Omniatech - verified working
+			"https://rpc-sepolia.rockx.com",                        // RockX - verified working
 		}
 	case dex.Mainnet:
 		defaultProviders = []string{
-			"https://rpc.ankr.com/eth",
-			"https://ethereum.blockpi.network/v1/rpc/public",
-			"https://eth-mainnet.nodereal.io/v1/1659dfb40aa24bbb8153a677b98064d7",
-			"https://rpc.builder0x69.io",
-			"https://rpc.flashbots.net",
-			"wss://eth.llamarpc.com",
-			"https://eth.drpc.org",
+			// Verified working (2025-12-26)
+			"https://eth-mainnet.nodereal.io/v1/1659dfb40aa24bbb8153a677b98064d7", // NodeReal - verified working
+			"https://eth.api.onfinality.io/public",                                // OnFinality - verified working
+			"https://eth-mainnet.public.blastapi.io",                              // Blast API - verified working
+			"https://ethereum-rpc.publicnode.com",                                 // PublicNode - verified working
 		}
 	}
 
