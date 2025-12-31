@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"decred.org/dcrdex/dex"
 	"github.com/decred/dcrd/chaincfg/chainhash"
@@ -713,6 +714,54 @@ func TestIsRefundScript(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if is := IsRefundScript(tt.scriptVersion, tt.sigScript, tt.contract, false); is != tt.want {
 				t.Errorf("want %v, got %v", tt.want, is)
+			}
+		})
+	}
+}
+
+func TestExtractPaymentMultisigDetails(t *testing.T) {
+	p2pkh, _ := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(randBytes(20), tParams)
+	pk1 := secp256k1.PrivKeyFromBytes(randBytes(32)).PubKey()
+	pk2 := secp256k1.PrivKeyFromBytes(randBytes(32)).PubKey()
+	//pk3, _ := stdaddr.NewAddressPubKeyEcdsaSecp256k1V0Raw(newPubKey(), tParams)
+	tests := []struct {
+		name      string
+		nRequired int64
+		locktime  int64
+		pubKeys   []*secp256k1.PublicKey
+	}{{
+		name:      "ok 1 of 2",
+		nRequired: 1,
+		locktime:  time.Now().Unix(),
+		pubKeys:   []*secp256k1.PublicKey{pk1, pk2},
+	}}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			redeemScript, err := MakePaymentMultisig(p2pkh.String(), test.pubKeys, test.nRequired, test.locktime, tParams)
+			if err != nil {
+				t.Fatal(err)
+			}
+			nRequired, sender, locktime, pubKeys, err := ExtractPaymentMultisigDetails(redeemScript)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if nRequired != test.nRequired {
+				t.Fatalf("wanted nRequired %v but got %v", test.nRequired, nRequired)
+			}
+			hash := p2pkh.Hash160()
+			if sender != *hash {
+				t.Fatalf("wanted sender %v but got %v", p2pkh.Hash160(), sender)
+			}
+			if locktime != test.locktime {
+				t.Fatalf("wanted locktime %v but got %v", test.locktime, locktime)
+			}
+			if len(pubKeys) != len(test.pubKeys) {
+				t.Fatal("diff number of pubkeys")
+			}
+			for i, pubkey := range test.pubKeys {
+				if !bytes.Equal(pubkey.SerializeCompressed()[:], pubKeys[i].SerializeCompressed()[:]) {
+					t.Fatal("pubkeys not equal or in order")
+				}
 			}
 		})
 	}
