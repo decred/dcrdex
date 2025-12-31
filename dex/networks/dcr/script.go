@@ -15,6 +15,7 @@ import (
 	"decred.org/dcrwallet/v5/wallet/txsizes"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/decred/dcrd/txscript/v4"
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
@@ -1094,4 +1095,165 @@ func FindKeyPush(scriptVersion uint16, sigScript, contractHash []byte, chainPara
 	}
 
 	return nil, fmt.Errorf("key not found")
+}
+
+// MakePaymentMultisig makes a script that can be used to send funds to an address
+// that requires either n signatures from signerXpubs or can be used by sender
+// after locktime has passed.
+func MakePaymentMultisig(sender string, signerXpubs []*secp256k1.PublicKey, nRequired,
+	locktime int64, chainParams *chaincfg.Params) (redeemScript []byte, err error) {
+	if nRequired < 1 || nRequired > 16 {
+		return nil, errors.New("use nRequired between 1 and 16")
+	}
+	if len(signerXpubs) < 2 || len(signerXpubs) > 16 {
+		return nil, errors.New("use between 2 and 16 signers")
+	}
+	addr, err := stdaddr.DecodeAddress(sender, chainParams)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding address %s: %w", sender, err)
+	}
+	p2pkh, ok := addr.(*stdaddr.AddressPubKeyHashEcdsaSecp256k1V0)
+	if !ok {
+		return nil, fmt.Errorf("address %s is not a pubkey-hash address or "+
+			"signature algorithm is unsupported", sender)
+	}
+
+	b := txscript.NewScriptBuilder().
+		AddOp(txscript.OP_IF)
+	{ // multisig
+		b.AddInt64(nRequired)
+		for _, xpub := range signerXpubs {
+			b.AddData(xpub.SerializeCompressed())
+		}
+		b.AddInt64(int64(len(signerXpubs)))
+		b.AddOp(txscript.OP_CHECKMULTISIG)
+	}
+	b.AddOp(txscript.OP_ELSE)
+	{ // refund to sender
+		b.AddInt64(locktime)
+		b.AddOp(txscript.OP_CHECKLOCKTIMEVERIFY)
+		b.AddOp(txscript.OP_DROP)
+		b.AddOp(txscript.OP_DUP)
+		b.AddOp(txscript.OP_HASH160)
+		b.AddData(p2pkh.Hash160()[:])
+		b.AddOp(txscript.OP_EQUALVERIFY)
+		b.AddOp(txscript.OP_CHECKSIG)
+	}
+	b.AddOp(txscript.OP_ENDIF)
+	return b.Script()
+}
+
+// RedeemPaymentMultisig spends a payment multisig if there are enough signatures.
+func RedeemPaymentMultisig(redeemScript []byte, sigs [][]byte) ([]byte, error) {
+	b := txscript.NewScriptBuilder()
+	for _, sig := range sigs {
+		b.AddData(sig)
+	}
+	b.AddInt64(1)
+	return b.AddData(redeemScript).
+		Script()
+}
+
+// SigsFromPaymentMultisig returns the signatures and redeemScript from a signed
+// payment multisig.
+func SigsFromPaymentMultisig(sigScript []byte) (redeemScript []byte, sigs [][]byte, err error) {
+	var scriptVer uint16
+	tokenizer := txscript.MakeScriptTokenizer(scriptVer, sigScript)
+	for !tokenizer.Done() {
+		if !tokenizer.Next() {
+			err = tokenizer.Err()
+			return
+		}
+		sig := tokenizer.Data()
+		if sig == nil {
+			continue
+		}
+		sigs = append(sigs, sig)
+	}
+	nSigs := len(sigs)
+	if nSigs == 0 {
+		return nil, nil, errors.New("no sigs found")
+	}
+	redeemScript = sigs[nSigs-1]
+	sigs = sigs[:nSigs-1]
+	return
+}
+
+// RefundPaymentMultisig spends a payment multisig if after the locktime and
+// signed by the sender.
+func RefundPaymentMultisig(redeemScript, pubKey, sig []byte) ([]byte, error) {
+	return txscript.NewScriptBuilder().
+		AddData(sig).
+		AddData(pubKey).
+		AddInt64(0).
+		AddData(redeemScript).
+		Script()
+}
+
+// ExtractPaymentMultisigDetails extracts details from a multisig payment script.
+func ExtractPaymentMultisigDetails(script []byte) (nRequired int64, sender [ripemd160.Size]byte,
+	locktime int64, pubKeys []*secp256k1.PublicKey, err error) {
+	// OP_IF
+	//  nRequired (OP_DATA_33 pubkey) nKeys OP_CHECKMULTISIG
+	//      1    +     var (34x)   +    1     +    1
+	// OP_ELSE
+	//  OP_DATA4 lockTime OP_CHECKLOCKTIMEVERIFY OP_DROP OP_DUP OP_HASH160 OP_DATA_20 pkHashSender OP_EQUALVERIFY OP_CHECKSIG
+	//     1    +    4   +           1          +   1   +  1   +    1     +   1      +    20      +      1       +     1
+	// OP_ENDIF
+	//
+	// NOTE: nRequired and nKeys are limited to numbers 1-16. Larger numbers would use OP_DATA1.
+	// 3 bytes if-else-endif-equalverify-checksig
+	// total 38 plus a variable number of 1+33 byte public keys
+
+	if len(script) < 38 {
+		err = fmt.Errorf("invalid multisig payment length = %v", len(script))
+		return
+	}
+	gapSize := len(script) - 38
+	pubBlock := secp256k1.PubKeyBytesLenCompressed + 1
+	if gapSize%pubBlock != 0 {
+		err = fmt.Errorf("invalid multisig payment length = %v", len(script))
+		return
+	}
+	if script[0] == txscript.OP_IF &&
+		// nRequired
+		// OP_DATA_33 and pubkey pairs
+		// nKeys
+		script[gapSize+3] == txscript.OP_CHECKMULTISIG &&
+		script[gapSize+4] == txscript.OP_ELSE &&
+		script[gapSize+5] == txscript.OP_DATA_4 &&
+		// locktime
+		script[gapSize+10] == txscript.OP_CHECKLOCKTIMEVERIFY &&
+		script[gapSize+11] == txscript.OP_DROP &&
+		script[gapSize+12] == txscript.OP_DUP &&
+		script[gapSize+13] == txscript.OP_HASH160 &&
+		script[gapSize+14] == txscript.OP_DATA_20 &&
+		// sender hash
+		script[gapSize+35] == txscript.OP_EQUALVERIFY &&
+		script[gapSize+36] == txscript.OP_CHECKSIG &&
+		script[gapSize+37] == txscript.OP_ENDIF {
+		nPubKeys := gapSize / pubBlock
+		if nPubKeys != int(script[gapSize+2])-txscript.OP_1+1 {
+			return 0, [ripemd160.Size]byte{}, 0, nil, errors.New("invalid nPubKeys")
+		}
+		pubKeys = make([]*secp256k1.PublicKey, nPubKeys)
+		for i := 0; i < nPubKeys; i++ {
+			if script[i*pubBlock+2] != txscript.OP_DATA_33 {
+				return 0, [ripemd160.Size]byte{}, 0, nil, errors.New("invalid multisig payment script")
+			}
+			start := i*pubBlock + 3
+			pubKeys[i], err = secp256k1.ParsePubKey(script[start : start+secp256k1.PubKeyBytesLenCompressed])
+			if err != nil {
+				return 0, [ripemd160.Size]byte{}, 0, nil, fmt.Errorf("bad pubkey: %v", err)
+			}
+		}
+		start := gapSize + 15
+		copy(sender[:], script[start:start+ripemd160.Size])
+		nRequired = int64(script[1]) - txscript.OP_1 + 1
+		start = gapSize + 6
+		locktime = int64(binary.LittleEndian.Uint32(script[start : start+4]))
+	} else {
+		err = errors.New("invalid multisig payment script")
+	}
+	return
 }
