@@ -21,7 +21,7 @@ docker buildx build -f client/Dockerfile \
   --output "type=registry"  .
 ```
 
-This is a multi-platform (targeting `amd64` and `arm64`) build which takes longer, this is normal.  
+This is a multi-platform (targeting `amd64` and `arm64`) build which takes longer, this is normal.
 If there are no error messages, at the end of the build the image will be published to Docker.
 
 1. Verify that the image has been published on <https://hub.docker.com/r/decred/dcrdex/tags>.  There should be 2 digest lines; these indicate that both target platforms have been built and are included in the published image.
