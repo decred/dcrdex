@@ -113,12 +113,16 @@ type AcceptableZip struct {
 	Arch string `json:"arch"`
 }
 
+type AcceptableZipsList []AcceptableZip
+
 type Version struct {
-	AcceptableZips []AcceptableZip `json:"zips"`
+	AcceptableZips AcceptableZipsList `json:"zips"`
 }
 
-type versionSet struct {
-	versions []Version // no tag
+type VersionsList []Version
+
+type VersionSet struct {
+	Versions VersionsList // no tag
 }
 
 type moneroVersionSet []*moneroVersionV0
@@ -149,7 +153,7 @@ func (v *Version) getHashedZips() hashedZips {
 // getOtherAcceptableVersions gets other acceptable Zip versions from 'versions.json'
 // if it exists or from json definition(s) above. JSON file contents override any
 // hard-coded information in this file.
-func getOtherAcceptableVersions(toolsDir string) (*versionSet, error) {
+func getOtherAcceptableVersions(toolsDir string) (*VersionSet, error) {
 	vsFile, err := getVersionsFromJsonFile(toolsDir)
 	if err == nil {
 		return vsFile, nil
@@ -162,23 +166,23 @@ func getOtherAcceptableVersions(toolsDir string) (*versionSet, error) {
 	return vsJson, nil
 }
 
-func getVersionsFromJsonFile(toolsDir string) (*versionSet, error) {
-	var vs versionSet
+func getVersionsFromJsonFile(toolsDir string) (*VersionSet, error) {
+	var vs VersionSet
 	versionsFilepath := filepath.Join(toolsDir, VersionsFilename)
 	versions, err := os.ReadFile(versionsFilepath)
 	if err != nil {
 		return nil, err
 	}
-	err = json.Unmarshal(versions, &vs.versions)
+	err = json.Unmarshal(versions, &vs.Versions)
 	if err != nil {
 		fmt.Printf("unmarshall error - %v\n", err)
 	}
 	return &vs, nil
 }
 
-func getHardCodedJsonVersions() (*versionSet, error) {
-	var vs versionSet
-	err := json.Unmarshal([]byte(jsonVersions), &vs.versions)
+func getHardCodedJsonVersions() (*VersionSet, error) {
+	var vs VersionSet
+	err := json.Unmarshal([]byte(jsonVersions), &vs.Versions)
 	if err != nil {
 		return nil, fmt.Errorf("unmarshall all versions - %w", err)
 	}
@@ -191,9 +195,9 @@ func getMoneroMAVersionSet() (moneroVersionSet, error) {
 	if err != nil {
 		return nil, err
 	}
-	lenVersions := len(vs.versions)
+	lenVersions := len(vs.Versions)
 	mvs = make(moneroVersionSet, lenVersions)
-	for i, v := range vs.versions {
+	for i, v := range vs.Versions {
 		mv, err := newMoneroVersionFromDir(v.AcceptableZips[0].Dir)
 		if err != nil {
 			continue

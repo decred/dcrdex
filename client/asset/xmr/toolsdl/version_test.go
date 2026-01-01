@@ -65,7 +65,7 @@ func TestAcceptableVersion(t *testing.T) {
 	if err != nil || vset == nil {
 		t.Fatal(err)
 	}
-	for _, v := range vset.versions {
+	for _, v := range vset.Versions {
 		s, err := json.MarshalIndent(v, "", "  ")
 		if err != nil {
 			t.Fatal(err)

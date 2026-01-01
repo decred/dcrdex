@@ -327,7 +327,7 @@ func (d *Download) getHashedZips(hashesFilePath string) error {
 			d.hzips = append(d.hzips, hashedZip{
 				hash: tkns[0],
 				zip:  tkns[1],
-				dir:  getDirFromZip(tkns[1]),
+				dir:  GetDirFromZip(tkns[1]),
 			})
 		}
 	}
@@ -335,10 +335,10 @@ func (d *Download) getHashedZips(hashesFilePath string) error {
 	return scanner.Err()
 }
 
-func getDirFromZip(zipTkn string) string {
+func GetDirFromZip(zipTkn string) string {
 	isWinZip := strings.HasSuffix(zipTkn, WinZipExt)
 	isTarBz2 := strings.HasSuffix(zipTkn, TarBz2Ext)
-	if !isWinZip && !isTarBz2 {
+	if (!isWinZip && !isTarBz2) || (isWinZip && isTarBz2) {
 		return zipTkn
 	}
 	var lastIndex int
@@ -554,7 +554,7 @@ func (d *Download) runMavDownload() (string, error) {
 	}
 
 	// descending versions
-	slices.SortFunc(vset.versions, func(this, other Version) int {
+	slices.SortFunc(vset.Versions, func(this, other Version) int {
 		mvThis, _ := newMoneroVersionFromDir(this.AcceptableZips[0].Dir)
 		mvOther, _ := newMoneroVersionFromDir(other.AcceptableZips[0].Dir)
 		return mvThis.compare(mvOther)
@@ -564,7 +564,7 @@ func (d *Download) runMavDownload() (string, error) {
 
 	// try all versions from highest to lowest. first hit attempts a download.
 	// if error then try lower acceptable versions.
-	for _, v := range vset.versions {
+	for _, v := range vset.Versions {
 		hzips := v.getHashedZips()
 		// hzips should all have same version
 		for i, az := range v.AcceptableZips {
