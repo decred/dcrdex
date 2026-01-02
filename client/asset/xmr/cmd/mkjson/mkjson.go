@@ -5,14 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"strings"
 
 	"decred.org/dcrdex/client/asset/xmr/toolsdl"
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/dexnet"
-	"github.com/PuerkitoBio/goquery"
+	"github.com/anaskhan96/soup"
 	"github.com/decred/slog"
 )
 
@@ -20,24 +18,35 @@ const (
 	moneroReleasePage = "https://github.com/monero-project/monero/releases"
 )
 
+// func downloadAndParseText(url string) (string, error) {
+// 	// download the HTML.
+// 	res, err := dexnet.Client.Get(url) // default 20s is probably fine; if not lmk.
+// 	if err != nil {
+// 		return "", fmt.Errorf("failed to download URL: %w", err)
+// 	}
+// 	defer res.Body.Close()
+// 	if res.StatusCode != http.StatusOK {
+// 		return "", fmt.Errorf("bad status code: %d %s", res.StatusCode, res.Status)
+// 	}
+// 	// parse the HTML using 'goquery'.
+// 	doc, err := goquery.NewDocumentFromReader(res.Body)
+// 	if err != nil {
+// 		return "", fmt.Errorf("failed to parse HTML: %w", err)
+// 	}
+// 	// remove script and style elements to avoid including their code as text.
+// 	doc.Find("script, style").Remove()
+// 	return strings.TrimSpace(doc.Text()), nil
+// }
+
 func downloadAndParseText(url string) (string, error) {
-	// download the HTML.
-	res, err := dexnet.Client.Get(url) // default 20s is probably fine; if not lmk.
+	resp, err := soup.Get(url)
 	if err != nil {
 		return "", fmt.Errorf("failed to download URL: %w", err)
 	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("bad status code: %d %s", res.StatusCode, res.Status)
-	}
-	// parse the HTML using 'goquery'.
-	doc, err := goquery.NewDocumentFromReader(res.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse HTML: %w", err)
-	}
-	// remove script and style elements to avoid including their code as text.
-	doc.Find("script, style").Remove()
-	return strings.TrimSpace(doc.Text()), nil
+	doc := soup.HTMLParse(resp)
+	cleanText := doc.FullText()
+	fmt.Println(cleanText)
+	return strings.TrimSpace(cleanText), nil
 }
 
 func scanText(txt string) ([]string, error) {
