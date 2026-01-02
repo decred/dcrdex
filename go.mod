@@ -81,8 +81,6 @@ require (
 	lukechampine.com/blake3 v1.3.0
 )
 
-require github.com/andybalholm/cascadia v1.3.3 // indirect
-
 replace github.com/btcsuite/btcd/btcec/v2 v2.3.4 => github.com/martonp/btcd/btcec/v2 v2.0.0-20250528172049-6b252bb1b6a1
 
 require (
@@ -94,6 +92,7 @@ require (
 	github.com/StackExchange/wmi v1.2.1 // indirect
 	github.com/VictoriaMetrics/fastcache v1.12.2 // indirect
 	github.com/aead/siphash v1.0.1 // indirect
+	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/bits-and-blooms/bitset v1.20.0 // indirect
 	github.com/btcsuite/btcwallet/wallet/txrules v1.2.2 // indirect
 	github.com/btcsuite/btcwallet/wallet/txsizes v1.2.5 // indirect

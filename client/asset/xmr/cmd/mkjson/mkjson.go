@@ -11,6 +11,7 @@ import (
 
 	"decred.org/dcrdex/client/asset/xmr/toolsdl"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/dexnet"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/decred/slog"
 )
@@ -20,17 +21,15 @@ const (
 )
 
 func downloadAndParseText(url string) (string, error) {
-	// download the HTML content.
-	res, err := http.Get(url) // default 20s is probably fine; if not lmk.
+	// download the HTML.
+	res, err := dexnet.Client.Get(url) // default 20s is probably fine; if not lmk.
 	if err != nil {
 		return "", fmt.Errorf("failed to download URL: %w", err)
 	}
 	defer res.Body.Close()
-
 	if res.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("bad status code: %d %s", res.StatusCode, res.Status)
 	}
-
 	// parse the HTML using 'goquery'.
 	doc, err := goquery.NewDocumentFromReader(res.Body)
 	if err != nil {
@@ -38,14 +37,13 @@ func downloadAndParseText(url string) (string, error) {
 	}
 	// remove script and style elements to avoid including their code as text.
 	doc.Find("script, style").Remove()
-	// get the text of the entire body and trim whitespace.
 	return strings.TrimSpace(doc.Text()), nil
 }
 
 func scanText(txt string) ([]string, error) {
 	const (
-		downStr = "Download Hashes"
-		likeStr = "If you would like to verify that you have downloaded the correct file"
+		downTrigger = "Download Hashes"
+		likeTrigger = "If you would like to verify that you have downloaded the correct file"
 		// state
 		searching     = "searching"
 		foundDownload = "foundDownload"
@@ -66,12 +64,12 @@ func scanText(txt string) ([]string, error) {
 
 		switch state {
 		case searching:
-			if strings.Contains(line, downStr) {
+			if strings.Contains(line, downTrigger) {
 				state = foundDownload
 				continue
 			}
 		case foundDownload:
-			if strings.Contains(line, likeStr) {
+			if strings.Contains(line, likeTrigger) {
 				state = collecting
 				continue
 			}
@@ -101,7 +99,7 @@ func getZipLinesTokens(zipLine string) (*toolsdl.AcceptableZip, error) {
 
 	tkns := strings.Split(zipLine, sep)
 	if len(tkns) != 2 {
-		tkns = strings.Split(zipLine, sepTypo) // missing ',' .. maybe typo
+		tkns = strings.Split(zipLine, sepTypo) // missing ',' .. maybe html typo
 		if len(tkns) != 2 {
 			return nil, fmt.Errorf("got %d tokens, expected 2", len(tkns))
 		}
@@ -142,7 +140,7 @@ func makeVersionedZips(zipLines []string) ([]toolsdl.AcceptableZipsList, error) 
 	var zipVersions []toolsdl.AcceptableZipsList
 
 	var currentDir = ""
-	currVersion := make(toolsdl.AcceptableZipsList, 0)
+	currVersion := make(toolsdl.AcceptableZipsList, 0) // safety, discarded; could also be a var
 	for i, zipLine := range zipLines {
 		az, err := getZipLinesTokens(zipLine)
 		if err != nil {
@@ -159,19 +157,10 @@ func makeVersionedZips(zipLines []string) ([]toolsdl.AcceptableZipsList, error) 
 			if i > 0 {
 				zipVersions = append(zipVersions, currVersion)
 			}
-			currVersion = make(toolsdl.AcceptableZipsList, 0)
+			currVersion = make(toolsdl.AcceptableZipsList, 0, 10)
 		}
 
 		currVersion = append(currVersion, *az)
-	}
-
-	for _, zvs := range zipVersions {
-		// fmt.Printf("%s\n\n", zvs)
-		for _, zv := range zvs {
-			fmt.Println(zv)
-		}
-		fmt.Println()
-
 	}
 
 	return zipVersions, nil
@@ -211,11 +200,10 @@ func main() {
 		log.Errorf("error making versioned zip line list: %v", err)
 		os.Exit(1)
 	}
-
-	// err = mkJson(verList)
-	// if err != nil {
-	// 	log.Errorf("error making json: %v", err)
-	// 	os.Exit(1)
-	// }
+	err = mkJson(versionedZips)
+	if err != nil {
+		log.Errorf("error making json: %v", err)
+		os.Exit(1)
+	}
 	log.Infof("done %d versions.", len(versionedZips))
 }

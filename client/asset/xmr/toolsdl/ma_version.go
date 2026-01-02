@@ -122,7 +122,7 @@ type Version struct {
 type VersionsList []Version
 
 type VersionSet struct {
-	Versions VersionsList // no tag
+	Versions VersionsList `json:"versions"` // no tag
 }
 
 type moneroVersionSet []*moneroVersionV0
