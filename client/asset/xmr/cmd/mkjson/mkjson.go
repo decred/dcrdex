@@ -14,29 +14,7 @@ import (
 	"github.com/decred/slog"
 )
 
-const (
-	moneroReleasePage = "https://github.com/monero-project/monero/releases"
-)
-
-// func downloadAndParseText(url string) (string, error) {
-// 	// download the HTML.
-// 	res, err := dexnet.Client.Get(url) // default 20s is probably fine; if not lmk.
-// 	if err != nil {
-// 		return "", fmt.Errorf("failed to download URL: %w", err)
-// 	}
-// 	defer res.Body.Close()
-// 	if res.StatusCode != http.StatusOK {
-// 		return "", fmt.Errorf("bad status code: %d %s", res.StatusCode, res.Status)
-// 	}
-// 	// parse the HTML using 'goquery'.
-// 	doc, err := goquery.NewDocumentFromReader(res.Body)
-// 	if err != nil {
-// 		return "", fmt.Errorf("failed to parse HTML: %w", err)
-// 	}
-// 	// remove script and style elements to avoid including their code as text.
-// 	doc.Find("script, style").Remove()
-// 	return strings.TrimSpace(doc.Text()), nil
-// }
+const moneroReleasePage = "https://github.com/monero-project/monero/releases"
 
 func downloadAndParseText(url string) (string, error) {
 	resp, err := soup.Get(url)
@@ -45,7 +23,6 @@ func downloadAndParseText(url string) (string, error) {
 	}
 	doc := soup.HTMLParse(resp)
 	cleanText := doc.FullText()
-	fmt.Println(cleanText)
 	return strings.TrimSpace(cleanText), nil
 }
 
@@ -57,6 +34,8 @@ func scanText(txt string) ([]string, error) {
 		searching     = "searching"
 		foundDownload = "foundDownload"
 		collecting    = "collecting"
+		// prefix
+		monero = "monero-"
 	)
 
 	var zipLines = make([]string, 0)
@@ -83,7 +62,7 @@ func scanText(txt string) ([]string, error) {
 				continue
 			}
 		case collecting:
-			if strings.HasPrefix(line, "monero-") {
+			if strings.HasPrefix(line, monero) {
 				zipLines = append(zipLines, line)
 				continue
 			}
@@ -192,7 +171,7 @@ func mkJson(acceptableZipsLists []toolsdl.AcceptableZipsList) error {
 }
 
 func main() {
-	var log = dex.StdOutLogger("Test", slog.LevelTrace)
+	var log = dex.StdOutLogger("MKJSON", slog.LevelTrace)
 
 	txtReleasesPage, err := downloadAndParseText(moneroReleasePage)
 	if err != nil {
@@ -206,13 +185,13 @@ func main() {
 	}
 	versionedZips, err := makeVersionedZips(zipLines)
 	if err != nil {
-		log.Errorf("error making versioned zip line list: %v", err)
+		log.Errorf("error making versioned zip line lists: %v", err)
 		os.Exit(1)
 	}
 	err = mkJson(versionedZips)
 	if err != nil {
-		log.Errorf("error making json: %v", err)
+		log.Errorf("error marshaing json: %v", err)
 		os.Exit(1)
 	}
-	log.Infof("done %d versions.", len(versionedZips))
+	log.Infof("encoded %d versions to JSON.", len(versionedZips))
 }

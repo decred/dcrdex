@@ -20,7 +20,7 @@ Linux/Mac:
 
 ## More Information
 
-This tool will download the first releases page from <https://github.com/decred/dcrdex/releases> and then pull out the versioned Hashed Zip lines such as:-
+This tool will download the first releases page from <https://github.com/decred/dcrdex/releases> and then pull out the versioned Hashed Zip lines like:-
 
 
 ```text
