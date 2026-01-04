@@ -10,7 +10,9 @@ import (
 	"decred.org/dcrdex/dex"
 	dcrwalletjson "decred.org/dcrwallet/v5/rpc/jsonrpc/types"
 	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/decred/dcrd/txscript/v4/stdaddr"
 )
 
 // WalletTrait is a bitset indicating various optional wallet features, such as
@@ -1360,7 +1362,7 @@ type TicketStakingStatus struct {
 }
 
 // TicketBuyer is a wallet that can participate in decred staking.
-//
+// Satisfies pi.VotingWallet.
 // TODO: Consider adding (*AutoClient).ProcessUnprocessedTickets/ProcessManagedTickets
 // to be used when restoring wallet from seed.
 type TicketBuyer interface {
@@ -1369,7 +1371,7 @@ type TicketBuyer interface {
 	StakeStatus() (*TicketStakingStatus, error)
 	// SetVSP sets the VSP provider.
 	SetVSP(addr string) error
-	// PurchaseTickets starts an aysnchronous process to purchase n tickets.
+	// PurchaseTickets starts an asynchronous process to purchase n tickets.
 	// Look for TicketPurchaseUpdate notifications to track the process.
 	PurchaseTickets(n int, feeSuggestion uint64) error
 	// SetVotingPreferences sets default voting settings for all active
@@ -1383,6 +1385,15 @@ type TicketBuyer interface {
 	// starting at scanStart and going to progressively lower blocks. scanStart
 	// can be set to -1 to indicate the current chain tip.
 	TicketPage(scanStart int32, n, skipN int) ([]*Ticket, error)
+	// AddressAccount returns the account number for an address. If the address has no associated account,
+	// false and a nil error should be expected.
+	AddressAccount(address string) (bool, uint32, error)
+	// SignMessage returns the signature of a signed message using an address'
+	// associated private key.
+	SignMessage(msg string, addr string) ([]byte, error)
+	// CommittedTickets takes a list of tickets and returns a filtered list of
+	// tickets that are controlled by this wallet.
+	CommittedTickets(tickets []*chainhash.Hash) ([]*chainhash.Hash, []stdaddr.Address, error)
 }
 
 // TransactionType is the type of transaction made by a wallet.

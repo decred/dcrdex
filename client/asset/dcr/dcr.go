@@ -6537,6 +6537,24 @@ func (dcr *ExchangeWallet) TicketPage(scanStart int32, n, skipN int) ([]*asset.T
 	return pager.TicketPage(dcr.ctx, scanStart, n, skipN)
 }
 
+// AddressAccount returns the account number for an address. If the address has no associated account,
+// false and a nil error should be expected.
+func (dcr *ExchangeWallet) AddressAccount(address string) (bool, uint32, error) {
+	return dcr.wallet.AddressAccount(dcr.ctx, address)
+}
+
+// SignMessage returns the signature of a signed message using an address'
+// associated private key.
+func (dcr *ExchangeWallet) SignMessage(msg string, addr string) ([]byte, error) {
+	return dcr.wallet.SignMessage(dcr.ctx, msg, addr)
+}
+
+// CommittedTickets takes a list of tickets and returns a filtered list of
+// tickets that are controlled by this wallet.
+func (dcr *ExchangeWallet) CommittedTickets(tickets []*chainhash.Hash) ([]*chainhash.Hash, []stdaddr.Address, error) {
+	return dcr.wallet.CommittedTickets(dcr.ctx, tickets)
+}
+
 func (dcr *ExchangeWallet) broadcastTx(signedTx *wire.MsgTx, feeRate uint64) (*chainhash.Hash, error) {
 	// Hard limit: Validate transaction size before broadcasting to prevent
 	// transactions from getting stuck in mempool.

@@ -737,6 +737,18 @@ func (c *tRPCClient) AbandonTransaction(_ context.Context, hash *chainhash.Hash)
 	return c.abandonTxErr
 }
 
+func (c *tRPCClient) CommittedTickets(ctx context.Context, tickets []*chainhash.Hash) ([]*chainhash.Hash, []stdaddr.Address, error) {
+	return nil, nil, nil
+}
+
+func (c *tRPCClient) GetAccount(ctx context.Context, address stdaddr.Address) (string, error) {
+	return "", nil
+}
+
+func (c *tRPCClient) SignMessage(ctx context.Context, addr stdaddr.Address, msg string) (string, error) {
+	return "", nil
+}
+
 func TestMain(m *testing.M) {
 	tChainParams = chaincfg.MainNetParams()
 	tPKHAddr, _ = stdaddr.DecodeAddress("DsTya4cCFBgtofDLiRhkyPYEQjgs3HnarVP", tChainParams)
