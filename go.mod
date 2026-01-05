@@ -3,7 +3,7 @@ module decred.org/dcrdex
 go 1.24.0
 
 require (
-	decred.org/dcrwallet/v5 v5.0.2
+	decred.org/dcrwallet/v5 v5.0.3
 	fyne.io/systray v1.10.1-0.20220621085403-9a2652634e93
 	github.com/btcsuite/btcd v0.24.2-beta.rc1.0.20240625142744-cc26860b4026
 	github.com/btcsuite/btcd/btcec/v2 v2.3.4
@@ -111,7 +111,7 @@ require (
 	github.com/decred/dcrd/crypto/ripemd160 v1.0.2 // indirect
 	github.com/decred/dcrd/database/v3 v3.0.3 // indirect
 	github.com/decred/dcrd/lru v1.1.2 // indirect
-	github.com/decred/dcrd/mixing v0.6.0 // indirect
+	github.com/decred/dcrd/mixing v0.6.1 // indirect
 	github.com/decred/vspd/client/v4 v4.0.2 // indirect
 	github.com/decred/vspd/types/v3 v3.0.0 // indirect
 	github.com/dgraph-io/ristretto v0.0.3-0.20200630154024-f66de99634de // indirect

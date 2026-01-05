@@ -17,7 +17,7 @@ require (
 
 require (
 	decred.org/cspp/v2 v2.4.0 // indirect
-	decred.org/dcrwallet/v5 v5.0.2 // indirect
+	decred.org/dcrwallet/v5 v5.0.3 // indirect
 	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 // indirect
 	github.com/DataDog/zstd v1.5.2 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
@@ -82,7 +82,7 @@ require (
 	github.com/decred/dcrd/gcs/v4 v4.1.1 // indirect
 	github.com/decred/dcrd/hdkeychain/v3 v3.1.3 // indirect
 	github.com/decred/dcrd/lru v1.1.2 // indirect
-	github.com/decred/dcrd/mixing v0.6.0 // indirect
+	github.com/decred/dcrd/mixing v0.6.1 // indirect
 	github.com/decred/dcrd/rpc/jsonrpc/types/v4 v4.4.0 // indirect
 	github.com/decred/dcrd/rpcclient/v8 v8.1.0 // indirect
 	github.com/decred/dcrd/txscript/v4 v4.1.2 // indirect
