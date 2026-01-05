@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"maps"
 	"math"
 	"net"
@@ -41,6 +42,7 @@ import (
 	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
+	pi "decred.org/dcrdex/dex/politeia"
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
 	serverdex "decred.org/dcrdex/server/dex"
@@ -1519,6 +1521,10 @@ type Core struct {
 	meshMtx sync.RWMutex
 	mesh    *mesh.Mesh
 	meshCM  *dex.ConnectionMaster
+
+	politeia       *pi.Politeia
+	politeiaURL    string
+	politiaSyncing atomic.Bool
 }
 
 // New is the constructor for a new Core.
@@ -1755,6 +1761,40 @@ fetchers:
 			select {
 			case n := <-c.notes:
 				c.handleWalletNotification(n)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Start a goroutine to keep proposals synced.
+	c.wg.Add(1)
+	go func() {
+		// TODO: Allow configuration for testnet
+		c.politeiaURL = pi.PoliteiaMainnetHost
+		c.politeia, err = pi.New(ctx, c.politeiaURL, filepath.Join(filepath.Dir(c.cfg.DBPath), "politeia.db"), c.log.SubLogger("Politeia"))
+		if err != nil {
+			log.Printf("failed to set up politeia: %v", err.Error())
+		}
+
+		defer c.wg.Done()
+		defer c.politeia.Close()
+
+		// Initiate first sync.
+		c.politiaSyncing.Store(true)
+		err := c.politeia.ProposalsSync()
+		if err != nil {
+			log.Printf("politeia.ProposalsSync failed: %v", err)
+		}
+		c.politiaSyncing.Store(false)
+
+		for {
+			tick := time.NewTicker(time.Minute * 20)
+			select {
+			case <-tick.C:
+				c.politiaSyncing.Store(true)
+				c.politeia.ProposalsSync()
+				c.politiaSyncing.Store(false)
 			case <-ctx.Done():
 				return
 			}
