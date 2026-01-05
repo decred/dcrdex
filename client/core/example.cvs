@@ -1,0 +1,17 @@
+;asset ID as specified in Slip 44 https://github.com/satoshilabs/slips/blob/master/slip-0044.md, 42 for decred
+42
+;time after which the refund path can be taken in UNIX time
+1767614487
+;number of signatures needed for the multisig path
+2
+;xpubs separated by comma. Order cannot be changed once txn are created
+22a47fa09a223f2aa079edf85a7c2d4f8720ee63e502ee2869afab7de234b80c,225170f....
+;address to amount in coins separated with commas one new line per
+SsfLJbjXHTjGGqNd7uaNHL8EukmNgEQDNbg,40.1
+SsaDp2Ae7EUMgbC7B8Eo6qmQw2szu7HbecG,1000.002
+Sso9bUQ2ZZZzUMLwQsCM6m6QjR8HNaQLbbf,5
+;below this a new line and then a json containing a transaction will be filled in
+;after initial funds are sent and the spending transaction is created. Pass this
+;file around to receive signatures. The original creator can use this to refund
+;after the locktime has passed as well. The creator must not loose this file
+;before funds have moved from the multisig.
