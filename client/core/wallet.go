@@ -564,7 +564,7 @@ func (w *xcWallet) WalletTransaction(ctx context.Context, txID string) (*asset.W
 		return nil, errWalletNotConnected
 	}
 
-	return w.WalletTransaction(ctx, txID)
+	return w.Wallet.WalletTransaction(ctx, txID)
 }
 
 func (w *xcWallet) processWalletTransactions(txs []*asset.WalletTransaction) {
