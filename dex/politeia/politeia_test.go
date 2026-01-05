@@ -1,6 +1,9 @@
-//go:build live
+// This code is available on the terms of the project LICENSE.md file,
+// also available online at https://blueoakcouncil.org/license/1.0.0.
 
-package politeia
+///go:build live
+
+package pi
 
 import (
 	"os"
@@ -8,7 +11,6 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
-	"github.com/decred/dcrdata/gov/v5/politeia/types"
 )
 
 const proposalLimit = 400
@@ -23,25 +25,22 @@ func TestPoliteia(t *testing.T) {
 	// You can manually delete it between test runs to start fresh.
 	dbFile := "politeia_test.db"
 
-	p, err := New(PoliteiaMainnetHost, dbFile, log)
+	p, err := New(t.Context(), PoliteiaMainnetHost, dbFile, log)
 	if err != nil {
 		t.Fatal(err.Error())
 	}
 	defer p.Close()
 
 	go func() {
-		err = p.ProposalsSync()
-		if err != nil {
-			log.Errorf("ProposalsSync error: %v", err)
-		}
+		p.ProposalsSync()
 	}()
 
 	// No need to wait for sync to complete to test fetching proposals.
 	// If we get at least 5 proposals, we can proceed.
-	var proposals []*types.ProposalRecord
+	var proposals []*Proposal
 	var totalCount int
 	for {
-		proposals, totalCount, err = p.ProposalsDB.ProposalsAll(0, proposalLimit)
+		proposals, totalCount, err = p.ProposalsAll(0, proposalLimit, "")
 		if err != nil {
 			t.Fatal(err.Error())
 		}
@@ -49,7 +48,7 @@ func TestPoliteia(t *testing.T) {
 			log.Infof("Fetched %d proposals (total count: %d)", len(proposals), totalCount)
 			break
 		}
-		time.Sleep(2 * time.Minute)
+		time.Sleep(30 * time.Second)
 		log.Infof("Waiting for proposals to be available...")
 	}
 
@@ -57,13 +56,14 @@ func TestPoliteia(t *testing.T) {
 		if i >= 5 {
 			break
 		}
-		desc, err := p.FetchProposalDescription(proposal.Token)
+
+		p, err := p.ProposalByToken(proposal.Token)
 		if err != nil {
-			log.Errorf("FetchProposalDescription error: %v", err)
+			t.Errorf("ProposalByToken error: %v", err)
 			continue
 		}
 
-		log.Infof("Fetched description for proposal %s - %s...", proposal.Name, desc[:80])
+		log.Infof("Fetched proposal %s - %s", p.Name, p.Token)
 	}
 
 	// TODO: add tests for actual voting functions.
@@ -71,7 +71,6 @@ func TestPoliteia(t *testing.T) {
 	// p.WalletProposalVoteDetails(t.Context(), &wallet.Wallet{}, "")
 
 	// Close the db here. The sync goroutine may still be running but will exit once db is close.
-	p.Close()
 
 	log.Infof("Politeia tests completed")
 }
