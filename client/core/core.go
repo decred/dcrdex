@@ -1501,9 +1501,10 @@ type Core struct {
 	credMtx     sync.RWMutex
 	credentials *db.PrimaryCredentials
 
-	loginMtx  sync.Mutex
-	loggedIn  bool
-	bondXPriv *hdkeychain.ExtendedKey // derived from creds.EncSeed on login
+	loginMtx      sync.Mutex
+	loggedIn      bool
+	bondXPriv     *hdkeychain.ExtendedKey // derived from creds.EncSeed on login
+	multisigXPriv *hdkeychain.ExtendedKey // derived from creds.EncSeed on login
 
 	seedGenerationTime uint64
 
@@ -4581,6 +4582,10 @@ func (c *Core) Login(pw []byte) error {
 			if err != nil {
 				return false, fmt.Errorf("error deriving mesh private key: %w", err)
 			}
+			c.multisigXPriv, err = deriveMultisigXPriv(seed)
+			if err != nil {
+				return false, fmt.Errorf("error deriving multisig private key: %w", err)
+			}
 
 			if c.cfg.Mesh && c.net == dex.Simnet {
 				mesh, err := mesh.New(&mesh.Config{
@@ -4921,6 +4926,8 @@ func (c *Core) Logout() error {
 
 	c.bondXPriv.Zero()
 	c.bondXPriv = nil
+	c.multisigXPriv.Zero()
+	c.multisigXPriv = nil
 
 	c.loggedIn = false
 

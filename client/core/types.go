@@ -40,6 +40,8 @@ const (
 	hdKeyPurposeBonds uint32 = hdkeychain.HardenedKeyStart + 0x626f6e64 // ASCII "bond"
 	// hdKeyPurposeMesh is the BIP-43 purpose field for mesh keys.
 	hdKeyPurposeMesh uint32 = hdkeychain.HardenedKeyStart + 0x6d657368 // ASCII "mesh"
+	// hdKeyPurposeMulti is the BIP-43 purpose field for multisig keys.
+	hdKeyPurposeMulti uint32 = hdkeychain.HardenedKeyStart + 0x6D756C74 // ASCII "mult"
 )
 
 // errorSet is a slice of orders with a prefix prepended to the Error output.
