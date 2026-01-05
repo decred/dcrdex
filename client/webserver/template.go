@@ -11,12 +11,16 @@ import (
 	"io/fs"
 	"os"
 	"strings"
+	"time"
 
 	"runtime/debug"
 
 	"decred.org/dcrdex/client/intl"
 	"decred.org/dcrdex/client/webserver/locales"
 	"decred.org/dcrdex/dex/encode"
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/renderer/html"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -240,5 +244,64 @@ var templateFuncs = template.FuncMap{
 		}
 
 		return "unknown"
+	},
+	"mdToHTML": func(mdTxt string) template.HTML {
+		md := goldmark.New(
+			goldmark.WithExtensions(
+				extension.GFM,
+				extension.Table,
+			),
+			goldmark.WithRendererOptions(
+				html.WithUnsafe(),
+			),
+		)
+		var buf bytes.Buffer
+		if err := md.Convert([]byte(mdTxt), &buf); err != nil {
+			return template.HTML(fmt.Sprintf(`"<div class="d-flex mt-2 text-align-center">Failed to parse content: %v</div>`, err))
+		}
+		return template.HTML(buf.String())
+	},
+	"timeAgo": func(ts uint64) string {
+		diff := time.Since(time.Unix(int64(ts), 0))
+		seconds := int(diff.Seconds())
+
+		if seconds < 60 {
+			return "now"
+		}
+
+		const (
+			minute = 60
+			hour   = 60 * minute
+			day    = 24 * hour
+			month  = 30 * day
+			year   = 365 * day
+		)
+
+		type unit struct {
+			sec  int
+			suff string
+		}
+
+		units := []unit{
+			{year, "y"},
+			{month, "mo"},
+			{day, "d"},
+			{hour, "h"},
+			{minute, "m"},
+		}
+
+		var parts []string
+		for _, u := range units {
+			if seconds >= u.sec {
+				val := seconds / u.sec
+				seconds %= u.sec
+				parts = append(parts, fmt.Sprintf("%d%s", val, u.suff))
+				if len(parts) == 2 {
+					break
+				}
+			}
+		}
+
+		return strings.Join(parts, " ")
 	},
 }
