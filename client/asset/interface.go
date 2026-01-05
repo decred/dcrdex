@@ -257,6 +257,10 @@ const (
 	// too small to cover the gas fees when using a bundler.
 	ErrBundlerRedemptionLotSizeTooSmall = dex.ErrorKind("bundler redemption lot size too small")
 
+	// ErrMultisigPartialSend is returned when an error occurs after creating
+	// a multisig and sending some amount of funds.
+	ErrMultisigPartialSend = dex.ErrorKind("multisig partially sent")
+
 	// InternalNodeLoggerName is the name for a logger that is used to fine
 	// tune log levels for only loggers using this name.
 	InternalNodeLoggerName = "INTL"
@@ -814,6 +818,36 @@ type Bonder interface {
 	// known values. Further, methods for (1) locking coins for future bonds,
 	// and (2) renewing bonds by spending a bond directly into a new one, may be
 	// required for efficient client bond management.
+}
+
+type PaymentMultisig struct {
+	NRequired, Locktime int64
+	AssetID             uint32
+	SignerXpubs         [][]byte
+	AddrToVal           map[string]float64
+	SpendingTx          *PaymentMultisigTx
+}
+
+type PaymentMultisigTx struct {
+	TxHex   string `json:"txhex"`
+	HasSigs []bool `json:"hassigs"`
+}
+
+// Multisigner is a wallet capable of sending payments to multisig addresses.
+type Multisigner interface {
+	Broadcaster
+	// SendFundsToMultisig sends amounts to a multisig address, then creates
+	// a transaction that spends those funds. ErrMultisigPartialSend and
+	// partial results are returned if an error happens after sending funds.
+	SendFundsToMultisig(ctx context.Context, pm *PaymentMultisig) (*PaymentMultisigTx, error)
+	// SignMultisig signs the pmTx with the supplied privateKey and inserts
+	// the signature at idx among the other signatures.
+	SignMultisig(ctx context.Context, pmTx *PaymentMultisigTx, privKey []byte) (*PaymentMultisigTx, error)
+	// RefundMultisig refunds a multisig if it is after the locktime and we
+	// are the sender.
+	RefundMultisig(ctx context.Context, pmTx *PaymentMultisigTx) (txHash string, err error)
+	// ViewPaymentMultisig returns a tx hex in human readable json format.
+	ViewPaymentMultisig(pmTx *PaymentMultisigTx) (string, error)
 }
 
 // Rescanner is a wallet implementation with rescan functionality.
