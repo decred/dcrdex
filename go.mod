@@ -7,6 +7,7 @@ require (
 	filippo.io/edwards25519 v1.0.0
 	fyne.io/systray v1.10.1-0.20220621085403-9a2652634e93
 	github.com/agl/ed25519 v0.0.0-20170116200512-5312a6153412
+	github.com/asdine/storm/v3 v3.2.1
 	github.com/athanorlabs/go-dleq v0.1.0
 	github.com/bisoncraft/bchwallet v1.0.2
 	github.com/bisoncraft/go-bip39 v1.0.1
@@ -48,7 +49,6 @@ require (
 	github.com/decred/dcrd/rpcclient/v8 v8.1.0
 	github.com/decred/dcrd/txscript/v4 v4.1.2
 	github.com/decred/dcrd/wire v1.7.2
-	github.com/decred/dcrdata/gov/v5 v5.0.0
 	github.com/decred/go-socks v1.1.0
 	github.com/decred/slog v1.2.0
 	github.com/decred/vspd/types/v2 v2.1.0
@@ -72,6 +72,7 @@ require (
 	github.com/ltcsuite/ltcd/ltcutil v1.1.4-0.20240131072528-64dfa402637a
 	github.com/pkg/browser v0.0.0-20210911075715-681adbf594b8
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
+	github.com/yuin/goldmark v1.7.13
 	go.etcd.io/bbolt v1.3.12
 	golang.org/x/crypto v0.47.0
 	golang.org/x/exp v0.0.0-20231110203233-9a3e6036ecaa
@@ -89,7 +90,6 @@ require (
 	decred.org/dcrwallet v1.7.0 // indirect
 	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 // indirect
 	github.com/ProjectZKM/Ziren/crates/go-runtime/zkvm_runtime v0.0.0-20251001021608-1fe7b43fc4d6 // indirect
-	github.com/asdine/storm/v3 v3.2.1 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/cespare/xxhash v1.1.0 // indirect
 	github.com/charmbracelet/colorprofile v0.2.3-0.20250311203215-f60798e515dc // indirect
@@ -102,7 +102,6 @@ require (
 	github.com/decred/dcrd/dcrutil/v3 v3.0.0 // indirect
 	github.com/decred/dcrd/gcs/v2 v2.1.0 // indirect
 	github.com/decred/dcrd/txscript/v3 v3.0.0 // indirect
-	github.com/decred/dcrdata/v7 v7.0.0 // indirect
 	github.com/decred/dcrtime v0.0.0-20191018193024-8d8b4ef0458e // indirect
 	github.com/dgraph-io/ristretto v0.0.2 // indirect
 	github.com/dgraph-io/ristretto/v2 v2.2.0 // indirect

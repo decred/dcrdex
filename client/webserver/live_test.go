@@ -45,6 +45,7 @@ import (
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
+	pi "decred.org/dcrdex/dex/politeia"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -2036,6 +2037,22 @@ func (c *TCore) PendingBridges(assetID uint32) ([]*asset.WalletTransaction, erro
 
 func (c *TCore) BridgeHistory(assetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
 	return nil, nil
+}
+
+func (*TCore) ProposalsAll(offset, rowsCount int, searchPhrase string, filterByVoteStatus ...int) ([]*pi.Proposal, int, error) {
+	return nil, 0, nil
+}
+
+func (*TCore) Proposal(assetID uint32, token string) (*pi.Proposal, error) {
+	return nil, nil
+}
+
+func (*TCore) CastVote(assetID uint32, pw []byte, token, bit string) error {
+	return nil
+}
+
+func (*TCore) PoliteiaDetails() (string, bool, int64) {
+	return "", false, 0
 }
 
 func newMarketDay() *libxc.MarketDay {

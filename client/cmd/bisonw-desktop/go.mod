@@ -12,11 +12,13 @@ require (
 )
 
 require (
+	decred.org/dcrwallet v1.7.0 // indirect
 	filippo.io/edwards25519 v1.0.0 // indirect
 	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 // indirect
 	github.com/BurntSushi/toml v1.4.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProjectZKM/Ziren/crates/go-runtime/zkvm_runtime v0.0.0-20251001021608-1fe7b43fc4d6 // indirect
+	github.com/asdine/storm/v3 v3.2.1 // indirect
 	github.com/athanorlabs/go-dleq v0.1.0 // indirect
 	github.com/bisoncraft/bchwallet v1.0.2 // indirect
 	github.com/bisoncraft/go-bip39 v1.0.1 // indirect
@@ -29,9 +31,17 @@ require (
 	github.com/crate-crypto/go-ipa v0.0.0-20240724233137-53bbb0ceb27a // indirect
 	github.com/dcrlabs/ltcwallet v0.0.0-20240823165752-3e026e8da010 // indirect
 	github.com/decred/dcrd/addrmgr/v3 v3.0.0 // indirect
+	github.com/decred/dcrd/blockchain/stake/v3 v3.0.0 // indirect
 	github.com/decred/dcrd/container/lru v1.0.0 // indirect
 	github.com/decred/dcrd/crypto/rand v1.0.1 // indirect
+	github.com/decred/dcrd/database/v2 v2.0.2 // indirect
+	github.com/decred/dcrd/dcrec/secp256k1/v3 v3.0.0 // indirect
+	github.com/decred/dcrd/dcrutil/v3 v3.0.0 // indirect
+	github.com/decred/dcrd/gcs/v2 v2.1.0 // indirect
 	github.com/decred/dcrd/mixing v0.6.1 // indirect
+	github.com/decred/dcrd/txscript/v3 v3.0.0 // indirect
+	github.com/decred/dcrtime v0.0.0-20191018193024-8d8b4ef0458e // indirect
+	github.com/decred/politeia v1.5.0 // indirect
 	github.com/decred/vspd/client/v4 v4.0.2 // indirect
 	github.com/decred/vspd/types/v3 v3.0.0 // indirect
 	github.com/dgraph-io/badger v1.6.2 // indirect
@@ -48,10 +58,14 @@ require (
 	github.com/go-toast/toast v0.0.0-20190211030409-01e6764cf0a4 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/flatbuffers v25.2.10+incompatible // indirect
+	github.com/google/trillian v1.4.1 // indirect
+	github.com/gorilla/schema v1.1.0 // indirect
+	github.com/h2non/go-is-svg v0.0.0-20160927212452-35e8c4b0612c // indirect
 	github.com/holiman/billy v0.0.0-20250707135307-f2f9b9aae7db // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/ltcsuite/lnd/tlv v0.0.0-20240222214433-454d35886119 // indirect
 	github.com/ltcsuite/ltcd/chaincfg/chainhash v1.0.2 // indirect
+	github.com/marcopeereboom/sbox v1.1.0 // indirect
 	github.com/minio/sha256-simd v1.0.0 // indirect
 	github.com/mitchellh/mapstructure v1.4.1 // indirect
 	github.com/naoina/go-stringutil v0.1.0 // indirect
@@ -63,6 +77,7 @@ require (
 	github.com/stretchr/testify v1.10.0 // indirect
 	github.com/supranational/blst v0.3.16-0.20250831170142-f48500c1fdbe // indirect
 	github.com/tadvi/systray v0.0.0-20190226123456-11a2b8fa57af // indirect
+	github.com/yuin/goldmark v1.7.13 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/otel v1.37.0 // indirect
 	go.opentelemetry.io/otel/metric v1.37.0 // indirect

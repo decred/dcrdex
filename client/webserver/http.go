@@ -7,6 +7,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"sort"
@@ -18,6 +19,8 @@ import (
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/order"
+	pi "decred.org/dcrdex/dex/politeia"
+	tv1 "github.com/decred/politeia/politeiawww/api/ticketvote/v1"
 	qrcode "github.com/skip2/go-qrcode"
 )
 
@@ -36,6 +39,7 @@ const (
 	mmSettingsRoute  = "/mmsettings"
 	mmArchivesRoute  = "/mmarchives"
 	mmLogsRoute      = "/mmlogs"
+	proposalsRoute   = "/proposals"
 )
 
 // sendTemplate processes the template and sends the result.
@@ -568,4 +572,202 @@ func (s *WebServer) orderReader(ord *core.Order) *core.OrderReader {
 		QuoteFeeUnitInfo:    quoteFeeUnitInfo,
 		QuoteFeeAssetSymbol: quoteFeeAssetSymbol,
 	}
+}
+
+type proposalsTmplData struct {
+	CommonArguments
+	Proposals     []*pi.Proposal
+	VoteStatuses  map[tv1.VoteStatusT]string
+	Pagination    Pagination
+	VStatusFilter *uint64
+	Query         string
+	LastPropSync  uint64
+	IsSyncing     bool
+	ErrorMsg      string
+}
+
+type Pagination struct {
+	CurrentPage uint64
+	HasPrev     bool
+	HasNext     bool
+	PrevPage    uint64
+	NextPage    uint64
+	Pages       []PageItem
+}
+
+// handleProposals is the handler for the /proposals page request.
+func (s *WebServer) handleProposals(w http.ResponseWriter, r *http.Request) {
+	const pageSize = 10
+
+	query := r.URL.Query().Get("query")
+
+	currentPage := uint64(1)
+	if p := r.URL.Query().Get("page"); p != "" {
+		if parsed, err := strconv.ParseUint(p, 10, 64); err == nil && parsed > 0 {
+			currentPage = parsed
+		}
+	}
+
+	offset := (currentPage - 1) * pageSize
+
+	var filterBy *uint64
+	if filterByStr := r.URL.Query().Get("status"); filterByStr != "" && filterByStr != "all" {
+		val, err := strconv.ParseUint(filterByStr, 10, 64)
+		if err != nil {
+			s.sendProposalsPageWithError(r, w, fmt.Sprintf("invalid proposal status filter: %v", err))
+			return
+		}
+		filterBy = &val
+	}
+
+	var err error
+	var totalCount int
+	var proposals []*pi.Proposal
+
+	if filterBy != nil {
+		proposals, totalCount, err = s.core.ProposalsAll(int(offset),
+			int(pageSize), query, int(*filterBy))
+	} else {
+		proposals, totalCount, err = s.core.ProposalsAll(int(offset),
+			int(pageSize), query)
+	}
+	if err != nil {
+		errMsg := fmt.Sprintf("error retrieving proposals: %v", err)
+		log.Errorf(errMsg)
+		s.sendProposalsPageWithError(r, w, errMsg)
+		return
+	}
+
+	totalPages := int(math.Ceil(float64(totalCount) / float64(pageSize)))
+	pages := buildPagination(int(currentPage), totalPages)
+
+	_, isSyncing, lastSyncTimestamp := s.core.PoliteiaDetails()
+
+	s.sendTemplate(w, "proposals", &proposalsTmplData{
+		CommonArguments: *s.commonArgs(r, "Proposals | Bison Wallet"),
+		Proposals:       proposals,
+		VoteStatuses:    pi.VotesStatuses,
+		Pagination: Pagination{
+			CurrentPage: currentPage,
+			HasPrev:     currentPage > 1,
+			HasNext:     currentPage < uint64(totalPages),
+			PrevPage:    currentPage - 1,
+			NextPage:    currentPage + 1,
+			Pages:       pages,
+		},
+		VStatusFilter: filterBy,
+		Query:         query,
+		LastPropSync:  uint64(lastSyncTimestamp),
+		IsSyncing:     isSyncing,
+	})
+}
+
+type proposalTmplData struct {
+	CommonArguments
+	Proposal     *pi.Proposal
+	VoteStatuses map[tv1.VoteStatusT]string
+	PoliteiaURL  string
+	ShortToken   string
+	ErrorMsg     string
+}
+
+// handleProposal is the handler for the /proposal/{token} page request.
+func (s *WebServer) handleProposal(w http.ResponseWriter, r *http.Request) {
+	token, err := getProposalTokenCtx(r)
+	if err != nil {
+		errMsg := fmt.Sprintf("error retrieving proposal token from request context: %v", err)
+		log.Errorf(errMsg)
+		s.sendProposalPageWithError(r, w, errMsg)
+		return
+	}
+
+	assetStrID := r.URL.Query().Get("assetID")
+	if assetStrID == "" {
+		errMsg := "request to fetch proposal is missing url query assetID"
+		log.Error(errMsg)
+		s.sendProposalPageWithError(r, w, errMsg)
+		return
+	}
+
+	assetID, err := strconv.ParseUint(assetStrID, 10, 32)
+	if err != nil {
+		errMsg := fmt.Sprintf("error parsing asset id: %v", err)
+		log.Error(errMsg)
+		s.sendProposalPageWithError(r, w, errMsg)
+		return
+	}
+
+	proposal, err := s.core.Proposal(uint32(assetID), token)
+	if err != nil {
+		errMsg := fmt.Sprintf("error retrieving proposal: %v", err)
+		log.Error(errMsg)
+		s.sendProposalPageWithError(r, w, errMsg)
+		return
+	}
+
+	piURL, _, _ := s.core.PoliteiaDetails()
+
+	s.sendTemplate(w, "proposal", &proposalTmplData{
+		CommonArguments: *s.commonArgs(r, "Proposal | Bison Wallet"),
+		Proposal:        proposal,
+		VoteStatuses:    pi.VotesStatuses,
+		PoliteiaURL:     piURL,
+		ShortToken:      proposal.Token[:7],
+	})
+}
+
+func (s *WebServer) sendProposalPageWithError(r *http.Request, w http.ResponseWriter, errMsg string) {
+	s.sendTemplate(w, "proposal", &proposalTmplData{
+		CommonArguments: *s.commonArgs(r, "Proposal | Bison Wallet"),
+		ErrorMsg:        errMsg,
+	})
+}
+
+func (s *WebServer) sendProposalsPageWithError(r *http.Request, w http.ResponseWriter, errMsg string) {
+	s.sendTemplate(w, "proposals", &proposalsTmplData{
+		CommonArguments: *s.commonArgs(r, "Proposals | Bison Wallet"),
+		ErrorMsg:        errMsg,
+	})
+}
+
+type PageItem struct {
+	Num      int
+	Active   bool
+	Ellipsis bool
+}
+
+func buildPagination(current, total int) []PageItem {
+	const window = 2
+	items := []PageItem{}
+
+	add := func(num int) {
+		items = append(items, PageItem{
+			Num:    num,
+			Active: num == current,
+		})
+	}
+
+	addEllipsis := func() {
+		items = append(items, PageItem{Ellipsis: true})
+	}
+
+	add(1)
+
+	if current > window+2 {
+		addEllipsis()
+	}
+
+	for i := max(2, current-window); i <= min(total-1, current+window); i++ {
+		add(i)
+	}
+
+	if current < total-(window+1) {
+		addEllipsis()
+	}
+
+	if total > 1 {
+		add(total)
+	}
+
+	return items
 }

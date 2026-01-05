@@ -60,6 +60,10 @@ server/cmd/dcrdex/evm-protocol-overrides.json
 client/bworg/bworg
 tatanka/cmd/tatanka/tatanka
 dex/politeia/politeia_test.db
+<<<<<<< HEAD
 dex/lexi/cmd/lexidbexplorer/lexidbexplorer
 client/asset/xmr/cmd/mkjson/mkjson
 
+=======
+*.db
+>>>>>>> 81063df4 (client/webserver: Implement politeia APIs and pages)

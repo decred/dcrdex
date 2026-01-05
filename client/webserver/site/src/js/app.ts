@@ -13,6 +13,8 @@ import DexSettingsPage from './dexsettings'
 import MarketMakerArchivesPage from './mmarchives'
 import MarketMakerLogsPage from './mmlogs'
 import InitPage from './init'
+import ProposalPage from './proposal'
+import ProposalsPage from './proposals'
 import { MM } from './mmutil'
 import { RateEncodingFactor, StatusExecuted, hasActiveMatches } from './orderutil'
 import { getJSON, postJSON, Errors } from './http'
@@ -112,7 +114,9 @@ const constructors: Record<string, PageClass> = {
   mm: MarketMakerPage,
   mmsettings: MarketMakerSettingsPage,
   mmarchives: MarketMakerArchivesPage,
-  mmlogs: MarketMakerLogsPage
+  mmlogs: MarketMakerLogsPage,
+  proposals: ProposalsPage,
+  proposal: ProposalPage
 }
 
 interface LangData {
@@ -361,6 +365,12 @@ export default class Application {
     Doc.hide(this.page.noteBox, this.page.profileBox)
     // Parse the request.
     const url = new URL(`/${page}`, window.location.origin)
+    if (data) {
+      const d: Record<string, any> = data
+      Object.entries(d).forEach(([k, v]) => {
+        url.searchParams.set(k, v)
+      })
+    }
     const requestedHandler = handlerFromPath(page)
     // Fetch and parse the page.
     const response = await window.fetch(url.toString())
@@ -924,13 +934,13 @@ export default class Application {
     }
     if (!authed) {
       page.profileBox.classList.remove('authed')
-      Doc.hide(page.noteBell, page.walletsMenuEntry, page.marketsMenuEntry)
+      Doc.hide(page.noteBell, page.walletsMenuEntry, page.marketsMenuEntry, page.proposalsMenuEntry)
       return
     }
     Doc.setVis(Object.keys(this.exchanges).length > 0, page.marketsMenuEntry, page.mmLink)
 
     page.profileBox.classList.add('authed')
-    Doc.show(page.noteBell, page.walletsMenuEntry, page.marketsMenuEntry)
+    Doc.show(page.noteBell, page.walletsMenuEntry, page.marketsMenuEntry, page.proposalsMenuEntry)
     Doc.setVis(mmStatus, page.mmLink)
   }
 

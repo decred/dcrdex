@@ -541,12 +541,8 @@ github.com/decred/dcrd/wire v1.7.2 h1:04vpHHE3t78rDztjZx82JV2EEOMDUtUUB1347H32kh
 github.com/decred/dcrd/wire v1.7.2/go.mod h1:eP9XRsMloy+phlntkTAaAm611JgLv8NqY1YJoRxkNKU=
 github.com/decred/dcrdata/api/types/v4 v4.0.4/go.mod h1:CCu2Itqv/K3lqFxqSYDC49XWu5OuZRvNFkPiFHb0tYU=
 github.com/decred/dcrdata/db/dbtypes/v2 v2.1.4/go.mod h1:UF4KWxcCYhdXqaTwbA2Mb10os4H0UFSZaiu5eeMWQT8=
-github.com/decred/dcrdata/gov/v5 v5.0.0 h1:F/ZooIkuftL4SvzSED0GaoLOCz1yGQjrxr/6aINgxhY=
-github.com/decred/dcrdata/gov/v5 v5.0.0/go.mod h1:xazJ1lBUEh/cMXG+sRgcQ6VS4JbbMrkeDxn3lZFSZpU=
 github.com/decred/dcrdata/semver v1.0.0/go.mod h1:z+nQqiAd9fYkHhBLbejysZ2FPHtgkrErWDgMf+JlZWE=
 github.com/decred/dcrdata/txhelpers/v3 v3.0.4/go.mod h1:tKEDhoO+TbYrFrx+5qKZDxcla8ELQFYs4f5+8gL4cuY=
-github.com/decred/dcrdata/v7 v7.0.0 h1:seQUfJWV1n7Hvmp7LgJzrRFOY9K+0c6z9zl5k2uwJlQ=
-github.com/decred/dcrdata/v7 v7.0.0/go.mod h1:2o/PComCLw7EVP6YwcwKsxVpqianLPt/qG2GNMYFwZY=
 github.com/decred/dcrtime v0.0.0-20191018193024-8d8b4ef0458e h1:sNDR7vx6gaA3WD+WoEofTvtdjfwHAiogtjB3kt8iFco=
 github.com/decred/dcrtime v0.0.0-20191018193024-8d8b4ef0458e/go.mod h1:IyZnyBE3E6RBFsEjwEs21FrO/UsrLrL15hUnpZZQxpU=
 github.com/decred/dcrwallet v1.2.2/go.mod h1:BrSus0F+Rx8UhvPNBfuRMIjRJBNrW2sLspN9iQR5hm8=
@@ -1611,6 +1607,8 @@ github.com/yuin/goldmark v1.1.32/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9de
 github.com/yuin/goldmark v1.2.1/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 github.com/yuin/goldmark v1.3.5/go.mod h1:mwnBkeHKe2W/ZEtQ+71ViKU8L12m81fl3OWwC1Zlc8k=
 github.com/yuin/goldmark v1.4.1/go.mod h1:mwnBkeHKe2W/ZEtQ+71ViKU8L12m81fl3OWwC1Zlc8k=
+github.com/yuin/goldmark v1.7.13 h1:GPddIs617DnBLFFVJFgpo1aBfe/4xcvMc3SB5t/D0pA=
+github.com/yuin/goldmark v1.7.13/go.mod h1:ip/1k0VRfGynBgxOz0yCqHrbZXhcjxyuS66Brc7iBKg=
 github.com/zquestz/grab v0.0.0-20190224022517-abcee96e61b1 h1:1qKTeMTSIEvRIjvVYzgcRp0xVp0eoiRTTiHSncb5gD8=
 github.com/zquestz/grab v0.0.0-20190224022517-abcee96e61b1/go.mod h1:bslhAiUxakrA6z6CHmVyvkfpnxx18RJBwVyx2TluJWw=
 go.etcd.io/bbolt v1.3.2/go.mod h1:IbVyRI1SCnLcuJnV2u8VeU0CEYM7e686BmAb1XKL+uU=

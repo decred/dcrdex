@@ -20,6 +20,7 @@ type ctxID int
 const (
 	ctxOID ctxID = iota
 	ctxHost
+	ctxProposalToken
 )
 
 // securityMiddleware adds security headers to the server responses.
@@ -214,4 +215,26 @@ func getOrderIDCtx(r *http.Request) (dex.Bytes, error) {
 		return nil, fmt.Errorf("")
 	}
 	return oidB, nil
+}
+
+// proposalTokenCtx embeds the host into the request context.
+func proposalTokenCtx(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := chi.URLParam(r, "token")
+		ctx := context.WithValue(r.Context(), ctxProposalToken, host)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// getProposalTokenCtx interprets the context value at ctxProposalToken as a string.
+func getProposalTokenCtx(r *http.Request) (string, error) {
+	untypedToken := r.Context().Value(ctxProposalToken)
+	if untypedToken == nil {
+		return "", errors.New("proposal token not set in request")
+	}
+	token, ok := untypedToken.(string)
+	if !ok {
+		return "", errors.New("type assertion failed")
+	}
+	return token, nil
 }
