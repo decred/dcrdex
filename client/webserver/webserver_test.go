@@ -865,16 +865,16 @@ func TestAPI_ToggleRatesource(t *testing.T) {
 		wantErr            error
 	}{{
 		name:    "Invalid rate source",
-		source:  "binance",
+		source:  "Messari",
 		wantErr: errors.New("cannot disable unknown fiat rate source"),
 		want:    `{"ok":false,"msg":"cannot disable unknown fiat rate source"}`,
 	}, {
 		name:   "ok valid source",
-		source: "Messari",
+		source: "Coinpaprika",
 		want:   `{"ok":true}`,
 	}, {
 		name:   "ok already disabled/not initialized",
-		source: "Messari",
+		source: "Coinpaprika",
 		want:   `{"ok":true}`,
 	}}
 

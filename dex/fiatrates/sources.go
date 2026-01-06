@@ -218,7 +218,7 @@ func fiatSources(cfg Config) []*source {
 		{
 			name:            messari,
 			requestInterval: messariRefreshInterval,
-			disabled:        strings.Contains(disabledSources, strings.ToLower(messari)),
+			disabled:        strings.Contains(disabledSources, strings.ToLower(messari)) || true,
 			getRates: func(ctx context.Context, tickers []string, log dex.Logger) (map[string]float64, error) {
 				fiatRates := make(map[string]float64)
 				for _, ticker := range tickers {

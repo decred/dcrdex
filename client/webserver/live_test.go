@@ -517,7 +517,7 @@ func newTCore() *TCore {
 		noteFeed: make(chan core.Notification, 1),
 		fiatSources: map[string]bool{
 			"dcrdata":     true,
-			"Messari":     true,
+			"Messari":     false,
 			"Coinpaprika": true,
 		},
 		lang: "en-US",
