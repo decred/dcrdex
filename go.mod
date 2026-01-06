@@ -3,7 +3,7 @@ module decred.org/dcrdex
 go 1.24.0
 
 require (
-	decred.org/dcrwallet/v5 v5.0.2
+	decred.org/dcrwallet/v5 v5.0.3
 	filippo.io/edwards25519 v1.0.0
 	fyne.io/systray v1.10.1-0.20220621085403-9a2652634e93
 	github.com/agl/ed25519 v0.0.0-20170116200512-5312a6153412
@@ -131,7 +131,7 @@ require (
 	github.com/decred/dcrd/crypto/ripemd160 v1.0.2 // indirect
 	github.com/decred/dcrd/database/v3 v3.0.3 // indirect
 	github.com/decred/dcrd/lru v1.1.2 // indirect
-	github.com/decred/dcrd/mixing v0.6.0 // indirect
+	github.com/decred/dcrd/mixing v0.6.1 // indirect
 	github.com/decred/politeia v1.5.0
 	github.com/decred/vspd/client/v4 v4.0.2 // indirect
 	github.com/decred/vspd/types/v3 v3.0.0 // indirect

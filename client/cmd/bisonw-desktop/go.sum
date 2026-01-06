@@ -40,8 +40,8 @@ cloud.google.com/go/storage v1.10.0/go.mod h1:FLPqc6j+Ki4BU591ie1oL6qBQGu2Bl/tZ9
 contrib.go.opencensus.io/exporter/stackdriver v0.13.4/go.mod h1:aXENhDJ1Y4lIg4EUaVTwzvYETVNZk10Pu26tevFKLUc=
 decred.org/cspp/v2 v2.4.0 h1:whb0YW+UELHJS/UfT5MBXSJXrKUVw5omhgKNhjzYix4=
 decred.org/cspp/v2 v2.4.0/go.mod h1:9nO3bfvCheOPIFZw5f6sRQ42CjBFB5RKSaJ9Iq6G4MA=
-decred.org/dcrwallet/v5 v5.0.2 h1:RrziG6N7ACQ6t9XSNrXrqeMdETlaLvSgEwVn2/jXNJ4=
-decred.org/dcrwallet/v5 v5.0.2/go.mod h1:OPPAfEWBT+rHCtch1KSjvgK+Dnxg8RoKRq8mbbjOkyY=
+decred.org/dcrwallet/v5 v5.0.3 h1:nz3oIq06RnIQ8uNKCG8sBa5vsq2WLd5+a7QlErYMxu8=
+decred.org/dcrwallet/v5 v5.0.3/go.mod h1:yH+3MRx46MzoPNgEARW5K9a3o/uIa0qtlc6az2oZVqY=
 dmitri.shuralyov.com/gpu/mtl v0.0.0-20190408044501-666a987793e9/go.mod h1:H6x//7gZCb22OMCxBHrMx7a5I7Hp++hsVxbQ4BYO7hU=
 filippo.io/edwards25519 v1.0.0 h1:0wAIcmJUqRdI8IJ/3eGi5/HwXZWPujYXXlkrQogz0Ek=
 filippo.io/edwards25519 v1.0.0/go.mod h1:N1IkdkCkiLB6tki+MYJoSx2JTY9NUlxZE7eHn5EwJns=
@@ -316,8 +316,8 @@ github.com/decred/dcrd/hdkeychain/v3 v3.1.3/go.mod h1:mDAuGaH6InRD+hKVeVJsjLD/ih
 github.com/decred/dcrd/lru v1.0.0/go.mod h1:mxKOwFd7lFjN2GZYsiz/ecgqR6kkYAl+0pz0tEMk218=
 github.com/decred/dcrd/lru v1.1.2 h1:KdCzlkxppuoIDGEvCGah1fZRicrDH36IipvlB1ROkFY=
 github.com/decred/dcrd/lru v1.1.2/go.mod h1:gEdCVgXs1/YoBvFWt7Scgknbhwik3FgVSzlnCcXL2N8=
-github.com/decred/dcrd/mixing v0.6.0 h1:c7qW7DjBBCiB3bmu5c/JRIKxqbaB0EZ+Eog61QCk5kI=
-github.com/decred/dcrd/mixing v0.6.0/go.mod h1:M+Ao9h49usdSEsC0N6kMafijwgYh7E57RTKh8cCw02o=
+github.com/decred/dcrd/mixing v0.6.1 h1:nysHraShVbgKIrqpa04364YTchmVtqgaphTNWqs7nHc=
+github.com/decred/dcrd/mixing v0.6.1/go.mod h1:M+Ao9h49usdSEsC0N6kMafijwgYh7E57RTKh8cCw02o=
 github.com/decred/dcrd/rpc/jsonrpc/types/v4 v4.4.0 h1:BBVaYemabsFsaqNVlCmacoZlSsLDqwHYIs8ty6fg59Q=
 github.com/decred/dcrd/rpc/jsonrpc/types/v4 v4.4.0/go.mod h1:w4C6hZ7ywpc8/YNkiPAknCaqKofF68cRhUiTglEIc7s=
 github.com/decred/dcrd/rpcclient/v8 v8.1.0 h1:FLZ1j4ub7+O9oCIcKf+frYCrZW++G3FSzk2/f4U80hI=

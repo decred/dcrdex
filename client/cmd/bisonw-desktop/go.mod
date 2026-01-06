@@ -27,7 +27,7 @@ require (
 	github.com/decred/dcrd/addrmgr/v3 v3.0.0 // indirect
 	github.com/decred/dcrd/container/lru v1.0.0 // indirect
 	github.com/decred/dcrd/crypto/rand v1.0.1 // indirect
-	github.com/decred/dcrd/mixing v0.6.0 // indirect
+	github.com/decred/dcrd/mixing v0.6.1 // indirect
 	github.com/decred/vspd/client/v4 v4.0.2 // indirect
 	github.com/decred/vspd/types/v3 v3.0.0 // indirect
 	github.com/emicklei/dot v1.6.2 // indirect
@@ -59,7 +59,7 @@ replace github.com/btcsuite/btcd/btcec/v2 v2.3.4 => github.com/martonp/btcd/btce
 
 require (
 	decred.org/cspp/v2 v2.4.0 // indirect
-	decred.org/dcrwallet/v5 v5.0.2 // indirect
+	decred.org/dcrwallet/v5 v5.0.3 // indirect
 	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 // indirect
 	github.com/StackExchange/wmi v1.2.1 // indirect
 	github.com/VictoriaMetrics/fastcache v1.13.0 // indirect
