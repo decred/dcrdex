@@ -172,8 +172,6 @@ func (db *proposalsDB) ProposalsAll(offset, rowsCount int, searchPhrase string,
 
 	searchPhrase = strings.TrimSpace(strings.ToLower(searchPhrase))
 
-	searchPhrase = strings.TrimSpace(strings.ToLower(searchPhrase))
-
 	matchers := []q.Matcher{q.True()}
 
 	if len(filterByVoteStatus) > 0 {

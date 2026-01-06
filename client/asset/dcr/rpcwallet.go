@@ -59,7 +59,7 @@ const (
 	methodGetPeerInfo        = "getpeerinfo"
 	methodWalletInfo         = "walletinfo"
 	methodAbandonTransaction = "abandontransaction"
-	methodCommittedTickets   = "commitedtickets"
+	methodCommittedTickets   = "committedtickets"
 	methodAccountNumber      = "accountnumber"
 )
 
@@ -1258,9 +1258,9 @@ func (w *rpcWallet) CommittedTickets(ctx context.Context, tickets []*chainhash.H
 	}
 
 	var res struct {
-		TicketAdresses []struct {
+		TicketAddresses []struct {
 			Ticket  []byte `json:"ticket"`
-			Address string `json:"adress"`
+			Address string `json:"address"`
 		} `json:"ticketAddresses"`
 	}
 	err := w.rpcClientRawRequest(ctx, methodCommittedTickets, anylist{tickets}, &res)
@@ -1268,22 +1268,22 @@ func (w *rpcWallet) CommittedTickets(ctx context.Context, tickets []*chainhash.H
 		return nil, nil, fmt.Errorf("unable to fetch wallet tickets: %v", err)
 	}
 
-	nTicketAdresess := len(res.TicketAdresses)
-	respTickets := make([]*chainhash.Hash, nTicketAdresess)
-	adresses := make([]stdaddr.Address, nTicketAdresess)
-	for i, ad := range res.TicketAdresses {
+	nTicketAddresess := len(res.TicketAddresses)
+	respTickets := make([]*chainhash.Hash, nTicketAddresess)
+	addresses := make([]stdaddr.Address, nTicketAddresess)
+	for i, ad := range res.TicketAddresses {
 		respTickets[i], err = chainhash.NewHash(ad.Ticket)
 		if err != nil {
 			return nil, nil, err
 		}
 
-		adresses[i], err = stdaddr.DecodeAddress(ad.Address, w.chainParams)
+		addresses[i], err = stdaddr.DecodeAddress(ad.Address, w.chainParams)
 		if err != nil {
 			return nil, nil, err
 		}
 	}
 
-	return respTickets, adresses, nil
+	return respTickets, addresses, nil
 }
 
 // AddressAccount returns the account number for an address. If the address has no associated account,

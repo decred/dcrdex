@@ -2521,7 +2521,7 @@ func (s *WebServer) apiCastVote(w http.ResponseWriter, r *http.Request) {
 
 	err = s.core.CastVote(form.AssetID, appPW, form.Token, form.Bit)
 	if err != nil {
-		s.writeAPIError(w, fmt.Errorf("caste vote error: %w", err))
+		s.writeAPIError(w, fmt.Errorf("castvote error: %w", err))
 		return
 	}
 
