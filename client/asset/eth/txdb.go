@@ -78,7 +78,7 @@ const (
 )
 
 var (
-	lastIncomingScanKeyPrefix = []byte("lastIncomingScan:")
+	lastIncomingScanKeyPrefix   = []byte("lastIncomingScan:")
 	lastIncomingScanETHKeyBytes = []byte(lastIncomingScanETHKey)
 )
 

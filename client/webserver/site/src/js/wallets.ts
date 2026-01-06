@@ -518,15 +518,16 @@ export default class WalletsPage extends BasePage {
     page.vSendSymbol.textContent = symbol.toUpperCase()
     page.vSendLogo.src = Doc.logoPath(symbol)
 
+    let feeAsset: any = null
     if (token) {
-      const { unitInfo: feeUI, symbol: feeSymbol } = app().assets[token.parentID]
+      feeAsset = app().assets[token.parentID]
+      const { unitInfo: feeUI, symbol: feeSymbol } = feeAsset
       page.vSendFee.textContent = Doc.formatFullPrecision(txfee, feeUI) + ' ' + feeSymbol
     } else {
       page.vSendFee.textContent = Doc.formatFullPrecision(txfee, ui)
     }
     const xcRate = app().fiatRatesMap[assetID]
     if (token) {
-      const feeAsset = app().assets[token.parentID]
       Doc.showFiatValue(page.vSendFeeFiat, txfee, app().fiatRatesMap[token.parentID], feeAsset.unitInfo)
     } else {
       Doc.showFiatValue(page.vSendFeeFiat, txfee, xcRate, ui)
