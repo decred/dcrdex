@@ -49,7 +49,8 @@ var (
 var fiatRateFetchers = map[string]rateFetcher{
 	coinpaprika:   FetchCoinpaprikaRates,
 	dcrdataDotOrg: FetchDcrdataRates,
-	messari:       FetchMessariRates,
+	// TODO: messari is temporarily disabled until it is decided to procure an API Key.
+	// messari:       FetchMessariRates,
 }
 
 // fiatRateInfo holds the fiat rate and the last update time for an
@@ -170,6 +171,7 @@ func FetchDcrdataRates(ctx context.Context, log dex.Logger, assets map[uint32]*S
 // FetchMessariRates retrieves and parses fiat rate data from the Messari API.
 // See https://messari.io/api/docs#operation/Get%20Asset%20Market%20Data for
 // sample request and response information.
+// TODO: Requires an API Key, temporarily disabled.
 func FetchMessariRates(ctx context.Context, log dex.Logger, assets map[uint32]*SupportedAsset) map[uint32]float64 {
 	fiatRates := make(map[uint32]float64)
 	fetchRate := func(sa *SupportedAsset) {

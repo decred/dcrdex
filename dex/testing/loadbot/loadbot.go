@@ -789,9 +789,6 @@ func liveRate() (float64, error) {
 	}
 	as := map[uint32]*core.SupportedAsset{baseID: b, quoteID: q}
 	liveRates := core.FetchCoinpaprikaRates(ctx, log, as)
-	if len(liveRates) != 2 {
-		liveRates = core.FetchMessariRates(ctx, log, as)
-	}
 	// If decred check dcrdata.
 	if len(liveRates) != 2 && (quoteID == 42 || baseID == 42) {
 		liveRates = core.FetchDcrdataRates(ctx, log, as)
