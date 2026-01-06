@@ -51,12 +51,11 @@ func (c *Core) Proposal(assetID uint32, token string) (*pi.Proposal, error) {
 	tip := ss.Blocks
 	w.mtx.Unlock()
 
-	// Only return wallet voting info if this proposal is still voting.
-	if uint64(proposal.EndBlockHeight) > tip {
-		// Proposal already ended. Cannot vote.
+	if uint64(proposal.EndBlockHeight) > tip { // Proposal voting already ended. Cannot vote.
 		return proposal, nil
 	}
 
+	// Return wallet voting info since this proposal is still voting.
 	proposal.VoteDetails, err = c.politeia.WalletProposalVoteDetails(tb, token)
 	if err != nil {
 		return nil, err
@@ -67,7 +66,7 @@ func (c *Core) Proposal(assetID uint32, token string) (*pi.Proposal, error) {
 
 // CastVotes casts votes for the provided eligible tickets using the provided
 // wallet and passphrase for signing. The proposal identified by token must
-// exist in the politeia db. wallet must be unlocked prior to calling CastVotes.
+// exist in the politeia db. wallet must be unlocked prior to calling c.politeia.CastVotes.
 func (c *Core) CastVote(assetID uint32, pw []byte, token, bit string) error {
 	if c.politeia == nil {
 		return fmt.Errorf("politeia not configured")
