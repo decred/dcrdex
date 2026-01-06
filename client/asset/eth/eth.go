@@ -5281,7 +5281,6 @@ func (eth *ETHWallet) checkForNewBlocks(ctx context.Context) {
 
 	// Scan incoming transactions for all connected wallets
 	connectedWallets := eth.connectedWallets()
-	eth.log.Debugf("Scanning incoming transfers for %d connected wallets at tip %d", len(connectedWallets), bestHdr.Number.Uint64())
 
 	for _, w := range connectedWallets {
 		w.checkFindRedemptions()
@@ -5290,13 +5289,9 @@ func (eth *ETHWallet) checkForNewBlocks(ctx context.Context) {
 
 		// Scan incoming token transfers (only for token wallets, not base chain)
 		if w.assetID != eth.baseChainID && w.tokenAddr != (common.Address{}) {
-			eth.log.Debugf("Starting incoming token transfer scan for asset %d (tokenAddr: %s)", w.assetID, w.tokenAddr)
 			if err := w.scanIncomingTokenTransfers(ctx, bestHdr.Number.Uint64()); err != nil {
 				eth.log.Errorf("Error scanning incoming token transfers for asset %d: %v", w.assetID, err)
 			}
-		} else {
-			eth.log.Tracef("Skipping incoming token transfer scan for asset %d (baseChainID: %d, tokenAddr: %s)",
-				w.assetID, eth.baseChainID, w.tokenAddr)
 		}
 	}
 
@@ -7294,9 +7289,6 @@ func (w *assetWallet) buildIncomingTransferQuery(startBlock, endBlock uint64) et
 	transferTopic := common.HexToHash(transferEventSignature)
 	toTopic := common.BytesToHash(w.addr.Bytes())
 
-	w.log.Tracef("Building filter query for asset %d: tokenAddr=%s, walletAddr=%s, transferTopic=%s, toTopic=%s",
-		w.assetID, w.tokenAddr, w.addr, transferTopic, toTopic)
-
 	query := ethereum.FilterQuery{
 		FromBlock: big.NewInt(int64(startBlock)),
 		ToBlock:   big.NewInt(int64(endBlock)),
@@ -7307,9 +7299,6 @@ func (w *assetWallet) buildIncomingTransferQuery(startBlock, endBlock uint64) et
 			{toTopic},       // To: our address
 		},
 	}
-
-	w.log.Debugf("Filter query for asset %d: fromBlock=%d, toBlock=%d, address=%s, topics[0]=%s, topics[2]=%s",
-		w.assetID, startBlock, endBlock, w.tokenAddr, transferTopic, toTopic)
 
 	return query
 }
@@ -7376,18 +7365,13 @@ func (w *assetWallet) scanIncomingTokenTransfers(ctx context.Context, tip uint64
 	const maxChunkSize = 5000
 	const largeGapThreshold = 10000
 
-	w.log.Debugf("Starting incoming token transfer scan for asset %d at tip %d", w.assetID, tip)
-
 	// Get last scanned block
 	lastScanBlock, err := w.txDB.GetLastIncomingScanBlock(&w.assetID)
 	if errors.Is(err, ErrNeverScanned) {
 		lastScanBlock = 0
-		w.log.Debugf("No previous scan found for asset %d, starting from block 0", w.assetID)
 	} else if err != nil {
 		w.log.Errorf("Error getting last scan block for asset %d: %v", w.assetID, err)
 		return fmt.Errorf("error getting last scan block: %w", err)
-	} else {
-		w.log.Debugf("Last scanned block for asset %d: %d", w.assetID, lastScanBlock)
 	}
 
 	// Handle reorgs: if tip decreased, reset scan point
@@ -7413,13 +7397,11 @@ func (w *assetWallet) scanIncomingTokenTransfers(ctx context.Context, tip uint64
 		w.log.Infof("Initial sync for asset %d: scanning blocks %d-%d (1000 blocks back from tip %d)", w.assetID, startBlock, tip-blockQueryBuffer, tip)
 	} else {
 		startBlock = lastScanBlock + 1
-		w.log.Debugf("Incremental sync for asset %d: scanning blocks %d-%d", w.assetID, startBlock, tip-blockQueryBuffer)
 	}
 
 	endBlock := tip - blockQueryBuffer
 	if endBlock < startBlock {
 		// Nothing to scan
-		w.log.Debugf("No blocks to scan for asset %d: endBlock %d < startBlock %d", w.assetID, endBlock, startBlock)
 		return nil
 	}
 
@@ -7458,19 +7440,13 @@ func (w *assetWallet) scanIncomingTokenTransfers(ctx context.Context, tip uint64
 
 // scanBlockRange scans a specific block range for incoming transfers.
 func (w *assetWallet) scanBlockRange(ctx context.Context, startBlock, endBlock, tip uint64) error {
-	w.log.Debugf("Scanning asset %d blocks %d-%d for incoming transfers", w.assetID, startBlock, endBlock)
-
 	query := w.buildIncomingTransferQuery(startBlock, endBlock)
-	w.log.Tracef("FilterLogs query for asset %d: fromBlock=%s, toBlock=%s, address=%s, topics=%v",
-		w.assetID, query.FromBlock, query.ToBlock, query.Addresses, query.Topics)
 
 	logs, err := w.node.FilterLogs(ctx, query)
 	if err != nil {
 		w.log.Errorf("FilterLogs error for asset %d: %v", w.assetID, err)
 		return fmt.Errorf("FilterLogs error: %w", err)
 	}
-
-	w.log.Debugf("Found %d logs for asset %d in blocks %d-%d", len(logs), w.assetID, startBlock, endBlock)
 
 	if len(logs) == 0 {
 		return nil
@@ -7503,11 +7479,8 @@ func (w *assetWallet) scanBlockRange(ctx context.Context, startBlock, endBlock, 
 			return ctx.Err()
 		}
 
-		w.log.Tracef("Processing log for asset %d: txHash=%s, block=%d", w.assetID, log.TxHash, log.BlockNumber)
-
 		receipt, ok := receipts[log.TxHash]
 		if !ok {
-			w.log.Debugf("No receipt found for tx %s, skipping", log.TxHash)
 			continue
 		}
 
@@ -7518,38 +7491,26 @@ func (w *assetWallet) scanBlockRange(ctx context.Context, startBlock, endBlock, 
 			continue
 		}
 		if existingTx != nil {
-			w.log.Tracef("Transaction %s already exists in DB, skipping", log.TxHash)
 			continue
 		}
 
-		w.log.Debugf("Creating incoming transaction from log for asset %d: %s", w.assetID, log.TxHash)
 		wt, err := w.createIncomingWalletTxFromLog(log, receipt)
 		if err != nil {
 			w.log.Errorf("Error creating wallet tx from log for asset %d: %v", w.assetID, err)
 			continue
 		}
 
-		w.log.Debugf("Storing incoming tx %s for asset %d: amount=%d, recipient=%s", log.TxHash, w.assetID, wt.Amount, wt.Recipient)
 		// Store transaction
 		if err := w.txDB.storeTx(wt); err != nil {
 			w.log.Errorf("Error storing incoming tx %s for asset %d: %v", log.TxHash, w.assetID, err)
 			continue
 		}
 
-		w.log.Infof("Successfully stored incoming tx %s for asset %d", log.TxHash, w.assetID)
-
 		// Emit notification
 		w.emitTransactionNote(wt.WalletTransaction, true)
 		newTxCount++
 	}
 
-	if newTxCount > 0 {
-		w.log.Infof("Successfully scanned blocks %d-%d for asset %d: found %d new incoming transfers", startBlock, endBlock, w.assetID, newTxCount)
-	} else {
-		w.log.Debugf("Scanned blocks %d-%d for asset %d: no new incoming transfers found", startBlock, endBlock, w.assetID)
-	}
-
-	w.log.Debugf("Completed incoming token transfer scan for asset %d", w.assetID)
 	return nil
 }
 
@@ -7657,7 +7618,6 @@ func (eth *ETHWallet) scanETHBlockRange(ctx context.Context, startBlock, endBloc
 	// This is more expensive than token transfers, so we'll scan in smaller chunks
 	const ethScanChunkSize = 100 // Smaller chunks for ETH since we scan all txs
 
-	newTxCount := 0
 	for currentStart := startBlock; currentStart <= endBlock; currentStart += ethScanChunkSize {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -7689,10 +7649,6 @@ func (eth *ETHWallet) scanETHBlockRange(ctx context.Context, startBlock, endBloc
 			// TODO: Implement block-by-block scanning for ETH if needed
 			_ = block
 		}
-	}
-
-	if newTxCount > 0 {
-		eth.log.Debugf("Scanned blocks %d-%d: found %d new incoming ETH transfers", startBlock, endBlock, newTxCount)
 	}
 
 	return nil
