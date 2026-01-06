@@ -74,7 +74,15 @@ const (
 	allAssetIndexName         = "allAssets"
 	assetIndexName            = "asset"
 	bridgeInitiationIndexName = "bridgeinit"
+	lastIncomingScanETHKey    = "lastIncomingScanETH"
 )
+
+var (
+	lastIncomingScanKeyPrefix = []byte("lastIncomingScan:")
+	lastIncomingScanETHKeyBytes = []byte(lastIncomingScanETHKey)
+)
+
+const ErrNeverScanned = dex.ErrorKind("never scanned")
 
 func (wt *extendedWalletTx) MarshalBinary() ([]byte, error) {
 	return json.Marshal(wt)
@@ -115,6 +123,8 @@ type txDB interface {
 	getBridges(n int, refID *common.Hash, past bool) ([]*asset.WalletTransaction, error)
 	getPendingBridges() ([]*extendedWalletTx, error)
 	getBridgeCompletions(initiationTxID string) ([]*extendedWalletTx, error)
+	SetLastIncomingScanBlock(assetID *uint32, block uint64) error
+	GetLastIncomingScanBlock(assetID *uint32) (uint64, error)
 }
 
 type TxDB struct {
@@ -615,4 +625,57 @@ func (db *TxDB) getBridgeCompletions(initiationTxID string) ([]*extendedWalletTx
 	}
 
 	return txs, nil
+}
+
+// buildLastIncomingScanKey builds the key for storing last incoming scan block for a specific asset.
+func buildLastIncomingScanKey(assetID uint32) []byte {
+	key := make([]byte, len(lastIncomingScanKeyPrefix)+4)
+	copy(key, lastIncomingScanKeyPrefix)
+	binary.BigEndian.PutUint32(key[len(lastIncomingScanKeyPrefix):], assetID)
+	return key
+}
+
+// SetLastIncomingScanBlock stores the last block height at which incoming transactions
+// were scanned for the given asset. If assetID is nil, it stores for the base chain (ETH).
+func (db *TxDB) SetLastIncomingScanBlock(assetID *uint32, block uint64) error {
+	var key []byte
+	if assetID == nil {
+		key = lastIncomingScanETHKeyBytes
+	} else {
+		key = buildLastIncomingScanKey(*assetID)
+	}
+
+	return db.Update(func(txn *badger.Txn) error {
+		b := make([]byte, 8)
+		binary.BigEndian.PutUint64(b, block)
+		return txn.Set(key, b)
+	})
+}
+
+// GetLastIncomingScanBlock retrieves the last block height at which incoming transactions
+// were scanned for the given asset. If assetID is nil, it retrieves for the base chain (ETH).
+// Returns ErrNeverScanned if the value was never set.
+func (db *TxDB) GetLastIncomingScanBlock(assetID *uint32) (uint64, error) {
+	var key []byte
+	if assetID == nil {
+		key = lastIncomingScanETHKeyBytes
+	} else {
+		key = buildLastIncomingScanKey(*assetID)
+	}
+
+	var block uint64
+	err := db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get(key)
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return ErrNeverScanned
+		}
+		if err != nil {
+			return err
+		}
+		return item.Value(func(b []byte) error {
+			block = binary.BigEndian.Uint64(b)
+			return nil
+		})
+	})
+	return block, err
 }
