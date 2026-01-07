@@ -10514,11 +10514,11 @@ func TestToggleRateSourceStatus(t *testing.T) {
 		wantErr: true,
 	}, {
 		name:    "ok valid source",
-		source:  messari,
+		source:  coinpaprika,
 		wantErr: false,
 	}, {
 		name:    "ok already disabled/not initialized || enabled",
-		source:  messari,
+		source:  coinpaprika,
 		wantErr: false,
 	}}
 
