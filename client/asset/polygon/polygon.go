@@ -55,7 +55,7 @@ func init() {
 const (
 	// BipID is the BIP-0044 asset ID for Polygon.
 	BipID              = 966
-	defaultGasFeeLimit = 1000
+	defaultGasFeeLimit = 2500
 	walletTypeRPC      = "rpc"
 	walletTypeToken    = "token"
 )
