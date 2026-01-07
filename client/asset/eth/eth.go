@@ -1969,8 +1969,13 @@ func (w *assetWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, err
 		return nil, err
 	}
 
-	bestCase := nRedeem * req.FeeSuggestion
-	worstCase := oneRedeem * req.Lots * req.FeeSuggestion
+	feeRate, _, _, err := w.feeRate(w.ctx, req.FeeSuggestion, true, false)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get fee rate: %v", err)
+	}
+
+	bestCase := nRedeem * feeRate
+	worstCase := oneRedeem * req.Lots * feeRate
 	userOpRequired := false
 
 	w.bundlerMtx.RLock()
@@ -2000,7 +2005,11 @@ func (w *assetWallet) SingleLotRedeemFees(assetVer uint32, feeSuggestion uint64)
 	if g == nil {
 		return 0, fmt.Errorf("no gases known for %d, constract version %d", w.assetID, contractVersion(assetVer))
 	}
-	return g.Redeem * feeSuggestion, nil
+	feeRate, _, _, err := w.feeRate(w.ctx, feeSuggestion, true, false)
+	if err != nil {
+		return 0, fmt.Errorf("unable to get fee rate: %v", err)
+	}
+	return g.Redeem * feeRate, nil
 }
 
 // coin implements the asset.Coin interface for ETH
@@ -2069,21 +2078,20 @@ func (w *ETHWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uint6
 			dex.BipIDSymbol(w.assetID), ord.MaxFeeRate, dexeth.MinGasTipCap)
 	}
 
-	if w.gasFeeLimit() < ord.MaxFeeRate {
-		return nil, nil, 0, fmt.Errorf(
-			"%v: server's max fee rate %v higher than configured fee rate limit %v",
-			dex.BipIDSymbol(w.assetID), ord.MaxFeeRate, w.gasFeeLimit())
+	feeRate, _, _, err := w.feeRate(w.ctx, ord.MaxFeeRate, true, true)
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("unable to get fee rate: %v", err)
 	}
 
 	contractVer := contractVersion(ord.AssetVersion)
 
 	g, err := w.initGasEstimate(int(ord.MaxSwapCount), contractVer,
-		ord.RedeemVersion, ord.RedeemAssetID, ord.MaxFeeRate)
+		ord.RedeemVersion, ord.RedeemAssetID, feeRate)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error estimating swap gas: %v", err)
 	}
 
-	ethToLock := ord.MaxFeeRate*g.Swap*ord.MaxSwapCount + ord.Value
+	ethToLock := feeRate*g.Swap*ord.MaxSwapCount + ord.Value
 	// Note: In a future refactor, we could lock the redemption funds here too
 	// and signal to the user so that they don't call `RedeemN`. This has the
 	// same net effect, but avoids a lockFunds -> unlockFunds for us and likely
@@ -2091,7 +2099,7 @@ func (w *ETHWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uint6
 	// remove RedeemN, since we can't guarantee that the redemption asset is in
 	// our fee-family. though it could still be an AccountRedeemer.
 	w.log.Debugf("Locking %s to swap %s in up to %d swaps at a fee rate of %d gwei/gas using up to %d gas per swap",
-		w.amtString(ethToLock), w.amtString(ord.Value), ord.MaxSwapCount, ord.MaxFeeRate, g.Swap)
+		w.amtString(ethToLock), w.amtString(ord.Value), ord.MaxSwapCount, feeRate, g.Swap)
 
 	coin := w.createFundingCoin(ethToLock)
 
@@ -2109,10 +2117,9 @@ func (w *TokenWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uin
 			dex.BipIDSymbol(w.assetID), ord.MaxFeeRate, dexeth.MinGasTipCap)
 	}
 
-	if w.gasFeeLimit() < ord.MaxFeeRate {
-		return nil, nil, 0, fmt.Errorf(
-			"%v: server's max fee rate %v higher than configured fee rate limit %v",
-			dex.BipIDSymbol(w.assetID), ord.MaxFeeRate, w.gasFeeLimit())
+	feeRate, _, _, err := w.feeRate(w.ctx, ord.MaxFeeRate, true, true)
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("unable to get fee rate: %v", err)
 	}
 
 	approvalStatus, err := w.swapContractApprovalStatus(ord.AssetVersion)
@@ -2130,12 +2137,12 @@ func (w *TokenWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uin
 	}
 
 	g, err := w.initGasEstimate(int(ord.MaxSwapCount), contractVersion(ord.AssetVersion),
-		ord.RedeemVersion, ord.RedeemAssetID, ord.MaxFeeRate)
+		ord.RedeemVersion, ord.RedeemAssetID, feeRate)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error estimating swap gas: %v", err)
 	}
 
-	ethToLock := ord.MaxFeeRate * g.Swap * ord.MaxSwapCount
+	ethToLock := feeRate * g.Swap * ord.MaxSwapCount
 	var success bool
 	if err = w.lockFunds(ord.Value, initiationReserve); err != nil {
 		return nil, nil, 0, fmt.Errorf("error locking token funds: %v", err)
@@ -2147,7 +2154,7 @@ func (w *TokenWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uin
 	}()
 
 	w.log.Debugf("Locking %s to swap %s in up to %d swaps at a fee rate of %d gwei/gas using up to %d gas per swap",
-		w.parent.amtString(ethToLock), w.amtString(ord.Value), ord.MaxSwapCount, ord.MaxFeeRate, g.Swap)
+		w.parent.amtString(ethToLock), w.amtString(ord.Value), ord.MaxSwapCount, feeRate, g.Swap)
 	if err := w.parent.lockFunds(ethToLock, initiationReserve); err != nil {
 		return nil, nil, 0, err
 	}
@@ -2161,13 +2168,12 @@ func (w *TokenWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uin
 // FundMultiOrder funds multiple orders in one shot. No special handling is
 // required for ETH as ETH does not over-lock during funding.
 func (w *ETHWallet) FundMultiOrder(ord *asset.MultiOrder, maxLock uint64) ([]asset.Coins, [][]dex.Bytes, uint64, error) {
-	if w.gasFeeLimit() < ord.MaxFeeRate {
-		return nil, nil, 0, fmt.Errorf(
-			"%v: server's max fee rate %v higher than configured fee rate limit %v",
-			dex.BipIDSymbol(w.assetID), ord.MaxFeeRate, w.gasFeeLimit())
+	feeRate, _, _, err := w.feeRate(w.ctx, ord.MaxFeeRate, true, true)
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("unable to get fee rate: %v", err)
 	}
 
-	g, err := w.initGasEstimate(1, ord.AssetVersion, ord.RedeemVersion, ord.RedeemAssetID, ord.MaxFeeRate)
+	g, err := w.initGasEstimate(1, ord.AssetVersion, ord.RedeemVersion, ord.RedeemAssetID, feeRate)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error estimating swap gas: %v", err)
 	}
@@ -2175,7 +2181,7 @@ func (w *ETHWallet) FundMultiOrder(ord *asset.MultiOrder, maxLock uint64) ([]ass
 	var totalToLock uint64
 	allCoins := make([]asset.Coins, 0, len(ord.Values))
 	for _, value := range ord.Values {
-		toLock := ord.MaxFeeRate*g.Swap*value.MaxSwapCount + value.Value
+		toLock := feeRate*g.Swap*value.MaxSwapCount + value.Value
 		allCoins = append(allCoins, asset.Coins{w.createFundingCoin(toLock)})
 		totalToLock += toLock
 	}
@@ -2199,10 +2205,9 @@ func (w *ETHWallet) FundMultiOrder(ord *asset.MultiOrder, maxLock uint64) ([]ass
 // FundMultiOrder funds multiple orders in one shot. No special handling is
 // required for ETH as ETH does not over-lock during funding.
 func (w *TokenWallet) FundMultiOrder(ord *asset.MultiOrder, maxLock uint64) ([]asset.Coins, [][]dex.Bytes, uint64, error) {
-	if w.gasFeeLimit() < ord.MaxFeeRate {
-		return nil, nil, 0, fmt.Errorf(
-			"%v: server's max fee rate %v higher than configured fee rate limit %v",
-			dex.BipIDSymbol(w.assetID), ord.MaxFeeRate, w.gasFeeLimit())
+	feeRate, _, _, err := w.feeRate(w.ctx, ord.MaxFeeRate, true, true)
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("unable to get fee rate: %v", err)
 	}
 
 	approvalStatus, err := w.swapContractApprovalStatus(ord.AssetVersion)
@@ -2220,7 +2225,7 @@ func (w *TokenWallet) FundMultiOrder(ord *asset.MultiOrder, maxLock uint64) ([]a
 	}
 
 	g, err := w.initGasEstimate(1, ord.AssetVersion,
-		ord.RedeemVersion, ord.RedeemAssetID, ord.MaxFeeRate)
+		ord.RedeemVersion, ord.RedeemAssetID, feeRate)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error estimating swap gas: %v", err)
 	}
@@ -2228,7 +2233,7 @@ func (w *TokenWallet) FundMultiOrder(ord *asset.MultiOrder, maxLock uint64) ([]a
 	var totalETHToLock, totalTokenToLock uint64
 	allCoins := make([]asset.Coins, 0, len(ord.Values))
 	for _, value := range ord.Values {
-		ethToLock := ord.MaxFeeRate * g.Swap * value.MaxSwapCount
+		ethToLock := feeRate * g.Swap * value.MaxSwapCount
 		tokenToLock := value.Value
 		allCoins = append(allCoins, asset.Coins{w.createTokenFundingCoin(tokenToLock, ethToLock)})
 		totalETHToLock += ethToLock
@@ -2561,8 +2566,9 @@ var _ asset.Receipt = (*swapReceipt)(nil)
 // max fees that will possibly be used, since in ethereum with EIP-1559 we cannot
 // know exactly how much fees will be used.
 func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
-	if swaps.FeeRate == 0 {
-		return nil, nil, 0, fmt.Errorf("cannot send swap with with zero fee rate")
+	feeRate, maxFeeRate, tipRate, err := w.feeRate(w.ctx, swaps.FeeRate, false, true)
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("unable to get fee rate: %v", err)
 	}
 
 	fail := func(s string, a ...any) ([]asset.Receipt, asset.Coin, uint64, error) {
@@ -2585,12 +2591,12 @@ func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 
 	contractVer := contractVersion(swaps.AssetVersion)
 	n := len(swaps.Contracts)
-	oneSwap, nSwap, err := w.swapGas(n, contractVer, swaps.FeeRate)
+	oneSwap, nSwap, err := w.swapGas(n, contractVer, feeRate)
 	if err != nil {
 		return fail("error getting gas fees: %v", err)
 	}
 	gasLimit := oneSwap * uint64(n) // naive unbatched, higher but not realistic
-	fees := gasLimit * swaps.FeeRate
+	fees := gasLimit * feeRate
 	if swapVal+fees > reservedVal {
 		if n == 1 {
 			return fail("unfunded swap: %d < %d", reservedVal, swapVal+fees)
@@ -2598,7 +2604,7 @@ func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 		w.log.Warnf("Unexpectedly low reserves for %d swaps: %d < %d", n, reservedVal, swapVal+fees)
 		// Since this is a batch swap, attempt to use the realistic limits.
 		gasLimit = nSwap
-		fees = gasLimit * swaps.FeeRate
+		fees = gasLimit * feeRate
 		if swapVal+fees > reservedVal {
 			// If the live gas estimate is giving us an unrealistically high
 			// value, we're in trouble, so we might consider a third fallback
@@ -2611,13 +2617,8 @@ func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 		}
 	}
 
-	maxFeeRate := dexeth.GweiToWei(swaps.FeeRate)
-	_, tipRate, err := w.currentNetworkFees(w.ctx)
-	if err != nil {
-		return fail("Swap: failed to get network tip cap: %w", err)
-	}
-
-	tx, err := w.initiate(w.ctx, w.assetID, swaps.Contracts, gasLimit, maxFeeRate, tipRate, contractVer)
+	maxFeeRateBig := dexeth.GweiToWei(maxFeeRate)
+	tx, err := w.initiate(w.ctx, w.assetID, swaps.Contracts, gasLimit, maxFeeRateBig, tipRate, contractVer)
 	if err != nil {
 		return fail("Swap: initiate error: %w", err)
 	}
@@ -2670,8 +2671,9 @@ func acToLocator(contractVer uint32, swap *asset.Contract, evmValue *big.Int, fr
 // max fees that will possibly be used, since in ethereum with EIP-1559 we cannot
 // know exactly how much fees will be used.
 func (w *TokenWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
-	if swaps.FeeRate == 0 {
-		return nil, nil, 0, fmt.Errorf("cannot send swap with with zero fee rate")
+	feeRate, maxFeeRate, tipRate, err := w.feeRate(w.ctx, swaps.FeeRate, false, true)
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("unable to get fee rate: %v", err)
 	}
 
 	fail := func(s string, a ...any) ([]asset.Receipt, asset.Coin, uint64, error) {
@@ -2699,13 +2701,13 @@ func (w *TokenWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uin
 
 	n := len(swaps.Contracts)
 	contractVer := contractVersion(swaps.AssetVersion)
-	oneSwap, nSwap, err := w.swapGas(n, contractVer, swaps.FeeRate)
+	oneSwap, nSwap, err := w.swapGas(n, contractVer, feeRate)
 	if err != nil {
 		return fail("error getting gas fees: %v", err)
 	}
 
 	gasLimit := oneSwap * uint64(n)
-	fees := gasLimit * swaps.FeeRate
+	fees := gasLimit * feeRate
 	if fees > reservedParent {
 		if n == 1 {
 			return fail("unfunded token swap fees: %d < %d", reservedParent, fees)
@@ -2713,23 +2715,18 @@ func (w *TokenWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uin
 		// Since this is a batch swap, attempt to use the realistic limits.
 		w.log.Warnf("Unexpectedly low reserves for %d swaps: %d < %d", n, reservedVal, swapVal+fees)
 		gasLimit = nSwap
-		fees = gasLimit * swaps.FeeRate
+		fees = gasLimit * feeRate
 		if fees > reservedParent {
 			return fail("unfunded token swap fees: %d < %d", reservedParent, fees)
 		} // See (*ETHWallet).Swap comments for a third option.
 	}
 
-	maxFeeRate := dexeth.GweiToWei(swaps.FeeRate)
-	_, tipRate, err := w.currentNetworkFees(w.ctx)
-	if err != nil {
-		return fail("Swap: failed to get network tip cap: %w", err)
-	}
-
+	maxFeeRateBig := dexeth.GweiToWei(maxFeeRate)
 	if w.netToken.SwapContracts[swaps.AssetVersion] == nil {
 		return fail("unable to find contract address for asset %d contract version %d", w.assetID, swaps.AssetVersion)
 	}
 
-	tx, err := w.initiate(w.ctx, w.assetID, swaps.Contracts, gasLimit, maxFeeRate, tipRate, contractVer)
+	tx, err := w.initiate(w.ctx, w.assetID, swaps.Contracts, gasLimit, maxFeeRateBig, tipRate, contractVer)
 	if err != nil {
 		return fail("Swap: initiate error: %w", err)
 	}
@@ -3088,17 +3085,6 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 		return fail(fmt.Errorf("no gas table"))
 	}
 
-	if feeWallet == nil {
-		feeWallet = w
-	}
-	bal, err := feeWallet.Balance()
-	if err != nil {
-		return fail(fmt.Errorf("error getting balance in excessive gas fee recovery: %v", err))
-	}
-
-	gasLimit, gasFeeCap := g.Redeem*n, form.FeeSuggestion
-	originalFundsReserved := gasLimit * gasFeeCap
-
 	/* We could get a gas estimate via RPC, but this will reveal the secret key
 	   before submitting the redeem transaction. This is not OK for maker.
 	   Disable for now.
@@ -3125,25 +3111,12 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 	}
 	*/
 
-	// If the base fee is higher than the FeeSuggestion we attempt to increase
-	// the gasFeeCap to 2*baseFee. If we don't have enough funds, we use the
-	// funds we have available.
-	baseFee, tipRate, err := w.currentNetworkFees(w.ctx)
+	feeRate, maxFeeRate, tipRate, err := w.feeRate(w.ctx, form.FeeSuggestion, false, false)
 	if err != nil {
-		return fail(fmt.Errorf("Error getting net fee state: %w", err))
-	}
-	baseFeeGwei := dexeth.WeiToGweiCeil(baseFee)
-	if baseFeeGwei > form.FeeSuggestion {
-		additionalFundsNeeded := (2 * baseFeeGwei * gasLimit) - originalFundsReserved
-		if bal.Available > additionalFundsNeeded {
-			gasFeeCap = 2 * baseFeeGwei
-		} else {
-			gasFeeCap = (bal.Available + originalFundsReserved) / gasLimit
-		}
-		w.log.Warnf("base fee %d > server max fee rate %d. using %d as gas fee cap for redemption", baseFeeGwei, form.FeeSuggestion, gasFeeCap)
+		return fail(fmt.Errorf("unable to get fee rate: %v", err))
 	}
 
-	tx, err := w.redeem(w.ctx, form.Redemptions, gasFeeCap, tipRate, gasLimit, contractVer)
+	tx, err := w.redeem(w.ctx, form.Redemptions, maxFeeRate, tipRate, g.Redeem*n, contractVer)
 	if err != nil {
 		return fail(fmt.Errorf("Redeem: redeem error: %w", err))
 	}
@@ -3162,7 +3135,7 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 
 	// This is still a fee estimate. The actual gas cost will be returned in the
 	// receipt.
-	fees := g.RedeemN(len(form.Redemptions)) * form.FeeSuggestion
+	fees := g.RedeemN(len(form.Redemptions)) * feeRate
 	return txs, outputCoin, fees, nil
 }
 
@@ -4498,13 +4471,17 @@ func (w *assetWallet) Refund(_, contract dex.Bytes, feeRate uint64) (dex.Bytes, 
 		return nil, fmt.Errorf("Refund: swap with locator %x is not refundable", locator)
 	}
 
-	maxFeeRate := dexeth.GweiToWei(feeRate)
+	maxFeeRate := w.gasFeeLimit()
+	if feeRate > maxFeeRate {
+		w.log.Warnf("Refund fee rate higher than max fee. %d > %d", feeRate, maxFeeRate)
+	}
+	maxFeeRateBig := dexeth.GweiToWei(maxFeeRate)
 	_, tipRate, err := w.currentNetworkFees(w.ctx)
 	if err != nil {
 		return nil, fmt.Errorf("Refund: failed to get network tip cap: %w", err)
 	}
 
-	tx, err := w.refund(locator, w.atomize(vector.Value), maxFeeRate, tipRate, contractVer)
+	tx, err := w.refund(locator, w.atomize(vector.Value), maxFeeRateBig, tipRate, contractVer)
 	if err != nil {
 		return nil, fmt.Errorf("Refund: failed to call refund: %w", err)
 	}
@@ -5121,6 +5098,42 @@ func (w *baseWallet) currentBaseFee(ctx context.Context) (*big.Int, error) {
 		return nil, err
 	}
 	return base, nil
+}
+
+// feeRate returns the higher of suggested fee rate and the current on chain fee
+// rate and caps with the user's gas fee limit.
+func (w *baseWallet) feeRate(ctx context.Context, suggestedFeeRate uint64, addBuffer, isInit bool) (feeRate, maxFeeRate uint64, tipRate *big.Int, err error) {
+	maxFeeRate = w.gasFeeLimit()
+	if maxFeeRate < suggestedFeeRate {
+		// Only allow server values to stop initiation transactions.
+		err := fmt.Errorf(
+			"server's max fee rate %v higher than configured fee rate limit %v",
+			suggestedFeeRate, maxFeeRate)
+		if isInit {
+			return 0, 0, nil, err
+		} else {
+			w.log.Warn(err)
+		}
+	}
+	liveRateBig, tipRate, err := w.recommendedMaxFeeRate(ctx)
+	if err != nil {
+		return 0, 0, nil, fmt.Errorf("unable to get recommended fee rate: %v", err)
+	}
+	estimate := suggestedFeeRate
+	// If not a swap initiation, the suggestion is already what is returned
+	// from recommendedMaxFeeRate.
+	if isInit {
+		estimate, err = dexeth.WeiToGweiSafe(liveRateBig)
+		if err != nil {
+			return 0, 0, nil, fmt.Errorf("unable to convert to gwei: %v", err)
+		}
+		estimate = max(estimate, suggestedFeeRate)
+	}
+	// Add a %25 buffer for initial fund locking.
+	if addBuffer {
+		estimate = estimate * 5 / 4
+	}
+	return min(estimate, maxFeeRate), maxFeeRate, tipRate, nil
 }
 
 // currentNetworkFees give the current base fee rate (from the best header),
