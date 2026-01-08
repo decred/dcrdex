@@ -763,9 +763,9 @@ func (t *trackedTrade) token() string {
 // clearCancel clears the unmatched cancel and deletes the cancel checksum and
 // link to the trade in the dexConnection. clearCancel must be called with the
 // trackedTrade.mtx locked.
-func (t *trackedTrade) clearCancel(preImg order.Preimage) {
+func (c *Core) clearCancel(t *trackedTrade, preImg order.Preimage) {
 	if t.cancel != nil {
-		t.dc.deleteCancelLink(t.cancel.ID())
+		c.deleteCancelLink(t.cancel.ID())
 		t.cancel = nil
 	}
 	t.csumMtx.Lock()
@@ -776,15 +776,15 @@ func (t *trackedTrade) clearCancel(preImg order.Preimage) {
 
 // cancelTrade sets the cancellation data with the order and its preimage.
 // cancelTrade must be called with the mtx write-locked.
-func (t *trackedTrade) cancelTrade(co *order.CancelOrder, preImg order.Preimage, epochLen uint64) error {
-	t.clearCancel(preImg)
+func (c *Core) cancelTrade(t *trackedTrade, co *order.CancelOrder, preImg order.Preimage, epochLen uint64) error {
+	c.clearCancel(t, preImg)
 	t.cancel = &trackedCancel{
 		CancelOrder: *co,
 		epochLen:    epochLen,
 	}
 	cid := co.ID()
 	oid := t.ID()
-	t.dc.registerCancelLink(cid, oid)
+	c.registerCancelLink(cid, oid)
 	err := t.db.LinkOrder(oid, cid)
 	if err != nil {
 		return fmt.Errorf("error linking cancel order %s for trade %s: %w", cid, oid, err)
@@ -794,7 +794,7 @@ func (t *trackedTrade) cancelTrade(co *order.CancelOrder, preImg order.Preimage,
 }
 
 // nomatch sets the appropriate order status and returns funding coins.
-func (t *trackedTrade) nomatch(oid order.OrderID) (assetMap, error) {
+func (c *Core) nomatch(t *trackedTrade, oid order.OrderID) (assetMap, error) {
 	assets := make(assetMap)
 	// Check if this is the cancel order.
 	t.mtx.Lock()
@@ -812,7 +812,7 @@ func (t *trackedTrade) nomatch(oid order.OrderID) (assetMap, error) {
 			t.dc.log.Errorf("DB error unlinking cancel order %s for trade %s: %v", oid, t.ID(), err)
 		}
 		// Clearing the trackedCancel allows this order to be canceled again.
-		t.clearCancel(order.Preimage{})
+		c.clearCancel(t, order.Preimage{})
 		t.metaData.LinkedOrder = order.OrderID{}
 
 		subject, details := t.formatDetails(TopicMissedCancel, makeOrderToken(t.token()))
@@ -1218,7 +1218,7 @@ func (t *trackedTrade) counterPartyConfirms(ctx context.Context, match *matchTra
 // orders detected as "stale" with the two-epochs-old heuristic use this.
 //
 // This method MUST be called with the trackedTrade mutex lock held for writes.
-func (t *trackedTrade) deleteCancelOrder() {
+func (c *Core) deleteCancelOrder(t *trackedTrade) {
 	if t.cancel == nil {
 		return
 	}
@@ -1228,7 +1228,7 @@ func (t *trackedTrade) deleteCancelOrder() {
 		t.dc.log.Errorf("Error updating status in db for cancel order %v to revoked: %v", cid, err)
 	}
 	// Unlink the cancel order from the trade.
-	t.clearCancel(order.Preimage{})
+	c.clearCancel(t, order.Preimage{})
 	t.metaData.LinkedOrder = order.OrderID{} // NOTE: caller may wish to update the trades's DB entry
 }
 
@@ -1257,7 +1257,7 @@ func (t *trackedTrade) hasStaleCancelOrder() bool {
 // check and return status of cancel orders.
 //
 // This method MUST be called with the trackedTrade mutex lock held for writes.
-func (t *trackedTrade) deleteStaleCancelOrder() {
+func (c *Core) deleteStaleCancelOrder(t *trackedTrade) {
 	if !t.hasStaleCancelOrder() {
 		return
 	}
@@ -1268,7 +1268,7 @@ func (t *trackedTrade) deleteStaleCancelOrder() {
 	// Clear the trackedCancel, allowing this order to be canceled again, and
 	// set the cancel order's status as revoked.
 	cancelOrd := t.cancel
-	t.deleteCancelOrder()
+	c.deleteCancelOrder(t)
 	err := t.db.LinkOrder(t.ID(), order.OrderID{})
 	if err != nil {
 		t.dc.log.Errorf("DB error unlinking cancel order %s for trade %s: %v", cancelOrd.ID(), t.ID(), err)
@@ -2149,7 +2149,7 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	defer t.mtx.Unlock()
 
 	if rmCancel {
-		t.deleteStaleCancelOrder()
+		c.deleteStaleCancelOrder(t)
 	}
 
 	for _, match := range revokes {

@@ -740,8 +740,8 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	// Revoke all active orders of the suspended market for the dex.
 	c.log.Warnf("Revoking all active orders for market %s at %s.", sp.MarketID, dc.acct.host)
 	updatedAssets := make(assetMap)
-	dc.tradeMtx.RLock()
-	for _, tracker := range dc.trades {
+	c.tradeMtx.RLock()
+	for _, tracker := range c.trades {
 		if tracker.Order.Base() == mkt.Base && tracker.Order.Quote() == mkt.Quote &&
 			tracker.metaData.Host == dc.acct.host && tracker.status() == order.OrderStatusBooked {
 			// Locally revoke the purged book order.
@@ -751,7 +751,7 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 			updatedAssets.count(tracker.fromAssetID)
 		}
 	}
-	dc.tradeMtx.RUnlock()
+	c.tradeMtx.RUnlock()
 
 	// Clear the book.
 	book.send(&BookUpdate{
