@@ -1089,7 +1089,7 @@ export class FeeAssetSelectionForm {
         tmpl.ticker.textContent = unit
         tmpl.name.textContent = name
         const fiatRate = app().fiatRatesMap[assetID]
-        Doc.setVis(tmpl.fiatBox)
+        Doc.setVis(fiatRate, tmpl.fiatBox)
         if (fiatRate) tmpl.fiatAmt.textContent = Doc.formatFourSigFigs(bondLocked / conversionFactor * fiatRate)
       }
     }
@@ -1631,7 +1631,7 @@ export class DEXAddressForm {
     Doc.setVis(Doc.isDisplayed(page.customBox), page.auth)
   }
 
-  skipRegistration () : boolean {
+  skipRegistration (): boolean {
     return this.page.skipRegistration.checked ?? false
   }
 
@@ -1655,7 +1655,7 @@ export class DEXAddressForm {
     }
     const cert = await this.certPicker.file()
     const skipRegistration = this.skipRegistration()
-    let endpoint : string, req: any
+    let endpoint: string, req: any
     if (this.dexToUpdate) {
       endpoint = '/api/updatedexhost'
       req = {
