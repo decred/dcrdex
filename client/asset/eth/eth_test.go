@@ -1587,7 +1587,7 @@ func newTestNode(assetID uint32) *tMempoolNode {
 			acct:                    acct,
 			addr:                    acct.Address,
 			maxFeeRate:              dexeth.GweiToWei(100),
-			baseFee:                 dexeth.GweiToWei(100),
+			baseFee:                 dexeth.GweiToWei(4),
 			tip:                     dexeth.GweiToWei(2),
 			privKey:                 privKey,
 			contractor:              c,
@@ -2186,9 +2186,9 @@ func testRefund(t *testing.T, assetID uint32) {
 					test.name, secretHash, c.lastRefund.secretHash)
 			}
 
-			if dexeth.GweiToWei(feeSuggestion).Cmp(c.lastRefund.maxFeeRate) != 0 {
-				t.Fatalf(`%v: fee suggestion %v != used to call refund %v`,
-					test.name, dexeth.GweiToWei(feeSuggestion), c.lastRefund.maxFeeRate)
+			if dexeth.GweiToWei(eth.gasFeeLimit()).Cmp(c.lastRefund.maxFeeRate) != 0 {
+				t.Fatalf(`%v: gas fee limit %v != used to call refund %v`,
+					test.name, dexeth.GweiToWei(eth.gasFeeLimit()), c.lastRefund.maxFeeRate)
 			}
 		}
 	}
@@ -2293,10 +2293,9 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 		RedeemVersion: tBTC.Version, // not important if not a token
 		RedeemAssetID: tBTC.ID,
 	}
-
 	// Test fund order with less than available funds
 	coins1, redeemScripts1, _, err := w.FundOrder(&order)
-	expectedOrderFees := eth.gases(fromAsset.Version).Swap * order.MaxFeeRate * order.MaxSwapCount
+	expectedOrderFees := eth.gases(fromAsset.Version).Swap * (order.MaxFeeRate * 5 / 4) * order.MaxSwapCount
 	expectedFees := expectedOrderFees
 	expectedCoinValue := order.Value
 	if assetID == BipID {
@@ -2541,7 +2540,7 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 	tests := []test{
 		{
 			name:      "ok",
-			bal:       uint64(dexeth.GweiFactor) + swapGas*4*fromAsset.MaxFeeRate,
+			bal:       uint64(dexeth.GweiFactor) + swapGas*4*(fromAsset.MaxFeeRate*5/4),
 			tokenBal:  uint64(dexeth.GweiFactor),
 			parentBal: uint64(dexeth.GweiFactor),
 			multiOrder: &asset.MultiOrder{
@@ -2561,7 +2560,7 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 		},
 		{
 			name:      "maxLock just enough, eth",
-			bal:       uint64(dexeth.GweiFactor) + swapGas*4*fromAsset.MaxFeeRate,
+			bal:       uint64(dexeth.GweiFactor) + swapGas*4*(fromAsset.MaxFeeRate*5/4),
 			tokenBal:  uint64(dexeth.GweiFactor),
 			parentBal: uint64(dexeth.GweiFactor),
 			multiOrder: &asset.MultiOrder{
@@ -2578,7 +2577,7 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 					},
 				},
 			},
-			maxLock: uint64(dexeth.GweiFactor) + swapGas*4*fromAsset.MaxFeeRate,
+			maxLock: uint64(dexeth.GweiFactor) + swapGas*4*(fromAsset.MaxFeeRate*5/4),
 		},
 		{
 			name:      "maxLock not enough, eth",
@@ -2606,7 +2605,7 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 		{
 			name:      "maxLock just enough, token",
 			tokenOnly: true,
-			bal:       uint64(dexeth.GweiFactor) + swapGas*4*fromAsset.MaxFeeRate,
+			bal:       uint64(dexeth.GweiFactor) + swapGas*4*(fromAsset.MaxFeeRate*5/4),
 			tokenBal:  uint64(dexeth.GweiFactor),
 			parentBal: uint64(dexeth.GweiFactor),
 			multiOrder: &asset.MultiOrder{
@@ -2673,7 +2672,7 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 			name:      "parent balance ok",
 			tokenOnly: true,
 			tokenBal:  uint64(dexeth.GweiFactor),
-			parentBal: swapGas * 4 * fromAsset.MaxFeeRate,
+			parentBal: swapGas * 4 * (fromAsset.MaxFeeRate * 5 / 4),
 			multiOrder: &asset.MultiOrder{
 				AssetVersion: fromAsset.Version,
 				MaxFeeRate:   fromAsset.MaxFeeRate,
@@ -2751,7 +2750,7 @@ func testFundMultiOrder(t *testing.T, assetID uint32) {
 			}
 			expectedValue := test.multiOrder.Values[i].Value
 			if assetID == BipID {
-				expectedValue += swapGas * test.multiOrder.Values[i].MaxSwapCount * fromAsset.MaxFeeRate
+				expectedValue += swapGas * test.multiOrder.Values[i].MaxSwapCount * (fromAsset.MaxFeeRate * 5 / 4)
 			}
 			if coins[0].Value() != expectedValue {
 				t.Fatalf("%s: expected coin %d value %d but got %d", test.name, i, expectedValue, coins[0].Value())
@@ -3439,12 +3438,11 @@ func testRedeem(t *testing.T, assetID uint32) {
 		v1                bool
 	}{
 		{
-			name:              "ok",
-			expectError:       false,
-			swapMap:           swappableSwapMap,
-			ethBal:            dexeth.GweiToWei(10e9),
-			baseFee:           dexeth.GweiToWei(100),
-			expectedGasFeeCap: dexeth.GweiToWei(100),
+			name:        "ok",
+			expectError: false,
+			swapMap:     swappableSwapMap,
+			ethBal:      dexeth.GweiToWei(10e9),
+			baseFee:     dexeth.GweiToWei(25),
 			form: asset.RedeemForm{
 				Redemptions:   []*asset.Redemption{newRedeem(0), newRedeem(1)},
 				FeeSuggestion: 100,
@@ -3549,7 +3547,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 				secretHashes[1]: dexeth.SSRedeemed,
 			},
 			ethBal:  dexeth.GweiToWei(10e9),
-			baseFee: dexeth.GweiToWei(100),
+			baseFee: dexeth.GweiToWei(25),
 
 			form: asset.RedeemForm{
 				Redemptions:   []*asset.Redemption{newRedeem(0), newRedeem(1)},
@@ -3560,7 +3558,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			name:        "isRedeemable error",
 			expectError: true,
 			ethBal:      dexeth.GweiToWei(10e9),
-			baseFee:     dexeth.GweiToWei(100),
+			baseFee:     dexeth.GweiToWei(25),
 			swapErr:     errors.New("swap() error"),
 			form: asset.RedeemForm{
 				Redemptions:   []*asset.Redemption{newRedeem(0), newRedeem(1)},
@@ -3573,7 +3571,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			swapMap:     swappableSwapMap,
 			expectError: true,
 			ethBal:      dexeth.GweiToWei(10e9),
-			baseFee:     dexeth.GweiToWei(100),
+			baseFee:     dexeth.GweiToWei(25),
 			form: asset.RedeemForm{
 				Redemptions:   []*asset.Redemption{newRedeem(0)},
 				FeeSuggestion: 200,
@@ -3584,7 +3582,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			swapMap:     swappableSwapMap,
 			expectError: true,
 			ethBal:      dexeth.GweiToWei(10e9),
-			baseFee:     dexeth.GweiToWei(100),
+			baseFee:     dexeth.GweiToWei(25),
 			form: asset.RedeemForm{
 				Redemptions:   []*asset.Redemption{newRedeem(2)},
 				FeeSuggestion: 100,
@@ -3593,7 +3591,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 		{
 			name:        "empty redemptions slice error",
 			ethBal:      dexeth.GweiToWei(10e9),
-			baseFee:     dexeth.GweiToWei(100),
+			baseFee:     dexeth.GweiToWei(25),
 			swapMap:     swappableSwapMap,
 			expectError: true,
 			form: asset.RedeemForm{
@@ -3681,9 +3679,10 @@ func testRedeem(t *testing.T, assetID uint32) {
 			t.Fatalf("%s: expected gas limit %d, but got %d", test.name, expectedGasLimit, contractor.lastRedeemOpts.GasLimit)
 		}
 
+		expectedGasFeeLimit := dexeth.GweiToWei(eth.gasFeeLimit())
 		// Check that the gas fee cap in the transaction is as expected
-		if contractor.lastRedeemOpts.GasFeeCap.Cmp(test.expectedGasFeeCap) != 0 {
-			t.Fatalf("%s: expected gas fee cap %v, but got %v", test.name, test.expectedGasFeeCap, contractor.lastRedeemOpts.GasFeeCap)
+		if contractor.lastRedeemOpts.GasFeeCap.Cmp(expectedGasFeeLimit) != 0 {
+			t.Fatalf("%s: expected gas fee cap %v, but got %v", test.name, expectedGasFeeLimit, contractor.lastRedeemOpts.GasFeeCap)
 		}
 	}
 }
