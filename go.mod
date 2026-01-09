@@ -7,6 +7,7 @@ require (
 	filippo.io/edwards25519 v1.0.0
 	fyne.io/systray v1.10.1-0.20220621085403-9a2652634e93
 	github.com/agl/ed25519 v0.0.0-20170116200512-5312a6153412
+	github.com/asdine/storm/v3 v3.2.1
 	github.com/athanorlabs/go-dleq v0.1.0
 	github.com/bisoncraft/go-monero v0.1.1
 	github.com/bisoncraft/op-geth v0.0.0-20250729074358-3cfe4f15e91c
@@ -45,7 +46,6 @@ require (
 	github.com/decred/dcrd/rpcclient/v8 v8.1.0
 	github.com/decred/dcrd/txscript/v4 v4.1.2
 	github.com/decred/dcrd/wire v1.7.2
-	github.com/decred/dcrdata/gov/v5 v5.0.0
 	github.com/decred/go-socks v1.1.0
 	github.com/decred/slog v1.2.0
 	github.com/decred/vspd/types/v2 v2.1.0
@@ -69,6 +69,7 @@ require (
 	github.com/pkg/browser v0.0.0-20210911075715-681adbf594b8
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/tyler-smith/go-bip39 v1.1.0
+	github.com/yuin/goldmark v1.7.13
 	go.etcd.io/bbolt v1.3.12
 	golang.org/x/crypto v0.45.0
 	golang.org/x/exp v0.0.0-20231110203233-9a3e6036ecaa
@@ -85,14 +86,12 @@ require (
 require (
 	decred.org/dcrwallet v1.7.0 // indirect
 	github.com/ProjectZKM/Ziren/crates/go-runtime/zkvm_runtime v0.0.0-20251001021608-1fe7b43fc4d6 // indirect
-	github.com/asdine/storm/v3 v3.2.1 // indirect
 	github.com/decred/dcrd/blockchain/stake/v3 v3.0.0 // indirect
 	github.com/decred/dcrd/database/v2 v2.0.2 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v3 v3.0.0 // indirect
 	github.com/decred/dcrd/dcrutil/v3 v3.0.0 // indirect
 	github.com/decred/dcrd/gcs/v2 v2.1.0 // indirect
 	github.com/decred/dcrd/txscript/v3 v3.0.0 // indirect
-	github.com/decred/dcrdata/v7 v7.0.0 // indirect
 	github.com/decred/dcrtime v0.0.0-20191018193024-8d8b4ef0458e // indirect
 	github.com/emicklei/dot v1.6.2 // indirect
 	github.com/ethereum/go-bigmodexpfix v0.0.0-20250911101455-f9e208c548ab // indirect

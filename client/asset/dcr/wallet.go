@@ -180,6 +180,15 @@ type Wallet interface {
 	// AbandonTransaction implements asset.TxAbandoner, marking an unconfirmed
 	// transaction and all its descendants as abandoned.
 	AbandonTransaction(context.Context, *chainhash.Hash) error
+	// CommittedTickets takes a list of tickets and returns a filtered list of
+	// tickets that are controlled by this wallet.
+	CommittedTickets(ctx context.Context, tickets []*chainhash.Hash) ([]*chainhash.Hash, []stdaddr.Address, error)
+	// AddressAccount returns the account number for an address. If the address has no associated account,
+	// false and a nil error should be expected.
+	AddressAccount(ctx context.Context, address string) (bool, uint32, error)
+	// SignMessage returns the signature of a signed message using an address'
+	// associated private key.
+	SignMessage(ctx context.Context, msg string, addr string) ([]byte, error)
 }
 
 // WalletTransaction is a pared down version of walletjson.GetTransactionResult.

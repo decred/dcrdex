@@ -1,21 +1,19 @@
-package politeia
+// This code is available on the terms of the project LICENSE.md file,
+// also available online at https://blueoakcouncil.org/license/1.0.0.
+
+package pi
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"strconv"
 	"strings"
-	"sync"
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrwallet/v5/errors"
 	"decred.org/dcrwallet/v5/wallet/udb"
 	"github.com/decred/dcrd/chaincfg/chainhash"
-	"github.com/decred/dcrd/txscript/v4/stdaddr"
-	gov "github.com/decred/dcrdata/gov/v5/politeia"
-	v1 "github.com/decred/politeia/politeiawww/api/records/v1"
 	tkv1 "github.com/decred/politeia/politeiawww/api/ticketvote/v1"
 	piclient "github.com/decred/politeia/politeiawww/client"
 )
@@ -30,72 +28,28 @@ const (
 )
 
 type Politeia struct {
-	*gov.ProposalsDB
-	client *piclient.Client // for sending votes
-	files  sync.Map         // token -> decoded index.md file contents
+	*proposalsDB
+	log    dex.Logger
+	client *piclient.Client
 }
 
 // New creates and returns a new instance of *Politeia.
-func New(politeiaURL string, dbPath string, log dex.Logger) (*Politeia, error) {
-	gov.UseLogger(log)
-
-	pdb, err := gov.NewProposalsDB(politeiaURL, dbPath)
-	if err != nil {
-		return nil, err
-	}
-
+func New(ctx context.Context, politeiaURL string, dbPath string, log dex.Logger) (*Politeia, error) {
 	pc, err := piclient.New(politeiaURL+"/api", piclient.Opts{})
 	if err != nil {
 		return nil, err
 	}
 
+	pdb, err := newProposalsDB(ctx, dbPath, log, pc)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Politeia{
-		ProposalsDB: pdb,
+		log:         log,
+		proposalsDB: pdb,
 		client:      pc,
-		files:       sync.Map{},
 	}, nil
-}
-
-// FetchProposalDescription retrieves the complete written text description of a proposal.
-func (p *Politeia) FetchProposalDescription(token string) (string, error) {
-	// Ensure proposal exists in our db.
-	proposal, err := p.ProposalByToken(token)
-	if err != nil {
-		return "", err
-	}
-
-	req := v1.Details{
-		Token: token,
-	}
-	resp, err := p.client.RecordDetails(req)
-	if err != nil {
-		return "", err
-	}
-
-	cacheKey := fmt.Sprintf("%v-%v", token, proposal.Version)
-	if resp.Version == proposal.Version {
-		// Check cache for proposal files.
-		if v, ok := p.files.Load(cacheKey); ok {
-			return string(v.([]byte)), nil
-		}
-	}
-
-	for _, file := range resp.Files {
-		if file.Name == "index.md" {
-			b, err := base64.StdEncoding.DecodeString(file.Payload)
-			if err != nil {
-				return "", err
-			}
-
-			// Update cached proposal file version
-			p.files.Delete(cacheKey)
-			p.files.Store(fmt.Sprintf("%v-%v", token, resp.Version), b)
-
-			return string(b), nil
-		}
-	}
-
-	return "", errors.New(ErrNotExist)
 }
 
 // WalletProposalVoteDetails retrieves the vote details for a proposal token
@@ -103,13 +57,7 @@ func (p *Politeia) FetchProposalDescription(token string) (string, error) {
 // It returns the eligible tickets that have not yet voted, the tickets that
 // have voted along with their votes, and the total yes and no votes cast by
 // the wallet.
-func (p *Politeia) WalletProposalVoteDetails(ctx context.Context, wallet VotingWallet, token string) (*WalletProposalVoteDetails, error) {
-	// Ensure proposal exists in our db.
-	_, err := p.ProposalByToken(token)
-	if err != nil {
-		return nil, err
-	}
-
+func (p *Politeia) WalletProposalVoteDetails(wallet VotingWallet, token string) (*WalletProposalVoteDetails, error) {
 	req := tkv1.Results{
 		Token: token,
 	}
@@ -129,21 +77,20 @@ func (p *Politeia) WalletProposalVoteDetails(ctx context.Context, wallet VotingW
 		castVotes[v.Ticket] = v.VoteBit
 	}
 
-	walletTicketHashes, addresses, err := wallet.CommittedTickets(ctx, hashes)
+	walletTicketHashes, addresses, err := wallet.CommittedTickets(hashes)
 	if err != nil {
 		return nil, err
 	}
 
-	eligibleWalletTickets := make([]*EligibleTicket, 0) // eligibleWalletTickets are wallet tickets that have not yet voted.
-	walletVotedTickets := make([]*ProposalVote, 0)      // walletVotedTickets are wallet tickets that have voted.
-	var yesVotes, noVotes int32
+	eligibleWalletTickets := make([]*Ticket, 0) // eligibleWalletTickets are wallet tickets that have not yet voted.
+	walletVotedTickets := make([]*Ticket, 0)    // walletVotedTickets are wallet tickets that have voted.
 	for i := 0; i < len(walletTicketHashes); i++ {
-		ticket := &EligibleTicket{
+		ticket := &Ticket{
 			Hash:    walletTicketHashes[i].String(),
 			Address: addresses[i].String(),
 		}
 
-		isMine, accountNumber, err := walletAddressAccount(ctx, wallet, ticket.Address)
+		isMine, accountNumber, err := wallet.AddressAccount(ticket.Address)
 		if err != nil {
 			return nil, err
 		}
@@ -154,21 +101,8 @@ func (p *Politeia) WalletProposalVoteDetails(ctx context.Context, wallet VotingW
 		}
 
 		// filter out wallet tickets that have voted.
-		if voteBit, ok := castVotes[ticket.Hash]; ok {
-			pv := &ProposalVote{
-				Ticket: ticket,
-			}
-
-			switch voteBit {
-			case "1":
-				noVotes++
-				pv.Bit = VoteBitNo
-			case "2":
-				yesVotes++
-				pv.Bit = VoteBitYes
-			}
-
-			walletVotedTickets = append(walletVotedTickets, pv)
+		if _, ok := castVotes[ticket.Hash]; ok {
+			walletVotedTickets = append(walletVotedTickets, ticket)
 			continue
 		}
 
@@ -178,45 +112,37 @@ func (p *Politeia) WalletProposalVoteDetails(ctx context.Context, wallet VotingW
 	return &WalletProposalVoteDetails{
 		EligibleTickets: eligibleWalletTickets,
 		Votes:           walletVotedTickets,
-		YesVotes:        yesVotes,
-		NoVotes:         noVotes,
 	}, nil
 }
 
 // CastVotes casts votes for the provided eligible tickets using the provided
 // wallet and passphrase for signing. The proposal identified by token must
 // exist in the politeia db. wallet must be unlocked prior to calling CastVotes.
-func (p *Politeia) CastVotes(ctx context.Context, wallet VotingWallet, eligibleTickets []*ProposalVote, token string) error {
-	// Ensure proposal exists in our db.
-	_, err := p.ProposalByToken(token)
-	if err != nil {
-		return err
-	}
-
+func (p *Politeia) CastVotes(wallet VotingWallet, eligibleTickets []*Ticket, bit, token string) error {
 	vDetails, err := p.client.TicketVoteDetails(tkv1.Details{Token: token})
 	if err != nil {
 		return err
 	}
 
+	var voteBitHex string
+	for _, vv := range vDetails.Vote.Params.Options { // Verify that the vote bit is valid.
+		if vv.ID == bit {
+			voteBitHex = strconv.FormatUint(vv.Bit, 16)
+			break
+		}
+	}
+
+	if voteBitHex == "" {
+		return errors.New("invalid vote bit")
+	}
+
 	votes := make([]tkv1.CastVote, 0)
-	for _, eligibleTicket := range eligibleTickets {
-		var voteBitHex string
-		for _, vv := range vDetails.Vote.Params.Options { // Verify that the vote bit is valid.
-			if vv.ID == eligibleTicket.Bit {
-				voteBitHex = strconv.FormatUint(vv.Bit, 16)
-				break
-			}
-		}
-
-		if voteBitHex == "" {
-			return errors.New("invalid vote bit")
-		}
-
-		ticket := eligibleTicket.Ticket
+	for i := range eligibleTickets {
+		ticket := eligibleTickets[i]
 
 		msg := token + ticket.Hash + voteBitHex
 
-		signature, err := walletSignMessage(ctx, wallet, ticket.Address, msg)
+		signature, err := wallet.SignMessage(msg, ticket.Address)
 		if err != nil {
 			return err
 		}
@@ -247,42 +173,4 @@ func (p *Politeia) CastVotes(ctx context.Context, wallet VotingWallet, eligibleT
 	}
 
 	return nil
-}
-
-func walletAddressAccount(ctx context.Context, wallet VotingWallet, address string) (bool, uint32, error) {
-	addr, err := stdaddr.DecodeAddress(address, wallet.ChainParams())
-	if err != nil {
-		return false, 0, err
-	}
-
-	known, _ := wallet.KnownAddress(ctx, addr)
-	if known != nil {
-		accountNumber, err := wallet.AccountNumber(ctx, "")
-		return true, accountNumber, err
-	}
-
-	return false, 0, nil
-}
-
-func walletSignMessage(ctx context.Context, wallet VotingWallet, address string, message string) ([]byte, error) {
-	addr, err := stdaddr.DecodeAddress(address, wallet.ChainParams())
-	if err != nil {
-		return nil, translateError(err)
-	}
-
-	// Addresses must have an associated secp256k1 private key and therefore
-	// must be P2PK or P2PKH (P2SH is not allowed).
-	switch addr.(type) {
-	case *stdaddr.AddressPubKeyEcdsaSecp256k1V0:
-	case *stdaddr.AddressPubKeyHashEcdsaSecp256k1V0:
-	default:
-		return nil, errors.New(ErrInvalidAddress)
-	}
-
-	sig, err := wallet.SignMessage(ctx, message, addr)
-	if err != nil {
-		return nil, translateError(err)
-	}
-
-	return sig, nil
 }

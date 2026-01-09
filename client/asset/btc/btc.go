@@ -5184,10 +5184,10 @@ func ConvertAuditInfo(ai *asset.AuditInfo, decodeAddr dexbtc.AddressDecoder, cha
 	}, nil
 }
 
-// SignMessage signs the message with the private key associated with the
+// SignCoinMessage signs the message with the private key associated with the
 // specified unspent coin. A slice of pubkeys required to spend the coin and a
 // signature for each pubkey are returned.
-func (btc *baseWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
+func (btc *baseWallet) SignCoinMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
 	op, err := ConvertCoin(coin)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error converting coin: %w", err)
