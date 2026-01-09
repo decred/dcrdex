@@ -65,16 +65,15 @@ type Proposal struct {
 	CommentsCount int32 `json:"commentscount"`
 
 	// Ticketvote API data
-	VoteStatus       tv1.VoteStatusT    `json:"votestatus"`
-	VoteResults      []tv1.VoteResult   `json:"voteresults"`
-	StatusChangeMsg  string             `json:"statuschangemsg"`
-	EligibleTickets  uint32             `json:"eligibletickets"`
-	StartBlockHeight uint32             `json:"startblockheight"`
-	EndBlockHeight   uint32             `json:"endblockheight"`
-	QuorumPercentage uint32             `json:"quorumpercentage"`
-	PassPercentage   uint32             `json:"passpercentage"`
-	TotalVotes       uint64             `json:"totalvotes"`
-	ChartData        *ProposalChartData `json:"chartdata"`
+	VoteStatus       tv1.VoteStatusT  `json:"votestatus"`
+	VoteResults      []tv1.VoteResult `json:"voteresults"`
+	StatusChangeMsg  string           `json:"statuschangemsg"`
+	EligibleTickets  uint32           `json:"eligibletickets"`
+	StartBlockHeight uint32           `json:"startblockheight"`
+	EndBlockHeight   uint32           `json:"endblockheight"`
+	QuorumPercentage uint32           `json:"quorumpercentage"`
+	PassPercentage   uint32           `json:"passpercentage"`
+	TotalVotes       uint64           `json:"totalvotes"`
 
 	// Synced is used to indicate that this proposal is already fully
 	// synced with politeia server, and does not need to make any more
@@ -139,14 +138,6 @@ func (pi *Proposal) Metadata() *ProposalMetadata {
 	return meta
 }
 
-// ProposalChartData defines the data used to plot proposal ticket votes
-// charts.
-type ProposalChartData struct {
-	Yes  []uint64 `json:"yes"`
-	No   []uint64 `json:"no"`
-	Time []int64  `json:"time"`
-}
-
 // IsEqual compares data between the two ProposalRecord structs passed.
 func (pi *Proposal) IsEqual(b Proposal) bool {
 	if pi.Token != b.Token || pi.Name != b.Name || pi.State != b.State ||
@@ -154,7 +145,7 @@ func (pi *Proposal) IsEqual(b Proposal) bool {
 		pi.CommentsCount != b.CommentsCount || pi.Timestamp != b.Timestamp ||
 		pi.VoteStatus != b.VoteStatus || pi.TotalVotes != b.TotalVotes ||
 		pi.PublishedAt != b.PublishedAt || pi.CensoredAt != b.CensoredAt ||
-		pi.AbandonedAt != b.AbandonedAt || pi.ChartData != b.ChartData {
+		pi.AbandonedAt != b.AbandonedAt || pi.Description != b.Description {
 		return false
 	}
 	return true

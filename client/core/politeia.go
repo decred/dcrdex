@@ -1,6 +1,7 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 
 	pi "decred.org/dcrdex/dex/politeia"
@@ -46,10 +47,10 @@ func (c *Core) Proposal(assetID uint32, token string) (*pi.Proposal, error) {
 		return proposal, nil // voting wallet not configured
 	}
 
-	w.mtx.Lock()
+	w.mtx.RLock()
 	ss := *w.syncStatus
 	tip := ss.Blocks
-	w.mtx.Unlock()
+	w.mtx.RUnlock()
 
 	if tip > uint64(proposal.EndBlockHeight) { // Proposal voting already ended. Cannot vote.
 		return proposal, nil
@@ -65,15 +66,16 @@ func (c *Core) Proposal(assetID uint32, token string) (*pi.Proposal, error) {
 }
 
 // CastVotes casts votes for the provided eligible tickets using the provided
-// wallet and passphrase for signing. The proposal identified by token must
-// exist in the politeia db. wallet must be unlocked prior to calling c.politeia.CastVotes.
+// wallet and passphrase for signing.
+// The proposal identified by token must exist in the Politeia DB.
+// The wallet must be unlocked prior to calling c.politeia.CastVotes.
 func (c *Core) CastVote(assetID uint32, pw []byte, token, bit string) error {
 	if c.politeia == nil {
 		return fmt.Errorf("politeia not configured")
 	}
 
 	if bit != pi.VoteBitYes && bit != pi.VoteBitNo {
-		return fmt.Errorf("invalid vote bit: %s", bit)
+		return errors.New("invalid vote bit")
 	}
 
 	wallet, tb, err := c.stakingWallet(assetID)
