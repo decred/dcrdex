@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"maps"
 	"math"
 	"net"
@@ -1770,26 +1769,28 @@ fetchers:
 	// Start a goroutine to keep proposals synced.
 	c.wg.Add(1)
 	go func() {
+		defer c.wg.Done()
+
 		// TODO: Allow configuration for testnet
 		c.politeiaURL = pi.PoliteiaMainnetHost
 		c.politeia, err = pi.New(ctx, c.politeiaURL, filepath.Join(filepath.Dir(c.cfg.DBPath), "politeia.db"), c.log.SubLogger("Politeia"))
 		if err != nil {
-			log.Printf("failed to set up politeia: %v", err.Error())
+			c.log.Errorf("failed to set up politeia: %v", err.Error())
+			return
 		}
-
-		defer c.wg.Done()
 		defer c.politeia.Close()
 
 		// Initiate first sync.
 		c.politiaSyncing.Store(true)
 		err := c.politeia.ProposalsSync()
 		if err != nil {
-			log.Printf("politeia.ProposalsSync failed: %v", err)
+			c.log.Errorf("politeia.ProposalsSync failed: %v", err)
 		}
 		c.politiaSyncing.Store(false)
 
+		tick := time.NewTicker(time.Minute * 20)
+		defer tick.Stop()
 		for {
-			tick := time.NewTicker(time.Minute * 20)
 			select {
 			case <-tick.C:
 				c.politiaSyncing.Store(true)

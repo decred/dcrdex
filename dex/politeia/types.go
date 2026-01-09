@@ -31,18 +31,13 @@ var VotesStatuses = map[tv1.VoteStatusT]string{
 
 // WalletProposalVoteDetails contains the details of votes for a proposal for a wallet.
 type WalletProposalVoteDetails struct {
-	EligibleTickets []*EligibleTicket `json:"eligibleTickets"`
-	Votes           []*ProposalVote   `json:"votes"`
+	EligibleTickets []*Ticket `json:"eligibleTickets"`
+	Votes           []*Ticket `json:"votes"`
 }
 
-type EligibleTicket struct {
+type Ticket struct {
 	Hash    string `json:"hash"`
 	Address string `json:"address"`
-}
-
-type ProposalVote struct {
-	Ticket *EligibleTicket `json:"ticket"`
-	Bit    string          `json:"bit"`
 }
 
 // Proposal is the struct that holds all politeia data that dcrdata needs

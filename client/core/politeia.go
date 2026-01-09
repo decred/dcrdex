@@ -51,7 +51,7 @@ func (c *Core) Proposal(assetID uint32, token string) (*pi.Proposal, error) {
 	tip := ss.Blocks
 	w.mtx.Unlock()
 
-	if uint64(proposal.EndBlockHeight) > tip { // Proposal voting already ended. Cannot vote.
+	if tip > uint64(proposal.EndBlockHeight) { // Proposal voting already ended. Cannot vote.
 		return proposal, nil
 	}
 
@@ -103,14 +103,5 @@ func (c *Core) CastVote(assetID uint32, pw []byte, token, bit string) error {
 		return err
 	}
 
-	votingTickets := make([]*pi.ProposalVote, 0, len(voteDetails.EligibleTickets))
-	for _, et := range voteDetails.EligibleTickets {
-		pv := &pi.ProposalVote{
-			Ticket: et,
-			Bit:    bit,
-		}
-		votingTickets = append(votingTickets, pv)
-	}
-
-	return c.politeia.CastVotes(tb, votingTickets, token)
+	return c.politeia.CastVotes(tb, voteDetails.EligibleTickets, bit, token)
 }
