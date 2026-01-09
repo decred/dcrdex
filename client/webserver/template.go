@@ -257,7 +257,7 @@ var templateFuncs = template.FuncMap{
 		)
 		var buf bytes.Buffer
 		if err := md.Convert([]byte(mdTxt), &buf); err != nil {
-			return template.HTML(fmt.Sprintf(`"<div class="d-flex mt-2 text-align-center">Failed to parse content: %v</div>`, err))
+			return template.HTML(fmt.Sprintf(`<div class="text-danger">Failed to parse content: %v</div>`, err))
 		}
 		return template.HTML(buf.String())
 	},

@@ -11,8 +11,6 @@ import (
 	"fmt"
 	"os"
 	"regexp"
-	"sort"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -149,13 +147,6 @@ func (db *proposalsDB) ProposalsSync() error {
 		return err
 	}
 
-	// Update vote results data on finished proposals that are not yet
-	// fully synced with politeia.
-	err = db.proposalsVoteResultsUpdate()
-	if err != nil {
-		return err
-	}
-
 	db.log.Info("Politeia records were synced.")
 
 	return nil
@@ -216,7 +207,13 @@ func (db *proposalsDB) ProposalByToken(token string) (*Proposal, error) {
 		return nil, errDef
 	}
 
-	return db.proposal("Token", token)
+	var proposal Proposal
+	err := db.dbP.Select(q.Eq("Token", token)).Limit(1).First(&proposal)
+	if err != nil {
+		return nil, err
+	}
+
+	return &proposal, nil
 }
 
 // fetchProposalsData returns the parsed vetted proposals from politeia
@@ -439,91 +436,6 @@ func paginateTokens(tokens []string, pageSize uint32) [][]string {
 	return ts
 }
 
-// fetchTicketVoteResults fetches the vote data for the given proposal token,
-// then builds and returns its parsed chart data.
-func (db *proposalsDB) fetchTicketVoteResults(token string) (*ProposalChartData, error) {
-	// Fetch ticket votes details to acquire vote bits options info.
-	details, err := db.client.TicketVoteDetails(ticketvotev1.Details{
-		Token: token,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("pi client TicketVoteDetails err: %w", err)
-	}
-
-	// Maps the vote bits option to their respective string ID.
-	voteOptsMap := make(map[uint64]string)
-	for _, opt := range details.Vote.Params.Options {
-		voteOptsMap[opt.Bit] = opt.ID
-	}
-
-	tvr, err := db.client.TicketVoteResults(ticketvotev1.Results{
-		Token: token,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("pi client TicketVoteResults err: %w", err)
-	}
-
-	// Parse proposal chart data from the ticket vote results reply and
-	// sort it afterwords.
-	type voteData struct {
-		yes, no   uint64
-		timestamp int64
-	}
-	votes := make([]*voteData, 0, len(tvr.Votes))
-	for iv := range tvr.Votes {
-		// Vote bit comes as a hexadecimal number in the format of a string.
-		// Convert it to uint64.
-		bit, err := strconv.ParseUint(tvr.Votes[iv].VoteBit, 16, 64)
-		if err != nil {
-			return nil, err
-		}
-
-		// Verify vote bit is valid.
-		err = voteBitVerify(details.Vote.Params.Options,
-			details.Vote.Params.Mask, bit)
-		if err != nil {
-			return nil, err
-		}
-
-		// Parse relevant data.
-		var vd voteData
-		switch voteOptsMap[bit] {
-		case ticketvotev1.VoteOptionIDApprove:
-			vd.yes = 1
-			vd.no = 0
-		case ticketvotev1.VoteOptionIDReject:
-			vd.no = 1
-			vd.yes = 0
-		default:
-			db.log.Warnf("Unknown vote option ID %v", voteOptsMap[bit])
-			continue
-		}
-		vd.timestamp = tvr.Votes[iv].Timestamp
-		votes = append(votes, &vd)
-	}
-	sort.Slice(votes, func(i, j int) bool {
-		return votes[i].timestamp < votes[j].timestamp
-	})
-
-	// Build data for the returned proposal chart data object.
-	var (
-		yes   = make([]uint64, 0, len(votes))
-		no    = make([]uint64, 0, len(votes))
-		times = make([]int64, 0, len(votes))
-	)
-	for _, vote := range votes {
-		yes = append(yes, vote.yes)
-		no = append(no, vote.no)
-		times = append(times, vote.timestamp)
-	}
-
-	return &ProposalChartData{
-		Yes:  yes,
-		No:   no,
-		Time: times,
-	}, nil
-}
-
 // proposalsSave saves the batch proposals data to the db. This is ran when the
 // proposals sync function finds new proposals that don't exist on our db yet.
 // Before saving a proposal to the db, set the synced property to false to
@@ -556,18 +468,6 @@ func (db *proposalsDB) proposalsSave(proposals []*Proposal) error {
 	}
 
 	return nil
-}
-
-// proposal is used to retrieve proposals from stormdb given the search
-// arguments passed in.
-func (db *proposalsDB) proposal(searchBy, searchTerm string) (*Proposal, error) {
-	var proposal Proposal
-	err := db.dbP.Select(q.Eq(searchBy, searchTerm)).Limit(1).First(&proposal)
-	if err != nil {
-		return nil, err
-	}
-
-	return &proposal, nil
 }
 
 // proposalsNewUpdate verifies if there is any new proposals on the politeia
@@ -650,23 +550,6 @@ func (db *proposalsDB) proposalsInProgressUpdate() error {
 		}
 		proposal := proposals[0]
 
-		// Ticket vote results is an expensive API call, so we check
-		// appropriate conditions to call it. Vote status needs to be started
-		// for in progress proposals. Then we check the total votes to see
-		// if any new votes has been cast. Then we check if chart data is nil,
-		// which means first time fetching ticket vote data.
-		if prop.VoteStatus == ticketvotev1.VoteStatusStarted &&
-			(prop.TotalVotes != proposal.TotalVotes || prop.ChartData == nil) {
-			t0 := time.Now()
-			db.log.Infof("Fetching vote results for proposal %v (status %v)...", prop.Token, recordsv1.RecordStatuses[prop.Status])
-			voteResults, err := db.fetchTicketVoteResults(prop.Token)
-			if err != nil {
-				return fmt.Errorf("fetchTicketVoteResults failed with err: %w", err)
-			}
-			proposal.ChartData = voteResults
-			db.log.Infof("Retrieved vote results for proposal %v in %v.", prop.Token, time.Since(t0))
-		}
-
 		if prop.IsEqual(*proposal) {
 			// No changes made to proposal, skip db call.
 			continue
@@ -679,59 +562,6 @@ func (db *proposalsDB) proposalsInProgressUpdate() error {
 		if err != nil {
 			return fmt.Errorf("storm db Update failed with err: %w", err)
 		}
-	}
-
-	return nil
-}
-
-// proposalsVoteResultsUpdate verifies if there is still a need to update vote
-// results data for proposals with the vote status equal to finished, approved
-// and rejected. This is the final sync between Bison Wallet and politeia servers
-// for proposals with the final finished/approved/rejected vote status.
-func (db *proposalsDB) proposalsVoteResultsUpdate() error {
-	// Get proposals that need to be synced
-	var propsVotingComplete []*Proposal
-	err := db.dbP.Select(
-		q.Or(
-			q.And(
-				q.Eq("VoteStatus", ticketvotev1.VoteStatusFinished),
-				q.Eq("Synced", false),
-			),
-			q.And(
-				q.Eq("VoteStatus", ticketvotev1.VoteStatusApproved),
-				q.Eq("Synced", false),
-			),
-			q.And(
-				q.Eq("VoteStatus", ticketvotev1.VoteStatusRejected),
-				q.Eq("Synced", false),
-			),
-		),
-	).Find(&propsVotingComplete)
-	if err != nil && !errors.Is(err, storm.ErrNotFound) {
-		return err
-	}
-
-	// Update finished proposals that are not yet synced with the
-	// latest vote results.
-	for _, prop := range propsVotingComplete {
-		if err := db.ctx.Err(); err != nil {
-			return err // context canceled or timed out
-		}
-
-		t0 := time.Now()
-		db.log.Infof("Fetching vote results for proposal %v (status %v)...", prop.Token, recordsv1.RecordStatuses[prop.Status])
-		voteResults, err := db.fetchTicketVoteResults(prop.Token)
-		if err != nil {
-			return fmt.Errorf("fetchTicketVoteResults failed with err: %w", err)
-		}
-		prop.ChartData = voteResults
-		prop.Synced = true
-
-		err = db.dbP.Update(prop)
-		if err != nil {
-			return fmt.Errorf("storm db Update failed with err: %w", err)
-		}
-		db.log.Infof("Retrieved vote results for proposal %v in %v.", prop.Token, time.Since(t0))
 	}
 
 	return nil
