@@ -536,21 +536,22 @@ func (db *proposalsDB) proposalsSave(proposals []*Proposal) error {
 
 		proposal.Synced = false
 		err := db.dbP.Save(proposal)
-		if errors.Is(err, storm.ErrAlreadyExists) {
-			// Proposal exists, update instead of inserting new.
-			data, err := db.ProposalByToken(proposal.Token)
-			if err != nil {
-				return fmt.Errorf("ProposalsDB ProposalByToken err: %w", err)
-			}
-			updateData := *proposal
-			updateData.ID = data.ID
-			err = db.dbP.Update(&updateData)
-			if err != nil {
-				return fmt.Errorf("stormdb update err: %w", err)
-			}
-		}
 		if err != nil {
-			return fmt.Errorf("stormdb save err: %w", err)
+			if errors.Is(err, storm.ErrAlreadyExists) {
+				// Proposal exists, update instead of inserting new.
+				data, err := db.ProposalByToken(proposal.Token)
+				if err != nil {
+					return fmt.Errorf("ProposalsDB ProposalByToken err: %w", err)
+				}
+				updateData := *proposal
+				updateData.ID = data.ID
+				err = db.dbP.Update(&updateData)
+				if err != nil {
+					return fmt.Errorf("stormdb update err: %w", err)
+				}
+			} else {
+				return fmt.Errorf("stormdb save err: %w", err)
+			}
 		}
 	}
 
@@ -614,7 +615,7 @@ func (db *proposalsDB) proposalsNewUpdate() error {
 	if err != nil {
 		return err
 	}
-	db.log.Infof("Obtained data for %d new proposals.", len(prs)) // always equal length?
+	db.log.Infof("Obtained data for %d new proposals.", len(prs))
 
 	// Save proposals data in the db.
 	return db.proposalsSave(prs)

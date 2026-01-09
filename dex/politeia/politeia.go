@@ -82,10 +82,10 @@ func (p *Politeia) WalletProposalVoteDetails(wallet VotingWallet, token string) 
 		return nil, err
 	}
 
-	eligibleWalletTickets := make([]*EligibleTicket, 0) // eligibleWalletTickets are wallet tickets that have not yet voted.
-	walletVotedTickets := make([]*ProposalVote, 0)      // walletVotedTickets are wallet tickets that have voted.
+	eligibleWalletTickets := make([]*Ticket, 0) // eligibleWalletTickets are wallet tickets that have not yet voted.
+	walletVotedTickets := make([]*Ticket, 0)    // walletVotedTickets are wallet tickets that have voted.
 	for i := 0; i < len(walletTicketHashes); i++ {
-		ticket := &EligibleTicket{
+		ticket := &Ticket{
 			Hash:    walletTicketHashes[i].String(),
 			Address: addresses[i].String(),
 		}
@@ -101,19 +101,8 @@ func (p *Politeia) WalletProposalVoteDetails(wallet VotingWallet, token string) 
 		}
 
 		// filter out wallet tickets that have voted.
-		if voteBit, ok := castVotes[ticket.Hash]; ok {
-			pv := &ProposalVote{
-				Ticket: ticket,
-			}
-
-			switch voteBit {
-			case "1":
-				pv.Bit = VoteBitNo
-			case "2":
-				pv.Bit = VoteBitYes
-			}
-
-			walletVotedTickets = append(walletVotedTickets, pv)
+		if _, ok := castVotes[ticket.Hash]; ok {
+			walletVotedTickets = append(walletVotedTickets, ticket)
 			continue
 		}
 
@@ -129,27 +118,27 @@ func (p *Politeia) WalletProposalVoteDetails(wallet VotingWallet, token string) 
 // CastVotes casts votes for the provided eligible tickets using the provided
 // wallet and passphrase for signing. The proposal identified by token must
 // exist in the politeia db. wallet must be unlocked prior to calling CastVotes.
-func (p *Politeia) CastVotes(wallet VotingWallet, eligibleTickets []*ProposalVote, token string) error {
+func (p *Politeia) CastVotes(wallet VotingWallet, eligibleTickets []*Ticket, bit, token string) error {
 	vDetails, err := p.client.TicketVoteDetails(tkv1.Details{Token: token})
 	if err != nil {
 		return err
 	}
 
+	var voteBitHex string
+	for _, vv := range vDetails.Vote.Params.Options { // Verify that the vote bit is valid.
+		if vv.ID == bit {
+			voteBitHex = strconv.FormatUint(vv.Bit, 16)
+			break
+		}
+	}
+
+	if voteBitHex == "" {
+		return errors.New("invalid vote bit")
+	}
+
 	votes := make([]tkv1.CastVote, 0)
-	for _, eligibleTicket := range eligibleTickets {
-		var voteBitHex string
-		for _, vv := range vDetails.Vote.Params.Options { // Verify that the vote bit is valid.
-			if vv.ID == eligibleTicket.Bit {
-				voteBitHex = strconv.FormatUint(vv.Bit, 16)
-				break
-			}
-		}
-
-		if voteBitHex == "" {
-			return errors.New("invalid vote bit")
-		}
-
-		ticket := eligibleTicket.Ticket
+	for i := range eligibleTickets {
+		ticket := eligibleTickets[i]
 
 		msg := token + ticket.Hash + voteBitHex
 
