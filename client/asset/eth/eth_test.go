@@ -152,8 +152,6 @@ type testNode struct {
 	tokenParent             *assetWallet // only set for tokens
 	txConfirmations         map[common.Hash]uint32
 	txConfsErr              map[common.Hash]error
-	filterLogs              []types.Log
-	filterLogsErr           error
 }
 
 func newBalance(current, in, out uint64) *Balance {
@@ -328,13 +326,6 @@ func (n *testNode) transactionAndReceipt(ctx context.Context, txHash common.Hash
 
 func (n *testNode) nonce(ctx context.Context) (*big.Int, *big.Int, error) {
 	return big.NewInt(0), big.NewInt(1), nil
-}
-
-func (n *testNode) FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error) {
-	if n.filterLogsErr != nil {
-		return nil, n.filterLogsErr
-	}
-	return n.filterLogs, nil
 }
 
 func (n *testNode) setBalanceError(w *assetWallet, err error) {
@@ -611,15 +602,14 @@ func (c *tTokenContractor) estimateTransferGas(context.Context, *big.Int) (uint6
 }
 
 type tTxDB struct {
-	storeTxCalled          bool
-	storedTx               *extendedWalletTx
-	storeTxErr             error
-	removeTxCalled         bool
-	removeTxErr            error
-	txToGet                *extendedWalletTx
-	getTxErr               error
-	pendingBridges         []*extendedWalletTx
-	lastIncomingScanBlocks map[string]uint64 // key: assetID string or "ETH" for nil
+	storeTxCalled  bool
+	storedTx       *extendedWalletTx
+	storeTxErr     error
+	removeTxCalled bool
+	removeTxErr    error
+	txToGet        *extendedWalletTx
+	getTxErr       error
+	pendingBridges []*extendedWalletTx
 }
 
 var _ txDB = (*tTxDB)(nil)
@@ -659,33 +649,6 @@ func (db *tTxDB) getPendingBridges() ([]*extendedWalletTx, error) {
 }
 func (db *tTxDB) getBridgeCompletions(initiationTxID string) ([]*extendedWalletTx, error) {
 	return []*extendedWalletTx{db.txToGet}, db.getTxErr
-}
-
-func (db *tTxDB) SetLastIncomingScanBlock(assetID *uint32, block uint64) error {
-	if db.lastIncomingScanBlocks == nil {
-		db.lastIncomingScanBlocks = make(map[string]uint64)
-	}
-	key := "ETH"
-	if assetID != nil {
-		key = fmt.Sprintf("%d", *assetID)
-	}
-	db.lastIncomingScanBlocks[key] = block
-	return nil
-}
-
-func (db *tTxDB) GetLastIncomingScanBlock(assetID *uint32) (uint64, error) {
-	if db.lastIncomingScanBlocks == nil {
-		return 0, ErrNeverScanned
-	}
-	key := "ETH"
-	if assetID != nil {
-		key = fmt.Sprintf("%d", *assetID)
-	}
-	block, ok := db.lastIncomingScanBlocks[key]
-	if !ok {
-		return 0, ErrNeverScanned
-	}
-	return block, nil
 }
 
 // func TestCheckUnconfirmedTxs(t *testing.T) {
@@ -6832,162 +6795,4 @@ func parseRecoveryID(c asset.Coin) []byte {
 
 func randomHash() common.Hash {
 	return common.BytesToHash(encode.RandomBytes(20))
-}
-
-// TestBuildIncomingTransferQuery tests the buildIncomingTransferQuery function.
-func TestBuildIncomingTransferQuery(t *testing.T) {
-	_, aw, _, cancel := tassetWallet(usdcEthID)
-	defer cancel()
-
-	startBlock := uint64(100)
-	endBlock := uint64(200)
-	tokenAddr := common.HexToAddress("0x1234567890123456789012345678901234567890")
-
-	aw.tokenAddr = tokenAddr
-
-	query := aw.buildIncomingTransferQuery(startBlock, endBlock)
-
-	// Verify query structure
-	if query.FromBlock.Uint64() != startBlock {
-		t.Fatalf("expected FromBlock %d, got %d", startBlock, query.FromBlock.Uint64())
-	}
-	if query.ToBlock.Uint64() != endBlock {
-		t.Fatalf("expected ToBlock %d, got %d", endBlock, query.ToBlock.Uint64())
-	}
-	if len(query.Addresses) != 1 || query.Addresses[0] != tokenAddr {
-		t.Fatalf("expected token address %s, got %v", tokenAddr, query.Addresses)
-	}
-	if len(query.Topics) != 3 {
-		t.Fatalf("expected 3 topics, got %d", len(query.Topics))
-	}
-	// Verify Transfer event signature topic
-	expectedTransferTopic := common.HexToHash(transferEventSignature)
-	if len(query.Topics[0]) != 1 || query.Topics[0][0] != expectedTransferTopic {
-		t.Fatalf("expected Transfer topic %s, got %v", expectedTransferTopic, query.Topics[0])
-	}
-	// Verify From topic is empty (any sender)
-	if len(query.Topics[1]) != 0 {
-		t.Fatalf("expected empty From topic, got %v", query.Topics[1])
-	}
-	// Verify To topic matches wallet address
-	expectedToTopic := common.BytesToHash(aw.addr.Bytes())
-	if len(query.Topics[2]) != 1 || query.Topics[2][0] != expectedToTopic {
-		t.Fatalf("expected To topic %s, got %v", expectedToTopic, query.Topics[2])
-	}
-}
-
-// TestScanIncomingTokenTransfers tests the scanIncomingTokenTransfers function.
-func TestScanIncomingTokenTransfers(t *testing.T) {
-	_, aw, node, cancel := tassetWallet(usdcEthID)
-	defer cancel()
-
-	ctx := context.Background()
-	tip := uint64(1000)
-
-	// Set up token address
-	tokenAddr := common.HexToAddress("0x1234567890123456789012345678901234567890")
-	aw.tokenAddr = tokenAddr
-
-	// Test case 1: No previous scan (initial sync)
-	t.Run("InitialSync", func(t *testing.T) {
-		// Reset txDB
-		aw.txDB = &tTxDB{}
-
-		// Mock FilterLogs to return empty logs
-		node.filterLogs = []types.Log{}
-		node.filterLogsErr = nil
-
-		err := aw.scanIncomingTokenTransfers(ctx, tip)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		// Verify last scan block was set
-		lastBlock, err := aw.txDB.GetLastIncomingScanBlock(&aw.assetID)
-		if err != nil {
-			t.Fatalf("expected last scan block to be set, got error: %v", err)
-		}
-		// For simnet, blockQueryBuffer = 0, so endBlock = tip
-		expectedEndBlock := tip
-		if lastBlock != expectedEndBlock {
-			t.Fatalf("expected last scan block %d, got %d", expectedEndBlock, lastBlock)
-		}
-	})
-
-	// Test case 2: Incremental sync with no new blocks
-	t.Run("NoNewBlocks", func(t *testing.T) {
-		aw.txDB = &tTxDB{}
-		// Set last scan block close to tip
-		aw.txDB.SetLastIncomingScanBlock(&aw.assetID, tip-1)
-
-		node.filterLogs = []types.Log{}
-		node.filterLogsErr = nil
-
-		err := aw.scanIncomingTokenTransfers(ctx, tip)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	// Test case 3: FilterLogs error
-	t.Run("FilterLogsError", func(t *testing.T) {
-		aw.txDB = &tTxDB{}
-		aw.txDB.SetLastIncomingScanBlock(&aw.assetID, 100)
-
-		node.filterLogsErr = errors.New("RPC error")
-		err := aw.scanIncomingTokenTransfers(ctx, tip)
-		if err == nil {
-			t.Fatalf("expected error from FilterLogs")
-		}
-	})
-}
-
-// TestCreateIncomingWalletTxFromLog tests the createIncomingWalletTxFromLog function.
-func TestCreateIncomingWalletTxFromLog(t *testing.T) {
-	_, aw, _, cancel := tassetWallet(usdcEthID)
-	defer cancel()
-
-	tokenAddr := common.HexToAddress("0x1234567890123456789012345678901234567890")
-	aw.tokenAddr = tokenAddr
-
-	// Create a mock Transfer event log
-	txHash := randomHash()
-	blockNumber := uint64(1000)
-	transferValue := big.NewInt(1000000) // 1 USDC (6 decimals)
-
-	// Create a proper Transfer event log
-	// Transfer(address indexed from, address indexed to, uint256 value)
-	transferTopic := common.HexToHash(transferEventSignature)
-	fromTopic := common.BytesToHash(common.HexToAddress("0x1111111111111111111111111111111111111111").Bytes())
-	toTopic := common.BytesToHash(aw.addr.Bytes())
-
-	log := types.Log{
-		Address:     tokenAddr,
-		Topics:      []common.Hash{transferTopic, fromTopic, toTopic},
-		Data:        transferValue.Bytes(),
-		BlockNumber: blockNumber,
-		TxHash:      txHash,
-		Index:       0,
-	}
-
-	receipt := &types.Receipt{
-		BlockNumber: big.NewInt(int64(blockNumber)),
-		TxHash:      txHash,
-		Status:      1,
-	}
-
-	// Note: This test requires actual ERC20 contract parsing, which is complex
-	// For now, we test that the function handles errors correctly
-	t.Run("LogAddressMismatch", func(t *testing.T) {
-		wrongLog := log
-		wrongLog.Address = common.HexToAddress("0x9999999999999999999999999999999999999999")
-
-		_, err := aw.createIncomingWalletTxFromLog(wrongLog, receipt)
-		if err == nil {
-			t.Fatalf("expected error for address mismatch")
-		}
-		if !strings.Contains(err.Error(), "log address mismatch") {
-			t.Fatalf("expected address mismatch error, got: %v", err)
-		}
-	})
 }
