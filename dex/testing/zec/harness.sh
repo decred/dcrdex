@@ -28,18 +28,20 @@ DELTA_DIR="${NODES_ROOT}/delta"
 GAMMA_DIR="${NODES_ROOT}/gamma"
 HARNESS_DIR="${NODES_ROOT}/harness-ctl"
 
-echo "Writing node config files"
+mkdir -p "${ALPHA_DIR}"
+mkdir -p "${BETA_DIR}"
+mkdir -p "${DELTA_DIR}"
+mkdir -p "${GAMMA_DIR}"
 mkdir -p "${HARNESS_DIR}"
 
 WALLET_PASSWORD="abc"
 
-ALPHA_CLI_CFG="-rpcport=${ALPHA_RPC_PORT} -regtest=1 -rpcuser=user -rpcpassword=pass -conf=${ALPHA_DIR}/alpha.conf"
-BETA_CLI_CFG="-rpcport=${BETA_RPC_PORT} -regtest=1 -rpcuser=user -rpcpassword=pass -conf=${BETA_DIR}/beta.conf"
-DELTA_CLI_CFG="-rpcport=${DELTA_RPC_PORT} -regtest=1 -rpcuser=user -rpcpassword=pass -conf=${DELTA_DIR}/delta.conf"
-GAMMA_CLI_CFG="-rpcport=${GAMMA_RPC_PORT} -regtest=1 -rpcuser=user -rpcpassword=pass -conf=${GAMMA_DIR}/gamma.conf"
+ALPHA_CLI_CFG="-rpcport=${ALPHA_RPC_PORT} -regtest=1 -rpcuser=user -rpcpassword=pass -rpcwallet=alphawallet -conf=${ALPHA_DIR}/alpha.conf"
+BETA_CLI_CFG=" -rpcport=${BETA_RPC_PORT}  -regtest=1 -rpcuser=user -rpcpassword=pass -rpcwallet=betawallet  -conf=${BETA_DIR}/beta.conf"
+DELTA_CLI_CFG="-rpcport=${DELTA_RPC_PORT} -regtest=1 -rpcuser=user -rpcpassword=pass -rpcwallet=deltawallet -conf=${DELTA_DIR}/delta.conf"
+GAMMA_CLI_CFG="-rpcport=${GAMMA_RPC_PORT} -regtest=1 -rpcuser=user -rpcpassword=pass -rpcwallet=gammawallet -conf=${GAMMA_DIR}/gamma.conf"
 
-# DONE can be used in a send-keys call along with a `wait-for btc` command to
-# wait for process termination.
+# macro wait for process termination.
 DONE="; tmux wait-for -S ${SYMBOL}"
 WAIT="wait-for ${SYMBOL}"
 
@@ -47,25 +49,13 @@ SESSION="${SYMBOL}-harness"
 
 SHELL=$(which bash)
 
-################################################################################
-# Load prepared wallet if the files exist.
-################################################################################
-
-mkdir -p "${ALPHA_DIR}"
-mkdir -p "${BETA_DIR}"
-mkdir -p "${DELTA_DIR}"
-mkdir -p "${GAMMA_DIR}"
-
-# mkdir -p ${ALPHA_DIR}/regtest
-# cp ${SOURCE_DIR}/alpha_wallet.dat ${ALPHA_DIR}/regtest/wallet.dat
-# mkdir -p ${BETA_DIR}/regtest
-# cp ${SOURCE_DIR}/beta_wallet.dat ${BETA_DIR}/regtest/wallet.dat
-
 cd ${NODES_ROOT} && tmux new-session -d -s $SESSION $SHELL
 
 ################################################################################
 # Write config files.
 ################################################################################
+
+echo "Writing node config files"
 
 # Activation logic updated for NU6.1.
 
@@ -80,16 +70,19 @@ txindex=1
 port=${ALPHA_LISTEN_PORT}
 regtest=1
 rpcport=${ALPHA_RPC_PORT}
+# Required for 2026 operations
 i-am-aware-zcashd-will-be-replaced-by-zebrad-and-zallet-in-2025=1
 exportdir=${SOURCE_DIR}
-# Activate all the things.
+# Upgrades 1-5 (Overwinter through NU5)
 nuparams=5ba81b19:1
 nuparams=76b809bb:1
 nuparams=2bb40e60:1
 nuparams=f5b9230b:1
 nuparams=e9ff75a6:2
 nuparams=c2d6d0b4:3
+# NU6 (Block Reward/Lockbox)
 nuparams=c8e71055:5
+# NU6.1 (Finalized Dev Fund Disbursement)
 nuparams=4dec4df0:7
 EOF
 
@@ -160,8 +153,9 @@ tmux send-keys -t $SESSION:0 "${DAEMON} -rpcuser=user -rpcpassword=pass \
   -wallet=alphawallet \
   -txindex=1 -regtest=1 -port=${ALPHA_LISTEN_PORT} -fallbackfee=0.00001 \
   -allowdeprecated=getnewaddress  -printtoconsole"  C-m
-sleep 8
+sleep 3
 tmux wait-for -S alpha${SYMBOL}
+
 ################################################################################
 # Setup the beta node.
 ################################################################################
@@ -177,7 +171,7 @@ tmux send-keys -t $SESSION:1 "${DAEMON} -rpcuser=user -rpcpassword=pass \
   -whitelist=127.0.0.0/8 -whitelist=::1  \
   -wallet=betawallet \
   -port=${BETA_LISTEN_PORT} -fallbackfee=0.00001 -allowdeprecated=getnewaddress  -printtoconsole" C-m
-sleep 8
+sleep 3
 tmux wait-for -S beta${SYMBOL}
 
 ################################################################################
@@ -195,7 +189,7 @@ tmux send-keys -t $SESSION:2 "${DAEMON} -rpcuser=user -rpcpassword=pass \
   -whitelist=127.0.0.0/8 -whitelist=::1  \
   -wallet=deltawallet \
   -port=${DELTA_LISTEN_PORT} -fallbackfee=0.00001 -allowdeprecated=getnewaddress  -printtoconsole" C-m
-sleep 8
+sleep 3
 tmux wait-for -S delta${SYMBOL}
 
 ################################################################################
@@ -213,11 +207,10 @@ tmux send-keys -t $SESSION:3 "${DAEMON} -rpcuser=user -rpcpassword=pass \
   -whitelist=127.0.0.0/8 -whitelist=::1  \
   -wallet=gammawallet \
   -port=${GAMMA_LISTEN_PORT} -fallbackfee=0.00001 -allowdeprecated=getnewaddress  -printtoconsole" C-m
-sleep 8
+sleep 3
 tmux wait-for -S gamma${SYMBOL}
 
-# maybe reduce
-sleep 30
+#sleep 30 # increased and moved to end startup
 
 ################################################################################
 # Setup the harness-ctl directory
@@ -230,6 +223,9 @@ sleep 1
 
 cd ${HARNESS_DIR}
 
+
+# -----------------------------------------------------------------------------
+# begin loadbot specific ->
 # start-wallet, connect-alpha, and stop-wallet are used by loadbot to set up and
 # run new wallets.
 cat > "./start-wallet" <<EOF
@@ -259,6 +255,9 @@ cat > "./stop-wallet" <<EOF
 ${CLI} -conf=${NODES_ROOT}/\$2/\$2.conf -rpcport=\$1 -regtest=1 -rpcuser=user -rpcpassword=pass stop
 EOF
 chmod +x "./stop-wallet"
+# <- end loadbot specific
+# -----------------------------------------------------------------------------
+
 
 cat > "./alpha" <<EOF
 #!/usr/bin/env bash
@@ -329,9 +328,14 @@ tmux kill-session
 EOF
 chmod +x "${HARNESS_DIR}/quit"
 
-sleep 10
+# sleep 10 # not sure why?
+sleep 1
 
-tmux send-keys -t $SESSION:4 "./beta addnode 127.0.0.1:${ALPHA_LISTEN_PORT} add${DONE}" C-m\; ${WAIT}
+############################################################################################################
+# Make a network of daemons and generate genesis
+############################################################################################################
+
+tmux send-keys -t $SESSION:4 "./beta  addnode 127.0.0.1:${ALPHA_LISTEN_PORT} add${DONE}" C-m\; ${WAIT}
 tmux send-keys -t $SESSION:4 "./delta addnode 127.0.0.1:${ALPHA_LISTEN_PORT} add${DONE}" C-m\; ${WAIT}
 tmux send-keys -t $SESSION:4 "./gamma addnode 127.0.0.1:${ALPHA_LISTEN_PORT} add${DONE}" C-m\; ${WAIT}
 # This timeout is apparently critical. Give the nodes time to sync.
@@ -341,31 +345,24 @@ echo "Generating the genesis block"
 tmux send-keys -t $SESSION:4 "./alpha generate 1${DONE}" C-m\; ${WAIT}
 sleep 1
 
-# 
-# TODO(zec) -- uncomment after clean NU6.1 exported wallets
-# 
-# tmux send-keys -t $SESSION:4 "./alpha z_importwallet ${SOURCE_DIR}/alphawallet ${DONE}" C-m\; ${WAIT}
-# tmux send-keys -t $SESSION:4 "./beta z_importwallet ${SOURCE_DIR}/betawallet ${DONE}" C-m\; ${WAIT}
-# tmux send-keys -t $SESSION:4 "./delta z_importwallet ${SOURCE_DIR}/deltawallet ${DONE}" C-m\; ${WAIT}
-# tmux send-keys -t $SESSION:4 "./gamma z_importwallet ${SOURCE_DIR}/gammawallet ${DONE}" C-m\; ${WAIT}
+############################################################################################################
+# Import clean, empty NU6.1 pre-exported wallets. Alpha has an imported transparent privkey
+############################################################################################################
+tmux send-keys -t $SESSION:4 "./alpha z_importwallet ${SOURCE_DIR}/alphawallet ${DONE}" C-m\; ${WAIT}
+tmux send-keys -t $SESSION:4 "./beta  z_importwallet ${SOURCE_DIR}/betawallet ${DONE}"  C-m\; ${WAIT}
+tmux send-keys -t $SESSION:4 "./delta z_importwallet ${SOURCE_DIR}/deltawallet ${DONE}" C-m\; ${WAIT}
+tmux send-keys -t $SESSION:4 "./gamma z_importwallet ${SOURCE_DIR}/gammawallet ${DONE}" C-m\; ${WAIT}
 
+############################################################################################################
+# mine coins -> alpha
+############################################################################################################
 echo "Generating 600 blocks for alpha"
 tmux send-keys -t $SESSION:4 "./alpha generate 600${DONE}" C-m\; ${WAIT}
 
 ################################################################################
-# Send gamma and delta some coin
+# Send beta, gamma and delta some coins
 ################################################################################
 
-# getaddr () {
-#   cd ${HARNESS_DIR}
-#   NODE=$1
-#   ./${NODE} z_getnewaccount > /dev/null
-#   R=$(./${NODE} z_getaddressforaccount 0)
-#   UADDR=$(sed -rn 's/.*"address": "([^"]+)".*/\1/p' <<< "${R}")
-#   R=$(./${NODE} z_listunifiedreceivers ${UADDR})
-#   ADDR=$(sed -rn 's/.*"p2pkh": "([^"]+)".*/\1/p' <<< "${R}")
-#   echo $ADDR
-# }
 getaddr () {
   cd ${HARNESS_DIR}
   NODE=$1
@@ -386,13 +383,9 @@ echo "beta address ${BETA_ADDR}"
 echo "delta address ${DELTA_ADDR}"
 echo "gamma address ${GAMMA_ADDR}"
 
-# Send the lazy wallets some dough.
-echo "Sending 74 ZEC to beta in 8 blocks"
+echo "Sending 74 ZEC to beta, delta & gamma over 7 blocks"
 for i in 18 5 7 1 15 3 25
 do
-    # tmux send-keys -t $SESSION:4 "./alpha sendtoaddress ${BETA_ADDR} ${i}${DONE}" C-m\; ${WAIT}
-    # tmux send-keys -t $SESSION:4 "./alpha sendtoaddress ${DELTA_ADDR} ${i}${DONE}" C-m\; ${WAIT}
-    # tmux send-keys -t $SESSION:4 "./alpha sendtoaddress ${GAMMA_ADDR} ${i}${DONE}" C-m\; ${WAIT}
     tmux send-keys -t $SESSION:4 "./alpha sendtoaddress ${BETA_ADDR} ${i} ${DONE}" C-m\; ${WAIT}
     tmux send-keys -t $SESSION:4 "./alpha sendtoaddress ${DELTA_ADDR} ${i} ${DONE}" C-m\; ${WAIT}
     tmux send-keys -t $SESSION:4 "./alpha sendtoaddress ${GAMMA_ADDR} ${i} ${DONE}" C-m\; ${WAIT}
@@ -400,11 +393,28 @@ done
 
 tmux send-keys -t $SESSION:4 "./mine-alpha 2${DONE}" C-m\; ${WAIT}
 
+################################################################################
+# Set up mining - MINING env var enables - default Off. Window always available.
+################################################################################
+
 tmux new-window -t $SESSION:5 -n 'miner' $SHELL
 tmux send-keys -t $SESSION:5 "cd ${HARNESS_DIR}" C-m
-# tmux send-keys -t $SESSION:5 "watch -n 15 ./mine-alpha 1" C-m
+if [ "${MINING}" == "" ]
+then
+  echo "not mining"
+else
+  echo "mining ..."
+  tmux send-keys -t $SESSION:5 "watch -n 15 ./mine-alpha 1" C-m
+fi
 
-# Reenable history and attach to the control session.
+################################################################################
+# Re-enable history. Wait wallets ready. Attach to the control session
+################################################################################
+
 tmux select-window -t $SESSION:4
 tmux send-keys -t $SESSION:4 "set -o history" C-m
+tmux send-keys -t $SESSION:4 "echo \"Please wait for daemons to re-index/rescan the imported wallets .. ready on your machine when: ./gamma getbalance succeeds\"" C-m
+# moved from above z_importwallet
+sleep 30
+
 tmux attach-session -t $SESSION
