@@ -95,8 +95,8 @@ checkmark in the "native" column, no external software is required.
 | Polygon      | ✓      | bor IPC/http/ws                                             | N/A                                                           | see [RPC Providers for EVM-Compatible Networks](Wallet#rpc-providers-for-evm-compatible-networks) |
 | Litecoin     | ✓      | [v0.21.2.1](https://litecoin.org/)                          | [v4.2.2](https://electrum-ltc.org/)                           |                                                                                                   |
 | Bitcoin Cash | ✓      | [v27.0.0](https://bitcoincashnode.org/)                     | x                                                             | use only Bitcoin Cash Node for full node                                                          |
-| Dogecoin     | x      | [v1.14.7.0](https://dogecoin.com/)                          | x                                                             |                                                                                       |
-| Zcash        | x      | [v6.11.0](https://z.cash/download/)                         | x                                                             |                                                                                                   |
+| Dogecoin     | x      | [v1.14.7.0](https://dogecoin.com/)                          | x                                                             |                                                                                                   |
+| Zcash        | x      | [v6.3.0](https://z.cash/download/)                          | x                                                             |                                                                                                   |
 | Dash         | x      | [v20.1.1](https://github.com/dashpay/dash/releases)         | x                                                             |                                                                                                   |
 | Firo         | x      | [v0.14.14.1](https://github.com/firoorg/firo/releases)      | [v4.1.5.5](https://github.com/firoorg/electrum-firo/releases) |                                                                                                   |
 
@@ -106,7 +106,7 @@ Initially proposed by Jake Yocom-Piatt in the
 [Decred blog](https://blog.decred.org/2018/06/05/A-New-Kind-of-DEX/) in 2018,
 DCRDEX development started in 2019 and has been fully funded by the Decred treasury.
 
-**Project Timeline**
+## Project Timeline
 
 | Date    | Milestone                                                                                                               |
 |---------|-------------------------------------------------------------------------------------------------------------------------|
