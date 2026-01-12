@@ -6218,7 +6218,8 @@ func (c *Core) prepareForTradeRequestPrep(pw []byte, base, quote uint32, host st
 }
 
 func (c *Core) createTradeRequest(wallets *walletSet, coins asset.Coins, redeemScripts []dex.Bytes, dc *dexConnection, redeemAddr string,
-	form *TradeForm, redemptionRefundLots uint64, fundingFees uint64, assetConfigs *assetSet, mktConf *msgjson.Market, errCloser *dex.ErrorCloser) (*tradeRequest, error) {
+	form *TradeForm, redemptionRefundLots uint64, fundingFees, maxFeeRate uint64, assetConfigs *assetSet, mktConf *msgjson.Market,
+	errCloser *dex.ErrorCloser) (*tradeRequest, error) {
 	coinIDs := make([]order.CoinID, 0, len(coins))
 	for i := range coins {
 		coinIDs = append(coinIDs, []byte(coins[i].ID()))
@@ -6498,11 +6499,21 @@ func (c *Core) prepareTradeRequest(pw []byte, form *TradeForm) (*tradeRequest, e
 			qty, assetConfigs.baseAsset.Symbol, rate, mktConf.LotSize)
 	}
 
+	maxFeeRate := assetConfigs.fromAsset.MaxFeeRate
+	if dynamicSwapper, is := fromWallet.Wallet.(asset.DynamicSwapper); is {
+		localMaxFee := dynamicSwapper.GasFeeLimit()
+		if maxFeeRate > localMaxFee {
+			return nil, codedError(walletErr, fmt.Errorf("%v: server's max fee rate %v higher than configured fee rate limit %v",
+				dex.BipIDSymbol(assetConfigs.fromAsset.ID), maxFeeRate, localMaxFee))
+		}
+		maxFeeRate = localMaxFee
+	}
+
 	coins, redeemScripts, fundingFees, err := fromWallet.FundOrder(&asset.Order{
 		AssetVersion:  assetConfigs.fromAsset.Version,
 		Value:         fundQty,
 		MaxSwapCount:  lots,
-		MaxFeeRate:    assetConfigs.fromAsset.MaxFeeRate,
+		MaxFeeRate:    maxFeeRate,
 		Immediate:     isImmediate,
 		FeeSuggestion: c.feeSuggestion(dc, assetConfigs.fromAsset.ID),
 		Options:       form.Options,
@@ -6535,7 +6546,7 @@ func (c *Core) prepareTradeRequest(pw []byte, form *TradeForm) (*tradeRequest, e
 	})
 
 	tradeRequest, err := c.createTradeRequest(wallets, coins, redeemScripts, dc, redeemAddr, form,
-		redemptionRefundLots, fundingFees, assetConfigs, mktConf, errCloser)
+		redemptionRefundLots, fundingFees, maxFeeRate, assetConfigs, mktConf, errCloser)
 	if err != nil {
 		return nil, err
 	}
@@ -6588,10 +6599,20 @@ func (c *Core) prepareMultiTradeRequests(pw []byte, form *MultiTradeForm) ([]*tr
 		})
 	}
 
+	maxFeeRate := assetConfigs.fromAsset.MaxFeeRate
+	if dynamicSwapper, is := fromWallet.Wallet.(asset.DynamicSwapper); is {
+		localMaxFee := dynamicSwapper.GasFeeLimit()
+		if maxFeeRate > localMaxFee {
+			return nil, codedError(walletErr, fmt.Errorf("%v: server's max fee rate %v higher than configured fee rate limit %v",
+				dex.BipIDSymbol(assetConfigs.fromAsset.ID), maxFeeRate, localMaxFee))
+		}
+		maxFeeRate = localMaxFee
+	}
+
 	allCoins, allRedeemScripts, fundingFees, err := fromWallet.FundMultiOrder(&asset.MultiOrder{
 		AssetVersion:  assetConfigs.fromAsset.Version,
 		Values:        orderValues,
-		MaxFeeRate:    assetConfigs.fromAsset.MaxFeeRate,
+		MaxFeeRate:    maxFeeRate,
 		FeeSuggestion: c.feeSuggestion(dc, assetConfigs.fromAsset.ID),
 		Options:       form.Options,
 		RedeemVersion: assetConfigs.toAsset.Version,
@@ -6646,7 +6667,7 @@ func (c *Core) prepareMultiTradeRequests(pw []byte, form *MultiTradeForm) ([]*tr
 			fees = fundingFees
 		}
 		req, err := c.createTradeRequest(wallets, coins, allRedeemScripts[i], dc, redeemAddresses[i], tradeForm,
-			orderValues[i].MaxSwapCount, fees, assetConfigs, mktConf, errClosers[i])
+			orderValues[i].MaxSwapCount, fees, maxFeeRate, assetConfigs, mktConf, errClosers[i])
 		if err != nil {
 			return nil, err
 		}

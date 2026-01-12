@@ -2386,15 +2386,6 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 		node.tokenContractor.allow = unlimitedAllowance
 	}
 
-	// Test eth wallet gas fee limit > server MaxFeeRate causes error
-	tmpGasFeeLimit := eth.gasFeeLimit()
-	eth.gasFeeLimitV = order.MaxFeeRate - 1
-	_, _, _, err = w.FundOrder(&order)
-	if err == nil {
-		t.Fatalf("eth wallet gas fee limit > server MaxFeeRate should cause error")
-	}
-	eth.gasFeeLimitV = tmpGasFeeLimit
-
 	w2, eth2, _, shutdown2 := tassetWallet(assetID)
 	defer shutdown2()
 	eth2.node = node
@@ -4605,8 +4596,8 @@ func TestDriverOpen(t *testing.T) {
 	if !ok {
 		t.Fatalf("failed to cast wallet as ETHWallet")
 	}
-	if eth.gasFeeLimit() != defaultGasFeeLimit {
-		t.Fatalf("expected gasFeeLimit to be default, but got %v", eth.gasFeeLimit())
+	if eth.GasFeeLimit() != defaultGasFeeLimit {
+		t.Fatalf("expected GasFeeLimit to be default, but got %v", eth.GasFeeLimit())
 	}
 
 	// Make sure gas fee limit is properly parsed from settings
@@ -4619,8 +4610,8 @@ func TestDriverOpen(t *testing.T) {
 	if !ok {
 		t.Fatalf("failed to cast wallet as ETHWallet")
 	}
-	if eth.gasFeeLimit() != 150 {
-		t.Fatalf("expected gasFeeLimit to be 150, but got %v", eth.gasFeeLimit())
+	if eth.GasFeeLimit() != 150 {
+		t.Fatalf("expected GasFeeLimit to be 150, but got %v", eth.GasFeeLimit())
 	}
 }
 
@@ -5170,7 +5161,7 @@ func TestReconfigure(t *testing.T) {
 		t.Fatalf("unexpected restart")
 	}
 
-	if eth.baseWallet.gasFeeLimit() != ethCfg.GasFeeLimit {
+	if eth.baseWallet.GasFeeLimit() != ethCfg.GasFeeLimit {
 		t.Fatal("gas fee limit was not updated properly")
 	}
 }

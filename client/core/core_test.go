@@ -10732,8 +10732,46 @@ func (dtfc *TDynamicSwapper) DynamicSwapFeesPaid(ctx context.Context, coinID, co
 func (dtfc *TDynamicSwapper) DynamicRedemptionFeesPaid(ctx context.Context, coinID, contractData dex.Bytes) (uint64, [][]byte, error) {
 	return dtfc.tfpPaid, dtfc.tfpSecretHashes, dtfc.tfpErr
 }
+func (dtfc *TDynamicSwapper) GasFeeLimit() uint64 {
+	return 200
+}
 
 var _ asset.DynamicSwapper = (*TDynamicSwapper)(nil)
+
+// TDynamicAccountLocker combines TAccountLocker with DynamicSwapper interface
+// for testing gas fee limit validation in prepareTradeRequest.
+type TDynamicAccountLocker struct {
+	*TAccountLocker
+	gasFeeLimit     uint64
+	tfpPaid         uint64
+	tfpSecretHashes [][]byte
+	tfpErr          error
+}
+
+func newTDynamicAccountLocker(assetID uint32) (*xcWallet, *TDynamicAccountLocker) {
+	xcWallet, accountLocker := newTAccountLocker(assetID)
+	dynamicAccountLocker := &TDynamicAccountLocker{
+		TAccountLocker: accountLocker,
+		gasFeeLimit:    200, // default higher than tACCTAsset.MaxFeeRate (20)
+	}
+	xcWallet.Wallet = dynamicAccountLocker
+	return xcWallet, dynamicAccountLocker
+}
+
+func (w *TDynamicAccountLocker) DynamicSwapFeesPaid(ctx context.Context, coinID, contractData dex.Bytes) (uint64, [][]byte, error) {
+	return w.tfpPaid, w.tfpSecretHashes, w.tfpErr
+}
+
+func (w *TDynamicAccountLocker) DynamicRedemptionFeesPaid(ctx context.Context, coinID, contractData dex.Bytes) (uint64, [][]byte, error) {
+	return w.tfpPaid, w.tfpSecretHashes, w.tfpErr
+}
+
+func (w *TDynamicAccountLocker) GasFeeLimit() uint64 {
+	return w.gasFeeLimit
+}
+
+var _ asset.DynamicSwapper = (*TDynamicAccountLocker)(nil)
+var _ asset.AccountLocker = (*TDynamicAccountLocker)(nil)
 
 func TestUpdateFeesPaid(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -10817,6 +10855,118 @@ func TestUpdateFeesPaid(t *testing.T) {
 		if got != test.paid {
 			t.Fatalf("%s: want %d but got %d fees paid", test.name, test.paid, got)
 		}
+	}
+}
+
+// TestDynamicSwapperGasFeeLimit tests the gas fee limit validation in
+// prepareTradeRequest for DynamicSwapper wallets.
+func TestDynamicSwapperGasFeeLimit(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	tCore := rig.core
+
+	// Set up BTC wallet (to wallet when buying BTC with ETH)
+	btcWallet, _ := newTWallet(tUTXOAssetB.ID)
+	tCore.wallets[tUTXOAssetB.ID] = btcWallet
+	btcWallet.address = "12DXGkvxFjuq5btXYkwWfBZaz1rVwFgini"
+	btcWallet.Unlock(rig.crypter)
+
+	// Set up ETH wallet with DynamicSwapper interface (from wallet when buying BTC with ETH)
+	ethWallet, tEthWallet := newTDynamicAccountLocker(tACCTAsset.ID)
+	tCore.wallets[tACCTAsset.ID] = ethWallet
+	ethWallet.address = "18d65fb8d60c1199bb1ad381be47aa692b482605"
+	ethWallet.Unlock(rig.crypter)
+
+	var lots uint64 = 10
+	qty := dcrBtcLotSize * lots
+	rate := dcrBtcRateStep * 1000
+
+	// Set up ETH as funding coins (ETH is from wallet when Sell=false on btc_eth market)
+	ethVal := calc.BaseToQuote(rate, qty*2)
+	ethCoin := &tCoin{
+		id:  encode.RandomBytes(36),
+		val: ethVal,
+	}
+	tEthWallet.fundingCoins = asset.Coins{ethCoin}
+	tEthWallet.fundRedeemScripts = []dex.Bytes{nil}
+
+	book := newBookie(rig.dc, tUTXOAssetB.ID, tACCTAsset.ID, nil, tLogger)
+	rig.dc.books[tBtcEthMktName] = book
+
+	msgOrderNote := &msgjson.BookOrderNote{
+		OrderNote: msgjson.OrderNote{
+			OrderID: encode.RandomBytes(32),
+		},
+		TradeNote: msgjson.TradeNote{
+			Side:     msgjson.SellOrderNum,
+			Quantity: dcrBtcLotSize,
+			Time:     uint64(time.Now().Unix()),
+			Rate:     rate,
+		},
+	}
+
+	err := book.Sync(&msgjson.OrderBook{
+		MarketID: tBtcEthMktName,
+		Seq:      1,
+		Epoch:    1,
+		Orders:   []*msgjson.BookOrderNote{msgOrderNote},
+	})
+	if err != nil {
+		t.Fatalf("order book sync error: %v", err)
+	}
+
+	handleLimit := func(msg *msgjson.Message, f msgFunc) error {
+		t.Helper()
+		msgOrder := new(msgjson.LimitOrder)
+		err := msg.Unmarshal(msgOrder)
+		if err != nil {
+			t.Fatalf("unmarshal error: %v", err)
+		}
+		lo := convertMsgLimitOrder(msgOrder)
+		f(orderResponse(msg.ID, msgOrder, lo, false, false, false))
+		return nil
+	}
+
+	// Form for buying BTC with ETH (ETH is the from/funding wallet with DynamicSwapper)
+	// Market is btc_eth (Base=BTC, Quote=ETH), Sell=false means buying base (BTC),
+	// so the from wallet is the quote asset (ETH).
+	form := &TradeForm{
+		Host:    tDexHost,
+		IsLimit: true,
+		Sell:    false, // Buying BTC, selling ETH. ETH is from wallet.
+		Base:    tUTXOAssetB.ID,
+		Quote:   tACCTAsset.ID,
+		Qty:     qty,
+		Rate:    rate,
+		TifNow:  false,
+	}
+
+	// Test 1: Gas fee limit higher than server's max fee rate - should succeed
+	// tACCTAsset.MaxFeeRate = 20, gasFeeLimit = 200
+	tEthWallet.gasFeeLimit = 200
+	rig.ws.queueResponse(msgjson.LimitRoute, handleLimit)
+	_, err = tCore.Trade(tPW, form)
+	if err != nil {
+		t.Fatalf("trade with adequate gas fee limit should succeed: %v", err)
+	}
+
+	// Test 2: Gas fee limit lower than server's max fee rate - should fail
+	// tACCTAsset.MaxFeeRate = 20, gasFeeLimit = 10
+	tEthWallet.gasFeeLimit = 10
+	_, err = tCore.Trade(tPW, form)
+	if err == nil {
+		t.Fatal("trade with gas fee limit lower than server max fee rate should fail")
+	}
+	if !strings.Contains(err.Error(), "higher than configured fee rate limit") {
+		t.Fatalf("expected gas fee limit error, got: %v", err)
+	}
+
+	// Test 3: Gas fee limit equal to server's max fee rate - should succeed
+	tEthWallet.gasFeeLimit = tACCTAsset.MaxFeeRate
+	rig.ws.queueResponse(msgjson.LimitRoute, handleLimit)
+	_, err = tCore.Trade(tPW, form)
+	if err != nil {
+		t.Fatalf("trade with gas fee limit equal to server max fee rate should succeed: %v", err)
 	}
 }
 
