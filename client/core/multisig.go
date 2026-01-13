@@ -339,7 +339,7 @@ func (c *Core) ViewPaymentMultisig(csvFilePath string) (string, error) {
 }
 
 // SendPaymentMultisig sends the multisig hex. Will not error if there aren't
-// enough signatures and may then create a tx that never confirms.
+// enough signatures if using spv.
 func (c *Core) SendPaymentMultisig(csvFilePath string) (string, error) {
 	pm, multisigner, _, _, err := c.preparePaymentMultisig(csvFilePath)
 	if err != nil {
