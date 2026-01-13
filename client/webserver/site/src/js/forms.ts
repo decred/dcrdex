@@ -990,7 +990,7 @@ export class FeeAssetSelectionForm {
           tmpl.fiatTradeLimitLow.textContent = Doc.formatFourSigFigs(startingLimit * baseFiatRate)
           tmpl.fiatTradeLimitHigh.textContent = Doc.formatFourSigFigs(privilegedLimit * baseFiatRate)
         }
-        Doc.setVis(baseFiatRate, page.fiatTradeLowBox, page.fiatTradeHighBox)
+        Doc.setVis(baseFiatRate, tmpl.fiatTradeLowBox, tmpl.fiatTradeHighBox)
       }
 
       setTier(strongTier(xc.auth) || 1)
