@@ -2,7 +2,7 @@ package lexi
 
 import (
 	"decred.org/dcrdex/dex"
-	"github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/v4"
 )
 
 // badgerLoggerWrapper wraps dex.Logger and translates Warnf to Warningf to
