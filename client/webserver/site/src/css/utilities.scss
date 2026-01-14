@@ -30,7 +30,9 @@
   position: absolute;
 }
 
-.hoverbg:hover {
+.hoverbg:hover,
+.hoverbg.active,
+.hoverbg.selected {
   background-color: var(--tertiary-bg);
 }
 
