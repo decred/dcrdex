@@ -34,6 +34,7 @@ import (
 	"decred.org/dcrdex/dex/networks/eth/contracts/entrypoint"
 	multibal "decred.org/dcrdex/dex/networks/eth/contracts/multibalance"
 	"decred.org/dcrdex/dex/utils"
+	"decred.org/dcrdex/internal/go-bip39"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/decred/dcrd/hdkeychain/v3"
 	"github.com/ethereum/go-ethereum"
@@ -45,7 +46,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
-	"github.com/tyler-smith/go-bip39"
 )
 
 func registerToken(tokenID uint32, desc string) {
