@@ -41,6 +41,7 @@ import (
 	"decred.org/dcrdex/dex/dexnet"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
+	pi "decred.org/dcrdex/dex/politeia"
 	"decred.org/dcrdex/dex/version"
 	"github.com/decred/dcrd/certgen"
 	"github.com/go-chi/chi/v5"
@@ -180,6 +181,10 @@ type clientCore interface {
 	BridgeFeesAndLimits(fromAssetID, toAssetID uint32, bridgeName string) (*core.BridgeFeesAndLimits, error)
 	AllBridgePaths() (map[uint32]map[uint32][]string, error)
 	ExtensionModeConfig() *core.ExtensionModeConfig
+	PoliteiaDetails() (string, bool, int64)
+	ProposalsAll(offset, rowsCount int, searchPhrase string, filterByVoteStatus ...int) ([]*pi.Proposal, int, error)
+	Proposal(assetID uint32, token string) (*pi.Proposal, error)
+	CastVote(assetID uint32, pw []byte, token, bit string) error
 }
 
 type MMCore interface {
@@ -501,6 +506,8 @@ func New(cfg *Config) (*WebServer, error) {
 					webAuth.Get(homeRoute, s.handleHome)
 					webAuth.Get(walletsRoute, s.handleWallets)
 					webAuth.Get(walletLogRoute, s.handleWalletLogFile)
+					webAuth.With(proposalTokenCtx).Get("/proposal/{token}", s.handleProposal)
+					webAuth.Get(proposalsRoute, s.handleProposals)
 				})
 			})
 
@@ -624,6 +631,7 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/maxfundingfees", s.apiMaxFundingFees)
 			apiAuth.Get("/allbridgepaths", s.apiAllBridgePaths)
 			apiAuth.Post("/bridgefeesandlimits", s.apiBridgeFeesAndLimits)
+			apiAuth.Post("/castvote", s.apiCastVote)
 		})
 	})
 
@@ -719,7 +727,9 @@ func (s *WebServer) buildTemplates(lang string) error {
 		addTemplate("mm", bb, "forms").
 		addTemplate("mmsettings", bb, "forms").
 		addTemplate("mmarchives", bb).
-		addTemplate("mmlogs", bb)
+		addTemplate("mmlogs", bb).
+		addTemplate("proposals", bb).
+		addTemplate("proposal", bb)
 	s.html.Store(html)
 
 	return html.buildErr()

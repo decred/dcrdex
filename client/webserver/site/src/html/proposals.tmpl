@@ -1,0 +1,167 @@
+{{define "proposals"}}
+{{template "top" .}}
+<div id="main" data-handler="proposals" class="py-5 overflow-y-auto">
+    <section class="flex-stretch-column mw-500 mx-auto">
+        <div id="tabs" class="row g-0">
+            <button id="tabProposals" type="button" class="col border-0 tab active-tab">
+                [[[proposals]]]
+            </button>
+            <button id="tabConsensus" type="button" class="col border-0 tab">
+                [[[consensus_changes]]]
+            </button>
+            <button id="tabTreasury" type="button" class="col border-0 tab">
+                [[[treasury_spending]]]
+            </button>
+        </div>
+    </section>
+
+    <section class="flex-stretch-column mw-500 mx-auto pb-3 pt-2 px-3">
+        <div id="tabContent" class="d-flex justify-content-between">
+            {{$statuses := .VoteStatuses }}
+            {{$statusFilter := .VStatusFilter}}
+
+            <div id="sectionProposals">
+                <div class="m-1 mb-2 d-flex justify-content-end">
+                    <small>[[[last_sync]]]
+                        {{if .IsSyncing}} [[[syncing...]]]{{else if gt .LastPropSync 0}}{{timeAgo .LastPropSync}}{{else}}[[[not_synced]]]{{end}}
+                    </small>
+                </div>
+                <div class="row justify-content-center m-1 mb-3">
+                    <div class="search-bar col">
+                        <input id="proposalSearchInput" type="search" name="q" placeholder="Search…"
+                            value="{{.Query}}" />
+                        <button id="cancelSearch" type="button" class="search-clear p-0">
+                            <svg viewBox="0 0 24 24" width="18" height="18">
+                                <path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2"
+                                    stroke-linecap="round" />
+                            </svg>
+                        </button>
+
+                        <button id="searchProposals" type="button" class="p-0">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                                <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" />
+                                <line x1="20" y1="20" x2="16.5" y2="16.5" stroke="currentColor" stroke-width="2"
+                                    stroke-linecap="round" />
+                            </svg>
+                        </button>
+                    </div>
+                    <button id="filterIcon" type="button" class="btn btn-outline-info col-auto ms-3">☰</button>
+                </div>
+
+                {{if .ErrorMsg}}
+                <div class="text-center my-5">
+                    <div class="text-danger m-2 p-3">{{.ErrorMsg}}</div>
+                </div>
+                {{else if eq (len .Proposals) 0}}
+                <div class="text-center my-5">
+                    <p class="text-muted">[[[no_proposals_found]]]</p>
+                </div>
+                {{else}}
+                {{range .Proposals}}
+                {{$meta := .Metadata}}
+                <div class="card mb-3 border-0 p-3 rounded3 proposal" data-token="{{.Token}}">
+                    <div class="d-flex justify-content-between">
+                        <h6 class="pb-0 mb-0">
+                            {{.Name}}
+                        </h6>
+                        <small class="{{if eq $meta.VoteStatusDesc "Approved"}}buycolor{{else if eq
+                            $meta.VoteStatusDesc "Rejected" }}text-danger{{else}}text-color-secondary{{end}}">
+                            {{$meta.VoteStatusDesc}}
+                        </small>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <small class="text-muted">{{.Username}} — [[[Version]]] {{.Version}}</small>
+                        <small class="text-muted">{{timeAgo .PublishedAt}} </small>
+                    </div>
+
+                    {{if gt .TotalVotes 0}}
+                    <div class="d-flex mb-2">
+                        <div class="me-2 d-flex">
+                            <div class="yes-indicator mt-2 me-1"></div> [[[Yes]]]: {{$meta.Yes}} ({{printf "%.1f"
+                            $meta.Approval}}%)
+                        </div>
+                        <div class="d-flex">
+                            <div class="no-indicator mt-2 me-1"></div> [[[No]]]: {{$meta.No}} ({{printf "%.1f"
+                            $meta.Rejection}}%)
+                        </div>
+                    </div>
+
+                    <div class="d-flex align-items-center mt-1 mb-2">
+                        <div class="vote-bar" data-yes="{{ $meta.Approval }}" data-no="{{ $meta.Rejection }}"
+                            data-threshold="{{ $meta.PassPercent }}">
+                            <div class="vote-yes"></div>
+                            <div class="vote-no"></div>
+                            <span class="approval-threshold"></span>
+                        </div>
+                    </div>
+
+                    <div class="d-flex">
+                        <small class="text-muted ms-auto">{{.TotalVotes}} [[[votes]]]</small>
+                    </div>
+                    {{end}}
+                </div>
+                {{end}}
+
+                {{$query := .Query}}
+                <div id="pagination" class="pagination justify-content-center d-flex">
+                    {{if .Pagination.HasPrev}}
+                    <div class="page-item m-1">
+                        <a class="page-link"
+                            href="?page={{.Pagination.PrevPage}}&status={{if $statusFilter }}{{$statusFilter}}{{else}}all{{end}}{{if $query }}&query={{$query}}{{end}}">‹</a>
+                    </div>
+                    {{end}}
+
+                    {{range .Pagination.Pages}}
+
+                    {{if .Ellipsis}}
+                    <div class="page-item disabled m-1">
+                        <span class="page-link">…</span>
+                    </div>
+                    {{else}}
+                    <div class="page-item m-1 {{if .Active}}is-active{{end}}">
+                        <a class="page-link"
+                            href="?page={{.Num}}&status={{if $statusFilter }}{{$statusFilter}}{{else}}all{{end}}{{if $query }}&query={{$query}}{{end}}">
+                            {{.Num}}
+                        </a>
+                    </div>
+                    {{end}}
+
+                    {{end}}
+
+                    {{if .Pagination.HasNext}}
+                    <div class="page-item m-1">
+                        <a class="page-link"
+                            href="?page={{.Pagination.NextPage}}&status={{if $statusFilter }}&status={{$statusFilter}}{{else}}all{{end}}{{if $query }}&query={{$query}}{{end}}">›</a>
+                    </div>
+                    {{end}}
+                </div>
+                {{end}}
+            </div>
+            <div class="text-center d-hide" id="sectionConsensus">
+                <p class="text-muted">Consensus change proposals go here.</p>
+            </div>
+
+            <div class="text-center d-hide" id="sectionTreasury">
+                <p class="text-muted">Treasury spending settings go here.</p>
+            </div>
+    </section>
+
+    <div id="forms" class="d-hide">
+        <form id="filterForm" data-activestatus="{{if $statusFilter }}{{$statusFilter}}{{else}}all{{end}}"
+            class="mw-425 d-hide">
+            <div class="form-closer"><span class="ico-cross"></span></div>
+            <h5 class="modal-title mb-2 me-5">[[[filter]]]</h5>
+            <label class="form-label">[[[Status]]]</label>
+            <div class="d-flex flex-wrap p-0">
+                <button type="button" class="me-2 mb-2 voteStatus" data-status="all">[[[all]]]</button>
+                {{range $k, $v := .VoteStatuses}}
+                <button type="button" class="me-2 mb-2 voteStatus" data-status="{{$k}}">
+                    {{$v}}
+                </button>
+                {{end}}
+            </div>
+        </form>
+    </div>
+</div>
+{{template "bottom"}}
+{{end}}
