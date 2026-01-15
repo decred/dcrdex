@@ -8,6 +8,7 @@ import {
   ConfirmRegistrationForm,
   FeeAssetSelectionForm,
   WalletWaitForm,
+  LoginForm,
   slideSwap
 } from './forms'
 import {
@@ -33,12 +34,19 @@ export default class RegistrationPage extends BasePage {
   regAssetForm: FeeAssetSelectionForm
   walletWaitForm: WalletWaitForm
   confirmRegisterForm: ConfirmRegistrationForm
+  loginForm: LoginForm
 
   constructor (body: HTMLElement, data: RegistrationPageData) {
     super()
     this.body = body
     this.data = data
     const page = this.page = Doc.idDescendants(body)
+
+    // Initialize LoginForm if the login form is present (shown when app is
+    // initialized but user is not authenticated, e.g., after app restart)
+    if (page.loginForm) {
+      this.loginForm = new LoginForm(page.loginForm, () => { this.loggedIn() })
+    }
 
     if (data.host && page.dexAddrForm.classList.contains('selected')) {
       page.dexAddrForm.classList.remove('selected')
@@ -128,6 +136,11 @@ export default class RegistrationPage extends BasePage {
   // auth should be called once user is known to be authed with the server.
   async auth () {
     await app().fetchUser()
+  }
+
+  // loggedIn is called after successful login from the login form.
+  async loggedIn () {
+    await app().loadPage('wallets')
   }
 
   async requestFeepayment (oldForm: HTMLElement, xc: Exchange, certFile: string) {
