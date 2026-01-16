@@ -20,7 +20,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
-	"github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/v4"
 )
 
 type ExtendedWalletTx struct {
@@ -122,15 +122,6 @@ func (db *BadgerTxDB) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	opts := badger.DefaultOptions(db.filePath).WithLogger(&badgerLoggerWrapper{db.log})
 	var err error
 	db.DB, err = badger.Open(opts)
-	if err == badger.ErrTruncateNeeded {
-		// Probably a Windows thing.
-		// https://github.com/dgraph-io/badger/issues/744
-		db.log.Warnf("newTxHistoryStore badger db: %v", err)
-		// Try again with value log truncation enabled.
-		opts.Truncate = true
-		db.log.Warnf("Attempting to reopen badger DB with the Truncate option set...")
-		db.DB, err = badger.Open(opts)
-	}
 	if err != nil {
 		return nil, err
 	}

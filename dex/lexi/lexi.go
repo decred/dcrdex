@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
-	"github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/v4"
 )
 
 // ErrKeyNotFound is an alias for badger.ErrKeyNotFound so that the caller
@@ -50,15 +50,6 @@ type Config struct {
 func New(cfg *Config) (*DB, error) {
 	opts := badger.DefaultOptions(cfg.Path).WithLogger(&badgerLoggerWrapper{cfg.Log.SubLogger("BADG")})
 	bdb, err := badger.Open(opts)
-	if err == badger.ErrTruncateNeeded {
-		// Probably a Windows thing.
-		// https://github.com/dgraph-io/badger/issues/744
-		cfg.Log.Warnf("Error opening badger db: %v", err)
-		// Try again with value log truncation enabled.
-		opts.Truncate = true
-		cfg.Log.Warnf("Attempting to reopen badger DB with the Truncate option set...")
-		bdb, err = badger.Open(opts)
-	}
 	if err != nil {
 		return nil, err
 	}

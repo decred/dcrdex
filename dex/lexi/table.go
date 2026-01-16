@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/v4"
 )
 
 // Table is a prefixed section of the k-v DB. A Table can have indexes, such
