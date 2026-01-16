@@ -8,7 +8,10 @@ require (
 	fyne.io/systray v1.10.1-0.20220621085403-9a2652634e93
 	github.com/agl/ed25519 v0.0.0-20170116200512-5312a6153412
 	github.com/athanorlabs/go-dleq v0.1.0
+	github.com/bisoncraft/bchwallet v1.0.2
+	github.com/bisoncraft/go-bip39 v1.0.1
 	github.com/bisoncraft/go-monero v0.1.1
+	github.com/bisoncraft/neutrino-bch v1.0.1
 	github.com/bisoncraft/op-geth v0.0.0-20250729074358-3cfe4f15e91c
 	github.com/btcsuite/btcd v0.24.2-beta.rc1.0.20240625142744-cc26860b4026
 	github.com/btcsuite/btcd/btcec/v2 v2.3.4
@@ -22,9 +25,7 @@ require (
 	github.com/btcsuite/btcwallet/wtxmgr v1.5.4
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 	github.com/dchest/blake2b v1.0.0
-	github.com/dcrlabs/bchwallet v0.0.0-20240114124852-0e95005810be
 	github.com/dcrlabs/ltcwallet v0.0.0-20240823165752-3e026e8da010
-	github.com/dcrlabs/neutrino-bch v0.0.0-20240114121828-d656bce11095
 	github.com/decred/base58 v1.0.6
 	github.com/decred/dcrd/addrmgr/v3 v3.0.0
 	github.com/decred/dcrd/blockchain/stake/v5 v5.0.2
@@ -68,13 +69,12 @@ require (
 	github.com/ltcsuite/ltcd/ltcutil v1.1.4-0.20240131072528-64dfa402637a
 	github.com/pkg/browser v0.0.0-20210911075715-681adbf594b8
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
-	github.com/tyler-smith/go-bip39 v1.1.0
 	go.etcd.io/bbolt v1.3.12
-	golang.org/x/crypto v0.45.0
+	golang.org/x/crypto v0.47.0
 	golang.org/x/exp v0.0.0-20231110203233-9a3e6036ecaa
-	golang.org/x/sync v0.18.0
-	golang.org/x/term v0.37.0
-	golang.org/x/text v0.31.0
+	golang.org/x/sync v0.19.0
+	golang.org/x/term v0.39.0
+	golang.org/x/text v0.33.0
 	golang.org/x/time v0.9.0
 	google.golang.org/protobuf v1.36.10
 	gopkg.in/ini.v1 v1.67.0
@@ -186,8 +186,8 @@ require (
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
 	github.com/zquestz/grab v0.0.0-20190224022517-abcee96e61b1 // indirect
-	golang.org/x/net v0.47.0 // indirect
-	golang.org/x/sys v0.38.0 // indirect
+	golang.org/x/net v0.48.0 // indirect
+	golang.org/x/sys v0.40.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

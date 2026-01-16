@@ -10,6 +10,9 @@ require (
 )
 
 require (
+	github.com/bisoncraft/bchwallet v1.0.2 // indirect
+	github.com/bisoncraft/go-bip39 v1.0.1 // indirect
+	github.com/bisoncraft/neutrino-bch v1.0.1 // indirect
 	github.com/dcrlabs/ltcwallet v0.0.0-20240823165752-3e026e8da010 // indirect
 	github.com/ltcsuite/lnd/tlv v0.0.0-20240222214433-454d35886119 // indirect
 	github.com/ltcsuite/ltcd/chaincfg/chainhash v1.0.2 // indirect
@@ -55,8 +58,6 @@ require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dchest/blake2b v1.0.0 // indirect
 	github.com/dchest/siphash v1.2.3 // indirect
-	github.com/dcrlabs/bchwallet v0.0.0-20240114124852-0e95005810be // indirect
-	github.com/dcrlabs/neutrino-bch v0.0.0-20240114121828-d656bce11095 // indirect
 	github.com/deckarep/golang-set/v2 v2.6.0 // indirect
 	github.com/decred/base58 v1.0.6 // indirect
 	github.com/decred/dcrd/addrmgr/v3 v3.0.0 // indirect
@@ -148,16 +149,15 @@ require (
 	github.com/supranational/blst v0.3.16-0.20250831170142-f48500c1fdbe // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
-	github.com/tyler-smith/go-bip39 v1.1.0 // indirect
 	github.com/zquestz/grab v0.0.0-20190224022517-abcee96e61b1 // indirect
 	go.etcd.io/bbolt v1.3.12 // indirect
-	golang.org/x/crypto v0.45.0 // indirect
+	golang.org/x/crypto v0.47.0 // indirect
 	golang.org/x/exp v0.0.0-20231110203233-9a3e6036ecaa // indirect
-	golang.org/x/net v0.47.0 // indirect
-	golang.org/x/sync v0.18.0 // indirect
-	golang.org/x/sys v0.38.0 // indirect
-	golang.org/x/term v0.37.0 // indirect
-	golang.org/x/text v0.31.0 // indirect
+	golang.org/x/net v0.48.0 // indirect
+	golang.org/x/sync v0.19.0 // indirect
+	golang.org/x/sys v0.40.0 // indirect
+	golang.org/x/term v0.39.0 // indirect
+	golang.org/x/text v0.33.0 // indirect
 	golang.org/x/time v0.9.0 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
