@@ -1,7 +1,7 @@
 # BTC Simnet Test Harness
-The harness script will create three connected regnet nodes and wallets, and
+The harness script will create two connected regnet nodes with four wallets, and
 then mine some blocks and send some BTC around. The result is a set of wallets
-named **alpha**, **beta**, and **gamma**, each with slightly different
+named **alpha**, **beta**, **gamma**, and **delta**, each with slightly different
 properties.
 
 **Beta** is purely a mining node/wallet and has never sent a transaction. Beta
@@ -11,15 +11,17 @@ does have some mature coinbase transaction outputs to spend.
 so has some change outputs that are not coinbase and have varying number of
 confirmations.
 
-**Gamma** is another wallet on the alpha node. Gamma is encrypted, so requires
-unlocking for sensitive operations. Gamma has no coinbase-spending outputs,
-but has a number of UTXOs of varying size and confirmation count.
-**The gamma wallet password is "abc"**.
+**Gamma** is another wallet on the alpha node. Gamma has no coinbase-spending
+outputs, but has a number of UTXOs of varying size and confirmation count.
+
+**Delta** is another wallet on the beta node, similar to gamma.
+
+**The wallet password is "abc"** for encrypted wallets.
 
 ## Dependencies
 
 You must have [bitcoind and bitcoin-cli](https://github.com/bitcoin/bitcoin/releases)
-in `PATH` to use the harness. bitcoin v26.0.0+ is recommended.
+in `PATH` to use the harness. Bitcoin Core v26.0.0+ is recommended. v30+ is fully supported.
 
 It also requires tmux.
 
@@ -29,14 +31,27 @@ The `./harness.sh` script will drop you into a tmux window in a directory
 called `harness-ctl`. Inside of this directory are a number of scripts to
 allow you to perform RPC calls against each wallet.
 
-`./alpha`, `./beta`, and `./gamma` are just `bitcoin-cli` configured for their
-respective wallets.
+`./alpha`, `./beta`, `./gamma`, and `./delta` are just `bitcoin-cli` configured
+for their respective wallets.
 Try `./gamma getbalance`, for example.
 
 `./reorg` will step through a script that causes the alpha node to undergo a
 1-deep reorganization.
 
 `./quit` shuts down the nodes and closes the tmux session.
+
+## Regenerating Descriptor Files
+
+If you need to regenerate the `desc-*.json` files (e.g., after changing wallet
+configuration), use the `gen-descriptors.sh` script:
+
+```bash
+# Start a Bitcoin Core node first, then run:
+./gen-descriptors.sh [RPC_PORT]
+```
+
+This will create new descriptor files and output the corresponding addresses
+to update in `harness.sh`.
 
 ## Dev Stuff
 
