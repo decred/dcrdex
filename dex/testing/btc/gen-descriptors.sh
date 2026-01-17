@@ -5,6 +5,7 @@
 # Prerequisites:
 #   - Bitcoin Core running on regtest (run harness.sh first, or start manually)
 #   - bitcoin-cli available in PATH
+#   - python3 available in PATH
 #
 # Usage: ./gen-descriptors.sh [RPC_PORT]
 #   RPC_PORT defaults to 20556 (alpha node)
