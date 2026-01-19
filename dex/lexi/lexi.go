@@ -9,10 +9,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"decred.org/dcrdex/dex"
+	v1badger "github.com/dgraph-io/badger"
 	"github.com/dgraph-io/badger/v4"
 )
 
@@ -46,12 +49,108 @@ type Config struct {
 	Log  dex.Logger
 }
 
-// New constructs a new Lexi DB.
-func New(cfg *Config) (*DB, error) {
-	opts := badger.DefaultOptions(cfg.Path).WithLogger(&badgerLoggerWrapper{cfg.Log.SubLogger("BADG")})
-	bdb, err := badger.Open(opts)
+// BadgerV1Update attempts to update old badger databases from v1 to v4.
+func BadgerV1Update(path string, v4Path string, logger dex.Logger, opts badger.Options) (*badger.DB, error) {
+	// Copy the old db directory as is.
+	logger.Warnf("Detected incompatible database version at %s. "+
+		"Backing up old database and attempting to update.", path)
+	// Open the old db using v1 badger.
+	v1opts := v1badger.DefaultOptions(path).WithLogger(&badgerLoggerWrapper{logger})
+	oldDB, err := v1badger.Open(v1opts)
 	if err != nil {
 		return nil, err
+	}
+	defer oldDB.Close()
+	// Back up values to a temporary file.
+	tempPath := path + ".temp"
+	tempF, err := os.OpenFile(tempPath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(tempPath)
+	if _, err := oldDB.Backup(tempF, 0); err != nil {
+		tempF.Close()
+		return nil, err
+	}
+	tempF.Close()
+	tempF, err = os.OpenFile(tempPath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
+	if err != nil {
+		return nil, err
+	}
+	defer tempF.Close()
+	// Open a new database at the v4 path and attempt to load. Delete if that fails.
+	db, err := badger.Open(opts)
+	if err != nil {
+		return nil, err
+	}
+	maxPendingWrites := 16
+	if err := db.Load(tempF, maxPendingWrites); err != nil {
+		db.Close()
+		defer os.Remove(v4Path)
+		return nil, err
+	}
+	return db, nil
+}
+
+const version4Suffix = "_v4"
+
+// NeedsV1toV4Update returns whether the database needs an upgrade from v1 to
+// v4. Works by searching for a directory with the v4 suffix.
+func NeedsV1toV4Update(path string) (string, bool, error) {
+	path = strings.TrimRight(path, "/")
+	lenDiff := len(path) - len(version4Suffix)
+	var v4Path string
+	// May be already pointing to a v4 directory.
+	if lenDiff >= 0 && path[lenDiff:] == version4Suffix {
+		v4Path = path
+		path = path[:len(version4Suffix)]
+	} else {
+		v4Path = fmt.Sprintf("%s%s", path, version4Suffix)
+	}
+	_, err := os.Stat(v4Path)
+	if err == nil {
+		// v4 directory exists where expected
+		return v4Path, false, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return "", false, err
+	}
+	_, err = os.Stat(path)
+	if err == nil {
+		// v1 directory found, update it
+		return v4Path, true, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return "", false, err
+	}
+	// Neither directory exists, new db.
+	return v4Path, false, nil
+}
+
+// New constructs a new Lexi DB. Starting at badger v4, badger versions are
+// appended to the directory path, i.e. "path_v4".
+func New(cfg *Config) (*DB, error) {
+	v4Path, needs, err := NeedsV1toV4Update(cfg.Path)
+	if err != nil {
+		return nil, err
+	}
+	logger := cfg.Log.SubLogger("BADG")
+	opts := badger.DefaultOptions(v4Path).WithLogger(&badgerLoggerWrapper{logger})
+	var bdb *badger.DB
+	if needs {
+		bdb, err = BadgerV1Update(cfg.Path, v4Path, logger, opts)
+		if err != nil {
+			logger.Warnf("Unable to update old db, creating new one: %v", err)
+			bdb, err = badger.Open(opts)
+			if err != nil {
+				return nil, err
+			}
+		}
+	} else {
+		bdb, err = badger.Open(opts)
+		if err != nil {
+			return nil, err
+		}
 	}
 	idSeq, err := bdb.GetSequence(prefixedKey(primarySequencePrefix, []byte{0x00}), 1000)
 	if err != nil {

@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"decred.org/dcrdex/dex/lexi"
-	"github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/v4"
 )
 
 // These constants mirror unexported values from the lexi package.

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
-	"github.com/dgraph-io/badger/v4"
+	"github.com/dgraph-io/badger" // Keep version 1
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -99,6 +99,15 @@ func newBadgerTxDB(filePath string, log dex.Logger) (*badgerTxDB, error) {
 	opts := badger.DefaultOptions(filePath).WithLogger(&badgerLoggerWrapper{log})
 	var err error
 	bdb, err := badger.Open(opts)
+	if err == badger.ErrTruncateNeeded {
+		// Probably a Windows thing.
+		// https://github.com/dgraph-io/badger/issues/744
+		log.Warnf("error opening badger db: %v", err)
+		// Try again with value log truncation enabled.
+		opts.Truncate = true
+		log.Warnf("Attempting to reopen badger DB with the Truncate option set...")
+		bdb, err = badger.Open(opts)
+	}
 	if err != nil {
 		return nil, err
 	}

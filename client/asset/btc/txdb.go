@@ -20,6 +20,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/lexi"
 	"github.com/dgraph-io/badger/v4"
 )
 
@@ -119,11 +120,25 @@ func (db *BadgerTxDB) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	//   .WithValueLogLoadingMode(options.FileIO) // default options.MemoryMap
 	//   .WithMaxTableSize(sz int64); // bytes, default 6MB
 	//   .WithValueLogFileSize(sz int64), bytes, default 1 GB, must be 1MB <= sz <= 1GB
-	opts := badger.DefaultOptions(db.filePath).WithLogger(&badgerLoggerWrapper{db.log})
-	var err error
-	db.DB, err = badger.Open(opts)
+	v4Path, needs, err := lexi.NeedsV1toV4Update(db.filePath)
 	if err != nil {
 		return nil, err
+	}
+	opts := badger.DefaultOptions(v4Path).WithLogger(&badgerLoggerWrapper{db.log})
+	if needs {
+		db.DB, err = lexi.BadgerV1Update(db.filePath, v4Path, db.log, opts)
+		if err != nil {
+			db.log.Warnf("Unable to update old db, creating new one: %v", err)
+			db.DB, err = badger.Open(opts)
+			if err != nil {
+				return nil, err
+			}
+		}
+	} else {
+		db.DB, err = badger.Open(opts)
+		if err != nil {
+			return nil, err
+		}
 	}
 	db.ctx = ctx
 	db.seq, err = db.GetSequence([]byte("seq"), 10)
