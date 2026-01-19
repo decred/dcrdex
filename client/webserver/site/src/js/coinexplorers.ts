@@ -68,13 +68,13 @@ export const CoinExplorers: Record<number, Record<number, (cid: string) => strin
   42: { // dcr
     [Mainnet]: (cid: string) => {
       const [txid, vout] = cid.split(':')
-      if (vout !== undefined) return `https://explorer.dcrdata.org/tx/${txid}/out/${vout}`
-      return `https://explorer.dcrdata.org/tx/${txid}`
+      if (vout !== undefined) return `https://dcrdata.decred.org/tx/${txid}/out/${vout}`
+      return `https://dcrdata.decred.org/tx/${txid}`
     },
     [Testnet]: (cid: string) => {
       const [txid, vout] = cid.split(':')
-      if (vout !== undefined) return `https://testnet.dcrdata.org/tx/${txid}/out/${vout}`
-      return `https://testnet.dcrdata.org/tx/${txid}`
+      if (vout !== undefined) return `https://testnet.decred.org/tx/${txid}/out/${vout}`
+      return `https://testnet.decred.org/tx/${txid}`
     },
     [Simnet]: (cid: string) => {
       const [txid, vout] = cid.split(':')

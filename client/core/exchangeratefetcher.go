@@ -31,7 +31,7 @@ const (
 )
 
 var (
-	dcrDataURL = "https://explorer.dcrdata.org/api/exchangerate"
+	dcrDataURL = "https://dcrdata.decred.org/api/exchangerate"
 	// The best info I can find on Messari says
 	//    Without an API key requests are rate limited to 20 requests per minute
 	//    and 1000 requests per day.
