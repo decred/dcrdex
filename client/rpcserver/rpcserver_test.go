@@ -226,6 +226,24 @@ func (c *TCore) SupportedBridgeDestinations(assetID uint32) (map[uint32][]string
 func (c *TCore) BridgeFeesAndLimits(fromAssetID, toAssetID uint32, bridgeName string) (*core.BridgeFeesAndLimits, error) {
 	return nil, nil
 }
+func (c *TCore) PaymentMultisigPubkey(assetID uint32) (string, error) {
+	return "", nil
+}
+func (c *TCore) SendFundsToMultisig(csvFilePath string) error {
+	return nil
+}
+func (c *TCore) SignMultisig(csvFilePath string, signIdx int) error {
+	return nil
+}
+func (c *TCore) RefundPaymentMultisig(csvFilePath string) (string, error) {
+	return "", nil
+}
+func (c *TCore) ViewPaymentMultisig(csvFilePath string) (string, error) {
+	return "", nil
+}
+func (c *TCore) SendPaymentMultisig(csvFilePath string) (string, error) {
+	return "", nil
+}
 func (c *TCore) AbandonTransaction(assetID uint32, txID string) error {
 	return c.abandonTransactionErr
 }

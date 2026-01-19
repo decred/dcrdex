@@ -155,4 +155,13 @@ type DB interface {
 	SetLanguage(lang string) error
 	// Language gets the language stored with SetLanguage.
 	Language() (string, error)
+	// NextMultisigKeyIndex returns the next multisig key index and increments the
+	// stored value so that subsequent calls will always return a higher index.
+	NextMultisigKeyIndex(assetID uint32) (uint32, error)
+	// StoreMultisigIndexForPubkey stores the key index for the compressed
+	// pubkey bytes of assetID.
+	StoreMultisigIndexForPubkey(assetID, idx uint32, pubkey [33]byte) error
+	// MultisigIndexForPubkey returns the key index for the compressed
+	// pubkey bytes of assetID if stored.
+	MultisigIndexForPubkey(assetID uint32, pubkey [33]byte) (uint32, error)
 }
