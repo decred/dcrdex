@@ -23,7 +23,7 @@ var allocs embed.FS
 const (
 	MainnetChainID = 137
 	TestnetChainID = 80001 // Mumbai
-	SimnetChainID  = 90001
+	SimnetChainID  = 1337
 )
 
 var (

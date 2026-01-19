@@ -854,10 +854,7 @@ func newBotWallet(symbol, node, name string, port string, pass []byte, minFunds,
 			},
 		}
 	case polygon, usdcp:
-		rpcProvider := filepath.Join(dextestDir, "polygon", "alpha", "bor", "bor.ipc")
-		if node == beta {
-			rpcProvider = filepath.Join(dextestDir, "eth", "beta", "bor", "bor.ipc")
-		}
+		rpcProvider := "ws://127.0.0.1:34983"
 		form = &core.WalletForm{
 			Type:    "rpc",
 			AssetID: polygonID,
