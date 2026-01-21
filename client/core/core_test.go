@@ -271,9 +271,6 @@ func testDexConnection(ctx context.Context, crypter *tCrypter) (*dexConnection, 
 			BinSizes: []string{"1h", "24h"},
 		},
 		notify:            func(Notification) {},
-		trades:            make(map[order.OrderID]*trackedTrade),
-		cancels:           make(map[order.OrderID]order.OrderID),
-		inFlightOrders:    make(map[uint64]*InFlightOrder),
 		epoch:             map[string]uint64{tDcrBtcMktName: 0},
 		resolvedEpoch:     map[string]uint64{tDcrBtcMktName: 0},
 		apiVer:            serverdex.PreAPIVersion,
@@ -1424,12 +1421,15 @@ func newTestRig() *testRig {
 			conns: map[string]*dexConnection{
 				tDexHost: dc,
 			},
-			lockTimeTaker: dex.LockTimeTaker(dex.Testnet),
-			lockTimeMaker: dex.LockTimeMaker(dex.Testnet),
-			wallets:       make(map[uint32]*xcWallet),
-			blockWaiters:  make(map[string]*blockWaiter),
-			sentCommits:   make(map[order.Commitment]chan struct{}),
-			tickSched:     make(map[order.OrderID]*time.Timer),
+			trades:         make(map[order.OrderID]*trackedTrade),
+			cancels:        make(map[order.OrderID]order.OrderID),
+			inFlightOrders: make(map[uint64]*InFlightOrder),
+			lockTimeTaker:  dex.LockTimeTaker(dex.Testnet),
+			lockTimeMaker:  dex.LockTimeMaker(dex.Testnet),
+			wallets:        make(map[uint32]*xcWallet),
+			blockWaiters:   make(map[string]*blockWaiter),
+			sentCommits:    make(map[order.Commitment]chan struct{}),
+			tickSched:      make(map[order.OrderID]*time.Timer),
 			wsConstructor: func(*comms.WsCfg) (comms.WsConn, error) {
 				// This is not very realistic since it doesn't start a fresh
 				// one, and (*Core).connectDEX always gets the same TWebsocket,
@@ -2541,11 +2541,11 @@ func TestLogin(t *testing.T) {
 		return nil
 	})
 
-	dc.trades = map[order.OrderID]*trackedTrade{
+	tCore = rig.core
+	tCore.trades = map[order.OrderID]*trackedTrade{
 		oid: tracker,
 	}
 
-	tCore = rig.core
 	rig.queueConnect(nil, []*msgjson.Match{knownMsgMatch /* missing missingMatch! */, extraMsgMatch}, nil)
 	rig.queueCancel(nil) // for the unfunded order that gets canceled in authDEX
 	// Login>authDEX will do 4 match DB updates for these two matches:
@@ -3380,7 +3380,7 @@ func TestRefundReserves(t *testing.T) {
 
 	tracker := newTrackedTrade(dbOrder, preImg, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails)
-	dc.trades[loid] = tracker
+	tCore.trades[loid] = tracker
 	preImgC := newPreimage()
 	co := &order.CancelOrder{
 		P: order.Prefix{
@@ -3515,10 +3515,10 @@ func TestRefundReserves(t *testing.T) {
 
 	tracker = newTrackedTrade(dbOrder, preImg, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails)
-	dc.trades = map[order.OrderID]*trackedTrade{moid: tracker}
+	tCore.trades = map[order.OrderID]*trackedTrade{moid: tracker}
 
 	test("nomatch", reserves, func() {
-		tracker.nomatch(moid)
+		tCore.nomatch(tracker, moid)
 	})
 
 	test("partial market sell match", reserves/3, func() {
@@ -3633,7 +3633,7 @@ func TestRedemptionReserves(t *testing.T) {
 
 	tracker := newTrackedTrade(dbOrder, preImg, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails)
-	dc.trades[loid] = tracker
+	tCore.trades[loid] = tracker
 	preImgC := newPreimage()
 	co := &order.CancelOrder{
 		P: order.Prefix{
@@ -3722,10 +3722,10 @@ func TestRedemptionReserves(t *testing.T) {
 
 	tracker = newTrackedTrade(dbOrder, preImg, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails)
-	dc.trades = map[order.OrderID]*trackedTrade{moid: tracker}
+	tCore.trades = map[order.OrderID]*trackedTrade{moid: tracker}
 
 	test("nomatch", reserves, func() {
-		tracker.nomatch(moid)
+		tCore.nomatch(tracker, moid)
 	})
 
 	test("partial market sell match", reserves/3, func() {
@@ -3820,7 +3820,7 @@ func TestCancel(t *testing.T) {
 	oid := lo.ID()
 	tracker := newTrackedTrade(dbOrder, preImg, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, nil, nil, rig.core.notify, rig.core.formatDetails)
-	dc.trades[oid] = tracker
+	rig.core.trades[oid] = tracker
 
 	rig.queueCancel(nil)
 	err := rig.core.Cancel(oid[:])
@@ -3859,10 +3859,10 @@ func TestCancel(t *testing.T) {
 	oid = ogID
 
 	// Order not found
-	delete(dc.trades, oid)
+	delete(rig.core.trades, oid)
 	ensureErr("no order")
 	ensureNilCancel("no order")
-	dc.trades[oid] = tracker
+	rig.core.trades[oid] = tracker
 
 	// Send error
 	rig.ws.reqErr = tErr
@@ -3904,7 +3904,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 			tracker.csumMtx.Unlock()
 		}
 
-		rig.dc.trades[oid] = tracker
+		rig.core.trades[oid] = tracker
 		err := handlePreimageRequest(rig.core, rig.dc, reqNoCommit)
 		if err == nil {
 			t.Fatalf("handlePreimageRequest succeeded with no commitment in the request")
@@ -3930,7 +3930,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 
 		notes := rig.core.NotificationFeed()
 
-		rig.dc.trades[oid] = tracker
+		rig.core.trades[oid] = tracker
 		err = handlePreimageRequest(rig.core, rig.dc, reqCommit)
 		if err != nil {
 			t.Fatalf("handlePreimageRequest error: %v", err)
@@ -4011,7 +4011,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 
 		notes := rig.core.NotificationFeed()
 
-		rig.dc.trades[oid] = tracker
+		rig.core.trades[oid] = tracker
 		err := handlePreimageRequest(rig.core, rig.dc, reqCommit)
 		if err != nil {
 			t.Fatalf("handlePreimageRequest error: %v", err)
@@ -4086,7 +4086,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 		rig.ws.sendMsgErrChan = make(chan *msgjson.Error, 1)
 		defer func() { rig.ws.sendMsgErrChan = nil }()
 
-		rig.dc.trades[oid] = tracker
+		rig.core.trades[oid] = tracker
 		err := handlePreimageRequest(rig.core, rig.dc, reqCommit)
 		if err != nil {
 			t.Fatalf("handlePreimageRequest error: %v", err)
@@ -4157,7 +4157,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 
 		notes := rig.core.NotificationFeed()
 
-		rig.dc.trades[oid] = tracker
+		rig.core.trades[oid] = tracker
 		err := handlePreimageRequest(rig.core, rig.dc, reqCommit)
 		if err != nil {
 			t.Fatalf("handlePreimageRequest error: %v", err)
@@ -4240,8 +4240,8 @@ func TestHandlePreimageRequest(t *testing.T) {
 
 		notes := rig.core.NotificationFeed()
 
-		rig.dc.trades[oid] = tracker
-		rig.dc.registerCancelLink(cid, oid)
+		rig.core.trades[oid] = tracker
+		rig.core.registerCancelLink(cid, oid)
 		err := handlePreimageRequest(rig.core, rig.dc, reqCommit)
 		if err != nil {
 			t.Fatalf("handlePreimageRequest error: %v", err)
@@ -4331,8 +4331,8 @@ func TestHandlePreimageRequest(t *testing.T) {
 		rig.ws.sendMsgErrChan = make(chan *msgjson.Error, 1)
 		defer func() { rig.ws.sendMsgErrChan = nil }()
 
-		rig.dc.trades[oid] = tracker
-		rig.dc.registerCancelLink(cid, oid)
+		rig.core.trades[oid] = tracker
+		rig.core.registerCancelLink(cid, oid)
 		err := handlePreimageRequest(rig.core, rig.dc, reqCommit)
 		if err != nil {
 			t.Fatalf("handlePreimageRequest error: %v", err)
@@ -4416,8 +4416,8 @@ func TestHandlePreimageRequest(t *testing.T) {
 
 		notes := rig.core.NotificationFeed()
 
-		rig.dc.trades[oid] = tracker
-		rig.dc.registerCancelLink(cid, oid)
+		rig.core.trades[oid] = tracker
+		rig.core.registerCancelLink(cid, oid)
 		err := handlePreimageRequest(rig.core, rig.dc, reqCommit)
 		if err != nil {
 			t.Fatalf("handlePreimageRequest error: %v", err)
@@ -4512,8 +4512,8 @@ func TestHandleRevokeOrderMsg(t *testing.T) {
 	}
 	tracker.cancel = &trackedCancel{CancelOrder: *co}
 	coid := co.ID()
-	rig.dc.trades[oid] = tracker
-	rig.dc.registerCancelLink(coid, oid)
+	tCore.trades[oid] = tracker
+	tCore.registerCancelLink(coid, oid)
 
 	orderNotes, feedDone := orderNoteFeed(tCore)
 	defer feedDone()
@@ -4612,7 +4612,7 @@ func TestHandleRevokeMatchMsg(t *testing.T) {
 		t.Fatal("[handleRevokeMatchMsg] expected a non-existent order")
 	}
 
-	rig.dc.trades[oid] = tracker
+	tCore.trades[oid] = tracker
 
 	// Success
 	err = handleRevokeMatchMsg(rig.core, rig.dc, req)
@@ -4663,7 +4663,7 @@ func TestTradeTracking(t *testing.T) {
 	fundingCoins := asset.Coins{&tCoin{id: fundCoinDcrID}}
 	tracker := newTrackedTrade(dbOrder, preImgL, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, walletSet, fundingCoins, rig.core.notify, rig.core.formatDetails)
-	rig.dc.trades[tracker.ID()] = tracker
+	tCore.trades[tracker.ID()] = tracker
 	var match *matchTracker
 	checkStatus := func(tag string, wantStatus order.MatchStatus) {
 		t.Helper()
@@ -5139,7 +5139,7 @@ func TestTradeTracking(t *testing.T) {
 	}
 	tracker.cancel = &trackedCancel{CancelOrder: *co, epochLen: mkt.EpochLen}
 	coid := co.ID()
-	rig.dc.registerCancelLink(coid, tracker.ID())
+	tCore.registerCancelLink(coid, tracker.ID())
 	m1 := &msgjson.Match{
 		OrderID:  loid[:],
 		MatchID:  mid[:],
@@ -5357,16 +5357,16 @@ func TestReconcileTrades(t *testing.T) {
 
 	for _, tt := range tests {
 		// Track client orders in dc.trades.
-		dc.tradeMtx.Lock()
+		rig.core.tradeMtx.Lock()
 		var pendingCancel *trackedTrade
-		dc.trades = make(map[order.OrderID]*trackedTrade)
+		rig.core.trades = make(map[order.OrderID]*trackedTrade)
 		for _, tracker := range tt.clientOrders {
-			dc.trades[tracker.ID()] = tracker
+			rig.core.trades[tracker.ID()] = tracker
 			if tracker.cancel != nil {
 				pendingCancel = tracker
 			}
 		}
-		dc.tradeMtx.Unlock()
+		rig.core.tradeMtx.Unlock()
 
 		// Queue order_status response if required for reconciliation.
 		if len(tt.orderStatusRes) > 0 {
@@ -5378,14 +5378,14 @@ func TestReconcileTrades(t *testing.T) {
 		}
 
 		// Reconcile tracked orders with server orders.
-		dc.reconcileTrades(tt.serverOrders)
+		rig.core.reconcileTrades(dc, tt.serverOrders)
 
-		dc.tradeMtx.RLock()
-		if len(dc.trades) != len(tt.expectOrderStatuses) {
+		rig.core.tradeMtx.RLock()
+		if len(rig.core.trades) != len(tt.expectOrderStatuses) {
 			t.Fatalf("%s: post-reconcileTrades order count mismatch. expected %d, got %d",
-				tt.name, len(tt.expectOrderStatuses), len(dc.trades))
+				tt.name, len(tt.expectOrderStatuses), len(rig.core.trades))
 		}
-		for oid, tracker := range dc.trades {
+		for oid, tracker := range rig.core.trades {
 			expectedStatus, expected := tt.expectOrderStatuses[oid]
 			if !expected {
 				t.Fatalf("%s: unexpected order %v tracked by client", tt.name, oid)
@@ -5397,7 +5397,7 @@ func TestReconcileTrades(t *testing.T) {
 			}
 			tracker.mtx.RUnlock()
 		}
-		dc.tradeMtx.RUnlock()
+		rig.core.tradeMtx.RUnlock()
 
 		// Check if a previously canceled order existed; if the order is still
 		// active (Epoch/Booked status) and the cancel order is deleted, having
@@ -5519,7 +5519,7 @@ func TestRefunds(t *testing.T) {
 	tEthWallet.fundRedeemScripts = []dex.Bytes{nil}
 	tracker := newTrackedTrade(dbOrder, preImgL, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, walletSet, fundCoinsETH, rig.core.notify, rig.core.formatDetails)
-	rig.dc.trades[tracker.ID()] = tracker
+	tCore.trades[tracker.ID()] = tracker
 
 	// MAKER REFUND, INVALID TAKER COUNTERSWAP
 	//
@@ -5915,7 +5915,7 @@ func TestResolveActiveTrades(t *testing.T) {
 		tEthWallet.reservedRedemption = 0
 		tEthWallet.reservedRefund = 0
 
-		rig.dc.trades = make(map[order.OrderID]*trackedTrade)
+		tCore.trades = make(map[order.OrderID]*trackedTrade)
 	}
 
 	// Ensure the order is good, and reset the state.
@@ -5933,9 +5933,9 @@ func TestResolveActiveTrades(t *testing.T) {
 			t.Fatalf("%s: login error: %v", description, err)
 		}
 
-		trade, found := rig.dc.trades[lo.ID()]
+		trade, found := tCore.trades[lo.ID()]
 		if expAddedToTradesMap != found {
-			t.Fatalf("%s: expected added to trades map = %v, but got %v. len(trades) = %d", description, expAddedToTradesMap, found, len(rig.dc.trades))
+			t.Fatalf("%s: expected added to trades map = %v, but got %v. len(trades) = %d", description, expAddedToTradesMap, found, len(tCore.trades))
 		}
 		if !expAddedToTradesMap {
 			return
@@ -6101,7 +6101,7 @@ func TestReReserveFunding(t *testing.T) {
 		refundReserves:     refundReserves,
 	}
 
-	rig.dc.trades = map[order.OrderID]*trackedTrade{
+	tCore.trades = map[order.OrderID]*trackedTrade{
 		oid: tracker,
 	}
 
@@ -6270,12 +6270,12 @@ func TestCompareServerMatches(t *testing.T) {
 		// oidMissing not included (missing!)
 	}
 
-	dc.trades = map[order.OrderID]*trackedTrade{
+	rig.core.trades = map[order.OrderID]*trackedTrade{
 		oid:        tracker,
 		oidMissing: trackerMissing,
 	}
 
-	exceptions, _ := dc.compareServerMatches(srvMatches)
+	exceptions, _ := rig.core.compareServerMatches(dc, srvMatches)
 	if len(exceptions) != 2 {
 		t.Fatalf("exceptions did not include both trades, just %d", len(exceptions))
 	}
@@ -6535,10 +6535,9 @@ func TestHandleMatchProofMsg(t *testing.T) {
 }
 
 func Test_marketTrades(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
 	mktID := "dcr_btc"
-	dc := &dexConnection{
-		trades: make(map[order.OrderID]*trackedTrade),
-	}
 
 	preImg := newPreimage()
 	activeOrd := &order.LimitOrder{P: order.Prefix{
@@ -6549,14 +6548,14 @@ func Test_marketTrades(t *testing.T) {
 		Order:  activeOrd,
 		preImg: preImg,
 		mktID:  mktID,
-		dc:     dc,
+		dc:     rig.dc,
 		metaData: &db.OrderMetaData{
 			Status: order.OrderStatusBooked,
 		},
 		matches: make(map[order.MatchID]*matchTracker),
 	}
 
-	dc.trades[activeTracker.ID()] = activeTracker
+	rig.core.trades[activeTracker.ID()] = activeTracker
 
 	preImg = newPreimage() // different oid
 	inactiveOrd := &order.LimitOrder{P: order.Prefix{
@@ -6567,16 +6566,16 @@ func Test_marketTrades(t *testing.T) {
 		Order:  inactiveOrd,
 		preImg: preImg,
 		mktID:  mktID,
-		dc:     dc,
+		dc:     rig.dc,
 		metaData: &db.OrderMetaData{
 			Status: order.OrderStatusExecuted,
 		},
 		matches: make(map[order.MatchID]*matchTracker), // no matches
 	}
 
-	dc.trades[inactiveTracker.ID()] = inactiveTracker
+	rig.core.trades[inactiveTracker.ID()] = inactiveTracker
 
-	trades, _ := dc.marketTrades(mktID)
+	trades, _ := rig.core.marketTrades(rig.dc.acct.host, mktID)
 	if len(trades) != 1 {
 		t.Fatalf("Expected only one trade from marketTrades, found %v", len(trades))
 	}
@@ -6606,7 +6605,7 @@ func TestLogout(t *testing.T) {
 		},
 		matches: make(map[order.MatchID]*matchTracker),
 	}
-	rig.dc.trades[ord.ID()] = tracker
+	tCore.trades[ord.ID()] = tracker
 
 	ensureErr := func(tag string) {
 		t.Helper()
@@ -6644,7 +6643,7 @@ func TestLogout(t *testing.T) {
 	}
 	// Active orders with matches error.
 	ensureErr("active orders matches")
-	rig.dc.trades = nil
+	tCore.trades = nil
 }
 
 func TestSetEpoch(t *testing.T) {
@@ -6866,7 +6865,7 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 		oid := lo.ID()
 		tracker := newTrackedTrade(dbOrder, preImg, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 			rig.db, rig.queue, walletSet, coins, rig.core.notify, rig.core.formatDetails)
-		dc.trades[oid] = tracker
+		tCore.trades[oid] = tracker
 		return tracker
 	}
 
@@ -6918,14 +6917,14 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 
 	// Check that the funding coin was returned. Use the tradeMtx for
 	// synchronization.
-	dc.tradeMtx.Lock()
+	tCore.tradeMtx.Lock()
 	if len(tDcrWallet.returnedCoins) != 1 || !bytes.Equal(tDcrWallet.returnedCoins[0].ID(), fundCoinDcrID) {
 		t.Fatalf("funding coin not returned")
 	}
-	dc.tradeMtx.Unlock()
+	tCore.tradeMtx.Unlock()
 
 	// Make sure the change coin is returned for a trade with a change coin.
-	delete(dc.trades, freshTracker.ID())
+	delete(tCore.trades, freshTracker.ID())
 	swappedTracker := addTracker(nil)
 	changeCoinID := encode.RandomBytes(36)
 	swappedTracker.change = &tCoin{id: changeCoinID}
@@ -6942,12 +6941,12 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 		t.Fatalf("[handleTradeSuspensionMsg] unexpected error: %v", err)
 	}
 	// Check that the funding coin was returned.
-	dc.tradeMtx.Lock()
+	tCore.tradeMtx.Lock()
 	if len(tDcrWallet.returnedCoins) != 1 || !bytes.Equal(tDcrWallet.returnedCoins[0].ID(), changeCoinID) {
 		t.Fatalf("change coin not returned")
 	}
 	tDcrWallet.returnedCoins = nil
-	dc.tradeMtx.Unlock()
+	tCore.tradeMtx.Unlock()
 
 	// Make sure the coin isn't returned if there are unswapped matches.
 	mid := ordertest.RandomMatchID()
@@ -6967,11 +6966,11 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 	if err != nil {
 		t.Fatalf("[handleTradeSuspensionMsg] unexpected error: %v", err)
 	}
-	dc.tradeMtx.Lock()
+	tCore.tradeMtx.Lock()
 	if tDcrWallet.returnedCoins != nil {
 		t.Fatalf("change coin returned with active matches")
 	}
-	dc.tradeMtx.Unlock()
+	tCore.tradeMtx.Unlock()
 
 	// Ensure trades for a suspended market generate an error.
 	form := &TradeForm{
@@ -7162,7 +7161,7 @@ func TestHandleNomatch(t *testing.T) {
 	immediateOID := loImmediate.ID()
 	immediateTracker := newTrackedTrade(dbOrder, preImgL, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, walletSet, fundingCoins, rig.core.notify, rig.core.formatDetails)
-	dc.trades[immediateOID] = immediateTracker
+	tCore.trades[immediateOID] = immediateTracker
 
 	// 2. Standing limit order
 	loStanding, dbOrder, preImgL, _ := makeLimitOrder(dc, true, dcrBtcLotSize*100, dcrBtcRateStep)
@@ -7170,7 +7169,7 @@ func TestHandleNomatch(t *testing.T) {
 	standingOID := loStanding.ID()
 	standingTracker := newTrackedTrade(dbOrder, preImgL, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, walletSet, fundingCoins, rig.core.notify, rig.core.formatDetails)
-	dc.trades[standingOID] = standingTracker
+	tCore.trades[standingOID] = standingTracker
 
 	// 3. Cancel order.
 	cancelOrder := &order.CancelOrder{
@@ -7182,7 +7181,7 @@ func TestHandleNomatch(t *testing.T) {
 	standingTracker.cancel = &trackedCancel{
 		CancelOrder: *cancelOrder,
 	}
-	dc.registerCancelLink(cancelOID, standingOID)
+	tCore.registerCancelLink(cancelOID, standingOID)
 
 	// 4. Market order.
 	loWillBeMarket, dbOrder, preImgL, _ := makeLimitOrder(dc, true, dcrBtcLotSize*100, dcrBtcRateStep)
@@ -7194,10 +7193,10 @@ func TestHandleNomatch(t *testing.T) {
 	marketOID := mktOrder.ID()
 	marketTracker := newTrackedTrade(dbOrder, preImgL, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, walletSet, fundingCoins, rig.core.notify, rig.core.formatDetails)
-	dc.trades[marketOID] = marketTracker
+	tCore.trades[marketOID] = marketTracker
 
 	runNomatch := func(tag string, oid order.OrderID) {
-		tracker, _ := dc.findOrder(oid)
+		tracker, _ := tCore.findOrder(oid)
 		if tracker == nil {
 			t.Fatalf("%s: order ID not found", tag)
 		}
@@ -7210,7 +7209,7 @@ func TestHandleNomatch(t *testing.T) {
 	}
 
 	checkTradeStatus := func(tag string, oid order.OrderID, expStatus order.OrderStatus) {
-		tracker, _ := dc.findOrder(oid)
+		tracker, _ := tCore.findOrder(oid)
 		if tracker.metaData.Status != expStatus {
 			t.Fatalf("%s: wrong status. expected %s, got %s", tag, expStatus, tracker.metaData.Status)
 		}
@@ -7488,8 +7487,8 @@ func TestReconfigureWallet(t *testing.T) {
 			},
 		},
 	}
-	tCore.conns[tDexHost].tradeMtx.Lock()
-	tCore.conns[tDexHost].trades[order.OrderID{}] = &trackedTrade{
+	tCore.tradeMtx.Lock()
+	tCore.trades[order.OrderID{}] = &trackedTrade{
 		Order: &order.LimitOrder{
 			P: order.Prefix{
 				BaseAsset:  assetID,
@@ -7509,7 +7508,7 @@ func TestReconfigureWallet(t *testing.T) {
 		dc:          rig.dc,
 		readyToTick: true, // prevent resume path
 	}
-	tCore.conns[tDexHost].tradeMtx.Unlock()
+	tCore.tradeMtx.Unlock()
 
 	// Error checking if wallet owns address.
 	tXyzWallet.ownsAddressErr = tErr
@@ -8119,7 +8118,7 @@ func TestAccelerateOrder(t *testing.T) {
 		}
 		trade := newTrackedTrade(dbOrder, preImg, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 			rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails)
-		dc.trades[trade.ID()] = trade
+		tCore.trades[trade.ID()] = trade
 		trade.Trade().AddFill(test.orderFilled)
 
 		trade.metaData.ChangeCoin = encode.RandomBytes(32)
@@ -8370,7 +8369,7 @@ func TestMatchStatusResolution(t *testing.T) {
 	trade := newTrackedTrade(dbOrder, preImg, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails)
 
-	dc.trades[trade.ID()] = trade
+	tCore.trades[trade.ID()] = trade
 	matchID := ordertest.RandomMatchID()
 	matchTime := time.Now()
 	match := &matchTracker{
@@ -8857,7 +8856,7 @@ func TestConfirmTransaction(t *testing.T) {
 	oid := lo.ID()
 	tracker := newTrackedTrade(dbOrder, preImg, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails)
-	dc.trades[oid] = tracker
+	tCore.trades[oid] = tracker
 
 	tBytes := encode.RandomBytes(2)
 	tCoinID := encode.RandomBytes(36)
@@ -9452,7 +9451,7 @@ func TestMaxSwapsRedeemsInTx(t *testing.T) {
 	oid := lo.ID()
 	tracker := newTrackedTrade(dbOrder, preImg, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails)
-	dc.trades[oid] = tracker
+	tCore.trades[oid] = tracker
 
 	newMatch := func(side order.MatchSide, status order.MatchStatus) *matchTracker {
 		return &matchTracker{
@@ -9578,7 +9577,7 @@ func TestSuspectTrades(t *testing.T) {
 	oid := lo.ID()
 	tracker := newTrackedTrade(dbOrder, preImg, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails)
-	dc.trades[oid] = tracker
+	tCore.trades[oid] = tracker
 
 	newMatch := func(side order.MatchSide, status order.MatchStatus) *matchTracker {
 		return &matchTracker{
@@ -11421,7 +11420,7 @@ func TestTradingLimits(t *testing.T) {
 			Status: order.OrderStatusEpoch,
 		},
 	}
-	rig.dc.trades[oids[0]] = tracker
+	rig.core.trades[oids[0]] = tracker
 	checkTradingLimits(2, 20)
 
 	// Add another epoch order, 2 lots, likely taker, so 2x
@@ -11443,7 +11442,7 @@ func TestTradingLimits(t *testing.T) {
 			Status: order.OrderStatusEpoch,
 		},
 	}
-	rig.dc.trades[oids[1]] = tracker
+	rig.core.trades[oids[1]] = tracker
 	checkTradingLimits(6, 20)
 
 	// Add partially filled booked order
@@ -11465,7 +11464,7 @@ func TestTradingLimits(t *testing.T) {
 			Status: order.OrderStatusBooked,
 		},
 	}
-	rig.dc.trades[oids[2]] = tracker
+	rig.core.trades[oids[2]] = tracker
 	checkTradingLimits(7, 20)
 
 	// Add settling match to the booked order
@@ -11528,7 +11527,7 @@ func TestTakeAction(t *testing.T) {
 	var oid order.OrderID
 	copy(oid[:], encode.RandomBytes(32))
 
-	rig.dc.trades[oid] = tracker
+	rig.core.trades[oid] = tracker
 
 	requestData := []byte(fmt.Sprintf(`{"orderID":"abcd","coinID":"%s","retry":true}`, dex.Bytes(coinID)))
 
