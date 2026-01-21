@@ -40,6 +40,7 @@ import (
 	"decred.org/dcrwallet/v5/wallet"
 	_ "decred.org/dcrwallet/v5/wallet/drivers/bdb"
 	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/decred/dcrd/blockchain/stake/v5"
 	blockchain "github.com/decred/dcrd/blockchain/standalone/v2"
 	"github.com/decred/dcrd/chaincfg/chainhash"
@@ -48,6 +49,7 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/schnorr"
+	"github.com/decred/dcrd/dcrjson/v4"
 	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/decred/dcrd/hdkeychain/v3"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v4"
@@ -109,6 +111,10 @@ const (
 
 	ticketSize               = dexdcr.MsgTxOverhead + dexdcr.P2PKHInputSize + 2*dexdcr.P2SHOutputSize /* stakesubmission and sstxchanges */ + 32 /* see e.g. RewardCommitmentScript */
 	minVSPTicketPurchaseSize = dexdcr.MsgTxOverhead + dexdcr.P2PKHInputSize + dexdcr.P2PKHOutputSize + ticketSize
+
+	// sstxCommitmentString is the string to insert when a verbose
+	// transaction output's pkscript type is a ticket commitment.
+	sstxCommitmentString = "sstxcommitment"
 )
 
 var (
@@ -717,6 +723,7 @@ var _ asset.NewAddresser = (*ExchangeWallet)(nil)
 var _ asset.PrivateSwapper = (*ExchangeWallet)(nil)
 var _ asset.GeocodeRedeemer = (*ExchangeWallet)(nil)
 var _ asset.TxAbandoner = (*ExchangeWallet)(nil)
+var _ asset.Multisigner = (*ExchangeWallet)(nil)
 
 type block struct {
 	height int64
@@ -8147,4 +8154,526 @@ func getDcrdataTxs(ctx context.Context, addr string, net dex.Network) (txs []*wi
 	}
 
 	return
+}
+
+// SendFundsToMultisig sends amounts to a multisig address, then creates a
+// transaction that spends those funds. ErrMultisigPartialSend and partial
+// results are returned if an error happens after sending funds.
+func (dcr *ExchangeWallet) SendFundsToMultisig(ctx context.Context, pm *asset.PaymentMultisig) (pmTx *asset.PaymentMultisigTx, err error) {
+	xpubs := make([]*secp256k1.PublicKey, len(pm.SignerXpubs))
+	for i, b := range pm.SignerXpubs {
+		key, err := secp256k1.ParsePubKey(b)
+		if err != nil {
+			return nil, err
+		}
+		xpubs[i] = key
+	}
+
+	addrToValue := make(map[stdaddr.Address]uint64)
+	var value uint64
+	for addrStr, val := range pm.AddrToVal {
+		amt, err := dcrutil.NewAmount(val)
+		if err != nil {
+			return nil, err
+		}
+		addr, err := stdaddr.DecodeAddress(addrStr, dcr.chainParams)
+		if err != nil {
+			return nil, err
+		}
+		addrToValue[addr] = uint64(amt)
+		value += uint64(amt)
+	}
+
+	feeRate := dcr.targetFeeRateWithFallback(2, 0)
+	redeemTxSize := dexdcr.PaymentMultisigRedeemTxSize(int64(len(xpubs)), pm.NRequired, int64(len(addrToValue)))
+	redeemFee := feeRate * redeemTxSize
+	value += redeemFee
+
+	bal, err := dcr.balance()
+	if err != nil {
+		return nil, err
+	}
+
+	// Not adding fee for initial send but sending will fail anyway in that
+	// case.
+	if bal.Available < value {
+		return nil, errors.New("not enough funds to send to multisig")
+	}
+
+	locktime := time.Unix(pm.Locktime, 0).UTC()
+	// TODO: Remove this 3 day check.
+	if locktime.After(time.Now().Add(time.Hour * 72)) {
+		return nil, errors.New("locktime more than three days in the future, make it shorter")
+	}
+
+	addr, err := dcr.wallet.InternalAddress(dcr.ctx, dcr.depositAccount())
+	if err != nil {
+		return nil, err
+	}
+
+	redeemScript, err := dexdcr.MakePaymentMultisig(addr.String(), xpubs, pm.NRequired, pm.Locktime, dcr.chainParams)
+	if err != nil {
+		return nil, fmt.Errorf("unable to make multisig redeem script: %v", err)
+	}
+	dcr.log.Infof("Multisig redeem script: %x", redeemScript)
+
+	scriptAddr, err := stdaddr.NewAddressScriptHashV0(redeemScript, dcr.chainParams)
+	if err != nil {
+		return nil, fmt.Errorf("error encoding script address: %w", err)
+	}
+
+	// Funds are sent. Point of no return.
+	msgTx, _, _, err := dcr.sendToAddress(scriptAddr, value, feeRate)
+	if err != nil {
+		return nil, err
+	}
+
+	// Add a data push value to the beginning of the script so that we can
+	// parse in the same way as a script with signatures.
+	redeemScriptWithDataPush, err := txscript.NewScriptBuilder().AddData(redeemScript).Script()
+	if err != nil {
+		return nil, err
+	}
+
+	// Create the transaction that spends the contract.
+	redeemTx := wire.NewMsgTx()
+	redeemTx.LockTime = uint32(pm.Locktime)
+	// TODO: Change is always last output?
+	hash := msgTx.TxHash()
+	prevOut := wire.NewOutPoint(&hash, 0, wire.TxTreeRegular)
+	txIn := wire.NewTxIn(prevOut, int64(value), redeemScriptWithDataPush)
+	// Enable the OP_CHECKLOCKTIMEVERIFY opcode to be used.
+	//
+	// https://github.com/decred/dcrd/blob/8f5270b707daaa1ecf24a1ba02b3ff8a762674d3/txscript/opcode.go#L981-L998
+	txIn.Sequence = wire.MaxTxInSequenceNum - 1
+	redeemTx.AddTxIn(txIn)
+
+	for addr, amt := range addrToValue {
+		pkScriptVer, pkScript := addr.PaymentScript()
+		txOut := newTxOut(int64(amt), pkScriptVer, pkScript)
+		redeemTx.AddTxOut(txOut)
+	}
+
+	hasSigs := make([]bool, len(xpubs))
+	b, err := redeemTx.Bytes()
+	if err != nil {
+		return &asset.PaymentMultisigTx{
+			TxHex:   spew.Sdump(redeemTx),
+			HasSigs: hasSigs,
+		}, asset.ErrMultisigPartialSend
+	}
+
+	return &asset.PaymentMultisigTx{
+		TxHex:   hex.EncodeToString(b),
+		HasSigs: hasSigs,
+	}, nil
+}
+
+func insert(a [][]byte, index int, value []byte) [][]byte {
+	if len(a) == index { // nil or empty slice or after last element
+		return append(a, value)
+	}
+	a = append(a[:index+1], a[index:]...) // index < len(a)
+	a[index] = value
+	return a
+}
+
+// SignMultisig signs the pmTx with the supplied privateKey and inserts the
+// signature at idx among the other signatures.
+func (dcr *ExchangeWallet) SignMultisig(ctx context.Context, pmTx *asset.PaymentMultisigTx, privKey []byte) (*asset.PaymentMultisigTx, error) {
+	// Decode the spending tx and extract values from it.
+	txB, err := hex.DecodeString(pmTx.TxHex)
+	if err != nil {
+		return nil, err
+	}
+	msgTx := new(wire.MsgTx)
+	if err := msgTx.FromBytes(txB); err != nil {
+		return nil, err
+	}
+	if len(msgTx.TxIn) < 1 {
+		return nil, errors.New("spending tx does not have an input")
+	}
+
+	redeemScript, sigs, err := dexdcr.SigsFromPaymentMultisig(msgTx.TxIn[0].SignatureScript)
+	if err != nil {
+		return nil, err
+	}
+
+	nRequired, _, _, pubKeys, err := dexdcr.ExtractPaymentMultisigDetails(redeemScript)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(pmTx.HasSigs) != len(pubKeys) {
+		return nil, errors.New("has sigs and number of xpubs different")
+	}
+
+	if nRequired <= int64(len(sigs)) {
+		return nil, errors.New("already has enough signatures to send")
+	}
+
+	// Find our signature's placement.
+	priv := secp256k1.PrivKeyFromBytes(privKey)
+	defer priv.Zero()
+	pubKeyB := priv.PubKey().SerializeCompressed()
+	sigIdx := -1
+	sigOffset := 0
+	for i, b := range pubKeys {
+		if pmTx.HasSigs[i] {
+			sigOffset += 1
+		}
+		if bytes.Equal(pubKeyB, b.SerializeCompressed()) {
+			sigIdx = i
+			break
+		}
+	}
+	if sigIdx < 0 {
+		return nil, fmt.Errorf("signing pubkey %x for private key not found in signer xpubs", pubKeyB)
+	}
+	if sigOffset > len(sigs) {
+		return nil, fmt.Errorf("not as many sigs found as expected")
+	}
+	if pmTx.HasSigs[sigIdx] {
+		return nil, fmt.Errorf("already have a signature for pubkey %x", pubKeyB)
+	}
+	// Create our signature.
+	sig, err := sign.RawTxInSignature(msgTx, 0, redeemScript, txscript.SigHashAll, privKey, dcrec.STEcdsaSecp256k1)
+	if err != nil {
+		return nil, err
+	}
+	// Add our signature to the others and repace the sig script.
+	sigScript, err := dexdcr.RedeemPaymentMultisig(redeemScript, insert(sigs, sigOffset, sig))
+	if err != nil {
+		return nil, err
+	}
+	msgTx.TxIn[0].SignatureScript = sigScript
+	b, err := msgTx.Bytes()
+	if err != nil {
+		return nil, err
+	}
+
+	pmTx.HasSigs[sigIdx] = true
+	return &asset.PaymentMultisigTx{
+		TxHex:   hex.EncodeToString(b),
+		HasSigs: pmTx.HasSigs,
+	}, nil
+}
+
+// RefundMultisig refunds a multisig if it is after the locktime and we are the
+// sender.
+func (dcr *ExchangeWallet) RefundMultisig(ctx context.Context, pmTx *asset.PaymentMultisigTx) (string, error) {
+	// Decode the spending tx and extract values from it.
+	txB, err := hex.DecodeString(pmTx.TxHex)
+	if err != nil {
+		return "", err
+	}
+	msgTx := new(wire.MsgTx)
+	if err := msgTx.FromBytes(txB); err != nil {
+		return "", err
+	}
+	if len(msgTx.TxIn) < 1 {
+		return "", errors.New("spending tx does not have an input")
+	}
+
+	redeemScript, _, err := dexdcr.SigsFromPaymentMultisig(msgTx.TxIn[0].SignatureScript)
+	if err != nil {
+		return "", err
+	}
+
+	_, sender, locktime, pubKeys, err := dexdcr.ExtractPaymentMultisigDetails(redeemScript)
+	if err != nil {
+		return "", err
+	}
+
+	expired, err := dcr.LockTimeExpired(dcr.ctx, time.Unix(locktime, 0))
+	if err != nil {
+		return "", err
+	}
+	if !expired {
+		return "", fmt.Errorf("locktime not yet expired. Expires at %v", time.Unix(locktime, 0))
+	}
+
+	addr, err := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(sender[:], dcr.chainParams)
+	if err != nil {
+		return "", fmt.Errorf("error generating address: %v", err)
+	}
+
+	size := dexdcr.PaymentMultisigRefundTxSize(int64(len(pubKeys)))
+	feeRate := dcr.targetFeeRateWithFallback(2, 0)
+	refundFee := int64(feeRate) * int64(size)
+	pkScriptVer, pkScript := addr.PaymentScript()
+	txOut := newTxOut(msgTx.TxIn[0].ValueIn-refundFee, pkScriptVer, pkScript)
+	msgTx.TxOut = []*wire.TxOut{txOut}
+	msgTx.TxOut[0].Value -= refundFee
+
+	// Create our signature.
+	redeemSig, pubkey, err := dcr.createSig(msgTx, 0, redeemScript, addr)
+	if err != nil {
+		return "", err
+	}
+	sigScript, err := dexdcr.RefundPaymentMultisig(redeemScript, pubkey, redeemSig)
+	if err != nil {
+		return "", err
+	}
+	msgTx.TxIn[0].SignatureScript = sigScript
+
+	txHash, err := dcr.wallet.SendRawTransaction(dcr.ctx, msgTx, true)
+	if err != nil {
+		return "", err
+	}
+	return txHash.String(), nil
+}
+
+// createVinList returns a slice of JSON objects for the inputs of the passed
+// transaction.
+func createVinList(mtx *wire.MsgTx, isTreasuryEnabled bool) []chainjson.Vin {
+	// Treasurybase transactions only have a single txin by definition.
+	//
+	// NOTE: This check MUST come before the coinbase check because a
+	// treasurybase will be identified as a coinbase as well.
+	vinList := make([]chainjson.Vin, len(mtx.TxIn))
+	if isTreasuryEnabled && blockchain.IsTreasuryBase(mtx) {
+		txIn := mtx.TxIn[0]
+		vinEntry := &vinList[0]
+		vinEntry.Treasurybase = true
+		vinEntry.Sequence = txIn.Sequence
+		vinEntry.AmountIn = dcrutil.Amount(txIn.ValueIn).ToCoin()
+		vinEntry.BlockHeight = txIn.BlockHeight
+		vinEntry.BlockIndex = txIn.BlockIndex
+		return vinList
+	}
+
+	// Coinbase transactions only have a single txin by definition.
+	if blockchain.IsCoinBaseTx(mtx, isTreasuryEnabled) {
+		txIn := mtx.TxIn[0]
+		vinEntry := &vinList[0]
+		vinEntry.Coinbase = hex.EncodeToString(txIn.SignatureScript)
+		vinEntry.Sequence = txIn.Sequence
+		vinEntry.AmountIn = dcrutil.Amount(txIn.ValueIn).ToCoin()
+		vinEntry.BlockHeight = txIn.BlockHeight
+		vinEntry.BlockIndex = txIn.BlockIndex
+		return vinList
+	}
+
+	// Treasury spend transactions only have a single txin by definition.
+	if isTreasuryEnabled && stake.IsTSpend(mtx) {
+		txIn := mtx.TxIn[0]
+		vinEntry := &vinList[0]
+		vinEntry.TreasurySpend = hex.EncodeToString(txIn.SignatureScript)
+		vinEntry.Sequence = txIn.Sequence
+		vinEntry.AmountIn = dcrutil.Amount(txIn.ValueIn).ToCoin()
+		vinEntry.BlockHeight = txIn.BlockHeight
+		vinEntry.BlockIndex = txIn.BlockIndex
+		return vinList
+	}
+
+	// Stakebase transactions (votes) have two inputs: a null stake base
+	// followed by an input consuming a ticket's stakesubmission.
+	isSSGen := stake.IsSSGen(mtx)
+
+	for i, txIn := range mtx.TxIn {
+		// Handle only the null input of a stakebase differently.
+		if isSSGen && i == 0 {
+			vinEntry := &vinList[0]
+			vinEntry.Stakebase = hex.EncodeToString(txIn.SignatureScript)
+			vinEntry.Sequence = txIn.Sequence
+			vinEntry.AmountIn = dcrutil.Amount(txIn.ValueIn).ToCoin()
+			vinEntry.BlockHeight = txIn.BlockHeight
+			vinEntry.BlockIndex = txIn.BlockIndex
+			continue
+		}
+
+		// The disassembled string will contain [error] inline
+		// if the script doesn't fully parse, so ignore the
+		// error here.
+		disbuf, _ := txscript.DisasmString(txIn.SignatureScript)
+
+		vinEntry := &vinList[i]
+		vinEntry.Txid = txIn.PreviousOutPoint.Hash.String()
+		vinEntry.Vout = txIn.PreviousOutPoint.Index
+		vinEntry.Tree = txIn.PreviousOutPoint.Tree
+		vinEntry.Sequence = txIn.Sequence
+		vinEntry.AmountIn = dcrutil.Amount(txIn.ValueIn).ToCoin()
+		vinEntry.BlockHeight = txIn.BlockHeight
+		vinEntry.BlockIndex = txIn.BlockIndex
+		vinEntry.ScriptSig = &chainjson.ScriptSig{
+			Asm: disbuf,
+			Hex: hex.EncodeToString(txIn.SignatureScript),
+		}
+	}
+
+	return vinList
+}
+
+// createVoutList returns a slice of JSON objects for the outputs of the passed
+// transaction.
+func createVoutList(mtx *wire.MsgTx, chainParams *chaincfg.Params) ([]chainjson.Vout, error) {
+
+	txType := stake.DetermineTxType(mtx)
+	voutList := make([]chainjson.Vout, 0, len(mtx.TxOut))
+	for i, v := range mtx.TxOut {
+		// The disassembled string will contain [error] inline if the
+		// script doesn't fully parse, so ignore the error here.
+		disbuf, _ := txscript.DisasmString(v.PkScript)
+
+		// Attempt to extract addresses from the public key script.  In
+		// the case of stake submission transactions, the odd outputs
+		// contain a commitment address, so detect that case
+		// accordingly.
+		var addrs []stdaddr.Address
+		var scriptType string
+		var reqSigs uint16
+		var commitAmt *dcrutil.Amount
+		if txType == stake.TxTypeSStx && (i%2 != 0) {
+			scriptType = sstxCommitmentString
+			addr, err := stake.AddrFromSStxPkScrCommitment(v.PkScript,
+				chainParams)
+			if err != nil {
+				return nil, fmt.Errorf("failed to decode ticket "+
+					"commitment addr output for tx hash "+
+					"%v, output idx %v", mtx.TxHash(), i)
+			} else {
+				addrs = []stdaddr.Address{addr}
+			}
+			amt, err := stake.AmountFromSStxPkScrCommitment(v.PkScript)
+			if err != nil {
+				return nil, fmt.Errorf("failed to decode ticket "+
+					"commitment amt output for tx hash %v"+
+					", output idx %v", mtx.TxHash(), i)
+			} else {
+				commitAmt = &amt
+			}
+		} else {
+			// Attempt to extract known addresses associated with the script.
+			var st stdscript.ScriptType
+			st, addrs = stdscript.ExtractAddrs(v.Version, v.PkScript, chainParams)
+			scriptType = st.String()
+
+			// Determine the number of required signatures for known standard
+			// dcrdtypes.
+			reqSigs = stdscript.DetermineRequiredSigs(v.Version, v.PkScript)
+		}
+
+		encodedAddrs := make([]string, len(addrs))
+		for j, addr := range addrs {
+			encodedAddr := addr.String()
+			encodedAddrs[j] = encodedAddr
+		}
+
+		var vout chainjson.Vout
+		voutSPK := &vout.ScriptPubKey
+		vout.N = uint32(i)
+		vout.Value = dcrutil.Amount(v.Value).ToCoin()
+		vout.Version = v.Version
+		voutSPK.Addresses = encodedAddrs
+		voutSPK.Asm = disbuf
+		voutSPK.Hex = hex.EncodeToString(v.PkScript)
+		voutSPK.Type = scriptType
+		voutSPK.ReqSigs = int32(reqSigs)
+		if commitAmt != nil {
+			voutSPK.CommitAmt = dcrjson.Float64(commitAmt.ToCoin())
+		}
+		voutSPK.Version = v.Version
+
+		voutList = append(voutList, vout)
+	}
+
+	return voutList, nil
+}
+
+// decodeTx decodes a transaction from its hex.
+func (dcr *ExchangeWallet) decodeTx(hexStr string) (*chainjson.TxRawDecodeResult, error) {
+	if len(hexStr)%2 != 0 {
+		hexStr = "0" + hexStr
+	}
+	serializedTx, err := hex.DecodeString(hexStr)
+	if err != nil {
+		return nil, err
+	}
+	var mtx wire.MsgTx
+	err = mtx.Deserialize(bytes.NewReader(serializedTx))
+	if err != nil {
+		return nil, err
+	}
+
+	voutList, err := createVoutList(&mtx, dcr.chainParams)
+	if err != nil {
+		return nil, err
+	}
+
+	isTreasuryEnabled := true
+
+	// Create and return the result.
+	return &chainjson.TxRawDecodeResult{
+		Txid:     mtx.TxHash().String(),
+		Version:  int32(mtx.Version),
+		Locktime: mtx.LockTime,
+		Expiry:   mtx.Expiry,
+		Vin:      createVinList(&mtx, isTreasuryEnabled),
+		Vout:     voutList,
+	}, nil
+}
+
+type ViewPM struct {
+	Tx        *chainjson.TxRawDecodeResult `json:"tx"`
+	Locktime  time.Time                    `json:"locktime"`
+	Pubkeys   []string                     `json:"pubkeys"`
+	NSigs     int                          `json:"nsigs"`
+	NRequired int64                        `json:"nrequired"`
+	Sender    string                       `json:"sender"`
+}
+
+// ViewPaymentMultisig returns a tx hex in human readable json format.
+func (dcr *ExchangeWallet) ViewPaymentMultisig(pmTx *asset.PaymentMultisigTx) (string, error) {
+	txB, err := hex.DecodeString(pmTx.TxHex)
+	if err != nil {
+		return "", err
+	}
+	msgTx := new(wire.MsgTx)
+	if err := msgTx.FromBytes(txB); err != nil {
+		return "", err
+	}
+	if len(msgTx.TxIn) < 1 {
+		return "", errors.New("spending tx does not have an input")
+	}
+
+	redeemScript, sigs, err := dexdcr.SigsFromPaymentMultisig(msgTx.TxIn[0].SignatureScript)
+	if err != nil {
+		return "", err
+	}
+
+	nRequired, sender, locktime, pubKeys, err := dexdcr.ExtractPaymentMultisigDetails(redeemScript)
+	if err != nil {
+		return "", err
+	}
+
+	pks := make([]string, len(pubKeys))
+	for i, pk := range pubKeys {
+		pks[i] = hex.EncodeToString(pk.SerializeCompressed())
+	}
+
+	addr, err := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(sender[:], dcr.chainParams)
+	if err != nil {
+		return "", fmt.Errorf("error generating address: %v", err)
+	}
+
+	dTx, err := dcr.decodeTx(pmTx.TxHex)
+	if err != nil {
+		return "", err
+	}
+
+	viewPm := ViewPM{
+		Tx:        dTx,
+		Locktime:  time.Unix(locktime, 0),
+		Pubkeys:   pks,
+		NSigs:     len(sigs),
+		NRequired: nRequired,
+		Sender:    addr.String(),
+	}
+
+	b, err := json.MarshalIndent(viewPm, "", "\t")
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
