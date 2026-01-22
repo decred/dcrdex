@@ -907,8 +907,9 @@ type Bridger interface {
 	// min and mix limits for the bridge, if any.
 	BridgeInitiationFeesAndLimits(bridgeName string, destAssetID uint32) (estimatedFee uint64, limits [2]uint64, hasLimits bool, err error)
 
-	// BridgeCompletionFees returns the estimated fees for completing a bridge.
-	BridgeCompletionFees(bridgeName string) (uint64, error)
+	// BridgeCompletionFees returns the estimated fees for completing a bridge,
+	// and whether the wallet has sufficient balance available to pay those fees.
+	BridgeCompletionFees(bridgeName string) (fees uint64, hasSufficientBalance bool, err error)
 }
 
 // Sweeper is a wallet that can clear the entire balance of the wallet/account

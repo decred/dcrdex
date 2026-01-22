@@ -14,56 +14,40 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
+	dexbase "decred.org/dcrdex/dex/networks/base"
+	dexerc20 "decred.org/dcrdex/dex/networks/erc20"
+	dexeth "decred.org/dcrdex/dex/networks/eth"
+	dexpolygon "decred.org/dcrdex/dex/networks/polygon"
 )
 
 const simnetBridgeName = "simnet"
 
-// Token asset IDs for simnet bridge support
 var (
-	simnetUsdcEthID, _     = dex.BipSymbolID("usdc.eth")
-	simnetUsdtEthID, _     = dex.BipSymbolID("usdt.eth")
-	simnetUsdcPolygonID, _ = dex.BipSymbolID("usdc.polygon")
-	simnetUsdtPolygonID, _ = dex.BipSymbolID("usdt.polygon")
-	simnetUsdcBaseID, _    = dex.BipSymbolID("usdc.base")
-	simnetUsdtBaseID, _    = dex.BipSymbolID("usdt.base")
+	usdtBaseID, _ = dex.BipSymbolID("usdt.base")
 )
 
-// simnetHarnessDir maps base chain asset IDs to their harness directory names.
 var simnetHarnessDir = map[uint32]string{
 	ethID:     "eth",
 	polygonID: "polygon",
 	baseID:    "base",
 }
 
-// simnetTokenParent maps token asset IDs to their parent chain asset ID.
-var simnetTokenParent = map[uint32]uint32{
-	simnetUsdcEthID:     ethID,
-	simnetUsdtEthID:     ethID,
-	simnetUsdcPolygonID: polygonID,
-	simnetUsdtPolygonID: polygonID,
-	simnetUsdcBaseID:    baseID,
-	simnetUsdtBaseID:    baseID,
-}
-
-// simnetTokenScript maps token asset IDs to their harness script name.
 var simnetTokenScript = map[uint32]string{
-	simnetUsdcEthID:     "sendUSDC",
-	simnetUsdtEthID:     "sendUSDT",
-	simnetUsdcPolygonID: "sendUSDC",
-	simnetUsdtPolygonID: "sendUSDT",
-	simnetUsdcBaseID:    "sendUSDC",
-	simnetUsdtBaseID:    "sendUSDT",
+	usdcEthID:     "sendUSDC",
+	usdtEthID:     "sendUSDT",
+	usdcPolygonID: "sendUSDC",
+	usdtPolygonID: "sendUSDT",
+	usdcBaseID:    "sendUSDC",
+	usdtBaseID:    "sendUSDT",
 }
 
-// simnetBridge is a mock bridge implementation for testing on simnet.
-// It allows testing the bridge UI without requiring real cross-chain infrastructure.
-// The bridge executes harness scripts to allocate funds on the destination chain.
 type simnetBridge struct {
 	net     dex.Network
 	assetID uint32
@@ -77,7 +61,6 @@ type simnetBridge struct {
 	approvalsMtx   sync.RWMutex
 }
 
-// newSimnetBridge creates a new simnet bridge for testing.
 func newSimnetBridge(assetID uint32, net dex.Network, cb bind.ContractBackend, addr common.Address, chainID *big.Int, log dex.Logger) (*simnetBridge, error) {
 	if net != dex.Simnet {
 		return nil, fmt.Errorf("simnet bridge only available on simnet, got %s", net)
@@ -94,51 +77,34 @@ func newSimnetBridge(assetID uint32, net dex.Network, cb bind.ContractBackend, a
 	}, nil
 }
 
-// simnetBridgePaths defines the supported bridge paths on simnet.
-// Maps source asset ID -> destination asset IDs
 var simnetBridgePaths = map[uint32][]uint32{
-	// Base chain assets
-	ethID:     {polygonID, baseID},
-	polygonID: {ethID, baseID},
-	baseID:    {ethID, polygonID},
-	// USDC tokens
-	simnetUsdcEthID:     {simnetUsdcPolygonID, simnetUsdcBaseID},
-	simnetUsdcPolygonID: {simnetUsdcEthID, simnetUsdcBaseID},
-	simnetUsdcBaseID:    {simnetUsdcEthID, simnetUsdcPolygonID},
-	// USDT tokens
-	simnetUsdtEthID:     {simnetUsdtPolygonID, simnetUsdtBaseID},
-	simnetUsdtPolygonID: {simnetUsdtEthID, simnetUsdtBaseID},
-	simnetUsdtBaseID:    {simnetUsdtEthID, simnetUsdtPolygonID},
+	ethID:         {polygonID, baseID},
+	polygonID:     {ethID, baseID},
+	baseID:        {ethID, polygonID},
+	usdcEthID:     {usdcPolygonID, usdcBaseID},
+	usdcPolygonID: {usdcEthID, usdcBaseID},
+	usdcBaseID:    {usdcEthID, usdcPolygonID},
+	usdtEthID:     {usdtPolygonID, usdtBaseID},
+	usdtPolygonID: {usdtEthID, usdtBaseID},
+	usdtBaseID:    {usdtEthID, usdtPolygonID},
 }
 
-// bridgeContractAddr returns the bridge contract address.
-// For simnet, this returns a deterministic mock address based on the asset ID.
-// This is needed for the pending approval tracking system.
 func (b *simnetBridge) bridgeContractAddr(ctx context.Context, assetID uint32) (common.Address, error) {
-	// Return a deterministic address based on asset ID for tracking
 	return common.HexToAddress(fmt.Sprintf("0x%040x", assetID)), nil
 }
 
-// bridgeContractAllowance returns the token allowance for the bridge contract.
-// For simnet, this returns the allowance based on the mock approval state.
 func (b *simnetBridge) bridgeContractAllowance(ctx context.Context, assetID uint32) (*big.Int, error) {
 	b.approvalsMtx.RLock()
 	defer b.approvalsMtx.RUnlock()
 
 	if b.approvedAssets[assetID] {
-		// Return max allowance when approved
 		return new(big.Int).SetBytes(common.MaxHash.Bytes()), nil
 	}
-	// Return zero allowance when not approved
 	return big.NewInt(0), nil
 }
 
-// approveBridgeContract approves the bridge contract to spend tokens.
-// For simnet, this updates the mock approval state and returns a mock transaction.
-// If amount > 0, the asset is approved. If amount == 0, it is unapproved.
 func (b *simnetBridge) approveBridgeContract(txOpts *bind.TransactOpts, amount *big.Int, assetID uint32) (*types.Transaction, error) {
 	b.approvalsMtx.Lock()
-	// Update approval state: amount > 0 means approve, amount == 0 means unapprove
 	b.approvedAssets[assetID] = amount.Cmp(big.NewInt(0)) > 0
 	b.approvalsMtx.Unlock()
 
@@ -148,26 +114,23 @@ func (b *simnetBridge) approveBridgeContract(txOpts *bind.TransactOpts, amount *
 	}
 	b.log.Infof("Simnet bridge: %s asset %d", action, assetID)
 
-	// Create a mock self-transfer transaction to simulate the approval tx
 	to := b.addr
 	tx := types.NewTx(&types.DynamicFeeTx{
 		ChainID:   b.chainID,
 		Nonce:     txOpts.Nonce.Uint64(),
 		GasTipCap: txOpts.GasTipCap,
 		GasFeeCap: txOpts.GasFeeCap,
-		Gas:       50000, // Approval gas estimate
+		Gas:       50000,
 		To:        &to,
 		Value:     big.NewInt(0),
 		Data:      nil,
 	})
 
-	// Sign the transaction
 	signedTx, err := txOpts.Signer(b.addr, tx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign transaction: %w", err)
 	}
 
-	// Send the transaction to the network
 	if err := b.cb.SendTransaction(txOpts.Context, signedTx); err != nil {
 		return nil, fmt.Errorf("failed to send transaction: %w", err)
 	}
@@ -175,69 +138,80 @@ func (b *simnetBridge) approveBridgeContract(txOpts *bind.TransactOpts, amount *
 	return signedTx, nil
 }
 
-// requiresBridgeContractApproval returns whether approval is required.
-// For simnet bridge, approval is required for tokens but not for base chain assets.
 func (b *simnetBridge) requiresBridgeContractApproval(assetID uint32) bool {
-	// Tokens require approval, base chain assets do not
-	_, isToken := simnetTokenParent[assetID]
-	return isToken
+	return asset.TokenInfo(assetID) != nil
 }
 
-// initiateBridge initiates the bridge transaction.
-// For simnet, this creates a self-transfer transaction on the source chain
-// and executes the harness script on the destination chain.
 func (b *simnetBridge) initiateBridge(txOpts *bind.TransactOpts, sourceAssetID, destAssetID uint32, amount *big.Int) (*types.Transaction, error) {
-	// Verify the bridge path is supported
 	destinations, ok := simnetBridgePaths[sourceAssetID]
 	if !ok {
 		return nil, fmt.Errorf("source asset %d not supported for simnet bridge", sourceAssetID)
 	}
-
 	if !slices.Contains(destinations, destAssetID) {
 		return nil, fmt.Errorf("bridge from %d to %d not supported on simnet", sourceAssetID, destAssetID)
 	}
 
-	// Determine transaction value - for tokens, we send 0 ETH
-	// For base chain assets, we send the actual amount
-	var txValue *big.Int
-	_, isToken := simnetTokenParent[sourceAssetID]
-	if isToken {
-		txValue = big.NewInt(0)
-	} else {
-		txValue = amount
+	bridgeAddr, err := b.bridgeContractAddr(txOpts.Context, sourceAssetID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get bridge contract address: %w", err)
 	}
 
-	// Create an EIP-1559 transaction (DynamicFeeTx) for the self-transfer
-	// This simulates locking/burning funds on the source chain
-	to := b.addr
-	tx := types.NewTx(&types.DynamicFeeTx{
-		ChainID:   b.chainID,
-		Nonce:     txOpts.Nonce.Uint64(),
-		GasTipCap: txOpts.GasTipCap,
-		GasFeeCap: txOpts.GasFeeCap,
-		Gas:       21000, // Standard transfer gas
-		To:        &to,
-		Value:     txValue,
-		Data:      nil,
-	})
+	var tx *types.Transaction
+	token := asset.TokenInfo(sourceAssetID)
 
-	// Sign the transaction using the txOpts signer
+	if token != nil {
+		tokenAddr := common.HexToAddress(token.ContractAddress)
+		tx = types.NewTx(&types.DynamicFeeTx{
+			ChainID:   b.chainID,
+			Nonce:     txOpts.Nonce.Uint64(),
+			GasTipCap: txOpts.GasTipCap,
+			GasFeeCap: txOpts.GasFeeCap,
+			Gas:       100_000,
+			To:        &tokenAddr,
+			Value:     big.NewInt(0),
+			Data:      erc20TransferData(bridgeAddr, amount),
+		})
+	} else {
+		tx = types.NewTx(&types.DynamicFeeTx{
+			ChainID:   b.chainID,
+			Nonce:     txOpts.Nonce.Uint64(),
+			GasTipCap: txOpts.GasTipCap,
+			GasFeeCap: txOpts.GasFeeCap,
+			Gas:       21000,
+			To:        &bridgeAddr,
+			Value:     amount,
+			Data:      nil,
+		})
+	}
+
 	signedTx, err := txOpts.Signer(b.addr, tx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign transaction: %w", err)
 	}
 
-	// Send the transaction to the network
 	if err := b.cb.SendTransaction(txOpts.Context, signedTx); err != nil {
 		return nil, fmt.Errorf("failed to send transaction: %w", err)
 	}
 
-	// Execute the harness script to send funds on the destination chain
 	if err := b.sendToDestination(destAssetID, amount); err != nil {
 		return nil, fmt.Errorf("failed to send funds to destination: %w", err)
 	}
 
 	return signedTx, nil
+}
+
+func erc20TransferData(to common.Address, amount *big.Int) []byte {
+	erc20ABI, err := abi.JSON(strings.NewReader(dexerc20.IERC20ABI))
+	if err != nil {
+		panic(fmt.Errorf("failed to parse erc20 abi: %w", err))
+	}
+
+	data, err := erc20ABI.Pack("transfer", to, amount)
+	if err != nil {
+		panic(fmt.Errorf("failed to pack erc20 transfer data: %w", err))
+	}
+
+	return data
 }
 
 // sendToDestination executes the harness script to allocate funds on the
@@ -247,10 +221,12 @@ func (b *simnetBridge) sendToDestination(destAssetID uint32, amount *big.Int) er
 	var destDir string
 	var scriptName string
 
-	// Check if destination is a token or base chain asset
-	if parentID, isToken := simnetTokenParent[destAssetID]; isToken {
-		destDir = simnetHarnessDir[parentID]
+	if tok := asset.TokenInfo(destAssetID); tok != nil {
+		destDir = simnetHarnessDir[tok.ParentID]
 		scriptName = simnetTokenScript[destAssetID]
+		if destDir == "" || scriptName == "" {
+			return fmt.Errorf("unknown token destination asset ID: %d", destAssetID)
+		}
 	} else if dir, ok := simnetHarnessDir[destAssetID]; ok {
 		destDir = dir
 		scriptName = "sendtoaddress"
@@ -265,10 +241,7 @@ func (b *simnetBridge) sendToDestination(destAssetID uint32, amount *big.Int) er
 	if ui.Conventional.ConversionFactor == 0 {
 		return fmt.Errorf("zero conversion factor for destination asset %d", destAssetID)
 	}
-	conversionFactor := new(big.Float).SetUint64(ui.Conventional.ConversionFactor)
 
-	// Build path to script
-	// The harness scripts are in ~/dextest/{chain}/harness-ctl/
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("failed to get home directory: %w", err)
@@ -281,15 +254,18 @@ func (b *simnetBridge) sendToDestination(destAssetID uint32, amount *big.Int) er
 		return fmt.Errorf("harness script not found: %s", scriptPath)
 	}
 
-	// Convert amount from atomic units to conventional units
-	amountConv := new(big.Float).Quo(
-		new(big.Float).SetInt(amount),
-		conversionFactor,
-	)
+	amountAtomic, err := evmToDEXAtomic(destAssetID, amount)
+	if err != nil {
+		return err
+	}
+	if !amountAtomic.IsUint64() {
+		return fmt.Errorf("amount too large: %s", amountAtomic)
+	}
 
 	addrStr := b.addr.Hex()
 	addrStr = strings.TrimPrefix(addrStr, "0x")
-	amountStr := amountConv.Text('f', 18)
+	amountStr := ui.ConventionalString(amountAtomic.Uint64())
+	amountStr = strings.TrimRight(strings.TrimRight(amountStr, "0"), ".")
 
 	scriptDir := filepath.Dir(scriptPath)
 	b.log.Infof("Simnet bridge: running %s %s %s on %s", scriptName, addrStr, amountStr, destDir)
@@ -303,6 +279,27 @@ func (b *simnetBridge) sendToDestination(destAssetID uint32, amount *big.Int) er
 
 	b.log.Infof("Simnet bridge: %s output: %s", scriptName, strings.TrimSpace(string(output)))
 	return nil
+}
+
+func evmToDEXAtomic(assetID uint32, evmAmount *big.Int) (*big.Int, error) {
+	if evmAmount == nil {
+		return nil, fmt.Errorf("nil amount")
+	}
+	if evmAmount.Sign() < 0 {
+		return nil, fmt.Errorf("negative amount: %s", evmAmount)
+	}
+
+	if tok, found := dexeth.Tokens[assetID]; found {
+		return new(big.Int).SetUint64(tok.EVMToAtomic(evmAmount)), nil
+	}
+	if tok, found := dexpolygon.Tokens[assetID]; found {
+		return new(big.Int).SetUint64(tok.EVMToAtomic(evmAmount)), nil
+	}
+	if tok, found := dexbase.Tokens[assetID]; found {
+		return new(big.Int).SetUint64(tok.EVMToAtomic(evmAmount)), nil
+	}
+
+	return new(big.Int).SetUint64(dexeth.WeiToGwei(evmAmount)), nil
 }
 
 // getCompletionData retrieves the data needed to complete the bridge.
@@ -333,12 +330,12 @@ func (b *simnetBridge) completeFollowUpBridge(txOpts *bind.TransactOpts, data []
 
 // initiateBridgeGas returns the gas cost for initiating a bridge.
 func (b *simnetBridge) initiateBridgeGas(sourceAssetID uint32) uint64 {
-	return 21000 // Standard ETH transfer gas
+	return 21000
 }
 
 // completeBridgeGas returns the gas cost for completing a bridge.
 func (b *simnetBridge) completeBridgeGas(destAssetID uint32) uint64 {
-	return 0 // No completion transaction for simnet
+	return 0
 }
 
 // followUpCompleteBridgeGas returns the gas cost for follow-up completion.

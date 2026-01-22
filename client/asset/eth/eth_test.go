@@ -6100,7 +6100,9 @@ type mockBridge struct {
 		data     []byte
 		err      error
 	}
-	completeFollowUpBridgeCalled common.Hash
+	completeFollowUpBridgeCalled    common.Hash
+	completeBridgeGasResult         uint64
+	followUpCompleteBridgeGasResult uint64
 }
 
 var _ bridge = (*mockBridge)(nil)
@@ -6130,7 +6132,7 @@ func (m *mockBridge) completeBridge(txOpts *bind.TransactOpts, destAssetID uint3
 	return tx, nil
 }
 func (m *mockBridge) initiateBridgeGas(sourceAssetID uint32) uint64 { return 0 }
-func (m *mockBridge) completeBridgeGas(destAssetID uint32) uint64   { return 0 }
+func (m *mockBridge) completeBridgeGas(destAssetID uint32) uint64   { return m.completeBridgeGasResult }
 func (m *mockBridge) requiresCompletion(destAssetID uint32) bool {
 	return m.requiresCompletionResult
 }
@@ -6151,9 +6153,127 @@ func (m *mockBridge) completeFollowUpBridge(txOpts *bind.TransactOpts, data []by
 	m.completeFollowUpBridgeCalled = tx.Hash()
 	return tx, nil
 }
-func (m *mockBridge) followUpCompleteBridgeGas() uint64 { return 0 }
+func (m *mockBridge) followUpCompleteBridgeGas() uint64 { return m.followUpCompleteBridgeGasResult }
 func (m *mockBridge) bridgeLimits(sourceAssetID, destAssetID uint32) (min, max *big.Int, hasLimits bool, err error) {
 	return nil, nil, false, nil
+}
+
+func TestBridgeCompletionFees(t *testing.T) {
+	const bridgeName = "mock"
+	const maxFeeRateGwei = 202
+
+	tests := []struct {
+		name              string
+		assetID           uint32
+		completeBridgeGas uint64
+		followUpGas       uint64
+		balance           uint64
+		parentBalance     uint64
+
+		expectFees          uint64
+		expectSufficientBal bool
+		expectErr           bool
+		bridgeNotFound      bool
+	}{
+		{
+			name:                "base asset - sufficient balance",
+			assetID:             BipID,
+			completeBridgeGas:   100_000,
+			followUpGas:         50_000,
+			balance:             150_000 * maxFeeRateGwei,
+			expectFees:          150_000 * maxFeeRateGwei,
+			expectSufficientBal: true,
+		},
+		{
+			name:                "base asset - insufficient balance",
+			assetID:             BipID,
+			completeBridgeGas:   100_000,
+			followUpGas:         50_000,
+			balance:             150_000*maxFeeRateGwei - 1,
+			expectFees:          150_000 * maxFeeRateGwei,
+			expectSufficientBal: false,
+		},
+		{
+			name:                "base asset - zero completion gas",
+			assetID:             BipID,
+			completeBridgeGas:   0,
+			followUpGas:         0,
+			balance:             0,
+			expectFees:          0,
+			expectSufficientBal: true,
+		},
+		{
+			name:                "token - sufficient parent balance",
+			assetID:             usdcEthID,
+			completeBridgeGas:   200_000,
+			followUpGas:         0,
+			balance:             1e6,
+			parentBalance:       200_000 * maxFeeRateGwei,
+			expectFees:          200_000 * maxFeeRateGwei,
+			expectSufficientBal: true,
+		},
+		{
+			name:                "token - insufficient parent balance",
+			assetID:             usdcEthID,
+			completeBridgeGas:   200_000,
+			followUpGas:         0,
+			balance:             1e9,
+			parentBalance:       200_000*maxFeeRateGwei - 1,
+			expectFees:          200_000 * maxFeeRateGwei,
+			expectSufficientBal: false,
+		},
+		{
+			name:           "bridge not found",
+			assetID:        BipID,
+			bridgeNotFound: true,
+			expectErr:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, aw, node, shutdown := tassetWallet(tt.assetID)
+			defer shutdown()
+
+			node.bal = dexeth.GweiToWei(tt.balance)
+
+			// Set up parent balance for tokens
+			if tt.assetID != BipID && node.tokenParent != nil {
+				parentNode := newTestNode(BipID)
+				parentNode.bal = dexeth.GweiToWei(tt.parentBalance)
+				node.tokenParent.node = parentNode
+			}
+
+			if !tt.bridgeNotFound {
+				mb := &mockBridge{
+					completeBridgeGasResult:         tt.completeBridgeGas,
+					followUpCompleteBridgeGasResult: tt.followUpGas,
+				}
+				aw.bridges = map[string]bridge{bridgeName: mb}
+			}
+
+			fees, hasSufficientBal, err := aw.BridgeCompletionFees(bridgeName)
+
+			if tt.expectErr {
+				if err == nil {
+					t.Fatal("expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if fees != tt.expectFees {
+				t.Errorf("expected fees %d, got %d", tt.expectFees, fees)
+			}
+
+			if hasSufficientBal != tt.expectSufficientBal {
+				t.Errorf("expected hasSufficientBalance=%v, got %v", tt.expectSufficientBal, hasSufficientBal)
+			}
+		})
+	}
 }
 
 func TestBridgeManager(t *testing.T) {

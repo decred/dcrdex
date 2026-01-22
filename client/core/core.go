@@ -5631,7 +5631,19 @@ func (c *Core) Bridge(fromAssetID, toAssetID uint32, amt uint64, bridgeName stri
 		return "", err
 	}
 
-	// Initiate the bridge.
+	// Check destination wallet has enough for completion fees
+	destBridger, ok := destWallet.Wallet.(asset.Bridger)
+	if !ok {
+		return "", fmt.Errorf("wallet %s is not a Bridger", unbip(toAssetID))
+	}
+	_, hasSufficientBalance, err := destBridger.BridgeCompletionFees(bridgeName)
+	if err != nil {
+		return "", fmt.Errorf("error getting completion fees: %w", err)
+	}
+	if !hasSufficientBalance {
+		return "", fmt.Errorf("insufficient destination wallet balance for bridge completion fees")
+	}
+
 	return sourceWallet.InitiateBridge(c.ctx, amt, toAssetID, bridgeName)
 }
 
@@ -5698,7 +5710,7 @@ func (c *Core) BridgeFeesAndLimits(fromAssetID, toAssetID uint32, bridgeName str
 		return nil, err
 	}
 
-	completionFee, err := destBridger.BridgeCompletionFees(bridgeName)
+	completionFee, _, err := destBridger.BridgeCompletionFees(bridgeName)
 	if err != nil {
 		return nil, err
 	}

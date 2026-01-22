@@ -3684,6 +3684,43 @@ func (w *assetWallet) InitiateBridge(ctx context.Context, amt uint64, dest uint3
 		return "", fmt.Errorf("insufficient balance: %d < %d", balance.Available, amt)
 	}
 
+	// Calculate the fee for the bridge initiation
+	bridge, ok := w.bridges[bridgeName]
+	if !ok {
+		return "", fmt.Errorf("bridge %s not found", bridgeName)
+	}
+	initiateGas := bridge.initiateBridgeGas(w.assetID)
+	maxFeeRateWei, _, err := w.recommendedMaxFeeRate(ctx)
+	if err != nil {
+		return "", fmt.Errorf("error calculating bridge fee rate: %w", err)
+	}
+	maxFeeRateGwei := dexeth.WeiToGweiCeil(maxFeeRateWei)
+	fee := initiateGas * maxFeeRateGwei
+
+	// Check fee balance
+	isToken := w.assetID != w.baseChainID
+	if isToken {
+		// For tokens, the fee is paid in the base asset
+		w.walletsMtx.RLock()
+		baseWallet := w.wallets[w.baseChainID]
+		w.walletsMtx.RUnlock()
+		if baseWallet == nil {
+			return "", fmt.Errorf("base wallet not found")
+		}
+		baseBal, err := baseWallet.balance()
+		if err != nil {
+			return "", fmt.Errorf("error getting base asset balance: %w", err)
+		}
+		if baseBal.Available < fee {
+			return "", fmt.Errorf("insufficient fee balance: required %d, available %d", fee, baseBal.Available)
+		}
+	} else {
+		// For base assets, the fee comes from the same balance as the amount
+		if balance.Available < amt+fee {
+			return "", fmt.Errorf("insufficient balance for amount + fee: required %d, available %d", amt+fee, balance.Available)
+		}
+	}
+
 	txID, err := w.initiateBridge(ctx, amt, dest, bridgeName)
 	if err != nil {
 		return "", err
@@ -4026,7 +4063,7 @@ func (w *assetWallet) BridgeInitiationFeesAndLimits(bridgeName string, destAsset
 	if err != nil {
 		return 0, [2]uint64{}, false, fmt.Errorf("error calculating bridge fee rate: %w", err)
 	}
-	maxFeeRateGwei := dexeth.WeiToGwei(maxFeeRateWei)
+	maxFeeRateGwei := dexeth.WeiToGweiCeil(maxFeeRateWei)
 
 	minBig, maxBig, hasLimits, err := bridge.bridgeLimits(w.assetID, destAssetID)
 	if err != nil {
@@ -4039,11 +4076,12 @@ func (w *assetWallet) BridgeInitiationFeesAndLimits(bridgeName string, destAsset
 	return initiateGas * maxFeeRateGwei, [2]uint64{min, max}, hasLimits, nil
 }
 
-// BridgeCompletionFees returns the estimated fees for completing a bridge.
-func (w *assetWallet) BridgeCompletionFees(bridgeName string) (uint64, error) {
+// BridgeCompletionFees returns the estimated fees for completing a bridge,
+// and whether the wallet has sufficient balance available to pay those fees.
+func (w *assetWallet) BridgeCompletionFees(bridgeName string) (uint64, bool, error) {
 	bridge, found := w.bridges[bridgeName]
 	if !found {
-		return 0, fmt.Errorf("bridge %s not found", bridgeName)
+		return 0, false, fmt.Errorf("bridge %s not found", bridgeName)
 	}
 
 	completeGas := bridge.completeBridgeGas(w.assetID)
@@ -4051,11 +4089,37 @@ func (w *assetWallet) BridgeCompletionFees(bridgeName string) (uint64, error) {
 
 	maxFeeRateWei, _, err := w.recommendedMaxFeeRate(w.ctx)
 	if err != nil {
-		return 0, fmt.Errorf("error calculating bridge fee rate: %w", err)
+		return 0, false, fmt.Errorf("error calculating bridge fee rate: %w", err)
 	}
-	maxFeeRateGwei := dexeth.WeiToGwei(maxFeeRateWei)
+	maxFeeRateGwei := dexeth.WeiToGweiCeil(maxFeeRateWei)
 
-	return (completeGas + followUpCompleteGas) * maxFeeRateGwei, nil
+	fees := (completeGas + followUpCompleteGas) * maxFeeRateGwei
+
+	// Get available fee balance
+	var availableFeeBalance uint64
+	if w.assetID == w.baseChainID {
+		// Base asset - fees come from own balance
+		bal, err := w.balance()
+		if err != nil {
+			return fees, false, fmt.Errorf("error getting balance: %w", err)
+		}
+		availableFeeBalance = bal.Available
+	} else {
+		// Token - fees come from parent asset
+		w.walletsMtx.RLock()
+		baseWallet := w.wallets[w.baseChainID]
+		w.walletsMtx.RUnlock()
+		if baseWallet == nil {
+			return fees, false, fmt.Errorf("base wallet not found")
+		}
+		bal, err := baseWallet.balance()
+		if err != nil {
+			return fees, false, fmt.Errorf("error getting base asset balance: %w", err)
+		}
+		availableFeeBalance = bal.Available
+	}
+
+	return fees, availableFeeBalance >= fees, nil
 }
 
 func (w *ETHWallet) canRedeemWithBundler(lotSize uint64, gases *dexeth.Gases, n uint64) (bool, error) {
