@@ -196,31 +196,28 @@ const BridgeHistory: React.FC<BridgeHistoryProps> = ({ networkAssetIDs, onSelect
           <h6 className="mb-2 fs15 fw-bold">{intl.prep(intl.ID_BRIDGE_HISTORY) || 'History'}</h6>
           {renderTable(visibleHistory, false)}
           {showPager && (
-            <div className="d-flex mt-2 justify-content-center align-items-center">
+            <div className="d-flex mt-2 justify-content-end align-items-center pt-1">
               {canPrev && (
-                <button
-                  className={`go fs14 ${canPrev && canNext ? 'me-2' : ''}`}
-                  type="button"
-                  disabled={historyLoading}
-                  onClick={handlePrev}
+                <span
+                  className="p-1 ico-wide-headed-left-arrow pointer hoverbg"
+                  onClick={historyLoading ? undefined : handlePrev}
                   aria-label={intl.prep(intl.ID_PREVIOUS) || 'Previous'}
                   title={intl.prep(intl.ID_PREVIOUS) || 'Previous'}
-                >
-                  <span className="ico-arrowleft"></span>
-                </button>
+                ></span>
               )}
-              {historyLoading && <span className="ico-spinner spinner fs14 mx-2"></span>}
+              <span className="fs16 mx-1 p-1">
+                {historyLoading
+                  ? <span className="ico-spinner spinner fs14"></span>
+                  : bridgeHistoryPageIndex + 1
+                }
+              </span>
               {canNext && (
-                <button
-                  className={`go fs14 ${canPrev && canNext ? 'ms-2' : ''}`}
-                  type="button"
-                  disabled={historyLoading}
-                  onClick={handleNext}
+                <span
+                  className="p-1 ico-wide-headed-right-arrow pointer hoverbg"
+                  onClick={historyLoading ? undefined : handleNext}
                   aria-label={intl.prep(intl.ID_NEXT) || 'Next'}
                   title={intl.prep(intl.ID_NEXT) || 'Next'}
-                >
-                  <span className="ico-arrowright"></span>
-                </button>
+                ></span>
               )}
             </div>
           )}
