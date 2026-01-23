@@ -8,7 +8,7 @@ import (
 
 	"decred.org/dcrdex/dex/lexi"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/v4"
 )
 
 // viewState represents the current view in the application.

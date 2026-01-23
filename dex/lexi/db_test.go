@@ -3,6 +3,7 @@ package lexi
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -12,7 +13,8 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
-	"github.com/dgraph-io/badger"
+	v1badger "github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/v4"
 )
 
 func newTestDB(t *testing.T) (*DB, func()) {
@@ -824,5 +826,297 @@ func TestTransactionOptions(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(err.Error()), "key not found") {
 		t.Fatalf("Expected key not found error, got: %v", err)
+	}
+}
+
+func TestNeedsV1toV4Update(t *testing.T) {
+	tests := []struct {
+		name, addSuffix string
+		setupFunc       func(t *testing.T, tmpDir string, basePath string)
+		wantNeedsMigr   bool
+		wantV4Suffix    bool
+	}{
+		{
+			name:          "neither directory exists - new db",
+			setupFunc:     func(t *testing.T, tmpDir string, basePath string) {},
+			wantNeedsMigr: false,
+			wantV4Suffix:  true,
+		},
+		{
+			name: "only v1 directory exists - needs migration",
+			setupFunc: func(t *testing.T, tmpDir string, basePath string) {
+				if err := os.MkdirAll(basePath, 0755); err != nil {
+					t.Fatalf("Failed to create v1 directory: %v", err)
+				}
+			},
+			wantNeedsMigr: true,
+			wantV4Suffix:  true,
+		},
+		{
+			name: "only v4 directory exists - already migrated",
+			setupFunc: func(t *testing.T, tmpDir string, basePath string) {
+				v4Path := basePath + "_v4"
+				if err := os.MkdirAll(v4Path, 0755); err != nil {
+					t.Fatalf("Failed to create v4 directory: %v", err)
+				}
+			},
+			wantNeedsMigr: false,
+			wantV4Suffix:  true,
+		},
+		{
+			name: "both v1 and v4 directories exist - use v4",
+			setupFunc: func(t *testing.T, tmpDir string, basePath string) {
+				if err := os.MkdirAll(basePath, 0755); err != nil {
+					t.Fatalf("Failed to create v1 directory: %v", err)
+				}
+				v4Path := basePath + "_v4"
+				if err := os.MkdirAll(v4Path, 0755); err != nil {
+					t.Fatalf("Failed to create v4 directory: %v", err)
+				}
+			},
+			wantNeedsMigr: false,
+			wantV4Suffix:  true,
+		},
+		{
+			name: "v4 directory exists - already migrated - base path has version suffix",
+			setupFunc: func(t *testing.T, tmpDir string, basePath string) {
+				v4Path := basePath + "_v4"
+				if err := os.MkdirAll(v4Path, 0755); err != nil {
+					t.Fatalf("Failed to create v4 directory: %v", err)
+				}
+			},
+			wantNeedsMigr: false,
+			wantV4Suffix:  true,
+			addSuffix:     "_v4",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			basePath := filepath.Join(tmpDir, "test.db")
+
+			tt.setupFunc(t, tmpDir, basePath)
+
+			gotPath, gotNeeds, err := NeedsV1toV4Update(basePath + tt.addSuffix)
+			if err != nil {
+				t.Fatalf("NeedsV1toV4Update returned error: %v", err)
+			}
+
+			if gotNeeds != tt.wantNeedsMigr {
+				t.Errorf("NeedsV1toV4Update() needsMigration = %v, want %v", gotNeeds, tt.wantNeedsMigr)
+			}
+
+			expectedV4Path := basePath + "_v4"
+			if tt.wantV4Suffix && gotPath != expectedV4Path {
+				t.Errorf("NeedsV1toV4Update() path = %v, want %v", gotPath, expectedV4Path)
+			}
+		})
+	}
+}
+
+func TestBadgerV1Update(t *testing.T) {
+	tmpDir := t.TempDir()
+	v1Path := filepath.Join(tmpDir, "v1db")
+	v4Path := filepath.Join(tmpDir, "v4db")
+
+	logger := dex.StdOutLogger("TEST", dex.LevelWarn)
+
+	// Create a v1 database and populate it with test data.
+	v1opts := v1badger.DefaultOptions(v1Path).WithLogger(&badgerLoggerWrapper{logger})
+	v1db, err := v1badger.Open(v1opts)
+	if err != nil {
+		t.Fatalf("Failed to open v1 database: %v", err)
+	}
+
+	// Insert test data into v1 database.
+	testData := map[string]string{
+		"key1": "value1",
+		"key2": "value2",
+		"key3": "value3",
+	}
+
+	err = v1db.Update(func(txn *v1badger.Txn) error {
+		for k, v := range testData {
+			if err := txn.Set([]byte(k), []byte(v)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Failed to insert test data into v1 database: %v", err)
+	}
+
+	// Close the v1 database before migration.
+	if err := v1db.Close(); err != nil {
+		t.Fatalf("Failed to close v1 database: %v", err)
+	}
+
+	// Perform the migration.
+	v4opts := badger.DefaultOptions(v4Path).WithLogger(&badgerLoggerWrapper{logger})
+	v4db, err := BadgerV1Update(v1Path, v4Path, logger, v4opts)
+	if err != nil {
+		t.Fatalf("BadgerV1Update failed: %v", err)
+	}
+	defer v4db.Close()
+
+	// Verify all data was migrated correctly.
+	err = v4db.View(func(txn *badger.Txn) error {
+		for k, expectedV := range testData {
+			item, err := txn.Get([]byte(k))
+			if err != nil {
+				return fmt.Errorf("failed to get key %s: %w", k, err)
+			}
+			err = item.Value(func(val []byte) error {
+				if string(val) != expectedV {
+					return fmt.Errorf("key %s: expected value %s, got %s", k, expectedV, string(val))
+				}
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Data verification failed: %v", err)
+	}
+}
+
+func TestBadgerV1UpdateWithLargeData(t *testing.T) {
+	tmpDir := t.TempDir()
+	v1Path := filepath.Join(tmpDir, "v1db_large")
+	v4Path := filepath.Join(tmpDir, "v4db_large")
+
+	logger := dex.StdOutLogger("TEST", dex.LevelWarn)
+
+	// Create a v1 database and populate it with more data.
+	v1opts := v1badger.DefaultOptions(v1Path).WithLogger(&badgerLoggerWrapper{logger})
+	v1db, err := v1badger.Open(v1opts)
+	if err != nil {
+		t.Fatalf("Failed to open v1 database: %v", err)
+	}
+
+	// Insert 100 key-value pairs with varying sizes.
+	const numEntries = 100
+	testData := make(map[string][]byte, numEntries)
+
+	err = v1db.Update(func(txn *v1badger.Txn) error {
+		for i := 0; i < numEntries; i++ {
+			key := fmt.Sprintf("key_%04d", i)
+			value := encode.RandomBytes(100 + i*10) // Varying value sizes
+			testData[key] = value
+			if err := txn.Set([]byte(key), value); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Failed to insert test data: %v", err)
+	}
+
+	if err := v1db.Close(); err != nil {
+		t.Fatalf("Failed to close v1 database: %v", err)
+	}
+
+	// Perform the migration.
+	v4opts := badger.DefaultOptions(v4Path).WithLogger(&badgerLoggerWrapper{logger})
+	v4db, err := BadgerV1Update(v1Path, v4Path, logger, v4opts)
+	if err != nil {
+		t.Fatalf("BadgerV1Update failed: %v", err)
+	}
+	defer v4db.Close()
+
+	// Verify all data was migrated correctly.
+	var count int
+	err = v4db.View(func(txn *badger.Txn) error {
+		for k, expectedV := range testData {
+			item, err := txn.Get([]byte(k))
+			if err != nil {
+				return fmt.Errorf("failed to get key %s: %w", k, err)
+			}
+			err = item.Value(func(val []byte) error {
+				if !bytes.Equal(val, expectedV) {
+					return fmt.Errorf("key %s: value mismatch", k)
+				}
+				count++
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Data verification failed: %v", err)
+	}
+
+	if count != numEntries {
+		t.Fatalf("Expected %d entries, but verified %d", numEntries, count)
+	}
+}
+
+func TestNewWithMigration(t *testing.T) {
+	tmpDir := t.TempDir()
+	basePath := filepath.Join(tmpDir, "test.db")
+
+	logger := dex.StdOutLogger("TEST", dex.LevelWarn)
+
+	// Create a v1 database at the base path.
+	v1opts := v1badger.DefaultOptions(basePath).WithLogger(&badgerLoggerWrapper{logger})
+	v1db, err := v1badger.Open(v1opts)
+	if err != nil {
+		t.Fatalf("Failed to create v1 database: %v", err)
+	}
+
+	// Insert some data.
+	testKey := []byte("migration_test_key")
+	testValue := []byte("migration_test_value")
+	err = v1db.Update(func(txn *v1badger.Txn) error {
+		return txn.Set(testKey, testValue)
+	})
+	if err != nil {
+		t.Fatalf("Failed to insert data: %v", err)
+	}
+
+	if err := v1db.Close(); err != nil {
+		t.Fatalf("Failed to close v1 database: %v", err)
+	}
+
+	// Open with New() which should trigger migration.
+	db, err := New(&Config{
+		Path: basePath,
+		Log:  logger,
+	})
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
+	defer db.Close()
+
+	// Verify the migrated data is accessible.
+	err = db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get(testKey)
+		if err != nil {
+			return fmt.Errorf("failed to get migrated key: %w", err)
+		}
+		return item.Value(func(val []byte) error {
+			if !bytes.Equal(val, testValue) {
+				return fmt.Errorf("value mismatch: expected %s, got %s", testValue, val)
+			}
+			return nil
+		})
+	})
+	if err != nil {
+		t.Fatalf("Migrated data verification failed: %v", err)
+	}
+
+	// Verify the v4 directory was created.
+	v4Path := basePath + "_v4"
+	if _, err := os.Stat(v4Path); os.IsNotExist(err) {
+		t.Fatalf("Expected v4 directory to exist at %s", v4Path)
 	}
 }

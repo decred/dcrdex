@@ -10,7 +10,8 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
-	"github.com/dgraph-io/badger"
+	"decred.org/dcrdex/dex/lexi"
+	"github.com/dgraph-io/badger/v4"
 )
 
 type KeyValueDB interface {
@@ -31,19 +32,26 @@ func NewFileDB(filePath string, log dex.Logger) (KeyValueDB, error) {
 	//   .WithValueLogLoadingMode(options.FileIO) // default options.MemoryMap
 	//   .WithMaxTableSize(sz int64); // bytes, default 6MB
 	//   .WithValueLogFileSize(sz int64), bytes, default 1 GB, must be 1MB <= sz <= 1GB
-	opts := badger.DefaultOptions(filePath).WithLogger(&badgerLoggerWrapper{log})
-	db, err := badger.Open(opts)
-	if err == badger.ErrTruncateNeeded {
-		// Probably a Windows thing.
-		// https://github.com/dgraph-io/badger/issues/744
-		log.Warnf("NewFileDB badger db: %v", err)
-		// Try again with value log truncation enabled.
-		opts.Truncate = true
-		log.Warnf("Attempting to reopen badger DB with the Truncate option set...")
-		db, err = badger.Open(opts)
-	}
+	v4Path, needs, err := lexi.NeedsV1toV4Update(filePath)
 	if err != nil {
 		return nil, err
+	}
+	opts := badger.DefaultOptions(v4Path).WithLogger(&badgerLoggerWrapper{log})
+	var db *badger.DB
+	if needs {
+		db, err = lexi.BadgerV1Update(filePath, v4Path, log, opts)
+		if err != nil {
+			log.Warnf("Unable to update old db, creating new one: %v", err)
+			db, err = badger.Open(opts)
+			if err != nil {
+				return nil, err
+			}
+		}
+	} else {
+		db, err = badger.Open(opts)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return &kvDB{db, log}, nil

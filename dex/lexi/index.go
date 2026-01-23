@@ -9,7 +9,7 @@ import (
 	"fmt"
 
 	"decred.org/dcrdex/dex"
-	"github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/v4"
 )
 
 const (

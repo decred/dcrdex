@@ -2,7 +2,8 @@ package lexi
 
 import (
 	"decred.org/dcrdex/dex"
-	"github.com/dgraph-io/badger"
+	v1badger "github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/v4"
 )
 
 // badgerLoggerWrapper wraps dex.Logger and translates Warnf to Warningf to
@@ -13,6 +14,7 @@ type badgerLoggerWrapper struct {
 }
 
 var _ badger.Logger = (*badgerLoggerWrapper)(nil)
+var _ v1badger.Logger = (*badgerLoggerWrapper)(nil)
 
 // Debugf -> dex.Logger.Tracef
 func (log *badgerLoggerWrapper) Debugf(s string, a ...any) {

@@ -58,3 +58,4 @@ server/cmd/dcrdex/evm-protocol-overrides.json
 client/bworg/bworg
 tatanka/cmd/tatanka/tatanka
 dex/politeia/politeia_test.db
+dex/lexi/cmd/lexidbexplorer/lexidbexplorer

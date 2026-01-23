@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
-	"github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger" // Keep version 1
 	"github.com/ethereum/go-ethereum/common"
 )
 
