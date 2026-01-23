@@ -10736,8 +10736,7 @@ func (dtfc *TDynamicSwapper) DynamicRedemptionFeesPaid(ctx context.Context, coin
 var _ asset.DynamicSwapper = (*TDynamicSwapper)(nil)
 
 func TestUpdateFeesPaid(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tests := []struct {
 		name                   string
 		paid                   uint64

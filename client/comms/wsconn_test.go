@@ -64,8 +64,7 @@ func TestWsConn(t *testing.T) {
 	pingCh := make(chan struct{})
 	readPumpCh := make(chan any)
 	writePumpCh := make(chan *msgjson.Message)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	type conn struct {
 		sync.WaitGroup

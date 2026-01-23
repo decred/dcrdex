@@ -4,7 +4,6 @@
 package ws
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -145,8 +144,7 @@ func TestWSLink_send(t *testing.T) {
 	}
 	ipk := dex.IPKey{16, 16, 120, 120 /* ipv6 1010:7878:: */}
 	wsLink := NewWSLink(ipk.String(), conn, time.Second, inMsgHandler, tLogger)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// start the in/out/pingHandlers, and the initial read deadline
 	wg, err := wsLink.Connect(ctx)

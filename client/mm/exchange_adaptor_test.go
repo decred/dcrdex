@@ -4973,8 +4973,7 @@ func TestDeposit(t *testing.T) {
 				}
 			}
 
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+			ctx := t.Context()
 
 			botID := dexMarketID("host1", test.assetID, 0)
 			eventLogDB := newTEventLogDB()
@@ -5296,8 +5295,7 @@ func TestWithdraw(t *testing.T) {
 
 			tCEX.withdrawalID = withdrawalID
 
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+			ctx := t.Context()
 
 			botID := dexMarketID("host1", test.assetID, 0)
 			eventLogDB := newTEventLogDB()
