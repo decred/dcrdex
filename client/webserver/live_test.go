@@ -2014,6 +2014,30 @@ func (c *TCore) BridgeFeesAndLimits(fromAssetID, toAssetID uint32, bridgeName st
 	return nil, nil
 }
 
+func (c *TCore) Bridge(fromAssetID, toAssetID uint32, amt uint64, bridgeName string) (string, error) {
+	return "", nil
+}
+
+func (c *TCore) BridgeContractApprovalStatus(assetID uint32, bridgeName string) (asset.ApprovalStatus, error) {
+	return asset.NotApproved, nil
+}
+
+func (c *TCore) ApproveBridgeContract(assetID uint32, bridgeName string) (string, error) {
+	return "", nil
+}
+
+func (c *TCore) UnapproveBridgeContract(assetID uint32, bridgeName string) (string, error) {
+	return "", nil
+}
+
+func (c *TCore) PendingBridges(assetID uint32) ([]*asset.WalletTransaction, error) {
+	return nil, nil
+}
+
+func (c *TCore) BridgeHistory(assetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
+	return nil, nil
+}
+
 func newMarketDay() *libxc.MarketDay {
 	avgPrice := tenToThe(7)
 	return &libxc.MarketDay{

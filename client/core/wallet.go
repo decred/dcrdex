@@ -717,22 +717,22 @@ func (w *xcWallet) BridgeContractApprovalStatus(ctx context.Context, bridgeName 
 
 // ApproveBridgeContract approves the bridge contract if the wallet is a
 // Bridger.
-func (w *xcWallet) ApproveBridgeContract(ctx context.Context, bridgeName string) (string, error) {
+func (w *xcWallet) ApproveBridgeContract(ctx context.Context, bridgeName string, onConfirm func()) (string, error) {
 	approver, ok := w.Wallet.(asset.Bridger)
 	if !ok {
 		return "", fmt.Errorf("%s wallet is not a Bridger", unbip(w.AssetID))
 	}
-	return approver.ApproveBridgeContract(ctx, bridgeName)
+	return approver.ApproveBridgeContract(ctx, bridgeName, onConfirm)
 }
 
 // UnapproveBridgeContract removes approval of the bridge contract if the
 // wallet is a Bridger.
-func (w *xcWallet) UnapproveBridgeContract(ctx context.Context, bridgeName string) (string, error) {
+func (w *xcWallet) UnapproveBridgeContract(ctx context.Context, bridgeName string, onConfirm func()) (string, error) {
 	approver, ok := w.Wallet.(asset.Bridger)
 	if !ok {
 		return "", fmt.Errorf("%s wallet is not a Bridger", unbip(w.AssetID))
 	}
-	return approver.UnapproveBridgeContract(ctx, bridgeName)
+	return approver.UnapproveBridgeContract(ctx, bridgeName, onConfirm)
 }
 
 // InitiateBridge initiates the bridge on the source chain if the wallet is a
@@ -758,14 +758,14 @@ func (w *xcWallet) CompleteBridge(ctx context.Context, bridgeTx *asset.BridgeCou
 
 // MarkBridgeComplete marks the bridge as complete on the source chain if the
 // wallet is a Bridger.
-func (w *xcWallet) MarkBridgeComplete(initiationTxID string, completionTxIDs []string, amtReceived uint64, complete bool) {
+func (w *xcWallet) MarkBridgeComplete(initiationTxID string, completionTxIDs []string, amtReceived, fees uint64, complete bool) {
 	bridger, ok := w.Wallet.(asset.Bridger)
 	if !ok {
 		w.log.Errorf("MarkBridgeComplete: %s wallet is not a Bridger", unbip(w.AssetID))
 		return
 	}
 
-	bridger.MarkBridgeComplete(initiationTxID, completionTxIDs, amtReceived, complete)
+	bridger.MarkBridgeComplete(initiationTxID, completionTxIDs, amtReceived, fees, complete)
 }
 
 // PendingBridges returns the pending bridges originating on the chain of the

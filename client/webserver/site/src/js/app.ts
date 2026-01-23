@@ -62,7 +62,11 @@ import {
   CEXBalanceUpdate,
   EpochReportNote,
   CEXProblemsNote,
-  BridgeFeesAndLimits
+  BridgeFeesAndLimits,
+  BridgeResult,
+  BridgeApprovalStatusResult,
+  BridgeApprovalResult,
+  WalletTransaction
 } from './registry'
 import { setCoinHref } from './coinexplorers'
 
@@ -1550,6 +1554,38 @@ export default class Application {
     const resp = await postJSON('/api/bridgefeesandlimits', { fromAssetID, toAssetID, bridgeName })
     if (!this.checkResponse(resp)) return null
     return resp.result
+  }
+
+  async bridge (fromAssetID: number, toAssetID: number, amount: number, bridgeName: string): Promise<BridgeResult> {
+    const resp = await postJSON('/api/bridge', { fromAssetID, toAssetID, amount, bridgeName })
+    return resp as BridgeResult
+  }
+
+  async bridgeApprovalStatus (assetID: number, bridgeName: string): Promise<BridgeApprovalStatusResult> {
+    const resp = await postJSON('/api/bridgeapprovalstatus', { assetID, bridgeName })
+    return resp as BridgeApprovalStatusResult
+  }
+
+  async approveBridgeContract (assetID: number, bridgeName: string): Promise<BridgeApprovalResult> {
+    const resp = await postJSON('/api/approvebridgecontract', { assetID, bridgeName })
+    return resp as BridgeApprovalResult
+  }
+
+  async unapproveBridgeContract (assetID: number, bridgeName: string): Promise<BridgeApprovalResult> {
+    const resp = await postJSON('/api/unapprovebridgecontract', { assetID, bridgeName })
+    return resp as BridgeApprovalResult
+  }
+
+  async pendingBridges (assetID: number): Promise<WalletTransaction[]> {
+    const resp = await postJSON('/api/pendingbridges', { assetID })
+    if (!this.checkResponse(resp)) return []
+    return resp.bridges || []
+  }
+
+  async bridgeHistory (assetID: number, n: number, refID?: string, past?: boolean): Promise<WalletTransaction[]> {
+    const resp = await postJSON('/api/bridgehistory', { assetID, n, refID, past: past ?? false })
+    if (!this.checkResponse(resp)) return []
+    return resp.bridges || []
   }
 }
 

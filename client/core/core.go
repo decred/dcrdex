@@ -5547,7 +5547,7 @@ func (c *Core) ApproveBridgeContract(assetID uint32, bridgeName string) (string,
 		return "", err
 	}
 
-	if !wallet.unlocked() {
+	if !wallet.locallyUnlocked() {
 		return "", fmt.Errorf("wallet %s must be unlocked", unbip(assetID))
 	}
 
@@ -5556,11 +5556,18 @@ func (c *Core) ApproveBridgeContract(assetID uint32, bridgeName string) (string,
 		return "", err
 	}
 
-	txID, err := wallet.ApproveBridgeContract(c.ctx, bridgeName)
+	// Send notification when approval confirms
+	onConfirm := func() {
+		go c.notify(newBridgeApprovalNote(wallet.state()))
+	}
+
+	txID, err := wallet.ApproveBridgeContract(c.ctx, bridgeName, onConfirm)
 	if err != nil {
 		return "", err
 	}
 
+	// Send immediate notification (approval pending)
+	c.notify(newBridgeApprovalNote(wallet.state()))
 	return txID, nil
 }
 
@@ -5572,7 +5579,7 @@ func (c *Core) UnapproveBridgeContract(assetID uint32, bridgeName string) (strin
 		return "", err
 	}
 
-	if !wallet.unlocked() {
+	if !wallet.locallyUnlocked() {
 		return "", fmt.Errorf("wallet %s must be unlocked", unbip(assetID))
 	}
 
@@ -5581,11 +5588,18 @@ func (c *Core) UnapproveBridgeContract(assetID uint32, bridgeName string) (strin
 		return "", err
 	}
 
-	txID, err := wallet.UnapproveBridgeContract(c.ctx, bridgeName)
+	// Send notification when unapproval confirms
+	onConfirm := func() {
+		go c.notify(newBridgeApprovalNote(wallet.state()))
+	}
+
+	txID, err := wallet.UnapproveBridgeContract(c.ctx, bridgeName, onConfirm)
 	if err != nil {
 		return "", err
 	}
 
+	// Send immediate notification (unapproval pending)
+	c.notify(newBridgeApprovalNote(wallet.state()))
 	return txID, nil
 }
 
@@ -5596,7 +5610,7 @@ func (c *Core) Bridge(fromAssetID, toAssetID uint32, amt uint64, bridgeName stri
 	if err != nil {
 		return "", err
 	}
-	if !sourceWallet.unlocked() {
+	if !sourceWallet.locallyUnlocked() {
 		return "", fmt.Errorf("wallet %s must be unlocked", unbip(fromAssetID))
 	}
 	err = sourceWallet.checkPeersAndSyncStatus()
@@ -5609,7 +5623,7 @@ func (c *Core) Bridge(fromAssetID, toAssetID uint32, amt uint64, bridgeName stri
 	if err != nil {
 		return "", err
 	}
-	if !destWallet.unlocked() {
+	if !destWallet.locallyUnlocked() {
 		return "", fmt.Errorf("wallet %s must be unlocked", unbip(toAssetID))
 	}
 	err = destWallet.checkPeersAndSyncStatus()
@@ -5617,7 +5631,19 @@ func (c *Core) Bridge(fromAssetID, toAssetID uint32, amt uint64, bridgeName stri
 		return "", err
 	}
 
-	// Initiate the bridge.
+	// Check destination wallet has enough for completion fees
+	destBridger, ok := destWallet.Wallet.(asset.Bridger)
+	if !ok {
+		return "", fmt.Errorf("wallet %s is not a Bridger", unbip(toAssetID))
+	}
+	_, hasSufficientBalance, err := destBridger.BridgeCompletionFees(bridgeName)
+	if err != nil {
+		return "", fmt.Errorf("error getting completion fees: %w", err)
+	}
+	if !hasSufficientBalance {
+		return "", fmt.Errorf("insufficient destination wallet balance for bridge completion fees")
+	}
+
 	return sourceWallet.InitiateBridge(c.ctx, amt, toAssetID, bridgeName)
 }
 
@@ -5656,7 +5682,7 @@ func (c *Core) SupportedBridgeDestinations(assetID uint32) (map[uint32][]string,
 		return nil, fmt.Errorf("wallet for asset %s does not support bridging", unbip(assetID))
 	}
 
-	return bridger.SupportedDestinations()
+	return bridger.SupportedDestinations(), nil
 }
 
 // BridgeFeesAndLimits returns the estimated fees and limits for bridging between two assets.
@@ -5684,7 +5710,7 @@ func (c *Core) BridgeFeesAndLimits(fromAssetID, toAssetID uint32, bridgeName str
 		return nil, err
 	}
 
-	completionFee, err := destBridger.BridgeCompletionFees(bridgeName)
+	completionFee, _, err := destBridger.BridgeCompletionFees(bridgeName)
 	if err != nil {
 		return nil, err
 	}
@@ -5729,11 +5755,7 @@ func (c *Core) AllBridgePaths() (map[uint32]map[uint32][]string, error) {
 			continue
 		}
 
-		var err error
-		paths[assetID], err = bridger.SupportedDestinations()
-		if err != nil {
-			return nil, fmt.Errorf("error getting supported destinations for %s: %w", unbip(assetID), err)
-		}
+		paths[assetID] = bridger.SupportedDestinations()
 	}
 
 	return paths, nil
@@ -9759,7 +9781,9 @@ func (c *Core) handleBridgeCompleted(n *asset.BridgeCompletedNote) {
 		return
 	}
 
-	sourceWallet.MarkBridgeComplete(n.InitiationTxID, n.CompletionTxIDs, n.AmtReceived, n.Complete)
+	sourceWallet.MarkBridgeComplete(n.InitiationTxID, n.CompletionTxIDs, n.AmtReceived, n.Fees, n.Complete)
+
+	c.notify(newBridgeNote(n))
 }
 
 // handleWalletNotification processes an asynchronous wallet notification.

@@ -179,6 +179,12 @@ type clientCore interface {
 	RedeemGeocode(appPW, code []byte, msg string) (dex.Bytes, uint64, error)
 	BridgeFeesAndLimits(fromAssetID, toAssetID uint32, bridgeName string) (*core.BridgeFeesAndLimits, error)
 	AllBridgePaths() (map[uint32]map[uint32][]string, error)
+	Bridge(fromAssetID, toAssetID uint32, amt uint64, bridgeName string) (string, error)
+	BridgeContractApprovalStatus(assetID uint32, bridgeName string) (asset.ApprovalStatus, error)
+	ApproveBridgeContract(assetID uint32, bridgeName string) (string, error)
+	UnapproveBridgeContract(assetID uint32, bridgeName string) (string, error)
+	PendingBridges(assetID uint32) ([]*asset.WalletTransaction, error)
+	BridgeHistory(assetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error)
 	ExtensionModeConfig() *core.ExtensionModeConfig
 }
 
@@ -624,6 +630,12 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/maxfundingfees", s.apiMaxFundingFees)
 			apiAuth.Get("/allbridgepaths", s.apiAllBridgePaths)
 			apiAuth.Post("/bridgefeesandlimits", s.apiBridgeFeesAndLimits)
+			apiAuth.Post("/bridge", s.apiBridge)
+			apiAuth.Post("/bridgeapprovalstatus", s.apiBridgeApprovalStatus)
+			apiAuth.Post("/approvebridgecontract", s.apiApproveBridgeContract)
+			apiAuth.Post("/unapprovebridgecontract", s.apiUnapproveBridgeContract)
+			apiAuth.Post("/pendingbridges", s.apiPendingBridges)
+			apiAuth.Post("/bridgehistory", s.apiBridgeHistory)
 		})
 	})
 

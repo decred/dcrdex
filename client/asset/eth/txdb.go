@@ -68,12 +68,13 @@ type extendedWalletTx struct {
 }
 
 const (
-	dbVersion                 = 1
-	txsTable                  = "txs"
-	bridgeCompletionsTable    = "bridgeCompletions"
-	allAssetIndexName         = "allAssets"
-	assetIndexName            = "asset"
-	bridgeInitiationIndexName = "bridgeinit"
+	dbVersion                      = 2
+	txsTable                       = "txs"
+	bridgeCompletionsTable         = "bridgeCompletions"
+	allAssetIndexName              = "allAssets"
+	assetIndexName                 = "asset"
+	bridgeInitiationIndexName      = "bridgeinit"
+	bridgeInitiationAssetIndexName = "bridgeinitasset"
 )
 
 func (wt *extendedWalletTx) MarshalBinary() ([]byte, error) {
@@ -112,8 +113,8 @@ type txDB interface {
 	// getPendingTxs returns any recent txs that are not confirmed, ordered
 	// by nonce lowest-first.
 	getPendingTxs() ([]*extendedWalletTx, error)
-	getBridges(n int, refID *common.Hash, past bool) ([]*asset.WalletTransaction, error)
-	getPendingBridges() ([]*extendedWalletTx, error)
+	getBridges(tokenID *uint32, n int, refID *common.Hash, past bool) ([]*asset.WalletTransaction, error)
+	getPendingBridges(tokenID *uint32) ([]*extendedWalletTx, error)
 	getBridgeCompletions(initiationTxID string) ([]*extendedWalletTx, error)
 }
 
@@ -123,9 +124,10 @@ type TxDB struct {
 	txs               *lexi.Table
 	bridgeCompletions *lexi.Table
 
-	allAssetIndex         *lexi.Index
-	assetIndex            *lexi.Index
-	bridgeInitiationIndex *lexi.Index
+	allAssetIndex              *lexi.Index
+	assetIndex                 *lexi.Index
+	bridgeInitiationIndex      *lexi.Index
+	bridgeInitiationAssetIndex *lexi.Index
 
 	baseChainID uint32
 	log         dex.Logger
@@ -192,6 +194,21 @@ func bridgeIndexEntry(wt *extendedWalletTx) []byte {
 	return entry
 }
 
+// bridgeAssetIndexEntry is used to iterate over bridge initiation transactions
+// for a specific asset ID (base chain or token). It is the bridgeIndexEntry
+// prepended with the asset ID.
+func bridgeAssetIndexEntry(wt *extendedWalletTx, baseChainID uint32) []byte {
+	var assetID uint32 = baseChainID
+	if wt.TokenID != nil {
+		assetID = *wt.TokenID
+	}
+	bridgeKey := bridgeIndexEntry(wt)
+	assetKey := make([]byte, 4+len(bridgeKey))
+	binary.BigEndian.PutUint32(assetKey[:4], assetID)
+	copy(assetKey[4:], bridgeKey)
+	return assetKey
+}
+
 // NewTxDB creates a transaction database for storing Ethereum transactions.
 func NewTxDB(path string, log dex.Logger, baseChainID uint32) (*TxDB, error) {
 	ldb, err := lexi.New(&lexi.Config{
@@ -248,15 +265,30 @@ func NewTxDB(path string, log dex.Logger, baseChainID uint32) (*TxDB, error) {
 		return nil, err
 	}
 
+	bridgeInitiationAssetIndex, err := txs.AddIndex(bridgeInitiationAssetIndexName, func(k, v lexi.KV) ([]byte, error) {
+		wt, is := v.(*extendedWalletTx)
+		if !is {
+			return nil, fmt.Errorf("expected type *extendedWalletTx, got %T", wt)
+		}
+		if wt.WalletTransaction.Type != asset.InitiateBridge {
+			return nil, lexi.ErrNotIndexed
+		}
+		return bridgeAssetIndexEntry(wt, baseChainID), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	db := &TxDB{
-		DB:                    ldb,
-		txs:                   txs,
-		bridgeCompletions:     bridgeCompletions,
-		allAssetIndex:         allAssetIndex,
-		assetIndex:            assetIndex,
-		bridgeInitiationIndex: bridgeInitiationIndex,
-		baseChainID:           baseChainID,
-		log:                   log,
+		DB:                         ldb,
+		txs:                        txs,
+		bridgeCompletions:          bridgeCompletions,
+		allAssetIndex:              allAssetIndex,
+		assetIndex:                 assetIndex,
+		bridgeInitiationIndex:      bridgeInitiationIndex,
+		bridgeInitiationAssetIndex: bridgeInitiationAssetIndex,
+		baseChainID:                baseChainID,
+		log:                        log,
 	}
 
 	return db, db.upgrade()
@@ -283,6 +315,19 @@ func (db *TxDB) v1Upgrade() error {
 	})
 }
 
+func (db *TxDB) v2Upgrade() error {
+	return db.ReIndex(txsTable, bridgeInitiationAssetIndexName, func(k, v []byte) ([]byte, error) {
+		wt := new(extendedWalletTx)
+		if err := wt.UnmarshalBinary(v); err != nil {
+			return nil, err
+		}
+		if wt.WalletTransaction.Type != asset.InitiateBridge {
+			return nil, lexi.ErrNotIndexed
+		}
+		return bridgeAssetIndexEntry(wt, db.baseChainID), nil
+	})
+}
+
 func (db *TxDB) upgrade() error {
 	version, err := db.GetDBVersion()
 	if err != nil {
@@ -298,9 +343,17 @@ func (db *TxDB) upgrade() error {
 	db.log.Infof("Upgrading database from version %d to %d", version, dbVersion)
 
 	return db.Upgrade(func() error {
-		err := db.v1Upgrade()
-		if err != nil {
-			return err
+		if version < 1 {
+			if err := db.v1Upgrade(); err != nil {
+				return err
+			}
+			version = 1
+		}
+		if version < 2 {
+			if err := db.v2Upgrade(); err != nil {
+				return err
+			}
+			version = 2
 		}
 		return db.SetDBVersion(dbVersion)
 	})
@@ -515,7 +568,7 @@ func (db *TxDB) getPendingTxs() (txs []*extendedWalletTx, err error) {
 // - If past=true: Results are in reverse chronological order
 // - The referenced transaction is included in results
 // - Returns asset.CoinNotFoundError if refID not found
-func (db *TxDB) getBridges(n int, refID *common.Hash, past bool) ([]*asset.WalletTransaction, error) {
+func (db *TxDB) getBridges(assetID *uint32, n int, refID *common.Hash, past bool) ([]*asset.WalletTransaction, error) {
 	var opts []lexi.IterationOption
 	if past || refID == nil {
 		opts = append(opts, lexi.WithReverse())
@@ -530,11 +583,28 @@ func (db *TxDB) getBridges(n int, refID *common.Hash, past bool) ([]*asset.Walle
 			return nil, fmt.Errorf("referenced transaction is not a bridge initiation")
 		}
 
-		entry := bridgeIndexEntry(wt)
+		if assetID != nil {
+			refTxAssetID := db.baseChainID
+			if wt.TokenID != nil {
+				refTxAssetID = *wt.TokenID
+			}
+			if refTxAssetID != *assetID {
+				return nil, fmt.Errorf("token ID mismatch: %d != %d", refTxAssetID, *assetID)
+			}
+		}
+
+		var entry []byte
+		if assetID != nil {
+			entry = bridgeAssetIndexEntry(wt, *assetID)
+		} else {
+			entry = bridgeIndexEntry(wt)
+		}
+
 		opts = append(opts, lexi.WithSeek(entry))
 	}
 
 	txs := make([]*asset.WalletTransaction, 0, n)
+
 	iterFunc := func(it *lexi.Iter) error {
 		wt := new(extendedWalletTx)
 		err := it.V(func(vB []byte) error {
@@ -553,13 +623,23 @@ func (db *TxDB) getBridges(n int, refID *common.Hash, past bool) ([]*asset.Walle
 		return nil
 	}
 
+	if assetID != nil {
+		return txs, db.bridgeInitiationAssetIndex.Iterate(*assetID, iterFunc, opts...)
+	}
 	return txs, db.bridgeInitiationIndex.Iterate(nil, iterFunc, opts...)
 }
 
 // getPendingBridges returns all bridge initiation transactions that have not been
 // completed and are not marked as lost.
-func (db *TxDB) getPendingBridges() (txs []*extendedWalletTx, err error) {
-	db.bridgeInitiationIndex.Iterate(nil, func(it *lexi.Iter) error {
+func (db *TxDB) getPendingBridges(tokenID *uint32) (txs []*extendedWalletTx, err error) {
+	idx := db.bridgeInitiationIndex
+	var iterKey any = nil
+	if tokenID != nil {
+		idx = db.bridgeInitiationAssetIndex
+		iterKey = *tokenID
+	}
+
+	idx.Iterate(iterKey, func(it *lexi.Iter) error {
 		wt := new(extendedWalletTx)
 		err := it.V(func(vB []byte) error {
 			return wt.UnmarshalBinary(vB)
@@ -572,6 +652,7 @@ func (db *TxDB) getPendingBridges() (txs []*extendedWalletTx, err error) {
 		}
 
 		if wt.BridgeCounterpartTx == nil || !wt.BridgeCounterpartTx.Complete {
+			wt.BridgeCounterpartTx.Complete = false
 			txs = append(txs, wt)
 		}
 
