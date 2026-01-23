@@ -1104,6 +1104,28 @@ export default class WalletsPage extends BasePage {
 
       Doc.setVis(hasWallet, tmpl.txsBttn)
       Doc.setVis(canCreate, tmpl.createWalletBttn)
+
+      // Per-network wallet controls
+      const configAssetID = token ? token.parentID : assetID
+      Doc.bind(tmpl.configNetBttn, 'click', () => this.showReconfig(configAssetID))
+
+      const walletForLock = token ? app().walletMap[token.parentID] : w
+      if (walletForLock) {
+        const { encrypted, open: unlocked, running, disabled } = walletForLock
+        const walletAssetID = token ? token.parentID : assetID
+        Doc.bind(tmpl.unlockNetBttn, 'click', () => this.openWallet(walletAssetID))
+        Doc.bind(tmpl.lockNetBttn, 'click', () => this.lock(walletAssetID))
+
+        const hasActiveOrders = app().haveActiveOrders(walletAssetID)
+        const canUnlock = encrypted && !unlocked && running && !disabled
+        const canLock = encrypted && unlocked && running && !disabled && !hasActiveOrders
+
+        Doc.setVis(canUnlock, tmpl.unlockNetBttn)
+        Doc.setVis(canLock, tmpl.lockNetBttn)
+        Doc.setVis(running && !disabled, tmpl.configNetBttn)
+      } else if (hasWallet) {
+        Doc.setVis(true, tmpl.configNetBttn)
+      }
     }
 
     // TODO: handle reserves deficit with a notification.
@@ -2515,6 +2537,7 @@ export default class WalletsPage extends BasePage {
     const res = await postJSON('/api/closewallet', { assetID: assetID })
     loaded()
     if (!app().checkResponse(res)) return
+    if (this.selectedTicker.isRelatedAsset(assetID)) this.updateDisplayedTicker()
     this.updateSyncAndPeers()
     this.updatePrivacy()
   }
@@ -2645,7 +2668,7 @@ export default class WalletsPage extends BasePage {
    */
   handleWalletStateNote (note: WalletStateNote): void {
     const { assetID } = note.wallet
-    if (this.selectedTicker.networkAssetLookup[assetID]) this.updateDisplayedTicker()
+    if (this.selectedTicker.isRelatedAsset(assetID)) this.updateDisplayedTicker()
     if (assetID === this.selectedWalletID) this.updateFeeState()
     if (note.topic === 'WalletPeersUpdate' &&
       assetID === this.selectedWalletID &&

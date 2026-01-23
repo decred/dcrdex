@@ -95,6 +95,11 @@ export class TickerAsset {
     this.isMultiNet = this.networkAssets.length > 1
   }
 
+  isRelatedAsset (assetID: number): boolean {
+    if (this.networkAssetLookup[assetID]) return true
+    return this.networkAssets.some(na => na.token?.parentID === assetID)
+  }
+
   walletInfo (): WalletInfo | undefined {
     for (const { assetID } of this.networkAssets) {
       const { info } = app().assets[assetID]
