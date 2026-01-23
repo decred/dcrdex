@@ -40,8 +40,7 @@ func TestEventLogV2Upgrade(t *testing.T) {
 	db1.Close()
 
 	// Create new DB instance which should trigger upgrade
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	var wg sync.WaitGroup
 	db2, err := newBoltEventLogDB(ctx, dbPath, &wg, dex.StdOutLogger("TEST", dex.LevelError))
