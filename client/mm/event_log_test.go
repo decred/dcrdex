@@ -34,8 +34,7 @@ func tryWithTimeout(t *testing.T, f func() error) {
 func TestEventLogDB(t *testing.T) {
 	dir := t.TempDir()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	var wg sync.WaitGroup
 	db, err := newBoltEventLogDB(ctx, filepath.Join(dir, "event_log.db"), &wg, tLogger)
@@ -456,8 +455,7 @@ func TestUpdateFinalBalanceDueToEventDiff(t *testing.T) {
 
 	dir := t.TempDir()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	var wg sync.WaitGroup
 	db, err := newBoltEventLogDB(ctx, filepath.Join(dir, "event_log.db"), &wg, tLogger)

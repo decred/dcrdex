@@ -1975,8 +1975,7 @@ func TestBalanceNoMempool(t *testing.T) {
 }
 
 func TestFeeRate(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	node := &testNode{}
 	eth := &baseWallet{
 		node:          node,
@@ -4470,8 +4469,7 @@ func TestOwnsAddress(t *testing.T) {
 }
 
 func TestSignMessage(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	node := newTestNode(BipID)
 	eth := &assetWallet{
@@ -4533,8 +4531,7 @@ func TestSwapConfirmation(t *testing.T) {
 
 	ver := uint32(0)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	checkResult := func(expErr bool, expConfs uint32, expSpent bool) {
 		t.Helper()
@@ -5801,8 +5798,7 @@ func testEstimateSendTxFee(t *testing.T, assetID uint32) {
 }
 
 func TestSwapOrRedemptionFeesPaid(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	_, bw, node, shutdown := tassetWallet(BipID)
 	defer shutdown()
 

@@ -9,8 +9,7 @@ import (
 )
 
 func TestTaperingQueueExpiration(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	q := NewTaperingTickerQueue(time.Millisecond, time.Millisecond*10)
 	go q.Run(ctx)
