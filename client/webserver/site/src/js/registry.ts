@@ -1029,6 +1029,7 @@ export interface CEXProblems {
 export interface MMBotStatus {
   config: BotConfig
   running: boolean
+  stopping?: boolean
   runStats?: RunStats
   latestEpoch?: EpochReport
   cexProblems?: CEXProblems

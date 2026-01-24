@@ -117,13 +117,15 @@ func balanceDiffsToAllocation(diffs *BotInventoryDiffs) *BotBalanceAllocation {
 // should be created and the event log db should be updated to support both
 // versions.
 
-type rpcConfig struct {
+// RPCConfig can be used for file-based initial allocations and
+// auto-rebalance settings.
+type RPCConfig struct {
 	Alloc         *BotBalanceAllocation `json:"alloc"`
 	AutoRebalance *AutoRebalanceConfig  `json:"autoRebalance"`
 }
 
-func (r *rpcConfig) copy() *rpcConfig {
-	return &rpcConfig{
+func (r *RPCConfig) copy() *RPCConfig {
+	return &RPCConfig{
 		Alloc:         r.Alloc.copy(),
 		AutoRebalance: r.AutoRebalance.copy(),
 	}
@@ -162,7 +164,7 @@ type BotConfig struct {
 
 	// RPCConfig can be used for file-based initial allocations and
 	// auto-rebalance settings.
-	RPCConfig *rpcConfig `json:"rpcConfig"`
+	RPCConfig *RPCConfig `json:"rpcConfig"`
 
 	// LotSize is the lot size of the market at the time this configuration
 	// was created. It is used to notify the user if the lot size changes
@@ -212,23 +214,26 @@ func (c *BotConfig) updateLotSize(oldLotSize, newLotSize uint64) {
 }
 
 func (c *BotConfig) validate(configuredBridgesSupported func([]*configuredBridge) error) error {
-	bridges := make([]*configuredBridge, 0, 2)
-	if c.BaseID != c.CEXBaseID {
-		bridges = append(bridges, &configuredBridge{
-			dexAssetID: c.BaseID,
-			cexAssetID: c.CEXBaseID,
-			bridgeName: c.BaseBridgeName,
-		})
-	}
-	if c.QuoteID != c.CEXQuoteID {
-		bridges = append(bridges, &configuredBridge{
-			dexAssetID: c.QuoteID,
-			cexAssetID: c.CEXQuoteID,
-			bridgeName: c.QuoteBridgeName,
-		})
-	}
-	if err := configuredBridgesSupported(bridges); err != nil {
-		return err
+	// Only validate bridges if CEX is configured (DEX-only bots don't need bridge validation)
+	if c.CEXName != "" {
+		bridges := make([]*configuredBridge, 0, 2)
+		if c.BaseID != c.CEXBaseID {
+			bridges = append(bridges, &configuredBridge{
+				dexAssetID: c.BaseID,
+				cexAssetID: c.CEXBaseID,
+				bridgeName: c.BaseBridgeName,
+			})
+		}
+		if c.QuoteID != c.CEXQuoteID {
+			bridges = append(bridges, &configuredBridge{
+				dexAssetID: c.QuoteID,
+				cexAssetID: c.CEXQuoteID,
+				bridgeName: c.QuoteBridgeName,
+			})
+		}
+		if err := configuredBridgesSupported(bridges); err != nil {
+			return err
+		}
 	}
 
 	if c.BasicMMConfig != nil {

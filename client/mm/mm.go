@@ -12,7 +12,9 @@ import (
 	"maps"
 	"os"
 	"slices"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -119,8 +121,9 @@ type bot interface {
 
 type runningBot struct {
 	bot
-	cm     *dex.ConnectionMaster
-	cexCfg *CEXConfig
+	cm       *dex.ConnectionMaster
+	cexCfg   *CEXConfig
+	stopping atomic.Bool
 }
 
 func (rb *runningBot) assets() map[uint32]any {
@@ -343,8 +346,9 @@ func newCEXProblems() *CEXProblems {
 
 // BotStatus is state information about a configured bot.
 type BotStatus struct {
-	Config  *BotConfig `json:"config"`
-	Running bool       `json:"running"`
+	Config   *BotConfig `json:"config"`
+	Running  bool       `json:"running"`
+	Stopping bool       `json:"stopping"`
 	// RunStats being non-nil means the bot is running.
 	RunStats    *RunStats    `json:"runStats"`
 	LatestEpoch *EpochReport `json:"latestEpoch"`
@@ -366,14 +370,17 @@ func (m *MarketMaker) Status() *Status {
 		var stats *RunStats
 		var epochReport *EpochReport
 		var cexProblems *CEXProblems
+		var stopping bool
 		if rb != nil {
 			stats = rb.stats()
 			epochReport = rb.latestEpoch()
 			cexProblems = rb.latestCEXProblems()
+			stopping = rb.stopping.Load()
 		}
 		status.Bots = append(status.Bots, &BotStatus{
 			Config:      botCfg,
 			Running:     rb != nil,
+			Stopping:    stopping,
 			RunStats:    stats,
 			LatestEpoch: epochReport,
 			CEXProblems: cexProblems,
@@ -409,6 +416,7 @@ func (m *MarketMaker) RunningBotsStatus() *Status {
 		status.Bots = append(status.Bots, &BotStatus{
 			Config:      rb.botCfg(),
 			Running:     true,
+			Stopping:    rb.stopping.Load(),
 			RunStats:    rb.stats(),
 			LatestEpoch: rb.latestEpoch(),
 			CEXProblems: rb.latestCEXProblems(),
@@ -1022,16 +1030,59 @@ func (m *MarketMaker) startBot(startCfg *StartConfig, botCfg *BotConfig, cexCfg 
 	return nil
 }
 
-// StopBot stops a running bot.
+// StopBot stops a running bot. The function returns immediately; the bot
+// stops asynchronously. A notification is broadcast when the bot finishes
+// stopping.
 func (m *MarketMaker) StopBot(mkt *MarketWithHost) error {
 	runningBots := m.runningBotsLookup()
 	bot, found := runningBots[*mkt]
 	if !found {
 		return fmt.Errorf("no bot running on market: %s", mkt)
 	}
-	bot.cm.Disconnect()
-	m.core.Broadcast(newRunStatsNote(mkt.Host, mkt.BaseID, mkt.QuoteID, nil))
+	bot.stopping.Store(true)
+	go bot.cm.Disconnect()
 	return nil
+}
+
+// StartBots starts all bots in the provided config file.
+func (m *MarketMaker) StartBots(cfgPath *string, appPW []byte) (started int, err error) {
+	cfg, err := getMarketMakingConfig(*cfgPath)
+	if err != nil {
+		return 0, fmt.Errorf("error loading config: %w", err)
+	}
+	if len(cfg.BotConfigs) == 0 {
+		return 0, fmt.Errorf("no bots configured in %s", *cfgPath)
+	}
+	var errs []string
+	for _, botCfg := range cfg.BotConfigs {
+		mkt := MarketWithHost{botCfg.Host, botCfg.BaseID, botCfg.QuoteID}
+		startCfg := &StartConfig{MarketWithHost: mkt}
+		if err := m.StartBot(startCfg, cfgPath, appPW, true); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", mkt, err))
+		} else {
+			started++
+		}
+	}
+	if len(errs) > 0 {
+		return started, fmt.Errorf("some bots failed to start: %s", strings.Join(errs, "; "))
+	}
+	return started, nil
+}
+
+// StopBots signals all running bots to stop and returns immediately.
+// The bots will finish stopping asynchronously.
+func (m *MarketMaker) StopBots() (stopped int, err error) {
+	runningBots := m.runningBotsLookup()
+	if len(runningBots) == 0 {
+		return 0, fmt.Errorf("no bots running")
+	}
+	for mkt := range runningBots {
+		if err := m.StopBot(&mkt); err != nil {
+			continue
+		}
+		stopped++
+	}
+	return stopped, nil
 }
 
 func getMarketMakingConfig(path string) (*MarketMakingConfig, error) {
