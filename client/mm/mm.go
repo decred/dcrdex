@@ -726,6 +726,10 @@ func (m *MarketMaker) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 }
 
 func (m *MarketMaker) balancesSufficient(balances *BotBalanceAllocation, mkt *MarketWithHost, botCfg *BotConfig, cexCfg *CEXConfig) error {
+	if balances == nil {
+		return fmt.Errorf("no balance allocation provided")
+	}
+
 	availableDEXBalances, availableCEXBalances, err := m.availableBalances(mkt, botCfg.CEXBaseID, botCfg.CEXQuoteID, cexCfg)
 	if err != nil {
 		return fmt.Errorf("error getting available balances: %v", err)
