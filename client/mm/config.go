@@ -158,13 +158,18 @@ type BotConfig struct {
 	// of the quote asset.
 	QuoteBridgeName string `json:"quoteBridgeName,omitempty"`
 
-	// UIConfig is settings defined and used by the front end to determine
-	// allocations.
+	// UIConfig is settings defined and used by the front end for UI state.
 	UIConfig json.RawMessage `json:"uiConfig,omitempty"`
 
-	// RPCConfig can be used for file-based initial allocations and
-	// auto-rebalance settings.
-	RPCConfig *RPCConfig `json:"rpcConfig"`
+	// Alloc is the balance allocation for this bot.
+	Alloc *BotBalanceAllocation `json:"alloc,omitempty"`
+
+	// AutoRebalance configures automatic rebalancing between DEX and CEX.
+	AutoRebalance *AutoRebalanceConfig `json:"autoRebalance,omitempty"`
+
+	// RPCConfig is deprecated. Use Alloc and AutoRebalance directly.
+	// Kept for backwards compatibility with existing config files.
+	RPCConfig *RPCConfig `json:"rpcConfig,omitempty"`
 
 	// LotSize is the lot size of the market at the time this configuration
 	// was created. It is used to notify the user if the lot size changes
@@ -187,6 +192,12 @@ func (c *BotConfig) copy() *BotConfig {
 		b.UIConfig = make(json.RawMessage, len(c.UIConfig))
 		copy(b.UIConfig, c.UIConfig)
 	}
+	if c.Alloc != nil {
+		b.Alloc = c.Alloc.copy()
+	}
+	if c.AutoRebalance != nil {
+		b.AutoRebalance = c.AutoRebalance.copy()
+	}
 	if c.RPCConfig != nil {
 		b.RPCConfig = c.RPCConfig.copy()
 	}
@@ -201,6 +212,20 @@ func (c *BotConfig) copy() *BotConfig {
 	}
 
 	return &b
+}
+
+// migrate moves deprecated RPCConfig fields to the new top-level fields.
+// This provides backwards compatibility with config files that use the old format.
+func (c *BotConfig) migrate() {
+	if c.RPCConfig != nil {
+		if c.Alloc == nil {
+			c.Alloc = c.RPCConfig.Alloc
+		}
+		if c.AutoRebalance == nil {
+			c.AutoRebalance = c.RPCConfig.AutoRebalance
+		}
+		c.RPCConfig = nil
+	}
 }
 
 // updateLotSize modifies the bot's configuration based on an update to the

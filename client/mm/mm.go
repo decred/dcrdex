@@ -875,28 +875,19 @@ func (m *MarketMaker) newBot(cfg *BotConfig, adaptorCfg *exchangeAdaptorCfg) (bo
 	}
 }
 
-// StartConfig contains the data that must be submitted with a call to StartBot.
-type StartConfig struct {
-	MarketWithHost
-	AutoRebalance *AutoRebalanceConfig  `json:"autoRebalance"`
-	Alloc         *BotBalanceAllocation `json:"alloc"`
-}
-
 // StartBot starts a market making bot.
-func (m *MarketMaker) StartBot(startCfg *StartConfig, alternateConfigPath *string, appPW []byte, overrideLotSizeChange bool) (err error) {
-	mkt := startCfg.MarketWithHost
-
+func (m *MarketMaker) StartBot(mkt *MarketWithHost, alternateConfigPath *string, appPW []byte, overrideLotSizeChange bool) (err error) {
 	m.startUpdateMtx.Lock()
 	defer m.startUpdateMtx.Unlock()
 
 	m.runningBotsMtx.RLock()
-	_, found := m.runningBots[startCfg.MarketWithHost]
+	_, found := m.runningBots[*mkt]
 	m.runningBotsMtx.RUnlock()
 	if found {
 		return fmt.Errorf("bot for %s already running", mkt)
 	}
 
-	coreMkt, err := m.core.ExchangeMarket(startCfg.Host, startCfg.BaseID, startCfg.QuoteID)
+	coreMkt, err := m.core.ExchangeMarket(mkt.Host, mkt.BaseID, mkt.QuoteID)
 	if err != nil {
 		return fmt.Errorf("error getting market: %v", err)
 	}
@@ -910,14 +901,9 @@ func (m *MarketMaker) StartBot(startCfg *StartConfig, alternateConfigPath *strin
 		}
 	}
 
-	botCfg, cexCfg, err := m.configsForMarket(&startCfg.MarketWithHost, alternateConfigPath)
+	botCfg, cexCfg, err := m.configsForMarket(mkt, alternateConfigPath)
 	if err != nil {
 		return err
-	}
-
-	if botCfg.RPCConfig != nil {
-		startCfg.Alloc = botCfg.RPCConfig.Alloc
-		startCfg.AutoRebalance = botCfg.RPCConfig.AutoRebalance
 	}
 
 	// Lot size may be zero if started from RPC. If the lot size in the config
@@ -945,12 +931,11 @@ func (m *MarketMaker) StartBot(startCfg *StartConfig, alternateConfigPath *strin
 		botCfg.LotSize = mktInfo.LotSize
 	}
 
-	return m.startBot(startCfg, botCfg, cexCfg, appPW)
+	return m.startBot(mkt, botCfg, cexCfg, appPW)
 }
 
-func (m *MarketMaker) startBot(startCfg *StartConfig, botCfg *BotConfig, cexCfg *CEXConfig, appPW []byte) (err error) {
-	mwh := &startCfg.MarketWithHost
-	if err := m.balancesSufficient(startCfg.Alloc, mwh, botCfg, cexCfg); err != nil {
+func (m *MarketMaker) startBot(mkt *MarketWithHost, botCfg *BotConfig, cexCfg *CEXConfig, appPW []byte) (err error) {
+	if err := m.balancesSufficient(botCfg.Alloc, mkt, botCfg, cexCfg); err != nil {
 		return err
 	}
 
@@ -983,10 +968,10 @@ func (m *MarketMaker) startBot(startCfg *StartConfig, botCfg *BotConfig, cexCfg 
 
 	adaptorCfg := &exchangeAdaptorCfg{
 		botID:               dexMarketID(botCfg.Host, botCfg.BaseID, botCfg.QuoteID),
-		mwh:                 mwh,
-		baseDexBalances:     startCfg.Alloc.DEX,
-		baseCexBalances:     startCfg.Alloc.CEX,
-		autoRebalanceConfig: startCfg.AutoRebalance,
+		mwh:                 mkt,
+		baseDexBalances:     botCfg.Alloc.DEX,
+		baseCexBalances:     botCfg.Alloc.CEX,
+		autoRebalanceConfig: botCfg.AutoRebalance,
 		core:                m.core,
 		cex:                 cex,
 		log:                 m.botSubLogger(botCfg),
@@ -1009,14 +994,14 @@ func (m *MarketMaker) startBot(startCfg *StartConfig, botCfg *BotConfig, cexCfg 
 	go func() {
 		cm.Wait()
 		m.runningBotsMtx.Lock()
-		if bot, found := m.runningBots[*mwh]; found {
+		if bot, found := m.runningBots[*mkt]; found {
 			if bot.botCfg().requiresPriceOracle() {
-				m.oracle.stopAutoSyncingMarket(mwh.BaseID, mwh.QuoteID)
+				m.oracle.stopAutoSyncingMarket(mkt.BaseID, mkt.QuoteID)
 			}
-			delete(m.runningBots, *mwh)
+			delete(m.runningBots, *mkt)
 		}
 		m.runningBotsMtx.Unlock()
-		m.core.Broadcast(newRunStatsNote(mwh.Host, mwh.BaseID, mwh.QuoteID, nil))
+		m.core.Broadcast(newRunStatsNote(mkt.Host, mkt.BaseID, mkt.QuoteID, nil))
 	}()
 
 	startedBot = true
@@ -1028,7 +1013,7 @@ func (m *MarketMaker) startBot(startCfg *StartConfig, botCfg *BotConfig, cexCfg 
 	}
 
 	m.runningBotsMtx.Lock()
-	m.runningBots[*mwh] = rb
+	m.runningBots[*mkt] = rb
 	m.runningBotsMtx.Unlock()
 
 	return nil
@@ -1059,9 +1044,8 @@ func (m *MarketMaker) StartBots(cfgPath *string, appPW []byte) (started int, err
 	}
 	var errs []string
 	for _, botCfg := range cfg.BotConfigs {
-		mkt := MarketWithHost{botCfg.Host, botCfg.BaseID, botCfg.QuoteID}
-		startCfg := &StartConfig{MarketWithHost: mkt}
-		if err := m.StartBot(startCfg, cfgPath, appPW, true); err != nil {
+		mkt := &MarketWithHost{botCfg.Host, botCfg.BaseID, botCfg.QuoteID}
+		if err := m.StartBot(mkt, cfgPath, appPW, true); err != nil {
 			errs = append(errs, fmt.Sprintf("%s: %v", mkt, err))
 		} else {
 			started++
@@ -1103,6 +1087,11 @@ func getMarketMakingConfig(path string) (*MarketMakingConfig, error) {
 	err = json.Unmarshal(data, cfg)
 	if err != nil {
 		return nil, err
+	}
+
+	// Migrate deprecated RPCConfig to new top-level fields
+	for _, botCfg := range cfg.BotConfigs {
+		botCfg.migrate()
 	}
 
 	return cfg, nil

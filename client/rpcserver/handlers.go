@@ -929,7 +929,7 @@ func handleStartBot(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	}
 
 	// Start specific bot
-	err = s.mm.StartBot(&mm.StartConfig{MarketWithHost: *form.mkt}, &form.cfgFilePath, form.appPass, true)
+	err = s.mm.StartBot(form.mkt, &form.cfgFilePath, form.appPass, true)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCStartMarketMakingError, "unable to start market making: %v", err)
 		return createResponse(startBotRoute, nil, resErr)

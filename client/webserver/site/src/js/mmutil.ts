@@ -7,7 +7,6 @@ import {
   MarketMakingStatus,
   ExchangeBalance,
   RunStats,
-  StartConfig,
   MarketWithHost,
   RunningBotInventory,
   Spot,
@@ -112,7 +111,7 @@ class MarketMakerBot {
     return postJSON('/api/maxfundingfees', { market, maxBuyPlacements, maxSellPlacements, baseOptions, quoteOptions })
   }
 
-  async startBot (config: StartConfig) {
+  async startBot (config: MarketWithHost) {
     return await postJSON('/api/startmarketmakingbot', { config })
   }
 
