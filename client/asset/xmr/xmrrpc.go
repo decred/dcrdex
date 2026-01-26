@@ -46,7 +46,7 @@ type xmrRpc struct {
 	emit             *asset.WalletEmitter
 	peersChange      func(uint32, error)
 	dataDir          string
-	cliToolsDir      string
+	toolsDir         string
 	daemonIsLocal    bool
 	daemonAddr       string
 	walletRpcProcess *os.Process
@@ -57,8 +57,7 @@ type xmrRpc struct {
 	syncing          atomic.Bool
 }
 
-func newXmrRpc(cfg *asset.WalletConfig, settings *configSettings, network dex.Network,
-	logger dex.Logger) (*xmrRpc, error) {
+func newXmrRpc(cfg *asset.WalletConfig, network dex.Network, toolsDir string, logger dex.Logger) (*xmrRpc, error) {
 	isLocalAddress := func(address string) (bool, error) {
 		parsedURL, err := url.Parse(address)
 		if err != nil {
@@ -109,7 +108,7 @@ func newXmrRpc(cfg *asset.WalletConfig, settings *configSettings, network dex.Ne
 		emit:             cfg.Emit,
 		peersChange:      cfg.PeersChange,
 		dataDir:          cfg.DataDir,
-		cliToolsDir:      settings.CliToolsDir,
+		toolsDir:         toolsDir,
 		daemonAddr:       daemonAddr,
 		daemonIsLocal:    daemonIsLocal,
 		walletRpcProcess: nil,
