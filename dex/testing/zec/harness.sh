@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+# Use harness2.sh for NU6.1
+
 # IMPORTANT NOTE: It can take the beta node a little bit to get caught up with
 # alpha after the harness initializes.
 

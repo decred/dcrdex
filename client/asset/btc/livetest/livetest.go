@@ -134,7 +134,9 @@ func (rig *testRig) close() {
 func (rig *testRig) mineAlpha() error {
 	var tmuxWindow string
 	switch rig.symbol {
-	case "zec", "firo", "doge":
+	case "zec":
+		tmuxWindow = rig.symbol + "-harness:3"
+	case "firo", "doge":
 		tmuxWindow = rig.symbol + "-harness:4"
 	default:
 		tmuxWindow = rig.symbol + "-harness:2"
