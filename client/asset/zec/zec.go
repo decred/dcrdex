@@ -47,7 +47,7 @@ const (
 	// structure.
 	defaultFee          = 10
 	defaultFeeRateLimit = 1000
-	minNetworkVersion   = 6030050 // v5.9.1	=>  v6.3.0
+	minNetworkVersion   = 6110050 // v6.3.0 => v6.11.0
 	walletTypeRPC       = "zcashdRPC"
 
 	// defaultConfTarget is the amount of confirmations required to consider
