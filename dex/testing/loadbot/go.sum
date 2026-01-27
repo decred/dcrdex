@@ -124,8 +124,6 @@ github.com/bisoncraft/bchwallet v1.0.2 h1:7CHvqCR+lV04jJQOi5l9EhC06bfu7S7CwZB/SE
 github.com/bisoncraft/bchwallet v1.0.2/go.mod h1:sJ0BcksJ1ErDYSBsOqfo00bUvjqnj25rk8lGw6wd8/E=
 github.com/bisoncraft/go-bip39 v1.0.1 h1:qqH/GdbePynW6zGhBDBlYnRoRZBheHWF/qzNavUEc8U=
 github.com/bisoncraft/go-bip39 v1.0.1/go.mod h1:CxiJ2DeR1DAwtjUyLiouiw6zMQtXVAmiIJUGoksDet4=
-github.com/bisoncraft/go-monero v0.1.1 h1:XfZYfUigkdTeU8oVq5X08X8tO59EyVwRKDIXbkwhCIY=
-github.com/bisoncraft/go-monero v0.1.1/go.mod h1:HE9dCbZhK0tVgMfQoYOVX8cP0lihcg6pHojBF+YeOXo=
 github.com/bisoncraft/neutrino-bch v1.0.1 h1:DCARjFk3iKYLFOcfKyvJHA+wPaCPtLSfpNx0jBhg2dk=
 github.com/bisoncraft/neutrino-bch v1.0.1/go.mod h1:ZqHrMuM24bSat9EDOQQovb8qQn4XdU0OgHGoSZTPufk=
 github.com/bisoncraft/op-geth v0.0.0-20250729074358-3cfe4f15e91c h1:cmK4HxTpEutYvsKiRlsibMuzdgAr9vRokgFLTvrCMZ0=

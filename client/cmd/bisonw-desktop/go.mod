@@ -20,7 +20,6 @@ require (
 	github.com/athanorlabs/go-dleq v0.1.0 // indirect
 	github.com/bisoncraft/bchwallet v1.0.2 // indirect
 	github.com/bisoncraft/go-bip39 v1.0.1 // indirect
-	github.com/bisoncraft/go-monero v0.1.1 // indirect
 	github.com/bisoncraft/neutrino-bch v1.0.1 // indirect
 	github.com/bisoncraft/op-geth v0.0.0-20250729074358-3cfe4f15e91c // indirect
 	github.com/bits-and-blooms/bitset v1.22.0 // indirect
