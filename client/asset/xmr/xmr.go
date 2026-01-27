@@ -6,16 +6,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
+	"decred.org/dcrdex/client/asset/xmr/toolsdl"
 	"decred.org/dcrdex/client/asset/xmr/txn"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
@@ -32,17 +30,6 @@ const (
 
 var (
 	configOpts = []*asset.ConfigOption{
-		{
-			Key:         "toolsdir",
-			DisplayName: "Monero CLI tools folder",
-			Description: "Required. The path to the Monero CLI folder you downloaded from Monero github." +
-				" This should be the Latest release version." +
-				" A linux example is '/home/<user>/monero-x86_64-linux-gnu-v0.18.4.2'." +
-				" If you later change this setting you need restart bisonw for the changes to take effect.",
-			DefaultValue:  "",
-			ShowByDefault: true,
-			Required:      true,
-		},
 		{
 			Key:         "feepriority",
 			DisplayName: "Transaction Priority",
@@ -124,20 +111,18 @@ func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, 
 func (d *Driver) Create(cwp *asset.CreateWalletParams) error {
 	// check if user re-entered from create UI but wallet files already made
 	if !walletFilesMissing(cwp.DataDir) {
-		return fmt.Errorf("Create entered but wallet files already exist")
+		return fmt.Errorf("create entered but wallet files already exist")
 	}
 
-	configSettings, err := parseWalletConfig(cwp.Settings)
+	toolsDir, err := downloadTools(cwp.Logger, cwp.DataDir)
 	if err != nil {
 		return err
 	}
-	err = checkConfig(configSettings)
-	if err != nil {
-		return err
-	}
+
+	// context for running cli process through exec.CommandContext
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cliToolsDir := configSettings.CliToolsDir
+
 	trustedDaemons := getTrustedDaemons(cwp.Net, true, cwp.DataDir) // true: can be used for cli
 	if len(trustedDaemons) == 0 {
 		return errors.New("no trusted damons")
@@ -145,7 +130,31 @@ func (d *Driver) Create(cwp *asset.CreateWalletParams) error {
 	if len(cwp.Seed) != ed25519.SeedSize {
 		return fmt.Errorf("expected seed size of %d but got %d", ed25519.SeedSize, len(cwp.Seed))
 	}
-	return cliGenerateRefreshWallet(ctx, trustedDaemons[0], cwp.Logger, cwp.Net, cwp.DataDir, cliToolsDir, cwp.Pass, cwp.Seed, cwp.Birthday)
+	return cliGenerateRefreshWallet(ctx, trustedDaemons[0], cwp.Logger, cwp.Net, cwp.DataDir, toolsDir, cwp.Pass, cwp.Seed, cwp.Birthday)
+}
+
+// downloadTools downloads the latest tools if needed. Used by Create.
+func downloadTools(log dex.Logger, dataDir string) (string, error) {
+	dl := toolsdl.NewDownload(dataDir, log)
+	hasPath, toolsPath, _ := dl.GetBestCurrentLocalToolsDir()
+	if !hasPath {
+		return dl.Run()
+	}
+	return toolsPath, nil
+}
+
+// getToolsDir gets the current tools full-path and dir. Used by newWallet.
+func getToolsDir(dataDir string, log dex.Logger) (string, string, error) {
+	dl := toolsdl.NewDownload(dataDir, log)
+	hasPath, toolsPath, err := dl.GetBestCurrentLocalToolsDir()
+	dir := filepath.Base(toolsPath)
+	if err != nil {
+		return "", "", err
+	}
+	if !hasPath {
+		return "", "", err
+	}
+	return toolsPath, dir, nil
 }
 
 func checkWalletCfg(cfg *asset.WalletConfig) error {
@@ -167,80 +176,6 @@ func parseWalletConfig(settings map[string]string) (*configSettings, error) {
 	return xwSettings, nil
 }
 
-func checkConfig(s *configSettings) error {
-	_, dir := filepath.Split(s.CliToolsDir)
-	err := checkToolsVersion(dir)
-	if err != nil {
-		return err
-	}
-	entries, err := os.ReadDir(s.CliToolsDir)
-	if err != nil {
-		return err
-	}
-	if len(entries) == 0 {
-		return fmt.Errorf("empty folder %s", dir)
-	}
-	walletRpc := WalletServerRpcName
-	cli := CliName
-	if runtime.GOOS == "windows" {
-		walletRpc += ".exe"
-		cli += ".exe"
-	}
-	gotWalletRpc := false
-	gotCli := false
-	for _, entry := range entries {
-		if gotWalletRpc && gotCli {
-			break
-		}
-		if entry.IsDir() {
-			continue
-		}
-		if walletRpc == entry.Name() {
-			gotWalletRpc = true
-			continue
-		}
-		if cli == entry.Name() {
-			gotCli = true
-			continue
-		}
-	}
-	if !gotWalletRpc || !gotCli {
-		var missingWalletRpc string
-		if !gotWalletRpc {
-			missingWalletRpc = walletRpc
-		}
-		var missingCli string
-		if !gotCli {
-			missingCli = cli
-		}
-		return fmt.Errorf("missing wallet tools: %s %s in folder %s", missingWalletRpc, missingCli, dir)
-	}
-	return nil
-}
-
-func checkToolsVersion(dir string) error {
-	if !strings.HasPrefix(dir, "monero") {
-		return fmt.Errorf("tools folder does not start with 'monero'")
-	}
-	i := strings.LastIndex(dir, "v")
-	if i < 0 {
-		return fmt.Errorf("start of version string 'v' not found in %s", dir)
-	}
-	last := dir[i:]
-	if len(last) <= 1 {
-		return fmt.Errorf("version too short %s", dir)
-	}
-	ver := last[1:]
-	mv, err := newMoneroVersionFromVersionString(ver)
-	if err != nil {
-		return err
-	}
-	if !mv.valid() {
-		return fmt.Errorf("invalid version %s", ver)
-	}
-	return nil
-}
-
 // newWallet constructs an unconnected exchange wallet.
 func newWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
 	err := checkWalletCfg(cfg)
@@ -251,10 +186,6 @@ func newWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	if err != nil {
 		return nil, err
 	}
-	err = checkConfig(configSettings)
-	if err != nil {
-		return nil, err
-	}
 	feePriority, err := strconv.ParseUint(configSettings.FeePriorityStr, 10, 8)
 	if err != nil {
 		return nil, err
@@ -262,10 +193,17 @@ func newWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	if feePriority > 4 {
 		return nil, fmt.Errorf("invalid fee priority %d", feePriority)
 	}
-	xmrpc, err := newXmrRpc(cfg, configSettings, network, logger)
+
+	toolsDir, _, err := getToolsDir(cfg.DataDir, logger)
 	if err != nil {
 		return nil, err
 	}
+
+	xmrpc, err := newXmrRpc(cfg, network, toolsDir, logger)
+	if err != nil {
+		return nil, err
+	}
+
 	xw := wallet{
 		net:         network,
 		log:         logger,
@@ -277,7 +215,6 @@ func newWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 }
 
 type configSettings struct {
-	CliToolsDir    string `ini:"toolsdir"`
 	FeePriorityStr string `ini:"feepriority"`
 }
 
@@ -606,10 +543,6 @@ func (x *wallet) Reconfigure(reconfCtx context.Context, cfg *asset.WalletConfig,
 		return false, errSyncing
 	}
 	configSettings, err := parseWalletConfig(cfg.Settings)
-	if err != nil {
-		return false, err
-	}
-	err = checkConfig(configSettings)
 	if err != nil {
 		return false, err
 	}
