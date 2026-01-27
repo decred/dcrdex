@@ -31,7 +31,6 @@ require (
 	github.com/aead/siphash v1.0.1 // indirect
 	github.com/agl/ed25519 v0.0.0-20170116200512-5312a6153412 // indirect
 	github.com/athanorlabs/go-dleq v0.1.0 // indirect
-	github.com/bisoncraft/go-monero v0.1.1 // indirect
 	github.com/bisoncraft/op-geth v0.0.0-20250729074358-3cfe4f15e91c // indirect
 	github.com/bits-and-blooms/bitset v1.22.0 // indirect
 	github.com/btcsuite/btcd v0.24.2-beta.rc1.0.20240625142744-cc26860b4026 // indirect
