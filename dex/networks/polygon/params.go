@@ -71,7 +71,9 @@ var (
 		GaslessRedeemPreVerification:    70_000,
 		GaslessRedeemPreVerificationAdd: 6_000,
 		GaslessRedeemCall:               120_000,
-		GaslessRedeemCallAdd:            13_000,
+		// Must be >= MIN_CALL_GAS_PER_REDEMPTION in the contract's
+		// validateUserOp, otherwise batch redemptions will be rejected.
+		GaslessRedeemCallAdd: 25_000,
 	}
 
 	VersionedGases = map[uint32]*dexeth.Gases{

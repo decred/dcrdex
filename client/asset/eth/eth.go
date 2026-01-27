@@ -2781,7 +2781,7 @@ func (w *ETHWallet) generateUserOp(ctx context.Context, nonce *big.Int, bundler 
 	if !is {
 		return nil, nil, nil, fmt.Errorf("contractor does not support gasless redeems")
 	}
-	callData, err := contractor.gaslessRedeemCalldata(redemptions)
+	callData, err := contractor.gaslessRedeemCalldata(redemptions, nonce)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("error getting calldata: %v", err)
 	}

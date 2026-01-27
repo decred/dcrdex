@@ -539,7 +539,7 @@ type tGaslessRedeemContractor struct {
 var _ contractor = (*tGaslessRedeemContractor)(nil)
 var _ gaslessRedeemContractor = (*tGaslessRedeemContractor)(nil)
 
-func (c *tGaslessRedeemContractor) gaslessRedeemCalldata(redeems []*asset.Redemption) ([]byte, error) {
+func (c *tGaslessRedeemContractor) gaslessRedeemCalldata(redeems []*asset.Redemption, nonce *big.Int) ([]byte, error) {
 	return c.calldata, nil
 }
 func (c *tGaslessRedeemContractor) entrypointAddress() (common.Address, error) {
