@@ -117,20 +117,6 @@ func balanceDiffsToAllocation(diffs *BotInventoryDiffs) *BotBalanceAllocation {
 // should be created and the event log db should be updated to support both
 // versions.
 
-// RPCConfig can be used for file-based initial allocations and
-// auto-rebalance settings.
-type RPCConfig struct {
-	Alloc         *BotBalanceAllocation `json:"alloc"`
-	AutoRebalance *AutoRebalanceConfig  `json:"autoRebalance"`
-}
-
-func (r *RPCConfig) copy() *RPCConfig {
-	return &RPCConfig{
-		Alloc:         r.Alloc.copy(),
-		AutoRebalance: r.AutoRebalance.copy(),
-	}
-}
-
 // BotConfig is the configuration for a market making bot.
 // The balance fields are the initial amounts that will be reserved to use for
 // this bot. As the bot trades, the amounts reserved for it will be updated.
@@ -167,10 +153,6 @@ type BotConfig struct {
 	// AutoRebalance configures automatic rebalancing between DEX and CEX.
 	AutoRebalance *AutoRebalanceConfig `json:"autoRebalance,omitempty"`
 
-	// RPCConfig is deprecated. Use Alloc and AutoRebalance directly.
-	// Kept for backwards compatibility with existing config files.
-	RPCConfig *RPCConfig `json:"rpcConfig,omitempty"`
-
 	// LotSize is the lot size of the market at the time this configuration
 	// was created. It is used to notify the user if the lot size changes
 	// when they are starting the bot.
@@ -198,9 +180,6 @@ func (c *BotConfig) copy() *BotConfig {
 	if c.AutoRebalance != nil {
 		b.AutoRebalance = c.AutoRebalance.copy()
 	}
-	if c.RPCConfig != nil {
-		b.RPCConfig = c.RPCConfig.copy()
-	}
 	if c.BasicMMConfig != nil {
 		b.BasicMMConfig = c.BasicMMConfig.copy()
 	}
@@ -212,20 +191,6 @@ func (c *BotConfig) copy() *BotConfig {
 	}
 
 	return &b
-}
-
-// migrate moves deprecated RPCConfig fields to the new top-level fields.
-// This provides backwards compatibility with config files that use the old format.
-func (c *BotConfig) migrate() {
-	if c.RPCConfig != nil {
-		if c.Alloc == nil {
-			c.Alloc = c.RPCConfig.Alloc
-		}
-		if c.AutoRebalance == nil {
-			c.AutoRebalance = c.RPCConfig.AutoRebalance
-		}
-		c.RPCConfig = nil
-	}
 }
 
 // updateLotSize modifies the bot's configuration based on an update to the

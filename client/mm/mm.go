@@ -1089,11 +1089,6 @@ func getMarketMakingConfig(path string) (*MarketMakingConfig, error) {
 		return nil, err
 	}
 
-	// Migrate deprecated RPCConfig to new top-level fields
-	for _, botCfg := range cfg.BotConfigs {
-		botCfg.migrate()
-	}
-
 	return cfg, nil
 }
 
