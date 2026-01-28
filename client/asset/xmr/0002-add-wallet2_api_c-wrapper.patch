@@ -1,0 +1,30 @@
+diff --git a/monero_libwallet2_api_c/src/main/cpp/wallet2_api_c.cpp b/monero_libwallet2_api_c/src/main/cpp/wallet2_api_c.cpp
+index c58fbec..524df49 100644
+--- a/monero_libwallet2_api_c/src/main/cpp/wallet2_api_c.cpp
++++ b/monero_libwallet2_api_c/src/main/cpp/wallet2_api_c.cpp
+@@ -1334,6 +1334,12 @@ bool MONERO_Wallet_trustedDaemon(void* wallet_ptr) {
+     return wallet->trustedDaemon();
+     DEBUG_END()
+ }
++void MONERO_Wallet_setAllowMismatchedDaemonVersion(void* wallet_ptr, bool allow) {
++    DEBUG_START()
++    Monero::Wallet *wallet = reinterpret_cast<Monero::Wallet*>(wallet_ptr);
++    wallet->setAllowMismatchedDaemonVersion(allow);
++    DEBUG_END()
++}
+ bool MONERO_Wallet_setProxy(void* wallet_ptr, const char* address) {
+     DEBUG_START()
+     Monero::Wallet *wallet = reinterpret_cast<Monero::Wallet*>(wallet_ptr);
+diff --git a/monero_libwallet2_api_c/src/main/cpp/wallet2_api_c.h b/monero_libwallet2_api_c/src/main/cpp/wallet2_api_c.h
+index ff28d68..0c708bc 100644
+--- a/monero_libwallet2_api_c/src/main/cpp/wallet2_api_c.h
++++ b/monero_libwallet2_api_c/src/main/cpp/wallet2_api_c.h
+@@ -572,6 +572,8 @@ extern ADDAPI int MONERO_Wallet_connected(void* wallet_ptr);
+ extern ADDAPI void MONERO_Wallet_setTrustedDaemon(void* wallet_ptr, bool arg);
+ //     virtual bool trustedDaemon() const = 0;
+ extern ADDAPI bool MONERO_Wallet_trustedDaemon(void* wallet_ptr);
++//     virtual void setAllowMismatchedDaemonVersion(bool allow) = 0;
++extern ADDAPI void MONERO_Wallet_setAllowMismatchedDaemonVersion(void* wallet_ptr, bool allow);
+ //     virtual bool setProxy(const std::string &address) = 0;
+ extern ADDAPI bool MONERO_Wallet_setProxy(void* wallet_ptr, const char* address);
+ //     virtual uint64_t balance(uint32_t accountIndex = 0) const = 0;

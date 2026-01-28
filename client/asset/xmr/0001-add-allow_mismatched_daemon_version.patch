@@ -1,0 +1,61 @@
+From: dcrdex <dcrdex@decred.org>
+Date: Thu, 29 Jan 2026 00:00:00 +0000
+Subject: [PATCH] Add allow_mismatched_daemon_version function
+
+This allows the wallet to connect to a daemon running a different
+hard fork version, which is necessary for regtest/fakechain mode
+where the daemon starts at the latest hard fork from block 0.
+
+---
+ src/wallet/api/wallet.cpp     | 5 +++++
+ src/wallet/api/wallet.h       | 1 +
+ src/wallet/api/wallet2_api.h  | 5 +++++
+ 3 files changed, 11 insertions(+)
+
+diff --git a/src/wallet/api/wallet.cpp b/src/wallet/api/wallet.cpp
+index 1111111..2222222 100644
+--- a/src/wallet/api/wallet.cpp
++++ b/src/wallet/api/wallet.cpp
+@@ -2892,6 +2892,11 @@ bool WalletImpl::trustedDaemon() const
+     return m_wallet->is_trusted_daemon();
+ }
+
++void WalletImpl::setAllowMismatchedDaemonVersion(bool allow)
++{
++    m_wallet->allow_mismatched_daemon_version(allow);
++}
++
+ bool WalletImpl::setProxy(const std::string &address)
+ {
+     return m_wallet->set_proxy(address);
+diff --git a/src/wallet/api/wallet.h b/src/wallet/api/wallet.h
+index 3333333..4444444 100644
+--- a/src/wallet/api/wallet.h
++++ b/src/wallet/api/wallet.h
+@@ -124,6 +124,7 @@ public:
+     ConnectionStatus connected() const override;
+     void setTrustedDaemon(bool arg) override;
+     bool trustedDaemon() const override;
++    void setAllowMismatchedDaemonVersion(bool allow) override;
+     bool setProxy(const std::string &address) override;
+     uint64_t balance(uint32_t accountIndex = 0) const override;
+     uint64_t unlockedBalance(uint32_t accountIndex = 0) const override;
+diff --git a/src/wallet/api/wallet2_api.h b/src/wallet/api/wallet2_api.h
+index 5555555..6666666 100644
+--- a/src/wallet/api/wallet2_api.h
++++ b/src/wallet/api/wallet2_api.h
+@@ -660,6 +660,11 @@ struct Wallet
+     virtual ConnectionStatus connected() const = 0;
+     virtual void setTrustedDaemon(bool arg) = 0;
+     virtual bool trustedDaemon() const = 0;
++    /**
++     * @brief setAllowMismatchedDaemonVersion - allow connection to daemon with different hard fork version
++     */
++    virtual void setAllowMismatchedDaemonVersion(bool allow) = 0;
++
+     virtual bool setProxy(const std::string &address) = 0;
+     virtual uint64_t balance(uint32_t accountIndex = 0) const = 0;
+     uint64_t balanceAll() const {
+--
+2.39.0
+
