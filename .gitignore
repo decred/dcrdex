@@ -23,6 +23,8 @@ markets.json
 dist/
 node_modules/
 client/cmd/bisonw/bisonw
+client/cmd/bisonw/libwallet2_api_c*
+client/asset/xmr/lib/*/libwallet2_api_c*
 client/cmd/bisonw-desktop/bisonw-desktop
 client/cmd/bwctl/bwctl
 client/cmd/assetseed/assetseed

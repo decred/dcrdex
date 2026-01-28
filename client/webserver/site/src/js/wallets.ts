@@ -1086,8 +1086,8 @@ export default class WalletsPage extends BasePage {
       tmpl.chainName.textContent = chainName
       const usable = w || token?.parentMade
       if (usable) {
-        if (immature > 0) Doc.formatCoinValue((immature), ui)
-        if (locked > 0) Doc.formatCoinValue((locked), ui)
+        if (immature > 0) tmpl.immature.textContent = Doc.formatCoinValue(immature, ui)
+        if (locked > 0) tmpl.locked.textContent = Doc.formatCoinValue(locked, ui)
         tmpl.avail.textContent = Doc.formatCoinValue(available, ui)
         tmpl.allocation.textContent = String(total ? Math.round((available + locked + immature) / total * 100) : 0) + '%'
       }
@@ -2281,11 +2281,15 @@ export default class WalletsPage extends BasePage {
 
   async showSendForm () {
     const { page, selectedTicker: { networkAssets } } = this
+    if (networkAssets.length === 1) return this.showSendAssetForm(networkAssets[0].assetID)
     const fundedAssets: NetworkAsset[] = []
     for (const ca of networkAssets) if (ca.bal.available > 0) fundedAssets.push(ca)
-    if (fundedAssets.length === 1) return this.showSendAssetForm(fundedAssets[0].assetID)
+    if (fundedAssets.length <= 1) {
+      const assetID = fundedAssets.length === 1 ? fundedAssets[0].assetID : networkAssets[0].assetID
+      return this.showSendAssetForm(assetID)
+    }
     Doc.empty(page.netSelectBox)
-    for (const { assetID, chainLogo, chainName, bal, ui } of networkAssets) {
+    for (const { assetID, chainLogo, chainName, bal, ui } of fundedAssets) {
       const bttn = Doc.clone(page.netSelectBttnTmpl)
       page.netSelectBox.appendChild(bttn)
       const tmpl = Doc.parseTemplate(bttn)
