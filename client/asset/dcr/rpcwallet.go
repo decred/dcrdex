@@ -19,6 +19,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
+	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	"decred.org/dcrwallet/v5/rpc/client/dcrwallet"
 	walletjson "decred.org/dcrwallet/v5/rpc/jsonrpc/types"
 	"decred.org/dcrwallet/v5/wallet"
@@ -1177,11 +1178,38 @@ func (w *rpcWallet) VotingPreferences(ctx context.Context) ([]*walletjson.VoteCh
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("unable to get treasury policy: %v", err)
 	}
-	treasuryPolicy := make([]*walletjson.TreasuryPolicyResult, len(treasuryRes))
-	for i, v := range treasuryRes {
-		tp := v
-		treasuryPolicy[i] = &tp
+
+	// Track existing keys to avoid duplicates when adding defaults.
+	existingKeys := make(map[string]bool)
+	treasuryPolicy := make([]*walletjson.TreasuryPolicyResult, 0, len(treasuryRes))
+	for i := range treasuryRes {
+		existingKeys[treasuryRes[i].Key] = true
+		tp := treasuryRes[i]
+		treasuryPolicy = append(treasuryPolicy, &tp)
 	}
+
+	// Add default Pi keys from network params if not already present.
+	// This allows users to see and set policies for treasury keys without
+	// having to manually discover and add them.
+	var net dex.Network
+	switch w.chainParams.Net {
+	case wire.MainNet:
+		net = dex.Mainnet
+	case wire.TestNet3:
+		net = dex.Testnet
+	default:
+		net = dex.Simnet
+	}
+	for _, piKey := range dexdcr.PiKeysForNet(net) {
+		keyHex := hex.EncodeToString(piKey)
+		if !existingKeys[keyHex] {
+			treasuryPolicy = append(treasuryPolicy, &walletjson.TreasuryPolicyResult{
+				Key:    keyHex,
+				Policy: "", // No policy set yet (abstain)
+			})
+		}
+	}
+
 	return voteChoices, tSpendPolicy, treasuryPolicy, nil
 }
 
