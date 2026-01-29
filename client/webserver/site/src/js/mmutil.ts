@@ -7,7 +7,6 @@ import {
   MarketMakingStatus,
   ExchangeBalance,
   RunStats,
-  StartConfig,
   MarketWithHost,
   RunningBotInventory,
   Spot,
@@ -112,7 +111,7 @@ class MarketMakerBot {
     return postJSON('/api/maxfundingfees', { market, maxBuyPlacements, maxSellPlacements, baseOptions, quoteOptions })
   }
 
-  async startBot (config: StartConfig) {
+  async startBot (config: MarketWithHost) {
     return await postJSON('/api/startmarketmakingbot', { config })
   }
 
@@ -504,9 +503,9 @@ export class BotMarket {
   status () {
     const { baseID, quoteID } = this
     const botStatus = app().mmStatus.bots.find((s: MMBotStatus) => s.config.baseID === baseID && s.config.quoteID === quoteID)
-    if (!botStatus) return { botCfg: {} as BotConfig, running: false, runStats: {} as RunStats }
-    const { config: botCfg, running, runStats, latestEpoch, cexProblems } = botStatus
-    return { botCfg, running, runStats, latestEpoch, cexProblems }
+    if (!botStatus) return { botCfg: {} as BotConfig, running: false, stopping: false, runStats: {} as RunStats }
+    const { config: botCfg, running, stopping, runStats, latestEpoch, cexProblems } = botStatus
+    return { botCfg, running, stopping, runStats, latestEpoch, cexProblems }
   }
 
   /*
@@ -596,6 +595,7 @@ export class RunningMarketMakerDisplay {
   dexBalancesRowTmpl: PageElement
   placementRowTmpl: PageElement
   placementAmtRowTmpl: PageElement
+  loaderCleanup: (() => void) | null = null
 
   constructor (div: PageElement, forms: Forms, elements: RunningMMDisplayElements, page: string) {
     this.div = div
@@ -621,10 +621,11 @@ export class RunningMarketMakerDisplay {
   }
 
   async stop () {
-    const { page, mkt: { host, baseID, quoteID } } = this
-    const loaded = app().loading(page.stopBttn)
+    const { mkt: { host, baseID, quoteID } } = this
     await MM.stopBot({ host, baseID: baseID, quoteID: quoteID })
-    loaded()
+    // Refresh status to get the new stopping state and show spinner
+    await app().fetchMMStatus()
+    this.update()
   }
 
   async setMarket (host: string, baseID: number, quoteID: number) {
@@ -726,11 +727,19 @@ export class RunningMarketMakerDisplay {
       }
     } = this
     // Get fresh stats
-    const { botCfg: { cexName, basicMarketMakingConfig: bmmCfg }, runStats, latestEpoch, cexProblems } = this.mkt.status()
+    const { botCfg: { cexName, basicMarketMakingConfig: bmmCfg }, stopping, runStats, latestEpoch, cexProblems } = this.mkt.status()
     const { cexBaseID, cexQuoteID } = this.mkt.cfg
 
     this.latestEpoch = latestEpoch
     this.cexProblems = cexProblems
+
+    // Show loading spinner on stop button while bot is stopping
+    if (stopping && !this.loaderCleanup) {
+      this.loaderCleanup = app().loading(page.stopBttn)
+    } else if (!stopping && this.loaderCleanup) {
+      this.loaderCleanup()
+      this.loaderCleanup = null
+    }
 
     Doc.hide(page.stats, page.cexRow, page.pendingDepositBox, page.pendingWithdrawalBox)
 

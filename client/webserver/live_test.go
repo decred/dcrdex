@@ -2149,17 +2149,16 @@ func (m *TMarketMaker) MarketReport(host string, baseID, quoteID uint32) (*mm.Ma
 	}, nil
 }
 
-func (m *TMarketMaker) StartBot(startCfg *mm.StartConfig, alternateConfigPath *string, appPW []byte, overrideLotSizeUpdate bool) (err error) {
+func (m *TMarketMaker) StartBot(mkt *mm.MarketWithHost, alternateConfigPath *string, appPW []byte, overrideLotSizeUpdate bool) (err error) {
 	m.runningBotsMtx.Lock()
 	defer m.runningBotsMtx.Unlock()
 
-	mkt := startCfg.MarketWithHost
-	_, running := m.runningBots[mkt]
+	_, running := m.runningBots[*mkt]
 	if running {
 		return fmt.Errorf("bot already running for %s", mkt)
 	}
 	startTime := time.Now().Unix()
-	m.runningBots[mkt] = startTime
+	m.runningBots[*mkt] = startTime
 
 	m.core.noteFeed <- &struct {
 		db.Notification

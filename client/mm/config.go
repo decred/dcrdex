@@ -117,18 +117,6 @@ func balanceDiffsToAllocation(diffs *BotInventoryDiffs) *BotBalanceAllocation {
 // should be created and the event log db should be updated to support both
 // versions.
 
-type rpcConfig struct {
-	Alloc         *BotBalanceAllocation `json:"alloc"`
-	AutoRebalance *AutoRebalanceConfig  `json:"autoRebalance"`
-}
-
-func (r *rpcConfig) copy() *rpcConfig {
-	return &rpcConfig{
-		Alloc:         r.Alloc.copy(),
-		AutoRebalance: r.AutoRebalance.copy(),
-	}
-}
-
 // BotConfig is the configuration for a market making bot.
 // The balance fields are the initial amounts that will be reserved to use for
 // this bot. As the bot trades, the amounts reserved for it will be updated.
@@ -156,13 +144,14 @@ type BotConfig struct {
 	// of the quote asset.
 	QuoteBridgeName string `json:"quoteBridgeName,omitempty"`
 
-	// UIConfig is settings defined and used by the front end to determine
-	// allocations.
+	// UIConfig is settings defined and used by the front end for UI state.
 	UIConfig json.RawMessage `json:"uiConfig,omitempty"`
 
-	// RPCConfig can be used for file-based initial allocations and
-	// auto-rebalance settings.
-	RPCConfig *rpcConfig `json:"rpcConfig"`
+	// Alloc is the balance allocation for this bot.
+	Alloc *BotBalanceAllocation `json:"alloc,omitempty"`
+
+	// AutoRebalance configures automatic rebalancing between DEX and CEX.
+	AutoRebalance *AutoRebalanceConfig `json:"autoRebalance,omitempty"`
 
 	// LotSize is the lot size of the market at the time this configuration
 	// was created. It is used to notify the user if the lot size changes
@@ -185,8 +174,11 @@ func (c *BotConfig) copy() *BotConfig {
 		b.UIConfig = make(json.RawMessage, len(c.UIConfig))
 		copy(b.UIConfig, c.UIConfig)
 	}
-	if c.RPCConfig != nil {
-		b.RPCConfig = c.RPCConfig.copy()
+	if c.Alloc != nil {
+		b.Alloc = c.Alloc.copy()
+	}
+	if c.AutoRebalance != nil {
+		b.AutoRebalance = c.AutoRebalance.copy()
 	}
 	if c.BasicMMConfig != nil {
 		b.BasicMMConfig = c.BasicMMConfig.copy()
@@ -212,23 +204,26 @@ func (c *BotConfig) updateLotSize(oldLotSize, newLotSize uint64) {
 }
 
 func (c *BotConfig) validate(configuredBridgesSupported func([]*configuredBridge) error) error {
-	bridges := make([]*configuredBridge, 0, 2)
-	if c.BaseID != c.CEXBaseID {
-		bridges = append(bridges, &configuredBridge{
-			dexAssetID: c.BaseID,
-			cexAssetID: c.CEXBaseID,
-			bridgeName: c.BaseBridgeName,
-		})
-	}
-	if c.QuoteID != c.CEXQuoteID {
-		bridges = append(bridges, &configuredBridge{
-			dexAssetID: c.QuoteID,
-			cexAssetID: c.CEXQuoteID,
-			bridgeName: c.QuoteBridgeName,
-		})
-	}
-	if err := configuredBridgesSupported(bridges); err != nil {
-		return err
+	// Only validate bridges if CEX is configured (DEX-only bots don't need bridge validation)
+	if c.CEXName != "" {
+		bridges := make([]*configuredBridge, 0, 2)
+		if c.BaseID != c.CEXBaseID {
+			bridges = append(bridges, &configuredBridge{
+				dexAssetID: c.BaseID,
+				cexAssetID: c.CEXBaseID,
+				bridgeName: c.BaseBridgeName,
+			})
+		}
+		if c.QuoteID != c.CEXQuoteID {
+			bridges = append(bridges, &configuredBridge{
+				dexAssetID: c.QuoteID,
+				cexAssetID: c.CEXQuoteID,
+				bridgeName: c.QuoteBridgeName,
+			})
+		}
+		if err := configuredBridgesSupported(bridges); err != nil {
+			return err
+		}
 	}
 
 	if c.BasicMMConfig != nil {

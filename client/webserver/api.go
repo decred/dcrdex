@@ -1990,8 +1990,8 @@ func (s *WebServer) apiConfigureMixer(w http.ResponseWriter, r *http.Request) {
 
 func (s *WebServer) apiStartMarketMakingBot(w http.ResponseWriter, r *http.Request) {
 	var form struct {
-		Config *mm.StartConfig  `json:"config"`
-		AppPW  encode.PassBytes `json:"appPW"`
+		Config *mm.MarketWithHost `json:"config"`
+		AppPW  encode.PassBytes   `json:"appPW"`
 	}
 	defer form.AppPW.Clear()
 	if !readPost(w, r, &form) {

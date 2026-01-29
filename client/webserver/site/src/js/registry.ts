@@ -843,17 +843,11 @@ export interface QuickBalanceConfig {
 
 export interface UIConfig {
   quickBalance: QuickBalanceConfig
-  allocation: BotBalanceAllocation
   usingQuickBalance: boolean
   baseMinTransfer: number
   quoteMinTransfer: number
   cexRebalance: boolean
   internalTransfers: boolean
-}
-
-export interface StartConfig extends MarketWithHost {
-  autoRebalance?: AutoRebalanceConfig
-  alloc: BotBalanceAllocation
 }
 
 export interface BotConfig {
@@ -868,6 +862,8 @@ export interface BotConfig {
   quoteWalletOptions?: Record<string, string>
   cexName: string
   uiConfig: UIConfig
+  alloc?: BotBalanceAllocation
+  autoRebalance?: AutoRebalanceConfig
   basicMarketMakingConfig?: BasicMarketMakingConfig
   arbMarketMakingConfig?: ArbMarketMakingConfig
   simpleArbConfig?: SimpleArbConfig
@@ -1029,6 +1025,7 @@ export interface CEXProblems {
 export interface MMBotStatus {
   config: BotConfig
   running: boolean
+  stopping?: boolean
   runStats?: RunStats
   latestEpoch?: EpochReport
   cexProblems?: CEXProblems
