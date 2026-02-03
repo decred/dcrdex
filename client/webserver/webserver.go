@@ -10,13 +10,11 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/tls"
-	"embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"mime"
 	"net"
 	"net/http"
@@ -73,9 +71,6 @@ const (
 	// The basis for content-security-policy. connect-src must be the final
 	// directive so that it can be reliably supplemented on startup.
 	baseCSP = "default-src 'none'; script-src 'self'; img-src 'self' data:; style-src 'self'; font-src 'self'; connect-src 'self'"
-	// site is the common prefix for the site resources with respect to this
-	// webserver package.
-	site = "site"
 	// companionTokenTTL is the time-to-live for an unclaimed companion
 	// token. If the companion app does not scan the QR code within this
 	// window the token is automatically revoked.
@@ -91,13 +86,6 @@ var (
 var (
 	log   dex.Logger
 	unbip = dex.BipIDSymbol
-
-	//go:embed site/src/html/*.tmpl
-	htmlTmplRes    embed.FS
-	htmlTmplSub, _ = fs.Sub(htmlTmplRes, "site/src/html") // unrooted slash separated path as per io/fs.ValidPath
-
-	//go:embed site/dist site/src/img site/src/font
-	staticSiteRes embed.FS
 
 	latestVersionRegex = regexp.MustCompile(`\d+(\.\d+)+`)
 )
@@ -159,7 +147,7 @@ type clientCore interface {
 	UpdateCert(host string, cert []byte) error
 	UpdateDEXHost(oldHost, newHost string, appPW []byte, certI any) (*core.Exchange, error)
 	WalletRestorationInfo(pw []byte, assetID uint32) ([]*asset.WalletRestoration, error)
-	ToggleRateSourceStatus(src string, disable bool) error
+	ToggleRateSourceStatus(src string, enable bool) error
 	FiatRateSources() map[string]bool
 	EstimateSendTxFee(address string, assetID uint32, value uint64, subtract, maxWithdraw bool) (fee uint64, isValidAddress bool, err error)
 	ValidateAddress(address string, assetID uint32) (bool, error)
@@ -200,6 +188,7 @@ type clientCore interface {
 	Proposal(assetID uint32, token string) (*pi.Proposal, error)
 	ProposalsInProgress() ([]*pi.MiniProposal, error)
 	CastVote(assetID uint32, pw []byte, token, bit string) error
+	ValidateSeed(seed string) (bool, error)
 }
 
 type MMCore interface {
@@ -348,12 +337,15 @@ func New(cfg *Config) (*WebServer, error) {
 		execPath = filepath.Dir(execPath) // e.g. /opt/decred/dex
 
 		absDir, _ := filepath.Abs(site)
-		for _, dir := range []string{
+
+		paths := []string{
 			cfg.CustomSiteDir,
 			filepath.Join(execPath, site),
+			filepath.Clean(filepath.Join(execPath, "../../webserver/"+site)),
 			absDir,
-			filepath.Clean(filepath.Join(execPath, "../../webserver/site")),
-		} {
+		}
+
+		for _, dir := range paths {
 			if dir == "" {
 				continue
 			}
@@ -370,7 +362,6 @@ func New(cfg *Config) (*WebServer, error) {
 				"or run bisonw from within the client/cmd/bisonw source workspace folder, or specify the"+
 				"'sitedir' configuration directive to bisonw.", execPath)
 		}
-
 		log.Infof("Located \"site\" folder at %v", siteDir)
 	} else {
 		// Developer should remember to rebuild the Go binary if they modify any
@@ -462,10 +453,6 @@ func New(cfg *Config) (*WebServer, error) {
 		s.companionTokenClaimed = true
 	}
 
-	if err := s.buildTemplates(lang); err != nil {
-		return nil, fmt.Errorf("error loading localized html templates: %v", err)
-	}
-
 	// Middleware
 	mux.Use(middleware.RequestLogger(&middleware.DefaultLogFormatter{
 		Logger: &chiLogger{ // logs with Trace()
@@ -502,63 +489,80 @@ func New(cfg *Config) (*WebServer, error) {
 	// The WebSocket handler is mounted on /ws in Connect.
 
 	// Webpages
-	mux.Group(func(web chi.Router) {
-		web.Use(s.tokenAuthMiddleware)
-		// Inject user info for handlers that use extractUserInfo, which
-		// includes most of the page handlers that use commonArgs to
-		// inject the User object for page template execution.
-		web.Use(s.authMiddleware)
-		web.Get(settingsRoute, s.handleSettings)
+	if !newUI {
+		if err := s.buildTemplates(lang); err != nil {
+			return nil, fmt.Errorf("error loading localized html templates: %v", err)
+		}
+		mux.Group(func(web chi.Router) {
+			web.Use(s.tokenAuthMiddleware)
+			// Inject user info for handlers that use extractUserInfo, which
+			// includes most of the page handlers that use commonArgs to
+			// inject the User object for page template execution.
+			web.Use(s.authMiddleware)
+			web.Get(settingsRoute, s.handleSettings)
 
-		web.Get("/generateqrcode", s.handleGenerateQRCode)
+			web.Get("/generateqrcode", s.handleGenerateQRCode)
+			web.Get("/generatecompanionappqrcode", s.handleGenerateCompanionAppQRCode)
 
-		web.Group(func(notInit chi.Router) {
-			notInit.Use(s.requireNotInit)
-			notInit.Get(initRoute, s.handleInit)
-		})
-
-		// The rest of the web handlers require initialization.
-		web.Group(func(webInit chi.Router) {
-			webInit.Use(s.requireInit)
-
-			webInit.Route(registerRoute, func(rr chi.Router) {
-				rr.Get("/", s.handleRegister)
-				rr.With(dexHostCtx).Get("/{host}", s.handleRegister)
+			web.Group(func(notInit chi.Router) {
+				notInit.Use(s.requireNotInit)
+				notInit.Get(initRoute, s.handleInit)
 			})
 
-			webInit.Group(func(webNoAuth chi.Router) {
-				// The login handler requires init but not auth since
-				// it performs the auth.
-				webNoAuth.Get(loginRoute, s.handleLogin)
+			// The rest of the web handlers require initialization.
+			web.Group(func(webInit chi.Router) {
+				webInit.Use(s.requireInit)
 
-				// The rest of these handlers require both init and auth.
-				webNoAuth.Group(func(webAuth chi.Router) {
-					webAuth.Use(s.requireLogin)
-					webAuth.Get(homeRoute, s.handleHome)
-					webAuth.Get(walletsRoute, s.handleWallets)
-					webAuth.Get(walletLogRoute, s.handleWalletLogFile)
-					webAuth.With(proposalTokenCtx).Get("/proposal/{token}", s.handleProposal)
-					webAuth.Get(proposalsRoute, s.handleProposals)
-					webAuth.Get("/generatecompanionappqrcode", s.handleGenerateCompanionAppQRCode)
+				webInit.Route(registerRoute, func(rr chi.Router) {
+					rr.Get("/", s.handleRegister)
+					rr.With(dexHostCtx).Get("/{host}", s.handleRegister)
 				})
-			})
 
-			// Handlers requiring a DEX connection.
-			webInit.Group(func(webDC chi.Router) {
-				webDC.Use(s.requireDEXConnection, s.requireLogin)
-				webDC.With(orderIDCtx).Get("/order/{oid}", s.handleOrder)
-				webDC.Get(ordersRoute, s.handleOrders)
-				webDC.Get(exportOrderRoute, s.handleExportOrders)
-				webDC.Get(marketsRoute, s.handleMarkets)
-				webDC.Get(mmSettingsRoute, s.handleMMSettings)
-				webDC.Get(mmArchivesRoute, s.handleMMArchives)
-				webDC.Get(mmLogsRoute, s.handleMMLogs)
-				webDC.Get(marketMakerRoute, s.handleMarketMaking)
-				webDC.With(dexHostCtx).Get("/dexsettings/{host}", s.handleDexSettings)
-			})
+				webInit.Group(func(webNoAuth chi.Router) {
+					// The login handler requires init but not auth since
+					// it performs the auth.
+					webNoAuth.Get(loginRoute, s.handleLogin)
 
+					// The rest of these handlers require both init and auth.
+					webNoAuth.Group(func(webAuth chi.Router) {
+						webAuth.Use(s.requireLogin)
+						webAuth.Get(homeRoute, s.handleHome)
+						webAuth.Get(walletsRoute, s.handleWallets)
+						webAuth.Get(walletLogRoute, s.handleWalletLogFile)
+						webAuth.With(proposalTokenCtx).Get("/proposal/{token}", s.handleProposal)
+						webAuth.Get(proposalsRoute, s.handleProposals)
+						webAuth.Get("/generatecompanionappqrcode", s.handleGenerateCompanionAppQRCode)
+					})
+				})
+
+				// Handlers requiring a DEX connection.
+				webInit.Group(func(webDC chi.Router) {
+					webDC.Use(s.requireDEXConnection, s.requireLogin)
+					webDC.With(orderIDCtx).Get("/order/{oid}", s.handleOrder)
+					webDC.Get(ordersRoute, s.handleOrders)
+					webDC.Get(exportOrderRoute, s.handleExportOrders)
+					webDC.Get(marketsRoute, s.handleMarkets)
+					webDC.Get(mmSettingsRoute, s.handleMMSettings)
+					webDC.Get(mmArchivesRoute, s.handleMMArchives)
+					webDC.Get(mmLogsRoute, s.handleMMLogs)
+					webDC.Get(marketMakerRoute, s.handleMarketMaking)
+					webDC.With(dexHostCtx).Get("/dexsettings/{host}", s.handleDexSettings)
+				})
+
+			})
 		})
-	})
+	} else { // new UI. Only serve index.html.
+		mux.Group(func(r chi.Router) {
+			r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
+				upath := r.URL.Path
+				if strings.Contains(upath, "..") {
+					http.Error(w, "Invalid path", http.StatusBadRequest)
+					return
+				}
+				http.ServeFile(w, r, filepath.Join(siteDir, "dist", "index.html"))
+			})
+		})
+	}
 
 	// api endpoints
 	mux.Route("/api", func(r chi.Router) {
@@ -570,6 +574,7 @@ func New(cfg *Config) (*WebServer, error) {
 		r.Post("/locale", s.apiLocale)
 		r.Post("/setlocale", s.apiSetLocale)
 		r.Get("/buildinfo", s.apiBuildInfo)
+		r.Get("/validateseed", s.apiValidateSeed)
 
 		r.Group(func(apiInit chi.Router) {
 			apiInit.Use(s.rejectUninited)
@@ -679,6 +684,11 @@ func New(cfg *Config) (*WebServer, error) {
 	fileServer(mux, "/css", siteDir, "dist", "text/css")
 	fileServer(mux, "/img", siteDir, "src/img", "")
 	fileServer(mux, "/font", siteDir, "src/font", "")
+
+	// New UI has Coinpaprika enabled by default
+	if newUI {
+		s.core.ToggleRateSourceStatus("Coinpaprika", true)
+	}
 
 	return s, nil
 }

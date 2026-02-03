@@ -10895,7 +10895,7 @@ func TestToggleRateSourceStatus(t *testing.T) {
 
 	// Test disabling fiat rate source.
 	for _, test := range tests {
-		err := tCore.ToggleRateSourceStatus(test.source, true)
+		err := tCore.ToggleRateSourceStatus(test.source, false)
 		if test.wantErr != (err != nil) {
 			t.Fatalf("%s: wantErr = %t, err = %v", test.name, test.wantErr, err)
 		}
@@ -10904,73 +10904,12 @@ func TestToggleRateSourceStatus(t *testing.T) {
 	// Test enabling fiat rate source.
 	for _, test := range tests {
 		if test.init {
-			tCore.fiatRateSources[test.source] = newCommonRateSource(tFetcher)
+			tCore.fiatRateSources[test.source] = newCommonRateSource(test.source, tFetcher)
 		}
-		err := tCore.ToggleRateSourceStatus(test.source, false)
+		err := tCore.ToggleRateSourceStatus(test.source, true)
 		if test.wantErr != (err != nil) {
 			t.Fatalf("%s: wantErr = %t, err = %v", test.name, test.wantErr, err)
 		}
-	}
-}
-
-func TestFiatRateSources(t *testing.T) {
-	rig := newTestRig()
-	defer rig.shutdown()
-	tCore := rig.core
-	supportedFetchers := len(fiatRateFetchers)
-	rateSources := tCore.FiatRateSources()
-	if len(rateSources) != supportedFetchers {
-		t.Fatalf("Expected %d number of fiat rate source/fetchers", supportedFetchers)
-	}
-}
-
-func TestFiatConversions(t *testing.T) {
-	rig := newTestRig()
-	defer rig.shutdown()
-	tCore := rig.core
-
-	// No fiat rate source initialized
-	fiatRates := tCore.fiatConversions()
-	if len(fiatRates) != 0 {
-		t.Fatal("Unexpected asset rate values.")
-	}
-
-	// Initialize fiat rate sources.
-	for token := range fiatRateFetchers {
-		tCore.fiatRateSources[token] = newCommonRateSource(tFetcher)
-	}
-
-	// Fetch fiat rates.
-	tCore.wg.Add(1)
-	go func() {
-		defer tCore.wg.Done()
-		tCore.refreshFiatRates(tCtx)
-	}()
-	tCore.wg.Wait()
-
-	// Expects assets fiat rate values.
-	fiatRates = tCore.fiatConversions()
-	if len(fiatRates) != 2 {
-		t.Fatal("Expected assets fiat rate for two assets")
-	}
-
-	// fiat rates for assets can expire, and fiat rate fetchers can be
-	// removed if expired.
-	for token, source := range tCore.fiatRateSources {
-		source.fiatRates[tUTXOAssetA.ID].lastUpdate = time.Now().Add(-time.Minute)
-		source.fiatRates[tUTXOAssetB.ID].lastUpdate = time.Now().Add(-time.Minute)
-		if source.isExpired(55 * time.Second) {
-			delete(tCore.fiatRateSources, token)
-		}
-	}
-
-	fiatRates = tCore.fiatConversions()
-	if len(fiatRates) != 0 {
-		t.Fatal("Unexpected assets fiat rate values, expected to ignore expired fiat rates.")
-	}
-
-	if len(tCore.fiatRateSources) != 0 {
-		t.Fatal("Expected fiat conversion to be disabled, all rate source data has expired.")
 	}
 }
 

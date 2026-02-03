@@ -97,21 +97,6 @@ func (s *WebServer) tokenAuthMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// extractBooleanCookie extracts the cookie value with key k from the Request,
-// and interprets the value as true only if it's equal to the string "1".
-func extractBooleanCookie(r *http.Request, k string, defaultVal bool) bool {
-	cookie, err := r.Cookie(k)
-	switch {
-	// Dark mode is the default
-	case err == nil:
-		return cookie.Value == "1"
-	case errors.Is(err, http.ErrNoCookie):
-	default:
-		log.Errorf("Cookie %q retrieval error: %v", k, err)
-	}
-	return defaultVal
-}
-
 // requireInit ensures that the core app is initialized before allowing the
 // incoming request to proceed. Redirects to the register page if the app is
 // not initialized.

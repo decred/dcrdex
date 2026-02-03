@@ -965,6 +965,25 @@ func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *WebServer) apiValidateSeed(w http.ResponseWriter, r *http.Request) {
+	var seed string
+	if !readPost(w, r, &seed) {
+		return
+	}
+
+	ok, err := s.core.ValidateSeed(seed)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error validating seed: %w", err))
+		return
+	}
+
+	writeJSON(w, struct {
+		OK bool `json:"ok"`
+	}{
+		OK: ok,
+	})
+}
+
 // apiIsInitialized is the handler for the '/isinitialized' request.
 func (s *WebServer) apiIsInitialized(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, &struct {
@@ -1647,13 +1666,13 @@ func (s *WebServer) apiUser(w http.ResponseWriter, r *http.Request) {
 // apiToggleRateSource handles the /toggleratesource API request.
 func (s *WebServer) apiToggleRateSource(w http.ResponseWriter, r *http.Request) {
 	form := &struct {
-		Disable bool   `json:"disable"`
-		Source  string `json:"source"`
+		Enable bool   `json:"enable"`
+		Source string `json:"source"`
 	}{}
 	if !readPost(w, r, form) {
 		return
 	}
-	err := s.core.ToggleRateSourceStatus(form.Source, form.Disable)
+	err := s.core.ToggleRateSourceStatus(form.Source, form.Enable)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error disabling/enabling rate source: %w", err))
 		return
@@ -2306,6 +2325,7 @@ func (s *WebServer) writeAPIError(w http.ResponseWriter, err error) {
 	innerErr := core.UnwrapErr(err)
 	resp := &standardResponse{
 		OK:   false,
+		Bad:  true,
 		Msg:  innerErr.Error(),
 		Code: code,
 	}

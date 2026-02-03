@@ -25,7 +25,6 @@ const (
 
 	// Tokens. Used to identify fiat rate source, source name must not contain a
 	// comma.
-	messari       = "Messari"
 	coinpaprika   = "Coinpaprika"
 	dcrdataDotOrg = "dcrdata"
 )
@@ -64,6 +63,7 @@ type fiatRateInfo struct {
 type rateFetcher func(context context.Context, logger dex.Logger, assets map[uint32]*SupportedAsset) map[uint32]float64
 
 type commonRateSource struct {
+	source     string
 	fetchRates rateFetcher
 
 	mtx       sync.RWMutex
@@ -114,7 +114,7 @@ func (source *commonRateSource) refreshRates(ctx context.Context, logger dex.Log
 }
 
 // Used to initialize a fiat rate source.
-func newCommonRateSource(fetcher rateFetcher) *commonRateSource {
+func newCommonRateSource(name string, fetcher rateFetcher) *commonRateSource {
 	return &commonRateSource{
 		fetchRates: fetcher,
 		fiatRates:  make(map[uint32]*fiatRateInfo),

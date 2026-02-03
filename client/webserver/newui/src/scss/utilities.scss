@@ -1,0 +1,256 @@
+@use "sass:map";
+@use "sass:meta";
+@use "sass:list";
+
+// Minimal Bootstrap Utilities API Replication
+// --------------------------------------------------------------------------
+
+// 1. Variables & Dependencies
+// --------------------------------------------------------------------------
+$spacer: 1rem !default;
+$spacers: (
+  0: 0,
+  1: $spacer * .25,
+  2: $spacer * .5,
+  3: $spacer,
+  4: $spacer * 1.5,
+  5: $spacer * 3,
+  ) !default;
+
+$grid-breakpoints: (
+  xs: 0,
+  sm: 576px,
+  md: 768px,
+  lg: 992px,
+  xl: 1200px,
+  xxl: 1400px) !default;
+
+
+
+// 2. Functions & Mixins
+// --------------------------------------------------------------------------
+@function breakpoint-min($name, $breakpoints: $grid-breakpoints) {
+  $min: map.get($breakpoints, $name
+  );
+@if $min !=0 {
+  @return $min;
+}
+@else {
+  @return null;
+}
+}
+
+@function breakpoint-infix($name, $breakpoints: $grid-breakpoints) {
+  @if breakpoint-min($name, $breakpoints)==null {
+    @return "";
+  }
+  @else {
+    @return "-#{$name}";
+  }
+}
+
+@mixin media-breakpoint-up($name, $breakpoints: $grid-breakpoints) {
+  $min: breakpoint-min($name, $breakpoints);
+  @if $min {
+    @media (min-width: $min) {
+      @content;
+    }
+  }
+  @else {
+    @content;
+  }
+}
+
+@mixin generate-utility($utility, $infix) {
+  $values: map.get($utility, values);
+
+  // If the values are a list or string, convert it into a map
+  @if meta.type-of($values)=="string" or meta.type-of(list.nth($values, 1)) !="list" {
+    $values: list.zip($values, $values);
+  }
+
+  @each $key, $value in $values {
+    $properties: map.get($utility, property);
+
+    // Multiple properties are possible
+    @if meta.type-of($properties)=="string" {
+      $properties: list.append((), $properties);
+    }
+
+    // Use custom class if present
+    $property-class: null;
+    @if map.has-key($utility, class) {
+      $property-class: map.get($utility, class);
+    }
+    @else {
+      $property-class: list.nth($properties, 1);
+    }
+
+    @if $property-class ==null {
+      $property-class: "";
+    }
+
+    // Don't prefix if value key is null
+    $property-class-modifier: "";
+    @if $key {
+      $infix-part: "-";
+      @if $property-class =="" and $infix =="" {
+        $infix-part: "";
+      }
+      $property-class-modifier: $infix-part + $key;
+    }
+
+    @if $value !=null {
+      .#{$property-class + $infix + $property-class-modifier} {
+        @each $property in $properties {
+          #{$property}: $value;
+        }
+      }
+    }
+  }
+}
+
+// 3. Utilities Map Configuration
+// --------------------------------------------------------------------------
+$utilities: (
+  "display": (responsive: true,
+    print: true,
+    property: display,
+    class: d,
+    values: inline inline-block block grid inline-grid table table-row table-cell flex inline-flex none),
+  "flex": (responsive: true,
+    property: flex,
+    values: (fill: 1 1 auto)),
+  "flex-direction": ( // probably don't need all of these.
+    responsive: true,
+    property: flex-direction,
+    class: flex,
+    values: row column row-reverse column-reverse),
+  "align-items": (property: align-items,
+    values: (start: flex-start,
+      end: flex-end,
+      center: center,
+      baseline: baseline,
+      stretch: stretch,
+    )),
+  "justify-content": (property: justify-content,
+    values: (start: flex-start,
+      end: flex-end,
+      center: center,
+      between: space-between,
+      around: space-around,
+      evenly: space-evenly,
+    )),
+  "padding": (property: padding,
+    class: p,
+    values: $spacers ),
+  "padding-x": (property: padding-right padding-left,
+    class: px,
+    values: $spacers ),
+  "padding-y": (property: padding-top padding-bottom,
+    class: py,
+    values: $spacers ),
+  "padding-top": (property: padding-top,
+    class: pt,
+    values: $spacers ),
+  "padding-end": (property: padding-right,
+    class: pe,
+    values: $spacers ),
+  "padding-bottom": (property: padding-bottom,
+    class: pb,
+    values: $spacers ),
+  "padding-start": (property: padding-left,
+    class: ps,
+    values: $spacers ),
+  "margin": (property: margin,
+    class: m,
+    values: map.merge($spacers, (auto: auto))),
+  "margin-x": (property: margin-right margin-left,
+    class: mx,
+    values: map.merge($spacers, (auto: auto))),
+  "margin-y": (property: margin-top margin-bottom,
+    class: my,
+    values: map.merge($spacers, (auto: auto))),
+  "margin-top": (property: margin-top,
+    class: mt,
+    values: map.merge($spacers, (auto: auto))),
+  "margin-end": (property: margin-right,
+    class: me,
+    values: map.merge($spacers, (auto: auto))),
+  "margin-bottom": (property: margin-bottom,
+    class: mb,
+    values: map.merge($spacers, (auto: auto))),
+  "margin-start": (property: margin-left,
+    class: ms,
+    values: map.merge($spacers, (auto: auto))),
+  "border": (property: border,
+    values: (null: 1px solid var(--border-color),
+      0: 0,
+    )),
+  "border-top": (property: border-top,
+    values: (null: 1px solid var(--border-color),
+      0: 0,
+    )),
+  "border-right": (property: border-right,
+    class: border-right,
+    values: (null: 1px solid var(--border-color),
+      0: 0,
+    )),
+  "border-bottom": (property: border-bottom,
+    values: (null: 1px solid var(--border-color),
+      0: 0,
+    )),
+  "border-left": (property: border-left,
+    class: border-left,
+    values: (null: 1px solid var(--border-color),
+      0: 0,
+    )),
+  "border-style": (property: border-style,
+    values: (dashed: dashed)),
+  "width": (property: width,
+    class: w,
+    values: (25: 25%,
+      50: 50%,
+      75: 75%,
+      100: 100%,
+      auto: auto)),
+  "height": (property: height,
+    class: h,
+    values: (100: 100%)),
+  "text-align": (property: text-align,
+    class: text,
+    values: (left: left,
+      right: right,
+      center: center,
+      justify: justify,
+    )),
+);
+
+// 4. Generation Loop
+// --------------------------------------------------------------------------
+
+// Loop over all breakpoints
+@each $breakpoint in map.keys($grid-breakpoints) {
+  @include media-breakpoint-up($breakpoint) {
+    $infix: breakpoint-infix($breakpoint, $grid-breakpoints);
+
+    @each $key, $utility in $utilities {
+      // The utility can be disabled with `false`, thus check if the utility is a map first
+      // Only proceed if responsive media queries are enabled or if it's the base media query
+      @if meta.type-of($utility)=="map" and (map.get($utility, responsive) or $infix =="") {
+        @include generate-utility($utility, $infix);
+      }
+    }
+  }
+}
+
+// Print utilities
+@media print {
+  @each $key, $utility in $utilities {
+    // The utility can be disabled with `false`, thus check if the utility is a map first
+    // Then check if the utility needs print styles
+    @if meta.type-of($utility)=="map" and map.get($utility, print)==true {
+      @include generate-utility($utility, "-print");
+    }
+  }
+}
