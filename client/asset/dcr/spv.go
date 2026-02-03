@@ -20,7 +20,6 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
-	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	"decred.org/dcrdex/dex/utils"
 	"decred.org/dcrwallet/v5/chain"
 	walleterrors "decred.org/dcrwallet/v5/errors"
@@ -1264,19 +1263,10 @@ func (w *spvWallet) VotingPreferences(ctx context.Context) ([]*walletjson.VoteCh
 		treasuryPolicy = append(treasuryPolicy, &r)
 	}
 
-	// Add default Pi keys from network params if not already present.
+	// Add default Pi keys from chain params if not already present.
 	// This allows users to see and set policies for treasury keys without
 	// having to manually discover and add them.
-	var net dex.Network
-	switch w.chainParams.Net {
-	case wire.MainNet:
-		net = dex.Mainnet
-	case wire.TestNet3:
-		net = dex.Testnet
-	default:
-		net = dex.Simnet
-	}
-	for _, piKey := range dexdcr.PiKeysForNet(net) {
+	for _, piKey := range w.chainParams.PiKeys {
 		keyHex := hex.EncodeToString(piKey)
 		if !existingKeys[keyHex] {
 			treasuryPolicy = append(treasuryPolicy, &walletjson.TreasuryPolicyResult{
