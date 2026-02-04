@@ -1246,15 +1246,34 @@ func (w *spvWallet) VotingPreferences(ctx context.Context) ([]*walletjson.VoteCh
 
 	policies := w.dcrWallet.TreasuryKeyPolicies()
 	treasuryPolicy := make([]*walletjson.TreasuryPolicyResult, 0, len(policies))
+
+	// Track existing keys to avoid duplicates when adding defaults.
+	existingKeys := make(map[string]bool)
+
 	for i := range policies {
+		keyHex := hex.EncodeToString(policies[i].PiKey)
+		existingKeys[keyHex] = true
 		r := walletjson.TreasuryPolicyResult{
-			Key:    hex.EncodeToString(policies[i].PiKey),
+			Key:    keyHex,
 			Policy: policyToStr(policies[i].Policy),
 		}
 		if policies[i].Ticket != nil {
 			r.Ticket = policies[i].Ticket.String()
 		}
 		treasuryPolicy = append(treasuryPolicy, &r)
+	}
+
+	// Add default Pi keys from chain params if not already present.
+	// This allows users to see and set policies for treasury keys without
+	// having to manually discover and add them.
+	for _, piKey := range w.chainParams.PiKeys {
+		keyHex := hex.EncodeToString(piKey)
+		if !existingKeys[keyHex] {
+			treasuryPolicy = append(treasuryPolicy, &walletjson.TreasuryPolicyResult{
+				Key:    keyHex,
+				Policy: "", // No policy set yet (abstain)
+			})
+		}
 	}
 
 	return voteChoices, tSpendPolicy, treasuryPolicy, nil

@@ -1177,11 +1177,29 @@ func (w *rpcWallet) VotingPreferences(ctx context.Context) ([]*walletjson.VoteCh
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("unable to get treasury policy: %v", err)
 	}
-	treasuryPolicy := make([]*walletjson.TreasuryPolicyResult, len(treasuryRes))
-	for i, v := range treasuryRes {
-		tp := v
-		treasuryPolicy[i] = &tp
+
+	// Track existing keys to avoid duplicates when adding defaults.
+	existingKeys := make(map[string]bool)
+	treasuryPolicy := make([]*walletjson.TreasuryPolicyResult, 0, len(treasuryRes))
+	for i := range treasuryRes {
+		existingKeys[treasuryRes[i].Key] = true
+		tp := treasuryRes[i]
+		treasuryPolicy = append(treasuryPolicy, &tp)
 	}
+
+	// Add default Pi keys from chain params if not already present.
+	// This allows users to see and set policies for treasury keys without
+	// having to manually discover and add them.
+	for _, piKey := range w.chainParams.PiKeys {
+		keyHex := hex.EncodeToString(piKey)
+		if !existingKeys[keyHex] {
+			treasuryPolicy = append(treasuryPolicy, &walletjson.TreasuryPolicyResult{
+				Key:    keyHex,
+				Policy: "", // No policy set yet (abstain)
+			})
+		}
+	}
+
 	return voteChoices, tSpendPolicy, treasuryPolicy, nil
 }
 
