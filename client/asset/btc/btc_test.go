@@ -6141,7 +6141,7 @@ func TestAddressRecycling(t *testing.T) {
 	w.ar.WriteRecycledAddrsToFile()
 	b, _ := os.ReadFile(w.ar.recyclePath)
 	var fileAddrs []string
-	for _, addr := range strings.Split(string(b), "\n") {
+	for addr := range strings.SplitSeq(string(b), "\n") {
 		if addr == "" {
 			continue
 		}

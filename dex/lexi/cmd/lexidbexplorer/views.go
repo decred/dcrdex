@@ -55,7 +55,7 @@ func buildEntryDetailLines(entry entryData) []string {
 
 	// Key section
 	lines = append(lines, headerStyle.Render("Key:"))
-	for _, line := range strings.Split(formatKey(entry.key), "\n") {
+	for line := range strings.SplitSeq(formatKey(entry.key), "\n") {
 		lines = append(lines, keyStyle.Render(line))
 	}
 	lines = append(lines, "")
@@ -63,7 +63,7 @@ func buildEntryDetailLines(entry entryData) []string {
 	// Index key section (if present)
 	if len(entry.indexKey) > 0 {
 		lines = append(lines, headerStyle.Render("Index Key:"))
-		for _, line := range strings.Split(formatKey(entry.indexKey), "\n") {
+		for line := range strings.SplitSeq(formatKey(entry.indexKey), "\n") {
 			lines = append(lines, indexKeyStyle.Render(line))
 		}
 		lines = append(lines, "")
@@ -71,7 +71,7 @@ func buildEntryDetailLines(entry entryData) []string {
 
 	// Value section
 	lines = append(lines, headerStyle.Render("Value:"))
-	for _, line := range strings.Split(formatValue(entry.value), "\n") {
+	for line := range strings.SplitSeq(formatValue(entry.value), "\n") {
 		lines = append(lines, valueStyle.Render(line))
 	}
 
