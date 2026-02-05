@@ -41,8 +41,7 @@ func NewFiatOracle(cfg Config, tickerSymbols string, log dex.Logger) (*Oracle, e
 		listeners: make(map[string]chan<- map[string]*FiatRateInfo),
 	}
 
-	tickers := strings.Split(tickerSymbols, ",")
-	for _, ticker := range tickers {
+	for ticker := range strings.SplitSeq(tickerSymbols, ",") {
 		_, ok := dex.BipSymbolID(strings.ToLower(ticker))
 		if !ok {
 			return nil, fmt.Errorf("unknown asset %s", ticker)

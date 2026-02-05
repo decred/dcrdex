@@ -115,7 +115,7 @@ func parseSelector(unescapedSelector string) ([]byte, error) {
 	// Reassemble the fake ABI and constuct the JSON
 	arguments := make([]fakeArg, 0)
 	if len(args) > 0 {
-		for _, arg := range strings.Split(args, ",") {
+		for arg := range strings.SplitSeq(args, ",") {
 			arguments = append(arguments, fakeArg{arg})
 		}
 	}
