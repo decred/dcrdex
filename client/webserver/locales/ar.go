@@ -364,6 +364,7 @@ var Ar = map[string]*intl.Translation{
 	"URL":                             {T: "عنوان URL"},
 	"Oracle bias":                     {T: "انحياز أوراكل"},
 	"API Secret":                      {T: "سر واجهة برمجة التطبيقات"},
+	"API Passphrase":                  {T: "عبارة مرور واجهة برمجة التطبيقات"},
 	"Maker Swap":                      {T: "مقايضة صانع السوق"},
 	"fiat_rates":                      {T: "أسعار العملة الورقية"},
 	"Oracles":                         {T: "أوراكل"},

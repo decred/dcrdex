@@ -558,6 +558,7 @@ var EnUS = map[string]*intl.Translation{
 	"configure_cex_prompt":        {T: "Configure your exchange API to enable arbitrage features."},
 	"API Key":                     {T: "API Key"},
 	"API Secret":                  {T: "API Secret"},
+	"API Passphrase":              {T: "API Passphrase"},
 	"Available":                   {T: "Available"},
 	"Locked":                      {T: "Locked"},
 	"profit_loss":                 {T: "Profit / Loss"},

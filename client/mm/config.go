@@ -32,6 +32,8 @@ type CEXConfig struct {
 	APIKey string `json:"apiKey"`
 	// APISecret is the API secret for the CEX.
 	APISecret string `json:"apiSecret"`
+	// APIPassphrase is the API passphrase for the CEX (required by some exchanges like Bitget).
+	APIPassphrase string `json:"apiPassphrase,omitempty"`
 }
 
 // AutoRebalanceConfig configures deposits and withdrawals by setting minimum
@@ -131,12 +133,12 @@ type BotConfig struct {
 	CEXName string `json:"cexName"`
 	// CEXBaseID will be different from BaseID if the bot is configured to arbitrage
 	// with a CEX, but the DEX base asset must be bridged to the CEX base asset before
-	// deposits and after withdrawals.
-	CEXBaseID uint32 `json:"cexBaseID,omitempty"`
+	// deposits and after withdrawals. When CEXName is set, this defaults to BaseID.
+	CEXBaseID uint32 `json:"cexBaseID"`
 	// CEXQuoteID will be different from QuoteID if the bot is configured to arbitrage
 	// with a CEX, but the DEX quote asset must be bridged to the CEX quote asset before
-	// deposits and after withdrawals.
-	CEXQuoteID uint32 `json:"cexQuoteID,omitempty"`
+	// deposits and after withdrawals. When CEXName is set, this defaults to QuoteID.
+	CEXQuoteID uint32 `json:"cexQuoteID"`
 	// BaseBridgeName is the name of the bridge to use for deposits and withdrawals
 	// of the base asset.
 	BaseBridgeName string `json:"baseBridgeName,omitempty"`

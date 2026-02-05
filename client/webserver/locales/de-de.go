@@ -550,6 +550,7 @@ var DeDE = map[string]*intl.Translation{
 	"configure_cex_prompt":        {T: "Konfiguriere deine Exchange-API, um Arbitrage-Funktionen zu aktivieren."},
 	"API Key":                     {T: "API Key"},
 	"API Secret":                  {T: "API Secret"},
+	"API Passphrase":              {T: "API Passphrase"},
 	"Available":                   {T: "Verfügbar"},
 	"Locked":                      {T: "Gesperrt"},
 	"profit_loss":                 {T: "Profit / Verlust"},

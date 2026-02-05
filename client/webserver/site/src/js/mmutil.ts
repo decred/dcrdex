@@ -59,6 +59,10 @@ export const CEXDisplayInfos: Record<string, CEXDisplayInfo> = {
     name: 'Binance U.S.',
     logo: '/img/binance.us.png'
   },
+  'Bitget': {
+    name: 'Bitget',
+    logo: '/img/bitget.com.png'
+  },
   'Coinbase': {
     name: 'Coinbase',
     logo: '/img/coinbase.com.png'

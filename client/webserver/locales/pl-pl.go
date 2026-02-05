@@ -545,4 +545,5 @@ var PlPL = map[string]*intl.Translation{
 	"configure_cex_prompt":        {T: "Skonfiguruj API swojej giełdy, aby włączyć funkcję arbitrażu."},
 	"API Key":                     {T: "Klucz API"},
 	"API Secret":                  {T: "Sekret API"},
+	"API Passphrase":              {T: "Hasło API"},
 }

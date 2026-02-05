@@ -178,6 +178,8 @@ func NewMarketMaker(c clientCore, eventLogDBPath, cfgPath string, log dex.Logger
 		if err := json.Unmarshal(b, &cfg); err != nil {
 			return nil, fmt.Errorf("error unmarshaling config file: %v", err)
 		}
+		// Normalize all bot configs after loading
+		normalizeBotConfigs(&cfg)
 	}
 
 	return &MarketMaker{
@@ -593,7 +595,7 @@ func (m *MarketMaker) loadCEX(ctx context.Context, cfg *CEXConfig) (*centralized
 	defer m.cexMtx.Unlock()
 	var success bool
 	if cex := m.cexes[cfg.Name]; cex != nil {
-		if cex.APIKey == cfg.APIKey && cex.APISecret == cfg.APISecret {
+		if cex.APIKey == cfg.APIKey && cex.APISecret == cfg.APISecret && cex.APIPassphrase == cfg.APIPassphrase {
 			return cex, nil
 		}
 		if m.cexInUse(cfg.Name) {
@@ -611,11 +613,12 @@ func (m *MarketMaker) loadCEX(ctx context.Context, cfg *CEXConfig) (*centralized
 	}
 	logger := m.log.SubLogger(fmt.Sprintf("CEX-%s", cfg.Name))
 	cex, err := libxc.NewCEX(cfg.Name, &libxc.CEXConfig{
-		APIKey:    cfg.APIKey,
-		SecretKey: cfg.APISecret,
-		Logger:    logger,
-		Net:       m.core.Network(),
-		Notify: func(n any) {
+		APIKey:        cfg.APIKey,
+		SecretKey:     cfg.APISecret,
+		APIPassphrase: cfg.APIPassphrase,
+		Logger:        logger,
+		Net:           m.core.Network(),
+		Notify: func(n interface{}) {
 			m.handleCEXUpdate(cfg.Name, n)
 		},
 	})
@@ -675,7 +678,10 @@ func (m *MarketMaker) cexList() []*centralizedExchange {
 func (m *MarketMaker) defaultConfig() *MarketMakingConfig {
 	m.defaultCfgMtx.RLock()
 	defer m.defaultCfgMtx.RUnlock()
-	return m.defaultCfg.Copy()
+	cfg := m.defaultCfg.Copy()
+	// Ensure configs are normalized
+	normalizeBotConfigs(cfg)
+	return cfg
 }
 
 func (m *MarketMaker) Connect(ctx context.Context) (*sync.WaitGroup, error) {
@@ -771,6 +777,17 @@ func (m *MarketMaker) configsForMarket(mkt *MarketWithHost, alternateConfigPath 
 	}
 	if botConfig == nil {
 		return nil, nil, fmt.Errorf("no bot config found for %s", mkt)
+	}
+
+	// Normalize CEX asset IDs: if CEXName is set but CEXBaseID/CEXQuoteID are missing (0),
+	// default them to BaseID/QuoteID. This handles legacy configs that may be missing these fields.
+	if botConfig.CEXName != "" {
+		if botConfig.CEXBaseID == 0 {
+			botConfig.CEXBaseID = botConfig.BaseID
+		}
+		if botConfig.CEXQuoteID == 0 {
+			botConfig.CEXQuoteID = botConfig.QuoteID
+		}
 	}
 
 	if botConfig.CEXName != "" {
@@ -1033,6 +1050,21 @@ func (m *MarketMaker) StopBot(mkt *MarketWithHost) error {
 	return nil
 }
 
+// normalizeBotConfigs normalizes all bot configs in a MarketMakingConfig by setting
+// CEXBaseID and CEXQuoteID to BaseID and QuoteID when they're 0 and CEXName is set.
+func normalizeBotConfigs(cfg *MarketMakingConfig) {
+	for _, botCfg := range cfg.BotConfigs {
+		if botCfg.CEXName != "" {
+			if botCfg.CEXBaseID == 0 {
+				botCfg.CEXBaseID = botCfg.BaseID
+			}
+			if botCfg.CEXQuoteID == 0 {
+				botCfg.CEXQuoteID = botCfg.QuoteID
+			}
+		}
+	}
+}
+
 // StartBots starts all bots in the provided config file.
 func (m *MarketMaker) StartBots(cfgPath *string, appPW []byte) (started int, err error) {
 	cfg, err := getMarketMakingConfig(*cfgPath)
@@ -1089,6 +1121,9 @@ func getMarketMakingConfig(path string) (*MarketMakingConfig, error) {
 		return nil, err
 	}
 
+	// Normalize all bot configs after loading
+	normalizeBotConfigs(cfg)
+
 	return cfg, nil
 }
 
@@ -1109,6 +1144,16 @@ func (m *MarketMaker) writeConfigFile(cfg *MarketMakingConfig) error {
 }
 
 func (m *MarketMaker) updateDefaultBotConfig(updatedCfg *BotConfig) {
+	// Normalize CEX asset IDs before saving
+	if updatedCfg.CEXName != "" {
+		if updatedCfg.CEXBaseID == 0 {
+			updatedCfg.CEXBaseID = updatedCfg.BaseID
+		}
+		if updatedCfg.CEXQuoteID == 0 {
+			updatedCfg.CEXQuoteID = updatedCfg.QuoteID
+		}
+	}
+
 	cfg := m.defaultConfig()
 
 	var updated bool
