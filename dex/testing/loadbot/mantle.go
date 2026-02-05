@@ -9,10 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"net"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -248,14 +246,31 @@ func (m *Mantle) fatalError(s string, a ...any) {
 	}
 }
 
+// SetupSymmetricWallets creates wallets for both base and quote assets with
+// symmetric configuration based on the standard trading requirements.
+func (m *Mantle) SetupSymmetricWallets(numCoins int) {
+	minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig()
+	m.createWallet(baseSymbol, minBaseQty, maxBaseQty, numCoins)
+	m.createWallet(quoteSymbol, minQuoteQty, maxQuoteQty, numCoins)
+}
+
+// SymmetricWalletMinMax returns wallet min/max configuration for both assets.
+func (m *Mantle) SymmetricWalletMinMax() walletMinMax {
+	minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig()
+	return walletMinMax{
+		baseID:  {min: minBaseQty, max: maxBaseQty},
+		quoteID: {min: minQuoteQty, max: maxQuoteQty},
+	}
+}
+
 // order places an order on the market.
 func (m *Mantle) order(sell bool, qty, rate uint64) error {
 	_, err := m.Trade(pass, coreLimitOrder(sell, qty, rate))
 	if err != nil {
-		switch {
-		case isOverLimitError(err):
+		switch classifyOrderError(err) {
+		case OrderErrorOverLimit:
 			m.log.Infof("Over-limit error. Order not placed.")
-		case isApprovalPendingError(err):
+		case OrderErrorApprovalPending:
 			m.log.Infof("Approval-pending error. Order not placed")
 		default:
 			m.fatalError("Trade error (limit order, sell = %t, qty = %d, rate = %d): %v", sell, qty, rate, err)
@@ -288,7 +303,7 @@ func (m *Mantle) orderMetered(ords []*orderReq, dur time.Duration) {
 		return m.order(ord.sell, ord.qty, ord.rate)
 	}
 	err := placeOrder()
-	if isOverLimitError(err) || isApprovalPendingError(err) {
+	if isRecoverableOrderError(err) {
 		return
 	}
 	if len(ords) == 0 {
@@ -302,7 +317,7 @@ func (m *Mantle) orderMetered(ords []*orderReq, dur time.Duration) {
 			select {
 			case <-ticker.C:
 				err := placeOrder()
-				if isOverLimitError(err) || isApprovalPendingError(err) {
+				if isRecoverableOrderError(err) {
 					return
 				}
 				if len(ords) == 0 {
@@ -322,8 +337,8 @@ func (m *Mantle) marketOrder(sell bool, qty uint64) {
 	mo.IsLimit = false
 	_, err := m.Trade(pass, mo)
 	if err != nil {
-		if isOverLimitError(err) || isApprovalPendingError(err) {
-			m.log.Infof("Over-limit error. Order not placed.")
+		if isRecoverableOrderError(err) {
+			m.log.Infof("Recoverable error. Order not placed.")
 		} else {
 			m.fatalError("Trade error (market order, sell = %t, qty = %d: %v", sell, qty, err)
 		}
@@ -354,81 +369,21 @@ func (m *Mantle) truncatedMidGap() uint64 {
 func (m *Mantle) createWallet(symbol string, minFunds, maxFunds uint64, numCoins int) {
 	// Generate a name for this wallet.
 	name := randomToken()
-	var rpcPort string
-	switch symbol {
-	case eth, usdc, polygon, usdcp:
-		// Nothing to do here for internal wallets.
-	case dcr:
-		cmdOut := <-harnessCtl(ctx, symbol, "./alpha", "createnewaccount", name)
-		if cmdOut.err != nil {
-			m.fatalError("%s create account error: %v", symbol, cmdOut.err)
-			return
-		}
-		// Even though the harnessCtl is synchronous, I've still observed some
-		// issues with trying to create the wallet immediately.
-		<-time.After(time.Second)
-	case ltc, bch, btc, dash, dgb:
-		cmdOut := <-harnessCtl(ctx, symbol, "./new-wallet", alpha, name)
-		if cmdOut.err != nil {
-			m.fatalError("%s create account error: %v", symbol, cmdOut.err)
-			return
-		}
-		<-time.After(time.Second)
-	case doge, firo, zec, zcl:
-		// Some coins require a totally new node. Create it and monitor
-		// it. Shut it down with the stop function before exiting.
-		addrs, err := findOpenAddrs(2)
-		if err != nil {
-			m.fatalError("unable to find open ports: %v", err)
-			return
-		}
-		addrPort := addrs[0].String()
-		_, rpcPort, err = net.SplitHostPort(addrPort)
-		if err != nil {
-			m.fatalError("unable to split addr and port: %v", err)
-			return
-		}
-		addrPort = addrs[1].String()
-		_, networkPort, err := net.SplitHostPort(addrPort)
-		if err != nil {
-			m.fatalError("unable to split addr and port: %v", err)
-			return
-		}
 
-		// NOTE: The exec package seems to listen for a SIGINT and call
-		// cmd.Process.Kill() when it happens. Because of this it seems
-		// zec will error when we run the stop-wallet script because the
-		// node already shut down when killing with ctrl-c. doge however
-		// does not respect the kill command and still needs the wallet
-		// to be stopped here. So, it is probably fine to ignore the
-		// error returned from stop-wallet.
-		stopFn := func(ctx context.Context) {
-			<-harnessCtl(ctx, symbol, "./stop-wallet", rpcPort, name)
-		}
-		if err = harnessProcessCtl(symbol, stopFn, "./start-wallet", name, rpcPort, networkPort); err != nil {
-			m.fatalError("%s start-wallet error: %v", symbol, err)
-			return
-		}
-		<-time.After(time.Second * 3)
-		if symbol == zec || symbol == zcl {
-			<-time.After(time.Second * 10)
-		}
-		// Connect the new node to the alpha node. name only used with zec and zcl.
-		cmdOut := <-harnessCtl(ctx, symbol, "./connect-alpha", rpcPort, name)
-		if cmdOut.err != nil {
-			m.fatalError("%s create account error: %v", symbol, cmdOut.err)
-			return
-		}
+	rpcPort, err := createWalletAccount(m, symbol, name)
+	if err != nil {
+		m.fatalError("%s create account error: %v", symbol, err)
+		return
+	}
+
+	// Wait a bit after account creation
+	def := getAssetDef(symbol)
+	if def != nil && def.Type != AssetTypeETH && def.Type != AssetTypePolygon && !def.NeedsNewNode {
 		<-time.After(time.Second)
-		if symbol == zec || symbol == zcl {
-			<-time.After(time.Second * 20)
-		}
-	default:
-		m.fatalError("createWallet: symbol %s unknown", symbol)
 	}
 
 	var walletPass []byte
-	if symbol == dcr {
+	if def != nil && def.NeedsWalletPass {
 		walletPass = pass
 	}
 	if rpcPort == "" {
@@ -437,130 +392,103 @@ func (m *Mantle) createWallet(symbol string, minFunds, maxFunds uint64, numCoins
 	w := newBotWallet(symbol, alpha, name, rpcPort, walletPass, minFunds, maxFunds, numCoins)
 	m.wallets[w.assetID] = w
 
-	createWallet := func(walletPW []byte, form *core.WalletForm, nCoins int) (string, error) {
-		err := m.CreateWallet(pass, walletPW, form)
-		if err != nil {
-			return "", fmt.Errorf("Mantle %s failed to create wallet: %v", m.name, err)
-		}
-		walletSymbol := dex.BipIDSymbol(form.AssetID)
-		m.log.Infof("created wallet %s:%s", walletSymbol, name)
-		coreWallet := m.WalletState(form.AssetID)
-		if coreWallet == nil {
-			return "", fmt.Errorf("failed to retrieve WalletState for newly created %s wallet", walletSymbol)
-		}
-		addr := coreWallet.Address
-		if symbol == zec {
-			var ua struct {
-				TAddr string `json:"transparent"`
-			}
-			if err := json.Unmarshal([]byte(addr[len("unified:"):]), &ua); err != nil {
-				return "", fmt.Errorf("error decoding unified address: %w", err)
-			}
-			addr = ua.TAddr
-		}
-		if numCoins < 1 {
-			return addr, nil
-		}
+	if w.address, err = m.initializeWallet(walletPass, w.form, numCoins, symbol, maxFunds, minFunds); err != nil {
+		m.fatalError(err.Error())
+		return
+	}
+}
 
-		deadline := time.After(time.Second * 30)
-		for {
-			s := m.WalletState(form.AssetID)
-			if s.Synced {
-				break
-			}
-			select {
-			case <-time.After(time.Second):
-			case <-ctx.Done():
-				return "", context.Canceled
-			case <-deadline:
-				return "", fmt.Errorf("timed out waiting for wallet to sync")
-			}
-		}
+// initializeWallet creates the wallet in core and funds it.
+func (m *Mantle) initializeWallet(walletPW []byte, form *core.WalletForm, nCoins int, symbol string, maxFunds, minFunds uint64) (string, error) {
+	err := m.CreateWallet(pass, walletPW, form)
+	if err != nil {
+		return "", fmt.Errorf("Mantle %s failed to create wallet: %v", m.name, err)
+	}
+	walletSymbol := dex.BipIDSymbol(form.AssetID)
+	m.log.Infof("created wallet %s:%s", walletSymbol, form.Config["account"])
+	coreWallet := m.WalletState(form.AssetID)
+	if coreWallet == nil {
+		return "", fmt.Errorf("failed to retrieve WalletState for newly created %s wallet", walletSymbol)
+	}
+	addr := coreWallet.Address
 
-		if nCoins != 0 {
-			// Send fee funding for token assets.
-			if tkn := asset.TokenInfo(form.AssetID); tkn != nil {
-				if err = send(dex.BipIDSymbol(tkn.ParentID), addr, 1000e9); err != nil {
+	// Handle ZEC unified address
+	if symbol == zec {
+		var ua struct {
+			TAddr string `json:"transparent"`
+		}
+		if err := json.Unmarshal([]byte(addr[len("unified:"):]), &ua); err != nil {
+			return "", fmt.Errorf("error decoding unified address: %w", err)
+		}
+		addr = ua.TAddr
+	}
+
+	if nCoins < 1 {
+		return addr, nil
+	}
+
+	// Wait for wallet to sync
+	deadline := time.After(time.Second * 30)
+	for {
+		s := m.WalletState(form.AssetID)
+		if s.Synced {
+			break
+		}
+		select {
+		case <-time.After(time.Second):
+		case <-ctx.Done():
+			return "", context.Canceled
+		case <-deadline:
+			return "", fmt.Errorf("timed out waiting for wallet to sync")
+		}
+	}
+
+	if nCoins != 0 {
+		// Send fee funding for token assets.
+		if tkn := asset.TokenInfo(form.AssetID); tkn != nil {
+			if err = send(dex.BipIDSymbol(tkn.ParentID), addr, 1000e9); err != nil {
+				if ignoreErrors && ctx.Err() == nil {
+					m.log.Errorf("Trouble sending fee funding: %v", err)
+				} else {
+					return "", err
+				}
+			}
+			for {
+				time.Sleep(time.Second * 3)
+				bal, err := m.AssetBalance(tkn.ParentID)
+				if err != nil {
 					if ignoreErrors && ctx.Err() == nil {
-						m.log.Errorf("Trouble sending fee funding: %v", err)
+						m.log.Errorf("Trouble getting fee balance: %v", err)
 					} else {
 						return "", err
 					}
 				}
-				for {
-					time.Sleep(time.Second * 3)
-					bal, err := m.AssetBalance(tkn.ParentID)
-					if err != nil {
-						if ignoreErrors && ctx.Err() == nil {
-							m.log.Errorf("Trouble sending fee funding: %v", err)
-						} else {
-							return "", err
-						}
-					}
-					if bal.Available > 0 {
-						break
-					}
-					m.log.Infof("%s fee balance not available yet. Trying again in 3 seconds", dex.BipIDSymbol(tkn.ParentID))
+				if bal.Available > 0 {
+					break
 				}
-
-			}
-			chunk := (maxFunds + minFunds) / 2 / uint64(nCoins)
-			for i := 0; i < nCoins; {
-				if err = send(walletSymbol, addr, chunk); err != nil {
-					if ignoreErrors && ctx.Err() == nil {
-						m.log.Errorf("Trouble sending %d %s to %s: %v\n Sleeping and trying again.", fmtAtoms(chunk, walletSymbol), walletSymbol, addr, err)
-						// It often happens that the wallet is not able to
-						// create enough outputs. try indefinitely
-						// if we are ignoring errors.
-						time.Sleep(time.Second)
-						continue
-					}
-					return "", err
-				}
-				i++
+				m.log.Infof("%s fee balance not available yet. Trying again in 3 seconds", dex.BipIDSymbol(tkn.ParentID))
 			}
 		}
 
-		return addr, nil
+		chunk := (maxFunds + minFunds) / 2 / uint64(nCoins)
+		for i := 0; i < nCoins; {
+			if err = send(walletSymbol, addr, chunk); err != nil {
+				if ignoreErrors && ctx.Err() == nil {
+					m.log.Errorf("Trouble sending %d %s to %s: %v\n Sleeping and trying again.", fmtAtoms(chunk, walletSymbol), walletSymbol, addr, err)
+					time.Sleep(time.Second)
+					continue
+				}
+				return "", err
+			}
+			i++
+		}
 	}
 
-	var err error
-	if w.address, err = createWallet(walletPass, w.form, numCoins); err != nil {
-		m.fatalError(err.Error())
-		return
-	}
-
+	return addr, nil
 }
 
 func send(symbol, addr string, val uint64) error {
-	log.Tracef("Sending %s %s to %s", fmtAtoms(val, symbol), symbol, addr)
-	var res *harnessResult
-	switch symbol {
-	case btc, dcr, ltc, dash, doge, firo, bch, dgb:
-		res = <-harnessCtl(ctx, symbol, "./alpha", "sendtoaddress", addr, fmtConv(val, symbol))
-	case zec, zcl:
-		// sendtoaddress will choose spent outputs if a block was
-		// recently mined. Use the zecSendMtx to ensure we have waited
-		// a sec after mining.
-		//
-		// TODO: This is not great and does not allow for multiple
-		// loadbots to run on zec at once. Find a better way to avoid
-		// double spends. Alternatively, wait for zec to fix this and
-		// remove the lock https://github.com/zcash/zcash/issues/6045
-		zecSendMtx.Lock()
-		res = <-harnessCtl(ctx, symbol, "./alpha", "sendtoaddress", addr, fmtConv(val, symbol))
-		zecSendMtx.Unlock()
-	case eth, polygon:
-		// eth values are always handled as gwei, so multiply by 1e9
-		// here to convert to wei.
-		res = <-harnessCtl(ctx, symbol, "./sendtoaddress", addr, strconv.FormatFloat(float64(val)/1e9, 'f', 9, 64))
-	case usdc, usdcp:
-		res = <-harnessCtl(ctx, symbol, "./sendUSDC", addr, strconv.FormatFloat(float64(val)/1e6, 'f', 6, 64))
-	default:
-		return fmt.Errorf("send unknown symbol %q", symbol)
-	}
-	return res.err
-
+	return sendFromRegistry(symbol, addr, val)
 }
 
 type walletMinMax map[uint32]struct {
@@ -729,146 +657,21 @@ type botWallet struct {
 // once per epoch, if it falls outside of the range [minFunds, maxFunds].
 // Set numCoins to at least twice the maximum number of (booked + epoch)
 // orders the wallet is expected to support.
-func newBotWallet(symbol, node, name string, port string, pass []byte, minFunds, maxFunds uint64, numCoins int) *botWallet {
-	var form *core.WalletForm
-	switch symbol {
-	case dcr:
-		form = &core.WalletForm{
-			Type:    "dcrwalletRPC",
-			AssetID: dcrID,
-			Config: map[string]string{
-				"account":   name,
-				"username":  "user",
-				"password":  "pass",
-				"rpccert":   filepath.Join(dextestDir, "dcr/"+node+"/rpc.cert"),
-				"rpclisten": port,
-			},
-		}
-	case btc:
-		form = &core.WalletForm{
-			Type:    "bitcoindRPC",
-			AssetID: btcID,
-			Config: map[string]string{
-				"walletname":  name,
-				"rpcuser":     "user",
-				"rpcpassword": "pass",
-				"rpcport":     port,
-			},
-		}
-	case ltc:
-		form = &core.WalletForm{
-			Type:    "litecoindRPC",
-			AssetID: ltcID,
-			Config: map[string]string{
-				"walletname":  name,
-				"rpcuser":     "user",
-				"rpcpassword": "pass",
-				"rpcport":     port,
-			},
-		}
-	case bch:
-		form = &core.WalletForm{
-			Type:    "bitcoindRPC",
-			AssetID: bchID,
-			Config: map[string]string{
-				"walletname":  name,
-				"rpcuser":     "user",
-				"rpcpassword": "pass",
-				"rpcport":     port,
-			},
-		}
-	case zec:
-		form = &core.WalletForm{
-			Type:    "zcashdRPC",
-			AssetID: zecID,
-			Config: map[string]string{
-				"walletname":  name,
-				"rpcuser":     "user",
-				"rpcpassword": "pass",
-				"rpcport":     port,
-			},
-		}
-	case zcl:
-		form = &core.WalletForm{
-			Type:    "zclassicdRPC",
-			AssetID: zclID,
-			Config: map[string]string{
-				"walletname":  name,
-				"rpcuser":     "user",
-				"rpcpassword": "pass",
-				"rpcport":     port,
-			},
-		}
-	case dash:
-		form = &core.WalletForm{
-			Type:    "dashdRPC",
-			AssetID: dashID,
-			Config: map[string]string{
-				"walletname":  name,
-				"rpcuser":     "user",
-				"rpcpassword": "pass",
-				"rpcport":     port,
-			},
-		}
-	case doge:
-		form = &core.WalletForm{
-			Type:    "dogecoindRPC",
-			AssetID: dogeID,
-			Config: map[string]string{
-				"walletname":   name,
-				"rpcuser":      "user",
-				"rpcpassword":  "pass",
-				"rpcport":      port,
-				"feeratelimit": "40000",
-			},
-		}
-	case dgb:
-		form = &core.WalletForm{
-			Type:    "digibytedRPC",
-			AssetID: dgbID,
-			Config: map[string]string{
-				"walletname":  name,
-				"rpcuser":     "user",
-				"rpcpassword": "pass",
-				"rpcport":     port,
-			},
-		}
-	case firo:
-		form = &core.WalletForm{
-			Type:    "firodRPC",
-			AssetID: firoID,
-			Config: map[string]string{
-				"walletname":  name,
-				"rpcuser":     "user",
-				"rpcpassword": "pass",
-				"rpcport":     port,
-			},
-		}
-	case eth, usdc:
-		rpcProvider := "ws://127.0.0.1:38557"
-		form = &core.WalletForm{
-			Type:    "rpc",
-			AssetID: ethID,
-			Config: map[string]string{
-				"providers": rpcProvider,
-			},
-		}
-	case polygon, usdcp:
-		rpcProvider := "ws://127.0.0.1:34983"
-		form = &core.WalletForm{
-			Type:    "rpc",
-			AssetID: polygonID,
-			Config: map[string]string{
-				"providers": rpcProvider,
-			},
-		}
+func newBotWallet(symbol, node, name string, port string, walletPass []byte, minFunds, maxFunds uint64, numCoins int) *botWallet {
+	def := getAssetDef(symbol)
+	if def == nil || def.WalletFormFunc == nil {
+		log.Errorf("newBotWallet: unknown symbol %s", symbol)
+		return nil
 	}
+
+	form := def.WalletFormFunc(node, name, port)
+
 	return &botWallet{
 		form:     form,
 		name:     name,
 		node:     node,
 		symbol:   symbol,
-		pass:     pass,
+		pass:     walletPass,
 		assetID:  form.AssetID,
 		numCoins: numCoins,
 		minFunds: minFunds,
