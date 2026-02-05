@@ -310,6 +310,39 @@ chmod +x "${HARNESS_DIR}/quit"
 
 sleep 10
 
+################################################################################
+# Wait for wallets to be ready before any operations
+################################################################################
+
+# Wait for a wallet to be ready (RPC responsive)
+waitforwallet () {
+  cd ${HARNESS_DIR}
+  NODE=$1
+  i=0
+  while true; do
+    # Use z_listaccounts as a read-only check since getwalletinfo returns
+    # "reindexing" error on regtest until a block is mined
+    RESULT=$(./${NODE} z_listaccounts 2>&1)
+    # If result starts with '[', it's valid JSON (empty or with accounts)
+    if [[ "${RESULT}" == \[* ]]; then
+      break
+    fi
+    sleep 1
+    i=$((i+1))
+    if [ $i -gt 120 ]; then
+      echo "Timeout waiting for ${NODE} wallet: ${RESULT}"
+      exit 1
+    fi
+  done
+}
+
+echo "Waiting for wallets to be ready..."
+waitforwallet alpha
+waitforwallet beta
+waitforwallet delta
+waitforwallet gamma
+echo "All wallets ready"
+
 tmux send-keys -t $SESSION:4 "./beta addnode 127.0.0.1:${ALPHA_LISTEN_PORT} add${DONE}" C-m\; ${WAIT}
 tmux send-keys -t $SESSION:4 "./delta addnode 127.0.0.1:${ALPHA_LISTEN_PORT} add${DONE}" C-m\; ${WAIT}
 tmux send-keys -t $SESSION:4 "./gamma addnode 127.0.0.1:${ALPHA_LISTEN_PORT} add${DONE}" C-m\; ${WAIT}
@@ -319,11 +352,6 @@ sleep 3
 echo "Generating the genesis block"
 tmux send-keys -t $SESSION:4 "./alpha generate 1${DONE}" C-m\; ${WAIT}
 sleep 1
-
-tmux send-keys -t $SESSION:4 "./alpha z_importwallet ${SOURCE_DIR}/alphawallet ${DONE}" C-m\; ${WAIT}
-tmux send-keys -t $SESSION:4 "./beta z_importwallet ${SOURCE_DIR}/betawallet ${DONE}" C-m\; ${WAIT}
-tmux send-keys -t $SESSION:4 "./delta z_importwallet ${SOURCE_DIR}/deltawallet ${DONE}" C-m\; ${WAIT}
-tmux send-keys -t $SESSION:4 "./gamma z_importwallet ${SOURCE_DIR}/gammawallet ${DONE}" C-m\; ${WAIT}
 
 echo "Generating 600 blocks for alpha"
 tmux send-keys -t $SESSION:4 "./alpha generate 600${DONE}" C-m\; ${WAIT}
@@ -343,7 +371,7 @@ getaddr () {
   echo $ADDR
 }
 
-ALPHA_ADDR="tmEgW8c44RQQfft9FHXnqGp8XEcQQSRcUXD"
+ALPHA_ADDR=$(getaddr alpha)
 BETA_ADDR=$(getaddr beta)
 DELTA_ADDR=$(getaddr delta)
 GAMMA_ADDR=$(getaddr gamma)
