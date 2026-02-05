@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"math"
+	"math/big"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -43,6 +44,7 @@ import (
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/dexnet"
 	"decred.org/dcrdex/dex/encode"
+	"github.com/huandu/skiplist"
 )
 
 const (
@@ -86,7 +88,8 @@ const (
 )
 
 // bitgetOrderBook manages an order book for a single market.
-// It keeps the order book synced using REST snapshots and WebSocket full snapshot updates.
+// It uses a unified entry type that stores both string (for checksum) and uint64 (for VWAP)
+// representations, parsing strings only once on insertion.
 type bitgetOrderBook struct {
 	mtx            sync.RWMutex
 	synced         atomic.Bool
@@ -94,9 +97,8 @@ type bitgetOrderBook struct {
 	cm             *dex.ConnectionMaster
 
 	symbol      string
-	bookStrings *stringOrderbook // Primary: string orderbook (source of truth)
-	bookCache   *orderbook       // Secondary: cached uint64 orderbook for VWAP
-	bookDirty   atomic.Bool      // True when bookCache needs rebuild
+	bids        *skiplist.SkipList // *bitgetObEntry, sorted descending by rate
+	asks        *skiplist.SkipList // *bitgetObEntry, sorted ascending by rate
 	updateQueue chan *bgtypes.BookUpdate
 
 	baseConversionFactor  uint64
@@ -113,189 +115,49 @@ type bitgetOrderBook struct {
 	lastChecksumValidation atomic.Int64 // Last checksum validation time (ms)
 }
 
-// stringOrderbook maintains orderbook in original string format for checksum validation
-type stringOrderbook struct {
-	mtx  sync.RWMutex
-	bids [][]string // [price, quantity] sorted descending by price
-	asks [][]string // [price, quantity] sorted ascending by price
+// bitgetObEntry stores both string (for checksum) and uint64 (for VWAP) representations.
+// Strings are parsed once on insertion.
+type bitgetObEntry struct {
+	priceStr string // Original string for checksum calculation
+	qtyStr   string // Original string for checksum calculation
+	rate     uint64 // Converted rate for VWAP calculations
+	qty      uint64 // Converted quantity for VWAP calculations
 }
 
-func newStringOrderbook() *stringOrderbook {
-	return &stringOrderbook{
-		bids: make([][]string, 0),
-		asks: make([][]string, 0),
+// bitgetBidsComparable sorts bids descending by rate
+type bitgetBidsComparable struct{}
+
+func (bitgetBidsComparable) Compare(lhs, rhs any) int {
+	l, r := lhs.(*bitgetObEntry), rhs.(*bitgetObEntry)
+	if l.rate > r.rate {
+		return -1
 	}
+	if l.rate < r.rate {
+		return 1
+	}
+	return 0
 }
 
-// update applies changes to string orderbook
-func (sob *stringOrderbook) update(bids, asks [][]string) {
-	sob.mtx.Lock()
-	defer sob.mtx.Unlock()
-
-	// Update bids
-	for _, update := range bids {
-		if len(update) < 2 {
-			continue
-		}
-		price := update[0]
-		qty := update[1]
-
-		// Find existing price level
-		found := false
-		for i, level := range sob.bids {
-			if level[0] == price {
-				if qty == "0" {
-					// Remove
-					sob.bids = append(sob.bids[:i], sob.bids[i+1:]...)
-				} else {
-					// Update
-					sob.bids[i][1] = qty
-				}
-				found = true
-				break
-			}
-		}
-
-		// Insert new level if not found and qty != 0
-		if !found && qty != "0" {
-			sob.bids = sob.insertBid(price, qty)
-		}
-	}
-
-	// Update asks
-	for _, update := range asks {
-		if len(update) < 2 {
-			continue
-		}
-		price := update[0]
-		qty := update[1]
-
-		// Find existing price level
-		found := false
-		for i, level := range sob.asks {
-			if level[0] == price {
-				if qty == "0" {
-					// Remove
-					sob.asks = append(sob.asks[:i], sob.asks[i+1:]...)
-				} else {
-					// Update
-					sob.asks[i][1] = qty
-				}
-				found = true
-				break
-			}
-		}
-
-		// Insert new level if not found and qty != 0
-		if !found && qty != "0" {
-			sob.asks = sob.insertAsk(price, qty)
-		}
-	}
+func (bitgetBidsComparable) CalcScore(key any) float64 {
+	return -float64(key.(*bitgetObEntry).rate)
 }
 
-// insertBid inserts a bid maintaining descending price order
-func (sob *stringOrderbook) insertBid(price, qty string) [][]string {
-	priceFloat, err := strconv.ParseFloat(price, 64)
-	if err != nil {
-		// If price parsing fails, append at end as fallback
-		// This should not happen with valid Bitget data, but we handle it gracefully
-		return append(sob.bids, []string{price, qty})
-	}
-	newBid := []string{price, qty}
+// bitgetAsksComparable sorts asks ascending by rate
+type bitgetAsksComparable struct{}
 
-	for i, level := range sob.bids {
-		levelPrice, err := strconv.ParseFloat(level[0], 64)
-		if err != nil {
-			// Skip invalid price level and continue
-			continue
-		}
-		if priceFloat > levelPrice {
-			// Insert here
-			return append(sob.bids[:i], append([][]string{newBid}, sob.bids[i:]...)...)
-		}
+func (bitgetAsksComparable) Compare(lhs, rhs any) int {
+	l, r := lhs.(*bitgetObEntry), rhs.(*bitgetObEntry)
+	if l.rate < r.rate {
+		return -1
 	}
-	// Append at end
-	return append(sob.bids, newBid)
+	if l.rate > r.rate {
+		return 1
+	}
+	return 0
 }
 
-// insertAsk inserts an ask maintaining ascending price order
-func (sob *stringOrderbook) insertAsk(price, qty string) [][]string {
-	priceFloat, err := strconv.ParseFloat(price, 64)
-	if err != nil {
-		// If price parsing fails, append at end as fallback
-		// This should not happen with valid Bitget data, but we handle it gracefully
-		return append(sob.asks, []string{price, qty})
-	}
-	newAsk := []string{price, qty}
-
-	for i, level := range sob.asks {
-		levelPrice, err := strconv.ParseFloat(level[0], 64)
-		if err != nil {
-			// Skip invalid price level and continue
-			continue
-		}
-		if priceFloat < levelPrice {
-			// Insert here
-			return append(sob.asks[:i], append([][]string{newAsk}, sob.asks[i:]...)...)
-		}
-	}
-	// Append at end
-	return append(sob.asks, newAsk)
-}
-
-// clear clears the orderbook
-func (sob *stringOrderbook) clear() {
-	sob.mtx.Lock()
-	defer sob.mtx.Unlock()
-	sob.bids = make([][]string, 0)
-	sob.asks = make([][]string, 0)
-}
-
-// snap returns top N levels (for checksum calculation)
-func (sob *stringOrderbook) snap(levels int) (bids, asks [][]string) {
-	sob.mtx.RLock()
-	defer sob.mtx.RUnlock()
-
-	bidCount := len(sob.bids)
-	if bidCount > levels {
-		bidCount = levels
-	}
-	bids = make([][]string, bidCount)
-	copy(bids, sob.bids[:bidCount])
-
-	askCount := len(sob.asks)
-	if askCount > levels {
-		askCount = levels
-	}
-	asks = make([][]string, askCount)
-	copy(asks, sob.asks[:askCount])
-
-	return bids, asks
-}
-
-// rebuildCache converts string orderbook to uint64 orderbook cache
-func (b *bitgetOrderBook) rebuildCache() {
-	// Get all levels from string orderbook
-	bids, asks := b.bookStrings.snap(1000) // Get up to 1000 levels
-
-	// Convert to uint64 format
-	bidsConverted, asksConverted, err := b.convertBitgetBook(bids, asks)
-	if err != nil {
-		b.log.Errorf("%s: error converting orderbook for cache: %v", b.symbol, err)
-		return
-	}
-
-	// Update cache
-	b.bookCache.clear()
-	b.bookCache.update(bidsConverted, asksConverted)
-	b.bookDirty.Store(false)
-}
-
-// ensureCacheValid rebuilds cache if dirty
-func (b *bitgetOrderBook) ensureCacheValid() {
-	if b.bookDirty.Load() {
-		b.rebuildCache()
-	}
+func (bitgetAsksComparable) CalcScore(key any) float64 {
+	return float64(key.(*bitgetObEntry).rate)
 }
 
 // newBitgetOrderBook creates a new order book for the given symbol.
@@ -307,8 +169,8 @@ func newBitgetOrderBook(
 ) *bitgetOrderBook {
 	return &bitgetOrderBook{
 		symbol:                symbol,
-		bookStrings:           newStringOrderbook(),
-		bookCache:             newOrderBook(),
+		bids:                  skiplist.New(bitgetBidsComparable{}),
+		asks:                  skiplist.New(bitgetAsksComparable{}),
 		updateQueue:           make(chan *bgtypes.BookUpdate, 1024),
 		numSubscribers:        1,
 		baseConversionFactor:  baseConversionFactor,
@@ -319,82 +181,87 @@ func newBitgetOrderBook(
 	}
 }
 
-// convertBitgetBook converts bids and asks from Bitget format ([][]string)
-// to the DEX orderbook format ([]*obEntry).
-func (b *bitgetOrderBook) convertBitgetBook(bitgetBids, bitgetAsks [][]string) (bids, asks []*obEntry, err error) {
-	convert := func(updates [][]string) ([]*obEntry, error) {
-		convertedUpdates := make([]*obEntry, 0, len(updates))
-
-		for _, update := range updates {
-			if len(update) < 2 {
-				continue
-			}
-
-			price, err := strconv.ParseFloat(update[0], 64)
-			if err != nil {
-				return nil, fmt.Errorf("error parsing price: %v", err)
-			}
-
-			qty, err := strconv.ParseFloat(update[1], 64)
-			if err != nil {
-				return nil, fmt.Errorf("error parsing qty: %v", err)
-			}
-
-			convertedUpdates = append(convertedUpdates, &obEntry{
-				rate: calc.MessageRateAlt(price, b.baseConversionFactor, b.quoteConversionFactor),
-				qty:  uint64(qty * float64(b.baseConversionFactor)),
-			})
-		}
-
-		return convertedUpdates, nil
-	}
-
-	bids, err = convert(bitgetBids)
+// parseAndConvert builds a bitgetObEntry from a pre-computed rate and a
+// quantity string. The caller is responsible for parsing the price and
+// computing the rate, so that each price string is only parsed once.
+func (b *bitgetOrderBook) parseAndConvert(priceStr, qtyStr string, rate uint64) *bitgetObEntry {
+	qty, err := strconv.ParseFloat(qtyStr, 64)
 	if err != nil {
-		return nil, nil, err
+		b.log.Warnf("%s: failed to parse qty %q: %v", b.symbol, qtyStr, err)
+		return nil
 	}
 
-	asks, err = convert(bitgetAsks)
-	if err != nil {
-		return nil, nil, err
+	return &bitgetObEntry{
+		priceStr: priceStr,
+		qtyStr:   qtyStr,
+		rate:     rate,
+		qty:      uint64(qty * float64(b.baseConversionFactor)),
 	}
-
-	return bids, asks, nil
 }
 
-// convertBookUpdate converts a BookUpdate with float64 arrays to obEntry slices.
-func (b *bitgetOrderBook) convertBookUpdate(update *bgtypes.BookUpdate) (bids, asks []*obEntry, err error) {
-	convert := func(updates [][]float64) ([]*obEntry, error) {
-		convertedUpdates := make([]*obEntry, 0, len(updates))
-
-		for _, update := range updates {
-			if len(update) < 2 {
-				continue
-			}
-
-			price := update[0]
-			qty := update[1]
-
-			convertedUpdates = append(convertedUpdates, &obEntry{
-				rate: calc.MessageRateAlt(price, b.baseConversionFactor, b.quoteConversionFactor),
-				qty:  uint64(qty * float64(b.baseConversionFactor)),
-			})
+// updateSide applies changes to one side of the orderbook.
+func (b *bitgetOrderBook) updateSide(list *skiplist.SkipList, updates [][]string) {
+	for _, u := range updates {
+		if len(u) < 2 {
+			continue
 		}
+		priceStr, qtyStr := u[0], u[1]
 
-		return convertedUpdates, nil
+		// Parse price once — used for both lookup and entry construction.
+		price, err := strconv.ParseFloat(priceStr, 64)
+		if err != nil {
+			continue
+		}
+		rate := calc.MessageRateAlt(price, b.baseConversionFactor, b.quoteConversionFactor)
+		if rate == 0 {
+			b.log.Warnf("%s: zero rate from price %s", b.symbol, priceStr)
+			continue
+		}
+		lookupKey := &bitgetObEntry{rate: rate}
+
+		// Always remove existing entry at this rate first.
+		list.Remove(lookupKey)
+
+		if qtyStr != "0" {
+			if entry := b.parseAndConvert(priceStr, qtyStr, rate); entry != nil {
+				list.Set(entry, entry)
+			}
+		}
+	}
+}
+
+// update applies changes to the orderbook. Entries are parsed once and stored
+// with both string and uint64 representations.
+func (b *bitgetOrderBook) update(bids, asks [][]string) {
+	b.updateSide(b.bids, bids)
+	b.updateSide(b.asks, asks)
+}
+
+// clear clears the orderbook
+func (b *bitgetOrderBook) clear() {
+	b.bids = skiplist.New(bitgetBidsComparable{})
+	b.asks = skiplist.New(bitgetAsksComparable{})
+}
+
+// snapStrings returns top N levels as strings for checksum calculation.
+func (b *bitgetOrderBook) snapStrings(levels int) (bids, asks [][]string) {
+	bids = make([][]string, 0, levels)
+	count := 0
+	for curr := b.bids.Front(); curr != nil && count < levels; curr = curr.Next() {
+		entry := curr.Value.(*bitgetObEntry)
+		bids = append(bids, []string{entry.priceStr, entry.qtyStr})
+		count++
 	}
 
-	bids, err = convert(update.Bids)
-	if err != nil {
-		return nil, nil, err
+	asks = make([][]string, 0, levels)
+	count = 0
+	for curr := b.asks.Front(); curr != nil && count < levels; curr = curr.Next() {
+		entry := curr.Value.(*bitgetObEntry)
+		asks = append(asks, []string{entry.priceStr, entry.qtyStr})
+		count++
 	}
 
-	asks, err = convert(update.Asks)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return bids, asks, nil
+	return bids, asks
 }
 
 // Connect implements the dex.Connector interface.
@@ -426,36 +293,13 @@ func (b *bitgetOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error) 
 			return true
 		}
 
-		bids, asks, err := b.convertBookUpdate(update)
-		if err != nil {
-			b.log.Errorf("%s: error converting book update: %v", b.symbol, err)
-			return false
-		}
-
-		// Sanity check: Validate rate > 0 (qty=0 is valid for removals)
-		for _, bid := range bids {
-			if bid.rate == 0 {
-				b.log.Errorf("%s: Invalid bid with zero rate: rate=%d, qty=%d", b.symbol, bid.rate, bid.qty)
-				return false
-			}
-		}
-		for _, ask := range asks {
-			if ask.rate == 0 {
-				b.log.Errorf("%s: Invalid ask with zero rate: rate=%d, qty=%d", b.symbol, ask.rate, ask.qty)
-				return false
-			}
-		}
-
 		if update.IsSnapshot {
 			// Full snapshot: clear and replace entire orderbook
-			b.bookStrings.clear()
+			b.clear()
 		}
 
-		// Update string orderbook (source of truth)
-		b.bookStrings.update(update.BidsOriginal, update.AsksOriginal)
-
-		// Mark uint64 cache as dirty (will rebuild on next read)
-		b.bookDirty.Store(true)
+		// Update orderbook - strings are parsed once and stored with uint64 values
+		b.update(update.Bids, update.Asks)
 
 		// Validate checksum (if provided and non-zero)
 		// Rate limit to avoid performance issues (100-1000+ updates/sec for BTCUSDT)
@@ -465,8 +309,8 @@ func (b *bitgetOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error) 
 			shouldValidate := update.IsSnapshot || (now-lastValidation > 5000) // 5 seconds
 
 			if shouldValidate {
-				// Get top 25 levels from string orderbook (current state)
-				stringBids, stringAsks := b.bookStrings.snap(25)
+				// Get top 25 levels using stored strings
+				stringBids, stringAsks := b.snapStrings(25)
 				calculated := calculateBookChecksum(stringBids, stringAsks)
 				if calculated != update.Checksum {
 					b.log.Errorf("%s: Checksum mismatch! Expected %d, calculated %d",
@@ -492,11 +336,8 @@ func (b *bitgetOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error) 
 		b.log.Debugf("Got %s orderbook snapshot", b.symbol)
 
 		syncMtx.Lock()
-		// Initialize string orderbook from REST snapshot (source of truth)
-		b.bookStrings.clear()
-		b.bookStrings.update(snapshot.Bids, snapshot.Asks)
-		// Mark uint64 cache as dirty
-		b.bookDirty.Store(true)
+		b.clear()
+		b.update(snapshot.Bids, snapshot.Asks)
 		b.synced.Store(true)
 		syncMtx.Unlock()
 
@@ -604,39 +445,109 @@ func (b *bitgetOrderBook) Connect(ctx context.Context) (*sync.WaitGroup, error) 
 // vwap returns the volume weighted average price for a certain quantity of the
 // base asset. It returns an error if the orderbook is not synced.
 func (b *bitgetOrderBook) vwap(bids bool, qty uint64) (vwap, extrema uint64, filled bool, err error) {
+	if qty == 0 {
+		return 0, 0, false, nil
+	}
+
 	b.mtx.RLock()
 	defer b.mtx.RUnlock()
 
 	if !b.synced.Load() {
-		return 0, 0, filled, ErrUnsyncedOrderbook
+		return 0, 0, false, ErrUnsyncedOrderbook
 	}
 
-	// Ensure uint64 cache is valid before using it
-	b.ensureCacheValid()
+	var list *skiplist.SkipList
+	if bids {
+		list = b.bids
+	} else {
+		list = b.asks
+	}
 
-	vwap, extrema, filled = b.bookCache.vwap(bids, qty)
-	return
+	weightedTotal := big.NewInt(0)
+	bigQty := big.NewInt(0)
+	bigRate := big.NewInt(0)
+	addToWeightedTotal := func(rate uint64, qty uint64) {
+		bigRate.SetUint64(rate)
+		bigQty.SetUint64(qty)
+		weightedTotal.Add(weightedTotal, bigRate.Mul(bigRate, bigQty))
+	}
+
+	remaining := qty
+	for curr := list.Front(); curr != nil; curr = curr.Next() {
+		entry := curr.Value.(*bitgetObEntry)
+		if entry.qty >= remaining {
+			filled = true
+			extrema = entry.rate
+			addToWeightedTotal(entry.rate, remaining)
+			break
+		}
+		remaining -= entry.qty
+		addToWeightedTotal(entry.rate, entry.qty)
+	}
+	if !filled {
+		return 0, 0, false, nil
+	}
+
+	return weightedTotal.Div(weightedTotal, big.NewInt(int64(qty))).Uint64(), extrema, filled, nil
 }
 
 func (b *bitgetOrderBook) invVWAP(bids bool, qty uint64) (vwap, extrema uint64, filled bool, err error) {
+	if qty == 0 {
+		return 0, 0, false, nil
+	}
+
 	b.mtx.RLock()
 	defer b.mtx.RUnlock()
 
 	if !b.synced.Load() {
-		return 0, 0, filled, ErrUnsyncedOrderbook
+		return 0, 0, false, ErrUnsyncedOrderbook
 	}
 
-	// Ensure uint64 cache is valid before using it
-	b.ensureCacheValid()
+	var list *skiplist.SkipList
+	if bids {
+		list = b.bids
+	} else {
+		list = b.asks
+	}
 
-	vwap, extrema, filled = b.bookCache.invVWAP(bids, qty)
-	return
+	var totalBaseQty uint64
+	remaining := qty
+	for curr := list.Front(); curr != nil; curr = curr.Next() {
+		entry := curr.Value.(*bitgetObEntry)
+		quoteQty := calc.BaseToQuote(entry.rate, entry.qty)
+
+		if quoteQty >= remaining {
+			filled = true
+			extrema = entry.rate
+			totalBaseQty += calc.QuoteToBase(entry.rate, remaining)
+			break
+		}
+
+		remaining -= quoteQty
+		totalBaseQty += entry.qty
+	}
+	if !filled {
+		return 0, 0, false, nil
+	}
+
+	return calc.BaseQuoteToRate(totalBaseQty, qty), extrema, filled, nil
 }
 
 func (b *bitgetOrderBook) midGap() uint64 {
-	// Ensure uint64 cache is valid before using it
-	b.ensureCacheValid()
-	return b.bookCache.midGap()
+	b.mtx.RLock()
+	defer b.mtx.RUnlock()
+
+	bestBidI := b.bids.Front()
+	if bestBidI == nil {
+		return 0
+	}
+	bestAskI := b.asks.Front()
+	if bestAskI == nil {
+		return 0
+	}
+	bestBid := bestBidI.Value.(*bitgetObEntry)
+	bestAsk := bestAskI.Value.(*bitgetObEntry)
+	return (bestBid.rate + bestAsk.rate) / 2
 }
 
 // bitget is the main Bitget exchange adapter
@@ -1929,14 +1840,40 @@ func (bg *bitget) Book(baseID, quoteID uint32) (buys, sells []*core.MiniOrder, _
 	if err != nil {
 		return nil, nil, err
 	}
-	// Ensure uint64 cache is valid before using it
-	book.ensureCacheValid()
-	bids, asks := book.bookCache.snap()
+
+	book.mtx.RLock()
+	defer book.mtx.RUnlock()
+
 	bFactor := book.baseConversionFactor
 	qFactor := book.quoteConversionFactor
-	buys = convertSide(bids, false, bFactor, qFactor)
-	sells = convertSide(asks, true, bFactor, qFactor)
-	return
+
+	// Convert bids
+	buys = make([]*core.MiniOrder, 0, book.bids.Len())
+	for curr := book.bids.Front(); curr != nil; curr = curr.Next() {
+		e := curr.Value.(*bitgetObEntry)
+		buys = append(buys, &core.MiniOrder{
+			Qty:       float64(e.qty) / float64(bFactor),
+			QtyAtomic: e.qty,
+			Rate:      calc.ConventionalRateAlt(e.rate, bFactor, qFactor),
+			MsgRate:   e.rate,
+			Sell:      false,
+		})
+	}
+
+	// Convert asks
+	sells = make([]*core.MiniOrder, 0, book.asks.Len())
+	for curr := book.asks.Front(); curr != nil; curr = curr.Next() {
+		e := curr.Value.(*bitgetObEntry)
+		sells = append(sells, &core.MiniOrder{
+			Qty:       float64(e.qty) / float64(bFactor),
+			QtyAtomic: e.qty,
+			Rate:      calc.ConventionalRateAlt(e.rate, bFactor, qFactor),
+			MsgRate:   e.rate,
+			Sell:      true,
+		})
+	}
+
+	return buys, sells, nil
 }
 
 // ensureMarketConnection ensures the market WebSocket is connected
@@ -2172,19 +2109,12 @@ func (bg *bitget) handleOrderbookUpdate(msg *bgtypes.WsDataMessage) {
 			}
 		}
 
-		// Convert to internal format
-		bidsFloat := convertStringArrayToFloat(bookData.Bids)
-		asksFloat := convertStringArrayToFloat(bookData.Asks)
-
-		// Pass checksum through for validation AFTER orderbook update
-		// Also pass original strings for accurate checksum calculation
+		// Create update with string data - conversion happens once in orderbook.update()
 		update := &bgtypes.BookUpdate{
-			Bids:         bidsFloat,
-			Asks:         asksFloat,
-			BidsOriginal: bookData.Bids, // Preserve original string format
-			AsksOriginal: bookData.Asks, // Preserve original string format
-			IsSnapshot:   isSnapshot,
-			Checksum:     int32(bookData.Checksum),
+			Bids:       bookData.Bids,
+			Asks:       bookData.Asks,
+			IsSnapshot: isSnapshot,
+			Checksum:   int32(bookData.Checksum),
 		}
 
 		select {
@@ -2208,28 +2138,6 @@ func parseFloatOrZero(s string, fieldName, symbol string, log dex.Logger) float6
 		return 0
 	}
 	return val
-}
-
-// convertStringArrayToFloat converts [][]string to [][]float64
-func convertStringArrayToFloat(arr [][]string) [][]float64 {
-	result := make([][]float64, 0, len(arr))
-	for _, item := range arr {
-		if len(item) < 2 {
-			continue
-		}
-		price, err := strconv.ParseFloat(item[0], 64)
-		if err != nil {
-			// Skip invalid price - this should not happen with valid Bitget data
-			continue
-		}
-		qty, err := strconv.ParseFloat(item[1], 64)
-		if err != nil {
-			// Skip invalid quantity - this should not happen with valid Bitget data
-			continue
-		}
-		result = append(result, []float64{price, qty})
-	}
-	return result
 }
 
 // calculateBookChecksum calculates CRC32 checksum per Bitget specification.
