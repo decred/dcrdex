@@ -11,6 +11,9 @@ import State from './state'
 import * as intl from './locales'
 import * as OrderUtil from './orderutil'
 import { NetworkAsset, TickerAsset, normalizedTicker } from './assets'
+import React from 'react'
+import { createRoot, Root } from 'react-dom/client'
+import { BridgingPopup, BridgePopupHandle } from './bridging'
 import {
   app,
   PageElement,
@@ -40,7 +43,8 @@ import {
   TxHistoryResult,
   TxHistoryRequest,
   TransactionNote,
-  WalletTransaction
+  WalletTransaction,
+  BridgeNote
 } from './registry'
 import { CoinExplorers } from './coinexplorers'
 
@@ -169,7 +173,7 @@ const txTypeTranslationKeys = [
   intl.ID_TX_TYPE_BRIDGE_COMPLETION
 ]
 
-const txHistoryPageSize = 2
+const txHistoryPageSize = 10
 
 export function txTypeString (txType: number): string {
   return intl.prep(txTypeTranslationKeys[txType])
@@ -264,6 +268,10 @@ export default class WalletsPage extends BasePage {
     isMixing: boolean
   }
 
+  bridgePaths: Record<number, Record<number, string[]>>
+  bridgingRoot: Root | null
+  bridgingPopupRef: React.RefObject<BridgePopupHandle>
+
   constructor (body: HTMLElement, data?: WalletsPageData) {
     super()
     this.body = body
@@ -275,6 +283,10 @@ export default class WalletsPage extends BasePage {
     this.selectedWalletID = -1
     this.pendingTxs = {}
     this.txHistory = { pgs: [], currentPage: 0, assetID: -1, isMixing: false }
+    this.bridgePaths = {}
+    this.bridgingRoot = null
+    this.bridgingPopupRef = React.createRef<BridgePopupHandle>()
+    this.loadBridgePaths()
 
     this.balanceDetails = Doc.parseTemplate(page.balanceDetails)
     this.walletConfig = Doc.parseTemplate(page.walletConfig)
@@ -313,6 +325,7 @@ export default class WalletsPage extends BasePage {
     Doc.bind(page.connectBttn, 'click', () => this.doConnect(this.selectedWalletID))
     Doc.bind(page.send, 'click', () => this.showSendForm())
     Doc.bind(page.receive, 'click', () => this.showDeposit())
+    Doc.bind(page.bridge, 'click', () => this.showBridgingPopup())
     Doc.bind(page.unlockBttn, 'click', () => this.openWallet(this.selectedWalletID))
     Doc.bind(page.lockBttn, 'click', () => this.lock(this.selectedWalletID))
     Doc.bind(page.reconfigureBttn, 'click', () => this.showReconfig(this.selectedWalletID))
@@ -438,7 +451,8 @@ export default class WalletsPage extends BasePage {
         if (note.assetID === this.selectedWalletID) this.updateSyncAndPeers()
       },
       createwallet: (note: WalletCreationNote) => { this.handleCreateWalletNote(note) },
-      walletnote: (note: WalletNote) => { this.handleCustomWalletNote(note) }
+      walletnote: (note: WalletNote) => { this.handleCustomWalletNote(note) },
+      bridge: (note: BridgeNote) => { this.handleBridgeNote(note) }
     })
 
     this.prepareTickerAssets()
@@ -1031,6 +1045,10 @@ export default class WalletsPage extends BasePage {
     Doc.setVis(ta.hasWallets, page.sendReceiveBox)
     const w = chainWallet?.wallet
     Doc.setVis(w, page.walletConfig)
+
+    // Show bridge button if any network asset supports bridging
+    const hasBridging = ta.networkAssets.some(na => this.hasBridgingSupport(na.assetID))
+    Doc.setVis(hasBridging && ta.hasWallets, page.bridge)
 
     if (w) {
       Doc.show(page.walletConfig)
@@ -2102,17 +2120,41 @@ export default class WalletsPage extends BasePage {
   }
 
   /* Show the open wallet form if the password is not cached, and otherwise
-   * attempt to open the wallet.
+   * attempt to open the wallet. This unlocks all wallets for the selected
+   * ticker's network assets (e.g., ETH on mainnet and Base).
    */
   async openWallet (assetID: number) {
-    const open = {
-      assetID: assetID
+    const { selectedTicker: ta } = this
+    // Collect all asset IDs that need to be unlocked
+    const assetsToUnlock: number[] = []
+    for (const na of ta.networkAssets) {
+      const asset = app().assets[na.assetID]
+      const wallet = asset?.wallet
+      // Only include wallets that exist, are encrypted, and not already open
+      if (wallet && wallet.encrypted && !wallet.open) {
+        assetsToUnlock.push(na.assetID)
+      }
     }
-    const res = await postJSON('/api/openwallet', open)
-    if (!app().checkResponse(res)) {
-      console.error('openwallet error', res)
-      return
+
+    // If no wallets need unlocking, just use the provided assetID
+    if (assetsToUnlock.length === 0) {
+      assetsToUnlock.push(assetID)
     }
+
+    // Unlock all wallets
+    const errors: string[] = []
+    for (const id of assetsToUnlock) {
+      const res = await postJSON('/api/openwallet', { assetID: id })
+      if (!app().checkResponse(res)) {
+        const asset = app().assets[id]
+        errors.push(`${asset?.name || id}: ${res.msg || 'unknown error'}`)
+      }
+    }
+
+    if (errors.length > 0) {
+      console.error('openwallet errors:', errors)
+    }
+
     this.assetUpdated(assetID, undefined, intl.prep(intl.ID_WALLET_UNLOCKED))
   }
 
@@ -2547,6 +2589,10 @@ export default class WalletsPage extends BasePage {
   handleBalanceNote (note: BalanceNote): void {
     this.updateAssetBalance(note.assetID)
     if (this.selectedTicker.networkAssetLookup[note.assetID]) this.updateDisplayedTickerBalance()
+    // Forward to bridge popup if open
+    if (this.bridgingPopupRef.current) {
+      this.bridgingPopupRef.current.handleBalanceUpdate(note.assetID)
+    }
   }
 
   /* handleRatesNote handles fiat rate notifications, updating the fiat value of
@@ -2572,6 +2618,20 @@ export default class WalletsPage extends BasePage {
       Doc.isDisplayed(this.page.managePeersForm)) {
       this.updateWalletPeersTable()
     }
+    // Forward to bridge popup if open
+    if (this.bridgingPopupRef.current) {
+      this.bridgingPopupRef.current.handleWalletState(note)
+    }
+  }
+
+  /*
+   * handleBridgeNote is a handler for 'bridge' notifications.
+   * It forwards bridge status updates to the bridge popup if open.
+   */
+  handleBridgeNote (note: BridgeNote): void {
+    if (this.bridgingPopupRef.current) {
+      this.bridgingPopupRef.current.handleBridgeUpdate(note)
+    }
   }
 
   /*
@@ -2579,6 +2639,8 @@ export default class WalletsPage extends BasePage {
    */
   handleCreateWalletNote (note: WalletCreationNote) {
     if (this.selectedTicker.networkAssetLookup[note.assetID]) this.updateDisplayedTicker()
+    // Reload bridge paths since the new wallet may enable new bridge routes
+    this.loadBridgePaths()
   }
 
   handleCustomWalletNote (note: WalletNote) {
@@ -2608,6 +2670,9 @@ export default class WalletsPage extends BasePage {
         const n = walletNote as TransactionNote
         const ca = this.selectedTicker.networkAssetLookup[n.assetID]
         if (ca) this.handleTxNote(ca, n.transaction)
+        if (this.bridgingPopupRef.current) {
+          this.bridgingPopupRef.current.handleTransactionNote(n)
+        }
         break
       }
       // case 'transactionHistorySynced' : {
@@ -2619,12 +2684,100 @@ export default class WalletsPage extends BasePage {
   }
 
   /*
+   * loadBridgePaths fetches the available bridge paths for all assets.
+   */
+  async loadBridgePaths () {
+    try {
+      this.bridgePaths = await app().allBridgePaths()
+      this.updateBridgeButtonVisibility()
+    } catch (e) {
+      console.error('Failed to load bridge paths:', e)
+    }
+  }
+
+  /*
+   * updateBridgeButtonVisibility shows/hides the bridge button based on
+   * whether the current asset supports bridging.
+   */
+  updateBridgeButtonVisibility () {
+    const { page, selectedTicker: ta } = this
+    if (!ta) return
+    const hasBridging = ta.networkAssets.some(na => this.hasBridgingSupport(na.assetID))
+    Doc.setVis(hasBridging && ta.hasWallets, page.bridge)
+  }
+
+  /*
+   * hasBridgingSupport returns true if the asset has a wallet and can bridge
+   * to at least one destination that also has a wallet.
+   */
+  hasBridgingSupport (assetID: number): boolean {
+    const asset = app().assets[assetID]
+    if (!asset?.wallet) return false
+
+    const paths = this.bridgePaths[assetID]
+    if (!paths) return false
+
+    // Check if any destination has a wallet
+    for (const destAssetID of Object.keys(paths)) {
+      const destAsset = app().assets[Number(destAssetID)]
+      if (destAsset?.wallet) return true
+    }
+    return false
+  }
+
+  /*
+   * showBridgingPopup displays the bridging popup for the currently selected
+   * asset. It selects the first network asset that supports bridging.
+   */
+  showBridgingPopup () {
+    const { page, selectedTicker: ta } = this
+
+    // Find first network asset with bridging support
+    const bridgeableAsset = ta.networkAssets.find(na => this.hasBridgingSupport(na.assetID))
+    if (!bridgeableAsset) return
+
+    const container = page.bridgingPopupContainer
+
+    Doc.show(container)
+
+    if (!this.bridgingRoot) {
+      this.bridgingRoot = createRoot(container)
+    }
+
+    const networkAssetIDs = ta.networkAssets.map((na: NetworkAsset) => na.assetID)
+    this.bridgingRoot.render(
+      React.createElement(BridgingPopup, {
+        ref: this.bridgingPopupRef,
+        networkAssetIDs: networkAssetIDs,
+        bridgePaths: this.bridgePaths,
+        onClose: () => this.closeBridgingPopup()
+      })
+    )
+  }
+
+  /*
+   * closeBridgingPopup closes the bridging popup and cleans up the React tree.
+   */
+  closeBridgingPopup () {
+    const { page } = this
+    Doc.hide(page.bridgingPopupContainer)
+    if (this.bridgingRoot) {
+      this.bridgingRoot.unmount()
+      this.bridgingRoot = null
+    }
+  }
+
+  /*
    * unload is called by the Application when the user navigates away from
    * the /wallets page.
    */
   unload (): void {
     clearInterval(this.secondTicker)
     Doc.unbind(document, 'keyup', this.keyup)
+    if (this.bridgingRoot) {
+      this.bridgingRoot.unmount()
+      this.bridgingRoot = null
+    }
   }
 }
 

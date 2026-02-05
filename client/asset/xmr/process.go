@@ -90,7 +90,7 @@ func (r *xmrRpc) probeDaemon(ctx context.Context) error {
 
 // startWalletServer starts the wallet server and connects it to the running daemon
 func (r *xmrRpc) startWalletServer(ctx context.Context) error {
-	walletRpc := path.Join(r.cliToolsDir, WalletServerRpcName)
+	walletRpc := path.Join(r.toolsDir, WalletServerRpcName)
 	if runtime.GOOS == "windows" {
 		walletRpc += ".exe"
 	}

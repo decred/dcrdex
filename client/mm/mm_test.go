@@ -753,8 +753,7 @@ func (t *tExchangeAdaptor) latestEpoch() *EpochReport       { return &EpochRepor
 func (t *tExchangeAdaptor) latestCEXProblems() *CEXProblems { return nil }
 
 func TestAvailableBalances(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	tCore := newTCore()
 

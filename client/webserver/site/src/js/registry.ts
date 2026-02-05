@@ -260,6 +260,7 @@ export interface WalletState {
   syncProgress: number
   syncStatus: SyncStatus
   approved: Record<number, ApprovalStatus>
+  bridgeApproved?: Record<string, ApprovalStatus>
   feeState?: FeeState
   pendingTxs: Record<string, WalletTransaction>
 }
@@ -392,6 +393,15 @@ export interface CoreNote {
   stamp: number
   acked: boolean
   id: string
+}
+
+export interface BridgeNote extends CoreNote {
+  sourceAssetID: number
+  destAssetID: number
+  txID: string
+  completionTxIDs: string[]
+  amount: number
+  complete: boolean
 }
 
 export interface BondNote extends CoreNote {
@@ -833,17 +843,11 @@ export interface QuickBalanceConfig {
 
 export interface UIConfig {
   quickBalance: QuickBalanceConfig
-  allocation: BotBalanceAllocation
   usingQuickBalance: boolean
   baseMinTransfer: number
   quoteMinTransfer: number
   cexRebalance: boolean
   internalTransfers: boolean
-}
-
-export interface StartConfig extends MarketWithHost {
-  autoRebalance?: AutoRebalanceConfig
-  alloc: BotBalanceAllocation
 }
 
 export interface BotConfig {
@@ -858,6 +862,8 @@ export interface BotConfig {
   quoteWalletOptions?: Record<string, string>
   cexName: string
   uiConfig: UIConfig
+  alloc?: BotBalanceAllocation
+  autoRebalance?: AutoRebalanceConfig
   basicMarketMakingConfig?: BasicMarketMakingConfig
   arbMarketMakingConfig?: ArbMarketMakingConfig
   simpleArbConfig?: SimpleArbConfig
@@ -1020,6 +1026,7 @@ export interface CEXProblems {
 export interface MMBotStatus {
   config: BotConfig
   running: boolean
+  stopping?: boolean
   runStats?: RunStats
   latestEpoch?: EpochReport
   cexProblems?: CEXProblems
@@ -1271,6 +1278,29 @@ export interface BridgeFeesAndLimits {
   hasLimits: boolean
 }
 
+export interface BridgeResult {
+  ok: boolean
+  txID?: string
+  msg?: string
+}
+
+export interface BridgeApprovalStatusResult {
+  ok: boolean
+  status: number // 0=Approved, 1=Pending, 2=NotApproved
+  msg?: string
+}
+
+export interface BridgeApprovalResult {
+  ok: boolean
+  txID?: string
+  msg?: string
+}
+
+// Bridge approval status constants
+export const BridgeApprovalApproved = 0
+export const BridgeApprovalPending = 1
+export const BridgeApprovalNotApproved = 2
+
 export interface WalletTransaction {
   type: number
   id: string
@@ -1285,6 +1315,7 @@ export interface WalletTransaction {
   isUserOp: boolean
   userOpTxID: string
   bridgeCounterpartTx?: BridgeCounterpartTx
+  bridgeName?: string
   confirmed: boolean
   confirms?: {
     current: number
@@ -1365,6 +1396,12 @@ export interface Application {
   parentAsset(assetID: number): SupportedAsset
   allBridgePaths (): Promise<Record<number, Record<number, string[]>>>
   bridgeFeesAndLimits (fromAssetID: number, toAssetID: number, bridgeName: string): Promise<BridgeFeesAndLimits | null>
+  bridge (fromAssetID: number, toAssetID: number, amount: number, bridgeName: string): Promise<BridgeResult>
+  bridgeApprovalStatus (assetID: number, bridgeName: string): Promise<BridgeApprovalStatusResult>
+  approveBridgeContract (assetID: number, bridgeName: string): Promise<BridgeApprovalResult>
+  unapproveBridgeContract (assetID: number, bridgeName: string): Promise<BridgeApprovalResult>
+  pendingBridges (assetID: number): Promise<WalletTransaction[]>
+  bridgeHistory (assetID: number, n: number, refID?: string, past?: boolean): Promise<WalletTransaction[]>
   bindUnits (ancestor: PageElement): void
 }
 

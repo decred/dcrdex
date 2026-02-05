@@ -9,7 +9,7 @@ import (
 	"fmt"
 
 	"decred.org/dcrdex/dex"
-	"github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/v4"
 )
 
 const (
@@ -169,6 +169,28 @@ func (db *DB) ReIndex(tableName, indexName string, f func(k, v []byte) ([]byte, 
 
 				// Generate the new index entry
 				idxB, err := f(k, d.v)
+				if errors.Is(err, ErrNotIndexed) {
+					newIndexes := d.indexes[:0]
+					for _, idxBi := range d.indexes {
+						if bytes.Equal(idxBi[:prefixSize], indexPrefix[:]) {
+							if err := txn.Delete(idxBi); err != nil {
+								return fmt.Errorf("error deleting old index entry during reindex: %w", err)
+							}
+							continue
+						}
+						newIndexes = append(newIndexes, idxBi)
+					}
+					d.indexes = newIndexes
+
+					b, err := d.bytes()
+					if err != nil {
+						return fmt.Errorf("error encoding datum after index reindex: %w", err)
+					}
+					if err := txn.Set(tableKey, b); err != nil {
+						return fmt.Errorf("error storing new datum after index reindex: %w", err)
+					}
+					return nil
+				}
 				if err != nil {
 					return fmt.Errorf("indexer function error: %w", err)
 				}

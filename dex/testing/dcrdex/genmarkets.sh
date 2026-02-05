@@ -462,13 +462,9 @@ fi
 
 if [ $ETH_ON -eq 0 ]; then
 ETH_CONFIG_PATH=${TEST_ROOT}/eth.conf
-ETH_IPC_FILE=${TEST_ROOT}/eth/alpha/node/geth.ipc
 
 cat > $ETH_CONFIG_PATH <<EOF
-ws://localhost:38559 , 2000
-# comments are respected
-; http://localhost:38556
-${ETH_IPC_FILE},2
+ws://localhost:38557 , 2000
 EOF
 
 cat << EOF >> "${FILEPATH}"

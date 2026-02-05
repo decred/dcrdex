@@ -1990,8 +1990,8 @@ func (s *WebServer) apiConfigureMixer(w http.ResponseWriter, r *http.Request) {
 
 func (s *WebServer) apiStartMarketMakingBot(w http.ResponseWriter, r *http.Request) {
 	var form struct {
-		Config *mm.StartConfig  `json:"config"`
-		AppPW  encode.PassBytes `json:"appPW"`
+		Config *mm.MarketWithHost `json:"config"`
+		AppPW  encode.PassBytes   `json:"appPW"`
 	}
 	defer form.AppPW.Clear()
 	if !readPost(w, r, &form) {
@@ -2339,5 +2339,158 @@ func (s *WebServer) apiBridgeFeesAndLimits(w http.ResponseWriter, r *http.Reques
 	}{
 		OK:     true,
 		Result: result,
+	})
+}
+
+// apiBridge is the handler for the '/bridge' API request.
+func (s *WebServer) apiBridge(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		FromAssetID uint32 `json:"fromAssetID"`
+		ToAssetID   uint32 `json:"toAssetID"`
+		Amount      uint64 `json:"amount"`
+		BridgeName  string `json:"bridgeName"`
+	}{}
+	if !readPost(w, r, form) {
+		return
+	}
+
+	txID, err := s.core.Bridge(form.FromAssetID, form.ToAssetID, form.Amount, form.BridgeName)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("bridge error: %w", err))
+		return
+	}
+
+	writeJSON(w, &struct {
+		OK   bool   `json:"ok"`
+		TxID string `json:"txID"`
+	}{
+		OK:   true,
+		TxID: txID,
+	})
+}
+
+// apiBridgeApprovalStatus is the handler for the '/bridgeapprovalstatus' API request.
+func (s *WebServer) apiBridgeApprovalStatus(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		AssetID    uint32 `json:"assetID"`
+		BridgeName string `json:"bridgeName"`
+	}{}
+	if !readPost(w, r, form) {
+		return
+	}
+
+	status, err := s.core.BridgeContractApprovalStatus(form.AssetID, form.BridgeName)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error getting bridge approval status: %w", err))
+		return
+	}
+
+	writeJSON(w, &struct {
+		OK     bool                 `json:"ok"`
+		Status asset.ApprovalStatus `json:"status"`
+	}{
+		OK:     true,
+		Status: status,
+	})
+}
+
+// apiApproveBridgeContract is the handler for the '/approvebridgecontract' API request.
+func (s *WebServer) apiApproveBridgeContract(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		AssetID    uint32 `json:"assetID"`
+		BridgeName string `json:"bridgeName"`
+	}{}
+	if !readPost(w, r, form) {
+		return
+	}
+
+	txID, err := s.core.ApproveBridgeContract(form.AssetID, form.BridgeName)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error approving bridge contract: %w", err))
+		return
+	}
+
+	writeJSON(w, &struct {
+		OK   bool   `json:"ok"`
+		TxID string `json:"txID"`
+	}{
+		OK:   true,
+		TxID: txID,
+	})
+}
+
+// apiUnapproveBridgeContract is the handler for the '/unapprovebridgecontract' API request.
+func (s *WebServer) apiUnapproveBridgeContract(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		AssetID    uint32 `json:"assetID"`
+		BridgeName string `json:"bridgeName"`
+	}{}
+	if !readPost(w, r, form) {
+		return
+	}
+
+	txID, err := s.core.UnapproveBridgeContract(form.AssetID, form.BridgeName)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error unapproving bridge contract: %w", err))
+		return
+	}
+
+	writeJSON(w, &struct {
+		OK   bool   `json:"ok"`
+		TxID string `json:"txID"`
+	}{
+		OK:   true,
+		TxID: txID,
+	})
+}
+
+// apiPendingBridges is the handler for the '/pendingbridges' API request.
+func (s *WebServer) apiPendingBridges(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		AssetID uint32 `json:"assetID"`
+	}{}
+	if !readPost(w, r, form) {
+		return
+	}
+
+	bridges, err := s.core.PendingBridges(form.AssetID)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error getting pending bridges: %w", err))
+		return
+	}
+
+	writeJSON(w, &struct {
+		OK      bool                       `json:"ok"`
+		Bridges []*asset.WalletTransaction `json:"bridges"`
+	}{
+		OK:      true,
+		Bridges: bridges,
+	})
+}
+
+// apiBridgeHistory is the handler for the '/bridgehistory' API request.
+func (s *WebServer) apiBridgeHistory(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		AssetID uint32  `json:"assetID"`
+		N       int     `json:"n"`
+		RefID   *string `json:"refID"`
+		Past    bool    `json:"past"`
+	}{}
+	if !readPost(w, r, form) {
+		return
+	}
+
+	bridges, err := s.core.BridgeHistory(form.AssetID, form.N, form.RefID, form.Past)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error getting bridge history: %w", err))
+		return
+	}
+
+	writeJSON(w, &struct {
+		OK      bool                       `json:"ok"`
+		Bridges []*asset.WalletTransaction `json:"bridges"`
+	}{
+		OK:      true,
+		Bridges: bridges,
 	})
 }

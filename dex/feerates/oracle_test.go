@@ -1,7 +1,6 @@
 package feerates
 
 import (
-	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -25,8 +24,7 @@ func TestOracleRun(t *testing.T) {
 		t.Fatalf("failed to create oracle: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Start the oracle in a separate goroutine.
 	go o.Run(ctx, dex.StdOutLogger("T", dex.LevelTrace))

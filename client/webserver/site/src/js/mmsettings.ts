@@ -17,7 +17,6 @@ import {
   BalanceNote,
   ApprovalStatus,
   SupportedAsset,
-  StartConfig,
   MMBotStatus,
   RunStats,
   UIConfig,
@@ -126,10 +125,6 @@ const defaultLimitOrderBuffer = {
 function defaultUIConfig (baseMinWithdraw: number, quoteMinWithdraw: number, botType: string) : UIConfig {
   const buffer = botType === botTypeBasicArb ? 1 : 0
   return {
-    allocation: {
-      dex: {},
-      cex: {}
-    },
     quickBalance: {
       buysBuffer: buffer,
       sellsBuffer: buffer,
@@ -179,6 +174,7 @@ interface ConfigState {
   baseOptions: Record<string, string>
   quoteOptions: Record<string, string>
   uiConfig: UIConfig
+  alloc: BotBalanceAllocation
   multiHop?: MultiHopCfg
   cexBaseID: number
   cexQuoteID: number
@@ -670,11 +666,12 @@ export default class MarketMakerSettingsPage extends BasePage {
       }
     }
 
-    updateAllocations(dexAssetIDs, this.updatedConfig.uiConfig.allocation.dex)
+    if (!this.updatedConfig.alloc) this.updatedConfig.alloc = { dex: {}, cex: {} }
+    updateAllocations(dexAssetIDs, this.updatedConfig.alloc.dex)
 
     if (this.specs.cexName) {
       const cexAssetIDs = [this.updatedConfig.cexBaseID, this.updatedConfig.cexQuoteID]
-      updateAllocations(cexAssetIDs, this.updatedConfig.uiConfig.allocation.cex)
+      updateAllocations(cexAssetIDs, this.updatedConfig.alloc.cex)
     }
   }
 
@@ -807,21 +804,21 @@ export default class MarketMakerSettingsPage extends BasePage {
 
   // clampOriginalAllocations sets the allocations to be within the valid range
   // based on the available balances.
-  clampOriginalAllocations (uiConfig: UIConfig) {
+  clampOriginalAllocations (alloc: BotBalanceAllocation) {
     const { baseID, quoteID } = this.walletStuff()
     const { cexBaseID, cexQuoteID } = this.updatedConfig
     const dexAssetIDs = this.requiredDexAssets(baseID, quoteID, cexBaseID, cexQuoteID)
 
     for (const assetID of dexAssetIDs) {
       const [dexMin, dexMax] = this.validManualBalanceRange(assetID, 'dex', false)
-      uiConfig.allocation.dex[assetID] = Math.min(Math.max(uiConfig.allocation.dex[assetID], dexMin), dexMax)
+      alloc.dex[assetID] = Math.min(Math.max(alloc.dex[assetID], dexMin), dexMax)
     }
 
     if (this.specs.cexName) {
       const cexAssetIDs = [cexBaseID, cexQuoteID]
       for (const assetID of cexAssetIDs) {
         const [cexMin, cexMax] = this.validManualBalanceRange(assetID, 'cex', false)
-        uiConfig.allocation.cex[assetID] = Math.min(Math.max(uiConfig.allocation.cex[assetID], cexMin), cexMax)
+        alloc.cex[assetID] = Math.min(Math.max(alloc.cex[assetID], cexMin), cexMax)
       }
     }
   }
@@ -971,13 +968,14 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     oldCfg.baseOptions = savedBotCfg.baseWalletOptions || {}
     oldCfg.quoteOptions = savedBotCfg.quoteWalletOptions || {}
-    oldCfg.cexBaseID = savedBotCfg.cexBaseID
-    oldCfg.cexQuoteID = savedBotCfg.cexQuoteID
+    oldCfg.cexBaseID = savedBotCfg.cexBaseID || savedBotCfg.baseID
+    oldCfg.cexQuoteID = savedBotCfg.cexQuoteID || savedBotCfg.quoteID
     if (savedBotCfg.uiConfig) oldCfg.uiConfig = savedBotCfg.uiConfig
+    if (savedBotCfg.alloc) oldCfg.alloc = savedBotCfg.alloc
     if (this.runningBot && !savedBotCfg.uiConfig.usingQuickBalance) {
       // If the bot is running and we are allocating manually, initialize
       // the allocations to 0.
-      oldCfg.uiConfig.allocation = { dex: {}, cex: {} }
+      oldCfg.alloc = { dex: {}, cex: {} }
     }
 
     if (mmCfg) {
@@ -1094,7 +1092,8 @@ export default class MarketMakerSettingsPage extends BasePage {
       baseBridgeName: baseBridgeName,
       quoteBridgeName: quoteBridgeName,
       multiHop: this.defaultMultiHopCfg(cexName, cexBaseID, cexQuoteID, intermediateAssets ? intermediateAssets[0] : undefined),
-      uiConfig: defaultUIConfig(minBaseWithdraw, minQuoteWithdraw, botType)
+      uiConfig: defaultUIConfig(minBaseWithdraw, minQuoteWithdraw, botType),
+      alloc: { dex: {}, cex: {} }
     }) as ConfigState
 
     // Update original config values based on saved bot config
@@ -1103,7 +1102,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     this.updatedConfig = JSON.parse(JSON.stringify(oldCfg))
     await this.setAvailableBalances()
     await this.fetchMarketReport()
-    this.clampOriginalAllocations(oldCfg.uiConfig)
+    if (oldCfg.alloc) this.clampOriginalAllocations(oldCfg.alloc)
     this.updatedConfig = JSON.parse(JSON.stringify(oldCfg))
 
     this.setupAllocationTable()
@@ -1219,14 +1218,18 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     if (baseID !== cexBaseID && this.updatedConfig.uiConfig.cexRebalance) {
       const cexBaseAsset = app().assets[cexBaseID]
-      const cexBaseAssetFeeID = cexBaseAsset.token ? cexBaseAsset.token.parentID : cexBaseID
-      addAssetID(cexBaseAssetFeeID)
+      if (cexBaseAsset) {
+        const cexBaseAssetFeeID = cexBaseAsset.token ? cexBaseAsset.token.parentID : cexBaseID
+        addAssetID(cexBaseAssetFeeID)
+      }
     }
 
     if (quoteID !== cexQuoteID && this.updatedConfig.uiConfig.cexRebalance) {
       const cexQuoteAsset = app().assets[cexQuoteID]
-      const cexQuoteAssetFeeID = cexQuoteAsset.token ? cexQuoteAsset.token.parentID : cexQuoteID
-      addAssetID(cexQuoteAssetFeeID)
+      if (cexQuoteAsset) {
+        const cexQuoteAssetFeeID = cexQuoteAsset.token ? cexQuoteAsset.token.parentID : cexQuoteID
+        addAssetID(cexQuoteAssetFeeID)
+      }
     }
 
     return assetIDs
@@ -1490,7 +1493,7 @@ export default class MarketMakerSettingsPage extends BasePage {
 
   updateManualBalanceEntries () {
     const { baseID, quoteID } = this.walletStuff()
-    const { allocation } = this.updatedConfig.uiConfig
+    const allocation = this.updatedConfig.alloc || { dex: {}, cex: {} }
 
     const dexAssetIDs = this.requiredDexAssets(baseID, quoteID, this.updatedConfig.cexBaseID, this.updatedConfig.cexQuoteID)
     let cexAssetIDs : number[] = []
@@ -1500,9 +1503,14 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     const updateBalanceInputs = (assetIDs: number[], location: 'dex' | 'cex', allocations: Record<number, number>) => {
       for (const assetID of assetIDs) {
+        const inputs = this.manualBalanceInputs[location]?.[assetID]
+        if (!inputs) {
+          console.error('updateBalanceInputs: no inputs found for assetID', assetID, location)
+          continue
+        }
         const asset = app().assets[assetID]
         const allocation = allocations[assetID] ?? 0
-        const [input, slider] = this.manualBalanceInputs[location][assetID]
+        const [input, slider] = inputs
         const [min, max] = this.validManualBalanceRange(assetID, location, false)
         input.min = min / asset.unitInfo.conventional.conversionFactor
         input.setValue(allocation / asset.unitInfo.conventional.conversionFactor)
@@ -1531,6 +1539,7 @@ export default class MarketMakerSettingsPage extends BasePage {
         const td = row.children[i + 1] as PageElement
         const assetID = assetIDs[i]
         const asset = app().assets[assetID]
+        if (!asset) continue
         const alloc = allocations[assetID] ? allocations[assetID].amount : 0
         td.textContent = format(alloc, asset.unitInfo)
         setColor(td, allocations[assetID]?.status ?? 'insufficient')
@@ -1927,7 +1936,7 @@ export default class MarketMakerSettingsPage extends BasePage {
     }
 
     const botBalanceAllocation = allocationResultToBotBalanceAllocation(toAlloc)
-    this.updatedConfig.uiConfig.allocation = botBalanceAllocation
+    this.updatedConfig.alloc = botBalanceAllocation
     this.populateAllocationTable(toAlloc)
     this.updateManualBalanceEntries()
     this.updateRebalanceSection()
@@ -2027,7 +2036,8 @@ export default class MarketMakerSettingsPage extends BasePage {
 
       console.log('minTransferValidRange', asset, dexAssetID, cexAssetID)
 
-      const { dex, cex } = this.updatedConfig.uiConfig.allocation
+      const alloc = this.updatedConfig.alloc || { dex: {}, cex: {} }
+      const { dex, cex } = alloc
 
       console.log('allocation', dex, cex)
 
@@ -2111,10 +2121,11 @@ export default class MarketMakerSettingsPage extends BasePage {
 
   setConfigAllocation (amt: number, assetID: number, location: 'dex' | 'cex') {
     const { updatedConfig: cfg } = this
+    if (!cfg.alloc) cfg.alloc = { dex: {}, cex: {} }
     if (location === 'dex') {
-      cfg.uiConfig.allocation.dex[assetID] = amt
+      cfg.alloc.dex[assetID] = amt
     } else {
-      cfg.uiConfig.allocation.cex[assetID] = amt
+      cfg.alloc.cex[assetID] = amt
     }
   }
 
@@ -2537,10 +2548,11 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     if (this.bridgingRequired() && (oldCexRebalance !== this.updatedConfig.uiConfig.cexRebalance)) {
       await this.assetsUpdated()
-      this.updateRebalanceSection()
     } else {
       await this.updateAllocations()
     }
+    // Always update rebalance section visibility
+    this.updateRebalanceSection()
   }
 
   async externalTransfersChanged () {
@@ -2552,10 +2564,11 @@ export default class MarketMakerSettingsPage extends BasePage {
 
     if (this.bridgingRequired() && oldCexRebalance !== this.updatedConfig.uiConfig.cexRebalance) {
       await this.assetsUpdated()
-      this.updateRebalanceSection()
     } else {
       await this.updateAllocations()
     }
+    // Always update rebalance section visibility
+    this.updateRebalanceSection()
   }
 
   async autoRebalanceChanged () {
@@ -2594,6 +2607,8 @@ export default class MarketMakerSettingsPage extends BasePage {
     } else {
       await this.updateAllocations()
     }
+    // Always update rebalance section visibility when checkbox changes
+    this.updateRebalanceSection()
   }
 
   // bridgingRequired checks if bridging is required for either base or quote asset
@@ -3184,6 +3199,8 @@ export default class MarketMakerSettingsPage extends BasePage {
       quoteBridgeName: cfg.quoteBridgeName,
       cexName: cexName ?? '',
       uiConfig: cfg.uiConfig,
+      alloc: cfg.alloc,
+      autoRebalance: this.autoRebalanceSettings(),
       baseWalletOptions: cfg.baseOptions,
       quoteWalletOptions: cfg.quoteOptions
     }
@@ -3207,11 +3224,11 @@ export default class MarketMakerSettingsPage extends BasePage {
     // all the diffs initially to 0. However, we save the UI with the total
     // allocations for each asset, so that if the bot is stopped and then the
     // settings are reloaded, the total allocations will be shown.
-    const updatedAllocation = cfg.uiConfig.allocation
+    const updatedAllocation = cfg.alloc || { dex: {}, cex: {} }
     if (!botCfg.uiConfig.usingQuickBalance && this.runningBot) {
       const botAlloc = this.runningBotAllocations()
       if (botAlloc) {
-        botCfg.uiConfig.allocation = combineBotAllocations(botAlloc, updatedAllocation)
+        botCfg.alloc = combineBotAllocations(botAlloc, updatedAllocation)
       }
     }
 
@@ -3233,18 +3250,9 @@ export default class MarketMakerSettingsPage extends BasePage {
   }
 
   async saveSettingsAndStart () {
-    const { specs: { host, baseID, quoteID }, updatedConfig: cfg } = this
+    const { specs: { host, baseID, quoteID } } = this
     await this.doSave()
-
-    const startConfig: StartConfig = {
-      baseID: baseID,
-      quoteID: quoteID,
-      host: host,
-      alloc: cfg.uiConfig.allocation,
-      autoRebalance: this.autoRebalanceSettings()
-    }
-
-    await MM.startBot(startConfig)
+    await MM.startBot({ host, baseID, quoteID })
     app().loadPage('mm')
   }
 
@@ -3877,10 +3885,12 @@ export type AvailableFunds = {
 function allocationResultToBotBalanceAllocation (allocationResult: AllocationResult) : BotBalanceAllocation {
   const result: BotBalanceAllocation = { dex: {}, cex: {} }
   for (const assetID of Object.keys(allocationResult.dex)) {
-    result.dex[Number(assetID)] = allocationResult.dex[Number(assetID)].amount
+    const alloc = allocationResult.dex[Number(assetID)]
+    if (alloc) result.dex[Number(assetID)] = alloc.amount
   }
   for (const assetID of Object.keys(allocationResult.cex)) {
-    result.cex[Number(assetID)] = allocationResult.cex[Number(assetID)].amount
+    const alloc = allocationResult.cex[Number(assetID)]
+    if (alloc) result.cex[Number(assetID)] = alloc.amount
   }
   return result
 }

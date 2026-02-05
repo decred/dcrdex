@@ -1843,8 +1843,7 @@ func TestMarket_CancelWhileSuspended(t *testing.T) {
 	storage.archivedCancels = make([]*order.CancelOrder, 0, 1)
 	storage.canceledOrders = make([]*order.LimitOrder, 0, 1)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Insert a limit order into the book before the market has started
 	lo := makeLO(buyer3, mkRate3(1.0, 1.2), 1, order.StandingTiF)

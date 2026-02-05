@@ -918,7 +918,18 @@ func handleStartBot(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		return usage(startBotRoute, err)
 	}
 
-	err = s.mm.StartBot(&mm.StartConfig{MarketWithHost: *form.mkt}, &form.cfgFilePath, form.appPass, true)
+	if form.mkt == nil {
+		// Start all bots
+		started, err := s.mm.StartBots(&form.cfgFilePath, form.appPass)
+		if err != nil {
+			resErr := msgjson.NewError(msgjson.RPCStartMarketMakingError, "error starting bots: %v", err)
+			return createResponse(startBotRoute, nil, resErr)
+		}
+		return createResponse(startBotRoute, fmt.Sprintf("started %d bot(s)", started), nil)
+	}
+
+	// Start specific bot
+	err = s.mm.StartBot(form.mkt, &form.cfgFilePath, form.appPass, true)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCStartMarketMakingError, "unable to start market making: %v", err)
 		return createResponse(startBotRoute, nil, resErr)
@@ -930,16 +941,27 @@ func handleStartBot(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 func handleStopBot(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	mkt, err := parseStopBotArgs(params)
 	if err != nil {
-		return usage(startBotRoute, err)
+		return usage(stopBotRoute, err)
 	}
 
+	if mkt == nil {
+		// Stop all bots
+		stopped, err := s.mm.StopBots()
+		if err != nil {
+			resErr := msgjson.NewError(msgjson.RPCStopMarketMakingError, "error stopping bots: %v", err)
+			return createResponse(stopBotRoute, nil, resErr)
+		}
+		return createResponse(stopBotRoute, fmt.Sprintf("stopping %d bot(s)", stopped), nil)
+	}
+
+	// Stop specific bot
 	err = s.mm.StopBot(mkt)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCStopMarketMakingError, "unable to stop market making: %v", err)
 		return createResponse(stopBotRoute, nil, resErr)
 	}
 
-	return createResponse(stopBotRoute, "stopped bot", nil)
+	return createResponse(stopBotRoute, "stopping bot", nil)
 }
 
 func handleUpdateRunningBotCfg(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
@@ -1910,23 +1932,24 @@ supported for DCR wallets.`,
 		num (int): The number of notifications to load.`,
 	},
 	startBotRoute: {
-		cmdSummary: `Start market making.`,
-		argsShort:  `(cfgPath) (host) (baseID) (quoteID) (dexBals) (dexBals)`,
+		pwArgsShort: `"appPass"`,
+		cmdSummary:  `Start market making bot(s).`,
+		argsShort:   `cfgPath [host baseID quoteID]`,
+		pwArgsLong: `Password Args:
+    appPass (string): The Bison Wallet password.`,
 		argsLong: `Args:
-		cfgPath (string): The path to the market maker config file.
-		host (string): The DEX address.
-		baseID (int): The base asset's BIP-44 registered coin index.
-		quoteID (int): The quote asset's BIP-44 registered coin index.
-		dexBalances (array): The DEX balances i.e. [[60,1000000],[42,10000000]].
-		cexBalances (array): The CEX balances i.e. [[60,1000000],[42,10000000]].`,
+    cfgPath (string): The path to the market maker config file.
+    host (string, optional): The DEX address. If not provided, starts all bots in config.
+    baseID (int, optional): The base asset's BIP-44 registered coin index.
+    quoteID (int, optional): The quote asset's BIP-44 registered coin index.`,
 	},
 	stopBotRoute: {
-		cmdSummary: `Stop market making.`,
-		argsShort:  `(host) (baseID) (quoteID)`,
+		cmdSummary: `Stop market making bot(s).`,
+		argsShort:  `[host baseID quoteID]`,
 		argsLong: `Args:
-		host (string): The DEX address.
-		baseID (int): The base asset's BIP-44 registered coin index.
-		quoteID (int): The quote asset's BIP-44 registered coin index.`,
+    host (string, optional): The DEX address. If not provided, stops all running bots.
+    baseID (int, optional): The base asset's BIP-44 registered coin index.
+    quoteID (int, optional): The quote asset's BIP-44 registered coin index.`,
 	},
 	mmAvailableBalancesRoute: {
 		cmdSummary: `Get available balances for starting a bot or adding additional balance to a running bot.`,

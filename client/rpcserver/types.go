@@ -959,25 +959,34 @@ func parseBotBalances(balanceArg string) (map[uint32]uint64, error) {
 }
 
 func parseStartBotArgs(params *RawParams) (*startBotForm, error) {
-	if err := checkNArgs(params, []int{1}, []int{6}); err != nil {
-		return nil, err
+	if len(params.PWArgs) != 1 {
+		return nil, fmt.Errorf("%w: expected 1 password argument, got %d", errArgs, len(params.PWArgs))
 	}
+	if len(params.Args) != 1 && len(params.Args) != 4 {
+		return nil, fmt.Errorf("%w: expected 1 or 4 arguments, got %d", errArgs, len(params.Args))
+	}
+
 	form := new(startBotForm)
 	form.appPass = params.PWArgs[0]
 	form.cfgFilePath = params.Args[0]
 
-	mkt, err := parseMktWithHost(params.Args[1], params.Args[2], params.Args[3])
-	if err != nil {
-		return nil, err
+	if len(params.Args) == 4 {
+		mkt, err := parseMktWithHost(params.Args[1], params.Args[2], params.Args[3])
+		if err != nil {
+			return nil, err
+		}
+		form.mkt = mkt
 	}
-	form.mkt = mkt
 
 	return form, nil
 }
 
 func parseStopBotArgs(params *RawParams) (*mm.MarketWithHost, error) {
-	if err := checkNArgs(params, []int{0}, []int{3}); err != nil {
-		return nil, err
+	if len(params.Args) != 0 && len(params.Args) != 3 {
+		return nil, fmt.Errorf("%w: expected 0 or 3 arguments, got %d", errArgs, len(params.Args))
+	}
+	if len(params.Args) == 0 {
+		return nil, nil // nil means stop all bots
 	}
 	return parseMktWithHost(params.Args[0], params.Args[1], params.Args[2])
 }

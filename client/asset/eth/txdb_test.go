@@ -399,7 +399,7 @@ func TestTxDB_GetBridges(t *testing.T) {
 	}
 
 	t.Run("getBridges all", func(t *testing.T) {
-		result, err := db.getBridges(0, nil, false)
+		result, err := db.getBridges(nil, 0, nil, false)
 		if err != nil {
 			t.Fatalf("getBridges failed: %v", err)
 		}
@@ -416,7 +416,7 @@ func TestTxDB_GetBridges(t *testing.T) {
 	})
 
 	t.Run("getBridges limited", func(t *testing.T) {
-		result, err := db.getBridges(2, nil, false)
+		result, err := db.getBridges(nil, 2, nil, false)
 		if err != nil {
 			t.Fatalf("getBridges failed: %v", err)
 		}
@@ -432,7 +432,7 @@ func TestTxDB_GetBridges(t *testing.T) {
 
 	t.Run("getBridges with refID and past=false", func(t *testing.T) {
 		refID := common.HexToHash(txs[0].ID)
-		result, err := db.getBridges(2, &refID, false)
+		result, err := db.getBridges(nil, 2, &refID, false)
 		if err != nil {
 			t.Fatalf("getBridges failed: %v", err)
 		}
@@ -448,7 +448,7 @@ func TestTxDB_GetBridges(t *testing.T) {
 
 	t.Run("getBridges with refID and past=true", func(t *testing.T) {
 		refID := common.HexToHash(txs[0].ID)
-		result, err := db.getBridges(2, &refID, true)
+		result, err := db.getBridges(nil, 2, &refID, true)
 		if err != nil {
 			t.Fatalf("getBridges failed: %v", err)
 		}
@@ -465,7 +465,7 @@ func TestTxDB_GetBridges(t *testing.T) {
 	t.Run("getBridges with refID and past=true from newer bridge", func(t *testing.T) {
 		// Use txs[1] as reference to test past=true with older transactions available
 		refID := common.HexToHash(txs[1].ID)
-		result, err := db.getBridges(2, &refID, true)
+		result, err := db.getBridges(nil, 2, &refID, true)
 		if err != nil {
 			t.Fatalf("getBridges failed: %v", err)
 		}
@@ -481,7 +481,7 @@ func TestTxDB_GetBridges(t *testing.T) {
 
 	t.Run("getBridges with invalid refID", func(t *testing.T) {
 		invalidID := common.HexToHash("0xdeadbeef")
-		_, err := db.getBridges(2, &invalidID, false)
+		_, err := db.getBridges(nil, 2, &invalidID, false)
 		if err == nil || err != asset.CoinNotFoundError {
 			t.Fatalf("expected CoinNotFoundError, got %v", err)
 		}
@@ -489,14 +489,14 @@ func TestTxDB_GetBridges(t *testing.T) {
 
 	t.Run("getBridges with non-bridge refID", func(t *testing.T) {
 		nonBridgeID := common.HexToHash(txs[4].ID)
-		_, err := db.getBridges(2, &nonBridgeID, false)
+		_, err := db.getBridges(nil, 2, &nonBridgeID, false)
 		if err == nil {
 			t.Fatalf("expected error for non-bridge refID, got nil")
 		}
 	})
 
 	t.Run("getPendingBridges", func(t *testing.T) {
-		result, err := db.getPendingBridges()
+		result, err := db.getPendingBridges(nil)
 		if err != nil {
 			t.Fatalf("getPendingBridges failed: %v", err)
 		}

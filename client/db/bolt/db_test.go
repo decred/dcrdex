@@ -1327,8 +1327,7 @@ func TestDeleteInactiveMatches(t *testing.T) {
 	boltdb, shutdown := newTestDB(t)
 	defer shutdown()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Create an account to use.
 	acct1 := dbtest.RandomAccountInfo()
@@ -1505,8 +1504,7 @@ func TestDeleteInactiveOrders(t *testing.T) {
 	boltdb, shutdown := newTestDB(t)
 	defer shutdown()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Create an account to use.
 	acct1 := dbtest.RandomAccountInfo()

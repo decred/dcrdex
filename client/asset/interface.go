@@ -860,11 +860,13 @@ type Bridger interface {
 	// ApproveBridgeContract submits a transaction to authorize the bridge contract
 	// to manage the user's tokens. This step is optional for some assets.
 	// Use BridgeContractApprovalStatus to determine if approval is necessary.
-	ApproveBridgeContract(ctx context.Context, bridgeName string) (string, error)
+	// The onConfirm callback is called when the approval transaction confirms.
+	ApproveBridgeContract(ctx context.Context, bridgeName string, onConfirm func()) (string, error)
 
 	// UnapproveBridgeContract submits a transaction to revoke the bridge contract's
 	// permission to manage the user's tokens.
-	UnapproveBridgeContract(ctx context.Context, bridgeName string) (string, error)
+	// The onConfirm callback is called when the unapproval transaction confirms.
+	UnapproveBridgeContract(ctx context.Context, bridgeName string, onConfirm func()) (string, error)
 
 	// BridgeContractApprovalStatus retrieves the current approval state of the bridge contract.
 	// Returns Approved for assets that don't require explicit approval.
@@ -884,10 +886,11 @@ type Bridger interface {
 	// MarkBridgeComplete is called when the destination chain sends a
 	// notification regarding the completion of a bridge. The completionTxIDs
 	// are the IDs of the transactions that completed the bridge. The amtReceived
-	// is the amount of tokens received on the destination chain. The complete
-	// boolean is true if the bridge has fully completed and the funds are
-	// allocated on the destination chain.
-	MarkBridgeComplete(initiationTxID string, completionTxIDs []string, amtReceived uint64, complete bool)
+	// is the amount of tokens received on the destination chain. The fees are
+	// the network fees paid on the destination chain. The complete boolean is
+	// true if the bridge has fully completed and the funds are allocated on
+	// the destination chain.
+	MarkBridgeComplete(initiationTxID string, completionTxIDs []string, amtReceived, fees uint64, complete bool)
 
 	// PendingBridges lists all uncompleted bridge transactions on the blockchain.
 	// For token wallets, this includes pending bridges for other tokens on the same chain.
@@ -898,14 +901,15 @@ type Bridger interface {
 	BridgeHistory(n int, refID *string, past bool) ([]*WalletTransaction, error)
 
 	// SupportedDestinations returns the list of asset IDs that are supported as destinations for the origin asset.
-	SupportedDestinations() (map[uint32][]string, error)
+	SupportedDestinations() map[uint32][]string
 
 	// BridgeInitiationFeesAndLimits returns the estimated for initiating a bridge, and the
 	// min and mix limits for the bridge, if any.
 	BridgeInitiationFeesAndLimits(bridgeName string, destAssetID uint32) (estimatedFee uint64, limits [2]uint64, hasLimits bool, err error)
 
-	// BridgeCompletionFees returns the estimated fees for completing a bridge.
-	BridgeCompletionFees(bridgeName string) (uint64, error)
+	// BridgeCompletionFees returns the estimated fees for completing a bridge,
+	// and whether the wallet has sufficient balance available to pay those fees.
+	BridgeCompletionFees(bridgeName string) (fees uint64, hasSufficientBalance bool, err error)
 }
 
 // Sweeper is a wallet that can clear the entire balance of the wallet/account
@@ -1914,6 +1918,7 @@ type BridgeCompletedNote struct {
 	InitiationTxID  string   `json:"initiationTxID"`
 	CompletionTxIDs []string `json:"completionTxIDs"`
 	AmtReceived     uint64   `json:"amtReceived"`
+	Fees            uint64   `json:"fees"`
 	Complete        bool     `json:"complete"`
 }
 
@@ -2068,7 +2073,7 @@ func (e *WalletEmitter) BridgeReadyToComplete(destAssetID uint32, bridgeTxID str
 
 // BridgeCompleted is emitted by the wallet which completed a bridge to
 // notify that the bridge has been completed.
-func (e *WalletEmitter) BridgeCompleted(sourceAssetID uint32, initiationTxID string, completionTxIDs []string, amtReceived uint64, complete bool) {
+func (e *WalletEmitter) BridgeCompleted(sourceAssetID uint32, initiationTxID string, completionTxIDs []string, amtReceived, fees uint64, complete bool) {
 	e.emit(&BridgeCompletedNote{
 		baseWalletNotification: baseWalletNotification{
 			AssetID: e.assetID,
@@ -2078,6 +2083,7 @@ func (e *WalletEmitter) BridgeCompleted(sourceAssetID uint32, initiationTxID str
 		InitiationTxID:  initiationTxID,
 		CompletionTxIDs: completionTxIDs,
 		AmtReceived:     amtReceived,
+		Fees:            fees,
 		Complete:        complete,
 	})
 }

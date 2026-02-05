@@ -608,6 +608,7 @@ type tTxDB struct {
 	removeTxCalled bool
 	removeTxErr    error
 	txToGet        *extendedWalletTx
+	txs            map[common.Hash]*extendedWalletTx // for looking up multiple txs by hash
 	getTxErr       error
 	pendingBridges []*extendedWalletTx
 }
@@ -633,6 +634,11 @@ func (db *tTxDB) getTxs(tokenID *uint32, req *asset.TxHistoryRequest) (*asset.Tx
 // getTx gets a single transaction. It is not an error if the tx is not known.
 // In that case, a nil tx is returned.
 func (db *tTxDB) getTx(txHash common.Hash) (tx *extendedWalletTx, _ error) {
+	if db.txs != nil {
+		if tx, ok := db.txs[txHash]; ok {
+			return tx, db.getTxErr
+		}
+	}
 	return db.txToGet, db.getTxErr
 }
 func (db *tTxDB) getPendingTxs() ([]*extendedWalletTx, error) {
@@ -641,10 +647,10 @@ func (db *tTxDB) getPendingTxs() ([]*extendedWalletTx, error) {
 func (db *tTxDB) close() error {
 	return nil
 }
-func (db *tTxDB) getBridges(n int, refID *common.Hash, past bool) ([]*asset.WalletTransaction, error) {
+func (db *tTxDB) getBridges(tokenID *uint32, n int, refID *common.Hash, past bool) ([]*asset.WalletTransaction, error) {
 	panic("getBridges not implemented")
 }
-func (db *tTxDB) getPendingBridges() ([]*extendedWalletTx, error) {
+func (db *tTxDB) getPendingBridges(tokenID *uint32) ([]*extendedWalletTx, error) {
 	return db.pendingBridges, nil
 }
 func (db *tTxDB) getBridgeCompletions(initiationTxID string) ([]*extendedWalletTx, error) {
@@ -1969,8 +1975,7 @@ func TestBalanceNoMempool(t *testing.T) {
 }
 
 func TestFeeRate(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	node := &testNode{}
 	eth := &baseWallet{
 		node:          node,
@@ -4464,8 +4469,7 @@ func TestOwnsAddress(t *testing.T) {
 }
 
 func TestSignMessage(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	node := newTestNode(BipID)
 	eth := &assetWallet{
@@ -4527,8 +4531,7 @@ func TestSwapConfirmation(t *testing.T) {
 
 	ver := uint32(0)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	checkResult := func(expErr bool, expConfs uint32, expSpent bool) {
 		t.Helper()
@@ -5795,8 +5798,7 @@ func testEstimateSendTxFee(t *testing.T, assetID uint32) {
 }
 
 func TestSwapOrRedemptionFeesPaid(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	_, bw, node, shutdown := tassetWallet(BipID)
 	defer shutdown()
 
@@ -6094,7 +6096,9 @@ type mockBridge struct {
 		data     []byte
 		err      error
 	}
-	completeFollowUpBridgeCalled common.Hash
+	completeFollowUpBridgeCalled    common.Hash
+	completeBridgeGasResult         uint64
+	followUpCompleteBridgeGasResult uint64
 }
 
 var _ bridge = (*mockBridge)(nil)
@@ -6124,7 +6128,7 @@ func (m *mockBridge) completeBridge(txOpts *bind.TransactOpts, destAssetID uint3
 	return tx, nil
 }
 func (m *mockBridge) initiateBridgeGas(sourceAssetID uint32) uint64 { return 0 }
-func (m *mockBridge) completeBridgeGas(destAssetID uint32) uint64   { return 0 }
+func (m *mockBridge) completeBridgeGas(destAssetID uint32) uint64   { return m.completeBridgeGasResult }
 func (m *mockBridge) requiresCompletion(destAssetID uint32) bool {
 	return m.requiresCompletionResult
 }
@@ -6145,9 +6149,127 @@ func (m *mockBridge) completeFollowUpBridge(txOpts *bind.TransactOpts, data []by
 	m.completeFollowUpBridgeCalled = tx.Hash()
 	return tx, nil
 }
-func (m *mockBridge) followUpCompleteBridgeGas() uint64 { return 0 }
+func (m *mockBridge) followUpCompleteBridgeGas() uint64 { return m.followUpCompleteBridgeGasResult }
 func (m *mockBridge) bridgeLimits(sourceAssetID, destAssetID uint32) (min, max *big.Int, hasLimits bool, err error) {
 	return nil, nil, false, nil
+}
+
+func TestBridgeCompletionFees(t *testing.T) {
+	const bridgeName = "mock"
+	const maxFeeRateGwei = 202
+
+	tests := []struct {
+		name              string
+		assetID           uint32
+		completeBridgeGas uint64
+		followUpGas       uint64
+		balance           uint64
+		parentBalance     uint64
+
+		expectFees          uint64
+		expectSufficientBal bool
+		expectErr           bool
+		bridgeNotFound      bool
+	}{
+		{
+			name:                "base asset - sufficient balance",
+			assetID:             BipID,
+			completeBridgeGas:   100_000,
+			followUpGas:         50_000,
+			balance:             150_000 * maxFeeRateGwei,
+			expectFees:          150_000 * maxFeeRateGwei,
+			expectSufficientBal: true,
+		},
+		{
+			name:                "base asset - insufficient balance",
+			assetID:             BipID,
+			completeBridgeGas:   100_000,
+			followUpGas:         50_000,
+			balance:             150_000*maxFeeRateGwei - 1,
+			expectFees:          150_000 * maxFeeRateGwei,
+			expectSufficientBal: false,
+		},
+		{
+			name:                "base asset - zero completion gas",
+			assetID:             BipID,
+			completeBridgeGas:   0,
+			followUpGas:         0,
+			balance:             0,
+			expectFees:          0,
+			expectSufficientBal: true,
+		},
+		{
+			name:                "token - sufficient parent balance",
+			assetID:             usdcEthID,
+			completeBridgeGas:   200_000,
+			followUpGas:         0,
+			balance:             1e6,
+			parentBalance:       200_000 * maxFeeRateGwei,
+			expectFees:          200_000 * maxFeeRateGwei,
+			expectSufficientBal: true,
+		},
+		{
+			name:                "token - insufficient parent balance",
+			assetID:             usdcEthID,
+			completeBridgeGas:   200_000,
+			followUpGas:         0,
+			balance:             1e9,
+			parentBalance:       200_000*maxFeeRateGwei - 1,
+			expectFees:          200_000 * maxFeeRateGwei,
+			expectSufficientBal: false,
+		},
+		{
+			name:           "bridge not found",
+			assetID:        BipID,
+			bridgeNotFound: true,
+			expectErr:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, aw, node, shutdown := tassetWallet(tt.assetID)
+			defer shutdown()
+
+			node.bal = dexeth.GweiToWei(tt.balance)
+
+			// Set up parent balance for tokens
+			if tt.assetID != BipID && node.tokenParent != nil {
+				parentNode := newTestNode(BipID)
+				parentNode.bal = dexeth.GweiToWei(tt.parentBalance)
+				node.tokenParent.node = parentNode
+			}
+
+			if !tt.bridgeNotFound {
+				mb := &mockBridge{
+					completeBridgeGasResult:         tt.completeBridgeGas,
+					followUpCompleteBridgeGasResult: tt.followUpGas,
+				}
+				aw.bridges = map[string]bridge{bridgeName: mb}
+			}
+
+			fees, hasSufficientBal, err := aw.BridgeCompletionFees(bridgeName)
+
+			if tt.expectErr {
+				if err == nil {
+					t.Fatal("expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if fees != tt.expectFees {
+				t.Errorf("expected fees %d, got %d", tt.expectFees, fees)
+			}
+
+			if hasSufficientBal != tt.expectSufficientBal {
+				t.Errorf("expected hasSufficientBalance=%v, got %v", tt.expectSufficientBal, hasSufficientBal)
+			}
+		})
+	}
 }
 
 func TestBridgeManager(t *testing.T) {
@@ -6289,7 +6411,7 @@ func TestBridgeManager(t *testing.T) {
 		}
 
 		// Remove the bridge
-		bm.markBridgeComplete(burnTxID, []string{"mintTxID"}, 1000000, true)
+		bm.markBridgeComplete(burnTxID, []string{"mintTxID"}, 1000000, 1000, true)
 
 		// Wait and ensure no more calls occur
 		time.Sleep(300 * time.Millisecond) // Longer than 2 monitor intervals
@@ -6406,6 +6528,21 @@ func TestCompleteBridge(t *testing.T) {
 		WalletTransaction: &asset.WalletTransaction{
 			ID:                  "complete-tx-id",
 			Amount:              1e9,
+			Fees:                5000, // 5000 gwei fees
+			Confirmed:           true,
+			Type:                asset.CompleteBridge,
+			BridgeCounterpartTx: initiationTx,
+			Timestamp:           timestamp,
+		},
+		Nonce:     new(big.Int),
+		savedToDB: true,
+	}
+	// Previous completion tx for follow-up scenarios
+	initialCompletionTx := &extendedWalletTx{
+		WalletTransaction: &asset.WalletTransaction{
+			ID:                  "initial-completion-tx-id",
+			Amount:              0,
+			Fees:                3000, // 3000 gwei fees
 			Confirmed:           true,
 			Type:                asset.CompleteBridge,
 			BridgeCounterpartTx: initiationTx,
@@ -6418,6 +6555,7 @@ func TestCompleteBridge(t *testing.T) {
 		WalletTransaction: &asset.WalletTransaction{
 			ID:                  "follow-up-tx-id",
 			Amount:              1e9,
+			Fees:                2000, // 2000 gwei fees for follow-up
 			Confirmed:           true,
 			Type:                asset.CompleteBridge,
 			BridgeCounterpartTx: initiationTx,
@@ -6432,6 +6570,7 @@ func TestCompleteBridge(t *testing.T) {
 		WalletTransaction: &asset.WalletTransaction{
 			ID:                  "pending-tx-id",
 			Amount:              1e9,
+			Fees:                0, // No fees yet - not confirmed
 			Confirmed:           false,
 			Type:                asset.CompleteBridge,
 			BridgeCounterpartTx: initiationTx,
@@ -6444,6 +6583,7 @@ func TestCompleteBridge(t *testing.T) {
 	tests := []struct {
 		name                    string
 		dbTx                    *extendedWalletTx
+		extraTxs                map[common.Hash]*extendedWalletTx // additional txs for DB lookup
 		pendingTx               *extendedWalletTx
 		dbErr                   error
 		bridge                  *mockBridge
@@ -6453,6 +6593,7 @@ func TestCompleteBridge(t *testing.T) {
 		expectNote              bool
 		expectedCompletionTxIDs []string
 		expectedIsComplete      bool
+		expectedFees            uint64
 	}{
 		{
 			name: "new completion - requires completion",
@@ -6463,6 +6604,7 @@ func TestCompleteBridge(t *testing.T) {
 			expectNote:              true,
 			expectedCompletionTxIDs: []string{"mock-tx-id"}, // Will be generated by mock
 			expectedIsComplete:      false,                  // Not complete until confirmed
+			expectedFees:            0,                      // No fees until confirmed
 		},
 		{
 			name: "bridge does not require completion - verification successful",
@@ -6473,6 +6615,7 @@ func TestCompleteBridge(t *testing.T) {
 			expectNote:              true,
 			expectedCompletionTxIDs: []string{}, // No completion transactions
 			expectedIsComplete:      true,
+			expectedFees:            0, // No completion tx, no fees
 		},
 		{
 			name: "bridge does not require completion - verification failed",
@@ -6504,10 +6647,14 @@ func TestCompleteBridge(t *testing.T) {
 			expectNote:              true,
 			expectedCompletionTxIDs: []string{"complete-tx-id"},
 			expectedIsComplete:      true,
+			expectedFees:            5000, // confirmedTx.Fees
 		},
 		{
 			name: "confirmed completion - follow-up required, verification complete",
 			dbTx: confirmedTxWithFollowUpData,
+			extraTxs: map[common.Hash]*extendedWalletTx{
+				common.HexToHash("initial-completion-tx-id"): initialCompletionTx,
+			},
 			bridge: &mockBridge{
 				requiresCompletionResult:         true,
 				requiresFollowUpCompletionResult: true,
@@ -6516,6 +6663,7 @@ func TestCompleteBridge(t *testing.T) {
 			expectNote:              true,
 			expectedCompletionTxIDs: []string{"initial-completion-tx-id", "follow-up-tx-id"},
 			expectedIsComplete:      true,
+			expectedFees:            5000, // initialCompletionTx.Fees (3000) + confirmedTxWithFollowUpData.Fees (2000)
 		},
 		{
 			name: "confirmed completion - follow-up required, verification incomplete",
@@ -6548,6 +6696,7 @@ func TestCompleteBridge(t *testing.T) {
 			expectNote:              true,
 			expectedCompletionTxIDs: []string{"complete-tx-id"},
 			expectedIsComplete:      true,
+			expectedFees:            5000, // confirmedTx.Fees
 		},
 		{
 			name: "confirmed completion - follow-up required, no verification data, follow-up required",
@@ -6569,6 +6718,7 @@ func TestCompleteBridge(t *testing.T) {
 			expectCompleteFollowUp:  true,
 			expectedCompletionTxIDs: []string{"complete-tx-id", "mock-tx-id"}, // Initial + new follow-up
 			expectedIsComplete:      false,                                    // Not complete until follow-up verified
+			expectedFees:            0,                                        // No fees until follow-up confirmed
 		},
 		{
 			name:  "db error",
@@ -6597,6 +6747,7 @@ func TestCompleteBridge(t *testing.T) {
 
 			txDB := &tTxDB{
 				txToGet:  tt.dbTx,
+				txs:      tt.extraTxs,
 				getTxErr: tt.dbErr,
 			}
 			ethWallet.txDB = txDB
@@ -6682,6 +6833,10 @@ func TestCompleteBridge(t *testing.T) {
 				} else if actualID != expectedID {
 					t.Fatalf("expected CompletionTxID[%d] = %s, got %s", i, expectedID, actualID)
 				}
+			}
+
+			if note.Fees != tt.expectedFees {
+				t.Fatalf("expected Fees = %d, got %d", tt.expectedFees, note.Fees)
 			}
 		})
 	}

@@ -9,6 +9,8 @@
     "sourceMap": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "strictNullChecks": true
+    "strictNullChecks": true,
+    "jsx": "react-jsx",
+    "lib": ["es6", "dom", "dom.iterable"]
   }
 }

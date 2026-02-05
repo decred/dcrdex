@@ -1372,9 +1372,9 @@ func dcrPerKBToAtomsPerByte(dcrPerkB float64) (uint64, error) {
 func fetchFeeFromOracle(ctx context.Context, net dex.Network, nb uint64) (float64, error) {
 	var uri string
 	if net == dex.Testnet {
-		uri = fmt.Sprintf("https://testnet.dcrdata.org/insight/api/utils/estimatefee?nbBlocks=%d", nb)
+		uri = fmt.Sprintf("https://testnet.decred.org/insight/api/utils/estimatefee?nbBlocks=%d", nb)
 	} else { // mainnet and simnet
-		uri = fmt.Sprintf("https://explorer.dcrdata.org/insight/api/utils/estimatefee?nbBlocks=%d", nb)
+		uri = fmt.Sprintf("https://dcrdata.decred.org/insight/api/utils/estimatefee?nbBlocks=%d", nb)
 	}
 	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
@@ -8106,7 +8106,7 @@ func getDcrdataTxs(ctx context.Context, addr string, net dex.Network) (txs []*wi
 	apiRoot := "https://dcrdata.decred.org/api/"
 	switch net {
 	case dex.Testnet:
-		apiRoot = "https://testnet.dcrdata.org/api/"
+		apiRoot = "https://testnet.decred.org/api/"
 	case dex.Simnet:
 		apiRoot = "http://127.0.0.1:17779/api/"
 	}

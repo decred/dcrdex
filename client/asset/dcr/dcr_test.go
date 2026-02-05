@@ -4341,8 +4341,7 @@ func TestReconfigure(t *testing.T) {
 
 	wallet.wallet = &reconfigurer
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cfg1 := &walletConfig{
 		UseSplitTx:       true,

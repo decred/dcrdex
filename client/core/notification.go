@@ -43,6 +43,7 @@ const (
 	NoteTypeWalletNote     = "walletnote"
 	NoteTypeReputation     = "reputation"
 	NoteTypeActionRequired = "actionrequired"
+	NoteTypeBridge         = "bridge"
 )
 
 var noteChanCounter uint64
@@ -622,12 +623,48 @@ type WalletStateNote WalletConfigNote
 
 const TopicWalletState Topic = "WalletState"
 const TopicTokenApproval Topic = "TokenApproval"
+const TopicBridgeApproval Topic = "BridgeApproval"
 
 func newTokenApprovalNote(walletState *WalletState) *WalletStateNote {
 	return &WalletStateNote{
 		Notification: db.NewNotification(NoteTypeWalletState, TopicTokenApproval, "", "", db.Data),
 		Wallet:       walletState,
 	}
+}
+
+func newBridgeApprovalNote(walletState *WalletState) *WalletStateNote {
+	return &WalletStateNote{
+		Notification: db.NewNotification(NoteTypeWalletState, TopicBridgeApproval, "", "", db.Data),
+		Wallet:       walletState,
+	}
+}
+
+// BridgeNote is a notification for bridge status updates.
+// It is sent whenever the destination chain submits a transaction,
+// and when the bridge is fully complete.
+type BridgeNote struct {
+	db.Notification
+	SourceAssetID   uint32   `json:"sourceAssetID"`
+	DestAssetID     uint32   `json:"destAssetID"`
+	TxID            string   `json:"txID"`
+	CompletionTxIDs []string `json:"completionTxIDs"`
+	Amount          uint64   `json:"amount"`
+	Complete        bool     `json:"complete"`
+}
+
+const TopicBridgeUpdate Topic = "BridgeUpdate"
+
+func newBridgeNote(n *asset.BridgeCompletedNote) *BridgeNote {
+	bn := &BridgeNote{
+		Notification:    db.NewNotification(NoteTypeBridge, TopicBridgeUpdate, "", "", db.Data),
+		SourceAssetID:   n.SourceAssetID,
+		DestAssetID:     n.AssetID,
+		TxID:            n.InitiationTxID,
+		CompletionTxIDs: n.CompletionTxIDs,
+		Amount:          n.AmtReceived,
+		Complete:        n.Complete,
+	}
+	return bn
 }
 
 func newWalletStateNote(walletState *WalletState) *WalletStateNote {

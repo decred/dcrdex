@@ -1000,8 +1000,7 @@ func TestRescan(t *testing.T) {
 
 	dcrw.makeBlocks(0, tipHeight)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	ensureErr := func(errStr string, us []wallet.RescanProgress) {
 		t.Helper()

@@ -2014,6 +2014,30 @@ func (c *TCore) BridgeFeesAndLimits(fromAssetID, toAssetID uint32, bridgeName st
 	return nil, nil
 }
 
+func (c *TCore) Bridge(fromAssetID, toAssetID uint32, amt uint64, bridgeName string) (string, error) {
+	return "", nil
+}
+
+func (c *TCore) BridgeContractApprovalStatus(assetID uint32, bridgeName string) (asset.ApprovalStatus, error) {
+	return asset.NotApproved, nil
+}
+
+func (c *TCore) ApproveBridgeContract(assetID uint32, bridgeName string) (string, error) {
+	return "", nil
+}
+
+func (c *TCore) UnapproveBridgeContract(assetID uint32, bridgeName string) (string, error) {
+	return "", nil
+}
+
+func (c *TCore) PendingBridges(assetID uint32) ([]*asset.WalletTransaction, error) {
+	return nil, nil
+}
+
+func (c *TCore) BridgeHistory(assetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error) {
+	return nil, nil
+}
+
 func newMarketDay() *libxc.MarketDay {
 	avgPrice := tenToThe(7)
 	return &libxc.MarketDay{
@@ -2125,17 +2149,16 @@ func (m *TMarketMaker) MarketReport(host string, baseID, quoteID uint32) (*mm.Ma
 	}, nil
 }
 
-func (m *TMarketMaker) StartBot(startCfg *mm.StartConfig, alternateConfigPath *string, appPW []byte, overrideLotSizeUpdate bool) (err error) {
+func (m *TMarketMaker) StartBot(mkt *mm.MarketWithHost, alternateConfigPath *string, appPW []byte, overrideLotSizeUpdate bool) (err error) {
 	m.runningBotsMtx.Lock()
 	defer m.runningBotsMtx.Unlock()
 
-	mkt := startCfg.MarketWithHost
-	_, running := m.runningBots[mkt]
+	_, running := m.runningBots[*mkt]
 	if running {
 		return fmt.Errorf("bot already running for %s", mkt)
 	}
 	startTime := time.Now().Unix()
-	m.runningBots[mkt] = startTime
+	m.runningBots[*mkt] = startTime
 
 	m.core.noteFeed <- &struct {
 		db.Notification

@@ -115,6 +115,10 @@
                   <span class="ico-qrcode fs15 me-1"></span>
                   <span class="fs20">[[[Receive]]]</span>
                 </div>
+                <button id="bridge" class="flex-grow-1 flex-center p-2 noborder hoverbg border-right d-hide">
+                  <span class="ico-exchange me-1"></span>
+                  <span class="fs20">[[[Bridge]]]</span>
+                </button>
                 <button id="send" class="flex-grow-1 flex-center p-2 noborder feature">
                   <span class="ico-send me-1"></span>
                   <span class="fs20">[[[Send]]]</span>
@@ -1313,6 +1317,9 @@
     </form>
 
   </div>
+
+  {{- /* REACT BRIDGING POPUP CONTAINER */ -}}
+  <div id="bridgingPopupContainer" class="d-hide"></div>
 </div>
 {{template "bottom"}}
 {{end}}
