@@ -707,7 +707,7 @@ type bitgetWithdrawInfo struct {
 	lotSize uint64 // Step size (integer multiple) for withdrawals
 }
 
-// var _ CEX = (*bitget)(nil) // Will be uncommented after all methods are implemented
+var _ CEX = (*bitget)(nil)
 
 // Symbol conversion maps
 var dexToBitgetCoinSymbol = map[string]string{
@@ -1006,7 +1006,7 @@ func (bg *bitget) readCoins(coins []*bgtypes.CoinInfo) {
 
 	for _, coin := range coins {
 		for _, chain := range coin.Chains {
-			if chain.Withdrawable != "true" || chain.Rechargeable != "true" {
+			if !strings.EqualFold(chain.Withdrawable, "true") || !strings.EqualFold(chain.Rechargeable, "true") {
 				continue
 			}
 
@@ -2996,7 +2996,7 @@ func (bg *bitget) GetDepositAddress(ctx context.Context, assetID uint32) (string
 		bg.log.Warnf("Bitget API error setting deposit account to SPOT for %s: %s - %s (continuing anyway)",
 			assetCfg.coin, modifyResp.Code, modifyResp.Msg)
 	} else {
-		bg.log.Infof("✓ Set deposit account to SPOT for %s", assetCfg.coin)
+		bg.log.Infof("Set deposit account to SPOT for %s", assetCfg.coin)
 	}
 
 	// Now get the deposit address
