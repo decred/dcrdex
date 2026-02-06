@@ -5987,7 +5987,7 @@ func (w *ETHWallet) sendToAddr(addr common.Address, amt uint64, maxFeeRate, tipR
 		if err != nil {
 			return nil, err
 		}
-		res.tx, err = w.node.sendTransaction(w.ctx, txOpts, addr, nil)
+		res.tx, err = w.node.sendTransaction(w.ctx, txOpts, addr, nil, allowAlreadyKnownFilter)
 		if err != nil {
 			return nil, err
 		}
@@ -6837,7 +6837,7 @@ func (w *assetWallet) userActionBumpFees(actionB []byte) error {
 			return errors.New("pending tx has no recipient?")
 		}
 
-		newTx, err := w.node.sendTransaction(w.ctx, txOpts, *addr, tx.Data())
+		newTx, err := w.node.sendTransaction(w.ctx, txOpts, *addr, tx.Data(), allowAlreadyKnownFilter)
 		if err != nil {
 			return fmt.Errorf("error sending bumped-fee transaction: %w", err)
 		}
@@ -7006,6 +7006,9 @@ func (w *assetWallet) userActionRecoverNonces(actionB []byte) error {
 			if errorFilter(err, "replacement transaction underpriced") {
 				skip = true
 				return true, false, false
+			}
+			if errorFilter(err, "already known", "known transaction") {
+				return true, false, false // already in mempool = success
 			}
 			return false, false, true
 		})
@@ -7841,7 +7844,7 @@ func (getGas) returnFunds(
 	if err != nil {
 		return fmt.Errorf("error generating tx opts: %w", err)
 	}
-	tx, err := cl.sendTransaction(ctx, txOpts, returnAddr, nil)
+	tx, err := cl.sendTransaction(ctx, txOpts, returnAddr, nil, allowAlreadyKnownFilter)
 	if err != nil {
 		return fmt.Errorf("error sending funds: %w", err)
 	}
@@ -7941,7 +7944,7 @@ func (getGas) Estimate(ctx context.Context, net dex.Network, assetID, contractVe
 			return fmt.Errorf("error creating tx opts for sending fees for approval client: %v", err)
 		}
 
-		tx, err := cl.sendTransaction(ctx, txOpts, approvalClient.address(), nil)
+		tx, err := cl.sendTransaction(ctx, txOpts, approvalClient.address(), nil, allowAlreadyKnownFilter)
 		if err != nil {
 			return fmt.Errorf("error sending fee reserves to approval client: %v", err)
 		}

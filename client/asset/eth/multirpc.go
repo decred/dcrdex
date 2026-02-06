@@ -1518,7 +1518,7 @@ func (m *multiRPCClient) EstimateGas(ctx context.Context, call ethereum.CallMsg)
 }
 
 func (m *multiRPCClient) SendTransaction(ctx context.Context, tx *types.Transaction) error {
-	return m.sendSignedTransaction(ctx, tx)
+	return m.sendSignedTransaction(ctx, tx, allowAlreadyKnownFilter)
 }
 
 func (m *multiRPCClient) FilterLogs(ctx context.Context, query ethereum.FilterQuery) (logs []types.Log, err error) {
