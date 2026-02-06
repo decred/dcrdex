@@ -133,7 +133,7 @@ func pendingBuffer(net dex.Network) int64 {
 	case dex.Testnet: // testnet generally has shorter block times, min diff rules, and vacant blocks
 		return 20 * 60
 	default: // Regtest and Simnet have on-demand blocks
-		return 35
+		return 90
 	}
 }
 
