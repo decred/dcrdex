@@ -414,7 +414,28 @@ func (conn *wsConn) readRaw(ctx context.Context) {
 // read fetches and parses incoming messages for processing. This should be
 // run as a goroutine. Increment the wg before calling read.
 func (conn *wsConn) read(ctx context.Context) {
+	// overflow buffers messages when readCh is full, preventing the read loop
+	// from blocking. This is critical because pings are handled during ReadJSON
+	// calls - if the read loop blocks on a channel send, pings won't be
+	// processed and the server will disconnect due to ping timeout.
+	var overflow []*msgjson.Message
+
+	// drainOverflow attempts to send buffered messages to readCh without blocking.
+	drainOverflow := func() {
+		for len(overflow) > 0 {
+			select {
+			case conn.readCh <- overflow[0]:
+				overflow = overflow[1:]
+			default:
+				return
+			}
+		}
+	}
+
 	for {
+		// Try to drain any overflow before reading new messages.
+		drainOverflow()
+
 		msg := new(msgjson.Message)
 
 		// Lock since conn.ws may be set by connect.
@@ -458,7 +479,18 @@ func (conn *wsConn) read(ctx context.Context) {
 			}()
 			continue
 		}
-		conn.readCh <- msg
+
+		// Non-blocking send to readCh. If the channel is full, buffer the
+		// message to avoid blocking the read loop.
+		select {
+		case conn.readCh <- msg:
+			// Message sent successfully.
+		default:
+			// Channel full - buffer the message and warn about backpressure.
+			overflow = append(overflow, msg)
+			conn.log.Warnf("Read channel full, message buffered (overflow size: %d). "+
+				"Consumer may be too slow.", len(overflow))
+		}
 
 		err = ws.SetReadDeadline(time.Now().Add(conn.cfg.PingWait))
 		if err != nil {

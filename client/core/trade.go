@@ -3012,9 +3012,17 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 	go func() {
 		defer c.wg.Done() // bottom of the stack
 		var err error
+		var transientErr bool // set for connection/timeout errors that will be retried
 		defer func() {
 			atomic.StoreUint32(&match.sendingRedeemAsync, 0)
 			if err != nil {
+				if transientErr {
+					// Transient connection errors will be retried by
+					// resendPendingRequests on the next tick. Log a warning
+					// instead of sending an ERROR notification.
+					c.log.Warnf("Transient error sending 'redeem' request for match %s (will retry): %v", match, err)
+					return
+				}
 				corder := t.coreOrder()
 				subject, details := c.formatDetails(TopicReportRedeemError, match, err)
 				t.notify(newOrderNote(TopicReportRedeemError, subject, details, db.ErrorLevel, corder))
@@ -3063,6 +3071,10 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 						numMissing, makeOrderToken(t.token()), t.dc.acct.host)
 					c.notify(newOrderNote(TopicMissingMatches, subject, details, db.ErrorLevel, t.coreOrderInternal()))
 				}
+			} else if errors.Is(err, errTimeout) || strings.Contains(err.Error(), "broken connection") {
+				// Transient connection/timeout errors will be retried by
+				// resendPendingRequests on the next tick.
+				transientErr = true
 			}
 			err = fmt.Errorf("error sending 'redeem' message: %w", err)
 			return
