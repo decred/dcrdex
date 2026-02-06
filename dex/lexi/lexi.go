@@ -53,7 +53,7 @@ type Config struct {
 func BadgerV1Update(path string, v4Path string, logger dex.Logger, opts badger.Options) (*badger.DB, error) {
 	// Copy the old db directory as is.
 	logger.Warnf("Detected incompatible database version at %s. "+
-		"Backing up old database and attempting to update.", path)
+		"Attempting to update.", path)
 	// Open the old db using v1 badger.
 	v1opts := v1badger.DefaultOptions(path).WithLogger(&badgerLoggerWrapper{logger})
 	oldDB, err := v1badger.Open(v1opts)
