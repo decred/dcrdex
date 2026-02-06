@@ -95,6 +95,12 @@ type clientCore interface {
 	BridgeHistory(assetID uint32, n int, refID *string, past bool) ([]*asset.WalletTransaction, error)
 	SupportedBridgeDestinations(assetID uint32) (map[uint32][]string, error)
 	BridgeFeesAndLimits(fromAssetID, toAssetID uint32, bridgeName string) (*core.BridgeFeesAndLimits, error)
+	PaymentMultisigPubkey(assetID uint32) (string, error)
+	SendFundsToMultisig(csvFilePath string) error
+	SignMultisig(csvFilePath string, signIdx int) error
+	RefundPaymentMultisig(csvFilePath string) (string, error)
+	ViewPaymentMultisig(csvFilePath string) (string, error)
+	SendPaymentMultisig(csvFilePath string) (string, error)
 
 	// These are core's ticket buying interface.
 	StakeStatus(assetID uint32) (*asset.TicketStakingStatus, error)

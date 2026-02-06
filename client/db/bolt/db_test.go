@@ -1773,3 +1773,32 @@ func TestPokes(t *testing.T) {
 		t.Fatal("Result from second LoadPokes wasn't empty")
 	}
 }
+
+func TestStoreMultisigIndexForPubkey(t *testing.T) {
+	boltdb, shutdown := newTestDB(t)
+	defer shutdown()
+	pubkey := [33]byte{}
+	assetID := uint32(42)
+	idx := uint32(0)
+	if err := boltdb.StoreMultisigIndexForPubkey(assetID, idx, pubkey); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMultisigIndexForPubkey(t *testing.T) {
+	boltdb, shutdown := newTestDB(t)
+	defer shutdown()
+	pubkey := [33]byte{}
+	assetID := uint32(42)
+	idx := uint32(0)
+	if err := boltdb.StoreMultisigIndexForPubkey(assetID, idx, pubkey); err != nil {
+		t.Fatal(err)
+	}
+	gotIdx, err := boltdb.MultisigIndexForPubkey(assetID, pubkey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if idx != gotIdx {
+		t.Fatalf("wanted %d but got %d", idx, gotIdx)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"decred.org/dcrdex/dex"
 	"github.com/decred/dcrd/chaincfg/chainhash"
@@ -715,5 +716,221 @@ func TestIsRefundScript(t *testing.T) {
 				t.Errorf("want %v, got %v", tt.want, is)
 			}
 		})
+	}
+}
+
+func TestExtractPaymentMultisigDetails(t *testing.T) {
+	p2pkh, _ := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(randBytes(20), tParams)
+	pk1 := secp256k1.PrivKeyFromBytes(randBytes(32)).PubKey()
+	pk2 := secp256k1.PrivKeyFromBytes(randBytes(32)).PubKey()
+	pk3 := secp256k1.PrivKeyFromBytes(randBytes(32)).PubKey()
+	tests := []struct {
+		name      string
+		nRequired int64
+		locktime  int64
+		pubKeys   []*secp256k1.PublicKey
+	}{{
+		name:      "ok 1 of 2",
+		nRequired: 1,
+		locktime:  time.Now().Unix(),
+		pubKeys:   []*secp256k1.PublicKey{pk1, pk2},
+	}, {
+		name:      "ok 2 of 2",
+		nRequired: 2,
+		locktime:  time.Now().Add(time.Hour * 24).Unix(),
+		pubKeys:   []*secp256k1.PublicKey{pk1, pk2},
+	}, {
+		name:      "ok 2 of 3",
+		nRequired: 2,
+		locktime:  time.Now().Add(time.Hour * 48).Unix(),
+		pubKeys:   []*secp256k1.PublicKey{pk1, pk2, pk3},
+	}}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			redeemScript, err := MakePaymentMultisig(p2pkh.String(), test.pubKeys, test.nRequired, test.locktime, tParams)
+			if err != nil {
+				t.Fatal(err)
+			}
+			nRequired, sender, locktime, pubKeys, err := ExtractPaymentMultisigDetails(redeemScript)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if nRequired != test.nRequired {
+				t.Fatalf("wanted nRequired %v but got %v", test.nRequired, nRequired)
+			}
+			hash := p2pkh.Hash160()
+			if sender != *hash {
+				t.Fatalf("wanted sender %v but got %v", p2pkh.Hash160(), sender)
+			}
+			if locktime != test.locktime {
+				t.Fatalf("wanted locktime %v but got %v", test.locktime, locktime)
+			}
+			if len(pubKeys) != len(test.pubKeys) {
+				t.Fatal("diff number of pubkeys")
+			}
+			for i, pubkey := range test.pubKeys {
+				if !bytes.Equal(pubkey.SerializeCompressed()[:], pubKeys[i].SerializeCompressed()[:]) {
+					t.Fatal("pubkeys not equal or in order")
+				}
+			}
+		})
+	}
+}
+
+func TestMakePaymentMultisigErrors(t *testing.T) {
+	p2pkh, _ := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(randBytes(20), tParams)
+	pk1 := secp256k1.PrivKeyFromBytes(randBytes(32)).PubKey()
+	pk2 := secp256k1.PrivKeyFromBytes(randBytes(32)).PubKey()
+	locktime := time.Now().Unix()
+
+	// nRequired < 1
+	_, err := MakePaymentMultisig(p2pkh.String(), []*secp256k1.PublicKey{pk1, pk2}, 0, locktime, tParams)
+	if err == nil {
+		t.Fatal("expected error for nRequired < 1")
+	}
+
+	// nRequired > 16
+	_, err = MakePaymentMultisig(p2pkh.String(), []*secp256k1.PublicKey{pk1, pk2}, 17, locktime, tParams)
+	if err == nil {
+		t.Fatal("expected error for nRequired > 16")
+	}
+
+	// Less than 2 signers
+	_, err = MakePaymentMultisig(p2pkh.String(), []*secp256k1.PublicKey{pk1}, 1, locktime, tParams)
+	if err == nil {
+		t.Fatal("expected error for < 2 signers")
+	}
+
+	// Invalid address
+	_, err = MakePaymentMultisig("invalid", []*secp256k1.PublicKey{pk1, pk2}, 1, locktime, tParams)
+	if err == nil {
+		t.Fatal("expected error for invalid address")
+	}
+}
+
+func TestPaymentMultisigRedeemAndRefundScripts(t *testing.T) {
+	p2pkh, _ := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(randBytes(20), tParams)
+	priv1 := secp256k1.PrivKeyFromBytes(randBytes(32))
+	priv2 := secp256k1.PrivKeyFromBytes(randBytes(32))
+	pk1 := priv1.PubKey()
+	pk2 := priv2.PubKey()
+	locktime := time.Now().Unix()
+
+	redeemScript, err := MakePaymentMultisig(p2pkh.String(), []*secp256k1.PublicKey{pk1, pk2}, 1, locktime, tParams)
+	if err != nil {
+		t.Fatalf("MakePaymentMultisig error: %v", err)
+	}
+
+	// Test RedeemPaymentMultisig
+	fakeSig := randBytes(71) // typical DER signature length
+	sigScript, err := RedeemPaymentMultisig(redeemScript, [][]byte{fakeSig})
+	if err != nil {
+		t.Fatalf("RedeemPaymentMultisig error: %v", err)
+	}
+	if len(sigScript) == 0 {
+		t.Fatal("expected non-empty sig script")
+	}
+
+	// Test SigsFromPaymentMultisig
+	extractedScript, sigs, err := SigsFromPaymentMultisig(sigScript)
+	if err != nil {
+		t.Fatalf("SigsFromPaymentMultisig error: %v", err)
+	}
+	if !bytes.Equal(extractedScript, redeemScript) {
+		t.Fatal("extracted redeem script doesn't match original")
+	}
+	if len(sigs) != 1 {
+		t.Fatalf("expected 1 sig, got %d", len(sigs))
+	}
+	if !bytes.Equal(sigs[0], fakeSig) {
+		t.Fatal("extracted sig doesn't match original")
+	}
+
+	// Test RefundPaymentMultisig
+	fakePubKey := pk1.SerializeCompressed()
+	refundScript, err := RefundPaymentMultisig(redeemScript, fakePubKey, fakeSig)
+	if err != nil {
+		t.Fatalf("RefundPaymentMultisig error: %v", err)
+	}
+	if len(refundScript) == 0 {
+		t.Fatal("expected non-empty refund script")
+	}
+}
+
+func TestPaymentMultisigTxSizes(t *testing.T) {
+	// Test that size calculations return reasonable values
+	tests := []struct {
+		name        string
+		nPub        int64
+		nRequired   int64
+		nRecipients int64
+	}{{
+		name:        "1 of 2, 1 recipient",
+		nPub:        2,
+		nRequired:   1,
+		nRecipients: 1,
+	}, {
+		name:        "2 of 3, 2 recipients",
+		nPub:        3,
+		nRequired:   2,
+		nRecipients: 2,
+	}, {
+		name:        "3 of 5, 3 recipients",
+		nPub:        5,
+		nRequired:   3,
+		nRecipients: 3,
+	}}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			redeemSize := PaymentMultisigRedeemTxSize(test.nPub, test.nRequired, test.nRecipients)
+			if redeemSize == 0 {
+				t.Fatal("redeem tx size should not be 0")
+			}
+			// Redeem size should be greater than just the overhead
+			if redeemSize < MsgTxOverhead {
+				t.Fatalf("redeem size %d should be greater than overhead %d", redeemSize, MsgTxOverhead)
+			}
+
+			refundSize := PaymentMultisigRefundTxSize(test.nPub)
+			if refundSize == 0 {
+				t.Fatal("refund tx size should not be 0")
+			}
+			if refundSize < MsgTxOverhead {
+				t.Fatalf("refund size %d should be greater than overhead %d", refundSize, MsgTxOverhead)
+			}
+
+			// Refund should generally be smaller than redeem with multiple sigs
+			// (refund has 1 sig, redeem has nRequired sigs)
+			if test.nRequired > 1 && refundSize >= redeemSize {
+				t.Logf("Note: refund size %d >= redeem size %d (may be expected with few recipients)", refundSize, redeemSize)
+			}
+		})
+	}
+}
+
+func TestExtractPaymentMultisigDetailsErrors(t *testing.T) {
+	// Test with invalid/short scripts
+	_, _, _, _, err := ExtractPaymentMultisigDetails([]byte{})
+	if err == nil {
+		t.Fatal("expected error for empty script")
+	}
+
+	_, _, _, _, err = ExtractPaymentMultisigDetails(randBytes(10))
+	if err == nil {
+		t.Fatal("expected error for short script")
+	}
+
+	_, _, _, _, err = ExtractPaymentMultisigDetails(randBytes(50))
+	if err == nil {
+		t.Fatal("expected error for invalid script")
+	}
+}
+
+func TestSigsFromPaymentMultisigErrors(t *testing.T) {
+	// Test with empty script
+	_, _, err := SigsFromPaymentMultisig([]byte{})
+	if err == nil {
+		t.Fatal("expected error for empty script")
 	}
 }

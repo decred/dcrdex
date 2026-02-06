@@ -666,6 +666,18 @@ func (tdb *TDB) Language() (string, error) {
 	return "en-US", nil
 }
 
+func (tdb *TDB) NextMultisigKeyIndex(assetID uint32) (uint32, error) {
+	return 0, nil
+}
+
+func (tdb *TDB) StoreMultisigIndexForPubkey(assetID, idx uint32, pubkey [33]byte) error {
+	return nil
+}
+
+func (tdb *TDB) MultisigIndexForPubkey(assetID uint32, pubkey [33]byte) (uint32, error) {
+	return 0, nil
+}
+
 type tCoin struct {
 	id []byte
 

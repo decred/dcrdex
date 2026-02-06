@@ -73,6 +73,12 @@ const (
 	bridgeHistoryRoute         = "bridgehistory"
 	supportedBridgesRoute      = "supportedbridges"
 	bridgeFeesAndLimitsRoute   = "bridgefeesandlimits"
+	paymentMultisigPubkeyRoute = "paymentmultisigpubkey"
+	sendFundsToMultisigRoute   = "sendfundstomultisig"
+	signMultisigRoute          = "signmultisig"
+	refundPaymentMultisigRoute = "refundpaymentmultisig"
+	viewPaymentMultisigRoute   = "viewpaymentmultisig"
+	sendPaymentMultisigRoute   = "sendpaymentmultisig"
 )
 
 const (
@@ -158,6 +164,12 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	bridgeHistoryRoute:         handleBridgeHistory,
 	supportedBridgesRoute:      handleSupportedBridges,
 	bridgeFeesAndLimitsRoute:   handleBridgeFeesAndLimits,
+	paymentMultisigPubkeyRoute: handlePaymentMultisigPubkey,
+	sendFundsToMultisigRoute:   handleSendFundsToMultisig,
+	signMultisigRoute:          handleSignMultisig,
+	refundPaymentMultisigRoute: handleRefundPaymentMultisig,
+	viewPaymentMultisigRoute:   handleViewPaymentMultisig,
+	sendPaymentMultisigRoute:   handleSendPaymentMultisig,
 }
 
 // handleHelp handles requests for help. Returns general help for all commands
@@ -1311,6 +1323,87 @@ func handleBridgeFeesAndLimits(s *RPCServer, params *RawParams) *msgjson.Respons
 
 	return createResponse(bridgeFeesAndLimitsRoute, result, nil)
 }
+func handlePaymentMultisigPubkey(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	if len(params.Args) != 1 {
+		return usage(paymentMultisigPubkeyRoute, fmt.Errorf("expected 1 arg, got %d", len(params.Args)))
+	}
+
+	assetID, err := strconv.ParseUint(params.Args[0], 10, 32)
+	if err != nil {
+		return usage(paymentMultisigPubkeyRoute, fmt.Errorf("error parsing assetID: %v", err))
+	}
+
+	pubkey, err := s.core.PaymentMultisigPubkey(uint32(assetID))
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCPaymentMultisigError, "unable to get pubkey: %v", err)
+		return createResponse(paymentMultisigPubkeyRoute, nil, resErr)
+	}
+	return createResponse(paymentMultisigPubkeyRoute, pubkey, nil)
+}
+
+func handleSendFundsToMultisig(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	if len(params.Args) != 1 {
+		return usage(sendFundsToMultisigRoute, fmt.Errorf("expected 1 arg, got %d", len(params.Args)))
+	}
+	if err := s.core.SendFundsToMultisig(params.Args[0]); err != nil {
+		resErr := msgjson.NewError(msgjson.RPCPaymentMultisigError, "unable to send funds to multisig: %v", err)
+		return createResponse(sendFundsToMultisigRoute, nil, resErr)
+	}
+	res := "csv updated"
+	return createResponse(sendFundsToMultisigRoute, &res, nil)
+}
+
+func handleSignMultisig(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	if len(params.Args) != 2 {
+		return usage(signMultisigRoute, fmt.Errorf("expected 1 arg, got %d", len(params.Args)))
+	}
+	idx, err := checkUIntArg(params.Args[1], "signIdx", 32)
+	if err != nil {
+		return usage(signMultisigRoute, fmt.Errorf("unable to decode index: %v", err))
+	}
+	if err := s.core.SignMultisig(params.Args[0], int(idx)); err != nil {
+		resErr := msgjson.NewError(msgjson.RPCPaymentMultisigError, "unable to sign multisig: %v", err)
+		return createResponse(signMultisigRoute, nil, resErr)
+	}
+	res := "csv updated"
+	return createResponse(sendFundsToMultisigRoute, &res, nil)
+}
+
+func handleRefundPaymentMultisig(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	if len(params.Args) != 1 {
+		return usage(refundPaymentMultisigRoute, fmt.Errorf("expected 1 arg, got %d", len(params.Args)))
+	}
+	res, err := s.core.RefundPaymentMultisig(params.Args[0])
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCPaymentMultisigError, "unable to refund multisig: %v", err)
+		return createResponse(refundPaymentMultisigRoute, nil, resErr)
+	}
+	return createResponse(refundPaymentMultisigRoute, &res, nil)
+}
+
+func handleViewPaymentMultisig(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	if len(params.Args) != 1 {
+		return usage(refundPaymentMultisigRoute, fmt.Errorf("expected 1 arg, got %d", len(params.Args)))
+	}
+	res, err := s.core.ViewPaymentMultisig(params.Args[0])
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCPaymentMultisigError, "unable to view multisig: %v", err)
+		return createResponse(refundPaymentMultisigRoute, nil, resErr)
+	}
+	return createResponse(refundPaymentMultisigRoute, &res, nil)
+}
+
+func handleSendPaymentMultisig(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	if len(params.Args) != 1 {
+		return usage(refundPaymentMultisigRoute, fmt.Errorf("expected 1 arg, got %d", len(params.Args)))
+	}
+	res, err := s.core.SendPaymentMultisig(params.Args[0])
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCPaymentMultisigError, "unable to send multisig: %v", err)
+		return createResponse(refundPaymentMultisigRoute, nil, resErr)
+	}
+	return createResponse(refundPaymentMultisigRoute, &res, nil)
+}
 
 // format concatenates thing and tail. If thing is empty, returns an empty
 // string.
@@ -2155,5 +2248,50 @@ an spv wallet and enables options to view and set the vsp.
 		fromAssetID (int): The asset's BIP-44 registered coin index on the "from" chain.
 		toAssetID (int): The asset's BIP-44 registered coin index on the "to" chain.
 		bridgeName (string): The name of the bridge to query.`,
+	},
+	paymentMultisigPubkeyRoute: {
+		argsShort:  `assetID`,
+		cmdSummary: "Get a multisig pubkey for asset id.",
+		argsLong: `Args:
+		assetID (int): The asset's BIP-44 registered coin index to get a pubkey for.`,
+		returns: `Returns:
+	string: a pubkey. The index is stored in the db and this pubkey will not be returned again`,
+	},
+	sendFundsToMultisigRoute: {
+		argsShort:  `csvFilePath`,
+		cmdSummary: "Send funds to a payment multisig.",
+		argsLong: `Args:
+		csvFilePath (string): The csv file path from the point of view of the client, not bwctl. Will be written to.`,
+	},
+	signMultisigRoute: {
+		argsShort:  `csvFilePath sigIndex`,
+		cmdSummary: "Sign a payment multisig.",
+		argsLong: `Args:
+		csvFilePath (string): The csv file path from the point of view of the client, not bwctl. Will be written to.
+		sigIndex (int): The pubkey index we own and are able to sign.`,
+	},
+	refundPaymentMultisigRoute: {
+		argsShort:  `csvFilePath`,
+		cmdSummary: "Refund a payment multisig.",
+		argsLong: `Args:
+		csvFilePath (string): The csv file path from the point of view of the client, not bwctl.`,
+		returns: `Returns:
+	string: the refund tx hash`,
+	},
+	viewPaymentMultisigRoute: {
+		argsShort:  `csvFilePath`,
+		cmdSummary: "view a payment multisig.",
+		argsLong: `Args:
+		csvFilePath (string): The csv file path from the point of view of the client, not bwctl.`,
+		returns: `Returns:
+	string: tx in json format`,
+	},
+	sendPaymentMultisigRoute: {
+		argsShort:  `csvFilePath`,
+		cmdSummary: "Send a payment multisig. May not error even with spv if not fully signed.",
+		argsLong: `Args:
+		csvFilePath (string): The csv file path from the point of view of the client, not bwctl.`,
+		returns: `Returns:
+	string: the sent tx hash`,
 	},
 }

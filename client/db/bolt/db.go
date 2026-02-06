@@ -69,6 +69,8 @@ var (
 	notesBucket           = []byte("notes")
 	pokesBucket           = []byte("pokes")
 	credentialsBucket     = []byte("credentials")
+	multisigIndexesBucket = []byte("multiIndexes")
+	multisigPubKeysBucket = []byte("multiPubKeys")
 
 	// value keys
 	versionKey = []byte("version")
@@ -181,7 +183,8 @@ func NewDB(dbPath string, logger dex.Logger, opts ...Opts) (dexdb.DB, error) {
 		activeOrdersBucket, archivedOrdersBucket,
 		activeMatchesBucket, archivedMatchesBucket,
 		walletsBucket, notesBucket, credentialsBucket,
-		botProgramsBucket, pokesBucket,
+		botProgramsBucket, pokesBucket, multisigIndexesBucket,
+		multisigPubKeysBucket,
 	}); err != nil {
 		return nil, err
 	}
@@ -670,6 +673,62 @@ func (db *BoltDB) NextBondKeyIndex(assetID uint32) (uint32, error) {
 			bondIndex = intCoder.Uint32(bondIndexB)
 		}
 		return bkt.Put(thisBondIdxKey, uint32Bytes(bondIndex+1))
+	})
+}
+
+// NextMultisigKeyIndex returns the next multisig key index and increments the stored
+// value so that subsequent calls will always return a higher index.
+func (db *BoltDB) NextMultisigKeyIndex(assetID uint32) (uint32, error) {
+	var multisigIndex uint32
+	return multisigIndex, db.Update(func(tx *bbolt.Tx) error {
+		bkt := tx.Bucket(multisigIndexesBucket)
+		if bkt == nil {
+			return errors.New("no multisig indexes bucket")
+		}
+
+		thisMultisigIdxKey := uint32Bytes(assetID)
+		multisigIndexB := bkt.Get(thisMultisigIdxKey)
+		if len(multisigIndexB) != 0 {
+			multisigIndex = intCoder.Uint32(multisigIndexB)
+		}
+		return bkt.Put(thisMultisigIdxKey, uint32Bytes(multisigIndex+1))
+	})
+}
+
+// StoreMultisigIndexForPubkey stores the index for pubkey and asset id.
+func (db *BoltDB) StoreMultisigIndexForPubkey(assetID, idx uint32, pubkey [33]byte) error {
+	return db.Update(func(tx *bbolt.Tx) error {
+		outerBkt := tx.Bucket(multisigPubKeysBucket)
+		if outerBkt == nil {
+			return errors.New("no multisig indexes bucket")
+		}
+
+		bkt, err := outerBkt.CreateBucketIfNotExists(uint32Bytes(assetID))
+		if err != nil {
+			return err
+		}
+		return bkt.Put(pubkey[:], uint32Bytes(idx))
+	})
+}
+
+// MultisigIndexForPubkey returns the index for pubkey and asset id if stored.
+func (db *BoltDB) MultisigIndexForPubkey(assetID uint32, pubkey [33]byte) (uint32, error) {
+	var multisigIndex uint32
+	return multisigIndex, db.View(func(tx *bbolt.Tx) error {
+		outerBkt := tx.Bucket(multisigPubKeysBucket)
+		if outerBkt == nil {
+			return errors.New("no multisig indexes bucket")
+		}
+		bkt := outerBkt.Bucket(uint32Bytes(assetID))
+		if bkt == nil {
+			return fmt.Errorf("no multisig bucket for asset id %d", assetID)
+		}
+		idxB := bkt.Get(pubkey[:])
+		if len(idxB) == 0 {
+			return errors.New("pubkey index not found")
+		}
+		multisigIndex = intCoder.Uint32(idxB)
+		return nil
 	})
 }
 
