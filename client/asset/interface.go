@@ -740,7 +740,7 @@ type Opener interface {
 	// IsOpen returns whether the wallet is currently open.
 	IsOpen() bool
 	// Close should be called when done using the wallet.
-	Close(ctx context.Context) error
+	Close() error
 }
 
 // SyncStatus is the status of wallet syncing.

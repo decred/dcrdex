@@ -25,7 +25,7 @@ func mustHash(hash string) *chainhash.Hash {
 
 var NetRpcPorts = btc.NetPorts{
 	Mainnet: "18081",
-	Testnet: "38081", // stagenet
+	Testnet: "28081", // testnet (not stagenet)
 	Simnet:  "18081",
 }
 
@@ -61,13 +61,13 @@ var (
 		GenesisHash: mustHash("418015bb9ae982a1975da7d79277c2705727a56894ba0fb246adaabb1f4632e3"),
 	}
 
-	// StageNetParams are the parameters for stagenet; testnet used only by monero dev.
-	StageNetParams = &chaincfg.Params{
-		Name:             "stagenet",
-		DefaultPort:      "38080",
+	// TestNetParams are the parameters for testnet.
+	TestNetParams = &chaincfg.Params{
+		Name:             "testnet",
+		DefaultPort:      "28080",
 		CoinbaseMaturity: 10,
 		Net:              0x77bb11a1,
-		GenesisHash:      mustHash("76ee3cc98646292206cd3e86f74d88b4dcc1d937088645e9b0cbca84b7ce74eb"),
+		GenesisHash:      mustHash("48ca7cd3c8de5b6a4d53d2861fbdaedca141553559f9be9520068053cda8430b"),
 	}
 
 	// RegressionNetParams are the parameters for simnet.
@@ -81,7 +81,7 @@ var (
 )
 
 func init() {
-	for _, params := range []*chaincfg.Params{MainNetParams, StageNetParams, RegressionNetParams} {
+	for _, params := range []*chaincfg.Params{MainNetParams, TestNetParams, RegressionNetParams} {
 		err := chaincfg.Register(params)
 		if err != nil {
 			panic("failed to register xmr parameters: " + err.Error())
