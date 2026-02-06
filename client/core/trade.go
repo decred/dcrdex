@@ -2399,6 +2399,11 @@ func (t *trackedTrade) revokeMatch(matchID order.MatchID, fromServer bool) error
 // This method modifies match fields and MUST be called with the trackedTrade
 // mutex lock held for writes.
 func (c *Core) swapMatches(t *trackedTrade, matches []*matchTracker) (err error) {
+	feeRate, err := t.bestSwapGroupFeeRate(matches)
+	if err != nil {
+		return err
+	}
+
 	errs := newErrorSet("swapMatches order %s - ", t.ID())
 	groupables := make([]*matchTracker, 0, len(matches)) // Over-allocating if there are suspect matches
 	var suspects []*matchTracker
@@ -2409,7 +2414,6 @@ func (c *Core) swapMatches(t *trackedTrade, matches []*matchTracker) (err error)
 			groupables = append(groupables, m)
 		}
 	}
-	feeRate := t.bestSwapGroupFeeRate(matches)
 	if len(groupables) > 0 {
 		var maxSwapsInTx int
 		if counter, is := t.wallets.fromWallet.Wallet.(asset.MaxMatchesCounter); is {
@@ -2436,7 +2440,7 @@ func (c *Core) swapMatches(t *trackedTrade, matches []*matchTracker) (err error)
 }
 
 // bestSwapGroupRate gets the most appropriate fee rate for a group of swaps.
-func (t *trackedTrade) bestSwapGroupFeeRate(matches []*matchTracker) uint64 {
+func (t *trackedTrade) bestSwapGroupFeeRate(matches []*matchTracker) (uint64, error) {
 	var highestFeeRate uint64
 	for _, match := range matches {
 		if match.FeeRateSwap > highestFeeRate {
@@ -2444,14 +2448,15 @@ func (t *trackedTrade) bestSwapGroupFeeRate(matches []*matchTracker) uint64 {
 		}
 	}
 	// Use a higher swap fee rate if a local estimate is higher than the
-	// prescribed rate, but not higher than the funded (max) rate.
+	// prescribed rate. If the fresh rate is higher than the max fee rate,
+	// our swap transactions will not be mined, so fail.
 	if highestFeeRate < t.metaData.MaxFeeRate {
 		freshRate := t.wallets.fromWallet.feeRate()
 		if freshRate == 0 { // either not a FeeRater, or FeeRate failed
 			freshRate = t.dc.bestBookFeeSuggestion(t.wallets.fromWallet.AssetID)
 		}
 		if freshRate > t.metaData.MaxFeeRate {
-			freshRate = t.metaData.MaxFeeRate
+			return 0, fmt.Errorf("current fee rate higher than the order's max %d > %d", freshRate, t.metaData.MaxFeeRate)
 		}
 		if highestFeeRate < freshRate {
 			t.dc.log.Infof("Prescribed %v fee rate %v looks low, using %v",
@@ -2459,7 +2464,7 @@ func (t *trackedTrade) bestSwapGroupFeeRate(matches []*matchTracker) uint64 {
 			highestFeeRate = freshRate
 		}
 	}
-	return highestFeeRate
+	return highestFeeRate, nil
 }
 
 // swapMatchGroup will send a transaction with swap outputs for the specified

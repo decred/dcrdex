@@ -1252,7 +1252,7 @@ func (eth *baseWallet) wallet(assetID uint32) *assetWallet {
 	return eth.wallets[assetID]
 }
 
-func (eth *baseWallet) gasFeeLimit() uint64 {
+func (eth *baseWallet) GasFeeLimit() uint64 {
 	return atomic.LoadUint64(&eth.gasFeeLimitV)
 }
 
@@ -2079,12 +2079,6 @@ func (w *ETHWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uint6
 			dex.BipIDSymbol(w.assetID), ord.MaxFeeRate, dexeth.MinGasTipCap)
 	}
 
-	if w.gasFeeLimit() < ord.MaxFeeRate {
-		return nil, nil, 0, fmt.Errorf(
-			"%v: server's max fee rate %v higher than configured fee rate limit %v",
-			dex.BipIDSymbol(w.assetID), ord.MaxFeeRate, w.gasFeeLimit())
-	}
-
 	contractVer := contractVersion(ord.AssetVersion)
 
 	g, err := w.initGasEstimate(int(ord.MaxSwapCount), contractVer,
@@ -2117,12 +2111,6 @@ func (w *TokenWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uin
 	if ord.MaxFeeRate < dexeth.MinGasTipCap {
 		return nil, nil, 0, fmt.Errorf("%v: server's max fee rate is lower than our min gas tip cap. %d < %d",
 			dex.BipIDSymbol(w.assetID), ord.MaxFeeRate, dexeth.MinGasTipCap)
-	}
-
-	if w.gasFeeLimit() < ord.MaxFeeRate {
-		return nil, nil, 0, fmt.Errorf(
-			"%v: server's max fee rate %v higher than configured fee rate limit %v",
-			dex.BipIDSymbol(w.assetID), ord.MaxFeeRate, w.gasFeeLimit())
 	}
 
 	approvalStatus, err := w.swapContractApprovalStatus(ord.AssetVersion)
@@ -2171,12 +2159,6 @@ func (w *TokenWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uin
 // FundMultiOrder funds multiple orders in one shot. No special handling is
 // required for ETH as ETH does not over-lock during funding.
 func (w *ETHWallet) FundMultiOrder(ord *asset.MultiOrder, maxLock uint64) ([]asset.Coins, [][]dex.Bytes, uint64, error) {
-	if w.gasFeeLimit() < ord.MaxFeeRate {
-		return nil, nil, 0, fmt.Errorf(
-			"%v: server's max fee rate %v higher than configured fee rate limit %v",
-			dex.BipIDSymbol(w.assetID), ord.MaxFeeRate, w.gasFeeLimit())
-	}
-
 	g, err := w.initGasEstimate(1, ord.AssetVersion, ord.RedeemVersion, ord.RedeemAssetID, ord.MaxFeeRate)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error estimating swap gas: %v", err)
@@ -2209,12 +2191,6 @@ func (w *ETHWallet) FundMultiOrder(ord *asset.MultiOrder, maxLock uint64) ([]ass
 // FundMultiOrder funds multiple orders in one shot. No special handling is
 // required for ETH as ETH does not over-lock during funding.
 func (w *TokenWallet) FundMultiOrder(ord *asset.MultiOrder, maxLock uint64) ([]asset.Coins, [][]dex.Bytes, uint64, error) {
-	if w.gasFeeLimit() < ord.MaxFeeRate {
-		return nil, nil, 0, fmt.Errorf(
-			"%v: server's max fee rate %v higher than configured fee rate limit %v",
-			dex.BipIDSymbol(w.assetID), ord.MaxFeeRate, w.gasFeeLimit())
-	}
-
 	approvalStatus, err := w.swapContractApprovalStatus(ord.AssetVersion)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error getting approval status: %v", err)

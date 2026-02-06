@@ -952,6 +952,9 @@ type DynamicSwapper interface {
 	DynamicSwapFeesPaid(ctx context.Context, coinID, contractData dex.Bytes) (fee uint64, secretHashes [][]byte, err error)
 	// DynamicRedemptionFeesPaid returns fees for redemption transactions.
 	DynamicRedemptionFeesPaid(ctx context.Context, coinID, contractData dex.Bytes) (fee uint64, secretHashes [][]byte, err error)
+	// GasFeeLimit returns the user set gas fee limit to be used as the max
+	// fee if higher than server.
+	GasFeeLimit() uint64
 }
 
 // FeeRater is capable of retrieving a non-critical fee rate estimate for an
