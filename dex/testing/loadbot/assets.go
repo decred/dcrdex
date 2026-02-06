@@ -64,28 +64,16 @@ type AssetDef struct {
 // assetRegistry maps asset symbols to their definitions.
 var assetRegistry = map[string]*AssetDef{
 	dcr: {
-		ID:              dcrID,
-		Symbol:          dcr,
-		Type:            AssetTypeDCR,
-		WalletType:      "dcrwalletRPC",
-		RPCConfigKey:    "rpclisten",
-		NeedsWalletPass: true,
-		UnlockDur:       "0",
-		ExtraUnlock: [][]string{
-			{"./beta", "unlockaccount", "default", "abc"},
-		},
+		ID:          dcrID,
+		Symbol:      dcr,
+		Type:        AssetTypeDCR,
+		WalletType:  "SPV",
 		AddressArgs: []string{"getnewaddress", "default", "ignore"},
 		WalletFormFunc: func(node, name, port string) *core.WalletForm {
 			return &core.WalletForm{
-				Type:    "dcrwalletRPC",
+				Type:    "SPV",
 				AssetID: dcrID,
-				Config: map[string]string{
-					"account":   name,
-					"username":  "user",
-					"password":  "pass",
-					"rpccert":   filepath.Join(dextestDir, "dcr/"+node+"/rpc.cert"),
-					"rpclisten": port,
-				},
+				Config:  map[string]string{},
 			}
 		},
 		SendCmd: func(addr, amt string) []string {
@@ -436,10 +424,14 @@ func unlockWalletFromRegistry(symbol string) error {
 		return nil
 	}
 
-	// ETH, polygon, zec, zcl don't need unlocking
+	// ETH, polygon, DCR SPV, zec, zcl don't need unlocking
 	switch def.Type {
 	case AssetTypeETH, AssetTypePolygon:
 		return nil
+	case AssetTypeDCR:
+		if def.WalletType == "SPV" {
+			return nil
+		}
 	case AssetTypeNewNode:
 		if symbol == zec || symbol == zcl {
 			return nil
@@ -548,6 +540,9 @@ func createWalletAccount(m *Mantle, symbol, name string) (rpcPort string, err er
 		return "", nil
 
 	case AssetTypeDCR:
+		if def.WalletType == "SPV" {
+			return "", nil
+		}
 		cmdOut := <-harnessCtl(ctx, symbol, "./alpha", "createnewaccount", name)
 		if cmdOut.err != nil {
 			return "", cmdOut.err
