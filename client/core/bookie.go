@@ -1009,7 +1009,11 @@ func handleEpochReportMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	if err != nil {
 		return fmt.Errorf("error logging epoch report: %w", err)
 	}
-	c.checkEpochResolution(dc.acct.host, note.MarketID)
+	if dc.dispatchTradeWork != nil {
+		go c.checkEpochResolution(dc.acct.host, note.MarketID)
+	} else {
+		c.checkEpochResolution(dc.acct.host, note.MarketID)
+	}
 	return nil
 }
 

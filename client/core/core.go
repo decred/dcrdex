@@ -203,6 +203,11 @@ type dexConnection struct {
 	anomaliesCount uint32 // atomic
 	lastConnectMtx sync.RWMutex
 	lastConnect    time.Time
+
+	// dispatchTradeWork routes a function to the per-trade message queue
+	// for the given order. Set by the dispatcher goroutine in listen().
+	// Only accessed from the dispatcher goroutine (via runJob handlers).
+	dispatchTradeWork func(order.OrderID, func())
 }
 
 // DefaultResponseTimeout is the default timeout for responses after a request is
@@ -1522,8 +1527,9 @@ type Core struct {
 	waiterMtx    sync.RWMutex
 	blockWaiters map[string]*blockWaiter
 
-	tickSchedMtx sync.Mutex
-	tickSched    map[order.OrderID]*time.Timer
+	tipMtx     sync.Mutex
+	tipPending map[uint32]uint64 // assetID -> latest pending tip height
+	tipActive  map[uint32]bool   // assetID -> whether tipChange is running
 
 	noteMtx   sync.RWMutex
 	noteChans map[uint64]chan Notification
@@ -1671,7 +1677,8 @@ func New(cfg *Config) (*Core, error) {
 		lockTimeMaker: dex.LockTimeMaker(cfg.Net),
 		blockWaiters:  make(map[string]*blockWaiter),
 		sentCommits:   make(map[order.Commitment]chan struct{}),
-		tickSched:     make(map[order.OrderID]*time.Timer),
+		tipPending:    make(map[uint32]uint64),
+		tipActive:     make(map[uint32]bool),
 		// Allowing to change the constructor makes testing a lot easier.
 		wsConstructor: comms.NewWsConn,
 		newCrypter:    encrypt.NewCrypter,
@@ -8336,53 +8343,55 @@ func generateDEXMaps(host string, cfg *msgjson.ConfigResult) (map[uint32]*dex.As
 }
 
 // runMatches runs the sorted matches returned from parseMatches.
-func (c *Core) runMatches(tradeMatches map[order.OrderID]*serverMatches) (assetMap, error) {
-	runMatch := func(sm *serverMatches) (assetMap, error) {
-		updatedAssets := make(assetMap)
-		tracker := sm.tracker
-		oid := tracker.ID()
+// negotiateMatches processes matches for a single trade: verifying cancel
+// matches and beginning negotiation for trade matches.
+func (c *Core) negotiateMatches(sm *serverMatches) (assetMap, error) {
+	updatedAssets := make(assetMap)
+	tracker := sm.tracker
+	oid := tracker.ID()
 
-		// Verify and record any cancel Match targeting this trade.
-		if sm.cancel != nil {
-			err := tracker.processCancelMatch(sm.cancel)
-			if err != nil {
-				return updatedAssets, fmt.Errorf("processCancelMatch for cancel order %v targeting order %v failed: %w",
-					sm.cancel.OrderID, oid, err)
-			}
+	// Verify and record any cancel Match targeting this trade.
+	if sm.cancel != nil {
+		err := tracker.processCancelMatch(sm.cancel)
+		if err != nil {
+			return updatedAssets, fmt.Errorf("processCancelMatch for cancel order %v targeting order %v failed: %w",
+				sm.cancel.OrderID, oid, err)
 		}
-
-		// Begin negotiation for any trade Matches.
-		if len(sm.msgMatches) > 0 {
-			tracker.mtx.Lock()
-			err := tracker.negotiate(sm.msgMatches)
-			tracker.mtx.Unlock()
-			if err != nil {
-				return updatedAssets, fmt.Errorf("negotiate order %v matches failed: %w", oid, err)
-			}
-
-			// Coins may be returned for canceled orders.
-			tracker.mtx.RLock()
-			if tracker.metaData.Status == order.OrderStatusCanceled {
-				updatedAssets.count(tracker.fromAssetID)
-				if _, is := tracker.wallets.toWallet.Wallet.(asset.AccountLocker); is {
-					updatedAssets.count(tracker.wallets.toWallet.AssetID)
-				}
-			}
-			tracker.mtx.RUnlock()
-
-			// Try to tick the trade now, but do not interrupt on error. The
-			// trade will tick again automatically.
-			tickUpdatedAssets, err := c.tick(tracker)
-			updatedAssets.merge(tickUpdatedAssets)
-			if err != nil {
-				return updatedAssets, fmt.Errorf("tick of order %v failed: %w", oid, err)
-			}
-		}
-
-		return updatedAssets, nil
 	}
 
-	// Process the trades concurrently.
+	// Begin negotiation for any trade Matches.
+	if len(sm.msgMatches) > 0 {
+		tracker.mtx.Lock()
+		err := tracker.negotiate(sm.msgMatches)
+		tracker.mtx.Unlock()
+		if err != nil {
+			return updatedAssets, fmt.Errorf("negotiate order %v matches failed: %w", oid, err)
+		}
+
+		// Coins may be returned for canceled orders.
+		tracker.mtx.RLock()
+		if tracker.metaData.Status == order.OrderStatusCanceled {
+			updatedAssets.count(tracker.fromAssetID)
+			if _, is := tracker.wallets.toWallet.Wallet.(asset.AccountLocker); is {
+				updatedAssets.count(tracker.wallets.toWallet.AssetID)
+			}
+		}
+		tracker.mtx.RUnlock()
+
+		// Try to tick the trade now. The trade will tick again
+		// automatically via the periodic ticker, so don't block on this.
+		// Blocking here was causing the single-threaded message handler
+		// to stall, preventing timely processing of other messages.
+		c.schedTradeTick(tracker)
+	}
+
+	return updatedAssets, nil
+}
+
+// runMatches processes matches for multiple trades concurrently and waits
+// for all to complete. Used when per-trade message queues are not available
+// (e.g. tests, reconnect).
+func (c *Core) runMatches(tradeMatches map[order.OrderID]*serverMatches) (assetMap, error) {
 	type runMatchResult struct {
 		updatedAssets assetMap
 		err           error
@@ -8390,7 +8399,7 @@ func (c *Core) runMatches(tradeMatches map[order.OrderID]*serverMatches) (assetM
 	resultChan := make(chan *runMatchResult)
 	for _, trade := range tradeMatches {
 		go func(trade *serverMatches) {
-			assetsUpdated, err := runMatch(trade)
+			assetsUpdated, err := c.negotiateMatches(trade)
 			resultChan <- &runMatchResult{assetsUpdated, err}
 		}(trade)
 	}
@@ -8868,23 +8877,33 @@ func handleMatchProofMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 		return fmt.Errorf("match proof validation failed: %w", err)
 	}
 
-	// Validate match_proof commitment checksum for client orders in this epoch.
-	for _, trade := range dc.trackedTrades() {
-		if note.MarketID != trade.mktID {
-			continue
-		}
+	// Validate match_proof commitment checksum for client orders in this
+	// epoch. When the dispatcher is running, do this asynchronously to
+	// avoid blocking it — verifyCSum takes trade.mtx.RLock() which can
+	// block for seconds if a tick goroutine holds the write lock.
+	verifyCsums := func() {
+		for _, trade := range dc.trackedTrades() {
+			if note.MarketID != trade.mktID {
+				continue
+			}
 
-		// Validation can fail either due to server trying to cheat (by
-		// requesting a preimage before closing the epoch to more orders), or
-		// client losing trades' epoch csums (e.g. due to restarting, since we
-		// don't persistently store these at the moment).
-		//
-		// Just warning the user for now, later on we might wanna revoke the
-		// order if this happens.
-		if err = trade.verifyCSum(note.CSum, note.Epoch); err != nil {
-			c.log.Warnf("Failed to validate commitment checksum for %s epoch %d at %s: %v",
-				note.MarketID, note.Epoch, dc.acct.host, err)
+			// Validation can fail either due to server trying to cheat (by
+			// requesting a preimage before closing the epoch to more orders), or
+			// client losing trades' epoch csums (e.g. due to restarting, since we
+			// don't persistently store these at the moment).
+			//
+			// Just warning the user for now, later on we might wanna revoke the
+			// order if this happens.
+			if err := trade.verifyCSum(note.CSum, note.Epoch); err != nil {
+				c.log.Warnf("Failed to validate commitment checksum for %s epoch %d at %s: %v",
+					note.MarketID, note.Epoch, dc.acct.host, err)
+			}
 		}
+	}
+	if dc.dispatchTradeWork != nil {
+		go verifyCsums()
+	} else {
+		verifyCsums()
 	}
 
 	return nil
@@ -9122,9 +9141,6 @@ func (c *Core) listen(dc *dexConnection) {
 	defer dc.ticker.Stop()
 	lastTick := time.Now()
 
-	// Messages must be run in the order in which they are received, but they
-	// should not be blocking or run concurrently. TODO: figure out which if any
-	// can run asynchronously, maybe all.
 	type msgJob struct {
 		hander routeHandler
 		msg    *msgjson.Message
@@ -9146,16 +9162,78 @@ func (c *Core) listen(dc *dexConnection) {
 				job.msg.Type, dc.acct.host, err)
 		}
 	}
-	// Start a single runner goroutine to run jobs one at a time in the order
-	// that they were received. Include the handler goroutine in the WaitGroup
-	// to allow it to complete if the connection master desires.
+
+	// Trade-specific routes dispatched to per-trade message queues.
+	// Messages for the same trade are processed sequentially (preserving
+	// order), while messages for different trades run concurrently. This
+	// prevents a slow handler for one trade (e.g. audit blocked on tick
+	// holding trackedTrade.mtx) from stalling handlers for other trades.
+	//
+	// The match handler runs synchronously in the dispatcher to ensure
+	// negotiate() creates match entries before audit messages reach the
+	// per-trade queue. Book-related routes stay sequential because they
+	// carry sequence numbers.
+	tradeRoutes := map[string]bool{
+		msgjson.AuditRoute:       true,
+		msgjson.RedemptionRoute:  true,
+		msgjson.NoMatchRoute:     true,
+		msgjson.RevokeOrderRoute: true,
+		msgjson.RevokeMatchRoute: true,
+	}
+
 	nextJob := make(chan *msgJob, 1024) // start blocking at this cap
 	defer close(nextJob)
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
+		tradeQueues := make(map[order.OrderID]chan func())
+		defer func() {
+			dc.dispatchTradeWork = nil
+			for _, ch := range tradeQueues {
+				close(ch)
+			}
+		}()
+
+		getQueue := func(oid order.OrderID) chan func() {
+			q, exists := tradeQueues[oid]
+			if !exists {
+				q = make(chan func(), 128)
+				tradeQueues[oid] = q
+				c.wg.Add(1)
+				go func() {
+					defer c.wg.Done()
+					for fn := range q {
+						fn()
+					}
+				}()
+			}
+			return q
+		}
+
+		// dispatchTradeWork routes work to the per-trade queue for the
+		// given order. Handlers running in this goroutine (via runJob)
+		// can use dc.dispatchTradeWork to inject per-trade work that
+		// will be sequenced with other messages for the same trade.
+		dc.dispatchTradeWork = func(oid order.OrderID, fn func()) {
+			getQueue(oid) <- fn
+		}
+
 		for job := range nextJob {
-			runJob(job)
+			if !tradeRoutes[job.msg.Route] {
+				runJob(job)
+				continue
+			}
+			// Extract order ID from the message payload.
+			var oidMsg struct {
+				OrderID dex.Bytes `json:"orderid"`
+			}
+			if err := job.msg.Unmarshal(&oidMsg); err != nil || len(oidMsg.OrderID) != order.OrderIDSize {
+				runJob(job) // Can't parse order ID, run inline.
+				continue
+			}
+			var oid order.OrderID
+			copy(oid[:], oidMsg.OrderID)
+			getQueue(oid) <- func() { runJob(job) }
 		}
 	}()
 
@@ -9206,14 +9284,7 @@ func (c *Core) listen(dc *dexConnection) {
 		}
 
 		for _, trade := range activeTrades {
-			if c.ctx.Err() != nil { // don't fail each one in sequence if shutting down
-				return
-			}
-			newUpdates, err := c.tick(trade)
-			if err != nil {
-				c.log.Error(err)
-			}
-			updatedAssets.merge(newUpdates)
+			c.schedTradeTick(trade)
 		}
 
 		if len(updatedAssets) > 0 {
@@ -9473,16 +9544,46 @@ func handleMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	}
 
 	// Begin match negotiation.
-	updatedAssets, err := c.runMatches(matches)
-	if len(updatedAssets) > 0 {
-		c.updateBalances(updatedAssets)
+	var matchErr error
+	if dc.dispatchTradeWork != nil {
+		// Dispatch per-trade negotiate work to the per-trade message
+		// queues. Each trade's negotiate runs sequentially with other
+		// messages for that trade (e.g. audit, redemption), preserving
+		// the ordering the server sent while allowing different trades
+		// to be processed concurrently.
+		for oid, sm := range matches {
+			dc.dispatchTradeWork(oid, func() {
+				updatedAssets, err := c.negotiateMatches(sm)
+				if len(updatedAssets) > 0 {
+					c.updateBalances(updatedAssets)
+				}
+				if err != nil {
+					c.log.Errorf("negotiateMatches for order %v: %v", sm.tracker.ID(), err)
+				}
+			})
+		}
+	} else {
+		// Synchronous path for when listen() is not running (tests).
+		var updatedAssets assetMap
+		updatedAssets, matchErr = c.runMatches(matches)
+		if len(updatedAssets) > 0 {
+			c.updateBalances(updatedAssets)
+		}
 	}
 
+	// When the dispatcher is running, call checkEpochResolution
+	// asynchronously to avoid blocking it. It iterates trades calling
+	// isActive() which takes trade.mtx.RLock() and can block for
+	// seconds if a tick goroutine holds the write lock.
 	for mktID := range mktIDs {
-		c.checkEpochResolution(dc.acct.host, mktID)
+		if dc.dispatchTradeWork != nil {
+			go c.checkEpochResolution(dc.acct.host, mktID)
+		} else {
+			c.checkEpochResolution(dc.acct.host, mktID)
+		}
 	}
 
-	return err
+	return matchErr
 }
 
 // handleNoMatchRoute handles the DEX-originating nomatch request, which is sent
@@ -9513,48 +9614,36 @@ func handleNoMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error 
 	if len(updatedAssets) > 0 {
 		c.updateBalances(updatedAssets)
 	}
-	c.checkEpochResolution(dc.acct.host, tracker.mktID)
+	if dc.dispatchTradeWork != nil {
+		go c.checkEpochResolution(dc.acct.host, tracker.mktID)
+	} else {
+		c.checkEpochResolution(dc.acct.host, tracker.mktID)
+	}
 	return err
 }
 
 func (c *Core) schedTradeTick(tracker *trackedTrade) {
-	oid := tracker.ID()
-	c.tickSchedMtx.Lock()
-	defer c.tickSchedMtx.Unlock()
-	if _, found := c.tickSched[oid]; found {
-		return // already going to tick this trade
-	}
-
-	tick := func() {
-		assets, err := c.tick(tracker)
-		if len(assets) > 0 {
-			c.updateBalances(assets)
-		}
-		if err != nil {
-			c.log.Errorf("tick error for order %v: %v", oid, err)
-		}
-	}
-
-	numMatches := len(tracker.activeMatches())
-	switch numMatches {
-	case 0:
+	// Signal that a tick is needed.
+	atomic.StoreUint32(&tracker.tickRequested, 1)
+	// If a goroutine is already running, it will see tickRequested and loop.
+	if !atomic.CompareAndSwapUint32(&tracker.tickRunning, 0, 1) {
 		return
-	case 1:
-		go tick()
-		return
-	default:
 	}
-
-	// Schedule a tick for this trade.
-	// 1 sec extra delay for every 10 active matches
-	delay := min(2*time.Second+time.Duration(numMatches)*time.Second/10, 5*time.Second)
-	c.log.Debugf("Waiting %v to tick trade %v with %d active matches", delay, oid, numMatches)
-	c.tickSched[oid] = time.AfterFunc(delay, func() {
-		c.tickSchedMtx.Lock()
-		defer c.tickSchedMtx.Unlock()
-		defer delete(c.tickSched, oid)
-		tick()
-	})
+	go func() {
+		defer atomic.StoreUint32(&tracker.tickRunning, 0)
+		for atomic.SwapUint32(&tracker.tickRequested, 0) != 0 {
+			if c.ctx.Err() != nil {
+				return
+			}
+			assets, err := c.tick(tracker)
+			if len(assets) > 0 {
+				c.updateBalances(assets)
+			}
+			if err != nil {
+				c.log.Errorf("tick error for order %v: %v", tracker.ID(), err)
+			}
+		}
+	}()
 }
 
 // handleAuditRoute handles the DEX-originating audit request, which is sent
@@ -9818,7 +9907,7 @@ func (c *Core) handleBridgeCompleted(n *asset.BridgeCompletedNote) {
 func (c *Core) handleWalletNotification(ni asset.WalletNotification) {
 	switch n := ni.(type) {
 	case *asset.TipChangeNote:
-		c.tipChange(n.AssetID, n.Tip)
+		c.queueTipChange(n.AssetID, n.Tip)
 	case *asset.BalanceChangeNote:
 		w, ok := c.wallet(n.AssetID)
 		if !ok {
@@ -9858,6 +9947,40 @@ func (c *Core) handleWalletNotification(ni asset.WalletNotification) {
 	c.notify(newWalletNote(ni))
 }
 
+// queueTipChange records the latest tip for the asset and ensures a tipChange
+// goroutine is running. If one is already active, the pending tip is stored and
+// picked up when the current run finishes, coalescing rapid-fire notifications.
+func (c *Core) queueTipChange(assetID uint32, tip uint64) {
+	c.tipMtx.Lock()
+	c.tipPending[assetID] = tip
+	if c.tipActive[assetID] {
+		c.tipMtx.Unlock()
+		return
+	}
+	c.tipActive[assetID] = true
+	c.tipMtx.Unlock()
+	c.wg.Add(1)
+	go c.runTipChange(assetID)
+}
+
+// runTipChange drains pending tips for the asset, calling tipChange for each.
+// When no more pending tips exist, marks the asset as inactive and returns.
+func (c *Core) runTipChange(assetID uint32) {
+	defer c.wg.Done()
+	for {
+		c.tipMtx.Lock()
+		tip, ok := c.tipPending[assetID]
+		if !ok {
+			c.tipActive[assetID] = false
+			c.tipMtx.Unlock()
+			return
+		}
+		delete(c.tipPending, assetID)
+		c.tipMtx.Unlock()
+		c.tipChange(assetID, tip)
+	}
+}
+
 // tipChange is called by a wallet backend when the tip block changes, or when
 // a connection error is encountered such that tip change reporting may be
 // adversely affected.
@@ -9892,20 +10015,19 @@ func (c *Core) tipChange(assetID uint32, tip uint64) {
 		w.mtx.Unlock()
 	}
 
-	assets := make(assetMap)
 	for _, dc := range c.dexConnections() {
-		newUpdates := c.tickAsset(dc, assetID)
-		if len(newUpdates) > 0 {
-			assets.merge(newUpdates)
+		dc.tradeMtx.RLock()
+		for _, trade := range dc.trades {
+			if trade.Base() == assetID || trade.Quote() == assetID {
+				c.schedTradeTick(trade)
+			}
 		}
+		dc.tradeMtx.RUnlock()
 	}
 
 	if _, exists := c.wallet(assetID); exists {
-		// Ensure we always at least update this asset's balance regardless of
-		// trade status changes.
-		assets.count(assetID)
+		c.updateBalances(assetMap{assetID: {}})
 	}
-	c.updateBalances(assets)
 }
 
 // convertAssetInfo converts from a *msgjson.Asset to the nearly identical
@@ -11229,8 +11351,14 @@ func (c *Core) checkEpochResolution(host string, mktID string) {
 			return
 		}
 		// Does this order have an in-flight cancel order that is not yet
-		// resolved?
-		t.mtx.RLock()
+		// resolved? Use TryRLock to avoid blocking the message handler if
+		// the trade is currently being ticked (which holds the write lock
+		// during slow wallet operations). If we can't acquire the lock,
+		// assume the trade may have unresolved business and return early.
+		// The next epoch_report will trigger another check.
+		if !t.mtx.TryRLock() {
+			return
+		}
 		unresolvedCancel := t.cancel != nil && t.cancelEpochIdx() == lastEpoch && t.cancel.matches.taker == nil
 		t.mtx.RUnlock()
 		if unresolvedCancel {
