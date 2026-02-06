@@ -80,6 +80,10 @@ func getRawTransaction(c rpcCaller, txHash *chainhash.Hash) ([]byte, error) {
 	return txB, c.CallRPC("getrawtransaction", []any{txHash.String()}, &txB)
 }
 
+// signTxByRPC signs a transaction using the signrawtransaction RPC.
+// NOTE: signrawtransaction is deprecated in zcashd v6.11.0 and will be removed
+// in a future release. Migration to PCZT-based methods will be required when
+// Zallet provides replacement RPC methods.
 func signTxByRPC(c rpcCaller, inTx *dexzec.Tx) (*dexzec.Tx, error) {
 	txBytes, err := inTx.Bytes()
 	if err != nil {
