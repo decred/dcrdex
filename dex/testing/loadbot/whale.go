@@ -62,15 +62,12 @@ func runWhale() {
 
 // SetupWallets is part of the Trader interface.
 func (*whale) SetupWallets(m *Mantle) {
-	numCoins := 20
+	const numCoins = 20
+	m.SetupSymmetricWallets(numCoins)
 	minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig()
-	m.createWallet(baseSymbol, minBaseQty, maxBaseQty, numCoins)
-	m.createWallet(quoteSymbol, minQuoteQty, maxQuoteQty, numCoins)
-
 	m.log.Infof("Whale has been initialized with  %s to %s %s balance, and %s to %s %s balance, %d initial funding coins",
 		fmtAtoms(minBaseQty, baseSymbol), fmtAtoms(maxBaseQty, baseSymbol), baseSymbol,
 		fmtAtoms(minQuoteQty, quoteSymbol), fmtAtoms(maxQuoteQty, quoteSymbol), quoteSymbol, numCoins)
-
 }
 
 func (*whale) cancelOrders(currentEpoch uint64) {
@@ -104,12 +101,7 @@ func (w *whale) HandleNotification(m *Mantle, note core.Notification) {
 	case *core.BondPostNote:
 		// Once registration is complete, register for a book feed.
 		if n.Topic() == core.TopicAccountRegistered {
-			minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig()
-			wmm := walletMinMax{
-				baseID:  {min: minBaseQty, max: maxBaseQty},
-				quoteID: {min: minQuoteQty, max: maxQuoteQty},
-			}
-			m.replenishBalances(wmm)
+			m.replenishBalances(m.SymmetricWalletMinMax())
 			wMantlesMtx.Lock()
 			wMantles = append(wMantles, m)
 			wMantlesMtx.Unlock()
@@ -135,12 +127,7 @@ func (w *whale) HandleNotification(m *Mantle, note core.Notification) {
 		switch {
 		// Refresh balances one epoch at a time.
 		case c < numWhale:
-			minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig()
-			wmm := walletMinMax{
-				baseID:  {min: minBaseQty, max: maxBaseQty},
-				quoteID: {min: minQuoteQty, max: maxQuoteQty},
-			}
-			wMantles[c].replenishBalances(wmm)
+			wMantles[c].replenishBalances(wMantles[c].SymmetricWalletMinMax())
 		// Give a small cooldown. Then cancel all orders.
 		case c == numWhale+coolDownPeriod:
 			w.cancelOrders(n.Epoch)

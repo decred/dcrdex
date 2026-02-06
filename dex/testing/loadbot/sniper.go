@@ -31,15 +31,12 @@ func newSniper(maxOrdsPerEpoch int) *sniper {
 // SetupWallets is part of the Trader interface.
 func (s *sniper) SetupWallets(m *Mantle) {
 	numCoins := 3 * s.maxOrdsPerEpoch
+	m.SetupSymmetricWallets(numCoins)
 	minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig()
-	m.createWallet(baseSymbol, minBaseQty, maxBaseQty, numCoins)
-	m.createWallet(quoteSymbol, minQuoteQty, maxQuoteQty, numCoins)
-
 	m.log.Infof("Sniper has been initialized with %d max orders per epoch"+
 		"per epoch, %s to %s %s balance, and %s to %s %s balance, %d initial funding coins",
 		s.maxOrdsPerEpoch, fmtAtoms(minBaseQty, baseSymbol), fmtAtoms(maxBaseQty, baseSymbol), baseSymbol,
 		fmtAtoms(minQuoteQty, quoteSymbol), fmtAtoms(maxQuoteQty, quoteSymbol), quoteSymbol, numCoins)
-
 }
 
 // HandleNotification is part of the Trader interface.
@@ -57,12 +54,7 @@ func (s *sniper) HandleNotification(m *Mantle, note core.Notification) {
 				}
 				s.snipe(m)
 			}()
-			minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig()
-			wmm := walletMinMax{
-				baseID:  {min: minBaseQty, max: maxBaseQty},
-				quoteID: {min: minQuoteQty, max: maxQuoteQty},
-			}
-			m.replenishBalances(wmm)
+			m.replenishBalances(m.SymmetricWalletMinMax())
 		}
 	case *core.BalanceNote:
 		log.Infof("sniper balance: %s = %d available, %d locked", unbip(n.AssetID), n.Balance.Available, n.Balance.Locked)

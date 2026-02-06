@@ -169,23 +169,7 @@ func findOpenAddrs(n int) ([]net.Addr, error) {
 // fresh nodes created with the start-wallet script, just the alpha and beta
 // nodes' wallets.
 func rpcAddr(symbol string) string {
-	var key string
-
-	switch symbol {
-	case dcr:
-		key = "rpclisten"
-	case btc, ltc, bch, zec, zcl, doge, firo, dash:
-		key = "rpcport"
-	case eth, usdc:
-		key = "ListenAddr"
-	case polygon, usdcp:
-		return "" // using IPC files
-	}
-
-	if symbol == baseSymbol {
-		return alphaCfgBase[key]
-	}
-	return alphaCfgQuote[key]
+	return rpcAddrFromRegistry(symbol)
 }
 
 // returnAddress is an address for the specified node's wallet. returnAddress
@@ -470,59 +454,18 @@ func run() error {
 
 	log.Infof("Running program %s", programName)
 
-	alphaAddress := func(symbol string) (string, error) {
-		var args []string
-		switch symbol {
-		case btc, ltc, dgb:
-			args = []string{"getnewaddress", "''", "bech32"}
-		case dash, doge, bch, firo:
-			args = []string{"getnewaddress"}
-		case dcr:
-			args = []string{"getnewaddress", "default", "ignore"}
-		case eth, usdc, polygon, usdcp:
-			args = []string{"attach", `--exec eth.accounts[0]`}
-		case zec, zcl:
-			return "tmEgW8c44RQQfft9FHXnqGp8XEcQQSRcUXD", nil // ALPHA_ADDR in the zcash harness.sh
-		default:
-			return "", fmt.Errorf("getAddress: unknown symbol %q", symbol)
-		}
-		res := <-harnessCtl(ctx, symbol, "./alpha", args...)
-		if res.err != nil {
-			return "", fmt.Errorf("error getting %s address: %v", symbol, res.err)
-		}
-		return strings.Trim(res.output, `"`), nil
+	if alphaAddrBase, err = alphaAddressFromRegistry(baseSymbol); err != nil {
+		return fmt.Errorf("error getting %s address: %v", baseSymbol, err)
 	}
-
-	if alphaAddrBase, err = alphaAddress(baseSymbol); err != nil {
-		return err
-	}
-	if alphaAddrQuote, err = alphaAddress(quoteSymbol); err != nil {
-		return err
-	}
-
-	unlockWallets := func(symbol string) error {
-		switch symbol {
-		case btc, ltc, dash, doge, firo, bch, dgb:
-			<-harnessCtl(ctx, symbol, "./alpha", "walletpassphrase", "abc", "4294967295")
-			<-harnessCtl(ctx, symbol, "./beta", "walletpassphrase", "abc", "4294967295")
-		case dcr:
-			<-harnessCtl(ctx, dcr, "./alpha", "walletpassphrase", "abc", "0")
-			<-harnessCtl(ctx, dcr, "./beta", "walletpassphrase", "abc", "0") // creating new accounts requires wallet unlocked
-			<-harnessCtl(ctx, dcr, "./beta", "unlockaccount", "default", "abc")
-		case eth, zec, zcl, usdc, polygon, usdcp:
-			// eth unlocking for send, so no need to here. Mining
-			// accounts are always unlocked. zec is unlocked already.
-		default:
-			return fmt.Errorf("unlockWallets: unknown symbol %q", symbol)
-		}
-		return nil
+	if alphaAddrQuote, err = alphaAddressFromRegistry(quoteSymbol); err != nil {
+		return fmt.Errorf("error getting %s address: %v", quoteSymbol, err)
 	}
 
 	// Unlock wallets, since they may have been locked on a previous shutdown.
-	if err = unlockWallets(baseSymbol); err != nil {
+	if err = unlockWalletFromRegistry(baseSymbol); err != nil {
 		return err
 	}
-	if err = unlockWallets(quoteSymbol); err != nil {
+	if err = unlockWalletFromRegistry(quoteSymbol); err != nil {
 		return err
 	}
 

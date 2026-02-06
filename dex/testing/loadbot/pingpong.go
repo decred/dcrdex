@@ -31,10 +31,9 @@ func runPingPong(n int) {
 
 // SetupWallets is part of the Trader interface.
 func (p *pingPonger) SetupWallets(m *Mantle) {
-	numCoins := 4
+	const numCoins = 4
+	m.SetupSymmetricWallets(numCoins)
 	minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig()
-	m.createWallet(baseSymbol, minBaseQty, maxBaseQty, numCoins)
-	m.createWallet(quoteSymbol, minQuoteQty, maxQuoteQty, numCoins)
 	m.log.Infof("Ping Ponger has been initialized with %s to %s %s balance, "+
 		"and %s to %s %s balance, %d initial funding coins",
 		fmtAtoms(minBaseQty, baseSymbol), fmtAtoms(maxBaseQty, baseSymbol), baseSymbol,
@@ -65,12 +64,7 @@ func (p *pingPonger) HandleNotification(m *Mantle, note core.Notification) {
 		}
 	case *core.EpochNotification:
 		if n.MarketID == market {
-			minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig()
-			wmm := walletMinMax{
-				baseID:  {min: minBaseQty, max: maxBaseQty},
-				quoteID: {min: minQuoteQty, max: maxQuoteQty},
-			}
-			m.replenishBalances(wmm)
+			m.replenishBalances(m.SymmetricWalletMinMax())
 		}
 	case *core.BalanceNote:
 		log.Infof("pingponger balance: %s = %d available, %d locked", unbip(n.AssetID), n.Balance.Available, n.Balance.Locked)
