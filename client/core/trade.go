@@ -275,7 +275,9 @@ type trackedTrade struct {
 
 	selfGoverned uint32 // (atomic) server either lacks this market or is down
 
-	tickLock sync.Mutex // prevent multiple concurrent ticks, but allow them to queue
+	tickLock      sync.Mutex // prevent multiple concurrent ticks, but allow them to queue
+	tickRequested uint32     // atomic; 1 when a tick is needed
+	tickRunning   uint32     // atomic; 1 while a tick goroutine is active
 
 	order.Order
 
