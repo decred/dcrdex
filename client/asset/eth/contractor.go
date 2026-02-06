@@ -767,7 +767,7 @@ func (c *contractorV1) estimateInitGas(ctx context.Context, n int) (uint64, erro
 		var secretHash [32]byte
 		copy(secretHash[:], encode.RandomBytes(32))
 		initiations = append(initiations, swapv1.ETHSwapVector{
-			RefundTimestamp: 1,
+			RefundTimestamp: uint64(time.Now().Add(time.Hour * 6).Unix()),
 			SecretHash:      secretHash,
 			Initiator:       c.acctAddr,
 			Participant:     common.BytesToAddress(encode.RandomBytes(20)),
