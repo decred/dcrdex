@@ -436,12 +436,12 @@ func TestParseHTTPRequest(t *testing.T) {
 	r, _ = http.NewRequest("GET", "", bbuff)
 	ensureNoErr("good request")
 
-	// Use real route with bad args.
+	// Use real route with args. Since version ignores params, this should succeed.
 	msg, _ = msgjson.NewRequest(1, "version", "something")
 	b, _ = json.Marshal(msg)
 	bbuff = bytes.NewBuffer(b)
 	r, _ = http.NewRequest("GET", "", bbuff)
-	ensureMsgErr("bad params", msgjson.RPCParseError)
+	ensureNoErr("version ignores params")
 }
 
 func TestNew(t *testing.T) {

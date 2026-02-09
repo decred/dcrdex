@@ -4,11 +4,11 @@
 package rpcserver
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -93,12 +93,14 @@ const (
 	setVSPStr         = "vsp set to %s"
 )
 
+
 // createResponse creates a msgjson response payload.
 func createResponse(op string, res any, resErr *msgjson.Error) *msgjson.ResponsePayload {
 	encodedRes, err := json.Marshal(res)
 	if err != nil {
-		err := fmt.Errorf("unable to marshal data for %s: %w", op, err)
-		panic(err)
+		log.Errorf("unable to marshal data for %s: %v", op, err)
+		errMsg := msgjson.NewError(msgjson.RPCInternal, "unable to marshal response for %s", op)
+		return &msgjson.ResponsePayload{Error: errMsg}
 	}
 	return &msgjson.ResponsePayload{Result: encodedRes, Error: resErr}
 }
@@ -112,7 +114,7 @@ func usage(route string, err error) *msgjson.ResponsePayload {
 }
 
 // routes maps routes to a handler function.
-var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponsePayload{
+var routes = map[string]func(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload{
 	cancelRoute:                handleCancel,
 	closeWalletRoute:           handleCloseWallet,
 	discoverAcctRoute:          handleDiscoverAcct,
@@ -172,21 +174,25 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	sendPaymentMultisigRoute:   handleSendPaymentMultisig,
 }
 
+//
+// handlers_system handlers
+//
+
 // handleHelp handles requests for help. Returns general help for all commands
 // if no arguments are passed or verbose help if the passed argument is a known
 // command.
-func handleHelp(_ *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseHelpArgs(params)
-	if err != nil {
+func handleHelp(_ *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params HelpParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(helpRoute, err)
 	}
 	res := ""
-	if form.helpWith == "" {
+	if params.HelpWith == "" {
 		// List all commands if no arguments.
-		res = ListCommands(form.includePasswords)
+		res = ListCommands(params.IncludePasswords)
 	} else {
 		var err error
-		res, err = commandUsage(form.helpWith, form.includePasswords)
+		res, err = commandUsage(params.HelpWith, params.IncludePasswords)
 		if err != nil {
 			resErr := msgjson.NewError(msgjson.RPCUnknownRoute, "error getting usage: %v", err)
 			return createResponse(helpRoute, nil, resErr)
@@ -197,13 +203,13 @@ func handleHelp(_ *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 
 // handleInit handles requests for init. *msgjson.ResponsePayload.Error is empty
 // if successful.
-func handleInit(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	appPass, seed, err := parseInitArgs(params)
-	if err != nil {
+func handleInit(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params InitParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(initRoute, err)
 	}
-	defer appPass.Clear()
-	if _, err := s.core.InitializeClient(appPass, seed); err != nil {
+	defer params.AppPass.Clear()
+	if _, err := s.core.InitializeClient(params.AppPass, params.Seed); err != nil {
 		resErr := msgjson.NewError(msgjson.RPCInitError, "unable to initialize client: %v", err)
 		return createResponse(initRoute, nil, resErr)
 	}
@@ -213,7 +219,7 @@ func handleInit(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 
 // handleVersion handles requests for version. It returns the rpc server version
 // and dexc version.
-func handleVersion(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
+func handleVersion(s *RPCServer, _ *msgjson.Message) *msgjson.ResponsePayload {
 	result := &VersionResponse{
 		RPCServerVer: &dex.Semver{
 			Major: rpcSemverMajor,
@@ -226,279 +232,241 @@ func handleVersion(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 	return createResponse(versionRoute, result, nil)
 }
 
+// handleLogin sets up the dex connections.
+func handleLogin(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params LoginParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(loginRoute, err)
+	}
+	defer params.AppPass.Clear()
+	err := s.core.Login(params.AppPass)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCLoginError, "unable to login: %v", err)
+		return createResponse(loginRoute, nil, resErr)
+	}
+	res := "successfully logged in"
+	return createResponse(loginRoute, &res, nil)
+}
+
+// handleLogout logs out Bison Wallet. *msgjson.ResponsePayload.Error is empty
+// if successful.
+func handleLogout(s *RPCServer, _ *msgjson.Message) *msgjson.ResponsePayload {
+	if err := s.core.Logout(); err != nil {
+		resErr := msgjson.NewError(msgjson.RPCLogoutError, "unable to logout: %v", err)
+		return createResponse(logoutRoute, nil, resErr)
+	}
+	res := logoutStr
+	return createResponse(logoutRoute, &res, nil)
+}
+
+//
+// handlers_wallet handlers
+//
+
 // handleNewWallet handles requests for newwallet.
 // *msgjson.ResponsePayload.Error is empty if successful. Returns a
 // msgjson.RPCWalletExistsError if a wallet for the assetID already exists.
 // Wallet will be unlocked if successful.
-func handleNewWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseNewWalletArgs(params)
-	if err != nil {
+func handleNewWallet(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params NewWalletParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(newWalletRoute, err)
 	}
 
 	// zero password params in request payload when done handling this request
 	defer func() {
-		form.appPass.Clear()
-		form.walletPass.Clear()
+		params.AppPass.Clear()
+		params.WalletPass.Clear()
 	}()
 
-	if s.core.WalletState(form.assetID) != nil {
-		resErr := msgjson.NewError(msgjson.RPCWalletExistsError, "error creating %s wallet: wallet already exists", dex.BipIDSymbol(form.assetID))
+	if s.core.WalletState(params.AssetID) != nil {
+		resErr := msgjson.NewError(msgjson.RPCWalletExistsError, "error creating %s wallet: wallet already exists", dex.BipIDSymbol(params.AssetID))
 		return createResponse(newWalletRoute, nil, resErr)
 	}
 
-	walletDef, err := asset.WalletDef(form.assetID, form.walletType)
+	walletDef, err := asset.WalletDef(params.AssetID, params.WalletType)
 	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCWalletDefinitionError, "error creating %s wallet: unable to get wallet definition: %v", dex.BipIDSymbol(form.assetID), err)
+		resErr := msgjson.NewError(msgjson.RPCWalletDefinitionError, "error creating %s wallet: unable to get wallet definition: %v", dex.BipIDSymbol(params.AssetID), err)
 		return createResponse(newWalletRoute, nil, resErr)
+	}
+
+	if params.Config == nil {
+		params.Config = make(map[string]string)
 	}
 
 	// Apply default config options if they exist.
 	for _, opt := range walletDef.ConfigOpts {
-		if _, has := form.config[opt.Key]; !has {
-			form.config[opt.Key] = opt.DefaultValue
+		if _, has := params.Config[opt.Key]; !has {
+			params.Config[opt.Key] = opt.DefaultValue
 		}
 	}
 
 	// Wallet does not exist yet. Try to create it.
-	err = s.core.CreateWallet(form.appPass, form.walletPass, &core.WalletForm{
-		Type:    form.walletType,
-		AssetID: form.assetID,
-		Config:  form.config,
+	err = s.core.CreateWallet(params.AppPass, params.WalletPass, &core.WalletForm{
+		Type:    params.WalletType,
+		AssetID: params.AssetID,
+		Config:  params.Config,
 	})
 	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCCreateWalletError, "error creating %s wallet: %v", dex.BipIDSymbol(form.assetID), err)
+		resErr := msgjson.NewError(msgjson.RPCCreateWalletError, "error creating %s wallet: %v", dex.BipIDSymbol(params.AssetID), err)
 		return createResponse(newWalletRoute, nil, resErr)
 	}
 
-	err = s.core.OpenWallet(form.assetID, form.appPass)
+	err = s.core.OpenWallet(params.AssetID, params.AppPass)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCOpenWalletError, "wallet connected, but failed to open with provided password: %v", err)
 		return createResponse(newWalletRoute, nil, resErr)
 	}
 
-	res := fmt.Sprintf(walletCreatedStr, dex.BipIDSymbol(form.assetID))
+	res := fmt.Sprintf(walletCreatedStr, dex.BipIDSymbol(params.AssetID))
 	return createResponse(newWalletRoute, &res, nil)
 }
 
 // handleOpenWallet handles requests for openWallet.
 // *msgjson.ResponsePayload.Error is empty if successful. Requires the app
 // password. Opens the wallet.
-func handleOpenWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseOpenWalletArgs(params)
-	if err != nil {
+func handleOpenWallet(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params OpenWalletParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(openWalletRoute, err)
 	}
-	defer form.appPass.Clear()
+	defer params.AppPass.Clear()
 
-	err = s.core.OpenWallet(form.assetID, form.appPass)
+	err := s.core.OpenWallet(params.AssetID, params.AppPass)
 	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCOpenWalletError, "error unlocking %s wallet: %v", dex.BipIDSymbol(form.assetID), err)
+		resErr := msgjson.NewError(msgjson.RPCOpenWalletError, "error unlocking %s wallet: %v", dex.BipIDSymbol(params.AssetID), err)
 		return createResponse(openWalletRoute, nil, resErr)
 	}
 
-	res := fmt.Sprintf(walletUnlockedStr, dex.BipIDSymbol(form.assetID))
+	res := fmt.Sprintf(walletUnlockedStr, dex.BipIDSymbol(params.AssetID))
 	return createResponse(openWalletRoute, &res, nil)
 }
 
 // handleCloseWallet handles requests for closeWallet.
 // *msgjson.ResponsePayload.Error is empty if successful. Closes the wallet.
-func handleCloseWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	assetID, err := parseCloseWalletArgs(params)
-	if err != nil {
+func handleCloseWallet(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params CloseWalletParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(closeWalletRoute, err)
 	}
-	if err := s.core.CloseWallet(assetID); err != nil {
-		resErr := msgjson.NewError(msgjson.RPCCloseWalletError, "unable to close wallet %s: %v", dex.BipIDSymbol(assetID), err)
+	if err := s.core.CloseWallet(params.AssetID); err != nil {
+		resErr := msgjson.NewError(msgjson.RPCCloseWalletError, "unable to close wallet %s: %v", dex.BipIDSymbol(params.AssetID), err)
 		return createResponse(closeWalletRoute, nil, resErr)
 	}
 
-	res := fmt.Sprintf(walletLockedStr, dex.BipIDSymbol(assetID))
+	res := fmt.Sprintf(walletLockedStr, dex.BipIDSymbol(params.AssetID))
 	return createResponse(closeWalletRoute, &res, nil)
 }
 
 // handleToggleWalletStatus handles requests for toggleWalletStatus.
 // *msgjson.ResponsePayload.Error is empty if successful. Disables or enables a
 // wallet.
-func handleToggleWalletStatus(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseToggleWalletStatusArgs(params)
-	if err != nil {
+func handleToggleWalletStatus(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params ToggleWalletStatusParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(toggleWalletStatusRoute, err)
 	}
-	if err := s.core.ToggleWalletStatus(form.assetID, form.disable); err != nil {
-		resErr := msgjson.NewError(msgjson.RPCToggleWalletStatusError, "unable to change %s wallet status: %v", dex.BipIDSymbol(form.assetID), err)
+	if err := s.core.ToggleWalletStatus(params.AssetID, params.Disable); err != nil {
+		resErr := msgjson.NewError(msgjson.RPCToggleWalletStatusError, "unable to change %s wallet status: %v", dex.BipIDSymbol(params.AssetID), err)
 		return createResponse(toggleWalletStatusRoute, nil, resErr)
 	}
 
 	status := "enabled"
-	if form.disable {
+	if params.Disable {
 		status = "disabled"
 	}
 
-	res := fmt.Sprintf(walletStatusStr, dex.BipIDSymbol(form.assetID), status)
+	res := fmt.Sprintf(walletStatusStr, dex.BipIDSymbol(params.AssetID), status)
 	return createResponse(toggleWalletStatusRoute, &res, nil)
 }
 
 // handleWallets handles requests for wallets. Returns a list of wallet details.
-func handleWallets(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
+func handleWallets(s *RPCServer, _ *msgjson.Message) *msgjson.ResponsePayload {
 	walletsStates := s.core.Wallets()
 	return createResponse(walletsRoute, walletsStates, nil)
 }
 
-// handleBondAssets handles requests for bondassets.
-// *msgjson.ResponsePayload.Error is empty if successful. Requires the address
-// of a dex and returns the bond expiry and supported asset bond details.
-func handleBondAssets(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	host, cert, err := parseBondAssetsArgs(params)
+// handleRescanWallet handles requests to rescan a wallet. This may trigger an
+// asynchronous resynchronization of wallet address activity, and the wallet
+// state should be consulted for status. *msgjson.ResponsePayload.Error is empty
+// if successful.
+func handleRescanWallet(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params RescanWalletParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(rescanWalletRoute, err)
+	}
+	err := s.core.RescanWallet(params.AssetID, params.Force)
 	if err != nil {
-		return usage(bondAssetsRoute, err)
+		resErr := msgjson.NewError(msgjson.RPCWalletRescanError, "unable to rescan wallet: %v", err)
+		return createResponse(rescanWalletRoute, nil, resErr)
 	}
-	exchInf := s.core.Exchanges()
-	exchCfg := exchInf[host]
-	if exchCfg == nil {
-		exchCfg, err = s.core.GetDEXConfig(host, cert) // cert is file contents, not name
-		if err != nil {
-			resErr := msgjson.NewError(msgjson.RPCGetDEXConfigError, "%v", err)
-			return createResponse(bondAssetsRoute, nil, resErr)
-		}
-	}
-	res := &getBondAssetsResponse{
-		Expiry: exchCfg.BondExpiry,
-		Assets: exchCfg.BondAssets,
-	}
-	return createResponse(bondAssetsRoute, res, nil)
+	return createResponse(rescanWalletRoute, "started", nil)
 }
 
-// handleGetDEXConfig handles requests for getdexconfig.
-// *msgjson.ResponsePayload.Error is empty if successful. Requires the address
-// of a dex and returns its config..
-func handleGetDEXConfig(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	host, cert, err := parseGetDEXConfigArgs(params)
-	if err != nil {
-		return usage(getDEXConfRoute, err)
-	}
-	exchange, err := s.core.GetDEXConfig(host, cert) // cert is file contents, not name
-	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCGetDEXConfigError, "%v", err)
-		return createResponse(getDEXConfRoute, nil, resErr)
-	}
-	return createResponse(getDEXConfRoute, exchange, nil)
-}
-
-// handleDiscoverAcct is the handler for discoveracct. *msgjson.ResponsePayload.Error
-// is empty if successful.
-func handleDiscoverAcct(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseDiscoverAcctArgs(params)
-	if err != nil {
-		return usage(discoverAcctRoute, err)
-	}
-	defer form.appPass.Clear()
-	_, paid, err := s.core.DiscoverAccount(form.addr, form.appPass, form.cert)
-	if err != nil {
-		resErr := &msgjson.Error{Code: msgjson.RPCDiscoverAcctError, Message: err.Error()}
-		return createResponse(discoverAcctRoute, nil, resErr)
-	}
-	return createResponse(discoverAcctRoute, &paid, nil)
-}
-
-func handleBondOptions(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseBondOptsArgs(params)
-	if err != nil {
-		return usage(bondOptionsRoute, err)
-	}
-	err = s.core.UpdateBondOptions(form)
-	if err != nil {
-		resErr := &msgjson.Error{Code: msgjson.RPCPostBondError, Message: err.Error()}
-		return createResponse(bondOptionsRoute, nil, resErr)
-	}
-	return createResponse(bondOptionsRoute, "ok", nil)
-}
-
-// handlePostBond handles requests for postbond. *msgjson.ResponsePayload.Error
-// is empty if successful.
-func handlePostBond(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parsePostBondArgs(params)
-	if err != nil {
-		return usage(postBondRoute, err)
-	}
-	defer form.AppPass.Clear()
-	// Get the exchange config with Exchanges(), not GetDEXConfig, since we may
-	// already be connected and even with an existing account.
-	exchInf := s.core.Exchanges()
-	exchCfg := exchInf[form.Addr]
-	if exchCfg == nil {
-		// Not already registered.
-		exchCfg, err = s.core.GetDEXConfig(form.Addr, form.Cert)
-		if err != nil {
-			resErr := &msgjson.Error{Code: msgjson.RPCGetDEXConfigError, Message: err.Error()}
-			return createResponse(postBondRoute, nil, resErr)
-		}
-	}
-	// Registration with different assets will be supported in the future, but
-	// for now, this requires DCR.
-	assetID := uint32(42)
-	if form.Asset != nil {
-		assetID = *form.Asset
-	}
-	symb := dex.BipIDSymbol(assetID)
-
-	bondAsset, supported := exchCfg.BondAssets[symb]
-	if !supported {
-		resErr := msgjson.NewError(msgjson.RPCPostBondError, "DEX %s does not support registration with %s", form.Addr, symb)
-		return createResponse(postBondRoute, nil, resErr)
-	}
-	if bondAsset.Amt > form.Bond || form.Bond%bondAsset.Amt != 0 {
-		resErr := msgjson.NewError(msgjson.RPCPostBondError, "DEX at %s expects a bond amount in multiples of %d %s but %d was offered",
-			form.Addr, bondAsset.Amt, dex.BipIDSymbol(assetID), form.Bond)
-		return createResponse(postBondRoute, nil, resErr)
-	}
-	res, err := s.core.PostBond(form)
-	if err != nil {
-		resErr := &msgjson.Error{Code: msgjson.RPCPostBondError, Message: err.Error()}
-		return createResponse(postBondRoute, nil, resErr)
-	}
-	if res.BondID == "" {
-		return createResponse(postBondRoute, "existing account configured - no bond posted", nil)
-	}
-	return createResponse(postBondRoute, res, nil)
-}
+//
+// handlers_trading handlers
+//
 
 // handleExchanges handles requests for exchanges. It takes no arguments and
 // returns a map of exchanges.
-func handleExchanges(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
+func handleExchanges(s *RPCServer, _ *msgjson.Message) *msgjson.ResponsePayload {
 	// Convert something to a map[string]any.
-	convM := func(in any) map[string]any {
+	convM := func(in any) (map[string]any, error) {
 		var m map[string]any
 		b, err := json.Marshal(in)
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		if err = json.Unmarshal(b, &m); err != nil {
-			panic(err)
+			return nil, err
 		}
-		return m
+		return m, nil
 	}
 	res := s.core.Exchanges()
-	exchanges := convM(res)
+	exchanges, err := convM(res)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCInternal, "failed to encode exchanges: %v", err)
+		return createResponse(exchangesRoute, nil, resErr)
+	}
 	// Iterate through exchanges converting structs into maps in order to
 	// remove some fields. Keys are DEX addresses.
 	for k, exchange := range exchanges {
-		exchangeDetails := convM(exchange)
+		exchangeDetails, err := convM(exchange)
+		if err != nil {
+			resErr := msgjson.NewError(msgjson.RPCInternal, "failed to encode exchange: %v", err)
+			return createResponse(exchangesRoute, nil, resErr)
+		}
 		// Remove a redundant address field.
 		delete(exchangeDetails, "host")
-		markets := convM(exchangeDetails["markets"])
+		markets, err := convM(exchangeDetails["markets"])
+		if err != nil {
+			resErr := msgjson.NewError(msgjson.RPCInternal, "failed to encode markets: %v", err)
+			return createResponse(exchangesRoute, nil, resErr)
+		}
 		// Market keys are market name.
 		for k, market := range markets {
-			marketDetails := convM(market)
+			marketDetails, err := convM(market)
+			if err != nil {
+				resErr := msgjson.NewError(msgjson.RPCInternal, "failed to encode market: %v", err)
+				return createResponse(exchangesRoute, nil, resErr)
+			}
 			// Remove redundant name field.
 			delete(marketDetails, "name")
 			delete(marketDetails, "orders")
 			markets[k] = marketDetails
 		}
-		assets := convM(exchangeDetails["assets"])
+		assets, err := convM(exchangeDetails["assets"])
+		if err != nil {
+			resErr := msgjson.NewError(msgjson.RPCInternal, "failed to encode assets: %v", err)
+			return createResponse(exchangesRoute, nil, resErr)
+		}
 		// Asset keys are assetIDs.
 		for k, asset := range assets {
-			assetDetails := convM(asset)
+			assetDetails, err := convM(asset)
+			if err != nil {
+				resErr := msgjson.NewError(msgjson.RPCInternal, "failed to encode asset: %v", err)
+				return createResponse(exchangesRoute, nil, resErr)
+			}
 			// Remove redundant id field.
 			delete(assetDetails, "id")
 			assets[k] = assetDetails
@@ -510,31 +478,15 @@ func handleExchanges(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 	return createResponse(exchangesRoute, &exchanges, nil)
 }
 
-// handleLogin sets up the dex connections.
-func handleLogin(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	appPass, err := parseLoginArgs(params)
-	if err != nil {
-		return usage(loginRoute, err)
-	}
-	defer appPass.Clear()
-	err = s.core.Login(appPass)
-	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCLoginError, "unable to login: %v", err)
-		return createResponse(loginRoute, nil, resErr)
-	}
-	res := "successfully logged in"
-	return createResponse(loginRoute, &res, nil)
-}
-
 // handleTrade handles requests for trade. *msgjson.ResponsePayload.Error is
 // empty if successful.
-func handleTrade(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseTradeArgs(params)
-	if err != nil {
+func handleTrade(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params TradeParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(tradeRoute, err)
 	}
-	defer form.appPass.Clear()
-	res, err := s.core.Trade(form.appPass, form.srvForm)
+	defer params.AppPass.Clear()
+	res, err := s.core.Trade(params.AppPass, &params.TradeForm)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCTradeError, "unable to trade: %v", err)
 		return createResponse(tradeRoute, nil, resErr)
@@ -547,13 +499,13 @@ func handleTrade(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	return createResponse(tradeRoute, &tradeRes, nil)
 }
 
-func handleMultiTrade(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseMultiTradeArgs(params)
-	if err != nil {
+func handleMultiTrade(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params MultiTradeParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(multiTradeRoute, err)
 	}
-	defer form.appPass.Clear()
-	results := s.core.MultiTrade(form.appPass, form.srvForm)
+	defer params.AppPass.Clear()
+	results := s.core.MultiTrade(params.AppPass, &params.MultiTradeForm)
 	trades := make([]*tradeResponse, 0, len(results))
 	for _, res := range results {
 		if res.Error != nil {
@@ -574,97 +526,21 @@ func handleMultiTrade(s *RPCServer, params *RawParams) *msgjson.ResponsePayload 
 
 // handleCancel handles requests for cancel. *msgjson.ResponsePayload.Error is
 // empty if successful.
-func handleCancel(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseCancelArgs(params)
-	if err != nil {
+func handleCancel(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params CancelParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(cancelRoute, err)
 	}
-	if err := s.core.Cancel(form.orderID); err != nil {
-		resErr := msgjson.NewError(msgjson.RPCCancelError, "unable to cancel order %q: %v", form.orderID, err)
+	orderID, err := hex.DecodeString(params.OrderID)
+	if err != nil || len(orderID) != order.OrderIDSize {
+		return usage(cancelRoute, fmt.Errorf("invalid order ID"))
+	}
+	if err := s.core.Cancel(orderID); err != nil {
+		resErr := msgjson.NewError(msgjson.RPCCancelError, "unable to cancel order %q: %v", orderID, err)
 		return createResponse(cancelRoute, nil, resErr)
 	}
-	res := fmt.Sprintf(canceledOrderStr, form.orderID)
+	res := fmt.Sprintf(canceledOrderStr, orderID)
 	return createResponse(cancelRoute, &res, nil)
-}
-
-// handleWithdraw handles requests for withdraw. *msgjson.ResponsePayload.Error
-// is empty if successful.
-func handleWithdraw(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	return send(s, params, withdrawRoute)
-}
-
-// handleSend handles the request for send. *msgjson.ResponsePayload.Error
-// is empty if successful.
-func handleSend(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	return send(s, params, sendRoute)
-}
-
-func send(s *RPCServer, params *RawParams, route string) *msgjson.ResponsePayload {
-	form, err := parseSendOrWithdrawArgs(params)
-	if err != nil {
-		return usage(route, err)
-	}
-	defer form.appPass.Clear()
-	subtract := false
-	if route == withdrawRoute {
-		subtract = true
-	}
-	if len(form.appPass) == 0 {
-		resErr := msgjson.NewError(msgjson.RPCFundTransferError, "empty pass")
-		return createResponse(route, nil, resErr)
-	}
-	coin, err := s.core.Send(form.appPass, form.assetID, form.value, form.address, subtract)
-	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCFundTransferError, "unable to %s: %v", route, err)
-		return createResponse(route, nil, resErr)
-	}
-	res := coin.String()
-	return createResponse(route, &res, nil)
-}
-
-// handleRescanWallet handles requests to rescan a wallet. This may trigger an
-// asynchronous resynchronization of wallet address activity, and the wallet
-// state should be consulted for status. *msgjson.ResponsePayload.Error is empty
-// if successful.
-func handleRescanWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	assetID, force, err := parseRescanWalletArgs(params)
-	if err != nil {
-		return usage(rescanWalletRoute, err)
-	}
-	err = s.core.RescanWallet(assetID, force)
-	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCWalletRescanError, "unable to rescan wallet: %v", err)
-		return createResponse(rescanWalletRoute, nil, resErr)
-	}
-	return createResponse(rescanWalletRoute, "started", nil)
-}
-
-// handleAbandonTx handles requests to abandon an unconfirmed transaction.
-// This marks the transaction and all its descendants as abandoned, allowing
-// the wallet to forget about it. *msgjson.ResponsePayload.Error is empty if
-// successful.
-func handleAbandonTx(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	assetID, txID, err := parseAbandonTxArgs(params)
-	if err != nil {
-		return usage(abandonTxRoute, err)
-	}
-	err = s.core.AbandonTransaction(assetID, txID)
-	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCWalletRescanError, "unable to abandon transaction: %v", err)
-		return createResponse(abandonTxRoute, nil, resErr)
-	}
-	return createResponse(abandonTxRoute, "transaction abandoned successfully", nil)
-}
-
-// handleLogout logs out Bison Wallet. *msgjson.ResponsePayload.Error is empty
-// if successful.
-func handleLogout(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
-	if err := s.core.Logout(); err != nil {
-		resErr := msgjson.NewError(msgjson.RPCLogoutError, "unable to logout: %v", err)
-		return createResponse(logoutRoute, nil, resErr)
-	}
-	res := logoutStr
-	return createResponse(logoutRoute, &res, nil)
 }
 
 // truncateOrderBook truncates book to the top nOrders of buys and sells.
@@ -687,18 +563,18 @@ func truncateOrderBook(book *core.OrderBook, nOrders uint64) {
 
 // handleOrderBook handles requests for orderbook.
 // *msgjson.ResponsePayload.Error is empty if successful.
-func handleOrderBook(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseOrderBookArgs(params)
-	if err != nil {
+func handleOrderBook(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params OrderBookParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(orderBookRoute, err)
 	}
-	book, err := s.core.Book(form.host, form.base, form.quote)
+	book, err := s.core.Book(params.Host, params.Base, params.Quote)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCOrderBookError, "unable to retrieve order book: %v", err)
 		return createResponse(orderBookRoute, nil, resErr)
 	}
-	if form.nOrders > 0 {
-		truncateOrderBook(book, form.nOrders)
+	if params.NOrders > 0 {
+		truncateOrderBook(book, params.NOrders)
 	}
 	return createResponse(orderBookRoute, book, nil)
 }
@@ -778,20 +654,20 @@ func parseCoreOrder(co *core.Order, b, q uint32) *myOrder {
 
 // handleMyOrders handles requests for myorders. *msgjson.ResponsePayload.Error
 // is empty if successful.
-func handleMyOrders(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseMyOrdersArgs(params)
-	if err != nil {
+func handleMyOrders(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params MyOrdersParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(myOrdersRoute, err)
 	}
 	var myOrders myOrdersResponse
-	filterMkts := form.base != nil && form.quote != nil
+	filterMkts := params.Base != nil && params.Quote != nil
 	exchanges := s.core.Exchanges()
 	for host, exchange := range exchanges {
-		if form.host != "" && form.host != host {
+		if params.Host != "" && params.Host != host {
 			continue
 		}
 		for _, market := range exchange.Markets {
-			if filterMkts && (market.BaseID != *form.base || market.QuoteID != *form.quote) {
+			if filterMkts && (market.BaseID != *params.Base || market.QuoteID != *params.Quote) {
 				continue
 			}
 			for _, order := range market.Orders {
@@ -805,15 +681,67 @@ func handleMyOrders(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	return createResponse(myOrdersRoute, myOrders, nil)
 }
 
+//
+// handlers_tx handlers
+//
+
+// handleWithdraw handles requests for withdraw. *msgjson.ResponsePayload.Error
+// is empty if successful.
+func handleWithdraw(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	return send(s, msg, withdrawRoute)
+}
+
+// handleSend handles the request for send. *msgjson.ResponsePayload.Error
+// is empty if successful.
+func handleSend(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	return send(s, msg, sendRoute)
+}
+
+func send(s *RPCServer, msg *msgjson.Message, route string) *msgjson.ResponsePayload {
+	var params SendParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(route, err)
+	}
+	defer params.AppPass.Clear()
+	subtract := params.Subtract
+	if route == withdrawRoute {
+		subtract = true
+	}
+	coin, err := s.core.Send(params.AppPass, params.AssetID, params.Value, params.Address, subtract)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCFundTransferError, "unable to %s: %v", route, err)
+		return createResponse(route, nil, resErr)
+	}
+	res := coin.String()
+	return createResponse(route, &res, nil)
+}
+
+// handleAbandonTx handles requests to abandon an unconfirmed transaction.
+// This marks the transaction and all its descendants as abandoned, allowing
+// the wallet to forget about it. *msgjson.ResponsePayload.Error is empty if
+// successful.
+func handleAbandonTx(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params AbandonTxParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(abandonTxRoute, err)
+	}
+	err := s.core.AbandonTransaction(params.AssetID, params.TxID)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCWalletRescanError, "unable to abandon transaction: %v", err)
+		return createResponse(abandonTxRoute, nil, resErr)
+	}
+	return createResponse(abandonTxRoute, "transaction abandoned successfully", nil)
+}
+
 // handleAppSeed handles requests for the app seed. *msgjson.ResponsePayload.Error
 // is empty if successful.
-func handleAppSeed(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	appPass, err := parseAppSeedArgs(params)
-	if err != nil {
+func handleAppSeed(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params AppSeedParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(appSeedRoute, err)
 	}
-	defer appPass.Clear()
-	seed, err := s.core.ExportSeed(appPass)
+	defer params.AppPass.Clear()
+	seed, err := s.core.ExportSeed(params.AppPass)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCExportSeedError, "unable to retrieve app seed: %v", err)
 		return createResponse(appSeedRoute, nil, resErr)
@@ -824,75 +752,42 @@ func handleAppSeed(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 
 // handleDeleteArchivedRecords handles requests for deleting archived records.
 // *msgjson.ResponsePayload.Error is empty if successful.
-func handleDeleteArchivedRecords(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseDeleteArchivedRecordsArgs(params)
-	if err != nil {
+func handleDeleteArchivedRecords(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params DeleteRecordsParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(deleteArchivedRecordsRoute, err)
 	}
+
+	// Convert to internal form.
+	form := &deleteRecordsForm{
+		matchesFileStr: params.MatchesFile,
+		ordersFileStr:  params.OrdersFile,
+	}
+	if params.OlderThanMs != nil && *params.OlderThanMs != 0 {
+		t := time.UnixMilli(*params.OlderThanMs)
+		form.olderThan = &t
+	}
+
 	nRecordsDeleted, err := s.core.DeleteArchivedRecords(form.olderThan, form.matchesFileStr, form.ordersFileStr)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCDeleteArchivedRecordsError, "unable to delete records: %v", err)
 		return createResponse(deleteArchivedRecordsRoute, nil, resErr)
 	}
 
-	msg := fmt.Sprintf("%d archived records has been deleted successfully", nRecordsDeleted)
+	msg2 := fmt.Sprintf("%d archived records has been deleted successfully", nRecordsDeleted)
 	if nRecordsDeleted <= 0 {
-		msg = "No archived records found"
+		msg2 = "No archived records found"
 	}
-	return createResponse(deleteArchivedRecordsRoute, msg, nil)
+	return createResponse(deleteArchivedRecordsRoute, msg2, nil)
 }
 
-func handleWalletPeers(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	assetID, err := parseWalletPeersArgs(params)
-	if err != nil {
-		return usage(walletPeersRoute, err)
-	}
-
-	peers, err := s.core.WalletPeers(assetID)
-	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCWalletPeersError, "unable to get wallet peers: %v", err)
-		return createResponse(walletPeersRoute, nil, resErr)
-	}
-	return createResponse(walletPeersRoute, peers, nil)
-}
-
-func handleAddWalletPeer(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseAddRemoveWalletPeerArgs(params)
-	if err != nil {
-		return usage(addWalletPeerRoute, err)
-	}
-
-	err = s.core.AddWalletPeer(form.assetID, form.address)
-	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCWalletPeersError, "unable to add wallet peer: %v", err)
-		return createResponse(addWalletPeerRoute, nil, resErr)
-	}
-
-	return createResponse(addWalletPeerRoute, "successfully added peer", nil)
-}
-
-func handleRemoveWalletPeer(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseAddRemoveWalletPeerArgs(params)
-	if err != nil {
-		return usage(removeWalletPeerRoute, err)
-	}
-
-	err = s.core.RemoveWalletPeer(form.assetID, form.address)
-	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCWalletPeersError, "unable to remove wallet peer: %v", err)
-		return createResponse(removeWalletPeerRoute, nil, resErr)
-	}
-
-	return createResponse(removeWalletPeerRoute, "successfully removed peer", nil)
-}
-
-func handleNotifications(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	numNotes, err := parseNotificationsArgs(params)
-	if err != nil {
+func handleNotifications(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params NotificationsParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(notificationsRoute, err)
 	}
 
-	notes, _, err := s.core.Notifications(numNotes)
+	notes, _, err := s.core.Notifications(params.N)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCNotificationsError, "unable to handle notification: %v", err)
 		return createResponse(notificationsRoute, nil, resErr)
@@ -901,13 +796,209 @@ func handleNotifications(s *RPCServer, params *RawParams) *msgjson.ResponsePaylo
 	return createResponse(notificationsRoute, notes, nil)
 }
 
-func handleMMAvailableBalances(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseMMAvailableBalancesArgs(params)
+func handleTxHistory(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params TxHistoryParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(txHistoryRoute, err)
+	}
+
+	txs, err := s.core.TxHistory(params.AssetID, &asset.TxHistoryRequest{
+		N:     params.N,
+		RefID: params.RefID,
+		Past:  params.Past,
+	})
 	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCTxHistoryError, "unable to get tx history: %v", err)
+		return createResponse(txHistoryRoute, nil, resErr)
+	}
+
+	return createResponse(txHistoryRoute, txs, nil)
+}
+
+func handleWalletTx(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params WalletTxParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(walletTxRoute, err)
+	}
+
+	tx, err := s.core.WalletTransaction(params.AssetID, params.TxID)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCTxHistoryError, "unable to get wallet tx: %v", err)
+		return createResponse(walletTxRoute, nil, resErr)
+	}
+
+	return createResponse(walletTxRoute, tx, nil)
+}
+
+func handleWithdrawBchSpv(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params BchWithdrawParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(withdrawBchSpvRoute, err)
+	}
+	defer params.AppPass.Clear()
+
+	txB, err := s.core.GenerateBCHRecoveryTransaction(params.AppPass, params.Recipient)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCCreateWalletError, "error generating tx: %v", err)
+		return createResponse(withdrawBchSpvRoute, nil, resErr)
+	}
+
+	return createResponse(withdrawBchSpvRoute, dex.Bytes(txB).String(), nil)
+}
+
+//
+// handlers_dex handlers
+//
+
+// handleBondAssets handles requests for bondassets.
+// *msgjson.ResponsePayload.Error is empty if successful. Requires the address
+// of a dex and returns the bond expiry and supported asset bond details.
+func handleBondAssets(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params BondAssetsParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(bondAssetsRoute, err)
+	}
+	var cert []byte
+	if params.Cert != "" {
+		cert = []byte(params.Cert)
+	}
+	exchInf := s.core.Exchanges()
+	exchCfg := exchInf[params.Host]
+	if exchCfg == nil {
+		var err error
+		exchCfg, err = s.core.GetDEXConfig(params.Host, cert) // cert is file contents, not name
+		if err != nil {
+			resErr := msgjson.NewError(msgjson.RPCGetDEXConfigError, "%v", err)
+			return createResponse(bondAssetsRoute, nil, resErr)
+		}
+	}
+	res := &getBondAssetsResponse{
+		Expiry: exchCfg.BondExpiry,
+		Assets: exchCfg.BondAssets,
+	}
+	return createResponse(bondAssetsRoute, res, nil)
+}
+
+// handleGetDEXConfig handles requests for getdexconfig.
+// *msgjson.ResponsePayload.Error is empty if successful. Requires the address
+// of a dex and returns its config..
+func handleGetDEXConfig(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params GetDEXConfigParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(getDEXConfRoute, err)
+	}
+	var cert []byte
+	if params.Cert != "" {
+		cert = []byte(params.Cert)
+	}
+	exchange, err := s.core.GetDEXConfig(params.Host, cert) // cert is file contents, not name
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCGetDEXConfigError, "%v", err)
+		return createResponse(getDEXConfRoute, nil, resErr)
+	}
+	return createResponse(getDEXConfRoute, exchange, nil)
+}
+
+// handleDiscoverAcct is the handler for discoveracct. *msgjson.ResponsePayload.Error
+// is empty if successful.
+func handleDiscoverAcct(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params DiscoverAcctParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(discoverAcctRoute, err)
+	}
+	defer params.AppPass.Clear()
+	var cert []byte
+	if params.Cert != "" {
+		cert = []byte(params.Cert)
+	}
+	_, paid, err := s.core.DiscoverAccount(params.Addr, params.AppPass, cert)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCDiscoverAcctError, "%v", err)
+		return createResponse(discoverAcctRoute, nil, resErr)
+	}
+	return createResponse(discoverAcctRoute, &paid, nil)
+}
+
+func handleBondOptions(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params core.BondOptionsForm
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(bondOptionsRoute, err)
+	}
+	err := s.core.UpdateBondOptions(&params)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCPostBondError, "%v", err)
+		return createResponse(bondOptionsRoute, nil, resErr)
+	}
+	return createResponse(bondOptionsRoute, "ok", nil)
+}
+
+// handlePostBond handles requests for postbond. *msgjson.ResponsePayload.Error
+// is empty if successful.
+func handlePostBond(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var form core.PostBondForm
+	if err := msg.Unmarshal(&form); err != nil {
+		return usage(postBondRoute, err)
+	}
+	defer form.AppPass.Clear()
+	// Get the exchange config with Exchanges(), not GetDEXConfig, since we may
+	// already be connected and even with an existing account.
+	exchInf := s.core.Exchanges()
+	exchCfg := exchInf[form.Addr]
+	if exchCfg == nil {
+		// Not already registered.
+		var err error
+		exchCfg, err = s.core.GetDEXConfig(form.Addr, form.Cert)
+		if err != nil {
+			resErr := msgjson.NewError(msgjson.RPCGetDEXConfigError, "%v", err)
+			return createResponse(postBondRoute, nil, resErr)
+		}
+	}
+	// Registration with different assets will be supported in the future, but
+	// for now, this requires DCR.
+	assetID := uint32(42)
+	if form.Asset != nil {
+		assetID = *form.Asset
+	}
+	symb := dex.BipIDSymbol(assetID)
+
+	bondAsset, supported := exchCfg.BondAssets[symb]
+	if !supported {
+		resErr := msgjson.NewError(msgjson.RPCPostBondError, "DEX %s does not support registration with %s", form.Addr, symb)
+		return createResponse(postBondRoute, nil, resErr)
+	}
+	if bondAsset.Amt > form.Bond || form.Bond%bondAsset.Amt != 0 {
+		resErr := msgjson.NewError(msgjson.RPCPostBondError, "DEX at %s expects a bond amount in multiples of %d %s but %d was offered",
+			form.Addr, bondAsset.Amt, dex.BipIDSymbol(assetID), form.Bond)
+		return createResponse(postBondRoute, nil, resErr)
+	}
+	res, err := s.core.PostBond(&form)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCPostBondError, "%v", err)
+		return createResponse(postBondRoute, nil, resErr)
+	}
+	if res.BondID == "" {
+		return createResponse(postBondRoute, "existing account configured - no bond posted", nil)
+	}
+	return createResponse(postBondRoute, res, nil)
+}
+
+//
+// handlers_mm handlers
+//
+
+func handleMMAvailableBalances(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params MMAvailableBalancesParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(mmAvailableBalancesRoute, err)
 	}
 
-	dexBalances, cexBalances, err := s.mm.AvailableBalances(form.mkt, form.cexBaseID, form.cexQuoteID, form.cexName)
+	mkt := &mm.MarketWithHost{
+		Host:    params.Host,
+		BaseID:  params.BaseID,
+		QuoteID: params.QuoteID,
+	}
+
+	dexBalances, cexBalances, err := s.mm.AvailableBalances(mkt, params.CexBaseID, params.CexQuoteID, params.CexName)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCMMAvailableBalancesError, "unable to get available balances: %v", err)
 		return createResponse(mmAvailableBalancesRoute, nil, resErr)
@@ -924,15 +1015,15 @@ func handleMMAvailableBalances(s *RPCServer, params *RawParams) *msgjson.Respons
 	return createResponse(mmAvailableBalancesRoute, res, nil)
 }
 
-func handleStartBot(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseStartBotArgs(params)
-	if err != nil {
+func handleStartBot(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params StartBotParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(startBotRoute, err)
 	}
 
-	if form.mkt == nil {
+	if params.Market == nil {
 		// Start all bots
-		started, err := s.mm.StartBots(&form.cfgFilePath, form.appPass)
+		started, err := s.mm.StartBots(&params.CfgFilePath, params.AppPass)
 		if err != nil {
 			resErr := msgjson.NewError(msgjson.RPCStartMarketMakingError, "error starting bots: %v", err)
 			return createResponse(startBotRoute, nil, resErr)
@@ -941,7 +1032,7 @@ func handleStartBot(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	}
 
 	// Start specific bot
-	err = s.mm.StartBot(form.mkt, &form.cfgFilePath, form.appPass, true)
+	err := s.mm.StartBot(params.Market, &params.CfgFilePath, params.AppPass, true)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCStartMarketMakingError, "unable to start market making: %v", err)
 		return createResponse(startBotRoute, nil, resErr)
@@ -950,13 +1041,13 @@ func handleStartBot(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	return createResponse(startBotRoute, "started bot", nil)
 }
 
-func handleStopBot(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	mkt, err := parseStopBotArgs(params)
-	if err != nil {
+func handleStopBot(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params StopBotParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(stopBotRoute, err)
 	}
 
-	if mkt == nil {
+	if params.Market == nil {
 		// Stop all bots
 		stopped, err := s.mm.StopBots()
 		if err != nil {
@@ -967,7 +1058,7 @@ func handleStopBot(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	}
 
 	// Stop specific bot
-	err = s.mm.StopBot(mkt)
+	err := s.mm.StopBot(params.Market)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCStopMarketMakingError, "unable to stop market making: %v", err)
 		return createResponse(stopBotRoute, nil, resErr)
@@ -976,13 +1067,13 @@ func handleStopBot(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	return createResponse(stopBotRoute, "stopping bot", nil)
 }
 
-func handleUpdateRunningBotCfg(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseUpdateRunningBotArgs(params)
-	if err != nil {
+func handleUpdateRunningBotCfg(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params UpdateRunningBotParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(updateRunningBotCfgRoute, err)
 	}
 
-	data, err := os.ReadFile(form.cfgFilePath)
+	data, err := os.ReadFile(params.CfgFilePath)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotCfgError, "unable to read config file: %v", err)
 		return createResponse(updateRunningBotCfgRoute, nil, resErr)
@@ -997,18 +1088,18 @@ func handleUpdateRunningBotCfg(s *RPCServer, params *RawParams) *msgjson.Respons
 
 	var botCfg *mm.BotConfig
 	for _, bot := range cfg.BotConfigs {
-		if bot.Host == form.mkt.Host && bot.BaseID == form.mkt.BaseID && bot.QuoteID == form.mkt.QuoteID {
+		if bot.Host == params.Market.Host && bot.BaseID == params.Market.BaseID && bot.QuoteID == params.Market.QuoteID {
 			botCfg = bot
 			break
 		}
 	}
 
 	if botCfg == nil {
-		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotCfgError, "bot config not found for market %s", form.mkt.String())
+		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotCfgError, "bot config not found for market %s", params.Market.String())
 		return createResponse(updateRunningBotCfgRoute, nil, resErr)
 	}
 
-	err = s.mm.UpdateRunningBotCfg(botCfg, form.balances, nil, false)
+	err = s.mm.UpdateRunningBotCfg(botCfg, params.Balances, nil, false)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotCfgError, "unable to update running bot: %v", err)
 		return createResponse(updateRunningBotCfgRoute, nil, resErr)
@@ -1017,49 +1108,53 @@ func handleUpdateRunningBotCfg(s *RPCServer, params *RawParams) *msgjson.Respons
 	return createResponse(updateRunningBotCfgRoute, "updated running bot", nil)
 }
 
-func handleUpdateRunningBotInventory(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseUpdateRunningBotInventoryArgs(params)
-	if err != nil {
-		return usage(updateRunningBotCfgRoute, err)
+func handleUpdateRunningBotInventory(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params UpdateRunningBotInventoryParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(updateRunningBotInvRoute, err)
 	}
 
-	err = s.mm.UpdateRunningBotInventory(form.mkt, form.balances)
+	err := s.mm.UpdateRunningBotInventory(&params.Market, params.Balances)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotInvError, "unable to update running bot: %v", err)
-		return createResponse(updateRunningBotCfgRoute, nil, resErr)
+		return createResponse(updateRunningBotInvRoute, nil, resErr)
 	}
 
-	return createResponse(updateRunningBotCfgRoute, "updated running bot", nil)
+	return createResponse(updateRunningBotInvRoute, "updated running bot", nil)
 }
 
-func handleMMStatus(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+func handleMMStatus(s *RPCServer, _ *msgjson.Message) *msgjson.ResponsePayload {
 	status := s.mm.RunningBotsStatus()
 	return createResponse(mmStatusRoute, status, nil)
 }
 
-func handleSetVSP(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseSetVSPArgs(params)
-	if err != nil {
+//
+// handlers_staking handlers
+//
+
+func handleSetVSP(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params SetVSPParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(setVSPRoute, err)
 	}
 
-	err = s.core.SetVSP(form.assetID, form.addr)
+	err := s.core.SetVSP(params.AssetID, params.Addr)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCSetVSPError, "unable to set vsp: %v", err)
 		return createResponse(setVSPRoute, nil, resErr)
 	}
 
-	return createResponse(setVSPRoute, fmt.Sprintf(setVSPStr, form.addr), nil)
+	return createResponse(setVSPRoute, fmt.Sprintf(setVSPStr, params.Addr), nil)
 }
 
-func handlePurchaseTickets(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parsePurchaseTicketsArgs(params)
-	if err != nil {
+func handlePurchaseTickets(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params PurchaseTicketsParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(purchaseTicketsRoute, err)
 	}
-	defer form.appPass.Clear()
+	defer params.AppPass.Clear()
 
-	if err = s.core.PurchaseTickets(form.assetID, form.appPass, form.num); err != nil {
+	if err := s.core.PurchaseTickets(params.AssetID, params.AppPass, params.N); err != nil {
 		resErr := msgjson.NewError(msgjson.RPCPurchaseTicketsError, "unable to purchase tickets: %v", err)
 		return createResponse(purchaseTicketsRoute, nil, resErr)
 	}
@@ -1067,12 +1162,12 @@ func handlePurchaseTickets(s *RPCServer, params *RawParams) *msgjson.ResponsePay
 	return createResponse(purchaseTicketsRoute, true, nil)
 }
 
-func handleStakeStatus(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	assetID, err := parseStakeStatusArgs(params)
-	if err != nil {
+func handleStakeStatus(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params StakeStatusParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(stakeStatusRoute, err)
 	}
-	stakeStatus, err := s.core.StakeStatus(assetID)
+	stakeStatus, err := s.core.StakeStatus(params.AssetID)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCStakeStatusError, "unable to get staking status: %v", err)
 		return createResponse(stakeStatusRoute, nil, resErr)
@@ -1081,13 +1176,13 @@ func handleStakeStatus(s *RPCServer, params *RawParams) *msgjson.ResponsePayload
 	return createResponse(stakeStatusRoute, &stakeStatus, nil)
 }
 
-func handleSetVotingPreferences(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseSetVotingPreferencesArgs(params)
-	if err != nil {
+func handleSetVotingPreferences(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params SetVotingPreferencesParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(setVotingPreferencesRoute, err)
 	}
 
-	err = s.core.SetVotingPreferences(form.assetID, form.voteChoices, form.tSpendPolicy, form.treasuryPolicy)
+	err := s.core.SetVotingPreferences(params.AssetID, params.Choices, params.TSpendPolicy, params.TreasuryPolicy)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCSetVotingPreferencesError, "unable to set voting preferences: %v", err)
 		return createResponse(setVotingPreferencesRoute, nil, resErr)
@@ -1096,70 +1191,17 @@ func handleSetVotingPreferences(s *RPCServer, params *RawParams) *msgjson.Respon
 	return createResponse(setVotingPreferencesRoute, "vote preferences set", nil)
 }
 
-func handleTxHistory(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseTxHistoryArgs(params)
-	if err != nil {
-		return usage(txHistoryRoute, err)
+//
+// handlers_bridge handlers
+//
+
+func handleCheckBridgeApproval(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params CheckBridgeApprovalParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(checkBridgeApprovalRoute, err)
 	}
 
-	txs, err := s.core.TxHistory(form.assetID, &asset.TxHistoryRequest{
-		N:     form.num,
-		RefID: form.refID,
-		Past:  form.past,
-	})
-	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCTxHistoryError, "unable to get tx history: %v", err)
-		return createResponse(txHistoryRoute, nil, resErr)
-	}
-
-	return createResponse(txHistoryRoute, txs, nil)
-}
-
-func handleWalletTx(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseWalletTxArgs(params)
-	if err != nil {
-		return usage(walletTxRoute, err)
-	}
-
-	tx, err := s.core.WalletTransaction(form.assetID, form.txID)
-	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCTxHistoryError, "unable to get wallet tx: %v", err)
-		return createResponse(walletTxRoute, nil, resErr)
-	}
-
-	return createResponse(walletTxRoute, tx, nil)
-}
-
-func handleWithdrawBchSpv(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	appPW, recipient, err := parseBchWithdrawArgs(params)
-	if err != nil {
-		return usage(withdrawBchSpvRoute, err)
-	}
-	defer appPW.Clear()
-
-	txB, err := s.core.GenerateBCHRecoveryTransaction(appPW, recipient)
-	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCCreateWalletError, "error generating tx: %v", err)
-		return createResponse(withdrawBchSpvRoute, nil, resErr)
-	}
-
-	return createResponse(withdrawBchSpvRoute, dex.Bytes(txB).String(), nil)
-}
-
-func handleCheckBridgeApproval(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 2 {
-		return usage(checkBridgeApprovalRoute, fmt.Errorf("expected 2 args, got %d", len(params.Args)))
-	}
-
-	i, err := strconv.ParseUint(params.Args[0], 10, 32)
-	if err != nil {
-		return usage(checkBridgeApprovalRoute, fmt.Errorf("error parsing assetID: %v", err))
-	}
-
-	assetID := uint32(i)
-	bridgeName := params.Args[1]
-
-	approvalStatus, err := s.core.BridgeContractApprovalStatus(assetID, bridgeName)
+	approvalStatus, err := s.core.BridgeContractApprovalStatus(params.AssetID, params.BridgeName)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCBridgeError, "unable to check bridge approval: %v", err)
 		return createResponse(checkBridgeApprovalRoute, nil, resErr)
@@ -1168,29 +1210,18 @@ func handleCheckBridgeApproval(s *RPCServer, params *RawParams) *msgjson.Respons
 	return createResponse(checkBridgeApprovalRoute, approvalStatus.String(), nil)
 }
 
-func handleApproveBridge(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 3 {
-		return usage(approveBridgeContractRoute, fmt.Errorf("expected 3 args, got %d", len(params.Args)))
-	}
-
-	i, err := strconv.ParseUint(params.Args[0], 10, 32)
-	if err != nil {
-		return usage(approveBridgeContractRoute, fmt.Errorf("error parsing assetID: %v", err))
-	}
-
-	assetID := uint32(i)
-	bridgeName := params.Args[1]
-
-	approve, err := strconv.ParseBool(params.Args[2])
-	if err != nil {
-		return usage(approveBridgeContractRoute, fmt.Errorf("error parsing approve: %v", err))
+func handleApproveBridge(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params ApproveBridgeParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(approveBridgeContractRoute, err)
 	}
 
 	var txID string
-	if approve {
-		txID, err = s.core.ApproveBridgeContract(assetID, bridgeName)
+	var err error
+	if params.Approve {
+		txID, err = s.core.ApproveBridgeContract(params.AssetID, params.BridgeName)
 	} else {
-		txID, err = s.core.UnapproveBridgeContract(assetID, bridgeName)
+		txID, err = s.core.UnapproveBridgeContract(params.AssetID, params.BridgeName)
 	}
 
 	if err != nil {
@@ -1201,35 +1232,13 @@ func handleApproveBridge(s *RPCServer, params *RawParams) *msgjson.ResponsePaylo
 	return createResponse(approveBridgeContractRoute, txID, nil)
 }
 
-func handleBridge(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 4 {
-		return usage(bridgeRoute, fmt.Errorf("expected 4 args, got %d", len(params.Args)))
+func handleBridge(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params BridgeParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(bridgeRoute, err)
 	}
 
-	fromAssetID, err := strconv.ParseUint(params.Args[0], 10, 32)
-	if err != nil {
-		return usage(bridgeRoute, fmt.Errorf("error parsing fromAssetID: %v", err))
-	}
-
-	toAssetID, err := strconv.ParseUint(params.Args[1], 10, 32)
-	if err != nil {
-		return usage(bridgeRoute, fmt.Errorf("error parsing toAssetID: %v", err))
-	}
-
-	value, err := strconv.ParseFloat(params.Args[2], 64)
-	if err != nil {
-		return usage(bridgeRoute, fmt.Errorf("error parsing value: %v", err))
-	}
-
-	bridgeName := params.Args[3]
-
-	unitInfo, err := asset.UnitInfo(uint32(fromAssetID))
-	if err != nil {
-		return usage(bridgeRoute, fmt.Errorf("error getting unit info: %v", err))
-	}
-	atomValue := uint64(value * float64(unitInfo.Conventional.ConversionFactor))
-
-	txID, err := s.core.Bridge(uint32(fromAssetID), uint32(toAssetID), atomValue, bridgeName)
+	txID, err := s.core.Bridge(params.FromAssetID, params.ToAssetID, params.Amt, params.BridgeName)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCBridgeError, "unable to initiate bridge: %v", err)
 		return createResponse(bridgeRoute, nil, resErr)
@@ -1238,17 +1247,13 @@ func handleBridge(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	return createResponse(bridgeRoute, txID, nil)
 }
 
-func handlePendingBridges(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 1 {
-		return usage(pendingBridgesRoute, fmt.Errorf("expected 1 arg, got %d", len(params.Args)))
+func handlePendingBridges(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params PendingBridgesParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(pendingBridgesRoute, err)
 	}
 
-	assetID, err := strconv.ParseUint(params.Args[0], 10, 32)
-	if err != nil {
-		return usage(pendingBridgesRoute, fmt.Errorf("error parsing assetID: %v", err))
-	}
-
-	bridges, err := s.core.PendingBridges(uint32(assetID))
+	bridges, err := s.core.PendingBridges(params.AssetID)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCBridgeError, "unable to get pending bridges: %v", err)
 		return createResponse(pendingBridgesRoute, nil, resErr)
@@ -1257,13 +1262,13 @@ func handlePendingBridges(s *RPCServer, params *RawParams) *msgjson.ResponsePayl
 	return createResponse(pendingBridgesRoute, bridges, nil)
 }
 
-func handleBridgeHistory(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseTxHistoryArgs(params)
-	if err != nil {
+func handleBridgeHistory(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params TxHistoryParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(bridgeHistoryRoute, err)
 	}
 
-	bridges, err := s.core.BridgeHistory(form.assetID, form.num, form.refID, form.past)
+	bridges, err := s.core.BridgeHistory(params.AssetID, params.N, params.RefID, params.Past)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCBridgeError, "unable to get bridge history: %v", err)
 		return createResponse(bridgeHistoryRoute, nil, resErr)
@@ -1272,17 +1277,13 @@ func handleBridgeHistory(s *RPCServer, params *RawParams) *msgjson.ResponsePaylo
 	return createResponse(bridgeHistoryRoute, bridges, nil)
 }
 
-func handleSupportedBridges(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 1 {
-		return usage(supportedBridgesRoute, fmt.Errorf("expected 1 arg, got %d", len(params.Args)))
+func handleSupportedBridges(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params SupportedBridgesParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(supportedBridgesRoute, err)
 	}
 
-	assetID, err := strconv.ParseUint(params.Args[0], 10, 32)
-	if err != nil {
-		return usage(supportedBridgesRoute, fmt.Errorf("error parsing assetID: %v", err))
-	}
-
-	bridgeDestinations, err := s.core.SupportedBridgeDestinations(uint32(assetID))
+	bridgeDestinations, err := s.core.SupportedBridgeDestinations(params.AssetID)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCBridgeError, "unable to get supported bridge destinations: %v", err)
 		return createResponse(supportedBridgesRoute, nil, resErr)
@@ -1298,24 +1299,13 @@ func handleSupportedBridges(s *RPCServer, params *RawParams) *msgjson.ResponsePa
 	return createResponse(supportedBridgesRoute, result, nil)
 }
 
-func handleBridgeFeesAndLimits(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 3 {
-		return usage(bridgeFeesAndLimitsRoute, fmt.Errorf("expected 3 args, got %d", len(params.Args)))
+func handleBridgeFeesAndLimits(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params BridgeFeesAndLimitsParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(bridgeFeesAndLimitsRoute, err)
 	}
 
-	fromAssetID, err := strconv.ParseUint(params.Args[0], 10, 32)
-	if err != nil {
-		return usage(bridgeFeesAndLimitsRoute, fmt.Errorf("error parsing fromAssetID: %v", err))
-	}
-
-	toAssetID, err := strconv.ParseUint(params.Args[1], 10, 32)
-	if err != nil {
-		return usage(bridgeFeesAndLimitsRoute, fmt.Errorf("error parsing toAssetID: %v", err))
-	}
-
-	bridgeName := params.Args[2]
-
-	result, err := s.core.BridgeFeesAndLimits(uint32(fromAssetID), uint32(toAssetID), bridgeName)
+	result, err := s.core.BridgeFeesAndLimits(params.FromAssetID, params.ToAssetID, params.BridgeName)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCBridgeError, "unable to get bridge fees and limits: %v", err)
 		return createResponse(bridgeFeesAndLimitsRoute, nil, resErr)
@@ -1323,17 +1313,18 @@ func handleBridgeFeesAndLimits(s *RPCServer, params *RawParams) *msgjson.Respons
 
 	return createResponse(bridgeFeesAndLimitsRoute, result, nil)
 }
-func handlePaymentMultisigPubkey(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 1 {
-		return usage(paymentMultisigPubkeyRoute, fmt.Errorf("expected 1 arg, got %d", len(params.Args)))
+
+//
+// handlers_multisig handlers
+//
+
+func handlePaymentMultisigPubkey(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params PaymentMultisigPubkeyParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(paymentMultisigPubkeyRoute, err)
 	}
 
-	assetID, err := strconv.ParseUint(params.Args[0], 10, 32)
-	if err != nil {
-		return usage(paymentMultisigPubkeyRoute, fmt.Errorf("error parsing assetID: %v", err))
-	}
-
-	pubkey, err := s.core.PaymentMultisigPubkey(uint32(assetID))
+	pubkey, err := s.core.PaymentMultisigPubkey(params.AssetID)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCPaymentMultisigError, "unable to get pubkey: %v", err)
 		return createResponse(paymentMultisigPubkeyRoute, nil, resErr)
@@ -1341,11 +1332,12 @@ func handlePaymentMultisigPubkey(s *RPCServer, params *RawParams) *msgjson.Respo
 	return createResponse(paymentMultisigPubkeyRoute, pubkey, nil)
 }
 
-func handleSendFundsToMultisig(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 1 {
-		return usage(sendFundsToMultisigRoute, fmt.Errorf("expected 1 arg, got %d", len(params.Args)))
+func handleSendFundsToMultisig(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params CsvFileParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(sendFundsToMultisigRoute, err)
 	}
-	if err := s.core.SendFundsToMultisig(params.Args[0]); err != nil {
+	if err := s.core.SendFundsToMultisig(params.CsvFilePath); err != nil {
 		resErr := msgjson.NewError(msgjson.RPCPaymentMultisigError, "unable to send funds to multisig: %v", err)
 		return createResponse(sendFundsToMultisigRoute, nil, resErr)
 	}
@@ -1353,27 +1345,25 @@ func handleSendFundsToMultisig(s *RPCServer, params *RawParams) *msgjson.Respons
 	return createResponse(sendFundsToMultisigRoute, &res, nil)
 }
 
-func handleSignMultisig(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 2 {
-		return usage(signMultisigRoute, fmt.Errorf("expected 1 arg, got %d", len(params.Args)))
+func handleSignMultisig(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params SignMultisigParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(signMultisigRoute, err)
 	}
-	idx, err := checkUIntArg(params.Args[1], "signIdx", 32)
-	if err != nil {
-		return usage(signMultisigRoute, fmt.Errorf("unable to decode index: %v", err))
-	}
-	if err := s.core.SignMultisig(params.Args[0], int(idx)); err != nil {
+	if err := s.core.SignMultisig(params.CsvFilePath, params.SignIdx); err != nil {
 		resErr := msgjson.NewError(msgjson.RPCPaymentMultisigError, "unable to sign multisig: %v", err)
 		return createResponse(signMultisigRoute, nil, resErr)
 	}
 	res := "csv updated"
-	return createResponse(sendFundsToMultisigRoute, &res, nil)
+	return createResponse(signMultisigRoute, &res, nil)
 }
 
-func handleRefundPaymentMultisig(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 1 {
-		return usage(refundPaymentMultisigRoute, fmt.Errorf("expected 1 arg, got %d", len(params.Args)))
+func handleRefundPaymentMultisig(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params CsvFileParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(refundPaymentMultisigRoute, err)
 	}
-	res, err := s.core.RefundPaymentMultisig(params.Args[0])
+	res, err := s.core.RefundPaymentMultisig(params.CsvFilePath)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCPaymentMultisigError, "unable to refund multisig: %v", err)
 		return createResponse(refundPaymentMultisigRoute, nil, resErr)
@@ -1381,32 +1371,80 @@ func handleRefundPaymentMultisig(s *RPCServer, params *RawParams) *msgjson.Respo
 	return createResponse(refundPaymentMultisigRoute, &res, nil)
 }
 
-func handleViewPaymentMultisig(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 1 {
-		return usage(refundPaymentMultisigRoute, fmt.Errorf("expected 1 arg, got %d", len(params.Args)))
+func handleViewPaymentMultisig(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params CsvFileParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(viewPaymentMultisigRoute, err)
 	}
-	res, err := s.core.ViewPaymentMultisig(params.Args[0])
+	res, err := s.core.ViewPaymentMultisig(params.CsvFilePath)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCPaymentMultisigError, "unable to view multisig: %v", err)
-		return createResponse(refundPaymentMultisigRoute, nil, resErr)
+		return createResponse(viewPaymentMultisigRoute, nil, resErr)
 	}
-	return createResponse(refundPaymentMultisigRoute, &res, nil)
+	return createResponse(viewPaymentMultisigRoute, &res, nil)
 }
 
-func handleSendPaymentMultisig(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 1 {
-		return usage(refundPaymentMultisigRoute, fmt.Errorf("expected 1 arg, got %d", len(params.Args)))
+func handleSendPaymentMultisig(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params CsvFileParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(sendPaymentMultisigRoute, err)
 	}
-	res, err := s.core.SendPaymentMultisig(params.Args[0])
+	res, err := s.core.SendPaymentMultisig(params.CsvFilePath)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCPaymentMultisigError, "unable to send multisig: %v", err)
-		return createResponse(refundPaymentMultisigRoute, nil, resErr)
+		return createResponse(sendPaymentMultisigRoute, nil, resErr)
 	}
-	return createResponse(refundPaymentMultisigRoute, &res, nil)
+	return createResponse(sendPaymentMultisigRoute, &res, nil)
 }
 
-// format concatenates thing and tail. If thing is empty, returns an empty
-// string.
+//
+// handlers_peers handlers
+//
+
+func handleWalletPeers(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params WalletPeersParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(walletPeersRoute, err)
+	}
+
+	peers, err := s.core.WalletPeers(params.AssetID)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCWalletPeersError, "unable to get wallet peers: %v", err)
+		return createResponse(walletPeersRoute, nil, resErr)
+	}
+	return createResponse(walletPeersRoute, peers, nil)
+}
+
+func handleAddWalletPeer(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params AddRemovePeerParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(addWalletPeerRoute, err)
+	}
+
+	err := s.core.AddWalletPeer(params.AssetID, params.Address)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCWalletPeersError, "unable to add wallet peer: %v", err)
+		return createResponse(addWalletPeerRoute, nil, resErr)
+	}
+
+	return createResponse(addWalletPeerRoute, "successfully added peer", nil)
+}
+
+func handleRemoveWalletPeer(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params AddRemovePeerParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(removeWalletPeerRoute, err)
+	}
+
+	err := s.core.RemoveWalletPeer(params.AssetID, params.Address)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCWalletPeersError, "unable to remove wallet peer: %v", err)
+		return createResponse(removeWalletPeerRoute, nil, resErr)
+	}
+
+	return createResponse(removeWalletPeerRoute, "successfully removed peer", nil)
+}
+
 func format(thing, tail string) string {
 	if thing == "" {
 		return ""

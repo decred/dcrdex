@@ -21,11 +21,45 @@ import (
 	"github.com/davecgh/go-spew/spew"
 )
 
+//
+// From testutil_test.go
+//
+
 func init() {
 	asset.Register(tUTXOAssetA.ID, &tDriver{
 		decodedCoinID: tUTXOAssetA.Symbol,
 		winfo:         tWalletInfo,
 	}, true)
+}
+
+// makeMsg is a test helper that creates a *msgjson.Message from a route and
+// typed params. For nil params (no-params handlers), it creates a message
+// with nil payload.
+func makeMsg(t *testing.T, route string, params any) *msgjson.Message {
+	t.Helper()
+	if params == nil {
+		msg, err := msgjson.NewRequest(1, route, nil)
+		if err != nil {
+			t.Fatalf("NewRequest error: %v", err)
+		}
+		return msg
+	}
+	msg, err := msgjson.NewRequest(1, route, params)
+	if err != nil {
+		t.Fatalf("NewRequest error: %v", err)
+	}
+	return msg
+}
+
+// makeBadMsg creates a *msgjson.Message with an invalid payload that will
+// fail to unmarshal into any typed params struct.
+func makeBadMsg(t *testing.T, route string) *msgjson.Message {
+	t.Helper()
+	msg, err := msgjson.NewRequest(1, route, "bad")
+	if err != nil {
+		t.Fatalf("NewRequest error: %v", err)
+	}
+	return msg
 }
 
 func verifyResponse(payload *msgjson.ResponsePayload, res any, wantErrCode int) error {
@@ -90,6 +124,29 @@ func (drv *tDriver) Info() *asset.WalletInfo {
 type Dummy struct {
 	Status string
 }
+
+// tCoin satisfies the asset.Coin interface.
+type tCoin struct{}
+
+func (tCoin) ID() dex.Bytes {
+	return nil
+}
+func (tCoin) String() string {
+	return ""
+}
+func (tCoin) TxID() string {
+	return ""
+}
+func (tCoin) Value() uint64 {
+	return 0
+}
+func (tCoin) Confirmations(context.Context) (uint32, error) {
+	return 0, nil
+}
+
+//
+// From routes_test.go
+//
 
 func TestCreateResponse(t *testing.T) {
 	tests := []struct {
@@ -196,30 +253,40 @@ func TestCommandUsage(t *testing.T) {
 	}
 }
 
+//
+// From handlers_system_test.go
+//
+
 func TestHandleHelp(t *testing.T) {
 	tests := []struct {
 		name        string
-		params      *RawParams
+		params      any
 		wantErrCode int
 	}{{
 		name:        "ok no arg",
-		params:      new(RawParams),
+		params:      &HelpParams{},
 		wantErrCode: -1,
 	}, {
 		name:        "ok with arg",
-		params:      &RawParams{Args: []string{"version"}},
+		params:      &HelpParams{HelpWith: "version"},
 		wantErrCode: -1,
 	}, {
 		name:        "unknown route",
-		params:      &RawParams{Args: []string{"versio"}},
+		params:      &HelpParams{HelpWith: "versio"},
 		wantErrCode: msgjson.RPCUnknownRoute,
 	}, {
 		name:        "bad params",
-		params:      &RawParams{Args: []string{"version", "blue"}},
+		params:      nil, // will use makeBadMsg
 		wantErrCode: msgjson.RPCArgumentsError,
 	}}
 	for _, test := range tests {
-		payload := handleHelp(nil, test.params)
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, helpRoute)
+		} else {
+			msg = makeMsg(t, helpRoute, test.params)
+		}
+		payload := handleHelp(nil, msg)
 		res := ""
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
 			t.Fatal(err)
@@ -237,64 +304,37 @@ func TestHandleVersion(t *testing.T) {
 	}
 }
 
-func TestHandleGetDEXConfig(t *testing.T) {
-	tests := []struct {
-		name            string
-		params          *RawParams
-		getDEXConfigErr error
-		wantErrCode     int
-	}{{
-		name:        "ok",
-		params:      &RawParams{Args: []string{"dex", "cert bytes"}},
-		wantErrCode: -1,
-	}, {
-		name:            "get dex conf error",
-		params:          &RawParams{Args: []string{"dex", "cert bytes"}},
-		getDEXConfigErr: errors.New(""),
-		wantErrCode:     msgjson.RPCGetDEXConfigError,
-	}, {
-		name:        "bad params",
-		params:      &RawParams{},
-		wantErrCode: msgjson.RPCArgumentsError,
-	}}
-	for _, test := range tests {
-		tc := &TCore{
-			getDEXConfigErr: test.getDEXConfigErr,
-		}
-		r := &RPCServer{core: tc}
-		payload := handleGetDEXConfig(r, test.params)
-		res := new(*core.Exchange)
-		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
 func TestHandleInit(t *testing.T) {
 	pw := encode.PassBytes("password123")
 	tests := []struct {
 		name                string
-		params              *RawParams
+		params              any
 		initializeClientErr error
 		wantErrCode         int
 	}{{
 		name:        "ok",
-		params:      &RawParams{PWArgs: []encode.PassBytes{pw}},
+		params:      &InitParams{AppPass: pw},
 		wantErrCode: -1,
 	}, {
 		name:                "core.InitializeClient error",
-		params:              &RawParams{PWArgs: []encode.PassBytes{pw}},
+		params:              &InitParams{AppPass: pw},
 		initializeClientErr: errors.New("error"),
 		wantErrCode:         msgjson.RPCInitError,
 	}, {
 		name:        "bad params",
-		params:      &RawParams{},
+		params:      nil,
 		wantErrCode: msgjson.RPCArgumentsError,
 	}}
 	for _, test := range tests {
 		tc := &TCore{initializeClientErr: test.initializeClientErr}
 		r := &RPCServer{core: tc}
-		payload := handleInit(r, test.params)
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, initRoute)
+		} else {
+			msg = makeMsg(t, initRoute, test.params)
+		}
+		payload := handleInit(r, msg)
 		res := ""
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
 			t.Fatal(err)
@@ -302,72 +342,131 @@ func TestHandleInit(t *testing.T) {
 	}
 }
 
+func TestHandleLogin(t *testing.T) {
+	pw := encode.PassBytes("abc")
+	tests := []struct {
+		name        string
+		params      any
+		loginErr    error
+		wantErrCode int
+	}{{
+		name:        "ok",
+		params:      &LoginParams{AppPass: pw},
+		wantErrCode: -1,
+	}, {
+		name:        "core.Login error",
+		params:      &LoginParams{AppPass: pw},
+		loginErr:    errors.New("error"),
+		wantErrCode: msgjson.RPCLoginError,
+	}, {
+		name:        "bad params",
+		params:      nil,
+		wantErrCode: msgjson.RPCArgumentsError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{
+			loginErr: test.loginErr,
+		}
+		r := &RPCServer{core: tc}
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, loginRoute)
+		} else {
+			msg = makeMsg(t, loginRoute, test.params)
+		}
+		payload := handleLogin(r, msg)
+		successString := "successfully logged in"
+		if err := verifyResponse(payload, &successString, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestHandleLogout(t *testing.T) {
+	tests := []struct {
+		name        string
+		logoutErr   error
+		wantErrCode int
+	}{{
+		name:        "ok",
+		wantErrCode: -1,
+	}, {
+		name:        "core.Logout error",
+		logoutErr:   errors.New("error"),
+		wantErrCode: msgjson.RPCLogoutError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{
+			logoutErr: test.logoutErr,
+		}
+		r := &RPCServer{core: tc}
+		payload := handleLogout(r, nil)
+		res := ""
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+//
+// From handlers_wallet_test.go
+//
+
 func TestHandleNewWallet(t *testing.T) {
 	pw := encode.PassBytes("password123")
-	params := &RawParams{
-		PWArgs: []encode.PassBytes{pw, pw},
-		Args: []string{
-			"42",
-			"rpc",
-			"username=tacotime",
-			`{"field":"value"}`,
+	goodParams := &NewWalletParams{
+		AppPass:    pw,
+		WalletPass: pw,
+		AssetID:    42,
+		WalletType: "rpc",
+		Config: map[string]string{
+			"username": "tacotime",
+			"field":    "value",
 		},
 	}
-	badJSONParams := &RawParams{
-		PWArgs: []encode.PassBytes{pw, pw},
-		Args: []string{
-			"42",
-			"rpc",
-			"username=tacotime",
-			`{"field":  value"}`,
-		},
-	}
-	badWalletDefParams := &RawParams{
-		PWArgs: []encode.PassBytes{pw, pw},
-		Args: []string{
-			"45",
-			"rpc",
-			"username=tacotime",
-			`{"field":"value"}`,
+	badWalletDefParams := &NewWalletParams{
+		AppPass:    pw,
+		WalletPass: pw,
+		AssetID:    45,
+		WalletType: "rpc",
+		Config: map[string]string{
+			"username": "tacotime",
+			"field":    "value",
 		},
 	}
 	tests := []struct {
 		name            string
-		params          *RawParams
+		params          any
 		walletState     *core.WalletState
 		createWalletErr error
 		openWalletErr   error
 		wantErrCode     int
 	}{{
 		name:        "ok new wallet",
-		params:      params,
+		params:      goodParams,
 		wantErrCode: -1,
 	}, {
 		name:        "ok existing wallet",
-		params:      params,
+		params:      goodParams,
 		walletState: &core.WalletState{Open: false},
 		wantErrCode: msgjson.RPCWalletExistsError,
 	}, {
 		name:            "core.CreateWallet error",
-		params:          params,
+		params:          goodParams,
 		createWalletErr: errors.New("error"),
 		wantErrCode:     msgjson.RPCCreateWalletError,
 	}, {
 		name:          "core.OpenWallet error",
-		params:        params,
+		params:        goodParams,
 		openWalletErr: errors.New("error"),
 		wantErrCode:   msgjson.RPCOpenWalletError,
-	}, {
-		name:        "bad JSON error",
-		params:      badJSONParams,
-		wantErrCode: msgjson.RPCArgumentsError,
 	}, {
 		name:        "bad config opts error, unknown coin",
 		params:      badWalletDefParams,
 		wantErrCode: msgjson.RPCWalletDefinitionError,
 	}, {
 		name:        "bad params",
-		params:      &RawParams{},
+		params:      nil,
 		wantErrCode: msgjson.RPCArgumentsError,
 	}}
 	for _, test := range tests {
@@ -377,7 +476,13 @@ func TestHandleNewWallet(t *testing.T) {
 			openWalletErr:   test.openWalletErr,
 		}
 		r := &RPCServer{core: tc, wsServer: wsServer}
-		payload := handleNewWallet(r, test.params)
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, newWalletRoute)
+		} else {
+			msg = makeMsg(t, newWalletRoute, test.params)
+		}
+		payload := handleNewWallet(r, msg)
 
 		res := ""
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
@@ -400,35 +505,39 @@ func TestHandleNewWallet(t *testing.T) {
 
 func TestHandleOpenWallet(t *testing.T) {
 	pw := encode.PassBytes("password123")
-	params := &RawParams{
-		PWArgs: []encode.PassBytes{pw},
-		Args: []string{
-			"42",
-		},
+	goodParams := &OpenWalletParams{
+		AppPass: pw,
+		AssetID: 42,
 	}
 	tests := []struct {
 		name          string
-		params        *RawParams
+		params        any
 		openWalletErr error
 		wantErrCode   int
 	}{{
 		name:        "ok",
-		params:      params,
+		params:      goodParams,
 		wantErrCode: -1,
 	}, {
 		name:          "core.OpenWallet error",
-		params:        params,
+		params:        goodParams,
 		openWalletErr: errors.New("error"),
 		wantErrCode:   msgjson.RPCOpenWalletError,
 	}, {
 		name:        "bad params",
-		params:      &RawParams{},
+		params:      nil,
 		wantErrCode: msgjson.RPCArgumentsError,
 	}}
 	for _, test := range tests {
 		tc := &TCore{openWalletErr: test.openWalletErr}
 		r := &RPCServer{core: tc, wsServer: wsServer}
-		payload := handleOpenWallet(r, test.params)
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, openWalletRoute)
+		} else {
+			msg = makeMsg(t, openWalletRoute, test.params)
+		}
+		payload := handleOpenWallet(r, msg)
 		res := ""
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
 			t.Fatal(err)
@@ -439,27 +548,33 @@ func TestHandleOpenWallet(t *testing.T) {
 func TestHandleCloseWallet(t *testing.T) {
 	tests := []struct {
 		name           string
-		params         *RawParams
+		params         any
 		closeWalletErr error
 		wantErrCode    int
 	}{{
 		name:        "ok",
-		params:      &RawParams{Args: []string{"42"}},
+		params:      &CloseWalletParams{AssetID: 42},
 		wantErrCode: -1,
 	}, {
 		name:           "core.closeWallet error",
-		params:         &RawParams{Args: []string{"42"}},
+		params:         &CloseWalletParams{AssetID: 42},
 		closeWalletErr: errors.New("error"),
 		wantErrCode:    msgjson.RPCCloseWalletError,
 	}, {
 		name:        "bad params",
-		params:      &RawParams{},
+		params:      nil,
 		wantErrCode: msgjson.RPCArgumentsError,
 	}}
 	for _, test := range tests {
 		tc := &TCore{closeWalletErr: test.closeWalletErr}
 		r := &RPCServer{core: tc, wsServer: wsServer}
-		payload := handleCloseWallet(r, test.params)
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, closeWalletRoute)
+		} else {
+			msg = makeMsg(t, closeWalletRoute, test.params)
+		}
+		payload := handleCloseWallet(r, msg)
 		res := ""
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
 			t.Fatal(err)
@@ -470,31 +585,37 @@ func TestHandleCloseWallet(t *testing.T) {
 func TestHandleToggleWalletStatus(t *testing.T) {
 	tests := []struct {
 		name            string
-		params          *RawParams
+		params          any
 		walletStatusErr error
 		wantErrCode     int
 	}{{
 		name:        "ok: disable",
-		params:      &RawParams{Args: []string{"42", "true"}},
+		params:      &ToggleWalletStatusParams{AssetID: 42, Disable: true},
 		wantErrCode: -1,
 	}, {
 		name:        "ok: enable",
-		params:      &RawParams{Args: []string{"42", "false"}},
+		params:      &ToggleWalletStatusParams{AssetID: 42, Disable: false},
 		wantErrCode: -1,
 	}, {
 		name:            "core.toggleWalletStatus error",
-		params:          &RawParams{Args: []string{"42", "true"}},
+		params:          &ToggleWalletStatusParams{AssetID: 42, Disable: true},
 		walletStatusErr: errors.New("error"),
 		wantErrCode:     msgjson.RPCToggleWalletStatusError,
 	}, {
 		name:        "bad params",
-		params:      &RawParams{Args: []string{"42"}},
+		params:      nil,
 		wantErrCode: msgjson.RPCArgumentsError,
 	}}
 	for _, test := range tests {
 		tc := &TCore{walletStatusErr: test.walletStatusErr, walletState: &core.WalletState{}}
 		r := &RPCServer{core: tc, wsServer: wsServer}
-		payload := handleToggleWalletStatus(r, test.params)
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, toggleWalletStatusRoute)
+		} else {
+			msg = makeMsg(t, toggleWalletStatusRoute, test.params)
+		}
+		payload := handleToggleWalletStatus(r, msg)
 		res := ""
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
 			t.Fatalf("%s failed: %v", test.name, err)
@@ -511,6 +632,10 @@ func TestHandleWallets(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+//
+// From handlers_trading_test.go
+//
 
 const exchangeIn = `{
   "https://127.0.0.1:7232": {
@@ -650,77 +775,51 @@ func TestHandleExchanges(t *testing.T) {
 	}
 }
 
-func TestHandleLogin(t *testing.T) {
-	params := &RawParams{PWArgs: []encode.PassBytes{encode.PassBytes("abc")}}
-	tests := []struct {
-		name        string
-		params      *RawParams
-		loginErr    error
-		wantErrCode int
-	}{{
-		name:        "ok",
-		params:      params,
-		wantErrCode: -1,
-	}, {
-		name:        "core.Login error",
-		params:      params,
-		loginErr:    errors.New("error"),
-		wantErrCode: msgjson.RPCLoginError,
-	}, {
-		name:        "bad params",
-		params:      &RawParams{},
-		wantErrCode: msgjson.RPCArgumentsError,
-	}}
-	for _, test := range tests {
-		tc := &TCore{
-			loginErr: test.loginErr,
-		}
-		r := &RPCServer{core: tc}
-		payload := handleLogin(r, test.params)
-		successString := "successfully logged in"
-		if err := verifyResponse(payload, &successString, test.wantErrCode); err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
 func TestHandleTrade(t *testing.T) {
-	params := &RawParams{
-		PWArgs: []encode.PassBytes{encode.PassBytes("abc")}, // 0. AppPass
-		Args: []string{
-			"1.2.3.4:3000", // 0. DEX
-			"true",         // 1. IsLimit
-			"true",         // 2. Sell
-			"0",            // 3. Base
-			"42",           // 4. Quote
-			"1",            // 5. Qty
-			"1",            // 6. Rate
-			"true",         // 7. TifNow
-			`{"gas_price":"23","gas_limit":"120000"}`, // 8. Options
-		}}
+	pw := encode.PassBytes("abc")
+	goodParams := &TradeParams{
+		AppPass: pw,
+		TradeForm: core.TradeForm{
+			Host:    "1.2.3.4:3000",
+			IsLimit: true,
+			Sell:    true,
+			Base:    0,
+			Quote:   42,
+			Qty:     1,
+			Rate:    1,
+			TifNow:  true,
+			Options: map[string]string{"gas_price": "23", "gas_limit": "120000"},
+		},
+	}
 	tests := []struct {
 		name        string
-		params      *RawParams
+		params      any
 		tradeErr    error
 		wantErrCode int
 	}{{
 		name:        "ok",
-		params:      params,
+		params:      goodParams,
 		wantErrCode: -1,
 	}, {
 		name:        "core.Trade error",
-		params:      params,
+		params:      goodParams,
 		tradeErr:    errors.New("error"),
 		wantErrCode: msgjson.RPCTradeError,
 	}, {
 		name:        "bad params",
-		params:      &RawParams{},
+		params:      nil,
 		wantErrCode: msgjson.RPCArgumentsError,
 	}}
 	for _, test := range tests {
 		tc := &TCore{order: new(core.Order), tradeErr: test.tradeErr}
 		r := &RPCServer{core: tc}
-		payload := handleTrade(r, test.params)
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, tradeRoute)
+		} else {
+			msg = makeMsg(t, tradeRoute, test.params)
+		}
+		payload := handleTrade(r, msg)
 		res := new(tradeResponse)
 		if err := verifyResponse(payload, res, test.wantErrCode); err != nil {
 			t.Fatal(err)
@@ -729,145 +828,38 @@ func TestHandleTrade(t *testing.T) {
 }
 
 func TestHandleCancel(t *testing.T) {
-	params := &RawParams{
-		Args: []string{"fb94fe99e4e32200a341f0f1cb33f34a08ac23eedab636e8adb991fa76343e1e"},
+	goodParams := &CancelParams{
+		OrderID: "fb94fe99e4e32200a341f0f1cb33f34a08ac23eedab636e8adb991fa76343e1e",
 	}
 	tests := []struct {
 		name        string
-		params      *RawParams
+		params      any
 		cancelErr   error
 		wantErrCode int
 	}{{
 		name:        "ok",
-		params:      params,
+		params:      goodParams,
 		wantErrCode: -1,
 	}, {
 		name:        "core.Cancel error",
-		params:      params,
+		params:      goodParams,
 		cancelErr:   errors.New("error"),
 		wantErrCode: msgjson.RPCCancelError,
 	}, {
 		name:        "bad params",
-		params:      &RawParams{},
+		params:      nil,
 		wantErrCode: msgjson.RPCArgumentsError,
 	}}
 	for _, test := range tests {
 		tc := &TCore{cancelErr: test.cancelErr}
 		r := &RPCServer{core: tc}
-		payload := handleCancel(r, test.params)
-		res := ""
-		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
-			t.Fatal(err)
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, cancelRoute)
+		} else {
+			msg = makeMsg(t, cancelRoute, test.params)
 		}
-	}
-}
-
-// tCoin satisfies the asset.Coin interface.
-type tCoin struct{}
-
-func (tCoin) ID() dex.Bytes {
-	return nil
-}
-func (tCoin) String() string {
-	return ""
-}
-func (tCoin) TxID() string {
-	return ""
-}
-func (tCoin) Value() uint64 {
-	return 0
-}
-func (tCoin) Confirmations(context.Context) (uint32, error) {
-	return 0, nil
-}
-
-func TestHandleSendAndWithdraw(t *testing.T) {
-	pw := encode.PassBytes("password123")
-	params := &RawParams{
-		PWArgs: []encode.PassBytes{pw},
-		Args: []string{
-			"42",
-			"1000",
-			"abc",
-		},
-	}
-
-	tests := []struct {
-		name        string
-		params      *RawParams
-		walletState *core.WalletState
-		coin        asset.Coin
-		sendErr     error
-		wantErrCode int
-	}{{
-		name:        "ok",
-		params:      params,
-		walletState: &core.WalletState{},
-		coin:        tCoin{},
-		wantErrCode: -1,
-	}, {
-		name:        "Send error",
-		params:      params,
-		walletState: &core.WalletState{},
-		coin:        tCoin{},
-		sendErr:     errors.New("error"),
-		wantErrCode: msgjson.RPCFundTransferError,
-	}, {
-		name:        "bad params",
-		params:      &RawParams{},
-		wantErrCode: msgjson.RPCArgumentsError,
-	}}
-
-	// Test handleWithdraw.
-	for _, test := range tests {
-		tc := &TCore{
-			walletState: test.walletState,
-			coin:        test.coin,
-			sendErr:     test.sendErr,
-		}
-		r := &RPCServer{core: tc}
-		payload := handleWithdraw(r, test.params)
-		res := ""
-		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	// Test handleSend.
-	for _, test := range tests {
-		tc := &TCore{
-			walletState: test.walletState,
-			coin:        test.coin,
-			sendErr:     test.sendErr,
-		}
-		r := &RPCServer{core: tc}
-		payload := handleSend(r, test.params)
-		res := ""
-		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
-func TestHandleLogout(t *testing.T) {
-	tests := []struct {
-		name        string
-		logoutErr   error
-		wantErrCode int
-	}{{
-		name:        "ok",
-		wantErrCode: -1,
-	}, {
-		name:        "core.Logout error",
-		logoutErr:   errors.New("error"),
-		wantErrCode: msgjson.RPCLogoutError,
-	}}
-	for _, test := range tests {
-		tc := &TCore{
-			logoutErr: test.logoutErr,
-		}
-		r := &RPCServer{core: tc}
-		payload := handleLogout(r, nil)
+		payload := handleCancel(r, msg)
 		res := ""
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
 			t.Fatal(err)
@@ -876,17 +868,17 @@ func TestHandleLogout(t *testing.T) {
 }
 
 func TestHandleOrderBook(t *testing.T) {
-	params := &RawParams{Args: []string{"dex", "42", "0"}}
-	paramsNOrders := &RawParams{Args: []string{"dex", "42", "0", "1"}}
+	goodParams := &OrderBookParams{Host: "dex", Base: 42, Quote: 0}
+	paramsNOrders := &OrderBookParams{Host: "dex", Base: 42, Quote: 0, NOrders: 1}
 	tests := []struct {
 		name        string
-		params      *RawParams
+		params      any
 		book        *core.OrderBook
 		bookErr     error
 		wantErrCode int
 	}{{
 		name:        "ok no nOrders",
-		params:      params,
+		params:      goodParams,
 		book:        new(core.OrderBook),
 		wantErrCode: -1,
 	}, {
@@ -896,12 +888,12 @@ func TestHandleOrderBook(t *testing.T) {
 		wantErrCode: -1,
 	}, {
 		name:        "core.Book error",
-		params:      params,
+		params:      goodParams,
 		bookErr:     errors.New("error"),
 		wantErrCode: msgjson.RPCOrderBookError,
 	}, {
 		name:        "bad params",
-		params:      &RawParams{},
+		params:      nil,
 		wantErrCode: msgjson.RPCArgumentsError,
 	}}
 	for _, test := range tests {
@@ -910,7 +902,13 @@ func TestHandleOrderBook(t *testing.T) {
 			bookErr: test.bookErr,
 		}
 		r := &RPCServer{core: tc}
-		payload := handleOrderBook(r, test.params)
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, orderBookRoute)
+		} else {
+			msg = makeMsg(t, orderBookRoute, test.params)
+		}
+		payload := handleOrderBook(r, msg)
 		res := new(core.OrderBook)
 		if err := verifyResponse(payload, res, test.wantErrCode); err != nil {
 			t.Fatal(err)
@@ -969,40 +967,43 @@ func TestHandleMyOrders(t *testing.T) {
 	if err := json.Unmarshal([]byte(exchangeIn), &exchangesIn); err != nil {
 		panic(err)
 	}
-	paramsWithArgs := func(ss ...string) *RawParams {
-		args := []string{}
-		args = append(args, ss...)
-		return &RawParams{Args: args}
-	}
+	base42 := uint32(42)
+	quote0 := uint32(0)
 	tests := []struct {
 		name        string
-		params      *RawParams
+		params      any
 		wantErrCode int
 	}{{
 		name:        "ok no params",
-		params:      paramsWithArgs(),
+		params:      &MyOrdersParams{},
 		wantErrCode: -1,
 	}, {
 		name:        "ok with host param",
-		params:      paramsWithArgs("127.0.0.1:7232"),
+		params:      &MyOrdersParams{Host: "127.0.0.1:7232"},
 		wantErrCode: -1,
 	}, {
 		name:        "ok with host and baseID/quoteID params",
-		params:      paramsWithArgs("127.0.0.1:7232", "42", "0"),
+		params:      &MyOrdersParams{Host: "127.0.0.1:7232", Base: &base42, Quote: &quote0},
 		wantErrCode: -1,
 	}, {
 		name:        "ok with no host and baseID/quoteID params",
-		params:      paramsWithArgs("", "42", "0"),
+		params:      &MyOrdersParams{Host: "", Base: &base42, Quote: &quote0},
 		wantErrCode: -1,
 	}, {
 		name:        "bad params",
-		params:      paramsWithArgs("", "42"), // missing quote ID
+		params:      nil,
 		wantErrCode: msgjson.RPCArgumentsError,
 	}}
 	for _, test := range tests {
 		tc := &TCore{exchanges: exchangesIn}
 		r := &RPCServer{core: tc}
-		payload := handleMyOrders(r, test.params)
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, myOrdersRoute)
+		} else {
+			msg = makeMsg(t, myOrdersRoute, test.params)
+		}
+		payload := handleMyOrders(r, msg)
 		res := new(myOrdersResponse)
 		if err := verifyResponse(payload, res, test.wantErrCode); err != nil {
 			t.Fatal(err)
@@ -1113,33 +1114,120 @@ func TestParseCoreOrder(t *testing.T) {
 	}
 }
 
-func TestHandleAppSeed(t *testing.T) {
-	params := &RawParams{
-		PWArgs: []encode.PassBytes{encode.PassBytes("abc")},
+//
+// From handlers_tx_test.go
+//
+
+func TestHandleSendAndWithdraw(t *testing.T) {
+	pw := encode.PassBytes("password123")
+	goodParams := &SendParams{
+		AppPass: pw,
+		AssetID: 42,
+		Value:   1000,
+		Address: "abc",
 	}
+
+	tests := []struct {
+		name        string
+		params      any
+		walletState *core.WalletState
+		coin        asset.Coin
+		sendErr     error
+		wantErrCode int
+	}{{
+		name:        "ok",
+		params:      goodParams,
+		walletState: &core.WalletState{},
+		coin:        tCoin{},
+		wantErrCode: -1,
+	}, {
+		name:        "Send error",
+		params:      goodParams,
+		walletState: &core.WalletState{},
+		coin:        tCoin{},
+		sendErr:     errors.New("error"),
+		wantErrCode: msgjson.RPCFundTransferError,
+	}, {
+		name:        "bad params",
+		params:      nil,
+		wantErrCode: msgjson.RPCArgumentsError,
+	}}
+
+	// Test handleWithdraw.
+	for _, test := range tests {
+		tc := &TCore{
+			walletState: test.walletState,
+			coin:        test.coin,
+			sendErr:     test.sendErr,
+		}
+		r := &RPCServer{core: tc}
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, withdrawRoute)
+		} else {
+			msg = makeMsg(t, withdrawRoute, test.params)
+		}
+		payload := handleWithdraw(r, msg)
+		res := ""
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Test handleSend.
+	for _, test := range tests {
+		tc := &TCore{
+			walletState: test.walletState,
+			coin:        test.coin,
+			sendErr:     test.sendErr,
+		}
+		r := &RPCServer{core: tc}
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, sendRoute)
+		} else {
+			msg = makeMsg(t, sendRoute, test.params)
+		}
+		payload := handleSend(r, msg)
+		res := ""
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestHandleAppSeed(t *testing.T) {
+	pw := encode.PassBytes("abc")
+	goodParams := &AppSeedParams{AppPass: pw}
 	tests := []struct {
 		name          string
-		params        *RawParams
+		params        any
 		exportSeedErr error
 		wantErrCode   int
 	}{{
 		name:        "ok",
-		params:      params,
+		params:      goodParams,
 		wantErrCode: -1,
 	}, {
 		name:          "core.ExportSeed error",
-		params:        params,
+		params:        goodParams,
 		exportSeedErr: errors.New("error"),
 		wantErrCode:   msgjson.RPCExportSeedError,
 	}, {
 		name:        "bad params",
-		params:      &RawParams{},
+		params:      nil,
 		wantErrCode: msgjson.RPCArgumentsError,
 	}}
 	for _, test := range tests {
 		tc := &TCore{exportSeed: "seed words here", exportSeedErr: test.exportSeedErr}
 		r := &RPCServer{core: tc}
-		payload := handleAppSeed(r, test.params)
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, appSeedRoute)
+		} else {
+			msg = makeMsg(t, appSeedRoute, test.params)
+		}
+		payload := handleAppSeed(r, msg)
 		res := ""
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
 			t.Fatal(err)
@@ -1152,74 +1240,26 @@ func TestHandleAppSeed(t *testing.T) {
 	}
 }
 
-func TestHandleDiscoverAcct(t *testing.T) {
-	pw := encode.PassBytes("password123")
-	params := &RawParams{
-		PWArgs: []encode.PassBytes{pw},
-		Args: []string{
-			"dex:1234",
-			"cert",
-		},
-	}
-	tests := []struct {
-		name            string
-		params          *RawParams
-		discoverAcctErr error
-		wantErrCode     int
-	}{{
-		name:        "ok",
-		params:      params,
-		wantErrCode: -1,
-	}, {
-		name:            "discover account error",
-		params:          params,
-		discoverAcctErr: errors.New(""),
-		wantErrCode:     msgjson.RPCDiscoverAcctError,
-	}, {
-		name:        "bad params",
-		params:      &RawParams{},
-		wantErrCode: msgjson.RPCArgumentsError,
-	}}
-	for _, test := range tests {
-		tc := &TCore{
-			discoverAcctErr: test.discoverAcctErr,
-		}
-		r := &RPCServer{core: tc}
-		payload := handleDiscoverAcct(r, test.params)
-		res := new(bool)
-		if err := verifyResponse(payload, res, test.wantErrCode); err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
 func TestDeleteRecords(t *testing.T) {
-	params := &RawParams{
-		Args: []string{
-			"123",
-		},
-	}
+	olderThan := int64(123)
+	goodParams := &DeleteRecordsParams{OlderThanMs: &olderThan}
 	tests := []struct {
 		name                     string
-		params                   *RawParams
+		params                   any
 		deleteArchivedRecordsErr error
 		wantErrCode              int
 	}{{
 		name:        "ok",
-		params:      params,
+		params:      goodParams,
 		wantErrCode: -1,
 	}, {
 		name:                     "delete archived records error",
-		params:                   params,
+		params:                   goodParams,
 		deleteArchivedRecordsErr: errors.New(""),
 		wantErrCode:              msgjson.RPCDeleteArchivedRecordsError,
 	}, {
-		name: "bad params",
-		params: &RawParams{
-			Args: []string{
-				"abc",
-			},
-		},
+		name:        "bad params",
+		params:      nil,
 		wantErrCode: msgjson.RPCArgumentsError,
 	}}
 	for _, test := range tests {
@@ -1228,7 +1268,13 @@ func TestDeleteRecords(t *testing.T) {
 		}
 		tc.archivedRecords = 10
 		r := &RPCServer{core: tc}
-		payload := handleDeleteArchivedRecords(r, test.params)
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, deleteArchivedRecordsRoute)
+		} else {
+			msg = makeMsg(t, deleteArchivedRecordsRoute, test.params)
+		}
+		payload := handleDeleteArchivedRecords(r, msg)
 		res := ""
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
 			t.Fatal(err)
@@ -1239,36 +1285,132 @@ func TestDeleteRecords(t *testing.T) {
 	}
 }
 
+//
+// From handlers_dex_test.go
+//
+
+func TestHandleGetDEXConfig(t *testing.T) {
+	tests := []struct {
+		name            string
+		params          any
+		getDEXConfigErr error
+		wantErrCode     int
+	}{{
+		name:        "ok",
+		params:      &GetDEXConfigParams{Host: "dex", Cert: "cert bytes"},
+		wantErrCode: -1,
+	}, {
+		name:            "get dex conf error",
+		params:          &GetDEXConfigParams{Host: "dex", Cert: "cert bytes"},
+		getDEXConfigErr: errors.New(""),
+		wantErrCode:     msgjson.RPCGetDEXConfigError,
+	}, {
+		name:        "bad params",
+		params:      nil,
+		wantErrCode: msgjson.RPCArgumentsError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{
+			getDEXConfigErr: test.getDEXConfigErr,
+		}
+		r := &RPCServer{core: tc}
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, getDEXConfRoute)
+		} else {
+			msg = makeMsg(t, getDEXConfRoute, test.params)
+		}
+		payload := handleGetDEXConfig(r, msg)
+		res := new(*core.Exchange)
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestHandleDiscoverAcct(t *testing.T) {
+	pw := encode.PassBytes("password123")
+	goodParams := &DiscoverAcctParams{
+		AppPass: pw,
+		Addr:    "dex:1234",
+		Cert:    "cert",
+	}
+	tests := []struct {
+		name            string
+		params          any
+		discoverAcctErr error
+		wantErrCode     int
+	}{{
+		name:        "ok",
+		params:      goodParams,
+		wantErrCode: -1,
+	}, {
+		name:            "discover account error",
+		params:          goodParams,
+		discoverAcctErr: errors.New(""),
+		wantErrCode:     msgjson.RPCDiscoverAcctError,
+	}, {
+		name:        "bad params",
+		params:      nil,
+		wantErrCode: msgjson.RPCArgumentsError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{
+			discoverAcctErr: test.discoverAcctErr,
+		}
+		r := &RPCServer{core: tc}
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, discoverAcctRoute)
+		} else {
+			msg = makeMsg(t, discoverAcctRoute, test.params)
+		}
+		payload := handleDiscoverAcct(r, msg)
+		res := new(bool)
+		if err := verifyResponse(payload, res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+//
+// From handlers_staking_test.go
+//
+
 func TestHandleSetVSP(t *testing.T) {
-	params := &RawParams{
-		Args: []string{
-			"42",
-			"url.com",
-		},
+	goodParams := &SetVSPParams{
+		AssetID: 42,
+		Addr:    "url.com",
 	}
 	tests := []struct {
 		name        string
-		params      *RawParams
+		params      any
 		setVSPErr   error
 		wantErrCode int
 	}{{
 		name:        "ok",
-		params:      params,
+		params:      goodParams,
 		wantErrCode: -1,
 	}, {
 		name:        "core.SetVSP error",
-		params:      params,
+		params:      goodParams,
 		setVSPErr:   errors.New("error"),
 		wantErrCode: msgjson.RPCSetVSPError,
 	}, {
 		name:        "bad params",
-		params:      &RawParams{},
+		params:      nil,
 		wantErrCode: msgjson.RPCArgumentsError,
 	}}
 	for _, test := range tests {
 		tc := &TCore{setVSPErr: test.setVSPErr}
 		r := &RPCServer{core: tc}
-		payload := handleSetVSP(r, test.params)
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, setVSPRoute)
+		} else {
+			msg = makeMsg(t, setVSPRoute, test.params)
+		}
+		payload := handleSetVSP(r, msg)
 		res := ""
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
 			t.Fatal(err)
@@ -1278,16 +1420,15 @@ func TestHandleSetVSP(t *testing.T) {
 
 func TestPurchaseTickets(t *testing.T) {
 	pw := encode.PassBytes("password123")
-	params := &RawParams{
-		PWArgs: []encode.PassBytes{pw},
-		Args: []string{
-			"42",
-			"2",
-		},
+	goodParams := &PurchaseTicketsParams{
+		AppPass: pw,
+		AssetID: 42,
+		N:       2,
 	}
 	tc := &TCore{}
 	r := &RPCServer{core: tc}
-	payload := handlePurchaseTickets(r, params)
+	msg := makeMsg(t, purchaseTicketsRoute, goodParams)
+	payload := handlePurchaseTickets(r, msg)
 	var res bool
 	err := verifyResponse(payload, &res, -1)
 	if err != nil {
@@ -1301,41 +1442,44 @@ func TestPurchaseTickets(t *testing.T) {
 	}
 
 	tc.purchaseTicketsErr = errors.New("test error")
-	payload = handlePurchaseTickets(r, params)
+	msg = makeMsg(t, purchaseTicketsRoute, goodParams)
+	payload = handlePurchaseTickets(r, msg)
 	if err = verifyResponse(payload, &res, msgjson.RPCPurchaseTicketsError); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestHandleStakeStatus(t *testing.T) {
-	params := &RawParams{
-		Args: []string{
-			"42",
-		},
-	}
+	goodParams := &StakeStatusParams{AssetID: 42}
 	tests := []struct {
 		name           string
-		params         *RawParams
+		params         any
 		stakeStatusErr error
 		wantErrCode    int
 	}{{
 		name:        "ok",
-		params:      params,
+		params:      goodParams,
 		wantErrCode: -1,
 	}, {
 		name:           "core.StakeStatus error",
-		params:         params,
+		params:         goodParams,
 		stakeStatusErr: errors.New("error"),
 		wantErrCode:    msgjson.RPCStakeStatusError,
 	}, {
 		name:        "bad params",
-		params:      &RawParams{},
+		params:      nil,
 		wantErrCode: msgjson.RPCArgumentsError,
 	}}
 	for _, test := range tests {
 		tc := &TCore{stakeStatusErr: test.stakeStatusErr}
 		r := &RPCServer{core: tc}
-		payload := handleStakeStatus(r, test.params)
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, stakeStatusRoute)
+		} else {
+			msg = makeMsg(t, stakeStatusRoute, test.params)
+		}
+		payload := handleStakeStatus(r, msg)
 		res := new(asset.TicketStakingStatus)
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
 			t.Fatal(err)
@@ -1344,38 +1488,36 @@ func TestHandleStakeStatus(t *testing.T) {
 }
 
 func TestHandleSetVotingPreferences(t *testing.T) {
-	params := &RawParams{
-		Args: []string{
-			"42",
-		},
-	}
+	goodParams := &SetVotingPreferencesParams{AssetID: 42}
 	tests := []struct {
 		name             string
-		params           *RawParams
+		params           any
 		setVotingPrefErr error
 		wantErrCode      int
 	}{{
 		name:        "ok",
-		params:      params,
+		params:      goodParams,
 		wantErrCode: -1,
 	}, {
 		name:             "core.SetVotingPreferences error",
-		params:           params,
+		params:           goodParams,
 		setVotingPrefErr: errors.New("error"),
 		wantErrCode:      msgjson.RPCSetVotingPreferencesError,
 	}, {
-		name: "bad params",
-		params: &RawParams{
-			Args: []string{
-				"asdf",
-			},
-		},
+		name:        "bad params",
+		params:      nil,
 		wantErrCode: msgjson.RPCArgumentsError,
 	}}
 	for _, test := range tests {
 		tc := &TCore{setVotingPrefErr: test.setVotingPrefErr}
 		r := &RPCServer{core: tc}
-		payload := handleSetVotingPreferences(r, test.params)
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, setVotingPreferencesRoute)
+		} else {
+			msg = makeMsg(t, setVotingPreferencesRoute, test.params)
+		}
+		payload := handleSetVotingPreferences(r, msg)
 		res := ""
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
 			t.Fatal(err)

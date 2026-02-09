@@ -30,7 +30,7 @@ var (
 	// requiredRPCServerVersion is the least version of the bisonw RPC server
 	// that this bwctl package can work with. It should be updated whenever a
 	// bwctl change requires an updated RPC server.
-	requiredRPCServerVersion = dex.Semver{Major: 0, Minor: 3, Patch: 0}
+	requiredRPCServerVersion = dex.Semver{Major: 1, Minor: 0, Patch: 0}
 )
 
 func main() {
@@ -47,22 +47,20 @@ func main() {
 // promptPasswords is a map of routes to password prompts. Passwords are
 // prompted in the order given.
 var promptPasswords = map[string][]string{
-	"discoveracct":      {"App password:"},
-	"init":              {"Set new app password:"},
-	"login":             {"App password:"},
-	"newwallet":         {"App password:", "Wallet password:"},
-	"openwallet":        {"App password:"},
-	"register":          {"App password:"},
-	"postbond":          {"App password:"},
-	"trade":             {"App password:"},
-	"withdraw":          {"App password:"},
-	"send":              {"App password:"},
-	"appseed":           {"App password:"},
-	"startmarketmaking": {"App password:"},
-	"multitrade":        {"App password:"},
-	"purchasetickets":   {"App password:"},
-	"startmmbot":        {"App password:"},
-	"withdrawbchspv":    {"App password"},
+	"discoveracct":    {"App password:"},
+	"init":            {"Set new app password:"},
+	"login":           {"App password:"},
+	"newwallet":       {"App password:", "Wallet password:"},
+	"openwallet":      {"App password:"},
+	"postbond":        {"App password:"},
+	"trade":           {"App password:"},
+	"withdraw":        {"App password:"},
+	"send":            {"App password:"},
+	"appseed":         {"App password:"},
+	"multitrade":      {"App password:"},
+	"purchasetickets": {"App password:"},
+	"startmmbot":      {"App password:"},
+	"withdrawbchspv":  {"App password"},
 }
 
 // optionalTextFiles is a map of routes to arg index for routes that should read
@@ -73,8 +71,6 @@ var optionalTextFiles = map[string]int{
 	"bondassets":   1,
 	"postbond":     4,
 	"getdexconfig": 1,
-	"register":     3,
-	"newwallet":    2,
 }
 
 // promptPWs prompts for passwords on stdin and returns an error if prompting
@@ -179,9 +175,9 @@ func run(ctx context.Context) error {
 		return err
 	}
 
-	payload := &rpcserver.RawParams{
-		PWArgs: pws,
-		Args:   params,
+	payload, err := buildPayload(args[0], pws, params)
+	if err != nil {
+		return fmt.Errorf("error building payload: %v", err)
 	}
 
 	// Create a request using the parsedArgs.

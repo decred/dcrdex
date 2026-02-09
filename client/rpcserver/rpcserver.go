@@ -37,8 +37,8 @@ const (
 	// breaking changes. Move minor for backwards compatible features. Move
 	// patch for bug fixes. bwctl requiredRPCSemVer should be kept up to date
 	// with this version.
-	rpcSemverMajor uint32 = 0
-	rpcSemverMinor uint32 = 4
+	rpcSemverMajor uint32 = 1
+	rpcSemverMinor uint32 = 0
 	rpcSemverPatch uint32 = 0
 
 	// rpcTimeoutSeconds is the number of seconds a connection to the RPC server
@@ -282,6 +282,10 @@ func New(cfg *Config) (*RPCServer, error) {
 	// HTTPS endpoint
 	mux.Post("/", s.handleJSON)
 
+	// API documentation endpoints
+	mux.Get("/openapi.yaml", s.serveOpenAPISpec)
+	mux.Get("/swagger", s.serveSwagger)
+
 	return s, nil
 }
 
@@ -346,15 +350,7 @@ func (s *RPCServer) handleRequest(req *msgjson.Message) *msgjson.ResponsePayload
 		return payload
 	}
 
-	params := new(RawParams)
-	err := req.Unmarshal(params) // NOT &params to prevent setting it to nil for []byte("null") Payload
-	if err != nil {
-		log.Debugf("cannot unmarshal params for route %s", req.Route)
-		payload.Error = msgjson.NewError(msgjson.RPCParseError, "unable to unmarshal request")
-		return payload
-	}
-
-	return h(s, params)
+	return h(s, req)
 }
 
 // parseHTTPRequest parses the msgjson message in the request body, creates a
