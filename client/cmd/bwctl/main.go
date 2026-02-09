@@ -69,7 +69,7 @@ var promptPasswords = map[string][]string{
 var optionalTextFiles = map[string]int{
 	"discoveracct": 1,
 	"bondassets":   1,
-	"postbond":     4,
+	"postbond":     5,
 	"getdexconfig": 1,
 }
 

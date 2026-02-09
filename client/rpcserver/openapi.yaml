@@ -354,6 +354,42 @@ paths:
         **Route:** `wallets`
         **Payload:** none
 
+  /walletbalance:
+    post:
+      tags: [Wallet]
+      summary: Get wallet balance
+      description: |
+        Returns the balance for a single wallet identified by asset ID.
+
+        **Route:** `walletbalance`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: walletbalance
+              id: 1
+              payload:
+                assetID: 42
+
+  /walletstate:
+    post:
+      tags: [Wallet]
+      summary: Get wallet state
+      description: |
+        Returns the full state for a single wallet identified by asset ID.
+
+        **Route:** `walletstate`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: walletstate
+              id: 1
+              payload:
+                assetID: 42
+
   /rescanwallet:
     post:
       tags: [Wallet]

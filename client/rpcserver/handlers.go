@@ -43,6 +43,8 @@ const (
 	bondOptionsRoute           = "bondopts"
 	tradeRoute                 = "trade"
 	versionRoute               = "version"
+	walletBalanceRoute         = "walletbalance"
+	walletStateRoute           = "walletstate"
 	walletsRoute               = "wallets"
 	rescanWalletRoute          = "rescanwallet"
 	abandonTxRoute             = "abandontx"
@@ -135,6 +137,8 @@ var routes = map[string]func(s *RPCServer, msg *msgjson.Message) *msgjson.Respon
 	bondAssetsRoute:            handleBondAssets,
 	tradeRoute:                 handleTrade,
 	versionRoute:               handleVersion,
+	walletBalanceRoute:         handleWalletBalance,
+	walletStateRoute:           handleWalletState,
 	walletsRoute:               handleWallets,
 	rescanWalletRoute:          handleRescanWallet,
 	abandonTxRoute:             handleAbandonTx,
@@ -387,6 +391,36 @@ func handleWallets(s *RPCServer, _ *msgjson.Message) *msgjson.ResponsePayload {
 	return createResponse(walletsRoute, walletsStates, nil)
 }
 
+// handleWalletBalance handles requests for walletbalance. Returns the balance
+// for a single wallet.
+func handleWalletBalance(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params WalletBalanceParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(walletBalanceRoute, err)
+	}
+	bal, err := s.core.AssetBalance(params.AssetID)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCInternal, "unable to get balance for %s: %v", dex.BipIDSymbol(params.AssetID), err)
+		return createResponse(walletBalanceRoute, nil, resErr)
+	}
+	return createResponse(walletBalanceRoute, bal, nil)
+}
+
+// handleWalletState handles requests for walletstate. Returns the state for a
+// single wallet.
+func handleWalletState(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params WalletStateParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(walletStateRoute, err)
+	}
+	state := s.core.WalletState(params.AssetID)
+	if state == nil {
+		resErr := msgjson.NewError(msgjson.RPCWalletNotFoundError, "no wallet found for %s", dex.BipIDSymbol(params.AssetID))
+		return createResponse(walletStateRoute, nil, resErr)
+	}
+	return createResponse(walletStateRoute, state, nil)
+}
+
 // handleRescanWallet handles requests to rescan a wallet. This may trigger an
 // asynchronous resynchronization of wallet address activity, and the wallet
 // state should be consulted for status. *msgjson.ResponsePayload.Error is empty
@@ -537,10 +571,10 @@ func handleCancel(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
 		return usage(cancelRoute, fmt.Errorf("invalid order ID"))
 	}
 	if err := s.core.Cancel(orderID); err != nil {
-		resErr := msgjson.NewError(msgjson.RPCCancelError, "unable to cancel order %q: %v", orderID, err)
+		resErr := msgjson.NewError(msgjson.RPCCancelError, "unable to cancel order %q: %v", params.OrderID, err)
 		return createResponse(cancelRoute, nil, resErr)
 	}
-	res := fmt.Sprintf(canceledOrderStr, orderID)
+	res := fmt.Sprintf(canceledOrderStr, params.OrderID)
 	return createResponse(cancelRoute, &res, nil)
 }
 
@@ -704,6 +738,10 @@ func send(s *RPCServer, msg *msgjson.Message, route string) *msgjson.ResponsePay
 		return usage(route, err)
 	}
 	defer params.AppPass.Clear()
+	if len(params.AppPass) == 0 {
+		resErr := msgjson.NewError(msgjson.RPCFundTransferError, "empty pass")
+		return createResponse(route, nil, resErr)
+	}
 	subtract := params.Subtract
 	if route == withdrawRoute {
 		subtract = true
@@ -1608,6 +1646,45 @@ var routeInfos = map[string]routeInfo{
 		returns: `Returns:
     string: The message "` + fmt.Sprintf(walletStatusStr, "[coin symbol]", "[wallet status]") + `".`,
 	},
+	walletBalanceRoute: {
+		paramsType: reflect.TypeOf(WalletBalanceParams{}),
+		summary:    `Get the balance for a single wallet.`,
+		fieldDescs: map[string]string{
+			"assetID": descAssetID,
+		},
+		returns: `Returns:
+    obj: The wallet balance.
+    {
+      "available" (int): The balance available for funding orders.
+      "immature" (int): Balance that requires confirmations before use.
+      "locked" (int): The total locked balance.
+      "bondReserves" (int): Amount reserved for bond maintenance.
+      "reservesDeficit" (int): Deficit if reserves are insufficient.
+      "other" (obj): Other balance categories.
+      "stamp" (string): Time stamp.
+      "orderlocked" (int): Amount locked in active orders.
+      "contractlocked" (int): Amount locked in active swap contracts.
+      "bondlocked" (int): Amount locked in active bonds.
+    }`,
+	},
+	walletStateRoute: {
+		paramsType: reflect.TypeOf(WalletStateParams{}),
+		summary:    `Get the state for a single wallet.`,
+		fieldDescs: map[string]string{
+			"assetID": descAssetID,
+		},
+		returns: `Returns:
+    obj: The wallet state.
+    {
+      "symbol" (string): The coin symbol.
+      "assetID" (int): The asset's BIP-44 registered coin index.
+      "open" (bool): Whether the wallet is unlocked.
+      "running" (bool): Whether the wallet is running.
+      "disabled" (bool): Whether the wallet is disabled.
+      "balance" (obj): The wallet balance.
+      "address" (string): A wallet address.
+    }`,
+	},
 	walletsRoute: {
 		summary: `List all wallets.`,
 		returns: `Returns:
@@ -1837,7 +1914,7 @@ supported for DCR wallets.`,
 			"assetID":  descAssetID,
 			"value":    "The amount to withdraw in units of the asset's smallest denomination (e.g. satoshis, atoms, etc.)",
 			"address":  "The address to which withdrawn funds are sent.",
-			"subtract": "Whether to subtract the tx fee from the value.",
+			"subtract": "Ignored for withdraw (always true). Use 'send' route for exact-amount sends.",
 		},
 		returns: `Returns:
     string: "[coin ID]"`,

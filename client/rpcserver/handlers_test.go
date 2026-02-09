@@ -1218,6 +1218,14 @@ func TestHandleSendAndWithdraw(t *testing.T) {
 		sendErr:     errors.New("error"),
 		wantErrCode: msgjson.RPCFundTransferError,
 	}, {
+		name: "empty password",
+		params: &SendParams{
+			AssetID: 42,
+			Value:   1000,
+			Address: "abc",
+		},
+		wantErrCode: msgjson.RPCFundTransferError,
+	}, {
 		name:        "bad params",
 		params:      nil,
 		wantErrCode: msgjson.RPCArgumentsError,
@@ -1590,6 +1598,85 @@ func TestHandleSetVotingPreferences(t *testing.T) {
 		payload := handleSetVotingPreferences(r, msg)
 		res := ""
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestHandleWalletBalance(t *testing.T) {
+	goodParams := &WalletBalanceParams{AssetID: 42}
+	tests := []struct {
+		name          string
+		params        any
+		walletBalance *core.WalletBalance
+		balanceErr    error
+		wantErrCode   int
+	}{{
+		name:          "ok",
+		params:        goodParams,
+		walletBalance: &core.WalletBalance{},
+		wantErrCode:   -1,
+	}, {
+		name:        "core.AssetBalance error",
+		params:      goodParams,
+		balanceErr:  errors.New("error"),
+		wantErrCode: msgjson.RPCInternal,
+	}, {
+		name:        "bad params",
+		params:      nil,
+		wantErrCode: msgjson.RPCArgumentsError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{walletBalance: test.walletBalance, balanceErr: test.balanceErr}
+		r := &RPCServer{core: tc}
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, walletBalanceRoute)
+		} else {
+			msg = makeMsg(t, walletBalanceRoute, test.params)
+		}
+		payload := handleWalletBalance(r, msg)
+		res := &core.WalletBalance{}
+		if err := verifyResponse(payload, res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestHandleWalletState(t *testing.T) {
+	goodParams := &WalletStateParams{AssetID: 42}
+	tests := []struct {
+		name        string
+		params      any
+		walletState *core.WalletState
+		wantErrCode int
+	}{{
+		name:        "ok",
+		params:      goodParams,
+		walletState: &core.WalletState{Symbol: "dcr", AssetID: 42},
+		wantErrCode: -1,
+	}, {
+		name:        "wallet not found",
+		params:      goodParams,
+		walletState: nil,
+		wantErrCode: msgjson.RPCWalletNotFoundError,
+	}, {
+		name:        "bad params",
+		params:      nil,
+		wantErrCode: msgjson.RPCArgumentsError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{walletState: test.walletState}
+		r := &RPCServer{core: tc}
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, walletStateRoute)
+		} else {
+			msg = makeMsg(t, walletStateRoute, test.params)
+		}
+		payload := handleWalletState(r, msg)
+		res := &core.WalletState{}
+		if err := verifyResponse(payload, res, test.wantErrCode); err != nil {
 			t.Fatal(err)
 		}
 	}

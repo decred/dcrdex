@@ -44,6 +44,10 @@ func buildPayload(route string, pws []encode.PassBytes, args []string) (any, err
 		return buildToggleWalletStatus(args)
 	case "rescanwallet":
 		return buildRescanWallet(args)
+	case "walletbalance":
+		return buildWalletBalance(args)
+	case "walletstate":
+		return buildWalletState(args)
 
 	// Trading.
 	case "trade":
@@ -340,6 +344,28 @@ func buildToggleWalletStatus(args []string) (*rpcserver.ToggleWalletStatusParams
 		return nil, fmt.Errorf("bad disable: %w", err)
 	}
 	return &rpcserver.ToggleWalletStatusParams{AssetID: assetID, Disable: disable}, nil
+}
+
+func buildWalletBalance(args []string) (*rpcserver.WalletBalanceParams, error) {
+	if len(args) < 1 {
+		return nil, fmt.Errorf("missing assetID")
+	}
+	assetID, err := parseUint32(args[0])
+	if err != nil {
+		return nil, fmt.Errorf("bad assetID: %w", err)
+	}
+	return &rpcserver.WalletBalanceParams{AssetID: assetID}, nil
+}
+
+func buildWalletState(args []string) (*rpcserver.WalletStateParams, error) {
+	if len(args) < 1 {
+		return nil, fmt.Errorf("missing assetID")
+	}
+	assetID, err := parseUint32(args[0])
+	if err != nil {
+		return nil, fmt.Errorf("bad assetID: %w", err)
+	}
+	return &rpcserver.WalletStateParams{AssetID: assetID}, nil
 }
 
 func buildRescanWallet(args []string) (*rpcserver.RescanWalletParams, error) {
@@ -754,16 +780,23 @@ func buildPostBond(pws []encode.PassBytes, args []string) (*core.PostBondForm, e
 		Bond:    bond,
 		Asset:   &assetID,
 	}
+	if s := optArg(args, 3); s != "" {
+		lockTime, err := parseUint64(s)
+		if err != nil {
+			return nil, fmt.Errorf("bad lockTime: %w", err)
+		}
+		p.LockTime = lockTime
+	}
 	// maintain defaults to true.
 	maintainTier := true
-	if s := optArg(args, 3); s != "" {
+	if s := optArg(args, 4); s != "" {
 		maintainTier, err = parseBool(s)
 		if err != nil {
 			return nil, fmt.Errorf("bad maintain: %w", err)
 		}
 	}
 	p.MaintainTier = &maintainTier
-	if s := optArg(args, 4); s != "" {
+	if s := optArg(args, 5); s != "" {
 		p.Cert = s
 	}
 	return p, nil
@@ -824,6 +857,9 @@ func buildStartBot(pws []encode.PassBytes, args []string) (*rpcserver.StartBotPa
 		CfgFilePath: args[0],
 	}
 	// Optional market filter: host, baseID, quoteID.
+	if len(args) > 1 && len(args) < 4 {
+		return nil, fmt.Errorf("market filter requires host, baseID, and quoteID (got %d of 3)", len(args)-1)
+	}
 	if len(args) >= 4 {
 		baseID, err := parseUint32(args[2])
 		if err != nil {
@@ -844,6 +880,9 @@ func buildStartBot(pws []encode.PassBytes, args []string) (*rpcserver.StartBotPa
 
 func buildStopBot(args []string) (*rpcserver.StopBotParams, error) {
 	p := &rpcserver.StopBotParams{}
+	if len(args) > 0 && len(args) < 3 {
+		return nil, fmt.Errorf("market filter requires host, baseID, and quoteID (got %d of 3)", len(args))
+	}
 	if len(args) >= 3 {
 		baseID, err := parseUint32(args[1])
 		if err != nil {

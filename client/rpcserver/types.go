@@ -77,6 +77,16 @@ type CloseWalletParams struct {
 	AssetID uint32 `json:"assetID"`
 }
 
+// WalletBalanceParams is the parameter type for the walletbalance route.
+type WalletBalanceParams struct {
+	AssetID uint32 `json:"assetID"`
+}
+
+// WalletStateParams is the parameter type for the walletstate route.
+type WalletStateParams struct {
+	AssetID uint32 `json:"assetID"`
+}
+
 // ToggleWalletStatusParams is the parameter type for the togglewalletstatus route.
 type ToggleWalletStatusParams struct {
 	AssetID uint32 `json:"assetID"`

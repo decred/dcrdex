@@ -100,6 +100,7 @@ const (
 	RPCMMStatusError                     // 82
 	RPCBridgeError                       // 83
 	RPCPaymentMultisigError              // 84
+	RPCWalletNotFoundError               // 85
 )
 
 // Routes are destinations for a "payload" of data. The type of data being

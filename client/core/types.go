@@ -243,7 +243,7 @@ type PostBondForm struct {
 	AppPass  encode.PassBytes `json:"appPass"`
 	Asset    *uint32          `json:"assetID,omitempty"` // do not default to 0
 	Bond     uint64           `json:"bond"`
-	LockTime uint64           `json:"lockTime"` // 0 means go with server-derived value
+	LockTime uint64           `json:"lockTime,omitempty"` // 0 means go with server-derived value
 
 	// FeeBuffer is optional, to use same value from BondsFeeBuffer during
 	// wallet funding. If zero, the wallet will use an internal estimate.
