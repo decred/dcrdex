@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/mm"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 )
@@ -92,7 +94,6 @@ const (
 	setVotePrefsStr   = "vote preferences set"
 	setVSPStr         = "vsp set to %s"
 )
-
 
 // createResponse creates a msgjson response payload.
 func createResponse(op string, res any, resErr *msgjson.Error) *msgjson.ResponsePayload {
@@ -1445,231 +1446,179 @@ func handleRemoveWalletPeer(s *RPCServer, msg *msgjson.Message) *msgjson.Respons
 	return createResponse(removeWalletPeerRoute, "successfully removed peer", nil)
 }
 
-func format(thing, tail string) string {
-	if thing == "" {
-		return ""
-	}
-	return fmt.Sprintf("%s%s", thing, tail)
+// passBytesType is used by reflection to detect password fields.
+var passBytesType = reflect.TypeOf(encode.PassBytes{})
+
+// routeInfo describes a route's parameters and help text, replacing the old
+// helpMsg struct. Parameter documentation is auto-generated from the struct
+// type via reflection, making it impossible for help text to drift from
+// actual param types.
+type routeInfo struct {
+	paramsType reflect.Type      // nil for no-params routes
+	summary    string            // short command description
+	fieldDescs map[string]string // JSON field name -> description
+	returns    string            // return value description
+	extraHelp  func() string     // optional dynamic help text appended to usage
 }
 
-// ListCommands prints a short usage string for every route available to the
-// rpcserver.
-func ListCommands(includePasswords bool) string {
-	var sb strings.Builder
-	var err error
-	for _, r := range sortHelpKeys() {
-		msg := helpMsgs[r]
-		// If help should include password arguments and this command
-		// has password arguments, add them to the help message.
-		if includePasswords && msg.pwArgsShort != "" {
-			_, err = sb.WriteString(fmt.Sprintf("%s %s%s\n", r,
-				format(msg.pwArgsShort, " "), msg.argsShort))
-		} else {
-			_, err = sb.WriteString(fmt.Sprintf("%s %s\n", r, msg.argsShort))
-		}
-		if err != nil {
-			log.Errorf("unable to parse help message for %s", r)
-			return ""
-		}
-	}
-	s := sb.String()
-	// Remove trailing newline.
-	return s[:len(s)-1]
+// fieldInfo holds metadata for a single struct field, extracted via reflection.
+type fieldInfo struct {
+	jsonName   string
+	typeName   string // "string", "int", "bool", "password", "object", "array", "any"
+	isPassword bool   // true if Go type is encode.PassBytes
+	isOptional bool   // true if pointer or omitempty
+	desc       string // from routeInfo.fieldDescs
 }
 
-// commandUsage returns a help message for cmd or an error if cmd is unknown.
-func commandUsage(cmd string, includePasswords bool) (string, error) {
-	msg, exists := helpMsgs[cmd]
-	if !exists {
-		return "", fmt.Errorf("%w: %s", errUnknownCmd, cmd)
-	}
-	// If help should include password arguments and this command has
-	// password arguments, return them as part of the help message.
-	if includePasswords && msg.pwArgsShort != "" {
-		return fmt.Sprintf("%s %s%s\n\n%s\n\n%s%s%s",
-			cmd, format(msg.pwArgsShort, " "), msg.argsShort,
-			msg.cmdSummary, format(msg.pwArgsLong, "\n\n"), format(msg.argsLong, "\n\n"),
-			msg.returns), nil
-	}
-	return fmt.Sprintf("%s %s\n\n%s\n\n%s%s", cmd, msg.argsShort,
-		msg.cmdSummary, format(msg.argsLong, "\n\n"), msg.returns), nil
-}
+// Common field description constants.
+const (
+	descAppPass     = "The Bison Wallet password."
+	descAssetID     = "The asset's BIP-44 registered coin index. e.g. 42 for DCR. See https://github.com/satoshilabs/slips/blob/master/slip-0044.md"
+	descHost        = "The DEX address."
+	descCert        = "The TLS certificate path."
+	descBase        = "The BIP-44 coin index for the market's base asset."
+	descQuote       = "The BIP-44 coin index for the market's quote asset."
+	descFromAssetID = `The asset's BIP-44 registered coin index on the "from" chain.`
+	descToAssetID   = `The asset's BIP-44 registered coin index on the "to" chain.`
+	descBridgeName  = "The name of the bridge."
+	descCsvFilePath = "The csv file path from the point of view of the client, not bwctl."
+)
 
-// sortHelpKeys returns a sorted list of helpMsgs keys.
-func sortHelpKeys() []string {
-	keys := make([]string, 0, len(helpMsgs))
-	for k := range helpMsgs {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	return keys
-}
-
-type helpMsg struct {
-	pwArgsShort, argsShort, cmdSummary, pwArgsLong, argsLong, returns string
-}
-
-// helpMsgs are a map of routes to help messages. They are broken down into six
-// sections.
-// In descending order:
-//  1. Password argument example inputs. These are arguments the caller may not
-//     want to echo listed in order of input.
-//  2. Argument example inputs. These are non-sensitive arguments listed in
-//     order of input.
-//  3. A description of the command.
-//  4. An extensive breakdown of the password arguments.
-//  5. An extensive breakdown of the arguments.
-//  6. An extensive breakdown of the returned values.
-var helpMsgs = map[string]helpMsg{
+// routeInfos maps each route to its parameter type and help metadata.
+var routeInfos = map[string]routeInfo{
 	helpRoute: {
-		pwArgsShort: ``,                           // password args example input
-		argsShort:   `("cmd") (includePasswords)`, // args example input
-		cmdSummary:  `Print a help message.`,      // command explanation
-		pwArgsLong:  ``,                           // password args breakdown
-		argsLong: `Args:
-    cmd (string): Optional. The command to print help for.
-    includePasswords (bool): Optional. Default is false. Whether to include
-      password arguments in the returned help.`, // args breakdown
+		paramsType: reflect.TypeOf(HelpParams{}),
+		summary:    `Print a help message.`,
+		fieldDescs: map[string]string{
+			"helpWith":         "The command to print help for.",
+			"includePasswords": "Whether to include password arguments in the returned help.",
+		},
 		returns: `Returns:
-    string: The help message for command.`, // returns breakdown
+    string: The help message for command.`,
 	},
 	versionRoute: {
-		cmdSummary: `Print the Bison Wallet rpcserver version.`,
+		summary: `Print the Bison Wallet rpcserver version.`,
 		returns: `Returns:
     string: The Bison Wallet rpcserver version.`,
 	},
 	discoverAcctRoute: {
-		pwArgsShort: `"appPass"`,
-		argsShort:   `"addr" ("cert")`,
-		cmdSummary: `Discover an account that is used for a dex. Useful when restoring
-    an account and can be used in place of register. Will error if
-    the account has already been discovered/restored.`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.`,
-		argsLong: `Args:
-    addr (string): The DEX address to discover an account for.
-    cert (string): Optional. The TLS certificate path.`,
+		paramsType: reflect.TypeOf(DiscoverAcctParams{}),
+		summary: `Discover an account that is used for a DEX. Useful when restoring
+    an account. Will error if the account has already been discovered/restored.`,
+		fieldDescs: map[string]string{
+			"appPass": descAppPass,
+			"addr":    "The DEX address to discover an account for.",
+			"cert":    descCert,
+		},
 		returns: `Returns:
-    bool: True if the account has has been registered and paid for.`,
+    bool: True if the account has been registered and paid for.`,
 	},
 	initRoute: {
-		pwArgsShort: `"appPass"`,
-		argsShort:   `("seed")`,
-		cmdSummary:  `Initialize the client.`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.`,
-		argsLong: `Args:
-    seed (string): Optional. hex-encoded 512-bit restoration seed.`,
+		paramsType: reflect.TypeOf(InitParams{}),
+		summary:    `Initialize the client.`,
+		fieldDescs: map[string]string{
+			"appPass": descAppPass,
+			"seed":    "hex-encoded 512-bit restoration seed or mnemonic.",
+		},
 		returns: `Returns:
     string: The message "` + initializedStr + `"`,
 	},
 	deleteArchivedRecordsRoute: {
-		argsShort: `("unix time milli") ("matches csv path") ("orders csv path")`,
-		cmdSummary: `Delete archived records from the database and returns total deleted. Optionally
-	set a time to delete records before and file paths to save deleted records as comma separated
+		paramsType: reflect.TypeOf(DeleteRecordsParams{}),
+		summary: `Delete archived records from the database and returns total deleted. Optionally
+    set a time to delete records before and file paths to save deleted records as comma separated
     values. Note that file locations are from the perspective of dexc and not the caller.`,
-		argsLong: `Args:
-    unix time milli (int): Optional. If set deletes records before the date in unix time
-      in milliseconds (not seconds). Unset or 0 will default to the current time.
-    matches csv path (string): Optional. A path to save a csv with deleted matches.
-      Will not save by default.
-    orders csv path (string): Optional. A path to save a csv with deleted orders.
-      Will not save by default.`,
+		fieldDescs: map[string]string{
+			"olderThanMs": "If set, deletes records before the date in unix time in milliseconds (not seconds). Unset or 0 defaults to the current time.",
+			"matchesFile": "A path to save a csv with deleted matches. Will not save by default.",
+			"ordersFile":  "A path to save a csv with deleted orders. Will not save by default.",
+		},
 		returns: `Returns:
     Nothing.`,
 	},
 	bondAssetsRoute: {
-		argsShort:  `"dex" ("cert")`,
-		cmdSummary: `Get dex bond asset config.`,
-		argsLong: `Args:
-    dex (string): The dex address to get bond info for.
-    cert (string): Optional. The TLS certificate path.`,
+		paramsType: reflect.TypeOf(BondAssetsParams{}),
+		summary:    `Get dex bond asset config.`,
+		fieldDescs: map[string]string{
+			"host": "The dex address to get bond info for.",
+			"cert": descCert,
+		},
 		returns: `Returns:
     obj: The getBondAssets result.
     {
       "expiry" (int): Bond expiry in seconds remaining until locktime.
-	  "assets" (object): {
-		"id" (int): The BIP-44 coin type for the asset.
-		"confs" (int): The required confirmations for the bond transaction.
-		"amount" (int): The minimum bond amount.
-	  }
+      "assets" (object): {
+        "id" (int): The BIP-44 coin type for the asset.
+        "confs" (int): The required confirmations for the bond transaction.
+        "amount" (int): The minimum bond amount.
+      }
     }`,
 	},
 	getDEXConfRoute: {
-		argsShort:  `"dex" ("cert")`,
-		cmdSummary: `Get a DEX configuration.`,
-		argsLong: `Args:
-    dex (string): The dex address to get config for.
-    cert (string): Optional. The TLS certificate path.`,
+		paramsType: reflect.TypeOf(GetDEXConfigParams{}),
+		summary:    `Get a DEX configuration.`,
+		fieldDescs: map[string]string{
+			"host": "The dex address to get config for.",
+			"cert": descCert,
+		},
 		returns: `Returns:
     obj: The getdexconfig result. See the 'exchanges' result.`,
 	},
 	newWalletRoute: {
-		pwArgsShort: `"appPass" "walletPass"`,
-		argsShort:   `assetID walletType ("path" "settings")`,
-		cmdSummary:  `Connect to a new wallet.`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.
-    walletPass (string): The wallet's password. Leave the password empty for wallets without a password set.`,
-		argsLong: `Args:
-    assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
-      See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
-    walletType (string): The wallet type.
-    path (string): Optional. The path to a configuration file.
-    settings (string): A JSON-encoded string->string mapping of additional
-       configuration settings. These settings take precedence over any settings
-       parsed from file. e.g. '{"account":"default"}' for Decred accounts, and
-       '{"walletname":""}' for the default Bitcoin wallet where bitcoind's listwallets RPC gives possible walletnames.`,
+		paramsType: reflect.TypeOf(NewWalletParams{}),
+		summary:    `Connect to a new wallet.`,
+		fieldDescs: map[string]string{
+			"appPass":    descAppPass,
+			"walletPass": "The wallet's password. Leave the password empty for wallets without a password set.",
+			"assetID":    descAssetID,
+			"walletType": "The wallet type.",
+			"config":     `A JSON string->string mapping of additional configuration settings. These settings take precedence over any settings parsed from file.`,
+		},
 		returns: `Returns:
     string: The message "` + fmt.Sprintf(walletCreatedStr, "[coin symbol]") + `"`,
+		extraHelp: walletTypesHelp,
 	},
 	openWalletRoute: {
-		pwArgsShort: `"appPass"`,
-		argsShort:   `assetID`,
-		cmdSummary:  `Open an existing wallet.`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.`,
-		argsLong: `Args:
-    assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
-      See https://github.com/satoshilabs/slips/blob/master/slip-0044.md`,
+		paramsType: reflect.TypeOf(OpenWalletParams{}),
+		summary:    `Open an existing wallet.`,
+		fieldDescs: map[string]string{
+			"appPass": descAppPass,
+			"assetID": descAssetID,
+		},
 		returns: `Returns:
     string: The message "` + fmt.Sprintf(walletUnlockedStr, "[coin symbol]") + `"`,
 	},
 	closeWalletRoute: {
-		argsShort:  `assetID`,
-		cmdSummary: `Close an open wallet.`,
-		argsLong: `Args:
-    assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
-      See https://github.com/satoshilabs/slips/blob/master/slip-0044.md`,
+		paramsType: reflect.TypeOf(CloseWalletParams{}),
+		summary:    `Close an open wallet.`,
+		fieldDescs: map[string]string{
+			"assetID": descAssetID,
+		},
 		returns: `Returns:
     string: The message "` + fmt.Sprintf(walletLockedStr, "[coin symbol]") + `"`,
 	},
 	toggleWalletStatusRoute: {
-		pwArgsShort: "appPass",
-		argsShort:   `assetID disable`,
-		cmdSummary: `Disable or enable an existing wallet. When disabling a chain's primary asset wallet,
-	all token wallets for that chain will be disabled too.`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.`,
-		argsLong: `Args:
-   assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
-                  See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
-  disable (bool): The wallet's status. e.g To disable a wallet set to "true", to enable set to "false".`,
+		paramsType: reflect.TypeOf(ToggleWalletStatusParams{}),
+		summary: `Disable or enable an existing wallet. When disabling a chain's primary asset wallet,
+    all token wallets for that chain will be disabled too.`,
+		fieldDescs: map[string]string{
+			"assetID": descAssetID,
+			"disable": `The wallet's status. To disable a wallet set to true, to enable set to false.`,
+		},
 		returns: `Returns:
     string: The message "` + fmt.Sprintf(walletStatusStr, "[coin symbol]", "[wallet status]") + `".`,
 	},
 	walletsRoute: {
-		cmdSummary: `List all wallets.`,
+		summary: `List all wallets.`,
 		returns: `Returns:
     array: An array of wallet results.
     [
       {
         "symbol" (string): The coin symbol.
         "assetID" (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
-          See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
         "open" (bool): Whether the wallet is unlocked.
         "running" (bool): Whether the wallet is running.
-		"disabled" (bool): Whether the wallet is disabled.
+        "disabled" (bool): Whether the wallet is disabled.
         "updated" (int): Unix time of last balance update. Seconds since 00:00:00 Jan 1 1970.
         "balance" (obj): {
           "available" (int): The balance available for funding orders case.
@@ -1684,18 +1633,20 @@ var helpMsgs = map[string]helpMsg{
     ]`,
 	},
 	postBondRoute: {
-		pwArgsShort: `"appPass"`,
-		argsShort:   `"addr" bond assetID (maintain "cert")`,
-		cmdSummary: `Post new bond for DEX. An ok response does not mean that the bond is active.
-		Bond is active after the bond transaction has been confirmed and the server notified.`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.`,
-		argsLong: `Args:
-    addr (string): The DEX address to post bond for for.
-    bond (int): The bond amount (in DCR presently).
-    assetID (int): The asset ID with which to pay the fee.
-    maintain (bool): Optional. Whether to maintain the trading tier established by this bond. Only applicable when registering. (default is true)
-    cert (string): Optional. The TLS certificate path. Only applicable when registering.`,
+		paramsType: reflect.TypeOf(core.PostBondForm{}),
+		summary: `Post new bond for DEX. An ok response does not mean that the bond is active.
+    Bond is active after the bond transaction has been confirmed and the server notified.`,
+		fieldDescs: map[string]string{
+			"host":         descHost,
+			"appPass":      descAppPass,
+			"assetID":      "The asset ID with which to pay the fee.",
+			"bond":         "The bond amount.",
+			"lockTime":     "The lock time. 0 means go with server-derived value.",
+			"feeBuffer":    "Optional fee buffer to use during wallet funding.",
+			"maintainTier": "Whether to maintain the trading tier established by this bond.",
+			"maxBondedAmt": "The maximum amount that may be locked in bonds.",
+			"cert":         "The TLS certificate path. Only applicable when registering.",
+		},
 		returns: `Returns:
     {
       "bondID" (string): The bond transactions's txid and output index.
@@ -1703,32 +1654,33 @@ var helpMsgs = map[string]helpMsg{
     }`,
 	},
 	bondOptionsRoute: {
-		argsShort:  `"addr" targetTier (maxBondedAmt bondAssetID penaltyComps)`,
-		cmdSummary: `Change bond options for a DEX.`,
-		argsLong: `Args:
-    addr (string): The DEX address to post bond for for.
-    targetTier (int): The target trading tier.
-    maxBondedAmt (int): The maximum amount that may be locked in bonds.
-    bondAssetID (int): The asset ID with which to auto-post bonds.
-    penaltyComp (int): The maximum number of penalties to compensate`,
+		paramsType: reflect.TypeOf(core.BondOptionsForm{}),
+		summary:    `Change bond options for a DEX.`,
+		fieldDescs: map[string]string{
+			"host":         descHost,
+			"targetTier":   "The target trading tier.",
+			"maxBondedAmt": "The maximum amount that may be locked in bonds.",
+			"bondAssetID":  "The asset ID with which to auto-post bonds.",
+			"penaltyComps": "The maximum number of penalties to compensate.",
+		},
 		returns: `Returns: "ok"`,
 	},
 	exchangesRoute: {
-		cmdSummary: `Detailed information about known exchanges and markets.`,
+		summary: `Detailed information about known exchanges and markets.`,
 		returns: `Returns:
     obj: The exchanges result.
     {
       "[DEX host]": {
-        "acctID" (string):  The client's account ID associated with this DEX.,
+        "acctID" (string): The client's account ID associated with this DEX.
         "markets": {
           "[assetID-assetID]": {
             "baseid" (int): The base asset ID
             "basesymbol" (string): The base ticker symbol.
             "quoteid" (int): The quote asset ID.
-            "quotesymbol" (string): The quote asset ID symbol,
-            "epochlen" (int): Duration of a epoch in milliseconds.
+            "quotesymbol" (string): The quote asset ID symbol.
+            "epochlen" (int): Duration of an epoch in milliseconds.
             "startepoch" (int): Time of start of the last epoch in milliseconds
-	      since 00:00:00 Jan 1 1970.
+              since 00:00:00 Jan 1 1970.
             "buybuffer" (float): The minimum order size for a market buy order.
           },...
         },
@@ -1741,7 +1693,7 @@ var helpMsgs = map[string]helpMsg{
             "swapSize" (int): The size of a swap transaction in bytes.
             "swapSizeBase" (int): The size of a swap transaction minus inputs in bytes.
             "swapConf" (int): The number of confirmations needed to confirm
-	      trade transactions.
+              trade transactions.
           },...
         },
         "regFees": {
@@ -1755,10 +1707,11 @@ var helpMsgs = map[string]helpMsg{
     }`,
 	},
 	loginRoute: {
-		pwArgsShort: `"appPass"`,
-		cmdSummary:  `Attempt to login to all registered DEX servers.`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.`,
+		paramsType: reflect.TypeOf(LoginParams{}),
+		summary:    `Attempt to login to all registered DEX servers.`,
+		fieldDescs: map[string]string{
+			"appPass": descAppPass,
+		},
 		returns: `Returns:
     obj: A map of notifications and dexes.
     {
@@ -1788,23 +1741,21 @@ var helpMsgs = map[string]helpMsg{
     }`,
 	},
 	tradeRoute: {
-		pwArgsShort: `"appPass"`,
-		argsShort:   `"host" isLimit sell base quote qty rate immediate`,
-		cmdSummary:  `Make an order to buy or sell an asset.`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.`,
-		argsLong: `Args:
-    host (string): The DEX to trade on.
-    isLimit (bool): Whether the order is a limit order.
-    sell (bool): Whether the order is selling.
-    base (int): The BIP-44 coin index for the market's base asset.
-    quote (int): The BIP-44 coin index for the market's quote asset.
-    qty (int): The number of units to buy/sell. Must be a multiple of the lot size.
-    rate (int): The atoms quote asset to pay/accept per unit base asset. e.g.
-      156000 satoshi/DCR for the DCR(base)_BTC(quote).
-    immediate (bool): Require immediate match. Do not book the order.
-    options (string): A JSON-encoded string->string mapping of additional
-       trade options.`,
+		paramsType: reflect.TypeOf(TradeParams{}),
+		summary:    `Make an order to buy or sell an asset.`,
+		fieldDescs: map[string]string{
+			"appPass": descAppPass,
+			"host":    "The DEX to trade on.",
+			"isLimit": "Whether the order is a limit order.",
+			"sell":    "Whether the order is selling.",
+			"base":    descBase,
+			"quote":   descQuote,
+			"qty":     "The number of units to buy/sell. Must be a multiple of the lot size.",
+			"rate": `The atoms quote asset to pay/accept per unit base asset. e.g.
+      156000 satoshi/DCR for the DCR(base)_BTC(quote).`,
+			"tifnow":  "Require immediate match. Do not book the order.",
+			"options": "A JSON-encoded string->string mapping of additional trade options.",
+		},
 		returns: `Returns:
     obj: The order details.
     {
@@ -1815,21 +1766,18 @@ var helpMsgs = map[string]helpMsg{
     }`,
 	},
 	multiTradeRoute: {
-		pwArgsShort: `"appPass"`,
-		argsShort:   `"host" sell base quote maxLock [[qty,rate]] options`,
-		cmdSummary:  `Place multiple orders in one go.`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.`,
-		argsLong: `Args:
-    host (string): The DEX to trade on.
-    sell (bool): Whether the order is selling.
-    base (int): The BIP-44 coin index for the market's base asset.
-    quote (int): The BIP-44 coin index for the market's quote asset.
-    maxLock (int): The maximum amount the wallet can lock for this order. 0 means no limit.
-    placements ([[int,int]]):  An array of [qty,rate] placements. Quantity must be
-	 a multiple of the lot size. Rate must be in atomic units of the quote asset.
-    options (string): A JSON-encoded string->string mapping of additional
-       trade options.`,
+		paramsType: reflect.TypeOf(MultiTradeParams{}),
+		summary:    `Place multiple orders in one go.`,
+		fieldDescs: map[string]string{
+			"appPass":   descAppPass,
+			"host":      "The DEX to trade on.",
+			"sell":      "Whether the order is selling.",
+			"base":      descBase,
+			"quote":     descQuote,
+			"placement": "An array of [qty,rate] placements.",
+			"options":   "A JSON-encoded string->string mapping of additional trade options.",
+			"maxLock":   "The maximum amount the wallet can lock for this order. 0 means no limit.",
+		},
 		returns: `Returns:
     obj: The details of each order.
     [{
@@ -1840,37 +1788,33 @@ var helpMsgs = map[string]helpMsg{
     }]`,
 	},
 	cancelRoute: {
-		pwArgsShort: `"appPass"`,
-		argsShort:   `"orderID"`,
-		cmdSummary:  `Cancel an order.`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.`,
-		argsLong: `Args:
-    orderID (string): The hex ID of the order to cancel`,
+		paramsType: reflect.TypeOf(CancelParams{}),
+		summary:    `Cancel an order.`,
+		fieldDescs: map[string]string{
+			"orderID": "The hex ID of the order to cancel.",
+		},
 		returns: `Returns:
     string: The message "` + fmt.Sprintf(canceledOrderStr, "[order ID]") + `"`,
 	},
 	rescanWalletRoute: {
-		argsShort: `assetID (force)`,
-		cmdSummary: `Initiate a rescan of an asset's wallet. This is only supported for certain
+		paramsType: reflect.TypeOf(RescanWalletParams{}),
+		summary: `Initiate a rescan of an asset's wallet. This is only supported for certain
 wallet types. Wallet resynchronization may be asynchronous, and the wallet
 state should be consulted for progress.
 
 WARNING: It is ill-advised to initiate a wallet rescan with active orders
 unless as a last ditch effort to get the wallet to recognize a transaction
 needed to complete a swap.`,
+		fieldDescs: map[string]string{
+			"assetID": descAssetID,
+			"force":   "Force a wallet rescan even if there are active orders.",
+		},
 		returns: `Returns:
     string: "started"`,
-		argsLong: `Args:
-    assetID (int): The asset's BIP-44 registered coin index. Used to identify
-      which wallet to withdraw from. e.g. 42 for DCR. See
-      https://github.com/satoshilabs/slips/blob/master/slip-0044.md
-    force (bool): Force a wallet rescan even if their are active orders. The
-      default is false.`,
 	},
 	abandonTxRoute: {
-		argsShort: `assetID "txID"`,
-		cmdSummary: `Abandon an unconfirmed transaction. This marks the transaction and all
+		paramsType: reflect.TypeOf(AbandonTxParams{}),
+		summary: `Abandon an unconfirmed transaction. This marks the transaction and all
 its descendants as abandoned, allowing the wallet to forget about it and
 potentially spend its inputs in a different transaction. This is useful when
 a transaction gets stuck (e.g., due to low fees).
@@ -1878,60 +1822,53 @@ a transaction gets stuck (e.g., due to low fees).
 Note: This only works for unconfirmed transactions. Returns an error if the
 transaction is confirmed or does not exist in the wallet. Currently only
 supported for DCR wallets.`,
-		argsLong: `Args:
-    assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
-      See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
-    txID (string): The transaction ID (hash) to abandon.`,
+		fieldDescs: map[string]string{
+			"assetID": descAssetID,
+			"txID":    "The transaction ID (hash) to abandon.",
+		},
 		returns: `Returns:
     string: Success message on completion.`,
 	},
 	withdrawRoute: {
-		pwArgsShort: `"appPass"`,
-		argsShort:   `assetID value "address"`,
-		cmdSummary:  `Withdraw value from an exchange wallet to address. Fees are subtracted from the value.`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.`,
-		argsLong: `Args:
-    assetID (int): The asset's BIP-44 registered coin index. Used to identify
-      which wallet to withdraw from. e.g. 42 for DCR. See
-      https://github.com/satoshilabs/slips/blob/master/slip-0044.md
-    value (int): The amount to withdraw in units of the asset's smallest
-      denomination (e.g. satoshis, atoms, etc.)"
-    address (string): The address to which withdrawn funds are sent.`,
+		paramsType: reflect.TypeOf(SendParams{}),
+		summary:    `Withdraw value from an exchange wallet to address. Fees are subtracted from the value.`,
+		fieldDescs: map[string]string{
+			"appPass":  descAppPass,
+			"assetID":  descAssetID,
+			"value":    "The amount to withdraw in units of the asset's smallest denomination (e.g. satoshis, atoms, etc.)",
+			"address":  "The address to which withdrawn funds are sent.",
+			"subtract": "Whether to subtract the tx fee from the value.",
+		},
 		returns: `Returns:
     string: "[coin ID]"`,
 	},
 	sendRoute: {
-		pwArgsShort: `"appPass"`,
-		argsShort:   `assetID value "address"`,
-		cmdSummary:  `Sends exact value from an exchange wallet to address.`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.`,
-		argsLong: `Args:
-    assetID (int): The asset's BIP-44 registered coin index. Used to identify
-      which wallet to withdraw from. e.g. 42 for DCR. See
-      https://github.com/satoshilabs/slips/blob/master/slip-0044.md
-    value (int): The amount to send in units of the asset's smallest
-      denomination (e.g. satoshis, atoms, etc.)"
-    address (string): The address to which funds are sent.`,
+		paramsType: reflect.TypeOf(SendParams{}),
+		summary:    `Sends exact value from an exchange wallet to address.`,
+		fieldDescs: map[string]string{
+			"appPass":  descAppPass,
+			"assetID":  descAssetID,
+			"value":    "The amount to send in units of the asset's smallest denomination (e.g. satoshis, atoms, etc.)",
+			"address":  "The address to which funds are sent.",
+			"subtract": "Whether to subtract the tx fee from the value.",
+		},
 		returns: `Returns:
     string: "[coin ID]"`,
 	},
 	logoutRoute: {
-		cmdSummary: `Logout of Bison Wallet.`,
+		summary: `Logout of Bison Wallet.`,
 		returns: `Returns:
     string: The message "` + logoutStr + `"`,
 	},
 	orderBookRoute: {
-		argsShort:  `"host" base quote (nOrders)`,
-		cmdSummary: `Retrieve all orders for a market.`,
-		argsLong: `Args:
-    host (string): The DEX to retrieve the order book from.
-    base (int): The BIP-44 coin index for the market's base asset.
-    quote (int): The BIP-44 coin index for the market's quote asset.
-    nOrders (int): Optional. Default is 0, which returns all orders. The number
-      of orders from the top of buys and sells to return. Epoch orders are not
-      truncated.`,
+		paramsType: reflect.TypeOf(OrderBookParams{}),
+		summary:    `Retrieve all orders for a market.`,
+		fieldDescs: map[string]string{
+			"host":    "The DEX to retrieve the order book from.",
+			"base":    descBase,
+			"quote":   descQuote,
+			"nOrders": "The number of orders from the top of buys and sells to return. 0 returns all. Epoch orders are not truncated.",
+		},
 		returns: `Returns:
     obj: A map of orders.
     {
@@ -1968,168 +1905,164 @@ supported for DCR wallets.`,
     }`,
 	},
 	myOrdersRoute: {
-		argsShort: `("host") (base) (quote)`,
-		cmdSummary: `Fetch all active and recently executed orders
+		paramsType: reflect.TypeOf(MyOrdersParams{}),
+		summary: `Fetch all active and recently executed orders
     belonging to the user.`,
-		argsLong: `Args:
-    host (string): Optional. The DEX to show orders from.
-    base (int): Optional. The BIP-44 coin index for the market's base asset.
-    quote (int): Optional. The BIP-44 coin index for the market's quote asset.`,
+		fieldDescs: map[string]string{
+			"host":  "The DEX to show orders from.",
+			"base":  descBase,
+			"quote": descQuote,
+		},
 		returns: `Returns:
-  array: An array of orders.
-  [
-    {
-      "host" (string): The DEX address.
-      "marketName" (string): The market's name. e.g. "DCR_BTC".
-      "baseID" (int): The market's base asset BIP-44 coin index. e.g. 42 for DCR.
-      "quoteID" (int): The market's quote asset BIP-44 coin index. e.g. 0 for BTC.
-      "id" (string): The order's unique hex ID.
-      "type" (string): The type of order. "limit", "market", or "cancel".
-      "sell" (string): Whether this order is selling.
-      "stamp" (int): Server's time stamp of the order in milliseconds since 00:00:00 Jan 1 1970.
-      "submitTime" (int): Time of order submission, also in milliseconds.
-      "age" (string): The time that this order has been active in human readable form.
-      "rate" (int): The exchange rate limit. Limit orders only. Units: quote
-        asset per unit base asset.
-      "quantity" (int): The amount being traded.
-      "filled" (int): The order quantity that has matched.
-      "settled" (int): The sum quantity of all completed matches.
-      "status" (string): The status of the order. "epoch", "booked", "executed",
-        "canceled", or "revoked".
-      "cancelling" (bool): Whether this order is in the process of cancelling.
-      "canceled" (bool): Whether this order has been canceled.
-      "tif" (string): "immediate" if this limit order will only match for one epoch.
-        "standing" if the order can continue matching until filled or cancelled.
-      "matches": (array): An array of matches associated with the order.
-      [
-        {
-          "matchID (string): The match's ID."
-          "status" (string): The match's status."
-          "revoked" (bool): Indicates if match was revoked.
-          "rate"    (int): The match's rate.
-          "qty"     (int): The match's amount.
-          "side"    (string): The match's side, "maker" or "taker".
-          "feerate" (int): The match's fee rate.
-          "swap"    (string): The match's swap transaction.
-          "counterSwap" (string): The match's counter swap transaction.
-          "redeem" (string): The match's redeem transaction.
-          "counterRedeem" (string): The match's counter redeem transaction.
-          "refund" (string): The match's refund transaction.
-          "stamp" (int): The match's stamp.
-          "isCancel" (bool): Indicates if match is canceled.
-        },...
-      ]
-    },...
-  ]`,
+    array: An array of orders.
+    [
+      {
+        "host" (string): The DEX address.
+        "marketName" (string): The market's name. e.g. "DCR_BTC".
+        "baseID" (int): The market's base asset BIP-44 coin index. e.g. 42 for DCR.
+        "quoteID" (int): The market's quote asset BIP-44 coin index. e.g. 0 for BTC.
+        "id" (string): The order's unique hex ID.
+        "type" (string): The type of order. "limit", "market", or "cancel".
+        "sell" (string): Whether this order is selling.
+        "stamp" (int): Server's time stamp of the order in milliseconds since 00:00:00 Jan 1 1970.
+        "submitTime" (int): Time of order submission, also in milliseconds.
+        "age" (string): The time that this order has been active in human readable form.
+        "rate" (int): The exchange rate limit. Limit orders only. Units: quote
+          asset per unit base asset.
+        "quantity" (int): The amount being traded.
+        "filled" (int): The order quantity that has matched.
+        "settled" (int): The sum quantity of all completed matches.
+        "status" (string): The status of the order. "epoch", "booked", "executed",
+          "canceled", or "revoked".
+        "cancelling" (bool): Whether this order is in the process of cancelling.
+        "canceled" (bool): Whether this order has been canceled.
+        "tif" (string): "immediate" if this limit order will only match for one epoch.
+          "standing" if the order can continue matching until filled or cancelled.
+        "matches": (array): An array of matches associated with the order.
+        [
+          {
+            "matchID (string): The match's ID."
+            "status" (string): The match's status."
+            "revoked" (bool): Indicates if match was revoked.
+            "rate"    (int): The match's rate.
+            "qty"     (int): The match's amount.
+            "side"    (string): The match's side, "maker" or "taker".
+            "feerate" (int): The match's fee rate.
+            "swap"    (string): The match's swap transaction.
+            "counterSwap" (string): The match's counter swap transaction.
+            "redeem" (string): The match's redeem transaction.
+            "counterRedeem" (string): The match's counter redeem transaction.
+            "refund" (string): The match's refund transaction.
+            "stamp" (int): The match's stamp.
+            "isCancel" (bool): Indicates if match is canceled.
+          },...
+        ]
+      },...
+    ]`,
 	},
 	appSeedRoute: {
-		pwArgsShort: `"appPass"`,
-		cmdSummary: `Show the application's seed. It is recommended to not store the seed
-  digitally. Make a copy on paper with pencil and keep it safe.`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.`,
+		paramsType: reflect.TypeOf(AppSeedParams{}),
+		summary: `Show the application's seed. It is recommended to not store the seed
+    digitally. Make a copy on paper with pencil and keep it safe.`,
+		fieldDescs: map[string]string{
+			"appPass": descAppPass,
+		},
 		returns: `Returns:
     string: The application's seed as hex.`,
 	},
 	walletPeersRoute: {
-		cmdSummary: `Show the peers a wallet is connected to.`,
-		argsShort:  `(assetID)`,
-		argsLong: `Args:
-		assetID (int): The asset's BIP-44 registered coin index. Used to identify
-		which wallet's peers to return.`,
+		paramsType: reflect.TypeOf(WalletPeersParams{}),
+		summary:    `Show the peers a wallet is connected to.`,
+		fieldDescs: map[string]string{
+			"assetID": descAssetID,
+		},
 		returns: `Returns:
-		[]string: Addresses of wallet peers.`,
+    []string: Addresses of wallet peers.`,
 	},
 	addWalletPeerRoute: {
-		cmdSummary: `Add a new wallet peer connection.`,
-		argsShort:  `(assetID) (addr)`,
-		argsLong: `Args:
-		assetID (int): The asset's BIP-44 registered coin index. Used to identify
-		which wallet to add a peer.
-		addr (string): The peer's address (host:port).`,
+		paramsType: reflect.TypeOf(AddRemovePeerParams{}),
+		summary:    `Add a new wallet peer connection.`,
+		fieldDescs: map[string]string{
+			"assetID": descAssetID,
+			"address": "The peer's address (host:port).",
+		},
 	},
 	removeWalletPeerRoute: {
-		cmdSummary: `Remove an added wallet peer.`,
-		argsShort:  `(assetID) (addr)`,
-		argsLong: `Args:
-		assetID (int): The asset's BIP-44 registered coin index. Used to identify
-		which wallet to add a peer.
-		addr (string): The peer's address (host:port).`,
+		paramsType: reflect.TypeOf(AddRemovePeerParams{}),
+		summary:    `Remove an added wallet peer.`,
+		fieldDescs: map[string]string{
+			"assetID": descAssetID,
+			"address": "The peer's address (host:port).",
+		},
 	},
 	notificationsRoute: {
-		cmdSummary: `See recent notifications.`,
-		argsShort:  `(num)`,
-		argsLong: `Args:
-		num (int): The number of notifications to load.`,
+		paramsType: reflect.TypeOf(NotificationsParams{}),
+		summary:    `See recent notifications.`,
+		fieldDescs: map[string]string{
+			"n": "The number of notifications to load.",
+		},
 	},
 	startBotRoute: {
-		pwArgsShort: `"appPass"`,
-		cmdSummary:  `Start market making bot(s).`,
-		argsShort:   `cfgPath [host baseID quoteID]`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.`,
-		argsLong: `Args:
-    cfgPath (string): The path to the market maker config file.
-    host (string, optional): The DEX address. If not provided, starts all bots in config.
-    baseID (int, optional): The base asset's BIP-44 registered coin index.
-    quoteID (int, optional): The quote asset's BIP-44 registered coin index.`,
+		paramsType: reflect.TypeOf(StartBotParams{}),
+		summary:    `Start market making bot(s).`,
+		fieldDescs: map[string]string{
+			"appPass":     descAppPass,
+			"cfgFilePath": "The path to the market maker config file.",
+			"market":      "The market to start a bot for. If not provided, starts all bots in config.",
+		},
 	},
 	stopBotRoute: {
-		cmdSummary: `Stop market making bot(s).`,
-		argsShort:  `[host baseID quoteID]`,
-		argsLong: `Args:
-    host (string, optional): The DEX address. If not provided, stops all running bots.
-    baseID (int, optional): The base asset's BIP-44 registered coin index.
-    quoteID (int, optional): The quote asset's BIP-44 registered coin index.`,
+		paramsType: reflect.TypeOf(StopBotParams{}),
+		summary:    `Stop market making bot(s).`,
+		fieldDescs: map[string]string{
+			"market": "The market to stop a bot for. If not provided, stops all running bots.",
+		},
 	},
 	mmAvailableBalancesRoute: {
-		cmdSummary: `Get available balances for starting a bot or adding additional balance to a running bot.`,
-		argsShort:  `(cfgPath) (host) (baseID) (quoteID) [cexBaseID] [cexQuoteID] [cexName]`,
-		argsLong: `Args:
-		cfgPath (string): The path to the market maker config file.
-		host (string): The DEX address.
-		baseID (int): The base asset's BIP-44 registered coin index.
-		quoteID (int): The quote asset's BIP-44 registered coin index.
-		cexBaseID (int, optional): The CEX base asset's BIP-44 registered coin index for bridging.
-		cexQuoteID (int, optional): The CEX quote asset's BIP-44 registered coin index for bridging.
-		cexName (string, optional): The name of the CEX to get balances for.`,
+		paramsType: reflect.TypeOf(MMAvailableBalancesParams{}),
+		summary:    `Get available balances for starting a bot or adding additional balance to a running bot.`,
+		fieldDescs: map[string]string{
+			"host":       descHost,
+			"baseID":     "The base asset's BIP-44 registered coin index.",
+			"quoteID":    "The quote asset's BIP-44 registered coin index.",
+			"cexBaseID":  "The CEX base asset's BIP-44 registered coin index for bridging.",
+			"cexQuoteID": "The CEX quote asset's BIP-44 registered coin index for bridging.",
+			"cexName":    "The name of the CEX to get balances for.",
+		},
 	},
 	mmStatusRoute: {
-		cmdSummary: `Get market making status.`,
+		summary: `Get market making status.`,
 	},
 	updateRunningBotCfgRoute: {
-		cmdSummary: `Update the config and optionally the inventory of a running bot`,
-		argsShort:  `(cfgPath) (host) (baseID) (quoteID) (dexInventory) (cexInventory)`,
-		argsLong: `Args:
-		cfgPath (string): The path to the market maker config file.
-		host (string): The DEX address.
-		baseID (int): The base asset's BIP-44 registered coin index.
-		quoteID (int): The quote asset's BIP-44 registered coin index.
-		dexInventory (obj): (optional) The DEX inventory adjustments i.e. [[60,-1000000],[42,10000000]].
-		cexInventory (obj): (optional) The CEX inventory adjustments i.e. [[60,-1000000],[42,10000000]].`,
+		paramsType: reflect.TypeOf(UpdateRunningBotParams{}),
+		summary:    `Update the config and optionally the inventory of a running bot.`,
+		fieldDescs: map[string]string{
+			"cfgFilePath": "The path to the market maker config file.",
+			"market":      "The market for the bot to update.",
+			"balances":    "The inventory adjustments.",
+		},
 	},
 	updateRunningBotInvRoute: {
-		cmdSummary: `Update the inventory of a running bot`,
-		argsShort:  `(host) (baseID) (quoteID) (dexInventory) (cexInventory)`,
-		argsLong: `Args:
-		host (string): The DEX address.
-		baseID (int): The base asset's BIP-44 registered coin index.
-		quoteID (int): The quote asset's BIP-44 registered coin index.
-		dexInventory (obj): The DEX inventory adjustments i.e. [[60,-1000000],[42,10000000]].
-		cexInventory (obj): The CEX inventory adjustments i.e. [[60,-1000000],[42,10000000]].`,
+		paramsType: reflect.TypeOf(UpdateRunningBotInventoryParams{}),
+		summary:    `Update the inventory of a running bot.`,
+		fieldDescs: map[string]string{
+			"market":   "The market for the bot to update.",
+			"balances": "The inventory adjustments.",
+		},
 	},
 	stakeStatusRoute: {
-		cmdSummary: `Get stake status. `,
-		argsShort:  `assetID`,
-		argsLong: `Args:
-  assetID (int): The asset's BIP-44 registered coin index.`,
+		paramsType: reflect.TypeOf(StakeStatusParams{}),
+		summary:    `Get stake status.`,
+		fieldDescs: map[string]string{
+			"assetID": descAssetID,
+		},
 		returns: `Returns:
-  obj: The staking status.
+    obj: The staking status.
     {
       ticketPrice (uint64): The current ticket price in atoms.
       vsp (string): The url of the currently set vsp (voting service provider).
       isRPC (bool): Whether the wallet is an RPC wallet. False indicates
-an spv wallet and enables options to view and set the vsp.
+        an spv wallet and enables options to view and set the vsp.
       tickets (array): An array of ticket objects.
       [
         {
@@ -2141,195 +2074,454 @@ an spv wallet and enables options to view and set the vsp.
             stamp (int): The UNIX time the ticket was purchased.
             blockHeight (int): The block number the ticket was mined.
           },
-          status: (int) The ticket status. 0: unknown, 1: unmined, 2: immature, 3: live,
-                        4: voted, 5: missed, 6:expired, 7: unspent, 8: revoked.
+          status (int): The ticket status. 0: unknown, 1: unmined, 2: immature,
+            3: live, 4: voted, 5: missed, 6: expired, 7: unspent, 8: revoked.
           spender (string): The transaction that votes on or revokes the ticket if available.
-       },
-     ],...
-     stances (obj): Voting policies.
-     {
-       agendas (array): An array of consensus vote choices.
-       [
-         {
-           id (string): The agenda ID,
-           description (string): A description of the agenda being voted on.
-           currentChoice (string): Your current choice.
-           choices ([{id: "string", description: "string"}, ...]): A description of the available choices.
-         },
-       ],...
-       tspends (array): An array of TSpend policies.
-       [
-         {
-           hash (string): The TSpend txid.,
-           value (int): The total value send in the tspend.,
-           currentValue (string): The policy.
-         },
-       ],...
-       treasuryKeys (array): An array of treasury policies.
-       [
-         {
-           key (string): The pubkey of the tspend creator.
-           policy (string): The policy.
-         },
-       ],...
-     }
-  }`,
+        },...
+      ]
+      stances (obj): Voting policies.
+      {
+        agendas (array): An array of consensus vote choices.
+        [
+          {
+            id (string): The agenda ID.
+            description (string): A description of the agenda being voted on.
+            currentChoice (string): Your current choice.
+            choices (array): A description of the available choices.
+          },...
+        ]
+        tspends (array): An array of TSpend policies.
+        [
+          {
+            hash (string): The TSpend txid.
+            value (int): The total value sent in the tspend.
+            currentValue (string): The policy.
+          },...
+        ]
+        treasuryKeys (array): An array of treasury policies.
+        [
+          {
+            key (string): The pubkey of the tspend creator.
+            policy (string): The policy.
+          },...
+        ]
+      }
+    }`,
 	},
 	setVSPRoute: {
-		argsShort:  `assetID "addr"`,
-		cmdSummary: `Set a vsp by url.`,
-		argsLong: `Args:
-  assetID (int): The asset's BIP-44 registered coin index.
-  addr (string): The vsp's url.`,
+		paramsType: reflect.TypeOf(SetVSPParams{}),
+		summary:    `Set a vsp by url.`,
+		fieldDescs: map[string]string{
+			"assetID": descAssetID,
+			"addr":    "The vsp's url.",
+		},
 		returns: `Returns:
-  string: The message "` + fmt.Sprintf(setVSPStr, "[vsp url]") + `"`,
+    string: The message "` + fmt.Sprintf(setVSPStr, "[vsp url]") + `"`,
 	},
 	purchaseTicketsRoute: {
-		pwArgsShort: `"appPass"`,
-		argsShort:   `assetID num`,
-		cmdSummary:  `Starts a asyncrhonous ticket purchasing process. Check stakestatus for number of tickets remaining to be purchased.`,
-		pwArgsLong: `Password Args:
-  appPass (string): The Bison Wallet password.`,
-		argsLong: `Args:
-  assetID (int): The asset's BIP-44 registered coin index.
-  num (int): The number of tickets to purchase`,
+		paramsType: reflect.TypeOf(PurchaseTicketsParams{}),
+		summary:    `Start an asynchronous ticket purchasing process. Check stakestatus for number of tickets remaining to be purchased.`,
+		fieldDescs: map[string]string{
+			"appPass": descAppPass,
+			"assetID": descAssetID,
+			"n":       "The number of tickets to purchase.",
+		},
 		returns: `Returns:
-  	bool: true is the only non-error return value`,
+    bool: true is the only non-error return value`,
 	},
 	setVotingPreferencesRoute: {
-		argsShort:  `assetID (choicesMap) (tSpendPolicyMap) (treasuryPolicyMap)`,
-		cmdSummary: `Cancel an order.`,
-		argsLong: `Args:
-  assetID (int): The asset's BIP-44 registered coin index.
-  choicesMap ({"agendaid": "choiceid", ...}): A map of choices IDs to choice policies.
-  tSpendPolicyMap ({"hash": "policy", ...}): A map of tSpend txids to tSpend policies.
-  treasuryPolicyMap ({"key": "policy", ...}): A map of treasury spender public keys to tSpend policies.`,
+		paramsType: reflect.TypeOf(SetVotingPreferencesParams{}),
+		summary:    `Set voting preferences.`,
+		fieldDescs: map[string]string{
+			"assetID":        descAssetID,
+			"choices":        "A map of agenda IDs to choice IDs.",
+			"tSpendPolicy":   "A map of tSpend txids to tSpend policies.",
+			"treasuryPolicy": "A map of treasury spender public keys to tSpend policies.",
+		},
 		returns: `Returns:
-  string: The message "` + setVotePrefsStr + `"`,
+    string: The message "` + setVotePrefsStr + `"`,
 	},
 	txHistoryRoute: {
-		argsShort:  `assetID (n) (refTxID) (past)`,
-		cmdSummary: `Get transaction history for a wallet`,
-		argsLong: `Args:
-		  assetID (int): The asset's BIP-44 registered coin index.
-		  n (int): Optional. The number of transactions to return. If <= 0 or unset, all transactions are returned.
-		  refTxID (string): Optional. If set, the transactions before or after this tx (depending on the past argument)
-		  will be returned.
-		  past (bool): If true, the transactions before the reference tx will be returned. If false, the
-		  transactions after the reference tx will be returned.`,
+		paramsType: reflect.TypeOf(TxHistoryParams{}),
+		summary:    `Get transaction history for a wallet.`,
+		fieldDescs: map[string]string{
+			"assetID": descAssetID,
+			"n":       "The number of transactions to return. If <= 0 or unset, all transactions are returned.",
+			"refID":   "If set, the transactions before or after this tx (depending on the past argument) will be returned.",
+			"past":    "If true, the transactions before the reference tx will be returned.",
+		},
 	},
 	walletTxRoute: {
-		argsShort:  `assetID txID`,
-		cmdSummary: `Get a wallet transaction`,
-		argsLong: `Args:
-		  assetID (int): The asset's BIP-44 registered coin index.
-		  txID (string): The transaction ID.`,
+		paramsType: reflect.TypeOf(WalletTxParams{}),
+		summary:    `Get a wallet transaction.`,
+		fieldDescs: map[string]string{
+			"assetID": descAssetID,
+			"txID":    "The transaction ID.",
+		},
 	},
 	withdrawBchSpvRoute: {
-		pwArgsShort: `"appPass"`,
-		argsShort:   `recipient`,
-		cmdSummary:  `Get a transaction that will withdraw all funds from the deprecated Bitcoin Cash SPV wallet`,
-		argsLong: `Args:
-		  recipient (string): The Bitcoin Cash address to withdraw the funds to`,
+		paramsType: reflect.TypeOf(BchWithdrawParams{}),
+		summary:    `Get a transaction that will withdraw all funds from the deprecated Bitcoin Cash SPV wallet.`,
+		fieldDescs: map[string]string{
+			"appPass":   descAppPass,
+			"recipient": "The Bitcoin Cash address to withdraw the funds to.",
+		},
 	},
 	bridgeRoute: {
-		argsShort:  `fromAssetID toAssetID value bridgeName`,
-		cmdSummary: "Bridge tokens from one chain to another",
-		argsLong: `Args:
-		fromAssetID (int): The asset's BIP-44 registered coin index on the "from" chain.
-		toAssetID (int): The asset's BIP-44 registered coin index on the "to" chain.
-		value (int): The amount of tokens to bridge.
-		bridgeName (string): The name of the bridge to use.`,
+		paramsType: reflect.TypeOf(BridgeParams{}),
+		summary:    "Bridge tokens from one chain to another.",
+		fieldDescs: map[string]string{
+			"fromAssetID": descFromAssetID,
+			"toAssetID":   descToAssetID,
+			"amt":         "The amount of tokens to bridge.",
+			"bridgeName":  descBridgeName,
+		},
 	},
 	checkBridgeApprovalRoute: {
-		argsShort:  `assetID bridgeName`,
-		cmdSummary: "Check if the bridge contract is approved.",
-		argsLong: `Args:
-		assetID (int): The BIP-44 registered coin index of the asset from where the bridge will be initiated.
-		bridgeName (string): The name of the bridge to check.`,
+		paramsType: reflect.TypeOf(CheckBridgeApprovalParams{}),
+		summary:    "Check if the bridge contract is approved.",
+		fieldDescs: map[string]string{
+			"assetID":    descFromAssetID,
+			"bridgeName": descBridgeName,
+		},
 	},
 	approveBridgeContractRoute: {
-		argsShort:  `assetID bridgeName approve`,
-		cmdSummary: "Approve the bridge contract.",
-		argsLong: `Args:
-		assetID (int): The asset's BIP-44 registered coin index on the "from" chain.
-		bridgeName (string): The name of the bridge to approve/unapprove.
-		approve (bool): True to approve, false to unapprove.`,
+		paramsType: reflect.TypeOf(ApproveBridgeParams{}),
+		summary:    "Approve or unapprove the bridge contract.",
+		fieldDescs: map[string]string{
+			"assetID":    descFromAssetID,
+			"bridgeName": descBridgeName,
+			"approve":    "True to approve, false to unapprove.",
+		},
 	},
 	pendingBridgesRoute: {
-		argsShort:  `assetID`,
-		cmdSummary: "Get pending bridges.",
-		argsLong: `Args:
-		assetID (int): The asset's BIP-44 registered coin index on the "from" chain.`,
+		paramsType: reflect.TypeOf(PendingBridgesParams{}),
+		summary:    "Get pending bridges.",
+		fieldDescs: map[string]string{
+			"assetID": descFromAssetID,
+		},
 	},
 	bridgeHistoryRoute: {
-		argsShort:  `assetID (n) (refTxID) (past)`,
-		cmdSummary: "Get bridge history.",
-		argsLong: `Args:
-		assetID (int): The asset's BIP-44 registered coin index on the "from" chain.
-		n (int): The number of transactions to return. If <= 0 or unset, all transactions are returned.
-		refTxID (string): If set, the transactions before or after this tx (depending on the past argument)
-		will be returned.
-		past (bool): If true, the transactions before the reference tx will be returned. If false, the
-		transactions after the reference tx will be returned.`,
+		paramsType: reflect.TypeOf(TxHistoryParams{}),
+		summary:    "Get bridge history.",
+		fieldDescs: map[string]string{
+			"assetID": descFromAssetID,
+			"n":       "The number of transactions to return. If <= 0 or unset, all transactions are returned.",
+			"refID":   "If set, the transactions before or after this tx (depending on the past argument) will be returned.",
+			"past":    "If true, the transactions before the reference tx will be returned.",
+		},
 	},
 	supportedBridgesRoute: {
-		argsShort:  `assetID`,
-		cmdSummary: "Get supported bridge destinations.",
-		argsLong: `Args:
-		assetID (int): The asset's BIP-44 registered coin index to get bridge destinations for.`,
+		paramsType: reflect.TypeOf(SupportedBridgesParams{}),
+		summary:    "Get supported bridge destinations.",
+		fieldDescs: map[string]string{
+			"assetID": "The asset's BIP-44 registered coin index to get bridge destinations for.",
+		},
 	},
 	bridgeFeesAndLimitsRoute: {
-		argsShort:  `fromAssetID toAssetID bridgeName`,
-		cmdSummary: "Get bridge fees and limits.",
-		argsLong: `Args:
-		fromAssetID (int): The asset's BIP-44 registered coin index on the "from" chain.
-		toAssetID (int): The asset's BIP-44 registered coin index on the "to" chain.
-		bridgeName (string): The name of the bridge to query.`,
+		paramsType: reflect.TypeOf(BridgeFeesAndLimitsParams{}),
+		summary:    "Get bridge fees and limits.",
+		fieldDescs: map[string]string{
+			"fromAssetID": descFromAssetID,
+			"toAssetID":   descToAssetID,
+			"bridgeName":  descBridgeName,
+		},
 	},
 	paymentMultisigPubkeyRoute: {
-		argsShort:  `assetID`,
-		cmdSummary: "Get a multisig pubkey for asset id.",
-		argsLong: `Args:
-		assetID (int): The asset's BIP-44 registered coin index to get a pubkey for.`,
+		paramsType: reflect.TypeOf(PaymentMultisigPubkeyParams{}),
+		summary:    "Get a multisig pubkey for asset id.",
+		fieldDescs: map[string]string{
+			"assetID": descAssetID,
+		},
 		returns: `Returns:
-	string: a pubkey. The index is stored in the db and this pubkey will not be returned again`,
+    string: a pubkey. The index is stored in the db and this pubkey will not be returned again.`,
 	},
 	sendFundsToMultisigRoute: {
-		argsShort:  `csvFilePath`,
-		cmdSummary: "Send funds to a payment multisig.",
-		argsLong: `Args:
-		csvFilePath (string): The csv file path from the point of view of the client, not bwctl. Will be written to.`,
+		paramsType: reflect.TypeOf(CsvFileParams{}),
+		summary:    "Send funds to a payment multisig.",
+		fieldDescs: map[string]string{
+			"csvFilePath": descCsvFilePath + " Will be written to.",
+		},
 	},
 	signMultisigRoute: {
-		argsShort:  `csvFilePath sigIndex`,
-		cmdSummary: "Sign a payment multisig.",
-		argsLong: `Args:
-		csvFilePath (string): The csv file path from the point of view of the client, not bwctl. Will be written to.
-		sigIndex (int): The pubkey index we own and are able to sign.`,
+		paramsType: reflect.TypeOf(SignMultisigParams{}),
+		summary:    "Sign a payment multisig.",
+		fieldDescs: map[string]string{
+			"csvFilePath": descCsvFilePath + " Will be written to.",
+			"signIdx":     "The pubkey index we own and are able to sign.",
+		},
 	},
 	refundPaymentMultisigRoute: {
-		argsShort:  `csvFilePath`,
-		cmdSummary: "Refund a payment multisig.",
-		argsLong: `Args:
-		csvFilePath (string): The csv file path from the point of view of the client, not bwctl.`,
+		paramsType: reflect.TypeOf(CsvFileParams{}),
+		summary:    "Refund a payment multisig.",
+		fieldDescs: map[string]string{
+			"csvFilePath": descCsvFilePath,
+		},
 		returns: `Returns:
-	string: the refund tx hash`,
+    string: the refund tx hash`,
 	},
 	viewPaymentMultisigRoute: {
-		argsShort:  `csvFilePath`,
-		cmdSummary: "view a payment multisig.",
-		argsLong: `Args:
-		csvFilePath (string): The csv file path from the point of view of the client, not bwctl.`,
+		paramsType: reflect.TypeOf(CsvFileParams{}),
+		summary:    "View a payment multisig.",
+		fieldDescs: map[string]string{
+			"csvFilePath": descCsvFilePath,
+		},
 		returns: `Returns:
-	string: tx in json format`,
+    string: tx in json format`,
 	},
 	sendPaymentMultisigRoute: {
-		argsShort:  `csvFilePath`,
-		cmdSummary: "Send a payment multisig. May not error even with spv if not fully signed.",
-		argsLong: `Args:
-		csvFilePath (string): The csv file path from the point of view of the client, not bwctl.`,
+		paramsType: reflect.TypeOf(CsvFileParams{}),
+		summary:    "Send a payment multisig. May not error even with spv if not fully signed.",
+		fieldDescs: map[string]string{
+			"csvFilePath": descCsvFilePath,
+		},
 		returns: `Returns:
-	string: the sent tx hash`,
+    string: the sent tx hash`,
 	},
+}
+
+// parseJSONTag splits a struct field's json tag into name and options.
+func parseJSONTag(tag string) (name, opts string) {
+	if idx := strings.IndexByte(tag, ','); idx != -1 {
+		return tag[:idx], tag[idx+1:]
+	}
+	return tag, ""
+}
+
+// goTypeToHelpType maps Go reflect.Type to a human-readable type name for
+// help output.
+func goTypeToHelpType(t reflect.Type) string {
+	if t == passBytesType {
+		return "password"
+	}
+	switch t.Kind() {
+	case reflect.String:
+		return "string"
+	case reflect.Bool:
+		return "bool"
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return "int"
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return "int"
+	case reflect.Float32, reflect.Float64:
+		return "float"
+	case reflect.Map:
+		return "object"
+	case reflect.Struct:
+		return "object"
+	case reflect.Slice:
+		if t.Elem().Kind() == reflect.Uint8 {
+			return "string" // []byte
+		}
+		return "array"
+	case reflect.Ptr:
+		return goTypeToHelpType(t.Elem())
+	case reflect.Interface:
+		return "any"
+	default:
+		return t.Kind().String()
+	}
+}
+
+// reflectFields walks a struct type and returns field metadata in declaration
+// order. Embedded structs are recursively flattened. Pointer-to-struct named
+// fields are shown as a single "object" field.
+func reflectFields(t reflect.Type, descs map[string]string) []fieldInfo {
+	if t == nil {
+		return nil
+	}
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return nil
+	}
+	var fields []fieldInfo
+	for i := 0; i < t.NumField(); i++ {
+		sf := t.Field(i)
+
+		// Embedded (anonymous) struct: recurse and flatten.
+		if sf.Anonymous {
+			embedded := sf.Type
+			if embedded.Kind() == reflect.Ptr {
+				embedded = embedded.Elem()
+			}
+			if embedded.Kind() == reflect.Struct {
+				fields = append(fields, reflectFields(embedded, descs)...)
+				continue
+			}
+		}
+
+		tag := sf.Tag.Get("json")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		jsonName, tagOpts := parseJSONTag(tag)
+		if jsonName == "" {
+			continue
+		}
+
+		isPassword := sf.Type == passBytesType
+		isOptional := sf.Type.Kind() == reflect.Ptr || strings.Contains(tagOpts, "omitempty")
+
+		typeName := goTypeToHelpType(sf.Type)
+
+		fields = append(fields, fieldInfo{
+			jsonName:   jsonName,
+			typeName:   typeName,
+			isPassword: isPassword,
+			isOptional: isOptional,
+			desc:       descs[jsonName],
+		})
+	}
+	return fields
+}
+
+// ListCommands prints a short usage string for every route available to the
+// rpcserver.
+func ListCommands(includePasswords bool) string {
+	var sb strings.Builder
+	for _, r := range sortRouteInfoKeys() {
+		info := routeInfos[r]
+		fields := reflectFields(info.paramsType, info.fieldDescs)
+		var parts []string
+		for _, f := range fields {
+			if f.isPassword && !includePasswords {
+				continue
+			}
+			name := f.jsonName
+			if f.isOptional {
+				name += "?"
+			}
+			parts = append(parts, name)
+		}
+		if len(parts) > 0 {
+			sb.WriteString(fmt.Sprintf("%s {%s}\n", r, strings.Join(parts, ", ")))
+		} else {
+			sb.WriteString(r + "\n")
+		}
+	}
+	s := sb.String()
+	if len(s) > 0 {
+		s = s[:len(s)-1] // Remove trailing newline.
+	}
+	return s
+}
+
+// commandUsage returns a help message for cmd or an error if cmd is unknown.
+func commandUsage(cmd string, includePasswords bool) (string, error) {
+	info, exists := routeInfos[cmd]
+	if !exists {
+		return "", fmt.Errorf("%w: %s", errUnknownCmd, cmd)
+	}
+
+	fields := reflectFields(info.paramsType, info.fieldDescs)
+
+	// Build short args line.
+	var parts []string
+	for _, f := range fields {
+		if f.isPassword && !includePasswords {
+			continue
+		}
+		name := f.jsonName
+		if f.isOptional {
+			name += "?"
+		}
+		parts = append(parts, name)
+	}
+	var sb strings.Builder
+	if len(parts) > 0 {
+		sb.WriteString(fmt.Sprintf("%s {%s}", cmd, strings.Join(parts, ", ")))
+	} else {
+		sb.WriteString(cmd)
+	}
+
+	// Summary
+	sb.WriteString("\n\n")
+	sb.WriteString(info.summary)
+
+	// Params
+	var paramFields []fieldInfo
+	for _, f := range fields {
+		if f.isPassword && !includePasswords {
+			continue
+		}
+		paramFields = append(paramFields, f)
+	}
+	if len(paramFields) > 0 {
+		sb.WriteString("\n\nParams:")
+		for _, f := range paramFields {
+			optStr := ""
+			if f.isOptional {
+				optStr = ", optional"
+			}
+			sb.WriteString(fmt.Sprintf("\n    %s (%s%s): %s", f.jsonName, f.typeName, optStr, f.desc))
+		}
+	}
+
+	// Returns
+	if info.returns != "" {
+		sb.WriteString("\n\n")
+		sb.WriteString(info.returns)
+	}
+
+	// Extra dynamic help.
+	if info.extraHelp != nil {
+		sb.WriteString("\n\n")
+		sb.WriteString(info.extraHelp())
+	}
+
+	return sb.String(), nil
+}
+
+// walletTypesHelp returns a formatted list of available wallet types for each
+// registered asset.
+func walletTypesHelp() string {
+	assets := asset.Assets()
+	type assetEntry struct {
+		id     uint32
+		symbol string
+		types  []string
+	}
+	var entries []assetEntry
+	for _, ra := range assets {
+		var types []string
+		for _, wd := range ra.Info.AvailableWallets {
+			if wd.Type != "" {
+				types = append(types, wd.Type)
+			}
+		}
+		if len(types) > 0 {
+			slices.Sort(types)
+			entries = append(entries, assetEntry{ra.ID, ra.Symbol, types})
+		}
+	}
+	if len(entries) == 0 {
+		return ""
+	}
+	slices.SortFunc(entries, func(a, b assetEntry) int {
+		if a.id < b.id {
+			return -1
+		}
+		if a.id > b.id {
+			return 1
+		}
+		return 0
+	})
+	var sb strings.Builder
+	sb.WriteString("Available wallet types:")
+	for _, e := range entries {
+		sb.WriteString(fmt.Sprintf("\n    %s (%d): %s", e.symbol, e.id, strings.Join(e.types, ", ")))
+	}
+	return sb.String()
+}
+
+// sortRouteInfoKeys returns a sorted list of routeInfos keys.
+func sortRouteInfoKeys() []string {
+	keys := make([]string, 0, len(routeInfos))
+	for k := range routeInfos {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
 }

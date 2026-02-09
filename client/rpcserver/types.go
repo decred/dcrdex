@@ -38,8 +38,8 @@ type SemVersion struct {
 
 // HelpParams is the parameter type for the help route.
 type HelpParams struct {
-	HelpWith         string `json:"helpWith"`
-	IncludePasswords bool   `json:"includePasswords"`
+	HelpWith         string `json:"helpWith,omitempty"`
+	IncludePasswords bool   `json:"includePasswords,omitempty"`
 }
 
 // InitParams is the parameter type for the init route.

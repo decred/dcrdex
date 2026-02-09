@@ -176,80 +176,150 @@ func TestCreateResponse(t *testing.T) {
 	}
 }
 
-func TestHelpMsgs(t *testing.T) {
-	// routes and helpMsgs must have the same keys.
-	if len(routes) != len(helpMsgs) {
-		t.Fatal("routes and helpMsgs have different number of routes")
+func TestRouteInfos(t *testing.T) {
+	// routes and routeInfos must have the same keys.
+	if len(routes) != len(routeInfos) {
+		t.Fatalf("routes has %d entries but routeInfos has %d", len(routes), len(routeInfos))
 	}
 	for k := range routes {
-		if _, exists := helpMsgs[k]; !exists {
-			t.Fatalf("%v exists in routes but not in helpMsgs", k)
+		if _, exists := routeInfos[k]; !exists {
+			t.Fatalf("%v exists in routes but not in routeInfos", k)
 		}
 	}
 }
 
 func TestListCommands(t *testing.T) {
-	// no passwords
+	// Without passwords.
 	res := ListCommands(false)
 	if res == "" {
-		t.Fatal("unable to parse helpMsgs")
+		t.Fatal("ListCommands returned empty string")
 	}
-	want := ""
-	for _, r := range sortHelpKeys() {
-		msg := helpMsgs[r]
-		want += r + " " + msg.argsShort + "\n"
+	// Verify password fields are absent.
+	if strings.Contains(res, "appPass") {
+		t.Fatal("ListCommands(false) should not contain appPass")
 	}
-	if res != want[:len(want)-1] {
-		t.Fatalf("wanted %s but got %s", want, res)
+
+	// With passwords.
+	resWithPW := ListCommands(true)
+	if resWithPW == "" {
+		t.Fatal("ListCommands(true) returned empty string")
 	}
-	// with passwords
-	res = ListCommands(true)
-	if res == "" {
-		t.Fatal("unable to parse helpMsgs")
-	}
-	want = ""
-	for _, r := range sortHelpKeys() {
-		msg := helpMsgs[r]
-		if msg.pwArgsShort != "" {
-			want += r + " " + format(msg.pwArgsShort, " ") + msg.argsShort + "\n"
-		} else {
-			want += r + " " + msg.argsShort + "\n"
-		}
-	}
-	if res != want[:len(want)-1] {
-		t.Fatalf("wanted %s but got %s", want, res)
+	// Verify password fields appear.
+	if !strings.Contains(resWithPW, "appPass") {
+		t.Fatal("ListCommands(true) should contain appPass")
 	}
 }
 
 func TestCommandUsage(t *testing.T) {
-	for r, msg := range helpMsgs {
-		// no passwords
+	// Verify each route produces non-empty output.
+	for r := range routeInfos {
 		res, err := commandUsage(r, false)
 		if err != nil {
-			t.Fatalf("unexpected error for command %s", r)
+			t.Fatalf("unexpected error for command %s: %v", r, err)
 		}
-		want := r + " " + msg.argsShort + "\n\n" + msg.cmdSummary + "\n\n" +
-			format(msg.argsLong, "\n\n") + msg.returns
-		if res != want {
-			t.Fatalf("wanted %s but got %s for usage of %s without passwords", want, res, r)
+		if res == "" {
+			t.Fatalf("commandUsage returned empty string for %s", r)
 		}
+		// Must contain the summary.
+		if !strings.Contains(res, routeInfos[r].summary) {
+			t.Fatalf("commandUsage for %s does not contain summary", r)
+		}
+	}
 
-		// with passwords when applicable
-		if msg.pwArgsShort != "" {
-			res, err = commandUsage(r, true)
-			if err != nil {
-				t.Fatalf("unexpected error for command %s", r)
-			}
-			want = r + " " + format(msg.pwArgsShort, " ") + msg.argsShort + "\n\n" +
-				msg.cmdSummary + "\n\n" + format(msg.pwArgsLong, "\n\n") +
-				format(msg.argsLong, "\n\n") + msg.returns
-			if res != want {
-				t.Fatalf("wanted %s but got %s for usage of %s with passwords", want, res, r)
+	// Verify unknown command returns errUnknownCmd.
+	if _, err := commandUsage("never make this command", false); !errors.Is(err, errUnknownCmd) {
+		t.Fatal("expected error for bogus command")
+	}
+
+	// Verify password toggle works for a route that has passwords.
+	resNoPW, _ := commandUsage("trade", false)
+	resWithPW, _ := commandUsage("trade", true)
+	if strings.Contains(resNoPW, "appPass") {
+		t.Fatal("commandUsage(trade, false) should not contain appPass")
+	}
+	if !strings.Contains(resWithPW, "appPass") {
+		t.Fatal("commandUsage(trade, true) should contain appPass")
+	}
+}
+
+func TestFieldDescsMatchParams(t *testing.T) {
+	// For every routeInfo with a paramsType, verify every key in fieldDescs
+	// maps to an actual JSON field in the reflected struct.
+	for route, info := range routeInfos {
+		if info.paramsType == nil {
+			continue
+		}
+		fields := reflectFields(info.paramsType, info.fieldDescs)
+		jsonNames := make(map[string]bool, len(fields))
+		for _, f := range fields {
+			jsonNames[f.jsonName] = true
+		}
+		for key := range info.fieldDescs {
+			if !jsonNames[key] {
+				t.Errorf("route %q: fieldDescs key %q does not match any JSON field in %v",
+					route, key, info.paramsType)
 			}
 		}
 	}
-	if _, err := commandUsage("never make this command", false); !errors.Is(err, errUnknownCmd) {
-		t.Fatal("expected error for bogus command")
+}
+
+func TestFieldDescsComplete(t *testing.T) {
+	// For every routeInfo with a paramsType, verify every non-password JSON
+	// field has a corresponding key in fieldDescs.
+	for route, info := range routeInfos {
+		if info.paramsType == nil {
+			continue
+		}
+		fields := reflectFields(info.paramsType, info.fieldDescs)
+		for _, f := range fields {
+			if f.isPassword {
+				continue
+			}
+			if _, exists := info.fieldDescs[f.jsonName]; !exists {
+				t.Errorf("route %q: JSON field %q has no entry in fieldDescs", route, f.jsonName)
+			}
+		}
+	}
+}
+
+func TestPasswordFieldDetection(t *testing.T) {
+	// TradeParams should have appPass as a password field.
+	fields := reflectFields(reflect.TypeOf(TradeParams{}), nil)
+	foundAppPass := false
+	for _, f := range fields {
+		if f.jsonName == "appPass" {
+			foundAppPass = true
+			if !f.isPassword {
+				t.Fatal("appPass in TradeParams should be detected as password")
+			}
+		}
+	}
+	if !foundAppPass {
+		t.Fatal("appPass not found in TradeParams fields")
+	}
+
+	// CancelParams should have no password fields.
+	fields = reflectFields(reflect.TypeOf(CancelParams{}), nil)
+	for _, f := range fields {
+		if f.isPassword {
+			t.Fatalf("CancelParams should have no password fields, found %s", f.jsonName)
+		}
+	}
+}
+
+func TestEmbeddedStructFlattening(t *testing.T) {
+	// TradeParams embeds core.TradeForm. Verify that fields from TradeForm
+	// appear in the reflected output.
+	fields := reflectFields(reflect.TypeOf(TradeParams{}), nil)
+	names := make(map[string]bool, len(fields))
+	for _, f := range fields {
+		names[f.jsonName] = true
+	}
+	// "host" comes from embedded core.TradeForm
+	for _, expected := range []string{"appPass", "host", "isLimit", "sell", "base", "quote", "qty", "rate", "tifnow"} {
+		if !names[expected] {
+			t.Errorf("expected field %q from embedded TradeForm not found in TradeParams reflection", expected)
+		}
 	}
 }
 
