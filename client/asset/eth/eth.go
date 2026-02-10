@@ -4000,7 +4000,7 @@ func (w *assetWallet) completeBridgeIfNeeded(ctx context.Context, bridgeTx *asse
 	return nil
 }
 
-// CompleteBridges completes a bridge by submitting a transaction that mints
+// CompleteBridge completes a bridge by submitting a transaction that mints
 // or unlocks coins on the destination chain.
 func (w *assetWallet) CompleteBridge(ctx context.Context, bridgeTx *asset.BridgeCounterpartTx, amount uint64, data []byte, bridgeName string) error {
 	return w.completeBridgeIfNeeded(ctx, bridgeTx, amount, data, bridgeName)
@@ -7961,7 +7961,7 @@ func (getGas) Estimate(ctx context.Context, net dex.Network, assetID, contractVe
 	return getGasEstimates(ctx, cl, approvalClient, c, approvalContractor, maxSwaps, contractVer, wParams.Gas, evmify, log)
 }
 
-// getGasEstimate is used to get a gas table for an asset's contract(s). The
+// getGasEstimates is used to get a gas table for an asset's contract(s). The
 // provided gases, g, should be generous estimates of what the gas might be.
 // Errors are thrown if the provided estimates are too small by more than a
 // factor of 2. The account should already have a trading balance of at least
