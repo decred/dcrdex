@@ -275,7 +275,9 @@ type trackedTrade struct {
 
 	selfGoverned uint32 // (atomic) server either lacks this market or is down
 
-	tickLock sync.Mutex // prevent multiple concurrent ticks, but allow them to queue
+	tickLock      sync.Mutex // prevent multiple concurrent ticks, but allow them to queue
+	tickRequested uint32     // atomic; 1 when a tick is needed
+	tickRunning   uint32     // atomic; 1 while a tick goroutine is active
 
 	order.Order
 
@@ -1965,70 +1967,77 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	defer t.tickLock.Unlock()
 	tLock = time.Since(tStart)
 
-	var swaps, redeems, refunds, revokes, searches, redemptionConfirms,
-		refundConfirms, dynamicSwapFeeConfirms, dynamicRedemptionFeeConfirms []*matchTracker
-	var sent, quoteSent, received, quoteReceived uint64
+	// matchResult holds the check results for a single match, computed
+	// concurrently across all matches to avoid O(N) serial wallet calls.
+	type matchResult struct {
+		match                       *matchTracker
+		swap, redeem, refund        bool
+		revoke                      bool // may appear alongside refund/redeem
+		search                      bool
+		redemptionConfirm           bool
+		refundConfirm               bool
+		dynamicSwapFeeConfirm       bool
+		dynamicRedemptionFeeConfirm bool
+		err                         error
+	}
 
-	checkMatch := func(match *matchTracker) error { // only errors on context.DeadlineExceeded or context.Canceled
+	checkMatch := func(match *matchTracker) *matchResult {
+		res := &matchResult{match: match}
 		side := match.Side
 		if match.Status == order.MatchConfirmed {
-			return nil
+			return res
 		}
 		if match.Address == "" {
-			return nil // a cancel order match
+			return res // a cancel order match
 		}
 		if !t.matchIsActive(match) {
-			return nil // either refunded or revoked requiring no action on this side of the match
+			return res // either refunded or revoked requiring no action on this side of the match
 		}
 
 		// Inform shouldBeginFindRedemption without modifying the MatchProof.
 		revoked := match.MetaData.Proof.IsRevoked()
 
-		// The trackedTrade mutex is locked, so we must not hang forever. Give
-		// this a generous timeout because it may be necessary to retrieve full
-		// blocks, and catch timeout/shutdown after each check. Individual
-		// requests can have shorter timeouts of their own. This is cumulative.
+		// Give this a generous timeout because it may be necessary to retrieve
+		// full blocks, and catch timeout/shutdown after each check.
 		ctx, cancel := context.WithTimeout(c.ctx, 40*time.Second)
 		defer cancel()
 
-		ok, revoke := t.isSwappable(ctx, match) // rejects revoked matches
+		ok, shouldRevoke := t.isSwappable(ctx, match) // rejects revoked matches
 		if ok {
 			c.log.Debugf("Swappable match %s for order %v (%v)", match, t.ID(), side)
-			swaps = append(swaps, match)
-			sent += match.Quantity
-			quoteSent += calc.BaseToQuote(match.Rate, match.Quantity)
-			return nil
+			res.swap = true
+			return res
 		}
-		if revoke {
-			revokes = append(revokes, match) // may still need refund/redeem, continue
-			revoked = true
-		}
-		if ctx.Err() != nil { // may be here because of timeout or shutdown
-			return ctx.Err()
-		}
-
-		if t.checkSwapFeeConfirms(match) {
-			dynamicSwapFeeConfirms = append(dynamicSwapFeeConfirms, match)
-		}
-
-		ok, revoke = t.isRedeemable(ctx, match) // does not reject revoked matches
-		if ok {
-			c.log.Debugf("Redeemable match %s for order %v (%v)", match, t.ID(), side)
-			redeems = append(redeems, match)
-			received += match.Quantity
-			quoteReceived += calc.BaseToQuote(match.Rate, match.Quantity)
-			return nil
-		}
-		if revoke {
-			revokes = append(revokes, match) // may still need refund/redeem, continue
+		if shouldRevoke {
+			res.revoke = true
 			revoked = true
 		}
 		if ctx.Err() != nil {
-			return ctx.Err()
+			res.err = ctx.Err()
+			return res
+		}
+
+		if t.checkSwapFeeConfirms(match) {
+			res.dynamicSwapFeeConfirm = true
+		}
+
+		ok, shouldRevoke = t.isRedeemable(ctx, match) // does not reject revoked matches
+		if ok {
+			c.log.Debugf("Redeemable match %s for order %v (%v)", match, t.ID(), side)
+			res.redeem = true
+			return res
+		}
+		if shouldRevoke {
+			res.revoke = true
+			revoked = true
+		}
+		if ctx.Err() != nil {
+			res.err = ctx.Err()
+			return res
 		}
 
 		if t.checkRedemptionFeeConfirms(match) {
-			dynamicRedemptionFeeConfirms = append(dynamicRedemptionFeeConfirms, match)
+			res.dynamicRedemptionFeeConfirm = true
 		}
 
 		// Check refundability before checking if to start finding redemption.
@@ -2037,27 +2046,28 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		// will be aborted if/when auto-refund succeeds.
 		if t.isRefundable(ctx, match) { // does not matter if revoked
 			c.log.Debugf("Refundable match %s for order %v (%v)", match, t.ID(), side)
-			refunds = append(refunds, match)
-			return nil
+			res.refund = true
+			return res
 		}
 		if ctx.Err() != nil {
-			return ctx.Err()
+			res.err = ctx.Err()
+			return res
 		}
 
 		if t.shouldBeginFindRedemption(ctx, match, revoked /* consider new pending self-revoke */) {
 			c.log.Debugf("Ready to find counter-party redemption for match %s, order %v (%v)", match, t.ID(), side)
-			searches = append(searches, match)
-			return nil
+			res.search = true
+			return res
 		}
 
 		if shouldConfirmRedemption(match) {
-			redemptionConfirms = append(redemptionConfirms, match)
-			return nil
+			res.redemptionConfirm = true
+			return res
 		}
 
 		if shouldConfirmRefund(match) {
-			refundConfirms = append(refundConfirms, match)
-			return nil
+			res.refundConfirm = true
+			return res
 		}
 
 		// For certain "self-governed" trades where the market or server has
@@ -2067,12 +2077,11 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		if !revoked && t.isSelfGoverned() && time.Since(match.matchTime()) > t.lockTimeTaker {
 			c.log.Warnf("Revoking old self-governed match %v for market %v, host %v.",
 				match, t.mktID, t.dc.acct.host)
-			revokes = append(revokes, match)
-			// NOTE: If the trade is in booked status, the order still won't
-			// retire. We need a way to force-cancel such orders.
+			res.revoke = true
 		}
 
-		return ctx.Err()
+		res.err = ctx.Err()
+		return res
 	}
 
 	c.loginMtx.Lock()
@@ -2097,11 +2106,72 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		c.resendPendingRequests(t)
 	}
 
-	// Check all matches and then swap, redeem, or refund as necessary.
+	// Check all matches concurrently. The check phase is read-only on
+	// match state — it makes independent wallet calls per match that are
+	// the slow part (SPV block filter scans). Running them in parallel
+	// reduces tick time from O(N * wallet_call) to O(max(wallet_call)).
+	results := make([]*matchResult, 0, len(t.matches))
+	if len(t.matches) == 1 {
+		// Fast path for single match: no goroutine overhead.
+		for _, match := range t.matches {
+			results = append(results, checkMatch(match))
+		}
+	} else if len(t.matches) > 1 {
+		var wg sync.WaitGroup
+		resultsCh := make(chan *matchResult, len(t.matches))
+		for _, match := range t.matches {
+			wg.Add(1)
+			go func(m *matchTracker) {
+				defer wg.Done()
+				resultsCh <- checkMatch(m)
+			}(match)
+		}
+		wg.Wait()
+		close(resultsCh)
+		for res := range resultsCh {
+			results = append(results, res)
+		}
+	}
+
+	// Merge results into action lists.
+	var swaps, redeems, refunds, revokes, searches, redemptionConfirms,
+		refundConfirms, dynamicSwapFeeConfirms, dynamicRedemptionFeeConfirms []*matchTracker
+	var sent, quoteSent, received, quoteReceived uint64
 	var err error
-	for _, match := range t.matches {
-		if err = checkMatch(match); err != nil {
-			break
+	for _, res := range results {
+		if res.err != nil {
+			err = res.err
+		}
+		if res.revoke {
+			revokes = append(revokes, res.match)
+		}
+		if res.swap {
+			swaps = append(swaps, res.match)
+			sent += res.match.Quantity
+			quoteSent += calc.BaseToQuote(res.match.Rate, res.match.Quantity)
+		}
+		if res.redeem {
+			redeems = append(redeems, res.match)
+			received += res.match.Quantity
+			quoteReceived += calc.BaseToQuote(res.match.Rate, res.match.Quantity)
+		}
+		if res.refund {
+			refunds = append(refunds, res.match)
+		}
+		if res.search {
+			searches = append(searches, res.match)
+		}
+		if res.redemptionConfirm {
+			redemptionConfirms = append(redemptionConfirms, res.match)
+		}
+		if res.refundConfirm {
+			refundConfirms = append(refundConfirms, res.match)
+		}
+		if res.dynamicSwapFeeConfirm {
+			dynamicSwapFeeConfirms = append(dynamicSwapFeeConfirms, res.match)
+		}
+		if res.dynamicRedemptionFeeConfirm {
+			dynamicRedemptionFeeConfirms = append(dynamicRedemptionFeeConfirms, res.match)
 		}
 	}
 
@@ -3592,7 +3662,7 @@ func (c *Core) refundMatches(t *trackedTrade, matches []*matchTracker) (uint64, 
 
 // processAuditMsg processes the audit request from the server. A non-nil error
 // is only returned if the match referenced by the Audit message is not known.
-func (t *trackedTrade) processAuditMsg(msgID uint64, audit *msgjson.Audit) error {
+func (t *trackedTrade) processAuditMsg(msgID uint64, audit *msgjson.Audit, afterAudit func()) error {
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
 	// Find the match and check the server's signature.
@@ -3644,6 +3714,10 @@ func (t *trackedTrade) processAuditMsg(msgID uint64, audit *msgjson.Audit) error
 			// The server's response timeout may have just passed, but we got
 			// what we needed to do our swap or redeem if the match is still
 			// live, so do not log this as an error.
+		}
+
+		if afterAudit != nil {
+			afterAudit()
 		}
 	}()
 
