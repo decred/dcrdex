@@ -178,7 +178,7 @@ type CEXConfig struct {
 	SecretKey     string
 	APIPassphrase string // Required by some exchanges like Bitget
 	Logger        dex.Logger
-	Notify        func(interface{})
+	Notify        func(any)
 }
 
 // NewCEX creates a new CEX.
