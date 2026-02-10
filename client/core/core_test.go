@@ -14,6 +14,7 @@ import (
 	mrand "math/rand/v2"
 	"os"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -469,15 +470,6 @@ func (tdb *TDB) Orders(filter *db.OrderFilter) ([]*db.MetaOrder, error) {
 		return nil, nil
 	}
 
-	// Check if OrderStatusExecuted is in the filter statuses
-	hasExecutedFilter := false
-	for _, status := range filter.Statuses {
-		if status == order.OrderStatusExecuted {
-			hasExecutedFilter = true
-			break
-		}
-	}
-
 	// Filter orders based on status
 	var filtered []*db.MetaOrder
 	for _, ord := range tdb.allOrders {
@@ -488,22 +480,14 @@ func (tdb *TDB) Orders(filter *db.OrderFilter) ([]*db.MetaOrder, error) {
 		}
 
 		// Check if order status matches any of the filter statuses
-		statusMatch := false
-		for _, status := range filter.Statuses {
-			if ord.MetaData.Status == status {
-				statusMatch = true
-				break
-			}
-		}
-
-		if statusMatch {
+		if slices.Contains(filter.Statuses, ord.MetaData.Status) {
 			filtered = append(filtered, ord)
 			continue
 		}
 
 		// Handle IncludePartial: include canceled/revoked orders with partial fills
 		// when filtering for "executed" status
-		if filter.IncludePartial && hasExecutedFilter {
+		if filter.IncludePartial && slices.Contains(filter.Statuses, order.OrderStatusExecuted) {
 			if ord.MetaData.Status == order.OrderStatusCanceled ||
 				ord.MetaData.Status == order.OrderStatusRevoked {
 				// Check if order has trade matches (non-cancel matches indicating partial fill)
