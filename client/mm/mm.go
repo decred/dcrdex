@@ -618,7 +618,7 @@ func (m *MarketMaker) loadCEX(ctx context.Context, cfg *CEXConfig) (*centralized
 		APIPassphrase: cfg.APIPassphrase,
 		Logger:        logger,
 		Net:           m.core.Network(),
-		Notify: func(n interface{}) {
+		Notify: func(n any) {
 			m.handleCEXUpdate(cfg.Name, n)
 		},
 	})

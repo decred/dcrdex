@@ -457,7 +457,7 @@ func (db *TxDB) getTxs(assetIDPtr *uint32, req *asset.TxHistoryRequest) (*asset.
 		}
 		refID = &h
 	}
-	var assetID interface{}
+	var assetID any
 	idx := db.allAssetIndex
 	if assetIDPtr != nil {
 		assetID = *assetIDPtr

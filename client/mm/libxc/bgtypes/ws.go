@@ -51,7 +51,7 @@ type WsDataMessage struct {
 }
 
 // WsData is a generic container for WebSocket data
-type WsData interface{}
+type WsData any
 
 // WsBookData represents orderbook data from WebSocket
 type WsBookData struct {

@@ -649,7 +649,7 @@ type bitget struct {
 	secretKey  string
 	passphrase string // Bitget requires a passphrase for API access
 	net        dex.Network
-	broadcast  func(interface{})
+	broadcast  func(any)
 	ctx        context.Context
 
 	tradeIDNonce       atomic.Uint32
@@ -908,7 +908,7 @@ func (bg *bitget) sign(timestamp, method, requestPath, body string) string {
 }
 
 // request makes an HTTP request to the Bitget API
-func (bg *bitget) request(ctx context.Context, method, endpoint string, params map[string]string, body interface{}, needsAuth bool, result interface{}) error {
+func (bg *bitget) request(ctx context.Context, method, endpoint string, params map[string]string, body any, needsAuth bool, result any) error {
 	fullURL := bg.apiURL + endpoint
 
 	var bodyBytes []byte
@@ -969,12 +969,12 @@ func (bg *bitget) request(ctx context.Context, method, endpoint string, params m
 }
 
 // getAPI makes a GET request to the Bitget API
-func (bg *bitget) getAPI(ctx context.Context, endpoint string, params map[string]string, needsAuth bool, result interface{}) error {
+func (bg *bitget) getAPI(ctx context.Context, endpoint string, params map[string]string, needsAuth bool, result any) error {
 	return bg.request(ctx, http.MethodGet, endpoint, params, nil, needsAuth, result)
 }
 
 // postAPI makes a POST request to the Bitget API
-func (bg *bitget) postAPI(ctx context.Context, endpoint string, body interface{}, needsAuth bool, result interface{}) error {
+func (bg *bitget) postAPI(ctx context.Context, endpoint string, body any, needsAuth bool, result any) error {
 	return bg.request(ctx, http.MethodPost, endpoint, nil, body, needsAuth, result)
 }
 
