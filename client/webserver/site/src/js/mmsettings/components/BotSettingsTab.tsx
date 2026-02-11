@@ -381,6 +381,39 @@ const Knobs: React.FC = () => {
   )
 }
 
+const MMSnapshotsSection: React.FC = () => {
+  const botConfigState = useBotConfigState()
+  const dispatch = useBotConfigDispatch()
+  const { botConfig } = botConfigState
+
+  return (
+    <div className="mb-4">
+      <div className="d-flex align-items-center mb-3">
+        <span className="ico-camera fs20 pe-2"></span>
+        <span className="fs22">MM Epoch Snapshots</span>
+      </div>
+
+      <div className="border rounded p-3">
+        <div className="form-check">
+          <input
+            className="form-check-input me-2"
+            type="checkbox"
+            id="mmSnapshots"
+            checked={botConfig.mmSnapshots ?? false}
+            onChange={(e) => dispatch({ type: 'TOGGLE_MM_SNAPSHOTS', payload: e.target.checked })}
+          />
+          <label className="form-check-label" htmlFor="mmSnapshots">
+            Enable epoch snapshot collection
+          </label>
+          <Tooltip content="Subscribe to server-signed epoch snapshots for this market. Snapshots can be exported later for independent verification of market making activity.">
+            <span className="ico-info fs12 ms-1"></span>
+          </Tooltip>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const MultiHopSection: React.FC = () => {
   const botConfigState = useBotConfigState()
   const { intermediateAssets } = botConfigState
@@ -413,6 +446,9 @@ const BotSettingsTab: React.FC = () => {
         </div>
         <div className="col-12">
           <Knobs />
+        </div>
+        <div className="col-12">
+          <MMSnapshotsSection />
         </div>
         <div className="col-12">
           <MultiHopSection />

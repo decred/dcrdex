@@ -862,6 +862,7 @@ export interface BotConfig {
   uiConfig: UIConfig
   alloc?: BotBalanceAllocation
   autoRebalance?: AutoRebalanceConfig
+  mmSnapshots?: boolean
   basicMarketMakingConfig?: BasicMarketMakingConfig
   arbMarketMakingConfig?: ArbMarketMakingConfig
   simpleArbConfig?: SimpleArbConfig

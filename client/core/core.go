@@ -208,6 +208,12 @@ type dexConnection struct {
 	lastConnectMtx sync.RWMutex
 	lastConnect    time.Time
 
+	// mmSnapshotSubs tracks markets with active MM snapshot subscriptions,
+	// keyed by market name (e.g. "dcr_btc"), for re-subscription on
+	// reconnect.
+	mmSnapshotSubsMtx sync.RWMutex
+	mmSnapshotSubs    map[string]struct{}
+
 	// dispatchTradeWork routes a function to the per-trade message queue
 	// for the given order. In production, set by the dispatcher goroutine
 	// in listen(). In tests, set to a synchronous inline executor.
@@ -488,10 +494,16 @@ func (c *Core) exchangeInfo(dc *dexConnection) *Exchange {
 	dc.cfgMtx.RLock()
 	cfg := dc.cfg
 	dc.cfgMtx.RUnlock()
+	var dexPubKeyB dex.Bytes
+	if dc.acct.dexPubKey != nil {
+		dexPubKeyB = dc.acct.dexPubKey.SerializeCompressed()
+	}
+
 	if cfg == nil { // no config, assets, or markets data
 		return &Exchange{
 			Host:             dc.acct.host,
 			AcctID:           acctID,
+			DEXPubKey:        dexPubKeyB,
 			ConnectionStatus: dc.status(),
 			Disabled:         dc.acct.isDisabled(),
 			Markets:          make(map[string]*Market),
@@ -523,6 +535,7 @@ func (c *Core) exchangeInfo(dc *dexConnection) *Exchange {
 	return &Exchange{
 		Host:             dc.acct.host,
 		AcctID:           acctID,
+		DEXPubKey:        dexPubKeyB,
 		Markets:          dc.marketMap(),
 		Assets:           assets,
 		BondExpiry:       cfg.BondExpiry,
@@ -4456,6 +4469,90 @@ func (c *Core) ExportSeed(pw []byte) (seedStr string, err error) {
 	}
 
 	return seedStr, nil
+}
+
+// ExportMMSnapshots retrieves stored MM epoch snapshots for a market within
+// the specified epoch index range.
+func (c *Core) ExportMMSnapshots(host string, base, quote uint32, startEpoch, endEpoch uint64) ([]*msgjson.MMEpochSnapshot, error) {
+	return c.db.MMEpochSnapshots(host, base, quote, startEpoch, endEpoch)
+}
+
+// PruneMMSnapshots deletes MM epoch snapshots for a market with epochIdx
+// strictly less than minEpochIdx.
+func (c *Core) PruneMMSnapshots(host string, base, quote uint32, minEpochIdx uint64) (int, error) {
+	return c.db.PruneMMEpochSnapshots(host, base, quote, minEpochIdx)
+}
+
+// SubscribeMMSnapshots sends a subscribe (or unsubscribe) request to the DEX
+// for MM epoch snapshots on the given market.
+func (c *Core) SubscribeMMSnapshots(host string, base, quote uint32, unsub bool) error {
+	dc, _, err := c.dex(host)
+	if err != nil {
+		return err
+	}
+
+	mktName, err := dex.MarketName(base, quote)
+	if err != nil {
+		return err
+	}
+
+	req := &msgjson.SubscribeMMSnapshots{
+		MarketID: mktName,
+		Unsub:    unsub,
+	}
+	msg, err := msgjson.NewRequest(dc.NextID(), msgjson.SubscribeMMSnapshotsRoute, req)
+	if err != nil {
+		return fmt.Errorf("error creating subscribe_mm_snapshots request: %w", err)
+	}
+
+	errChan := make(chan error, 1)
+	err = dc.RequestWithTimeout(msg, func(msg *msgjson.Message) {
+		var success bool
+		if err := msg.UnmarshalResult(&success); err != nil {
+			errChan <- err
+			return
+		}
+		if !success {
+			errChan <- fmt.Errorf("subscribe_mm_snapshots rejected by %s", host)
+			return
+		}
+		errChan <- nil
+	}, DefaultResponseTimeout, func() {
+		errChan <- fmt.Errorf("timed out waiting for subscribe_mm_snapshots response from %s", host)
+	})
+	if err != nil {
+		return fmt.Errorf("subscribe_mm_snapshots request error: %w", err)
+	}
+	if err = <-errChan; err != nil {
+		// For unsubscribe, clean up local tracking even if the request
+		// failed (e.g. connection down) to prevent stale re-subscriptions
+		// on reconnect.
+		if unsub {
+			dc.mmSnapshotSubsMtx.Lock()
+			delete(dc.mmSnapshotSubs, mktName)
+			dc.mmSnapshotSubsMtx.Unlock()
+		}
+		var msgErr *msgjson.Error
+		if errors.As(err, &msgErr) && msgErr.Code == msgjson.RPCUnknownRoute {
+			subject, details := c.formatDetails(TopicMMSnapshotsNotSupported, host)
+			c.notify(newServerNotifyNote(TopicMMSnapshotsNotSupported, subject, details, db.WarningLevel))
+		}
+		return fmt.Errorf("subscribe_mm_snapshots error from %s: %w", host, err)
+	}
+
+	// Track subscription state for re-subscription on reconnect.
+	dc.mmSnapshotSubsMtx.Lock()
+	if dc.mmSnapshotSubs == nil {
+		dc.mmSnapshotSubs = make(map[string]struct{})
+	}
+	if unsub {
+		delete(dc.mmSnapshotSubs, mktName)
+	} else {
+		dc.mmSnapshotSubs[mktName] = struct{}{}
+	}
+	dc.mmSnapshotSubsMtx.Unlock()
+
+	return nil
 }
 
 func decodeSeedString(seedStr string) (seed []byte, bday time.Time, err error) {
@@ -8817,6 +8914,24 @@ func (c *Core) handleReconnect(host string) {
 	for _, mkt := range mkts {
 		resubMkt(mkt)
 	}
+
+	// Re-subscribe to MM epoch snapshots for any markets that had active
+	// subscriptions before the disconnect.
+	dc.mmSnapshotSubsMtx.RLock()
+	mmSubs := make(map[string]struct{}, len(dc.mmSnapshotSubs))
+	for mktName := range dc.mmSnapshotSubs {
+		mmSubs[mktName] = struct{}{}
+	}
+	dc.mmSnapshotSubsMtx.RUnlock()
+	for mktName := range mmSubs {
+		mkt := mkts[mktName]
+		if mkt == nil {
+			continue // market no longer exists on this server
+		}
+		if err := c.SubscribeMMSnapshots(host, mkt.base, mkt.quote, false); err != nil {
+			c.log.Warnf("handleReconnect: Failed to re-subscribe to MM snapshots for %s: %v", mktName, err)
+		}
+	}
 }
 
 func (dc *dexConnection) broadcastingConnect() bool {
@@ -9120,6 +9235,21 @@ func handleBondExpiredMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	return c.bondExpired(dc, bondExpired.AssetID, bondExpired.BondCoinID, bondExpired)
 }
 
+func handleMMEpochSnapshotMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
+	var snap msgjson.MMEpochSnapshot
+	if err := msg.Unmarshal(&snap); err != nil {
+		return fmt.Errorf("mm_epoch_snapshot unmarshal error: %w", err)
+	}
+	if err := dc.acct.checkSig(snap.Serialize(), snap.Sig); err != nil {
+		return newError(signatureErr, "handleMMEpochSnapshotMsg: DEX signature validation error: %v", err)
+	}
+	if err := c.db.StoreMMEpochSnapshot(dc.acct.host, &snap); err != nil {
+		return fmt.Errorf("failed to store mm epoch snapshot: %w", err)
+	}
+	c.log.Tracef("Stored MM epoch snapshot for %s epoch %d", snap.MarketID, snap.EpochIdx)
+	return nil
+}
+
 // routeHandler is a handler for a message from the DEX.
 type routeHandler func(*Core, *dexConnection, *msgjson.Message) error
 
@@ -9148,6 +9278,7 @@ var noteHandlers = map[string]routeHandler{
 	msgjson.TierChangeRoute:      handleTierChangeMsg,
 	msgjson.ScoreChangeRoute:     handleScoreChangeMsg,
 	msgjson.BondExpiredRoute:     handleBondExpiredMsg,
+	msgjson.MMEpochSnapshotRoute: handleMMEpochSnapshotMsg,
 }
 
 // listen monitors the DEX websocket connection for server requests and

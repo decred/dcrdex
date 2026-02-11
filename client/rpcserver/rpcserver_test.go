@@ -73,6 +73,10 @@ type TCore struct {
 	stakeStatusErr           error
 	setVotingPrefErr         error
 	abandonTransactionErr    error
+	exportMMSnapshots        []*msgjson.MMEpochSnapshot
+	exportMMSnapshotsErr     error
+	pruneMMSnapshotsResult   int
+	pruneMMSnapshotsErr      error
 }
 
 func (c *TCore) Balance(uint32) (uint64, error) {
@@ -244,6 +248,12 @@ func (c *TCore) ViewPaymentMultisig(csvFilePath string) (string, error) {
 }
 func (c *TCore) SendPaymentMultisig(csvFilePath string) (string, error) {
 	return "", nil
+}
+func (c *TCore) ExportMMSnapshots(host string, base, quote uint32, startEpoch, endEpoch uint64) ([]*msgjson.MMEpochSnapshot, error) {
+	return c.exportMMSnapshots, c.exportMMSnapshotsErr
+}
+func (c *TCore) PruneMMSnapshots(host string, base, quote uint32, minEpochIdx uint64) (int, error) {
+	return c.pruneMMSnapshotsResult, c.pruneMMSnapshotsErr
 }
 func (c *TCore) AbandonTransaction(assetID uint32, txID string) error {
 	return c.abandonTransactionErr

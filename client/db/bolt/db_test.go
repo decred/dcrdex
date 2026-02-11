@@ -15,6 +15,7 @@ import (
 	"decred.org/dcrdex/client/db"
 	dbtest "decred.org/dcrdex/client/db/test"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
 	"go.etcd.io/bbolt"
@@ -1800,5 +1801,139 @@ func TestMultisigIndexForPubkey(t *testing.T) {
 	}
 	if idx != gotIdx {
 		t.Fatalf("wanted %d but got %d", idx, gotIdx)
+	}
+}
+
+func TestStoreAndRetrieveMMSnapshots(t *testing.T) {
+	boltdb, shutdown := newTestDB(t)
+	defer shutdown()
+
+	host := "somedex.tld:7232"
+	base, quote := uint32(42), uint32(0)
+
+	snap1 := &msgjson.MMEpochSnapshot{
+		MarketID: "dcr_btc",
+		Base:     base,
+		Quote:    quote,
+		EpochIdx: 100,
+		EpochDur: 60000,
+		BuyOrders: []msgjson.SnapOrder{
+			{Rate: 1e8, Qty: 2e8},
+		},
+	}
+	snap2 := &msgjson.MMEpochSnapshot{
+		MarketID: "dcr_btc",
+		Base:     base,
+		Quote:    quote,
+		EpochIdx: 200,
+		EpochDur: 60000,
+		SellOrders: []msgjson.SnapOrder{
+			{Rate: 3e8, Qty: 4e8},
+		},
+	}
+	snap3 := &msgjson.MMEpochSnapshot{
+		MarketID: "dcr_btc",
+		Base:     base,
+		Quote:    quote,
+		EpochIdx: 300,
+		EpochDur: 60000,
+	}
+
+	// Store snapshots.
+	for _, snap := range []*msgjson.MMEpochSnapshot{snap1, snap2, snap3} {
+		if err := boltdb.StoreMMEpochSnapshot(host, snap); err != nil {
+			t.Fatalf("StoreMMEpochSnapshot error: %v", err)
+		}
+	}
+
+	// Retrieve all (endEpoch=0 means no upper bound).
+	snaps, err := boltdb.MMEpochSnapshots(host, base, quote, 0, 0)
+	if err != nil {
+		t.Fatalf("MMEpochSnapshots error: %v", err)
+	}
+	if len(snaps) != 3 {
+		t.Fatalf("expected 3 snapshots, got %d", len(snaps))
+	}
+
+	// Retrieve with range [100, 200].
+	snaps, err = boltdb.MMEpochSnapshots(host, base, quote, 100, 200)
+	if err != nil {
+		t.Fatalf("MMEpochSnapshots error: %v", err)
+	}
+	if len(snaps) != 2 {
+		t.Fatalf("expected 2 snapshots for range [100,200], got %d", len(snaps))
+	}
+	if snaps[0].EpochIdx != 100 || snaps[1].EpochIdx != 200 {
+		t.Fatalf("unexpected epoch indices: %d, %d", snaps[0].EpochIdx, snaps[1].EpochIdx)
+	}
+
+	// No cross-market leakage: different base/quote should return nothing.
+	snaps, err = boltdb.MMEpochSnapshots(host, 999, 888, 0, 0)
+	if err != nil {
+		t.Fatalf("MMEpochSnapshots error: %v", err)
+	}
+	if len(snaps) != 0 {
+		t.Fatalf("expected 0 snapshots for different market, got %d", len(snaps))
+	}
+
+	// No cross-host leakage.
+	snaps, err = boltdb.MMEpochSnapshots("otherhost.tld:7232", base, quote, 0, 0)
+	if err != nil {
+		t.Fatalf("MMEpochSnapshots error: %v", err)
+	}
+	if len(snaps) != 0 {
+		t.Fatalf("expected 0 snapshots for different host, got %d", len(snaps))
+	}
+}
+
+func TestPruneMMEpochSnapshots(t *testing.T) {
+	boltdb, shutdown := newTestDB(t)
+	defer shutdown()
+
+	host := "somedex.tld:7232"
+	base, quote := uint32(42), uint32(0)
+
+	// Store snapshots at epochs 100, 200, 300.
+	for _, idx := range []uint64{100, 200, 300} {
+		snap := &msgjson.MMEpochSnapshot{
+			MarketID: "dcr_btc",
+			Base:     base,
+			Quote:    quote,
+			EpochIdx: idx,
+			EpochDur: 60000,
+		}
+		if err := boltdb.StoreMMEpochSnapshot(host, snap); err != nil {
+			t.Fatalf("StoreMMEpochSnapshot error: %v", err)
+		}
+	}
+
+	// Prune with minEpochIdx=200: should delete epoch 100 only.
+	n, err := boltdb.PruneMMEpochSnapshots(host, base, quote, 200)
+	if err != nil {
+		t.Fatalf("PruneMMEpochSnapshots error: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("expected 1 pruned, got %d", n)
+	}
+
+	// Verify only epochs 200 and 300 remain.
+	snaps, err := boltdb.MMEpochSnapshots(host, base, quote, 0, 0)
+	if err != nil {
+		t.Fatalf("MMEpochSnapshots error: %v", err)
+	}
+	if len(snaps) != 2 {
+		t.Fatalf("expected 2 remaining, got %d", len(snaps))
+	}
+	if snaps[0].EpochIdx != 200 || snaps[1].EpochIdx != 300 {
+		t.Fatalf("unexpected remaining epochs: %d, %d", snaps[0].EpochIdx, snaps[1].EpochIdx)
+	}
+
+	// Prune on non-existent host should not error.
+	n, err = boltdb.PruneMMEpochSnapshots("nohost.tld:7232", base, quote, 999)
+	if err != nil {
+		t.Fatalf("PruneMMEpochSnapshots error on missing host: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("expected 0 pruned on missing host, got %d", n)
 	}
 }

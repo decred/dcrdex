@@ -160,6 +160,10 @@ type BotConfig struct {
 	// when they are starting the bot.
 	LotSize uint64 `json:"lotSize"`
 
+	// MMSnapshots enables subscription to server-signed epoch snapshots
+	// for this market when the bot is running.
+	MMSnapshots bool `json:"mmSnapshots,omitempty"`
+
 	// Only one of the following configs should be set
 	BasicMMConfig        *BasicMarketMakingConfig `json:"basicMarketMakingConfig,omitempty"`
 	SimpleArbConfig      *SimpleArbConfig         `json:"simpleArbConfig,omitempty"`

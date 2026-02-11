@@ -711,6 +711,15 @@ func (tdb *TDB) StoreMultisigIndexForPubkey(assetID, idx uint32, pubkey [33]byte
 func (tdb *TDB) MultisigIndexForPubkey(assetID uint32, pubkey [33]byte) (uint32, error) {
 	return 0, nil
 }
+func (tdb *TDB) StoreMMEpochSnapshot(host string, snap *msgjson.MMEpochSnapshot) error {
+	return nil
+}
+func (tdb *TDB) MMEpochSnapshots(host string, base, quote uint32, startEpoch, endEpoch uint64) ([]*msgjson.MMEpochSnapshot, error) {
+	return nil, nil
+}
+func (tdb *TDB) PruneMMEpochSnapshots(host string, base, quote uint32, minEpochIdx uint64) (int, error) {
+	return 0, nil
+}
 
 type tCoin struct {
 	id []byte
@@ -7936,6 +7945,88 @@ func TestHandlePenaltyMsg(t *testing.T) {
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %s", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", test.name, err)
+		}
+	}
+}
+
+func TestHandleMMEpochSnapshotMsg(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	tCore := rig.core
+	dc := rig.dc
+
+	acctID := make([]byte, 32)
+	copy(acctID, dc.acct.id[:])
+
+	snap := &msgjson.MMEpochSnapshot{
+		MarketID:  tDcrBtcMktName,
+		Base:      tUTXOAssetA.ID,
+		Quote:     tUTXOAssetB.ID,
+		EpochIdx:  1000,
+		EpochDur:  60000,
+		AccountID: acctID,
+		BuyOrders: []msgjson.SnapOrder{
+			{Rate: 1e8, Qty: 2e8},
+		},
+		SellOrders: []msgjson.SnapOrder{
+			{Rate: 3e8, Qty: 4e8},
+		},
+		BestBuy:  5e8,
+		BestSell: 6e8,
+	}
+
+	diffKey, _ := secp256k1.GeneratePrivateKey()
+	badPayload, err := msgjson.NewNotification(msgjson.NoMatchRoute, "fake")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name    string
+		key     *secp256k1.PrivateKey
+		payload any
+		wantErr bool
+	}{{
+		name:    "ok",
+		key:     tDexPriv,
+		payload: snap,
+	}, {
+		name:    "bad payload",
+		key:     tDexPriv,
+		payload: badPayload,
+		wantErr: true,
+	}, {
+		name:    "wrong sig",
+		key:     diffKey,
+		payload: snap,
+		wantErr: true,
+	}}
+	for _, test := range tests {
+		var err error
+		var note *msgjson.Message
+		switch v := test.payload.(type) {
+		case *msgjson.MMEpochSnapshot:
+			snapCopy := *v
+			sign(test.key, &snapCopy)
+			note, err = msgjson.NewNotification(msgjson.MMEpochSnapshotRoute, &snapCopy)
+			if err != nil {
+				t.Fatalf("%s: error creating notification: %v", test.name, err)
+			}
+		case *msgjson.Message:
+			note = v
+		default:
+			t.Fatalf("unknown payload type: %T", v)
+		}
+
+		err = handleMMEpochSnapshotMsg(tCore, dc, note)
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("%s: expected error", test.name)
 			}
 			continue
 		}

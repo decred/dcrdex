@@ -127,6 +127,8 @@ type TAuth struct {
 	sendsMtx           sync.Mutex
 	sends              []*msgjson.Message
 	sent               chan *msgjson.Error
+	sendErrForMtx      sync.RWMutex
+	sendErrFor         map[account.AccountID]error
 	piMtx              sync.Mutex
 	preimagesByMsgID   map[uint64]order.Preimage
 	preimagesByOrdID   map[string]order.Preimage
@@ -155,6 +157,12 @@ func (a *TAuth) Auth(user account.AccountID, msg, sig []byte) error {
 }
 func (a *TAuth) Sign(...msgjson.Signable) {}
 func (a *TAuth) Send(user account.AccountID, msg *msgjson.Message) error {
+	a.sendErrForMtx.RLock()
+	sendErr := a.sendErrFor[user]
+	a.sendErrForMtx.RUnlock()
+	if sendErr != nil {
+		return sendErr
+	}
 	//log.Infof("Send for user %v. Message: %v", user, msg)
 	a.sendsMtx.Lock()
 	a.sends = append(a.sends, msg)

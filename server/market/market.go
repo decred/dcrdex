@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -174,6 +175,9 @@ type Market struct {
 	checkParcelLimit func(user account.AccountID, calcParcels MarketParcelCalculator) bool
 
 	minimumRate uint64
+
+	mmSnapshotMtx  sync.RWMutex
+	mmSnapshotSubs map[account.AccountID]struct{}
 }
 
 // Storage is the DB interface required by Market.
@@ -506,6 +510,7 @@ ordersLoop:
 		lastRate:         lastEpochEndRate,
 		checkParcelLimit: cfg.CheckParcelLimit,
 		minimumRate:      cfg.MinimumRate,
+		mmSnapshotSubs:   make(map[account.AccountID]struct{}),
 	}, nil
 }
 
@@ -2664,6 +2669,9 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 		},
 	}
 
+	// Send MM epoch snapshots to subscribers.
+	m.sendMMSnapshots(epoch)
+
 	// Initiate the swaps.
 	if len(matches) > 0 {
 		log.Debugf("Negotiating %d matches for epoch %d:%d", len(matches),
@@ -2773,4 +2781,133 @@ func (a accountCounter) add(addr string, qty, lots uint64, redeems int) {
 	stats.qty += qty
 	stats.lots += lots
 	stats.redeems += redeems
+}
+
+// SubscribeMMSnapshots subscribes or unsubscribes a user from per-epoch market
+// making snapshots for this market.
+func (m *Market) SubscribeMMSnapshots(user account.AccountID, unsub bool) {
+	m.mmSnapshotMtx.Lock()
+	if unsub {
+		delete(m.mmSnapshotSubs, user)
+		log.Debugf("User %v unsubscribed from MM snapshots for %s", user, m.marketInfo.Name)
+	} else {
+		m.mmSnapshotSubs[user] = struct{}{}
+		log.Debugf("User %v subscribed to MM snapshots for %s", user, m.marketInfo.Name)
+	}
+	m.mmSnapshotMtx.Unlock()
+}
+
+// sendMMSnapshots builds and sends signed epoch snapshots to all MM snapshot
+// subscribers after the book has been updated for the given epoch.
+func (m *Market) sendMMSnapshots(epoch *readyEpoch) {
+	m.mmSnapshotMtx.RLock()
+	if len(m.mmSnapshotSubs) == 0 {
+		m.mmSnapshotMtx.RUnlock()
+		return
+	}
+	subs := make(map[account.AccountID]struct{}, len(m.mmSnapshotSubs))
+	for acctID := range m.mmSnapshotSubs {
+		subs[acctID] = struct{}{}
+	}
+	m.mmSnapshotMtx.RUnlock()
+
+	// Hold bookMtx to get an atomic snapshot of the book state.
+	m.bookMtx.Lock()
+	bestBuy, bestSell := m.book.Best()
+	var bestBuyRate, bestSellRate uint64
+	if bestBuy != nil {
+		bestBuyRate = bestBuy.Rate
+	}
+	if bestSell != nil {
+		bestSellRate = bestSell.Rate
+	}
+
+	buyOrders := m.book.BuyOrders()
+	sellOrders := m.book.SellOrders()
+	m.bookMtx.Unlock()
+
+	base, quote := m.Base(), m.Quote()
+	mktID := m.marketInfo.Name
+	epochIdx := uint64(epoch.Epoch)
+	epochDur := uint64(epoch.Duration)
+
+	// Build per-account order lists in a single pass over the book.
+	type acctOrders struct {
+		buys, sells []msgjson.SnapOrder
+	}
+	acctMap := make(map[account.AccountID]*acctOrders, len(subs))
+	for _, lo := range buyOrders {
+		if _, ok := subs[lo.AccountID]; ok {
+			ao := acctMap[lo.AccountID]
+			if ao == nil {
+				ao = &acctOrders{}
+				acctMap[lo.AccountID] = ao
+			}
+			ao.buys = append(ao.buys, msgjson.SnapOrder{
+				Rate: lo.Rate,
+				Qty:  lo.Remaining(),
+			})
+		}
+	}
+	for _, lo := range sellOrders {
+		if _, ok := subs[lo.AccountID]; ok {
+			ao := acctMap[lo.AccountID]
+			if ao == nil {
+				ao = &acctOrders{}
+				acctMap[lo.AccountID] = ao
+			}
+			ao.sells = append(ao.sells, msgjson.SnapOrder{
+				Rate: lo.Rate,
+				Qty:  lo.Remaining(),
+			})
+		}
+	}
+
+	for acctID := range subs {
+		ao := acctMap[acctID]
+		var buys, sells []msgjson.SnapOrder
+		if ao != nil {
+			buys, sells = ao.buys, ao.sells
+		}
+
+		// Sort by rate ascending for deterministic serialization.
+		sort.Slice(buys, func(i, j int) bool { return buys[i].Rate < buys[j].Rate })
+		sort.Slice(sells, func(i, j int) bool { return sells[i].Rate < sells[j].Rate })
+
+		const maxSnapOrders = 1<<16 - 1 // uint16 max
+		if len(buys) > maxSnapOrders {
+			log.Warnf("Truncating %d buy orders to %d for snapshot", len(buys), maxSnapOrders)
+			buys = buys[:maxSnapOrders]
+		}
+		if len(sells) > maxSnapOrders {
+			log.Warnf("Truncating %d sell orders to %d for snapshot", len(sells), maxSnapOrders)
+			sells = sells[:maxSnapOrders]
+		}
+
+		snap := &msgjson.MMEpochSnapshot{
+			MarketID:   mktID,
+			Base:       base,
+			Quote:      quote,
+			EpochIdx:   epochIdx,
+			EpochDur:   epochDur,
+			AccountID:  acctID[:],
+			BuyOrders:  buys,
+			SellOrders: sells,
+			BestBuy:    bestBuyRate,
+			BestSell:   bestSellRate,
+		}
+		m.auth.Sign(snap)
+
+		msg, err := msgjson.NewNotification(msgjson.MMEpochSnapshotRoute, snap)
+		if err != nil {
+			log.Errorf("Failed to create mm_epoch_snapshot notification: %v", err)
+			continue
+		}
+		if err := m.auth.Send(acctID, msg); err != nil {
+			log.Debugf("Failed to send mm_epoch_snapshot to %v (removing subscription): %v", acctID, err)
+			m.mmSnapshotMtx.Lock()
+			delete(m.mmSnapshotSubs, acctID)
+			m.mmSnapshotMtx.Unlock()
+		}
+	}
 }

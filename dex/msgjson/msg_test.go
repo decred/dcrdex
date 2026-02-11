@@ -1152,3 +1152,198 @@ func randomCoin() *Coin {
 		Redeem:  randomBytes(25),
 	}
 }
+
+func TestMMEpochSnapshotSerialize(t *testing.T) {
+	acctID := make([]byte, 32)
+	for i := range acctID {
+		acctID[i] = byte(i)
+	}
+	snap := &MMEpochSnapshot{
+		Base:      42,
+		Quote:     0,
+		EpochIdx:  1000,
+		EpochDur:  60000,
+		AccountID: acctID,
+		BestBuy:   5e8,
+		BestSell:  6e8,
+		BuyOrders: []SnapOrder{
+			{Rate: 1e8, Qty: 2e8},
+			{Rate: 3e8, Qty: 4e8},
+		},
+		SellOrders: []SnapOrder{
+			{Rate: 7e8, Qty: 8e8},
+		},
+	}
+
+	// Manually compute expected bytes:
+	// base(4) + quote(4) + epochIdx(8) + epochDur(8) + accountID(32)
+	// + bestBuy(8) + bestSell(8) + numBuys(2) + buy0_rate(8) + buy0_qty(8)
+	// + buy1_rate(8) + buy1_qty(8) + numSells(2) + sell0_rate(8) + sell0_qty(8)
+	// = 76 + 2*16 + 1*16 = 124 bytes
+	exp := []byte{
+		// base = 42
+		0x00, 0x00, 0x00, 0x2a,
+		// quote = 0
+		0x00, 0x00, 0x00, 0x00,
+		// epochIdx = 1000
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xe8,
+		// epochDur = 60000
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xea, 0x60,
+		// accountID = 0x00..0x1f
+		0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+		0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+		0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+		0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
+		// bestBuy = 5e8 = 0x1DCD6500
+		0x00, 0x00, 0x00, 0x00, 0x1d, 0xcd, 0x65, 0x00,
+		// bestSell = 6e8 = 0x23C34600
+		0x00, 0x00, 0x00, 0x00, 0x23, 0xc3, 0x46, 0x00,
+		// numBuys = 2
+		0x00, 0x02,
+		// buy[0].Rate = 1e8 = 0x05F5E100
+		0x00, 0x00, 0x00, 0x00, 0x05, 0xf5, 0xe1, 0x00,
+		// buy[0].Qty = 2e8 = 0x0BEBC200
+		0x00, 0x00, 0x00, 0x00, 0x0b, 0xeb, 0xc2, 0x00,
+		// buy[1].Rate = 3e8 = 0x11E1A300
+		0x00, 0x00, 0x00, 0x00, 0x11, 0xe1, 0xa3, 0x00,
+		// buy[1].Qty = 4e8 = 0x17D78400
+		0x00, 0x00, 0x00, 0x00, 0x17, 0xd7, 0x84, 0x00,
+		// numSells = 1
+		0x00, 0x01,
+		// sell[0].Rate = 7e8 = 0x29B92700
+		0x00, 0x00, 0x00, 0x00, 0x29, 0xb9, 0x27, 0x00,
+		// sell[0].Qty = 8e8 = 0x2FAF0800
+		0x00, 0x00, 0x00, 0x00, 0x2f, 0xaf, 0x08, 0x00,
+	}
+
+	b := snap.Serialize()
+	if !bytes.Equal(b, exp) {
+		t.Fatalf("unexpected serialization.\nWanted: %x\nGot:    %x", exp, b)
+	}
+
+	// JSON round-trip.
+	snapB, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+	var snapBack MMEpochSnapshot
+	if err := json.Unmarshal(snapB, &snapBack); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if snapBack.Base != snap.Base {
+		t.Fatalf("Base mismatch: %d vs %d", snapBack.Base, snap.Base)
+	}
+	if snapBack.Quote != snap.Quote {
+		t.Fatalf("Quote mismatch: %d vs %d", snapBack.Quote, snap.Quote)
+	}
+	if snapBack.EpochIdx != snap.EpochIdx {
+		t.Fatalf("EpochIdx mismatch: %d vs %d", snapBack.EpochIdx, snap.EpochIdx)
+	}
+	if snapBack.EpochDur != snap.EpochDur {
+		t.Fatalf("EpochDur mismatch: %d vs %d", snapBack.EpochDur, snap.EpochDur)
+	}
+	if !bytes.Equal(snapBack.AccountID, snap.AccountID) {
+		t.Fatalf("AccountID mismatch")
+	}
+	if len(snapBack.BuyOrders) != len(snap.BuyOrders) {
+		t.Fatalf("BuyOrders length mismatch: %d vs %d", len(snapBack.BuyOrders), len(snap.BuyOrders))
+	}
+	if len(snapBack.SellOrders) != len(snap.SellOrders) {
+		t.Fatalf("SellOrders length mismatch: %d vs %d", len(snapBack.SellOrders), len(snap.SellOrders))
+	}
+	// Verify round-trip serialization produces same bytes.
+	if !bytes.Equal(snapBack.Serialize(), exp) {
+		t.Fatalf("round-trip serialization mismatch")
+	}
+
+	// Empty order lists.
+	emptySnap := &MMEpochSnapshot{
+		Base:      42,
+		Quote:     0,
+		EpochIdx:  1000,
+		EpochDur:  60000,
+		AccountID: acctID,
+	}
+	emptyB := emptySnap.Serialize()
+	// Should be 76 bytes: fixed fields + numBuys(2) + numSells(2)
+	if len(emptyB) != 76 {
+		t.Fatalf("expected 76 bytes for empty snapshot, got %d", len(emptyB))
+	}
+	// Check numBuys and numSells are both 0.
+	numBuys := int(emptyB[72])<<8 | int(emptyB[73])
+	numSells := int(emptyB[74])<<8 | int(emptyB[75])
+	if numBuys != 0 || numSells != 0 {
+		t.Fatalf("expected 0 buys and sells in empty snapshot, got %d buys, %d sells", numBuys, numSells)
+	}
+
+	// Serialize sorts orders by rate ascending internally.
+	unsortedSnap := &MMEpochSnapshot{
+		Base:      42,
+		Quote:     0,
+		EpochIdx:  1000,
+		EpochDur:  60000,
+		AccountID: acctID,
+		BestBuy:   5e8,
+		BestSell:  6e8,
+		BuyOrders: []SnapOrder{
+			{Rate: 3e8, Qty: 4e8}, // higher rate first
+			{Rate: 1e8, Qty: 2e8}, // lower rate second
+		},
+		SellOrders: []SnapOrder{
+			{Rate: 7e8, Qty: 8e8},
+		},
+	}
+	// Should produce the same serialization as the sorted snap.
+	unsortedB := unsortedSnap.Serialize()
+	if !bytes.Equal(unsortedB, exp) {
+		t.Fatalf("Serialize did not sort orders.\nWanted: %x\nGot:    %x", exp, unsortedB)
+	}
+	// Original slice should be unmodified (Serialize must not mutate).
+	if unsortedSnap.BuyOrders[0].Rate != 3e8 {
+		t.Fatal("Serialize mutated the original BuyOrders slice")
+	}
+
+	// Asymmetric: buys only, no sells.
+	buyOnlySnap := &MMEpochSnapshot{
+		Base:      42,
+		Quote:     0,
+		EpochIdx:  1000,
+		EpochDur:  60000,
+		AccountID: acctID,
+		BuyOrders: []SnapOrder{{Rate: 1e8, Qty: 2e8}},
+	}
+	buyOnlyB := buyOnlySnap.Serialize()
+	// 76 + 1*16 = 92 bytes
+	if len(buyOnlyB) != 92 {
+		t.Fatalf("expected 92 bytes for buy-only snapshot, got %d", len(buyOnlyB))
+	}
+
+	// Asymmetric: sells only, no buys.
+	sellOnlySnap := &MMEpochSnapshot{
+		Base:       42,
+		Quote:      0,
+		EpochIdx:   1000,
+		EpochDur:   60000,
+		AccountID:  acctID,
+		SellOrders: []SnapOrder{{Rate: 7e8, Qty: 8e8}},
+	}
+	sellOnlyB := sellOnlySnap.Serialize()
+	// 76 + 1*16 = 92 bytes
+	if len(sellOnlyB) != 92 {
+		t.Fatalf("expected 92 bytes for sell-only snapshot, got %d", len(sellOnlyB))
+	}
+
+	// Sig field round-trip through JSON.
+	snap.Sig = randomBytes(64)
+	sigSnapB, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatalf("marshal with sig error: %v", err)
+	}
+	var sigSnapBack MMEpochSnapshot
+	if err := json.Unmarshal(sigSnapB, &sigSnapBack); err != nil {
+		t.Fatalf("unmarshal with sig error: %v", err)
+	}
+	if !bytes.Equal(sigSnapBack.Sig, snap.Sig) {
+		t.Fatalf("Sig mismatch after JSON round-trip")
+	}
+}
