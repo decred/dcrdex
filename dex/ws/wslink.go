@@ -279,6 +279,15 @@ out:
 
 		if c.RawHandler != nil {
 			c.RawHandler(msgBytes)
+			// Reset the read deadline after handling. If the handler
+			// held shared locks for an extended time, the pong-based
+			// deadline may have expired. Resetting here ensures the
+			// next ReadMessage call has adequate time to read buffered
+			// pong frames.
+			if err := c.conn.SetReadDeadline(time.Now().Add(c.pingPeriod * 2)); err != nil {
+				c.log.Errorf("failed to set read deadline: %v", err)
+				break out
+			}
 			continue
 		}
 
@@ -296,6 +305,15 @@ out:
 			continue
 		}
 		c.handleMessage(msg)
+		// Reset the read deadline after message handling. If the
+		// handler held shared locks for an extended time, the
+		// pong-based deadline may have expired. Resetting here
+		// ensures the next ReadMessage call has adequate time to
+		// read buffered pong frames.
+		if err := c.conn.SetReadDeadline(time.Now().Add(c.pingPeriod * 2)); err != nil {
+			c.log.Errorf("failed to set read deadline: %v", err)
+			break out
+		}
 	}
 }
 
