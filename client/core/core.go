@@ -3364,8 +3364,8 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 	return nil
 }
 
-// CloseWallet closes the wallet for the specified asset. The wallet cannot be
-// closed if there are active negotiations for the asset.
+// CloseWallet locks the wallet for the specified asset. The wallet cannot be
+// locked if there are active negotiations for the asset.
 func (c *Core) CloseWallet(assetID uint32) error {
 	if c.isActiveBondAsset(assetID, false) { // unlock not needed for refunds
 		return fmt.Errorf("%s wallet must remain unlocked for bonding", unbip(assetID))
@@ -3381,11 +3381,6 @@ func (c *Core) CloseWallet(assetID uint32) error {
 	if err != nil {
 		return err
 	}
-	err = wallet.Close(c.ctx)
-	if err != nil {
-		return err
-	}
-
 	c.notify(newWalletStateNote(wallet.state()))
 
 	return nil

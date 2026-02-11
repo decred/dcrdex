@@ -444,7 +444,8 @@ func (w *xcWallet) Connect() error {
 }
 
 // Disconnect calls the dex.Connector's Disconnect method and sets the
-// xcWallet.hookedUp flag to false.
+// xcWallet.hookedUp flag to false. Will also close the wallet if it is an
+// asset.Opener and open.
 func (w *xcWallet) Disconnect() {
 	// Disabled wallet is already disconnected.
 	if w.isDisabled() {
@@ -454,6 +455,18 @@ func (w *xcWallet) Disconnect() {
 	w.mtx.Lock()
 	w.hookedUp = false
 	w.mtx.Unlock()
+	opener, is := w.Wallet.(asset.Opener)
+	if !is {
+		return
+	}
+
+	if !opener.IsOpen() {
+		return
+	}
+
+	if err := opener.Close(); err != nil {
+		w.log.Errorf("Unable to close wallet: %v", err)
+	}
 }
 
 // rescan will initiate a rescan of the wallet if the asset.Wallet
@@ -828,22 +841,4 @@ func (w *xcWallet) OpenWithPW(ctx context.Context, crypter encrypt.Crypter) erro
 	}
 
 	return opener.OpenWithPW(ctx, pw)
-}
-
-// Close closes a wallet if it is an asset.Opener. Otherwise does nothing.
-func (w *xcWallet) Close(ctx context.Context) error {
-	opener, ok := w.Wallet.(asset.Opener)
-	if !ok {
-		return nil
-	}
-
-	if !opener.IsOpen() {
-		return nil
-	}
-
-	if w.isDisabled() {
-		return fmt.Errorf(walletDisabledErrStr, strings.ToUpper(unbip(w.AssetID)))
-	}
-
-	return opener.Close(ctx)
 }
