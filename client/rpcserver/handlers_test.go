@@ -1681,3 +1681,81 @@ func TestHandleWalletState(t *testing.T) {
 		}
 	}
 }
+
+//
+// Exported accessor tests
+//
+
+func TestRouteExists(t *testing.T) {
+	if !RouteExists("help") {
+		t.Fatal("RouteExists returned false for 'help'")
+	}
+	if !RouteExists("version") {
+		t.Fatal("RouteExists returned false for 'version'")
+	}
+	if !RouteExists("trade") {
+		t.Fatal("RouteExists returned false for 'trade'")
+	}
+	if RouteExists("nonexistentroute") {
+		t.Fatal("RouteExists returned true for nonexistent route")
+	}
+}
+
+func TestParamType(t *testing.T) {
+	// Routes with params should return a non-nil type.
+	pt := ParamType("trade")
+	if pt == nil {
+		t.Fatal("ParamType returned nil for 'trade'")
+	}
+	if pt != reflect.TypeOf(TradeParams{}) {
+		t.Fatalf("ParamType('trade') = %v, want %v", pt, reflect.TypeOf(TradeParams{}))
+	}
+
+	// version has no params.
+	if ParamType("version") != nil {
+		t.Fatal("ParamType should return nil for 'version' (no params)")
+	}
+
+	// Nonexistent route.
+	if ParamType("nonexistentroute") != nil {
+		t.Fatal("ParamType should return nil for nonexistent route")
+	}
+}
+
+func TestExportedReflectFields(t *testing.T) {
+	pt := ParamType("trade")
+	if pt == nil {
+		t.Fatal("no param type for trade")
+	}
+	fields := ReflectFields(pt)
+	if len(fields) == 0 {
+		t.Fatal("ReflectFields returned no fields for TradeParams")
+	}
+
+	// Check that the exported fields have the expected metadata.
+	nameSet := make(map[string]bool, len(fields))
+	for _, f := range fields {
+		nameSet[f.JSONName] = true
+		if f.GoType == nil {
+			t.Fatalf("GoType is nil for field %s", f.JSONName)
+		}
+	}
+
+	// TradeParams should have appPass (password) and host (from embedded TradeForm).
+	if !nameSet["appPass"] {
+		t.Fatal("appPass not found in exported ReflectFields")
+	}
+	if !nameSet["host"] {
+		t.Fatal("host not found in exported ReflectFields")
+	}
+
+	// Verify password detection.
+	for _, f := range fields {
+		if f.JSONName == "appPass" && !f.IsPassword {
+			t.Fatal("appPass should be marked as password")
+		}
+		if f.JSONName == "host" && f.IsPassword {
+			t.Fatal("host should not be marked as password")
+		}
+	}
+}

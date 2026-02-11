@@ -44,33 +44,92 @@ func main() {
 	}
 }
 
-// promptPasswords is a map of routes to password prompts. Passwords are
-// prompted in the order given.
-var promptPasswords = map[string][]string{
-	"discoveracct":    {"App password:"},
-	"init":            {"Set new app password:"},
-	"login":           {"App password:"},
-	"newwallet":       {"App password:", "Wallet password:"},
-	"openwallet":      {"App password:"},
-	"postbond":        {"App password:"},
-	"trade":           {"App password:"},
-	"withdraw":        {"App password:"},
-	"send":            {"App password:"},
-	"appseed":         {"App password:"},
-	"multitrade":      {"App password:"},
-	"purchasetickets": {"App password:"},
-	"startmmbot":      {"App password:"},
-	"withdrawbchspv":  {"App password"},
+// customPromptText overrides the default password prompt for specific routes
+// and field names. The default prompt is derived from the JSON field name
+// (e.g. "appPass" → "App password:").
+var customPromptText = map[string]map[string]string{
+	"init": {"appPass": "Set new app password:"},
 }
 
-// optionalTextFiles is a map of routes to arg index for routes that should read
-// the text content of a file, where the file path _may_ be found in the route's
-// cmd args at the specified index.
-var optionalTextFiles = map[string]int{
-	"discoveracct": 1,
-	"bondassets":   1,
-	"postbond":     5,
-	"getdexconfig": 1,
+// passwordPrompts derives prompt strings for a route by inspecting the params
+// struct's password fields in declaration order.
+func passwordPrompts(route string) []string {
+	pt := rpcserver.ParamType(route)
+	if pt == nil {
+		return nil
+	}
+	fields := rpcserver.ReflectFields(pt)
+	var prompts []string
+	for _, f := range fields {
+		if !f.IsPassword {
+			continue
+		}
+		// Check for a custom prompt override.
+		if m, ok := customPromptText[route]; ok {
+			if p, ok := m[f.JSONName]; ok {
+				prompts = append(prompts, p)
+				continue
+			}
+		}
+		// Default: derive from JSON field name.
+		prompts = append(prompts, passwordPromptFromFieldName(f.JSONName))
+	}
+	if len(prompts) == 0 {
+		return nil
+	}
+	return prompts
+}
+
+// passwordPromptFromFieldName converts a JSON field name like "appPass" or
+// "walletPass" to a human-readable prompt like "App password:" or
+// "Wallet password:".
+func passwordPromptFromFieldName(name string) string {
+	// Strip trailing "Pass" or "Password".
+	label := name
+	switch {
+	case strings.HasSuffix(label, "Password"):
+		label = label[:len(label)-len("Password")]
+	case strings.HasSuffix(label, "Pass"):
+		label = label[:len(label)-len("Pass")]
+	}
+	if label == "" {
+		label = "App"
+	}
+	// Uppercase the first letter.
+	label = strings.ToUpper(label[:1]) + label[1:]
+	return label + " password:"
+}
+
+// optionalTextFiles maps routes to the JSON field name whose CLI arg should be
+// treated as a file path. The positional arg index is computed at runtime.
+var optionalTextFiles = map[string]string{
+	"discoveracct": "cert",
+	"bondassets":   "cert",
+	"postbond":     "cert",
+	"getdexconfig": "cert",
+}
+
+// noCertArg indicates that the cert field was not found in the route's params.
+const noCertArg = -1
+
+// certArgIndex computes the positional CLI arg index for a given JSON field
+// name by counting non-password fields in declaration order.
+func certArgIndex(route, fieldName string) int {
+	pt := rpcserver.ParamType(route)
+	if pt == nil {
+		return noCertArg
+	}
+	fields := rpcserver.ReflectFields(pt)
+	idx := 0
+	for _, f := range fields {
+		if f.JSONName == fieldName {
+			return idx
+		}
+		if !f.IsPassword {
+			idx++
+		}
+	}
+	return noCertArg
 }
 
 // promptPWs prompts for passwords on stdin and returns an error if prompting
@@ -78,8 +137,8 @@ var optionalTextFiles = map[string]int{
 // cmdPWs is provided, the passwords will be drawn from cmdPWs instead of stdin
 // prompts.
 func promptPWs(ctx context.Context, cmd string, cmdPWs []string) ([]encode.PassBytes, error) {
-	prompts, exists := promptPasswords[cmd]
-	if !exists {
+	prompts := passwordPrompts(cmd)
+	if len(prompts) == 0 {
 		return nil, nil
 	}
 	var err error
@@ -106,12 +165,16 @@ func promptPWs(ctx context.Context, cmd string, cmdPWs []string) ([]encode.PassB
 }
 
 // readTextFile reads the text content of the file whose path is specified at
-// args' index as expected for cmd and sets the args value at the expected index
-// to the file's text content. The passed args are modified.
+// the computed arg index for cmd and sets the args value at that index to the
+// file's text content. The passed args are modified.
 func readTextFile(cmd string, args []string) error {
-	fileArgIndx, readFile := optionalTextFiles[cmd]
+	fieldName, readFile := optionalTextFiles[cmd]
+	if !readFile {
+		return nil
+	}
+	fileArgIndx := certArgIndex(cmd, fieldName)
 	// Not an error if file path arg is not provided for optional file args.
-	if !readFile || len(args) < fileArgIndx+1 || args[fileArgIndx] == "" {
+	if fileArgIndx == noCertArg || len(args) < fileArgIndx+1 || args[fileArgIndx] == "" {
 		return nil
 	}
 	path := dex.CleanAndExpandPath(args[fileArgIndx])

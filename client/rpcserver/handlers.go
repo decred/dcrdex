@@ -1503,9 +1503,60 @@ type routeInfo struct {
 type fieldInfo struct {
 	jsonName   string
 	typeName   string // "string", "int", "bool", "password", "object", "array", "any"
+	goType     reflect.Type
 	isPassword bool   // true if Go type is encode.PassBytes
 	isOptional bool   // true if pointer or omitempty
 	desc       string // from routeInfo.fieldDescs
+}
+
+// FieldInfo is the exported version of fieldInfo for use by bwctl's generic
+// builder.
+type FieldInfo struct {
+	JSONName   string
+	GoType     reflect.Type
+	IsPassword bool
+	IsOptional bool
+}
+
+// ReflectFields returns exported field metadata for the given struct type in
+// declaration order (same order as help output). Embedded structs are flattened.
+func ReflectFields(t reflect.Type) []FieldInfo {
+	internal := reflectFields(t, nil)
+	out := make([]FieldInfo, len(internal))
+	for i, f := range internal {
+		out[i] = FieldInfo{
+			JSONName:   f.jsonName,
+			GoType:     f.goType,
+			IsPassword: f.isPassword,
+			IsOptional: f.isOptional,
+		}
+	}
+	return out
+}
+
+// ParamType returns the reflect.Type for the given route's params struct, or
+// nil for no-params routes.
+func ParamType(route string) reflect.Type {
+	info, ok := routeInfos[route]
+	if !ok {
+		return nil
+	}
+	return info.paramsType
+}
+
+// RouteExists reports whether route is a known RPC route.
+func RouteExists(route string) bool {
+	_, ok := routeInfos[route]
+	return ok
+}
+
+// Routes returns the names of all known RPC routes.
+func Routes() []string {
+	routes := make([]string, 0, len(routeInfos))
+	for r := range routeInfos {
+		routes = append(routes, r)
+	}
+	return routes
 }
 
 // Common field description constants.
@@ -2446,6 +2497,7 @@ func reflectFields(t reflect.Type, descs map[string]string) []fieldInfo {
 		fields = append(fields, fieldInfo{
 			jsonName:   jsonName,
 			typeName:   typeName,
+			goType:     sf.Type,
 			isPassword: isPassword,
 			isOptional: isOptional,
 			desc:       descs[jsonName],
