@@ -272,6 +272,7 @@ func testDexConnection(ctx context.Context, crypter *tCrypter) (*dexConnection, 
 			BinSizes: []string{"1h", "24h"},
 		},
 		notify:            func(Notification) {},
+		dispatchTradeWork: func(_ order.OrderID, fn func()) { fn() },
 		trades:            make(map[order.OrderID]*trackedTrade),
 		cancels:           make(map[order.OrderID]order.OrderID),
 		inFlightOrders:    make(map[uint64]*InFlightOrder),
@@ -352,18 +353,22 @@ func (conn *TWebsocket) Connect(context.Context) (*sync.WaitGroup, error) {
 func (conn *TWebsocket) UpdateURL(string) {}
 
 type TDB struct {
-	updateWalletErr          error
-	acct                     *db.AccountInfo
-	acctErr                  error
-	createAccountErr         error
-	addBondErr               error
-	updateOrderErr           error
-	activeDEXOrders          []*db.MetaOrder
-	allOrders                []*db.MetaOrder
-	matchesForOID            []*db.MetaMatch
-	matchesByOrderID         map[order.OrderID][]*db.MetaMatch
-	matchesForOIDErr         error
-	updateMatchChan          chan order.MatchStatus
+	updateWalletErr  error
+	acct             *db.AccountInfo
+	acctErr          error
+	createAccountErr error
+	addBondErr       error
+	updateOrderErr   error
+	activeDEXOrders  []*db.MetaOrder
+	allOrders        []*db.MetaOrder
+	matchesForOID    []*db.MetaMatch
+	matchesByOrderID map[order.OrderID][]*db.MetaMatch
+	matchesForOIDErr error
+	updateMatchChan  chan order.MatchStatus
+	// For async-safe match update tracking
+	matchUpdatesMtx          sync.Mutex
+	matchUpdates             []order.MatchStatus
+	matchUpdateCond          *sync.Cond
 	activeMatchOIDs          []order.OrderID
 	activeMatchOIDSErr       error
 	lastStatusID             order.OrderID
@@ -543,10 +548,55 @@ func (tdb *TDB) LinkOrder(oid, linkedID order.OrderID) error {
 }
 
 func (tdb *TDB) UpdateMatch(m *db.MetaMatch) error {
+	// Non-blocking channel send for backward compatibility with tests
+	// that still use the channel pattern.
 	if tdb.updateMatchChan != nil {
-		tdb.updateMatchChan <- m.Status
+		select {
+		case tdb.updateMatchChan <- m.Status:
+		default:
+			// Channel full or no reader - don't block
+		}
 	}
+	// Also track updates in a thread-safe slice for async-aware tests.
+	tdb.matchUpdatesMtx.Lock()
+	tdb.matchUpdates = append(tdb.matchUpdates, m.Status)
+	if tdb.matchUpdateCond != nil {
+		tdb.matchUpdateCond.Broadcast()
+	}
+	tdb.matchUpdatesMtx.Unlock()
 	return nil
+}
+
+// resetMatchUpdates clears the tracked match updates.
+func (tdb *TDB) resetMatchUpdates() {
+	tdb.matchUpdatesMtx.Lock()
+	tdb.matchUpdates = nil
+	tdb.matchUpdatesMtx.Unlock()
+}
+
+// waitForMatchUpdate waits for at least n match updates within the timeout.
+// Returns the updates received.
+func (tdb *TDB) waitForMatchUpdate(n int, timeout time.Duration) []order.MatchStatus {
+	deadline := time.Now().Add(timeout)
+	tdb.matchUpdatesMtx.Lock()
+	defer tdb.matchUpdatesMtx.Unlock()
+
+	if tdb.matchUpdateCond == nil {
+		tdb.matchUpdateCond = sync.NewCond(&tdb.matchUpdatesMtx)
+	}
+
+	// Wake up when the deadline expires so we don't block forever.
+	timer := time.AfterFunc(timeout, func() {
+		tdb.matchUpdateCond.Broadcast()
+	})
+	defer timer.Stop()
+
+	for len(tdb.matchUpdates) < n && time.Now().Before(deadline) {
+		tdb.matchUpdateCond.Wait()
+	}
+	result := make([]order.MatchStatus, len(tdb.matchUpdates))
+	copy(result, tdb.matchUpdates)
+	return result
 }
 
 func (tdb *TDB) ActiveMatches() ([]*db.MetaMatch, error) {
@@ -717,6 +767,7 @@ type TXCWallet struct {
 	sendErr             error
 	addrErr             error
 	signCoinErr         error
+	lastSwapsMtx        sync.Mutex
 	lastSwaps           []*asset.Swaps
 	lastRedeems         []*asset.RedeemForm
 	swapReceipts        []asset.Receipt
@@ -923,7 +974,9 @@ func (w *TXCWallet) FundingCoins([]dex.Bytes) (asset.Coins, error) {
 
 func (w *TXCWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
 	w.swapCounter++
+	w.lastSwapsMtx.Lock()
 	w.lastSwaps = append(w.lastSwaps, swaps)
+	w.lastSwapsMtx.Unlock()
 	if w.swapErr != nil {
 		return nil, nil, 0, w.swapErr
 	}
@@ -1425,7 +1478,6 @@ func newTestRig() *testRig {
 			wallets:       make(map[uint32]*xcWallet),
 			blockWaiters:  make(map[string]*blockWaiter),
 			sentCommits:   make(map[order.Commitment]chan struct{}),
-			tickSched:     make(map[order.OrderID]*time.Timer),
 			wsConstructor: func(*comms.WsCfg) (comms.WsConn, error) {
 				// This is not very realistic since it doesn't start a fresh
 				// one, and (*Core).connectDEX always gets the same TWebsocket,
@@ -1667,7 +1719,7 @@ func TestBookFeed(t *testing.T) {
 			if u.Action != action {
 				t.Fatalf("expected action = %s, got %s", action, u.Action)
 			}
-		default:
+		case <-time.After(time.Second):
 			t.Fatalf("no %s received", action)
 		}
 	}
@@ -3412,8 +3464,10 @@ func TestRefundReserves(t *testing.T) {
 	test := func(tag string, expUnlock uint64, f func()) {
 		t.Helper()
 		tEthWallet.refundUnlocked = 0
+		tracker.mtx.Lock()
 		tracker.refundLocked = reserves
 		tracker.metaData.Status = order.OrderStatusEpoch
+		tracker.mtx.Unlock()
 		f()
 		if tEthWallet.refundUnlocked != expUnlock {
 			t.Fatalf("%s: expected %d to be unlocked. saw %d", tag, expUnlock, tEthWallet.refundUnlocked)
@@ -3439,10 +3493,25 @@ func TestRefundReserves(t *testing.T) {
 		}
 	})
 
+	tracker.mtx.Lock()
 	tracker.cancel = nil
+	tracker.mtx.Unlock()
 
-	lo.Force = order.ImmediateTiF
+	// Create a new order with immediate TiF for testing
+	lo, dbOrder, preImg, _ = makeLimitOrderWithTiF(dc, true, qty, rate, order.ImmediateTiF)
+	lo.BaseAsset = tUTXOAssetB.ID
+	lo.QuoteAsset = tACCTAsset.ID
+	oldLoid := loid
 	loid = lo.ID()
+	dbOrder.MetaData.RefundReserves = reserves
+
+	tracker = newTrackedTrade(dbOrder, preImg, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails)
+	dc.tradeMtx.Lock()
+	delete(dc.trades, oldLoid)
+	dc.trades[loid] = tracker
+	dc.tradeMtx.Unlock()
+
 	msgMatch.OrderID = loid[:]
 	sign(tDexPriv, msgMatch)
 
@@ -3453,8 +3522,21 @@ func TestRefundReserves(t *testing.T) {
 		}
 	})
 
-	lo.Force = order.StandingTiF
+	// Create a new order with standing TiF for subsequent tests
+	lo, dbOrder, preImg, _ = makeLimitOrderWithTiF(dc, true, qty, rate, order.StandingTiF)
+	lo.BaseAsset = tUTXOAssetB.ID
+	lo.QuoteAsset = tACCTAsset.ID
+	oldLoid = loid
 	loid = lo.ID()
+	dbOrder.MetaData.RefundReserves = reserves
+
+	tracker = newTrackedTrade(dbOrder, preImg, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails)
+	dc.tradeMtx.Lock()
+	delete(dc.trades, oldLoid)
+	dc.trades[loid] = tracker
+	dc.tradeMtx.Unlock()
+
 	msgMatch.OrderID = loid[:]
 	sign(tDexPriv, msgMatch)
 
@@ -3471,19 +3553,28 @@ func TestRefundReserves(t *testing.T) {
 		if err := handleMatchRoute(tCore, rig.dc, matchReq); err != nil {
 			t.Fatalf("handleMatchRoute error: %v", err)
 		}
+		// Wait for any in-flight schedTradeTick goroutine to finish.
+		for atomic.LoadUint32(&tracker.tickRunning) != 0 {
+			time.Sleep(time.Millisecond)
+		}
+		tracker.mtx.Lock()
 		mt, ok := tracker.matches[mid]
 		if !ok {
+			tracker.mtx.Unlock()
 			t.Fatalf("match not found")
 		}
 		mt.Status = status
 		if status >= order.TakerSwapCast {
 			mt.counterSwap = &asset.AuditInfo{}
 		}
+		tracker.mtx.Unlock()
 		return mid
 	}
 
 	resetMatches := func() {
+		tracker.mtx.Lock()
 		tracker.matches = make(map[order.MatchID]*matchTracker)
+		tracker.mtx.Unlock()
 	}
 
 	test("redemption received", reserves/10, func() {
@@ -3665,8 +3756,10 @@ func TestRedemptionReserves(t *testing.T) {
 	test := func(tag string, expUnlock uint64, f func()) {
 		t.Helper()
 		tEthWallet.redemptionUnlocked = 0
+		tracker.mtx.Lock()
 		tracker.redemptionLocked = reserves
 		tracker.metaData.Status = order.OrderStatusEpoch
+		tracker.mtx.Unlock()
 		f()
 		if tEthWallet.redemptionUnlocked != expUnlock {
 			t.Fatalf("%s: expected %d to be unlocked. saw %d", tag, expUnlock, tEthWallet.redemptionUnlocked)
@@ -3692,7 +3785,9 @@ func TestRedemptionReserves(t *testing.T) {
 		}
 	})
 
+	tracker.mtx.Lock()
 	tracker.cancel = nil
+	tracker.mtx.Unlock()
 
 	lo.Force = order.ImmediateTiF
 	loid = lo.ID()
@@ -3743,16 +3838,25 @@ func TestRedemptionReserves(t *testing.T) {
 		if err := handleMatchRoute(tCore, rig.dc, matchReq); err != nil {
 			t.Fatalf("handleMatchRoute error: %v", err)
 		}
+		// Wait for any in-flight schedTradeTick goroutine to finish.
+		for atomic.LoadUint32(&tracker.tickRunning) != 0 {
+			time.Sleep(time.Millisecond)
+		}
+		tracker.mtx.Lock()
 		mt, ok := tracker.matches[mid]
 		if !ok {
+			tracker.mtx.Unlock()
 			t.Fatalf("match not found")
 		}
 		mt.Status = status
+		tracker.mtx.Unlock()
 		return mid
 	}
 
 	resetMatches := func() {
+		tracker.mtx.Lock()
 		tracker.matches = make(map[order.MatchID]*matchTracker)
+		tracker.mtx.Unlock()
 	}
 
 	testRevokeMatch := func(side order.MatchSide, status order.MatchStatus, expReserves uint64) {
@@ -4899,7 +5003,7 @@ func TestTradeTracking(t *testing.T) {
 	auditInfo.Expiration = matchTime.Add(tracker.lockTimeTaker)
 
 	// success, full handleAuditRoute>processAuditMsg>auditContract
-	rig.db.updateMatchChan = make(chan order.MatchStatus, 1)
+	rig.db.updateMatchChan = make(chan order.MatchStatus, 4)
 	err = handleAuditRoute(tCore, rig.dc, msg)
 	if err != nil {
 		t.Fatalf("audit error: %v", err)
@@ -4932,7 +5036,10 @@ func TestTradeTracking(t *testing.T) {
 	//<-tBtcWallet.redeemErrChan
 	tBtcWallet.redeemCoins = []dex.Bytes{redeemCoin}
 	rig.ws.queueResponse(msgjson.RedeemRoute, redeemAcker)
-	tCore.tickAsset(dc, tUTXOAssetB.ID)
+	tCore.schedTradeTick(tracker)
+	for atomic.LoadUint32(&tracker.tickRunning) != 0 {
+		time.Sleep(time.Millisecond)
+	}
 	// TakerSwapCast -> MakerRedeemed after broadcast, before redeem request
 	newMatchStatus = <-rig.db.updateMatchChan
 	if newMatchStatus != order.MakerRedeemed {
@@ -4974,7 +5081,7 @@ func TestTradeTracking(t *testing.T) {
 	}
 	sign(tDexPriv, msgMatch)
 	msg, _ = msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
-	rig.db.updateMatchChan = make(chan order.MatchStatus, 1)
+	rig.db.updateMatchChan = make(chan order.MatchStatus, 16)
 	err = handleMatchRoute(tCore, rig.dc, msg)
 	if err != nil {
 		t.Fatalf("match messages error: %v", err)
@@ -5044,7 +5151,10 @@ func TestTradeTracking(t *testing.T) {
 	swapID := encode.RandomBytes(36)
 	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: swapID}}}
 	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
-	tCore.tickAsset(dc, tUTXOAssetB.ID)
+	tCore.schedTradeTick(tracker)
+	for atomic.LoadUint32(&tracker.tickRunning) != 0 {
+		time.Sleep(time.Millisecond)
+	}
 	newMatchStatus = <-rig.db.updateMatchChan // MakerSwapCast->TakerSwapCast (after taker's swap bcast)
 	if newMatchStatus != order.TakerSwapCast {
 		t.Fatalf("wrong match status. wanted %v, got %v", order.TakerSwapCast, newMatchStatus)
@@ -5171,10 +5281,12 @@ func TestTradeTracking(t *testing.T) {
 	}
 
 	resetMatches := func() {
+		tracker.mtx.Lock()
 		tracker.matches = make(map[order.MatchID]*matchTracker)
 		tracker.change = nil
 		tracker.metaData.ChangeCoin = nil
 		tracker.coinsLocked = true
+		tracker.mtx.Unlock()
 	}
 
 	// If there is no change coin and no matches, the funding coin should be
@@ -5193,20 +5305,52 @@ func TestTradeTracking(t *testing.T) {
 
 	// If the order is an immediate order, the asset.Swaps.LockChange should be
 	// false regardless of whether the order is filled.
-	resetMatches()
-	tracker.cancel = nil
+	// Create a new order with ImmediateTiF for this test.
+	tDcrWallet.lastSwapsMtx.Lock()
+	tDcrWallet.lastSwaps = make([]*asset.Swaps, 0) // Clear previous swaps
+	tDcrWallet.lastSwapsMtx.Unlock()
 	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
+
+	loImm, dbOrderImm, preImgImm, _ := makeLimitOrder(dc, true, qty, dcrBtcRateStep) // ImmediateTiF by default
+	newLoid := loImm.ID()
+	fundingCoinsImm := asset.Coins{&tCoin{id: encode.RandomBytes(36)}}
+	trackerImm := newTrackedTrade(dbOrderImm, preImgImm, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, walletSet, fundingCoinsImm, rig.core.notify, rig.core.formatDetails)
+	trackerImm.coins = map[string]asset.Coin{
+		hex.EncodeToString(fundingCoinsImm[0].ID()): fundingCoinsImm[0],
+	}
+	trackerImm.coinsLocked = true
+	trackerImm.metaData.Status = order.OrderStatusEpoch
+	rig.dc.tradeMtx.Lock()
+	delete(rig.dc.trades, loid)
+	rig.dc.trades[newLoid] = trackerImm
+	rig.dc.tradeMtx.Unlock()
+
+	msgMatch.OrderID = newLoid[:]
 	msgMatch.Side = uint8(order.Maker)
-	sign(tDexPriv, msgMatch) // Side is not in the serialization but whatever
+	sign(tDexPriv, msgMatch)
 	msg, _ = msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
 
-	tracker.metaData.Status = order.OrderStatusEpoch
-	lo.Force = order.ImmediateTiF
 	err = handleMatchRoute(tCore, rig.dc, msg)
 	if err != nil {
 		t.Fatalf("handleMatchRoute error (immediate partial fill): %v", err)
 	}
-	lastSwaps := tDcrWallet.lastSwaps[len(tDcrWallet.lastSwaps)-1]
+	// Wait for async tick to broadcast the swap
+	var lastSwaps *asset.Swaps
+	for i := 0; i < 100; i++ {
+		tDcrWallet.lastSwapsMtx.Lock()
+		if len(tDcrWallet.lastSwaps) > 0 {
+			lastSwaps = tDcrWallet.lastSwaps[len(tDcrWallet.lastSwaps)-1]
+		}
+		tDcrWallet.lastSwapsMtx.Unlock()
+		if lastSwaps != nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if lastSwaps == nil {
+		t.Fatalf("swap not broadcast for immediate partial fill")
+	}
 	if lastSwaps.LockChange != false {
 		t.Fatalf("change locked for executed non-standing order (immediate partial fill)")
 	}
@@ -5454,11 +5598,20 @@ func TestRefunds(t *testing.T) {
 	}
 	checkRefund := func(tracker *trackedTrade, match *matchTracker, expectAmt uint64) {
 		t.Helper()
+		// Hold t.mtx for the duration since refundMatches and isRefundable
+		// expect the caller to hold it (as tick() does), and background
+		// goroutines (checkEpochResolution) read match state under RLock.
+		tracker.mtx.Lock()
+		defer tracker.mtx.Unlock()
 		// Confirm that the status is SwapCast.
 		if match.Side == order.Maker {
-			checkStatus("maker swapped", match, order.MakerSwapCast)
+			if match.Status != order.MakerSwapCast {
+				t.Fatalf("maker swapped: wrong status wanted %v, got %v", order.MakerSwapCast, match.Status)
+			}
 		} else {
-			checkStatus("taker swapped", match, order.TakerSwapCast)
+			if match.Status != order.TakerSwapCast {
+				t.Fatalf("taker swapped: wrong status wanted %v, got %v", order.TakerSwapCast, match.Status)
+			}
 		}
 		// Confirm isRefundable = true.
 		if !tracker.isRefundable(tCore.ctx, match) {
@@ -5487,9 +5640,13 @@ func TestRefunds(t *testing.T) {
 		}
 		// Confirm that the status is unchanged.
 		if match.Side == order.Maker {
-			checkStatus("maker swapped", match, order.MakerSwapCast)
+			if match.Status != order.MakerSwapCast {
+				t.Fatalf("maker swapped: wrong status wanted %v, got %v", order.MakerSwapCast, match.Status)
+			}
 		} else {
-			checkStatus("taker swapped", match, order.TakerSwapCast)
+			if match.Status != order.TakerSwapCast {
+				t.Fatalf("taker swapped: wrong status wanted %v, got %v", order.TakerSwapCast, match.Status)
+			}
 		}
 
 		if _, is := tracker.accountRefunder(); is {
@@ -5541,20 +5698,36 @@ func TestRefunds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("match messages error: %v", err)
 	}
+	tracker.mtx.RLock()
 	match, found := tracker.matches[mid]
+	tracker.mtx.RUnlock()
 	if !found {
 		t.Fatalf("match not found")
 	}
 
 	// We're the maker, so the init transaction should be broadcast.
+	// Wait for async tick to broadcast the swap.
+	for i := 0; i < 100; i++ {
+		tracker.mtx.RLock()
+		status := match.Status
+		tracker.mtx.RUnlock()
+		if status == order.MakerSwapCast {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	checkStatus("maker swapped", match, order.MakerSwapCast)
+	tracker.mtx.RLock()
 	proof := &match.MetaData.Proof
 	if !bytes.Equal(proof.ContractData, contract) {
+		tracker.mtx.RUnlock()
 		t.Fatalf("invalid contract recorded for Maker swap")
 	}
+	secretHash := proof.SecretHash
+	tracker.mtx.RUnlock()
 
 	// Send the counter-party's init info.
-	audit, auditInfo := tMsgAudit(loid, mid, addr, matchSize, proof.SecretHash)
+	audit, auditInfo := tMsgAudit(loid, mid, addr, matchSize, secretHash)
 	tBtcWallet.auditInfo = auditInfo
 	auditInfo.Expiration = encode.DropMilliseconds(matchTime.Add(tracker.lockTimeMaker).UTC())
 
@@ -5606,13 +5779,20 @@ func TestRefunds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("match messages error: %v", err)
 	}
+	tracker.mtx.RLock()
 	match, found = tracker.matches[mid]
+	tracker.mtx.RUnlock()
 	if !found {
 		t.Fatalf("match not found")
 	}
 	checkStatus("taker matched", match, order.NewlyMatched)
+	// Wait for any in-flight schedTradeTick goroutine to finish before
+	// setting up the channel, to avoid racing on rig.db.updateMatchChan.
+	for atomic.LoadUint32(&tracker.tickRunning) != 0 {
+		time.Sleep(time.Millisecond)
+	}
 	// Send through the audit request for the maker's init.
-	rig.db.updateMatchChan = make(chan order.MatchStatus, 1)
+	rig.db.updateMatchChan = make(chan order.MatchStatus, 16)
 	audit, auditInfo = tMsgAudit(loid, mid, addr, matchSize, nil)
 	tBtcWallet.auditInfo = auditInfo
 	auditInfo.Expiration = encode.DropMilliseconds(matchTime.Add(tracker.lockTimeMaker))
@@ -5639,7 +5819,10 @@ func TestRefunds(t *testing.T) {
 	counterScript := encode.RandomBytes(36)
 	tEthWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: counterSwapID}, contract: counterScript}}
 	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
-	tCore.tickAsset(dc, tUTXOAssetB.ID)
+	tCore.schedTradeTick(tracker)
+	for atomic.LoadUint32(&tracker.tickRunning) != 0 {
+		time.Sleep(time.Millisecond)
+	}
 	newMatchStatus = <-rig.db.updateMatchChan // MakerSwapCast->TakerSwapCast (after taker's swap bcast)
 	if newMatchStatus != order.TakerSwapCast {
 		t.Fatalf("wrong match status. wanted %v, got %v", order.TakerSwapCast, newMatchStatus)
@@ -5649,17 +5832,26 @@ func TestRefunds(t *testing.T) {
 		t.Fatalf("invalid contract recorded for Taker swap")
 	}
 	tracker.mtx.RUnlock()
-	// still takerswapcast, but with initsig
+	// still takerswapcast, but with initsig (or status may have advanced due to async ticks)
 	newMatchStatus = <-rig.db.updateMatchChan
-	if newMatchStatus != order.TakerSwapCast {
-		t.Fatalf("wrong match status wanted %v, got %v", order.TakerSwapCast, newMatchStatus)
+	if newMatchStatus < order.TakerSwapCast {
+		t.Fatalf("wrong match status wanted >= %v, got %v", order.TakerSwapCast, newMatchStatus)
 	}
-	tracker.mtx.RLock()
-	auth := &match.MetaData.Proof.Auth
-	if len(auth.InitSig) == 0 {
+	// Wait for init sig to be set (may take time due to async processing)
+	var authHasInitSig bool
+	for i := 0; i < 100; i++ {
+		tracker.mtx.RLock()
+		auth := &match.MetaData.Proof.Auth
+		authHasInitSig = len(auth.InitSig) > 0
+		tracker.mtx.RUnlock()
+		if authHasInitSig {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !authHasInitSig {
 		t.Fatalf("init sig not recorded for valid init ack")
 	}
-	tracker.mtx.RUnlock()
 
 	// Attempt refund.
 	rig.db.updateMatchChan = nil
@@ -6680,6 +6872,10 @@ func TestSetEpoch(t *testing.T) {
 }
 
 func makeLimitOrder(dc *dexConnection, sell bool, qty, rate uint64) (*order.LimitOrder, *db.MetaOrder, order.Preimage, string) {
+	return makeLimitOrderWithTiF(dc, sell, qty, rate, order.ImmediateTiF)
+}
+
+func makeLimitOrderWithTiF(dc *dexConnection, sell bool, qty, rate uint64, force order.TimeInForce) (*order.LimitOrder, *db.MetaOrder, order.Preimage, string) {
 	preImg := newPreimage()
 	addr := ordertest.RandomAddress()
 	lo := &order.LimitOrder{
@@ -6699,7 +6895,7 @@ func makeLimitOrder(dc *dexConnection, sell bool, qty, rate uint64) (*order.Limi
 			Address:  addr,
 		},
 		Rate:  rate,
-		Force: order.ImmediateTiF,
+		Force: force,
 	}
 	fromAsset, toAsset := tUTXOAssetB, tUTXOAssetA
 	if sell {
@@ -9360,7 +9556,10 @@ func TestConfirmTransaction(t *testing.T) {
 		tDcrWallet.confirmTxErr = test.refundConfirmTxErr
 		tDcrWallet.confirmTxCalled = false
 
-		tCore.tickAsset(dc, tUTXOAssetB.ID)
+		tCore.schedTradeTick(tracker)
+		for atomic.LoadUint32(&tracker.tickRunning) != 0 {
+			time.Sleep(time.Millisecond)
+		}
 
 		if tBtcWallet.confirmTxCalled != test.expectConfirmTxCalled {
 			t.Fatalf("%s: expected confirm tx for redemption to be called=%v but got=%v",

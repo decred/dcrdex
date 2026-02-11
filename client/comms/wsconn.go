@@ -164,8 +164,9 @@ type wsConn struct {
 	readCh chan *msgjson.Message
 	urlV   atomic.Value // string
 
-	wsMtx sync.Mutex
-	ws    *websocket.Conn
+	wsMtx    sync.Mutex
+	writeMtx sync.Mutex
+	ws       *websocket.Conn
 
 	connectionStatus uint32 // atomic
 
@@ -642,14 +643,18 @@ func (conn *wsConn) SendRaw(b []byte) error {
 	}
 
 	conn.wsMtx.Lock()
-	defer conn.wsMtx.Unlock()
-	err := conn.ws.SetWriteDeadline(time.Now().Add(writeWait))
+	ws := conn.ws
+	conn.wsMtx.Unlock()
+
+	conn.writeMtx.Lock()
+	defer conn.writeMtx.Unlock()
+	err := ws.SetWriteDeadline(time.Now().Add(writeWait))
 	if err != nil {
 		conn.log.Errorf("Send: failed to set write deadline: %v", err)
 		return err
 	}
 
-	err = conn.ws.WriteMessage(websocket.TextMessage, b)
+	err = ws.WriteMessage(websocket.TextMessage, b)
 	if err != nil {
 		conn.log.Errorf("Send: WriteMessage error: %v", err)
 		return err

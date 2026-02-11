@@ -312,22 +312,18 @@ func (db *badgerTxDB) getAllEntries() ([]*extendedWalletTx, error) {
 }
 
 // badgerLoggerWrapper wraps dex.Logger and translates Warnf to Warningf to
-// satisfy badger.Logger. It also lowers the log level of Infof to Debugf
-// and Debugf to Tracef.
+// satisfy badger.Logger. It also lowers the log level of Infof to Debugf.
+// Debugf is discarded as badger's debug logs are too noisy even for trace.
 type badgerLoggerWrapper struct {
 	dex.Logger
 }
 
 var _ badger.Logger = (*badgerLoggerWrapper)(nil)
 
-// Debugf -> dex.Logger.Tracef
-func (log *badgerLoggerWrapper) Debugf(s string, a ...any) {
-	log.Tracef(s, a...)
-}
+// Debugf is discarded - badger's debug logs are too verbose.
+func (log *badgerLoggerWrapper) Debugf(s string, a ...any) {}
 
-func (log *badgerLoggerWrapper) Debug(a ...any) {
-	log.Trace(a...)
-}
+func (log *badgerLoggerWrapper) Debug(a ...any) {}
 
 // Infof -> dex.Logger.Debugf
 func (log *badgerLoggerWrapper) Infof(s string, a ...any) {

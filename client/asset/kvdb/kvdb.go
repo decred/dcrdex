@@ -117,12 +117,16 @@ func (d *kvDB) Store(k []byte, thing encoding.BinaryMarshaler) error {
 }
 
 // badgerLoggerWrapper wraps dex.Logger and translates Warnf to Warningf to
-// satisfy badger.Logger.
+// satisfy badger.Logger. Debugf is discarded as badger's debug logs are too
+// noisy even for trace.
 type badgerLoggerWrapper struct {
 	dex.Logger
 }
 
 var _ badger.Logger = (*badgerLoggerWrapper)(nil)
+
+// Debugf is discarded - badger's debug logs are too verbose.
+func (log *badgerLoggerWrapper) Debugf(s string, a ...any) {}
 
 // Warningf -> dex.Logger.Warnf
 func (log *badgerLoggerWrapper) Warningf(s string, a ...any) {
