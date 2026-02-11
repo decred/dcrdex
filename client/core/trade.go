@@ -2209,12 +2209,20 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	}
 
 	// Wallet requests below may still hang if there are no internal timeouts.
-	// We should consider giving each asset.Wallet method a context arg.
-	// However, if the requests in the checks above just succeeded, the wallets
-	// are likely to be responsive below.
+	// asset.Wallet methods now accept a context arg, but implementations do
+	// not yet use it. However, if the requests in the checks above just
+	// succeeded, the wallets are likely to be responsive below.
 
 	// Take the actions that will modify the match.
 	errs := newErrorSet("%s tick: ", t.dc.acct.host)
+
+	// refreshUnlock is a wallet operation that doesn't need the trade lock.
+	// Call it before acquiring the lock for each phase.
+
+	// WARNING: The trade lock is manually managed below rather than using
+	// defer. The lock is released around wallet calls (swapMatches,
+	// redeemMatches, refundMatches) to avoid blocking message handlers.
+	// Do NOT add early returns without ensuring the lock is released first.
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
 
@@ -2308,7 +2316,7 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 
 	if len(searches) > 0 {
 		for _, match := range searches {
-			t.findMakersRedemption(c.ctx, match) // async search, just set cancelRedemptionSearch
+			t.findMakersRedemption(c.ctx, match, &c.wg) // async search, just set cancelRedemptionSearch
 		}
 	}
 
@@ -3474,7 +3482,7 @@ func (c *Core) confirmTx(t *trackedTrade, match *matchTracker, info *txInfo) (bo
 //
 // This method modifies trackedTrade fields and MUST be called with the
 // trackedTrade mutex lock held for writes.
-func (t *trackedTrade) findMakersRedemption(ctx context.Context, match *matchTracker) {
+func (t *trackedTrade) findMakersRedemption(ctx context.Context, match *matchTracker, wg *sync.WaitGroup) {
 	if match.cancelRedemptionSearch != nil {
 		return
 	}
@@ -3492,7 +3500,9 @@ func (t *trackedTrade) findMakersRedemption(ctx context.Context, match *matchTra
 	}
 
 	// Run redemption finder in goroutine.
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		defer cancel() // don't leak the context when we reset match.cancelRedemptionSearch
 		redemptionCoinID, secret, err := wallet.FindRedemption(ctx, swapCoinID, swapContract)
 
@@ -3616,7 +3626,7 @@ func (c *Core) refundMatches(t *trackedTrade, matches []*matchTracker) (uint64, 
 				// started FindRedemption for this contract.
 				c.log.Debugf("Failed to refund %s contract %s, already redeemed. Beginning find redemption.",
 					symbol, swapCoinString)
-				t.findMakersRedemption(c.ctx, match)
+				t.findMakersRedemption(c.ctx, match, &c.wg)
 			} else {
 				match.delayTicks(time.Minute * 5)
 				errs.add("error sending refund tx for match %s, swap coin %s: %v",
@@ -3625,7 +3635,7 @@ func (c *Core) refundMatches(t *trackedTrade, matches []*matchTracker) (uint64, 
 					// Check for a redeem even though Refund did not indicate it
 					// was spent via CoinNotFoundError, but do not set refundErr
 					// so that a refund can be tried again.
-					t.findMakersRedemption(c.ctx, match)
+					t.findMakersRedemption(c.ctx, match, &c.wg)
 				}
 			}
 			continue
@@ -3662,7 +3672,7 @@ func (c *Core) refundMatches(t *trackedTrade, matches []*matchTracker) (uint64, 
 
 // processAuditMsg processes the audit request from the server. A non-nil error
 // is only returned if the match referenced by the Audit message is not known.
-func (t *trackedTrade) processAuditMsg(msgID uint64, audit *msgjson.Audit, afterAudit func()) error {
+func (t *trackedTrade) processAuditMsg(msgID uint64, audit *msgjson.Audit, afterAudit func(), wg *sync.WaitGroup) error {
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
 	// Find the match and check the server's signature.
@@ -3684,7 +3694,9 @@ func (t *trackedTrade) processAuditMsg(msgID uint64, audit *msgjson.Audit, after
 	// depending on node connectivity, so this is run in a goroutine. If the
 	// contract and coin (amount) are successfully validated, the matchTracker
 	// data are updated.
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		// Search until it's known to be revoked.
 		err := t.auditContract(match, audit.CoinID, audit.Contract, audit.TxData)
 		if err != nil {

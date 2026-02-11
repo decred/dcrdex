@@ -9563,7 +9563,9 @@ func (c *Core) schedTradeTick(tracker *trackedTrade) {
 	if !atomic.CompareAndSwapUint32(&tracker.tickRunning, 0, 1) {
 		return
 	}
+	c.wg.Add(1)
 	go func() {
+		defer c.wg.Done()
 		for {
 			for atomic.SwapUint32(&tracker.tickRequested, 0) != 0 {
 				if c.ctx.Err() != nil {
@@ -9614,7 +9616,7 @@ func handleAuditRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 		c.tryFastSwap(tracker, mid)
 		c.schedTradeTick(tracker)
 	}
-	return tracker.processAuditMsg(msg.ID, audit, afterAudit)
+	return tracker.processAuditMsg(msg.ID, audit, afterAudit, &c.wg)
 }
 
 // tryFastSwap attempts to immediately send the taker's swap for a single match
@@ -9815,7 +9817,11 @@ func handleRedemptionRoute(c *Core, dc *dexConnection, msg *msgjson.Message) err
 		// bypassing the slow tick cycle.
 		var mid order.MatchID
 		copy(mid[:], redemption.MatchID)
-		go c.tryFastRedeem(tracker, mid)
+		c.wg.Add(1)
+		go func() {
+			defer c.wg.Done()
+			c.tryFastRedeem(tracker, mid)
+		}()
 		c.schedTradeTick(tracker)
 		return nil
 	}
