@@ -6767,7 +6767,7 @@ func (c *Core) sendTradeRequest(tr *tradeRequest) (*Order, error) {
 
 	// Prepare and store the tracker and get the core.Order to return.
 	tracker := newTrackedTrade(dbOrder, preImg, dc, c.lockTimeTaker, c.lockTimeMaker,
-		c.db, c.latencyQ, wallets, coins, c.notify, c.formatDetails)
+		c.db, c.latencyQ, wallets, coins, c.notify, c.formatDetails, &c.wg)
 
 	tracker.redemptionLocked = tracker.redemptionReserves
 	tracker.refundLocked = tracker.refundReserves
@@ -7706,7 +7706,7 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		var preImg order.Preimage
 		copy(preImg[:], dbOrder.MetaData.Proof.Preimage)
 		tracker := newTrackedTrade(dbOrder, preImg, dc, c.lockTimeTaker, c.lockTimeMaker,
-			c.db, c.latencyQ, nil, nil, c.notify, c.formatDetails)
+			c.db, c.latencyQ, nil, nil, c.notify, c.formatDetails, &c.wg)
 		tracker.readyToTick = false
 		trackers[dbOrder.Order.ID()] = tracker
 
@@ -9605,7 +9605,9 @@ func (c *Core) schedTradeTick(tracker *trackedTrade) {
 	if !atomic.CompareAndSwapUint32(&tracker.tickRunning, 0, 1) {
 		return
 	}
+	c.wg.Add(1)
 	go func() {
+		defer c.wg.Done()
 		for {
 			for atomic.SwapUint32(&tracker.tickRequested, 0) != 0 {
 				if c.ctx.Err() != nil {
@@ -9857,7 +9859,11 @@ func handleRedemptionRoute(c *Core, dc *dexConnection, msg *msgjson.Message) err
 		// bypassing the slow tick cycle.
 		var mid order.MatchID
 		copy(mid[:], redemption.MatchID)
-		go c.tryFastRedeem(tracker, mid)
+		c.wg.Add(1)
+		go func() {
+			defer c.wg.Done()
+			c.tryFastRedeem(tracker, mid)
+		}()
 		c.schedTradeTick(tracker)
 		return nil
 	}

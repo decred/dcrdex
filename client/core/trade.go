@@ -314,12 +314,14 @@ type trackedTrade struct {
 	redemptionLocked uint64 // remaining locked of redemptionReserves
 	refundLocked     uint64 // remaining locked of refundReserves
 	readyToTick      bool   // this will be false if either of the wallets cannot be connected and unlocked
+	wg               *sync.WaitGroup
 }
 
 // newTrackedTrade is a constructor for a trackedTrade.
 func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnection,
 	lockTimeTaker, lockTimeMaker time.Duration, db db.DB, latencyQ *wait.TickerQueue, wallets *walletSet,
-	coins asset.Coins, notify func(Notification), formatDetails func(Topic, ...any) (string, string)) *trackedTrade {
+	coins asset.Coins, notify func(Notification), formatDetails func(Topic, ...any) (string, string),
+	wg *sync.WaitGroup) *trackedTrade {
 
 	fromID := dbOrder.Order.Quote()
 	if dbOrder.Order.Trade().Sell {
@@ -348,6 +350,7 @@ func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnec
 		redemptionReserves: dbOrder.MetaData.RedemptionReserves,
 		refundReserves:     dbOrder.MetaData.RefundReserves,
 		readyToTick:        true,
+		wg:                 wg,
 	}
 	return t
 }
@@ -2209,12 +2212,20 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	}
 
 	// Wallet requests below may still hang if there are no internal timeouts.
-	// We should consider giving each asset.Wallet method a context arg.
-	// However, if the requests in the checks above just succeeded, the wallets
-	// are likely to be responsive below.
+	// asset.Wallet methods now accept a context arg, but implementations do
+	// not yet use it. However, if the requests in the checks above just
+	// succeeded, the wallets are likely to be responsive below.
 
 	// Take the actions that will modify the match.
 	errs := newErrorSet("%s tick: ", t.dc.acct.host)
+
+	// refreshUnlock is a wallet operation that doesn't need the trade lock.
+	// Call it before acquiring the lock for each phase.
+
+	// WARNING: The trade lock is manually managed below rather than using
+	// defer. The lock is released around wallet calls (swapMatches,
+	// redeemMatches, refundMatches) to avoid blocking message handlers.
+	// Do NOT add early returns without ensuring the lock is released first.
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
 
@@ -3492,7 +3503,9 @@ func (t *trackedTrade) findMakersRedemption(ctx context.Context, match *matchTra
 	}
 
 	// Run redemption finder in goroutine.
+	t.wg.Add(1)
 	go func() {
+		defer t.wg.Done()
 		defer cancel() // don't leak the context when we reset match.cancelRedemptionSearch
 		redemptionCoinID, secret, err := wallet.FindRedemption(ctx, swapCoinID, swapContract)
 
@@ -3684,7 +3697,9 @@ func (t *trackedTrade) processAuditMsg(msgID uint64, audit *msgjson.Audit, after
 	// depending on node connectivity, so this is run in a goroutine. If the
 	// contract and coin (amount) are successfully validated, the matchTracker
 	// data are updated.
+	t.wg.Add(1)
 	go func() {
+		defer t.wg.Done()
 		// Search until it's known to be revoked.
 		err := t.auditContract(match, audit.CoinID, audit.Contract, audit.TxData)
 		if err != nil {
