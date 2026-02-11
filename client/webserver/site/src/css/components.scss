@@ -52,6 +52,15 @@ button {
       background-color: var(--btn-feature-hover-bg);
       border-color: var(--btn-featur-hover-border-color);
     }
+
+    &:disabled {
+      opacity: 0.4;
+
+      &:hover {
+        background-color: var(--btn-feature-bg);
+        border-color: var(--btn-feature-border-color);
+      }
+    }
   }
 
   &.danger {

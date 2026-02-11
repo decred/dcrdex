@@ -1459,6 +1459,16 @@ export default class Application {
     return this.assets[asset.token.parentID]
   }
 
+  prettyPrintAssetID (assetID: number) : string {
+    const asset = this.assets[assetID]
+    if (!asset) return `Unknown Asset ${assetID}`
+    if (asset.token) {
+      const parentAsset = this.assets[asset.token.parentID]
+      return `${asset.name} on ${parentAsset.name}`
+    }
+    return asset.name
+  }
+
   /*
   * baseChainSymbol returns the symbol for the asset's parent if the asset is a
   * token, otherwise the symbol for the asset itself.
@@ -1497,7 +1507,7 @@ export default class Application {
     if (asset.token) {
       return asset.token.definition
     }
-    return this.walletDefinition(assetID, this.assets[assetID].wallet.type)
+    return this.walletDefinition(assetID, asset.wallet.type)
   }
 
   /*

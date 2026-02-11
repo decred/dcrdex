@@ -161,71 +161,188 @@ const (
 	tradingTierUpdateddID            = "TRADING_TIER_UPDATED"
 	invalidTierValueID               = "INVALID_TIER_VALUE"
 	invalidCompsValueID              = "INVALID_COMPS_VALUE"
-	txTypeUnknownID                  = "TX_TYPE_UNKNOWN"
-	txTypeSendID                     = "TX_TYPE_SEND"
-	txTypeReceiveID                  = "TX_TYPE_RECEIVE"
-	txTypeSwapID                     = "TX_TYPE_SWAP"
-	txTypeRedeemID                   = "TX_TYPE_REDEEM"
-	txTypeRefundID                   = "TX_TYPE_REFUND"
-	txTypeSplitID                    = "TX_TYPE_SPLIT"
-	txTypeCreateBondID               = "TX_TYPE_CREATE_BOND"
-	txTypeRedeemBondID               = "TX_TYPE_REDEEM_BOND"
-	txTypeApproveTokenID             = "TX_TYPE_APPROVE_TOKEN"
-	txTypeAccelerationID             = "TX_TYPE_ACCELERATION"
-	txTypeSelfTransferID             = "TX_TYPE_SELF_TRANSFER"
-	txTypeRevokeTokenApprovalID      = "TX_TYPE_REVOKE_TOKEN_APPROVAL"
-	txTypeTicketPurchaseID           = "TX_TYPE_TICKET_PURCHASE"
-	txTypeTicketVoteID               = "TX_TYPE_TICKET_VOTE"
-	txTypeTicketRevokeID             = "TX_TYPE_TICKET_REVOCATION"
-	txTypeSwapOrSendID               = "TX_TYPE_SWAP_OR_SEND"
-	txTypeMixID                      = "TX_TYPE_MIX"
-	txTypeBridgeInitiationID         = "TX_TYPE_BRIDGE_INITIATION"
-	txTypeBridgeCompletionID         = "TX_TYPE_BRIDGE_COMPLETION"
-	swapOrSendTooltipID              = "SWAP_OR_SEND_TOOLTIP"
-	missingCexCredsID                = "MISSING_CEX_CREDS"
-	matchBufferID                    = "MATCH_BUFFER"
-	noPlacementsID                   = "NO_PLACEMENTS"
-	invalidValueID                   = "INVALID_VALUE"
-	noZeroID                         = "NO_ZERO"
-	botTypeBasicMMID                 = "BOTTYPE_BASIC_MM"
-	botTypeArbMMID                   = "BOTTYPE_ARB_MM"
-	botTypeSimpleArbID               = "BOTTYPE_SIMPLE_ARB"
-	botTypeNoneID                    = "NO_BOTTYPE"
-	noCexID                          = "NO_CEX"
-	cexBalanceErrID                  = "CEXBALANCE_ERR"
-	pendingID                        = "PENDING"
-	completeID                       = "COMPLETE"
-	archivedSettingsID               = "ARCHIVED_SETTINGS"
-	idTransparent                    = "TRANSPARENT"
-	idNoCodeProvided                 = "NO_CODE_PROVIDED"
-	enableAccount                    = "ENABLE_ACCOUNT"
-	disableAccount                   = "DISABLE_ACCOUNT"
-	accountDisabledMsg               = "ACCOUNT_DISABLED_MSG"
-	dexDisabledMsg                   = "DEX_DISABLED_MSG"
-	idWalletNotSynced                = "WALLET_NOT_SYNCED"
-	idWalletNoPeers                  = "WALLET_NO_PEERS"
-	idDepositError                   = "DEPOSIT_ERROR"
-	idWithdrawError                  = "WITHDRAW_ERROR"
-	idDEXUnderfunded                 = "DEX_UNDERFUNDED"
-	idCEXUnderfunded                 = "CEX_UNDERFUNDED"
-	idCEXTooShallow                  = "CEX_TOO_SHALLOW"
-	idAccountSuspended               = "ACCOUNT_SUSPENDED"
-	idUserLimitTooLow                = "USER_LIMIT_TOO_LOW"
-	idNoPriceSource                  = "NO_PRICE_SOURCE"
-	idCEXOrderbookUnsynced           = "CEX_ORDERBOOK_UNSYNCED"
-	idDeterminePlacementsError       = "DETERMINE_PLACEMENTS_ERROR"
-	idPlaceBuyOrdersError            = "PLACE_BUY_ORDERS_ERROR"
-	idPlaceSellOrdersError           = "PLACE_SELL_ORDERS_ERROR"
-	idCEXTradeError                  = "CEX_TRADE_ERROR"
-	idOrderReportTitle               = "ORDER_REPORT_TITLE"
-	idCEXBalances                    = "CEX_BALANCES"
-	idCausesSelfMatch                = "CAUSES_SELF_MATCH"
-	idCexNotConnected                = "CEX_NOT_CONNECTED"
-	idDeleteBot                      = "DELETE_BOT"
-	idMarketOrderCapitalize          = "MARKET_ORDER_CAPITALIZE"
-	idLimitOrderCapitalize           = "LIMIT_ORDER_CAPITALIZE"
-	idInsuffRedeemFundsErrMsg        = "INSUFFICIENT_REDEEM_FUNDS_ERR_MSG"
-	idInsuffRedeemFundsBundErrMsg    = "INSUFFICIENT_REDEEM_FUNDS_BUNDLER_ERR_MSG"
+
+	// MM Settings translations
+	mmStartBotID                   = "MM_START_BOT"
+	mmSaveSettingsID               = "MM_SAVE_SETTINGS"
+	mmDeleteBotID                  = "MM_DELETE_BOT"
+	mmUpdateRunningBotID           = "MM_UPDATE_RUNNING_BOT"
+	mmConfirmDeleteID              = "MM_CONFIRM_DELETE"
+	mmCancelID                     = "MM_CANCEL"
+	mmDeleteID                     = "MM_DELETE"
+	mmCloseID                      = "MM_CLOSE"
+	mmErrorID                      = "MM_ERROR"
+	mmPlacementsID                 = "MM_PLACEMENTS"
+	mmAllocationsID                = "MM_ALLOCATIONS"
+	mmSettingsID                   = "MM_SETTINGS"
+	mmRebalanceSettingsID          = "MM_REBALANCE_SETTINGS"
+	mmBasicMarketMakerID           = "MM_BASIC_MARKET_MAKER"
+	mmMMPlusArbID                  = "MM_MM_PLUS_ARB"
+	mmBasicArbitrageID             = "MM_BASIC_ARBITRAGE"
+	mmUnknownID                    = "MM_UNKNOWN"
+	mmConfigureID                  = "MM_CONFIGURE"
+	mmFixErrorsID                  = "MM_FIX_ERRORS"
+	mmMarketNotAvailableID         = "MM_MARKET_NOT_AVAILABLE"
+	mmSelectMarketID               = "MM_SELECT_MARKET"
+	mmSearchMarketsID              = "MM_SEARCH_MARKETS"
+	mmMarketHeaderID               = "MM_MARKET_HEADER"
+	mmHostHeaderID                 = "MM_HOST_HEADER"
+	mmArbHeaderID                  = "MM_ARB_HEADER"
+	mmChooseBotID                  = "MM_CHOOSE_BOT"
+	mmNextID                       = "MM_NEXT"
+	mmSubmitID                     = "MM_SUBMIT"
+	mmWalletSettingsID             = "MM_WALLET_SETTINGS"
+	mmBaseWalletID                 = "MM_BASE_WALLET"
+	mmQuoteWalletID                = "MM_QUOTE_WALLET"
+	mmKnobsID                      = "MM_KNOBS"
+	mmDriftToleranceID             = "MM_DRIFT_TOLERANCE"
+	mmDriftToleranceTooltipID      = "MM_DRIFT_TOLERANCE_TOOLTIP"
+	mmOrderPersistenceID           = "MM_ORDER_PERSISTENCE"
+	mmOrderPersistenceTooltipID    = "MM_ORDER_PERSISTENCE_TOOLTIP"
+	mmEpochsID                     = "MM_EPOCHS"
+	mmMultiHopArbID                = "MM_MULTI_HOP_ARB"
+	mmIntermediateAssetID          = "MM_INTERMEDIATE_ASSET"
+	mmIntermediateAssetTooltipID   = "MM_INTERMEDIATE_ASSET_TOOLTIP"
+	mmCompletionOrderTypeID        = "MM_COMPLETION_ORDER_TYPE"
+	mmCompletionOrderTypeTooltipID = "MM_COMPLETION_ORDER_TYPE_TOOLTIP"
+	mmMarketOrderCapitalizeID      = "MM_MARKET_ORDER_CAPITALIZE"
+	mmLimitOrderCapitalizeID       = "MM_LIMIT_ORDER_CAPITALIZE"
+	mmLimitBufferID                = "MM_LIMIT_BUFFER"
+	mmLimitBufferTooltipID         = "MM_LIMIT_BUFFER_TOOLTIP"
+	mmGapStrategyID                = "MM_GAP_STRATEGY"
+	mmPercentPlusID                = "MM_PERCENT_PLUS"
+	mmPercentID                    = "MM_PERCENT"
+	mmAbsolutePlusID               = "MM_ABSOLUTE_PLUS"
+	mmAbsoluteID                   = "MM_ABSOLUTE"
+	mmMultiplierID                 = "MM_MULTIPLIER"
+	mmFactorLabelPercentID         = "MM_FACTOR_LABEL_PERCENT"
+	mmFactorLabelRateID            = "MM_FACTOR_LABEL_RATE"
+	mmFactorLabelMultiplierID      = "MM_FACTOR_LABEL_MULTIPLIER"
+	mmProfitThresholdID            = "MM_PROFIT_THRESHOLD"
+	mmProfitThresholdDescID        = "MM_PROFIT_THRESHOLD_DESC"
+	mmPriceLevelsPerSideID         = "MM_PRICE_LEVELS_PER_SIDE"
+	mmLotsPerLevelID               = "MM_LOTS_PER_LEVEL"
+	mmUSDPerSideID                 = "MM_USD_PER_SIDE"
+	mmPriceIncrementID             = "MM_PRICE_INCREMENT"
+	mmMatchBufferID                = "MM_MATCH_BUFFER"
+	mmQuickPlacementsID            = "MM_QUICK_PLACEMENTS"
+	mmAdvancedPlacementsID         = "MM_ADVANCED_PLACEMENTS"
+	mmQuickConfigID                = "MM_QUICK_CONFIG"
+	mmAdvancedConfigID             = "MM_ADVANCED_CONFIG"
+	mmPlacementsDescriptionID      = "MM_PLACEMENTS_DESCRIPTION"
+	mmQuickAllocationID            = "MM_QUICK_ALLOCATION"
+	mmManualAllocationID           = "MM_MANUAL_ALLOCATION"
+	mmTradedAmountID               = "MM_TRADED_AMOUNT"
+	mmSwapFeesID                   = "MM_SWAP_FEES"
+	mmRedeemFeesID                 = "MM_REDEEM_FEES"
+	mmRefundFeesID                 = "MM_REFUND_FEES"
+	mmFundingFeesID                = "MM_FUNDING_FEES"
+	mmSlippageBufferID             = "MM_SLIPPAGE_BUFFER"
+	mmMultiSplitBufferID           = "MM_MULTI_SPLIT_BUFFER"
+	mmInitialBuyFundingFeesID      = "MM_INITIAL_BUY_FUNDING_FEES"
+	mmInitialSellFundingFeesID     = "MM_INITIAL_SELL_FUNDING_FEES"
+	mmBridgeFeeReservesID          = "MM_BRIDGE_FEE_RESERVES"
+	mmTotalRequiredID              = "MM_TOTAL_REQUIRED"
+	mmAlreadyAllocatedID           = "MM_ALREADY_ALLOCATED"
+	mmAvailableToUnallocateID      = "MM_AVAILABLE_TO_UNALLOCATE"
+	mmTotalAvailableID             = "MM_TOTAL_AVAILABLE"
+	mmAmountAllocatedID            = "MM_AMOUNT_ALLOCATED"
+	mmBuyBufferID                  = "MM_BUY_BUFFER"
+	mmSellBufferID                 = "MM_SELL_BUFFER"
+	mmBuyFeeReserveID              = "MM_BUY_FEE_RESERVE"
+	mmSellFeeReserveID             = "MM_SELL_FEE_RESERVE"
+	mmBridgeFeeReserveID           = "MM_BRIDGE_FEE_RESERVE"
+	mmWithdrawalID                 = "MM_WITHDRAWAL"
+	mmDepositID                    = "MM_DEPOSIT"
+	mmFailedSaveBotConfigID        = "MM_FAILED_SAVE_BOT_CONFIG"
+	mmMinTransferID                = "MM_MIN_TRANSFER"
+	mmMinTransferTooltipID         = "MM_MIN_TRANSFER_TOOLTIP"
+	mmFailedFetchBridgeFeesID      = "MM_FAILED_FETCH_BRIDGE_FEES"
+	mmBridgeConfigurationID        = "MM_BRIDGE_CONFIGURATION"
+	mmBridgeConfigTooltipID        = "MM_BRIDGE_CONFIG_TOOLTIP"
+	mmBridgeToAssetID              = "MM_BRIDGE_TO_ASSET"
+	mmSelectCEXAssetID             = "MM_SELECT_CEX_ASSET"
+	mmBridgeID                     = "MM_BRIDGE"
+	mmSelectBridgeID               = "MM_SELECT_BRIDGE"
+	mmBridgeFeesID                 = "MM_BRIDGE_FEES"
+	mmRebalanceMethodID            = "MM_REBALANCE_METHOD"
+	mmCEXRebalanceID               = "MM_CEX_REBALANCE"
+	mmCEXRebalanceDescID           = "MM_CEX_REBALANCE_DESC"
+	mmInternalTransfersOnlyID      = "MM_INTERNAL_TRANSFERS_ONLY"
+	mmInternalTransfersDescID      = "MM_INTERNAL_TRANSFERS_DESC"
+	mmRebalanceDescriptionID       = "MM_REBALANCE_DESCRIPTION"
+	mmFailedStartBotID             = "MM_FAILED_START_BOT"
+	mmLoadingID                    = "MM_LOADING"
+	mmRemovePlacementID            = "MM_REMOVE_PLACEMENT"
+	mmMoveUpID                     = "MM_MOVE_UP"
+	mmMoveDownID                   = "MM_MOVE_DOWN"
+	mmAddPlacementID               = "MM_ADD_PLACEMENT"
+
+	txTypeUnknownID               = "TX_TYPE_UNKNOWN"
+	txTypeSendID                  = "TX_TYPE_SEND"
+	txTypeReceiveID               = "TX_TYPE_RECEIVE"
+	txTypeSwapID                  = "TX_TYPE_SWAP"
+	txTypeRedeemID                = "TX_TYPE_REDEEM"
+	txTypeRefundID                = "TX_TYPE_REFUND"
+	txTypeSplitID                 = "TX_TYPE_SPLIT"
+	txTypeCreateBondID            = "TX_TYPE_CREATE_BOND"
+	txTypeRedeemBondID            = "TX_TYPE_REDEEM_BOND"
+	txTypeApproveTokenID          = "TX_TYPE_APPROVE_TOKEN"
+	txTypeAccelerationID          = "TX_TYPE_ACCELERATION"
+	txTypeSelfTransferID          = "TX_TYPE_SELF_TRANSFER"
+	txTypeRevokeTokenApprovalID   = "TX_TYPE_REVOKE_TOKEN_APPROVAL"
+	txTypeTicketPurchaseID        = "TX_TYPE_TICKET_PURCHASE"
+	txTypeTicketVoteID            = "TX_TYPE_TICKET_VOTE"
+	txTypeTicketRevokeID          = "TX_TYPE_TICKET_REVOCATION"
+	txTypeSwapOrSendID            = "TX_TYPE_SWAP_OR_SEND"
+	txTypeMixID                   = "TX_TYPE_MIX"
+	txTypeBridgeInitiationID      = "TX_TYPE_BRIDGE_INITIATION"
+	txTypeBridgeCompletionID      = "TX_TYPE_BRIDGE_COMPLETION"
+	swapOrSendTooltipID           = "SWAP_OR_SEND_TOOLTIP"
+	missingCexCredsID             = "MISSING_CEX_CREDS"
+	matchBufferID                 = "MATCH_BUFFER"
+	noPlacementsID                = "NO_PLACEMENTS"
+	invalidValueID                = "INVALID_VALUE"
+	noZeroID                      = "NO_ZERO"
+	botTypeBasicMMID              = "BOTTYPE_BASIC_MM"
+	botTypeArbMMID                = "BOTTYPE_ARB_MM"
+	botTypeSimpleArbID            = "BOTTYPE_SIMPLE_ARB"
+	botTypeNoneID                 = "NO_BOTTYPE"
+	noCexID                       = "NO_CEX"
+	cexBalanceErrID               = "CEXBALANCE_ERR"
+	pendingID                     = "PENDING"
+	completeID                    = "COMPLETE"
+	archivedSettingsID            = "ARCHIVED_SETTINGS"
+	idTransparent                 = "TRANSPARENT"
+	idNoCodeProvided              = "NO_CODE_PROVIDED"
+	enableAccount                 = "ENABLE_ACCOUNT"
+	disableAccount                = "DISABLE_ACCOUNT"
+	accountDisabledMsg            = "ACCOUNT_DISABLED_MSG"
+	dexDisabledMsg                = "DEX_DISABLED_MSG"
+	idWalletNotSynced             = "WALLET_NOT_SYNCED"
+	idWalletNoPeers               = "WALLET_NO_PEERS"
+	idDepositError                = "DEPOSIT_ERROR"
+	idWithdrawError               = "WITHDRAW_ERROR"
+	idDEXUnderfunded              = "DEX_UNDERFUNDED"
+	idCEXUnderfunded              = "CEX_UNDERFUNDED"
+	idCEXTooShallow               = "CEX_TOO_SHALLOW"
+	idAccountSuspended            = "ACCOUNT_SUSPENDED"
+	idUserLimitTooLow             = "USER_LIMIT_TOO_LOW"
+	idNoPriceSource               = "NO_PRICE_SOURCE"
+	idCEXOrderbookUnsynced        = "CEX_ORDERBOOK_UNSYNCED"
+	idDeterminePlacementsError    = "DETERMINE_PLACEMENTS_ERROR"
+	idPlaceBuyOrdersError         = "PLACE_BUY_ORDERS_ERROR"
+	idPlaceSellOrdersError        = "PLACE_SELL_ORDERS_ERROR"
+	idCEXTradeError               = "CEX_TRADE_ERROR"
+	idOrderReportTitle            = "ORDER_REPORT_TITLE"
+	idCEXBalances                 = "CEX_BALANCES"
+	idCausesSelfMatch             = "CAUSES_SELF_MATCH"
+	idCexNotConnected             = "CEX_NOT_CONNECTED"
+	idDeleteBot                   = "DELETE_BOT"
+	idMarketOrderCapitalize       = "MARKET_ORDER_CAPITALIZE"
+	idLimitOrderCapitalize        = "LIMIT_ORDER_CAPITALIZE"
+	idInsuffRedeemFundsErrMsg     = "INSUFFICIENT_REDEEM_FUNDS_ERR_MSG"
+	idInsuffRedeemFundsBundErrMsg = "INSUFFICIENT_REDEEM_FUNDS_BUNDLER_ERR_MSG"
 )
 
 var enUS = map[string]*intl.Translation{
@@ -385,72 +502,189 @@ var enUS = map[string]*intl.Translation{
 	tradingTierUpdateddID:            {T: "Trading Tier Updated"},
 	invalidTierValueID:               {T: "Invalid tier value"},
 	invalidCompsValueID:              {T: "Invalid comps value"},
-	apiErrorID:                       {T: "api error: {{ msg }}"},
-	txTypeUnknownID:                  {T: "Unknown"},
-	txTypeSendID:                     {T: "Send"},
-	txTypeReceiveID:                  {T: "Receive"},
-	txTypeSwapID:                     {T: "Swap"},
-	txTypeRedeemID:                   {T: "Redeem"},
-	txTypeRefundID:                   {T: "Refund"},
-	txTypeSplitID:                    {T: "Split"},
-	txTypeCreateBondID:               {T: "Create bond"},
-	txTypeRedeemBondID:               {T: "Redeem bond"},
-	txTypeApproveTokenID:             {T: "Approve token"},
-	txTypeAccelerationID:             {T: "Acceleration"},
-	txTypeSelfTransferID:             {T: "Self transfer"},
-	txTypeRevokeTokenApprovalID:      {T: "Revoke token approval"},
-	txTypeTicketPurchaseID:           {T: "Ticket purchase"},
-	txTypeTicketVoteID:               {T: "Ticket vote"},
-	txTypeTicketRevokeID:             {T: "Ticket revocation"},
-	txTypeSwapOrSendID:               {T: "Swap / Send"},
-	txTypeMixID:                      {T: "Mix"},
-	txTypeBridgeInitiationID:         {T: "Bridge initiation"},
-	txTypeBridgeCompletionID:         {T: "Bridge completion"},
-	swapOrSendTooltipID:              {T: "The wallet was unable to determine if this transaction was a swap or a send."},
-	missingCexCredsID:                {T: "specify both key and secret"},
-	matchBufferID:                    {T: "Match buffer"},
-	noPlacementsID:                   {T: "must specify 1 or more placements"},
-	invalidValueID:                   {T: "invalid value"},
-	noZeroID:                         {T: "zero not allowed"},
-	botTypeBasicMMID:                 {T: "Market Maker"},
-	botTypeArbMMID:                   {T: "Market Maker + Arbitrage"},
-	botTypeSimpleArbID:               {Version: 1, T: "Arbitrage"},
-	botTypeNoneID:                    {T: "choose a bot type"},
-	noCexID:                          {T: "choose an exchange for arbitrage"},
-	cexBalanceErrID:                  {T: "error fetching {{ cexName }} balance for {{ assetID }}: {{ err }}"},
-	pendingID:                        {T: "Pending"},
-	completeID:                       {T: "Complete"},
-	archivedSettingsID:               {T: "Archived Settings"},
-	idTransparent:                    {T: "Transparent"},
-	idNoCodeProvided:                 {T: "no code provided"},
-	enableAccount:                    {T: "Enable Account"},
-	disableAccount:                   {T: "Disable Account"},
-	accountDisabledMsg:               {T: "account disabled - re-enable to update settings"},
-	dexDisabledMsg:                   {T: "DEX server is disabled. Visit the settings page to enable and connect to this server."},
-	idWalletNotSynced:                {T: "{{ assetSymbol }} wallet not synced."},
-	idWalletNoPeers:                  {T: "{{ assetSymbol }} wallet has no peers."},
-	idDepositError:                   {T: "The last attempted deposit of {{ assetSymbol }} at {{ time }} failed with the following error: {{ error }}"},
-	idWithdrawError:                  {T: "The last attempted withdrawal of {{ assetSymbol }} at {{ time }} failed with the following error: {{ error }}"},
-	idDEXUnderfunded:                 {T: "The {{ assetSymbol }} wallet is underfunded by {{ amount }}"},
-	idCEXUnderfunded:                 {T: "The {{ cexName }} {{ assetSymbol }} wallet is underfunded by {{ amount }}"},
-	idCEXTooShallow:                  {T: "The {{ cexName }} market on the {{ side }} side is too shallow for arbitrages as specified by the configuration."},
-	idAccountSuspended:               {T: "Your account at {{ dexHost }} is suspended."},
-	idUserLimitTooLow:                {T: "Your account at {{ dexHost }} has a limit too low to place all the orders required by the configuration."},
-	idNoPriceSource:                  {T: "No oracle or fiat rate sources are available for this market."},
-	idCEXOrderbookUnsynced:           {T: "The {{ cexName }} orderbook is not synced."},
-	idDeterminePlacementsError:       {T: "Error determining placements: {{ error }}"},
-	idPlaceBuyOrdersError:            {T: "Error placing buy orders: {{ error }}"},
-	idPlaceSellOrdersError:           {T: "Error placing sell orders: {{ error }}"},
-	idCEXTradeError:                  {T: "The last attempted CEX trade at {{ time }} failed with the following error: {{ error }}"},
-	idOrderReportTitle:               {T: "{{ side }} orders report for epoch #{{ epochNum }}"},
-	idCEXBalances:                    {T: "{{ cexName }} Balances"},
-	idCausesSelfMatch:                {T: "This order would cause a self-match"},
-	idCexNotConnected:                {T: "{{ cexName }} not connected"},
-	idDeleteBot:                      {T: "Are you sure you want to delete this bot for the {{ baseTicker }}-{{ quoteTicker }} market on {{ host }}?"},
-	idMarketOrderCapitalize:          {T: "Market"},
-	idLimitOrderCapitalize:           {T: "Limit"},
-	idInsuffRedeemFundsErrMsg:        {T: "Insufficient gas for redemption. Configure an ERC-4337 bundler to do a gasless redemption."},
-	idInsuffRedeemFundsBundErrMsg:    {T: "Redemption lot size is too small to cover the gas fees in a gasless redemption."},
+
+	// MM Settings translations
+	mmStartBotID:                   {T: "Start Bot"},
+	mmSaveSettingsID:               {T: "Save Settings"},
+	mmDeleteBotID:                  {T: "Delete Bot"},
+	mmUpdateRunningBotID:           {T: "Update Running Bot"},
+	mmConfirmDeleteID:              {T: "Are you sure you want to delete this bot?"},
+	mmCancelID:                     {T: "Cancel"},
+	mmDeleteID:                     {T: "Delete"},
+	mmCloseID:                      {T: "Close"},
+	mmErrorID:                      {T: "Error"},
+	mmPlacementsID:                 {T: "Placements"},
+	mmAllocationsID:                {T: "Allocations"},
+	mmSettingsID:                   {T: "Settings"},
+	mmRebalanceSettingsID:          {T: "Rebalance Settings"},
+	mmBasicMarketMakerID:           {T: "Basic Market Maker"},
+	mmMMPlusArbID:                  {T: "MM + Arbitrage"},
+	mmBasicArbitrageID:             {T: "Basic Arbitrage"},
+	mmUnknownID:                    {T: "Unknown"},
+	mmConfigureID:                  {T: "Configure"},
+	mmFixErrorsID:                  {T: "Fix errors"},
+	mmMarketNotAvailableID:         {T: "Market not available"},
+	mmSelectMarketID:               {T: "Select a Market"},
+	mmSearchMarketsID:              {T: "Search markets..."},
+	mmMarketHeaderID:               {T: "Market"},
+	mmHostHeaderID:                 {T: "Host"},
+	mmArbHeaderID:                  {T: "Arb"},
+	mmChooseBotID:                  {T: "Choose Your Bot"},
+	mmNextID:                       {T: "Next"},
+	mmSubmitID:                     {T: "Submit"},
+	mmWalletSettingsID:             {T: "Wallet Settings"},
+	mmBaseWalletID:                 {T: "Base Wallet"},
+	mmQuoteWalletID:                {T: "Quote Wallet"},
+	mmKnobsID:                      {T: "Knobs"},
+	mmDriftToleranceID:             {T: "Drift Tolerance"},
+	mmDriftToleranceTooltipID:      {T: "Maximum allowed price deviation before repositioning orders"},
+	mmOrderPersistenceID:           {T: "Order Persistence"},
+	mmOrderPersistenceTooltipID:    {T: "Number of epochs to keep unfilled orders active"},
+	mmEpochsID:                     {T: "epochs"},
+	mmMultiHopArbID:                {T: "Multi-Hop Arbitrage"},
+	mmIntermediateAssetID:          {T: "Intermediate Asset"},
+	mmIntermediateAssetTooltipID:   {T: "Asset to use for multi-hop arbitrage"},
+	mmCompletionOrderTypeID:        {T: "Completion Order Type"},
+	mmCompletionOrderTypeTooltipID: {T: "This specifies the type of order to execute on the second leg of a multi-hop arb. Market orders will always be filled, ensuring that the bot never has any funds stuck in the intermediate asset, but may result in losses if the price suddenly moves against the bot."},
+	mmMarketOrderCapitalizeID:      {T: "Market"},
+	mmLimitOrderCapitalizeID:       {T: "Limit"},
+	mmLimitBufferID:                {T: "Limit Buffer"},
+	mmLimitBufferTooltipID:         {T: "This specifies the buffer to apply to the limit order rate for the second leg of a multi-hop arb. The buffer will make the rate 'worse' (lower for sell orders, higher for buy orders) resulting in a higher probability of the trade being filled in order to avoid having funds stuck in the intermediate asset."},
+	mmGapStrategyID:                {T: "Gap Strategy"},
+	mmPercentPlusID:                {T: "Percent Plus"},
+	mmPercentID:                    {T: "Percent"},
+	mmAbsolutePlusID:               {T: "Absolute Plus"},
+	mmAbsoluteID:                   {T: "Absolute"},
+	mmMultiplierID:                 {T: "Multiplier"},
+	mmFactorLabelPercentID:         {T: "Percent"},
+	mmFactorLabelRateID:            {T: "Rate"},
+	mmFactorLabelMultiplierID:      {T: "Multiplier"},
+	mmProfitThresholdID:            {T: "Profit Threshold"},
+	mmProfitThresholdDescID:        {T: "Minimum profit required for arbitrage opportunities."},
+	mmPriceLevelsPerSideID:         {T: "Price levels per side"},
+	mmLotsPerLevelID:               {T: "Lots per level"},
+	mmUSDPerSideID:                 {T: "USD per side"},
+	mmPriceIncrementID:             {T: "Price increment"},
+	mmMatchBufferID:                {T: "Match buffer"},
+	mmQuickPlacementsID:            {T: "Quick Placements"},
+	mmAdvancedPlacementsID:         {T: "Advanced Placements"},
+	mmQuickConfigID:                {T: "Quick config"},
+	mmAdvancedConfigID:             {T: "Advanced config"},
+	mmPlacementsDescriptionID:      {T: "Configure the price levels of the placements on both sides of the order book."},
+	mmQuickAllocationID:            {T: "Quick Allocation"},
+	mmManualAllocationID:           {T: "Manual Allocation"},
+	mmTradedAmountID:               {T: "Traded Amount"},
+	mmSwapFeesID:                   {T: "Swap Fees"},
+	mmRedeemFeesID:                 {T: "Redeem Fees"},
+	mmRefundFeesID:                 {T: "Refund Fees"},
+	mmFundingFeesID:                {T: "Funding Fees"},
+	mmSlippageBufferID:             {T: "Slippage Buffer"},
+	mmMultiSplitBufferID:           {T: "Multi-Split Buffer"},
+	mmInitialBuyFundingFeesID:      {T: "Initial Buy Funding Fees"},
+	mmInitialSellFundingFeesID:     {T: "Initial Sell Funding Fees"},
+	mmBridgeFeeReservesID:          {T: "Bridge Fee Reserves"},
+	mmTotalRequiredID:              {T: "Total Required"},
+	mmAlreadyAllocatedID:           {T: "Already Allocated"},
+	mmAvailableToUnallocateID:      {T: "Available To Unallocate"},
+	mmTotalAvailableID:             {T: "Total Available"},
+	mmAmountAllocatedID:            {T: "Amount Allocated"},
+	mmBuyBufferID:                  {T: "Buy Buffer"},
+	mmSellBufferID:                 {T: "Sell Buffer"},
+	mmBuyFeeReserveID:              {T: "Buy Fee Reserve"},
+	mmSellFeeReserveID:             {T: "Sell Fee Reserve"},
+	mmBridgeFeeReserveID:           {T: "Bridge Fee Reserve"},
+	mmWithdrawalID:                 {T: "Withdrawal"},
+	mmDepositID:                    {T: "Deposit"},
+	mmFailedSaveBotConfigID:        {T: "Failed to save bot config:"},
+	mmMinTransferID:                {T: "Min Transfer"},
+	mmMinTransferTooltipID:         {T: "Minimum {{ asset }} asset amount for transfers"},
+	mmFailedFetchBridgeFeesID:      {T: "Failed to fetch bridge fees and limits"},
+	mmBridgeConfigurationID:        {T: "{{ asset }} Bridge Configuration"},
+	mmBridgeConfigTooltipID:        {T: "The {{ asset }} asset cannot be directly transferred between Bison Wallet and the CEX. It must be bridged before deposits and after withdrawals."},
+	mmBridgeToAssetID:              {T: "Bridge to Asset:"},
+	mmSelectCEXAssetID:             {T: "Select CEX Asset"},
+	mmBridgeID:                     {T: "Bridge:"},
+	mmSelectBridgeID:               {T: "Select Bridge"},
+	mmBridgeFeesID:                 {T: "Bridge Fees"},
+	mmRebalanceMethodID:            {T: "Rebalance Method"},
+	mmCEXRebalanceID:               {T: "CEX Rebalance"},
+	mmCEXRebalanceDescID:           {T: "Automatically rebalance funds between DEX and CEX"},
+	mmInternalTransfersOnlyID:      {T: "Internal Transfers Only"},
+	mmInternalTransfersDescID:      {T: "Only use internal wallet transfers for rebalancing"},
+	mmRebalanceDescriptionID:       {T: "Configure settings related to rebalancing between Bison Wallet and a CEX. If all of the required placements cannot be made, the bot will automatically transfer funds in order to be able to make the maximum amount of placements."},
+	mmFailedStartBotID:             {T: "Failed to start bot:"},
+	mmLoadingID:                    {T: "Loading..."},
+	mmRemovePlacementID:            {T: "Remove placement"},
+	mmMoveUpID:                     {T: "Move up"},
+	mmMoveDownID:                   {T: "Move down"},
+	mmAddPlacementID:               {T: "Add placement"},
+
+	apiErrorID:                    {T: "api error: {{ msg }}"},
+	txTypeUnknownID:               {T: "Unknown"},
+	txTypeSendID:                  {T: "Send"},
+	txTypeReceiveID:               {T: "Receive"},
+	txTypeSwapID:                  {T: "Swap"},
+	txTypeRedeemID:                {T: "Redeem"},
+	txTypeRefundID:                {T: "Refund"},
+	txTypeSplitID:                 {T: "Split"},
+	txTypeCreateBondID:            {T: "Create bond"},
+	txTypeRedeemBondID:            {T: "Redeem bond"},
+	txTypeApproveTokenID:          {T: "Approve token"},
+	txTypeAccelerationID:          {T: "Acceleration"},
+	txTypeSelfTransferID:          {T: "Self transfer"},
+	txTypeRevokeTokenApprovalID:   {T: "Revoke token approval"},
+	txTypeTicketPurchaseID:        {T: "Ticket purchase"},
+	txTypeTicketVoteID:            {T: "Ticket vote"},
+	txTypeTicketRevokeID:          {T: "Ticket revocation"},
+	txTypeSwapOrSendID:            {T: "Swap / Send"},
+	txTypeMixID:                   {T: "Mix"},
+	txTypeBridgeInitiationID:      {T: "Bridge initiation"},
+	txTypeBridgeCompletionID:      {T: "Bridge completion"},
+	swapOrSendTooltipID:           {T: "The wallet was unable to determine if this transaction was a swap or a send."},
+	missingCexCredsID:             {T: "specify both key and secret"},
+	matchBufferID:                 {T: "Match buffer"},
+	noPlacementsID:                {T: "must specify 1 or more placements"},
+	invalidValueID:                {T: "invalid value"},
+	noZeroID:                      {T: "zero not allowed"},
+	botTypeBasicMMID:              {T: "Market Maker"},
+	botTypeArbMMID:                {T: "Market Maker + Arbitrage"},
+	botTypeSimpleArbID:            {Version: 1, T: "Arbitrage"},
+	botTypeNoneID:                 {T: "choose a bot type"},
+	noCexID:                       {T: "choose an exchange for arbitrage"},
+	cexBalanceErrID:               {T: "error fetching {{ cexName }} balance for {{ assetID }}: {{ err }}"},
+	pendingID:                     {T: "Pending"},
+	completeID:                    {T: "Complete"},
+	archivedSettingsID:            {T: "Archived Settings"},
+	idTransparent:                 {T: "Transparent"},
+	idNoCodeProvided:              {T: "no code provided"},
+	enableAccount:                 {T: "Enable Account"},
+	disableAccount:                {T: "Disable Account"},
+	accountDisabledMsg:            {T: "account disabled - re-enable to update settings"},
+	dexDisabledMsg:                {T: "DEX server is disabled. Visit the settings page to enable and connect to this server."},
+	idWalletNotSynced:             {T: "{{ assetSymbol }} wallet not synced."},
+	idWalletNoPeers:               {T: "{{ assetSymbol }} wallet has no peers."},
+	idDepositError:                {T: "The last attempted deposit of {{ assetSymbol }} at {{ time }} failed with the following error: {{ error }}"},
+	idWithdrawError:               {T: "The last attempted withdrawal of {{ assetSymbol }} at {{ time }} failed with the following error: {{ error }}"},
+	idDEXUnderfunded:              {T: "The {{ assetSymbol }} wallet is underfunded by {{ amount }}"},
+	idCEXUnderfunded:              {T: "The {{ cexName }} {{ assetSymbol }} wallet is underfunded by {{ amount }}"},
+	idCEXTooShallow:               {T: "The {{ cexName }} market on the {{ side }} side is too shallow for arbitrages as specified by the configuration."},
+	idAccountSuspended:            {T: "Your account at {{ dexHost }} is suspended."},
+	idUserLimitTooLow:             {T: "Your account at {{ dexHost }} has a limit too low to place all the orders required by the configuration."},
+	idNoPriceSource:               {T: "No oracle or fiat rate sources are available for this market."},
+	idCEXOrderbookUnsynced:        {T: "The {{ cexName }} orderbook is not synced."},
+	idDeterminePlacementsError:    {T: "Error determining placements: {{ error }}"},
+	idPlaceBuyOrdersError:         {T: "Error placing buy orders: {{ error }}"},
+	idPlaceSellOrdersError:        {T: "Error placing sell orders: {{ error }}"},
+	idCEXTradeError:               {T: "The last attempted CEX trade at {{ time }} failed with the following error: {{ error }}"},
+	idOrderReportTitle:            {T: "{{ side }} orders report for epoch #{{ epochNum }}"},
+	idCEXBalances:                 {T: "{{ cexName }} Balances"},
+	idCausesSelfMatch:             {T: "This order would cause a self-match"},
+	idCexNotConnected:             {T: "{{ cexName }} not connected"},
+	idDeleteBot:                   {T: "Are you sure you want to delete this bot for the {{ baseTicker }}-{{ quoteTicker }} market on {{ host }}?"},
+	idMarketOrderCapitalize:       {T: "Market"},
+	idLimitOrderCapitalize:        {T: "Limit"},
+	idInsuffRedeemFundsErrMsg:     {T: "Insufficient gas for redemption. Configure an ERC-4337 bundler to do a gasless redemption."},
+	idInsuffRedeemFundsBundErrMsg: {T: "Redemption lot size is too small to cover the gas fees in a gasless redemption."},
 }
 
 var ptBR = map[string]*intl.Translation{
@@ -507,6 +741,8 @@ var ptBR = map[string]*intl.Translation{
 	availableID:               {T: "disponível"},
 	immatureID:                {T: "imaturo"},
 	maxID:                     {T: "ma"},
+	mmWalletSettingsID:        {T: "Configurações da Carteira"},
+	mmDepositID:               {T: "Depositar"},
 }
 
 var zhCN = map[string]*intl.Translation{
@@ -724,6 +960,25 @@ var zhCN = map[string]*intl.Translation{
 	idOrderReportTitle:               {T: "{{ side }}订单报告，纪元 #{{ epochNum }}"},
 	idCEXBalances:                    {T: "{{ cexName }}余额"},
 	idCausesSelfMatch:                {T: "此订单会导致自匹配"},
+	mmBasicMarketMakerID:             {T: "基础做市商"},
+	mmBasicArbitrageID:               {T: "基础套利"},
+	mmFixErrorsID:                    {T: "修复错误"},
+	mmChooseBotID:                    {T: "选择您的机器人"},
+	mmPlacementsID:                   {T: "投放"},
+	mmConfigureID:                    {T: "配置"},
+	mmMarketNotAvailableID:           {T: "市场不可用"},
+	mmSelectMarketID:                 {T: "选择一个市场"},
+	mmWalletSettingsID:               {T: "钱包设置"},
+	mmMMPlusArbID:                    {T: "市场做市 + 套利"},
+	mmRebalanceSettingsID:            {T: "再平衡设置"},
+	mmSettingsID:                     {T: "设置"},
+	mmGapStrategyID:                  {T: "差距策略"},
+	mmProfitThresholdID:              {T: "利润阈值"},
+	mmPriceLevelsPerSideID:           {T: "每边价格等级"},
+	mmPriceIncrementID:               {T: "价格增量"},
+	mmMatchBufferID:                  {T: "匹配缓冲区"},
+	mmWithdrawalID:                   {T: "提取"},
+	mmDepositID:                      {T: "存款"},
 }
 
 var plPL = map[string]*intl.Translation{
@@ -909,6 +1164,13 @@ var plPL = map[string]*intl.Translation{
 	txTypeUnknownID:                  {T: "Nieznany"},
 	walletSyncFinishingID:            {T: "na ukończeniu"},
 	txTypeReceiveID:                  {T: "Odbiór"},
+	mmConfigureID:                    {T: "Skonfiguruj"},
+	mmMarketNotAvailableID:           {T: "Rynek niedostępny"},
+	mmSelectMarketID:                 {T: "Wybierz rynek"},
+	mmWalletSettingsID:               {T: "Ustawienia portfela"},
+	mmRebalanceSettingsID:            {T: "Ustawienia rebalancingu"},
+	mmSettingsID:                     {T: "Ustawienia"},
+	mmDepositID:                      {T: "Zdeponuj"},
 }
 
 var deDE = map[string]*intl.Translation{
@@ -1128,6 +1390,25 @@ var deDE = map[string]*intl.Translation{
 	idCausesSelfMatch:                {T: "Dieser Auftrag würde ein Self-Match auslösen"},
 	idCexNotConnected:                {T: "{{ cexName }} nicht verbunden"},
 	idDeleteBot:                      {T: "Bist du sicher das du den Bot für den {{ baseTicker }}-{{ quoteTicker }} Markt bei {{ host }} löschen möchtest?"},
+	mmChooseBotID:                    {T: "Wähle deinen Bot"},
+	mmBasicMarketMakerID:             {T: "Basic Market Maker"},
+	mmMMPlusArbID:                    {T: "Market Maker + Arbitrage"},
+	mmBasicArbitrageID:               {T: "Basic Arbitrage"},
+	mmFixErrorsID:                    {T: "Fehler beheben"},
+	mmConfigureID:                    {T: "Konfigurieren"},
+	mmMarketNotAvailableID:           {T: "Markt nicht verfügbar"},
+	mmSelectMarketID:                 {T: "Wähle einen Markt"},
+	mmPlacementsID:                   {T: "Platzierungen"},
+	mmWalletSettingsID:               {T: "Wallet Einstellungen"},
+	mmRebalanceSettingsID:            {T: "Rebalance Einstellungen"},
+	mmSettingsID:                     {T: "Einstellungen"},
+	mmGapStrategyID:                  {T: "Gap Strategy"},
+	mmProfitThresholdID:              {T: "Profit-Schwelle"},
+	mmPriceLevelsPerSideID:           {T: "Preislevels pro Seite"},
+	mmPriceIncrementID:               {T: "Preis Steigerung"},
+	mmMatchBufferID:                  {T: "Match buffer"},
+	mmWithdrawalID:                   {T: "Auszahlen"},
+	mmDepositID:                      {T: "Einzahlen"},
 }
 
 var ar = map[string]*intl.Translation{
@@ -1313,6 +1594,13 @@ var ar = map[string]*intl.Translation{
 	ticketStatusMissedID:             {T: "مفوتة"},
 	txFeeSupportedID:                 {T: "تقدير الرسوم غير مدعوم لهذا النوع من المحفظة"},
 	orderBttnSellBalErrID:            {T: "الرصيد غير كافي للبيع."},
+	mmConfigureID:                    {T: "التهيئة"},
+	mmMarketNotAvailableID:           {T: "السوق غير متوفر"},
+	mmSelectMarketID:                 {T: "اختر سوقًا"},
+	mmWalletSettingsID:               {T: "اعدادات المحفظة"},
+	mmRebalanceSettingsID:            {T: "إعدادات إعادة الرصيد لـ"},
+	mmSettingsID:                     {T: "الإعدادات"},
+	mmDepositID:                      {T: "إيداع"},
 }
 
 var localesMap = map[string]map[string]*intl.Translation{

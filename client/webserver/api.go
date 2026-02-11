@@ -2009,7 +2009,7 @@ func (s *WebServer) apiStartMarketMakingBot(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err = s.mm.StartBot(form.Config, nil, appPW, true); err != nil {
-		s.writeAPIError(w, fmt.Errorf("error starting market making: %v", err))
+		s.writeAPIError(w, err)
 		return
 	}
 
