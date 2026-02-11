@@ -426,3 +426,21 @@ type AddRemovePeerParams struct {
 	AssetID uint32 `json:"assetID"`
 	Address string `json:"address"`
 }
+
+// MMReportParams is the parameter type for the mmreport route.
+type MMReportParams struct {
+	Host       string `json:"host"`
+	BaseID     uint32 `json:"baseID"`
+	QuoteID    uint32 `json:"quoteID"`
+	StartEpoch uint64 `json:"startEpoch"`
+	EndEpoch   uint64 `json:"endEpoch"`
+	OutFile    string `json:"outFile"`
+}
+
+// PruneMMSnapshotsParams is the parameter type for the prunemmsnapshots route.
+type PruneMMSnapshotsParams struct {
+	Host        string `json:"host"`
+	BaseID      uint32 `json:"baseID"`
+	QuoteID     uint32 `json:"quoteID"`
+	MinEpochIdx uint64 `json:"minEpochIdx"`
+}

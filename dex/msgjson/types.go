@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"math"
 	"time"
 
 	"decred.org/dcrdex/dex"
@@ -233,6 +234,12 @@ const (
 	// CandlesRoute is the HTTP request to get the set of candlesticks
 	// representing market activity history.
 	CandlesRoute = "candles"
+	// SubscribeMMSnapshotsRoute is the client-originating request to subscribe
+	// to epoch-level market making snapshots for a market.
+	SubscribeMMSnapshotsRoute = "subscribe_mm_snapshots"
+	// MMEpochSnapshotRoute is the DEX-originating notification-type message
+	// delivering a signed per-account epoch snapshot.
+	MMEpochSnapshotRoute = "mm_epoch_snapshot"
 )
 
 const errNullRespPayload = dex.ErrorKind("null response payload")
@@ -1380,6 +1387,74 @@ type EpochReportNote struct {
 	Candle
 }
 
+// SubscribeMMSnapshots is the payload for a client-originating request to
+// subscribe to (or unsubscribe from) epoch-level market making snapshots.
+type SubscribeMMSnapshots struct {
+	MarketID string `json:"marketid"`
+	Unsub    bool   `json:"unsub,omitempty"`
+}
+
+// SnapOrder represents a single standing order in an epoch snapshot.
+type SnapOrder struct {
+	Rate uint64 `json:"rate"`
+	Qty  uint64 `json:"qty"`
+}
+
+// MMEpochSnapshot is a server-signed, per-account snapshot of an account's
+// standing orders on the book after a match cycle, along with market-wide best
+// bid/ask for context.
+type MMEpochSnapshot struct {
+	Signature
+	MarketID   string      `json:"marketid"`
+	Base       uint32      `json:"base"`
+	Quote      uint32      `json:"quote"`
+	EpochIdx   uint64      `json:"epochIdx"`
+	EpochDur   uint64      `json:"epochDur"`
+	AccountID  Bytes       `json:"accountID"`
+	BuyOrders  []SnapOrder `json:"buyOrders"`
+	SellOrders []SnapOrder `json:"sellOrders"`
+	BestBuy    uint64      `json:"bestBuy"`
+	BestSell   uint64      `json:"bestSell"`
+}
+
+// Serialize serializes the MMEpochSnapshot for signing. Format:
+// base(4) + quote(4) + epochIdx(8) + epochDur(8) + accountID(32) +
+// bestBuy(8) + bestSell(8) + numBuys(2) + [rate(8)+qty(8)]... +
+// numSells(2) + [rate(8)+qty(8)]...
+// The caller must sort orders by rate ascending within each side before
+// calling Serialize to ensure deterministic output for signature
+// verification.
+func (s *MMEpochSnapshot) Serialize() []byte {
+	nBuys := len(s.BuyOrders)
+	nSells := len(s.SellOrders)
+	if nBuys > math.MaxUint16 {
+		nBuys = math.MaxUint16
+	}
+	if nSells > math.MaxUint16 {
+		nSells = math.MaxUint16
+	}
+	// 4+4+8+8+32+8+8 + 2+nBuys*16 + 2+nSells*16 = 76 + nBuys*16 + nSells*16
+	b := make([]byte, 0, 76+nBuys*16+nSells*16)
+	b = append(b, uint32Bytes(s.Base)...)
+	b = append(b, uint32Bytes(s.Quote)...)
+	b = append(b, uint64Bytes(s.EpochIdx)...)
+	b = append(b, uint64Bytes(s.EpochDur)...)
+	b = append(b, s.AccountID...)
+	b = append(b, uint64Bytes(s.BestBuy)...)
+	b = append(b, uint64Bytes(s.BestSell)...)
+	b = append(b, uint16Bytes(uint16(nBuys))...)
+	for _, o := range s.BuyOrders[:nBuys] {
+		b = append(b, uint64Bytes(o.Rate)...)
+		b = append(b, uint64Bytes(o.Qty)...)
+	}
+	b = append(b, uint16Bytes(uint16(nSells))...)
+	for _, o := range s.SellOrders[:nSells] {
+		b = append(b, uint64Bytes(o.Rate)...)
+		b = append(b, uint64Bytes(o.Qty)...)
+	}
+	return b
+}
+
 // Convert uint64 to 8 bytes.
 func uint64Bytes(i uint64) []byte {
 	b := make([]byte, 8)
@@ -1394,7 +1469,7 @@ func uint32Bytes(i uint32) []byte {
 	return b
 }
 
-// Convert uint32 to 4 bytes.
+// Convert uint16 to 2 bytes.
 func uint16Bytes(i uint16) []byte {
 	b := make([]byte, 2)
 	binary.BigEndian.PutUint16(b, i)

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -83,6 +84,8 @@ const (
 	refundPaymentMultisigRoute = "refundpaymentmultisig"
 	viewPaymentMultisigRoute   = "viewpaymentmultisig"
 	sendPaymentMultisigRoute   = "sendpaymentmultisig"
+	mmReportRoute              = "mmreport"
+	pruneMMSnapshotsRoute      = "prunemmsnapshots"
 )
 
 const (
@@ -177,6 +180,8 @@ var routes = map[string]func(s *RPCServer, msg *msgjson.Message) *msgjson.Respon
 	refundPaymentMultisigRoute: handleRefundPaymentMultisig,
 	viewPaymentMultisigRoute:   handleViewPaymentMultisig,
 	sendPaymentMultisigRoute:   handleSendPaymentMultisig,
+	mmReportRoute:              handleMMReport,
+	pruneMMSnapshotsRoute:      handlePruneMMSnapshots,
 }
 
 //
@@ -2406,6 +2411,32 @@ supported for DCR wallets.`,
 		returns: `Returns:
     string: the sent tx hash`,
 	},
+	mmReportRoute: {
+		paramsType: reflect.TypeOf(MMReportParams{}),
+		summary:    "Export MM epoch snapshots for a market to a JSON file.",
+		fieldDescs: map[string]string{
+			"host":       "The DEX host.",
+			"baseID":     "The base asset BIP ID.",
+			"quoteID":    "The quote asset BIP ID.",
+			"startEpoch": "The start epoch index.",
+			"endEpoch":   "The end epoch index.",
+			"outFile":    "The output file path.",
+		},
+		returns: `Returns:
+    string: the output file path`,
+	},
+	pruneMMSnapshotsRoute: {
+		paramsType: reflect.TypeOf(PruneMMSnapshotsParams{}),
+		summary:    "Delete MM epoch snapshots for a market older than a given epoch index.",
+		fieldDescs: map[string]string{
+			"host":        "The DEX host.",
+			"baseID":      "The base asset BIP ID.",
+			"quoteID":     "The quote asset BIP ID.",
+			"minEpochIdx": "Delete snapshots with epochIdx strictly less than this value.",
+		},
+		returns: `Returns:
+    int: the number of snapshots deleted`,
+	},
 }
 
 // parseJSONTag splits a struct field's json tag into name and options.
@@ -2643,6 +2674,50 @@ func walletTypesHelp() string {
 		sb.WriteString(fmt.Sprintf("\n    %s (%d): %s", e.symbol, e.id, strings.Join(e.types, ", ")))
 	}
 	return sb.String()
+}
+
+func handleMMReport(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params MMReportParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(mmReportRoute, err)
+	}
+	if params.OutFile == "" {
+		resErr := msgjson.NewError(msgjson.RPCParseError, "outFile is required")
+		return createResponse(mmReportRoute, nil, resErr)
+	}
+	outFile := filepath.Clean(params.OutFile)
+	snaps, err := s.core.ExportMMSnapshots(params.Host, params.BaseID, params.QuoteID, params.StartEpoch, params.EndEpoch)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCInternal, "error exporting snapshots: %v", err)
+		return createResponse(mmReportRoute, nil, resErr)
+	}
+	b, err := json.MarshalIndent(snaps, "", "  ")
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCInternal, "error marshaling snapshots: %v", err)
+		return createResponse(mmReportRoute, nil, resErr)
+	}
+	if err := os.WriteFile(outFile, b, 0644); err != nil {
+		resErr := msgjson.NewError(msgjson.RPCInternal, "error writing file: %v", err)
+		return createResponse(mmReportRoute, nil, resErr)
+	}
+	return createResponse(mmReportRoute, &outFile, nil)
+}
+
+func handlePruneMMSnapshots(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params PruneMMSnapshotsParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(pruneMMSnapshotsRoute, err)
+	}
+	if params.MinEpochIdx == 0 {
+		resErr := msgjson.NewError(msgjson.RPCParseError, "minEpochIdx is required")
+		return createResponse(pruneMMSnapshotsRoute, nil, resErr)
+	}
+	n, err := s.core.PruneMMSnapshots(params.Host, params.BaseID, params.QuoteID, params.MinEpochIdx)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCInternal, "error pruning snapshots: %v", err)
+		return createResponse(pruneMMSnapshotsRoute, nil, resErr)
+	}
+	return createResponse(pruneMMSnapshotsRoute, &n, nil)
 }
 
 // sortRouteInfoKeys returns a sorted list of routeInfos keys.
