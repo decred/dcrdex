@@ -232,31 +232,32 @@ type BondOptionsForm struct {
 	Host         string  `json:"host"`
 	TargetTier   *uint64 `json:"targetTier,omitempty"`
 	MaxBondedAmt *uint64 `json:"maxBondedAmt,omitempty"`
-	PenaltyComps *uint16 `json:"penaltyComps,omitempty"`
 	BondAssetID  *uint32 `json:"bondAssetID,omitempty"`
+	PenaltyComps *uint16 `json:"penaltyComps,omitempty"`
 }
 
 // PostBondForm is information necessary to post a new bond for a new or
 // existing DEX account at the specified DEX address.
 type PostBondForm struct {
-	Addr     string           `json:"host"`
-	AppPass  encode.PassBytes `json:"appPass"`
-	Asset    *uint32          `json:"assetID,omitempty"` // do not default to 0
-	Bond     uint64           `json:"bond"`
-	LockTime uint64           `json:"lockTime"` // 0 means go with server-derived value
+	Addr    string           `json:"host"`
+	AppPass encode.PassBytes `json:"appPass"`
+	Bond    uint64           `json:"bond"`
+	Asset   *uint32          `json:"assetID,omitempty"` // do not default to 0
 
-	// FeeBuffer is optional, to use same value from BondsFeeBuffer during
-	// wallet funding. If zero, the wallet will use an internal estimate.
-	FeeBuffer uint64 `json:"feeBuffer,omitempty"`
+	LockTime uint64 `json:"lockTime,omitempty"` // 0 means go with server-derived value
 
 	// These options may be set when creating an account.
-	MaintainTier *bool   `json:"maintainTier,omitempty"` // tier implied from Bond amount
-	MaxBondedAmt *uint64 `json:"maxBondedAmt,omitempty"`
+	MaintainTier *bool `json:"maintainTier,omitempty"` // tier implied from Bond amount
 
 	// Cert is needed if posting bond to a new DEX. Cert can be a string, which
 	// is interpreted as a filepath, or a []byte, which is interpreted as the
 	// file contents of the certificate.
 	Cert any `json:"cert"`
+
+	// FeeBuffer is optional, to use same value from BondsFeeBuffer during
+	// wallet funding. If zero, the wallet will use an internal estimate.
+	FeeBuffer    uint64  `json:"feeBuffer,omitempty"`
+	MaxBondedAmt *uint64 `json:"maxBondedAmt,omitempty"`
 }
 
 // Match represents a match on an order. An order may have many matches.
@@ -1077,15 +1078,15 @@ type QtyRate struct {
 // All orders must be on the same side of the same market, and only standing
 // limit orders are supported.
 type MultiTradeForm struct {
-	Host       string            `json:"host"`
-	Sell       bool              `json:"sell"`
-	Base       uint32            `json:"base"`
-	Quote      uint32            `json:"quote"`
-	Placements []*QtyRate        `json:"placement"`
-	Options    map[string]string `json:"options"`
+	Host  string `json:"host"`
+	Sell  bool   `json:"sell"`
+	Base  uint32 `json:"base"`
+	Quote uint32 `json:"quote"`
 	// MaxLock is the maximum amount of the "from" asset that the wallet
 	// should lock for the trade.
-	MaxLock uint64 `json:"maxLock"`
+	MaxLock    uint64            `json:"maxLock"`
+	Placements []*QtyRate        `json:"placement"`
+	Options    map[string]string `json:"options"`
 }
 
 // SingleLotFeesForm is used to determine the fees for a single lot trade.

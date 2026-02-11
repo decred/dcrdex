@@ -629,15 +629,15 @@ func TestMarket_Suspend(t *testing.T) {
 		t.Fatal("the market should have be running")
 	}
 
-	// Wait until after suspend time.
+	// Wait until after suspend time, and for Run to return.
 	<-time.After(time.Until(finalTime.Add(20 * time.Millisecond)))
+	wg.Wait()
 
 	// should be stopped
 	if mkt.Running() {
 		t.Fatal("the market should have been suspended")
 	}
 
-	wg.Wait()
 	mkt.FeedDone(feed)
 
 	// Start up again (consumer resumes the Market manually)
@@ -663,9 +663,10 @@ func TestMarket_Suspend(t *testing.T) {
 		t.Fatal("the market should have be running")
 	}
 
-	// Suspend asap.
+	// Suspend asap. Wait for Run to return.
 	_, finalTime = mkt.SuspendASAP(persist)
 	<-time.After(time.Until(finalTime.Add(40 * time.Millisecond)))
+	wg.Wait()
 
 	// Should be stopped
 	if mkt.Running() {
@@ -673,7 +674,6 @@ func TestMarket_Suspend(t *testing.T) {
 	}
 
 	cancel()
-	wg.Wait()
 	mkt.FeedDone(feed)
 }
 

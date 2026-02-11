@@ -4,11 +4,12 @@
 package rpcserver
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
+	"reflect"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/mm"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 )
@@ -41,6 +43,8 @@ const (
 	bondOptionsRoute           = "bondopts"
 	tradeRoute                 = "trade"
 	versionRoute               = "version"
+	walletBalanceRoute         = "walletbalance"
+	walletStateRoute           = "walletstate"
 	walletsRoute               = "wallets"
 	rescanWalletRoute          = "rescanwallet"
 	abandonTxRoute             = "abandontx"
@@ -97,8 +101,9 @@ const (
 func createResponse(op string, res any, resErr *msgjson.Error) *msgjson.ResponsePayload {
 	encodedRes, err := json.Marshal(res)
 	if err != nil {
-		err := fmt.Errorf("unable to marshal data for %s: %w", op, err)
-		panic(err)
+		log.Errorf("unable to marshal data for %s: %v", op, err)
+		errMsg := msgjson.NewError(msgjson.RPCInternal, "unable to marshal response for %s", op)
+		return &msgjson.ResponsePayload{Error: errMsg}
 	}
 	return &msgjson.ResponsePayload{Result: encodedRes, Error: resErr}
 }
@@ -112,7 +117,7 @@ func usage(route string, err error) *msgjson.ResponsePayload {
 }
 
 // routes maps routes to a handler function.
-var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponsePayload{
+var routes = map[string]func(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload{
 	cancelRoute:                handleCancel,
 	closeWalletRoute:           handleCloseWallet,
 	discoverAcctRoute:          handleDiscoverAcct,
@@ -132,6 +137,8 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	bondAssetsRoute:            handleBondAssets,
 	tradeRoute:                 handleTrade,
 	versionRoute:               handleVersion,
+	walletBalanceRoute:         handleWalletBalance,
+	walletStateRoute:           handleWalletState,
 	walletsRoute:               handleWallets,
 	rescanWalletRoute:          handleRescanWallet,
 	abandonTxRoute:             handleAbandonTx,
@@ -172,21 +179,25 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	sendPaymentMultisigRoute:   handleSendPaymentMultisig,
 }
 
+//
+// handlers_system handlers
+//
+
 // handleHelp handles requests for help. Returns general help for all commands
 // if no arguments are passed or verbose help if the passed argument is a known
 // command.
-func handleHelp(_ *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseHelpArgs(params)
-	if err != nil {
+func handleHelp(_ *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params HelpParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(helpRoute, err)
 	}
 	res := ""
-	if form.helpWith == "" {
+	if params.HelpWith == "" {
 		// List all commands if no arguments.
-		res = ListCommands(form.includePasswords)
+		res = ListCommands(params.IncludePasswords)
 	} else {
 		var err error
-		res, err = commandUsage(form.helpWith, form.includePasswords)
+		res, err = commandUsage(params.HelpWith, params.IncludePasswords)
 		if err != nil {
 			resErr := msgjson.NewError(msgjson.RPCUnknownRoute, "error getting usage: %v", err)
 			return createResponse(helpRoute, nil, resErr)
@@ -197,13 +208,13 @@ func handleHelp(_ *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 
 // handleInit handles requests for init. *msgjson.ResponsePayload.Error is empty
 // if successful.
-func handleInit(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	appPass, seed, err := parseInitArgs(params)
-	if err != nil {
+func handleInit(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params InitParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(initRoute, err)
 	}
-	defer appPass.Clear()
-	if _, err := s.core.InitializeClient(appPass, seed); err != nil {
+	defer params.AppPass.Clear()
+	if _, err := s.core.InitializeClient(params.AppPass, params.Seed); err != nil {
 		resErr := msgjson.NewError(msgjson.RPCInitError, "unable to initialize client: %v", err)
 		return createResponse(initRoute, nil, resErr)
 	}
@@ -213,7 +224,7 @@ func handleInit(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 
 // handleVersion handles requests for version. It returns the rpc server version
 // and dexc version.
-func handleVersion(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
+func handleVersion(s *RPCServer, _ *msgjson.Message) *msgjson.ResponsePayload {
 	result := &VersionResponse{
 		RPCServerVer: &dex.Semver{
 			Major: rpcSemverMajor,
@@ -226,279 +237,271 @@ func handleVersion(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 	return createResponse(versionRoute, result, nil)
 }
 
+// handleLogin sets up the dex connections.
+func handleLogin(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params LoginParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(loginRoute, err)
+	}
+	defer params.AppPass.Clear()
+	err := s.core.Login(params.AppPass)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCLoginError, "unable to login: %v", err)
+		return createResponse(loginRoute, nil, resErr)
+	}
+	res := "successfully logged in"
+	return createResponse(loginRoute, &res, nil)
+}
+
+// handleLogout logs out Bison Wallet. *msgjson.ResponsePayload.Error is empty
+// if successful.
+func handleLogout(s *RPCServer, _ *msgjson.Message) *msgjson.ResponsePayload {
+	if err := s.core.Logout(); err != nil {
+		resErr := msgjson.NewError(msgjson.RPCLogoutError, "unable to logout: %v", err)
+		return createResponse(logoutRoute, nil, resErr)
+	}
+	res := logoutStr
+	return createResponse(logoutRoute, &res, nil)
+}
+
+//
+// handlers_wallet handlers
+//
+
 // handleNewWallet handles requests for newwallet.
 // *msgjson.ResponsePayload.Error is empty if successful. Returns a
 // msgjson.RPCWalletExistsError if a wallet for the assetID already exists.
 // Wallet will be unlocked if successful.
-func handleNewWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseNewWalletArgs(params)
-	if err != nil {
+func handleNewWallet(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params NewWalletParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(newWalletRoute, err)
 	}
 
 	// zero password params in request payload when done handling this request
 	defer func() {
-		form.appPass.Clear()
-		form.walletPass.Clear()
+		params.AppPass.Clear()
+		params.WalletPass.Clear()
 	}()
 
-	if s.core.WalletState(form.assetID) != nil {
-		resErr := msgjson.NewError(msgjson.RPCWalletExistsError, "error creating %s wallet: wallet already exists", dex.BipIDSymbol(form.assetID))
+	if s.core.WalletState(params.AssetID) != nil {
+		resErr := msgjson.NewError(msgjson.RPCWalletExistsError, "error creating %s wallet: wallet already exists", dex.BipIDSymbol(params.AssetID))
 		return createResponse(newWalletRoute, nil, resErr)
 	}
 
-	walletDef, err := asset.WalletDef(form.assetID, form.walletType)
+	walletDef, err := asset.WalletDef(params.AssetID, params.WalletType)
 	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCWalletDefinitionError, "error creating %s wallet: unable to get wallet definition: %v", dex.BipIDSymbol(form.assetID), err)
+		resErr := msgjson.NewError(msgjson.RPCWalletDefinitionError, "error creating %s wallet: unable to get wallet definition: %v", dex.BipIDSymbol(params.AssetID), err)
 		return createResponse(newWalletRoute, nil, resErr)
+	}
+
+	if params.Config == nil {
+		params.Config = make(map[string]string)
 	}
 
 	// Apply default config options if they exist.
 	for _, opt := range walletDef.ConfigOpts {
-		if _, has := form.config[opt.Key]; !has {
-			form.config[opt.Key] = opt.DefaultValue
+		if _, has := params.Config[opt.Key]; !has {
+			params.Config[opt.Key] = opt.DefaultValue
 		}
 	}
 
 	// Wallet does not exist yet. Try to create it.
-	err = s.core.CreateWallet(form.appPass, form.walletPass, &core.WalletForm{
-		Type:    form.walletType,
-		AssetID: form.assetID,
-		Config:  form.config,
+	err = s.core.CreateWallet(params.AppPass, params.WalletPass, &core.WalletForm{
+		Type:    params.WalletType,
+		AssetID: params.AssetID,
+		Config:  params.Config,
 	})
 	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCCreateWalletError, "error creating %s wallet: %v", dex.BipIDSymbol(form.assetID), err)
+		resErr := msgjson.NewError(msgjson.RPCCreateWalletError, "error creating %s wallet: %v", dex.BipIDSymbol(params.AssetID), err)
 		return createResponse(newWalletRoute, nil, resErr)
 	}
 
-	err = s.core.OpenWallet(form.assetID, form.appPass)
+	err = s.core.OpenWallet(params.AssetID, params.AppPass)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCOpenWalletError, "wallet connected, but failed to open with provided password: %v", err)
 		return createResponse(newWalletRoute, nil, resErr)
 	}
 
-	res := fmt.Sprintf(walletCreatedStr, dex.BipIDSymbol(form.assetID))
+	res := fmt.Sprintf(walletCreatedStr, dex.BipIDSymbol(params.AssetID))
 	return createResponse(newWalletRoute, &res, nil)
 }
 
 // handleOpenWallet handles requests for openWallet.
 // *msgjson.ResponsePayload.Error is empty if successful. Requires the app
 // password. Opens the wallet.
-func handleOpenWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseOpenWalletArgs(params)
-	if err != nil {
+func handleOpenWallet(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params OpenWalletParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(openWalletRoute, err)
 	}
-	defer form.appPass.Clear()
+	defer params.AppPass.Clear()
 
-	err = s.core.OpenWallet(form.assetID, form.appPass)
+	err := s.core.OpenWallet(params.AssetID, params.AppPass)
 	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCOpenWalletError, "error unlocking %s wallet: %v", dex.BipIDSymbol(form.assetID), err)
+		resErr := msgjson.NewError(msgjson.RPCOpenWalletError, "error unlocking %s wallet: %v", dex.BipIDSymbol(params.AssetID), err)
 		return createResponse(openWalletRoute, nil, resErr)
 	}
 
-	res := fmt.Sprintf(walletUnlockedStr, dex.BipIDSymbol(form.assetID))
+	res := fmt.Sprintf(walletUnlockedStr, dex.BipIDSymbol(params.AssetID))
 	return createResponse(openWalletRoute, &res, nil)
 }
 
 // handleCloseWallet handles requests for closeWallet.
 // *msgjson.ResponsePayload.Error is empty if successful. Closes the wallet.
-func handleCloseWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	assetID, err := parseCloseWalletArgs(params)
-	if err != nil {
+func handleCloseWallet(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params CloseWalletParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(closeWalletRoute, err)
 	}
-	if err := s.core.CloseWallet(assetID); err != nil {
-		resErr := msgjson.NewError(msgjson.RPCCloseWalletError, "unable to close wallet %s: %v", dex.BipIDSymbol(assetID), err)
+	if err := s.core.CloseWallet(params.AssetID); err != nil {
+		resErr := msgjson.NewError(msgjson.RPCCloseWalletError, "unable to close wallet %s: %v", dex.BipIDSymbol(params.AssetID), err)
 		return createResponse(closeWalletRoute, nil, resErr)
 	}
 
-	res := fmt.Sprintf(walletLockedStr, dex.BipIDSymbol(assetID))
+	res := fmt.Sprintf(walletLockedStr, dex.BipIDSymbol(params.AssetID))
 	return createResponse(closeWalletRoute, &res, nil)
 }
 
 // handleToggleWalletStatus handles requests for toggleWalletStatus.
 // *msgjson.ResponsePayload.Error is empty if successful. Disables or enables a
 // wallet.
-func handleToggleWalletStatus(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseToggleWalletStatusArgs(params)
-	if err != nil {
+func handleToggleWalletStatus(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params ToggleWalletStatusParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(toggleWalletStatusRoute, err)
 	}
-	if err := s.core.ToggleWalletStatus(form.assetID, form.disable); err != nil {
-		resErr := msgjson.NewError(msgjson.RPCToggleWalletStatusError, "unable to change %s wallet status: %v", dex.BipIDSymbol(form.assetID), err)
+	if err := s.core.ToggleWalletStatus(params.AssetID, params.Disable); err != nil {
+		resErr := msgjson.NewError(msgjson.RPCToggleWalletStatusError, "unable to change %s wallet status: %v", dex.BipIDSymbol(params.AssetID), err)
 		return createResponse(toggleWalletStatusRoute, nil, resErr)
 	}
 
 	status := "enabled"
-	if form.disable {
+	if params.Disable {
 		status = "disabled"
 	}
 
-	res := fmt.Sprintf(walletStatusStr, dex.BipIDSymbol(form.assetID), status)
+	res := fmt.Sprintf(walletStatusStr, dex.BipIDSymbol(params.AssetID), status)
 	return createResponse(toggleWalletStatusRoute, &res, nil)
 }
 
 // handleWallets handles requests for wallets. Returns a list of wallet details.
-func handleWallets(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
+func handleWallets(s *RPCServer, _ *msgjson.Message) *msgjson.ResponsePayload {
 	walletsStates := s.core.Wallets()
 	return createResponse(walletsRoute, walletsStates, nil)
 }
 
-// handleBondAssets handles requests for bondassets.
-// *msgjson.ResponsePayload.Error is empty if successful. Requires the address
-// of a dex and returns the bond expiry and supported asset bond details.
-func handleBondAssets(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	host, cert, err := parseBondAssetsArgs(params)
+// handleWalletBalance handles requests for walletbalance. Returns the balance
+// for a single wallet.
+func handleWalletBalance(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params WalletBalanceParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(walletBalanceRoute, err)
+	}
+	bal, err := s.core.AssetBalance(params.AssetID)
 	if err != nil {
-		return usage(bondAssetsRoute, err)
+		resErr := msgjson.NewError(msgjson.RPCInternal, "unable to get balance for %s: %v", dex.BipIDSymbol(params.AssetID), err)
+		return createResponse(walletBalanceRoute, nil, resErr)
 	}
-	exchInf := s.core.Exchanges()
-	exchCfg := exchInf[host]
-	if exchCfg == nil {
-		exchCfg, err = s.core.GetDEXConfig(host, cert) // cert is file contents, not name
-		if err != nil {
-			resErr := msgjson.NewError(msgjson.RPCGetDEXConfigError, "%v", err)
-			return createResponse(bondAssetsRoute, nil, resErr)
-		}
-	}
-	res := &getBondAssetsResponse{
-		Expiry: exchCfg.BondExpiry,
-		Assets: exchCfg.BondAssets,
-	}
-	return createResponse(bondAssetsRoute, res, nil)
+	return createResponse(walletBalanceRoute, bal, nil)
 }
 
-// handleGetDEXConfig handles requests for getdexconfig.
-// *msgjson.ResponsePayload.Error is empty if successful. Requires the address
-// of a dex and returns its config..
-func handleGetDEXConfig(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	host, cert, err := parseGetDEXConfigArgs(params)
-	if err != nil {
-		return usage(getDEXConfRoute, err)
+// handleWalletState handles requests for walletstate. Returns the state for a
+// single wallet.
+func handleWalletState(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params WalletStateParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(walletStateRoute, err)
 	}
-	exchange, err := s.core.GetDEXConfig(host, cert) // cert is file contents, not name
-	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCGetDEXConfigError, "%v", err)
-		return createResponse(getDEXConfRoute, nil, resErr)
+	state := s.core.WalletState(params.AssetID)
+	if state == nil {
+		resErr := msgjson.NewError(msgjson.RPCWalletNotFoundError, "no wallet found for %s", dex.BipIDSymbol(params.AssetID))
+		return createResponse(walletStateRoute, nil, resErr)
 	}
-	return createResponse(getDEXConfRoute, exchange, nil)
+	return createResponse(walletStateRoute, state, nil)
 }
 
-// handleDiscoverAcct is the handler for discoveracct. *msgjson.ResponsePayload.Error
-// is empty if successful.
-func handleDiscoverAcct(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseDiscoverAcctArgs(params)
-	if err != nil {
-		return usage(discoverAcctRoute, err)
+// handleRescanWallet handles requests to rescan a wallet. This may trigger an
+// asynchronous resynchronization of wallet address activity, and the wallet
+// state should be consulted for status. *msgjson.ResponsePayload.Error is empty
+// if successful.
+func handleRescanWallet(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params RescanWalletParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(rescanWalletRoute, err)
 	}
-	defer form.appPass.Clear()
-	_, paid, err := s.core.DiscoverAccount(form.addr, form.appPass, form.cert)
+	err := s.core.RescanWallet(params.AssetID, params.Force)
 	if err != nil {
-		resErr := &msgjson.Error{Code: msgjson.RPCDiscoverAcctError, Message: err.Error()}
-		return createResponse(discoverAcctRoute, nil, resErr)
+		resErr := msgjson.NewError(msgjson.RPCWalletRescanError, "unable to rescan wallet: %v", err)
+		return createResponse(rescanWalletRoute, nil, resErr)
 	}
-	return createResponse(discoverAcctRoute, &paid, nil)
+	return createResponse(rescanWalletRoute, "started", nil)
 }
 
-func handleBondOptions(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseBondOptsArgs(params)
-	if err != nil {
-		return usage(bondOptionsRoute, err)
-	}
-	err = s.core.UpdateBondOptions(form)
-	if err != nil {
-		resErr := &msgjson.Error{Code: msgjson.RPCPostBondError, Message: err.Error()}
-		return createResponse(bondOptionsRoute, nil, resErr)
-	}
-	return createResponse(bondOptionsRoute, "ok", nil)
-}
-
-// handlePostBond handles requests for postbond. *msgjson.ResponsePayload.Error
-// is empty if successful.
-func handlePostBond(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parsePostBondArgs(params)
-	if err != nil {
-		return usage(postBondRoute, err)
-	}
-	defer form.AppPass.Clear()
-	// Get the exchange config with Exchanges(), not GetDEXConfig, since we may
-	// already be connected and even with an existing account.
-	exchInf := s.core.Exchanges()
-	exchCfg := exchInf[form.Addr]
-	if exchCfg == nil {
-		// Not already registered.
-		exchCfg, err = s.core.GetDEXConfig(form.Addr, form.Cert)
-		if err != nil {
-			resErr := &msgjson.Error{Code: msgjson.RPCGetDEXConfigError, Message: err.Error()}
-			return createResponse(postBondRoute, nil, resErr)
-		}
-	}
-	// Registration with different assets will be supported in the future, but
-	// for now, this requires DCR.
-	assetID := uint32(42)
-	if form.Asset != nil {
-		assetID = *form.Asset
-	}
-	symb := dex.BipIDSymbol(assetID)
-
-	bondAsset, supported := exchCfg.BondAssets[symb]
-	if !supported {
-		resErr := msgjson.NewError(msgjson.RPCPostBondError, "DEX %s does not support registration with %s", form.Addr, symb)
-		return createResponse(postBondRoute, nil, resErr)
-	}
-	if bondAsset.Amt > form.Bond || form.Bond%bondAsset.Amt != 0 {
-		resErr := msgjson.NewError(msgjson.RPCPostBondError, "DEX at %s expects a bond amount in multiples of %d %s but %d was offered",
-			form.Addr, bondAsset.Amt, dex.BipIDSymbol(assetID), form.Bond)
-		return createResponse(postBondRoute, nil, resErr)
-	}
-	res, err := s.core.PostBond(form)
-	if err != nil {
-		resErr := &msgjson.Error{Code: msgjson.RPCPostBondError, Message: err.Error()}
-		return createResponse(postBondRoute, nil, resErr)
-	}
-	if res.BondID == "" {
-		return createResponse(postBondRoute, "existing account configured - no bond posted", nil)
-	}
-	return createResponse(postBondRoute, res, nil)
-}
+//
+// handlers_trading handlers
+//
 
 // handleExchanges handles requests for exchanges. It takes no arguments and
 // returns a map of exchanges.
-func handleExchanges(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
+func handleExchanges(s *RPCServer, _ *msgjson.Message) *msgjson.ResponsePayload {
 	// Convert something to a map[string]any.
-	convM := func(in any) map[string]any {
+	convM := func(in any) (map[string]any, error) {
 		var m map[string]any
 		b, err := json.Marshal(in)
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		if err = json.Unmarshal(b, &m); err != nil {
-			panic(err)
+			return nil, err
 		}
-		return m
+		return m, nil
 	}
 	res := s.core.Exchanges()
-	exchanges := convM(res)
+	exchanges, err := convM(res)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCInternal, "failed to encode exchanges: %v", err)
+		return createResponse(exchangesRoute, nil, resErr)
+	}
 	// Iterate through exchanges converting structs into maps in order to
 	// remove some fields. Keys are DEX addresses.
 	for k, exchange := range exchanges {
-		exchangeDetails := convM(exchange)
+		exchangeDetails, err := convM(exchange)
+		if err != nil {
+			resErr := msgjson.NewError(msgjson.RPCInternal, "failed to encode exchange: %v", err)
+			return createResponse(exchangesRoute, nil, resErr)
+		}
 		// Remove a redundant address field.
 		delete(exchangeDetails, "host")
-		markets := convM(exchangeDetails["markets"])
+		markets, err := convM(exchangeDetails["markets"])
+		if err != nil {
+			resErr := msgjson.NewError(msgjson.RPCInternal, "failed to encode markets: %v", err)
+			return createResponse(exchangesRoute, nil, resErr)
+		}
 		// Market keys are market name.
 		for k, market := range markets {
-			marketDetails := convM(market)
+			marketDetails, err := convM(market)
+			if err != nil {
+				resErr := msgjson.NewError(msgjson.RPCInternal, "failed to encode market: %v", err)
+				return createResponse(exchangesRoute, nil, resErr)
+			}
 			// Remove redundant name field.
 			delete(marketDetails, "name")
 			delete(marketDetails, "orders")
 			markets[k] = marketDetails
 		}
-		assets := convM(exchangeDetails["assets"])
+		assets, err := convM(exchangeDetails["assets"])
+		if err != nil {
+			resErr := msgjson.NewError(msgjson.RPCInternal, "failed to encode assets: %v", err)
+			return createResponse(exchangesRoute, nil, resErr)
+		}
 		// Asset keys are assetIDs.
 		for k, asset := range assets {
-			assetDetails := convM(asset)
+			assetDetails, err := convM(asset)
+			if err != nil {
+				resErr := msgjson.NewError(msgjson.RPCInternal, "failed to encode asset: %v", err)
+				return createResponse(exchangesRoute, nil, resErr)
+			}
 			// Remove redundant id field.
 			delete(assetDetails, "id")
 			assets[k] = assetDetails
@@ -510,31 +513,15 @@ func handleExchanges(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 	return createResponse(exchangesRoute, &exchanges, nil)
 }
 
-// handleLogin sets up the dex connections.
-func handleLogin(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	appPass, err := parseLoginArgs(params)
-	if err != nil {
-		return usage(loginRoute, err)
-	}
-	defer appPass.Clear()
-	err = s.core.Login(appPass)
-	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCLoginError, "unable to login: %v", err)
-		return createResponse(loginRoute, nil, resErr)
-	}
-	res := "successfully logged in"
-	return createResponse(loginRoute, &res, nil)
-}
-
 // handleTrade handles requests for trade. *msgjson.ResponsePayload.Error is
 // empty if successful.
-func handleTrade(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseTradeArgs(params)
-	if err != nil {
+func handleTrade(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params TradeParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(tradeRoute, err)
 	}
-	defer form.appPass.Clear()
-	res, err := s.core.Trade(form.appPass, form.srvForm)
+	defer params.AppPass.Clear()
+	res, err := s.core.Trade(params.AppPass, &params.TradeForm)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCTradeError, "unable to trade: %v", err)
 		return createResponse(tradeRoute, nil, resErr)
@@ -547,13 +534,13 @@ func handleTrade(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	return createResponse(tradeRoute, &tradeRes, nil)
 }
 
-func handleMultiTrade(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseMultiTradeArgs(params)
-	if err != nil {
+func handleMultiTrade(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params MultiTradeParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(multiTradeRoute, err)
 	}
-	defer form.appPass.Clear()
-	results := s.core.MultiTrade(form.appPass, form.srvForm)
+	defer params.AppPass.Clear()
+	results := s.core.MultiTrade(params.AppPass, &params.MultiTradeForm)
 	trades := make([]*tradeResponse, 0, len(results))
 	for _, res := range results {
 		if res.Error != nil {
@@ -574,97 +561,21 @@ func handleMultiTrade(s *RPCServer, params *RawParams) *msgjson.ResponsePayload 
 
 // handleCancel handles requests for cancel. *msgjson.ResponsePayload.Error is
 // empty if successful.
-func handleCancel(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseCancelArgs(params)
-	if err != nil {
+func handleCancel(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params CancelParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(cancelRoute, err)
 	}
-	if err := s.core.Cancel(form.orderID); err != nil {
-		resErr := msgjson.NewError(msgjson.RPCCancelError, "unable to cancel order %q: %v", form.orderID, err)
+	orderID, err := hex.DecodeString(params.OrderID)
+	if err != nil || len(orderID) != order.OrderIDSize {
+		return usage(cancelRoute, fmt.Errorf("invalid order ID"))
+	}
+	if err := s.core.Cancel(orderID); err != nil {
+		resErr := msgjson.NewError(msgjson.RPCCancelError, "unable to cancel order %q: %v", params.OrderID, err)
 		return createResponse(cancelRoute, nil, resErr)
 	}
-	res := fmt.Sprintf(canceledOrderStr, form.orderID)
+	res := fmt.Sprintf(canceledOrderStr, params.OrderID)
 	return createResponse(cancelRoute, &res, nil)
-}
-
-// handleWithdraw handles requests for withdraw. *msgjson.ResponsePayload.Error
-// is empty if successful.
-func handleWithdraw(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	return send(s, params, withdrawRoute)
-}
-
-// handleSend handles the request for send. *msgjson.ResponsePayload.Error
-// is empty if successful.
-func handleSend(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	return send(s, params, sendRoute)
-}
-
-func send(s *RPCServer, params *RawParams, route string) *msgjson.ResponsePayload {
-	form, err := parseSendOrWithdrawArgs(params)
-	if err != nil {
-		return usage(route, err)
-	}
-	defer form.appPass.Clear()
-	subtract := false
-	if route == withdrawRoute {
-		subtract = true
-	}
-	if len(form.appPass) == 0 {
-		resErr := msgjson.NewError(msgjson.RPCFundTransferError, "empty pass")
-		return createResponse(route, nil, resErr)
-	}
-	coin, err := s.core.Send(form.appPass, form.assetID, form.value, form.address, subtract)
-	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCFundTransferError, "unable to %s: %v", route, err)
-		return createResponse(route, nil, resErr)
-	}
-	res := coin.String()
-	return createResponse(route, &res, nil)
-}
-
-// handleRescanWallet handles requests to rescan a wallet. This may trigger an
-// asynchronous resynchronization of wallet address activity, and the wallet
-// state should be consulted for status. *msgjson.ResponsePayload.Error is empty
-// if successful.
-func handleRescanWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	assetID, force, err := parseRescanWalletArgs(params)
-	if err != nil {
-		return usage(rescanWalletRoute, err)
-	}
-	err = s.core.RescanWallet(assetID, force)
-	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCWalletRescanError, "unable to rescan wallet: %v", err)
-		return createResponse(rescanWalletRoute, nil, resErr)
-	}
-	return createResponse(rescanWalletRoute, "started", nil)
-}
-
-// handleAbandonTx handles requests to abandon an unconfirmed transaction.
-// This marks the transaction and all its descendants as abandoned, allowing
-// the wallet to forget about it. *msgjson.ResponsePayload.Error is empty if
-// successful.
-func handleAbandonTx(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	assetID, txID, err := parseAbandonTxArgs(params)
-	if err != nil {
-		return usage(abandonTxRoute, err)
-	}
-	err = s.core.AbandonTransaction(assetID, txID)
-	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCWalletRescanError, "unable to abandon transaction: %v", err)
-		return createResponse(abandonTxRoute, nil, resErr)
-	}
-	return createResponse(abandonTxRoute, "transaction abandoned successfully", nil)
-}
-
-// handleLogout logs out Bison Wallet. *msgjson.ResponsePayload.Error is empty
-// if successful.
-func handleLogout(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
-	if err := s.core.Logout(); err != nil {
-		resErr := msgjson.NewError(msgjson.RPCLogoutError, "unable to logout: %v", err)
-		return createResponse(logoutRoute, nil, resErr)
-	}
-	res := logoutStr
-	return createResponse(logoutRoute, &res, nil)
 }
 
 // truncateOrderBook truncates book to the top nOrders of buys and sells.
@@ -687,18 +598,18 @@ func truncateOrderBook(book *core.OrderBook, nOrders uint64) {
 
 // handleOrderBook handles requests for orderbook.
 // *msgjson.ResponsePayload.Error is empty if successful.
-func handleOrderBook(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseOrderBookArgs(params)
-	if err != nil {
+func handleOrderBook(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params OrderBookParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(orderBookRoute, err)
 	}
-	book, err := s.core.Book(form.host, form.base, form.quote)
+	book, err := s.core.Book(params.Host, params.Base, params.Quote)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCOrderBookError, "unable to retrieve order book: %v", err)
 		return createResponse(orderBookRoute, nil, resErr)
 	}
-	if form.nOrders > 0 {
-		truncateOrderBook(book, form.nOrders)
+	if params.NOrders > 0 {
+		truncateOrderBook(book, params.NOrders)
 	}
 	return createResponse(orderBookRoute, book, nil)
 }
@@ -778,20 +689,20 @@ func parseCoreOrder(co *core.Order, b, q uint32) *myOrder {
 
 // handleMyOrders handles requests for myorders. *msgjson.ResponsePayload.Error
 // is empty if successful.
-func handleMyOrders(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseMyOrdersArgs(params)
-	if err != nil {
+func handleMyOrders(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params MyOrdersParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(myOrdersRoute, err)
 	}
 	var myOrders myOrdersResponse
-	filterMkts := form.base != nil && form.quote != nil
+	filterMkts := params.Base != nil && params.Quote != nil
 	exchanges := s.core.Exchanges()
 	for host, exchange := range exchanges {
-		if form.host != "" && form.host != host {
+		if params.Host != "" && params.Host != host {
 			continue
 		}
 		for _, market := range exchange.Markets {
-			if filterMkts && (market.BaseID != *form.base || market.QuoteID != *form.quote) {
+			if filterMkts && (market.BaseID != *params.Base || market.QuoteID != *params.Quote) {
 				continue
 			}
 			for _, order := range market.Orders {
@@ -805,15 +716,71 @@ func handleMyOrders(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	return createResponse(myOrdersRoute, myOrders, nil)
 }
 
+//
+// handlers_tx handlers
+//
+
+// handleWithdraw handles requests for withdraw. *msgjson.ResponsePayload.Error
+// is empty if successful.
+func handleWithdraw(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	return send(s, msg, withdrawRoute)
+}
+
+// handleSend handles the request for send. *msgjson.ResponsePayload.Error
+// is empty if successful.
+func handleSend(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	return send(s, msg, sendRoute)
+}
+
+func send(s *RPCServer, msg *msgjson.Message, route string) *msgjson.ResponsePayload {
+	var params SendParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(route, err)
+	}
+	defer params.AppPass.Clear()
+	if len(params.AppPass) == 0 {
+		resErr := msgjson.NewError(msgjson.RPCFundTransferError, "empty pass")
+		return createResponse(route, nil, resErr)
+	}
+	subtract := params.Subtract
+	if route == withdrawRoute {
+		subtract = true
+	}
+	coin, err := s.core.Send(params.AppPass, params.AssetID, params.Value, params.Address, subtract)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCFundTransferError, "unable to %s: %v", route, err)
+		return createResponse(route, nil, resErr)
+	}
+	res := coin.String()
+	return createResponse(route, &res, nil)
+}
+
+// handleAbandonTx handles requests to abandon an unconfirmed transaction.
+// This marks the transaction and all its descendants as abandoned, allowing
+// the wallet to forget about it. *msgjson.ResponsePayload.Error is empty if
+// successful.
+func handleAbandonTx(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params AbandonTxParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(abandonTxRoute, err)
+	}
+	err := s.core.AbandonTransaction(params.AssetID, params.TxID)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCWalletRescanError, "unable to abandon transaction: %v", err)
+		return createResponse(abandonTxRoute, nil, resErr)
+	}
+	return createResponse(abandonTxRoute, "transaction abandoned successfully", nil)
+}
+
 // handleAppSeed handles requests for the app seed. *msgjson.ResponsePayload.Error
 // is empty if successful.
-func handleAppSeed(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	appPass, err := parseAppSeedArgs(params)
-	if err != nil {
+func handleAppSeed(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params AppSeedParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(appSeedRoute, err)
 	}
-	defer appPass.Clear()
-	seed, err := s.core.ExportSeed(appPass)
+	defer params.AppPass.Clear()
+	seed, err := s.core.ExportSeed(params.AppPass)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCExportSeedError, "unable to retrieve app seed: %v", err)
 		return createResponse(appSeedRoute, nil, resErr)
@@ -824,75 +791,42 @@ func handleAppSeed(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 
 // handleDeleteArchivedRecords handles requests for deleting archived records.
 // *msgjson.ResponsePayload.Error is empty if successful.
-func handleDeleteArchivedRecords(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseDeleteArchivedRecordsArgs(params)
-	if err != nil {
+func handleDeleteArchivedRecords(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params DeleteRecordsParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(deleteArchivedRecordsRoute, err)
 	}
+
+	// Convert to internal form.
+	form := &deleteRecordsForm{
+		matchesFileStr: params.MatchesFile,
+		ordersFileStr:  params.OrdersFile,
+	}
+	if params.OlderThanMs != nil && *params.OlderThanMs != 0 {
+		t := time.UnixMilli(*params.OlderThanMs)
+		form.olderThan = &t
+	}
+
 	nRecordsDeleted, err := s.core.DeleteArchivedRecords(form.olderThan, form.matchesFileStr, form.ordersFileStr)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCDeleteArchivedRecordsError, "unable to delete records: %v", err)
 		return createResponse(deleteArchivedRecordsRoute, nil, resErr)
 	}
 
-	msg := fmt.Sprintf("%d archived records has been deleted successfully", nRecordsDeleted)
+	msg2 := fmt.Sprintf("%d archived records has been deleted successfully", nRecordsDeleted)
 	if nRecordsDeleted <= 0 {
-		msg = "No archived records found"
+		msg2 = "No archived records found"
 	}
-	return createResponse(deleteArchivedRecordsRoute, msg, nil)
+	return createResponse(deleteArchivedRecordsRoute, msg2, nil)
 }
 
-func handleWalletPeers(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	assetID, err := parseWalletPeersArgs(params)
-	if err != nil {
-		return usage(walletPeersRoute, err)
-	}
-
-	peers, err := s.core.WalletPeers(assetID)
-	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCWalletPeersError, "unable to get wallet peers: %v", err)
-		return createResponse(walletPeersRoute, nil, resErr)
-	}
-	return createResponse(walletPeersRoute, peers, nil)
-}
-
-func handleAddWalletPeer(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseAddRemoveWalletPeerArgs(params)
-	if err != nil {
-		return usage(addWalletPeerRoute, err)
-	}
-
-	err = s.core.AddWalletPeer(form.assetID, form.address)
-	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCWalletPeersError, "unable to add wallet peer: %v", err)
-		return createResponse(addWalletPeerRoute, nil, resErr)
-	}
-
-	return createResponse(addWalletPeerRoute, "successfully added peer", nil)
-}
-
-func handleRemoveWalletPeer(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseAddRemoveWalletPeerArgs(params)
-	if err != nil {
-		return usage(removeWalletPeerRoute, err)
-	}
-
-	err = s.core.RemoveWalletPeer(form.assetID, form.address)
-	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCWalletPeersError, "unable to remove wallet peer: %v", err)
-		return createResponse(removeWalletPeerRoute, nil, resErr)
-	}
-
-	return createResponse(removeWalletPeerRoute, "successfully removed peer", nil)
-}
-
-func handleNotifications(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	numNotes, err := parseNotificationsArgs(params)
-	if err != nil {
+func handleNotifications(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params NotificationsParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(notificationsRoute, err)
 	}
 
-	notes, _, err := s.core.Notifications(numNotes)
+	notes, _, err := s.core.Notifications(params.N)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCNotificationsError, "unable to handle notification: %v", err)
 		return createResponse(notificationsRoute, nil, resErr)
@@ -901,13 +835,209 @@ func handleNotifications(s *RPCServer, params *RawParams) *msgjson.ResponsePaylo
 	return createResponse(notificationsRoute, notes, nil)
 }
 
-func handleMMAvailableBalances(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseMMAvailableBalancesArgs(params)
+func handleTxHistory(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params TxHistoryParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(txHistoryRoute, err)
+	}
+
+	txs, err := s.core.TxHistory(params.AssetID, &asset.TxHistoryRequest{
+		N:     params.N,
+		RefID: params.RefID,
+		Past:  params.Past,
+	})
 	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCTxHistoryError, "unable to get tx history: %v", err)
+		return createResponse(txHistoryRoute, nil, resErr)
+	}
+
+	return createResponse(txHistoryRoute, txs, nil)
+}
+
+func handleWalletTx(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params WalletTxParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(walletTxRoute, err)
+	}
+
+	tx, err := s.core.WalletTransaction(params.AssetID, params.TxID)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCTxHistoryError, "unable to get wallet tx: %v", err)
+		return createResponse(walletTxRoute, nil, resErr)
+	}
+
+	return createResponse(walletTxRoute, tx, nil)
+}
+
+func handleWithdrawBchSpv(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params BchWithdrawParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(withdrawBchSpvRoute, err)
+	}
+	defer params.AppPass.Clear()
+
+	txB, err := s.core.GenerateBCHRecoveryTransaction(params.AppPass, params.Recipient)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCCreateWalletError, "error generating tx: %v", err)
+		return createResponse(withdrawBchSpvRoute, nil, resErr)
+	}
+
+	return createResponse(withdrawBchSpvRoute, dex.Bytes(txB).String(), nil)
+}
+
+//
+// handlers_dex handlers
+//
+
+// handleBondAssets handles requests for bondassets.
+// *msgjson.ResponsePayload.Error is empty if successful. Requires the address
+// of a dex and returns the bond expiry and supported asset bond details.
+func handleBondAssets(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params BondAssetsParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(bondAssetsRoute, err)
+	}
+	var cert []byte
+	if params.Cert != "" {
+		cert = []byte(params.Cert)
+	}
+	exchInf := s.core.Exchanges()
+	exchCfg := exchInf[params.Host]
+	if exchCfg == nil {
+		var err error
+		exchCfg, err = s.core.GetDEXConfig(params.Host, cert) // cert is file contents, not name
+		if err != nil {
+			resErr := msgjson.NewError(msgjson.RPCGetDEXConfigError, "%v", err)
+			return createResponse(bondAssetsRoute, nil, resErr)
+		}
+	}
+	res := &getBondAssetsResponse{
+		Expiry: exchCfg.BondExpiry,
+		Assets: exchCfg.BondAssets,
+	}
+	return createResponse(bondAssetsRoute, res, nil)
+}
+
+// handleGetDEXConfig handles requests for getdexconfig.
+// *msgjson.ResponsePayload.Error is empty if successful. Requires the address
+// of a dex and returns its config..
+func handleGetDEXConfig(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params GetDEXConfigParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(getDEXConfRoute, err)
+	}
+	var cert []byte
+	if params.Cert != "" {
+		cert = []byte(params.Cert)
+	}
+	exchange, err := s.core.GetDEXConfig(params.Host, cert) // cert is file contents, not name
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCGetDEXConfigError, "%v", err)
+		return createResponse(getDEXConfRoute, nil, resErr)
+	}
+	return createResponse(getDEXConfRoute, exchange, nil)
+}
+
+// handleDiscoverAcct is the handler for discoveracct. *msgjson.ResponsePayload.Error
+// is empty if successful.
+func handleDiscoverAcct(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params DiscoverAcctParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(discoverAcctRoute, err)
+	}
+	defer params.AppPass.Clear()
+	var cert []byte
+	if params.Cert != "" {
+		cert = []byte(params.Cert)
+	}
+	_, paid, err := s.core.DiscoverAccount(params.Addr, params.AppPass, cert)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCDiscoverAcctError, "%v", err)
+		return createResponse(discoverAcctRoute, nil, resErr)
+	}
+	return createResponse(discoverAcctRoute, &paid, nil)
+}
+
+func handleBondOptions(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params core.BondOptionsForm
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(bondOptionsRoute, err)
+	}
+	err := s.core.UpdateBondOptions(&params)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCPostBondError, "%v", err)
+		return createResponse(bondOptionsRoute, nil, resErr)
+	}
+	return createResponse(bondOptionsRoute, "ok", nil)
+}
+
+// handlePostBond handles requests for postbond. *msgjson.ResponsePayload.Error
+// is empty if successful.
+func handlePostBond(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var form core.PostBondForm
+	if err := msg.Unmarshal(&form); err != nil {
+		return usage(postBondRoute, err)
+	}
+	defer form.AppPass.Clear()
+	// Get the exchange config with Exchanges(), not GetDEXConfig, since we may
+	// already be connected and even with an existing account.
+	exchInf := s.core.Exchanges()
+	exchCfg := exchInf[form.Addr]
+	if exchCfg == nil {
+		// Not already registered.
+		var err error
+		exchCfg, err = s.core.GetDEXConfig(form.Addr, form.Cert)
+		if err != nil {
+			resErr := msgjson.NewError(msgjson.RPCGetDEXConfigError, "%v", err)
+			return createResponse(postBondRoute, nil, resErr)
+		}
+	}
+	// Registration with different assets will be supported in the future, but
+	// for now, this requires DCR.
+	assetID := uint32(42)
+	if form.Asset != nil {
+		assetID = *form.Asset
+	}
+	symb := dex.BipIDSymbol(assetID)
+
+	bondAsset, supported := exchCfg.BondAssets[symb]
+	if !supported {
+		resErr := msgjson.NewError(msgjson.RPCPostBondError, "DEX %s does not support registration with %s", form.Addr, symb)
+		return createResponse(postBondRoute, nil, resErr)
+	}
+	if bondAsset.Amt > form.Bond || form.Bond%bondAsset.Amt != 0 {
+		resErr := msgjson.NewError(msgjson.RPCPostBondError, "DEX at %s expects a bond amount in multiples of %d %s but %d was offered",
+			form.Addr, bondAsset.Amt, dex.BipIDSymbol(assetID), form.Bond)
+		return createResponse(postBondRoute, nil, resErr)
+	}
+	res, err := s.core.PostBond(&form)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCPostBondError, "%v", err)
+		return createResponse(postBondRoute, nil, resErr)
+	}
+	if res.BondID == "" {
+		return createResponse(postBondRoute, "existing account configured - no bond posted", nil)
+	}
+	return createResponse(postBondRoute, res, nil)
+}
+
+//
+// handlers_mm handlers
+//
+
+func handleMMAvailableBalances(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params MMAvailableBalancesParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(mmAvailableBalancesRoute, err)
 	}
 
-	dexBalances, cexBalances, err := s.mm.AvailableBalances(form.mkt, form.cexBaseID, form.cexQuoteID, form.cexName)
+	mkt := &mm.MarketWithHost{
+		Host:    params.Host,
+		BaseID:  params.BaseID,
+		QuoteID: params.QuoteID,
+	}
+
+	dexBalances, cexBalances, err := s.mm.AvailableBalances(mkt, params.CexBaseID, params.CexQuoteID, params.CexName)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCMMAvailableBalancesError, "unable to get available balances: %v", err)
 		return createResponse(mmAvailableBalancesRoute, nil, resErr)
@@ -924,15 +1054,15 @@ func handleMMAvailableBalances(s *RPCServer, params *RawParams) *msgjson.Respons
 	return createResponse(mmAvailableBalancesRoute, res, nil)
 }
 
-func handleStartBot(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseStartBotArgs(params)
-	if err != nil {
+func handleStartBot(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params StartBotParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(startBotRoute, err)
 	}
 
-	if form.mkt == nil {
+	if params.Market == nil {
 		// Start all bots
-		started, err := s.mm.StartBots(&form.cfgFilePath, form.appPass)
+		started, err := s.mm.StartBots(&params.CfgFilePath, params.AppPass)
 		if err != nil {
 			resErr := msgjson.NewError(msgjson.RPCStartMarketMakingError, "error starting bots: %v", err)
 			return createResponse(startBotRoute, nil, resErr)
@@ -941,7 +1071,7 @@ func handleStartBot(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	}
 
 	// Start specific bot
-	err = s.mm.StartBot(form.mkt, &form.cfgFilePath, form.appPass, true)
+	err := s.mm.StartBot(params.Market, &params.CfgFilePath, params.AppPass, true)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCStartMarketMakingError, "unable to start market making: %v", err)
 		return createResponse(startBotRoute, nil, resErr)
@@ -950,13 +1080,13 @@ func handleStartBot(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	return createResponse(startBotRoute, "started bot", nil)
 }
 
-func handleStopBot(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	mkt, err := parseStopBotArgs(params)
-	if err != nil {
+func handleStopBot(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params StopBotParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(stopBotRoute, err)
 	}
 
-	if mkt == nil {
+	if params.Market == nil {
 		// Stop all bots
 		stopped, err := s.mm.StopBots()
 		if err != nil {
@@ -967,7 +1097,7 @@ func handleStopBot(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	}
 
 	// Stop specific bot
-	err = s.mm.StopBot(mkt)
+	err := s.mm.StopBot(params.Market)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCStopMarketMakingError, "unable to stop market making: %v", err)
 		return createResponse(stopBotRoute, nil, resErr)
@@ -976,13 +1106,13 @@ func handleStopBot(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	return createResponse(stopBotRoute, "stopping bot", nil)
 }
 
-func handleUpdateRunningBotCfg(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseUpdateRunningBotArgs(params)
-	if err != nil {
+func handleUpdateRunningBotCfg(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params UpdateRunningBotParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(updateRunningBotCfgRoute, err)
 	}
 
-	data, err := os.ReadFile(form.cfgFilePath)
+	data, err := os.ReadFile(params.CfgFilePath)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotCfgError, "unable to read config file: %v", err)
 		return createResponse(updateRunningBotCfgRoute, nil, resErr)
@@ -997,18 +1127,18 @@ func handleUpdateRunningBotCfg(s *RPCServer, params *RawParams) *msgjson.Respons
 
 	var botCfg *mm.BotConfig
 	for _, bot := range cfg.BotConfigs {
-		if bot.Host == form.mkt.Host && bot.BaseID == form.mkt.BaseID && bot.QuoteID == form.mkt.QuoteID {
+		if bot.Host == params.Market.Host && bot.BaseID == params.Market.BaseID && bot.QuoteID == params.Market.QuoteID {
 			botCfg = bot
 			break
 		}
 	}
 
 	if botCfg == nil {
-		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotCfgError, "bot config not found for market %s", form.mkt.String())
+		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotCfgError, "bot config not found for market %s", params.Market.String())
 		return createResponse(updateRunningBotCfgRoute, nil, resErr)
 	}
 
-	err = s.mm.UpdateRunningBotCfg(botCfg, form.balances, nil, false)
+	err = s.mm.UpdateRunningBotCfg(botCfg, params.Balances, nil, false)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotCfgError, "unable to update running bot: %v", err)
 		return createResponse(updateRunningBotCfgRoute, nil, resErr)
@@ -1017,49 +1147,53 @@ func handleUpdateRunningBotCfg(s *RPCServer, params *RawParams) *msgjson.Respons
 	return createResponse(updateRunningBotCfgRoute, "updated running bot", nil)
 }
 
-func handleUpdateRunningBotInventory(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseUpdateRunningBotInventoryArgs(params)
-	if err != nil {
-		return usage(updateRunningBotCfgRoute, err)
+func handleUpdateRunningBotInventory(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params UpdateRunningBotInventoryParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(updateRunningBotInvRoute, err)
 	}
 
-	err = s.mm.UpdateRunningBotInventory(form.mkt, form.balances)
+	err := s.mm.UpdateRunningBotInventory(&params.Market, params.Balances)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCUpdateRunningBotInvError, "unable to update running bot: %v", err)
-		return createResponse(updateRunningBotCfgRoute, nil, resErr)
+		return createResponse(updateRunningBotInvRoute, nil, resErr)
 	}
 
-	return createResponse(updateRunningBotCfgRoute, "updated running bot", nil)
+	return createResponse(updateRunningBotInvRoute, "updated running bot", nil)
 }
 
-func handleMMStatus(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+func handleMMStatus(s *RPCServer, _ *msgjson.Message) *msgjson.ResponsePayload {
 	status := s.mm.RunningBotsStatus()
 	return createResponse(mmStatusRoute, status, nil)
 }
 
-func handleSetVSP(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseSetVSPArgs(params)
-	if err != nil {
+//
+// handlers_staking handlers
+//
+
+func handleSetVSP(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params SetVSPParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(setVSPRoute, err)
 	}
 
-	err = s.core.SetVSP(form.assetID, form.addr)
+	err := s.core.SetVSP(params.AssetID, params.Addr)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCSetVSPError, "unable to set vsp: %v", err)
 		return createResponse(setVSPRoute, nil, resErr)
 	}
 
-	return createResponse(setVSPRoute, fmt.Sprintf(setVSPStr, form.addr), nil)
+	return createResponse(setVSPRoute, fmt.Sprintf(setVSPStr, params.Addr), nil)
 }
 
-func handlePurchaseTickets(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parsePurchaseTicketsArgs(params)
-	if err != nil {
+func handlePurchaseTickets(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params PurchaseTicketsParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(purchaseTicketsRoute, err)
 	}
-	defer form.appPass.Clear()
+	defer params.AppPass.Clear()
 
-	if err = s.core.PurchaseTickets(form.assetID, form.appPass, form.num); err != nil {
+	if err := s.core.PurchaseTickets(params.AssetID, params.AppPass, params.N); err != nil {
 		resErr := msgjson.NewError(msgjson.RPCPurchaseTicketsError, "unable to purchase tickets: %v", err)
 		return createResponse(purchaseTicketsRoute, nil, resErr)
 	}
@@ -1067,12 +1201,12 @@ func handlePurchaseTickets(s *RPCServer, params *RawParams) *msgjson.ResponsePay
 	return createResponse(purchaseTicketsRoute, true, nil)
 }
 
-func handleStakeStatus(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	assetID, err := parseStakeStatusArgs(params)
-	if err != nil {
+func handleStakeStatus(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params StakeStatusParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(stakeStatusRoute, err)
 	}
-	stakeStatus, err := s.core.StakeStatus(assetID)
+	stakeStatus, err := s.core.StakeStatus(params.AssetID)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCStakeStatusError, "unable to get staking status: %v", err)
 		return createResponse(stakeStatusRoute, nil, resErr)
@@ -1081,13 +1215,13 @@ func handleStakeStatus(s *RPCServer, params *RawParams) *msgjson.ResponsePayload
 	return createResponse(stakeStatusRoute, &stakeStatus, nil)
 }
 
-func handleSetVotingPreferences(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseSetVotingPreferencesArgs(params)
-	if err != nil {
+func handleSetVotingPreferences(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params SetVotingPreferencesParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(setVotingPreferencesRoute, err)
 	}
 
-	err = s.core.SetVotingPreferences(form.assetID, form.voteChoices, form.tSpendPolicy, form.treasuryPolicy)
+	err := s.core.SetVotingPreferences(params.AssetID, params.Choices, params.TSpendPolicy, params.TreasuryPolicy)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCSetVotingPreferencesError, "unable to set voting preferences: %v", err)
 		return createResponse(setVotingPreferencesRoute, nil, resErr)
@@ -1096,70 +1230,17 @@ func handleSetVotingPreferences(s *RPCServer, params *RawParams) *msgjson.Respon
 	return createResponse(setVotingPreferencesRoute, "vote preferences set", nil)
 }
 
-func handleTxHistory(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseTxHistoryArgs(params)
-	if err != nil {
-		return usage(txHistoryRoute, err)
+//
+// handlers_bridge handlers
+//
+
+func handleCheckBridgeApproval(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params CheckBridgeApprovalParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(checkBridgeApprovalRoute, err)
 	}
 
-	txs, err := s.core.TxHistory(form.assetID, &asset.TxHistoryRequest{
-		N:     form.num,
-		RefID: form.refID,
-		Past:  form.past,
-	})
-	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCTxHistoryError, "unable to get tx history: %v", err)
-		return createResponse(txHistoryRoute, nil, resErr)
-	}
-
-	return createResponse(txHistoryRoute, txs, nil)
-}
-
-func handleWalletTx(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseWalletTxArgs(params)
-	if err != nil {
-		return usage(walletTxRoute, err)
-	}
-
-	tx, err := s.core.WalletTransaction(form.assetID, form.txID)
-	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCTxHistoryError, "unable to get wallet tx: %v", err)
-		return createResponse(walletTxRoute, nil, resErr)
-	}
-
-	return createResponse(walletTxRoute, tx, nil)
-}
-
-func handleWithdrawBchSpv(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	appPW, recipient, err := parseBchWithdrawArgs(params)
-	if err != nil {
-		return usage(withdrawBchSpvRoute, err)
-	}
-	defer appPW.Clear()
-
-	txB, err := s.core.GenerateBCHRecoveryTransaction(appPW, recipient)
-	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCCreateWalletError, "error generating tx: %v", err)
-		return createResponse(withdrawBchSpvRoute, nil, resErr)
-	}
-
-	return createResponse(withdrawBchSpvRoute, dex.Bytes(txB).String(), nil)
-}
-
-func handleCheckBridgeApproval(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 2 {
-		return usage(checkBridgeApprovalRoute, fmt.Errorf("expected 2 args, got %d", len(params.Args)))
-	}
-
-	i, err := strconv.ParseUint(params.Args[0], 10, 32)
-	if err != nil {
-		return usage(checkBridgeApprovalRoute, fmt.Errorf("error parsing assetID: %v", err))
-	}
-
-	assetID := uint32(i)
-	bridgeName := params.Args[1]
-
-	approvalStatus, err := s.core.BridgeContractApprovalStatus(assetID, bridgeName)
+	approvalStatus, err := s.core.BridgeContractApprovalStatus(params.AssetID, params.BridgeName)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCBridgeError, "unable to check bridge approval: %v", err)
 		return createResponse(checkBridgeApprovalRoute, nil, resErr)
@@ -1168,29 +1249,18 @@ func handleCheckBridgeApproval(s *RPCServer, params *RawParams) *msgjson.Respons
 	return createResponse(checkBridgeApprovalRoute, approvalStatus.String(), nil)
 }
 
-func handleApproveBridge(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 3 {
-		return usage(approveBridgeContractRoute, fmt.Errorf("expected 3 args, got %d", len(params.Args)))
-	}
-
-	i, err := strconv.ParseUint(params.Args[0], 10, 32)
-	if err != nil {
-		return usage(approveBridgeContractRoute, fmt.Errorf("error parsing assetID: %v", err))
-	}
-
-	assetID := uint32(i)
-	bridgeName := params.Args[1]
-
-	approve, err := strconv.ParseBool(params.Args[2])
-	if err != nil {
-		return usage(approveBridgeContractRoute, fmt.Errorf("error parsing approve: %v", err))
+func handleApproveBridge(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params ApproveBridgeParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(approveBridgeContractRoute, err)
 	}
 
 	var txID string
-	if approve {
-		txID, err = s.core.ApproveBridgeContract(assetID, bridgeName)
+	var err error
+	if params.Approve {
+		txID, err = s.core.ApproveBridgeContract(params.AssetID, params.BridgeName)
 	} else {
-		txID, err = s.core.UnapproveBridgeContract(assetID, bridgeName)
+		txID, err = s.core.UnapproveBridgeContract(params.AssetID, params.BridgeName)
 	}
 
 	if err != nil {
@@ -1201,35 +1271,13 @@ func handleApproveBridge(s *RPCServer, params *RawParams) *msgjson.ResponsePaylo
 	return createResponse(approveBridgeContractRoute, txID, nil)
 }
 
-func handleBridge(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 4 {
-		return usage(bridgeRoute, fmt.Errorf("expected 4 args, got %d", len(params.Args)))
+func handleBridge(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params BridgeParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(bridgeRoute, err)
 	}
 
-	fromAssetID, err := strconv.ParseUint(params.Args[0], 10, 32)
-	if err != nil {
-		return usage(bridgeRoute, fmt.Errorf("error parsing fromAssetID: %v", err))
-	}
-
-	toAssetID, err := strconv.ParseUint(params.Args[1], 10, 32)
-	if err != nil {
-		return usage(bridgeRoute, fmt.Errorf("error parsing toAssetID: %v", err))
-	}
-
-	value, err := strconv.ParseFloat(params.Args[2], 64)
-	if err != nil {
-		return usage(bridgeRoute, fmt.Errorf("error parsing value: %v", err))
-	}
-
-	bridgeName := params.Args[3]
-
-	unitInfo, err := asset.UnitInfo(uint32(fromAssetID))
-	if err != nil {
-		return usage(bridgeRoute, fmt.Errorf("error getting unit info: %v", err))
-	}
-	atomValue := uint64(value * float64(unitInfo.Conventional.ConversionFactor))
-
-	txID, err := s.core.Bridge(uint32(fromAssetID), uint32(toAssetID), atomValue, bridgeName)
+	txID, err := s.core.Bridge(params.FromAssetID, params.ToAssetID, params.Amt, params.BridgeName)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCBridgeError, "unable to initiate bridge: %v", err)
 		return createResponse(bridgeRoute, nil, resErr)
@@ -1238,17 +1286,13 @@ func handleBridge(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	return createResponse(bridgeRoute, txID, nil)
 }
 
-func handlePendingBridges(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 1 {
-		return usage(pendingBridgesRoute, fmt.Errorf("expected 1 arg, got %d", len(params.Args)))
+func handlePendingBridges(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params PendingBridgesParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(pendingBridgesRoute, err)
 	}
 
-	assetID, err := strconv.ParseUint(params.Args[0], 10, 32)
-	if err != nil {
-		return usage(pendingBridgesRoute, fmt.Errorf("error parsing assetID: %v", err))
-	}
-
-	bridges, err := s.core.PendingBridges(uint32(assetID))
+	bridges, err := s.core.PendingBridges(params.AssetID)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCBridgeError, "unable to get pending bridges: %v", err)
 		return createResponse(pendingBridgesRoute, nil, resErr)
@@ -1257,13 +1301,13 @@ func handlePendingBridges(s *RPCServer, params *RawParams) *msgjson.ResponsePayl
 	return createResponse(pendingBridgesRoute, bridges, nil)
 }
 
-func handleBridgeHistory(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseTxHistoryArgs(params)
-	if err != nil {
+func handleBridgeHistory(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params TxHistoryParams
+	if err := msg.Unmarshal(&params); err != nil {
 		return usage(bridgeHistoryRoute, err)
 	}
 
-	bridges, err := s.core.BridgeHistory(form.assetID, form.num, form.refID, form.past)
+	bridges, err := s.core.BridgeHistory(params.AssetID, params.N, params.RefID, params.Past)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCBridgeError, "unable to get bridge history: %v", err)
 		return createResponse(bridgeHistoryRoute, nil, resErr)
@@ -1272,17 +1316,13 @@ func handleBridgeHistory(s *RPCServer, params *RawParams) *msgjson.ResponsePaylo
 	return createResponse(bridgeHistoryRoute, bridges, nil)
 }
 
-func handleSupportedBridges(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 1 {
-		return usage(supportedBridgesRoute, fmt.Errorf("expected 1 arg, got %d", len(params.Args)))
+func handleSupportedBridges(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params SupportedBridgesParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(supportedBridgesRoute, err)
 	}
 
-	assetID, err := strconv.ParseUint(params.Args[0], 10, 32)
-	if err != nil {
-		return usage(supportedBridgesRoute, fmt.Errorf("error parsing assetID: %v", err))
-	}
-
-	bridgeDestinations, err := s.core.SupportedBridgeDestinations(uint32(assetID))
+	bridgeDestinations, err := s.core.SupportedBridgeDestinations(params.AssetID)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCBridgeError, "unable to get supported bridge destinations: %v", err)
 		return createResponse(supportedBridgesRoute, nil, resErr)
@@ -1298,24 +1338,13 @@ func handleSupportedBridges(s *RPCServer, params *RawParams) *msgjson.ResponsePa
 	return createResponse(supportedBridgesRoute, result, nil)
 }
 
-func handleBridgeFeesAndLimits(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 3 {
-		return usage(bridgeFeesAndLimitsRoute, fmt.Errorf("expected 3 args, got %d", len(params.Args)))
+func handleBridgeFeesAndLimits(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params BridgeFeesAndLimitsParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(bridgeFeesAndLimitsRoute, err)
 	}
 
-	fromAssetID, err := strconv.ParseUint(params.Args[0], 10, 32)
-	if err != nil {
-		return usage(bridgeFeesAndLimitsRoute, fmt.Errorf("error parsing fromAssetID: %v", err))
-	}
-
-	toAssetID, err := strconv.ParseUint(params.Args[1], 10, 32)
-	if err != nil {
-		return usage(bridgeFeesAndLimitsRoute, fmt.Errorf("error parsing toAssetID: %v", err))
-	}
-
-	bridgeName := params.Args[2]
-
-	result, err := s.core.BridgeFeesAndLimits(uint32(fromAssetID), uint32(toAssetID), bridgeName)
+	result, err := s.core.BridgeFeesAndLimits(params.FromAssetID, params.ToAssetID, params.BridgeName)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCBridgeError, "unable to get bridge fees and limits: %v", err)
 		return createResponse(bridgeFeesAndLimitsRoute, nil, resErr)
@@ -1323,17 +1352,18 @@ func handleBridgeFeesAndLimits(s *RPCServer, params *RawParams) *msgjson.Respons
 
 	return createResponse(bridgeFeesAndLimitsRoute, result, nil)
 }
-func handlePaymentMultisigPubkey(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 1 {
-		return usage(paymentMultisigPubkeyRoute, fmt.Errorf("expected 1 arg, got %d", len(params.Args)))
+
+//
+// handlers_multisig handlers
+//
+
+func handlePaymentMultisigPubkey(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params PaymentMultisigPubkeyParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(paymentMultisigPubkeyRoute, err)
 	}
 
-	assetID, err := strconv.ParseUint(params.Args[0], 10, 32)
-	if err != nil {
-		return usage(paymentMultisigPubkeyRoute, fmt.Errorf("error parsing assetID: %v", err))
-	}
-
-	pubkey, err := s.core.PaymentMultisigPubkey(uint32(assetID))
+	pubkey, err := s.core.PaymentMultisigPubkey(params.AssetID)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCPaymentMultisigError, "unable to get pubkey: %v", err)
 		return createResponse(paymentMultisigPubkeyRoute, nil, resErr)
@@ -1341,11 +1371,12 @@ func handlePaymentMultisigPubkey(s *RPCServer, params *RawParams) *msgjson.Respo
 	return createResponse(paymentMultisigPubkeyRoute, pubkey, nil)
 }
 
-func handleSendFundsToMultisig(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 1 {
-		return usage(sendFundsToMultisigRoute, fmt.Errorf("expected 1 arg, got %d", len(params.Args)))
+func handleSendFundsToMultisig(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params CsvFileParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(sendFundsToMultisigRoute, err)
 	}
-	if err := s.core.SendFundsToMultisig(params.Args[0]); err != nil {
+	if err := s.core.SendFundsToMultisig(params.CsvFilePath); err != nil {
 		resErr := msgjson.NewError(msgjson.RPCPaymentMultisigError, "unable to send funds to multisig: %v", err)
 		return createResponse(sendFundsToMultisigRoute, nil, resErr)
 	}
@@ -1353,27 +1384,25 @@ func handleSendFundsToMultisig(s *RPCServer, params *RawParams) *msgjson.Respons
 	return createResponse(sendFundsToMultisigRoute, &res, nil)
 }
 
-func handleSignMultisig(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 2 {
-		return usage(signMultisigRoute, fmt.Errorf("expected 1 arg, got %d", len(params.Args)))
+func handleSignMultisig(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params SignMultisigParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(signMultisigRoute, err)
 	}
-	idx, err := checkUIntArg(params.Args[1], "signIdx", 32)
-	if err != nil {
-		return usage(signMultisigRoute, fmt.Errorf("unable to decode index: %v", err))
-	}
-	if err := s.core.SignMultisig(params.Args[0], int(idx)); err != nil {
+	if err := s.core.SignMultisig(params.CsvFilePath, params.SignIdx); err != nil {
 		resErr := msgjson.NewError(msgjson.RPCPaymentMultisigError, "unable to sign multisig: %v", err)
 		return createResponse(signMultisigRoute, nil, resErr)
 	}
 	res := "csv updated"
-	return createResponse(sendFundsToMultisigRoute, &res, nil)
+	return createResponse(signMultisigRoute, &res, nil)
 }
 
-func handleRefundPaymentMultisig(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 1 {
-		return usage(refundPaymentMultisigRoute, fmt.Errorf("expected 1 arg, got %d", len(params.Args)))
+func handleRefundPaymentMultisig(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params CsvFileParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(refundPaymentMultisigRoute, err)
 	}
-	res, err := s.core.RefundPaymentMultisig(params.Args[0])
+	res, err := s.core.RefundPaymentMultisig(params.CsvFilePath)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCPaymentMultisigError, "unable to refund multisig: %v", err)
 		return createResponse(refundPaymentMultisigRoute, nil, resErr)
@@ -1381,257 +1410,343 @@ func handleRefundPaymentMultisig(s *RPCServer, params *RawParams) *msgjson.Respo
 	return createResponse(refundPaymentMultisigRoute, &res, nil)
 }
 
-func handleViewPaymentMultisig(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 1 {
-		return usage(refundPaymentMultisigRoute, fmt.Errorf("expected 1 arg, got %d", len(params.Args)))
+func handleViewPaymentMultisig(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params CsvFileParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(viewPaymentMultisigRoute, err)
 	}
-	res, err := s.core.ViewPaymentMultisig(params.Args[0])
+	res, err := s.core.ViewPaymentMultisig(params.CsvFilePath)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCPaymentMultisigError, "unable to view multisig: %v", err)
-		return createResponse(refundPaymentMultisigRoute, nil, resErr)
+		return createResponse(viewPaymentMultisigRoute, nil, resErr)
 	}
-	return createResponse(refundPaymentMultisigRoute, &res, nil)
+	return createResponse(viewPaymentMultisigRoute, &res, nil)
 }
 
-func handleSendPaymentMultisig(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 1 {
-		return usage(refundPaymentMultisigRoute, fmt.Errorf("expected 1 arg, got %d", len(params.Args)))
+func handleSendPaymentMultisig(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params CsvFileParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(sendPaymentMultisigRoute, err)
 	}
-	res, err := s.core.SendPaymentMultisig(params.Args[0])
+	res, err := s.core.SendPaymentMultisig(params.CsvFilePath)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCPaymentMultisigError, "unable to send multisig: %v", err)
-		return createResponse(refundPaymentMultisigRoute, nil, resErr)
+		return createResponse(sendPaymentMultisigRoute, nil, resErr)
 	}
-	return createResponse(refundPaymentMultisigRoute, &res, nil)
+	return createResponse(sendPaymentMultisigRoute, &res, nil)
 }
 
-// format concatenates thing and tail. If thing is empty, returns an empty
-// string.
-func format(thing, tail string) string {
-	if thing == "" {
-		return ""
+//
+// handlers_peers handlers
+//
+
+func handleWalletPeers(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params WalletPeersParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(walletPeersRoute, err)
 	}
-	return fmt.Sprintf("%s%s", thing, tail)
+
+	peers, err := s.core.WalletPeers(params.AssetID)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCWalletPeersError, "unable to get wallet peers: %v", err)
+		return createResponse(walletPeersRoute, nil, resErr)
+	}
+	return createResponse(walletPeersRoute, peers, nil)
 }
 
-// ListCommands prints a short usage string for every route available to the
-// rpcserver.
-func ListCommands(includePasswords bool) string {
-	var sb strings.Builder
-	var err error
-	for _, r := range sortHelpKeys() {
-		msg := helpMsgs[r]
-		// If help should include password arguments and this command
-		// has password arguments, add them to the help message.
-		if includePasswords && msg.pwArgsShort != "" {
-			_, err = sb.WriteString(fmt.Sprintf("%s %s%s\n", r,
-				format(msg.pwArgsShort, " "), msg.argsShort))
-		} else {
-			_, err = sb.WriteString(fmt.Sprintf("%s %s\n", r, msg.argsShort))
+func handleAddWalletPeer(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params AddRemovePeerParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(addWalletPeerRoute, err)
+	}
+
+	err := s.core.AddWalletPeer(params.AssetID, params.Address)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCWalletPeersError, "unable to add wallet peer: %v", err)
+		return createResponse(addWalletPeerRoute, nil, resErr)
+	}
+
+	return createResponse(addWalletPeerRoute, "successfully added peer", nil)
+}
+
+func handleRemoveWalletPeer(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params AddRemovePeerParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(removeWalletPeerRoute, err)
+	}
+
+	err := s.core.RemoveWalletPeer(params.AssetID, params.Address)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCWalletPeersError, "unable to remove wallet peer: %v", err)
+		return createResponse(removeWalletPeerRoute, nil, resErr)
+	}
+
+	return createResponse(removeWalletPeerRoute, "successfully removed peer", nil)
+}
+
+// passBytesType is used by reflection to detect password fields.
+var passBytesType = reflect.TypeOf(encode.PassBytes{})
+
+// routeInfo describes a route's parameters and help text, replacing the old
+// helpMsg struct. Parameter documentation is auto-generated from the struct
+// type via reflection, making it impossible for help text to drift from
+// actual param types.
+type routeInfo struct {
+	paramsType reflect.Type      // nil for no-params routes
+	summary    string            // short command description
+	fieldDescs map[string]string // JSON field name -> description
+	returns    string            // return value description
+	extraHelp  func() string     // optional dynamic help text appended to usage
+}
+
+// fieldInfo holds metadata for a single struct field, extracted via reflection.
+type fieldInfo struct {
+	jsonName   string
+	typeName   string // "string", "int", "bool", "password", "object", "array", "any"
+	goType     reflect.Type
+	isPassword bool   // true if Go type is encode.PassBytes
+	isOptional bool   // true if pointer or omitempty
+	desc       string // from routeInfo.fieldDescs
+}
+
+// FieldInfo is the exported version of fieldInfo for use by bwctl's generic
+// builder.
+type FieldInfo struct {
+	JSONName   string
+	GoType     reflect.Type
+	IsPassword bool
+	IsOptional bool
+}
+
+// ReflectFields returns exported field metadata for the given struct type in
+// declaration order (same order as help output). Embedded structs are flattened.
+func ReflectFields(t reflect.Type) []FieldInfo {
+	internal := reflectFields(t, nil)
+	out := make([]FieldInfo, len(internal))
+	for i, f := range internal {
+		out[i] = FieldInfo{
+			JSONName:   f.jsonName,
+			GoType:     f.goType,
+			IsPassword: f.isPassword,
+			IsOptional: f.isOptional,
 		}
-		if err != nil {
-			log.Errorf("unable to parse help message for %s", r)
-			return ""
-		}
 	}
-	s := sb.String()
-	// Remove trailing newline.
-	return s[:len(s)-1]
+	return out
 }
 
-// commandUsage returns a help message for cmd or an error if cmd is unknown.
-func commandUsage(cmd string, includePasswords bool) (string, error) {
-	msg, exists := helpMsgs[cmd]
-	if !exists {
-		return "", fmt.Errorf("%w: %s", errUnknownCmd, cmd)
+// ParamType returns the reflect.Type for the given route's params struct, or
+// nil for no-params routes.
+func ParamType(route string) reflect.Type {
+	info, ok := routeInfos[route]
+	if !ok {
+		return nil
 	}
-	// If help should include password arguments and this command has
-	// password arguments, return them as part of the help message.
-	if includePasswords && msg.pwArgsShort != "" {
-		return fmt.Sprintf("%s %s%s\n\n%s\n\n%s%s%s",
-			cmd, format(msg.pwArgsShort, " "), msg.argsShort,
-			msg.cmdSummary, format(msg.pwArgsLong, "\n\n"), format(msg.argsLong, "\n\n"),
-			msg.returns), nil
-	}
-	return fmt.Sprintf("%s %s\n\n%s\n\n%s%s", cmd, msg.argsShort,
-		msg.cmdSummary, format(msg.argsLong, "\n\n"), msg.returns), nil
+	return info.paramsType
 }
 
-// sortHelpKeys returns a sorted list of helpMsgs keys.
-func sortHelpKeys() []string {
-	keys := make([]string, 0, len(helpMsgs))
-	for k := range helpMsgs {
-		keys = append(keys, k)
+// RouteExists reports whether route is a known RPC route.
+func RouteExists(route string) bool {
+	_, ok := routeInfos[route]
+	return ok
+}
+
+// Routes returns the names of all known RPC routes.
+func Routes() []string {
+	routes := make([]string, 0, len(routeInfos))
+	for r := range routeInfos {
+		routes = append(routes, r)
 	}
-	slices.Sort(keys)
-	return keys
+	return routes
 }
 
-type helpMsg struct {
-	pwArgsShort, argsShort, cmdSummary, pwArgsLong, argsLong, returns string
-}
+// Common field description constants.
+const (
+	descAppPass     = "The Bison Wallet password."
+	descAssetID     = "The asset's BIP-44 registered coin index. e.g. 42 for DCR. See https://github.com/satoshilabs/slips/blob/master/slip-0044.md"
+	descHost        = "The DEX address."
+	descCert        = "The TLS certificate path."
+	descBase        = "The BIP-44 coin index for the market's base asset."
+	descQuote       = "The BIP-44 coin index for the market's quote asset."
+	descFromAssetID = `The asset's BIP-44 registered coin index on the "from" chain.`
+	descToAssetID   = `The asset's BIP-44 registered coin index on the "to" chain.`
+	descBridgeName  = "The name of the bridge."
+	descCsvFilePath = "The csv file path from the point of view of the client, not bwctl."
+)
 
-// helpMsgs are a map of routes to help messages. They are broken down into six
-// sections.
-// In descending order:
-//  1. Password argument example inputs. These are arguments the caller may not
-//     want to echo listed in order of input.
-//  2. Argument example inputs. These are non-sensitive arguments listed in
-//     order of input.
-//  3. A description of the command.
-//  4. An extensive breakdown of the password arguments.
-//  5. An extensive breakdown of the arguments.
-//  6. An extensive breakdown of the returned values.
-var helpMsgs = map[string]helpMsg{
+// routeInfos maps each route to its parameter type and help metadata.
+var routeInfos = map[string]routeInfo{
 	helpRoute: {
-		pwArgsShort: ``,                           // password args example input
-		argsShort:   `("cmd") (includePasswords)`, // args example input
-		cmdSummary:  `Print a help message.`,      // command explanation
-		pwArgsLong:  ``,                           // password args breakdown
-		argsLong: `Args:
-    cmd (string): Optional. The command to print help for.
-    includePasswords (bool): Optional. Default is false. Whether to include
-      password arguments in the returned help.`, // args breakdown
+		paramsType: reflect.TypeOf(HelpParams{}),
+		summary:    `Print a help message.`,
+		fieldDescs: map[string]string{
+			"helpWith":         "The command to print help for.",
+			"includePasswords": "Whether to include password arguments in the returned help.",
+		},
 		returns: `Returns:
-    string: The help message for command.`, // returns breakdown
+    string: The help message for command.`,
 	},
 	versionRoute: {
-		cmdSummary: `Print the Bison Wallet rpcserver version.`,
+		summary: `Print the Bison Wallet rpcserver version.`,
 		returns: `Returns:
     string: The Bison Wallet rpcserver version.`,
 	},
 	discoverAcctRoute: {
-		pwArgsShort: `"appPass"`,
-		argsShort:   `"addr" ("cert")`,
-		cmdSummary: `Discover an account that is used for a dex. Useful when restoring
-    an account and can be used in place of register. Will error if
-    the account has already been discovered/restored.`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.`,
-		argsLong: `Args:
-    addr (string): The DEX address to discover an account for.
-    cert (string): Optional. The TLS certificate path.`,
+		paramsType: reflect.TypeOf(DiscoverAcctParams{}),
+		summary: `Discover an account that is used for a DEX. Useful when restoring
+    an account. Will error if the account has already been discovered/restored.`,
+		fieldDescs: map[string]string{
+			"appPass": descAppPass,
+			"addr":    "The DEX address to discover an account for.",
+			"cert":    descCert,
+		},
 		returns: `Returns:
-    bool: True if the account has has been registered and paid for.`,
+    bool: True if the account has been registered and paid for.`,
 	},
 	initRoute: {
-		pwArgsShort: `"appPass"`,
-		argsShort:   `("seed")`,
-		cmdSummary:  `Initialize the client.`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.`,
-		argsLong: `Args:
-    seed (string): Optional. hex-encoded 512-bit restoration seed.`,
+		paramsType: reflect.TypeOf(InitParams{}),
+		summary:    `Initialize the client.`,
+		fieldDescs: map[string]string{
+			"appPass": descAppPass,
+			"seed":    "hex-encoded 512-bit restoration seed or mnemonic.",
+		},
 		returns: `Returns:
     string: The message "` + initializedStr + `"`,
 	},
 	deleteArchivedRecordsRoute: {
-		argsShort: `("unix time milli") ("matches csv path") ("orders csv path")`,
-		cmdSummary: `Delete archived records from the database and returns total deleted. Optionally
-	set a time to delete records before and file paths to save deleted records as comma separated
+		paramsType: reflect.TypeOf(DeleteRecordsParams{}),
+		summary: `Delete archived records from the database and returns total deleted. Optionally
+    set a time to delete records before and file paths to save deleted records as comma separated
     values. Note that file locations are from the perspective of dexc and not the caller.`,
-		argsLong: `Args:
-    unix time milli (int): Optional. If set deletes records before the date in unix time
-      in milliseconds (not seconds). Unset or 0 will default to the current time.
-    matches csv path (string): Optional. A path to save a csv with deleted matches.
-      Will not save by default.
-    orders csv path (string): Optional. A path to save a csv with deleted orders.
-      Will not save by default.`,
+		fieldDescs: map[string]string{
+			"olderThanMs": "If set, deletes records before the date in unix time in milliseconds (not seconds). Unset or 0 defaults to the current time.",
+			"matchesFile": "A path to save a csv with deleted matches. Will not save by default.",
+			"ordersFile":  "A path to save a csv with deleted orders. Will not save by default.",
+		},
 		returns: `Returns:
     Nothing.`,
 	},
 	bondAssetsRoute: {
-		argsShort:  `"dex" ("cert")`,
-		cmdSummary: `Get dex bond asset config.`,
-		argsLong: `Args:
-    dex (string): The dex address to get bond info for.
-    cert (string): Optional. The TLS certificate path.`,
+		paramsType: reflect.TypeOf(BondAssetsParams{}),
+		summary:    `Get dex bond asset config.`,
+		fieldDescs: map[string]string{
+			"host": "The dex address to get bond info for.",
+			"cert": descCert,
+		},
 		returns: `Returns:
     obj: The getBondAssets result.
     {
       "expiry" (int): Bond expiry in seconds remaining until locktime.
-	  "assets" (object): {
-		"id" (int): The BIP-44 coin type for the asset.
-		"confs" (int): The required confirmations for the bond transaction.
-		"amount" (int): The minimum bond amount.
-	  }
+      "assets" (object): {
+        "id" (int): The BIP-44 coin type for the asset.
+        "confs" (int): The required confirmations for the bond transaction.
+        "amount" (int): The minimum bond amount.
+      }
     }`,
 	},
 	getDEXConfRoute: {
-		argsShort:  `"dex" ("cert")`,
-		cmdSummary: `Get a DEX configuration.`,
-		argsLong: `Args:
-    dex (string): The dex address to get config for.
-    cert (string): Optional. The TLS certificate path.`,
+		paramsType: reflect.TypeOf(GetDEXConfigParams{}),
+		summary:    `Get a DEX configuration.`,
+		fieldDescs: map[string]string{
+			"host": "The dex address to get config for.",
+			"cert": descCert,
+		},
 		returns: `Returns:
     obj: The getdexconfig result. See the 'exchanges' result.`,
 	},
 	newWalletRoute: {
-		pwArgsShort: `"appPass" "walletPass"`,
-		argsShort:   `assetID walletType ("path" "settings")`,
-		cmdSummary:  `Connect to a new wallet.`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.
-    walletPass (string): The wallet's password. Leave the password empty for wallets without a password set.`,
-		argsLong: `Args:
-    assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
-      See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
-    walletType (string): The wallet type.
-    path (string): Optional. The path to a configuration file.
-    settings (string): A JSON-encoded string->string mapping of additional
-       configuration settings. These settings take precedence over any settings
-       parsed from file. e.g. '{"account":"default"}' for Decred accounts, and
-       '{"walletname":""}' for the default Bitcoin wallet where bitcoind's listwallets RPC gives possible walletnames.`,
+		paramsType: reflect.TypeOf(NewWalletParams{}),
+		summary:    `Connect to a new wallet.`,
+		fieldDescs: map[string]string{
+			"appPass":    descAppPass,
+			"walletPass": "The wallet's password. Leave the password empty for wallets without a password set.",
+			"assetID":    descAssetID,
+			"walletType": "The wallet type.",
+			"config":     `A JSON string->string mapping of additional configuration settings. These settings take precedence over any settings parsed from file.`,
+		},
 		returns: `Returns:
     string: The message "` + fmt.Sprintf(walletCreatedStr, "[coin symbol]") + `"`,
+		extraHelp: walletTypesHelp,
 	},
 	openWalletRoute: {
-		pwArgsShort: `"appPass"`,
-		argsShort:   `assetID`,
-		cmdSummary:  `Open an existing wallet.`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.`,
-		argsLong: `Args:
-    assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
-      See https://github.com/satoshilabs/slips/blob/master/slip-0044.md`,
+		paramsType: reflect.TypeOf(OpenWalletParams{}),
+		summary:    `Open an existing wallet.`,
+		fieldDescs: map[string]string{
+			"appPass": descAppPass,
+			"assetID": descAssetID,
+		},
 		returns: `Returns:
     string: The message "` + fmt.Sprintf(walletUnlockedStr, "[coin symbol]") + `"`,
 	},
 	closeWalletRoute: {
-		argsShort:  `assetID`,
-		cmdSummary: `Close an open wallet.`,
-		argsLong: `Args:
-    assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
-      See https://github.com/satoshilabs/slips/blob/master/slip-0044.md`,
+		paramsType: reflect.TypeOf(CloseWalletParams{}),
+		summary:    `Close an open wallet.`,
+		fieldDescs: map[string]string{
+			"assetID": descAssetID,
+		},
 		returns: `Returns:
     string: The message "` + fmt.Sprintf(walletLockedStr, "[coin symbol]") + `"`,
 	},
 	toggleWalletStatusRoute: {
-		pwArgsShort: "appPass",
-		argsShort:   `assetID disable`,
-		cmdSummary: `Disable or enable an existing wallet. When disabling a chain's primary asset wallet,
-	all token wallets for that chain will be disabled too.`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.`,
-		argsLong: `Args:
-   assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
-                  See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
-  disable (bool): The wallet's status. e.g To disable a wallet set to "true", to enable set to "false".`,
+		paramsType: reflect.TypeOf(ToggleWalletStatusParams{}),
+		summary: `Disable or enable an existing wallet. When disabling a chain's primary asset wallet,
+    all token wallets for that chain will be disabled too.`,
+		fieldDescs: map[string]string{
+			"assetID": descAssetID,
+			"disable": `The wallet's status. To disable a wallet set to true, to enable set to false.`,
+		},
 		returns: `Returns:
     string: The message "` + fmt.Sprintf(walletStatusStr, "[coin symbol]", "[wallet status]") + `".`,
 	},
+	walletBalanceRoute: {
+		paramsType: reflect.TypeOf(WalletBalanceParams{}),
+		summary:    `Get the balance for a single wallet.`,
+		fieldDescs: map[string]string{
+			"assetID": descAssetID,
+		},
+		returns: `Returns:
+    obj: The wallet balance.
+    {
+      "available" (int): The balance available for funding orders.
+      "immature" (int): Balance that requires confirmations before use.
+      "locked" (int): The total locked balance.
+      "bondReserves" (int): Amount reserved for bond maintenance.
+      "reservesDeficit" (int): Deficit if reserves are insufficient.
+      "other" (obj): Other balance categories.
+      "stamp" (string): Time stamp.
+      "orderlocked" (int): Amount locked in active orders.
+      "contractlocked" (int): Amount locked in active swap contracts.
+      "bondlocked" (int): Amount locked in active bonds.
+    }`,
+	},
+	walletStateRoute: {
+		paramsType: reflect.TypeOf(WalletStateParams{}),
+		summary:    `Get the state for a single wallet.`,
+		fieldDescs: map[string]string{
+			"assetID": descAssetID,
+		},
+		returns: `Returns:
+    obj: The wallet state.
+    {
+      "symbol" (string): The coin symbol.
+      "assetID" (int): The asset's BIP-44 registered coin index.
+      "open" (bool): Whether the wallet is unlocked.
+      "running" (bool): Whether the wallet is running.
+      "disabled" (bool): Whether the wallet is disabled.
+      "balance" (obj): The wallet balance.
+      "address" (string): A wallet address.
+    }`,
+	},
 	walletsRoute: {
-		cmdSummary: `List all wallets.`,
+		summary: `List all wallets.`,
 		returns: `Returns:
     array: An array of wallet results.
     [
       {
         "symbol" (string): The coin symbol.
         "assetID" (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
-          See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
         "open" (bool): Whether the wallet is unlocked.
         "running" (bool): Whether the wallet is running.
-		"disabled" (bool): Whether the wallet is disabled.
+        "disabled" (bool): Whether the wallet is disabled.
         "updated" (int): Unix time of last balance update. Seconds since 00:00:00 Jan 1 1970.
         "balance" (obj): {
           "available" (int): The balance available for funding orders case.
@@ -1646,18 +1761,20 @@ var helpMsgs = map[string]helpMsg{
     ]`,
 	},
 	postBondRoute: {
-		pwArgsShort: `"appPass"`,
-		argsShort:   `"addr" bond assetID (maintain "cert")`,
-		cmdSummary: `Post new bond for DEX. An ok response does not mean that the bond is active.
-		Bond is active after the bond transaction has been confirmed and the server notified.`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.`,
-		argsLong: `Args:
-    addr (string): The DEX address to post bond for for.
-    bond (int): The bond amount (in DCR presently).
-    assetID (int): The asset ID with which to pay the fee.
-    maintain (bool): Optional. Whether to maintain the trading tier established by this bond. Only applicable when registering. (default is true)
-    cert (string): Optional. The TLS certificate path. Only applicable when registering.`,
+		paramsType: reflect.TypeOf(core.PostBondForm{}),
+		summary: `Post new bond for DEX. An ok response does not mean that the bond is active.
+    Bond is active after the bond transaction has been confirmed and the server notified.`,
+		fieldDescs: map[string]string{
+			"host":         descHost,
+			"appPass":      descAppPass,
+			"assetID":      "The asset ID with which to pay the fee.",
+			"bond":         "The bond amount.",
+			"lockTime":     "The lock time. 0 means go with server-derived value.",
+			"feeBuffer":    "Optional fee buffer to use during wallet funding.",
+			"maintainTier": "Whether to maintain the trading tier established by this bond.",
+			"maxBondedAmt": "The maximum amount that may be locked in bonds.",
+			"cert":         "The TLS certificate path. Only applicable when registering.",
+		},
 		returns: `Returns:
     {
       "bondID" (string): The bond transactions's txid and output index.
@@ -1665,32 +1782,33 @@ var helpMsgs = map[string]helpMsg{
     }`,
 	},
 	bondOptionsRoute: {
-		argsShort:  `"addr" targetTier (maxBondedAmt bondAssetID penaltyComps)`,
-		cmdSummary: `Change bond options for a DEX.`,
-		argsLong: `Args:
-    addr (string): The DEX address to post bond for for.
-    targetTier (int): The target trading tier.
-    maxBondedAmt (int): The maximum amount that may be locked in bonds.
-    bondAssetID (int): The asset ID with which to auto-post bonds.
-    penaltyComp (int): The maximum number of penalties to compensate`,
+		paramsType: reflect.TypeOf(core.BondOptionsForm{}),
+		summary:    `Change bond options for a DEX.`,
+		fieldDescs: map[string]string{
+			"host":         descHost,
+			"targetTier":   "The target trading tier.",
+			"maxBondedAmt": "The maximum amount that may be locked in bonds.",
+			"bondAssetID":  "The asset ID with which to auto-post bonds.",
+			"penaltyComps": "The maximum number of penalties to compensate.",
+		},
 		returns: `Returns: "ok"`,
 	},
 	exchangesRoute: {
-		cmdSummary: `Detailed information about known exchanges and markets.`,
+		summary: `Detailed information about known exchanges and markets.`,
 		returns: `Returns:
     obj: The exchanges result.
     {
       "[DEX host]": {
-        "acctID" (string):  The client's account ID associated with this DEX.,
+        "acctID" (string): The client's account ID associated with this DEX.
         "markets": {
           "[assetID-assetID]": {
             "baseid" (int): The base asset ID
             "basesymbol" (string): The base ticker symbol.
             "quoteid" (int): The quote asset ID.
-            "quotesymbol" (string): The quote asset ID symbol,
-            "epochlen" (int): Duration of a epoch in milliseconds.
+            "quotesymbol" (string): The quote asset ID symbol.
+            "epochlen" (int): Duration of an epoch in milliseconds.
             "startepoch" (int): Time of start of the last epoch in milliseconds
-	      since 00:00:00 Jan 1 1970.
+              since 00:00:00 Jan 1 1970.
             "buybuffer" (float): The minimum order size for a market buy order.
           },...
         },
@@ -1703,7 +1821,7 @@ var helpMsgs = map[string]helpMsg{
             "swapSize" (int): The size of a swap transaction in bytes.
             "swapSizeBase" (int): The size of a swap transaction minus inputs in bytes.
             "swapConf" (int): The number of confirmations needed to confirm
-	      trade transactions.
+              trade transactions.
           },...
         },
         "regFees": {
@@ -1717,10 +1835,11 @@ var helpMsgs = map[string]helpMsg{
     }`,
 	},
 	loginRoute: {
-		pwArgsShort: `"appPass"`,
-		cmdSummary:  `Attempt to login to all registered DEX servers.`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.`,
+		paramsType: reflect.TypeOf(LoginParams{}),
+		summary:    `Attempt to login to all registered DEX servers.`,
+		fieldDescs: map[string]string{
+			"appPass": descAppPass,
+		},
 		returns: `Returns:
     obj: A map of notifications and dexes.
     {
@@ -1750,23 +1869,21 @@ var helpMsgs = map[string]helpMsg{
     }`,
 	},
 	tradeRoute: {
-		pwArgsShort: `"appPass"`,
-		argsShort:   `"host" isLimit sell base quote qty rate immediate`,
-		cmdSummary:  `Make an order to buy or sell an asset.`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.`,
-		argsLong: `Args:
-    host (string): The DEX to trade on.
-    isLimit (bool): Whether the order is a limit order.
-    sell (bool): Whether the order is selling.
-    base (int): The BIP-44 coin index for the market's base asset.
-    quote (int): The BIP-44 coin index for the market's quote asset.
-    qty (int): The number of units to buy/sell. Must be a multiple of the lot size.
-    rate (int): The atoms quote asset to pay/accept per unit base asset. e.g.
-      156000 satoshi/DCR for the DCR(base)_BTC(quote).
-    immediate (bool): Require immediate match. Do not book the order.
-    options (string): A JSON-encoded string->string mapping of additional
-       trade options.`,
+		paramsType: reflect.TypeOf(TradeParams{}),
+		summary:    `Make an order to buy or sell an asset.`,
+		fieldDescs: map[string]string{
+			"appPass": descAppPass,
+			"host":    "The DEX to trade on.",
+			"isLimit": "Whether the order is a limit order.",
+			"sell":    "Whether the order is selling.",
+			"base":    descBase,
+			"quote":   descQuote,
+			"qty":     "The number of units to buy/sell. Must be a multiple of the lot size.",
+			"rate": `The atoms quote asset to pay/accept per unit base asset. e.g.
+      156000 satoshi/DCR for the DCR(base)_BTC(quote).`,
+			"tifnow":  "Require immediate match. Do not book the order.",
+			"options": "A JSON-encoded string->string mapping of additional trade options.",
+		},
 		returns: `Returns:
     obj: The order details.
     {
@@ -1777,21 +1894,18 @@ var helpMsgs = map[string]helpMsg{
     }`,
 	},
 	multiTradeRoute: {
-		pwArgsShort: `"appPass"`,
-		argsShort:   `"host" sell base quote maxLock [[qty,rate]] options`,
-		cmdSummary:  `Place multiple orders in one go.`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.`,
-		argsLong: `Args:
-    host (string): The DEX to trade on.
-    sell (bool): Whether the order is selling.
-    base (int): The BIP-44 coin index for the market's base asset.
-    quote (int): The BIP-44 coin index for the market's quote asset.
-    maxLock (int): The maximum amount the wallet can lock for this order. 0 means no limit.
-    placements ([[int,int]]):  An array of [qty,rate] placements. Quantity must be
-	 a multiple of the lot size. Rate must be in atomic units of the quote asset.
-    options (string): A JSON-encoded string->string mapping of additional
-       trade options.`,
+		paramsType: reflect.TypeOf(MultiTradeParams{}),
+		summary:    `Place multiple orders in one go.`,
+		fieldDescs: map[string]string{
+			"appPass":   descAppPass,
+			"host":      "The DEX to trade on.",
+			"sell":      "Whether the order is selling.",
+			"base":      descBase,
+			"quote":     descQuote,
+			"placement": "An array of [qty,rate] placements.",
+			"options":   "A JSON-encoded string->string mapping of additional trade options.",
+			"maxLock":   "The maximum amount the wallet can lock for this order. 0 means no limit.",
+		},
 		returns: `Returns:
     obj: The details of each order.
     [{
@@ -1802,37 +1916,33 @@ var helpMsgs = map[string]helpMsg{
     }]`,
 	},
 	cancelRoute: {
-		pwArgsShort: `"appPass"`,
-		argsShort:   `"orderID"`,
-		cmdSummary:  `Cancel an order.`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.`,
-		argsLong: `Args:
-    orderID (string): The hex ID of the order to cancel`,
+		paramsType: reflect.TypeOf(CancelParams{}),
+		summary:    `Cancel an order.`,
+		fieldDescs: map[string]string{
+			"orderID": "The hex ID of the order to cancel.",
+		},
 		returns: `Returns:
     string: The message "` + fmt.Sprintf(canceledOrderStr, "[order ID]") + `"`,
 	},
 	rescanWalletRoute: {
-		argsShort: `assetID (force)`,
-		cmdSummary: `Initiate a rescan of an asset's wallet. This is only supported for certain
+		paramsType: reflect.TypeOf(RescanWalletParams{}),
+		summary: `Initiate a rescan of an asset's wallet. This is only supported for certain
 wallet types. Wallet resynchronization may be asynchronous, and the wallet
 state should be consulted for progress.
 
 WARNING: It is ill-advised to initiate a wallet rescan with active orders
 unless as a last ditch effort to get the wallet to recognize a transaction
 needed to complete a swap.`,
+		fieldDescs: map[string]string{
+			"assetID": descAssetID,
+			"force":   "Force a wallet rescan even if there are active orders.",
+		},
 		returns: `Returns:
     string: "started"`,
-		argsLong: `Args:
-    assetID (int): The asset's BIP-44 registered coin index. Used to identify
-      which wallet to withdraw from. e.g. 42 for DCR. See
-      https://github.com/satoshilabs/slips/blob/master/slip-0044.md
-    force (bool): Force a wallet rescan even if their are active orders. The
-      default is false.`,
 	},
 	abandonTxRoute: {
-		argsShort: `assetID "txID"`,
-		cmdSummary: `Abandon an unconfirmed transaction. This marks the transaction and all
+		paramsType: reflect.TypeOf(AbandonTxParams{}),
+		summary: `Abandon an unconfirmed transaction. This marks the transaction and all
 its descendants as abandoned, allowing the wallet to forget about it and
 potentially spend its inputs in a different transaction. This is useful when
 a transaction gets stuck (e.g., due to low fees).
@@ -1840,60 +1950,53 @@ a transaction gets stuck (e.g., due to low fees).
 Note: This only works for unconfirmed transactions. Returns an error if the
 transaction is confirmed or does not exist in the wallet. Currently only
 supported for DCR wallets.`,
-		argsLong: `Args:
-    assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
-      See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
-    txID (string): The transaction ID (hash) to abandon.`,
+		fieldDescs: map[string]string{
+			"assetID": descAssetID,
+			"txID":    "The transaction ID (hash) to abandon.",
+		},
 		returns: `Returns:
     string: Success message on completion.`,
 	},
 	withdrawRoute: {
-		pwArgsShort: `"appPass"`,
-		argsShort:   `assetID value "address"`,
-		cmdSummary:  `Withdraw value from an exchange wallet to address. Fees are subtracted from the value.`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.`,
-		argsLong: `Args:
-    assetID (int): The asset's BIP-44 registered coin index. Used to identify
-      which wallet to withdraw from. e.g. 42 for DCR. See
-      https://github.com/satoshilabs/slips/blob/master/slip-0044.md
-    value (int): The amount to withdraw in units of the asset's smallest
-      denomination (e.g. satoshis, atoms, etc.)"
-    address (string): The address to which withdrawn funds are sent.`,
+		paramsType: reflect.TypeOf(SendParams{}),
+		summary:    `Withdraw value from an exchange wallet to address. Fees are subtracted from the value.`,
+		fieldDescs: map[string]string{
+			"appPass":  descAppPass,
+			"assetID":  descAssetID,
+			"value":    "The amount to withdraw in units of the asset's smallest denomination (e.g. satoshis, atoms, etc.)",
+			"address":  "The address to which withdrawn funds are sent.",
+			"subtract": "Ignored for withdraw (always true). Use 'send' route for exact-amount sends.",
+		},
 		returns: `Returns:
     string: "[coin ID]"`,
 	},
 	sendRoute: {
-		pwArgsShort: `"appPass"`,
-		argsShort:   `assetID value "address"`,
-		cmdSummary:  `Sends exact value from an exchange wallet to address.`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.`,
-		argsLong: `Args:
-    assetID (int): The asset's BIP-44 registered coin index. Used to identify
-      which wallet to withdraw from. e.g. 42 for DCR. See
-      https://github.com/satoshilabs/slips/blob/master/slip-0044.md
-    value (int): The amount to send in units of the asset's smallest
-      denomination (e.g. satoshis, atoms, etc.)"
-    address (string): The address to which funds are sent.`,
+		paramsType: reflect.TypeOf(SendParams{}),
+		summary:    `Sends exact value from an exchange wallet to address.`,
+		fieldDescs: map[string]string{
+			"appPass":  descAppPass,
+			"assetID":  descAssetID,
+			"value":    "The amount to send in units of the asset's smallest denomination (e.g. satoshis, atoms, etc.)",
+			"address":  "The address to which funds are sent.",
+			"subtract": "Whether to subtract the tx fee from the value.",
+		},
 		returns: `Returns:
     string: "[coin ID]"`,
 	},
 	logoutRoute: {
-		cmdSummary: `Logout of Bison Wallet.`,
+		summary: `Logout of Bison Wallet.`,
 		returns: `Returns:
     string: The message "` + logoutStr + `"`,
 	},
 	orderBookRoute: {
-		argsShort:  `"host" base quote (nOrders)`,
-		cmdSummary: `Retrieve all orders for a market.`,
-		argsLong: `Args:
-    host (string): The DEX to retrieve the order book from.
-    base (int): The BIP-44 coin index for the market's base asset.
-    quote (int): The BIP-44 coin index for the market's quote asset.
-    nOrders (int): Optional. Default is 0, which returns all orders. The number
-      of orders from the top of buys and sells to return. Epoch orders are not
-      truncated.`,
+		paramsType: reflect.TypeOf(OrderBookParams{}),
+		summary:    `Retrieve all orders for a market.`,
+		fieldDescs: map[string]string{
+			"host":    "The DEX to retrieve the order book from.",
+			"base":    descBase,
+			"quote":   descQuote,
+			"nOrders": "The number of orders from the top of buys and sells to return. 0 returns all. Epoch orders are not truncated.",
+		},
 		returns: `Returns:
     obj: A map of orders.
     {
@@ -1930,168 +2033,164 @@ supported for DCR wallets.`,
     }`,
 	},
 	myOrdersRoute: {
-		argsShort: `("host") (base) (quote)`,
-		cmdSummary: `Fetch all active and recently executed orders
+		paramsType: reflect.TypeOf(MyOrdersParams{}),
+		summary: `Fetch all active and recently executed orders
     belonging to the user.`,
-		argsLong: `Args:
-    host (string): Optional. The DEX to show orders from.
-    base (int): Optional. The BIP-44 coin index for the market's base asset.
-    quote (int): Optional. The BIP-44 coin index for the market's quote asset.`,
+		fieldDescs: map[string]string{
+			"host":  "The DEX to show orders from.",
+			"base":  descBase,
+			"quote": descQuote,
+		},
 		returns: `Returns:
-  array: An array of orders.
-  [
-    {
-      "host" (string): The DEX address.
-      "marketName" (string): The market's name. e.g. "DCR_BTC".
-      "baseID" (int): The market's base asset BIP-44 coin index. e.g. 42 for DCR.
-      "quoteID" (int): The market's quote asset BIP-44 coin index. e.g. 0 for BTC.
-      "id" (string): The order's unique hex ID.
-      "type" (string): The type of order. "limit", "market", or "cancel".
-      "sell" (string): Whether this order is selling.
-      "stamp" (int): Server's time stamp of the order in milliseconds since 00:00:00 Jan 1 1970.
-      "submitTime" (int): Time of order submission, also in milliseconds.
-      "age" (string): The time that this order has been active in human readable form.
-      "rate" (int): The exchange rate limit. Limit orders only. Units: quote
-        asset per unit base asset.
-      "quantity" (int): The amount being traded.
-      "filled" (int): The order quantity that has matched.
-      "settled" (int): The sum quantity of all completed matches.
-      "status" (string): The status of the order. "epoch", "booked", "executed",
-        "canceled", or "revoked".
-      "cancelling" (bool): Whether this order is in the process of cancelling.
-      "canceled" (bool): Whether this order has been canceled.
-      "tif" (string): "immediate" if this limit order will only match for one epoch.
-        "standing" if the order can continue matching until filled or cancelled.
-      "matches": (array): An array of matches associated with the order.
-      [
-        {
-          "matchID (string): The match's ID."
-          "status" (string): The match's status."
-          "revoked" (bool): Indicates if match was revoked.
-          "rate"    (int): The match's rate.
-          "qty"     (int): The match's amount.
-          "side"    (string): The match's side, "maker" or "taker".
-          "feerate" (int): The match's fee rate.
-          "swap"    (string): The match's swap transaction.
-          "counterSwap" (string): The match's counter swap transaction.
-          "redeem" (string): The match's redeem transaction.
-          "counterRedeem" (string): The match's counter redeem transaction.
-          "refund" (string): The match's refund transaction.
-          "stamp" (int): The match's stamp.
-          "isCancel" (bool): Indicates if match is canceled.
-        },...
-      ]
-    },...
-  ]`,
+    array: An array of orders.
+    [
+      {
+        "host" (string): The DEX address.
+        "marketName" (string): The market's name. e.g. "DCR_BTC".
+        "baseID" (int): The market's base asset BIP-44 coin index. e.g. 42 for DCR.
+        "quoteID" (int): The market's quote asset BIP-44 coin index. e.g. 0 for BTC.
+        "id" (string): The order's unique hex ID.
+        "type" (string): The type of order. "limit", "market", or "cancel".
+        "sell" (string): Whether this order is selling.
+        "stamp" (int): Server's time stamp of the order in milliseconds since 00:00:00 Jan 1 1970.
+        "submitTime" (int): Time of order submission, also in milliseconds.
+        "age" (string): The time that this order has been active in human readable form.
+        "rate" (int): The exchange rate limit. Limit orders only. Units: quote
+          asset per unit base asset.
+        "quantity" (int): The amount being traded.
+        "filled" (int): The order quantity that has matched.
+        "settled" (int): The sum quantity of all completed matches.
+        "status" (string): The status of the order. "epoch", "booked", "executed",
+          "canceled", or "revoked".
+        "cancelling" (bool): Whether this order is in the process of cancelling.
+        "canceled" (bool): Whether this order has been canceled.
+        "tif" (string): "immediate" if this limit order will only match for one epoch.
+          "standing" if the order can continue matching until filled or cancelled.
+        "matches": (array): An array of matches associated with the order.
+        [
+          {
+            "matchID (string): The match's ID."
+            "status" (string): The match's status."
+            "revoked" (bool): Indicates if match was revoked.
+            "rate"    (int): The match's rate.
+            "qty"     (int): The match's amount.
+            "side"    (string): The match's side, "maker" or "taker".
+            "feerate" (int): The match's fee rate.
+            "swap"    (string): The match's swap transaction.
+            "counterSwap" (string): The match's counter swap transaction.
+            "redeem" (string): The match's redeem transaction.
+            "counterRedeem" (string): The match's counter redeem transaction.
+            "refund" (string): The match's refund transaction.
+            "stamp" (int): The match's stamp.
+            "isCancel" (bool): Indicates if match is canceled.
+          },...
+        ]
+      },...
+    ]`,
 	},
 	appSeedRoute: {
-		pwArgsShort: `"appPass"`,
-		cmdSummary: `Show the application's seed. It is recommended to not store the seed
-  digitally. Make a copy on paper with pencil and keep it safe.`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.`,
+		paramsType: reflect.TypeOf(AppSeedParams{}),
+		summary: `Show the application's seed. It is recommended to not store the seed
+    digitally. Make a copy on paper with pencil and keep it safe.`,
+		fieldDescs: map[string]string{
+			"appPass": descAppPass,
+		},
 		returns: `Returns:
     string: The application's seed as hex.`,
 	},
 	walletPeersRoute: {
-		cmdSummary: `Show the peers a wallet is connected to.`,
-		argsShort:  `(assetID)`,
-		argsLong: `Args:
-		assetID (int): The asset's BIP-44 registered coin index. Used to identify
-		which wallet's peers to return.`,
+		paramsType: reflect.TypeOf(WalletPeersParams{}),
+		summary:    `Show the peers a wallet is connected to.`,
+		fieldDescs: map[string]string{
+			"assetID": descAssetID,
+		},
 		returns: `Returns:
-		[]string: Addresses of wallet peers.`,
+    []string: Addresses of wallet peers.`,
 	},
 	addWalletPeerRoute: {
-		cmdSummary: `Add a new wallet peer connection.`,
-		argsShort:  `(assetID) (addr)`,
-		argsLong: `Args:
-		assetID (int): The asset's BIP-44 registered coin index. Used to identify
-		which wallet to add a peer.
-		addr (string): The peer's address (host:port).`,
+		paramsType: reflect.TypeOf(AddRemovePeerParams{}),
+		summary:    `Add a new wallet peer connection.`,
+		fieldDescs: map[string]string{
+			"assetID": descAssetID,
+			"address": "The peer's address (host:port).",
+		},
 	},
 	removeWalletPeerRoute: {
-		cmdSummary: `Remove an added wallet peer.`,
-		argsShort:  `(assetID) (addr)`,
-		argsLong: `Args:
-		assetID (int): The asset's BIP-44 registered coin index. Used to identify
-		which wallet to add a peer.
-		addr (string): The peer's address (host:port).`,
+		paramsType: reflect.TypeOf(AddRemovePeerParams{}),
+		summary:    `Remove an added wallet peer.`,
+		fieldDescs: map[string]string{
+			"assetID": descAssetID,
+			"address": "The peer's address (host:port).",
+		},
 	},
 	notificationsRoute: {
-		cmdSummary: `See recent notifications.`,
-		argsShort:  `(num)`,
-		argsLong: `Args:
-		num (int): The number of notifications to load.`,
+		paramsType: reflect.TypeOf(NotificationsParams{}),
+		summary:    `See recent notifications.`,
+		fieldDescs: map[string]string{
+			"n": "The number of notifications to load.",
+		},
 	},
 	startBotRoute: {
-		pwArgsShort: `"appPass"`,
-		cmdSummary:  `Start market making bot(s).`,
-		argsShort:   `cfgPath [host baseID quoteID]`,
-		pwArgsLong: `Password Args:
-    appPass (string): The Bison Wallet password.`,
-		argsLong: `Args:
-    cfgPath (string): The path to the market maker config file.
-    host (string, optional): The DEX address. If not provided, starts all bots in config.
-    baseID (int, optional): The base asset's BIP-44 registered coin index.
-    quoteID (int, optional): The quote asset's BIP-44 registered coin index.`,
+		paramsType: reflect.TypeOf(StartBotParams{}),
+		summary:    `Start market making bot(s).`,
+		fieldDescs: map[string]string{
+			"appPass":     descAppPass,
+			"cfgFilePath": "The path to the market maker config file.",
+			"market":      "The market to start a bot for. If not provided, starts all bots in config.",
+		},
 	},
 	stopBotRoute: {
-		cmdSummary: `Stop market making bot(s).`,
-		argsShort:  `[host baseID quoteID]`,
-		argsLong: `Args:
-    host (string, optional): The DEX address. If not provided, stops all running bots.
-    baseID (int, optional): The base asset's BIP-44 registered coin index.
-    quoteID (int, optional): The quote asset's BIP-44 registered coin index.`,
+		paramsType: reflect.TypeOf(StopBotParams{}),
+		summary:    `Stop market making bot(s).`,
+		fieldDescs: map[string]string{
+			"market": "The market to stop a bot for. If not provided, stops all running bots.",
+		},
 	},
 	mmAvailableBalancesRoute: {
-		cmdSummary: `Get available balances for starting a bot or adding additional balance to a running bot.`,
-		argsShort:  `(cfgPath) (host) (baseID) (quoteID) [cexBaseID] [cexQuoteID] [cexName]`,
-		argsLong: `Args:
-		cfgPath (string): The path to the market maker config file.
-		host (string): The DEX address.
-		baseID (int): The base asset's BIP-44 registered coin index.
-		quoteID (int): The quote asset's BIP-44 registered coin index.
-		cexBaseID (int, optional): The CEX base asset's BIP-44 registered coin index for bridging.
-		cexQuoteID (int, optional): The CEX quote asset's BIP-44 registered coin index for bridging.
-		cexName (string, optional): The name of the CEX to get balances for.`,
+		paramsType: reflect.TypeOf(MMAvailableBalancesParams{}),
+		summary:    `Get available balances for starting a bot or adding additional balance to a running bot.`,
+		fieldDescs: map[string]string{
+			"host":       descHost,
+			"baseID":     "The base asset's BIP-44 registered coin index.",
+			"quoteID":    "The quote asset's BIP-44 registered coin index.",
+			"cexBaseID":  "The CEX base asset's BIP-44 registered coin index for bridging.",
+			"cexQuoteID": "The CEX quote asset's BIP-44 registered coin index for bridging.",
+			"cexName":    "The name of the CEX to get balances for.",
+		},
 	},
 	mmStatusRoute: {
-		cmdSummary: `Get market making status.`,
+		summary: `Get market making status.`,
 	},
 	updateRunningBotCfgRoute: {
-		cmdSummary: `Update the config and optionally the inventory of a running bot`,
-		argsShort:  `(cfgPath) (host) (baseID) (quoteID) (dexInventory) (cexInventory)`,
-		argsLong: `Args:
-		cfgPath (string): The path to the market maker config file.
-		host (string): The DEX address.
-		baseID (int): The base asset's BIP-44 registered coin index.
-		quoteID (int): The quote asset's BIP-44 registered coin index.
-		dexInventory (obj): (optional) The DEX inventory adjustments i.e. [[60,-1000000],[42,10000000]].
-		cexInventory (obj): (optional) The CEX inventory adjustments i.e. [[60,-1000000],[42,10000000]].`,
+		paramsType: reflect.TypeOf(UpdateRunningBotParams{}),
+		summary:    `Update the config and optionally the inventory of a running bot.`,
+		fieldDescs: map[string]string{
+			"cfgFilePath": "The path to the market maker config file.",
+			"market":      "The market for the bot to update.",
+			"balances":    "The inventory adjustments.",
+		},
 	},
 	updateRunningBotInvRoute: {
-		cmdSummary: `Update the inventory of a running bot`,
-		argsShort:  `(host) (baseID) (quoteID) (dexInventory) (cexInventory)`,
-		argsLong: `Args:
-		host (string): The DEX address.
-		baseID (int): The base asset's BIP-44 registered coin index.
-		quoteID (int): The quote asset's BIP-44 registered coin index.
-		dexInventory (obj): The DEX inventory adjustments i.e. [[60,-1000000],[42,10000000]].
-		cexInventory (obj): The CEX inventory adjustments i.e. [[60,-1000000],[42,10000000]].`,
+		paramsType: reflect.TypeOf(UpdateRunningBotInventoryParams{}),
+		summary:    `Update the inventory of a running bot.`,
+		fieldDescs: map[string]string{
+			"market":   "The market for the bot to update.",
+			"balances": "The inventory adjustments.",
+		},
 	},
 	stakeStatusRoute: {
-		cmdSummary: `Get stake status. `,
-		argsShort:  `assetID`,
-		argsLong: `Args:
-  assetID (int): The asset's BIP-44 registered coin index.`,
+		paramsType: reflect.TypeOf(StakeStatusParams{}),
+		summary:    `Get stake status.`,
+		fieldDescs: map[string]string{
+			"assetID": descAssetID,
+		},
 		returns: `Returns:
-  obj: The staking status.
+    obj: The staking status.
     {
       ticketPrice (uint64): The current ticket price in atoms.
       vsp (string): The url of the currently set vsp (voting service provider).
       isRPC (bool): Whether the wallet is an RPC wallet. False indicates
-an spv wallet and enables options to view and set the vsp.
+        an spv wallet and enables options to view and set the vsp.
       tickets (array): An array of ticket objects.
       [
         {
@@ -2103,195 +2202,455 @@ an spv wallet and enables options to view and set the vsp.
             stamp (int): The UNIX time the ticket was purchased.
             blockHeight (int): The block number the ticket was mined.
           },
-          status: (int) The ticket status. 0: unknown, 1: unmined, 2: immature, 3: live,
-                        4: voted, 5: missed, 6:expired, 7: unspent, 8: revoked.
+          status (int): The ticket status. 0: unknown, 1: unmined, 2: immature,
+            3: live, 4: voted, 5: missed, 6: expired, 7: unspent, 8: revoked.
           spender (string): The transaction that votes on or revokes the ticket if available.
-       },
-     ],...
-     stances (obj): Voting policies.
-     {
-       agendas (array): An array of consensus vote choices.
-       [
-         {
-           id (string): The agenda ID,
-           description (string): A description of the agenda being voted on.
-           currentChoice (string): Your current choice.
-           choices ([{id: "string", description: "string"}, ...]): A description of the available choices.
-         },
-       ],...
-       tspends (array): An array of TSpend policies.
-       [
-         {
-           hash (string): The TSpend txid.,
-           value (int): The total value send in the tspend.,
-           currentValue (string): The policy.
-         },
-       ],...
-       treasuryKeys (array): An array of treasury policies.
-       [
-         {
-           key (string): The pubkey of the tspend creator.
-           policy (string): The policy.
-         },
-       ],...
-     }
-  }`,
+        },...
+      ]
+      stances (obj): Voting policies.
+      {
+        agendas (array): An array of consensus vote choices.
+        [
+          {
+            id (string): The agenda ID.
+            description (string): A description of the agenda being voted on.
+            currentChoice (string): Your current choice.
+            choices (array): A description of the available choices.
+          },...
+        ]
+        tspends (array): An array of TSpend policies.
+        [
+          {
+            hash (string): The TSpend txid.
+            value (int): The total value sent in the tspend.
+            currentValue (string): The policy.
+          },...
+        ]
+        treasuryKeys (array): An array of treasury policies.
+        [
+          {
+            key (string): The pubkey of the tspend creator.
+            policy (string): The policy.
+          },...
+        ]
+      }
+    }`,
 	},
 	setVSPRoute: {
-		argsShort:  `assetID "addr"`,
-		cmdSummary: `Set a vsp by url.`,
-		argsLong: `Args:
-  assetID (int): The asset's BIP-44 registered coin index.
-  addr (string): The vsp's url.`,
+		paramsType: reflect.TypeOf(SetVSPParams{}),
+		summary:    `Set a vsp by url.`,
+		fieldDescs: map[string]string{
+			"assetID": descAssetID,
+			"addr":    "The vsp's url.",
+		},
 		returns: `Returns:
-  string: The message "` + fmt.Sprintf(setVSPStr, "[vsp url]") + `"`,
+    string: The message "` + fmt.Sprintf(setVSPStr, "[vsp url]") + `"`,
 	},
 	purchaseTicketsRoute: {
-		pwArgsShort: `"appPass"`,
-		argsShort:   `assetID num`,
-		cmdSummary:  `Starts a asyncrhonous ticket purchasing process. Check stakestatus for number of tickets remaining to be purchased.`,
-		pwArgsLong: `Password Args:
-  appPass (string): The Bison Wallet password.`,
-		argsLong: `Args:
-  assetID (int): The asset's BIP-44 registered coin index.
-  num (int): The number of tickets to purchase`,
+		paramsType: reflect.TypeOf(PurchaseTicketsParams{}),
+		summary:    `Start an asynchronous ticket purchasing process. Check stakestatus for number of tickets remaining to be purchased.`,
+		fieldDescs: map[string]string{
+			"appPass": descAppPass,
+			"assetID": descAssetID,
+			"n":       "The number of tickets to purchase.",
+		},
 		returns: `Returns:
-  	bool: true is the only non-error return value`,
+    bool: true is the only non-error return value`,
 	},
 	setVotingPreferencesRoute: {
-		argsShort:  `assetID (choicesMap) (tSpendPolicyMap) (treasuryPolicyMap)`,
-		cmdSummary: `Cancel an order.`,
-		argsLong: `Args:
-  assetID (int): The asset's BIP-44 registered coin index.
-  choicesMap ({"agendaid": "choiceid", ...}): A map of choices IDs to choice policies.
-  tSpendPolicyMap ({"hash": "policy", ...}): A map of tSpend txids to tSpend policies.
-  treasuryPolicyMap ({"key": "policy", ...}): A map of treasury spender public keys to tSpend policies.`,
+		paramsType: reflect.TypeOf(SetVotingPreferencesParams{}),
+		summary:    `Set voting preferences.`,
+		fieldDescs: map[string]string{
+			"assetID":        descAssetID,
+			"choices":        "A map of agenda IDs to choice IDs.",
+			"tSpendPolicy":   "A map of tSpend txids to tSpend policies.",
+			"treasuryPolicy": "A map of treasury spender public keys to tSpend policies.",
+		},
 		returns: `Returns:
-  string: The message "` + setVotePrefsStr + `"`,
+    string: The message "` + setVotePrefsStr + `"`,
 	},
 	txHistoryRoute: {
-		argsShort:  `assetID (n) (refTxID) (past)`,
-		cmdSummary: `Get transaction history for a wallet`,
-		argsLong: `Args:
-		  assetID (int): The asset's BIP-44 registered coin index.
-		  n (int): Optional. The number of transactions to return. If <= 0 or unset, all transactions are returned.
-		  refTxID (string): Optional. If set, the transactions before or after this tx (depending on the past argument)
-		  will be returned.
-		  past (bool): If true, the transactions before the reference tx will be returned. If false, the
-		  transactions after the reference tx will be returned.`,
+		paramsType: reflect.TypeOf(TxHistoryParams{}),
+		summary:    `Get transaction history for a wallet.`,
+		fieldDescs: map[string]string{
+			"assetID": descAssetID,
+			"n":       "The number of transactions to return. If <= 0 or unset, all transactions are returned.",
+			"refID":   "If set, the transactions before or after this tx (depending on the past argument) will be returned.",
+			"past":    "If true, the transactions before the reference tx will be returned.",
+		},
 	},
 	walletTxRoute: {
-		argsShort:  `assetID txID`,
-		cmdSummary: `Get a wallet transaction`,
-		argsLong: `Args:
-		  assetID (int): The asset's BIP-44 registered coin index.
-		  txID (string): The transaction ID.`,
+		paramsType: reflect.TypeOf(WalletTxParams{}),
+		summary:    `Get a wallet transaction.`,
+		fieldDescs: map[string]string{
+			"assetID": descAssetID,
+			"txID":    "The transaction ID.",
+		},
 	},
 	withdrawBchSpvRoute: {
-		pwArgsShort: `"appPass"`,
-		argsShort:   `recipient`,
-		cmdSummary:  `Get a transaction that will withdraw all funds from the deprecated Bitcoin Cash SPV wallet`,
-		argsLong: `Args:
-		  recipient (string): The Bitcoin Cash address to withdraw the funds to`,
+		paramsType: reflect.TypeOf(BchWithdrawParams{}),
+		summary:    `Get a transaction that will withdraw all funds from the deprecated Bitcoin Cash SPV wallet.`,
+		fieldDescs: map[string]string{
+			"appPass":   descAppPass,
+			"recipient": "The Bitcoin Cash address to withdraw the funds to.",
+		},
 	},
 	bridgeRoute: {
-		argsShort:  `fromAssetID toAssetID value bridgeName`,
-		cmdSummary: "Bridge tokens from one chain to another",
-		argsLong: `Args:
-		fromAssetID (int): The asset's BIP-44 registered coin index on the "from" chain.
-		toAssetID (int): The asset's BIP-44 registered coin index on the "to" chain.
-		value (int): The amount of tokens to bridge.
-		bridgeName (string): The name of the bridge to use.`,
+		paramsType: reflect.TypeOf(BridgeParams{}),
+		summary:    "Bridge tokens from one chain to another.",
+		fieldDescs: map[string]string{
+			"fromAssetID": descFromAssetID,
+			"toAssetID":   descToAssetID,
+			"amt":         "The amount of tokens to bridge.",
+			"bridgeName":  descBridgeName,
+		},
 	},
 	checkBridgeApprovalRoute: {
-		argsShort:  `assetID bridgeName`,
-		cmdSummary: "Check if the bridge contract is approved.",
-		argsLong: `Args:
-		assetID (int): The BIP-44 registered coin index of the asset from where the bridge will be initiated.
-		bridgeName (string): The name of the bridge to check.`,
+		paramsType: reflect.TypeOf(CheckBridgeApprovalParams{}),
+		summary:    "Check if the bridge contract is approved.",
+		fieldDescs: map[string]string{
+			"assetID":    descFromAssetID,
+			"bridgeName": descBridgeName,
+		},
 	},
 	approveBridgeContractRoute: {
-		argsShort:  `assetID bridgeName approve`,
-		cmdSummary: "Approve the bridge contract.",
-		argsLong: `Args:
-		assetID (int): The asset's BIP-44 registered coin index on the "from" chain.
-		bridgeName (string): The name of the bridge to approve/unapprove.
-		approve (bool): True to approve, false to unapprove.`,
+		paramsType: reflect.TypeOf(ApproveBridgeParams{}),
+		summary:    "Approve or unapprove the bridge contract.",
+		fieldDescs: map[string]string{
+			"assetID":    descFromAssetID,
+			"bridgeName": descBridgeName,
+			"approve":    "True to approve, false to unapprove.",
+		},
 	},
 	pendingBridgesRoute: {
-		argsShort:  `assetID`,
-		cmdSummary: "Get pending bridges.",
-		argsLong: `Args:
-		assetID (int): The asset's BIP-44 registered coin index on the "from" chain.`,
+		paramsType: reflect.TypeOf(PendingBridgesParams{}),
+		summary:    "Get pending bridges.",
+		fieldDescs: map[string]string{
+			"assetID": descFromAssetID,
+		},
 	},
 	bridgeHistoryRoute: {
-		argsShort:  `assetID (n) (refTxID) (past)`,
-		cmdSummary: "Get bridge history.",
-		argsLong: `Args:
-		assetID (int): The asset's BIP-44 registered coin index on the "from" chain.
-		n (int): The number of transactions to return. If <= 0 or unset, all transactions are returned.
-		refTxID (string): If set, the transactions before or after this tx (depending on the past argument)
-		will be returned.
-		past (bool): If true, the transactions before the reference tx will be returned. If false, the
-		transactions after the reference tx will be returned.`,
+		paramsType: reflect.TypeOf(TxHistoryParams{}),
+		summary:    "Get bridge history.",
+		fieldDescs: map[string]string{
+			"assetID": descFromAssetID,
+			"n":       "The number of transactions to return. If <= 0 or unset, all transactions are returned.",
+			"refID":   "If set, the transactions before or after this tx (depending on the past argument) will be returned.",
+			"past":    "If true, the transactions before the reference tx will be returned.",
+		},
 	},
 	supportedBridgesRoute: {
-		argsShort:  `assetID`,
-		cmdSummary: "Get supported bridge destinations.",
-		argsLong: `Args:
-		assetID (int): The asset's BIP-44 registered coin index to get bridge destinations for.`,
+		paramsType: reflect.TypeOf(SupportedBridgesParams{}),
+		summary:    "Get supported bridge destinations.",
+		fieldDescs: map[string]string{
+			"assetID": "The asset's BIP-44 registered coin index to get bridge destinations for.",
+		},
 	},
 	bridgeFeesAndLimitsRoute: {
-		argsShort:  `fromAssetID toAssetID bridgeName`,
-		cmdSummary: "Get bridge fees and limits.",
-		argsLong: `Args:
-		fromAssetID (int): The asset's BIP-44 registered coin index on the "from" chain.
-		toAssetID (int): The asset's BIP-44 registered coin index on the "to" chain.
-		bridgeName (string): The name of the bridge to query.`,
+		paramsType: reflect.TypeOf(BridgeFeesAndLimitsParams{}),
+		summary:    "Get bridge fees and limits.",
+		fieldDescs: map[string]string{
+			"fromAssetID": descFromAssetID,
+			"toAssetID":   descToAssetID,
+			"bridgeName":  descBridgeName,
+		},
 	},
 	paymentMultisigPubkeyRoute: {
-		argsShort:  `assetID`,
-		cmdSummary: "Get a multisig pubkey for asset id.",
-		argsLong: `Args:
-		assetID (int): The asset's BIP-44 registered coin index to get a pubkey for.`,
+		paramsType: reflect.TypeOf(PaymentMultisigPubkeyParams{}),
+		summary:    "Get a multisig pubkey for asset id.",
+		fieldDescs: map[string]string{
+			"assetID": descAssetID,
+		},
 		returns: `Returns:
-	string: a pubkey. The index is stored in the db and this pubkey will not be returned again`,
+    string: a pubkey. The index is stored in the db and this pubkey will not be returned again.`,
 	},
 	sendFundsToMultisigRoute: {
-		argsShort:  `csvFilePath`,
-		cmdSummary: "Send funds to a payment multisig.",
-		argsLong: `Args:
-		csvFilePath (string): The csv file path from the point of view of the client, not bwctl. Will be written to.`,
+		paramsType: reflect.TypeOf(CsvFileParams{}),
+		summary:    "Send funds to a payment multisig.",
+		fieldDescs: map[string]string{
+			"csvFilePath": descCsvFilePath + " Will be written to.",
+		},
 	},
 	signMultisigRoute: {
-		argsShort:  `csvFilePath sigIndex`,
-		cmdSummary: "Sign a payment multisig.",
-		argsLong: `Args:
-		csvFilePath (string): The csv file path from the point of view of the client, not bwctl. Will be written to.
-		sigIndex (int): The pubkey index we own and are able to sign.`,
+		paramsType: reflect.TypeOf(SignMultisigParams{}),
+		summary:    "Sign a payment multisig.",
+		fieldDescs: map[string]string{
+			"csvFilePath": descCsvFilePath + " Will be written to.",
+			"signIdx":     "The pubkey index we own and are able to sign.",
+		},
 	},
 	refundPaymentMultisigRoute: {
-		argsShort:  `csvFilePath`,
-		cmdSummary: "Refund a payment multisig.",
-		argsLong: `Args:
-		csvFilePath (string): The csv file path from the point of view of the client, not bwctl.`,
+		paramsType: reflect.TypeOf(CsvFileParams{}),
+		summary:    "Refund a payment multisig.",
+		fieldDescs: map[string]string{
+			"csvFilePath": descCsvFilePath,
+		},
 		returns: `Returns:
-	string: the refund tx hash`,
+    string: the refund tx hash`,
 	},
 	viewPaymentMultisigRoute: {
-		argsShort:  `csvFilePath`,
-		cmdSummary: "view a payment multisig.",
-		argsLong: `Args:
-		csvFilePath (string): The csv file path from the point of view of the client, not bwctl.`,
+		paramsType: reflect.TypeOf(CsvFileParams{}),
+		summary:    "View a payment multisig.",
+		fieldDescs: map[string]string{
+			"csvFilePath": descCsvFilePath,
+		},
 		returns: `Returns:
-	string: tx in json format`,
+    string: tx in json format`,
 	},
 	sendPaymentMultisigRoute: {
-		argsShort:  `csvFilePath`,
-		cmdSummary: "Send a payment multisig. May not error even with spv if not fully signed.",
-		argsLong: `Args:
-		csvFilePath (string): The csv file path from the point of view of the client, not bwctl.`,
+		paramsType: reflect.TypeOf(CsvFileParams{}),
+		summary:    "Send a payment multisig. May not error even with spv if not fully signed.",
+		fieldDescs: map[string]string{
+			"csvFilePath": descCsvFilePath,
+		},
 		returns: `Returns:
-	string: the sent tx hash`,
+    string: the sent tx hash`,
 	},
+}
+
+// parseJSONTag splits a struct field's json tag into name and options.
+func parseJSONTag(tag string) (name, opts string) {
+	if idx := strings.IndexByte(tag, ','); idx != -1 {
+		return tag[:idx], tag[idx+1:]
+	}
+	return tag, ""
+}
+
+// goTypeToHelpType maps Go reflect.Type to a human-readable type name for
+// help output.
+func goTypeToHelpType(t reflect.Type) string {
+	if t == passBytesType {
+		return "password"
+	}
+	switch t.Kind() {
+	case reflect.String:
+		return "string"
+	case reflect.Bool:
+		return "bool"
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return "int"
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return "int"
+	case reflect.Float32, reflect.Float64:
+		return "float"
+	case reflect.Map:
+		return "object"
+	case reflect.Struct:
+		return "object"
+	case reflect.Slice:
+		if t.Elem().Kind() == reflect.Uint8 {
+			return "string" // []byte
+		}
+		return "array"
+	case reflect.Ptr:
+		return goTypeToHelpType(t.Elem())
+	case reflect.Interface:
+		return "any"
+	default:
+		return t.Kind().String()
+	}
+}
+
+// reflectFields walks a struct type and returns field metadata in declaration
+// order. Embedded structs are recursively flattened. Pointer-to-struct named
+// fields are shown as a single "object" field.
+func reflectFields(t reflect.Type, descs map[string]string) []fieldInfo {
+	if t == nil {
+		return nil
+	}
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return nil
+	}
+	var fields []fieldInfo
+	for i := 0; i < t.NumField(); i++ {
+		sf := t.Field(i)
+
+		// Embedded (anonymous) struct: recurse and flatten.
+		if sf.Anonymous {
+			embedded := sf.Type
+			if embedded.Kind() == reflect.Ptr {
+				embedded = embedded.Elem()
+			}
+			if embedded.Kind() == reflect.Struct {
+				fields = append(fields, reflectFields(embedded, descs)...)
+				continue
+			}
+		}
+
+		tag := sf.Tag.Get("json")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		jsonName, tagOpts := parseJSONTag(tag)
+		if jsonName == "" {
+			continue
+		}
+
+		isPassword := sf.Type == passBytesType
+		isOptional := sf.Type.Kind() == reflect.Ptr || strings.Contains(tagOpts, "omitempty")
+
+		typeName := goTypeToHelpType(sf.Type)
+
+		fields = append(fields, fieldInfo{
+			jsonName:   jsonName,
+			typeName:   typeName,
+			goType:     sf.Type,
+			isPassword: isPassword,
+			isOptional: isOptional,
+			desc:       descs[jsonName],
+		})
+	}
+	return fields
+}
+
+// ListCommands prints a short usage string for every route available to the
+// rpcserver.
+func ListCommands(includePasswords bool) string {
+	var sb strings.Builder
+	for _, r := range sortRouteInfoKeys() {
+		info := routeInfos[r]
+		fields := reflectFields(info.paramsType, info.fieldDescs)
+		var parts []string
+		for _, f := range fields {
+			if f.isPassword && !includePasswords {
+				continue
+			}
+			name := f.jsonName
+			if f.isOptional {
+				name += "?"
+			}
+			parts = append(parts, name)
+		}
+		if len(parts) > 0 {
+			sb.WriteString(fmt.Sprintf("%s {%s}\n", r, strings.Join(parts, ", ")))
+		} else {
+			sb.WriteString(r + "\n")
+		}
+	}
+	s := sb.String()
+	if len(s) > 0 {
+		s = s[:len(s)-1] // Remove trailing newline.
+	}
+	return s
+}
+
+// commandUsage returns a help message for cmd or an error if cmd is unknown.
+func commandUsage(cmd string, includePasswords bool) (string, error) {
+	info, exists := routeInfos[cmd]
+	if !exists {
+		return "", fmt.Errorf("%w: %s", errUnknownCmd, cmd)
+	}
+
+	fields := reflectFields(info.paramsType, info.fieldDescs)
+
+	// Build short args line.
+	var parts []string
+	for _, f := range fields {
+		if f.isPassword && !includePasswords {
+			continue
+		}
+		name := f.jsonName
+		if f.isOptional {
+			name += "?"
+		}
+		parts = append(parts, name)
+	}
+	var sb strings.Builder
+	if len(parts) > 0 {
+		sb.WriteString(fmt.Sprintf("%s {%s}", cmd, strings.Join(parts, ", ")))
+	} else {
+		sb.WriteString(cmd)
+	}
+
+	// Summary
+	sb.WriteString("\n\n")
+	sb.WriteString(info.summary)
+
+	// Params
+	var paramFields []fieldInfo
+	for _, f := range fields {
+		if f.isPassword && !includePasswords {
+			continue
+		}
+		paramFields = append(paramFields, f)
+	}
+	if len(paramFields) > 0 {
+		sb.WriteString("\n\nParams:")
+		for _, f := range paramFields {
+			optStr := ""
+			if f.isOptional {
+				optStr = ", optional"
+			}
+			sb.WriteString(fmt.Sprintf("\n    %s (%s%s): %s", f.jsonName, f.typeName, optStr, f.desc))
+		}
+	}
+
+	// Returns
+	if info.returns != "" {
+		sb.WriteString("\n\n")
+		sb.WriteString(info.returns)
+	}
+
+	// Extra dynamic help.
+	if info.extraHelp != nil {
+		sb.WriteString("\n\n")
+		sb.WriteString(info.extraHelp())
+	}
+
+	return sb.String(), nil
+}
+
+// walletTypesHelp returns a formatted list of available wallet types for each
+// registered asset.
+func walletTypesHelp() string {
+	assets := asset.Assets()
+	type assetEntry struct {
+		id     uint32
+		symbol string
+		types  []string
+	}
+	var entries []assetEntry
+	for _, ra := range assets {
+		var types []string
+		for _, wd := range ra.Info.AvailableWallets {
+			if wd.Type != "" {
+				types = append(types, wd.Type)
+			}
+		}
+		if len(types) > 0 {
+			slices.Sort(types)
+			entries = append(entries, assetEntry{ra.ID, ra.Symbol, types})
+		}
+	}
+	if len(entries) == 0 {
+		return ""
+	}
+	slices.SortFunc(entries, func(a, b assetEntry) int {
+		if a.id < b.id {
+			return -1
+		}
+		if a.id > b.id {
+			return 1
+		}
+		return 0
+	})
+	var sb strings.Builder
+	sb.WriteString("Available wallet types:")
+	for _, e := range entries {
+		sb.WriteString(fmt.Sprintf("\n    %s (%d): %s", e.symbol, e.id, strings.Join(e.types, ", ")))
+	}
+	return sb.String()
+}
+
+// sortRouteInfoKeys returns a sorted list of routeInfos keys.
+func sortRouteInfoKeys() []string {
+	keys := make([]string, 0, len(routeInfos))
+	for k := range routeInfos {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
 }

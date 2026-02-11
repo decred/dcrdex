@@ -37,6 +37,7 @@ var (
 type TCore struct {
 	dexExchange              *core.Exchange
 	getDEXConfigErr          error
+	walletBalance            *core.WalletBalance
 	balanceErr               error
 	syncErr                  error
 	createWalletErr          error
@@ -82,7 +83,7 @@ func (c *TCore) Book(dex string, base, quote uint32) (*core.OrderBook, error) {
 }
 func (c *TCore) AckNotes(ids []dex.Bytes) {}
 func (c *TCore) AssetBalance(uint32) (*core.WalletBalance, error) {
-	return nil, c.balanceErr
+	return c.walletBalance, c.balanceErr
 }
 func (c *TCore) Cancel(oid dex.Bytes) error {
 	return c.cancelErr
@@ -436,12 +437,12 @@ func TestParseHTTPRequest(t *testing.T) {
 	r, _ = http.NewRequest("GET", "", bbuff)
 	ensureNoErr("good request")
 
-	// Use real route with bad args.
+	// Use real route with args. Since version ignores params, this should succeed.
 	msg, _ = msgjson.NewRequest(1, "version", "something")
 	b, _ = json.Marshal(msg)
 	bbuff = bytes.NewBuffer(b)
 	r, _ = http.NewRequest("GET", "", bbuff)
-	ensureMsgErr("bad params", msgjson.RPCParseError)
+	ensureNoErr("version ignores params")
 }
 
 func TestNew(t *testing.T) {

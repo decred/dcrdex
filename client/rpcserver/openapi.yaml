@@ -1,0 +1,1314 @@
+openapi: 3.0.1
+info:
+  title: Bison Wallet RPC API
+  description: |
+    JSON-RPC API for the Bison Wallet (bisonw) client. All requests are sent as
+    HTTP POST to the root endpoint `/` with Basic authentication over TLS.
+
+    Request bodies are JSON-RPC messages with a `route` field specifying the
+    command and a `payload` field containing a typed JSON object specific to the
+    route. Routes that take no parameters use an empty or null payload.
+  version: "1.0.0"
+  license:
+    name: Blue Oak Model License 1.0.0
+    url: https://blueoakcouncil.org/license/1.0.0
+
+servers:
+  - url: https://localhost:5757
+    description: Default local RPC server
+
+security:
+  - basicAuth: []
+
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+      description: HTTP Basic authentication with the configured RPC user and password.
+
+  schemas:
+    RPCRequest:
+      type: object
+      required:
+        - type
+        - route
+        - id
+      properties:
+        type:
+          type: integer
+          enum: [1]
+          description: Message type (1 = request).
+        route:
+          type: string
+          description: The RPC command route name.
+        id:
+          type: integer
+          description: Request ID for matching responses.
+        payload:
+          description: Typed JSON object for the route's parameters. Null or omitted for no-param routes.
+
+    RPCResponse:
+      type: object
+      properties:
+        type:
+          type: integer
+          enum: [2]
+          description: Message type (2 = response).
+        id:
+          type: integer
+          description: ID matching the request.
+        payload:
+          type: object
+          properties:
+            result:
+              description: The result on success (type depends on route).
+            error:
+              type: object
+              nullable: true
+              properties:
+                code:
+                  type: integer
+                message:
+                  type: string
+
+    VersionResponse:
+      type: object
+      properties:
+        rpcServerVersion:
+          type: object
+          properties:
+            major:
+              type: integer
+            minor:
+              type: integer
+            patch:
+              type: integer
+        dexcVersion:
+          type: object
+          properties:
+            versionString:
+              type: string
+            major:
+              type: integer
+            minor:
+              type: integer
+            patch:
+              type: integer
+
+    TradeResponse:
+      type: object
+      properties:
+        orderID:
+          type: string
+        sig:
+          type: string
+        stamp:
+          type: integer
+          format: uint64
+
+    WalletState:
+      type: object
+      properties:
+        symbol:
+          type: string
+        assetID:
+          type: integer
+        open:
+          type: boolean
+        running:
+          type: boolean
+        disabled:
+          type: boolean
+        balance:
+          type: object
+
+    MyOrder:
+      type: object
+      properties:
+        host:
+          type: string
+        marketName:
+          type: string
+        baseID:
+          type: integer
+        quoteID:
+          type: integer
+        id:
+          type: string
+        type:
+          type: string
+        sell:
+          type: boolean
+        stamp:
+          type: integer
+          format: uint64
+        rate:
+          type: integer
+          format: uint64
+        quantity:
+          type: integer
+          format: uint64
+        filled:
+          type: integer
+          format: uint64
+        settled:
+          type: integer
+          format: uint64
+        status:
+          type: string
+
+paths:
+  /:
+    post:
+      summary: JSON-RPC endpoint
+      description: |
+        All RPC commands are sent as POST requests to this endpoint. The `route`
+        field in the request body determines which command is executed.
+
+        See the individual route descriptions below for details on each command.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RPCRequest'
+      responses:
+        '200':
+          description: JSON-RPC response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RPCResponse'
+        '401':
+          description: Authentication failed
+
+  /help:
+    post:
+      tags: [System]
+      summary: Print a help message
+      description: |
+        Returns general help for all commands if no arguments are passed, or
+        verbose help for a specific command.
+
+        **Route:** `help`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: help
+              id: 1
+              payload:
+                helpWith: "version"
+      responses:
+        '200':
+          description: Help text
+
+  /init:
+    post:
+      tags: [System]
+      summary: Initialize the client
+      description: |
+        Initialize the Bison Wallet client with an application password.
+
+        **Route:** `init`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: init
+              id: 1
+              payload:
+                appPass: "mypassword"
+      responses:
+        '200':
+          description: '"app initialized"'
+
+  /version:
+    post:
+      tags: [System]
+      summary: Get version information
+      description: |
+        Returns the RPC server version and Bison Wallet version.
+
+        **Route:** `version`
+        **Payload:** none
+
+  /login:
+    post:
+      tags: [System]
+      summary: Log in to DEX servers
+      description: |
+        Attempt to login to all registered DEX servers.
+
+        **Route:** `login`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: login
+              id: 1
+              payload:
+                appPass: "mypassword"
+
+  /logout:
+    post:
+      tags: [System]
+      summary: Log out
+      description: |
+        Log out of Bison Wallet.
+
+        **Route:** `logout`
+        **Payload:** none
+
+  /newwallet:
+    post:
+      tags: [Wallet]
+      summary: Create a new wallet
+      description: |
+        Connect to a new wallet. Wallet will be unlocked if successful.
+
+        **Route:** `newwallet`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: newwallet
+              id: 1
+              payload:
+                appPass: "mypassword"
+                walletPass: "walletpassword"
+                assetID: 42
+                walletType: "dcrwalletspv"
+                config:
+                  username: "user"
+
+  /openwallet:
+    post:
+      tags: [Wallet]
+      summary: Open an existing wallet
+      description: |
+        Open/unlock an existing wallet.
+
+        **Route:** `openwallet`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: openwallet
+              id: 1
+              payload:
+                appPass: "mypassword"
+                assetID: 42
+
+  /closewallet:
+    post:
+      tags: [Wallet]
+      summary: Close a wallet
+      description: |
+        Lock/close an open wallet.
+
+        **Route:** `closewallet`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: closewallet
+              id: 1
+              payload:
+                assetID: 42
+
+  /togglewalletstatus:
+    post:
+      tags: [Wallet]
+      summary: Enable or disable a wallet
+      description: |
+        Disable or enable an existing wallet. When disabling a chain's primary
+        asset wallet, all token wallets for that chain will be disabled too.
+
+        **Route:** `togglewalletstatus`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: togglewalletstatus
+              id: 1
+              payload:
+                assetID: 42
+                disable: true
+
+  /wallets:
+    post:
+      tags: [Wallet]
+      summary: List all wallets
+      description: |
+        Returns a list of all wallet states.
+
+        **Route:** `wallets`
+        **Payload:** none
+
+  /walletbalance:
+    post:
+      tags: [Wallet]
+      summary: Get wallet balance
+      description: |
+        Returns the balance for a single wallet identified by asset ID.
+
+        **Route:** `walletbalance`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: walletbalance
+              id: 1
+              payload:
+                assetID: 42
+
+  /walletstate:
+    post:
+      tags: [Wallet]
+      summary: Get wallet state
+      description: |
+        Returns the full state for a single wallet identified by asset ID.
+
+        **Route:** `walletstate`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: walletstate
+              id: 1
+              payload:
+                assetID: 42
+
+  /rescanwallet:
+    post:
+      tags: [Wallet]
+      summary: Rescan a wallet
+      description: |
+        Initiate a rescan of an asset's wallet. Wallet resynchronization may be
+        asynchronous.
+
+        **Route:** `rescanwallet`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: rescanwallet
+              id: 1
+              payload:
+                assetID: 42
+                force: false
+
+  /trade:
+    post:
+      tags: [Trading]
+      summary: Place a trade order
+      description: |
+        Make an order to buy or sell an asset.
+
+        **Route:** `trade`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: trade
+              id: 1
+              payload:
+                appPass: "mypassword"
+                host: "dex.decred.org"
+                isLimit: true
+                sell: true
+                base: 42
+                quote: 0
+                qty: 10000000
+                rate: 5000000
+                tifNow: false
+
+  /multitrade:
+    post:
+      tags: [Trading]
+      summary: Place multiple trade orders
+      description: |
+        Place multiple orders in one go.
+
+        **Route:** `multitrade`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: multitrade
+              id: 1
+              payload:
+                appPass: "mypassword"
+                host: "dex.decred.org"
+                sell: true
+                base: 42
+                quote: 0
+                maxLock: 100000000
+                placements:
+                  - qty: 10000000
+                    rate: 5000000
+
+  /cancel:
+    post:
+      tags: [Trading]
+      summary: Cancel an order
+      description: |
+        Cancel an existing order by its order ID (hex-encoded).
+
+        **Route:** `cancel`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: cancel
+              id: 1
+              payload:
+                orderID: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+
+  /myorders:
+    post:
+      tags: [Trading]
+      summary: List user orders
+      description: |
+        Fetch all active and recently executed orders belonging to the user.
+        All fields are optional filters.
+
+        **Route:** `myorders`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: myorders
+              id: 1
+              payload:
+                host: "dex.decred.org"
+                base: 42
+                quote: 0
+
+  /orderbook:
+    post:
+      tags: [Trading]
+      summary: Get order book
+      description: |
+        Retrieve the order book for a market.
+
+        **Route:** `orderbook`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: orderbook
+              id: 1
+              payload:
+                host: "dex.decred.org"
+                base: 42
+                quote: 0
+                nOrders: 10
+
+  /exchanges:
+    post:
+      tags: [Trading]
+      summary: Get exchange information
+      description: |
+        Detailed information about known exchanges and markets.
+
+        **Route:** `exchanges`
+        **Payload:** none
+
+  /withdraw:
+    post:
+      tags: [Transactions]
+      summary: Withdraw from wallet
+      description: |
+        Withdraw value from an exchange wallet to an address. Fees are
+        subtracted from the value.
+
+        **Route:** `withdraw`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: withdraw
+              id: 1
+              payload:
+                appPass: "mypassword"
+                assetID: 42
+                value: 100000000
+                address: "DsAddress..."
+                subtract: true
+
+  /send:
+    post:
+      tags: [Transactions]
+      summary: Send from wallet
+      description: |
+        Send exact value from an exchange wallet to an address.
+
+        **Route:** `send`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: send
+              id: 1
+              payload:
+                appPass: "mypassword"
+                assetID: 42
+                value: 100000000
+                address: "DsAddress..."
+
+  /abandontx:
+    post:
+      tags: [Transactions]
+      summary: Abandon a transaction
+      description: |
+        Abandon an unconfirmed transaction.
+
+        **Route:** `abandontx`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: abandontx
+              id: 1
+              payload:
+                assetID: 42
+                txID: "abc123..."
+
+  /appseed:
+    post:
+      tags: [Transactions]
+      summary: Export application seed
+      description: |
+        Show the application's seed.
+
+        **Route:** `appseed`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: appseed
+              id: 1
+              payload:
+                appPass: "mypassword"
+
+  /deletearchivedrecords:
+    post:
+      tags: [Transactions]
+      summary: Delete archived records
+      description: |
+        Delete archived records from the database and return total deleted.
+
+        **Route:** `deletearchivedrecords`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: deletearchivedrecords
+              id: 1
+              payload:
+                olderThanMs: 1609459200000
+                matchesFile: "/path/to/matches.csv"
+                ordersFile: "/path/to/orders.csv"
+
+  /notifications:
+    post:
+      tags: [Transactions]
+      summary: Get recent notifications
+      description: |
+        See recent notifications.
+
+        **Route:** `notifications`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: notifications
+              id: 1
+              payload:
+                n: 10
+
+  /txhistory:
+    post:
+      tags: [Transactions]
+      summary: Get transaction history
+      description: |
+        Get transaction history for a wallet.
+
+        **Route:** `txhistory`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: txhistory
+              id: 1
+              payload:
+                assetID: 42
+                n: 10
+
+  /wallettx:
+    post:
+      tags: [Transactions]
+      summary: Get a wallet transaction
+      description: |
+        Get details of a specific wallet transaction.
+
+        **Route:** `wallettx`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: wallettx
+              id: 1
+              payload:
+                assetID: 42
+                txID: "abc123..."
+
+  /withdrawbchspv:
+    post:
+      tags: [Transactions]
+      summary: Withdraw BCH SPV funds
+      description: |
+        Get a transaction that will withdraw all funds from the deprecated
+        Bitcoin Cash SPV wallet.
+
+        **Route:** `withdrawbchspv`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: withdrawbchspv
+              id: 1
+              payload:
+                appPass: "mypassword"
+                recipient: "bitcoincash:qp..."
+
+  /discoveracct:
+    post:
+      tags: [DEX]
+      summary: Discover a DEX account
+      description: |
+        Discover an account that is used for a DEX. Useful when restoring an
+        account.
+
+        **Route:** `discoveracct`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: discoveracct
+              id: 1
+              payload:
+                appPass: "mypassword"
+                addr: "dex.decred.org"
+                cert: ""
+
+  /getdexconfig:
+    post:
+      tags: [DEX]
+      summary: Get DEX configuration
+      description: |
+        Get a DEX server's configuration.
+
+        **Route:** `getdexconfig`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: getdexconfig
+              id: 1
+              payload:
+                host: "dex.decred.org"
+
+  /bondassets:
+    post:
+      tags: [DEX]
+      summary: Get bond asset info
+      description: |
+        Get DEX bond asset configuration including expiry and supported assets.
+
+        **Route:** `bondassets`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: bondassets
+              id: 1
+              payload:
+                host: "dex.decred.org"
+
+  /postbond:
+    post:
+      tags: [DEX]
+      summary: Post a new bond
+      description: |
+        Post a new bond for a DEX. Bond is active after the bond transaction
+        has been confirmed. Uses `core.PostBondForm` directly.
+
+        **Route:** `postbond`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: postbond
+              id: 1
+              payload:
+                appPass: "mypassword"
+                addr: "dex.decred.org"
+                bond: 100000000
+                asset: 42
+                maintainTier: true
+
+  /bondopts:
+    post:
+      tags: [DEX]
+      summary: Change bond options
+      description: |
+        Change bond options for a DEX. Uses `core.BondOptionsForm` directly.
+
+        **Route:** `bondopts`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: bondopts
+              id: 1
+              payload:
+                host: "dex.decred.org"
+                targetTier: 1
+                maxBondedAmt: 200000000
+
+  /startmmbot:
+    post:
+      tags: [Market Making]
+      summary: Start market making bot(s)
+      description: |
+        Start market making bot(s). If market is provided, starts a specific
+        bot. Otherwise starts all bots in the config.
+
+        **Route:** `startmmbot`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: startmmbot
+              id: 1
+              payload:
+                appPass: "mypassword"
+                cfgFilePath: "/path/to/bot.json"
+                market:
+                  host: "dex.decred.org"
+                  baseID: 42
+                  quoteID: 0
+
+  /stopmmbot:
+    post:
+      tags: [Market Making]
+      summary: Stop market making bot(s)
+      description: |
+        Stop market making bot(s). If market is null/omitted, stops all
+        running bots.
+
+        **Route:** `stopmmbot`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: stopmmbot
+              id: 1
+              payload:
+                market:
+                  host: "dex.decred.org"
+                  baseID: 42
+                  quoteID: 0
+
+  /mmstatus:
+    post:
+      tags: [Market Making]
+      summary: Get market making status
+      description: |
+        Get the status of running market making bots.
+
+        **Route:** `mmstatus`
+        **Payload:** none
+
+  /mmavailablebalances:
+    post:
+      tags: [Market Making]
+      summary: Get available balances for bots
+      description: |
+        Get available balances for starting a bot or adding additional balance
+        to a running bot.
+
+        **Route:** `mmavailablebalances`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: mmavailablebalances
+              id: 1
+              payload:
+                host: "dex.decred.org"
+                baseID: 42
+                quoteID: 0
+
+  /updaterunningbotcfg:
+    post:
+      tags: [Market Making]
+      summary: Update running bot config
+      description: |
+        Update the config and optionally the inventory of a running bot.
+
+        **Route:** `updaterunningbotcfg`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: updaterunningbotcfg
+              id: 1
+              payload:
+                cfgFilePath: "/path/to/bot.json"
+                market:
+                  host: "dex.decred.org"
+                  baseID: 42
+                  quoteID: 0
+
+  /updaterunningbotinv:
+    post:
+      tags: [Market Making]
+      summary: Update running bot inventory
+      description: |
+        Update the inventory of a running bot.
+
+        **Route:** `updaterunningbotinv`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: updaterunningbotinv
+              id: 1
+              payload:
+                market:
+                  host: "dex.decred.org"
+                  baseID: 42
+                  quoteID: 0
+                balances:
+                  dex:
+                    42: 100000
+                  cex:
+                    0: 50000
+
+  /stakestatus:
+    post:
+      tags: [Staking]
+      summary: Get stake status
+      description: |
+        Get the staking status for an asset.
+
+        **Route:** `stakestatus`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: stakestatus
+              id: 1
+              payload:
+                assetID: 42
+
+  /setvsp:
+    post:
+      tags: [Staking]
+      summary: Set VSP
+      description: |
+        Set a voting service provider by URL.
+
+        **Route:** `setvsp`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: setvsp
+              id: 1
+              payload:
+                assetID: 42
+                addr: "https://vsp.example.com"
+
+  /purchasetickets:
+    post:
+      tags: [Staking]
+      summary: Purchase tickets
+      description: |
+        Start an asynchronous ticket purchasing process.
+
+        **Route:** `purchasetickets`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: purchasetickets
+              id: 1
+              payload:
+                appPass: "mypassword"
+                assetID: 42
+                n: 3
+
+  /setvotingprefs:
+    post:
+      tags: [Staking]
+      summary: Set voting preferences
+      description: |
+        Set voting preferences for consensus votes, treasury spends, and
+        treasury keys.
+
+        **Route:** `setvotingprefs`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: setvotingprefs
+              id: 1
+              payload:
+                assetID: 42
+                choices:
+                  agendaid: "yes"
+
+  /bridge:
+    post:
+      tags: [Bridge]
+      summary: Bridge tokens
+      description: |
+        Bridge tokens from one chain to another.
+
+        **Route:** `bridge`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: bridge
+              id: 1
+              payload:
+                fromAssetID: 60
+                toAssetID: 60001
+                amt: 1000000000
+                bridgeName: "mesonfi"
+
+  /checkbridgeapproval:
+    post:
+      tags: [Bridge]
+      summary: Check bridge approval status
+      description: |
+        Check if the bridge contract is approved.
+
+        **Route:** `checkbridgeapproval`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: checkbridgeapproval
+              id: 1
+              payload:
+                assetID: 60
+                bridgeName: "mesonfi"
+
+  /approvebridgecontract:
+    post:
+      tags: [Bridge]
+      summary: Approve bridge contract
+      description: |
+        Approve or unapprove the bridge contract.
+
+        **Route:** `approvebridgecontract`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: approvebridgecontract
+              id: 1
+              payload:
+                assetID: 60
+                bridgeName: "mesonfi"
+                approve: true
+
+  /pendingbridges:
+    post:
+      tags: [Bridge]
+      summary: Get pending bridges
+      description: |
+        Get pending bridge transactions.
+
+        **Route:** `pendingbridges`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: pendingbridges
+              id: 1
+              payload:
+                assetID: 60
+
+  /bridgehistory:
+    post:
+      tags: [Bridge]
+      summary: Get bridge history
+      description: |
+        Get bridge transaction history. Uses the same params as txhistory.
+
+        **Route:** `bridgehistory`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: bridgehistory
+              id: 1
+              payload:
+                assetID: 60
+                n: 10
+
+  /supportedbridges:
+    post:
+      tags: [Bridge]
+      summary: Get supported bridge destinations
+      description: |
+        Get supported bridge destinations for an asset.
+
+        **Route:** `supportedbridges`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: supportedbridges
+              id: 1
+              payload:
+                assetID: 60
+
+  /bridgefeesandlimits:
+    post:
+      tags: [Bridge]
+      summary: Get bridge fees and limits
+      description: |
+        Get fees and limits for a specific bridge.
+
+        **Route:** `bridgefeesandlimits`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: bridgefeesandlimits
+              id: 1
+              payload:
+                fromAssetID: 60
+                toAssetID: 60001
+                bridgeName: "mesonfi"
+
+  /paymentmultisigpubkey:
+    post:
+      tags: [Multisig]
+      summary: Get multisig pubkey
+      description: |
+        Get a multisig pubkey for an asset. The index is stored in the DB
+        and this pubkey will not be returned again.
+
+        **Route:** `paymentmultisigpubkey`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: paymentmultisigpubkey
+              id: 1
+              payload:
+                assetID: 42
+
+  /sendfundstomultisig:
+    post:
+      tags: [Multisig]
+      summary: Send funds to multisig
+      description: |
+        Send funds to a payment multisig.
+
+        **Route:** `sendfundstomultisig`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: sendfundstomultisig
+              id: 1
+              payload:
+                csvFilePath: "/path/to/payment.csv"
+
+  /signmultisig:
+    post:
+      tags: [Multisig]
+      summary: Sign a multisig transaction
+      description: |
+        Sign a payment multisig.
+
+        **Route:** `signmultisig`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: signmultisig
+              id: 1
+              payload:
+                csvFilePath: "/path/to/payment.csv"
+                signIdx: 0
+
+  /refundpaymentmultisig:
+    post:
+      tags: [Multisig]
+      summary: Refund a multisig payment
+      description: |
+        Refund a payment multisig.
+
+        **Route:** `refundpaymentmultisig`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: refundpaymentmultisig
+              id: 1
+              payload:
+                csvFilePath: "/path/to/payment.csv"
+
+  /viewpaymentmultisig:
+    post:
+      tags: [Multisig]
+      summary: View a multisig payment
+      description: |
+        View a payment multisig transaction.
+
+        **Route:** `viewpaymentmultisig`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: viewpaymentmultisig
+              id: 1
+              payload:
+                csvFilePath: "/path/to/payment.csv"
+
+  /sendpaymentmultisig:
+    post:
+      tags: [Multisig]
+      summary: Send a multisig payment
+      description: |
+        Send a payment multisig. May not error even with SPV if not fully signed.
+
+        **Route:** `sendpaymentmultisig`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: sendpaymentmultisig
+              id: 1
+              payload:
+                csvFilePath: "/path/to/payment.csv"
+
+  /walletpeers:
+    post:
+      tags: [Peers]
+      summary: List wallet peers
+      description: |
+        Show the peers a wallet is connected to.
+
+        **Route:** `walletpeers`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: walletpeers
+              id: 1
+              payload:
+                assetID: 42
+
+  /addwalletpeer:
+    post:
+      tags: [Peers]
+      summary: Add a wallet peer
+      description: |
+        Add a new wallet peer connection.
+
+        **Route:** `addwalletpeer`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: addwalletpeer
+              id: 1
+              payload:
+                assetID: 42
+                address: "192.168.1.100:9108"
+
+  /removewalletpeer:
+    post:
+      tags: [Peers]
+      summary: Remove a wallet peer
+      description: |
+        Remove an added wallet peer.
+
+        **Route:** `removewalletpeer`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: removewalletpeer
+              id: 1
+              payload:
+                assetID: 42
+                address: "192.168.1.100:9108"

@@ -44,7 +44,7 @@ type config struct {
 	Proxy        string   `long:"proxy" description:"Connect via SOCKS5 proxy (eg. 127.0.0.1:9050)"`
 	ProxyUser    string   `long:"proxyuser" description:"Username for proxy server"`
 	ProxyPass    string   `long:"proxypass" default-mask:"-" description:"Password for proxy server"`
-	PasswordArgs []string `short:"p" long:"passarg" description:"Password arguments to bypass stdin prompts."`
+	PasswordArgs []string `short:"p" long:"passarg" description:"Password arguments to bypass stdin prompts. Can be specified multiple times, once for each required password. For example, newwallet requires two: -p <appPass> -p <walletPass>. Use -p \"\" for an empty password."`
 	Testnet      bool     `long:"testnet" description:"use testnet"`
 	Simnet       bool     `long:"simnet" description:"use simnet"`
 }

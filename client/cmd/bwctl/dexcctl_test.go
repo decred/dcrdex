@@ -103,7 +103,6 @@ func TestReadTextFile(t *testing.T) {
 		file.Close()
 	}
 	certTxt := "Hi. I'm a TLS certificate."
-	cfgTxt := "Hi, I'm a config"
 	tests := []struct {
 		name, cmd, txtFilePath, txtToSave string
 		args, want                        []string
@@ -128,18 +127,6 @@ func TestReadTextFile(t *testing.T) {
 		cmd:     "getdexconfig",
 		args:    []string{"1.2.3.4:3000", "./cert"},
 		wantErr: true,
-	}, {
-		name:        "newwallet ok, with cfg file",
-		cmd:         "newwallet",
-		args:        []string{"42", "rpc", "./w.conf"},
-		txtFilePath: "./w.conf",
-		txtToSave:   cfgTxt,
-		want:        []string{"42", "rpc", cfgTxt},
-	}, {
-		name: "newwallet ok, no cfg file",
-		cmd:  "newwallet",
-		args: []string{"42", "rpc"},
-		want: []string{"42", "rpc"},
 	}}
 	for _, test := range tests {
 		if test.txtFilePath != "" {

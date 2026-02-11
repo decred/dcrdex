@@ -52,8 +52,8 @@ func run() error {
 		return err
 	}
 
-	rawParams := rpcserver.RawParams{Args: []string{"trade"}}
-	msg, err := msgjson.NewRequest(1, "help", rawParams)
+	helpParams := rpcserver.HelpParams{HelpWith: "trade"}
+	msg, err := msgjson.NewRequest(1, "help", helpParams)
 	b, err := json.Marshal(msg)
 	fmt.Println("http request:", string(b))
 	if err != nil {
