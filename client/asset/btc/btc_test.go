@@ -3087,7 +3087,7 @@ func testSwap(t *testing.T, segwit bool, walletType string) {
 	}
 
 	// This time should succeed.
-	_, changeCoin, feesPaid, err := wallet.Swap(swaps)
+	_, changeCoin, feesPaid, err := wallet.Swap(context.Background(), swaps)
 	if err != nil {
 		t.Fatalf("swap error: %v", err)
 	}
@@ -3109,7 +3109,7 @@ func testSwap(t *testing.T, segwit bool, walletType string) {
 
 	// Not enough funds
 	swaps.Inputs = coins[:1]
-	_, _, _, err = wallet.Swap(swaps)
+	_, _, _, err = wallet.Swap(context.Background(), swaps)
 	if err == nil {
 		t.Fatalf("no error for listunspent not enough funds")
 	}
@@ -3117,7 +3117,7 @@ func testSwap(t *testing.T, segwit bool, walletType string) {
 
 	// AddressPKH error
 	node.newAddressErr = tErr
-	_, _, _, err = wallet.Swap(swaps)
+	_, _, _, err = wallet.Swap(context.Background(), swaps)
 	if err == nil {
 		t.Fatalf("no error for getnewaddress rpc error")
 	}
@@ -3125,7 +3125,7 @@ func testSwap(t *testing.T, segwit bool, walletType string) {
 
 	// ChangeAddress error
 	node.changeAddrErr = tErr
-	_, _, _, err = wallet.Swap(swaps)
+	_, _, _, err = wallet.Swap(context.Background(), swaps)
 	if err == nil {
 		t.Fatalf("no error for getrawchangeaddress rpc error")
 	}
@@ -3133,7 +3133,7 @@ func testSwap(t *testing.T, segwit bool, walletType string) {
 
 	// SignTx error
 	node.signTxErr = tErr
-	_, _, _, err = wallet.Swap(swaps)
+	_, _, _, err = wallet.Swap(context.Background(), swaps)
 	if err == nil {
 		t.Fatalf("no error for signrawtransactionwithwallet rpc error")
 	}
@@ -3141,14 +3141,14 @@ func testSwap(t *testing.T, segwit bool, walletType string) {
 
 	// incomplete signatures
 	node.sigIncomplete = true
-	_, _, _, err = wallet.Swap(swaps)
+	_, _, _, err = wallet.Swap(context.Background(), swaps)
 	if err == nil {
 		t.Fatalf("no error for incomplete signature rpc error")
 	}
 	node.sigIncomplete = false
 
 	// Make sure we can succeed again.
-	_, _, _, err = wallet.Swap(swaps)
+	_, _, _, err = wallet.Swap(context.Background(), swaps)
 	if err != nil {
 		t.Fatalf("re-swap error: %v", err)
 	}
@@ -3245,7 +3245,7 @@ func testPrivateSwap(t *testing.T, segwit bool, walletType string) {
 	}
 
 	// This time should succeed.
-	receipts, changeCoin, txData, feesPaid, err := wallet.SwapPrivate(swaps)
+	receipts, changeCoin, txData, feesPaid, err := wallet.SwapPrivate(context.Background(), swaps)
 	if err != nil {
 		t.Fatalf("private swap error: %v", err)
 	}
@@ -3277,7 +3277,7 @@ func testPrivateSwap(t *testing.T, segwit bool, walletType string) {
 
 	// Not enough funds
 	swaps.Inputs = coins[:1]
-	_, _, _, _, err = wallet.SwapPrivate(swaps)
+	_, _, _, _, err = wallet.SwapPrivate(context.Background(), swaps)
 	if err == nil {
 		t.Fatalf("no error for listunspent not enough funds")
 	}
@@ -3285,7 +3285,7 @@ func testPrivateSwap(t *testing.T, segwit bool, walletType string) {
 
 	// AddressPKH error
 	node.newAddressErr = tErr
-	_, _, _, _, err = wallet.SwapPrivate(swaps)
+	_, _, _, _, err = wallet.SwapPrivate(context.Background(), swaps)
 	if err == nil {
 		t.Fatalf("no error for getnewaddress rpc error")
 	}
@@ -3293,7 +3293,7 @@ func testPrivateSwap(t *testing.T, segwit bool, walletType string) {
 
 	// ChangeAddress error
 	node.changeAddrErr = tErr
-	_, _, _, _, err = wallet.SwapPrivate(swaps)
+	_, _, _, _, err = wallet.SwapPrivate(context.Background(), swaps)
 	if err == nil {
 		t.Fatalf("no error for getrawchangeaddress rpc error")
 	}
@@ -3301,7 +3301,7 @@ func testPrivateSwap(t *testing.T, segwit bool, walletType string) {
 
 	// SignTx error
 	node.signTxErr = tErr
-	_, _, _, _, err = wallet.SwapPrivate(swaps)
+	_, _, _, _, err = wallet.SwapPrivate(context.Background(), swaps)
 	if err == nil {
 		t.Fatalf("no error for signrawtransactionwithwallet rpc error")
 	}
@@ -3309,14 +3309,14 @@ func testPrivateSwap(t *testing.T, segwit bool, walletType string) {
 
 	// incomplete signatures
 	node.sigIncomplete = true
-	_, _, _, _, err = wallet.SwapPrivate(swaps)
+	_, _, _, _, err = wallet.SwapPrivate(context.Background(), swaps)
 	if err == nil {
 		t.Fatalf("no error for incomplete signature rpc error")
 	}
 	node.sigIncomplete = false
 
 	// Make sure we can succeed again.
-	_, _, _, _, err = wallet.SwapPrivate(swaps)
+	_, _, _, _, err = wallet.SwapPrivate(context.Background(), swaps)
 	if err != nil {
 		t.Fatalf("re-private-swap error: %v", err)
 	}
@@ -3374,7 +3374,7 @@ func testRedeem(t *testing.T, segwit bool, walletType string) {
 		Redemptions: []*asset.Redemption{redemption},
 	}
 
-	_, _, feesPaid, err := wallet.Redeem(redemptions)
+	_, _, feesPaid, err := wallet.Redeem(context.Background(), redemptions)
 	if err != nil {
 		t.Fatalf("redeem error: %v", err)
 	}
@@ -3387,7 +3387,7 @@ func testRedeem(t *testing.T, segwit bool, walletType string) {
 
 	// No audit info
 	redemption.Spends = nil
-	_, _, _, err = wallet.Redeem(redemptions)
+	_, _, _, err = wallet.Redeem(context.Background(), redemptions)
 	if err == nil {
 		t.Fatalf("no error for nil AuditInfo")
 	}
@@ -3395,7 +3395,7 @@ func testRedeem(t *testing.T, segwit bool, walletType string) {
 
 	// Spoofing AuditInfo is not allowed.
 	redemption.Spends = &asset.AuditInfo{}
-	_, _, _, err = wallet.Redeem(redemptions)
+	_, _, _, err = wallet.Redeem(context.Background(), redemptions)
 	if err == nil {
 		t.Fatalf("no error for spoofed AuditInfo")
 	}
@@ -3403,7 +3403,7 @@ func testRedeem(t *testing.T, segwit bool, walletType string) {
 
 	// Wrong secret hash
 	redemption.Secret = randBytes(32)
-	_, _, _, err = wallet.Redeem(redemptions)
+	_, _, _, err = wallet.Redeem(context.Background(), redemptions)
 	if err == nil {
 		t.Fatalf("no error for wrong secret")
 	}
@@ -3411,7 +3411,7 @@ func testRedeem(t *testing.T, segwit bool, walletType string) {
 
 	// too low of value
 	coin.Val = 200
-	_, _, _, err = wallet.Redeem(redemptions)
+	_, _, _, err = wallet.Redeem(context.Background(), redemptions)
 	if err == nil {
 		t.Fatalf("no error for redemption not worth the fees")
 	}
@@ -3419,7 +3419,7 @@ func testRedeem(t *testing.T, segwit bool, walletType string) {
 
 	// New address error
 	node.newAddressErr = tErr
-	_, _, _, err = wallet.Redeem(redemptions)
+	_, _, _, err = wallet.Redeem(context.Background(), redemptions)
 	if err == nil {
 		t.Fatalf("no error for new address error")
 	}
@@ -3427,7 +3427,7 @@ func testRedeem(t *testing.T, segwit bool, walletType string) {
 
 	// Missing priv key error
 	node.privKeyForAddrErr = tErr
-	_, _, _, err = wallet.Redeem(redemptions)
+	_, _, _, err = wallet.Redeem(context.Background(), redemptions)
 	if err == nil {
 		t.Fatalf("no error for missing private key")
 	}
@@ -3435,7 +3435,7 @@ func testRedeem(t *testing.T, segwit bool, walletType string) {
 
 	// Send error
 	node.sendErr = tErr
-	_, _, _, err = wallet.Redeem(redemptions)
+	_, _, _, err = wallet.Redeem(context.Background(), redemptions)
 	if err == nil {
 		t.Fatalf("no error for send error")
 	}
@@ -3445,7 +3445,7 @@ func testRedeem(t *testing.T, segwit bool, walletType string) {
 	var h chainhash.Hash
 	h[0] = 0x01
 	node.badSendHash = &h
-	_, _, _, err = wallet.Redeem(redemptions)
+	_, _, _, err = wallet.Redeem(context.Background(), redemptions)
 	if err == nil {
 		t.Fatalf("no error for wrong return hash")
 	}
@@ -3780,7 +3780,7 @@ func testRefund(t *testing.T, segwit bool, walletType string) {
 	node.getTransactionErr = WalletTransactionNotFound
 
 	contractOutput := NewOutput(&txHash, 0, 1e8)
-	_, err = wallet.Refund(contractOutput.ID(), contract, feeSuggestion)
+	_, err = wallet.Refund(context.Background(), contractOutput.ID(), contract, feeSuggestion)
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
 	}
@@ -3789,14 +3789,14 @@ func testRefund(t *testing.T, segwit bool, walletType string) {
 	badReceipt := &tReceipt{
 		coin: &tCoin{id: make([]byte, 15)},
 	}
-	_, err = wallet.Refund(badReceipt.coin.id, badReceipt.Contract(), feeSuggestion)
+	_, err = wallet.Refund(context.Background(), badReceipt.coin.id, badReceipt.Contract(), feeSuggestion)
 	if err == nil {
 		t.Fatalf("no error for bad receipt")
 	}
 
 	ensureErr := func(tag string) {
 		delete(node.checkpoints, outPt)
-		_, err = wallet.Refund(contractOutput.ID(), contract, feeSuggestion)
+		_, err = wallet.Refund(context.Background(), contractOutput.ID(), contract, feeSuggestion)
 		if err == nil {
 			t.Fatalf("no error for %q", tag)
 		}
@@ -3812,7 +3812,7 @@ func testRefund(t *testing.T, segwit bool, walletType string) {
 	// bad contract
 	badContractOutput := NewOutput(tTxHash, 0, 1e8)
 	badContract := randBytes(50)
-	_, err = wallet.Refund(badContractOutput.ID(), badContract, feeSuggestion)
+	_, err = wallet.Refund(context.Background(), badContractOutput.ID(), badContract, feeSuggestion)
 	if err == nil {
 		t.Fatalf("no error for bad contract")
 	}
@@ -3847,7 +3847,7 @@ func testRefund(t *testing.T, segwit bool, walletType string) {
 	node.badSendHash = nil
 
 	// Sanity check that we can succeed again.
-	_, err = wallet.Refund(contractOutput.ID(), contract, feeSuggestion)
+	_, err = wallet.Refund(context.Background(), contractOutput.ID(), contract, feeSuggestion)
 	if err != nil {
 		t.Fatalf("re-refund error: %v", err)
 	}
@@ -7787,7 +7787,7 @@ func testRedeemPrivate(t *testing.T, segwit bool, walletType string) {
 	node.privKeyForAddrErr = nil
 
 	// Test successful redemption
-	out, feesPaid, txData, err := wallet.RedeemPrivate(contract, unsignedRedeemB, adaptorSigB, adaptorSecret)
+	out, feesPaid, txData, err := wallet.RedeemPrivate(context.Background(), contract, unsignedRedeemB, adaptorSigB, adaptorSecret)
 	if err != nil {
 		t.Fatalf("RedeemPrivate error: %v", err)
 	}
@@ -7816,31 +7816,31 @@ func testRedeemPrivate(t *testing.T, segwit bool, walletType string) {
 	// Test error cases
 
 	// Test with nil unsigned redeem transaction
-	_, _, _, err = wallet.RedeemPrivate(contract, nil, adaptorSigB, adaptorSecret)
+	_, _, _, err = wallet.RedeemPrivate(context.Background(), contract, nil, adaptorSigB, adaptorSecret)
 	if err == nil {
 		t.Fatalf("expected error for nil unsigned redeem transaction")
 	}
 
 	// Test with nil adaptor signature
-	_, _, _, err = wallet.RedeemPrivate(contract, unsignedRedeemB, nil, adaptorSecret)
+	_, _, _, err = wallet.RedeemPrivate(context.Background(), contract, unsignedRedeemB, nil, adaptorSecret)
 	if err == nil {
 		t.Fatalf("expected error for nil adaptor signature")
 	}
 
 	// Test with nil adaptor secret
-	_, _, _, err = wallet.RedeemPrivate(contract, unsignedRedeemB, adaptorSigB, nil)
+	_, _, _, err = wallet.RedeemPrivate(context.Background(), contract, unsignedRedeemB, adaptorSigB, nil)
 	if err == nil {
 		t.Fatalf("expected error for nil adaptor secret")
 	}
 
 	// Test with invalid unsigned redeem transaction
-	_, _, _, err = wallet.RedeemPrivate(contract, []byte("invalid"), adaptorSigB, adaptorSecret)
+	_, _, _, err = wallet.RedeemPrivate(context.Background(), contract, []byte("invalid"), adaptorSigB, adaptorSecret)
 	if err == nil {
 		t.Fatalf("expected error for invalid unsigned redeem transaction")
 	}
 
 	// Test with invalid adaptor signature
-	_, _, _, err = wallet.RedeemPrivate(contract, unsignedRedeemB, []byte("invalid"), adaptorSecret)
+	_, _, _, err = wallet.RedeemPrivate(context.Background(), contract, unsignedRedeemB, []byte("invalid"), adaptorSecret)
 	if err == nil {
 		t.Fatalf("expected error for invalid adaptor signature")
 	}
@@ -7848,14 +7848,14 @@ func testRedeemPrivate(t *testing.T, segwit bool, walletType string) {
 	// Test with wrong adaptor secret
 	wrongSecret := new(btcec.ModNScalar)
 	wrongSecret.SetByteSlice(randBytes(32))
-	_, _, _, err = wallet.RedeemPrivate(contract, unsignedRedeemB, adaptorSigB, wrongSecret)
+	_, _, _, err = wallet.RedeemPrivate(context.Background(), contract, unsignedRedeemB, adaptorSigB, wrongSecret)
 	if err == nil {
 		t.Fatalf("expected error for wrong adaptor secret")
 	}
 
 	// Test with missing private key
 	node.privKeyForAddrErr = tErr
-	_, _, _, err = wallet.RedeemPrivate(contract, unsignedRedeemB, adaptorSigB, adaptorSecret)
+	_, _, _, err = wallet.RedeemPrivate(context.Background(), contract, unsignedRedeemB, adaptorSigB, adaptorSecret)
 	if err == nil {
 		t.Fatalf("expected error for missing private key")
 	}
@@ -7863,7 +7863,7 @@ func testRedeemPrivate(t *testing.T, segwit bool, walletType string) {
 
 	// Test with broadcast error
 	node.sendErr = tErr
-	_, _, _, err = wallet.RedeemPrivate(contract, unsignedRedeemB, adaptorSigB, adaptorSecret)
+	_, _, _, err = wallet.RedeemPrivate(context.Background(), contract, unsignedRedeemB, adaptorSigB, adaptorSecret)
 	if err == nil {
 		t.Fatalf("expected error for broadcast failure")
 	}
@@ -7873,7 +7873,7 @@ func testRedeemPrivate(t *testing.T, segwit bool, walletType string) {
 	var h chainhash.Hash
 	h[0] = 0x01
 	node.badSendHash = &h
-	_, _, _, err = wallet.RedeemPrivate(contract, unsignedRedeemB, adaptorSigB, adaptorSecret)
+	_, _, _, err = wallet.RedeemPrivate(context.Background(), contract, unsignedRedeemB, adaptorSigB, adaptorSecret)
 	if err == nil {
 		t.Fatalf("expected error for wrong broadcast hash")
 	}

@@ -1371,11 +1371,11 @@ func (w *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	return nil, asset.ErrUnsupported
 }
 
-func (w *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
+func (w *ExchangeWallet) Swap(_ context.Context, swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
 	return nil, nil, 0, asset.ErrUnsupported
 }
 
-func (w *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
+func (w *ExchangeWallet) Redeem(_ context.Context, form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
 	return nil, nil, 0, asset.ErrUnsupported
 }
 
@@ -1395,7 +1395,7 @@ func (w *ExchangeWallet) FindRedemption(ctx context.Context, coinID, contract de
 	return nil, nil, asset.ErrUnsupported
 }
 
-func (w *ExchangeWallet) Refund(coinID, contract dex.Bytes, feeRate uint64) (dex.Bytes, error) {
+func (w *ExchangeWallet) Refund(_ context.Context, coinID, contract dex.Bytes, feeRate uint64) (dex.Bytes, error) {
 	return nil, asset.ErrUnsupported
 }
 

@@ -213,7 +213,8 @@ func newMantle(name string) (*Mantle, error) {
 		Logger:           loggerMaker.Logger("CORE:" + name),
 		NoAutoWalletLock: true,
 		// UnlockCoinsOnLogin: true, // true if we are certain that two bots/Core's are not using the same external wallet
-		NoAutoDBBackup: true,
+		NoAutoDBBackup:   true,
+		MaxActiveMatches: 12,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error initializing core: %w", err)
@@ -680,14 +681,14 @@ func newBotWallet(symbol, node, name string, port string, walletPass []byte, min
 }
 
 // isOverLimitError will be true if the error is a ErrQuantityTooHigh,
-// indicating the client has reached its order limit. Ideally, Core would
-// know the limit and we could query it to use in our algorithm, but the order
-// limit change is new and Core doesn't know what to do with it yet.
+// indicating the client has reached its order limit, or if there are too
+// many active matches and new orders are being deferred.
 func isOverLimitError(err error) bool {
 	if err == nil {
 		return false
 	}
-	return strings.Contains(err.Error(), "order quantity exceeds user limit")
+	return strings.Contains(err.Error(), "order quantity exceeds user limit") ||
+		errors.Is(err, core.ErrTooManyActiveMatches)
 }
 
 func isApprovalPendingError(err error) bool {
