@@ -43,7 +43,7 @@ const CEXConfigForm: React.FC<CEXConfigFormProps> = ({
         onClose()
       }
     } catch (error) {
-      setError(`Failed to update CEX configuration: ${error}`)
+      setError(`Failed to update CEX configuration: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 

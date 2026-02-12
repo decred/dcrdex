@@ -93,7 +93,7 @@ function orderOptionsToRecord (opts: OrderOption[] | null): Record<string, strin
   if (!opts) return null
   return opts.reduce((acc, opt) => ({
     ...acc,
-    [opt.key]: opt.default?.toString() || ''
+    [opt.key]: opt.default?.toString() ?? ''
   }), {})
 }
 
@@ -159,7 +159,6 @@ function getMinimumTransferAmounts (
     else if (market.quoteID === baseID) baseMinWithdraw = Math.max(baseMinWithdraw, market.quoteMinWithdraw)
     if (market.quoteID === quoteID) quoteMinWithdraw = Math.max(quoteMinWithdraw, market.quoteMinWithdraw)
     else if (market.baseID === quoteID) quoteMinWithdraw = Math.max(quoteMinWithdraw, market.baseMinWithdraw)
-    if (baseMinWithdraw > 0 && quoteMinWithdraw > 0) break
   }
 
   if (baseFeesAndLimits) {
@@ -204,8 +203,8 @@ function getDEXMarketInfo (host: string, baseID: number, quoteID: number): Marke
     quoteAsset,
     lotSize,
     quoteLot,
-    baseIsAccountLocker: (baseWallet.traits & TRAIT_ACCOUNT_LOCKER) > 0,
-    quoteIsAccountLocker: (quoteWallet.traits & TRAIT_ACCOUNT_LOCKER) > 0
+    baseIsAccountLocker: baseWallet ? (baseWallet.traits & TRAIT_ACCOUNT_LOCKER) > 0 : false,
+    quoteIsAccountLocker: quoteWallet ? (quoteWallet.traits & TRAIT_ACCOUNT_LOCKER) > 0 : false
   }
 }
 
@@ -303,7 +302,7 @@ export async function initialBotConfigState (
     ({ cexAssetID: cexQuoteID, cexBridge: quoteBridgeName, feesAndLimits: quoteBridgeFeesAndLimits } =
       await fetchCEXAssetAndBridgeInfo(quoteID, null, '', quoteBridges))
   } catch (error) {
-    return `${error}`
+    return error instanceof Error ? error.message : String(error)
   }
 
   const { baseMinWithdraw, quoteMinWithdraw } = getMinimumTransferAmounts(
@@ -387,10 +386,20 @@ export async function botConfigStateFromSavedConfig (
   baseBridges: Record<number, string[]> | null,
   quoteBridges: Record<number, string[]> | null
 ): Promise<BotConfigState | string> {
-  const { cexAssetID: cexBaseID, cexBridge: baseBridgeName, feesAndLimits: baseBridgeFeesAndLimits } =
-    await fetchCEXAssetAndBridgeInfo(savedBotConfig.baseID, savedBotConfig.cexBaseID, savedBotConfig.baseBridgeName, baseBridges)
-  const { cexAssetID: cexQuoteID, cexBridge: quoteBridgeName, feesAndLimits: quoteBridgeFeesAndLimits } =
-    await fetchCEXAssetAndBridgeInfo(savedBotConfig.quoteID, savedBotConfig.cexQuoteID, savedBotConfig.quoteBridgeName, quoteBridges)
+  let cexBaseID = 0
+  let cexQuoteID = 0
+  let baseBridgeName = ''
+  let quoteBridgeName = ''
+  let baseBridgeFeesAndLimits: RoundTripFeesAndLimits | null = null
+  let quoteBridgeFeesAndLimits: RoundTripFeesAndLimits | null = null
+  try {
+    ({ cexAssetID: cexBaseID, cexBridge: baseBridgeName, feesAndLimits: baseBridgeFeesAndLimits } =
+      await fetchCEXAssetAndBridgeInfo(savedBotConfig.baseID, savedBotConfig.cexBaseID, savedBotConfig.baseBridgeName, baseBridges));
+    ({ cexAssetID: cexQuoteID, cexBridge: quoteBridgeName, feesAndLimits: quoteBridgeFeesAndLimits } =
+      await fetchCEXAssetAndBridgeInfo(savedBotConfig.quoteID, savedBotConfig.cexQuoteID, savedBotConfig.quoteBridgeName, quoteBridges))
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
+  }
 
   const { baseMinWithdraw, quoteMinWithdraw } = getMinimumTransferAmounts(
     savedBotConfig.cexName,

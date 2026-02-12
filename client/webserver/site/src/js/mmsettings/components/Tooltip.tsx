@@ -14,7 +14,7 @@ const Tooltip: React.FC<TooltipProps> = ({ content, children }) => {
   const handleMouseEnter = () => {
     if (triggerRef.current) {
       const rect = triggerRef.current.getBoundingClientRect()
-      const tooltipWidth = 200 // Approximate tooltip width
+      const tooltipWidth = 300 // Match maxWidth of tooltip element
       let left = rect.left + rect.width / 2 - tooltipWidth / 2
 
       // Ensure tooltip doesn't go off screen

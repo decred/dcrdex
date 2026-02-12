@@ -2,33 +2,13 @@ div[data-handler=mmsettings],
 div[data-handler=mmarchives],
 div[data-handler=mmlogs],
 div[data-handler=mm] {
-  #gapStrategySelect {
-    width: 300px;
-  }
-
   .gap-factor-input,
   .lots-input {
     max-width: 75px;
   }
 
-  .mw-500 {
-    max-width: 500px;
-  }
-
-  [data-tmpl=value].wide {
-    width: 3rem;
-  }
-
-  .ico-arrowup.ml2px {
-    margin-left: 2px;
-  }
-
   .pt-pt5 {
     padding-top: 0.125rem;
-  }
-
-  #profitInput {
-    width: 70px;
   }
 
   .bot-type-selector {
@@ -121,34 +101,6 @@ div[data-handler=mm] {
     }
   }
 
-  #quickConfig input[type=number] {
-    width: 100px;
-  }
-
-  #levelSpacingBox.disabled {
-    opacity: 0.5;
-  }
-
-  #placementsChart,
-  [data-tmpl=placementsChart] {
-    height: 100px;
-
-    canvas {
-      @extend .fill-abs;
-    }
-  }
-
-  #buyPlacementsBox,
-  #sellPlacementsBox {
-    .ico-cross {
-      color: var(--text-danger);
-    }
-
-    .ico-plus {
-      color: var(--btn-go-bg);
-    }
-  }
-
   #noBots {
     .ico-robot {
       font-size: 80px;
@@ -161,61 +113,6 @@ div[data-handler=mm] {
   #depositDetailsForm,
   #withdrawalDetailsForm {
       min-width: 400px;
-  }
-
-  .allocation-grid {
-    display: grid;
-    grid-template-columns: 1fr auto auto;
-
-    .second {
-      grid-column: 2;
-    }
-
-    .third {
-      grid-column: 3;
-    }
-  }
-
-  section.datum {
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    justify-content: start;
-    text-align: center;
-    font-size: 15px;
-  }
-
-  .buffer-input,
-  .transfer-input {
-    width: 30%;
-  }
-
-  .bridge-label {
-    min-width: 120px;
-  }
-
-  .bridge-select {
-    max-width: 200px;
-  }
-
-  #limitOrderBufferSection {
-    display: none;
-  }
-
-  .configure-bot-content {
-    width: 100%;
-    background-color: var(--section-bg);
-    margin: 20px 0;
-    display: flex;
-    flex-direction: column;
-    // border: 1px solid #dee2e6;
-    border-radius: 0.375rem;
-    box-shadow: 0 0.125rem 0.25rem rgb(0 0 0 / 7.5%);
-  }
-
-  .configure-bot-market-box {
-    padding: 1rem;
-    border-bottom: 1px solid #dee2e6;
   }
 
   .configure-bot-market-display {

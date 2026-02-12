@@ -221,17 +221,8 @@ const (
 	mmProfitThresholdID            = "MM_PROFIT_THRESHOLD"
 	mmProfitThresholdDescID        = "MM_PROFIT_THRESHOLD_DESC"
 	mmPriceLevelsPerSideID         = "MM_PRICE_LEVELS_PER_SIDE"
-	mmLotsPerLevelID               = "MM_LOTS_PER_LEVEL"
-	mmUSDPerSideID                 = "MM_USD_PER_SIDE"
 	mmPriceIncrementID             = "MM_PRICE_INCREMENT"
 	mmMatchBufferID                = "MM_MATCH_BUFFER"
-	mmQuickPlacementsID            = "MM_QUICK_PLACEMENTS"
-	mmAdvancedPlacementsID         = "MM_ADVANCED_PLACEMENTS"
-	mmQuickConfigID                = "MM_QUICK_CONFIG"
-	mmAdvancedConfigID             = "MM_ADVANCED_CONFIG"
-	mmPlacementsDescriptionID      = "MM_PLACEMENTS_DESCRIPTION"
-	mmQuickAllocationID            = "MM_QUICK_ALLOCATION"
-	mmManualAllocationID           = "MM_MANUAL_ALLOCATION"
 	mmTradedAmountID               = "MM_TRADED_AMOUNT"
 	mmSwapFeesID                   = "MM_SWAP_FEES"
 	mmRedeemFeesID                 = "MM_REDEEM_FEES"
@@ -562,17 +553,8 @@ var enUS = map[string]*intl.Translation{
 	mmProfitThresholdID:            {T: "Profit Threshold"},
 	mmProfitThresholdDescID:        {T: "Minimum profit required for arbitrage opportunities."},
 	mmPriceLevelsPerSideID:         {T: "Price levels per side"},
-	mmLotsPerLevelID:               {T: "Lots per level"},
-	mmUSDPerSideID:                 {T: "USD per side"},
 	mmPriceIncrementID:             {T: "Price increment"},
 	mmMatchBufferID:                {T: "Match buffer"},
-	mmQuickPlacementsID:            {T: "Quick Placements"},
-	mmAdvancedPlacementsID:         {T: "Advanced Placements"},
-	mmQuickConfigID:                {T: "Quick config"},
-	mmAdvancedConfigID:             {T: "Advanced config"},
-	mmPlacementsDescriptionID:      {T: "Configure the price levels of the placements on both sides of the order book."},
-	mmQuickAllocationID:            {T: "Quick Allocation"},
-	mmManualAllocationID:           {T: "Manual Allocation"},
 	mmTradedAmountID:               {T: "Traded Amount"},
 	mmSwapFeesID:                   {T: "Swap Fees"},
 	mmRedeemFeesID:                 {T: "Redeem Fees"},
