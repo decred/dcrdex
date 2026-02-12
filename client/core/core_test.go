@@ -1487,6 +1487,10 @@ func newTestRig() *testRig {
 			newCrypter: func([]byte) encrypt.Crypter { return crypter },
 			reCrypter:  func([]byte, []byte) (encrypt.Crypter, error) { return crypter, crypter.recryptErr },
 			noteChans:  make(map[uint64]chan Notification),
+			tipPending: make(map[uint32]uint64),
+			tipActive:  make(map[uint32]bool),
+			balPending: make(map[uint32]*asset.Balance),
+			balActive:  make(map[uint32]bool),
 
 			fiatRateSources:  make(map[string]*commonRateSource),
 			notes:            make(chan asset.WalletNotification, 128),

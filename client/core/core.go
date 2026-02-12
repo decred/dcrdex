@@ -1499,6 +1499,10 @@ type Core struct {
 	tipPending map[uint32]uint64 // assetID -> latest pending tip height
 	tipActive  map[uint32]bool   // assetID -> whether tipChange is running
 
+	balMtx     sync.Mutex
+	balPending map[uint32]*asset.Balance // assetID -> latest pending balance
+	balActive  map[uint32]bool           // assetID -> whether balance processing is running
+
 	noteMtx   sync.RWMutex
 	noteChans map[uint64]chan Notification
 
@@ -1651,6 +1655,8 @@ func New(cfg *Config) (*Core, error) {
 		sentCommits:   make(map[order.Commitment]chan struct{}),
 		tipPending:    make(map[uint32]uint64),
 		tipActive:     make(map[uint32]bool),
+		balPending:    make(map[uint32]*asset.Balance),
+		balActive:     make(map[uint32]bool),
 		// Allowing to change the constructor makes testing a lot easier.
 		wsConstructor: comms.NewWsConn,
 		newCrypter:    encrypt.NewCrypter,
@@ -10081,24 +10087,8 @@ func (c *Core) handleWalletNotification(ni asset.WalletNotification) {
 	case *asset.TipChangeNote:
 		c.queueTipChange(n.AssetID, n.Tip)
 	case *asset.BalanceChangeNote:
-		w, ok := c.wallet(n.AssetID)
-		if !ok {
-			return
-		}
-		contractLockedAmt, orderLockedAmt, bondLockedAmt := c.lockedAmounts(n.AssetID)
-		bal := &WalletBalance{
-			Balance: &db.Balance{
-				Balance: *n.Balance,
-				Stamp:   time.Now(),
-			},
-			OrderLocked:    orderLockedAmt,
-			ContractLocked: contractLockedAmt,
-			BondLocked:     bondLockedAmt,
-		}
-		if err := c.storeAndSendWalletBalance(w, bal); err != nil {
-			c.log.Errorf("Error storing and sending emitted balance: %v", err)
-		}
-		return // Notification sent already.
+		c.queueBalanceChange(n.AssetID, n.Balance)
+		return // Notification sent by runBalanceChange.
 	case *asset.ActionRequiredNote:
 		c.requestedActionMtx.Lock()
 		c.requestedActions[n.UniqueID] = n
@@ -10150,6 +10140,58 @@ func (c *Core) runTipChange(assetID uint32) {
 		delete(c.tipPending, assetID)
 		c.tipMtx.Unlock()
 		c.tipChange(assetID, tip)
+	}
+}
+
+// queueBalanceChange records the latest balance for the asset and ensures a
+// balance processing goroutine is running. If one is already active, the
+// pending balance is stored and picked up when the current run finishes,
+// coalescing rapid-fire balance notifications.
+func (c *Core) queueBalanceChange(assetID uint32, bal *asset.Balance) {
+	c.balMtx.Lock()
+	c.balPending[assetID] = bal
+	if c.balActive[assetID] {
+		c.balMtx.Unlock()
+		return
+	}
+	c.balActive[assetID] = true
+	c.balMtx.Unlock()
+	c.wg.Add(1)
+	go c.runBalanceChange(assetID)
+}
+
+// runBalanceChange drains pending balance changes for the asset. When no more
+// pending balances exist, marks the asset as inactive and returns.
+func (c *Core) runBalanceChange(assetID uint32) {
+	defer c.wg.Done()
+	for {
+		c.balMtx.Lock()
+		bal, ok := c.balPending[assetID]
+		if !ok {
+			c.balActive[assetID] = false
+			c.balMtx.Unlock()
+			return
+		}
+		delete(c.balPending, assetID)
+		c.balMtx.Unlock()
+
+		w, ok := c.wallet(assetID)
+		if !ok {
+			continue
+		}
+		contractLockedAmt, orderLockedAmt, bondLockedAmt := c.lockedAmounts(assetID)
+		walBal := &WalletBalance{
+			Balance: &db.Balance{
+				Balance: *bal,
+				Stamp:   time.Now(),
+			},
+			OrderLocked:    orderLockedAmt,
+			ContractLocked: contractLockedAmt,
+			BondLocked:     bondLockedAmt,
+		}
+		if err := c.storeAndSendWalletBalance(w, walBal); err != nil {
+			c.log.Errorf("Error storing and sending emitted balance: %v", err)
+		}
 	}
 }
 
