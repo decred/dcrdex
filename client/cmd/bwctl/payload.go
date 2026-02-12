@@ -6,6 +6,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 	"strconv"
 	"strings"
@@ -323,9 +324,7 @@ func parseConfigFromRemainingArgs(args []string) (reflect.Value, int, error) {
 			if err := json.Unmarshal([]byte(a), &jm); err != nil {
 				return reflect.Value{}, 0, fmt.Errorf("bad JSON config arg: %w", err)
 			}
-			for k, v := range jm {
-				cfg[k] = v
-			}
+			maps.Copy(cfg, jm)
 		} else if k, v, ok := strings.Cut(a, "="); ok {
 			cfg[k] = v
 		} else {

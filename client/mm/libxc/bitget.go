@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/crc32"
+	"maps"
 	"math"
 	"math/big"
 	"net/http"
@@ -642,9 +643,7 @@ var bitgetToDexSymbol = make(map[string]string)
 
 func init() {
 	// Build the bitgetToDexSymbol map
-	for key, value := range bitgetToDexCoinSymbol {
-		bitgetToDexSymbol[key] = value
-	}
+	maps.Copy(bitgetToDexSymbol, bitgetToDexCoinSymbol)
 
 	for key, value := range dexToBitgetCoinSymbol {
 		if _, exists := bitgetToDexSymbol[value]; !exists {
