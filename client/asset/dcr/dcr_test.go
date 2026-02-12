@@ -3789,7 +3789,7 @@ func TestBroadcastTxDustValidation(t *testing.T) {
 		// Add non-dust output (1 DCR = 100,000,000 atoms)
 		tx.AddTxOut(createP2PKHOutput(1e8))
 
-		_, err := wallet.broadcastTx(tx, feeRate)
+		_, err := wallet.broadcastTx(tCtx, tx, feeRate)
 		if err != nil {
 			// Error might be from SendRawTransaction, but should not be dust error
 			if strings.Contains(err.Error(), "dust") {
@@ -3808,7 +3808,7 @@ func TestBroadcastTxDustValidation(t *testing.T) {
 		// 5000 atoms is below threshold
 		tx.AddTxOut(createP2PKHOutput(5000))
 
-		_, err := wallet.broadcastTx(tx, feeRate)
+		_, err := wallet.broadcastTx(tCtx, tx, feeRate)
 		if err == nil {
 			t.Fatal("expected dust error, got nil")
 		}
@@ -3831,7 +3831,7 @@ func TestBroadcastTxDustValidation(t *testing.T) {
 		// Add a normal non-dust output as well
 		tx.AddTxOut(createP2PKHOutput(1e8))
 
-		_, err := wallet.broadcastTx(tx, feeRate)
+		_, err := wallet.broadcastTx(tCtx, tx, feeRate)
 		if err != nil {
 			// Should not be dust error since OP_RETURN is skipped
 			if strings.Contains(err.Error(), "dust") {
@@ -3848,7 +3848,7 @@ func TestBroadcastTxDustValidation(t *testing.T) {
 		// For P2PKH: min = 10 * (36 + 165) * 3 = 6,030 atoms
 		tx.AddTxOut(createP2PKHOutput(6030))
 
-		_, err := wallet.broadcastTx(tx, feeRate)
+		_, err := wallet.broadcastTx(tCtx, tx, feeRate)
 		// At exact boundary, should NOT be dust
 		if err != nil && strings.Contains(err.Error(), "dust") {
 			t.Fatalf("boundary value should not be dust: %v", err)
@@ -3866,7 +3866,7 @@ func TestBroadcastTxDustValidation(t *testing.T) {
 		// Output 2: Non-dust
 		tx.AddTxOut(createP2PKHOutput(1e8))
 
-		_, err := wallet.broadcastTx(tx, feeRate)
+		_, err := wallet.broadcastTx(tCtx, tx, feeRate)
 		if err == nil {
 			t.Fatal("expected dust error, got nil")
 		}
@@ -3888,7 +3888,7 @@ func TestBroadcastTxDustValidation(t *testing.T) {
 		tx.AddTxOut(createP2PKHOutput(1e8))
 
 		// Pass zero fee rate - should use fallback
-		_, err := wallet.broadcastTx(tx, 0)
+		_, err := wallet.broadcastTx(tCtx, tx, 0)
 		if err != nil && strings.Contains(err.Error(), "dust") {
 			t.Fatalf("fallback fee rate should not cause dust error for 1 DCR: %v", err)
 		}
