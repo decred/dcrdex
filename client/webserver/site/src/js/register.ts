@@ -56,7 +56,7 @@ export default class RegistrationPage extends BasePage {
 
     // Hide the form closers for the registration process except for the
     // password reset form closer.
-    for (const el of body.querySelectorAll('.form-closer')) if (el !== page.resetPassFormCloser) Doc.hide(el)
+    for (const el of Array.from(body.querySelectorAll('.form-closer'))) if (el !== page.resetPassFormCloser) Doc.hide(el)
 
     this.newWalletForm = new NewWalletForm(
       page.newWalletForm,

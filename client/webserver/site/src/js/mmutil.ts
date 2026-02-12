@@ -332,23 +332,38 @@ export class PlacementsChart extends Chart {
       if (!placements?.length) return
       const [xMin, xMax] = isBuy ? [0, cexGapL] : [cexGapR, canvas.width]
       const reg = new Region(ctx, new Extents(xMin, xMax, canvas.height * (1 - regionHeight), canvas.height))
-      const [l, r] = isBuy ? [-range, 0] : [0, range]
+
+      // Calculate actual range needed for placements to touch the border
+      let actualRange = range
+      if (isBuy && placements.length > 0) {
+        const maxGapFactor = Math.max(...placements.map(p => isBasicMM ? p.gapFactor : profit + (placements.indexOf(p) + 1) * fauxSpacer))
+        actualRange = Math.max(range, maxGapFactor)
+      }
+
+      const [l, r] = isBuy ? [-actualRange, 0] : [0, range]
       reg.plot(new Extents(l, r, 0, maxLots), (ctx: CanvasRenderingContext2D, tools: Translator) => {
         ctx.lineWidth = 2.5
         ctx.strokeStyle = isBuy ? theme.buyLine : theme.sellLine
         ctx.fillStyle = isBuy ? theme.buyFill : theme.sellFill
         ctx.beginPath()
         const sideFactor = isBuy ? -1 : 1
-        const firstPt = placements[0]
         const y0 = tools.y(0)
-        const firstX = tools.x((isBasicMM ? firstPt.gapFactor : profit + fauxSpacer) * sideFactor)
-        ctx.moveTo(firstX, y0)
+
+        // For buy side, start from the left border to ensure it touches
+        if (isBuy) {
+          ctx.moveTo(tools.x(-actualRange), y0)
+        }
+
         let cumulativeLots = 0
         for (let i = 0; i < placements.length; i++) {
           const p = placements[i]
           // For arb-mm, we don't know exactly
           const rawX = isBasicMM ? p.gapFactor : profit + (i + 1) * fauxSpacer
           const x = tools.x(rawX * sideFactor)
+          if (i === 0 && !isBuy) {
+            // For sell side, start from first placement
+            ctx.moveTo(x, y0)
+          }
           ctx.lineTo(x, tools.y(cumulativeLots))
           cumulativeLots += p.lots
           ctx.lineTo(x, tools.y(cumulativeLots))
@@ -357,7 +372,13 @@ export class PlacementsChart extends Chart {
         ctx.lineTo(xInfinity, tools.y(cumulativeLots))
         ctx.stroke()
         ctx.lineTo(xInfinity, y0)
-        ctx.lineTo(firstX, y0)
+        if (isBuy) {
+          ctx.lineTo(tools.x(-actualRange), y0)
+        } else {
+          const firstPt = placements[0]
+          const firstX = tools.x((isBasicMM ? firstPt.gapFactor : profit + fauxSpacer) * sideFactor)
+          ctx.lineTo(firstX, y0)
+        }
         ctx.closePath()
         ctx.globalAlpha = 0.25
         ctx.fill()
@@ -386,6 +407,7 @@ export function liveBotStatus (host: string, baseID: number, quoteID: number): M
 }
 
 export function feeAssetID (assetID: number) {
+  console.log('assetID', assetID)
   const asset = app().assets[assetID]
   if (asset.token) return asset.token.parentID
   return assetID
