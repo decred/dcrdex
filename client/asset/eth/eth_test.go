@@ -2163,7 +2163,7 @@ func testRefund(t *testing.T, assetID uint32) {
 			c.refundTx = tx
 		}
 
-		refundID, err := eth.Refund(context.Background(), nil, contract, feeSuggestion)
+		refundID, err := eth.Refund(t.Context(), nil, contract, feeSuggestion)
 
 		if test.wantErr {
 			if err == nil {
@@ -3018,7 +3018,7 @@ func testSwap(t *testing.T, assetID uint32) {
 			t.Fatalf("%v: error getting balance: %v", testName, err)
 		}
 
-		receipts, changeCoin, feeSpent, err := w.Swap(context.Background(), &swaps)
+		receipts, changeCoin, feeSpent, err := w.Swap(t.Context(), &swaps)
 		if expectError {
 			if err == nil {
 				t.Fatalf("%v: expected error but did not get", testName)
@@ -3614,7 +3614,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			contractVer = 1
 		}
 
-		txs, out, fees, err := w.Redeem(context.Background(), &test.form)
+		txs, out, fees, err := w.Redeem(t.Context(), &test.form)
 		if test.expectError {
 			if err == nil {
 				t.Fatalf("%v: expected error", test.name)
@@ -3933,7 +3933,7 @@ func TestGaslessRedeem(t *testing.T) {
 			node.bal = dexeth.GweiToWei(test.balance)
 			node.tContractor.redeemTx = types.NewTx(&types.DynamicFeeTx{})
 
-			ids, out, fees, submitted, err := ethWallet.GaslessRedeem(context.Background(), &asset.RedeemForm{
+			ids, out, fees, submitted, err := ethWallet.GaslessRedeem(t.Context(), &asset.RedeemForm{
 				Redemptions: test.redemptions,
 			})
 			if test.expError {
