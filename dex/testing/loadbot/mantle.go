@@ -214,7 +214,7 @@ func newMantle(name string) (*Mantle, error) {
 		NoAutoWalletLock: true,
 		// UnlockCoinsOnLogin: true, // true if we are certain that two bots/Core's are not using the same external wallet
 		NoAutoDBBackup:   true,
-		MaxActiveMatches: 12,
+		MaxActiveMatches: maxActiveMatches,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error initializing core: %w", err)
@@ -294,7 +294,7 @@ type orderReq struct {
 // order is placed at now + dur - (dur / n). This is a convenience so that the
 // caller can target n orders per epoch with a dur = mkt.EpochDuration, and
 // avoid the simultaneous order at the beginning of the next epoch.
-func (m *Mantle) orderMetered(ords []*orderReq, dur time.Duration) {
+func (m *Mantle) orderMetered(ords []*orderReq, dur time.Duration, overLimit *atomic.Bool) {
 	if len(ords) == 0 {
 		return
 	}
@@ -305,7 +305,11 @@ func (m *Mantle) orderMetered(ords []*orderReq, dur time.Duration) {
 	}
 	err := placeOrder()
 	if isRecoverableOrderError(err) {
+		overLimit.Store(true)
 		return
+	}
+	if err == nil {
+		overLimit.Store(false)
 	}
 	if len(ords) == 0 {
 		// There was only one to place. No need to set a ticker.
@@ -319,10 +323,13 @@ func (m *Mantle) orderMetered(ords []*orderReq, dur time.Duration) {
 			case <-ticker.C:
 				err := placeOrder()
 				if isRecoverableOrderError(err) {
+					overLimit.Store(true)
 					return
 				}
+				if err == nil {
+					overLimit.Store(false)
+				}
 				if len(ords) == 0 {
-					// There was only one to place. No need to set a ticker.
 					return
 				}
 			case <-ctx.Done():
@@ -601,7 +608,7 @@ func coreLimitOrder(sell bool, qty, rate uint64) *core.TradeForm {
 // midGap parses the provided order book for the mid-gap price. If the book
 // is empty, a default value is returned instead.
 func midGap(book *core.OrderBook) uint64 {
-	if keepMidGap {
+	if keepMidGap || oscillate {
 		return uint64(defaultMidGap * rateEncFactor)
 	}
 	if len(book.Sells) > 0 {
