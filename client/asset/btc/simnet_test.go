@@ -393,7 +393,7 @@ func testWalletTxBalanceSync(t *testing.T, fromWallet, toWallet *ExchangeWalletF
 			contract,
 		},
 	}
-	receipts, _, _, err := fromWallet.Swap(context.Background(), swaps)
+	receipts, _, _, err := fromWallet.Swap(t.Context(), swaps)
 	if err != nil {
 		t.Fatalf("error swapping: %v", err)
 	}
@@ -416,7 +416,7 @@ func testWalletTxBalanceSync(t *testing.T, fromWallet, toWallet *ExchangeWalletF
 	if err != nil {
 		t.Fatalf("error getting balance: %v", err)
 	}
-	_, out, _, err := toWallet.Redeem(context.Background(), &asset.RedeemForm{
+	_, out, _, err := toWallet.Redeem(t.Context(), &asset.RedeemForm{
 		Redemptions: []*asset.Redemption{
 			{
 				Spends: auditInfo,
@@ -1028,7 +1028,7 @@ func TestRefundPrivateSwap(t *testing.T) {
 	}
 
 	// Perform the private swap
-	receipts, _, _, _, err := beta.SwapPrivate(context.Background(), swaps)
+	receipts, _, _, _, err := beta.SwapPrivate(t.Context(), swaps)
 	if err != nil {
 		t.Fatalf("error performing private swap: %v", err)
 	}
@@ -1056,7 +1056,7 @@ func TestRefundPrivateSwap(t *testing.T) {
 	}
 
 	// Perform the refund
-	refundCoinID, err := beta.RefundPrivate(context.Background(), coinID, contract, order.MaxFeeRate)
+	refundCoinID, err := beta.RefundPrivate(t.Context(), coinID, contract, order.MaxFeeRate)
 	if err != nil {
 		t.Fatalf("error performing refund: %v", err)
 	}
@@ -1080,7 +1080,7 @@ func TestRefundPrivateSwap(t *testing.T) {
 	time.Sleep(time.Second * 15)
 
 	// Call RefundPrivate again and ensure the same coinID is returned
-	refundCoinID2, err := beta.RefundPrivate(context.Background(), coinID, contract, order.MaxFeeRate)
+	refundCoinID2, err := beta.RefundPrivate(t.Context(), coinID, contract, order.MaxFeeRate)
 	if err != nil {
 		t.Fatalf("error calling RefundPrivate after already refunded.: %v", err)
 	}

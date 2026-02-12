@@ -1081,7 +1081,7 @@ func (btc *ExchangeWalletSPV) WithdrawTx(ctx context.Context, walletPW []byte, a
 	fees := feeRate * (inputsSize + baseSize)
 	toSend := totalIn - fees
 
-	signedTx, _, _, err := btc.signTxAndAddChange(fundedTx, addr, toSend, 0, feeRate)
+	signedTx, _, _, err := btc.signTxAndAddChange(ctx, fundedTx, addr, toSend, 0, feeRate)
 	if err != nil {
 		return nil, err
 	}
@@ -2663,7 +2663,7 @@ func (btc *baseWallet) submitMultiSplitTx(fundingCoins asset.Coins, spents []*Ou
 
 	outputAddresses := make([]btcutil.Address, len(orders))
 	for i, req := range requiredForOrders {
-		outputAddr, err := btc.node.ExternalAddress()
+		outputAddr, err := btc.node.ExternalAddress(btc.ctx)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -2675,7 +2675,7 @@ func (btc *baseWallet) submitMultiSplitTx(fundingCoins asset.Coins, spents []*Ou
 		baseTx.AddTxOut(wire.NewTxOut(int64(req), script))
 	}
 
-	changeAddr, err := btc.node.ChangeAddress()
+	changeAddr, err := btc.node.ChangeAddress(btc.ctx)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -2914,7 +2914,7 @@ func (btc *baseWallet) split(value uint64, lots uint64, outputs []*Output, input
 		return coins, false, 0, nil // err==nil records and locks the provided fundingCoins in defer
 	}
 
-	addr, err := btc.node.ExternalAddress()
+	addr, err := btc.node.ExternalAddress(btc.ctx)
 	if err != nil {
 		return nil, false, 0, fmt.Errorf("error creating split transaction address: %w", err)
 	}
@@ -2933,7 +2933,7 @@ func (btc *baseWallet) split(value uint64, lots uint64, outputs []*Output, input
 	baseTx.AddTxOut(wire.NewTxOut(int64(reqFunds), splitScript))
 
 	if extraOutput > 0 {
-		addr, err := btc.node.ChangeAddress()
+		addr, err := btc.node.ChangeAddress(btc.ctx)
 		if err != nil {
 			return nil, false, 0, fmt.Errorf("error creating split transaction address: %w", err)
 		}
@@ -2945,7 +2945,7 @@ func (btc *baseWallet) split(value uint64, lots uint64, outputs []*Output, input
 	}
 
 	// Grab a change address.
-	changeAddr, err := btc.node.ChangeAddress()
+	changeAddr, err := btc.node.ChangeAddress(btc.ctx)
 	if err != nil {
 		return nil, false, 0, fmt.Errorf("error creating change address: %w", err)
 	}
@@ -3326,12 +3326,12 @@ func (btc *baseWallet) signedAccelerationTx(previousTxs []*GetTransactionResult,
 		return makeError(err)
 	}
 
-	addr, err := btc.node.ExternalAddress()
+	addr, err := btc.node.ExternalAddress(btc.ctx)
 	if err != nil {
 		return makeError(fmt.Errorf("error creating change address: %w", err))
 	}
 
-	tx, output, txFee, err := btc.signTxAndAddChange(baseTx, addr, totalIn, additionalFeesRequired, newFeeRate)
+	tx, output, txFee, err := btc.signTxAndAddChange(btc.ctx, baseTx, addr, totalIn, additionalFeesRequired, newFeeRate)
 	if err != nil {
 		return makeError(err)
 	}
@@ -3397,7 +3397,7 @@ func accelerateOrder(btc *baseWallet, swapCoins, accelerationCoins []dex.Bytes, 
 		return nil, "", err
 	}
 
-	_, err = btc.broadcastTx(signedTx)
+	_, err = btc.broadcastTx(btc.ctx, signedTx)
 	if err != nil {
 		return nil, "", err
 	}
@@ -3788,7 +3788,7 @@ func (btc *baseWallet) addTxToHistory(wt *asset.WalletTransaction, txHash *chain
 // Receipts returned can be used to refund a failed transaction. The Input coins
 // are NOT manually unlocked because they're auto-unlocked when the transaction
 // is broadcasted.
-func (btc *baseWallet) Swap(_ context.Context, swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
+func (btc *baseWallet) Swap(ctx context.Context, swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
 	if swaps.FeeRate == 0 {
 		return nil, nil, 0, fmt.Errorf("cannot send swap with with zero fee rate")
 	}
@@ -3865,7 +3865,7 @@ func (btc *baseWallet) Swap(_ context.Context, swaps *asset.Swaps) ([]asset.Rece
 	}
 
 	// Grab a change address.
-	changeAddr, err := btc.node.ChangeAddress()
+	changeAddr, err := btc.node.ChangeAddress(ctx)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error creating change address: %w", err)
 	}
@@ -3877,7 +3877,7 @@ func (btc *baseWallet) Swap(_ context.Context, swaps *asset.Swaps) ([]asset.Rece
 
 	// Sign, add change, but don't send the transaction yet until
 	// the individual swap refund txs are prepared and signed.
-	msgTx, change, fees, err := btc.signTxAndAddChange(baseTx, changeAddr, totalIn, totalOut, feeRate)
+	msgTx, change, fees, err := btc.signTxAndAddChange(ctx, baseTx, changeAddr, totalIn, totalOut, feeRate)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -3888,7 +3888,7 @@ func (btc *baseWallet) Swap(_ context.Context, swaps *asset.Swaps) ([]asset.Rece
 	for i, contract := range swaps.Contracts {
 		output := NewOutput(txHash, uint32(i), contract.Value)
 		refundAddr := refundAddrs[i]
-		signedRefundTx, err := btc.refundTx(output.txHash(), output.vout(), contracts[i],
+		signedRefundTx, err := btc.refundTx(ctx, output.txHash(), output.vout(), contracts[i],
 			contract.Value, refundAddr, swaps.FeeRate)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error creating refund tx: %w", err)
@@ -3907,7 +3907,7 @@ func (btc *baseWallet) Swap(_ context.Context, swaps *asset.Swaps) ([]asset.Rece
 	}
 
 	// Refund txs prepared and signed. Can now broadcast the swap(s).
-	_, err = btc.broadcastTx(msgTx)
+	_, err = btc.broadcastTx(ctx, msgTx)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -4007,7 +4007,7 @@ func (btc *baseWallet) PrivateSwapPubKey() (pubKeyAndNonce []byte, err error) {
 	}
 
 	// Get an external address from the wallet and retrieve its private key.
-	addr, err := btc.node.ExternalAddress()
+	addr, err := btc.node.ExternalAddress(btc.ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -4016,7 +4016,7 @@ func (btc *baseWallet) PrivateSwapPubKey() (pubKeyAndNonce []byte, err error) {
 	if err != nil {
 		return nil, err
 	}
-	priv, err := btc.node.PrivKeyForAddress(addrStr)
+	priv, err := btc.node.PrivKeyForAddress(btc.ctx, addrStr)
 	if err != nil {
 		return nil, fmt.Errorf("private key unavailable for address %v: %w", addrStr, err)
 	}
@@ -4073,7 +4073,7 @@ func (btc *baseWallet) privKeyForPubKey(pubKey *btcec.PublicKey) (*btcec.Private
 		return nil, err
 	}
 
-	return btc.node.PrivKeyForAddress(addr.String())
+	return btc.node.PrivKeyForAddress(btc.ctx, addr.String())
 }
 
 // privateSwapOutputData contains the data related to a private swap
@@ -4159,7 +4159,7 @@ func (btc *baseWallet) signPrivateSwapRefund(refundTx *wire.MsgTx, output *Outpu
 		return nil, err
 	}
 
-	privKey, err := btc.node.PrivKeyForAddress(addrStr)
+	privKey, err := btc.node.PrivKeyForAddress(btc.ctx, addrStr)
 	if err != nil {
 		return nil, err
 	}
@@ -4224,7 +4224,7 @@ func (btc *baseWallet) privateRefundTx(swapTxOut *Output, lockTime int64, output
 }
 
 // SwapPrivate sends a transaction initiating swaps.
-func (btc *baseWallet) SwapPrivate(_ context.Context, swaps *asset.PrivateSwaps) (receipts []asset.Receipt, coin asset.Coin, txData []byte, fees uint64, err error) {
+func (btc *baseWallet) SwapPrivate(ctx context.Context, swaps *asset.PrivateSwaps) (receipts []asset.Receipt, coin asset.Coin, txData []byte, fees uint64, err error) {
 	fail := func(err error) ([]asset.Receipt, asset.Coin, []byte, uint64, error) {
 		return nil, nil, nil, 0, err
 	}
@@ -4267,14 +4267,14 @@ func (btc *baseWallet) SwapPrivate(_ context.Context, swaps *asset.PrivateSwaps)
 	}
 
 	// Grab a change address.
-	changeAddr, err := btc.node.ChangeAddress()
+	changeAddr, err := btc.node.ChangeAddress(ctx)
 	if err != nil {
 		return fail(fmt.Errorf("error creating change address: %w", err))
 	}
 
 	// Sign, add change, but don't send the transaction yet until
 	// the individual swap refund txs are prepared and signed.
-	swapTx, change, fees, err := btc.signTxAndAddChange(swapTx, changeAddr, totalIn, totalOut, feeRate)
+	swapTx, change, fees, err := btc.signTxAndAddChange(ctx, swapTx, changeAddr, totalIn, totalOut, feeRate)
 	if err != nil {
 		return fail(err)
 	}
@@ -4329,7 +4329,7 @@ func (btc *baseWallet) SwapPrivate(_ context.Context, swaps *asset.PrivateSwaps)
 		return fail(fmt.Errorf("error serializing tx: %w", err))
 	}
 
-	_, err = btc.broadcastTx(swapTx)
+	_, err = btc.broadcastTx(ctx, swapTx)
 	if err != nil {
 		return fail(fmt.Errorf("error sending raw transaction: %w", err))
 	}
@@ -4391,7 +4391,7 @@ func (btc *baseWallet) AuditPrivateContract(coinID, txData []byte, contract *ass
 
 	if rebroadcast {
 		go func() {
-			if hashSent, err := btc.node.SendRawTransaction(tx); err != nil {
+			if hashSent, err := btc.node.SendRawTransaction(btc.ctx, tx); err != nil {
 				btc.log.Debugf("Rebroadcasting counterparty contract %v (THIS MAY BE NORMAL): %v", txHash, err)
 			} else if !hashSent.IsEqual(txHash) {
 				btc.log.Errorf("Counterparty contract %v was rebroadcast as %v!", txHash, hashSent)
@@ -4423,7 +4423,7 @@ func (btc *baseWallet) GenerateUnsignedRedeemTx(coinID []byte, contract *asset.P
 	}
 
 	// Add the output.
-	redeemAddr, err := btc.node.ExternalAddress()
+	redeemAddr, err := btc.node.ExternalAddress(btc.ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error getting external address: %w", err)
 	}
@@ -4753,7 +4753,7 @@ func (btc *baseWallet) GeneratePublicKeyTweakedAdaptor(
 // the adaptor secret. This is used to transform the unsigned redemption into
 // a signed redemption transaction, which is then broadcasted.
 func (btc *baseWallet) RedeemPrivate(
-	_ context.Context,
+	ctx context.Context,
 	contract *asset.PrivateContract,
 	unsignedRedeemB []byte,
 	adaptorSigB []byte,
@@ -4821,7 +4821,7 @@ func (btc *baseWallet) RedeemPrivate(
 	}
 
 	redeemTx.TxIn[0].Witness = wire.TxWitness{finalSig.Serialize()}
-	txHash, err := btc.broadcastTx(redeemTx)
+	txHash, err := btc.broadcastTx(ctx, redeemTx)
 	if err != nil {
 		return nil, 0, nil, fmt.Errorf("error broadcasting redeem tx: %w", err)
 	}
@@ -4927,7 +4927,7 @@ func (btc *baseWallet) RecoverAdaptorSecret(
 	return adaptorSecret, nil
 }
 
-func (btc *baseWallet) RefundPrivate(_ context.Context, coinID dex.Bytes, contract *asset.PrivateContract, feeRate uint64) (dex.Bytes, error) {
+func (btc *baseWallet) RefundPrivate(ctx context.Context, coinID dex.Bytes, contract *asset.PrivateContract, feeRate uint64) (dex.Bytes, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, err
@@ -4976,7 +4976,7 @@ func (btc *baseWallet) RefundPrivate(_ context.Context, coinID dex.Bytes, contra
 		return nil, fmt.Errorf("error deserializing refund tx: %w", err)
 	}
 
-	refundHash, err := btc.broadcastTx(msgTx)
+	refundHash, err := btc.broadcastTx(ctx, msgTx)
 	if err != nil {
 		return nil, fmt.Errorf("broadcastTx: %w", err)
 	}
@@ -5021,7 +5021,7 @@ func (btc *baseWallet) MarkPrivateSwapComplete(contract *asset.PrivateContract, 
 }
 
 // Redeem sends the redemption transaction, completing the atomic swap.
-func (btc *baseWallet) Redeem(_ context.Context, form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
+func (btc *baseWallet) Redeem(ctx context.Context, form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
 	// Create a transaction that spends the referenced contract.
 	msgTx := wire.NewMsgTx(btc.txVersion())
 	var totalIn uint64
@@ -5096,7 +5096,7 @@ func (btc *baseWallet) Redeem(_ context.Context, form *asset.RedeemForm) ([]dex.
 	}
 
 	// Send the funds back to the exchange wallet.
-	redeemAddr, err := btc.node.ExternalAddress()
+	redeemAddr, err := btc.node.ExternalAddress(ctx)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error getting new address from the wallet: %w", err)
 	}
@@ -5118,7 +5118,7 @@ func (btc *baseWallet) Redeem(_ context.Context, form *asset.RedeemForm) ([]dex.
 		sigHashes := txscript.NewTxSigHashes(msgTx, new(txscript.CannedPrevOutputFetcher))
 		for i, r := range form.Redemptions {
 			contract := contracts[i]
-			redeemSig, redeemPubKey, err := btc.createWitnessSig(msgTx, i, contract, addresses[i], values[i], sigHashes)
+			redeemSig, redeemPubKey, err := btc.createWitnessSig(ctx, msgTx, i, contract, addresses[i], values[i], sigHashes)
 			if err != nil {
 				return nil, nil, 0, err
 			}
@@ -5127,7 +5127,7 @@ func (btc *baseWallet) Redeem(_ context.Context, form *asset.RedeemForm) ([]dex.
 	} else {
 		for i, r := range form.Redemptions {
 			contract := contracts[i]
-			redeemSig, redeemPubKey, err := btc.createSig(msgTx, i, contract, addresses[i], values, prevScripts)
+			redeemSig, redeemPubKey, err := btc.createSig(ctx, msgTx, i, contract, addresses[i], values, prevScripts)
 			if err != nil {
 				return nil, nil, 0, err
 			}
@@ -5139,7 +5139,7 @@ func (btc *baseWallet) Redeem(_ context.Context, form *asset.RedeemForm) ([]dex.
 	}
 
 	// Send the transaction.
-	txHash, err := btc.broadcastTx(msgTx)
+	txHash, err := btc.broadcastTx(ctx, msgTx)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -5198,7 +5198,7 @@ func (btc *baseWallet) SignCoinMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 	if utxo == nil {
 		return nil, nil, fmt.Errorf("no utxo found for %s", op)
 	}
-	privKey, err := btc.node.PrivKeyForAddress(utxo.Address)
+	privKey, err := btc.node.PrivKeyForAddress(btc.ctx, utxo.Address)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -5297,7 +5297,7 @@ func (btc *baseWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroad
 	// and does not affect the audit result.
 	if rebroadcast && tx != nil {
 		go func() {
-			if hashSent, err := btc.node.SendRawTransaction(tx); err != nil {
+			if hashSent, err := btc.node.SendRawTransaction(btc.ctx, tx); err != nil {
 				btc.log.Debugf("Rebroadcasting counterparty contract %v (THIS MAY BE NORMAL): %v", txHash, err)
 			} else if !hashSent.IsEqual(txHash) {
 				btc.log.Errorf("Counterparty contract %v was rebroadcast as %v!", txHash, hashSent)
@@ -5362,7 +5362,7 @@ func (btc *intermediaryWallet) FindRedemption(ctx context.Context, coinID, _ dex
 // wallet does not store it, even though it was known when the init transaction
 // was created. The client should store this information for persistence across
 // sessions.
-func (btc *baseWallet) Refund(_ context.Context, coinID, contract dex.Bytes, feeRate uint64) (dex.Bytes, error) {
+func (btc *baseWallet) Refund(ctx context.Context, coinID, contract dex.Bytes, feeRate uint64) (dex.Bytes, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, err
@@ -5393,12 +5393,12 @@ func (btc *baseWallet) Refund(_ context.Context, coinID, contract dex.Bytes, fee
 		return nil, asset.CoinNotFoundError // spent
 	}
 
-	msgTx, err := btc.refundTx(txHash, vout, contract, uint64(utxo.Value), nil, feeRate)
+	msgTx, err := btc.refundTx(ctx, txHash, vout, contract, uint64(utxo.Value), nil, feeRate)
 	if err != nil {
 		return nil, fmt.Errorf("error creating refund tx: %w", err)
 	}
 
-	refundHash, err := btc.broadcastTx(msgTx)
+	refundHash, err := btc.broadcastTx(ctx, msgTx)
 	if err != nil {
 		return nil, fmt.Errorf("broadcastTx: %w", err)
 	}
@@ -5419,7 +5419,7 @@ func (btc *baseWallet) Refund(_ context.Context, coinID, contract dex.Bytes, fee
 
 // refundTx creates and signs a contract`s refund transaction. If refundAddr is
 // not supplied, one will be requested from the wallet.
-func (btc *baseWallet) refundTx(txHash *chainhash.Hash, vout uint32, contract dex.Bytes, val uint64, refundAddr btcutil.Address, feeRate uint64) (*wire.MsgTx, error) {
+func (btc *baseWallet) refundTx(ctx context.Context, txHash *chainhash.Hash, vout uint32, contract dex.Bytes, val uint64, refundAddr btcutil.Address, feeRate uint64) (*wire.MsgTx, error) {
 	sender, _, lockTime, _, err := dexbtc.ExtractSwapDetails(contract, btc.segwit, btc.chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting swap addresses: %w", err)
@@ -5452,7 +5452,7 @@ func (btc *baseWallet) refundTx(txHash *chainhash.Hash, vout uint32, contract de
 		return nil, fmt.Errorf("refund tx not worth the fees")
 	}
 	if refundAddr == nil {
-		refundAddr, err = btc.node.ExternalAddress()
+		refundAddr, err = btc.node.ExternalAddress(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("error getting new address from the wallet: %w", err)
 		}
@@ -5470,7 +5470,7 @@ func (btc *baseWallet) refundTx(txHash *chainhash.Hash, vout uint32, contract de
 
 	if btc.segwit {
 		sigHashes := txscript.NewTxSigHashes(msgTx, new(txscript.CannedPrevOutputFetcher))
-		refundSig, refundPubKey, err := btc.createWitnessSig(msgTx, 0, contract, sender, int64(val), sigHashes)
+		refundSig, refundPubKey, err := btc.createWitnessSig(ctx, msgTx, 0, contract, sender, int64(val), sigHashes)
 		if err != nil {
 			return nil, fmt.Errorf("createWitnessSig: %w", err)
 		}
@@ -5481,7 +5481,7 @@ func (btc *baseWallet) refundTx(txHash *chainhash.Hash, vout uint32, contract de
 			return nil, fmt.Errorf("error constructing p2sh script: %w", err)
 		}
 
-		refundSig, refundPubKey, err := btc.createSig(msgTx, 0, contract, sender, []int64{int64(val)}, [][]byte{prevScript})
+		refundSig, refundPubKey, err := btc.createSig(ctx, msgTx, 0, contract, sender, []int64{int64(val)}, [][]byte{prevScript})
 		if err != nil {
 			return nil, fmt.Errorf("createSig: %w", err)
 		}
@@ -5496,7 +5496,7 @@ func (btc *baseWallet) refundTx(txHash *chainhash.Hash, vout uint32, contract de
 // DepositAddress returns an address for depositing funds into the
 // exchange wallet.
 func (btc *baseWallet) DepositAddress() (string, error) {
-	addr, err := btc.node.ExternalAddress()
+	addr, err := btc.node.ExternalAddress(btc.ctx)
 	if err != nil {
 		return "", err
 	}
@@ -5511,7 +5511,7 @@ func (btc *baseWallet) DepositAddress() (string, error) {
 	// If the wallet is unlocked, be extra cautious and ensure the wallet gave
 	// us an address for which we can retrieve the private keys, regardless of
 	// what ownsAddress would say.
-	priv, err := btc.node.PrivKeyForAddress(addrStr)
+	priv, err := btc.node.PrivKeyForAddress(btc.ctx, addrStr)
 	if err != nil {
 		return "", fmt.Errorf("private key unavailable for address %v: %w", addrStr, err)
 	}
@@ -5614,7 +5614,7 @@ func (btc *baseWallet) SendTransaction(rawTx []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	txHash, err := btc.node.SendRawTransaction(msgTx)
+	txHash, err := btc.node.SendRawTransaction(btc.ctx, msgTx)
 	if err != nil {
 		return nil, err
 	}
@@ -5676,7 +5676,7 @@ func (btc *baseWallet) send(address string, val uint64, feeRate uint64, subtract
 	}
 	fundedTx.AddTxOut(wire.NewTxOut(int64(toSend), pay2script))
 
-	changeAddr, err := btc.node.ChangeAddress()
+	changeAddr, err := btc.node.ChangeAddress(btc.ctx)
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("error creating change address: %w", err)
 	}
@@ -5900,18 +5900,18 @@ func (btc *intermediaryWallet) reportNewTip(ctx context.Context, newTip *BlockVe
 func (btc *baseWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Address,
 	totalIn, totalOut, feeRate uint64) (*wire.MsgTx, error) {
 
-	signedTx, _, _, err := btc.signTxAndAddChange(baseTx, addr, totalIn, totalOut, feeRate)
+	signedTx, _, _, err := btc.signTxAndAddChange(btc.ctx, baseTx, addr, totalIn, totalOut, feeRate)
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = btc.broadcastTx(signedTx)
+	_, err = btc.broadcastTx(btc.ctx, signedTx)
 	return signedTx, err
 }
 
 // signTxAndAddChange signs the passed tx and adds a change output if the change
 // wouldn't be dust. Returns but does NOT broadcast the signed tx.
-func (btc *baseWallet) signTxAndAddChange(baseTx *wire.MsgTx, addr btcutil.Address,
+func (btc *baseWallet) signTxAndAddChange(ctx context.Context, baseTx *wire.MsgTx, addr btcutil.Address,
 	totalIn, totalOut, feeRate uint64) (*wire.MsgTx, *Output, uint64, error) {
 
 	makeErr := func(s string, a ...any) (*wire.MsgTx, *Output, uint64, error) {
@@ -5921,7 +5921,7 @@ func (btc *baseWallet) signTxAndAddChange(baseTx *wire.MsgTx, addr btcutil.Addre
 	// Sign the transaction to get an initial size estimate and calculate whether
 	// a change output would be dust.
 	sigCycles := 1
-	msgTx, err := btc.node.SignTx(baseTx)
+	msgTx, err := btc.node.SignTx(ctx, baseTx)
 	if err != nil {
 		return makeErr("signing error: %v, raw tx: %x", err, btc.wireBytes(baseTx))
 	}
@@ -5966,7 +5966,7 @@ func (btc *baseWallet) signTxAndAddChange(baseTx *wire.MsgTx, addr btcutil.Addre
 		for {
 			// Sign the transaction with the change output and compute new size.
 			sigCycles++
-			msgTx, err = btc.node.SignTx(baseTx)
+			msgTx, err = btc.node.SignTx(ctx, baseTx)
 			if err != nil {
 				return makeErr("signing error: %v, raw tx: %x", err, btc.wireBytes(baseTx))
 			}
@@ -6023,8 +6023,8 @@ func (btc *baseWallet) signTxAndAddChange(baseTx *wire.MsgTx, addr btcutil.Addre
 	return msgTx, change, fee, nil
 }
 
-func (btc *baseWallet) broadcastTx(signedTx *wire.MsgTx) (*chainhash.Hash, error) {
-	txHash, err := btc.node.SendRawTransaction(signedTx)
+func (btc *baseWallet) broadcastTx(ctx context.Context, signedTx *wire.MsgTx) (*chainhash.Hash, error) {
+	txHash, err := btc.node.SendRawTransaction(ctx, signedTx)
 	if err != nil {
 		return nil, fmt.Errorf("sendrawtx error: %v, raw tx: %x", err, btc.wireBytes(signedTx))
 	}
@@ -6038,13 +6038,13 @@ func (btc *baseWallet) broadcastTx(signedTx *wire.MsgTx) (*chainhash.Hash, error
 
 // createSig creates and returns the serialized raw signature and compressed
 // pubkey for a transaction input signature.
-func (btc *baseWallet) createSig(tx *wire.MsgTx, idx int, pkScript []byte, addr btcutil.Address, vals []int64, pkScripts [][]byte) (sig, pubkey []byte, err error) {
+func (btc *baseWallet) createSig(ctx context.Context, tx *wire.MsgTx, idx int, pkScript []byte, addr btcutil.Address, vals []int64, pkScripts [][]byte) (sig, pubkey []byte, err error) {
 	addrStr, err := btc.stringAddr(addr, btc.chainParams)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	privKey, err := btc.node.PrivKeyForAddress(addrStr)
+	privKey, err := btc.node.PrivKeyForAddress(ctx, addrStr)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -6060,13 +6060,13 @@ func (btc *baseWallet) createSig(tx *wire.MsgTx, idx int, pkScript []byte, addr 
 
 // createWitnessSig creates and returns a signature for the witness of a segwit
 // input and the pubkey associated with the address.
-func (btc *baseWallet) createWitnessSig(tx *wire.MsgTx, idx int, pkScript []byte,
+func (btc *baseWallet) createWitnessSig(ctx context.Context, tx *wire.MsgTx, idx int, pkScript []byte,
 	addr btcutil.Address, val int64, sigHashes *txscript.TxSigHashes) (sig, pubkey []byte, err error) {
 	addrStr, err := btc.stringAddr(addr, btc.chainParams)
 	if err != nil {
 		return nil, nil, err
 	}
-	privKey, err := btc.node.PrivKeyForAddress(addrStr)
+	privKey, err := btc.node.PrivKeyForAddress(ctx, addrStr)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -6272,11 +6272,11 @@ func (btc *baseWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time
 		return nil, nil, fmt.Errorf("failed to add inputs to bond tx: %w", err)
 	}
 
-	changeAddr, err := btc.node.ChangeAddress()
+	changeAddr, err := btc.node.ChangeAddress(btc.ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating change address: %w", err)
 	}
-	signedTx, _, fee, err := btc.signTxAndAddChange(baseTx, changeAddr, totalIn, amt, feeRate)
+	signedTx, _, fee, err := btc.signTxAndAddChange(btc.ctx, baseTx, changeAddr, totalIn, amt, feeRate)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to sign bond tx: %w", err)
 	}
@@ -6367,7 +6367,7 @@ func (btc *baseWallet) makeBondRefundTxV0(txid *chainhash.Hash, vout uint32, amt
 	}
 
 	// Add the refund output.
-	redeemAddr, err := btc.node.ExternalAddress()
+	redeemAddr, err := btc.node.ExternalAddress(btc.ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error creating change address: %w", err)
 	}
@@ -6429,7 +6429,7 @@ func (btc *baseWallet) RefundBond(ctx context.Context, ver uint16, coinID, scrip
 		return nil, err
 	}
 
-	_, err = btc.node.SendRawTransaction(msgTx)
+	_, err = btc.node.SendRawTransaction(ctx, msgTx)
 	if err != nil {
 		return nil, fmt.Errorf("error sending refund bond transaction: %w", err)
 	}
