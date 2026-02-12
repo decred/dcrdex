@@ -3232,7 +3232,7 @@ func (dcr *ExchangeWallet) privateRefundTx(coinID, contract dex.Bytes, val uint6
 }
 
 // SwapPrivate initiates private swaps in a single transaction.
-func (dcr *ExchangeWallet) SwapPrivate(swaps *asset.PrivateSwaps) (receipts []asset.Receipt, coin asset.Coin, txData []byte, fees uint64, err error) {
+func (dcr *ExchangeWallet) SwapPrivate(_ context.Context, swaps *asset.PrivateSwaps) (receipts []asset.Receipt, coin asset.Coin, txData []byte, fees uint64, err error) {
 	if swaps.FeeRate == 0 {
 		return nil, nil, nil, 0, fmt.Errorf("cannot send swap with with zero fee rate")
 	}
@@ -3622,7 +3622,7 @@ func (dcr *ExchangeWallet) GeneratePublicKeyTweakedAdaptor(unsignedRedeemB []byt
 // RedeemPrivate redeems a private swap. Unlike HTLC atomic swaps, only one
 // swap can be redeemed at a time because the redemption transaction was
 // pre-generated using GenerateUnsignedRedeemTx.
-func (dcr *ExchangeWallet) RedeemPrivate(contract *asset.PrivateContract, unsignedRedeemB []byte, adaptorSigB []byte, adaptorSecret *btcec.ModNScalar) (out asset.Coin, feesPaid uint64, txData []byte, err error) {
+func (dcr *ExchangeWallet) RedeemPrivate(_ context.Context, contract *asset.PrivateContract, unsignedRedeemB []byte, adaptorSigB []byte, adaptorSecret *btcec.ModNScalar) (out asset.Coin, feesPaid uint64, txData []byte, err error) {
 	adaptorSig, err := dcradaptor.ParseAdaptorSignature(adaptorSigB)
 	if err != nil {
 		return nil, 0, nil, fmt.Errorf("error parsing adaptor signature: %w", err)
@@ -3709,7 +3709,7 @@ func (dcr *ExchangeWallet) MarkPrivateSwapComplete(contract *asset.PrivateContra
 // method MUST return an asset.CoinNotFoundError error if the swap is already
 // spent, which is used to indicate if FindRedemption should be used and the
 // counterparty's swap redeemed.
-func (dcr *ExchangeWallet) RefundPrivate(coinID dex.Bytes, contract *asset.PrivateContract, feeRate uint64) (dex.Bytes, error) {
+func (dcr *ExchangeWallet) RefundPrivate(_ context.Context, coinID dex.Bytes, contract *asset.PrivateContract, feeRate uint64) (dex.Bytes, error) {
 	// Caller should provide a non-zero fee rate, so we could just do
 	// dcr.feeRateWithFallback(feeRate), but be permissive for now.
 	if feeRate == 0 {
@@ -3784,7 +3784,7 @@ func (dcr *ExchangeWallet) RecoverAdaptorSecret(cpRedeemTxB, ourAdaptorSigB, _ [
 // used to refund a failed transaction. The Input coins are manually unlocked
 // because they're not auto-unlocked by the wallet and therefore inaccurately
 // included as part of the locked balance despite being spent.
-func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
+func (dcr *ExchangeWallet) Swap(_ context.Context, swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
 	if swaps.FeeRate == 0 {
 		return nil, nil, 0, fmt.Errorf("cannot send swap with with zero fee rate")
 	}
@@ -3926,7 +3926,7 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 // Redeem sends the redemption transaction, which may contain more than one
 // redemption. FeeSuggestion is just a fallback if an internal estimate using
 // the wallet's redeem confirm block target setting is not available.
-func (dcr *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
+func (dcr *ExchangeWallet) Redeem(_ context.Context, form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
 	// Create a transaction that spends the referenced contract.
 	msgTx := wire.NewMsgTx()
 	var totalIn uint64
@@ -4678,7 +4678,7 @@ func (dcr *ExchangeWallet) fatalFindRedemptionsError(err error, contractOutpoint
 // wallet does not store it, even though it was known when the init transaction
 // was created. The client should store this information for persistence across
 // sessions.
-func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes, feeRate uint64) (dex.Bytes, error) {
+func (dcr *ExchangeWallet) Refund(_ context.Context, coinID, contract dex.Bytes, feeRate uint64) (dex.Bytes, error) {
 	// Caller should provide a non-zero fee rate, so we could just do
 	// dcr.feeRateWithFallback(feeRate), but be permissive for now.
 	if feeRate == 0 {
@@ -7984,14 +7984,14 @@ func (dcr *ExchangeWallet) ConfirmTransaction(coinID dex.Bytes, confirmTx *asset
 			},
 			FeeSuggestion: feeSuggestion,
 		}
-		_, coin, _, err := dcr.Redeem(form)
+		_, coin, _, err := dcr.Redeem(dcr.ctx, form)
 		if err != nil {
 			return nil, fmt.Errorf("unable to re-redeem %s: %w", confirmTx.SpendsCoinID(), err)
 		}
 		newCoinID = coin.ID()
 	} else {
 		spendsCoinID := confirmTx.SpendsCoinID()
-		newCoinID, err = dcr.Refund(spendsCoinID, confirmTx.Contract(), feeSuggestion)
+		newCoinID, err = dcr.Refund(dcr.ctx, spendsCoinID, confirmTx.Contract(), feeSuggestion)
 		if err != nil {
 			return nil, fmt.Errorf("unable to re-refund %s: %w", spendsCoinID, err)
 		}

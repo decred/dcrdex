@@ -116,6 +116,9 @@ var (
 	// ActiveOrdersLogoutErr is returned from logout when there are active
 	// orders.
 	ActiveOrdersLogoutErr = errors.New("cannot log out with active orders")
+	// ErrTooManyActiveMatches is returned from trade when the number of
+	// active matches exceeds the limit.
+	ErrTooManyActiveMatches = errors.New("too many active matches")
 	// walletDisabledErrStr is the error message returned when trying to use a
 	// disabled wallet.
 	walletDisabledErrStr = "%s wallet is disabled"
@@ -1444,6 +1447,10 @@ type Config struct {
 	TheOneHost string
 
 	Mesh bool
+	// MaxActiveMatches is the maximum number of active swap matches allowed
+	// per DEX connection before new orders are deferred. Zero means use the
+	// default (48).
+	MaxActiveMatches int
 }
 
 // locale is data associated with the currently selected language.
@@ -6466,11 +6473,39 @@ func (c *Core) createTradeRequest(wallets *walletSet, coins asset.Coins, redeemS
 	}, nil
 }
 
+// maxActiveMatches is the maximum number of active matches allowed across all
+// trades for a dex connection before new orders are rejected. This prevents
+// wallet overload when many trades are active simultaneously.
+const maxActiveMatchesDefault = 48
+
+// activeMatchCount returns the total number of active matches across all trades
+// for the given dex connection.
+func (c *Core) activeMatchCount(dc *dexConnection) int {
+	dc.tradeMtx.RLock()
+	defer dc.tradeMtx.RUnlock()
+	var n int
+	for _, trade := range dc.trades {
+		n += len(trade.activeMatches())
+	}
+	return n
+}
+
 // prepareTradeRequest prepares a trade request.
 func (c *Core) prepareTradeRequest(pw []byte, form *TradeForm) (*tradeRequest, error) {
 	wallets, assetConfigs, dc, mktConf, err := c.prepareForTradeRequestPrep(pw, form.Base, form.Quote, form.Host, form.Sell)
 	if err != nil {
 		return nil, err
+	}
+
+	// Prevent placing new orders when there are too many active matches.
+	// This avoids overwhelming the wallet backend with concurrent swap
+	// operations, which can cause cascade failures.
+	maxMatches := c.cfg.MaxActiveMatches
+	if maxMatches <= 0 {
+		maxMatches = maxActiveMatchesDefault
+	}
+	if n := c.activeMatchCount(dc); n >= maxMatches {
+		return nil, fmt.Errorf("%w (%d); deferring new orders", ErrTooManyActiveMatches, n)
 	}
 
 	fromWallet, toWallet := wallets.fromWallet, wallets.toWallet

@@ -495,10 +495,10 @@ type Wallet interface {
 	// where necessary to ensure accurate balance reporting in cases where the
 	// wallet includes spent coins as part of the locked balance just because
 	// they were previously locked.
-	Swap(*Swaps) (receipts []Receipt, changeCoin Coin, feesPaid uint64, err error)
+	Swap(ctx context.Context, swaps *Swaps) (receipts []Receipt, changeCoin Coin, feesPaid uint64, err error)
 	// Redeem sends the redemption transaction, which may contain more than one
 	// redemption. The input coin IDs and the output Coin are returned.
-	Redeem(redeems *RedeemForm) (ins []dex.Bytes, out Coin, feesPaid uint64, err error)
+	Redeem(ctx context.Context, redeems *RedeemForm) (ins []dex.Bytes, out Coin, feesPaid uint64, err error)
 	// SignCoinMessage signs the coin ID with the private key associated with the
 	// specified Coin. A slice of pubkeys required to spend the Coin and a
 	// signature for each pubkey are returned.
@@ -544,7 +544,7 @@ type Wallet interface {
 	// the unspent coin info as the wallet does not store it, even though it was
 	// known when the init transaction was created. The client should store this
 	// information for persistence across sessions.
-	Refund(coinID, contract dex.Bytes, feeRate uint64) (dex.Bytes, error)
+	Refund(ctx context.Context, coinID, contract dex.Bytes, feeRate uint64) (dex.Bytes, error)
 	// DepositAddress returns an address for depositing funds into Bison Wallet.
 	DepositAddress() (string, error)
 	// OwnsDepositAddress indicates if the provided address can be used
@@ -645,7 +645,7 @@ type PrivateSwapper interface {
 	// SwapPrivate creates and broadcasts the funding transaction for one or more
 	// private swaps. This transaction locks funds into the contract script
 	// defined by the provided PrivateSwaps data.
-	SwapPrivate(swaps *PrivateSwaps) (receipts []Receipt, coin Coin, txData []byte, fees uint64, err error)
+	SwapPrivate(ctx context.Context, swaps *PrivateSwaps) (receipts []Receipt, coin Coin, txData []byte, fees uint64, err error)
 	// AuditPrivateContract verifies that an on-chain transaction (identified by
 	// coinID and txData) correctly funds the swap as defined by the contract.
 	// This ensures the counterparty has locked funds into the agreed-upon
@@ -704,14 +704,14 @@ type PrivateSwapper interface {
 	// signature using the adaptor secret. This is used to transform the
 	// unsigned redemption into a signed redemption transaction, which is
 	// then broadcasted.
-	RedeemPrivate(contract *PrivateContract, unsignedRedeemB []byte, adaptorSigB []byte, adaptorSecret *btcec.ModNScalar) (out Coin, feesPaid uint64, txData []byte, err error)
+	RedeemPrivate(ctx context.Context, contract *PrivateContract, unsignedRedeemB []byte, adaptorSigB []byte, adaptorSecret *btcec.ModNScalar) (out Coin, feesPaid uint64, txData []byte, err error)
 	// RefundPrivate refunds a private swap. This can only be used after
 	// the time lock has expired AND if the contract has not been
 	// redeemed/refunded. This method MUST return an
 	// asset.CoinNotFoundError error if the swap is already spent, which
 	// is used to indicate if FindRedemption should be used and the
 	// counterparty's swap redeemed.
-	RefundPrivate(coinID dex.Bytes, contract *PrivateContract, feeRate uint64) (dex.Bytes, error)
+	RefundPrivate(ctx context.Context, coinID dex.Bytes, contract *PrivateContract, feeRate uint64) (dex.Bytes, error)
 	// MarkPrivateSwapComplete should be called when a private swap is complete
 	// to clean up some data that is no longer needed. This could potentially be
 	// handled by the wallet itself, but it adds a lot of complexity to the wallet.
@@ -1171,7 +1171,7 @@ type GaslessRedeemer interface {
 	// true. If it is false, an updated coin ID will be returned from
 	// ConfirmRedemption when the transaction is submitted by the bundler,
 	// and the server should be notified using that coin ID.
-	GaslessRedeem(redeems *RedeemForm) (ins []dex.Bytes, out Coin, feesPaid uint64, submitted bool, err error)
+	GaslessRedeem(ctx context.Context, redeems *RedeemForm) (ins []dex.Bytes, out Coin, feesPaid uint64, submitted bool, err error)
 }
 
 // LiveReconfigurer is a wallet that can possibly handle a reconfiguration

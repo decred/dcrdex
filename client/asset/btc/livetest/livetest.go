@@ -354,7 +354,7 @@ func Run(t *testing.T, cfg *Config) {
 
 	tLogger.Info("Testing Swap")
 
-	receipts, _, _, err := rig.secondWallet.Swap(swaps)
+	receipts, _, _, err := rig.secondWallet.Swap(context.Background(), swaps)
 	if err != nil {
 		t.Fatalf("error sending swap transaction: %v", err)
 	}
@@ -461,7 +461,7 @@ func Run(t *testing.T, cfg *Config) {
 
 	tLogger.Info("Testing Redeem")
 
-	_, _, _, err = rig.firstWallet.Redeem(&asset.RedeemForm{
+	_, _, _, err = rig.firstWallet.Redeem(context.Background(), &asset.RedeemForm{
 		Redemptions: redemptions,
 	})
 	if err != nil {
@@ -535,7 +535,7 @@ func Run(t *testing.T, cfg *Config) {
 
 	tLogger.Info("Testing Refund")
 
-	receipts, _, _, err = rig.secondWallet.Swap(swaps)
+	receipts, _, _, err = rig.secondWallet.Swap(context.Background(), swaps)
 	if err != nil {
 		t.Fatalf("error sending swap transaction: %v", err)
 	}
@@ -553,7 +553,7 @@ func Run(t *testing.T, cfg *Config) {
 	}
 
 	const defaultFee = 100
-	coinID, err := rig.secondWallet.Refund(swapReceipt.Coin().ID(), swapReceipt.Contract(), 100)
+	coinID, err := rig.secondWallet.Refund(context.Background(), swapReceipt.Coin().ID(), swapReceipt.Contract(), 100)
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
 	}

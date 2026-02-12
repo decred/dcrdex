@@ -2227,7 +2227,6 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	// redeemMatches, refundMatches) to avoid blocking message handlers.
 	// Do NOT add early returns without ensuring the lock is released first.
 	t.mtx.Lock()
-	defer t.mtx.Unlock()
 
 	if rmCancel {
 		t.deleteStaleCancelOrder()
@@ -2243,6 +2242,8 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	}
 
 	if len(swaps) > 0 {
+		// refreshUnlock doesn't need the trade lock.
+		t.mtx.Unlock()
 		didUnlock, err := t.wallets.fromWallet.refreshUnlock()
 		if err != nil { // Just log it and try anyway.
 			c.log.Errorf("refreshUnlock error swapping %s: %v", t.wallets.fromWallet.Symbol, err)
@@ -2250,10 +2251,12 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		if didUnlock {
 			c.log.Infof("Unexpected unlock needed for the %s wallet to send a swap", t.wallets.fromWallet.Symbol)
 		}
+		t.mtx.Lock()
 		qty := sent
 		if !t.Trade().Sell {
 			qty = quoteSent
 		}
+		// swapMatches/swapMatchGroup temporarily release t.mtx during wallet calls.
 		err = c.swapMatches(t, swaps)
 		corder := t.coreOrderInternal() // after swapMatches modifies matches
 		ui := t.wallets.fromWallet.Info().UnitInfo
@@ -2268,6 +2271,8 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	}
 
 	if len(redeems) > 0 {
+		// refreshUnlock doesn't need the trade lock.
+		t.mtx.Unlock()
 		didUnlock, err := t.wallets.toWallet.refreshUnlock()
 		if err != nil { // Just log it and try anyway.
 			c.log.Errorf("refreshUnlock error redeeming %s: %v", t.wallets.toWallet.Symbol, err)
@@ -2275,10 +2280,12 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		if didUnlock {
 			c.log.Infof("Unexpected unlock needed for the %s wallet to send a redemption", t.wallets.toWallet.Symbol)
 		}
+		t.mtx.Lock()
 		qty := received
 		if t.Trade().Sell {
 			qty = quoteReceived
 		}
+		// redeemMatches/redeemMatchGroup temporarily release t.mtx during wallet calls.
 		err = c.redeemMatches(t, redeems)
 		corder := t.coreOrderInternal()
 		ui := t.wallets.toWallet.Info().UnitInfo
@@ -2295,6 +2302,8 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	}
 
 	if len(refunds) > 0 {
+		// refreshUnlock doesn't need the trade lock.
+		t.mtx.Unlock()
 		didUnlock, err := t.wallets.fromWallet.refreshUnlock()
 		if err != nil { // Just log it and try anyway.
 			c.log.Errorf("refreshUnlock error refunding %s: %v", t.wallets.fromWallet.Symbol, err)
@@ -2302,6 +2311,8 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		if didUnlock {
 			c.log.Infof("Unexpected unlock needed for the %s wallet while sending a refund", t.wallets.fromWallet.Symbol)
 		}
+		t.mtx.Lock()
+		// refundMatches temporarily releases t.mtx during wallet calls.
 		refunded, err := c.refundMatches(t, refunds)
 		corder := t.coreOrderInternal()
 		ui := t.wallets.fromWallet.Info().UnitInfo
@@ -2342,6 +2353,8 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	for _, match := range dynamicRedemptionFeeConfirms {
 		t.updateDynamicSwapOrRedemptionFeesPaid(c.ctx, match, false)
 	}
+
+	t.mtx.Unlock()
 
 	return assets, errs.ifAny()
 }
@@ -2478,7 +2491,8 @@ func (t *trackedTrade) revokeMatch(matchID order.MatchID, fromServer bool) error
 // individually and separate from the non-suspect group.
 //
 // This method modifies match fields and MUST be called with the trackedTrade
-// mutex lock held for writes.
+// mutex lock held for writes. The lock is temporarily released during wallet
+// calls.
 func (c *Core) swapMatches(t *trackedTrade, matches []*matchTracker) (err error) {
 	feeRate, err := t.bestSwapGroupFeeRate(matches)
 	if err != nil {
@@ -2552,7 +2566,8 @@ func (t *trackedTrade) bestSwapGroupFeeRate(matches []*matchTracker) (uint64, er
 // matches.
 //
 // This method modifies match fields and MUST be called with the trackedTrade
-// mutex lock held for writes.
+// mutex lock held for writes. The lock is temporarily released during the
+// wallet Swap call to avoid blocking message handlers.
 func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, highestFeeRate uint64, errs *errorSet) {
 	// Ensure swap is not sent with a zero fee rate.
 	if highestFeeRate == 0 {
@@ -2644,7 +2659,11 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, highestF
 		LockChange:   lockChange,
 		Options:      t.options,
 	}
-	receipts, change, fees, err := fromWallet.Swap(swaps)
+	// Release the trade lock during the wallet call to avoid blocking
+	// message handlers (e.g. revoke_match, audit) for this trade.
+	t.mtx.Unlock()
+	receipts, change, fees, err := fromWallet.Swap(c.ctx, swaps)
+	t.mtx.Lock()
 	if err != nil {
 		bTimeout, tickInterval := t.broadcastTimeout(), t.dc.ticker.Dur() // bTimeout / tickCheckInterval
 		for _, match := range matches {
@@ -2741,6 +2760,10 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, highestF
 			coin, fromWallet.Symbol, coin.Value(), receipt.Expiration(), receipt.String(), match)
 		if secret := match.MetaData.Proof.Secret; len(secret) > 0 {
 			c.log.Tracef("Contract coin %v secret = %x", coin, secret)
+		}
+
+		if match.MetaData.Proof.IsRevoked() {
+			c.log.Warnf("Match %s revoked while swap tx was being broadcast for order %s. Swap is already sent.", match, t.ID())
 		}
 
 		// Update the match db data with the swap details before attempting
@@ -2868,7 +2891,8 @@ func (c *Core) sendInitAsync(t *trackedTrade, match *matchTracker, coinID, contr
 // individually and separate from the non-suspect group.
 //
 // This method modifies match fields and MUST be called with the trackedTrade
-// mutex lock held for writes.
+// mutex lock held for writes. The lock is temporarily released during wallet
+// calls.
 func (c *Core) redeemMatches(t *trackedTrade, matches []*matchTracker) (err error) {
 	errs := newErrorSet("redeemMatches order %s - ", t.ID())
 	groupables := make([]*matchTracker, 0, len(matches)) // Over-allocating if there are suspect matches
@@ -2930,10 +2954,10 @@ func lcm(a, b uint64) (lowest, multA, multB uint64) {
 // funds for the redempiton.
 func (c *Core) redeem(redeemWallet *xcWallet, redemptionReserves uint64, redeemForm *asset.RedeemForm) (coinIDs []dex.Bytes, outCoin asset.Coin, fees uint64, submitted bool, err error) {
 	if gaslessRedeemer, is := redeemWallet.Wallet.(asset.GaslessRedeemer); is && redemptionReserves == 0 {
-		return gaslessRedeemer.GaslessRedeem(redeemForm)
+		return gaslessRedeemer.GaslessRedeem(c.ctx, redeemForm)
 	}
 
-	coinIDs, outCoin, fees, err = redeemWallet.Redeem(redeemForm)
+	coinIDs, outCoin, fees, err = redeemWallet.Redeem(c.ctx, redeemForm)
 	submitted = true
 	return
 }
@@ -2941,7 +2965,8 @@ func (c *Core) redeem(redeemWallet *xcWallet, redemptionReserves uint64, redeemF
 // redeemMatchGroup will send a transaction redeeming the specified matches.
 //
 // This method modifies match fields and MUST be called with the trackedTrade
-// mutex lock held for writes.
+// mutex lock held for writes. The lock is temporarily released during the
+// wallet Redeem call to avoid blocking message handlers.
 func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *errorSet) {
 	// Collect an asset.Redemption for each match into a slice of redemptions that
 	// will be grouped into a single transaction.
@@ -2960,12 +2985,19 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 		return
 	}
 
-	coinIDs, outCoin, fees, submitted, err := c.redeem(redeemWallet, t.redemptionReserves,
+	// Release the trade lock during the wallet call to avoid blocking
+	// message handlers (e.g. revoke_match, audit) for this trade.
+	redemptionReserves := t.redemptionReserves
+	redeemFee := t.redeemFee()
+	options := t.options
+	t.mtx.Unlock()
+	coinIDs, outCoin, fees, submitted, err := c.redeem(redeemWallet, redemptionReserves,
 		&asset.RedeemForm{
 			Redemptions:   redemptions,
-			FeeSuggestion: t.redeemFee(), // fallback - wallet will try to get a rate internally for configured redeem conf target
-			Options:       t.options,
+			FeeSuggestion: redeemFee, // fallback - wallet will try to get a rate internally for configured redeem conf target
+			Options:       options,
 		})
+	t.mtx.Lock()
 
 	// If an error was encountered, fail all of the matches. A failed match will
 	// not run again on during ticks.
@@ -3037,6 +3069,9 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 	// Saving the redemption details now makes it possible to resend the
 	// `redeem` request at a later time if sending it now fails.
 	for i, match := range matches {
+		if match.MetaData.Proof.IsRevoked() {
+			c.log.Warnf("Match %s revoked while redeem tx was being broadcast for order %s. Redeem is already sent.", match, t.ID())
+		}
 		proof := &match.MetaData.Proof
 		coinID := []byte(coinIDs[i])
 		match.redemptionPendingSubmission = !submitted
@@ -3572,7 +3607,8 @@ func (t *trackedTrade) findMakersRedemption(ctx context.Context, match *matchTra
 // refundMatches will send refund transactions for the specified matches.
 //
 // This method modifies match fields and MUST be called with the trackedTrade
-// mutex lock held for writes.
+// mutex lock held for writes. The lock is temporarily released during each
+// wallet Refund call to avoid blocking message handlers.
 func (c *Core) refundMatches(t *trackedTrade, matches []*matchTracker) (uint64, error) {
 	errs := newErrorSet("refundMatches: order %s - ", t.ID())
 
@@ -3617,7 +3653,11 @@ func (c *Core) refundMatches(t *trackedTrade, matches []*matchTracker) (uint64, 
 			feeRate = c.feeSuggestionAny(assetID) // includes wallet itself
 		}
 
-		refundCoin, err := refundWallet.Refund(swapCoinID, contractToRefund, feeRate)
+		// Release the trade lock during the wallet call to avoid blocking
+		// message handlers (e.g. revoke_match, audit) for this trade.
+		t.mtx.Unlock()
+		refundCoin, err := refundWallet.Refund(c.ctx, swapCoinID, contractToRefund, feeRate)
+		t.mtx.Lock()
 		if err != nil {
 			// CRITICAL - Refund must indicate if the swap is spent (i.e.
 			// redeemed already) so that as taker we will start the
@@ -3642,6 +3682,10 @@ func (c *Core) refundMatches(t *trackedTrade, matches []*matchTracker) (uint64, 
 				}
 			}
 			continue
+		}
+
+		if match.MetaData.Proof.IsRevoked() {
+			c.log.Warnf("Match %s revoked while refund tx was being broadcast for order %s. Refund is still valid.", match, t.ID())
 		}
 
 		if t.isMarketBuy() {

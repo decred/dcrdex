@@ -3788,7 +3788,7 @@ func (btc *baseWallet) addTxToHistory(wt *asset.WalletTransaction, txHash *chain
 // Receipts returned can be used to refund a failed transaction. The Input coins
 // are NOT manually unlocked because they're auto-unlocked when the transaction
 // is broadcasted.
-func (btc *baseWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
+func (btc *baseWallet) Swap(_ context.Context, swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
 	if swaps.FeeRate == 0 {
 		return nil, nil, 0, fmt.Errorf("cannot send swap with with zero fee rate")
 	}
@@ -4224,7 +4224,7 @@ func (btc *baseWallet) privateRefundTx(swapTxOut *Output, lockTime int64, output
 }
 
 // SwapPrivate sends a transaction initiating swaps.
-func (btc *baseWallet) SwapPrivate(swaps *asset.PrivateSwaps) (receipts []asset.Receipt, coin asset.Coin, txData []byte, fees uint64, err error) {
+func (btc *baseWallet) SwapPrivate(_ context.Context, swaps *asset.PrivateSwaps) (receipts []asset.Receipt, coin asset.Coin, txData []byte, fees uint64, err error) {
 	fail := func(err error) ([]asset.Receipt, asset.Coin, []byte, uint64, error) {
 		return nil, nil, nil, 0, err
 	}
@@ -4753,6 +4753,7 @@ func (btc *baseWallet) GeneratePublicKeyTweakedAdaptor(
 // the adaptor secret. This is used to transform the unsigned redemption into
 // a signed redemption transaction, which is then broadcasted.
 func (btc *baseWallet) RedeemPrivate(
+	_ context.Context,
 	contract *asset.PrivateContract,
 	unsignedRedeemB []byte,
 	adaptorSigB []byte,
@@ -4926,7 +4927,7 @@ func (btc *baseWallet) RecoverAdaptorSecret(
 	return adaptorSecret, nil
 }
 
-func (btc *baseWallet) RefundPrivate(coinID dex.Bytes, contract *asset.PrivateContract, feeRate uint64) (dex.Bytes, error) {
+func (btc *baseWallet) RefundPrivate(_ context.Context, coinID dex.Bytes, contract *asset.PrivateContract, feeRate uint64) (dex.Bytes, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, err
@@ -5020,7 +5021,7 @@ func (btc *baseWallet) MarkPrivateSwapComplete(contract *asset.PrivateContract, 
 }
 
 // Redeem sends the redemption transaction, completing the atomic swap.
-func (btc *baseWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
+func (btc *baseWallet) Redeem(_ context.Context, form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
 	// Create a transaction that spends the referenced contract.
 	msgTx := wire.NewMsgTx(btc.txVersion())
 	var totalIn uint64
@@ -5361,7 +5362,7 @@ func (btc *intermediaryWallet) FindRedemption(ctx context.Context, coinID, _ dex
 // wallet does not store it, even though it was known when the init transaction
 // was created. The client should store this information for persistence across
 // sessions.
-func (btc *baseWallet) Refund(coinID, contract dex.Bytes, feeRate uint64) (dex.Bytes, error) {
+func (btc *baseWallet) Refund(_ context.Context, coinID, contract dex.Bytes, feeRate uint64) (dex.Bytes, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, err
@@ -7574,14 +7575,14 @@ func (btc *baseWallet) ConfirmTransaction(coinID dex.Bytes, confirmTx *asset.Con
 			},
 			FeeSuggestion: feeSuggestion,
 		}
-		_, coin, _, err := btc.Redeem(form)
+		_, coin, _, err := btc.Redeem(btc.ctx, form)
 		if err != nil {
 			return nil, fmt.Errorf("unable to re-redeem %s with swap hash %v vout %d: %w", confirmTx.SpendsCoinID(), swapHash, vout, err)
 		}
 		newCoinID = coin.ID()
 	} else {
 		spendsCoinID := confirmTx.SpendsCoinID()
-		newCoinID, err = btc.Refund(spendsCoinID, confirmTx.Contract(), feeSuggestion)
+		newCoinID, err = btc.Refund(btc.ctx, spendsCoinID, confirmTx.Contract(), feeSuggestion)
 		if err != nil {
 			return nil, fmt.Errorf("unable to re-refund %s: %w", spendsCoinID, err)
 		}

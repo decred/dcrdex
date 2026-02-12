@@ -863,7 +863,7 @@ func (w *zecWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uint6
 }
 
 // Redeem sends the redemption transaction, completing the atomic swap.
-func (w *zecWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
+func (w *zecWallet) Redeem(_ context.Context, form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
 	// Create a transaction that spends the referenced contract.
 	tx := dexzec.NewTxFromMsgTx(wire.NewMsgTx(dexzec.VersionNU5), dexzec.MaxExpiryHeight)
 	var totalIn uint64
@@ -1632,14 +1632,14 @@ func (w *zecWallet) ConfirmTransaction(coinID dex.Bytes, confirmTx *asset.Confir
 			},
 			FeeSuggestion: feeSuggestion,
 		}
-		_, coin, _, err := w.Redeem(form)
+		_, coin, _, err := w.Redeem(w.ctx, form)
 		if err != nil {
 			return nil, fmt.Errorf("unable to re-redeem %s with swap hash %v vout %d: %w", confirmTx.SpendsCoinID(), swapHash, vout, err)
 		}
 		newCoinID = coin.ID()
 	} else {
 		spendsCoinID := confirmTx.SpendsCoinID()
-		newCoinID, err = w.Refund(spendsCoinID, confirmTx.Contract(), feeSuggestion)
+		newCoinID, err = w.Refund(w.ctx, spendsCoinID, confirmTx.Contract(), feeSuggestion)
 		if err != nil {
 			return nil, fmt.Errorf("unable to re-refund %s: %w", spendsCoinID, err)
 		}
@@ -1944,7 +1944,7 @@ func (w *zecWallet) recyclableAddress() (string, error) {
 	return transparentAddressString(w)
 }
 
-func (w *zecWallet) Refund(coinID, contract dex.Bytes, feeRate uint64) (dex.Bytes, error) {
+func (w *zecWallet) Refund(_ context.Context, coinID, contract dex.Bytes, feeRate uint64) (dex.Bytes, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, err
@@ -2366,7 +2366,7 @@ func (w *zecWallet) SignCoinMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, si
 	return
 }
 
-func (w *zecWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
+func (w *zecWallet) Swap(_ context.Context, swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
 	contracts := make([][]byte, 0, len(swaps.Contracts))
 	var totalOut uint64
 	// Start with an empty MsgTx.
