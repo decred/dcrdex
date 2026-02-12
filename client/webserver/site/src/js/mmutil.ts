@@ -407,7 +407,6 @@ export function liveBotStatus (host: string, baseID: number, quoteID: number): M
 }
 
 export function feeAssetID (assetID: number) {
-  console.log('assetID', assetID)
   const asset = app().assets[assetID]
   if (asset.token) return asset.token.parentID
   return assetID
