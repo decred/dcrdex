@@ -118,12 +118,11 @@ type WsPongMessage struct {
 	Op string `json:"op"` // "pong"
 }
 
-// BookUpdate represents an orderbook update (converted from WsBookData)
+// BookUpdate represents an orderbook update from WebSocket.
+// Only string format is stored - conversion to uint64 happens once during orderbook insertion.
 type BookUpdate struct {
-	Bids         [][]float64
-	Asks         [][]float64
-	BidsOriginal [][]string // Original string format for checksum calculation
-	AsksOriginal [][]string // Original string format for checksum calculation
-	IsSnapshot   bool       // true if action='snapshot', false if action='update'
-	Checksum     int32      // Bitget's checksum for validation (0 if not provided)
+	Bids       [][]string // [price, quantity] as strings
+	Asks       [][]string // [price, quantity] as strings
+	IsSnapshot bool       // true if action='snapshot', false if action='update'
+	Checksum   int32      // Bitget's checksum for validation (0 if not provided)
 }
