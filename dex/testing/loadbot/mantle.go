@@ -214,7 +214,7 @@ func newMantle(name string) (*Mantle, error) {
 		NoAutoWalletLock: true,
 		// UnlockCoinsOnLogin: true, // true if we are certain that two bots/Core's are not using the same external wallet
 		NoAutoDBBackup:   true,
-		MaxActiveMatches: 12,
+		MaxActiveMatches: maxActiveMatches,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error initializing core: %w", err)
@@ -601,7 +601,7 @@ func coreLimitOrder(sell bool, qty, rate uint64) *core.TradeForm {
 // midGap parses the provided order book for the mid-gap price. If the book
 // is empty, a default value is returned instead.
 func midGap(book *core.OrderBook) uint64 {
-	if keepMidGap {
+	if keepMidGap || oscillate {
 		return uint64(defaultMidGap * rateEncFactor)
 	}
 	if len(book.Sells) > 0 {

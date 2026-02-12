@@ -28,6 +28,7 @@ import (
 	"os/signal"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -39,6 +40,7 @@ import (
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/config"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
+	"decred.org/dcrdex/dex/version"
 	dexpolygon "decred.org/dcrdex/dex/networks/polygon"
 	dexsrv "decred.org/dcrdex/server/dex"
 	toxiproxy "github.com/Shopify/toxiproxy/v2/client"
@@ -121,6 +123,7 @@ var (
 	defaultMidGap, marketBuyBuffer, whalePercent               float64
 	keepMidGap, oscillate, randomOsc, ignoreErrors, liveMidGap bool
 	oscInterval, oscStep, whaleFrequency                       uint64
+	maxActiveMatches                                           int
 
 	processesMtx sync.Mutex
 	processes    []*process
@@ -128,12 +131,17 @@ var (
 	// zecSendMtx prevents sending funds too soon after mining a block and
 	// the harness choosing spent outputs for Zcash.
 	zecSendMtx sync.Mutex
+
+	// Version is the loadbot version string, overridden on init with the
+	// build's VCS commit info.
+	Version = "0.0.0-pre"
 )
 
 func init() {
 	rand.Seed(time.Now().UnixNano())
 	dexeth.MaybeReadSimnetAddrs()
 	dexpolygon.MaybeReadSimnetAddrs()
+	Version = version.Parse(Version)
 }
 
 // process stores a long running command and the funcion to stop it on shutdown.
@@ -332,6 +340,7 @@ func run() error {
 	flag.Uint64Var(&whaleFrequency, "whalefrequency", 4, "controls the frequency with which the whale \"whales\" after it is ready. To whale is to choose a rate and attempt to buy up the entire book at that price. If frequency is N, the whale will whale an average of 1 out of every N+1 epochs (default 4)")
 	flag.Float64Var(&whalePercent, "whalepercent", 0.1, "The percent of the current mid gap to whale within. If 0.1 the whale will pick a target price between 0.9 and 1.1 percent of the current mid gap (default 0.1). Ignored if livemidgap is true")
 	flag.BoolVar(&liveMidGap, "livemidgap", false, "set true to start with a fetched midgap. Also forces the whale to only whale towards the mid gap")
+	flag.IntVar(&maxActiveMatches, "maxmatches", 6, "maximum number of active swap matches per Core before new orders are deferred (default 6)")
 	flag.Parse()
 
 	if programName == "" {
@@ -417,6 +426,9 @@ func run() error {
 	}
 
 	rateIncrease = int64(rateStep) * rateShift
+	if randomOsc {
+		oscillate = true
+	}
 
 	// Adjust to be comparable to the dcr_btc market.
 	defaultMidGapConv := getXCRate(baseSymbol) / getXCRate(quoteSymbol)
@@ -427,6 +439,7 @@ func run() error {
 		return fmt.Errorf("error creating LoggerMaker: %v", err)
 	}
 	log /* global */ = loggerMaker.NewLogger("LOADBOT")
+	log.Infof("loadbot version %s (Go version %s)", Version, runtime.Version())
 
 	if liveMidGap {
 		defaultMidGap, err = liveRate()
