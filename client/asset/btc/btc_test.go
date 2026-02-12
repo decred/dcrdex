@@ -699,6 +699,7 @@ func tNewWallet(segwit bool, walletType string) (*intermediaryWallet, *testData,
 		os.RemoveAll(dataDir)
 		panic(err.Error())
 	}
+	wallet.ctx = walletCtx
 	wallet.tipMtx.Lock()
 	wallet.currentTip = &BlockVector{
 		Height: data.GetBestBlockHeight(),

@@ -364,7 +364,7 @@ func (ew *electrumWallet) Reconfigure(cfg *asset.WalletConfig, currentAddress st
 }
 
 // part of btc.Wallet interface
-func (ew *electrumWallet) SendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error) {
+func (ew *electrumWallet) SendRawTransaction(ctx context.Context, tx *wire.MsgTx) (*chainhash.Hash, error) {
 	b, err := serializeMsgTx(tx)
 	if err != nil {
 		return nil, err
@@ -372,13 +372,13 @@ func (ew *electrumWallet) SendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, e
 	// Add the transaction to the wallet DB before broadcasting it on the
 	// network, otherwise it is not immediately recorded. This is expected to
 	// error on non-wallet transactions such as counterparty transactions.
-	_, err = ew.wallet.AddLocalTx(ew.ctx, b)
+	_, err = ew.wallet.AddLocalTx(ctx, b)
 	if err != nil && !strings.Contains(err.Error(), "unrelated to this wallet") {
 		ew.log.Warnf("Failed to add tx to the wallet DB: %v", err)
 	}
-	txid, err := ew.wallet.Broadcast(ew.ctx, b)
+	txid, err := ew.wallet.Broadcast(ctx, b)
 	if err != nil {
-		ew.tryRemoveLocalTx(ew.ctx, tx.TxHash().String())
+		ew.tryRemoveLocalTx(ctx, tx.TxHash().String())
 		return nil, err
 	}
 	hash, err := chainhash.NewHashFromStr(txid)
@@ -776,8 +776,8 @@ func (ew *electrumWallet) ListLockUnspent() ([]*RPCOutpoint, error) {
 
 // ExternalAddress creates a fresh address beyond the default gap limit, so it
 // should be used immediately. Part of btc.Wallet interface.
-func (ew *electrumWallet) ExternalAddress() (btcutil.Address, error) {
-	addr, err := ew.wallet.GetUnusedAddress(ew.ctx)
+func (ew *electrumWallet) ExternalAddress(ctx context.Context) (btcutil.Address, error) {
+	addr, err := ew.wallet.GetUnusedAddress(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -786,12 +786,12 @@ func (ew *electrumWallet) ExternalAddress() (btcutil.Address, error) {
 
 // ChangeAddress creates a fresh address beyond the default gap limit, so it
 // should be used immediately. Part of btc.Wallet interface.
-func (ew *electrumWallet) ChangeAddress() (btcutil.Address, error) {
-	return ew.ExternalAddress() // sadly, cannot request internal addresses
+func (ew *electrumWallet) ChangeAddress(ctx context.Context) (btcutil.Address, error) {
+	return ew.ExternalAddress(ctx) // sadly, cannot request internal addresses
 }
 
 // part of btc.Wallet interface
-func (ew *electrumWallet) SignTx(inTx *wire.MsgTx) (*wire.MsgTx, error) {
+func (ew *electrumWallet) SignTx(ctx context.Context, inTx *wire.MsgTx) (*wire.MsgTx, error) {
 	// If the wallet's signtransaction RPC ever has a problem with the PSBT, we
 	// could attempt to sign the transaction ourselves by pulling the inputs'
 	// private keys and using txscript manually, but this can vary greatly
@@ -806,7 +806,7 @@ func (ew *electrumWallet) SignTx(inTx *wire.MsgTx) (*wire.MsgTx, error) {
 		return nil, err
 	}
 
-	signedB, err := ew.wallet.SignTx(ew.ctx, ew.walletPass(), psbtB64)
+	signedB, err := ew.wallet.SignTx(ctx, ew.walletPass(), psbtB64)
 	if err != nil {
 		return nil, err
 	}
@@ -822,12 +822,12 @@ type pubKeyer interface {
 }
 
 // part of btc.Wallet interface
-func (ew *electrumWallet) PrivKeyForAddress(addr string) (*btcec.PrivateKey, error) {
+func (ew *electrumWallet) PrivKeyForAddress(ctx context.Context, addr string) (*btcec.PrivateKey, error) {
 	addrDec, err := ew.decodeAddr(addr, ew.chainParams)
 	if err != nil {
 		return nil, err
 	}
-	wifStr, err := ew.wallet.GetPrivateKeys(ew.ctx, ew.walletPass(), addr)
+	wifStr, err := ew.wallet.GetPrivateKeys(ctx, ew.walletPass(), addr)
 	if err != nil {
 		return nil, err
 	}

@@ -293,13 +293,13 @@ func (wc *rpcClient) SendRawTransactionLegacy(tx *wire.MsgTx) (*chainhash.Hash, 
 }
 
 // SendRawTransaction broadcasts the transaction.
-func (wc *rpcClient) SendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error) {
+func (wc *rpcClient) SendRawTransaction(ctx context.Context, tx *wire.MsgTx) (*chainhash.Hash, error) {
 	b, err := wc.serializeTx(tx)
 	if err != nil {
 		return nil, err
 	}
 	var txid string
-	err = wc.call(methodSendRawTransaction, anylist{hex.EncodeToString(b)}, &txid)
+	err = Call(ctx, wc.requester(), methodSendRawTransaction, anylist{hex.EncodeToString(b)}, &txid)
 	if err != nil {
 		return nil, err
 	}
@@ -307,11 +307,11 @@ func (wc *rpcClient) SendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error)
 }
 
 // sendRawTransaction sends the MsgTx.
-func (wc *rpcClient) sendRawTransaction(tx *wire.MsgTx) (txHash *chainhash.Hash, err error) {
+func (wc *rpcClient) sendRawTransaction(ctx context.Context, tx *wire.MsgTx) (txHash *chainhash.Hash, err error) {
 	if wc.legacyRawSends {
 		txHash, err = wc.SendRawTransactionLegacy(tx)
 	} else {
-		txHash, err = wc.SendRawTransaction(tx)
+		txHash, err = wc.SendRawTransaction(ctx, tx)
 	}
 	if err != nil {
 		return nil, err
@@ -567,16 +567,16 @@ func (wc *rpcClient) ListLockUnspent() ([]*RPCOutpoint, error) {
 
 // ChangeAddress gets a new internal address from the wallet. The address will
 // be bech32-encoded (P2WPKH).
-func (wc *rpcClient) ChangeAddress() (btcutil.Address, error) {
+func (wc *rpcClient) ChangeAddress(ctx context.Context) (btcutil.Address, error) {
 	var addrStr string
 	var err error
 	switch {
 	case wc.omitAddressType:
-		err = wc.call(methodChangeAddress, nil, &addrStr)
+		err = Call(ctx, wc.requester(), methodChangeAddress, nil, &addrStr)
 	case wc.segwit:
-		err = wc.call(methodChangeAddress, anylist{"bech32"}, &addrStr)
+		err = Call(ctx, wc.requester(), methodChangeAddress, anylist{"bech32"}, &addrStr)
 	default:
-		err = wc.call(methodChangeAddress, anylist{"legacy"}, &addrStr)
+		err = Call(ctx, wc.requester(), methodChangeAddress, anylist{"legacy"}, &addrStr)
 	}
 	if err != nil {
 		return nil, err
@@ -584,22 +584,22 @@ func (wc *rpcClient) ChangeAddress() (btcutil.Address, error) {
 	return wc.decodeAddr(addrStr, wc.chainParams)
 }
 
-func (wc *rpcClient) ExternalAddress() (btcutil.Address, error) {
+func (wc *rpcClient) ExternalAddress(ctx context.Context) (btcutil.Address, error) {
 	if wc.segwit {
-		return wc.address("bech32")
+		return wc.address(ctx, "bech32")
 	}
-	return wc.address("legacy")
+	return wc.address(ctx, "legacy")
 }
 
 // address is used internally for fetching addresses of various types from the
 // wallet.
-func (wc *rpcClient) address(aType string) (btcutil.Address, error) {
+func (wc *rpcClient) address(ctx context.Context, aType string) (btcutil.Address, error) {
 	var addrStr string
 	args := anylist{""}
 	if !wc.omitAddressType {
 		args = append(args, aType)
 	}
-	err := wc.call(methodNewAddress, args, &addrStr)
+	err := Call(ctx, wc.requester(), methodNewAddress, args, &addrStr)
 	if err != nil {
 		return nil, err
 	}
@@ -607,7 +607,7 @@ func (wc *rpcClient) address(aType string) (btcutil.Address, error) {
 }
 
 // SignTx attempts to have the wallet sign the transaction inputs.
-func (wc *rpcClient) SignTx(inTx *wire.MsgTx) (*wire.MsgTx, error) {
+func (wc *rpcClient) SignTx(ctx context.Context, inTx *wire.MsgTx) (*wire.MsgTx, error) {
 	txBytes, err := wc.serializeTx(inTx)
 	if err != nil {
 		return nil, fmt.Errorf("tx serialization error: %w", err)
@@ -618,7 +618,7 @@ func (wc *rpcClient) SignTx(inTx *wire.MsgTx) (*wire.MsgTx, error) {
 		method = methodSignTxLegacy
 	}
 
-	err = wc.call(method, anylist{hex.EncodeToString(txBytes)}, res)
+	err = Call(ctx, wc.requester(), method, anylist{hex.EncodeToString(txBytes)}, res)
 	if err != nil {
 		return nil, fmt.Errorf("tx signing error: %w", err)
 	}
@@ -676,7 +676,7 @@ func (wc *rpcClient) ListTransactionsSinceBlock(blockHeight int32) ([]*ListTrans
 
 // PrivKeyForAddress retrieves the private key associated with the specified
 // address.
-func (wc *rpcClient) PrivKeyForAddress(addr string) (*btcec.PrivateKey, error) {
+func (wc *rpcClient) PrivKeyForAddress(ctx context.Context, addr string) (*btcec.PrivateKey, error) {
 	// Use a specialized client's privKey function
 	if wc.privKeyFunc != nil {
 		return wc.privKeyFunc(addr)
@@ -684,7 +684,7 @@ func (wc *rpcClient) PrivKeyForAddress(addr string) (*btcec.PrivateKey, error) {
 	// Descriptor wallets do not have dumpprivkey.
 	if !wc.descriptors {
 		var keyHex string
-		err := wc.call(methodPrivKeyForAddress, anylist{addr}, &keyHex)
+		err := Call(ctx, wc.requester(), methodPrivKeyForAddress, anylist{addr}, &keyHex)
 		if err != nil {
 			return nil, err
 		}
@@ -704,7 +704,7 @@ func (wc *rpcClient) PrivKeyForAddress(addr string) (*btcec.PrivateKey, error) {
 	// getaddressinfo. When the parent master private key is identified, we
 	// derive the private key for the address.
 	ai := new(GetAddressInfoResult)
-	if err := wc.call(methodGetAddressInfo, anylist{addr}, ai); err != nil {
+	if err := Call(ctx, wc.requester(), methodGetAddressInfo, anylist{addr}, ai); err != nil {
 		return nil, fmt.Errorf("getaddressinfo RPC failure: %w", err)
 	}
 	wc.log.Tracef("Address %v descriptor: %v", addr, ai.Descriptor)
