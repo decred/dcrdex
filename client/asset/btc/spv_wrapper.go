@@ -263,7 +263,7 @@ func (w *spvWallet) OwnsAddress(addr btcutil.Address) (bool, error) {
 	return w.wallet.HaveAddress(addr)
 }
 
-func (w *spvWallet) SendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error) {
+func (w *spvWallet) SendRawTransaction(ctx context.Context, tx *wire.MsgTx) (*chainhash.Hash, error) {
 	// Publish the transaction in a goroutine so the caller may wait for a given
 	// period before it goes asynchronous and it is assumed that btcwallet at
 	// least succeeded with its DB updates and queueing of the transaction for
@@ -290,6 +290,8 @@ func (w *spvWallet) SendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error) 
 		if err != nil {
 			return nil, err
 		}
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	case <-time.After(defaultBroadcastWait):
 		w.log.Debugf("No error from PublishTransaction after %v for txn %v. "+
 			"Assuming wallet accepted it.", defaultBroadcastWait, tx.TxHash())
@@ -657,18 +659,18 @@ func (w *spvWallet) ListLockUnspent() ([]*RPCOutpoint, error) {
 
 // ChangeAddress gets a new internal address from the wallet. The address will
 // be bech32-encoded (P2WPKH).
-func (w *spvWallet) ChangeAddress() (btcutil.Address, error) {
+func (w *spvWallet) ChangeAddress(ctx context.Context) (btcutil.Address, error) {
 	return w.wallet.NewChangeAddress(w.acctNum, waddrmgr.KeyScopeBIP0084)
 }
 
 // ExternalAddress gets a new bech32-encoded (P2WPKH) external address from the
 // wallet.
-func (w *spvWallet) ExternalAddress() (btcutil.Address, error) {
+func (w *spvWallet) ExternalAddress(ctx context.Context) (btcutil.Address, error) {
 	return w.wallet.NewAddress(w.acctNum, waddrmgr.KeyScopeBIP0084)
 }
 
 // signTx attempts to have the wallet sign the transaction inputs.
-func (w *spvWallet) SignTx(tx *wire.MsgTx) (*wire.MsgTx, error) {
+func (w *spvWallet) SignTx(ctx context.Context, tx *wire.MsgTx) (*wire.MsgTx, error) {
 	// Can't use btcwallet.Wallet.SignTransaction, because it doesn't work for
 	// segwit transactions (for real?).
 	return tx, w.wallet.SignTx(tx)
@@ -676,7 +678,7 @@ func (w *spvWallet) SignTx(tx *wire.MsgTx) (*wire.MsgTx, error) {
 
 // PrivKeyForAddress retrieves the private key associated with the specified
 // address.
-func (w *spvWallet) PrivKeyForAddress(addr string) (*btcec.PrivateKey, error) {
+func (w *spvWallet) PrivKeyForAddress(ctx context.Context, addr string) (*btcec.PrivateKey, error) {
 	a, err := w.decodeAddr(addr, w.chainParams)
 	if err != nil {
 		return nil, err

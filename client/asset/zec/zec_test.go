@@ -1001,7 +1001,7 @@ func TestSwap(t *testing.T) {
 
 	// This time should succeed.
 	queueSuccess()
-	_, _, feesPaid, err := w.Swap(swaps)
+	_, _, feesPaid, err := w.Swap(context.Background(), swaps)
 	if err != nil {
 		t.Fatalf("swap error: %v", err)
 	}
@@ -1038,7 +1038,7 @@ func TestSwap(t *testing.T) {
 	swaps.Inputs = coins[:1]
 	cl.queueResponse(methodZGetAddressForAccount, &zGetAddressForAccountResult{Address: tAddr}) // change address
 	cl.queueResponse(methodZListUnifiedReceivers, &unifiedReceivers{Transparent: tAddr})
-	_, _, _, err = w.Swap(swaps)
+	_, _, _, err = w.Swap(context.Background(), swaps)
 	if !errorHasCode(err, errInsufficientBalance) {
 		t.Fatalf("wrong error for listunspent not enough funds: %v", err)
 	}
@@ -1046,7 +1046,7 @@ func TestSwap(t *testing.T) {
 
 	// Make sure we can succeed again.
 	queueSuccess()
-	_, _, _, err = w.Swap(swaps)
+	_, _, _, err = w.Swap(context.Background(), swaps)
 	if err != nil {
 		t.Fatalf("re-swap error: %v", err)
 	}
@@ -1094,7 +1094,7 @@ func TestRedeem(t *testing.T) {
 		return json.Marshal(tx.TxHash().String())
 	})
 
-	_, _, _, err = w.Redeem(redemptions)
+	_, _, _, err = w.Redeem(context.Background(), redemptions)
 	if err != nil {
 		t.Fatalf("redeem error: %v", err)
 	}
