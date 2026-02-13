@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: BlueOak-1.0.0
-pragma solidity = 0.8.18;
+pragma solidity = 0.8.23;
+
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 // TestCaller is a contract used in tests to verify that senderIsOrigin
 // rejects calls from contracts.
@@ -19,5 +21,16 @@ contract TestCaller {
 contract RevertingRecipient {
     receive() external payable {
         revert("no ETH accepted");
+    }
+}
+
+// MockERC20 is a simple ERC20 token for testing token swap paths.
+contract MockERC20 is ERC20 {
+    constructor() ERC20("MockToken", "MTK") {
+        _mint(msg.sender, 1000000 * 10 ** 18);
+    }
+
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
     }
 }
