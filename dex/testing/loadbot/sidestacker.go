@@ -38,6 +38,10 @@ type sideStacker struct {
 	// each epoch. If there are already enough standing limit orders,
 	// sideStacker will place orders to match immediately.
 	ordsPerEpoch int
+	// overLimit tracks whether the previous epoch hit the match limit.
+	// When true, matchers are skipped for one epoch to allow both sides
+	// to replenish standing orders before crossing the spread again.
+	overLimit atomic.Bool
 	// oscillator will cause the side stacker rate to move up and down over
 	// time. Used for a sideways market. Shared between side stackers so
 	// that they push in the same direction. Rate moves up from
@@ -155,16 +159,25 @@ func (s *sideStacker) HandleNotification(m *Mantle, note core.Notification) {
 func (s *sideStacker) stack(m *Mantle, currentEpoch uint64) {
 	book := m.book()
 	midGap := midGap(book)
+	xcs := m.Exchanges()
+	xc := xcs[hostAddr]
+	mkt := xc.Markets[market]
+	minRate := mkt.MinimumRate
 	worstBuys, worstSells := s.cancellableOrders(m, currentEpoch)
 	activeBuys, activeSells := len(worstBuys), len(worstSells)
 	cancelOrds := func(ords []*core.Order) {
 		for _, o := range ords {
 			err := m.Cancel(o.ID)
 			if err != nil {
-				// Be permissive of cancel misses.
+				// Be permissive of cancel misses and duplicate
+				// cancel attempts that can arise from stale
+				// Exchanges() snapshots.
 				var msgErr *msgjson.Error
 				if errors.As(err, &msgErr) && msgErr.Code == msgjson.OrderParameterError &&
 					strings.Contains(err.Error(), missedCancelErrStr) {
+					continue
+				}
+				if strings.Contains(err.Error(), "only one cancel order") {
 					continue
 				}
 				m.fatalError("error canceling order for overloaded side: %v", err)
@@ -172,14 +185,22 @@ func (s *sideStacker) stack(m *Mantle, currentEpoch uint64) {
 		}
 	}
 	oscillator := atomic.LoadUint64(s.oscillator)
+	// Cancel stale standing orders that are far from the current price.
+	// When oscillating, cancel more aggressively to keep the book fresh
+	// as the midGap moves each epoch.
+	oscCancels := 0
+	if oscillate {
+		oscCancels = s.ordsPerEpoch / 2
+		if oscCancels < 1 {
+			oscCancels = 1
+		}
+	}
 	if s.seller {
 		numCancels := activeSells - s.numStanding
-		// If the market is moving cancel an order from the side we are moving
-		// away from in order to make new standing orders closer to the mid gap.
-		if numCancels == 0 &&
+		if numCancels < oscCancels &&
 			(rateIncrease < 0 ||
 				(oscillate && oscillator >= oscInterval/2)) {
-			numCancels = 1
+			numCancels = oscCancels
 		}
 		if numCancels > activeSells {
 			numCancels = activeSells
@@ -189,10 +210,10 @@ func (s *sideStacker) stack(m *Mantle, currentEpoch uint64) {
 		}
 	} else {
 		numCancels := activeBuys - s.numStanding
-		if numCancels == 0 &&
+		if numCancels < oscCancels &&
 			(rateIncrease > 0 ||
 				(oscillate && oscillator < oscInterval/2)) {
-			numCancels = 1
+			numCancels = oscCancels
 		}
 		if numCancels > activeBuys {
 			numCancels = activeBuys
@@ -211,6 +232,26 @@ func (s *sideStacker) stack(m *Mantle, currentEpoch uint64) {
 	}
 	numNewStanding = utils.Clamp(numNewStanding, 0, s.ordsPerEpoch)
 	numMatchers := s.ordsPerEpoch - numNewStanding
+	if s.overLimit.Load() {
+		s.log.Infof("Seller = %t skipping matchers to replenish book depth after over-limit", s.seller)
+		numMatchers = 0
+		// Reset so we only skip for one epoch. If the condition
+		// persists, it will be set again when orders are placed.
+		s.overLimit.Store(false)
+	}
+	// Don't place matchers if the opposite side of the book is thin.
+	// Without this check, one side's matchers consume the other side's
+	// standers faster than they can be replenished, leaving the book
+	// one-sided.
+	oppositeSide := len(book.Buys)
+	if !s.seller {
+		oppositeSide = len(book.Sells)
+	}
+	if numMatchers > 0 && oppositeSide < s.numStanding/2 {
+		s.log.Infof("Seller = %t skipping %d matchers, opposite book side thin (%d orders)",
+			s.seller, numMatchers, oppositeSide)
+		numMatchers = 0
+	}
 	s.log.Infof("Seller = %t placing %d standers and %d matchers. Currently %d active orders",
 		s.seller, numNewStanding, numMatchers, activeOrders)
 
@@ -218,11 +259,7 @@ func (s *sideStacker) stack(m *Mantle, currentEpoch uint64) {
 		return uint64(rand.Intn(maxOrderLots-1)+1) * lotSize
 	}
 
-	var osc int64
-	// Move up the first half of the oscillator max and down the rest. Add
-	// one and reset if necessary.
 	if oscillate {
-		osc = int64(rateStep) * int64(oscStep)
 		if randomOsc && s.oscillatorWrite {
 			// Randomly flip the direction about four times per
 			// interval.
@@ -231,9 +268,26 @@ func (s *sideStacker) stack(m *Mantle, currentEpoch uint64) {
 				oscillator %= oscInterval
 			}
 		}
-		if oscillator >= oscInterval/2 {
-			osc = -osc
+		// Compute a centered triangle wave displacement from the
+		// oscillator counter. The price oscillates symmetrically above
+		// and below defaultMidGap. oscStep controls amplitude as a
+		// percentage of midGap (e.g. 50 = ±25% centered oscillation).
+		halfInterval := int64(oscInterval / 2)
+		pos := int64(oscillator % oscInterval)
+		peak := int64(midGap) / 100 * int64(oscStep)
+		var displacement int64
+		if pos < halfInterval {
+			displacement = peak * pos / halfInterval
+		} else {
+			displacement = peak * (int64(oscInterval) - pos) / halfInterval
 		}
+		// Center the wave around zero.
+		displacement -= peak / 2
+		shifted := int64(midGap) + displacement
+		if shifted < int64(rateStep) {
+			shifted = int64(rateStep)
+		}
+		midGap = uint64(shifted)
 		if s.oscillatorWrite {
 			oscillator += 1
 			oscillator %= oscInterval
@@ -244,7 +298,7 @@ func (s *sideStacker) stack(m *Mantle, currentEpoch uint64) {
 		ne := neg
 		// For the stagnant market, flip matches across the mid gap to
 		// match. Moving markets will match naturally.
-		if doMatch && rateIncrease == 0 && !oscillate {
+		if doMatch && rateIncrease == 0 {
 			ne = -ne
 		}
 		rateTweak := int64(rand.Float64() * stackerSpread * float64(rateStep))
@@ -252,12 +306,17 @@ func (s *sideStacker) stack(m *Mantle, currentEpoch uint64) {
 		// Standing matches for the moving market can be ensured by not
 		// applying the rate Increase.
 		if doMatch {
-			rate += float64(rateIncrease) + float64(osc)
+			rate += float64(rateIncrease)
 		}
 		if rate < 0 {
 			rate = float64(rateStep)
 		}
-		return truncate(int64(rate), int64(rateStep))
+		r := truncate(int64(rate), int64(rateStep))
+		if r < minRate {
+			// Round minRate up to the nearest rateStep multiple.
+			r = ((minRate + rateStep - 1) / rateStep) * rateStep
+		}
+		return r
 	}
 
 	ords := make([]*orderReq, 0, numNewStanding+numMatchers)
@@ -277,10 +336,18 @@ func (s *sideStacker) stack(m *Mantle, currentEpoch uint64) {
 	}
 
 	if s.metered {
-		m.orderMetered(ords, time.Duration(epochDuration)*time.Millisecond)
+		m.orderMetered(ords, time.Duration(epochDuration)*time.Millisecond, &s.overLimit)
 	} else {
 		for _, ord := range ords {
-			m.order(s.seller, ord.qty, ord.rate)
+			err := m.order(s.seller, ord.qty, ord.rate)
+			if err != nil {
+				if isRecoverableOrderError(err) {
+					s.overLimit.Store(true)
+					break
+				}
+			} else {
+				s.overLimit.Store(false)
+			}
 		}
 	}
 }

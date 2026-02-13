@@ -972,7 +972,7 @@ func (w *TXCWallet) FundingCoins([]dex.Bytes) (asset.Coins, error) {
 	return w.fundingCoins, w.fundingCoinErr
 }
 
-func (w *TXCWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
+func (w *TXCWallet) Swap(_ context.Context, swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
 	w.swapCounter++
 	w.lastSwapsMtx.Lock()
 	w.lastSwaps = append(w.lastSwaps, swaps)
@@ -983,7 +983,7 @@ func (w *TXCWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 	return w.swapReceipts, w.changeCoin, tSwapFeesPaid, nil
 }
 
-func (w *TXCWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
+func (w *TXCWallet) Redeem(_ context.Context, form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
 	w.redeemFeeSuggestion = form.FeeSuggestion
 	defer func() {
 		if w.redeemErrChan != nil {
@@ -1023,7 +1023,7 @@ func (w *TXCWallet) FindRedemption(ctx context.Context, coinID, _ dex.Bytes) (re
 	return nil, nil, fmt.Errorf("not mocked")
 }
 
-func (w *TXCWallet) Refund(refundCoin dex.Bytes, refundContract dex.Bytes, feeSuggestion uint64) (dex.Bytes, error) {
+func (w *TXCWallet) Refund(_ context.Context, refundCoin dex.Bytes, refundContract dex.Bytes, feeSuggestion uint64) (dex.Bytes, error) {
 	w.refundFeeSuggestion = feeSuggestion
 	return w.refundCoin, w.refundErr
 }
@@ -1487,6 +1487,10 @@ func newTestRig() *testRig {
 			newCrypter: func([]byte) encrypt.Crypter { return crypter },
 			reCrypter:  func([]byte, []byte) (encrypt.Crypter, error) { return crypter, crypter.recryptErr },
 			noteChans:  make(map[uint64]chan Notification),
+			tipPending: make(map[uint32]uint64),
+			tipActive:  make(map[uint32]bool),
+			balPending: make(map[uint32]*asset.Balance),
+			balActive:  make(map[uint32]bool),
 
 			fiatRateSources:  make(map[string]*commonRateSource),
 			notes:            make(chan asset.WalletNotification, 128),

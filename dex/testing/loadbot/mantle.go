@@ -213,7 +213,8 @@ func newMantle(name string) (*Mantle, error) {
 		Logger:           loggerMaker.Logger("CORE:" + name),
 		NoAutoWalletLock: true,
 		// UnlockCoinsOnLogin: true, // true if we are certain that two bots/Core's are not using the same external wallet
-		NoAutoDBBackup: true,
+		NoAutoDBBackup:   true,
+		MaxActiveMatches: maxActiveMatches,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error initializing core: %w", err)
@@ -293,7 +294,7 @@ type orderReq struct {
 // order is placed at now + dur - (dur / n). This is a convenience so that the
 // caller can target n orders per epoch with a dur = mkt.EpochDuration, and
 // avoid the simultaneous order at the beginning of the next epoch.
-func (m *Mantle) orderMetered(ords []*orderReq, dur time.Duration) {
+func (m *Mantle) orderMetered(ords []*orderReq, dur time.Duration, overLimit *atomic.Bool) {
 	if len(ords) == 0 {
 		return
 	}
@@ -304,7 +305,11 @@ func (m *Mantle) orderMetered(ords []*orderReq, dur time.Duration) {
 	}
 	err := placeOrder()
 	if isRecoverableOrderError(err) {
+		overLimit.Store(true)
 		return
+	}
+	if err == nil {
+		overLimit.Store(false)
 	}
 	if len(ords) == 0 {
 		// There was only one to place. No need to set a ticker.
@@ -318,10 +323,13 @@ func (m *Mantle) orderMetered(ords []*orderReq, dur time.Duration) {
 			case <-ticker.C:
 				err := placeOrder()
 				if isRecoverableOrderError(err) {
+					overLimit.Store(true)
 					return
 				}
+				if err == nil {
+					overLimit.Store(false)
+				}
 				if len(ords) == 0 {
-					// There was only one to place. No need to set a ticker.
 					return
 				}
 			case <-ctx.Done():
@@ -600,7 +608,7 @@ func coreLimitOrder(sell bool, qty, rate uint64) *core.TradeForm {
 // midGap parses the provided order book for the mid-gap price. If the book
 // is empty, a default value is returned instead.
 func midGap(book *core.OrderBook) uint64 {
-	if keepMidGap {
+	if keepMidGap || oscillate {
 		return uint64(defaultMidGap * rateEncFactor)
 	}
 	if len(book.Sells) > 0 {
@@ -680,14 +688,14 @@ func newBotWallet(symbol, node, name string, port string, walletPass []byte, min
 }
 
 // isOverLimitError will be true if the error is a ErrQuantityTooHigh,
-// indicating the client has reached its order limit. Ideally, Core would
-// know the limit and we could query it to use in our algorithm, but the order
-// limit change is new and Core doesn't know what to do with it yet.
+// indicating the client has reached its order limit, or if there are too
+// many active matches and new orders are being deferred.
 func isOverLimitError(err error) bool {
 	if err == nil {
 		return false
 	}
-	return strings.Contains(err.Error(), "order quantity exceeds user limit")
+	return strings.Contains(err.Error(), "order quantity exceeds user limit") ||
+		errors.Is(err, core.ErrTooManyActiveMatches)
 }
 
 func isApprovalPendingError(err error) bool {
