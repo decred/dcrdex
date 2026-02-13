@@ -102,9 +102,18 @@
                       <td data-tmpl="avail">—</td>
                       <td data-tmpl="locked">—</td>
                       <td data-tmpl="immature">—</td>
-                      <td>
+                      <td class="text-nowrap">
                         <button data-tmpl="txsBttn" class="micro">Txs</button>
                         <button data-tmpl="createWalletBttn" class="micro">Create Wallet</button>
+                        <button data-tmpl="unlockNetBttn" class="micro d-hide" title="Unlock">
+                          <span class="ico-unlocked"></span>
+                        </button>
+                        <button data-tmpl="lockNetBttn" class="micro d-hide" title="Lock">
+                          <span class="ico-locked"></span>
+                        </button>
+                        <button data-tmpl="configNetBttn" class="micro d-hide" title="Configure">
+                          <span class="ico-settings"></span>
+                        </button>
                       </td>
                     </tr>
                   </tbody>
