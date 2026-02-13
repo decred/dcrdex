@@ -266,6 +266,9 @@ func (c *tCore) SupportedBridgeDestinations(assetID uint32) (map[uint32][]string
 func (c *tCore) BridgeContractApprovalStatus(assetID uint32, bridgeName string) (asset.ApprovalStatus, error) {
 	return asset.Approved, nil
 }
+func (c *tCore) SubscribeMMSnapshots(host string, base, quote uint32, unsub bool) error {
+	return nil
+}
 
 type dexOrder struct {
 	rate uint64

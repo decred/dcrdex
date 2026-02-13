@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -23,6 +24,7 @@ import (
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
+	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"go.etcd.io/bbolt"
 )
@@ -56,21 +58,22 @@ var (
 // value encodings.
 var (
 	// bucket keys
-	appBucket             = []byte("appBucket")
-	accountsBucket        = []byte("accounts")
-	bondIndexesBucket     = []byte("bondIndexes")
-	bondsSubBucket        = []byte("bonds") // sub bucket of accounts
-	activeOrdersBucket    = []byte("activeOrders")
-	archivedOrdersBucket  = []byte("orders")
-	activeMatchesBucket   = []byte("activeMatches")
-	archivedMatchesBucket = []byte("matches")
-	botProgramsBucket     = []byte("botPrograms")
-	walletsBucket         = []byte("wallets")
-	notesBucket           = []byte("notes")
-	pokesBucket           = []byte("pokes")
-	credentialsBucket     = []byte("credentials")
-	multisigIndexesBucket = []byte("multiIndexes")
-	multisigPubKeysBucket = []byte("multiPubKeys")
+	appBucket              = []byte("appBucket")
+	accountsBucket         = []byte("accounts")
+	bondIndexesBucket      = []byte("bondIndexes")
+	bondsSubBucket         = []byte("bonds") // sub bucket of accounts
+	activeOrdersBucket     = []byte("activeOrders")
+	archivedOrdersBucket   = []byte("orders")
+	activeMatchesBucket    = []byte("activeMatches")
+	archivedMatchesBucket  = []byte("matches")
+	botProgramsBucket      = []byte("botPrograms")
+	walletsBucket          = []byte("wallets")
+	notesBucket            = []byte("notes")
+	pokesBucket            = []byte("pokes")
+	credentialsBucket      = []byte("credentials")
+	multisigIndexesBucket  = []byte("multiIndexes")
+	multisigPubKeysBucket  = []byte("multiPubKeys")
+	mmEpochSnapshotsBucket = []byte("mmEpochSnapshots")
 
 	// value keys
 	versionKey = []byte("version")
@@ -184,7 +187,7 @@ func NewDB(dbPath string, logger dex.Logger, opts ...Opts) (dexdb.DB, error) {
 		activeMatchesBucket, archivedMatchesBucket,
 		walletsBucket, notesBucket, credentialsBucket,
 		botProgramsBucket, pokesBucket, multisigIndexesBucket,
-		multisigPubKeysBucket,
+		multisigPubKeysBucket, mmEpochSnapshotsBucket,
 	}); err != nil {
 		return nil, err
 	}
@@ -2592,6 +2595,96 @@ func (db *BoltDB) Language() (lang string, _ error) {
 // timeNow is the current unix timestamp in milliseconds.
 func timeNow() uint64 {
 	return uint64(time.Now().UnixMilli())
+}
+
+// mmSnapshotsView is a convenience function for reading from the MM snapshots
+// bucket.
+func (db *BoltDB) mmSnapshotsView(f bucketFunc) error {
+	return db.withBucket(mmEpochSnapshotsBucket, db.View, f)
+}
+
+// mmSnapshotsUpdate is a convenience function for updating the MM snapshots
+// bucket.
+func (db *BoltDB) mmSnapshotsUpdate(f bucketFunc) error {
+	return db.withBucket(mmEpochSnapshotsBucket, db.Update, f)
+}
+
+// mmSnapshotKey creates a key for an MM epoch snapshot:
+// base(4) + quote(4) + epochIdx(8).
+func mmSnapshotKey(base, quote uint32, epochIdx uint64) []byte {
+	k := make([]byte, 16)
+	copy(k, encode.Uint32Bytes(base))
+	copy(k[4:], encode.Uint32Bytes(quote))
+	copy(k[8:], encode.Uint64Bytes(epochIdx))
+	return k
+}
+
+// StoreMMEpochSnapshot stores a signed MM epoch snapshot.
+func (db *BoltDB) StoreMMEpochSnapshot(host string, snap *msgjson.MMEpochSnapshot) error {
+	return db.mmSnapshotsUpdate(func(master *bbolt.Bucket) error {
+		hostBkt, err := master.CreateBucketIfNotExists([]byte(host))
+		if err != nil {
+			return fmt.Errorf("failed to create host bucket: %w", err)
+		}
+		k := mmSnapshotKey(snap.Base, snap.Quote, snap.EpochIdx)
+		v, err := json.Marshal(snap)
+		if err != nil {
+			return fmt.Errorf("failed to marshal snapshot: %w", err)
+		}
+		return hostBkt.Put(k, v)
+	})
+}
+
+// PruneMMEpochSnapshots deletes MM epoch snapshots for a market with epochIdx
+// strictly less than minEpochIdx.
+func (db *BoltDB) PruneMMEpochSnapshots(host string, base, quote uint32, minEpochIdx uint64) (int, error) {
+	var n int
+	return n, db.mmSnapshotsUpdate(func(master *bbolt.Bucket) error {
+		hostBkt := master.Bucket([]byte(host))
+		if hostBkt == nil {
+			return nil
+		}
+		// The market prefix is base(4)+quote(4). Iterate keys that start
+		// with this prefix and have epochIdx < minEpochIdx.
+		startKey := mmSnapshotKey(base, quote, 0)
+		endKey := mmSnapshotKey(base, quote, minEpochIdx) // exclusive
+		c := hostBkt.Cursor()
+		for k, _ := c.Seek(startKey); k != nil && bytes.Compare(k, endKey) < 0; k, _ = c.Next() {
+			if err := c.Delete(); err != nil {
+				return fmt.Errorf("failed to delete snapshot: %w", err)
+			}
+			n++
+		}
+		return nil
+	})
+}
+
+// MMEpochSnapshots retrieves MM epoch snapshots for a market within the
+// specified epoch range [startEpoch, endEpoch]. An endEpoch of 0 means no
+// upper bound.
+func (db *BoltDB) MMEpochSnapshots(host string, base, quote uint32, startEpoch, endEpoch uint64) ([]*msgjson.MMEpochSnapshot, error) {
+	if endEpoch == 0 {
+		endEpoch = math.MaxUint64
+	}
+	var snaps []*msgjson.MMEpochSnapshot
+	return snaps, db.mmSnapshotsView(func(master *bbolt.Bucket) error {
+		hostBkt := master.Bucket([]byte(host))
+		if hostBkt == nil {
+			return nil // no snapshots for this host
+		}
+		startKey := mmSnapshotKey(base, quote, startEpoch)
+		endKey := mmSnapshotKey(base, quote, endEpoch)
+		c := hostBkt.Cursor()
+		for k, v := c.Seek(startKey); k != nil && bytes.Compare(k, endKey) <= 0; k, v = c.Next() {
+			var snap msgjson.MMEpochSnapshot
+			if err := json.Unmarshal(v, &snap); err != nil {
+				db.log.Errorf("Failed to unmarshal MM snapshot: %v", err)
+				continue
+			}
+			snaps = append(snaps, &snap)
+		}
+		return nil
+	})
 }
 
 // A couple of common bbolt functions.

@@ -9,6 +9,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encrypt"
+	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 )
 
@@ -164,4 +165,12 @@ type DB interface {
 	// MultisigIndexForPubkey returns the key index for the compressed
 	// pubkey bytes of assetID if stored.
 	MultisigIndexForPubkey(assetID uint32, pubkey [33]byte) (uint32, error)
+	// StoreMMEpochSnapshot stores a signed MM epoch snapshot from a DEX server.
+	StoreMMEpochSnapshot(host string, snap *msgjson.MMEpochSnapshot) error
+	// MMEpochSnapshots retrieves MM epoch snapshots for a market within the
+	// specified epoch range.
+	MMEpochSnapshots(host string, base, quote uint32, startEpoch, endEpoch uint64) ([]*msgjson.MMEpochSnapshot, error)
+	// PruneMMEpochSnapshots deletes MM epoch snapshots for a market with
+	// epochIdx strictly less than minEpochIdx, returning the number deleted.
+	PruneMMEpochSnapshots(host string, base, quote uint32, minEpochIdx uint64) (int, error)
 }

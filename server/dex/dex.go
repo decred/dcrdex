@@ -1105,6 +1105,28 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	bookRouter := market.NewBookRouter(bookSources, feeMgr, server.Route)
 	startSubSys("BookRouter", bookRouter)
 
+	// Register the MM snapshot subscription handler once for all markets.
+	authMgr.Route(msgjson.SubscribeMMSnapshotsRoute, func(user account.AccountID, msg *msgjson.Message) *msgjson.Error {
+		var req msgjson.SubscribeMMSnapshots
+		if err := json.Unmarshal(msg.Payload, &req); err != nil {
+			return msgjson.NewError(msgjson.RPCParseError, "error parsing subscribe_mm_snapshots request")
+		}
+		mkt, found := markets[req.MarketID]
+		if !found {
+			return msgjson.NewError(msgjson.UnknownMarket, "unknown market %q", req.MarketID)
+		}
+		mkt.SubscribeMMSnapshots(user, req.Unsub)
+		resp, err := msgjson.NewResponse(msg.ID, true, nil)
+		if err != nil {
+			log.Errorf("NewResponse error: %v", err)
+			return msgjson.NewError(msgjson.RPCInternal, "internal error")
+		}
+		if err := authMgr.Send(user, resp); err != nil {
+			log.Debugf("error sending subscribe_mm_snapshots response: %v", err)
+		}
+		return nil
+	})
+
 	// The data API gets the order book from the book router.
 	dataAPI.SetBookSource(bookRouter)
 

@@ -262,6 +262,10 @@ var originLocale = map[Topic]*translation{
 		subject:  intl.Translation{T: "Upgrade needed"},
 		template: intl.Translation{T: "You may need to update your client to trade at %s.", Notes: "args: [host]"},
 	},
+	TopicMMSnapshotsNotSupported: {
+		subject:  intl.Translation{T: "MM Snapshots Not Supported"},
+		template: intl.Translation{T: "The server at %s does not support market maker epoch snapshots.", Notes: "args: [host]"},
+	},
 	TopicDEXConnected: {
 		subject:  intl.Translation{T: "Server connected"},
 		template: intl.Translation{T: "%s is connected", Notes: "args: [host]"},

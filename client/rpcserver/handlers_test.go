@@ -1759,3 +1759,126 @@ func TestExportedReflectFields(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleMMReport(t *testing.T) {
+	outFile := t.TempDir() + "/report.json"
+	goodParams := &MMReportParams{
+		Host:       "somedex.tld:7232",
+		BaseID:     42,
+		QuoteID:    0,
+		StartEpoch: 100,
+		EndEpoch:   200,
+		OutFile:    outFile,
+	}
+	missingOutFile := &MMReportParams{
+		Host:    "somedex.tld:7232",
+		BaseID:  42,
+		QuoteID: 0,
+	}
+	tests := []struct {
+		name        string
+		params      any
+		snaps       []*msgjson.MMEpochSnapshot
+		coreErr     error
+		wantErrCode int
+	}{{
+		name:   "ok",
+		params: goodParams,
+		snaps: []*msgjson.MMEpochSnapshot{{
+			MarketID: "dcr_btc",
+			Base:     42,
+			Quote:    0,
+			EpochIdx: 100,
+		}},
+		wantErrCode: -1,
+	}, {
+		name:        "bad params",
+		params:      nil,
+		wantErrCode: msgjson.RPCArgumentsError,
+	}, {
+		name:        "missing outFile",
+		params:      missingOutFile,
+		wantErrCode: msgjson.RPCParseError,
+	}, {
+		name:        "core error",
+		params:      goodParams,
+		coreErr:     errors.New("test error"),
+		wantErrCode: msgjson.RPCInternal,
+	}}
+	for _, test := range tests {
+		tc := &TCore{
+			exportMMSnapshots:    test.snaps,
+			exportMMSnapshotsErr: test.coreErr,
+		}
+		r := &RPCServer{core: tc}
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, mmReportRoute)
+		} else {
+			msg = makeMsg(t, mmReportRoute, test.params)
+		}
+		payload := handleMMReport(r, msg)
+		res := ""
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatalf("%s: %v", test.name, err)
+		}
+	}
+}
+
+func TestHandlePruneMMSnapshots(t *testing.T) {
+	goodParams := &PruneMMSnapshotsParams{
+		Host:        "somedex.tld:7232",
+		BaseID:      42,
+		QuoteID:     0,
+		MinEpochIdx: 200,
+	}
+	zeroMinEpoch := &PruneMMSnapshotsParams{
+		Host:        "somedex.tld:7232",
+		BaseID:      42,
+		QuoteID:     0,
+		MinEpochIdx: 0,
+	}
+	tests := []struct {
+		name        string
+		params      any
+		pruned      int
+		coreErr     error
+		wantErrCode int
+	}{{
+		name:        "ok",
+		params:      goodParams,
+		pruned:      5,
+		wantErrCode: -1,
+	}, {
+		name:        "bad params",
+		params:      nil,
+		wantErrCode: msgjson.RPCArgumentsError,
+	}, {
+		name:        "zero minEpochIdx",
+		params:      zeroMinEpoch,
+		wantErrCode: msgjson.RPCParseError,
+	}, {
+		name:        "core error",
+		params:      goodParams,
+		coreErr:     errors.New("test error"),
+		wantErrCode: msgjson.RPCInternal,
+	}}
+	for _, test := range tests {
+		tc := &TCore{
+			pruneMMSnapshotsResult: test.pruned,
+			pruneMMSnapshotsErr:    test.coreErr,
+		}
+		r := &RPCServer{core: tc}
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, pruneMMSnapshotsRoute)
+		} else {
+			msg = makeMsg(t, pruneMMSnapshotsRoute, test.params)
+		}
+		payload := handlePruneMMSnapshots(r, msg)
+		var res int
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatalf("%s: %v", test.name, err)
+		}
+	}
+}
