@@ -103,7 +103,7 @@ type MultiHopCfg struct {
 //
 // For the first placement, the bot will find the rate at which it can
 // buy 15 DCR (1 lot * 1.5 multiplier). This rate is .006 BTC/DCR. Therefore,
-// it will place place a sell order at .00606 BTC/DCR (.006 BTC/DCR * 1.01).
+// it will place a sell order at .00606 BTC/DCR (.006 BTC/DCR * 1.01).
 //
 // For the second placement, the bot will go deeper into the CEX order book
 // and find the rate at which it can buy 25 DCR. This is the previous 15 DCR

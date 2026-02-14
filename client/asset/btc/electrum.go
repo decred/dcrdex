@@ -396,7 +396,7 @@ func (btc *ExchangeWalletElectrum) watchBlocks(ctx context.Context) {
 }
 
 // syncTxHistory checks to see if there are any transactions which the wallet
-// has made or recieved that are not part of the transaction history, then
+// has made or received that are not part of the transaction history, then
 // identifies and adds them. It also checks all the pending transactions to see
 // if they have been mined into a block, and if so, updates the transaction
 // history to reflect the block height.

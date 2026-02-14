@@ -2054,7 +2054,7 @@ func (m *Market) collectPreimages(orders []order.Order) (cSum []byte, ordersReve
 			continue
 		}
 
-		// The clients preimage response comes back via a channel, where nil
+		// The client's preimage response comes back via a channel, where nil
 		// indicates client failure to respond, either due to disconnection or
 		// no action.
 		piChan := make(chan *order.Preimage, 1) // buffer so the link's in handler does not block

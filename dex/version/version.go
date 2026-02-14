@@ -46,7 +46,7 @@ func checkSemString(s, alphabet, fieldName string) error {
 
 // ParseSemVer parses various semver components from the provided string.
 func ParseSemVer(s string) (major, minor, patch uint32, preRel, build string, err error) {
-	// Parse the various semver component from the version string via a regular
+	// Parse the various semver components from the version string via a regular
 	// expression.
 	m := semverRE.FindStringSubmatch(s)
 	if m == nil {
