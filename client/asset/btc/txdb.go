@@ -275,12 +275,16 @@ func (db *BadgerTxDB) StoreTx(tx *ExtendedWalletTx) error {
 	return db.handleConflictWithBackoff(func() error { return db.storeTx(tx) })
 }
 
+func nonceKey(pubNonce []byte) []byte {
+	key := make([]byte, len(secNoncePrefix)+len(pubNonce))
+	copy(key, secNoncePrefix)
+	copy(key[len(secNoncePrefix):], pubNonce)
+	return key
+}
+
 func (db *BadgerTxDB) deleteSecNonce(pubNonce []byte) error {
 	return db.Update(func(txn *badger.Txn) error {
-		secNonceKey := make([]byte, len(secNoncePrefix)+len(pubNonce))
-		copy(secNonceKey, secNoncePrefix)
-		copy(secNonceKey[len(secNoncePrefix):], pubNonce)
-		return txn.Delete(secNonceKey)
+		return txn.Delete(nonceKey(pubNonce))
 	})
 }
 
@@ -298,10 +302,7 @@ func (db *BadgerTxDB) DeleteSecNonce(pubNonce []byte) error {
 
 func (db *BadgerTxDB) storeSecNonce(pubNonce, secNonce []byte) error {
 	return db.Update(func(txn *badger.Txn) error {
-		secNonceKey := make([]byte, len(secNoncePrefix)+len(pubNonce))
-		copy(secNonceKey, secNoncePrefix)
-		copy(secNonceKey[len(secNoncePrefix):], pubNonce)
-		return txn.Set(secNonceKey, secNonce)
+		return txn.Set(nonceKey(pubNonce), secNonce)
 	})
 }
 
@@ -373,10 +374,7 @@ func (db *BadgerTxDB) StoreSecNonce(pubNonce, secNonce, encKey []byte) error {
 func (db *BadgerTxDB) getSecNonce(pubNonce []byte) ([]byte, error) {
 	var secNonce []byte
 	err := db.View(func(txn *badger.Txn) error {
-		secNonceKey := make([]byte, len(secNoncePrefix)+len(pubNonce))
-		copy(secNonceKey, secNoncePrefix)
-		copy(secNonceKey[len(secNoncePrefix):], pubNonce)
-		item, err := txn.Get(secNonceKey)
+		item, err := txn.Get(nonceKey(pubNonce))
 		if err != nil {
 			return err
 		}
