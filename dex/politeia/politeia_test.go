@@ -7,6 +7,7 @@ package pi
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -23,9 +24,9 @@ func TestPoliteia(t *testing.T) {
 	// Use a persistent db file for easier manual testing because the first run takes
 	// a long time fetching all the required data for all the proposals.
 	// You can manually delete it between test runs to start fresh.
-	dbFile := "politeia_test.db"
+	dbDir := filepath.Join(t.TempDir(), "politeia")
 
-	p, err := New(t.Context(), PoliteiaMainnetHost, dbFile, log)
+	p, err := New(t.Context(), PoliteiaMainnetHost, dbDir, log)
 	if err != nil {
 		t.Fatal(err.Error())
 	}
@@ -69,8 +70,6 @@ func TestPoliteia(t *testing.T) {
 	// TODO: add tests for actual voting functions.
 	// p.CastVotes(t.Context(), nil, nil, "", "")
 	// p.WalletProposalVoteDetails(t.Context(), &wallet.Wallet{}, "")
-
-	// Close the db here. The sync goroutine may still be running but will exit once db is close.
 
 	log.Infof("Politeia tests completed")
 }

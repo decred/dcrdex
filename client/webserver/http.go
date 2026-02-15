@@ -632,9 +632,7 @@ func (s *WebServer) handleProposals(w http.ResponseWriter, r *http.Request) {
 			int(pageSize), query)
 	}
 	if err != nil {
-		errMsg := fmt.Sprintf("error retrieving proposals: %v", err)
-		log.Errorf(errMsg)
-		s.sendProposalsPageWithError(r, w, errMsg)
+		s.sendProposalsPageWithError(r, w, fmt.Sprintf("error retrieving proposals: %v", err))
 		return
 	}
 
@@ -675,33 +673,25 @@ type proposalTmplData struct {
 func (s *WebServer) handleProposal(w http.ResponseWriter, r *http.Request) {
 	token, err := getProposalTokenCtx(r)
 	if err != nil {
-		errMsg := fmt.Sprintf("error retrieving proposal token from request context: %v", err)
-		log.Errorf(errMsg)
-		s.sendProposalPageWithError(r, w, errMsg)
+		s.sendProposalPageWithError(r, w, fmt.Sprintf("error retrieving proposal token from request context: %v", err))
 		return
 	}
 
 	assetStrID := r.URL.Query().Get("assetID")
 	if assetStrID == "" {
-		errMsg := "request to fetch proposal is missing url query assetID"
-		log.Error(errMsg)
-		s.sendProposalPageWithError(r, w, errMsg)
+		s.sendProposalPageWithError(r, w, "request to fetch proposal is missing url query assetID")
 		return
 	}
 
 	assetID, err := strconv.ParseUint(assetStrID, 10, 32)
 	if err != nil {
-		errMsg := fmt.Sprintf("error parsing asset id: %v", err)
-		log.Error(errMsg)
-		s.sendProposalPageWithError(r, w, errMsg)
+		s.sendProposalPageWithError(r, w, fmt.Sprintf("error parsing asset id: %v", err))
 		return
 	}
 
 	proposal, err := s.core.Proposal(uint32(assetID), token)
 	if err != nil {
-		errMsg := fmt.Sprintf("error retrieving proposal: %v", err)
-		log.Error(errMsg)
-		s.sendProposalPageWithError(r, w, errMsg)
+		s.sendProposalPageWithError(r, w, fmt.Sprintf("error retrieving proposal: %v", err))
 		return
 	}
 

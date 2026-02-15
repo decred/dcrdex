@@ -190,6 +190,7 @@ type clientCore interface {
 	PoliteiaDetails() (string, bool, int64)
 	ProposalsAll(offset, rowsCount int, searchPhrase string, filterByVoteStatus ...int) ([]*pi.Proposal, int, error)
 	Proposal(assetID uint32, token string) (*pi.Proposal, error)
+	ProposalsInProgress() ([]*pi.MiniProposal, error)
 	CastVote(assetID uint32, pw []byte, token, bit string) error
 }
 

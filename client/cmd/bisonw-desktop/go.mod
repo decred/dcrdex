@@ -18,7 +18,6 @@ require (
 	github.com/BurntSushi/toml v1.4.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProjectZKM/Ziren/crates/go-runtime/zkvm_runtime v0.0.0-20251001021608-1fe7b43fc4d6 // indirect
-	github.com/asdine/storm/v3 v3.2.1 // indirect
 	github.com/athanorlabs/go-dleq v0.1.0 // indirect
 	github.com/bisoncraft/bchwallet v1.0.2 // indirect
 	github.com/bisoncraft/go-bip39 v1.0.1 // indirect

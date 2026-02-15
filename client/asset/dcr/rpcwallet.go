@@ -1286,17 +1286,16 @@ func (w *rpcWallet) CommittedTickets(ctx context.Context, tickets []*chainhash.H
 	return respTickets, addresses, nil
 }
 
-// AddressAccount returns the account number for an address. If the address has no associated account,
-// false and a nil error should be expected.
+// AddressAccount returns the account number for an address.
 func (w *rpcWallet) AddressAccount(ctx context.Context, address string) (bool, uint32, error) {
 	addr, err := stdaddr.DecodeAddress(address, w.chainParams)
 	if err != nil {
 		return false, 0, err
 	}
 
-	accountName, _ := w.rpcClient.GetAccount(ctx, addr)
-	if accountName == "" {
-		return false, 0, nil // safe to assume err is due to no associated account for this address.
+	accountName, err := w.rpcClient.GetAccount(ctx, addr)
+	if err != nil {
+		return false, 0, err
 	}
 
 	var res struct {

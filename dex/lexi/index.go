@@ -107,7 +107,7 @@ func (db *DB) DeleteIndex(tableName, indexName string) error {
 				// Filter out indexes that match the deleted index prefix
 				newIndexes := make([][]byte, 0, len(d.indexes)-1)
 				for _, idxB := range d.indexes {
-					if !bytes.Equal(idxB[:prefixSize], indexPrefix[:]) {
+					if !bytes.Equal(idxB[:PrefixSize], indexPrefix[:]) {
 						newIndexes = append(newIndexes, idxB)
 					}
 				}
@@ -155,10 +155,10 @@ func (db *DB) ReIndex(tableName, indexName string, f func(k, v []byte) ([]byte, 
 				}
 
 				tableKey := iter.Item().Key()
-				dbIDB := tableKey[prefixSize:]
+				dbIDB := tableKey[PrefixSize:]
 
 				// Get the original key for this datum
-				keyItem, err := txn.Get(prefixedKey(idToKeyPrefix, dbIDB))
+				keyItem, err := txn.Get(PrefixedKey(IdToKeyPrefix, dbIDB))
 				if err != nil {
 					return fmt.Errorf("error finding key for entry: %w", err)
 				}
@@ -172,7 +172,7 @@ func (db *DB) ReIndex(tableName, indexName string, f func(k, v []byte) ([]byte, 
 				if errors.Is(err, ErrNotIndexed) {
 					newIndexes := d.indexes[:0]
 					for _, idxBi := range d.indexes {
-						if bytes.Equal(idxBi[:prefixSize], indexPrefix[:]) {
+						if bytes.Equal(idxBi[:PrefixSize], indexPrefix[:]) {
 							if err := txn.Delete(idxBi); err != nil {
 								return fmt.Errorf("error deleting old index entry during reindex: %w", err)
 							}
@@ -194,12 +194,12 @@ func (db *DB) ReIndex(tableName, indexName string, f func(k, v []byte) ([]byte, 
 				if err != nil {
 					return fmt.Errorf("indexer function error: %w", err)
 				}
-				indexEntry := prefixedKey(indexPrefix, append(idxB, dbIDB...))
+				indexEntry := PrefixedKey(indexPrefix, append(idxB, dbIDB...))
 
 				// Remove old index entries for this index and add the new one
 				var replaced bool
 				for j, idxBi := range d.indexes {
-					if bytes.Equal(idxBi[:prefixSize], indexPrefix[:]) {
+					if bytes.Equal(idxBi[:PrefixSize], indexPrefix[:]) {
 						// Delete the old index entry from the database
 						if err := txn.Delete(idxBi); err != nil {
 							return fmt.Errorf("error deleting old index entry during reindex: %w", err)
@@ -245,7 +245,7 @@ func (e uniqueIndexConflictError) Error() string {
 }
 
 func (idx *Index) checkForIndexConflict(txn *badger.Txn, idxB []byte, updatingDBID DBID) error {
-	conflictPrefix := prefixedKey(idx.prefix, idxB)
+	conflictPrefix := PrefixedKey(idx.prefix, idxB)
 
 	var conflictDBID DBID
 	var foundConflict bool
@@ -254,7 +254,7 @@ func (idx *Index) checkForIndexConflict(txn *badger.Txn, idxB []byte, updatingDB
 		item := iter.Item()
 		key := item.Key()
 
-		if len(key) < prefixSize+DBIDSize {
+		if len(key) < PrefixSize+DBIDSize {
 			return fmt.Errorf("index entry too small. length = %d", len(key))
 		}
 
@@ -292,7 +292,7 @@ func (idx *Index) add(txn *badger.Txn, k, v KV, dbID DBID) ([]byte, error) {
 		}
 		return nil, fmt.Errorf("error getting index value: %w", err)
 	}
-	b := prefixedKey(idx.prefix, append(idxB, dbID[:]...))
+	b := PrefixedKey(idx.prefix, append(idxB, dbID[:]...))
 
 	if idx.unique {
 		if err := idx.checkForIndexConflict(txn, idxB, dbID); err != nil {
@@ -375,7 +375,7 @@ func (i *Iter) V(f func(vB []byte) error) error {
 
 // K is the key for the datum.
 func (i *Iter) K() ([]byte, error) {
-	item, err := i.txn.Get(prefixedKey(idToKeyPrefix, i.dbID[:]))
+	item, err := i.txn.Get(PrefixedKey(IdToKeyPrefix, i.dbID[:]))
 	if err != nil {
 		return nil, err
 	}
@@ -387,15 +387,15 @@ func (i *Iter) K() ([]byte, error) {
 func (i *Iter) Entry(f func(idxB []byte) error) error {
 	k := i.item.Key()
 	if i.isIndex {
-		if len(k) < prefixSize+DBIDSize {
+		if len(k) < PrefixSize+DBIDSize {
 			return fmt.Errorf("index entry too small. length = %d", len(k))
 		}
-		return f(k[prefixSize : len(k)-DBIDSize])
+		return f(k[PrefixSize : len(k)-DBIDSize])
 	}
-	if len(k) < prefixSize {
+	if len(k) < PrefixSize {
 		return fmt.Errorf("table key too small. length = %d", len(k))
 	}
-	return f(k[prefixSize:])
+	return f(k[PrefixSize:])
 }
 
 func (i *Iter) datum() (_ *datum, err error) {
@@ -443,24 +443,24 @@ func (db *DB) iterate(keyPfix keyPrefix, table *Table, io iteratorOpts, isIndex 
 	}
 	var seek []byte
 	if len(io.seek) > 0 {
-		seek = prefixedKey(keyPfix, io.seek)
+		seek = PrefixedKey(keyPfix, io.seek)
 	}
 	return viewUpdate(func(txn *badger.Txn) error {
-		return iterFunc(txn, prefixedKey(keyPfix, prefix), seek, func(iter *badger.Iterator) error {
+		return iterFunc(txn, PrefixedKey(keyPfix, prefix), seek, func(iter *badger.Iterator) error {
 			item := iter.Item()
 			k := item.Key()
 
 			var dbID DBID
 			if isIndex {
-				if len(k) < prefixSize+DBIDSize {
+				if len(k) < PrefixSize+DBIDSize {
 					return fmt.Errorf("invalid index entry length %d", len(k))
 				}
 				dbID = newDBIDFromBytes(k[len(k)-DBIDSize:])
 			} else {
-				if len(k) != prefixSize+DBIDSize {
+				if len(k) != PrefixSize+DBIDSize {
 					return fmt.Errorf("invalid table key length %d", len(k))
 				}
-				copy(dbID[:], k[prefixSize:])
+				copy(dbID[:], k[PrefixSize:])
 			}
 			return f(&Iter{
 				isIndex: isIndex,

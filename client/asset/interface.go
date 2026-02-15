@@ -1385,8 +1385,7 @@ type TicketBuyer interface {
 	// starting at scanStart and going to progressively lower blocks. scanStart
 	// can be set to -1 to indicate the current chain tip.
 	TicketPage(scanStart int32, n, skipN int) ([]*Ticket, error)
-	// AddressAccount returns the account number for an address. If the address has no associated account,
-	// false and a nil error should be expected.
+	// AddressAccount returns the account number for an address.
 	AddressAccount(address string) (bool, uint32, error)
 	// SignMessage returns the signature of a signed message using an address'
 	// associated private key.

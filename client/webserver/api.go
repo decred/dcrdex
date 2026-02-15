@@ -1787,12 +1787,23 @@ func (s *WebServer) apiStakeStatus(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, fmt.Errorf("error fetching stake status for asset ID %d: %w", assetID, err))
 		return
 	}
+
+	proposalsInProgress, err := s.core.ProposalsInProgress()
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error fetching proposals in progress for asset ID %d: %w", assetID, err))
+		return
+	}
+
 	writeJSON(w, &struct {
-		OK     bool                       `json:"ok"`
-		Status *asset.TicketStakingStatus `json:"status"`
+		OK            bool                       `json:"ok"`
+		Status        *asset.TicketStakingStatus `json:"status"`
+		ProposalsMeta *proposalsMeta             `json:"proposalsMeta"`
 	}{
 		OK:     true,
 		Status: status,
+		ProposalsMeta: &proposalsMeta{
+			ProposalsInProgress: proposalsInProgress,
+		},
 	})
 }
 

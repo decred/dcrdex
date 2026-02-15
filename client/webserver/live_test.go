@@ -2047,6 +2047,10 @@ func (*TCore) Proposal(assetID uint32, token string) (*pi.Proposal, error) {
 	return nil, nil
 }
 
+func (*TCore) ProposalsInProgress() ([]*pi.MiniProposal, error) {
+	return nil, nil
+}
+
 func (*TCore) CastVote(assetID uint32, pw []byte, token, bit string) error {
 	return nil
 }

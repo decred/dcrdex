@@ -6,6 +6,9 @@
 package pi
 
 import (
+	"encoding/json"
+	"math"
+
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	rv1 "github.com/decred/politeia/politeiawww/api/records/v1"
@@ -90,16 +93,27 @@ type Proposal struct {
 	VoteDetails *WalletProposalVoteDetails `json:"-"`
 }
 
+// MarshalBinary satisfies encoding.BinaryMarshaler for Proposal
+// so that it can be saved to lexi.
+func (p *Proposal) MarshalBinary() ([]byte, error) {
+	return json.Marshal(p)
+}
+
+// UnmarshalBinary satisfies encoding.BinaryUnmarshaler for Proposal.
+func (p *Proposal) UnmarshalBinary(b []byte) error {
+	return json.Unmarshal(b, &p)
+}
+
 type ProposalMetadata struct {
 	IsPassing          bool
-	Approval           float32
-	Rejection          float32
+	Approval           float64
+	Rejection          float64
 	Yes                int64
 	No                 int64
 	VoteCount          int64
 	QuorumCount        int64
 	QuorumAchieved     bool
-	PassPercent        float32
+	PassPercent        float64
 	VoteStatusDesc     string
 	ProposalStateDesc  string
 	ProposalStatusDesc string
@@ -121,15 +135,17 @@ func (pi *Proposal) Metadata() *ProposalMetadata {
 			}
 		}
 		meta.VoteCount = meta.Yes + meta.No
-		quorumPct := float32(pi.QuorumPercentage)
-		meta.QuorumCount = int64(quorumPct * float32(pi.EligibleTickets))
-		meta.PassPercent = float32(pi.PassPercentage)
-		pctVoted := float32(meta.VoteCount) / float32(pi.EligibleTickets)
-		meta.QuorumAchieved = pctVoted > quorumPct
-		if meta.VoteCount > 0 {
-			meta.Approval = (float32(meta.Yes) / float32(meta.VoteCount)) * 100
-			meta.Rejection = (100 - meta.Approval)
+		quorumPct := float64(pi.QuorumPercentage) / 100
+		meta.QuorumCount = int64(quorumPct * float64(pi.EligibleTickets))
+		meta.PassPercent = float64(pi.PassPercentage)
+		pctVoted := float64(meta.VoteCount) / float64(pi.EligibleTickets)
+		meta.QuorumAchieved = pctVoted >= quorumPct
+		denominator := math.Max(float64(meta.VoteCount), float64(meta.QuorumCount))
+		if denominator > 0 {
+			meta.Approval = (float64(meta.Yes) / denominator) * 100
+			meta.Rejection = (float64(meta.No) / denominator) * 100
 		}
+
 		meta.IsPassing = meta.Approval > meta.PassPercent
 	}
 	meta.VoteStatusDesc = VotesStatuses[pi.VoteStatus]
@@ -149,4 +165,24 @@ func (pi *Proposal) IsEqual(b Proposal) bool {
 		return false
 	}
 	return true
+}
+
+// ToMiniProposal returns a MiniProposal struct with a subset of the data in Proposal.
+func (pi *Proposal) ToMiniProposal() *MiniProposal {
+	return &MiniProposal{
+		Token:      pi.Token,
+		Name:       pi.Name,
+		Username:   pi.Username,
+		Version:    pi.Version,
+		VoteStatus: VotesStatuses[pi.VoteStatus],
+	}
+}
+
+// MiniProposal is a struct that holds a subset of the data in Proposal.
+type MiniProposal struct {
+	Token      string `json:"token"`
+	Name       string `json:"name"`
+	Username   string `json:"username"`
+	Version    uint32 `json:"version"`
+	VoteStatus string `json:"voteStatus"`
 }

@@ -1686,12 +1686,22 @@ func (c *Core) Run(ctx context.Context) {
 	// Store the context as a field, since we will need to spawn new DEX threads
 	// when new accounts are registered.
 	c.ctx = ctx
-	if err := c.initialize(); err != nil { // connectDEX gets ctx for the wsConn
+	err := c.initialize()
+	if err != nil { // connectDEX gets ctx for the wsConn
 		c.log.Critical(err)
 		close(c.ready) // unblock <-Ready()
 		return
 	}
 	close(c.ready)
+
+	// TODO: Allow configuration for testnet
+	c.politeiaURL = pi.PoliteiaMainnetHost
+	c.politeia, err = pi.New(ctx, c.politeiaURL, filepath.Join(filepath.Dir(c.cfg.DBPath), "politeia"), c.log.SubLogger("Politeia"))
+	if err != nil {
+		c.log.Errorf("failed to set up politeia: %v", err.Error())
+		return
+	}
+	defer c.politeia.Close()
 
 	// The DB starts first and stops last.
 	ctxDB, stopDB := context.WithCancel(context.Background())
@@ -1770,15 +1780,6 @@ fetchers:
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
-
-		// TODO: Allow configuration for testnet
-		c.politeiaURL = pi.PoliteiaMainnetHost
-		c.politeia, err = pi.New(ctx, c.politeiaURL, filepath.Join(filepath.Dir(c.cfg.DBPath), "politeia.db"), c.log.SubLogger("Politeia"))
-		if err != nil {
-			c.log.Errorf("failed to set up politeia: %v", err.Error())
-			return
-		}
-		defer c.politeia.Close()
 
 		// Initiate first sync.
 		c.politiaSyncing.Store(true)

@@ -113,7 +113,7 @@ export default class ProposalPage extends BasePage {
 
   async loadProposal (token: string) {
     const assetID = 42 // dcr asset ID
-    const loaded = app().loading(this.page.tabContent)
+    const loaded = app().loading(this.page.proposals)
     const data: Record<string, string> = {
       assetID: assetID.toString()
     }

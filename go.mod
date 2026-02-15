@@ -7,7 +7,6 @@ require (
 	filippo.io/edwards25519 v1.0.0
 	fyne.io/systray v1.10.1-0.20220621085403-9a2652634e93
 	github.com/agl/ed25519 v0.0.0-20170116200512-5312a6153412
-	github.com/asdine/storm/v3 v3.2.1
 	github.com/athanorlabs/go-dleq v0.1.0
 	github.com/bisoncraft/bchwallet v1.0.2
 	github.com/bisoncraft/go-bip39 v1.0.1

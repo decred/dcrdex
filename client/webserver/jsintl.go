@@ -344,6 +344,7 @@ const (
 	idInsuffRedeemFundsErrMsg     = "INSUFFICIENT_REDEEM_FUNDS_ERR_MSG"
 	idInsuffRedeemFundsBundErrMsg = "INSUFFICIENT_REDEEM_FUNDS_BUNDLER_ERR_MSG"
 	idVoteCastMsg                 = "VOTE_CAST_MESSAGE"
+	versionTxt                    = "VERSION"
 )
 
 var enUS = map[string]*intl.Translation{
@@ -687,6 +688,7 @@ var enUS = map[string]*intl.Translation{
 	idInsuffRedeemFundsErrMsg:     {T: "Insufficient gas for redemption. Configure an ERC-4337 bundler to do a gasless redemption."},
 	idInsuffRedeemFundsBundErrMsg: {T: "Redemption lot size is too small to cover the gas fees in a gasless redemption."},
 	idVoteCastMsg:                 {T: "Your vote has been cast"},
+	versionTxt:                    {T: "Version"},
 }
 
 var ptBR = map[string]*intl.Translation{

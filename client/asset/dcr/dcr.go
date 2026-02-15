@@ -6537,8 +6537,7 @@ func (dcr *ExchangeWallet) TicketPage(scanStart int32, n, skipN int) ([]*asset.T
 	return pager.TicketPage(dcr.ctx, scanStart, n, skipN)
 }
 
-// AddressAccount returns the account number for an address. If the address has no associated account,
-// false and a nil error should be expected.
+// AddressAccount returns the account number for an address.
 func (dcr *ExchangeWallet) AddressAccount(address string) (bool, uint32, error) {
 	return dcr.wallet.AddressAccount(dcr.ctx, address)
 }

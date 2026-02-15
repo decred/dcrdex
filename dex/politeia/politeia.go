@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/lexi"
 	"decred.org/dcrwallet/v5/errors"
 	"decred.org/dcrwallet/v5/wallet/udb"
 	"github.com/decred/dcrd/chaincfg/chainhash"
@@ -25,30 +27,110 @@ const (
 	VoteBitNo = tkv1.VoteOptionIDReject
 
 	PoliteiaMainnetHost = "https://proposals.decred.org"
+
+	// dbVersion is the current required version of the proposals db.
+	dbVersion = 1
 )
 
 type Politeia struct {
-	*proposalsDB
-	log    dex.Logger
-	client *piclient.Client
+	ctx          context.Context
+	db           *lexi.DB
+	dbConn       *dex.ConnectionMaster
+	proposals    *lexi.Table
+	proposalMeta *lexi.Table
+	log          dex.Logger
+	client       *piclient.Client
+	lastSync     atomic.Int64
+	updating     atomic.Bool
 }
 
 // New creates and returns a new instance of *Politeia.
 func New(ctx context.Context, politeiaURL string, dbPath string, log dex.Logger) (*Politeia, error) {
+	if dbPath == "" {
+		return nil, errors.New("missing db path")
+	}
+
+	db, err := lexi.New(&lexi.Config{
+		Path: dbPath,
+		Log:  log.SubLogger("DB"),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error initializing db: %w", err)
+	}
+
+	proposalsTable, err := db.Table(proposalsTable)
+	if err != nil {
+		return nil, err
+	}
+
+	// Add indexes
+	proposalsTable.AddUniqueIndex(proposalStatusIndex, func(k, v lexi.KV) ([]byte, error) {
+		p, ok := v.(*Proposal)
+		if !ok {
+			return nil, fmt.Errorf("unexpected type for proposalStatus: %T", v)
+		}
+		return proposalsStatusIndex(p), nil
+	})
+
+	proposalsTable.AddUniqueIndex(proposalTimestampIndex, func(k, v lexi.KV) ([]byte, error) {
+		p, ok := v.(*Proposal)
+		if !ok {
+			return nil, fmt.Errorf("unexpected type for proposalTimestamp: %T", v)
+		}
+		return proposalsTimestampIndex(p), nil
+	})
+
+	proposalsMetaTable, err := db.Table(proposalsMetaTable)
+	if err != nil {
+		return nil, err
+	}
+
+	version, err := db.GetDBVersion()
+	if err != nil {
+		return nil, err
+	}
+
+	// Checks if the correct db version has been set.
+	if version == 0 {
+		if err = db.SetDBVersion(dbVersion); err != nil {
+			return nil, fmt.Errorf("error setting db version: %w", err)
+		}
+
+		log.Infof("Proposals DB version %v was set...", dbVersion)
+	} else if version > dbVersion {
+		return nil, fmt.Errorf("db version is newer than expected: got %v, want %v", version, dbVersion)
+	} else if version < dbVersion {
+		log.Warnf("Proposals DB version is outdated: got %v, want %v. Attempting to update...", version, dbVersion)
+
+		if err = db.DropAll(); err != nil {
+			return nil, fmt.Errorf("error dropping db: %w", err)
+		}
+
+		if err = db.SetDBVersion(dbVersion); err != nil {
+			return nil, fmt.Errorf("error setting db version: %w", err)
+		}
+
+		log.Infof("Proposals DB version %v was set...", dbVersion)
+	}
+
 	pc, err := piclient.New(politeiaURL+"/api", piclient.Opts{})
 	if err != nil {
 		return nil, err
 	}
 
-	pdb, err := newProposalsDB(ctx, dbPath, log, pc)
-	if err != nil {
+	dbConn := dex.NewConnectionMaster(db)
+	if err := dbConn.ConnectOnce(ctx); err != nil {
 		return nil, err
 	}
 
 	return &Politeia{
-		log:         log,
-		proposalsDB: pdb,
-		client:      pc,
+		ctx:          ctx,
+		log:          log,
+		db:           db,
+		dbConn:       dbConn,
+		proposals:    proposalsTable,
+		proposalMeta: proposalsMetaTable,
+		client:       pc,
 	}, nil
 }
 
@@ -92,6 +174,9 @@ func (p *Politeia) WalletProposalVoteDetails(wallet VotingWallet, token string) 
 
 		isMine, accountNumber, err := wallet.AddressAccount(ticket.Address)
 		if err != nil {
+			if strings.Contains(err.Error(), "address not found in wallet") {
+				continue // address not found in wallet, skip this ticket
+			}
 			return nil, err
 		}
 
@@ -172,5 +257,11 @@ func (p *Politeia) CastVotes(wallet VotingWallet, eligibleTickets []*Ticket, bit
 		return fmt.Errorf("errors casting votes: %v", strings.Join(errors, "; "))
 	}
 
+	return nil
+}
+
+// Close closes the Politeia db and disconnects from the db connection master.
+func (p *Politeia) Close() error {
+	p.dbConn.Disconnect()
 	return nil
 }

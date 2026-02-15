@@ -747,6 +747,7 @@ var EnUS = map[string]*intl.Translation{
 	"published":                   {T: "Published"},
 	"votes":                       {T: "votes"},
 	"vote_now":                    {T: "Vote Now"},
+	"no_treasury_spends_to_show":  {T: "No treasury spends to show"},
 	"proposal_structure":          {T: "Proposal Structure"},
 	"view_on_politeia":            {T: "View on Politeia"},
 	"vote":                        {T: "Vote"},
@@ -762,4 +763,8 @@ var EnUS = map[string]*intl.Translation{
 	"all":                         {T: "All"},
 	"filter":                      {T: "Filter"},
 	"not_synced":                  {T: "Not Synced"},
+	"proposals_inProgress":        {T: "proposals in-progress"},
+	"view":                        {T: "View"},
+	"no_proposals_in_progress":    {T: "No proposals in progress."},
+	"view_all":                    {T: "View All"},
 }

@@ -34,7 +34,7 @@ export default class ProposalsPage extends BasePage {
     Doc.bind(page.searchProposals, 'click', () => {
       const query = page.proposalSearchInput.value || ''
       if (!query) return
-      const loaded = app().loading(this.page.tabContent)
+      const loaded = app().loading(this.page.proposals)
       app().loadPage('proposals', { query })
       loaded()
     })
@@ -50,33 +50,10 @@ export default class ProposalsPage extends BasePage {
         this.refreshWithFilter()
       })
     })
-    Doc.applySelector(page.tabs, '.tab').forEach(el => {
-      Doc.bind(el, 'click', () => {
-        Doc.applySelector(page.tabs, '.tab').forEach(el => { el.classList.remove('active-tab') })
-        switch (el.id) {
-          case 'tabProposals':
-            Doc.hide(page.sectionTreasury, page.sectionConsensus)
-            Doc.show(page.sectionProposals)
-            el.classList.add('active-tab')
-            break
-
-          case 'tabConsensus':
-            Doc.hide(page.sectionTreasury, page.sectionProposals)
-            Doc.show(page.sectionConsensus)
-            el.classList.add('active-tab')
-            break
-
-          case 'tabTreasury':
-            Doc.hide(page.sectionProposals, page.sectionConsensus)
-            Doc.show(page.sectionTreasury)
-            el.classList.add('active-tab')
-        }
-      })
+    Doc.applySelector(page.proposals, '.proposal').forEach(el => {
+      Doc.bind(el, 'click', async () => await this.loadProposal(el.dataset.token || '', this.page.proposals))
     })
-    Doc.applySelector(page.sectionProposals, '.proposal').forEach(el => {
-      Doc.bind(el, 'click', async () => await this.loadProposal(el))
-    })
-    Doc.applySelector(page.sectionProposals, '.vote-bar').forEach(bar => {
+    Doc.applySelector(page.proposals, '.vote-bar').forEach(bar => {
       bar.style.setProperty('--yes', bar.dataset.yes + '%')
       bar.style.setProperty('--no', bar.dataset.no + '%')
       bar.style.setProperty('--approval-threshold', bar.dataset.threshold || '60')
@@ -115,10 +92,9 @@ export default class ProposalsPage extends BasePage {
     app().loadPage('proposals', data)
   }
 
-  async loadProposal (el : PageElement) {
-    const token = el.dataset.token || ''
+  async loadProposal (token: string, displayedEl : PageElement) {
     const assetID = 42 // dcr asset ID
-    const loaded = app().loading(this.page.tabContent)
+    const loaded = app().loading(displayedEl)
     const data: Record<string, string> = {
       assetID: assetID.toString()
     }

@@ -1,4 +1,4 @@
-#sectionProposals {
+#proposals {
   max-width: 500px;
   width: 100%;
 }
@@ -31,7 +31,7 @@
 }
 
 .page-link.is-active {
-  background-color: var(--subtle-link-color);
+  background-color: var(--link-color);
   color: #fff;
   cursor: default;
   pointer-events: none;
@@ -81,12 +81,4 @@
 
 .search-bar button:hover {
   color: var(--btn-feature-hover-bg);
-}
-
-.tab {
-  height: 40px;
-  padding: 0 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }

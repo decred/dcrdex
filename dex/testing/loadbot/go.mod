@@ -31,7 +31,6 @@ require (
 	github.com/VictoriaMetrics/fastcache v1.13.0 // indirect
 	github.com/aead/siphash v1.0.1 // indirect
 	github.com/agl/ed25519 v0.0.0-20170116200512-5312a6153412 // indirect
-	github.com/asdine/storm/v3 v3.2.1 // indirect
 	github.com/athanorlabs/go-dleq v0.1.0 // indirect
 	github.com/bisoncraft/op-geth v0.0.0-20250729074358-3cfe4f15e91c // indirect
 	github.com/bits-and-blooms/bitset v1.22.0 // indirect

@@ -385,6 +385,7 @@ export const ID_MM_MOVE_UP = 'MM_MOVE_UP'
 export const ID_MM_MOVE_DOWN = 'MM_MOVE_DOWN'
 export const ID_MM_ADD_PLACEMENT = 'MM_ADD_PLACEMENT'
 export const ID_VOTE_CAST_MESSAGE = 'VOTE_CAST_MESSAGE'
+export const ID_VERSION = 'VERSION'
 
 let locale: Locale
 
