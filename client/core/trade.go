@@ -267,15 +267,12 @@ const (
 	// existing retry logic (suspectSwap / suspectRedeem) will re-attempt
 	// the operation on the next tick.
 	//
-	// NOTE: For UTXO wallets, a retry after a successful-but-timed-out
-	// broadcast will build a different transaction (new change address)
-	// with the same inputs, which the node will reject as a double-spend.
-	// The original transaction will still confirm, but the match state
-	// won't be updated with the receipts. The match will be marked with
-	// swapErr after exhausting retries. The BTC SPV wallet mitigates this
-	// by checking for a completed publish before returning a context error.
-	// ETH Redeem and Refund are safe (idempotent state checks), but ETH
-	// Swap lacks an AlreadyInitialized pre-check.
+	// UTXO wallets (BTC, DCR, ZEC) cache the signed transaction before
+	// broadcast. On retry, the cached transaction is rebroadcast instead
+	// of building a new one, and "already in mempool" errors are treated
+	// as success. ETH wallets check on-chain contract state on retry
+	// (AlreadyInitialized for Swap, SSRedeemed for Redeem) and return
+	// early if the operation already completed.
 	walletCallTimeout = 45 * time.Second
 )
 
