@@ -26,6 +26,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
+	pi "decred.org/dcrdex/dex/politeia"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -348,6 +349,26 @@ func (*TCore) TakeAction(assetID uint32, actionID string, actionB json.RawMessag
 
 func (*TCore) ExtensionModeConfig() *core.ExtensionModeConfig {
 	return nil
+}
+
+func (*TCore) ProposalsAll(offset, rowsCount int, searchPhrase string, filterByVoteStatus ...int) ([]*pi.Proposal, int, error) {
+	return nil, 0, nil
+}
+
+func (*TCore) Proposal(assetID uint32, token string) (*pi.Proposal, error) {
+	return nil, nil
+}
+
+func (*TCore) ProposalsInProgress() ([]*pi.MiniProposal, error) {
+	return nil, nil
+}
+
+func (*TCore) CastVote(assetID uint32, pw []byte, token, bit string) error {
+	return nil
+}
+
+func (*TCore) PoliteiaDetails() (string, bool, int64) {
+	return "", false, 0
 }
 
 type TWriter struct {
@@ -1099,4 +1120,62 @@ func TestAPIBuildInfo(t *testing.T) {
 	}
 
 	ensureResponse(t, s.apiBuildInfo, string(body), reader, writer, nil, nil)
+}
+
+func TestProposalTokenCtx(t *testing.T) {
+	propToken := hex.EncodeToString(encode.RandomBytes(32))
+	req := (&http.Request{}).WithContext(context.WithValue(context.Background(), chi.RouteCtxKey, &chi.Context{
+		URLParams: chi.RouteParams{
+			Keys:   []string{"token"},
+			Values: []string{propToken},
+		},
+	}))
+
+	tNextHandler := &tHTTPHandler{}
+	handlerFunc := proposalTokenCtx(tNextHandler)
+	handlerFunc.ServeHTTP(nil, req)
+
+	reqCtx := tNextHandler.req.Context()
+	untypedToken := reqCtx.Value(ctxProposalToken)
+	if untypedToken == nil {
+		t.Fatalf("proposal not embedded in request context")
+	}
+	token, ok := untypedToken.(string)
+	if !ok {
+		t.Fatalf("string type assertion failed")
+	}
+
+	if token != propToken {
+		t.Fatalf("wrong value embedded in request context. wanted %s, got %s", propToken, token)
+	}
+}
+
+func TestGetProposalTokenCtx(t *testing.T) {
+	token := encode.RandomBytes(32)
+	propToken := hex.EncodeToString(token)
+
+	r := (&http.Request{}).WithContext(context.WithValue(context.Background(), ctxProposalToken, propToken))
+
+	extractedToken, err := getProposalTokenCtx(r)
+	if err != nil {
+		t.Fatalf("getProposalTokenCtx error: %v", err)
+	}
+	if len(extractedToken) == 0 {
+		t.Fatalf("empty proposal token")
+	}
+	if propToken != extractedToken {
+		t.Fatalf("wrong bytes. wanted %x, got %s", token, extractedToken)
+	}
+
+	// Test some negative paths
+	for name, v := range map[string]any{
+		"nil": nil,
+		"int": 5,
+	} {
+		r := (&http.Request{}).WithContext(context.WithValue(context.Background(), ctxOID, v))
+		_, err := getProposalTokenCtx(r)
+		if err == nil {
+			t.Fatalf("no error for %v", name)
+		}
+	}
 }

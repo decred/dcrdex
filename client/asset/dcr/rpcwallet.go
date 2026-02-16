@@ -59,6 +59,8 @@ const (
 	methodGetPeerInfo        = "getpeerinfo"
 	methodWalletInfo         = "walletinfo"
 	methodAbandonTransaction = "abandontransaction"
+	methodCommittedTickets   = "committedtickets"
+	methodAccountNumber      = "accountnumber"
 )
 
 // rpcWallet implements Wallet functionality using an rpc client to communicate
@@ -157,6 +159,8 @@ type rpcClient interface {
 	SetTxFee(ctx context.Context, fee dcrutil.Amount) error
 	ListSinceBlock(ctx context.Context, hash *chainhash.Hash) (*walletjson.ListSinceBlockResult, error)
 	GetReceivedByAddressMinConf(ctx context.Context, address stdaddr.Address, minConfs int) (dcrutil.Amount, error)
+	GetAccount(ctx context.Context, address stdaddr.Address) (string, error)
+	SignMessage(ctx context.Context, addr stdaddr.Address, msg string) (string, error)
 }
 
 // newRPCWallet creates an rpcClient and uses it to construct a new instance
@@ -1243,6 +1247,91 @@ func (w *rpcWallet) AddressUsed(ctx context.Context, addrStr string) (bool, erro
 		return false, err
 	}
 	return recv != 0, nil
+}
+
+// CommittedTickets takes a list of tickets and returns a filtered list of
+// tickets that are controlled by this wallet.
+func (w *rpcWallet) CommittedTickets(ctx context.Context, tickets []*chainhash.Hash) ([]*chainhash.Hash, []stdaddr.Address, error) {
+	req := make(anylist, len(tickets))
+	for i, t := range tickets {
+		req[i] = t
+	}
+
+	var res struct {
+		TicketAddresses []struct {
+			Ticket  []byte `json:"ticket"`
+			Address string `json:"address"`
+		} `json:"ticketAddresses"`
+	}
+	err := w.rpcClientRawRequest(ctx, methodCommittedTickets, anylist{tickets}, &res)
+	if err != nil {
+		return nil, nil, fmt.Errorf("unable to fetch wallet tickets: %v", err)
+	}
+
+	nTicketAddresess := len(res.TicketAddresses)
+	respTickets := make([]*chainhash.Hash, nTicketAddresess)
+	addresses := make([]stdaddr.Address, nTicketAddresess)
+	for i, ad := range res.TicketAddresses {
+		respTickets[i], err = chainhash.NewHash(ad.Ticket)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		addresses[i], err = stdaddr.DecodeAddress(ad.Address, w.chainParams)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	return respTickets, addresses, nil
+}
+
+// AddressAccount returns the account number for an address.
+func (w *rpcWallet) AddressAccount(ctx context.Context, address string) (bool, uint32, error) {
+	addr, err := stdaddr.DecodeAddress(address, w.chainParams)
+	if err != nil {
+		return false, 0, err
+	}
+
+	accountName, err := w.rpcClient.GetAccount(ctx, addr)
+	if err != nil {
+		return false, 0, err
+	}
+
+	var res struct {
+		AccountNumber uint32 `json:"account_number"`
+	}
+	err = w.rpcClientRawRequest(ctx, methodAccountNumber, anylist{accountName}, &res)
+	if err != nil {
+		return false, 0, err
+	}
+
+	return true, res.AccountNumber, err
+}
+
+// SignMessage returns the signature of a signed message using an address'
+// associated private key.
+func (w *rpcWallet) SignMessage(ctx context.Context, message string, address string) ([]byte, error) {
+	addr, err := stdaddr.DecodeAddress(address, w.chainParams)
+	if err != nil {
+		return nil, err
+	}
+
+	// Addresses must have an associated secp256k1 private key and therefore
+	// must be P2PK or P2PKH (P2SH is not allowed).
+	switch addr.(type) {
+	case *stdaddr.AddressPubKeyEcdsaSecp256k1V0:
+	case *stdaddr.AddressPubKeyHashEcdsaSecp256k1V0:
+	default:
+		return nil, errors.New("invalid address")
+	}
+
+	sig, err := w.rpcClient.SignMessage(ctx, addr, message)
+	if err != nil {
+		return nil, err
+	}
+
+	return []byte(sig), nil
 }
 
 // anylist is a list of RPC parameters to be converted to []json.RawMessage and

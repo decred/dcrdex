@@ -4261,13 +4261,13 @@ func (w *TokenWallet) ReReserveRefund(req uint64) error {
 	return w.parent.lockFunds(req, refundReserve)
 }
 
-// SignMessage signs the message with the private key associated with the
+// SignCoinMessage signs the message with the private key associated with the
 // specified funding Coin. Only a coin that came from the address this wallet
 // is initialized with can be used to sign.
-func (eth *baseWallet) SignMessage(_ asset.Coin, msg dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
+func (eth *baseWallet) SignCoinMessage(_ asset.Coin, msg dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
 	sig, pubKey, err := eth.node.signData(msg)
 	if err != nil {
-		return nil, nil, fmt.Errorf("SignMessage: error signing data: %w", err)
+		return nil, nil, fmt.Errorf("SignCoinMessage: error signing data: %w", err)
 	}
 
 	// Strip the recovery ID if it's present.

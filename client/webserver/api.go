@@ -24,6 +24,7 @@ import (
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
+	pi "decred.org/dcrdex/dex/politeia"
 )
 
 var zero = encode.ClearBytes
@@ -1786,12 +1787,23 @@ func (s *WebServer) apiStakeStatus(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, fmt.Errorf("error fetching stake status for asset ID %d: %w", assetID, err))
 		return
 	}
+
+	proposalsInProgress, err := s.core.ProposalsInProgress()
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error fetching proposals in progress for asset ID %d: %w", assetID, err))
+		return
+	}
+
 	writeJSON(w, &struct {
-		OK     bool                       `json:"ok"`
-		Status *asset.TicketStakingStatus `json:"status"`
+		OK            bool                       `json:"ok"`
+		Status        *asset.TicketStakingStatus `json:"status"`
+		ProposalsMeta *proposalsMeta             `json:"proposalsMeta"`
 	}{
 		OK:     true,
 		Status: status,
+		ProposalsMeta: &proposalsMeta{
+			ProposalsInProgress: proposalsInProgress,
+		},
 	})
 }
 
@@ -2493,4 +2505,36 @@ func (s *WebServer) apiBridgeHistory(w http.ResponseWriter, r *http.Request) {
 		OK:      true,
 		Bridges: bridges,
 	})
+}
+
+// apiCastVote is the handler for the '/castvote' API request.
+func (s *WebServer) apiCastVote(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		Token   string           `json:"token"`
+		AssetID uint32           `json:"assetID"`
+		AppPW   encode.PassBytes `json:"appPW"`
+		Bit     string           `json:"bit"`
+	}{}
+	if !readPost(w, r, form) {
+		return
+	}
+	defer form.AppPW.Clear()
+	appPW, err := s.resolvePass(form.AppPW, r)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
+		return
+	}
+
+	if form.Bit != pi.VoteBitYes && form.Bit != pi.VoteBitNo {
+		s.writeAPIError(w, errors.New("invalid vote bit"))
+		return
+	}
+
+	err = s.core.CastVote(form.AssetID, appPW, form.Token, form.Bit)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("castvote error: %w", err))
+		return
+	}
+
+	writeJSON(w, simpleAck())
 }

@@ -1238,6 +1238,18 @@ export interface TicketStakingStatus {
   stats: TicketStats
 }
 
+export interface ProposalsMeta {
+  proposalsInProgress: Proposal[]
+}
+
+export interface Proposal {
+  token: string
+  name: string
+  username: string
+  version: string
+  voteStatus: string
+}
+
 // VotingServiceProvider is information about a voting service provider.
 export interface VotingServiceProvider {
   url: string

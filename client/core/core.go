@@ -41,6 +41,7 @@ import (
 	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
+	pi "decred.org/dcrdex/dex/politeia"
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
 	serverdex "decred.org/dcrdex/server/dex"
@@ -1519,6 +1520,10 @@ type Core struct {
 	meshMtx sync.RWMutex
 	mesh    *mesh.Mesh
 	meshCM  *dex.ConnectionMaster
+
+	politeia       *pi.Politeia
+	politeiaURL    string
+	politiaSyncing atomic.Bool
 }
 
 // New is the constructor for a new Core.
@@ -1681,12 +1686,22 @@ func (c *Core) Run(ctx context.Context) {
 	// Store the context as a field, since we will need to spawn new DEX threads
 	// when new accounts are registered.
 	c.ctx = ctx
-	if err := c.initialize(); err != nil { // connectDEX gets ctx for the wsConn
+	err := c.initialize()
+	if err != nil { // connectDEX gets ctx for the wsConn
 		c.log.Critical(err)
 		close(c.ready) // unblock <-Ready()
 		return
 	}
 	close(c.ready)
+
+	// TODO: Allow configuration for testnet
+	c.politeiaURL = pi.PoliteiaMainnetHost
+	c.politeia, err = pi.New(ctx, c.politeiaURL, filepath.Join(filepath.Dir(c.cfg.DBPath), "politeia"), c.log.SubLogger("Politeia"))
+	if err != nil {
+		c.log.Errorf("failed to set up politeia: %v", err.Error())
+		return
+	}
+	defer c.politeia.Close()
 
 	// The DB starts first and stops last.
 	ctxDB, stopDB := context.WithCancel(context.Background())
@@ -1755,6 +1770,33 @@ fetchers:
 			select {
 			case n := <-c.notes:
 				c.handleWalletNotification(n)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Start a goroutine to keep proposals synced.
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+
+		// Initiate first sync.
+		c.politiaSyncing.Store(true)
+		err := c.politeia.ProposalsSync()
+		if err != nil {
+			c.log.Errorf("politeia.ProposalsSync failed: %v", err)
+		}
+		c.politiaSyncing.Store(false)
+
+		tick := time.NewTicker(time.Minute * 20)
+		defer tick.Stop()
+		for {
+			select {
+			case <-tick.C:
+				c.politiaSyncing.Store(true)
+				c.politeia.ProposalsSync()
+				c.politiaSyncing.Store(false)
 			case <-ctx.Done():
 				return
 			}
@@ -6295,9 +6337,9 @@ func (c *Core) createTradeRequest(wallets *walletSet, coins asset.Coins, redeemS
 	// funds.
 	var redemptionReserves uint64
 	if isAccountRedemption {
-		pubKeys, sigs, err := toWallet.SignMessage(nil, msgOrder.Serialize())
+		pubKeys, sigs, err := toWallet.SignCoinMessage(nil, msgOrder.Serialize())
 		if err != nil {
-			return nil, codedError(signatureErr, fmt.Errorf("SignMessage error: %w", err))
+			return nil, codedError(signatureErr, fmt.Errorf("SignCoinMessage error: %w", err))
 		}
 		if len(pubKeys) == 0 || len(sigs) == 0 {
 			return nil, newError(signatureErr, "wrong number of pubkeys or signatures, %d & %d", len(pubKeys), len(sigs))
@@ -6371,7 +6413,7 @@ func (c *Core) createTradeRequest(wallets *walletSet, coins asset.Coins, redeemS
 	// first coin is an address and the entire serialized message needs to
 	// be signed with that address's private key.
 	if changeID != nil {
-		if _, msgTrade.Coins[0].Sigs, err = fromWallet.SignMessage(nil, msgOrder.Serialize()); err != nil {
+		if _, msgTrade.Coins[0].Sigs, err = fromWallet.SignCoinMessage(nil, msgOrder.Serialize()); err != nil {
 			return nil, fmt.Errorf("%v wallet failed to sign for redeem: %w",
 				assetConfigs.fromAsset.Symbol, err)
 		}
@@ -10277,9 +10319,9 @@ func messageCoins(wallet *xcWallet, coins asset.Coins, redeemScripts []dex.Bytes
 	msgCoins := make([]*msgjson.Coin, 0, len(coins))
 	for i, coin := range coins {
 		coinID := coin.ID()
-		pubKeys, sigs, err := wallet.SignMessage(coin, coinID)
+		pubKeys, sigs, err := wallet.SignCoinMessage(coin, coinID)
 		if err != nil {
-			return nil, fmt.Errorf("%s SignMessage error: %w", unbip(wallet.AssetID), err)
+			return nil, fmt.Errorf("%s SignCoinMessage error: %w", unbip(wallet.AssetID), err)
 		}
 		msgCoins = append(msgCoins, &msgjson.Coin{
 			ID:      coinID,

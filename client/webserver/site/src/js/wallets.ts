@@ -1,52 +1,53 @@
-import Doc, { Animation, AniToggle, parseFloatDefault, setupCopyBtn } from './doc'
-import BasePage from './basepage'
-import { postJSON, Errors } from './http'
-import {
-  NewWalletForm,
-  WalletConfigForm,
-  DepositAddress,
-  Forms
-} from './forms'
-import State from './state'
-import * as intl from './locales'
-import * as OrderUtil from './orderutil'
-import { NetworkAsset, TickerAsset, normalizedTicker } from './assets'
 import React from 'react'
 import { createRoot, Root } from 'react-dom/client'
-import { BridgingPopup, BridgePopupHandle } from './bridging'
+import { NetworkAsset, normalizedTicker, TickerAsset } from './assets'
+import BasePage from './basepage'
+import { BridgePopupHandle, BridgingPopup } from './bridging'
+import { CoinExplorers } from './coinexplorers'
+import Doc, { Animation, AniToggle, parseFloatDefault, setupCopyBtn } from './doc'
+import {
+  DepositAddress,
+  Forms,
+  NewWalletForm,
+  WalletConfigForm
+} from './forms'
+import { Errors, postJSON } from './http'
+import * as intl from './locales'
+import * as OrderUtil from './orderutil'
 import {
   app,
-  PageElement,
-  SupportedAsset,
-  WalletDefinition,
+  ApprovalStatus,
   BalanceNote,
-  WalletStateNote,
-  WalletSyncNote,
-  Order,
-  OrderFilter,
-  WalletCreationNote,
   BaseWalletNote,
-  WalletNote,
+  BridgeNote,
   CustomWalletNote,
-  TipChangeNote,
   Exchange,
   Market,
+  Order,
+  OrderFilter,
+  PageElement,
   PeerSource,
-  WalletPeer,
-  ApprovalStatus,
-  WalletState,
-  UnitInfo,
-  TicketStakingStatus,
-  VotingServiceProvider,
+  ProposalsMeta,
+  SupportedAsset,
   Ticket,
+  TicketStakingStatus,
   TicketStats,
-  TxHistoryResult,
-  TxHistoryRequest,
+  TipChangeNote,
   TransactionNote,
-  WalletTransaction,
-  BridgeNote
+  TxHistoryRequest,
+  TxHistoryResult,
+  UnitInfo,
+  VotingServiceProvider,
+  WalletCreationNote,
+  WalletDefinition,
+  WalletNote,
+  WalletPeer,
+  WalletState,
+  WalletStateNote,
+  WalletSyncNote,
+  WalletTransaction
 } from './registry'
-import { CoinExplorers } from './coinexplorers'
+import State from './state'
 
 interface DecredTicketTipUpdate {
   ticketPrice: number
@@ -253,6 +254,7 @@ export default class WalletsPage extends BasePage {
   restoreInfoCard: HTMLElement
   selectedWalletID: number
   stakeStatus: TicketStakingStatus
+  proposalsMeta: ProposalsMeta
   maxSend: number
   unapprovingTokenVersion: number
   ticketPage: TicketPagination
@@ -400,6 +402,11 @@ export default class WalletsPage extends BasePage {
     Doc.bind(page.expandPendingTxs, 'click', () => { this.toggleExpandPendingTxs() })
     Doc.bind(page.txHistoryBack, 'click', () => { this.showTxHistoryPage(this.txHistory.currentPage - 1) })
     Doc.bind(page.txHistoryFwd, 'click', () => { this.showTxHistoryPage(this.txHistory.currentPage + 1) })
+    Doc.bind(page.viewAllProposals, 'click', () => {
+      const loaded = app().loading(body)
+      app().loadPage('proposals')
+      loaded()
+    })
 
     // Display fiat value for current send amount.
     Doc.bind(page.sendAmt, 'input', () => {
@@ -1250,6 +1257,9 @@ export default class WalletsPage extends BasePage {
       return
     }
     Doc.show(page.stakingSummary, page.ticketPriceBox)
+    const proposalsMeta = res.proposalsMeta as ProposalsMeta
+    this.proposalsMeta = proposalsMeta
+    page.proposalsInProgressCount.textContent = String(proposalsMeta.proposalsInProgress?.length)
     const stakeStatus = res.status as TicketStakingStatus
     this.stakeStatus = stakeStatus
     page.stakingAgendaCount.textContent = String(stakeStatus.stances.agendas.length)
@@ -1497,7 +1507,7 @@ export default class WalletsPage extends BasePage {
   }
 
   showSetVotesDialog () {
-    const { page, stakeStatus, selectedWalletID: assetID } = this
+    const { page, stakeStatus, proposalsMeta, selectedWalletID: assetID } = this
     const ui = app().unitInfo(assetID)
     Doc.hide(page.votingFormErr)
     const coinLink = CoinExplorers[assetID][app().user.net]
@@ -1549,6 +1559,8 @@ export default class WalletsPage extends BasePage {
     }
 
     Doc.empty(page.votingTspends)
+    Doc.hide(page.noTspendsMessage)
+    if (stakeStatus.stances.tspends.length === 0) Doc.show(page.noTspendsMessage)
     for (const tspend of stakeStatus.stances.tspends) {
       const div = page.tspendTmpl.cloneNode(true) as PageElement
       page.votingTspends.appendChild(div)
@@ -1587,6 +1599,22 @@ export default class WalletsPage extends BasePage {
         })
       }
       tmpl.key.textContent = keyPolicy.key
+    }
+
+    Doc.empty(page.proposalsInProgress)
+    Doc.hide(page.noInProgressProposal)
+    if (proposalsMeta?.proposalsInProgress.length === 0) Doc.show(page.noInProgressProposal)
+    for (const proposal of (proposalsMeta?.proposalsInProgress ?? [])) {
+      const div = page.proposalTmpl.cloneNode(true) as PageElement
+      page.proposalsInProgress.appendChild(div)
+      const proposalTmpl = Doc.parseTemplate(div)
+      proposalTmpl.name.textContent = proposal.name
+      proposalTmpl.meta.textContent = `${proposal.username} - ${intl.prep(intl.ID_VERSION)} ${proposal.version} -  ${proposal.voteStatus.toLowerCase()}`
+      proposalTmpl.detailsLink.setAttribute('href', `/proposal/${proposal.token}?assetID=42`)
+      Doc.bind(proposalTmpl.detailsLink, 'click', (e: Event) => {
+        e.preventDefault()
+        this.loadProposal(proposal.token, page.votingForm)
+      })
     }
 
     this.forms.show(page.votingForm)
@@ -2782,6 +2810,12 @@ export default class WalletsPage extends BasePage {
       this.bridgingRoot.unmount()
       this.bridgingRoot = null
     }
+  }
+
+  async loadProposal (token: string, displayedEl: PageElement) {
+    const loaded = app().loading(displayedEl)
+    await app().loadPage(`proposal/${token}?assetID=42`)
+    loaded()
   }
 }
 

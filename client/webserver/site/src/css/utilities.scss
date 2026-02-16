@@ -87,6 +87,10 @@
   max-width: 425px;
 }
 
+.mw-500 {
+  max-width: 500px;
+}
+
 .max-h-100 {
   max-height: 100%;
 }
@@ -109,6 +113,10 @@
 
 .rounded3 {
   border-radius: 3px;
+}
+
+.rounded25 {
+  border-radius: 25px;
 }
 
 hr.dashed {
@@ -232,4 +240,58 @@ div.clear {
 
 .text-sellcolor {
   color: var(--sell-color);
+}
+
+.yes-indicator {
+  background: #22c55e;
+  width: 8px;
+  height: 8px;
+}
+
+.no-indicator {
+  background: #ef4444;
+  width: 8px;
+  height: 8px;
+}
+
+.approval-bar {
+  background: #22c55e; 
+  flex: var(--approval-flex);
+}
+
+.rejection-bar {
+  background: #ef4444; 
+  flex: var(--rejection-flex);
+}
+
+.vote-bar {
+  display: flex;
+  width: 100%;
+  height: 10px;
+  background: #e5e5e5;
+  border-radius: 6px;
+  overflow: hidden;
+  position: relative;
+}
+
+.vote-yes {
+  background: #28a745;
+  width: var(--yes);
+}
+
+.vote-no {
+  background: #dc3545;
+  width: var(--no);
+}
+
+.approval-threshold {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--approval-threshold) * 1%);
+  width: 2px;
+  background: #000;
+  opacity: 0.7;
+  transform: translateX(-50%);
+  pointer-events: none;
 }

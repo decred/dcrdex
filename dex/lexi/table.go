@@ -104,7 +104,7 @@ func (t *Table) Get(k KV, thing encoding.BinaryUnmarshaler, options ...GetOption
 // }
 
 func (t *Table) get(txn *badger.Txn, dbID DBID) (d *datum, err error) {
-	item, err := txn.Get(prefixedKey(t.prefix, dbID[:]))
+	item, err := txn.Get(PrefixedKey(t.prefix, dbID[:]))
 	if err != nil {
 		return nil, convertError(err)
 	}
@@ -230,7 +230,7 @@ func (t *Table) Set(k, v KV, setOpts ...SetOption) error {
 			return fmt.Errorf("error encoding datum: %w", err)
 		}
 
-		return txn.Set(prefixedKey(t.prefix, dbID[:]), dB)
+		return txn.Set(PrefixedKey(t.prefix, dbID[:]), dB)
 	}
 
 	if opts.txn != nil {
@@ -252,7 +252,7 @@ func (t *Table) Delete(kB []byte) error {
 }
 
 func (t *Table) removeTableEntry(txn *badger.Txn, dbID DBID) error {
-	item, err := txn.Get(prefixedKey(t.prefix, dbID[:]))
+	item, err := txn.Get(PrefixedKey(t.prefix, dbID[:]))
 	if err != nil {
 		return convertError(err)
 	}
@@ -271,7 +271,7 @@ func (t *Table) deleteDatum(txn *badger.Txn, dbID DBID, d *datum) error {
 			return fmt.Errorf("error deleting index entry; %w", err)
 		}
 	}
-	if err := txn.Delete(prefixedKey(t.prefix, dbID[:])); err != nil {
+	if err := txn.Delete(PrefixedKey(t.prefix, dbID[:])); err != nil {
 		return fmt.Errorf("error deleting table entry: %w", err)
 	}
 	return t.deleteDBID(txn, dbID)

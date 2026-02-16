@@ -20,6 +20,7 @@ require (
 
 require (
 	decred.org/cspp/v2 v2.4.0 // indirect
+	decred.org/dcrwallet v1.7.0 // indirect
 	decred.org/dcrwallet/v5 v5.0.3 // indirect
 	filippo.io/edwards25519 v1.0.0 // indirect
 	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 // indirect
@@ -60,6 +61,7 @@ require (
 	github.com/deckarep/golang-set/v2 v2.6.0 // indirect
 	github.com/decred/base58 v1.0.6 // indirect
 	github.com/decred/dcrd/addrmgr/v3 v3.0.0 // indirect
+	github.com/decred/dcrd/blockchain/stake/v3 v3.0.0 // indirect
 	github.com/decred/dcrd/blockchain/stake/v5 v5.0.2 // indirect
 	github.com/decred/dcrd/blockchain/standalone/v2 v2.2.2 // indirect
 	github.com/decred/dcrd/certgen v1.2.0 // indirect
@@ -70,21 +72,28 @@ require (
 	github.com/decred/dcrd/crypto/blake256 v1.1.0 // indirect
 	github.com/decred/dcrd/crypto/rand v1.0.1 // indirect
 	github.com/decred/dcrd/crypto/ripemd160 v1.0.2 // indirect
+	github.com/decred/dcrd/database/v2 v2.0.2 // indirect
 	github.com/decred/dcrd/database/v3 v3.0.3 // indirect
 	github.com/decred/dcrd/dcrec v1.0.1 // indirect
 	github.com/decred/dcrd/dcrec/edwards/v2 v2.0.4 // indirect
+	github.com/decred/dcrd/dcrec/secp256k1/v3 v3.0.0 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
 	github.com/decred/dcrd/dcrjson/v4 v4.2.0 // indirect
+	github.com/decred/dcrd/dcrutil/v3 v3.0.0 // indirect
 	github.com/decred/dcrd/dcrutil/v4 v4.0.3 // indirect
+	github.com/decred/dcrd/gcs/v2 v2.1.0 // indirect
 	github.com/decred/dcrd/gcs/v4 v4.1.1 // indirect
 	github.com/decred/dcrd/hdkeychain/v3 v3.1.3 // indirect
 	github.com/decred/dcrd/lru v1.1.2 // indirect
 	github.com/decred/dcrd/mixing v0.6.1 // indirect
 	github.com/decred/dcrd/rpc/jsonrpc/types/v4 v4.4.0 // indirect
 	github.com/decred/dcrd/rpcclient/v8 v8.1.0 // indirect
+	github.com/decred/dcrd/txscript/v3 v3.0.0 // indirect
 	github.com/decred/dcrd/txscript/v4 v4.1.2 // indirect
 	github.com/decred/dcrd/wire v1.7.2 // indirect
+	github.com/decred/dcrtime v0.0.0-20191018193024-8d8b4ef0458e // indirect
 	github.com/decred/go-socks v1.1.0 // indirect
+	github.com/decred/politeia v1.5.0 // indirect
 	github.com/decred/slog v1.2.0 // indirect
 	github.com/decred/vspd/client/v4 v4.0.2 // indirect
 	github.com/decred/vspd/types/v2 v2.1.0 // indirect
@@ -112,8 +121,11 @@ require (
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/golang/snappy v1.0.0 // indirect
 	github.com/google/flatbuffers v25.2.10+incompatible // indirect
+	github.com/google/trillian v1.4.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/gorilla/schema v1.1.0 // indirect
 	github.com/gorilla/websocket v1.5.1 // indirect
+	github.com/h2non/go-is-svg v0.0.0-20160927212452-35e8c4b0612c // indirect
 	github.com/holiman/billy v0.0.0-20250707135307-f2f9b9aae7db // indirect
 	github.com/holiman/bloomfilter/v2 v2.0.3 // indirect
 	github.com/holiman/uint256 v1.3.2 // indirect
@@ -138,6 +150,7 @@ require (
 	github.com/ltcsuite/ltcd/btcec/v2 v2.3.2 // indirect
 	github.com/ltcsuite/ltcd/ltcutil v1.1.4-0.20240131072528-64dfa402637a // indirect
 	github.com/ltcsuite/ltcd/ltcutil/psbt v1.1.1-0.20240131072528-64dfa402637a // indirect
+	github.com/marcopeereboom/sbox v1.1.0 // indirect
 	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/minio/sha256-simd v1.0.0 // indirect
 	github.com/mitchellh/mapstructure v1.4.1 // indirect
