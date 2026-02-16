@@ -737,6 +737,18 @@ func (c *tRPCClient) AbandonTransaction(_ context.Context, hash *chainhash.Hash)
 	return c.abandonTxErr
 }
 
+func (c *tRPCClient) CommittedTickets(ctx context.Context, tickets []*chainhash.Hash) ([]*chainhash.Hash, []stdaddr.Address, error) {
+	return nil, nil, nil
+}
+
+func (c *tRPCClient) GetAccount(ctx context.Context, address stdaddr.Address) (string, error) {
+	return "", nil
+}
+
+func (c *tRPCClient) SignMessage(ctx context.Context, addr stdaddr.Address, msg string) (string, error) {
+	return "", nil
+}
+
 func TestMain(m *testing.M) {
 	tChainParams = chaincfg.MainNetParams()
 	tPKHAddr, _ = stdaddr.DecodeAddress("DsTya4cCFBgtofDLiRhkyPYEQjgs3HnarVP", tChainParams)
@@ -2965,7 +2977,7 @@ const (
 	//txCatGenerate = "generate"
 )
 
-func TestSignMessage(t *testing.T) {
+func TestSignCoinMessage(t *testing.T) {
 	wallet, node, shutdown := tNewWallet()
 	defer shutdown()
 
@@ -2993,9 +3005,9 @@ func TestSignMessage(t *testing.T) {
 	}
 
 	check := func() {
-		pubkeys, sigs, err := wallet.SignMessage(op, msg)
+		pubkeys, sigs, err := wallet.SignCoinMessage(op, msg)
 		if err != nil {
-			t.Fatalf("SignMessage error: %v", err)
+			t.Fatalf("SignCoinMessage error: %v", err)
 		}
 		if len(pubkeys) != 1 {
 			t.Fatalf("expected 1 pubkey, received %d", len(pubkeys))
@@ -3020,7 +3032,7 @@ func TestSignMessage(t *testing.T) {
 
 	// gettxout error
 	node.txOutErr = tErr
-	_, _, err = wallet.SignMessage(op, msg)
+	_, _, err = wallet.SignCoinMessage(op, msg)
 	if err == nil {
 		t.Fatalf("no error for gettxout rpc error")
 	}
@@ -3028,7 +3040,7 @@ func TestSignMessage(t *testing.T) {
 
 	// dumpprivkey error
 	node.privWIFErr = tErr
-	_, _, err = wallet.SignMessage(op, msg)
+	_, _, err = wallet.SignCoinMessage(op, msg)
 	if err == nil {
 		t.Fatalf("no error for dumpprivkey rpc error")
 	}
@@ -3036,7 +3048,7 @@ func TestSignMessage(t *testing.T) {
 
 	// bad coin
 	badCoin := &tCoin{id: make([]byte, 15)}
-	_, _, err = wallet.SignMessage(badCoin, msg)
+	_, _, err = wallet.SignCoinMessage(badCoin, msg)
 	if err == nil {
 		t.Fatalf("no error for bad coin")
 	}

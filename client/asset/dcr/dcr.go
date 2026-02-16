@@ -4034,10 +4034,10 @@ func (dcr *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 	return coinIDs, newOutput(txHash, 0, uint64(txOut.Value), wire.TxTreeRegular), fee, nil
 }
 
-// SignMessage signs the message with the private key associated with the
+// SignCoinMessage signs the message with the private key associated with the
 // specified funding Coin. A slice of pubkeys required to spend the Coin and a
 // signature for each pubkey are returned.
-func (dcr *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
+func (dcr *ExchangeWallet) SignCoinMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
 	op, err := dcr.convertCoin(coin)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error converting coin: %w", err)
@@ -4057,12 +4057,12 @@ func (dcr *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 		// able to deal with that and find the actual tree.
 		txOut, err := dcr.wallet.UnspentOutput(dcr.ctx, op.txHash(), op.vout(), op.tree)
 		if err != nil {
-			dcr.log.Errorf("gettxout error for SignMessage coin %s: %v", op, err)
+			dcr.log.Errorf("gettxout error for SignCoinMessage coin %s: %v", op, err)
 		} else if txOut != nil {
 			if len(txOut.Addresses) != 1 {
-				// TODO: SignMessage is usually called for coins selected by
+				// TODO: SignCoinMessage is usually called for coins selected by
 				// FundOrder. Should consider rejecting/ignoring multisig ops
-				// in FundOrder to prevent this SignMessage error from killing
+				// in FundOrder to prevent this SignCoinMessage error from killing
 				// order placements.
 				return nil, nil, fmt.Errorf("multi-sig not supported")
 			}
@@ -6535,6 +6535,23 @@ func (dcr *ExchangeWallet) TicketPage(scanStart int32, n, skipN int) ([]*asset.T
 		return nil, errors.New("ticket pagination not supported for this wallet")
 	}
 	return pager.TicketPage(dcr.ctx, scanStart, n, skipN)
+}
+
+// AddressAccount returns the account number for an address.
+func (dcr *ExchangeWallet) AddressAccount(address string) (bool, uint32, error) {
+	return dcr.wallet.AddressAccount(dcr.ctx, address)
+}
+
+// SignMessage returns the signature of a signed message using an address'
+// associated private key.
+func (dcr *ExchangeWallet) SignMessage(msg string, addr string) ([]byte, error) {
+	return dcr.wallet.SignMessage(dcr.ctx, msg, addr)
+}
+
+// CommittedTickets takes a list of tickets and returns a filtered list of
+// tickets that are controlled by this wallet.
+func (dcr *ExchangeWallet) CommittedTickets(tickets []*chainhash.Hash) ([]*chainhash.Hash, []stdaddr.Address, error) {
+	return dcr.wallet.CommittedTickets(dcr.ctx, tickets)
 }
 
 func (dcr *ExchangeWallet) broadcastTx(signedTx *wire.MsgTx, feeRate uint64) (*chainhash.Hash, error) {

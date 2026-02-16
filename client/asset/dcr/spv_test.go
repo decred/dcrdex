@@ -392,6 +392,14 @@ func (w *tDcrWallet) SignMessage(ctx context.Context, msg string, addr stdaddr.A
 	return nil, nil
 }
 
+func (w *tDcrWallet) CommittedTickets(ctx context.Context, tickets []*chainhash.Hash) ([]*chainhash.Hash, []stdaddr.Address, error) {
+	return nil, nil, nil
+}
+
+func (w *tDcrWallet) AddressAccount(ctx context.Context, address string) (bool, uint32, error) {
+	return false, 0, nil
+}
+
 func (w *tDcrWallet) SetRelayFee(relayFee dcrutil.Amount) {}
 
 func (w *tDcrWallet) GetTicketInfo(ctx context.Context, hash *chainhash.Hash) (*wallet.TicketSummary, *wire.BlockHeader, error) {
@@ -610,7 +618,7 @@ func TestLockUnlockOutpoints(t *testing.T) {
 		Index: 55,
 	}
 
-	w.LockUnspent(nil, false, []*wire.OutPoint{lock})
+	w.LockUnspent(context.TODO(), false, []*wire.OutPoint{lock})
 	if *dcrw.lockedOutpoint != *lock {
 		t.Fatalf("outpoint not locked")
 	}
@@ -619,7 +627,7 @@ func TestLockUnlockOutpoints(t *testing.T) {
 		Hash:  chainhash.Hash{0x2},
 		Index: 555,
 	}
-	w.LockUnspent(nil, true, []*wire.OutPoint{unlock})
+	w.LockUnspent(context.TODO(), true, []*wire.OutPoint{unlock})
 	if *dcrw.unlockedOutpoint != *unlock {
 		t.Fatalf("outpoint not unlocked")
 	}

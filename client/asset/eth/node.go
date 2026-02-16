@@ -75,7 +75,7 @@ func signHash(creds *accountCredentials, h []byte) (sig, pubKey []byte, err erro
 
 	pubKey, err = recoverPubkey(h, sig)
 	if err != nil {
-		return nil, nil, fmt.Errorf("SignMessage: error recovering pubkey %w", err)
+		return nil, nil, fmt.Errorf("SignCoinMessage: error recovering pubkey %w", err)
 	}
 
 	// Adjust the recovery identifier 'v' (at sig[64]) by adding 27 to match Ethereum's

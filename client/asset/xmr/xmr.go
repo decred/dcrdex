@@ -1379,7 +1379,7 @@ func (w *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin
 	return nil, nil, 0, asset.ErrUnsupported
 }
 
-func (w *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) ([]dex.Bytes, []dex.Bytes, error) {
+func (w *ExchangeWallet) SignCoinMessage(coin asset.Coin, msg dex.Bytes) ([]dex.Bytes, []dex.Bytes, error) {
 	return nil, nil, asset.ErrUnsupported
 }
 

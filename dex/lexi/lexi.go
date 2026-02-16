@@ -152,7 +152,7 @@ func New(cfg *Config) (*DB, error) {
 			return nil, err
 		}
 	}
-	idSeq, err := bdb.GetSequence(prefixedKey(primarySequencePrefix, []byte{0x00}), 1000)
+	idSeq, err := bdb.GetSequence(PrefixedKey(primarySequencePrefix, []byte{0x00}), 1000)
 	if err != nil {
 		return nil, fmt.Errorf("error getting constructing primary sequence: %w", err)
 	}
@@ -270,7 +270,7 @@ func (db *DB) Upgrade(upgrade func() error) error {
 }
 
 func (db *DB) prefixForNameImpl(name string, existing bool) (prefix keyPrefix, _ error) {
-	nameKey := prefixedKey(nameToPrefixPrefix, []byte(name))
+	nameKey := PrefixedKey(nameToPrefixPrefix, []byte(name))
 	return prefix, db.Update(func(txn *badger.Txn) error {
 		it, err := txn.Get(nameKey)
 		if err == nil {
@@ -291,10 +291,10 @@ func (db *DB) prefixForNameImpl(name string, existing bool) (prefix keyPrefix, _
 		} else {
 			prefix = incrementPrefix(bytesToPrefix(lastPrefix))
 		}
-		if err := txn.Set(prefixedKey(nameToPrefixPrefix, []byte(name)), prefix[:]); err != nil {
+		if err := txn.Set(PrefixedKey(nameToPrefixPrefix, []byte(name)), prefix[:]); err != nil {
 			return fmt.Errorf("error setting prefix for table name: %w", err)
 		}
-		if err := txn.Set(prefixedKey(prefixToNamePrefix, prefix[:]), []byte(name)); err != nil {
+		if err := txn.Set(PrefixedKey(prefixToNamePrefix, prefix[:]), []byte(name)); err != nil {
 			return fmt.Errorf("error setting table name for prefix: %w", err)
 		}
 		return nil
@@ -336,7 +336,7 @@ func (db *DB) KeyID(kB []byte) (dbID DBID, err error) {
 }
 
 func (db *DB) keyID(txn *badger.Txn, kB []byte, readOnly bool) (dbID DBID, err error) {
-	item, err := txn.Get(prefixedKey(keyToIDPrefix, kB))
+	item, err := txn.Get(PrefixedKey(keyToIDPrefix, kB))
 	if err == nil {
 		err = item.Value(func(v []byte) error {
 			copy(dbID[:], v)
@@ -348,9 +348,9 @@ func (db *DB) keyID(txn *badger.Txn, kB []byte, readOnly bool) (dbID DBID, err e
 		if dbID, err = db.nextID(); err != nil {
 			return
 		}
-		if err = txn.Set(prefixedKey(keyToIDPrefix, kB), dbID[:]); err != nil {
+		if err = txn.Set(PrefixedKey(keyToIDPrefix, kB), dbID[:]); err != nil {
 			err = fmt.Errorf("error mapping key to ID: %w", err)
-		} else if err = txn.Set(prefixedKey(idToKeyPrefix, dbID[:]), kB); err != nil {
+		} else if err = txn.Set(PrefixedKey(IdToKeyPrefix, dbID[:]), kB); err != nil {
 			err = fmt.Errorf("error mapping ID to key: %w", err)
 		}
 	}
@@ -360,13 +360,13 @@ func (db *DB) keyID(txn *badger.Txn, kB []byte, readOnly bool) (dbID DBID, err e
 // deleteDBID deletes the id-to-key mapping and the key-to-id mapping for the
 // DBID.
 func (db *DB) deleteDBID(txn *badger.Txn, dbID DBID) error {
-	idK := prefixedKey(idToKeyPrefix, dbID[:])
+	idK := PrefixedKey(IdToKeyPrefix, dbID[:])
 	item, err := txn.Get(idK)
 	if err != nil {
 		return convertError(err)
 	}
 	if err := item.Value(func(kB []byte) error {
-		if err := txn.Delete(prefixedKey(keyToIDPrefix, kB)); err != nil {
+		if err := txn.Delete(PrefixedKey(keyToIDPrefix, kB)); err != nil {
 			return fmt.Errorf("error deleting key to ID mapping: %w", err)
 		}
 		return nil

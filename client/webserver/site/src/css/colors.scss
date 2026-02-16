@@ -10,6 +10,7 @@ body:not(.dark) {
   --text-color: #333;
   --text-color-secondary: #4a4949;
   --text-danger: #d22;
+  --text-sucess: green;
   --text-warning: #f82e;
   --text-grey: #777;
   --border-color: #ddd;
@@ -29,7 +30,7 @@ body:not(.dark) {
   --btn-feature-bg: #6bc5ff;
   --btn-feature-hover-bg: #a3dbff;
   --btn-feature-border-color: #759cb5;
-  --btn-featur-hover-border-color: #9bc3dd;
+  --btn-feature-hover-border-color: #9bc3dd;
   --btn-danger-hover-color: white;
   --btn-border-color: #ddd;
   --btn-hover-border-color: #ddd;
@@ -156,4 +157,9 @@ body.dark {
 
 .faded {
   opacity: 0.7;
+}
+
+.active-opt {
+  background-color: var(--form-bg);
+  border-color: var(--btn-go-bg);
 }

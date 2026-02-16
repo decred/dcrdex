@@ -3452,11 +3452,11 @@ func testRedeem(t *testing.T, segwit bool, walletType string) {
 	node.badSendHash = nil
 }
 
-func TestSignMessage(t *testing.T) {
-	runRubric(t, testSignMessage)
+func TestSignCoinMessage(t *testing.T) {
+	runRubric(t, testSignCoinMessage)
 }
 
-func testSignMessage(t *testing.T, segwit bool, walletType string) {
+func testSignCoinMessage(t *testing.T, segwit bool, walletType string) {
 	wallet, node, shutdown := tNewWallet(segwit, walletType)
 	defer shutdown()
 
@@ -3503,9 +3503,9 @@ func testSignMessage(t *testing.T, segwit bool, walletType string) {
 	}
 
 	var coin asset.Coin = NewOutput(tTxHash, vout, 5e7)
-	pubkeys, sigs, err := wallet.SignMessage(coin, msg)
+	pubkeys, sigs, err := wallet.SignCoinMessage(coin, msg)
 	if err != nil {
-		t.Fatalf("SignMessage error: %v", err)
+		t.Fatalf("SignCoinMessage error: %v", err)
 	}
 	if len(pubkeys) != 1 {
 		t.Fatalf("expected 1 pubkey, received %d", len(pubkeys))
@@ -3522,7 +3522,7 @@ func testSignMessage(t *testing.T, segwit bool, walletType string) {
 
 	// Unknown UTXO
 	delete(wallet.cm.lockedOutputs, pt)
-	_, _, err = wallet.SignMessage(coin, msg)
+	_, _, err = wallet.SignCoinMessage(coin, msg)
 	if err == nil {
 		t.Fatalf("no error for unknown utxo")
 	}
@@ -3530,7 +3530,7 @@ func testSignMessage(t *testing.T, segwit bool, walletType string) {
 
 	// dumpprivkey error
 	node.privKeyForAddrErr = tErr
-	_, _, err = wallet.SignMessage(coin, msg)
+	_, _, err = wallet.SignCoinMessage(coin, msg)
 	if err == nil {
 		t.Fatalf("no error for dumpprivkey rpc error")
 	}
@@ -3538,7 +3538,7 @@ func testSignMessage(t *testing.T, segwit bool, walletType string) {
 
 	// bad coin
 	badCoin := &tCoin{id: make([]byte, 15)}
-	_, _, err = wallet.SignMessage(badCoin, msg)
+	_, _, err = wallet.SignCoinMessage(badCoin, msg)
 	if err == nil {
 		t.Fatalf("no error for bad coin")
 	}

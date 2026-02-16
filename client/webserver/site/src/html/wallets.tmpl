@@ -400,6 +400,7 @@
                     <div class="flex-center flex-column fs14">
                       <span><span id="stakingAgendaCount"></span> [[[agendas]]]</span>
                       <span><span id="stakingTspendCount"></span> [[[treasury spends]]]</span>
+                      <span><span id="proposalsInProgressCount"></span> [[[proposals_inProgress]]]</span>
                     </div>
                   </div>
                 </div>
@@ -1112,10 +1113,10 @@
     {{- /* SET VOTES */ -}}
     <form id="votingForm">
       <div class="form-closer"><span class="ico-cross"></span></div>
-      <header>
+      <div class="justify-content-start align-items-center">
         <span class="ico-check fs22 me-2 grey"></span>
-        <span>[[[Agendas]]]</span>
-      </header>
+        <span class="fs26">[[[Agendas]]]</span>
+      </div>
       {{- /* AGENDAS */ -}}
       <div id="votingAgendas" class="flex-stretch-column">
         <div id="votingAgendaTmpl" class="d-flex justify-content-between py-2 border-bottom">
@@ -1132,7 +1133,8 @@
       </div>
 
       {{- /* TREASURY SPENDS */ -}}
-      <div class="flex-center fs26">[[[Treasury Spends]]]</div>
+      <div class="fs26">[[[Treasury Spends]]]</div>
+      <div id="noTspendsMessage" class="flex-stretch-column text-center d-hide">[[[no_treasury_spends_to_show]]]</div>
       <div id="votingTspends" class="flex-stretch-column py-0">
         <div id="tspendTmpl" class="d-flex align-items-stretch py-3 border-bottom">
           <div class="d-flex flex-column flex-grow-1 pe-3">
@@ -1156,7 +1158,7 @@
       </div>
 
       {{- /* TREASURY KEYS */ -}}
-      <div class="flex-center fs26">[[[Treasury Keys]]]</div>
+      <div class="fs26">[[[Treasury Keys]]]</div>
       <div id="votingTKeys" class="flex-stretch-column">
         <div id="tkeyTmpl" class="d-flex justify-content-between align-items-stretch py-2 border-bottom">
           <div class="flex-center flex-grow-1 justify-content-start pe-3">
@@ -1174,6 +1176,27 @@
           </div>
         </div>
       </div>
+
+      {{- /* PROPOSALS IN-PROGRESS */ -}}
+      <div class="d-flex justify-content-between align-items-center">
+        <div class="fs26">[[[proposals]]]</div>
+        <a id="viewAllProposals" class="fs15 hoverbg pointer ico-open justify-content-end"> [[[view_all]]]</a>
+      </div>
+       <div id="noInProgressProposal" class="text-center d-hide">[[[no_proposals_in_progress]]]</div>
+       <div id="proposalsInProgress" class="flex-stretch-column py-0">
+        <div id="proposalTmpl" class="py-3 border-bottom">
+          <div>
+            <div class="d-flex justify-content-between align-items-center">
+              <h6 data-tmpl="name" class="pb-0 mb-0"></h6>
+              <a data-tmpl="detailsLink" class="fs15 pt-1 hoverbg pointer ico-open justify-content-end"></a>
+            </div>
+            <div>
+              <small data-tmpl="meta" class="text-muted"></small>
+            </div>
+           </div>
+        </div>
+      </div>
+
       <div id="votingFormErr" class="fs14 text-danger d-hide"></div>
     </form>
 

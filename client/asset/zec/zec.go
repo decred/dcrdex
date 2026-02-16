@@ -2342,7 +2342,7 @@ func (w *zecWallet) sendWithReturn(baseTx *dexzec.Tx, addr btcutil.Address, tota
 	return signedTx, err
 }
 
-func (w *zecWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
+func (w *zecWallet) SignCoinMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
 
 	op, err := btc.ConvertCoin(coin)
 	if err != nil {

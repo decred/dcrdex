@@ -8,6 +8,7 @@ import (
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
+	pi "decred.org/dcrdex/dex/politeia"
 )
 
 // standardResponse is a basic API response when no data needs to be returned.
@@ -148,4 +149,8 @@ type buildInfoResponse struct {
 	OK       bool   `json:"ok"`
 	Version  string `json:"version"`
 	Revision string `json:"revision"`
+}
+
+type proposalsMeta struct {
+	ProposalsInProgress []*pi.MiniProposal `json:"proposalsInProgress"`
 }

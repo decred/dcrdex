@@ -107,6 +107,8 @@ type dcrWallet interface {
 	TotalReceivedForAddr(ctx context.Context, addr stdaddr.Address, minConf int32) (dcrutil.Amount, error)
 	NewVSPClient(cfg wallet.VSPClientConfig, log slog.Logger, dialer wallet.DialFunc) (*wallet.VSPClient, error)
 	AbandonTransaction(ctx context.Context, hash *chainhash.Hash) error
+	CommittedTickets(ctx context.Context, tickets []*chainhash.Hash) ([]*chainhash.Hash, []stdaddr.Address, error)
+	SignMessage(ctx context.Context, msg string, addr stdaddr.Address) (sig []byte, err error)
 }
 
 // Interface for *spv.Syncer so that we can test with a stub.
@@ -1444,6 +1446,49 @@ func (w *spvWallet) AddressUsed(ctx context.Context, addrStr string) (bool, erro
 		return false, err
 	}
 	return recv != 0, nil
+}
+
+// CommittedTickets takes a list of tickets and returns a filtered list of
+// tickets that are controlled by this wallet.
+func (w *spvWallet) CommittedTickets(ctx context.Context, tickets []*chainhash.Hash) ([]*chainhash.Hash, []stdaddr.Address, error) {
+	return w.dcrWallet.CommittedTickets(ctx, tickets)
+}
+
+// AddressAccount returns the account number for an address. If the address has no associated account,
+// false and a nil error should be expected.
+func (w *spvWallet) AddressAccount(ctx context.Context, address string) (bool, uint32, error) {
+	addr, err := stdaddr.DecodeAddress(address, w.chainParams)
+	if err != nil {
+		return false, 0, err
+	}
+
+	known, _ := w.dcrWallet.KnownAddress(ctx, addr)
+	if known != nil {
+		accountNumber, err := w.dcrWallet.AccountNumber(ctx, known.AccountName())
+		return true, accountNumber, err
+	}
+
+	return false, 0, nil
+}
+
+// SignMessage returns the signature of a signed message using an address'
+// associated private key.
+func (w *spvWallet) SignMessage(ctx context.Context, message string, address string) ([]byte, error) {
+	addr, err := stdaddr.DecodeAddress(address, w.chainParams)
+	if err != nil {
+		return nil, err
+	}
+
+	// Addresses must have an associated secp256k1 private key and therefore
+	// must be P2PK or P2PKH (P2SH is not allowed).
+	switch addr.(type) {
+	case *stdaddr.AddressPubKeyEcdsaSecp256k1V0:
+	case *stdaddr.AddressPubKeyHashEcdsaSecp256k1V0:
+	default:
+		return nil, errors.New("invalid address")
+	}
+
+	return w.dcrWallet.SignMessage(ctx, message, addr)
 }
 
 // cacheBlock caches a block for future use. The block has a lastAccess stamp
