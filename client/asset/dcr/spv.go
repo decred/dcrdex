@@ -1462,7 +1462,13 @@ func (w *spvWallet) AddressAccount(ctx context.Context, address string) (bool, u
 		return false, 0, err
 	}
 
-	known, _ := w.dcrWallet.KnownAddress(ctx, addr)
+	known, err := w.dcrWallet.KnownAddress(ctx, addr)
+	if err != nil {
+		if errors.Is(err, walleterrors.NotExist) {
+			return false, 0, nil
+		}
+		return false, 0, fmt.Errorf("KnownAddress error: %w", err)
+	}
 	if known != nil {
 		accountNumber, err := w.dcrWallet.AccountNumber(ctx, known.AccountName())
 		return true, accountNumber, err

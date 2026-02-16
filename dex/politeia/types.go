@@ -43,18 +43,18 @@ type Ticket struct {
 	Address string `json:"address"`
 }
 
-// Proposal is the struct that holds all politeia data that dcrdata needs
-// for each proposal. This is the object that is saved to stormdb. It uses data
-// from three politeia API's: records, comments and ticketvote.
+// Proposal is the struct that holds all politeia data that Bison Wallet needs
+// for each proposal. This is the object that is saved to the lexi DB. It uses
+// data from three politeia API's: records, comments and ticketvote.
 type Proposal struct {
-	ID int `json:"id" storm:"id,increment"`
+	ID int `json:"id"`
 
 	// Record API data
 	State       rv1.RecordStateT  `json:"state"`
 	Status      rv1.RecordStatusT `json:"status"`
 	Token       string            `json:"token"`
 	Version     uint32            `json:"version"`
-	Timestamp   uint64            `json:"timestamp" storm:"index"`
+	Timestamp   uint64            `json:"timestamp"`
 	Username    string            `json:"username"`
 	Description string            `json:"description"`
 
@@ -84,7 +84,7 @@ type Proposal struct {
 	Synced bool `json:"synced"`
 
 	// Timestamps
-	PublishedAt uint64 `json:"publishedat" storm:"index"`
+	PublishedAt uint64 `json:"publishedat"`
 	CensoredAt  uint64 `json:"censoredat"`
 	AbandonedAt uint64 `json:"abandonedat"`
 
@@ -138,8 +138,10 @@ func (pi *Proposal) Metadata() *ProposalMetadata {
 		quorumPct := float64(pi.QuorumPercentage) / 100
 		meta.QuorumCount = int64(quorumPct * float64(pi.EligibleTickets))
 		meta.PassPercent = float64(pi.PassPercentage)
-		pctVoted := float64(meta.VoteCount) / float64(pi.EligibleTickets)
-		meta.QuorumAchieved = pctVoted >= quorumPct
+		if pi.EligibleTickets > 0 {
+			pctVoted := float64(meta.VoteCount) / float64(pi.EligibleTickets)
+			meta.QuorumAchieved = pctVoted >= quorumPct
+		}
 		denominator := math.Max(float64(meta.VoteCount), float64(meta.QuorumCount))
 		if denominator > 0 {
 			meta.Approval = (float64(meta.Yes) / denominator) * 100
@@ -161,8 +163,23 @@ func (pi *Proposal) IsEqual(b Proposal) bool {
 		pi.CommentsCount != b.CommentsCount || pi.Timestamp != b.Timestamp ||
 		pi.VoteStatus != b.VoteStatus || pi.TotalVotes != b.TotalVotes ||
 		pi.PublishedAt != b.PublishedAt || pi.CensoredAt != b.CensoredAt ||
-		pi.AbandonedAt != b.AbandonedAt || pi.Description != b.Description {
+		pi.AbandonedAt != b.AbandonedAt || pi.Description != b.Description ||
+		pi.Version != b.Version || pi.Username != b.Username ||
+		pi.EligibleTickets != b.EligibleTickets ||
+		pi.StartBlockHeight != b.StartBlockHeight ||
+		pi.EndBlockHeight != b.EndBlockHeight ||
+		pi.QuorumPercentage != b.QuorumPercentage ||
+		pi.PassPercentage != b.PassPercentage {
 		return false
+	}
+	if len(pi.VoteResults) != len(b.VoteResults) {
+		return false
+	}
+	for i := range pi.VoteResults {
+		if pi.VoteResults[i].ID != b.VoteResults[i].ID ||
+			pi.VoteResults[i].Votes != b.VoteResults[i].Votes {
+			return false
+		}
 	}
 	return true
 }

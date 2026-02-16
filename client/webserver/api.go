@@ -1790,8 +1790,7 @@ func (s *WebServer) apiStakeStatus(w http.ResponseWriter, r *http.Request) {
 
 	proposalsInProgress, err := s.core.ProposalsInProgress()
 	if err != nil {
-		s.writeAPIError(w, fmt.Errorf("error fetching proposals in progress for asset ID %d: %w", assetID, err))
-		return
+		log.Errorf("error fetching proposals in progress: %v", err)
 	}
 
 	writeJSON(w, &struct {

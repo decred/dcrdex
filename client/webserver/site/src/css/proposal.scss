@@ -3,8 +3,10 @@
   display: block;
 }
 
-.proposal-content h1, h2, h3 {
-  font-size: 1.3rem;
+.proposal-content {
+  h1, h2, h3 {
+    font-size: 1.3rem;
+  }
 }
 
 .vote-btn {
@@ -33,11 +35,11 @@
   text-align: center;
 }
 
-.vote-yes {
+.vote-btn.vote-yes {
   background: #6dff4f;
 }
 
-.vote-no {
+.vote-btn.vote-no {
   background: #d81e14;
 }
 

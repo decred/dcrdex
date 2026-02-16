@@ -217,11 +217,11 @@ func getOrderIDCtx(r *http.Request) (dex.Bytes, error) {
 	return oidB, nil
 }
 
-// proposalTokenCtx embeds the host into the request context.
+// proposalTokenCtx embeds the proposal token into the request context.
 func proposalTokenCtx(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		host := chi.URLParam(r, "token")
-		ctx := context.WithValue(r.Context(), ctxProposalToken, host)
+		token := chi.URLParam(r, "token")
+		ctx := context.WithValue(r.Context(), ctxProposalToken, token)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

@@ -10,12 +10,18 @@ import (
 
 // PoliteiaDetails retrieves the current state for c.politeia, including the politeia URL.
 func (c *Core) PoliteiaDetails() (string, bool, int64) {
-	return c.politeiaURL, c.politiaSyncing.Load(), c.politeia.ProposalsLastSync()
+	if c.politeia == nil {
+		return c.politeiaURL, false, 0
+	}
+	return c.politeiaURL, c.politeiaSyncing.Load(), c.politeia.ProposalsLastSync()
 }
 
 // ProposalsAll fetches the proposals data from local db.
 // The argument searchPhrase and filterByVoteStatus are optional.
 func (c *Core) ProposalsAll(offset, rowsCount int, searchPhrase string, filterByVoteStatus ...int) ([]*pi.Proposal, int, error) {
+	if c.politeia == nil {
+		return nil, 0, fmt.Errorf("politeia not configured")
+	}
 	return c.politeia.ProposalsAll(offset, rowsCount, searchPhrase, filterByVoteStatus...)
 }
 
@@ -23,6 +29,9 @@ func (c *Core) ProposalsAll(offset, rowsCount int, searchPhrase string, filterBy
 // a configured TicketBuyer and the proposal is currently voting, the
 // wallet voting details will be returned as part of the proposal details.
 func (c *Core) Proposal(assetID uint32, token string) (*pi.Proposal, error) {
+	if c.politeia == nil {
+		return nil, fmt.Errorf("politeia not configured")
+	}
 	proposal, err := c.politeia.ProposalByToken(token)
 	if err != nil {
 		return nil, err
@@ -59,10 +68,13 @@ func (c *Core) Proposal(assetID uint32, token string) (*pi.Proposal, error) {
 // progress, meaning their vote status is unauthorized, authorized or started.
 // This is used to display the in progress proposals on the Bison Wallet UI.
 func (c *Core) ProposalsInProgress() ([]*pi.MiniProposal, error) {
+	if c.politeia == nil {
+		return nil, nil
+	}
 	return c.politeia.ProposalsInProgress()
 }
 
-// CastVotes casts votes for the provided eligible tickets using the provided
+// CastVote casts votes for the provided eligible tickets using the provided
 // wallet and passphrase for signing.
 // The proposal identified by token must exist in the Politeia DB.
 // The wallet must be unlocked prior to calling c.politeia.CastVotes.

@@ -6,6 +6,7 @@ package dcr
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -1252,11 +1253,6 @@ func (w *rpcWallet) AddressUsed(ctx context.Context, addrStr string) (bool, erro
 // CommittedTickets takes a list of tickets and returns a filtered list of
 // tickets that are controlled by this wallet.
 func (w *rpcWallet) CommittedTickets(ctx context.Context, tickets []*chainhash.Hash) ([]*chainhash.Hash, []stdaddr.Address, error) {
-	req := make(anylist, len(tickets))
-	for i, t := range tickets {
-		req[i] = t
-	}
-
 	var res struct {
 		TicketAddresses []struct {
 			Ticket  []byte `json:"ticket"`
@@ -1268,9 +1264,9 @@ func (w *rpcWallet) CommittedTickets(ctx context.Context, tickets []*chainhash.H
 		return nil, nil, fmt.Errorf("unable to fetch wallet tickets: %v", err)
 	}
 
-	nTicketAddresess := len(res.TicketAddresses)
-	respTickets := make([]*chainhash.Hash, nTicketAddresess)
-	addresses := make([]stdaddr.Address, nTicketAddresess)
+	nTicketAddresses := len(res.TicketAddresses)
+	respTickets := make([]*chainhash.Hash, nTicketAddresses)
+	addresses := make([]stdaddr.Address, nTicketAddresses)
 	for i, ad := range res.TicketAddresses {
 		respTickets[i], err = chainhash.NewHash(ad.Ticket)
 		if err != nil {
@@ -1331,7 +1327,7 @@ func (w *rpcWallet) SignMessage(ctx context.Context, message string, address str
 		return nil, err
 	}
 
-	return []byte(sig), nil
+	return base64.StdEncoding.DecodeString(sig)
 }
 
 // anylist is a list of RPC parameters to be converted to []json.RawMessage and

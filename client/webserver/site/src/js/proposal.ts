@@ -25,10 +25,10 @@ export default class ProposalPage extends BasePage {
     Doc.applySelector(page.forms, '.form-closer').forEach(el => {
       Doc.bind(el, 'click', () => { this.closePopups() })
     })
-    Doc.bind(page.goBackToProposals, 'click', (e: Event) => {
+    Doc.bind(page.goBackToProposals, 'click', async (e: Event) => {
       e.preventDefault()
       const loaded = app().loading(body)
-      app().loadPage('proposals')
+      await app().loadPage('proposals')
       loaded()
     })
     Doc.applySelector(page.proposalInfo, '.vote-bar').forEach(bar => {
@@ -113,7 +113,7 @@ export default class ProposalPage extends BasePage {
 
   async loadProposal (token: string) {
     const assetID = 42 // dcr asset ID
-    const loaded = app().loading(this.page.proposals)
+    const loaded = app().loading(this.body)
     const data: Record<string, string> = {
       assetID: assetID.toString()
     }

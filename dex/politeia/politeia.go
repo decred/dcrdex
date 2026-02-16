@@ -58,6 +58,35 @@ func New(ctx context.Context, politeiaURL string, dbPath string, log dex.Logger)
 		return nil, fmt.Errorf("error initializing db: %w", err)
 	}
 
+	version, err := db.GetDBVersion()
+	if err != nil {
+		return nil, err
+	}
+
+	// Checks if the correct db version has been set. Must happen before
+	// table/index setup since DropAll destroys lexi internal mappings.
+	if version == 0 {
+		if err = db.SetDBVersion(dbVersion); err != nil {
+			return nil, fmt.Errorf("error setting db version: %w", err)
+		}
+
+		log.Infof("Proposals DB version %v was set...", dbVersion)
+	} else if version > dbVersion {
+		return nil, fmt.Errorf("db version is newer than expected: got %v, want %v", version, dbVersion)
+	} else if version < dbVersion {
+		log.Warnf("Proposals DB version is outdated: got %v, want %v. Attempting to update...", version, dbVersion)
+
+		if err = db.DropAll(); err != nil {
+			return nil, fmt.Errorf("error dropping db: %w", err)
+		}
+
+		if err = db.SetDBVersion(dbVersion); err != nil {
+			return nil, fmt.Errorf("error setting db version: %w", err)
+		}
+
+		log.Infof("Proposals DB version %v was set...", dbVersion)
+	}
+
 	proposalsTable, err := db.Table(proposalsTable)
 	if err != nil {
 		return nil, err
@@ -83,34 +112,6 @@ func New(ctx context.Context, politeiaURL string, dbPath string, log dex.Logger)
 	proposalsMetaTable, err := db.Table(proposalsMetaTable)
 	if err != nil {
 		return nil, err
-	}
-
-	version, err := db.GetDBVersion()
-	if err != nil {
-		return nil, err
-	}
-
-	// Checks if the correct db version has been set.
-	if version == 0 {
-		if err = db.SetDBVersion(dbVersion); err != nil {
-			return nil, fmt.Errorf("error setting db version: %w", err)
-		}
-
-		log.Infof("Proposals DB version %v was set...", dbVersion)
-	} else if version > dbVersion {
-		return nil, fmt.Errorf("db version is newer than expected: got %v, want %v", version, dbVersion)
-	} else if version < dbVersion {
-		log.Warnf("Proposals DB version is outdated: got %v, want %v. Attempting to update...", version, dbVersion)
-
-		if err = db.DropAll(); err != nil {
-			return nil, fmt.Errorf("error dropping db: %w", err)
-		}
-
-		if err = db.SetDBVersion(dbVersion); err != nil {
-			return nil, fmt.Errorf("error setting db version: %w", err)
-		}
-
-		log.Infof("Proposals DB version %v was set...", dbVersion)
 	}
 
 	pc, err := piclient.New(politeiaURL+"/api", piclient.Opts{})
@@ -209,6 +210,10 @@ func (p *Politeia) CastVotes(wallet VotingWallet, eligibleTickets []*Ticket, bit
 		return err
 	}
 
+	if vDetails.Vote == nil {
+		return fmt.Errorf("no vote details available for proposal %s", token)
+	}
+
 	var voteBitHex string
 	for _, vv := range vDetails.Vote.Params.Options { // Verify that the vote bit is valid.
 		if vv.ID == bit {
@@ -246,15 +251,15 @@ func (p *Politeia) CastVotes(wallet VotingWallet, eligibleTickets []*Ticket, bit
 		return err
 	}
 
-	var errors []string
+	var voteErrors []string
 	for _, receipt := range resp.Receipts {
 		if receipt.ErrorContext != "" {
-			errors = append(errors, fmt.Sprintf("ticket %s: %s", receipt.Ticket, receipt.ErrorContext))
+			voteErrors = append(voteErrors, fmt.Sprintf("ticket %s: %s", receipt.Ticket, receipt.ErrorContext))
 		}
 	}
 
-	if len(errors) > 0 {
-		return fmt.Errorf("errors casting votes: %v", strings.Join(errors, "; "))
+	if len(voteErrors) > 0 {
+		return fmt.Errorf("errors casting votes: %v", strings.Join(voteErrors, "; "))
 	}
 
 	return nil

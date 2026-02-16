@@ -20,7 +20,6 @@ import (
 	"decred.org/dcrdex/dex/encode"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
-	"github.com/yuin/goldmark/renderer/html"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -251,13 +250,10 @@ var templateFuncs = template.FuncMap{
 				extension.GFM,
 				extension.Table,
 			),
-			goldmark.WithRendererOptions(
-				html.WithUnsafe(),
-			),
 		)
 		var buf bytes.Buffer
 		if err := md.Convert([]byte(mdTxt), &buf); err != nil {
-			return template.HTML(fmt.Sprintf(`<div class="text-danger">Failed to parse content: %v</div>`, err))
+			return template.HTML(`<div class="text-danger">Failed to parse content</div>`)
 		}
 		return template.HTML(buf.String())
 	},

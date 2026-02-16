@@ -402,9 +402,9 @@ export default class WalletsPage extends BasePage {
     Doc.bind(page.expandPendingTxs, 'click', () => { this.toggleExpandPendingTxs() })
     Doc.bind(page.txHistoryBack, 'click', () => { this.showTxHistoryPage(this.txHistory.currentPage - 1) })
     Doc.bind(page.txHistoryFwd, 'click', () => { this.showTxHistoryPage(this.txHistory.currentPage + 1) })
-    Doc.bind(page.viewAllProposals, 'click', () => {
+    Doc.bind(page.viewAllProposals, 'click', async () => {
       const loaded = app().loading(body)
-      app().loadPage('proposals')
+      await app().loadPage('proposals')
       loaded()
     })
 
@@ -1259,7 +1259,7 @@ export default class WalletsPage extends BasePage {
     Doc.show(page.stakingSummary, page.ticketPriceBox)
     const proposalsMeta = res.proposalsMeta as ProposalsMeta
     this.proposalsMeta = proposalsMeta
-    page.proposalsInProgressCount.textContent = String(proposalsMeta.proposalsInProgress?.length)
+    page.proposalsInProgressCount.textContent = String(proposalsMeta?.proposalsInProgress?.length ?? 0)
     const stakeStatus = res.status as TicketStakingStatus
     this.stakeStatus = stakeStatus
     page.stakingAgendaCount.textContent = String(stakeStatus.stances.agendas.length)
@@ -1603,7 +1603,7 @@ export default class WalletsPage extends BasePage {
 
     Doc.empty(page.proposalsInProgress)
     Doc.hide(page.noInProgressProposal)
-    if (proposalsMeta?.proposalsInProgress.length === 0) Doc.show(page.noInProgressProposal)
+    if ((proposalsMeta?.proposalsInProgress?.length ?? 0) === 0) Doc.show(page.noInProgressProposal)
     for (const proposal of (proposalsMeta?.proposalsInProgress ?? [])) {
       const div = page.proposalTmpl.cloneNode(true) as PageElement
       page.proposalsInProgress.appendChild(div)
@@ -2814,7 +2814,7 @@ export default class WalletsPage extends BasePage {
 
   async loadProposal (token: string, displayedEl: PageElement) {
     const loaded = app().loading(displayedEl)
-    await app().loadPage(`proposal/${token}?assetID=42`)
+    await app().loadPage(`proposal/${token}`, { assetID: '42' })
     loaded()
   }
 }

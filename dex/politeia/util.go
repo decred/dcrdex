@@ -2,6 +2,7 @@
 // See LICENSE for details.
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
+
 package pi
 
 import (
@@ -15,7 +16,6 @@ import (
 	"github.com/decred/politeia/politeiad/plugins/usermd"
 	piv1 "github.com/decred/politeia/politeiawww/api/pi/v1"
 	rv1 "github.com/decred/politeia/politeiawww/api/records/v1"
-	tv1 "github.com/decred/politeia/politeiawww/api/ticketvote/v1"
 )
 
 // userMetadataDecode returns the parsed data for the usermd plugin metadata
@@ -139,31 +139,4 @@ func statusChangeMetadataDecode(md []rv1.MetadataStream) (*statusTimestamps, str
 	}
 
 	return &timestamps, changeMsg, nil
-}
-
-// voteBitVerify verifies that the vote bit corresponds to a valid vote option.
-// This verification matches the one used on politeia's code base to verify
-// vote bits.
-func voteBitVerify(options []tv1.VoteOption, mask, bit uint64) error {
-	if len(options) == 0 {
-		return fmt.Errorf("no vote options found")
-	}
-	if bit == 0 {
-		return fmt.Errorf("invalid bit %#x", bit)
-	}
-
-	// Verify bit is included in mask
-	if mask&bit != bit {
-		return fmt.Errorf("invalid mask 0x%x bit %#x", mask, bit)
-	}
-
-	// Verify bit is included in vote options
-	for _, v := range options {
-		if v.Bit == bit {
-			// Bit matches one of the options. We're done.
-			return nil
-		}
-	}
-
-	return fmt.Errorf("bit %#x not found in vote options", bit)
 }
