@@ -116,6 +116,9 @@ var (
 	// ActiveOrdersLogoutErr is returned from logout when there are active
 	// orders.
 	ActiveOrdersLogoutErr = errors.New("cannot log out with active orders")
+	// ErrTooManyActiveMatches is returned from trade when the number of
+	// active matches exceeds the limit.
+	ErrTooManyActiveMatches = errors.New("too many active matches")
 	// walletDisabledErrStr is the error message returned when trying to use a
 	// disabled wallet.
 	walletDisabledErrStr = "%s wallet is disabled"
@@ -1444,6 +1447,10 @@ type Config struct {
 	TheOneHost string
 
 	Mesh bool
+	// MaxActiveMatches is the maximum number of active swap matches allowed
+	// per DEX connection before new orders are deferred. Zero means use the
+	// default (48).
+	MaxActiveMatches int
 }
 
 // locale is data associated with the currently selected language.
@@ -1498,6 +1505,10 @@ type Core struct {
 	tipMtx     sync.Mutex
 	tipPending map[uint32]uint64 // assetID -> latest pending tip height
 	tipActive  map[uint32]bool   // assetID -> whether tipChange is running
+
+	balMtx     sync.Mutex
+	balPending map[uint32]*asset.Balance // assetID -> latest pending balance
+	balActive  map[uint32]bool           // assetID -> whether balance processing is running
 
 	noteMtx   sync.RWMutex
 	noteChans map[uint64]chan Notification
@@ -1651,6 +1662,8 @@ func New(cfg *Config) (*Core, error) {
 		sentCommits:   make(map[order.Commitment]chan struct{}),
 		tipPending:    make(map[uint32]uint64),
 		tipActive:     make(map[uint32]bool),
+		balPending:    make(map[uint32]*asset.Balance),
+		balActive:     make(map[uint32]bool),
 		// Allowing to change the constructor makes testing a lot easier.
 		wsConstructor: comms.NewWsConn,
 		newCrypter:    encrypt.NewCrypter,
@@ -6460,11 +6473,39 @@ func (c *Core) createTradeRequest(wallets *walletSet, coins asset.Coins, redeemS
 	}, nil
 }
 
+// maxActiveMatches is the maximum number of active matches allowed across all
+// trades for a dex connection before new orders are rejected. This prevents
+// wallet overload when many trades are active simultaneously.
+const maxActiveMatchesDefault = 48
+
+// activeMatchCount returns the total number of active matches across all trades
+// for the given dex connection.
+func (c *Core) activeMatchCount(dc *dexConnection) int {
+	dc.tradeMtx.RLock()
+	defer dc.tradeMtx.RUnlock()
+	var n int
+	for _, trade := range dc.trades {
+		n += len(trade.activeMatches())
+	}
+	return n
+}
+
 // prepareTradeRequest prepares a trade request.
 func (c *Core) prepareTradeRequest(pw []byte, form *TradeForm) (*tradeRequest, error) {
 	wallets, assetConfigs, dc, mktConf, err := c.prepareForTradeRequestPrep(pw, form.Base, form.Quote, form.Host, form.Sell)
 	if err != nil {
 		return nil, err
+	}
+
+	// Prevent placing new orders when there are too many active matches.
+	// This avoids overwhelming the wallet backend with concurrent swap
+	// operations, which can cause cascade failures.
+	maxMatches := c.cfg.MaxActiveMatches
+	if maxMatches <= 0 {
+		maxMatches = maxActiveMatchesDefault
+	}
+	if n := c.activeMatchCount(dc); n >= maxMatches {
+		return nil, fmt.Errorf("%w (%d); deferring new orders", ErrTooManyActiveMatches, n)
 	}
 
 	fromWallet, toWallet := wallets.fromWallet, wallets.toWallet
@@ -6767,7 +6808,7 @@ func (c *Core) sendTradeRequest(tr *tradeRequest) (*Order, error) {
 
 	// Prepare and store the tracker and get the core.Order to return.
 	tracker := newTrackedTrade(dbOrder, preImg, dc, c.lockTimeTaker, c.lockTimeMaker,
-		c.db, c.latencyQ, wallets, coins, c.notify, c.formatDetails)
+		c.db, c.latencyQ, wallets, coins, c.notify, c.formatDetails, &c.wg)
 
 	tracker.redemptionLocked = tracker.redemptionReserves
 	tracker.refundLocked = tracker.refundReserves
@@ -7706,7 +7747,7 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		var preImg order.Preimage
 		copy(preImg[:], dbOrder.MetaData.Proof.Preimage)
 		tracker := newTrackedTrade(dbOrder, preImg, dc, c.lockTimeTaker, c.lockTimeMaker,
-			c.db, c.latencyQ, nil, nil, c.notify, c.formatDetails)
+			c.db, c.latencyQ, nil, nil, c.notify, c.formatDetails, &c.wg)
 		tracker.readyToTick = false
 		trackers[dbOrder.Order.ID()] = tracker
 
@@ -9605,7 +9646,9 @@ func (c *Core) schedTradeTick(tracker *trackedTrade) {
 	if !atomic.CompareAndSwapUint32(&tracker.tickRunning, 0, 1) {
 		return
 	}
+	c.wg.Add(1)
 	go func() {
+		defer c.wg.Done()
 		for {
 			for atomic.SwapUint32(&tracker.tickRequested, 0) != 0 {
 				if c.ctx.Err() != nil {
@@ -9857,7 +9900,11 @@ func handleRedemptionRoute(c *Core, dc *dexConnection, msg *msgjson.Message) err
 		// bypassing the slow tick cycle.
 		var mid order.MatchID
 		copy(mid[:], redemption.MatchID)
-		go c.tryFastRedeem(tracker, mid)
+		c.wg.Add(1)
+		go func() {
+			defer c.wg.Done()
+			c.tryFastRedeem(tracker, mid)
+		}()
 		c.schedTradeTick(tracker)
 		return nil
 	}
@@ -10075,24 +10122,8 @@ func (c *Core) handleWalletNotification(ni asset.WalletNotification) {
 	case *asset.TipChangeNote:
 		c.queueTipChange(n.AssetID, n.Tip)
 	case *asset.BalanceChangeNote:
-		w, ok := c.wallet(n.AssetID)
-		if !ok {
-			return
-		}
-		contractLockedAmt, orderLockedAmt, bondLockedAmt := c.lockedAmounts(n.AssetID)
-		bal := &WalletBalance{
-			Balance: &db.Balance{
-				Balance: *n.Balance,
-				Stamp:   time.Now(),
-			},
-			OrderLocked:    orderLockedAmt,
-			ContractLocked: contractLockedAmt,
-			BondLocked:     bondLockedAmt,
-		}
-		if err := c.storeAndSendWalletBalance(w, bal); err != nil {
-			c.log.Errorf("Error storing and sending emitted balance: %v", err)
-		}
-		return // Notification sent already.
+		c.queueBalanceChange(n.AssetID, n.Balance)
+		return // Notification sent by runBalanceChange.
 	case *asset.ActionRequiredNote:
 		c.requestedActionMtx.Lock()
 		c.requestedActions[n.UniqueID] = n
@@ -10144,6 +10175,58 @@ func (c *Core) runTipChange(assetID uint32) {
 		delete(c.tipPending, assetID)
 		c.tipMtx.Unlock()
 		c.tipChange(assetID, tip)
+	}
+}
+
+// queueBalanceChange records the latest balance for the asset and ensures a
+// balance processing goroutine is running. If one is already active, the
+// pending balance is stored and picked up when the current run finishes,
+// coalescing rapid-fire balance notifications.
+func (c *Core) queueBalanceChange(assetID uint32, bal *asset.Balance) {
+	c.balMtx.Lock()
+	c.balPending[assetID] = bal
+	if c.balActive[assetID] {
+		c.balMtx.Unlock()
+		return
+	}
+	c.balActive[assetID] = true
+	c.balMtx.Unlock()
+	c.wg.Add(1)
+	go c.runBalanceChange(assetID)
+}
+
+// runBalanceChange drains pending balance changes for the asset. When no more
+// pending balances exist, marks the asset as inactive and returns.
+func (c *Core) runBalanceChange(assetID uint32) {
+	defer c.wg.Done()
+	for {
+		c.balMtx.Lock()
+		bal, ok := c.balPending[assetID]
+		if !ok {
+			c.balActive[assetID] = false
+			c.balMtx.Unlock()
+			return
+		}
+		delete(c.balPending, assetID)
+		c.balMtx.Unlock()
+
+		w, ok := c.wallet(assetID)
+		if !ok {
+			continue
+		}
+		contractLockedAmt, orderLockedAmt, bondLockedAmt := c.lockedAmounts(assetID)
+		walBal := &WalletBalance{
+			Balance: &db.Balance{
+				Balance: *bal,
+				Stamp:   time.Now(),
+			},
+			OrderLocked:    orderLockedAmt,
+			ContractLocked: contractLockedAmt,
+			BondLocked:     bondLockedAmt,
+		}
+		if err := c.storeAndSendWalletBalance(w, walBal); err != nil {
+			c.log.Errorf("Error storing and sending emitted balance: %v", err)
+		}
 	}
 }
 

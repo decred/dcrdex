@@ -2546,7 +2546,7 @@ var _ asset.Receipt = (*swapReceipt)(nil)
 // Swap sends the swaps in a single transaction. The fees used returned are the
 // max fees that will possibly be used, since in ethereum with EIP-1559 we cannot
 // know exactly how much fees will be used.
-func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
+func (w *ETHWallet) Swap(_ context.Context, swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
 	if swaps.FeeRate == 0 {
 		return nil, nil, 0, fmt.Errorf("cannot send swap with with zero fee rate")
 	}
@@ -2655,7 +2655,7 @@ func acToLocator(contractVer uint32, swap *asset.Contract, evmValue *big.Int, fr
 // Swap sends the swaps in a single transaction. The fees used returned are the
 // max fees that will possibly be used, since in ethereum with EIP-1559 we cannot
 // know exactly how much fees will be used.
-func (w *TokenWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
+func (w *TokenWallet) Swap(_ context.Context, swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
 	if swaps.FeeRate == 0 {
 		return nil, nil, 0, fmt.Errorf("cannot send swap with with zero fee rate")
 	}
@@ -2931,7 +2931,7 @@ func (w *ETHWallet) gaslessRedeem(form *asset.RedeemForm, bundler bundler) ([]de
 // conceptually a batch of redeems could be processed for any number of
 // different contract addresses with multiple transactions. (buck: what would
 // the difference from calling Redeem repeatedly?)
-func (w *ETHWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
+func (w *ETHWallet) Redeem(_ context.Context, form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
 	return w.assetWallet.Redeem(form, nil, nil)
 }
 
@@ -2941,7 +2941,7 @@ func (w *ETHWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uin
 // If the funds are insufficient, it will send a user operation to the bundler.
 // Submitted will be true if a regular transaction was sent to the network, and
 // false if a user operation was sent to the bundler.
-func (w *ETHWallet) GaslessRedeem(form *asset.RedeemForm) (ins []dex.Bytes, out asset.Coin, fees uint64, submitted bool, err error) {
+func (w *ETHWallet) GaslessRedeem(_ context.Context, form *asset.RedeemForm) (ins []dex.Bytes, out asset.Coin, fees uint64, submitted bool, err error) {
 	fail := func(err error) ([]dex.Bytes, asset.Coin, uint64, bool, error) {
 		return nil, nil, 0, false, err
 	}
@@ -2997,7 +2997,7 @@ func (w *ETHWallet) GaslessRedeem(form *asset.RedeemForm) (ins []dex.Bytes, out 
 
 // Redeem sends the redemption transaction, which may contain more than one
 // redemption.
-func (w *TokenWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
+func (w *TokenWallet) Redeem(_ context.Context, form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
 	return w.assetWallet.Redeem(form, w.parent, nil)
 }
 
@@ -4522,7 +4522,7 @@ func (w *assetWallet) findSecret(locator []byte, contractVer uint32) ([]byte, st
 
 // Refund refunds a contract. This can only be used after the time lock has
 // expired.
-func (w *assetWallet) Refund(_, contract dex.Bytes, feeRate uint64) (dex.Bytes, error) {
+func (w *assetWallet) Refund(_ context.Context, _, contract dex.Bytes, feeRate uint64) (dex.Bytes, error) {
 	contractVer, locator, err := dexeth.DecodeContractData(contract)
 	if err != nil {
 		return nil, fmt.Errorf("Refund: failed to decode contract: %w", err)
