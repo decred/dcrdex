@@ -5800,7 +5800,7 @@ func (c *Core) SingleLotFees(form *SingleLotFeesForm) (swapFees, redeemFees, ref
 		}
 		swapFeeRate, redeemFeeRate = swapAsset.MaxFeeRate, redeemAsset.MaxFeeRate
 	} else {
-		// For dynamic swappers, use the wallet rate, becuase the server sends
+		// For dynamic swappers, use the wallet rate, because the server sends
 		// the max fee rate. For non-dynamic swappers use the server rates,
 		// because this is what swaps will need to use.
 		_, isDynamicSwapper := wallets.fromWallet.Wallet.(asset.DynamicSwapper)

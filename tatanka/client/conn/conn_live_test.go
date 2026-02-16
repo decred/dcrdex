@@ -474,7 +474,7 @@ func TestFailover(t *testing.T) {
 	conn2.conn.Subscribe(marketsTopic, dcrBtcSubject)
 
 	// testBroadcast sends a broadcast on the source client and makes sure that
-	// the destination client recieves it.
+	// the destination client receives it.
 	testBroadcast := func(bcast *mj.Broadcast, source, dest *tConn) {
 		t.Helper()
 

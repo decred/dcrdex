@@ -1165,7 +1165,7 @@ type GaslessRedeemer interface {
 	// on its own, otherwise if a user operation was sent to a bundler, it will
 	// be false.
 	//
-	// The redemption message should only be sent the the server if submitted is
+	// The redemption message should only be sent to the server if submitted is
 	// true. If it is false, an updated coin ID will be returned from
 	// ConfirmRedemption when the transaction is submitted by the bundler,
 	// and the server should be notified using that coin ID.

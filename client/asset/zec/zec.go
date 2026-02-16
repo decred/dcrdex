@@ -3120,7 +3120,7 @@ func (w *zecWallet) TxHistory(req *asset.TxHistoryRequest) (*asset.TxHistoryResp
 const sendCategory = "send"
 
 // idUnknownTx identifies the type and details of a transaction either made
-// or recieved by the wallet.
+// or received by the wallet.
 func (w *zecWallet) idUnknownTx(tx *btcjson.ListTransactionsResult) (*asset.WalletTransaction, error) {
 	txHash, err := chainhash.NewHashFromStr(tx.TxID)
 	if err != nil {
@@ -3381,7 +3381,7 @@ func (w *zecWallet) idUnknownTx(tx *btcjson.ListTransactionsResult) (*asset.Wall
 }
 
 // addUnknownTransactionsToHistory checks for any transactions the wallet has
-// made or recieved that are not part of the transaction history. It scans
+// made or received that are not part of the transaction history. It scans
 // from the last point to which it had previously scanned to the current tip.
 func (w *zecWallet) addUnknownTransactionsToHistory(tip uint64) {
 	txHistoryDB := w.txDB()
@@ -3450,7 +3450,7 @@ func (w *zecWallet) addUnknownTransactionsToHistory(tip uint64) {
 }
 
 // syncTxHistory checks to see if there are any transactions which the wallet
-// has made or recieved that are not part of the transaction history, then
+// has made or received that are not part of the transaction history, then
 // identifies and adds them. It also checks all the pending transactions to see
 // if they have been mined into a block, and if so, updates the transaction
 // history to reflect the block height.

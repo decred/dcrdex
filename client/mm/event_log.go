@@ -18,7 +18,7 @@ import (
 	"go.etcd.io/bbolt"
 )
 
-// DEXOrderEvent represents a a dex order that a bot placed.
+// DEXOrderEvent represents a dex order that a bot placed.
 type DEXOrderEvent struct {
 	ID           string                     `json:"id"`
 	Rate         uint64                     `json:"rate"`
@@ -27,7 +27,7 @@ type DEXOrderEvent struct {
 	Transactions []*asset.WalletTransaction `json:"transactions"`
 }
 
-// CEXOrderEvent represents a a cex order that a bot placed.
+// CEXOrderEvent represents a cex order that a bot placed.
 type CEXOrderEvent struct {
 	ID      string `json:"id"`
 	BaseID  uint32 `json:"baseID"`
