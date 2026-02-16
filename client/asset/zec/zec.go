@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/asset"
+	"decred.org/dcrdex/client/asset/broadcast"
 	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
@@ -270,10 +271,13 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 		decodeAddr: func(addr string, net *chaincfg.Params) (btcutil.Address, error) {
 			return dexzec.DecodeAddress(addr, addrParams, btcParams)
 		},
-		ar:         ar,
-		node:       cl,
-		walletDir:  cfg.DataDir,
-		pendingTxs: make(map[chainhash.Hash]*btc.ExtendedWalletTx),
+		ar:          ar,
+		node:        cl,
+		walletDir:   cfg.DataDir,
+		pendingTxs:  make(map[chainhash.Hash]*btc.ExtendedWalletTx),
+		swapCache:   broadcast.NewCache[*zecSwapCacheEntry](),
+		redeemCache: broadcast.NewCache[*zecRedeemCacheEntry](),
+		refundCache: broadcast.NewCache[*zecRefundCacheEntry](),
 	}
 	zw.walletCfg.Store(&walletCfg)
 	zw.prepareCoinManager()
@@ -333,6 +337,10 @@ type zecWallet struct {
 
 	txHistoryDB      atomic.Value // *btc.BadgerTxDB
 	syncingTxHistory atomic.Bool
+
+	swapCache   *broadcast.Cache[*zecSwapCacheEntry]
+	redeemCache *broadcast.Cache[*zecRedeemCacheEntry]
+	refundCache *broadcast.Cache[*zecRefundCacheEntry]
 }
 
 var _ asset.FeeRater = (*zecWallet)(nil)
@@ -864,6 +872,27 @@ func (w *zecWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uint6
 
 // Redeem sends the redemption transaction, completing the atomic swap.
 func (w *zecWallet) Redeem(ctx context.Context, form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
+	// Check broadcast cache for retry of a previously built transaction.
+	cacheKey := broadcast.RedeemCacheKey(form.Redemptions)
+	if cached, ok := broadcast.RecoverFromCache(w.redeemCache, cacheKey,
+		func(e *zecRedeemCacheEntry) error { _, err := w.broadcastTx(ctx, e.signedTx); return err },
+		func(e *zecRedeemCacheEntry) bool {
+			txHash := e.signedTx.TxHash()
+			_, err := getWalletTransaction(w, &txHash)
+			return err == nil
+		},
+		w.log, "Redeem",
+	); ok {
+		txHash := cached.signedTx.TxHash()
+		w.addTxToHistory(&asset.WalletTransaction{
+			Type:   asset.Redeem,
+			ID:     txHash.String(),
+			Amount: cached.totalIn,
+			Fees:   cached.fees,
+		}, &txHash, true)
+		return cached.coinIDs, cached.outCoin, cached.fees, nil
+	}
+
 	// Create a transaction that spends the referenced contract.
 	tx := dexzec.NewTxFromMsgTx(wire.NewMsgTx(dexzec.VersionNU5), dexzec.MaxExpiryHeight)
 	var totalIn uint64
@@ -955,8 +984,26 @@ func (w *zecWallet) Redeem(ctx context.Context, form *asset.RedeemForm) ([]dex.B
 		}
 	}
 
+	// Prepare return values for caching.
+	txHash := tx.TxHash()
+	coinIDs := make([]dex.Bytes, 0, len(form.Redemptions))
+	for i := range form.Redemptions {
+		coinIDs = append(coinIDs, btc.ToCoinID(&txHash, uint32(i)))
+	}
+	outCoin := btc.NewOutput(&txHash, 0, uint64(txOut.Value))
+
+	// Save to cache before broadcast for recovery on timeout/retry.
+	w.redeemCache.Put(cacheKey, &zecRedeemCacheEntry{
+		signedTx:  tx,
+		coinIDs:   coinIDs,
+		outCoin:   outCoin,
+		fees:      fee,
+		totalIn:   totalIn,
+		timestamp: time.Now(),
+	})
+
 	// Send the transaction.
-	txHash, err := w.broadcastTx(ctx, tx)
+	_, err = w.broadcastTx(ctx, tx)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error sending tx: %w", err)
 	}
@@ -966,14 +1013,9 @@ func (w *zecWallet) Redeem(ctx context.Context, form *asset.RedeemForm) ([]dex.B
 		ID:     txHash.String(),
 		Amount: totalIn,
 		Fees:   fee,
-	}, txHash, true)
+	}, &txHash, true)
 
-	// Log the change output.
-	coinIDs := make([]dex.Bytes, 0, len(form.Redemptions))
-	for i := range form.Redemptions {
-		coinIDs = append(coinIDs, btc.ToCoinID(txHash, uint32(i)))
-	}
-	return coinIDs, btc.NewOutput(txHash, 0, uint64(txOut.Value)), fee, nil
+	return coinIDs, outCoin, fee, nil
 }
 
 // scriptHashAddress returns a new p2sh address.
@@ -1945,6 +1987,27 @@ func (w *zecWallet) recyclableAddress() (string, error) {
 }
 
 func (w *zecWallet) Refund(ctx context.Context, coinID, contract dex.Bytes, feeRate uint64) (dex.Bytes, error) {
+	// Check broadcast cache for retry of a previously built transaction.
+	cacheKey := broadcast.RefundCacheKey(coinID)
+	if cached, ok := broadcast.RecoverFromCache(w.refundCache, cacheKey,
+		func(e *zecRefundCacheEntry) error { _, err := w.broadcastTx(ctx, e.signedTx); return err },
+		func(e *zecRefundCacheEntry) bool {
+			refundHash := e.signedTx.TxHash()
+			_, err := getWalletTransaction(w, &refundHash)
+			return err == nil
+		},
+		w.log, "Refund",
+	); ok {
+		refundHash := cached.signedTx.TxHash()
+		w.addTxToHistory(&asset.WalletTransaction{
+			Type:   asset.Refund,
+			ID:     refundHash.String(),
+			Amount: cached.refundVal,
+			Fees:   cached.fees,
+		}, &refundHash, true)
+		return cached.refundCoinID, nil
+	}
+
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, err
@@ -1970,21 +2033,66 @@ func (w *zecWallet) Refund(ctx context.Context, coinID, contract dex.Bytes, feeR
 		return nil, fmt.Errorf("error creating refund tx: %w", err)
 	}
 
-	refundHash, err := w.broadcastTx(ctx, dexzec.NewTxFromMsgTx(msgTx, dexzec.MaxExpiryHeight))
+	zecRefundTx := zecTx(msgTx)
+	refundTxFees := zecRefundTx.RequiredTxFeesZIP317()
+	refundHash := zecRefundTx.TxHash()
+	refundCoinID := btc.ToCoinID(&refundHash, 0)
+
+	// Save to cache before broadcast for recovery on timeout/retry.
+	w.refundCache.Put(cacheKey, &zecRefundCacheEntry{
+		signedTx:     zecRefundTx,
+		refundCoinID: refundCoinID,
+		refundVal:    uint64(utxo.Value),
+		fees:         refundTxFees,
+		timestamp:    time.Now(),
+	})
+
+	_, err = w.broadcastTx(ctx, zecRefundTx)
 	if err != nil {
 		return nil, fmt.Errorf("broadcastTx: %w", err)
 	}
 
-	tx := zecTx(msgTx)
 	w.addTxToHistory(&asset.WalletTransaction{
 		Type:   asset.Refund,
 		ID:     refundHash.String(),
 		Amount: uint64(utxo.Value),
-		Fees:   tx.RequiredTxFeesZIP317(),
-	}, refundHash, true)
+		Fees:   refundTxFees,
+	}, &refundHash, true)
 
-	return btc.ToCoinID(refundHash, 0), nil
+	return refundCoinID, nil
 }
+
+type zecSwapCacheEntry struct {
+	signedTx  *dexzec.Tx
+	receipts  []asset.Receipt
+	change    *btc.Output
+	fees      uint64
+	totalOut  uint64
+	timestamp time.Time
+}
+
+func (e *zecSwapCacheEntry) Stamp() time.Time { return e.timestamp }
+
+type zecRedeemCacheEntry struct {
+	signedTx  *dexzec.Tx
+	coinIDs   []dex.Bytes
+	outCoin   *btc.Output
+	fees      uint64
+	totalIn   uint64
+	timestamp time.Time
+}
+
+func (e *zecRedeemCacheEntry) Stamp() time.Time { return e.timestamp }
+
+type zecRefundCacheEntry struct {
+	signedTx     *dexzec.Tx
+	refundCoinID dex.Bytes
+	refundVal    uint64
+	fees         uint64
+	timestamp    time.Time
+}
+
+func (e *zecRefundCacheEntry) Stamp() time.Time { return e.timestamp }
 
 // TODO: The ctx parameter is accepted but not threaded through to the
 // underlying RPC calls (sendRawTransaction, signTxByRPC, dumpPrivKey, etc.)
@@ -2001,6 +2109,11 @@ func (w *zecWallet) broadcastTx(ctx context.Context, tx *dexzec.Tx) (*chainhash.
 	}
 	txHash, err := sendRawTransaction(w, tx)
 	if err != nil {
+		if broadcast.IsAlreadyBroadcastErr(err) {
+			h := tx.TxHash()
+			w.log.Warnf("Transaction %s appears to already be broadcast: %v", h, err)
+			return &h, nil
+		}
 		return nil, fmt.Errorf("sendrawtx error: %v: %s", err, rawTx())
 	}
 	checkHash := tx.TxHash()
@@ -2372,6 +2485,31 @@ func (w *zecWallet) SignCoinMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, si
 }
 
 func (w *zecWallet) Swap(ctx context.Context, swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
+	// Check broadcast cache for retry of a previously built transaction.
+	cacheKey := broadcast.CoinIDsCacheKey(swaps.Inputs)
+	if cached, ok := broadcast.RecoverFromCache(w.swapCache, cacheKey,
+		func(e *zecSwapCacheEntry) error { _, err := w.broadcastTx(ctx, e.signedTx); return err },
+		func(e *zecSwapCacheEntry) bool {
+			txHash := e.signedTx.TxHash()
+			_, err := getWalletTransaction(w, &txHash)
+			return err == nil
+		},
+		w.log, "Swap",
+	); ok {
+		txHash := cached.signedTx.TxHash()
+		w.addTxToHistory(&asset.WalletTransaction{
+			Type:   asset.Swap,
+			ID:     txHash.String(),
+			Amount: cached.totalOut,
+			Fees:   cached.fees,
+		}, &txHash, true)
+		var changeCoin asset.Coin
+		if cached.change != nil {
+			changeCoin = cached.change
+		}
+		return cached.receipts, changeCoin, cached.fees, nil
+	}
+
 	contracts := make([][]byte, 0, len(swaps.Contracts))
 	var totalOut uint64
 	// Start with an empty MsgTx.
@@ -2492,6 +2630,16 @@ func (w *zecWallet) Swap(ctx context.Context, swaps *asset.Swaps) ([]asset.Recei
 			SignedRefundBytes: refundBuff.Bytes(),
 		})
 	}
+
+	// Save to cache before broadcast for recovery on timeout/retry.
+	w.swapCache.Put(cacheKey, &zecSwapCacheEntry{
+		signedTx:  msgTx,
+		receipts:  receipts,
+		change:    change,
+		fees:      fees,
+		totalOut:  totalOut,
+		timestamp: time.Now(),
+	})
 
 	// Refund txs prepared and signed. Can now broadcast the swap(s).
 	_, err = w.broadcastTx(ctx, msgTx)

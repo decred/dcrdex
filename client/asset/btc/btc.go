@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/asset"
+	"decred.org/dcrdex/client/asset/broadcast"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/config"
@@ -860,6 +861,10 @@ type baseWallet struct {
 	txHistoryDB atomic.Value // *BadgerTxDB
 
 	ar *AddressRecycler
+
+	swapCache   *broadcast.Cache[*swapCacheEntry]
+	redeemCache *broadcast.Cache[*redeemCacheEntry]
+	refundCache *broadcast.Cache[*refundCacheEntry]
 }
 
 func (w *baseWallet) fallbackFeeRate() uint64 {
@@ -1374,6 +1379,9 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 		pendingTxs:        make(map[chainhash.Hash]ExtendedWalletTx),
 		walletDir:         walletDir,
 		ar:                addressRecyler,
+		swapCache:         broadcast.NewCache[*swapCacheEntry](),
+		redeemCache:       broadcast.NewCache[*redeemCacheEntry](),
+		refundCache:       broadcast.NewCache[*refundCacheEntry](),
 	}
 	w.cfgV.Store(baseCfg)
 
@@ -3793,6 +3801,30 @@ func (btc *baseWallet) Swap(ctx context.Context, swaps *asset.Swaps) ([]asset.Re
 		return nil, nil, 0, fmt.Errorf("cannot send swap with with zero fee rate")
 	}
 
+	// Check broadcast cache for retry of a previously built transaction.
+	cacheKey := broadcast.CoinIDsCacheKey(swaps.Inputs)
+	if cached, ok := broadcast.RecoverFromCache(btc.swapCache, cacheKey,
+		func(e *swapCacheEntry) error { _, err := btc.broadcastTx(ctx, e.signedTx); return err },
+		func(e *swapCacheEntry) bool {
+			_, err := btc.node.GetWalletTransaction(btc.hashTx(e.signedTx))
+			return err == nil
+		},
+		btc.log, "Swap",
+	); ok {
+		txHash := btc.hashTx(cached.signedTx)
+		btc.addTxToHistory(&asset.WalletTransaction{
+			Type:   asset.Swap,
+			ID:     txHash.String(),
+			Amount: cached.totalOut,
+			Fees:   cached.fees,
+		}, txHash, true)
+		var changeCoin asset.Coin
+		if cached.change != nil {
+			changeCoin = cached.change
+		}
+		return cached.receipts, changeCoin, cached.fees, nil
+	}
+
 	contracts := make([][]byte, 0, len(swaps.Contracts))
 	var totalOut uint64
 	// Start with an empty MsgTx.
@@ -3905,6 +3937,16 @@ func (btc *baseWallet) Swap(ctx context.Context, swaps *asset.Swaps) ([]asset.Re
 			SignedRefundBytes: refundBuff.Bytes(),
 		})
 	}
+
+	// Save to cache before broadcast for recovery on timeout/retry.
+	btc.swapCache.Put(cacheKey, &swapCacheEntry{
+		signedTx:  msgTx,
+		receipts:  receipts,
+		change:    change,
+		fees:      fees,
+		totalOut:  totalOut,
+		timestamp: time.Now(),
+	})
 
 	// Refund txs prepared and signed. Can now broadcast the swap(s).
 	_, err = btc.broadcastTx(ctx, msgTx)
@@ -5022,6 +5064,26 @@ func (btc *baseWallet) MarkPrivateSwapComplete(contract *asset.PrivateContract, 
 
 // Redeem sends the redemption transaction, completing the atomic swap.
 func (btc *baseWallet) Redeem(ctx context.Context, form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
+	// Check broadcast cache for retry of a previously built transaction.
+	cacheKey := broadcast.RedeemCacheKey(form.Redemptions)
+	if cached, ok := broadcast.RecoverFromCache(btc.redeemCache, cacheKey,
+		func(e *redeemCacheEntry) error { _, err := btc.broadcastTx(ctx, e.signedTx); return err },
+		func(e *redeemCacheEntry) bool {
+			_, err := btc.node.GetWalletTransaction(btc.hashTx(e.signedTx))
+			return err == nil
+		},
+		btc.log, "Redeem",
+	); ok {
+		txHash := btc.hashTx(cached.signedTx)
+		btc.addTxToHistory(&asset.WalletTransaction{
+			Type:   asset.Redeem,
+			ID:     txHash.String(),
+			Amount: cached.totalIn,
+			Fees:   cached.fees,
+		}, txHash, true)
+		return cached.coinIDs, cached.outCoin, cached.fees, nil
+	}
+
 	// Create a transaction that spends the referenced contract.
 	msgTx := wire.NewMsgTx(btc.txVersion())
 	var totalIn uint64
@@ -5138,8 +5200,26 @@ func (btc *baseWallet) Redeem(ctx context.Context, form *asset.RedeemForm) ([]de
 		}
 	}
 
+	// Prepare return values for caching.
+	txHash := btc.hashTx(msgTx)
+	coinIDs := make([]dex.Bytes, 0, len(form.Redemptions))
+	for i := range form.Redemptions {
+		coinIDs = append(coinIDs, ToCoinID(txHash, uint32(i)))
+	}
+	outCoin := NewOutput(txHash, 0, uint64(txOut.Value))
+
+	// Save to cache before broadcast for recovery on timeout/retry.
+	btc.redeemCache.Put(cacheKey, &redeemCacheEntry{
+		signedTx:  msgTx,
+		coinIDs:   coinIDs,
+		outCoin:   outCoin,
+		fees:      fee,
+		totalIn:   totalIn,
+		timestamp: time.Now(),
+	})
+
 	// Send the transaction.
-	txHash, err := btc.broadcastTx(ctx, msgTx)
+	_, err = btc.broadcastTx(ctx, msgTx)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -5151,12 +5231,7 @@ func (btc *baseWallet) Redeem(ctx context.Context, form *asset.RedeemForm) ([]de
 		Fees:   fee,
 	}, txHash, true)
 
-	// Log the change output.
-	coinIDs := make([]dex.Bytes, 0, len(form.Redemptions))
-	for i := range form.Redemptions {
-		coinIDs = append(coinIDs, ToCoinID(txHash, uint32(i)))
-	}
-	return coinIDs, NewOutput(txHash, 0, uint64(txOut.Value)), fee, nil
+	return coinIDs, outCoin, fee, nil
 }
 
 // ConvertAuditInfo converts from the common *asset.AuditInfo type to our
@@ -5363,6 +5438,26 @@ func (btc *intermediaryWallet) FindRedemption(ctx context.Context, coinID, _ dex
 // was created. The client should store this information for persistence across
 // sessions.
 func (btc *baseWallet) Refund(ctx context.Context, coinID, contract dex.Bytes, feeRate uint64) (dex.Bytes, error) {
+	// Check broadcast cache for retry of a previously built transaction.
+	cacheKey := broadcast.RefundCacheKey(coinID)
+	if cached, ok := broadcast.RecoverFromCache(btc.refundCache, cacheKey,
+		func(e *refundCacheEntry) error { _, err := btc.broadcastTx(ctx, e.signedTx); return err },
+		func(e *refundCacheEntry) bool {
+			_, err := btc.node.GetWalletTransaction(btc.hashTx(e.signedTx))
+			return err == nil
+		},
+		btc.log, "Refund",
+	); ok {
+		refundHash := btc.hashTx(cached.signedTx)
+		btc.addTxToHistory(&asset.WalletTransaction{
+			Type:   asset.Refund,
+			ID:     refundHash.String(),
+			Amount: cached.refundVal,
+			Fees:   cached.fees,
+		}, refundHash, true)
+		return cached.refundCoinID, nil
+	}
+
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, err
@@ -5398,15 +5493,27 @@ func (btc *baseWallet) Refund(ctx context.Context, coinID, contract dex.Bytes, f
 		return nil, fmt.Errorf("error creating refund tx: %w", err)
 	}
 
-	refundHash, err := btc.broadcastTx(ctx, msgTx)
-	if err != nil {
-		return nil, fmt.Errorf("broadcastTx: %w", err)
-	}
-
 	var fee uint64
 	if len(msgTx.TxOut) > 0 { // something went very wrong if not true
 		fee = uint64(utxo.Value - msgTx.TxOut[0].Value)
 	}
+	refundHash := btc.hashTx(msgTx)
+	refundCoinID := ToCoinID(refundHash, 0)
+
+	// Save to cache before broadcast for recovery on timeout/retry.
+	btc.refundCache.Put(cacheKey, &refundCacheEntry{
+		signedTx:     msgTx,
+		refundCoinID: refundCoinID,
+		refundVal:    uint64(utxo.Value),
+		fees:         fee,
+		timestamp:    time.Now(),
+	})
+
+	_, err = btc.broadcastTx(ctx, msgTx)
+	if err != nil {
+		return nil, fmt.Errorf("broadcastTx: %w", err)
+	}
+
 	btc.addTxToHistory(&asset.WalletTransaction{
 		Type:   asset.Refund,
 		ID:     refundHash.String(),
@@ -5414,7 +5521,7 @@ func (btc *baseWallet) Refund(ctx context.Context, coinID, contract dex.Bytes, f
 		Fees:   fee,
 	}, refundHash, true)
 
-	return ToCoinID(refundHash, 0), nil
+	return refundCoinID, nil
 }
 
 // refundTx creates and signs a contract`s refund transaction. If refundAddr is
@@ -6023,9 +6130,46 @@ func (btc *baseWallet) signTxAndAddChange(ctx context.Context, baseTx *wire.MsgT
 	return msgTx, change, fee, nil
 }
 
+type swapCacheEntry struct {
+	signedTx  *wire.MsgTx
+	receipts  []asset.Receipt
+	change    *Output
+	fees      uint64
+	totalOut  uint64
+	timestamp time.Time
+}
+
+func (e *swapCacheEntry) Stamp() time.Time { return e.timestamp }
+
+type redeemCacheEntry struct {
+	signedTx  *wire.MsgTx
+	coinIDs   []dex.Bytes
+	outCoin   *Output
+	fees      uint64
+	totalIn   uint64
+	timestamp time.Time
+}
+
+func (e *redeemCacheEntry) Stamp() time.Time { return e.timestamp }
+
+type refundCacheEntry struct {
+	signedTx     *wire.MsgTx
+	refundCoinID dex.Bytes
+	refundVal    uint64
+	fees         uint64
+	timestamp    time.Time
+}
+
+func (e *refundCacheEntry) Stamp() time.Time { return e.timestamp }
+
 func (btc *baseWallet) broadcastTx(ctx context.Context, signedTx *wire.MsgTx) (*chainhash.Hash, error) {
 	txHash, err := btc.node.SendRawTransaction(ctx, signedTx)
 	if err != nil {
+		if broadcast.IsAlreadyBroadcastErr(err) {
+			h := btc.hashTx(signedTx)
+			btc.log.Warnf("Transaction %s appears to already be broadcast: %v", h, err)
+			return h, nil
+		}
 		return nil, fmt.Errorf("sendrawtx error: %v, raw tx: %x", err, btc.wireBytes(signedTx))
 	}
 	checkHash := btc.hashTx(signedTx)

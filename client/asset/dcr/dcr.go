@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/asset"
+	"decred.org/dcrdex/client/asset/broadcast"
 	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
@@ -704,6 +705,10 @@ type ExchangeWallet struct {
 		sync.RWMutex
 		progress *rescanProgress // nil = no rescan in progress
 	}
+
+	swapCache   *broadcast.Cache[*dcrSwapCacheEntry]
+	redeemCache *broadcast.Cache[*dcrRedeemCacheEntry]
+	refundCache *broadcast.Cache[*dcrRefundCacheEntry]
 }
 
 func (dcr *ExchangeWallet) config() *exchangeWalletConfig {
@@ -867,6 +872,9 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *walletConfig, chainParam
 		subsidyCache:        blockchain.NewSubsidyCache(chainParams),
 		pendingTxs:          make(map[chainhash.Hash]*btc.ExtendedWalletTx),
 		walletDir:           dir,
+		swapCache:           broadcast.NewCache[*dcrSwapCacheEntry](),
+		redeemCache:         broadcast.NewCache[*dcrRedeemCacheEntry](),
+		refundCache:         broadcast.NewCache[*dcrRefundCacheEntry](),
 	}
 
 	if b, err := os.ReadFile(vspFilepath); err == nil {
@@ -3789,6 +3797,30 @@ func (dcr *ExchangeWallet) Swap(ctx context.Context, swaps *asset.Swaps) ([]asse
 		return nil, nil, 0, fmt.Errorf("cannot send swap with with zero fee rate")
 	}
 
+	// Check broadcast cache for retry of a previously built transaction.
+	cacheKey := broadcast.CoinIDsCacheKey(swaps.Inputs)
+	if cached, ok := broadcast.RecoverFromCache(dcr.swapCache, cacheKey,
+		func(e *dcrSwapCacheEntry) error { _, err := dcr.broadcastTx(ctx, e.signedTx, e.feeRate); return err },
+		func(e *dcrSwapCacheEntry) bool {
+			_, err := dcr.wallet.GetTransaction(ctx, e.signedTx.CachedTxHash())
+			return err == nil
+		},
+		dcr.log, "Swap",
+	); ok {
+		txHash := cached.signedTx.CachedTxHash()
+		dcr.addTxToHistory(&asset.WalletTransaction{
+			Type:   asset.Swap,
+			ID:     txHash.String(),
+			Amount: cached.totalOut,
+			Fees:   cached.fees,
+		}, txHash, true)
+		var changeCoin asset.Coin
+		if cached.change != nil {
+			changeCoin = cached.change
+		}
+		return cached.receipts, changeCoin, cached.fees, nil
+	}
+
 	var totalOut uint64
 	// Start with an empty MsgTx.
 	baseTx := wire.NewMsgTx()
@@ -3884,6 +3916,17 @@ func (dcr *ExchangeWallet) Swap(ctx context.Context, swaps *asset.Swaps) ([]asse
 		})
 	}
 
+	// Save to cache before broadcast for recovery on timeout/retry.
+	dcr.swapCache.Put(cacheKey, &dcrSwapCacheEntry{
+		signedTx:  msgTx,
+		receipts:  receipts,
+		change:    change,
+		fees:      fees,
+		totalOut:  totalOut,
+		feeRate:   feeRate,
+		timestamp: time.Now(),
+	})
+
 	// Refund txs prepared and signed. Can now broadcast the swap(s).
 	_, err = dcr.broadcastTx(ctx, msgTx, feeRate)
 	if err != nil {
@@ -3927,6 +3970,26 @@ func (dcr *ExchangeWallet) Swap(ctx context.Context, swaps *asset.Swaps) ([]asse
 // redemption. FeeSuggestion is just a fallback if an internal estimate using
 // the wallet's redeem confirm block target setting is not available.
 func (dcr *ExchangeWallet) Redeem(ctx context.Context, form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
+	// Check broadcast cache for retry of a previously built transaction.
+	cacheKey := broadcast.RedeemCacheKey(form.Redemptions)
+	if cached, ok := broadcast.RecoverFromCache(dcr.redeemCache, cacheKey,
+		func(e *dcrRedeemCacheEntry) error { _, err := dcr.broadcastTx(ctx, e.signedTx, e.feeRate); return err },
+		func(e *dcrRedeemCacheEntry) bool {
+			_, err := dcr.wallet.GetTransaction(ctx, e.signedTx.CachedTxHash())
+			return err == nil
+		},
+		dcr.log, "Redeem",
+	); ok {
+		txHash := cached.signedTx.CachedTxHash()
+		dcr.addTxToHistory(&asset.WalletTransaction{
+			Type:   asset.Redeem,
+			ID:     txHash.String(),
+			Amount: cached.totalIn,
+			Fees:   cached.fees,
+		}, txHash, true)
+		return cached.coinIDs, cached.outCoin, cached.fees, nil
+	}
+
 	// Create a transaction that spends the referenced contract.
 	msgTx := wire.NewMsgTx()
 	var totalIn uint64
@@ -4009,8 +4072,27 @@ func (dcr *ExchangeWallet) Redeem(ctx context.Context, form *asset.RedeemForm) (
 		}
 		msgTx.TxIn[i].SignatureScript = redeemSigScript
 	}
+	// Prepare return values for caching.
+	txHash := msgTx.CachedTxHash()
+	coinIDs := make([]dex.Bytes, 0, len(form.Redemptions))
+	for i := range form.Redemptions {
+		coinIDs = append(coinIDs, ToCoinID(txHash, uint32(i)))
+	}
+	outCoin := newOutput(txHash, 0, uint64(txOut.Value), wire.TxTreeRegular)
+
+	// Save to cache before broadcast for recovery on timeout/retry.
+	dcr.redeemCache.Put(cacheKey, &dcrRedeemCacheEntry{
+		signedTx:  msgTx,
+		coinIDs:   coinIDs,
+		outCoin:   outCoin,
+		fees:      fee,
+		totalIn:   totalIn,
+		feeRate:   feeRate,
+		timestamp: time.Now(),
+	})
+
 	// Send the transaction.
-	txHash, err := dcr.broadcastTx(ctx, msgTx, feeRate)
+	_, err = dcr.broadcastTx(ctx, msgTx, feeRate)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -4022,16 +4104,14 @@ func (dcr *ExchangeWallet) Redeem(ctx context.Context, form *asset.RedeemForm) (
 		Fees:   fee,
 	}, txHash, true)
 
-	coinIDs := make([]dex.Bytes, 0, len(form.Redemptions))
 	dcr.mempoolTxsMtx.Lock()
 	for i := range form.Redemptions {
-		coinIDs = append(coinIDs, ToCoinID(txHash, uint32(i)))
 		var secretHash [32]byte
 		copy(secretHash[:], form.Redemptions[i].Spends.SecretHash)
 		dcr.mempoolTxs[secretHash] = &mempoolTx{txHash: *txHash, firstSeen: time.Now(), txType: asset.CTRedeem}
 	}
 	dcr.mempoolTxsMtx.Unlock()
-	return coinIDs, newOutput(txHash, 0, uint64(txOut.Value), wire.TxTreeRegular), fee, nil
+	return coinIDs, outCoin, fee, nil
 }
 
 // SignCoinMessage signs the message with the private key associated with the
@@ -4679,6 +4759,26 @@ func (dcr *ExchangeWallet) fatalFindRedemptionsError(err error, contractOutpoint
 // was created. The client should store this information for persistence across
 // sessions.
 func (dcr *ExchangeWallet) Refund(ctx context.Context, coinID, contract dex.Bytes, feeRate uint64) (dex.Bytes, error) {
+	// Check broadcast cache for retry of a previously built transaction.
+	cacheKey := broadcast.RefundCacheKey(coinID)
+	if cached, ok := broadcast.RecoverFromCache(dcr.refundCache, cacheKey,
+		func(e *dcrRefundCacheEntry) error { _, err := dcr.broadcastTx(ctx, e.signedTx, e.feeRate); return err },
+		func(e *dcrRefundCacheEntry) bool {
+			_, err := dcr.wallet.GetTransaction(ctx, e.signedTx.CachedTxHash())
+			return err == nil
+		},
+		dcr.log, "Refund",
+	); ok {
+		refundHash := cached.signedTx.CachedTxHash()
+		dcr.addTxToHistory(&asset.WalletTransaction{
+			Type:   asset.Refund,
+			ID:     refundHash.String(),
+			Amount: cached.refundVal,
+			Fees:   cached.fees,
+		}, refundHash, true)
+		return cached.refundCoinID, nil
+	}
+
 	// Caller should provide a non-zero fee rate, so we could just do
 	// dcr.feeRateWithFallback(feeRate), but be permissive for now.
 	if feeRate == 0 {
@@ -4689,10 +4789,24 @@ func (dcr *ExchangeWallet) Refund(ctx context.Context, coinID, contract dex.Byte
 		return nil, fmt.Errorf("error creating refund tx: %w", err)
 	}
 
-	refundHash, err := dcr.broadcastTx(ctx, msgTx, feeRate)
+	refundHash := msgTx.CachedTxHash()
+	refundCoinID := ToCoinID(refundHash, 0)
+
+	// Save to cache before broadcast for recovery on timeout/retry.
+	dcr.refundCache.Put(cacheKey, &dcrRefundCacheEntry{
+		signedTx:     msgTx,
+		refundCoinID: refundCoinID,
+		refundVal:    refundVal,
+		fees:         fee,
+		feeRate:      feeRate,
+		timestamp:    time.Now(),
+	})
+
+	_, err = dcr.broadcastTx(ctx, msgTx, feeRate)
 	if err != nil {
 		return nil, err
 	}
+
 	dcr.addTxToHistory(&asset.WalletTransaction{
 		Type:   asset.Refund,
 		ID:     refundHash.String(),
@@ -4700,7 +4814,7 @@ func (dcr *ExchangeWallet) Refund(ctx context.Context, coinID, contract dex.Byte
 		Fees:   fee,
 	}, refundHash, true)
 
-	return ToCoinID(refundHash, 0), nil
+	return refundCoinID, nil
 }
 
 // refundTx crates and signs a contract's refund transaction. If refundAddr is
@@ -6554,6 +6668,41 @@ func (dcr *ExchangeWallet) CommittedTickets(tickets []*chainhash.Hash) ([]*chain
 	return dcr.wallet.CommittedTickets(dcr.ctx, tickets)
 }
 
+type dcrSwapCacheEntry struct {
+	signedTx  *wire.MsgTx
+	receipts  []asset.Receipt
+	change    *output
+	fees      uint64
+	totalOut  uint64
+	feeRate   uint64
+	timestamp time.Time
+}
+
+func (e *dcrSwapCacheEntry) Stamp() time.Time { return e.timestamp }
+
+type dcrRedeemCacheEntry struct {
+	signedTx  *wire.MsgTx
+	coinIDs   []dex.Bytes
+	outCoin   *output
+	fees      uint64
+	totalIn   uint64
+	feeRate   uint64
+	timestamp time.Time
+}
+
+func (e *dcrRedeemCacheEntry) Stamp() time.Time { return e.timestamp }
+
+type dcrRefundCacheEntry struct {
+	signedTx     *wire.MsgTx
+	refundCoinID dex.Bytes
+	refundVal    uint64
+	fees         uint64
+	feeRate      uint64
+	timestamp    time.Time
+}
+
+func (e *dcrRefundCacheEntry) Stamp() time.Time { return e.timestamp }
+
 func (dcr *ExchangeWallet) broadcastTx(ctx context.Context, signedTx *wire.MsgTx, feeRate uint64) (*chainhash.Hash, error) {
 	// Hard limit: Validate transaction size before broadcasting to prevent
 	// transactions from getting stuck in mempool.
@@ -6601,6 +6750,11 @@ func (dcr *ExchangeWallet) broadcastTx(ctx context.Context, signedTx *wire.MsgTx
 
 	txHash, err := dcr.wallet.SendRawTransaction(ctx, signedTx, false)
 	if err != nil {
+		if broadcast.IsAlreadyBroadcastErr(err) {
+			h := signedTx.CachedTxHash()
+			dcr.log.Warnf("Transaction %s appears to already be broadcast: %v", h, err)
+			return h, nil
+		}
 		return nil, fmt.Errorf("sendrawtx error: %w, raw tx: %x", err, dcr.wireBytes(signedTx))
 	}
 	checkHash := signedTx.TxHash()

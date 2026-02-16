@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/asset"
+	"decred.org/dcrdex/client/asset/broadcast"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
@@ -515,7 +516,24 @@ type assetWallet struct {
 	// status of pending txs if the tip has changed OR if the balance has
 	// changed.
 	pendingTxCheckBal *big.Int
+
+	// swapSeen tracks input keys that have been seen by Swap. A cache hit
+	// means this is a retry, and the AlreadyInitialized on-chain check
+	// should be performed. On the first call (cache miss), we skip the
+	// check to avoid unnecessary RPC calls.
+	swapSeen *broadcast.Cache[*ethSwapSeen]
+
+	// redeemSeen tracks redemption keys that have been seen by Redeem. A
+	// cache hit means this is a retry, and the on-chain SSRedeemed check
+	// should be performed.
+	redeemSeen *broadcast.Cache[*ethSwapSeen]
 }
+
+type ethSwapSeen struct {
+	timestamp time.Time
+}
+
+func (e *ethSwapSeen) Stamp() time.Time { return e.timestamp }
 
 // ETHWallet implements some Ethereum-specific methods.
 type ETHWallet struct {
@@ -830,6 +848,8 @@ func NewEVMWallet(cfg *EVMWalletConfig) (w *ETHWallet, err error) {
 		ui:                 dexeth.UnitInfo,
 		pendingTxCheckBal:  new(big.Int),
 		wi:                 cfg.WalletInfo,
+		swapSeen:           broadcast.NewCache[*ethSwapSeen](),
+		redeemSeen:         broadcast.NewCache[*ethSwapSeen](),
 	}
 
 	aw.wallets = map[uint32]*assetWallet{
@@ -1675,6 +1695,8 @@ func (w *ETHWallet) OpenTokenWallet(tokenCfg *asset.TokenConfig) (asset.Wallet, 
 		},
 		tokenAddr:         netToken.Address,
 		pendingTxCheckBal: new(big.Int),
+		swapSeen:          broadcast.NewCache[*ethSwapSeen](),
+		redeemSeen:        broadcast.NewCache[*ethSwapSeen](),
 	}
 
 	w.baseWallet.walletsMtx.Lock()
@@ -2603,6 +2625,52 @@ func (w *ETHWallet) Swap(ctx context.Context, swaps *asset.Swaps) ([]asset.Recei
 		return fail("Swap: failed to get network tip cap: %w", err)
 	}
 
+	// Only check on-chain state on retry (cache hit) to avoid unnecessary
+	// RPC calls on the first attempt.
+	cacheKey := broadcast.CoinIDsCacheKey(swaps.Inputs)
+	if _, seen := w.swapSeen.Get(cacheKey); seen {
+		allInitiated := true
+		for _, contract := range swaps.Contracts {
+			initiated, _, _, err := w.AlreadyInitialized(swaps.AssetVersion, contract)
+			if err != nil {
+				w.log.Warnf("AlreadyInitialized check error: %v", err)
+				allInitiated = false
+				break
+			}
+			if !initiated {
+				allInitiated = false
+				break
+			}
+		}
+		if allInitiated {
+			w.log.Infof("All %d swaps already initiated on-chain, returning cached results", n)
+			// The zero txHash is safe here because downstream swap
+			// confirmation uses contract state via the locator, not txHash.
+			zeroHash := common.Hash{}
+			receipts := make([]asset.Receipt, 0, n)
+			for _, swap := range swaps.Contracts {
+				receipts = append(receipts, &swapReceipt{
+					expiration:   time.Unix(int64(swap.LockTime), 0),
+					value:        swap.Value,
+					txHash:       zeroHash,
+					locator:      acToLocator(contractVer, swap, dexeth.GweiToWei(swap.Value), w.addr),
+					contractVer:  contractVer,
+					contractAddr: w.versionedContracts[contractVer].String(),
+				})
+			}
+			var change asset.Coin
+			if swaps.LockChange {
+				w.unlockFunds(swapVal+fees, initiationReserve)
+				change = w.createFundingCoin(reservedVal - swapVal - fees)
+			} else {
+				w.unlockFunds(reservedVal, initiationReserve)
+			}
+			// fees is an estimate (gasLimit * feeRate), not actual tx fees.
+			return receipts, change, fees, nil
+		}
+	}
+	w.swapSeen.Put(cacheKey, &ethSwapSeen{timestamp: time.Now()})
+
 	tx, err := w.initiate(ctx, w.assetID, swaps.Contracts, gasLimit, maxFeeRate, tipRate, contractVer)
 	if err != nil {
 		return fail("Swap: initiate error: %w", err)
@@ -2715,12 +2783,60 @@ func (w *TokenWallet) Swap(ctx context.Context, swaps *asset.Swaps) ([]asset.Rec
 		return fail("unable to find contract address for asset %d contract version %d", w.assetID, swaps.AssetVersion)
 	}
 
+	contractAddr := w.netToken.SwapContracts[contractVer].Address.String()
+
+	// Only check on-chain state on retry (cache hit) to avoid unnecessary
+	// RPC calls on the first attempt.
+	cacheKey := broadcast.CoinIDsCacheKey(swaps.Inputs)
+	if _, seen := w.swapSeen.Get(cacheKey); seen {
+		allInitiated := true
+		for _, contract := range swaps.Contracts {
+			initiated, _, _, err := w.AlreadyInitialized(swaps.AssetVersion, contract)
+			if err != nil {
+				w.log.Warnf("AlreadyInitialized check error: %v", err)
+				allInitiated = false
+				break
+			}
+			if !initiated {
+				allInitiated = false
+				break
+			}
+		}
+		if allInitiated {
+			w.log.Infof("All %d token swaps already initiated on-chain, returning cached results", n)
+			// The zero txHash is safe here because downstream swap
+			// confirmation uses contract state via the locator, not txHash.
+			zeroHash := common.Hash{}
+			receipts := make([]asset.Receipt, 0, n)
+			for _, swap := range swaps.Contracts {
+				receipts = append(receipts, &swapReceipt{
+					expiration:   time.Unix(int64(swap.LockTime), 0),
+					value:        swap.Value,
+					txHash:       zeroHash,
+					locator:      acToLocator(contractVer, swap, w.evmify(swap.Value), w.addr),
+					contractVer:  contractVer,
+					contractAddr: contractAddr,
+				})
+			}
+			var change asset.Coin
+			if swaps.LockChange {
+				w.unlockFunds(swapVal, initiationReserve)
+				w.parent.unlockFunds(fees, initiationReserve)
+				change = w.createTokenFundingCoin(reservedVal-swapVal, reservedParent-fees)
+			} else {
+				w.unlockFunds(reservedVal, initiationReserve)
+				w.parent.unlockFunds(reservedParent, initiationReserve)
+			}
+			// fees is an estimate (gasLimit * feeRate), not actual tx fees.
+			return receipts, change, fees, nil
+		}
+	}
+	w.swapSeen.Put(cacheKey, &ethSwapSeen{timestamp: time.Now()})
+
 	tx, err := w.initiate(ctx, w.assetID, swaps.Contracts, gasLimit, maxFeeRate, tipRate, contractVer)
 	if err != nil {
 		return fail("Swap: initiate error: %w", err)
 	}
-
-	contractAddr := w.netToken.SwapContracts[contractVer].Address.String()
 
 	txHash := tx.Hash()
 	receipts := make([]asset.Receipt, 0, n)
@@ -3063,6 +3179,56 @@ func (w *assetWallet) Redeem(ctx context.Context, form *asset.RedeemForm, feeWal
 	if n == 0 {
 		return fail(errors.New("Redeem: must be called with at least 1 redemption"))
 	}
+
+	// Only check on-chain state on retry (cache hit) to avoid unnecessary
+	// RPC calls on the first attempt.
+	redeemCacheKey := broadcast.RedeemCacheKey(form.Redemptions)
+	if _, seen := w.redeemSeen.Get(redeemCacheKey); seen {
+		allRedeemed := true
+		var contractVer uint32
+		var redeemedValue uint64
+		for i, redemption := range form.Redemptions {
+			ver, locator, err := dexeth.DecodeContractData(redemption.Spends.Contract)
+			if err != nil {
+				w.log.Warnf("Redeem recovery: invalid contract data: %v", err)
+				allRedeemed = false
+				break
+			}
+			if i == 0 {
+				contractVer = ver
+			}
+			status, vector, err := w.statusAndVector(ctx, locator, ver)
+			if err != nil {
+				w.log.Warnf("Redeem recovery: status check error: %v", err)
+				allRedeemed = false
+				break
+			}
+			if status.Step != dexeth.SSRedeemed {
+				allRedeemed = false
+				break
+			}
+			redeemedValue += w.atomize(vector.Value)
+		}
+		if allRedeemed {
+			w.log.Infof("All %d redemptions already redeemed on-chain, returning cached results", n)
+			zeroHash := common.Hash{}
+			txs := make([]dex.Bytes, n)
+			for i := range txs {
+				txs[i] = zeroHash[:]
+			}
+			g := w.gases(contractVer)
+			var fees uint64
+			if g != nil {
+				fees = g.RedeemN(int(n)) * form.FeeSuggestion
+			}
+			outputCoin := &coin{
+				txHash: zeroHash,
+				value:  redeemedValue,
+			}
+			return txs, outputCoin, fees, nil
+		}
+	}
+	w.redeemSeen.Put(redeemCacheKey, &ethSwapSeen{timestamp: time.Now()})
 
 	contractVer, redeemedValue, err := w.validateRedemptions(ctx, form.Redemptions)
 	if err != nil {
