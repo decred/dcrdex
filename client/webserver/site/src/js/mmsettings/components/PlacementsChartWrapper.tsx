@@ -6,7 +6,7 @@ import { OrderPlacement } from '../../registry'
 const PlacementsChartWrapper: React.FC = () => {
   const chartRef = React.useRef<HTMLDivElement>(null)
   const chartInstanceRef = React.useRef<PlacementsChart | null>(null)
-  const { botConfig, dexMarket, quickPlacements } = useBotConfigState()
+  const { botConfig, dexMarket, quickPlacements, fiatRatesMap } = useBotConfigState()
 
   React.useEffect(() => {
     if (chartRef.current && !chartInstanceRef.current) {
@@ -49,7 +49,7 @@ const PlacementsChartWrapper: React.FC = () => {
       const chartConfig: PlacementChartConfig = {
         cexName: botConfig.cexName,
         botType: isBasicMM ? 'basicMM' : isArbMM ? 'arbMM' : 'basicArb',
-        baseFiatRate: 1, // TODO: We'll use 1 for now, could be enhanced to use actual fiat rate
+        baseFiatRate: fiatRatesMap[dexMarket.baseID] || 1,
         dict: {
           profit,
           buyPlacements,
@@ -59,7 +59,7 @@ const PlacementsChartWrapper: React.FC = () => {
 
       chartInstanceRef.current.setMarket(chartConfig)
     }
-  }, [botConfig, dexMarket, quickPlacements])
+  }, [botConfig, dexMarket, quickPlacements, fiatRatesMap])
 
   return (
       <div

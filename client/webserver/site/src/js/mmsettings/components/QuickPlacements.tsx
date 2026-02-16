@@ -57,6 +57,7 @@ const LotsOrUsdSelector: React.FC = () => {
     const convFactor = baseAsset.unitInfo.conventional.conversionFactor
     const convLotSize = lotSize / convFactor
     const usdPerLot = USD_RATE * convLotSize
+    if (usdPerLot === 0 || quickPlacements.priceLevelsPerSide === 0) return 1
     return Math.floor(usd / usdPerLot / quickPlacements.priceLevelsPerSide)
   }
 

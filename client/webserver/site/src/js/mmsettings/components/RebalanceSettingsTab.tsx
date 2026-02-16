@@ -52,7 +52,7 @@ const MinTransferControl: React.FC<MinTransferControlProps> = ({
   // Get asset ID and calculate precision from conversion factor
   const assetID = asset === 'base' ? dexMarket.baseID : dexMarket.quoteID
   const conversionFactor = app().unitInfo(assetID).conventional.conversionFactor
-  const precision = Math.log10(conversionFactor)
+  const precision = Math.round(Math.log10(conversionFactor))
 
   // Calculate max as total allocated amount on DEX + CEX
   const cexAssetID = asset === 'base' ? botConfig.cexBaseID : botConfig.cexQuoteID

@@ -51,7 +51,7 @@ const ManualBalanceEntry: React.FC<ManualBalanceEntryProps> = ({
         <NumberInput
           min={-runningBotAvailable / asset.unitInfo.conventional.conversionFactor}
           max={availableBalance / asset.unitInfo.conventional.conversionFactor}
-          precision={Math.log10(asset.unitInfo.conventional.conversionFactor)}
+          precision={Math.round(Math.log10(asset.unitInfo.conventional.conversionFactor))}
           value={currentValue / asset.unitInfo.conventional.conversionFactor}
           onChange={(amount : number) => dispatch({
             type: 'UPDATE_MANUAL_ALLOCATION',
@@ -72,7 +72,7 @@ const ManualAllocationView: React.FC = () => {
 
   // Calculate column class based on number of items
   const getColumnClass = (itemCount: number) => {
-    return `col-${Math.floor(24 / itemCount)}`
+    return `col-${Math.floor(12 / itemCount)}`
   }
 
   return (
