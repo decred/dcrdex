@@ -816,7 +816,7 @@ func (w *zecWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uint6
 				return nil, nil, 0, fmt.Errorf("transparentAddress (1) error: %w", err)
 			}
 
-			splitTx, _, err := w.signTxAndAddChange(baseTx, changeAddr, sum, splitOutputVal, transparentSplitFees)
+			splitTx, _, err := w.signTxAndAddChange(w.ctx, baseTx, changeAddr, sum, splitOutputVal, transparentSplitFees)
 			if err != nil {
 				return nil, nil, 0, fmt.Errorf("signTxAndAddChange error: %v", err)
 			}
@@ -863,7 +863,7 @@ func (w *zecWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uint6
 }
 
 // Redeem sends the redemption transaction, completing the atomic swap.
-func (w *zecWallet) Redeem(_ context.Context, form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
+func (w *zecWallet) Redeem(ctx context.Context, form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
 	// Create a transaction that spends the referenced contract.
 	tx := dexzec.NewTxFromMsgTx(wire.NewMsgTx(dexzec.VersionNU5), dexzec.MaxExpiryHeight)
 	var totalIn uint64
@@ -956,7 +956,7 @@ func (w *zecWallet) Redeem(_ context.Context, form *asset.RedeemForm) ([]dex.Byt
 	}
 
 	// Send the transaction.
-	txHash, err := sendRawTransaction(w, tx)
+	txHash, err := w.broadcastTx(ctx, tx)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("error sending tx: %w", err)
 	}
@@ -1293,7 +1293,7 @@ func (w *zecWallet) addInputsToTx(tx *dexzec.Tx, coins []*btc.Output) (uint64, [
 
 // signTxAndAddChange signs the passed tx and adds a change output if the change
 // wouldn't be dust. Returns but does NOT broadcast the signed tx.
-func (w *zecWallet) signTxAndAddChange(baseTx *dexzec.Tx, addr btcutil.Address, totalIn, totalOut, fees uint64) (*dexzec.Tx, *btc.Output, error) {
+func (w *zecWallet) signTxAndAddChange(ctx context.Context, baseTx *dexzec.Tx, addr btcutil.Address, totalIn, totalOut, fees uint64) (*dexzec.Tx, *btc.Output, error) {
 
 	makeErr := func(s string, a ...any) (*dexzec.Tx, *btc.Output, error) {
 		return nil, nil, fmt.Errorf(s, a...)
@@ -1944,7 +1944,7 @@ func (w *zecWallet) recyclableAddress() (string, error) {
 	return transparentAddressString(w)
 }
 
-func (w *zecWallet) Refund(_ context.Context, coinID, contract dex.Bytes, feeRate uint64) (dex.Bytes, error) {
+func (w *zecWallet) Refund(ctx context.Context, coinID, contract dex.Bytes, feeRate uint64) (dex.Bytes, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, err
@@ -1965,12 +1965,12 @@ func (w *zecWallet) Refund(_ context.Context, coinID, contract dex.Bytes, feeRat
 	if utxo == nil {
 		return nil, asset.CoinNotFoundError // spent
 	}
-	msgTx, err := w.refundTx(txHash, vout, contract, uint64(utxo.Value), nil, feeRate)
+	msgTx, err := w.refundTx(ctx, txHash, vout, contract, uint64(utxo.Value), nil, feeRate)
 	if err != nil {
 		return nil, fmt.Errorf("error creating refund tx: %w", err)
 	}
 
-	refundHash, err := w.broadcastTx(dexzec.NewTxFromMsgTx(msgTx, dexzec.MaxExpiryHeight))
+	refundHash, err := w.broadcastTx(ctx, dexzec.NewTxFromMsgTx(msgTx, dexzec.MaxExpiryHeight))
 	if err != nil {
 		return nil, fmt.Errorf("broadcastTx: %w", err)
 	}
@@ -1986,7 +1986,12 @@ func (w *zecWallet) Refund(_ context.Context, coinID, contract dex.Bytes, feeRat
 	return btc.ToCoinID(refundHash, 0), nil
 }
 
-func (w *zecWallet) broadcastTx(tx *dexzec.Tx) (*chainhash.Hash, error) {
+// TODO: The ctx parameter is accepted but not threaded through to the
+// underlying RPC calls (sendRawTransaction, signTxByRPC, dumpPrivKey, etc.)
+// because the ZEC RPC infrastructure (CallRPC) doesn't support context yet.
+// The wallet call timeout set in core will not apply to ZEC operations until
+// CallRPC is updated to accept and respect a context.Context.
+func (w *zecWallet) broadcastTx(ctx context.Context, tx *dexzec.Tx) (*chainhash.Hash, error) {
 	rawTx := func() string {
 		b, err := tx.Bytes()
 		if err != nil {
@@ -2006,7 +2011,7 @@ func (w *zecWallet) broadcastTx(tx *dexzec.Tx) (*chainhash.Hash, error) {
 	return txHash, nil
 }
 
-func (w *zecWallet) refundTx(txHash *chainhash.Hash, vout uint32, contract dex.Bytes, val uint64, refundAddr btcutil.Address, fees uint64) (*wire.MsgTx, error) {
+func (w *zecWallet) refundTx(ctx context.Context, txHash *chainhash.Hash, vout uint32, contract dex.Bytes, val uint64, refundAddr btcutil.Address, fees uint64) (*wire.MsgTx, error) {
 	sender, _, lockTime, _, err := dexbtc.ExtractSwapDetails(contract, false, w.btcParams)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting swap addresses: %w", err)
@@ -2046,7 +2051,7 @@ func (w *zecWallet) refundTx(txHash *chainhash.Hash, vout uint32, contract dex.B
 		return nil, fmt.Errorf("error constructing p2sh script: %w", err)
 	}
 
-	refundSig, refundPubKey, err := w.createSig(msgTx, 0, contract, sender, []int64{int64(val)}, [][]byte{prevScript})
+	refundSig, refundPubKey, err := w.createSig(ctx, msgTx, 0, contract, sender, []int64{int64(val)}, [][]byte{prevScript})
 	if err != nil {
 		return nil, fmt.Errorf("createSig: %w", err)
 	}
@@ -2057,7 +2062,7 @@ func (w *zecWallet) refundTx(txHash *chainhash.Hash, vout uint32, contract dex.B
 	return msgTx, nil
 }
 
-func (w *zecWallet) createSig(msgTx *wire.MsgTx, idx int, pkScript []byte, addr btcutil.Address, vals []int64, prevScripts [][]byte) (sig, pubkey []byte, err error) {
+func (w *zecWallet) createSig(ctx context.Context, msgTx *wire.MsgTx, idx int, pkScript []byte, addr btcutil.Address, vals []int64, prevScripts [][]byte) (sig, pubkey []byte, err error) {
 	addrStr, err := dexzec.EncodeAddress(addr, w.addrParams)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error encoding address: %w", err)
@@ -2311,12 +2316,12 @@ func (w *zecWallet) send(addrStr string, val uint64, subtract bool) (*chainhash.
 		return nil, 0, 0, fmt.Errorf("error creating change address: %w", err)
 	}
 
-	signedTx, _, err := w.signTxAndAddChange(fundedTx, changeAddr, totalIn, val, fees)
+	signedTx, _, err := w.signTxAndAddChange(w.ctx, fundedTx, changeAddr, totalIn, val, fees)
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("signTxAndAddChange error: %v", err)
 	}
 
-	txHash, err := w.broadcastTx(signedTx)
+	txHash, err := w.broadcastTx(w.ctx, signedTx)
 	if err != nil {
 		return nil, 0, 0, err
 	}
@@ -2333,12 +2338,12 @@ func (w *zecWallet) sendWithReturn(baseTx *dexzec.Tx, addr btcutil.Address, tota
 
 	fees := dexzec.TxFeesZIP317(txInsSize, txOutsSize, 0, 0, 0, 0)
 
-	signedTx, _, err := w.signTxAndAddChange(baseTx, addr, totalIn, totalOut, fees)
+	signedTx, _, err := w.signTxAndAddChange(w.ctx, baseTx, addr, totalIn, totalOut, fees)
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = w.broadcastTx(signedTx)
+	_, err = w.broadcastTx(w.ctx, signedTx)
 	return signedTx, err
 }
 
@@ -2366,7 +2371,7 @@ func (w *zecWallet) SignCoinMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, si
 	return
 }
 
-func (w *zecWallet) Swap(_ context.Context, swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
+func (w *zecWallet) Swap(ctx context.Context, swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
 	contracts := make([][]byte, 0, len(swaps.Contracts))
 	var totalOut uint64
 	// Start with an empty MsgTx.
@@ -2460,7 +2465,7 @@ func (w *zecWallet) Swap(_ context.Context, swaps *asset.Swaps) ([]asset.Receipt
 
 	// Sign, add change, but don't send the transaction yet until
 	// the individual swap refund txs are prepared and signed.
-	msgTx, change, err := w.signTxAndAddChange(baseTx, changeAddr, totalIn, totalOut, fees)
+	msgTx, change, err := w.signTxAndAddChange(ctx, baseTx, changeAddr, totalIn, totalOut, fees)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -2471,7 +2476,7 @@ func (w *zecWallet) Swap(_ context.Context, swaps *asset.Swaps) ([]asset.Receipt
 	for i, contract := range swaps.Contracts {
 		output := btc.NewOutput(&txHash, uint32(i), contract.Value)
 		refundAddr := refundAddrs[i]
-		signedRefundTx, err := w.refundTx(&output.Pt.TxHash, output.Pt.Vout, contracts[i], contract.Value, refundAddr, fees)
+		signedRefundTx, err := w.refundTx(ctx, &output.Pt.TxHash, output.Pt.Vout, contracts[i], contract.Value, refundAddr, fees)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error creating refund tx: %w", err)
 		}
@@ -2489,7 +2494,7 @@ func (w *zecWallet) Swap(_ context.Context, swaps *asset.Swaps) ([]asset.Receipt
 	}
 
 	// Refund txs prepared and signed. Can now broadcast the swap(s).
-	_, err = w.broadcastTx(msgTx)
+	_, err = w.broadcastTx(ctx, msgTx)
 	if err != nil {
 		return nil, nil, 0, err
 	}

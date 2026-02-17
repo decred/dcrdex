@@ -2546,7 +2546,7 @@ var _ asset.Receipt = (*swapReceipt)(nil)
 // Swap sends the swaps in a single transaction. The fees used returned are the
 // max fees that will possibly be used, since in ethereum with EIP-1559 we cannot
 // know exactly how much fees will be used.
-func (w *ETHWallet) Swap(_ context.Context, swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
+func (w *ETHWallet) Swap(ctx context.Context, swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
 	if swaps.FeeRate == 0 {
 		return nil, nil, 0, fmt.Errorf("cannot send swap with with zero fee rate")
 	}
@@ -2598,12 +2598,12 @@ func (w *ETHWallet) Swap(_ context.Context, swaps *asset.Swaps) ([]asset.Receipt
 	}
 
 	maxFeeRate := dexeth.GweiToWei(swaps.FeeRate)
-	_, tipRate, err := w.currentNetworkFees(w.ctx)
+	_, tipRate, err := w.currentNetworkFees(ctx)
 	if err != nil {
 		return fail("Swap: failed to get network tip cap: %w", err)
 	}
 
-	tx, err := w.initiate(w.ctx, w.assetID, swaps.Contracts, gasLimit, maxFeeRate, tipRate, contractVer)
+	tx, err := w.initiate(ctx, w.assetID, swaps.Contracts, gasLimit, maxFeeRate, tipRate, contractVer)
 	if err != nil {
 		return fail("Swap: initiate error: %w", err)
 	}
@@ -2655,7 +2655,7 @@ func acToLocator(contractVer uint32, swap *asset.Contract, evmValue *big.Int, fr
 // Swap sends the swaps in a single transaction. The fees used returned are the
 // max fees that will possibly be used, since in ethereum with EIP-1559 we cannot
 // know exactly how much fees will be used.
-func (w *TokenWallet) Swap(_ context.Context, swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
+func (w *TokenWallet) Swap(ctx context.Context, swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
 	if swaps.FeeRate == 0 {
 		return nil, nil, 0, fmt.Errorf("cannot send swap with with zero fee rate")
 	}
@@ -2706,7 +2706,7 @@ func (w *TokenWallet) Swap(_ context.Context, swaps *asset.Swaps) ([]asset.Recei
 	}
 
 	maxFeeRate := dexeth.GweiToWei(swaps.FeeRate)
-	_, tipRate, err := w.currentNetworkFees(w.ctx)
+	_, tipRate, err := w.currentNetworkFees(ctx)
 	if err != nil {
 		return fail("Swap: failed to get network tip cap: %w", err)
 	}
@@ -2715,7 +2715,7 @@ func (w *TokenWallet) Swap(_ context.Context, swaps *asset.Swaps) ([]asset.Recei
 		return fail("unable to find contract address for asset %d contract version %d", w.assetID, swaps.AssetVersion)
 	}
 
-	tx, err := w.initiate(w.ctx, w.assetID, swaps.Contracts, gasLimit, maxFeeRate, tipRate, contractVer)
+	tx, err := w.initiate(ctx, w.assetID, swaps.Contracts, gasLimit, maxFeeRate, tipRate, contractVer)
 	if err != nil {
 		return fail("Swap: initiate error: %w", err)
 	}
@@ -2766,7 +2766,7 @@ func precalculatedGaslessRedeemGasEstimates(numRedemptions uint64, gases *dexeth
 }
 
 // generateUserOp generates a user operation to redeem some swaps.
-func (w *ETHWallet) generateUserOp(nonce *big.Int, bundler bundler, redemptions []*asset.Redemption, swapContractVersion uint32, estimateGasUsingBundler bool) (*userOp, []byte, *big.Int, error) {
+func (w *ETHWallet) generateUserOp(ctx context.Context, nonce *big.Int, bundler bundler, redemptions []*asset.Redemption, swapContractVersion uint32, estimateGasUsingBundler bool) (*userOp, []byte, *big.Int, error) {
 	swapContractAddress, exists := w.versionedContracts[swapContractVersion]
 	if !exists {
 		return nil, nil, nil, fmt.Errorf("contract address for version %d not found", swapContractVersion)
@@ -2785,7 +2785,7 @@ func (w *ETHWallet) generateUserOp(nonce *big.Int, bundler bundler, redemptions 
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("error getting calldata: %v", err)
 	}
-	maxFeeRateStr, maxTipRateStr, err := bundler.getGasPrice(w.ctx)
+	maxFeeRateStr, maxTipRateStr, err := bundler.getGasPrice(ctx)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("error getting max fee rate: %v", err)
 	}
@@ -2816,7 +2816,7 @@ func (w *ETHWallet) generateUserOp(nonce *big.Int, bundler bundler, redemptions 
 	// precalculated values.
 	var gasEstimate *estimateBundlerGasResult
 	if estimateGasUsingBundler {
-		gasEstimate, err = bundler.estimateGas(w.ctx, op)
+		gasEstimate, err = bundler.estimateGas(ctx, op)
 		if err != nil {
 			w.log.Errorf("bundler gas estimation failed, using precalculated values: %v", err)
 			gasEstimate = precalculatedGaslessRedeemGasEstimates(uint64(len(redemptions)), gases)
@@ -2854,12 +2854,12 @@ func (w *ETHWallet) generateUserOp(nonce *big.Int, bundler bundler, redemptions 
 
 // gaslessRedeem creates a user operation to redeem swaps and sends it to the
 // bundler.
-func (w *ETHWallet) gaslessRedeem(form *asset.RedeemForm, bundler bundler) ([]dex.Bytes, asset.Coin, uint64, error) {
+func (w *ETHWallet) gaslessRedeem(ctx context.Context, form *asset.RedeemForm, bundler bundler) ([]dex.Bytes, asset.Coin, uint64, error) {
 	fail := func(err error) ([]dex.Bytes, asset.Coin, uint64, error) {
 		return nil, nil, 0, err
 	}
 
-	contractVer, redeemedValue, err := w.validateRedemptions(form.Redemptions)
+	contractVer, redeemedValue, err := w.validateRedemptions(ctx, form.Redemptions)
 	if err != nil {
 		return fail(fmt.Errorf("Redeem: failed to validate redemptions: %w", err))
 	}
@@ -2884,24 +2884,24 @@ func (w *ETHWallet) gaslessRedeem(form *asset.RedeemForm, bundler bundler) ([]de
 		// an "AA40 over verificationGasLimit" when using the bundler's gas
 		// estimate. This is clearly a bug, so it it fails, we try again using
 		// the precalculated values.
-		op, callData, maxFee, err = w.generateUserOp(nonce, bundler, form.Redemptions, contractVer, true)
+		op, callData, maxFee, err = w.generateUserOp(ctx, nonce, bundler, form.Redemptions, contractVer, true)
 		if err != nil {
 			return fmt.Errorf("error generating user operation: %v", err)
 		}
 
-		userOpHash, err = bundler.sendUserOp(w.ctx, op)
+		userOpHash, err = bundler.sendUserOp(ctx, op)
 		if err == nil {
 			return nil
 		}
 
 		w.log.Errorf("Error sending user operation with bundler's gas estimates, trying again with precalculated values: %v", err)
 
-		op, callData, maxFee, err = w.generateUserOp(nonce, bundler, form.Redemptions, contractVer, false)
+		op, callData, maxFee, err = w.generateUserOp(ctx, nonce, bundler, form.Redemptions, contractVer, false)
 		if err != nil {
 			return fmt.Errorf("error generating user operation: %v", err)
 		}
 
-		userOpHash, err = bundler.sendUserOp(w.ctx, op)
+		userOpHash, err = bundler.sendUserOp(ctx, op)
 		return err
 	})
 	if err != nil {
@@ -2931,8 +2931,8 @@ func (w *ETHWallet) gaslessRedeem(form *asset.RedeemForm, bundler bundler) ([]de
 // conceptually a batch of redeems could be processed for any number of
 // different contract addresses with multiple transactions. (buck: what would
 // the difference from calling Redeem repeatedly?)
-func (w *ETHWallet) Redeem(_ context.Context, form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
-	return w.assetWallet.Redeem(form, nil, nil)
+func (w *ETHWallet) Redeem(ctx context.Context, form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
+	return w.assetWallet.Redeem(ctx, form, nil, nil)
 }
 
 // GaslessRedeem redeems swaps by using a EIP-4337 bundler in order to be able
@@ -2941,7 +2941,7 @@ func (w *ETHWallet) Redeem(_ context.Context, form *asset.RedeemForm) ([]dex.Byt
 // If the funds are insufficient, it will send a user operation to the bundler.
 // Submitted will be true if a regular transaction was sent to the network, and
 // false if a user operation was sent to the bundler.
-func (w *ETHWallet) GaslessRedeem(_ context.Context, form *asset.RedeemForm) (ins []dex.Bytes, out asset.Coin, fees uint64, submitted bool, err error) {
+func (w *ETHWallet) GaslessRedeem(ctx context.Context, form *asset.RedeemForm) (ins []dex.Bytes, out asset.Coin, fees uint64, submitted bool, err error) {
 	fail := func(err error) ([]dex.Bytes, asset.Coin, uint64, bool, error) {
 		return nil, nil, 0, false, err
 	}
@@ -2951,7 +2951,7 @@ func (w *ETHWallet) GaslessRedeem(_ context.Context, form *asset.RedeemForm) (in
 	if numRedemptions == 0 {
 		return fail(errors.New("GaslessRedeem must be called with at least 1 redemption"))
 	}
-	maxFeeRate, _, err := w.recommendedMaxFeeRate(w.ctx)
+	maxFeeRate, _, err := w.recommendedMaxFeeRate(ctx)
 	if err != nil {
 		return nil, nil, 0, false, err
 	}
@@ -2977,7 +2977,7 @@ func (w *ETHWallet) GaslessRedeem(_ context.Context, form *asset.RedeemForm) (in
 		if bundler == nil {
 			return fail(fmt.Errorf("bundler not configured"))
 		}
-		txs, coin, fees, err := w.gaslessRedeem(form, bundler)
+		txs, coin, fees, err := w.gaslessRedeem(ctx, form, bundler)
 		return txs, coin, fees, false, err
 	}
 	if err != nil {
@@ -2987,7 +2987,7 @@ func (w *ETHWallet) GaslessRedeem(_ context.Context, form *asset.RedeemForm) (in
 
 	// We did have enough funds so we can pay for the redemption
 	// ourselves.
-	txs, coin, fees, err := w.assetWallet.Redeem(form, nil, nil)
+	txs, coin, fees, err := w.assetWallet.Redeem(ctx, form, nil, nil)
 	if err != nil {
 		return nil, nil, 0, false, err
 	}
@@ -2997,13 +2997,13 @@ func (w *ETHWallet) GaslessRedeem(_ context.Context, form *asset.RedeemForm) (in
 
 // Redeem sends the redemption transaction, which may contain more than one
 // redemption.
-func (w *TokenWallet) Redeem(_ context.Context, form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
-	return w.assetWallet.Redeem(form, w.parent, nil)
+func (w *TokenWallet) Redeem(ctx context.Context, form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
+	return w.assetWallet.Redeem(ctx, form, w.parent, nil)
 }
 
 // validateRedemptions checks that all redemptions use the same contract version
 // and that they are all redeemable.
-func (w *assetWallet) validateRedemptions(redemptions []*asset.Redemption) (contractVer uint32, redeemedValue uint64, err error) {
+func (w *assetWallet) validateRedemptions(ctx context.Context, redemptions []*asset.Redemption) (contractVer uint32, redeemedValue uint64, err error) {
 	for i, redemption := range redemptions {
 		// NOTE: redemption.Spends.SecretHash is a dup of the hash extracted
 		// from redemption.Spends.Contract. Even for scriptable UTXO assets, the
@@ -3027,7 +3027,7 @@ func (w *assetWallet) validateRedemptions(redemptions []*asset.Redemption) (cont
 		// are maker (the swap initiator).
 		var secret [32]byte
 		copy(secret[:], redemption.Secret)
-		redeemable, err := w.isRedeemable(locator, secret, ver)
+		redeemable, err := w.isRedeemable(ctx, locator, secret, ver)
 		if err != nil {
 			return 0, 0, fmt.Errorf("Redeem: failed to check if swap is redeemable: %w", err)
 		}
@@ -3036,7 +3036,7 @@ func (w *assetWallet) validateRedemptions(redemptions []*asset.Redemption) (cont
 				ver, locator, secret)
 		}
 
-		status, vector, err := w.statusAndVector(w.ctx, locator, contractVer)
+		status, vector, err := w.statusAndVector(ctx, locator, contractVer)
 		if err != nil {
 			return 0, 0, fmt.Errorf("error finding swap state: %w", err)
 		}
@@ -3053,7 +3053,7 @@ func (w *assetWallet) validateRedemptions(redemptions []*asset.Redemption) (cont
 // redemption. The nonceOverride parameter is used to specify a specific nonce
 // to be used for the redemption transaction. It is needed when resubmitting a
 // redemption with a fee too low to be mined.
-func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, nonceOverride *uint64) ([]dex.Bytes, asset.Coin, uint64, error) {
+func (w *assetWallet) Redeem(ctx context.Context, form *asset.RedeemForm, feeWallet *assetWallet, nonceOverride *uint64) ([]dex.Bytes, asset.Coin, uint64, error) {
 	fail := func(err error) ([]dex.Bytes, asset.Coin, uint64, error) {
 		return nil, nil, 0, err
 	}
@@ -3064,7 +3064,7 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 		return fail(errors.New("Redeem: must be called with at least 1 redemption"))
 	}
 
-	contractVer, redeemedValue, err := w.validateRedemptions(form.Redemptions)
+	contractVer, redeemedValue, err := w.validateRedemptions(ctx, form.Redemptions)
 	if err != nil {
 		return fail(fmt.Errorf("Redeem: failed to validate redemptions: %w", err))
 	}
@@ -3114,7 +3114,7 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 	// If the base fee is higher than the FeeSuggestion we attempt to increase
 	// the gasFeeCap to 2*baseFee. If we don't have enough funds, we use the
 	// funds we have available.
-	baseFee, tipRate, err := w.currentNetworkFees(w.ctx)
+	baseFee, tipRate, err := w.currentNetworkFees(ctx)
 	if err != nil {
 		return fail(fmt.Errorf("Error getting net fee state: %w", err))
 	}
@@ -3129,7 +3129,7 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 		w.log.Warnf("base fee %d > server max fee rate %d. using %d as gas fee cap for redemption", baseFeeGwei, form.FeeSuggestion, gasFeeCap)
 	}
 
-	tx, err := w.redeem(w.ctx, form.Redemptions, gasFeeCap, tipRate, gasLimit, contractVer)
+	tx, err := w.redeem(ctx, form.Redemptions, gasFeeCap, tipRate, gasLimit, contractVer)
 	if err != nil {
 		return fail(fmt.Errorf("Redeem: redeem error: %w", err))
 	}
@@ -4522,13 +4522,13 @@ func (w *assetWallet) findSecret(locator []byte, contractVer uint32) ([]byte, st
 
 // Refund refunds a contract. This can only be used after the time lock has
 // expired.
-func (w *assetWallet) Refund(_ context.Context, _, contract dex.Bytes, feeRate uint64) (dex.Bytes, error) {
+func (w *assetWallet) Refund(ctx context.Context, _, contract dex.Bytes, feeRate uint64) (dex.Bytes, error) {
 	contractVer, locator, err := dexeth.DecodeContractData(contract)
 	if err != nil {
 		return nil, fmt.Errorf("Refund: failed to decode contract: %w", err)
 	}
 
-	status, vector, err := w.statusAndVector(w.ctx, locator, contractVer)
+	status, vector, err := w.statusAndVector(ctx, locator, contractVer)
 	if err != nil {
 		return nil, err
 	}
@@ -4548,7 +4548,7 @@ func (w *assetWallet) Refund(_ context.Context, _, contract dex.Bytes, feeRate u
 		return nil, asset.CoinNotFoundError // so caller knows to FindRedemption
 	}
 
-	refundable, err := w.isRefundable(locator, contractVer)
+	refundable, err := w.isRefundable(ctx, locator, contractVer)
 	if err != nil {
 		return nil, fmt.Errorf("Refund: failed to check isRefundable: %w", err)
 	}
@@ -4557,12 +4557,12 @@ func (w *assetWallet) Refund(_ context.Context, _, contract dex.Bytes, feeRate u
 	}
 
 	maxFeeRate := dexeth.GweiToWei(feeRate)
-	_, tipRate, err := w.currentNetworkFees(w.ctx)
+	_, tipRate, err := w.currentNetworkFees(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("Refund: failed to get network tip cap: %w", err)
 	}
 
-	tx, err := w.refund(locator, w.atomize(vector.Value), maxFeeRate, tipRate, contractVer)
+	tx, err := w.refund(ctx, locator, w.atomize(vector.Value), maxFeeRate, tipRate, contractVer)
 	if err != nil {
 		return nil, fmt.Errorf("Refund: failed to call refund: %w", err)
 	}
@@ -6259,7 +6259,7 @@ func (w *assetWallet) redeem(
 // refund refunds a swap contract using the account controlled by the wallet.
 // Any on-chain failure, such as the locktime not being past, will not cause
 // this to error.
-func (w *assetWallet) refund(locator []byte, amt uint64, maxFeeRate, tipRate *big.Int, contractVer uint32) (*types.Transaction, error) {
+func (w *assetWallet) refund(ctx context.Context, locator []byte, amt uint64, maxFeeRate, tipRate *big.Int, contractVer uint32) (*types.Transaction, error) {
 	gas := w.gases(contractVer)
 	if gas == nil {
 		return nil, fmt.Errorf("no gas table for asset %d, version %d", w.assetID, contractVer)
@@ -6271,8 +6271,8 @@ func (w *assetWallet) refund(locator []byte, amt uint64, maxFeeRate, tipRate *bi
 		amt:    amt,
 	}
 
-	return res.tx, w.withNonce(w.ctx, func(nonce *big.Int) (*genTxResult, error) {
-		txOpts, err := w.node.txOpts(w.ctx, 0, gas.Refund, maxFeeRate, tipRate, nonce)
+	return res.tx, w.withNonce(ctx, func(nonce *big.Int) (*genTxResult, error) {
+		txOpts, err := w.node.txOpts(ctx, 0, gas.Refund, maxFeeRate, tipRate, nonce)
 		if err != nil {
 			return nil, err
 		}
@@ -6284,8 +6284,8 @@ func (w *assetWallet) refund(locator []byte, amt uint64, maxFeeRate, tipRate *bi
 }
 
 // isRedeemable checks if the swap identified by secretHash is redeemable using secret.
-func (w *assetWallet) isRedeemable(locator []byte, secret [32]byte, contractVer uint32) (redeemable bool, err error) {
-	status, err := w.status(w.ctx, locator, contractVer)
+func (w *assetWallet) isRedeemable(ctx context.Context, locator []byte, secret [32]byte, contractVer uint32) (redeemable bool, err error) {
+	status, err := w.status(ctx, locator, contractVer)
 	if err != nil {
 		return false, err
 	}
@@ -6294,7 +6294,7 @@ func (w *assetWallet) isRedeemable(locator []byte, secret [32]byte, contractVer 
 		return false, nil
 	}
 
-	vector, err := w.vector(w.ctx, locator, contractVer)
+	vector, err := w.vector(ctx, locator, contractVer)
 	if err != nil {
 		return false, err
 	}
@@ -6302,7 +6302,7 @@ func (w *assetWallet) isRedeemable(locator []byte, secret [32]byte, contractVer 
 	return w.ValidateSecret(secret[:], vector.SecretHash[:]), nil
 }
 
-func (w *assetWallet) isRefundable(locator []byte, contractVer uint32) (refundable bool, err error) {
+func (w *assetWallet) isRefundable(ctx context.Context, locator []byte, contractVer uint32) (refundable bool, err error) {
 	return refundable, w.withContractor(contractVer, func(c contractor) error {
 		refundable, err = c.isRefundable(locator)
 		return err

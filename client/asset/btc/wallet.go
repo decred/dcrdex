@@ -14,12 +14,11 @@ import (
 	"github.com/btcsuite/btcd/wire"
 )
 
-// Wallet is the interface that BTC wallet backends must implement. TODO: plumb
-// all requests with a context.Context.
+// Wallet is the interface that BTC wallet backends must implement.
 type Wallet interface {
 	RawRequester // for localFeeRate/rpcFeeRate calls
 	Connect(ctx context.Context, wg *sync.WaitGroup) error
-	SendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error)
+	SendRawTransaction(ctx context.Context, tx *wire.MsgTx) (*chainhash.Hash, error)
 	GetTxOut(txHash *chainhash.Hash, index uint32, pkScript []byte, startTime time.Time) (*wire.TxOut, uint32, error)
 	GetBlockHash(blockHeight int64) (*chainhash.Hash, error)
 	GetBestBlockHash() (*chainhash.Hash, error)
@@ -29,10 +28,10 @@ type Wallet interface {
 	ListUnspent() ([]*ListUnspentResult, error) // must not return locked coins
 	LockUnspent(unlock bool, ops []*Output) error
 	ListLockUnspent() ([]*RPCOutpoint, error)
-	ChangeAddress() (btcutil.Address, error) // warning: don't just use the Stringer if there's a "recode" function for a clone e.g. BCH
-	ExternalAddress() (btcutil.Address, error)
-	SignTx(inTx *wire.MsgTx) (*wire.MsgTx, error)
-	PrivKeyForAddress(addr string) (*btcec.PrivateKey, error)
+	ChangeAddress(ctx context.Context) (btcutil.Address, error) // warning: don't just use the Stringer if there's a "recode" function for a clone e.g. BCH
+	ExternalAddress(ctx context.Context) (btcutil.Address, error)
+	SignTx(ctx context.Context, inTx *wire.MsgTx) (*wire.MsgTx, error)
+	PrivKeyForAddress(ctx context.Context, addr string) (*btcec.PrivateKey, error)
 	WalletUnlock(pw []byte) error
 	WalletLock() error
 	Locked() bool

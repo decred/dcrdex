@@ -10328,13 +10328,15 @@ func (c *Core) queueBalanceChange(assetID uint32, bal *asset.Balance) {
 	c.balActive[assetID] = true
 	c.balMtx.Unlock()
 	c.wg.Add(1)
-	go c.runBalanceChange(assetID)
+	go func() {
+		defer c.wg.Done()
+		c.runBalanceChange(assetID)
+	}()
 }
 
 // runBalanceChange drains pending balance changes for the asset. When no more
 // pending balances exist, marks the asset as inactive and returns.
 func (c *Core) runBalanceChange(assetID uint32) {
-	defer c.wg.Done()
 	for {
 		c.balMtx.Lock()
 		bal, ok := c.balPending[assetID]

@@ -127,7 +127,7 @@ func Test_electrumWallet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = ew.PrivKeyForAddress(addr)
+	_, err = ew.PrivKeyForAddress(t.Context(), addr)
 	if err != nil {
 		t.Fatal(err)
 	}

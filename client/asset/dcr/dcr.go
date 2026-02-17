@@ -3122,7 +3122,7 @@ func (dcr *ExchangeWallet) PrivateSwapPubKey() ([]byte, error) {
 // privateRefundTx creates and signs a private swap contract's refund transaction.
 // If refundAddr is not supplied, one will be requested from the wallet. If val
 // is not supplied it will be retrieved with gettxout.
-func (dcr *ExchangeWallet) privateRefundTx(coinID, contract dex.Bytes, val uint64, refundAddr stdaddr.Address, feeRate uint64) (tx *wire.MsgTx, refundVal, txFee uint64, err error) {
+func (dcr *ExchangeWallet) privateRefundTx(ctx context.Context, coinID, contract dex.Bytes, val uint64, refundAddr stdaddr.Address, feeRate uint64) (tx *wire.MsgTx, refundVal, txFee uint64, err error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, 0, 0, err
@@ -3130,7 +3130,7 @@ func (dcr *ExchangeWallet) privateRefundTx(coinID, contract dex.Bytes, val uint6
 
 	// Grab the output, make sure it's unspent and get the value if not supplied.
 	if val == 0 {
-		utxo, _, spent, err := dcr.lookupTxOutput(dcr.ctx, txHash, vout)
+		utxo, _, spent, err := dcr.lookupTxOutput(ctx, txHash, vout)
 		if err != nil {
 			return nil, 0, 0, fmt.Errorf("error finding unspent contract: %w", err)
 		}
@@ -3152,13 +3152,13 @@ func (dcr *ExchangeWallet) privateRefundTx(coinID, contract dex.Bytes, val uint6
 				return nil, 0, 0, fmt.Errorf("error encoding contract address: %w", err)
 			}
 			_, pkScript := scriptAddr.PaymentScript()
-			outFound, _, err := dcr.externalTxOutput(dcr.ctx, newOutPoint(txHash, vout),
+			outFound, _, err := dcr.externalTxOutput(ctx, newOutPoint(txHash, vout),
 				pkScript, time.Now().Add(-60*24*time.Hour)) // search up to 60 days ago
 			if err != nil {
 				return nil, 0, 0, err // possibly the contract is still in mempool
 			}
 			// Try to find a transaction that spends it.
-			spent, err := dcr.isOutputSpent(dcr.ctx, outFound) // => findTxOutSpender
+			spent, err := dcr.isOutputSpent(ctx, outFound) // => findTxOutSpender
 			if err != nil {
 				return nil, 0, 0, fmt.Errorf("error checking if contract %v:%d is spent: %w", txHash, vout, err)
 			}
@@ -3198,7 +3198,7 @@ func (dcr *ExchangeWallet) privateRefundTx(coinID, contract dex.Bytes, val uint6
 	}
 
 	if refundAddr == nil {
-		refundAddr, err = dcr.wallet.ExternalAddress(dcr.ctx, dcr.depositAccount())
+		refundAddr, err = dcr.wallet.ExternalAddress(ctx, dcr.depositAccount())
 		if err != nil {
 			return nil, 0, 0, fmt.Errorf("error getting new address from the wallet: %w", err)
 		}
@@ -3217,7 +3217,7 @@ func (dcr *ExchangeWallet) privateRefundTx(coinID, contract dex.Bytes, val uint6
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("error encoding refunder address: %w", err)
 	}
-	refundSig, refundPubKey, err := dcr.createSig(msgTx, 0, contract, refunderAddr)
+	refundSig, refundPubKey, err := dcr.createSig(ctx, msgTx, 0, contract, refunderAddr)
 	if err != nil {
 		return nil, 0, 0, err
 	}
@@ -3232,7 +3232,7 @@ func (dcr *ExchangeWallet) privateRefundTx(coinID, contract dex.Bytes, val uint6
 }
 
 // SwapPrivate initiates private swaps in a single transaction.
-func (dcr *ExchangeWallet) SwapPrivate(_ context.Context, swaps *asset.PrivateSwaps) (receipts []asset.Receipt, coin asset.Coin, txData []byte, fees uint64, err error) {
+func (dcr *ExchangeWallet) SwapPrivate(ctx context.Context, swaps *asset.PrivateSwaps) (receipts []asset.Receipt, coin asset.Coin, txData []byte, fees uint64, err error) {
 	if swaps.FeeRate == 0 {
 		return nil, nil, nil, 0, fmt.Errorf("cannot send swap with with zero fee rate")
 	}
@@ -3304,7 +3304,7 @@ func (dcr *ExchangeWallet) SwapPrivate(_ context.Context, swaps *asset.PrivateSw
 
 	// Sign the tx but don't send the transaction yet until
 	// the individual swap refund txs are prepared and signed.
-	msgTx, change, changeAddr, fees, err := dcr.signTxAndAddChange(baseTx, feeRate, -1, changeAcct)
+	msgTx, change, changeAddr, fees, err := dcr.signTxAndAddChange(ctx, baseTx, feeRate, -1, changeAcct)
 	if err != nil {
 		return nil, nil, nil, 0, err
 	}
@@ -3314,7 +3314,7 @@ func (dcr *ExchangeWallet) SwapPrivate(_ context.Context, swaps *asset.PrivateSw
 	txHash := msgTx.CachedTxHash()
 	for i, contract := range swaps.Contracts {
 		output := newOutput(txHash, uint32(i), contract.Value, wire.TxTreeRegular)
-		signedRefundTx, _, _, err := dcr.privateRefundTx(output.ID(), contracts[i], contract.Value, refundAddrs[i], swaps.FeeRate)
+		signedRefundTx, _, _, err := dcr.privateRefundTx(ctx, output.ID(), contracts[i], contract.Value, refundAddrs[i], swaps.FeeRate)
 		if err != nil {
 			return nil, nil, nil, 0, fmt.Errorf("error creating refund tx: %w", err)
 		}
@@ -3331,7 +3331,7 @@ func (dcr *ExchangeWallet) SwapPrivate(_ context.Context, swaps *asset.PrivateSw
 	}
 
 	// Refund txs prepared and signed. Can now broadcast the swap(s).
-	_, err = dcr.broadcastTx(msgTx, feeRate)
+	_, err = dcr.broadcastTx(ctx, msgTx, feeRate)
 	if err != nil {
 		return nil, nil, nil, 0, err
 	}
@@ -3459,7 +3459,7 @@ func (dcr *ExchangeWallet) GenerateUnsignedRedeemTx(coinID []byte, contract *ass
 		return nil, fmt.Errorf("redeem tx not worth the fees")
 	}
 
-	txOut, _, err := dcr.makeExternalOut(dcr.depositAccount(), contract.Value-fee)
+	txOut, _, err := dcr.makeExternalOut(dcr.ctx, dcr.depositAccount(), contract.Value-fee)
 	if err != nil {
 		return nil, err
 	}
@@ -3526,7 +3526,7 @@ func (dcr *ExchangeWallet) GeneratePrivateKeyTweakedAdaptor(unsignedRedeemB []by
 		return nil, fmt.Errorf("error encoding script address: %w", err)
 	}
 
-	sig, _, err := dcr.createSig(redeemTx, 0, contractScript, signerAddr)
+	sig, _, err := dcr.createSig(dcr.ctx, redeemTx, 0, contractScript, signerAddr)
 	if err != nil {
 		return nil, fmt.Errorf("error creating signature: %w", err)
 	}
@@ -3622,7 +3622,7 @@ func (dcr *ExchangeWallet) GeneratePublicKeyTweakedAdaptor(unsignedRedeemB []byt
 // RedeemPrivate redeems a private swap. Unlike HTLC atomic swaps, only one
 // swap can be redeemed at a time because the redemption transaction was
 // pre-generated using GenerateUnsignedRedeemTx.
-func (dcr *ExchangeWallet) RedeemPrivate(_ context.Context, contract *asset.PrivateContract, unsignedRedeemB []byte, adaptorSigB []byte, adaptorSecret *btcec.ModNScalar) (out asset.Coin, feesPaid uint64, txData []byte, err error) {
+func (dcr *ExchangeWallet) RedeemPrivate(ctx context.Context, contract *asset.PrivateContract, unsignedRedeemB []byte, adaptorSigB []byte, adaptorSecret *btcec.ModNScalar) (out asset.Coin, feesPaid uint64, txData []byte, err error) {
 	adaptorSig, err := dcradaptor.ParseAdaptorSignature(adaptorSigB)
 	if err != nil {
 		return nil, 0, nil, fmt.Errorf("error parsing adaptor signature: %w", err)
@@ -3688,7 +3688,7 @@ func (dcr *ExchangeWallet) RedeemPrivate(_ context.Context, contract *asset.Priv
 		return nil, 0, nil, fmt.Errorf("error serializing transaction: %w", err)
 	}
 
-	txHash, err := dcr.broadcastTx(redeemTx, 0) // Use fallback fee rate for pre-generated tx
+	txHash, err := dcr.broadcastTx(ctx, redeemTx, 0) // Use fallback fee rate for pre-generated tx
 	if err != nil {
 		return nil, 0, nil, fmt.Errorf("error broadcasting transaction: %w", err)
 	}
@@ -3709,7 +3709,7 @@ func (dcr *ExchangeWallet) MarkPrivateSwapComplete(contract *asset.PrivateContra
 // method MUST return an asset.CoinNotFoundError error if the swap is already
 // spent, which is used to indicate if FindRedemption should be used and the
 // counterparty's swap redeemed.
-func (dcr *ExchangeWallet) RefundPrivate(_ context.Context, coinID dex.Bytes, contract *asset.PrivateContract, feeRate uint64) (dex.Bytes, error) {
+func (dcr *ExchangeWallet) RefundPrivate(ctx context.Context, coinID dex.Bytes, contract *asset.PrivateContract, feeRate uint64) (dex.Bytes, error) {
 	// Caller should provide a non-zero fee rate, so we could just do
 	// dcr.feeRateWithFallback(feeRate), but be permissive for now.
 	if feeRate == 0 {
@@ -3721,12 +3721,12 @@ func (dcr *ExchangeWallet) RefundPrivate(_ context.Context, coinID dex.Bytes, co
 		return nil, fmt.Errorf("error encoding script address: %w", err)
 	}
 
-	msgTx, refundVal, fee, err := dcr.privateRefundTx(coinID, contractB, 0, nil, feeRate)
+	msgTx, refundVal, fee, err := dcr.privateRefundTx(ctx, coinID, contractB, 0, nil, feeRate)
 	if err != nil {
 		return nil, fmt.Errorf("error creating private refund tx: %w", err)
 	}
 
-	refundHash, err := dcr.broadcastTx(msgTx, feeRate)
+	refundHash, err := dcr.broadcastTx(ctx, msgTx, feeRate)
 	if err != nil {
 		return nil, err
 	}
@@ -3784,7 +3784,7 @@ func (dcr *ExchangeWallet) RecoverAdaptorSecret(cpRedeemTxB, ourAdaptorSigB, _ [
 // used to refund a failed transaction. The Input coins are manually unlocked
 // because they're not auto-unlocked by the wallet and therefore inaccurately
 // included as part of the locked balance despite being spent.
-func (dcr *ExchangeWallet) Swap(_ context.Context, swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
+func (dcr *ExchangeWallet) Swap(ctx context.Context, swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
 	if swaps.FeeRate == 0 {
 		return nil, nil, 0, fmt.Errorf("cannot send swap with with zero fee rate")
 	}
@@ -3811,7 +3811,7 @@ func (dcr *ExchangeWallet) Swap(_ context.Context, swaps *asset.Swaps) ([]asset.
 		totalOut += contract.Value
 		// revokeAddrV2 is the address belonging to the key that will be
 		// used to sign and refund a swap past its encoded refund locktime.
-		revokeAddrV2, err := dcr.wallet.ExternalAddress(dcr.ctx, dcr.depositAccount())
+		revokeAddrV2, err := dcr.wallet.ExternalAddress(ctx, dcr.depositAccount())
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error creating revocation address: %w", err)
 		}
@@ -3859,7 +3859,7 @@ func (dcr *ExchangeWallet) Swap(_ context.Context, swaps *asset.Swaps) ([]asset.
 		// account.
 		changeAcct = tradingAccount
 	}
-	msgTx, change, changeAddr, fees, err := dcr.signTxAndAddChange(baseTx, feeRate, -1, changeAcct)
+	msgTx, change, changeAddr, fees, err := dcr.signTxAndAddChange(ctx, baseTx, feeRate, -1, changeAcct)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -3868,7 +3868,7 @@ func (dcr *ExchangeWallet) Swap(_ context.Context, swaps *asset.Swaps) ([]asset.
 	txHash := msgTx.CachedTxHash()
 	for i, contract := range swaps.Contracts {
 		output := newOutput(txHash, uint32(i), contract.Value, wire.TxTreeRegular)
-		signedRefundTx, _, _, err := dcr.refundTx(output.ID(), contracts[i], contract.Value, refundAddrs[i], swaps.FeeRate)
+		signedRefundTx, _, _, err := dcr.refundTx(ctx, output.ID(), contracts[i], contract.Value, refundAddrs[i], swaps.FeeRate)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error creating refund tx: %w", err)
 		}
@@ -3885,7 +3885,7 @@ func (dcr *ExchangeWallet) Swap(_ context.Context, swaps *asset.Swaps) ([]asset.
 	}
 
 	// Refund txs prepared and signed. Can now broadcast the swap(s).
-	_, err = dcr.broadcastTx(msgTx, feeRate)
+	_, err = dcr.broadcastTx(ctx, msgTx, feeRate)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -3926,7 +3926,7 @@ func (dcr *ExchangeWallet) Swap(_ context.Context, swaps *asset.Swaps) ([]asset.
 // Redeem sends the redemption transaction, which may contain more than one
 // redemption. FeeSuggestion is just a fallback if an internal estimate using
 // the wallet's redeem confirm block target setting is not available.
-func (dcr *ExchangeWallet) Redeem(_ context.Context, form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
+func (dcr *ExchangeWallet) Redeem(ctx context.Context, form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
 	// Create a transaction that spends the referenced contract.
 	msgTx := wire.NewMsgTx()
 	var totalIn uint64
@@ -3987,7 +3987,7 @@ func (dcr *ExchangeWallet) Redeem(_ context.Context, form *asset.RedeemForm) ([]
 	}
 
 	// Send the funds back to the exchange wallet.
-	txOut, _, err := dcr.makeExternalOut(dcr.depositAccount(), totalIn-fee)
+	txOut, _, err := dcr.makeExternalOut(ctx, dcr.depositAccount(), totalIn-fee)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -3999,7 +3999,7 @@ func (dcr *ExchangeWallet) Redeem(_ context.Context, form *asset.RedeemForm) ([]
 	// Sign the inputs.
 	for i, r := range form.Redemptions {
 		contract := contracts[i]
-		redeemSig, redeemPubKey, err := dcr.createSig(msgTx, i, contract, addresses[i])
+		redeemSig, redeemPubKey, err := dcr.createSig(ctx, msgTx, i, contract, addresses[i])
 		if err != nil {
 			return nil, nil, 0, err
 		}
@@ -4010,7 +4010,7 @@ func (dcr *ExchangeWallet) Redeem(_ context.Context, form *asset.RedeemForm) ([]
 		msgTx.TxIn[i].SignatureScript = redeemSigScript
 	}
 	// Send the transaction.
-	txHash, err := dcr.broadcastTx(msgTx, feeRate)
+	txHash, err := dcr.broadcastTx(ctx, msgTx, feeRate)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -4678,18 +4678,18 @@ func (dcr *ExchangeWallet) fatalFindRedemptionsError(err error, contractOutpoint
 // wallet does not store it, even though it was known when the init transaction
 // was created. The client should store this information for persistence across
 // sessions.
-func (dcr *ExchangeWallet) Refund(_ context.Context, coinID, contract dex.Bytes, feeRate uint64) (dex.Bytes, error) {
+func (dcr *ExchangeWallet) Refund(ctx context.Context, coinID, contract dex.Bytes, feeRate uint64) (dex.Bytes, error) {
 	// Caller should provide a non-zero fee rate, so we could just do
 	// dcr.feeRateWithFallback(feeRate), but be permissive for now.
 	if feeRate == 0 {
 		feeRate = dcr.targetFeeRateWithFallback(2, 0)
 	}
-	msgTx, refundVal, fee, err := dcr.refundTx(coinID, contract, 0, nil, feeRate)
+	msgTx, refundVal, fee, err := dcr.refundTx(ctx, coinID, contract, 0, nil, feeRate)
 	if err != nil {
 		return nil, fmt.Errorf("error creating refund tx: %w", err)
 	}
 
-	refundHash, err := dcr.broadcastTx(msgTx, feeRate)
+	refundHash, err := dcr.broadcastTx(ctx, msgTx, feeRate)
 	if err != nil {
 		return nil, err
 	}
@@ -4706,14 +4706,14 @@ func (dcr *ExchangeWallet) Refund(_ context.Context, coinID, contract dex.Bytes,
 // refundTx crates and signs a contract's refund transaction. If refundAddr is
 // not supplied, one will be requested from the wallet. If val is not supplied
 // it will be retrieved with gettxout.
-func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refundAddr stdaddr.Address, feeRate uint64) (tx *wire.MsgTx, refundVal, txFee uint64, err error) {
+func (dcr *ExchangeWallet) refundTx(ctx context.Context, coinID, contract dex.Bytes, val uint64, refundAddr stdaddr.Address, feeRate uint64) (tx *wire.MsgTx, refundVal, txFee uint64, err error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, 0, 0, err
 	}
 	// Grab the output, make sure it's unspent and get the value if not supplied.
 	if val == 0 {
-		utxo, _, spent, err := dcr.lookupTxOutput(dcr.ctx, txHash, vout)
+		utxo, _, spent, err := dcr.lookupTxOutput(ctx, txHash, vout)
 		if err != nil {
 			return nil, 0, 0, fmt.Errorf("error finding unspent contract: %w", err)
 		}
@@ -4735,13 +4735,13 @@ func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refu
 				return nil, 0, 0, fmt.Errorf("error encoding contract address: %w", err)
 			}
 			_, pkScript := scriptAddr.PaymentScript()
-			outFound, _, err := dcr.externalTxOutput(dcr.ctx, newOutPoint(txHash, vout),
+			outFound, _, err := dcr.externalTxOutput(ctx, newOutPoint(txHash, vout),
 				pkScript, time.Now().Add(-60*24*time.Hour)) // search up to 60 days ago
 			if err != nil {
 				return nil, 0, 0, err // possibly the contract is still in mempool
 			}
 			// Try to find a transaction that spends it.
-			spent, err := dcr.isOutputSpent(dcr.ctx, outFound) // => findTxOutSpender
+			spent, err := dcr.isOutputSpent(ctx, outFound) // => findTxOutSpender
 			if err != nil {
 				return nil, 0, 0, fmt.Errorf("error checking if contract %v:%d is spent: %w", txHash, vout, err)
 			}
@@ -4780,7 +4780,7 @@ func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refu
 	}
 
 	if refundAddr == nil {
-		refundAddr, err = dcr.wallet.ExternalAddress(dcr.ctx, dcr.depositAccount())
+		refundAddr, err = dcr.wallet.ExternalAddress(ctx, dcr.depositAccount())
 		if err != nil {
 			return nil, 0, 0, fmt.Errorf("error getting new address from the wallet: %w", err)
 		}
@@ -4793,7 +4793,7 @@ func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refu
 	}
 	msgTx.AddTxOut(txOut)
 	// Sign it.
-	refundSig, refundPubKey, err := dcr.createSig(msgTx, 0, contract, sender)
+	refundSig, refundPubKey, err := dcr.createSig(ctx, msgTx, 0, contract, sender)
 	if err != nil {
 		return nil, 0, 0, err
 	}
@@ -5020,7 +5020,7 @@ func (dcr *ExchangeWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime 
 		return nil, nil, err
 	}
 
-	signedTx, _, _, fee, err := dcr.signTxAndAddChange(baseTx, feeRate, -1, dcr.depositAccount())
+	signedTx, _, _, fee, err := dcr.signTxAndAddChange(dcr.ctx, baseTx, feeRate, -1, dcr.depositAccount())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -5798,8 +5798,8 @@ func msgTxToHex(msgTx *wire.MsgTx) (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-func (dcr *ExchangeWallet) makeExternalOut(acct string, val uint64) (*wire.TxOut, stdaddr.Address, error) {
-	addr, err := dcr.wallet.ExternalAddress(dcr.ctx, acct)
+func (dcr *ExchangeWallet) makeExternalOut(ctx context.Context, acct string, val uint64) (*wire.TxOut, stdaddr.Address, error) {
+	addr, err := dcr.wallet.ExternalAddress(ctx, acct)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating change address: %w", err)
 	}
@@ -5807,8 +5807,8 @@ func (dcr *ExchangeWallet) makeExternalOut(acct string, val uint64) (*wire.TxOut
 	return newTxOut(int64(val), changeScriptVersion, changeScript), addr, nil
 }
 
-func (dcr *ExchangeWallet) makeChangeOut(changeAcct string, val uint64) (*wire.TxOut, stdaddr.Address, error) {
-	changeAddr, err := dcr.wallet.InternalAddress(dcr.ctx, changeAcct)
+func (dcr *ExchangeWallet) makeChangeOut(ctx context.Context, changeAcct string, val uint64) (*wire.TxOut, stdaddr.Address, error) {
+	changeAddr, err := dcr.wallet.InternalAddress(ctx, changeAcct)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating change address: %w", err)
 	}
@@ -5820,12 +5820,12 @@ func (dcr *ExchangeWallet) makeChangeOut(changeAcct string, val uint64) (*wire.T
 // the amount is dust. subtractFrom indicates the output from which fees should
 // be subtracted, where -1 indicates fees should come out of a change output.
 func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, feeRate uint64, subtractFrom int32) (*wire.MsgTx, error) {
-	signedTx, _, _, _, err := dcr.signTxAndAddChange(baseTx, feeRate, subtractFrom, dcr.depositAccount())
+	signedTx, _, _, _, err := dcr.signTxAndAddChange(dcr.ctx, baseTx, feeRate, subtractFrom, dcr.depositAccount())
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = dcr.broadcastTx(signedTx, feeRate)
+	_, err = dcr.broadcastTx(dcr.ctx, signedTx, feeRate)
 	return signedTx, err
 }
 
@@ -5834,12 +5834,12 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, feeRate uint64, su
 // subtractFrom indicates the output from which fees should be subtracted, where
 // -1 indicates fees should come out of a change output. baseTx may be modified
 // with an added change output or a reduced value of the subtractFrom output.
-func (dcr *ExchangeWallet) signTxAndAddChange(baseTx *wire.MsgTx, feeRate uint64,
+func (dcr *ExchangeWallet) signTxAndAddChange(ctx context.Context, baseTx *wire.MsgTx, feeRate uint64,
 	subtractFrom int32, changeAcct string) (*wire.MsgTx, *output, string, uint64, error) {
 	// Sign the transaction to get an initial size estimate and calculate
 	// whether a change output would be dust.
 	sigCycles := 1
-	msgTx, err := dcr.wallet.SignRawTransaction(dcr.ctx, baseTx)
+	msgTx, err := dcr.wallet.SignRawTransaction(ctx, baseTx)
 	if err != nil {
 		return nil, nil, "", 0, err
 	}
@@ -5876,7 +5876,7 @@ func (dcr *ExchangeWallet) signTxAndAddChange(baseTx *wire.MsgTx, feeRate uint64
 				baseTx.TxOut[subtractFrom].Value -= int64(minFeeWithChange)
 				remaining += minFeeWithChange
 			}
-			changeOutput, changeAddress, err = dcr.makeChangeOut(changeAcct, changeValue)
+			changeOutput, changeAddress, err = dcr.makeChangeOut(ctx, changeAcct, changeValue)
 			if err != nil {
 				return nil, nil, "", 0, err
 			}
@@ -5906,7 +5906,7 @@ func (dcr *ExchangeWallet) signTxAndAddChange(baseTx *wire.MsgTx, feeRate uint64
 			// Each cycle, sign the transaction and see if there is a need to
 			// raise or lower the fees.
 			sigCycles++
-			msgTx, err = dcr.wallet.SignRawTransaction(dcr.ctx, baseTx)
+			msgTx, err = dcr.wallet.SignRawTransaction(ctx, baseTx)
 			if err != nil {
 				return nil, nil, "", 0, err
 			}
@@ -6554,7 +6554,7 @@ func (dcr *ExchangeWallet) CommittedTickets(tickets []*chainhash.Hash) ([]*chain
 	return dcr.wallet.CommittedTickets(dcr.ctx, tickets)
 }
 
-func (dcr *ExchangeWallet) broadcastTx(signedTx *wire.MsgTx, feeRate uint64) (*chainhash.Hash, error) {
+func (dcr *ExchangeWallet) broadcastTx(ctx context.Context, signedTx *wire.MsgTx, feeRate uint64) (*chainhash.Hash, error) {
 	// Hard limit: Validate transaction size before broadcasting to prevent
 	// transactions from getting stuck in mempool.
 	// Use MaxStandardTxSize (100KB) not chainParams.MaxTxSize (393KB) because
@@ -6599,7 +6599,7 @@ func (dcr *ExchangeWallet) broadcastTx(signedTx *wire.MsgTx, feeRate uint64) (*c
 		}
 	}
 
-	txHash, err := dcr.wallet.SendRawTransaction(dcr.ctx, signedTx, false)
+	txHash, err := dcr.wallet.SendRawTransaction(ctx, signedTx, false)
 	if err != nil {
 		return nil, fmt.Errorf("sendrawtx error: %w, raw tx: %x", err, dcr.wireBytes(signedTx))
 	}
@@ -6613,13 +6613,13 @@ func (dcr *ExchangeWallet) broadcastTx(signedTx *wire.MsgTx, feeRate uint64) (*c
 
 // createSig creates and returns the serialized raw signature and compressed
 // pubkey for a transaction input signature.
-func (dcr *ExchangeWallet) createSig(tx *wire.MsgTx, idx int, pkScript []byte, addr stdaddr.Address) (sig, pubkey []byte, err error) {
+func (dcr *ExchangeWallet) createSig(ctx context.Context, tx *wire.MsgTx, idx int, pkScript []byte, addr stdaddr.Address) (sig, pubkey []byte, err error) {
 	sigType, err := dexdcr.AddressSigType(addr)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	priv, err := dcr.wallet.AddressPrivKey(dcr.ctx, addr)
+	priv, err := dcr.wallet.AddressPrivKey(ctx, addr)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -8105,7 +8105,7 @@ func (dcr *ExchangeWallet) RedeemGeocode(code []byte, msg string) (dex.Bytes, ui
 		}
 	}
 
-	redeemHash, err := dcr.broadcastTx(redeemTx, feeRate)
+	redeemHash, err := dcr.broadcastTx(dcr.ctx, redeemTx, feeRate)
 	if err != nil {
 		return nil, 0, fmt.Errorf("error broadcasting tx: %w", err)
 	}
@@ -8424,7 +8424,7 @@ func (dcr *ExchangeWallet) RefundMultisig(ctx context.Context, pmTx *asset.Payme
 	msgTx.TxOut[0].Value -= refundFee
 
 	// Create our signature.
-	redeemSig, pubkey, err := dcr.createSig(msgTx, 0, redeemScript, addr)
+	redeemSig, pubkey, err := dcr.createSig(ctx, msgTx, 0, redeemScript, addr)
 	if err != nil {
 		return "", err
 	}

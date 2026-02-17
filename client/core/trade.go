@@ -259,6 +259,24 @@ const (
 	// self-governed trade. We are less patient if the server is down or
 	// lacking the market or asset configs involved.
 	spentAgoThreshSelfGoverned = time.Minute
+
+	// walletCallTimeout is the maximum time allowed for a single wallet RPC
+	// (Swap, Redeem, Refund). This prevents slow or stalled RPCs from
+	// blocking trade processing and causing cascade failures. If a timeout
+	// fires after the wallet has already broadcast a transaction, the
+	// existing retry logic (suspectSwap / suspectRedeem) will re-attempt
+	// the operation on the next tick.
+	//
+	// NOTE: For UTXO wallets, a retry after a successful-but-timed-out
+	// broadcast will build a different transaction (new change address)
+	// with the same inputs, which the node will reject as a double-spend.
+	// The original transaction will still confirm, but the match state
+	// won't be updated with the receipts. The match will be marked with
+	// swapErr after exhausting retries. The BTC SPV wallet mitigates this
+	// by checking for a completed publish before returning a context error.
+	// ETH Redeem and Refund are safe (idempotent state checks), but ETH
+	// Swap lacks an AlreadyInitialized pre-check.
+	walletCallTimeout = 45 * time.Second
 )
 
 // trackedTrade is an order (issued by this client), its matches, and its cancel
@@ -2662,7 +2680,9 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, highestF
 	// Release the trade lock during the wallet call to avoid blocking
 	// message handlers (e.g. revoke_match, audit) for this trade.
 	t.mtx.Unlock()
-	receipts, change, fees, err := fromWallet.Swap(c.ctx, swaps)
+	swapCtx, cancel := context.WithTimeout(c.ctx, walletCallTimeout)
+	receipts, change, fees, err := fromWallet.Swap(swapCtx, swaps)
+	cancel()
 	t.mtx.Lock()
 	if err != nil {
 		bTimeout, tickInterval := t.broadcastTimeout(), t.dc.ticker.Dur() // bTimeout / tickCheckInterval
@@ -2953,11 +2973,13 @@ func lcm(a, b uint64) (lowest, multA, multB uint64) {
 // the wallet is a gasless redeemer and whether the wallet was able to reserve
 // funds for the redempiton.
 func (c *Core) redeem(redeemWallet *xcWallet, redemptionReserves uint64, redeemForm *asset.RedeemForm) (coinIDs []dex.Bytes, outCoin asset.Coin, fees uint64, submitted bool, err error) {
+	ctx, cancel := context.WithTimeout(c.ctx, walletCallTimeout)
+	defer cancel()
 	if gaslessRedeemer, is := redeemWallet.Wallet.(asset.GaslessRedeemer); is && redemptionReserves == 0 {
-		return gaslessRedeemer.GaslessRedeem(c.ctx, redeemForm)
+		return gaslessRedeemer.GaslessRedeem(ctx, redeemForm)
 	}
 
-	coinIDs, outCoin, fees, err = redeemWallet.Redeem(c.ctx, redeemForm)
+	coinIDs, outCoin, fees, err = redeemWallet.Redeem(ctx, redeemForm)
 	submitted = true
 	return
 }
@@ -3656,7 +3678,9 @@ func (c *Core) refundMatches(t *trackedTrade, matches []*matchTracker) (uint64, 
 		// Release the trade lock during the wallet call to avoid blocking
 		// message handlers (e.g. revoke_match, audit) for this trade.
 		t.mtx.Unlock()
-		refundCoin, err := refundWallet.Refund(c.ctx, swapCoinID, contractToRefund, feeRate)
+		refundCtx, cancel := context.WithTimeout(c.ctx, walletCallTimeout)
+		refundCoin, err := refundWallet.Refund(refundCtx, swapCoinID, contractToRefund, feeRate)
+		cancel()
 		t.mtx.Lock()
 		if err != nil {
 			// CRITICAL - Refund must indicate if the swap is spent (i.e.
