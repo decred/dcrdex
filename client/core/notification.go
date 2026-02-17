@@ -720,7 +720,8 @@ type UpgradeNote struct {
 }
 
 const (
-	TopicUpgradeNeeded Topic = "UpgradeNeeded"
+	TopicUpgradeNeeded           Topic = "UpgradeNeeded"
+	TopicMMSnapshotsNotSupported Topic = "MMSnapshotsNotSupported"
 )
 
 func newUpgradeNote(topic Topic, subject, details string, severity db.Severity) *UpgradeNote {

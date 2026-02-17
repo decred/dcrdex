@@ -108,6 +108,8 @@ type clientCore interface {
 	PurchaseTickets(assetID uint32, pw []byte, n int) error
 	SetVotingPreferences(assetID uint32, choices, tSpendPolicy, treasuryPolicy map[string]string) error
 	GenerateBCHRecoveryTransaction(appPW []byte, recipient string) ([]byte, error)
+	ExportMMSnapshots(host string, base, quote uint32, startEpoch, endEpoch uint64) ([]*msgjson.MMEpochSnapshot, error)
+	PruneMMSnapshots(host string, base, quote uint32, minEpochIdx uint64) (int, error)
 }
 
 // RPCServer is a single-client http and websocket server enabling a JSON

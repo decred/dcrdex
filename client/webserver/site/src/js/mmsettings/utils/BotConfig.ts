@@ -507,7 +507,8 @@ type BotConfigAction =
   | { type: 'UPDATE_INTERMEDIATE_ASSET'; payload: number }
   | { type: 'UPDATE_MULTI_HOP_MARKET_COMPLETION'; payload: boolean }
   | { type: 'UPDATE_MULTI_HOP_LIMIT_BUFFER'; payload: number }
-  | { type: 'UPDATE_AVAILABLE_BALANCES'; payload: { dexBalances: Record<number, number>; cexBalances: Record<number, number> } };
+  | { type: 'UPDATE_AVAILABLE_BALANCES'; payload: { dexBalances: Record<number, number>; cexBalances: Record<number, number> } }
+  | { type: 'TOGGLE_MM_SNAPSHOTS'; payload: boolean };
 
 function rebalanceSettingsReducer (state: AutoRebalanceConfig, action: RebalanceSettingsAction): AutoRebalanceConfig {
   switch (action.type) {
@@ -1082,6 +1083,9 @@ export const botConfigStateReducer = (state: BotConfigState | null, action: BotC
         ? updateAllocationsBasedOnQuickConfig(updatedState)
         : clampOriginalAllocations(updatedState, dexBalances, cexBalances)
     }
+
+    case 'TOGGLE_MM_SNAPSHOTS':
+      return { ...state, botConfig: { ...state.botConfig, mmSnapshots: action.payload } }
 
     default:
       return state

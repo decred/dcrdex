@@ -724,6 +724,7 @@ type ExchangeAuth struct {
 type Exchange struct {
 	Host             string                 `json:"host"`
 	AcctID           string                 `json:"acctID"`
+	DEXPubKey        dex.Bytes              `json:"dexPubKey,omitempty"`
 	Markets          map[string]*Market     `json:"markets"`
 	Assets           map[uint32]*dex.Asset  `json:"assets"`
 	BondExpiry       uint64                 `json:"bondExpiry"`

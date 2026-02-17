@@ -52,6 +52,7 @@ type clientCore interface {
 	Bridge(fromAssetID, toAssetID uint32, amt uint64, bridgeName string) (txID string, err error)
 	SupportedBridgeDestinations(assetID uint32) (map[uint32][]string, error)
 	BridgeContractApprovalStatus(assetID uint32, bridgeName string) (asset.ApprovalStatus, error)
+	SubscribeMMSnapshots(host string, base, quote uint32, unsub bool) error
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -1012,6 +1013,11 @@ func (m *MarketMaker) startBot(mkt *MarketWithHost, botCfg *BotConfig, cexCfg *C
 		cm.Wait()
 		m.runningBotsMtx.Lock()
 		if bot, found := m.runningBots[*mkt]; found {
+			if bot.botCfg().MMSnapshots {
+				if err := m.core.SubscribeMMSnapshots(mkt.Host, mkt.BaseID, mkt.QuoteID, true); err != nil {
+					m.log.Warnf("Failed to unsubscribe from MM snapshots on bot exit for %s: %v", mkt, err)
+				}
+			}
 			if bot.botCfg().requiresPriceOracle() {
 				m.oracle.stopAutoSyncingMarket(mkt.BaseID, mkt.QuoteID)
 			}
@@ -1022,6 +1028,13 @@ func (m *MarketMaker) startBot(mkt *MarketWithHost, botCfg *BotConfig, cexCfg *C
 	}()
 
 	startedBot = true
+
+	// Subscribe to MM epoch snapshots for this market.
+	if botCfg.MMSnapshots {
+		if err := m.core.SubscribeMMSnapshots(mkt.Host, mkt.BaseID, mkt.QuoteID, false); err != nil {
+			m.log.Warnf("Failed to subscribe to MM snapshots for %s: %v", mkt, err)
+		}
+	}
 
 	rb := &runningBot{
 		bot:    bot,
@@ -1046,6 +1059,11 @@ func (m *MarketMaker) StopBot(mkt *MarketWithHost) error {
 		return fmt.Errorf("no bot running on market: %s", mkt)
 	}
 	bot.stopping.Store(true)
+	if bot.botCfg().MMSnapshots {
+		if err := m.core.SubscribeMMSnapshots(mkt.Host, mkt.BaseID, mkt.QuoteID, true); err != nil {
+			m.log.Warnf("Failed to unsubscribe from MM snapshots for %s: %v", mkt, err)
+		}
+	}
 	go bot.cm.Disconnect()
 	return nil
 }
@@ -1373,6 +1391,17 @@ func (m *MarketMaker) UpdateRunningBotCfg(cfg *BotConfig, balanceDiffs *BotInven
 	} else if oldCfg.requiresPriceOracle() && !cfg.requiresPriceOracle() {
 		m.oracle.stopAutoSyncingMarket(cfg.BaseID, cfg.QuoteID)
 		stoppedOracle = true
+	}
+
+	// Handle MMSnapshots config changes.
+	if !oldCfg.MMSnapshots && cfg.MMSnapshots {
+		if err := m.core.SubscribeMMSnapshots(cfg.Host, cfg.BaseID, cfg.QuoteID, false); err != nil {
+			m.log.Warnf("Failed to subscribe to MM snapshots for %s: %v", mkt, err)
+		}
+	} else if oldCfg.MMSnapshots && !cfg.MMSnapshots {
+		if err := m.core.SubscribeMMSnapshots(cfg.Host, cfg.BaseID, cfg.QuoteID, true); err != nil {
+			m.log.Warnf("Failed to unsubscribe from MM snapshots for %s: %v", mkt, err)
+		}
 	}
 
 	if err := rb.withPause(func() error {

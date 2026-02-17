@@ -2094,3 +2094,306 @@ func TestMarket_AccountPending(t *testing.T) {
 	checkPending("with-epoch-market-buy-matic", maticAddr, assetMATIC.ID, totalQty, totalBuyLots, redeems)
 	checkPending("with-epoch-market-buy-eth", ethAddr, assetETH.ID, totalSellLots*dcrLotSize, totalSellLots, int(totalBuyLots))
 }
+
+func TestSubscribeMMSnapshots(t *testing.T) {
+	mkt, _, _, cleanup, err := newTestMarket()
+	if err != nil {
+		t.Fatalf("newTestMarket failure: %v", err)
+	}
+	defer cleanup()
+
+	user := test.NextAccount()
+
+	// Subscribe.
+	mkt.SubscribeMMSnapshots(user, false)
+	mkt.mmSnapshotMtx.RLock()
+	_, ok := mkt.mmSnapshotSubs[user]
+	mkt.mmSnapshotMtx.RUnlock()
+	if !ok {
+		t.Fatal("user not in mmSnapshotSubs after subscribe")
+	}
+
+	// Unsubscribe.
+	mkt.SubscribeMMSnapshots(user, true)
+	mkt.mmSnapshotMtx.RLock()
+	_, ok = mkt.mmSnapshotSubs[user]
+	mkt.mmSnapshotMtx.RUnlock()
+	if ok {
+		t.Fatal("user still in mmSnapshotSubs after unsubscribe")
+	}
+}
+
+func TestSendMMSnapshots(t *testing.T) {
+	mkt, _, auth, cleanup, err := newTestMarket()
+	if err != nil {
+		t.Fatalf("newTestMarket failure: %v", err)
+	}
+	defer cleanup()
+
+	// No subscribers — no messages should be sent.
+	epoch := &readyEpoch{
+		EpochQueue: NewEpoch(100, 500),
+	}
+	auth.sendsMtx.Lock()
+	auth.sends = auth.sends[:0]
+	auth.sendsMtx.Unlock()
+
+	mkt.sendMMSnapshots(epoch)
+
+	auth.sendsMtx.Lock()
+	nSends := len(auth.sends)
+	auth.sendsMtx.Unlock()
+	if nSends != 0 {
+		t.Fatalf("expected 0 sends with no subscribers, got %d", nSends)
+	}
+
+	// Subscribe two users.
+	user1 := buyer3.Acct
+	user2 := seller3.Acct
+
+	mkt.SubscribeMMSnapshots(user1, false)
+	mkt.SubscribeMMSnapshots(user2, false)
+
+	// Insert buy orders for user1 and sell orders for user2.
+	buyRate1 := uint64(2_500_000_000)
+	buyRate2 := uint64(2_600_000_000)
+	sellRate1 := uint64(2_700_000_000)
+	sellRate2 := uint64(2_800_000_000)
+
+	loBuy1 := makeLO(buyer3, buyRate1, 1, order.StandingTiF)
+	loBuy1.AccountID = user1
+	loBuy2 := makeLO(buyer3, buyRate2, 2, order.StandingTiF)
+	loBuy2.AccountID = user1
+
+	loSell1 := makeLO(seller3, sellRate1, 1, order.StandingTiF)
+	loSell1.AccountID = user2
+	loSell2 := makeLO(seller3, sellRate2, 2, order.StandingTiF)
+	loSell2.AccountID = user2
+
+	mkt.bookMtx.Lock()
+	for _, lo := range []*order.LimitOrder{loBuy1, loBuy2, loSell1, loSell2} {
+		if !mkt.book.Insert(lo) {
+			t.Fatalf("failed to insert order into book")
+		}
+	}
+	mkt.bookMtx.Unlock()
+
+	auth.sendsMtx.Lock()
+	auth.sends = auth.sends[:0]
+	auth.sendsMtx.Unlock()
+
+	mkt.sendMMSnapshots(epoch)
+
+	auth.sendsMtx.Lock()
+	sends := make([]*msgjson.Message, len(auth.sends))
+	copy(sends, auth.sends)
+	auth.sendsMtx.Unlock()
+
+	if len(sends) != 2 {
+		t.Fatalf("expected 2 sends, got %d", len(sends))
+	}
+
+	// Each send should be an MMEpochSnapshotRoute notification.
+	for _, msg := range sends {
+		if msg.Route != msgjson.MMEpochSnapshotRoute {
+			t.Fatalf("expected route %s, got %s", msgjson.MMEpochSnapshotRoute, msg.Route)
+		}
+		var snap msgjson.MMEpochSnapshot
+		if err := msg.Unmarshal(&snap); err != nil {
+			t.Fatalf("unmarshal error: %v", err)
+		}
+		if snap.EpochIdx != uint64(epoch.Epoch) {
+			t.Fatalf("expected epochIdx %d, got %d", epoch.Epoch, snap.EpochIdx)
+		}
+		if snap.EpochDur != uint64(epoch.Duration) {
+			t.Fatalf("expected epochDur %d, got %d", epoch.Duration, snap.EpochDur)
+		}
+		acct := account.AccountID{}
+		copy(acct[:], snap.AccountID)
+		if acct == user1 {
+			// user1 has buy orders only.
+			if len(snap.BuyOrders) != 2 {
+				t.Fatalf("user1: expected 2 buy orders, got %d", len(snap.BuyOrders))
+			}
+			if len(snap.SellOrders) != 0 {
+				t.Fatalf("user1: expected 0 sell orders, got %d", len(snap.SellOrders))
+			}
+			// Verify orders are sorted by rate ascending.
+			if snap.BuyOrders[0].Rate >= snap.BuyOrders[1].Rate {
+				t.Fatalf("user1: buy orders not sorted by rate ascending: %d >= %d",
+					snap.BuyOrders[0].Rate, snap.BuyOrders[1].Rate)
+			}
+		} else if acct == user2 {
+			// user2 has sell orders only.
+			if len(snap.BuyOrders) != 0 {
+				t.Fatalf("user2: expected 0 buy orders, got %d", len(snap.BuyOrders))
+			}
+			if len(snap.SellOrders) != 2 {
+				t.Fatalf("user2: expected 2 sell orders, got %d", len(snap.SellOrders))
+			}
+			// Verify orders are sorted by rate ascending.
+			if snap.SellOrders[0].Rate >= snap.SellOrders[1].Rate {
+				t.Fatalf("user2: sell orders not sorted by rate ascending: %d >= %d",
+					snap.SellOrders[0].Rate, snap.SellOrders[1].Rate)
+			}
+		} else {
+			t.Fatalf("unexpected accountID: %x", snap.AccountID)
+		}
+
+		// BestBuy and BestSell should reflect the book.
+		if snap.BestBuy == 0 {
+			t.Fatal("BestBuy should be non-zero")
+		}
+		if snap.BestSell == 0 {
+			t.Fatal("BestSell should be non-zero")
+		}
+	}
+
+	// Subscriber with no orders should get empty order lists.
+	user3 := test.NextAccount()
+	mkt.SubscribeMMSnapshots(user3, false)
+
+	auth.sendsMtx.Lock()
+	auth.sends = auth.sends[:0]
+	auth.sendsMtx.Unlock()
+
+	mkt.sendMMSnapshots(epoch)
+
+	auth.sendsMtx.Lock()
+	sends = make([]*msgjson.Message, len(auth.sends))
+	copy(sends, auth.sends)
+	auth.sendsMtx.Unlock()
+
+	// 3 subscribers now.
+	if len(sends) != 3 {
+		t.Fatalf("expected 3 sends, got %d", len(sends))
+	}
+	// Find user3's snapshot.
+	for _, msg := range sends {
+		var snap msgjson.MMEpochSnapshot
+		if err := msg.Unmarshal(&snap); err != nil {
+			t.Fatalf("unmarshal error: %v", err)
+		}
+		acct := account.AccountID{}
+		copy(acct[:], snap.AccountID)
+		if acct == user3 {
+			if len(snap.BuyOrders) != 0 {
+				t.Fatalf("user3: expected 0 buy orders, got %d", len(snap.BuyOrders))
+			}
+			if len(snap.SellOrders) != 0 {
+				t.Fatalf("user3: expected 0 sell orders, got %d", len(snap.SellOrders))
+			}
+		}
+	}
+}
+
+func TestSendMMSnapshotsAutoUnsub(t *testing.T) {
+	mkt, _, auth, cleanup, err := newTestMarket()
+	if err != nil {
+		t.Fatalf("newTestMarket failure: %v", err)
+	}
+	defer cleanup()
+
+	user1 := buyer3.Acct
+	user2 := seller3.Acct
+
+	mkt.SubscribeMMSnapshots(user1, false)
+	mkt.SubscribeMMSnapshots(user2, false)
+
+	// Make Send fail for user1.
+	auth.sendErrForMtx.Lock()
+	if auth.sendErrFor == nil {
+		auth.sendErrFor = make(map[account.AccountID]error)
+	}
+	auth.sendErrFor[user1] = errors.New("disconnected")
+	auth.sendErrForMtx.Unlock()
+
+	epoch := &readyEpoch{
+		EpochQueue: NewEpoch(100, 500),
+	}
+	mkt.sendMMSnapshots(epoch)
+
+	// user1 should have been auto-unsubscribed.
+	mkt.mmSnapshotMtx.RLock()
+	_, user1Found := mkt.mmSnapshotSubs[user1]
+	_, user2Found := mkt.mmSnapshotSubs[user2]
+	mkt.mmSnapshotMtx.RUnlock()
+	if user1Found {
+		t.Fatal("user1 should have been auto-unsubscribed after Send failure")
+	}
+	if !user2Found {
+		t.Fatal("user2 should still be subscribed")
+	}
+
+	// user2 should have received a message.
+	auth.sendsMtx.Lock()
+	nSends := len(auth.sends)
+	auth.sendsMtx.Unlock()
+	if nSends != 1 {
+		t.Fatalf("expected 1 send (user2 only), got %d", nSends)
+	}
+}
+
+func TestSendMMSnapshotsBothSides(t *testing.T) {
+	mkt, _, auth, cleanup, err := newTestMarket()
+	if err != nil {
+		t.Fatalf("newTestMarket failure: %v", err)
+	}
+	defer cleanup()
+
+	// Single user with orders on both sides of the book.
+	user := buyer3.Acct
+	mkt.SubscribeMMSnapshots(user, false)
+
+	buyRate := uint64(2_500_000_000)
+	sellRate := uint64(2_700_000_000)
+
+	loBuy := makeLO(buyer3, buyRate, 1, order.StandingTiF)
+	loBuy.AccountID = user
+	loSell := makeLO(seller3, sellRate, 1, order.StandingTiF)
+	loSell.AccountID = user
+
+	mkt.bookMtx.Lock()
+	if !mkt.book.Insert(loBuy) {
+		t.Fatal("failed to insert buy order")
+	}
+	if !mkt.book.Insert(loSell) {
+		t.Fatal("failed to insert sell order")
+	}
+	mkt.bookMtx.Unlock()
+
+	auth.sendsMtx.Lock()
+	auth.sends = auth.sends[:0]
+	auth.sendsMtx.Unlock()
+
+	epoch := &readyEpoch{
+		EpochQueue: NewEpoch(100, 500),
+	}
+	mkt.sendMMSnapshots(epoch)
+
+	auth.sendsMtx.Lock()
+	sends := make([]*msgjson.Message, len(auth.sends))
+	copy(sends, auth.sends)
+	auth.sendsMtx.Unlock()
+
+	if len(sends) != 1 {
+		t.Fatalf("expected 1 send, got %d", len(sends))
+	}
+
+	var snap msgjson.MMEpochSnapshot
+	if err := sends[0].Unmarshal(&snap); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if len(snap.BuyOrders) != 1 {
+		t.Fatalf("expected 1 buy order, got %d", len(snap.BuyOrders))
+	}
+	if len(snap.SellOrders) != 1 {
+		t.Fatalf("expected 1 sell order, got %d", len(snap.SellOrders))
+	}
+	if snap.BuyOrders[0].Rate != buyRate {
+		t.Fatalf("expected buy rate %d, got %d", buyRate, snap.BuyOrders[0].Rate)
+	}
+	if snap.SellOrders[0].Rate != sellRate {
+		t.Fatalf("expected sell rate %d, got %d", sellRate, snap.SellOrders[0].Rate)
+	}
+}
