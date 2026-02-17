@@ -370,6 +370,13 @@ type ethFetcher interface {
 	transactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error)
 	transactionAndReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, *types.Transaction, error)
 	nonce(ctx context.Context) (confirmed, next *big.Int, err error)
+	// l1FeeForCalldata estimates the L1 fee for the given calldata using
+	// the OP Stack GasPriceOracle precompile.
+	l1FeeForCalldata(ctx context.Context, calldata []byte) (*big.Int, error)
+	// l1FeeFromReceipt returns the L1 fee actually paid for a transaction,
+	// extracted from the receipt via eth_getTransactionReceipt.
+	// NOTE: Uses the deprecated l1Fee receipt field. See multirpc.go.
+	l1FeeFromReceipt(ctx context.Context, txHash common.Hash) (*big.Int, error)
 }
 
 // txPoolFetcher can be implemented by node types that support fetching of
@@ -432,6 +439,7 @@ type baseWallet struct {
 	compat       *CompatibilityData
 	tokens       map[uint32]*dexeth.Token
 	maxTxFeeGwei uint64
+	isOpStack    bool
 
 	startingBlocks atomic.Uint64
 
@@ -465,6 +473,12 @@ type baseWallet struct {
 		blockNum uint64
 		baseRate *big.Int
 		tipRate  *big.Int
+	}
+
+	l1Fees struct {
+		sync.Mutex
+		sendBlockNum uint64
+		sendL1Fee    uint64 // gwei, for a simple send tx
 	}
 
 	txDB txDB
@@ -508,6 +522,14 @@ type assetWallet struct {
 
 	contractorV0 contractor
 	contractorV1 contractor
+
+	l1OpFees struct {
+		sync.Mutex
+		blockNum    uint64
+		swapL1Fee   uint64 // gwei, for 1 swap tx
+		redeemL1Fee uint64 // gwei, for 1 redeem tx
+		refundL1Fee uint64 // gwei, for 1 refund tx
+	}
 
 	evmify  func(uint64) *big.Int
 	atomize func(*big.Int) uint64
@@ -1612,6 +1634,9 @@ type EVMWalletConfig struct {
 	// MaxTxFeeGwei is the absolute maximum fees we will allow for a single tx.
 	// It should be set to a relatively large value.
 	MaxTxFeeGwei uint64
+	// IsOpStack is true for OP Stack L2s (Base, etc.) that have an additional
+	// L1 security fee for posting calldata to Ethereum.
+	IsOpStack bool
 }
 
 func NewEVMWallet(cfg *EVMWalletConfig) (w *ETHWallet, err error) {
@@ -1655,6 +1680,7 @@ func NewEVMWallet(cfg *EVMWalletConfig) (w *ETHWallet, err error) {
 		wallets:             make(map[uint32]*assetWallet),
 		multiBalanceAddress: cfg.MultiBalAddress,
 		maxTxFeeGwei:        cfg.MaxTxFeeGwei,
+		isOpStack:           cfg.IsOpStack,
 	}
 
 	var maxSwapGas, maxRedeemGas uint64
@@ -2023,6 +2049,110 @@ func (w *baseWallet) tip() *types.Header {
 // tipHeight gets the current best header's tip height.
 func (w *baseWallet) tipHeight() uint64 {
 	return w.tip().Number.Uint64()
+}
+
+// l1FeesForOps returns the estimated L1 fees (in gwei) for swap, redeem, and
+// refund transactions on OP Stack chains. For non-OP Stack chains, returns
+// (0, 0, 0). Results are cached per block per asset, so token wallets get
+// estimates based on their own (larger) calldata rather than the base asset's.
+func (w *assetWallet) l1FeesForOps(contractVer uint32) (swap, redeem, refund uint64) {
+	if !w.isOpStack {
+		return 0, 0, 0
+	}
+
+	tipNum := w.tipHeight()
+
+	// Check cache.
+	w.l1OpFees.Lock()
+	if w.l1OpFees.blockNum == tipNum && tipNum > 0 {
+		swap, redeem, refund = w.l1OpFees.swapL1Fee, w.l1OpFees.redeemL1Fee, w.l1OpFees.refundL1Fee
+		w.l1OpFees.Unlock()
+		return
+	}
+	// Save stale values as fallback in case fresh estimates fail.
+	staleSwap, staleRedeem, staleRefund := w.l1OpFees.swapL1Fee, w.l1OpFees.redeemL1Fee, w.l1OpFees.refundL1Fee
+	w.l1OpFees.Unlock()
+
+	// Fetch fresh estimates without holding the lock.
+	getL1Fee := func(packFn func(contractor) ([]byte, error)) uint64 {
+		var data []byte
+		packErr := w.withContractor(contractVer, func(c contractor) error {
+			var err error
+			data, err = packFn(c)
+			return err
+		})
+		if packErr != nil {
+			w.log.Warnf("l1FeesForOps: error packing calldata: %v", packErr)
+			return 0
+		}
+		l1Fee, feeErr := w.node.l1FeeForCalldata(w.ctx, data)
+		if feeErr != nil {
+			w.log.Warnf("l1FeesForOps: error getting L1 fee: %v", feeErr)
+			return 0
+		}
+		return dexeth.WeiToGweiCeil(l1Fee)
+	}
+
+	swapL1 := getL1Fee(func(c contractor) ([]byte, error) { return c.packInitiateData(1) })
+	redeemL1 := getL1Fee(func(c contractor) ([]byte, error) { return c.packRedeemData(1) })
+	refundL1 := getL1Fee(func(c contractor) ([]byte, error) { return c.packRefundData() })
+
+	// Update cache under lock. Only update if all estimates succeeded. A zero
+	// return from getL1Fee indicates an error, and we don't want to cache
+	// that for the entire block — better to retry on the next call.
+	w.l1OpFees.Lock()
+	if swapL1 > 0 && redeemL1 > 0 && refundL1 > 0 {
+		w.l1OpFees.swapL1Fee = swapL1
+		w.l1OpFees.redeemL1Fee = redeemL1
+		w.l1OpFees.refundL1Fee = refundL1
+		w.l1OpFees.blockNum = tipNum
+		swap, redeem, refund = swapL1, redeemL1, refundL1
+	} else {
+		// Return stale values on failure rather than zeros.
+		swap, redeem, refund = staleSwap, staleRedeem, staleRefund
+	}
+	w.l1OpFees.Unlock()
+
+	w.log.Tracef("l1FeesForOps: swap=%d redeem=%d refund=%d gwei (block %d)",
+		swap, redeem, refund, tipNum)
+
+	return
+}
+
+// sendL1Fee returns the estimated L1 fee (in gwei) for a simple ETH send
+// transaction on OP Stack chains. For non-OP Stack chains, returns 0.
+// The value is cached per block.
+func (w *baseWallet) sendL1Fee() uint64 {
+	if !w.isOpStack {
+		return 0
+	}
+
+	tipNum := w.tipHeight()
+
+	// Check cache.
+	w.l1Fees.Lock()
+	if w.l1Fees.sendBlockNum == tipNum && tipNum > 0 {
+		fee := w.l1Fees.sendL1Fee
+		w.l1Fees.Unlock()
+		return fee
+	}
+	staleFee := w.l1Fees.sendL1Fee
+	w.l1Fees.Unlock()
+
+	// Fetch without holding the lock.
+	l1Fee, err := w.node.l1FeeForCalldata(w.ctx, nil)
+	if err != nil {
+		w.log.Warnf("sendL1Fee: error getting L1 fee: %v", err)
+		return staleFee
+	}
+
+	// Update cache.
+	fee := dexeth.WeiToGweiCeil(l1Fee)
+	w.l1Fees.Lock()
+	w.l1Fees.sendL1Fee = fee
+	w.l1Fees.sendBlockNum = tipNum
+	w.l1Fees.Unlock()
+	return fee
 }
 
 // Reconfigure attempts to reconfigure the wallet.
@@ -2703,8 +2833,8 @@ func (w *assetWallet) maxOrder(lotSize uint64, maxFeeRate uint64, initAssetVer,
 		return nil, fmt.Errorf("gasEstimate error: %w", err)
 	}
 
-	refundCost := g.Refund * maxFeeRate
-	oneFee := g.oneGas * maxFeeRate
+	refundCost := g.Refund*maxFeeRate + g.refundL1Fee
+	oneFee := g.oneGas*maxFeeRate + g.swapL1Fee + g.redeemL1Fee
 	feeReservesPerLot := oneFee + refundCost
 	var lots uint64
 	if feeWallet == nil {
@@ -2774,9 +2904,10 @@ func (w *assetWallet) SingleLotSwapRefundFees(assetVer uint32, feeSuggestion uin
 	contractVer := contractVersion(assetVer)
 	g := w.gases(contractVer)
 	if g == nil {
-		return 0, 0, fmt.Errorf("no gases known for %d contract version %d", w.assetID, contractVersion(assetVer))
+		return 0, 0, fmt.Errorf("no gases known for %d contract version %d", w.assetID, contractVer)
 	}
-	return g.Swap * feeSuggestion, g.Refund * feeSuggestion, nil
+	swapL1, _, refundL1 := w.l1FeesForOps(contractVer)
+	return g.Swap*feeSuggestion + swapL1, g.Refund*feeSuggestion + refundL1, nil
 }
 
 // estimateSwap prepares an *asset.SwapEstimate. The estimate does not include
@@ -2805,16 +2936,18 @@ func (w *assetWallet) estimateSwap(
 	// NOTE: nSwap is neither best nor worst case. A single match can be
 	// multiple lots. See RealisticBestCase descriptions.
 
+	swapL1, _, _ := w.l1FeesForOps(contractVer)
+
 	value := lots * lotSize
 	oneGasMax := oneSwap * lots
-	maxFees := oneGasMax * maxFeeRate
+	maxFees := oneGasMax*maxFeeRate + swapL1*lots
 
 	return &asset.SwapEstimate{
 		Lots:               lots,
 		Value:              value,
 		MaxFees:            maxFees,
-		RealisticWorstCase: oneGasMax * feeRateGwei,
-		RealisticBestCase:  oneSwap * feeRateGwei, // not even batch, just perfect match
+		RealisticWorstCase: oneGasMax*feeRateGwei + swapL1*lots,
+		RealisticBestCase:  oneSwap*feeRateGwei + swapL1, // single tx
 		FeeReservesPerLot:  feeReservesPerLot,
 	}, nil
 }
@@ -2832,8 +2965,9 @@ func (w *assetWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, err
 		return nil, err
 	}
 
-	bestCase := nRedeem * req.FeeSuggestion
-	worstCase := oneRedeem * req.Lots * req.FeeSuggestion
+	_, redeemL1, _ := w.l1FeesForOps(contractVersion(req.AssetVersion))
+	bestCase := nRedeem*req.FeeSuggestion + redeemL1
+	worstCase := oneRedeem*req.Lots*req.FeeSuggestion + redeemL1*req.Lots
 	userOpRequired := false
 
 	w.bundlerMtx.RLock()
@@ -2861,9 +2995,10 @@ func (w *assetWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, err
 func (w *assetWallet) SingleLotRedeemFees(assetVer uint32, feeSuggestion uint64) (fees uint64, err error) {
 	g := w.gases(contractVersion(assetVer))
 	if g == nil {
-		return 0, fmt.Errorf("no gases known for %d, constract version %d", w.assetID, contractVersion(assetVer))
+		return 0, fmt.Errorf("no gases known for %d, contract version %d", w.assetID, contractVersion(assetVer))
 	}
-	return g.Redeem * feeSuggestion, nil
+	_, redeemL1, _ := w.l1FeesForOps(contractVersion(assetVer))
+	return g.Redeem*feeSuggestion + redeemL1, nil
 }
 
 // coin implements the asset.Coin interface for ETH
@@ -2940,7 +3075,7 @@ func (w *ETHWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uint6
 		return nil, nil, 0, fmt.Errorf("error estimating swap gas: %v", err)
 	}
 
-	ethToLock := ord.MaxFeeRate*g.Swap*ord.MaxSwapCount + ord.Value
+	ethToLock := ord.MaxFeeRate*g.Swap*ord.MaxSwapCount + g.swapL1Fee*ord.MaxSwapCount + ord.Value
 	// Note: In a future refactor, we could lock the redemption funds here too
 	// and signal to the user so that they don't call `RedeemN`. This has the
 	// same net effect, but avoids a lockFunds -> unlockFunds for us and likely
@@ -2986,7 +3121,7 @@ func (w *TokenWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uin
 		return nil, nil, 0, fmt.Errorf("error estimating swap gas: %v", err)
 	}
 
-	ethToLock := ord.MaxFeeRate * g.Swap * ord.MaxSwapCount
+	ethToLock := ord.MaxFeeRate*g.Swap*ord.MaxSwapCount + g.swapL1Fee*ord.MaxSwapCount
 	var success bool
 	if err = w.lockFunds(ord.Value, initiationReserve); err != nil {
 		return nil, nil, 0, fmt.Errorf("error locking token funds: %v", err)
@@ -3020,7 +3155,7 @@ func (w *ETHWallet) FundMultiOrder(ord *asset.MultiOrder, maxLock uint64) ([]ass
 	var totalToLock uint64
 	allCoins := make([]asset.Coins, 0, len(ord.Values))
 	for _, value := range ord.Values {
-		toLock := ord.MaxFeeRate*g.Swap*value.MaxSwapCount + value.Value
+		toLock := ord.MaxFeeRate*g.Swap*value.MaxSwapCount + g.swapL1Fee*value.MaxSwapCount + value.Value
 		allCoins = append(allCoins, asset.Coins{w.createFundingCoin(toLock)})
 		totalToLock += toLock
 	}
@@ -3067,7 +3202,7 @@ func (w *TokenWallet) FundMultiOrder(ord *asset.MultiOrder, maxLock uint64) ([]a
 	var totalETHToLock, totalTokenToLock uint64
 	allCoins := make([]asset.Coins, 0, len(ord.Values))
 	for _, value := range ord.Values {
-		ethToLock := ord.MaxFeeRate * g.Swap * value.MaxSwapCount
+		ethToLock := ord.MaxFeeRate*g.Swap*value.MaxSwapCount + g.swapL1Fee*value.MaxSwapCount
 		tokenToLock := value.Value
 		allCoins = append(allCoins, asset.Coins{w.createTokenFundingCoin(tokenToLock, ethToLock)})
 		totalETHToLock += ethToLock
@@ -3108,6 +3243,10 @@ type gasEstimate struct {
 	// and nGas will include both swap and redeem gas, but note that the redeem
 	// gas may be zero if the redeemed asset is not ETH or an ETH token.
 	oneGas, nGas, nSwap, nRedeem uint64
+	// L1 fees in gwei (OP Stack only, 0 otherwise). Per-transaction flat costs.
+	swapL1Fee   uint64
+	redeemL1Fee uint64
+	refundL1Fee uint64
 }
 
 // initGasEstimate gets the best available gas estimate for n initiations. A
@@ -3141,6 +3280,9 @@ func (w *assetWallet) initGasEstimate(n int, initContractVer, redeemContractVer,
 		est.oneGas += est.Redeem
 		est.nGas += est.nRedeem
 	}
+
+	// Populate L1 fees for OP Stack chains.
+	est.swapL1Fee, est.redeemL1Fee, est.refundL1Fee = w.l1FeesForOps(initContractVer)
 
 	return
 }
@@ -4014,7 +4156,8 @@ func (w *assetWallet) Redeem(ctx context.Context, form *asset.RedeemForm, feeWal
 
 	// This is still a fee estimate. The actual gas cost will be returned in the
 	// receipt.
-	fees := g.RedeemN(len(form.Redemptions)) * form.FeeSuggestion
+	_, redeemL1, _ := w.l1FeesForOps(contractVer)
+	fees := g.RedeemN(len(form.Redemptions))*form.FeeSuggestion + redeemL1*n
 	return txs, outputCoin, fees, nil
 }
 
@@ -5514,7 +5657,7 @@ func (w *ETHWallet) canSend(value uint64, verifyBalance, isPreEstimate bool) (ma
 	}
 	maxFeeRateGwei := dexeth.WeiToGweiCeil(maxFeeRate)
 
-	maxFee = defaultSendGasLimit * maxFeeRateGwei
+	maxFee = defaultSendGasLimit*maxFeeRateGwei + w.sendL1Fee()
 
 	if isPreEstimate {
 		maxFee = maxFee * 12 / 10 // 20% buffer
@@ -5551,7 +5694,7 @@ func (w *TokenWallet) canSend(value uint64, verifyBalance, isPreEstimate bool) (
 		return 0, nil, nil, fmt.Errorf("gas table not found")
 	}
 
-	maxFee = maxFeeRateGwei * g.Transfer
+	maxFee = maxFeeRateGwei*g.Transfer + w.sendL1Fee()
 
 	if isPreEstimate {
 		maxFee = maxFee * 12 / 10 // 20% buffer
@@ -5597,7 +5740,7 @@ func (w *ETHWallet) EstimateSendTxFee(addr string, value, _ uint64, _, maxWithdr
 
 // StandardSendFee returns the fees for a simple send tx.
 func (w *ETHWallet) StandardSendFee(feeRate uint64) uint64 {
-	return defaultSendGasLimit * feeRate
+	return defaultSendGasLimit*feeRate + w.sendL1Fee()
 }
 
 // EstimateSendTxFee returns a tx fee rate estimate for a send tx. The provided fee
@@ -5622,7 +5765,7 @@ func (w *TokenWallet) StandardSendFee(feeRate uint64) uint64 {
 		w.log.Errorf("error getting gases for token %s", w.token.Name)
 		return 0
 	}
-	return g.Transfer * feeRate
+	return g.Transfer*feeRate + w.sendL1Fee()
 }
 
 // RestorationInfo returns information about how to restore the wallet in
@@ -5805,6 +5948,14 @@ func (w *baseWallet) swapOrRedemptionFeesPaidOnChainTx(ctx context.Context, txHa
 	}
 
 	bigFees := new(big.Int).Mul(receipt.EffectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
+	if w.isOpStack {
+		l1Fee, err := w.node.l1FeeFromReceipt(ctx, txHash)
+		if err != nil {
+			w.log.Warnf("Error getting L1 fee for %s: %v", txHash, err)
+		} else if l1Fee != nil && l1Fee.Sign() > 0 {
+			bigFees.Add(bigFees, l1Fee)
+		}
+	}
 	fee := dexeth.WeiToGweiCeil(bigFees)
 	locators, _, err := extractSecretHashes(tx.Data(), contractVer, isInit)
 	if err != nil {
@@ -7342,6 +7493,14 @@ func (w *baseWallet) updatePendingTx(tip uint64, pendingTx *extendedWalletTx) {
 	}
 
 	bigFees := new(big.Int).Mul(effectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
+	if w.isOpStack {
+		l1Fee, err := w.node.l1FeeFromReceipt(w.ctx, pendingTx.txHash)
+		if err != nil {
+			w.log.Warnf("Error getting L1 fee for %s: %v", pendingTx.txHash, err)
+		} else if l1Fee != nil && l1Fee.Sign() > 0 {
+			bigFees.Add(bigFees, l1Fee)
+		}
+	}
 	pendingTx.Fees = dexeth.WeiToGweiCeil(bigFees)
 	pendingTx.BlockNumber = receipt.BlockNumber.Uint64()
 	if confs := safeConfs(tip, pendingTx.BlockNumber); confs >= w.finalizeConfs {
@@ -7996,12 +8155,21 @@ func (w *baseWallet) extendAndStoreTx(genTxResult *genTxResult, tokenAssetID *ui
 
 	now := time.Now()
 
+	fees := dexeth.WeiToGweiCeil(transactionFeeLimit(genTxResult.tx))
+	if w.isOpStack {
+		if l1, err := w.node.l1FeeForCalldata(w.ctx, genTxResult.tx.Data()); err != nil {
+			w.log.Warnf("Error estimating L1 fee for %s: %v", genTxResult.tx.Hash(), err)
+		} else if l1 != nil && l1.Sign() > 0 {
+			fees += dexeth.WeiToGweiCeil(l1)
+		}
+	}
+
 	wt := &extendedWalletTx{
 		WalletTransaction: &asset.WalletTransaction{
 			Type:      genTxResult.txType,
 			ID:        genTxResult.tx.Hash().String(),
 			Amount:    genTxResult.amt,
-			Fees:      dexeth.WeiToGweiCeil(transactionFeeLimit(genTxResult.tx)), // updated later
+			Fees:      fees, // updated later with actual receipt fees
 			TokenID:   tokenAssetID,
 			Recipient: genTxResult.recipient,
 			AdditionalData: map[string]string{
