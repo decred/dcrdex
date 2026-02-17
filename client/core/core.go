@@ -1532,9 +1532,9 @@ type Core struct {
 	mesh    *mesh.Mesh
 	meshCM  *dex.ConnectionMaster
 
-	politeia       *pi.Politeia
-	politeiaURL    string
-	politiaSyncing atomic.Bool
+	politeia        *pi.Politeia
+	politeiaURL     string
+	politeiaSyncing atomic.Bool
 }
 
 // New is the constructor for a new Core.
@@ -1711,10 +1711,11 @@ func (c *Core) Run(ctx context.Context) {
 	c.politeiaURL = pi.PoliteiaMainnetHost
 	c.politeia, err = pi.New(ctx, c.politeiaURL, filepath.Join(filepath.Dir(c.cfg.DBPath), "politeia"), c.log.SubLogger("Politeia"))
 	if err != nil {
-		c.log.Errorf("failed to set up politeia: %v", err.Error())
-		return
+		c.log.Errorf("failed to set up politeia: %v", err)
 	}
-	defer c.politeia.Close()
+	if c.politeia != nil {
+		defer c.politeia.Close()
+	}
 
 	// The DB starts first and stops last.
 	ctxDB, stopDB := context.WithCancel(context.Background())
@@ -1790,31 +1791,35 @@ fetchers:
 	}()
 
 	// Start a goroutine to keep proposals synced.
-	c.wg.Add(1)
-	go func() {
-		defer c.wg.Done()
+	if c.politeia != nil {
+		c.wg.Add(1)
+		go func() {
+			defer c.wg.Done()
 
-		// Initiate first sync.
-		c.politiaSyncing.Store(true)
-		err := c.politeia.ProposalsSync()
-		if err != nil {
-			c.log.Errorf("politeia.ProposalsSync failed: %v", err)
-		}
-		c.politiaSyncing.Store(false)
-
-		tick := time.NewTicker(time.Minute * 20)
-		defer tick.Stop()
-		for {
-			select {
-			case <-tick.C:
-				c.politiaSyncing.Store(true)
-				c.politeia.ProposalsSync()
-				c.politiaSyncing.Store(false)
-			case <-ctx.Done():
-				return
+			// Initiate first sync.
+			c.politeiaSyncing.Store(true)
+			err := c.politeia.ProposalsSync()
+			if err != nil {
+				c.log.Errorf("politeia.ProposalsSync failed: %v", err)
 			}
-		}
-	}()
+			c.politeiaSyncing.Store(false)
+
+			tick := time.NewTicker(time.Minute * 20)
+			defer tick.Stop()
+			for {
+				select {
+				case <-tick.C:
+					c.politeiaSyncing.Store(true)
+					if err := c.politeia.ProposalsSync(); err != nil {
+						c.log.Errorf("politeia.ProposalsSync failed: %v", err)
+					}
+					c.politeiaSyncing.Store(false)
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
 
 	c.wg.Wait() // block here until all goroutines except DB complete
 

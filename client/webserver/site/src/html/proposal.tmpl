@@ -3,7 +3,6 @@
 <div id="main" data-handler="proposal" class="py-5 overflow-y-auto">
     {{$politeiaURL := .PoliteiaURL}}
     {{$shortToken := .ShortToken}}
-    {{$statuses := .VoteStatuses }}
     {{$votingPower := 0}}
     {{$proposalToken := ""}}
     {{with .Proposal}}
@@ -125,7 +124,7 @@
                 </p>
                 <div>[[[voting_power]]]: {{$votingPower}}</div>
                 <div class="vote-actions">
-                    <button class="vote-btn vote-yes rounded3 active" type="button" data-value="yes">
+                    <button class="vote-btn vote-yes rounded3" type="button" data-value="yes">
                         <span class="icon">
                             <svg class="vote-icon" viewBox="0 0 24 24" width="20" height="20" fill="none"
                                 xmlns="http://www.w3.org/2000/svg">

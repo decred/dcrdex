@@ -302,8 +302,8 @@ input:invalid {
   border-right: 1px solid var(--border-color);
 }
 
-div[data-handler=proposal]
-div[data-handler=proposals]
+div[data-handler=proposal],
+div[data-handler=proposals],
 div[data-handler=dexsettings],
 div[data-handler=init],
 div[data-handler=login],
@@ -339,7 +339,8 @@ div[data-handler=wallets] {
   }
 }
 
-.card {
+div[data-handler=proposal] .card,
+div[data-handler=proposals] .card {
   background-color: var(--body-bg);
   padding: 3px;
 }

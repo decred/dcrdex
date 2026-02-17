@@ -115,7 +115,7 @@
             {{if .Pagination.HasNext}}
             <div class="page-item m-1">
                 <a class="page-link"
-                    href="?page={{.Pagination.NextPage}}&status={{if $statusFilter }}&status={{$statusFilter}}{{else}}all{{end}}{{if $query }}&query={{$query}}{{end}}">›</a>
+                    href="?page={{.Pagination.NextPage}}&status={{if $statusFilter }}{{$statusFilter}}{{else}}all{{end}}{{if $query }}&query={{$query}}{{end}}">›</a>
             </div>
             {{end}}
         </div>

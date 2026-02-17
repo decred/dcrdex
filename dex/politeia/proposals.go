@@ -55,9 +55,6 @@ func (p *Politeia) ProposalsSync() error {
 	}
 	defer p.updating.Store(false)
 
-	// Save the timestamp of the last update check.
-	defer p.lastSync.Store(time.Now().UTC().Unix())
-
 	// Update db with any new proposals on politeia server.
 	err := p.proposalsNewUpdate()
 	if err != nil {
@@ -70,6 +67,9 @@ func (p *Politeia) ProposalsSync() error {
 	if err != nil {
 		return err
 	}
+
+	// Save the timestamp of the last update check only on success.
+	p.lastSync.Store(time.Now().UTC().Unix())
 
 	p.log.Info("Politeia records were synced.")
 
@@ -530,6 +530,10 @@ func (p *Politeia) proposalsInProgressUpdate() error {
 		if err != nil {
 			return fmt.Errorf("fetchProposalsData failed with err: %w", err)
 		}
+		if len(proposals) == 0 {
+			p.log.Warnf("No data returned for in-progress proposal %s, skipping update", prop.Token)
+			continue
+		}
 		proposal := proposals[0]
 
 		if prop.IsEqual(*proposal) {
@@ -580,7 +584,7 @@ func proposalKey(proposalToken string) []byte {
 // the proposal token prefixed with proposalStatusIndexPrefix and the proposal
 // vote status to allow querying proposals by their vote status.
 func proposalsStatusIndex(p *Proposal) []byte {
-	reversed := math.MaxInt64 - p.Timestamp
+	reversed := uint64(math.MaxInt64) - p.Timestamp
 	return []byte(fmt.Sprintf(
 		"%s:%s:%020d:%s",
 		proposalStatusIndexPrefix,
@@ -594,7 +598,7 @@ func proposalsStatusIndex(p *Proposal) []byte {
 // the proposal token prefixed with proposalTimestampIndexPrefix and the proposal
 // timestamp to allow querying proposals by their timestamp.
 func proposalsTimestampIndex(p *Proposal) []byte {
-	reversed := math.MaxInt64 - p.Timestamp
+	reversed := uint64(math.MaxInt64) - p.Timestamp
 	return []byte(fmt.Sprintf(
 		"%s:%020d:%s",
 		proposalTimestampIndexPrefix,
@@ -633,7 +637,7 @@ func iterateTable(db *lexi.DB, tableName string, limit int, f func(val []byte) e
 		return nil
 	})
 
-	return nil
+	return err
 }
 
 // iterateIndex iterates all entries in an index and returns the entries
