@@ -328,6 +328,14 @@ func (n *testNode) nonce(ctx context.Context) (*big.Int, *big.Int, error) {
 	return big.NewInt(0), big.NewInt(1), nil
 }
 
+func (n *testNode) l1FeeForCalldata(ctx context.Context, calldata []byte) (*big.Int, error) {
+	return new(big.Int), nil
+}
+
+func (n *testNode) l1FeeFromReceipt(ctx context.Context, txHash common.Hash) (*big.Int, error) {
+	return new(big.Int), nil
+}
+
 func (n *testNode) setBalanceError(w *assetWallet, err error) {
 	n.balErr = err
 	n.tokenContractor.balErr = err
@@ -489,6 +497,18 @@ func (c *tContractor) estimateRedeemGas(ctx context.Context, secrets [][32]byte,
 
 func (c *tContractor) estimateRefundGas(ctx context.Context, locator []byte) (uint64, error) {
 	return c.gasEstimates.Refund, c.refundGasErr
+}
+
+func (c *tContractor) packInitiateData(n int) ([]byte, error) {
+	return make([]byte, 100*n), nil // representative-sized calldata
+}
+
+func (c *tContractor) packRedeemData(n int) ([]byte, error) {
+	return make([]byte, 100*n), nil
+}
+
+func (c *tContractor) packRefundData() ([]byte, error) {
+	return make([]byte, 100), nil
 }
 
 func (c *tContractor) isRedeemable(locator []byte, secret [32]byte) (bool, error) {
