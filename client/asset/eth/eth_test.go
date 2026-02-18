@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/asset"
+	"decred.org/dcrdex/client/asset/broadcast"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
@@ -1670,6 +1671,8 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 		pendingTxCheckBal:  new(big.Int),
 		pendingApprovals:   make(map[common.Address]*pendingApproval),
 		approvalCache:      make(map[common.Address]bool),
+		swapSeen:           broadcast.NewCache[*ethSwapSeen](),
+		redeemSeen:         broadcast.NewCache[*ethSwapSeen](),
 		// move up after review
 		wi:   WalletInfo,
 		emit: asset.NewWalletEmitter(emitChan, BipID, tLogger),

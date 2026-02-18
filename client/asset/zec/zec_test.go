@@ -1044,8 +1044,13 @@ func TestSwap(t *testing.T) {
 	}
 	swaps.Inputs = coins
 
-	// Make sure we can succeed again.
-	queueSuccess()
+	// Make sure we can succeed again. The first successful swap cached
+	// the result, so RecoverFromCache will rebroadcast and return early.
+	cl.queueResponse("sendrawtransaction", func(args []json.RawMessage) (json.RawMessage, error) {
+		rawSent = true
+		tx, _ := signRawJSONTx(args[0])
+		return json.Marshal(tx.TxHash().String())
+	})
 	_, _, _, err = w.Swap(t.Context(), swaps)
 	if err != nil {
 		t.Fatalf("re-swap error: %v", err)
