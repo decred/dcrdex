@@ -1667,19 +1667,19 @@ func (m *Market) coinsLocked(o order.Order) ([]order.CoinID, uint32) {
 	return lockedCoins, assetID
 }
 
-func (m *Market) lockOrderCoins(o order.Order) {
+func (m *Market) lockOrderCoins(o order.Order) bool {
 	if o.Type() == order.CancelOrderType {
-		return
+		return true
 	}
 
 	if o.Trade().Sell {
 		if m.coinLockerBase != nil {
-			m.coinLockerBase.LockOrdersCoins([]order.Order{o})
+			return len(m.coinLockerBase.LockOrdersCoins([]order.Order{o})) == 0
 		}
-
 	} else if m.coinLockerQuote != nil {
-		m.coinLockerQuote.LockOrdersCoins([]order.Order{o})
+		return len(m.coinLockerQuote.LockOrdersCoins([]order.Order{o})) == 0
 	}
+	return true
 }
 
 func (m *Market) unlockOrderCoins(o order.Order) {
@@ -1877,7 +1877,11 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 	// For market and limit orders, lock the backing coins NOW so orders using
 	// locked coins cannot get into the epoch queue. Later, in processReadyEpoch
 	// or the Swapper, release these coins when the swap is completed.
-	m.lockOrderCoins(ord)
+	if !m.lockOrderCoins(ord) {
+		log.Debugf("processOrder: Failed to lock coins for order %v", ord)
+		errChan <- ErrInvalidOrder
+		return nil
+	}
 
 	// Check for known orders in the DB with the same Commitment.
 	//
