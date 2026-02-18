@@ -22,25 +22,40 @@ then
     exit 1
 fi
 
-if [ "${VERSION}" -ne "0" ]
-then
-  cd ./${PKG_NAME} && npm install && cd ../
-fi
-
 mkdir temp
 mkdir -p ${PKG_NAME}
 
 if [ "${VERSION}" -eq "0" ]
 then
   solc --abi --bin --bin-runtime --overwrite --optimize ${SOLIDITY_FILE} -o ./temp/
+  ABI_FILE=./temp/${CONTRACT_NAME}.abi
+  BIN_FILE=./temp/${CONTRACT_NAME}.bin
 else
-  solc --abi --bin --bin-runtime --overwrite --optimize --base-path ./${PKG_NAME}/node_modules ${SOLIDITY_FILE} -o ./temp/
+  cd ./${PKG_NAME} && npm install && npx hardhat compile && cd ../
+
+  # Extract ABI and bytecode from Hardhat artifacts.
+  ARTIFACT=./${PKG_NAME}/artifacts/contracts/${CONTRACT_NAME}V${VERSION}.sol/${CONTRACT_NAME}.json
+  if [ ! -f "${ARTIFACT}" ]
+  then
+      echo "Hardhat artifact not found: ${ARTIFACT}" >&2
+      rm -fr temp
+      exit 1
+  fi
+
+  node -e "
+    const art = require('./${PKG_NAME}/artifacts/contracts/${CONTRACT_NAME}V${VERSION}.sol/${CONTRACT_NAME}.json');
+    const fs = require('fs');
+    fs.writeFileSync('./temp/${CONTRACT_NAME}.abi', JSON.stringify(art.abi));
+    fs.writeFileSync('./temp/${CONTRACT_NAME}.bin', art.bytecode.replace('0x', ''));
+  "
+  ABI_FILE=./temp/${CONTRACT_NAME}.abi
+  BIN_FILE=./temp/${CONTRACT_NAME}.bin
 fi
 
-abigen --abi ./temp/${CONTRACT_NAME}.abi --bin ./temp/${CONTRACT_NAME}.bin --pkg ${PKG_NAME} \
+abigen --abi ${ABI_FILE} --bin ${BIN_FILE} --pkg ${PKG_NAME} \
  --type ${CONTRACT_NAME} --out ./${PKG_NAME}/contract.go
 
-BYTECODE=$(<./temp/${CONTRACT_NAME}.bin)
+BYTECODE=$(<${BIN_FILE})
 
 echo "${BYTECODE}" | xxd -r -p > "v${VERSION}/contract.bin"
 
