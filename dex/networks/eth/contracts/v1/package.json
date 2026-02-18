@@ -4,14 +4,14 @@
     "description": "",
     "main": "index.js",
     "scripts": {
-        "test": "echo \"Error: no test specified\" && exit 1"
+        "test": "npx hardhat test"
     },
     "keywords": [],
     "author": "",
     "license": "ISC",
     "dependencies": {
-        "@account-abstraction/contracts": "^0.6.0",
-        "@openzeppelin/contracts": "^4.2.0",
+        "@account-abstraction/contracts": "^0.7.0",
+        "@openzeppelin/contracts": "^5.0.0",
         "crypto": "^1.0.1",
         "dotenv": "^16.4.1",
         "hardhat": "^2.19.5"

@@ -599,8 +599,8 @@ func (c *tokenContractorV0) tokenAddress() common.Address {
 // using ERC-4337 account abstraction.
 type gaslessRedeemContractor interface {
 	// gaslessRedeemCalldata creates the calldata to be sent to the bundler
-	// for a gasless redemption.
-	gaslessRedeemCalldata(redeems []*asset.Redemption) ([]byte, error)
+	// for a gasless redemption. The nonce must match the UserOp nonce.
+	gaslessRedeemCalldata(redeems []*asset.Redemption, nonce *big.Int) ([]byte, error)
 	// entrypointAddress returns the address of the entrypoint contract specified
 	// in the ETH Swap contract.
 	entrypointAddress() (common.Address, error)
@@ -741,12 +741,12 @@ func (c *contractorV1) redeem(txOpts *bind.TransactOpts, redeems []*asset.Redemp
 	return c.Redeem(txOpts, c.tokenAddr, versionedRedemptions)
 }
 
-func (c *contractorV1) gaslessRedeemCalldata(redeems []*asset.Redemption) ([]byte, error) {
+func (c *contractorV1) gaslessRedeemCalldata(redeems []*asset.Redemption, nonce *big.Int) ([]byte, error) {
 	versionedRedemptions, err := c.convertRedeems(redeems)
 	if err != nil {
 		return nil, err
 	}
-	return c.abi.Pack("redeemAA", versionedRedemptions)
+	return c.abi.Pack("redeemAA", versionedRedemptions, nonce)
 }
 
 func (c *contractorV1) entrypointAddress() (common.Address, error) {
@@ -767,7 +767,7 @@ func (c *contractorV1) estimateInitGas(ctx context.Context, n int) (uint64, erro
 		var secretHash [32]byte
 		copy(secretHash[:], encode.RandomBytes(32))
 		initiations = append(initiations, swapv1.ETHSwapVector{
-			RefundTimestamp: 1,
+			RefundTimestamp: uint64(time.Now().Add(time.Hour * 6).Unix()),
 			SecretHash:      secretHash,
 			Initiator:       c.acctAddr,
 			Participant:     common.BytesToAddress(encode.RandomBytes(20)),
