@@ -91,7 +91,7 @@ it is the easiest to setup and generally has the most up-to-date downloads. From
 
 Pick **just one** method:
 
-1. Visit [bisonwallet.com](https://bisonwallet.com) and download the
+1. Visit [bisonwallet.org](https://bisonwallet.org) and download the
    appropriate installer for your operating system.
 2. Download standalone Bison Wallet for your operating system for the
    [latest release on GitHub](https://github.com/decred/dcrdex/releases).
