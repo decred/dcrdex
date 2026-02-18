@@ -5736,6 +5736,49 @@ func (c *Core) UnapproveBridgeContract(assetID uint32, bridgeName string) (strin
 	return txID, nil
 }
 
+// DeployContract deploys a smart contract to one or more EVM chains.
+func (c *Core) DeployContract(appPW []byte, assetIDs []uint32, txData []byte, contractVer *uint32, tokenAddress string) ([]*DeployContractResult, error) {
+	_, err := c.encryptionKey(appPW)
+	if err != nil {
+		return nil, newError(authErr, "DeployContract password error: %w", err)
+	}
+	results := make([]*DeployContractResult, 0, len(assetIDs))
+	for _, assetID := range assetIDs {
+		res := &DeployContractResult{AssetID: assetID, Symbol: unbip(assetID)}
+		wallet, err := c.connectedWallet(assetID)
+		if err != nil {
+			res.Error = err.Error()
+			results = append(results, res)
+			continue
+		}
+		deployer, ok := wallet.Wallet.(asset.ContractDeployer)
+		if !ok {
+			res.Error = "wallet does not support contract deployment"
+			results = append(results, res)
+			continue
+		}
+		deployData := txData
+		if deployData == nil && contractVer != nil {
+			deployData, err = deployer.BuildDeployTxData(*contractVer, tokenAddress)
+			if err != nil {
+				res.Error = err.Error()
+				results = append(results, res)
+				continue
+			}
+		}
+		contractAddr, txID, err := deployer.DeployContract(deployData)
+		if err != nil {
+			res.Error = err.Error()
+			results = append(results, res)
+			continue
+		}
+		res.ContractAddr = contractAddr
+		res.TxID = txID
+		results = append(results, res)
+	}
+	return results, nil
+}
+
 // Bridge initiates a bridge.
 func (c *Core) Bridge(fromAssetID, toAssetID uint32, amt uint64, bridgeName string) (txID string, err error) {
 	// Connect and unlock the source wallet.

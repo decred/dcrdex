@@ -781,6 +781,7 @@ func TestAllRoutesHaveCorrectType(t *testing.T) {
 		"updaterunningbotinv": true, // market + required inventory
 		"postbond":            true, // maintainTier defaults true
 		"withdraw":            true, // postProcess sets subtract
+		"deploycontract":      true, // required slice field (chains)
 	}
 
 	// Verify that buildPayload returns the correct pointer type for every

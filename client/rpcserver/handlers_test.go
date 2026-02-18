@@ -1882,3 +1882,95 @@ func TestHandlePruneMMSnapshots(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleDeployContract(t *testing.T) {
+	bytecode := "6080604052"
+	contractVer := uint32(0)
+	goodResults := []*core.DeployContractResult{{
+		AssetID:      60,
+		Symbol:       "eth",
+		ContractAddr: "0x1234",
+		TxID:         "0xabcd",
+	}}
+	tests := []struct {
+		name        string
+		params      any
+		results     []*core.DeployContractResult
+		coreErr     error
+		wantErrCode int
+	}{{
+		name: "ok with bytecode",
+		params: &DeployContractParams{
+			AppPass:  encode.PassBytes("abc"),
+			Chains:   []string{"eth"},
+			Bytecode: &bytecode,
+		},
+		results:     goodResults,
+		wantErrCode: -1,
+	}, {
+		name: "ok with contractVer",
+		params: &DeployContractParams{
+			AppPass:     encode.PassBytes("abc"),
+			Chains:      []string{"eth"},
+			ContractVer: &contractVer,
+		},
+		results:     goodResults,
+		wantErrCode: -1,
+	}, {
+		name:        "bad params",
+		params:      nil,
+		wantErrCode: msgjson.RPCArgumentsError,
+	}, {
+		name: "unknown chain",
+		params: &DeployContractParams{
+			AppPass:  encode.PassBytes("abc"),
+			Chains:   []string{"unknownchain"},
+			Bytecode: &bytecode,
+		},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}, {
+		name: "missing bytecode and contractVer",
+		params: &DeployContractParams{
+			AppPass: encode.PassBytes("abc"),
+			Chains:  []string{"eth"},
+		},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}, {
+		name: "bytecode takes priority over contractVer",
+		params: &DeployContractParams{
+			AppPass:     encode.PassBytes("abc"),
+			Chains:      []string{"eth"},
+			Bytecode:    &bytecode,
+			ContractVer: &contractVer,
+		},
+		results:     goodResults,
+		wantErrCode: -1,
+	}, {
+		name: "core error",
+		params: &DeployContractParams{
+			AppPass:  encode.PassBytes("abc"),
+			Chains:   []string{"eth"},
+			Bytecode: &bytecode,
+		},
+		coreErr:     errors.New("test error"),
+		wantErrCode: msgjson.RPCDeployContractError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{
+			deployContractResults: test.results,
+			deployContractErr:     test.coreErr,
+		}
+		r := &RPCServer{core: tc}
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, deployContractRoute)
+		} else {
+			msg = makeMsg(t, deployContractRoute, test.params)
+		}
+		payload := handleDeployContract(r, msg)
+		var res []*core.DeployContractResult
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatalf("%s: %v", test.name, err)
+		}
+	}
+}

@@ -77,6 +77,8 @@ type TCore struct {
 	exportMMSnapshotsErr     error
 	pruneMMSnapshotsResult   int
 	pruneMMSnapshotsErr      error
+	deployContractResults    []*core.DeployContractResult
+	deployContractErr        error
 }
 
 func (c *TCore) Balance(uint32) (uint64, error) {
@@ -257,6 +259,9 @@ func (c *TCore) PruneMMSnapshots(host string, base, quote uint32, minEpochIdx ui
 }
 func (c *TCore) AbandonTransaction(assetID uint32, txID string) error {
 	return c.abandonTransactionErr
+}
+func (c *TCore) DeployContract(appPW []byte, assetIDs []uint32, txData []byte, contractVer *uint32, tokenAddress string) ([]*core.DeployContractResult, error) {
+	return c.deployContractResults, c.deployContractErr
 }
 
 type tBookFeed struct{}

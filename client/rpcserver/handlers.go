@@ -27,6 +27,7 @@ import (
 const (
 	cancelRoute                = "cancel"
 	closeWalletRoute           = "closewallet"
+	deployContractRoute        = "deploycontract"
 	discoverAcctRoute          = "discoveracct"
 	exchangesRoute             = "exchanges"
 	helpRoute                  = "help"
@@ -123,6 +124,7 @@ func usage(route string, err error) *msgjson.ResponsePayload {
 var routes = map[string]func(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload{
 	cancelRoute:                handleCancel,
 	closeWalletRoute:           handleCloseWallet,
+	deployContractRoute:        handleDeployContract,
 	discoverAcctRoute:          handleDiscoverAcct,
 	exchangesRoute:             handleExchanges,
 	helpRoute:                  handleHelp,
@@ -1691,6 +1693,39 @@ var routeInfos = map[string]routeInfo{
 		returns: `Returns:
     string: The message "` + fmt.Sprintf(walletLockedStr, "[coin symbol]") + `"`,
 	},
+	deployContractRoute: {
+		paramsType: reflect.TypeOf(DeployContractParams{}),
+		summary:    "Deploy a smart contract to one or more EVM chains.",
+		fieldDescs: map[string]string{
+			"appPass":      descAppPass,
+			"chains":       `List of chain symbols to deploy to, e.g. ["eth", "polygon", "base"].`,
+			"contractVer":  "The DEX swap contract version to deploy (0 or 1). Ignored if bytecode is provided.",
+			"tokenAddress": "The ERC20 token address. Required when deploying a token swap contract with contractVer.",
+			"bytecode":     "Hex-encoded contract bytecode for arbitrary deployment. If provided, takes priority over contractVer.",
+		},
+		returns: `Returns:
+    array: Per-chain deployment results.
+    [
+      {
+        "assetID" (int): The chain's BIP-44 asset ID.
+        "symbol" (string): The chain symbol.
+        "contractAddr" (string): The deployed contract address.
+        "txID" (string): The deployment transaction ID.
+        "error" (string): Error if deployment failed on this chain.
+      }
+    ]`,
+		extraHelp: func() string {
+			return `Examples:
+    Deploy v1 base chain contract to all chains:
+      bwctl deploycontract '["eth","polygon","base"]' 1
+
+    Deploy v0 token contract:
+      bwctl deploycontract '["polygon"]' 0 0x2791bca1f2de4661ed88a30c99a7a9449aa84174
+
+    Deploy arbitrary bytecode (pass 0 and empty token address as placeholders):
+      bwctl deploycontract '["eth"]' 0 '' 0x608060...`
+		},
+	},
 	toggleWalletStatusRoute: {
 		paramsType: reflect.TypeOf(ToggleWalletStatusParams{}),
 		summary: `Disable or enable an existing wallet. When disabling a chain's primary asset wallet,
@@ -2718,6 +2753,54 @@ func handlePruneMMSnapshots(s *RPCServer, msg *msgjson.Message) *msgjson.Respons
 		return createResponse(pruneMMSnapshotsRoute, nil, resErr)
 	}
 	return createResponse(pruneMMSnapshotsRoute, &n, nil)
+}
+
+func handleDeployContract(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params DeployContractParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(deployContractRoute, err)
+	}
+	defer params.AppPass.Clear()
+
+	assetIDs := make([]uint32, 0, len(params.Chains))
+	for _, chain := range params.Chains {
+		assetID, found := dex.BipSymbolID(chain)
+		if !found {
+			resErr := msgjson.NewError(msgjson.RPCArgumentsError, "unknown chain %q", chain)
+			return createResponse(deployContractRoute, nil, resErr)
+		}
+		assetIDs = append(assetIDs, assetID)
+	}
+	if len(assetIDs) == 0 {
+		resErr := msgjson.NewError(msgjson.RPCArgumentsError, "no chains specified")
+		return createResponse(deployContractRoute, nil, resErr)
+	}
+
+	var txData []byte
+	switch {
+	case params.Bytecode != nil && *params.Bytecode != "":
+		var err error
+		txData, err = hex.DecodeString(strings.TrimPrefix(*params.Bytecode, "0x"))
+		if err != nil {
+			resErr := msgjson.NewError(msgjson.RPCArgumentsError, "invalid bytecode hex: %v", err)
+			return createResponse(deployContractRoute, nil, resErr)
+		}
+	case params.ContractVer == nil:
+		resErr := msgjson.NewError(msgjson.RPCArgumentsError, "either bytecode or contractVer must be specified")
+		return createResponse(deployContractRoute, nil, resErr)
+	}
+
+	var tokenAddr string
+	if params.TokenAddress != nil {
+		tokenAddr = *params.TokenAddress
+	}
+
+	results, err := s.core.DeployContract(params.AppPass, assetIDs, txData, params.ContractVer, tokenAddr)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCDeployContractError, "deploy contract error: %v", err)
+		return createResponse(deployContractRoute, nil, resErr)
+	}
+	return createResponse(deployContractRoute, results, nil)
 }
 
 // sortRouteInfoKeys returns a sorted list of routeInfos keys.

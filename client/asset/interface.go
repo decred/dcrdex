@@ -20,25 +20,26 @@ import (
 type WalletTrait uint64
 
 const (
-	WalletTraitRescanner      WalletTrait = 1 << iota // The Wallet is an asset.Rescanner.
-	WalletTraitNewAddresser                           // The Wallet can generate new addresses on demand with NewAddress.
-	WalletTraitLogFiler                               // The Wallet allows for downloading of a log file.
-	WalletTraitFeeRater                               // Wallet can provide a fee rate for non-critical transactions
-	WalletTraitAccelerator                            // This wallet can accelerate transactions using the CPFP technique
-	WalletTraitRecoverer                              // The wallet is an asset.Recoverer.
-	WalletTraitWithdrawer                             // The Wallet can withdraw a specific amount from an exchange wallet.
-	WalletTraitSweeper                                // The Wallet can sweep all the funds, leaving no change.
-	WalletTraitRestorer                               // The wallet is an asset.WalletRestorer
-	WalletTraitTxFeeEstimator                         // The wallet can estimate transaction fees.
-	WalletTraitPeerManager                            // The wallet can manage its peers.
-	WalletTraitAuthenticator                          // The wallet require authentication.
-	WalletTraitShielded                               // DEPRECATED. Left for ordering
-	WalletTraitTokenApprover                          // The wallet is a TokenApprover
-	WalletTraitAccountLocker                          // The wallet must have enough balance for redemptions before a trade.
-	WalletTraitTicketBuyer                            // The wallet can participate in decred staking.
-	WalletTraitHistorian                              // This wallet can return its transaction history // DEPRECATED
-	WalletTraitFundsMixer                             // The wallet can mix funds.
-	WalletTraitDynamicSwapper                         // The wallet has dynamic fees.
+	WalletTraitRescanner        WalletTrait = 1 << iota // The Wallet is an asset.Rescanner.
+	WalletTraitNewAddresser                             // The Wallet can generate new addresses on demand with NewAddress.
+	WalletTraitLogFiler                                 // The Wallet allows for downloading of a log file.
+	WalletTraitFeeRater                                 // Wallet can provide a fee rate for non-critical transactions
+	WalletTraitAccelerator                              // This wallet can accelerate transactions using the CPFP technique
+	WalletTraitRecoverer                                // The wallet is an asset.Recoverer.
+	WalletTraitWithdrawer                               // The Wallet can withdraw a specific amount from an exchange wallet.
+	WalletTraitSweeper                                  // The Wallet can sweep all the funds, leaving no change.
+	WalletTraitRestorer                                 // The wallet is an asset.WalletRestorer
+	WalletTraitTxFeeEstimator                           // The wallet can estimate transaction fees.
+	WalletTraitPeerManager                              // The wallet can manage its peers.
+	WalletTraitAuthenticator                            // The wallet require authentication.
+	WalletTraitShielded                                 // DEPRECATED. Left for ordering
+	WalletTraitTokenApprover                            // The wallet is a TokenApprover
+	WalletTraitAccountLocker                            // The wallet must have enough balance for redemptions before a trade.
+	WalletTraitTicketBuyer                              // The wallet can participate in decred staking.
+	WalletTraitHistorian                                // This wallet can return its transaction history // DEPRECATED
+	WalletTraitFundsMixer                               // The wallet can mix funds.
+	WalletTraitDynamicSwapper                           // The wallet has dynamic fees.
+	WalletTraitContractDeployer                         // The wallet can deploy contracts.
 )
 
 // IsRescanner tests if the WalletTrait has the WalletTraitRescanner bit set.
@@ -146,6 +147,13 @@ func (wt WalletTrait) IsDynamicSwapper() bool {
 	return wt&WalletTraitDynamicSwapper != 0
 }
 
+// IsContractDeployer tests if the WalletTrait has the
+// WalletTraitContractDeployer bit set, which indicates the wallet implements the
+// ContractDeployer interface.
+func (wt WalletTrait) IsContractDeployer() bool {
+	return wt&WalletTraitContractDeployer != 0
+}
+
 // DetermineWalletTraits returns the WalletTrait bitset for the provided Wallet.
 func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	if _, is := w.(Rescanner); is {
@@ -198,6 +206,9 @@ func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	}
 	if _, is := w.(DynamicSwapper); is {
 		t |= WalletTraitDynamicSwapper
+	}
+	if _, is := w.(ContractDeployer); is {
+		t |= WalletTraitContractDeployer
 	}
 	return t
 }
@@ -948,6 +959,17 @@ type Bridger interface {
 	BridgeCompletionFees(bridgeName string) (fees uint64, hasSufficientBalance bool, err error)
 }
 
+// ContractDeployer is a wallet that can deploy smart contracts.
+type ContractDeployer interface {
+	// BuildDeployTxData builds the transaction data for deploying a DEX swap
+	// contract. If tokenAddress is empty, the base asset contract is used.
+	BuildDeployTxData(contractVer uint32, tokenAddress string) ([]byte, error)
+	// DeployContract deploys a contract with the given transaction data
+	// (complete bytecode including constructor args). Returns the expected
+	// contract address and the transaction ID.
+	DeployContract(txData []byte) (contractAddr, txID string, err error)
+}
+
 // Sweeper is a wallet that can clear the entire balance of the wallet/account
 // to an address. Similar to Withdraw, but no input value is required.
 type Sweeper interface {
@@ -1421,6 +1443,7 @@ const (
 	Mix
 	InitiateBridge
 	CompleteBridge
+	DeployContract
 )
 
 // IncomingTxType returns true if the wallet's balance increases due to a

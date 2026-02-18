@@ -41,13 +41,14 @@ func (contractDeployer) EstimateDeployFunding(
 	chain string,
 	contractVer uint32,
 	tokenAddress common.Address,
+	entryPoint common.Address,
 	credentialsPath string,
 	chainCfg *params.ChainConfig,
 	ui *dex.UnitInfo,
 	log dex.Logger,
 	net dex.Network,
 ) error {
-	txData, err := ContractDeployer.txData(contractVer, tokenAddress)
+	txData, err := ContractDeployer.TxData(contractVer, tokenAddress, entryPoint)
 	if err != nil {
 		return err
 	}
@@ -140,29 +141,41 @@ func (contractDeployer) EstimateMultiBalanceDeployFunding(
 	return ContractDeployer.estimateDeployFunding(ctx, txData, deploymentGas, chain, credentialsPath, chainCfg, ui, log, net)
 }
 
-func (contractDeployer) txData(contractVer uint32, tokenAddr common.Address) (txData []byte, err error) {
+func (contractDeployer) TxData(contractVer uint32, tokenAddr, entryPoint common.Address) (txData []byte, err error) {
 	if tokenAddr == (common.Address{}) {
 		switch contractVer {
 		case 0:
 			return common.FromHex(ethv0.ETHSwapBin), nil
 		case 1:
-			return common.FromHex(ethv1.ETHSwapBin), nil
+			if entryPoint == (common.Address{}) {
+				entryPoint = dexeth.CanonicalEntryPointV07
+			}
+			var abiData *abi.ABI
+			abiData, err = ethv1.ETHSwapMetaData.GetAbi()
+			if err != nil {
+				return nil, fmt.Errorf("error parsing v1 ABI: %w", err)
+			}
+			argData, err := abiData.Pack("", entryPoint)
+			if err != nil {
+				return nil, fmt.Errorf("error packing entry point: %w", err)
+			}
+			return append(common.FromHex(ethv1.ETHSwapBin), argData...), nil
 		}
 	}
-	var abi *abi.ABI
+	var abiData *abi.ABI
 	var bytecode []byte
 	switch contractVer {
 	case 0:
 		bytecode = common.FromHex(erc20v0.ERC20SwapBin)
-		abi, err = erc20v0.ERC20SwapMetaData.GetAbi()
+		abiData, err = erc20v0.ERC20SwapMetaData.GetAbi()
 	}
 	if err != nil {
 		return nil, fmt.Errorf("error parsing ABI: %w", err)
 	}
-	if abi == nil {
+	if abiData == nil {
 		return nil, fmt.Errorf("no abi data for version %d", contractVer)
 	}
-	argData, err := abi.Pack("", tokenAddr)
+	argData, err := abiData.Pack("", tokenAddr)
 	if err != nil {
 		return nil, fmt.Errorf("error packing token address: %w", err)
 	}
@@ -175,13 +188,14 @@ func (contractDeployer) DeployContract(
 	chain string,
 	contractVer uint32,
 	tokenAddress common.Address,
+	entryPoint common.Address,
 	credentialsPath string,
 	chainCfg *params.ChainConfig,
 	ui *dex.UnitInfo,
 	log dex.Logger,
 	net dex.Network,
 ) error {
-	txData, err := ContractDeployer.txData(contractVer, tokenAddress)
+	txData, err := ContractDeployer.TxData(contractVer, tokenAddress, entryPoint)
 	if err != nil {
 		return err
 	}
@@ -205,7 +219,7 @@ func (contractDeployer) DeployContract(
 			}
 		case 1:
 			deployer = func(txOpts *bind.TransactOpts, cb bind.ContractBackend) (common.Address, *types.Transaction, error) {
-				contractAddr, tx, _, err := ethv1.DeployETHSwap(txOpts, cb, common.Address{} /* TODO: populate entrypoint */)
+				contractAddr, tx, _, err := ethv1.DeployETHSwap(txOpts, cb, entryPoint)
 				return contractAddr, tx, err
 			}
 		}
@@ -266,7 +280,7 @@ func (contractDeployer) deployContract(
 	feeRate := dexeth.WeiToGweiCeil(maxFeeRate)
 	log.Infof("Estimated fees: %s gwei", ui.ConventionalString(feeRate*gas))
 
-	gas *= 5 / 4 // Add 20% buffer
+	gas = gas * 5 / 4 // Add 20% buffer
 	feesWithBuffer := feeRate * gas
 
 	gweiBal := dexeth.WeiToGwei(baseChainBal)
@@ -397,4 +411,21 @@ func (contractDeployer) DeployMultiBalance(
 		return contractAddr, tx, err
 	}
 	return ContractDeployer.deployContract(ctx, txData, deployer, chain, credentialsPath, chainCfg, ui, log, net)
+}
+
+// BuildDeployTxData builds the transaction data for deploying a DEX swap
+// contract. If tokenAddress is empty, the base asset contract is used.
+// For v1 contracts, the canonical ERC-4337 v0.7 EntryPoint is used automatically.
+func BuildDeployTxData(contractVer uint32, tokenAddress string) ([]byte, error) {
+	var tokenAddr common.Address
+	if tokenAddress != "" {
+		if !common.IsHexAddress(tokenAddress) {
+			return nil, fmt.Errorf("invalid token address: %s", tokenAddress)
+		}
+		tokenAddr = common.HexToAddress(tokenAddress)
+	}
+	// Zero entry point — TxData will use the canonical v0.7 entry point
+	// as a default. Simnet uses a different address read from the harness,
+	// so callers that need simnet support should use TxData directly.
+	return ContractDeployer.TxData(contractVer, tokenAddr, common.Address{})
 }

@@ -444,3 +444,12 @@ type PruneMMSnapshotsParams struct {
 	QuoteID     uint32 `json:"quoteID"`
 	MinEpochIdx uint64 `json:"minEpochIdx"`
 }
+
+// DeployContractParams is the parameter type for the deploycontract route.
+type DeployContractParams struct {
+	AppPass      encode.PassBytes `json:"appPass"`
+	Chains       []string         `json:"chains"`
+	ContractVer  *uint32          `json:"contractVer,omitempty"`
+	TokenAddress *string          `json:"tokenAddress,omitempty"`
+	Bytecode     *string          `json:"bytecode,omitempty"`
+}

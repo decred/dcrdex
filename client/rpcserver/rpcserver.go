@@ -110,6 +110,7 @@ type clientCore interface {
 	GenerateBCHRecoveryTransaction(appPW []byte, recipient string) ([]byte, error)
 	ExportMMSnapshots(host string, base, quote uint32, startEpoch, endEpoch uint64) ([]*msgjson.MMEpochSnapshot, error)
 	PruneMMSnapshots(host string, base, quote uint32, minEpochIdx uint64) (int, error)
+	DeployContract(appPW []byte, assetIDs []uint32, txData []byte, contractVer *uint32, tokenAddress string) ([]*core.DeployContractResult, error)
 }
 
 // RPCServer is a single-client http and websocket server enabling a JSON

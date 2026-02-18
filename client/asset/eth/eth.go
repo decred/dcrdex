@@ -356,7 +356,8 @@ type ethFetcher interface {
 	locked() bool
 	shutdown()
 	sendSignedTransaction(ctx context.Context, tx *types.Transaction, filts ...acceptabilityFilter) error
-	sendTransaction(ctx context.Context, txOpts *bind.TransactOpts, to common.Address, data []byte, filts ...acceptabilityFilter) (*types.Transaction, error)
+	sendTransaction(ctx context.Context, txOpts *bind.TransactOpts, to *common.Address, data []byte, filts ...acceptabilityFilter) (*types.Transaction, error)
+	EstimateGas(ctx context.Context, call ethereum.CallMsg) (uint64, error)
 	signData(data []byte) (sig, pubKey []byte, err error)
 	signHash(hash []byte) (sig, pubKey []byte, err error)
 	syncProgress(context.Context) (progress *ethereum.SyncProgress, tipTime uint64, err error)
@@ -403,6 +404,7 @@ var _ asset.DynamicSwapper = (*ETHWallet)(nil)
 var _ asset.DynamicSwapper = (*TokenWallet)(nil)
 var _ asset.Authenticator = (*ETHWallet)(nil)
 var _ asset.TokenApprover = (*TokenWallet)(nil)
+var _ asset.ContractDeployer = (*ETHWallet)(nil)
 
 type baseWallet struct {
 	// The asset subsystem starts with Connect(ctx). This ctx will be initialized
@@ -583,6 +585,58 @@ func (w *assetWallet) MaxRedeems(assetVer uint32) (int, error) {
 func (w *assetWallet) Info() *asset.WalletInfo {
 	wi := w.wi
 	return &wi
+}
+
+// BuildDeployTxData builds the transaction data for deploying a DEX swap
+// contract. If tokenAddress is empty, the base asset contract is used.
+func (w *ETHWallet) BuildDeployTxData(contractVer uint32, tokenAddress string) ([]byte, error) {
+	return BuildDeployTxData(contractVer, tokenAddress)
+}
+
+// DeployContract deploys a contract with the given transaction data (complete
+// bytecode including constructor args). Returns the expected contract address
+// and the transaction ID.
+func (w *ETHWallet) DeployContract(txData []byte) (contractAddr, txID string, err error) {
+	if len(txData) == 0 {
+		return "", "", errors.New("empty contract bytecode")
+	}
+
+	ctx := w.ctx
+	maxFeeRate, tipRate, err := w.recommendedMaxFeeRate(ctx)
+	if err != nil {
+		return "", "", fmt.Errorf("error getting fee rate: %w", err)
+	}
+
+	gas, err := w.node.EstimateGas(ctx, ethereum.CallMsg{
+		From: w.node.address(),
+		To:   nil,
+		Data: txData,
+	})
+	if err != nil {
+		return "", "", fmt.Errorf("gas estimation error: %w", err)
+	}
+	gas = gas * 5 / 4 // 20% buffer
+
+	// contractAddr and txID are set via closure capture. If withNonce
+	// retries due to a nonce conflict, the values reflect the final attempt.
+	err = w.withNonce(ctx, func(nonce *big.Int) (*genTxResult, error) {
+		contractAddr = crypto.CreateAddress(w.node.address(), nonce.Uint64()).Hex()
+		txOpts, err := w.node.txOpts(ctx, 0, gas, maxFeeRate, tipRate, nonce)
+		if err != nil {
+			return nil, fmt.Errorf("txOpts error: %w", err)
+		}
+		tx, err := w.node.sendTransaction(ctx, txOpts, nil, txData)
+		if err != nil {
+			return nil, err
+		}
+		txID = tx.Hash().Hex()
+		return &genTxResult{
+			tx:     tx,
+			txType: asset.DeployContract,
+			amt:    0,
+		}, nil
+	})
+	return
 }
 
 // genWalletSeed uses the wallet seed passed from core as the entropy for
@@ -5987,7 +6041,7 @@ func (w *ETHWallet) sendToAddr(addr common.Address, amt uint64, maxFeeRate, tipR
 		if err != nil {
 			return nil, err
 		}
-		res.tx, err = w.node.sendTransaction(w.ctx, txOpts, addr, nil, allowAlreadyKnownFilter)
+		res.tx, err = w.node.sendTransaction(w.ctx, txOpts, &addr, nil, allowAlreadyKnownFilter)
 		if err != nil {
 			return nil, err
 		}
@@ -6837,7 +6891,7 @@ func (w *assetWallet) userActionBumpFees(actionB []byte) error {
 			return errors.New("pending tx has no recipient?")
 		}
 
-		newTx, err := w.node.sendTransaction(w.ctx, txOpts, *addr, tx.Data(), allowAlreadyKnownFilter)
+		newTx, err := w.node.sendTransaction(w.ctx, txOpts, addr, tx.Data(), allowAlreadyKnownFilter)
 		if err != nil {
 			return fmt.Errorf("error sending bumped-fee transaction: %w", err)
 		}
@@ -7002,7 +7056,7 @@ func (w *assetWallet) userActionRecoverNonces(actionB []byte) error {
 			return fmt.Errorf("error getting tx opts for nonce resolution: %v", err)
 		}
 		var skip bool
-		tx, err := w.node.sendTransaction(w.ctx, txOpts, w.addr, nil, func(err error) (discard, propagate, fail bool) {
+		tx, err := w.node.sendTransaction(w.ctx, txOpts, &w.addr, nil, func(err error) (discard, propagate, fail bool) {
 			if errorFilter(err, "replacement transaction underpriced") {
 				skip = true
 				return true, false, false
@@ -7844,7 +7898,7 @@ func (getGas) returnFunds(
 	if err != nil {
 		return fmt.Errorf("error generating tx opts: %w", err)
 	}
-	tx, err := cl.sendTransaction(ctx, txOpts, returnAddr, nil, allowAlreadyKnownFilter)
+	tx, err := cl.sendTransaction(ctx, txOpts, &returnAddr, nil, allowAlreadyKnownFilter)
 	if err != nil {
 		return fmt.Errorf("error sending funds: %w", err)
 	}
@@ -7944,7 +7998,8 @@ func (getGas) Estimate(ctx context.Context, net dex.Network, assetID, contractVe
 			return fmt.Errorf("error creating tx opts for sending fees for approval client: %v", err)
 		}
 
-		tx, err := cl.sendTransaction(ctx, txOpts, approvalClient.address(), nil, allowAlreadyKnownFilter)
+		approvalAddr := approvalClient.address()
+		tx, err := cl.sendTransaction(ctx, txOpts, &approvalAddr, nil, allowAlreadyKnownFilter)
 		if err != nil {
 			return fmt.Errorf("error sending fee reserves to approval client: %v", err)
 		}

@@ -1318,9 +1318,9 @@ func (m *multiRPCClient) sendSignedTransaction(ctx context.Context, tx *types.Tr
 	return nil
 }
 
-func (m *multiRPCClient) sendTransaction(ctx context.Context, txOpts *bind.TransactOpts, to common.Address, data []byte, filts ...acceptabilityFilter) (*types.Transaction, error) {
+func (m *multiRPCClient) sendTransaction(ctx context.Context, txOpts *bind.TransactOpts, to *common.Address, data []byte, filts ...acceptabilityFilter) (*types.Transaction, error) {
 	tx, err := m.creds.ks.SignTx(*m.creds.acct, types.NewTx(&types.DynamicFeeTx{
-		To:        &to,
+		To:        to,
 		ChainID:   m.chainID,
 		Nonce:     txOpts.Nonce.Uint64(),
 		Gas:       txOpts.GasLimit,

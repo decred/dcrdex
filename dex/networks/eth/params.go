@@ -515,11 +515,15 @@ func SwapVectorToAbigen(v *SwapVector) swapv1.ETHSwapVector {
 	}
 }
 
+// CanonicalEntryPointV07 is the well-known ERC-4337 v0.7 EntryPoint address,
+// deployed via CREATE2 at the same address on all EVM chains.
+var CanonicalEntryPointV07 = common.HexToAddress("0x0000000071727De22E5E9d8BAf0edAc6f37da032")
+
 // EntryPoints is a map of network to the ERC-4337 entrypoint address.
-// Currently only the v0.6 entrypoint is supported.
 var EntryPoints = map[dex.Network]common.Address{
 	// dex.Simnet:  common.Address{}, // populated by MaybeReadSimnetAddrs
-	dex.Testnet: common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
+	dex.Mainnet: CanonicalEntryPointV07,
+	dex.Testnet: CanonicalEntryPointV07,
 }
 
 // ProtocolVersion assists in mapping the dex.Asset.Version to a contract
