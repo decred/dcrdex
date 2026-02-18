@@ -1812,6 +1812,11 @@ func (t *trackedTrade) isRefundable(ctx context.Context, match *matchTracker) bo
 		return false
 	}
 
+	if ticksGoverned, _ := match.exceptions(); ticksGoverned {
+		t.dc.log.Tracef("Match %s not refundable: ticks metered", match)
+		return false
+	}
+
 	wallet := t.wallets.fromWallet
 	// Just a quick check here. We'll perform a more thorough check if there are
 	// actually refundables.
@@ -3686,14 +3691,19 @@ func (c *Core) refundMatches(t *trackedTrade, matches []*matchTracker) (uint64, 
 			// CRITICAL - Refund must indicate if the swap is spent (i.e.
 			// redeemed already) so that as taker we will start the
 			// auto-redemption path.
-			if errors.Is(err, asset.CoinNotFoundError) && match.Side == order.Taker {
+			if errors.Is(err, asset.CoinNotFoundError) {
 				match.refundErr = err
-				// Could not find the contract coin, which means it has been
-				// spent. Unless the locktime is expired, we would have already
-				// started FindRedemption for this contract.
-				c.log.Debugf("Failed to refund %s contract %s, already redeemed. Beginning find redemption.",
-					symbol, swapCoinString)
-				t.findMakersRedemption(c.ctx, match)
+				if match.Side == order.Taker {
+					// Could not find the contract coin, which means it has been
+					// spent. Unless the locktime is expired, we would have already
+					// started FindRedemption for this contract.
+					c.log.Debugf("Failed to refund %s contract %s, already redeemed. Beginning find redemption.",
+						symbol, swapCoinString)
+					t.findMakersRedemption(c.ctx, match)
+				} else {
+					c.log.Warnf("Failed to refund %s contract %s for match %s: contract already spent by counterparty.",
+						symbol, swapCoinString, match)
+				}
 			} else {
 				match.delayTicks(time.Minute * 5)
 				errs.add("error sending refund tx for match %s, swap coin %s: %v",
