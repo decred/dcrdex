@@ -81,6 +81,7 @@ type TCore struct {
 	deployContractErr        error
 	testContractGasResults   []*core.ContractGasTestResult
 	testContractGasErr       error
+	reconfigureWalletErr     error
 }
 
 func (c *TCore) Balance(uint32) (uint64, error) {
@@ -99,6 +100,9 @@ func (c *TCore) Cancel(oid dex.Bytes) error {
 func (c *TCore) CreateWallet(appPW, walletPW []byte, form *core.WalletForm) error {
 	c.newWalletForm = form
 	return c.createWalletErr
+}
+func (c *TCore) ReconfigureWallet(appPW, newWalletPW []byte, form *core.WalletForm) error {
+	return c.reconfigureWalletErr
 }
 func (c *TCore) CloseWallet(assetID uint32) error {
 	return c.closeWalletErr

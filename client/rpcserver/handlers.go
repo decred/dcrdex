@@ -37,6 +37,7 @@ const (
 	logoutRoute                = "logout"
 	myOrdersRoute              = "myorders"
 	newWalletRoute             = "newwallet"
+	reconfigureWalletRoute     = "reconfigurewallet"
 	openWalletRoute            = "openwallet"
 	toggleWalletStatusRoute    = "togglewalletstatus"
 	orderBookRoute             = "orderbook"
@@ -141,6 +142,7 @@ var routes = map[string]func(s *RPCServer, msg *msgjson.Message) *msgjson.Respon
 	logoutRoute:                handleLogout,
 	myOrdersRoute:              handleMyOrders,
 	newWalletRoute:             handleNewWallet,
+	reconfigureWalletRoute:     handleReconfigureWallet,
 	openWalletRoute:            handleOpenWallet,
 	toggleWalletStatusRoute:    handleToggleWalletStatus,
 	orderBookRoute:             handleOrderBook,
@@ -344,6 +346,36 @@ func handleNewWallet(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayloa
 
 	res := fmt.Sprintf(walletCreatedStr, dex.BipIDSymbol(params.AssetID))
 	return createResponse(newWalletRoute, &res, nil)
+}
+
+// handleReconfigureWallet handles requests for reconfigurewallet.
+func handleReconfigureWallet(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params ReconfigureWalletParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(reconfigureWalletRoute, err)
+	}
+
+	defer func() {
+		params.AppPass.Clear()
+		params.NewWalletPW.Clear()
+	}()
+
+	if params.Config == nil {
+		params.Config = make(map[string]string)
+	}
+
+	err := s.core.ReconfigureWallet(params.AppPass, params.NewWalletPW, &core.WalletForm{
+		Type:    params.WalletType,
+		AssetID: params.AssetID,
+		Config:  params.Config,
+	})
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCReconfigureWalletError, "error reconfiguring %s wallet: %v", dex.BipIDSymbol(params.AssetID), err)
+		return createResponse(reconfigureWalletRoute, nil, resErr)
+	}
+
+	res := fmt.Sprintf("%s wallet reconfigured", dex.BipIDSymbol(params.AssetID))
+	return createResponse(reconfigureWalletRoute, &res, nil)
 }
 
 // handleOpenWallet handles requests for openWallet.
@@ -1684,6 +1716,20 @@ var routeInfos = map[string]routeInfo{
 		},
 		returns: `Returns:
     string: The message "` + fmt.Sprintf(walletCreatedStr, "[coin symbol]") + `"`,
+		extraHelp: walletTypesHelp,
+	},
+	reconfigureWalletRoute: {
+		paramsType: reflect.TypeOf(ReconfigureWalletParams{}),
+		summary:    `Reconfigure an existing wallet.`,
+		fieldDescs: map[string]string{
+			"appPass":     descAppPass,
+			"newWalletPW": "A new wallet password. Only required if changing the wallet password.",
+			"assetID":     descAssetID,
+			"walletType":  "The wallet type.",
+			"config":      `A JSON string->string mapping of wallet configuration settings.`,
+		},
+		returns: `Returns:
+    string: The message "[coin symbol] wallet reconfigured"`,
 		extraHelp: walletTypesHelp,
 	},
 	openWalletRoute: {

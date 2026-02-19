@@ -2072,3 +2072,62 @@ func TestHandleTestContractGas(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleReconfigureWallet(t *testing.T) {
+	tests := []struct {
+		name        string
+		params      any
+		coreErr     error
+		wantErrCode int
+	}{{
+		name: "ok",
+		params: &ReconfigureWalletParams{
+			AppPass:    encode.PassBytes("abc"),
+			AssetID:    42,
+			WalletType: "rpc",
+			Config:     map[string]string{"key": "val"},
+		},
+		wantErrCode: -1,
+	}, {
+		name: "ok with new password",
+		params: &ReconfigureWalletParams{
+			AppPass:     encode.PassBytes("abc"),
+			NewWalletPW: encode.PassBytes("newpw"),
+			AssetID:     42,
+			WalletType:  "rpc",
+			Config:      map[string]string{"key": "val"},
+		},
+		wantErrCode: -1,
+	}, {
+		name:        "bad params",
+		params:      nil,
+		wantErrCode: msgjson.RPCArgumentsError,
+	}, {
+		name: "core error",
+		params: &ReconfigureWalletParams{
+			AppPass:    encode.PassBytes("abc"),
+			AssetID:    42,
+			WalletType: "rpc",
+			Config:     map[string]string{"key": "val"},
+		},
+		coreErr:     errors.New("test error"),
+		wantErrCode: msgjson.RPCReconfigureWalletError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{
+			reconfigureWalletErr: test.coreErr,
+		}
+		r := &RPCServer{core: tc}
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, reconfigureWalletRoute)
+		} else {
+			msg = makeMsg(t, reconfigureWalletRoute, test.params)
+		}
+		payload := handleReconfigureWallet(r, msg)
+		var res string
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatalf("%s: %v", test.name, err)
+		}
+	}
+}

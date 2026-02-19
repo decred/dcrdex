@@ -68,6 +68,7 @@ type clientCore interface {
 	Cancel(orderID dex.Bytes) error
 	CloseWallet(assetID uint32) error
 	CreateWallet(appPass, walletPass []byte, form *core.WalletForm) error
+	ReconfigureWallet(appPW, newWalletPW []byte, form *core.WalletForm) error
 	DiscoverAccount(dexAddr string, pass []byte, certI any) (*core.Exchange, bool, error)
 	Exchanges() (exchanges map[string]*core.Exchange)
 	InitializeClient(appPass []byte, seed *string) (string, error)
