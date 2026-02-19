@@ -190,7 +190,7 @@ func TestRouteInfos(t *testing.T) {
 
 func TestListCommands(t *testing.T) {
 	// Without passwords.
-	res := ListCommands(false)
+	res := ListCommands(false, true)
 	if res == "" {
 		t.Fatal("ListCommands returned empty string")
 	}
@@ -200,13 +200,19 @@ func TestListCommands(t *testing.T) {
 	}
 
 	// With passwords.
-	resWithPW := ListCommands(true)
+	resWithPW := ListCommands(true, true)
 	if resWithPW == "" {
 		t.Fatal("ListCommands(true) returned empty string")
 	}
 	// Verify password fields appear.
 	if !strings.Contains(resWithPW, "appPass") {
 		t.Fatal("ListCommands(true) should contain appPass")
+	}
+
+	// Without dev flag, dev routes should be hidden.
+	resNoDev := ListCommands(false, false)
+	if strings.Contains(resNoDev, "deploycontract") {
+		t.Fatal("ListCommands with dev=false should not contain deploycontract")
 	}
 }
 
@@ -356,7 +362,7 @@ func TestHandleHelp(t *testing.T) {
 		} else {
 			msg = makeMsg(t, helpRoute, test.params)
 		}
-		payload := handleHelp(nil, msg)
+		payload := handleHelp(&RPCServer{}, msg)
 		res := ""
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
 			t.Fatal(err)
@@ -1960,7 +1966,7 @@ func TestHandleDeployContract(t *testing.T) {
 			deployContractResults: test.results,
 			deployContractErr:     test.coreErr,
 		}
-		r := &RPCServer{core: tc}
+		r := &RPCServer{core: tc, dev: true}
 		var msg *msgjson.Message
 		if test.params == nil {
 			msg = makeBadMsg(t, deployContractRoute)

@@ -127,6 +127,7 @@ type RPCServer struct {
 	wg        sync.WaitGroup
 	bwVersion *SemVersion
 	ctx       context.Context
+	dev       bool
 }
 
 // genCertPair generates a key/cert pair to the paths provided.
@@ -212,6 +213,7 @@ type Config struct {
 	Addr, User, Pass, Cert, Key string
 	BWVersion                   *SemVersion
 	CertHosts                   []string
+	Dev                         bool
 }
 
 // SetLogger sets the logger for the RPCServer package.
@@ -267,6 +269,7 @@ func New(cfg *Config) (*RPCServer, error) {
 		tlsConfig: tlsConfig,
 		bwVersion: cfg.BWVersion,
 		wsServer:  websocket.New(cfg.Core, log.SubLogger("WS")),
+		dev:       cfg.Dev,
 	}
 
 	// Create authSHA to verify requests against.
@@ -348,6 +351,12 @@ func (s *RPCServer) handleRequest(req *msgjson.Message) *msgjson.ResponsePayload
 	// Find the correct handler for this route.
 	h, exists := routes[req.Route]
 	if !exists {
+		log.Debugf("%v: %v", errUnknownCmd, req.Route)
+		payload.Error = msgjson.NewError(msgjson.RPCUnknownRoute, "%v", errUnknownCmd)
+		return payload
+	}
+
+	if devRoutes[req.Route] && !s.dev {
 		log.Debugf("%v: %v", errUnknownCmd, req.Route)
 		payload.Error = msgjson.NewError(msgjson.RPCUnknownRoute, "%v", errUnknownCmd)
 		return payload
