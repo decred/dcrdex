@@ -28,6 +28,7 @@ const (
 	cancelRoute                = "cancel"
 	closeWalletRoute           = "closewallet"
 	deployContractRoute        = "deploycontract"
+	testContractGasRoute       = "testcontractgas"
 	discoverAcctRoute          = "discoveracct"
 	exchangesRoute             = "exchanges"
 	helpRoute                  = "help"
@@ -122,7 +123,8 @@ func usage(route string, err error) *msgjson.ResponsePayload {
 
 // devRoutes is the set of routes that require the --dev flag.
 var devRoutes = map[string]bool{
-	deployContractRoute: true,
+	deployContractRoute:  true,
+	testContractGasRoute: true,
 }
 
 // routes maps routes to a handler function.
@@ -130,6 +132,7 @@ var routes = map[string]func(s *RPCServer, msg *msgjson.Message) *msgjson.Respon
 	cancelRoute:                handleCancel,
 	closeWalletRoute:           handleCloseWallet,
 	deployContractRoute:        handleDeployContract,
+	testContractGasRoute:       handleTestContractGas,
 	discoverAcctRoute:          handleDiscoverAcct,
 	exchangesRoute:             handleExchanges,
 	helpRoute:                  handleHelp,
@@ -1735,6 +1738,29 @@ var routeInfos = map[string]routeInfo{
       bwctl deploycontract '["eth"]' 0 '' 0x608060...`
 		},
 	},
+	testContractGasRoute: {
+		paramsType: reflect.TypeOf(TestContractGasParams{}),
+		summary:    "Test swap contract gas usage on one or more EVM chains.",
+		fieldDescs: map[string]string{
+			"appPass":  descAppPass,
+			"chains":   `Optional list of base chain symbols, e.g. ["eth", "polygon", "base"]. If omitted, parent chains are inferred from tokens.`,
+			"tokens":   `Optional list of token symbols, e.g. ["usdc.eth", "usdc.polygon"]. Tokens are tested on their parent chain. If chains is omitted, only token tests run (base chain tests are skipped).`,
+			"maxSwaps": "Maximum number of swaps per batch (default 5, min 1, max 10).",
+		},
+		returns: `Returns:
+    array: Per-asset gas test results with raw measurements and recommended gas values.`,
+		extraHelp: func() string {
+			return `Examples:
+    Test ETH base chain gas with defaults:
+      bwctl -p abc testcontractgas '["eth"]'
+
+    Test with tokens:
+      bwctl -p abc testcontractgas '["eth"]' '["usdc.eth"]' 3
+
+    Test only tokens (skip base chain):
+      bwctl -p abc testcontractgas '[]' '["usdc.eth","usdt.eth"]'`
+		},
+	},
 	toggleWalletStatusRoute: {
 		paramsType: reflect.TypeOf(ToggleWalletStatusParams{}),
 		summary: `Disable or enable an existing wallet. When disabling a chain's primary asset wallet,
@@ -2813,6 +2839,60 @@ func handleDeployContract(s *RPCServer, msg *msgjson.Message) *msgjson.ResponseP
 		return createResponse(deployContractRoute, nil, resErr)
 	}
 	return createResponse(deployContractRoute, results, nil)
+}
+
+func handleTestContractGas(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params TestContractGasParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(testContractGasRoute, err)
+	}
+	defer params.AppPass.Clear()
+
+	assetIDs := make([]uint32, 0, len(params.Chains))
+	for _, chain := range params.Chains {
+		assetID, found := dex.BipSymbolID(chain)
+		if !found {
+			resErr := msgjson.NewError(msgjson.RPCArgumentsError, "unknown chain %q", chain)
+			return createResponse(testContractGasRoute, nil, resErr)
+		}
+		assetIDs = append(assetIDs, assetID)
+	}
+	if len(assetIDs) == 0 && len(params.Tokens) == 0 {
+		resErr := msgjson.NewError(msgjson.RPCArgumentsError, "no chains or tokens specified")
+		return createResponse(testContractGasRoute, nil, resErr)
+	}
+
+	var tokenAssetIDs []uint32
+	for _, tok := range params.Tokens {
+		assetID, found := dex.BipSymbolID(tok)
+		if !found {
+			resErr := msgjson.NewError(msgjson.RPCArgumentsError, "unknown token %q", tok)
+			return createResponse(testContractGasRoute, nil, resErr)
+		}
+		tokenAssetIDs = append(tokenAssetIDs, assetID)
+	}
+
+	maxSwaps := 5
+	if params.MaxSwaps != nil {
+		maxSwaps = *params.MaxSwaps
+		if maxSwaps < 1 {
+			maxSwaps = 1
+		} else if maxSwaps > 10 {
+			maxSwaps = 10
+		}
+	}
+
+	results, err := s.core.TestContractGas(params.AppPass, assetIDs, tokenAssetIDs, maxSwaps)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCTestContractGasError, "test contract gas error: %v", err)
+		return createResponse(testContractGasRoute, nil, resErr)
+	}
+	for _, r := range results {
+		if r.Summary != "" {
+			log.Infof("\n%s", r.Summary)
+		}
+	}
+	return createResponse(testContractGasRoute, results, nil)
 }
 
 // sortRouteInfoKeys returns a sorted list of routeInfos keys.

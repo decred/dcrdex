@@ -1980,3 +1980,95 @@ func TestHandleDeployContract(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleTestContractGas(t *testing.T) {
+	maxSwaps := 3
+	goodResults := []*core.ContractGasTestResult{{
+		AssetID:    60,
+		Symbol:     "eth",
+		Swap:       63441,
+		SwapAdd:    34703,
+		Redeem:     52041,
+		RawSwaps:   []uint64{48801, 75511, 102209},
+		RawRedeems: []uint64{40032, 50996, 61949},
+		RawRefunds: []uint64{40390, 40401, 40388},
+		Summary:    "test summary",
+	}}
+	tests := []struct {
+		name        string
+		params      any
+		results     []*core.ContractGasTestResult
+		coreErr     error
+		wantErrCode int
+	}{{
+		name: "ok",
+		params: &TestContractGasParams{
+			AppPass:  encode.PassBytes("abc"),
+			Chains:   []string{"eth"},
+			MaxSwaps: &maxSwaps,
+		},
+		results:     goodResults,
+		wantErrCode: -1,
+	}, {
+		name: "ok with tokens",
+		params: &TestContractGasParams{
+			AppPass: encode.PassBytes("abc"),
+			Chains:  []string{"eth"},
+			Tokens:  []string{"usdc.eth"},
+		},
+		results:     goodResults,
+		wantErrCode: -1,
+	}, {
+		name:        "bad params",
+		params:      nil,
+		wantErrCode: msgjson.RPCArgumentsError,
+	}, {
+		name: "unknown chain",
+		params: &TestContractGasParams{
+			AppPass: encode.PassBytes("abc"),
+			Chains:  []string{"unknownchain"},
+		},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}, {
+		name: "no chains",
+		params: &TestContractGasParams{
+			AppPass: encode.PassBytes("abc"),
+			Chains:  []string{},
+		},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}, {
+		name: "unknown token",
+		params: &TestContractGasParams{
+			AppPass: encode.PassBytes("abc"),
+			Chains:  []string{"eth"},
+			Tokens:  []string{"unknown.token"},
+		},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}, {
+		name: "core error",
+		params: &TestContractGasParams{
+			AppPass: encode.PassBytes("abc"),
+			Chains:  []string{"eth"},
+		},
+		coreErr:     errors.New("test error"),
+		wantErrCode: msgjson.RPCTestContractGasError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{
+			testContractGasResults: test.results,
+			testContractGasErr:     test.coreErr,
+		}
+		r := &RPCServer{core: tc, dev: true}
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, testContractGasRoute)
+		} else {
+			msg = makeMsg(t, testContractGasRoute, test.params)
+		}
+		payload := handleTestContractGas(r, msg)
+		var res []*core.ContractGasTestResult
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatalf("%s: %v", test.name, err)
+		}
+	}
+}

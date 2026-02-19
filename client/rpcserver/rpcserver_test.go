@@ -79,6 +79,8 @@ type TCore struct {
 	pruneMMSnapshotsErr      error
 	deployContractResults    []*core.DeployContractResult
 	deployContractErr        error
+	testContractGasResults   []*core.ContractGasTestResult
+	testContractGasErr       error
 }
 
 func (c *TCore) Balance(uint32) (uint64, error) {
@@ -262,6 +264,9 @@ func (c *TCore) AbandonTransaction(assetID uint32, txID string) error {
 }
 func (c *TCore) DeployContract(appPW []byte, assetIDs []uint32, txData []byte, contractVer *uint32, tokenAddress string) ([]*core.DeployContractResult, error) {
 	return c.deployContractResults, c.deployContractErr
+}
+func (c *TCore) TestContractGas(appPW []byte, assetIDs []uint32, tokenAssetIDs []uint32, maxSwaps int) ([]*core.ContractGasTestResult, error) {
+	return c.testContractGasResults, c.testContractGasErr
 }
 
 type tBookFeed struct{}

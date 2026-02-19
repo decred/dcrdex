@@ -405,6 +405,7 @@ var _ asset.DynamicSwapper = (*TokenWallet)(nil)
 var _ asset.Authenticator = (*ETHWallet)(nil)
 var _ asset.TokenApprover = (*TokenWallet)(nil)
 var _ asset.ContractDeployer = (*ETHWallet)(nil)
+var _ asset.ContractGasTester = (*ETHWallet)(nil)
 
 type baseWallet struct {
 	// The asset subsystem starts with Connect(ctx). This ctx will be initialized
@@ -637,6 +638,804 @@ func (w *ETHWallet) DeployContract(txData []byte) (contractAddr, txID string, er
 		}, nil
 	})
 	return
+}
+
+// TestContractGas exercises all v1 swap contract functions on the base chain
+// and the specified tokens, measuring actual gas consumption.
+func (w *ETHWallet) TestContractGas(contractVer uint32, maxSwaps int, tokenAssetIDs []uint32, tokensOnly bool) ([]*asset.GasTestResult, error) {
+	if contractVer != 1 {
+		return nil, fmt.Errorf("only contract version 1 is supported, got %d", contractVer)
+	}
+	if maxSwaps < 1 {
+		return nil, fmt.Errorf("maxSwaps must be >= 1")
+	}
+
+	c := w.contractorV1
+	if c == nil {
+		return nil, fmt.Errorf("v1 contractor not available")
+	}
+
+	g := w.gases(contractVer)
+	if g == nil {
+		return nil, fmt.Errorf("no gas table for contract version %d", contractVer)
+	}
+
+	ctx := w.ctx
+	cl := w.node
+	log := w.log
+
+	var results []*asset.GasTestResult
+
+	if !tokensOnly {
+		// Test base chain gas.
+		baseResult, err := testContractGasForAsset(ctx, cl, c, contractVer, maxSwaps, g, w.evmify,
+			false /* isToken */, log, nil, nil, nil, w.assetID, dex.BipIDSymbol(w.assetID))
+		if err != nil {
+			return nil, fmt.Errorf("base chain gas test error: %w", err)
+		}
+
+		// Test gasless redeem if bundler is configured.
+		w.bundlerMtx.RLock()
+		bndlr := w.bundler
+		w.bundlerMtx.RUnlock()
+		if bndlr != nil {
+			testGaslessRedeem(ctx, cl, c, contractVer, maxSwaps, g, w.evmify, log, w, bndlr, baseResult)
+		} else {
+			baseResult.Summary += "\n--- Gasless Redeem ---\nSkipped (no bundler configured)\n"
+		}
+
+		results = append(results, baseResult)
+	}
+
+	// Use the wallet's configured providers for the temp client, falling
+	// back to default providers if none are configured.
+	providers := w.defaultProviders
+	w.settingsMtx.RLock()
+	if providerDef, found := w.settings[providersKey]; found && len(providerDef) > 0 {
+		providers = strings.Split(providerDef, " ")
+	}
+	w.settingsMtx.RUnlock()
+
+	// Test each token.
+	for _, tokenAssetID := range tokenAssetIDs {
+		token := w.tokens[tokenAssetID]
+		if token == nil {
+			results = append(results, &asset.GasTestResult{
+				AssetID: tokenAssetID,
+				Symbol:  dex.BipIDSymbol(tokenAssetID),
+				Error:   fmt.Sprintf("token %d not found", tokenAssetID),
+			})
+			continue
+		}
+
+		uc, ok := c.(unifiedContractor)
+		if !ok {
+			results = append(results, &asset.GasTestResult{
+				AssetID: tokenAssetID,
+				Symbol:  dex.BipIDSymbol(tokenAssetID),
+				Error:   "base contractor does not support token contractors",
+			})
+			continue
+		}
+		tc, err := uc.tokenContractor(token)
+		if err != nil {
+			results = append(results, &asset.GasTestResult{
+				AssetID: tokenAssetID,
+				Symbol:  dex.BipIDSymbol(tokenAssetID),
+				Error:   fmt.Sprintf("error creating token contractor: %v", err),
+			})
+			continue
+		}
+		netToken := token.NetTokens[w.net]
+		if netToken == nil {
+			results = append(results, &asset.GasTestResult{
+				AssetID: tokenAssetID,
+				Symbol:  dex.BipIDSymbol(tokenAssetID),
+				Error:   fmt.Sprintf("no net token for network %s", w.net),
+			})
+			continue
+		}
+		sc := netToken.SwapContracts[contractVer]
+		if sc == nil {
+			results = append(results, &asset.GasTestResult{
+				AssetID: tokenAssetID,
+				Symbol:  dex.BipIDSymbol(tokenAssetID),
+				Error:   fmt.Sprintf("no swap contract for version %d", contractVer),
+			})
+			continue
+		}
+		tg := &sc.Gas
+		tokenResult, err := testContractGasForAsset(ctx, cl, tc, contractVer, maxSwaps, tg, token.AtomicToEVM,
+			true /* isToken */, log, tc, providers, w, tokenAssetID, dex.BipIDSymbol(tokenAssetID))
+		if err != nil {
+			results = append(results, &asset.GasTestResult{
+				AssetID: tokenAssetID,
+				Symbol:  dex.BipIDSymbol(tokenAssetID),
+				Error:   err.Error(),
+			})
+			continue
+		}
+		results = append(results, tokenResult)
+	}
+
+	return results, nil
+}
+
+// testGaslessRedeem tests gasless redeem gas estimates using the bundler. For
+// each batch size 1..maxSwaps, it creates swaps, estimates gas via the bundler,
+// then redeems to recover funds.
+func testGaslessRedeem(
+	ctx context.Context,
+	cl ethFetcher,
+	c contractor,
+	contractVer uint32,
+	maxSwaps int,
+	g *dexeth.Gases,
+	evmify func(uint64) *big.Int,
+	log dex.Logger,
+	w *ETHWallet,
+	bndlr bundler,
+	result *asset.GasTestResult,
+) {
+	var v uint64 = 1
+
+	baseRate, tipRate, err := cl.currentFees(ctx)
+	if err != nil {
+		result.Summary += fmt.Sprintf("\n--- Gasless Redeem ---\nError getting fees: %v\n", err)
+		return
+	}
+	maxFeeRate := new(big.Int).Add(tipRate, new(big.Int).Mul(baseRate, big.NewInt(2)))
+
+	rawVerification := make([]uint64, 0, maxSwaps)
+	rawPreVerification := make([]uint64, 0, maxSwaps)
+	rawCall := make([]uint64, 0, maxSwaps)
+
+	for n := 1; n <= maxSwaps; n++ {
+		contracts := make([]*asset.Contract, 0, n)
+		secrets := make([][32]byte, 0, n)
+		lockTime := time.Now().Add(time.Minute)
+		for i := 0; i < n; i++ {
+			secretB := encode.RandomBytes(32)
+			var secret [32]byte
+			copy(secret[:], secretB)
+			secretHash := sha256.Sum256(secretB)
+			contracts = append(contracts, &asset.Contract{
+				Address:    cl.address().String(),
+				Value:      v,
+				SecretHash: secretHash[:],
+				LockTime:   uint64(lockTime.Unix()),
+			})
+			secrets = append(secrets, secret)
+		}
+
+		// Initiate.
+		txOpts, err := cl.txOpts(ctx, uint64(n), g.SwapN(n)*2, maxFeeRate, tipRate, nil)
+		if err != nil {
+			log.Errorf("gasless test: txOpts error for %d swaps: %v", n, err)
+			break
+		}
+		tx, err := c.initiate(txOpts, contracts)
+		if err != nil {
+			log.Errorf("gasless test: initiate error for %d swaps: %v", n, err)
+			break
+		}
+		result.TxIDs = append(result.TxIDs, fmt.Sprintf("gasless-init(%d): %s", n, tx.Hash().Hex()))
+		if err = waitForConfirmation(ctx, "gasless-init", cl, tx.Hash(), log); err != nil {
+			log.Errorf("gasless test: wait error: %v", err)
+			break
+		}
+
+		// Verify status.
+		locator0 := acToLocator(contractVer, contracts[0], evmify(v), cl.address())
+		st, err := c.status(ctx, locator0)
+		if err != nil {
+			log.Errorf("gasless test: status error: %v", err)
+			break
+		}
+		if st.Step != dexeth.SSInitiated {
+			log.Errorf("gasless test: expected SSInitiated, got %s", st.Step)
+			break
+		}
+
+		// Build redemptions for gasless estimation.
+		redemptions := make([]*asset.Redemption, 0, n)
+		for i, contract := range contracts {
+			redemptions = append(redemptions, &asset.Redemption{
+				Spends: &asset.AuditInfo{
+					Recipient:  cl.address().String(),
+					Expiration: lockTime,
+					Contract:   dexeth.EncodeContractData(contractVer, acToLocator(contractVer, contract, evmify(v), cl.address())),
+					SecretHash: contract.SecretHash,
+				},
+				Secret: secrets[i][:],
+			})
+		}
+
+		// Estimate gas via bundler.
+		op, _, _, err := w.generateUserOp(ctx, big.NewInt(0), bndlr, redemptions, contractVer, true)
+		if err != nil {
+			log.Errorf("gasless test: generateUserOp error for %d redeems: %v", n, err)
+			// Still try to recover funds.
+		} else {
+			verification, _ := strconv.ParseUint(strings.TrimPrefix(op.VerificationGasLimit, "0x"), 16, 64)
+			preVerification, _ := strconv.ParseUint(strings.TrimPrefix(op.PreVerificationGas, "0x"), 16, 64)
+			callGas, _ := strconv.ParseUint(strings.TrimPrefix(op.CallGasLimit, "0x"), 16, 64)
+			rawVerification = append(rawVerification, verification)
+			rawPreVerification = append(rawPreVerification, preVerification)
+			rawCall = append(rawCall, callGas)
+		}
+
+		// Regular redeem to recover funds.
+		txOpts, err = cl.txOpts(ctx, 0, g.RedeemN(n)*2, maxFeeRate, tipRate, nil)
+		if err != nil {
+			log.Errorf("gasless test: txOpts error for redeem: %v", err)
+			break
+		}
+		tx, err = c.redeem(txOpts, redemptions)
+		if err != nil {
+			log.Errorf("gasless test: redeem error: %v", err)
+			break
+		}
+		result.TxIDs = append(result.TxIDs, fmt.Sprintf("gasless-redeem(%d): %s", n, tx.Hash().Hex()))
+		if err = waitForConfirmation(ctx, "gasless-redeem", cl, tx.Hash(), log); err != nil {
+			log.Errorf("gasless test: redeem wait error: %v", err)
+			break
+		}
+	}
+
+	result.RawGaslessVerification = rawVerification
+	result.RawGaslessPreVerification = rawPreVerification
+	result.RawGaslessCall = rawCall
+
+	recommendedGas := func(v uint64) uint64 { return v * 13 / 10 }
+
+	if len(rawVerification) > 0 {
+		result.GaslessRedeemVerification = recommendedGas(rawVerification[0])
+		result.GaslessRedeemPreVerification = recommendedGas(rawPreVerification[0])
+		// Call gas uses the contract's hard minimums directly. The
+		// EntryPoint passes callGasLimit as the full gas stipend to
+		// the inner Exec.call, so no overhead is deducted. No buffer
+		// is needed because the contract must operate within its own
+		// minimums — if it can't, the contract is broken.
+		result.GaslessRedeemCall = minCallGasBase + minCallGasPerRedemption
+		if len(rawVerification) > 1 {
+			result.GaslessRedeemVerificationAdd = recommendedGas(avgDiff(rawVerification))
+			result.GaslessRedeemPreVerificationAdd = recommendedGas(avgDiff(rawPreVerification))
+			result.GaslessRedeemCallAdd = minCallGasPerRedemption
+		}
+
+		result.Summary += "\n--- Gasless Redeem (bundler estimates) ---\n"
+		result.Summary += "Recommended values for Gases table:\n"
+		result.Summary += fmt.Sprintf("  GaslessRedeemVerification:       %d\n", result.GaslessRedeemVerification)
+		if len(rawVerification) > 1 {
+			result.Summary += fmt.Sprintf("  GaslessRedeemVerificationAdd:    %d\n", result.GaslessRedeemVerificationAdd)
+		}
+		result.Summary += fmt.Sprintf("  GaslessRedeemPreVerification:    %d\n", result.GaslessRedeemPreVerification)
+		if len(rawPreVerification) > 1 {
+			result.Summary += fmt.Sprintf("  GaslessRedeemPreVerificationAdd: %d\n", result.GaslessRedeemPreVerificationAdd)
+		}
+		result.Summary += fmt.Sprintf("  GaslessRedeemCall:               %d\n", result.GaslessRedeemCall)
+		if len(rawCall) > 1 {
+			result.Summary += fmt.Sprintf("  GaslessRedeemCallAdd:            %d\n", result.GaslessRedeemCallAdd)
+		}
+		result.Summary += "\nRaw measurements:\n"
+		result.Summary += fmt.Sprintf("  Verification (n=1..%d):    %v\n", len(rawVerification), rawVerification)
+		result.Summary += fmt.Sprintf("  PreVerification (n=1..%d): %v\n", len(rawPreVerification), rawPreVerification)
+		result.Summary += fmt.Sprintf("  Call (n=1..%d):            %v\n", len(rawCall), rawCall)
+	} else {
+		result.Summary += "\n--- Gasless Redeem ---\nNo estimates obtained.\n"
+	}
+}
+
+// avgDiff calculates the average per-step increase from the first to the last
+// element. If the last element is not greater than the first, it returns 0.
+func avgDiff(vs []uint64) uint64 {
+	if len(vs) < 2 {
+		return 0
+	}
+	if vs[len(vs)-1] <= vs[0] {
+		return 0
+	}
+	return (vs[len(vs)-1] - vs[0]) / uint64(len(vs)-1)
+}
+
+// testContractGasForAsset runs the gas measurement test for a single asset
+// (base chain or token).
+func testContractGasForAsset(
+	ctx context.Context,
+	cl ethFetcher,
+	c contractor,
+	contractVer uint32,
+	maxSwaps int,
+	g *dexeth.Gases,
+	evmify func(uint64) *big.Int,
+	isToken bool,
+	log dex.Logger,
+	tc tokenContractor,
+	providers []string,
+	w *ETHWallet,
+	assetID uint32,
+	symbol string,
+) (*asset.GasTestResult, error) {
+
+	result := &asset.GasTestResult{
+		AssetID: assetID,
+		Symbol:  symbol,
+	}
+
+	recommendedGas := func(v uint64) uint64 { return v * 13 / 10 }
+
+	baseRate, tipRate, err := cl.currentFees(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error getting fees: %w", err)
+	}
+	maxFeeRate := new(big.Int).Add(tipRate, new(big.Int).Mul(baseRate, big.NewInt(2)))
+
+	// Token-specific testing: approve + transfer.
+	if isToken && tc != nil {
+		// Create temp client for first-time approval gas.
+		seed := encode.RandomBytes(32)
+		walletDir, err := os.MkdirTemp("", "dcrdex-gastest-*")
+		if err != nil {
+			return nil, fmt.Errorf("error creating temp dir: %w", err)
+		}
+		defer os.RemoveAll(walletDir)
+
+		token := w.tokens[assetID]
+		if token == nil {
+			return nil, fmt.Errorf("token %d not found on wallet", assetID)
+		}
+
+		wParams := &GetGasWalletParams{
+			ChainCfg:     w.chainCfg,
+			Gas:          g,
+			Token:        token,
+			Compat:       w.compat,
+			ContractAddr: w.versionedContracts[contractVer],
+		}
+
+		tempCl, tempC, err := quickNode(ctx, walletDir, contractVer, seed, providers, wParams, w.net, log)
+		if err != nil {
+			return nil, fmt.Errorf("error creating temp client: %w", err)
+		}
+		defer tempCl.shutdown()
+
+		tempTC, ok := tempC.(tokenContractor)
+		if !ok {
+			return nil, fmt.Errorf("temp contractor is not a tokenContractor")
+		}
+
+		// Fund temp client: send enough ETH for fees.
+		feeRate := dexeth.WeiToGweiCeil(maxFeeRate)
+		fundVal := g.Approve * 2 * 6 / 5 * feeRate // same formula as getgas
+		txOpts, err := cl.txOpts(ctx, fundVal, defaultSendGasLimit, maxFeeRate, tipRate, nil)
+		if err != nil {
+			return nil, fmt.Errorf("error creating fund tx opts: %w", err)
+		}
+		tempAddr := tempCl.address()
+		fundTx, err := cl.sendTransaction(ctx, txOpts, &tempAddr, nil)
+		if err != nil {
+			return nil, fmt.Errorf("error funding temp client: %w", err)
+		}
+		result.TxIDs = append(result.TxIDs, fmt.Sprintf("fund-temp: %s", fundTx.Hash().Hex()))
+		log.Infof("Funded temp client %s, tx %s", tempCl.address(), fundTx.Hash())
+		if err = waitForConfirmation(ctx, "fund-temp", cl, fundTx.Hash(), log); err != nil {
+			return nil, fmt.Errorf("error waiting for fund tx: %w", err)
+		}
+
+		// First-time approval from temp client.
+		approveOpts, err := tempCl.txOpts(ctx, 0, g.Approve*2, maxFeeRate, tipRate, nil)
+		if err != nil {
+			return nil, fmt.Errorf("error creating temp approve tx opts: %w", err)
+		}
+		approveTx, err := tempTC.approve(approveOpts, unlimitedAllowance)
+		if err != nil {
+			return nil, fmt.Errorf("temp approve error: %w", err)
+		}
+		result.TxIDs = append(result.TxIDs, fmt.Sprintf("approve(temp): %s", approveTx.Hash().Hex()))
+		if err = waitForConfirmation(ctx, "temp-approve", tempCl, approveTx.Hash(), log); err != nil {
+			return nil, fmt.Errorf("error waiting for temp approve: %w", err)
+		}
+		receipt, _, err := tempCl.transactionAndReceipt(ctx, approveTx.Hash())
+		if err != nil {
+			return nil, fmt.Errorf("error getting temp approve receipt: %w", err)
+		}
+		if err = checkTxStatus(receipt, g.Approve*2); err != nil {
+			return nil, fmt.Errorf("temp approve failed: %w", err)
+		}
+		log.Infof("Temp client approval used %d gas", receipt.GasUsed)
+		result.RawApprovals = append(result.RawApprovals, receipt.GasUsed)
+
+		// Approval from main client.
+		mainApproveOpts, err := cl.txOpts(ctx, 0, g.Approve*2, maxFeeRate, tipRate, nil)
+		if err != nil {
+			return nil, fmt.Errorf("error creating main approve tx opts: %w", err)
+		}
+		mainApproveTx, err := tc.approve(mainApproveOpts, unlimitedAllowance)
+		if err != nil {
+			return nil, fmt.Errorf("main approve error: %w", err)
+		}
+		result.TxIDs = append(result.TxIDs, fmt.Sprintf("approve(main): %s", mainApproveTx.Hash().Hex()))
+		if err = waitForConfirmation(ctx, "main-approve", cl, mainApproveTx.Hash(), log); err != nil {
+			return nil, fmt.Errorf("error waiting for main approve: %w", err)
+		}
+		receipt, _, err = cl.transactionAndReceipt(ctx, mainApproveTx.Hash())
+		if err != nil {
+			return nil, fmt.Errorf("error getting main approve receipt: %w", err)
+		}
+		if err = checkTxStatus(receipt, g.Approve*2); err != nil {
+			return nil, fmt.Errorf("main approve failed: %w", err)
+		}
+		log.Infof("Main client approval used %d gas", receipt.GasUsed)
+		result.RawApprovals = append(result.RawApprovals, receipt.GasUsed)
+
+		// Transfer 1 atom to random address.
+		transferOpts, err := cl.txOpts(ctx, 0, g.Transfer*2, maxFeeRate, tipRate, nil)
+		if err != nil {
+			return nil, fmt.Errorf("error creating transfer tx opts: %w", err)
+		}
+		var randomAddr common.Address
+		copy(randomAddr[:], encode.RandomBytes(20))
+		transferTx, err := tc.transfer(transferOpts, randomAddr, big.NewInt(1))
+		if err != nil {
+			return nil, fmt.Errorf("transfer error: %w", err)
+		}
+		result.TxIDs = append(result.TxIDs, fmt.Sprintf("transfer: %s", transferTx.Hash().Hex()))
+		if err = waitForConfirmation(ctx, "transfer", cl, transferTx.Hash(), log); err != nil {
+			return nil, fmt.Errorf("error waiting for transfer: %w", err)
+		}
+		receipt, _, err = cl.transactionAndReceipt(ctx, transferTx.Hash())
+		if err != nil {
+			return nil, fmt.Errorf("error getting transfer receipt: %w", err)
+		}
+		if err = checkTxStatus(receipt, g.Transfer*2); err != nil {
+			return nil, fmt.Errorf("transfer failed: %w", err)
+		}
+		log.Infof("Transfer used %d gas", receipt.GasUsed)
+		result.RawTransfers = append(result.RawTransfers, receipt.GasUsed)
+
+		// Sweep remaining ETH from temp client back.
+		sweepBal, err := tempCl.addressBalance(ctx, tempCl.address())
+		if err != nil {
+			log.Warnf("Error getting temp client balance for sweep: %v", err)
+		} else if sweepBal.Sign() > 0 {
+			sweepGas := uint64(21000)
+			sweepCost := new(big.Int).Mul(maxFeeRate, new(big.Int).SetUint64(sweepGas))
+			sweepVal := new(big.Int).Sub(sweepBal, sweepCost)
+			if sweepVal.Sign() > 0 {
+				sweepOpts, err := tempCl.txOpts(ctx, 0, sweepGas, maxFeeRate, tipRate, nil)
+				if err == nil {
+					sweepOpts.Value = sweepVal
+					mainAddr := cl.address()
+					sweepTx, err := tempCl.sendTransaction(ctx, sweepOpts, &mainAddr, nil)
+					if err == nil {
+						result.TxIDs = append(result.TxIDs, fmt.Sprintf("sweep: %s", sweepTx.Hash().Hex()))
+						log.Infof("Swept temp client back to main, tx %s", sweepTx.Hash())
+					} else {
+						log.Warnf("Error sweeping temp client: %v", err)
+					}
+				}
+			}
+		}
+	}
+
+	// Swap/redeem/refund gas testing.
+	var v uint64 = 1
+	for n := 1; n <= maxSwaps; n++ {
+		contracts := make([]*asset.Contract, 0, n)
+		secrets := make([][32]byte, 0, n)
+		lockTime := time.Now().Add(time.Minute)
+		for i := 0; i < n; i++ {
+			secretB := encode.RandomBytes(32)
+			var secret [32]byte
+			copy(secret[:], secretB)
+			secretHash := sha256.Sum256(secretB)
+			contracts = append(contracts, &asset.Contract{
+				Address:    cl.address().String(),
+				Value:      v,
+				SecretHash: secretHash[:],
+				LockTime:   uint64(lockTime.Unix()),
+			})
+			secrets = append(secrets, secret)
+		}
+
+		var optsVal uint64
+		if !isToken {
+			optsVal = uint64(n)
+		}
+
+		// Initiate.
+		txOpts, err := cl.txOpts(ctx, optsVal, g.SwapN(n)*2, maxFeeRate, tipRate, nil)
+		if err != nil {
+			return nil, fmt.Errorf("error creating tx opts for %d swaps: %v", n, err)
+		}
+		tx, err := c.initiate(txOpts, contracts)
+		if err != nil {
+			return nil, fmt.Errorf("initiate error for %d swaps: %v", n, err)
+		}
+		result.TxIDs = append(result.TxIDs, fmt.Sprintf("init(%d): %s", n, tx.Hash().Hex()))
+		if err = waitForConfirmation(ctx, "init", cl, tx.Hash(), log); err != nil {
+			return nil, fmt.Errorf("error waiting for init tx: %w", err)
+		}
+		receipt, _, err := cl.transactionAndReceipt(ctx, tx.Hash())
+		if err != nil {
+			return nil, fmt.Errorf("error getting init receipt: %w", err)
+		}
+		if err = checkTxStatus(receipt, txOpts.GasLimit); err != nil {
+			return nil, fmt.Errorf("init tx failed: %w", err)
+		}
+		log.Infof("%d gas used for %d initiations in tx %s", receipt.GasUsed, n, tx.Hash())
+		result.RawSwaps = append(result.RawSwaps, receipt.GasUsed)
+
+		// Verify contract status.
+		locator0 := acToLocator(contractVer, contracts[0], evmify(v), cl.address())
+		st, err := c.status(ctx, locator0)
+		if err != nil {
+			return nil, fmt.Errorf("status check error after init: %w", err)
+		}
+		if st.Step != dexeth.SSInitiated {
+			return nil, fmt.Errorf("expected SSInitiated after init, got %s", st.Step)
+		}
+
+		// Check isRedeemable if v1.
+		type redeemableChecker interface {
+			isRedeemable(locator []byte, secret [32]byte) (bool, error)
+		}
+		if rc, ok := c.(redeemableChecker); ok {
+			redeemable, err := rc.isRedeemable(locator0, secrets[0])
+			if err != nil {
+				return nil, fmt.Errorf("isRedeemable error: %w", err)
+			}
+			if !redeemable {
+				return nil, fmt.Errorf("swap should be redeemable after init but isn't")
+			}
+		}
+
+		// Wait for the lock time to expire so the refund gas estimation
+		// can simulate a valid refund.
+		if wait := time.Until(lockTime) + time.Second; wait > 0 {
+			log.Infof("Waiting %s for lock time to expire", wait)
+			select {
+			case <-time.After(wait):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		// Mine a block so the latest block timestamp advances past
+		// the lock time. In dev mode, eth_estimateGas simulates
+		// against the latest block's timestamp.
+		bumpOpts, err := cl.txOpts(ctx, 0, defaultSendGasLimit, maxFeeRate, tipRate, nil)
+		if err != nil {
+			return nil, fmt.Errorf("error creating bump tx opts: %w", err)
+		}
+		selfAddr := cl.address()
+		bumpTx, err := cl.sendTransaction(ctx, bumpOpts, &selfAddr, nil)
+		if err != nil {
+			return nil, fmt.Errorf("error sending bump tx: %w", err)
+		}
+		if err = waitForConfirmation(ctx, "bump", cl, bumpTx.Hash(), log); err != nil {
+			return nil, fmt.Errorf("error waiting for bump tx: %w", err)
+		}
+
+		// Estimate refund gas (no on-chain tx, gas estimation only).
+		refundGas, err := c.estimateRefundGas(ctx, locator0)
+		if err != nil {
+			return nil, fmt.Errorf("error estimating refund gas: %w", err)
+		}
+		result.RawRefunds = append(result.RawRefunds, refundGas)
+
+		// Redeem.
+		redemptions := make([]*asset.Redemption, 0, n)
+		for i, contract := range contracts {
+			redemptions = append(redemptions, &asset.Redemption{
+				Spends: &asset.AuditInfo{
+					Recipient:  cl.address().String(),
+					Expiration: lockTime,
+					Contract:   dexeth.EncodeContractData(contractVer, acToLocator(contractVer, contract, evmify(v), cl.address())),
+					SecretHash: contract.SecretHash,
+				},
+				Secret: secrets[i][:],
+			})
+		}
+
+		txOpts, err = cl.txOpts(ctx, 0, g.RedeemN(n)*2, maxFeeRate, tipRate, nil)
+		if err != nil {
+			return nil, fmt.Errorf("error creating tx opts for %d redeems: %v", n, err)
+		}
+		tx, err = c.redeem(txOpts, redemptions)
+		if err != nil {
+			return nil, fmt.Errorf("redeem error for %d: %v", n, err)
+		}
+		result.TxIDs = append(result.TxIDs, fmt.Sprintf("redeem(%d): %s", n, tx.Hash().Hex()))
+		if err = waitForConfirmation(ctx, "redeem", cl, tx.Hash(), log); err != nil {
+			return nil, fmt.Errorf("error waiting for redeem tx: %w", err)
+		}
+		receipt, _, err = cl.transactionAndReceipt(ctx, tx.Hash())
+		if err != nil {
+			return nil, fmt.Errorf("error getting redeem receipt: %w", err)
+		}
+		if err = checkTxStatus(receipt, txOpts.GasLimit); err != nil {
+			return nil, fmt.Errorf("redeem tx failed: %w", err)
+		}
+		log.Infof("%d gas used for %d redemptions in tx %s", receipt.GasUsed, n, tx.Hash())
+		result.RawRedeems = append(result.RawRedeems, receipt.GasUsed)
+
+		// Verify redeemed status.
+		st, err = c.status(ctx, locator0)
+		if err != nil {
+			return nil, fmt.Errorf("status check error after redeem: %w", err)
+		}
+		if st.Step != dexeth.SSRedeemed {
+			return nil, fmt.Errorf("expected SSRedeemed after redeem, got %s", st.Step)
+		}
+	}
+
+	// Execute an actual on-chain refund to get real gas usage.
+	{
+		secretB := encode.RandomBytes(32)
+		var secret [32]byte
+		copy(secret[:], secretB)
+		secretHash := sha256.Sum256(secretB)
+		lockTime := time.Now().Add(time.Minute)
+		contracts := []*asset.Contract{{
+			Address:    cl.address().String(),
+			Value:      v,
+			SecretHash: secretHash[:],
+			LockTime:   uint64(lockTime.Unix()),
+		}}
+
+		var optsVal uint64
+		if !isToken {
+			optsVal = 1
+		}
+
+		txOpts, err := cl.txOpts(ctx, optsVal, g.SwapN(1)*2, maxFeeRate, tipRate, nil)
+		if err != nil {
+			return nil, fmt.Errorf("error creating refund-test init tx opts: %v", err)
+		}
+		tx, err := c.initiate(txOpts, contracts)
+		if err != nil {
+			return nil, fmt.Errorf("refund-test initiate error: %v", err)
+		}
+		result.TxIDs = append(result.TxIDs, fmt.Sprintf("refund-init: %s", tx.Hash().Hex()))
+		if err = waitForConfirmation(ctx, "refund-init", cl, tx.Hash(), log); err != nil {
+			return nil, fmt.Errorf("error waiting for refund-test init: %w", err)
+		}
+		receipt, _, err := cl.transactionAndReceipt(ctx, tx.Hash())
+		if err != nil {
+			return nil, fmt.Errorf("error getting refund-test init receipt: %w", err)
+		}
+		if err = checkTxStatus(receipt, txOpts.GasLimit); err != nil {
+			return nil, fmt.Errorf("refund-test init tx failed: %w", err)
+		}
+
+		locator := acToLocator(contractVer, contracts[0], evmify(v), cl.address())
+
+		// Wait for expiry.
+		if wait := time.Until(lockTime) + time.Second; wait > 0 {
+			log.Infof("Waiting %s for refund lock time to expire", wait)
+			select {
+			case <-time.After(wait):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		bumpOpts, err := cl.txOpts(ctx, 0, defaultSendGasLimit, maxFeeRate, tipRate, nil)
+		if err != nil {
+			return nil, fmt.Errorf("error creating refund bump tx opts: %w", err)
+		}
+		selfAddr := cl.address()
+		bumpTx, err := cl.sendTransaction(ctx, bumpOpts, &selfAddr, nil)
+		if err != nil {
+			return nil, fmt.Errorf("error sending refund bump tx: %w", err)
+		}
+		if err = waitForConfirmation(ctx, "refund-bump", cl, bumpTx.Hash(), log); err != nil {
+			return nil, fmt.Errorf("error waiting for refund bump tx: %w", err)
+		}
+
+		// Execute the refund.
+		refundOpts, err := cl.txOpts(ctx, 0, g.Refund*2, maxFeeRate, tipRate, nil)
+		if err != nil {
+			return nil, fmt.Errorf("error creating refund tx opts: %v", err)
+		}
+		refundTx, err := c.refund(refundOpts, locator)
+		if err != nil {
+			return nil, fmt.Errorf("refund error: %v", err)
+		}
+		result.TxIDs = append(result.TxIDs, fmt.Sprintf("refund: %s", refundTx.Hash().Hex()))
+		if err = waitForConfirmation(ctx, "refund", cl, refundTx.Hash(), log); err != nil {
+			return nil, fmt.Errorf("error waiting for refund tx: %w", err)
+		}
+		receipt, _, err = cl.transactionAndReceipt(ctx, refundTx.Hash())
+		if err != nil {
+			return nil, fmt.Errorf("error getting refund receipt: %w", err)
+		}
+		if err = checkTxStatus(receipt, refundOpts.GasLimit); err != nil {
+			return nil, fmt.Errorf("refund tx failed: %w", err)
+		}
+		log.Infof("%d gas used for refund tx %s", receipt.GasUsed, refundTx.Hash())
+		result.RawRefunds = append(result.RawRefunds, receipt.GasUsed)
+
+		// Verify refunded status.
+		st, err := c.status(ctx, locator)
+		if err != nil {
+			return nil, fmt.Errorf("status check error after refund: %w", err)
+		}
+		if st.Step != dexeth.SSRefunded {
+			return nil, fmt.Errorf("expected SSRefunded after refund, got %s", st.Step)
+		}
+	}
+
+	// Build summary.
+	var summary strings.Builder
+	summary.WriteString(fmt.Sprintf("=== %s (v%d) Gas Test Results ===\n\n", strings.ToUpper(symbol), contractVer))
+
+	// Recommended gas values (raw * 1.3, for use in the Gases table).
+	summary.WriteString("Recommended values for Gases table:\n")
+	if len(result.RawSwaps) > 0 {
+		result.Swap = recommendedGas(result.RawSwaps[0])
+		summary.WriteString(fmt.Sprintf("  Swap:      %d\n", result.Swap))
+		if len(result.RawSwaps) > 1 {
+			result.SwapAdd = recommendedGas(avgDiff(result.RawSwaps))
+			summary.WriteString(fmt.Sprintf("  SwapAdd:   %d\n", result.SwapAdd))
+		}
+	}
+	if len(result.RawRedeems) > 0 {
+		result.Redeem = recommendedGas(result.RawRedeems[0])
+		summary.WriteString(fmt.Sprintf("  Redeem:    %d\n", result.Redeem))
+		if len(result.RawRedeems) > 1 {
+			result.RedeemAdd = recommendedGas(avgDiff(result.RawRedeems))
+			summary.WriteString(fmt.Sprintf("  RedeemAdd: %d\n", result.RedeemAdd))
+		}
+	}
+	if len(result.RawRefunds) > 0 {
+		avgRefund := avgSlice(result.RawRefunds)
+		result.Refund = recommendedGas(avgRefund)
+		summary.WriteString(fmt.Sprintf("  Refund:    %d\n", result.Refund))
+	}
+	if len(result.RawApprovals) > 0 {
+		avgApprove := avgSlice(result.RawApprovals)
+		result.Approve = recommendedGas(avgApprove)
+		summary.WriteString(fmt.Sprintf("  Approve:   %d\n", result.Approve))
+	}
+	if len(result.RawTransfers) > 0 {
+		avgTransfer := avgSlice(result.RawTransfers)
+		result.Transfer = recommendedGas(avgTransfer)
+		summary.WriteString(fmt.Sprintf("  Transfer:  %d\n", result.Transfer))
+	}
+
+	// Raw measurements.
+	summary.WriteString("\nRaw gas measurements (actual on-chain usage):\n")
+	if len(result.RawSwaps) > 0 {
+		summary.WriteString(fmt.Sprintf("  Swaps (n=1..%d):   %v\n", len(result.RawSwaps), result.RawSwaps))
+	}
+	if len(result.RawRedeems) > 0 {
+		summary.WriteString(fmt.Sprintf("  Redeems (n=1..%d): %v\n", len(result.RawRedeems), result.RawRedeems))
+	}
+	if len(result.RawRefunds) > 0 {
+		summary.WriteString(fmt.Sprintf("  Refunds (n=1..%d): %v\n", len(result.RawRefunds), result.RawRefunds))
+	}
+	if len(result.RawApprovals) > 0 {
+		summary.WriteString(fmt.Sprintf("  Approvals: %v\n", result.RawApprovals))
+	}
+	if len(result.RawTransfers) > 0 {
+		summary.WriteString(fmt.Sprintf("  Transfers: %v\n", result.RawTransfers))
+	}
+
+	result.Summary = summary.String()
+	return result, nil
+}
+
+// avgSlice calculates the average of a slice of uint64 values.
+func avgSlice(vs []uint64) uint64 {
+	if len(vs) == 0 {
+		return 0
+	}
+	var sum uint64
+	for _, v := range vs {
+		sum += v
+	}
+	return sum / uint64(len(vs))
 }
 
 // genWalletSeed uses the wallet seed passed from core as the entropy for
@@ -1057,7 +1856,7 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	// Setting the bundler depends on the tip already being set.
 	if bundlerDef, found := w.settings[bundlerKey]; found && len(bundlerDef) > 0 {
 		if err := w.setBundler(bundlerDef); err != nil {
-			return nil, fmt.Errorf("error setting bundler: %v", err)
+			w.log.Warnf("Failed to set bundler (gasless redeem unavailable): %v", err)
 		}
 	}
 
@@ -1263,7 +2062,7 @@ func (w *ETHWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, cu
 
 	if bundlerDef, found := cfg.Settings[bundlerKey]; found && len(bundlerDef) > 0 {
 		if err := w.setBundler(bundlerDef); err != nil {
-			return false, fmt.Errorf("error setting bundler: %v", err)
+			w.log.Warnf("Failed to set bundler (gasless redeem unavailable): %v", err)
 		}
 	} else {
 		w.bundlerMtx.Lock()
@@ -2804,6 +3603,13 @@ func (w *TokenWallet) Swap(ctx context.Context, swaps *asset.Swaps) ([]asset.Rec
 
 const dummyUserOpSignature = "0xfffffffffffffffffffffffffffffff0000000000000000000000000000000007aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c"
 
+// Contract minimums from ETHSwapV1.sol validateUserOp. The call gas limit
+// must be at least this value or the UserOp is rejected.
+const (
+	minCallGasBase          = 75_000 // MIN_CALL_GAS_BASE
+	minCallGasPerRedemption = 25_000 // MIN_CALL_GAS_PER_REDEMPTION
+)
+
 // precalculatedGaslessRedeemGasEstimates returns estimates for the gas limits
 // of a user op that redeems a number of swaps. This estimate is based on
 // pre-calculated values.
@@ -2811,6 +3617,12 @@ func precalculatedGaslessRedeemGasEstimates(numRedemptions uint64, gases *dexeth
 	verification := gases.GaslessRedeemVerification + gases.GaslessRedeemVerificationAdd*(numRedemptions-1)
 	preVerification := gases.GaslessRedeemPreVerification + gases.GaslessRedeemPreVerificationAdd*(numRedemptions-1)
 	call := gases.GaslessRedeemCall + gases.GaslessRedeemCallAdd*(numRedemptions-1)
+
+	// Enforce the contract's hard minimum so validateUserOp won't reject
+	// the UserOp even if the gas table values are too low.
+	if minCall := minCallGasBase + minCallGasPerRedemption*numRedemptions; call < minCall {
+		call = minCall
+	}
 
 	return &estimateBundlerGasResult{
 		VerificationGasLimit: hexutil.EncodeBig(big.NewInt(int64(verification))),
@@ -6219,6 +7031,9 @@ func (w *assetWallet) withContractor(contractVer uint32, f func(contractor) erro
 				bestContractor = c
 				bestVer = ver
 			}
+		}
+		if bestContractor == nil {
+			return errors.New("no contractors available")
 		}
 		return f(bestContractor)
 	}

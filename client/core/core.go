@@ -5779,6 +5779,83 @@ func (c *Core) DeployContract(appPW []byte, assetIDs []uint32, txData []byte, co
 	return results, nil
 }
 
+// TestContractGas exercises all v1 swap contract functions on the specified
+// chains and tokens, measuring actual gas consumption.
+func (c *Core) TestContractGas(appPW []byte, assetIDs []uint32, tokenAssetIDs []uint32, maxSwaps int) ([]*ContractGasTestResult, error) {
+	_, err := c.encryptionKey(appPW)
+	if err != nil {
+		return nil, newError(authErr, "TestContractGas password error: %w", err)
+	}
+
+	// Group token asset IDs by their parent chain.
+	tokensByParent := make(map[uint32][]uint32)
+	for _, tokenID := range tokenAssetIDs {
+		ti := asset.TokenInfo(tokenID)
+		if ti == nil {
+			return nil, newError(assetSupportErr, "unknown token asset ID %d", tokenID)
+		}
+		tokensByParent[ti.ParentID] = append(tokensByParent[ti.ParentID], tokenID)
+	}
+
+	// Build the set of chains to test. Explicitly listed chains run both
+	// base and token tests. Chains inferred from tokens run tokens only.
+	explicitChains := make(map[uint32]bool, len(assetIDs))
+	for _, id := range assetIDs {
+		explicitChains[id] = true
+	}
+	// Auto-add parent chains for tokens not already covered.
+	for parentID := range tokensByParent {
+		if !explicitChains[parentID] {
+			assetIDs = append(assetIDs, parentID)
+		}
+	}
+
+	var (
+		results []*ContractGasTestResult
+		mu      sync.Mutex
+		wg      sync.WaitGroup
+	)
+	for _, assetID := range assetIDs {
+		wg.Add(1)
+		go func(assetID uint32) {
+			defer wg.Done()
+			var res []*ContractGasTestResult
+			wallet, err := c.connectedWallet(assetID)
+			if err != nil {
+				res = []*ContractGasTestResult{{
+					AssetID: assetID,
+					Symbol:  unbip(assetID),
+					Error:   err.Error(),
+				}}
+			} else if tester, ok := wallet.Wallet.(asset.ContractGasTester); !ok {
+				res = []*ContractGasTestResult{{
+					AssetID: assetID,
+					Symbol:  unbip(assetID),
+					Error:   "wallet does not support contract gas testing",
+				}}
+			} else {
+				tokensForChain := tokensByParent[assetID]
+				tokensOnly := !explicitChains[assetID]
+				gasResults, err := tester.TestContractGas(1, maxSwaps, tokensForChain, tokensOnly)
+				if err != nil {
+					res = []*ContractGasTestResult{{
+						AssetID: assetID,
+						Symbol:  unbip(assetID),
+						Error:   err.Error(),
+					}}
+				} else {
+					res = gasResults
+				}
+			}
+			mu.Lock()
+			results = append(results, res...)
+			mu.Unlock()
+		}(assetID)
+	}
+	wg.Wait()
+	return results, nil
+}
+
 // Bridge initiates a bridge.
 func (c *Core) Bridge(fromAssetID, toAssetID uint32, amt uint64, bridgeName string) (txID string, err error) {
 	// Connect and unlock the source wallet.

@@ -44,6 +44,12 @@ const (
 	// rpcTimeoutSeconds is the number of seconds a connection to the RPC server
 	// is allowed to stay open without authenticating before it is closed.
 	rpcTimeoutSeconds = 10
+
+	// rpcDevWriteTimeoutSeconds is the write timeout used when --dev is
+	// enabled, accommodating long-running operations like contract
+	// deployment and gas testing (which may test multiple assets
+	// sequentially).
+	rpcDevWriteTimeoutSeconds = 1800
 )
 
 var (
@@ -111,6 +117,7 @@ type clientCore interface {
 	ExportMMSnapshots(host string, base, quote uint32, startEpoch, endEpoch uint64) ([]*msgjson.MMEpochSnapshot, error)
 	PruneMMSnapshots(host string, base, quote uint32, minEpochIdx uint64) (int, error)
 	DeployContract(appPW []byte, assetIDs []uint32, txData []byte, contractVer *uint32, tokenAddress string) ([]*core.DeployContractResult, error)
+	TestContractGas(appPW []byte, assetIDs []uint32, tokenAssetIDs []uint32, maxSwaps int) ([]*core.ContractGasTestResult, error)
 }
 
 // RPCServer is a single-client http and websocket server enabling a JSON
@@ -253,10 +260,14 @@ func New(cfg *Config) (*RPCServer, error) {
 
 	// Create an HTTP router.
 	mux := chi.NewRouter()
+	writeTimeout := rpcTimeoutSeconds
+	if cfg.Dev {
+		writeTimeout = rpcDevWriteTimeoutSeconds
+	}
 	httpServer := &http.Server{
 		Handler:      mux,
-		ReadTimeout:  rpcTimeoutSeconds * time.Second, // slow requests should not hold connections opened
-		WriteTimeout: rpcTimeoutSeconds * time.Second, // hung responses must die
+		ReadTimeout:  rpcTimeoutSeconds * time.Second,           // slow requests should not hold connections opened
+		WriteTimeout: time.Duration(writeTimeout) * time.Second, // dev mode allows long-running handlers
 	}
 
 	// Make the server.

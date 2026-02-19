@@ -158,6 +158,9 @@ type BridgeFeesAndLimits struct {
 	HasLimits bool              `json:"hasLimits"`
 }
 
+// ContractGasTestResult is the per-asset result of a contract gas test.
+type ContractGasTestResult = asset.GasTestResult
+
 // DeployContractResult is the per-chain result of a contract deployment.
 type DeployContractResult struct {
 	AssetID      uint32 `json:"assetID"`
