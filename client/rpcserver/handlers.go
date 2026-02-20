@@ -27,6 +27,8 @@ import (
 const (
 	cancelRoute                = "cancel"
 	closeWalletRoute           = "closewallet"
+	deployContractRoute        = "deploycontract"
+	testContractGasRoute       = "testcontractgas"
 	discoverAcctRoute          = "discoveracct"
 	exchangesRoute             = "exchanges"
 	helpRoute                  = "help"
@@ -35,6 +37,7 @@ const (
 	logoutRoute                = "logout"
 	myOrdersRoute              = "myorders"
 	newWalletRoute             = "newwallet"
+	reconfigureWalletRoute     = "reconfigurewallet"
 	openWalletRoute            = "openwallet"
 	toggleWalletStatusRoute    = "togglewalletstatus"
 	orderBookRoute             = "orderbook"
@@ -119,10 +122,18 @@ func usage(route string, err error) *msgjson.ResponsePayload {
 	return createResponse(route, nil, resErr)
 }
 
+// devRoutes is the set of routes that require the --dev flag.
+var devRoutes = map[string]bool{
+	deployContractRoute:  true,
+	testContractGasRoute: true,
+}
+
 // routes maps routes to a handler function.
 var routes = map[string]func(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload{
 	cancelRoute:                handleCancel,
 	closeWalletRoute:           handleCloseWallet,
+	deployContractRoute:        handleDeployContract,
+	testContractGasRoute:       handleTestContractGas,
 	discoverAcctRoute:          handleDiscoverAcct,
 	exchangesRoute:             handleExchanges,
 	helpRoute:                  handleHelp,
@@ -131,6 +142,7 @@ var routes = map[string]func(s *RPCServer, msg *msgjson.Message) *msgjson.Respon
 	logoutRoute:                handleLogout,
 	myOrdersRoute:              handleMyOrders,
 	newWalletRoute:             handleNewWallet,
+	reconfigureWalletRoute:     handleReconfigureWallet,
 	openWalletRoute:            handleOpenWallet,
 	toggleWalletStatusRoute:    handleToggleWalletStatus,
 	orderBookRoute:             handleOrderBook,
@@ -191,7 +203,7 @@ var routes = map[string]func(s *RPCServer, msg *msgjson.Message) *msgjson.Respon
 // handleHelp handles requests for help. Returns general help for all commands
 // if no arguments are passed or verbose help if the passed argument is a known
 // command.
-func handleHelp(_ *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+func handleHelp(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
 	var params HelpParams
 	if err := msg.Unmarshal(&params); err != nil {
 		return usage(helpRoute, err)
@@ -199,8 +211,12 @@ func handleHelp(_ *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
 	res := ""
 	if params.HelpWith == "" {
 		// List all commands if no arguments.
-		res = ListCommands(params.IncludePasswords)
+		res = ListCommands(params.IncludePasswords, s.dev)
 	} else {
+		if devRoutes[params.HelpWith] && !s.dev {
+			resErr := msgjson.NewError(msgjson.RPCUnknownRoute, "error getting usage: %v", fmt.Errorf("%w: %s", errUnknownCmd, params.HelpWith))
+			return createResponse(helpRoute, nil, resErr)
+		}
 		var err error
 		res, err = commandUsage(params.HelpWith, params.IncludePasswords)
 		if err != nil {
@@ -330,6 +346,36 @@ func handleNewWallet(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayloa
 
 	res := fmt.Sprintf(walletCreatedStr, dex.BipIDSymbol(params.AssetID))
 	return createResponse(newWalletRoute, &res, nil)
+}
+
+// handleReconfigureWallet handles requests for reconfigurewallet.
+func handleReconfigureWallet(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params ReconfigureWalletParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(reconfigureWalletRoute, err)
+	}
+
+	defer func() {
+		params.AppPass.Clear()
+		params.NewWalletPW.Clear()
+	}()
+
+	if params.Config == nil {
+		params.Config = make(map[string]string)
+	}
+
+	err := s.core.ReconfigureWallet(params.AppPass, params.NewWalletPW, &core.WalletForm{
+		Type:    params.WalletType,
+		AssetID: params.AssetID,
+		Config:  params.Config,
+	})
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCReconfigureWalletError, "error reconfiguring %s wallet: %v", dex.BipIDSymbol(params.AssetID), err)
+		return createResponse(reconfigureWalletRoute, nil, resErr)
+	}
+
+	res := fmt.Sprintf("%s wallet reconfigured", dex.BipIDSymbol(params.AssetID))
+	return createResponse(reconfigureWalletRoute, &res, nil)
 }
 
 // handleOpenWallet handles requests for openWallet.
@@ -1672,6 +1718,20 @@ var routeInfos = map[string]routeInfo{
     string: The message "` + fmt.Sprintf(walletCreatedStr, "[coin symbol]") + `"`,
 		extraHelp: walletTypesHelp,
 	},
+	reconfigureWalletRoute: {
+		paramsType: reflect.TypeOf(ReconfigureWalletParams{}),
+		summary:    `Reconfigure an existing wallet.`,
+		fieldDescs: map[string]string{
+			"appPass":     descAppPass,
+			"newWalletPW": "A new wallet password. Only required if changing the wallet password.",
+			"assetID":     descAssetID,
+			"walletType":  "The wallet type.",
+			"config":      `A JSON string->string mapping of wallet configuration settings.`,
+		},
+		returns: `Returns:
+    string: The message "[coin symbol] wallet reconfigured"`,
+		extraHelp: walletTypesHelp,
+	},
 	openWalletRoute: {
 		paramsType: reflect.TypeOf(OpenWalletParams{}),
 		summary:    `Open an existing wallet.`,
@@ -1690,6 +1750,62 @@ var routeInfos = map[string]routeInfo{
 		},
 		returns: `Returns:
     string: The message "` + fmt.Sprintf(walletLockedStr, "[coin symbol]") + `"`,
+	},
+	deployContractRoute: {
+		paramsType: reflect.TypeOf(DeployContractParams{}),
+		summary:    "Deploy a smart contract to one or more EVM chains.",
+		fieldDescs: map[string]string{
+			"appPass":      descAppPass,
+			"chains":       `List of chain symbols to deploy to, e.g. ["eth", "polygon", "base"].`,
+			"contractVer":  "The DEX swap contract version to deploy (0 or 1). Ignored if bytecode is provided.",
+			"tokenAddress": "The ERC20 token address. Required when deploying a token swap contract with contractVer.",
+			"bytecode":     "Hex-encoded contract bytecode for arbitrary deployment. If provided, takes priority over contractVer.",
+		},
+		returns: `Returns:
+    array: Per-chain deployment results.
+    [
+      {
+        "assetID" (int): The chain's BIP-44 asset ID.
+        "symbol" (string): The chain symbol.
+        "contractAddr" (string): The deployed contract address.
+        "txID" (string): The deployment transaction ID.
+        "error" (string): Error if deployment failed on this chain.
+      }
+    ]`,
+		extraHelp: func() string {
+			return `Examples:
+    Deploy v1 base chain contract to all chains:
+      bwctl deploycontract '["eth","polygon","base"]' 1
+
+    Deploy v0 token contract:
+      bwctl deploycontract '["polygon"]' 0 0x2791bca1f2de4661ed88a30c99a7a9449aa84174
+
+    Deploy arbitrary bytecode (pass 0 and empty token address as placeholders):
+      bwctl deploycontract '["eth"]' 0 '' 0x608060...`
+		},
+	},
+	testContractGasRoute: {
+		paramsType: reflect.TypeOf(TestContractGasParams{}),
+		summary:    "Test swap contract gas usage on one or more EVM chains.",
+		fieldDescs: map[string]string{
+			"appPass":  descAppPass,
+			"chains":   `Optional list of base chain symbols, e.g. ["eth", "polygon", "base"]. If omitted, parent chains are inferred from tokens.`,
+			"tokens":   `Optional list of token symbols, e.g. ["usdc.eth", "usdc.polygon"]. Tokens are tested on their parent chain. If chains is omitted, only token tests run (base chain tests are skipped).`,
+			"maxSwaps": "Maximum number of swaps per batch (default 5, min 1, max 10).",
+		},
+		returns: `Returns:
+    array: Per-asset gas test results with raw measurements and recommended gas values.`,
+		extraHelp: func() string {
+			return `Examples:
+    Test ETH base chain gas with defaults:
+      bwctl -p abc testcontractgas '["eth"]'
+
+    Test with tokens:
+      bwctl -p abc testcontractgas '["eth"]' '["usdc.eth"]' 3
+
+    Test only tokens (skip base chain):
+      bwctl -p abc testcontractgas '[]' '["usdc.eth","usdt.eth"]'`
+		},
 	},
 	toggleWalletStatusRoute: {
 		paramsType: reflect.TypeOf(ToggleWalletStatusParams{}),
@@ -2539,9 +2655,12 @@ func reflectFields(t reflect.Type, descs map[string]string) []fieldInfo {
 
 // ListCommands prints a short usage string for every route available to the
 // rpcserver.
-func ListCommands(includePasswords bool) string {
+func ListCommands(includePasswords, dev bool) string {
 	var sb strings.Builder
 	for _, r := range sortRouteInfoKeys() {
+		if devRoutes[r] && !dev {
+			continue
+		}
 		info := routeInfos[r]
 		fields := reflectFields(info.paramsType, info.fieldDescs)
 		var parts []string
@@ -2718,6 +2837,108 @@ func handlePruneMMSnapshots(s *RPCServer, msg *msgjson.Message) *msgjson.Respons
 		return createResponse(pruneMMSnapshotsRoute, nil, resErr)
 	}
 	return createResponse(pruneMMSnapshotsRoute, &n, nil)
+}
+
+func handleDeployContract(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params DeployContractParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(deployContractRoute, err)
+	}
+	defer params.AppPass.Clear()
+
+	assetIDs := make([]uint32, 0, len(params.Chains))
+	for _, chain := range params.Chains {
+		assetID, found := dex.BipSymbolID(chain)
+		if !found {
+			resErr := msgjson.NewError(msgjson.RPCArgumentsError, "unknown chain %q", chain)
+			return createResponse(deployContractRoute, nil, resErr)
+		}
+		assetIDs = append(assetIDs, assetID)
+	}
+	if len(assetIDs) == 0 {
+		resErr := msgjson.NewError(msgjson.RPCArgumentsError, "no chains specified")
+		return createResponse(deployContractRoute, nil, resErr)
+	}
+
+	var txData []byte
+	switch {
+	case params.Bytecode != nil && *params.Bytecode != "":
+		var err error
+		txData, err = hex.DecodeString(strings.TrimPrefix(*params.Bytecode, "0x"))
+		if err != nil {
+			resErr := msgjson.NewError(msgjson.RPCArgumentsError, "invalid bytecode hex: %v", err)
+			return createResponse(deployContractRoute, nil, resErr)
+		}
+	case params.ContractVer == nil:
+		resErr := msgjson.NewError(msgjson.RPCArgumentsError, "either bytecode or contractVer must be specified")
+		return createResponse(deployContractRoute, nil, resErr)
+	}
+
+	var tokenAddr string
+	if params.TokenAddress != nil {
+		tokenAddr = *params.TokenAddress
+	}
+
+	results, err := s.core.DeployContract(params.AppPass, assetIDs, txData, params.ContractVer, tokenAddr)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCDeployContractError, "deploy contract error: %v", err)
+		return createResponse(deployContractRoute, nil, resErr)
+	}
+	return createResponse(deployContractRoute, results, nil)
+}
+
+func handleTestContractGas(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params TestContractGasParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(testContractGasRoute, err)
+	}
+	defer params.AppPass.Clear()
+
+	assetIDs := make([]uint32, 0, len(params.Chains))
+	for _, chain := range params.Chains {
+		assetID, found := dex.BipSymbolID(chain)
+		if !found {
+			resErr := msgjson.NewError(msgjson.RPCArgumentsError, "unknown chain %q", chain)
+			return createResponse(testContractGasRoute, nil, resErr)
+		}
+		assetIDs = append(assetIDs, assetID)
+	}
+	if len(assetIDs) == 0 && len(params.Tokens) == 0 {
+		resErr := msgjson.NewError(msgjson.RPCArgumentsError, "no chains or tokens specified")
+		return createResponse(testContractGasRoute, nil, resErr)
+	}
+
+	var tokenAssetIDs []uint32
+	for _, tok := range params.Tokens {
+		assetID, found := dex.BipSymbolID(tok)
+		if !found {
+			resErr := msgjson.NewError(msgjson.RPCArgumentsError, "unknown token %q", tok)
+			return createResponse(testContractGasRoute, nil, resErr)
+		}
+		tokenAssetIDs = append(tokenAssetIDs, assetID)
+	}
+
+	maxSwaps := 5
+	if params.MaxSwaps != nil {
+		maxSwaps = *params.MaxSwaps
+		if maxSwaps < 1 {
+			maxSwaps = 1
+		} else if maxSwaps > 10 {
+			maxSwaps = 10
+		}
+	}
+
+	results, err := s.core.TestContractGas(params.AppPass, assetIDs, tokenAssetIDs, maxSwaps)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCTestContractGasError, "test contract gas error: %v", err)
+		return createResponse(testContractGasRoute, nil, resErr)
+	}
+	for _, r := range results {
+		if r.Summary != "" {
+			log.Infof("\n%s", r.Summary)
+		}
+	}
+	return createResponse(testContractGasRoute, results, nil)
 }
 
 // sortRouteInfoKeys returns a sorted list of routeInfos keys.

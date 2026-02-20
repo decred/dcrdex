@@ -35,6 +35,11 @@ var routeOverrides = map[string]*routeOverride{
 			"config": parseConfigFromRemainingArgs,
 		},
 	},
+	"reconfigurewallet": {
+		fieldParsers: map[string]FieldParser{
+			"config": parseConfigFromRemainingArgs,
+		},
+	},
 	"multitrade": {
 		fieldParsers: map[string]FieldParser{
 			"placement": parsePlacementsJSON,

@@ -77,6 +77,11 @@ type TCore struct {
 	exportMMSnapshotsErr     error
 	pruneMMSnapshotsResult   int
 	pruneMMSnapshotsErr      error
+	deployContractResults    []*core.DeployContractResult
+	deployContractErr        error
+	testContractGasResults   []*core.ContractGasTestResult
+	testContractGasErr       error
+	reconfigureWalletErr     error
 }
 
 func (c *TCore) Balance(uint32) (uint64, error) {
@@ -95,6 +100,9 @@ func (c *TCore) Cancel(oid dex.Bytes) error {
 func (c *TCore) CreateWallet(appPW, walletPW []byte, form *core.WalletForm) error {
 	c.newWalletForm = form
 	return c.createWalletErr
+}
+func (c *TCore) ReconfigureWallet(appPW, newWalletPW []byte, form *core.WalletForm) error {
+	return c.reconfigureWalletErr
 }
 func (c *TCore) CloseWallet(assetID uint32) error {
 	return c.closeWalletErr
@@ -257,6 +265,12 @@ func (c *TCore) PruneMMSnapshots(host string, base, quote uint32, minEpochIdx ui
 }
 func (c *TCore) AbandonTransaction(assetID uint32, txID string) error {
 	return c.abandonTransactionErr
+}
+func (c *TCore) DeployContract(appPW []byte, assetIDs []uint32, txData []byte, contractVer *uint32, tokenAddress string) ([]*core.DeployContractResult, error) {
+	return c.deployContractResults, c.deployContractErr
+}
+func (c *TCore) TestContractGas(appPW []byte, assetIDs []uint32, tokenAssetIDs []uint32, maxSwaps int) ([]*core.ContractGasTestResult, error) {
+	return c.testContractGasResults, c.testContractGasErr
 }
 
 type tBookFeed struct{}

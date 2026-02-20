@@ -145,6 +145,7 @@ func mainErr() error {
 
 	var bui *dex.UnitInfo
 	var chainCfg *params.ChainConfig
+	var entryPoints map[dex.Network]common.Address
 	switch chain {
 	case "eth":
 		bui = &dexeth.UnitInfo
@@ -152,13 +153,17 @@ func mainErr() error {
 		if err != nil {
 			return fmt.Errorf("error finding chain config: %v", err)
 		}
+		entryPoints = dexeth.EntryPoints
 	case "polygon":
 		bui = &dexpolygon.UnitInfo
 		chainCfg, err = polygon.ChainConfig(net)
 		if err != nil {
 			return fmt.Errorf("error finding chain config: %v", err)
 		}
+		entryPoints = dexpolygon.EntryPoints
 	}
+
+	entryPoint := entryPoints[net] // zero address if not set
 
 	switch {
 	case fundingReq:
@@ -178,6 +183,7 @@ func mainErr() error {
 			chain,
 			contractVer,
 			tokenAddr,
+			entryPoint,
 			credentialsPath,
 			chainCfg,
 			bui,
@@ -206,6 +212,7 @@ func mainErr() error {
 			chain,
 			contractVer,
 			tokenAddr,
+			entryPoint,
 			credentialsPath,
 			chainCfg,
 			bui,

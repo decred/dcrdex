@@ -287,6 +287,28 @@ paths:
                 config:
                   username: "user"
 
+  /reconfigurewallet:
+    post:
+      tags: [Wallet]
+      summary: Reconfigure an existing wallet
+      description: |
+        Reconfigure an existing wallet with new settings.
+
+        **Route:** `reconfigurewallet`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: reconfigurewallet
+              id: 1
+              payload:
+                appPass: "mypassword"
+                assetID: 60
+                walletType: "rpc"
+                config:
+                  providers: "https://mynode:8545"
+
   /openwallet:
     post:
       tags: [Wallet]

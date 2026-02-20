@@ -47,6 +47,7 @@ type RPCConfig struct {
 	RPCPass string `long:"rpcpass" description:"RPC server password"`
 	RPCCert string `long:"rpccert" description:"RPC server certificate file location"`
 	RPCKey  string `long:"rpckey" description:"RPC server key file location"`
+	Dev     bool   `long:"dev" description:"Enable developer RPC endpoints."`
 	// CertHosts is a list of hosts given to certgen.NewTLSCertPair for the
 	// "Subject Alternate Name" values of the generated TLS certificate. It is
 	// set automatically, not via the config file or cli args.
@@ -85,6 +86,7 @@ func (cfg *RPCConfig) RPC(c *core.Core, marketMaker *mm.MarketMaker, log dex.Log
 		Cert:        cfg.RPCCert,
 		Key:         cfg.RPCKey,
 		BWVersion:   bwVersion,
+		Dev:         cfg.Dev,
 		CertHosts: []string{
 			defaultTestnetHost, defaultSimnetHost, defaultMainnetHost,
 			walletPairOneHost, walletPairTwoHost,

@@ -312,12 +312,12 @@ func TestParseHandleOps(t *testing.T) {
 		t.Fatalf("failed to parse handle ops data: %v", err)
 	}
 
-	hash, err := HashUserOp(userOps[0], common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"), big.NewInt(11155111))
+	hash, err := HashUserOp(userOps[0], common.HexToAddress("0x0000000071727De22E5E9d8BAf0edAc6f37da032"), big.NewInt(11155111))
 	if err != nil {
 		t.Fatalf("failed to hash user op: %v", err)
 	}
 
-	if hash != common.HexToHash("0xff642622a4fba14cebc2266b4c3431a88f5a2ae355d7dfe60759e60811c13e2e") {
+	if hash != common.HexToHash("0xd0bd558a42310ba277179b2321927f38bd6679c87c8ce3bca7695ce571c0544c") {
 		t.Fatalf("unexpected hash: %s", hash.Hex())
 	}
 }

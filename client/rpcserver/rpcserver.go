@@ -44,6 +44,12 @@ const (
 	// rpcTimeoutSeconds is the number of seconds a connection to the RPC server
 	// is allowed to stay open without authenticating before it is closed.
 	rpcTimeoutSeconds = 10
+
+	// rpcDevWriteTimeoutSeconds is the write timeout used when --dev is
+	// enabled, accommodating long-running operations like contract
+	// deployment and gas testing (which may test multiple assets
+	// sequentially).
+	rpcDevWriteTimeoutSeconds = 1800
 )
 
 var (
@@ -62,6 +68,7 @@ type clientCore interface {
 	Cancel(orderID dex.Bytes) error
 	CloseWallet(assetID uint32) error
 	CreateWallet(appPass, walletPass []byte, form *core.WalletForm) error
+	ReconfigureWallet(appPW, newWalletPW []byte, form *core.WalletForm) error
 	DiscoverAccount(dexAddr string, pass []byte, certI any) (*core.Exchange, bool, error)
 	Exchanges() (exchanges map[string]*core.Exchange)
 	InitializeClient(appPass []byte, seed *string) (string, error)
@@ -110,6 +117,8 @@ type clientCore interface {
 	GenerateBCHRecoveryTransaction(appPW []byte, recipient string) ([]byte, error)
 	ExportMMSnapshots(host string, base, quote uint32, startEpoch, endEpoch uint64) ([]*msgjson.MMEpochSnapshot, error)
 	PruneMMSnapshots(host string, base, quote uint32, minEpochIdx uint64) (int, error)
+	DeployContract(appPW []byte, assetIDs []uint32, txData []byte, contractVer *uint32, tokenAddress string) ([]*core.DeployContractResult, error)
+	TestContractGas(appPW []byte, assetIDs []uint32, tokenAssetIDs []uint32, maxSwaps int) ([]*core.ContractGasTestResult, error)
 }
 
 // RPCServer is a single-client http and websocket server enabling a JSON
@@ -126,6 +135,7 @@ type RPCServer struct {
 	wg        sync.WaitGroup
 	bwVersion *SemVersion
 	ctx       context.Context
+	dev       bool
 }
 
 // genCertPair generates a key/cert pair to the paths provided.
@@ -211,6 +221,7 @@ type Config struct {
 	Addr, User, Pass, Cert, Key string
 	BWVersion                   *SemVersion
 	CertHosts                   []string
+	Dev                         bool
 }
 
 // SetLogger sets the logger for the RPCServer package.
@@ -250,10 +261,14 @@ func New(cfg *Config) (*RPCServer, error) {
 
 	// Create an HTTP router.
 	mux := chi.NewRouter()
+	writeTimeout := rpcTimeoutSeconds
+	if cfg.Dev {
+		writeTimeout = rpcDevWriteTimeoutSeconds
+	}
 	httpServer := &http.Server{
 		Handler:      mux,
-		ReadTimeout:  rpcTimeoutSeconds * time.Second, // slow requests should not hold connections opened
-		WriteTimeout: rpcTimeoutSeconds * time.Second, // hung responses must die
+		ReadTimeout:  rpcTimeoutSeconds * time.Second,           // slow requests should not hold connections opened
+		WriteTimeout: time.Duration(writeTimeout) * time.Second, // dev mode allows long-running handlers
 	}
 
 	// Make the server.
@@ -266,6 +281,7 @@ func New(cfg *Config) (*RPCServer, error) {
 		tlsConfig: tlsConfig,
 		bwVersion: cfg.BWVersion,
 		wsServer:  websocket.New(cfg.Core, log.SubLogger("WS")),
+		dev:       cfg.Dev,
 	}
 
 	// Create authSHA to verify requests against.
@@ -347,6 +363,12 @@ func (s *RPCServer) handleRequest(req *msgjson.Message) *msgjson.ResponsePayload
 	// Find the correct handler for this route.
 	h, exists := routes[req.Route]
 	if !exists {
+		log.Debugf("%v: %v", errUnknownCmd, req.Route)
+		payload.Error = msgjson.NewError(msgjson.RPCUnknownRoute, "%v", errUnknownCmd)
+		return payload
+	}
+
+	if devRoutes[req.Route] && !s.dev {
 		log.Debugf("%v: %v", errUnknownCmd, req.Route)
 		payload.Error = msgjson.NewError(msgjson.RPCUnknownRoute, "%v", errUnknownCmd)
 		return payload

@@ -190,7 +190,7 @@ func TestRouteInfos(t *testing.T) {
 
 func TestListCommands(t *testing.T) {
 	// Without passwords.
-	res := ListCommands(false)
+	res := ListCommands(false, true)
 	if res == "" {
 		t.Fatal("ListCommands returned empty string")
 	}
@@ -200,13 +200,19 @@ func TestListCommands(t *testing.T) {
 	}
 
 	// With passwords.
-	resWithPW := ListCommands(true)
+	resWithPW := ListCommands(true, true)
 	if resWithPW == "" {
 		t.Fatal("ListCommands(true) returned empty string")
 	}
 	// Verify password fields appear.
 	if !strings.Contains(resWithPW, "appPass") {
 		t.Fatal("ListCommands(true) should contain appPass")
+	}
+
+	// Without dev flag, dev routes should be hidden.
+	resNoDev := ListCommands(false, false)
+	if strings.Contains(resNoDev, "deploycontract") {
+		t.Fatal("ListCommands with dev=false should not contain deploycontract")
 	}
 }
 
@@ -356,7 +362,7 @@ func TestHandleHelp(t *testing.T) {
 		} else {
 			msg = makeMsg(t, helpRoute, test.params)
 		}
-		payload := handleHelp(nil, msg)
+		payload := handleHelp(&RPCServer{}, msg)
 		res := ""
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
 			t.Fatal(err)
@@ -1877,6 +1883,249 @@ func TestHandlePruneMMSnapshots(t *testing.T) {
 		}
 		payload := handlePruneMMSnapshots(r, msg)
 		var res int
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatalf("%s: %v", test.name, err)
+		}
+	}
+}
+
+func TestHandleDeployContract(t *testing.T) {
+	bytecode := "6080604052"
+	contractVer := uint32(0)
+	goodResults := []*core.DeployContractResult{{
+		AssetID:      60,
+		Symbol:       "eth",
+		ContractAddr: "0x1234",
+		TxID:         "0xabcd",
+	}}
+	tests := []struct {
+		name        string
+		params      any
+		results     []*core.DeployContractResult
+		coreErr     error
+		wantErrCode int
+	}{{
+		name: "ok with bytecode",
+		params: &DeployContractParams{
+			AppPass:  encode.PassBytes("abc"),
+			Chains:   []string{"eth"},
+			Bytecode: &bytecode,
+		},
+		results:     goodResults,
+		wantErrCode: -1,
+	}, {
+		name: "ok with contractVer",
+		params: &DeployContractParams{
+			AppPass:     encode.PassBytes("abc"),
+			Chains:      []string{"eth"},
+			ContractVer: &contractVer,
+		},
+		results:     goodResults,
+		wantErrCode: -1,
+	}, {
+		name:        "bad params",
+		params:      nil,
+		wantErrCode: msgjson.RPCArgumentsError,
+	}, {
+		name: "unknown chain",
+		params: &DeployContractParams{
+			AppPass:  encode.PassBytes("abc"),
+			Chains:   []string{"unknownchain"},
+			Bytecode: &bytecode,
+		},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}, {
+		name: "missing bytecode and contractVer",
+		params: &DeployContractParams{
+			AppPass: encode.PassBytes("abc"),
+			Chains:  []string{"eth"},
+		},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}, {
+		name: "bytecode takes priority over contractVer",
+		params: &DeployContractParams{
+			AppPass:     encode.PassBytes("abc"),
+			Chains:      []string{"eth"},
+			Bytecode:    &bytecode,
+			ContractVer: &contractVer,
+		},
+		results:     goodResults,
+		wantErrCode: -1,
+	}, {
+		name: "core error",
+		params: &DeployContractParams{
+			AppPass:  encode.PassBytes("abc"),
+			Chains:   []string{"eth"},
+			Bytecode: &bytecode,
+		},
+		coreErr:     errors.New("test error"),
+		wantErrCode: msgjson.RPCDeployContractError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{
+			deployContractResults: test.results,
+			deployContractErr:     test.coreErr,
+		}
+		r := &RPCServer{core: tc, dev: true}
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, deployContractRoute)
+		} else {
+			msg = makeMsg(t, deployContractRoute, test.params)
+		}
+		payload := handleDeployContract(r, msg)
+		var res []*core.DeployContractResult
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatalf("%s: %v", test.name, err)
+		}
+	}
+}
+
+func TestHandleTestContractGas(t *testing.T) {
+	maxSwaps := 3
+	goodResults := []*core.ContractGasTestResult{{
+		AssetID:    60,
+		Symbol:     "eth",
+		Swap:       63441,
+		SwapAdd:    34703,
+		Redeem:     52041,
+		RawSwaps:   []uint64{48801, 75511, 102209},
+		RawRedeems: []uint64{40032, 50996, 61949},
+		RawRefunds: []uint64{40390, 40401, 40388},
+		Summary:    "test summary",
+	}}
+	tests := []struct {
+		name        string
+		params      any
+		results     []*core.ContractGasTestResult
+		coreErr     error
+		wantErrCode int
+	}{{
+		name: "ok",
+		params: &TestContractGasParams{
+			AppPass:  encode.PassBytes("abc"),
+			Chains:   []string{"eth"},
+			MaxSwaps: &maxSwaps,
+		},
+		results:     goodResults,
+		wantErrCode: -1,
+	}, {
+		name: "ok with tokens",
+		params: &TestContractGasParams{
+			AppPass: encode.PassBytes("abc"),
+			Chains:  []string{"eth"},
+			Tokens:  []string{"usdc.eth"},
+		},
+		results:     goodResults,
+		wantErrCode: -1,
+	}, {
+		name:        "bad params",
+		params:      nil,
+		wantErrCode: msgjson.RPCArgumentsError,
+	}, {
+		name: "unknown chain",
+		params: &TestContractGasParams{
+			AppPass: encode.PassBytes("abc"),
+			Chains:  []string{"unknownchain"},
+		},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}, {
+		name: "no chains",
+		params: &TestContractGasParams{
+			AppPass: encode.PassBytes("abc"),
+			Chains:  []string{},
+		},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}, {
+		name: "unknown token",
+		params: &TestContractGasParams{
+			AppPass: encode.PassBytes("abc"),
+			Chains:  []string{"eth"},
+			Tokens:  []string{"unknown.token"},
+		},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}, {
+		name: "core error",
+		params: &TestContractGasParams{
+			AppPass: encode.PassBytes("abc"),
+			Chains:  []string{"eth"},
+		},
+		coreErr:     errors.New("test error"),
+		wantErrCode: msgjson.RPCTestContractGasError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{
+			testContractGasResults: test.results,
+			testContractGasErr:     test.coreErr,
+		}
+		r := &RPCServer{core: tc, dev: true}
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, testContractGasRoute)
+		} else {
+			msg = makeMsg(t, testContractGasRoute, test.params)
+		}
+		payload := handleTestContractGas(r, msg)
+		var res []*core.ContractGasTestResult
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatalf("%s: %v", test.name, err)
+		}
+	}
+}
+
+func TestHandleReconfigureWallet(t *testing.T) {
+	tests := []struct {
+		name        string
+		params      any
+		coreErr     error
+		wantErrCode int
+	}{{
+		name: "ok",
+		params: &ReconfigureWalletParams{
+			AppPass:    encode.PassBytes("abc"),
+			AssetID:    42,
+			WalletType: "rpc",
+			Config:     map[string]string{"key": "val"},
+		},
+		wantErrCode: -1,
+	}, {
+		name: "ok with new password",
+		params: &ReconfigureWalletParams{
+			AppPass:     encode.PassBytes("abc"),
+			NewWalletPW: encode.PassBytes("newpw"),
+			AssetID:     42,
+			WalletType:  "rpc",
+			Config:      map[string]string{"key": "val"},
+		},
+		wantErrCode: -1,
+	}, {
+		name:        "bad params",
+		params:      nil,
+		wantErrCode: msgjson.RPCArgumentsError,
+	}, {
+		name: "core error",
+		params: &ReconfigureWalletParams{
+			AppPass:    encode.PassBytes("abc"),
+			AssetID:    42,
+			WalletType: "rpc",
+			Config:     map[string]string{"key": "val"},
+		},
+		coreErr:     errors.New("test error"),
+		wantErrCode: msgjson.RPCReconfigureWalletError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{
+			reconfigureWalletErr: test.coreErr,
+		}
+		r := &RPCServer{core: tc}
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, reconfigureWalletRoute)
+		} else {
+			msg = makeMsg(t, reconfigureWalletRoute, test.params)
+		}
+		payload := handleReconfigureWallet(r, msg)
+		var res string
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
 			t.Fatalf("%s: %v", test.name, err)
 		}

@@ -66,6 +66,15 @@ type NewWalletParams struct {
 	Config     map[string]string `json:"config,omitempty"`
 }
 
+// ReconfigureWalletParams is the parameter type for the reconfigurewallet route.
+type ReconfigureWalletParams struct {
+	AppPass     encode.PassBytes  `json:"appPass"`
+	NewWalletPW encode.PassBytes  `json:"newWalletPW,omitempty"`
+	AssetID     uint32            `json:"assetID"`
+	WalletType  string            `json:"walletType"`
+	Config      map[string]string `json:"config,omitempty"`
+}
+
 // OpenWalletParams is the parameter type for the openwallet route.
 type OpenWalletParams struct {
 	AppPass encode.PassBytes `json:"appPass"`
@@ -443,4 +452,21 @@ type PruneMMSnapshotsParams struct {
 	BaseID      uint32 `json:"baseID"`
 	QuoteID     uint32 `json:"quoteID"`
 	MinEpochIdx uint64 `json:"minEpochIdx"`
+}
+
+// DeployContractParams is the parameter type for the deploycontract route.
+type DeployContractParams struct {
+	AppPass      encode.PassBytes `json:"appPass"`
+	Chains       []string         `json:"chains"`
+	ContractVer  *uint32          `json:"contractVer,omitempty"`
+	TokenAddress *string          `json:"tokenAddress,omitempty"`
+	Bytecode     *string          `json:"bytecode,omitempty"`
+}
+
+// TestContractGasParams is the parameter type for the testcontractgas route.
+type TestContractGasParams struct {
+	AppPass  encode.PassBytes `json:"appPass"`
+	Chains   []string         `json:"chains"`
+	Tokens   []string         `json:"tokens,omitempty"`
+	MaxSwaps *int             `json:"maxSwaps,omitempty"`
 }

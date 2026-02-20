@@ -158,6 +158,18 @@ type BridgeFeesAndLimits struct {
 	HasLimits bool              `json:"hasLimits"`
 }
 
+// ContractGasTestResult is the per-asset result of a contract gas test.
+type ContractGasTestResult = asset.GasTestResult
+
+// DeployContractResult is the per-chain result of a contract deployment.
+type DeployContractResult struct {
+	AssetID      uint32 `json:"assetID"`
+	Symbol       string `json:"symbol"`
+	ContractAddr string `json:"contractAddr,omitempty"`
+	TxID         string `json:"txID,omitempty"`
+	Error        string `json:"error,omitempty"`
+}
+
 // ExtensionModeConfig is configuration for running core in extension mode,
 // primarily for restricting certain wallet reconfiguration options.
 type ExtensionModeConfig struct {

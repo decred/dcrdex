@@ -49,7 +49,7 @@ func init() {
 	registerToken(usdcTokenID, "The USDC Ethereum ERC20 token.", dex.Mainnet, dex.Testnet, dex.Simnet)
 	registerToken(usdtTokenID, "The USDT Ethereum ERC20 token.", dex.Mainnet, dex.Testnet, dex.Simnet)
 	registerToken(wbtcTokenID, "Wrapped BTC.", dex.Mainnet)
-	registerToken(wethTokenID, "Wrapped ETH.", dex.Mainnet)
+	registerToken(wethTokenID, "Wrapped ETH.", dex.Mainnet, dex.Testnet)
 }
 
 const (

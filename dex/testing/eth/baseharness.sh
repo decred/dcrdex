@@ -15,7 +15,7 @@ ERC20_SWAP_V0=$(fileToHex "../../networks/erc20/contracts/v0/swap_contract.bin")
 TEST_TOKEN=$(fileToHex "../../networks/erc20/contracts/v0/token_contract.bin")
 MULTIBALANCE_BIN=$(fileToHex "../../networks/eth/contracts/multibalance/contract.bin")
 ETH_SWAP_V1=$(fileToHex "../../networks/eth/contracts/v1/contract.bin")
-ENTRYPOINT_V06=$(fileToHex "../../networks/eth/contracts/entrypoint/entrypoint.bin")
+ENTRYPOINT_V07=$(fileToHex "../../networks/eth/contracts/entrypoint/entrypoint.bin")
 
 # Ensure we can create the session and that there's not a session already
 # running before we nuke the data directory.
@@ -119,7 +119,7 @@ echo "Sending 5000 to bundler"
 "${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/send.js --exec send(\"${BUNDLER_ADDRESS}\",${SEND_AMT})"
 
 echo "Deploying Entrypoint contract."
-ENTRYPOINT_CONTRACT_HASH=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/deploy.js --exec deploy(\"${ENTRYPOINT_V06}\")" | sed 's/"//g')
+ENTRYPOINT_CONTRACT_HASH=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/deploy.js --exec deploy(\"${ENTRYPOINT_V07}\")" | sed 's/"//g')
 
 echo "Deploying ETHSwapV0 contract."
 ETH_SWAP_CONTRACT_HASH_V0=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/deploy.js --exec deploy(\"${ETH_SWAP_V0}\")" | sed 's/"//g')

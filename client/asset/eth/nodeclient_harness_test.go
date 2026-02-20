@@ -925,7 +925,7 @@ func testSendTransaction(t *testing.T) {
 		t.Fatalf("txOpts error: %v", err)
 	}
 
-	tx, err := ethClient.sendTransaction(ctx, txOpts, participantAddr, nil)
+	tx, err := ethClient.sendTransaction(ctx, txOpts, &participantAddr, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1051,7 +1051,7 @@ func testTransactionReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("txOpts error: %v", err)
 	}
-	tx, err := ethClient.sendTransaction(ctx, txOpts, simnetAddr, nil)
+	tx, err := ethClient.sendTransaction(ctx, txOpts, &simnetAddr, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2401,7 +2401,7 @@ func testApproveGas(t *testing.T) {
 		Nonce:     big.NewInt(nonce),
 	}
 
-	tx, err := client.sendTransaction(ctx, txOpts, addressToCall, data)
+	tx, err := client.sendTransaction(ctx, txOpts, &addressToCall, data)
 	if err != nil {
 		t.Fatalf("failed to send transaction: %v", err)
 	}

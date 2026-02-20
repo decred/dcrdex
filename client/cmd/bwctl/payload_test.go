@@ -367,6 +367,42 @@ func TestNewWalletConfig(t *testing.T) {
 	}
 }
 
+func TestReconfigureWalletConfig(t *testing.T) {
+	pws := []encode.PassBytes{encode.PassBytes("app"), encode.PassBytes("newwallet")}
+
+	// With key=value config args.
+	p, err := buildPayload("reconfigurewallet", pws, []string{"60", "rpc", "bundler=http://localhost:40000", "providers=http://node1"})
+	if err != nil {
+		t.Fatalf("reconfigurewallet config: %v", err)
+	}
+	rw := p.(*rpcserver.ReconfigureWalletParams)
+	if string(rw.AppPass) != "app" || string(rw.NewWalletPW) != "newwallet" {
+		t.Fatal("reconfigurewallet: wrong passwords")
+	}
+	if rw.AssetID != 60 || rw.WalletType != "rpc" {
+		t.Fatal("reconfigurewallet: wrong fields")
+	}
+	if rw.Config == nil || rw.Config["bundler"] != "http://localhost:40000" || rw.Config["providers"] != "http://node1" {
+		t.Fatal("reconfigurewallet: wrong config")
+	}
+
+	// Without config.
+	p, err = buildPayload("reconfigurewallet", pws, []string{"60", "rpc"})
+	if err != nil {
+		t.Fatalf("reconfigurewallet no config: %v", err)
+	}
+	rw = p.(*rpcserver.ReconfigureWalletParams)
+	if rw.Config != nil {
+		t.Fatal("reconfigurewallet: config should be nil")
+	}
+
+	// Without new wallet password (only app pass).
+	_, err = buildPayload("reconfigurewallet", []encode.PassBytes{encode.PassBytes("app")}, []string{"60", "rpc"})
+	if err == nil {
+		t.Fatal("reconfigurewallet: expected error for missing second password")
+	}
+}
+
 func TestStartStopBot(t *testing.T) {
 	pw := encode.PassBytes("password")
 
@@ -774,6 +810,7 @@ func TestAllRoutesHaveCorrectType(t *testing.T) {
 	// generic dummy-arg builder below can't synthesize.
 	customRoutes := map[string]bool{
 		"newwallet":           true, // config uses remaining args
+		"reconfigurewallet":   true, // config uses remaining args
 		"multitrade":          true, // placements JSON
 		"startmmbot":          true, // optional market filter
 		"stopmmbot":           true, // optional market filter
@@ -781,6 +818,8 @@ func TestAllRoutesHaveCorrectType(t *testing.T) {
 		"updaterunningbotinv": true, // market + required inventory
 		"postbond":            true, // maintainTier defaults true
 		"withdraw":            true, // postProcess sets subtract
+		"deploycontract":      true, // required slice field (chains)
+		"testcontractgas":     true, // required slice field (chains)
 	}
 
 	// Verify that buildPayload returns the correct pointer type for every

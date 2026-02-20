@@ -143,6 +143,8 @@ type testNode struct {
 	sentTxs                 int
 	sendTxTx                *types.Transaction
 	sendTxErr               error
+	estimateGasResult       uint64
+	estimateGasErr          error
 	simBackend              bind.ContractBackend
 	maxFeeRate              *big.Int
 	tContractor             *tContractor
@@ -271,10 +273,18 @@ func (n *testNode) signHash(hash []byte) (sig, pubKey []byte, err error) {
 	return sig, crypto.FromECDSAPub(&n.privKey.PublicKey), nil
 }
 
-func (n *testNode) sendTransaction(ctx context.Context, txOpts *bind.TransactOpts, to common.Address, data []byte, filts ...acceptabilityFilter) (*types.Transaction, error) {
+func (n *testNode) sendTransaction(ctx context.Context, txOpts *bind.TransactOpts, to *common.Address, data []byte, filts ...acceptabilityFilter) (*types.Transaction, error) {
 	n.sentTxs++
 	return n.sendTxTx, n.sendTxErr
 }
+
+func (n *testNode) EstimateGas(ctx context.Context, call ethereum.CallMsg) (uint64, error) {
+	if n.estimateGasResult != 0 || n.estimateGasErr != nil {
+		return n.estimateGasResult, n.estimateGasErr
+	}
+	return 100_000, nil
+}
+
 func (n *testNode) sendSignedTransaction(ctx context.Context, tx *types.Transaction, filts ...acceptabilityFilter) error {
 	n.lastSignedTx = tx
 	return nil

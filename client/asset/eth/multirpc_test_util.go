@@ -157,7 +157,7 @@ func (m *MRPCTest) TestSimnetMultiRPCClient(t *testing.T, wsPort, httpPort strin
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := cl.sendTransaction(ctx, txOpts, alphaAddr, nil); err != nil {
+				if _, err := cl.sendTransaction(ctx, txOpts, &alphaAddr, nil); err != nil {
 					t.Fatalf("error sending tx %d-%d: %v", i, j, err)
 				}
 			}

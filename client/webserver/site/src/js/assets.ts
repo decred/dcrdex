@@ -73,11 +73,15 @@ export class TickerAsset {
     const xcRate = app().fiatRatesMap[assetID]
     if (!xcRate) this.haveAllFiatRates = false
     this.hasTokens = this.hasTokens || Boolean(token)
-    if (!token) { // prefer the native asset data, e.g. weth.polygon -> eth}
-      this.bestID = assetID
-      this.logoSymbol = symbol
-      this.name = name
-      this.ui = ui
+    if (!token) { // prefer the native asset data, e.g. weth.polygon -> eth
+      // Use the lowest asset ID as the primary. This ensures e.g.
+      // Ethereum (60) takes priority over Base for the ETH ticker.
+      if (assetID < this.bestID) {
+        this.bestID = assetID
+        this.logoSymbol = symbol
+        this.name = name
+        this.ui = ui
+      }
     }
     const ca = new NetworkAsset(a)
     this.hasWallets = this.hasWallets || Boolean(w) || Boolean(ca.token?.parentMade)
