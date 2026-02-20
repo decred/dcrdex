@@ -1091,18 +1091,19 @@ export default class WalletsPage extends BasePage {
       const tmpl = Doc.parseTemplate(tr)
       tmpl.chainLogo.src = chainLogo
       tmpl.chainName.textContent = chainName
-      const usable = w || token?.parentMade
-      if (usable) {
+      const hasWallet = Boolean(w)
+      const canCreate = !hasWallet && (!token || token.parentMade)
+      if (hasWallet) {
         if (immature > 0) tmpl.immature.textContent = Doc.formatCoinValue(immature, ui)
         if (locked > 0) tmpl.locked.textContent = Doc.formatCoinValue(locked, ui)
         tmpl.avail.textContent = Doc.formatCoinValue(available, ui)
         tmpl.allocation.textContent = String(total ? Math.round((available + locked + immature) / total * 100) : 0) + '%'
       }
       Doc.bind(tmpl.txsBttn, 'click', () => this.showTxHistory(assetID))
-      Doc.bind(tmpl.createWalletBttn, 'click', () => this.showNewWallet(token?.parentID ?? assetID))
+      Doc.bind(tmpl.createWalletBttn, 'click', () => this.showNewWallet(assetID))
 
-      Doc.setVis(usable, tmpl.txsBttn)
-      Doc.setVis(!usable, tmpl.createWalletBttn)
+      Doc.setVis(hasWallet, tmpl.txsBttn)
+      Doc.setVis(canCreate, tmpl.createWalletBttn)
     }
 
     // TODO: handle reserves deficit with a notification.
