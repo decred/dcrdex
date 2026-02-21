@@ -154,21 +154,79 @@ func (b *rpcBundler) implementation(ctx context.Context) (bundlerImpl, error) {
 	return 0, fmt.Errorf("unknown bundler implementation. Supported implementations: rundler, skandha, pimlico")
 }
 
-// userOp represents a user operation as defined by ERC-4337.
+// userOp represents a v0.7 ERC-4337 user operation in the unpacked RPC format.
 type userOp struct {
-	Sender               string `json:"sender"`
-	Nonce                string `json:"nonce"`
-	InitCode             string `json:"initCode"`
-	CallData             string `json:"callData"`
-	CallGasLimit         string `json:"callGasLimit"`
-	VerificationGasLimit string `json:"verificationGasLimit"`
-	PreVerificationGas   string `json:"preVerificationGas"`
-	MaxFeePerGas         string `json:"maxFeePerGas"`
-	MaxPriorityFeePerGas string `json:"maxPriorityFeePerGas"`
-	PaymasterAndData     string `json:"paymasterAndData"`
-	Signature            string `json:"signature"`
+	Sender                        string `json:"sender"`
+	Nonce                         string `json:"nonce"`
+	Factory                       string `json:"factory,omitempty"`
+	FactoryData                   string `json:"factoryData,omitempty"`
+	CallData                      string `json:"callData"`
+	CallGasLimit                  string `json:"callGasLimit"`
+	VerificationGasLimit          string `json:"verificationGasLimit"`
+	PreVerificationGas            string `json:"preVerificationGas"`
+	MaxFeePerGas                  string `json:"maxFeePerGas"`
+	MaxPriorityFeePerGas          string `json:"maxPriorityFeePerGas"`
+	Paymaster                     string `json:"paymaster,omitempty"`
+	PaymasterVerificationGasLimit string `json:"paymasterVerificationGasLimit,omitempty"`
+	PaymasterPostOpGasLimit       string `json:"paymasterPostOpGasLimit,omitempty"`
+	PaymasterData                 string `json:"paymasterData,omitempty"`
+	Signature                     string `json:"signature"`
 }
 
+// packInitCode returns factory + factoryData concatenated, or empty bytes
+// if no factory is set.
+func (op *userOp) packInitCode() []byte {
+	if op.Factory == "" {
+		return []byte{}
+	}
+	factory := common.FromHex(op.Factory)
+	factoryData := common.FromHex(op.FactoryData)
+	return append(factory, factoryData...)
+}
+
+// packPaymasterAndData returns paymaster + paymasterVerificationGasLimit (16 bytes)
+// + paymasterPostOpGasLimit (16 bytes) + paymasterData concatenated, or empty
+// bytes if no paymaster is set.
+func (op *userOp) packPaymasterAndData() []byte {
+	if op.Paymaster == "" {
+		return []byte{}
+	}
+	paymaster := common.FromHex(op.Paymaster)
+	pmVerifGas := common.FromHex(op.PaymasterVerificationGasLimit)
+	pmPostOpGas := common.FromHex(op.PaymasterPostOpGasLimit)
+	pmData := common.FromHex(op.PaymasterData)
+	result := make([]byte, 0, len(paymaster)+16+16+len(pmData))
+	result = append(result, paymaster...)
+	result = append(result, common.LeftPadBytes(pmVerifGas, 16)...)
+	result = append(result, common.LeftPadBytes(pmPostOpGas, 16)...)
+	result = append(result, pmData...)
+	return result
+}
+
+// packAccountGasLimits packs verificationGasLimit and callGasLimit into a
+// single bytes32: verificationGasLimit (16 bytes) | callGasLimit (16 bytes).
+func (op *userOp) packAccountGasLimits() [32]byte {
+	verif := common.FromHex(op.VerificationGasLimit)
+	call := common.FromHex(op.CallGasLimit)
+	var packed [32]byte
+	copy(packed[16-len(verif):16], verif)
+	copy(packed[32-len(call):32], call)
+	return packed
+}
+
+// packGasFees packs maxPriorityFeePerGas and maxFeePerGas into a single
+// bytes32: maxPriorityFeePerGas (16 bytes) | maxFeePerGas (16 bytes).
+func (op *userOp) packGasFees() [32]byte {
+	priority := common.FromHex(op.MaxPriorityFeePerGas)
+	maxFee := common.FromHex(op.MaxFeePerGas)
+	var packed [32]byte
+	copy(packed[16-len(priority):16], priority)
+	copy(packed[32-len(maxFee):32], maxFee)
+	return packed
+}
+
+// hash computes the v0.7 ERC-4337 UserOperation hash using the
+// PackedUserOperation type hash scheme.
 func (op *userOp) hash(entryPoint common.Address, chainID *big.Int) (common.Hash, error) {
 	parseBigInt := func(hexStr string) *big.Int {
 		intB := common.FromHex(hexStr)
@@ -186,35 +244,29 @@ func (op *userOp) hash(entryPoint common.Address, chainID *big.Int) (common.Hash
 		{Name: "nonce", Type: uint256},
 		{Name: "hashInitCode", Type: bytes32},
 		{Name: "hashCallData", Type: bytes32},
-		{Name: "callGasLimit", Type: uint256},
-		{Name: "verificationGasLimit", Type: uint256},
+		{Name: "accountGasLimits", Type: bytes32},
 		{Name: "preVerificationGas", Type: uint256},
-		{Name: "maxFeePerGas", Type: uint256},
-		{Name: "maxPriorityFeePerGas", Type: uint256},
+		{Name: "gasFees", Type: bytes32},
 		{Name: "hashPaymasterAndData", Type: bytes32},
 	}
 
 	sender := common.HexToAddress(op.Sender)
 	nonce := parseBigInt(op.Nonce)
-	callGasLimit := parseBigInt(op.CallGasLimit)
-	verificationGasLimit := parseBigInt(op.VerificationGasLimit)
 	preVerificationGas := parseBigInt(op.PreVerificationGas)
-	maxFeePerGas := parseBigInt(op.MaxFeePerGas)
-	maxPriorityFeePerGas := parseBigInt(op.MaxPriorityFeePerGas)
-	initCodeHash := crypto.Keccak256Hash(common.FromHex(op.InitCode))
+	initCodeHash := crypto.Keccak256Hash(op.packInitCode())
 	callDataHash := crypto.Keccak256Hash(common.FromHex(op.CallData))
-	paymasterAndDataHash := crypto.Keccak256Hash(common.FromHex(op.PaymasterAndData))
+	accountGasLimits := op.packAccountGasLimits()
+	gasFees := op.packGasFees()
+	paymasterAndDataHash := crypto.Keccak256Hash(op.packPaymasterAndData())
 
 	packed, err := args.Pack(
 		sender,
 		nonce,
 		initCodeHash,
 		callDataHash,
-		callGasLimit,
-		verificationGasLimit,
+		accountGasLimits,
 		preVerificationGas,
-		maxFeePerGas,
-		maxPriorityFeePerGas,
+		gasFees,
 		paymasterAndDataHash,
 	)
 	if err != nil {

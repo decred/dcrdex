@@ -77,8 +77,8 @@ var (
 			dex.Simnet:  common.HexToAddress(""),
 		},
 		1: {
-			dex.Mainnet: common.HexToAddress("0xa958d5B8a3a29E3f5f41742Fbb939A0dd93EB418"), // tx 0x4adf0314237c454acee1f8d33e97f84126af612245cad0794471693f0906610e
-			dex.Testnet: common.HexToAddress("0xaa3084e2a99e3548b9111280794711771a803c5e"), // tx 0x56714e5a4dea2b20a3b517023168a3ffd81d183368d99bf976dc1cb0bf673095
+			dex.Mainnet: common.HexToAddress("0xa05Ab6136a5AF832B4AdF12e5306E1f8C5Af17Cc"), // tx 0x64c28f3cf277b320cf11e3e057387a1d8a57f3d88847a1deafda33d31fd65b6f
+			dex.Testnet: common.HexToAddress("0xA70055386aD35190D39d7f3d6B1EceBa7690c59D"), // tx 0x178af6205fe07274ddc543099f0e3de9844ef1cb76755a8b6e9a54f14049ba0c
 			dex.Simnet:  common.HexToAddress(""),
 		},
 	}
@@ -128,31 +128,36 @@ var v0Gases = &Gases{
 
 */
 
+// Mainnet v1 swap evidence:
+//
+//	init:            0x8274d24f1e33049f3d44d8b9a0e3c527bf6c416cc4271064e8eebd2e732aab38
+//	redeem:          0x9d1daaba143257fa71f71b541e904aabe2222ad13d7b4fbed3552811c2215a71
+//	refund:          0x801d1b712696ea624a76b4b67e675422756a574bd24deebebd64c2b69b99bb44
+//	gasless redeem:  0xd4d1911ffe6ca69819f4b7fc207160ef6a4d8fd322f112520649076d950e164f
 var v1Gases = &Gases{
-	// First swap used 48801 gas Recommended Gases.Swap = 63441
-	Swap: 63_441,
-	// 	4 additional swaps averaged 26695 gas each. Recommended Gases.SwapAdd = 34703
-	// 	[48801 75511 102209 128895 155582]
-	SwapAdd: 34_703,
-	// First redeem used 40032 gas. Recommended Gases.Redeem = 52041
-	Redeem: 52_041,
-	// 	4 additional redeems averaged 10950 gas each. recommended Gases.RedeemAdd = 14235
-	// 	[40032 50996 61949 72890 83832]
-	RedeemAdd: 14_235,
-	// *** Compare expected Swap + Redeem = 88k with UniSwap v2: 102k, v3: 127k
-	// *** A 1-match order is cheaper than UniSwap.
-	// Average of 5 refunds: 40390. Recommended Gases.Refund = 52507
-	// 	[40381 40393 40393 40393 40393]
-	Refund: 52_507,
+	// Mainnet measurements:
+	// Swaps (n=1..5):   [54272 83981 113666 143412 173135]
+	Swap:    70_553,
+	SwapAdd: 38_629,
+	// Redeems (n=1..5): [44887 58230 71550 84931 98290]
+	Redeem:    58_353,
+	RedeemAdd: 17_355,
+	// Refunds (n=1..6): [47962 47975 47975 47975 47987 42847]
+	Refund: 61_256,
 
-	GaslessRedeemVerification:       83_000,
-	GaslessRedeemVerificationAdd:    11_000,
-	GaslessRedeemPreVerification:    70_000,
-	GaslessRedeemPreVerificationAdd: 6_000,
-	GaslessRedeemCall:               120_000,
-	// Must be >= MIN_CALL_GAS_PER_REDEMPTION in the contract's
-	// validateUserOp, otherwise batch redemptions will be rejected.
-	GaslessRedeemCallAdd: 25_000,
+	// Gasless redeem (mainnet, v0.7 EntryPoint):
+	// Verification (n=1..4): [117397 147644 181866 234477]
+	GaslessRedeemVerification:    152_616,
+	GaslessRedeemVerificationAdd: 50_733,
+	// PreVerification (n=1..4): [46968 49092 51216 53328]
+	GaslessRedeemPreVerification:    61_058,
+	GaslessRedeemPreVerificationAdd: 2_756,
+	// Call gas uses the contract's hard minimums from validateUserOp.
+	// The EntryPoint passes callGasLimit directly to the inner call
+	// (Exec.call), so the full amount is available to redeemAA.
+	// Raw bundler estimates (n=1..4): [32197 43109 54023 58056]
+	GaslessRedeemCall:    100_000, // MIN_CALL_GAS_BASE (75k) + MIN_CALL_GAS_PER_REDEMPTION (25k)
+	GaslessRedeemCallAdd: 25_000,  // MIN_CALL_GAS_PER_REDEMPTION
 }
 
 // LoadGenesisFile loads a Genesis config from a json file.
