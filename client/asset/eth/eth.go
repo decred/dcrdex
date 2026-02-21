@@ -3671,7 +3671,6 @@ func (w *ETHWallet) generateUserOp(ctx context.Context, nonce *big.Int, bundler 
 	op := &userOp{
 		Nonce:                hexutil.EncodeBig(nonce),
 		Sender:               swapContractAddress.Hex(),
-		InitCode:             "0x",
 		CallData:             "0x" + hex.EncodeToString(callData),
 		Signature:            dummyUserOpSignature,
 		MaxFeePerGas:         maxFeeRateStr,
@@ -3679,7 +3678,6 @@ func (w *ETHWallet) generateUserOp(ctx context.Context, nonce *big.Int, bundler 
 		CallGasLimit:         "0x0",
 		VerificationGasLimit: "0x0",
 		PreVerificationGas:   "0x0",
-		PaymasterAndData:     "0x",
 	}
 
 	// Get the estimated gas required for each stage of the user op, and
