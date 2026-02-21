@@ -793,7 +793,7 @@ func testGaslessRedeem(
 	for n := 1; n <= maxSwaps; n++ {
 		contracts := make([]*asset.Contract, 0, n)
 		secrets := make([][32]byte, 0, n)
-		lockTime := time.Now().Add(time.Minute)
+		lockTime := time.Now().Add(75 * time.Second)
 		for i := 0; i < n; i++ {
 			secretB := encode.RandomBytes(32)
 			var secret [32]byte
@@ -837,6 +837,9 @@ func testGaslessRedeem(
 			break
 		}
 
+		// Give the bundler node time to sync the confirmed init tx.
+		time.Sleep(10 * time.Second)
+
 		// Build redemptions for gasless estimation.
 		redemptions := make([]*asset.Redemption, 0, n)
 		for i, contract := range contracts {
@@ -852,10 +855,12 @@ func testGaslessRedeem(
 		}
 
 		// Estimate gas via bundler.
-		op, _, _, err := w.generateUserOp(ctx, big.NewInt(0), bndlr, redemptions, contractVer, true)
+		op, _, _, err, bundlerUsed := w.generateUserOp(ctx, big.NewInt(0), bndlr, redemptions, contractVer, true)
 		if err != nil {
 			log.Errorf("gasless test: generateUserOp error for %d redeems: %v", n, err)
 			// Still try to recover funds.
+		} else if !bundlerUsed {
+			log.Warnf("gasless test: bundler estimation failed for %d redeems, skipping (precalculated fallback was used)", n)
 		} else {
 			verification, _ := strconv.ParseUint(strings.TrimPrefix(op.VerificationGasLimit, "0x"), 16, 64)
 			preVerification, _ := strconv.ParseUint(strings.TrimPrefix(op.PreVerificationGas, "0x"), 16, 64)
@@ -1124,7 +1129,7 @@ func testContractGasForAsset(
 	for n := 1; n <= maxSwaps; n++ {
 		contracts := make([]*asset.Contract, 0, n)
 		secrets := make([][32]byte, 0, n)
-		lockTime := time.Now().Add(time.Minute)
+		lockTime := time.Now().Add(75 * time.Second)
 		for i := 0; i < n; i++ {
 			secretB := encode.RandomBytes(32)
 			var secret [32]byte
@@ -1276,7 +1281,7 @@ func testContractGasForAsset(
 		var secret [32]byte
 		copy(secret[:], secretB)
 		secretHash := sha256.Sum256(secretB)
-		lockTime := time.Now().Add(time.Minute)
+		lockTime := time.Now().Add(75 * time.Second)
 		contracts := []*asset.Contract{{
 			Address:    cl.address().String(),
 			Value:      v,
@@ -3631,33 +3636,36 @@ func precalculatedGaslessRedeemGasEstimates(numRedemptions uint64, gases *dexeth
 	}
 }
 
-// generateUserOp generates a user operation to redeem some swaps.
-func (w *ETHWallet) generateUserOp(ctx context.Context, nonce *big.Int, bundler bundler, redemptions []*asset.Redemption, swapContractVersion uint32, estimateGasUsingBundler bool) (*userOp, []byte, *big.Int, error) {
+// generateUserOp generates a user operation to redeem some swaps. The
+// bundlerEstimated return value indicates whether the bundler's gas
+// estimate was used (true) or precalculated fallback values were used
+// (false).
+func (w *ETHWallet) generateUserOp(ctx context.Context, nonce *big.Int, bundler bundler, redemptions []*asset.Redemption, swapContractVersion uint32, estimateGasUsingBundler bool) (_ *userOp, _ []byte, _ *big.Int, _ error, bundlerEstimated bool) {
 	swapContractAddress, exists := w.versionedContracts[swapContractVersion]
 	if !exists {
-		return nil, nil, nil, fmt.Errorf("contract address for version %d not found", swapContractVersion)
+		return nil, nil, nil, fmt.Errorf("contract address for version %d not found", swapContractVersion), false
 	}
 
 	gases := w.gases(swapContractVersion)
 	if gases == nil {
-		return nil, nil, nil, fmt.Errorf("no gas table")
+		return nil, nil, nil, fmt.Errorf("no gas table"), false
 	}
 
 	contractor, is := w.contractorV1.(gaslessRedeemContractor)
 	if !is {
-		return nil, nil, nil, fmt.Errorf("contractor does not support gasless redeems")
+		return nil, nil, nil, fmt.Errorf("contractor does not support gasless redeems"), false
 	}
 	callData, err := contractor.gaslessRedeemCalldata(redemptions, nonce)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("error getting calldata: %v", err)
+		return nil, nil, nil, fmt.Errorf("error getting calldata: %v", err), false
 	}
 	maxFeeRateStr, maxTipRateStr, err := bundler.getGasPrice(ctx)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("error getting max fee rate: %v", err)
+		return nil, nil, nil, fmt.Errorf("error getting max fee rate: %v", err), false
 	}
 	maxFeeRate, ok := new(big.Int).SetString(strings.TrimPrefix(maxFeeRateStr, "0x"), 16)
 	if !ok {
-		return nil, nil, nil, fmt.Errorf("error parsing max fee rate: %v", maxFeeRateStr)
+		return nil, nil, nil, fmt.Errorf("error parsing max fee rate: %v", maxFeeRateStr), false
 	}
 
 	op := &userOp{
@@ -3686,6 +3694,8 @@ func (w *ETHWallet) generateUserOp(ctx context.Context, nonce *big.Int, bundler 
 		if err != nil {
 			w.log.Errorf("bundler gas estimation failed, using precalculated values: %v", err)
 			gasEstimate = precalculatedGaslessRedeemGasEstimates(uint64(len(redemptions)), gases)
+		} else {
+			bundlerEstimated = true
 		}
 	} else {
 		gasEstimate = precalculatedGaslessRedeemGasEstimates(uint64(len(redemptions)), gases)
@@ -3699,15 +3709,15 @@ func (w *ETHWallet) generateUserOp(ctx context.Context, nonce *big.Int, bundler 
 	// Sign the user op.
 	entrypoint, err := w.entrypointAddress()
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("error getting entrypoint address: %v", err)
+		return nil, nil, nil, fmt.Errorf("error getting entrypoint address: %v", err), false
 	}
 	signingHash, err := op.hash(entrypoint, big.NewInt(w.chainID))
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("error getting user op hash: %v", err)
+		return nil, nil, nil, fmt.Errorf("error getting user op hash: %v", err), false
 	}
 	sig, _, err := w.node.signHash(signingHash.Bytes())
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("error signing user operation: %v", err)
+		return nil, nil, nil, fmt.Errorf("error signing user operation: %v", err), false
 	}
 	op.Signature = "0x" + common.Bytes2Hex(sig)
 
@@ -3715,7 +3725,7 @@ func (w *ETHWallet) generateUserOp(ctx context.Context, nonce *big.Int, bundler 
 	totalGas := gasEstimate.totalGas()
 	maxFee := maxFeeRate.Mul(maxFeeRate, big.NewInt(int64(totalGas)))
 
-	return op, callData, maxFee, nil
+	return op, callData, maxFee, nil, bundlerEstimated
 }
 
 // gaslessRedeem creates a user operation to redeem swaps and sends it to the
@@ -3750,7 +3760,7 @@ func (w *ETHWallet) gaslessRedeem(ctx context.Context, form *asset.RedeemForm, b
 		// an "AA40 over verificationGasLimit" when using the bundler's gas
 		// estimate. This is clearly a bug, so it it fails, we try again using
 		// the precalculated values.
-		op, callData, maxFee, err = w.generateUserOp(ctx, nonce, bundler, form.Redemptions, contractVer, true)
+		op, callData, maxFee, err, _ = w.generateUserOp(ctx, nonce, bundler, form.Redemptions, contractVer, true)
 		if err != nil {
 			return fmt.Errorf("error generating user operation: %v", err)
 		}
@@ -3762,7 +3772,7 @@ func (w *ETHWallet) gaslessRedeem(ctx context.Context, form *asset.RedeemForm, b
 
 		w.log.Errorf("Error sending user operation with bundler's gas estimates, trying again with precalculated values: %v", err)
 
-		op, callData, maxFee, err = w.generateUserOp(ctx, nonce, bundler, form.Redemptions, contractVer, false)
+		op, callData, maxFee, err, _ = w.generateUserOp(ctx, nonce, bundler, form.Redemptions, contractVer, false)
 		if err != nil {
 			return fmt.Errorf("error generating user operation: %v", err)
 		}
