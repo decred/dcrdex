@@ -17,6 +17,7 @@ import (
 	"math/rand"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -938,6 +939,23 @@ func newTBundler() *tBundler {
 		getUserOpReceiptErrs:       make(map[common.Hash]error),
 		submittedUserOps:           make([]*userOp, 0),
 	}
+}
+
+type tPaymaster struct {
+	stubResult *paymasterStubDataResult
+	stubErr    error
+	dataResult *paymasterDataResult
+	dataErr    error
+}
+
+var _ paymaster = (*tPaymaster)(nil)
+
+func (p *tPaymaster) getPaymasterStubData(ctx context.Context, op *userOp) (*paymasterStubDataResult, error) {
+	return p.stubResult, p.stubErr
+}
+
+func (p *tPaymaster) getPaymasterData(ctx context.Context, op *userOp) (*paymasterDataResult, error) {
+	return p.dataResult, p.dataErr
 }
 
 func TestCheckPendingUserOps(t *testing.T) {
@@ -3782,14 +3800,36 @@ func TestGaslessRedeem(t *testing.T) {
 
 	gases := dexeth.VersionedGases[1]
 	precalculatedOneRedeemGas := precalculatedGaslessRedeemGasEstimates(1, gases)
-	totalPrecalculatedFees := precalculatedOneRedeemGas.totalGas() * maxFeePerGas
 
 	bundlerGasEstimate := &estimateBundlerGasResult{
 		PreVerificationGas:   "0x168d8",
 		VerificationGasLimit: "0x1ecfa",
 		CallGasLimit:         "0xb770",
 	}
+
+	// applyGasAdjustments mimics the adjustments that generateUserOp applies
+	// after obtaining gas estimates: enforce minimum callGasLimit and add 50%
+	// buffer to verificationGasLimit.
+	applyGasAdjustments := func(est *estimateBundlerGasResult, numRedemptions uint64) *estimateBundlerGasResult {
+		adjusted := *est
+		callGas, _ := strconv.ParseUint(strings.TrimPrefix(adjusted.CallGasLimit, "0x"), 16, 64)
+		minCallGas := minCallGasBase + minCallGasPerRedemption*numRedemptions
+		if callGas < minCallGas {
+			adjusted.CallGasLimit = hexutil.EncodeUint64(minCallGas)
+		}
+		verifGas, _ := strconv.ParseUint(strings.TrimPrefix(adjusted.VerificationGasLimit, "0x"), 16, 64)
+		adjusted.VerificationGasLimit = hexutil.EncodeUint64(verifGas * 3 / 2)
+		return &adjusted
+	}
+
+	adjustedBundlerGas := applyGasAdjustments(bundlerGasEstimate, 1)
+	adjustedPrecalculatedGas := applyGasAdjustments(precalculatedOneRedeemGas, 1)
+
+	// Fee calculations use the unadjusted gasEstimate.totalGas() in
+	// generateUserOp (the adjustments are applied to the op but not back
+	// to gasEstimate), so expFees use the original estimates.
 	totalBundlerEstimateFees := bundlerGasEstimate.totalGas() * maxFeePerGas
+	totalPrecalculatedFees := precalculatedOneRedeemGas.totalGas() * maxFeePerGas
 
 	type test struct {
 		name              string
@@ -3803,6 +3843,7 @@ func TestGaslessRedeem(t *testing.T) {
 		userOpHash    common.Hash
 		sendUserOpErr error
 		balance       uint64
+		paymaster     *tPaymaster
 
 		expUserOps   []*userOp
 		expIDs       []dex.Bytes
@@ -3845,15 +3886,13 @@ func TestGaslessRedeem(t *testing.T) {
 			expUserOps: []*userOp{{
 				Nonce:                hexutil.EncodeBig(epNonce),
 				Sender:               dexeth.ContractAddresses[1][dex.Simnet].Hex(),
-				InitCode:             "0x",
 				CallData:             "0x" + common.Bytes2Hex(calldata),
 				Signature:            "",
-				PreVerificationGas:   bundlerGasEstimate.PreVerificationGas,
-				VerificationGasLimit: bundlerGasEstimate.VerificationGasLimit,
-				CallGasLimit:         bundlerGasEstimate.CallGasLimit,
+				PreVerificationGas:   adjustedBundlerGas.PreVerificationGas,
+				VerificationGasLimit: adjustedBundlerGas.VerificationGasLimit,
+				CallGasLimit:         adjustedBundlerGas.CallGasLimit,
 				MaxFeePerGas:         "0x" + dexeth.GweiToWei(maxFeePerGas).Text(16),
 				MaxPriorityFeePerGas: "0x" + dexeth.GweiToWei(maxPriorityFeePerGas).Text(16),
-				PaymasterAndData:     "0x",
 			}},
 			expIDs:  []dex.Bytes{userOpCoinID(userOpHashes[0], common.Hash{})},
 			expCoin: &coin{value: value},
@@ -3876,15 +3915,13 @@ func TestGaslessRedeem(t *testing.T) {
 			expUserOps: []*userOp{{
 				Nonce:                hexutil.EncodeBig(epNonce),
 				Sender:               dexeth.ContractAddresses[1][dex.Simnet].Hex(),
-				InitCode:             "0x",
 				CallData:             "0x" + common.Bytes2Hex(calldata),
 				Signature:            "",
-				PreVerificationGas:   precalculatedOneRedeemGas.PreVerificationGas,
-				VerificationGasLimit: precalculatedOneRedeemGas.VerificationGasLimit,
-				CallGasLimit:         precalculatedOneRedeemGas.CallGasLimit,
+				PreVerificationGas:   adjustedPrecalculatedGas.PreVerificationGas,
+				VerificationGasLimit: adjustedPrecalculatedGas.VerificationGasLimit,
+				CallGasLimit:         adjustedPrecalculatedGas.CallGasLimit,
 				MaxFeePerGas:         "0x" + dexeth.GweiToWei(maxFeePerGas).Text(16),
 				MaxPriorityFeePerGas: "0x" + dexeth.GweiToWei(maxPriorityFeePerGas).Text(16),
-				PaymasterAndData:     "0x",
 			}},
 			expIDs:  []dex.Bytes{userOpCoinID(userOpHashes[0], common.Hash{})},
 			expCoin: &coin{value: value},
@@ -3909,32 +3946,139 @@ func TestGaslessRedeem(t *testing.T) {
 				{
 					Nonce:                hexutil.EncodeBig(epNonce),
 					Sender:               dexeth.ContractAddresses[1][dex.Simnet].Hex(),
-					InitCode:             "0x",
 					CallData:             "0x" + common.Bytes2Hex(calldata),
 					Signature:            "",
-					PreVerificationGas:   bundlerGasEstimate.PreVerificationGas,
-					VerificationGasLimit: bundlerGasEstimate.VerificationGasLimit,
-					CallGasLimit:         bundlerGasEstimate.CallGasLimit,
+					PreVerificationGas:   adjustedBundlerGas.PreVerificationGas,
+					VerificationGasLimit: adjustedBundlerGas.VerificationGasLimit,
+					CallGasLimit:         adjustedBundlerGas.CallGasLimit,
 					MaxFeePerGas:         "0x" + dexeth.GweiToWei(maxFeePerGas).Text(16),
 					MaxPriorityFeePerGas: "0x" + dexeth.GweiToWei(maxPriorityFeePerGas).Text(16),
-					PaymasterAndData:     "0x",
 				},
 				{
 					Nonce:                hexutil.EncodeBig(epNonce),
 					Sender:               dexeth.ContractAddresses[1][dex.Simnet].Hex(),
-					InitCode:             "0x",
 					CallData:             "0x" + common.Bytes2Hex(calldata),
 					Signature:            "",
-					PreVerificationGas:   precalculatedOneRedeemGas.PreVerificationGas,
-					VerificationGasLimit: precalculatedOneRedeemGas.VerificationGasLimit,
-					CallGasLimit:         precalculatedOneRedeemGas.CallGasLimit,
+					PreVerificationGas:   adjustedPrecalculatedGas.PreVerificationGas,
+					VerificationGasLimit: adjustedPrecalculatedGas.VerificationGasLimit,
+					CallGasLimit:         adjustedPrecalculatedGas.CallGasLimit,
 					MaxFeePerGas:         "0x" + dexeth.GweiToWei(maxFeePerGas).Text(16),
 					MaxPriorityFeePerGas: "0x" + dexeth.GweiToWei(maxPriorityFeePerGas).Text(16),
-					PaymasterAndData:     "0x",
 				}},
 			expIDs:  []dex.Bytes{userOpCoinID(userOpHashes[0], common.Hash{})},
 			expCoin: &coin{value: value},
 			expFees: totalPrecalculatedFees,
+		},
+		{
+			name:    "gasless redeem with paymaster",
+			balance: ethGasesV1.Redeem*nodeRecommendedFee - 1,
+			redemptions: []*asset.Redemption{
+				newRedeem(0),
+			},
+			swapState: map[[32]byte]*dexeth.SwapState{
+				secretHashes[0]: {
+					State: dexeth.SSInitiated,
+					Value: dexeth.GweiToWei(value),
+				},
+			},
+			estimateGasResult: bundlerGasEstimate,
+			userOpHash:        userOpHashes[0],
+			paymaster: &tPaymaster{
+				stubResult: &paymasterStubDataResult{
+					Paymaster:                     "0x1234567890abcdef1234567890abcdef12345678",
+					PaymasterData:                 "0xstubdata",
+					PaymasterVerificationGasLimit: "0x2710",
+					PaymasterPostOpGasLimit:       "0x1388",
+					IsFinal:                       false,
+				},
+				dataResult: &paymasterDataResult{
+					Paymaster:     "0x1234567890abcdef1234567890abcdef12345678",
+					PaymasterData: "0xfinaldata",
+				},
+			},
+			expUserOps: []*userOp{{
+				Nonce:                         hexutil.EncodeBig(epNonce),
+				Sender:                        dexeth.ContractAddresses[1][dex.Simnet].Hex(),
+				CallData:                      "0x" + common.Bytes2Hex(calldata),
+				Signature:                     "",
+				PreVerificationGas:            adjustedBundlerGas.PreVerificationGas,
+				VerificationGasLimit:          adjustedBundlerGas.VerificationGasLimit,
+				CallGasLimit:                  adjustedBundlerGas.CallGasLimit,
+				MaxFeePerGas:                  "0x" + dexeth.GweiToWei(maxFeePerGas).Text(16),
+				MaxPriorityFeePerGas:          "0x" + dexeth.GweiToWei(maxPriorityFeePerGas).Text(16),
+				Paymaster:                     "0x1234567890abcdef1234567890abcdef12345678",
+				PaymasterData:                 "0xfinaldata",
+				PaymasterVerificationGasLimit: "0x2710",
+				PaymasterPostOpGasLimit:       "0x1388",
+			}},
+			expIDs:  []dex.Bytes{userOpCoinID(userOpHashes[0], common.Hash{})},
+			expCoin: &coin{value: value},
+			expFees: totalBundlerEstimateFees,
+		},
+		{
+			name:    "gasless redeem with paymaster isFinal",
+			balance: ethGasesV1.Redeem*nodeRecommendedFee - 1,
+			redemptions: []*asset.Redemption{
+				newRedeem(0),
+			},
+			swapState: map[[32]byte]*dexeth.SwapState{
+				secretHashes[0]: {
+					State: dexeth.SSInitiated,
+					Value: dexeth.GweiToWei(value),
+				},
+			},
+			estimateGasResult: bundlerGasEstimate,
+			userOpHash:        userOpHashes[0],
+			paymaster: &tPaymaster{
+				stubResult: &paymasterStubDataResult{
+					Paymaster:                     "0x1234567890abcdef1234567890abcdef12345678",
+					PaymasterData:                 "0xfinalstubdata",
+					PaymasterVerificationGasLimit: "0x2710",
+					PaymasterPostOpGasLimit:       "0x1388",
+					IsFinal:                       true,
+				},
+				dataResult: &paymasterDataResult{
+					Paymaster:     "0xshouldnotbeused",
+					PaymasterData: "0xshouldnotbeused",
+				},
+			},
+			expUserOps: []*userOp{{
+				Nonce:                         hexutil.EncodeBig(epNonce),
+				Sender:                        dexeth.ContractAddresses[1][dex.Simnet].Hex(),
+				CallData:                      "0x" + common.Bytes2Hex(calldata),
+				Signature:                     "",
+				PreVerificationGas:            adjustedBundlerGas.PreVerificationGas,
+				VerificationGasLimit:          adjustedBundlerGas.VerificationGasLimit,
+				CallGasLimit:                  adjustedBundlerGas.CallGasLimit,
+				MaxFeePerGas:                  "0x" + dexeth.GweiToWei(maxFeePerGas).Text(16),
+				MaxPriorityFeePerGas:          "0x" + dexeth.GweiToWei(maxPriorityFeePerGas).Text(16),
+				Paymaster:                     "0x1234567890abcdef1234567890abcdef12345678",
+				PaymasterData:                 "0xfinalstubdata",
+				PaymasterVerificationGasLimit: "0x2710",
+				PaymasterPostOpGasLimit:       "0x1388",
+			}},
+			expIDs:  []dex.Bytes{userOpCoinID(userOpHashes[0], common.Hash{})},
+			expCoin: &coin{value: value},
+			expFees: totalBundlerEstimateFees,
+		},
+		{
+			name:    "paymaster stub error",
+			balance: ethGasesV1.Redeem*nodeRecommendedFee - 1,
+			redemptions: []*asset.Redemption{
+				newRedeem(0),
+			},
+			swapState: map[[32]byte]*dexeth.SwapState{
+				secretHashes[0]: {
+					State: dexeth.SSInitiated,
+					Value: dexeth.GweiToWei(value),
+				},
+			},
+			estimateGasResult: bundlerGasEstimate,
+			userOpHash:        userOpHashes[0],
+			paymaster: &tPaymaster{
+				stubErr: errors.New("paymaster stub error"),
+			},
+			expError: true,
 		},
 	}
 
@@ -3953,6 +4097,9 @@ func TestGaslessRedeem(t *testing.T) {
 			tb.maxFeePerGas = "0x" + dexeth.GweiToWei(maxFeePerGas).Text(16)
 			tb.maxPriorityFeePerGas = "0x" + dexeth.GweiToWei(maxPriorityFeePerGas).Text(16)
 			eth.bundler = tb
+			if test.paymaster != nil {
+				eth.paymaster = test.paymaster
+			}
 
 			eth.versionedContracts = map[uint32]common.Address{
 				1: dexeth.ContractAddresses[1][dex.Simnet],

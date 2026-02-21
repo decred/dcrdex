@@ -17,7 +17,23 @@ func TestEstimateBundlerGasResultTotalGas(t *testing.T) {
 		t.Errorf("Expected total gas %d, got %d", expected, actual)
 	}
 
-	// Test case 2: Zero values
+	// Test case 2: With paymaster gas fields
+	resultPM := &estimateBundlerGasResult{
+		PreVerificationGas:            "0x5208",  // 21000
+		VerificationGasLimit:          "0x186a0", // 100000
+		CallGasLimit:                  "0x7530",  // 30000
+		PaymasterVerificationGasLimit: "0x2710",  // 10000
+		PaymasterPostOpGasLimit:       "0x1388",  // 5000
+	}
+
+	expectedPM := uint64(21000 + 100000 + 30000 + 10000 + 5000) // 166000
+	actualPM := resultPM.totalGas()
+
+	if actualPM != expectedPM {
+		t.Errorf("Expected total gas %d, got %d", expectedPM, actualPM)
+	}
+
+	// Test case 3: Zero values
 	resultZero := &estimateBundlerGasResult{
 		PreVerificationGas:   "0x0",
 		VerificationGasLimit: "0x0",

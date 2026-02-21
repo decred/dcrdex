@@ -92,6 +92,7 @@ const (
 
 	providersKey = "providers"
 	bundlerKey   = "bundler"
+	paymasterKey = "paymaster"
 
 	// onChainDataFetchTimeout is the max amount of time allocated to fetching
 	// on-chain data. Testing on testnet has shown spikes up to 2.5 seconds
@@ -124,6 +125,17 @@ const (
 	peerCountTicker = 5 * time.Second // no rpc calls here
 )
 
+// parsePaymasterConfig parses the paymaster config value. If it looks like
+// a URL, it's used as the endpoint with an empty context. Otherwise it's
+// treated as a policy ID (e.g. for Alchemy's Gas Manager) and the bundler
+// endpoint is used with {"policyId": value} as the context.
+func parsePaymasterConfig(cfg, bundlerEndpoint string) (endpoint string, pmContext interface{}) {
+	if strings.Contains(cfg, "://") || strings.HasPrefix(cfg, "/") {
+		return cfg, struct{}{}
+	}
+	return bundlerEndpoint, map[string]string{"policyId": cfg}
+}
+
 var (
 	walletOpts = []*asset.ConfigOption{
 		{
@@ -150,10 +162,20 @@ var (
 		{
 			Key:         bundlerKey,
 			DisplayName: "Bundler",
-			Description: "Specify a bundler to use for gasless redemptions. " +
-				"If not specified, you will be required to have a balance to pay for " +
-				"gas for a redemption. This should only be used for initially acquiring " +
-				"a balance on the chain, because gasless redemptions cost more than regular ones.",
+			Description: "Specify a bundler endpoint for gasless redemptions. " +
+				"If not specified, the RPC provider endpoint will be used if it " +
+				"supports the bundler API. Gasless redemptions should only be used " +
+				"for initially acquiring a balance on the chain, because they cost " +
+				"more than regular ones.",
+			DefaultValue: "",
+		},
+		{
+			Key:         paymasterKey,
+			DisplayName: "Paymaster",
+			Description: "Enable an ERC-7677 paymaster for sponsoring gasless " +
+				"redemptions. Required by some bundler providers (e.g. Alchemy on Polygon). " +
+				"For Alchemy, set to your Gas Manager policy ID. " +
+				"Alternatively, specify a full paymaster endpoint URL.",
 			DefaultValue: "",
 		},
 	}
@@ -428,6 +450,7 @@ type baseWallet struct {
 
 	bundlerMtx sync.RWMutex
 	bundler    bundler
+	paymaster  paymaster
 
 	finalizeConfs uint64
 
@@ -717,9 +740,10 @@ func (w *ETHWallet) TestContractGas(contractVer uint32, maxSwaps int, tokenAsset
 		// Test gasless redeem if bundler is configured.
 		w.bundlerMtx.RLock()
 		bndlr := w.bundler
+		pm := w.paymaster
 		w.bundlerMtx.RUnlock()
 		if bndlr != nil {
-			testGaslessRedeem(ctx, cl, c, contractVer, maxSwaps, g, w.evmify, log, w, bndlr, baseResult)
+			testGaslessRedeem(ctx, cl, c, contractVer, maxSwaps, g, w.evmify, log, w, bndlr, pm, baseResult)
 		} else {
 			baseResult.Summary += "\n--- Gasless Redeem ---\nSkipped (no bundler configured)\n"
 		}
@@ -815,16 +839,26 @@ func testGaslessRedeem(
 	log dex.Logger,
 	w *ETHWallet,
 	bndlr bundler,
+	pm paymaster,
 	result *asset.GasTestResult,
 ) {
-	var v uint64 = 1
-
 	baseRate, tipRate, err := cl.currentFees(ctx)
 	if err != nil {
 		result.Summary += fmt.Sprintf("\n--- Gasless Redeem ---\nError getting fees: %v\n", err)
 		return
 	}
 	maxFeeRate := new(big.Int).Add(tipRate, new(big.Int).Mul(baseRate, big.NewInt(2)))
+
+	// The swap value must exceed the EntryPoint's missingAccountFunds
+	// (totalGas * maxFeePerGas) or validateUserOp will reject it. Use
+	// 2x the estimated max gas cost per swap to provide margin.
+	maxGasPerSwap := g.GaslessRedeemVerification + g.GaslessRedeemPreVerification + g.GaslessRedeemCall
+	prefundPerSwap := new(big.Int).Mul(maxFeeRate, new(big.Int).SetUint64(maxGasPerSwap*2))
+	v := dexeth.WeiToGweiCeil(prefundPerSwap)
+	if v == 0 {
+		v = 1
+	}
+	log.Infof("gasless test: using swap value %d gwei (%s wei) per swap", v, prefundPerSwap)
 
 	rawVerification := make([]uint64, 0, maxSwaps)
 	rawPreVerification := make([]uint64, 0, maxSwaps)
@@ -833,7 +867,7 @@ func testGaslessRedeem(
 	for n := 1; n <= maxSwaps; n++ {
 		contracts := make([]*asset.Contract, 0, n)
 		secrets := make([][32]byte, 0, n)
-		lockTime := time.Now().Add(time.Minute)
+		lockTime := time.Now().Add(75 * time.Second)
 		for i := 0; i < n; i++ {
 			secretB := encode.RandomBytes(32)
 			var secret [32]byte
@@ -849,7 +883,7 @@ func testGaslessRedeem(
 		}
 
 		// Initiate.
-		txOpts, err := cl.txOpts(ctx, uint64(n), g.SwapN(n)*2, maxFeeRate, tipRate, nil)
+		txOpts, err := cl.txOpts(ctx, v*uint64(n), g.SwapN(n)*2, maxFeeRate, tipRate, nil)
 		if err != nil {
 			log.Errorf("gasless test: txOpts error for %d swaps: %v", n, err)
 			break
@@ -877,6 +911,9 @@ func testGaslessRedeem(
 			break
 		}
 
+		// Give the bundler node time to sync the confirmed init tx.
+		time.Sleep(15 * time.Second)
+
 		// Build redemptions for gasless estimation.
 		redemptions := make([]*asset.Redemption, 0, n)
 		for i, contract := range contracts {
@@ -892,10 +929,12 @@ func testGaslessRedeem(
 		}
 
 		// Estimate gas via bundler.
-		op, _, _, err := w.generateUserOp(ctx, big.NewInt(0), bndlr, redemptions, contractVer, true)
+		op, _, _, err, bundlerUsed := w.generateUserOp(ctx, big.NewInt(0), bndlr, pm, redemptions, contractVer, true)
 		if err != nil {
 			log.Errorf("gasless test: generateUserOp error for %d redeems: %v", n, err)
 			// Still try to recover funds.
+		} else if !bundlerUsed {
+			log.Warnf("gasless test: bundler estimation failed for %d redeems, skipping (precalculated fallback was used)", n)
 		} else {
 			verification, _ := strconv.ParseUint(strings.TrimPrefix(op.VerificationGasLimit, "0x"), 16, 64)
 			preVerification, _ := strconv.ParseUint(strings.TrimPrefix(op.PreVerificationGas, "0x"), 16, 64)
@@ -905,21 +944,60 @@ func testGaslessRedeem(
 			rawCall = append(rawCall, callGas)
 		}
 
-		// Regular redeem to recover funds.
-		txOpts, err = cl.txOpts(ctx, 0, g.RedeemN(n)*2, maxFeeRate, tipRate, nil)
+		// Submit a real AA redeem via the bundler.
+		swapContractAddress := w.versionedContracts[contractVer]
+		var aaRedeemed bool
+		var userOpHash common.Hash
+		err = bndlr.withNonce(&bind.CallOpts{Pending: false}, swapContractAddress, cl.address(), func(nonce *big.Int) error {
+			op, _, _, err, _ := w.generateUserOp(ctx, nonce, bndlr, pm, redemptions, contractVer, true)
+			if err != nil {
+				return fmt.Errorf("generateUserOp: %v", err)
+			}
+			userOpHash, err = bndlr.sendUserOp(ctx, op)
+			return err
+		})
 		if err != nil {
-			log.Errorf("gasless test: txOpts error for redeem: %v", err)
-			break
+			log.Errorf("gasless test: AA redeem send error for %d redeems: %v", n, err)
+		} else {
+			log.Infof("gasless test: AA redeem sent for %d redeems, userOpHash: %s", n, userOpHash.Hex())
+			// Poll for receipt.
+			for i := 0; i < 60; i++ {
+				time.Sleep(5 * time.Second)
+				receipt, err := bndlr.getUserOpReceipt(ctx, userOpHash)
+				if err != nil {
+					log.Errorf("gasless test: error getting AA redeem receipt: %v", err)
+					break
+				}
+				if receipt.receipt != nil {
+					if receipt.success {
+						aaRedeemed = true
+						result.TxIDs = append(result.TxIDs, fmt.Sprintf("gasless-aa-redeem(%d): %s", n, receipt.receipt.TxHash.Hex()))
+						log.Infof("gasless test: AA redeem confirmed for %d redeems in tx %s (gas cost: %s)", n, receipt.receipt.TxHash.Hex(), receipt.actualGasCost)
+					} else {
+						log.Errorf("gasless test: AA redeem failed on-chain for %d redeems in tx %s", n, receipt.receipt.TxHash.Hex())
+					}
+					break
+				}
+			}
 		}
-		tx, err = c.redeem(txOpts, redemptions)
-		if err != nil {
-			log.Errorf("gasless test: redeem error: %v", err)
-			break
-		}
-		result.TxIDs = append(result.TxIDs, fmt.Sprintf("gasless-redeem(%d): %s", n, tx.Hash().Hex()))
-		if err = waitForConfirmation(ctx, "gasless-redeem", cl, tx.Hash(), log); err != nil {
-			log.Errorf("gasless test: redeem wait error: %v", err)
-			break
+
+		if !aaRedeemed {
+			// Fall back to regular redeem to recover funds.
+			txOpts, err = cl.txOpts(ctx, 0, g.RedeemN(n)*2, maxFeeRate, tipRate, nil)
+			if err != nil {
+				log.Errorf("gasless test: txOpts error for redeem: %v", err)
+				break
+			}
+			tx, err = c.redeem(txOpts, redemptions)
+			if err != nil {
+				log.Errorf("gasless test: redeem error: %v", err)
+				break
+			}
+			result.TxIDs = append(result.TxIDs, fmt.Sprintf("gasless-redeem(%d): %s", n, tx.Hash().Hex()))
+			if err = waitForConfirmation(ctx, "gasless-redeem", cl, tx.Hash(), log); err != nil {
+				log.Errorf("gasless test: redeem wait error: %v", err)
+				break
+			}
 		}
 	}
 
@@ -1164,7 +1242,7 @@ func testContractGasForAsset(
 	for n := 1; n <= maxSwaps; n++ {
 		contracts := make([]*asset.Contract, 0, n)
 		secrets := make([][32]byte, 0, n)
-		lockTime := time.Now().Add(time.Minute)
+		lockTime := time.Now().Add(75 * time.Second)
 		for i := 0; i < n; i++ {
 			secretB := encode.RandomBytes(32)
 			var secret [32]byte
@@ -1316,7 +1394,7 @@ func testContractGasForAsset(
 		var secret [32]byte
 		copy(secret[:], secretB)
 		secretHash := sha256.Sum256(secretB)
-		lockTime := time.Now().Add(time.Minute)
+		lockTime := time.Now().Add(75 * time.Second)
 		contracts := []*asset.Contract{{
 			Address:    cl.address().String(),
 			Value:      v,
@@ -1900,9 +1978,25 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	w.userOpsMtx.Unlock()
 
 	// Setting the bundler depends on the tip already being set.
-	if bundlerDef, found := w.settings[bundlerKey]; found && len(bundlerDef) > 0 {
-		if err := w.setBundler(bundlerDef); err != nil {
-			w.log.Warnf("Failed to set bundler (gasless redeem unavailable): %v", err)
+	bundlerEP := w.settings[bundlerKey]
+	explicitBundler := bundlerEP != ""
+	if bundlerEP == "" {
+		if providerDef, found := w.settings[providersKey]; found && len(providerDef) > 0 {
+			bundlerEP = strings.SplitN(providerDef, providerDelimiter, 2)[0]
+		}
+	}
+	if bundlerEP != "" {
+		if err := w.setBundler(bundlerEP); err != nil {
+			if explicitBundler {
+				w.log.Warnf("Failed to set bundler (gasless redeem unavailable): %v", err)
+			} else {
+				w.log.Debugf("Bundler not available on provider endpoint: %v", err)
+			}
+		} else if pmCfg := w.settings[paymasterKey]; pmCfg != "" {
+			pmEndpoint, pmCtx := parsePaymasterConfig(pmCfg, bundlerEP)
+			if err := w.setPaymaster(pmEndpoint, pmCtx); err != nil {
+				w.log.Warnf("Failed to set paymaster: %v", err)
+			}
 		}
 	}
 
@@ -2029,6 +2123,21 @@ func (w *ETHWallet) setBundler(bundlerAddr string) error {
 	w.bundler = bundler
 	w.bundlerMtx.Unlock()
 
+	return nil
+}
+
+func (w *ETHWallet) setPaymaster(endpoint string, pmContext interface{}) error {
+	entrypoint, err := w.entrypointAddress()
+	if err != nil {
+		return fmt.Errorf("error getting entrypoint address: %v", err)
+	}
+	pm, err := newPaymaster(w.ctx, endpoint, entrypoint, w.chainID, pmContext)
+	if err != nil {
+		return fmt.Errorf("error connecting to paymaster: %v", err)
+	}
+	w.bundlerMtx.Lock()
+	w.paymaster = pm
+	w.bundlerMtx.Unlock()
 	return nil
 }
 
@@ -2210,13 +2319,41 @@ func (w *ETHWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, cu
 		}
 	}
 
-	if bundlerDef, found := cfg.Settings[bundlerKey]; found && len(bundlerDef) > 0 {
-		if err := w.setBundler(bundlerDef); err != nil {
-			w.log.Warnf("Failed to set bundler (gasless redeem unavailable): %v", err)
+	reconfigBundlerEP := cfg.Settings[bundlerKey]
+	reconfigExplicitBundler := reconfigBundlerEP != ""
+	if reconfigBundlerEP == "" {
+		if providerDef, found := cfg.Settings[providersKey]; found && len(providerDef) > 0 {
+			reconfigBundlerEP = strings.SplitN(providerDef, providerDelimiter, 2)[0]
+		}
+	}
+	if reconfigBundlerEP != "" {
+		if err := w.setBundler(reconfigBundlerEP); err != nil {
+			if reconfigExplicitBundler {
+				w.log.Warnf("Failed to set bundler (gasless redeem unavailable): %v", err)
+			} else {
+				w.log.Debugf("Bundler not available on provider endpoint: %v", err)
+			}
+			w.bundlerMtx.Lock()
+			w.bundler = nil
+			w.paymaster = nil
+			w.bundlerMtx.Unlock()
+		} else if pmCfg := cfg.Settings[paymasterKey]; pmCfg != "" {
+			pmEndpoint, pmCtx := parsePaymasterConfig(pmCfg, reconfigBundlerEP)
+			if err := w.setPaymaster(pmEndpoint, pmCtx); err != nil {
+				w.log.Warnf("Failed to set paymaster: %v", err)
+				w.bundlerMtx.Lock()
+				w.paymaster = nil
+				w.bundlerMtx.Unlock()
+			}
+		} else {
+			w.bundlerMtx.Lock()
+			w.paymaster = nil
+			w.bundlerMtx.Unlock()
 		}
 	} else {
 		w.bundlerMtx.Lock()
 		w.bundler = nil
+		w.paymaster = nil
 		w.bundlerMtx.Unlock()
 	}
 
@@ -2643,8 +2780,11 @@ func (w *ETHWallet) OpenTokenWallet(tokenCfg *asset.TokenConfig) (asset.Wallet, 
 	}
 
 	netToken := token.NetTokens[w.net]
-	if netToken == nil || len(netToken.SwapContracts) == 0 {
-		return nil, fmt.Errorf("could not find token with ID %d on network %s", w.assetID, w.net)
+	if netToken == nil {
+		return nil, fmt.Errorf("no %s network configuration for token %s (%d)", w.net, token.Name, tokenCfg.AssetID)
+	}
+	if len(netToken.SwapContracts) == 0 {
+		return nil, fmt.Errorf("no swap contracts for token %s (%d) on %s", token.Name, tokenCfg.AssetID, w.net)
 	}
 
 	supportedAssetVersions := make([]uint32, 0, 1)
@@ -3893,39 +4033,41 @@ func precalculatedGaslessRedeemGasEstimates(numRedemptions uint64, gases *dexeth
 	}
 }
 
-// generateUserOp generates a user operation to redeem some swaps.
-func (w *ETHWallet) generateUserOp(ctx context.Context, nonce *big.Int, bundler bundler, redemptions []*asset.Redemption, swapContractVersion uint32, estimateGasUsingBundler bool) (*userOp, []byte, *big.Int, error) {
+// generateUserOp generates a user operation to redeem some swaps. The
+// bundlerEstimated return value indicates whether the bundler's gas
+// estimate was used (true) or precalculated fallback values were used
+// (false).
+func (w *ETHWallet) generateUserOp(ctx context.Context, nonce *big.Int, bundler bundler, pm paymaster, redemptions []*asset.Redemption, swapContractVersion uint32, estimateGasUsingBundler bool) (_ *userOp, _ []byte, _ *big.Int, _ error, bundlerEstimated bool) {
 	swapContractAddress, exists := w.versionedContracts[swapContractVersion]
 	if !exists {
-		return nil, nil, nil, fmt.Errorf("contract address for version %d not found", swapContractVersion)
+		return nil, nil, nil, fmt.Errorf("contract address for version %d not found", swapContractVersion), false
 	}
 
 	gases := w.gases(swapContractVersion)
 	if gases == nil {
-		return nil, nil, nil, fmt.Errorf("no gas table")
+		return nil, nil, nil, fmt.Errorf("no gas table"), false
 	}
 
 	contractor, is := w.contractorV1.(gaslessRedeemContractor)
 	if !is {
-		return nil, nil, nil, fmt.Errorf("contractor does not support gasless redeems")
+		return nil, nil, nil, fmt.Errorf("contractor does not support gasless redeems"), false
 	}
 	callData, err := contractor.gaslessRedeemCalldata(redemptions, nonce)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("error getting calldata: %v", err)
+		return nil, nil, nil, fmt.Errorf("error getting calldata: %v", err), false
 	}
 	maxFeeRateStr, maxTipRateStr, err := bundler.getGasPrice(ctx)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("error getting max fee rate: %v", err)
+		return nil, nil, nil, fmt.Errorf("error getting max fee rate: %v", err), false
 	}
 	maxFeeRate, ok := new(big.Int).SetString(strings.TrimPrefix(maxFeeRateStr, "0x"), 16)
 	if !ok {
-		return nil, nil, nil, fmt.Errorf("error parsing max fee rate: %v", maxFeeRateStr)
+		return nil, nil, nil, fmt.Errorf("error parsing max fee rate: %v", maxFeeRateStr), false
 	}
 
 	op := &userOp{
 		Nonce:                hexutil.EncodeBig(nonce),
 		Sender:               swapContractAddress.Hex(),
-		InitCode:             "0x",
 		CallData:             "0x" + hex.EncodeToString(callData),
 		Signature:            dummyUserOpSignature,
 		MaxFeePerGas:         maxFeeRateStr,
@@ -3933,7 +4075,24 @@ func (w *ETHWallet) generateUserOp(ctx context.Context, nonce *big.Int, bundler 
 		CallGasLimit:         "0x0",
 		VerificationGasLimit: "0x0",
 		PreVerificationGas:   "0x0",
-		PaymasterAndData:     "0x",
+	}
+
+	// If a paymaster is configured, get stub data for gas estimation.
+	var paymasterIsFinal bool
+	if pm != nil {
+		stubResult, err := pm.getPaymasterStubData(ctx, op)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("error getting paymaster stub data: %v", err), false
+		}
+		op.Paymaster = stubResult.Paymaster
+		op.PaymasterData = stubResult.PaymasterData
+		if stubResult.PaymasterVerificationGasLimit != "" {
+			op.PaymasterVerificationGasLimit = stubResult.PaymasterVerificationGasLimit
+		}
+		if stubResult.PaymasterPostOpGasLimit != "" {
+			op.PaymasterPostOpGasLimit = stubResult.PaymasterPostOpGasLimit
+		}
+		paymasterIsFinal = stubResult.IsFinal
 	}
 
 	// Get the estimated gas required for each stage of the user op, and
@@ -3948,6 +4107,8 @@ func (w *ETHWallet) generateUserOp(ctx context.Context, nonce *big.Int, bundler 
 		if err != nil {
 			w.log.Errorf("bundler gas estimation failed, using precalculated values: %v", err)
 			gasEstimate = precalculatedGaslessRedeemGasEstimates(uint64(len(redemptions)), gases)
+		} else {
+			bundlerEstimated = true
 		}
 	} else {
 		gasEstimate = precalculatedGaslessRedeemGasEstimates(uint64(len(redemptions)), gases)
@@ -3958,18 +4119,54 @@ func (w *ETHWallet) generateUserOp(ctx context.Context, nonce *big.Int, bundler 
 	op.VerificationGasLimit = gasEstimate.VerificationGasLimit
 	op.PreVerificationGas = gasEstimate.PreVerificationGas
 
+	// Enforce the contract's minimum callGasLimit. The bundler estimates
+	// actual gas usage, but the contract requires a safety floor to prevent
+	// out-of-gas attacks. The EntryPoint passes callGasLimit directly to
+	// the inner call, so the contract checks it in validateUserOp.
+	minCallGas := minCallGasBase + minCallGasPerRedemption*uint64(len(redemptions))
+	callGas, _ := strconv.ParseUint(strings.TrimPrefix(op.CallGasLimit, "0x"), 16, 64)
+	if callGas < minCallGas {
+		op.CallGasLimit = hexutil.EncodeUint64(minCallGas)
+	}
+
+	// Add overhead to the verification gas limit. During gas estimation,
+	// the bundler sends a dummy signature, so validateUserOp exits early
+	// after _payPrefund (before ECDSA recovery and the redeemPrepayments
+	// SSTORE). The real execution path uses more gas, so we add 50% buffer
+	// to prevent AA26 (over verificationGasLimit).
+	verifGas, _ := strconv.ParseUint(strings.TrimPrefix(op.VerificationGasLimit, "0x"), 16, 64)
+	op.VerificationGasLimit = hexutil.EncodeUint64(verifGas * 3 / 2)
+
+	// If bundler estimation returned paymaster gas limits, apply those.
+	if gasEstimate.PaymasterVerificationGasLimit != "" {
+		op.PaymasterVerificationGasLimit = gasEstimate.PaymasterVerificationGasLimit
+	}
+	if gasEstimate.PaymasterPostOpGasLimit != "" {
+		op.PaymasterPostOpGasLimit = gasEstimate.PaymasterPostOpGasLimit
+	}
+
+	// If paymaster stub data was not final, fetch the final paymaster data.
+	if pm != nil && !paymasterIsFinal {
+		dataResult, err := pm.getPaymasterData(ctx, op)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("error getting paymaster data: %v", err), false
+		}
+		op.Paymaster = dataResult.Paymaster
+		op.PaymasterData = dataResult.PaymasterData
+	}
+
 	// Sign the user op.
 	entrypoint, err := w.entrypointAddress()
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("error getting entrypoint address: %v", err)
+		return nil, nil, nil, fmt.Errorf("error getting entrypoint address: %v", err), false
 	}
 	signingHash, err := op.hash(entrypoint, big.NewInt(w.chainID))
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("error getting user op hash: %v", err)
+		return nil, nil, nil, fmt.Errorf("error getting user op hash: %v", err), false
 	}
 	sig, _, err := w.node.signHash(signingHash.Bytes())
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("error signing user operation: %v", err)
+		return nil, nil, nil, fmt.Errorf("error signing user operation: %v", err), false
 	}
 	op.Signature = "0x" + common.Bytes2Hex(sig)
 
@@ -3977,12 +4174,12 @@ func (w *ETHWallet) generateUserOp(ctx context.Context, nonce *big.Int, bundler 
 	totalGas := gasEstimate.totalGas()
 	maxFee := maxFeeRate.Mul(maxFeeRate, big.NewInt(int64(totalGas)))
 
-	return op, callData, maxFee, nil
+	return op, callData, maxFee, nil, bundlerEstimated
 }
 
 // gaslessRedeem creates a user operation to redeem swaps and sends it to the
 // bundler.
-func (w *ETHWallet) gaslessRedeem(ctx context.Context, form *asset.RedeemForm, bundler bundler) ([]dex.Bytes, asset.Coin, uint64, error) {
+func (w *ETHWallet) gaslessRedeem(ctx context.Context, form *asset.RedeemForm, bundler bundler, pm paymaster) ([]dex.Bytes, asset.Coin, uint64, error) {
 	fail := func(err error) ([]dex.Bytes, asset.Coin, uint64, error) {
 		return nil, nil, 0, err
 	}
@@ -4012,7 +4209,7 @@ func (w *ETHWallet) gaslessRedeem(ctx context.Context, form *asset.RedeemForm, b
 		// an "AA40 over verificationGasLimit" when using the bundler's gas
 		// estimate. This is clearly a bug, so it it fails, we try again using
 		// the precalculated values.
-		op, callData, maxFee, err = w.generateUserOp(ctx, nonce, bundler, form.Redemptions, contractVer, true)
+		op, callData, maxFee, err, _ = w.generateUserOp(ctx, nonce, bundler, pm, form.Redemptions, contractVer, true)
 		if err != nil {
 			return fmt.Errorf("error generating user operation: %v", err)
 		}
@@ -4024,7 +4221,7 @@ func (w *ETHWallet) gaslessRedeem(ctx context.Context, form *asset.RedeemForm, b
 
 		w.log.Errorf("Error sending user operation with bundler's gas estimates, trying again with precalculated values: %v", err)
 
-		op, callData, maxFee, err = w.generateUserOp(ctx, nonce, bundler, form.Redemptions, contractVer, false)
+		op, callData, maxFee, err, _ = w.generateUserOp(ctx, nonce, bundler, pm, form.Redemptions, contractVer, false)
 		if err != nil {
 			return fmt.Errorf("error generating user operation: %v", err)
 		}
@@ -4101,11 +4298,12 @@ func (w *ETHWallet) GaslessRedeem(ctx context.Context, form *asset.RedeemForm) (
 	if errors.Is(err, errInsufficientFunds) {
 		w.bundlerMtx.RLock()
 		bundler := w.bundler
+		pm := w.paymaster
 		w.bundlerMtx.RUnlock()
 		if bundler == nil {
 			return fail(fmt.Errorf("bundler not configured"))
 		}
-		txs, coin, fees, err := w.gaslessRedeem(ctx, form, bundler)
+		txs, coin, fees, err := w.gaslessRedeem(ctx, form, bundler, pm)
 		return txs, coin, fees, false, err
 	}
 	if err != nil {
