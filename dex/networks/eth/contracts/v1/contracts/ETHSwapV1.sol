@@ -89,14 +89,17 @@ contract ETHSwap is IAccount, ReentrancyGuard {
     // Keyed by UserOp nonce, which the EntryPoint guarantees is unique per sender.
     mapping(uint256 => uint256) public redeemPrepayments;
 
-    // validatedAt tracks the block number at which each swap key was last
-    // validated in validateUserOp. This prevents double-validation of the
-    // same swap within a single EntryPoint bundle, where the validation
-    // phase runs before any execution. Without this, two UserOps in the
-    // same bundle could both pass validation for the same swap, causing
-    // the second execution to revert while still consuming the prefund.
-    // Entries auto-expire after the block in which they were written.
-    mapping(bytes32 => uint256) internal validatedAt;
+    // pendingValidation tracks swap keys that have passed validateUserOp
+    // but have not yet been executed in redeemAA. This prevents double-
+    // validation of the same swap within a single EntryPoint bundle, where
+    // the validation phase runs before any execution. Without this, two
+    // UserOps in the same bundle could both pass validation for the same
+    // swap, causing the second execution to revert while still consuming
+    // the prefund. The flag is cleared by redeemAA upon successful
+    // execution. If execution fails, the flag remains set, preventing
+    // future AA redeems for that swap (the regular redeem function can
+    // still be used as a fallback).
+    mapping(bytes32 => bool) internal pendingValidation;
 
     event Initiated(
         bytes32 indexed swapKey,
@@ -440,20 +443,21 @@ contract ETHSwap is IAccount, ReentrancyGuard {
             // so without this check two UserOps redeeming the same swap
             // would both pass validation and both pay prefund, but only
             // the first execution would succeed.
-            if (validatedAt[key] == block.number) {
+            if (pendingValidation[key]) {
                 return SIG_VALIDATION_FAILED;
             }
 
-            // Must match redeemAA's checks.
+            // Must match redeemAA's checks, except block.number comparison
+            // which is banned by ERC-4337 (NUMBER opcode). The block number
+            // check is still enforced in redeemAA during execution.
             if (blockNum == 0
-                || blockNum >= block.number
                 || record == REFUND_RECORD
                 || secretValidates(record, r.v.secretHash)
             ) {
                 return SIG_VALIDATION_FAILED;
             }
 
-            validatedAt[key] = block.number;
+            pendingValidation[key] = true;
 
             if (i == 0) {
                 participant = r.v.participant;
@@ -464,11 +468,17 @@ contract ETHSwap is IAccount, ReentrancyGuard {
             total += r.v.value;
         }
 
-        // Ensure callGasLimit is sufficient to prevent out-of-gas attacks
+        if (missingAccountFunds > total) return SIG_VALIDATION_FAILED;
+
+        // Pay prefund before callGasLimit and signature checks. During gas
+        // estimation, the bundler sends zero gas limits and a dummy signature,
+        // both of which would fail checks below. The EntryPoint requires the
+        // prefund to be paid regardless of validation result (AA21 otherwise).
+        _payPrefund(missingAccountFunds);
+
+        // Ensure callGasLimit is sufficient to prevent out-of-gas attacks.
         uint256 minCallGas = MIN_CALL_GAS_BASE + (reds.length * MIN_CALL_GAS_PER_REDEMPTION);
         if (uint128(uint256(userOp.accountGasLimits)) < minCallGas) return SIG_VALIDATION_FAILED;
-
-        if (missingAccountFunds > total) return SIG_VALIDATION_FAILED;
 
         (address recovered, ECDSA.RecoverError ecdsaErr, ) =
             ECDSA.tryRecover(userOpHash, userOp.signature);
@@ -482,7 +492,6 @@ contract ETHSwap is IAccount, ReentrancyGuard {
         // Written after all validation checks to avoid stale entries on failure.
         redeemPrepayments[opNonce] = missingAccountFunds;
 
-        _payPrefund(missingAccountFunds);
         return SIG_VALIDATION_SUCCESS;
     }
 
@@ -524,6 +533,7 @@ contract ETHSwap is IAccount, ReentrancyGuard {
             require(secretValidates(r.secret, r.v.secretHash), "bad secret");
 
             swaps[key] = r.secret;
+            delete pendingValidation[key];
             total += r.v.value;
 
             emit Redeemed(key, address(0), recipient, r.secret);

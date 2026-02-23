@@ -942,7 +942,7 @@ describe("ETHSwapV1", function () {
       await ethers.provider.send("hardhat_stopImpersonatingAccount", [epAddr]);
     });
 
-    it("double-validation prevention: allows re-validation in a new block", async function () {
+    it("double-validation prevention: flag persists until redeemAA clears it", async function () {
       const { secret, secretHash } = makeSecret();
       const v = makeVector(secretHash, ONE_ETH, initiator.address, participant.address, await futureTimestamp());
       await ethSwap.connect(initiator).initiate(ZERO_ADDR, [v], { value: ONE_ETH });
@@ -961,20 +961,23 @@ describe("ETHSwapV1", function () {
       await deployer.sendTransaction({ to: epAddr, value: ethers.parseEther("1") });
       const epSigner = await ethers.getSigner(epAddr);
 
-      // First validation succeeds and writes validatedAt
+      // First validation succeeds and sets pendingValidation flag
       await ethSwap.connect(epSigner).validateUserOp(op, opHash, 0n);
 
-      // Mine a new block so the validatedAt entry expires
+      // Mine a new block - flag should still be set (unlike old block.number approach)
       await mineBlock();
 
-      // Re-validation in the new block should succeed
+      // Re-validation in a new block should FAIL because flag persists
       const callData2 = encodeRedeemAA(redemptions, 1n);
       const op2 = buildUserOp(swapAddr, callData2, { nonce: 1n });
       op2.signature = await signUserOp(op2, participantWallet);
       const opHash2 = await getUserOpHash(op2);
 
       const ret = await ethSwap.connect(epSigner).validateUserOp.staticCall(op2, opHash2, 0n);
-      expect(ret).to.equal(VALIDATE_SUCCESS);
+      expect(ret).to.equal(1n); // SIG_VALIDATION_FAILED
+
+      // Execute redeemAA to clear the flag
+      await ethSwap.connect(epSigner).redeemAA(redemptions, 0n);
 
       await ethers.provider.send("hardhat_stopImpersonatingAccount", [epAddr]);
     });
@@ -1370,38 +1373,38 @@ describe("ETHSwapV1", function () {
       await stopEpImpersonation();
     });
 
-    it("should reject same-block swap (blockNum >= block.number)", async function () {
-      // We need initiate and validateUserOp to execute in the same block.
-      // staticCall simulates block.number = latestBlock + 1, so we use
-      // manual mining and check side effects instead of the return value.
+    it("redeemAA should reject same-block swap (blockNum >= block.number)", async function () {
+      // The block.number check was removed from validateUserOp (NUMBER
+      // opcode is banned by ERC-4337) but is still enforced in redeemAA.
       const { secret, secretHash } = makeSecret();
       const v = makeVector(secretHash, ONE_ETH, initiator.address, participant.address, await futureTimestamp());
-
-      const swapAddr = await ethSwap.getAddress();
-      const callData = encodeRedeemAA([{ v, secret }], 0n);
-      const op = buildUserOp(swapAddr, callData);
-      op.signature = await signUserOp(op, participantWallet);
-      const opHash = await getUserOpHash(op);
 
       const epAddr = await entryPoint.getAddress();
       await ethers.provider.send("hardhat_impersonateAccount", [epAddr]);
       await deployer.sendTransaction({ to: epAddr, value: ethers.parseEther("2") });
       const epSigner = await ethers.getSigner(epAddr);
 
+      const redemptions = [{ v, secret }];
+
+      // Use manual mining so initiate and redeemAA execute in the same block.
       await ethers.provider.send("evm_setAutomine", [false]);
       try {
-        // Queue both transactions in the same block
         const initTx = await ethSwap.connect(initiator).initiate(ZERO_ADDR, [v], { value: ONE_ETH });
-        const validateTx = await ethSwap.connect(epSigner).validateUserOp(op, opHash, 0n);
+        const redeemTx = await ethSwap.connect(epSigner).redeemAA(redemptions, 0n);
         await ethers.provider.send("evm_mine", []);
 
         const initReceipt = await initTx.wait();
-        const validateReceipt = await validateTx.wait();
-        expect(initReceipt.blockNumber).to.equal(validateReceipt.blockNumber);
+        // redeemTx.wait() throws on revert in ethers v6; catch and check status.
+        let redeemReceipt;
+        try {
+          redeemReceipt = await redeemTx.wait();
+        } catch (e) {
+          redeemReceipt = e.receipt;
+        }
+        expect(initReceipt.blockNumber).to.equal(redeemReceipt.blockNumber);
 
-        // On SIG_VALIDATION_FAILED, redeemPrepayments is not set.
-        // On VALIDATE_SUCCESS, it would be set. Check it's zero.
-        expect(await ethSwap.redeemPrepayments(0n)).to.equal(0n);
+        // redeemAA should have reverted (status 0) because blockNum >= block.number
+        expect(redeemReceipt.status).to.equal(0);
       } finally {
         await ethers.provider.send("evm_setAutomine", [true]);
         await ethers.provider.send("hardhat_stopImpersonatingAccount", [epAddr]);
