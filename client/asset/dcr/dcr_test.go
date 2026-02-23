@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/asset"
+	"decred.org/dcrdex/client/asset/broadcast"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/config"
@@ -2795,6 +2796,9 @@ func TestSwap(t *testing.T) {
 	}
 	swaps.Inputs = coins
 
+	// Clear the swap cache so error tests below go through the full code path.
+	wallet.swapCache = broadcast.NewCache[*dcrSwapCacheEntry]()
+
 	// AddressPKH error
 	node.newAddrErr = tErr
 	_, _, _, err = wallet.Swap(t.Context(), swaps)
@@ -2912,6 +2916,9 @@ func TestRedeem(t *testing.T) {
 		t.Fatalf("no error for spoofed AuditInfo")
 	}
 	redemption.Spends = ci
+
+	// Clear the redeem cache so error tests below go through the full code path.
+	wallet.redeemCache = broadcast.NewCache[*dcrRedeemCacheEntry]()
 
 	// Wrong secret hash
 	redemption.Secret = randBytes(32)
@@ -3364,6 +3371,9 @@ func TestRefund(t *testing.T) {
 	if err == nil {
 		t.Fatalf("no error for bad receipt")
 	}
+
+	// Clear the refund cache so error tests below go through the full code path.
+	wallet.refundCache = broadcast.NewCache[*dcrRefundCacheEntry]()
 
 	// gettxout error
 	node.txOutErr = tErr
@@ -4723,6 +4733,8 @@ func TestConfirmTransaction(t *testing.T) {
 		wantErr:   true,
 	}}
 	for _, test := range tests {
+		wallet.redeemCache = broadcast.NewCache[*dcrRedeemCacheEntry]()
+		wallet.refundCache = broadcast.NewCache[*dcrRefundCacheEntry]()
 		node.walletTxFn = test.txRes
 		node.bestBlockErr = test.bestBlockErr
 		wallet.mempoolTxs = test.mempoolTxs
