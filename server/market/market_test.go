@@ -2397,3 +2397,59 @@ func TestSendMMSnapshotsBothSides(t *testing.T) {
 		t.Fatalf("expected sell rate %d, got %d", sellRate, snap.SellOrders[0].Rate)
 	}
 }
+
+func TestMarket_lockOrderCoins(t *testing.T) {
+	mkt, _, _, cleanup, err := newTestMarket()
+	if err != nil {
+		t.Fatalf("newTestMarket failure: %v", err)
+	}
+	defer cleanup()
+
+	coin1 := order.CoinID([]byte{0x01, 0x02, 0x03})
+	coin2 := order.CoinID([]byte{0x04, 0x05, 0x06})
+
+	// Sell order uses base asset locker.
+	sellOrder := makeLO(seller3, mkRate3(0.8, 1.0), 1, order.StandingTiF)
+	sellOrder.Coins = []order.CoinID{coin1}
+
+	// Buy order uses quote asset locker.
+	buyOrder := makeLO(buyer3, mkRate3(0.8, 1.0), 1, order.StandingTiF)
+	buyOrder.Coins = []order.CoinID{coin2}
+
+	// Locking fresh coins should succeed.
+	if !mkt.lockOrderCoins(sellOrder) {
+		t.Fatal("lockOrderCoins failed for sell order with unlocked coins")
+	}
+	if !mkt.lockOrderCoins(buyOrder) {
+		t.Fatal("lockOrderCoins failed for buy order with unlocked coins")
+	}
+
+	// Unlock so we can reuse the coins.
+	mkt.unlockOrderCoins(sellOrder)
+	mkt.unlockOrderCoins(buyOrder)
+
+	// Pre-lock coin1 in the base book locker under a different order.
+	mkt.coinLockerBase.LockCoins(map[order.OrderID][]order.CoinID{
+		randomOrderID(): {coin1},
+	})
+
+	// Pre-lock coin2 in the quote book locker under a different order.
+	mkt.coinLockerQuote.LockCoins(map[order.OrderID][]order.CoinID{
+		randomOrderID(): {coin2},
+	})
+
+	// lockOrderCoins should now fail for both since their coins are
+	// already locked.
+	if mkt.lockOrderCoins(sellOrder) {
+		t.Fatal("lockOrderCoins should have failed for sell order with locked coins")
+	}
+	if mkt.lockOrderCoins(buyOrder) {
+		t.Fatal("lockOrderCoins should have failed for buy order with locked coins")
+	}
+
+	// Cancel orders always succeed regardless of coin lock state.
+	co := makeCO(seller3, randomOrderID())
+	if !mkt.lockOrderCoins(co) {
+		t.Fatal("lockOrderCoins should always succeed for cancel orders")
+	}
+}

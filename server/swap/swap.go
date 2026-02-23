@@ -2277,7 +2277,11 @@ func (s *Swapper) lockOrdersCoins(assetID uint32, orders []order.Order) {
 		return
 	}
 
-	swapperAsset.Locker.LockOrdersCoins(orders)
+	if failed := swapperAsset.Locker.LockOrdersCoins(orders); len(failed) > 0 {
+		for _, ord := range failed {
+			log.Errorf("failed to lock swap coins for order %v (asset %d)", ord.ID(), assetID)
+		}
+	}
 }
 
 // LockCoins locks coins of a given asset. The OrderID is used for tracking.
@@ -2290,7 +2294,11 @@ func (s *Swapper) LockCoins(asset uint32, coins map[order.OrderID][]order.CoinID
 		return
 	}
 
-	swapperAsset.Locker.LockCoins(coins)
+	if failed := swapperAsset.Locker.LockCoins(coins); len(failed) > 0 {
+		for oid, coinIDs := range failed {
+			log.Errorf("failed to lock swap coins for order %v (asset %d): %d coins", oid, asset, len(coinIDs))
+		}
+	}
 }
 
 // unlockOrderCoins is not exported since only the Swapper knows when to unlock
