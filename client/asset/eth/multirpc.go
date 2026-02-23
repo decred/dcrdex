@@ -1793,3 +1793,38 @@ func shuffleProviders(p []*provider) {
 func isNotFoundError(err error) bool {
 	return strings.Contains(err.Error(), "not found")
 }
+
+// l1FeeForCalldata estimates the L1 fee for the given calldata using the OP
+// Stack GasPriceOracle precompile. The multiRPCClient itself satisfies
+// bind.ContractBackend.
+func (m *multiRPCClient) l1FeeForCalldata(ctx context.Context, calldata []byte) (*big.Int, error) {
+	return l1FeeForCalldata(ctx, m, calldata)
+}
+
+// l1FeeFromReceipt returns the L1 fee paid for a transaction from its receipt.
+// OP Stack nodes include an l1Fee field in the receipt JSON.
+// NOTE: The l1Fee receipt field is deprecated since the Ecotone upgrade
+// (March 2024) in favor of blob-based fee fields, but is still populated
+// for backwards compatibility. If it is removed in a future upgrade, this
+// method will return an error.
+func (m *multiRPCClient) l1FeeFromReceipt(ctx context.Context, txHash common.Hash) (fee *big.Int, err error) {
+	type opStackReceipt struct {
+		L1Fee *big.Int `json:"l1Fee"`
+	}
+	err = m.withAny(ctx, func(ctx context.Context, p *provider) error {
+		var raw json.RawMessage
+		if err := p.ec.rpc.CallContext(ctx, &raw, "eth_getTransactionReceipt", txHash); err != nil {
+			return err
+		}
+		var r opStackReceipt
+		if err := json.Unmarshal(raw, &r); err != nil {
+			return fmt.Errorf("error unmarshaling OP Stack receipt: %w", err)
+		}
+		fee = r.L1Fee
+		if fee == nil {
+			return fmt.Errorf("l1Fee field missing from receipt for %s — the deprecated field may have been removed", txHash)
+		}
+		return nil
+	})
+	return
+}

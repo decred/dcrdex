@@ -4,7 +4,6 @@
 package base
 
 import (
-	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -97,9 +96,6 @@ type Driver struct{}
 
 // Open opens the Base exchange wallet. Start the wallet with its Run method.
 func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (asset.Wallet, error) {
-	if net == dex.Mainnet {
-		return nil, errors.New("base is disable until we get L1 security fees worked out")
-	}
 	chainCfg, err := ChainConfig(net)
 	if err != nil {
 		return nil, fmt.Errorf("failed to locate Base genesis configuration for network %s", net)
@@ -154,6 +150,7 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Networ
 		Net:                net,
 		DefaultProviders:   defaultProviders,
 		MaxTxFeeGwei:       dexeth.GweiFactor, // 1 ETH
+		IsOpStack:          true,
 	})
 }
 

@@ -46,6 +46,15 @@ type contractor interface {
 	// case will always be zero.
 	value(context.Context, *types.Transaction) (incoming, outgoing uint64, err error)
 	isRefundable(locator []byte) (bool, error)
+	// packInitiateData returns ABI-packed calldata for an initiate transaction
+	// with n dummy swaps. Used for L1 fee estimation on OP Stack chains.
+	packInitiateData(n int) ([]byte, error)
+	// packRedeemData returns ABI-packed calldata for a redeem transaction
+	// with n dummy redemptions. Used for L1 fee estimation on OP Stack chains.
+	packRedeemData(n int) ([]byte, error)
+	// packRefundData returns ABI-packed calldata for a refund transaction
+	// with dummy data. Used for L1 fee estimation on OP Stack chains.
+	packRefundData() ([]byte, error)
 }
 
 // tokenContractor interacts with an ERC20 token contract and a token swap
@@ -337,10 +346,29 @@ func (c *contractorV0) estimateRefundGasImpl(ctx context.Context, secretHash [32
 	return c.estimateGas(ctx, nil, "refund", secretHash)
 }
 
-// estimateInitGas estimates the gas used to initiate n generic swaps. The
-// account must have a balance of at least n wei, as well as the eth balance
-// to cover fees.
-func (c *contractorV0) estimateInitGas(ctx context.Context, n int) (uint64, error) {
+// packRedeemData returns ABI-packed calldata for a redeem transaction.
+func (c *contractorV0) packRedeemData(n int) ([]byte, error) {
+	redemps := make([]swapv0.ETHSwapRedemption, 0, n)
+	for j := 0; j < n; j++ {
+		var secret [32]byte
+		copy(secret[:], encode.RandomBytes(32))
+		redemps = append(redemps, swapv0.ETHSwapRedemption{
+			Secret:     secret,
+			SecretHash: sha256.Sum256(secret[:]),
+		})
+	}
+	return c.abi.Pack("redeem", redemps)
+}
+
+// packRefundData returns ABI-packed calldata for a refund transaction.
+func (c *contractorV0) packRefundData() ([]byte, error) {
+	var secretHash [32]byte
+	copy(secretHash[:], encode.RandomBytes(32))
+	return c.abi.Pack("refund", secretHash)
+}
+
+// dummyInitiationsV0 creates n dummy initiations for gas/calldata estimation.
+func dummyInitiationsV0(n int, acctAddr common.Address) []swapv0.ETHSwapInitiation {
 	initiations := make([]swapv0.ETHSwapInitiation, 0, n)
 	for j := 0; j < n; j++ {
 		var secretHash [32]byte
@@ -348,10 +376,23 @@ func (c *contractorV0) estimateInitGas(ctx context.Context, n int) (uint64, erro
 		initiations = append(initiations, swapv0.ETHSwapInitiation{
 			RefundTimestamp: big.NewInt(1),
 			SecretHash:      secretHash,
-			Participant:     c.acctAddr,
+			Participant:     acctAddr,
 			Value:           big.NewInt(1),
 		})
 	}
+	return initiations
+}
+
+// packInitiateData returns ABI-packed calldata for an initiate transaction.
+func (c *contractorV0) packInitiateData(n int) ([]byte, error) {
+	return c.abi.Pack("initiate", dummyInitiationsV0(n, c.acctAddr))
+}
+
+// estimateInitGas estimates the gas used to initiate n generic swaps. The
+// account must have a balance of at least n wei, as well as the eth balance
+// to cover fees.
+func (c *contractorV0) estimateInitGas(ctx context.Context, n int) (uint64, error) {
+	initiations := dummyInitiationsV0(n, c.acctAddr)
 
 	var value *big.Int
 	if !c.isToken {
@@ -761,7 +802,8 @@ func (c *contractorV1) refund(txOpts *bind.TransactOpts, locator []byte) (*types
 	return c.Refund(txOpts, c.tokenAddr, dexeth.SwapVectorToAbigen(v))
 }
 
-func (c *contractorV1) estimateInitGas(ctx context.Context, n int) (uint64, error) {
+// dummyInitiationsV1 creates n dummy initiations for gas/calldata estimation.
+func dummyInitiationsV1(n int, acctAddr common.Address, evmify func(uint64) *big.Int) []swapv1.ETHSwapVector {
 	initiations := make([]swapv1.ETHSwapVector, 0, n)
 	for j := 0; j < n; j++ {
 		var secretHash [32]byte
@@ -769,11 +811,21 @@ func (c *contractorV1) estimateInitGas(ctx context.Context, n int) (uint64, erro
 		initiations = append(initiations, swapv1.ETHSwapVector{
 			RefundTimestamp: uint64(time.Now().Add(time.Hour * 6).Unix()),
 			SecretHash:      secretHash,
-			Initiator:       c.acctAddr,
+			Initiator:       acctAddr,
 			Participant:     common.BytesToAddress(encode.RandomBytes(20)),
-			Value:           c.evmify(1),
+			Value:           evmify(1),
 		})
 	}
+	return initiations
+}
+
+// packInitiateData returns ABI-packed calldata for an initiate transaction.
+func (c *contractorV1) packInitiateData(n int) ([]byte, error) {
+	return c.abi.Pack("initiate", c.tokenAddr, dummyInitiationsV1(n, c.acctAddr, c.evmify))
+}
+
+func (c *contractorV1) estimateInitGas(ctx context.Context, n int) (uint64, error) {
+	initiations := dummyInitiationsV1(n, c.acctAddr, c.evmify)
 
 	var value *big.Int
 	if !c.isToken {
@@ -817,6 +869,40 @@ func (c *contractorV1) estimateRefundGas(ctx context.Context, locator []byte) (u
 		return 0, err
 	}
 	return c.estimateGas(ctx, nil, "refund", c.tokenAddr, dexeth.SwapVectorToAbigen(v))
+}
+
+// packRedeemData returns ABI-packed calldata for a redeem transaction.
+func (c *contractorV1) packRedeemData(n int) ([]byte, error) {
+	redemps := make([]swapv1.ETHSwapRedemption, 0, n)
+	for j := 0; j < n; j++ {
+		var secret [32]byte
+		copy(secret[:], encode.RandomBytes(32))
+		redemps = append(redemps, swapv1.ETHSwapRedemption{
+			Secret: secret,
+			V: swapv1.ETHSwapVector{
+				RefundTimestamp: uint64(time.Now().Add(time.Hour * 6).Unix()),
+				SecretHash:      sha256.Sum256(secret[:]),
+				Initiator:       common.BytesToAddress(encode.RandomBytes(20)),
+				Participant:     c.acctAddr,
+				Value:           c.evmify(1),
+			},
+		})
+	}
+	return c.abi.Pack("redeem", c.tokenAddr, redemps)
+}
+
+// packRefundData returns ABI-packed calldata for a refund transaction.
+func (c *contractorV1) packRefundData() ([]byte, error) {
+	var secretHash [32]byte
+	copy(secretHash[:], encode.RandomBytes(32))
+	v := swapv1.ETHSwapVector{
+		RefundTimestamp: uint64(time.Now().Add(-time.Hour).Unix()),
+		SecretHash:      secretHash,
+		Initiator:       c.acctAddr,
+		Participant:     common.BytesToAddress(encode.RandomBytes(20)),
+		Value:           c.evmify(1),
+	}
+	return c.abi.Pack("refund", c.tokenAddr, v)
 }
 
 func (c *contractorV1) isRedeemable(locator []byte, secret [32]byte) (bool, error) {
