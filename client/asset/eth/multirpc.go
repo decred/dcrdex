@@ -30,6 +30,7 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -1809,7 +1810,7 @@ func (m *multiRPCClient) l1FeeForCalldata(ctx context.Context, calldata []byte) 
 // method will return an error.
 func (m *multiRPCClient) l1FeeFromReceipt(ctx context.Context, txHash common.Hash) (fee *big.Int, err error) {
 	type opStackReceipt struct {
-		L1Fee *big.Int `json:"l1Fee"`
+		L1Fee *hexutil.Big `json:"l1Fee"`
 	}
 	err = m.withAny(ctx, func(ctx context.Context, p *provider) error {
 		var raw json.RawMessage
@@ -1820,10 +1821,10 @@ func (m *multiRPCClient) l1FeeFromReceipt(ctx context.Context, txHash common.Has
 		if err := json.Unmarshal(raw, &r); err != nil {
 			return fmt.Errorf("error unmarshaling OP Stack receipt: %w", err)
 		}
-		fee = r.L1Fee
-		if fee == nil {
+		if r.L1Fee == nil {
 			return fmt.Errorf("l1Fee field missing from receipt for %s — the deprecated field may have been removed", txHash)
 		}
+		fee = r.L1Fee.ToInt()
 		return nil
 	})
 	return
