@@ -842,6 +842,11 @@ func testGaslessRedeem(
 	pm paymaster,
 	result *asset.GasTestResult,
 ) {
+	if err := w.checkBundler(ctx, bndlr, pm); err != nil {
+		result.Summary += fmt.Sprintf("\n--- Gasless Redeem ---\nBundler pre-flight check failed: %v\n", err)
+		return
+	}
+
 	baseRate, tipRate, err := cl.currentFees(ctx)
 	if err != nil {
 		result.Summary += fmt.Sprintf("\n--- Gasless Redeem ---\nError getting fees: %v\n", err)
@@ -957,7 +962,11 @@ func testGaslessRedeem(
 			return err
 		})
 		if err != nil {
-			log.Errorf("gasless test: AA redeem send error for %d redeems: %v", n, err)
+			if pm == nil {
+				log.Errorf("gasless test: AA redeem send error for %d redeems (no paymaster configured - one may be required for this network): %v", n, err)
+			} else {
+				log.Errorf("gasless test: AA redeem send error for %d redeems: %v", n, err)
+			}
 		} else {
 			log.Infof("gasless test: AA redeem sent for %d redeems, userOpHash: %s", n, userOpHash.Hex())
 			// Poll for receipt.
@@ -2138,6 +2147,55 @@ func (w *ETHWallet) setPaymaster(endpoint string, pmContext interface{}) error {
 	w.bundlerMtx.Lock()
 	w.paymaster = pm
 	w.bundlerMtx.Unlock()
+	return nil
+}
+
+// checkBundler performs a pre-flight validation of the bundler and paymaster
+// before attempting a gasless redeem. It calls getGasPrice on the bundler as a
+// connectivity check, and if a paymaster is configured, calls
+// getPaymasterStubData with a minimal dummy user op to verify the paymaster
+// endpoint and policy are valid.
+func (w *ETHWallet) checkBundler(ctx context.Context, b bundler, pm paymaster) error {
+	// On Polygon, the default provider (e.g. Alchemy) typically requires a
+	// paymaster for user operations. Require an explicit bundler endpoint
+	// to be configured so the user is not surprised by failures at redeem
+	// time.
+	w.settingsMtx.RLock()
+	explicitBundler := w.settings[bundlerKey] != ""
+	w.settingsMtx.RUnlock()
+	if w.assetID == polygonID && !explicitBundler {
+		return fmt.Errorf("a dedicated bundler endpoint is required for gasless redemptions on Polygon - set one in wallet settings")
+	}
+
+	if _, _, err := b.getGasPrice(ctx); err != nil {
+		return fmt.Errorf("bundler gas price check failed: %w", err)
+	}
+
+	if pm == nil {
+		return nil
+	}
+
+	contractAddr, ok := w.versionedContracts[1]
+	if !ok {
+		return nil
+	}
+
+	op := &userOp{
+		Sender:               contractAddr.Hex(),
+		Nonce:                "0x0",
+		CallData:             "0x",
+		Signature:            dummyUserOpSignature,
+		MaxFeePerGas:         "0x0",
+		MaxPriorityFeePerGas: "0x0",
+		CallGasLimit:         "0x0",
+		VerificationGasLimit: "0x0",
+		PreVerificationGas:   "0x0",
+	}
+
+	if _, err := pm.getPaymasterStubData(ctx, op); err != nil {
+		return fmt.Errorf("paymaster check failed: %w", err)
+	}
+
 	return nil
 }
 
@@ -4230,6 +4288,9 @@ func (w *ETHWallet) gaslessRedeem(ctx context.Context, form *asset.RedeemForm, b
 		return err
 	})
 	if err != nil {
+		if pm == nil {
+			return fail(fmt.Errorf("error sending user operation (no paymaster configured - one may be required for this network): %v", err))
+		}
 		return fail(fmt.Errorf("error sending user operation: %v", err))
 	}
 
@@ -4302,6 +4363,9 @@ func (w *ETHWallet) GaslessRedeem(ctx context.Context, form *asset.RedeemForm) (
 		w.bundlerMtx.RUnlock()
 		if bundler == nil {
 			return fail(fmt.Errorf("bundler not configured"))
+		}
+		if err := w.checkBundler(ctx, bundler, pm); err != nil {
+			return fail(fmt.Errorf("gasless redeem pre-flight check failed: %w", err))
 		}
 		txs, coin, fees, err := w.gaslessRedeem(ctx, form, bundler, pm)
 		return txs, coin, fees, false, err
@@ -5480,6 +5544,7 @@ func (w *assetWallet) BridgeCompletionFees(bridgeName string) (uint64, bool, err
 func (w *ETHWallet) canRedeemWithBundler(lotSize uint64, gases *dexeth.Gases, n uint64) (bool, error) {
 	w.bundlerMtx.RLock()
 	bundler := w.bundler
+	pm := w.paymaster
 	w.bundlerMtx.RUnlock()
 
 	if bundler == nil {
@@ -5505,6 +5570,12 @@ func (w *ETHWallet) canRedeemWithBundler(lotSize uint64, gases *dexeth.Gases, n 
 	gasEstimate := precalculatedGaslessRedeemGasEstimates(n, gases)
 	if lotSize < gasEstimate.totalGas()*maxFeeRate {
 		return false, asset.ErrBundlerRedemptionLotSizeTooSmall
+	}
+
+	// Validate the paymaster if one is configured, to catch configuration
+	// issues before funds are locked.
+	if err := w.checkBundler(w.ctx, bundler, pm); err != nil {
+		return false, err
 	}
 
 	return true, nil
