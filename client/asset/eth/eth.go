@@ -6442,30 +6442,42 @@ func (w *baseWallet) swapOrRedemptionFeesPaidUserOp(ctx context.Context, userOpH
 		return 0, nil, asset.ErrNotEnoughConfirms
 	}
 
-	userOps, err := dexeth.ParseHandleOpsData(tx.Data())
-	if err != nil {
-		return 0, nil, err
-	}
-
-	// Loop through all the user ops that were submitted in this transaction,
-	// and find the one that matches our user op hash.
-	var ourUserOp *entrypoint.UserOperation
-	for _, userOp := range userOps {
-		hash, err := dexeth.HashUserOp(userOp, *tx.To(), w.chainCfg.ChainID)
-		if err != nil {
-			return 0, nil, err
+	var callData []byte
+	var sender common.Address
+	userOps, parseErr := dexeth.ParseHandleOpsData(tx.Data())
+	if parseErr != nil {
+		innerData, innerErr := dexeth.ParseInnerHandleOpData(tx.Data())
+		if innerErr != nil {
+			return 0, nil, fmt.Errorf("unable to parse entrypoint tx data: handleOps: %v, innerHandleOp: %v", parseErr, innerErr)
 		}
-		if hash == userOpHash {
-			ourUserOp = &userOp
-			break
+		if innerData.UserOpHash != userOpHash {
+			return 0, nil, fmt.Errorf("innerHandleOp userOpHash %x != expected %x", innerData.UserOpHash, userOpHash)
 		}
-	}
-	if ourUserOp == nil {
-		return 0, nil, fmt.Errorf("user op not found in transaction")
+		callData = innerData.CallData
+		sender = innerData.Sender
+	} else {
+		// Loop through all the user ops that were submitted in this transaction,
+		// and find the one that matches our user op hash.
+		var ourUserOp *entrypoint.PackedUserOperation
+		for _, userOp := range userOps {
+			hash, err := dexeth.HashUserOp(userOp, *tx.To(), w.chainCfg.ChainID)
+			if err != nil {
+				return 0, nil, err
+			}
+			if hash == userOpHash {
+				ourUserOp = &userOp
+				break
+			}
+		}
+		if ourUserOp == nil {
+			return 0, nil, fmt.Errorf("user op not found in transaction")
+		}
+		callData = ourUserOp.CallData
+		sender = ourUserOp.Sender
 	}
 
 	// Extract the secret hashes from the user op call data.
-	locators, _, err = extractSecretHashes(ourUserOp.CallData, contractVer, false)
+	locators, _, err = extractSecretHashes(callData, contractVer, false)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -6481,7 +6493,7 @@ func (w *baseWallet) swapOrRedemptionFeesPaidUserOp(ctx context.Context, userOpH
 		Start:   blockNumber,
 		End:     &blockNumber,
 		Context: ctx,
-	}, [][32]byte{userOpHash}, []common.Address{ourUserOp.Sender}, []common.Address{})
+	}, [][32]byte{userOpHash}, []common.Address{sender}, []common.Address{})
 	if err != nil {
 		return 0, nil, err
 	}

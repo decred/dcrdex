@@ -246,24 +246,33 @@ func (be *AssetBackend) userOpBaseCoin(txHash, userOpHash common.Hash, contractD
 		return nil, fmt.Errorf("unknown entrypoint address: %s", tx.To().String())
 	}
 
+	var callData []byte
 	handleOpsData, err := dexeth.ParseHandleOpsData(tx.Data())
 	if err != nil {
-		return nil, fmt.Errorf("unable to parse handle ops data: %v", err)
-	}
-
-	var userOp *entrypoint.UserOperation
-	for _, op := range handleOpsData {
-		hash, err := dexeth.HashUserOp(op, be.entryPointAddress, big.NewInt(int64(be.evmChainID)))
-		if err != nil {
-			return nil, fmt.Errorf("unable to hash user op: %v", err)
+		innerData, innerErr := dexeth.ParseInnerHandleOpData(tx.Data())
+		if innerErr != nil {
+			return nil, fmt.Errorf("unable to parse entrypoint tx data: handleOps: %v, innerHandleOp: %v", err, innerErr)
 		}
-		if hash == userOpHash {
-			userOp = &op
-			break
+		if innerData.UserOpHash != userOpHash {
+			return nil, fmt.Errorf("innerHandleOp userOpHash %x != expected %x", innerData.UserOpHash, userOpHash)
 		}
-	}
-	if userOp == nil {
-		return nil, fmt.Errorf("user op not found in tx %s", txHash)
+		callData = innerData.CallData
+	} else {
+		var userOp *entrypoint.PackedUserOperation
+		for _, op := range handleOpsData {
+			hash, err := dexeth.HashUserOp(op, be.entryPointAddress, big.NewInt(int64(be.evmChainID)))
+			if err != nil {
+				return nil, fmt.Errorf("unable to hash user op: %v", err)
+			}
+			if hash == userOpHash {
+				userOp = &op
+				break
+			}
+		}
+		if userOp == nil {
+			return nil, fmt.Errorf("user op not found in tx %s", txHash)
+		}
+		callData = userOp.CallData
 	}
 
 	return &baseCoin{
@@ -272,7 +281,7 @@ func (be *AssetBackend) userOpBaseCoin(txHash, userOpHash common.Hash, contractD
 		locator:     locator,
 		txHash:      txHash,
 		isUserOp:    true,
-		txData:      userOp.CallData,
+		txData:      callData,
 		contractVer: contractVer,
 
 		// The following is not populated, but since user ops are only used
