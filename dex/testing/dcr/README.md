@@ -11,6 +11,12 @@ The harness depends on [dcrd](https://github.com/decred/dcrd), [dcrwallet](https
 
 You must have `dcrd` `dcrwallet` and `dcrctl` in `PATH` to use the harness.
 
+All of the above can be downloaded at once from [Decred Binaries Release Page](https://github.com/decred/decred-binaries/releases).
+
+Download the `Decred-{os}-{architecture}-{version}` file with a `.tar.gz` extension and extract it to find all the executables you need. 
+
+Then add the path to those executables in `PATH`.
+
 The harness script will create two connected simnet nodes and wallets, and
 then mine some blocks and send some regular transactions. The result is a set of
 wallets named **alpha** and **beta**, each with slightly different properties.

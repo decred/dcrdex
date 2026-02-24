@@ -23,6 +23,8 @@ outputs, but has a number of UTXOs of varying size and confirmation count.
 You must have [bitcoind and bitcoin-cli](https://github.com/bitcoin/bitcoin/releases)
 in `PATH` to use the harness. Bitcoin Core v26.0.0+ is recommended. v30+ is fully supported.
 
+To get `bitcoind` and `bitcoin-cli`, you must download only a `.tar.gz` for the operating system you choose. Then extract the `.tar.gz` file to find the `bin` folder and add the `bin` folder to `PATH`.
+
 It also requires tmux.
 
 ## Harness control scripts
