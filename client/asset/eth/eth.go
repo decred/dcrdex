@@ -3262,7 +3262,7 @@ func (c *coin) TxID() string {
 
 // String is a string representation of the coin.
 func (c *coin) String() string {
-	return c.txHash.String()
+	return c.TxID()
 }
 
 // Value returns the value in gwei of the coin.

@@ -414,7 +414,7 @@ export default class WalletsPage extends BasePage {
       const ui = app().unitInfo(assetID)
       const amt = parseFloatDefault(page.sendAmt.value)
       const conversionFactor = ui.conventional.conversionFactor
-      Doc.showFiatValue(page.sendValue, amt * conversionFactor, app().fiatRatesMap[this.selectedWalletID], ui)
+      Doc.showFiatValue(page.sendValue, amt * conversionFactor, app().fiatRatesMap[assetID], ui)
     })
 
     // Clicking on maxSend on the send form should populate the amount field.
@@ -422,11 +422,11 @@ export default class WalletsPage extends BasePage {
 
     // Validate send address on input.
     Doc.bind(page.sendAddr, 'input', async () => {
-      const asset = app().assets[this.selectedWalletID]
+      const assetID = parseInt(page.sendForm.dataset.assetID || '')
       page.sendAddr.classList.remove('border-danger', 'border-success')
       const addr = page.sendAddr.value || ''
-      if (!asset || addr === '') return
-      const valid = await this.validateSendAddress(addr, asset.id)
+      if (!assetID || addr === '') return
+      const valid = await this.validateSendAddress(addr, assetID)
       if (valid) page.sendAddr.classList.add('border-success')
       else page.sendAddr.classList.add('border-danger')
     })
@@ -2427,7 +2427,8 @@ export default class WalletsPage extends BasePage {
   */
   async populateMaxSend () {
     const page = this.page
-    const { id: assetID, unitInfo: ui, wallet } = app().assets[this.selectedWalletID]
+    const assetID = parseInt(page.sendForm.dataset.assetID || '')
+    const { unitInfo: ui, wallet } = app().assets[assetID]
     // Populate send amount with max send value and ensure we don't check
     // subtract checkbox for assets that don't have a withdraw method.
     const xcRate = app().fiatRatesMap[assetID]
