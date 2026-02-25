@@ -3537,6 +3537,17 @@ func (c *Core) confirmTx(t *trackedTrade, match *matchTracker, info *txInfo) (bo
 		t.notify(note)
 	}
 
+	// If this is a redeem that was pending submission (e.g. a
+	// GaslessRedeem UserOp), the bundler has now submitted the
+	// transaction and we have the real coin ID. Send the deferred
+	// redeem notification to the server.
+	if info.txType == asset.CTRedeem && match.redemptionPendingSubmission && !status.PendingSubmission {
+		match.redemptionPendingSubmission = false
+		if !match.matchCompleteSent {
+			c.sendRedeemAsync(t, match, status.CoinID, match.MetaData.Proof.Secret)
+		}
+	}
+
 	if confirmed {
 		subject, details := t.formatDetails(info.confirmedTopic, match.token(), makeOrderToken(t.token()))
 		note := newMatchNote(info.confirmedTopic, subject, details, db.Success, t, match)
