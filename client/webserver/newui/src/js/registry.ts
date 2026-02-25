@@ -6,8 +6,6 @@ declare global {
     recordLogger: (loggerID: string, enable: boolean) => void
     dumpLogger: (loggerID: string) => void
     mmstatus: () => Promise<MarketMakingStatus>
-    testFormatFourSigFigs: () => void
-    testFormatRateFullPrecision: () => void
     user: () => User
     cexBook: () => Promise<void>
     mmStatus: () => MarketMakingStatus
@@ -18,6 +16,8 @@ declare global {
     open: (url?: string | URL, target?: string, features?: string) => WindowProxy | null
     sendOSNotification (title: string, body?: string): void
     clearLocale (): void
+    recordMissingTranslations (enable?: boolean): void
+    dumpMissingTranslations (): void
   }
 }
 

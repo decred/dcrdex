@@ -552,6 +552,10 @@ func New(cfg *Config) (*WebServer, error) {
 			})
 		})
 	} else { // new UI. Only serve index.html.
+		indexHTML, err := s.newUIIndexHTML(siteDir)
+		if err != nil {
+			return nil, fmt.Errorf("error getting new UI index.html: %v", err)
+		}
 		mux.Group(func(r chi.Router) {
 			r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
 				upath := r.URL.Path
@@ -559,7 +563,9 @@ func New(cfg *Config) (*WebServer, error) {
 					http.Error(w, "Invalid path", http.StatusBadRequest)
 					return
 				}
-				http.ServeFile(w, r, filepath.Join(siteDir, "dist", "index.html"))
+				w.Header().Set("Content-Type", "text/html;charset=UTF-8")
+				w.WriteHeader(http.StatusOK)
+				w.Write(indexHTML)
 			})
 		})
 	}

@@ -1,7 +1,9 @@
 import { useState, ChangeEvent } from 'react'
 import t from '../js/intl'
 import PasswordInput from './PasswordInput'
+import LocaleSelector from './LocaleSelector'
 import { postJSON } from '../js/http'
+import app from '../js/application'
 
 interface UnlockedFormParams {
   setUnlocked: () => void
@@ -23,6 +25,9 @@ export default function UnlockForm ({ setUnlocked }: UnlockedFormParams) {
 
   return (
     <div className="forms">
+      <div className="top-right-floater">
+        <LocaleSelector />
+      </div>
       <form className="modal form-width-250">
         <header>
           <img className="logo-full small me-2" />

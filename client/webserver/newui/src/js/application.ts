@@ -1,4 +1,4 @@
-import { getJSON } from "./http"
+import { getJSON, postJSON } from "./http"
 import {
   AppState,
   User,
@@ -27,16 +27,24 @@ import {
   RateNote,
   TipChangeNote,
   BookUpdate,
+  MarketMakingStatus
 } from "./registry"
 import { TickerAsset, normalizedTicker } from "./assets"
 import Doc from "./doc"
 import State from "./state"
 import ws from "./ws"
+import { loadLocale } from "./intl"
 
 export class Application {
   user: User | null
   commitHash: string
+  langs: string[]
+  lang: string
+  mmStatus: MarketMakingStatus
+  inited: boolean
+  authed: boolean
   pageLoaded: (d: PageData) => void
+  reRender: () => void
   pageData: PageData
   tickerList: TickerAsset[]
   tickerMap: Record<string, TickerAsset>
@@ -98,8 +106,9 @@ export class Application {
     window.user = () => this.user
   }
 
-  async start (pageLoaded: (d: PageData) => void) {
+  async start (pageLoaded: (d: PageData) => void, reRender: () => void) {
     this.pageLoaded = pageLoaded
+    this.reRender = reRender
     await this.fetchBuildInfo()
     console.log('Bison Wallet, Build', this.commitHash.substring(0, 8))
 
@@ -154,8 +163,22 @@ export class Application {
     const r = await getJSON('/api/user')
     const needsTickers = r.user && !this.user
     this.user = r.user
+    this.inited = r.inited
+    this.authed = Boolean(r.user)
+    if (r.lang != this.lang) {
+      await loadLocale(r.lang, this.commitHash, false)
+    }
+    this.lang = r.lang
+    this.langs = r.langs
+    this.mmStatus = r.mmStatus
     if (needsTickers) this.prepareTickerAssets()
     return r
+  }
+
+  async changeLocale (lang: string) {
+    await postJSON('/api/setlocale', lang)
+    await loadLocale(lang, this.commitHash, false)
+    this.lang = lang
   }
 
   async fetchUser (): Promise<User | null> {

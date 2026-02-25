@@ -1,5 +1,6 @@
 
 import { useState, ChangeEvent } from "react"
+import t from "../js/intl"
 
 interface PasswordInputParams {
   onChange: (e: ChangeEvent<HTMLInputElement>) => void
@@ -21,7 +22,7 @@ export default function PasswordInput ({ onChange, placeholder, value }: Passwor
       <span className="ico-key fs16 p-2"></span>
       <input
         type={showPW ? 'text' : 'password'}
-        onChange={pwChanged} placeholder={placeholder || 'password'}
+        onChange={pwChanged} placeholder={placeholder || t('password')}
         value={value}
       ></input>
       <div className={`p-2 hoverbg pointer ${showPW ? 'ico-eyeopen' : 'ico-eyeclosed'}`} onClick={showPWClicked}></div>

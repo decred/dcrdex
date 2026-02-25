@@ -9,7 +9,7 @@ module.exports = {
             {
                 test: /\.tsx?$/,
                 use: 'ts-loader',
-                exclude: /node_modules/,
+                exclude: /node_modules/
             },
             {
                 test: /\.s[ac]ss$/i,
@@ -28,7 +28,7 @@ module.exports = {
                         loader: "sass-loader",
                         options: {
                             api: "modern",
-                            implementation: require("sass"),
+                            implementation: require("sass")
                         },
                     },
                 ],
@@ -43,16 +43,17 @@ module.exports = {
         ],
     },
     resolve: {
-        extensions: ['.tsx', '.ts', '.js'],
+        extensions: ['.tsx', '.ts', '.js']
     },
     output: {
         filename: 'bundle.js',
         path: path.resolve(__dirname, 'dist'),
-        publicPath: '/js/',
+        publicPath: '/js/'
     },
     plugins: [
         new HtmlWebpackPlugin({
             template: 'src/index.html',
+            inject: false
         }),
     ],
 };

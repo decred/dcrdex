@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import t from '../js/intl'
 import PasswordInput from './PasswordInput'
+import LocaleSelector from './LocaleSelector'
 import { postJSON } from '../js/http'
 
 /*
@@ -98,10 +99,10 @@ export const SeedInput = ({ setSeed, setUsingSeed }: SeedInputParams) => {
         <button
           className="feature w-100"
           disabled={workingSeed.trim() === ''}
-          onClick={submitSeed}>Recover</button>
+          onClick={submitSeed}>{t('Recover')}</button>
         <button
           className="w-100 mt-2"
-          onClick={onGoBackClicked}>Go Back</button>
+          onClick={onGoBackClicked}>{t('Go Back')}</button>
       </div>
     </form>
   )
@@ -143,20 +144,19 @@ export default function InitWizard ({ setInited }: InitWizardParams) {
     if (usingSeed) done()
   }
 
+  const renderContent = () => {
+    if (usingSeed === undefined) return <SeedPromptForm setUsingSeed={setUsingSeed} />
+    if (usingSeed && !seed) return <SeedInput setSeed={setSeed} setUsingSeed={setUsingSeed} />
+    if (!registered) return <PasswordForm setRegistered={registerFormFeedback} setSeed={setSeed} setUsingSeed={setUsingSeed} seed={seed || ''} />
+    return <SeedDisplay acked={() => { done() }} seed={seed} />
+  }
+
   return (
     <div className="fill-abs flex-center init-bg">
-      {
-        usingSeed === undefined ? <SeedPromptForm setUsingSeed={setUsingSeed} /> :
-          usingSeed && !seed ? (
-            <SeedInput setSeed={setSeed} setUsingSeed={setUsingSeed} />) :
-            !registered ? (
-              <PasswordForm
-                setRegistered={registerFormFeedback}
-                setSeed={setSeed}
-                setUsingSeed={setUsingSeed}
-                seed={seed || ''} />
-            ) : <SeedDisplay acked={() => { done() }} seed={seed} />
-      }
+      <div className="top-right-floater">
+        <LocaleSelector />
+      </div>
+      {renderContent()}
     </div>
   )
 }

@@ -72,6 +72,23 @@ textarea {
   }
 }
 
+// TODO: Implement our own React <Select /> component.
+select {
+  background-color: inherit !important;
+  border: none;
+  color: var(--text-color);
+  appearance: none;
+
+  &:focus-visible {
+    outline: none;
+    border: none;
+  }
+
+  & option {
+    background-color: var(--form-input-bg);
+  }
+}
+
 // hr {
 //   width: calc(100% - 0.5rem);
 //   border-width: 2px 0 0 0;
@@ -270,4 +287,10 @@ img.logo-full {
   z-index: 101;
   background-color: #0007;
   backdrop-filter: blur(5px);
+}
+
+.top-right-floater {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
 }

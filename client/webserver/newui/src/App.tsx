@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useReducer, useState } from 'react'
 import app from './js/application'
 import UnlockForm from './components/UnlockForm'
 import MainFrame from './components/MainFrame'
@@ -13,6 +13,7 @@ import {
 document.addEventListener('submit', e => e.preventDefault())
 
 export const App = () => {
+  const [, reRender] = useReducer(x => x + 1, 0);
   const [appState, setAppState] = useState<AppState | null>(null)
   const [pageData, setPageData] = useState<PageData | null>(null)
 
@@ -21,7 +22,7 @@ export const App = () => {
   }
 
   const start = async () => {
-    await app.start(setPageData)
+    await app.start(setPageData, reRender)
     await resetAppState()
     if (!app.user && !pageData) app.loadPage('') // reset URL
   }

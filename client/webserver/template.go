@@ -8,8 +8,12 @@ import (
 	"encoding/hex"
 	"fmt"
 	"html/template"
+	"io"
 	"io/fs"
+	"net/http"
 	"os"
+	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,6 +21,7 @@ import (
 
 	"decred.org/dcrdex/client/intl"
 	"decred.org/dcrdex/client/webserver/locales"
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
@@ -300,4 +305,47 @@ var templateFuncs = template.FuncMap{
 
 		return strings.Join(parts, " ")
 	},
+}
+
+func (s *WebServer) newUIIndexHTML(siteDir string) ([]byte, error) {
+	var indexTmpl string
+	if siteDir != "" {
+		b, err := os.ReadFile(filepath.Join(siteDir, "dist", "index.html"))
+		if err != nil {
+			return nil, fmt.Errorf("error reading new UI index.html: %v", err)
+		}
+		indexTmpl = string(b)
+	} else {
+		fs := http.FS(staticSiteRes) // so f is an http.File instead of fs.File
+		f, err := fs.Open(path.Join(site, "dist", "index.html"))
+		if err != nil {
+			return nil, fmt.Errorf("error reading new UI index.html from embedded resources: %v", err)
+		}
+		b, err := io.ReadAll(f)
+		if err != nil {
+			return nil, fmt.Errorf("error reading new UI index.html from embedded resources: %v", err)
+		}
+		indexTmpl = string(b)
+	}
+	t, err := template.New("index").Parse(indexTmpl)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing new UI index.html: %v", err)
+	}
+	ch := commitHash
+	if ch == "" || s.core.Network() == dex.Simnet {
+		ch = hex.EncodeToString(encode.RandomBytes(4))
+	}
+	data := &struct {
+		Lang       string
+		CommitHash string
+	}{
+		Lang:       (s.lang.Load()).(string),
+		CommitHash: ch,
+	}
+	var b bytes.Buffer
+	err = t.ExecuteTemplate(&b, "index", data)
+	if err != nil {
+		return nil, fmt.Errorf("error executing new UI index.html: %v", err)
+	}
+	return b.Bytes(), nil
 }
