@@ -255,6 +255,10 @@ const (
 	// swap spent by the maker without receiving a redemption request from the
 	// server before initiating a redemption search and auto-redeem.
 	spentAgoThreshNormal = 10 * time.Minute
+	// spentAgoThreshAccount is like spentAgoThreshNormal, but for
+	// account-based (EVM) assets where the secret can be read directly
+	// from contract state without parsing transactions.
+	spentAgoThreshAccount = 30 * time.Second
 	// spentAgoThreshSelfGoverned is like spentAgoThreshNormal, but for a
 	// self-governed trade. We are less patient if the server is down or
 	// lacking the market or asset configs involved.
@@ -377,6 +381,11 @@ func (t *trackedTrade) isSelfGoverned() bool {
 func (t *trackedTrade) spentAgoThresh() time.Duration {
 	if t.isSelfGoverned() {
 		return spentAgoThreshSelfGoverned
+	}
+	// Account-based (EVM) assets can read the secret directly from
+	// contract state, so we don't need to wait long for the server relay.
+	if _, is := t.wallets.fromWallet.Wallet.(asset.AccountLocker); is {
+		return spentAgoThreshAccount
 	}
 	return spentAgoThreshNormal // longer
 }
