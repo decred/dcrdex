@@ -73,7 +73,19 @@ contract ETHSwap is IAccount, ReentrancyGuard {
     bytes32 internal constant ZERO_SECRET_HASH =
         0x66687AADF862BD776C8FC18B8E9F8E20089714856EE233B3902A591D0D5F2925;
 
+    // Test swap secret: bytes32(uint256(1)). The test swap is created in the
+    // constructor for bundler compatibility checking.
+    bytes32 internal constant TEST_SECRET =
+        0x0000000000000000000000000000000000000000000000000000000000000001;
+
+    // TEST_SECRET_HASH = sha256(TEST_SECRET). Precomputed.
+    bytes32 internal constant TEST_SECRET_HASH =
+        0xEC4916DD28FC4C10D78E287CA5D9CC51EE1AE73CBFDE08C6B37324CBFAAC8BC5;
+
     address payable public immutable entryPoint;
+
+    // Stored as immutable so redeem/refund can reject it and redeemAA can skip it.
+    bytes32 public immutable testSwapKey;
 
     // swaps is a map of contract hashes to the "swap record". The swap record
     // has the following interpretation.
@@ -151,6 +163,21 @@ contract ETHSwap is IAccount, ReentrancyGuard {
     constructor(address payable _entryPoint) {
         require(_entryPoint != address(0), "zero entry point");
         entryPoint = _entryPoint;
+
+        // Permanent test swap for bundler compatibility checks.
+        // participant and initiator are address(this) — unredeemable by
+        // construction (no private key). redeem/refund reject it outright;
+        // redeemAA silently skips it so bundler gas estimation succeeds.
+        Vector memory tv = Vector({
+            secretHash: TEST_SECRET_HASH,
+            value: 1 ether,
+            initiator: address(this),
+            refundTimestamp: type(uint64).max,
+            participant: address(this)
+        });
+        bytes32 key = contractKey(address(0), tv);
+        swaps[key] = bytes32(block.number);
+        testSwapKey = key;
     }
 
     // senderIsOrigin ensures that this contract cannot be used by other
@@ -265,11 +292,13 @@ contract ETHSwap is IAccount, ReentrancyGuard {
             Vector calldata v = vectors[i];
 
             require(v.value > 0, "zero value");
-            require(v.initiator != address(0) && v.participant != address(0), "zero addr");
+            require(v.initiator == msg.sender, "bad initiator");
+            require(v.participant != address(0), "zero addr");
             require(v.refundTimestamp > block.timestamp, "bad refund time");
             require(v.secretHash != bytes32(0), "zero hash");
             require(v.secretHash != REFUND_RECORD_HASH, "illegal hash");
             require(v.secretHash != ZERO_SECRET_HASH, "zero secret hash");
+            require(v.secretHash != TEST_SECRET_HASH, "test secret hash");
 
             bytes32 key = contractKey(token, v);
             require(swaps[key] == bytes32(0), "already exists");
@@ -287,10 +316,15 @@ contract ETHSwap is IAccount, ReentrancyGuard {
             require(msg.value == total, "bad ETH value");
         } else {
             require(msg.value == 0, "no ETH for token swap");
+            uint256 balBefore = IERC20(token).balanceOf(address(this));
             IERC20(token).safeTransferFrom(
                 msg.sender,
                 address(this),
                 total
+            );
+            require(
+                IERC20(token).balanceOf(address(this)) - balBefore == total,
+                "fee-on-transfer not supported"
             );
         }
     }
@@ -319,6 +353,7 @@ contract ETHSwap is IAccount, ReentrancyGuard {
             (bytes32 key, bytes32 record, uint256 blockNum) =
                 _retrieve(token, r.v);
 
+            require(key != testSwapKey, "test swap");
             require(blockNum > 0 && blockNum < block.number, "not redeemable");
             require(record != REFUND_RECORD, "already refunded");
             require(!secretValidates(record, r.v.secretHash), "already redeemed");
@@ -355,6 +390,7 @@ contract ETHSwap is IAccount, ReentrancyGuard {
         (bytes32 key, bytes32 record, uint256 blockNum) =
             _retrieve(token, v);
 
+        require(key != testSwapKey, "test swap");
         require(blockNum > 0, "not initiated");
         require(record != REFUND_RECORD, "already refunded");
         require(!secretValidates(record, v.secretHash), "already redeemed");
@@ -526,6 +562,14 @@ contract ETHSwap is IAccount, ReentrancyGuard {
             (bytes32 key, bytes32 record, uint256 blockNum) =
                 _retrieve(address(0), r.v);
 
+            // The test swap is used for bundler compatibility checks via
+            // eth_estimateUserOperationGas. Instead of reverting (which would
+            // break the estimation), silently skip the test swap.
+            if (key == testSwapKey) {
+                delete pendingValidation[key];
+                continue;
+            }
+
             require(blockNum > 0 && blockNum < block.number, "not redeemable");
             require(record != REFUND_RECORD, "already refunded");
             require(!secretValidates(record, r.v.secretHash), "already redeemed");
@@ -542,6 +586,10 @@ contract ETHSwap is IAccount, ReentrancyGuard {
         // Key by nonce - must match validateUserOp
         uint256 fees = redeemPrepayments[opNonce];
         delete redeemPrepayments[opNonce];
+
+        // If all redemptions were skipped (test swaps), there is nothing to
+        // pay out. Guard against underflow when fees >= total.
+        if (total <= fees) return;
 
         // Intentionally not requiring success. If the recipient is a contract
         // that reverts on ETH transfer, the swap must still finalize to prevent

@@ -743,7 +743,15 @@ func (w *ETHWallet) TestContractGas(contractVer uint32, maxSwaps int, tokenAsset
 		pm := w.paymaster
 		w.bundlerMtx.RUnlock()
 		if bndlr != nil {
-			testGaslessRedeem(ctx, cl, c, contractVer, maxSwaps, g, w.evmify, log, w, bndlr, pm, baseResult)
+			// Pre-check: verify bundler compatibility before running
+			// the full gasless redeem gas test.
+			if can, err := w.canRedeemWithBundler(^uint64(0), g, 1); err != nil {
+				baseResult.Summary += fmt.Sprintf("\n--- Gasless Redeem ---\ncanRedeemWithBundler failed: %v\n", err)
+			} else if !can {
+				baseResult.Summary += "\n--- Gasless Redeem ---\ncanRedeemWithBundler returned false\n"
+			} else {
+				testGaslessRedeem(ctx, cl, c, contractVer, maxSwaps, g, w.evmify, log, w, bndlr, pm, baseResult)
+			}
 		} else {
 			baseResult.Summary += "\n--- Gasless Redeem ---\nSkipped (no bundler configured)\n"
 		}
@@ -2156,17 +2164,6 @@ func (w *ETHWallet) setPaymaster(endpoint string, pmContext interface{}) error {
 // getPaymasterStubData with a minimal dummy user op to verify the paymaster
 // endpoint and policy are valid.
 func (w *ETHWallet) checkBundler(ctx context.Context, b bundler, pm paymaster) error {
-	// On Polygon, the default provider (e.g. Alchemy) typically requires a
-	// paymaster for user operations. Require an explicit bundler endpoint
-	// to be configured so the user is not surprised by failures at redeem
-	// time.
-	w.settingsMtx.RLock()
-	explicitBundler := w.settings[bundlerKey] != ""
-	w.settingsMtx.RUnlock()
-	if w.assetID == polygonID && !explicitBundler {
-		return fmt.Errorf("a dedicated bundler endpoint is required for gasless redemptions on Polygon - set one in wallet settings")
-	}
-
 	if _, _, err := b.getGasPrice(ctx); err != nil {
 		return fmt.Errorf("bundler gas price check failed: %w", err)
 	}
@@ -5541,6 +5538,60 @@ func (w *assetWallet) BridgeCompletionFees(bridgeName string) (uint64, bool, err
 	return fees, availableFeeBalance >= fees, nil
 }
 
+// testBundlerCompatibility verifies that the bundler (and paymaster, if
+// configured) can handle this contract's validateUserOp by calling
+// eth_estimateUserOperationGas with the permanent test swap.
+func (w *ETHWallet) testBundlerCompatibility(ctx context.Context, b bundler, pm paymaster) error {
+	contractAddr, ok := w.versionedContracts[1]
+	if !ok {
+		return nil
+	}
+
+	contractor, is := w.contractorV1.(gaslessRedeemContractor)
+	if !is {
+		return nil
+	}
+
+	callData, err := contractor.testGaslessRedeemCalldata()
+	if err != nil {
+		return fmt.Errorf("error creating test calldata: %w", err)
+	}
+
+	op := &userOp{
+		Sender:               contractAddr.Hex(),
+		Nonce:                "0x0",
+		CallData:             "0x" + hex.EncodeToString(callData),
+		Signature:            dummyUserOpSignature,
+		MaxFeePerGas:         "0x0",
+		MaxPriorityFeePerGas: "0x0",
+		CallGasLimit:         "0x0",
+		VerificationGasLimit: "0x0",
+		PreVerificationGas:   "0x0",
+	}
+
+	// If paymaster configured, include stub data so the full flow is tested.
+	if pm != nil {
+		stubResult, err := pm.getPaymasterStubData(ctx, op)
+		if err != nil {
+			return fmt.Errorf("paymaster check failed: %w", err)
+		}
+		op.Paymaster = stubResult.Paymaster
+		op.PaymasterData = stubResult.PaymasterData
+		if stubResult.PaymasterVerificationGasLimit != "" {
+			op.PaymasterVerificationGasLimit = stubResult.PaymasterVerificationGasLimit
+		}
+		if stubResult.PaymasterPostOpGasLimit != "" {
+			op.PaymasterPostOpGasLimit = stubResult.PaymasterPostOpGasLimit
+		}
+	}
+
+	if _, err := b.estimateGas(ctx, op); err != nil {
+		return fmt.Errorf("bundler does not support this contract: %w", err)
+	}
+
+	return nil
+}
+
 func (w *ETHWallet) canRedeemWithBundler(lotSize uint64, gases *dexeth.Gases, n uint64) (bool, error) {
 	w.bundlerMtx.RLock()
 	bundler := w.bundler
@@ -5549,6 +5600,13 @@ func (w *ETHWallet) canRedeemWithBundler(lotSize uint64, gases *dexeth.Gases, n 
 
 	if bundler == nil {
 		return false, nil
+	}
+
+	// Verify bundler (and paymaster, if configured) can handle this
+	// contract's validateUserOp by simulating against the permanent test
+	// swap.
+	if err := w.testBundlerCompatibility(w.ctx, bundler, pm); err != nil {
+		return false, fmt.Errorf("bundler compatibility check failed: %w", err)
 	}
 
 	// Check if the bundler can handle the redemption by ensuring the lot size
@@ -5560,7 +5618,7 @@ func (w *ETHWallet) canRedeemWithBundler(lotSize uint64, gases *dexeth.Gases, n 
 	}
 	maxFeeRateBig, ok := big.NewInt(0).SetString(strings.TrimPrefix(maxFeePerGas, "0x"), 16)
 	if !ok {
-		return false, fmt.Errorf("error parsing max fee per gas: %w", err)
+		return false, fmt.Errorf("error parsing max fee per gas %q", maxFeePerGas)
 	}
 	maxFeeRate := dexeth.WeiToGwei(maxFeeRateBig)
 
@@ -5570,12 +5628,6 @@ func (w *ETHWallet) canRedeemWithBundler(lotSize uint64, gases *dexeth.Gases, n 
 	gasEstimate := precalculatedGaslessRedeemGasEstimates(n, gases)
 	if lotSize < gasEstimate.totalGas()*maxFeeRate {
 		return false, asset.ErrBundlerRedemptionLotSizeTooSmall
-	}
-
-	// Validate the paymaster if one is configured, to catch configuration
-	// issues before funds are locked.
-	if err := w.checkBundler(w.ctx, bundler, pm); err != nil {
-		return false, err
 	}
 
 	return true, nil

@@ -217,13 +217,13 @@ describe("ETHSwapV1", function () {
       ).to.be.revertedWith("zero value");
     });
 
-    it("should reject zero initiator address (unrefundable swap)", async function () {
+    it("should reject mismatched initiator address", async function () {
       const { secretHash } = makeSecret();
-      const v = makeVector(secretHash, ONE_ETH, ZERO_ADDR, participant.address, await futureTimestamp());
+      const v = makeVector(secretHash, ONE_ETH, other.address, participant.address, await futureTimestamp());
 
       await expect(
         ethSwap.connect(initiator).initiate(ZERO_ADDR, [v], { value: ONE_ETH })
-      ).to.be.revertedWith("zero addr");
+      ).to.be.revertedWith("bad initiator");
     });
 
     it("should reject zero participant address (unredeemable swap)", async function () {
@@ -1587,6 +1587,127 @@ describe("ETHSwapV1", function () {
       const keyETH = await ethSwap.contractKey(ZERO_ADDR, v);
       const keyToken = await ethSwap.contractKey(tokenAddr, v);
       expect(keyETH).to.not.equal(keyToken);
+    });
+
+    it("should reject fee-on-transfer tokens", async function () {
+      const FeeTokenFactory = await ethers.getContractFactory("FeeOnTransferToken");
+      const feeToken = await FeeTokenFactory.connect(initiator).deploy();
+      await feeToken.waitForDeployment();
+      const feeTokenAddr = await feeToken.getAddress();
+
+      const { secretHash } = makeSecret();
+      const v = makeVector(secretHash, ONE_ETH, initiator.address, participant.address, await futureTimestamp());
+
+      await feeToken.connect(initiator).approve(await ethSwap.getAddress(), ONE_ETH);
+      await expect(
+        ethSwap.connect(initiator).initiate(feeTokenAddr, [v])
+      ).to.be.revertedWith("fee-on-transfer not supported");
+    });
+  });
+
+  describe("Test swap", function () {
+    // Test swap constants matching the contract.
+    const TEST_SECRET = ethers.zeroPadValue("0x01", 32);
+    const TEST_SECRET_HASH = ethers.sha256(TEST_SECRET);
+    const TEST_VALUE = ethers.parseEther("1");
+    const MAX_UINT64 = (1n << 64n) - 1n;
+
+    function testVector(contractAddr) {
+      return makeVector(TEST_SECRET_HASH, TEST_VALUE, contractAddr, contractAddr, MAX_UINT64);
+    }
+
+    it("test swap exists after deployment", async function () {
+      const contractAddr = await ethSwap.getAddress();
+      const testKey = await ethSwap.testSwapKey();
+      const record = await ethSwap.swaps(testKey);
+      expect(record).to.not.equal(ethers.ZeroHash);
+
+      // Verify testSwapKey matches the expected contractKey.
+      const tv = testVector(contractAddr);
+      const expectedKey = await ethSwap.contractKey(ZERO_ADDR, tv);
+      expect(testKey).to.equal(expectedKey);
+    });
+
+    it("cannot initiate with test secret hash", async function () {
+      const v = makeVector(TEST_SECRET_HASH, ONE_ETH, initiator.address, participant.address, await futureTimestamp());
+      await expect(
+        ethSwap.connect(initiator).initiate(ZERO_ADDR, [v], { value: ONE_ETH })
+      ).to.be.revertedWith("test secret hash");
+    });
+
+    it("cannot redeem test swap", async function () {
+      const contractAddr = await ethSwap.getAddress();
+      const tv = testVector(contractAddr);
+      // The senderIsOrigin modifier and participant check prevent calling
+      // redeem as the contract address. The "test swap" guard is a backstop
+      // that fires after _retrieve. Either way, redemption is impossible.
+      await expect(
+        ethSwap.connect(initiator).redeem(ZERO_ADDR, [{ v: tv, secret: TEST_SECRET }])
+      ).to.be.reverted;
+    });
+
+    it("redeemAA silently skips test swap", async function () {
+      const contractAddr = await ethSwap.getAddress();
+      const tv = testVector(contractAddr);
+
+      // Impersonate entryPoint to call redeemAA directly.
+      const epAddr = await entryPoint.getAddress();
+      await ethers.provider.send("hardhat_impersonateAccount", [epAddr]);
+      await deployer.sendTransaction({ to: epAddr, value: ONE_ETH });
+      const epSigner = await ethers.getSigner(epAddr);
+
+      // redeemAA skips the test swap with `continue` instead of reverting,
+      // so bundler gas estimation succeeds. Verify the call succeeds but
+      // emits no Redeemed event.
+      await expect(
+        ethSwap.connect(epSigner).redeemAA([{ v: tv, secret: TEST_SECRET }], 0)
+      ).to.not.emit(ethSwap, "Redeemed");
+
+      await ethers.provider.send("hardhat_stopImpersonatingAccount", [epAddr]);
+    });
+
+    it("cannot refund test swap", async function () {
+      const contractAddr = await ethSwap.getAddress();
+      const tv = testVector(contractAddr);
+      // refundTimestamp is type(uint64).max, so "not expired" fires before
+      // the "test swap" guard. Either way, refund is impossible.
+      await expect(
+        ethSwap.connect(initiator).refund(ZERO_ADDR, tv)
+      ).to.be.reverted;
+    });
+
+    it("validateUserOp succeeds on test swap", async function () {
+      const contractAddr = await ethSwap.getAddress();
+      const tv = testVector(contractAddr);
+
+      // Encode redeemAA calldata.
+      const callData = ethSwap.interface.encodeFunctionData("redeemAA", [
+        [{ v: tv, secret: TEST_SECRET }],
+        0, // nonce
+      ]);
+
+      // Build a UserOp.
+      const userOp = buildUserOp(contractAddr, callData, {
+        nonce: 0n,
+        signature: "0x" + "00".repeat(65),
+      });
+
+      // Impersonate entryPoint and call validateUserOp directly.
+      const epAddr = await entryPoint.getAddress();
+      await ethers.provider.send("hardhat_impersonateAccount", [epAddr]);
+      await deployer.sendTransaction({ to: epAddr, value: ONE_ETH });
+      const epSigner = await ethers.getSigner(epAddr);
+
+      // Call validateUserOp directly. It should not revert.
+      // It will return SIG_VALIDATION_FAILED since we use a dummy sig, but
+      // the important thing is that it doesn't revert — that's what matters
+      // for bundler simulation (eth_estimateUserOperationGas).
+      const userOpHash = await getUserOpHash(userOp);
+      const result = await ethSwap.connect(epSigner).validateUserOp.staticCall(userOp, userOpHash, 0n);
+      // SIG_VALIDATION_FAILED = 1 (dummy sig), but no revert.
+      expect(result).to.equal(SIG_VALIDATION_FAILED);
+
+      await ethers.provider.send("hardhat_stopImpersonatingAccount", [epAddr]);
     });
   });
 });

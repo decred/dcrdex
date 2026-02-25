@@ -577,6 +577,9 @@ func (c *tGaslessRedeemContractor) gaslessRedeemCalldata(redeems []*asset.Redemp
 func (c *tGaslessRedeemContractor) entrypointAddress() (common.Address, error) {
 	return c.epAddress, nil
 }
+func (c *tGaslessRedeemContractor) testGaslessRedeemCalldata() ([]byte, error) {
+	return c.calldata, nil
+}
 
 type tTokenContractor struct {
 	*tContractor
@@ -4113,6 +4116,26 @@ func TestGaslessRedeem(t *testing.T) {
 			node.bal = dexeth.GweiToWei(test.balance)
 			node.tContractor.redeemTx = types.NewTx(&types.DynamicFeeTx{})
 
+			// Verify canRedeemWithBundler (which calls
+			// testBundlerCompatibility) agrees with expectations. Use a
+			// large lot size so the size check doesn't interfere.
+			compatGases := dexeth.VersionedGases[1]
+			largeLotSize := uint64(1e18)
+			canRedeem, redeemErr := ethWallet.canRedeemWithBundler(largeLotSize, compatGases, 1)
+			if test.estimateGasErr != nil {
+				if redeemErr == nil {
+					t.Fatalf("expected canRedeemWithBundler to fail with estimateGas error")
+				}
+			} else if test.paymaster != nil && test.paymaster.stubErr != nil {
+				if redeemErr == nil {
+					t.Fatalf("expected canRedeemWithBundler to fail with paymaster error")
+				}
+			} else if redeemErr != nil {
+				t.Fatalf("unexpected canRedeemWithBundler error: %v", redeemErr)
+			} else if !canRedeem {
+				t.Fatalf("expected canRedeemWithBundler to return true")
+			}
+
 			ids, out, fees, submitted, err := ethWallet.GaslessRedeem(t.Context(), &asset.RedeemForm{
 				Redemptions: test.redemptions,
 			})
@@ -5273,6 +5296,9 @@ func testRedemptionReserves(t *testing.T, assetID uint32) {
 	eth.balances.m = map[uint32]*cachedBalance{}
 	eth.balances.Unlock()
 
+	// Enable v1 contract so testBundlerCompatibility is exercised.
+	eth.versionedContracts[1] = dexeth.ContractAddresses[1][dex.Simnet]
+
 	// Bundler available and lot size sufficient
 	tb := newTBundler()
 	bundlerMaxFeePerGasGwei := uint64(60)
@@ -5295,6 +5321,34 @@ func testRedemptionReserves(t *testing.T, assetID uint32) {
 	if !errors.Is(err, asset.ErrBundlerRedemptionLotSizeTooSmall) {
 		t.Fatalf("expected ErrBundlerRedemptionLotSizeTooSmall, got %v", err)
 	}
+
+	// Bundler compatibility check failure — estimateGas returns error.
+	tb2 := newTBundler()
+	tb2.maxFeePerGas = "0x" + dexeth.GweiToWei(bundlerMaxFeePerGasGwei).Text(16)
+	tb2.estimateGasErr = errors.New("unsupported contract")
+	eth.bundler = tb2
+	_, err = w.ReserveNRedemptions(1, assetV1.Version, assetV1.MaxFeeRate, redeemCost)
+	if err == nil {
+		t.Fatalf("expected bundler compatibility error, got nil")
+	}
+	if !strings.Contains(err.Error(), "bundler compatibility check failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Bundler compatibility check failure — paymaster stub error.
+	ethWallet := wi.(*ETHWallet)
+	tb3 := newTBundler()
+	tb3.maxFeePerGas = "0x" + dexeth.GweiToWei(bundlerMaxFeePerGasGwei).Text(16)
+	eth.bundler = tb3
+	ethWallet.paymaster = &tPaymaster{stubErr: errors.New("paymaster rejected")}
+	_, err = w.ReserveNRedemptions(1, assetV1.Version, assetV1.MaxFeeRate, redeemCost)
+	if err == nil {
+		t.Fatalf("expected paymaster compatibility error, got nil")
+	}
+	if !strings.Contains(err.Error(), "paymaster check failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	ethWallet.paymaster = nil
 
 	// Failed to get gas price from bundler
 	eth.bundler = newTBundler()

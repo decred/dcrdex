@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"time"
 
@@ -645,6 +646,10 @@ type gaslessRedeemContractor interface {
 	// entrypointAddress returns the address of the entrypoint contract specified
 	// in the ETH Swap contract.
 	entrypointAddress() (common.Address, error)
+	// testGaslessRedeemCalldata generates calldata for a test redeemAA call
+	// using the contract's permanent test swap. Used to verify bundler
+	// compatibility before committing to trades.
+	testGaslessRedeemCalldata() ([]byte, error)
 }
 
 type contractorV1 struct {
@@ -792,6 +797,26 @@ func (c *contractorV1) gaslessRedeemCalldata(redeems []*asset.Redemption, nonce 
 
 func (c *contractorV1) entrypointAddress() (common.Address, error) {
 	return c.EntryPoint(&bind.CallOpts{From: c.acctAddr})
+}
+
+var (
+	testSecret     = [32]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}
+	testSecretHash = sha256.Sum256(testSecret[:])
+	testValue      = big.NewInt(1e18) // 1 ether
+)
+
+func (c *contractorV1) testGaslessRedeemCalldata() ([]byte, error) {
+	testRedemption := swapv1.ETHSwapRedemption{
+		V: swapv1.ETHSwapVector{
+			SecretHash:      testSecretHash,
+			Value:           testValue,
+			Initiator:       c.swapContractAddr,
+			RefundTimestamp: math.MaxUint64,
+			Participant:     c.swapContractAddr,
+		},
+		Secret: testSecret,
+	}
+	return c.abi.Pack("redeemAA", []swapv1.ETHSwapRedemption{testRedemption}, new(big.Int))
 }
 
 func (c *contractorV1) refund(txOpts *bind.TransactOpts, locator []byte) (*types.Transaction, error) {

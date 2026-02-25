@@ -40,18 +40,52 @@ function, which requires `tx.origin == msg.sender`. A smart contract
 wallet that can only interact via ERC-4337 would need to wait for the
 refund timeout.
 
-## v.initiator Is Not Validated Against msg.sender
+## Refund Is Callable by Any EOA
 
-In `initiate`, there is no check that `v.initiator == msg.sender`. The
-caller pays for the swap, but the refund goes to `v.initiator`. If set
-incorrectly, refunded funds go to the wrong address with no way to
-recover them.
+The `refund` function does not restrict the caller to `v.initiator`. Any
+EOA can trigger a refund for any expired swap. The funds are always sent
+to `v.initiator`, so there is no theft risk, but a third party can force
+a refund that the initiator might have preferred to leave open — for
+example if the counterparty is still attempting to redeem. In the DCRDEX
+protocol this is not a practical concern because refund timestamps are
+chosen with sufficient margin and the DEX server coordinates timing, but
+direct users of the contract should be aware that expired swaps can be
+refunded by anyone.
 
-## Fee-on-Transfer and Rebasing Tokens
+## Rebasing and Fee-on-Outbound-Transfer Tokens
 
-The contract is not compatible with fee-on-transfer or rebasing tokens.
-No currently supported tokens (USDC, USDT, WETH, WBTC, POL) have this
-property, but there is no on-chain guard preventing their use. A
-post-transfer balance check in `initiate` would reject such tokens at
-initiation time rather than allowing silent accounting mismatches that
-surface later as failed redemptions for the last redeemer.
+The contract is not compatible with rebasing tokens. No currently
+supported tokens (USDC, USDT, WETH, WBTC, POL) have this property.
+Fee-on-transfer tokens are rejected at initiation time via a
+post-transfer balance check, but rebasing tokens that change balances
+outside of transfers have no on-chain guard.
+
+Tokens that charge fees only on outbound transfers (not on the
+`transferFrom` during initiation) would pass the balance check but
+deliver less than `v.value` on `redeem` or `refund`. No currently
+supported tokens have this property.
+
+## \_payPrefund Silently Ignores Transfer Failure
+
+`_payPrefund` does not check the return value of the ETH transfer to
+the EntryPoint. This is per the ERC-4337 specification: the EntryPoint
+handles insufficient prefund scenarios itself (reverting with AA21),
+so a failed prefund transfer does not need to revert `validateUserOp`.
+
+## Test Swap Has No Backing ETH
+
+The constructor creates a permanent test swap with `value: 1 ether`
+for bundler compatibility checks, but no ETH is actually deposited.
+This is safe because `redeemAA` skips the test swap before adding to
+`total`, and `redeem`/`refund` reject it outright via the
+`testSwapKey` check.
+
+## sha256 Precompile Cost
+
+The contract uses `sha256` throughout (for `contractKey`,
+`secretValidates`, etc.) rather than the native `keccak256`. This is
+intentional for cross-chain compatibility with DCRDEX, which uses
+SHA-256 for atomic swap secrets. The `sha256` precompile costs roughly
+double what `keccak256` does (60 base + 12/word vs 30 + 6/word), but
+this is negligible relative to the storage operations in each
+transaction.
