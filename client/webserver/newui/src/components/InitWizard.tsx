@@ -51,8 +51,7 @@ const PasswordForm = ({ setRegistered, setUsingSeed, setSeed, seed }: PasswordFo
     if (r.ok) {
       setRegistered(true)
       if (r.mnemonic) setSeed(r.mnemonic)
-    }
-    else setErr(r.errMsg)
+    } else setErr(r.errMsg)
   }
 
   return (

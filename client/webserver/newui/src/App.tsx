@@ -13,7 +13,7 @@ import {
 document.addEventListener('submit', e => e.preventDefault())
 
 export const App = () => {
-  const [, reRender] = useReducer(x => x + 1, 0);
+  const [, reRender] = useReducer(x => x + 1, 0)
   const [appState, setAppState] = useState<AppState | null>(null)
   const [pageData, setPageData] = useState<PageData | null>(null)
 
@@ -30,7 +30,6 @@ export const App = () => {
   useEffect(() => { start() }, [])
 
   if (appState === null) return <Loading />
-
 
   if (appState.user) {
     return <MainFrame pd={pageData} />

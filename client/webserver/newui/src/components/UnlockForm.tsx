@@ -3,7 +3,6 @@ import t from '../js/intl'
 import PasswordInput from './PasswordInput'
 import LocaleSelector from './LocaleSelector'
 import { postJSON } from '../js/http'
-import app from '../js/application'
 
 interface UnlockedFormParams {
   setUnlocked: () => void

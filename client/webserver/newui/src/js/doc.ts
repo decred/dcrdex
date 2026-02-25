@@ -134,8 +134,8 @@ export default class Doc {
 
   static addrHost (addr: string) {
     // Handle IPv6 cases like "[::1]:7232"
-    if (addr.startsWith("[")) return addr.substring(1, addr.lastIndexOf("]"));
-    return addr.split(":")[0];
+    if (addr.startsWith('[')) return addr.substring(1, addr.lastIndexOf(']'))
+    return addr.split(':')[0]
   }
 }
 

@@ -67,7 +67,7 @@ function marketsAvailable () {
 function extractMarket (pd: PageData): ([string, string] | undefined) {
   if (pd.pageParts.length !== 3) return
   const mkts = hostMarkets()
-  const [_, host, mktName] = pd.pageParts
+  const [, host, mktName] = pd.pageParts
   if (mkts[host]?.[mktName]) return [host, mktName]
 }
 

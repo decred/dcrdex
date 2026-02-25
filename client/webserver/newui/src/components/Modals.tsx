@@ -16,7 +16,6 @@ const onBackgroundClick = (e: MouseEvent) => {
 }
 
 export default function Modals ({ fd }: ModalsParams) {
-
   const renderContent = () => {
     switch (fd.form) {
       case 'receive': return <Receive />

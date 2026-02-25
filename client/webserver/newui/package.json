@@ -6,7 +6,8 @@
   "scripts": {
     "start": "webpack serve --mode development --open",
     "watch": "webpack --watch --mode development",
-    "build": "webpack --mode production"
+    "build": "webpack --mode production",
+    "lint": "npm exec tsc && npm exec -- eslint src --ext .js --ext .ts --ext .tsx"
   },
   "author": "",
   "license": "ISC",
@@ -17,7 +18,16 @@
   "devDependencies": {
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
+    "@typescript-eslint/eslint-plugin": "^8.56.1",
+    "@typescript-eslint/parser": "^8.56.1",
     "css-loader": "^6.8.1",
+    "eslint": "^8.57.1",
+    "eslint-config-standard": "^17.1.0",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-node": "^11.1.0",
+    "eslint-plugin-promise": "^6.6.0",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-webpack-plugin": "^4.2.0",
     "html-webpack-plugin": "^5.5.3",
     "sass": "^1.69.5",
     "sass-loader": "^13.3.2",

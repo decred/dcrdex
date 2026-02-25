@@ -1,4 +1,3 @@
-
 declare global {
   interface Window {
     log: (...args: any) => void

@@ -1,6 +1,5 @@
-
-import { useState, ChangeEvent } from "react"
-import t from "../js/intl"
+import { useState, ChangeEvent } from 'react'
+import t from '../js/intl'
 
 interface PasswordInputParams {
   onChange: (e: ChangeEvent<HTMLInputElement>) => void

@@ -4,7 +4,6 @@ import app from '../js/application'
 import Doc from '../js/doc'
 import { TotalUSDBalance } from '../js/registry'
 
-
 export default function Header () {
   const [usdBalance, setUSDBalance] = useState<TotalUSDBalance>(app.totalBalanceUSD())
 
@@ -26,13 +25,15 @@ export default function Header () {
       </div>
       <div className="flex-grow-1 d-flex align-items-stretch justify-content-end fs14 demi py-1">
         {
-          usdBal.ok ? (
+          usdBal.ok
+            ? (
             <button className="flex-center flex-column demi me-2 subtle"
               onClick={() => app.loadPage('portfolio')}>
               <span>{Doc.formatFourSigFigs(usdBal.total, 2)} USD</span>
               <span>{usdBal.numContribs} {t('Assets')}</span>
             </button>
-          ) : null
+              )
+            : null
         }
 
         <button className="flex-center flex-column demi me-2 subtle"

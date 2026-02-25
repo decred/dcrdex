@@ -1,4 +1,4 @@
-import { getJSON, postJSON } from "./http"
+import { getJSON, postJSON } from './http'
 import {
   AppState,
   User,
@@ -22,18 +22,17 @@ import {
   ReputationNote,
   WalletConfigNote,
   WalletSyncNote,
-  ActionRequiredNote,
   Match,
   RateNote,
   TipChangeNote,
   BookUpdate,
   MarketMakingStatus
-} from "./registry"
-import { TickerAsset, normalizedTicker } from "./assets"
-import Doc from "./doc"
-import State from "./state"
-import ws from "./ws"
-import { loadLocale } from "./intl"
+} from './registry'
+import { TickerAsset, normalizedTicker } from './assets'
+import Doc from './doc'
+import State from './state'
+import ws from './ws'
+import { loadLocale } from './intl'
 
 export class Application {
   user: User | null
@@ -165,7 +164,7 @@ export class Application {
     this.user = r.user
     this.inited = r.inited
     this.authed = Boolean(r.user)
-    if (r.lang != this.lang) {
+    if (r.lang !== this.lang) {
       await loadLocale(r.lang, this.commitHash, false)
     }
     this.lang = r.lang
@@ -437,7 +436,7 @@ export class Application {
             break
           }
           case 'actionRequired': {
-            const req = n.payload as ActionRequiredNote
+            // const req = n.payload as ActionRequiredNote
             // TODO: implement required actions
             // this.addAction(req)
             /// this.blinkAction()

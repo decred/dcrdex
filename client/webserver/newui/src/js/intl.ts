@@ -1,6 +1,6 @@
-import State from "./state"
-import { postJSON } from "./http"
-import { PageElement } from "./registry"
+import State from './state'
+import { postJSON } from './http'
+import { PageElement } from './registry'
 
 let translations: Record<string, string> = {}
 
