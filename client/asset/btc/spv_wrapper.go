@@ -202,6 +202,20 @@ func extendAddresses(extIdx, intIdx uint32, btcw *wallet.Wallet) error {
 	})
 }
 
+const (
+	// stallThreshold is the chain-vs-wallet block divergence that must be
+	// exceeded before suspecting a rescan stall (~1 hr at BTC's block rate).
+	stallThreshold = 6
+	// stallConfirmationTime is how long the divergence must persist before
+	// triggering a rescan.
+	stallConfirmationTime = 10 * time.Minute
+	// stallCheckInterval is how often the nanny goroutine checks for stalls.
+	stallCheckInterval = time.Minute
+	// stallRescanCooldown is the minimum time between rescan triggers to
+	// prevent rapid re-triggering if RescanAsync doesn't fix the stall.
+	stallRescanCooldown = 30 * time.Minute
+)
+
 // spvWallet is an in-process btcwallet.Wallet + neutrino light-filter-based
 // Bitcoin wallet. spvWallet controls an instance of btcwallet.Wallet directly
 // and does not run or connect to the RPC server.
@@ -220,6 +234,15 @@ type spvWallet struct {
 	tipChan            chan *BlockVector
 	syncTarget         int32
 	lastPrenatalHeight int32
+
+	// Stall detection: lastWalletHeight is the wallet's SyncedTo height
+	// observed on the previous check. stallDetectedAt is the unix timestamp
+	// when divergence was first noticed (0 means not stalled).
+	// lastRescanAt is the unix timestamp of the last rescan trigger, used
+	// to enforce a cooldown between rescans.
+	lastWalletHeight atomic.Int32
+	stallDetectedAt  atomic.Int64
+	lastRescanAt     atomic.Int64
 
 	*BlockFiltersScanner
 }
@@ -922,6 +945,98 @@ func (w *spvWallet) logFilePath() string {
 	return filepath.Join(w.dir, logDirName, logFileName)
 }
 
+// checkRescanStall detects and recovers from a neutrino bug where the rescan
+// goroutine silently dies on a peer timeout during block fetching (specifically
+// in catchup mode). When this happens, both notification and polling paths go
+// permanently dead: BlockNotifications() stops producing events because the
+// rescan is dead, and watchBlocks() polling via GetBestBlockHash() calls
+// wallet.SyncedTo() which never advances. Meanwhile, the chain service
+// (w.cl.BestBlock()) continues syncing headers normally, so the data to detect
+// the stall already exists — it's just never compared.
+//
+// A proper upstream fix requires changes in both neutrino and btcwallet.
+// This method is defense-in-depth: it compares chain service height
+// against wallet SyncedTo height, and if the divergence exceeds stallThreshold
+// and persists for stallConfirmationTime with no wallet progress, triggers a
+// rescan to recover.
+func (w *spvWallet) checkRescanStall() bool {
+	chainStamp, err := w.cl.BestBlock()
+	if err != nil || chainStamp.Height == 0 {
+		return false
+	}
+
+	// Don't flag a stall if the chain tip is before the wallet's birthday.
+	// The wallet is expected to not process those blocks.
+	if bday := w.wallet.Birthday(); !bday.IsZero() && chainStamp.Timestamp.Before(bday) {
+		return false
+	}
+
+	walletStamp := w.wallet.SyncedTo()
+	walletHeight := walletStamp.Height
+	if walletHeight == 0 {
+		// Wallet hasn't started processing blocks yet (possibly a rescan
+		// is already in progress). Don't interfere.
+		return false
+	}
+
+	if len(w.cl.Peers()) == 0 {
+		return false
+	}
+
+	if walletHeight >= chainStamp.Height {
+		w.stallDetectedAt.Store(0)
+		w.lastWalletHeight.Store(0)
+		return false
+	}
+
+	divergence := chainStamp.Height - walletHeight
+	if divergence <= stallThreshold {
+		// Wallet is keeping up (or close enough). Clear any stall state.
+		w.stallDetectedAt.Store(0)
+		w.lastWalletHeight.Store(0)
+		return false
+	}
+
+	prevHeight := w.lastWalletHeight.Swap(walletHeight)
+	if walletHeight > prevHeight && prevHeight != 0 {
+		// Wallet is making progress, just behind. Reset the timer.
+		w.stallDetectedAt.Store(0)
+		return false
+	}
+
+	now := time.Now().Unix()
+	firstSeen := w.stallDetectedAt.Load()
+	if firstSeen == 0 {
+		// First time noticing the divergence.
+		w.log.Warnf("Possible rescan stall detected: chain height %d, wallet height %d (divergence %d blocks)",
+			chainStamp.Height, walletHeight, divergence)
+		w.stallDetectedAt.Store(now)
+		return false
+	}
+
+	stalledFor := time.Since(time.Unix(firstSeen, 0))
+	if stalledFor < stallConfirmationTime {
+		return false
+	}
+
+	// Stall confirmed. Enforce cooldown to prevent rapid re-triggering.
+	if lastRescan := w.lastRescanAt.Load(); lastRescan != 0 {
+		if time.Since(time.Unix(lastRescan, 0)) < stallRescanCooldown {
+			return false
+		}
+	}
+
+	w.log.Errorf("Rescan stall confirmed (chain height %d, wallet height %d, stalled for %s). Triggering rescan.",
+		chainStamp.Height, walletHeight, stalledFor)
+	if err := w.wallet.RescanAsync(); err != nil {
+		w.log.Errorf("RescanAsync error: %v", err)
+	}
+	w.stallDetectedAt.Store(0)
+	w.lastWalletHeight.Store(0)
+	w.lastRescanAt.Store(now)
+	return true
+}
+
 // Connect will start the wallet and begin syncing.
 func (w *spvWallet) Connect(ctx context.Context, wg *sync.WaitGroup) (err error) {
 	w.cl, err = w.wallet.Start()
@@ -939,13 +1054,24 @@ func (w *spvWallet) Connect(ctx context.Context, wg *sync.WaitGroup) (err error)
 
 		ticker := time.NewTicker(time.Minute * 20)
 		defer ticker.Stop()
+
+		stallTicker := time.NewTicker(stallCheckInterval)
+		defer stallTicker.Stop()
+
 		expiration := time.Hour * 2
 		for {
 			select {
 			case <-ticker.C:
 				w.BlockFiltersScanner.CleanCaches(expiration)
 
+			case <-stallTicker.C:
+				w.checkRescanStall()
+
 			case blk := <-blockNotes:
+				// Block received from the wallet's rescan — it's alive.
+				w.stallDetectedAt.Store(0)
+				w.lastWalletHeight.Store(0)
+
 				syncTarget := atomic.LoadInt32(&w.syncTarget)
 				if syncTarget == 0 || (blk.Height < syncTarget && blk.Height%10_000 != 0) {
 					continue
