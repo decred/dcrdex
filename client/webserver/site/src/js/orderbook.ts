@@ -3,6 +3,20 @@ import {
   MiniOrder
 } from './registry'
 
+import { RateEncodingFactor } from './orderutil'
+
+export interface MarketOrderEstimate {
+  avgRate: number // VWAP fill rate (msgRate-encoded)
+  worstRate: number // Worst (last) fill rate
+  midGapRate: number // Mid-gap rate for comparison
+  slippagePct: number // |avgRate - midGap| / midGap * 100
+  worstSlippagePct: number // |worstRate - midGap| / midGap * 100
+  filled: boolean // Book can fully fill the order?
+  bookDepthPct: number // % of book side consumed (by base qty)
+  levelsConsumed: number // Number of price levels consumed
+  receivedEstimate: number // Estimated received amount (base atoms for buy, quote atoms for sell)
+}
+
 export default class OrderBook {
   base: number
   baseSymbol: string
@@ -128,6 +142,108 @@ export default class OrderBook {
 
   bestGapSell () {
     return this.bestGapOrder(this.sells)
+  }
+
+  /*
+   * estimateMarketOrder walks the order book to estimate fill quality for a
+   * market order, returning slippage, VWAP, worst rate, and book depth info.
+   * For sell orders, qty is in base-asset atoms. For buy orders, qty is in
+   * quote-asset atoms.
+   */
+  estimateMarketOrder (sell: boolean, qty: number): MarketOrderEstimate | null {
+    // For a sell, we consume buy orders. For a buy, sell orders.
+    const side = sell ? this.buys : this.sells
+    if (!side || !side.length || qty <= 0) return null
+
+    // Compute mid-gap rate from best non-epoch orders.
+    const bestBuy = this.bestGapBuy()
+    const bestSell = this.bestGapSell()
+    if (!bestBuy && !bestSell) return null
+    const midGapRate = bestBuy && bestSell
+      ? (bestBuy.msgRate + bestSell.msgRate) / 2
+      : bestBuy ? bestBuy.msgRate : bestSell ? bestSell.msgRate : 0
+
+    if (midGapRate <= 0) return null
+
+    const isMarketBuy = !sell
+    let remainingQty = qty
+    let weightedSum = 0
+    let baseQtySum = 0
+    let worstRate = 0
+    let levelsConsumed = 0
+    let filledBaseQty = 0
+    let totalBookBaseQty = 0
+
+    for (const ord of side) {
+      if (!ord.epoch) totalBookBaseQty += ord.qtyAtomic
+    }
+
+    let filled = false
+    for (const ord of side) {
+      if (remainingQty <= 0) break
+      // Skip epoch orders for estimation — they may not be matched.
+      if (ord.epoch) continue
+      levelsConsumed++
+      worstRate = ord.msgRate
+
+      if (isMarketBuy) {
+        // qty is in quote atoms. Each order costs qtyAtomic * msgRate / RateEncodingFactor quote atoms.
+        const quoteCost = ord.qtyAtomic * ord.msgRate / RateEncodingFactor
+        if (quoteCost >= remainingQty) {
+          // Partial fill
+          const baseUsed = remainingQty * RateEncodingFactor / ord.msgRate
+          weightedSum += baseUsed * ord.msgRate
+          baseQtySum += baseUsed
+          filledBaseQty += baseUsed
+          remainingQty = 0
+          filled = true
+        } else {
+          weightedSum += ord.qtyAtomic * ord.msgRate
+          baseQtySum += ord.qtyAtomic
+          filledBaseQty += ord.qtyAtomic
+          remainingQty -= quoteCost
+        }
+      } else {
+        // qty is in base atoms.
+        const orderQty = ord.qtyAtomic
+        if (orderQty >= remainingQty) {
+          weightedSum += remainingQty * ord.msgRate
+          baseQtySum += remainingQty
+          filledBaseQty += remainingQty
+          remainingQty = 0
+          filled = true
+        } else {
+          weightedSum += orderQty * ord.msgRate
+          baseQtySum += orderQty
+          filledBaseQty += orderQty
+          remainingQty -= orderQty
+        }
+      }
+    }
+
+    if (baseQtySum === 0) return null
+
+    const avgRate = weightedSum / baseQtySum
+    const bookDepthPct = totalBookBaseQty > 0 ? (filledBaseQty / totalBookBaseQty) * 100 : 0
+    const slippagePct = Math.abs(avgRate - midGapRate) / midGapRate * 100
+    const worstSlippagePct = Math.abs(worstRate - midGapRate) / midGapRate * 100
+
+    // For buy, it's base atoms received; for sell, it's quote atoms received.
+    const receivedEstimate = sell
+      ? baseQtySum * avgRate / RateEncodingFactor
+      : baseQtySum
+
+    return {
+      avgRate,
+      worstRate,
+      midGapRate,
+      slippagePct,
+      worstSlippagePct,
+      filled,
+      bookDepthPct,
+      levelsConsumed,
+      receivedEstimate
+    }
   }
 }
 
