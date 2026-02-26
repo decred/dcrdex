@@ -1,107 +1,64 @@
 package core
 
 import (
-	"errors"
 	"fmt"
 
 	pi "decred.org/dcrdex/dex/politeia"
-	tv1 "github.com/decred/politeia/politeiawww/api/ticketvote/v1"
 )
 
-// PoliteiaDetails retrieves the current state for c.politeia, including the politeia URL.
+// PoliteiaDetails retrieves the current Politeia state from the DCR wallet.
 func (c *Core) PoliteiaDetails() (string, bool, int64) {
-	if c.politeia == nil {
-		return c.politeiaURL, false, 0
+	pv, err := c.politeiaVoter()
+	if err != nil {
+		return "", false, 0
 	}
-	return c.politeiaURL, c.politeiaSyncing.Load(), c.politeia.ProposalsLastSync()
+	return pv.PoliteiaDetails()
 }
 
-// ProposalsAll fetches the proposals data from local db.
+// ProposalsAll fetches the proposals data from the wallet's local db.
 // The argument searchPhrase and filterByVoteStatus are optional.
 func (c *Core) ProposalsAll(offset, rowsCount int, searchPhrase string, filterByVoteStatus ...int) ([]*pi.Proposal, int, error) {
-	if c.politeia == nil {
-		return nil, 0, fmt.Errorf("politeia not configured")
+	pv, err := c.politeiaVoter()
+	if err != nil {
+		return nil, 0, fmt.Errorf("politeia not configured: %w", err)
 	}
-	return c.politeia.ProposalsAll(offset, rowsCount, searchPhrase, filterByVoteStatus...)
+	return pv.ProposalsAll(offset, rowsCount, searchPhrase, filterByVoteStatus...)
 }
 
-// Proposal retrieves the proposal for the given token argument. If assetID is
-// a configured TicketBuyer and the proposal is currently voting, the
-// wallet voting details will be returned as part of the proposal details.
+// Proposal retrieves the proposal for the given token argument, including
+// wallet voting details if applicable.
 func (c *Core) Proposal(assetID uint32, token string) (*pi.Proposal, error) {
-	if c.politeia == nil {
-		return nil, fmt.Errorf("politeia not configured")
-	}
-	proposal, err := c.politeia.ProposalByToken(token)
+	pv, err := c.politeiaVoter(assetID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("politeia not configured: %w", err)
 	}
-
-	if proposal.VoteStatus != tv1.VoteStatusStarted { // not voting.
-		return proposal, nil
-	}
-
-	w, tb, err := c.stakingWallet(assetID)
-	if err != nil {
-		return proposal, nil // voting wallet not configured
-	}
-
-	w.mtx.RLock()
-	ss := *w.syncStatus
-	tip := ss.Blocks
-	w.mtx.RUnlock()
-
-	if tip > uint64(proposal.EndBlockHeight) { // Proposal voting already ended. Cannot vote.
-		return proposal, nil
-	}
-
-	// Return wallet voting info since this proposal is still voting.
-	proposal.VoteDetails, err = c.politeia.WalletProposalVoteDetails(tb, token)
-	if err != nil {
-		return nil, err
-	}
-
-	return proposal, nil
+	return pv.Proposal(token)
 }
 
-// ProposalsInProgress returns the mini proposals for the proposals that are currently in
-// progress, meaning their vote status is unauthorized, authorized or started.
-// This is used to display the in progress proposals on the Bison Wallet UI.
+// ProposalsInProgress returns the mini proposals for the proposals that are
+// currently in progress, meaning their vote status is unauthorized, authorized
+// or started. This is used to display the in progress proposals on the Bison
+// Wallet UI.
 func (c *Core) ProposalsInProgress() ([]*pi.MiniProposal, error) {
-	if c.politeia == nil {
+	pv, err := c.politeiaVoter()
+	if err != nil {
 		return nil, nil
 	}
-	return c.politeia.ProposalsInProgress()
+	return pv.ProposalsInProgress()
 }
 
 // CastVote casts votes for the provided eligible tickets using the provided
-// wallet and passphrase for signing.
-// The proposal identified by token must exist in the Politeia DB.
-// The wallet must be unlocked prior to calling c.politeia.CastVotes.
+// wallet and passphrase for signing. The wallet is unlocked before delegating
+// to the wallet's CastVote method.
 func (c *Core) CastVote(assetID uint32, pw []byte, token, bit string) error {
-	if c.politeia == nil {
-		return fmt.Errorf("politeia not configured")
-	}
-
-	if bit != pi.VoteBitYes && bit != pi.VoteBitNo {
-		return errors.New("invalid vote bit")
-	}
-
-	wallet, tb, err := c.stakingWallet(assetID)
+	pv, err := c.politeiaVoter(assetID)
 	if err != nil {
-		return err
+		return fmt.Errorf("politeia not configured: %w", err)
 	}
 
-	voteDetails, err := c.politeia.WalletProposalVoteDetails(tb, token)
+	wallet, _, err := c.stakingWallet(assetID)
 	if err != nil {
-		return err
-	}
-
-	if len(voteDetails.EligibleTickets) == 0 {
-		if len(voteDetails.Votes) > 0 {
-			return fmt.Errorf("all eligible tickets have already voted on proposal (%s)", token)
-		}
-		return fmt.Errorf("no eligible tickets found for voting wallet")
+		return fmt.Errorf("staking wallet error: %w", err)
 	}
 
 	crypter, err := c.encryptionKey(pw)
@@ -114,5 +71,5 @@ func (c *Core) CastVote(assetID uint32, pw []byte, token, bit string) error {
 		return err
 	}
 
-	return c.politeia.CastVotes(tb, voteDetails.EligibleTickets, bit, token)
+	return pv.CastVote(token, bit)
 }
