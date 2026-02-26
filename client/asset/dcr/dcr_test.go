@@ -4670,10 +4670,11 @@ func TestConfirmTransaction(t *testing.T) {
 		txRes:     txFn([]bool{true, false}),
 		txOutRes:  map[outPoint]*chainjson.GetTxOutResult{newOutPoint(&txHash, 0): makeGetTxOutRes(0, 5, nil)},
 	}, {
-		name:       "ok old tx should maybe be abandoned",
+		name:       "ok old tx abandoned and re-sent",
 		coinID:     coinID,
 		confirmTx:  confirmTx,
 		txRes:      txFn([]bool{false}),
+		txOutRes:   map[outPoint]*chainjson.GetTxOutResult{newOutPoint(&txHash, 0): makeGetTxOutRes(0, 5, nil)},
 		mempoolTxs: map[[32]byte]*mempoolTx{secretHash: {txHash: txHash, firstSeen: time.Now().Add(-maxMempoolAge - time.Second), txType: asset.CTRedeem}},
 	}, {
 		name:      "ok and spent",
@@ -4697,11 +4698,11 @@ func TestConfirmTransaction(t *testing.T) {
 		}(),
 		wantConfs: confTxFinality,
 	}, {
-		name:      "get transaction error",
+		name:      "get transaction error recovered via cfilter scan",
 		coinID:    coinID,
 		confirmTx: confirmTx,
 		txRes:     txFn([]bool{true, true}),
-		wantErr:   true,
+		wantConfs: 1,
 	}, {
 		name:      "decode coin error",
 		coinID:    nil,

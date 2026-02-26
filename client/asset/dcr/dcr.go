@@ -8025,14 +8025,21 @@ func (dcr *ExchangeWallet) ConfirmTransaction(coinID dex.Bytes, confirmTx *asset
 		return nil, fmt.Errorf("problem searching for %s transaction %s: %w", confirmTx.TxType(), txHash, err)
 	}
 	if err == nil {
+		abandoned := false
 		if have && mTx.txHash == *txHash {
 			if tx.Confirmations == 0 && time.Now().After(mTx.firstSeen.Add(maxMempoolAge)) {
 				// Transaction has been sitting in the mempool
-				// for a long time now.
-				//
-				// TODO: Consider abandoning.
+				// for a long time now. Abandon it so the wallet
+				// releases the inputs, then fall through to the
+				// re-send path below.
 				txAge := time.Since(mTx.firstSeen)
-				dcr.log.Warnf("%s transaction %v has been in the mempool for %v which is too long.", confirmTx.TxType(), txHash, txAge)
+				dcr.log.Warnf("Abandoning %s transaction %v that has been in the mempool for %v.",
+					confirmTx.TxType(), txHash, txAge)
+				if err := dcr.wallet.AbandonTransaction(dcr.ctx, txHash); err != nil {
+					dcr.log.Errorf("Failed to abandon %s transaction %v: %v", confirmTx.TxType(), txHash, err)
+				}
+				deleteMempoolTx = true
+				abandoned = true
 			}
 		} else {
 			if have {
@@ -8049,33 +8056,35 @@ func (dcr *ExchangeWallet) ConfirmTransaction(coinID dex.Bytes, confirmTx *asset
 			dcr.mempoolTxs[secretHash] = &mempoolTx{txHash: *txHash, firstSeen: time.Now(), txType: confirmTx.TxType()}
 			dcr.mempoolTxsMtx.Unlock()
 		}
-		if tx.Confirmations >= confTxFinality {
-			deleteMempoolTx = true
+		if !abandoned {
+			if tx.Confirmations >= confTxFinality {
+				deleteMempoolTx = true
+			}
+			return &asset.ConfirmTxStatus{
+				Confs:  uint64(tx.Confirmations),
+				Req:    confTxFinality,
+				CoinID: coinID,
+			}, nil
 		}
-		return &asset.ConfirmTxStatus{
-			Confs:  uint64(tx.Confirmations),
-			Req:    confTxFinality,
-			CoinID: coinID,
-		}, nil
 	}
 
-	// Transaction is missing from the point of view of our wallet!
-	// Unlikely, but possible it was spent by another transaction. Check if
-	// the contract is still an unspent output.
+	// Transaction was either not found by GetTransaction or was abandoned
+	// after being stale in the mempool. Check if the contract output has
+	// been spent by another transaction.
 
 	swapHash, vout, err := decodeCoinID(confirmTx.SpendsCoinID())
 	if err != nil {
 		return nil, err
 	}
 
-	_, _, spentStatus, err := dcr.lookupTxOutput(dcr.ctx, swapHash, vout)
-	if err != nil {
-		return nil, fmt.Errorf("error finding unspent contract: %w", err)
-	}
+	_, _, spentStatus, lookupErr := dcr.lookupTxOutput(dcr.ctx, swapHash, vout)
 
-	switch spentStatus {
-	case -1, 1:
-		// First find the block containing the output itself.
+	// Whether lookupTxOutput succeeded or not, use externalTxOutput to
+	// search for the contract output in blocks via cfilter scanning. This
+	// is necessary for SPV wallets where lookupTxOutput may fail for
+	// non-wallet transactions (counterparty's swap tx), and also handles
+	// the spentStatus -1 (unknown) case.
+	if lookupErr != nil || spentStatus != 0 {
 		scriptAddr, err := stdaddr.NewAddressScriptHashV0(confirmTx.Contract(), dcr.chainParams)
 		if err != nil {
 			return nil, fmt.Errorf("error encoding contract address: %w", err)
@@ -8084,71 +8093,81 @@ func (dcr *ExchangeWallet) ConfirmTransaction(coinID dex.Bytes, confirmTx *asset
 		outFound, block, err := dcr.externalTxOutput(dcr.ctx, newOutPoint(swapHash, vout),
 			pkScript, time.Now().Add(-60*24*time.Hour)) // search up to 60 days ago
 		if err != nil {
-			return nil, err // possibly the contract is still in mempool
+			if lookupErr != nil {
+				// Both lookupTxOutput and externalTxOutput failed.
+				// The spending tx is lost and the contract output is
+				// not findable. Report as lost so core can reset.
+				dcr.log.Warnf("Cannot find contract output %v:%d or %s tx %v. Reporting as lost.",
+					swapHash, vout, confirmTx.TxType(), txHash)
+				return nil, asset.ErrTxLost
+			}
+			// lookupTxOutput found something but externalTxOutput
+			// didn't. Contract may still be in mempool.
+			return nil, err
 		}
 		spent, err := dcr.isOutputSpent(dcr.ctx, outFound)
 		if err != nil {
 			return nil, fmt.Errorf("error checking if contract %v:%d is spent: %w", *swapHash, vout, err)
 		}
-		if !spent {
-			break
-		}
-		vin := -1
-		spendTx := outFound.spenderTx
-		for i := range spendTx.TxIn {
-			sigScript := spendTx.TxIn[i].SignatureScript
-			sigScriptLen := len(sigScript)
-			if sigScriptLen < dexdcr.SwapContractSize {
-				continue
+		if spent {
+			vin := -1
+			spendTx := outFound.spenderTx
+			for i := range spendTx.TxIn {
+				sigScript := spendTx.TxIn[i].SignatureScript
+				sigScriptLen := len(sigScript)
+				if sigScriptLen < dexdcr.SwapContractSize {
+					continue
+				}
+				// The spent contract is at the end of the signature
+				// script. Lop off the front half.
+				script := sigScript[sigScriptLen-dexdcr.SwapContractSize:]
+				_, _, _, sh, err := dexdcr.ExtractSwapDetails(script, dcr.chainParams)
+				if err != nil {
+					// This is not our script, but not necessarily
+					// a problem.
+					dcr.log.Tracef("Error encountered searching for the input that spends %v, "+
+						"extracting swap details from vin %d of %d. Probably not a problem: %v.",
+						spendTx.TxHash(), i, len(spendTx.TxIn), err)
+					continue
+				}
+				if bytes.Equal(sh[:], secretHash[:]) {
+					vin = i
+					break
+				}
 			}
-			// The spent contract is at the end of the signature
-			// script. Lop off the front half.
-			script := sigScript[sigScriptLen-dexdcr.SwapContractSize:]
-			_, _, _, sh, err := dexdcr.ExtractSwapDetails(script, dcr.chainParams)
-			if err != nil {
-				// This is not our script, but not necessarily
-				// a problem.
-				dcr.log.Tracef("Error encountered searching for the input that spends %v, "+
-					"extracting swap details from vin %d of %d. Probably not a problem: %v.",
-					spendTx.TxHash(), i, len(spendTx.TxIn), err)
-				continue
+			if vin >= 0 {
+				_, height, err := dcr.wallet.GetBestBlock(dcr.ctx)
+				if err != nil {
+					return nil, err
+				}
+				confs := uint64(height - block.height)
+				hash := spendTx.TxHash()
+				if confs < confTxFinality {
+					dcr.mempoolTxsMtx.Lock()
+					dcr.mempoolTxs[secretHash] = &mempoolTx{txHash: hash, firstSeen: time.Now(), txType: confirmTx.TxType()}
+					dcr.mempoolTxsMtx.Unlock()
+				}
+				return &asset.ConfirmTxStatus{
+					Confs:  confs,
+					Req:    confTxFinality,
+					CoinID: ToCoinID(&hash, uint32(vin)),
+				}, nil
 			}
-			if bytes.Equal(sh[:], secretHash[:]) {
-				vin = i
-				break
-			}
-		}
-		if vin >= 0 {
-			_, height, err := dcr.wallet.GetBestBlock(dcr.ctx)
-			if err != nil {
-				return nil, err
-			}
-			confs := uint64(height - block.height)
-			hash := spendTx.TxHash()
-			if confs < confTxFinality {
-				dcr.mempoolTxsMtx.Lock()
-				dcr.mempoolTxs[secretHash] = &mempoolTx{txHash: hash, firstSeen: time.Now(), txType: confirmTx.TxType()}
-				dcr.mempoolTxsMtx.Unlock()
-			}
+			dcr.log.Warnf("Contract coin %v spent by someone but not sure who.", confirmTx.SpendsCoinID())
+			// Incorrect, but we will be in a loop of erroring if we don't
+			// return something. We were unable to find the spender for some
+			// reason.
+
+			// May be still in the map if abandonTx failed.
+			deleteMempoolTx = true
+
 			return &asset.ConfirmTxStatus{
-				Confs:  confs,
+				Confs:  confTxFinality,
 				Req:    confTxFinality,
-				CoinID: ToCoinID(&hash, uint32(vin)),
+				CoinID: coinID,
 			}, nil
 		}
-		dcr.log.Warnf("Contract coin %v spent by someone but not sure who.", confirmTx.SpendsCoinID())
-		// Incorrect, but we will be in a loop of erroring if we don't
-		// return something. We were unable to find the spender for some
-		// reason.
-
-		// May be still in the map if abandonTx failed.
-		deleteMempoolTx = true
-
-		return &asset.ConfirmTxStatus{
-			Confs:  confTxFinality,
-			Req:    confTxFinality,
-			CoinID: coinID,
-		}, nil
+		// Contract output found but not spent. Fall through to re-send.
 	}
 
 	// The contract has not yet been redeemed or refunded, but it seems the
