@@ -10,8 +10,8 @@ export interface MarketOrderEstimate {
   worstRate: number // Worst (last) fill rate
   midGapRate: number // Mid-gap rate for comparison
   slippagePct: number // |avgRate - midGap| / midGap * 100
-  worstSlippagePct: number // |worstRate - midGap| / midGap * 100
   filled: boolean // Book can fully fill the order?
+  orderFillPct: number // % of the order that can be filled
   bookDepthPct: number // % of book side consumed (by base qty)
   levelsConsumed: number // Number of price levels consumed
   receivedEstimate: number // Estimated received amount (base atoms for buy, quote atoms for sell)
@@ -226,7 +226,11 @@ export default class OrderBook {
     const avgRate = weightedSum / baseQtySum
     const bookDepthPct = totalBookBaseQty > 0 ? (filledBaseQty / totalBookBaseQty) * 100 : 0
     const slippagePct = Math.abs(avgRate - midGapRate) / midGapRate * 100
-    const worstSlippagePct = Math.abs(worstRate - midGapRate) / midGapRate * 100
+    // For sell: qty is base atoms, filledBaseQty is base atoms matched.
+    // For buy: qty is quote atoms, use spent quote to calculate fill %.
+    const orderFillPct = sell
+      ? (filledBaseQty / qty) * 100
+      : ((qty - remainingQty) / qty) * 100
 
     // For buy, it's base atoms received; for sell, it's quote atoms received.
     const receivedEstimate = sell
@@ -238,8 +242,8 @@ export default class OrderBook {
       worstRate,
       midGapRate,
       slippagePct,
-      worstSlippagePct,
       filled,
+      orderFillPct,
       bookDepthPct,
       levelsConsumed,
       receivedEstimate

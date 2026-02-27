@@ -2182,7 +2182,7 @@ export default class MarketsPage extends BasePage {
     // Partial fill warning: order is larger than available book depth.
     if (!estimate.filled) {
       Doc.show(page.vPartialFillWarning)
-      page.vmBookDepthPct.textContent = percentFormatter.format(estimate.bookDepthPct)
+      page.vmBookDepthPct.textContent = percentFormatter.format(estimate.orderFillPct)
     } else {
       Doc.hide(page.vPartialFillWarning)
     }
