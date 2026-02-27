@@ -334,9 +334,9 @@ const (
 	idLimitOrderCapitalize        = "LIMIT_ORDER_CAPITALIZE"
 	idInsuffRedeemFundsErrMsg     = "INSUFFICIENT_REDEEM_FUNDS_ERR_MSG"
 	idInsuffRedeemFundsBundErrMsg = "INSUFFICIENT_REDEEM_FUNDS_BUNDLER_ERR_MSG"
-	idSlippageAckRequired        = "SLIPPAGE_ACK_REQUIRED"
-	idSlippageWarningMsg         = "SLIPPAGE_WARNING_MSG"
-	idHighSlippageWarningMsg     = "HIGH_SLIPPAGE_WARNING_MSG"
+	idSlippageAckRequired         = "SLIPPAGE_ACK_REQUIRED"
+	idSlippageWarningMsg          = "SLIPPAGE_WARNING_MSG"
+	idHighSlippageWarningMsg      = "HIGH_SLIPPAGE_WARNING_MSG"
 	idVoteCastMsg                 = "VOTE_CAST_MESSAGE"
 	idVersionTxt                  = "VERSION"
 )
@@ -672,9 +672,9 @@ var enUS = map[string]*intl.Translation{
 	idLimitOrderCapitalize:        {T: "Limit"},
 	idInsuffRedeemFundsErrMsg:     {T: "Insufficient gas for redemption. Configure an ERC-4337 bundler to do a gasless redemption."},
 	idInsuffRedeemFundsBundErrMsg: {T: "Redemption lot size is too small to cover the gas fees in a gasless redemption."},
-	idSlippageAckRequired:        {T: "Please acknowledge the high slippage warning before submitting."},
-	idSlippageWarningMsg:         {T: "This order has significant price impact. The estimated fill rate is {{ slippagePct }}% away from the mid-market rate."},
-	idHighSlippageWarningMsg:     {T: "This order has very high price impact ({{ slippagePct }}% slippage). You may receive significantly less than expected."},
+	idSlippageAckRequired:         {T: "Please acknowledge the high slippage warning before submitting."},
+	idSlippageWarningMsg:          {T: "This order has significant price impact. The estimated fill rate is {{ slippagePct }}% away from the mid-market rate."},
+	idHighSlippageWarningMsg:      {T: "This order has very high price impact ({{ slippagePct }}% slippage). You may receive significantly less than expected."},
 	idVoteCastMsg:                 {T: "Your vote has been cast"},
 	idVersionTxt:                  {T: "Version"},
 }
