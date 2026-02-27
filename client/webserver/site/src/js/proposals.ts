@@ -21,6 +21,7 @@ export default class ProposalsPage extends BasePage {
     Doc.applySelector(page.forms, '.form-closer').forEach(el => {
       Doc.bind(el, 'click', () => { this.closePopups() })
     })
+    Doc.bind(page.goBackToWallets, 'click', () => app().loadPage('wallets'))
     Doc.bind(page.filterIcon, 'click', () => {
       const activeStatus = page.filterForm.dataset.activestatus || 'all'
       Doc.applySelector(page.filterForm, '.voteStatus').forEach(el => {
@@ -45,7 +46,7 @@ export default class ProposalsPage extends BasePage {
     })
     Doc.applySelector(page.filterForm, '.voteStatus').forEach(el => {
       Doc.bind(el, 'click', () => {
-        Doc.applySelector(page.filterForm, '.voteStatus').forEach(el => { el.classList.remove('active-opt') })
+        Doc.applySelector(page.filterForm, '.voteStatus').forEach(btn => { btn.classList.remove('active-opt') })
         el.classList.add('active-opt')
         this.refreshWithFilter()
       })
@@ -60,7 +61,6 @@ export default class ProposalsPage extends BasePage {
     })
   }
 
-  /* showForm shows a modal form with a little animation. */
   async showForm (form: HTMLElement) {
     const page = this.page
     this.currentForm = form
