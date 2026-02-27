@@ -89,3 +89,51 @@ SHA-256 for atomic swap secrets. The `sha256` precompile costs roughly
 double what `keccak256` does (60 base + 12/word vs 30 + 6/word), but
 this is negligible relative to the storage operations in each
 transaction.
+
+## No receive() Function — EntryPoint Gas Refunds Are Lost
+
+The contract has no `receive()` or `fallback()` function. After
+executing a user operation, the EntryPoint refunds unused gas back to
+the sender (this contract) via a low-level call. Without `receive()`,
+those refunds silently fail — the EntryPoint handles the failure
+gracefully, but the unused gas ETH stays in the EntryPoint permanently.
+The contract overpays for every AA redemption by the difference between
+estimated and actual gas.
+
+## pendingValidation Leak on Post-Loop Validation Failure
+
+`validateUserOp` sets `pendingValidation[key] = true` inside the
+redemption loop, before the post-loop checks (missingAccountFunds vs
+total, callGasLimit minimum, ECDSA signature). If any post-loop check
+returns `SIG_VALIDATION_FAILED`, the EntryPoint does not call
+`redeemAA`, so `pendingValidation` flags are never cleared. Those swaps
+are permanently locked out of the AA redemption path (regular `redeem`
+still works).
+
+This is a griefing vector: an attacker who observes a pending user
+operation in the mempool can extract the secret and swap details, then
+submit a modified version with a valid secret but an invalid signature.
+The validation loop passes (setting `pendingValidation`), the signature
+check fails, and the swap is now blocked from AA redemption. The
+attacker gains nothing financially, but the participant is forced to
+fall back to the regular `redeem` path.
+
+## isRedeemable Does Not Check block.number
+
+`isRedeemable` checks `blockNum != 0` but not `blockNum < block.number`.
+A swap initiated in the current block returns `true` from `isRedeemable`
+but would fail the `blockNum < block.number` require in `redeem`. This
+is a view function so there is no on-chain impact, but off-chain code
+relying on it to gate redemption attempts could be misled into
+submitting transactions that revert.
+
+## Test Swap Bundler Check Depends on 1 ETH Exceeding Gas Prefund
+
+The bundler compatibility check in `testBundlerCompatibility` submits a
+user operation that redeems the permanent test swap (value: 1 ether).
+During `validateUserOp`, the contract checks
+`missingAccountFunds > total` and returns `SIG_VALIDATION_FAILED` if
+the gas prefund exceeds the total redemption value. The check passes
+because 1 ETH exceeds any reasonable gas prefund. If gas costs ever
+approach 1 ETH, the compatibility check would start failing even though
+real trades with higher lot sizes would succeed.

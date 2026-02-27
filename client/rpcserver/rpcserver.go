@@ -45,7 +45,7 @@ const (
 	// is allowed to stay open without authenticating before it is closed.
 	rpcTimeoutSeconds = 10
 
-	// rpcDevWriteTimeoutSeconds is the write timeout used when --dev is
+	// rpcDevWriteTimeoutSeconds is the write timeout used when --rpcdev is
 	// enabled, accommodating long-running operations like contract
 	// deployment and gas testing (which may test multiple assets
 	// sequentially).

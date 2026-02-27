@@ -52,7 +52,6 @@ type bundlerImpl uint8
 
 const (
 	rundler bundlerImpl = iota
-	skandha
 	pimlico
 )
 
@@ -215,17 +214,12 @@ func (b *rpcBundler) implementation(ctx context.Context) (bundlerImpl, error) {
 		return rundler, nil
 	}
 
-	_, _, err = b.skandhaGetGasPrice(ctx)
-	if err == nil {
-		return skandha, nil
-	}
-
 	_, _, err = b.pimlicoGetGasPrice(ctx)
 	if err == nil {
 		return pimlico, nil
 	}
 
-	return 0, fmt.Errorf("unknown bundler implementation. Supported implementations: rundler, skandha, pimlico")
+	return 0, fmt.Errorf("unknown bundler implementation. Supported implementations: rundler, pimlico")
 }
 
 // userOp represents a v0.7 ERC-4337 user operation in the unpacked RPC format.
@@ -455,19 +449,6 @@ func (b *rpcBundler) rundlerGetGasPrice(ctx context.Context) (string, string, er
 	return maxFeePerGas, res, nil
 }
 
-// skandhaGetGasPrice retrieves gas prices for the Skandha implementation.
-func (b *rpcBundler) skandhaGetGasPrice(ctx context.Context) (maxFeePerGas, maxPriorityFeePerGas string, err error) {
-	res := struct {
-		MaxFeePerGas         string `json:"maxFeePerGas"`
-		MaxPriorityFeePerGas string `json:"maxPriorityFeePerGas"`
-	}{}
-	err = b.rpcClient.CallContext(ctx, &res, "skandha_getGasPrice")
-	if err != nil {
-		return "", "", err
-	}
-	return res.MaxFeePerGas, res.MaxPriorityFeePerGas, nil
-}
-
 // pimlicoGetGasPrice retrieves gas prices for the Pimlico implementation.
 func (b *rpcBundler) pimlicoGetGasPrice(ctx context.Context) (maxFeePerGas, maxPriorityFeePerGas string, err error) {
 	var res struct {
@@ -490,8 +471,6 @@ func (b *rpcBundler) getGasPrice(ctx context.Context) (maxFeePerGas, maxPriority
 	switch b.bundlerImplementation {
 	case rundler:
 		return b.rundlerGetGasPrice(ctx)
-	case skandha:
-		return b.skandhaGetGasPrice(ctx)
 	case pimlico:
 		return b.pimlicoGetGasPrice(ctx)
 	}
