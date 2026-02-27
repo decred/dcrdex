@@ -409,19 +409,23 @@ export async function botConfigStateFromSavedConfig (
     quoteBridgeFeesAndLimits
   )
 
+  const autoRebalance = savedBotConfig.autoRebalance
+    ? {
+        ...savedBotConfig.autoRebalance,
+        minBaseTransfer: Math.max(savedBotConfig.autoRebalance.minBaseTransfer, baseMinWithdraw),
+        minQuoteTransfer: Math.max(savedBotConfig.autoRebalance.minQuoteTransfer, quoteMinWithdraw)
+      }
+    : savedBotConfig.cexName
+      ? { minBaseTransfer: baseMinWithdraw, minQuoteTransfer: quoteMinWithdraw, internalOnly: true }
+      : undefined
+
   const config: BotConfig = {
     ...savedBotConfig,
     cexBaseID,
     cexQuoteID,
     baseBridgeName,
     quoteBridgeName,
-    autoRebalance: savedBotConfig.autoRebalance
-      ? {
-          ...savedBotConfig.autoRebalance,
-          minBaseTransfer: Math.max(savedBotConfig.autoRebalance.minBaseTransfer, baseMinWithdraw),
-          minQuoteTransfer: Math.max(savedBotConfig.autoRebalance.minQuoteTransfer, quoteMinWithdraw)
-        }
-      : undefined
+    autoRebalance
   }
 
   let intermediateAsset: number | null = null
