@@ -3,6 +3,15 @@
   width: 100%;
 }
 
+.proposal {
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.proposal:hover {
+  background-color: var(--tertiary-bg);
+}
+
 .page-link {
   min-width: 20px;
   height: 20px;
@@ -35,6 +44,82 @@
   color: #fff;
   cursor: default;
   pointer-events: none;
+}
+
+.filter-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: radial-gradient(
+      120% 120% at 10% 10%,
+      var(--body-bg),
+      var(--body-bg),
+    ),
+    #0b1220;
+  border: 1px solid var(--border-color);
+  cursor: pointer;
+  color: var(--text-color);
+  flex-shrink: 0;
+}
+
+.filter-btn:hover {
+  color: var(--btn-feature-hover-bg);
+}
+
+.filter-form {
+  max-width: 500px;
+
+  & > .filter-list-wrap {
+    padding: 16px 10px;
+  }
+}
+
+.filter-list-wrap {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 16px 10px;
+  margin-left: 1rem;
+  margin-right: 1rem;
+}
+
+.filter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  max-height: 50vh;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.filter-pill {
+  width: 100%;
+  padding: 12px 20px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-color);
+  font-size: 15px;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+
+  &:hover {
+    background-color: var(--tertiary-bg);
+  }
+
+  &.active-opt {
+    background-color: var(--btn-go-bg);
+    border-color: var(--btn-go-bg);
+    color: #fff;
+  }
 }
 
 .search-bar {

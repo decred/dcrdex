@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	pi "decred.org/dcrdex/dex/politeia"
 	dcrwalletjson "decred.org/dcrwallet/v5/rpc/jsonrpc/types"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/decred/dcrd/chaincfg/chainhash"
@@ -41,6 +42,7 @@ const (
 	WalletTraitDynamicSwapper                            // The wallet has dynamic fees.
 	WalletTraitContractDeployer                          // The wallet can deploy contracts.
 	WalletTraitContractGasTester                         // The wallet can test contract gas usage.
+	WalletTraitPoliteiaVoter                             // The wallet can vote on Politeia proposals.
 )
 
 // IsRescanner tests if the WalletTrait has the WalletTraitRescanner bit set.
@@ -162,6 +164,12 @@ func (wt WalletTrait) IsContractGasTester() bool {
 	return wt&WalletTraitContractGasTester != 0
 }
 
+// IsPoliteiaVoter tests if the WalletTrait has the WalletTraitPoliteiaVoter
+// bit set, which indicates the wallet implements the PoliteiaVoter interface.
+func (wt WalletTrait) IsPoliteiaVoter() bool {
+	return wt&WalletTraitPoliteiaVoter != 0
+}
+
 // DetermineWalletTraits returns the WalletTrait bitset for the provided Wallet.
 func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	if _, is := w.(Rescanner); is {
@@ -220,6 +228,9 @@ func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	}
 	if _, is := w.(ContractGasTester); is {
 		t |= WalletTraitContractGasTester
+	}
+	if _, is := w.(PoliteiaVoter); is {
+		t |= WalletTraitPoliteiaVoter
 	}
 	return t
 }
@@ -1466,6 +1477,33 @@ type TicketBuyer interface {
 	// CommittedTickets takes a list of tickets and returns a filtered list of
 	// tickets that are controlled by this wallet.
 	CommittedTickets(tickets []*chainhash.Hash) ([]*chainhash.Hash, []stdaddr.Address, error)
+}
+
+// PoliteiaVoter is a wallet that can sync Decred governance proposals from
+// Politeia and cast votes.
+//
+// NOTE: This interface references types from dex/politeia, which couples this
+// generic package to DCR-specific types. This is consistent with the existing
+// TicketBuyer interface that references dcrd and dcrwallet types. If more
+// assets need governance interfaces in the future, consider abstracting the
+// proposal types.
+type PoliteiaVoter interface {
+	// PoliteiaDetails returns the Politeia URL, whether a sync is in progress,
+	// and the unix timestamp of the last completed sync.
+	PoliteiaDetails() (url string, syncing bool, lastSync int64)
+	// ProposalsAll fetches proposals from the local DB with optional filtering.
+	ProposalsAll(offset, rowsCount int, searchPhrase string, filterByVoteStatus ...int) ([]*pi.Proposal, int, error)
+	// Proposal retrieves a single proposal by token, populating vote details
+	// if the proposal is currently voting and the wallet has eligible tickets.
+	Proposal(token string) (*pi.Proposal, error)
+	// ProposalsInProgress returns mini proposals for proposals currently in
+	// progress (unauthorized, authorized, or started).
+	ProposalsInProgress() ([]*pi.MiniProposal, error)
+	// CastVote casts votes on the proposal identified by token using the
+	// provided vote bit. The wallet must already be unlocked.
+	CastVote(token, bit string) error
+	// PoliteiaEnabled returns whether Politeia sync is currently enabled.
+	PoliteiaEnabled() bool
 }
 
 // TransactionType is the type of transaction made by a wallet.
