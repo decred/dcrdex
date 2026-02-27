@@ -116,8 +116,8 @@ Remove-Item $tmpDir -Recurse -Force
 
 $msg = "Installation complete.  
 Open a new command prompt to apply environment variables and run 
-pkg\build-windows.cmd or
-pkg\pkg-windows.cmd
+windows\build-windows.cmd or
+windows\pkg-windows.cmd
 "
 
 Write-Host $msg -BackgroundColor Green -ForegroundColor Black

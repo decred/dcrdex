@@ -181,7 +181,6 @@ require (
 	github.com/ltcsuite/ltcd/ltcutil/psbt v1.1.1-0.20240131072528-64dfa402637a // indirect
 	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/olekukonko/tablewriter v0.0.5 // indirect
-	github.com/progrium/darwinkit v0.5.0
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/shirou/gopsutil v3.21.4-0.20210419000835-c7a38de76ee5+incompatible // indirect
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e // indirect

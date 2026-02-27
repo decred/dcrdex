@@ -15,7 +15,7 @@ sudo apt-get install libgtk-3-dev libwebkit2gtk-4.1-dev build-essential
 ### Run build
 
 ```bash
-./pkg/pkg-debian.sh
+./linux/pkg-debian.sh
 ```
 
 The deb archive will be located in **./build**.
@@ -39,14 +39,40 @@ sudo ufw disable # if ufw is installed on the host, this is neccessary for lxd t
 ### Running the build
 
  1. Build the Debian package
- 2. `./pkg/pkg-snap.sh`
+ 2. `./linux/pkg-snap.sh`
 
 ### Publishing the snap
 
-The snap can be uploaded to the Snap Store using `./pkg/publish-snap.sh`.  This requires [Snapcraft developer account credentials](https://snapcraft.io/docs/releasing-your-app).  After this is completed, the package can be installed on any system running `snap` by running `snap install bisonw`.  The app will be available on the [Snap Store](https://snapcraft.io/store/bisonw).
+The snap can be uploaded to the Snap Store using `./linux/publish-snap.sh`.  This requires [Snapcraft developer account credentials](https://snapcraft.io/docs/releasing-your-app).  After this is completed, the package can be installed on any system running `snap` by running `snap install bisonw`.  The app will be available on the [Snap Store](https://snapcraft.io/store/bisonw).
 
 ## macOS (darwin)
 
-Build with `./pkg/pkg-darwin.sh` for `amd64` MacOS machines. If running on an `arm64` machine, you'll need to build with `TARGETS=darwin/arm64 ./pkg/pkg-darwin.sh` instead. The `.dmg` click installer can be located in **./pkg/installers** after a successful build.
+macOS builds use Electron.
 
-Due to a problem with darwinkit, the maximum golang version that can be used to build the darwin application is 1.24.8.
+### Dev/test build
+
+```bash
+./electron/prepare.sh
+cd electron
+npm run make
+```
+
+The `.dmg` will be in `electron/out/make/`.
+
+### Release build
+
+Release builds require Apple code signing and notarization credentials. Set the following environment variables before building:
+
+```bash
+export APPLE_ID="your-apple-id@example.com"
+export APPLE_PASSWORD="app-specific-password"
+export APPLE_TEAM_ID="your-team-id"
+```
+
+Then run the packaging script:
+
+```bash
+./electron/pkg.sh
+```
+
+The signed `.dmg` installers will be in `installers/`.

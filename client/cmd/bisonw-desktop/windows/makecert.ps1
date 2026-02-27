@@ -2,7 +2,7 @@
 # and installer, suitable for testing.
 
 # If the default PowerShell Execution Policy is set to Restricted, run this using:
-# powershell -ExecutionPolicy Bypass -File pkg\makecert.ps1
+# powershell -ExecutionPolicy Bypass -File windows\makecert.ps1
 
 # Set variables
 $certSubject = "CN=DCRDEXCodeSigningCertificate"
