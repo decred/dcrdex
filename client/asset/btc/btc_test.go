@@ -170,6 +170,7 @@ type testData struct {
 	ownedAddresses    map[string]bool
 	ownsAddress       bool
 	locked            bool
+	noPeers           bool
 }
 
 func newTestData() *testData {
@@ -666,7 +667,7 @@ func tNewWallet(segwit bool, walletType string) (*intermediaryWallet, *testData,
 			spvw := &spvWallet{
 				chainParams: &chaincfg.MainNetParams,
 				cfg:         &WalletConfig{},
-				wallet:      &tBtcWallet{data},
+				wallet:      &tBtcWallet{testData: data},
 				cl:          neutrinoClient,
 				tipChan:     make(chan *BlockVector, 1),
 				acctNum:     0,

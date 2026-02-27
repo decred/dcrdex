@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,6 +38,9 @@ import (
 
 type tBtcWallet struct {
 	*testData
+	walletSyncHeight atomic.Pointer[int32] // override SyncedTo height when non-nil
+	rescanCalled     atomic.Bool
+	rescanErr        error
 }
 
 func (c *tBtcWallet) ListSinceBlock(start, end, syncHeight int32) ([]btcjson.ListTransactionsResult, error) {
@@ -293,6 +297,24 @@ func (c *tBtcWallet) WalletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDetail
 }
 
 func (c *tBtcWallet) SyncedTo() waddrmgr.BlockStamp {
+	if hp := c.walletSyncHeight.Load(); hp != nil {
+		h := *hp
+		// Return a stamp at the overridden height. Find the block at that
+		// height if it exists, otherwise use a zero hash/timestamp.
+		c.blockchainMtx.RLock()
+		defer c.blockchainMtx.RUnlock()
+		for height, hash := range c.mainchain {
+			if int32(height) == h {
+				blk := c.verboseBlocks[*hash]
+				return waddrmgr.BlockStamp{
+					Height:    h,
+					Hash:      *hash,
+					Timestamp: blk.msgBlock.Header.Timestamp,
+				}
+			}
+		}
+		return waddrmgr.BlockStamp{Height: h}
+	}
 	bestHash, bestHeight := c.bestBlock() // NOTE: in reality this may be lower than the chain service's best block
 	blk := c.getBlock(*bestHash)
 	return waddrmgr.BlockStamp{
@@ -323,10 +345,13 @@ func (c *tBtcWallet) BlockNotifications(ctx context.Context) <-chan *BlockNotifi
 
 func (c *tBtcWallet) ForceRescan() {}
 
-func (c *tBtcWallet) RescanAsync() error { return nil }
+func (c *tBtcWallet) RescanAsync() error {
+	c.rescanCalled.Store(true)
+	return c.rescanErr
+}
 
 func (c *tBtcWallet) Birthday() time.Time {
-	return time.Time{}
+	return c.birthdayTime
 }
 
 func (c *tBtcWallet) Reconfigure(*asset.WalletConfig, string) (bool, error) {
@@ -383,6 +408,9 @@ func (c *tNeutrinoClient) BestBlock() (*headerfs.BlockStamp, error) {
 func (c *tNeutrinoClient) Peers() []SPVPeer {
 	c.blockchainMtx.RLock()
 	defer c.blockchainMtx.RUnlock()
+	if c.noPeers {
+		return nil
+	}
 	peer := &neutrino.ServerPeer{Peer: &peer.Peer{}}
 	if c.getBlockchainInfo != nil {
 		peer.UpdateLastBlockHeight(int32(c.getBlockchainInfo.Headers))
@@ -913,4 +941,211 @@ func TestGetBlockHeader(t *testing.T) {
 		t.Fatalf("confirmations not zero for lower mainchain tip height, got: %d", hdr.Confirmations)
 	}
 	node.mainchain = prevMainchain // clean up
+}
+
+func TestCheckRescanStall(t *testing.T) {
+	data := newTestData()
+	btcWallet := &tBtcWallet{testData: data}
+	neutrinoClient := &tNeutrinoClient{data}
+	spvw := &spvWallet{
+		chainParams: &chaincfg.MainNetParams,
+		cfg:         &WalletConfig{},
+		wallet:      btcWallet,
+		cl:          neutrinoClient,
+		tipChan:     make(chan *BlockVector, 1),
+		log:         dex.StdOutLogger("T", dex.LevelTrace),
+	}
+
+	// Build a chain of 20 blocks. Both chain service and wallet see the
+	// same chain by default (bestBlock returns the highest mainchain entry).
+	const tipHeight = 20
+	for i := int64(0); i <= tipHeight; i++ {
+		data.addRawTx(i, dummyTx())
+	}
+	// Need getBlockchainInfo for Peers() to work.
+	data.blockchainMtx.Lock()
+	data.getBlockchainInfo = &GetBlockchainInfoResult{
+		Headers: tipHeight,
+		Blocks:  tipHeight,
+	}
+	data.blockchainMtx.Unlock()
+
+	// Helper to set the wallet's SyncedTo override.
+	setWalletHeight := func(h int32) {
+		btcWallet.walletSyncHeight.Store(&h)
+	}
+	clearWalletHeight := func() {
+		btcWallet.walletSyncHeight.Store(nil)
+	}
+
+	// --- No stall when divergence < threshold ---
+	setWalletHeight(tipHeight - stallThreshold + 1) // divergence = stallThreshold-1
+	if spvw.checkRescanStall() {
+		t.Fatal("should not detect stall when divergence < threshold")
+	}
+
+	// --- No stall when wallet height is 0 (rescan in progress) ---
+	setWalletHeight(0)
+	if spvw.checkRescanStall() {
+		t.Fatal("should not detect stall when wallet height is 0")
+	}
+
+	// --- No stall before wallet birthday ---
+	// Set birthday to a time in the future relative to chain tip timestamp.
+	data.birthdayTime = time.Now().Add(time.Hour)
+	setWalletHeight(5)
+	if spvw.checkRescanStall() {
+		t.Fatal("should not detect stall before wallet birthday")
+	}
+	data.birthdayTime = time.Time{} // reset
+
+	// --- No stall with 0 peers ---
+	setWalletHeight(5) // divergence = 15, well above threshold
+	data.noPeers = true
+	if spvw.checkRescanStall() {
+		t.Fatal("should not detect stall with 0 peers")
+	}
+	data.noPeers = false
+
+	// --- No stall when wallet is making progress ---
+	setWalletHeight(5)
+	spvw.lastWalletHeight.Store(4) // previous was 4, now 5 => progressing
+	if spvw.checkRescanStall() {
+		t.Fatal("should not detect stall when wallet is making progress")
+	}
+	if spvw.stallDetectedAt.Load() != 0 {
+		t.Fatal("stall timer should be cleared when wallet is progressing")
+	}
+
+	// --- Stall detected but not confirmed until stallConfirmationTime ---
+	// Reset state.
+	spvw.lastWalletHeight.Store(0)
+	spvw.stallDetectedAt.Store(0)
+	setWalletHeight(5) // divergence = 15
+
+	// First call: should notice the divergence and record timestamp.
+	if spvw.checkRescanStall() {
+		t.Fatal("should not trigger rescan on first detection")
+	}
+	firstSeen := spvw.stallDetectedAt.Load()
+	if firstSeen == 0 {
+		t.Fatal("stallDetectedAt should be set after first detection")
+	}
+
+	// Second call shortly after: should not trigger yet.
+	if spvw.checkRescanStall() {
+		t.Fatal("should not trigger rescan before confirmation time elapses")
+	}
+	if btcWallet.rescanCalled.Load() {
+		t.Fatal("RescanAsync should not have been called yet")
+	}
+
+	// --- Stall confirmed after stallConfirmationTime → RescanAsync called ---
+	// Simulate the confirmation time having elapsed by backdating firstSeen.
+	spvw.stallDetectedAt.Store(time.Now().Add(-stallConfirmationTime - time.Second).Unix())
+	btcWallet.rescanCalled.Store(false)
+
+	if !spvw.checkRescanStall() {
+		t.Fatal("should trigger rescan after confirmation time")
+	}
+	if !btcWallet.rescanCalled.Load() {
+		t.Fatal("RescanAsync should have been called")
+	}
+	// State should be reset after triggering rescan.
+	if spvw.stallDetectedAt.Load() != 0 {
+		t.Fatal("stallDetectedAt should be reset after rescan")
+	}
+	if spvw.lastWalletHeight.Load() != 0 {
+		t.Fatal("lastWalletHeight should be reset after rescan")
+	}
+
+	// --- lastWalletHeight reset when divergence drops below threshold ---
+	// Simulate: wallet was stalled at height 5, then catches up to tip.
+	// lastWalletHeight should be cleared so that a future stall is not
+	// confused by the old value.
+	spvw.lastWalletHeight.Store(5)
+	spvw.stallDetectedAt.Store(time.Now().Unix())
+	clearWalletHeight() // wallet == chain tip, divergence = 0
+	if spvw.checkRescanStall() {
+		t.Fatal("should not detect stall when wallet caught up")
+	}
+	if spvw.lastWalletHeight.Load() != 0 {
+		t.Fatal("lastWalletHeight should be reset when divergence drops below threshold")
+	}
+	if spvw.stallDetectedAt.Load() != 0 {
+		t.Fatal("stallDetectedAt should be reset when divergence drops below threshold")
+	}
+
+	// --- Cooldown prevents rapid re-triggering ---
+	// Set up a confirmed stall, but with a recent lastRescanAt.
+	spvw.lastWalletHeight.Store(0)
+	spvw.stallDetectedAt.Store(0)
+	spvw.lastRescanAt.Store(time.Now().Unix()) // just rescanned
+	setWalletHeight(5)                         // divergence = 15
+
+	// First call records the stall.
+	if spvw.checkRescanStall() {
+		t.Fatal("should not trigger during first detection even with cooldown")
+	}
+	// Backdate stallDetectedAt to exceed confirmation time.
+	spvw.stallDetectedAt.Store(time.Now().Add(-stallConfirmationTime - time.Second).Unix())
+	btcWallet.rescanCalled.Store(false)
+
+	if spvw.checkRescanStall() {
+		t.Fatal("should not trigger rescan during cooldown period")
+	}
+	if btcWallet.rescanCalled.Load() {
+		t.Fatal("RescanAsync should not have been called during cooldown")
+	}
+
+	// Backdate lastRescanAt to exceed cooldown.
+	spvw.lastRescanAt.Store(time.Now().Add(-stallRescanCooldown - time.Second).Unix())
+	// Re-backdate stallDetectedAt since the previous call didn't reset it.
+	spvw.stallDetectedAt.Store(time.Now().Add(-stallConfirmationTime - time.Second).Unix())
+
+	if !spvw.checkRescanStall() {
+		t.Fatal("should trigger rescan after cooldown expires")
+	}
+	if !btcWallet.rescanCalled.Load() {
+		t.Fatal("RescanAsync should have been called after cooldown")
+	}
+
+	// --- RescanAsync error: still returns true and resets state ---
+	spvw.lastWalletHeight.Store(0)
+	spvw.stallDetectedAt.Store(0)
+	spvw.lastRescanAt.Store(0)
+	setWalletHeight(5)
+	btcWallet.rescanCalled.Store(false)
+	btcWallet.rescanErr = fmt.Errorf("test rescan error")
+
+	// First call records the stall.
+	spvw.checkRescanStall()
+	// Backdate to exceed confirmation time.
+	spvw.stallDetectedAt.Store(time.Now().Add(-stallConfirmationTime - time.Second).Unix())
+
+	if !spvw.checkRescanStall() {
+		t.Fatal("should trigger rescan even when RescanAsync returns error")
+	}
+	if !btcWallet.rescanCalled.Load() {
+		t.Fatal("RescanAsync should have been called")
+	}
+	if spvw.stallDetectedAt.Load() != 0 {
+		t.Fatal("stallDetectedAt should be reset even on RescanAsync error")
+	}
+	if spvw.lastWalletHeight.Load() != 0 {
+		t.Fatal("lastWalletHeight should be reset even on RescanAsync error")
+	}
+	if spvw.lastRescanAt.Load() == 0 {
+		t.Fatal("lastRescanAt should be set even on RescanAsync error")
+	}
+	btcWallet.rescanErr = nil // reset
+
+	// --- No stall when wallet and chain are in sync ---
+	clearWalletHeight()
+	spvw.stallDetectedAt.Store(0)
+	spvw.lastWalletHeight.Store(0)
+	spvw.lastRescanAt.Store(0)
+	if spvw.checkRescanStall() {
+		t.Fatal("should not detect stall when wallet is synced")
+	}
 }
