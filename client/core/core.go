@@ -41,7 +41,6 @@ import (
 	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
-	pi "decred.org/dcrdex/dex/politeia"
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
 	serverdex "decred.org/dcrdex/server/dex"
@@ -1544,10 +1543,6 @@ type Core struct {
 	meshMtx sync.RWMutex
 	mesh    *mesh.Mesh
 	meshCM  *dex.ConnectionMaster
-
-	politeia        *pi.Politeia
-	politeiaURL     string
-	politeiaSyncing atomic.Bool
 }
 
 // New is the constructor for a new Core.
@@ -1720,16 +1715,6 @@ func (c *Core) Run(ctx context.Context) {
 	}
 	close(c.ready)
 
-	// TODO: Allow configuration for testnet
-	c.politeiaURL = pi.PoliteiaMainnetHost
-	c.politeia, err = pi.New(ctx, c.politeiaURL, filepath.Join(filepath.Dir(c.cfg.DBPath), "politeia"), c.log.SubLogger("Politeia"))
-	if err != nil {
-		c.log.Errorf("failed to set up politeia: %v", err)
-	}
-	if c.politeia != nil {
-		defer c.politeia.Close()
-	}
-
 	// The DB starts first and stops last.
 	ctxDB, stopDB := context.WithCancel(context.Background())
 	var dbWG sync.WaitGroup
@@ -1802,37 +1787,6 @@ fetchers:
 			}
 		}
 	}()
-
-	// Start a goroutine to keep proposals synced.
-	if c.politeia != nil {
-		c.wg.Add(1)
-		go func() {
-			defer c.wg.Done()
-
-			// Initiate first sync.
-			c.politeiaSyncing.Store(true)
-			err := c.politeia.ProposalsSync()
-			if err != nil {
-				c.log.Errorf("politeia.ProposalsSync failed: %v", err)
-			}
-			c.politeiaSyncing.Store(false)
-
-			tick := time.NewTicker(time.Minute * 20)
-			defer tick.Stop()
-			for {
-				select {
-				case <-tick.C:
-					c.politeiaSyncing.Store(true)
-					if err := c.politeia.ProposalsSync(); err != nil {
-						c.log.Errorf("politeia.ProposalsSync failed: %v", err)
-					}
-					c.politeiaSyncing.Store(false)
-				case <-ctx.Done():
-					return
-				}
-			}
-		}()
-	}
 
 	c.wg.Wait() // block here until all goroutines except DB complete
 
@@ -11559,6 +11513,27 @@ func (c *Core) stakingWallet(assetID uint32) (*xcWallet, asset.TicketBuyer, erro
 		return nil, nil, fmt.Errorf("%s wallet is not a TicketBuyer", unbip(assetID))
 	}
 	return wallet, ticketBuyer, nil
+}
+
+// politeiaVoter returns the PoliteiaVoter interface for the given asset ID.
+// Defaults to DCR (asset ID 42) if no asset ID is provided.
+func (c *Core) politeiaVoter(assetID ...uint32) (asset.PoliteiaVoter, error) {
+	id := uint32(42) // DCR BipID
+	if len(assetID) > 0 {
+		id = assetID[0]
+	}
+	wallet, exists := c.wallet(id)
+	if !exists {
+		return nil, fmt.Errorf("no wallet for %s", unbip(id))
+	}
+	if !wallet.traits.IsPoliteiaVoter() {
+		return nil, fmt.Errorf("%s wallet is not a PoliteiaVoter", unbip(id))
+	}
+	pv, ok := wallet.Wallet.(asset.PoliteiaVoter)
+	if !ok {
+		return nil, fmt.Errorf("%s wallet is not a PoliteiaVoter", unbip(id))
+	}
+	return pv, nil
 }
 
 // StakeStatus returns current staking statuses such as currently owned

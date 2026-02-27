@@ -38,6 +38,7 @@ type walletConfig struct {
 	ActivelyUsed     bool    `ini:"special_activelyUsed"` //injected by core
 	ApiFeeFallback   bool    `ini:"apifeefallback"`
 	GapLimit         uint32  `ini:"gaplimit"`
+	PoliteiaEnabled  bool    `ini:"politeiaenabled"`
 }
 
 type rpcConfig struct {

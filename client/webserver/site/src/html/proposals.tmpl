@@ -5,14 +5,17 @@
         {{$statuses := .VoteStatuses }}
         {{$statusFilter := .VStatusFilter}}
 
-        <div class="m-1 mb-2 d-flex justify-content-end">
+        <div class="d-flex justify-content-start align-items-center">
+            <span id="goBackToWallets" class="ico-wide-headed-left-arrow fs24 py-1 px-2 lh1 hoverbg pointer"></span>
+        </div>
+        <div class="d-flex justify-content-end mb-2">
             <small>[[[last_sync]]]
                 {{if .IsSyncing}} [[[syncing...]]]{{else if gt .LastPropSync 0}}{{timeAgo
                 .LastPropSync}}{{else}}[[[not_synced]]]{{end}}
             </small>
         </div>
-        <div class="row justify-content-center m-1 mb-3">
-            <div class="search-bar col">
+        <div class="d-flex align-items-center mb-2">
+            <div class="search-bar flex-grow-1">
                 <input id="proposalSearchInput" type="search" name="q" placeholder="Search…" value="{{.Query}}" />
                 <button id="cancelSearch" type="button" class="search-clear p-0">
                     <svg viewBox="0 0 24 24" width="18" height="18">
@@ -29,8 +32,13 @@
                     </svg>
                 </button>
             </div>
-            <button id="filterIcon" type="button" class="btn btn-outline-info col-auto ms-3">☰</button>
+            <button id="filterIcon" type="button" class="filter-btn ms-2">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                    <path d="M3 6h18M7 12h10M10 18h4" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                </svg>
+            </button>
         </div>
+        <div class="mb-3"></div>
 
         {{if .ErrorMsg}}
         <div class="text-center my-5">
@@ -123,18 +131,17 @@
     </section>
 
     <div id="forms" class="d-hide">
-        <form id="filterForm" data-activestatus="{{if $statusFilter }}{{$statusFilter}}{{else}}all{{end}}"
-            class="mw-425 d-hide">
+        <form id="filterForm" data-activestatus="{{if $statusFilter}}{{$statusFilter}}{{else}}all{{end}}"
+            class="filter-form d-hide">
             <div class="form-closer"><span class="ico-cross"></span></div>
-            <h5 class="modal-title mb-2 me-5">[[[filter]]]</h5>
-            <label class="form-label">[[[Status]]]</label>
-            <div class="d-flex flex-wrap p-0">
-                <button type="button" class="me-2 mb-2 voteStatus" data-status="all">[[[all]]]</button>
-                {{range $k, $v := .VoteStatuses}}
-                <button type="button" class="me-2 mb-2 voteStatus" data-status="{{$k}}">
-                    {{$v}}
-                </button>
-                {{end}}
+            <div class="fs22 fw-bold mb-3">[[[filter]]]</div>
+            <div class="filter-list-wrap">
+                <div class="filter-list">
+                    <button type="button" class="filter-pill voteStatus" data-status="all">[[[all]]]</button>
+                    {{range $k, $v := .VoteStatuses}}
+                    <button type="button" class="filter-pill voteStatus" data-status="{{$k}}">{{$v}}</button>
+                    {{end}}
+                </div>
             </div>
         </form>
     </div>

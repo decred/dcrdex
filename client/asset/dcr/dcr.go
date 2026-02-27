@@ -34,6 +34,7 @@ import (
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/dexnet"
+	pi "decred.org/dcrdex/dex/politeia"
 	dcradaptor "decred.org/dcrdex/internal/adaptorsigs"
 
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
@@ -59,6 +60,7 @@ import (
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	"github.com/decred/dcrd/txscript/v4/stdscript"
 	"github.com/decred/dcrd/wire"
+	tv1 "github.com/decred/politeia/politeiawww/api/ticketvote/v1"
 	vspdjson "github.com/decred/vspd/types/v2"
 )
 
@@ -186,6 +188,13 @@ var (
 			Description: "Allow fee rate estimation from a block explorer API. " +
 				"This is useful as a fallback for SPV wallets and RPC wallets " +
 				"that have recently been started.",
+			IsBoolean:    true,
+			DefaultValue: "true",
+		},
+		{
+			Key:          "politeiaenabled",
+			DisplayName:  "Enable Politeia proposals",
+			Description:  "Sync Decred governance proposals from Politeia and enable the proposals UI.",
 			IsBoolean:    true,
 			DefaultValue: "true",
 		},
@@ -610,6 +619,7 @@ type exchangeWalletConfig struct {
 	feeRateLimit     uint64
 	redeemConfTarget uint64
 	apiFeeFallback   bool
+	politeiaEnabled  bool
 }
 
 // mempoolTx holds a refund or redeem.
@@ -709,6 +719,12 @@ type ExchangeWallet struct {
 	swapCache   *broadcast.Cache[*dcrSwapCacheEntry]
 	redeemCache *broadcast.Cache[*dcrRedeemCacheEntry]
 	refundCache *broadcast.Cache[*dcrRefundCacheEntry]
+
+	politeiaMtx     sync.RWMutex
+	politeia        *pi.Politeia
+	politeiaSyncing atomic.Bool
+	politeiaCancel  context.CancelFunc
+	politeiaDone    chan struct{} // closed when politeia goroutine exits
 }
 
 func (dcr *ExchangeWallet) config() *exchangeWalletConfig {
@@ -729,6 +745,7 @@ var _ asset.PrivateSwapper = (*ExchangeWallet)(nil)
 var _ asset.GeocodeRedeemer = (*ExchangeWallet)(nil)
 var _ asset.TxAbandoner = (*ExchangeWallet)(nil)
 var _ asset.Multisigner = (*ExchangeWallet)(nil)
+var _ asset.PoliteiaVoter = (*ExchangeWallet)(nil)
 
 type block struct {
 	height int64
@@ -838,6 +855,7 @@ func getExchangeWalletCfg(dcrCfg *walletConfig, logger dex.Logger) (*exchangeWal
 		redeemConfTarget: redeemConfTarget,
 		useSplitTx:       dcrCfg.UseSplitTx,
 		apiFeeFallback:   dcrCfg.ApiFeeFallback,
+		politeiaEnabled:  dcrCfg.PoliteiaEnabled,
 	}, nil
 }
 
@@ -1124,6 +1142,10 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		dcr.syncTxHistory(ctx, uint64(tip.height))
 	}()
 
+	if dcr.config().politeiaEnabled {
+		dcr.startPoliteia(ctx)
+	}
+
 	return &dcr.wg, nil
 }
 
@@ -1140,11 +1162,21 @@ func (dcr *ExchangeWallet) Reconfigure(ctx context.Context, cfg *asset.WalletCon
 		return restart, err
 	}
 
+	oldCfg := dcr.config()
 	exchangeWalletCfg, err := getExchangeWalletCfg(dcrCfg, dcr.log)
 	if err != nil {
 		return false, err
 	}
 	dcr.cfgV.Store(exchangeWalletCfg)
+
+	// Handle Politeia toggle. startPoliteia stops any existing instance first,
+	// so this is safe even for rapid reconfigurations.
+	if exchangeWalletCfg.politeiaEnabled {
+		dcr.startPoliteia(ctx)
+	} else if oldCfg.politeiaEnabled {
+		dcr.stopPoliteia()
+	}
+
 	return false, nil
 }
 
@@ -6693,6 +6725,215 @@ func (dcr *ExchangeWallet) SignMessage(msg string, addr string) ([]byte, error) 
 // tickets that are controlled by this wallet.
 func (dcr *ExchangeWallet) CommittedTickets(tickets []*chainhash.Hash) ([]*chainhash.Hash, []stdaddr.Address, error) {
 	return dcr.wallet.CommittedTickets(dcr.ctx, tickets)
+}
+
+// startPoliteia initializes the Politeia subsystem and starts a background
+// goroutine that syncs proposals periodically. Only runs on mainnet. If
+// Politeia is already running, it is stopped first.
+//
+// stopPoliteia blocks until the old goroutine's wg.Done() has fired, so
+// the new wg.Add(1) here cannot race with the previous wg.Done().
+func (dcr *ExchangeWallet) startPoliteia(ctx context.Context) {
+	if dcr.network != dex.Mainnet {
+		return
+	}
+
+	// Ensure any previous instance is fully stopped before starting a new one.
+	dcr.stopPoliteia()
+
+	// Create the Politeia instance outside the lock to avoid blocking readers
+	// (PoliteiaDetails, ProposalsAll, etc.) during filesystem I/O.
+	p, err := pi.New(ctx, pi.PoliteiaMainnetHost, filepath.Join(dcr.walletDir, "politeia"), dcr.log.SubLogger("Politeia"))
+	if err != nil {
+		dcr.log.Errorf("failed to set up politeia: %v", err)
+		return
+	}
+
+	// pCtx is a child of the wallet's ctx so that cancelling either one shuts
+	// down the sync goroutine. politeiaCancel allows stopPoliteia to cancel
+	// only the Politeia goroutine without tearing down the whole wallet.
+	pCtx, cancel := context.WithCancel(ctx)
+
+	dcr.politeiaMtx.Lock()
+	done := make(chan struct{})
+	dcr.politeia = p
+	dcr.politeiaCancel = cancel
+	dcr.politeiaDone = done
+	dcr.politeiaMtx.Unlock()
+
+	dcr.wg.Add(1)
+	go func() {
+		defer dcr.wg.Done()
+		defer close(done)
+		defer func() {
+			if err := p.Close(); err != nil {
+				dcr.log.Errorf("error closing politeia: %v", err)
+			}
+			dcr.politeiaMtx.Lock()
+			dcr.politeia = nil
+			dcr.politeiaCancel = nil
+			dcr.politeiaDone = nil
+			dcr.politeiaMtx.Unlock()
+		}()
+
+		// Initiate first sync.
+		dcr.politeiaSyncing.Store(true)
+		if err := p.ProposalsSync(); err != nil {
+			dcr.log.Errorf("politeia.ProposalsSync failed: %v", err)
+		}
+		dcr.politeiaSyncing.Store(false)
+
+		tick := time.NewTicker(20 * time.Minute)
+		defer tick.Stop()
+		for {
+			select {
+			case <-tick.C:
+				dcr.politeiaSyncing.Store(true)
+				if err := p.ProposalsSync(); err != nil {
+					dcr.log.Errorf("politeia.ProposalsSync failed: %v", err)
+				}
+				dcr.politeiaSyncing.Store(false)
+			case <-pCtx.Done():
+				return
+			}
+		}
+	}()
+}
+
+// stopPoliteia shuts down the Politeia subsystem. Blocks until the background
+// goroutine exits. Safe to call when Politeia is not running.
+func (dcr *ExchangeWallet) stopPoliteia() {
+	dcr.politeiaMtx.Lock()
+	cancel := dcr.politeiaCancel
+	done := dcr.politeiaDone
+	// Nil out cancel so a concurrent stopPoliteia call is a no-op.
+	dcr.politeiaCancel = nil
+	dcr.politeiaMtx.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	if done != nil {
+		<-done
+	}
+}
+
+// PoliteiaEnabled returns whether Politeia sync is currently enabled.
+func (dcr *ExchangeWallet) PoliteiaEnabled() bool {
+	return dcr.config().politeiaEnabled
+}
+
+// PoliteiaDetails returns the Politeia URL, whether a sync is in progress, and
+// the unix timestamp of the last completed sync. The URL is always returned for
+// mainnet even when Politeia sync is disabled.
+func (dcr *ExchangeWallet) PoliteiaDetails() (string, bool, int64) {
+	var url string
+	if dcr.network == dex.Mainnet {
+		url = pi.PoliteiaMainnetHost
+	}
+
+	dcr.politeiaMtx.RLock()
+	p := dcr.politeia
+	dcr.politeiaMtx.RUnlock()
+
+	if p == nil {
+		return url, false, 0
+	}
+	return url, dcr.politeiaSyncing.Load(), p.ProposalsLastSync()
+}
+
+// ProposalsAll fetches proposals from the local DB with optional filtering.
+func (dcr *ExchangeWallet) ProposalsAll(offset, rowsCount int, searchPhrase string, filterByVoteStatus ...int) ([]*pi.Proposal, int, error) {
+	dcr.politeiaMtx.RLock()
+	p := dcr.politeia
+	dcr.politeiaMtx.RUnlock()
+
+	if p == nil {
+		return nil, 0, fmt.Errorf("politeia not configured")
+	}
+	return p.ProposalsAll(offset, rowsCount, searchPhrase, filterByVoteStatus...)
+}
+
+// Proposal retrieves a single proposal by token. If the proposal is currently
+// voting and the wallet has eligible tickets, vote details are populated.
+func (dcr *ExchangeWallet) Proposal(token string) (*pi.Proposal, error) {
+	dcr.politeiaMtx.RLock()
+	p := dcr.politeia
+	dcr.politeiaMtx.RUnlock()
+
+	if p == nil {
+		return nil, fmt.Errorf("politeia not configured")
+	}
+
+	proposal, err := p.ProposalByToken(token)
+	if err != nil {
+		return nil, err
+	}
+
+	if proposal.VoteStatus != tv1.VoteStatusStarted {
+		return proposal, nil
+	}
+
+	tipI := dcr.currentTip.Load()
+	if tipI == nil {
+		// Wallet hasn't synced a tip yet; can't check voting eligibility.
+		return proposal, nil
+	}
+	tip := tipI.(*block)
+	if tip.height > int64(proposal.EndBlockHeight) {
+		return proposal, nil
+	}
+
+	// The wallet itself satisfies the VotingWallet interface.
+	proposal.VoteDetails, err = p.WalletProposalVoteDetails(dcr, token)
+	if err != nil {
+		return nil, err
+	}
+
+	return proposal, nil
+}
+
+// ProposalsInProgress returns mini proposals for proposals currently in
+// progress.
+func (dcr *ExchangeWallet) ProposalsInProgress() ([]*pi.MiniProposal, error) {
+	dcr.politeiaMtx.RLock()
+	p := dcr.politeia
+	dcr.politeiaMtx.RUnlock()
+
+	if p == nil {
+		return nil, nil
+	}
+	return p.ProposalsInProgress()
+}
+
+// CastVote casts votes on the proposal identified by token using the provided
+// vote bit. The wallet must already be unlocked before calling this method.
+func (dcr *ExchangeWallet) CastVote(token, bit string) error {
+	if bit != pi.VoteBitYes && bit != pi.VoteBitNo {
+		return errors.New("invalid vote bit")
+	}
+
+	dcr.politeiaMtx.RLock()
+	p := dcr.politeia
+	dcr.politeiaMtx.RUnlock()
+
+	if p == nil {
+		return fmt.Errorf("politeia not configured")
+	}
+
+	voteDetails, err := p.WalletProposalVoteDetails(dcr, token)
+	if err != nil {
+		return err
+	}
+
+	if len(voteDetails.EligibleTickets) == 0 {
+		if len(voteDetails.Votes) > 0 {
+			return fmt.Errorf("all eligible tickets have already voted on proposal (%s)", token)
+		}
+		return fmt.Errorf("no eligible tickets found for voting wallet")
+	}
+
+	return p.CastVotes(dcr, voteDetails.EligibleTickets, bit, token)
 }
 
 type dcrSwapCacheEntry struct {
