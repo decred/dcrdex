@@ -4428,7 +4428,9 @@ func testSyncStatus(t *testing.T, segwit bool, walletType string) {
 	// spv
 	blkHash, msgBlock := node.addRawTx(100, dummyTx())
 	node.birthdayTime = msgBlock.Header.Timestamp.Add(-time.Minute) // SPV, wallet birthday is passed
-	node.mainchain[100] = blkHash                                   // SPV, actually has to reach target
+	node.blockchainMtx.Lock()
+	node.mainchain[100] = blkHash // SPV, actually has to reach target
+	node.blockchainMtx.Unlock()
 
 	ss, err := wallet.SyncStatus()
 	if err != nil {
@@ -4444,8 +4446,8 @@ func testSyncStatus(t *testing.T, segwit bool, walletType string) {
 	node.getBlockchainInfoErr = tErr // rpc
 	node.blockchainMtx.Lock()
 	node.getBestBlockHashErr = tErr // spv BestBlock()
+	delete(node.mainchain, 100)     // force spv to BestBlock() with no wallet block
 	node.blockchainMtx.Unlock()
-	delete(node.mainchain, 100) // force spv to BestBlock() with no wallet block
 	_, err = wallet.SyncStatus()
 	if err == nil {
 		t.Fatalf("SyncStatus error not propagated")
