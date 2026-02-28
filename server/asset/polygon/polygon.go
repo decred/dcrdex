@@ -76,5 +76,5 @@ func (d *Driver) Setup(cfg *asset.BackendConfig) (asset.Backend, error) {
 		chainID = 1337
 	}
 
-	return eth.NewEVMBackend(cfg, chainID, dexpolygon.ContractAddresses, registeredTokens, dexpolygon.EntryPoints[cfg.Net])
+	return eth.NewEVMBackend(cfg, chainID, dexpolygon.ContractAddresses, registeredTokens)
 }

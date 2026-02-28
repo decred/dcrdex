@@ -183,7 +183,7 @@ func (b *DEXBalancer) CheckBalance(acctAddr string, assetID, redeemAssetID uint3
 		}
 	} else {
 		// Base chain doesn't have redeem requirement because it can be redeemed
-		// using EIP-4337 bundlers.
+		// using gasless relay redemptions.
 		redeems = 0
 	}
 
