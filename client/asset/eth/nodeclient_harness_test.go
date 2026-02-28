@@ -43,6 +43,7 @@ import (
 	"decred.org/dcrdex/dex/encode"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
+	swapv1 "decred.org/dcrdex/dex/networks/eth/contracts/v1"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -100,8 +101,7 @@ var (
 	secPerBlock = time.Second
 	// If you are testing on testnet, you must specify the rpcNode. You can also
 	// specify it in the testnet-credentials.json file.
-	rpcProviders    []string
-	bundlerProvider string
+	rpcProviders []string
 
 	// isTestnet can be set to true to perform tests on the sepolia testnet.
 	// May need some setup including sending testnet coins to the addresses
@@ -355,10 +355,8 @@ func runSimnet(m *testing.M) (int, error) {
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, "./mine-alpha", "1")
-	cmd.Dir = harnessCtlDir
-	if err := cmd.Run(); err != nil {
-		return 1, fmt.Errorf("error mining block after funding wallets")
+	if err := waitForMined(); err != nil {
+		return 1, fmt.Errorf("error mining block after funding wallets: %v", err)
 	}
 
 	code := m.Run()
@@ -449,10 +447,10 @@ func runTestnet(m *testing.M) (int, error) {
 		ctor = newV1Contractor
 	}
 
-	if simnetContractor, err = ctor(dex.Testnet, contractAddr, simnetAddr, ethClient.contractBackend()); err != nil {
+	if simnetContractor, err = ctor(dex.Testnet, contractAddr, simnetAddr, ethClient.contractBackend(), dexeth.TestnetChainID); err != nil {
 		return 1, fmt.Errorf("newV0Contractor error: %w", err)
 	}
-	if participantContractor, err = ctor(dex.Testnet, contractAddr, participantAddr, participantEthClient.contractBackend()); err != nil {
+	if participantContractor, err = ctor(dex.Testnet, contractAddr, participantAddr, participantEthClient.contractBackend(), dexeth.TestnetChainID); err != nil {
 		return 1, fmt.Errorf("participant newV0Contractor error: %w", err)
 	}
 
@@ -511,10 +509,10 @@ func prepareSimnetContractors() (err error) {
 		ctor = newV1Contractor
 	}
 
-	if simnetContractor, err = ctor(dex.Simnet, contractAddr, simnetAddr, ethClient.contractBackend()); err != nil {
+	if simnetContractor, err = ctor(dex.Simnet, contractAddr, simnetAddr, ethClient.contractBackend(), dexeth.SimnetChainID); err != nil {
 		return fmt.Errorf("new contractor error: %w", err)
 	}
-	if participantContractor, err = ctor(dex.Simnet, contractAddr, participantAddr, participantEthClient.contractBackend()); err != nil {
+	if participantContractor, err = ctor(dex.Simnet, contractAddr, participantAddr, participantEthClient.contractBackend(), dexeth.SimnetChainID); err != nil {
 		return fmt.Errorf("participant new contractor error: %w", err)
 	}
 
@@ -564,9 +562,6 @@ func useTestnet() error {
 	testnetWalletSeed = hex.EncodeToString(creds.Seed)
 	testnetParticipantWalletSeed = hex.EncodeToString(seed2[:])
 	rpcProviders = creds.Providers["eth"][dex.Testnet.String()]
-	if bundlers, ok := creds.Bundlers["eth"]; ok {
-		bundlerProvider = bundlers[dex.Testnet.String()]
-	}
 	return nil
 }
 
@@ -671,13 +666,6 @@ func setupWallet(walletDir, seed string, providers []string, net dex.Network) (*
 		Emit:        asset.NewWalletEmitter(emit, BipID, tLogger),
 		PeersChange: func(uint32, error) {},
 	}
-	if bundlerProvider != "" {
-		cfg.Settings[bundlerKey] = bundlerProvider
-		fmt.Printf("using bundler: %s\n", bundlerProvider)
-	} else {
-		fmt.Printf("no bundler set\n")
-	}
-
 	wallet, err := newWallet(cfg, tLogger, net)
 	if err != nil {
 		return nil, err
@@ -1820,180 +1808,464 @@ func genSecretsAndHashes(numSecrets int) ([][32]byte, [][32]byte) {
 }
 
 // TestGaslessRedeem is used to manually test the gasless redeem functionality.
-// It is a convenient way to test various bundler providers. The test initiates
-// the specified number of swaps of the specified value then submits a gasless
-// redemption to the bundler. Some code in the test can be commented out in order
+// It is a convenient way to test the relay. The test initiates the specified
+// number of swaps of the specified value then submits a gasless redemption via
+// the relay. Some code in the test can be commented out in order
 // to print the gas estimates for each number of redemptions.
-func TestGaslessRedeem(t *testing.T) {
+func TestRelayGaslessRedeem(t *testing.T) {
 	numSwaps := 1
-	swapValue := uint64(1e7)
+	swapValue := uint64(1e7) // 0.01 ETH in gwei
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	// Setup wallet and contractor
-	gases := ethGases
+	// The relay's address, derived from the known simnet private key.
+	relayAddr := common.HexToAddress("0xfC09662648F682Ee158B16408dbc2Ca6567bA2Ad")
 
-	// FROM:
+	// Setup: use simnetAddr as initiator, participantAddr as redeemer.
+	gases := ethGases
 	client := ethClient
 	contractor := simnetContractor
 	fromAddr := simnetAddr
+	toAddr := participantAddr
 
-	// TO:
-	wallet := simnetETHWallet
-	_, err := wallet.Connect(ctx)
-	if err != nil {
+	// Connect the participant's wallet — they are the redeemer.
+	wallet := participantETHWallet
+	if _, err := wallet.Connect(ctx); err != nil {
 		t.Fatalf("connect error: %v", err)
 	}
-	toAddr := simnetAddr
 
-	// Create swap tx
+	// Set up relay client and configure it on the wallet so the background
+	// relay-checking loop can poll for tx status.
+	relay := newHTTPRelayer("http://localhost:21232", dex.Simnet, 60, 1337)
+	if err := relay.checkHealth(ctx); err != nil {
+		t.Fatalf("relay health check failed: %v", err)
+	}
+	wallet.relayerMtx.Lock()
+	wallet.relayer = relay
+	wallet.relayerMtx.Unlock()
+
+	// Record initial balances.
+	participantBalBefore, err := ethClient.addressBalance(ctx, toAddr)
+	if err != nil {
+		t.Fatalf("failed to get participant balance: %v", err)
+	}
+	relayBalBefore, err := ethClient.addressBalance(ctx, relayAddr)
+	if err != nil {
+		t.Fatalf("failed to get relay balance: %v", err)
+	}
+	t.Logf("Initial participant balance: %s gwei", participantBalBefore)
+	t.Logf("Initial relay balance: %s gwei", relayBalBefore)
+
+	// Initiate swap(s).
 	secrets, secretHashes := genSecretsAndHashes(numSwaps)
 	lockTime := uint64(time.Now().Add(12 * secPerBlock).Unix())
 
-	var skipSwap bool
-
-	/*
-		~~~~~  Uncomment this to manually provide secrets and secret hashes.  ~~~~~
-
-		secretStrings := []string{
-			"47a4e8c5ffb550711ad86967d05d3320a10deff159a87b6718898c1e6c15da6d",
-		}
-		secretHashesStrings := []string{
-			"b59da941021b53bbc7577ad8a77890516ffcca9495f176af9dfd575b834eb427",
-		}
-		lockTime = uint64(1750432924)
-
-		secrets = make([][32]byte, len(secretStrings))
-		secretHashes = make([][32]byte, len(secretHashesStrings))
-		for i := 0; i < len(secretStrings); i++ {
-			secretB, _ := hex.DecodeString(secretStrings[i])
-			secretHashB, _ := hex.DecodeString(secretHashesStrings[i])
-			copy(secrets[i][:], secretB)
-			copy(secretHashes[i][:], secretHashB)
-		}
-
-		skipSwap = true
-	*/
-
-	for i := 0; i < len(secrets); i++ {
-		fmt.Printf("Secret #%d: %s\n", i, hex.EncodeToString(secrets[i][:]))
-		fmt.Printf("Secret hash #%d: %s\n", i, hex.EncodeToString(secretHashes[i][:]))
-	}
-	fmt.Println("Lock time", lockTime)
-
-	swapVectors := make([]*dexeth.SwapVector, 0, len(secrets))
+	swapVectors := make([]*dexeth.SwapVector, 0, numSwaps)
 	totalGwei := uint64(0)
-	for i := 0; i < len(secrets); i++ {
+	for i := range numSwaps {
 		totalGwei += swapValue
-		swapVector := &dexeth.SwapVector{
+		swapVectors = append(swapVectors, &dexeth.SwapVector{
 			From:       fromAddr,
 			To:         toAddr,
 			Value:      dexeth.GweiToWei(swapValue),
 			SecretHash: secretHashes[i],
 			LockTime:   lockTime,
-		}
-		swapVectors = append(swapVectors, swapVector)
+		})
 	}
 
-	if !skipSwap {
-		swapTxOpts, err := client.txOpts(ctx, totalGwei, gases.SwapN(numSwaps), dexeth.GweiToWei(maxFeeRate), nil, nil)
-		if err != nil {
-			t.Fatalf("txOpts error: %v", err)
-		}
-
-		contracts := make([]*asset.Contract, 0, len(swapVectors))
-		for _, swapVector := range swapVectors {
-			contract := newContract(swapVector.LockTime, swapVector.SecretHash, dexeth.WeiToGwei(swapVector.Value))
-			contract.Address = toAddr.String()
-			contracts = append(contracts, contract)
-		}
-
-		swapTx, err := contractor.initiate(swapTxOpts, contracts)
-		if err != nil {
-			t.Fatalf("initiate error: %v ", err)
-		}
-		if err := waitForMined(); err != nil {
-			t.Fatalf("post-init mining error: %v", err)
-		}
-		swapReceipt, err := waitForReceipt(ethClient, swapTx)
-		if err != nil {
-			t.Fatalf("failed to get swap receipt: %v", err)
-		}
-		spew.Dump("Swap tx receipt", swapReceipt)
+	swapTxOpts, err := client.txOpts(ctx, totalGwei, gases.SwapN(numSwaps), dexeth.GweiToWei(maxFeeRate), nil, nil)
+	if err != nil {
+		t.Fatalf("txOpts error: %v", err)
 	}
 
-	/*
-		~~~~~  Uncomment this to print the bundler's gas estimates for each number of redemptions.  ~~~~~
+	contracts := make([]*asset.Contract, 0, numSwaps)
+	for _, sv := range swapVectors {
+		c := newContract(sv.LockTime, sv.SecretHash, dexeth.WeiToGwei(sv.Value))
+		c.Address = toAddr.String()
+		contracts = append(contracts, c)
+	}
 
-		for numRedeems := len(swapVectors); numRedeems >= 1; numRedeems-- {
-			redemptions := make([]*asset.Redemption, 0, numRedeems)
-			for i := 0; i < numRedeems; i++ {
-				redemptions = append(redemptions, &asset.Redemption{
-					Spends: &asset.AuditInfo{
-						Contract:   dexeth.EncodeContractData(1, swapVectors[i].Locator()),
-						SecretHash: secretHashes[i][:],
-					},
-					Secret: secrets[i][:],
-				})
-			}
+	swapTx, err := contractor.initiate(swapTxOpts, contracts)
+	if err != nil {
+		t.Fatalf("initiate error: %v", err)
+	}
+	if err := waitForMined(); err != nil {
+		t.Fatalf("post-init mining error: %v", err)
+	}
+	if _, err := waitForReceipt(ethClient, swapTx); err != nil {
+		t.Fatalf("failed to get swap receipt: %v", err)
+	}
 
-			userOp, _, _, err := wallet.generateUserOp(wallet.bundler, redemptions, 1)
-			if err != nil {
-				t.Fatalf("failed to generate user op with %d redemptions: %v", numRedeems, err)
-			}
-
-			verificationGasLimit, _ := new(big.Int).SetString(userOp.VerificationGasLimit, 0)
-			preVerificationGas, _ := new(big.Int).SetString(userOp.PreVerificationGas, 0)
-			callGasLimit, _ := new(big.Int).SetString(userOp.CallGasLimit, 0)
-			fmt.Printf("%d redemptions: VerificationGasLimit: %s, PreVerificationGas: %s, CallGasLimit: %s \n", numRedeems, verificationGasLimit, preVerificationGas, callGasLimit)
+	// Verify swaps are initiated.
+	for _, sv := range swapVectors {
+		status, err := contractor.status(ctx, sv.Locator())
+		if err != nil {
+			t.Fatalf("error checking swap status: %v", err)
 		}
+		if status.Step != dexeth.SSInitiated {
+			t.Fatalf("expected SSInitiated, got %d", status.Step)
+		}
+	}
 
-		return
-	*/
-
-	// Submit a gasless redeem
-	redemptions := make([]*asset.Redemption, 0, len(swapVectors))
-
-	for i := 0; i < len(swapVectors); i++ {
+	// Build redemptions.
+	redemptions := make([]*asset.Redemption, 0, numSwaps)
+	for i, sv := range swapVectors {
 		redemptions = append(redemptions, &asset.Redemption{
 			Spends: &asset.AuditInfo{
-				Contract:   dexeth.EncodeContractData(1, swapVectors[i].Locator()),
+				Contract:   dexeth.EncodeContractData(1, sv.Locator()),
 				SecretHash: secretHashes[i][:],
+				Coin: &coin{
+					txHash: swapTx.Hash(),
+					value:  swapValue,
+				},
 			},
 			Secret: secrets[i][:],
 		})
 	}
-	redeemForm := &asset.RedeemForm{
-		Redemptions: redemptions,
+
+	// Unlock the wallet so signHash can sign the EIP-712 digest.
+	if err := wallet.Unlock([]byte(pw)); err != nil {
+		t.Fatalf("error unlocking wallet: %v", err)
 	}
 
-	_, opCoin, _, err := wallet.gaslessRedeem(t.Context(), redeemForm, wallet.bundler, wallet.paymaster)
+	// Perform gasless redeem via relay.
+	_, opCoin, feeGwei, err := wallet.gaslessRedeem(ctx, &asset.RedeemForm{
+		Redemptions: redemptions,
+	}, relay)
 	if err != nil {
 		t.Fatalf("gasless redeem error: %v", err)
 	}
-	coin := opCoin.(*coin)
+	t.Logf("Gasless redeem submitted, fee: %d gwei", feeGwei)
 
-	// Wait for the gasless redeem to be submitted by the bundler
-	ticker := time.NewTicker(10 * time.Second)
-checkLoop:
+	c := opCoin.(*coin)
+
+	// Poll for relay tx confirmation.
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	timeout := time.After(60 * time.Second)
+	var walletTx *asset.WalletTransaction
+pollLoop:
 	for {
 		select {
 		case <-ticker.C:
-			tx, err := wallet.WalletTransaction(ctx, coin.userOpHash.String())
+			tx, err := wallet.WalletTransaction(ctx, c.relayTaskHash.String())
 			if err != nil {
-				t.Fatalf("wallet transaction error: %v", err)
+				t.Logf("wallet transaction query: %v", err)
+				continue
 			}
-
-			if tx.UserOpTxID != "" {
-				spew.Dump("Gasless redeem submitted by bundler", tx)
-				break checkLoop
+			if tx.RelayTxID != "" {
+				walletTx = tx
+				t.Logf("Relay tx confirmed: %s", tx.RelayTxID)
+				break pollLoop
 			}
-
+			t.Log("Waiting for relay tx...")
+		case <-timeout:
+			t.Fatal("timed out waiting for relay tx confirmation")
 		case <-ctx.Done():
-			return
+			t.Fatal("context cancelled")
 		}
 	}
+
+	// Wait for mining.
+	if err := waitForMined(); err != nil {
+		t.Fatalf("post-redeem mining error: %v", err)
+	}
+
+	// Verify swaps are redeemed.
+	for _, sv := range swapVectors {
+		status, err := contractor.status(ctx, sv.Locator())
+		if err != nil {
+			t.Fatalf("error checking swap status: %v", err)
+		}
+		if status.Step != dexeth.SSRedeemed {
+			t.Fatalf("expected SSRedeemed, got %d", status.Step)
+		}
+	}
+
+	// Verify participant balance increased.
+	participantBalAfter, err := ethClient.addressBalance(ctx, toAddr)
+	if err != nil {
+		t.Fatalf("failed to get participant balance: %v", err)
+	}
+	balIncrease := new(big.Int).Sub(participantBalAfter, participantBalBefore)
+	t.Logf("Participant balance increase: %s gwei", balIncrease)
+	if balIncrease.Sign() <= 0 {
+		t.Fatalf("participant balance did not increase")
+	}
+
+	// Verify relay earned profit (balance increased).
+	relayBalAfter, err := ethClient.addressBalance(ctx, relayAddr)
+	if err != nil {
+		t.Fatalf("failed to get relay balance: %v", err)
+	}
+	relayProfit := new(big.Int).Sub(relayBalAfter, relayBalBefore)
+	t.Logf("Relay balance change: %s gwei", relayProfit)
+
+	// Verify transaction appears in history.
+	if walletTx == nil {
+		t.Fatal("expected wallet transaction")
+	}
+	t.Logf("Wallet tx: ID=%s, Amount=%d, RelayTxID=%s", walletTx.ID, walletTx.Amount, walletTx.RelayTxID)
+}
+
+// TestRelayConcurrentRedeems stress-tests the relay server's nonce handling
+// by running two participants concurrently, each submitting 10 sequential
+// relay redemptions. The relay must assign unique on-chain transaction nonces
+// even as both participants' requests interleave.
+func TestRelayConcurrentRedeems(t *testing.T) {
+	const numSwaps = 10
+	swapValue := uint64(1e7) // 0.01 ETH in gwei
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	swapContractAddress := dexeth.ContractAddresses[contractVer][dex.Simnet]
+	gases := ethGases
+
+	// Set up relay client.
+	relay := newHTTPRelayer("http://localhost:21232", dex.Simnet, 60, 1337)
+	if err := relay.checkHealth(ctx); err != nil {
+		t.Fatalf("relay health check failed: %v", err)
+	}
+
+	// Set A: simnetAddr initiates → participantAddr redeems.
+	// Set B: participantAddr initiates → simnetAddr redeems.
+	secretsA, secretHashesA := genSecretsAndHashes(numSwaps)
+	secretsB, secretHashesB := genSecretsAndHashes(numSwaps)
+	lockTime := uint64(time.Now().Add(120 * secPerBlock).Unix())
+
+	// Build and initiate set A (simnet → participant).
+	vectorsA := make([]*dexeth.SwapVector, numSwaps)
+	contractsA := make([]*asset.Contract, numSwaps)
+	for i := range numSwaps {
+		vectorsA[i] = &dexeth.SwapVector{
+			From:       simnetAddr,
+			To:         participantAddr,
+			Value:      dexeth.GweiToWei(swapValue),
+			SecretHash: secretHashesA[i],
+			LockTime:   lockTime,
+		}
+		contractsA[i] = &asset.Contract{
+			LockTime:   lockTime,
+			SecretHash: secretHashesA[i][:],
+			Address:    participantAddr.String(),
+			Value:      swapValue,
+		}
+	}
+	totalGwei := swapValue * numSwaps
+	txOptsA, err := ethClient.txOpts(ctx, totalGwei, gases.SwapN(numSwaps), dexeth.GweiToWei(maxFeeRate), nil, nil)
+	if err != nil {
+		t.Fatalf("txOpts A error: %v", err)
+	}
+	swapTxA, err := simnetContractor.initiate(txOptsA, contractsA)
+	if err != nil {
+		t.Fatalf("initiate A error: %v", err)
+	}
+
+	// Build and initiate set B (participant → simnet).
+	vectorsB := make([]*dexeth.SwapVector, numSwaps)
+	contractsB := make([]*asset.Contract, numSwaps)
+	for i := range numSwaps {
+		vectorsB[i] = &dexeth.SwapVector{
+			From:       participantAddr,
+			To:         simnetAddr,
+			Value:      dexeth.GweiToWei(swapValue),
+			SecretHash: secretHashesB[i],
+			LockTime:   lockTime,
+		}
+		contractsB[i] = &asset.Contract{
+			LockTime:   lockTime,
+			SecretHash: secretHashesB[i][:],
+			Address:    simnetAddr.String(),
+			Value:      swapValue,
+		}
+	}
+	txOptsB, err := participantEthClient.txOpts(ctx, totalGwei, gases.SwapN(numSwaps), dexeth.GweiToWei(maxFeeRate), nil, nil)
+	if err != nil {
+		t.Fatalf("txOpts B error: %v", err)
+	}
+	swapTxB, err := participantContractor.initiate(txOptsB, contractsB)
+	if err != nil {
+		t.Fatalf("initiate B error: %v", err)
+	}
+
+	// Mine and confirm both initiations.
+	if err := waitForMined(); err != nil {
+		t.Fatalf("post-init mining error: %v", err)
+	}
+	if _, err := waitForReceipt(ethClient, swapTxA); err != nil {
+		t.Fatalf("swap A receipt error: %v", err)
+	}
+	if _, err := waitForReceipt(ethClient, swapTxB); err != nil {
+		t.Fatalf("swap B receipt error: %v", err)
+	}
+
+	// Verify all 20 swaps are initiated.
+	for i, sv := range vectorsA {
+		status, err := simnetContractor.status(ctx, sv.Locator())
+		if err != nil {
+			t.Fatalf("A[%d] status error: %v", i, err)
+		}
+		if status.Step != dexeth.SSInitiated {
+			t.Fatalf("A[%d] expected SSInitiated, got %s", i, status.Step)
+		}
+	}
+	for i, sv := range vectorsB {
+		status, err := participantContractor.status(ctx, sv.Locator())
+		if err != nil {
+			t.Fatalf("B[%d] status error: %v", i, err)
+		}
+		if status.Step != dexeth.SSInitiated {
+			t.Fatalf("B[%d] expected SSInitiated, got %s", i, status.Step)
+		}
+	}
+	t.Log("All 20 swaps initiated successfully")
+
+	// pollTaskSuccess polls the relay until a task reaches "success" state.
+	pollTaskSuccess := func(taskID string) error {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		timeout := time.After(90 * time.Second)
+		for {
+			select {
+			case <-ticker.C:
+				st, err := relay.getRelayStatus(ctx, taskID)
+				if err != nil {
+					continue
+				}
+				if st.State == "success" {
+					return nil
+				}
+				if st.State == "reverted" {
+					return fmt.Errorf("task %s reverted: tx %s", taskID, st.TxHash)
+				}
+			case <-timeout:
+				return fmt.Errorf("task %s timed out", taskID)
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+
+	// redeemSequentially builds, signs, and submits relay redemptions one
+	// at a time for the given participant, waiting for each to succeed
+	// before submitting the next.
+	redeemSequentially := func(
+		label string,
+		cv1 *contractorV1,
+		signer ethFetcher,
+		signerAddr common.Address,
+		vectors []*dexeth.SwapVector,
+		secrets [][32]byte,
+	) error {
+		deadline := new(big.Int).SetInt64(time.Now().Add(10 * time.Minute).Unix())
+		for i, v := range vectors {
+			// Get current on-chain contract nonce.
+			nonce, err := cv1.nonces(signerAddr)
+			if err != nil {
+				return fmt.Errorf("%s[%d] nonce error: %v", label, i, err)
+			}
+
+			redemption := swapv1.ETHSwapRedemption{
+				V:      dexeth.SwapVectorToAbigen(v),
+				Secret: secrets[i],
+			}
+			redemptions := []swapv1.ETHSwapRedemption{redemption}
+
+			estimate, err := relay.estimateFee(ctx, len(redemptions), swapContractAddress)
+			if err != nil {
+				return fmt.Errorf("%s[%d] fee estimate: %v", label, i, err)
+			}
+
+			digest, err := cv1.eip712RedeemDigest(
+				estimate.RelayAddr, redemptions, estimate.Fee, nonce, deadline,
+			)
+			if err != nil {
+				return fmt.Errorf("%s[%d] digest: %v", label, i, err)
+			}
+
+			sig, _, err := signer.signHash(digest.Bytes())
+			if err != nil {
+				return fmt.Errorf("%s[%d] sign: %v", label, i, err)
+			}
+
+			calldata, err := cv1.redeemWithSignatureCalldata(
+				redemptions, estimate.RelayAddr, estimate.Fee, nonce, deadline, sig,
+			)
+			if err != nil {
+				return fmt.Errorf("%s[%d] calldata: %v", label, i, err)
+			}
+
+			taskID, err := relay.submitSignedRedeem(ctx, &relayRequest{
+				Target:   swapContractAddress,
+				Calldata: calldata,
+			})
+			if err != nil {
+				return fmt.Errorf("%s[%d] submit: %v", label, i, err)
+			}
+			t.Logf("%s[%d] submitted, taskID=%s", label, i, taskID)
+
+			if err := pollTaskSuccess(taskID); err != nil {
+				return fmt.Errorf("%s[%d] poll: %v", label, i, err)
+			}
+			t.Logf("%s[%d] success", label, i)
+		}
+		return nil
+	}
+
+	simnetCV1 := simnetContractor.(*contractorV1)
+	participantCV1 := participantContractor.(*contractorV1)
+
+	// Run both participants concurrently.
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		// Participant redeems set A.
+		errs <- redeemSequentially("participant", participantCV1, participantEthClient, participantAddr, vectorsA, secretsA)
+	}()
+	go func() {
+		defer wg.Done()
+		// Simnet redeems set B.
+		errs <- redeemSequentially("simnet", simnetCV1, ethClient, simnetAddr, vectorsB, secretsB)
+	}()
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Wait for final confirmations.
+	if err := waitForMined(); err != nil {
+		t.Fatalf("post-redeem mining error: %v", err)
+	}
+
+	// Verify all 20 swaps are redeemed on-chain.
+	for i, sv := range vectorsA {
+		status, err := simnetContractor.status(ctx, sv.Locator())
+		if err != nil {
+			t.Fatalf("A[%d] final status error: %v", i, err)
+		}
+		if status.Step != dexeth.SSRedeemed {
+			t.Fatalf("A[%d] expected SSRedeemed, got %s", i, status.Step)
+		}
+	}
+	for i, sv := range vectorsB {
+		status, err := participantContractor.status(ctx, sv.Locator())
+		if err != nil {
+			t.Fatalf("B[%d] final status error: %v", i, err)
+		}
+		if status.Step != dexeth.SSRedeemed {
+			t.Fatalf("B[%d] expected SSRedeemed, got %s", i, status.Step)
+		}
+	}
+	t.Log("All 20 swaps verified as SSRedeemed on-chain")
 }
 
 func testRefundGas(t *testing.T, assetID uint32) {

@@ -371,7 +371,7 @@ func TestReconfigureWalletConfig(t *testing.T) {
 	pws := []encode.PassBytes{encode.PassBytes("app"), encode.PassBytes("newwallet")}
 
 	// With key=value config args.
-	p, err := buildPayload("reconfigurewallet", pws, []string{"60", "rpc", "bundler=http://localhost:40000", "providers=http://node1"})
+	p, err := buildPayload("reconfigurewallet", pws, []string{"60", "rpc", "relay=http://localhost:40000", "providers=http://node1"})
 	if err != nil {
 		t.Fatalf("reconfigurewallet config: %v", err)
 	}
@@ -382,7 +382,7 @@ func TestReconfigureWalletConfig(t *testing.T) {
 	if rw.AssetID != 60 || rw.WalletType != "rpc" {
 		t.Fatal("reconfigurewallet: wrong fields")
 	}
-	if rw.Config == nil || rw.Config["bundler"] != "http://localhost:40000" || rw.Config["providers"] != "http://node1" {
+	if rw.Config == nil || rw.Config["relay"] != "http://localhost:40000" || rw.Config["providers"] != "http://node1" {
 		t.Fatal("reconfigurewallet: wrong config")
 	}
 

@@ -26,6 +26,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/dexnet"
+	"decred.org/dcrdex/dex/networks/base"
 	"decred.org/dcrdex/dex/networks/erc20"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	"github.com/ethereum/go-ethereum"
@@ -1815,7 +1816,7 @@ func isNotFoundError(err error) bool {
 // Stack GasPriceOracle precompile. The multiRPCClient itself satisfies
 // bind.ContractBackend.
 func (m *multiRPCClient) l1FeeForCalldata(ctx context.Context, calldata []byte) (*big.Int, error) {
-	return l1FeeForCalldata(ctx, m, calldata)
+	return base.L1FeeForCalldata(ctx, m, calldata)
 }
 
 // l1FeeFromReceipt returns the L1 fee paid for a transaction from its receipt.

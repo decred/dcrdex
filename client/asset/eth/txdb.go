@@ -57,6 +57,10 @@ type extendedWalletTx struct {
 	// is set to true for the initial bridge completion.
 	RequiresFollowUp bool `json:"requiresFollowUp,omitempty"`
 
+	// RelayTaskID is the original relay task ID string used for polling relay status.
+	// The coin ID map key is the keccak256 of this value.
+	RelayTaskID string `json:"relayTaskID,omitempty"`
+
 	txHash          common.Hash
 	lastCheck       uint64
 	savedToDB       bool
@@ -95,9 +99,24 @@ func (t *extendedWalletTx) age() time.Duration {
 	return time.Since(time.Unix(int64(t.SubmissionTime), 0))
 }
 
+func (t *extendedWalletTx) relayTaskHash() common.Hash {
+	return common.HexToHash(t.ID)
+}
+
+func (t *extendedWalletTx) hasRelayTx() bool {
+	return t.RelayTxID != ""
+}
+
+func (t *extendedWalletTx) relayTxHash() common.Hash {
+	if !t.hasRelayTx() {
+		return common.Hash{}
+	}
+	return common.HexToHash(t.RelayTxID)
+}
+
 func (t *extendedWalletTx) tx() (*types.Transaction, error) {
-	if t.IsUserOp {
-		return nil, fmt.Errorf("cannot get raw tx for user op")
+	if t.IsRelay {
+		return nil, fmt.Errorf("cannot get raw tx for relay tx")
 	}
 	tx := new(types.Transaction)
 	return tx, tx.UnmarshalBinary(t.RawTx)
@@ -140,7 +159,7 @@ var _ txDB = (*TxDB)(nil)
 //   - blockNumber: the block number of the transaction. If the transaction is pending
 //     then the block number is set to ^uint64(0) in order to place pending
 //     transactions at the end of the index.
-//   - isUserOp: 1 if the transaction is a user op, 0 otherwise.
+//   - isRelay: 1 if the transaction is a relay tx, 0 otherwise.
 //   - nonce: the nonce of the transaction, so that pending transactions and
 //     transactions within the same block are ordered by nonce.
 func allAssetIndexEntry(wt *extendedWalletTx) []byte {
@@ -149,12 +168,12 @@ func allAssetIndexEntry(wt *extendedWalletTx) []byte {
 	if blockNumber == 0 {
 		blockNumber = ^uint64(0)
 	}
-	isUserOp := byte(0)
-	if wt.IsUserOp {
-		isUserOp = byte(1)
+	isRelay := byte(0)
+	if wt.IsRelay {
+		isRelay = byte(1)
 	}
 	binary.BigEndian.PutUint64(entry[:8], blockNumber)
-	entry[8] = isUserOp
+	entry[8] = isRelay
 	if wt.Nonce != nil {
 		binary.BigEndian.PutUint64(entry[9:], wt.Nonce.Uint64())
 	}

@@ -6556,7 +6556,7 @@ func (c *Core) createTradeRequest(wallets *walletSet, coins asset.Coins, redeemS
 		}
 
 		// Calculate redemption lot size in order to ensure that the redemption
-		// size can cover the gas fees if we are using a bundler.
+		// size can cover the relay fees for a gasless redemption.
 		redemptionLotSize := mktConf.LotSize // Buys
 		if form.Sell && form.IsLimit {       // Limit Sells
 			redemptionLotSize = calc.BaseToQuote(form.Rate, mktConf.LotSize)
@@ -6567,7 +6567,7 @@ func (c *Core) createTradeRequest(wallets *walletSet, coins asset.Coins, redeemS
 				midGap, err := book.MidGap()
 				if err == nil {
 					// Divide because a smaller lot size is more restrictive.
-					// If the redemption size is too small, the bundler will
+					// If the redemption size is too small, the relay will
 					// not be able to use it to cover fees.
 					redemptionLotSize = calc.BaseToQuote(midGap, mktConf.LotSize) / marketTradeRedemptionSlippageBuffer
 				} else {
@@ -6579,9 +6579,9 @@ func (c *Core) createTradeRequest(wallets *walletSet, coins asset.Coins, redeemS
 		redemptionReserves, err = accountRedeemer.ReserveNRedemptions(redemptionRefundLots,
 			assetConfigs.toAsset.Version, assetConfigs.toAsset.MaxFeeRate, redemptionLotSize)
 		if errors.Is(err, asset.ErrInsufficientRedeemFunds) {
-			return nil, newError(insufficientRedeemFundsErr, "insufficient redeem funds, configure a bundler to redeem")
-		} else if errors.Is(err, asset.ErrBundlerRedemptionLotSizeTooSmall) {
-			return nil, newError(bundlerRedemptionLotSizeTooSmallErr, "bundler redemption lot size too small")
+			return nil, newError(insufficientRedeemFundsErr, "insufficient redeem funds, configure a relay to redeem")
+		} else if errors.Is(err, asset.ErrRelayRedemptionLotSizeTooSmall) {
+			return nil, newError(relayRedemptionLotSizeTooSmallErr, "relay redemption lot size too small")
 		} else if err != nil {
 			return nil, codedError(walletErr, fmt.Errorf("ReserveNRedemptions error: %w", err))
 		}
