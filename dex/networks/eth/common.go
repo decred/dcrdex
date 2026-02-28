@@ -13,40 +13,40 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
-const UserOpCoinIDLength = common.HashLength * 2
+const RelayCoinIDLength = common.HashLength * 2
 
-// ETHCoinID identifies a ETH transaction or user operation.
+// ETHCoinID identifies an ETH transaction or relay redemption.
 type ETHCoinID struct {
-	IsUserOp   bool
-	UserOpHash common.Hash
-	TxHash     common.Hash
+	IsRelay       bool
+	RelayTaskHash common.Hash
+	TxHash        common.Hash
 }
 
 // DecodeCoinID decodes an eth coin ID into an ETHCoinID. For eth there are no
 // funding coin IDs, just an account address. Care should be taken not to use
 // DecodeCoinID or (Driver).DecodeCoinID for account addresses.
 func DecodeCoinID(coinID []byte) (*ETHCoinID, error) {
-	if len(coinID) == UserOpCoinIDLength {
-		var userOpHash, txHash common.Hash
-		copy(userOpHash[:], coinID[:common.HashLength])
+	if len(coinID) == RelayCoinIDLength {
+		var relayTaskHash, txHash common.Hash
+		copy(relayTaskHash[:], coinID[:common.HashLength])
 		copy(txHash[:], coinID[common.HashLength:])
 		return &ETHCoinID{
-			IsUserOp:   true,
-			UserOpHash: userOpHash,
-			TxHash:     txHash,
+			IsRelay:       true,
+			RelayTaskHash: relayTaskHash,
+			TxHash:        txHash,
 		}, nil
 	}
 
 	if len(coinID) != common.HashLength {
 		return nil, fmt.Errorf("wrong coin ID length. wanted %d or %d, got %d",
-			common.HashLength, UserOpCoinIDLength, len(coinID))
+			common.HashLength, RelayCoinIDLength, len(coinID))
 	}
 
 	var h common.Hash
 	h.SetBytes(coinID)
 	return &ETHCoinID{
-		IsUserOp: false,
-		TxHash:   h,
+		IsRelay: false,
+		TxHash:  h,
 	}, nil
 }
 

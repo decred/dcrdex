@@ -34,33 +34,26 @@ var (
 	}
 
 	// Mainnet v1 swap evidence:
-	//   init:            0x24bb1a2f39061f7476d2997f743a02baf28e7ce68e0274c25dc57cc64694d03e
-	//   redeem:          0x8de1f2639448cc457673ee8750398efc33f035dc60035536dfc18033c02d35ff
-	//   refund:          0x2c65a5ed943ac7460c306977641652c19f1c2c9782046f07f49df51ea5b4b3b5
-	//   gasless redeem:  0x01ea080b31b2b81e185eed6d1f36c47bf518b6de50bc2a487954719c4ab5c629
+	//   init:            0xf7c752f9217e359718dc9d9a17f3a04d3bfb3af6923fa43e2d668eda978319d0
+	//   redeem:          0x958268be6bfe6db7088440f7ba6a78ec718da5a575674a75f781975974e5f965
+	//   refund:          0xaf49b64a327051dcf304b418f43781bedd79680329b8503a0c3f91e900ba609f
+	//   gasless redeem:  0xf997a66ddb1f92e6b9011a168153d787940dd2b50b1c80701630f283265a994c
 	v1Gases = &dexeth.Gases{
 		// Mainnet measurements:
-		// Swaps (n=1..5):   [54262 83982 113702 143423 173145]
-		Swap:    70_540,
-		SwapAdd: 38_636,
-		// Redeems (n=1..5): [44934 58300 71655 85023 98405]
-		Redeem:    58_414,
-		RedeemAdd: 17_377,
-		// Refunds (n=1..6): [48032 48032 48032 48032 48032 42892]
-		Refund: 61_327,
+		// Swaps (n=1..5):   [54296 84005 113714 143412 173111]
+		Swap:    70_584,
+		SwapAdd: 38_613,
+		// Redeems (n=1..5): [44911 58254 71598 84907 98254]
+		Redeem:    58_384,
+		RedeemAdd: 17_335,
+		// Refunds (n=1..6): [47987 47987 47987 47987 47975 42859]
+		Refund: 61_269,
 
-		// Gasless redeem (mainnet, v0.7 EntryPoint):
-		// Verification (n=1..5): [176220 221701 273162 352264 394093]
-		GaslessRedeemVerification:    229_086,
-		GaslessRedeemVerificationAdd: 70_808,
-		// PreVerification (n=1..5): [47217 49358 51584 53740 55976]
-		GaslessRedeemPreVerification:    61_382,
-		GaslessRedeemPreVerificationAdd: 2_845,
-		// Call gas uses the contract's hard minimums from validateUserOp.
-		// The EntryPoint passes callGasLimit directly to the inner call
-		// (Exec.call), so the full amount is available to redeemAA.
-		GaslessRedeemCall:    100_000, // MIN_CALL_GAS_BASE (75k) + MIN_CALL_GAS_PER_REDEMPTION (25k)
-		GaslessRedeemCallAdd: 25_000,  // MIN_CALL_GAS_PER_REDEMPTION
+		// Signed redeems (n=1..5): [85211 82157 96133 110135 124140]
+		// The first time someone does a gasless redeem, it will be more expensive due
+		// to the first-time cost of initializing the on chain nonce.
+		SignedRedeem:    110_774,
+		SignedRedeemAdd: 18_201,
 	}
 
 	VersionedGases = map[uint32]*dexeth.Gases{
@@ -72,9 +65,9 @@ var (
 			dex.Simnet: common.HexToAddress(""), // Filled in by MaybeReadSimnetAddrs
 		},
 		1: {
-			dex.Mainnet: common.HexToAddress("0x6971221538F885CF22A39Bb2cb1747FA2A4a34ba"), // txid: 0xd27ca1eb23b74fb41687b1a6573c3d8053d4ac20b061e01b9c1a7dfa7a6e3518
-			dex.Testnet: common.HexToAddress("0x7F6130a86B6ffF6a9387004dBc0984C5FBB4d43F"), // txid: 0x47fadb3c3bfc25b8b0737593b2779770a52655a440f509769b614a10aae13518
-			dex.Simnet:  common.HexToAddress(""),                                           // Filled in by MaybeReadSimnetAddrs
+			dex.Mainnet: common.HexToAddress("0x0157e132fAD5aB9432cEdDF5709941Cc245Ad950"),
+			dex.Testnet: common.HexToAddress("0xAB51BFA44Eee1EBD0E7861c0e8ba7c37842530ba"),
+			dex.Simnet:  common.HexToAddress(""), // Filled in by MaybeReadSimnetAddrs
 		},
 	}
 
@@ -117,13 +110,13 @@ var (
 					1: {
 						Gas: dexeth.Gases{
 							// Gas values are from usdt.base mainnet.
-							Swap:      119_568,
-							SwapAdd:   38_604,
-							Redeem:    64_457,
-							RedeemAdd: 17_342,
-							Refund:    72_712,
+							Swap:      117_171,
+							SwapAdd:   38_613,
+							Redeem:    64_412,
+							RedeemAdd: 17_335,
+							Refund:    68_328,
 							Approve:   60_732,
-							Transfer:  67_342,
+							Transfer:  67_358,
 						},
 					},
 				},
@@ -134,13 +127,13 @@ var (
 					1: {
 						Gas: dexeth.Gases{
 							// Gas values are from usdt.base mainnet.
-							Swap:      119_568,
-							SwapAdd:   38_604,
-							Redeem:    64_457,
-							RedeemAdd: 17_342,
-							Refund:    72_712,
+							Swap:      117_171,
+							SwapAdd:   38_613,
+							Redeem:    64_412,
+							RedeemAdd: 17_335,
+							Refund:    68_328,
 							Approve:   60_732,
-							Transfer:  67_342,
+							Transfer:  67_358,
 						},
 					},
 				},
@@ -196,13 +189,13 @@ var (
 							// Refunds (n=1..2): [57628 47493]
 							// Approvals: [46717 46717]
 							// Transfers: [51814]
-							Swap:      119_568,
-							SwapAdd:   38_604,
-							Redeem:    64_457,
-							RedeemAdd: 17_342,
-							Refund:    72_712,
+							Swap:      117_171,
+							SwapAdd:   38_613,
+							Redeem:    64_412,
+							RedeemAdd: 17_335,
+							Refund:    68_328,
 							Approve:   60_732,
-							Transfer:  67_342,
+							Transfer:  67_358,
 						},
 					},
 				},
@@ -213,13 +206,13 @@ var (
 					1: {
 						Gas: dexeth.Gases{
 							// Gas values are from usdt.base mainnet.
-							Swap:      119_568,
-							SwapAdd:   38_604,
-							Redeem:    64_457,
-							RedeemAdd: 17_342,
-							Refund:    72_712,
+							Swap:      117_171,
+							SwapAdd:   38_613,
+							Redeem:    64_412,
+							RedeemAdd: 17_335,
+							Refund:    68_328,
 							Approve:   60_732,
-							Transfer:  67_342,
+							Transfer:  67_358,
 						},
 					},
 				},
@@ -275,13 +268,13 @@ var (
 					1: {
 						Gas: dexeth.Gases{
 							// Gas values are from usdt.base mainnet.
-							Swap:      119_568,
-							SwapAdd:   38_604,
-							Redeem:    64_457,
-							RedeemAdd: 17_342,
-							Refund:    72_712,
+							Swap:      117_171,
+							SwapAdd:   38_613,
+							Redeem:    64_412,
+							RedeemAdd: 17_335,
+							Refund:    68_328,
 							Approve:   60_732,
-							Transfer:  67_342,
+							Transfer:  67_358,
 						},
 					},
 				},
@@ -292,13 +285,13 @@ var (
 					1: {
 						Gas: dexeth.Gases{
 							// Gas values are from usdt.base mainnet.
-							Swap:      119_568,
-							SwapAdd:   38_604,
-							Redeem:    64_457,
-							RedeemAdd: 17_342,
-							Refund:    72_712,
+							Swap:      117_171,
+							SwapAdd:   38_613,
+							Redeem:    64_412,
+							RedeemAdd: 17_335,
+							Refund:    68_328,
 							Approve:   60_732,
-							Transfer:  67_342,
+							Transfer:  67_358,
 						},
 					},
 				},
@@ -311,16 +304,9 @@ var (
 	}
 )
 
-// EntryPoints is a map of network to the ERC-4337 entrypoint address.
-var EntryPoints = map[dex.Network]common.Address{
-	// dex.Simnet:  common.Address{}, // populated by MaybeReadSimnetAddrs
-	dex.Mainnet: dexeth.CanonicalEntryPointV07,
-	dex.Testnet: dexeth.CanonicalEntryPointV07,
-}
-
 // MaybeReadSimnetAddrs attempts to read the info files generated by the eth
 // simnet harness to populate swap contract and token addresses in
 // ContractAddresses and Tokens.
 func MaybeReadSimnetAddrs() {
-	dexeth.MaybeReadSimnetAddrsDir("base", ContractAddresses, MultiBalanceAddresses, EntryPoints, Tokens[usdcTokenID].NetTokens[dex.Simnet], Tokens[usdtTokenID].NetTokens[dex.Simnet])
+	dexeth.MaybeReadSimnetAddrsDir("base", ContractAddresses, MultiBalanceAddresses, Tokens[usdcTokenID].NetTokens[dex.Simnet], Tokens[usdtTokenID].NetTokens[dex.Simnet])
 }

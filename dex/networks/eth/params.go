@@ -77,8 +77,8 @@ var (
 			dex.Simnet:  common.HexToAddress(""),
 		},
 		1: {
-			dex.Mainnet: common.HexToAddress("0x49a5b8A795e1aED1Ee194e275B63Da6740514dF8"), // tx 0x5e6ea167819e96635f9e0d0cfd18e4669f1b1126a5a7587307ec6b8299fcc52b
-			dex.Testnet: common.HexToAddress("0xf566E43Fd64F4436A3f7B002CA6d949E773366DC"), // tx 0x4f9ced237070a6a8bbed73e76e8742cd486d96edd92029471e201989bef42127
+			dex.Mainnet: common.HexToAddress("0x85c4e942AE2729a3C61275d4ff90A245c81592ae"), // tx 0xb163305c0660c72397e85a96d5988763f81adc85a98cb60d4afee3d1b3ac7d71
+			dex.Testnet: common.HexToAddress("0x575bA12fA9875685A358172d263ad5008bC71a6F"),
 			dex.Simnet:  common.HexToAddress(""),
 		},
 	}
@@ -99,33 +99,26 @@ var v0Gases = &Gases{
 
 // Mainnet v1 swap evidence:
 //
-//	init:            0x4520838d6e67e83ef26807c222a1dd879090a722f6a67399fceba5b798944ad7
-//	redeem:          0x9799a98e9b4f3283379f25fa25bb16c3f2c5bc24dd6843b3d95276f6a22b9485
-//	refund:          0xe2b86e9480fefb7e206df585ff57037407b7ae20d8f6c926a5bae0889add3896
-//	gasless redeem:  0xfe32e495e49f9d9cb988fee29f95283649f35c8fe9116ff739bb40e7821434d3
+//	init:            0xfd582dde119379951c4538c6cd0ed6344101d9e023cff3b56e8fc134832c715e
+//	redeem:          0x9f66c46c2d938d5424691f9018ec560b1a986376e4e7b49eb932224d21d7f8cd
+//	refund:          0x33f6f9a5e3c3f74ff3dd3a54f981908381039cf2a3a8ad6983b6e9dd1d1f83da
+//	gasless redeem:  0xd1a29baaef4be3ad3f32962c24027f14a143a12224d7b7547f52f66cdab41097
 var v1Gases = &Gases{
 	// Mainnet measurements:
-	// Swaps (n=1..5):   [54262 83982 113690 143423 173121]
-	Swap:    70_540,
-	SwapAdd: 38_628,
-	// Redeems (n=1..5): [44934 58300 71643 85035 98381]
-	Redeem:    58_414,
-	RedeemAdd: 17_369,
-	// Refunds (n=1..6): [48032 48032 48020 48032 48020 42904]
-	Refund: 61_324,
+	// Swaps (n=1..5):   [54296 83993 113714 143412 173123]
+	Swap:    70_584,
+	SwapAdd: 38_617,
+	// Redeems (n=1..5): [44911 58242 71598 84919 98278]
+	Redeem:    58_384,
+	RedeemAdd: 17_343,
+	// Refunds (n=1..6): [47987 47975 47987 47987 47987 42859]
+	Refund: 61_269,
 
-	// Gasless redeem (mainnet, v0.7 EntryPoint):
-	// Verification (n=1..5): [176220 221701 273162 352264 394093]
-	GaslessRedeemVerification:    229_086,
-	GaslessRedeemVerificationAdd: 70_808,
-	// PreVerification (n=1..5): [47004 49152 51324 53448 55632]
-	GaslessRedeemPreVerification:    61_105,
-	GaslessRedeemPreVerificationAdd: 2_804,
-	// Call gas uses the contract's hard minimums from validateUserOp.
-	// The EntryPoint passes callGasLimit directly to the inner call
-	// (Exec.call), so the full amount is available to redeemAA.
-	GaslessRedeemCall:    100_000, // MIN_CALL_GAS_BASE (75k) + MIN_CALL_GAS_PER_REDEMPTION (25k)
-	GaslessRedeemCallAdd: 25_000,  // MIN_CALL_GAS_PER_REDEMPTION
+	// Signed redeems (n=1..5): [85211 82157 96133 110135 124140]
+	// The first time someone does a gasless redeem, it will be more expensive due
+	// to the first-time cost of initializing the on chain nonce.
+	SignedRedeem:    110_774,
+	SignedRedeemAdd: 18_201,
 }
 
 // LoadGenesisFile loads a Genesis config from a json file.
@@ -423,14 +416,8 @@ type Gases struct {
 	// Refund is the amount of gas needed to refund a swap.
 	Refund uint64 `json:"refund"`
 
-	GaslessRedeemVerification    uint64 `json:"gaslessRedeemVerification"`
-	GaslessRedeemVerificationAdd uint64 `json:"gaslessRedeemVerificationAdd"`
-
-	GaslessRedeemPreVerification    uint64 `json:"gaslessRedeemPreVerification"`
-	GaslessRedeemPreVerificationAdd uint64 `json:"gaslessRedeemPreVerificationAdd"`
-
-	GaslessRedeemCall    uint64 `json:"gaslessRedeemCall"`
-	GaslessRedeemCallAdd uint64 `json:"gaslessRedeemCallAdd"`
+	SignedRedeem    uint64 `json:"signedRedeem"`
+	SignedRedeemAdd uint64 `json:"signedRedeemAdd"`
 }
 
 // SwapN calculates the gas needed to initiate n swaps.
@@ -447,6 +434,15 @@ func (g *Gases) RedeemN(n int) uint64 {
 		return 0
 	}
 	return g.Redeem + g.RedeemAdd*(uint64(n)-1)
+}
+
+// SignedRedeemN calculates the gas needed for a signed (relayed) redemption
+// of n swaps.
+func (g *Gases) SignedRedeemN(n int) uint64 {
+	if n <= 0 {
+		return 0
+	}
+	return g.SignedRedeem + g.SignedRedeemAdd*(uint64(n)-1)
 }
 
 func ParseV0Locator(locator []byte) (secretHash [32]byte, err error) {
@@ -486,17 +482,6 @@ func SwapVectorToAbigen(v *SwapVector) swapv1.ETHSwapVector {
 		Participant:     v.To,
 		Value:           v.Value,
 	}
-}
-
-// CanonicalEntryPointV07 is the well-known ERC-4337 v0.7 EntryPoint address,
-// deployed via CREATE2 at the same address on all EVM chains.
-var CanonicalEntryPointV07 = common.HexToAddress("0x0000000071727De22E5E9d8BAf0edAc6f37da032")
-
-// EntryPoints is a map of network to the ERC-4337 entrypoint address.
-var EntryPoints = map[dex.Network]common.Address{
-	// dex.Simnet:  common.Address{}, // populated by MaybeReadSimnetAddrs
-	dex.Mainnet: CanonicalEntryPointV07,
-	dex.Testnet: CanonicalEntryPointV07,
 }
 
 // ProtocolVersion assists in mapping the dex.Asset.Version to a contract

@@ -284,13 +284,12 @@ const (
 	ErrUnapprovedToken = dex.ErrorKind("token not approved")
 	ErrApprovalPending = dex.ErrorKind("approval pending")
 	// ErrInsufficientRedeemFunds is returned when there is insufficient funds
-	// to redeem a swap, but configuring a bundler to redeem would fix the
-	// issue.
+	// to redeem a swap, but a gasless relay redemption would fix the issue.
 	ErrInsufficientRedeemFunds = dex.ErrorKind("insufficient redeem funds")
 
-	// ErrBundlerRedemptionLotSizeTooSmall is returned when the lot size is
-	// too small to cover the gas fees when using a bundler.
-	ErrBundlerRedemptionLotSizeTooSmall = dex.ErrorKind("bundler redemption lot size too small")
+	// ErrRelayRedemptionLotSizeTooSmall is returned when the lot size is
+	// too small to cover the relay fees for a gasless redemption.
+	ErrRelayRedemptionLotSizeTooSmall = dex.ErrorKind("relay redemption lot size too small")
 
 	// ErrMultisigPartialSend is returned when an error occurs after creating
 	// a multisig and sending some amount of funds.
@@ -455,9 +454,9 @@ type ConfirmTxStatus struct {
 	Confs  uint64
 	Req    uint64
 	CoinID dex.Bytes
-	// PendingSubmission is true for ETH redemptions using a user op before
-	// the bundler has submitted the transaction. The redemption message
-	// should only be sent to the server once this is true.
+	// PendingSubmission is true for ETH relay redemptions before the relay
+	// has submitted the transaction on-chain. The redemption message should
+	// only be sent to the server once this is false.
 	PendingSubmission bool
 }
 
@@ -998,22 +997,25 @@ type ContractDeployer interface {
 // GasTestResult holds the gas usage measurements from testing swap contract
 // functions.
 type GasTestResult struct {
-	AssetID      uint32   `json:"assetID"`
-	Symbol       string   `json:"symbol"`
-	TxIDs        []string `json:"txIDs"`
-	Swap         uint64   `json:"swap"`
-	SwapAdd      uint64   `json:"swapAdd"`
-	Redeem       uint64   `json:"redeem"`
-	RedeemAdd    uint64   `json:"redeemAdd"`
-	Refund       uint64   `json:"refund"`
-	Approve      uint64   `json:"approve,omitempty"`  // zero for base chain
-	Transfer     uint64   `json:"transfer,omitempty"` // zero for base chain
-	RawSwaps     []uint64 `json:"rawSwaps"`
-	RawRedeems   []uint64 `json:"rawRedeems"`
-	RawRefunds   []uint64 `json:"rawRefunds"`
-	RawApprovals []uint64 `json:"rawApprovals,omitempty"`
-	RawTransfers []uint64 `json:"rawTransfers,omitempty"`
-	// Gasless redeem bundler estimates.
+	AssetID          uint32   `json:"assetID"`
+	Symbol           string   `json:"symbol"`
+	TxIDs            []string `json:"txIDs"`
+	Swap             uint64   `json:"swap"`
+	SwapAdd          uint64   `json:"swapAdd"`
+	Redeem           uint64   `json:"redeem"`
+	RedeemAdd        uint64   `json:"redeemAdd"`
+	Refund           uint64   `json:"refund"`
+	Approve          uint64   `json:"approve,omitempty"`  // zero for base chain
+	Transfer         uint64   `json:"transfer,omitempty"` // zero for base chain
+	RawSwaps         []uint64 `json:"rawSwaps"`
+	RawRedeems       []uint64 `json:"rawRedeems"`
+	RawRefunds       []uint64 `json:"rawRefunds"`
+	RawApprovals     []uint64 `json:"rawApprovals,omitempty"`
+	RawTransfers     []uint64 `json:"rawTransfers,omitempty"`
+	SignedRedeem     uint64   `json:"signedRedeem,omitempty"`
+	SignedRedeemAdd  uint64   `json:"signedRedeemAdd,omitempty"`
+	RawSignedRedeems []uint64 `json:"rawSignedRedeems,omitempty"`
+	// Gasless redeem relay estimates.
 	GaslessRedeemVerification       uint64   `json:"gaslessRedeemVerification,omitempty"`
 	GaslessRedeemVerificationAdd    uint64   `json:"gaslessRedeemVerificationAdd,omitempty"`
 	GaslessRedeemPreVerification    uint64   `json:"gaslessRedeemPreVerification,omitempty"`
@@ -1221,8 +1223,8 @@ type AccountLocker interface {
 	// appropriate amount of funds so that we can redeem N swaps using the
 	// specified fee and asset version. It is an error to request funds >
 	// spendable balance. The lotSize parameter is used to ensure that when
-	// doing a redemption with a bundler, the size of the redemption will be
-	// able to cover the gas fees.
+	// doing a gasless relay redemption, the size of the redemption will be
+	// able to cover the relay fees.
 	ReserveNRedemptions(n uint64, ver uint32, maxFeeRate uint64, lotSize uint64) (uint64, error)
 	// ReReserveRedemption is used when reconstructing existing orders on
 	// startup. It is an error to request funds > spendable balance.
@@ -1251,12 +1253,12 @@ type GaslessRedeemer interface {
 	// It should be called if ReserveNRedemptions returned a zero value. The
 	// submitted bool will be true if the wallet received funds since the
 	// wallet attempted to reserve funds, and is able to pay for the redemption
-	// on its own, otherwise if a user operation was sent to a bundler, it will
+	// on its own, otherwise if the redemption was submitted via relay, it will
 	// be false.
 	//
 	// The redemption message should only be sent to the server if submitted is
 	// true. If it is false, an updated coin ID will be returned from
-	// ConfirmRedemption when the transaction is submitted by the bundler,
+	// ConfirmRedemption when the transaction is submitted by the relay,
 	// and the server should be notified using that coin ID.
 	GaslessRedeem(ctx context.Context, redeems *RedeemForm) (ins []dex.Bytes, out Coin, feesPaid uint64, submitted bool, err error)
 }
@@ -1612,11 +1614,11 @@ type WalletTransaction struct {
 	// BridgeName is the name of the bridge. It is only populated for bridge
 	// related transactions.
 	BridgeName string `json:"bridgeName,omitempty"`
-	// UserOpTxID is the id of the transaction that the bundler submitted
-	// for a user op.
-	UserOpTxID string `json:"userOpTxID,omitempty"`
-	// IsUserOp will be true if the transaction is a user op.
-	IsUserOp bool `json:"isUserOp"`
+	// RelayTxID is the id of the on-chain transaction submitted by the
+	// relay for a gasless redemption.
+	RelayTxID string `json:"relayTxID,omitempty"`
+	// IsRelay will be true if the transaction is a relay redemption.
+	IsRelay bool `json:"isRelay"`
 }
 
 // Bond is the fidelity bond info generated for a certain account ID, amount,
