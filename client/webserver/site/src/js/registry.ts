@@ -692,7 +692,7 @@ export interface PreSwap {
 
 export interface PreRedeem {
   estimate: RedeemEstimate
-  userOpRequired: boolean
+  relayRequired: boolean
   options: OrderOption[]
 }
 
@@ -1323,8 +1323,8 @@ export interface WalletTransaction {
   recipient?: string
   bondInfo?: BondTxInfo
   additionalData: Record<string, string>
-  isUserOp: boolean
-  userOpTxID: string
+  isRelay: boolean
+  relayTxID: string
   bridgeCounterpartTx?: BridgeCounterpartTx
   bridgeName?: string
   confirmed: boolean

@@ -1,9 +1,5 @@
 SESSION="${CHAIN}-harness"
 
-BUNDLER_DIR=$(realpath ../eth/bundler)
-BUNDLER_PRIV_KEY="dcfb54294baf3c746e15a85ca375dc7d5eb97fa7c87f838206daf93eaab2b7cc"
-BUNDLER_ADDRESS="0x65797B6518F6694e86efceAdE581d2aC5a22b287"
-
 # TESTING_ADDRESS is used by the client's internal node.
 TESTING_ADDRESS="946dfaB1AD7caCFeF77dE70ea68819a30acD4577"
 
@@ -15,7 +11,6 @@ ERC20_SWAP_V0=$(fileToHex "../../networks/erc20/contracts/v0/swap_contract.bin")
 TEST_TOKEN=$(fileToHex "../../networks/erc20/contracts/v0/token_contract.bin")
 MULTIBALANCE_BIN=$(fileToHex "../../networks/eth/contracts/multibalance/contract.bin")
 ETH_SWAP_V1=$(fileToHex "../../networks/eth/contracts/v1/contract.bin")
-ENTRYPOINT_V07=$(fileToHex "../../networks/eth/contracts/entrypoint/entrypoint.bin")
 
 # Ensure we can create the session and that there's not a session already
 # running before we nuke the data directory.
@@ -83,6 +78,9 @@ cp "${HARNESS_DIR}/create-node.sh" "${NODES_ROOT}/harness-ctl/create-node"
 # Shutdown script
 cat > "${NODES_ROOT}/harness-ctl/quit" <<EOF
 #!/usr/bin/env bash
+if tmux list-windows -t $SESSION 2>/dev/null | grep -q relay; then
+  tmux send-keys -t $SESSION:relay C-c
+fi
 tmux send-keys -t $SESSION:5 C-c
 tmux send-keys -t $SESSION:1 C-c
 tmux kill-session
@@ -115,9 +113,6 @@ cat > "${NODES_ROOT}/test_tx_hash.txt" <<EOF
 ${TEST_TX_HASH}
 EOF
 
-echo "Sending 5000 to bundler"
-"${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/send.js --exec send(\"${BUNDLER_ADDRESS}\",${SEND_AMT})"
-
 # gethDeploy writes the deploy JS expression to a preload file to avoid
 # command-line length limits with large contract bytecodes.
 gethDeploy() {
@@ -125,11 +120,8 @@ gethDeploy() {
   cat > "${NODES_ROOT}/harness-ctl/_deploy_cmd.js" <<DEPLOYEOF
 var __result = ${jsExpr};
 DEPLOYEOF
-  "${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/deploy.js,${NODES_ROOT}/harness-ctl/_deploy_cmd.js --exec __result" | sed 's/"//g'
+  "${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/deploy.js,${NODES_ROOT}/harness-ctl/_deploy_cmd.js --exec __result" | sed 's/\"//g'
 }
-
-echo "Deploying Entrypoint contract."
-ENTRYPOINT_CONTRACT_HASH=$(gethDeploy "deploy(\"${ENTRYPOINT_V07}\")")
 
 echo "Deploying ETHSwapV0 contract."
 ETH_SWAP_CONTRACT_HASH_V0=$(gethDeploy "deploy(\"${ETH_SWAP_V0}\")")
@@ -157,14 +149,8 @@ mine_pending_txs() {
 
 mine_pending_txs
 
-ENTRYPOINT_CONTRACT_ADDR=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/contractAddress.js --exec contractAddress(\"${ENTRYPOINT_CONTRACT_HASH}\")" | sed 's/"//g')
-echo "Entrypoint contract address is ${ENTRYPOINT_CONTRACT_ADDR}. Saving to ${NODES_ROOT}/entrypoint_contract_address.txt"
-cat > "${NODES_ROOT}/entrypoint_contract_address.txt" <<EOF
-${ENTRYPOINT_CONTRACT_ADDR}
-EOF
-
 echo "Deploying ETHSwap1 contract."
-ETH_SWAP_CONTRACT_HASH_V1=$(gethDeploy "deployERC20Swap(\"${ETH_SWAP_V1}\",\"${ENTRYPOINT_CONTRACT_ADDR}\")")
+ETH_SWAP_CONTRACT_HASH_V1=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/deploy.js --exec deploy(\"${ETH_SWAP_V1}\")" | sed 's/"//g')
 
 mine_pending_txs
 
@@ -267,11 +253,68 @@ cat > "${NODES_ROOT}/test_block1_hash.txt" <<EOF
 ${TEST_BLOCK1_HASH}
 EOF
 
-# Set up bundler
-echo "Setting up bundler"
-tmux new-window -t $SESSION:6 -n "bundler" $SHELL
-tmux send-keys -t $SESSION:6 "cd ${BUNDLER_DIR} && go build" C-m
-tmux send-keys -t $SESSION:6 "./bundler --privkey ${BUNDLER_PRIV_KEY} --chain ${CHAIN}" C-m
+# Shared relay server for all EVM harnesses.
+RELAY_PRIVKEY="4bd88e0fd6769a529930286c76ecc9a5dbf7b3b29f3c6fab1b27e5d99bcb4753"
+RELAY_ETH_ADDR="0xfC09662648F682Ee158B16408dbc2Ca6567bA2Ad"
+RELAY_CONFIG=~/dextest/evm-relay-config.json
+
+# Rebuild the shared relay config from the known harness RPC ports instead of
+# accumulating per-chain fragment files.
+mkdir -p ~/dextest
+CHAIN_ENTRIES=""
+append_relay_chain_entry() {
+  local chain_id="$1"
+  local rpc_port="$2"
+  local entry="{\"chainID\": ${chain_id}, \"rpcURL\": \"http://localhost:${rpc_port}\"}"
+  if [ -n "${CHAIN_ENTRIES}" ]; then
+    CHAIN_ENTRIES="${CHAIN_ENTRIES},${entry}"
+  else
+    CHAIN_ENTRIES="${entry}"
+  fi
+}
+
+if nc -z localhost 38556 2>/dev/null; then
+  append_relay_chain_entry 1 38556
+fi
+if nc -z localhost 39556 2>/dev/null; then
+  append_relay_chain_entry 8453 39556
+fi
+if nc -z localhost 48296 2>/dev/null; then
+  append_relay_chain_entry 137 48296
+fi
+
+cat > "${RELAY_CONFIG}" <<RELAYEOF
+{
+  "addr": ":21232",
+  "privkey": "${RELAY_PRIVKEY}",
+  "profitPerGas": 1.5,
+  "chains": [${CHAIN_ENTRIES}]
+}
+RELAYEOF
+
+# Build the relay binary.
+REPO_ROOT=$(cd "${HARNESS_DIR}/../../.." && pwd)
+go build -C "${REPO_ROOT}" -o ~/dextest/evmrelay ./evmrelay/cmd/evmrelay
+
+# Stop existing relay if running, then (re)start with updated config.
+if nc -z localhost 21232 2>/dev/null; then
+    pkill -f "evmrelay.*--config" || true
+    sleep 1
+fi
+
+tmux new-window -t $SESSION -n "relay"
+tmux send-keys -t $SESSION:relay "set +o history" C-m
+tmux send-keys -t $SESSION:relay "~/dextest/evmrelay \
+    --config ${RELAY_CONFIG} --simnet --log debug \
+    2>&1 | tee ~/dextest/relay.log" C-m
+# Wait for relay to come up.
+for i in $(seq 1 10); do
+    sleep 1
+    nc -z localhost 21232 2>/dev/null && break
+done
+
+# Fund the relay address on this chain.
+"${NODES_ROOT}/harness-ctl/sendtoaddress" "${RELAY_ETH_ADDR}" 100
 
 # Reenable history and attach to the control session.
 tmux select-window -t $SESSION:0

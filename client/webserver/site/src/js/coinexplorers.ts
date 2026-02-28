@@ -14,9 +14,9 @@ const coinIDTakerFoundMakerRedemption = 'TakerFoundMakerRedemption:'
    compatible assets, whether the return value is an address, and whether a
    link should be returned. */
 function ethBasedExplorerArg (cid: string): [string, boolean] {
-  if (cid.startsWith('userOpHash')) {
+  if (cid.startsWith('relayTaskHash')) {
     const parts = cid.split(',')
-    return [parts[0].substring('userOpHash:'.length), false]
+    return [parts[0].substring('relayTaskHash:'.length), false]
   }
   if (cid.startsWith(coinIDTakerFoundMakerRedemption)) return [cid.substring(coinIDTakerFoundMakerRedemption.length), true]
   else if (cid.length === 42) return [cid, true]
@@ -148,8 +148,8 @@ export function formatCoinID (cid: string) : string[] {
     const makerAddr = cid.substring(coinIDTakerFoundMakerRedemption.length)
     return [intl.prep(intl.ID_TAKER_FOUND_MAKER_REDEMPTION, { makerAddr: makerAddr })]
   }
-  if (cid.startsWith('userOpHash:')) {
-    return cid.split(',')
+  if (cid.startsWith('relayTaskHash:')) {
+    return [intl.prep(intl.ID_SENT_TO_RELAYER)]
   }
   return [cid]
 }
@@ -168,6 +168,13 @@ function baseChainID (assetID: number) {
  * assetID and data-explorer-coin value present on supplied link element.
  */
 export function setCoinHref (assetID: number, link: PageElement) {
+  const coinID = link.dataset.explorerCoin || ''
+  if (coinID.startsWith('relayTaskHash:')) {
+    link.classList.remove('subtlelink')
+    link.classList.add('plainlink')
+    link.removeAttribute('href')
+    return
+  }
   const net = app().user.net
   const assetExplorer = CoinExplorers[baseChainID(assetID)]
   if (!assetExplorer) return
@@ -175,5 +182,5 @@ export function setCoinHref (assetID: number, link: PageElement) {
   if (!formatter) return
   link.classList.remove('plainlink')
   link.classList.add('subtlelink')
-  link.href = formatter(link.dataset.explorerCoin || '')
+  link.href = formatter(coinID)
 }

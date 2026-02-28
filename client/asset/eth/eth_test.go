@@ -4781,8 +4781,9 @@ func TestDriverDecodeCoinID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error decoding relay coin id without tx hash: %v", err)
 	}
-	if coinID != relayTaskHash.String() {
-		t.Fatalf("expected relay coin id to be %s but got %s", relayTaskHash.String(), coinID)
+	wantPendingRelayCoinID := "relayTaskHash:" + relayTaskHash.String()
+	if coinID != wantPendingRelayCoinID {
+		t.Fatalf("expected relay coin id to be %s but got %s", wantPendingRelayCoinID, coinID)
 	}
 
 	// Once the relay tx hash is known, display that instead of the relay task hash.

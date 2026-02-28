@@ -283,7 +283,7 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 		if ethCoinID.TxHash != (common.Hash{}) {
 			return ethCoinID.TxHash.String(), nil
 		}
-		return ethCoinID.RelayTaskHash.String(), nil
+		return "relayTaskHash:" + ethCoinID.RelayTaskHash.String(), nil
 	case fundingCoinIDSize:
 		c, err := decodeFundingCoin(coinID)
 		if err != nil {
