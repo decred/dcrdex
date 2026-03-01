@@ -21,8 +21,8 @@ const SeedPromptForm = ({ setUsingSeed }: SeedPromptFormParams) => {
       </header>
       <div className="px-3">{t('prompt_for_seed')}</div>
       <div className="d-flex align-items-center p-3">
-        <button className="fs16 me-1 flex-grow-1" onClick={onUsingSeedClicked}>Yes</button>
-        <button className="feature fs16 ms-1 flex-grow-1" onClick={onNoSeedClicked}>No</button>
+        <button className="fs16 me-1 flex-grow-1" onClick={onUsingSeedClicked}>{t('Yes')}</button>
+        <button className="feature fs16 ms-1 flex-grow-1" onClick={onNoSeedClicked}>{t('No')}</button>
       </div>
     </form>
   )

@@ -33,7 +33,7 @@ export default function MainFrame ({ pd }: MainFrameParams) {
       <Header />
       <div className="d-flex flex-grow-1 align-items-stretch">
         <Sidebar />
-        <div className="flex-grow-1 border-left border-top position-relative">{renderContent()}</div>
+        <div className="flex-grow-1 border-left border-top position-relative fade-in">{renderContent()}</div>
       </div>
       <Modals fd={formData} />
     </div>

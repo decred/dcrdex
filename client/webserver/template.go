@@ -21,7 +21,6 @@ import (
 
 	"decred.org/dcrdex/client/intl"
 	"decred.org/dcrdex/client/webserver/locales"
-	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
@@ -307,7 +306,7 @@ var templateFuncs = template.FuncMap{
 	},
 }
 
-func (s *WebServer) newUIIndexHTML(siteDir string) ([]byte, error) {
+func (s *WebServer) newUIIndexTMPL(siteDir string) (*template.Template, error) {
 	var indexTmpl string
 	if siteDir != "" {
 		b, err := os.ReadFile(filepath.Join(siteDir, "dist", "index.html"))
@@ -327,23 +326,27 @@ func (s *WebServer) newUIIndexHTML(siteDir string) ([]byte, error) {
 		}
 		indexTmpl = string(b)
 	}
-	t, err := template.New("index").Parse(indexTmpl)
+	t, err := template.New("index").Funcs(template.FuncMap{
+		"commitHash": func() string {
+			if commitHash != "" {
+				return commitHash[:8]
+			}
+			return hex.EncodeToString(encode.RandomBytes(4))
+		},
+	}).Parse(indexTmpl)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing new UI index.html: %v", err)
 	}
-	ch := commitHash
-	if ch == "" || s.core.Network() == dex.Simnet {
-		ch = hex.EncodeToString(encode.RandomBytes(4))
-	}
-	data := &struct {
-		Lang       string
-		CommitHash string
-	}{
-		Lang:       (s.lang.Load()).(string),
-		CommitHash: ch,
-	}
+	return t, nil
+}
+
+func (s *WebServer) newUIIndexHTML(tmpl *template.Template, lang string) ([]byte, error) {
 	var b bytes.Buffer
-	err = t.ExecuteTemplate(&b, "index", data)
+	err := tmpl.ExecuteTemplate(&b, "index", &struct {
+		Lang string
+	}{
+		Lang: lang,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("error executing new UI index.html: %v", err)
 	}

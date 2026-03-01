@@ -13,10 +13,11 @@ export default function LocaleSelector () {
   return (
     <div className="form-input-bg flex-center form-input-bg p-2 pointer hoverbg"
       onClick={(e) => {
-        e.currentTarget.querySelector('select').click()
+        const select = e.currentTarget.querySelector('select')
+        if (e.target === select) return
+        select.showPicker()
       }}>
-      <select className="pointer" onChange={(e) => changeLanguage(e.target.value)} value={lang}
-        onClick={(e) => e.stopPropagation()}>
+      <select className="pointer" onChange={(e) => changeLanguage(e.target.value)} value={lang}>
         {Object.keys(localeData).map((key) => (
           <option key={key} value={key}>
             {localeData[key].flag} {localeData[key].name}

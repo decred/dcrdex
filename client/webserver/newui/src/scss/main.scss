@@ -266,6 +266,20 @@ img.logo-full {
   }
 }
 
+@keyframes fadeIn {
+  0% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+.fade-in {
+  animation: fadeIn 0.3s ease-in-out;
+}
+
 .loading-bg {
   background-color: #30343d77;
   z-index: 201;

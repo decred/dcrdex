@@ -552,7 +552,7 @@ func New(cfg *Config) (*WebServer, error) {
 			})
 		})
 	} else { // new UI. Only serve index.html.
-		indexHTML, err := s.newUIIndexHTML(siteDir)
+		tmpl, err := s.newUIIndexTMPL(siteDir)
 		if err != nil {
 			return nil, fmt.Errorf("error getting new UI index.html: %v", err)
 		}
@@ -561,6 +561,12 @@ func New(cfg *Config) (*WebServer, error) {
 				upath := r.URL.Path
 				if strings.Contains(upath, "..") {
 					http.Error(w, "Invalid path", http.StatusBadRequest)
+					return
+				}
+				indexHTML, err := s.newUIIndexHTML(tmpl, s.lang.Load().(string))
+				if err != nil {
+					log.Errorf("error getting new UI index.html: %v", err)
+					http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 					return
 				}
 				w.Header().Set("Content-Type", "text/html;charset=UTF-8")
