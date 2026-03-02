@@ -33,20 +33,8 @@ const (
 	// is closed.
 	rpcTimeoutSeconds = 10
 
-	// rpcMaxClients is the maximum number of active websocket connections
-	// allowed.
-	rpcMaxClients = 10000
-
-	// rpcMaxConnsPerIP is the maximum number of active websocket connections
-	// allowed per IP, loopback excluded.
-	rpcMaxConnsPerIP = 8
-
 	// banishTime is the default duration of a client quarantine.
 	banishTime = time.Hour
-
-	// Per-ip rate limits for market data API routes.
-	ipMaxRatePerSec = 1
-	ipMaxBurstSize  = 5
 
 	// Per-websocket-connection limits in requests per second. Rate should be a
 	// reasonable sustained rate, while burst should consider bulk reconnect
@@ -59,6 +47,15 @@ const (
 	// The cumulative rates below would need to be less than sum of above to
 	// actually trip unless it is also applied to unspecified routes.
 	wsRateTotal, wsBurstTotal = 40, 1000
+
+	// Defaults for configurable rate limit and connection values.
+	DefaultMaxClients        = 10000
+	DefaultMaxConnsPerIP     = 8
+	DefaultIPRatePerSec      = 1.0
+	DefaultIPBurstSize       = 5
+	DefaultMaxIPRateLimiters = 10000
+	DefaultGlobalHTTPRate    = 100.0
+	DefaultGlobalHTTPBurst   = 1000
 )
 
 var (
@@ -72,17 +69,6 @@ var (
 	// default is intended for production, but leaving as a var instead of const
 	// to facilitate testing.
 	pingPeriod = (pongWait * 9) / 10 // i.e. 18 sec
-
-	// globalHTTPRateLimiter is a limit on the global HTTP request limit. The
-	// global rate limiter is like a rudimentary auto-spam filter for
-	// non-critical routes, including all routes registered as HTTP routes.
-	globalHTTPRateLimiter = rate.NewLimiter(100, 1000) // rate per sec, max burst
-
-	// ipHTTPRateLimiter is a per-client rate limiter for the HTTP endpoints
-	// requests and httpRoutes (the market data API). The Server manages
-	// separate limiters used with the websocket routes, rpcRoutes.
-	ipHTTPRateLimiter = make(map[dex.IPKey]*ipRateLimiter)
-	rateLimiterMtx    sync.RWMutex
 )
 
 var idCounter uint64
@@ -93,22 +79,35 @@ type ipRateLimiter struct {
 	lastHit time.Time
 }
 
-// Get an ipRateLimiter for the IP. Creates a new one if it doesn't exist. This
-// is for use with the HTTP endpoints and httpRoutes (the data API), not the
-// websocket request routes in rpcRoutes.
-func getIPLimiter(ip dex.IPKey) *ipRateLimiter {
-	rateLimiterMtx.Lock()
-	defer rateLimiterMtx.Unlock()
-	limiter := ipHTTPRateLimiter[ip]
+// getIPLimiter gets an ipRateLimiter for the IP. Creates a new one if it
+// doesn't exist. This is for use with the HTTP endpoints and httpRoutes (the
+// data API), not the websocket request routes in rpcRoutes.
+//
+// If the per-IP limiter map has reached its configured cap
+// (maxIPRateLimiters), a shared overflow limiter is returned instead of
+// creating a new entry. Because the overflow limiter's token bucket is shared
+// by all such IPs, it will drain quickly under load, effectively blocking
+// new IPs that arrive after the map is full. This is intentional: under
+// normal operation the map cap should never be reached, and if it is, the
+// aggressive throttling acts as back-pressure during an attack. The periodic
+// cleanup goroutine in Run evicts stale entries, making room for legitimate
+// clients once the attack subsides.
+func (s *Server) getIPLimiter(ip dex.IPKey) *ipRateLimiter {
+	s.rateLimiterMtx.Lock()
+	defer s.rateLimiterMtx.Unlock()
+	limiter := s.ipHTTPRateLimiter[ip]
 	if limiter != nil {
 		limiter.lastHit = time.Now()
 		return limiter
 	}
+	if len(s.ipHTTPRateLimiter) >= s.maxIPRateLimiters {
+		return s.overflowLimiter
+	}
 	limiter = &ipRateLimiter{
-		Limiter: rate.NewLimiter(ipMaxRatePerSec, ipMaxBurstSize),
+		Limiter: rate.NewLimiter(rate.Limit(s.ipMaxRatePerSec), s.ipMaxBurstSize),
 		lastHit: time.Now(),
 	}
-	ipHTTPRateLimiter[ip] = limiter
+	s.ipHTTPRateLimiter[ip] = limiter
 	return limiter
 }
 
@@ -173,6 +172,27 @@ type RPCConfig struct {
 	AltDNSNames []string
 	// DisableDataAPI will disable all traffic to the HTTP data API routes.
 	DisableDataAPI bool
+	// MaxClients is the maximum number of active websocket connections.
+	// Zero means use the default (10000).
+	MaxClients int
+	// MaxConnsPerIP is the maximum number of active websocket connections
+	// per IP address, loopback excluded. Zero means use the default (8).
+	MaxConnsPerIP int
+	// IPRatePerSec is the per-IP HTTP data API request rate in
+	// requests/second. Zero means use the default (1).
+	IPRatePerSec float64
+	// IPBurstSize is the per-IP HTTP data API burst size. Zero means use
+	// the default (5).
+	IPBurstSize int
+	// MaxIPRateLimiters is the maximum number of entries in the per-IP
+	// rate limiter map. Zero means use the default (10000).
+	MaxIPRateLimiters int
+	// GlobalHTTPRate is the global HTTP data API request rate in
+	// requests/second. Zero means use the default (100).
+	GlobalHTTPRate float64
+	// GlobalHTTPBurst is the global HTTP data API burst size. Zero means
+	// use the default (1000).
+	GlobalHTTPBurst int
 }
 
 // allower is satisfied by rate.Limiter.
@@ -248,6 +268,22 @@ type Server struct {
 	mux *chi.Mux
 	// One listener for each address specified at (RPCConfig).ListenAddrs.
 	listeners []net.Listener
+
+	maxClients    int64
+	maxConnsPerIP int64
+
+	// Per-IP HTTP rate limiting state.
+	ipMaxRatePerSec   float64
+	ipMaxBurstSize    int
+	maxIPRateLimiters int
+	overflowLimiter   *ipRateLimiter
+	ipHTTPRateLimiter map[dex.IPKey]*ipRateLimiter
+	rateLimiterMtx    sync.RWMutex
+
+	// globalHTTPRateLimiter is a limit on the global HTTP request rate. The
+	// global rate limiter is like a rudimentary auto-spam filter for
+	// non-critical routes, including all routes registered as HTTP routes.
+	globalHTTPRateLimiter *rate.Limiter
 
 	// The client map indexes each wsLink by its id.
 	clientMtx sync.RWMutex
@@ -368,21 +404,77 @@ func NewServer(cfg *RPCConfig) (*Server, error) {
 		dataEnabled = 0
 	}
 
+	// Apply configurable rate limit and connection values, using defaults
+	// for any zero or negative fields.
+	maxCl := cfg.MaxClients
+	if maxCl <= 0 {
+		maxCl = DefaultMaxClients
+	}
+	maxPerIP := cfg.MaxConnsPerIP
+	if maxPerIP <= 0 {
+		maxPerIP = DefaultMaxConnsPerIP
+	}
+	ipRate := cfg.IPRatePerSec
+	if ipRate <= 0 {
+		ipRate = DefaultIPRatePerSec
+	}
+	ipBurst := cfg.IPBurstSize
+	if ipBurst <= 0 {
+		ipBurst = DefaultIPBurstSize
+	}
+	maxIPLimiters := cfg.MaxIPRateLimiters
+	if maxIPLimiters <= 0 {
+		maxIPLimiters = DefaultMaxIPRateLimiters
+	}
+	globalRate := cfg.GlobalHTTPRate
+	if globalRate <= 0 {
+		globalRate = DefaultGlobalHTTPRate
+	}
+	globalBurst := cfg.GlobalHTTPBurst
+	if globalBurst <= 0 {
+		globalBurst = DefaultGlobalHTTPBurst
+	}
+
+	log.Infof("Comms server config: maxClients=%d, maxConnsPerIP=%d, "+
+		"ipRate=%.1f/s, ipBurst=%d, maxIPLimiters=%d, globalRate=%.1f/s, globalBurst=%d",
+		maxCl, maxPerIP, ipRate, ipBurst, maxIPLimiters, globalRate, globalBurst)
+
 	// Create an HTTP router, putting a couple of useful middlewares in place.
+	//
+	// NOTE: Do not use middleware.RealIP here. It trusts X-Forwarded-For and
+	// X-Real-IP headers unconditionally, allowing any client to spoof their
+	// IP and bypass per-IP rate limiting. This server is designed to face the
+	// internet directly, not to run behind a reverse proxy. Multiple IP-based
+	// mechanisms (per-IP HTTP rate limiting, websocket connection counting via
+	// ipConnCount, quarantine checks, and wsLimiter) all rely on r.RemoteAddr
+	// being the true TCP peer address. Running behind a reverse proxy would
+	// cause all clients to share the proxy's IP, breaking connection limits
+	// and rate limiting. Properly supporting a reverse proxy would require a
+	// coordinated change across all IP-based checks with a trusted proxy
+	// allowlist, not just a middleware that silently rewrites RemoteAddr.
 	mux := chi.NewRouter()
-	mux.Use(middleware.RealIP)
 	mux.Use(middleware.Recoverer)
 
 	return &Server{
-		mux:         mux,
-		listeners:   listeners,
-		clients:     make(map[uint64]*wsLink),
-		wsLimiters:  make(map[dex.IPKey]*ipWsLimiter),
-		v6Prefixes:  make(map[dex.IPKey]int),
-		quarantine:  make(map[dex.IPKey]time.Time),
-		dataEnabled: dataEnabled,
-		rpcRoutes:   make(map[string]MsgHandler),
-		httpRoutes:  make(map[string]HTTPHandler),
+		mux:               mux,
+		listeners:         listeners,
+		maxClients:        int64(maxCl),
+		maxConnsPerIP:     int64(maxPerIP),
+		ipMaxRatePerSec:   ipRate,
+		ipMaxBurstSize:    ipBurst,
+		maxIPRateLimiters: maxIPLimiters,
+		overflowLimiter: &ipRateLimiter{
+			Limiter: rate.NewLimiter(rate.Limit(ipRate), ipBurst),
+		},
+		ipHTTPRateLimiter:     make(map[dex.IPKey]*ipRateLimiter),
+		globalHTTPRateLimiter: rate.NewLimiter(rate.Limit(globalRate), globalBurst),
+		clients:               make(map[uint64]*wsLink),
+		wsLimiters:            make(map[dex.IPKey]*ipWsLimiter),
+		v6Prefixes:            make(map[dex.IPKey]int),
+		quarantine:            make(map[dex.IPKey]time.Time),
+		dataEnabled:           dataEnabled,
+		rpcRoutes:             make(map[string]MsgHandler),
+		httpRoutes:            make(map[string]HTTPHandler),
 	}, nil
 }
 
@@ -401,7 +493,7 @@ func (s *Server) Run(ctx context.Context) {
 			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 			return
 		}
-		if s.clientCount() >= rpcMaxClients {
+		if s.clientCount() >= s.maxClients {
 			http.Error(w, "server at maximum capacity", http.StatusServiceUnavailable)
 			return
 		}
@@ -409,7 +501,7 @@ func (s *Server) Run(ctx context.Context) {
 		// Check websocket connection count for this IP before upgrading the
 		// conn so we can send an HTTP error code, but check again after
 		// upgrade/hijack so they cannot initiate many simultaneously.
-		if s.ipConnCount(ip) >= rpcMaxConnsPerIP {
+		if s.ipConnCount(ip) >= s.maxConnsPerIP {
 			http.Error(w, "too many connections from your address", http.StatusServiceUnavailable)
 			return
 		}
@@ -473,13 +565,13 @@ func (s *Server) Run(ctx context.Context) {
 		for {
 			select {
 			case <-ticker.C:
-				rateLimiterMtx.Lock()
-				for ip, limiter := range ipHTTPRateLimiter {
+				s.rateLimiterMtx.Lock()
+				for ip, limiter := range s.ipHTTPRateLimiter {
 					if time.Since(limiter.lastHit) > time.Minute {
-						delete(ipHTTPRateLimiter, ip)
+						delete(s.ipHTTPRateLimiter, ip)
 					}
 				}
-				rateLimiterMtx.Unlock()
+				s.rateLimiterMtx.Unlock()
 			case <-ctx.Done():
 				return
 			}
@@ -565,7 +657,7 @@ func (s *Server) wsLimiter(ip dex.IPKey) *routeLimiter {
 	}
 
 	if l := s.wsLimiters[ip]; l != nil {
-		if l.conns >= rpcMaxConnsPerIP {
+		if l.conns >= s.maxConnsPerIP {
 			return nil
 		}
 		l.conns++
@@ -735,10 +827,10 @@ func (s *Server) removeClient(id uint64) {
 }
 
 // Get the number of active clients.
-func (s *Server) clientCount() uint64 {
+func (s *Server) clientCount() int64 {
 	s.clientMtx.RLock()
 	defer s.clientMtx.RUnlock()
-	return uint64(len(s.clients))
+	return int64(len(s.clients))
 }
 
 // Get the number of websocket connections for a given IP, excluding loopback.
