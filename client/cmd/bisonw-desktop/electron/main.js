@@ -32,9 +32,9 @@ bisonwProcess = spawn(bisonwPath);
 
 bisonwProcess.stdout.on("data", async (data) => {
   const message = data.toString();
-  if (isAppReady && message.includes("LOGIN AND TRADE")) {
+  if (message.includes("LOGIN AND TRADE")) {
     isWebServerReady = true;
-    createWindow();
+    if (isAppReady) createWindow();
   }
 
   // Watch for logout messages and if there's an active order, warn the user via notification.
@@ -79,26 +79,20 @@ bisonwProcess.stdout.on("data", async (data) => {
   console.log(`${data}`);
 });
 
-bisonwProcess.on("exit", (code) => {
-  console.log(`Bison Wallet process exited with code ${code}`);
-
-  if (isShuttingDown) {
-    app.exit(code || 0);
-  }
+bisonwProcess.on("exit", (code, signal) => {
+  console.log(`Bison Wallet process exited with code ${code}, signal ${signal}`);
+  app.exit(code || 0);
 });
 
 bisonwProcess.stderr.on("data", (data) => {
   console.error(data.toString());
-
-  if (!isShuttingDown) {
-    isShuttingDown = true;
-    console.log("Bison Wallet process reported an error. Shutting down...");
-    bisonwProcess.kill();
-  }
 });
 
 app.whenReady().then(() => {
   isAppReady = true;
+
+  // If the web server became ready before the app, create the window now.
+  if (isWebServerReady) createWindow();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -132,7 +126,7 @@ app.on("before-quit", (e) => {
 });
 
 function createWindow() {
-  if (!isWebServerReady) return;
+  if (!isWebServerReady || isShuttingDown) return;
 
   const win = new BrowserWindow({
     width: 1000,

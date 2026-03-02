@@ -1,8 +1,6 @@
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
-//go:build !darwin
-
 /*
 The sync server is a tiny HTTP server that handles synchronization of multiple
 instances of bisonw-desktop. Any bisonw-desktop instance that manages to get a

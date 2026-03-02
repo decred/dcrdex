@@ -1,5 +1,3 @@
-//go:build !darwin
-
 package main
 
 // Full screen cgo solution. Seems to work on Debian.

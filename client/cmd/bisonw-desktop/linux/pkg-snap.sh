@@ -6,5 +6,5 @@ SCRIPT_DIR=$(dirname "$0")
 
 source $SCRIPT_DIR/common.sh
 
-pkg/prepare-snap.sh
+linux/prepare-snap.sh
 snapcraft --verbose --output $BUILD_DIR/

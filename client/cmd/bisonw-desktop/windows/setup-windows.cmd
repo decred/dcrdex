@@ -85,4 +85,4 @@ if exist dcrdex rd /s /q dcrdex
 cd dcrdex\client\cmd\bisonw-desktop
 
 :: Install toolchain and SDKs
-powershell  -ExecutionPolicy Bypass -File pkg\setup-windows-stage2.ps1
+powershell  -ExecutionPolicy Bypass -File windows\setup-windows-stage2.ps1

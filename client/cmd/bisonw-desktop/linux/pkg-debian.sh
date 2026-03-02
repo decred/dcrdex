@@ -6,8 +6,17 @@
 # turn this on for debugging, keep noise low for prod builds
 # set -ex
 
-source pkg/common.sh
+source linux/common.sh
 VER="1.1.0-pre" # pre, beta, rc1, etc.
+
+# Parse flags.
+TAGS=""
+for arg in "$@"; do
+  case $arg in
+    --xmr) TAGS="${TAGS:+${TAGS} }xmr" ;;
+    *) echo "Unknown option: $arg"; exit 1 ;;
+  esac
+done
 
 # A directory containing metadata files
 SRC_DIR="./src"
@@ -54,8 +63,15 @@ cd $CWD
 
 # Build bisonw
 LDFLAGS="-s -w -X main.Version=${VER}${META:++${META}}"
-GOOS=linux GOARCH=${ARCH} go build -o "${BIN_BUILDPATH}" -ldflags "$LDFLAGS"
+GOOS=linux GOARCH=${ARCH} go build ${TAGS:+-tags ${TAGS}} -o "${BIN_BUILDPATH}" -ldflags "$LDFLAGS"
 chmod 755 "${BIN_BUILDPATH}"
+
+# Bundle XMR shared library if building with XMR support.
+if [[ " ${TAGS} " == *" xmr "* || "${TAGS}" == "xmr" ]]; then
+  XMR_LIB_DIR="${DEB_DIR}/usr/lib/bisonw"
+  mkdir -p "${XMR_LIB_DIR}"
+  cp "../../asset/xmr/lib/linux-${ARCH}/libwallet2_api_c.so" "${XMR_LIB_DIR}/"
+fi
 
 # Full control file specification -
 # https://www.debian.org/doc/debian-policy/ch-controlfields.html

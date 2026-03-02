@@ -1,7 +1,7 @@
 build/
 certs/
-pkg/windows-msi/bin
-pkg/windows-msi/obj
+windows/windows-msi/bin
+windows/windows-msi/obj
 electron/node_modules/
 electron/resources/
 electron/out

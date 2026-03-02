@@ -8,7 +8,7 @@ Download and run setup as Administrator (privileges are required in order to set
 
  ```batch
  cd %UserProfile%
- curl -O https://raw.githubusercontent.com/decred/dcrdex/master/client/cmd/bisonw-desktop/pkg/setup-windows.cmd
+ curl -O https://raw.githubusercontent.com/decred/dcrdex/master/client/cmd/bisonw-desktop/windows/setup-windows.cmd
  setup-windows.cmd <branch> <repoUrl>
  ```
 
@@ -25,7 +25,7 @@ Download and run setup as Administrator (privileges are required in order to set
 Build the Windows binary: 
 
 ```batch
-pkg\build-windows.cmd
+windows\build-windows.cmd
 ```
 
 This will also build the site bundle if `client/webserver/site/dist` does not exist.
@@ -35,7 +35,7 @@ The resulting `.exe` will be in `build\windows`.
 ### Build the MSI (Windows Installer)
 
 ```batch
-pkg\pkg-windows.cmd
+windows\pkg-windows.cmd
 ```
 
 The resulting installer binary will be located in `build\msi`.
