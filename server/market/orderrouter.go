@@ -584,11 +584,12 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 				}
 				buyBuffer := tunnel.MarketBuyBuffer()
 				lotWithBuffer := uint64(float64(lotSize) * buyBuffer)
-				swapVal = matcher.BaseToQuote(midGap, lotWithBuffer)
-				if trade.Quantity < swapVal {
+				bufferQty := matcher.BaseToQuote(midGap, lotWithBuffer)
+				if trade.Quantity < bufferQty {
 					return false, msgjson.NewError(msgjson.FundingError, "order quantity does not satisfy market buy buffer. %d < %d. midGap = %d",
-						trade.Quantity, swapVal, midGap)
+						trade.Quantity, bufferQty, midGap)
 				}
+				swapVal = trade.Quantity
 			}
 		}
 

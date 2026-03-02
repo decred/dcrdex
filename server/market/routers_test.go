@@ -484,6 +484,7 @@ func (b *TBackend) ValidateFeeRate(asset.Coin, uint64) bool {
 
 type tUTXOBackend struct {
 	*TBackend
+	lastSwapVal uint64
 }
 
 func (b *tUTXOBackend) FundingCoin(ctx context.Context, coinID, redeemScript []byte) (asset.FundingCoin, error) {
@@ -496,6 +497,7 @@ func (b *tUTXOBackend) VerifyUnspentCoin(_ context.Context, coinID []byte) error
 }
 
 func (b *tUTXOBackend) ValidateOrderFunding(swapVal, valSum, inputCount, inputsSize, maxSwaps uint64, nfo *dex.Asset) bool {
+	b.lastSwapVal = swapVal
 	return !b.unfunded
 }
 
@@ -1147,6 +1149,13 @@ func TestMarketStartProcessStop(t *testing.T) {
 	mkt.ServerTime = 0
 	oRig.auth.sends = nil
 	ensureSuccess("market buy")
+
+	// Verify that ValidateOrderFunding received the actual order quantity as
+	// swapVal, not the buffer minimum. This was a bug where swapVal was set
+	// to the buffer minimum, causing inflated fee estimates.
+	if oRig.btc.lastSwapVal != mktBuyQty {
+		t.Fatalf("market buy swapVal: expected trade.Quantity %d, got %d", mktBuyQty, oRig.btc.lastSwapVal)
+	}
 
 	// Create the order manually, so that we can compare the IDs as another check
 	// of equivalence.
