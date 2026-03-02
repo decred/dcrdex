@@ -74,7 +74,7 @@ const traitTokenApprover = 1 << 13
 const traitTicketBuyer = 1 << 15
 const traitFundsMixer = 1 << 17
 
-const traitsExtraOpts = traitLogFiler | traitRecoverer | traitRestorer | traitRescanner | traitPeerManager | traitTokenApprover
+const traitsExtraOpts = traitLogFiler | traitRecoverer | traitRestorer | traitRescanner | traitTokenApprover
 
 export const ticketStatusUnknown = 0
 export const ticketStatusUnmined = 1
@@ -238,7 +238,7 @@ export default class WalletsPage extends BasePage {
   tickerTemplates: Record<string, Record<string, PageElement>>
   tickerButtons: Record<string, PageElement>
   balanceDetails: Record<string, PageElement>
-  walletConfig: Record<string, PageElement>
+  networkRowTmpls: Record<number, Record<string, PageElement>>
   newWalletForm: NewWalletForm
   reconfigForm: WalletConfigForm
   walletCfgGuide: PageElement
@@ -270,6 +270,8 @@ export default class WalletsPage extends BasePage {
     isMixing: boolean
   }
 
+  actionAssetID: number
+  actionNetAssetID: number
   bridgePaths: Record<number, Record<number, string[]>>
   bridgingRoot: Root | null
   bridgingPopupRef: React.RefObject<BridgePopupHandle>
@@ -291,8 +293,7 @@ export default class WalletsPage extends BasePage {
     this.loadBridgePaths()
 
     this.balanceDetails = Doc.parseTemplate(page.balanceDetails)
-    this.walletConfig = Doc.parseTemplate(page.walletConfig)
-    this.walletConfig.div = page.walletConfig
+    this.networkRowTmpls = {}
 
     net = app().user.net
 
@@ -323,14 +324,23 @@ export default class WalletsPage extends BasePage {
     )
 
     Doc.bind(page.cancelForce, 'click', () => { this.forms.close() })
+
+    // Network actions modal
+    this.actionAssetID = -1
+    this.actionNetAssetID = -1
+    Doc.bind(page.actTxHistory, 'click', () => { this.forms.close(); this.showTxHistory(this.actionNetAssetID) })
+    Doc.bind(page.actCreateWallet, 'click', () => { this.forms.close(); this.showNewWallet(this.actionNetAssetID) })
+    Doc.bind(page.actConnect, 'click', () => { this.forms.close(); this.doConnect(this.actionAssetID) })
+    Doc.bind(page.actUnlock, 'click', () => { this.forms.close(); this.openWallet(this.actionAssetID) })
+    Doc.bind(page.actLock, 'click', () => { this.forms.close(); this.lock(this.actionAssetID) })
+    Doc.bind(page.actSettings, 'click', () => { this.forms.close(); this.showReconfig(this.actionAssetID) })
+    Doc.bind(page.actManagePeers, 'click', () => { this.forms.close(); this.showManagePeersForm(this.actionAssetID) })
+    Doc.bind(page.actEnable, 'click', () => { this.forms.close(); this.showToggleWalletStatus(false) })
+
     Doc.bind(page.createWallet, 'click', () => this.showNewWallet(this.selectedWalletID))
-    Doc.bind(page.connectBttn, 'click', () => this.doConnect(this.selectedWalletID))
     Doc.bind(page.send, 'click', () => this.showSendForm())
     Doc.bind(page.receive, 'click', () => this.showDeposit())
     Doc.bind(page.bridge, 'click', () => this.showBridgingPopup())
-    Doc.bind(page.unlockBttn, 'click', () => this.openWallet(this.selectedWalletID))
-    Doc.bind(page.lockBttn, 'click', () => this.lock(this.selectedWalletID))
-    Doc.bind(page.reconfigureBttn, 'click', () => this.showReconfig(this.selectedWalletID))
     Doc.bind(page.rescanWallet, 'click', () => this.rescanWallet(this.selectedWalletID))
 
     const getTxID = (): string => {
@@ -382,7 +392,6 @@ export default class WalletsPage extends BasePage {
     Doc.bind(page.disableWallet, 'click', async () => { this.showToggleWalletStatus(true) })
     Doc.bind(page.enableWallet, 'click', async () => { this.showToggleWalletStatus(false) })
     Doc.bind(page.toggleWalletStatusSubmit, 'click', async () => { this.toggleWalletStatus() })
-    Doc.bind(page.managePeers, 'click', async () => { this.showManagePeersForm() })
     Doc.bind(page.addPeerSubmit, 'click', async () => { this.submitAddPeer() })
     Doc.bind(page.unapproveTokenAllowance, 'click', async () => { this.showUnapproveTokenAllowanceTableForm() })
     Doc.bind(page.unapproveTokenSubmit, 'click', async () => { this.submitUnapproveTokenAllowance() })
@@ -455,7 +464,7 @@ export default class WalletsPage extends BasePage {
       walletstate: (note: WalletStateNote) => { this.handleWalletStateNote(note) },
       walletconfig: (note: WalletStateNote) => { this.handleWalletStateNote(note) },
       walletsync: (note: WalletSyncNote) => {
-        if (note.assetID === this.selectedWalletID) this.updateSyncAndPeers()
+        if (this.selectedTicker?.isRelatedAsset(note.assetID)) this.updateNetworkRowSync(note.assetID)
       },
       createwallet: (note: WalletCreationNote) => { this.handleCreateWalletNote(note) },
       walletnote: (note: WalletNote) => { this.handleCustomWalletNote(note) },
@@ -822,7 +831,8 @@ export default class WalletsPage extends BasePage {
   }
 
   // showManagePeersForm displays the manage peers form.
-  async showManagePeersForm () {
+  async showManagePeersForm (assetID: number) {
+    this.selectedWalletID = assetID
     const page = this.page
     await this.updateWalletPeersTable()
     Doc.hide(page.managePeersErr)
@@ -1050,20 +1060,10 @@ export default class WalletsPage extends BasePage {
     const chainWallet = ta.blockchainWallet()
     Doc.setVis(chainWallet && !chainWallet.wallet, page.createWalletBox)
     Doc.setVis(ta.hasWallets, page.sendReceiveBox)
-    const w = chainWallet?.wallet
-    Doc.setVis(w, page.walletConfig)
 
     // Show bridge button if any network asset supports bridging
     const hasBridging = ta.networkAssets.some(na => this.hasBridgingSupport(na.assetID))
     Doc.setVis(hasBridging && ta.hasWallets, page.bridge)
-
-    if (w) {
-      Doc.show(page.walletConfig)
-      page.blockchainClass.textContent = w.class
-      const walletDef = app().walletDefinition(w.assetID, w.type)
-      page.walletType.textContent = walletDef.tab
-      this.updateSyncAndPeers()
-    }
 
     this.updateDisplayedTickerBalance()
     this.updateFeeState()
@@ -1083,6 +1083,7 @@ export default class WalletsPage extends BasePage {
     Doc.setVis(total > 0, page.send)
     if (!showBalanceBreakdown) return
 
+    this.networkRowTmpls = {}
     Doc.empty(page.balanceBreakdown)
     for (const { assetID, chainName, chainLogo, bal: { available, locked, immature }, token } of ta.networkAssets) {
       const { wallet: w } = app().assets[assetID]
@@ -1092,69 +1093,165 @@ export default class WalletsPage extends BasePage {
       tmpl.chainLogo.src = chainLogo
       tmpl.chainName.textContent = chainName
       const hasWallet = Boolean(w)
-      const canCreate = !hasWallet && (!token || token.parentMade)
       if (hasWallet) {
         if (immature > 0) tmpl.immature.textContent = Doc.formatCoinValue(immature, ui)
         if (locked > 0) tmpl.locked.textContent = Doc.formatCoinValue(locked, ui)
         tmpl.avail.textContent = Doc.formatCoinValue(available, ui)
         tmpl.allocation.textContent = String(total ? Math.round((available + locked + immature) / total * 100) : 0) + '%'
       }
-      Doc.bind(tmpl.txsBttn, 'click', () => this.showTxHistory(assetID))
-      Doc.bind(tmpl.createWalletBttn, 'click', () => this.showNewWallet(assetID))
+      // Per-network wallet controls
+      const configAssetID = token ? token.parentID : assetID
+      Doc.bind(tmpl.actionsBttn, 'click', () => this.showNetworkActions(configAssetID, assetID, chainName))
 
-      Doc.setVis(hasWallet, tmpl.txsBttn)
-      Doc.setVis(canCreate, tmpl.createWalletBttn)
-    }
+      const walletForLock = token ? app().walletMap[token.parentID] : w
+      if (walletForLock) {
+        const { encrypted, open: unlocked, running, disabled, peerCount, syncProgress, syncStatus } = walletForLock
+        if (disabled) {
+          Doc.show(tmpl.statusDisabled)
+        } else {
+          // Status icons
+          if (!running) {
+            Doc.show(tmpl.statusOff)
+          } else {
+            const syncing = syncProgress < 1 || syncStatus.txs !== undefined
+            if (syncing) {
+              Doc.show(tmpl.statusSyncing)
+            } else if (encrypted && !unlocked) {
+              Doc.show(tmpl.statusLocked)
+            } else {
+              Doc.show(tmpl.statusReady)
+            }
+          }
 
-    // TODO: handle reserves deficit with a notification.
-    // if (bal.reservesDeficit > 0) addPrimaryBalance(intl.prep(intl.ID_RESERVES_DEFICIT), bal.reservesDeficit, intl.prep(intl.ID_RESERVES_DEFICIT_MSG))
+          // Sync info
+          if (running) {
+            tmpl.syncInfo.textContent = `${(syncProgress * 100).toFixed(1)}%`
+            tmpl.syncInfo.dataset.tooltip = `${peerCount} peers`
+            tmpl.syncHeight.textContent = String(syncStatus.blocks)
 
-    // page.purchaserBal.textContent = Doc.formatFourSigFigs(bal.available / ui.conventional.conversionFactor)
-    // app().bindTooltips(page.balanceDetailBox)
-  }
-
-  updateSyncAndPeers () {
-    const { page, selectedWalletID: assetID } = this
-    const w = app().walletMap[assetID]
-    const { peerCount, syncProgress, syncStatus, encrypted, open: unlocked, running, disabled } = w
-
-    Doc.hide(page.txSyncBox, page.txFindingAddrs, page.txProgress)
-    if (running) {
-      page.peerCount.textContent = String(peerCount)
-      page.syncProgress.textContent = `${(syncProgress * 100).toFixed(1)}%`
-      page.syncHeight.textContent = String(syncStatus.blocks)
-      if (syncStatus.txs !== undefined) {
-        Doc.show(page.txSyncBox)
-        if (syncStatus.txs === 0 && syncStatus.blocks >= syncStatus.targetHeight) Doc.show(page.txFindingAddrs)
-        else {
-          Doc.show(page.txProgress)
-          const prog = syncStatus.txs / syncStatus.targetHeight
-          page.txProgress.textContent = `${(prog * 100).toFixed(1)}%`
+            // Balance discovery
+            Doc.hide(tmpl.txSyncBox, tmpl.txFindingAddrs)
+            if (syncStatus.txs !== undefined) {
+              Doc.show(tmpl.txSyncBox)
+              if (syncStatus.txs === 0 && syncStatus.blocks >= syncStatus.targetHeight) {
+                Doc.show(tmpl.txFindingAddrs)
+              } else {
+                const prog = syncStatus.txs / syncStatus.targetHeight
+                tmpl.txProgress.textContent = `${(prog * 100).toFixed(1)}%`
+              }
+            }
+          } else {
+            tmpl.syncInfo.textContent = '—'
+          }
         }
       }
-    } else {
-      page.peerCount.textContent = '—'
-      page.syncProgress.textContent = '—'
-      page.syncHeight.textContent = '—'
+
+      // Store template for per-row sync updates
+      this.networkRowTmpls[configAssetID] = tmpl
     }
 
-    Doc.hide(
-      page.statusReady, page.statusLocked, page.statusOff, page.statusDisabled,
-      page.statusSyncing, page.connectBttn, page.lockBttn, page.unlockBttn
-    )
+    app().bindTooltips(page.balanceBreakdown)
+  }
 
-    if (disabled) return Doc.show(page.statusDisabled)
-    if (!running) return Doc.show(page.connectBttn, page.statusLocked)
+  updateNetworkRowSync (assetID: number) {
+    const tmpl = this.networkRowTmpls[assetID]
+    if (!tmpl) return
+    const w = app().walletMap[assetID]
+    if (!w) return
+    const { peerCount, syncProgress, syncStatus, encrypted, open: unlocked, running, disabled } = w
+
+    // Reset status icons
+    Doc.hide(tmpl.statusReady, tmpl.statusLocked, tmpl.statusOff, tmpl.statusDisabled, tmpl.statusSyncing)
+
+    if (disabled) {
+      Doc.show(tmpl.statusDisabled)
+      tmpl.syncInfo.textContent = '—'
+      return
+    }
+
+    if (!running) {
+      Doc.show(tmpl.statusOff)
+      tmpl.syncInfo.textContent = '—'
+      return
+    }
+
+    // Sync info
+    tmpl.syncInfo.textContent = `${(syncProgress * 100).toFixed(1)}%`
+    tmpl.syncInfo.dataset.tooltip = `${peerCount} peers`
+    tmpl.syncHeight.textContent = String(syncStatus.blocks)
+
+    // Balance discovery
+    Doc.hide(tmpl.txSyncBox, tmpl.txFindingAddrs)
+    if (syncStatus.txs !== undefined) {
+      Doc.show(tmpl.txSyncBox)
+      if (syncStatus.txs === 0 && syncStatus.blocks >= syncStatus.targetHeight) {
+        Doc.show(tmpl.txFindingAddrs)
+      } else {
+        const prog = syncStatus.txs / syncStatus.targetHeight
+        tmpl.txProgress.textContent = `${(prog * 100).toFixed(1)}%`
+      }
+    }
+
+    // Status icons
     const syncing = syncProgress < 1 || syncStatus.txs !== undefined
-    if (syncing) return Doc.show(page.statusSyncing)
-    Doc.show(page.statusReady)
-    const hasActiveOrders = app().haveActiveOrders(assetID)
-    const lockable = unlocked && encrypted && !hasActiveOrders
-    const unlockable = encrypted && !unlocked
-    Doc.setVis(unlockable, page.unlockBttn)
-    Doc.setVis(lockable, page.lockBttn)
-    if (unlockable) Doc.show(page.unlockBttn)
-    else if (lockable) Doc.show(page.lockBttn)
+    if (syncing) {
+      Doc.show(tmpl.statusSyncing)
+      return
+    }
+    if (encrypted && !unlocked) {
+      Doc.show(tmpl.statusLocked)
+    } else {
+      Doc.show(tmpl.statusReady)
+    }
+  }
+
+  showNetworkActions (configAssetID: number, assetID: number, chainName: string) {
+    const { page } = this
+    this.actionAssetID = configAssetID
+    this.actionNetAssetID = assetID
+    page.networkActionsHeader.textContent = chainName
+
+    // Hide all action links
+    Doc.hide(page.actTxHistory, page.actCreateWallet, page.actConnect,
+      page.actUnlock, page.actLock, page.actSettings, page.actManagePeers, page.actEnable)
+
+    const { wallet: w } = app().assets[assetID]
+    const hasWallet = Boolean(w)
+    const walletForActions = app().walletMap[configAssetID]
+
+    if (walletForActions) {
+      const { encrypted, open: unlocked, running, disabled, traits } = walletForActions
+      if (disabled) {
+        Doc.show(page.actEnable)
+      } else {
+        if (hasWallet) Doc.show(page.actTxHistory)
+        Doc.show(page.actSettings)
+        if (!running) {
+          Doc.show(page.actConnect)
+        } else {
+          if (encrypted && !unlocked) {
+            Doc.show(page.actUnlock)
+          } else if (encrypted && unlocked && !app().haveActiveOrders(configAssetID)) {
+            Doc.show(page.actLock)
+          }
+          if (traits & traitPeerManager) {
+            Doc.show(page.actManagePeers)
+          }
+        }
+      }
+    } else if (hasWallet) {
+      Doc.show(page.actTxHistory, page.actSettings)
+    } else {
+      // Check if we can create a wallet (token whose parent exists)
+      const asset = app().assets[assetID]
+      if (asset.token) {
+        if (app().walletMap[asset.token.parentID]) Doc.show(page.actCreateWallet)
+      } else {
+        Doc.show(page.actCreateWallet)
+      }
+    }
+
+    this.forms.show(page.networkActionsForm)
   }
 
   updateFeeState () {
@@ -2224,7 +2321,6 @@ export default class WalletsPage extends BasePage {
     Doc.setVis(wallet.traits & traitRecoverer, page.recoverWallet)
     Doc.setVis(wallet.traits & traitRestorer, page.exportWallet)
     Doc.setVis(wallet.traits & traitRescanner, page.rescanWallet)
-    Doc.setVis(wallet.traits & traitPeerManager && !wallet.disabled, page.managePeers)
     Doc.setVis(wallet.traits & traitTokenApprover && !wallet.disabled, page.unapproveTokenAllowance)
 
     Doc.setVis(wallet.traits & traitsExtraOpts, page.otherActionsLabel)
@@ -2409,7 +2505,7 @@ export default class WalletsPage extends BasePage {
       page.errorModalMsg.textContent = intl.prep(intl.ID_CONNECT_WALLET_ERR_MSG, { assetName: symbol, errMsg: res.msg })
       this.forms.show(page.errorModal)
     }
-    this.updateSyncAndPeers()
+    this.updateDisplayedTickerBalance()
   }
 
   assetUpdated (assetID: number, oldForm?: PageElement, successMsg?: string) {
@@ -2515,7 +2611,8 @@ export default class WalletsPage extends BasePage {
     const res = await postJSON('/api/closewallet', { assetID: assetID })
     loaded()
     if (!app().checkResponse(res)) return
-    this.updateSyncAndPeers()
+    if (this.selectedTicker.isRelatedAsset(assetID)) this.updateDisplayedTicker()
+    this.updateNetworkRowSync(assetID)
     this.updatePrivacy()
   }
 
@@ -2645,7 +2742,7 @@ export default class WalletsPage extends BasePage {
    */
   handleWalletStateNote (note: WalletStateNote): void {
     const { assetID } = note.wallet
-    if (this.selectedTicker.networkAssetLookup[assetID]) this.updateDisplayedTicker()
+    if (this.selectedTicker.isRelatedAsset(assetID)) this.updateDisplayedTicker()
     if (assetID === this.selectedWalletID) this.updateFeeState()
     if (note.topic === 'WalletPeersUpdate' &&
       assetID === this.selectedWalletID &&
@@ -2682,7 +2779,8 @@ export default class WalletsPage extends BasePage {
     switch (walletNote.route) {
       case 'tipChange': {
         const n = walletNote as TipChangeNote
-        if (n.assetID === this.selectedWalletID) this.page.syncHeight.textContent = String(n.tip)
+        const rowTmpl = this.networkRowTmpls[n.assetID]
+        if (rowTmpl) rowTmpl.syncHeight.textContent = String(n.tip)
         switch (n.assetID) {
           case 42: { // dcr
             if (!this.stakeStatus) return
