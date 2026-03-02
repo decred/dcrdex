@@ -87,6 +87,8 @@
                       <th>Available</th>
                       <th>Locked</th>
                       <th>Pending</th> <!-- immature -->
+                      <th>Status</th>
+                      <th>Sync</th>
                       <th></th>
                     </tr>
                   </thead>
@@ -102,18 +104,25 @@
                       <td data-tmpl="avail">—</td>
                       <td data-tmpl="locked">—</td>
                       <td data-tmpl="immature">—</td>
-                      <td class="text-nowrap">
-                        <button data-tmpl="txsBttn" class="micro">Txs</button>
-                        <button data-tmpl="createWalletBttn" class="micro">Create Wallet</button>
-                        <button data-tmpl="unlockNetBttn" class="micro d-hide" title="Unlock">
-                          <span class="ico-unlocked"></span>
-                        </button>
-                        <button data-tmpl="lockNetBttn" class="micro d-hide" title="Lock">
-                          <span class="ico-locked"></span>
-                        </button>
-                        <button data-tmpl="configNetBttn" class="micro d-hide" title="Configure">
-                          <span class="ico-settings"></span>
-                        </button>
+                      <td class="text-center">
+                        <span data-tmpl="statusReady" class="d-hide ico-unlocked fs14" data-tooltip="Ready"></span>
+                        <span data-tmpl="statusLocked" class="d-hide ico-locked fs14" data-tooltip="Locked"></span>
+                        <span data-tmpl="statusOff" class="d-hide ico-sleeping fs14" data-tooltip="Off"></span>
+                        <span data-tmpl="statusDisabled" class="d-hide ico-cross fs14 grey" data-tooltip="Disabled"></span>
+                        <span data-tmpl="statusSyncing" class="d-hide ico-robot fs14 grey" data-tooltip="Syncing"></span>
+                      </td>
+                      <td class="text-nowrap fs14">
+                        <span data-tmpl="syncInfo"></span>
+                        <span data-tmpl="syncHeight" class="d-hide"></span>
+                        <span data-tmpl="txSyncBox" class="d-hide">
+                          <span data-tmpl="txProgress"></span>
+                          <span data-tmpl="txFindingAddrs" class="d-hide">
+                            <span class="fs10 ico-spinner spinner me-1"></span>
+                          </span>
+                        </span>
+                      </td>
+                      <td>
+                        <span data-tmpl="actionsBttn" class="ico-settings fs16 pointer hoverbg p-1"></span>
                       </td>
                     </tr>
                   </tbody>
@@ -271,90 +280,6 @@
               </div>
             </section>
 
-            {{- /* WALLET CONFIGURATION */ -}}
-            <section id="walletConfig">
-              <!-- wallet type, wallet class, wallet status, -->
-              <div class="d-flex justify-content-between align-items-center p-3 lh1">
-                <div class="flex-center">
-                  <img data-logo class="micro-icon me-1"> 
-                  <span class="fs20 demi">Wallet Configuration</span>
-                </div>
-                <div class="flex-center fs18">
-                  <div id="statusLocked" class="flex-center">
-                    <span class="ico-locked fs14 me-1"></span>
-                    <span>[[[:title:locked]]]</span>
-                  </div>
-                  <div id="statusReady" class="flex-center">
-                    <span class="ico-unlocked fs14 me-1"></span>
-                    <span>[[[:title:ready]]]</span>
-                  </div>
-                  <div id="statusOff" class="flex-center">
-                    <span class="ico-sleeping fs14 me-1"></span>
-                    <span>[[[:title:off]]]</span>
-                  </div>
-                  <div id="statusDisabled" class="flex-center grey">
-                    <span class="ico-cross fs14 me-1"></span>
-                    <span>[[[Disabled]]]</span>
-                  </div>
-                  <div id="statusSyncing" class="flex-center grey">
-                    <span class="ico-robot fs14 me-1"></span>
-                    <span>Syncing</span>
-                  </div>
-                </div>
-              </div>
-              <div class="d-flex">
-                <div class="col-12 flex-stretch-column border-top p-2">
-                  <div class="d-flex justify-content-between align-items-center">
-                    <span>[[[Type]]]</span>
-                    <span id="walletType" class="demi"></span>
-                  </div>
-                  <div class="d-flex justify-content-between align-items-center">
-                    <span>Class</span>
-                    <span id="blockchainClass" class="demi"></span>
-                  </div>
-                  <div class="flex-grow-1 flex-stretch-column justify-content-end pt-2">
-                    <div class="d-flex align-items-stretch">
-                      <button id="unlockBttn" class="flex-grow-1 small me-1">[[[Unlock]]]</button>
-                      <button id="lockBttn" class="flex-grow-1 small me-1">[[[Lock]]]</button>
-                      <button id="connectBttn" class="flex-grow-1 small me-1">[[[Connect]]]</button>
-                      <button id="reconfigureBttn" class="flex-grow-1 small">
-                        <span class="ico-settings"></span>
-                        <span>[[[Configure]]]</span>
-                      </button>
-                    </div>
-                    
-                  </div>
-                </div>
-                {{- /* SYNC STATUS */ -}}
-                <div class="col-12 flex-stretch-column border-top border-left p-2">
-                  <div class="d-flex justify-content-between align-items-center">
-                    <span>[[[Peer Count]]]</span>
-                    <span id="peerCount" class="demi">—</span>
-                  </div>
-                  <div class="d-flex justify-content-between align-items-center">
-                    <span>[[[Block Sync]]]</span>
-                    <span id="syncProgress" class="demi">—</span>
-                  </div>
-                  <div class="d-flex justify-content-between align-items-center">
-                    <span>Blocks</span>
-                    <span id="syncHeight" class="demi">—</span>
-                  </div>
-                  <div id="txSyncBox" class="d-hide">
-                    <span>[[[Balance Discovery]]]</span>
-                    <span id="txProgress" class="demi text-end"></span>
-                    <span id="txFindingAddrs" class="demi">
-                      <div class="d-flex align-items-center justify-content-end">
-                        <div class="fs10 ico-spinner spinner me-1"></div>
-                        <span>[[[Finding Addresses]]]</span>
-                      </div>
-                    </span>
-                  </div>
-                  <div class="flex-grow-1 flex-stretch-column justify-content-end pt-2">
-                    <button id="managePeers" class="small">[[[manage_peers]]]</button>
-                  </div>
-                </div>
-              </div>
-            </section>
 
             {{- /* STAKING */ -}}
             <section id="stakingBox" class="position-relative d-flex align-items-stretch border">
@@ -632,6 +557,22 @@
         <span class="ico-check" id="checkmark"></span>
       </div>
       <div id="successMessage" class="fs22"></div>
+    </form>
+
+    {{- /* NETWORK ACTIONS */ -}}
+    <form id="networkActionsForm" class="d-hide">
+      <div class="form-closer"><span class="ico-cross"></span></div>
+      <header id="networkActionsHeader"></header>
+      <div class="flex-stretch-column">
+        <div id="actTxHistory" class="d-hide flex-center p-2 fs20 pointer hoverbg border-top">Transaction History</div>
+        <div id="actCreateWallet" class="d-hide flex-center p-2 fs20 pointer hoverbg border-top">Create Wallet</div>
+        <div id="actConnect" class="d-hide flex-center p-2 fs20 pointer hoverbg border-top">Connect</div>
+        <div id="actUnlock" class="d-hide flex-center p-2 fs20 pointer hoverbg border-top">Unlock</div>
+        <div id="actLock" class="d-hide flex-center p-2 fs20 pointer hoverbg border-top">Lock</div>
+        <div id="actSettings" class="d-hide flex-center p-2 fs20 pointer hoverbg border-top">Settings</div>
+        <div id="actManagePeers" class="d-hide flex-center p-2 fs20 pointer hoverbg border-top">Manage Peers</div>
+        <div id="actEnable" class="d-hide flex-center p-2 fs20 pointer hoverbg border-top">Enable</div>
+      </div>
     </form>
 
     {{- /* NEW WALLET */ -}}
