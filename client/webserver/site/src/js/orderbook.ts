@@ -14,7 +14,6 @@ export interface MarketOrderEstimate {
   orderFillPct: number // % of the order that can be filled
   bookDepthPct: number // % of book side consumed (by base qty)
   levelsConsumed: number // Number of price levels consumed
-  receivedEstimate: number // Estimated received amount (base atoms for buy, quote atoms for sell)
 }
 
 export default class OrderBook {
@@ -187,18 +186,20 @@ export default class OrderBook {
       worstRate = ord.msgRate
 
       if (isMarketBuy) {
-        // qty is in quote atoms. Each order costs qtyAtomic * msgRate / RateEncodingFactor quote atoms.
-        const quoteCost = ord.qtyAtomic * ord.msgRate / RateEncodingFactor
+        // qty is in quote atoms. Each order costs qtyAtomic * (msgRate / RateEncodingFactor) quote atoms.
+        // Divide first to avoid intermediate overflow past Number.MAX_SAFE_INTEGER.
+        const rate = ord.msgRate / RateEncodingFactor
+        const quoteCost = ord.qtyAtomic * rate
         if (quoteCost >= remainingQty) {
           // Partial fill
-          const baseUsed = remainingQty * RateEncodingFactor / ord.msgRate
-          weightedSum += baseUsed * ord.msgRate
+          const baseUsed = remainingQty / rate
+          weightedSum += baseUsed * rate
           baseQtySum += baseUsed
           filledBaseQty += baseUsed
           remainingQty = 0
           filled = true
         } else {
-          weightedSum += ord.qtyAtomic * ord.msgRate
+          weightedSum += ord.qtyAtomic * rate
           baseQtySum += ord.qtyAtomic
           filledBaseQty += ord.qtyAtomic
           remainingQty -= quoteCost
@@ -206,14 +207,15 @@ export default class OrderBook {
       } else {
         // qty is in base atoms.
         const orderQty = ord.qtyAtomic
+        const rate = ord.msgRate / RateEncodingFactor
         if (orderQty >= remainingQty) {
-          weightedSum += remainingQty * ord.msgRate
+          weightedSum += remainingQty * rate
           baseQtySum += remainingQty
           filledBaseQty += remainingQty
           remainingQty = 0
           filled = true
         } else {
-          weightedSum += orderQty * ord.msgRate
+          weightedSum += orderQty * rate
           baseQtySum += orderQty
           filledBaseQty += orderQty
           remainingQty -= orderQty
@@ -223,7 +225,11 @@ export default class OrderBook {
 
     if (baseQtySum === 0) return null
 
-    const avgRate = weightedSum / baseQtySum
+    // weightedSum uses conventional rate (msgRate / RateEncodingFactor) to
+    // avoid overflow, so avgConvRate is also conventional.
+    const avgConvRate = weightedSum / baseQtySum
+    // Convert back to msgRate-encoded for the interface contract.
+    const avgRate = avgConvRate * RateEncodingFactor
     const bookDepthPct = totalBookBaseQty > 0 ? (filledBaseQty / totalBookBaseQty) * 100 : 0
     const slippagePct = Math.abs(avgRate - midGapRate) / midGapRate * 100
     // For sell: qty is base atoms, filledBaseQty is base atoms matched.
@@ -231,11 +237,6 @@ export default class OrderBook {
     const orderFillPct = sell
       ? (filledBaseQty / qty) * 100
       : ((qty - remainingQty) / qty) * 100
-
-    // For buy, it's base atoms received; for sell, it's quote atoms received.
-    const receivedEstimate = sell
-      ? baseQtySum * avgRate / RateEncodingFactor
-      : baseQtySum
 
     return {
       avgRate,
@@ -245,8 +246,7 @@ export default class OrderBook {
       filled,
       orderFillPct,
       bookDepthPct,
-      levelsConsumed,
-      receivedEstimate
+      levelsConsumed
     }
   }
 }

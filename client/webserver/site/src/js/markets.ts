@@ -2112,7 +2112,7 @@ export default class MarketsPage extends BasePage {
         Doc.hide(page.vMarketEstimate)
       }
       // Show slippage estimate for market orders.
-      this.showSlippageEstimate(order, toAsset)
+      this.showSlippageEstimate(order)
     }
     // Visually differentiate between buy/sell orders.
     if (isSell) {
@@ -2139,7 +2139,7 @@ export default class MarketsPage extends BasePage {
    * showSlippageEstimate calculates and displays slippage/price impact
    * information for market orders on the verification dialog.
    */
-  showSlippageEstimate (order: TradeForm, toAsset: SupportedAsset) {
+  showSlippageEstimate (order: TradeForm) {
     const page = this.page
     if (!this.book || order.isLimit) {
       Doc.hide(page.vSlippageSection)
@@ -2174,11 +2174,6 @@ export default class MarketsPage extends BasePage {
       page.vmSlippagePct.classList.add('text-success')
     }
 
-    // Update "Receiving Approximately" with more accurate VWAP-based estimate.
-    if (estimate.receivedEstimate > 0) {
-      page.vmToTotal.textContent = Doc.formatCoinValue(estimate.receivedEstimate, toAsset.unitInfo)
-    }
-
     // Partial fill warning: order is larger than available book depth.
     if (!estimate.filled) {
       Doc.show(page.vPartialFillWarning)
@@ -2193,13 +2188,7 @@ export default class MarketsPage extends BasePage {
       const pctStr = percentFormatter.format(slippage)
       const isHigh = slippage >= slippageAckPct
       const msgId = isHigh ? intl.ID_HIGH_SLIPPAGE_WARNING_MSG : intl.ID_SLIPPAGE_WARNING_MSG
-      let msg = intl.prep(msgId, { slippagePct: pctStr })
-      if (!msg) {
-        msg = isHigh
-          ? `This order has very high price impact (${pctStr}% slippage). You may receive significantly less than expected.`
-          : `This order has significant price impact. The estimated fill rate is ${pctStr}% away from the mid-market rate.`
-      }
-      page.vmSlippageWarnMsg.textContent = msg
+      page.vmSlippageWarnMsg.textContent = intl.prep(msgId, { slippagePct: pctStr })
       page.vSlippageWarning.classList.remove('border-warning', 'text-warning', 'border-danger', 'text-danger')
       if (isHigh) {
         page.vSlippageWarning.classList.add('border-danger', 'text-danger')
@@ -2811,7 +2800,7 @@ export default class MarketsPage extends BasePage {
     if (!Doc.isHidden(page.vHighSlippageAck)) {
       const ackCheck = page.slippageAckCheck as HTMLInputElement
       if (!ackCheck.checked) {
-        page.vErr.textContent = intl.prep(intl.ID_SLIPPAGE_ACK_REQUIRED) || 'Please acknowledge the high slippage warning before submitting.'
+        page.vErr.textContent = intl.prep(intl.ID_SLIPPAGE_ACK_REQUIRED)
         Doc.show(page.vErr)
         return
       }
