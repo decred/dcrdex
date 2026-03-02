@@ -64,16 +64,8 @@ public class MainActivity extends AppCompatActivity {
 
         ActivityResultLauncher<Void> launcher = registerForActivityResult(new QRCodeScannerContract(), newClientURL -> {
             if (!newClientURL.isEmpty()) {
-
-                DexClient newItem;
-
-                try {
-                    newItem = mAdapter.addItem(newClientURL);
-                } catch (Exception e) {
-                    Toast.makeText(MainActivity.this, "DEX client already exists", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                Toast.makeText(MainActivity.this, "Paired DEX: " + newItem.name(), Toast.LENGTH_LONG).show();
+                DexClient item = mAdapter.addItem(newClientURL);
+                Toast.makeText(MainActivity.this, "Paired DEX: " + item.name(), Toast.LENGTH_LONG).show();
             }
         });
 
@@ -138,7 +130,6 @@ public class MainActivity extends AppCompatActivity {
             RecyclerView.ViewHolder viewHolder = adapter.getViewHolder();
             int position = viewHolder.getAbsoluteAdapterPosition();
             if (position < 0) {
-                // FIXME this shouldn't occur but it can be -1 when deleting the last item in the list.
                 return false;
             }
             ((DexClientChooserAdapter) recyclerView.getAdapter()).removeItem(position);

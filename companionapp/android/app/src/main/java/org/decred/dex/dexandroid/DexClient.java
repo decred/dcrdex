@@ -24,12 +24,16 @@ public record DexClient(String url, String name) implements Serializable {
         return url.equals(dexClient.url);
     }
 
-    private static String convertUrlToName(String url) {
+    public static String hostFromURL(String url) {
         try {
             URL urlObj = new URL(url);
             return urlObj.getHost();
         } catch (MalformedURLException e) {
             return url;
         }
+    }
+
+    private static String convertUrlToName(String url) {
+        return hostFromURL(url);
     }
 }

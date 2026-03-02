@@ -45,13 +45,30 @@ public class PreferenceManager {
     }
 
     public Boolean containsUrl(String url) {
+        String newHost = DexClient.hostFromURL(url);
         List<DexClient> clientList = getDexClientList();
         for (DexClient client : clientList) {
-            if (client.url().equals(url)) {
+            if (DexClient.hostFromURL(client.url()).equals(newHost)) {
                 return true;
             }
         }
         return false;
+    }
+
+    // updateDexClientURL replaces the URL for an existing entry that shares
+    // the same host. Returns the updated DexClient, or null if not found.
+    public DexClient updateDexClientURL(String url) {
+        String newHost = DexClient.hostFromURL(url);
+        List<DexClient> clientList = getDexClientList();
+        for (int i = 0; i < clientList.size(); i++) {
+            if (DexClient.hostFromURL(clientList.get(i).url()).equals(newHost)) {
+                DexClient updated = new DexClient(url, clientList.get(i).name());
+                clientList.set(i, updated);
+                saveDexClientList(clientList);
+                return updated;
+            }
+        }
+        return null;
     }
 
     public List<DexClient> getDexClientList() {

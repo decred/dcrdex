@@ -28,7 +28,7 @@ public class DexClientChooserAdapter extends RecyclerView.Adapter<DexClientChoos
 
     private boolean isConnected;
 
-    public static class ItemViewHolder extends RecyclerView.ViewHolder implements View.OnCreateContextMenuListener {
+    public class ItemViewHolder extends RecyclerView.ViewHolder implements View.OnCreateContextMenuListener {
         public TextView textView;
 
         public ItemViewHolder(View v) {
@@ -39,6 +39,7 @@ public class DexClientChooserAdapter extends RecyclerView.Adapter<DexClientChoos
 
         @Override
         public void onCreateContextMenu(ContextMenu menu, View v, ContextMenu.ContextMenuInfo menuInfo) {
+            currentViewHolder = this;
             menu.add(Menu.NONE, R.id.delete, Menu.NONE, "Delete");
         }
     }
@@ -56,9 +57,20 @@ public class DexClientChooserAdapter extends RecyclerView.Adapter<DexClientChoos
         notifyDataSetChanged();
     }
 
-    public DexClient addItem(String url) throws Exception {
+    @SuppressLint("NotifyDataSetChanged")
+    public DexClient addItem(String url) {
         if (preferenceManager.containsUrl(url)) {
-            throw new Exception("DEX client already exists");
+            DexClient updated = preferenceManager.updateDexClientURL(url);
+            if (updated != null) {
+                for (int i = 0; i < list.size(); i++) {
+                    if (DexClient.hostFromURL(list.get(i).url()).equals(DexClient.hostFromURL(url))) {
+                        list.set(i, updated);
+                        notifyDataSetChanged();
+                        break;
+                    }
+                }
+                return updated;
+            }
         }
         DexClient newItem = preferenceManager.addDexClientFromURL(url);
         list.add(newItem);
@@ -82,7 +94,6 @@ public class DexClientChooserAdapter extends RecyclerView.Adapter<DexClientChoos
 
     @Override
     public void onBindViewHolder(ItemViewHolder holder, @SuppressLint("RecyclerView") int position) {
-        currentViewHolder = holder;
         DexClient item = list.get(position);
         holder.textView.setText(item.name());
 

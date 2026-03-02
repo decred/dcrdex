@@ -252,20 +252,16 @@ func (s *WebServer) handleGenerateQRCode(w http.ResponseWriter, r *http.Request)
 	}
 }
 
-// handleGenerateQRCode is the handler for the '/generateqrcode' page request
+// handleGenerateCompanionAppQRCode is the handler for the
+// '/generatecompanionappqrcode' page request.
 func (s *WebServer) handleGenerateCompanionAppQRCode(w http.ResponseWriter, r *http.Request) {
-
-	var url string
-
-	if s.onion != "" {
-		url = s.onion
-	} else {
-		url = fmt.Sprintf("http://%s", s.addr)
+	if s.onion == "" {
+		http.Error(w, "Tor must be enabled to pair a companion app", http.StatusBadRequest)
+		return
 	}
-	// Create auth token and append it to the URL for authTokenMiddleware to pick up.
-	// TODO save this token in the DB to make it permanent?
-	authToken := s.authorize()
-	url = fmt.Sprintf("%s?%s=%s", url, authCK, authToken)
+
+	authToken := s.authorizeCompanion()
+	url := fmt.Sprintf("%s?%s=%s", s.onion, authCK, authToken)
 
 	png, err := qrcode.Encode(url, qrcode.Medium, 200)
 	if err != nil {

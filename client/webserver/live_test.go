@@ -1979,6 +1979,8 @@ func (c *TCore) SetLanguage(lang string) error {
 func (c *TCore) Language() string {
 	return c.lang
 }
+func (c *TCore) SetCompanionToken(token string) error { return nil }
+func (c *TCore) CompanionToken() (string, error)      { return "", nil }
 
 func (c *TCore) TakeAction(assetID uint32, actionID string, actionB json.RawMessage) error {
 	if rand.Float32() < 0.25 {
