@@ -142,7 +142,6 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 
 	// Middleware
 	mux.Use(middleware.Recoverer)
-	mux.Use(middleware.RealIP)
 	mux.Use(oneTimeConnection)
 	mux.Use(s.authMiddleware)
 

@@ -292,7 +292,6 @@ func New(cfg *Config) (*RPCServer, error) {
 
 	// Middleware
 	mux.Use(middleware.Recoverer)
-	mux.Use(middleware.RealIP)
 	mux.Use(s.authMiddleware)
 
 	// The WebSocket handler is mounted on /ws in Connect.

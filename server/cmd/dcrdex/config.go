@@ -68,38 +68,45 @@ type procOpts struct {
 
 // dexConf is the data that is required to setup the dex.
 type dexConf struct {
-	DataDir          string
-	Network          dex.Network
-	DBName           string
-	DBUser           string
-	DBPass           string
-	DBHost           string
-	DBPort           uint16
-	ShowPGConfig     bool
-	MarketsConfPath  string
-	CancelThreshold  float64
-	FreeCancels      bool
-	MaxUserCancels   uint32
-	PenaltyThreshold uint32
-	DEXPrivKeyPath   string
-	RPCCert          string
-	RPCKey           string
-	NoTLS            bool
-	RPCListen        []string
-	HiddenService    string
-	BroadcastTimeout time.Duration
-	TxWaitExpiration time.Duration
-	AltDNSNames      []string
-	LogMaker         *dex.LoggerMaker
-	SigningKeyPW     []byte
-	AdminSrvOn       bool
-	AdminSrvAddr     string
-	AdminSrvPW       []byte
-	AdminSrvNoTLS    bool
-	NoResumeSwaps    bool
-	DisableDataAPI   bool
-	NodeRelayAddr    string
-	ValidateMarkets  bool
+	DataDir           string
+	Network           dex.Network
+	DBName            string
+	DBUser            string
+	DBPass            string
+	DBHost            string
+	DBPort            uint16
+	ShowPGConfig      bool
+	MarketsConfPath   string
+	CancelThreshold   float64
+	FreeCancels       bool
+	MaxUserCancels    uint32
+	PenaltyThreshold  uint32
+	DEXPrivKeyPath    string
+	RPCCert           string
+	RPCKey            string
+	NoTLS             bool
+	RPCListen         []string
+	HiddenService     string
+	BroadcastTimeout  time.Duration
+	TxWaitExpiration  time.Duration
+	AltDNSNames       []string
+	LogMaker          *dex.LoggerMaker
+	SigningKeyPW      []byte
+	AdminSrvOn        bool
+	AdminSrvAddr      string
+	AdminSrvPW        []byte
+	AdminSrvNoTLS     bool
+	NoResumeSwaps     bool
+	DisableDataAPI    bool
+	NodeRelayAddr     string
+	ValidateMarkets   bool
+	MaxClients        int
+	MaxConnsPerIP     int
+	IPRatePerSec      float64
+	IPBurstSize       int
+	MaxIPRateLimiters int
+	GlobalHTTPRate    float64
+	GlobalHTTPBurst   int
 }
 
 type flagsData struct {
@@ -154,6 +161,14 @@ type flagsData struct {
 	NodeRelayAddr string `long:"noderelayaddr" description:"The public address by which node sources should connect to the node relay"`
 
 	ValidateMarkets bool `long:"validate" description:"Validate the market configuration and quit"`
+
+	MaxClients        int     `long:"maxclients" default:"10000" description:"Maximum number of active websocket connections."`
+	MaxConnsPerIP     int     `long:"maxconnsperip" default:"8" description:"Maximum number of websocket connections per IP, loopback excluded."`
+	IPRatePerSec      float64 `long:"ipratelimit" default:"1" description:"Per-IP HTTP data API request rate in requests/second."`
+	IPBurstSize       int     `long:"ipburstsize" default:"5" description:"Per-IP HTTP data API burst size."`
+	MaxIPRateLimiters int     `long:"maxipratelimiters" default:"10000" description:"Maximum number of per-IP rate limiter entries."`
+	GlobalHTTPRate    float64 `long:"globalhttprate" default:"100" description:"Global HTTP data API request rate in requests/second."`
+	GlobalHTTPBurst   int     `long:"globalhttpburst" default:"1000" description:"Global HTTP data API burst size."`
 }
 
 // supportedSubsystems returns a sorted slice of the supported subsystems for
@@ -251,20 +266,27 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		AppDataDir: defaultAppDataDir,
 		// Defaults for ConfigFile, LogDir, and DataDir are set relative to
 		// AppDataDir. They are not to be set here.
-		MaxLogZips:       defaultMaxLogZips,
-		RPCCert:          defaultRPCCertFilename,
-		RPCKey:           defaultRPCKeyFilename,
-		DebugLevel:       defaultLogLevel,
-		PGDBName:         defaultPGDBName,
-		PGUser:           defaultPGUser,
-		PGHost:           defaultPGHost,
-		MarketsConfPath:  defaultMarketsConfFilename,
-		DEXPrivKeyPath:   defaultDEXPrivKeyFilename,
-		BroadcastTimeout: defaultBroadcastTimeout,
-		TxWaitExpiration: defaultTxWaitExpiration,
-		CancelThreshold:  defaultCancelThresh,
-		MaxUserCancels:   defaultMaxUserCancels,
-		PenaltyThreshold: defaultPenaltyThresh,
+		MaxLogZips:        defaultMaxLogZips,
+		RPCCert:           defaultRPCCertFilename,
+		RPCKey:            defaultRPCKeyFilename,
+		DebugLevel:        defaultLogLevel,
+		PGDBName:          defaultPGDBName,
+		PGUser:            defaultPGUser,
+		PGHost:            defaultPGHost,
+		MarketsConfPath:   defaultMarketsConfFilename,
+		DEXPrivKeyPath:    defaultDEXPrivKeyFilename,
+		BroadcastTimeout:  defaultBroadcastTimeout,
+		TxWaitExpiration:  defaultTxWaitExpiration,
+		CancelThreshold:   defaultCancelThresh,
+		MaxUserCancels:    defaultMaxUserCancels,
+		PenaltyThreshold:  defaultPenaltyThresh,
+		MaxClients:        comms.DefaultMaxClients,
+		MaxConnsPerIP:     comms.DefaultMaxConnsPerIP,
+		IPRatePerSec:      comms.DefaultIPRatePerSec,
+		IPBurstSize:       comms.DefaultIPBurstSize,
+		MaxIPRateLimiters: comms.DefaultMaxIPRateLimiters,
+		GlobalHTTPRate:    comms.DefaultGlobalHTTPRate,
+		GlobalHTTPBurst:   comms.DefaultGlobalHTTPBurst,
 	}
 
 	// Pre-parse the command line options to see if an alternative config file
@@ -530,38 +552,45 @@ func loadConfig() (*dexConf, *procOpts, error) {
 	cfg.PGDBName = strings.ReplaceAll(cfg.PGDBName, "{netname}", network.String())
 
 	dexCfg := &dexConf{
-		DataDir:          cfg.DataDir,
-		Network:          network,
-		DBName:           cfg.PGDBName,
-		DBHost:           dbHost,
-		DBPort:           dbPort,
-		DBUser:           cfg.PGUser,
-		DBPass:           cfg.PGPass,
-		ShowPGConfig:     cfg.ShowPGConfig,
-		MarketsConfPath:  cfg.MarketsConfPath,
-		CancelThreshold:  cfg.CancelThreshold,
-		MaxUserCancels:   cfg.MaxUserCancels,
-		FreeCancels:      cfg.FreeCancels,
-		PenaltyThreshold: cfg.PenaltyThreshold,
-		DEXPrivKeyPath:   cfg.DEXPrivKeyPath,
-		RPCCert:          cfg.RPCCert,
-		RPCKey:           cfg.RPCKey,
-		NoTLS:            cfg.NoTLS,
-		RPCListen:        RPCListen,
-		HiddenService:    HiddenService,
-		BroadcastTimeout: cfg.BroadcastTimeout,
-		TxWaitExpiration: cfg.TxWaitExpiration,
-		AltDNSNames:      cfg.AltDNSNames,
-		LogMaker:         logMaker,
-		SigningKeyPW:     []byte(cfg.SigningKeyPassword),
-		AdminSrvAddr:     adminSrvAddr,
-		AdminSrvOn:       cfg.AdminSrvOn,
-		AdminSrvPW:       []byte(cfg.AdminSrvPassword),
-		AdminSrvNoTLS:    cfg.AdminSrvNoTLS,
-		NoResumeSwaps:    cfg.NoResumeSwaps,
-		DisableDataAPI:   cfg.DisableDataAPI,
-		NodeRelayAddr:    cfg.NodeRelayAddr,
-		ValidateMarkets:  cfg.ValidateMarkets,
+		DataDir:           cfg.DataDir,
+		Network:           network,
+		DBName:            cfg.PGDBName,
+		DBHost:            dbHost,
+		DBPort:            dbPort,
+		DBUser:            cfg.PGUser,
+		DBPass:            cfg.PGPass,
+		ShowPGConfig:      cfg.ShowPGConfig,
+		MarketsConfPath:   cfg.MarketsConfPath,
+		CancelThreshold:   cfg.CancelThreshold,
+		MaxUserCancels:    cfg.MaxUserCancels,
+		FreeCancels:       cfg.FreeCancels,
+		PenaltyThreshold:  cfg.PenaltyThreshold,
+		DEXPrivKeyPath:    cfg.DEXPrivKeyPath,
+		RPCCert:           cfg.RPCCert,
+		RPCKey:            cfg.RPCKey,
+		NoTLS:             cfg.NoTLS,
+		RPCListen:         RPCListen,
+		HiddenService:     HiddenService,
+		BroadcastTimeout:  cfg.BroadcastTimeout,
+		TxWaitExpiration:  cfg.TxWaitExpiration,
+		AltDNSNames:       cfg.AltDNSNames,
+		LogMaker:          logMaker,
+		SigningKeyPW:      []byte(cfg.SigningKeyPassword),
+		AdminSrvAddr:      adminSrvAddr,
+		AdminSrvOn:        cfg.AdminSrvOn,
+		AdminSrvPW:        []byte(cfg.AdminSrvPassword),
+		AdminSrvNoTLS:     cfg.AdminSrvNoTLS,
+		NoResumeSwaps:     cfg.NoResumeSwaps,
+		DisableDataAPI:    cfg.DisableDataAPI,
+		NodeRelayAddr:     cfg.NodeRelayAddr,
+		ValidateMarkets:   cfg.ValidateMarkets,
+		MaxClients:        cfg.MaxClients,
+		MaxConnsPerIP:     cfg.MaxConnsPerIP,
+		IPRatePerSec:      cfg.IPRatePerSec,
+		IPBurstSize:       cfg.IPBurstSize,
+		MaxIPRateLimiters: cfg.MaxIPRateLimiters,
+		GlobalHTTPRate:    cfg.GlobalHTTPRate,
+		GlobalHTTPBurst:   cfg.GlobalHTTPBurst,
 	}
 
 	opts := &procOpts{

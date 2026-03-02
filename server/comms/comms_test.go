@@ -23,6 +23,7 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/ws"
 	"github.com/gorilla/websocket"
+	"golang.org/x/time/rate"
 )
 
 var (
@@ -33,13 +34,23 @@ var (
 
 func newServer() *Server {
 	s := &Server{
-		clients:     make(map[uint64]*wsLink),
-		wsLimiters:  make(map[dex.IPKey]*ipWsLimiter),
-		v6Prefixes:  make(map[dex.IPKey]int),
-		quarantine:  make(map[dex.IPKey]time.Time),
-		dataEnabled: 1,
-		rpcRoutes:   make(map[string]MsgHandler),
-		httpRoutes:  make(map[string]HTTPHandler),
+		maxClients:        DefaultMaxClients,
+		maxConnsPerIP:     DefaultMaxConnsPerIP,
+		ipMaxRatePerSec:   DefaultIPRatePerSec,
+		ipMaxBurstSize:    DefaultIPBurstSize,
+		maxIPRateLimiters: DefaultMaxIPRateLimiters,
+		overflowLimiter: &ipRateLimiter{
+			Limiter: rate.NewLimiter(rate.Limit(DefaultIPRatePerSec), DefaultIPBurstSize),
+		},
+		ipHTTPRateLimiter:     make(map[dex.IPKey]*ipRateLimiter),
+		globalHTTPRateLimiter: rate.NewLimiter(rate.Limit(DefaultGlobalHTTPRate), DefaultGlobalHTTPBurst),
+		clients:               make(map[uint64]*wsLink),
+		wsLimiters:            make(map[dex.IPKey]*ipWsLimiter),
+		v6Prefixes:            make(map[dex.IPKey]int),
+		quarantine:            make(map[dex.IPKey]time.Time),
+		dataEnabled:           1,
+		rpcRoutes:             make(map[string]MsgHandler),
+		httpRoutes:            make(map[string]HTTPHandler),
 	}
 	for _, route := range []string{msgjson.ConfigRoute, msgjson.SpotsRoute, msgjson.CandlesRoute, msgjson.OrderBookRoute} {
 		s.RegisterHTTP(route, func(any) (any, error) { return nil, nil })
@@ -829,7 +840,7 @@ func TestOnline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error connecting on expired ban")
 	}
-	var clientCount uint64
+	var clientCount int64
 	if !giveItASecond(func() bool {
 		clientCount = server.clientCount()
 		return clientCount == 1
@@ -906,24 +917,94 @@ func (h *tHTTPHandler) ServeHTTP(http.ResponseWriter, *http.Request) {
 
 func TestHTTPRateLimiter(t *testing.T) {
 	tHandler := &tHTTPHandler{}
-	s := Server{dataEnabled: 1}
+	s := newServer()
 
 	f := s.LimitRate(tHandler)
 	ip := "ip"
 	req := &http.Request{RemoteAddr: ip}
 	recorder := httptest.NewRecorder()
-	for i := 0; i < ipMaxBurstSize; i++ {
+	for i := 0; i < DefaultIPBurstSize; i++ {
 		f.ServeHTTP(recorder, req)
 	}
 	time.Sleep(100 * time.Millisecond)
 	f.ServeHTTP(recorder, req)
 	successes := atomic.LoadUint32(&tHandler.count)
-	if successes != ipMaxBurstSize {
-		t.Fatalf("expected %d requests. got %d", ipMaxBurstSize, successes)
+	if successes != uint32(DefaultIPBurstSize) {
+		t.Fatalf("expected %d requests. got %d", DefaultIPBurstSize, successes)
 	}
 	statusCode := recorder.Result().StatusCode
 	if statusCode != http.StatusTooManyRequests {
 		t.Fatalf("wrong status code. wanted %d, got %d", http.StatusTooManyRequests, statusCode)
+	}
+}
+
+func TestIPRateLimiterMapCap(t *testing.T) {
+	s := newServer()
+
+	// Fill the map to the cap.
+	for i := 0; i < s.maxIPRateLimiters; i++ {
+		ip := dex.NewIPKey(fmt.Sprintf("10.%d.%d.%d", i/(256*256), (i/256)%256, i%256))
+		s.getIPLimiter(ip)
+	}
+	s.rateLimiterMtx.RLock()
+	n := len(s.ipHTTPRateLimiter)
+	s.rateLimiterMtx.RUnlock()
+	if n != s.maxIPRateLimiters {
+		t.Fatalf("expected %d entries, got %d", s.maxIPRateLimiters, n)
+	}
+
+	// A new IP beyond the cap should return the overflow limiter and not
+	// grow the map.
+	newIP := dex.NewIPKey("192.168.255.255")
+	limiter := s.getIPLimiter(newIP)
+	if limiter != s.overflowLimiter {
+		t.Fatalf("expected overflow limiter for IP beyond cap")
+	}
+	s.rateLimiterMtx.RLock()
+	n = len(s.ipHTTPRateLimiter)
+	s.rateLimiterMtx.RUnlock()
+	if n != s.maxIPRateLimiters {
+		t.Fatalf("map grew beyond cap: %d", n)
+	}
+
+	// An existing IP should still return its own limiter.
+	existingIP := dex.NewIPKey("10.0.0.1")
+	limiter = s.getIPLimiter(existingIP)
+	if limiter == s.overflowLimiter {
+		t.Fatalf("existing IP should not get overflow limiter")
+	}
+}
+
+func TestXForwardedForIgnored(t *testing.T) {
+	s := newServer()
+
+	tHandler := &tHTTPHandler{}
+	f := s.LimitRate(tHandler)
+
+	realAddr := "198.51.100.1:12345"
+
+	// Send requests with unique X-Forwarded-For values but the same
+	// RemoteAddr. All requests should be rate-limited together under the
+	// real address, not split into separate limiters.
+	for i := 0; i < DefaultIPBurstSize+5; i++ {
+		req := &http.Request{
+			RemoteAddr: realAddr,
+			Header:     http.Header{"X-Forwarded-For": []string{fmt.Sprintf("203.0.113.%d", i)}},
+		}
+		f.ServeHTTP(httptest.NewRecorder(), req)
+	}
+
+	successes := atomic.LoadUint32(&tHandler.count)
+	if successes != uint32(DefaultIPBurstSize) {
+		t.Fatalf("expected %d successes (rate limited by real IP), got %d", DefaultIPBurstSize, successes)
+	}
+
+	// Only one entry should exist in the map (for the real RemoteAddr).
+	s.rateLimiterMtx.RLock()
+	n := len(s.ipHTTPRateLimiter)
+	s.rateLimiterMtx.RUnlock()
+	if n != 1 {
+		t.Fatalf("expected 1 rate limiter entry, got %d (X-Forwarded-For headers created separate entries)", n)
 	}
 }
 
