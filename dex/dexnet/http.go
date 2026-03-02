@@ -9,8 +9,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"sync"
 	"time"
+
+	"github.com/decred/go-socks/socks"
 )
 
 const defaultResponseSizeLimit = 1 << 20 // 1 MiB = 1,048,576 bytes
@@ -18,6 +22,50 @@ const defaultResponseSizeLimit = 1 << 20 // 1 MiB = 1,048,576 bytes
 // Client is the default HTTP client used for requests.
 var Client = &http.Client{
 	Timeout: 20 * time.Second, // 20 seconds
+}
+
+// ProxyDialContext returns a DialContext function that routes connections
+// through a SOCKS5 proxy at addr (host:port). If addr is empty, nil is
+// returned.
+func ProxyDialContext(addr string) func(ctx context.Context, network, address string) (net.Conn, error) {
+	if addr == "" {
+		return nil
+	}
+	proxy := &socks.Proxy{Addr: addr}
+	return proxy.DialContext
+}
+
+// ProxyTransport returns an *http.Transport that routes all connections through
+// a SOCKS5 proxy at addr (host:port).
+func ProxyTransport(addr string) *http.Transport {
+	return &http.Transport{
+		DialContext:           ProxyDialContext(addr),
+		ForceAttemptHTTP2:     false,
+		TLSHandshakeTimeout:   10 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
+		MaxIdleConns:          100,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+}
+
+// ProxyHTTPClient returns an *http.Client that routes all requests through a
+// SOCKS5 proxy at addr (host:port).
+func ProxyHTTPClient(addr string) *http.Client {
+	return &http.Client{
+		Transport: ProxyTransport(addr),
+		Timeout:   20 * time.Second,
+	}
+}
+
+var setProxyOnce sync.Once
+
+// SetProxy configures the global Client to route all requests through a SOCKS5
+// proxy at the given address (host:port). Only the first call takes effect;
+// subsequent calls are no-ops.
+func SetProxy(addr string) {
+	setProxyOnce.Do(func() {
+		Client.Transport = ProxyTransport(addr)
+	})
 }
 
 // RequestOption are optional arguments to Get, Post, or Do.

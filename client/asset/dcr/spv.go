@@ -1557,6 +1557,8 @@ func (w *spvWallet) newSpvSyncer() *spv.Syncer {
 	case wire.SimNet:
 		connectPeers = []string{"localhost:19560"}
 	}
+	// TODO: Route SPV peer connections through Tor when TorProxy is
+	// configured. Requires upstream library support.
 	addr := &net.TCPAddr{IP: net.ParseIP("::1"), Port: 0}
 	amgr := addrmgr.New(w.dir)
 	lp := p2p.NewLocalPeer(dcrw.ChainParams(), addr, amgr)

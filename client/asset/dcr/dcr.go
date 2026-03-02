@@ -6743,6 +6743,8 @@ func (dcr *ExchangeWallet) startPoliteia(ctx context.Context) {
 
 	// Create the Politeia instance outside the lock to avoid blocking readers
 	// (PoliteiaDetails, ProposalsAll, etc.) during filesystem I/O.
+	// TODO: Route Politeia requests through Tor when TorProxy is configured.
+	// The upstream piclient.Opts does not accept a custom http.Client.
 	p, err := pi.New(ctx, pi.PoliteiaMainnetHost, filepath.Join(dcr.walletDir, "politeia"), dcr.log.SubLogger("Politeia"))
 	if err != nil {
 		dcr.log.Errorf("failed to set up politeia: %v", err)

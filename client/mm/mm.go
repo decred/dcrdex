@@ -44,6 +44,7 @@ type clientCore interface {
 	Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (asset.Coin, error)
 	NewDepositAddress(assetID uint32) (string, error)
 	Network() dex.Network
+	TorProxy() string
 	Order(oidB dex.Bytes) (*core.Order, error)
 	WalletTransaction(uint32, string) (*asset.WalletTransaction, error)
 	TradingLimits(host string) (userParcels, parcelLimit uint32, err error)
@@ -619,6 +620,7 @@ func (m *MarketMaker) loadCEX(ctx context.Context, cfg *CEXConfig) (*centralized
 		APIPassphrase: cfg.APIPassphrase,
 		Logger:        logger,
 		Net:           m.core.Network(),
+		TorProxy:      m.core.TorProxy(),
 		Notify: func(n any) {
 			m.handleCEXUpdate(cfg.Name, n)
 		},

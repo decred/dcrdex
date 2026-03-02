@@ -562,6 +562,7 @@ type bitget struct {
 	passphrase string // Bitget requires a passphrase for API access
 	net        dex.Network
 	broadcast  func(any)
+	torProxy   string
 	ctx        context.Context
 
 	tradeIDNonce       atomic.Uint32
@@ -789,6 +790,7 @@ func newBitget(cfg *CEXConfig) *bitget {
 		secretKey:          cfg.SecretKey,
 		passphrase:         cfg.APIPassphrase,
 		net:                cfg.Net,
+		torProxy:           cfg.TorProxy,
 		balances:           make(map[uint32]*ExchangeBalance),
 		books:              make(map[string]*bitgetOrderBook),
 		tradeInfo:          make(map[string]*bitgetTradeInfo),
@@ -1190,6 +1192,9 @@ func (bg *bitget) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		Logger:        bg.log.SubLogger("WS-PRIV"),
 		RawHandler:    bg.handlePrivateWsMessage,
 		ReconnectSync: bg.onPrivateReconnect,
+	}
+	if bg.torProxy != "" {
+		privateWSCfg.NetDialContext = dexnet.ProxyDialContext(bg.torProxy)
 	}
 	privateWS, err := comms.NewWsConn(privateWSCfg)
 	if err != nil {
@@ -1920,7 +1925,9 @@ func (bg *bitget) ensureMarketConnection(ctx context.Context) error {
 		ReconnectSync:    bg.onMarketReconnect,
 		ConnectEventFunc: connectEventFunc,
 	}
-
+	if bg.torProxy != "" {
+		marketWSCfg.NetDialContext = dexnet.ProxyDialContext(bg.torProxy)
+	}
 	marketWS, err := comms.NewWsConn(marketWSCfg)
 	if err != nil {
 		return fmt.Errorf("create market ws: %w", err)

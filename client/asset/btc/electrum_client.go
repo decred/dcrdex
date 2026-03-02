@@ -80,6 +80,7 @@ type electrumWallet struct {
 	wallet      electrumWalletClient
 	chainV      atomic.Value // electrumNetworkClient
 	segwit      bool
+	torProxy    string
 
 	// ctx is set on connect, and used in asset.Wallet and btc.Wallet interface
 	// method implementations that have no ctx arg yet (refactoring TODO).
@@ -109,6 +110,7 @@ type electrumWalletConfig struct {
 	addrStringer dexbtc.AddressStringer
 	segwit       bool // indicates if segwit addresses are expected from requests
 	rpcCfg       *RPCConfig
+	torProxy     string
 }
 
 func newElectrumWallet(ew electrumWalletClient, cfg *electrumWalletConfig) *electrumWallet {
@@ -131,6 +133,7 @@ func newElectrumWallet(ew electrumWalletClient, cfg *electrumWalletConfig) *elec
 		stringAddr:  addrStringer,
 		wallet:      ew,
 		segwit:      cfg.segwit,
+		torProxy:    cfg.torProxy,
 		// TODO: remove this when all interface methods are given a Context. In
 		// the meantime, init with a valid sentry context until connect().
 		ctx: context.TODO(),
@@ -215,7 +218,7 @@ func (ew *electrumWallet) Connect(ctx context.Context, wg *sync.WaitGroup) error
 			return "", nil, fmt.Errorf("no suitable address for host %q: %w", host, err)
 		}
 		srvOpts = &electrum.ConnectOpts{
-			// TorProxy: TODO
+			TorProxy:    ew.torProxy,
 			TLSConfig:   tlsConfig, // may be nil if not ssl host
 			DebugLogger: ew.log.Debugf,
 		}

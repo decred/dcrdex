@@ -163,6 +163,8 @@ func (w *btcSPVWallet) Start() (SPVService, error) {
 	}
 	errCloser.Add(w.neutrinoDB.Close)
 
+	// TODO: Route SPV peer connections through Tor when TorProxy is
+	// configured. Requires upstream library support.
 	w.log.Debug("Starting neutrino chain service...")
 	w.cl, err = neutrino.NewChainService(neutrino.Config{
 		DataDir:       w.dir,

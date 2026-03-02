@@ -588,6 +588,7 @@ type binance struct {
 	tradeIDNoncePrefix dex.Bytes
 	broadcast          func(any)
 	isUS               bool
+	torProxy           string
 
 	markets atomic.Value // map[string]*binanceMarket
 	// tokenIDs maps the token's symbol to the list of bip ids of the token
@@ -665,6 +666,7 @@ func newBinance(cfg *CEXConfig, binanceUS bool) *binance {
 		balances:           make(map[uint32]*ExchangeBalance),
 		books:              make(map[string]*binanceOrderBook),
 		net:                cfg.Net,
+		torProxy:           cfg.TorProxy,
 		tradeInfo:          make(map[string]*tradeInfo),
 		tradeUpdaters:      make(map[int]chan *Trade),
 		tradeIDNoncePrefix: encode.RandomBytes(10),
@@ -1875,7 +1877,7 @@ func (bnc *binance) getUserDataStream(ctx context.Context) (err error) {
 			return nil, err
 		}
 
-		conn, err := comms.NewWsConn(&comms.WsCfg{
+		wsCfg := &comms.WsCfg{
 			URL:          bnc.wsURL + "/ws/" + listenKey,
 			PingWait:     time.Minute * 4,
 			EchoPingData: true,
@@ -1885,7 +1887,11 @@ func (bnc *binance) getUserDataStream(ctx context.Context) (err error) {
 			Logger:         bnc.log.SubLogger("BNCWS"),
 			RawHandler:     bnc.handleUserDataStreamUpdate,
 			ConnectHeaders: http.Header{"X-MBX-APIKEY": []string{bnc.apiKey}},
-		})
+		}
+		if bnc.torProxy != "" {
+			wsCfg.NetDialContext = dexnet.ProxyDialContext(bnc.torProxy)
+		}
+		conn, err := comms.NewWsConn(wsCfg)
 		if err != nil {
 			return nil, fmt.Errorf("NewWsConn error: %w", err)
 		}
@@ -2244,7 +2250,7 @@ func (bnc *binance) connectToMarketDataStream(ctx context.Context, baseID, quote
 				}
 			}
 		}
-		conn, err := comms.NewWsConn(&comms.WsCfg{
+		marketWsCfg := &comms.WsCfg{
 			URL: bnc.streamURL(),
 			// Binance Docs: The websocket server will send a ping frame every 3
 			// minutes. If the websocket server does not receive a pong frame
@@ -2262,7 +2268,11 @@ func (bnc *binance) connectToMarketDataStream(ctx context.Context, baseID, quote
 			ConnectEventFunc: connectEventFunc,
 			Logger:           bnc.log.SubLogger("BNCBOOK"),
 			RawHandler:       bnc.handleMarketDataNote,
-		})
+		}
+		if bnc.torProxy != "" {
+			marketWsCfg.NetDialContext = dexnet.ProxyDialContext(bnc.torProxy)
+		}
+		conn, err := comms.NewWsConn(marketWsCfg)
 		if err != nil {
 			return nil, err
 		}
