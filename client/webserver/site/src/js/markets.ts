@@ -99,6 +99,9 @@ const percentFormatter = new Intl.NumberFormat(Doc.languages(), {
 
 const parentIDNone = 0xFFFFFFFF
 
+const slippageWarnPct = 2 // Show yellow warning above 2%
+const slippageAckPct = 5 // Require checkbox acknowledgment above 5%
+
 interface MetaOrder {
   div: HTMLElement
   header: Record<string, PageElement>
@@ -2079,6 +2082,7 @@ export default class MarketsPage extends BasePage {
     if (order.isLimit) {
       Doc.show(page.verifyLimit)
       Doc.hide(page.verifyMarket)
+      page.vSubmit.removeAttribute('disabled')
       const orderDesc = `Limit ${buySellStr} Order`
       page.vOrderType.textContent = order.tifnow ? orderDesc + ' (immediate)' : orderDesc
       page.vRate.textContent = Doc.formatCoinValue(order.rate / this.market.rateConversionFactor)
@@ -2107,6 +2111,8 @@ export default class MarketsPage extends BasePage {
       } else {
         Doc.hide(page.vMarketEstimate)
       }
+      // Show slippage estimate for market orders.
+      this.showSlippageEstimate(order, toAsset)
     }
     // Visually differentiate between buy/sell orders.
     if (isSell) {
@@ -2126,6 +2132,104 @@ export default class MarketsPage extends BasePage {
     else {
       Doc.hide(page.vPreorder)
       this.unlockWalletsForEstimates()
+    }
+  }
+
+  /*
+   * showSlippageEstimate calculates and displays slippage/price impact
+   * information for market orders on the verification dialog.
+   */
+  showSlippageEstimate (order: TradeForm, toAsset: SupportedAsset) {
+    const page = this.page
+    if (!this.book || order.isLimit) {
+      Doc.hide(page.vSlippageSection)
+      return
+    }
+
+    const estimate = this.book.estimateMarketOrder(order.sell, order.qty)
+    if (!estimate) {
+      Doc.hide(page.vSlippageSection)
+      return
+    }
+
+    Doc.show(page.vSlippageSection)
+    const rcf = this.market.rateConversionFactor
+
+    // Display rates in conventional format.
+    page.vmAvgRate.textContent = Doc.formatCoinValue(estimate.avgRate / rcf)
+    page.vmWorstRate.textContent = Doc.formatCoinValue(estimate.worstRate / rcf)
+    const rateUnit = `${this.market.quoteUnitInfo.conventional.unit}/${this.market.baseUnitInfo.conventional.unit}`
+    page.vmAvgRateUnit.textContent = rateUnit
+    page.vmWorstRateUnit.textContent = rateUnit
+
+    // Slippage percentage with color coding.
+    const slippage = estimate.slippagePct
+    page.vmSlippagePct.textContent = percentFormatter.format(slippage) + '%'
+    page.vmSlippagePct.classList.remove('text-success', 'text-warning', 'text-danger')
+    if (slippage >= slippageAckPct) {
+      page.vmSlippagePct.classList.add('text-danger')
+    } else if (slippage >= slippageWarnPct) {
+      page.vmSlippagePct.classList.add('text-warning')
+    } else {
+      page.vmSlippagePct.classList.add('text-success')
+    }
+
+    // Update "Receiving Approximately" with more accurate VWAP-based estimate.
+    if (estimate.receivedEstimate > 0) {
+      page.vmToTotal.textContent = Doc.formatCoinValue(estimate.receivedEstimate, toAsset.unitInfo)
+    }
+
+    // Partial fill warning: order is larger than available book depth.
+    if (!estimate.filled) {
+      Doc.show(page.vPartialFillWarning)
+      page.vmBookDepthPct.textContent = percentFormatter.format(estimate.orderFillPct)
+    } else {
+      Doc.hide(page.vPartialFillWarning)
+    }
+
+    // Show/hide warning box.
+    if (slippage >= slippageWarnPct) {
+      Doc.show(page.vSlippageWarning)
+      const pctStr = percentFormatter.format(slippage)
+      const isHigh = slippage >= slippageAckPct
+      const msgId = isHigh ? intl.ID_HIGH_SLIPPAGE_WARNING_MSG : intl.ID_SLIPPAGE_WARNING_MSG
+      let msg = intl.prep(msgId, { slippagePct: pctStr })
+      if (!msg) {
+        msg = isHigh
+          ? `This order has very high price impact (${pctStr}% slippage). You may receive significantly less than expected.`
+          : `This order has significant price impact. The estimated fill rate is ${pctStr}% away from the mid-market rate.`
+      }
+      page.vmSlippageWarnMsg.textContent = msg
+      page.vSlippageWarning.classList.remove('border-warning', 'text-warning', 'border-danger', 'text-danger')
+      if (isHigh) {
+        page.vSlippageWarning.classList.add('border-danger', 'text-danger')
+      } else {
+        page.vSlippageWarning.classList.add('border-warning', 'text-warning')
+      }
+    } else {
+      Doc.hide(page.vSlippageWarning)
+    }
+
+    // Show/hide acknowledgment checkbox for high slippage or partial fill.
+    // Use onchange assignment instead of addEventListener to avoid
+    // accumulating listeners across repeated calls.
+    const requireAck = slippage >= slippageAckPct || !estimate.filled
+    const ackCheck = page.slippageAckCheck as HTMLInputElement
+    if (requireAck) {
+      Doc.show(page.vHighSlippageAck)
+      ackCheck.checked = false
+      page.vSubmit.setAttribute('disabled', '')
+      ackCheck.onchange = () => {
+        if (ackCheck.checked) {
+          page.vSubmit.removeAttribute('disabled')
+        } else {
+          page.vSubmit.setAttribute('disabled', '')
+        }
+      }
+    } else {
+      Doc.hide(page.vHighSlippageAck)
+      ackCheck.onchange = null
+      page.vSubmit.removeAttribute('disabled')
     }
   }
 
@@ -2703,6 +2807,15 @@ export default class MarketsPage extends BasePage {
     Doc.hide(page.orderErr, page.vErr)
     const order = this.currentOrder
     const req = { order: wireOrder(order) }
+    // Check slippage acknowledgment for market orders with high slippage.
+    if (!Doc.isHidden(page.vHighSlippageAck)) {
+      const ackCheck = page.slippageAckCheck as HTMLInputElement
+      if (!ackCheck.checked) {
+        page.vErr.textContent = intl.prep(intl.ID_SLIPPAGE_ACK_REQUIRED) || 'Please acknowledge the high slippage warning before submitting.'
+        Doc.show(page.vErr)
+        return
+      }
+    }
     if (!this.validateOrder(order)) return
     // Show loader and hide submit button.
     page.vSubmit.classList.add('d-hide')
