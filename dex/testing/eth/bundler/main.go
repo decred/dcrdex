@@ -61,7 +61,7 @@ type rpcResponse struct {
 // storedUserOp stores user operation data with its transaction hash.
 type storedUserOp struct {
 	txHash common.Hash
-	op     *entrypoint.UserOperation
+	op     *entrypoint.PackedUserOperation
 }
 
 // bundler is a web server that implements the ERC-4337 bundler API and
@@ -221,8 +221,20 @@ func decodeBig(val string) (*big.Int, error) {
 	return hexutil.DecodeBig(val)
 }
 
-// userOp converts user operation parameters to an entrypoint.UserOperation.
-func (param *userOperationParam) userOp() (*entrypoint.UserOperation, error) {
+// packUints128 packs two uint128 values into a [32]byte with high in the
+// upper 128 bits and low in the lower 128 bits.
+func packUints128(high, low *big.Int) [32]byte {
+	var packed [32]byte
+	highBytes := high.Bytes()
+	lowBytes := low.Bytes()
+	// high goes into bytes [0:16], low goes into bytes [16:32]
+	copy(packed[16-len(highBytes):16], highBytes)
+	copy(packed[32-len(lowBytes):32], lowBytes)
+	return packed
+}
+
+// userOp converts user operation parameters to an entrypoint.PackedUserOperation.
+func (param *userOperationParam) userOp() (*entrypoint.PackedUserOperation, error) {
 	sender := common.HexToAddress(param.Sender)
 	nonce, err := decodeBig(param.Nonce)
 	if err != nil {
@@ -248,18 +260,16 @@ func (param *userOperationParam) userOp() (*entrypoint.UserOperation, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid max priority fee per gas: %v", err)
 	}
-	return &entrypoint.UserOperation{
-		Sender:               sender,
-		Nonce:                nonce,
-		InitCode:             common.FromHex(param.InitCode),
-		CallData:             common.FromHex(param.CallData),
-		CallGasLimit:         callGasLimit,
-		VerificationGasLimit: verificationGasLimit,
-		PreVerificationGas:   preVerificationGas,
-		MaxFeePerGas:         maxFeePerGas,
-		MaxPriorityFeePerGas: maxPriorityFeePerGas,
-		PaymasterAndData:     common.FromHex(param.PaymasterAndData),
-		Signature:            common.FromHex(param.Signature),
+	return &entrypoint.PackedUserOperation{
+		Sender:             sender,
+		Nonce:              nonce,
+		InitCode:           common.FromHex(param.InitCode),
+		CallData:           common.FromHex(param.CallData),
+		AccountGasLimits:   packUints128(verificationGasLimit, callGasLimit),
+		PreVerificationGas: preVerificationGas,
+		GasFees:            packUints128(maxPriorityFeePerGas, maxFeePerGas),
+		PaymasterAndData:   common.FromHex(param.PaymasterAndData),
+		Signature:          common.FromHex(param.Signature),
 	}, nil
 }
 
@@ -451,7 +461,7 @@ func (b *bundler) handleSendUserOperation(w http.ResponseWriter, req *rpcRequest
 
 	// Submit the user operation in a goroutine
 	go func() {
-		tx, err := b.entryPoint.HandleOps(txOpts, []entrypoint.UserOperation{*userOp}, b.address)
+		tx, err := b.entryPoint.HandleOps(txOpts, []entrypoint.PackedUserOperation{*userOp}, b.address)
 		if err != nil {
 			fmt.Printf("Error sending user op %x: %v\n", userOpHash, err) // Log error instead of http.Error
 			return
@@ -481,18 +491,28 @@ type getUserOpByHashResult struct {
 	TxHash               string `json:"transactionHash"`
 }
 
+// unpackUints128 unpacks a [32]byte into high (upper 128 bits) and low
+// (lower 128 bits) big.Int values.
+func unpackUints128(packed [32]byte) (high, low *big.Int) {
+	high = new(big.Int).SetBytes(packed[:16])
+	low = new(big.Int).SetBytes(packed[16:])
+	return
+}
+
 // newGetUserOpByHashResult creates a new result struct for eth_getUserOperationByHash.
-func newGetUserOpByHashResult(op *entrypoint.UserOperation, ep common.Address, receipt *types.Receipt) *getUserOpByHashResult {
+func newGetUserOpByHashResult(op *entrypoint.PackedUserOperation, ep common.Address, receipt *types.Receipt) *getUserOpByHashResult {
+	verificationGasLimit, callGasLimit := unpackUints128(op.AccountGasLimits)
+	maxPriorityFeePerGas, maxFeePerGas := unpackUints128(op.GasFees)
 	res := &getUserOpByHashResult{
 		Sender:               op.Sender.String(),
 		Nonce:                op.Nonce.String(),
 		InitCode:             "0x" + hex.EncodeToString(op.InitCode),
 		CallData:             "0x" + hex.EncodeToString(op.CallData),
-		CallGasLimit:         op.CallGasLimit.String(),
-		VerificationGasLimit: op.VerificationGasLimit.String(),
+		CallGasLimit:         callGasLimit.String(),
+		VerificationGasLimit: verificationGasLimit.String(),
 		PreVerificationGas:   op.PreVerificationGas.String(),
-		MaxFeePerGas:         op.MaxFeePerGas.String(),
-		MaxPriorityFeePerGas: op.MaxPriorityFeePerGas.String(),
+		MaxFeePerGas:         maxFeePerGas.String(),
+		MaxPriorityFeePerGas: maxPriorityFeePerGas.String(),
 		PaymasterAndData:     "0x" + hex.EncodeToString(op.PaymasterAndData),
 		Signature:            "0x" + hex.EncodeToString(op.Signature),
 		EntryPoint:           ep.String(),

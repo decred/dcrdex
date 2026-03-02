@@ -122,7 +122,7 @@ func usage(route string, err error) *msgjson.ResponsePayload {
 	return createResponse(route, nil, resErr)
 }
 
-// devRoutes is the set of routes that require the --dev flag.
+// devRoutes is the set of routes that require the --rpcdev flag.
 var devRoutes = map[string]bool{
 	deployContractRoute:  true,
 	testContractGasRoute: true,

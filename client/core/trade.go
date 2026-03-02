@@ -255,6 +255,10 @@ const (
 	// swap spent by the maker without receiving a redemption request from the
 	// server before initiating a redemption search and auto-redeem.
 	spentAgoThreshNormal = 10 * time.Minute
+	// spentAgoThreshAccount is like spentAgoThreshNormal, but for
+	// account-based (EVM) assets where the secret can be read directly
+	// from contract state without parsing transactions.
+	spentAgoThreshAccount = 30 * time.Second
 	// spentAgoThreshSelfGoverned is like spentAgoThreshNormal, but for a
 	// self-governed trade. We are less patient if the server is down or
 	// lacking the market or asset configs involved.
@@ -377,6 +381,11 @@ func (t *trackedTrade) isSelfGoverned() bool {
 func (t *trackedTrade) spentAgoThresh() time.Duration {
 	if t.isSelfGoverned() {
 		return spentAgoThreshSelfGoverned
+	}
+	// Account-based (EVM) assets can read the secret directly from
+	// contract state, so we don't need to wait long for the server relay.
+	if _, is := t.wallets.fromWallet.Wallet.(asset.AccountLocker); is {
+		return spentAgoThreshAccount
 	}
 	return spentAgoThreshNormal // longer
 }
@@ -3526,6 +3535,17 @@ func (c *Core) confirmTx(t *trackedTrade, match *matchTracker, info *txInfo) (bo
 		subject, details := t.formatDetails(info.resubmitTopic, match.token(), makeOrderToken(t.token()))
 		note := newMatchNote(info.resubmitTopic, subject, details, db.WarningLevel, t, match)
 		t.notify(note)
+	}
+
+	// If this is a redeem that was pending submission (e.g. a
+	// GaslessRedeem UserOp), the bundler has now submitted the
+	// transaction and we have the real coin ID. Send the deferred
+	// redeem notification to the server.
+	if info.txType == asset.CTRedeem && match.redemptionPendingSubmission && !status.PendingSubmission {
+		match.redemptionPendingSubmission = false
+		if !match.matchCompleteSent {
+			c.sendRedeemAsync(t, match, status.CoinID, match.MetaData.Proof.Secret)
+		}
 	}
 
 	if confirmed {

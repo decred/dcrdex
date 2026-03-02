@@ -1968,7 +1968,7 @@ func TestGaslessRedeem(t *testing.T) {
 		Redemptions: redemptions,
 	}
 
-	_, opCoin, _, err := wallet.gaslessRedeem(t.Context(), redeemForm, wallet.bundler)
+	_, opCoin, _, err := wallet.gaslessRedeem(t.Context(), redeemForm, wallet.bundler, wallet.paymaster)
 	if err != nil {
 		t.Fatalf("gasless redeem error: %v", err)
 	}

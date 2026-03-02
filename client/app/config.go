@@ -47,7 +47,7 @@ type RPCConfig struct {
 	RPCPass string `long:"rpcpass" description:"RPC server password"`
 	RPCCert string `long:"rpccert" description:"RPC server certificate file location"`
 	RPCKey  string `long:"rpckey" description:"RPC server key file location"`
-	Dev     bool   `long:"dev" description:"Enable developer RPC endpoints."`
+	Dev     bool   `long:"rpcdev" description:"Enable developer RPC endpoints."`
 	// CertHosts is a list of hosts given to certgen.NewTLSCertPair for the
 	// "Subject Alternate Name" values of the generated TLS certificate. It is
 	// set automatically, not via the config file or cli args.
