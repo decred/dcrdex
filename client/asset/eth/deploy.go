@@ -371,7 +371,7 @@ func (contractDeployer) nodeAndRate(
 		return nil, nil, nil, fmt.Errorf("error creating wallet: %w", err)
 	}
 
-	cl, err := newMultiRPCClient(walletDir, providers, log, chainCfg, 3, net)
+	cl, err := newMultiRPCClient(walletDir, providers, log, chainCfg, 3, net, "")
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("error creating rpc client: %w", err)
 	}

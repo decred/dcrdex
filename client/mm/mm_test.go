@@ -186,6 +186,10 @@ func (c *tCore) Network() dex.Network {
 	return dex.Simnet
 }
 
+func (c *tCore) TorProxy() string {
+	return ""
+}
+
 func (c *tCore) FiatConversionRates() map[uint32]float64 {
 	return c.fiatRates
 }

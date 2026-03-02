@@ -48,6 +48,7 @@ type mexc struct {
 	notify    func(any)
 	apiKey    string
 	secretKey string
+	torProxy  string
 	ctx       context.Context
 
 	mtx sync.RWMutex
@@ -108,9 +109,6 @@ type mexc struct {
 	tradeInfo          map[string]*mexcTradeInfo
 	tradeUpdaters      map[int]chan *Trade
 	tradeUpdateCounter int
-
-	httpOnce sync.Once
-	httpCli  *http.Client
 }
 
 type mexcTradeInfo struct {
@@ -411,6 +409,7 @@ func newMEXC(cfg *CEXConfig) (*mexc, error) {
 		notify:        cfg.Notify,
 		apiKey:        cfg.APIKey,
 		secretKey:     cfg.SecretKey,
+		torProxy:      cfg.TorProxy,
 		activeTopics:  make(map[string]struct{}),
 		symbols:       make(map[string]struct{}),
 		symbolMeta:    make(map[string]*mxctypes.Symbol),
@@ -639,6 +638,9 @@ func (m *mexc) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		EchoPingData:  true,
 		ReconnectSync: m.onPrivateReconnect,
 	}
+	if m.torProxy != "" {
+		privateWSCfg.NetDialContext = dexnet.ProxyDialContext(m.torProxy)
+	}
 	privateWS, err := comms.NewWsConn(privateWSCfg)
 	if err != nil {
 		return &wg, fmt.Errorf("create private ws: %w", err)
@@ -709,15 +711,6 @@ func (m *mexc) stop() {
 	}
 }
 
-// initHTTPClient initializes the HTTP client on first use.
-func (m *mexc) initHTTPClient() {
-	m.httpOnce.Do(func() {
-		m.httpCli = &http.Client{
-			Timeout: 30 * time.Second,
-		}
-	})
-}
-
 // getAPI performs a signed GET request.
 // getOrderbookSnapshot fetches a full order book snapshot from MEXC REST API.
 // This is used for initial synchronization of order books.
@@ -756,8 +749,6 @@ func (m *mexc) deleteAPI(ctx context.Context, endpoint string, query url.Values,
 
 // request performs an HTTP request with optional HMAC signature.
 func (m *mexc) request(ctx context.Context, method, endpoint string, query, form url.Values, sign bool, thing any) error {
-	m.initHTTPClient()
-
 	fullURL := mexcHTTPURL + endpoint
 
 	if query == nil {
@@ -1239,7 +1230,9 @@ func (m *mexc) ensureMarketConnection(ctx context.Context) error {
 		ReconnectSync:    m.onMarketReconnect,
 		ConnectEventFunc: connectEventFunc,
 	}
-
+	if m.torProxy != "" {
+		wsCfg.NetDialContext = dexnet.ProxyDialContext(m.torProxy)
+	}
 	marketWS, err := comms.NewWsConn(wsCfg)
 	if err != nil {
 		return fmt.Errorf("create market ws: %w", err)

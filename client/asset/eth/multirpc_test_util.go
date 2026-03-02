@@ -95,7 +95,7 @@ func (m *MRPCTest) rpcClient(dir string, seed []byte, endpoints []string, net de
 		return nil, fmt.Errorf("error creating wallet: %v", err)
 	}
 
-	return newMultiRPCClient(dir, endpoints, log, cfg, 3, net)
+	return newMultiRPCClient(dir, endpoints, log, cfg, 3, net, "")
 }
 
 func (m *MRPCTest) TestHTTP(t *testing.T, port string) {
@@ -280,7 +280,7 @@ func (m *MRPCTest) TestMainnetCompliance(t *testing.T) {
 	}
 
 	log := dex.StdOutLogger("T", dex.LevelTrace)
-	providers, err := connectProviders(ctx, providerLookup, log, cfg.ChainID, dex.Mainnet)
+	providers, err := connectProviders(ctx, providerLookup, log, cfg.ChainID, dex.Mainnet, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -443,6 +443,9 @@ type WalletConfig struct {
 	// DataDir is a filesystem directory the wallet may use for persistent
 	// storage.
 	DataDir string
+	// TorProxy is the address (host:port) of a SOCKS5 proxy (e.g. Tor) for
+	// outgoing wallet connections such as RPC providers and Electrum servers.
+	TorProxy string
 }
 
 // ConfirmTxStatus contains the coinID which redeemed or refunded a swap, the

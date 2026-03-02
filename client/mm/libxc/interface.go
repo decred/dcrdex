@@ -179,6 +179,7 @@ type CEXConfig struct {
 	APIPassphrase string // Required by some exchanges like Bitget
 	Logger        dex.Logger
 	Notify        func(any)
+	TorProxy      string
 }
 
 // NewCEX creates a new CEX.

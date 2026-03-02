@@ -68,9 +68,10 @@ type cbWSConn struct {
 	setSynced  func(bool)
 	apiName    string
 	privKey    *ecdsa.PrivateKey
+	torProxy   string
 }
 
-func newCBWSConn(apiName, wsPath, productID, channel, channelID string, msgHandler func([]byte), setSynced func(bool), privKey *ecdsa.PrivateKey, log dex.Logger) *cbWSConn {
+func newCBWSConn(apiName, wsPath, productID, channel, channelID string, msgHandler func([]byte), setSynced func(bool), privKey *ecdsa.PrivateKey, log dex.Logger, torProxy string) *cbWSConn {
 	subLoggerName := fmt.Sprintf("WS-%s", channel)
 	if productID != "" {
 		subLoggerName += "-" + productID
@@ -85,6 +86,7 @@ func newCBWSConn(apiName, wsPath, productID, channel, channelID string, msgHandl
 		msgHandler: msgHandler,
 		setSynced:  setSynced,
 		privKey:    privKey,
+		torProxy:   torProxy,
 	}
 }
 
@@ -222,7 +224,7 @@ func (c *cbWSConn) handleSubscriptionMessage(b []byte) {
 
 func (c *cbWSConn) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	initialConnect := true
-	conn, err := comms.NewWsConn(&comms.WsCfg{
+	wsCfg := &comms.WsCfg{
 		URL: "wss://" + c.wsPath,
 		// Coinbase does not send pings, but there is a heartbeat every second,
 		// so if no messages come for one minute, we are disconnected.
@@ -243,7 +245,11 @@ func (c *cbWSConn) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		},
 		Logger:     c.log,
 		RawHandler: c.handleWebsocketMessage,
-	})
+	}
+	if c.torProxy != "" {
+		wsCfg.NetDialContext = dexnet.ProxyDialContext(c.torProxy)
+	}
+	conn, err := comms.NewWsConn(wsCfg)
 	if err != nil {
 		return nil, fmt.Errorf("error creating WsConn: %w", err)
 	}
@@ -289,9 +295,10 @@ type cbBook struct {
 	bui       *dex.UnitInfo
 	qui       *dex.UnitInfo
 	log       dex.Logger
+	torProxy  string
 }
 
-func newCBBook(wsPath, productID string, bui, qui *dex.UnitInfo, log dex.Logger) *cbBook {
+func newCBBook(wsPath, productID string, bui, qui *dex.UnitInfo, log dex.Logger, torProxy string) *cbBook {
 	return &cbBook{
 		wsPath:    wsPath,
 		productID: productID,
@@ -299,6 +306,7 @@ func newCBBook(wsPath, productID string, bui, qui *dex.UnitInfo, log dex.Logger)
 		bui:       bui,
 		qui:       qui,
 		log:       log,
+		torProxy:  torProxy,
 	}
 }
 func (c *cbBook) convertOBUpdates(updates []*cbtypes.OrderbookUpdate) (bids, asks []*obEntry) {
@@ -373,7 +381,7 @@ func (c *cbBook) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 
 	// apiName and signer not provided because these subscriptions do not need
 	// authentication.
-	conn := newCBWSConn("", c.wsPath, c.productID, "level2", "l2_data", c.handleLevel2Message, setSynced, nil, c.log)
+	conn := newCBWSConn("", c.wsPath, c.productID, "level2", "l2_data", c.handleLevel2Message, setSynced, nil, c.log, c.torProxy)
 	wsCM := dex.NewConnectionMaster(conn)
 	if err := wsCM.ConnectOnce(ctx); err != nil {
 		return nil, fmt.Errorf("error connecting to websocket feed: %w", err)
@@ -410,6 +418,7 @@ type coinbase struct {
 	idTicker   map[uint32]string
 	ctx        context.Context
 	net        dex.Network
+	torProxy   string
 	accounts   atomic.Value // map[string]*coinbaseAccount
 	assets     atomic.Value // map[string]*coinbaseAsset
 	markets    atomic.Value // map[string]*coinbaseMarket
@@ -501,6 +510,7 @@ func newCoinbase(cfg *CEXConfig) (*coinbase, error) {
 		apiPrivKey:         key,
 		tickerIDs:          tickerIDs,
 		idTicker:           idTicker,
+		torProxy:           cfg.TorProxy,
 		tradeIDNoncePrefix: encode.RandomBytes(10),
 		books:              make(map[string]*cbBook),
 		cexUpdaters:        make(map[chan any]struct{}),
@@ -571,7 +581,7 @@ func (c *coinbase) handleUserMessage(b []byte) {
 }
 
 func (c *coinbase) subscribeUserChannel(ctx context.Context) (*sync.WaitGroup, error) {
-	conn := newCBWSConn(c.apiName, c.wsPath, "", "user", "user", c.handleUserMessage, func(bool) {}, c.apiPrivKey, c.log)
+	conn := newCBWSConn(c.apiName, c.wsPath, "", "user", "user", c.handleUserMessage, func(bool) {}, c.apiPrivKey, c.log, c.torProxy)
 	cm := dex.NewConnectionMaster(conn)
 	if err := cm.ConnectOnce(ctx); err != nil {
 		return nil, fmt.Errorf("error connecting to websocket feed: %w", err)
@@ -824,7 +834,7 @@ func (c *coinbase) SubscribeMarket(ctx context.Context, baseID, quoteID uint32) 
 		return nil
 	}
 
-	book = newCBBook(c.wsPath, productID, &bui, &qui, c.log)
+	book = newCBBook(c.wsPath, productID, &bui, &qui, c.log, c.torProxy)
 	err = book.sync(c.ctx)
 	if err != nil {
 		return fmt.Errorf("error syncing book: %v", err)

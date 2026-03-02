@@ -67,6 +67,7 @@ func ElectrumWallet(cfg *BTCCloneCFG) (*ExchangeWalletElectrum, error) {
 		addrStringer: cfg.AddressStringer,
 		segwit:       cfg.Segwit,
 		rpcCfg:       rpcCfg,
+		torProxy:     cfg.WalletCFG.TorProxy,
 	})
 	btc.setNode(ew)
 

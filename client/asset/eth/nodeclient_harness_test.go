@@ -231,7 +231,7 @@ func prepareRPCClient(name, dataDir string, providers []string, net dex.Network)
 		return nil, nil, err
 	}
 
-	c, err := newMultiRPCClient(dataDir, providers, tLogger.SubLogger(name), cfg, 3, net)
+	c, err := newMultiRPCClient(dataDir, providers, tLogger.SubLogger(name), cfg, 3, net, "")
 	if err != nil {
 		return nil, nil, fmt.Errorf("(%s) prepareRPCClient error: %v", name, err)
 	}

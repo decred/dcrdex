@@ -25,6 +25,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/dexnet"
 	"decred.org/dcrdex/dex/networks/erc20"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	"github.com/ethereum/go-ethereum"
@@ -39,6 +40,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/gorilla/websocket"
 )
 
 const (
@@ -380,11 +382,12 @@ type receiptRecord struct {
 
 // multiRPCClient is an ethFetcher backed by one or more public RPC providers.
 type multiRPCClient struct {
-	cfg     *params.ChainConfig
-	creds   *accountCredentials
-	log     dex.Logger
-	chainID *big.Int
-	net     dex.Network
+	cfg      *params.ChainConfig
+	creds    *accountCredentials
+	log      dex.Logger
+	chainID  *big.Int
+	net      dex.Network
+	torProxy string
 
 	finalizeConfs uint64
 
@@ -416,6 +419,7 @@ func newMultiRPCClient(
 	cfg *params.ChainConfig,
 	finalizeConfs uint64,
 	net dex.Network,
+	torProxy string,
 ) (*multiRPCClient, error) {
 	walletDir := getWalletDir(dir, net)
 	creds, err := pathCredentials(filepath.Join(walletDir, "keystore"))
@@ -431,6 +435,7 @@ func newMultiRPCClient(
 		chainID:       cfg.ChainID,
 		endpoints:     endpoints,
 		finalizeConfs: finalizeConfs,
+		torProxy:      torProxy,
 	}
 	m.receipts.cache = make(map[common.Hash]*receiptRecord)
 	m.receipts.lastClean = time.Now()
@@ -442,7 +447,7 @@ func newMultiRPCClient(
 // list of providers that were successfully connected. It is not an error for a
 // connection to fail, unless all endpoints fail. The caller can infer failed
 // connections from the length and contents of the returned provider list.
-func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, chainID *big.Int, net dex.Network) ([]*provider, error) {
+func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, chainID *big.Int, net dex.Network, torProxy string) ([]*provider, error) {
 	providers := make([]*provider, 0, len(endpoints))
 	var success bool
 
@@ -514,7 +519,14 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 			// Some providers appear to meter websocket connections.
 			var err error
 			startTime := time.Now()
-			rpcClient, err = rpc.DialWebsocket(timedCtx, wsURL.String(), "")
+			if torProxy != "" {
+				rpcClient, err = rpc.DialOptions(timedCtx, wsURL.String(), rpc.WithWebsocketDialer(websocket.Dialer{
+					NetDialContext:   dexnet.ProxyDialContext(torProxy),
+					HandshakeTimeout: 30 * time.Second,
+				}))
+			} else {
+				rpcClient, err = rpc.DialWebsocket(timedCtx, wsURL.String(), "")
+			}
 			log.Tracef("%s to connect to %s", time.Since(startTime), wsURL)
 			if err == nil {
 				ec = ethclient.NewClient(rpcClient)
@@ -544,7 +556,11 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 		if ec == nil {
 			var err error
 			startTime := time.Now()
-			rpcClient, err = rpc.DialContext(timedCtx, endpoint)
+			if torProxy != "" {
+				rpcClient, err = rpc.DialOptions(timedCtx, endpoint, rpc.WithHTTPClient(dexnet.ProxyHTTPClient(torProxy)))
+			} else {
+				rpcClient, err = rpc.DialContext(timedCtx, endpoint)
+			}
 			log.Tracef("%s to connect to %s", time.Since(startTime), endpoint)
 			if err != nil {
 				log.Errorf("error creating http client for %q: %v", endpoint, err)
@@ -664,7 +680,7 @@ out:
 }
 
 func (m *multiRPCClient) connect(ctx context.Context) (err error) {
-	providers, err := connectProviders(ctx, m.endpoints, m.log, m.chainID, m.net)
+	providers, err := connectProviders(ctx, m.endpoints, m.log, m.chainID, m.net, m.torProxy)
 	if err != nil {
 		return err
 	}
@@ -700,7 +716,7 @@ func (m *multiRPCClient) connect(ctx context.Context) (err error) {
 // unknown providers have a sufficient api to trade and saves good providers to
 // file. One bad provider or connect problem will cause this to error.
 func createAndCheckProviders(ctx context.Context, walletDir string, endpoints []string, chainID *big.Int,
-	compat *CompatibilityData, net dex.Network, log dex.Logger, allProvidersMustConnect bool) error {
+	compat *CompatibilityData, net dex.Network, log dex.Logger, allProvidersMustConnect bool, torProxy string) error {
 
 	var localCP map[string]bool
 	path := filepath.Join(walletDir, "compliant-providers.json")
@@ -737,7 +753,7 @@ func createAndCheckProviders(ctx context.Context, walletDir string, endpoints []
 	}
 
 	if len(unknownEndpoints) > 0 {
-		providers, err := connectProviders(ctx, unknownEndpoints, log, chainID, net)
+		providers, err := connectProviders(ctx, unknownEndpoints, log, chainID, net, torProxy)
 		if err != nil {
 			return fmt.Errorf("expected to successfully connect to at least 1 of these unfamiliar providers: %s",
 				failedProviders(providers, unknownEndpoints))
@@ -793,12 +809,12 @@ func failedProviders(succeeded []*provider, tried []string) string {
 }
 
 func (m *multiRPCClient) reconfigure(ctx context.Context, endpoints []string, compat *CompatibilityData, walletDir string, defaultProviders bool) error {
-	if err := createAndCheckProviders(ctx, walletDir, endpoints, m.chainID, compat, m.net, m.log, !defaultProviders); err != nil {
+	if err := createAndCheckProviders(ctx, walletDir, endpoints, m.chainID, compat, m.net, m.log, !defaultProviders, m.torProxy); err != nil {
 		return fmt.Errorf("create and check providers: %v", err)
 	}
 
 	// TODO: If endpoints haven't change, do nothing.
-	providers, err := connectProviders(ctx, endpoints, m.log, m.chainID, m.net)
+	providers, err := connectProviders(ctx, endpoints, m.log, m.chainID, m.net, m.torProxy)
 	if err != nil {
 		return err
 	}

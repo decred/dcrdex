@@ -38,6 +38,7 @@ type CreateWalletParams struct {
 	DataDir  string
 	Net      dex.Network
 	Logger   dex.Logger
+	TorProxy string
 }
 
 // Driver is the interface required of all exchange wallets.

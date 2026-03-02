@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"decred.org/dcrdex/dex/dexnet"
 	"decred.org/dcrdex/dex/networks/eth/contracts/entrypoint"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -101,8 +102,14 @@ var _ bundler = (*rpcBundler)(nil)
 // newBundler creates a new bundler instance with the specified endpoint. If
 // the bundler does not support the specified entrypoint, or is not one of the
 // supported bundler implementations, an error is returned.
-func newBundler(ctx context.Context, endpoint string, entryPointAddr common.Address, backend bind.ContractCaller, getBaseFee func(ctx context.Context) (*big.Int, error)) (*rpcBundler, error) {
-	rpcClient, err := rpc.DialContext(ctx, endpoint)
+func newBundler(ctx context.Context, endpoint string, entryPointAddr common.Address, backend bind.ContractCaller, getBaseFee func(ctx context.Context) (*big.Int, error), torProxy string) (*rpcBundler, error) {
+	var rpcClient *rpc.Client
+	var err error
+	if torProxy != "" {
+		rpcClient, err = rpc.DialOptions(ctx, endpoint, rpc.WithHTTPClient(dexnet.ProxyHTTPClient(torProxy)))
+	} else {
+		rpcClient, err = rpc.DialContext(ctx, endpoint)
+	}
 	if err != nil {
 		return nil, err
 	}

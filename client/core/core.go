@@ -37,6 +37,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/config"
+	"decred.org/dcrdex/dex/dexnet"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/msgjson"
@@ -1561,6 +1562,7 @@ func New(cfg *Config) (*Core, error) {
 		if _, _, err = net.SplitHostPort(cfg.TorProxy); err != nil {
 			return nil, err
 		}
+		dexnet.SetProxy(cfg.TorProxy)
 	}
 	if cfg.Onion != "" {
 		if _, _, err = net.SplitHostPort(cfg.Onion); err != nil {
@@ -1969,6 +1971,11 @@ func (c *Core) setCredentials(creds *db.PrimaryCredentials) {
 // Network returns the current DEX network.
 func (c *Core) Network() dex.Network {
 	return c.net
+}
+
+// TorProxy returns the configured Tor proxy address, or "" if none.
+func (c *Core) TorProxy() string {
+	return c.cfg.TorProxy
 }
 
 // Exchanges creates a map of *Exchange keyed by host, including markets and
@@ -2776,6 +2783,7 @@ func (c *Core) createSeededWallet(assetID uint32, crypter encrypt.Crypter, form 
 		DataDir:  c.assetDataDirectory(assetID),
 		Net:      c.net,
 		Logger:   c.log.SubLogger(unbip(assetID)),
+		TorProxy: c.cfg.TorProxy,
 	}); err != nil {
 		return nil, fmt.Errorf("Error creating wallet: %w", err)
 	}
@@ -2913,6 +2921,7 @@ func (c *Core) loadXCWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 			Emit:        asset.NewWalletEmitter(c.notes, assetID, log),
 			PeersChange: peersChange,
 			DataDir:     c.assetDataDirectory(assetID),
+			TorProxy:    c.cfg.TorProxy,
 		}
 
 		settings[asset.SpecialSettingActivelyUsed] =
@@ -3302,6 +3311,7 @@ func (c *Core) RecoverWallet(assetID uint32, appPW []byte, force bool) error {
 		DataDir:  c.assetDataDirectory(assetID),
 		Net:      c.net,
 		Logger:   c.log.SubLogger(unbip(assetID)),
+		TorProxy: c.cfg.TorProxy,
 	}); err != nil {
 		return fmt.Errorf("error creating wallet: %w", err)
 	}
@@ -3594,6 +3604,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 			Type:     form.Type,
 			Settings: form.Config,
 			DataDir:  c.assetDataDirectory(assetID),
+			TorProxy: c.cfg.TorProxy,
 		}, oldWallet.currentDepositAddress()); err != nil {
 			return fmt.Errorf("Reconfigure: %v", err)
 		} else if !restart {

@@ -447,6 +447,7 @@ type baseWallet struct {
 	log        dex.Logger
 	dir        string
 	walletType string
+	torProxy   string
 
 	bundlerMtx sync.RWMutex
 	bundler    bundler
@@ -1658,7 +1659,7 @@ func CreateEVMWallet(chainID int64, createWalletParams *asset.CreateWalletParams
 		if !skipConnect && len(providerDef) > 0 {
 			endpoints := strings.Split(providerDef, providerDelimiter)
 			if err := createAndCheckProviders(context.Background(), walletDir, endpoints,
-				big.NewInt(chainID), compat, createWalletParams.Net, createWalletParams.Logger, false); err != nil {
+				big.NewInt(chainID), compat, createWalletParams.Net, createWalletParams.Logger, false, createWalletParams.TorProxy); err != nil {
 				return fmt.Errorf("create and check providers: %v", err)
 			}
 		}
@@ -1787,6 +1788,7 @@ func NewEVMWallet(cfg *EVMWalletConfig) (w *ETHWallet, err error) {
 		log:                 cfg.Logger,
 		dir:                 cfg.AssetCfg.DataDir,
 		walletType:          cfg.AssetCfg.Type,
+		torProxy:            cfg.AssetCfg.TorProxy,
 		finalizeConfs:       cfg.FinalizeConfs,
 		settings:            cfg.AssetCfg.Settings,
 		gasFeeLimitV:        gasFeeLimit,
@@ -1890,7 +1892,7 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 		if providerDef, found := w.settings[providersKey]; found && len(providerDef) > 0 {
 			endpoints = strings.Split(providerDef, " ")
 		}
-		rpcCl, err := newMultiRPCClient(w.dir, endpoints, w.log.SubLogger("RPC"), w.chainCfg, w.finalizeConfs, w.net)
+		rpcCl, err := newMultiRPCClient(w.dir, endpoints, w.log.SubLogger("RPC"), w.chainCfg, w.finalizeConfs, w.net, w.torProxy)
 		if err != nil {
 			return nil, err
 		}
@@ -2131,7 +2133,7 @@ func (w *ETHWallet) setBundler(bundlerAddr string) error {
 		return fmt.Errorf("error getting entrypoint address: %v", err)
 	}
 
-	bundler, err := newBundler(w.ctx, bundlerAddr, entrypoint, w.node.contractBackend(), w.currentBaseFee)
+	bundler, err := newBundler(w.ctx, bundlerAddr, entrypoint, w.node.contractBackend(), w.currentBaseFee, w.torProxy)
 	if err != nil {
 		return fmt.Errorf("error connecting to bundler: %v", err)
 	}
@@ -8953,7 +8955,7 @@ func quickNode(ctx context.Context, walletDir string, contractVer uint32,
 		return nil, nil, fmt.Errorf("error creating initiator wallet: %v", err)
 	}
 
-	cl, err := newMultiRPCClient(walletDir, providers, log, wParams.ChainCfg, 3, net)
+	cl, err := newMultiRPCClient(walletDir, providers, log, wParams.ChainCfg, 3, net, "")
 	if err != nil {
 		return nil, nil, fmt.Errorf("error opening initiator rpc client: %v", err)
 	}
