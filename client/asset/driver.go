@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"sync"
 
 	"decred.org/dcrdex/dex"
@@ -353,4 +355,30 @@ func SPVWithdrawTx(ctx context.Context, assetID uint32, walletPW []byte, recipie
 		return nil, errors.New("no withdraw function")
 	}
 	return f(ctx, walletPW, recipient, dataDir, net, log)
+}
+
+func Tickers() []string {
+	assets := Assets()
+	tickers := make([]string, 0, len(assets)/2 /* generous rough guess accounting for dupes i.e. tokens */)
+	for _, a := range assets {
+		ui, _ := UnitInfo(a.ID)
+		ticker := ui.Ticker()
+		if !slices.Contains(tickers, ticker) {
+			tickers = append(tickers, ticker)
+		}
+	}
+	return tickers
+}
+
+func NetworkTickers() map[string]uint32 {
+	assets := Assets()
+	netTickers := make(map[string]uint32)
+	for _, a := range assets {
+		parts := strings.Split(a.Symbol, ".")
+		if len(parts) > 1 {
+			continue
+		}
+		netTickers[a.Info.UnitInfo.Conventional.Unit] = a.ID
+	}
+	return netTickers
 }

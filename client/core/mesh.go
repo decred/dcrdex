@@ -1,36 +1,10 @@
 package core
 
 import (
+	"context"
+
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/keygen"
-	"decred.org/dcrdex/tatanka/mj"
-	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
-
-func (c *Core) handleMeshNotification(noteI any) {
-	switch n := noteI.(type) {
-	case *mj.Broadcast:
-		c.handleMeshBroadcast(n)
-	}
-}
-
-func (c *Core) handleMeshBroadcast(bcast *mj.Broadcast) {
-	c.log.Tracef("Received mesh broadcast: %s", bcast.Subject)
-
-	switch bcast.Topic {
-	case mj.TopicMarket:
-		// c.handleMarketBroadcast(bcast)
-	case mj.TopicFeeRateEstimate:
-		// c.handleFeeRateEstimateBroadcast(bcast)
-	case mj.TopicFiatRate:
-		// c.handleFiatRateBroadcast(bcast)
-	default:
-		c.log.Warnf("Unknown broadcast topic: %s", bcast.Topic)
-	}
-
-	// // Emit the broadcast to the subscribers.
-	// c.meshEmit(bcast)
-}
 
 func (c *Core) coreMesh() *Mesh {
 	c.meshMtx.RLock()
@@ -43,7 +17,7 @@ func (c *Core) coreMesh() *Mesh {
 
 }
 
-func (c *Core) connectMesh() {
+func (c *Core) connectMesh(ctx context.Context) {
 	if c.net != dex.Simnet || !c.cfg.Mesh {
 		return
 	}
@@ -64,24 +38,12 @@ func (c *Core) connectMesh() {
 
 	c.log.Infof("Connected to Mesh")
 
-	if err = mesh.SubscribeToFeeRateEstimates(); err != nil {
+	if err = mesh.SubscribeToFeeRateEstimates(ctx); err != nil {
 		c.log.Errorf("error subscribing to mesh fee rate estimates: %v", err)
 		return
 	}
-	if err = mesh.SubscribeToFiatRates(); err != nil {
+	if err = mesh.SubscribeToTickerPrices(ctx); err != nil {
 		c.log.Error("error subscribing to mesh fiat rates: %v", err)
 		return
 	}
-}
-
-func deriveMeshPriv(seed []byte) (*secp256k1.PrivateKey, error) {
-	xKey, err := keygen.GenDeepChild(seed, []uint32{hdKeyPurposeMesh})
-	if err != nil {
-		return nil, err
-	}
-	privB, err := xKey.SerializedPrivKey()
-	if err != nil {
-		return nil, err
-	}
-	return secp256k1.PrivKeyFromBytes(privB), nil
 }

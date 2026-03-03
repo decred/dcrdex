@@ -32,6 +32,7 @@ import (
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/db/bolt"
+	"decred.org/dcrdex/client/mesh"
 	"decred.org/dcrdex/client/mnemonic"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
@@ -44,8 +45,7 @@ import (
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
 	serverdex "decred.org/dcrdex/server/dex"
-	"decred.org/dcrdex/tatanka/client/mesh"
-	"decred.org/dcrdex/tatanka/tanka"
+	"github.com/bisoncraft/mesh/bond"
 	"github.com/decred/dcrd/crypto/blake256"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
@@ -1541,7 +1541,7 @@ type Core struct {
 	requestedActions   map[string]*asset.ActionRequiredNote
 
 	meshMtx sync.RWMutex
-	mesh    *mesh.Mesh
+	mesh    *mesh.Client
 	meshCM  *dex.ConnectionMaster
 }
 
@@ -4643,7 +4643,6 @@ func (c *Core) Login(pw []byte) error {
 		}
 	}
 
-	var meshPriv *secp256k1.PrivateKey
 	login := func() (needInit bool, err error) {
 		c.loginMtx.Lock()
 		defer c.loginMtx.Unlock()
@@ -4658,26 +4657,19 @@ func (c *Core) Login(pw []byte) error {
 			if err != nil {
 				return false, fmt.Errorf("error deriving bond private key: %w", err)
 			}
-			meshPriv, err = deriveMeshPriv(seed)
-			if err != nil {
-				return false, fmt.Errorf("error deriving mesh private key: %w", err)
-			}
 			c.multisigXPriv, err = deriveMultisigXPriv(seed)
 			if err != nil {
 				return false, fmt.Errorf("error deriving multisig private key: %w", err)
 			}
 
 			if c.cfg.Mesh && c.net == dex.Simnet {
-				mesh, err := mesh.New(&mesh.Config{
-					DataDir:    filepath.Join(filepath.Dir(c.cfg.DBPath), "mesh"),
-					PrivateKey: meshPriv,
-					Logger:     c.log.SubLogger("MESH"),
-					EntryNode: &mesh.TatankaCredentials{
-						PeerID: tanka.SimnetTatankaPeerID,
-						Addr:   "127.0.0.1:7323",
-						// Cert: ,
-						NoTLS: true,
-					},
+				const simnetMeshAddr = "/ip4/127.0.0.1/tcp/12347"
+				todoBonds := []*bond.BondParams{}
+				mesh, err := mesh.NewClient(&mesh.ClientConfig{
+					Seed:          seed,
+					BootstrapPeer: simnetMeshAddr,
+					Bonds:         todoBonds,
+					Log:           c.log.SubLogger("MC"),
 				})
 				if err != nil {
 					return false, err
@@ -4686,16 +4678,9 @@ func (c *Core) Login(pw []byte) error {
 				c.mesh = mesh
 				c.meshCM = dex.NewConnectionMaster(c.mesh)
 				c.meshMtx.Unlock()
-				go func() {
-					for {
-						select {
-						case n := <-mesh.Next():
-							c.handleMeshNotification(n)
-						case <-c.ctx.Done():
-							return
-						}
-					}
-				}()
+				if err := c.meshCM.Connect(c.ctx); err != nil {
+					c.log.Errorf("Error establishing connection with Mesh. Will continue trying: %v", err)
+				}
 			}
 
 			c.loggedIn = true
@@ -4716,7 +4701,7 @@ func (c *Core) Login(pw []byte) error {
 		c.connectWallets(crypter) // initialize reserves
 		c.notify(newLoginNote("Resuming active trades..."))
 		c.resolveActiveTrades(crypter)
-		c.connectMesh()
+		c.connectMesh(c.ctx)
 		c.notify(newLoginNote("Connecting to DEX servers..."))
 		c.initializeDEXConnections(crypter)
 	}

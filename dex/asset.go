@@ -207,6 +207,10 @@ func (ui *UnitInfo) FormatSignedAtoms(v int64, plusSign ...bool) string {
 	return "-" + ui.FormatAtoms(uint64(-v))
 }
 
+func (ui *UnitInfo) Ticker() string {
+	return ui.Conventional.Unit
+}
+
 // Token is a generic representation of a token-type asset.
 type Token struct {
 	// ParentID is the asset ID of the token's parent asset.
