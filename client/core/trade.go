@@ -3925,7 +3925,12 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID, contract, txDa
 	contractID := coinIDString(assetID, coinID)
 
 	// Audit the contract.
-	// 1. Recipient Address
+	// 1. Recipient Address — must be our own address. For UTXO-based assets,
+	//    this check is also a critical defense against CoinID reuse: since our
+	//    address is unique per trade (see RedemptionAddress), each legitimate
+	//    contract must have a unique script hash and CoinID. A counterparty
+	//    cannot present a single on-chain output as the contract for multiple
+	//    different matches, because each match expects a different recipient.
 	// 2. Contract value
 	// 3. Secret hash: maker compares, taker records
 	if auditInfo.Recipient != t.Trade().Address {
