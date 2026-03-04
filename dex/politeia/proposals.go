@@ -577,7 +577,7 @@ func (p *Politeia) fetchAllProposals() ([]*Proposal, error) {
 // The key is the proposal token prefixed with proposalPrefix to avoid key
 // collisions with other data saved in the db.
 func proposalKey(proposalToken string) []byte {
-	return []byte(fmt.Sprintf("%s:%s", proposalPrefix, proposalToken))
+	return fmt.Appendf(nil, "%s:%s", proposalPrefix, proposalToken)
 }
 
 // proposalsStatusIndex creates the key for the proposal status index. The key is
@@ -585,13 +585,13 @@ func proposalKey(proposalToken string) []byte {
 // vote status to allow querying proposals by their vote status.
 func proposalsStatusIndex(p *Proposal) []byte {
 	reversed := uint64(math.MaxInt64) - p.Timestamp
-	return []byte(fmt.Sprintf(
+	return fmt.Appendf(nil,
 		"%s:%s:%020d:%s",
 		proposalStatusIndexPrefix,
 		VotesStatuses[p.VoteStatus],
 		reversed,
 		p.Token,
-	))
+	)
 }
 
 // proposalsTimestampIndex creates the key for the proposal timestamp index. The key is
@@ -599,12 +599,12 @@ func proposalsStatusIndex(p *Proposal) []byte {
 // timestamp to allow querying proposals by their timestamp.
 func proposalsTimestampIndex(p *Proposal) []byte {
 	reversed := uint64(math.MaxInt64) - p.Timestamp
-	return []byte(fmt.Sprintf(
+	return fmt.Appendf(nil,
 		"%s:%020d:%s",
 		proposalTimestampIndexPrefix,
 		reversed,
 		p.Token,
-	))
+	)
 }
 
 // iterateTable iterates all entries in a table and returns the entries.
@@ -670,7 +670,7 @@ func iterateIndex(db *lexi.DB, limit int, voteStatus string, f func(k, val []byt
 
 		var voteSearchKey []byte
 		if voteStatus != "" {
-			voteSearchKey = lexi.PrefixedKey(indexPrefix, []byte(fmt.Sprintf("%s:%s", proposalStatusIndexPrefix, voteStatus)))
+			voteSearchKey = lexi.PrefixedKey(indexPrefix, fmt.Appendf(nil, "%s:%s", proposalStatusIndexPrefix, voteStatus))
 			it.Seek(voteSearchKey)
 		} else {
 			it.Rewind()

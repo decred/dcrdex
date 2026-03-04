@@ -11969,7 +11969,7 @@ func TestTakeAction(t *testing.T) {
 
 	rig.dc.trades[oid] = tracker
 
-	requestData := []byte(fmt.Sprintf(`{"orderID":"abcd","coinID":"%s","retry":true}`, dex.Bytes(coinID)))
+	requestData := fmt.Appendf(nil, `{"orderID":"abcd","coinID":"%s","retry":true}`, dex.Bytes(coinID))
 
 	err := rig.core.TakeAction(0, ActionIDRedeemRejected, requestData)
 	if err == nil {
@@ -11977,7 +11977,7 @@ func TestTakeAction(t *testing.T) {
 	}
 
 	rig.core.requestedActions[uniqueID] = nil
-	requestData = []byte(fmt.Sprintf(`{"orderID":"%s","coinID":"%s","retry":false}`, oid, dex.Bytes(coinID)))
+	requestData = fmt.Appendf(nil, `{"orderID":"%s","coinID":"%s","retry":false}`, oid, dex.Bytes(coinID))
 
 	err = rig.core.TakeAction(0, ActionIDRedeemRejected, requestData)
 	if err != nil {
@@ -11987,7 +11987,7 @@ func TestTakeAction(t *testing.T) {
 		t.Fatal("requested action not removed")
 	}
 
-	requestData = []byte(fmt.Sprintf(`{"orderID":"%s","coinID":"%s","retry":true}`, oid, dex.Bytes(coinID)))
+	requestData = fmt.Appendf(nil, `{"orderID":"%s","coinID":"%s","retry":true}`, oid, dex.Bytes(coinID))
 	err = rig.core.TakeAction(0, ActionIDRedeemRejected, requestData)
 	if err != nil {
 		t.Fatalf("error for taker retry=true: %v", err)

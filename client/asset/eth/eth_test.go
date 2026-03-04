@@ -1369,7 +1369,7 @@ func TestTakeAction(t *testing.T) {
 	}), signer, node.privKey)
 	node.sendTxTx = replacementTx
 
-	tooCheapAction := []byte(fmt.Sprintf(`{"txID":"%s","bump":true}`, pendingTx.ID))
+	tooCheapAction := fmt.Appendf(nil, `{"txID":"%s","bump":true}`, pendingTx.ID)
 	if err := eth.TakeAction(actionTypeTooCheap, tooCheapAction); err != nil {
 		t.Fatalf("TakeAction error: %v", err)
 	}
@@ -1397,7 +1397,7 @@ func TestTakeAction(t *testing.T) {
 	eth.pendingTxs = []*extendedWalletTx{pendingTx}
 	pendingTx.SubmissionTime = 0
 	// Neglecting to bump should reset submission time.
-	tooCheapAction = []byte(fmt.Sprintf(`{"txID":"%s","bump":false}`, pendingTx.ID))
+	tooCheapAction = fmt.Appendf(nil, `{"txID":"%s","bump":false}`, pendingTx.ID)
 	if err := eth.TakeAction(actionTypeTooCheap, tooCheapAction); err != nil {
 		t.Fatalf("TakeAction bump=false error: %v", err)
 	}
@@ -1414,7 +1414,7 @@ func TestTakeAction(t *testing.T) {
 
 	// Nonce-replaced tx
 	eth.pendingTxs = []*extendedWalletTx{pendingTx}
-	lostNonceAction := []byte(fmt.Sprintf(`{"txID":"%s","abandon":true}`, pendingTx.ID))
+	lostNonceAction := fmt.Appendf(nil, `{"txID":"%s","abandon":true}`, pendingTx.ID)
 	if err := eth.TakeAction(actionTypeLostNonce, lostNonceAction); err != nil {
 		t.Fatalf("TakeAction replacment=false, abandon=true error: %v", err)
 	}
@@ -1423,7 +1423,7 @@ func TestTakeAction(t *testing.T) {
 	}
 	eth.pendingTxs = []*extendedWalletTx{pendingTx}
 	node.getTxRes = replacementTx
-	lostNonceAction = []byte(fmt.Sprintf(`{"txID":"%s","abandon":false,"replacementID":"%s"}`, pendingTx.ID, replacementTx.Hash()))
+	lostNonceAction = fmt.Appendf(nil, `{"txID":"%s","abandon":false,"replacementID":"%s"}`, pendingTx.ID, replacementTx.Hash())
 	if err := eth.TakeAction(actionTypeLostNonce, lostNonceAction); err != nil {
 		t.Fatalf("TakeAction replacment=true, error: %v", err)
 	}
@@ -1438,7 +1438,7 @@ func TestTakeAction(t *testing.T) {
 		amt:    1,
 	})
 	eth.pendingTxs = []*extendedWalletTx{pendingTx}
-	lostNonceAction = []byte(fmt.Sprintf(`{"txID":"%s","abandon":false,"replacementID":"%s"}`, pendingTx.ID, replacementTx.Hash()))
+	lostNonceAction = fmt.Appendf(nil, `{"txID":"%s","abandon":false,"replacementID":"%s"}`, pendingTx.ID, replacementTx.Hash())
 	if err := eth.TakeAction(actionTypeLostNonce, lostNonceAction); err == nil {
 		t.Fatalf("no error for wrong nonce")
 	}

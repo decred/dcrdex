@@ -79,7 +79,7 @@ func (s *HiddenService) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	socksPort, serverPort := ports[0], ports[1]
 	s.serverAddr = "127.0.0.1:" + serverPort
 
-	torrcData := []byte(fmt.Sprintf(torrcTemplate, socksPort, s.dataDir, hiddenServiceDir, s.serverAddr))
+	torrcData := fmt.Appendf(nil, torrcTemplate, socksPort, s.dataDir, hiddenServiceDir, s.serverAddr)
 	if err := os.WriteFile(torrcPath, torrcData, 0600); err != nil {
 		return nil, fmt.Errorf("error writing torrc file: %w", err)
 	}
