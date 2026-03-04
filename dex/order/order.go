@@ -421,7 +421,12 @@ type Trade struct {
 	Coins    []CoinID
 	Sell     bool
 	Quantity uint64
-	Address  string // TODO: provide later, maybe in the match ack
+	// Deprecated: Address is the order-level swap address, no longer used as
+	// a contract recipient. Per-match swap addresses provided in the match
+	// ack are used instead. TODO: Remove Address from the order struct,
+	// serialization, submission flow, DB schema, and wallet address
+	// reservation (ReturnRedemptionAddress).
+	Address string
 
 	// FillAmt is not part of the order's serialization.
 	fillAmtMtx sync.RWMutex
@@ -479,6 +484,9 @@ func (t *Trade) SetFill(amt uint64) {
 }
 
 // SwapAddress returns the order's payment address.
+//
+// Deprecated: The order-level address is no longer used as a contract
+// recipient. Per-match swap addresses are used instead.
 func (t *Trade) SwapAddress() string {
 	return t.Address
 }

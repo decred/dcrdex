@@ -588,9 +588,18 @@ type Wallet interface {
 	OwnsDepositAddress(address string) (bool, error)
 	// RedemptionAddress gets an address for use in redeeming the counterparty's
 	// swap. This would be included in their swap initialization. This is
-	// presently called when each trade order is *submitted*. If these are
-	// unique addresses and the orders are canceled, the gap limit may become a
-	// hurdle when restoring the wallet.
+	// called once per match during match acknowledgement, so each match gets
+	// a unique address. If addresses are unique and matches are later revoked
+	// without use, the gap limit may become a hurdle when restoring the
+	// wallet.
+	//
+	// For UTXO-based assets, implementations MUST return a unique address on
+	// each call. The address becomes part of the HTLC script, so a unique
+	// address per match ensures each swap contract has a unique script hash
+	// and therefore a unique CoinID. This is a critical security property: it
+	// prevents a malicious counterparty from presenting a single on-chain
+	// contract as fulfilling multiple matches. (EVM-based assets use a
+	// different contract structure and are not subject to this requirement.)
 	RedemptionAddress() (string, error)
 	// LockTimeExpired returns true if the specified locktime has expired,
 	// making it possible to redeem the locked coins.

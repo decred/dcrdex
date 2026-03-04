@@ -244,6 +244,10 @@ const (
 	// MMEpochSnapshotRoute is the DEX-originating notification-type message
 	// delivering a signed per-account epoch snapshot.
 	MMEpochSnapshotRoute = "mm_epoch_snapshot"
+	// CounterPartyAddressRoute is a DEX-originating notification-type message
+	// delivering the counterparty's per-match swap address after both sides
+	// have acknowledged the match.
+	CounterPartyAddressRoute = "counterparty_address"
 )
 
 const errNullRespPayload = dex.ErrorKind("null response payload")
@@ -283,8 +287,9 @@ type Stampable interface {
 // requires an acknowledgement. It is typically a signature of some serialized
 // data associated with the request.
 type Acknowledgement struct {
-	MatchID Bytes `json:"matchid"`
-	Sig     Bytes `json:"sig"`
+	MatchID Bytes  `json:"matchid"`
+	Sig     Bytes  `json:"sig"`
+	Address string `json:"address"`
 }
 
 // Error is returned as part of the Response to indicate that an error
@@ -488,11 +493,16 @@ func (msg *Message) String() string {
 // Match is the params for a DEX-originating MatchRoute request.
 type Match struct {
 	Signature
-	OrderID      Bytes  `json:"orderid"`
-	MatchID      Bytes  `json:"matchid"`
-	Quantity     uint64 `json:"qty"`
-	Rate         uint64 `json:"rate"`
-	ServerTime   uint64 `json:"tserver"`
+	OrderID    Bytes  `json:"orderid"`
+	MatchID    Bytes  `json:"matchid"`
+	Quantity   uint64 `json:"qty"`
+	Rate       uint64 `json:"rate"`
+	ServerTime uint64 `json:"tserver"`
+	// Address carries the counterparty's per-match swap address in the
+	// connect response. During initial match notification it carries the
+	// order-level address for backward compatibility, but that value is not
+	// used for contracts. The actual per-match address is delivered via the
+	// counterparty_address notification.
 	Address      string `json:"address"`
 	FeeRateBase  uint64 `json:"feeratebase"`
 	FeeRateQuote uint64 `json:"feeratequote"`
@@ -563,6 +573,26 @@ type OrderStatusRequest struct {
 type OrderStatus struct {
 	ID     Bytes  `json:"id"`
 	Status uint16 `json:"status"`
+}
+
+// CounterPartyAddress is the payload for a DEX-originating
+// CounterPartyAddressRoute notification. After both sides of a match
+// acknowledge with per-match addresses, the server sends each side the
+// counterparty's address.
+type CounterPartyAddress struct {
+	Signature
+	OrderID Bytes  `json:"orderid"`
+	MatchID Bytes  `json:"matchid"`
+	Address string `json:"address"`
+}
+
+// Serialize serializes the CounterPartyAddress data.
+func (cpa *CounterPartyAddress) Serialize() []byte {
+	// orderid (32) + matchid (32) + address (variable, ~35 for typical base58/bech32) = ~99
+	s := make([]byte, 0, 99)
+	s = append(s, cpa.OrderID...)
+	s = append(s, cpa.MatchID...)
+	return append(s, []byte(cpa.Address)...)
 }
 
 // Init is the payload for a client-originating InitRoute request.
@@ -740,9 +770,12 @@ func (p *Prefix) Serialize() []byte {
 
 // Trade is common to Limit and Market Payloads.
 type Trade struct {
-	Side      uint8      `json:"side"`
-	Quantity  uint64     `json:"ordersize"`
-	Coins     []*Coin    `json:"coins"`
+	Side     uint8   `json:"side"`
+	Quantity uint64  `json:"ordersize"`
+	Coins    []*Coin `json:"coins"`
+	// Deprecated: Address is the order-level swap address, retained only for
+	// order submission validation. Per-match swap addresses are used for
+	// contracts.
 	Address   string     `json:"address"`
 	RedeemSig *RedeemSig `json:"redeemsig,omitempty"` // account-based assets only. not serialized.
 }

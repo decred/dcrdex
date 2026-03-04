@@ -112,7 +112,7 @@ var (
 	// NOTE: API version may change at any time. Keep this in mind when
 	// updating the API. Long-running operations may start and end with
 	// differing versions.
-	supportedAPIVers = []int32{serverdex.V1APIVersion}
+	supportedAPIVers = []int32{serverdex.PerMatchAddrVersion}
 	// ActiveOrdersLogoutErr is returned from logout when there are active
 	// orders.
 	ActiveOrdersLogoutErr = errors.New("cannot log out with active orders")
@@ -218,6 +218,39 @@ type dexConnection struct {
 	// for the given order. In production, set by the dispatcher goroutine
 	// in listen(). In tests, set to a synchronous inline executor.
 	dispatchTradeWork func(order.OrderID, func())
+
+	// activeContractsMtx protects activeCoinIDs, activeSecretHashes, and
+	// their reverse maps.
+	activeContractsMtx sync.Mutex
+	// activeCoinIDs tracks counterparty swap contracts across all active
+	// matches, keyed by composite "coinID:contract" hex. Using a composite
+	// key allows EVM batched swaps (same txHash, different contract) while
+	// still preventing reuse of the same on-chain contract for multiple
+	// matches.
+	activeCoinIDs map[string]order.MatchID
+	// activeSecretHashes tracks secret hashes seen in counterparty swap
+	// contracts across all active matches. Prevents a counterparty from
+	// using the same secret hash for multiple matches.
+	activeSecretHashes map[string]order.MatchID
+	// matchCoinIDs and matchSecretHashes are reverse maps for O(1)
+	// cleanup in releaseMatchCoinID.
+	matchCoinIDs      map[order.MatchID][]string
+	matchSecretHashes map[order.MatchID][]string
+}
+
+// releaseMatchCoinID removes a match's entries from the cross-match dedup
+// maps. Call when a match completes, is revoked, or is otherwise retired.
+func (dc *dexConnection) releaseMatchCoinID(matchID order.MatchID) {
+	dc.activeContractsMtx.Lock()
+	defer dc.activeContractsMtx.Unlock()
+	for _, k := range dc.matchCoinIDs[matchID] {
+		delete(dc.activeCoinIDs, k)
+	}
+	delete(dc.matchCoinIDs, matchID)
+	for _, k := range dc.matchSecretHashes[matchID] {
+		delete(dc.activeSecretHashes, k)
+	}
+	delete(dc.matchSecretHashes, matchID)
 }
 
 // DefaultResponseTimeout is the default timeout for responses after a request is
@@ -815,6 +848,9 @@ type serverMatches struct {
 	tracker    *trackedTrade
 	msgMatches []*msgjson.Match
 	cancel     *msgjson.Match
+	// perMatchAddrs maps match ID hex to the per-match swap address we
+	// generated and included in our ack.
+	perMatchAddrs map[string]string
 }
 
 // parseMatches sorts the list of matches and associates them with a trade. This
@@ -824,6 +860,18 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs boo
 	var acks []msgjson.Acknowledgement
 	matches := make(map[order.OrderID]*serverMatches)
 	var errs []string
+
+	// Phase 1: Find all orders and verify/sign signatures. This is fast
+	// and must complete before phase 2's slow wallet RPCs, which could
+	// otherwise allow cancel orders to be retired by concurrent trade
+	// ticks before findOrder is called for them.
+	type parsedMatch struct {
+		msgMatch *msgjson.Match
+		tracker  *trackedTrade
+		isCancel bool
+		sig      []byte
+	}
+	var parsed []*parsedMatch
 	for _, msgMatch := range msgMatches {
 		var oid order.OrderID
 		copy(oid[:], msgMatch.OrderID)
@@ -867,29 +915,95 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs boo
 			continue
 		}
 
+		parsed = append(parsed, &parsedMatch{
+			msgMatch: msgMatch,
+			tracker:  tracker,
+			isCancel: isCancel,
+			sig:      sig,
+		})
+	}
+
+	// Phase 2: Generate per-match swap addresses for non-cancel matches.
+	// RedemptionAddress involves wallet RPCs that can be very slow under
+	// load, so generate them concurrently to avoid O(N) serial latency.
+	type addrResult struct {
+		idx  int
+		addr string
+		err  string
+	}
+	addrCh := make(chan addrResult, len(parsed))
+	for i, pm := range parsed {
+		if pm.isCancel {
+			addrCh <- addrResult{idx: i}
+			continue
+		}
+		if pm.tracker.wallets == nil || pm.tracker.wallets.toWallet == nil {
+			addrCh <- addrResult{idx: i, err: fmt.Sprintf("no wallet for non-cancel order %v", pm.tracker.ID())}
+			continue
+		}
+		go func(idx int, pm *parsedMatch) {
+			addr, addrErr := pm.tracker.wallets.toWallet.RedemptionAddress()
+			if addrErr != nil {
+				addrCh <- addrResult{idx: idx, err: fmt.Sprintf("failed to get per-match RedemptionAddress for order %v: %v", pm.tracker.ID(), addrErr)}
+				return
+			}
+			if addr == "" || !pm.tracker.wallets.toWallet.ValidateAddress(addr) {
+				addrCh <- addrResult{idx: idx, err: fmt.Sprintf("wallet returned invalid per-match address %q for order %v", addr, pm.tracker.ID())}
+				return
+			}
+			addrCh <- addrResult{idx: idx, addr: addr}
+		}(i, pm)
+	}
+	// Collect address results.
+	addrs := make([]string, len(parsed))
+	addrFailed := make([]bool, len(parsed))
+	for range parsed {
+		res := <-addrCh
+		if res.err != "" {
+			errs = append(errs, res.err)
+			addrFailed[res.idx] = true
+			continue
+		}
+		addrs[res.idx] = res.addr
+	}
+
+	// Phase 3: Assemble matches and acks from the address results.
+	for i, pm := range parsed {
+		if addrFailed[i] {
+			continue
+		}
+		perMatchAddr := addrs[i]
+
 		// Success. Add the serverMatch and the Acknowledgement.
 		acks = append(acks, msgjson.Acknowledgement{
-			MatchID: msgMatch.MatchID,
-			Sig:     sig,
+			MatchID: pm.msgMatch.MatchID,
+			Sig:     pm.sig,
+			Address: perMatchAddr,
 		})
 
-		trackerID := tracker.ID()
+		trackerID := pm.tracker.ID()
 		match := matches[trackerID]
 		if match == nil {
 			match = &serverMatches{
-				tracker: tracker,
+				tracker:       pm.tracker,
+				perMatchAddrs: make(map[string]string),
 			}
 			matches[trackerID] = match
 		}
-		if isCancel {
-			match.cancel = msgMatch // taker match
+		if pm.isCancel {
+			match.cancel = pm.msgMatch // taker match
 		} else {
-			match.msgMatches = append(match.msgMatches, msgMatch)
+			match.msgMatches = append(match.msgMatches, pm.msgMatch)
+			if perMatchAddr != "" {
+				var mid order.MatchID
+				copy(mid[:], pm.msgMatch.MatchID)
+				match.perMatchAddrs[mid.String()] = perMatchAddr
+			}
 		}
 
-		status := order.MatchStatus(msgMatch.Status)
+		status := order.MatchStatus(pm.msgMatch.Status)
 		dc.log.Debugf("Registering match %v for order %v (%v) in status %v",
-			msgMatch.MatchID, oid, order.MatchSide(msgMatch.Side), status)
+			pm.msgMatch.MatchID, trackerID, order.MatchSide(pm.msgMatch.Side), status)
 	}
 
 	var err error
@@ -904,9 +1018,10 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs boo
 // matchDiscreps specifies a trackedTrades's missing and extra matches compared
 // to the server's list of active matches as returned in the connect response.
 type matchDiscreps struct {
-	trade   *trackedTrade
-	missing []*matchTracker
-	extra   []*msgjson.Match
+	trade         *trackedTrade
+	missing       []*matchTracker
+	extra         []*msgjson.Match
+	perMatchAddrs map[string]string // from parseMatches, for extras
 }
 
 // matchStatusConflict is a conflict between our status, and the status returned
@@ -932,6 +1047,13 @@ func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serv
 	// recognize.
 	for oid, match := range srvMatches {
 		var extra []*msgjson.Match
+		// addrRecovery collects matches that need their CounterPartyAddr
+		// populated from the connect response.
+		type addrUpdate struct {
+			mt   *matchTracker
+			addr string
+		}
+		var addrRecovery []addrUpdate
 		match.tracker.mtx.RLock()
 		for _, msgMatch := range match.msgMatches {
 			var matchID order.MatchID
@@ -952,12 +1074,46 @@ func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serv
 				}
 				conflict.matches = append(conflict.matches, mt)
 			}
+			// If we're missing the counterparty's per-match swap address
+			// and the server provided one, recover it.
+			if mt.MetaData.CounterPartyAddr == "" && msgMatch.Address != "" {
+				addrRecovery = append(addrRecovery, addrUpdate{mt, msgMatch.Address})
+			}
 		}
 		match.tracker.mtx.RUnlock()
+		// Validate and apply any recovered counterparty addresses.
+		if len(addrRecovery) > 0 {
+			// Validate outside the lock since ValidateAddress may do I/O.
+			var valid []addrUpdate
+			for _, ar := range addrRecovery {
+				if match.tracker.wallets == nil || match.tracker.wallets.fromWallet == nil {
+					dc.log.Warnf("Cannot validate recovered counterparty address for match %s: wallet not available", ar.mt.MatchID)
+					continue
+				}
+				if !match.tracker.wallets.fromWallet.ValidateAddress(ar.addr) {
+					dc.log.Errorf("Recovered counterparty address %s for match %s failed validation, ignoring", ar.addr, ar.mt.MatchID)
+					continue
+				}
+				valid = append(valid, ar)
+			}
+			if len(valid) > 0 {
+				match.tracker.mtx.Lock()
+				for _, ar := range valid {
+					ar.mt.MetaData.CounterPartyAddr = ar.addr
+					if err := match.tracker.db.UpdateMatch(&ar.mt.MetaMatch); err != nil {
+						dc.log.Errorf("Failed to persist recovered counterparty address for match %s: %v", ar.mt.MatchID, err)
+					} else {
+						dc.log.Infof("Recovered counterparty address %s for match %s from connect response", ar.addr, ar.mt.MatchID)
+					}
+				}
+				match.tracker.mtx.Unlock()
+			}
+		}
 		if len(extra) > 0 {
 			exceptions[match.tracker.ID()] = &matchDiscreps{
-				trade: match.tracker,
-				extra: extra,
+				trade:         match.tracker,
+				extra:         extra,
+				perMatchAddrs: match.perMatchAddrs,
 			}
 		}
 	}
@@ -7569,7 +7725,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 
 		// Start negotiation for extra matches for this trade.
 		if len(extras) > 0 {
-			err := trade.negotiate(extras)
+			err := trade.negotiate(extras, matchAnomalies.perMatchAddrs)
 			if err != nil {
 				c.log.Errorf("Error negotiating one or more previously unknown matches for order %s reported by %s on connect: %v",
 					oid, dc.acct.host, err)
@@ -7981,6 +8137,36 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 				checkServerRevoke: checkServerRevoke,
 			}
 		}
+
+		// Repopulate the cross-match dedup maps from persisted match
+		// proofs so that already-audited contracts retain their dedup
+		// protection across restarts.
+		dc.activeContractsMtx.Lock()
+		for _, mt := range tracker.matches {
+			proof := &mt.MetaData.Proof
+			if proof.IsRevoked() {
+				continue
+			}
+			// The counterparty's swap CoinID and contract are needed
+			// for the composite dedup key.
+			var counterSwap order.CoinID
+			if mt.Side == order.Maker {
+				counterSwap = proof.TakerSwap
+			} else {
+				counterSwap = proof.MakerSwap
+			}
+			if len(counterSwap) > 0 && len(proof.CounterContract) > 0 {
+				dedupKey := hex.EncodeToString(counterSwap) + ":" + hex.EncodeToString(proof.CounterContract)
+				dc.activeCoinIDs[dedupKey] = mt.MatchID
+				dc.matchCoinIDs[mt.MatchID] = append(dc.matchCoinIDs[mt.MatchID], dedupKey)
+			}
+			if len(proof.SecretHash) > 0 {
+				secretHashHex := hex.EncodeToString(proof.SecretHash)
+				dc.activeSecretHashes[secretHashHex] = mt.MatchID
+				dc.matchSecretHashes[mt.MatchID] = append(dc.matchSecretHashes[mt.MatchID], secretHashHex)
+			}
+		}
+		dc.activeContractsMtx.Unlock()
 
 		// Load any linked cancel order.
 		cancelID := tracker.metaData.LinkedOrder
@@ -8604,7 +8790,7 @@ func (c *Core) negotiateMatches(sm *serverMatches) (assetMap, error) {
 	// Begin negotiation for any trade Matches.
 	if len(sm.msgMatches) > 0 {
 		tracker.mtx.Lock()
-		err := tracker.negotiate(sm.msgMatches)
+		err := tracker.negotiate(sm.msgMatches, sm.perMatchAddrs)
 		tracker.mtx.Unlock()
 		if err != nil {
 			return updatedAssets, fmt.Errorf("negotiate order %v matches failed: %w", oid, err)
@@ -8704,19 +8890,23 @@ func (c *Core) newDEXConnection(acctInfo *db.AccountInfo, flag connectDEXFlag) (
 	}
 
 	dc := &dexConnection{
-		log:               c.log,
-		acct:              newDEXAccount(acctInfo, viewOnly),
-		notify:            c.notify,
-		ticker:            newDexTicker(defaultTickInterval), // updated when server config obtained
-		books:             make(map[string]*bookie),
-		trades:            make(map[order.OrderID]*trackedTrade),
-		cancels:           make(map[order.OrderID]order.OrderID),
-		inFlightOrders:    make(map[uint64]*InFlightOrder),
-		blindCancels:      make(map[order.OrderID]order.Preimage),
-		apiVer:            -1,
-		reportingConnects: reporting,
-		spots:             make(map[string]*msgjson.Spot),
-		connectionStatus:  uint32(comms.Disconnected),
+		log:                c.log,
+		acct:               newDEXAccount(acctInfo, viewOnly),
+		notify:             c.notify,
+		ticker:             newDexTicker(defaultTickInterval), // updated when server config obtained
+		books:              make(map[string]*bookie),
+		trades:             make(map[order.OrderID]*trackedTrade),
+		cancels:            make(map[order.OrderID]order.OrderID),
+		inFlightOrders:     make(map[uint64]*InFlightOrder),
+		blindCancels:       make(map[order.OrderID]order.Preimage),
+		apiVer:             -1,
+		reportingConnects:  reporting,
+		spots:              make(map[string]*msgjson.Spot),
+		connectionStatus:   uint32(comms.Disconnected),
+		activeCoinIDs:      make(map[string]order.MatchID),
+		activeSecretHashes: make(map[string]order.MatchID),
+		matchCoinIDs:       make(map[order.MatchID][]string),
+		matchSecretHashes:  make(map[order.MatchID][]string),
 		// On connect, must set: cfg, epoch, and assets.
 	}
 
@@ -9345,6 +9535,83 @@ func handleMMEpochSnapshotMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	return nil
 }
 
+// handleCounterPartyAddressMsg handles the counterparty_address notification
+// from the server, which delivers the counterparty's per-match swap address
+// after both sides have acknowledged the match.
+func handleCounterPartyAddressMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
+	var cpa msgjson.CounterPartyAddress
+	err := msg.Unmarshal(&cpa)
+	if err != nil {
+		return fmt.Errorf("counterparty_address unmarshal error: %w", err)
+	}
+
+	// Verify the server's signature.
+	err = dc.acct.checkSig(cpa.Serialize(), cpa.Sig)
+	if err != nil {
+		return fmt.Errorf("counterparty_address signature verification failed: %w", err)
+	}
+
+	var oid order.OrderID
+	copy(oid[:], cpa.OrderID)
+
+	tracker, _ := dc.findOrder(oid)
+	if tracker == nil {
+		return fmt.Errorf("counterparty_address: no order found with id %s", oid)
+	}
+
+	if len(cpa.MatchID) != order.MatchIDSize {
+		return fmt.Errorf("counterparty_address: invalid match ID %v", cpa.MatchID)
+	}
+
+	if cpa.Address == "" {
+		return fmt.Errorf("counterparty_address: empty address for order %s", oid)
+	}
+
+	var matchID order.MatchID
+	copy(matchID[:], cpa.MatchID)
+
+	tracker.mtx.Lock()
+	match := tracker.matches[matchID]
+	if match == nil {
+		tracker.mtx.Unlock()
+		return fmt.Errorf("counterparty_address: no match found with id %s for order %s", matchID, oid)
+	}
+	// Validate the address against the wallet for the chain where we create
+	// the swap contract (fromWallet). The server already validates via
+	// CheckSwapAddress, but we don't trust the server.
+	if tracker.wallets == nil || tracker.wallets.fromWallet == nil {
+		tracker.mtx.Unlock()
+		return fmt.Errorf("counterparty_address: wallet not available to validate address %q for match %s",
+			cpa.Address, matchID)
+	}
+	if !tracker.wallets.fromWallet.ValidateAddress(cpa.Address) {
+		tracker.mtx.Unlock()
+		return fmt.Errorf("counterparty_address: invalid address %q for asset %d, match %s",
+			cpa.Address, tracker.wallets.fromWallet.AssetID, matchID)
+	}
+	// Don't allow overwriting a previously accepted address with a different one.
+	if match.MetaData.CounterPartyAddr != "" && match.MetaData.CounterPartyAddr != cpa.Address {
+		tracker.mtx.Unlock()
+		return fmt.Errorf("counterparty_address: address already set for match %s (existing: %s, received: %s)",
+			matchID, match.MetaData.CounterPartyAddr, cpa.Address)
+	}
+	match.MetaData.CounterPartyAddr = cpa.Address
+	// Persist the counterparty address.
+	err = tracker.db.UpdateMatch(&match.MetaMatch)
+	tracker.mtx.Unlock()
+	if err != nil {
+		return fmt.Errorf("counterparty_address: error storing address in database for match %s: %w", matchID, err)
+	}
+
+	c.log.Infof("Received counterparty address %s for match %s, order %s", cpa.Address, matchID, oid)
+
+	// Now that we have the counterparty address, tick the trade so swaps can
+	// proceed.
+	c.schedTradeTick(tracker)
+
+	return nil
+}
+
 // routeHandler is a handler for a message from the DEX.
 type routeHandler func(*Core, *dexConnection, *msgjson.Message) error
 
@@ -9356,24 +9623,25 @@ var reqHandlers = map[string]routeHandler{
 }
 
 var noteHandlers = map[string]routeHandler{
-	msgjson.MatchProofRoute:      handleMatchProofMsg,
-	msgjson.BookOrderRoute:       handleBookOrderMsg,
-	msgjson.EpochOrderRoute:      handleEpochOrderMsg,
-	msgjson.UnbookOrderRoute:     handleUnbookOrderMsg,
-	msgjson.PriceUpdateRoute:     handlePriceUpdateNote,
-	msgjson.UpdateRemainingRoute: handleUpdateRemainingMsg,
-	msgjson.EpochReportRoute:     handleEpochReportMsg,
-	msgjson.SuspensionRoute:      handleTradeSuspensionMsg,
-	msgjson.ResumptionRoute:      handleTradeResumptionMsg,
-	msgjson.NotifyRoute:          handleNotifyMsg,
-	msgjson.PenaltyRoute:         handlePenaltyMsg,
-	msgjson.NoMatchRoute:         handleNoMatchRoute,
-	msgjson.RevokeOrderRoute:     handleRevokeOrderMsg,
-	msgjson.RevokeMatchRoute:     handleRevokeMatchMsg,
-	msgjson.TierChangeRoute:      handleTierChangeMsg,
-	msgjson.ScoreChangeRoute:     handleScoreChangeMsg,
-	msgjson.BondExpiredRoute:     handleBondExpiredMsg,
-	msgjson.MMEpochSnapshotRoute: handleMMEpochSnapshotMsg,
+	msgjson.MatchProofRoute:          handleMatchProofMsg,
+	msgjson.BookOrderRoute:           handleBookOrderMsg,
+	msgjson.EpochOrderRoute:          handleEpochOrderMsg,
+	msgjson.UnbookOrderRoute:         handleUnbookOrderMsg,
+	msgjson.PriceUpdateRoute:         handlePriceUpdateNote,
+	msgjson.UpdateRemainingRoute:     handleUpdateRemainingMsg,
+	msgjson.EpochReportRoute:         handleEpochReportMsg,
+	msgjson.SuspensionRoute:          handleTradeSuspensionMsg,
+	msgjson.ResumptionRoute:          handleTradeResumptionMsg,
+	msgjson.NotifyRoute:              handleNotifyMsg,
+	msgjson.PenaltyRoute:             handlePenaltyMsg,
+	msgjson.NoMatchRoute:             handleNoMatchRoute,
+	msgjson.RevokeOrderRoute:         handleRevokeOrderMsg,
+	msgjson.RevokeMatchRoute:         handleRevokeMatchMsg,
+	msgjson.TierChangeRoute:          handleTierChangeMsg,
+	msgjson.ScoreChangeRoute:         handleScoreChangeMsg,
+	msgjson.BondExpiredRoute:         handleBondExpiredMsg,
+	msgjson.MMEpochSnapshotRoute:     handleMMEpochSnapshotMsg,
+	msgjson.CounterPartyAddressRoute: handleCounterPartyAddressMsg,
 }
 
 // listen monitors the DEX websocket connection for server requests and
@@ -9416,16 +9684,23 @@ func (c *Core) listen(dc *dexConnection) {
 	// prevents a slow handler for one trade (e.g. audit blocked on tick
 	// holding trackedTrade.mtx) from stalling handlers for other trades.
 	//
-	// The match handler runs synchronously in the dispatcher to ensure
-	// negotiate() creates match entries before audit messages reach the
-	// per-trade queue. Book-related routes stay sequential because they
-	// carry sequence numbers.
+	// The match handler runs in a background goroutine because
+	// parseMatches makes wallet RPCs (RedemptionAddress) that can be
+	// very slow under load. To preserve the invariant that negotiate()
+	// creates match entries before audit messages reach the per-trade
+	// queue, the dispatcher gates trade-route messages for affected
+	// orders until the match handler completes. Non-trade messages
+	// (preimage, book, epoch, etc.) flow through immediately.
+	//
+	// Book-related routes stay sequential because they carry sequence
+	// numbers.
 	tradeRoutes := map[string]bool{
-		msgjson.AuditRoute:       true,
-		msgjson.RedemptionRoute:  true,
-		msgjson.NoMatchRoute:     true,
-		msgjson.RevokeOrderRoute: true,
-		msgjson.RevokeMatchRoute: true,
+		msgjson.AuditRoute:               true,
+		msgjson.RedemptionRoute:          true,
+		msgjson.NoMatchRoute:             true,
+		msgjson.RevokeOrderRoute:         true,
+		msgjson.RevokeMatchRoute:         true,
+		msgjson.CounterPartyAddressRoute: true,
 	}
 
 	nextJob := make(chan *msgJob, 1024) // start blocking at this cap
@@ -9433,15 +9708,20 @@ func (c *Core) listen(dc *dexConnection) {
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
+		var tradeQueuesMu sync.Mutex
 		tradeQueues := make(map[order.OrderID]chan func())
 		defer func() {
 			dc.dispatchTradeWork = nil
+			tradeQueuesMu.Lock()
 			for _, ch := range tradeQueues {
 				close(ch)
 			}
+			tradeQueuesMu.Unlock()
 		}()
 
 		getQueue := func(oid order.OrderID) chan func() {
+			tradeQueuesMu.Lock()
+			defer tradeQueuesMu.Unlock()
 			q, exists := tradeQueues[oid]
 			if !exists {
 				q = make(chan func(), 128)
@@ -9458,12 +9738,15 @@ func (c *Core) listen(dc *dexConnection) {
 		}
 
 		// dispatchTradeWork routes work to the per-trade queue for the
-		// given order. Handlers running in this goroutine (via runJob)
-		// can use dc.dispatchTradeWork to inject per-trade work that
-		// will be sequenced with other messages for the same trade.
+		// given order. This is safe to call from any goroutine.
 		dc.dispatchTradeWork = func(oid order.OrderID, fn func()) {
 			getQueue(oid) <- fn
 		}
+
+		// pendingMatches tracks orders with a match message being
+		// processed in a background goroutine. The channel is closed
+		// when the match handler completes.
+		pendingMatches := make(map[order.OrderID]<-chan struct{})
 
 		// Periodically prune queues for trades that are no longer
 		// tracked, so idle goroutines don't accumulate over long
@@ -9471,10 +9754,20 @@ func (c *Core) listen(dc *dexConnection) {
 		pruneQueues := func() {
 			dc.tradeMtx.RLock()
 			defer dc.tradeMtx.RUnlock()
+			tradeQueuesMu.Lock()
+			defer tradeQueuesMu.Unlock()
 			for oid, q := range tradeQueues {
 				if _, found := dc.trades[oid]; !found && len(q) == 0 {
 					close(q)
 					delete(tradeQueues, oid)
+				}
+			}
+			// Clean up completed pendingMatches entries.
+			for oid, done := range pendingMatches {
+				select {
+				case <-done:
+					delete(pendingMatches, oid)
+				default:
 				}
 			}
 		}
@@ -9487,6 +9780,32 @@ func (c *Core) listen(dc *dexConnection) {
 				if !ok {
 					return
 				}
+
+				// Match messages run in a background goroutine so
+				// slow wallet RPCs (RedemptionAddress) don't block
+				// time-critical messages like preimage requests.
+				if job.msg.Route == msgjson.MatchRoute {
+					var msgMatches []struct {
+						OrderID dex.Bytes `json:"orderid"`
+					}
+					if err := job.msg.Unmarshal(&msgMatches); err != nil {
+						c.log.Errorf("match pre-parse for dispatcher: %v", err)
+						runJob(job)
+						continue
+					}
+					done := make(chan struct{})
+					for _, m := range msgMatches {
+						var oid order.OrderID
+						copy(oid[:], m.OrderID)
+						pendingMatches[oid] = done
+					}
+					go func() {
+						defer close(done)
+						runJob(job)
+					}()
+					continue
+				}
+
 				if !tradeRoutes[job.msg.Route] {
 					runJob(job)
 					continue
@@ -9501,7 +9820,25 @@ func (c *Core) listen(dc *dexConnection) {
 				}
 				var oid order.OrderID
 				copy(oid[:], oidMsg.OrderID)
-				getQueue(oid) <- func() { runJob(job) }
+
+				// If this order has a pending match being processed
+				// in the background, wait for it to finish so that
+				// negotiateMatches is queued ahead of this message.
+				// To avoid blocking the dispatcher, spawn a
+				// goroutine that waits and then enqueues the job.
+				if done, ok := pendingMatches[oid]; ok {
+					q := getQueue(oid)
+					go func() {
+						select {
+						case <-done:
+						case <-time.After(2 * time.Minute):
+							c.log.Errorf("Timed out waiting for pending match handler for order %s; dispatching trade message %s directly", oid, job.msg.Route)
+						}
+						q <- func() { runJob(job) }
+					}()
+				} else {
+					getQueue(oid) <- func() { runJob(job) }
+				}
 			case <-pruneTicker.C:
 				pruneQueues()
 			}
@@ -9538,6 +9875,11 @@ func (c *Core) listen(dc *dexConnection) {
 				}
 
 				c.notify(newOrderNote(TopicOrderRetired, "", "", db.Data, trade.coreOrder()))
+				trade.mtx.RLock()
+				for _, match := range trade.matches {
+					dc.releaseMatchCoinID(match.MatchID)
+				}
+				trade.mtx.RUnlock()
 				delete(dc.trades, trade.ID())
 			}
 			dc.tradeMtx.Unlock()
@@ -10044,30 +10386,41 @@ func (c *Core) fastSwapCheck(t *trackedTrade, match *matchTracker) bool {
 	return true
 }
 
-// tryFastRedeem attempts to immediately redeem a single match after receiving
-// the maker's redemption notification, bypassing the full tick cycle. This is
-// critical for SPV wallets where ticks are slow due to block filter scanning.
+// tryFastRedeem attempts to immediately redeem all redeemable matches for the
+// trade after receiving a maker's redemption notification, bypassing the full
+// tick cycle. This is critical for SPV wallets where ticks are slow due to
+// block filter scanning. By batching all redeemable matches into a single
+// wallet call, we avoid serializing expensive RPCs across multiple tickLock
+// acquisitions.
 func (c *Core) tryFastRedeem(t *trackedTrade, mid order.MatchID) {
 	t.tickLock.Lock()
 	defer t.tickLock.Unlock()
 
 	t.mtx.Lock()
-	defer t.mtx.Unlock()
 
-	match, found := t.matches[mid]
-	if !found {
+	// Collect ALL redeemable taker-side matches, not just the one whose
+	// secret was just received. Other secrets may have arrived while we
+	// were waiting for tickLock.
+	var redeems []*matchTracker
+	for _, match := range t.matches {
+		if match.Status != order.MakerRedeemed || match.Side != order.Taker {
+			continue
+		}
+		if match.swapErr != nil || len(match.MetaData.Proof.RefundCoin) != 0 {
+			continue
+		}
+		if match.suspectRedeem {
+			continue
+		}
+		redeems = append(redeems, match)
+	}
+
+	if len(redeems) == 0 {
+		t.mtx.Unlock()
 		return
 	}
-	// Only redeem if the match is in the expected state.
-	if match.Status != order.MakerRedeemed || match.Side != order.Taker {
-		return
-	}
-	if match.swapErr != nil || len(match.MetaData.Proof.RefundCoin) != 0 {
-		return
-	}
-	if match.suspectRedeem {
-		return
-	}
+
+	t.mtx.Unlock()
 
 	didUnlock, err := t.wallets.toWallet.refreshUnlock()
 	if err != nil {
@@ -10079,22 +10432,51 @@ func (c *Core) tryFastRedeem(t *trackedTrade, mid order.MatchID) {
 			t.wallets.toWallet.Symbol)
 	}
 
-	err = c.redeemMatches(t, []*matchTracker{match})
+	t.mtx.Lock()
+	// Re-check: the lock was released for refreshUnlock above (which may
+	// block on a wallet RPC), so another goroutine could have redeemed
+	// some or all matches in the interim. Re-scan to avoid double-redeem.
+	redeems = redeems[:0]
+	var totalQty uint64
+	for _, match := range t.matches {
+		if match.Status != order.MakerRedeemed || match.Side != order.Taker {
+			continue
+		}
+		if match.swapErr != nil || len(match.MetaData.Proof.RefundCoin) != 0 {
+			continue
+		}
+		if match.suspectRedeem {
+			continue
+		}
+		redeems = append(redeems, match)
+		qty := match.Quantity
+		if t.Trade().Sell {
+			qty = calc.BaseToQuote(match.Rate, match.Quantity)
+		}
+		totalQty += qty
+	}
+
+	if len(redeems) == 0 {
+		t.mtx.Unlock()
+		return
+	}
+
+	c.log.Infof("Fast-path redeem: batching %d redeemable matches for order %s", len(redeems), t.ID())
+
+	err = c.redeemMatches(t, redeems)
 	corder := t.coreOrderInternal()
 	ui := t.wallets.toWallet.Info().UnitInfo
-	qty := match.Quantity
-	if t.Trade().Sell {
-		qty = calc.BaseToQuote(match.Rate, match.Quantity)
-	}
+	t.mtx.Unlock()
+
 	if err != nil {
-		c.log.Errorf("Fast-path redeem error for match %s, order %s: %v", mid, t.ID(), err)
+		c.log.Errorf("Fast-path redeem error for %d matches, order %s: %v", len(redeems), t.ID(), err)
 		subject, details := c.formatDetails(TopicRedemptionError,
-			ui.ConventionalString(qty), ui.Conventional.Unit, makeOrderToken(t.token()))
+			ui.ConventionalString(totalQty), ui.Conventional.Unit, makeOrderToken(t.token()))
 		t.notify(newOrderNote(TopicRedemptionError, subject, details, db.ErrorLevel, corder))
 	} else {
-		c.log.Infof("Fast-path redeem succeeded for match %s, order %s", mid, t.ID())
+		c.log.Infof("Fast-path redeem succeeded for %d matches, order %s", len(redeems), t.ID())
 		subject, details := c.formatDetails(TopicMatchComplete,
-			ui.ConventionalString(qty), ui.Conventional.Unit, makeOrderToken(t.token()))
+			ui.ConventionalString(totalQty), ui.Conventional.Unit, makeOrderToken(t.token()))
 		t.notify(newOrderNote(TopicMatchComplete, subject, details, db.Poke, corder))
 	}
 }

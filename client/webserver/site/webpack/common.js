@@ -1,5 +1,4 @@
 const path = require('path')
-const { CleanWebpackPlugin } = require('clean-webpack-plugin')
 const MiniCssExtractPlugin = require('mini-css-extract-plugin')
 const StyleLintPlugin = require('stylelint-webpack-plugin')
 const ESLintPlugin = require('eslint-webpack-plugin')
@@ -51,7 +50,6 @@ module.exports = {
     ]
   },
   plugins: [
-    new CleanWebpackPlugin(),
     new MiniCssExtractPlugin({
       filename: '../dist/style.css'
     }),
@@ -59,11 +57,13 @@ module.exports = {
       threads: true,
     }),
     new ESLintPlugin({
+      configType: 'flat',
       extensions: ['ts', 'tsx'],
       formatter: 'stylish'
     })
   ],
   output: {
+    clean: true,
     filename: 'entry.js',
     path: path.resolve(__dirname, '../dist'),
     publicPath: '/dist/'

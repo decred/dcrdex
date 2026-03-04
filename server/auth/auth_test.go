@@ -523,14 +523,16 @@ func userMatchData(takerUser account.AccountID) (*db.MatchData, *order.UserMatch
 	anyID = newAccountID()
 	copy(oid2[:], anyID[:])
 	matchData := &db.MatchData{
-		ID:        mid,
-		Taker:     oid,
-		TakerAcct: takerUser,
-		TakerAddr: "takerSwapAddress",
-		TakerSell: takerSell,
-		Maker:     oid2,
-		MakerAcct: newAccountID(),
-		MakerAddr: takerUserMatch.Address,
+		ID:            mid,
+		Taker:         oid,
+		TakerAcct:     takerUser,
+		TakerAddr:     "takerSwapAddress",
+		TakerSell:     takerSell,
+		Maker:         oid2,
+		MakerAcct:     newAccountID(),
+		MakerAddr:     takerUserMatch.Address,
+		MakerSwapAddr: takerUserMatch.Address, // per-match address
+		TakerSwapAddr: "takerSwapAddress",     // per-match address
 		Epoch: order.EpochID{
 			Dur: 10000,
 			Idx: 132412342,

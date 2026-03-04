@@ -180,10 +180,15 @@ type Match struct {
 // information that might be provided to the client when they are resyncing
 // their matches after a reconnect.
 type UserMatch struct {
-	OrderID     OrderID
-	MatchID     MatchID
-	Quantity    uint64
-	Rate        uint64
+	OrderID  OrderID
+	MatchID  MatchID
+	Quantity uint64
+	Rate     uint64
+	// Deprecated: Address is the order-level counterparty address. It is no
+	// longer used as a contract recipient. Per-match swap addresses
+	// (MetaData.CounterPartyAddr on the client, SwapData.MakerSwapAddr/
+	// TakerSwapAddr on the server) are used instead. This field is retained
+	// for cancel match detection (empty Address == cancel) and data export.
 	Address     string
 	Status      MatchStatus
 	Side        MatchSide

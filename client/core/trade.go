@@ -135,6 +135,11 @@ type matchTracker struct {
 	lastExpireDurMtx sync.Mutex
 	lastExpireDur    time.Duration
 
+	// addrGateWarnTime tracks when we first started waiting for the
+	// counterparty address. Used to log a warning if the wait exceeds a
+	// threshold. Protected by the parent trackedTrade's mutex.
+	addrGateWarnTime time.Time
+
 	// Certain exceptions that control swap actions are commonly accessed
 	// together, and these share a single mutex. See the exceptions and
 	// delayTicks methods.
@@ -874,7 +879,7 @@ func (t *trackedTrade) nomatch(oid order.OrderID) (assetMap, error) {
 // updates (UserMatch).Filled. Match negotiation can then be progressed by
 // calling (*trackedTrade).tick when a relevant event occurs, such as a request
 // from the DEX or a tip change.
-func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
+func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match, perMatchAddrs map[string]string) error {
 	trade := t.Trade()
 	// Validate matches and check if a cancel match is included.
 	// Non-cancel matches should be negotiated and are added to
@@ -921,6 +926,12 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 			lastExpireDur:   365 * 24 * time.Hour,
 		}
 		match.Status = order.NewlyMatched // these must be new matches
+		// Store our per-match swap address if one was generated.
+		if perMatchAddrs != nil {
+			if addr, ok := perMatchAddrs[mid.String()]; ok {
+				match.MetaData.SwapAddr = addr
+			}
+		}
 		newTrackers = append(newTrackers, match)
 	}
 
@@ -1438,6 +1449,31 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) (re
 		ready = ready && !t.isSelfGoverned() && t.dc.status() == comms.Connected // NOTE: swapMatchGroup rechecks dc conn anyway
 	}()
 
+	// We can't create the swap contract until we've received the
+	// counterparty's per-match address. The counterparty_address
+	// notification will trigger a trade tick when it arrives.
+	if match.MetaData.CounterPartyAddr == "" {
+		// If the server hasn't delivered the counterparty address or
+		// revoked the match within 3x the broadcast timeout, self-revoke.
+		// Under normal operation the server revokes after 1x bTimeout,
+		// so 3x provides ample margin while still ensuring the client
+		// doesn't hang indefinitely on a lost notification or server bug.
+		bTimeout := t.broadcastTimeout()
+		if bTimeout > 0 && time.Since(match.matchTime()) > 3*bTimeout {
+			t.dc.log.Errorf("Match %s: counterparty address never received after %v, self-revoking",
+				match, 3*bTimeout)
+			return false, true
+		}
+		if match.addrGateWarnTime.IsZero() {
+			match.addrGateWarnTime = time.Now()
+		} else if time.Since(match.addrGateWarnTime) > 2*time.Minute {
+			t.dc.log.Warnf("Match %s still waiting for counterparty address (waiting %v)",
+				match, time.Since(match.addrGateWarnTime).Round(time.Second))
+			match.addrGateWarnTime = time.Now() // reset to avoid spamming
+		}
+		return false, false
+	}
+
 	checkInitialized := func() (stop bool) {
 		// There's a possibility that init happened but appeared to error
 		// with account based assets. Check if the swap is already
@@ -1453,7 +1489,7 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) (re
 				lockTime = matchTime.Add(t.lockTimeMaker).UTC().Unix()
 			}
 			contract := &asset.Contract{
-				Address:    match.Address,
+				Address:    match.MetaData.CounterPartyAddr,
 				Value:      value,
 				SecretHash: match.MetaData.Proof.SecretHash,
 				LockTime:   uint64(lockTime),
@@ -2484,6 +2520,7 @@ func (t *trackedTrade) revokeMatch(matchID order.MatchID, fromServer bool) error
 	} else {
 		revokedMatch.MetaData.Proof.SelfRevoked = true
 	}
+	t.dc.releaseMatchCoinID(matchID)
 	err := t.db.UpdateMatch(&revokedMatch.MetaMatch)
 	if err != nil {
 		t.dc.log.Errorf("db update error for revoked match %v, order %v: %v", matchID, t.ID(), err)
@@ -2622,8 +2659,16 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, highestF
 			lockTime = matchTime.Add(t.lockTimeMaker).UTC().Unix()
 		}
 
+		// Use the per-match counterparty address for the contract recipient.
+		contractAddr := match.MetaData.CounterPartyAddr
+		if contractAddr == "" {
+			// Per-match addresses are required. This should have been
+			// caught by isSwappable.
+			errs.add("match %s: counterparty per-match address not yet received", match)
+			return
+		}
 		contracts[i] = &asset.Contract{
-			Address:    match.Address,
+			Address:    contractAddr,
 			Value:      value,
 			SecretHash: match.MetaData.Proof.SecretHash,
 			LockTime:   uint64(lockTime),
@@ -3248,6 +3293,7 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 			// which still needs taker's redeem.
 			if conf := match.redemptionConfs; conf > 0 && conf >= match.redemptionConfsReq {
 				match.Status = order.MatchConfirmed // redeem tx already confirmed before redeem request accepted by server
+				t.dc.releaseMatchCoinID(match.MatchID)
 			} else {
 				match.Status = order.MatchComplete
 			}
@@ -3445,8 +3491,8 @@ func (c *Core) confirmTx(t *trackedTrade, match *matchTracker, info *txInfo) (bo
 			return true, nil
 		}
 		match.Status = order.MatchConfirmed
-		err := t.db.UpdateMatch(&match.MetaMatch)
-		if err != nil {
+		t.dc.releaseMatchCoinID(match.MatchID)
+		if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
 			t.dc.log.Errorf("failed to update match in db: %v", err)
 		}
 		subject, details := t.formatDetails(info.confirmedTopic, match.token(), makeOrderToken(t.token()))
@@ -3477,8 +3523,8 @@ func (c *Core) confirmTx(t *trackedTrade, match *matchTracker, info *txInfo) (bo
 		note := newMatchNote(info.counterTxSuccess, subject, details, db.ErrorLevel, t, match)
 		t.notify(note)
 		match.Status = order.MatchConfirmed
-		err := t.db.UpdateMatch(&match.MetaMatch)
-		if err != nil {
+		t.dc.releaseMatchCoinID(match.MatchID)
+		if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
 			t.dc.log.Errorf("Failed to update match in db %v", err)
 		}
 		return false, errors.New(info.counterTxError)
@@ -3522,6 +3568,10 @@ func (c *Core) confirmTx(t *trackedTrade, match *matchTracker, info *txInfo) (bo
 			confirmed = true
 			match.Status = order.MatchConfirmed
 		}
+	}
+
+	if confirmed {
+		t.dc.releaseMatchCoinID(match.MatchID)
 	}
 
 	if resubmitted || confirmed {
@@ -3924,13 +3974,52 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID, contract, txDa
 	assetID, contractSymb := t.wallets.toWallet.AssetID, t.wallets.toWallet.Symbol
 	contractID := coinIDString(assetID, coinID)
 
-	// Audit the contract.
-	// 1. Recipient Address
+	// Cross-match dedup: atomically check and register this swap contract
+	// and secret hash to prevent a malicious counterparty (or server) from
+	// presenting the same on-chain contract for multiple matches.
+	// Registering early avoids a TOCTOU race; stale entries from later
+	// validation failures are harmless since releaseMatchCoinID cleans up.
+	// The composite key of CoinID and contract data is used so that EVM
+	// batched swaps (same txHash, different contract/locator) are not
+	// incorrectly rejected.
+	dedupKey := hex.EncodeToString(coinID) + ":" + hex.EncodeToString(contract)
+	secretHashHex := hex.EncodeToString(auditInfo.SecretHash)
+	t.dc.activeContractsMtx.Lock()
+	if existingMatch, exists := t.dc.activeCoinIDs[dedupKey]; exists && existingMatch != match.MatchID {
+		t.dc.activeContractsMtx.Unlock()
+		return fmt.Errorf("counterparty contract coin %v (%s) already in use by match %s",
+			contractID, contractSymb, existingMatch)
+	}
+	if existingMatch, exists := t.dc.activeSecretHashes[secretHashHex]; exists && existingMatch != match.MatchID {
+		t.dc.activeContractsMtx.Unlock()
+		return fmt.Errorf("counterparty secret hash %x (%s) already in use by match %s",
+			auditInfo.SecretHash, contractSymb, existingMatch)
+	}
+	if _, already := t.dc.activeCoinIDs[dedupKey]; !already {
+		t.dc.matchCoinIDs[match.MatchID] = append(t.dc.matchCoinIDs[match.MatchID], dedupKey)
+	}
+	if _, already := t.dc.activeSecretHashes[secretHashHex]; !already {
+		t.dc.matchSecretHashes[match.MatchID] = append(t.dc.matchSecretHashes[match.MatchID], secretHashHex)
+	}
+	t.dc.activeCoinIDs[dedupKey] = match.MatchID
+	t.dc.activeSecretHashes[secretHashHex] = match.MatchID
+	t.dc.activeContractsMtx.Unlock()
+
+	// Audit the contract. If any validation fails, the dedup entries
+	// registered above will be cleaned up when the match is revoked or
+	// retired via releaseMatchCoinID.
+	//
+	// 1. Recipient Address - must be our own per-match address. Since each
+	//    match has a unique address (via per-match RedemptionAddress), each
+	//    contract has a unique script hash and CoinID. A counterparty
+	//    cannot present a single on-chain output as the contract for
+	//    multiple matches.
 	// 2. Contract value
 	// 3. Secret hash: maker compares, taker records
-	if auditInfo.Recipient != t.Trade().Address {
-		return fmt.Errorf("swap recipient %s in contract coin %v (%s) is not the order address %s",
-			auditInfo.Recipient, contractID, contractSymb, t.Trade().Address)
+	expectedAddr := match.MetaData.SwapAddr
+	if auditInfo.Recipient != expectedAddr {
+		return fmt.Errorf("swap recipient %s in contract coin %v (%s) is not the expected address %s",
+			auditInfo.Recipient, contractID, contractSymb, expectedAddr)
 	}
 
 	auditQty := match.Quantity
@@ -3970,7 +4059,6 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID, contract, txDa
 			return fmt.Errorf("secret hash mismatch for contract coin %v (%s), contract %v. expected %x, got %v",
 				auditInfo.Coin, contractSymb, contract, proof.SecretHash, auditInfo.SecretHash)
 		}
-		// Audit successful. Update status and other match data.
 		match.Status = order.TakerSwapCast
 		proof.TakerSwap = coinID
 	} else {

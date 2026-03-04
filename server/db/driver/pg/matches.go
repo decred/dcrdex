@@ -95,6 +95,7 @@ func activeSwaps(ctx context.Context, dbe *sql.DB, tableName string) (matches []
 			&m.Epoch.Idx, &m.Epoch.Dur, &m.Quantity, &m.Rate,
 			&baseRate, &quoteRate, &status,
 			&sd.SigMatchAckMaker, &sd.SigMatchAckTaker,
+			&sd.MakerSwapAddr, &sd.TakerSwapAddr,
 			&sd.ContractACoinID, &sd.ContractA, &contractATime,
 			&sd.ContractAAckSig,
 			&sd.ContractBCoinID, &sd.ContractB, &contractBTime,
@@ -313,13 +314,15 @@ func rowsToMatchData(rows *sql.Rows, includeInactive bool) ([]*db.MatchData, err
 		var baseRate, quoteRate sql.NullInt64
 		var takerSell sql.NullBool
 		var takerAddr, makerAddr sql.NullString
+		var makerSwapAddr, takerSwapAddr sql.NullString
 		if includeInactive {
 			// "active" column SELECTed.
 			err = rows.Scan(&m.ID, &m.Active, &takerSell,
 				&m.Taker, &m.TakerAcct, &takerAddr,
 				&m.Maker, &m.MakerAcct, &makerAddr,
 				&m.Epoch.Idx, &m.Epoch.Dur, &m.Quantity, &m.Rate,
-				&baseRate, &quoteRate, &status)
+				&baseRate, &quoteRate, &status,
+				&makerSwapAddr, &takerSwapAddr)
 			if err != nil {
 				return nil, err
 			}
@@ -329,7 +332,8 @@ func rowsToMatchData(rows *sql.Rows, includeInactive bool) ([]*db.MatchData, err
 				&m.Taker, &m.TakerAcct, &takerAddr,
 				&m.Maker, &m.MakerAcct, &makerAddr,
 				&m.Epoch.Idx, &m.Epoch.Dur, &m.Quantity, &m.Rate,
-				&baseRate, &quoteRate, &status)
+				&baseRate, &quoteRate, &status,
+				&makerSwapAddr, &takerSwapAddr)
 			if err != nil {
 				return nil, err
 			}
@@ -340,6 +344,8 @@ func rowsToMatchData(rows *sql.Rows, includeInactive bool) ([]*db.MatchData, err
 		m.TakerSell = takerSell.Bool
 		m.TakerAddr = takerAddr.String
 		m.MakerAddr = makerAddr.String
+		m.MakerSwapAddr = makerSwapAddr.String
+		m.TakerSwapAddr = takerSwapAddr.String
 		m.BaseRate = uint64(baseRate.Int64)
 		m.QuoteRate = uint64(quoteRate.Int64)
 
@@ -647,6 +653,7 @@ func (a *Archiver) SwapData(mid db.MarketMatchID) (order.MatchStatus, *db.SwapDa
 	err = a.db.QueryRow(stmt, mid).
 		Scan(&status,
 			&sd.SigMatchAckMaker, &sd.SigMatchAckTaker,
+			&sd.MakerSwapAddr, &sd.TakerSwapAddr,
 			&sd.ContractACoinID, &sd.ContractA, &contractATime,
 			&sd.ContractAAckSig,
 			&sd.ContractBCoinID, &sd.ContractB, &contractBTime,
@@ -702,6 +709,20 @@ func (a *Archiver) SaveMatchAckSigA(mid db.MarketMatchID, sig []byte) error {
 func (a *Archiver) SaveMatchAckSigB(mid db.MarketMatchID, sig []byte) error {
 	return a.updateMatchStmt(mid, internal.SetTakerMatchAckSig,
 		mid.MatchID, sig)
+}
+
+// SaveMatchAckAddrA records the per-match swap address from the maker's match
+// acknowledgement.
+func (a *Archiver) SaveMatchAckAddrA(mid db.MarketMatchID, addr string) error {
+	return a.updateMatchStmt(mid, internal.SetMakerSwapAddr,
+		mid.MatchID, addr)
+}
+
+// SaveMatchAckAddrB records the per-match swap address from the taker's match
+// acknowledgement.
+func (a *Archiver) SaveMatchAckAddrB(mid db.MarketMatchID, addr string) error {
+	return a.updateMatchStmt(mid, internal.SetTakerSwapAddr,
+		mid.MatchID, addr)
 }
 
 // Swap contracts, and counterparty audit acknowledgement signatures.

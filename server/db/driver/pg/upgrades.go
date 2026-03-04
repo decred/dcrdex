@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 	"strings"
 
 	"decred.org/dcrdex/dex"
@@ -17,7 +18,7 @@ import (
 	"decred.org/dcrdex/server/db/driver/pg/internal"
 )
 
-const dbVersion = 7
+const dbVersion = 8
 
 // The number of upgrades defined MUST be equal to dbVersion.
 var upgrades = []func(db *sql.Tx) error{
@@ -53,6 +54,9 @@ var upgrades = []func(db *sql.Tx) error{
 	// facilitates a rolling upgrade of reputation tracking to address an issue
 	// with the DB design.
 	v7Upgrade,
+
+	// v8 upgrade adds per-match swap address columns to the matches tables.
+	v8Upgrade,
 }
 
 // v1Upgrade adds the schema_version column and removes the state_hash column
@@ -371,6 +375,38 @@ func v7Upgrade(tx *sql.Tx) error {
 	query = fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s SET DEFAULT 1;", tableName, columnName)
 	if _, err := tx.Exec(query); err != nil {
 		return fmt.Errorf("error updating reputation_ver default value: %w", err)
+	}
+	return nil
+}
+
+// safeIdentRE matches valid PostgreSQL schema/table name components used in
+// market names (e.g. "dcr_btc", "polygonTKN_eth"). Alphanumeric and
+// underscore are expected, including uppercase from the "TKN" replacement
+// for '.' in marketSchema.
+var safeIdentRE = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
+
+// v8Upgrade adds per-match swap address columns to all market matches tables.
+func v8Upgrade(tx *sql.Tx) error {
+	mkts, err := loadMarkets(tx, marketsTableName)
+	if err != nil {
+		return fmt.Errorf("failed to read markets table: %w", err)
+	}
+
+	log.Infof("Adding per-match swap address columns to matches tables for %d markets", len(mkts))
+
+	for _, mkt := range mkts {
+		if !safeIdentRE.MatchString(mkt.Name) {
+			return fmt.Errorf("market name %q contains disallowed characters", mkt.Name)
+		}
+		tableName := mkt.Name + "." + matchesTableName
+		_, err = tx.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS makerSwapAddr TEXT DEFAULT '';", tableName))
+		if err != nil {
+			return fmt.Errorf("error adding makerSwapAddr column to %s: %w", tableName, err)
+		}
+		_, err = tx.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS takerSwapAddr TEXT DEFAULT '';", tableName))
+		if err != nil {
+			return fmt.Errorf("error adding takerSwapAddr column to %s: %w", tableName, err)
+		}
 	}
 	return nil
 }

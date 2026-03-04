@@ -109,7 +109,10 @@ func (a *Archiver) AddPreimageOutcome(ctx context.Context, user account.AccountI
 }
 
 func (a *Archiver) AddMatchOutcome(ctx context.Context, user account.AccountID, mid order.MatchID, outcome db.Outcome) (*db.MatchResult, error) {
-	if outcome < db.OutcomeSwapSuccess || outcome > db.OutcomeNoRedeemAsTaker {
+	switch outcome {
+	case db.OutcomeSwapSuccess, db.OutcomeNoSwapAsMaker, db.OutcomeNoSwapAsTaker,
+		db.OutcomeNoRedeemAsMaker, db.OutcomeNoRedeemAsTaker, db.OutcomeNoAddrAsTaker:
+	default:
 		return nil, fmt.Errorf("invalid outcome for a match: %d", outcome)
 	}
 	dbID, err := a.insertPoints(ctx, user, mid, db.OutcomeClassMatch, outcome)

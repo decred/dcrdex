@@ -184,8 +184,10 @@ func (ta *TArchivist) MatchStatuses(aid account.AccountID, base, quote uint32, m
 func (ta *TArchivist) SwapData(mid db.MarketMatchID) (order.MatchStatus, *db.SwapData, error) {
 	return 0, nil, nil
 }
-func (ta *TArchivist) SaveMatchAckSigA(mid db.MarketMatchID, sig []byte) error { return nil }
-func (ta *TArchivist) SaveMatchAckSigB(mid db.MarketMatchID, sig []byte) error { return nil }
+func (ta *TArchivist) SaveMatchAckSigA(mid db.MarketMatchID, sig []byte) error   { return nil }
+func (ta *TArchivist) SaveMatchAckSigB(mid db.MarketMatchID, sig []byte) error   { return nil }
+func (ta *TArchivist) SaveMatchAckAddrA(mid db.MarketMatchID, addr string) error { return nil }
+func (ta *TArchivist) SaveMatchAckAddrB(mid db.MarketMatchID, addr string) error { return nil }
 
 // Contract data.
 func (ta *TArchivist) SaveContractA(mid db.MarketMatchID, contract []byte, coinID []byte, timestamp int64) error {

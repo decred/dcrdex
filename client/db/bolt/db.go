@@ -129,8 +129,10 @@ var (
 	disabledRateSourceKey = []byte("disabledRateSources")
 	walletDisabledKey     = []byte("walletDisabled")
 	// programKey            = []byte("program") unused
-	langKey           = []byte("lang")
-	companionTokenKey = []byte("companionToken")
+	langKey             = []byte("lang")
+	companionTokenKey   = []byte("companionToken")
+	swapAddrKey         = []byte("swapAddr")
+	counterPartyAddrKey = []byte("counterPartyAddr")
 
 	// values
 	byteTrue  = encode.ByteTrue
@@ -1572,6 +1574,8 @@ func (db *BoltDB) UpdateMatch(m *dexdb.MetaMatch) error {
 			put(matchIDKey, match.MatchID[:]).
 			put(matchKey, order.EncodeMatch(match)).
 			put(stampKey, uint64Bytes(md.Stamp)).
+			put(swapAddrKey, []byte(md.SwapAddr)).
+			put(counterPartyAddrKey, []byte(md.CounterPartyAddr)).
 			err()
 	})
 }
@@ -1703,11 +1707,13 @@ func loadMatchBucket(mBkt *bbolt.Bucket, excludeCancels bool) (*dexdb.MetaMatch,
 	}
 	return &dexdb.MetaMatch{
 		MetaData: &dexdb.MatchMetaData{
-			Proof: *proof,
-			DEX:   string(getCopy(mBkt, dexKey)),
-			Base:  intCoder.Uint32(mBkt.Get(baseKey)),
-			Quote: intCoder.Uint32(mBkt.Get(quoteKey)),
-			Stamp: intCoder.Uint64(mBkt.Get(stampKey)),
+			Proof:            *proof,
+			DEX:              string(getCopy(mBkt, dexKey)),
+			Base:             intCoder.Uint32(mBkt.Get(baseKey)),
+			Quote:            intCoder.Uint32(mBkt.Get(quoteKey)),
+			Stamp:            intCoder.Uint64(mBkt.Get(stampKey)),
+			SwapAddr:         string(getCopy(mBkt, swapAddrKey)),
+			CounterPartyAddr: string(getCopy(mBkt, counterPartyAddrKey)),
 		},
 		UserMatch: match,
 	}, nil

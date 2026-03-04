@@ -273,6 +273,9 @@ type AuthManager struct {
 	txDataSources map[uint32]TxDataSource
 
 	prepaidBondMtx sync.Mutex
+
+	connectCallbackMtx sync.RWMutex
+	connectCallbacks   []func(account.AccountID)
 }
 
 // violation badness
@@ -283,7 +286,8 @@ const (
 
 	// failure to act violations
 	matchCompletedScore  = 1   // offsets the violations
-	noSwapAsMakerScore   = -4  // book spoof, match with taker order affected, no stuck funds
+	noSwapAsMakerScore   = -4  // no swap broadcast at NewlyMatched
+	noAddrAsTakerScore   = -4  // taker failed to provide per-match address in time, blocking the maker
 	noSwapAsTakerScore   = -11 // maker has contract stuck for 20 hrs
 	noRedeemAsMakerScore = -7  // taker has contract stuck for 8 hrs
 	noRedeemAsTakerScore = -1  // just dumb, counterparty not inconvenienced
@@ -310,6 +314,7 @@ var outcomeScores = map[Outcome]int32{
 	db.OutcomeNoSwapAsTaker:   noSwapAsTakerScore,
 	db.OutcomeNoRedeemAsMaker: noRedeemAsMakerScore,
 	db.OutcomeNoRedeemAsTaker: noRedeemAsTakerScore,
+	db.OutcomeNoAddrAsTaker:   noAddrAsTakerScore,
 
 	// orders cancellations (completed/canceled)
 	db.OutcomeOrderCanceled: excessiveCancelsScore,
@@ -553,6 +558,16 @@ func (auth *AuthManager) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	}()
 	// TODO: wait for running comms route handlers and other DB writers.
 	return &auth.wg, nil
+}
+
+// OnConnect registers a callback that is invoked after a user successfully
+// connects (or reconnects). This allows other subsystems (e.g. the Swapper) to
+// perform actions when a user comes online, such as re-sending missed
+// notifications.
+func (auth *AuthManager) OnConnect(f func(account.AccountID)) {
+	auth.connectCallbackMtx.Lock()
+	auth.connectCallbacks = append(auth.connectCallbacks, f)
+	auth.connectCallbackMtx.Unlock()
 }
 
 // Route wraps the comms.Route function, storing the response handler with the
@@ -1653,11 +1668,11 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		var oid []byte
 		switch {
 		case side == order.Maker && user == match.MakerAcct:
-			addr = match.TakerAddr // counterparty
+			addr = match.TakerSwapAddr // counterparty's per-match address
 			oid = match.Maker[:]
 			// sell = !match.TakerSell
 		case side == order.Taker && user == match.TakerAcct:
-			addr = match.MakerAddr // counterparty
+			addr = match.MakerSwapAddr // counterparty's per-match address
 			oid = match.Taker[:]
 			// sell = match.TakerSell
 		default:
@@ -1748,6 +1763,13 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		"bond tier = %v, score = %v",
 		user, conn.Addr(), len(msgOrderStatuses), len(msgMatches), client.tier, bondTier, score)
 	auth.addClient(client)
+
+	auth.connectCallbackMtx.RLock()
+	callbacks := auth.connectCallbacks
+	auth.connectCallbackMtx.RUnlock()
+	for _, cb := range callbacks {
+		cb(user)
+	}
 
 	return nil
 }

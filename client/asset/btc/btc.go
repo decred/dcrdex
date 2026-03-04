@@ -5628,24 +5628,7 @@ func (btc *baseWallet) DepositAddress() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	addrStr, err := btc.stringAddr(addr, btc.chainParams)
-	if err != nil {
-		return "", err
-	}
-	if btc.node.Locked() {
-		return addrStr, nil
-	}
-
-	// If the wallet is unlocked, be extra cautious and ensure the wallet gave
-	// us an address for which we can retrieve the private keys, regardless of
-	// what ownsAddress would say.
-	priv, err := btc.node.PrivKeyForAddress(btc.ctx, addrStr)
-	if err != nil {
-		return "", fmt.Errorf("private key unavailable for address %v: %w", addrStr, err)
-	}
-	priv.Zero()
-
-	return addrStr, nil
+	return btc.stringAddr(addr, btc.chainParams)
 }
 
 // RedemptionAddress gets an address for use in redeeming the counterparty's

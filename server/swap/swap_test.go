@@ -263,14 +263,13 @@ func (m *TAuthManager) getNtfn(id account.AccountID, route string, payload any) 
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	msgs := m.ntfns[id]
-	if len(msgs) == 0 {
-		return errors.New("no message")
+	for i, msg := range msgs {
+		if msg.Route == route {
+			m.ntfns[id] = append(msgs[:i], msgs[i+1:]...)
+			return msg.Unmarshal(payload)
+		}
 	}
-	msg := msgs[0]
-	if msg.Route != route {
-		return fmt.Errorf("wrong route: %v", route)
-	}
-	return msg.Unmarshal(payload)
+	return fmt.Errorf("no %s notification", route)
 }
 
 // push front
@@ -331,8 +330,10 @@ func (ts *TStorage) InsertMatch(match *order.Match) error     { return nil }
 func (ts *TStorage) SwapData(mid db.MarketMatchID) (order.MatchStatus, *db.SwapData, error) {
 	return 0, nil, nil
 }
-func (ts *TStorage) SaveMatchAckSigA(mid db.MarketMatchID, sig []byte) error { return nil }
-func (ts *TStorage) SaveMatchAckSigB(mid db.MarketMatchID, sig []byte) error { return nil }
+func (ts *TStorage) SaveMatchAckSigA(mid db.MarketMatchID, sig []byte) error   { return nil }
+func (ts *TStorage) SaveMatchAckSigB(mid db.MarketMatchID, sig []byte) error   { return nil }
+func (ts *TStorage) SaveMatchAckAddrA(mid db.MarketMatchID, addr string) error { return nil }
+func (ts *TStorage) SaveMatchAckAddrB(mid db.MarketMatchID, addr string) error { return nil }
 
 // Contract data.
 func (ts *TStorage) SaveContractA(mid db.MarketMatchID, contract []byte, coinID []byte, timestamp int64) error {
@@ -658,10 +659,30 @@ func (rig *testRig) waitChans(tag string, chans ...chan struct{}) error {
 	return nil
 }
 
-// Taker: Acknowledge the servers match notification.
+// perMatchAddrs builds a map from match ID to per-match address for the given
+// user by scanning all match infos, or just rig.matchInfo when rig.matches is
+// not set.
+func (rig *testRig) perMatchAddrs(user *tUser, isMaker bool) map[order.MatchID]string {
+	addrs := make(map[order.MatchID]string)
+	matchInfos := []*tMatch{rig.matchInfo}
+	if rig.matches != nil {
+		matchInfos = rig.matches.matchInfos
+	}
+	for _, mi := range matchInfos {
+		if isMaker && mi.maker == user {
+			addrs[mi.matchID] = mi.makerPerMatchAddr
+		} else if !isMaker && mi.taker == user {
+			addrs[mi.matchID] = mi.takerPerMatchAddr
+		}
+	}
+	return addrs
+}
+
+// Maker: Acknowledge the servers match notification.
 func (rig *testRig) ackMatch_maker(checkSig bool) (err error) {
 	matchInfo := rig.matchInfo
-	err = rig.ackMatch(matchInfo.maker, matchInfo.makerOID, matchInfo.taker.addr)
+	err = rig.ackMatch(matchInfo.maker, matchInfo.makerOID, matchInfo.taker.addr,
+		rig.perMatchAddrs(matchInfo.maker, true))
 	if err != nil {
 		return err
 	}
@@ -674,10 +695,11 @@ func (rig *testRig) ackMatch_maker(checkSig bool) (err error) {
 	return nil
 }
 
-// Maker: Acknowledge the servers match notification.
+// Taker: Acknowledge the servers match notification.
 func (rig *testRig) ackMatch_taker(checkSig bool) error {
 	matchInfo := rig.matchInfo
-	err := rig.ackMatch(matchInfo.taker, matchInfo.takerOID, matchInfo.maker.addr)
+	err := rig.ackMatch(matchInfo.taker, matchInfo.takerOID, matchInfo.maker.addr,
+		rig.perMatchAddrs(matchInfo.taker, false))
 	if err != nil {
 		return err
 	}
@@ -690,7 +712,7 @@ func (rig *testRig) ackMatch_taker(checkSig bool) error {
 	return nil
 }
 
-func (rig *testRig) ackMatch(user *tUser, oid order.OrderID, counterAddr string) error {
+func (rig *testRig) ackMatch(user *tUser, oid order.OrderID, counterAddr string, matchAddrs map[order.MatchID]string) error {
 	req := rig.auth.popReq(user.acct)
 	if req == nil {
 		return fmt.Errorf("failed to find match notification for %s", user.lbl)
@@ -703,8 +725,8 @@ func (rig *testRig) ackMatch(user *tUser, oid order.OrderID, counterAddr string)
 		return err
 	}
 	// The maker and taker would sign the notifications and return a list of
-	// authorizations.
-	resp := tNewResponse(req.req.ID, tAckArr(user, user.matchIDs))
+	// authorizations, including per-match swap addresses.
+	resp := tNewResponse(req.req.ID, tAckArrWithAddrs(user, user.matchIDs, matchAddrs))
 	req.respFunc(nil, resp) // e.g. processMatchAcks, may Send resp on error
 	return nil
 }
@@ -790,10 +812,32 @@ func (rig *testRig) checkServerResponseFail(user *tUser, code int, grep ...strin
 	return nil
 }
 
+// swapRecipient returns the per-match swap address for the given side if one
+// has been stored on the match tracker (via the ack flow), otherwise falls back
+// to the order-level address.
+func (rig *testRig) swapRecipient(isMaker bool) string {
+	matchInfo := rig.matchInfo
+	tracker := rig.getTracker()
+	tracker.mtx.RLock()
+	defer tracker.mtx.RUnlock()
+	if isMaker {
+		// Maker's swap pays to the taker's address.
+		if tracker.takerSwapAddr != "" {
+			return tracker.takerSwapAddr
+		}
+		return matchInfo.taker.addr
+	}
+	// Taker's swap pays to the maker's address.
+	if tracker.makerSwapAddr != "" {
+		return tracker.makerSwapAddr
+	}
+	return matchInfo.maker.addr
+}
+
 // Maker: Send swap transaction (swap init request).
 func (rig *testRig) sendSwap_maker(expectSuccess bool) (err error) {
 	matchInfo := rig.matchInfo
-	swap, err := rig.sendSwap(matchInfo.maker, matchInfo.makerOID, matchInfo.taker.addr)
+	swap, err := rig.sendSwap(matchInfo.maker, matchInfo.makerOID, rig.swapRecipient(true))
 	if err != nil {
 		return fmt.Errorf("error sending maker swap request: %w", err)
 	}
@@ -812,10 +856,10 @@ func (rig *testRig) sendSwap_maker(expectSuccess bool) (err error) {
 	return nil
 }
 
-// Taker: Send swap transaction (swap init request)..
+// Taker: Send swap transaction (swap init request).
 func (rig *testRig) sendSwap_taker(expectSuccess bool) (err error) {
 	matchInfo := rig.matchInfo
-	swap, err := rig.sendSwap(matchInfo.taker, matchInfo.takerOID, matchInfo.maker.addr)
+	swap, err := rig.sendSwap(matchInfo.taker, matchInfo.takerOID, rig.swapRecipient(false))
 	if err != nil {
 		return fmt.Errorf("error sending taker swap request: %w", err)
 	}
@@ -1201,7 +1245,10 @@ type tMatch struct {
 	rate     uint64
 	maker    *tUser
 	taker    *tUser
-	db       struct {
+	// Per-match swap addresses provided in match acks.
+	makerPerMatchAddr string
+	takerPerMatchAddr string
+	db                struct {
 		makerRedeem *tRedeem
 		takerRedeem *tRedeem
 		makerSwap   *tSwap
@@ -1211,22 +1258,25 @@ type tMatch struct {
 	}
 }
 
-func makeAck(mid order.MatchID, sig []byte) msgjson.Acknowledgement {
+func makeAck(mid order.MatchID, sig []byte, addr string) msgjson.Acknowledgement {
 	return msgjson.Acknowledgement{
 		MatchID: mid[:],
 		Sig:     sig,
+		Address: addr,
 	}
 }
 
 func tAck(user *tUser, matchID order.MatchID) []byte {
-	b, _ := json.Marshal(makeAck(matchID, user.sig))
+	b, _ := json.Marshal(makeAck(matchID, user.sig, ""))
 	return b
 }
 
-func tAckArr(user *tUser, matchIDs []order.MatchID) []byte {
+// tAckArrWithAddrs builds acknowledgements for a user, using matchAddrs to
+// supply per-match addresses for each match ID.
+func tAckArrWithAddrs(user *tUser, matchIDs []order.MatchID, matchAddrs map[order.MatchID]string) []byte {
 	ackArr := make([]msgjson.Acknowledgement, 0, len(matchIDs))
 	for _, matchID := range matchIDs {
-		ackArr = append(ackArr, makeAck(matchID, user.sig))
+		ackArr = append(ackArr, makeAck(matchID, user.sig, matchAddrs[matchID]))
 	}
 	b, _ := json.Marshal(ackArr)
 	return b
@@ -1249,14 +1299,16 @@ func tMatchInfo(maker, taker *tUser, matchQty, matchRate uint64, makerOrder *ord
 	maker.matchIDs = append(maker.matchIDs, mid)
 	taker.matchIDs = append(taker.matchIDs, mid)
 	return &tMatch{
-		match:    match,
-		qty:      matchQty,
-		rate:     matchRate,
-		matchID:  mid,
-		makerOID: makerOrder.ID(),
-		takerOID: takerOrder.ID(),
-		maker:    maker,
-		taker:    taker,
+		match:             match,
+		qty:               matchQty,
+		rate:              matchRate,
+		matchID:           mid,
+		makerOID:          makerOrder.ID(),
+		takerOID:          takerOrder.ID(),
+		maker:             maker,
+		taker:             taker,
+		makerPerMatchAddr: fmt.Sprintf("maker-pmaddr-%s", mid),
+		takerPerMatchAddr: fmt.Sprintf("taker-pmaddr-%s", mid),
 	}
 }
 
@@ -1777,7 +1829,10 @@ func TestBroadcastTimeouts(t *testing.T) {
 	rig.auth.newSuspend = make(chan struct{}, 1)
 	rig.auth.auditReq = make(chan struct{}, 1)
 	rig.auth.redemptionReq = make(chan struct{}, 1)
-	rig.auth.newNtfn = make(chan struct{}, 2) // 2 revoke_match requests
+	// Buffer must be large enough for revoke_match notifications (2 per
+	// timeout iteration) plus counterparty_address notifications (2 per
+	// ack cycle, one per side).
+	rig.auth.newNtfn = make(chan struct{}, 20)
 
 	ensureNilErr := makeEnsureNilErr(t)
 	sendBlock := func(node *TBackend) {
@@ -1852,6 +1907,10 @@ func TestBroadcastTimeouts(t *testing.T) {
 
 		ensureNilErr(rig.ackMatch_maker(true))
 		ensureNilErr(rig.ackMatch_taker(true))
+
+		// Drain counterparty_address notifications generated by the ack flow.
+		ntfnWait(time.Second)
+		ntfnWait(time.Second)
 
 		// Timeout waiting for maker swap.
 		if tryExpire(i, 0, order.NewlyMatched, matchInfo.maker, matchInfo.taker, &rig.abcNode.TBackend) {
@@ -2342,6 +2401,406 @@ func TestAccountTracking(t *testing.T) {
 	addOrder(set.matchSet, false)
 	checkStats(makerAddr, qty*2+calc.BaseToQuote(rate, qty), 3, 3)
 	checkStats(takerAddr, qty*3, 3, 3)
+}
+
+func TestPerMatchSwapAddresses(t *testing.T) {
+	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true)
+	matchInfo := set.matchInfos[0]
+	rig, cleanup := tNewTestRig(matchInfo)
+	defer cleanup()
+
+	rig.auth.newNtfn = make(chan struct{}, 4)
+
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+
+	tracker := rig.getTracker()
+
+	// Maker acks with per-match address (included automatically via ack flow).
+	if err := rig.ackMatch_maker(true); err != nil {
+		t.Fatalf("maker ack: %v", err)
+	}
+
+	tracker.mtx.RLock()
+	if tracker.makerSwapAddr != matchInfo.makerPerMatchAddr {
+		t.Fatalf("expected maker swap addr %q, got %q", matchInfo.makerPerMatchAddr, tracker.makerSwapAddr)
+	}
+	// Taker hasn't acked yet, so no counterparty addrs should be sent.
+	if tracker.counterPartyAddrsSent {
+		t.Fatalf("counterPartyAddrsSent set before taker ack")
+	}
+	tracker.mtx.RUnlock()
+
+	// Taker acks with per-match address.
+	if err := rig.ackMatch_taker(true); err != nil {
+		t.Fatalf("taker ack: %v", err)
+	}
+
+	tracker.mtx.RLock()
+	if tracker.takerSwapAddr != matchInfo.takerPerMatchAddr {
+		t.Fatalf("expected taker swap addr %q, got %q", matchInfo.takerPerMatchAddr, tracker.takerSwapAddr)
+	}
+	if !tracker.counterPartyAddrsSent {
+		t.Fatalf("counterPartyAddrsSent not set after both acks")
+	}
+	tracker.mtx.RUnlock()
+
+	// Both acked. Check that counterparty_address notifications were sent.
+	// Two notifications: one to maker (with taker's addr) and one to taker
+	// (with maker's addr).
+	select {
+	case <-rig.auth.newNtfn:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first counterparty_address notification")
+	}
+	select {
+	case <-rig.auth.newNtfn:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for second counterparty_address notification")
+	}
+
+	// Check the notification contents.
+	var makerCPA msgjson.CounterPartyAddress
+	err := rig.auth.getNtfn(matchInfo.maker.acct, msgjson.CounterPartyAddressRoute, &makerCPA)
+	if err != nil {
+		t.Fatalf("maker counterparty_address notification error: %v", err)
+	}
+	if makerCPA.Address != matchInfo.takerPerMatchAddr {
+		t.Fatalf("maker received counterparty addr %q, expected %q", makerCPA.Address, matchInfo.takerPerMatchAddr)
+	}
+
+	var takerCPA msgjson.CounterPartyAddress
+	err = rig.auth.getNtfn(matchInfo.taker.acct, msgjson.CounterPartyAddressRoute, &takerCPA)
+	if err != nil {
+		t.Fatalf("taker counterparty_address notification error: %v", err)
+	}
+	if takerCPA.Address != matchInfo.makerPerMatchAddr {
+		t.Fatalf("taker received counterparty addr %q, expected %q", takerCPA.Address, matchInfo.makerPerMatchAddr)
+	}
+}
+
+func TestPerMatchAddressInProcessInit(t *testing.T) {
+	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true)
+	matchInfo := set.matchInfos[0]
+	rig, cleanup := tNewTestRig(matchInfo)
+	defer cleanup()
+
+	rig.auth.swapReceived = make(chan struct{}, 1)
+	rig.auth.auditReq = make(chan struct{}, 1)
+
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+
+	// Ack both sides. Per-match addresses are included automatically via the
+	// ack flow (tMatchInfo populates makerPerMatchAddr/takerPerMatchAddr).
+	if err := rig.ackMatch_maker(true); err != nil {
+		t.Fatalf("maker ack: %v", err)
+	}
+	if err := rig.ackMatch_taker(true); err != nil {
+		t.Fatalf("taker ack: %v", err)
+	}
+
+	// Verify the per-match addresses were stored on the tracker.
+	tracker := rig.getTracker()
+	tracker.mtx.RLock()
+	if tracker.takerSwapAddr != matchInfo.takerPerMatchAddr {
+		t.Fatalf("expected taker per-match addr %q on tracker, got %q",
+			matchInfo.takerPerMatchAddr, tracker.takerSwapAddr)
+	}
+	tracker.mtx.RUnlock()
+
+	// Maker sends swap using sendSwap_maker, which picks up the taker's
+	// per-match address from the tracker via swapRecipient.
+	if err := rig.sendSwap_maker(true); err != nil {
+		t.Fatalf("sendSwap_maker with per-match addr failed: %v", err)
+	}
+}
+
+func TestPerMatchAddressWrongAddr(t *testing.T) {
+	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true)
+	matchInfo := set.matchInfos[0]
+	rig, cleanup := tNewTestRig(matchInfo)
+	defer cleanup()
+
+	rig.auth.swapReceived = make(chan struct{}, 1)
+
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+
+	// Ack both sides with per-match addresses via the ack flow.
+	if err := rig.ackMatch_maker(true); err != nil {
+		t.Fatalf("maker ack: %v", err)
+	}
+	if err := rig.ackMatch_taker(true); err != nil {
+		t.Fatalf("taker ack: %v", err)
+	}
+
+	// Maker sends swap with wrong address (order-level addr instead of
+	// per-match addr).
+	swap := tNewSwap(matchInfo, matchInfo.makerOID, matchInfo.taker.addr, matchInfo.maker)
+	rig.abcNode.setContract(swap.coin, false)
+	rig.auth.swapID = swap.req.ID
+	rpcErr := rig.swapper.handleInit(matchInfo.maker.acct, swap.req)
+	if rpcErr != nil {
+		// Immediate error means synchronous rejection.
+		return
+	}
+	// May also be an async error via the coin waiter.
+	timeOutMempool()
+	select {
+	case <-rig.auth.swapReceived:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for swap response")
+	}
+	if err := rig.checkServerResponseFail(matchInfo.maker, msgjson.ContractError, "incorrect recipient"); err != nil {
+		t.Fatalf("expected contract error for wrong address: %v", err)
+	}
+}
+
+func TestCoinIDDedup(t *testing.T) {
+	// Create two independent matches with different makers and takers.
+	qty := uint64(1e8)
+	rate := uint64(1e8)
+
+	maker1, taker1 := tNewUser("maker1"), tNewUser("taker1")
+	makerOrder1 := makeLimitOrder(qty, rate, maker1, true)
+	takerOrder1 := makeLimitOrder(qty, rate, taker1, false)
+	matchInfo1 := tMatchInfo(maker1, taker1, qty, rate, makerOrder1, takerOrder1)
+	set1 := new(tMatchSet).add(matchInfo1)
+
+	maker2, taker2 := tNewUser("maker2"), tNewUser("taker2")
+	makerOrder2 := makeLimitOrder(qty, rate, maker2, true)
+	takerOrder2 := makeLimitOrder(qty, rate, taker2, false)
+	matchInfo2 := tMatchInfo(maker2, taker2, qty, rate, makerOrder2, takerOrder2)
+	set2 := new(tMatchSet).add(matchInfo2)
+
+	rig, cleanup := tNewTestRig(matchInfo1)
+	defer cleanup()
+
+	rig.auth.swapReceived = make(chan struct{}, 2)
+	rig.auth.auditReq = make(chan struct{}, 2)
+
+	rig.swapper.Negotiate([]*order.MatchSet{set1.matchSet})
+	rig.swapper.Negotiate([]*order.MatchSet{set2.matchSet})
+
+	// Ack both matches.
+	rig.matchInfo = matchInfo1
+	if err := rig.ackMatch_maker(true); err != nil {
+		t.Fatalf("match1 maker ack: %v", err)
+	}
+	if err := rig.ackMatch_taker(true); err != nil {
+		t.Fatalf("match1 taker ack: %v", err)
+	}
+	rig.matchInfo = matchInfo2
+	if err := rig.ackMatch_maker(true); err != nil {
+		t.Fatalf("match2 maker ack: %v", err)
+	}
+	if err := rig.ackMatch_taker(true); err != nil {
+		t.Fatalf("match2 taker ack: %v", err)
+	}
+
+	// Send swap for match 1 using taker's per-match address.
+	rig.matchInfo = matchInfo1
+	swap1 := tNewSwap(matchInfo1, matchInfo1.makerOID, matchInfo1.takerPerMatchAddr, matchInfo1.maker)
+	rig.abcNode.setContract(swap1.coin, false)
+	rig.auth.swapID = swap1.req.ID
+	rpcErr := rig.swapper.handleInit(matchInfo1.maker.acct, swap1.req)
+	if rpcErr != nil {
+		t.Fatalf("match1 swap init failed: %v", rpcErr.Message)
+	}
+	select {
+	case <-rig.auth.swapReceived:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for match1 swap response")
+	}
+	if err := rig.checkServerResponseSuccess(matchInfo1.maker); err != nil {
+		t.Fatalf("match1 swap should succeed: %v", err)
+	}
+
+	// Try to use the same CoinID and contract for match 2 - this should fail.
+	rig.matchInfo = matchInfo2
+	reusedCoinID := swap1.coin.ID() // same coin
+	swap2 := tNewSwap(matchInfo2, matchInfo2.makerOID, matchInfo2.takerPerMatchAddr, matchInfo2.maker)
+	// Override the CoinID and contract to reuse match1's.
+	var init1 msgjson.Init
+	swap1.req.Unmarshal(&init1)
+	var init2 msgjson.Init
+	swap2.req.Unmarshal(&init2)
+	init2.CoinID = reusedCoinID
+	init2.Contract = init1.Contract // same contract data
+	swap2.req, _ = msgjson.NewRequest(swap2.req.ID, msgjson.InitRoute, &init2)
+	// Also set the contract on the backend for the reused coin.
+	swap2.coin.Coin.(*TCoin).id = reusedCoinID
+	rig.abcNode.setContract(swap2.coin, false)
+	rig.auth.swapID = swap2.req.ID
+	rpcErr = rig.swapper.handleInit(matchInfo2.maker.acct, swap2.req)
+	if rpcErr != nil {
+		// Synchronous rejection.
+		if !strings.Contains(rpcErr.Message, "already in use") {
+			t.Fatalf("expected 'already in use' error, got: %s", rpcErr.Message)
+		}
+		return
+	}
+
+	timeOutMempool()
+	select {
+	case <-rig.auth.swapReceived:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for match2 swap response")
+	}
+	if err := rig.checkServerResponseFail(matchInfo2.maker, msgjson.ContractError, "already in use"); err != nil {
+		t.Fatalf("expected CoinID reuse error: %v", err)
+	}
+}
+
+func TestCoinIDDedupSameMatch(t *testing.T) {
+	// Verify that the same CoinID can be retried for the same match.
+	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true)
+	matchInfo := set.matchInfos[0]
+	rig, cleanup := tNewTestRig(matchInfo)
+	defer cleanup()
+
+	rig.auth.swapReceived = make(chan struct{}, 2)
+	rig.auth.auditReq = make(chan struct{}, 2)
+
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+
+	if err := rig.ackMatch_maker(true); err != nil {
+		t.Fatalf("maker ack: %v", err)
+	}
+	if err := rig.ackMatch_taker(true); err != nil {
+		t.Fatalf("taker ack: %v", err)
+	}
+
+	// First init should succeed using taker's per-match address.
+	swap := tNewSwap(matchInfo, matchInfo.makerOID, matchInfo.takerPerMatchAddr, matchInfo.maker)
+	rig.abcNode.setContract(swap.coin, false)
+	rig.auth.swapID = swap.req.ID
+	rpcErr := rig.swapper.handleInit(matchInfo.maker.acct, swap.req)
+	if rpcErr != nil {
+		t.Fatalf("first init failed: %v", rpcErr.Message)
+	}
+	select {
+	case <-rig.auth.swapReceived:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first swap response")
+	}
+	if err := rig.checkServerResponseSuccess(matchInfo.maker); err != nil {
+		t.Fatalf("first init should succeed: %v", err)
+	}
+
+	// Retry same CoinID for the same match (e.g. client retries) - the
+	// status check in step() should catch that we're past the init step.
+	// The dedup check itself should pass since existingMatch == match.MatchID.
+	swap2 := tNewSwap(matchInfo, matchInfo.makerOID, matchInfo.takerPerMatchAddr, matchInfo.maker)
+	// Copy the same CoinID.
+	var init2 msgjson.Init
+	swap2.req.Unmarshal(&init2)
+	init2.CoinID = swap.coin.ID()
+	swap2.req, _ = msgjson.NewRequest(swap2.req.ID, msgjson.InitRoute, &init2)
+	rpcErr = rig.swapper.handleInit(matchInfo.maker.acct, swap2.req)
+	// This should fail because the match status has already advanced, but the
+	// CoinID dedup itself should not be the reason - it should be a step error.
+	if rpcErr == nil {
+		t.Fatal("expected error for duplicate init on already-swapped match")
+	}
+	if strings.Contains(rpcErr.Message, "already in use") {
+		t.Fatal("CoinID dedup should not reject same-match retries")
+	}
+}
+
+func TestUserConnectedResend(t *testing.T) {
+	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true)
+	matchInfo := set.matchInfos[0]
+	rig, cleanup := tNewTestRig(matchInfo)
+	defer cleanup()
+
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+
+	tracker := rig.getTracker()
+
+	// Set per-match addresses directly to simulate both sides having acked.
+	makerAddr := "maker-addr"
+	takerAddr := "taker-addr"
+	tracker.mtx.Lock()
+	tracker.makerSwapAddr = makerAddr
+	tracker.takerSwapAddr = takerAddr
+	tracker.counterPartyAddrsSent = true
+	tracker.mtx.Unlock()
+
+	// Clear any notifications.
+	rig.auth.mtx.Lock()
+	rig.auth.ntfns = make(map[account.AccountID][]*msgjson.Message)
+	rig.auth.mtx.Unlock()
+
+	// Simulate maker reconnecting.
+	rig.swapper.UserConnected(matchInfo.maker.acct)
+
+	// Maker should receive a counterparty_address notification with taker's addr.
+	var cpa msgjson.CounterPartyAddress
+	err := rig.auth.getNtfn(matchInfo.maker.acct, msgjson.CounterPartyAddressRoute, &cpa)
+	if err != nil {
+		t.Fatalf("no counterparty_address resend on reconnect: %v", err)
+	}
+	if cpa.Address != takerAddr {
+		t.Fatalf("expected resent addr %q, got %q", takerAddr, cpa.Address)
+	}
+
+	// Taker should NOT have received one (only maker reconnected).
+	rig.auth.mtx.Lock()
+	takerNtfns := rig.auth.ntfns[matchInfo.taker.acct]
+	rig.auth.mtx.Unlock()
+	if len(takerNtfns) > 0 {
+		t.Fatal("taker should not receive notification when only maker reconnects")
+	}
+}
+
+func TestDeleteMatchCleansUpCoinIDs(t *testing.T) {
+	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true)
+	matchInfo := set.matchInfos[0]
+	rig, cleanup := tNewTestRig(matchInfo)
+	defer cleanup()
+
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+
+	tracker := rig.getTracker()
+
+	// Directly register CoinIDs in the dedup maps to simulate what
+	// processInit does, avoiding the async coin waiter complexity.
+	fakeCoinID1 := "aabbccdd"
+	fakeCoinID2 := "eeff0011"
+	mid := matchInfo.matchID
+
+	rig.swapper.activeCoinsMtx.Lock()
+	rig.swapper.activeCoinIDs[fakeCoinID1] = mid
+	rig.swapper.activeCoinIDs[fakeCoinID2] = mid
+	rig.swapper.matchCoinIDs[mid] = []string{fakeCoinID1, fakeCoinID2}
+	rig.swapper.activeCoinsMtx.Unlock()
+
+	// Verify they're registered.
+	rig.swapper.activeCoinsMtx.Lock()
+	if _, exists := rig.swapper.activeCoinIDs[fakeCoinID1]; !exists {
+		rig.swapper.activeCoinsMtx.Unlock()
+		t.Fatal("CoinID1 not registered")
+	}
+	rig.swapper.activeCoinsMtx.Unlock()
+
+	// Delete the match and verify cleanup. deleteMatch requires matchMtx.
+	rig.swapper.matchMtx.Lock()
+	rig.swapper.deleteMatch(tracker)
+	rig.swapper.matchMtx.Unlock()
+
+	rig.swapper.activeCoinsMtx.Lock()
+	if _, exists := rig.swapper.activeCoinIDs[fakeCoinID1]; exists {
+		rig.swapper.activeCoinsMtx.Unlock()
+		t.Fatal("CoinID1 not cleaned up after deleteMatch")
+	}
+	if _, exists := rig.swapper.activeCoinIDs[fakeCoinID2]; exists {
+		rig.swapper.activeCoinsMtx.Unlock()
+		t.Fatal("CoinID2 not cleaned up after deleteMatch")
+	}
+	if _, exists := rig.swapper.matchCoinIDs[mid]; exists {
+		rig.swapper.activeCoinsMtx.Unlock()
+		t.Fatal("matchCoinIDs entry not cleaned up after deleteMatch")
+	}
+	rig.swapper.activeCoinsMtx.Unlock()
 }
 
 // TODO: TestSwapper_restoreActiveSwaps? It would be almost entirely driven by
