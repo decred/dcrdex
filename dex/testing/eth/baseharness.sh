@@ -118,20 +118,30 @@ EOF
 echo "Sending 5000 to bundler"
 "${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/send.js --exec send(\"${BUNDLER_ADDRESS}\",${SEND_AMT})"
 
+# gethDeploy writes the deploy JS expression to a preload file to avoid
+# command-line length limits with large contract bytecodes.
+gethDeploy() {
+  local jsExpr="$1"
+  cat > "${NODES_ROOT}/harness-ctl/_deploy_cmd.js" <<DEPLOYEOF
+var __result = ${jsExpr};
+DEPLOYEOF
+  "${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/deploy.js,${NODES_ROOT}/harness-ctl/_deploy_cmd.js --exec __result" | sed 's/"//g'
+}
+
 echo "Deploying Entrypoint contract."
-ENTRYPOINT_CONTRACT_HASH=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/deploy.js --exec deploy(\"${ENTRYPOINT_V07}\")" | sed 's/"//g')
+ENTRYPOINT_CONTRACT_HASH=$(gethDeploy "deploy(\"${ENTRYPOINT_V07}\")")
 
 echo "Deploying ETHSwapV0 contract."
-ETH_SWAP_CONTRACT_HASH_V0=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/deploy.js --exec deploy(\"${ETH_SWAP_V0}\")" | sed 's/"//g')
+ETH_SWAP_CONTRACT_HASH_V0=$(gethDeploy "deploy(\"${ETH_SWAP_V0}\")")
 
 echo "Deploying USDC contract."
-TEST_USDC_CONTRACT_HASH=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/deploy.js --exec deployERC20(\"${TEST_TOKEN}\",6)" | sed 's/"//g')
+TEST_USDC_CONTRACT_HASH=$(gethDeploy "deployERC20(\"${TEST_TOKEN}\",6)")
 
 echo "Deploying USDT contract."
-TEST_USDT_CONTRACT_HASH=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/deploy.js --exec deployERC20(\"${TEST_TOKEN}\",6)" | sed 's/"//g')
+TEST_USDT_CONTRACT_HASH=$(gethDeploy "deployERC20(\"${TEST_TOKEN}\",6)")
 
 echo "Deploying MultiBalance contract."
-MULTIBALANCE_CONTRACT_HASH=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/deploy.js --exec deploy(\"${MULTIBALANCE_BIN}\")" | sed 's/"//g')
+MULTIBALANCE_CONTRACT_HASH=$(gethDeploy "deploy(\"${MULTIBALANCE_BIN}\")")
 
 mine_pending_txs() {
   while true
@@ -154,7 +164,7 @@ ${ENTRYPOINT_CONTRACT_ADDR}
 EOF
 
 echo "Deploying ETHSwap1 contract."
-ETH_SWAP_CONTRACT_HASH_V1=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/deploy.js --exec deployERC20Swap(\"${ETH_SWAP_V1}\",\"${ENTRYPOINT_CONTRACT_ADDR}\")" | sed 's/"//g')
+ETH_SWAP_CONTRACT_HASH_V1=$(gethDeploy "deployERC20Swap(\"${ETH_SWAP_V1}\",\"${ENTRYPOINT_CONTRACT_ADDR}\")")
 
 mine_pending_txs
 
@@ -177,7 +187,7 @@ ${TEST_USDC_CONTRACT_ADDR}
 EOF
 
 echo "Deploying v0 ERC20SwapV0 contract for USDC."
-USDC_SWAP_CONTRACT_HASH_V0=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/deploy.js --exec deployERC20Swap(\"${ERC20_SWAP_V0}\",\"${TEST_USDC_CONTRACT_ADDR}\")" | sed 's/"//g')
+USDC_SWAP_CONTRACT_HASH_V0=$(gethDeploy "deployERC20Swap(\"${ERC20_SWAP_V0}\",\"${TEST_USDC_CONTRACT_ADDR}\")")
 
 TEST_USDT_CONTRACT_ADDR=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/contractAddress.js --exec contractAddress(\"${TEST_USDT_CONTRACT_HASH}\")" | sed 's/"//g')
 echo "Test USDT contract address is ${TEST_USDT_CONTRACT_ADDR}. Saving to ${NODES_ROOT}/test_usdt_contract_address.txt"
@@ -186,7 +196,7 @@ ${TEST_USDT_CONTRACT_ADDR}
 EOF
 
 echo "Deploying ERC20SwapV0 contract for USDT."
-USDT_SWAP_CONTRACT_HASH=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/deploy.js --exec deployERC20Swap(\"${ERC20_SWAP_V0}\",\"${TEST_USDT_CONTRACT_ADDR}\")" | sed 's/"//g')
+USDT_SWAP_CONTRACT_HASH=$(gethDeploy "deployERC20Swap(\"${ERC20_SWAP_V0}\",\"${TEST_USDT_CONTRACT_ADDR}\")")
 
 cat > "${NODES_ROOT}/harness-ctl/loadTestToken.js" <<EOF
     // This ABI comes from running 'solc --abi TestToken.sol'
