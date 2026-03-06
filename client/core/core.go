@@ -1896,6 +1896,16 @@ func (c *Core) Language() string {
 	return c.locale().lang.String()
 }
 
+// SetCompanionToken stores the companion app auth token in the database.
+func (c *Core) SetCompanionToken(token string) error {
+	return c.db.SetCompanionToken(token)
+}
+
+// CompanionToken retrieves the companion app auth token from the database.
+func (c *Core) CompanionToken() (string, error) {
+	return c.db.CompanionToken()
+}
+
 // BackupDB makes a backup of the database at the specified location, optionally
 // overwriting any existing file and compacting the database.
 func (c *Core) BackupDB(dst string, overwrite, compact bool) error {

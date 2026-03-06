@@ -129,7 +129,8 @@ var (
 	disabledRateSourceKey = []byte("disabledRateSources")
 	walletDisabledKey     = []byte("walletDisabled")
 	// programKey            = []byte("program") unused
-	langKey = []byte("lang")
+	langKey           = []byte("lang")
+	companionTokenKey = []byte("companionToken")
 
 	// values
 	byteTrue  = encode.ByteTrue
@@ -2587,6 +2588,34 @@ func (db *BoltDB) Language() (lang string, _ error) {
 		bkt := dbTx.Bucket(appBucket)
 		if bkt != nil {
 			lang = string(bkt.Get(langKey))
+		}
+		return nil
+	})
+}
+
+// SetCompanionToken stores the companion app auth token hash. An empty
+// value deletes the key from the database.
+func (db *BoltDB) SetCompanionToken(token string) error {
+	return db.Update(func(dbTx *bbolt.Tx) error {
+		bkt := dbTx.Bucket(appBucket)
+		if bkt == nil {
+			return fmt.Errorf("app bucket not found")
+		}
+		if token == "" {
+			return bkt.Delete(companionTokenKey)
+		}
+		return bkt.Put(companionTokenKey, []byte(token))
+	})
+}
+
+// CompanionToken retrieves the companion app auth token hash stored with
+// SetCompanionToken. If no value has been stored, an empty string is
+// returned without an error.
+func (db *BoltDB) CompanionToken() (token string, _ error) {
+	return token, db.View(func(dbTx *bbolt.Tx) error {
+		bkt := dbTx.Bucket(appBucket)
+		if bkt != nil {
+			token = string(bkt.Get(companionTokenKey))
 		}
 		return nil
 	})

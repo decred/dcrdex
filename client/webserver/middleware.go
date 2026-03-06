@@ -5,6 +5,7 @@ package webserver
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -50,15 +51,45 @@ func (s *WebServer) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// tokenAuthMiddleware checks for an dexauth query parameter.
-// If present, it sets the dexauth cookie.  This allows for passwordless
-// login in the context of mobile companion apps.
+// tokenAuthMiddleware checks for a dexauth query parameter.
+// If the token is valid it sets the dexauth cookie, allowing passwordless
+// login in the context of mobile companion apps. When the token matches
+// the current companion token it is marked as claimed and a SHA-256 hash
+// is persisted to the database so it survives restarts. Invalid tokens
+// are rejected so that a revoked companion app cannot fall through to
+// password login. After a server restart, an unknown token is checked
+// against the persisted hash to re-establish the pairing.
 func (s *WebServer) tokenAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		queries := r.URL.Query()
 		authToken := queries.Get(authCK)
 		if authToken != "" {
+			s.authMtx.Lock()
+			valid := s.authTokens[authToken]
+			newlyClaimed := valid && authToken == s.companionToken && !s.companionTokenClaimed
+			if newlyClaimed {
+				s.companionTokenClaimed = true
+			}
+			s.authMtx.Unlock()
+			if !valid {
+				// Token not in memory. Try to restore from
+				// the persisted hash (e.g. after restart).
+				if !s.restoreCompanionFromHash(authToken) {
+					http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+					return
+				}
+			}
 			setCookie(authCK, authToken, w)
+			if newlyClaimed {
+				h := sha256.Sum256([]byte(authToken))
+				hashStr := hex.EncodeToString(h[:])
+				s.authMtx.Lock()
+				s.companionTokenHash = hashStr
+				s.authMtx.Unlock()
+				if err := s.core.SetCompanionToken(hashStr); err != nil {
+					log.Errorf("Error persisting claimed companion token hash: %v", err)
+				}
+			}
 		}
 		next.ServeHTTP(w, r)
 	})

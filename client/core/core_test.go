@@ -699,6 +699,12 @@ func (tdb *TDB) SetLanguage(lang string) error {
 func (tdb *TDB) Language() (string, error) {
 	return "en-US", nil
 }
+func (tdb *TDB) SetCompanionToken(token string) error {
+	return nil
+}
+func (tdb *TDB) CompanionToken() (string, error) {
+	return "", nil
+}
 
 func (tdb *TDB) NextMultisigKeyIndex(assetID uint32) (uint32, error) {
 	return 0, nil

@@ -343,8 +343,10 @@ func (c *TCore) RedeemGeocode(appPW, code []byte, msg string) (dex.Bytes, uint64
 	return nil, 0, nil
 }
 
-func (*TCore) SetLanguage(string) error { return nil }
-func (*TCore) Language() string         { return "en-US" }
+func (*TCore) SetLanguage(string) error             { return nil }
+func (*TCore) Language() string                     { return "en-US" }
+func (*TCore) SetCompanionToken(token string) error { return nil }
+func (*TCore) CompanionToken() (string, error)      { return "", nil }
 
 func (*TCore) TakeAction(assetID uint32, actionID string, actionB json.RawMessage) error { return nil }
 

@@ -156,6 +156,12 @@ type DB interface {
 	SetLanguage(lang string) error
 	// Language gets the language stored with SetLanguage.
 	Language() (string, error)
+	// SetCompanionToken stores the companion app auth token hash.
+	SetCompanionToken(token string) error
+	// CompanionToken retrieves the companion app auth token hash stored
+	// with SetCompanionToken. If no value has been stored, an empty
+	// string is returned without an error.
+	CompanionToken() (string, error)
 	// NextMultisigKeyIndex returns the next multisig key index and increments the
 	// stored value so that subsequent calls will always return a higher index.
 	NextMultisigKeyIndex(assetID uint32) (uint32, error)

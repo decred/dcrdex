@@ -7,6 +7,8 @@ import (
 	"context"
 	"crypto/elliptic"
 	crand "crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"crypto/tls"
 	"embed"
 	"encoding/hex"
@@ -74,6 +76,10 @@ const (
 	// site is the common prefix for the site resources with respect to this
 	// webserver package.
 	site = "site"
+	// companionTokenTTL is the time-to-live for an unclaimed companion
+	// token. If the companion app does not scan the QR code within this
+	// window the token is automatically revoked.
+	companionTokenTTL = 10 * time.Minute
 )
 
 var (
@@ -176,6 +182,8 @@ type clientCore interface {
 	ConfigureFundsMixer(appPW []byte, assetID uint32, enabled bool) error
 	SetLanguage(string) error
 	Language() string
+	SetCompanionToken(token string) error
+	CompanionToken() (string, error)
 	TakeAction(assetID uint32, actionID string, actionB json.RawMessage) error
 	RedeemGeocode(appPW, code []byte, msg string) (dex.Bytes, uint64, error)
 	BridgeFeesAndLimits(fromAssetID, toAssetID uint32, bridgeName string) (*core.BridgeFeesAndLimits, error)
@@ -297,6 +305,12 @@ type WebServer struct {
 	authMtx         sync.RWMutex
 	authTokens      map[string]bool
 	cachedPasswords map[string]*cachedPassword // cached passwords keyed by auth token
+
+	companionToken        string
+	companionTokenHash    string // hex(sha256(token)), persisted to DB
+	companionTokenExpiry  time.Time
+	companionTokenClaimed bool
+	companionExpiryTimer  *time.Timer
 
 	bondBufMtx sync.Mutex
 	bondBuf    map[uint32]valStamp
@@ -437,6 +451,17 @@ func New(cfg *Config) (*WebServer, error) {
 	}
 	s.lang.Store(lang)
 
+	// Restore a persisted companion token hash so the companion app
+	// stays paired across restarts. The raw token is not stored; it
+	// will be re-established when the companion app reconnects and
+	// presents its cookie or URL token.
+	if h, err := cfg.Core.CompanionToken(); err != nil {
+		log.Errorf("Error loading companion token hash: %v", err)
+	} else if h != "" {
+		s.companionTokenHash = h
+		s.companionTokenClaimed = true
+	}
+
 	if err := s.buildTemplates(lang); err != nil {
 		return nil, fmt.Errorf("error loading localized html templates: %v", err)
 	}
@@ -486,7 +511,6 @@ func New(cfg *Config) (*WebServer, error) {
 		web.Get(settingsRoute, s.handleSettings)
 
 		web.Get("/generateqrcode", s.handleGenerateQRCode)
-		web.Get("/generatecompanionappqrcode", s.handleGenerateCompanionAppQRCode)
 
 		web.Group(func(notInit chi.Router) {
 			notInit.Use(s.requireNotInit)
@@ -515,6 +539,7 @@ func New(cfg *Config) (*WebServer, error) {
 					webAuth.Get(walletLogRoute, s.handleWalletLogFile)
 					webAuth.With(proposalTokenCtx).Get("/proposal/{token}", s.handleProposal)
 					webAuth.Get(proposalsRoute, s.handleProposals)
+					webAuth.Get("/generatecompanionappqrcode", s.handleGenerateCompanionAppQRCode)
 				})
 			})
 
@@ -645,6 +670,7 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/pendingbridges", s.apiPendingBridges)
 			apiAuth.Post("/bridgehistory", s.apiBridgeHistory)
 			apiAuth.Post("/castvote", s.apiCastVote)
+			apiAuth.Post("/unpaircompanionapp", s.apiUnpairCompanionApp)
 		})
 	})
 
@@ -903,6 +929,17 @@ func prepareAddr(addr net.Addr) (string, bool) {
 	return addr.String(), false
 }
 
+// isOnionRequest returns true if the request was made through the Tor hidden
+// service.
+func (s *WebServer) isOnionRequest(r *http.Request) bool {
+	if s.onion == "" {
+		return false
+	}
+	// s.onion is "http://host.onion", strip the scheme to compare.
+	host := strings.TrimPrefix(s.onion, "http://")
+	return r.Host == host
+}
+
 // authorize creates, stores, and returns a new auth token to identify the user.
 // deauth should be used to invalidate tokens on logout.
 func (s *WebServer) authorize() string {
@@ -916,13 +953,83 @@ func (s *WebServer) authorize() string {
 	return token
 }
 
+// authorizeCompanion mints a new companion-app auth token, revoking any
+// previous one. The token is unclaimed until the companion app scans the
+// QR code and opens the URL. An unclaimed token expires after
+// companionTokenTTL.
+func (s *WebServer) authorizeCompanion() string {
+	b := make([]byte, 32)
+	crand.Read(b)
+	token := hex.EncodeToString(b)
+	zero(b)
+
+	s.authMtx.Lock()
+	// Revoke previous companion token.
+	if s.companionToken != "" {
+		delete(s.authTokens, s.companionToken)
+	}
+	// Stop any previous expiry timer.
+	if s.companionExpiryTimer != nil {
+		s.companionExpiryTimer.Stop()
+	}
+	s.authTokens[token] = true
+	s.companionToken = token
+	s.companionTokenHash = ""
+	s.companionTokenExpiry = time.Now().Add(companionTokenTTL)
+	s.companionTokenClaimed = false
+	s.companionExpiryTimer = time.AfterFunc(companionTokenTTL, func() {
+		s.authMtx.Lock()
+		defer s.authMtx.Unlock()
+		if s.companionToken == token && !s.companionTokenClaimed {
+			delete(s.authTokens, token)
+			s.companionToken = ""
+			s.companionTokenExpiry = time.Time{}
+			s.companionExpiryTimer = nil
+		}
+	})
+	s.authMtx.Unlock()
+
+	// Clear any previously persisted token. The new token is only
+	// persisted when claimed (see tokenAuthMiddleware) so that a
+	// crash before claim doesn't leave a stale unclaimed token that
+	// gets treated as claimed on restart.
+	if err := s.core.SetCompanionToken(""); err != nil {
+		log.Errorf("Error clearing persisted companion token: %v", err)
+	}
+
+	return token
+}
+
 // deauth invalidates all current auth tokens. All existing sessions will need
-// to login again.
+// to login again. A claimed companion token is preserved so that the
+// companion app stays paired across logout/login cycles.
 func (s *WebServer) deauth() {
+	var clearDB bool
 	s.authMtx.Lock()
 	s.authTokens = make(map[string]bool)
 	s.cachedPasswords = make(map[string]*cachedPassword)
+	// Preserve a claimed companion token so the pairing survives logout.
+	if s.companionToken != "" && s.companionTokenClaimed {
+		s.authTokens[s.companionToken] = true
+	} else if s.companionToken != "" {
+		// Discard any unclaimed (pending) companion token and clear
+		// the DB so a stale token doesn't load on restart.
+		if s.companionExpiryTimer != nil {
+			s.companionExpiryTimer.Stop()
+			s.companionExpiryTimer = nil
+		}
+		s.companionToken = ""
+		s.companionTokenHash = ""
+		s.companionTokenClaimed = false
+		s.companionTokenExpiry = time.Time{}
+		clearDB = true
+	}
 	s.authMtx.Unlock()
+	if clearDB {
+		if err := s.core.SetCompanionToken(""); err != nil {
+			log.Errorf("Error clearing companion token from DB: %v", err)
+		}
+	}
 }
 
 // getAuthToken checks the request for an auth token cookie and returns it.
@@ -959,17 +1066,75 @@ func getPWKey(r *http.Request) ([]byte, error) {
 	}
 }
 
+// restoreCompanionFromHash checks whether token hashes to the persisted
+// companion token hash. If so it re-establishes the companion token in
+// memory so subsequent requests use the fast path. This is the recovery
+// path after a server restart when the raw token is no longer in memory
+// but the companion app still holds it. Must be called without authMtx.
+func (s *WebServer) restoreCompanionFromHash(token string) bool {
+	h := sha256.Sum256([]byte(token))
+	tokenHash := hex.EncodeToString(h[:])
+
+	s.authMtx.Lock()
+	defer s.authMtx.Unlock()
+	if s.companionTokenHash == "" || !s.companionTokenClaimed {
+		return false
+	}
+	if subtle.ConstantTimeCompare([]byte(s.companionTokenHash), []byte(tokenHash)) != 1 {
+		return false
+	}
+	// Re-establish the companion token in memory.
+	s.authTokens[token] = true
+	s.companionToken = token
+	return true
+}
+
 // isAuthed checks if the incoming request is from an authorized user/device.
 // Requires the auth token cookie to be set in the request and for the token
-// to match `WebServer.validAuthToken`.
+// to match `WebServer.validAuthToken`. Requests through the Tor hidden
+// service also require an active companion app pairing.
 func (s *WebServer) isAuthed(r *http.Request) bool {
 	authToken := getAuthToken(r)
 	if authToken == "" {
 		return false
 	}
+	onion := s.isOnionRequest(r)
+
+	// Single read-lock section for the common case.
 	s.authMtx.RLock()
-	defer s.authMtx.RUnlock()
-	return s.authTokens[authToken]
+	ok := s.authTokens[authToken]
+	needsExpiryCheck := ok && authToken == s.companionToken && !s.companionTokenClaimed
+	paired := s.companionToken != "" && s.companionTokenClaimed
+	s.authMtx.RUnlock()
+
+	if !ok {
+		// Try to restore the companion token from the persisted
+		// hash (e.g. after a server restart).
+		return s.restoreCompanionFromHash(authToken)
+	}
+	// Reject authenticated onion requests when no companion app is paired.
+	if onion && !paired {
+		return false
+	}
+	if !needsExpiryCheck {
+		return true
+	}
+	// Slow path: write lock to potentially revoke an expired unclaimed
+	// companion token.
+	s.authMtx.Lock()
+	defer s.authMtx.Unlock()
+	// Re-check under write lock.
+	if !s.authTokens[authToken] {
+		return false
+	}
+	if authToken == s.companionToken && !s.companionTokenClaimed {
+		if time.Now().After(s.companionTokenExpiry) {
+			delete(s.authTokens, authToken)
+			s.companionToken = ""
+			return false
+		}
+	}
+	return true
 }
 
 // getCachedPassword retrieves the cached password for the user identified by authToken and

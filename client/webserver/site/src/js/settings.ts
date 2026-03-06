@@ -151,15 +151,39 @@ export default class SettingsPage extends BasePage {
     })
 
     Doc.bind(page.companionAppBtn, 'click', () => {
+      if (app().companionAppPaired) {
+        // Already paired. Show the paired section without generating a
+        // new QR code, which would revoke the existing pairing.
+        Doc.hide(page.companionAppInfo)
+        Doc.hide(page.companionAppTorEnabled)
+        Doc.hide(page.companionAppTorDisabled)
+      } else {
+        Doc.show(page.companionAppInfo)
+        if (app().onionUrl !== '') {
+          Doc.show(page.companionAppTorEnabled)
+          Doc.hide(page.companionAppTorDisabled)
+          page.companionAppQrcode.src = '/generatecompanionappqrcode'
+        } else {
+          Doc.hide(page.companionAppTorEnabled)
+          Doc.show(page.companionAppTorDisabled)
+        }
+      }
+      Doc.setVis(app().companionAppPaired, page.companionAppPairedSection)
+      this.showForm(page.companionAppForm)
+    })
+
+    Doc.bind(page.unpairCompanionApp, 'click', async () => {
+      const res = await postJSON('/api/unpaircompanionapp', {})
+      if (!app().checkResponse(res)) return
+      Doc.hide(page.companionAppPairedSection)
+      app().companionAppPaired = false
+      Doc.show(page.companionAppInfo)
       if (app().onionUrl !== '') {
         Doc.show(page.companionAppTorEnabled)
-        Doc.hide(page.companionAppTorDisabled)
         page.companionAppQrcode.src = '/generatecompanionappqrcode'
       } else {
-        Doc.hide(page.companionAppTorEnabled)
         Doc.show(page.companionAppTorDisabled)
       }
-      this.showForm(page.companionAppForm)
     })
 
     Doc.bind(page.accountFile, 'change', () => this.onAccountFileChange())

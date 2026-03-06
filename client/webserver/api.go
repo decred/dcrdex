@@ -1100,6 +1100,28 @@ func (s *WebServer) apiLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, response)
 }
 
+// apiUnpairCompanionApp removes the companion app pairing.
+func (s *WebServer) apiUnpairCompanionApp(w http.ResponseWriter, r *http.Request) {
+	if err := s.core.SetCompanionToken(""); err != nil {
+		s.writeAPIError(w, fmt.Errorf("error clearing companion token: %w", err))
+		return
+	}
+	s.authMtx.Lock()
+	if s.companionToken != "" {
+		delete(s.authTokens, s.companionToken)
+		s.companionToken = ""
+		s.companionTokenHash = ""
+		s.companionTokenClaimed = false
+		s.companionTokenExpiry = time.Time{}
+		if s.companionExpiryTimer != nil {
+			s.companionExpiryTimer.Stop()
+			s.companionExpiryTimer = nil
+		}
+	}
+	s.authMtx.Unlock()
+	writeJSON(w, simpleAck())
+}
+
 // apiGetBalance handles the 'balance' API request.
 func (s *WebServer) apiGetBalance(w http.ResponseWriter, r *http.Request) {
 	form := &struct {
@@ -1548,6 +1570,17 @@ func (s *WebServer) apiPreOrder(w http.ResponseWriter, r *http.Request) {
 // apiActuallyLogin logs the user in. login form private data is expected to be
 // cleared by the caller.
 func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login *loginForm) error {
+	// Only allow login from the onion address when a companion app is
+	// actively paired. This prevents an unpaired companion app from
+	// re-authenticating with saved credentials.
+	if s.isOnionRequest(r) {
+		s.authMtx.RLock()
+		paired := s.companionToken != "" && s.companionTokenClaimed
+		s.authMtx.RUnlock()
+		if !paired {
+			return errors.New("companion app is not paired")
+		}
+	}
 	pass, err := s.resolvePass(login.Pass, r)
 	defer zero(pass)
 	if err != nil {
@@ -1585,22 +1618,28 @@ func (s *WebServer) apiUser(w http.ResponseWriter, r *http.Request) {
 		mmStatus = s.mm.Status()
 	}
 
+	s.authMtx.RLock()
+	paired := s.companionToken != "" && s.companionTokenClaimed
+	s.authMtx.RUnlock()
+
 	response := struct {
-		User     *core.User `json:"user"`
-		Lang     string     `json:"lang"`
-		Langs    []string   `json:"langs"`
-		Inited   bool       `json:"inited"`
-		OK       bool       `json:"ok"`
-		OnionUrl string     `json:"onionUrl"`
-		MMStatus *mm.Status `json:"mmStatus"`
+		User               *core.User `json:"user"`
+		Lang               string     `json:"lang"`
+		Langs              []string   `json:"langs"`
+		Inited             bool       `json:"inited"`
+		OK                 bool       `json:"ok"`
+		OnionUrl           string     `json:"onionUrl"`
+		MMStatus           *mm.Status `json:"mmStatus"`
+		CompanionAppPaired bool       `json:"companionAppPaired"`
 	}{
-		User:     u,
-		Lang:     s.lang.Load().(string),
-		Langs:    s.langs,
-		Inited:   s.core.IsInitialized(),
-		OK:       true,
-		OnionUrl: s.onion,
-		MMStatus: mmStatus,
+		User:               u,
+		Lang:               s.lang.Load().(string),
+		Langs:              s.langs,
+		Inited:             s.core.IsInitialized(),
+		OK:                 true,
+		OnionUrl:           s.onion,
+		MMStatus:           mmStatus,
+		CompanionAppPaired: paired,
 	}
 	writeJSON(w, response)
 }
