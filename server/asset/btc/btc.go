@@ -1644,21 +1644,26 @@ var freeFeeSources = []*feeratefetcher.SourceConfig{
 			return uint64(math.Round(float64(res.MediumPerKB) / 1e3)), 0, nil
 		},
 	},
-	{ // undocumented
-		Name:   "btc.com",
+	{ // https://www.bitgo.com/api/v2/btc/tx/fee
+		Name:   "bitgo.com",
 		Rank:   2,
-		Period: time.Minute * 5,
+		Period: time.Minute * 3,
 		F: func(ctx context.Context) (rate uint64, errDelay time.Duration, err error) {
-			const uri = "https://btc.com/service/fees/distribution"
+			const uri = "https://www.bitgo.com/api/v2/btc/tx/fee"
 			var res struct {
-				RecommendedFees struct {
-					OneBlockFee uint64 `json:"one_block_fee"`
-				} `json:"fees_recommended"`
+				FeeByBlockTarget map[string]uint64 `json:"feeByBlockTarget"`
 			}
 			if err := dexnet.Get(ctx, uri, &res); err != nil {
 				return 0, time.Minute * 10, err
 			}
-			return res.RecommendedFees.OneBlockFee, 0, nil
+			if res.FeeByBlockTarget == nil {
+				return 0, time.Minute * 10, errors.New("no estimates returned")
+			}
+			r, found := res.FeeByBlockTarget["1"]
+			if !found {
+				return 0, time.Minute * 10, errors.New("no 1-block estimate returned")
+			}
+			return uint64(math.Round(float64(r) / 1e3)), 0, nil
 		},
 	},
 	{ // undocumented. source is somehow related to blockchain.com
@@ -1675,30 +1680,6 @@ var freeFeeSources = []*feeratefetcher.SourceConfig{
 				return 0, time.Minute * 10, err
 			}
 			return res.Priority, 0, nil
-		},
-	},
-	{
-		// undocumented. Probably just estimatesmartfee underneath
-		Name:   "bitcoinfees.net",
-		Rank:   2,
-		Period: time.Minute * 3,
-		F: func(ctx context.Context) (rate uint64, errDelay time.Duration, err error) {
-			const uri = "https://bitcoinfees.net/api.json"
-			var res struct {
-				FeePerKBByBlockTarget map[string]uint64 `json:"fee_by_block_target"`
-			}
-			if err := dexnet.Get(ctx, uri, &res); err != nil {
-				return 0, time.Minute * 10, err
-			}
-			if res.FeePerKBByBlockTarget == nil {
-				return 0, time.Minute * 10, errors.New("no estimates returned")
-			}
-			// Using 30 minutes estimate. There is also a 60, 120, and higher
-			r, found := res.FeePerKBByBlockTarget["1"]
-			if !found {
-				return 0, time.Minute * 10, errors.New("no 1-block estimate returned")
-			}
-			return uint64(math.Round(float64(r) / 1e3)), 0, nil
 		},
 	},
 	{
