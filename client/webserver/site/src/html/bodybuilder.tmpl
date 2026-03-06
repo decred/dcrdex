@@ -22,6 +22,14 @@
     </a>
   </div>
   {{end}}
+  <div class="d-hide p-2 d-flex justify-content-center align-items-center new-user-banner" id="newUserBanner">
+    <span class="ico-info fs14 me-1"></span>
+    <span class="fs15">[[[new_user_banner_msg]]]</span>
+    <a href="https://github.com/decred/dcrdex/wiki/Home#new-users" target="_blank" rel="noopener noreferrer" class="fs15 ps-2 me-3">
+      [[[Learn More]]]
+    </a>
+    <span class="ico-cross fs12 pointer" id="dismissNewUserBanner"></span>
+  </div>
   <div class="popup-notes d-hide" id="popupNotes">
     <span data-tmpl="note" class="fs15">
       <div class="note-indicator d-inline-block" data-tmpl="indicator"></div>

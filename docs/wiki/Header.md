@@ -1,6 +1,6 @@
 <a id="top"></a>
 
-_Last updated for Bison Wallet v1.0.0._
+_Last updated for Bison Wallet v1.0.6._
 
 ## Contents
 
@@ -22,15 +22,15 @@ the different features Bison Wallet offers.
 
 # Notifications Panel
 
-The notifications' panel can be opened by clicking the notifications icon
+The notifications panel can be opened by clicking the notifications icon
 on the [header](#top).
 
 <img src="./images/using-bison-wallet/header-notifications.png" width="400" alt="">
 
 ## Notifications Tab
 
-The notifications tab displays important updates, alerts, and other actionable information related
-your wallets, transaction and DCRDEX accounts.
+The notifications tab displays important updates, alerts, and other actionable information related to
+your wallets, transactions, and DCRDEX accounts.
 
 <img src="./images/using-bison-wallet/notifications-note.png" width="400" alt="">
 

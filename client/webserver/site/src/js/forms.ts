@@ -330,10 +330,13 @@ export class NewWalletForm {
     const guideLink = walletDef.guidelink
     const configOpts = walletDef.configopts || []
     // If a config represents a wallet's birthday, we update the default
-    // selection to the current date if this installation of the client
-    // generated a seed.
+    // selection to the current date if the seed was recently generated
+    // (within the last minute), indicating a fresh install rather than a
+    // restoration from an existing seed.
+    const recentSeed = app().seedGenTime > 0 &&
+      (Date.now() / 1000 - app().seedGenTime) < 60
     configOpts.map((opt) => {
-      if (opt.isBirthdayConfig && app().seedGenTime > 0) {
+      if (opt.isBirthdayConfig && recentSeed) {
         opt.default = toUnixDate(new Date())
       }
       return opt

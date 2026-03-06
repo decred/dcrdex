@@ -1,6 +1,6 @@
 <a id="top"/>
 
-_Last updated for Bison Wallet v1.0.0._
+_Last updated for Bison Wallet v1.0.6._
 
 ## Contents
 
@@ -88,7 +88,7 @@ section of this wiki.
 
 ## Your Orders
 
-This section show your recent orders for the selected market.
+This section shows your recent orders for the selected market.
 
 <img src="./images/using-bison-wallet/trade-yourOrders-1.png" width="1200" alt="">
 

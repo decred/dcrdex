@@ -13,10 +13,13 @@ export async function requestJSON (method: string, addr: string, reqBody?: any):
     const obj = await response.json()
     obj.requestSuccessful = true
     return obj
-  } catch (response) {
-    response.requestSuccessful = false
-    response.msg = await response.text()
-    return response
+  } catch (response: any) {
+    if (response && typeof response.text === 'function') {
+      response.requestSuccessful = false
+      response.msg = await response.text()
+      return response
+    }
+    return { requestSuccessful: false, msg: String(response) }
   }
 }
 

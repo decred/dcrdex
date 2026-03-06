@@ -1,6 +1,6 @@
 <a id="top"/>
 
-_Last updated for Bison Wallet v1.0.0._
+_Last updated for Bison Wallet v1.0.6._
 
 ## Contents
 
@@ -67,7 +67,7 @@ follows once it has been submitted to the DCRDEX server.
 DCRDEX does not collect any fees on the trades, but since all swap transactions
 occur on-chain and are created directly by the users, they will pay network
 transaction fees. Transaction fees vary based on how orders are matched and
-network activity. fee rate estimates are shown during order submission, and the realized
+network activity. Fee rate estimates are shown during order submission, and the realized
 fees are displayed on the [order details](#order-details) view once the trade settles.
 
 The fee details screen indicates the best and worst-case settlement fee rate estimates
@@ -273,11 +273,11 @@ the relevant blockchain explorers for each associated transaction.
 - **Maker Swap:** Swap transaction broadcast by the maker.
 - **Taker Swap:** Swap transaction broadcast by the taker.
 - **Maker Redemption:** Redemption transaction broadcast by the maker.
-- **Taker Redemption::** Redemption transaction broadcast by the taker.
+- **Taker Redemption:** Redemption transaction broadcast by the taker.
 - **Funding Coins:** The UTXO or address with the funding for this match.
 
 ---
 
-Next Section: [Managing your DCRDEX Accounts](Managing-your-DCRDEX-Accounts)
+Next Section: [Market Making](Market-Making)
 
 [⤴ Back to Top](#top)

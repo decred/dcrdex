@@ -1,6 +1,6 @@
 <a id="top"></a>
 
-_Last updated for Bison Wallet v1.0.0._
+_Last updated for Bison Wallet v1.0.6._
 
 ## Contents
 
@@ -24,7 +24,7 @@ You will use this password to perform all future security-sensitive client opera
 # Restore Existing Seed
 
 From the `New Password` prompt, you can also restore an existing application seed by clicking
-in the `Restoration Seed` button and entering the seed backup phrase in the 15 word format.
+in the `Restoration Seed` button and entering the seed backup phrase in the 15-word format.
 
 <img src="./images/setup-guide/restore-seed.png" width="1200" alt="">
 

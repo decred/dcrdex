@@ -1,8 +1,8 @@
 <a id="top"></a>
 
-_Last updated for Bison Wallet v1.0.0._
+_Last updated for Bison Wallet v1.0.6._
 
-This guide covers features and functions which are available in Bison Wallet. it assumes you
+This guide covers features and functions which are available in Bison Wallet. It assumes you
 have already set up a Bison Wallet using the [Getting Started Guide](Getting-Started).
 
 - [Header](Header)
@@ -36,9 +36,14 @@ have already set up a Bison Wallet using the [Getting Started Guide](Getting-Sta
   - [Placing an Order](Order-Management#placing-an-order)
     - [Fee Details](Order-Management#fee-details)
     - [Lot Size](Order-Management#lot-size)
-    - [Trade Execution](Order-Management#trade-execution)
+  - [Trade Execution](Order-Management#trade-execution)
   - [Order History](Order-Management#order-history)
   - [Order Details](Order-Management#order-details)
+- [Market Making](Market-Making)
+  - [Overview](Market-Making#overview)
+  - [Bot Types](Market-Making#bot-types)
+  - [Creating a Bot](Market-Making#creating-a-bot)
+  - [Managing Bots](Market-Making#managing-bots)
 - [Managing your DCRDEX Accounts](Managing-your-DCRDEX-Accounts)
   - [Changing Trading Tier](Managing-your-DCRDEX-Accounts#changing-trading-tier)
   - [Reputation Score](Managing-your-DCRDEX-Accounts#reputation-score)
@@ -52,6 +57,7 @@ have already set up a Bison Wallet using the [Getting Started Guide](Getting-Sta
     - [Recovery](Troubleshooting-Problems#recovery)
     - [Forced Rescan](Troubleshooting-Problems#forced-rescan)
     - [Full Reinitialize](Troubleshooting-Problems#full-reinitialize)
+    - [Private Key Export](Troubleshooting-Problems#private-key-export)
 
 ---
 

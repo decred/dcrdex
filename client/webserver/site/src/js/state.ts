@@ -22,6 +22,7 @@ export default class State {
   static lastCandleDurationLK = 'lastCandleDuration'
   static localeSpecsKey = 'localeSpecsLK'
   static localeKey = 'localeLK'
+  static newUserBannerDismissedLK = 'newUserBannerDismissed'
 
   static setCookie (cname: string, cvalue: string) {
     const d = new Date()

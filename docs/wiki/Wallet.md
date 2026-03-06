@@ -1,6 +1,6 @@
 <a id="top"></a>
 
-_Last updated for Bison Wallet v1.0.0._
+_Last updated for Bison Wallet v1.0.6._
 
 ## Contents
 
@@ -71,7 +71,7 @@ wallets provide fast, lightweight functionality with minimal resource usage, whi
 privacy by limiting data exposure during transaction verification.
 
 For Ethereum Virtual Machine (EVM) compatible assets, such as Ethereum and Polygon, Bison Wallet leverages RPC
-Providers. which serve as the wallet's gateway to the respective blockchain networks, read more about
+providers, which serve as the wallet's gateway to the respective blockchain networks. Read more about
 [RPC Providers](#rpc-providers-for-evm-compatible-networks) in their respective section of this wiki.
 
 Creating a new native wallet is simple—no additional parameters are needed. Just click the **Create** button in the
@@ -198,7 +198,7 @@ Send and Receive functionality.
 
 This is where you can generate wallet addresses to give to other people and receive funds into Bison Wallet.
 Addresses for UTXO-based assets like Bitcoin, Decred and Litecoin can be used as many times as you want,
-but for privacy reasons its best to generate a new one for each transaction.
+but for privacy reasons it's best to generate a new one for each transaction.
 
 <img src="./images/using-bison-wallet/wallets-receive.png" width="1200" alt="">
 
@@ -211,7 +211,7 @@ address into the text box and the amount of funds you wish to send.
   balance in the wallet.
 - **Max Estimated Send:** the estimated amount that will be received if you withdraw your current balance
   with 'Subtract fees from amount sent' checked.
-- **Max Estiamted Send Fee:** the estimated on-chain fee for the specified transaction.
+- **Max Estimated Send Fee:** the estimated on-chain fee for the specified transaction.
 
 <img src="./images/using-bison-wallet/wallets-send.png" width="1200" alt="">
 
@@ -261,7 +261,7 @@ over the information icon.
 - **Change Account Name:** dcrwallet change account name. This and the 'Temporary Trading Account' should only be
   set if mixing is enabled on the wallet. If set, deposit addresses will be from this account and will
   be mixed before being available to trade.
-- **Temproary Trading Account:** dcrwallet account to temporarily store split tx outputs or change from chained swaps in
+- **Temporary Trading Account:** dcrwallet account to temporarily store split tx outputs or change from chained swaps in
   multi-lot orders. This should only be set if 'Change Account Name' is set.
 - **RPC Username:** dcrwallet's 'username' setting for JSON-RPC.
 - **RPC Password:** dcrwallet's 'password' setting for JSON-RPC.
@@ -284,7 +284,7 @@ over the information icon.
   before you can use the wallet again.
 - **Export Wallet:** Export the wallet's private key for recovery on another Ethereum wallet. Using an externally
   restored wallet while you have active trades running in Bison Wallet could result in failed trades and lost funds.
-  It is recommended that you **do not** export your wallet unless you are an experienced user and you know what are doing.
+  It is recommended that you **do not** export your wallet unless you are an experienced user and you know what you are doing.
 - **Disable Wallet:** This function will disable the wallet, it will not be connected to when you start Bison Wallet
   and cannot be used until it is re-enabled. This will also disable all token wallets that depend on this wallet.
 - **Manage Peers:** Allows adding/removing of network peers.
@@ -305,7 +305,7 @@ The fee status section contains summary information around the fees associated w
 # Transaction History
 
 This section shows a list of all transactions that have occurred involving this wallet, including send, receive
-bonds, splits and mixes.
+bonds, splits, and mixes.
 
 <img src="./images/using-bison-wallet/wallets-txHistory.png" width="1200" alt="">
 

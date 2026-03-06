@@ -1,6 +1,6 @@
 <a id="top"/>
 
-_Last updated for Bison Wallet v1.0.0._
+_Last updated for Bison Wallet v1.0.6._
 
 > [!CAUTION]
 > Before starting any attempt at fixing a broken wallet, ensure you have your correct
@@ -45,7 +45,7 @@ There are different log files which may be reviewed when troubleshooting a probl
 ## Rescanning
 
 >[!NOTE]
-> This section of the is only applicable to Decred, Bitcoin and Litecoin wallets.
+> This section is only applicable to Decred, Bitcoin and Litecoin wallets.
 
 In rare circumstances, your wallet may need to rescan the blockchain for missed transactions.
 This is a process that can take several hours, depending on the number of transactions in the wallet.
@@ -60,10 +60,10 @@ You will see a message with a green check icon if the rescan was successfully in
 ## Recovery
 
 >[!NOTE]
-> This section of the is only applicable to Decred, Bitcoin and Litecoin wallets.
+> This section is only applicable to Decred, Bitcoin and Litecoin wallets.
 
 If a neutrino wallet is corrupted, the [dexc.log](#location-of-application-and-log-files) may have a message
-similiar to:
+similar to:
 
 ``
 [ERR] CORE: Unable to connect to btc wallet (start and sync wallets BEFORE starting dex!):
@@ -143,7 +143,7 @@ Once you enter your password, your wallet's private key will be revealed.
 <img src="./images/using-bison-wallet/wallets-settings-exported.png" width="400" alt="">
 
 > [!NOTE]
-> The following steps are a guide for importing the raw private key into MetaMask as an exmaple.
+> The following steps are a guide for importing the raw private key into MetaMask as an example.
 Please note that some steps may vary if you are using a different wallet.
 
 Accounts can be only imported by private key if MetaMask has already been initialized. If this is your first time installing MetaMask, create a new wallet and secret recovery phrase. Then, to import your Bison Wallet account into MetaMask, follow the steps below:
