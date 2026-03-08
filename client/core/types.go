@@ -170,6 +170,14 @@ type DeployContractResult struct {
 	Error        string `json:"error,omitempty"`
 }
 
+// GaslessRedeemCalldataResult is the core result for emergency gasless redeem
+// calldata generation.
+type GaslessRedeemCalldataResult struct {
+	AssetID         uint32    `json:"assetID"`
+	ContractAddress string    `json:"contractAddress"`
+	Calldata        dex.Bytes `json:"calldata"`
+}
+
 // ExtensionModeConfig is configuration for running core in extension mode,
 // primarily for restricting certain wallet reconfiguration options.
 type ExtensionModeConfig struct {

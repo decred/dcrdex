@@ -288,14 +288,16 @@ func ParseRedeemDataV1(calldata []byte) (common.Address, map[[SecretHashSize]byt
 
 // SignedRedemptionV1 holds the decoded fields from redeemWithSignature calldata.
 type SignedRedemptionV1 struct {
-	Redemptions    map[[SecretHashSize]byte]*RedemptionV1
-	Participant    common.Address
-	FeeRecipient   common.Address
-	RelayerFee     *big.Int
-	Nonce          *big.Int
-	Deadline       *big.Int
-	TotalRedeemed  *big.Int
-	NumRedemptions int
+	Redemptions        map[[SecretHashSize]byte]*RedemptionV1
+	OrderedRedemptions []swapv1.ETHSwapRedemption
+	Participant        common.Address
+	FeeRecipient       common.Address
+	RelayerFee         *big.Int
+	Nonce              *big.Int
+	Deadline           *big.Int
+	Signature          []byte
+	TotalRedeemed      *big.Int
+	NumRedemptions     int
 }
 
 // ParseSignedRedeemDataV1 parses redeemWithSignature calldata and returns a
@@ -338,12 +340,17 @@ func ParseSignedRedeemDataV1(calldata []byte) (*SignedRedemptionV1, error) {
 	participant := redemptions[0].V.Participant
 
 	redeemMap := make(map[[SecretHashSize]byte]*RedemptionV1, len(redemptions))
+	orderedRedeems := make([]swapv1.ETHSwapRedemption, 0, len(redemptions))
 	totalRedeemed := new(big.Int)
 	for _, r := range redemptions {
 		if r.V.Participant != participant {
 			return nil, fmt.Errorf("participant mismatch in redemptions")
 		}
 		totalRedeemed.Add(totalRedeemed, r.V.Value)
+		orderedRedeems = append(orderedRedeems, swapv1.ETHSwapRedemption{
+			V:      swapv1.ETHSwapVector(r.V),
+			Secret: r.Secret,
+		})
 		redeemMap[r.V.SecretHash] = &RedemptionV1{
 			Contract: &SwapVector{
 				From:       r.V.Initiator,
@@ -376,15 +383,22 @@ func ParseSignedRedeemDataV1(calldata []byte) (*SignedRedemptionV1, error) {
 		return nil, fmt.Errorf("unexpected deadline type %T", args[4].value)
 	}
 
+	signature, ok := args[5].value.([]byte)
+	if !ok {
+		return nil, fmt.Errorf("unexpected signature type %T", args[5].value)
+	}
+
 	return &SignedRedemptionV1{
-		Redemptions:    redeemMap,
-		Participant:    participant,
-		FeeRecipient:   feeRecipient,
-		RelayerFee:     relayerFee,
-		Nonce:          nonce,
-		Deadline:       deadline,
-		TotalRedeemed:  totalRedeemed,
-		NumRedemptions: len(redemptions),
+		Redemptions:        redeemMap,
+		OrderedRedemptions: orderedRedeems,
+		Participant:        participant,
+		FeeRecipient:       feeRecipient,
+		RelayerFee:         relayerFee,
+		Nonce:              nonce,
+		Deadline:           deadline,
+		Signature:          signature,
+		TotalRedeemed:      totalRedeemed,
+		NumRedemptions:     len(redemptions),
 	}, nil
 }
 

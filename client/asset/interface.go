@@ -1263,6 +1263,33 @@ type GaslessRedeemer interface {
 	GaslessRedeem(ctx context.Context, redeems *RedeemForm) (ins []dex.Bytes, out Coin, feesPaid uint64, submitted bool, err error)
 }
 
+// GaslessRedeemCalldata is the minimal information needed for a third party to
+// submit an emergency gasless redeem transaction.
+type GaslessRedeemCalldata struct {
+	ContractAddress string
+	Calldata        dex.Bytes
+}
+
+// GaslessRedeemValidation is returned when gasless redeem calldata parses,
+// targets the current wallet as fee recipient, and successfully simulates.
+type GaslessRedeemValidation struct {
+	FeeRecipient    string
+	Nonce           string
+	Deadline        uint64
+	RelayerFee      string
+	GasEstimate     uint64
+	EstimatedTxCost string
+	Profitable      bool
+}
+
+// EmergencyGaslessRedeemer is implemented by wallets that can build, validate,
+// and submit gasless redeem calldata outside the normal relay flow.
+type EmergencyGaslessRedeemer interface {
+	GaslessRedeemCalldata(ctx context.Context, form *RedeemForm, relayerAddress string) (*GaslessRedeemCalldata, error)
+	ValidateGaslessRedeemCalldata(ctx context.Context, contractAddress string, calldata []byte) (*GaslessRedeemValidation, error)
+	SubmitGaslessRedeemCalldata(ctx context.Context, contractAddress string, calldata []byte) (dex.Bytes, error)
+}
+
 // LiveReconfigurer is a wallet that can possibly handle a reconfiguration
 // without the need for re-initialization.
 type LiveReconfigurer interface {

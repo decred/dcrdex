@@ -145,6 +145,8 @@ type testNode struct {
 	sentTxs                int
 	sendTxTx               *types.Transaction
 	sendTxErr              error
+	lastSendTo             *common.Address
+	lastSendData           []byte
 	estimateGasResult      uint64
 	estimateGasErr         error
 	simBackend             bind.ContractBackend
@@ -277,6 +279,13 @@ func (n *testNode) signHash(hash []byte) (sig, pubKey []byte, err error) {
 
 func (n *testNode) sendTransaction(ctx context.Context, txOpts *bind.TransactOpts, to *common.Address, data []byte, filts ...acceptabilityFilter) (*types.Transaction, error) {
 	n.sentTxs++
+	if to != nil {
+		addr := *to
+		n.lastSendTo = &addr
+	} else {
+		n.lastSendTo = nil
+	}
+	n.lastSendData = append(n.lastSendData[:0], data...)
 	return n.sendTxTx, n.sendTxErr
 }
 
@@ -3964,6 +3973,206 @@ func TestGaslessRedeem(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func makeEmergencySignedRedeemCalldata(t *testing.T, signer *testNode, participant, feeRecipient common.Address,
+	digest common.Hash, nonce, deadline, relayerFee *big.Int) ([]byte, []swapv1.ETHSwapRedemption) {
+	t.Helper()
+
+	redemptions := []swapv1.ETHSwapRedemption{{
+		V: swapv1.ETHSwapVector{
+			SecretHash:      randomHash(),
+			Value:           big.NewInt(1),
+			Initiator:       common.HexToAddress("0x0000000000000000000000000000000000000001"),
+			RefundTimestamp: 1,
+			Participant:     participant,
+		},
+		Secret: [32]byte{1},
+	}}
+	sig, _, err := signer.signHash(digest.Bytes())
+	if err != nil {
+		t.Fatalf("signHash error: %v", err)
+	}
+	calldata, err := dexeth.ABIs[1].Pack("redeemWithSignature", redemptions, feeRecipient, relayerFee, nonce, deadline, sig)
+	if err != nil {
+		t.Fatalf("abi.Pack error: %v", err)
+	}
+	return calldata, redemptions
+}
+
+func TestEmergencyGaslessRedeemCalldataUsesOnChainNonce(t *testing.T) {
+	w, eth, node, shutdown := tassetWallet(BipID)
+	defer shutdown()
+
+	ethWallet := w.(*ETHWallet)
+	contractAddr := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	eth.versionedContracts = map[uint32]common.Address{
+		1: contractAddr,
+	}
+
+	value := uint64(1e9)
+	secret := encode.RandomBytes(32)
+	secretHash := sha256.Sum256(secret)
+	swapVector := &dexeth.SwapVector{
+		From:       common.Address{},
+		To:         common.Address{},
+		Value:      big.NewInt(int64(value)),
+		SecretHash: secretHash,
+		LockTime:   0,
+	}
+	node.tContractor.swapMap[secretHash] = &dexeth.SwapState{
+		State: dexeth.SSInitiated,
+		Value: dexeth.GweiToWei(value),
+	}
+	var redeemSecret [32]byte
+	copy(redeemSecret[:], secret)
+	node.signedRedeemContractor.redemptions = []swapv1.ETHSwapRedemption{{
+		V: swapv1.ETHSwapVector{
+			SecretHash:      swapVector.SecretHash,
+			Value:           swapVector.Value,
+			Initiator:       swapVector.From,
+			RefundTimestamp: swapVector.LockTime,
+			Participant:     eth.addr,
+		},
+		Secret: redeemSecret,
+	}}
+	node.signedRedeemContractor.calldata = []byte{0xde, 0xad, 0xbe, 0xef}
+	node.signedRedeemContractor.digest = randomHash()
+	node.signedRedeemContractor.nonce = big.NewInt(17)
+
+	result, err := ethWallet.GaslessRedeemCalldata(t.Context(), &asset.RedeemForm{
+		Redemptions: []*asset.Redemption{{
+			Spends: &asset.AuditInfo{
+				Contract:   dexeth.EncodeContractData(1, swapVector.Locator()),
+				SecretHash: secretHash[:],
+				Coin: &coin{
+					txHash: randomHash(),
+					value:  value,
+				},
+			},
+			Secret: secret,
+		}},
+	}, "0x1234567890abcdef1234567890abcdef12345678")
+	if err != nil {
+		t.Fatalf("GaslessRedeemCalldata error: %v", err)
+	}
+	if result.ContractAddress != contractAddr.String() {
+		t.Fatalf("wrong contract address %s", result.ContractAddress)
+	}
+	if !bytes.Equal(result.Calldata, node.signedRedeemContractor.calldata) {
+		t.Fatalf("wrong calldata %x", result.Calldata)
+	}
+	if node.signedRedeemContractor.lastNonce == nil || node.signedRedeemContractor.lastNonce.Cmp(big.NewInt(17)) != 0 {
+		t.Fatalf("expected on-chain nonce 17, got %v", node.signedRedeemContractor.lastNonce)
+	}
+}
+
+func TestValidateGaslessRedeemCalldata(t *testing.T) {
+	w, eth, node, shutdown := tassetWallet(BipID)
+	defer shutdown()
+
+	ethWallet := w.(*ETHWallet)
+	contractAddr := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	eth.versionedContracts = map[uint32]common.Address{
+		1: contractAddr,
+	}
+
+	digest := randomHash()
+	nonce := big.NewInt(21)
+	deadline := big.NewInt(time.Now().Add(time.Hour).Unix())
+	relayerFee := big.NewInt(12345)
+	calldata, _ := makeEmergencySignedRedeemCalldata(t, node.testNode, eth.addr, eth.addr, digest, nonce, deadline, relayerFee)
+	node.signedRedeemContractor.digest = digest
+	node.estimateGasResult = 123456
+
+	validation, err := ethWallet.ValidateGaslessRedeemCalldata(t.Context(), contractAddr.String(), calldata)
+	if err != nil {
+		t.Fatalf("ValidateGaslessRedeemCalldata error: %v", err)
+	}
+	if validation.FeeRecipient != eth.addr.String() {
+		t.Fatalf("wrong fee recipient %s", validation.FeeRecipient)
+	}
+	if validation.Nonce != nonce.String() {
+		t.Fatalf("wrong nonce %s", validation.Nonce)
+	}
+	if validation.Deadline != deadline.Uint64() {
+		t.Fatalf("wrong deadline %d", validation.Deadline)
+	}
+	if validation.RelayerFee != relayerFee.String() {
+		t.Fatalf("wrong relayer fee %s", validation.RelayerFee)
+	}
+	if validation.GasEstimate != node.estimateGasResult {
+		t.Fatalf("wrong gas estimate %d", validation.GasEstimate)
+	}
+	wantTxCost := new(big.Int).Mul(dexeth.GweiToWei(202), new(big.Int).SetUint64(node.estimateGasResult))
+	if validation.EstimatedTxCost != wantTxCost.String() {
+		t.Fatalf("wrong estimated tx cost %s", validation.EstimatedTxCost)
+	}
+	if validation.Profitable {
+		t.Fatalf("expected unprofitable validation")
+	}
+}
+
+func TestValidateGaslessRedeemCalldataRejectsWrongFeeRecipient(t *testing.T) {
+	w, eth, node, shutdown := tassetWallet(BipID)
+	defer shutdown()
+
+	ethWallet := w.(*ETHWallet)
+	contractAddr := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	eth.versionedContracts = map[uint32]common.Address{
+		1: contractAddr,
+	}
+
+	digest := randomHash()
+	nonce := big.NewInt(21)
+	deadline := big.NewInt(time.Now().Add(time.Hour).Unix())
+	relayerFee := big.NewInt(12345)
+	calldata, _ := makeEmergencySignedRedeemCalldata(t, node.testNode, eth.addr,
+		common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678"),
+		digest, nonce, deadline, relayerFee)
+	node.signedRedeemContractor.digest = digest
+
+	_, err := ethWallet.ValidateGaslessRedeemCalldata(t.Context(), contractAddr.String(), calldata)
+	if err == nil || !strings.Contains(err.Error(), "fee recipient") {
+		t.Fatalf("expected fee recipient error, got %v", err)
+	}
+}
+
+func TestSubmitGaslessRedeemCalldata(t *testing.T) {
+	w, eth, node, shutdown := tassetWallet(BipID)
+	defer shutdown()
+
+	ethWallet := w.(*ETHWallet)
+	contractAddr := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	eth.versionedContracts = map[uint32]common.Address{
+		1: contractAddr,
+	}
+
+	digest := randomHash()
+	nonce := big.NewInt(21)
+	deadline := big.NewInt(time.Now().Add(time.Hour).Unix())
+	relayerFee := big.NewInt(12345)
+	calldata, _ := makeEmergencySignedRedeemCalldata(t, node.testNode, eth.addr, eth.addr, digest, nonce, deadline, relayerFee)
+	node.signedRedeemContractor.digest = digest
+	node.estimateGasResult = 123456
+	node.sendTxTx = node.newTransaction(3, big.NewInt(0))
+
+	txHash, err := ethWallet.SubmitGaslessRedeemCalldata(t.Context(), contractAddr.String(), calldata)
+	if err != nil {
+		t.Fatalf("SubmitGaslessRedeemCalldata error: %v", err)
+	}
+	if !bytes.Equal(txHash, node.sendTxTx.Hash().Bytes()) {
+		t.Fatalf("wrong tx hash %x", txHash)
+	}
+	if node.sentTxs != 1 {
+		t.Fatalf("expected 1 sent tx, got %d", node.sentTxs)
+	}
+	if node.lastSendTo == nil || *node.lastSendTo != contractAddr {
+		t.Fatalf("wrong send target %v", node.lastSendTo)
+	}
+	if !bytes.Equal(node.lastSendData, calldata) {
+		t.Fatalf("wrong send calldata %x", node.lastSendData)
 	}
 }
 

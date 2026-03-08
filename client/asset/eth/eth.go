@@ -420,6 +420,7 @@ var _ asset.Authenticator = (*ETHWallet)(nil)
 var _ asset.TokenApprover = (*TokenWallet)(nil)
 var _ asset.ContractDeployer = (*ETHWallet)(nil)
 var _ asset.ContractGasTester = (*ETHWallet)(nil)
+var _ asset.EmergencyGaslessRedeemer = (*ETHWallet)(nil)
 
 type baseWallet struct {
 	// The asset subsystem starts with Connect(ctx). This ctx will be initialized
@@ -4030,9 +4031,19 @@ type preparedGaslessRedeem struct {
 	redeemedValue uint64
 	relayFee      *big.Int
 	nonce         *big.Int
+	deadline      uint64
 }
 
-func (w *ETHWallet) prepareGaslessRedeem(ctx context.Context, form *asset.RedeemForm, relay relayer) (*preparedGaslessRedeem, error) {
+type gaslessRedeemBuildEnv struct {
+	contractVer         uint32
+	redeemedValue       uint64
+	swapContractAddress common.Address
+	contractor          signedRedeemContractor
+}
+
+// gaslessRedeemBuildEnv validates a redeem form once and gathers the contract
+// data needed by both the normal relay path and the emergency RPC helpers.
+func (w *ETHWallet) gaslessRedeemBuildEnv(ctx context.Context, form *asset.RedeemForm) (*gaslessRedeemBuildEnv, error) {
 	contractVer, redeemedValue, err := w.validateRedemptions(ctx, form.Redemptions)
 	if err != nil {
 		return nil, fmt.Errorf("Redeem: failed to validate redemptions: %w", err)
@@ -4051,26 +4062,26 @@ func (w *ETHWallet) prepareGaslessRedeem(ctx context.Context, form *asset.Redeem
 		return nil, fmt.Errorf("contractor does not support signed redeems")
 	}
 
-	redemptions, err := contractor.convertRedeems(form.Redemptions)
+	return &gaslessRedeemBuildEnv{
+		contractVer:         contractVer,
+		redeemedValue:       redeemedValue,
+		swapContractAddress: swapContractAddress,
+		contractor:          contractor,
+	}, nil
+}
+
+// buildGaslessRedeem signs a redeemWithSignature call for an already-validated
+// redeem form using the caller-provided relayer fee and contract nonce.
+func (w *ETHWallet) buildGaslessRedeem(env *gaslessRedeemBuildEnv, form *asset.RedeemForm,
+	feeRecipient common.Address, relayerFee, nonce *big.Int) (*preparedGaslessRedeem, error) {
+
+	redemptions, err := env.contractor.convertRedeems(form.Redemptions)
 	if err != nil {
 		return nil, fmt.Errorf("error converting redemptions: %v", err)
 	}
-
-	onChainNonce, err := contractor.nonces(w.addr)
-	if err != nil {
-		return nil, fmt.Errorf("error getting nonce: %v", err)
-	}
-	nonce := w.nextContractNonce(onChainNonce)
 	deadline := new(big.Int).SetInt64(time.Now().Add(signedRedeemDeadline).Unix())
 
-	estimate, err := relay.estimateFee(ctx, len(form.Redemptions), swapContractAddress)
-	if err != nil {
-		return nil, fmt.Errorf("relay fee estimation failed: %v", err)
-	}
-	relayerFee := estimate.Fee
-	feeRecipient := estimate.RelayAddr
-
-	redeemedWei := dexeth.GweiToWei(redeemedValue)
+	redeemedWei := dexeth.GweiToWei(env.redeemedValue)
 	if relayerFee.Cmp(redeemedWei) >= 0 {
 		return nil, fmt.Errorf("relay fee %s exceeds redeemed value %s", relayerFee, redeemedWei)
 	}
@@ -4078,7 +4089,7 @@ func (w *ETHWallet) prepareGaslessRedeem(ctx context.Context, form *asset.Redeem
 		w.log.Warnf("Relay fee is >25%% of redeemed value: fee=%s, redeemed=%s", relayerFee, redeemedWei)
 	}
 
-	digest, err := contractor.eip712RedeemDigest(feeRecipient, redemptions, relayerFee, nonce, deadline)
+	digest, err := env.contractor.eip712RedeemDigest(feeRecipient, redemptions, relayerFee, nonce, deadline)
 	if err != nil {
 		return nil, fmt.Errorf("error computing EIP-712 digest: %v", err)
 	}
@@ -4088,7 +4099,7 @@ func (w *ETHWallet) prepareGaslessRedeem(ctx context.Context, form *asset.Redeem
 		return nil, fmt.Errorf("error signing EIP-712 digest: %v", err)
 	}
 
-	callData, err := contractor.redeemWithSignatureCalldata(
+	callData, err := env.contractor.redeemWithSignatureCalldata(
 		redemptions, feeRecipient, relayerFee, nonce, deadline, sig,
 	)
 	if err != nil {
@@ -4097,13 +4108,64 @@ func (w *ETHWallet) prepareGaslessRedeem(ctx context.Context, form *asset.Redeem
 
 	return &preparedGaslessRedeem{
 		request: &relayRequest{
-			Target:   swapContractAddress,
+			Target:   env.swapContractAddress,
 			Calldata: callData,
 		},
-		redeemedValue: redeemedValue,
+		redeemedValue: env.redeemedValue,
 		relayFee:      relayerFee,
 		nonce:         nonce,
+		deadline:      deadline.Uint64(),
 	}, nil
+}
+
+// estimateEmergencyRelayFee estimates the fee to embed in emergency calldata
+// using the wallet's current fee environment instead of asking a live relay.
+func (w *ETHWallet) estimateEmergencyRelayFee(ctx context.Context, contractVer uint32, numRedemptions int) (*big.Int, error) {
+	gases := w.gases(contractVer)
+	if gases == nil {
+		return nil, fmt.Errorf("no gas table")
+	}
+
+	baseFee, tipRate, err := w.currentNetworkFees(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error getting network fees: %w", err)
+	}
+
+	var l1Fee *big.Int
+	if w.isOpStack {
+		calldata, err := evmrelay.MockSignedRedeemCalldata(numRedemptions)
+		if err != nil {
+			return nil, fmt.Errorf("error building mock relay calldata: %w", err)
+		}
+		l1Fee, err = w.node.l1FeeForCalldata(ctx, calldata)
+		if err != nil {
+			return nil, fmt.Errorf("error estimating L1 fee: %w", err)
+		}
+	}
+
+	return evmrelay.EstimateRelayFeeWithMultipliers(numRedemptions, gases.SignedRedeem, gases.SignedRedeemAdd,
+		baseFee, tipRate, new(big.Int), l1Fee,
+		evmrelay.ValidateBaseFeeMultNum, evmrelay.ValidateBaseFeeMultDen,
+		evmrelay.L1FeeValidateMultNum, evmrelay.L1FeeValidateMultDen), nil
+}
+
+func (w *ETHWallet) prepareGaslessRedeem(ctx context.Context, form *asset.RedeemForm, relay relayer) (*preparedGaslessRedeem, error) {
+	env, err := w.gaslessRedeemBuildEnv(ctx, form)
+	if err != nil {
+		return nil, err
+	}
+
+	onChainNonce, err := env.contractor.nonces(w.addr)
+	if err != nil {
+		return nil, fmt.Errorf("error getting nonce: %v", err)
+	}
+	nonce := w.nextContractNonce(onChainNonce)
+
+	estimate, err := relay.estimateFee(ctx, len(form.Redemptions), env.swapContractAddress)
+	if err != nil {
+		return nil, fmt.Errorf("relay fee estimation failed: %v", err)
+	}
+	return w.buildGaslessRedeem(env, form, estimate.RelayAddr, estimate.Fee, nonce)
 }
 
 func (w *baseWallet) submitPreparedGaslessRedeem(ctx context.Context, relay relayer, prepared *preparedGaslessRedeem) (common.Hash, error) {
@@ -4134,6 +4196,142 @@ func newGaslessRedeemResult(numRedemptions int, relayTaskHash common.Hash, redee
 	}
 
 	return txs, outputCoin
+}
+
+// estimateGaslessRedeemSubmitCost estimates what the support submitter would
+// pay to broadcast the calldata with the wallet's current fee settings.
+func (w *ETHWallet) estimateGaslessRedeemSubmitCost(ctx context.Context, calldata []byte, gasEstimate uint64) (*big.Int, error) {
+	maxFeeRate, _, err := w.recommendedMaxFeeRate(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error getting fee rates: %w", err)
+	}
+	estimatedCost := new(big.Int).Mul(maxFeeRate, new(big.Int).SetUint64(gasEstimate))
+	if w.isOpStack {
+		l1Fee, err := w.node.l1FeeForCalldata(ctx, calldata)
+		if err != nil {
+			return nil, fmt.Errorf("error estimating L1 fee: %w", err)
+		}
+		estimatedCost.Add(estimatedCost, l1Fee)
+	}
+	return estimatedCost, nil
+}
+
+// validateGaslessRedeemCalldata parses emergency calldata, verifies that this
+// wallet is the intended fee recipient, and simulates the call from this
+// wallet's address.
+func (w *ETHWallet) validateGaslessRedeemCalldata(ctx context.Context, contractAddress common.Address, calldata []byte) (*asset.GaslessRedeemValidation, error) {
+	expectedContract, exists := w.versionedContracts[1]
+	if !exists {
+		return nil, errors.New("gasless redeems require a configured version 1 contract")
+	}
+	if contractAddress != expectedContract {
+		return nil, fmt.Errorf("unexpected contract address %s", contractAddress)
+	}
+
+	decodedCall, err := dexeth.ParseSignedRedeemDataV1(calldata)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding calldata: %w", err)
+	}
+	if decodedCall.FeeRecipient != w.addr {
+		return nil, fmt.Errorf("fee recipient %s does not match wallet address %s", decodedCall.FeeRecipient, w.addr)
+	}
+	if decodedCall.Deadline.Int64() <= time.Now().Unix() {
+		return nil, fmt.Errorf("signed redeem deadline %d has expired", decodedCall.Deadline.Int64())
+	}
+
+	gasEstimate, err := w.node.EstimateGas(ctx, ethereum.CallMsg{
+		From: w.addr,
+		To:   &contractAddress,
+		Data: calldata,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("gas simulation failed: %w", err)
+	}
+	estimatedTxCost, err := w.estimateGaslessRedeemSubmitCost(ctx, calldata, gasEstimate)
+	if err != nil {
+		return nil, err
+	}
+
+	return &asset.GaslessRedeemValidation{
+		FeeRecipient:    decodedCall.FeeRecipient.String(),
+		Nonce:           decodedCall.Nonce.String(),
+		Deadline:        decodedCall.Deadline.Uint64(),
+		RelayerFee:      decodedCall.RelayerFee.String(),
+		GasEstimate:     gasEstimate,
+		EstimatedTxCost: estimatedTxCost.String(),
+		Profitable:      decodedCall.RelayerFee.Cmp(estimatedTxCost) >= 0,
+	}, nil
+}
+
+// submitGaslessRedeemCalldata revalidates emergency calldata and broadcasts it
+// from this wallet's address using the current fee environment.
+func (w *ETHWallet) submitGaslessRedeemCalldata(ctx context.Context, contractAddress common.Address, calldata []byte) (dex.Bytes, error) {
+	validation, err := w.validateGaslessRedeemCalldata(ctx, contractAddress, calldata)
+	if err != nil {
+		return nil, err
+	}
+
+	maxFeeRate, tipRate, err := w.recommendedMaxFeeRate(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error getting fee rates: %w", err)
+	}
+	gasLimit := validation.GasEstimate + validation.GasEstimate/5
+	txOpts, err := w.node.txOpts(ctx, 0, gasLimit, maxFeeRate, tipRate, nil)
+	if err != nil {
+		return nil, fmt.Errorf("txOpts error: %w", err)
+	}
+	tx, err := w.node.sendTransaction(ctx, txOpts, &contractAddress, calldata)
+	if err != nil {
+		return nil, fmt.Errorf("error sending gasless redeem transaction: %w", err)
+	}
+	return tx.Hash().Bytes(), nil
+}
+
+// GaslessRedeemCalldata builds emergency redeemWithSignature calldata for the
+// specified relayer address using the current on-chain contract nonce.
+func (w *ETHWallet) GaslessRedeemCalldata(ctx context.Context, form *asset.RedeemForm, relayerAddress string) (*asset.GaslessRedeemCalldata, error) {
+	if !common.IsHexAddress(relayerAddress) {
+		return nil, fmt.Errorf("invalid relayer address %q", relayerAddress)
+	}
+
+	env, err := w.gaslessRedeemBuildEnv(ctx, form)
+	if err != nil {
+		return nil, err
+	}
+	onChainNonce, err := env.contractor.nonces(w.addr)
+	if err != nil {
+		return nil, fmt.Errorf("error getting nonce: %v", err)
+	}
+	relayerFee, err := w.estimateEmergencyRelayFee(ctx, env.contractVer, len(form.Redemptions))
+	if err != nil {
+		return nil, err
+	}
+	prepared, err := w.buildGaslessRedeem(env, form, common.HexToAddress(relayerAddress), relayerFee, onChainNonce)
+	if err != nil {
+		return nil, err
+	}
+	return &asset.GaslessRedeemCalldata{
+		ContractAddress: prepared.request.Target.String(),
+		Calldata:        prepared.request.Calldata,
+	}, nil
+}
+
+// ValidateGaslessRedeemCalldata validates and simulates emergency gasless
+// redeem calldata against the provided swap contract address.
+func (w *ETHWallet) ValidateGaslessRedeemCalldata(ctx context.Context, contractAddress string, calldata []byte) (*asset.GaslessRedeemValidation, error) {
+	if !common.IsHexAddress(contractAddress) {
+		return nil, fmt.Errorf("invalid contract address %q", contractAddress)
+	}
+	return w.validateGaslessRedeemCalldata(ctx, common.HexToAddress(contractAddress), calldata)
+}
+
+// SubmitGaslessRedeemCalldata validates and broadcasts emergency gasless redeem
+// calldata from this wallet's address.
+func (w *ETHWallet) SubmitGaslessRedeemCalldata(ctx context.Context, contractAddress string, calldata []byte) (dex.Bytes, error) {
+	if !common.IsHexAddress(contractAddress) {
+		return nil, fmt.Errorf("invalid contract address %q", contractAddress)
+	}
+	return w.submitGaslessRedeemCalldata(ctx, common.HexToAddress(contractAddress), calldata)
 }
 
 // gaslessRedeem creates an EIP-712 signed redemption and submits it to a

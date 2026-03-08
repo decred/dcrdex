@@ -24,6 +24,7 @@ import (
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/dex/order"
 )
 
 func init() {
@@ -82,6 +83,12 @@ type TCore struct {
 	testContractGasResults   []*core.ContractGasTestResult
 	testContractGasErr       error
 	reconfigureWalletErr     error
+	gaslessRedeemCalldata    *core.GaslessRedeemCalldataResult
+	gaslessRedeemCalldataErr error
+	gaslessRedeemValidation  *asset.GaslessRedeemValidation
+	gaslessRedeemValidErr    error
+	submitGaslessRedeemTx    string
+	submitGaslessRedeemErr   error
 }
 
 func (c *TCore) Balance(uint32) (uint64, error) {
@@ -271,6 +278,15 @@ func (c *TCore) DeployContract(appPW []byte, assetIDs []uint32, txData []byte, c
 }
 func (c *TCore) TestContractGas(appPW []byte, assetIDs []uint32, tokenAssetIDs []uint32, maxSwaps int) ([]*core.ContractGasTestResult, error) {
 	return c.testContractGasResults, c.testContractGasErr
+}
+func (c *TCore) GaslessRedeemCalldata(appPass []byte, matchIDs []order.MatchID, relayerAddress string) (*core.GaslessRedeemCalldataResult, error) {
+	return c.gaslessRedeemCalldata, c.gaslessRedeemCalldataErr
+}
+func (c *TCore) ValidateGaslessRedeem(assetID uint32, contractAddress, calldata string) (*asset.GaslessRedeemValidation, error) {
+	return c.gaslessRedeemValidation, c.gaslessRedeemValidErr
+}
+func (c *TCore) SubmitGaslessRedeem(appPass []byte, assetID uint32, contractAddress, calldata string) (string, error) {
+	return c.submitGaslessRedeemTx, c.submitGaslessRedeemErr
 }
 
 type tBookFeed struct{}

@@ -371,6 +371,12 @@ func TestParseSignedRedeemDataV1(t *testing.T) {
 		if parsed.NumRedemptions != 1 {
 			t.Errorf("numRedemptions: got %d, want 1", parsed.NumRedemptions)
 		}
+		if len(parsed.OrderedRedemptions) != 1 {
+			t.Fatalf("ordered redemptions: got %d entries, want 1", len(parsed.OrderedRedemptions))
+		}
+		if !bytes.Equal(parsed.Signature, sig) {
+			t.Fatalf("signature mismatch")
+		}
 		if len(parsed.Redemptions) != 1 {
 			t.Fatalf("redemptions map: got %d entries, want 1", len(parsed.Redemptions))
 		}
@@ -421,6 +427,13 @@ func TestParseSignedRedeemDataV1(t *testing.T) {
 		wantTotal := new(big.Int).Add(big.NewInt(1e18), big.NewInt(2e18))
 		if parsed.TotalRedeemed.Cmp(wantTotal) != 0 {
 			t.Errorf("totalRedeemed: got %s, want %s", parsed.TotalRedeemed, wantTotal)
+		}
+		if len(parsed.OrderedRedemptions) != 2 {
+			t.Fatalf("ordered redemptions: got %d entries, want 2", len(parsed.OrderedRedemptions))
+		}
+		if parsed.OrderedRedemptions[0].V.SecretHash != redemptions[0].V.SecretHash ||
+			parsed.OrderedRedemptions[1].V.SecretHash != redemptions[1].V.SecretHash {
+			t.Fatalf("ordered redemptions did not preserve calldata order")
 		}
 	})
 

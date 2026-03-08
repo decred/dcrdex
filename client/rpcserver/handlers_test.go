@@ -1369,6 +1369,197 @@ func TestDeleteRecords(t *testing.T) {
 	}
 }
 
+func TestHandleGaslessRedeemCalldata(t *testing.T) {
+	pw := encode.PassBytes("password123")
+	goodParams := &GaslessRedeemCalldataParams{
+		AppPass:        pw,
+		RelayerAddress: "0x1234567890abcdef1234567890abcdef12345678",
+		MatchIDs:       []string{"00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"},
+	}
+	tests := []struct {
+		name        string
+		params      any
+		result      *core.GaslessRedeemCalldataResult
+		coreErr     error
+		wantErrCode int
+	}{{
+		name:   "ok",
+		params: goodParams,
+		result: &core.GaslessRedeemCalldataResult{
+			AssetID:         60,
+			ContractAddress: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+			Calldata:        dex.Bytes{0xde, 0xad, 0xbe, 0xef},
+		},
+		wantErrCode: -1,
+	}, {
+		name:        "core error",
+		params:      goodParams,
+		coreErr:     errors.New("build error"),
+		wantErrCode: msgjson.RPCTradeError,
+	}, {
+		name:        "bad params",
+		params:      nil,
+		wantErrCode: msgjson.RPCArgumentsError,
+	}, {
+		name: "invalid match id",
+		params: &GaslessRedeemCalldataParams{
+			AppPass:        pw,
+			RelayerAddress: "0x1234567890abcdef1234567890abcdef12345678",
+			MatchIDs:       []string{"001122"},
+		},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}}
+
+	for _, test := range tests {
+		tc := &TCore{
+			gaslessRedeemCalldata:    test.result,
+			gaslessRedeemCalldataErr: test.coreErr,
+		}
+		r := &RPCServer{core: tc}
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, gaslessRedeemCalldataRoute)
+		} else {
+			msg = makeMsg(t, gaslessRedeemCalldataRoute, test.params)
+		}
+		payload := handleGaslessRedeemCalldata(r, msg)
+		var res GaslessRedeemCalldataResponse
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+		if test.wantErrCode == -1 {
+			if res.AssetID != test.result.AssetID || res.ContractAddress != test.result.ContractAddress {
+				t.Fatalf("unexpected response: %+v", res)
+			}
+			if res.Calldata != "0xdeadbeef" {
+				t.Fatalf("unexpected calldata %q", res.Calldata)
+			}
+		}
+	}
+}
+
+func TestHandleValidateGaslessRedeem(t *testing.T) {
+	goodParams := &ValidateGaslessRedeemParams{
+		AssetID:         60,
+		ContractAddress: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+		Calldata:        "0xdeadbeef",
+	}
+	tests := []struct {
+		name        string
+		params      any
+		result      *asset.GaslessRedeemValidation
+		coreErr     error
+		wantErrCode int
+	}{{
+		name:   "ok",
+		params: goodParams,
+		result: &asset.GaslessRedeemValidation{
+			FeeRecipient:    "0x1234567890abcdef1234567890abcdef12345678",
+			Nonce:           "9",
+			Deadline:        12345,
+			RelayerFee:      "1000",
+			GasEstimate:     120000,
+			EstimatedTxCost: "999",
+			Profitable:      true,
+		},
+		wantErrCode: -1,
+	}, {
+		name:        "core error",
+		params:      goodParams,
+		coreErr:     errors.New("validation error"),
+		wantErrCode: msgjson.RPCTradeError,
+	}, {
+		name:        "bad params",
+		params:      nil,
+		wantErrCode: msgjson.RPCArgumentsError,
+	}}
+
+	for _, test := range tests {
+		tc := &TCore{
+			gaslessRedeemValidation: test.result,
+			gaslessRedeemValidErr:   test.coreErr,
+		}
+		r := &RPCServer{core: tc}
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, validateGaslessRedeemRoute)
+		} else {
+			msg = makeMsg(t, validateGaslessRedeemRoute, test.params)
+		}
+		payload := handleValidateGaslessRedeem(r, msg)
+		var res ValidateGaslessRedeemResponse
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+		if test.wantErrCode == -1 {
+			if !reflect.DeepEqual(res, ValidateGaslessRedeemResponse{
+				FeeRecipient:    test.result.FeeRecipient,
+				Nonce:           test.result.Nonce,
+				Deadline:        test.result.Deadline,
+				RelayerFee:      test.result.RelayerFee,
+				GasEstimate:     test.result.GasEstimate,
+				EstimatedTxCost: test.result.EstimatedTxCost,
+				Profitable:      test.result.Profitable,
+			}) {
+				t.Fatalf("unexpected response: %+v", res)
+			}
+		}
+	}
+}
+
+func TestHandleSubmitGaslessRedeem(t *testing.T) {
+	pw := encode.PassBytes("password123")
+	goodParams := &SubmitGaslessRedeemParams{
+		AppPass:         pw,
+		AssetID:         60,
+		ContractAddress: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+		Calldata:        "0xdeadbeef",
+	}
+	tests := []struct {
+		name        string
+		params      any
+		txHash      string
+		coreErr     error
+		wantErrCode int
+	}{{
+		name:        "ok",
+		params:      goodParams,
+		txHash:      "deadbeef",
+		wantErrCode: -1,
+	}, {
+		name:        "core error",
+		params:      goodParams,
+		coreErr:     errors.New("submit error"),
+		wantErrCode: msgjson.RPCFundTransferError,
+	}, {
+		name:        "bad params",
+		params:      nil,
+		wantErrCode: msgjson.RPCArgumentsError,
+	}}
+
+	for _, test := range tests {
+		tc := &TCore{
+			submitGaslessRedeemTx:  test.txHash,
+			submitGaslessRedeemErr: test.coreErr,
+		}
+		r := &RPCServer{core: tc}
+		var msg *msgjson.Message
+		if test.params == nil {
+			msg = makeBadMsg(t, submitGaslessRedeemRoute)
+		} else {
+			msg = makeMsg(t, submitGaslessRedeemRoute, test.params)
+		}
+		payload := handleSubmitGaslessRedeem(r, msg)
+		var res SubmitGaslessRedeemResponse
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+		if test.wantErrCode == -1 && res.TxHash != test.txHash {
+			t.Fatalf("unexpected tx hash %q", res.TxHash)
+		}
+	}
+}
+
 //
 // From handlers_dex_test.go
 //
