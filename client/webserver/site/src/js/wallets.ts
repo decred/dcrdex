@@ -2573,7 +2573,8 @@ export default class WalletsPage extends BasePage {
   /* update wallet configuration */
   async reconfig (): Promise<void> {
     const page = this.page
-    const assetID = this.selectedWalletID
+    const assetID = this.reconfigForm.assetID
+
     Doc.hide(page.reconfigErr)
     let walletType = app().currentWalletDefinition(assetID).type
     if (!Doc.isHidden(page.changeWalletType)) {
