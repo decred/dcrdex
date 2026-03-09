@@ -77,7 +77,7 @@ var (
 			dex.Simnet:  common.HexToAddress(""),
 		},
 		1: {
-			dex.Mainnet: common.HexToAddress("0x85c4e942AE2729a3C61275d4ff90A245c81592ae"), // tx 0xb163305c0660c72397e85a96d5988763f81adc85a98cb60d4afee3d1b3ac7d71
+			dex.Mainnet: common.HexToAddress("0x82f29E3aCe0a0045c7b263Bf3198DA2210aD1670"), // tx 0x9895b26ca1dc7f06e3cfa93914ed73c44673610b2e8afadd04f0b1af5bd0f170
 			dex.Testnet: common.HexToAddress("0x575bA12fA9875685A358172d263ad5008bC71a6F"),
 			dex.Simnet:  common.HexToAddress(""),
 		},
@@ -428,7 +428,7 @@ func (g *Gases) SwapN(n int) uint64 {
 	return g.Swap + g.SwapAdd*(uint64(n)-1)
 }
 
-// RedeemN calculates the gas needed to redeem n swaps.
+// RedeemN calculates the gas needed to redeem n swaps. Returns 0 if n <= 0.
 func (g *Gases) RedeemN(n int) uint64 {
 	if n <= 0 {
 		return 0
@@ -437,7 +437,7 @@ func (g *Gases) RedeemN(n int) uint64 {
 }
 
 // SignedRedeemN calculates the gas needed for a signed (relayed) redemption
-// of n swaps.
+// of n swaps. Returns 0 if n <= 0.
 func (g *Gases) SignedRedeemN(n int) uint64 {
 	if n <= 0 {
 		return 0

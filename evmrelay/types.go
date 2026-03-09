@@ -145,6 +145,11 @@ type HealthResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
+// ErrorResponse is a generic JSON error response.
+type ErrorResponse struct {
+	Error string `json:"error,omitempty"`
+}
+
 // SubmitResponse is the JSON response from POST /api/relay.
 type SubmitResponse struct {
 	TaskID string `json:"taskID,omitempty"`

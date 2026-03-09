@@ -315,7 +315,7 @@ func ParseSignedRedeemDataV1(calldata []byte) (*SignedRedemptionV1, error) {
 
 	// redeemWithSignature args: (redemptions, feeRecipient, relayerFee, nonce, deadline, signature)
 	const numArgs = 6
-	if len(args) < numArgs {
+	if len(args) != numArgs {
 		return nil, fmt.Errorf("expected %d args but got %d", numArgs, len(args))
 	}
 
@@ -411,15 +411,13 @@ func ParseRefundDataV1(calldata []byte) (*SwapVector, error) {
 		return nil, fmt.Errorf("expected %v function but got %v", RefundMethodName, decoded.Name)
 	}
 	args := decoded.inputs
-	// Any difference in number of args and types than what we expect
-	// should be caught by parseCallData, but checking again anyway.
-	//
-	// TODO: If any of the checks prove redundant, remove them.
-	const numArgs = 1
+	// refund(address token, Vector calldata v) has 2 args.
+	const numArgs = 2
 	if len(args) != numArgs {
-		return nil, fmt.Errorf("expected %v redeem args but got %v", numArgs, len(args))
+		return nil, fmt.Errorf("expected %v refund args but got %v", numArgs, len(args))
 	}
-	contract, ok := args[0].value.(struct {
+	// args[0] is the token address, which we don't need for the refund vector.
+	contract, ok := args[1].value.(struct {
 		SecretHash      [32]byte       `json:"secretHash"`
 		Value           *big.Int       `json:"value"`
 		Initiator       common.Address `json:"initiator"`
@@ -427,7 +425,7 @@ func ParseRefundDataV1(calldata []byte) (*SwapVector, error) {
 		Participant     common.Address `json:"participant"`
 	})
 	if !ok {
-		return nil, fmt.Errorf("expected first arg of type [32]byte but got %T", args[0].value)
+		return nil, fmt.Errorf("expected second arg of type Vector but got %T", args[1].value)
 	}
 
 	return &SwapVector{

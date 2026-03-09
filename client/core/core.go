@@ -11681,7 +11681,7 @@ type gaslessRedeemMatchSet struct {
 	form   *asset.RedeemForm
 }
 
-func (c *Core) findMatch(mid order.MatchID) (*trackedTrade, *matchTracker) {
+func (c *Core) findTrade(mid order.MatchID) *trackedTrade {
 	for _, dc := range c.dexConnections() {
 		dc.tradeMtx.RLock()
 		for _, trade := range dc.trades {
@@ -11690,12 +11690,12 @@ func (c *Core) findMatch(mid order.MatchID) (*trackedTrade, *matchTracker) {
 			trade.mtx.RUnlock()
 			if match != nil {
 				dc.tradeMtx.RUnlock()
-				return trade, match
+				return trade
 			}
 		}
 		dc.tradeMtx.RUnlock()
 	}
-	return nil, nil
+	return nil
 }
 
 func (c *Core) gaslessRedeemMatchSet(matchIDs []order.MatchID) (*gaslessRedeemMatchSet, error) {
@@ -11704,29 +11704,31 @@ func (c *Core) gaslessRedeemMatchSet(matchIDs []order.MatchID) (*gaslessRedeemMa
 	}
 
 	seen := make(map[order.MatchID]struct{}, len(matchIDs))
-	matches := make([]*matchTracker, 0, len(matchIDs))
-	var trade *trackedTrade
-
 	for _, mid := range matchIDs {
 		if _, found := seen[mid]; found {
 			return nil, fmt.Errorf("duplicate match ID %s", mid)
 		}
 		seen[mid] = struct{}{}
+	}
 
-		matchTrade, match := c.findMatch(mid)
+	// Find the trade for the first match ID.
+	trade := c.findTrade(matchIDs[0])
+	if trade == nil {
+		return nil, fmt.Errorf("match %s not found", matchIDs[0])
+	}
+
+	// Collect all matches under a single lock hold to avoid TOCTOU issues.
+	trade.mtx.RLock()
+	defer trade.mtx.RUnlock()
+
+	matches := make([]*matchTracker, 0, len(matchIDs))
+	for _, mid := range matchIDs {
+		match := trade.matches[mid]
 		if match == nil {
-			return nil, fmt.Errorf("match %s not found", mid)
-		}
-		if trade == nil {
-			trade = matchTrade
-		} else if trade != matchTrade {
-			return nil, fmt.Errorf("all match IDs must belong to the same trade")
+			return nil, fmt.Errorf("match %s not found (all match IDs must belong to the same trade)", mid)
 		}
 		matches = append(matches, match)
 	}
-
-	trade.mtx.RLock()
-	defer trade.mtx.RUnlock()
 
 	redeemWallet := trade.wallets.toWallet
 	if redeemWallet == nil {

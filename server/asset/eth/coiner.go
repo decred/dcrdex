@@ -20,18 +20,17 @@ var _ asset.Coin = (*swapCoin)(nil)
 var _ asset.Coin = (*redeemCoin)(nil)
 
 type baseCoin struct {
-	tokenAddr     common.Address
-	backend       *AssetBackend
-	locator       []byte
-	gasFeeCap     *big.Int
-	gasTipCap     *big.Int
-	txHash        common.Hash
-	value         uint64
-	txData        []byte
-	serializedTx  []byte
-	contractVer   uint32
-	isRelay       bool
-	relayTaskHash common.Hash
+	tokenAddr    common.Address
+	backend      *AssetBackend
+	locator      []byte
+	gasFeeCap    *big.Int
+	gasTipCap    *big.Int
+	txHash       common.Hash
+	value        uint64
+	txData       []byte
+	serializedTx []byte
+	contractVer  uint32
+	isRelay      bool
 }
 
 type swapCoin struct {
@@ -174,6 +173,10 @@ func (be *AssetBackend) newRedeemCoin(coinID []byte, contractData []byte) (*rede
 		return nil, fmt.Errorf("expected tx value of zero for redeem but got: %d", bc.value)
 	}
 
+	if bc.isRelay && bc.contractVer < 1 {
+		return nil, fmt.Errorf("relay redeems are not supported for contract version %d", bc.contractVer)
+	}
+
 	var secret [32]byte
 	switch bc.contractVer {
 	case 0:
@@ -218,6 +221,10 @@ func (be *AssetBackend) relayBaseCoin(contractData []byte) (*baseCoin, error) {
 	contractVer, locator, err := dexeth.DecodeContractData(contractData)
 	if err != nil {
 		return nil, err
+	}
+
+	if be.contractVer != contractVer {
+		return nil, fmt.Errorf("wrong contract version for %s relay coin. wanted %d, got %d", dex.BipIDSymbol(be.assetID), be.contractVer, contractVer)
 	}
 
 	return &baseCoin{

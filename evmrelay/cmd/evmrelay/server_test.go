@@ -8,6 +8,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -179,6 +181,7 @@ type tEthRPC struct {
 	blockReceipt   bool
 	sendErr        error
 	sentTxs        []*types.Transaction
+	pendingNonce   hexutil.Uint64
 }
 
 func (e *tEthRPC) GetBlockByNumber(ctx context.Context, _ string, _ bool) (*types.Header, error) {
@@ -227,6 +230,10 @@ func (e *tEthRPC) GetTransactionReceipt(ctx context.Context, txHash common.Hash)
 		return nil, nil
 	}
 	return e.receipts[txHash], nil
+}
+
+func (e *tEthRPC) GetTransactionCount(_ context.Context, _ common.Address, _ string) (hexutil.Uint64, error) {
+	return e.pendingNonce, nil
 }
 
 func (e *tEthRPC) SendRawTransaction(_ context.Context, raw string) (common.Hash, error) {
@@ -1532,6 +1539,405 @@ func TestReconcileActiveTaskReplacesCancellation(t *testing.T) {
 	}
 	if replaced.tx.GasFeeCap().Cmp(prevCancelTx.GasFeeCap()) <= 0 {
 		t.Fatalf("replacement cancel fee cap: got %s, want > %s", replaced.tx.GasFeeCap(), prevCancelTx.GasFeeCap())
+	}
+}
+
+func TestLogHandlerBodyReadError(t *testing.T) {
+	s := tServer(t)
+
+	var handlerBodyLen int
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		handlerBodyLen = len(b)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := s.logHandler(inner)
+
+	// Simulate a request with a body that returns an error by using
+	// a reader that fails immediately.
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/test", &errReader{})
+	handler(w, r)
+
+	// The downstream handler should receive an empty body (not a nil or
+	// consumed body that could cause a panic).
+	if handlerBodyLen != 0 {
+		t.Fatalf("expected empty body after read error, got %d bytes", handlerBodyLen)
+	}
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+}
+
+// errReader is an io.ReadCloser that always returns an error on Read.
+type errReader struct{}
+
+func (e *errReader) Read([]byte) (int, error) { return 0, errors.New("read error") }
+func (e *errReader) Close() error             { return nil }
+
+func TestReconcileActiveTaskStillPendingNoReceipt(t *testing.T) {
+	const chainID = 42
+	target := common.HexToAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	rpcAPI := &tEthRPC{
+		header: tTestHeader(big.NewInt(1_000_000_000)),
+		tipCap: big.NewInt(2_000_000_000),
+	}
+	cc := tChainClientForTests(t, rpcAPI, chainID, target)
+	s := tServer(t)
+	s.relayAddr = cc.relayAddr
+	s.chains[chainID] = cc
+
+	participant := common.HexToAddress("0xabcdef0123456789abcdef0123456789abcdef01")
+	relayerNonce := uint64(5)
+
+	calldata := tRelayCalldata(t, cc.relayAddr, participant, big.NewInt(1e18), big.NewInt(1e15), 1)
+
+	_, rawTx := tSignedDynamicTx(t, cc, target, calldata, relayerNonce, 100_000, big.NewInt(1e9), big.NewInt(5e9))
+	relayTxHash := common.HexToHash("0xaaaa")
+
+	now := time.Now()
+	testPutTask(t, s.store, &taskEntry{
+		TaskID:        "task-pending",
+		ChainID:       chainID,
+		ValidUntil:    now.Add(time.Hour),
+		State:         evmrelay.RelayStatePending,
+		Phase:         taskPhaseActive,
+		Participant:   participant,
+		Nonce:         1,
+		Target:        target,
+		Calldata:      calldata,
+		RelayerNonce:  &relayerNonce,
+		RelayTxHashes: []common.Hash{relayTxHash},
+		RelayTxData:   rawTx,
+		FirstSentAt:   ptrTime(now.Add(-10 * time.Second)),
+		LastSentAt:    ptrTime(now.Add(-1 * time.Second)),
+	})
+
+	snapshot, _ := s.store.snapshot("task-pending")
+	changed, err := s.reconcileActiveTask(context.Background(), &snapshot)
+	if err != nil {
+		t.Fatalf("reconcileActiveTask error: %v", err)
+	}
+	// No receipt found, not yet time for replacement or rebroadcast,
+	// so nothing should change.
+	if changed {
+		t.Fatal("expected no change when receipt is not found and no replacement/rebroadcast is due")
+	}
+
+	updated, ok := s.store.snapshot("task-pending")
+	if !ok {
+		t.Fatal("task not found after reconcile")
+	}
+	if updated.State != evmrelay.RelayStatePending {
+		t.Fatalf("state: got %s, want %s", updated.State, evmrelay.RelayStatePending)
+	}
+	if updated.Phase != taskPhaseActive {
+		t.Fatalf("phase: got %s, want %s", updated.Phase, taskPhaseActive)
+	}
+}
+
+func TestReconcileActiveTaskRevertedReceipt(t *testing.T) {
+	const chainID = 42
+	target := common.HexToAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+
+	relayTxHash := common.HexToHash("0xaaaa")
+	rpcAPI := &tEthRPC{
+		header:   tTestHeader(big.NewInt(1_000_000_000)),
+		tipCap:   big.NewInt(2_000_000_000),
+		receipts: map[common.Hash]*types.Receipt{relayTxHash: tTestReceipt(relayTxHash, 0)},
+	}
+	cc := tChainClientForTests(t, rpcAPI, chainID, target)
+	s := tServer(t)
+	s.relayAddr = cc.relayAddr
+	s.chains[chainID] = cc
+
+	participant := common.HexToAddress("0xabcdef0123456789abcdef0123456789abcdef01")
+	relayerNonce := uint64(5)
+	calldata := tRelayCalldata(t, cc.relayAddr, participant, big.NewInt(1e18), big.NewInt(1e15), 1)
+	_, rawTx := tSignedDynamicTx(t, cc, target, calldata, relayerNonce, 100_000, big.NewInt(1e9), big.NewInt(5e9))
+
+	testPutTask(t, s.store, &taskEntry{
+		TaskID:        "task-reverted",
+		ChainID:       chainID,
+		ValidUntil:    time.Now().Add(time.Hour),
+		State:         evmrelay.RelayStatePending,
+		Phase:         taskPhaseActive,
+		Participant:   participant,
+		Nonce:         1,
+		Target:        target,
+		Calldata:      calldata,
+		RelayerNonce:  &relayerNonce,
+		RelayTxHashes: []common.Hash{relayTxHash},
+		RelayTxData:   rawTx,
+		FirstSentAt:   ptrTime(time.Now().Add(-time.Minute)),
+		LastSentAt:    ptrTime(time.Now().Add(-10 * time.Second)),
+	})
+
+	snapshot, _ := s.store.snapshot("task-reverted")
+	changed, err := s.reconcileActiveTask(context.Background(), &snapshot)
+	if err != nil {
+		t.Fatalf("reconcileActiveTask error: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected change for reverted receipt")
+	}
+
+	updated, ok := s.store.snapshot("task-reverted")
+	if !ok {
+		t.Fatal("task not found")
+	}
+	if updated.State != evmrelay.RelayStateFailed {
+		t.Fatalf("state: got %s, want %s", updated.State, evmrelay.RelayStateFailed)
+	}
+	if updated.FailureReason != failureReasonReverted {
+		t.Fatalf("reason: got %s, want %s", updated.FailureReason, failureReasonReverted)
+	}
+}
+
+func TestPromoteQueuedTaskHappyPath(t *testing.T) {
+	const chainID = 42
+	target := common.HexToAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	rpcAPI := &tEthRPC{
+		header:      tTestHeader(big.NewInt(1_000_000_000)),
+		tipCap:      big.NewInt(2_000_000_000),
+		estimateGas: 80_000,
+	}
+	cc := tChainClientForTests(t, rpcAPI, chainID, target)
+	s := tServer(t)
+	s.relayAddr = cc.relayAddr
+	s.chains[chainID] = cc
+
+	participant := common.HexToAddress("0xabcdef0123456789abcdef0123456789abcdef01")
+	calldata := tRelayCalldata(t, cc.relayAddr, participant, big.NewInt(1e18), big.NewInt(1e16), 1)
+
+	entry := &taskEntry{
+		TaskID:      "task-promote",
+		ChainID:     chainID,
+		QueueSeq:    1,
+		ValidUntil:  time.Now().Add(10 * time.Minute),
+		State:       evmrelay.RelayStatePending,
+		Phase:       taskPhaseQueued,
+		Participant: participant,
+		Nonce:       1,
+		Target:      target,
+		Calldata:    calldata,
+	}
+	testPutTask(t, s.store, entry)
+
+	snapshot, ok := s.store.nextQueuedTask(chainID)
+	if !ok {
+		t.Fatal("no queued task found")
+	}
+
+	changed, err := s.promoteQueuedTask(context.Background(), &snapshot)
+	if err != nil {
+		t.Fatalf("promoteQueuedTask error: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected task to change")
+	}
+	if len(rpcAPI.sentTxs) != 1 {
+		t.Fatalf("sent txs: got %d, want 1", len(rpcAPI.sentTxs))
+	}
+
+	updated, ok := s.store.snapshot("task-promote")
+	if !ok {
+		t.Fatal("task not found")
+	}
+	if updated.Phase != taskPhaseActive {
+		t.Fatalf("phase: got %s, want %s", updated.Phase, taskPhaseActive)
+	}
+	if updated.State != evmrelay.RelayStatePending {
+		t.Fatalf("state: got %s, want %s", updated.State, evmrelay.RelayStatePending)
+	}
+	if updated.RelayerNonce == nil {
+		t.Fatal("relayer nonce should be set")
+	}
+	if len(updated.RelayTxHashes) != 1 {
+		t.Fatalf("relay tx hashes: got %d, want 1", len(updated.RelayTxHashes))
+	}
+}
+
+func TestPromoteQueuedTaskExpired(t *testing.T) {
+	const chainID = 42
+	target := common.HexToAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	rpcAPI := &tEthRPC{
+		header: tTestHeader(big.NewInt(1_000_000_000)),
+		tipCap: big.NewInt(2_000_000_000),
+	}
+	cc := tChainClientForTests(t, rpcAPI, chainID, target)
+	s := tServer(t)
+	s.relayAddr = cc.relayAddr
+	s.chains[chainID] = cc
+
+	participant := common.HexToAddress("0xabcdef0123456789abcdef0123456789abcdef01")
+	calldata := tRelayCalldata(t, cc.relayAddr, participant, big.NewInt(1e18), big.NewInt(1e16), 1)
+
+	entry := &taskEntry{
+		TaskID:      "task-expired",
+		ChainID:     chainID,
+		QueueSeq:    1,
+		ValidUntil:  time.Now().Add(-time.Minute),
+		State:       evmrelay.RelayStatePending,
+		Phase:       taskPhaseQueued,
+		Participant: participant,
+		Nonce:       1,
+		Target:      target,
+		Calldata:    calldata,
+	}
+	testPutTask(t, s.store, entry)
+
+	snapshot := *entry
+	changed, err := s.promoteQueuedTask(context.Background(), &snapshot)
+	if err != nil {
+		t.Fatalf("promoteQueuedTask error: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected task to change (marked failed)")
+	}
+
+	updated, ok := s.store.snapshot("task-expired")
+	if !ok {
+		t.Fatal("task not found")
+	}
+	if updated.State != evmrelay.RelayStateFailed {
+		t.Fatalf("state: got %s, want %s", updated.State, evmrelay.RelayStateFailed)
+	}
+	if updated.FailureReason != failureReasonExpired {
+		t.Fatalf("reason: got %s, want %s", updated.FailureReason, failureReasonExpired)
+	}
+}
+
+func TestClientIP(t *testing.T) {
+	trusted := map[string]struct{}{"10.0.0.1": {}}
+
+	tests := []struct {
+		name           string
+		remoteAddr     string
+		realIP         string
+		forwarded      string
+		trustedProxies map[string]struct{}
+		want           string
+	}{
+		{
+			name:       "no proxies uses RemoteAddr",
+			remoteAddr: "192.168.1.1:12345",
+			want:       "192.168.1.1",
+		},
+		{
+			name:           "untrusted proxy ignores headers",
+			remoteAddr:     "192.168.1.1:12345",
+			realIP:         "1.2.3.4",
+			trustedProxies: trusted,
+			want:           "192.168.1.1",
+		},
+		{
+			name:           "trusted proxy uses X-Real-IP",
+			remoteAddr:     "10.0.0.1:12345",
+			realIP:         "1.2.3.4",
+			trustedProxies: trusted,
+			want:           "1.2.3.4",
+		},
+		{
+			name:           "trusted proxy uses X-Forwarded-For first entry",
+			remoteAddr:     "10.0.0.1:12345",
+			forwarded:      "5.6.7.8, 10.0.0.1",
+			trustedProxies: trusted,
+			want:           "5.6.7.8",
+		},
+		{
+			name:           "trusted proxy X-Real-IP takes precedence over X-Forwarded-For",
+			remoteAddr:     "10.0.0.1:12345",
+			realIP:         "1.2.3.4",
+			forwarded:      "5.6.7.8",
+			trustedProxies: trusted,
+			want:           "1.2.3.4",
+		},
+		{
+			name:           "invalid X-Real-IP falls through to X-Forwarded-For",
+			remoteAddr:     "10.0.0.1:12345",
+			realIP:         "not-an-ip",
+			forwarded:      "5.6.7.8",
+			trustedProxies: trusted,
+			want:           "5.6.7.8",
+		},
+		{
+			name:           "invalid X-Real-IP and X-Forwarded-For falls back to RemoteAddr",
+			remoteAddr:     "10.0.0.1:12345",
+			realIP:         "garbage",
+			forwarded:      "also-garbage",
+			trustedProxies: trusted,
+			want:           "10.0.0.1",
+		},
+		{
+			name:           "empty proxies config always uses RemoteAddr",
+			remoteAddr:     "10.0.0.1:12345",
+			realIP:         "1.2.3.4",
+			trustedProxies: nil,
+			want:           "10.0.0.1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := httptest.NewRequest("GET", "/", nil)
+			r.RemoteAddr = tt.remoteAddr
+			if tt.realIP != "" {
+				r.Header.Set("X-Real-IP", tt.realIP)
+			}
+			if tt.forwarded != "" {
+				r.Header.Set("X-Forwarded-For", tt.forwarded)
+			}
+			got := clientIP(r, tt.trustedProxies)
+			if got != tt.want {
+				t.Errorf("clientIP = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHandleRelayQueueFull(t *testing.T) {
+	s := tServer(t)
+
+	chainID := int64(42)
+	target := common.HexToAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	s.chains[chainID] = &chainClient{
+		ec:             tFakeRPC(t),
+		chainID:        big.NewInt(chainID),
+		gases:          dexeth.VersionedGases[1],
+		allowedTargets: map[common.Address]bool{target: true},
+	}
+
+	participant := common.HexToAddress("0xabcdef0123456789abcdef0123456789abcdef01")
+
+	// Fill the queue to the limit.
+	for i := 0; i < maxQueuedTasksPerChain; i++ {
+		testPutTask(t, s.store, &taskEntry{
+			TaskID:      fmt.Sprintf("fill-%d", i),
+			ChainID:     chainID,
+			QueueSeq:    uint64(i + 1),
+			ValidUntil:  time.Now().Add(time.Hour),
+			State:       evmrelay.RelayStatePending,
+			Phase:       taskPhaseQueued,
+			Participant: common.HexToAddress(fmt.Sprintf("0x%040x", i+0x1000)),
+			Nonce:       uint64(i),
+			Target:      target,
+		})
+	}
+
+	// Next submission should get 503.
+	calldata := tRelayCalldata(t, s.relayAddr, participant, big.NewInt(1e18), big.NewInt(1e15), 9999)
+	calldataHex := hex.EncodeToString(calldata)
+	body := fmt.Sprintf(`{"chainID":%d,"target":"%s","calldata":"0x%s"}`, chainID, target.Hex(), calldataHex)
+	w := tPost(s.handleRelay, "/api/relay", body)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status: got %d, want %d; body: %s", w.Code, http.StatusServiceUnavailable, w.Body.String())
+	}
+	resp := respJSON(t, w)
+	errMsg, _ := resp["error"].(string)
+	if !strings.Contains(errMsg, "queue is full") {
+		t.Errorf("error: got %q, want substring 'queue is full'", errMsg)
 	}
 }
 

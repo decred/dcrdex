@@ -11,6 +11,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"net/url"
 	"time"
 
 	"decred.org/dcrdex/dex"
@@ -116,7 +117,7 @@ func (r *httpRelayer) doJSONRequest(ctx context.Context, method, path string, re
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1 MiB limit
 	if err != nil {
 		return nil, fmt.Errorf("error reading %s response: %w", path, err)
 	}
@@ -151,8 +152,13 @@ func (r *httpRelayer) estimateFee(ctx context.Context, numRedemptions int, targe
 		return nil, fmt.Errorf("invalid fee value: %s", result.Fee)
 	}
 
+	relayAddr := common.HexToAddress(result.RelayAddr)
+	if relayAddr == (common.Address{}) {
+		return nil, fmt.Errorf("relay returned zero fee-recipient address")
+	}
+
 	return &feeEstimate{
-		RelayAddr: common.HexToAddress(result.RelayAddr),
+		RelayAddr: relayAddr,
 		Fee:       fee,
 	}, nil
 }
@@ -202,7 +208,7 @@ func (r *httpRelayer) submitSignedRedeem(ctx context.Context, req *relayRequest)
 
 // getRelayStatus returns the current status of a relay task.
 func (r *httpRelayer) getRelayStatus(ctx context.Context, taskID string) (*relayStatus, error) {
-	respBody, err := r.doJSONRequest(ctx, http.MethodGet, "/api/relay/"+taskID, nil)
+	respBody, err := r.doJSONRequest(ctx, http.MethodGet, "/api/relay/"+url.PathEscape(taskID), nil)
 	if err != nil {
 		return nil, err
 	}

@@ -35,12 +35,14 @@ func (s *relayServer) logHandler(next http.HandlerFunc) http.HandlerFunc {
 		if r.Body != nil {
 			bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, 64<<10))
 			r.Body.Close()
-			if err == nil {
+			if err != nil {
+				r.Body = io.NopCloser(bytes.NewReader(nil))
+			} else {
 				r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 			}
 		}
 
-		ip := clientIP(r)
+		ip := clientIP(r, s.trustedProxies)
 		log.Debugf("%s %s from %s", r.Method, r.URL.String(), ip)
 
 		lw := &loggingResponseWriter{ResponseWriter: w, status: http.StatusOK}
@@ -52,8 +54,8 @@ func (s *relayServer) logHandler(next http.HandlerFunc) http.HandlerFunc {
 
 func (s *relayServer) rateLimitHandler(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !s.limiter.allow(clientIP(r)) {
-			writeJSON(w, http.StatusTooManyRequests, &evmrelay.SubmitResponse{Error: "rate limit exceeded"})
+		if !s.limiter.allow(clientIP(r, s.trustedProxies)) {
+			writeJSON(w, http.StatusTooManyRequests, &evmrelay.ErrorResponse{Error: "rate limit exceeded"})
 			return
 		}
 		next(w, r)
@@ -63,7 +65,9 @@ func (s *relayServer) rateLimitHandler(next http.HandlerFunc) http.HandlerFunc {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		log.Debugf("Error writing JSON response: %v", err)
+	}
 }
 
 func hexDecode(s string) ([]byte, error) {

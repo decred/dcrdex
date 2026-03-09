@@ -80,6 +80,11 @@ func newChainClient(ctx context.Context, chainID, signingChainID int64, rpcURL s
 	return client, nil
 }
 
+// close closes the underlying ethclient connection.
+func (c *chainClient) close() {
+	c.ec.Close()
+}
+
 // checkHealth verifies the chain RPC is reachable by fetching the latest block number.
 func (c *chainClient) checkHealth(ctx context.Context) error {
 	_, err := c.ec.BlockNumber(ctx)
@@ -152,7 +157,10 @@ func (c *chainClient) validateFee(ctx context.Context, calldata []byte, parsed *
 		}
 	}
 
-	if parsed.RelayerFee.Cmp(parsed.TotalRedeemed) > 0 {
+	// The on-chain contract enforces relayerFee <= total / 2. Reject here
+	// to avoid wasting gas on transactions that would revert.
+	halfTotal := new(big.Int).Div(parsed.TotalRedeemed, big.NewInt(2))
+	if parsed.RelayerFee.Cmp(halfTotal) > 0 {
 		return nil, nil, &feeExceedsRedeemedValueError{
 			Fee:   new(big.Int).Set(parsed.RelayerFee),
 			Total: new(big.Int).Set(parsed.TotalRedeemed),

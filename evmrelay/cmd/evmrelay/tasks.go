@@ -37,7 +37,9 @@ func (s *relayServer) processChainTasksWithTimeout(ctx context.Context, chainID 
 	if snapshot, ok := s.store.activeTask(chainID); ok {
 		changed, err := s.reconcileActiveTask(ctx, &snapshot)
 		if changed {
-			return s.store.save()
+			if saveErr := s.store.save(); saveErr != nil {
+				return errors.Join(err, saveErr)
+			}
 		}
 		return err
 	}
@@ -49,7 +51,9 @@ func (s *relayServer) processChainTasksWithTimeout(ctx context.Context, chainID 
 
 	changed, err := s.promoteQueuedTask(ctx, &snapshot)
 	if changed {
-		return s.store.save()
+		if saveErr := s.store.save(); saveErr != nil {
+			return errors.Join(err, saveErr)
+		}
 	}
 	return err
 }
@@ -65,7 +69,7 @@ func (s *relayServer) promoteQueuedTask(ctx context.Context, snapshot *taskEntry
 		return s.store.markTaskFailed(snapshot.TaskID, failureReasonExpired, nil), nil
 	}
 
-	calldata, parsed, err := validateRelayCalldata(common.Bytes2Hex(snapshot.Calldata), s.relayAddr, now)
+	parsed, err := validateRelayCalldataBytes(snapshot.Calldata, s.relayAddr, now)
 	if err != nil {
 		reason := failureReasonDropped
 		if errors.Is(err, errDeadlineExpired) {
@@ -73,6 +77,7 @@ func (s *relayServer) promoteQueuedTask(ctx context.Context, snapshot *taskEntry
 		}
 		return s.store.markTaskFailed(snapshot.TaskID, reason, nil), nil
 	}
+	calldata := snapshot.Calldata
 
 	baseFee, tipCap, err := cc.validateFee(ctx, calldata, parsed)
 	if err != nil {
@@ -130,10 +135,11 @@ func (s *relayServer) reconcileActiveTask(ctx context.Context, snapshot *taskEnt
 	// replace a stuck redeem with a higher-fee same-nonce redeem before moving
 	// on to cancellation.
 	if shouldAttemptRedeemReplacement(snapshot, now) {
-		calldata, parsed, err := validateRelayCalldata(common.Bytes2Hex(snapshot.Calldata), s.relayAddr, now)
+		parsed, err := validateRelayCalldataBytes(snapshot.Calldata, s.relayAddr, now)
 		if err != nil {
 			return false, err
 		}
+		calldata := snapshot.Calldata
 		baseFee, tipCap, err := cc.validateFee(ctx, calldata, parsed)
 		if err == nil {
 			currentTx, decodeErr := preparedTxFromRaw(snapshot.RelayTxData)

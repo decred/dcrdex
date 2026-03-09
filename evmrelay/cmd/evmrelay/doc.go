@@ -76,4 +76,19 @@
 // Persistence is handled by taskStore in task_store.go. Queue promotion and
 // active/cancel reconciliation live in tasks.go. The HTTP ingress and status
 // endpoints live in api.go.
+//
+// Deployment notes:
+//
+//   - The relay private key is stored as a hex string in the JSON config file.
+//     Restrict file permissions (chmod 600) and consider encrypted disk or a
+//     secrets manager for production deployments.
+//
+//   - The built-in HTTP server does not support TLS. Run behind a TLS-
+//     terminating reverse proxy (e.g. nginx, caddy) for production use.
+//
+//   - When running behind a reverse proxy, set "trustedProxies" in the JSON
+//     config to the proxy's IP address(es). Only requests from these addresses
+//     will have their X-Real-IP / X-Forwarded-For headers honored for rate
+//     limiting. If trustedProxies is empty (the default), proxy headers are
+//     ignored and rate limiting uses the direct connection address.
 package main

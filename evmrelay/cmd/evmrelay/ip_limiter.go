@@ -6,6 +6,7 @@ package main
 import (
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -58,11 +59,34 @@ func (l *ipLimiter) prune(maxAge time.Duration) {
 	}
 }
 
-// clientIP extracts the IP address from the request's RemoteAddr.
-func clientIP(r *http.Request) string {
+// clientIP extracts the client IP address from the request. Proxy headers
+// (X-Real-IP, X-Forwarded-For) are only honored when the direct connection
+// comes from an address in trustedProxies. If trustedProxies is empty, proxy
+// headers are ignored and RemoteAddr is always used.
+func clientIP(r *http.Request, trustedProxies map[string]struct{}) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
+	}
+	if len(trustedProxies) == 0 {
+		return host
+	}
+	if _, ok := trustedProxies[host]; !ok {
+		return host
+	}
+	if ip := r.Header.Get("X-Real-IP"); ip != "" {
+		if parsed := net.ParseIP(strings.TrimSpace(ip)); parsed != nil {
+			return parsed.String()
+		}
+	}
+	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+		candidate := forwarded
+		if i := strings.IndexByte(forwarded, ','); i > 0 {
+			candidate = forwarded[:i]
+		}
+		if parsed := net.ParseIP(strings.TrimSpace(candidate)); parsed != nil {
+			return parsed.String()
+		}
 	}
 	return host
 }

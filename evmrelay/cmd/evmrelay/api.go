@@ -36,7 +36,8 @@ func (s *relayServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := cc.checkHealth(r.Context()); err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, &evmrelay.HealthResponse{OK: false, Error: fmt.Sprintf("RPC unreachable: %v", err)})
+		log.Errorf("Health check failed for chain %d: %v", chainID, err)
+		writeJSON(w, http.StatusServiceUnavailable, &evmrelay.HealthResponse{OK: false, Error: "RPC unreachable"})
 		return
 	}
 
@@ -48,24 +49,24 @@ func (s *relayServer) handleEstimateFee(w http.ResponseWriter, r *http.Request) 
 
 	var req evmrelay.EstimateFeeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, &evmrelay.SubmitResponse{Error: "invalid request body"})
+		writeJSON(w, http.StatusBadRequest, &evmrelay.ErrorResponse{Error: "invalid request body"})
 		return
 	}
 
 	cc, err := s.getChain(req.ChainID)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, &evmrelay.SubmitResponse{Error: err.Error()})
+		writeJSON(w, http.StatusBadRequest, &evmrelay.ErrorResponse{Error: err.Error()})
 		return
 	}
 
 	if _, err := validateEstimateFeeRequest(&req, cc.allowedTargets); err != nil {
-		writeJSON(w, http.StatusBadRequest, &evmrelay.SubmitResponse{Error: err.Error()})
+		writeJSON(w, http.StatusBadRequest, &evmrelay.ErrorResponse{Error: err.Error()})
 		return
 	}
 
 	fee, err := cc.estimateFee(r.Context(), req.NumRedemptions)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, &evmrelay.SubmitResponse{Error: err.Error()})
+		writeJSON(w, http.StatusInternalServerError, &evmrelay.ErrorResponse{Error: err.Error()})
 		return
 	}
 
@@ -99,6 +100,13 @@ func (s *relayServer) handleRelay(w http.ResponseWriter, r *http.Request) {
 	calldata, parsed, err := validateRelayCalldata(req.Calldata, s.relayAddr, time.Now())
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, &evmrelay.SubmitResponse{Error: err.Error()})
+		return
+	}
+
+	if depth := s.store.queueDepth(req.ChainID); depth >= maxQueuedTasksPerChain {
+		writeJSON(w, http.StatusServiceUnavailable, &evmrelay.SubmitResponse{
+			Error: fmt.Sprintf("chain %d queue is full (%d pending tasks)", req.ChainID, depth),
+		})
 		return
 	}
 
@@ -195,18 +203,30 @@ func validateRelayCalldata(calldataHex string, relayAddr common.Address, now tim
 		return nil, nil, fmt.Errorf("invalid calldata hex")
 	}
 
-	parsed, err := dexeth.ParseSignedRedeemDataV1(calldata)
+	parsed, err := validateRelayCalldataBytes(calldata, relayAddr, now)
 	if err != nil {
-		return nil, nil, fmt.Errorf("invalid calldata: %v", err)
-	}
-	if err := validateSignedRedeemRequest(parsed, relayAddr, now); err != nil {
 		return nil, nil, err
 	}
 
 	return calldata, parsed, nil
 }
 
+func validateRelayCalldataBytes(calldata []byte, relayAddr common.Address, now time.Time) (*dexeth.SignedRedemptionV1, error) {
+	parsed, err := dexeth.ParseSignedRedeemDataV1(calldata)
+	if err != nil {
+		return nil, fmt.Errorf("invalid calldata: %v", err)
+	}
+	if err := validateSignedRedeemRequest(parsed, relayAddr, now); err != nil {
+		return nil, err
+	}
+
+	return parsed, nil
+}
+
 func validateSignedRedeemRequest(parsed *dexeth.SignedRedemptionV1, relayAddr common.Address, now time.Time) error {
+	if parsed.NumRedemptions <= 0 {
+		return fmt.Errorf("numRedemptions must be > 0")
+	}
 	if parsed.NumRedemptions > evmrelay.MaxSignedRedeemBatch {
 		return fmt.Errorf("too many redemptions: %d > %d", parsed.NumRedemptions, evmrelay.MaxSignedRedeemBatch)
 	}

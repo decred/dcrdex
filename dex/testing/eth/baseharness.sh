@@ -120,7 +120,7 @@ gethDeploy() {
   cat > "${NODES_ROOT}/harness-ctl/_deploy_cmd.js" <<DEPLOYEOF
 var __result = ${jsExpr};
 DEPLOYEOF
-  "${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/deploy.js,${NODES_ROOT}/harness-ctl/_deploy_cmd.js --exec __result" | sed 's/\"//g'
+  "${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/deploy.js,${NODES_ROOT}/harness-ctl/_deploy_cmd.js --exec __result" | sed 's/"//g'
 }
 
 echo "Deploying ETHSwapV0 contract."
@@ -150,7 +150,7 @@ mine_pending_txs() {
 mine_pending_txs
 
 echo "Deploying ETHSwap1 contract."
-ETH_SWAP_CONTRACT_HASH_V1=$("${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/deploy.js --exec deploy(\"${ETH_SWAP_V1}\")" | sed 's/"//g')
+ETH_SWAP_CONTRACT_HASH_V1=$(gethDeploy "deploy(\"${ETH_SWAP_V1}\")")
 
 mine_pending_txs
 
@@ -298,7 +298,7 @@ go build -C "${REPO_ROOT}" -o ~/dextest/evmrelay ./evmrelay/cmd/evmrelay
 
 # Stop existing relay if running, then (re)start with updated config.
 if nc -z localhost 21232 2>/dev/null; then
-    pkill -f "evmrelay.*--config" || true
+    pkill -xf ".*dextest/evmrelay --config.*" || true
     sleep 1
 fi
 
@@ -313,7 +313,8 @@ for i in $(seq 1 10); do
     nc -z localhost 21232 2>/dev/null && break
 done
 
-# Fund the relay address on this chain.
+# Fund the relay address on this chain. The relay only needs gas money,
+# not swap collateral, so 100 ETH is sufficient.
 "${NODES_ROOT}/harness-ctl/sendtoaddress" "${RELAY_ETH_ADDR}" 100
 
 # Reenable history and attach to the control session.

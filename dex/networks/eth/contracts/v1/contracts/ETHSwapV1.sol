@@ -238,7 +238,8 @@ contract ETHSwap is EIP712, ReentrancyGuard {
             Vector calldata v = vectors[i];
 
             require(v.value > 0, "zero value");
-            require(v.initiator != address(0) && v.participant != address(0), "zero addr");
+            require(v.initiator == msg.sender, "bad initiator");
+            require(v.participant != address(0), "zero addr");
             require(v.refundTimestamp > block.timestamp, "bad refund time");
             require(v.secretHash != bytes32(0), "zero hash");
             require(v.secretHash != REFUND_RECORD_HASH, "illegal hash");
@@ -247,9 +248,7 @@ contract ETHSwap is EIP712, ReentrancyGuard {
             bytes32 key = contractKey(token, v);
             require(swaps[key] == bytes32(0), "already exists");
 
-            // We subtract 1 from the block.number to avoid failing a redemption
-            // if the swap is redeemed in the same block that it was initiated.
-            bytes32 record = bytes32(block.number - 1);
+            bytes32 record = bytes32(block.number);
             require(!secretValidates(record, v.secretHash), "hash collision");
 
             swaps[key] = record;
@@ -262,10 +261,15 @@ contract ETHSwap is EIP712, ReentrancyGuard {
             require(msg.value == total, "bad ETH value");
         } else {
             require(msg.value == 0, "no ETH for token swap");
+            uint256 balBefore = IERC20(token).balanceOf(address(this));
             IERC20(token).safeTransferFrom(
                 msg.sender,
                 address(this),
                 total
+            );
+            require(
+                IERC20(token).balanceOf(address(this)) - balBefore == total,
+                "fee-on-transfer not supported"
             );
         }
     }
@@ -382,8 +386,11 @@ contract ETHSwap is EIP712, ReentrancyGuard {
         require(recovered == participant, "bad signature");
     }
 
-    // _executeRedemptions processes the swap state changes and returns the total value.
-    function _executeRedemptions(
+    // _executeETHRedemptions processes the swap state changes for native ETH
+    // swaps only and returns the total value. Token swaps use a different
+    // contract key (keyed by token address), so they cannot be redeemed
+    // through this path.
+    function _executeETHRedemptions(
         Redemption[] calldata redemptions,
         address participant
     ) internal returns (uint256 total) {
@@ -433,9 +440,9 @@ contract ETHSwap is EIP712, ReentrancyGuard {
             redemptions, feeRecipient, relayerFee, nonce, deadline, signature
         );
 
-        uint256 total = _executeRedemptions(redemptions, participant);
+        uint256 total = _executeETHRedemptions(redemptions, participant);
 
-        require(relayerFee <= total, "fee exceeds total");
+        require(relayerFee <= total / 2, "fee exceeds half");
 
         // Enforce feeRecipient == msg.sender (or use msg.sender if zero).
         if (feeRecipient != address(0)) {
