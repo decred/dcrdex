@@ -814,6 +814,27 @@ func (s *Swapper) restoreActiveSwaps(allowPartial bool) error {
 		}
 	}
 
+	// Revoke pre-upgrade matches that lack per-match swap addresses
+	// introduced in PerMatchAddrVersion. Matches at NewlyMatched or
+	// MakerSwapCast cannot proceed without addresses, so revoke them
+	// without fault. Matches at TakerSwapCast or later already have both
+	// contracts on-chain and don't need the addresses to finish.
+	var toRevoke []*matchTracker
+	for _, mt := range s.matches {
+		if mt.makerSwapAddr != "" || mt.takerSwapAddr != "" {
+			continue
+		}
+		if mt.Status != order.NewlyMatched && mt.Status != order.MakerSwapCast {
+			continue
+		}
+		toRevoke = append(toRevoke, mt)
+	}
+	for _, mt := range toRevoke {
+		log.Infof("Revoking pre-upgrade match %v (status %v): no per-match swap addresses", mt.ID(), mt.Status)
+		s.deleteMatch(mt)
+		s.failMatch(mt, false, false) // no fault
+	}
+
 	// Live coin waiters are abandoned on Swapper shutdown. When a client
 	// reconnects or their init request times out, they will resend it.
 
