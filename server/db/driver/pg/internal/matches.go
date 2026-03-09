@@ -35,6 +35,8 @@ const (
 		-- The remaining columns are only set during swap negotiation.
 		sigMatchAckMaker BYTEA,   -- maker's ack of the match
 		sigMatchAckTaker BYTEA,   -- taker's ack of the match
+		makerSwapAddr TEXT DEFAULT '',  -- per-match swap address from maker's ack
+		takerSwapAddr TEXT DEFAULT '',  -- per-match swap address from taker's ack
 
 		-- initiator/A (maker) CONTRACT data
 		aContractCoinID BYTEA,    -- coinID (e.g. tx:vout) with the contract
@@ -63,6 +65,7 @@ const (
 		WHERE takerSell IS NOT NULL AND epochIdx = $1 AND epochDur = $2;`
 
 	RetrieveSwapData = `SELECT status, sigMatchAckMaker, sigMatchAckTaker,
+		makerSwapAddr, takerSwapAddr,
 		aContractCoinID, aContract, aContractTime, bSigAckOfAContract,
 		bContractCoinID, bContract, bContractTime, aSigAckOfBContract,
 		aRedeemCoinID, aRedeemSecret, aRedeemTime, bSigAckOfARedeem,
@@ -105,14 +108,16 @@ const (
 	RetrieveUserMatches = `SELECT matchid, active, takerSell,
 		takerOrder, takerAccount, takerAddress,
 		makerOrder, makerAccount, makerAddress,
-		epochIdx, epochDur, quantity, rate, baseRate, quoteRate, status
+		epochIdx, epochDur, quantity, rate, baseRate, quoteRate, status,
+		makerSwapAddr, takerSwapAddr
 	FROM %s
 	WHERE takerAccount = $1 OR makerAccount = $1;`
 
 	RetrieveActiveUserMatches = `SELECT matchid, takerSell,
 		takerOrder, takerAccount, takerAddress,
 		makerOrder, makerAccount, makerAddress,
-		epochIdx, epochDur, quantity, rate, baseRate, quoteRate, status
+		epochIdx, epochDur, quantity, rate, baseRate, quoteRate, status,
+		makerSwapAddr, takerSwapAddr
 	FROM %s
 	WHERE (takerAccount = $1 OR makerAccount = $1)
 		AND active;`
@@ -144,6 +149,7 @@ const (
 		makerOrder, makerAccount, makerAddress,
 		epochIdx, epochDur, quantity, rate, baseRate, quoteRate, status,
 		sigMatchAckMaker, sigMatchAckTaker,
+		makerSwapAddr, takerSwapAddr,
 		aContractCoinID, aContract, aContractTime, bSigAckOfAContract,
 		bContractCoinID, bContract, bContractTime, aSigAckOfBContract,
 		aRedeemCoinID, aRedeemSecret, aRedeemTime, bSigAckOfARedeem,
@@ -210,6 +216,9 @@ const (
 
 	SetMakerMatchAckSig = `UPDATE %s SET sigMatchAckMaker = $2 WHERE matchid = $1;`
 	SetTakerMatchAckSig = `UPDATE %s SET sigMatchAckTaker = $2 WHERE matchid = $1;`
+
+	SetMakerSwapAddr = `UPDATE %s SET makerSwapAddr = $2 WHERE matchid = $1;`
+	SetTakerSwapAddr = `UPDATE %s SET takerSwapAddr = $2 WHERE matchid = $1;`
 
 	SetInitiatorSwapData = `UPDATE %s SET status = $2,
 		aContractCoinID = $3, aContract = $4, aContractTime = $5

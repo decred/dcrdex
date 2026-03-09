@@ -147,6 +147,11 @@ type matchTracker struct {
 	matchTime   time.Time // epoch close time
 	makerStatus *swapStatus
 	takerStatus *swapStatus
+	// Per-match swap addresses from each party's match acknowledgement.
+	// Each match requires a unique swap address to ensure unique contracts.
+	makerSwapAddr         string
+	takerSwapAddr         string
+	counterPartyAddrsSent bool
 }
 
 // expiredBy returns true if the lock time of either party's *known* swap is
@@ -235,6 +240,27 @@ type Swapper struct {
 	userMatches map[account.AccountID]map[order.MatchID]*matchTracker
 	acctMatches map[uint32]map[string]map[order.MatchID]*matchTracker
 
+	// activeCoinsMtx protects activeCoinIDs and matchCoinIDs. This is a
+	// separate lock from matchMtx to avoid contention on the global match
+	// lock during processInit's CoinID dedup check.
+	activeCoinsMtx sync.Mutex
+	// activeCoinIDs maps composite keys of hex-encoded CoinID and contract
+	// data to the match using them. The composite key (coinID:contract)
+	// prevents the same on-chain contract from being used in multiple
+	// matches simultaneously. Using a composite key instead of bare CoinID
+	// is necessary because EVM assets batch multiple swaps into a single
+	// transaction, sharing the same txHash (CoinID) across matches while
+	// each swap has a unique contract (version + locator/secretHash).
+	// The server doesn't need secret-hash dedup because the maker generates
+	// secret hashes and the server relays them, so the server inherently
+	// controls their uniqueness. The client deduplicates secret hashes
+	// because it doesn't trust the server.
+	activeCoinIDs map[string]order.MatchID
+	// matchCoinIDs is the reverse of activeCoinIDs: it maps match IDs to the
+	// keys registered in activeCoinIDs for that match. This allows
+	// O(1) cleanup in deleteMatch instead of iterating all activeCoinIDs.
+	matchCoinIDs map[order.MatchID][]string
+
 	// The broadcast timeout.
 	bTimeout time.Duration
 	// txWaitExpiration is the longest the Swapper will wait for a coin waiter.
@@ -311,6 +337,8 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 		matches:          make(map[order.MatchID]*matchTracker),
 		userMatches:      make(map[account.AccountID]map[order.MatchID]*matchTracker),
 		acctMatches:      acctMatches,
+		activeCoinIDs:    make(map[string]order.MatchID),
+		matchCoinIDs:     make(map[order.MatchID][]string),
 		bTimeout:         cfg.BroadcastTimeout,
 		txWaitExpiration: cfg.TxWaitExpiration,
 		lockTimeTaker:    cfg.LockTimeTaker,
@@ -383,6 +411,14 @@ func (s *Swapper) addMatch(mt *matchTracker) {
 func (s *Swapper) deleteMatch(mt *matchTracker) {
 	mid := mt.ID()
 	delete(s.matches, mid)
+
+	// Clean up activeCoinIDs for this match's swap contracts.
+	s.activeCoinsMtx.Lock()
+	for _, coinID := range s.matchCoinIDs[mid] {
+		delete(s.activeCoinIDs, coinID)
+	}
+	delete(s.matchCoinIDs, mid)
+	s.activeCoinsMtx.Unlock()
 
 	// Unlock the maker and taker order coins. May be redundant if processBlock
 	// confirmed both swaps, but premature/quick counterparty actions that
@@ -703,11 +739,14 @@ func (s *Swapper) restoreActiveSwaps(allowPartial bool) error {
 
 		epochCloseTime := match.Epoch.End()
 		mt := &matchTracker{
-			Match:       match,
-			time:        epochCloseTime.Add(time.Minute), // not quite, just be generous
-			matchTime:   epochCloseTime,
-			makerStatus: &swapStatus{}, // populated by translateSwapStatus
-			takerStatus: &swapStatus{},
+			Match:                 match,
+			time:                  epochCloseTime.Add(time.Minute), // not quite, just be generous
+			matchTime:             epochCloseTime,
+			makerStatus:           &swapStatus{}, // populated by translateSwapStatus
+			takerStatus:           &swapStatus{},
+			makerSwapAddr:         sd.SwapData.MakerSwapAddr,
+			takerSwapAddr:         sd.SwapData.TakerSwapAddr,
+			counterPartyAddrsSent: sd.SwapData.MakerSwapAddr != "" && sd.SwapData.TakerSwapAddr != "",
 		}
 
 		makerStatus := &swapStatusData{
@@ -740,6 +779,22 @@ func (s *Swapper) restoreActiveSwaps(allowPartial bool) error {
 
 		log.Infof("Resuming swap %v in status %v", mid, mt.Status)
 		s.addMatch(mt)
+
+		// Register swap contracts in the dedup maps using composite
+		// keys of CoinID and contract data.
+		for _, cs := range []struct {
+			coinOut  []byte
+			contract []byte
+		}{
+			{makerStatus.ContractCoinOut, makerStatus.ContractScript},
+			{takerStatus.ContractCoinOut, takerStatus.ContractScript},
+		} {
+			if len(cs.coinOut) > 0 {
+				dedupKey := fmt.Sprintf("%x:%x", cs.coinOut, cs.contract)
+				s.activeCoinIDs[dedupKey] = mid
+				s.matchCoinIDs[mid] = append(s.matchCoinIDs[mid], dedupKey)
+			}
+		}
 	}
 
 	// Live coin waiters are abandoned on Swapper shutdown. When a client
@@ -1028,7 +1083,7 @@ func (s *Swapper) processBlock(ctx context.Context, block *blockNotification) {
 // purposes. If userFault is false, there will be no penalty, such as if the
 // failure is because a swap tx lock time expired before required confirmations
 // were reached.
-func (s *Swapper) failMatch(match *matchTracker, userFault bool) {
+func (s *Swapper) failMatch(match *matchTracker, userFault bool, takerAddrFault bool) {
 	// From the match status, determine maker/taker fault and the corresponding
 	// auth.NoActionStep.
 	var makerFault bool
@@ -1036,9 +1091,17 @@ func (s *Swapper) failMatch(match *matchTracker, userFault bool) {
 	var refTime time.Time // a reference time found in the DB for reproducibly sorting outcomes
 	switch match.Status {
 	case order.NewlyMatched:
-		outcome = db.OutcomeNoSwapAsMaker
-		refTime = match.Epoch.End()
-		makerFault = true
+		if takerAddrFault {
+			// The taker failed to provide their per-match swap address
+			// in time, preventing the maker from swapping.
+			outcome = db.OutcomeNoAddrAsTaker
+			refTime = match.Epoch.End()
+			makerFault = false
+		} else {
+			outcome = db.OutcomeNoSwapAsMaker
+			refTime = match.Epoch.End()
+			makerFault = true
+		}
 	case order.MakerSwapCast:
 		outcome = db.OutcomeNoSwapAsTaker
 		refTime = match.makerStatus.swapTime // swapConfirmed time is not in the DB
@@ -1085,6 +1148,11 @@ func (s *Swapper) failMatch(match *matchTracker, userFault bool) {
 type fail struct {
 	match *matchTracker
 	fault bool
+	// takerAddrFault overrides the default fault attribution for
+	// NewlyMatched timeouts. When true, the taker is blamed instead of
+	// the maker because the taker failed to provide their per-match
+	// swap address in time.
+	takerAddrFault bool
 }
 
 // checkInactionEventBased scans the swapStatus structures, checking for actions
@@ -1094,6 +1162,11 @@ type fail struct {
 // matches in NewlyMatched that have not received a maker swap following the
 // match request, and in MakerRedeemed that have not received a taker redeem
 // following the redemption request triggered by the makers redeem.
+//
+// For NewlyMatched timeouts, if the taker has not yet provided their per-match
+// swap address (takerSwapAddr is empty), the taker is faulted instead of the
+// maker, since the maker cannot broadcast their swap without the taker's
+// address.
 func (s *Swapper) checkInactionEventBased() {
 	// If the DB is failing, do not penalize or attempt to start revocations.
 	if err := s.storage.LastErr(); err != nil {
@@ -1119,7 +1192,7 @@ func (s *Swapper) checkInactionEventBased() {
 
 		deleteMatch := func(fault bool) {
 			s.deleteMatch(match)
-			failures = append(failures, fail{match, fault}) // to process after map delete
+			failures = append(failures, fail{match: match, fault: fault})
 		}
 
 		switch match.Status {
@@ -1127,7 +1200,16 @@ func (s *Swapper) checkInactionEventBased() {
 			// Maker has not broadcast their swap. They have until match time
 			// plus bTimeout.
 			if tooOld(match.time) {
-				deleteMatch(true)
+				if match.takerSwapAddr == "" {
+					// The taker failed to provide their per-match swap
+					// address in time, preventing the maker from
+					// swapping. Fault the taker, not the maker.
+					log.Infof("Revoking match %v at NewlyMatched: taker did not provide per-match address in time", match.ID())
+					s.deleteMatch(match)
+					failures = append(failures, fail{match: match, fault: true, takerAddrFault: true})
+				} else {
+					deleteMatch(true)
+				}
 			}
 		case order.MakerSwapCast:
 			// If the taker contract's expected lock time would be in the past,
@@ -1180,7 +1262,7 @@ func (s *Swapper) checkInactionEventBased() {
 	// Record failed matches in the DB and auth mgr, unlock coins, and send
 	// revoke_match messages.
 	for _, fail := range failures {
-		s.failMatch(fail.match, fail.fault)
+		s.failMatch(fail.match, fail.fault, fail.takerAddrFault)
 	}
 }
 
@@ -1222,7 +1304,7 @@ func (s *Swapper) checkInactionBlockBased(assetID uint32) {
 		deleteMatch := func() {
 			// Fail the match, and assign fault if lock times are not passed.
 			s.deleteMatch(match)
-			failures = append(failures, fail{match, !match.expiredBy(now)})
+			failures = append(failures, fail{match: match, fault: !match.expiredBy(now)})
 		}
 
 		switch match.Status {
@@ -1247,7 +1329,7 @@ func (s *Swapper) checkInactionBlockBased(assetID uint32) {
 	// Record failed matches in the DB and auth mgr, unlock coins, and send
 	// revoke_match messages.
 	for _, fail := range failures {
-		s.failMatch(fail.match, fail.fault)
+		s.failMatch(fail.match, fail.fault, fail.takerAddrFault)
 	}
 }
 
@@ -1566,13 +1648,50 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		log.Infof("Swap txn %v (%s) with low fee rate (%v required), accepted with %d confirmations.",
 			contract, stepInfo.asset.Symbol, reqFeeRate, confs)
 	}
-	if contract.SwapAddress != counterParty.order.Trade().SwapAddress() {
+	// Use the per-match swap address from the counterparty's match ack.
+	stepInfo.match.mtx.RLock()
+	var expectedAddr string
+	if counterParty.isMaker {
+		expectedAddr = stepInfo.match.makerSwapAddr
+	} else {
+		expectedAddr = stepInfo.match.takerSwapAddr
+	}
+	stepInfo.match.mtx.RUnlock()
+	if expectedAddr == "" {
+		actor.status.endSwapSearch()
+		s.respondError(msg.ID, actor.user, msgjson.ContractError,
+			fmt.Sprintf("counterparty per-match address not yet received for match %v", stepInfo.match.ID()))
+		return wait.DontTryAgain
+	}
+	if contract.SwapAddress != expectedAddr {
 		actor.status.endSwapSearch() // allow client retry even before notifying him
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
 			fmt.Sprintf("incorrect recipient. expected %s. got %s",
-				contract.SwapAddress, counterParty.order.Trade().SwapAddress()))
+				expectedAddr, contract.SwapAddress))
 		return wait.DontTryAgain
 	}
+
+	// Swap contract dedup check and registration: atomically reject if this
+	// contract is already in use by another match, or register it.
+	// Registering early avoids a TOCTOU race; stale entries from later
+	// validation failures are harmless since deleteMatch cleans up
+	// activeCoinIDs. The composite key of CoinID and contract data is used
+	// so that EVM batched swaps (same txHash, different contract/locator)
+	// are not incorrectly rejected.
+	dedupKey := fmt.Sprintf("%x:%x", params.CoinID, params.Contract)
+	s.activeCoinsMtx.Lock()
+	if existingMatch, exists := s.activeCoinIDs[dedupKey]; exists && existingMatch != stepInfo.match.ID() {
+		s.activeCoinsMtx.Unlock()
+		actor.status.endSwapSearch()
+		s.respondError(msg.ID, actor.user, msgjson.ContractError,
+			fmt.Sprintf("swap contract %s already in use by match %s", dedupKey, existingMatch))
+		return wait.DontTryAgain
+	}
+	if _, already := s.activeCoinIDs[dedupKey]; !already {
+		s.matchCoinIDs[stepInfo.match.ID()] = append(s.matchCoinIDs[stepInfo.match.ID()], dedupKey)
+	}
+	s.activeCoinIDs[dedupKey] = stepInfo.match.ID()
+	s.activeCoinsMtx.Unlock()
 	if contract.Value() != stepInfo.checkVal {
 		actor.status.endSwapSearch() // allow client retry even before notifying him
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
@@ -1604,7 +1723,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		s.matchMtx.Lock()
 		defer s.matchMtx.Unlock()
 		if _, found := s.matches[stepInfo.match.ID()]; found {
-			s.failMatch(stepInfo.match, false) // no fault
+			s.failMatch(stepInfo.match, false, false) // no fault
 			s.deleteMatch(stepInfo.match)
 		} // else it's already revoked
 		return wait.DontTryAgain // and don't tell counterparty of expired contract they should not redeem
@@ -2171,7 +2290,9 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 	// Verify the signature of each Acknowledgement, and store the signatures in
 	// the matchTracker of each match (messageAcker). The signature will be
 	// either a MakerMatch or TakerMatch signature depending on whether the
-	// responding user is the maker or taker.
+	// responding user is the maker or taker. Counterparty address notifications
+	// are collected here but deferred until after DB persistence.
+	var addrNotifications []*matchTracker
 	for i, matchInfo := range matches {
 		ack := &acks[i]
 		match := matchInfo.match
@@ -2192,28 +2313,82 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 			return
 		}
 
-		// Store the signature in the matchTracker. These must be collected
-		// before the init steps begin and swap contracts are broadcasted.
+		// Cancel matches don't involve swaps, so no per-match address
+		// is needed. Only validate and store addresses for trade matches.
+		isCancelMatch := match.Taker.Type() == order.CancelOrderType
+		ackAddr := ack.Address
+
+		if !isCancelMatch {
+			// Validate the per-match swap address.
+			if ackAddr == "" {
+				s.respondError(msg.ID, user, msgjson.OrderParameterError,
+					fmt.Sprintf("missing per-match swap address for match %v", matchID))
+				return
+			}
+			// The user's swap address is on their redeem asset (the chain
+			// where the counterparty's contract pays them).
+			var redeemAssetID uint32
+			if matchInfo.isMaker {
+				redeemAssetID = match.makerStatus.redeemAsset
+			} else {
+				redeemAssetID = match.takerStatus.redeemAsset
+			}
+			swapperAsset := s.coins[redeemAssetID]
+			if swapperAsset == nil || !swapperAsset.Backend.CheckSwapAddress(ackAddr) {
+				s.respondError(msg.ID, user, msgjson.OrderParameterError,
+					fmt.Sprintf("invalid per-match swap address %q for asset %d", ackAddr, redeemAssetID))
+				return
+			}
+		}
+
+		// Store the signature and per-match address in the matchTracker.
+		// These must be collected before the init steps begin and swap
+		// contracts are broadcasted.
 		match.mtx.Lock()
 		status := match.Status
 		if matchInfo.isMaker {
 			match.Sigs.MakerMatch = ack.Sig
+			if !isCancelMatch {
+				match.makerSwapAddr = ackAddr
+			}
 		} else {
 			match.Sigs.TakerMatch = ack.Sig
+			if !isCancelMatch {
+				match.takerSwapAddr = ackAddr
+			}
+		}
+		// Check if both sides have provided per-match addresses and we
+		// haven't already sent counterparty addresses. The flag prevents
+		// duplicate sends when maker and taker acks arrive simultaneously.
+		// The actual notification is deferred until after DB persistence.
+		if !isCancelMatch && match.makerSwapAddr != "" && match.takerSwapAddr != "" && !match.counterPartyAddrsSent {
+			match.counterPartyAddrsSent = true
+			addrNotifications = append(addrNotifications, match)
+			// Reset the match timer so the maker gets a full bTimeout
+			// from when both addresses are available. Without this, a
+			// slow taker could consume most of the bTimeout, leaving
+			// the maker insufficient time to broadcast.
+			match.time = time.Now().UTC()
 		}
 		match.mtx.Unlock()
 		log.Debugf("processMatchAcks: storing valid 'match' ack signature from %v (maker=%v) "+
 			"for match %v (status %v)", user, matchInfo.isMaker, matchID, status)
 	}
 
-	// Store the signatures in the DB.
+	// Store the signatures and addresses in the DB. Counterparty address
+	// notifications are deferred until after persistence so that a crash
+	// between notification send and DB write doesn't leave the client
+	// acting on an address the server lost.
 	for i, matchInfo := range matches {
 		ackSig := acks[i].Sig
+		ackAddr := acks[i].Address
 		match := matchInfo.match
 
 		storFn := s.storage.SaveMatchAckSigB
+		storAddrFn := s.storage.SaveMatchAckAddrB
 		if matchInfo.isMaker {
 			storFn = s.storage.SaveMatchAckSigA
+			storAddrFn = s.storage.SaveMatchAckAddrA
 		}
 		matchID := match.ID()
 		mid := db.MarketMatchID{
@@ -2229,6 +2404,107 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 				"internal server error")
 			// TODO: revoke the match without penalties?
 			return
+		}
+		// Cancel matches have no per-match address to store.
+		if match.Taker.Type() == order.CancelOrderType {
+			continue
+		}
+		err = storAddrFn(mid, ackAddr)
+		if err != nil {
+			log.Errorf("saving match ack address (match id=%v, maker=%v) failed: %v",
+				matchID, matchInfo.isMaker, err)
+			s.respondError(msg.ID, matchInfo.user, msgjson.UnknownMarketError,
+				"internal server error")
+			s.revoke(match)
+			return
+		}
+	}
+
+	// Now that all signatures and addresses are persisted, send
+	// counterparty address notifications.
+	for _, match := range addrNotifications {
+		s.sendCounterPartyAddresses(match)
+	}
+}
+
+// sendCounterPartyAddresses sends a CounterPartyAddress notification to each
+// side of a match, delivering the counterparty's per-match swap address. This
+// is called after both sides have acknowledged the match with per-match
+// addresses. The match mtx should NOT be held.
+func (s *Swapper) sendCounterPartyAddresses(match *matchTracker) {
+	s.sendCounterPartyAddress(match, match.Maker.User())
+	s.sendCounterPartyAddress(match, match.Taker.User())
+	log.Debugf("Sent %s notifications for match %v (maker addr -> taker, taker addr -> maker)",
+		msgjson.CounterPartyAddressRoute, match.ID())
+}
+
+// UserConnected is called when a user connects (or reconnects). It re-sends
+// counterparty_address notifications for any of the user's active matches where
+// both per-match addresses are available. This recovers from lost notifications
+// due to brief disconnects.
+func (s *Swapper) UserConnected(user account.AccountID) {
+	s.matchMtx.RLock()
+	userMatches := s.userMatches[user]
+	var toResend []*matchTracker
+	for _, mt := range userMatches {
+		mt.mtx.RLock()
+		bothReady := mt.makerSwapAddr != "" && mt.takerSwapAddr != ""
+		mt.mtx.RUnlock()
+		if bothReady {
+			toResend = append(toResend, mt)
+		}
+	}
+	s.matchMtx.RUnlock()
+	for _, mt := range toResend {
+		s.sendCounterPartyAddress(mt, user)
+	}
+}
+
+// sendCounterPartyAddress sends the counterparty's per-match swap address to
+// the specified user for a given match. The match mtx should NOT be held.
+func (s *Swapper) sendCounterPartyAddress(match *matchTracker, user account.AccountID) {
+	match.mtx.RLock()
+	makerAddr := match.makerSwapAddr
+	takerAddr := match.takerSwapAddr
+	match.mtx.RUnlock()
+
+	mid := match.ID()
+	route := msgjson.CounterPartyAddressRoute
+
+	// Determine which side(s) the user is on and send the counterparty's
+	// address. In self-trade scenarios (maker == taker), the user needs
+	// notifications for both sides.
+	type addrNotification struct {
+		orderID order.OrderID
+		address string
+	}
+	var toSend []addrNotification
+	if user == match.Maker.User() {
+		toSend = append(toSend, addrNotification{match.Maker.ID(), takerAddr})
+	}
+	if user == match.Taker.User() {
+		toSend = append(toSend, addrNotification{match.Taker.ID(), makerAddr})
+	}
+	if len(toSend) == 0 {
+		return
+	}
+
+	for _, an := range toSend {
+		cpa := &msgjson.CounterPartyAddress{
+			OrderID: an.orderID.Bytes(),
+			MatchID: mid[:],
+			Address: an.address,
+		}
+		s.authMgr.Sign(cpa)
+		ntfn, err := msgjson.NewNotification(route, cpa)
+		if err != nil {
+			log.Errorf("Failed to create %s notification for %v, match %v: %v",
+				route, user, mid, err)
+			continue
+		}
+		if err = s.authMgr.Send(user, ntfn); err != nil {
+			log.Debugf("Failed to send %s to %v, match %v: %v",
+				route, user, mid, err)
 		}
 	}
 }

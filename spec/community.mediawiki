@@ -27,6 +27,12 @@ replace the order.
 In the event that the taker fails to respond to the maker's initialization
 transaction, the maker will incur no violation.
 
+Each party provides a unique per-match swap address in their match
+acknowledgement. If the taker fails to provide their per-match address before
+the broadcast timeout, the match is revoked and the taker incurs the violation
+instead of the maker, since the maker cannot broadcast their swap without the
+taker's address.
+
 ===Rule 3: An account's cancellation rate must not exceed the threshold===
 
 The cancellation rate is the ratio of the count of canceled orders to the

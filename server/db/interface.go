@@ -275,10 +275,14 @@ type MatchData struct {
 	ID        order.MatchID
 	Taker     order.OrderID
 	TakerAcct account.AccountID
+	// Deprecated: TakerAddr is the order-level address. Use TakerSwapAddr
+	// for contract recipients.
 	TakerAddr string
 	TakerSell bool
 	Maker     order.OrderID
 	MakerAcct account.AccountID
+	// Deprecated: MakerAddr is the order-level address. Use MakerSwapAddr
+	// for contract recipients.
 	MakerAddr string
 	Epoch     order.EpochID
 	Quantity  uint64
@@ -287,6 +291,11 @@ type MatchData struct {
 	QuoteRate uint64
 	Active    bool              // match negotiation in progress, not yet completed or failed
 	Status    order.MatchStatus // note that failed swaps, where Active=false, can have any status
+	// MakerSwapAddr and TakerSwapAddr are per-match swap addresses from
+	// each party's match acknowledgement. These are the addresses used for
+	// swap contracts.
+	MakerSwapAddr string
+	TakerSwapAddr string
 }
 
 // MatchDataWithCoins pairs MatchData (embedded) with the encode swap and redeem
@@ -321,20 +330,25 @@ type MatchStatus struct {
 type SwapData struct {
 	SigMatchAckMaker []byte
 	SigMatchAckTaker []byte
-	ContractA        []byte // contains the secret hash used by both parties
-	ContractACoinID  []byte
-	ContractATime    int64
-	ContractAAckSig  []byte // B's signature of contract A data
-	ContractB        []byte
-	ContractBCoinID  []byte
-	ContractBTime    int64
-	ContractBAckSig  []byte // A's signature of contract B data
-	RedeemACoinID    []byte
-	RedeemASecret    []byte // the secret revealed in A's redeem, also used in B's redeem
-	RedeemATime      int64
-	RedeemAAckSig    []byte // B's signature of redeem A data
-	RedeemBCoinID    []byte
-	RedeemBTime      int64
+	// MakerSwapAddr and TakerSwapAddr are per-match swap addresses provided
+	// by each party in their match acknowledgement. These are used instead of
+	// the order-level addresses to ensure each match has a unique contract.
+	MakerSwapAddr   string
+	TakerSwapAddr   string
+	ContractA       []byte // contains the secret hash used by both parties
+	ContractACoinID []byte
+	ContractATime   int64
+	ContractAAckSig []byte // B's signature of contract A data
+	ContractB       []byte
+	ContractBCoinID []byte
+	ContractBTime   int64
+	ContractBAckSig []byte // A's signature of contract B data
+	RedeemACoinID   []byte
+	RedeemASecret   []byte // the secret revealed in A's redeem, also used in B's redeem
+	RedeemATime     int64
+	RedeemAAckSig   []byte // B's signature of redeem A data
+	RedeemBCoinID   []byte
+	RedeemBTime     int64
 }
 
 // SwapDataFull combines a MatchData, SwapData, and the Base/Quote asset IDs.
@@ -433,6 +447,14 @@ type SwapArchiver interface {
 	// SaveMatchAckSigB records the match data acknowledgement signature from
 	// swap party B (the participant), which is the taker in the DEX.
 	SaveMatchAckSigB(mid MarketMatchID, sig []byte) error
+
+	// SaveMatchAckAddrA records the per-match swap address from the maker's
+	// match acknowledgement.
+	SaveMatchAckAddrA(mid MarketMatchID, addr string) error
+
+	// SaveMatchAckAddrB records the per-match swap address from the taker's
+	// match acknowledgement.
+	SaveMatchAckAddrB(mid MarketMatchID, addr string) error
 
 	// Swap contracts, and counterparty audit acknowledgement signatures.
 
@@ -561,6 +583,10 @@ const (
 	// Order cancel/complete
 	OutcomeOrderComplete
 	OutcomeOrderCanceled
+	// OutcomeNoAddrAsTaker is recorded when a match times out at
+	// NewlyMatched because the taker failed to provide their per-match
+	// swap address in time, preventing the maker from broadcasting.
+	OutcomeNoAddrAsTaker
 )
 
 func (o Outcome) String() string {
@@ -585,6 +611,8 @@ func (o Outcome) String() string {
 		return "excessive cancels"
 	case OutcomeOrderComplete:
 		return "order complete"
+	case OutcomeNoAddrAsTaker:
+		return "no address as taker"
 	case OutcomeInvalid:
 		return "invalid violation"
 	default:

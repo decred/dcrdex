@@ -45,10 +45,17 @@ const (
 	// PreAPIVersion covers all API iterations before versioning started.
 	PreAPIVersion  = iota
 	BondAPIVersion // when we drop the legacy reg fee proto
-	V1APIVersion
+	V1APIVersion   // initial versioned API
+	// PerMatchAddrVersion requires per-match swap addresses to prevent
+	// CoinID reuse attacks. This is a breaking protocol change: clients
+	// at this version include a per-match swap address in their match
+	// ack, and the server delivers counterparty addresses via a new
+	// counterparty_address notification. Older clients that do not
+	// provide per-match addresses will be rejected.
+	PerMatchAddrVersion
 
 	// APIVersion is the current API version.
-	APIVersion = V1APIVersion
+	APIVersion = PerMatchAddrVersion
 )
 
 // Asset represents an asset in the Config file.
@@ -980,6 +987,9 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	if err != nil {
 		return nil, fmt.Errorf("NewSwapper: %w", err)
 	}
+
+	// Re-send per-match counterparty addresses on user reconnect.
+	authMgr.OnConnect(swapper.UserConnected)
 
 	if err := ctx.Err(); err != nil {
 		return nil, err
