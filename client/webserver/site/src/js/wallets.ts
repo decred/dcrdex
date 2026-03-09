@@ -345,11 +345,11 @@ export default class WalletsPage extends BasePage {
 
     const getTxID = (): string => {
       if (!this.currTx) return ''
-      if (this.currTx.isUserOp) return this.currTx.userOpTxID
+      if (this.currTx.isRelay) return this.currTx.relayTxID
       return this.currTx.id
     }
     Doc.bind(page.copyTxIDBtn, 'click', () => { setupCopyBtn(getTxID(), page.txDetailsID, page.copyTxIDBtn, '#1e7d11') })
-    Doc.bind(page.copyUserOpIDBtn, 'click', () => { setupCopyBtn(this.currTx?.id || '', page.txDetailsUserOpID, page.copyUserOpIDBtn, '#1e7d11') })
+    Doc.bind(page.copyRelayIDBtn, 'click', () => { setupCopyBtn(this.currTx?.id || '', page.txDetailsRelayID, page.copyRelayIDBtn, '#1e7d11') })
     Doc.bind(page.copyRecipientBtn, 'click', () => { setupCopyBtn(this.currTx?.recipient || '', page.txDetailsRecipient, page.copyRecipientBtn, '#1e7d11') })
     Doc.bind(page.copyBondIDBtn, 'click', () => { setupCopyBtn(this.currTx?.bondInfo?.bondID || '', page.txDetailsBondID, page.copyBondIDBtn, '#1e7d11') })
     Doc.bind(page.copyBondAccountIDBtn, 'click', () => { setupCopyBtn(this.currTx?.bondInfo?.accountID || '', page.txDetailsBondAccountID, page.copyBondAccountIDBtn, '#1e7d11') })
@@ -1970,7 +1970,8 @@ export default class WalletsPage extends BasePage {
     // Block explorer
     const assetExplorer = CoinExplorers[this.selectedWalletID]
     if (assetExplorer && assetExplorer[net]) {
-      page.txViewBlockExplorer.href = assetExplorer[net](tx.id)
+      const explorerID = (tx.isRelay && tx.relayTxID) ? tx.relayTxID : tx.id
+      page.txViewBlockExplorer.href = assetExplorer[net](explorerID)
     }
 
     // Tx type
@@ -2021,11 +2022,11 @@ export default class WalletsPage extends BasePage {
     Doc.setVis(tx.blockNumber !== 0, page.txDetailsBlockNumber, page.txDetailsTimestamp)
 
     // Tx ID / User Op ID
-    Doc.setVis(tx.isUserOp, page.txDetailsUserOpIDSection)
-    if (tx.isUserOp) {
-      page.txDetailsUserOpID.textContent = trimStringWithEllipsis(tx.id, 20)
-      page.txDetailsUserOpID.setAttribute('title', tx.id)
-      const txIDString = tx.userOpTxID || 'Unsubmitted'
+    Doc.setVis(tx.isRelay, page.txDetailsRelayIDSection)
+    if (tx.isRelay) {
+      page.txDetailsRelayID.textContent = trimStringWithEllipsis(tx.id, 20)
+      page.txDetailsRelayID.setAttribute('title', tx.id)
+      const txIDString = tx.relayTxID || 'Unsubmitted'
       page.txDetailsID.textContent = trimStringWithEllipsis(txIDString, 20)
       page.txDetailsID.setAttribute('title', txIDString)
     } else {

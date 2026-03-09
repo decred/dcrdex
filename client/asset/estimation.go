@@ -99,11 +99,10 @@ type PreRedeemForm struct {
 // expanded in in-progress work to accommodate order-time options.
 type PreRedeem struct {
 	Estimate *RedeemEstimate `json:"estimate"`
-	// UserOpRequired will be true if a bundler is configured and the
-	// balance is insufficient to cover redemption fees. This is used
-	// to display a warning to the user.
-	UserOpRequired bool           `json:"userOpRequired"`
-	Options        []*OrderOption `json:"options"`
+	// RelayRequired will be true if the balance is insufficient to cover
+	// redemption fees and a relay will be used for gasless redemption.
+	RelayRequired bool           `json:"relayRequired"`
+	Options       []*OrderOption `json:"options"`
 }
 
 // MaxOrderForm is used to get a SwapEstimate from the Wallet's MaxOrder method.

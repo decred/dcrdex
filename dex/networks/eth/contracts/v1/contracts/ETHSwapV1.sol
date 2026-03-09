@@ -2,11 +2,10 @@
 // pragma should be as specific as possible to allow easier validation.
 pragma solidity = 0.8.23;
 
-import "@account-abstraction/contracts/interfaces/IAccount.sol";
-import "@account-abstraction/contracts/core/EntryPoint.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /// @title ETHSwap - Atomic swap contract for DCRDEX
 /// @author Decred developers
@@ -23,7 +22,7 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 /// ETHSwap has no limits on gas used for any transactions.
 ///
 /// ETHSwap cannot be used by other contracts or by a third party mediating
-/// the swap or multisig wallets (except via ERC-4337 account abstraction).
+/// the swap or multisig wallets (except via EIP-712 signed redemptions).
 ///
 /// TOKEN COMPATIBILITY: This contract is NOT compatible with fee-on-transfer
 /// tokens or rebasing tokens. Using such tokens will result in accounting
@@ -33,24 +32,10 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 /// This code should be verifiable as resulting in a certain on-chain contract
 /// by compiling with the correct version of solidity and comparing the
 /// resulting byte code to the data in the original transaction.
-contract ETHSwap is IAccount, ReentrancyGuard {
+contract ETHSwap is EIP712, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     uint256 public constant MAX_BATCH = 20;
-
-    // Minimum gas required per redemption in redeemAA to prevent out-of-gas attacks.
-    // This accounts for: storage reads, storage writes, ETH transfer, and loop overhead.
-    // Includes buffer for potential EVM gas repricing.
-    uint256 internal constant MIN_CALL_GAS_PER_REDEMPTION = 25000;
-    // Base gas for redeemAA regardless of redemption count (function overhead, final transfer).
-    uint256 internal constant MIN_CALL_GAS_BASE = 75000;
-
-    // ERC-4337 validation return codes are defined in
-    // @account-abstraction/contracts/core/Helpers.sol:
-    //   SIG_VALIDATION_SUCCESS = 0
-    //   SIG_VALIDATION_FAILED  = 1
-    // All validation failures return SIG_VALIDATION_FAILED to avoid
-    // non-standard return values being misinterpreted as aggregator addresses.
 
     // Step is a type that hold's a contract's current step. Empty is the
     // uninitiated or null value.
@@ -69,23 +54,25 @@ contract ETHSwap is IAccount, ReentrancyGuard {
         0xAF9613760F72635FBDB44A5A0A63C39F12AF30F950A6EE5C971BE188E89C4051;
 
     // ZERO_SECRET_HASH is sha256(bytes32(0)). Swaps with this secretHash
-    // are unredeemable because redeem/redeemAA reject zero secrets.
+    // are unredeemable because redeem rejects zero secrets.
     bytes32 internal constant ZERO_SECRET_HASH =
         0x66687AADF862BD776C8FC18B8E9F8E20089714856EE233B3902A591D0D5F2925;
 
-    // Test swap secret: bytes32(uint256(1)). The test swap is created in the
-    // constructor for bundler compatibility checking.
-    bytes32 internal constant TEST_SECRET =
-        0x0000000000000000000000000000000000000000000000000000000000000001;
+    // EIP-712 type hash for signed redemptions.
+    bytes32 public constant REDEEM_TYPEHASH = keccak256(
+        "Redeem(address feeRecipient,bytes32 redemptionsHash,uint256 relayerFee,uint256 nonce,uint256 deadline)"
+    );
 
-    // TEST_SECRET_HASH = sha256(TEST_SECRET). Precomputed.
-    bytes32 internal constant TEST_SECRET_HASH =
-        0xEC4916DD28FC4C10D78E287CA5D9CC51EE1AE73CBFDE08C6B37324CBFAAC8BC5;
-
-    address payable public immutable entryPoint;
-
-    // Stored as immutable so redeem/refund can reject it and redeemAA can skip it.
-    bytes32 public immutable testSwapKey;
+    // Sequential nonces per participant for signed redeems.
+    //
+    // A swap cannot be redeemed twice, but a participant can still sign
+    // multiple redeemWithSignature messages over time. The nonce makes each
+    // signed redeem usable only once and prevents old signed messages from
+    // staying valid until the deadline.
+    //
+    // It also gives the wallet and relay a simple way to identify and dedupe
+    // signed redeem requests: participant + nonce.
+    mapping(address => uint256) public nonces;
 
     // swaps is a map of contract hashes to the "swap record". The swap record
     // has the following interpretation.
@@ -96,22 +83,6 @@ contract ETHSwap is IAccount, ReentrancyGuard {
     //   else if (record == REFUND_RECORD): contract has been refunded
     //   else: invalid record. Should be impossible by construction
     mapping(bytes32 => bytes32) public swaps;
-
-    // redeemPrepayments tracks gas prepayments for ERC-4337 redemptions.
-    // Keyed by UserOp nonce, which the EntryPoint guarantees is unique per sender.
-    mapping(uint256 => uint256) public redeemPrepayments;
-
-    // pendingValidation tracks swap keys that have passed validateUserOp
-    // but have not yet been executed in redeemAA. This prevents double-
-    // validation of the same swap within a single EntryPoint bundle, where
-    // the validation phase runs before any execution. Without this, two
-    // UserOps in the same bundle could both pass validation for the same
-    // swap, causing the second execution to revert while still consuming
-    // the prefund. The flag is cleared by redeemAA upon successful
-    // execution. If execution fails, the flag remains set, preventing
-    // future AA redeems for that swap (the regular redeem function can
-    // still be used as a fallback).
-    mapping(bytes32 => bool) internal pendingValidation;
 
     event Initiated(
         bytes32 indexed swapKey,
@@ -131,11 +102,6 @@ contract ETHSwap is IAccount, ReentrancyGuard {
         bytes32 indexed swapKey,
         address indexed token,
         address indexed initiator
-    );
-
-    event RedeemAATransferFailed(
-        address indexed recipient,
-        uint256 amount
     );
 
     // Vector is the information necessary for initialization and redemption
@@ -158,34 +124,14 @@ contract ETHSwap is IAccount, ReentrancyGuard {
         bytes32 secret;
     }
 
-    /// @notice Constructs the ETHSwap contract.
-    /// @param _entryPoint The ERC-4337 EntryPoint contract address for account abstraction support
-    constructor(address payable _entryPoint) {
-        require(_entryPoint != address(0), "zero entry point");
-        entryPoint = _entryPoint;
-
-        // Permanent test swap for bundler compatibility checks.
-        // participant and initiator are address(this) — unredeemable by
-        // construction (no private key). redeem/refund reject it outright;
-        // redeemAA silently skips it so bundler gas estimation succeeds.
-        Vector memory tv = Vector({
-            secretHash: TEST_SECRET_HASH,
-            value: 1 ether,
-            initiator: address(this),
-            refundTimestamp: type(uint64).max,
-            participant: address(this)
-        });
-        bytes32 key = contractKey(address(0), tv);
-        swaps[key] = bytes32(block.number);
-        testSwapKey = key;
-    }
+    /// @notice Constructs the ETHSwap contract with EIP-712 domain.
+    constructor() EIP712("ETHSwap", "1") {}
 
     // senderIsOrigin ensures that this contract cannot be used by other
     // contracts, which reduces possible attack vectors.
     //
     // NOTE: This uses tx.origin which prevents smart contract wallets from
-    // using initiate/redeem/refund directly. Smart contract wallet users
-    // should use the account abstraction functions (redeemAA) instead.
+    // using initiate/redeem/refund directly.
     modifier senderIsOrigin() {
         require(tx.origin == msg.sender, "sender != origin");
         _;
@@ -292,18 +238,18 @@ contract ETHSwap is IAccount, ReentrancyGuard {
             Vector calldata v = vectors[i];
 
             require(v.value > 0, "zero value");
-            require(v.initiator == msg.sender, "bad initiator");
-            require(v.participant != address(0), "zero addr");
+            require(v.initiator != address(0) && v.participant != address(0), "zero addr");
             require(v.refundTimestamp > block.timestamp, "bad refund time");
             require(v.secretHash != bytes32(0), "zero hash");
             require(v.secretHash != REFUND_RECORD_HASH, "illegal hash");
             require(v.secretHash != ZERO_SECRET_HASH, "zero secret hash");
-            require(v.secretHash != TEST_SECRET_HASH, "test secret hash");
 
             bytes32 key = contractKey(token, v);
             require(swaps[key] == bytes32(0), "already exists");
 
-            bytes32 record = bytes32(block.number);
+            // We subtract 1 from the block.number to avoid failing a redemption
+            // if the swap is redeemed in the same block that it was initiated.
+            bytes32 record = bytes32(block.number - 1);
             require(!secretValidates(record, v.secretHash), "hash collision");
 
             swaps[key] = record;
@@ -316,24 +262,20 @@ contract ETHSwap is IAccount, ReentrancyGuard {
             require(msg.value == total, "bad ETH value");
         } else {
             require(msg.value == 0, "no ETH for token swap");
-            uint256 balBefore = IERC20(token).balanceOf(address(this));
             IERC20(token).safeTransferFrom(
                 msg.sender,
                 address(this),
                 total
-            );
-            require(
-                IERC20(token).balanceOf(address(this)) - balBefore == total,
-                "fee-on-transfer not supported"
             );
         }
     }
 
     /// @notice Redeems one or more swaps by providing the secret preimage.
     /// @dev The caller must be the participant specified in each Vector.
+    /// Requires at least one redemption.
     /// All redemptions must be for the same token. Funds are transferred to msg.sender.
     /// To prevent reentry attacks, state is updated before any transfers.
-    /// Contracts cannot call this function directly (use redeemAA for account abstraction).
+    /// Contracts cannot call this function directly (use redeemWithSignature for relayed redemptions).
     /// @param token The token address (address(0) for native ETH)
     /// @param redemptions Array of Redemption structs containing the Vector and secret
     function redeem(address token, Redemption[] calldata redemptions)
@@ -353,7 +295,6 @@ contract ETHSwap is IAccount, ReentrancyGuard {
             (bytes32 key, bytes32 record, uint256 blockNum) =
                 _retrieve(token, r.v);
 
-            require(key != testSwapKey, "test swap");
             require(blockNum > 0 && blockNum < block.number, "not redeemable");
             require(record != REFUND_RECORD, "already refunded");
             require(!secretValidates(record, r.v.secretHash), "already redeemed");
@@ -390,7 +331,6 @@ contract ETHSwap is IAccount, ReentrancyGuard {
         (bytes32 key, bytes32 record, uint256 blockNum) =
             _retrieve(token, v);
 
-        require(key != testSwapKey, "test swap");
         require(blockNum > 0, "not initiated");
         require(record != REFUND_RECORD, "already refunded");
         require(!secretValidates(record, v.secretHash), "already redeemed");
@@ -407,168 +347,53 @@ contract ETHSwap is IAccount, ReentrancyGuard {
         emit Refunded(key, token, v.initiator);
     }
 
-    modifier senderIsEntryPoint() {
-        require(msg.sender == entryPoint, "not entryPoint");
-        _;
-    }
-
-    // _payPrefund transfers the required gas prefund to the EntryPoint.
-    // Per ERC-4337 spec, the return value is intentionally ignored because
-    // prefund failures should not revert the validateUserOp call - the
-    // EntryPoint will handle insufficient prefund scenarios.
-    function _payPrefund(uint256 missingAccountFunds) internal {
-        if (missingAccountFunds > 0) {
-            (bool ok,) = payable(msg.sender).call{
-                value: missingAccountFunds
-            }("");
-            (ok); // Silence unused variable warning; see comment above.
-        }
-    }
-
-    /// @notice Validates a user operation for redeeming swaps via ERC-4337 account abstraction.
-    /// @dev Transfers the required gas prefund to the EntryPoint.
-    /// Returns 0 on success, or 1 (SIG_VALIDATION_FAILED) on failure per ERC-4337.
-    /// @param userOp The user operation to validate
-    /// @param userOpHash The hash of the user operation for signature verification
-    /// @param missingAccountFunds The amount of ETH needed for gas prefund
-    /// @return validationData 0 on success, 1 on failure
-    function validateUserOp(
-        PackedUserOperation calldata userOp,
-        bytes32 userOpHash,
-        uint256 missingAccountFunds
-    )
-        external
-        senderIsEntryPoint
-        nonReentrant
-        returns (uint256)
-    {
-        if (userOp.callData.length < 4) return SIG_VALIDATION_FAILED;
-
-        if (bytes4(userOp.callData[:4]) != this.redeemAA.selector) return SIG_VALIDATION_FAILED;
-
-        (Redemption[] memory reds, uint256 opNonce) =
-            abi.decode(userOp.callData[4:], (Redemption[], uint256));
-
-        if (opNonce != userOp.nonce) return SIG_VALIDATION_FAILED;
-
-        if (reds.length == 0 || reds.length > MAX_BATCH) return SIG_VALIDATION_FAILED;
-
-        address participant;
-        uint256 total;
-
-        for (uint256 i = 0; i < reds.length; i++) {
-            Redemption memory r = reds[i];
-
-            // Reject zero secrets to prevent the swap record from being
-            // reset to the uninitiated state after redemption.
-            if (r.secret == bytes32(0)) {
-                return SIG_VALIDATION_FAILED;
-            }
-
-            // Verify the secret is valid before paying any prefund
-            if (!secretValidates(r.secret, r.v.secretHash)) {
-                return SIG_VALIDATION_FAILED;
-            }
-
-            // redeemAA only supports ETH swaps (address(0))
-            (bytes32 key, bytes32 record, uint256 blockNum) =
-                _retrieve(address(0), r.v);
-
-            // Prevent double-validation of the same swap within a bundle.
-            // The EntryPoint validates all UserOps before executing any,
-            // so without this check two UserOps redeeming the same swap
-            // would both pass validation and both pay prefund, but only
-            // the first execution would succeed.
-            if (pendingValidation[key]) {
-                return SIG_VALIDATION_FAILED;
-            }
-
-            // Must match redeemAA's checks, except block.number comparison
-            // which is banned by ERC-4337 (NUMBER opcode). The block number
-            // check is still enforced in redeemAA during execution.
-            if (blockNum == 0
-                || record == REFUND_RECORD
-                || secretValidates(record, r.v.secretHash)
-            ) {
-                return SIG_VALIDATION_FAILED;
-            }
-
-            pendingValidation[key] = true;
-
-            if (i == 0) {
-                participant = r.v.participant;
-            } else {
-                if (r.v.participant != participant) return SIG_VALIDATION_FAILED;
-            }
-
-            total += r.v.value;
-        }
-
-        if (missingAccountFunds > total) return SIG_VALIDATION_FAILED;
-
-        // Pay prefund before callGasLimit and signature checks. During gas
-        // estimation, the bundler sends zero gas limits and a dummy signature,
-        // both of which would fail checks below. The EntryPoint requires the
-        // prefund to be paid regardless of validation result (AA21 otherwise).
-        _payPrefund(missingAccountFunds);
-
-        // Ensure callGasLimit is sufficient to prevent out-of-gas attacks.
-        uint256 minCallGas = MIN_CALL_GAS_BASE + (reds.length * MIN_CALL_GAS_PER_REDEMPTION);
-        if (uint128(uint256(userOp.accountGasLimits)) < minCallGas) return SIG_VALIDATION_FAILED;
-
-        (address recovered, ECDSA.RecoverError ecdsaErr, ) =
-            ECDSA.tryRecover(userOpHash, userOp.signature);
-        if (ecdsaErr != ECDSA.RecoverError.NoError || recovered != participant) {
-            return SIG_VALIDATION_FAILED;
-        }
-
-        // Key by nonce to ensure uniqueness per UserOp. The EntryPoint
-        // guarantees nonce uniqueness per sender, preventing collisions
-        // when different swaps share the same secrets.
-        // Written after all validation checks to avoid stale entries on failure.
-        redeemPrepayments[opNonce] = missingAccountFunds;
-
-        return SIG_VALIDATION_SUCCESS;
-    }
-
-    /// @notice Redeems multiple ETH swaps via ERC-4337 account abstraction.
-    /// @dev Only supports native ETH swaps. ERC20 token swaps must use the regular redeem function.
-    /// Verifies that:
-    /// 1. All redemptions are for the same participant
-    /// 2. Each swap exists and hasn't been redeemed yet
-    /// 3. The provided secret matches the secret hash
-    /// After validation, records the redemption and transfers funds minus fees to participant.
-    /// @param redemptions Array of Redemption structs containing the Vector and secret
-    /// @param opNonce The UserOp nonce, used to key the gas prepayment from validateUserOp
-    function redeemAA(Redemption[] calldata redemptions, uint256 opNonce)
-        external
-        senderIsEntryPoint
-        nonReentrant
-    {
+    // _verifySignedRedeem validates the EIP-712 signature and nonce for a
+    // signed redemption. Returns the participant address.
+    function _verifySignedRedeem(
+        Redemption[] calldata redemptions,
+        address feeRecipient,
+        uint256 relayerFee,
+        uint256 nonce,
+        uint256 deadline,
+        bytes calldata signature
+    ) internal returns (address participant) {
+        require(block.timestamp <= deadline, "expired");
         require(redemptions.length > 0 && redemptions.length <= MAX_BATCH, "bad batch size");
 
-        uint256 total;
-        address recipient;
+        participant = redemptions[0].v.participant;
 
+        // Check and increment nonce.
+        require(nonces[participant] == nonce, "bad nonce");
+        nonces[participant] = nonce + 1;
+
+        // Compute the redemptions hash: keccak256(abi.encode(redemptions)).
+        bytes32 redemptionsHash = keccak256(abi.encode(redemptions));
+
+        // Build and verify EIP-712 signature.
+        bytes32 structHash = keccak256(abi.encode(
+            REDEEM_TYPEHASH,
+            feeRecipient,
+            redemptionsHash,
+            relayerFee,
+            nonce,
+            deadline
+        ));
+        address recovered = ECDSA.recover(_hashTypedDataV4(structHash), signature);
+        require(recovered == participant, "bad signature");
+    }
+
+    // _executeRedemptions processes the swap state changes and returns the total value.
+    function _executeRedemptions(
+        Redemption[] calldata redemptions,
+        address participant
+    ) internal returns (uint256 total) {
         for (uint256 i = 0; i < redemptions.length; i++) {
             Redemption calldata r = redemptions[i];
 
-            if (i == 0) {
-                recipient = r.v.participant;
-            } else {
-                require(r.v.participant == recipient, "participant mismatch");
-            }
+            require(r.v.participant == participant, "participant mismatch");
 
             (bytes32 key, bytes32 record, uint256 blockNum) =
                 _retrieve(address(0), r.v);
-
-            // The test swap is used for bundler compatibility checks via
-            // eth_estimateUserOperationGas. Instead of reverting (which would
-            // break the estimation), silently skip the test swap.
-            if (key == testSwapKey) {
-                delete pendingValidation[key];
-                continue;
-            }
 
             require(blockNum > 0 && blockNum < block.number, "not redeemable");
             require(record != REFUND_RECORD, "already refunded");
@@ -577,28 +402,58 @@ contract ETHSwap is IAccount, ReentrancyGuard {
             require(secretValidates(r.secret, r.v.secretHash), "bad secret");
 
             swaps[key] = r.secret;
-            delete pendingValidation[key];
             total += r.v.value;
 
-            emit Redeemed(key, address(0), recipient, r.secret);
+            emit Redeemed(key, address(0), participant, r.secret);
+        }
+    }
+
+    /// @notice Redeems swaps using an EIP-712 signature from the participant.
+    /// @dev Allows a third-party relayer to submit redemptions on behalf of the
+    /// participant. The participant signs the redemption parameters, the relayer
+    /// fee, and the fee recipient address. When feeRecipient is nonzero, the
+    /// contract enforces feeRecipient == msg.sender to prevent MEV front-running.
+    /// When feeRecipient is zero, any relayer may submit and receive the signed fee.
+    /// Only supports native ETH swaps.
+    /// @param redemptions Array of Redemption structs containing the Vector and secret
+    /// @param feeRecipient Address that receives the relayer fee (signed, must equal msg.sender or zero)
+    /// @param relayerFee Amount to pay the relayer from redeemed funds (signed)
+    /// @param nonce Sequential nonce for replay protection (signed)
+    /// @param deadline Timestamp after which the signature expires (signed)
+    /// @param signature EIP-712 signature from the participant
+    function redeemWithSignature(
+        Redemption[] calldata redemptions,
+        address feeRecipient,
+        uint256 relayerFee,
+        uint256 nonce,
+        uint256 deadline,
+        bytes calldata signature
+    ) external nonReentrant {
+        address participant = _verifySignedRedeem(
+            redemptions, feeRecipient, relayerFee, nonce, deadline, signature
+        );
+
+        uint256 total = _executeRedemptions(redemptions, participant);
+
+        require(relayerFee <= total, "fee exceeds total");
+
+        // Enforce feeRecipient == msg.sender (or use msg.sender if zero).
+        if (feeRecipient != address(0)) {
+            require(feeRecipient == msg.sender, "feeRecipient must be msg.sender");
+        } else {
+            feeRecipient = msg.sender;
         }
 
-        // Key by nonce - must match validateUserOp
-        uint256 fees = redeemPrepayments[opNonce];
-        delete redeemPrepayments[opNonce];
+        // Transfer funds: relayer fee to feeRecipient, remainder to participant.
+        uint256 remainder = total - relayerFee;
 
-        // If all redemptions were skipped (test swaps), there is nothing to
-        // pay out. Guard against underflow when fees >= total.
-        if (total <= fees) return;
-
-        // Intentionally not requiring success. If the recipient is a contract
-        // that reverts on ETH transfer, the swap must still finalize to prevent
-        // a drain attack where validateUserOp pays prefund but redeemAA reverts,
-        // allowing repeated extraction of contract funds to the EntryPoint.
-        uint256 payout = total - fees;
-        (bool ok,) = payable(recipient).call{value: payout}("");
-        if (!ok) {
-            emit RedeemAATransferFailed(recipient, payout);
+        if (relayerFee > 0) {
+            (bool ok,) = payable(feeRecipient).call{value: relayerFee}("");
+            require(ok, "fee transfer failed");
+        }
+        if (remainder > 0) {
+            (bool ok,) = payable(participant).call{value: remainder}("");
+            require(ok, "ETH transfer failed");
         }
     }
 }

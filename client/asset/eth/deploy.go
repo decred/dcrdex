@@ -41,14 +41,13 @@ func (contractDeployer) EstimateDeployFunding(
 	chain string,
 	contractVer uint32,
 	tokenAddress common.Address,
-	entryPoint common.Address,
 	credentialsPath string,
 	chainCfg *params.ChainConfig,
 	ui *dex.UnitInfo,
 	log dex.Logger,
 	net dex.Network,
 ) error {
-	txData, err := ContractDeployer.TxData(contractVer, tokenAddress, entryPoint)
+	txData, err := ContractDeployer.TxData(contractVer, tokenAddress)
 	if err != nil {
 		return err
 	}
@@ -141,25 +140,13 @@ func (contractDeployer) EstimateMultiBalanceDeployFunding(
 	return ContractDeployer.estimateDeployFunding(ctx, txData, deploymentGas, chain, credentialsPath, chainCfg, ui, log, net)
 }
 
-func (contractDeployer) TxData(contractVer uint32, tokenAddr, entryPoint common.Address) (txData []byte, err error) {
+func (contractDeployer) TxData(contractVer uint32, tokenAddr common.Address) (txData []byte, err error) {
 	if tokenAddr == (common.Address{}) {
 		switch contractVer {
 		case 0:
 			return common.FromHex(ethv0.ETHSwapBin), nil
 		case 1:
-			if entryPoint == (common.Address{}) {
-				entryPoint = dexeth.CanonicalEntryPointV07
-			}
-			var abiData *abi.ABI
-			abiData, err = ethv1.ETHSwapMetaData.GetAbi()
-			if err != nil {
-				return nil, fmt.Errorf("error parsing v1 ABI: %w", err)
-			}
-			argData, err := abiData.Pack("", entryPoint)
-			if err != nil {
-				return nil, fmt.Errorf("error packing entry point: %w", err)
-			}
-			return append(common.FromHex(ethv1.ETHSwapBin), argData...), nil
+			return common.FromHex(ethv1.ETHSwapBin), nil
 		}
 	}
 	var abiData *abi.ABI
@@ -188,14 +175,13 @@ func (contractDeployer) DeployContract(
 	chain string,
 	contractVer uint32,
 	tokenAddress common.Address,
-	entryPoint common.Address,
 	credentialsPath string,
 	chainCfg *params.ChainConfig,
 	ui *dex.UnitInfo,
 	log dex.Logger,
 	net dex.Network,
 ) error {
-	txData, err := ContractDeployer.TxData(contractVer, tokenAddress, entryPoint)
+	txData, err := ContractDeployer.TxData(contractVer, tokenAddress)
 	if err != nil {
 		return err
 	}
@@ -219,7 +205,7 @@ func (contractDeployer) DeployContract(
 			}
 		case 1:
 			deployer = func(txOpts *bind.TransactOpts, cb bind.ContractBackend) (common.Address, *types.Transaction, error) {
-				contractAddr, tx, _, err := ethv1.DeployETHSwap(txOpts, cb, entryPoint)
+				contractAddr, tx, _, err := ethv1.DeployETHSwap(txOpts, cb)
 				return contractAddr, tx, err
 			}
 		}
@@ -415,7 +401,7 @@ func (contractDeployer) DeployMultiBalance(
 
 // BuildDeployTxData builds the transaction data for deploying a DEX swap
 // contract. If tokenAddress is empty, the base asset contract is used.
-// For v1 contracts, the canonical ERC-4337 v0.7 EntryPoint is used automatically.
+// For v1 contracts, EIP-712 signed relay redemptions are supported.
 func BuildDeployTxData(contractVer uint32, tokenAddress string) ([]byte, error) {
 	var tokenAddr common.Address
 	if tokenAddress != "" {
@@ -424,8 +410,5 @@ func BuildDeployTxData(contractVer uint32, tokenAddress string) ([]byte, error) 
 		}
 		tokenAddr = common.HexToAddress(tokenAddress)
 	}
-	// Zero entry point — TxData will use the canonical v0.7 entry point
-	// as a default. Simnet uses a different address read from the harness,
-	// so callers that need simnet support should use TxData directly.
-	return ContractDeployer.TxData(contractVer, tokenAddr, common.Address{})
+	return ContractDeployer.TxData(contractVer, tokenAddr)
 }

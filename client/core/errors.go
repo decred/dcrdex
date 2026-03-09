@@ -53,7 +53,7 @@ const (
 	bondAssetErr
 	bondPostErr // TODO
 	insufficientRedeemFundsErr
-	bundlerRedemptionLotSizeTooSmallErr
+	relayRedemptionLotSizeTooSmallErr
 )
 
 // Error is an error code and a wrapped error.

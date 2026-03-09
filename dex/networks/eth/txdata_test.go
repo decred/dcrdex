@@ -8,6 +8,7 @@ import (
 	"time"
 
 	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
+	swapv1 "decred.org/dcrdex/dex/networks/eth/contracts/v1"
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -300,24 +301,201 @@ func TestParseRefundDataV0(t *testing.T) {
 	}
 }
 
-func TestParseHandleOps(t *testing.T) {
-	calldata := "765e827f000000000000000000000000000000000000000000000000000000000000004000000000000000000000000005736be876755de230e809784def1937dcb6303e00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000020000000000000000000000000af5e6d6fd9011a8256a74b22791eb7865d0720efd157ae1594bda41e7e2c99f878555b6841ff1f4a000000000000000000000010000000000000000000000000000000000000000000000000000000000000012000000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000f67d00000000000000000000000000005bb8000000000000000000000000000000000000000000000000000000000000b46c000000000000000000000000773594000000000000000000000000013ade0a8e000000000000000000000000000000000000000000000000000000000000028000000000000000000000000000000000000000000000000000000000000002a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000120919835a400000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000001461e9116f88c220de9b4cb59e1dcdd29d201634310d58251586fae8b40c68d9a0000000000000000000000000000000000000000000000000214e8348c4f0000000000000000000000000000ce4ad4154b9914f3f641019e894060ae7b9684e30000000000000000000000000000000000000000000000000000000067997a66000000000000000000000000d157ae1594bda41e7e2c99f878555b6841ff1f4ac9f2956110b2ce62f9adfb543ea043961b62173f9f8e2b9734ea5353436fe5dd0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041fffffffffffffffffffffffffffffff0000000000000000000000000000000007aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c00000000000000000000000000000000000000000000000000000000000000"
-	calldataB, err := hex.DecodeString(calldata)
+func TestParseRedeemDataV1RejectsSignedRedeem(t *testing.T) {
+	participant := common.HexToAddress("0xabcdef0123456789abcdef0123456789abcdef01")
+	redemptions := []swapv1.ETHSwapRedemption{{
+		V: swapv1.ETHSwapVector{
+			SecretHash:      [32]byte{1},
+			Value:           big.NewInt(1e18),
+			Initiator:       common.HexToAddress("0x1111111111111111111111111111111111111111"),
+			RefundTimestamp: 9999,
+			Participant:     participant,
+		},
+		Secret: [32]byte{2},
+	}}
+	feeRecipient := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	sig := make([]byte, 65)
+
+	calldata, err := ABIs[1].Pack("redeemWithSignature", redemptions, feeRecipient, big.NewInt(1e15), big.NewInt(1), big.NewInt(9999999999), sig)
 	if err != nil {
-		t.Fatalf("failed to decode calldata: %v", err)
+		t.Fatal(err)
 	}
 
-	userOps, err := ParseHandleOpsData(calldataB)
-	if err != nil {
-		t.Fatalf("failed to parse handle ops data: %v", err)
+	_, _, err = ParseRedeemDataV1(calldata)
+	if err == nil {
+		t.Fatal("expected ParseRedeemDataV1 to reject redeemWithSignature calldata")
 	}
+}
 
-	hash, err := HashUserOp(userOps[0], common.HexToAddress("0x0000000071727De22E5E9d8BAf0edAc6f37da032"), big.NewInt(11155111))
-	if err != nil {
-		t.Fatalf("failed to hash user op: %v", err)
-	}
+func TestParseSignedRedeemDataV1(t *testing.T) {
+	participant := common.HexToAddress("0xabcdef0123456789abcdef0123456789abcdef01")
+	initiator := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	feeRecipient := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	sig := make([]byte, 65)
 
-	if hash != common.HexToHash("0xc69596e1efc7357095e9607467b4689643e96465e1a65fced645f268a141b8c2") {
-		t.Fatalf("unexpected hash: %s", hash.Hex())
-	}
+	t.Run("single redemption", func(t *testing.T) {
+		redemptions := []swapv1.ETHSwapRedemption{{
+			V: swapv1.ETHSwapVector{
+				SecretHash:      [32]byte{1},
+				Value:           big.NewInt(1e18),
+				Initiator:       initiator,
+				RefundTimestamp: 9999,
+				Participant:     participant,
+			},
+			Secret: [32]byte{2},
+		}}
+		calldata, err := ABIs[1].Pack("redeemWithSignature", redemptions, feeRecipient, big.NewInt(1e15), big.NewInt(42), big.NewInt(9999999999), sig)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		parsed, err := ParseSignedRedeemDataV1(calldata)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if parsed.Participant != participant {
+			t.Errorf("participant: got %s, want %s", parsed.Participant.Hex(), participant.Hex())
+		}
+		if parsed.FeeRecipient != feeRecipient {
+			t.Errorf("feeRecipient: got %s, want %s", parsed.FeeRecipient.Hex(), feeRecipient.Hex())
+		}
+		if parsed.Nonce.Uint64() != 42 {
+			t.Errorf("nonce: got %d, want 42", parsed.Nonce.Uint64())
+		}
+		if parsed.RelayerFee.Cmp(big.NewInt(1e15)) != 0 {
+			t.Errorf("relayerFee: got %s, want %d", parsed.RelayerFee, int64(1e15))
+		}
+		if parsed.TotalRedeemed.Cmp(big.NewInt(1e18)) != 0 {
+			t.Errorf("totalRedeemed: got %s, want %d", parsed.TotalRedeemed, int64(1e18))
+		}
+		if parsed.NumRedemptions != 1 {
+			t.Errorf("numRedemptions: got %d, want 1", parsed.NumRedemptions)
+		}
+		if len(parsed.OrderedRedemptions) != 1 {
+			t.Fatalf("ordered redemptions: got %d entries, want 1", len(parsed.OrderedRedemptions))
+		}
+		if !bytes.Equal(parsed.Signature, sig) {
+			t.Fatalf("signature mismatch")
+		}
+		if len(parsed.Redemptions) != 1 {
+			t.Fatalf("redemptions map: got %d entries, want 1", len(parsed.Redemptions))
+		}
+		r, ok := parsed.Redemptions[[32]byte{1}]
+		if !ok {
+			t.Fatal("redemption with secretHash {1} not found")
+		}
+		if r.Contract.From != initiator {
+			t.Errorf("initiator: got %s, want %s", r.Contract.From.Hex(), initiator.Hex())
+		}
+	})
+
+	t.Run("multiple redemptions", func(t *testing.T) {
+		redemptions := []swapv1.ETHSwapRedemption{
+			{
+				V: swapv1.ETHSwapVector{
+					SecretHash:      [32]byte{1},
+					Value:           big.NewInt(1e18),
+					Initiator:       initiator,
+					RefundTimestamp: 9999,
+					Participant:     participant,
+				},
+				Secret: [32]byte{0xaa},
+			},
+			{
+				V: swapv1.ETHSwapVector{
+					SecretHash:      [32]byte{2},
+					Value:           big.NewInt(2e18),
+					Initiator:       initiator,
+					RefundTimestamp: 9999,
+					Participant:     participant,
+				},
+				Secret: [32]byte{0xbb},
+			},
+		}
+		calldata, err := ABIs[1].Pack("redeemWithSignature", redemptions, feeRecipient, big.NewInt(5e15), big.NewInt(7), big.NewInt(9999999999), sig)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		parsed, err := ParseSignedRedeemDataV1(calldata)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if parsed.NumRedemptions != 2 {
+			t.Errorf("numRedemptions: got %d, want 2", parsed.NumRedemptions)
+		}
+		wantTotal := new(big.Int).Add(big.NewInt(1e18), big.NewInt(2e18))
+		if parsed.TotalRedeemed.Cmp(wantTotal) != 0 {
+			t.Errorf("totalRedeemed: got %s, want %s", parsed.TotalRedeemed, wantTotal)
+		}
+		if len(parsed.OrderedRedemptions) != 2 {
+			t.Fatalf("ordered redemptions: got %d entries, want 2", len(parsed.OrderedRedemptions))
+		}
+		if parsed.OrderedRedemptions[0].V.SecretHash != redemptions[0].V.SecretHash ||
+			parsed.OrderedRedemptions[1].V.SecretHash != redemptions[1].V.SecretHash {
+			t.Fatalf("ordered redemptions did not preserve calldata order")
+		}
+	})
+
+	t.Run("rejects redeem calldata", func(t *testing.T) {
+		redemptions := []swapv1.ETHSwapRedemption{{
+			V: swapv1.ETHSwapVector{
+				SecretHash:      [32]byte{1},
+				Value:           big.NewInt(1e18),
+				Initiator:       initiator,
+				RefundTimestamp: 9999,
+				Participant:     participant,
+			},
+			Secret: [32]byte{2},
+		}}
+		calldata, err := ABIs[1].Pack("redeem", common.Address{}, redemptions)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = ParseSignedRedeemDataV1(calldata)
+		if err == nil {
+			t.Fatal("expected error for redeem calldata")
+		}
+	})
+
+	t.Run("rejects short calldata", func(t *testing.T) {
+		_, err := ParseSignedRedeemDataV1([]byte{0x01, 0x02})
+		if err == nil {
+			t.Fatal("expected error for short calldata")
+		}
+	})
+
+	t.Run("participant mismatch", func(t *testing.T) {
+		other := common.HexToAddress("0x9999999999999999999999999999999999999999")
+		redemptions := []swapv1.ETHSwapRedemption{
+			{
+				V: swapv1.ETHSwapVector{
+					SecretHash:      [32]byte{1},
+					Value:           big.NewInt(1e18),
+					Initiator:       initiator,
+					RefundTimestamp: 9999,
+					Participant:     participant,
+				},
+				Secret: [32]byte{0xaa},
+			},
+			{
+				V: swapv1.ETHSwapVector{
+					SecretHash:      [32]byte{2},
+					Value:           big.NewInt(2e18),
+					Initiator:       initiator,
+					RefundTimestamp: 9999,
+					Participant:     other,
+				},
+				Secret: [32]byte{0xbb},
+			},
+		}
+		calldata, err := ABIs[1].Pack("redeemWithSignature", redemptions, feeRecipient, big.NewInt(1e15), big.NewInt(1), big.NewInt(9999999999), sig)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = ParseSignedRedeemDataV1(calldata)
+		if err == nil {
+			t.Fatal("expected error for participant mismatch")
+		}
+	})
 }

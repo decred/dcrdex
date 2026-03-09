@@ -448,7 +448,8 @@ export default class MarketMakerLogsPage extends BasePage {
       }
       const assetExplorer = CoinExplorers[asset.id]
       if (assetExplorer && assetExplorer[net]) {
-        tmpl.explorerLink.href = assetExplorer[net](tx.id)
+        const explorerID = (tx.isRelay && tx.relayTxID) ? tx.relayTxID : tx.id
+        tmpl.explorerLink.href = assetExplorer[net](explorerID)
       }
       tmpl.amt.textContent = `${Doc.formatCoinValue(tx.amount, asset.unitInfo)} ${asset.unitInfo.conventional.unit.toLowerCase()}`
       tmpl.fees.textContent = `${Doc.formatCoinValue(tx.fees, asset.unitInfo)} ${asset.unitInfo.conventional.unit.toLowerCase()}`

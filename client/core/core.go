@@ -6712,7 +6712,7 @@ func (c *Core) createTradeRequest(wallets *walletSet, coins asset.Coins, redeemS
 		}
 
 		// Calculate redemption lot size in order to ensure that the redemption
-		// size can cover the gas fees if we are using a bundler.
+		// size can cover the relay fees for a gasless redemption.
 		redemptionLotSize := mktConf.LotSize // Buys
 		if form.Sell && form.IsLimit {       // Limit Sells
 			redemptionLotSize = calc.BaseToQuote(form.Rate, mktConf.LotSize)
@@ -6723,7 +6723,7 @@ func (c *Core) createTradeRequest(wallets *walletSet, coins asset.Coins, redeemS
 				midGap, err := book.MidGap()
 				if err == nil {
 					// Divide because a smaller lot size is more restrictive.
-					// If the redemption size is too small, the bundler will
+					// If the redemption size is too small, the relay will
 					// not be able to use it to cover fees.
 					redemptionLotSize = calc.BaseToQuote(midGap, mktConf.LotSize) / marketTradeRedemptionSlippageBuffer
 				} else {
@@ -6735,9 +6735,9 @@ func (c *Core) createTradeRequest(wallets *walletSet, coins asset.Coins, redeemS
 		redemptionReserves, err = accountRedeemer.ReserveNRedemptions(redemptionRefundLots,
 			assetConfigs.toAsset.Version, assetConfigs.toAsset.MaxFeeRate, redemptionLotSize)
 		if errors.Is(err, asset.ErrInsufficientRedeemFunds) {
-			return nil, newError(insufficientRedeemFundsErr, "insufficient redeem funds, configure a bundler to redeem")
-		} else if errors.Is(err, asset.ErrBundlerRedemptionLotSizeTooSmall) {
-			return nil, newError(bundlerRedemptionLotSizeTooSmallErr, "bundler redemption lot size too small")
+			return nil, newError(insufficientRedeemFundsErr, "insufficient redeem funds, configure a relay to redeem")
+		} else if errors.Is(err, asset.ErrRelayRedemptionLotSizeTooSmall) {
+			return nil, newError(relayRedemptionLotSizeTooSmallErr, "relay redemption lot size too small")
 		} else if err != nil {
 			return nil, codedError(walletErr, fmt.Errorf("ReserveNRedemptions error: %w", err))
 		}
@@ -11673,6 +11673,190 @@ func (c *Core) RemoveWalletPeer(assetID uint32, address string) error {
 	}
 
 	return peerManager.RemovePeer(address)
+}
+
+type gaslessRedeemMatchSet struct {
+	trade  *trackedTrade
+	wallet *xcWallet
+	form   *asset.RedeemForm
+}
+
+func (c *Core) findMatch(mid order.MatchID) (*trackedTrade, *matchTracker) {
+	for _, dc := range c.dexConnections() {
+		dc.tradeMtx.RLock()
+		for _, trade := range dc.trades {
+			trade.mtx.RLock()
+			match := trade.matches[mid]
+			trade.mtx.RUnlock()
+			if match != nil {
+				dc.tradeMtx.RUnlock()
+				return trade, match
+			}
+		}
+		dc.tradeMtx.RUnlock()
+	}
+	return nil, nil
+}
+
+func (c *Core) gaslessRedeemMatchSet(matchIDs []order.MatchID) (*gaslessRedeemMatchSet, error) {
+	if len(matchIDs) == 0 {
+		return nil, fmt.Errorf("no match IDs provided")
+	}
+
+	seen := make(map[order.MatchID]struct{}, len(matchIDs))
+	matches := make([]*matchTracker, 0, len(matchIDs))
+	var trade *trackedTrade
+
+	for _, mid := range matchIDs {
+		if _, found := seen[mid]; found {
+			return nil, fmt.Errorf("duplicate match ID %s", mid)
+		}
+		seen[mid] = struct{}{}
+
+		matchTrade, match := c.findMatch(mid)
+		if match == nil {
+			return nil, fmt.Errorf("match %s not found", mid)
+		}
+		if trade == nil {
+			trade = matchTrade
+		} else if trade != matchTrade {
+			return nil, fmt.Errorf("all match IDs must belong to the same trade")
+		}
+		matches = append(matches, match)
+	}
+
+	trade.mtx.RLock()
+	defer trade.mtx.RUnlock()
+
+	redeemWallet := trade.wallets.toWallet
+	if redeemWallet == nil {
+		return nil, fmt.Errorf("redeem wallet not found")
+	}
+
+	redemptions := make([]*asset.Redemption, 0, len(matches))
+	var expectedContract []byte
+	for _, match := range matches {
+		if match.counterSwap == nil {
+			return nil, fmt.Errorf("match %x is not yet redeemable", match.MatchID[:])
+		}
+		if len(match.MetaData.Proof.Secret) == 0 {
+			return nil, fmt.Errorf("match %x secret is not known", match.MatchID[:])
+		}
+		contract := match.counterSwap.Contract
+		if len(contract) == 0 {
+			return nil, fmt.Errorf("match %x has no contract data", match.MatchID[:])
+		}
+		if expectedContract == nil {
+			expectedContract = append([]byte(nil), contract...)
+		} else if !bytes.Equal(expectedContract, contract) {
+			return nil, fmt.Errorf("all matches must use the same contract address and version")
+		}
+		redemptions = append(redemptions, &asset.Redemption{
+			Spends: match.counterSwap,
+			Secret: match.MetaData.Proof.Secret,
+		})
+	}
+
+	return &gaslessRedeemMatchSet{
+		trade:  trade,
+		wallet: redeemWallet,
+		form: &asset.RedeemForm{
+			Redemptions:   redemptions,
+			FeeSuggestion: trade.redeemFee(),
+			Options:       trade.options,
+		},
+	}, nil
+}
+
+// GaslessRedeemCalldata builds emergency gasless redeem calldata for the
+// specified matches and relayer address.
+func (c *Core) GaslessRedeemCalldata(appPass []byte, matchIDs []order.MatchID, relayerAddress string) (*GaslessRedeemCalldataResult, error) {
+	matchSet, err := c.gaslessRedeemMatchSet(matchIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	crypter, err := c.encryptionKey(appPass)
+	if err != nil {
+		return nil, err
+	}
+	defer crypter.Close()
+
+	if err := c.connectAndUnlock(crypter, matchSet.wallet); err != nil {
+		return nil, err
+	}
+
+	gaslessWallet, ok := matchSet.wallet.Wallet.(asset.EmergencyGaslessRedeemer)
+	if !ok {
+		return nil, fmt.Errorf("%s wallet does not support emergency gasless redeem export", matchSet.wallet.Symbol)
+	}
+	ctx, cancel := context.WithTimeout(c.ctx, walletCallTimeout)
+	defer cancel()
+	result, err := gaslessWallet.GaslessRedeemCalldata(ctx, matchSet.form, relayerAddress)
+	if err != nil {
+		return nil, err
+	}
+	return &GaslessRedeemCalldataResult{
+		AssetID:         matchSet.wallet.AssetID,
+		ContractAddress: result.ContractAddress,
+		Calldata:        result.Calldata,
+	}, nil
+}
+
+// ValidateGaslessRedeem validates emergency gasless redeem calldata against the
+// specified asset wallet.
+func (c *Core) ValidateGaslessRedeem(assetID uint32, contractAddress, calldata string) (*asset.GaslessRedeemValidation, error) {
+	wallet, err := c.connectedWallet(assetID)
+	if err != nil {
+		return nil, err
+	}
+	gaslessWallet, ok := wallet.Wallet.(asset.EmergencyGaslessRedeemer)
+	if !ok {
+		return nil, fmt.Errorf("%s wallet does not support gasless redeem validation", wallet.Symbol)
+	}
+	calldata = strings.TrimPrefix(calldata, "0x")
+	calldataB, err := hex.DecodeString(calldata)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding calldata: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(c.ctx, walletCallTimeout)
+	defer cancel()
+	return gaslessWallet.ValidateGaslessRedeemCalldata(ctx, contractAddress, calldataB)
+}
+
+// SubmitGaslessRedeem validates and broadcasts emergency gasless redeem
+// calldata from the specified asset wallet.
+func (c *Core) SubmitGaslessRedeem(appPass []byte, assetID uint32, contractAddress, calldata string) (string, error) {
+	crypter, err := c.encryptionKey(appPass)
+	if err != nil {
+		return "", err
+	}
+	defer crypter.Close()
+
+	wallet, found := c.wallet(assetID)
+	if !found {
+		return "", fmt.Errorf("no wallet found for %s", unbip(assetID))
+	}
+	if err := c.connectAndUnlock(crypter, wallet); err != nil {
+		return "", err
+	}
+
+	gaslessWallet, ok := wallet.Wallet.(asset.EmergencyGaslessRedeemer)
+	if !ok {
+		return "", fmt.Errorf("%s wallet does not support gasless redeem submission", wallet.Symbol)
+	}
+	calldata = strings.TrimPrefix(calldata, "0x")
+	calldataB, err := hex.DecodeString(calldata)
+	if err != nil {
+		return "", fmt.Errorf("error decoding calldata: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(c.ctx, walletCallTimeout)
+	defer cancel()
+	txHash, err := gaslessWallet.SubmitGaslessRedeemCalldata(ctx, contractAddress, calldataB)
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(txHash), nil
 }
 
 // findActiveOrder will search the dex connections for an active order by order

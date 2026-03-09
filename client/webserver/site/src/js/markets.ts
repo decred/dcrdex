@@ -2323,7 +2323,7 @@ export default class MarketsPage extends BasePage {
     }
     for (const opt of swap.options || []) addOption(opt, true)
     for (const opt of redeem.options || []) addOption(opt, false)
-    Doc.setVis(redeem.userOpRequired, page.vUserOpWarning)
+    Doc.setVis(redeem.relayRequired, page.vRelayWarning)
     app().bindTooltips(page.vDefaultOrderOpts)
     app().bindTooltips(page.vOtherOrderOpts)
   }
@@ -2817,8 +2817,8 @@ export default class MarketsPage extends BasePage {
     if (!app().checkResponse(res)) {
       if (res.code === Errors.insufficientRedeemFundsErr) {
         page.vErr.textContent = intl.prep(intl.ID_INSUFFICIENT_REDEEM_FUNDS_ERR_MSG)
-      } else if (res.code === Errors.insufficientRedeemFundsBundlerErr) {
-        page.vErr.textContent = intl.prep(intl.ID_INSUFFICIENT_REDEEM_FUNDS_BUNDLER_ERR_MSG)
+      } else if (res.code === Errors.insufficientRedeemFundsRelayErr) {
+        page.vErr.textContent = intl.prep(intl.ID_INSUFFICIENT_REDEEM_FUNDS_RELAY_ERR_MSG)
       } else {
         page.vErr.textContent = res.msg
       }

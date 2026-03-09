@@ -1,7 +1,7 @@
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
-package eth
+package base
 
 import (
 	"context"
@@ -16,9 +16,9 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
-// gasPriceOracleAddr is the OP Stack GasPriceOracle precompile address.
+// GasPriceOracleAddr is the OP Stack GasPriceOracle precompile address.
 // See https://docs.optimism.io/chain/addresses
-var gasPriceOracleAddr = common.HexToAddress("0x420000000000000000000000000000000000000F")
+var GasPriceOracleAddr = common.HexToAddress("0x420000000000000000000000000000000000000F")
 
 // gasPriceOracleABI is the minimal ABI for the OP Stack GasPriceOracle's
 // getL1Fee method: getL1Fee(bytes) returns (uint256).
@@ -33,13 +33,13 @@ func init() {
 	gasPriceOracleABI = &parsed
 }
 
-// wrapCalldata wraps the given calldata in a dummy DynamicFeeTx and returns
+// WrapCalldata wraps the given calldata in a dummy DynamicFeeTx and returns
 // the RLP-encoded transaction. The OP Stack GasPriceOracle.getL1Fee expects
 // the full RLP-encoded transaction, not just the calldata, because the L1 fee
 // is based on the total serialized size including the transaction envelope.
 // A zero ChainID is used because getL1Fee only cares about the serialized
 // size, not the chain — the size difference from ChainID encoding is negligible.
-func wrapCalldata(calldata []byte) ([]byte, error) {
+func WrapCalldata(calldata []byte) ([]byte, error) {
 	tx := types.NewTx(&types.DynamicFeeTx{
 		ChainID:   big.NewInt(0),
 		Nonce:     0,
@@ -53,7 +53,7 @@ func wrapCalldata(calldata []byte) ([]byte, error) {
 	return tx.MarshalBinary()
 }
 
-// l1FeeForCalldata calls the OP Stack GasPriceOracle precompile to estimate
+// L1FeeForCalldata calls the OP Stack GasPriceOracle precompile to estimate
 // the L1 fee for a transaction with the given calldata. The calldata is wrapped
 // in a dummy RLP-encoded transaction before being passed to getL1Fee, which
 // expects the full serialized transaction.
@@ -61,8 +61,8 @@ func wrapCalldata(calldata []byte) ([]byte, error) {
 // favor of getL1FeeUpperBound, but is still populated for backwards
 // compatibility. If it is removed in a future upgrade, this function will
 // return an error.
-func l1FeeForCalldata(ctx context.Context, cb bind.ContractBackend, calldata []byte) (*big.Int, error) {
-	rawTx, err := wrapCalldata(calldata)
+func L1FeeForCalldata(ctx context.Context, cb bind.ContractBackend, calldata []byte) (*big.Int, error) {
+	rawTx, err := WrapCalldata(calldata)
 	if err != nil {
 		return nil, fmt.Errorf("error wrapping calldata in dummy tx: %w", err)
 	}
@@ -72,7 +72,7 @@ func l1FeeForCalldata(ctx context.Context, cb bind.ContractBackend, calldata []b
 	}
 
 	result, err := cb.CallContract(ctx, ethereum.CallMsg{
-		To:   &gasPriceOracleAddr,
+		To:   &GasPriceOracleAddr,
 		Data: data,
 	}, nil)
 	if err != nil {

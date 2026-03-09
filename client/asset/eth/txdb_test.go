@@ -193,7 +193,7 @@ func TestTxDB(t *testing.T) {
 	}
 }
 
-func TestTxDB_userOp(t *testing.T) {
+func TestTxDB_relay(t *testing.T) {
 	tempDir := t.TempDir()
 	tLogger := dex.StdOutLogger("TXDB", dex.LevelTrace)
 
@@ -206,14 +206,14 @@ func TestTxDB_userOp(t *testing.T) {
 		t.Fatalf("error connecting to tx history store: %v", err)
 	}
 
-	newTx := func(nonce uint64, blockNumber uint64, isUserOp bool) *extendedWalletTx {
+	newTx := func(nonce uint64, blockNumber uint64, isRelay bool) *extendedWalletTx {
 		tx := eth.extendedTx(&genTxResult{
 			tx:     node.newTransaction(nonce, big.NewInt(1)),
 			txType: asset.Send,
 			amt:    1,
 		})
 		tx.BlockNumber = blockNumber
-		tx.IsUserOp = isUserOp
+		tx.IsRelay = isRelay
 		tx.ID = fmt.Sprintf("%d", rand.Intn(1000000))
 		if blockNumber > 0 {
 			tx.Confirmed = true
@@ -223,18 +223,18 @@ func TestTxDB_userOp(t *testing.T) {
 
 	wt1 := newTx(1, 100, false)
 	wt2 := newTx(2, 101, false)
-	wt2UserOp := newTx(1, 101, true)
+	wt2Relay := newTx(1, 101, true)
 	wt3 := newTx(3, 102, false)
 	wt4 := newTx(4, 103, false)
 
-	for _, wt := range []*extendedWalletTx{wt1, wt2, wt2UserOp, wt3, wt4} {
+	for _, wt := range []*extendedWalletTx{wt1, wt2, wt2Relay, wt3, wt4} {
 		err := txHistoryStore.storeTx(wt)
 		if err != nil {
 			t.Fatalf("error storing tx: %v", err)
 		}
 	}
 
-	expectedTxs := []*asset.WalletTransaction{wt4.WalletTransaction, wt3.WalletTransaction, wt2UserOp.WalletTransaction, wt2.WalletTransaction, wt1.WalletTransaction}
+	expectedTxs := []*asset.WalletTransaction{wt4.WalletTransaction, wt3.WalletTransaction, wt2Relay.WalletTransaction, wt2.WalletTransaction, wt1.WalletTransaction}
 	r, err := txHistoryStore.getTxs(nil, &asset.TxHistoryRequest{
 		N:           0,
 		RefID:       nil,

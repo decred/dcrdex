@@ -11,7 +11,6 @@ import (
 
 	"decred.org/dcrdex/dex"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
-	"decred.org/dcrdex/dex/networks/eth/contracts/entrypoint"
 	"decred.org/dcrdex/server/asset"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
@@ -21,18 +20,18 @@ var _ asset.Coin = (*swapCoin)(nil)
 var _ asset.Coin = (*redeemCoin)(nil)
 
 type baseCoin struct {
-	tokenAddr    common.Address
-	backend      *AssetBackend
-	locator      []byte
-	gasFeeCap    *big.Int
-	gasTipCap    *big.Int
-	txHash       common.Hash
-	value        uint64
-	txData       []byte
-	serializedTx []byte
-	contractVer  uint32
-	isUserOp     bool
-	userOpHash   common.Hash
+	tokenAddr     common.Address
+	backend       *AssetBackend
+	locator       []byte
+	gasFeeCap     *big.Int
+	gasTipCap     *big.Int
+	txHash        common.Hash
+	value         uint64
+	txData        []byte
+	serializedTx  []byte
+	contractVer   uint32
+	isRelay       bool
+	relayTaskHash common.Hash
 }
 
 type swapCoin struct {
@@ -60,8 +59,8 @@ func (be *AssetBackend) newSwapCoin(coinID []byte, contractData []byte) (*swapCo
 		return nil, err
 	}
 
-	if bc.isUserOp {
-		return nil, fmt.Errorf("user op coin not supported")
+	if bc.isRelay {
+		return nil, fmt.Errorf("relay coin not supported")
 	}
 
 	var sum uint64
@@ -178,9 +177,6 @@ func (be *AssetBackend) newRedeemCoin(coinID []byte, contractData []byte) (*rede
 	var secret [32]byte
 	switch bc.contractVer {
 	case 0:
-		if bc.isUserOp {
-			return nil, fmt.Errorf("user op coin not supported in v0")
-		}
 		secretHash, err := dexeth.ParseV0Locator(bc.locator)
 		if err != nil {
 			return nil, fmt.Errorf("error parsing vector from v0 locator '%x': %w", bc.locator, err)
@@ -195,25 +191,16 @@ func (be *AssetBackend) newRedeemCoin(coinID []byte, contractData []byte) (*rede
 		}
 		secret = redemption.Secret
 	case 1:
-		vector, err := dexeth.ParseV1Locator(bc.locator)
+		// V1 contracts just verify the redemption via on-chain status.
+		// This is simpler and works for both regular and gasless redemptions.
+		status, _, err := be.node.statusAndVector(be.ctx, be.assetID, bc.locator)
 		if err != nil {
-			return nil, fmt.Errorf("error parsing vector from v1 locator '%x': %w", bc.locator, err)
+			return nil, err
 		}
-		tokenAddr, redemptions, err := dexeth.ParseRedeemDataV1(bc.txData)
-		if err != nil {
-			return nil, fmt.Errorf("unable to parse v1 redemption call data: %v", err)
+		if status.Step != dexeth.SSRedeemed {
+			return nil, asset.CoinNotFoundError
 		}
-		if tokenAddr != be.tokenAddr {
-			return nil, fmt.Errorf("token address in redeem tx data is incorrect. %s != %s", tokenAddr, be.tokenAddr)
-		}
-		redemption, ok := redemptions[vector.SecretHash]
-		if !ok {
-			return nil, fmt.Errorf("tx %v does not contain redemption for v1 vector %s", bc.txHash, vector)
-		}
-		if !dexeth.CompareVectors(redemption.Contract, vector) {
-			return nil, fmt.Errorf("encoded vector %q doesn't match expected vector %q", redemption.Contract, vector)
-		}
-		secret = redemption.Secret
+		secret = status.Secret
 	default:
 		return nil, fmt.Errorf("version %d redeem coin not supported", bc.contractVer)
 	}
@@ -224,73 +211,23 @@ func (be *AssetBackend) newRedeemCoin(coinID []byte, contractData []byte) (*rede
 	}, nil
 }
 
-// userOpBaseCoin creates a baseCoin from a user operation.
-func (be *AssetBackend) userOpBaseCoin(txHash, userOpHash common.Hash, contractData []byte) (*baseCoin, error) {
+// relayBaseCoin creates a baseCoin from a relay coin ID. Relay transactions
+// are verified via on-chain swap status rather than transaction lookup,
+// since the relay tx hash may not be known when the coin ID is created.
+func (be *AssetBackend) relayBaseCoin(contractData []byte) (*baseCoin, error) {
 	contractVer, locator, err := dexeth.DecodeContractData(contractData)
 	if err != nil {
 		return nil, err
-	}
-
-	tx, isMempool, err := be.node.transaction(be.ctx, txHash)
-	if err != nil {
-		if errors.Is(err, ethereum.NotFound) {
-			return nil, asset.CoinNotFoundError
-		}
-		return nil, fmt.Errorf("unable to fetch transaction: %v", err)
-	}
-	if isMempool {
-		return nil, asset.CoinNotFoundError
-	}
-
-	if *tx.To() != be.entryPointAddress {
-		return nil, fmt.Errorf("unknown entrypoint address: %s", tx.To().String())
-	}
-
-	var callData []byte
-	handleOpsData, err := dexeth.ParseHandleOpsData(tx.Data())
-	if err != nil {
-		innerData, innerErr := dexeth.ParseInnerHandleOpData(tx.Data())
-		if innerErr != nil {
-			return nil, fmt.Errorf("unable to parse entrypoint tx data: handleOps: %v, innerHandleOp: %v", err, innerErr)
-		}
-		if innerData.UserOpHash != userOpHash {
-			return nil, fmt.Errorf("innerHandleOp userOpHash %x != expected %x", innerData.UserOpHash, userOpHash)
-		}
-		callData = innerData.CallData
-	} else {
-		var userOp *entrypoint.PackedUserOperation
-		for _, op := range handleOpsData {
-			hash, err := dexeth.HashUserOp(op, be.entryPointAddress, big.NewInt(int64(be.evmChainID)))
-			if err != nil {
-				return nil, fmt.Errorf("unable to hash user op: %v", err)
-			}
-			if hash == userOpHash {
-				userOp = &op
-				break
-			}
-		}
-		if userOp == nil {
-			return nil, fmt.Errorf("user op not found in tx %s", txHash)
-		}
-		callData = userOp.CallData
 	}
 
 	return &baseCoin{
 		backend:     be,
 		tokenAddr:   be.tokenAddr,
 		locator:     locator,
-		txHash:      txHash,
-		isUserOp:    true,
-		txData:      callData,
+		isRelay:     true,
 		contractVer: contractVer,
-
-		// The following is not populated, but since user ops are only used
-		// for redemptions, and the following data is not used in confirming
-		// redemptions, it is not necessary to populate it.
-		gasFeeCap:    new(big.Int),
-		gasTipCap:    new(big.Int),
-		value:        0,
-		serializedTx: []byte{},
+		gasFeeCap:   new(big.Int),
+		gasTipCap:   new(big.Int),
 	}, nil
 }
 
@@ -361,8 +298,8 @@ func (be *AssetBackend) baseCoin(coinID []byte, contractData []byte) (*baseCoin,
 		return nil, err
 	}
 
-	if ethCoinID.IsUserOp {
-		return be.userOpBaseCoin(ethCoinID.TxHash, ethCoinID.UserOpHash, contractData)
+	if ethCoinID.IsRelay {
+		return be.relayBaseCoin(contractData)
 	}
 
 	return be.txBaseCoin(ethCoinID.TxHash, contractData)
@@ -453,6 +390,11 @@ func (c *redeemCoin) Confirmations(ctx context.Context) (int64, error) {
 	// not validating the locktime, as the swap is redeemed and
 	// locktime no longer relevant.
 	if status.Step == dexeth.SSRedeemed {
+		if c.isRelay {
+			// Relay redeems have no tx hash to look up the receipt.
+			// The swap is confirmed redeemed on-chain.
+			return 1, nil
+		}
 		if c.contractVer == 1 {
 			if err := setV1StatusBlockHeight(ctx, c.backend.node, status, c.baseCoin); err != nil {
 				return -1, err

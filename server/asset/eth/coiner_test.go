@@ -99,6 +99,7 @@ func TestNewRedeemCoin(t *testing.T) {
 			swpErr: test.swpErr,
 			swp: map[string]*dexeth.SwapState{
 				string(secretHash[:]): test.swap,
+				string(test.locator):  test.swap,
 			},
 		}
 		eth := &AssetBackend{

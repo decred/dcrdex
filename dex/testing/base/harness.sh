@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tmux script that sets up an eth simnet harness. There is only one node in
+# tmux script that sets up a base simnet harness. There is only one node in
 # --dev mode.
 set -ex
 

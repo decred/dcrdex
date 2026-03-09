@@ -3588,12 +3588,13 @@ func (c *Core) confirmTx(t *trackedTrade, match *matchTracker, info *txInfo) (bo
 	}
 
 	// If this is a redeem that was pending submission (e.g. a
-	// GaslessRedeem UserOp), the bundler has now submitted the
+	// GaslessRedeem relay op), the relay has now submitted the
 	// transaction and we have the real coin ID. Send the deferred
 	// redeem notification to the server.
 	if info.txType == asset.CTRedeem && match.redemptionPendingSubmission && !status.PendingSubmission {
 		match.redemptionPendingSubmission = false
 		if !match.matchCompleteSent {
+			c.log.Infof("Relay redeem confirmed for match %s. Sending deferred redeem notification to server.", match)
 			c.sendRedeemAsync(t, match, status.CoinID, match.MetaData.Proof.Secret)
 		}
 	}
@@ -3606,6 +3607,7 @@ func (c *Core) confirmTx(t *trackedTrade, match *matchTracker, info *txInfo) (bo
 		note := newMatchNote(TopicConfirms, "", "", db.Data, t, match)
 		t.notify(note)
 	}
+
 	return confirmed, nil
 }
 

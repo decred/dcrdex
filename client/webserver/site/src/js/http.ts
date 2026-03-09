@@ -79,5 +79,5 @@ export enum Errors {
   bondAssetErr,
   bondPostErr,
   insufficientRedeemFundsErr,
-  insufficientRedeemFundsBundlerErr,
+  insufficientRedeemFundsRelayErr,
 }

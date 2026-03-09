@@ -9,7 +9,6 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"math"
 	"math/big"
 	"time"
 
@@ -26,6 +25,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
 // contractor is a translation layer between the abigen bindings and the DEX app.
@@ -76,7 +76,7 @@ type unifiedContractor interface {
 	tokenContractor(token *dexeth.Token) (tokenContractor, error)
 }
 
-type contractorConstructor func(net dex.Network, contractAddr, acctAddr common.Address, ec bind.ContractBackend) (contractor, error)
+type contractorConstructor func(net dex.Network, contractAddr, acctAddr common.Address, ec bind.ContractBackend, chainID int64) (contractor, error)
 
 // contractV0 is the interface common to a version 0 swap contract or version 0
 // token swap contract.
@@ -96,7 +96,7 @@ type contractV1 interface {
 	Status(opts *bind.CallOpts, token common.Address, c swapv1.ETHSwapVector) (swapv1.ETHSwapStatus, error)
 	Refund(opts *bind.TransactOpts, token common.Address, c swapv1.ETHSwapVector) (*types.Transaction, error)
 	IsRedeemable(opts *bind.CallOpts, token common.Address, c swapv1.ETHSwapVector) (bool, error)
-	EntryPoint(opts *bind.CallOpts) (common.Address, error)
+	Nonces(opts *bind.CallOpts, arg0 common.Address) (*big.Int, error)
 
 	ContractKey(opts *bind.CallOpts, token common.Address, v swapv1.ETHSwapVector) ([32]byte, error)
 	Swaps(opts *bind.CallOpts, arg0 [32]byte) ([32]byte, error)
@@ -122,7 +122,7 @@ var _ contractor = (*contractorV0)(nil)
 // newV0Contractor is the constructor for a version 0 ETH swap contract. For
 // token swap contracts, use newV0TokenContractor to construct a
 // tokenContractorV0.
-func newV0Contractor(_ dex.Network, contractAddr, acctAddr common.Address, cb bind.ContractBackend) (contractor, error) {
+func newV0Contractor(_ dex.Network, contractAddr, acctAddr common.Address, cb bind.ContractBackend, _ int64) (contractor, error) {
 	c, err := swapv0.NewETHSwap(contractAddr, cb)
 	if err != nil {
 		return nil, err
@@ -637,19 +637,20 @@ func (c *tokenContractorV0) tokenAddress() common.Address {
 	return c.tokenContractAddr
 }
 
-// gaslessRedeemContractor is a contractor that supports gasless redemptions
-// using ERC-4337 account abstraction.
-type gaslessRedeemContractor interface {
-	// gaslessRedeemCalldata creates the calldata to be sent to the bundler
-	// for a gasless redemption. The nonce must match the UserOp nonce.
-	gaslessRedeemCalldata(redeems []*asset.Redemption, nonce *big.Int) ([]byte, error)
-	// entrypointAddress returns the address of the entrypoint contract specified
-	// in the ETH Swap contract.
-	entrypointAddress() (common.Address, error)
-	// testGaslessRedeemCalldata generates calldata for a test redeemAA call
-	// using the contract's permanent test swap. Used to verify bundler
-	// compatibility before committing to trades.
-	testGaslessRedeemCalldata() ([]byte, error)
+// signedRedeemContractor is a contractor that supports EIP-712 signed
+// redemptions for gasless relay submission.
+type signedRedeemContractor interface {
+	// eip712RedeemDigest computes the EIP-712 digest for a signed redemption.
+	eip712RedeemDigest(feeRecipient common.Address, redemptions []swapv1.ETHSwapRedemption,
+		relayerFee, nonce, deadline *big.Int) (common.Hash, error)
+	// redeemWithSignatureCalldata encodes the calldata for redeemWithSignature.
+	redeemWithSignatureCalldata(redemptions []swapv1.ETHSwapRedemption,
+		feeRecipient common.Address, relayerFee, nonce, deadline *big.Int,
+		signature []byte) ([]byte, error)
+	// nonces returns the current EIP-712 nonce for an address.
+	nonces(addr common.Address) (*big.Int, error)
+	// convertRedeems converts asset.Redemption to the contract's type.
+	convertRedeems(redeems []*asset.Redemption) ([]swapv1.ETHSwapRedemption, error)
 }
 
 type contractorV1 struct {
@@ -660,15 +661,16 @@ type contractorV1 struct {
 	swapContractAddr common.Address
 	acctAddr         common.Address
 	cb               bind.ContractBackend
+	chainID          *big.Int
 	isToken          bool
 	evmify           func(uint64) *big.Int
 	atomize          func(*big.Int) uint64
 }
 
 var _ contractor = (*contractorV1)(nil)
-var _ gaslessRedeemContractor = (*contractorV1)(nil)
+var _ signedRedeemContractor = (*contractorV1)(nil)
 
-func newV1Contractor(net dex.Network, swapContractAddr, acctAddr common.Address, cb bind.ContractBackend) (contractor, error) {
+func newV1Contractor(net dex.Network, swapContractAddr, acctAddr common.Address, cb bind.ContractBackend, chainID int64) (contractor, error) {
 	c, err := swapv1.NewETHSwap(swapContractAddr, cb)
 	if err != nil {
 		return nil, err
@@ -680,6 +682,7 @@ func newV1Contractor(net dex.Network, swapContractAddr, acctAddr common.Address,
 		swapContractAddr: swapContractAddr,
 		acctAddr:         acctAddr,
 		cb:               cb,
+		chainID:          big.NewInt(chainID),
 		atomize:          dexeth.WeiToGwei,
 		evmify:           dexeth.GweiToWei,
 	}, nil
@@ -787,36 +790,90 @@ func (c *contractorV1) redeem(txOpts *bind.TransactOpts, redeems []*asset.Redemp
 	return c.Redeem(txOpts, c.tokenAddr, versionedRedemptions)
 }
 
-func (c *contractorV1) gaslessRedeemCalldata(redeems []*asset.Redemption, nonce *big.Int) ([]byte, error) {
-	versionedRedemptions, err := c.convertRedeems(redeems)
+// eip712RedeemDigest computes the EIP-712 digest for a signed redemption.
+// The digest matches what the Solidity contract computes in _verifySignedRedeem.
+func (c *contractorV1) eip712RedeemDigest(feeRecipient common.Address, redemptions []swapv1.ETHSwapRedemption,
+	relayerFee, nonce, deadline *big.Int) (common.Hash, error) {
+
+	redeemTypehash := crypto.Keccak256Hash([]byte("Redeem(address feeRecipient,bytes32 redemptionsHash,uint256 relayerFee,uint256 nonce,uint256 deadline)"))
+
+	// redemptionsHash = keccak256(abi.encode(redemptions))
+	redemptionArrayType, err := abi.NewType("tuple[]", "", []abi.ArgumentMarshaling{
+		{Name: "v", Type: "tuple", Components: []abi.ArgumentMarshaling{
+			{Name: "secretHash", Type: "bytes32"},
+			{Name: "value", Type: "uint256"},
+			{Name: "initiator", Type: "address"},
+			{Name: "refundTimestamp", Type: "uint64"},
+			{Name: "participant", Type: "address"},
+		}},
+		{Name: "secret", Type: "bytes32"},
+	})
 	if err != nil {
-		return nil, err
+		return common.Hash{}, fmt.Errorf("error creating redemption type: %w", err)
 	}
-	return c.abi.Pack("redeemAA", versionedRedemptions, nonce)
+	args := abi.Arguments{
+		{Type: redemptionArrayType},
+	}
+	redemptionsEncoded, err := args.Pack(redemptions)
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("error encoding redemptions: %w", err)
+	}
+	redemptionsHash := crypto.Keccak256Hash(redemptionsEncoded)
+
+	// structHash = keccak256(abi.encode(REDEEM_TYPEHASH, feeRecipient, redemptionsHash, relayerFee, nonce, deadline))
+	uint256Type, _ := abi.NewType("uint256", "", nil)
+	bytes32Type, _ := abi.NewType("bytes32", "", nil)
+	addressType, _ := abi.NewType("address", "", nil)
+	structArgs := abi.Arguments{
+		{Type: bytes32Type},
+		{Type: addressType},
+		{Type: bytes32Type},
+		{Type: uint256Type},
+		{Type: uint256Type},
+		{Type: uint256Type},
+	}
+	structEncoded, err := structArgs.Pack(redeemTypehash, feeRecipient, redemptionsHash, relayerFee, nonce, deadline)
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("error encoding struct hash: %w", err)
+	}
+	structHash := crypto.Keccak256Hash(structEncoded)
+
+	// domainSeparator = keccak256(abi.encode(typeHash, nameHash, versionHash, chainId, contractAddress))
+	domainTypeHash := crypto.Keccak256Hash([]byte("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"))
+	nameHash := crypto.Keccak256Hash([]byte("ETHSwap"))
+	versionHash := crypto.Keccak256Hash([]byte("1"))
+
+	domainArgs := abi.Arguments{
+		{Type: bytes32Type},
+		{Type: bytes32Type},
+		{Type: bytes32Type},
+		{Type: uint256Type},
+		{Type: addressType},
+	}
+	domainEncoded, err := domainArgs.Pack(domainTypeHash, nameHash, versionHash, c.chainID, c.swapContractAddr)
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("error encoding domain separator: %w", err)
+	}
+	domainSeparator := crypto.Keccak256Hash(domainEncoded)
+
+	// digest = keccak256("\x19\x01" || domainSeparator || structHash)
+	digest := crypto.Keccak256Hash(
+		append([]byte{0x19, 0x01}, append(domainSeparator.Bytes(), structHash.Bytes()...)...),
+	)
+	return digest, nil
 }
 
-func (c *contractorV1) entrypointAddress() (common.Address, error) {
-	return c.EntryPoint(&bind.CallOpts{From: c.acctAddr})
+// redeemWithSignatureCalldata encodes the calldata for redeemWithSignature.
+func (c *contractorV1) redeemWithSignatureCalldata(redemptions []swapv1.ETHSwapRedemption,
+	feeRecipient common.Address, relayerFee, nonce, deadline *big.Int,
+	signature []byte) ([]byte, error) {
+
+	return c.abi.Pack("redeemWithSignature", redemptions, feeRecipient, relayerFee, nonce, deadline, signature)
 }
 
-var (
-	testSecret     = [32]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}
-	testSecretHash = sha256.Sum256(testSecret[:])
-	testValue      = big.NewInt(1e18) // 1 ether
-)
-
-func (c *contractorV1) testGaslessRedeemCalldata() ([]byte, error) {
-	testRedemption := swapv1.ETHSwapRedemption{
-		V: swapv1.ETHSwapVector{
-			SecretHash:      testSecretHash,
-			Value:           testValue,
-			Initiator:       c.swapContractAddr,
-			RefundTimestamp: math.MaxUint64,
-			Participant:     c.swapContractAddr,
-		},
-		Secret: testSecret,
-	}
-	return c.abi.Pack("redeemAA", []swapv1.ETHSwapRedemption{testRedemption}, new(big.Int))
+// nonces returns the current EIP-712 nonce for an address.
+func (c *contractorV1) nonces(addr common.Address) (*big.Int, error) {
+	return c.Nonces(&bind.CallOpts{From: c.acctAddr}, addr)
 }
 
 func (c *contractorV1) refund(txOpts *bind.TransactOpts, locator []byte) (*types.Transaction, error) {
@@ -957,8 +1014,15 @@ func (c *contractorV1) isRefundable(locator []byte) (bool, error) {
 
 func (c *contractorV1) incomingValue(ctx context.Context, tx *types.Transaction) (uint64, error) {
 	if _, redeems, err := dexeth.ParseRedeemDataV1(tx.Data()); err == nil {
-		var redeemed *big.Int
+		redeemed := new(big.Int)
 		for _, r := range redeems {
+			redeemed.Add(redeemed, r.Contract.Value)
+		}
+		return c.atomize(redeemed), nil
+	}
+	if signed, err := dexeth.ParseSignedRedeemDataV1(tx.Data()); err == nil {
+		redeemed := new(big.Int)
+		for _, r := range signed.Redemptions {
 			redeemed.Add(redeemed, r.Contract.Value)
 		}
 		return c.atomize(redeemed), nil
@@ -1019,6 +1083,7 @@ func (c *contractorV1) tokenContractor(token *dexeth.Token) (tokenContractor, er
 			swapContractAddr: c.swapContractAddr,
 			acctAddr:         c.acctAddr,
 			cb:               c.cb,
+			chainID:          c.chainID,
 			isToken:          true,
 			evmify:           token.AtomicToEVM,
 			atomize:          token.EVMToAtomic,

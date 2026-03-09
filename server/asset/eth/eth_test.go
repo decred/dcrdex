@@ -246,10 +246,6 @@ func (n *testNode) accountBalance(ctx context.Context, assetID uint32, addr comm
 	return n.acctBal, n.acctBalErr
 }
 
-func (n *testNode) getUserOpEvent(ctx context.Context, epAddress common.Address, userOpHash common.Hash, swapContractAddress common.Address, blockNumber uint64) (*userOpEvent, error) {
-	return nil, nil
-}
-
 func tSwap(bn, locktime int64, value uint64, secret [32]byte, state dexeth.SwapStep, participantAddr *common.Address) *dexeth.SwapState {
 	return &dexeth.SwapState{
 		Secret:      secret,

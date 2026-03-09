@@ -27,6 +27,7 @@ import (
 	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/dex/order"
 	"github.com/decred/dcrd/certgen"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -119,6 +120,9 @@ type clientCore interface {
 	PruneMMSnapshots(host string, base, quote uint32, minEpochIdx uint64) (int, error)
 	DeployContract(appPW []byte, assetIDs []uint32, txData []byte, contractVer *uint32, tokenAddress string) ([]*core.DeployContractResult, error)
 	TestContractGas(appPW []byte, assetIDs []uint32, tokenAssetIDs []uint32, maxSwaps int) ([]*core.ContractGasTestResult, error)
+	GaslessRedeemCalldata(appPass []byte, matchIDs []order.MatchID, relayerAddress string) (*core.GaslessRedeemCalldataResult, error)
+	ValidateGaslessRedeem(assetID uint32, contractAddress, calldata string) (*asset.GaslessRedeemValidation, error)
+	SubmitGaslessRedeem(appPass []byte, assetID uint32, contractAddress, calldata string) (string, error)
 }
 
 // RPCServer is a single-client http and websocket server enabling a JSON

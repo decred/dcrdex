@@ -200,7 +200,7 @@ func (d *Driver) Setup(cfg *asset.BackendConfig) (asset.Backend, error) {
 		}
 	}
 
-	return NewEVMBackend(cfg, chainID, dexeth.ContractAddresses, registeredTokens, dexeth.EntryPoints[cfg.Net])
+	return NewEVMBackend(cfg, chainID, dexeth.ContractAddresses, registeredTokens)
 }
 
 type TokenDriver struct {
@@ -234,7 +234,6 @@ type ethFetcher interface {
 	vector(ctx context.Context, assetID uint32, locator []byte) (*dexeth.SwapVector, error)
 	statusAndVector(ctx context.Context, assetID uint32, locator []byte) (*dexeth.SwapStatus, *dexeth.SwapVector, error)
 	accountBalance(ctx context.Context, assetID uint32, addr common.Address) (*big.Int, error)
-	getUserOpEvent(ctx context.Context, epAddress common.Address, userOpHash common.Hash, swapContractAddress common.Address, blockNumber uint64) (*userOpEvent, error)
 }
 
 type baseBackend struct {
@@ -282,8 +281,6 @@ type AssetBackend struct {
 	contractAddr   common.Address // could be v0 or v1
 	contractAddrV1 common.Address // required regardless
 	contractVer    uint32
-
-	entryPointAddress common.Address
 }
 
 // ETHBackend implements some Ethereum-specific methods.
@@ -398,7 +395,6 @@ func NewEVMBackend(
 	chainID uint64,
 	contractAddrs map[uint32]map[dex.Network]common.Address,
 	vTokens map[uint32]*VersionedToken,
-	entryPointAddress common.Address,
 ) (*ETHBackend, error) {
 
 	endpoints, err := parseEndpoints(cfg)
@@ -436,7 +432,6 @@ func NewEVMBackend(
 	}
 
 	eth.node = newRPCClient(baseChainID, chainID, net, endpoints, contractVer, contractAddr, contractAddrV1, log.SubLogger("RPC"))
-	eth.entryPointAddress = entryPointAddress
 	return eth, nil
 }
 
@@ -763,8 +758,8 @@ func (eth *baseBackend) ValidateCoinID(coinID []byte) (string, error) {
 	if err != nil {
 		return "<invalid>", err
 	}
-	if ethCoinID.IsUserOp {
-		return "userOp:" + ethCoinID.TxHash.Hex(), nil
+	if ethCoinID.IsRelay {
+		return "relay:" + ethCoinID.TxHash.Hex(), nil
 	}
 	return ethCoinID.TxHash.Hex(), nil
 }

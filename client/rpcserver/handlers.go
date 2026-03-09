@@ -73,6 +73,9 @@ const (
 	setVotingPreferencesRoute  = "setvotingprefs"
 	txHistoryRoute             = "txhistory"
 	walletTxRoute              = "wallettx"
+	gaslessRedeemCalldataRoute = "gaslessredeemcalldata"
+	validateGaslessRedeemRoute = "validategaslessredeem"
+	submitGaslessRedeemRoute   = "submitgaslessredeem"
 	withdrawBchSpvRoute        = "withdrawbchspv"
 	bridgeRoute                = "bridge"
 	checkBridgeApprovalRoute   = "checkbridgeapproval"
@@ -178,6 +181,9 @@ var routes = map[string]func(s *RPCServer, msg *msgjson.Message) *msgjson.Respon
 	setVotingPreferencesRoute:  handleSetVotingPreferences,
 	txHistoryRoute:             handleTxHistory,
 	walletTxRoute:              handleWalletTx,
+	gaslessRedeemCalldataRoute: handleGaslessRedeemCalldata,
+	validateGaslessRedeemRoute: handleValidateGaslessRedeem,
+	submitGaslessRedeemRoute:   handleSubmitGaslessRedeem,
 	withdrawBchSpvRoute:        handleWithdrawBchSpv,
 	bridgeRoute:                handleBridge,
 	checkBridgeApprovalRoute:   handleCheckBridgeApproval,
@@ -918,6 +924,79 @@ func handleWalletTx(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload
 	}
 
 	return createResponse(walletTxRoute, tx, nil)
+}
+
+func handleGaslessRedeemCalldata(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params GaslessRedeemCalldataParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(gaslessRedeemCalldataRoute, err)
+	}
+	defer params.AppPass.Clear()
+
+	matchIDs := make([]order.MatchID, 0, len(params.MatchIDs))
+	for _, matchID := range params.MatchIDs {
+		matchID = strings.TrimPrefix(matchID, "0x")
+		matchIDB, err := hex.DecodeString(matchID)
+		if err != nil || len(matchIDB) != order.MatchIDSize {
+			return usage(gaslessRedeemCalldataRoute, fmt.Errorf("invalid match ID %q", matchID))
+		}
+		var mid order.MatchID
+		copy(mid[:], matchIDB)
+		matchIDs = append(matchIDs, mid)
+	}
+
+	result, err := s.core.GaslessRedeemCalldata(params.AppPass, matchIDs, params.RelayerAddress)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCTradeError, "unable to build gasless redeem calldata: %v", err)
+		return createResponse(gaslessRedeemCalldataRoute, nil, resErr)
+	}
+
+	return createResponse(gaslessRedeemCalldataRoute, &GaslessRedeemCalldataResponse{
+		AssetID:         result.AssetID,
+		ContractAddress: result.ContractAddress,
+		Calldata:        "0x" + hex.EncodeToString(result.Calldata),
+	}, nil)
+}
+
+func handleValidateGaslessRedeem(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params ValidateGaslessRedeemParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(validateGaslessRedeemRoute, err)
+	}
+
+	result, err := s.core.ValidateGaslessRedeem(params.AssetID, params.ContractAddress, params.Calldata)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCTradeError, "unable to validate gasless redeem calldata: %v", err)
+		return createResponse(validateGaslessRedeemRoute, nil, resErr)
+	}
+
+	return createResponse(validateGaslessRedeemRoute, &ValidateGaslessRedeemResponse{
+		FeeRecipient:    result.FeeRecipient,
+		Nonce:           result.Nonce,
+		Deadline:        result.Deadline,
+		RelayerFee:      result.RelayerFee,
+		GasEstimate:     result.GasEstimate,
+		EstimatedTxCost: result.EstimatedTxCost,
+		Profitable:      result.Profitable,
+	}, nil)
+}
+
+func handleSubmitGaslessRedeem(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
+	var params SubmitGaslessRedeemParams
+	if err := msg.Unmarshal(&params); err != nil {
+		return usage(submitGaslessRedeemRoute, err)
+	}
+	defer params.AppPass.Clear()
+
+	txHash, err := s.core.SubmitGaslessRedeem(params.AppPass, params.AssetID, params.ContractAddress, params.Calldata)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCFundTransferError, "unable to submit gasless redeem calldata: %v", err)
+		return createResponse(submitGaslessRedeemRoute, nil, resErr)
+	}
+
+	return createResponse(submitGaslessRedeemRoute, &SubmitGaslessRedeemResponse{
+		TxHash: txHash,
+	}, nil)
 }
 
 func handleWithdrawBchSpv(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload {
@@ -2406,6 +2485,38 @@ supported for DCR wallets.`,
 		fieldDescs: map[string]string{
 			"assetID": descAssetID,
 			"txID":    "The transaction ID.",
+		},
+	},
+	gaslessRedeemCalldataRoute: {
+		paramsType: reflect.TypeOf(GaslessRedeemCalldataParams{}),
+		summary: `Build calldata for an emergency gasless redeem. All requested
+    match IDs must belong to the same trade and will be batched into one
+    redeemWithSignature call.`,
+		fieldDescs: map[string]string{
+			"appPass":        descAppPass,
+			"relayerAddress": "The address that will submit the transaction.",
+			"matchIDs":       "The list of match IDs to include in the redeem call.",
+		},
+	},
+	validateGaslessRedeemRoute: {
+		paramsType: reflect.TypeOf(ValidateGaslessRedeemParams{}),
+		summary: `Validate and simulate emergency gasless redeem calldata using
+    the configured wallet address for the specified asset as the submitting sender.`,
+		fieldDescs: map[string]string{
+			"assetID":         descAssetID,
+			"contractAddress": "The swap contract address to validate against.",
+			"calldata":        "Hex-encoded redeemWithSignature calldata.",
+		},
+	},
+	submitGaslessRedeemRoute: {
+		paramsType: reflect.TypeOf(SubmitGaslessRedeemParams{}),
+		summary: `Submit emergency gasless redeem calldata from the configured
+    wallet for the specified asset.`,
+		fieldDescs: map[string]string{
+			"appPass":         descAppPass,
+			"assetID":         descAssetID,
+			"contractAddress": "The swap contract address to call.",
+			"calldata":        "Hex-encoded redeemWithSignature calldata.",
 		},
 	},
 	withdrawBchSpvRoute: {

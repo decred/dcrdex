@@ -258,6 +258,57 @@ type WalletTxParams struct {
 	TxID    string `json:"txID"`
 }
 
+// GaslessRedeemCalldataParams is the parameter type for the
+// gaslessredeemcalldata route.
+type GaslessRedeemCalldataParams struct {
+	AppPass        encode.PassBytes `json:"appPass"`
+	RelayerAddress string           `json:"relayerAddress"`
+	MatchIDs       []string         `json:"matchIDs"`
+}
+
+// GaslessRedeemCalldataResponse is the response for the
+// gaslessredeemcalldata route.
+type GaslessRedeemCalldataResponse struct {
+	AssetID         uint32 `json:"assetID"`
+	ContractAddress string `json:"contractAddress"`
+	Calldata        string `json:"calldata"`
+}
+
+// ValidateGaslessRedeemParams is the parameter type for the
+// validategaslessredeem route.
+type ValidateGaslessRedeemParams struct {
+	AssetID         uint32 `json:"assetID"`
+	ContractAddress string `json:"contractAddress"`
+	Calldata        string `json:"calldata"`
+}
+
+// ValidateGaslessRedeemResponse is the response for the
+// validategaslessredeem route.
+type ValidateGaslessRedeemResponse struct {
+	FeeRecipient    string `json:"feeRecipient"`
+	Nonce           string `json:"nonce"`
+	Deadline        uint64 `json:"deadline"`
+	RelayerFee      string `json:"relayerFee"`
+	GasEstimate     uint64 `json:"gasEstimate"`
+	EstimatedTxCost string `json:"estimatedTxCost"`
+	Profitable      bool   `json:"profitable"`
+}
+
+// SubmitGaslessRedeemParams is the parameter type for the
+// submitgaslessredeem route.
+type SubmitGaslessRedeemParams struct {
+	AppPass         encode.PassBytes `json:"appPass"`
+	AssetID         uint32           `json:"assetID"`
+	ContractAddress string           `json:"contractAddress"`
+	Calldata        string           `json:"calldata"`
+}
+
+// SubmitGaslessRedeemResponse is the response for the submitgaslessredeem
+// route.
+type SubmitGaslessRedeemResponse struct {
+	TxHash string `json:"txHash"`
+}
+
 //
 // DEX param types
 //
