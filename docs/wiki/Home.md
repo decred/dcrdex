@@ -10,7 +10,7 @@ For a step-by-step guide of the download, installation and configuration of Biso
 see the [Getting Started](Getting-Started) section.
 
 If you're a developer and interested in contributing, jump to the
- [Development and Contributing](Development-and-Contributing) section.
+[Development and Contributing](Development-and-Contributing) section.
 
 # What is Bison Wallet?
 
@@ -18,7 +18,7 @@ Bison Wallet is a multi-coin wallet developed in concert with [DCRDEX](#what-is-
 and [Tatanka Mesh](#tatanka-mesh). Bison Wallet leverages state-of-the-art blockchain
 technology to bring more features and more privacy for your favorite assets. DCRDEX is
 built-in and has advanced trading features like market-making and arbitrage with funds
-directlyfrom your wallet.
+directly from your wallet.
 
 Our goal is to find a balance of convenience and privacy that works for you,
 while giving you access to advanced features most wallets ignore. For many
@@ -60,6 +60,70 @@ wash trading.
 - **Transparent** – By performing exchanges on-chain and using cryptographic
 attestation, both clients and servers can be held accountable for malicious behavior.
 
+# New Users
+
+If you're new to Bison Wallet and DCRDEX, here are some important things to know
+before you get started.
+
+**Protect your seed**
+
+Your application seed is the master key to your native wallets and DCRDEX accounts.
+Back it up, store it somewhere safe, and never share it with anyone. If you lose
+your seed, you permanently lose access to your wallets and funds. See the
+[Backup Application Seed](Quick-Configuration#backup-application-seed) section for
+more details.
+
+**Do not use the same seed in two places**
+
+Never use a wallet created from the same seed in two places. Doing so can
+cause transaction conflicts, missed swaps, and loss of funds.
+
+**Keep Bison Wallet running during trades**
+
+Trades settle via on-chain [atomic swaps](Order-Management#settlement) and require
+your wallet to be online to complete. Settlement can take anywhere from a few minutes
+to a few hours. Do not shut down Bison Wallet or disconnect your wallets while you
+have active trades.
+
+**Be careful with market orders on low-volume markets**
+
+Market orders match against whatever is available on the order book. On a thin
+book, this can result in significant [slippage](https://en.wikipedia.org/wiki/Slippage_(finance)).
+Bison Wallet will warn you when estimated slippage is high and require
+acknowledgment before proceeding, but it is still good practice to check the
+order book depth before placing a large market order.
+
+**Bonds and reputation**
+
+To trade on a DCRDEX server, you must post a
+[fidelity bond](Creating-a-DCRDEX-Server-Account#fidelity-bonds) - a small amount
+of funds temporarily locked in an on-chain contract. Bonds establish your trading
+tier, which determines how much you can trade at once. Your trading limits also grow
+as you build [reputation](Managing-your-DCRDEX-Accounts#reputation-score) through
+successful trades. You can manage your bond strength and trading tier from the
+[DEX Settings](Managing-your-DCRDEX-Accounts#changing-trading-tier) panel.
+
+**No trading fees, but you pay network fees**
+
+DCRDEX does not collect any trading fees. However, since swaps happen on-chain,
+you will pay normal network transaction fees to miners. Fee estimates are shown
+before you submit an order. See [Fee Details](Order-Management#fee-details) for
+more information.
+
+**Native wallets need time to sync**
+
+When you first create a [native wallet](Wallet#native-wallet), it needs to
+synchronize with the blockchain network. This can take some time depending on
+the asset. Your wallet will show sync progress - wait for it to complete before
+trying to trade or send funds.
+
+**Something not working?**
+
+Check the [Troubleshooting](Troubleshooting-Problems) page for help with common
+issues like wallet recovery and rescanning. You can also get help from the
+community in the #support channel on
+[Decred Matrix](https://docs.decred.org/getting-started/joining-matrix-channels/).
+
 # Tatanka Mesh
 
 Tatanka Mesh (Tatanka, the mesh) is the evolution of DCRDEX. Where DCRDEX relies
@@ -77,7 +141,7 @@ The mesh collects no fees for its services. Trades are performed using trustless
 atomic swaps that exchange funds directly between wallets.
 
 Going P2P empowers our users to trade directly, enhancing security,
-censorship-resistance, privacy. and self-sovereignty.
+censorship-resistance, privacy, and self-sovereignty.
 
 # Supported Assets
 
@@ -91,14 +155,18 @@ checkmark in the "native" column, no external software is required.
 |--------------|--------|-------------------------------------------------------------|---------------------------------------------------------------|---------------------------------------------------------------------------------------------------|
 | Bitcoin      | ✓      | [v27.0](https://bitcoincore.org/en/download/)               | [v4.5.5](https://electrum.org/)                               |                                                                                                   |
 | Decred       | ✓      | [v2.0.3](https://github.com/decred/decred-release/releases) | x                                                             |                                                                                                   |
-| Ethereum     | ✓      | geth IPC/http/ws                                            | N/A                                                           | see [RPC Providers for EVM-Compatible Networks](Wallet#rpc-providers-for-evm-compatible-networks) |
-| Polygon      | ✓      | bor IPC/http/ws                                             | N/A                                                           | see [RPC Providers for EVM-Compatible Networks](Wallet#rpc-providers-for-evm-compatible-networks) |
+| Ethereum     | ✓      | geth IPC/http/ws                                            | N/A                                                           | tokens: USDC, USDT, MATIC, POL. See [RPC Providers](Wallet#rpc-providers-for-evm-compatible-networks) |
+| Polygon      | ✓      | bor IPC/http/ws                                             | N/A                                                           | tokens: USDC, USDT, WBTC, WETH. See [RPC Providers](Wallet#rpc-providers-for-evm-compatible-networks) |
 | Litecoin     | ✓      | [v0.21.2.1](https://litecoin.org/)                          | [v4.2.2](https://electrum-ltc.org/)                           |                                                                                                   |
 | Bitcoin Cash | ✓      | [v27.0.0](https://bitcoincashnode.org/)                     | x                                                             | use only Bitcoin Cash Node for full node                                                          |
 | Dogecoin     | x      | [v1.14.7.0](https://dogecoin.com/)                          | x                                                             |                                                                                                   |
 | Zcash        | x      | [v6.11.0](https://z.cash/download/)                         | x                                                             |                                                                                                   |
 | Dash         | x      | [v20.1.1](https://github.com/dashpay/dash/releases)         | x                                                             |                                                                                                   |
+| DigiByte     | x      | [v8.22.0](https://github.com/DigiByte-Core/digibyte/releases) | x                                                             |                                                                                                   |
 | Firo         | x      | [v0.14.14.1](https://github.com/firoorg/firo/releases)      | [v4.1.5.5](https://github.com/firoorg/electrum-firo/releases) |                                                                                                   |
+
+ERC-20 tokens on Ethereum and Polygon are created automatically when the parent network wallet exists.
+Token wallets share the parent wallet's configuration, including [RPC providers](Wallet#rpc-providers-for-evm-compatible-networks).
 
 # Project History
 
@@ -110,7 +178,7 @@ DCRDEX development started in 2019 and has been fully funded by the Decred treas
 
 | Date    | Milestone                                                                                                               |
 |---------|-------------------------------------------------------------------------------------------------------------------------|
-| 2018-06 | [A New kind DEX](https://blog.decred.org/2018/06/05/A-New-Kind-of-DEX/) blog post published in the Decred blog.         |
+| 2018-06 | [A New Kind of DEX](https://blog.decred.org/2018/06/05/A-New-Kind-of-DEX/) blog post published in the Decred blog.         |
 | 2019-03 | [RFP: Decred Decentralized Exchange Infrastructure](https://proposals.decred.org/record/3360c14) proposal approved.     |
 | 2019-06 | [Decentralized Exchange Specification Document](https://proposals.decred.org/record/94cc1ee) proposal approved.         |
 | 2019-08 | [Decentralized Exchange Development](https://proposals.decred.org/record/ad972c3) proposal approved.                    |
@@ -127,7 +195,7 @@ DCRDEX development started in 2019 and has been fully funded by the Decred treas
 | 2023-04 | [DCRDEX v0.6.0](https://github.com/decred/dcrdex/releases/tag/v0.6.0) release.                                          |
 | 2023-06 | [DCRDEX Mesh Beginnings and Bonds Evolution](https://proposals.decred.org/record/4d2324b) proposal approved.            |
 | 2024-04 | [DCRDEX Monero Stage 1](https://proposals.decred.org/record/fa0ea64) proposal approved.                                 |
-| 2024-09 | [DCRDEX v1.0.0](https://github.com/decred/dcrdex/releases/tag/v0.6.0) release.                                          |
+| 2024-09 | [DCRDEX v1.0.0](https://github.com/decred/dcrdex/releases/tag/v1.0.0) release.                                          |
 | 2024-10 | [DCRDEX Development Phase 5.5](https://proposals.decred.org/record/0d23788) proposal approved.                          |
 
 ---

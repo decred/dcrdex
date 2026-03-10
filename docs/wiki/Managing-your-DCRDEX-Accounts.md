@@ -1,6 +1,6 @@
 <a id="top"/>
 
-_Last updated for Bison Wallet v1.0.0._
+_Last updated for Bison Wallet v1.0.6._
 
 ## Contents
 
@@ -38,7 +38,7 @@ and [reputation](#reputation-score) score.
 # Changing Trading Tier
 
 Increasing your tier enables trading of larger quantities at a time. A higher tier also
-increase your capacity for violations before trading privileges are completely suspended.
+increases your capacity for violations before trading privileges are completely suspended.
 Trading limits are also increased as you establish [reputation](#reputation-score) by engaging
 in normal trading activity and successfully completing matches.
 
@@ -61,7 +61,7 @@ The DCRDEX scoring system has been designed to balance the need to deter intenti
 reality of unreliable consumer networks and other such technical issues.
 
 Your reputation score increases by successfully completing trades.
-Misbehaviour and failure to act on a trade will penalize your score depending on the type of match failure:
+Misbehavior and failure to act on a trade will penalize your score depending on the type of match failure:
 
 | Action             | Score Penalty | Notes                                                 |
 |--------------------|---------------|-------------------------------------------------------|
@@ -79,7 +79,7 @@ DCRDEX Servers can be added in the `Registered Dexes` section of the
 <img src="./images/using-bison-wallet/settings-addServer.png" width="400" alt="">
 
 The `Add a DCRDEX Server` form will be displayed. Enter the address of a known DCRDEX server
-that you would like to use, and select the  associated TLS file after clicking on `add a file`,
+that you would like to use, and select the associated TLS file after clicking on `add a file`,
 then click `Submit`.
 
 <img src="./images/using-bison-wallet/settings-addServer2.png" width="400" alt="">
@@ -95,7 +95,7 @@ and enabled, but you'll need to create fidelity bonds to enable trading with you
 # Export DCRDEX Account
 
 While Bison Wallet's native wallets can be restored from the application's seed,
-the DCRDEX server accounts bonds need to be backed up separately. This is done by
+the DCRDEX server account bonds need to be backed up separately. This is done by
 navigating to each registered server's [Account Management](Managing-your-DCRDEX-Accounts)
 panel and clicking the `Export Account` button.
 

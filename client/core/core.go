@@ -4555,15 +4555,15 @@ func (c *Core) InitializeClient(pw []byte, restorationSeed *string) (string, err
 		return "", fmt.Errorf("SetPrimaryCredentials error: %w", err)
 	}
 
+	seedGenTime := uint64(creds.Birthday.Unix())
+	err = c.db.SetSeedGenerationTime(seedGenTime)
+	if err != nil {
+		return "", fmt.Errorf("SetSeedGenerationTime error: %w", err)
+	}
+	c.seedGenerationTime = seedGenTime
+
 	freshSeed := restorationSeed == nil
 	if freshSeed {
-		now := uint64(time.Now().Unix())
-		err = c.db.SetSeedGenerationTime(now)
-		if err != nil {
-			return "", fmt.Errorf("SetSeedGenerationTime error: %w", err)
-		}
-		c.seedGenerationTime = now
-
 		subject, details := c.formatDetails(TopicSeedNeedsSaving)
 		c.notify(newSecurityNote(TopicSeedNeedsSaving, subject, details, db.Success))
 	}

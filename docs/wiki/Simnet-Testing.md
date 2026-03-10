@@ -297,7 +297,7 @@ For rapid setup, there is a script at `[repo root]/client/cmd/bwctl/simnet-setup
 You can generate a deposit address for your wallet through the wallets view in the
 wallet.
 
-Take the generated address to it's respective harness terminal and send funds to it using:
+Take the generated address to its respective harness terminal and send funds to it using:
 
 `./alpha sendtoaddress {address} {amount}`
 

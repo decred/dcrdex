@@ -64,12 +64,19 @@ export default class InitPage extends BasePage {
     slideSwap(page.appPWForm, page.quickConfigForm)
   }
 
-  quickConfigDone () {
-    if (!this.mnemonic) app().loadPage('wallets')
-    else slideSwap(this.page.quickConfigForm, this.page.seedBackupForm)
+  async quickConfigDone () {
+    if (!this.mnemonic) {
+      await app().fetchUser()
+      app().showNewUserBanner()
+      app().loadPage('wallets')
+    } else {
+      slideSwap(this.page.quickConfigForm, this.page.seedBackupForm)
+    }
   }
 
-  seedBackedUp () {
+  async seedBackedUp () {
+    await app().fetchUser()
+    app().showNewUserBanner()
     app().loadPage('wallets')
   }
 }
@@ -298,6 +305,7 @@ class SeedBackupForm {
     this.form = form
     const page = this.page = Doc.idDescendants(form)
     Doc.bind(page.seedAck, 'click', () => success())
+    Doc.bind(page.skipSeedBackup, 'click', () => success())
     Doc.bind(page.showSeed, 'click', () => this.showSeed())
   }
 

@@ -109,7 +109,7 @@ to run with `--create` to set your password and create the wallet. You'll need
 the wallet password later.
 
 At this point, you may choose to specify a new account just for trading. For
-the remainder of these instructions, is it assumed this step is complete.
+the remainder of these instructions, it is assumed this step is complete.
 
 ```sh
 > dcrctl --testnet --wallet createnewaccount dex

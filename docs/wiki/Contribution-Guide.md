@@ -6,7 +6,7 @@ Development is coordinated via [github issues](/../issues) and the
 [Matrix](https://matrix.org/)
 [DEX Development room](https://matrix.to/#/!EzTSRQITaqHuFBDFhM:decred.org?via=decred.org&via=matrix.org&via=zettaport.com).
 You can access the room at [chat.decred.org](https://chat.decred.org),
-[riot.im](https://riot.im), or with any other Matrix client.
+[Element](https://element.io), or with any other Matrix client.
 
 If you are yet to set up or want to build from source, please see [build from source guide](https://github.com/decred/dcrdex/wiki/Download-and-Install#building-from-source) for build instructions.
 
@@ -35,7 +35,7 @@ Once your code is ready for review, click the links on the PR to make it ready f
 
 When pushing updates to reviewable PRs, especially in response to reviews,
 ensure there is an easy way to see just what was changed since your previous
-revisions. Either add commits, which will be squash before merge, or force push
+revisions. Either add commits, which will be squashed before merge, or force push
 your squashed branch without changing the merge-base so that when we view the
 "force-pushed" diff provided by Github, it shows only what was changed in your
 PR. If the merge-base changes, the diff will be mixed up with whatever else was

@@ -77,5 +77,10 @@ cd "$dir"
 # golangci-lint (github.com/golangci/golangci-lint) is used to run each
 # static checker.
 
+# Lint markdown files if markdownlint-cli2 is installed.
+if command -v markdownlint-cli2 > /dev/null 2>&1; then
+	markdownlint-cli2 "*.md" "docs/**/*.md"
+fi
+
 # check linters
 golangci-lint -c ./.golangci.yml run

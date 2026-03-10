@@ -1,6 +1,6 @@
 <a id="top"></a>
 
-_Last updated for Bison Wallet v1.0.0._
+_Last updated for Bison Wallet v1.0.6._
 
 ## Contents
 
@@ -10,7 +10,7 @@ _Last updated for Bison Wallet v1.0.0._
 - [Bond Submission](#bond-submission)
 
 This guide assumes you have already [downloaded and installed](Download-and-Install) Bison Wallet,
-and ran the [Quick Configuration](Quick-Configuration).
+and run the [Quick Configuration](Quick-Configuration).
 
 # Create Account
 
@@ -30,9 +30,9 @@ This will open the `Select Bond Asset` prompt.
 
 # Fidelity Bonds
 
-A fidelity bond are funds that are temporarily locked in an on-chain contract,
+A fidelity bond is funds temporarily locked in an on-chain contract,
 which is only redeemable by the user who posted the bond after a certain time.
-Fidelity Bonds act as an incentive for good behaviour on the DCRDEX servers and are required for
+Fidelity bonds act as an incentive for good behavior on the DCRDEX servers and are required for
 creating an account on every server.
 
 ## Pre-paid Bonds
@@ -50,7 +50,7 @@ will have to post a bond to maintain their trading tier.
 Once the bond asset is selected, a prompt to select the
 [Trading Tier](Managing-your-DCRDEX-Accounts#changing-trading-tier) will appear.
 Increasing your tier enables trading of larger quantities at a time. A higher tier also
-increase your capacity for violations before trading privileges are completely suspended.
+increases your capacity for violations before trading privileges are completely suspended.
 
 Trading limits are also increased as you establish
 [reputation](Managing-your-DCRDEX-Accounts#reputation-score) by engaging

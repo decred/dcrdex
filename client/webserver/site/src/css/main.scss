@@ -98,6 +98,11 @@ div.note-indicator {
   }
 }
 
+.new-user-banner {
+  background-color: var(--section-bg);
+  border-bottom: 1px solid var(--border-color);
+}
+
 .z10 {
   z-index: 10;
 }

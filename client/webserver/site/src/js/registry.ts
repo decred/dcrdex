@@ -1368,6 +1368,7 @@ export interface Application {
   reconnected (): void
   fetchUser (): Promise<User | void>
   fetchMMStatus (): Promise<User | void>
+  showNewUserBanner (): void
   loadPage (page: string, data?: any, skipPush?: boolean): Promise<boolean>
   attach (data: any): void
   bindTooltips (ancestor: HTMLElement): void

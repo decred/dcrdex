@@ -280,6 +280,8 @@ export default class Application {
     const handler = this.main.dataset.handler
     // Don't fetch the user until we know what page we're on.
     await this.fetchUser()
+    // Show new user banner if the user hasn't dismissed it yet.
+    this.showNewUserBanner()
     const ignoreCachedLocale = process.env.NODE_ENV === 'development'
     await intl.loadLocale(this.lang, this.commitHash, ignoreCachedLocale)
     // The application is free to respond with a page that differs from the
@@ -308,6 +310,26 @@ export default class Application {
     ws.registerRoute(notificationRoute, (note: CoreNote) => {
       this.notify(note)
     })
+  }
+
+  /*
+   * showNewUserBanner shows a dismissible banner for new users with a link to
+   * important tips. NOTE: The dismissed state is keyed to seedGenTime, so
+   * restoring from the same seed will NOT reset the banner. Developers
+   * testing this banner should clear localStorage to see it again.
+   */
+  showNewUserBanner () {
+    if (!this.seedGenTime) return
+    const dismissed = State.fetchLocal(State.newUserBannerDismissedLK)
+    if (dismissed === this.seedGenTime) return
+    const banner = idel(document.body, 'newUserBanner')
+    const dismissBtn = idel(document.body, 'dismissNewUserBanner')
+    if (!banner || !dismissBtn) return
+    Doc.show(banner)
+    bind(dismissBtn, 'click', () => {
+      State.storeLocal(State.newUserBannerDismissedLK, this.seedGenTime)
+      Doc.hide(banner)
+    }, { once: true })
   }
 
   /*

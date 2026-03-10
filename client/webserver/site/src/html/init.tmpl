@@ -30,6 +30,9 @@
       </div>
       <div id="seedInputBox" class="d-hide">
         <textarea class="w-100 mono" id="seedInput" rows="4" autocomplete="off" spellcheck="false"></textarea>
+        <div class="pt-2 text-center fs15 text-warning">
+          [[[seed_same_wallet_warning]]]
+        </div>
       </div>
       <div class="fs15 text-center d-hide text-danger text-break" id="appPWErrMsg"></div>
     </form>
@@ -91,10 +94,10 @@
           <button id="showSeed" class="feature">[[[Backup Now]]]</button>
         </div>
         <div class="d-flex justify-content-end pt-3">
-          <a class="d-block plainlink fs15 flex-center hoverbg pointer" href="/wallets">
+          <div id="skipSeedBackup" class="d-block plainlink fs15 flex-center hoverbg pointer">
             <span>[[[Skip this step for now]]]</span>
             <span class="ico-info mx-1" data-tooltip="You can backup your seed at any time in the Settings view"></span>
-          </a>
+          </div>
         </div>
       </div>
 
