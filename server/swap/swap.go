@@ -240,9 +240,10 @@ type Swapper struct {
 	userMatches map[account.AccountID]map[order.MatchID]*matchTracker
 	acctMatches map[uint32]map[string]map[order.MatchID]*matchTracker
 
-	// activeCoinsMtx protects activeCoinIDs and matchCoinIDs. This is a
-	// separate lock from matchMtx to avoid contention on the global match
-	// lock during processInit's CoinID dedup check.
+	// activeCoinsMtx protects activeCoinIDs, matchCoinIDs,
+	// activeSecretHashes, and matchSecretHashes. This is a separate lock
+	// from matchMtx to avoid contention on the global match lock during
+	// processInit's dedup checks.
 	activeCoinsMtx sync.Mutex
 	// activeCoinIDs maps composite keys of hex-encoded CoinID and contract
 	// data to the match using them. The composite key (coinID:contract)
@@ -251,15 +252,18 @@ type Swapper struct {
 	// is necessary because EVM assets batch multiple swaps into a single
 	// transaction, sharing the same txHash (CoinID) across matches while
 	// each swap has a unique contract (version + locator/secretHash).
-	// The server doesn't need secret-hash dedup because the maker generates
-	// secret hashes and the server relays them, so the server inherently
-	// controls their uniqueness. The client deduplicates secret hashes
-	// because it doesn't trust the server.
 	activeCoinIDs map[string]order.MatchID
 	// matchCoinIDs is the reverse of activeCoinIDs: it maps match IDs to the
 	// keys registered in activeCoinIDs for that match. This allows
 	// O(1) cleanup in deleteMatch instead of iterating all activeCoinIDs.
 	matchCoinIDs map[order.MatchID][]string
+	// activeSecretHashes maps hex-encoded secret hashes to the match using
+	// them. This prevents a maker from reusing the same secret hash across
+	// multiple matches, which would allow them to grief takers (the taker's
+	// client-side dedup would reject the audit, penalizing the taker).
+	activeSecretHashes map[string]order.MatchID
+	// matchSecretHashes is the reverse map for O(1) cleanup in deleteMatch.
+	matchSecretHashes map[order.MatchID][]string
 
 	// The broadcast timeout.
 	bTimeout time.Duration
@@ -329,20 +333,22 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 
 	authMgr := cfg.AuthManager
 	swapper := &Swapper{
-		coins:            cfg.Assets,
-		storage:          cfg.Storage,
-		authMgr:          authMgr,
-		swapDone:         cfg.SwapDone,
-		latencyQ:         wait.NewTaperingTickerQueue(fastRecheckInterval, taperedRecheckInterval),
-		matches:          make(map[order.MatchID]*matchTracker),
-		userMatches:      make(map[account.AccountID]map[order.MatchID]*matchTracker),
-		acctMatches:      acctMatches,
-		activeCoinIDs:    make(map[string]order.MatchID),
-		matchCoinIDs:     make(map[order.MatchID][]string),
-		bTimeout:         cfg.BroadcastTimeout,
-		txWaitExpiration: cfg.TxWaitExpiration,
-		lockTimeTaker:    cfg.LockTimeTaker,
-		lockTimeMaker:    cfg.LockTimeMaker,
+		coins:              cfg.Assets,
+		storage:            cfg.Storage,
+		authMgr:            authMgr,
+		swapDone:           cfg.SwapDone,
+		latencyQ:           wait.NewTaperingTickerQueue(fastRecheckInterval, taperedRecheckInterval),
+		matches:            make(map[order.MatchID]*matchTracker),
+		userMatches:        make(map[account.AccountID]map[order.MatchID]*matchTracker),
+		acctMatches:        acctMatches,
+		activeCoinIDs:      make(map[string]order.MatchID),
+		matchCoinIDs:       make(map[order.MatchID][]string),
+		activeSecretHashes: make(map[string]order.MatchID),
+		matchSecretHashes:  make(map[order.MatchID][]string),
+		bTimeout:           cfg.BroadcastTimeout,
+		txWaitExpiration:   cfg.TxWaitExpiration,
+		lockTimeTaker:      cfg.LockTimeTaker,
+		lockTimeMaker:      cfg.LockTimeMaker,
 	}
 
 	// Ensure txWaitExpiration is not greater than broadcast timeout setting.
@@ -412,12 +418,16 @@ func (s *Swapper) deleteMatch(mt *matchTracker) {
 	mid := mt.ID()
 	delete(s.matches, mid)
 
-	// Clean up activeCoinIDs for this match's swap contracts.
+	// Clean up dedup maps for this match's swap contracts.
 	s.activeCoinsMtx.Lock()
 	for _, coinID := range s.matchCoinIDs[mid] {
 		delete(s.activeCoinIDs, coinID)
 	}
 	delete(s.matchCoinIDs, mid)
+	for _, sh := range s.matchSecretHashes[mid] {
+		delete(s.activeSecretHashes, sh)
+	}
+	delete(s.matchSecretHashes, mid)
 	s.activeCoinsMtx.Unlock()
 
 	// Unlock the maker and taker order coins. May be redundant if processBlock
@@ -795,6 +805,34 @@ func (s *Swapper) restoreActiveSwaps(allowPartial bool) error {
 				s.matchCoinIDs[mid] = append(s.matchCoinIDs[mid], dedupKey)
 			}
 		}
+
+		// Register the maker's secret hash in the dedup maps.
+		if mt.makerStatus.swap != nil && len(mt.makerStatus.swap.SecretHash) > 0 {
+			secretHashHex := fmt.Sprintf("%x", mt.makerStatus.swap.SecretHash)
+			s.activeSecretHashes[secretHashHex] = mid
+			s.matchSecretHashes[mid] = append(s.matchSecretHashes[mid], secretHashHex)
+		}
+	}
+
+	// Revoke pre-upgrade matches that lack per-match swap addresses
+	// introduced in PerMatchAddrVersion. Matches at NewlyMatched or
+	// MakerSwapCast cannot proceed without addresses, so revoke them
+	// without fault. Matches at TakerSwapCast or later already have both
+	// contracts on-chain and don't need the addresses to finish.
+	var toRevoke []*matchTracker
+	for _, mt := range s.matches {
+		if mt.makerSwapAddr != "" || mt.takerSwapAddr != "" {
+			continue
+		}
+		if mt.Status != order.NewlyMatched && mt.Status != order.MakerSwapCast {
+			continue
+		}
+		toRevoke = append(toRevoke, mt)
+	}
+	for _, mt := range toRevoke {
+		log.Infof("Revoking pre-upgrade match %v (status %v): no per-match swap addresses", mt.ID(), mt.Status)
+		s.deleteMatch(mt)
+		s.failMatch(mt, false, false) // no fault
 	}
 
 	// Live coin waiters are abandoned on Swapper shutdown. When a client
@@ -1674,23 +1712,42 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	// Swap contract dedup check and registration: atomically reject if this
 	// contract is already in use by another match, or register it.
 	// Registering early avoids a TOCTOU race; stale entries from later
-	// validation failures are harmless since deleteMatch cleans up
-	// activeCoinIDs. The composite key of CoinID and contract data is used
-	// so that EVM batched swaps (same txHash, different contract/locator)
-	// are not incorrectly rejected.
+	// validation failures are harmless since deleteMatch cleans up.
+	// The composite key of CoinID and contract data is used so that EVM
+	// batched swaps (same txHash, different contract/locator) are not
+	// incorrectly rejected.
 	dedupKey := fmt.Sprintf("%x:%x", params.CoinID, params.Contract)
+	mid := stepInfo.match.ID()
 	s.activeCoinsMtx.Lock()
-	if existingMatch, exists := s.activeCoinIDs[dedupKey]; exists && existingMatch != stepInfo.match.ID() {
+	if existingMatch, exists := s.activeCoinIDs[dedupKey]; exists && existingMatch != mid {
 		s.activeCoinsMtx.Unlock()
 		actor.status.endSwapSearch()
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
-			fmt.Sprintf("swap contract %s already in use by match %s", dedupKey, existingMatch))
+			"swap contract already in use by another match")
 		return wait.DontTryAgain
 	}
-	if _, already := s.activeCoinIDs[dedupKey]; !already {
-		s.matchCoinIDs[stepInfo.match.ID()] = append(s.matchCoinIDs[stepInfo.match.ID()], dedupKey)
+	// Secret hash dedup: reject if the maker is reusing a secret hash
+	// from another match. This prevents a griefing attack where a maker
+	// reuses the same secret hash, causing the taker's client-side dedup
+	// to reject the audit and penalize the taker.
+	if actor.isMaker && len(contract.SecretHash) > 0 {
+		secretHashHex := fmt.Sprintf("%x", contract.SecretHash)
+		if existingMatch, exists := s.activeSecretHashes[secretHashHex]; exists && existingMatch != mid {
+			s.activeCoinsMtx.Unlock()
+			actor.status.endSwapSearch()
+			s.respondError(msg.ID, actor.user, msgjson.ContractError,
+				"secret hash already in use by another match")
+			return wait.DontTryAgain
+		}
+		if _, already := s.activeSecretHashes[secretHashHex]; !already {
+			s.matchSecretHashes[mid] = append(s.matchSecretHashes[mid], secretHashHex)
+		}
+		s.activeSecretHashes[secretHashHex] = mid
 	}
-	s.activeCoinIDs[dedupKey] = stepInfo.match.ID()
+	if _, already := s.activeCoinIDs[dedupKey]; !already {
+		s.matchCoinIDs[mid] = append(s.matchCoinIDs[mid], dedupKey)
+	}
+	s.activeCoinIDs[dedupKey] = mid
 	s.activeCoinsMtx.Unlock()
 	if contract.Value() != stepInfo.checkVal {
 		actor.status.endSwapSearch() // allow client retry even before notifying him

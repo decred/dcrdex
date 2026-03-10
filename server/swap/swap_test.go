@@ -1248,7 +1248,9 @@ type tMatch struct {
 	// Per-match swap addresses provided in match acks.
 	makerPerMatchAddr string
 	takerPerMatchAddr string
-	db                struct {
+	// secretHash is the secret hash for this match, used in swap contracts.
+	secretHash []byte
+	db         struct {
 		makerRedeem *tRedeem
 		takerRedeem *tRedeem
 		makerSwap   *tSwap
@@ -1309,6 +1311,7 @@ func tMatchInfo(maker, taker *tUser, matchQty, matchRate uint64, makerOrder *ord
 		taker:             taker,
 		makerPerMatchAddr: fmt.Sprintf("maker-pmaddr-%s", mid),
 		takerPerMatchAddr: fmt.Sprintf("taker-pmaddr-%s", mid),
+		secretHash:        encode.RandomBytes(32),
 	}
 }
 
@@ -1401,6 +1404,7 @@ func tNewSwap(matchInfo *tMatch, oid order.OrderID, recipient string, user *tUse
 		Coin:        coin,
 		SwapAddress: recipient + tRecipientSpoofer,
 		TxData:      encode.RandomBytes(100),
+		SecretHash:  matchInfo.secretHash,
 	}
 
 	contract.LockTime = encode.DropMilliseconds(matchInfo.match.Epoch.End().Add(dex.LockTimeTaker(dex.Testnet)))
@@ -2799,6 +2803,183 @@ func TestDeleteMatchCleansUpCoinIDs(t *testing.T) {
 	if _, exists := rig.swapper.matchCoinIDs[mid]; exists {
 		rig.swapper.activeCoinsMtx.Unlock()
 		t.Fatal("matchCoinIDs entry not cleaned up after deleteMatch")
+	}
+	rig.swapper.activeCoinsMtx.Unlock()
+}
+
+func TestSecretHashDedup(t *testing.T) {
+	// A malicious maker reusing the same secret hash across two matches
+	// should be rejected by the server.
+	qty := uint64(1e8)
+	rate := uint64(1e8)
+
+	maker1, taker1 := tNewUser("maker1"), tNewUser("taker1")
+	makerOrder1 := makeLimitOrder(qty, rate, maker1, true)
+	takerOrder1 := makeLimitOrder(qty, rate, taker1, false)
+	matchInfo1 := tMatchInfo(maker1, taker1, qty, rate, makerOrder1, takerOrder1)
+	set1 := new(tMatchSet).add(matchInfo1)
+
+	maker2, taker2 := tNewUser("maker2"), tNewUser("taker2")
+	makerOrder2 := makeLimitOrder(qty, rate, maker2, true)
+	takerOrder2 := makeLimitOrder(qty, rate, taker2, false)
+	matchInfo2 := tMatchInfo(maker2, taker2, qty, rate, makerOrder2, takerOrder2)
+	set2 := new(tMatchSet).add(matchInfo2)
+
+	rig, cleanup := tNewTestRig(matchInfo1)
+	defer cleanup()
+
+	rig.auth.swapReceived = make(chan struct{}, 2)
+	rig.auth.auditReq = make(chan struct{}, 2)
+
+	rig.swapper.Negotiate([]*order.MatchSet{set1.matchSet})
+	rig.swapper.Negotiate([]*order.MatchSet{set2.matchSet})
+
+	// Ack both matches.
+	rig.matchInfo = matchInfo1
+	if err := rig.ackMatch_maker(true); err != nil {
+		t.Fatalf("match1 maker ack: %v", err)
+	}
+	if err := rig.ackMatch_taker(true); err != nil {
+		t.Fatalf("match1 taker ack: %v", err)
+	}
+	rig.matchInfo = matchInfo2
+	if err := rig.ackMatch_maker(true); err != nil {
+		t.Fatalf("match2 maker ack: %v", err)
+	}
+	if err := rig.ackMatch_taker(true); err != nil {
+		t.Fatalf("match2 taker ack: %v", err)
+	}
+
+	// Send swap for match 1.
+	rig.matchInfo = matchInfo1
+	swap1 := tNewSwap(matchInfo1, matchInfo1.makerOID, matchInfo1.takerPerMatchAddr, matchInfo1.maker)
+	rig.abcNode.setContract(swap1.coin, false)
+	rig.auth.swapID = swap1.req.ID
+	rpcErr := rig.swapper.handleInit(matchInfo1.maker.acct, swap1.req)
+	if rpcErr != nil {
+		t.Fatalf("match1 swap init failed: %v", rpcErr.Message)
+	}
+	select {
+	case <-rig.auth.swapReceived:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for match1 swap response")
+	}
+	if err := rig.checkServerResponseSuccess(matchInfo1.maker); err != nil {
+		t.Fatalf("match1 swap should succeed: %v", err)
+	}
+
+	// Send swap for match 2 with the same secret hash as match 1.
+	rig.matchInfo = matchInfo2
+	swap2 := tNewSwap(matchInfo2, matchInfo2.makerOID, matchInfo2.takerPerMatchAddr, matchInfo2.maker)
+	// Override the secret hash on the contract stored in the backend.
+	swap2.coin.SecretHash = swap1.coin.SecretHash
+	rig.abcNode.setContract(swap2.coin, false)
+	rig.auth.swapID = swap2.req.ID
+	rpcErr = rig.swapper.handleInit(matchInfo2.maker.acct, swap2.req)
+	if rpcErr != nil {
+		// Synchronous rejection.
+		if !strings.Contains(rpcErr.Message, "already in use") {
+			t.Fatalf("expected 'already in use' error, got: %s", rpcErr.Message)
+		}
+		return
+	}
+
+	timeOutMempool()
+	select {
+	case <-rig.auth.swapReceived:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for match2 swap response")
+	}
+	if err := rig.checkServerResponseFail(matchInfo2.maker, msgjson.ContractError, "already in use"); err != nil {
+		t.Fatalf("expected secret hash reuse error: %v", err)
+	}
+}
+
+func TestSecretHashDedupSameMatch(t *testing.T) {
+	// Same secret hash retried for the same match should not be rejected
+	// by the dedup check.
+	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true)
+	matchInfo := set.matchInfos[0]
+	rig, cleanup := tNewTestRig(matchInfo)
+	defer cleanup()
+
+	rig.auth.swapReceived = make(chan struct{}, 2)
+	rig.auth.auditReq = make(chan struct{}, 2)
+
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+
+	if err := rig.ackMatch_maker(true); err != nil {
+		t.Fatalf("maker ack: %v", err)
+	}
+	if err := rig.ackMatch_taker(true); err != nil {
+		t.Fatalf("taker ack: %v", err)
+	}
+
+	// First init should succeed.
+	swap := tNewSwap(matchInfo, matchInfo.makerOID, matchInfo.takerPerMatchAddr, matchInfo.maker)
+	rig.abcNode.setContract(swap.coin, false)
+	rig.auth.swapID = swap.req.ID
+	rpcErr := rig.swapper.handleInit(matchInfo.maker.acct, swap.req)
+	if rpcErr != nil {
+		t.Fatalf("first init failed: %v", rpcErr.Message)
+	}
+	select {
+	case <-rig.auth.swapReceived:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first swap response")
+	}
+	if err := rig.checkServerResponseSuccess(matchInfo.maker); err != nil {
+		t.Fatalf("first init should succeed: %v", err)
+	}
+
+	// Retry same match with same secret hash - dedup should not reject.
+	swap2 := tNewSwap(matchInfo, matchInfo.makerOID, matchInfo.takerPerMatchAddr, matchInfo.maker)
+	swap2.coin.SecretHash = swap.coin.SecretHash
+	var init2 msgjson.Init
+	swap2.req.Unmarshal(&init2)
+	init2.CoinID = swap.coin.ID()
+	swap2.req, _ = msgjson.NewRequest(swap2.req.ID, msgjson.InitRoute, &init2)
+	rpcErr = rig.swapper.handleInit(matchInfo.maker.acct, swap2.req)
+	if rpcErr == nil {
+		t.Fatal("expected error for duplicate init on already-swapped match")
+	}
+	if strings.Contains(rpcErr.Message, "already in use") {
+		t.Fatal("secret hash dedup should not reject same-match retries")
+	}
+}
+
+func TestDeleteMatchCleansUpSecretHashes(t *testing.T) {
+	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true)
+	matchInfo := set.matchInfos[0]
+	rig, cleanup := tNewTestRig(matchInfo)
+	defer cleanup()
+
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+
+	tracker := rig.getTracker()
+	mid := matchInfo.matchID
+
+	// Register secret hashes in the dedup maps.
+	fakeHash := "abcdef0123456789"
+	rig.swapper.activeCoinsMtx.Lock()
+	rig.swapper.activeSecretHashes[fakeHash] = mid
+	rig.swapper.matchSecretHashes[mid] = []string{fakeHash}
+	rig.swapper.activeCoinsMtx.Unlock()
+
+	// Delete the match.
+	rig.swapper.matchMtx.Lock()
+	rig.swapper.deleteMatch(tracker)
+	rig.swapper.matchMtx.Unlock()
+
+	// Verify cleanup.
+	rig.swapper.activeCoinsMtx.Lock()
+	if _, exists := rig.swapper.activeSecretHashes[fakeHash]; exists {
+		rig.swapper.activeCoinsMtx.Unlock()
+		t.Fatal("secret hash not cleaned up after deleteMatch")
+	}
+	if _, exists := rig.swapper.matchSecretHashes[mid]; exists {
+		rig.swapper.activeCoinsMtx.Unlock()
+		t.Fatal("matchSecretHashes entry not cleaned up after deleteMatch")
 	}
 	rig.swapper.activeCoinsMtx.Unlock()
 }
