@@ -4,7 +4,7 @@ go 1.24.0
 
 require (
 	decred.org/dcrwallet/v5 v5.0.3
-	filippo.io/edwards25519 v1.0.0
+	filippo.io/edwards25519 v1.2.0
 	fyne.io/systray v1.10.1-0.20220621085403-9a2652634e93
 	github.com/agl/ed25519 v0.0.0-20170116200512-5312a6153412
 	github.com/athanorlabs/go-dleq v0.1.0
@@ -18,7 +18,7 @@ require (
 	github.com/btcsuite/btcd/btcutil v1.1.5
 	github.com/btcsuite/btcd/btcutil/psbt v1.1.8
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0
-	github.com/btcsuite/btclog v0.0.0-20170628155309-84c8d2346e9f
+	github.com/btcsuite/btclog v1.0.0
 	github.com/btcsuite/btcwallet v0.16.10
 	github.com/btcsuite/btcwallet/wallet/txauthor v1.3.5
 	github.com/btcsuite/btcwallet/walletdb v1.4.4
@@ -35,11 +35,11 @@ require (
 	github.com/decred/dcrd/certgen v1.2.0
 	github.com/decred/dcrd/chaincfg/chainhash v1.0.5
 	github.com/decred/dcrd/chaincfg/v3 v3.3.0
-	github.com/decred/dcrd/connmgr/v3 v3.1.3
+	github.com/decred/dcrd/connmgr/v3 v3.1.4
 	github.com/decred/dcrd/crypto/blake256 v1.1.0
 	github.com/decred/dcrd/dcrec v1.0.1
 	github.com/decred/dcrd/dcrec/edwards/v2 v2.0.4
-	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0
+	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1
 	github.com/decred/dcrd/dcrjson/v4 v4.2.0
 	github.com/decred/dcrd/dcrutil/v4 v4.0.3
 	github.com/decred/dcrd/gcs/v4 v4.1.1
@@ -47,42 +47,42 @@ require (
 	github.com/decred/dcrd/rpc/jsonrpc/types/v4 v4.4.0
 	github.com/decred/dcrd/rpcclient/v8 v8.1.0
 	github.com/decred/dcrd/txscript/v4 v4.1.2
-	github.com/decred/dcrd/wire v1.7.2
+	github.com/decred/dcrd/wire v1.7.4
 	github.com/decred/go-socks v1.1.0
 	github.com/decred/slog v1.2.0
 	github.com/decred/vspd/types/v2 v2.1.0
 	github.com/dgraph-io/badger v1.6.2
-	github.com/dgraph-io/badger/v4 v4.9.0
-	github.com/ethereum/go-ethereum v1.16.7
-	github.com/fatih/color v1.16.0
+	github.com/dgraph-io/badger/v4 v4.9.1
+	github.com/ethereum/go-ethereum v1.17.1
+	github.com/fatih/color v1.18.0
 	github.com/gcash/bchd v0.19.0
 	github.com/gcash/bchlog v0.0.0-20180913005452-b4f036f92fa6
 	github.com/gcash/bchutil v0.0.0-20210113190856-6ea28dff4000
-	github.com/go-chi/chi/v5 v5.0.1
-	github.com/gorilla/websocket v1.5.1
+	github.com/go-chi/chi/v5 v5.2.5
+	github.com/gorilla/websocket v1.5.3
 	github.com/haven-protocol-org/monero-go-utils v0.0.0-20211126154105-058b2666f217
-	github.com/huandu/skiplist v1.2.0
-	github.com/jessevdk/go-flags v1.5.0
-	github.com/jrick/logrotate v1.0.0
-	github.com/lib/pq v1.10.4
+	github.com/huandu/skiplist v1.2.1
+	github.com/jessevdk/go-flags v1.6.1
+	github.com/jrick/logrotate v1.1.2
+	github.com/lib/pq v1.11.2
 	github.com/lightninglabs/neutrino v0.16.1-0.20240814152458-81d6cd2d2da5
 	github.com/ltcsuite/ltcd v0.23.6-0.20240131072528-64dfa402637a
 	github.com/ltcsuite/ltcd/chaincfg/chainhash v1.0.2
 	github.com/ltcsuite/ltcd/ltcutil v1.1.4-0.20240131072528-64dfa402637a
-	github.com/pkg/browser v0.0.0-20210911075715-681adbf594b8
+	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
-	github.com/yuin/goldmark v1.7.13
-	go.etcd.io/bbolt v1.3.12
+	github.com/yuin/goldmark v1.7.16
+	go.etcd.io/bbolt v1.4.3
 	golang.org/x/crypto v0.47.0
 	golang.org/x/exp v0.0.0-20231110203233-9a3e6036ecaa
 	golang.org/x/sync v0.19.0
 	golang.org/x/term v0.39.0
 	golang.org/x/text v0.33.0
 	golang.org/x/time v0.9.0
-	google.golang.org/protobuf v1.36.10
-	gopkg.in/ini.v1 v1.67.0
+	google.golang.org/protobuf v1.36.11
+	gopkg.in/ini.v1 v1.67.1
 	gopkg.in/square/go-jose.v2 v2.6.0
-	lukechampine.com/blake3 v1.3.0
+	lukechampine.com/blake3 v1.4.1
 )
 
 require (
@@ -121,10 +121,10 @@ require (
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
-	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
-	go.opentelemetry.io/otel v1.37.0 // indirect
-	go.opentelemetry.io/otel/metric v1.37.0 // indirect
-	go.opentelemetry.io/otel/trace v1.37.0 // indirect
+	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
+	go.opentelemetry.io/otel v1.39.0 // indirect
+	go.opentelemetry.io/otel/metric v1.39.0 // indirect
+	go.opentelemetry.io/otel/trace v1.39.0 // indirect
 )
 
 replace github.com/btcsuite/btcd/btcec/v2 v2.3.4 => github.com/martonp/btcd/btcec/v2 v2.0.0-20250528172049-6b252bb1b6a1
@@ -144,7 +144,7 @@ require (
 	github.com/btcsuite/websocket v0.0.0-20150119174127-31079b680792 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/companyzero/sntrup4591761 v0.0.0-20220309191932-9e0f3af2f07a // indirect
-	github.com/consensys/gnark-crypto v0.18.0 // indirect
+	github.com/consensys/gnark-crypto v0.18.1 // indirect
 	github.com/crate-crypto/go-eth-kzg v1.4.0 // indirect
 	github.com/crate-crypto/go-ipa v0.0.0-20240724233137-53bbb0ceb27a // indirect
 	github.com/dchest/siphash v1.2.3 // indirect
@@ -159,7 +159,7 @@ require (
 	github.com/decred/vspd/client/v4 v4.0.2 // indirect
 	github.com/decred/vspd/types/v3 v3.0.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/ethereum/c-kzg-4844/v2 v2.1.5 // indirect
+	github.com/ethereum/c-kzg-4844/v2 v2.1.6 // indirect
 	github.com/ethereum/go-verkle v0.2.2 // indirect
 	github.com/ferranbt/fastssz v0.1.4 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
@@ -195,14 +195,13 @@ require (
 	github.com/mitchellh/mapstructure v1.4.1 // indirect
 	github.com/naoina/go-stringutil v0.1.0 // indirect
 	github.com/naoina/toml v0.1.2-0.20170918210437-9fafd6967416 // indirect
-	github.com/olekukonko/tablewriter v0.0.5 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/shirou/gopsutil v3.21.4-0.20210419000835-c7a38de76ee5+incompatible // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
-	github.com/stretchr/testify v1.10.0 // indirect
-	github.com/supranational/blst v0.3.16-0.20250831170142-f48500c1fdbe // indirect
+	github.com/stretchr/testify v1.11.1 // indirect
+	github.com/supranational/blst v0.3.16 // indirect
 	github.com/tevino/abool v1.2.0 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
