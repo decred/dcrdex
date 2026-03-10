@@ -78,7 +78,7 @@ var (
 		},
 		1: {
 			dex.Mainnet: common.HexToAddress("0x82f29E3aCe0a0045c7b263Bf3198DA2210aD1670"), // tx 0x9895b26ca1dc7f06e3cfa93914ed73c44673610b2e8afadd04f0b1af5bd0f170
-			dex.Testnet: common.HexToAddress("0x575bA12fA9875685A358172d263ad5008bC71a6F"),
+			dex.Testnet: common.HexToAddress("0xc809A01d5286b0Ae88F552eF8961c649AB4922e1"), // tx 0xb2f7c996eb94b42d017f188051ca21f01110ec453de4103581c56bd725f645fe
 			dex.Simnet:  common.HexToAddress(""),
 		},
 	}
@@ -99,26 +99,26 @@ var v0Gases = &Gases{
 
 // Mainnet v1 swap evidence:
 //
-//	init:            0xfd582dde119379951c4538c6cd0ed6344101d9e023cff3b56e8fc134832c715e
-//	redeem:          0x9f66c46c2d938d5424691f9018ec560b1a986376e4e7b49eb932224d21d7f8cd
-//	refund:          0x33f6f9a5e3c3f74ff3dd3a54f981908381039cf2a3a8ad6983b6e9dd1d1f83da
-//	gasless redeem:  0xd1a29baaef4be3ad3f32962c24027f14a143a12224d7b7547f52f66cdab41097
+//	init:            0x8e67683bbca54ab8d814867c37b8088e9730971c47162c51c64178c560b59d41
+//	redeem:          0x670fea7573d701c6e356fce77fb27a5e402f26e5d64634f1c3a5ad7bedaca018
+//	refund:          0xe0c3dee16897adf104e600520845d0f6436756daa9863966b6f67e538cb5002c
+//	gasless redeem:  0xd5b2211b74e785dcfe778f37468c78d63fa1f44559722e6f0a585ecb0f805a1a
 var v1Gases = &Gases{
 	// Mainnet measurements:
-	// Swaps (n=1..5):   [54296 83993 113714 143412 173123]
-	Swap:    70_584,
-	SwapAdd: 38_617,
-	// Redeems (n=1..5): [44911 58242 71598 84919 98278]
-	Redeem:    58_384,
-	RedeemAdd: 17_343,
-	// Refunds (n=1..6): [47987 47975 47987 47987 47987 42859]
-	Refund: 61_269,
+	// Swaps (n=1..5):   [54317 84069 113821 143562 173316]
+	Swap:    70_612,
+	SwapAdd: 38_673,
+	// Redeems (n=1..5): [44988 58418 71873 85305 98751]
+	Redeem:    58_484,
+	RedeemAdd: 17_472,
+	// Refunds (n=1..6): [48069 48069 48069 48069 48069 42940]
+	Refund: 61_378,
 
-	// Signed redeems (n=1..5): [85211 82157 96133 110135 124140]
+	// Signed redeems (n=1..5): [85304 82190 96202 110204 124197]
 	// The first time someone does a gasless redeem, it will be more expensive due
 	// to the first-time cost of initializing the on chain nonce.
-	SignedRedeem:    110_774,
-	SignedRedeemAdd: 18_201,
+	SignedRedeem:    110_895,
+	SignedRedeemAdd: 12_639,
 }
 
 // LoadGenesisFile loads a Genesis config from a json file.
