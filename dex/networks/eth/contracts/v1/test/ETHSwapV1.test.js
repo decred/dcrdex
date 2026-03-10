@@ -176,13 +176,22 @@ describe("ETHSwapV1", function () {
       ).to.be.revertedWith("zero value");
     });
 
+    it("should reject wrong initiator address", async function () {
+      const { secretHash } = makeSecret();
+      const v = makeVector(secretHash, ONE_ETH, participant.address, participant.address, await futureTimestamp());
+
+      await expect(
+        ethSwap.connect(initiator).initiate(ZERO_ADDR, [v], { value: ONE_ETH })
+      ).to.be.revertedWith("bad initiator");
+    });
+
     it("should reject zero initiator address", async function () {
       const { secretHash } = makeSecret();
       const v = makeVector(secretHash, ONE_ETH, ZERO_ADDR, participant.address, await futureTimestamp());
 
       await expect(
         ethSwap.connect(initiator).initiate(ZERO_ADDR, [v], { value: ONE_ETH })
-      ).to.be.revertedWith("zero addr");
+      ).to.be.revertedWith("bad initiator");
     });
 
     it("should reject zero participant address", async function () {
@@ -631,7 +640,22 @@ describe("ETHSwapV1", function () {
         ethSwap.connect(deployer).redeemWithSignature(
           redemptions, deployer.address, relayerFee, 0n, deadline, sig
         )
-      ).to.be.revertedWith("fee exceeds total");
+      ).to.be.revertedWith("fee exceeds half");
+    });
+
+    it("should reject relayerFee > 50% of total", async function () {
+      const deadline = await futureTimestamp(600);
+      // 0.5 ETH + 1 wei > half of 1 ETH
+      const relayerFee = ethers.parseEther("0.5") + 1n;
+      const redemptions = [{ v: vector, secret }];
+
+      const sig = await signRedeem(participantWallet, deployer.address, redemptions, relayerFee, 0n, deadline);
+
+      await expect(
+        ethSwap.connect(deployer).redeemWithSignature(
+          redemptions, deployer.address, relayerFee, 0n, deadline, sig
+        )
+      ).to.be.revertedWith("fee exceeds half");
     });
 
     it("relayerFee == 0: entire total goes to participant", async function () {

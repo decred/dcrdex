@@ -988,7 +988,8 @@ func TestCheckPendingRelays(t *testing.T) {
 					WalletTransaction: &asset.WalletTransaction{
 						ID: relayTaskHashes[0].String(),
 					},
-					savedToDB: true,
+					RelayTaskID: relayTaskIDs[0],
+					savedToDB:   true,
 				},
 			},
 			statusResults: map[string]*relayStatus{
@@ -1011,7 +1012,8 @@ func TestCheckPendingRelays(t *testing.T) {
 						ID:        relayTaskHashes[0].String(),
 						RelayTxID: txHashes[0].Hex(),
 					},
-					savedToDB: true,
+					RelayTaskID: relayTaskIDs[0],
+					savedToDB:   true,
 				},
 			},
 			statusResults: map[string]*relayStatus{
@@ -1131,6 +1133,9 @@ func TestCheckPendingRelays(t *testing.T) {
 				}
 				if !reflect.DeepEqual(tx.WalletTransaction, exp.WalletTransaction) {
 					t.Fatalf("expected tx \n%+v\n\ngot\n%+v", spew.Sdump(exp.WalletTransaction), spew.Sdump(tx.WalletTransaction))
+				}
+				if tx.RelayTaskID != exp.RelayTaskID {
+					t.Fatalf("expected RelayTaskID %q, got %q", exp.RelayTaskID, tx.RelayTaskID)
 				}
 			}
 		})
@@ -3718,18 +3723,24 @@ func TestGaslessRedeem(t *testing.T) {
 	contractNonce := big.NewInt(123)
 	dexeth.ContractAddresses[1][dex.Simnet] = common.BytesToAddress(encode.RandomBytes(20))
 
-	swapVector := &dexeth.SwapVector{
-		From:       common.HexToAddress("0x0000000000000000000000000000000000000000"),
-		To:         common.HexToAddress("0x0000000000000000000000000000000000000000"),
-		Value:      big.NewInt(int64(value)),
-		SecretHash: secretHashes[0],
-		LockTime:   0,
+	initiator := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	participant := common.HexToAddress("0x2222222222222222222222222222222222222222")
+
+	newSwapVector := func(idx int) *dexeth.SwapVector {
+		return &dexeth.SwapVector{
+			From:       initiator,
+			To:         participant,
+			Value:      big.NewInt(int64(value)),
+			SecretHash: secretHashes[idx],
+			LockTime:   0,
+		}
 	}
 
 	newRedeem := func(idx int) *asset.Redemption {
+		sv := newSwapVector(idx)
 		return &asset.Redemption{
 			Spends: &asset.AuditInfo{
-				Contract:   dexeth.EncodeContractData(1, swapVector.Locator()),
+				Contract:   dexeth.EncodeContractData(1, sv.Locator()),
 				SecretHash: secretHashes[idx][:],
 				Coin: &coin{
 					txHash: randomHash(),
@@ -3756,10 +3767,13 @@ func TestGaslessRedeem(t *testing.T) {
 		nonceErr    error
 		digestErr   error
 		calldataErr error
+		signDataErr error
+		convertErr  error
 
 		expSubmitted bool // true = regular redeem
 		expError     bool
 		expNonce     *big.Int // if set, assert nonce passed to calldata builder
+		expCoinValue uint64   // if set, override the default coin value check
 	}
 
 	tests := []test{
@@ -3867,6 +3881,61 @@ func TestGaslessRedeem(t *testing.T) {
 			expError:    true,
 		},
 		{
+			name:    "sign hash error",
+			balance: ethGasesV1.Redeem*nodeRecommendedFee - 1,
+			redemptions: []*asset.Redemption{
+				newRedeem(0),
+			},
+			swapState: map[[32]byte]*dexeth.SwapState{
+				secretHashes[0]: {
+					State: dexeth.SSInitiated,
+					Value: dexeth.GweiToWei(value),
+				},
+			},
+			signDataErr: errors.New("signing error"),
+			expError:    true,
+		},
+		{
+			name:    "convert redeems error",
+			balance: ethGasesV1.Redeem*nodeRecommendedFee - 1,
+			redemptions: []*asset.Redemption{
+				newRedeem(0),
+			},
+			swapState: map[[32]byte]*dexeth.SwapState{
+				secretHashes[0]: {
+					State: dexeth.SSInitiated,
+					Value: dexeth.GweiToWei(value),
+				},
+			},
+			convertErr: errors.New("convert error"),
+			expError:   true,
+		},
+		{
+			name:    "multi-redemption batch via relay",
+			balance: ethGasesV1.Redeem*nodeRecommendedFee - 1,
+			redemptions: []*asset.Redemption{
+				newRedeem(0),
+				newRedeem(1),
+				newRedeem(2),
+			},
+			swapState: map[[32]byte]*dexeth.SwapState{
+				secretHashes[0]: {
+					State: dexeth.SSInitiated,
+					Value: dexeth.GweiToWei(value),
+				},
+				secretHashes[1]: {
+					State: dexeth.SSInitiated,
+					Value: dexeth.GweiToWei(value),
+				},
+				secretHashes[2]: {
+					State: dexeth.SSInitiated,
+					Value: dexeth.GweiToWei(value),
+				},
+			},
+			relayTaskID:  relayTaskID,
+			expCoinValue: 3 * value,
+		},
+		{
 			name:    "concurrent nonce bump",
 			balance: ethGasesV1.Redeem*nodeRecommendedFee - 1,
 			redemptions: []*asset.Redemption{
@@ -3912,6 +3981,8 @@ func TestGaslessRedeem(t *testing.T) {
 			node.signedRedeemContractor.nonceErr = test.nonceErr
 			node.signedRedeemContractor.digestErr = test.digestErr
 			node.signedRedeemContractor.calldataErr = test.calldataErr
+			node.signedRedeemContractor.convertErr = test.convertErr
+			node.signDataErr = test.signDataErr
 			node.bal = dexeth.GweiToWei(test.balance)
 			node.tContractor.redeemTx = types.NewTx(&types.DynamicFeeTx{})
 
@@ -3958,8 +4029,12 @@ func TestGaslessRedeem(t *testing.T) {
 			if out == nil {
 				t.Fatalf("expected non-nil output coin")
 			}
-			if out.Value() != value {
-				t.Fatalf("expected coin value %d, got %d", value, out.Value())
+			expValue := value
+			if test.expCoinValue != 0 {
+				expValue = test.expCoinValue
+			}
+			if out.Value() != expValue {
+				t.Fatalf("expected coin value %d, got %d", expValue, out.Value())
 			}
 			if fees == 0 {
 				t.Fatalf("expected non-zero fees")

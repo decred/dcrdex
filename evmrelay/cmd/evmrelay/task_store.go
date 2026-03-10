@@ -110,7 +110,7 @@ func (e *taskEntry) statusTxHash() common.Hash {
 //   - queued tasks may have no relayer nonce yet; active/canceling tasks must
 //     already own one
 type taskStore struct {
-	mtx sync.Mutex
+	mtx sync.RWMutex
 	// saveMtx serializes writes to tasks.json after a snapshot is taken under mtx.
 	saveMtx sync.Mutex
 	// tasks is the durable source of truth keyed by task ID.
@@ -179,6 +179,10 @@ func (ts *taskStore) load() error {
 		if shouldPruneTask(now, entry) {
 			continue
 		}
+		if entry.TaskID == "" || entry.ChainID == 0 || !entry.State.Valid() {
+			log.Warnf("Skipping invalid task entry: taskID=%q chainID=%d state=%q", entry.TaskID, entry.ChainID, entry.State)
+			continue
+		}
 		ts.tasks[entry.TaskID] = entry
 		if entry.State == evmrelay.RelayStatePending {
 			ts.pending[entry.pendingKey()] = pendingReservationForTask(entry.TaskID)
@@ -216,11 +220,26 @@ func (ts *taskStore) save() error {
 	}
 
 	tmpPath := ts.tasksFilePath() + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
+	f, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return fmt.Errorf("error creating tasks temp file: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(tmpPath)
 		return fmt.Errorf("error writing tasks file: %w", err)
 	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("error syncing tasks file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("error closing tasks file: %w", err)
+	}
 	if err := os.Rename(tmpPath, ts.tasksFilePath()); err != nil {
-		_ = os.Remove(tmpPath)
+		os.Remove(tmpPath)
 		return fmt.Errorf("error replacing tasks file: %w", err)
 	}
 	return nil
@@ -312,6 +331,19 @@ func (ts *taskStore) nextQueuedTask(chainID int64) (taskEntry, bool) {
 	}
 	delete(ts.queuedByChain, chainID)
 	return taskEntry{}, false
+}
+
+func (ts *taskStore) queueDepth(chainID int64) int {
+	ts.mtx.RLock()
+	defer ts.mtx.RUnlock()
+	count := 0
+	for _, taskID := range ts.queuedByChain[chainID] {
+		entry := ts.tasks[taskID]
+		if entry != nil && entry.ChainID == chainID && entry.State == evmrelay.RelayStatePending && entry.Phase == taskPhaseQueued {
+			count++
+		}
+	}
+	return count
 }
 
 // reservations

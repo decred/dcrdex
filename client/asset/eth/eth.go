@@ -2360,8 +2360,6 @@ func (w *ETHWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, cu
 	w.settings = cfg.Settings
 	w.settingsMtx.Unlock()
 
-	fmt.Println("Storing gas fee limit -- ", gasFeeLimit)
-
 	atomic.StoreUint64(&w.baseWallet.gasFeeLimitV, gasFeeLimit)
 
 	return false, nil
@@ -3501,6 +3499,9 @@ func (w *assetWallet) swapGas(n int, contractVer uint32, feeRateGwei uint64) (on
 // redeemGas gets an accurate estimate for redemption gas. We allow a DEX server
 // some latitude in adjusting the redemption gas, up to 2x our local estimate.
 func (w *assetWallet) redeemGas(n int, contractVer uint32) (oneGas, nGas uint64, err error) {
+	if n <= 0 {
+		return 0, 0, fmt.Errorf("redeemGas called with n=%d", n)
+	}
 	g := w.gases(contractVer)
 	if g == nil {
 		return 0, 0, fmt.Errorf("no gas table for redemption asset %d", w.assetID)
@@ -4082,8 +4083,10 @@ func (w *ETHWallet) buildGaslessRedeem(env *gaslessRedeemBuildEnv, form *asset.R
 	deadline := new(big.Int).SetInt64(time.Now().Add(signedRedeemDeadline).Unix())
 
 	redeemedWei := dexeth.GweiToWei(env.redeemedValue)
-	if relayerFee.Cmp(redeemedWei) >= 0 {
-		return nil, fmt.Errorf("relay fee %s exceeds redeemed value %s", relayerFee, redeemedWei)
+	// Reject relay fees that consume more than half the redeemed value.
+	// This matches the on-chain cap (relayerFee <= total / 2).
+	if new(big.Int).Mul(relayerFee, big.NewInt(2)).Cmp(redeemedWei) > 0 {
+		return nil, fmt.Errorf("relay fee %s exceeds 50%% of redeemed value %s", relayerFee, redeemedWei)
 	}
 	if new(big.Int).Mul(relayerFee, big.NewInt(4)).Cmp(redeemedWei) > 0 {
 		w.log.Warnf("Relay fee is >25%% of redeemed value: fee=%s, redeemed=%s", relayerFee, redeemedWei)
@@ -4289,6 +4292,10 @@ func (w *ETHWallet) submitGaslessRedeemCalldata(ctx context.Context, contractAdd
 
 // GaslessRedeemCalldata builds emergency redeemWithSignature calldata for the
 // specified relayer address using the current on-chain contract nonce.
+// NOTE: This uses the on-chain nonce directly (not bumped for pending relays)
+// because it is an emergency fallback for when the relay is unavailable. If a
+// relay task is still pending with a higher nonce, this calldata will fail
+// on-chain once the relay task mines.
 func (w *ETHWallet) GaslessRedeemCalldata(ctx context.Context, form *asset.RedeemForm, relayerAddress string) (*asset.GaslessRedeemCalldata, error) {
 	if !common.IsHexAddress(relayerAddress) {
 		return nil, fmt.Errorf("invalid relayer address %q", relayerAddress)
@@ -6471,9 +6478,9 @@ func (w *baseWallet) swapOrRedemptionFeesPaidOnChainTx(ctx context.Context, txHa
 	return fee, locators, nil
 }
 
-// parseRelayFeeAndLocators extracts the relayerFee and secret hash locators
+// parseRelayFeeAndSecretHashes extracts the relayerFee and secret hashes
 // from redeemWithSignature calldata.
-func parseRelayFeeAndLocators(calldata []byte, contractVer uint32) (*big.Int, [][]byte, error) {
+func parseRelayFeeAndSecretHashes(calldata []byte, contractVer uint32) (*big.Int, [][]byte, error) {
 	if contractVer < 1 {
 		return nil, nil, fmt.Errorf("relay redeems not supported for contract version %d", contractVer)
 	}
@@ -6523,13 +6530,13 @@ func parseRelayFeeAndLocators(calldata []byte, contractVer uint32) (*big.Int, []
 		return nil, nil, fmt.Errorf("unexpected redemptions type %T", decoded.Args[argRedemptions])
 	}
 
-	locators := make([][]byte, 0, len(redemptions))
+	secretHashes := make([][]byte, 0, len(redemptions))
 	for _, r := range redemptions {
 		sh := r.V.SecretHash
-		locators = append(locators, sh[:])
+		secretHashes = append(secretHashes, sh[:])
 	}
 
-	return relayerFee, locators, nil
+	return relayerFee, secretHashes, nil
 }
 
 // swapOrRedemptionFeesPaidRelay returns the fee for a relayed redemption.
@@ -6560,7 +6567,7 @@ func (w *baseWallet) swapOrRedemptionFeesPaidRelay(ctx context.Context, relayTas
 	callData := tx.Data()
 
 	// Extract the relayerFee from redeemWithSignature calldata.
-	relayerFee, secretHashes, err := parseRelayFeeAndLocators(callData, contractVer)
+	relayerFee, secretHashes, err := parseRelayFeeAndSecretHashes(callData, contractVer)
 	if err != nil {
 		w.log.Warnf("error parsing relay calldata for %s: %v", relayTaskHash, err)
 		locators = [][]byte{locator}
@@ -8019,49 +8026,83 @@ func applyRelayStatus(wt *extendedWalletTx, status *relayStatus) (updated bool, 
 	return updated, failed
 }
 
-// w.relayMtx must be held for writes
-func (w *baseWallet) updatePendingRelay(tip uint64, wt *extendedWalletTx) {
-	var updated bool
-	defer func() {
-		if updated || !wt.savedToDB {
-			w.tryStoreDBTx(wt)
-			w.emitTransactionNote(wt.WalletTransaction, false)
-		}
-	}()
-
-	// Only check once per block.
-	if wt.lastCheck == tip {
+// updatePendingRelay checks the on-chain and relay status for a single
+// pending relay entry. It acquires relayMtx internally so the caller
+// must NOT hold it - this keeps the lock released during network I/O
+// (receipt lookups, relay HTTP calls) to avoid blocking concurrent readers.
+func (w *baseWallet) updatePendingRelay(tip uint64, relayTaskHash common.Hash) {
+	w.relayMtx.Lock()
+	wt, ok := w.pendingRelays[relayTaskHash]
+	if !ok || wt.lastCheck == tip {
+		w.relayMtx.Unlock()
 		return
 	}
 	wt.lastCheck = tip
 
 	waitingOnConfs := wt.BlockNumber > 0 && safeConfs(tip, wt.BlockNumber) < w.finalizeConfs
 	if waitingOnConfs {
+		w.relayMtx.Unlock()
 		return
 	}
 
-	// If we already have a tx hash, check its receipt directly.
-	if wt.hasRelayTx() {
-		txHash := wt.relayTxHash()
-		receipt, err := w.node.transactionReceipt(w.ctx, txHash)
+	// Snapshot the fields needed for network I/O decisions.
+	hasRelayTx := wt.hasRelayTx()
+	var relayTxHash common.Hash
+	if hasRelayTx {
+		relayTxHash = wt.relayTxHash()
+	}
+	prevBlockNumber := wt.BlockNumber
+	w.relayMtx.Unlock()
+
+	// --- Network I/O below, no lock held ---
+
+	var updated bool
+	defer func() {
+		w.relayMtx.Lock()
+		// Re-check that the entry is still in the map. It could have been
+		// removed by a concurrent cleanup or replaced by a new submission.
+		if cur := w.pendingRelays[relayTaskHash]; cur != wt {
+			w.relayMtx.Unlock()
+			return
+		}
+		shouldStore := updated || !wt.savedToDB
+		if shouldStore {
+			w.tryStoreDBTx(wt)
+		}
+		wtCopy := wt.WalletTransaction
+		w.relayMtx.Unlock()
+		if shouldStore {
+			w.emitTransactionNote(wtCopy, false)
+		}
+	}()
+
+	if hasRelayTx {
+		receipt, err := w.node.transactionReceipt(w.ctx, relayTxHash)
 		if err != nil {
-			w.log.Errorf("Error getting receipt for relay tx %s: %v", wt.RelayTxID, err)
+			w.log.Errorf("Error getting receipt for relay tx %s: %v", relayTxHash, err)
 			return
 		}
 		if receipt == nil {
-			if wt.BlockNumber > 0 {
-				w.log.Warnf("Relay tx %s was previously mined but is now unconfirmed", wt.RelayTxID)
-				wt.Receipt = nil
-				wt.BlockNumber = 0
-				wt.Timestamp = 0
-				wt.Confirmed = false
+			if prevBlockNumber > 0 {
+				w.log.Warnf("Relay tx %s was previously mined but is now unconfirmed", relayTxHash)
+				w.relayMtx.Lock()
+				if cur := w.pendingRelays[relayTaskHash]; cur == wt {
+					wt.Receipt = nil
+					wt.BlockNumber = 0
+					wt.Timestamp = 0
+					wt.Confirmed = false
+					updated = true
+				}
+				w.relayMtx.Unlock()
+			}
+			if statusUpdated := w.fetchAndApplyRelayStatus(relayTaskHash, wt); statusUpdated {
 				updated = true
 			}
-			updated = w.updatePendingRelayStatus(wt) || updated
 			return
 		}
 
-		if receipt.BlockNumber.Uint64() != wt.BlockNumber {
+		receiptBlockNum := receipt.BlockNumber.Uint64()
+		if receiptBlockNum != prevBlockNumber {
 			hdr, err := w.node.headerByHash(w.ctx, receipt.BlockHash)
 			if err != nil {
 				w.log.Errorf("Error getting header for hash %v: %v", receipt.BlockHash, err)
@@ -8071,36 +8112,46 @@ func (w *baseWallet) updatePendingRelay(tip uint64, wt *extendedWalletTx) {
 				w.log.Errorf("Header for hash %v is nil", receipt.BlockHash)
 				return
 			}
-			wt.Receipt = receipt
-			wt.BlockNumber = receipt.BlockNumber.Uint64()
-			wt.Timestamp = hdr.Time
-			wt.Confirmed = safeConfs(tip, wt.BlockNumber) >= w.finalizeConfs
-			wt.Rejected = receipt.Status != 1
-			wt.txHash = receipt.TxHash
 
-			gasUsed := receipt.GasUsed
-			effectiveGasPrice := receipt.EffectiveGasPrice
-			if effectiveGasPrice != nil {
-				totalFee := new(big.Int).Mul(effectiveGasPrice, new(big.Int).SetUint64(gasUsed))
-				wt.Fees = dexeth.WeiToGweiCeil(totalFee)
+			w.relayMtx.Lock()
+			if cur := w.pendingRelays[relayTaskHash]; cur == wt {
+				wt.Receipt = receipt
+				wt.BlockNumber = receiptBlockNum
+				wt.Timestamp = hdr.Time
+				wt.Confirmed = safeConfs(tip, receiptBlockNum) >= w.finalizeConfs
+				wt.Rejected = receipt.Status != 1
+				wt.txHash = receipt.TxHash
+				if receipt.EffectiveGasPrice != nil {
+					totalFee := new(big.Int).Mul(receipt.EffectiveGasPrice, new(big.Int).SetUint64(receipt.GasUsed))
+					wt.Fees = dexeth.WeiToGweiCeil(totalFee)
+				}
+				updated = true
 			}
-			updated = true
+			w.relayMtx.Unlock()
 			return
 		}
 
-		confirmed := safeConfs(tip, wt.BlockNumber) >= w.finalizeConfs
-		if confirmed != wt.Confirmed {
+		confirmed := safeConfs(tip, prevBlockNumber) >= w.finalizeConfs
+		w.relayMtx.Lock()
+		if cur := w.pendingRelays[relayTaskHash]; cur == wt && confirmed != wt.Confirmed {
 			wt.Confirmed = confirmed
 			updated = true
 		}
+		w.relayMtx.Unlock()
 		return
 	}
 
-	updated = w.updatePendingRelayStatus(wt) || updated
+	// No relay tx hash yet - check relay status.
+	if statusUpdated := w.fetchAndApplyRelayStatus(relayTaskHash, wt); statusUpdated {
+		updated = true
+	}
 }
 
-// w.relayMtx must be held for writes
-func (w *baseWallet) updatePendingRelayStatus(wt *extendedWalletTx) (updated bool) {
+// fetchAndApplyRelayStatus queries the relay for the current task status
+// and applies the result to wt under relayMtx. The HTTP call is made
+// without holding relayMtx. relayTaskHash is used to re-validate that
+// wt is still the current entry in pendingRelays before applying.
+func (w *baseWallet) fetchAndApplyRelayStatus(relayTaskHash common.Hash, wt *extendedWalletTx) (updated bool) {
 	w.relayerMtx.RLock()
 	relay := w.relayer
 	w.relayerMtx.RUnlock()
@@ -8115,7 +8166,14 @@ func (w *baseWallet) updatePendingRelayStatus(wt *extendedWalletTx) (updated boo
 		return false
 	}
 
+	w.relayMtx.Lock()
+	if cur := w.pendingRelays[relayTaskHash]; cur != wt {
+		w.relayMtx.Unlock()
+		return false
+	}
 	updated, failed := applyRelayStatus(wt, status)
+	w.relayMtx.Unlock()
+
 	if failed {
 		w.log.Warnf("Relay task %s failed (%s)", wt.RelayTaskID, status.FailureReason)
 	}
@@ -8125,26 +8183,34 @@ func (w *baseWallet) updatePendingRelayStatus(wt *extendedWalletTx) (updated boo
 func (w *baseWallet) checkPendingRelays() {
 	tip := w.tipHeight()
 
-	w.relayMtx.Lock()
-	defer w.relayMtx.Unlock()
+	// Snapshot the task hashes so we can iterate without holding
+	// the lock during network calls.
+	w.relayMtx.RLock()
+	taskHashes := make([]common.Hash, 0, len(w.pendingRelays))
+	for h := range w.pendingRelays {
+		taskHashes = append(taskHashes, h)
+	}
+	w.relayMtx.RUnlock()
 
-	for _, pendingRelay := range w.pendingRelays {
+	for _, relayTaskHash := range taskHashes {
 		if w.ctx.Err() != nil {
 			return
 		}
+		w.updatePendingRelay(tip, relayTaskHash)
+	}
 
-		w.updatePendingRelay(tip, pendingRelay)
+	// Cleanup finalized entries.
+	w.relayMtx.Lock()
+	for relayTaskHash, pendingRelay := range w.pendingRelays {
 		age := pendingRelay.age()
 		if age >= txAgeOut && !pendingRelay.Confirmed {
 			// TODO: give up? delete pending tx?
 		}
-	}
-
-	for relayTaskHash, pendingRelay := range w.pendingRelays {
 		if pendingRelay.Confirmed || (pendingRelay.Rejected && !pendingRelay.hasRelayTx()) {
 			delete(w.pendingRelays, relayTaskHash)
 		}
 	}
+	w.relayMtx.Unlock()
 }
 
 // checkPendingTxs checks the confirmation status of all pending transactions.

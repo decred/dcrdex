@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -44,17 +45,21 @@ const (
 	taskMaxReplaceAttempts = 3
 	// rateLimitPruneAge is how long idle IP limiter entries are retained.
 	rateLimitPruneAge = time.Hour
+	// maxQueuedTasksPerChain limits how many queued tasks a single chain can
+	// accumulate before the relay starts rejecting new submissions.
+	maxQueuedTasksPerChain = 100
 )
 
 // relayConfig is the JSON configuration for the relay server.
 type relayConfig struct {
-	Addr         string        `json:"addr"`
-	PrivKey      string        `json:"privkey"`
-	LogLevel     string        `json:"logLevel"`
-	ProfitPerGas float64       `json:"profitPerGas"` // in gwei
-	DataDir      string        `json:"dataDir"`
-	Chains       []chainConfig `json:"chains"`
-	Net          dex.Network   `json:"-"` // set from CLI flags
+	Addr           string        `json:"addr"`
+	PrivKey        string        `json:"privkey"`
+	LogLevel       string        `json:"logLevel"`
+	ProfitPerGas   *float64      `json:"profitPerGas"` // in gwei; nil defaults to 1.5
+	DataDir        string        `json:"dataDir"`
+	TrustedProxies []string      `json:"trustedProxies"` // IPs whose X-Real-IP / X-Forwarded-For headers are honored
+	Chains         []chainConfig `json:"chains"`
+	Net            dex.Network   `json:"-"` // set from CLI flags
 }
 
 type chainConfig struct {
@@ -88,11 +93,12 @@ func (r pendingReservation) hasTask() bool {
 
 // relayServer is the HTTP relay server.
 type relayServer struct {
-	httpServer *http.Server
-	chains     map[int64]*chainClient
-	relayAddr  common.Address
-	limiter    *ipLimiter
-	store      *taskStore
+	httpServer     *http.Server
+	chains         map[int64]*chainClient
+	relayAddr      common.Address
+	limiter        *ipLimiter
+	store          *taskStore
+	trustedProxies map[string]struct{}
 }
 
 type middleware func(http.HandlerFunc) http.HandlerFunc
@@ -119,9 +125,12 @@ func newRelayServer(ctx context.Context, cfg *relayConfig) (*relayServer, error)
 	log.Infof("Relay address: %s", relayAddr.Hex())
 
 	// Default 1.5 gwei profit per gas.
-	profitGwei := cfg.ProfitPerGas
-	if profitGwei == 0 {
-		profitGwei = 1.5
+	profitGwei := 1.5
+	if cfg.ProfitPerGas != nil {
+		if *cfg.ProfitPerGas < 0 {
+			return nil, fmt.Errorf("profitPerGas must be >= 0, got %v", *cfg.ProfitPerGas)
+		}
+		profitGwei = *cfg.ProfitPerGas
 	}
 	profitPerGas := new(big.Int).SetUint64(uint64(math.Round(profitGwei * 1e9)))
 
@@ -154,11 +163,23 @@ func newRelayServer(ctx context.Context, cfg *relayConfig) (*relayServer, error)
 		return nil, fmt.Errorf("error creating data directory: %w", err)
 	}
 
+	trustedProxies := make(map[string]struct{}, len(cfg.TrustedProxies))
+	for _, ip := range cfg.TrustedProxies {
+		if net.ParseIP(ip) == nil {
+			return nil, fmt.Errorf("invalid trusted proxy IP %q", ip)
+		}
+		trustedProxies[ip] = struct{}{}
+	}
+	if len(trustedProxies) > 0 {
+		log.Infof("Trusted proxies: %v", cfg.TrustedProxies)
+	}
+
 	srv := &relayServer{
-		chains:    chains,
-		relayAddr: relayAddr,
-		limiter:   newIPLimiter(),
-		store:     newTaskStore(dataDir),
+		chains:         chains,
+		relayAddr:      relayAddr,
+		limiter:        newIPLimiter(),
+		store:          newTaskStore(dataDir),
+		trustedProxies: trustedProxies,
 	}
 
 	// Load tasks from disk.
@@ -173,8 +194,11 @@ func newRelayServer(ctx context.Context, cfg *relayConfig) (*relayServer, error)
 	mux.HandleFunc("GET /api/relay/{taskID}", composeMiddleware(srv.handleRelayStatus, srv.logHandler))
 
 	srv.httpServer = &http.Server{
-		Addr:    cfg.Addr,
-		Handler: mux,
+		Addr:         cfg.Addr,
+		Handler:      mux,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 
 	return srv, nil
@@ -242,8 +266,14 @@ func (s *relayServer) run(ctx context.Context) error {
 
 	wg.Wait()
 
+	for chainID, cc := range s.chains {
+		cc.close()
+		log.Debugf("Chain %d connection closed", chainID)
+	}
+
 	if err := s.store.save(); err != nil {
 		log.Errorf("Error saving tasks on shutdown: %v", err)
+		return fmt.Errorf("error saving tasks on shutdown: %w", err)
 	}
 	log.Info("Relay server shut down.")
 

@@ -301,6 +301,69 @@ func TestParseRefundDataV0(t *testing.T) {
 	}
 }
 
+func TestParseRefundDataV1(t *testing.T) {
+	initiator := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	participant := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	tokenAddr := common.Address{} // native ETH
+	secretHash := [32]byte{0xab, 0xcd}
+	value := big.NewInt(1e18)
+	refundTimestamp := uint64(1700000000)
+
+	vector := swapv1.ETHSwapVector{
+		SecretHash:      secretHash,
+		Value:           value,
+		Initiator:       initiator,
+		RefundTimestamp: refundTimestamp,
+		Participant:     participant,
+	}
+
+	calldata, err := ABIs[1].Pack("refund", tokenAddr, vector)
+	if err != nil {
+		t.Fatalf("failed to pack refund calldata: %v", err)
+	}
+
+	t.Run("ok", func(t *testing.T) {
+		parsed, err := ParseRefundDataV1(calldata)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if parsed.From != initiator {
+			t.Errorf("initiator: got %s, want %s", parsed.From.Hex(), initiator.Hex())
+		}
+		if parsed.To != participant {
+			t.Errorf("participant: got %s, want %s", parsed.To.Hex(), participant.Hex())
+		}
+		if parsed.Value.Cmp(value) != 0 {
+			t.Errorf("value: got %s, want %s", parsed.Value, value)
+		}
+		if parsed.LockTime != refundTimestamp {
+			t.Errorf("lockTime: got %d, want %d", parsed.LockTime, refundTimestamp)
+		}
+		if parsed.SecretHash != secretHash {
+			t.Errorf("secretHash: got %x, want %x", parsed.SecretHash, secretHash)
+		}
+	})
+
+	t.Run("short calldata", func(t *testing.T) {
+		_, err := ParseRefundDataV1([]byte{0x01, 0x02})
+		if err == nil {
+			t.Fatal("expected error for short calldata")
+		}
+	})
+
+	t.Run("wrong method", func(t *testing.T) {
+		// Use initiate calldata instead of refund.
+		initCalldata, err := ABIs[1].Pack("initiate", tokenAddr, []swapv1.ETHSwapVector{vector})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = ParseRefundDataV1(initCalldata)
+		if err == nil {
+			t.Fatal("expected error for wrong method")
+		}
+	})
+}
+
 func TestParseRedeemDataV1RejectsSignedRedeem(t *testing.T) {
 	participant := common.HexToAddress("0xabcdef0123456789abcdef0123456789abcdef01")
 	redemptions := []swapv1.ETHSwapRedemption{{

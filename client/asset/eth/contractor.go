@@ -665,6 +665,10 @@ type contractorV1 struct {
 	isToken          bool
 	evmify           func(uint64) *big.Int
 	atomize          func(*big.Int) uint64
+
+	// Cached EIP-712 constants.
+	eip712DomainSep  common.Hash
+	eip712RedeemType common.Hash
 }
 
 var _ contractor = (*contractorV1)(nil)
@@ -675,6 +679,13 @@ func newV1Contractor(net dex.Network, swapContractAddr, acctAddr common.Address,
 	if err != nil {
 		return nil, err
 	}
+
+	cid := big.NewInt(chainID)
+	domainSep, err := eip712DomainSeparator(cid, swapContractAddr)
+	if err != nil {
+		return nil, fmt.Errorf("error computing EIP-712 domain separator: %w", err)
+	}
+
 	return &contractorV1{
 		contractV1:       c,
 		net:              net,
@@ -682,9 +693,11 @@ func newV1Contractor(net dex.Network, swapContractAddr, acctAddr common.Address,
 		swapContractAddr: swapContractAddr,
 		acctAddr:         acctAddr,
 		cb:               cb,
-		chainID:          big.NewInt(chainID),
+		chainID:          cid,
 		atomize:          dexeth.WeiToGwei,
 		evmify:           dexeth.GweiToWei,
+		eip712DomainSep:  domainSep,
+		eip712RedeemType: eip712RedeemTypehash,
 	}, nil
 }
 
@@ -790,15 +803,34 @@ func (c *contractorV1) redeem(txOpts *bind.TransactOpts, redeems []*asset.Redemp
 	return c.Redeem(txOpts, c.tokenAddr, versionedRedemptions)
 }
 
-// eip712RedeemDigest computes the EIP-712 digest for a signed redemption.
-// The digest matches what the Solidity contract computes in _verifySignedRedeem.
-func (c *contractorV1) eip712RedeemDigest(feeRecipient common.Address, redemptions []swapv1.ETHSwapRedemption,
-	relayerFee, nonce, deadline *big.Int) (common.Hash, error) {
+// Cached EIP-712 ABI types and hashes, initialized once at package level.
+var (
+	eip712Uint256Type         abi.Type
+	eip712Bytes32Type         abi.Type
+	eip712AddressType         abi.Type
+	eip712RedemptionArrayType abi.Type
 
-	redeemTypehash := crypto.Keccak256Hash([]byte("Redeem(address feeRecipient,bytes32 redemptionsHash,uint256 relayerFee,uint256 nonce,uint256 deadline)"))
+	eip712RedeemTypehash common.Hash
+	eip712DomainTypeHash common.Hash
+	eip712NameHash       common.Hash
+	eip712VersionHash    common.Hash
+)
 
-	// redemptionsHash = keccak256(abi.encode(redemptions))
-	redemptionArrayType, err := abi.NewType("tuple[]", "", []abi.ArgumentMarshaling{
+func init() {
+	var err error
+	eip712Uint256Type, err = abi.NewType("uint256", "", nil)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create uint256 ABI type: %v", err))
+	}
+	eip712Bytes32Type, err = abi.NewType("bytes32", "", nil)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create bytes32 ABI type: %v", err))
+	}
+	eip712AddressType, err = abi.NewType("address", "", nil)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create address ABI type: %v", err))
+	}
+	eip712RedemptionArrayType, err = abi.NewType("tuple[]", "", []abi.ArgumentMarshaling{
 		{Name: "v", Type: "tuple", Components: []abi.ArgumentMarshaling{
 			{Name: "secretHash", Type: "bytes32"},
 			{Name: "value", Type: "uint256"},
@@ -809,10 +841,40 @@ func (c *contractorV1) eip712RedeemDigest(feeRecipient common.Address, redemptio
 		{Name: "secret", Type: "bytes32"},
 	})
 	if err != nil {
-		return common.Hash{}, fmt.Errorf("error creating redemption type: %w", err)
+		panic(fmt.Sprintf("failed to create redemption array ABI type: %v", err))
 	}
+
+	eip712RedeemTypehash = crypto.Keccak256Hash([]byte("Redeem(address feeRecipient,bytes32 redemptionsHash,uint256 relayerFee,uint256 nonce,uint256 deadline)"))
+	eip712DomainTypeHash = crypto.Keccak256Hash([]byte("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"))
+	eip712NameHash = crypto.Keccak256Hash([]byte("ETHSwap"))
+	eip712VersionHash = crypto.Keccak256Hash([]byte("1"))
+}
+
+// eip712DomainSeparator computes the EIP-712 domain separator for the given
+// chain ID and contract address.
+func eip712DomainSeparator(chainID *big.Int, contractAddr common.Address) (common.Hash, error) {
+	domainArgs := abi.Arguments{
+		{Type: eip712Bytes32Type},
+		{Type: eip712Bytes32Type},
+		{Type: eip712Bytes32Type},
+		{Type: eip712Uint256Type},
+		{Type: eip712AddressType},
+	}
+	domainEncoded, err := domainArgs.Pack(eip712DomainTypeHash, eip712NameHash, eip712VersionHash, chainID, contractAddr)
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("error encoding domain separator: %w", err)
+	}
+	return crypto.Keccak256Hash(domainEncoded), nil
+}
+
+// eip712RedeemDigest computes the EIP-712 digest for a signed redemption.
+// The digest matches what the Solidity contract computes in _verifySignedRedeem.
+func (c *contractorV1) eip712RedeemDigest(feeRecipient common.Address, redemptions []swapv1.ETHSwapRedemption,
+	relayerFee, nonce, deadline *big.Int) (common.Hash, error) {
+
+	// redemptionsHash = keccak256(abi.encode(redemptions))
 	args := abi.Arguments{
-		{Type: redemptionArrayType},
+		{Type: eip712RedemptionArrayType},
 	}
 	redemptionsEncoded, err := args.Pack(redemptions)
 	if err != nil {
@@ -821,45 +883,27 @@ func (c *contractorV1) eip712RedeemDigest(feeRecipient common.Address, redemptio
 	redemptionsHash := crypto.Keccak256Hash(redemptionsEncoded)
 
 	// structHash = keccak256(abi.encode(REDEEM_TYPEHASH, feeRecipient, redemptionsHash, relayerFee, nonce, deadline))
-	uint256Type, _ := abi.NewType("uint256", "", nil)
-	bytes32Type, _ := abi.NewType("bytes32", "", nil)
-	addressType, _ := abi.NewType("address", "", nil)
 	structArgs := abi.Arguments{
-		{Type: bytes32Type},
-		{Type: addressType},
-		{Type: bytes32Type},
-		{Type: uint256Type},
-		{Type: uint256Type},
-		{Type: uint256Type},
+		{Type: eip712Bytes32Type},
+		{Type: eip712AddressType},
+		{Type: eip712Bytes32Type},
+		{Type: eip712Uint256Type},
+		{Type: eip712Uint256Type},
+		{Type: eip712Uint256Type},
 	}
-	structEncoded, err := structArgs.Pack(redeemTypehash, feeRecipient, redemptionsHash, relayerFee, nonce, deadline)
+	structEncoded, err := structArgs.Pack(c.eip712RedeemType, feeRecipient, redemptionsHash, relayerFee, nonce, deadline)
 	if err != nil {
 		return common.Hash{}, fmt.Errorf("error encoding struct hash: %w", err)
 	}
 	structHash := crypto.Keccak256Hash(structEncoded)
 
-	// domainSeparator = keccak256(abi.encode(typeHash, nameHash, versionHash, chainId, contractAddress))
-	domainTypeHash := crypto.Keccak256Hash([]byte("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"))
-	nameHash := crypto.Keccak256Hash([]byte("ETHSwap"))
-	versionHash := crypto.Keccak256Hash([]byte("1"))
-
-	domainArgs := abi.Arguments{
-		{Type: bytes32Type},
-		{Type: bytes32Type},
-		{Type: bytes32Type},
-		{Type: uint256Type},
-		{Type: addressType},
-	}
-	domainEncoded, err := domainArgs.Pack(domainTypeHash, nameHash, versionHash, c.chainID, c.swapContractAddr)
-	if err != nil {
-		return common.Hash{}, fmt.Errorf("error encoding domain separator: %w", err)
-	}
-	domainSeparator := crypto.Keccak256Hash(domainEncoded)
-
 	// digest = keccak256("\x19\x01" || domainSeparator || structHash)
-	digest := crypto.Keccak256Hash(
-		append([]byte{0x19, 0x01}, append(domainSeparator.Bytes(), structHash.Bytes()...)...),
-	)
+	var buf [66]byte
+	buf[0] = 0x19
+	buf[1] = 0x01
+	copy(buf[2:34], c.eip712DomainSep.Bytes())
+	copy(buf[34:66], structHash.Bytes())
+	digest := crypto.Keccak256Hash(buf[:])
 	return digest, nil
 }
 
@@ -1087,6 +1131,8 @@ func (c *contractorV1) tokenContractor(token *dexeth.Token) (tokenContractor, er
 			isToken:          true,
 			evmify:           token.AtomicToEVM,
 			atomize:          token.EVMToAtomic,
+			eip712DomainSep:  c.eip712DomainSep,
+			eip712RedeemType: c.eip712RedeemType,
 		},
 		erc20Contractor: &erc20Contractor{
 			cb:                c.cb,
