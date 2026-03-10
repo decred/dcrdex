@@ -5202,11 +5202,15 @@ func TestTradeTracking(t *testing.T) {
 	if len(proof.TakerSwap) != 0 {
 		t.Fatalf("swap broadcast before confirmations")
 	}
-	// confirming maker's swap should trigger taker's swap bcast
-	tBtcWallet.setConfs(auditInfo.Coin.ID(), tUTXOAssetB.SwapConf, nil)
+	// confirming maker's swap should trigger taker's swap bcast.
+	// Set receipts and queue the response before setting confs, since
+	// the afterAudit tick goroutine may read swapReceipts as soon as
+	// confirmations are met. The confsMtx in setConfs/tConfirmations
+	// provides the happens-before ordering.
 	swapID := encode.RandomBytes(36)
 	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: swapID}}}
 	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
+	tBtcWallet.setConfs(auditInfo.Coin.ID(), tUTXOAssetB.SwapConf, nil)
 	tCore.schedTradeTick(tracker)
 	for atomic.LoadUint32(&tracker.tickRunning) != 0 {
 		time.Sleep(time.Millisecond)
@@ -5878,12 +5882,14 @@ func TestRefunds(t *testing.T) {
 		t.Fatalf("audit sig not set for taker")
 	}
 	tracker.mtx.RUnlock()
-	// maker's swap confirmation should trigger taker's swap bcast
-	tBtcWallet.setConfs(auditInfo.Coin.ID(), tUTXOAssetB.SwapConf, nil)
+	// maker's swap confirmation should trigger taker's swap bcast.
+	// Set receipts and queue the response before setting confs to avoid
+	// racing with the afterAudit tick goroutine.
 	counterSwapID := encode.RandomBytes(36)
 	counterScript := encode.RandomBytes(36)
 	tEthWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: counterSwapID}, contract: counterScript}}
 	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
+	tBtcWallet.setConfs(auditInfo.Coin.ID(), tUTXOAssetB.SwapConf, nil)
 	tCore.schedTradeTick(tracker)
 	for atomic.LoadUint32(&tracker.tickRunning) != 0 {
 		time.Sleep(time.Millisecond)
