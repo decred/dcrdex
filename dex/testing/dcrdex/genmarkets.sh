@@ -299,6 +299,118 @@ if [ $POLYGON_ON -eq 0 ] && [ $BASE_ON -eq 0 ]; then
 EOF
 fi
 
+if [ $LTC_ON -eq 0 ] && [ $BASE_ON -eq 0 ]; then
+    cat << EOF >> "${FILEPATH}"
+        },
+        {
+            "base": "LTC_simnet",
+            "quote": "USDC.BASE_simnet",
+            "lotSize": 100000000,
+            "rateStep": 100,
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 4
+EOF
+fi
+
+if [ $LTC_ON -eq 0 ] && [ $ETH_ON -eq 0 ]; then
+    cat << EOF >> "${FILEPATH}"
+        },
+        {
+            "base": "LTC_simnet",
+            "quote": "ETH_simnet",
+            "lotSize": 1000000000,
+            "rateStep": 1000,
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 4
+EOF
+fi
+
+if [ $LTC_ON -eq 0 ] && [ $DASH_ON -eq 0 ]; then
+    cat << EOF >> "${FILEPATH}"
+        },
+        {
+            "base": "LTC_simnet",
+            "quote": "DASH_simnet",
+            "lotSize": 1000000000,
+            "rateStep": 1000000,
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 4
+EOF
+fi
+
+if [ $DOGE_ON -eq 0 ] && [ $POLYGON_ON -eq 0 ]; then
+    cat << EOF >> "${FILEPATH}"
+        },
+        {
+            "base": "DOGE_simnet",
+            "quote": "POLYGON_simnet",
+            "lotSize": 10000000000,
+            "rateStep": 1000,
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 4
+EOF
+fi
+
+if [ $BCH_ON -eq 0 ] && [ $ETH_ON -eq 0 ]; then
+    cat << EOF >> "${FILEPATH}"
+        },
+        {
+            "base": "BCH_simnet",
+            "quote": "ETH_simnet",
+            "lotSize": 100000000,
+            "rateStep": 1000,
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 4
+EOF
+fi
+
+if [ $FIRO_ON -eq 0 ]; then
+    cat << EOF >> "${FILEPATH}"
+        },
+        {
+            "base": "FIRO_simnet",
+            "quote": "BTC_simnet",
+            "lotSize": 100000000,
+            "rateStep": 100,
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 4
+EOF
+fi
+
+if [ $FIRO_ON -eq 0 ] && [ $DOGE_ON -eq 0 ]; then
+    cat << EOF >> "${FILEPATH}"
+        },
+        {
+            "base": "FIRO_simnet",
+            "quote": "DOGE_simnet",
+            "lotSize": 100000000,
+            "rateStep": 100000000,
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 4
+EOF
+fi
+
+if [ $BCH_ON -eq 0 ] && [ $POLYGON_ON -eq 0 ]; then
+    cat << EOF >> "${FILEPATH}"
+        },
+        {
+            "base": "BCH_simnet",
+            "quote": "POLYGON_simnet",
+            "lotSize": 100000000,
+            "rateStep": 1000,
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2,
+            "parcelSize": 4
+EOF
+fi
+
 if [ $DOGE_ON -eq 0 ]; then
     cat << EOF >> "${FILEPATH}"
         },
@@ -365,11 +477,11 @@ if [ $DGB_ON -eq 0 ]; then
         {
             "base": "DCR_simnet",
             "quote": "DGB_simnet",
-            "lotSize": 1000000,
+            "lotSize": 100000000,
             "rateStep": 1000000,
             "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2,
-            "parcelSize": 1500
+            "parcelSize": 4
 EOF
 else echo "Digibyte is not running. Configuring dcrdex markets without DGB."
 fi
@@ -582,7 +694,7 @@ if [ $ZEC_ON -eq 0 ]; then
         "ZEC_simnet": {
             "bip44symbol": "zec",
             "network": "simnet",
-            "maxFeeRate": 200,
+            "maxFeeRate": 10000,
             "swapConf": 1,
             "configPath": "${TEST_ROOT}/zec/alpha/alpha.conf"
 EOF

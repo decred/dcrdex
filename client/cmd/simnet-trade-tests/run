@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+echo "Building simnet-trade-tests at commit $(git rev-parse --short HEAD) ($(git diff --stat --quiet 2>/dev/null && echo 'clean' || echo 'dirty'))"
+
 go build -tags harness -ldflags \
     "-X 'decred.org/dcrdex/dex.testLockTimeTaker=3m' \
     -X 'decred.org/dcrdex/dex.testLockTimeMaker=6m'"
@@ -26,11 +28,6 @@ case $1 in
   bchdcr)
     ./simnet-trade-tests --base bch --quote dcr --quote1node trading1 --quote2node trading2 \
 		--regasset dcr ${@:2}
-    ;;
-
-  bchspvdcr)
-    ./simnet-trade-tests --base bch --quote dcr --quote1node trading1 --quote2node trading2 \
-		--regasset dcr --base1type=spv ${@:2}
     ;;
 
   ltcdcr)
@@ -66,6 +63,10 @@ case $1 in
     ./simnet-trade-tests --base1node trading1 --base2node trading2 --quote eth ${@:2}
     ;;
 
+  dcrspveth)
+    ./simnet-trade-tests --base1node trading1 --base2node trading2 --quote eth --base1type spv ${@:2}
+    ;;
+
   dcrfiro)
     ./simnet-trade-tests --base1node trading1 --base2node trading2 --quote firo ${@:2}
     ;;
@@ -90,6 +91,67 @@ case $1 in
     ./simnet-trade-tests --quote1node trading1 --quote2node trading2 --base usdc.polygon --quote dcr --regasset dcr  ${@:2}
     ;;
 
+  ethbtc)
+    ./simnet-trade-tests --base eth --quote btc --regasset btc ${@:2}
+    ;;
+
+  ltceth)
+    ./simnet-trade-tests --base ltc --quote eth --regasset ltc ${@:2}
+    ;;
+
+  bchpolygon)
+    ./simnet-trade-tests --base bch --quote polygon --regasset bch ${@:2}
+    ;;
+
+  ltcdash)
+    ./simnet-trade-tests --base ltc --quote dash --regasset ltc \
+		--quote1node gamma --quote2node delta ${@:2}
+    ;;
+
+  dogepolygon)
+    ./simnet-trade-tests --base doge --quote polygon --regasset doge ${@:2}
+    ;;
+
+  bcheth)
+    ./simnet-trade-tests --base bch --quote eth --regasset bch ${@:2}
+    ;;
+
+  ltcspveth)
+    ./simnet-trade-tests --base ltc --quote eth --regasset ltc --base1type spv ${@:2}
+    ;;
+
+  firobtc)
+    ./simnet-trade-tests --base firo --quote btc --regasset btc ${@:2}
+    ;;
+
+  firobtcspv)
+    ./simnet-trade-tests --base firo --quote btc --regasset btc --quote1type spv ${@:2}
+    ;;
+
+  firodoge)
+    ./simnet-trade-tests --base firo --quote doge --regasset doge ${@:2}
+    ;;
+
+  btcusdceth)
+    ./simnet-trade-tests --base btc --quote usdc.eth --regasset btc ${@:2}
+    ;;
+
+  btcusdteth)
+    ./simnet-trade-tests --base btc --quote usdt.eth --regasset btc ${@:2}
+    ;;
+
+  ltcusdcbase)
+    ./simnet-trade-tests --base ltc --quote usdc.base --regasset ltc ${@:2}
+    ;;
+
+  dcrusdtpolygon)
+    ./simnet-trade-tests --base1node trading1 --base2node trading2 --quote usdt.polygon ${@:2}
+    ;;
+
+  dcrusdtbase)
+    ./simnet-trade-tests --base1node trading1 --base2node trading2 --quote usdt.base ${@:2}
+    ;;
+
   zclbtc)
     ./simnet-trade-tests --base zcl --quote btc --regasset btc ${@:2}
     ;;
@@ -107,7 +169,6 @@ dcrspvbtc - Decred SPV wallet and Bitcoin RPC wallet on DCR-BTC
 dcrbtcspv - Decred RPC wallet and Bitcoin SPV wallet on DCR-BTC market
 dcrbtcelectrum - Decred RPC wallet and Bitcoin Electrum wallet on DCR-BTC market
 bchdcr - RPC wallets on BCH-DCR market
-bchspvdcr - Bitcoin Cash SPV wallet and Decred RPC Wallet on BCH-DCR market
 ltcdcr - RPC wallets on LTC-DCR market
 ltcspvdcr - Litecoin SPV wallet and Decred RPC Wallet on LTC-DCR market
 ltcelectrumdcr - Litecoin Electrum wallet and Decred RPC wallet on LTC-DCR market
@@ -115,12 +176,28 @@ dcrdash - RPC wallets on DCR-DASH market
 dcrdoge - RPC wallets on DCR-DOGE market
 dcrdgb - RPC wallets on DCR-DGB market
 dcreth - Decred RPC wallet and Ethereum RPC wallet on DCR-ETH market
+dcrspveth - Decred SPV wallet and Ethereum wallet on DCR-ETH market
 dcrfiro - RPC wallets on DCR-FIRO market
 dcrfiroelectrum - Decred RPC wallet and Firo Electrum wallet on DCR-FIRO market
 zecbtc - RPC wallets on ZEC-BTC market
 dcrusdc - Decred RPC wallet and Ethereum wallet with usdc.eth test token on market DCR-USDC.ETH
 polygondcr - Decred RPC wallet and Polygon RPC wallet on POLYGON-DCR market
 dcrusdcpolygon - Decred RPC wallet and Polygon wallet with usdc.polygon test token on market DCR-USDC.POLYGON
+ethbtc - Ethereum wallet and Bitcoin RPC wallet on ETH-BTC market
+ltceth - Litecoin RPC wallet and Ethereum wallet on LTC-ETH market
+bchpolygon - Bitcoin Cash RPC wallet and Polygon wallet on BCH-POLYGON market
+ltcdash - Litecoin RPC wallet and Dash RPC wallet on LTC-DASH market
+dogepolygon - Dogecoin RPC wallet and Polygon wallet on DOGE-POLYGON market
+bcheth - Bitcoin Cash RPC wallet and Ethereum wallet on BCH-ETH market
+ltcspveth - Litecoin SPV wallet and Ethereum wallet on LTC-ETH market
+firobtc - Firo RPC wallet and Bitcoin RPC wallet on FIRO-BTC market
+firobtcspv - Firo RPC wallet and Bitcoin SPV wallet on FIRO-BTC market
+firodoge - Firo RPC wallet and Dogecoin RPC wallet on FIRO-DOGE market
+btcusdceth - Bitcoin RPC wallet and USDC.ETH token on BTC-USDC.ETH market
+btcusdteth - Bitcoin RPC wallet and USDT.ETH token on BTC-USDT.ETH market
+ltcusdcbase - Litecoin RPC wallet and USDC.BASE token on LTC-USDC.BASE market
+dcrusdtpolygon - Decred RPC wallet and USDT.POLYGON token on DCR-USDT.POLYGON market
+dcrusdtbase - Decred RPC wallet and USDT.BASE token on DCR-USDT.BASE market
 zclbtc - Zclassic RPC wallet and Bitcoin RPC wallet on ZCL-BTC
 
 ---------------------

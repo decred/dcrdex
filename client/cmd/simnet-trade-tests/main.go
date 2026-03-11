@@ -10,6 +10,7 @@ import (
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
+	dexbase "decred.org/dcrdex/dex/networks/base"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	dexpolygon "decred.org/dcrdex/dex/networks/polygon"
 	"github.com/fatih/color"
@@ -223,4 +224,5 @@ func (f *flagArray) Set(value string) error {
 func init() {
 	dexeth.MaybeReadSimnetAddrs()
 	dexpolygon.MaybeReadSimnetAddrs()
+	dexbase.MaybeReadSimnetAddrs()
 }
