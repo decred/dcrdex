@@ -4411,10 +4411,27 @@ func (w *ETHWallet) GaslessRedeem(ctx context.Context, form *asset.RedeemForm) (
 		relay := w.relayer
 		w.relayerMtx.RUnlock()
 		if relay == nil {
-			return fail(fmt.Errorf("relayer not configured"))
+			return fail(fmt.Errorf("relayer not configured and insufficient funds for gas"))
 		}
-		txs, coin, fees, err := w.gaslessRedeem(ctx, form, relay)
-		return txs, coin, fees, false, err
+		txs, coin, fees, relayErr := w.gaslessRedeem(ctx, form, relay)
+		if relayErr == nil {
+			return txs, coin, fees, false, nil
+		}
+		// Relay failed. Try a normal redemption in case funds have
+		// become available since the initial check (e.g. a pending
+		// tx confirmed).
+		w.log.Warnf("Gasless relay redeem failed (%v), attempting normal redemption as fallback.", relayErr)
+		if lockErr := w.lockFunds(reserve, redemptionReserve); lockErr != nil {
+			// Still can't afford gas. Return the original relay error
+			// since that's the primary failure.
+			return fail(fmt.Errorf("relay failed: %v; fallback failed: %w", relayErr, lockErr))
+		}
+		defer w.unlockFunds(reserve, redemptionReserve)
+		txs, coin, fees, redeemErr := w.assetWallet.Redeem(ctx, form, nil, nil)
+		if redeemErr != nil {
+			return fail(fmt.Errorf("relay failed: %v; fallback redeem failed: %w", relayErr, redeemErr))
+		}
+		return txs, coin, fees, true, nil
 	}
 	if err != nil {
 		return fail(err)

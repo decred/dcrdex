@@ -819,6 +819,12 @@ func (s *Swapper) restoreActiveSwaps(allowPartial bool) error {
 	// MakerSwapCast cannot proceed without addresses, so revoke them
 	// without fault. Matches at TakerSwapCast or later already have both
 	// contracts on-chain and don't need the addresses to finish.
+	//
+	// NOTE: For EVM assets, surviving TakerSwapCast+ matches may still
+	// have v0 contract data. The server's ETH backend only binds one
+	// contract version, so verifying their redeem coins will fail unless
+	// the operator uses evm-protocol-overrides.json to keep v0 active
+	// until those swaps complete. See server/asset/eth/eth.go.
 	var toRevoke []*matchTracker
 	for _, mt := range s.matches {
 		if mt.makerSwapAddr != "" || mt.takerSwapAddr != "" {

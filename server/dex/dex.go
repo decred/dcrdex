@@ -965,7 +965,14 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			log.Errorf("bad market for order %v: %v", ord.ID(), err)
 			return
 		}
-		markets[name].SwapDone(ord, match, fail)
+		mkt := markets[name]
+		if mkt == nil {
+			// markets are populated after the Swapper is created, so
+			// this is expected for matches revoked during startup.
+			log.Warnf("swapDone: no market %q for order %v (match may have been revoked during initialization)", name, ord.ID())
+			return
+		}
+		mkt.SwapDone(ord, match, fail)
 	}
 
 	// Create the swapper.

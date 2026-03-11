@@ -103,7 +103,7 @@ func NeedsV1toV4Update(path string) (string, bool, error) {
 	// May be already pointing to a v4 directory.
 	if lenDiff >= 0 && path[lenDiff:] == version4Suffix {
 		v4Path = path
-		path = path[:len(version4Suffix)]
+		path = path[:lenDiff]
 	} else {
 		v4Path = fmt.Sprintf("%s%s", path, version4Suffix)
 	}

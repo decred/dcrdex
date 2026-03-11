@@ -41,6 +41,21 @@ var (
 	protocolVersionsFilePath  = "evm-protocol-overrides.json"
 	protocolVersionsOverrides = make(map[uint32]dexeth.ProtocolVersion)
 
+	// IMPORTANT: Upgrading from v1.0.6 to v1.1.0+
+	//
+	// v1.0.6 used contract version 0. The server's RPC client binds to a
+	// single contract version, so after upgrading to v1 (the default), the
+	// server cannot verify coins from in-flight v0 swaps. Matches at
+	// TakerSwapCast or later are not revoked during the upgrade, but
+	// processing their redeem coins will fail with a version mismatch.
+	//
+	// To handle this safely, operators should either:
+	//  1. Wait for all active EVM swaps to complete before upgrading, OR
+	//  2. Place an evm-protocol-overrides.json file in the server's working
+	//     directory to keep v0 until remaining swaps drain:
+	//       {"eth": 0, "usdc.eth": 0, "usdt.eth": 0, "matic.eth": 0}
+	//     Once no v0 swaps remain, remove the file and restart to use v1.
+
 	backendInfo = &asset.BackendInfo{
 		SupportsDynamicTxFee: true,
 	}
