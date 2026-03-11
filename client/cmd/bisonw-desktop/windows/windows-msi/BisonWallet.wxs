@@ -1,5 +1,5 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <Package UpgradeCode="2c62692a-c72e-4182-a8eb-7d1d7e55adc0" Version="1.0.4.0" Language="1033"
+  <Package UpgradeCode="2c62692a-c72e-4182-a8eb-7d1d7e55adc0" Version="1.1.0.0" Language="1033"
     Name="BisonWallet" Manufacturer="Decred Developers" InstallerVersion="300">
     <Media Id="1" Cabinet="bisonwdesktop.cab" EmbedCab="yes" />
     <Property Id="PIDTEMPLATE" Value="Decred Developers" />
