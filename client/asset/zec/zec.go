@@ -2028,7 +2028,13 @@ func (w *zecWallet) Refund(ctx context.Context, coinID, contract dex.Bytes, feeR
 	if utxo == nil {
 		return nil, asset.CoinNotFoundError // spent
 	}
-	msgTx, err := w.refundTx(ctx, txHash, vout, contract, uint64(utxo.Value), nil, feeRate)
+	// Calculate ZIP-317 compliant fees for the refund tx. The feeRate
+	// parameter is per-action, but ZIP-317 requires fees based on logical
+	// actions derived from tx structure, not a simple rate.
+	var inputsSize uint64 = dexbtc.TxInOverhead + dexbtc.RefundSigScriptSize + 1
+	var outputsSize uint64 = dexbtc.P2PKHOutputSize + 1
+	refundFees := dexzec.TxFeesZIP317(inputsSize, outputsSize, 0, 0, 0, 0)
+	msgTx, err := w.refundTx(ctx, txHash, vout, contract, uint64(utxo.Value), nil, refundFees)
 	if err != nil {
 		return nil, fmt.Errorf("error creating refund tx: %w", err)
 	}
