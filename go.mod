@@ -2,7 +2,7 @@ module decred.org/dcrdex
 
 go 1.24.9
 
-replace github.com/bisoncraft/mesh => github.com/buck54321/mesh v0.0.0-20260310125835-501f40b7413d
+replace github.com/bisoncraft/mesh => github.com/buck54321/mesh v0.0.0-20260312171757-88530d61c463
 
 require (
 	decred.org/dcrwallet/v5 v5.0.3

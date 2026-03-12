@@ -272,8 +272,8 @@ github.com/btcsuite/snappy-go v1.0.0/go.mod h1:8woku9dyThutzjeg+3xrA5iCpBRH8XEEg
 github.com/btcsuite/websocket v0.0.0-20150119174127-31079b680792 h1:R8vQdOQdZ9Y3SkEwmHoWBmX1DNXhXZqlTpq6s4tyJGc=
 github.com/btcsuite/websocket v0.0.0-20150119174127-31079b680792/go.mod h1:ghJtEyQwv5/p4Mg4C0fgbePVuGr935/5ddU9Z3TmDRY=
 github.com/btcsuite/winsvc v1.0.0/go.mod h1:jsenWakMcC0zFBFurPLEAyrnc/teJEM1O46fmI40EZs=
-github.com/buck54321/mesh v0.0.0-20260310125835-501f40b7413d h1:DYZYW/jL0G3KxbReLnLpxW0E53vFMpcVB8IN1eyNz1A=
-github.com/buck54321/mesh v0.0.0-20260310125835-501f40b7413d/go.mod h1:DxzW6X/J4N6qqPt7ZYDTVx8iTE4xAoTTG9ANKv94f3Y=
+github.com/buck54321/mesh v0.0.0-20260312171757-88530d61c463 h1:cTzVglnn0aByPVhCWMy+tZuMEX3tklEM3xhiFebanco=
+github.com/buck54321/mesh v0.0.0-20260312171757-88530d61c463/go.mod h1:LjHlWgi2R4nusjXEwZ9AikmfIN39tHZ08nkV7fiNRLI=
 github.com/bufbuild/buf v0.37.0/go.mod h1:lQ1m2HkIaGOFba6w/aC3KYBHhKEOESP3gaAEpS3dAFM=
 github.com/buger/jsonparser v0.0.0-20181115193947-bf1c66bbce23/go.mod h1:bbYlZJ7hK1yFx9hf58LP0zeX7UjIGs20ufpu3evjr+s=
 github.com/caarlos0/ctrlc v1.0.0/go.mod h1:CdXpj4rmq0q/1Eb44M9zi2nKB0QraNKuRGYGrrHhcQw=
