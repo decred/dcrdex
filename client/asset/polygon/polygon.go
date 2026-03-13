@@ -97,6 +97,13 @@ var (
 	}
 )
 
+func polygonFinalizeConfs(net dex.Network) uint64 {
+	if net == dex.Simnet {
+		return 2
+	}
+	return 64
+}
+
 type Driver struct{}
 
 // Open opens the Polygon exchange wallet. Start the wallet with its Run method.
@@ -149,7 +156,7 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Networ
 		CompatData:         &compat,
 		VersionedGases:     dexpolygon.VersionedGases,
 		Tokens:             dexpolygon.Tokens,
-		FinalizeConfs:      64,
+		FinalizeConfs:      polygonFinalizeConfs(net),
 		Logger:             logger,
 		BaseChainContracts: contracts,
 		MultiBalAddress:    dexpolygon.MultiBalanceAddresses[net],

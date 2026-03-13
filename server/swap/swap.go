@@ -148,7 +148,14 @@ type matchTracker struct {
 	makerStatus *swapStatus
 	takerStatus *swapStatus
 	// Per-match swap addresses from each party's match acknowledgement.
-	// Each match requires a unique swap address to ensure unique contracts.
+	// Each match requires a unique swap address to prevent a counterparty
+	// from presenting a single on-chain contract as fulfilling multiple
+	// matches. This primarily protects the taker: without unique
+	// addresses, a malicious maker could reuse one contract across
+	// matches. If a party reuses their own address they only weaken
+	// their own protection, so the server validates that an address is
+	// provided and is valid for the asset, but does not enforce
+	// uniqueness across matches.
 	makerSwapAddr         string
 	takerSwapAddr         string
 	counterPartyAddrsSent bool

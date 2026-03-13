@@ -6,7 +6,6 @@ package main
 import (
 	"context"
 	"net"
-	"path/filepath"
 	"strconv"
 	"time"
 
@@ -349,19 +348,15 @@ var assetRegistry = map[string]*AssetDef{
 		Symbol:         polygon,
 		Type:           AssetTypePolygon,
 		WalletType:     "rpc",
-		RPCConfigKey:   "", // uses IPC
+		RPCConfigKey:   "",
 		AddressArgs:    []string{"attach", `--exec eth.accounts[0]`},
 		HasSpecialSend: true,
 		WalletFormFunc: func(node, name, port string) *core.WalletForm {
-			rpcProvider := filepath.Join(dextestDir, "polygon", "alpha", "bor", "bor.ipc")
-			if node == beta {
-				rpcProvider = filepath.Join(dextestDir, "eth", "beta", "bor", "bor.ipc")
-			}
 			return &core.WalletForm{
 				Type:    "rpc",
 				AssetID: polygonID,
 				Config: map[string]string{
-					"providers": rpcProvider,
+					"providers": "ws://127.0.0.1:34983",
 				},
 			}
 		},
@@ -374,19 +369,15 @@ var assetRegistry = map[string]*AssetDef{
 		Symbol:         usdcp,
 		Type:           AssetTypePolygon,
 		WalletType:     "rpc",
-		RPCConfigKey:   "", // uses IPC
+		RPCConfigKey:   "",
 		AddressArgs:    []string{"attach", `--exec eth.accounts[0]`},
 		HasSpecialSend: true,
 		WalletFormFunc: func(node, name, port string) *core.WalletForm {
-			rpcProvider := filepath.Join(dextestDir, "polygon", "alpha", "bor", "bor.ipc")
-			if node == beta {
-				rpcProvider = filepath.Join(dextestDir, "eth", "beta", "bor", "bor.ipc")
-			}
 			return &core.WalletForm{
 				Type:    "rpc",
 				AssetID: polygonID,
 				Config: map[string]string{
-					"providers": rpcProvider,
+					"providers": "ws://127.0.0.1:34983",
 				},
 			}
 		},

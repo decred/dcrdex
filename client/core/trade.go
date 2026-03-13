@@ -4015,7 +4015,9 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID, contract, txDa
 	//    match has a unique address (via per-match RedemptionAddress), each
 	//    contract has a unique script hash and CoinID. A counterparty
 	//    cannot present a single on-chain output as the contract for
-	//    multiple matches.
+	//    multiple matches. The server requires an address but does not
+	//    enforce uniqueness - reusing an address only weakens the
+	//    sender's own protection, not the counterparty's.
 	// 2. Contract value
 	// 3. Secret hash: maker compares, taker records
 	expectedAddr := match.MetaData.SwapAddr

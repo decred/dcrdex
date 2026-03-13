@@ -191,15 +191,28 @@ func (r *RedemptionFinder) checkRedemptionBlockDetails(outPt OutPoint, blockHash
 	}
 
 	var tx *wire.MsgTx
-out:
-	for _, iTx := range blk.Transactions {
-		if *r.hashTx(iTx) == outPt.TxHash {
-			tx = iTx
-			break out
+	for try := 0; ; try++ {
+		for _, iTx := range blk.Transactions {
+			if *r.hashTx(iTx) == outPt.TxHash {
+				tx = iTx
+				break
+			}
 		}
-	}
-	if tx == nil {
-		return 0, fmt.Errorf("transaction %s not found in block %s", outPt.TxHash, blockHash)
+		if tx != nil {
+			break
+		}
+		if try >= 10 {
+			return 0, fmt.Errorf("transaction %s not found in block %s after retries", outPt.TxHash, blockHash)
+		}
+		// Multi-node setups can have a delay between one node reporting
+		// a transaction in a block and that block's full data being
+		// available from getblock. Retry with a short delay.
+		r.log.Debugf("Transaction %s not yet found in block %s (attempt %d), retrying...", outPt.TxHash, blockHash, try+1)
+		time.Sleep(time.Second)
+		blk, err = r.getBlock(*blockHash)
+		if err != nil {
+			return 0, fmt.Errorf("error re-retrieving block %s: %w", blockHash, err)
+		}
 	}
 	if uint32(len(tx.TxOut)) < outPt.Vout+1 {
 		return 0, fmt.Errorf("no output %d in redemption transaction %s found in block %s", outPt.Vout, outPt.TxHash, blockHash)
