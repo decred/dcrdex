@@ -72,6 +72,19 @@ var (
 		SignedRedeemAdd: 12_636,
 	}
 
+	// tokenV1Gases are the gas estimates for v1 token swap contracts, measured
+	// from usdt.polygon mainnet. These values are used for all tokens on all
+	// networks since the v1 contract handles all ERC20 tokens identically.
+	tokenV1Gases = dexeth.Gases{
+		Swap:      141_523,
+		SwapAdd:   38_642,
+		Redeem:    74_353,
+		RedeemAdd: 17_436,
+		Refund:    86_868,
+		Approve:   67_597,
+		Transfer:  77_183,
+	}
+
 	VersionedGases = map[uint32]*dexeth.Gases{
 		0: v0Gases,
 		1: v1Gases,
@@ -158,16 +171,7 @@ var (
 						},
 					},
 					1: {
-						Gas: dexeth.Gases{
-							// Gas values are from usdt.polygon mainnet.
-							Swap:      141_523,
-							SwapAdd:   38_642,
-							Redeem:    74_353,
-							RedeemAdd: 17_436,
-							Refund:    86_868,
-							Approve:   67_597,
-							Transfer:  77_183,
-						},
+						Gas: tokenV1Gases,
 					},
 				},
 			},
@@ -201,16 +205,7 @@ var (
 						},
 					},
 					1: {
-						Gas: dexeth.Gases{
-							// Gas values are from usdt.polygon mainnet.
-							Swap:      141_523,
-							SwapAdd:   38_642,
-							Redeem:    74_353,
-							RedeemAdd: 17_436,
-							Refund:    86_868,
-							Approve:   67_597,
-							Transfer:  77_183,
-						},
+						Gas: tokenV1Gases,
 					},
 				},
 			},
@@ -230,15 +225,7 @@ var (
 						},
 					},
 					1: {
-						Gas: dexeth.Gases{
-							Swap:      114_515,
-							SwapAdd:   34_672,
-							Redeem:    58_272,
-							RedeemAdd: 14_207,
-							Refund:    61_911,
-							Approve:   58_180,
-							Transfer:  66_961,
-						},
+						Gas: tokenV1Gases,
 					},
 				},
 			},
@@ -290,27 +277,19 @@ var (
 						},
 					},
 					1: {
-						Gas: dexeth.Gases{
-							// Mainnet v1 token swap evidence:
-							//   approve:   0x952edd274572f22db7e7631da7cf57430a1ae1736b83350f5b7e11d600863879
-							//   transfer:  0xf9bc549ac8d20b0eda780edfc6fc8223a527553483431c20855c39ce354b152f
-							//   init:      0x07fae34e7a5a2cbdc3aa9de80a779db24e3b56d9a9708881fd11ae9132ddce50
-							//   redeem:    0x1da1fafb0ca5ce54ae1f3b02956b86076856d04099da88c763e1e90041b16b88
-							//   refund:    0x50c69a0256e45afb889521567ed8732b97d1888f96b9dc1a2ec7051fefd2f98a
-							// Mainnet measurements:
-							// Swaps (n=1..5):   [108864 138591 168308 198049 227767]
-							// Redeems (n=1..5): [57195 70601 84008 97453 110850]
-							// Refunds (n=1..6): [69160 69160 69160 69160 69160 55132]
-							// Approvals: [51998 51998]
-							// Transfers: [59372]
-							Swap:      141_523,
-							SwapAdd:   38_642,
-							Redeem:    74_353,
-							RedeemAdd: 17_436,
-							Refund:    86_868,
-							Approve:   67_597,
-							Transfer:  77_183,
-						},
+						// Mainnet v1 token swap evidence:
+						//   approve:   0x952edd274572f22db7e7631da7cf57430a1ae1736b83350f5b7e11d600863879
+						//   transfer:  0xf9bc549ac8d20b0eda780edfc6fc8223a527553483431c20855c39ce354b152f
+						//   init:      0x07fae34e7a5a2cbdc3aa9de80a779db24e3b56d9a9708881fd11ae9132ddce50
+						//   redeem:    0x1da1fafb0ca5ce54ae1f3b02956b86076856d04099da88c763e1e90041b16b88
+						//   refund:    0x50c69a0256e45afb889521567ed8732b97d1888f96b9dc1a2ec7051fefd2f98a
+						// Mainnet measurements:
+						// Swaps (n=1..5):   [108864 138591 168308 198049 227767]
+						// Redeems (n=1..5): [57195 70601 84008 97453 110850]
+						// Refunds (n=1..6): [69160 69160 69160 69160 69160 55132]
+						// Approvals: [51998 51998]
+						// Transfers: [59372]
+						Gas: tokenV1Gases,
 					},
 				},
 			},
@@ -330,16 +309,7 @@ var (
 						},
 					},
 					1: {
-						Gas: dexeth.Gases{
-							// Gas values are from usdt.polygon mainnet.
-							Swap:      141_523,
-							SwapAdd:   38_642,
-							Redeem:    74_353,
-							RedeemAdd: 17_436,
-							Refund:    86_868,
-							Approve:   67_597,
-							Transfer:  77_183,
-						},
+						Gas: tokenV1Gases,
 					},
 				},
 			},
@@ -402,16 +372,7 @@ var (
 						},
 					},
 					1: {
-						Gas: dexeth.Gases{
-							// Gas values are from usdt.polygon mainnet.
-							Swap:      141_523,
-							SwapAdd:   38_642,
-							Redeem:    74_353,
-							RedeemAdd: 17_436,
-							Refund:    86_868,
-							Approve:   67_597,
-							Transfer:  77_183,
-						},
+						Gas: tokenV1Gases,
 					},
 				},
 			},
@@ -419,16 +380,7 @@ var (
 				Address: common.HexToAddress("0x52ef3d68bab452a294342dc3e5f464d7f610f72e"),
 				SwapContracts: map[uint32]*dexeth.SwapContract{
 					1: {
-						Gas: dexeth.Gases{
-							// Gas values are from usdt.polygon mainnet.
-							Swap:      141_523,
-							SwapAdd:   38_642,
-							Redeem:    74_353,
-							RedeemAdd: 17_436,
-							Refund:    86_868,
-							Approve:   67_597,
-							Transfer:  77_183,
-						},
+						Gas: tokenV1Gases,
 					},
 				},
 			},
@@ -494,16 +446,7 @@ var (
 						},
 					},
 					1: {
-						Gas: dexeth.Gases{
-							// Gas values are from usdt.polygon mainnet.
-							Swap:      141_523,
-							SwapAdd:   38_642,
-							Redeem:    74_353,
-							RedeemAdd: 17_436,
-							Refund:    86_868,
-							Approve:   67_597,
-							Transfer:  77_183,
-						},
+						Gas: tokenV1Gases,
 					},
 				},
 			},

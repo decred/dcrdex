@@ -68,6 +68,19 @@ type SwapContract struct {
 	Gas     Gases
 }
 
+// tokenV1Gases are the gas estimates for v1 token swap contracts, measured
+// from usdt.eth mainnet. These values are used for all tokens on all
+// networks since the v1 contract handles all ERC20 tokens identically.
+var tokenV1Gases = Gases{
+	Swap:      135_447,
+	SwapAdd:   38_646,
+	Redeem:    79_427,
+	RedeemAdd: 17_440,
+	Refund:    87_834,
+	Approve:   63_550,
+	Transfer:  82_124,
+}
+
 var Tokens = map[uint32]*Token{
 	usdcTokenID: {
 		EVMFactor: new(int64),
@@ -109,16 +122,7 @@ var Tokens = map[uint32]*Token{
 						},
 					},
 					1: {
-						Gas: Gases{
-							// Gas values are from usdt.eth mainnet.
-							Swap:      135_447,
-							SwapAdd:   38_646,
-							Redeem:    79_427,
-							RedeemAdd: 17_440,
-							Refund:    87_834,
-							Approve:   63_550,
-							Transfer:  82_124,
-						},
+						Gas: tokenV1Gases,
 					},
 				},
 			},
@@ -173,16 +177,7 @@ var Tokens = map[uint32]*Token{
 						},
 					},
 					1: {
-						Gas: Gases{
-							// Gas values are from usdt.eth mainnet.
-							Swap:      135_447,
-							SwapAdd:   38_646,
-							Redeem:    79_427,
-							RedeemAdd: 17_440,
-							Refund:    87_834,
-							Approve:   63_550,
-							Transfer:  82_124,
-						},
+						Gas: tokenV1Gases,
 					},
 				},
 			},
@@ -201,27 +196,7 @@ var Tokens = map[uint32]*Token{
 							Transfer:  66_953,
 						}},
 					1: {
-						Gas: Gases{
-							// First swap used 88089 gas Recommended Gases.Swap = 114515
-							Swap: 114_515,
-							// 	4 additional swaps averaged 26671 gas each. Recommended Gases.SwapAdd = 34672
-							// 	[88089 114763 141438 168100 194775]
-							SwapAdd: 34_672,
-							// First redeem used 44825 gas. Recommended Gases.Redeem = 58272
-							Redeem: 58_272,
-							// 	4 additional redeems averaged 10929 gas each. recommended Gases.RedeemAdd = 14207
-							// 	[44825 55765 66682 77611 88541]
-							RedeemAdd: 14_207,
-							// Average of 5 refunds: 47624. Recommended Gases.Refund = 61911
-							// 	[47624 47624 47624 47624 47624]
-							Refund: 61_911,
-							// Average of 2 approvals: 44754. Recommended Gases.Approve = 58180
-							// 	[44754 44754]
-							Approve: 58_180,
-							// Average of 1 transfers: 51509. Recommended Gases.Transfer = 66961
-							// 	[51509]
-							Transfer: 66_961,
-						},
+						Gas: tokenV1Gases,
 					},
 				},
 			},
@@ -275,27 +250,19 @@ var Tokens = map[uint32]*Token{
 						},
 					},
 					1: {
-						Gas: Gases{
-							// Mainnet v1 token swap evidence:
-							//   approve:   0x4e0b729387bb694a490df2445d5105bd519a36df8acbbbe84da82f4f2b2a0467
-							//   transfer:  0xbee8582a7a1d78103fa71222dd6e6df43e82bfc21b8c4c7d9fac1dd1950d05d8
-							//   init:      0x800e3fb53beaaecd908760fe25177599bdd8bee1d39e87d67ca2e05622741e01
-							//   redeem:    0x8e7a826b35b656a6898d494e957f8d94364f79e722a8662f59db23c1bd2c87f2
-							//   refund:    0x7748c5fb6c6916b227a0922f1dfe953018a726c39647ff5b8e1f7ba1ac4c5b01
-							// Mainnet measurements:
-							// Swaps (n=1..5):   [104190 133917 163646 193375 223105]
-							// Redeems (n=1..5): [61098 74504 87935 101356 114765]
-							// Refunds (n=1..6): [69341 69254 69254 69254 69254 59035]
-							// Approvals: [48885 48885]
-							// Transfers: [63173]
-							Swap:      135_447,
-							SwapAdd:   38_646,
-							Redeem:    79_427,
-							RedeemAdd: 17_440,
-							Refund:    87_834,
-							Approve:   63_550,
-							Transfer:  82_124,
-						},
+						// Mainnet v1 token swap evidence:
+						//   approve:   0x4e0b729387bb694a490df2445d5105bd519a36df8acbbbe84da82f4f2b2a0467
+						//   transfer:  0xbee8582a7a1d78103fa71222dd6e6df43e82bfc21b8c4c7d9fac1dd1950d05d8
+						//   init:      0x800e3fb53beaaecd908760fe25177599bdd8bee1d39e87d67ca2e05622741e01
+						//   redeem:    0x8e7a826b35b656a6898d494e957f8d94364f79e722a8662f59db23c1bd2c87f2
+						//   refund:    0x7748c5fb6c6916b227a0922f1dfe953018a726c39647ff5b8e1f7ba1ac4c5b01
+						// Mainnet measurements:
+						// Swaps (n=1..5):   [104190 133917 163646 193375 223105]
+						// Redeems (n=1..5): [61098 74504 87935 101356 114765]
+						// Refunds (n=1..6): [69341 69254 69254 69254 69254 59035]
+						// Approvals: [48885 48885]
+						// Transfers: [63173]
+						Gas: tokenV1Gases,
 					},
 				},
 			},
@@ -329,16 +296,7 @@ var Tokens = map[uint32]*Token{
 						},
 					},
 					1: {
-						Gas: Gases{
-							// Gas values are from usdt.eth mainnet.
-							Swap:      135_447,
-							SwapAdd:   38_646,
-							Redeem:    79_427,
-							RedeemAdd: 17_440,
-							Refund:    87_834,
-							Approve:   63_550,
-							Transfer:  82_124,
-						},
+						Gas: tokenV1Gases,
 					},
 				},
 			},
@@ -356,10 +314,11 @@ var Tokens = map[uint32]*Token{
 							Approve:   32_303,
 							Transfer:  66_953,
 						}},
-					1: {},
+					1: {
+						Gas: tokenV1Gases,
+					},
 				},
 			},
-			// No USDC version 1 gases on simnet, for testing purposes.
 		},
 	},
 	maticTokenID: {
@@ -418,16 +377,7 @@ var Tokens = map[uint32]*Token{
 						},
 					},
 					1: {
-						Gas: Gases{
-							// Gas values are from usdt.eth mainnet.
-							Swap:      135_447,
-							SwapAdd:   38_646,
-							Redeem:    79_427,
-							RedeemAdd: 17_440,
-							Refund:    87_834,
-							Approve:   63_550,
-							Transfer:  82_124,
-						},
+						Gas: tokenV1Gases,
 					},
 				},
 			},
@@ -462,16 +412,7 @@ var Tokens = map[uint32]*Token{
 				Address: common.HexToAddress("0x455e53cbb86018ac2b8092fdcd39d8444affc3f6"),
 				SwapContracts: map[uint32]*SwapContract{
 					1: {
-						Gas: Gases{
-							// Gas values are from usdt.eth mainnet.
-							Swap:      135_447,
-							SwapAdd:   38_646,
-							Redeem:    79_427,
-							RedeemAdd: 17_440,
-							Refund:    87_834,
-							Approve:   63_550,
-							Transfer:  82_124,
-						},
+						Gas: tokenV1Gases,
 					},
 				},
 			},
@@ -479,16 +420,7 @@ var Tokens = map[uint32]*Token{
 				Address: common.HexToAddress("0x44499312f493f62f2dfd3c6435ca3603ebfceeba"),
 				SwapContracts: map[uint32]*SwapContract{
 					1: {
-						Gas: Gases{
-							// Gas values are from usdt.eth mainnet.
-							Swap:      135_447,
-							SwapAdd:   38_646,
-							Redeem:    79_427,
-							RedeemAdd: 17_440,
-							Refund:    87_834,
-							Approve:   63_550,
-							Transfer:  82_124,
-						},
+						Gas: tokenV1Gases,
 					},
 				},
 			},
