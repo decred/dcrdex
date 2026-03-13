@@ -1106,7 +1106,7 @@ export default class WalletsPage extends BasePage {
       const walletForLock = token ? app().walletMap[token.parentID] : w
       if (walletForLock) {
         const { encrypted, open: unlocked, running, disabled, peerCount, syncProgress, syncStatus } = walletForLock
-        if (disabled) {
+        if (disabled || (w && w.disabled)) {
           Doc.show(tmpl.statusDisabled)
         } else {
           // Status icons
@@ -1221,7 +1221,11 @@ export default class WalletsPage extends BasePage {
 
     if (walletForActions) {
       const { encrypted, open: unlocked, running, disabled, traits } = walletForActions
-      if (disabled) {
+      const tokenDisabled = w && w.disabled
+      if (disabled || tokenDisabled) {
+        // Target the token wallet if it's the one that's disabled,
+        // otherwise the parent.
+        if (tokenDisabled && !disabled) this.selectedWalletID = assetID
         Doc.show(page.actEnable)
       } else {
         if (hasWallet) Doc.show(page.actTxHistory)
