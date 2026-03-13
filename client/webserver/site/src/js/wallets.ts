@@ -2251,37 +2251,8 @@ export default class WalletsPage extends BasePage {
    * ticker's network assets (e.g., ETH on mainnet and Base).
    */
   async openWallet (assetID: number) {
-    const { selectedTicker: ta } = this
-    // Collect all asset IDs that need to be unlocked
-    const assetsToUnlock: number[] = []
-    for (const na of ta.networkAssets) {
-      const asset = app().assets[na.assetID]
-      const wallet = asset?.wallet
-      // Only include wallets that exist, are encrypted, and not already open
-      if (wallet && wallet.encrypted && !wallet.open) {
-        assetsToUnlock.push(na.assetID)
-      }
-    }
-
-    // If no wallets need unlocking, just use the provided assetID
-    if (assetsToUnlock.length === 0) {
-      assetsToUnlock.push(assetID)
-    }
-
-    // Unlock all wallets
-    const errors: string[] = []
-    for (const id of assetsToUnlock) {
-      const res = await postJSON('/api/openwallet', { assetID: id })
-      if (!app().checkResponse(res)) {
-        const asset = app().assets[id]
-        errors.push(`${asset?.name || id}: ${res.msg || 'unknown error'}`)
-      }
-    }
-
-    if (errors.length > 0) {
-      console.error('openwallet errors:', errors)
-    }
-
+    const res = await postJSON('/api/openwallet', { assetID: assetID })
+    if (!app().checkResponse(res)) return
     this.assetUpdated(assetID, undefined, intl.prep(intl.ID_WALLET_UNLOCKED))
   }
 
