@@ -8,8 +8,12 @@ import (
 	"encoding/hex"
 	"fmt"
 	"html/template"
+	"io"
 	"io/fs"
+	"net/http"
 	"os"
+	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -300,4 +304,51 @@ var templateFuncs = template.FuncMap{
 
 		return strings.Join(parts, " ")
 	},
+}
+
+func (s *WebServer) newUIIndexTMPL(siteDir string) (*template.Template, error) {
+	var indexTmpl string
+	if siteDir != "" {
+		b, err := os.ReadFile(filepath.Join(siteDir, "dist", "index.html"))
+		if err != nil {
+			return nil, fmt.Errorf("error reading new UI index.html: %v", err)
+		}
+		indexTmpl = string(b)
+	} else {
+		fs := http.FS(staticSiteRes) // so f is an http.File instead of fs.File
+		f, err := fs.Open(path.Join(site, "dist", "index.html"))
+		if err != nil {
+			return nil, fmt.Errorf("error reading new UI index.html from embedded resources: %v", err)
+		}
+		b, err := io.ReadAll(f)
+		if err != nil {
+			return nil, fmt.Errorf("error reading new UI index.html from embedded resources: %v", err)
+		}
+		indexTmpl = string(b)
+	}
+	t, err := template.New("index").Funcs(template.FuncMap{
+		"commitHash": func() string {
+			if commitHash != "" {
+				return commitHash[:8]
+			}
+			return hex.EncodeToString(encode.RandomBytes(4))
+		},
+	}).Parse(indexTmpl)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing new UI index.html: %v", err)
+	}
+	return t, nil
+}
+
+func (s *WebServer) newUIIndexHTML(tmpl *template.Template, lang string) ([]byte, error) {
+	var b bytes.Buffer
+	err := tmpl.ExecuteTemplate(&b, "index", &struct {
+		Lang string
+	}{
+		Lang: lang,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error executing new UI index.html: %v", err)
+	}
+	return b.Bytes(), nil
 }

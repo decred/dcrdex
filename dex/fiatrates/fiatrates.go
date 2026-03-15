@@ -26,6 +26,7 @@ type CoinpaprikaAsset struct {
 	AssetID uint32
 	Name    string
 	Symbol  string
+	Ticker  string
 }
 
 func parseCoinpapNameSymbol(name, symbol string) (string, string) {

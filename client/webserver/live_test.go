@@ -1891,8 +1891,8 @@ func (c *TCore) UpdateDEXHost(string, string, []byte, any) (*core.Exchange, erro
 func (c *TCore) WalletRestorationInfo(pw []byte, assetID uint32) ([]*asset.WalletRestoration, error) {
 	return nil, nil
 }
-func (c *TCore) ToggleRateSourceStatus(src string, disable bool) error {
-	c.fiatSources[src] = !disable
+func (c *TCore) ToggleRateSourceStatus(src string, enable bool) error {
+	c.fiatSources[src] = enable
 	return nil
 }
 func (c *TCore) FiatRateSources() map[string]bool {
@@ -2059,6 +2059,10 @@ func (*TCore) CastVote(assetID uint32, pw []byte, token, bit string) error {
 
 func (*TCore) PoliteiaDetails() (string, bool, int64) {
 	return "", false, 0
+}
+
+func (*TCore) ValidateSeed(string) (bool, error) {
+	return true, nil
 }
 
 func newMarketDay() *libxc.MarketDay {

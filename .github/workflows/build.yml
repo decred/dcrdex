@@ -58,6 +58,16 @@ jobs:
     - name: npm run build
       working-directory: ./client/webserver/site
       run: npm run build
+    
+    - name: npm clean-install
+      working-directory: ./client/webserver/newui
+      run: npm ci
+    - name: npm run lint
+      working-directory: ./client/webserver/newui
+      run: npm run lint
+    - name: npm run build
+      working-directory: ./client/webserver/newui
+      run: npm run build
 
   lint-docs:
     name: Lint Markdown

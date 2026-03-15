@@ -965,6 +965,25 @@ func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *WebServer) apiValidateSeed(w http.ResponseWriter, r *http.Request) {
+	var seed string
+	if !readPost(w, r, &seed) {
+		return
+	}
+
+	ok, err := s.core.ValidateSeed(seed)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error validating seed: %w", err))
+		return
+	}
+
+	writeJSON(w, struct {
+		OK bool `json:"ok"`
+	}{
+		OK: ok,
+	})
+}
+
 // apiIsInitialized is the handler for the '/isinitialized' request.
 func (s *WebServer) apiIsInitialized(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, &struct {
@@ -987,7 +1006,8 @@ func (s *WebServer) apiLocale(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := make(map[string]string)
-	for translationID, defaultTranslation := range enUS {
+	defaultLocale := localesMap["en-US"]
+	for translationID, defaultTranslation := range defaultLocale {
 		t, found := m[translationID]
 		if !found {
 			t = defaultTranslation
@@ -1011,9 +1031,11 @@ func (s *WebServer) apiSetLocale(w http.ResponseWriter, r *http.Request) {
 	// Get actual language after SetLanguage (in case of fallback)
 	actualLang := s.core.Language()
 	s.lang.Store(actualLang)
-	if err := s.buildTemplates(actualLang); err != nil {
-		s.writeAPIError(w, err)
-		return
+	if !newUI {
+		if err := s.buildTemplates(actualLang); err != nil {
+			s.writeAPIError(w, err)
+			return
+		}
 	}
 
 	writeJSON(w, simpleAck())
@@ -1623,23 +1645,25 @@ func (s *WebServer) apiUser(w http.ResponseWriter, r *http.Request) {
 	s.authMtx.RUnlock()
 
 	response := struct {
-		User               *core.User `json:"user"`
-		Lang               string     `json:"lang"`
-		Langs              []string   `json:"langs"`
-		Inited             bool       `json:"inited"`
-		OK                 bool       `json:"ok"`
-		OnionUrl           string     `json:"onionUrl"`
-		MMStatus           *mm.Status `json:"mmStatus"`
-		CompanionAppPaired bool       `json:"companionAppPaired"`
+		User                *core.User `json:"user"`
+		Lang                string     `json:"lang"`
+		Langs               []string   `json:"langs"`
+		Inited              bool       `json:"inited"`
+		OK                  bool       `json:"ok"`
+		OnionUrl            string     `json:"onionUrl"`
+		MMStatus            *mm.Status `json:"mmStatus"`
+		CompanionAppPaired  bool       `json:"companionAppPaired"`
+		NewVersionAvailable bool       `json:"newVersionAvailable"`
 	}{
-		User:               u,
-		Lang:               s.lang.Load().(string),
-		Langs:              s.langs,
-		Inited:             s.core.IsInitialized(),
-		OK:                 true,
-		OnionUrl:           s.onion,
-		MMStatus:           mmStatus,
-		CompanionAppPaired: paired,
+		User:                u,
+		Lang:                s.lang.Load().(string),
+		Langs:               s.langs,
+		Inited:              s.core.IsInitialized(),
+		OK:                  true,
+		OnionUrl:            s.onion,
+		MMStatus:            mmStatus,
+		CompanionAppPaired:  paired,
+		NewVersionAvailable: s.newAppVersionAvailable,
 	}
 	writeJSON(w, response)
 }
@@ -1647,13 +1671,13 @@ func (s *WebServer) apiUser(w http.ResponseWriter, r *http.Request) {
 // apiToggleRateSource handles the /toggleratesource API request.
 func (s *WebServer) apiToggleRateSource(w http.ResponseWriter, r *http.Request) {
 	form := &struct {
-		Disable bool   `json:"disable"`
-		Source  string `json:"source"`
+		Enable bool   `json:"enable"`
+		Source string `json:"source"`
 	}{}
 	if !readPost(w, r, form) {
 		return
 	}
-	err := s.core.ToggleRateSourceStatus(form.Source, form.Disable)
+	err := s.core.ToggleRateSourceStatus(form.Source, form.Enable)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error disabling/enabling rate source: %w", err))
 		return
@@ -2306,6 +2330,7 @@ func (s *WebServer) writeAPIError(w http.ResponseWriter, err error) {
 	innerErr := core.UnwrapErr(err)
 	resp := &standardResponse{
 		OK:   false,
+		Bad:  true,
 		Msg:  innerErr.Error(),
 		Code: code,
 	}

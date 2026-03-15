@@ -1,0 +1,128 @@
+@font-face {
+  font-family: "icons";
+  src: url("/font/icons.woff2") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+  font-display: block;
+}
+
+[class^="ico-"],
+[class*=" ico-"] {
+  /* Use !important to prevent extensions from overriding this font. */
+  font-family: "icons" !important;
+  font-style: normal;
+  font-weight: normal;
+  font-variant: normal;
+  text-transform: none;
+  line-height: 1;
+
+  /* Better Font Rendering =========== */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.micro-icon {
+  height: 15px;
+  width: 15px;
+}
+
+.mini-icon {
+  height: 20px;
+  width: 20px;
+}
+
+.small-icon {
+  height: 25px;
+  width: 25px;
+}
+
+.medium-icon {
+  height: 30px;
+  width: 30px;
+}
+
+.large-icon {
+  height: 40px;
+  width: 40px;
+}
+
+.enourmous-icon {
+  height: 50px;
+  width: 50px;
+}
+
+.ico-add:before {
+  content: "\f460";
+}
+
+.ico-star-filled:before {
+  content: "\f8db";
+}
+
+.ico-star:before {
+  content: "\f353";
+}
+
+.ico-swap:before {
+  content: "\f146";
+}
+
+.ico-portfolio:before {
+  content: "\f2dc";
+}
+
+.ico-key:before {
+  content: "\f12b";
+}
+
+.ico-arrowup:before {
+  content: "\f157";
+}
+
+.ico-knobs:before {
+  content: "\f170";
+}
+
+.ico-arrowleft:before {
+  content: "\f264";
+}
+
+.ico-arrowright:before {
+  content: "\f2ae";
+}
+
+.ico-eyeclosed:before {
+  content: "\f2d2";
+}
+
+.ico-arrowdown:before {
+  content: "\f603";
+}
+
+.ico-gear:before {
+  content: "\f67c";
+}
+
+.ico-qrcode:before {
+  content: "\f70b";
+}
+
+.ico-barchart:before {
+  content: "\f725";
+}
+
+.ico-eyeopen:before {
+  content: "\f7d9";
+}
+
+.ico-lock-closed:before {
+  content: "\f120";
+}
+
+.ico-send:before {
+  content: "\f2f8";
+}
+
+.ico-bell:before {
+  content: "\f417";
+}

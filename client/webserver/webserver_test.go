@@ -120,7 +120,7 @@ func (c *TCore) UpdateBondOptions(form *core.BondOptionsForm) error {
 func (c *TCore) BondsFeeBuffer(assetID uint32) (uint64, error) {
 	return 222, nil
 }
-func (c *TCore) ToggleRateSourceStatus(src string, disable bool) error {
+func (c *TCore) ToggleRateSourceStatus(src string, enable bool) error {
 	return c.rateSourceErr
 }
 func (c *TCore) FiatRateSources() map[string]bool {
@@ -374,6 +374,10 @@ func (*TCore) PoliteiaDetails() (string, bool, int64) {
 	return "", false, 0
 }
 
+func (*TCore) ValidateSeed(string) (bool, error) {
+	return true, nil
+}
+
 type TWriter struct {
 	b []byte
 }
@@ -568,7 +572,7 @@ func TestAPILogin(t *testing.T) {
 
 	// Login error
 	tCore.loginErr = tErr
-	ensure(fmt.Sprintf(`{"ok":false,"msg":"%s"}`, tErr))
+	ensure(fmt.Sprintf(`{"ok":false,"bad":true,"msg":"%s"}`, tErr))
 	tCore.loginErr = nil
 }
 
@@ -649,7 +653,7 @@ func TestAPIInit(t *testing.T) {
 
 	// Initialization error
 	tCore.initErr = tErr
-	ensure(s.apiInit, fmt.Sprintf(`{"ok":false,"msg":"%s"}`, tErr))
+	ensure(s.apiInit, fmt.Sprintf(`{"ok":false,"bad":true,"msg":"%s"}`, tErr))
 	tCore.initErr = nil
 }
 
@@ -674,11 +678,11 @@ func TestAPINewWallet(t *testing.T) {
 	ensure(`{"ok":true}`)
 
 	tCore.notHas = false
-	ensure(`{"ok":false,"msg":"already have a wallet for btc"}`)
+	ensure(`{"ok":false,"bad":true,"msg":"already have a wallet for btc"}`)
 	tCore.notHas = true
 
 	tCore.createWalletErr = tErr
-	ensure(fmt.Sprintf(`{"ok":false,"msg":"%s"}`, tErr))
+	ensure(fmt.Sprintf(`{"ok":false,"bad":true,"msg":"%s"}`, tErr))
 	tCore.createWalletErr = nil
 
 	tCore.notHas = false
@@ -697,7 +701,7 @@ func TestAPILogout(t *testing.T) {
 
 	// Logout error
 	tCore.logoutErr = tErr
-	ensure(fmt.Sprintf(`{"ok":false,"msg":"%s"}`, tErr))
+	ensure(fmt.Sprintf(`{"ok":false,"bad":true,"msg":"%s"}`, tErr))
 	tCore.logoutErr = nil
 }
 
@@ -714,7 +718,7 @@ func TestApiGetBalance(t *testing.T) {
 
 	// Logout error
 	tCore.balanceErr = tErr
-	ensure(fmt.Sprintf(`{"ok":false,"msg":"%s"}`, tErr))
+	ensure(fmt.Sprintf(`{"ok":false,"bad":true,"msg":"%s"}`, tErr))
 	tCore.balanceErr = nil
 }
 
@@ -826,7 +830,7 @@ func TestPasswordCache(t *testing.T) {
 	body := &newWalletForm{
 		Pass: encode.PassBytes(""),
 	}
-	want := `{"ok":false,"msg":"app pass cannot be empty"}`
+	want := `{"ok":false,"bad":true,"msg":"app pass cannot be empty"}`
 	tCore.notHas = true
 	ensureResponse(t, s.apiNewWallet, want, reader, writer, body, nil)
 
@@ -863,7 +867,7 @@ func TestAPI_ToggleRatesource(t *testing.T) {
 		name:    "Invalid rate source",
 		source:  "binance",
 		wantErr: errors.New("cannot enable unknown fiat rate source"),
-		want:    `{"ok":false,"msg":"cannot enable unknown fiat rate source"}`,
+		want:    `{"ok":false,"bad":true,"msg":"cannot enable unknown fiat rate source"}`,
 	}, {
 		name:   "ok valid source",
 		source: "dcrdata",
@@ -891,7 +895,7 @@ func TestAPI_ToggleRatesource(t *testing.T) {
 		name:    "Invalid rate source",
 		source:  "Messari",
 		wantErr: errors.New("cannot disable unknown fiat rate source"),
-		want:    `{"ok":false,"msg":"cannot disable unknown fiat rate source"}`,
+		want:    `{"ok":false,"bad":true,"msg":"cannot disable unknown fiat rate source"}`,
 	}, {
 		name:   "ok valid source",
 		source: "Coinpaprika",
@@ -956,7 +960,7 @@ func TestAPIEstimateSendTxFee(t *testing.T) {
 	tCore.estFee = 10000
 	ensureResponse(t, s.apiEstimateSendTxFee, want, reader, writer, body, nil)
 
-	want = fmt.Sprintf(`{"ok":false,"msg":"%s"}`, tErr)
+	want = fmt.Sprintf(`{"ok":false,"bad":true,"msg":"%s"}`, tErr)
 	tCore.estFeeErr = tErr
 	ensureResponse(t, s.apiEstimateSendTxFee, want, reader, writer, body, nil)
 }
@@ -983,7 +987,7 @@ func TestAPIToggleWalletStatus(t *testing.T) {
 	}
 
 	tCore.walletStatusErr = errors.New("wallet not found")
-	ensure(`{"ok":false,"msg":"wallet not found"}`)
+	ensure(`{"ok":false,"bad":true,"msg":"wallet not found"}`)
 
 	tCore.walletDisabled = false
 	body.Disable = false
@@ -1013,7 +1017,7 @@ func TestAPIDeleteArchivedRecords(t *testing.T) {
 	ensure(`{"ok":true,"archivedRecordsDeleted":23,"archivedRecordsPath":"/path/to/records"}`)
 
 	tCore.deleteRecordsErr = tErr
-	ensure(`{"ok":false,"msg":"expected dummy error"}`)
+	ensure(`{"ok":false,"bad":true,"msg":"expected dummy error"}`)
 }
 
 func TestAPITrade(t *testing.T) {
@@ -1044,7 +1048,7 @@ func testTrade(t *testing.T, async bool) {
 	}
 
 	tCore.tradeErr = tErr
-	ensure(`{"ok":false,"msg":"expected dummy error"}`)
+	ensure(`{"ok":false,"bad":true,"msg":"expected dummy error"}`)
 }
 
 func Test_prepareAddr(t *testing.T) {

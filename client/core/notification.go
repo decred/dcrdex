@@ -522,15 +522,17 @@ func newConnEventNote(topic Topic, subject, host string, status comms.Connection
 // FiatRatesNote is an update of fiat rate data for assets.
 type FiatRatesNote struct {
 	db.Notification
-	FiatRates map[uint32]float64 `json:"fiatRates"`
+	FiatRates   map[uint32]float64 `json:"fiatRates"`
+	TickerRates map[string]float64 `json:"tickerRates"`
 }
 
 const TopicFiatRatesUpdate Topic = "fiatrateupdate"
 
-func newFiatRatesUpdate(rates map[uint32]float64) *FiatRatesNote {
+func newFiatRatesUpdate(idRates map[uint32]float64, tickerRates map[string]float64) *FiatRatesNote {
 	return &FiatRatesNote{
 		Notification: db.NewNotification(NoteTypeFiatRates, TopicFiatRatesUpdate, "", "", db.Data),
-		FiatRates:    rates,
+		FiatRates:    idRates,
+		TickerRates:  tickerRates,
 	}
 }
 

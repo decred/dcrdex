@@ -7,9 +7,14 @@ import (
 	"golang.org/x/text/language"
 )
 
-var (
-	Locales map[string]map[string]*intl.Translation
-)
+var Locales = map[string]map[string]*intl.Translation{
+	"en-US": EnUS,
+	"pt-BR": PtBr,
+	"zh-CN": ZhCN,
+	"pl-PL": PlPL,
+	"de-DE": DeDE,
+	"ar":    Ar,
+}
 
 // RegisterTranslations registers translations with the init package for
 // translator worksheet preparation.
@@ -24,15 +29,6 @@ func RegisterTranslations() {
 }
 
 func init() {
-	Locales = map[string]map[string]*intl.Translation{
-		"en-US": EnUS,
-		"pt-BR": PtBr,
-		"zh-CN": ZhCN,
-		"pl-PL": PlPL,
-		"de-DE": DeDE,
-		"ar":    Ar,
-	}
-
 	for localeName := range Locales {
 		_, err := language.Parse(localeName)
 		if err != nil {

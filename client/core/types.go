@@ -225,6 +225,7 @@ type User struct {
 	SeedGenerationTime uint64                      `json:"seedgentime"`
 	Assets             map[uint32]*SupportedAsset  `json:"assets"`
 	FiatRates          map[uint32]float64          `json:"fiatRates"`
+	TickerRates        map[string]float64          `json:"tickerRates"`
 	Net                dex.Network                 `json:"net"`
 	ExtensionConfig    *ExtensionModeConfig        `json:"extensionModeConfig,omitempty"`
 	Actions            []*asset.ActionRequiredNote `json:"actions,omitempty"`

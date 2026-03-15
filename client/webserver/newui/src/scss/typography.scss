@@ -1,0 +1,97 @@
+@font-face {
+  font-family: 'inter';
+  src:
+    url('/font/Inter-variable.woff2') format('woff2-variations'),
+    url('/font/Inter-variable.woff2') format('woff2');
+  font-weight: 400 600;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: "mono";
+  src:
+    url("/font/inconsolata-v15-latin-regular.woff2") format("woff2-variations"),
+    url("/font/inconsolata-v15-latin-regular.woff2") format('woff2');
+  font-weight: normal;
+  font-style: normal;
+}
+
+.demi {
+  font-weight: var(--demi-bold);
+}
+
+.mono {
+  font-family: var(--mono);
+}
+
+.fs8 {
+  font-size: 8px;
+}
+
+.fs10 {
+  font-size: 10px;
+}
+
+.fs11 {
+  font-size: 11px;
+}
+
+.fs12 {
+  font-size: 12px;
+}
+
+.fs13 {
+  font-size: 13px;
+}
+
+.fs14 {
+  font-size: 14px;
+}
+
+.fs15 {
+  font-size: 15px;
+}
+
+.fs16 {
+  font-size: 16px;
+}
+
+.fs17 {
+  font-size: 17px;
+}
+
+.fs18 {
+  font-size: 18px;
+}
+
+.fs20 {
+  font-size: 20px;
+}
+
+.fs22 {
+  font-size: 22px;
+}
+
+.fs24 {
+  font-size: 24px;
+}
+
+.fs26 {
+  font-size: 24px;
+}
+
+.fs28 {
+  font-size: 28px;
+}
+
+.fs32 {
+  font-size: 32px;
+}
+
+.fs35 {
+  font-size: 35px;
+}
+
+.fs50 {
+  font-size: 50px;
+}
