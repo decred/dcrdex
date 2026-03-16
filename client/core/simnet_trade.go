@@ -396,7 +396,7 @@ func (s *simulationTest) startClients() error {
 					return fmt.Errorf("fund error: %w", err)
 				}
 			mined:
-				for {
+				for fundTimeout := time.After(20 * time.Second); ; {
 					hctrl.mineBlocks(s.ctx, 2)
 					bal, err := c.core.AssetBalance(form.AssetID)
 					if err != nil {
@@ -407,6 +407,8 @@ func (s *simulationTest) startClients() error {
 					}
 					s.log.Infof("Waiting for %s funding tx to be mined", unbip(form.AssetID))
 					select {
+					case <-fundTimeout:
+						return fmt.Errorf("timed out waiting for %s funding tx to be mined", unbip(form.AssetID))
 					case <-time.After(time.Second * 2):
 					case <-s.ctx.Done():
 						return s.ctx.Err()

@@ -80,13 +80,13 @@ var (
 				ConfigOpts:        configOpts,
 				MultiFundingOpts:  btc.MultiFundingOpts,
 			},
-			{
-				Type:             walletTypeElectrum,
-				Tab:              "Electrum-Firo (external)",
-				Description:      "Use an external Electrum-Firo Wallet",
-				ConfigOpts:       append(btc.ElectrumConfigOpts, btc.CommonConfigOpts("FIRO", true)...),
-				MultiFundingOpts: btc.MultiFundingOpts,
-			},
+			// {
+			// 	Type:             walletTypeElectrum,
+			// 	Tab:              "Electrum-Firo (external)",
+			// 	Description:      "Use an external Electrum-Firo Wallet",
+			// 	ConfigOpts:       append(btc.ElectrumConfigOpts, btc.CommonConfigOpts("FIRO", true)...),
+			// 	MultiFundingOpts: btc.MultiFundingOpts,
+			// }, // TODO: Broken. Investigate and re-enable.
 		},
 		BlockchainClass: asset.BlockchainClassUTXO,
 	}
