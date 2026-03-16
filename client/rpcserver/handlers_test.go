@@ -290,7 +290,7 @@ func TestFieldDescsComplete(t *testing.T) {
 
 func TestPasswordFieldDetection(t *testing.T) {
 	// TradeParams should have appPass as a password field.
-	fields := reflectFields(reflect.TypeOf(TradeParams{}), nil)
+	fields := reflectFields(reflect.TypeFor[TradeParams](), nil)
 	foundAppPass := false
 	for _, f := range fields {
 		if f.jsonName == "appPass" {
@@ -305,7 +305,7 @@ func TestPasswordFieldDetection(t *testing.T) {
 	}
 
 	// CancelParams should have no password fields.
-	fields = reflectFields(reflect.TypeOf(CancelParams{}), nil)
+	fields = reflectFields(reflect.TypeFor[CancelParams](), nil)
 	for _, f := range fields {
 		if f.isPassword {
 			t.Fatalf("CancelParams should have no password fields, found %s", f.jsonName)
@@ -316,7 +316,7 @@ func TestPasswordFieldDetection(t *testing.T) {
 func TestEmbeddedStructFlattening(t *testing.T) {
 	// TradeParams embeds core.TradeForm. Verify that fields from TradeForm
 	// appear in the reflected output.
-	fields := reflectFields(reflect.TypeOf(TradeParams{}), nil)
+	fields := reflectFields(reflect.TypeFor[TradeParams](), nil)
 	names := make(map[string]bool, len(fields))
 	for _, f := range fields {
 		names[f.jsonName] = true
@@ -1904,8 +1904,8 @@ func TestParamType(t *testing.T) {
 	if pt == nil {
 		t.Fatal("ParamType returned nil for 'trade'")
 	}
-	if pt != reflect.TypeOf(TradeParams{}) {
-		t.Fatalf("ParamType('trade') = %v, want %v", pt, reflect.TypeOf(TradeParams{}))
+	if pt != reflect.TypeFor[TradeParams]() {
+		t.Fatalf("ParamType('trade') = %v, want %v", pt, reflect.TypeFor[TradeParams]())
 	}
 
 	// version has no params.

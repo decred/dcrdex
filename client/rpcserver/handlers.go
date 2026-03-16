@@ -1615,7 +1615,7 @@ func handleRemoveWalletPeer(s *RPCServer, msg *msgjson.Message) *msgjson.Respons
 }
 
 // passBytesType is used by reflection to detect password fields.
-var passBytesType = reflect.TypeOf(encode.PassBytes{})
+var passBytesType = reflect.TypeFor[encode.PassBytes]()
 
 // routeInfo describes a route's parameters and help text, replacing the old
 // helpMsg struct. Parameter documentation is auto-generated from the struct
@@ -1706,7 +1706,7 @@ const (
 // routeInfos maps each route to its parameter type and help metadata.
 var routeInfos = map[string]routeInfo{
 	helpRoute: {
-		paramsType: reflect.TypeOf(HelpParams{}),
+		paramsType: reflect.TypeFor[HelpParams](),
 		summary:    `Print a help message.`,
 		fieldDescs: map[string]string{
 			"helpWith":         "The command to print help for.",
@@ -1721,7 +1721,7 @@ var routeInfos = map[string]routeInfo{
     string: The Bison Wallet rpcserver version.`,
 	},
 	discoverAcctRoute: {
-		paramsType: reflect.TypeOf(DiscoverAcctParams{}),
+		paramsType: reflect.TypeFor[DiscoverAcctParams](),
 		summary: `Discover an account that is used for a DEX. Useful when restoring
     an account. Will error if the account has already been discovered/restored.`,
 		fieldDescs: map[string]string{
@@ -1733,7 +1733,7 @@ var routeInfos = map[string]routeInfo{
     bool: True if the account has been registered and paid for.`,
 	},
 	initRoute: {
-		paramsType: reflect.TypeOf(InitParams{}),
+		paramsType: reflect.TypeFor[InitParams](),
 		summary:    `Initialize the client.`,
 		fieldDescs: map[string]string{
 			"appPass": descAppPass,
@@ -1743,7 +1743,7 @@ var routeInfos = map[string]routeInfo{
     string: The message "` + initializedStr + `"`,
 	},
 	deleteArchivedRecordsRoute: {
-		paramsType: reflect.TypeOf(DeleteRecordsParams{}),
+		paramsType: reflect.TypeFor[DeleteRecordsParams](),
 		summary: `Delete archived records from the database and returns total deleted. Optionally
     set a time to delete records before and file paths to save deleted records as comma separated
     values. Note that file locations are from the perspective of dexc and not the caller.`,
@@ -1756,7 +1756,7 @@ var routeInfos = map[string]routeInfo{
     Nothing.`,
 	},
 	bondAssetsRoute: {
-		paramsType: reflect.TypeOf(BondAssetsParams{}),
+		paramsType: reflect.TypeFor[BondAssetsParams](),
 		summary:    `Get dex bond asset config.`,
 		fieldDescs: map[string]string{
 			"host": "The dex address to get bond info for.",
@@ -1774,7 +1774,7 @@ var routeInfos = map[string]routeInfo{
     }`,
 	},
 	getDEXConfRoute: {
-		paramsType: reflect.TypeOf(GetDEXConfigParams{}),
+		paramsType: reflect.TypeFor[GetDEXConfigParams](),
 		summary:    `Get a DEX configuration.`,
 		fieldDescs: map[string]string{
 			"host": "The dex address to get config for.",
@@ -1784,7 +1784,7 @@ var routeInfos = map[string]routeInfo{
     obj: The getdexconfig result. See the 'exchanges' result.`,
 	},
 	newWalletRoute: {
-		paramsType: reflect.TypeOf(NewWalletParams{}),
+		paramsType: reflect.TypeFor[NewWalletParams](),
 		summary:    `Connect to a new wallet.`,
 		fieldDescs: map[string]string{
 			"appPass":    descAppPass,
@@ -1798,7 +1798,7 @@ var routeInfos = map[string]routeInfo{
 		extraHelp: walletTypesHelp,
 	},
 	reconfigureWalletRoute: {
-		paramsType: reflect.TypeOf(ReconfigureWalletParams{}),
+		paramsType: reflect.TypeFor[ReconfigureWalletParams](),
 		summary:    `Reconfigure an existing wallet.`,
 		fieldDescs: map[string]string{
 			"appPass":     descAppPass,
@@ -1812,7 +1812,7 @@ var routeInfos = map[string]routeInfo{
 		extraHelp: walletTypesHelp,
 	},
 	openWalletRoute: {
-		paramsType: reflect.TypeOf(OpenWalletParams{}),
+		paramsType: reflect.TypeFor[OpenWalletParams](),
 		summary:    `Open an existing wallet.`,
 		fieldDescs: map[string]string{
 			"appPass": descAppPass,
@@ -1822,7 +1822,7 @@ var routeInfos = map[string]routeInfo{
     string: The message "` + fmt.Sprintf(walletUnlockedStr, "[coin symbol]") + `"`,
 	},
 	closeWalletRoute: {
-		paramsType: reflect.TypeOf(CloseWalletParams{}),
+		paramsType: reflect.TypeFor[CloseWalletParams](),
 		summary:    `Close an open wallet.`,
 		fieldDescs: map[string]string{
 			"assetID": descAssetID,
@@ -1831,7 +1831,7 @@ var routeInfos = map[string]routeInfo{
     string: The message "` + fmt.Sprintf(walletLockedStr, "[coin symbol]") + `"`,
 	},
 	deployContractRoute: {
-		paramsType: reflect.TypeOf(DeployContractParams{}),
+		paramsType: reflect.TypeFor[DeployContractParams](),
 		summary:    "Deploy a smart contract to one or more EVM chains.",
 		fieldDescs: map[string]string{
 			"appPass":      descAppPass,
@@ -1864,7 +1864,7 @@ var routeInfos = map[string]routeInfo{
 		},
 	},
 	testContractGasRoute: {
-		paramsType: reflect.TypeOf(TestContractGasParams{}),
+		paramsType: reflect.TypeFor[TestContractGasParams](),
 		summary:    "Test swap contract gas usage on one or more EVM chains.",
 		fieldDescs: map[string]string{
 			"appPass":  descAppPass,
@@ -1887,7 +1887,7 @@ var routeInfos = map[string]routeInfo{
 		},
 	},
 	toggleWalletStatusRoute: {
-		paramsType: reflect.TypeOf(ToggleWalletStatusParams{}),
+		paramsType: reflect.TypeFor[ToggleWalletStatusParams](),
 		summary: `Disable or enable an existing wallet. When disabling a chain's primary asset wallet,
     all token wallets for that chain will be disabled too.`,
 		fieldDescs: map[string]string{
@@ -1898,7 +1898,7 @@ var routeInfos = map[string]routeInfo{
     string: The message "` + fmt.Sprintf(walletStatusStr, "[coin symbol]", "[wallet status]") + `".`,
 	},
 	walletBalanceRoute: {
-		paramsType: reflect.TypeOf(WalletBalanceParams{}),
+		paramsType: reflect.TypeFor[WalletBalanceParams](),
 		summary:    `Get the balance for a single wallet.`,
 		fieldDescs: map[string]string{
 			"assetID": descAssetID,
@@ -1919,7 +1919,7 @@ var routeInfos = map[string]routeInfo{
     }`,
 	},
 	walletStateRoute: {
-		paramsType: reflect.TypeOf(WalletStateParams{}),
+		paramsType: reflect.TypeFor[WalletStateParams](),
 		summary:    `Get the state for a single wallet.`,
 		fieldDescs: map[string]string{
 			"assetID": descAssetID,
@@ -1961,7 +1961,7 @@ var routeInfos = map[string]routeInfo{
     ]`,
 	},
 	postBondRoute: {
-		paramsType: reflect.TypeOf(core.PostBondForm{}),
+		paramsType: reflect.TypeFor[core.PostBondForm](),
 		summary: `Post new bond for DEX. An ok response does not mean that the bond is active.
     Bond is active after the bond transaction has been confirmed and the server notified.`,
 		fieldDescs: map[string]string{
@@ -1982,7 +1982,7 @@ var routeInfos = map[string]routeInfo{
     }`,
 	},
 	bondOptionsRoute: {
-		paramsType: reflect.TypeOf(core.BondOptionsForm{}),
+		paramsType: reflect.TypeFor[core.BondOptionsForm](),
 		summary:    `Change bond options for a DEX.`,
 		fieldDescs: map[string]string{
 			"host":         descHost,
@@ -2035,7 +2035,7 @@ var routeInfos = map[string]routeInfo{
     }`,
 	},
 	loginRoute: {
-		paramsType: reflect.TypeOf(LoginParams{}),
+		paramsType: reflect.TypeFor[LoginParams](),
 		summary:    `Attempt to login to all registered DEX servers.`,
 		fieldDescs: map[string]string{
 			"appPass": descAppPass,
@@ -2069,7 +2069,7 @@ var routeInfos = map[string]routeInfo{
     }`,
 	},
 	tradeRoute: {
-		paramsType: reflect.TypeOf(TradeParams{}),
+		paramsType: reflect.TypeFor[TradeParams](),
 		summary:    `Make an order to buy or sell an asset.`,
 		fieldDescs: map[string]string{
 			"appPass": descAppPass,
@@ -2094,7 +2094,7 @@ var routeInfos = map[string]routeInfo{
     }`,
 	},
 	multiTradeRoute: {
-		paramsType: reflect.TypeOf(MultiTradeParams{}),
+		paramsType: reflect.TypeFor[MultiTradeParams](),
 		summary:    `Place multiple orders in one go.`,
 		fieldDescs: map[string]string{
 			"appPass":   descAppPass,
@@ -2116,7 +2116,7 @@ var routeInfos = map[string]routeInfo{
     }]`,
 	},
 	cancelRoute: {
-		paramsType: reflect.TypeOf(CancelParams{}),
+		paramsType: reflect.TypeFor[CancelParams](),
 		summary:    `Cancel an order.`,
 		fieldDescs: map[string]string{
 			"orderID": "The hex ID of the order to cancel.",
@@ -2125,7 +2125,7 @@ var routeInfos = map[string]routeInfo{
     string: The message "` + fmt.Sprintf(canceledOrderStr, "[order ID]") + `"`,
 	},
 	rescanWalletRoute: {
-		paramsType: reflect.TypeOf(RescanWalletParams{}),
+		paramsType: reflect.TypeFor[RescanWalletParams](),
 		summary: `Initiate a rescan of an asset's wallet. This is only supported for certain
 wallet types. Wallet resynchronization may be asynchronous, and the wallet
 state should be consulted for progress.
@@ -2141,7 +2141,7 @@ needed to complete a swap.`,
     string: "started"`,
 	},
 	abandonTxRoute: {
-		paramsType: reflect.TypeOf(AbandonTxParams{}),
+		paramsType: reflect.TypeFor[AbandonTxParams](),
 		summary: `Abandon an unconfirmed transaction. This marks the transaction and all
 its descendants as abandoned, allowing the wallet to forget about it and
 potentially spend its inputs in a different transaction. This is useful when
@@ -2158,7 +2158,7 @@ supported for DCR wallets.`,
     string: Success message on completion.`,
 	},
 	withdrawRoute: {
-		paramsType: reflect.TypeOf(SendParams{}),
+		paramsType: reflect.TypeFor[SendParams](),
 		summary:    `Withdraw value from an exchange wallet to address. Fees are subtracted from the value.`,
 		fieldDescs: map[string]string{
 			"appPass":  descAppPass,
@@ -2171,7 +2171,7 @@ supported for DCR wallets.`,
     string: "[coin ID]"`,
 	},
 	sendRoute: {
-		paramsType: reflect.TypeOf(SendParams{}),
+		paramsType: reflect.TypeFor[SendParams](),
 		summary:    `Sends exact value from an exchange wallet to address.`,
 		fieldDescs: map[string]string{
 			"appPass":  descAppPass,
@@ -2189,7 +2189,7 @@ supported for DCR wallets.`,
     string: The message "` + logoutStr + `"`,
 	},
 	orderBookRoute: {
-		paramsType: reflect.TypeOf(OrderBookParams{}),
+		paramsType: reflect.TypeFor[OrderBookParams](),
 		summary:    `Retrieve all orders for a market.`,
 		fieldDescs: map[string]string{
 			"host":    "The DEX to retrieve the order book from.",
@@ -2233,7 +2233,7 @@ supported for DCR wallets.`,
     }`,
 	},
 	myOrdersRoute: {
-		paramsType: reflect.TypeOf(MyOrdersParams{}),
+		paramsType: reflect.TypeFor[MyOrdersParams](),
 		summary: `Fetch all active and recently executed orders
     belonging to the user.`,
 		fieldDescs: map[string]string{
@@ -2289,7 +2289,7 @@ supported for DCR wallets.`,
     ]`,
 	},
 	appSeedRoute: {
-		paramsType: reflect.TypeOf(AppSeedParams{}),
+		paramsType: reflect.TypeFor[AppSeedParams](),
 		summary: `Show the application's seed. It is recommended to not store the seed
     digitally. Make a copy on paper with pencil and keep it safe.`,
 		fieldDescs: map[string]string{
@@ -2299,7 +2299,7 @@ supported for DCR wallets.`,
     string: The application's seed as hex.`,
 	},
 	walletPeersRoute: {
-		paramsType: reflect.TypeOf(WalletPeersParams{}),
+		paramsType: reflect.TypeFor[WalletPeersParams](),
 		summary:    `Show the peers a wallet is connected to.`,
 		fieldDescs: map[string]string{
 			"assetID": descAssetID,
@@ -2308,7 +2308,7 @@ supported for DCR wallets.`,
     []string: Addresses of wallet peers.`,
 	},
 	addWalletPeerRoute: {
-		paramsType: reflect.TypeOf(AddRemovePeerParams{}),
+		paramsType: reflect.TypeFor[AddRemovePeerParams](),
 		summary:    `Add a new wallet peer connection.`,
 		fieldDescs: map[string]string{
 			"assetID": descAssetID,
@@ -2316,7 +2316,7 @@ supported for DCR wallets.`,
 		},
 	},
 	removeWalletPeerRoute: {
-		paramsType: reflect.TypeOf(AddRemovePeerParams{}),
+		paramsType: reflect.TypeFor[AddRemovePeerParams](),
 		summary:    `Remove an added wallet peer.`,
 		fieldDescs: map[string]string{
 			"assetID": descAssetID,
@@ -2324,14 +2324,14 @@ supported for DCR wallets.`,
 		},
 	},
 	notificationsRoute: {
-		paramsType: reflect.TypeOf(NotificationsParams{}),
+		paramsType: reflect.TypeFor[NotificationsParams](),
 		summary:    `See recent notifications.`,
 		fieldDescs: map[string]string{
 			"n": "The number of notifications to load.",
 		},
 	},
 	startBotRoute: {
-		paramsType: reflect.TypeOf(StartBotParams{}),
+		paramsType: reflect.TypeFor[StartBotParams](),
 		summary:    `Start market making bot(s).`,
 		fieldDescs: map[string]string{
 			"appPass":     descAppPass,
@@ -2340,14 +2340,14 @@ supported for DCR wallets.`,
 		},
 	},
 	stopBotRoute: {
-		paramsType: reflect.TypeOf(StopBotParams{}),
+		paramsType: reflect.TypeFor[StopBotParams](),
 		summary:    `Stop market making bot(s).`,
 		fieldDescs: map[string]string{
 			"market": "The market to stop a bot for. If not provided, stops all running bots.",
 		},
 	},
 	mmAvailableBalancesRoute: {
-		paramsType: reflect.TypeOf(MMAvailableBalancesParams{}),
+		paramsType: reflect.TypeFor[MMAvailableBalancesParams](),
 		summary:    `Get available balances for starting a bot or adding additional balance to a running bot.`,
 		fieldDescs: map[string]string{
 			"host":       descHost,
@@ -2362,7 +2362,7 @@ supported for DCR wallets.`,
 		summary: `Get market making status.`,
 	},
 	updateRunningBotCfgRoute: {
-		paramsType: reflect.TypeOf(UpdateRunningBotParams{}),
+		paramsType: reflect.TypeFor[UpdateRunningBotParams](),
 		summary:    `Update the config and optionally the inventory of a running bot.`,
 		fieldDescs: map[string]string{
 			"cfgFilePath": "The path to the market maker config file.",
@@ -2371,7 +2371,7 @@ supported for DCR wallets.`,
 		},
 	},
 	updateRunningBotInvRoute: {
-		paramsType: reflect.TypeOf(UpdateRunningBotInventoryParams{}),
+		paramsType: reflect.TypeFor[UpdateRunningBotInventoryParams](),
 		summary:    `Update the inventory of a running bot.`,
 		fieldDescs: map[string]string{
 			"market":   "The market for the bot to update.",
@@ -2379,7 +2379,7 @@ supported for DCR wallets.`,
 		},
 	},
 	stakeStatusRoute: {
-		paramsType: reflect.TypeOf(StakeStatusParams{}),
+		paramsType: reflect.TypeFor[StakeStatusParams](),
 		summary:    `Get stake status.`,
 		fieldDescs: map[string]string{
 			"assetID": descAssetID,
@@ -2437,7 +2437,7 @@ supported for DCR wallets.`,
     }`,
 	},
 	setVSPRoute: {
-		paramsType: reflect.TypeOf(SetVSPParams{}),
+		paramsType: reflect.TypeFor[SetVSPParams](),
 		summary:    `Set a vsp by url.`,
 		fieldDescs: map[string]string{
 			"assetID": descAssetID,
@@ -2447,7 +2447,7 @@ supported for DCR wallets.`,
     string: The message "` + fmt.Sprintf(setVSPStr, "[vsp url]") + `"`,
 	},
 	purchaseTicketsRoute: {
-		paramsType: reflect.TypeOf(PurchaseTicketsParams{}),
+		paramsType: reflect.TypeFor[PurchaseTicketsParams](),
 		summary:    `Start an asynchronous ticket purchasing process. Check stakestatus for number of tickets remaining to be purchased.`,
 		fieldDescs: map[string]string{
 			"appPass": descAppPass,
@@ -2458,7 +2458,7 @@ supported for DCR wallets.`,
     bool: true is the only non-error return value`,
 	},
 	setVotingPreferencesRoute: {
-		paramsType: reflect.TypeOf(SetVotingPreferencesParams{}),
+		paramsType: reflect.TypeFor[SetVotingPreferencesParams](),
 		summary:    `Set voting preferences.`,
 		fieldDescs: map[string]string{
 			"assetID":        descAssetID,
@@ -2470,7 +2470,7 @@ supported for DCR wallets.`,
     string: The message "` + setVotePrefsStr + `"`,
 	},
 	txHistoryRoute: {
-		paramsType: reflect.TypeOf(TxHistoryParams{}),
+		paramsType: reflect.TypeFor[TxHistoryParams](),
 		summary:    `Get transaction history for a wallet.`,
 		fieldDescs: map[string]string{
 			"assetID": descAssetID,
@@ -2480,7 +2480,7 @@ supported for DCR wallets.`,
 		},
 	},
 	walletTxRoute: {
-		paramsType: reflect.TypeOf(WalletTxParams{}),
+		paramsType: reflect.TypeFor[WalletTxParams](),
 		summary:    `Get a wallet transaction.`,
 		fieldDescs: map[string]string{
 			"assetID": descAssetID,
@@ -2488,7 +2488,7 @@ supported for DCR wallets.`,
 		},
 	},
 	gaslessRedeemCalldataRoute: {
-		paramsType: reflect.TypeOf(GaslessRedeemCalldataParams{}),
+		paramsType: reflect.TypeFor[GaslessRedeemCalldataParams](),
 		summary: `Build calldata for an emergency gasless redeem. All requested
     match IDs must belong to the same trade and will be batched into one
     redeemWithSignature call.`,
@@ -2499,7 +2499,7 @@ supported for DCR wallets.`,
 		},
 	},
 	validateGaslessRedeemRoute: {
-		paramsType: reflect.TypeOf(ValidateGaslessRedeemParams{}),
+		paramsType: reflect.TypeFor[ValidateGaslessRedeemParams](),
 		summary: `Validate and simulate emergency gasless redeem calldata using
     the configured wallet address for the specified asset as the submitting sender.`,
 		fieldDescs: map[string]string{
@@ -2509,7 +2509,7 @@ supported for DCR wallets.`,
 		},
 	},
 	submitGaslessRedeemRoute: {
-		paramsType: reflect.TypeOf(SubmitGaslessRedeemParams{}),
+		paramsType: reflect.TypeFor[SubmitGaslessRedeemParams](),
 		summary: `Submit emergency gasless redeem calldata from the configured
     wallet for the specified asset.`,
 		fieldDescs: map[string]string{
@@ -2520,7 +2520,7 @@ supported for DCR wallets.`,
 		},
 	},
 	withdrawBchSpvRoute: {
-		paramsType: reflect.TypeOf(BchWithdrawParams{}),
+		paramsType: reflect.TypeFor[BchWithdrawParams](),
 		summary:    `Get a transaction that will withdraw all funds from the deprecated Bitcoin Cash SPV wallet.`,
 		fieldDescs: map[string]string{
 			"appPass":   descAppPass,
@@ -2528,7 +2528,7 @@ supported for DCR wallets.`,
 		},
 	},
 	bridgeRoute: {
-		paramsType: reflect.TypeOf(BridgeParams{}),
+		paramsType: reflect.TypeFor[BridgeParams](),
 		summary:    "Bridge tokens from one chain to another.",
 		fieldDescs: map[string]string{
 			"fromAssetID": descFromAssetID,
@@ -2538,7 +2538,7 @@ supported for DCR wallets.`,
 		},
 	},
 	checkBridgeApprovalRoute: {
-		paramsType: reflect.TypeOf(CheckBridgeApprovalParams{}),
+		paramsType: reflect.TypeFor[CheckBridgeApprovalParams](),
 		summary:    "Check if the bridge contract is approved.",
 		fieldDescs: map[string]string{
 			"assetID":    descFromAssetID,
@@ -2546,7 +2546,7 @@ supported for DCR wallets.`,
 		},
 	},
 	approveBridgeContractRoute: {
-		paramsType: reflect.TypeOf(ApproveBridgeParams{}),
+		paramsType: reflect.TypeFor[ApproveBridgeParams](),
 		summary:    "Approve or unapprove the bridge contract.",
 		fieldDescs: map[string]string{
 			"assetID":    descFromAssetID,
@@ -2555,14 +2555,14 @@ supported for DCR wallets.`,
 		},
 	},
 	pendingBridgesRoute: {
-		paramsType: reflect.TypeOf(PendingBridgesParams{}),
+		paramsType: reflect.TypeFor[PendingBridgesParams](),
 		summary:    "Get pending bridges.",
 		fieldDescs: map[string]string{
 			"assetID": descFromAssetID,
 		},
 	},
 	bridgeHistoryRoute: {
-		paramsType: reflect.TypeOf(TxHistoryParams{}),
+		paramsType: reflect.TypeFor[TxHistoryParams](),
 		summary:    "Get bridge history.",
 		fieldDescs: map[string]string{
 			"assetID": descFromAssetID,
@@ -2572,14 +2572,14 @@ supported for DCR wallets.`,
 		},
 	},
 	supportedBridgesRoute: {
-		paramsType: reflect.TypeOf(SupportedBridgesParams{}),
+		paramsType: reflect.TypeFor[SupportedBridgesParams](),
 		summary:    "Get supported bridge destinations.",
 		fieldDescs: map[string]string{
 			"assetID": "The asset's BIP-44 registered coin index to get bridge destinations for.",
 		},
 	},
 	bridgeFeesAndLimitsRoute: {
-		paramsType: reflect.TypeOf(BridgeFeesAndLimitsParams{}),
+		paramsType: reflect.TypeFor[BridgeFeesAndLimitsParams](),
 		summary:    "Get bridge fees and limits.",
 		fieldDescs: map[string]string{
 			"fromAssetID": descFromAssetID,
@@ -2588,7 +2588,7 @@ supported for DCR wallets.`,
 		},
 	},
 	paymentMultisigPubkeyRoute: {
-		paramsType: reflect.TypeOf(PaymentMultisigPubkeyParams{}),
+		paramsType: reflect.TypeFor[PaymentMultisigPubkeyParams](),
 		summary:    "Get a multisig pubkey for asset id.",
 		fieldDescs: map[string]string{
 			"assetID": descAssetID,
@@ -2597,14 +2597,14 @@ supported for DCR wallets.`,
     string: a pubkey. The index is stored in the db and this pubkey will not be returned again.`,
 	},
 	sendFundsToMultisigRoute: {
-		paramsType: reflect.TypeOf(CsvFileParams{}),
+		paramsType: reflect.TypeFor[CsvFileParams](),
 		summary:    "Send funds to a payment multisig.",
 		fieldDescs: map[string]string{
 			"csvFilePath": descCsvFilePath + " Will be written to.",
 		},
 	},
 	signMultisigRoute: {
-		paramsType: reflect.TypeOf(SignMultisigParams{}),
+		paramsType: reflect.TypeFor[SignMultisigParams](),
 		summary:    "Sign a payment multisig.",
 		fieldDescs: map[string]string{
 			"csvFilePath": descCsvFilePath + " Will be written to.",
@@ -2612,7 +2612,7 @@ supported for DCR wallets.`,
 		},
 	},
 	refundPaymentMultisigRoute: {
-		paramsType: reflect.TypeOf(CsvFileParams{}),
+		paramsType: reflect.TypeFor[CsvFileParams](),
 		summary:    "Refund a payment multisig.",
 		fieldDescs: map[string]string{
 			"csvFilePath": descCsvFilePath,
@@ -2621,7 +2621,7 @@ supported for DCR wallets.`,
     string: the refund tx hash`,
 	},
 	viewPaymentMultisigRoute: {
-		paramsType: reflect.TypeOf(CsvFileParams{}),
+		paramsType: reflect.TypeFor[CsvFileParams](),
 		summary:    "View a payment multisig.",
 		fieldDescs: map[string]string{
 			"csvFilePath": descCsvFilePath,
@@ -2630,7 +2630,7 @@ supported for DCR wallets.`,
     string: tx in json format`,
 	},
 	sendPaymentMultisigRoute: {
-		paramsType: reflect.TypeOf(CsvFileParams{}),
+		paramsType: reflect.TypeFor[CsvFileParams](),
 		summary:    "Send a payment multisig. May not error even with spv if not fully signed.",
 		fieldDescs: map[string]string{
 			"csvFilePath": descCsvFilePath,
@@ -2639,7 +2639,7 @@ supported for DCR wallets.`,
     string: the sent tx hash`,
 	},
 	mmReportRoute: {
-		paramsType: reflect.TypeOf(MMReportParams{}),
+		paramsType: reflect.TypeFor[MMReportParams](),
 		summary:    "Export MM epoch snapshots for a market to a JSON file.",
 		fieldDescs: map[string]string{
 			"host":       "The DEX host.",
@@ -2653,7 +2653,7 @@ supported for DCR wallets.`,
     string: the output file path`,
 	},
 	pruneMMSnapshotsRoute: {
-		paramsType: reflect.TypeOf(PruneMMSnapshotsParams{}),
+		paramsType: reflect.TypeFor[PruneMMSnapshotsParams](),
 		summary:    "Delete MM epoch snapshots for a market older than a given epoch index.",
 		fieldDescs: map[string]string{
 			"host":        "The DEX host.",
