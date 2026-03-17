@@ -2028,26 +2028,26 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 
 	w.bridges = make(map[string]bridge)
 	if acrossBridge, err := newAcrossBridge(ctx, w.node.contractBackend(), w.node, w.assetID, w.net, w.addr, w.log); err != nil {
-		w.log.Errorf("Failed to initialize Across bridge: %v", err)
+		w.log.Warnf("Failed to initialize Across bridge: %v", err)
 	} else {
 		w.bridges[acrossBridgeName] = acrossBridge
 	}
 
 	/* if usdcBridge, err := newUsdcBridge(w.assetID, w.net, w.node.contractBackend(), w.addr, w.node); err != nil {
-		w.log.Errorf("Failed to initialize USDC bridge: %v", err)
+		w.log.Warnf("Failed to initialize USDC bridge: %v", err)
 	} else {
 		w.bridges[usdcBridgeName] = usdcBridge
 	} */
 
 	if w.assetID == ethID {
 		if polygonBridge, err := newPolygonBridgeEth(ctx, w.node.contractBackend(), w.net, w.addr, w.node, w.log); err != nil {
-			w.log.Errorf("Failed to initialize Polygon bridge for ETH: %v", err)
+			w.log.Warnf("Failed to initialize Polygon bridge for ETH: %v", err)
 		} else {
 			w.bridges[polygonBridgeName] = polygonBridge
 		}
 	} else if w.assetID == polygonID {
 		if polygonBridge, err := newPolygonBridgePolygon(w.node.contractBackend(), w.net, w.log); err != nil {
-			w.log.Errorf("Failed to initialize Polygon bridge for Polygon: %v", err)
+			w.log.Warnf("Failed to initialize Polygon bridge for Polygon: %v", err)
 		} else {
 			w.bridges[polygonBridgeName] = polygonBridge
 		}
