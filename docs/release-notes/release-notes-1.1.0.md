@@ -1,12 +1,16 @@
 # Bison Wallet v1.1.0
 
-This is a major feature release with 397 commits from 18+ contributors. It
+This is a major feature release with 400+ commits from 60+ contributors. It
 introduces Monero support, cross-chain bridging, private atomic swaps, gasless
 EVM redemptions, Politeia governance integration, and significantly expanded
 market making capabilities. All users must update. The protocol is incompatible
 between versions.
 
 ## Important Upgrade Notes
+
+### Go 1.24 Required
+
+The minimum Go version for building from source is now Go 1.24.
 
 ### Protocol Incompatibility
 
@@ -195,7 +199,7 @@ operators should either:
 
 ### Build and CI
 
-- Go 1.25 and updated GitHub actions (#3347)
+- Go 1.24 and updated GitHub actions (#3347)
 - Docker base images updated (#3341)
 - Add more platforms for binary builds (#3073)
 - Implement snap package (#2580)
@@ -241,3 +245,4 @@ operators should either:
 | slightsharp | 2 |
 | Dave Collins | 1 |
 | Jared Tate | 1 |
+| Other one-time contributors | ~45 |
