@@ -71,7 +71,7 @@ func (p *Politeia) ProposalsSync() error {
 	// Save the timestamp of the last update check only on success.
 	p.lastSync.Store(time.Now().UTC().Unix())
 
-	p.log.Info("Politeia records were synced.")
+	p.log.Debug("Politeia records were synced.")
 
 	return nil
 }
@@ -412,7 +412,7 @@ func (p *Politeia) proposalsNewUpdate() error {
 	}
 
 	nProposals := len(proposals)
-	p.log.Infof("Loaded %d proposal records from db...", nProposals)
+	p.log.Debugf("Loaded %d proposal records from db...", nProposals)
 
 	// Create proposals map from local db proposals.
 	proposalsMap := make(map[string]struct{})
@@ -518,7 +518,7 @@ func (p *Politeia) proposalsInProgressUpdate() error {
 		}
 	}
 
-	p.log.Infof("Fetching data for %d in-progress proposals...", len(propsInProgress))
+	p.log.Debugf("Fetching data for %d in-progress proposals...", len(propsInProgress))
 
 	for _, prop := range propsInProgress {
 		if err := p.ctx.Err(); err != nil {
