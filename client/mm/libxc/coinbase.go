@@ -1513,11 +1513,11 @@ var max = big.NewInt(math.MaxInt64)
 type nonceSource struct{}
 
 func (n nonceSource) Nonce() (string, error) {
-	r, err := rand.Int(rand.Reader, max)
-	if err != nil {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	return r.String(), nil
+	return hex.EncodeToString(b), nil
 }
 
 type APIKeyClaims struct {
@@ -1537,7 +1537,7 @@ func buildJWT(apiName, uri string, privKey *ecdsa.PrivateKey) (string, error) {
 	cl := &APIKeyClaims{
 		Claims: &jwt.Claims{
 			Subject:   apiName,
-			Issuer:    "coinbase-cloud",
+			Issuer:    "cdp",
 			NotBefore: jwt.NewNumericDate(time.Now()),
 			Expiry:    jwt.NewNumericDate(time.Now().Add(time.Minute * 2)),
 		},

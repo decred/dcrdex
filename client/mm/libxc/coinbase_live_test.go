@@ -571,7 +571,13 @@ func TestPlaceTrade(t *testing.T) {
 	}
 
 	msgRate := calc.MessageRate(rate, bui, qui)
-	qty := uint64(math.Round(amount * float64(bui.Conventional.ConversionFactor)))
+
+	var qty, quoteQty uint64
+	if !sell && orderType == OrderTypeMarket {
+		quoteQty = uint64(math.Round(amount * float64(qui.Conventional.ConversionFactor)))
+	} else {
+		qty = uint64(math.Round(amount * float64(bui.Conventional.ConversionFactor)))
+	}
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)
@@ -597,7 +603,7 @@ func TestPlaceTrade(t *testing.T) {
 		}
 	}()
 
-	trade, err := c.Trade(ctx, uint32(baseID), uint32(quoteID), sell, msgRate, qty, orderType, updaterID)
+	trade, err := c.Trade(ctx, uint32(baseID), uint32(quoteID), sell, msgRate, qty, quoteQty, orderType, updaterID)
 	if err != nil {
 		t.Fatalf("Trade error: %v", err)
 	}
