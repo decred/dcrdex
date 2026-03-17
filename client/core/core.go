@@ -5498,8 +5498,9 @@ func (c *Core) initializeDEXConnection(dc *dexConnection, crypter encrypt.Crypte
 	// Pending bonds will be handled by authDEX. Expired bonds will be
 	// refunded by rotateBonds.
 
-	// If the connection is down, authDEX will fail on Send.
-	if dc.IsDown() {
+	// If the connection is down or unusable (e.g. version mismatch),
+	// authDEX will fail.
+	if dc.IsDown() || dc.status() != comms.Connected {
 		c.log.Warnf("Connection to %v not available for authorization. "+
 			"It will automatically authorize when it connects.", dc.acct.host)
 		subject, details := c.formatDetails(TopicDEXDisconnected, dc.acct.host)
@@ -8823,6 +8824,13 @@ func sendOutdatedClientNotification(c *Core, dc *dexConnection) {
 	c.notify(newUpgradeNote(TopicUpgradeNeeded, subject, details, db.WarningLevel))
 }
 
+// sendOutdatedServerNotification will send a notification to the UI that
+// indicates the DEX server is running an incompatible older protocol version.
+func sendOutdatedServerNotification(c *Core, dc *dexConnection) {
+	subject, details := c.formatDetails(TopicServerVersionTooOld, dc.acct.host)
+	c.notify(newUpgradeNote(TopicServerVersionTooOld, subject, details, db.ErrorLevel))
+}
+
 func isOnionHost(addr string) bool {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -9032,8 +9040,12 @@ func (c *Core) startDexConnection(acctInfo *db.AccountInfo, dc *dexConnection) e
 	if err != nil {
 		// Sort out the bonds with current time to indicate refundable bonds.
 		categorizeBonds(time.Now().Unix())
+		// Mark the connection as unusable so the UI shows disconnected.
+		atomic.StoreUint32(&dc.connectionStatus, uint32(comms.Disconnected))
 		if errors.Is(err, outdatedClientErr) {
 			sendOutdatedClientNotification(c, dc)
+		} else if errors.Is(err, outdatedServerErr) {
+			sendOutdatedServerNotification(c, dc)
 		}
 		return err // no dc.acct.dexPubKey
 	}
@@ -9067,8 +9079,12 @@ func (c *Core) handleReconnect(host string) {
 	// server configuration.
 	cfg, err := dc.refreshServerConfig()
 	if err != nil {
+		// Mark the connection as unusable so the UI shows disconnected.
+		atomic.StoreUint32(&dc.connectionStatus, uint32(comms.Disconnected))
 		if errors.Is(err, outdatedClientErr) {
 			sendOutdatedClientNotification(c, dc)
+		} else if errors.Is(err, outdatedServerErr) {
+			sendOutdatedServerNotification(c, dc)
 		}
 		c.log.Errorf("handleReconnect: Unable to apply new configuration for DEX at %s: %v", host, err)
 		return

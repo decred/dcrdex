@@ -98,6 +98,11 @@
       </div>
 
       <div class="flex-grow-1 position-relative">
+        <div id="disconnectedOverlay" class="d-hide fill-abs flex-center flex-column" style="z-index:10; background-color: rgba(0,0,0,0.5);">
+          <span class="ico-disconnected fs40 text-danger mb-3"></span>
+          <span class="fs22 demi">[[[Connection to server failed]]]</span>
+          <span class="fs16 grey mt-2">[[[Waiting to reconnect...]]]</span>
+        </div>
         <div id="mainContent">
 
           {{- /* ORDER BOOK */ -}}

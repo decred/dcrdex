@@ -28,6 +28,7 @@ var (
 	bookFeedTimeout = time.Minute
 
 	outdatedClientErr = errors.New("outdated client")
+	outdatedServerErr = errors.New("outdated server")
 )
 
 // BookFeed manages a channel for receiving order book updates. It is imperative
@@ -844,6 +845,8 @@ func (dc *dexConnection) refreshServerConfig() (*msgjson.ConfigResult, error) {
 		err := fmt.Errorf("unsupported server API version %v", apiVer)
 		if apiVer > supportedAPIVers[len(supportedAPIVers)-1] {
 			err = fmt.Errorf("%v: %w", err, outdatedClientErr)
+		} else if apiVer < supportedAPIVers[0] {
+			err = fmt.Errorf("%v: %w", err, outdatedServerErr)
 		}
 		return nil, err
 	}

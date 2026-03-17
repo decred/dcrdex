@@ -721,6 +721,7 @@ type UpgradeNote struct {
 
 const (
 	TopicUpgradeNeeded           Topic = "UpgradeNeeded"
+	TopicServerVersionTooOld     Topic = "ServerVersionTooOld"
 	TopicMMSnapshotsNotSupported Topic = "MMSnapshotsNotSupported"
 )
 
