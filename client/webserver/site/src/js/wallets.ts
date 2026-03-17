@@ -1952,7 +1952,7 @@ export default class WalletsPage extends BasePage {
   txHistoryRow (tx: WalletTransaction, assetID: number): PageElement {
     const row = this.page.txHistoryRowTmpl.cloneNode(true) as PageElement
     row.dataset.txid = tx.id
-    Doc.bind(row, 'click', () => this.showTxDetailsPopup(tx))
+    Doc.bind(row, 'click', () => this.showTxDetailsPopup(tx, assetID))
     this.updateTxHistoryRow(row, tx, assetID)
     return row
   }
@@ -1964,11 +1964,13 @@ export default class WalletsPage extends BasePage {
     return row
   }
 
-  setTxDetailsPopupElements (tx: WalletTransaction) {
+  setTxDetailsPopupElements (tx: WalletTransaction, assetID: number) {
     const page = this.page
 
     // Block explorer
-    const assetExplorer = CoinExplorers[this.selectedWalletID]
+    page.txViewBlockExplorer.removeAttribute('href')
+    const explorerAssetID = app().assets[assetID]?.token?.parentID ?? assetID
+    const assetExplorer = CoinExplorers[explorerAssetID]
     if (assetExplorer && assetExplorer[net]) {
       const explorerID = (tx.isRelay && tx.relayTxID) ? tx.relayTxID : tx.id
       page.txViewBlockExplorer.href = assetExplorer[net](explorerID)
@@ -1976,7 +1978,7 @@ export default class WalletsPage extends BasePage {
 
     // Tx type
     let txType = txTypeString(tx.type)
-    if (tx.tokenID && tx.tokenID !== this.selectedWalletID) {
+    if (tx.tokenID && tx.tokenID !== assetID) {
       const tokenSymbol = app().assets[tx.tokenID].symbol.split('.')[0].toUpperCase()
       txType = `${tokenSymbol} ${txType}`
     }
@@ -1988,10 +1990,10 @@ export default class WalletsPage extends BasePage {
     if (noAmtTxTypes.includes(tx.type)) {
       Doc.hide(page.txDetailsAmtSection)
     } else {
-      let assetID = this.selectedWalletID
-      if (tx.tokenID) assetID = tx.tokenID
+      let amountAssetID = assetID
+      if (tx.tokenID) amountAssetID = tx.tokenID
       Doc.show(page.txDetailsAmtSection)
-      const ui = app().unitInfo(assetID)
+      const ui = app().unitInfo(amountAssetID)
       const amt = Doc.formatCoinValue(tx.amount, ui)
       const [s, c] = txTypeSignAndClass(tx.type)
       page.txDetailsAmount.textContent = `${s}${amt} ${ui.conventional.unit}`
@@ -1999,7 +2001,7 @@ export default class WalletsPage extends BasePage {
     }
 
     // Fee
-    let feeAsset = this.selectedWalletID
+    let feeAsset = assetID
     if (tx.tokenID !== undefined) {
       const asset = app().assets[tx.tokenID]
       if (asset.token) {
@@ -2068,9 +2070,9 @@ export default class WalletsPage extends BasePage {
     }
   }
 
-  showTxDetailsPopup (tx: WalletTransaction) {
+  showTxDetailsPopup (tx: WalletTransaction, assetID = this.txHistory.assetID) {
     this.currTx = tx
-    this.setTxDetailsPopupElements(tx)
+    this.setTxDetailsPopupElements(tx, assetID)
     this.forms.show(this.page.txDetails)
   }
 
