@@ -262,6 +262,10 @@ var originLocale = map[Topic]*translation{
 		subject:  intl.Translation{T: "Upgrade needed"},
 		template: intl.Translation{T: "You may need to update your client to trade at %s.", Notes: "args: [host]"},
 	},
+	TopicServerVersionTooOld: {
+		subject:  intl.Translation{T: "Server version incompatible"},
+		template: intl.Translation{T: "The server at %s is running an incompatible older protocol version.", Notes: "args: [host]"},
+	},
 	TopicMMSnapshotsNotSupported: {
 		subject:  intl.Translation{T: "MM Snapshots Not Supported"},
 		template: intl.Translation{T: "The server at %s does not support market maker epoch snapshots.", Notes: "args: [host]"},

@@ -1135,7 +1135,7 @@ export default class MarketsPage extends BasePage {
       let errMsg = intl.prep(intl.ID_CONNECTION_FAILED)
       if (dex.disabled) errMsg = intl.prep(intl.ID_DEX_DISABLED_MSG)
       page.chartErrMsg.textContent = errMsg
-      Doc.show(page.chartErrMsg)
+      Doc.show(page.chartErrMsg, page.disconnectedOverlay)
       return
     }
 
@@ -1147,7 +1147,7 @@ export default class MarketsPage extends BasePage {
     const [bui, qui] = [app().unitInfo(baseID, dex), app().unitInfo(quoteID, dex)]
 
     const rateConversionFactor = OrderUtil.RateEncodingFactor / bui.conventional.conversionFactor * qui.conventional.conversionFactor
-    Doc.hide(page.maxOrd, page.chartErrMsg)
+    Doc.hide(page.maxOrd, page.chartErrMsg, page.disconnectedOverlay)
     if (this.maxEstimateTimer) {
       window.clearTimeout(this.maxEstimateTimer)
       this.maxEstimateTimer = null

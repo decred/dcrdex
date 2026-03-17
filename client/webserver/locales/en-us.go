@@ -66,6 +66,8 @@ var EnUS = map[string]*intl.Translation{
 	"price":                          {T: "price"},
 	"volume":                         {T: "volume"},
 	"volume_24":                      {T: "24 Hr. Volume"},
+	"Connection to server failed":    {T: "Connection to server failed"},
+	"Waiting to reconnect...":        {T: "Waiting to reconnect..."},
 	"High":                           {T: "High"},
 	"Low":                            {T: "Low"},
 	"buys":                           {T: "buys"},
