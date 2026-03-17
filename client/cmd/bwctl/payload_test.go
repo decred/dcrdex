@@ -695,9 +695,9 @@ func TestSetFieldFromString(t *testing.T) {
 		A   any               `json:"a"`
 	}
 
-	v := reflect.New(reflect.TypeOf(testStruct{})).Elem()
+	v := reflect.New(reflect.TypeFor[testStruct]()).Elem()
 	t.Run("string", func(t *testing.T) {
-		if err := setFieldFromString(v.Field(0), reflect.TypeOf(""), "hello"); err != nil {
+		if err := setFieldFromString(v.Field(0), reflect.TypeFor[string](), "hello"); err != nil {
 			t.Fatal(err)
 		}
 		if v.Field(0).String() != "hello" {
@@ -705,7 +705,7 @@ func TestSetFieldFromString(t *testing.T) {
 		}
 	})
 	t.Run("bool", func(t *testing.T) {
-		if err := setFieldFromString(v.Field(1), reflect.TypeOf(false), "true"); err != nil {
+		if err := setFieldFromString(v.Field(1), reflect.TypeFor[bool](), "true"); err != nil {
 			t.Fatal(err)
 		}
 		if !v.Field(1).Bool() {
@@ -713,7 +713,7 @@ func TestSetFieldFromString(t *testing.T) {
 		}
 	})
 	t.Run("uint32", func(t *testing.T) {
-		if err := setFieldFromString(v.Field(2), reflect.TypeOf(uint32(0)), "42"); err != nil {
+		if err := setFieldFromString(v.Field(2), reflect.TypeFor[uint32](), "42"); err != nil {
 			t.Fatal(err)
 		}
 		if v.Field(2).Uint() != 42 {
@@ -721,7 +721,7 @@ func TestSetFieldFromString(t *testing.T) {
 		}
 	})
 	t.Run("uint64", func(t *testing.T) {
-		if err := setFieldFromString(v.Field(3), reflect.TypeOf(uint64(0)), "1000000"); err != nil {
+		if err := setFieldFromString(v.Field(3), reflect.TypeFor[uint64](), "1000000"); err != nil {
 			t.Fatal(err)
 		}
 		if v.Field(3).Uint() != 1000000 {
@@ -729,7 +729,7 @@ func TestSetFieldFromString(t *testing.T) {
 		}
 	})
 	t.Run("int", func(t *testing.T) {
-		if err := setFieldFromString(v.Field(4), reflect.TypeOf(0), "99"); err != nil {
+		if err := setFieldFromString(v.Field(4), reflect.TypeFor[int](), "99"); err != nil {
 			t.Fatal(err)
 		}
 		if v.Field(4).Int() != 99 {
@@ -737,7 +737,7 @@ func TestSetFieldFromString(t *testing.T) {
 		}
 	})
 	t.Run("int64", func(t *testing.T) {
-		if err := setFieldFromString(v.Field(5), reflect.TypeOf(int64(0)), "-100"); err != nil {
+		if err := setFieldFromString(v.Field(5), reflect.TypeFor[int64](), "-100"); err != nil {
 			t.Fatal(err)
 		}
 		if v.Field(5).Int() != -100 {
@@ -745,7 +745,7 @@ func TestSetFieldFromString(t *testing.T) {
 		}
 	})
 	t.Run("*string", func(t *testing.T) {
-		if err := setFieldFromString(v.Field(6), reflect.TypeOf((*string)(nil)), "hello"); err != nil {
+		if err := setFieldFromString(v.Field(6), reflect.TypeFor[*string](), "hello"); err != nil {
 			t.Fatal(err)
 		}
 		if v.Field(6).IsNil() || v.Field(6).Elem().String() != "hello" {
@@ -753,7 +753,7 @@ func TestSetFieldFromString(t *testing.T) {
 		}
 	})
 	t.Run("*uint32", func(t *testing.T) {
-		if err := setFieldFromString(v.Field(7), reflect.TypeOf((*uint32)(nil)), "7"); err != nil {
+		if err := setFieldFromString(v.Field(7), reflect.TypeFor[*uint32](), "7"); err != nil {
 			t.Fatal(err)
 		}
 		if v.Field(7).IsNil() || uint32(v.Field(7).Elem().Uint()) != 7 {
@@ -761,7 +761,7 @@ func TestSetFieldFromString(t *testing.T) {
 		}
 	})
 	t.Run("map", func(t *testing.T) {
-		if err := setFieldFromString(v.Field(8), reflect.TypeOf(map[string]string{}), `{"a":"b"}`); err != nil {
+		if err := setFieldFromString(v.Field(8), reflect.TypeFor[map[string]string](), `{"a":"b"}`); err != nil {
 			t.Fatal(err)
 		}
 		if v.Field(8).Len() != 1 {
@@ -769,7 +769,7 @@ func TestSetFieldFromString(t *testing.T) {
 		}
 	})
 	t.Run("any", func(t *testing.T) {
-		if err := setFieldFromString(v.Field(9), reflect.TypeOf((*any)(nil)).Elem(), "some_value"); err != nil {
+		if err := setFieldFromString(v.Field(9), reflect.TypeFor[any](), "some_value"); err != nil {
 			t.Fatal(err)
 		}
 		if v.Field(9).Interface() != "some_value" {
@@ -777,7 +777,7 @@ func TestSetFieldFromString(t *testing.T) {
 		}
 	})
 	t.Run("bad bool", func(t *testing.T) {
-		if err := setFieldFromString(v.Field(1), reflect.TypeOf(false), "notabool"); err == nil {
+		if err := setFieldFromString(v.Field(1), reflect.TypeFor[bool](), "notabool"); err == nil {
 			t.Fatal("expected error for bad bool")
 		}
 	})
