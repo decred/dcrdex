@@ -59,12 +59,14 @@ Run `./run help` to see all pre-configured pairs and available flags.
 | `ltcdcr`           | LTC-DCR         | RPC wallets                   |
 | `ltcspvdcr`        | LTC-DCR         | LTC SPV, DCR RPC              |
 | `ltcelectrumdcr`   | LTC-DCR         | LTC Electrum, DCR RPC         |
+| `ltcelectrumeth`   | LTC-ETH         | LTC Electrum, ETH native      |
 | `dcrdash`          | DCR-DASH        | RPC wallets                   |
 | `dcrdoge`          | DCR-DOGE        | RPC wallets                   |
 | `dcrdgb`           | DCR-DGB         | RPC wallets                   |
 | `dcreth`           | DCR-ETH         | DCR RPC, ETH native           |
 | `dcrfiro`          | DCR-FIRO        | RPC wallets                   |
 | `dcrfiroelectrum`  | DCR-FIRO        | DCR RPC, FIRO Electrum        |
+| `firoelectrumdoge` | FIRO-DOGE       | FIRO Electrum, DOGE RPC       |
 | `zecbtc`           | ZEC-BTC         | RPC wallets                   |
 | `dcrusdc`          | DCR-USDC.ETH    | ERC-20 token on Ethereum      |
 | `polygondcr`       | POLYGON-DCR     | Polygon RPC, DCR RPC          |

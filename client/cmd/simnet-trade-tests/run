@@ -116,6 +116,10 @@ case $1 in
     ./simnet-trade-tests --base bch --quote eth --regasset bch ${@:2}
     ;;
 
+  ltcelectrumeth)
+    ./simnet-trade-tests --base ltc --quote eth --regasset ltc --base1type electrum ${@:2}
+    ;;
+
   ltcspveth)
     ./simnet-trade-tests --base ltc --quote eth --regasset ltc --base1type spv ${@:2}
     ;;
@@ -126,6 +130,10 @@ case $1 in
 
   firobtcspv)
     ./simnet-trade-tests --base firo --quote btc --regasset btc --quote1type spv ${@:2}
+    ;;
+
+  firoelectrumdoge)
+    ./simnet-trade-tests --base firo --quote doge --regasset doge --base1type electrum ${@:2}
     ;;
 
   firodoge)
@@ -189,9 +197,11 @@ bchpolygon - Bitcoin Cash RPC wallet and Polygon wallet on BCH-POLYGON market
 ltcdash - Litecoin RPC wallet and Dash RPC wallet on LTC-DASH market
 dogepolygon - Dogecoin RPC wallet and Polygon wallet on DOGE-POLYGON market
 bcheth - Bitcoin Cash RPC wallet and Ethereum wallet on BCH-ETH market
+ltcelectrumeth - Litecoin Electrum wallet and Ethereum wallet on LTC-ETH market
 ltcspveth - Litecoin SPV wallet and Ethereum wallet on LTC-ETH market
 firobtc - Firo RPC wallet and Bitcoin RPC wallet on FIRO-BTC market
 firobtcspv - Firo RPC wallet and Bitcoin SPV wallet on FIRO-BTC market
+firoelectrumdoge - Firo Electrum wallet and Dogecoin RPC wallet on FIRO-DOGE market
 firodoge - Firo RPC wallet and Dogecoin RPC wallet on FIRO-DOGE market
 btcusdceth - Bitcoin RPC wallet and USDC.ETH token on BTC-USDC.ETH market
 btcusdteth - Bitcoin RPC wallet and USDT.ETH token on BTC-USDT.ETH market

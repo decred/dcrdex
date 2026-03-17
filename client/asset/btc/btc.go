@@ -217,7 +217,7 @@ var (
 		AvailableWallets: []*asset.WalletDefinition{
 			spvWalletDefinition,
 			rpcWalletDefinition,
-			electrumWalletDefinition,
+			// electrumWalletDefinition, // TODO: Broken. Investigate and re-enable.
 		},
 		LegacyWalletIndex: 1,
 		BlockchainClass:   asset.BlockchainClassUTXO,
