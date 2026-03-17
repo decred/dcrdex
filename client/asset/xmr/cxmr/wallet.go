@@ -10,6 +10,7 @@ package cxmr
 /*
 #cgo LDFLAGS: -lwallet2_api_c
 #cgo linux,amd64 LDFLAGS: -L${SRCDIR}/../lib/linux-amd64 -Wl,-rpath,$ORIGIN -Wl,-rpath,/usr/lib/bisonw
+#cgo linux,arm64 LDFLAGS: -L${SRCDIR}/../lib/linux-arm64 -Wl,-rpath,$ORIGIN -Wl,-rpath,/usr/lib/bisonw
 #cgo darwin,amd64 LDFLAGS: -L${SRCDIR}/../lib/darwin-amd64
 #cgo darwin,arm64 LDFLAGS: -L${SRCDIR}/../lib/darwin-arm64
 #cgo windows,amd64 LDFLAGS: -L${SRCDIR}/../lib/windows-amd64

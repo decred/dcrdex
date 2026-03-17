@@ -8,6 +8,7 @@ Libraries must be built using the Dockerfile in the parent directory (see below)
 | Directory | Platform | Library |
 |-----------|----------|---------|
 | `linux-amd64/` | Linux x86_64 | `libwallet2_api_c.so` |
+| `linux-arm64/` | Linux ARM64 | `libwallet2_api_c.so` |
 | `windows-amd64/` | Windows x86_64 | `libwallet2_api_c.dll` |
 | `darwin-amd64/` | macOS x86_64 | `libwallet2_api_c.dylib` |
 | `darwin-arm64/` | macOS ARM64 | `libwallet2_api_c.dylib` |
@@ -23,6 +24,8 @@ docker build -t monero_c_builder .
 # Extract libraries
 docker run --rm monero_c_builder cat /monero_c/release/monero/x86_64-linux-gnu_libwallet2_api_c.so.xz | xz -d > lib/linux-amd64/libwallet2_api_c.so
 
+docker run --rm monero_c_builder cat /monero_c/release/monero/aarch64-linux-gnu_libwallet2_api_c.so.xz | xz -d > lib/linux-arm64/libwallet2_api_c.so
+
 docker run --rm monero_c_builder cat /monero_c/release/monero/x86_64-w64-mingw32_libwallet2_api_c.dll.xz | xz -d > lib/windows-amd64/libwallet2_api_c.dll
 
 docker run --rm monero_c_builder cat /monero_c/release/monero/x86_64-apple-darwin11_libwallet2_api_c.dylib.xz | xz -d > lib/darwin-amd64/libwallet2_api_c.dylib
@@ -36,8 +39,11 @@ After building bisonw with XMR support, the library must be available at runtime
 
 **Option 1: Copy library next to executable (recommended for development)**
 ```bash
-# Linux
+# Linux x86_64
 cp lib/linux-amd64/libwallet2_api_c.so ./
+
+# Linux ARM64
+cp lib/linux-arm64/libwallet2_api_c.so ./
 
 # macOS
 cp lib/darwin-arm64/libwallet2_api_c.dylib ./  # or darwin-amd64

@@ -44,20 +44,24 @@ RUN apt-get update && apt-get install -y \
     gperf \
     xz-utils \
     python-is-python3 \
+    # Linux ARM64 cross-compilation
+    gcc-aarch64-linux-gnu \
+    g++-aarch64-linux-gnu \
     # Windows cross-compilation (MinGW)
     gcc-mingw-w64-x86-64 \
     g++-mingw-w64-x86-64 \
     && rm -rf /var/lib/apt/lists/*
 
-# Clone monero_c with submodules
-RUN git clone --recursive https://github.com/MrCyjaneK/monero_c.git /monero_c
+# Clone monero_c (without --recursive so submodules match the pinned commit)
+RUN git clone https://github.com/MrCyjaneK/monero_c.git /monero_c
 
 WORKDIR /monero_c
 
-# Checkout specific version and apply patches
+# Checkout specific version, sync submodules, and apply patches
 RUN git config --global user.name "bob" && \
     git config --global user.email "bob@nowhere.com" && \
     git checkout 411e8a1cdb3f4c2812d83f28c335d2a4eb18bd29 && \
+    git submodule update --init --recursive && \
     ./apply_patches.sh monero
 
 # Apply our custom patches for allow_mismatched_daemon_version
@@ -72,6 +76,9 @@ RUN sed -i '/_MONERO_Wallet_setTrustedDaemon/a _MONERO_Wallet_setAllowMismatched
 
 # Build for Linux x86_64
 RUN ./build_single.sh monero x86_64-linux-gnu -j$(nproc)
+
+# Build for Linux ARM64
+RUN ./build_single.sh monero aarch64-linux-gnu -j$(nproc)
 
 # Switch mingw-w64 to use POSIX threading model (required for std::mutex in Boost 1.85+)
 RUN update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix && \

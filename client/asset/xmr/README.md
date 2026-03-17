@@ -26,8 +26,11 @@ The shared library must also be available at runtime.
 **Option 1: Copy next to executable (recommended for development)**
 
 ```bash
-# Linux
+# Linux x86_64
 cp client/asset/xmr/lib/linux-amd64/libwallet2_api_c.so ./
+
+# Linux ARM64
+cp client/asset/xmr/lib/linux-arm64/libwallet2_api_c.so ./
 
 # macOS ARM64 (Apple Silicon)
 cp client/asset/xmr/lib/darwin-arm64/libwallet2_api_c.dylib ./
@@ -125,6 +128,7 @@ client/asset/xmr/
 │   └── doc.go      # Package documentation
 └── lib/
     ├── linux-amd64/    # Linux x86_64 library
+    ├── linux-arm64/    # Linux ARM64 library
     ├── darwin-amd64/   # macOS x86_64 library
     ├── darwin-arm64/   # macOS ARM64 library
     ├── windows-amd64/  # Windows x86_64 library
@@ -298,6 +302,8 @@ docker build -t monero_c_builder .
 # Extract libraries to lib/ directories
 docker run --rm monero_c_builder cat /monero_c/release/monero/x86_64-linux-gnu_libwallet2_api_c.so.xz | xz -d > lib/linux-amd64/libwallet2_api_c.so
 
+docker run --rm monero_c_builder cat /monero_c/release/monero/aarch64-linux-gnu_libwallet2_api_c.so.xz | xz -d > lib/linux-arm64/libwallet2_api_c.so
+
 docker run --rm monero_c_builder cat /monero_c/release/monero/x86_64-w64-mingw32_libwallet2_api_c.dll.xz | xz -d > lib/windows-amd64/libwallet2_api_c.dll
 
 docker run --rm monero_c_builder cat /monero_c/release/monero/x86_64-apple-darwin11_libwallet2_api_c.dylib.xz | xz -d > lib/darwin-amd64/libwallet2_api_c.dylib
@@ -307,6 +313,7 @@ docker run --rm monero_c_builder cat /monero_c/release/monero/aarch64-apple-darw
 
 **Supported targets:**
 - Linux x86_64 (`x86_64-linux-gnu`)
+- Linux ARM64 (`aarch64-linux-gnu`)
 - Windows x86_64 (`x86_64-w64-mingw32`)
 - macOS x86_64 (`x86_64-apple-darwin11`)
 - macOS ARM64 (`aarch64-apple-darwin11`)
