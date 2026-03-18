@@ -51,6 +51,8 @@ type clientCore interface {
 	WalletState(assetID uint32) *core.WalletState
 	Exchange(host string) (*core.Exchange, error)
 	Bridge(fromAssetID, toAssetID uint32, amt uint64, bridgeName string) (txID string, err error)
+	BridgeFeesAndLimits(fromAssetID, toAssetID uint32, bridgeName string) (*core.BridgeFeesAndLimits, error)
+	EstimateSendTxFee(address string, assetID uint32, amount uint64, subtract, maxWithdraw bool) (fee uint64, isValidAddress bool, err error)
 	SupportedBridgeDestinations(assetID uint32) (map[uint32][]string, error)
 	BridgeContractApprovalStatus(assetID uint32, bridgeName string) (asset.ApprovalStatus, error)
 	SubscribeMMSnapshots(host string, base, quote uint32, unsub bool) error

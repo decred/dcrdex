@@ -9,6 +9,7 @@ import (
 	"math"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -895,6 +896,8 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 			u.pendingDeposits = make(map[string]*pendingDeposit)
 			u.pendingWithdrawals = make(map[string]*pendingWithdrawal)
 			u.pendingDEXOrders = make(map[order.OrderID]*pendingDEXOrder)
+			u.pendingBaseRebalance.Store(false)
+			u.pendingQuoteRebalance.Store(false)
 		}()
 
 		var expBaseExternalDeposit, expBaseExternalWithdraw, expQuoteExternalDeposit, expQuoteExternalWithdraw uint64
@@ -1095,6 +1098,12 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 		}
 		tCore.cancelsPlaced = nil
 	}
+	checkNoCancel := func() {
+		t.Helper()
+		if len(tCore.cancelsPlaced) != 0 {
+			t.Fatalf("unexpected cancels placed: %v", tCore.cancelsPlaced)
+		}
+	}
 	addLocked(baseID, totalBase)
 	checkTransfers(true, 0, 0, 0, 0, false, false)
 	checkCancel()
@@ -1103,6 +1112,27 @@ func testDistribution(t *testing.T, baseID, quoteID uint32) {
 	addLocked(quoteID, totalQuote)
 	checkTransfers(true, 0, 0, 0, 0, false, false)
 	checkCancel()
+
+	setBals(totalBase, 0, minDexQuote, minCexQuote)
+	addLocked(baseID, totalBase)
+	u.pendingBaseRebalance.Store(true)
+	checkTransfers(false, 0, 0, 0, 0, false, false)
+	checkNoCancel()
+	tCore.cancelsPlaced = nil
+
+	setBals(totalBase, 0, totalQuote, 0)
+	addLocked(baseID, totalBase)
+	u.pendingBaseRebalance.Store(true)
+	checkTransfers(true, 0, 0, minCexQuote, 0, false, false)
+	checkNoCancel()
+	tCore.cancelsPlaced = nil
+
+	setBals(minDexBase, minCexBase, totalQuote, 0)
+	addLocked(quoteID, totalQuote)
+	u.pendingQuoteRebalance.Store(true)
+	checkTransfers(false, 0, 0, 0, 0, false, false)
+	checkNoCancel()
+	tCore.cancelsPlaced = nil
 
 	setBals(0, totalBase /* being withdrawn */, minDexQuote, minCexQuote)
 	u.pendingWithdrawals["a"] = &pendingWithdrawal{
@@ -4728,6 +4758,9 @@ func TestDeposit(t *testing.T) {
 		assetID              uint32
 		cexAssetID           uint32
 		bridgeRequired       bool
+		bridgeName           string
+		bridgeFees           map[uint32]uint64
+		estimateSendTxFee    uint64
 		isWithdrawer         bool
 		isDynamicSwapper     bool
 		depositAmt           uint64
@@ -4738,6 +4771,7 @@ func TestDeposit(t *testing.T) {
 		cexCreditedAmt       uint64
 		initialDEXBalances   map[uint32]uint64
 		initialCEXBalances   map[uint32]uint64
+		wantErr              string
 
 		// Expected balance updates
 		preConfirmBridgeDEXBalances   map[uint32]*botBalanceDiffs
@@ -4883,6 +4917,7 @@ func TestDeposit(t *testing.T) {
 			assetID:        60001,  // USDC on Ethereum
 			cexAssetID:     966001, // USDC on Polygon
 			bridgeRequired: true,
+			bridgeName:     "across",
 			depositAmt:     1e6,
 			unconfirmedBridgeTx: &asset.WalletTransaction{
 				ID:     "bridge_tx_id",
@@ -4948,6 +4983,23 @@ func TestDeposit(t *testing.T) {
 				966001: {available: 9.9e5, pending: -9.9e5},
 			},
 		},
+		{
+			name:              "bridge deposit fails with insufficient destination fee asset",
+			assetID:           966004,
+			cexAssetID:        60002,
+			bridgeRequired:    true,
+			bridgeName:        "across",
+			bridgeFees:        map[uint32]uint64{966: 20000, 60: 50000},
+			estimateSendTxFee: 140673,
+			depositAmt:        1e6,
+			initialDEXBalances: map[uint32]uint64{
+				966004: 5e6,
+				966:    1e6,
+				60:     0,
+			},
+			initialCEXBalances: map[uint32]uint64{},
+			wantErr:            "eth need 190673 have 0",
+		},
 	}
 
 	runTest := func(test *test) {
@@ -4956,15 +5008,31 @@ func TestDeposit(t *testing.T) {
 			tCore.isWithdrawer[test.assetID] = test.isWithdrawer
 			tCore.isDynamicSwapper[test.assetID] = test.isDynamicSwapper
 			tCore.setAssetBalances(test.initialDEXBalances)
+			if test.bridgeRequired && len(test.bridgeFees) > 0 {
+				tCore.bridgeFeesAndLimits[fmt.Sprintf("%d-%d-%s", test.assetID, test.cexAssetID, test.bridgeName)] = &core.BridgeFeesAndLimits{
+					Fees: test.bridgeFees,
+				}
+			}
+			if test.estimateSendTxFee > 0 {
+				tCore.estimateSendTxFee[test.cexAssetID] = test.estimateSendTxFee
+			}
 			tCore.walletTxsMtx.Lock()
 			if test.unconfirmedBridgeTx != nil {
 				tCore.walletTxs[test.unconfirmedBridgeTx.ID] = test.unconfirmedBridgeTx
+				tCore.walletTxAssets[test.unconfirmedBridgeTx.ID] = test.assetID
 			}
 			if test.unconfirmedDepositTx != nil {
 				tCore.walletTxs[test.unconfirmedDepositTx.ID] = test.unconfirmedDepositTx
+				if test.bridgeRequired {
+					tCore.walletTxAssets[test.unconfirmedDepositTx.ID] = test.cexAssetID
+				} else {
+					tCore.walletTxAssets[test.unconfirmedDepositTx.ID] = test.assetID
+				}
 			}
 			tCore.walletTxsMtx.Unlock()
-			tCore.sendCoinID = []byte(test.unconfirmedDepositTx.ID)
+			if test.unconfirmedDepositTx != nil {
+				tCore.sendCoinID = []byte(test.unconfirmedDepositTx.ID)
+			}
 
 			tCEX := newTCEX()
 			for assetID, balance := range test.initialCEXBalances {
@@ -4990,8 +5058,9 @@ func TestDeposit(t *testing.T) {
 				},
 				eventLogDB: eventLogDB,
 				botCfg: &BotConfig{
-					BaseID:    test.assetID,
-					CEXBaseID: test.cexAssetID,
+					BaseID:         test.assetID,
+					CEXBaseID:      test.cexAssetID,
+					BaseBridgeName: test.bridgeName,
 				},
 			})
 
@@ -5004,6 +5073,18 @@ func TestDeposit(t *testing.T) {
 			}
 
 			err = adaptor.deposit(ctx, test.assetID, test.depositAmt)
+			if test.wantErr != "" {
+				if err == nil {
+					t.Fatalf("%s: expected error", test.name)
+				}
+				if !strings.Contains(err.Error(), test.wantErr) {
+					t.Fatalf("%s: unexpected error: %v", test.name, err)
+				}
+				if len(adaptor.pendingDeposits) != 0 {
+					t.Fatalf("%s: expected no pending deposits, got %d", test.name, len(adaptor.pendingDeposits))
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("%s: unexpected error: %v", test.name, err)
 			}
@@ -5136,6 +5217,174 @@ func TestDeposit(t *testing.T) {
 	}
 }
 
+func TestPendingBridgedDepositIncludedInStats(t *testing.T) {
+	tCore := newTCore()
+	tCore.setAssetBalances(map[uint32]uint64{
+		966004: 5e6,
+		966:    1e9,
+		60:     1e9,
+	})
+	tCore.fiatRates = map[uint32]float64{
+		966004: 1,
+		60002:  1,
+		966:    1,
+		60:     1,
+	}
+	tCore.walletTxsMtx.Lock()
+	tCore.walletTxs["bridge_tx_id"] = &asset.WalletTransaction{
+		ID:     "bridge_tx_id",
+		Amount: 2e6,
+		BridgeCounterpartTx: &asset.BridgeCounterpartTx{
+			AssetID: 60002,
+		},
+	}
+	tCore.walletTxAssets["bridge_tx_id"] = 966004
+	tCore.walletTxsMtx.Unlock()
+
+	tCEX := newTCEX()
+	eventLogDB := newTEventLogDB()
+	adaptor := mustParseAdaptor(&exchangeAdaptorCfg{
+		botID:           dexMarketID("host1", 966004, 0),
+		core:            tCore,
+		cex:             tCEX,
+		baseDexBalances: map[uint32]uint64{966004: 5e6, 966: 1e9, 60: 1e9},
+		baseCexBalances: map[uint32]uint64{},
+		mwh: &MarketWithHost{
+			Host:    "host1",
+			BaseID:  966004,
+			QuoteID: 0,
+		},
+		eventLogDB: eventLogDB,
+		botCfg: &BotConfig{
+			BaseID:         966004,
+			CEXBaseID:      60002,
+			BaseBridgeName: "across",
+			CEXName:        "Binance",
+		},
+	})
+	tCore.singleLotBuyFees = tFees(0, 0, 0, 0)
+	tCore.singleLotSellFees = tFees(0, 0, 0, 0)
+
+	_, err := adaptor.Connect(t.Context())
+	if err != nil {
+		t.Fatalf("Connect error: %v", err)
+	}
+
+	if err := adaptor.deposit(t.Context(), 966004, 2e6); err != nil {
+		t.Fatalf("deposit error: %v", err)
+	}
+
+	var stats *RunStats
+	for i := 0; i < 20; i++ {
+		stats = adaptor.stats()
+		if bal := stats.DEXBalances[60002]; bal != nil && bal.Pending == 2e6 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if stats == nil {
+		t.Fatal("no stats returned")
+	}
+
+	destDEXBal := stats.DEXBalances[60002]
+	if destDEXBal == nil {
+		t.Fatal("missing stats dex balance for bridged destination asset")
+	}
+	if destDEXBal.Available != 0 || destDEXBal.Pending != 2e6 {
+		t.Fatalf("unexpected bridged destination dex balance. want available=0 pending=2000000, got %+v", destDEXBal)
+	}
+
+	destFinal := stats.ProfitLoss.Final[60002]
+	if destFinal == nil {
+		t.Fatal("missing profit/loss final balance for bridged destination asset")
+	}
+	if destFinal.Atoms != 2e6 {
+		t.Fatalf("unexpected bridged destination final atoms. want 2000000, got %d", destFinal.Atoms)
+	}
+
+	if math.Abs(stats.ProfitLoss.Profit) > 1e-8 {
+		t.Fatalf("expected pending bridged deposit profit to remain flat without fees, got %f", stats.ProfitLoss.Profit)
+	}
+}
+
+func TestDepositSendsStatsUpdateWhenPendingDepositStarts(t *testing.T) {
+	tCore := newTCore()
+	tCore.setAssetBalances(map[uint32]uint64{
+		42: 3e6,
+	})
+	tCore.walletTxsMtx.Lock()
+	tCore.walletTxs["deposit_tx_id"] = &asset.WalletTransaction{
+		ID:     "deposit_tx_id",
+		Amount: 1e6,
+		Fees:   2000,
+	}
+	tCore.walletTxsMtx.Unlock()
+	tCore.sendCoinID = []byte("deposit_tx_id")
+
+	tCEX := newTCEX()
+	eventLogDB := newTEventLogDB()
+	adaptor := mustParseAdaptor(&exchangeAdaptorCfg{
+		botID:           dexMarketID("host1", 42, 0),
+		core:            tCore,
+		cex:             tCEX,
+		baseDexBalances: map[uint32]uint64{42: 3e6},
+		baseCexBalances: map[uint32]uint64{42: 1e6},
+		mwh: &MarketWithHost{
+			Host:    "host1",
+			BaseID:  42,
+			QuoteID: 0,
+		},
+		eventLogDB: eventLogDB,
+		botCfg: &BotConfig{
+			BaseID:    42,
+			CEXBaseID: 42,
+			CEXName:   "Binance",
+		},
+	})
+	tCore.singleLotBuyFees = tFees(0, 0, 0, 0)
+	tCore.singleLotSellFees = tFees(0, 0, 0, 0)
+
+	_, err := adaptor.Connect(t.Context())
+	if err != nil {
+		t.Fatalf("Connect error: %v", err)
+	}
+
+	runStatsCount := func() int {
+		var n int
+		for _, note := range tCore.broadcasts {
+			if _, is := note.(*runStatsNote); is {
+				n++
+			}
+		}
+		return n
+	}
+
+	tCore.broadcastsMtx.Lock()
+	initialRunStats := runStatsCount()
+	tCore.broadcastsMtx.Unlock()
+
+	if err := adaptor.deposit(t.Context(), 42, 1e6); err != nil {
+		t.Fatalf("deposit error: %v", err)
+	}
+
+	tCore.broadcastsMtx.Lock()
+	defer tCore.broadcastsMtx.Unlock()
+
+	if got := runStatsCount(); got != initialRunStats+1 {
+		t.Fatalf("expected one additional runstats note, got %d -> %d", initialRunStats, got)
+	}
+
+	last := tCore.broadcasts[len(tCore.broadcasts)-1]
+	statsNote, is := last.(*runStatsNote)
+	if !is {
+		t.Fatalf("expected last broadcast to be runstats, got %T", last)
+	}
+	if statsNote.Stats == nil || statsNote.Stats.PendingDeposits != 1 {
+		t.Fatalf("expected pending deposits = 1, got %+v", statsNote.Stats)
+	}
+}
+
 func TestWithdraw(t *testing.T) {
 	coinID := encode.RandomBytes(32)
 	txID := hex.EncodeToString(coinID)
@@ -5148,6 +5397,8 @@ func TestWithdraw(t *testing.T) {
 		assetID                 uint32
 		cexAssetID              uint32
 		bridgeRequired          bool
+		bridgeName              string
+		bridgeFees              map[uint32]uint64
 		withdrawAmt             uint64
 		unconfirmedWithdrawalTx *asset.WalletTransaction
 		confirmedWithdrawalTx   *asset.WalletTransaction
@@ -5156,6 +5407,7 @@ func TestWithdraw(t *testing.T) {
 		cexDebitAmt             uint64
 		initialDEXBalances      map[uint32]uint64
 		initialCEXBalances      map[uint32]uint64
+		wantErr                 string
 
 		// Expected balance updates
 		preConfirmWithdrawalDEXBalances  map[uint32]*botBalanceDiffs
@@ -5167,6 +5419,19 @@ func TestWithdraw(t *testing.T) {
 	}
 
 	tests := []test{
+		{
+			name:        "insufficient CEX balance",
+			assetID:     42,
+			cexAssetID:  42,
+			withdrawAmt: 1e6,
+			initialDEXBalances: map[uint32]uint64{
+				42: 1e6,
+			},
+			initialCEXBalances: map[uint32]uint64{
+				42: 5e5,
+			},
+			wantErr: "required: 1000000, have: 500000",
+		},
 		{
 			name:        "ok",
 			assetID:     42,
@@ -5205,10 +5470,55 @@ func TestWithdraw(t *testing.T) {
 			postConfirmWithdrawalCEXBalances: map[uint32]*botBalanceDiffs{},
 		},
 		{
+			name:           "bridge withdrawal fails with insufficient source fee asset",
+			assetID:        60001,  // USDC on Ethereum (target)
+			cexAssetID:     966001, // USDC on Polygon (source)
+			bridgeRequired: true,
+			bridgeName:     "across",
+			bridgeFees: map[uint32]uint64{
+				966: 2222,
+				60:  3333,
+			},
+			withdrawAmt: 1e6,
+			initialDEXBalances: map[uint32]uint64{
+				60001:  1e7,
+				966001: 1e7,
+				966:    0,
+				60:     1e7,
+			},
+			initialCEXBalances: map[uint32]uint64{
+				966001: 1e7,
+			},
+			wantErr: "need 2222 have 0",
+		},
+		{
+			name:           "bridge withdrawal fails with insufficient destination fee asset",
+			assetID:        60001,  // USDC on Ethereum (target)
+			cexAssetID:     966001, // USDC on Polygon (source)
+			bridgeRequired: true,
+			bridgeName:     "across",
+			bridgeFees: map[uint32]uint64{
+				966: 2222,
+				60:  3333,
+			},
+			withdrawAmt: 1e6,
+			initialDEXBalances: map[uint32]uint64{
+				60001:  1e7,
+				966001: 1e7,
+				966:    1e7,
+				60:     0,
+			},
+			initialCEXBalances: map[uint32]uint64{
+				966001: 1e7,
+			},
+			wantErr: "need 3333 have 0",
+		},
+		{
 			name:           "bridge withdrawal - USDC Polygon to USDC Ethereum",
 			assetID:        60001,  // USDC on Ethereum (target)
 			cexAssetID:     966001, // USDC on Polygon (source)
 			bridgeRequired: true,
+			bridgeName:     "across",
 			withdrawAmt:    1e6,
 			unconfirmedWithdrawalTx: &asset.WalletTransaction{
 				ID:        "withdrawal_tx_id",
@@ -5276,6 +5586,11 @@ func TestWithdraw(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			tCore := newTCore()
 			tCore.setAssetBalances(test.initialDEXBalances)
+			if test.bridgeRequired && len(test.bridgeFees) > 0 {
+				tCore.bridgeFeesAndLimits[fmt.Sprintf("%d-%d-%s", test.cexAssetID, test.assetID, test.bridgeName)] = &core.BridgeFeesAndLimits{
+					Fees: test.bridgeFees,
+				}
+			}
 			tCore.walletTxsMtx.Lock()
 
 			if test.unconfirmedWithdrawalTx != nil {
@@ -5312,8 +5627,9 @@ func TestWithdraw(t *testing.T) {
 				},
 				eventLogDB: eventLogDB,
 				botCfg: &BotConfig{
-					BaseID:    test.assetID,
-					CEXBaseID: test.cexAssetID,
+					BaseID:         test.assetID,
+					CEXBaseID:      test.cexAssetID,
+					BaseBridgeName: test.bridgeName,
 				},
 			})
 
@@ -5326,6 +5642,18 @@ func TestWithdraw(t *testing.T) {
 			}
 
 			err = adaptor.withdraw(ctx, test.cexAssetID, test.withdrawAmt)
+			if test.wantErr != "" {
+				if err == nil {
+					t.Fatalf("%s: expected error", test.name)
+				}
+				if !strings.Contains(err.Error(), test.wantErr) {
+					t.Fatalf("%s: expected error containing %q, got %v", test.name, test.wantErr, err)
+				}
+				if len(tCEX.withdrawals) != 0 {
+					t.Fatalf("%s: expected no withdrawals to be sent to the CEX, got %d", test.name, len(tCEX.withdrawals))
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("%s: unexpected error: %v", test.name, err)
 			}
@@ -6158,6 +6486,14 @@ func TestCEXTrade(t *testing.T) {
 				QuoteID: botCfg.QuoteID,
 			},
 			eventLogDB: eventLogDB,
+			botCfg: &BotConfig{
+				Host:       botCfg.Host,
+				BaseID:     botCfg.BaseID,
+				QuoteID:    botCfg.QuoteID,
+				CEXName:    botCfg.CEXName,
+				CEXBaseID:  test.baseID,
+				CEXQuoteID: test.quoteID,
+			},
 		})
 		tCore.singleLotBuyFees = tFees(0, 0, 0, 0)
 		tCore.singleLotSellFees = tFees(0, 0, 0, 0)
@@ -6224,10 +6560,12 @@ func TestCEXTrade(t *testing.T) {
 			checkLatestEvent(updateAndStats.event, i+1)
 
 			stats := adaptor.stats()
-			stats.DEXBalances = nil
-			stats.StartTime = 0
-			if !reflect.DeepEqual(stats.CEXBalances, updateAndStats.stats.CEXBalances) {
-				t.Fatalf("%s: stats mismatch after update %d.\nwant: %+v\n\ngot: %+v", test.name, i+1, updateAndStats.stats, stats)
+			actualBalances := make(map[uint32]*BotBalance, len(updateAndStats.stats.CEXBalances))
+			for assetID := range updateAndStats.stats.CEXBalances {
+				actualBalances[assetID] = stats.CEXBalances[assetID]
+			}
+			if !reflect.DeepEqual(actualBalances, updateAndStats.stats.CEXBalances) {
+				t.Fatalf("%s: stats mismatch after update %d.\nwant: %+v\n\ngot: %+v", test.name, i+1, updateAndStats.stats.CEXBalances, actualBalances)
 			}
 		}
 	}

@@ -62,33 +62,38 @@ type sendArgs struct {
 }
 
 type tCore struct {
-	assetBalances     map[uint32]*core.WalletBalance
-	assetBalanceErr   error
-	market            *core.Market
-	singleLotSellFees *OrderFees
-	singleLotBuyFees  *OrderFees
-	singleLotFeesErr  error
-	multiTradeResult  []*core.MultiTradeResult
-	noteFeed          chan core.Notification
-	isAccountLocker   map[uint32]bool
-	isWithdrawer      map[uint32]bool
-	isDynamicSwapper  map[uint32]bool
-	cancelsPlaced     []order.OrderID
-	multiTradesPlaced []*core.MultiTradeForm
-	maxFundingFees    uint64
-	book              *orderbook.OrderBook
-	bookFeed          *tBookFeed
-	sends             []*sendArgs
-	sendCoinID        []byte
-	newDepositAddress string
-	orders            map[order.OrderID]*core.Order
-	walletTxsMtx      sync.Mutex
-	walletTxs         map[string]*asset.WalletTransaction
-	fiatRates         map[uint32]float64
-	userParcels       uint32
-	parcelLimit       uint32
-	exchange          *core.Exchange
-	walletStates      map[uint32]*core.WalletState
+	assetBalances       map[uint32]*core.WalletBalance
+	assetBalanceErr     error
+	market              *core.Market
+	singleLotSellFees   *OrderFees
+	singleLotBuyFees    *OrderFees
+	singleLotFeesErr    error
+	multiTradeResult    []*core.MultiTradeResult
+	noteFeed            chan core.Notification
+	isAccountLocker     map[uint32]bool
+	isWithdrawer        map[uint32]bool
+	isDynamicSwapper    map[uint32]bool
+	cancelsPlaced       []order.OrderID
+	multiTradesPlaced   []*core.MultiTradeForm
+	maxFundingFees      uint64
+	book                *orderbook.OrderBook
+	bookFeed            *tBookFeed
+	sends               []*sendArgs
+	sendCoinID          []byte
+	newDepositAddress   string
+	orders              map[order.OrderID]*core.Order
+	walletTxsMtx        sync.Mutex
+	walletTxs           map[string]*asset.WalletTransaction
+	walletTxAssets      map[string]uint32
+	bridgeFeesAndLimits map[string]*core.BridgeFeesAndLimits
+	estimateSendTxFee   map[uint32]uint64
+	broadcastsMtx       sync.Mutex
+	broadcasts          []core.Notification
+	fiatRates           map[uint32]float64
+	userParcels         uint32
+	parcelLimit         uint32
+	exchange            *core.Exchange
+	walletStates        map[uint32]*core.WalletState
 }
 
 func newTCore() *tCore {
@@ -102,9 +107,13 @@ func newTCore() *tCore {
 		bookFeed: &tBookFeed{
 			c: make(chan *core.BookUpdate, 1),
 		},
-		walletTxs:    make(map[string]*asset.WalletTransaction),
-		book:         &orderbook.OrderBook{},
-		walletStates: make(map[uint32]*core.WalletState),
+		walletTxs:           make(map[string]*asset.WalletTransaction),
+		walletTxAssets:      make(map[string]uint32),
+		bridgeFeesAndLimits: make(map[string]*core.BridgeFeesAndLimits),
+		estimateSendTxFee:   make(map[uint32]uint64),
+		broadcasts:          make([]core.Notification, 0),
+		book:                &orderbook.OrderBook{},
+		walletStates:        make(map[uint32]*core.WalletState),
 	}
 }
 
@@ -179,7 +188,20 @@ func (c *tCore) OpenWallet(assetID uint32, pw []byte) error {
 func (c *tCore) WalletTransaction(assetID uint32, txID string) (*asset.WalletTransaction, error) {
 	c.walletTxsMtx.Lock()
 	defer c.walletTxsMtx.Unlock()
+	if expectedAssetID, found := c.walletTxAssets[txID]; found && assetID != expectedAssetID {
+		return nil, fmt.Errorf("wallet transaction %s queried for wrong asset. want %d, got %d", txID, expectedAssetID, assetID)
+	}
 	return c.walletTxs[txID], nil
+}
+func (c *tCore) BridgeFeesAndLimits(fromAssetID, toAssetID uint32, bridgeName string) (*core.BridgeFeesAndLimits, error) {
+	key := fmt.Sprintf("%d-%d-%s", fromAssetID, toAssetID, bridgeName)
+	if fees, found := c.bridgeFeesAndLimits[key]; found {
+		return fees, nil
+	}
+	return &core.BridgeFeesAndLimits{Fees: make(map[uint32]uint64)}, nil
+}
+func (c *tCore) EstimateSendTxFee(address string, assetID uint32, amount uint64, subtract, maxWithdraw bool) (fee uint64, isValidAddress bool, err error) {
+	return c.estimateSendTxFee[assetID], true, nil
 }
 
 func (c *tCore) Network() dex.Network {
@@ -193,7 +215,11 @@ func (c *tCore) TorProxy() string {
 func (c *tCore) FiatConversionRates() map[uint32]float64 {
 	return c.fiatRates
 }
-func (c *tCore) Broadcast(core.Notification) {}
+func (c *tCore) Broadcast(note core.Notification) {
+	c.broadcastsMtx.Lock()
+	c.broadcasts = append(c.broadcasts, note)
+	c.broadcastsMtx.Unlock()
+}
 func (c *tCore) TradingLimits(host string) (userParcels, parcelLimit uint32, err error) {
 	return c.userParcels, c.parcelLimit, nil
 }

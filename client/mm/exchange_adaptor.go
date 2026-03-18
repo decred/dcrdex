@@ -1482,10 +1482,7 @@ type BotBalances struct {
 
 // dexBalance must be called with the balancesMtx read locked.
 func (u *unifiedExchangeAdaptor) dexBalance(assetID uint32) *BotBalance {
-	bal, found := u.baseDexBalances[assetID]
-	if !found {
-		return &BotBalance{}
-	}
+	bal := u.baseDexBalances[assetID]
 
 	totalEffects := newBalanceEffects()
 	addEffects := func(effects *BalanceEffects) {
@@ -1527,6 +1524,7 @@ func (u *unifiedExchangeAdaptor) dexBalance(assetID uint32) *BotBalance {
 		Available: uint64(availableBalance),
 		Locked:    totalEffects.Locked[assetID],
 		Pending:   totalEffects.Pending[assetID],
+		Reserved:  totalEffects.Reserved[assetID],
 	}
 }
 
@@ -1698,10 +1696,13 @@ func (u *unifiedExchangeAdaptor) allAssets() []uint32 {
 	assets[u.dexQuoteID] = struct{}{}
 	assets[feeAssetID(u.dexBaseID)] = struct{}{}
 	assets[feeAssetID(u.dexQuoteID)] = struct{}{}
-	assets[u.botCfg().CEXBaseID] = struct{}{}
-	assets[u.botCfg().CEXQuoteID] = struct{}{}
-	assets[feeAssetID(u.botCfg().CEXBaseID)] = struct{}{}
-	assets[feeAssetID(u.botCfg().CEXQuoteID)] = struct{}{}
+
+	if u.botCfg().CEXName != "" {
+		assets[u.botCfg().CEXBaseID] = struct{}{}
+		assets[u.botCfg().CEXQuoteID] = struct{}{}
+		assets[feeAssetID(u.botCfg().CEXBaseID)] = struct{}{}
+		assets[feeAssetID(u.botCfg().CEXQuoteID)] = struct{}{}
+	}
 
 	// TODO: add intermediate asset ID if multi-hop is enabled?
 
@@ -1807,7 +1808,7 @@ func (u *unifiedExchangeAdaptor) confirmDeposit(ctx context.Context, depositID s
 	if bridgeTx != nil && !bridgeTx.BridgeCounterpartTx.Complete {
 		tx, err := u.clientCore.WalletTransaction(deposit.dexAssetID, bridgeTx.ID)
 		if err != nil {
-			u.log.Errorf("Error getting wallet transaction: %v", err)
+			u.log.Errorf("Error getting %s wallet transaction %s: %v", dex.BipIDSymbol(deposit.dexAssetID), bridgeTx.ID, err)
 			return false
 		}
 
@@ -1843,9 +1844,9 @@ func (u *unifiedExchangeAdaptor) confirmDeposit(ctx context.Context, depositID s
 
 	// If the deposit tx is not yet confirmed, check if it is confirmed.
 	if depositTx != nil && !depositTx.Confirmed {
-		tx, err := u.clientCore.WalletTransaction(deposit.dexAssetID, depositTx.ID)
+		tx, err := u.clientCore.WalletTransaction(deposit.cexAssetID, depositTx.ID)
 		if err != nil {
-			u.log.Errorf("Error getting wallet transaction: %v", err)
+			u.log.Errorf("Error getting %s wallet transaction %s: %v", dex.BipIDSymbol(deposit.cexAssetID), depositTx.ID, err)
 			return false
 		}
 
@@ -1938,6 +1939,121 @@ func (u *unifiedExchangeAdaptor) bridge(dexAssetID uint32, amount uint64, deposi
 	return bridgeTx, nil
 }
 
+func (u *unifiedExchangeAdaptor) ensureSufficientBalanceForDeposit(ctx context.Context, dexAssetID, cexAssetID uint32, amount uint64) error {
+	required := map[uint32]uint64{
+		dexAssetID: amount,
+	}
+
+	if dexAssetID != cexAssetID {
+		cfg := u.botCfg()
+		bridgeName := cfg.BaseBridgeName
+		if dexAssetID != u.dexBaseID {
+			bridgeName = cfg.QuoteBridgeName
+		}
+		feesAndLimits, err := u.clientCore.BridgeFeesAndLimits(dexAssetID, cexAssetID, bridgeName)
+		if err != nil {
+			return fmt.Errorf("failed to estimate bridge fees for %s -> %s: %w",
+				dex.BipIDSymbol(dexAssetID), dex.BipIDSymbol(cexAssetID), err)
+		}
+		for assetID, fee := range feesAndLimits.Fees {
+			required[assetID] += fee
+		}
+	}
+
+	addr, err := u.CEX.GetDepositAddress(ctx, cexAssetID)
+	if err != nil {
+		return fmt.Errorf("failed to get CEX deposit address for %s: %w", dex.BipIDSymbol(cexAssetID), err)
+	}
+
+	subtract := u.isWithdrawer(cexAssetID)
+	sendFee, _, err := u.clientCore.EstimateSendTxFee(addr, cexAssetID, amount, subtract, false)
+	if err != nil {
+		return fmt.Errorf("failed to estimate deposit fee for %s: %w", dex.BipIDSymbol(cexAssetID), err)
+	}
+
+	sendFeeAsset := feeAssetID(cexAssetID)
+	if sendFeeAsset == cexAssetID {
+		if dexAssetID == cexAssetID || !subtract {
+			required[cexAssetID] += sendFee
+		}
+	} else {
+		// If the later wallet-to-CEX send pays fees in a separate asset, the
+		// bot must already have that fee asset on the DEX side.
+		required[sendFeeAsset] += sendFee
+	}
+
+	assetIDs := make([]uint32, 0, len(required))
+	for assetID := range required {
+		assetIDs = append(assetIDs, assetID)
+	}
+	sort.Slice(assetIDs, func(i, j int) bool {
+		return assetIDs[i] < assetIDs[j]
+	})
+
+	var insufficiencies []string
+	for _, assetID := range assetIDs {
+		need := required[assetID]
+		have := u.DEXBalance(assetID).Available
+		if have < need {
+			insufficiencies = append(insufficiencies, fmt.Sprintf("%s need %d have %d",
+				dex.BipIDSymbol(assetID), need, have))
+		}
+	}
+	if len(insufficiencies) > 0 {
+		return fmt.Errorf("insufficient balance for deposit %s -> %s: %s",
+			dex.BipIDSymbol(dexAssetID), dex.BipIDSymbol(cexAssetID), strings.Join(insufficiencies, ", "))
+	}
+
+	return nil
+}
+
+func (u *unifiedExchangeAdaptor) ensureSufficientBalanceForWithdrawal(cexAssetID, dexAssetID uint32, amount uint64) error {
+	symbol := dex.BipIDSymbol(cexAssetID)
+	balance := u.CEXBalance(cexAssetID)
+	if balance.Available < amount {
+		return fmt.Errorf("bot has insufficient balance to withdraw %s. required: %v, have: %v", symbol, amount, balance.Available)
+	}
+
+	if cexAssetID == dexAssetID {
+		return nil
+	}
+
+	cfg := u.botCfg()
+	bridgeName := cfg.BaseBridgeName
+	if dexAssetID != u.dexBaseID {
+		bridgeName = cfg.QuoteBridgeName
+	}
+	feesAndLimits, err := u.clientCore.BridgeFeesAndLimits(cexAssetID, dexAssetID, bridgeName)
+	if err != nil {
+		return fmt.Errorf("failed to estimate bridge fees for %s -> %s: %w",
+			dex.BipIDSymbol(cexAssetID), dex.BipIDSymbol(dexAssetID), err)
+	}
+
+	assetIDs := make([]uint32, 0, len(feesAndLimits.Fees))
+	for assetID := range feesAndLimits.Fees {
+		assetIDs = append(assetIDs, assetID)
+	}
+	sort.Slice(assetIDs, func(i, j int) bool {
+		return assetIDs[i] < assetIDs[j]
+	})
+
+	var insufficiencies []string
+	for _, assetID := range assetIDs {
+		need := feesAndLimits.Fees[assetID]
+		have := u.DEXBalance(assetID).Available
+		if have < need {
+			insufficiencies = append(insufficiencies, fmt.Sprintf("%s need %d have %d",
+				dex.BipIDSymbol(assetID), need, have))
+		}
+	}
+	if len(insufficiencies) > 0 {
+		return fmt.Errorf("insufficient balance for withdrawal %s -> %s: %s",
+			dex.BipIDSymbol(cexAssetID), dex.BipIDSymbol(dexAssetID), strings.Join(insufficiencies, ", "))
+	}
+
+	return nil
+}
+
 func (u *unifiedExchangeAdaptor) sendFundsToCEX(ctx context.Context, assetID uint32, amount uint64) (*asset.WalletTransaction, error) {
 	addr, err := u.CEX.GetDepositAddress(ctx, assetID)
 	if err != nil {
@@ -1961,11 +2077,15 @@ func (u *unifiedExchangeAdaptor) sendFundsToCEX(ctx context.Context, assetID uin
 // the fees of the deposit transaction are confirmed by the wallet and the
 // CEX confirms the amount they received, the onConfirm callback is called.
 func (u *unifiedExchangeAdaptor) deposit(ctx context.Context, dexAssetID uint32, amount uint64) error {
-	balance := u.DEXBalance(dexAssetID)
+	var cexAssetID uint32
+	if dexAssetID == u.dexBaseID {
+		cexAssetID = u.botCfg().CEXBaseID
+	} else {
+		cexAssetID = u.botCfg().CEXQuoteID
+	}
 
-	// TODO: estimate fee and make sure we have enough to cover it.
-	if balance.Available < amount {
-		return fmt.Errorf("bot has insufficient balance to deposit %d. required: %v, have: %v", dexAssetID, amount, balance.Available)
+	if err := u.ensureSufficientBalanceForDeposit(ctx, dexAssetID, cexAssetID, amount); err != nil {
+		return err
 	}
 
 	// Initiate a bridge if needed.
@@ -1996,12 +2116,9 @@ func (u *unifiedExchangeAdaptor) deposit(ctx context.Context, dexAssetID uint32,
 		u.log.Infof("Deposited %s. TxID = %s", u.fmtQty(dexAssetID, amount), depositTx.ID)
 	}
 
-	var cexAssetID uint32
 	if dexAssetID == u.dexBaseID {
-		cexAssetID = u.botCfg().CEXBaseID
 		u.pendingBaseRebalance.Store(true)
 	} else {
-		cexAssetID = u.botCfg().CEXQuoteID
 		u.pendingQuoteRebalance.Store(true)
 	}
 
@@ -2021,6 +2138,7 @@ func (u *unifiedExchangeAdaptor) deposit(ctx context.Context, dexAssetID uint32,
 	u.balancesMtx.Lock()
 	u.pendingDeposits[txID] = deposit
 	u.balancesMtx.Unlock()
+	u.sendStatsUpdate()
 
 	u.wg.Add(1)
 	go func() {
@@ -2141,7 +2259,7 @@ func (u *unifiedExchangeAdaptor) confirmWithdrawal(ctx context.Context, withdraw
 			return false
 		}
 		if err != nil {
-			u.log.Errorf("Error getting wallet transaction: %v", err)
+			u.log.Errorf("Error getting %s wallet transaction %s: %v", dex.BipIDSymbol(withdrawal.cexAssetID), withdrawalTxID, err)
 			return false
 		}
 
@@ -2216,8 +2334,6 @@ func (u *unifiedExchangeAdaptor) confirmWithdrawal(ctx context.Context, withdraw
 // for the transaction ID. After the transaction ID is available, the wallet is
 // queried for the amount received.
 func (u *unifiedExchangeAdaptor) withdraw(ctx context.Context, cexAssetID uint32, amount uint64) error {
-	symbol := dex.BipIDSymbol(cexAssetID)
-
 	var dexAssetID uint32
 	cfg := u.botCfg()
 	if cexAssetID == cfg.CEXBaseID {
@@ -2228,9 +2344,8 @@ func (u *unifiedExchangeAdaptor) withdraw(ctx context.Context, cexAssetID uint32
 		return fmt.Errorf("invalid CEX asset ID: %d", cexAssetID)
 	}
 
-	balance := u.CEXBalance(cexAssetID)
-	if balance.Available < amount {
-		return fmt.Errorf("bot has insufficient balance to withdraw %s. required: %v, have: %v", symbol, amount, balance.Available)
+	if err := u.ensureSufficientBalanceForWithdrawal(cexAssetID, dexAssetID, amount); err != nil {
+		return err
 	}
 
 	addr, err := u.clientCore.NewDepositAddress(cexAssetID)
@@ -2795,7 +2910,15 @@ func (u *unifiedExchangeAdaptor) isWithdrawer(assetID uint32) bool {
 	if assetID == u.dexBaseID {
 		return u.baseTraits.IsWithdrawer()
 	}
-	return u.quoteTraits.IsWithdrawer()
+	if assetID == u.dexQuoteID {
+		return u.quoteTraits.IsWithdrawer()
+	}
+	traits, err := u.clientCore.WalletTraits(assetID)
+	if err != nil {
+		u.log.Errorf("error getting wallet traits for %s: %v", dex.BipIDSymbol(assetID), err)
+		return false
+	}
+	return traits.IsWithdrawer()
 }
 
 // orderAssets returns all the assets involved in a dex order.
@@ -3512,28 +3635,40 @@ func (u *unifiedExchangeAdaptor) doInternalTransfers(baseDeposit, baseWithdraw, 
 
 func (u *unifiedExchangeAdaptor) doExternalTransfers(dist *distribution, currEpoch uint64) (actionTaken bool, err error) {
 	baseInv, quoteInv := dist.baseInv, dist.quoteInv
-	if baseInv.toDeposit+baseInv.toWithdraw+quoteInv.toDeposit+quoteInv.toWithdraw == 0 {
+
+	baseToDeposit, baseToWithdraw := baseInv.toDeposit, baseInv.toWithdraw
+	quoteToDeposit, quoteToWithdraw := quoteInv.toDeposit, quoteInv.toWithdraw
+	if u.pendingBaseRebalance.Load() {
+		baseToDeposit = 0
+		baseToWithdraw = 0
+	}
+	if u.pendingQuoteRebalance.Load() {
+		quoteToDeposit = 0
+		quoteToWithdraw = 0
+	}
+
+	if baseToDeposit+baseToWithdraw+quoteToDeposit+quoteToWithdraw == 0 {
 		return false, nil
 	}
 
 	var cancels []*dexOrderState
-	if baseInv.toDeposit > 0 || quoteInv.toWithdraw > 0 {
+	if baseToDeposit > 0 || quoteToWithdraw > 0 {
 		var toFree uint64
-		if baseInv.dexAvail < baseInv.toDeposit {
-			if baseInv.dexAvail+baseInv.dexPending >= baseInv.toDeposit {
+		if baseInv.dexAvail < baseToDeposit {
+			if baseInv.dexAvail+baseInv.dexPending >= baseToDeposit {
 				u.log.Tracef("Waiting on pending balance for base deposit")
 				return false, nil
 			}
-			toFree = baseInv.toDeposit - baseInv.dexAvail
+			toFree = baseToDeposit - baseInv.dexAvail
 		}
-		counterQty := quoteInv.cex - quoteInv.toWithdraw + quoteInv.toDeposit
+		counterQty := quoteInv.cex - quoteToWithdraw + quoteToDeposit
 		cs, ok := u.freeUpFunds(u.dexBaseID, toFree, counterQty, currEpoch)
 		if !ok {
 			if u.log.Level() == dex.LevelTrace {
 				u.log.Tracef(
 					"Unable to free up funds for deposit = %s, withdraw = %s, "+
 						"counter-quantity = %s, to free = %s, dex pending = %s",
-					u.fmtBase(baseInv.toDeposit), u.fmtQuote(quoteInv.toWithdraw), u.fmtQuote(counterQty),
+					u.fmtBase(baseToDeposit), u.fmtQuote(quoteToWithdraw), u.fmtQuote(counterQty),
 					u.fmtBase(toFree), u.fmtBase(baseInv.dexPending),
 				)
 			}
@@ -3541,24 +3676,24 @@ func (u *unifiedExchangeAdaptor) doExternalTransfers(dist *distribution, currEpo
 		}
 		cancels = cs
 	}
-	if quoteInv.toDeposit > 0 || baseInv.toWithdraw > 0 {
+	if quoteToDeposit > 0 || baseToWithdraw > 0 {
 		var toFree uint64
-		if quoteInv.dexAvail < quoteInv.toDeposit {
-			if quoteInv.dexAvail+quoteInv.dexPending >= quoteInv.toDeposit {
+		if quoteInv.dexAvail < quoteToDeposit {
+			if quoteInv.dexAvail+quoteInv.dexPending >= quoteToDeposit {
 				// waiting on pending
 				u.log.Tracef("Waiting on pending balance for quote deposit")
 				return false, nil
 			}
-			toFree = quoteInv.toDeposit - quoteInv.dexAvail
+			toFree = quoteToDeposit - quoteInv.dexAvail
 		}
-		counterQty := baseInv.cex - baseInv.toWithdraw + baseInv.toDeposit
+		counterQty := baseInv.cex - baseToWithdraw + baseToDeposit
 		cs, ok := u.freeUpFunds(u.dexQuoteID, toFree, counterQty, currEpoch)
 		if !ok {
 			if u.log.Level() == dex.LevelTrace {
 				u.log.Tracef(
 					"Unable to free up funds for deposit = %s, withdraw = %s, "+
 						"counter-quantity = %s, to free = %s, dex pending = %s",
-					u.fmtQuote(quoteInv.toDeposit), u.fmtBase(baseInv.toWithdraw), u.fmtBase(counterQty),
+					u.fmtQuote(quoteToDeposit), u.fmtBase(baseToWithdraw), u.fmtBase(counterQty),
 					u.fmtQuote(toFree), u.fmtQuote(quoteInv.dexPending),
 				)
 			}
@@ -3576,37 +3711,33 @@ func (u *unifiedExchangeAdaptor) doExternalTransfers(dist *distribution, currEpo
 		return true, nil
 	}
 
-	if !u.pendingBaseRebalance.Load() {
-		if baseInv.toDeposit > 0 {
-			err := u.deposit(u.ctx, u.dexBaseID, baseInv.toDeposit)
-			u.updateCEXProblems(cexDepositProblem, u.dexBaseID, err)
-			if err != nil {
-				return false, fmt.Errorf("error depositing base: %w", err)
-			}
-		} else if baseInv.toWithdraw > 0 {
-			botCfg := u.botCfg()
-			err := u.withdraw(u.ctx, botCfg.CEXBaseID, baseInv.toWithdraw)
-			u.updateCEXProblems(cexWithdrawProblem, botCfg.CEXBaseID, err)
-			if err != nil {
-				return false, fmt.Errorf("error withdrawing base: %w", err)
-			}
+	if baseToDeposit > 0 {
+		err := u.deposit(u.ctx, u.dexBaseID, baseToDeposit)
+		u.updateCEXProblems(cexDepositProblem, u.dexBaseID, err)
+		if err != nil {
+			return false, fmt.Errorf("error depositing base: %w", err)
+		}
+	} else if baseToWithdraw > 0 {
+		botCfg := u.botCfg()
+		err := u.withdraw(u.ctx, botCfg.CEXBaseID, baseToWithdraw)
+		u.updateCEXProblems(cexWithdrawProblem, botCfg.CEXBaseID, err)
+		if err != nil {
+			return false, fmt.Errorf("error withdrawing base: %w", err)
 		}
 	}
 
-	if !u.pendingQuoteRebalance.Load() {
-		if quoteInv.toDeposit > 0 {
-			err := u.deposit(u.ctx, u.dexQuoteID, quoteInv.toDeposit)
-			u.updateCEXProblems(cexDepositProblem, u.dexQuoteID, err)
-			if err != nil {
-				return false, fmt.Errorf("error depositing quote: %w", err)
-			}
-		} else if quoteInv.toWithdraw > 0 {
-			botCfg := u.botCfg()
-			err := u.withdraw(u.ctx, botCfg.CEXQuoteID, quoteInv.toWithdraw)
-			u.updateCEXProblems(cexWithdrawProblem, botCfg.CEXQuoteID, err)
-			if err != nil {
-				return false, fmt.Errorf("error withdrawing quote: %w", err)
-			}
+	if quoteToDeposit > 0 {
+		err := u.deposit(u.ctx, u.dexQuoteID, quoteToDeposit)
+		u.updateCEXProblems(cexDepositProblem, u.dexQuoteID, err)
+		if err != nil {
+			return false, fmt.Errorf("error depositing quote: %w", err)
+		}
+	} else if quoteToWithdraw > 0 {
+		botCfg := u.botCfg()
+		err := u.withdraw(u.ctx, botCfg.CEXQuoteID, quoteToWithdraw)
+		u.updateCEXProblems(cexWithdrawProblem, botCfg.CEXQuoteID, err)
+		if err != nil {
+			return false, fmt.Errorf("error withdrawing quote: %w", err)
 		}
 	}
 
@@ -3980,22 +4111,35 @@ func newProfitLoss(
 	mods map[uint32]int64,
 	fiatRates map[uint32]float64,
 ) *ProfitLoss {
-	pl := &ProfitLoss{
-		Initial: make(map[uint32]*Amount, len(initialBalances)),
-		Mods:    make(map[uint32]*Amount, len(mods)),
-		Diffs:   make(map[uint32]*Amount, len(initialBalances)),
-		Final:   make(map[uint32]*Amount, len(finalBalances)),
+	assetIDs := make(map[uint32]struct{}, len(initialBalances)+len(finalBalances)+len(mods))
+	for assetID := range initialBalances {
+		assetIDs[assetID] = struct{}{}
 	}
-	for assetID, v := range initialBalances {
-		if v == 0 {
-			continue
-		}
+	for assetID := range finalBalances {
+		assetIDs[assetID] = struct{}{}
+	}
+	for assetID := range mods {
+		assetIDs[assetID] = struct{}{}
+	}
+
+	pl := &ProfitLoss{
+		Initial: make(map[uint32]*Amount, len(assetIDs)),
+		Mods:    make(map[uint32]*Amount, len(mods)),
+		Diffs:   make(map[uint32]*Amount, len(assetIDs)),
+		Final:   make(map[uint32]*Amount, len(assetIDs)),
+	}
+	for assetID := range assetIDs {
 		fiatRate := fiatRates[assetID]
-		init := NewAmount(assetID, int64(v), fiatRate)
-		pl.Initial[assetID] = init
-		mod := NewAmount(assetID, mods[assetID], fiatRate)
-		pl.InitialUSD += init.USD
-		pl.ModsUSD += mod.USD
+		if v := initialBalances[assetID]; v != 0 {
+			init := NewAmount(assetID, int64(v), fiatRate)
+			pl.Initial[assetID] = init
+			pl.InitialUSD += init.USD
+		}
+		if mod := mods[assetID]; mod != 0 {
+			amt := NewAmount(assetID, mod, fiatRate)
+			pl.Mods[assetID] = amt
+			pl.ModsUSD += amt.USD
+		}
 		diff := int64(finalBalances[assetID]) - int64(initialBalances[assetID]) - mods[assetID]
 		pl.Diffs[assetID] = NewAmount(assetID, diff, fiatRate)
 	}
@@ -4018,20 +4162,18 @@ func (u *unifiedExchangeAdaptor) stats() *RunStats {
 	u.balancesMtx.RLock()
 	defer u.balancesMtx.RUnlock()
 
-	dexBalances := make(map[uint32]*BotBalance)
-	cexBalances := make(map[uint32]*BotBalance)
-	totalBalances := make(map[uint32]uint64)
+	assets := u.allAssets()
+	dexBalances := make(map[uint32]*BotBalance, len(assets))
+	cexBalances := make(map[uint32]*BotBalance, len(assets))
+	totalBalances := make(map[uint32]uint64, len(assets))
 
-	for assetID := range u.baseDexBalances {
-		bal := u.dexBalance(assetID)
-		dexBalances[assetID] = bal
-		totalBalances[assetID] = bal.Available + bal.Locked + bal.Pending + bal.Reserved
-	}
-
-	for assetID := range u.baseCexBalances {
-		bal := u.cexBalance(assetID)
-		cexBalances[assetID] = bal
-		totalBalances[assetID] += bal.Available + bal.Locked + bal.Pending + bal.Reserved
+	for _, assetID := range assets {
+		dexBal := u.dexBalance(assetID)
+		cexBal := u.cexBalance(assetID)
+		dexBalances[assetID] = dexBal
+		cexBalances[assetID] = cexBal
+		totalBalances[assetID] = dexBal.Available + dexBal.Locked + dexBal.Pending + dexBal.Reserved +
+			cexBal.Available + cexBal.Locked + cexBal.Pending + cexBal.Reserved
 	}
 
 	fiatRates := u.fiatRates.Load().(map[uint32]float64)
@@ -4045,13 +4187,15 @@ func (u *unifiedExchangeAdaptor) stats() *RunStats {
 	tradedUSD := u.runStats.tradedUSD.v
 	u.runStats.tradedUSD.Unlock()
 
+	profitLoss := newProfitLoss(u.initialBalances, totalBalances, u.inventoryMods, fiatRates)
+
 	// Effects of pendingWithdrawals are applied when the withdrawal is
 	// complete.
 	return &RunStats{
 		InitialBalances:    u.initialBalances,
 		DEXBalances:        dexBalances,
 		CEXBalances:        cexBalances,
-		ProfitLoss:         newProfitLoss(u.initialBalances, totalBalances, u.inventoryMods, fiatRates),
+		ProfitLoss:         profitLoss,
 		StartTime:          u.startTime.Load(),
 		PendingDeposits:    len(u.pendingDeposits),
 		PendingWithdrawals: len(u.pendingWithdrawals),
