@@ -2375,7 +2375,18 @@ export default class WalletsPage extends BasePage {
   /* Display a deposit address. */
   async showDeposit () {
     const { page, selectedTicker: { networkAssets } } = this
-    const assetIDs = networkAssets.map(({ assetID }: NetworkAsset) => assetID)
+    const assetIDs = networkAssets
+      .filter(({ assetID, token }: NetworkAsset) => {
+        const w = app().walletMap[assetID]
+        if (!w || w.disabled) return false
+        if (token) {
+          const pw = app().walletMap[token.parentID]
+          if (pw && pw.disabled) return false
+        }
+        return true
+      })
+      .map(({ assetID }: NetworkAsset) => assetID)
+    if (assetIDs.length === 0) return
     this.depositAddrForm.setAssetSelect(assetIDs)
     this.forms.show(page.deposit)
   }
