@@ -641,6 +641,8 @@ func (c *tCEX) Book(baseID, quoteID uint32) (buys, sells []*core.MiniOrder, _ er
 	return nil, nil, nil
 }
 
+func (c *tCEX) AssetGroups() map[uint32]uint32 { return nil }
+
 type prepareRebalanceResult struct {
 	rebalance   int64
 	cexReserves uint64

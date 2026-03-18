@@ -622,6 +622,37 @@ type bitgetWithdrawInfo struct {
 
 var _ CEX = (*bitget)(nil)
 
+func (bg *bitget) AssetGroups() map[uint32]uint32 {
+	tokenIDsI := bg.tokenIDs.Load()
+	if tokenIDsI == nil {
+		return nil
+	}
+	tokenIDs := tokenIDsI.(map[string][]uint32)
+	groups := make(map[uint32]uint32)
+	for coin, tknIDs := range tokenIDs {
+		ids := make([]uint32, 0, len(tknIDs)+1)
+		if nativeID, found := dex.BipSymbolID(convertBitgetCoin(coin)); found {
+			ids = append(ids, nativeID)
+		}
+		ids = append(ids, tknIDs...)
+		if len(ids) < 2 {
+			continue
+		}
+		canonical := ids[0]
+		for _, id := range ids[1:] {
+			if id < canonical {
+				canonical = id
+			}
+		}
+		for _, id := range ids {
+			if id != canonical {
+				groups[id] = canonical
+			}
+		}
+	}
+	return groups
+}
+
 // Symbol conversion maps
 var dexToBitgetCoinSymbol = map[string]string{
 	"polygon": "POL",

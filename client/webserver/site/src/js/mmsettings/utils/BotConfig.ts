@@ -373,12 +373,16 @@ function initialMultiHopCfg (
   cexQuoteID: number,
   savedCfg?: MultiHopCfg
 ): MultiHopCfg | undefined {
-  const intermediateAsset = savedCfg
-    ? savedCfg.baseAssetMarket[0] === cexBaseID ? savedCfg.baseAssetMarket[1] : savedCfg.baseAssetMarket[0]
-    : intermediateAssets[0]
+  const savedIntermediateAsset = savedCfg
+    ? (savedCfg.baseAssetMarket[0] === cexBaseID ? savedCfg.baseAssetMarket[1] : savedCfg.baseAssetMarket[0])
+    : null
 
-  const markets = multiHopMarkets(intermediateAsset, cexBaseID, cexQuoteID, cexStatus) ||
-    multiHopMarkets(intermediateAssets[0], cexBaseID, cexQuoteID, cexStatus)
+  let markets = savedIntermediateAsset == null
+    ? undefined
+    : multiHopMarkets(savedIntermediateAsset, cexBaseID, cexQuoteID, cexStatus)
+  if (!markets && intermediateAssets.length > 0) {
+    markets = multiHopMarkets(intermediateAssets[0], cexBaseID, cexQuoteID, cexStatus)
+  }
 
   if (!markets) return undefined
 
@@ -535,7 +539,7 @@ export async function initialBotConfigState (
     fiatRatesMap: app().fiatRatesMap
   }
 
-  return updateAllocationsBasedOnQuickConfig(botConfigState)
+  return updateAllocationsBasedOnQuickConfig(syncArbMMMultiHopState(botConfigState))
 }
 
 export async function botConfigStateFromSavedConfig (
@@ -587,16 +591,6 @@ export async function botConfigStateFromSavedConfig (
     autoRebalance
   }
 
-  let intermediateAsset: number | null = null
-  if (config.arbMarketMakingConfig?.multiHop && cexStatus && intermediateAssets) {
-    config.arbMarketMakingConfig.multiHop = initialMultiHopCfg(cexStatus, intermediateAssets, config.cexBaseID, config.cexQuoteID, config.arbMarketMakingConfig.multiHop)
-    if (!config.arbMarketMakingConfig.multiHop) {
-      return 'Unable to determine initial multi-hop config'
-    }
-    const baseAssetMarket = config.arbMarketMakingConfig.multiHop.baseAssetMarket
-    intermediateAsset = baseAssetMarket[0] === config.cexBaseID ? baseAssetMarket[1] : baseAssetMarket[0]
-  }
-
   const { dexBalances, cexBalances } = await MM.availableBalances(
     { host: savedBotConfig.host, baseID: savedBotConfig.baseID, quoteID: savedBotConfig.quoteID },
     config.cexBaseID,
@@ -635,14 +629,16 @@ export async function botConfigStateFromSavedConfig (
     baseMinWithdraw,
     quoteMinWithdraw,
     intermediateAssets,
-    intermediateAsset,
+    intermediateAsset: null,
     cexStatus,
     fiatRatesMap: app().fiatRatesMap
   }
 
+  const syncedState = syncArbMMMultiHopState(botConfigState)
+
   return config.uiConfig.usingQuickBalance
-    ? updateAllocationsBasedOnQuickConfig(botConfigState)
-    : clampOriginalAllocations(botConfigState, dexBalances, cexBalances)
+    ? updateAllocationsBasedOnQuickConfig(syncedState)
+    : clampOriginalAllocations(syncedState, dexBalances, cexBalances)
 }
 
 // Reducer and Context
@@ -873,6 +869,97 @@ function multiHopMarkets (
   }
 
   return baseAssetMarket && quoteAssetMarket ? [baseAssetMarket, quoteAssetMarket] : undefined
+}
+
+function validIntermediateAssets (
+  cexBaseID: number,
+  cexQuoteID: number,
+  cexStatus: MMCEXStatus
+): number[] | null {
+  const reachableAssets = new Set<number>()
+  for (const mkt of Object.values(cexStatus.markets)) {
+    if (mkt.baseID === cexBaseID) reachableAssets.add(mkt.quoteID)
+    if (mkt.quoteID === cexBaseID) reachableAssets.add(mkt.baseID)
+  }
+
+  const assetGroups = cexStatus.assetGroups ?? {}
+  const seenCanonical = new Set<number>()
+  const intermediateAssets: number[] = []
+  for (const intermediateAsset of reachableAssets) {
+    if (!multiHopMarkets(intermediateAsset, cexBaseID, cexQuoteID, cexStatus)) continue
+    const canonicalID = assetGroups[intermediateAsset] ?? intermediateAsset
+    if (seenCanonical.has(canonicalID)) continue
+    const asset = app().assets[canonicalID]
+    if (!asset) continue
+    const assetSymbol = asset.symbol.split('.')[0]
+    if (assetSymbol === 'weth') continue
+    seenCanonical.add(canonicalID)
+    intermediateAssets.push(canonicalID)
+  }
+
+  return intermediateAssets.length ? intermediateAssets : null
+}
+
+function syncArbMMMultiHopState (state: BotConfigState): BotConfigState {
+  if (!state.botConfig.arbMarketMakingConfig || !state.cexStatus) {
+    return state
+  }
+
+  const savedMultiHop = state.botConfig.arbMarketMakingConfig.multiHop
+  const savedIntermediateAsset = savedMultiHop
+    ? (savedMultiHop.baseAssetMarket[0] === state.botConfig.cexBaseID
+        ? savedMultiHop.baseAssetMarket[1]
+        : savedMultiHop.baseAssetMarket[0])
+    : null
+  const intermediateAssets = validIntermediateAssets(
+    state.botConfig.cexBaseID,
+    state.botConfig.cexQuoteID,
+    state.cexStatus
+  )
+
+  if (state.runStats && savedMultiHop && savedIntermediateAsset !== null) {
+    const assetGroups = state.cexStatus.assetGroups ?? {}
+    const canonicalSaved = assetGroups[savedIntermediateAsset] ?? savedIntermediateAsset
+    const displayIntermediateAssets = intermediateAssets
+      ? (intermediateAssets.some(id => (assetGroups[id] ?? id) === canonicalSaved)
+          ? intermediateAssets
+          : [...intermediateAssets, canonicalSaved])
+      : [canonicalSaved]
+
+    return {
+      ...state,
+      intermediateAssets: displayIntermediateAssets,
+      intermediateAsset: canonicalSaved
+    }
+  }
+  let intermediateAsset: number | null = null
+  let multiHop: MultiHopCfg | undefined
+  if (intermediateAssets) {
+    multiHop = initialMultiHopCfg(
+      state.cexStatus,
+      intermediateAssets,
+      state.botConfig.cexBaseID,
+      state.botConfig.cexQuoteID,
+      state.botConfig.arbMarketMakingConfig.multiHop
+    )
+    if (multiHop) {
+      const baseAssetMarket = multiHop.baseAssetMarket
+      intermediateAsset = baseAssetMarket[0] === state.botConfig.cexBaseID ? baseAssetMarket[1] : baseAssetMarket[0]
+    }
+  }
+
+  return {
+    ...state,
+    intermediateAssets,
+    intermediateAsset,
+    botConfig: {
+      ...state.botConfig,
+      arbMarketMakingConfig: {
+        ...state.botConfig.arbMarketMakingConfig,
+        multiHop
+      }
+    }
+  }
 }
 
 export const botConfigStateReducer = (state: BotConfigState | null, action: BotConfigAction): BotConfigState | null => {
@@ -1170,6 +1257,8 @@ export const botConfigStateReducer = (state: BotConfigState | null, action: BotC
         baseMinWithdraw,
         quoteMinWithdraw
       }
+
+      newState = syncArbMMMultiHopState(newState)
 
       return updateAllocationsBasedOnQuickConfig(newState)
     }

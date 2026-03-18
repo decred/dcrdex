@@ -221,6 +221,7 @@ type CEXStatus struct {
 	ConnectionError string                            `json:"connectErr"`
 	Markets         map[string]*libxc.Market          `json:"markets"`
 	Balances        map[uint32]*libxc.ExchangeBalance `json:"balances"`
+	AssetGroups     map[uint32]uint32                 `json:"assetGroups"`
 }
 
 // StampedError is an error with a timestamp.
@@ -404,6 +405,7 @@ func (m *MarketMaker) Status() *Status {
 		s.ConnectionError = cex.connectErr
 		s.Balances = cex.balancesCopy()
 		cex.mtx.RUnlock()
+		s.AssetGroups = cex.AssetGroups()
 		status.CEXes[cex.Name] = s
 	}
 	return status

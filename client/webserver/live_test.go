@@ -2373,8 +2373,9 @@ func (m *TMarketMaker) Status() *mm.Status {
 			Config:    cexCfg,
 			Connected: rand.Float32() < 0.5,
 			// ConnectionError: "test connection error",
-			Markets:  binanceMarkets,
-			Balances: bals,
+			Markets:     binanceMarkets,
+			Balances:    bals,
+			AssetGroups: map[uint32]uint32{8453: 60},
 		}
 	}
 	return status

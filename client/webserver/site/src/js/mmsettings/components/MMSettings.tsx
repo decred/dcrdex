@@ -98,31 +98,41 @@ export const cexSupportsArbOnMarket = (
     return true
   }
 
-  // baseBridges and quoteBridges are all the assets that the base and quote
-  // asset can be bridged to that are supported by the CEX, mapping to available bridge names.
-  // If the CEX supports the base or quote assets directly, the bridge map will be empty.
-  let baseBridges: Record<number, string[]> | null = {}
-  let quoteBridges: Record<number, string[]> | null = {}
+  // baseBridges and quoteBridges are the bridge destinations exposed in the UI
+  // when the asset is not supported directly on the CEX. Route discovery still
+  // considers both direct and bridged representations in parallel.
+  let baseDirectSupport = false
+  let quoteDirectSupport = false
+  const baseBridgeOptions: Record<number, string[]> = {}
+  const quoteBridgeOptions: Record<number, string[]> = {}
   for (const { baseID: cexBaseID, quoteID: cexQuoteID } of Object.values(cexStatus.markets ?? [])) {
-    if (cexBaseID === baseID) {
-      baseBridges = null
+    if (cexBaseID === baseID || cexQuoteID === baseID) {
+      baseDirectSupport = true
     }
-    if (cexQuoteID === quoteID) {
-      quoteBridges = null
+    if (cexBaseID === quoteID || cexQuoteID === quoteID) {
+      quoteDirectSupport = true
     }
-    if (baseBridges && supportedBridgePath(baseID, cexBaseID)) {
-      baseBridges[cexBaseID] = getBridgeNames(baseID, cexBaseID)
+    if (supportedBridgePath(baseID, cexBaseID)) {
+      baseBridgeOptions[cexBaseID] = getBridgeNames(baseID, cexBaseID)
     }
-    if (baseBridges && supportedBridgePath(baseID, cexQuoteID)) {
-      baseBridges[cexQuoteID] = getBridgeNames(baseID, cexQuoteID)
+    if (supportedBridgePath(baseID, cexQuoteID)) {
+      baseBridgeOptions[cexQuoteID] = getBridgeNames(baseID, cexQuoteID)
     }
-    if (quoteBridges && supportedBridgePath(quoteID, cexQuoteID)) {
-      quoteBridges[cexQuoteID] = getBridgeNames(quoteID, cexQuoteID)
+    if (supportedBridgePath(quoteID, cexQuoteID)) {
+      quoteBridgeOptions[cexQuoteID] = getBridgeNames(quoteID, cexQuoteID)
     }
-    if (quoteBridges && supportedBridgePath(quoteID, cexBaseID)) {
-      quoteBridges[cexBaseID] = getBridgeNames(quoteID, cexBaseID)
+    if (supportedBridgePath(quoteID, cexBaseID)) {
+      quoteBridgeOptions[cexBaseID] = getBridgeNames(quoteID, cexBaseID)
     }
   }
+
+  const baseBridges = baseDirectSupport ? null : baseBridgeOptions
+  const quoteBridges = quoteDirectSupport ? null : quoteBridgeOptions
+
+  const supportsBaseAsset = (cexAssetID: number): boolean =>
+    cexAssetID === baseID || baseBridgeOptions[cexAssetID] !== undefined
+  const supportsQuoteAsset = (cexAssetID: number): boolean =>
+    cexAssetID === quoteID || quoteBridgeOptions[cexAssetID] !== undefined
 
   // Find all markets that trade either base or quote assets trade on. If there
   // is an exact match, we can return early.
@@ -133,10 +143,10 @@ export const cexSupportsArbOnMarket = (
       return [true, null, baseBridges, quoteBridges]
     }
 
-    if (cexBaseID === baseID || (baseBridges && baseBridges[cexBaseID])) baseMarkets.add(cexQuoteID)
-    if (cexQuoteID === baseID || (baseBridges && baseBridges[cexQuoteID])) baseMarkets.add(cexBaseID)
-    if (cexBaseID === quoteID || (quoteBridges && quoteBridges[cexBaseID])) quoteMarkets.add(cexQuoteID)
-    if (cexQuoteID === quoteID || (quoteBridges && quoteBridges[cexQuoteID])) quoteMarkets.add(cexBaseID)
+    if (supportsBaseAsset(cexBaseID)) baseMarkets.add(cexQuoteID)
+    if (supportsBaseAsset(cexQuoteID)) baseMarkets.add(cexBaseID)
+    if (supportsQuoteAsset(cexBaseID)) quoteMarkets.add(cexQuoteID)
+    if (supportsQuoteAsset(cexQuoteID)) quoteMarkets.add(cexBaseID)
   }
 
   // If there was no exact match, find all the intermediate assets that can
@@ -148,25 +158,21 @@ export const cexSupportsArbOnMarket = (
     }
   }
 
-  // Filter out duplicate intermediate assets. If two intermediate assets
-  // share the same symbol, only one of them is required. WETH is also
-  // ignored.
-  const intermediateAssetSymbols : Set<string> = new Set()
+  // Filter out duplicate intermediate assets using the CEX's asset group
+  // mapping, which maps non-canonical asset IDs to their canonical
+  // equivalents. WETH is also ignored.
+  const assetGroups = cexStatus.assetGroups ?? {}
+  const seenCanonical = new Set<number>()
   const filteredIntermediateAssets: number[] = []
   for (const intermediateAsset of Object.keys(intermediateAssets).map(Number)) {
-    const asset = app().assets[intermediateAsset]
-    if (!asset) {
-      continue
-    }
+    const canonicalID = assetGroups[intermediateAsset] ?? intermediateAsset
+    if (seenCanonical.has(canonicalID)) continue
+    const asset = app().assets[canonicalID]
+    if (!asset) continue
     const assetSymbol = asset.symbol.split('.')[0]
-    if (assetSymbol === 'weth') {
-      continue
-    }
-    if (intermediateAssetSymbols.has(assetSymbol)) {
-      continue
-    }
-    intermediateAssetSymbols.add(assetSymbol)
-    filteredIntermediateAssets.push(intermediateAsset)
+    if (assetSymbol === 'weth') continue
+    seenCanonical.add(canonicalID)
+    filteredIntermediateAssets.push(canonicalID)
   }
 
   return [false, filteredIntermediateAssets, baseBridges, quoteBridges]

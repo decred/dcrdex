@@ -520,6 +520,27 @@ func newCoinbase(cfg *CEXConfig) (*coinbase, error) {
 	}, nil
 }
 
+func (c *coinbase) AssetGroups() map[uint32]uint32 {
+	groups := make(map[uint32]uint32)
+	for _, ids := range c.tickerIDs {
+		if len(ids) < 2 {
+			continue
+		}
+		canonical := ids[0]
+		for _, id := range ids[1:] {
+			if id < canonical {
+				canonical = id
+			}
+		}
+		for _, id := range ids {
+			if id != canonical {
+				groups[id] = canonical
+			}
+		}
+	}
+	return groups
+}
+
 func (c *coinbase) handleUserMessage(b []byte) {
 	msg := new(cbtypes.UserMessage)
 	if err := json.Unmarshal(b, &msg); err != nil {

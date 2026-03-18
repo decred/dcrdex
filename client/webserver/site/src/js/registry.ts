@@ -892,6 +892,7 @@ export interface MMCEXStatus {
   connectErr: string
   markets: Record<string, CEXMarket>
   balances: Record<number, ExchangeBalance>
+  assetGroups: Record<number, number>
 }
 
 export interface BotBalance {

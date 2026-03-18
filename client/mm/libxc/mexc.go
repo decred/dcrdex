@@ -403,6 +403,37 @@ func (b *mexcOrderBook) midGap() uint64 {
 	return b.book.midGap()
 }
 
+func (m *mexc) AssetGroups() map[uint32]uint32 {
+	// Collect all unique coin symbols from known markets.
+	coins := make(map[string]struct{})
+	m.symbolMetaMtx.RLock()
+	for _, sym := range m.symbolMeta {
+		coins[sym.BaseAsset] = struct{}{}
+		coins[sym.QuoteAsset] = struct{}{}
+	}
+	m.symbolMetaMtx.RUnlock()
+
+	groups := make(map[uint32]uint32)
+	for coin := range coins {
+		ids := m.getDEXAssetIDs(coin)
+		if len(ids) < 2 {
+			continue
+		}
+		canonical := ids[0]
+		for _, id := range ids[1:] {
+			if id < canonical {
+				canonical = id
+			}
+		}
+		for _, id := range ids {
+			if id != canonical {
+				groups[id] = canonical
+			}
+		}
+	}
+	return groups
+}
+
 func newMEXC(cfg *CEXConfig) (*mexc, error) {
 	return &mexc{
 		log:           cfg.Logger,

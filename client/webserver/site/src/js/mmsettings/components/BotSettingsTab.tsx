@@ -74,9 +74,10 @@ const MultiHopSettings: React.FC = () => {
       <div className="mb-3">
         <select
           className={`form-select ${isRunning ? 'mm-readonly-select' : ''}`}
-          value={currentIntermediateAsset || ''}
+          style={{ width: 'auto' }}
+          value={currentIntermediateAsset ?? ''}
           disabled={isRunning}
-          onChange={(e) => handleIntermediateAssetChange(parseInt(e.target.value) || 0)}
+          onChange={(e) => handleIntermediateAssetChange(parseInt(e.target.value))}
         >
           {displayIntermediateAssets.map(assetID => (
             <option key={assetID} value={assetID}>

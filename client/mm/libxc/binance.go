@@ -628,6 +628,37 @@ type binance struct {
 
 var _ CEX = (*binance)(nil)
 
+func (bnc *binance) AssetGroups() map[uint32]uint32 {
+	tokenIDsI := bnc.tokenIDs.Load()
+	if tokenIDsI == nil {
+		return nil
+	}
+	tokenIDs := tokenIDsI.(map[string][]uint32)
+	groups := make(map[uint32]uint32)
+	for coin, tknIDs := range tokenIDs {
+		ids := make([]uint32, 0, len(tknIDs)+1)
+		if nativeID, found := dex.BipSymbolID(convertBnCoin(coin)); found {
+			ids = append(ids, nativeID)
+		}
+		ids = append(ids, tknIDs...)
+		if len(ids) < 2 {
+			continue
+		}
+		canonical := ids[0]
+		for _, id := range ids[1:] {
+			if id < canonical {
+				canonical = id
+			}
+		}
+		for _, id := range ids {
+			if id != canonical {
+				groups[id] = canonical
+			}
+		}
+	}
+	return groups
+}
+
 // TODO: Investigate stablecoin auto-conversion.
 // https://developers.binance.com/docs/wallet/endpoints/switch-busd-stable-coins-convertion
 
