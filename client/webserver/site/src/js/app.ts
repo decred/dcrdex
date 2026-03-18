@@ -336,9 +336,13 @@ export default class Application {
    * reconnected is called by the websocket client when a reconnection is made.
    */
   reconnected () {
+    // Skip reload if the user is on the login page and a login is likely
+    // in progress. The long login (connecting wallets) can outlast the
+    // websocket ping timeout, causing a reconnect that would abort the
+    // pending login POST and lose the auth cookie.
+    if (this.main?.dataset.handler === 'login') return
     if (this.main?.dataset.handler === 'settings') window.location.assign('/')
-    else window.location.reload() // This triggers another websocket disconnect/connect (!)
-    // a fetchUser() and loadPage(window.history.state.page) might work
+    else window.location.reload()
   }
 
   /*
@@ -404,6 +408,12 @@ export default class Application {
     const doc = Doc.noderize(html)
     const main = idel(doc, 'main')
     const delivered = main.dataset.handler
+    // If we were redirected to the login page, fall back to a full page
+    // navigation which is more reliable for cookie handling.
+    if (delivered === 'login' && requestedHandler !== 'login') {
+      window.location.assign(url.toString())
+      return false
+    }
     // Append the request to the page history.
     if (!skipPush) {
       const path = delivered === requestedHandler ? url.toString() : `/${delivered}`
