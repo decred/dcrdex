@@ -15,6 +15,7 @@ import {
   UnitInfo,
   MarketReport,
   BotBalanceAllocation,
+  BotInventoryDiffs,
   BalanceNote,
   BotBalance,
   Order,
@@ -90,7 +91,7 @@ class MarketMakerBot {
   /*
    * updateRunningBot updates the BotConfig and inventory for a running bot.
    */
-  async updateRunningBot (cfg: BotConfig, diffs: BotBalanceAllocation, autoRebalanceCfg?: AutoRebalanceConfig) {
+  async updateRunningBot (cfg: BotConfig, diffs: BotInventoryDiffs, autoRebalanceCfg?: AutoRebalanceConfig) {
     const req: any = { cfg, diffs }
     if (autoRebalanceCfg) req.autoRebalanceCfg = autoRebalanceCfg
     return postJSON('/api/updaterunningbot', req)

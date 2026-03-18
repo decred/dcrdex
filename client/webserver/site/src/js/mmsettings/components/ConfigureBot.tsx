@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import Doc from '../../doc'
 import { app } from '../../registry'
 import { MM } from '../../mmutil'
-import { useBotConfigState } from '../utils/BotConfig'
+import { useBotConfigState, buildRunningBotUpdatePayload } from '../utils/BotConfig'
 import { renderSymbol, useMMSettingsSetError } from './MMSettings'
 import BotPlacementsTab from './BotPlacementsTab'
 import BotAllocationsTab from './BotAllocationsTab'
@@ -156,7 +156,8 @@ const BotActionButtons: React.FC<{
 
   const handleUpdateRunningBot = async () => {
     try {
-      await MM.updateRunningBot(botConfigState.botConfig, botConfigState.botConfig.alloc || { dex: {}, cex: {} }, botConfigState.botConfig.autoRebalance)
+      const runningBotUpdate = buildRunningBotUpdatePayload(botConfigState)
+      await MM.updateRunningBot(runningBotUpdate.cfg, runningBotUpdate.diffs, runningBotUpdate.cfg.autoRebalance)
       await app().fetchMMStatus()
       app().loadPage('mm')
     } catch (error) {

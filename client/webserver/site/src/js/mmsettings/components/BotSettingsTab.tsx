@@ -19,16 +19,27 @@ const MultiHopSettings: React.FC = () => {
   const dispatch = useBotConfigDispatch()
 
   const { intermediateAssets, intermediateAsset, botConfig } = botConfigState
-  if (!intermediateAssets || intermediateAssets.length === 0) {
+  const isRunning = !!botConfigState.runStats
+  // Get the current multi-hop config
+  const multiHopConfig = botConfig.arbMarketMakingConfig?.multiHop
+  const currentIntermediateAsset = multiHopConfig
+    ? (multiHopConfig.baseAssetMarket[0] === botConfig.cexBaseID
+        ? multiHopConfig.baseAssetMarket[1]
+        : multiHopConfig.baseAssetMarket[0])
+    : intermediateAsset
+  const displayIntermediateAssets = intermediateAssets ? [...intermediateAssets] : []
+  if (currentIntermediateAsset != null && !displayIntermediateAssets.includes(currentIntermediateAsset)) {
+    displayIntermediateAssets.push(currentIntermediateAsset)
+  }
+  if (displayIntermediateAssets.length === 0) {
     return null
   }
 
-  // Get the current multi-hop config
-  const multiHopConfig = botConfig.arbMarketMakingConfig?.multiHop
   const marketOrders = multiHopConfig?.marketOrders ?? false
   const limitOrdersBuffer = multiHopConfig?.limitOrdersBuffer ?? 0.01
 
   const handleIntermediateAssetChange = (assetID: number) => {
+    if (isRunning) return
     dispatch({
       type: 'UPDATE_INTERMEDIATE_ASSET',
       payload: assetID
@@ -36,6 +47,7 @@ const MultiHopSettings: React.FC = () => {
   }
 
   const handleOrderTypeChange = (isMarketOrder: boolean) => {
+    if (isRunning) return
     dispatch({
       type: 'UPDATE_MULTI_HOP_MARKET_COMPLETION',
       payload: isMarketOrder
@@ -43,6 +55,7 @@ const MultiHopSettings: React.FC = () => {
   }
 
   const handleLimitBufferChange = (value: number) => {
+    if (isRunning) return
     dispatch({
       type: 'UPDATE_MULTI_HOP_LIMIT_BUFFER',
       payload: value / 100 // Convert from percentage to decimal
@@ -60,11 +73,12 @@ const MultiHopSettings: React.FC = () => {
       </div>
       <div className="mb-3">
         <select
-          className="form-select"
-          value={intermediateAsset || ''}
+          className={`form-select ${isRunning ? 'mm-readonly-select' : ''}`}
+          value={currentIntermediateAsset || ''}
+          disabled={isRunning}
           onChange={(e) => handleIntermediateAssetChange(parseInt(e.target.value) || 0)}
         >
-          {intermediateAssets.map(assetID => (
+          {displayIntermediateAssets.map(assetID => (
             <option key={assetID} value={assetID}>
               {Doc.shortSymbol(app().assets[assetID]?.symbol) || `Asset ${assetID}`}
             </option>
@@ -81,7 +95,7 @@ const MultiHopSettings: React.FC = () => {
           </Tooltip>
         </div>
 
-        <div className="d-flex gap-3">
+        <div className={`d-flex gap-3 ${isRunning ? 'mm-readonly-radio-group' : ''}`}>
           <div className="form-check pe-2">
             <input
               className="form-check-input"
@@ -89,6 +103,7 @@ const MultiHopSettings: React.FC = () => {
               name="orderType"
               id="marketOrder"
               checked={marketOrders}
+              disabled={isRunning}
               onChange={() => handleOrderTypeChange(true)}
             />
             <label className="form-check-label" htmlFor="marketOrder">
@@ -103,6 +118,7 @@ const MultiHopSettings: React.FC = () => {
               name="orderType"
               id="limitOrder"
               checked={!marketOrders}
+              disabled={isRunning}
               onChange={() => handleOrderTypeChange(false)}
             />
             <label className="form-check-label" htmlFor="limitOrder">
@@ -131,6 +147,8 @@ const MultiHopSettings: React.FC = () => {
                 value={limitOrdersBuffer * 100} // Convert to percentage for display
                 onChange={handleLimitBufferChange}
                 withSlider={true}
+                disabled={isRunning}
+                className={isRunning ? 'p-2 text-center fs20 mm-readonly-input' : 'p-2 text-center fs20'}
               />
             </div>
             <span className="fs14 grey">%</span>
@@ -416,8 +434,8 @@ const MMSnapshotsSection: React.FC = () => {
 
 const MultiHopSection: React.FC = () => {
   const botConfigState = useBotConfigState()
-  const { intermediateAssets } = botConfigState
-  if (!intermediateAssets || intermediateAssets.length === 0) {
+  const { intermediateAssets, botConfig } = botConfigState
+  if ((!intermediateAssets || intermediateAssets.length === 0) && !botConfig.arbMarketMakingConfig?.multiHop) {
     return null
   }
 

@@ -1,4 +1,4 @@
-import { useBotConfigState, useBotConfigDispatch, fetchRoundTripFeesAndLimits } from '../utils/BotConfig'
+import { useBotConfigState, useBotConfigDispatch, fetchRoundTripFeesAndLimits, projectedAllocations } from '../utils/BotConfig'
 import { app } from '../../registry'
 import Tooltip from './Tooltip'
 import Doc from '../../doc'
@@ -56,9 +56,9 @@ const MinTransferControl: React.FC<MinTransferControlProps> = ({
 
   // Calculate max as total allocated amount on DEX + CEX
   const cexAssetID = asset === 'base' ? botConfig.cexBaseID : botConfig.cexQuoteID
-  const alloc = botConfig.alloc || { dex: {}, cex: {} }
-  const dexAmount = alloc.dex[assetID] || 0
-  const cexAmount = alloc.cex[cexAssetID] || 0
+  const projectedAlloc = projectedAllocations(botConfigState)
+  const dexAmount = projectedAlloc.dex[assetID] || 0
+  const cexAmount = projectedAlloc.cex[cexAssetID] || 0
   const max = Math.max(dexAmount + cexAmount, min)
 
   const onChange = (value: number) => {
@@ -135,17 +135,28 @@ const BridgeControl: React.FC<BridgeControlProps> = ({
   const setError = useMMSettingsSetError()
 
   const { botConfig } = botConfigState
+  const isRunning = !!botConfigState.runStats
   const bridges = asset === 'base' ? botConfigState.baseBridges : botConfigState.quoteBridges
   const currentFeesAndLimits = asset === 'base' ? botConfigState.baseBridgeFeesAndLimits : botConfigState.quoteBridgeFeesAndLimits
   const dexAssetID = asset === 'base' ? dexMarket.baseID : dexMarket.quoteID
 
   // Only show bridge controls if CEX rebalance is selected
-  if (!botConfig.autoRebalance || botConfig.autoRebalance.internalOnly || !bridges || !currentFeesAndLimits) return null
+  if (!botConfig.autoRebalance || botConfig.autoRebalance.internalOnly || !currentFeesAndLimits) return null
+
+  const displayBridges = { ...(bridges || {}) }
+  if (currentFeesAndLimits.cexAsset !== dexAssetID && currentFeesAndLimits.bridgeName) {
+    const bridgeNames = displayBridges[currentFeesAndLimits.cexAsset] || []
+    if (!bridgeNames.includes(currentFeesAndLimits.bridgeName)) {
+      displayBridges[currentFeesAndLimits.cexAsset] = [...bridgeNames, currentFeesAndLimits.bridgeName]
+    }
+  }
+  if (!Object.keys(displayBridges).length) return null
 
   const handleCexAssetChange = async (cexAssetID: number) => {
-    if (!bridges || !bridges[cexAssetID] || bridges[cexAssetID].length === 0) return
+    if (isRunning) return
+    if (!displayBridges[cexAssetID] || displayBridges[cexAssetID].length === 0) return
 
-    const bridgeName = bridges[cexAssetID][0] // Default to first bridge
+    const bridgeName = displayBridges[cexAssetID][0] // Default to first bridge
     try {
       setIsLoading(true)
       const feesAndLimits = await fetchRoundTripFeesAndLimits(dexAssetID, cexAssetID, bridgeName)
@@ -163,6 +174,7 @@ const BridgeControl: React.FC<BridgeControlProps> = ({
   }
 
   const handleBridgeChange = async (bridgeName: string) => {
+    if (isRunning) return
     try {
       setIsLoading(true)
       const feesAndLimits = await fetchRoundTripFeesAndLimits(dexAssetID, currentFeesAndLimits.cexAsset, bridgeName)
@@ -180,9 +192,9 @@ const BridgeControl: React.FC<BridgeControlProps> = ({
   }
 
   const assetName = asset === 'base' ? 'Base' : 'Quote'
-  const availableCexAssets = Object.keys(bridges).map(id => parseInt(id))
+  const availableCexAssets = Object.keys(displayBridges).map(id => parseInt(id))
   const currentCexAsset = currentFeesAndLimits.cexAsset
-  const availableBridges = bridges[currentCexAsset]
+  const availableBridges = displayBridges[currentCexAsset]
   const currentBridge = currentFeesAndLimits.bridgeName
 
   return (
@@ -199,8 +211,9 @@ const BridgeControl: React.FC<BridgeControlProps> = ({
           <div className="mb-2">
             <label className="form-label fs16">{prep(ID_MM_BRIDGE_TO_ASSET)}</label>
             <select
-              className="form-select"
+              className={`form-select ${isRunning ? 'mm-readonly-select' : ''}`}
               value={currentCexAsset || ''}
+              disabled={isRunning}
               onChange={(e) => handleCexAssetChange(parseInt(e.target.value))}
             >
               <option value="">{prep(ID_MM_SELECT_CEX_ASSET)}</option>
@@ -216,8 +229,9 @@ const BridgeControl: React.FC<BridgeControlProps> = ({
             <div>
               <label className="form-label fs16">{prep(ID_MM_BRIDGE)}</label>
               <select
-                className="form-select"
+                className={`form-select ${isRunning ? 'mm-readonly-select' : ''}`}
                 value={currentBridge || ''}
+                disabled={isRunning}
                 onChange={(e) => handleBridgeChange(e.target.value)}
               >
                 <option value="">{prep(ID_MM_SELECT_BRIDGE)}</option>
@@ -337,12 +351,12 @@ const RebalanceSettingsTab: React.FC = () => {
 
           {/* Bridge Configuration */}
           <div className="row">
-            {botConfigState.baseBridges && (<div className="col-12">
+            {(botConfigState.baseBridges || botConfigState.baseBridgeFeesAndLimits) && (<div className="col-12">
                   <BridgeControl
                     asset="base"
                   />
               </div>)}
-            {botConfigState.quoteBridges && (<div className="col-12">
+            {(botConfigState.quoteBridges || botConfigState.quoteBridgeFeesAndLimits) && (<div className="col-12">
                   <BridgeControl
                       asset="quote"
                     />

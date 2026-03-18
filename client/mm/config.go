@@ -62,6 +62,7 @@ func (a *AutoRebalanceConfig) copy() *AutoRebalanceConfig {
 	return &AutoRebalanceConfig{
 		MinBaseTransfer:  a.MinBaseTransfer,
 		MinQuoteTransfer: a.MinQuoteTransfer,
+		InternalOnly:     a.InternalOnly,
 	}
 }
 
@@ -255,7 +256,53 @@ func validateConfigUpdate(old, new *BotConfig, bridgesSupported func([]*configur
 		return fmt.Errorf("cannot change assets of a running bot")
 	}
 
+	if old.BaseID != old.CEXBaseID && old.BaseBridgeName != new.BaseBridgeName {
+		return fmt.Errorf("cannot change base bridge selection of a running bot")
+	}
+
+	if old.QuoteID != old.CEXQuoteID && old.QuoteBridgeName != new.QuoteBridgeName {
+		return fmt.Errorf("cannot change quote bridge selection of a running bot")
+	}
+
+	if multiHopMarketsChanged(old.ArbMarketMakerConfig, new.ArbMarketMakerConfig) {
+		return fmt.Errorf("cannot change multi-hop markets of a running bot")
+	}
+
+	if multiHopCompletionChanged(old.ArbMarketMakerConfig, new.ArbMarketMakerConfig) {
+		return fmt.Errorf("cannot change multi-hop completion settings of a running bot")
+	}
+
 	return new.validate(bridgesSupported)
+}
+
+func multiHopMarketsChanged(oldCfg, newCfg *ArbMarketMakerConfig) bool {
+	if oldCfg == nil || newCfg == nil {
+		return false
+	}
+
+	oldMultiHop := oldCfg.MultiHop
+	newMultiHop := newCfg.MultiHop
+	if oldMultiHop == nil || newMultiHop == nil {
+		return oldMultiHop != newMultiHop
+	}
+
+	return oldMultiHop.BaseAssetMarket != newMultiHop.BaseAssetMarket ||
+		oldMultiHop.QuoteAssetMarket != newMultiHop.QuoteAssetMarket
+}
+
+func multiHopCompletionChanged(oldCfg, newCfg *ArbMarketMakerConfig) bool {
+	if oldCfg == nil || newCfg == nil {
+		return false
+	}
+
+	oldMultiHop := oldCfg.MultiHop
+	newMultiHop := newCfg.MultiHop
+	if oldMultiHop == nil || newMultiHop == nil {
+		return false
+	}
+
+	return oldMultiHop.MarketOrders != newMultiHop.MarketOrders ||
+		oldMultiHop.LimitOrdersBuffer != newMultiHop.LimitOrdersBuffer
 }
 
 func (c *BotConfig) requiresPriceOracle() bool {

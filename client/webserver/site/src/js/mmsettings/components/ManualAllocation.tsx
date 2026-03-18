@@ -1,5 +1,5 @@
 import React from 'react'
-import { useBotConfigState, useBotConfigDispatch } from '../utils/BotConfig'
+import { useBotConfigState, useBotConfigDispatch, editableAmounts } from '../utils/BotConfig'
 import { app } from '../../registry'
 import Doc from '../../doc'
 import { requiredDexAssets } from '../utils/AllocationUtil'
@@ -18,11 +18,11 @@ const ManualBalanceEntry: React.FC<ManualBalanceEntryProps> = ({
   location,
   columnClass
 }) => {
+  const botConfigState = useBotConfigState()
   const {
-    runStats, availableCEXBalances, availableDEXBalances,
-    botConfig
-  } = useBotConfigState()
-  const alloc = botConfig.alloc || { dex: {}, cex: {} }
+    runStats, availableCEXBalances, availableDEXBalances
+  } = botConfigState
+  const editableBalanceAmounts = editableAmounts(botConfigState)
   const dispatch = useBotConfigDispatch()
 
   const asset = app().assets[assetID]
@@ -35,7 +35,7 @@ const ManualBalanceEntry: React.FC<ManualBalanceEntryProps> = ({
       ? (runStats.dexBalances[assetID]?.available || 0)
       : (runStats.cexBalances[assetID]?.available || 0)
   }
-  const currentValue = alloc[location][assetID] || 0
+  const currentValue = editableBalanceAmounts[location][assetID] || 0
 
   return (
     <div className={`${columnClass} mb-3`}>

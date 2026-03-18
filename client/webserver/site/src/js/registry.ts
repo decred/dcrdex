@@ -834,6 +834,11 @@ export interface BotBalanceAllocation {
   cex: Record<number, number>
 }
 
+export interface BotInventoryDiffs {
+  dex: Record<number, number>
+  cex: Record<number, number>
+}
+
 export interface QuickBalanceConfig {
   buysBuffer: number
   sellsBuffer: number

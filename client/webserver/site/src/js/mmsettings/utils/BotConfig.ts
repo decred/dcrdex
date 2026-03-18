@@ -1,5 +1,8 @@
 import {
   BotConfig,
+  BotBalance,
+  BotBalanceAllocation,
+  BotInventoryDiffs,
   MMBotStatus,
   MarketReport,
   SupportedAsset,
@@ -44,6 +47,7 @@ export interface QuickPlacementsConfig {
 
 export interface BotConfigState {
   botConfig: BotConfig;
+  inventoryDiffs: BotInventoryDiffs;
   dexMarket: MarketInfo;
   availableDEXBalances: Record<number, number>;
   availableCEXBalances: Record<number, number> | null;
@@ -83,6 +87,133 @@ const DEFAULT_QUICK_PLACEMENTS: QuickPlacementsConfig = {
 
 const TRAIT_ACCOUNT_LOCKER = 1 << 14
 
+function emptyBotBalanceAllocation (): BotBalanceAllocation {
+  return { dex: {}, cex: {} }
+}
+
+function emptyBotInventoryDiffs (): BotInventoryDiffs {
+  return { dex: {}, cex: {} }
+}
+
+function totalBotBalance (balance?: BotBalance): number {
+  return (balance?.available || 0) + (balance?.locked || 0) + (balance?.pending || 0) + (balance?.reserved || 0)
+}
+
+function savedAllocations (state: BotConfigState): BotBalanceAllocation {
+  return state.botConfig.alloc || emptyBotBalanceAllocation()
+}
+
+function cloneInventoryDiffs (diffs: BotInventoryDiffs): BotInventoryDiffs {
+  return {
+    dex: { ...diffs.dex },
+    cex: { ...diffs.cex }
+  }
+}
+
+function projectedAssetIDs (
+  savedAmounts: Record<number, number> | undefined,
+  balances: Record<number, BotBalance>,
+  diffAmounts: Record<number, number>
+): number[] {
+  return [...new Set([
+    ...Object.keys(savedAmounts || {}),
+    ...Object.keys(balances),
+    ...Object.keys(diffAmounts)
+  ])].map(Number)
+}
+
+function currentSourceAllocation (
+  assetID: number,
+  balances: Record<number, BotBalance>,
+  savedAmounts: Record<number, number> | undefined
+): number {
+  return balances[assetID] ? totalBotBalance(balances[assetID]) : (savedAmounts?.[assetID] || 0)
+}
+
+function projectSourceAllocations (
+  balances: Record<number, BotBalance>,
+  diffAmounts: Record<number, number>,
+  savedAmounts: Record<number, number> | undefined,
+  strict: boolean,
+  source: 'DEX' | 'CEX'
+): Record<number, number> {
+  const projectedAmounts: Record<number, number> = {}
+
+  for (const assetID of projectedAssetIDs(savedAmounts, balances, diffAmounts)) {
+    const currentTotal = currentSourceAllocation(assetID, balances, savedAmounts)
+    const nextTotal = currentTotal + (diffAmounts[assetID] || 0)
+    if (nextTotal < 0) {
+      if (strict) {
+        throw new Error(`resulting ${source} allocation for asset ${assetID} is negative`)
+      }
+      continue
+    }
+    if (nextTotal > 0) {
+      projectedAmounts[assetID] = nextTotal
+    }
+  }
+
+  return projectedAmounts
+}
+
+function projectRunningBotAllocations (
+  runStats: RunStats,
+  inventoryDiffs: BotInventoryDiffs,
+  savedAllocations: BotBalanceAllocation,
+  strict: boolean
+): BotBalanceAllocation {
+  return {
+    dex: projectSourceAllocations(runStats.dexBalances, inventoryDiffs.dex, savedAllocations.dex, strict, 'DEX'),
+    cex: projectSourceAllocations(runStats.cexBalances, inventoryDiffs.cex, savedAllocations.cex, strict, 'CEX')
+  }
+}
+
+export function editableAmounts (state: BotConfigState): BotBalanceAllocation | BotInventoryDiffs {
+  return state.runStats ? state.inventoryDiffs : savedAllocations(state)
+}
+
+function setEditableAmounts (state: BotConfigState, nextAmounts: BotBalanceAllocation | BotInventoryDiffs): BotConfigState {
+  if (state.runStats) {
+    return {
+      ...state,
+      inventoryDiffs: nextAmounts
+    }
+  }
+
+  return {
+    ...state,
+    botConfig: {
+      ...state.botConfig,
+      alloc: nextAmounts
+    }
+  }
+}
+
+export function projectedAllocations (state: BotConfigState): BotBalanceAllocation {
+  if (!state.runStats) {
+    return savedAllocations(state)
+  }
+  return projectRunningBotAllocations(state.runStats, state.inventoryDiffs, savedAllocations(state), false)
+}
+
+export function buildRunningBotUpdatePayload (state: BotConfigState): { cfg: BotConfig; diffs: BotInventoryDiffs } {
+  if (!state.runStats) {
+    throw new Error('cannot build running bot update payload for a stopped bot')
+  }
+
+  // Running bot updates persist the projected absolute allocation in cfg.alloc,
+  // but apply the live inventory adjustment through the separate diffs payload.
+  const diffs = cloneInventoryDiffs(state.inventoryDiffs)
+
+  return {
+    cfg: {
+      ...state.botConfig,
+      alloc: projectRunningBotAllocations(state.runStats, diffs, savedAllocations(state), true)
+    },
+    diffs
+  }
+}
+
 // Utility Functions
 function getWalletMultiFundingOptions (assetID: number): OrderOption[] | null {
   const walletDef = app().currentWalletDefinition(assetID)
@@ -103,6 +234,15 @@ async function fetchCEXAssetAndBridgeInfo (
   savedCEXBridge: string,
   bridges: Record<number, string[]> | null
 ): Promise<{ cexAssetID: number; cexBridge: string; feesAndLimits: RoundTripFeesAndLimits | null }> {
+  if (savedCEXAssetID != null && savedCEXAssetID !== dexAssetID && savedCEXBridge) {
+    try {
+      const feesAndLimits = await fetchRoundTripFeesAndLimits(dexAssetID, savedCEXAssetID, savedCEXBridge)
+      return { cexAssetID: savedCEXAssetID, cexBridge: savedCEXBridge, feesAndLimits }
+    } catch (error) {
+      console.warn(`Failed to restore saved bridge ${savedCEXBridge} for ${dexAssetID} -> ${savedCEXAssetID}`, error)
+    }
+  }
+
   if (!bridges || !Object.keys(bridges).length) {
     return { cexAssetID: dexAssetID, cexBridge: '', feesAndLimits: null }
   }
@@ -124,6 +264,24 @@ async function fetchCEXAssetAndBridgeInfo (
   const feesAndLimits = await fetchRoundTripFeesAndLimits(dexAssetID, cexAssetID, cexBridge)
 
   return { cexAssetID, cexBridge, feesAndLimits }
+}
+
+function withSavedBridgeOption (
+  dexAssetID: number,
+  bridges: Record<number, string[]> | null,
+  feesAndLimits: RoundTripFeesAndLimits | null
+): Record<number, string[]> | null {
+  if (!feesAndLimits || feesAndLimits.cexAsset === dexAssetID || !feesAndLimits.bridgeName) {
+    return bridges
+  }
+
+  const nextBridges = bridges ? { ...bridges } : {}
+  const existingBridgeNames = nextBridges[feesAndLimits.cexAsset] || []
+  if (!existingBridgeNames.includes(feesAndLimits.bridgeName)) {
+    nextBridges[feesAndLimits.cexAsset] = [...existingBridgeNames, feesAndLimits.bridgeName]
+  }
+
+  return nextBridges
 }
 
 export async function fetchRoundTripFeesAndLimits (dexAssetID: number, cexAssetID: number, bridgeName: string): Promise<RoundTripFeesAndLimits> {
@@ -355,6 +513,7 @@ export async function initialBotConfigState (
 
   const botConfigState: BotConfigState = {
     botConfig: config,
+    inventoryDiffs: emptyBotInventoryDiffs(),
     dexMarket: getDEXMarketInfo(host, baseID, quoteID),
     availableDEXBalances: dexBalances,
     availableCEXBalances: cexBalances,
@@ -459,11 +618,12 @@ export async function botConfigStateFromSavedConfig (
 
   const botConfigState: BotConfigState = {
     botConfig: config,
+    inventoryDiffs: emptyBotInventoryDiffs(),
     dexMarket: getDEXMarketInfo(savedBotConfig.host, savedBotConfig.baseID, savedBotConfig.quoteID),
     availableDEXBalances: dexBalances,
     availableCEXBalances: cexBalances,
-    baseBridges,
-    quoteBridges,
+    baseBridges: withSavedBridgeOption(savedBotConfig.baseID, baseBridges, baseBridgeFeesAndLimits),
+    quoteBridges: withSavedBridgeOption(savedBotConfig.quoteID, quoteBridges, quoteBridgeFeesAndLimits),
     baseBridgeFeesAndLimits,
     quoteBridgeFeesAndLimits,
     quickPlacements: null,
@@ -649,7 +809,11 @@ function regeneratePlacementsFromQuickConfig (state: BotConfigState): BotConfigS
 }
 
 function clampOriginalAllocations (state: BotConfigState, dexBalances: Record<number, number>, cexBalances: Record<number, number>): BotConfigState {
-  const allocation = state.botConfig.alloc || { dex: {}, cex: {} }
+  if (state.runStats) {
+    return state
+  }
+
+  const allocation = savedAllocations(state)
   const clampedAllocation = {
     dex: { ...allocation.dex },
     cex: { ...allocation.cex }
@@ -657,12 +821,12 @@ function clampOriginalAllocations (state: BotConfigState, dexBalances: Record<nu
 
   for (const [assetIDStr, allocatedAmount] of Object.entries(allocation.dex)) {
     const assetID = parseInt(assetIDStr, 10)
-    clampedAllocation.dex[assetID] = state.runStats ? 0 : Math.min(allocatedAmount, dexBalances[assetID] || 0)
+    clampedAllocation.dex[assetID] = Math.min(allocatedAmount, dexBalances[assetID] || 0)
   }
 
   for (const [assetIDStr, allocatedAmount] of Object.entries(allocation.cex)) {
     const assetID = parseInt(assetIDStr, 10)
-    clampedAllocation.cex[assetID] = state.runStats ? 0 : Math.min(allocatedAmount, cexBalances[assetID] || 0)
+    clampedAllocation.cex[assetID] = Math.min(allocatedAmount, cexBalances[assetID] || 0)
   }
 
   return {
@@ -678,10 +842,11 @@ function updateAllocationsBasedOnQuickConfig (state: BotConfigState): BotConfigS
   if (!state.botConfig.uiConfig.usingQuickBalance) return state
 
   const allocationResult = state.runStats ? toAllocateRunning(state, state.runStats) : toAllocate(state)
+  const proposedAmounts = allocationResultAmounts(allocationResult)
+  const nextState = setEditableAmounts(state, proposedAmounts)
 
   return {
-    ...state,
-    botConfig: { ...state.botConfig, alloc: allocationResultAmounts(allocationResult) },
+    ...nextState,
     allocationResult
   }
 }
@@ -890,20 +1055,15 @@ export const botConfigStateReducer = (state: BotConfigState | null, action: BotC
     }
 
     case 'UPDATE_MANUAL_ALLOCATION': {
-      const currentAlloc = state.botConfig.alloc || { dex: {}, cex: {} }
-      return {
-        ...state,
-        botConfig: {
-          ...state.botConfig,
-          alloc: {
-            ...currentAlloc,
-            [action.payload.source]: {
-              ...currentAlloc[action.payload.source],
-              [action.payload.assetID]: action.payload.amount
-            }
-          }
+      const currentAmounts = editableAmounts(state)
+      const nextAmounts = {
+        ...currentAmounts,
+        [action.payload.source]: {
+          ...currentAmounts[action.payload.source],
+          [action.payload.assetID]: action.payload.amount
         }
       }
+      return setEditableAmounts(state, nextAmounts)
     }
 
     case 'UPDATE_DRIFT_TOLERANCE':
@@ -1085,7 +1245,7 @@ export const botConfigStateReducer = (state: BotConfigState | null, action: BotC
 
       return updatedState.botConfig.uiConfig.usingQuickBalance
         ? updateAllocationsBasedOnQuickConfig(updatedState)
-        : clampOriginalAllocations(updatedState, dexBalances, cexBalances)
+        : (updatedState.runStats ? updatedState : clampOriginalAllocations(updatedState, dexBalances, cexBalances))
     }
 
     case 'TOGGLE_MM_SNAPSHOTS':
