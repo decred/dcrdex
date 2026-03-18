@@ -99,9 +99,16 @@
 
       <div class="flex-grow-1 position-relative">
         <div id="disconnectedOverlay" class="d-hide fill-abs flex-center flex-column" style="z-index:10; background-color: rgba(0,0,0,0.5);">
-          <span class="ico-disconnected fs40 text-danger mb-3"></span>
-          <span class="fs22 demi">[[[Connection to server failed]]]</span>
-          <span class="fs16 grey mt-2">[[[Waiting to reconnect...]]]</span>
+          <div id="disconnectedContent" class="flex-center flex-column">
+            <span class="ico-disconnected fs40 text-danger mb-3"></span>
+            <span class="fs22 demi">[[[Connection to server failed]]]</span>
+            <span class="fs16 grey mt-2">[[[Waiting to reconnect...]]]</span>
+          </div>
+          <div id="disabledContent" class="flex-center flex-column d-hide">
+            <span class="ico-settings fs40 grey mb-3"></span>
+            <span id="disabledMsg" class="fs22 demi"></span>
+            <a id="disabledSettingsLink" class="fs16 pointer mt-3 underline">[[[Visit settings to re-enable]]]</a>
+          </div>
         </div>
         <div id="mainContent">
 
