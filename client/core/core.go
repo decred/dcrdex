@@ -4951,6 +4951,12 @@ func (c *Core) connectWallets(crypter encrypt.Crypter) {
 		if wallet.isDisabled() {
 			return
 		}
+		// Return early if this is a token and the parent wallet is disabled.
+		if token := asset.TokenInfo(wallet.AssetID); token != nil {
+			if parentWallet, found := c.wallet(token.ParentID); found && parentWallet.isDisabled() {
+				return
+			}
+		}
 		if !wallet.connected() {
 			err := wallet.OpenWithPW(c.ctx, crypter)
 			if err != nil {
