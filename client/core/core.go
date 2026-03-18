@@ -1998,6 +1998,13 @@ fetchers:
 			continue
 		}
 		if !c.cfg.NoAutoWalletLock && wallet.unlocked() { // no-op if Logout did it
+			if mw, is := wallet.Wallet.(asset.FundsMixer); is {
+				if stats, err := mw.FundsMixingStats(); err == nil && stats.Enabled {
+					c.log.Infof("Skipping lock for %s wallet (mixing active)", strings.ToUpper(unbip(assetID)))
+					wallet.Disconnect()
+					continue
+				}
+			}
 			symb := strings.ToUpper(unbip(assetID))
 			c.log.Infof("Locking %s wallet", symb)
 			if err := wallet.Lock(walletLockTimeout); err != nil {
@@ -5169,6 +5176,12 @@ func (c *Core) Logout() error {
 		c.wg.Add(1)
 		for _, w := range c.xcWallets() {
 			if w.connected() && w.unlocked() {
+				if mw, is := w.Wallet.(asset.FundsMixer); is {
+					if stats, err := mw.FundsMixingStats(); err == nil && stats.Enabled {
+						c.log.Infof("Skipping lock for %s wallet (mixing active)", strings.ToUpper(unbip(w.AssetID)))
+						continue
+					}
+				}
 				symb := strings.ToUpper(unbip(w.AssetID))
 				c.log.Infof("Locking %s wallet", symb)
 				if err := w.Lock(walletLockTimeout); err != nil {
