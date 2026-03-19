@@ -35,6 +35,7 @@ dex/testing/loadbot/loadbot
 bin/
 bin-v*/
 client/webserver/site/template-builder/template-builder
+client/webserver/newui/locales/cmd/importlocales/importlocales
 dex/testing/btc/harnesschain.tar.gz
 client/asset/btc/electrum/example/server/server
 client/asset/btc/electrum/example/wallet/wallet

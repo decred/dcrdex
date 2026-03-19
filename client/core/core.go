@@ -1896,13 +1896,13 @@ func (c *Core) Run(ctx context.Context) {
 
 	// Construct enabled fiat rate sources.
 fetchers:
-	for token, rateFetcher := range fiatRateFetchers {
+	for src, f := range fiatRateFetchers {
 		for _, v := range disabledSources {
-			if token == v {
+			if src == v {
 				continue fetchers
 			}
 		}
-		c.fiatRateSources[token] = newCommonRateSource(rateFetcher)
+		c.fiatRateSources[src] = newCommonRateSource(src, f)
 	}
 	c.fetchFiatExchangeRates(ctx)
 
@@ -2719,12 +2719,14 @@ func (c *Core) assetMap() map[uint32]*SupportedAsset {
 // User is a thread-safe getter for the User.
 func (c *Core) User() *User {
 	m := c.coreMesh()
+	idRates, tickerRates := c.fiatConversions()
 	return &User{
 		Assets:             c.assetMap(),
 		Exchanges:          c.Exchanges(),
 		Initialized:        c.IsInitialized(),
 		SeedGenerationTime: c.seedGenerationTime,
-		FiatRates:          c.fiatConversions(),
+		FiatRates:          idRates,
+		TickerRates:        tickerRates,
 		Net:                c.net,
 		ExtensionConfig:    c.extensionModeConfig,
 		Actions:            c.requestedActionsList(),
@@ -11960,9 +11962,9 @@ func (c *Core) refreshFiatRates(ctx context.Context) {
 	// Remove expired rate source if any.
 	c.removeExpiredRateSources()
 
-	fiatRatesMap := c.fiatConversions()
-	if len(fiatRatesMap) != 0 {
-		c.notify(newFiatRatesUpdate(fiatRatesMap))
+	idRates, tickerRates := c.fiatConversions()
+	if len(idRates) != 0 {
+		c.notify(newFiatRatesUpdate(idRates, tickerRates))
 	}
 }
 
@@ -11981,12 +11983,13 @@ func (c *Core) FiatRateSources() map[string]bool {
 // FiatConversionRates are the currently cached fiat conversion rates. Must have
 // 1 or more fiat rate sources enabled.
 func (c *Core) FiatConversionRates() map[uint32]float64 {
-	return c.fiatConversions()
+	idRates, _ := c.fiatConversions()
+	return idRates
 }
 
 // fiatConversions returns fiat rate for all supported assets that have a
 // wallet.
-func (c *Core) fiatConversions() map[uint32]float64 {
+func (c *Core) fiatConversions() (map[uint32]float64, map[string]float64) {
 	assetIDs := make(map[uint32]struct{})
 	supportedAssets := asset.Assets()
 	for assetID, asset := range supportedAssets {
@@ -11997,6 +12000,7 @@ func (c *Core) fiatConversions() map[uint32]float64 {
 	}
 
 	fiatRatesMap := make(map[uint32]float64, len(supportedAssets))
+	tickerRatesMap := make(map[string]float64)
 	for assetID := range assetIDs {
 		var rateSum float64
 		var sources int
@@ -12015,19 +12019,22 @@ func (c *Core) fiatConversions() map[uint32]float64 {
 			}
 		}
 		if rateSum != 0 {
-			fiatRatesMap[assetID] = rateSum / float64(sources) // get average rate.
+			r := rateSum / float64(sources) // get average rate.
+			fiatRatesMap[assetID] = r
+			ui, _ := asset.UnitInfo(assetID)
+			tickerRatesMap[ui.Conventional.Unit] = r
 		}
 	}
-	return fiatRatesMap
+	return fiatRatesMap, tickerRatesMap
 }
 
 // ToggleRateSourceStatus toggles a fiat rate source status. If disable is true,
 // the fiat rate source is disabled, otherwise the rate source is enabled.
-func (c *Core) ToggleRateSourceStatus(source string, disable bool) error {
-	if disable {
-		return c.disableRateSource(source)
+func (c *Core) ToggleRateSourceStatus(source string, enable bool) error {
+	if enable {
+		return c.enableRateSource(source)
 	}
-	return c.enableRateSource(source)
+	return c.disableRateSource(source)
 }
 
 // enableRateSource enables a fiat rate source.
@@ -12045,7 +12052,7 @@ func (c *Core) enableRateSource(source string) error {
 	}
 
 	// Build fiat rate source.
-	rateSource := newCommonRateSource(rateFetcher)
+	rateSource := newCommonRateSource(source, rateFetcher)
 	c.fiatRateSources[source] = rateSource
 
 	select {
@@ -12554,6 +12561,11 @@ func (c *Core) RedeemGeocode(appPW, code []byte, msg string) (dex.Bytes, uint64,
 // ExtensionModeConfig is the configuration parsed from the extension-mode file.
 func (c *Core) ExtensionModeConfig() *ExtensionModeConfig {
 	return c.extensionModeConfig
+}
+
+func (c *Core) ValidateSeed(seed string) (bool, error) {
+	_, _, err := decodeSeedString(seed)
+	return err == nil, nil
 }
 
 // calcParcelLimit computes the users score-scaled user parcel limit.

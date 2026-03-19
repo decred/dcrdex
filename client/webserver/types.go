@@ -13,7 +13,10 @@ import (
 
 // standardResponse is a basic API response when no data needs to be returned.
 type standardResponse struct {
+	// OK is worthless, because 'ok' is a getter on the fetch response in
+	// Javascript, so unless we return a 200, OK will be overwritten by True.
 	OK   bool   `json:"ok"`
+	Bad  bool   `json:"bad,omitempty"`
 	Msg  string `json:"msg,omitempty"`
 	Code *int   `json:"code,omitempty"`
 }
@@ -61,12 +64,6 @@ type postBondForm struct {
 	Maintain     *bool            `json:"maintain,omitempty"`
 	MaxBondedAmt *uint64          `json:"maxBondedAmt,omitempty"`
 	FeeBuffer    *uint64          `json:"feeBuffer,omitempty"`
-}
-
-type registrationTxFeeForm struct {
-	Addr    string  `json:"addr"`
-	Cert    string  `json:"cert"`
-	AssetID *uint32 `json:"asset,omitempty"`
 }
 
 type sendTxFeeForm struct {
