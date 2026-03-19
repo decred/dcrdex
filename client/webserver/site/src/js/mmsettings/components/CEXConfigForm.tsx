@@ -1,6 +1,14 @@
 import React, { useState } from 'react'
 import { CEXDisplayInfos, MM } from '../../mmutil'
 import { MMCEXStatus, app } from '../../registry'
+import {
+  prep,
+  ID_MM_CEX_CONFIG_PROMPT,
+  ID_MM_CEX_CONNECTION_ERROR,
+  ID_MM_API_KEY,
+  ID_MM_API_SECRET,
+  ID_MM_SAVE_CEX_CREDENTIALS
+} from '../../locales'
 
 interface CEXConfigFormProps {
   cexName: string;
@@ -57,7 +65,7 @@ const CEXConfigForm: React.FC<CEXConfigFormProps> = ({
 
         {/* Configure CEX Prompt */}
         <div className="pt-4 fs18">
-          Configure your {cexName} account to enable arbitrage trading.
+          {prep(ID_MM_CEX_CONFIG_PROMPT, { cexName })}
         </div>
 
         {/* CEX Info */}
@@ -74,14 +82,14 @@ const CEXConfigForm: React.FC<CEXConfigFormProps> = ({
         {cexStatus && cexStatus.connectErr && (
           <div className="flex-center flex-column text-danger px-3">
             <span className="ico-disconnected fs24"></span>
-            <span>Error with CEX credentials</span>
+            <span>{prep(ID_MM_CEX_CONNECTION_ERROR)}</span>
             <span className="fs14 mt-2 text-break" style={{ maxWidth: '100%', wordBreak: 'break-word' }}>{cexStatus.connectErr}</span>
           </div>
         )}
 
         {/* API Key Input */}
         <div className="d-flex flex-column">
-          <label htmlFor="cexApiKeyInput">API Key</label>
+          <label htmlFor="cexApiKeyInput">{prep(ID_MM_API_KEY)}</label>
           <input
             id="cexApiKeyInput"
             type="text"
@@ -93,7 +101,7 @@ const CEXConfigForm: React.FC<CEXConfigFormProps> = ({
 
         {/* API Secret Input */}
         <div className="d-flex flex-column">
-          <label htmlFor="cexSecretInput">API Secret</label>
+          <label htmlFor="cexSecretInput">{prep(ID_MM_API_SECRET)}</label>
           <input
             id="cexSecretInput"
             type="password"
@@ -117,7 +125,7 @@ const CEXConfigForm: React.FC<CEXConfigFormProps> = ({
             className="feature"
             disabled={!apiKey.trim() || !apiSecret.trim()}
           >
-            Submit
+            {prep(ID_MM_SAVE_CEX_CREDENTIALS)}
           </button>
         </div>
       </form>

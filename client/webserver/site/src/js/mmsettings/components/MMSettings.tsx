@@ -8,6 +8,7 @@ import BotTypeSelector from './BotTypeSelector'
 import ConfigureBot from './ConfigureBot'
 import ErrorPopup from './ErrorPopup'
 import { LoadingSpinner } from './FormComponents'
+import { prep, ID_MM_MISSING_FIAT_RATES } from '../../locales'
 import {
   botConfigStateReducer,
   initialBotConfigState,
@@ -237,9 +238,15 @@ export interface MMSettingsError {
   onClose?: () => void
 }
 
-const checkFiatRates = (): boolean => {
-  // TODO: check fiat rates for the required assets
-  return true
+const missingFiatRateAssetIDs = (botConfigState: BotConfigState): number[] => {
+  const { baseID, quoteID } = botConfigState.dexMarket
+  const requiredAssetIDs = [...new Set([baseID, quoteID])]
+  return requiredAssetIDs.filter((assetID) => !botConfigState.fiatRatesMap[assetID])
+}
+
+const missingFiatRateMessage = (assetIDs: number[]): string => {
+  const symbols = assetIDs.map((assetID) => app().assets[assetID]?.symbol.toUpperCase() || String(assetID))
+  return prep(ID_MM_MISSING_FIAT_RATES, { assetSymbols: symbols.join(', ') })
 }
 
 function initialErrorState (botConfigState: BotConfigState | string | undefined, returnToMM?: boolean): [BotConfigState | null, MMSettingsError | null] {
@@ -256,9 +263,10 @@ function initialErrorState (botConfigState: BotConfigState | string | undefined,
     }]
   }
 
-  if (!checkFiatRates()) {
+  const missingFiatRates = missingFiatRateAssetIDs(botConfigState)
+  if (missingFiatRates.length > 0) {
     return [null, {
-      message: 'Fiat rates are not available for the selected market',
+      message: missingFiatRateMessage(missingFiatRates),
       onClose: () => {
         if (returnToMM) app().loadPage('mm')
       }
