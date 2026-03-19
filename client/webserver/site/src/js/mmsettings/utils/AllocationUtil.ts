@@ -39,9 +39,10 @@ interface CalculationBreakdown {
   initialBuyFundingFees: number
   initialSellFundingFees: number
 
-  bridgeFeeReserves: number
+  rebalanceFeeReserves: number
 
   bridgeFees: number
+  sendFees: number
   available: number
   totalRequired: number
   runningBotTotal?: number
@@ -92,11 +93,26 @@ function newCalculationBreakdown () : CalculationBreakdown {
     numSellFeeReserves: 0,
     initialBuyFundingFees: 0,
     initialSellFundingFees: 0,
-    bridgeFeeReserves: 0,
+    rebalanceFeeReserves: 0,
     bridgeFees: 0,
+    sendFees: 0,
     available: 0,
     totalRequired: 0
   }
+}
+
+function quoteMultiSplitBuffer (state: BotConfigState): number {
+  const rawBuffer = state.botConfig.quoteWalletOptions?.multisplitbuffer
+  if (!rawBuffer) return 0
+
+  const parsedBuffer = Number(rawBuffer)
+  if (!Number.isFinite(parsedBuffer)) return 0
+
+  return parsedBuffer / 100
+}
+
+function feeReserveAssetID (assetID: number): number {
+  return app().assets[assetID]?.token?.parentID ?? assetID
 }
 
 // perLotRequirements calculates the funding requirements for a single buy and sell lot.
@@ -119,28 +135,35 @@ function perLotRequirements (state: BotConfigState) : { perSellLot: PerLot, perB
     dexMarket: { baseID, lotSize, quoteLot, baseFeeAssetID, quoteID, quoteFeeAssetID, baseIsAccountLocker, quoteIsAccountLocker },
     botConfig: { cexBaseID, cexQuoteID, uiConfig: { quickBalance: { slippageBuffer } } }, marketReport
   } = state
+  const multiSplitBuffer = quoteMultiSplitBuffer(state)
 
   perSellLot.dex[baseID].tradedAmount = lotSize
   perSellLot.dex[baseFeeAssetID].fees.swap = marketReport.baseFees.max.swap
   perSellLot.cex[cexQuoteID].tradedAmount = quoteLot
   perSellLot.cex[cexQuoteID].slippageBuffer = slippageBuffer
-  perSellLot.dex[baseFeeAssetID].fees.funding = 0 // TODO: update this
+  perSellLot.dex[baseFeeAssetID].fees.funding = 0
   if (baseIsAccountLocker) perSellLot.dex[baseFeeAssetID].fees.refund = marketReport.baseFees.max.refund
   if (quoteIsAccountLocker) perSellLot.dex[quoteFeeAssetID].fees.redeem = marketReport.quoteFees.max.redeem
 
   perBuyLot.dex[quoteID].tradedAmount = quoteLot
   perBuyLot.dex[quoteID].slippageBuffer = slippageBuffer
+  perBuyLot.dex[quoteID].multiSplitBuffer = multiSplitBuffer
   perBuyLot.cex[cexBaseID].tradedAmount = lotSize
   perBuyLot.dex[quoteFeeAssetID].fees.swap = marketReport.quoteFees.max.swap
-  perBuyLot.dex[quoteFeeAssetID].fees.funding = 0 // TODO: update this
+  perBuyLot.dex[quoteFeeAssetID].multiSplitBuffer = multiSplitBuffer
+  perBuyLot.dex[quoteFeeAssetID].fees.funding = 0
   if (baseIsAccountLocker) perBuyLot.dex[baseFeeAssetID].fees.redeem = marketReport.baseFees.max.redeem
   if (quoteIsAccountLocker) perBuyLot.dex[quoteFeeAssetID].fees.refund = marketReport.quoteFees.max.refund
 
   const calculateTotalAmount = (perLot: PerLotBreakdown) : number => {
-    let total = perLot.tradedAmount
-    total *= (1 + perLot.slippageBuffer + perLot.multiSplitBuffer)
-    total = Math.floor(total)
-    total += perLot.fees.swap + perLot.fees.redeem + perLot.fees.refund + perLot.fees.funding
+    const principal = perLot.tradedAmount * (1 + perLot.slippageBuffer + perLot.multiSplitBuffer)
+    let total = perLot.multiSplitBuffer === 0 ? Math.floor(principal) : Math.round(principal)
+
+    const swapFees = perLot.multiSplitBuffer === 0
+      ? perLot.fees.swap
+      : Math.round(perLot.fees.swap * (1 + perLot.multiSplitBuffer))
+
+    total += swapFees + perLot.fees.redeem + perLot.fees.refund + perLot.fees.funding
     return total
   }
 
@@ -177,8 +200,11 @@ function requiredFunds (state: BotConfigState) : AllocationResult {
   const { numBuyLots, numSellLots } = calcNumLots(state)
   const totalBuyLots = numBuyLots + state.botConfig.uiConfig.quickBalance.buysBuffer
   const totalSellLots = numSellLots + state.botConfig.uiConfig.quickBalance.sellsBuffer
+  const cexRebalance = !!state.botConfig.autoRebalance && !state.botConfig.autoRebalance.internalOnly
 
   const { dexMarket: { baseIsAccountLocker, quoteIsAccountLocker }, marketReport } = state
+  const hasBuyPlacements = totalBuyLots > 0
+  const hasSellPlacements = totalSellLots > 0
 
   const dexAssetIDs = requiredDexAssets(state)
   const cexAssetIDs = [state.botConfig.cexBaseID, state.botConfig.cexQuoteID]
@@ -217,7 +243,7 @@ function requiredFunds (state: BotConfigState) : AllocationResult {
         toAllocate.dex[assetID].calculation.feeReserves.buyReserves.redeem = marketReport.baseFees.estimated.redeem
         toAllocate.dex[assetID].calculation.feeReserves.sellReserves.refund = marketReport.baseFees.estimated.refund
       }
-      toAllocate.dex[assetID].calculation.initialSellFundingFees = 0 // TODO: update this
+      toAllocate.dex[assetID].calculation.initialSellFundingFees = hasSellPlacements ? state.sellFundingFees : 0
     }
 
     if (assetID === state.dexMarket.quoteFeeAssetID) {
@@ -226,19 +252,24 @@ function requiredFunds (state: BotConfigState) : AllocationResult {
         toAllocate.dex[assetID].calculation.feeReserves.sellReserves.redeem = marketReport.quoteFees.estimated.redeem
         toAllocate.dex[assetID].calculation.feeReserves.buyReserves.refund = marketReport.quoteFees.estimated.refund
       }
-      toAllocate.dex[assetID].calculation.initialBuyFundingFees = 0 // TODO: update this
-      toAllocate.dex[assetID].calculation.initialSellFundingFees = 0 // TODO: update this
+      toAllocate.dex[assetID].calculation.initialBuyFundingFees = hasBuyPlacements ? state.buyFundingFees : 0
     }
 
-    toAllocate.dex[assetID].calculation.bridgeFeeReserves = state.botConfig.uiConfig.quickBalance.bridgeFeeReserve
+    toAllocate.dex[assetID].calculation.rebalanceFeeReserves = cexRebalance ? state.botConfig.uiConfig.quickBalance.rebalanceFeeReserve : 0
 
-    if (state.baseBridgeFeesAndLimits) {
+    if (cexRebalance && state.baseBridgeFeesAndLimits) {
       toAllocate.dex[assetID].calculation.bridgeFees += state.baseBridgeFeesAndLimits.withdrawal?.fees[assetID] ?? 0
       toAllocate.dex[assetID].calculation.bridgeFees += state.baseBridgeFeesAndLimits.deposit?.fees[assetID] ?? 0
     }
-    if (state.quoteBridgeFeesAndLimits) {
+    if (cexRebalance && state.quoteBridgeFeesAndLimits) {
       toAllocate.dex[assetID].calculation.bridgeFees += state.quoteBridgeFeesAndLimits.withdrawal?.fees[assetID] ?? 0
       toAllocate.dex[assetID].calculation.bridgeFees += state.quoteBridgeFeesAndLimits.deposit?.fees[assetID] ?? 0
+    }
+    if (cexRebalance && assetID === feeReserveAssetID(state.botConfig.cexBaseID)) {
+      toAllocate.dex[assetID].calculation.sendFees += state.baseExternalFee
+    }
+    if (cexRebalance && assetID === feeReserveAssetID(state.botConfig.cexQuoteID)) {
+      toAllocate.dex[assetID].calculation.sendFees += state.quoteExternalFee
     }
 
     toAllocate.dex[assetID].calculation.numBuyFeeReserves = state.botConfig.uiConfig.quickBalance.buyFeeReserve
@@ -257,7 +288,7 @@ function requiredFunds (state: BotConfigState) : AllocationResult {
     total += totalFees(breakdown.feeReserves.sellReserves) * breakdown.numSellFeeReserves
     total += breakdown.initialBuyFundingFees
     total += breakdown.initialSellFundingFees
-    total += breakdown.bridgeFeeReserves * breakdown.bridgeFees
+    total += breakdown.rebalanceFeeReserves * (breakdown.bridgeFees + breakdown.sendFees)
     return total
   }
 

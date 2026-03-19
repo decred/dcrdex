@@ -844,7 +844,7 @@ export interface QuickBalanceConfig {
   sellsBuffer: number
   buyFeeReserve: number
   sellFeeReserve: number
-  bridgeFeeReserve: number
+  rebalanceFeeReserve: number
   slippageBuffer: number
 }
 

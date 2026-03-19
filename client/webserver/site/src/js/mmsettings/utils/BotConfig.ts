@@ -67,6 +67,11 @@ export interface BotConfigState {
   intermediateAssets: number[] | null;
   intermediateAsset: number | null;
   fiatRatesMap: Record<number, number>;
+  buyFundingFees: number;
+  sellFundingFees: number;
+  baseExternalFee: number;
+  quoteExternalFee: number;
+  fundingFeesKey: string;
 }
 
 export interface RoundTripFeesAndLimits {
@@ -85,8 +90,8 @@ const DEFAULT_QUICK_PLACEMENTS: QuickPlacementsConfig = {
   matchBuffer: 0
 }
 
+const DEFAULT_EXTERNAL_REBALANCE_FEE_RESERVE = 5
 const TRAIT_ACCOUNT_LOCKER = 1 << 14
-
 function emptyBotBalanceAllocation (): BotBalanceAllocation {
   return { dex: {}, cex: {} }
 }
@@ -226,6 +231,134 @@ function orderOptionsToRecord (opts: OrderOption[] | null): Record<string, strin
     ...acc,
     [opt.key]: opt.default?.toString() ?? ''
   }), {})
+}
+
+function maxPlacementCounts (cfg: BotConfig): { maxBuyPlacements: number, maxSellPlacements: number } {
+  if (cfg.basicMarketMakingConfig) {
+    return {
+      maxBuyPlacements: cfg.basicMarketMakingConfig.buyPlacements.length,
+      maxSellPlacements: cfg.basicMarketMakingConfig.sellPlacements.length
+    }
+  }
+
+  if (cfg.arbMarketMakingConfig) {
+    return {
+      maxBuyPlacements: cfg.arbMarketMakingConfig.buyPlacements.length,
+      maxSellPlacements: cfg.arbMarketMakingConfig.sellPlacements.length
+    }
+  }
+
+  if (cfg.simpleArbConfig) {
+    return { maxBuyPlacements: 1, maxSellPlacements: 1 }
+  }
+
+  return { maxBuyPlacements: 0, maxSellPlacements: 0 }
+}
+
+function stableOptionsKey (options: Record<string, string> | null | undefined): string {
+  if (!options) return ''
+  return JSON.stringify(Object.entries(options).sort(([keyA], [keyB]) => keyA.localeCompare(keyB)))
+}
+
+export function fundingFeesRequestKey (state: BotConfigState): string {
+  const { maxBuyPlacements, maxSellPlacements } = maxPlacementCounts(state.botConfig)
+  const { host, baseID, quoteID, baseWalletOptions, quoteWalletOptions } = state.botConfig
+  return JSON.stringify({
+    host,
+    baseID,
+    quoteID,
+    maxBuyPlacements,
+    maxSellPlacements,
+    baseWalletOptions: stableOptionsKey(baseWalletOptions),
+    quoteWalletOptions: stableOptionsKey(quoteWalletOptions)
+  })
+}
+
+type FundingFeesResult =
+  | { ok: true; buyFees: number; sellFees: number; key: string }
+  | { ok: false; error: string; key: string }
+
+export function externalFeeRequestKey (state: BotConfigState): string {
+  const { host, baseID, quoteID, cexName, cexBaseID, cexQuoteID, autoRebalance } = state.botConfig
+  return JSON.stringify({
+    host,
+    baseID,
+    quoteID,
+    cexName,
+    cexBaseID,
+    cexQuoteID,
+    minBaseTransfer: autoRebalance?.minBaseTransfer || 0,
+    minQuoteTransfer: autoRebalance?.minQuoteTransfer || 0,
+    internalOnly: !!autoRebalance?.internalOnly
+  })
+}
+
+async function estimateExternalFee (assetID: number, amount: number): Promise<number> {
+  const wallet = app().assets[assetID]?.wallet
+  if (!wallet || amount <= 0) return 0
+  let addr = wallet.address
+  if (!addr) {
+    const addrRes = await MM.newDepositAddress(assetID)
+    if (!app().checkResponse(addrRes) || !addrRes.ok || !addrRes.address) return 0
+    addr = addrRes.address
+    wallet.address = addr
+  }
+  const res = await MM.estimateSendTxFee(addr, assetID, amount)
+  return app().checkResponse(res) && res.ok ? res.txfee : 0
+}
+
+export async function fetchExternalFees (state: BotConfigState): Promise<{ baseExternalFee: number; quoteExternalFee: number; key: string }> {
+  const key = externalFeeRequestKey(state)
+  const { cexName, cexBaseID, cexQuoteID, autoRebalance } = state.botConfig
+  if (!cexName || !autoRebalance || autoRebalance.internalOnly) {
+    return { baseExternalFee: 0, quoteExternalFee: 0, key }
+  }
+  const [baseExternalFee, quoteExternalFee] = await Promise.all([
+    estimateExternalFee(cexBaseID, autoRebalance.minBaseTransfer || state.dexMarket.lotSize),
+    estimateExternalFee(cexQuoteID, autoRebalance.minQuoteTransfer || state.dexMarket.quoteLot)
+  ])
+  return { baseExternalFee, quoteExternalFee, key }
+}
+
+export async function fetchFundingFees (state: BotConfigState): Promise<FundingFeesResult> {
+  const { maxBuyPlacements, maxSellPlacements } = maxPlacementCounts(state.botConfig)
+  const market = {
+    host: state.botConfig.host,
+    baseID: state.botConfig.baseID,
+    quoteID: state.botConfig.quoteID
+  }
+  const key = fundingFeesRequestKey(state)
+  try {
+    const res = await MM.maxFundingFees(
+      market,
+      maxBuyPlacements,
+      maxSellPlacements,
+      state.botConfig.baseWalletOptions ?? {},
+      state.botConfig.quoteWalletOptions ?? {}
+    )
+    if (!app().checkResponse(res)) {
+      return { ok: false, error: res.msg, key }
+    }
+
+    return { ok: true, buyFees: res.buyFees, sellFees: res.sellFees, key }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error), key }
+  }
+}
+
+function clearFundingFees (state: BotConfigState): BotConfigState {
+  if (state.fundingFeesKey === fundingFeesRequestKey(state)) {
+    return state
+  }
+  if (state.buyFundingFees === 0 && state.sellFundingFees === 0 && state.fundingFeesKey === '') {
+    return state
+  }
+  return {
+    ...state,
+    buyFundingFees: 0,
+    sellFundingFees: 0,
+    fundingFeesKey: ''
+  }
 }
 
 async function fetchCEXAssetAndBridgeInfo (
@@ -492,7 +625,7 @@ export async function initialBotConfigState (
         sellsBuffer: 1,
         buyFeeReserve: 0,
         sellFeeReserve: 0,
-        bridgeFeeReserve: 0,
+        rebalanceFeeReserve: 0,
         slippageBuffer: 0.05
       },
       usingQuickBalance: true
@@ -536,7 +669,12 @@ export async function initialBotConfigState (
     intermediateAssets,
     intermediateAsset: intermediateAssets?.[0] ?? null,
     cexStatus,
-    fiatRatesMap: app().fiatRatesMap
+    fiatRatesMap: app().fiatRatesMap,
+    buyFundingFees: 0,
+    sellFundingFees: 0,
+    baseExternalFee: 0,
+    quoteExternalFee: 0,
+    fundingFeesKey: ''
   }
 
   return updateAllocationsBasedOnQuickConfig(syncArbMMMultiHopState(botConfigState))
@@ -631,7 +769,12 @@ export async function botConfigStateFromSavedConfig (
     intermediateAssets,
     intermediateAsset: null,
     cexStatus,
-    fiatRatesMap: app().fiatRatesMap
+    fiatRatesMap: app().fiatRatesMap,
+    buyFundingFees: 0,
+    sellFundingFees: 0,
+    baseExternalFee: 0,
+    quoteExternalFee: 0,
+    fundingFeesKey: ''
   }
 
   const syncedState = syncArbMMMultiHopState(botConfigState)
@@ -649,6 +792,8 @@ type RebalanceSettingsAction =
 
 type BotConfigAction =
   | { type: 'SET_INITIAL_CONFIG'; payload: BotConfigState | null }
+  | { type: 'SET_FUNDING_FEES'; payload: { buyFees: number; sellFees: number; key: string } }
+  | { type: 'SET_EXTERNAL_FEES'; payload: { baseExternalFee: number; quoteExternalFee: number } }
   | { type: 'USE_QUICK_PLACEMENTS'; payload: boolean }
   | { type: 'SET_GAP_STRATEGY'; payload: GapStrategy }
   | { type: 'SET_PROFIT'; payload: number }
@@ -967,6 +1112,39 @@ export const botConfigStateReducer = (state: BotConfigState | null, action: BotC
   if (!state) return null
 
   switch (action.type) {
+    case 'SET_FUNDING_FEES': {
+      const { buyFees, sellFees, key } = action.payload
+      const fundingFeesUnchanged =
+        state.buyFundingFees === buyFees &&
+        state.sellFundingFees === sellFees &&
+        state.fundingFeesKey === key
+
+      const nextState = {
+        ...state,
+        buyFundingFees: buyFees,
+        sellFundingFees: sellFees,
+        fundingFeesKey: key
+      }
+
+      if (fundingFeesUnchanged) {
+        return state
+      }
+      return updateAllocationsBasedOnQuickConfig(nextState)
+    }
+
+    case 'SET_EXTERNAL_FEES':
+      return state.botConfig.uiConfig.usingQuickBalance
+        ? updateAllocationsBasedOnQuickConfig({
+          ...state,
+          baseExternalFee: action.payload.baseExternalFee,
+          quoteExternalFee: action.payload.quoteExternalFee,
+        })
+        : {
+          ...state,
+          baseExternalFee: action.payload.baseExternalFee,
+          quoteExternalFee: action.payload.quoteExternalFee
+        }
+
     case 'USE_QUICK_PLACEMENTS': {
       let newState = { ...state, quickPlacements: action.payload ? deriveQuickConfigFromPlacements(state) : null }
       if (action.payload && newState.botConfig.basicMarketMakingConfig) {
@@ -986,7 +1164,7 @@ export const botConfigStateReducer = (state: BotConfigState | null, action: BotC
 
     case 'SET_GAP_STRATEGY':
       if (state.botConfig.basicMarketMakingConfig) {
-        return {
+        return clearFundingFees({
           ...state,
           botConfig: {
             ...state.botConfig,
@@ -997,7 +1175,7 @@ export const botConfigStateReducer = (state: BotConfigState | null, action: BotC
               sellPlacements: []
             }
           }
-        }
+        })
       }
       return state
 
@@ -1034,7 +1212,7 @@ export const botConfigStateReducer = (state: BotConfigState | null, action: BotC
 
       if (isBasicMM && state.botConfig.basicMarketMakingConfig) {
         const newPlacement: OrderPlacement = { lots: action.payload.lots, gapFactor: action.payload.gapFactor }
-        return {
+        return clearFundingFees({
           ...state,
           botConfig: {
             ...state.botConfig,
@@ -1043,10 +1221,10 @@ export const botConfigStateReducer = (state: BotConfigState | null, action: BotC
               [placementType]: [...state.botConfig.basicMarketMakingConfig[placementType], newPlacement]
             }
           }
-        }
+        })
       } else if (state.botConfig.arbMarketMakingConfig) {
         const newPlacement: ArbMarketMakingPlacement = { lots: action.payload.lots, multiplier: action.payload.gapFactor }
-        return {
+        return clearFundingFees({
           ...state,
           botConfig: {
             ...state.botConfig,
@@ -1055,7 +1233,7 @@ export const botConfigStateReducer = (state: BotConfigState | null, action: BotC
               [placementType]: [...state.botConfig.arbMarketMakingConfig[placementType], newPlacement]
             }
           }
-        }
+        })
       }
       return state
     }
@@ -1068,7 +1246,7 @@ export const botConfigStateReducer = (state: BotConfigState | null, action: BotC
       const placements = [...config[placementType]]
       if (action.payload.index < 0 || action.payload.index >= placements.length) return state
       placements.splice(action.payload.index, 1)
-      return {
+      return clearFundingFees({
         ...state,
         botConfig: {
           ...state.botConfig,
@@ -1077,7 +1255,7 @@ export const botConfigStateReducer = (state: BotConfigState | null, action: BotC
             [placementType]: placements
           }
         }
-      }
+      })
     }
 
     case 'REORDER_PLACEMENTS': {
@@ -1107,7 +1285,7 @@ export const botConfigStateReducer = (state: BotConfigState | null, action: BotC
           ...state,
           quickPlacements: { ...state.quickPlacements, [action.payload.field]: action.payload.value }
         }
-        return updateAllocationsBasedOnQuickConfig(regeneratePlacementsFromQuickConfig(newState))
+        return updateAllocationsBasedOnQuickConfig(clearFundingFees(regeneratePlacementsFromQuickConfig(newState)))
       }
       return state
 
@@ -1203,12 +1381,28 @@ export const botConfigStateReducer = (state: BotConfigState | null, action: BotC
           autoRebalance: rebalanceSettingsReducer(state.botConfig.autoRebalance, action.payload)
         }
       }
-      return updateAllocationsBasedOnQuickConfig(newState)
+      return updateAllocationsBasedOnQuickConfig(
+        action.payload.type === 'CEX_REBALANCE' && action.payload.payload && state.botConfig.uiConfig.quickBalance.rebalanceFeeReserve === 0
+          ? {
+              ...newState,
+              botConfig: {
+                ...newState.botConfig,
+                uiConfig: {
+                  ...newState.botConfig.uiConfig,
+                  quickBalance: {
+                    ...newState.botConfig.uiConfig.quickBalance,
+                    rebalanceFeeReserve: DEFAULT_EXTERNAL_REBALANCE_FEE_RESERVE
+                  }
+                }
+              }
+            }
+          : newState
+      )
     }
 
     case 'UPDATE_WALLET_SETTING': {
       const optionsKey = action.payload.asset === 'base' ? 'baseWalletOptions' : 'quoteWalletOptions'
-      return {
+      const nextState = clearFundingFees({
         ...state,
         botConfig: {
           ...state.botConfig,
@@ -1217,7 +1411,8 @@ export const botConfigStateReducer = (state: BotConfigState | null, action: BotC
             [action.payload.key]: action.payload.value
           }
         }
-      }
+      })
+      return updateAllocationsBasedOnQuickConfig(nextState)
     }
 
     case 'UPDATE_BRIDGE_SELECTION': {

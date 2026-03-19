@@ -94,7 +94,6 @@ const BotActionButtons: React.FC<{
   const botConfigState = useBotConfigState()
   const setError = useMMSettingsSetError()
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false)
-
   const handleSaveSettings = async () => {
     try {
       await MM.updateBotConfig(botConfigState.botConfig)
@@ -177,7 +176,10 @@ const BotActionButtons: React.FC<{
   if (botConfigState.runStats) {
     return (
       <div className={containerClass}>
-        <button className={`btn btn-outline-primary go ${buttonClass}`} onClick={handleUpdateRunningBot}>
+        <button
+          className={`btn btn-outline-primary go ${buttonClass}`}
+          onClick={handleUpdateRunningBot}
+        >
           {prep(ID_MM_UPDATE_RUNNING_BOT)}
         </button>
       </div>
@@ -187,10 +189,16 @@ const BotActionButtons: React.FC<{
   return (
     <>
       <div className={containerClass}>
-        <button className={`btn btn-outline-primary go ${buttonClass}`} onClick={handleStart}>
+        <button
+          className={`btn btn-outline-primary go ${buttonClass}`}
+          onClick={handleStart}
+        >
           {prep(ID_MM_START_BOT)} <span className="ico-arrowright ms-1"></span>
         </button>
-        <button className={`btn btn-primary ${buttonClass}`} onClick={handleSaveSettings}>
+        <button
+          className={`btn btn-primary ${buttonClass}`}
+          onClick={handleSaveSettings}
+        >
           {prep(ID_MM_SAVE_SETTINGS)}
         </button>
         <button className={`btn btn-primary danger ${buttonClass}`} onClick={handleDeleteBotClick}>

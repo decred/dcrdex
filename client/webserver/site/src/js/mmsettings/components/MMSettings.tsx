@@ -1,4 +1,4 @@
-import React, { useReducer, useState, createContext, useContext, forwardRef, useImperativeHandle } from 'react'
+import React, { useReducer, useState, createContext, useContext, forwardRef, useImperativeHandle, useEffect, useRef } from 'react'
 import { MMCEXStatus, app, BalanceNote, CEXBalanceUpdate, SupportedAsset, ApprovalStatus } from '../../registry'
 import { MM } from '../../mmutil'
 import { BotSpecs, specLK } from '../../mmsettings'
@@ -8,7 +8,17 @@ import BotTypeSelector from './BotTypeSelector'
 import ConfigureBot from './ConfigureBot'
 import ErrorPopup from './ErrorPopup'
 import { LoadingSpinner } from './FormComponents'
-import { botConfigStateReducer, initialBotConfigState, BotConfigStateContext, BotConfigDispatchContext, BotConfigState } from '../utils/BotConfig'
+import {
+  botConfigStateReducer,
+  initialBotConfigState,
+  BotConfigStateContext,
+  BotConfigDispatchContext,
+  BotConfigState,
+  fetchExternalFees,
+  fetchFundingFees,
+  externalFeeRequestKey,
+  fundingFeesRequestKey
+} from '../utils/BotConfig'
 import State from '../../state'
 import { requiredDexAssets } from '../utils/AllocationUtil'
 
@@ -313,6 +323,25 @@ const MMSettings = forwardRef<MMSettingsHandle, MMSettingsProps>(({
     baseID: number;
     quoteID: number;
   } | null>(null)
+  const latestBotConfigState = useRef<BotConfigState | null>(initialState)
+  const fundingFeesRequestSeq = useRef(0)
+  const fundingFeesInFlightKey = useRef<string | null>(null)
+  const fundingFeesRetry = useRef<{ key: string; timer: number } | null>(null)
+  const externalFeesRequestSeq = useRef(0)
+  const externalFeesInFlightKey = useRef<string | null>(null)
+  const externalFeesLoadedKey = useRef<string | null>(null)
+  const mounted = useRef(true)
+  latestBotConfigState.current = botConfigState
+
+  useEffect(() => {
+    return () => {
+      mounted.current = false
+      if (fundingFeesRetry.current) {
+        window.clearTimeout(fundingFeesRetry.current.timer)
+        fundingFeesRetry.current = null
+      }
+    }
+  }, [])
 
   const handleCEXesUpdated = async () => {
     try {
@@ -382,6 +411,93 @@ const MMSettings = forwardRef<MMSettingsHandle, MMSettingsProps>(({
       }
     }
   }), [botConfigState])
+
+  useEffect(() => {
+    if (!botConfigState) return
+
+    const key = fundingFeesRequestKey(botConfigState)
+    const fundingFeesReady = botConfigState.fundingFeesKey === key
+    if (fundingFeesReady || fundingFeesInFlightKey.current === key) {
+      return
+    }
+
+    if (fundingFeesRetry.current && fundingFeesRetry.current.key !== key) {
+      window.clearTimeout(fundingFeesRetry.current.timer)
+      fundingFeesRetry.current = null
+    }
+
+    const performFetch = async (stateSnapshot: BotConfigState, keySnapshot: string) => {
+      if (fundingFeesInFlightKey.current === keySnapshot) {
+        return
+      }
+
+      fundingFeesInFlightKey.current = keySnapshot
+      const requestID = ++fundingFeesRequestSeq.current
+      const result = await fetchFundingFees(stateSnapshot)
+      if (!mounted.current || fundingFeesRequestSeq.current !== requestID) {
+        return
+      }
+
+      if (fundingFeesInFlightKey.current === keySnapshot) {
+        fundingFeesInFlightKey.current = null
+      }
+
+      if (result.ok) {
+        if (fundingFeesRetry.current?.key === keySnapshot) {
+          window.clearTimeout(fundingFeesRetry.current.timer)
+          fundingFeesRetry.current = null
+        }
+        dispatch({
+          type: 'SET_FUNDING_FEES',
+          payload: { buyFees: result.buyFees, sellFees: result.sellFees, key: result.key }
+        })
+      } else {
+        if (fundingFeesRetry.current?.key === keySnapshot) {
+          return
+        }
+        const timer = window.setTimeout(() => {
+          if (fundingFeesRetry.current?.key === keySnapshot) {
+            fundingFeesRetry.current = null
+          }
+          const latestState = latestBotConfigState.current
+          if (!latestState) {
+            return
+          }
+          const latestKey = fundingFeesRequestKey(latestState)
+          if (latestKey !== keySnapshot || latestState.fundingFeesKey === latestKey) {
+            return
+          }
+          performFetch(latestState, keySnapshot).then(() => undefined)
+        }, 3000)
+        fundingFeesRetry.current = { key: keySnapshot, timer }
+      }
+    }
+
+    if (fundingFeesRetry.current?.key === key) {
+      return
+    }
+
+    performFetch(botConfigState, key).then(() => undefined)
+  }, [botConfigState])
+
+  useEffect(() => {
+    if (!botConfigState) return
+    const key = externalFeeRequestKey(botConfigState)
+    if (externalFeesLoadedKey.current === key || externalFeesInFlightKey.current === key) return
+
+    const performFetch = async (stateSnapshot: BotConfigState, keySnapshot: string) => {
+      if (externalFeesInFlightKey.current === keySnapshot) return
+      externalFeesInFlightKey.current = keySnapshot
+      const requestID = ++externalFeesRequestSeq.current
+      const result = await fetchExternalFees(stateSnapshot)
+      if (!mounted.current || externalFeesRequestSeq.current !== requestID) return
+      if (externalFeesInFlightKey.current === keySnapshot) externalFeesInFlightKey.current = null
+      externalFeesLoadedKey.current = result.key
+      dispatch({ type: 'SET_EXTERNAL_FEES', payload: result })
+    }
+
+    performFetch(botConfigState, key).then(() => undefined)
+  }, [botConfigState])
 
   // Create the CEX market support checker function
   const checkCexMarketSupport = createCexMarketSupportChecker(bridgePaths, cexes)

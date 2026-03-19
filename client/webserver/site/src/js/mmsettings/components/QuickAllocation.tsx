@@ -32,7 +32,7 @@ const QuickConfigInput: React.FC<QuickConfigInputProps> = ({
   onChange
 }) => (
   <div className={`d-flex align-items-center pt-2 mt-2 pb-2${showBorder ? ' border-bottom' : ''}`}>
-    <div className="fs16 me-3" style={{ minWidth: '140px' }}>
+    <div className="fs16 me-3" style={{ flex: '0 0 140px' }}>
       {label}
       <Tooltip content={tooltip}>
         <span className="ico-info fs13 ms-1"></span>
@@ -303,12 +303,32 @@ const AllocationBreakdown: React.FC<AllocationBreakdownProps> = ({
           assetID={assetID}
           level={1}
         />
-        <CalculationBreakdownRow
-          text="Bridge Fee Reserves"
-          value={allocationDetail.calculation.bridgeFeeReserves}
-          assetID={assetID}
-          level={1}
-        />
+        {allocationDetail.calculation.rebalanceFeeReserves > 0 && (allocationDetail.calculation.bridgeFees > 0 || allocationDetail.calculation.sendFees > 0) && (
+          <div className="mb-3">
+            <CalculationBreakdownRow
+              text="External Rebalance Fee Reserve"
+              value={allocationDetail.calculation.rebalanceFeeReserves * (allocationDetail.calculation.bridgeFees + allocationDetail.calculation.sendFees)}
+              assetID={assetID}
+              level={1}
+            />
+            <div className="ms-3">
+              <CalculationBreakdownRow
+                text="Bridge Fees"
+                value={allocationDetail.calculation.rebalanceFeeReserves * allocationDetail.calculation.bridgeFees}
+                assetID={assetID}
+                level={2}
+                displayZero={true}
+              />
+              <CalculationBreakdownRow
+                text="Send Fees"
+                value={allocationDetail.calculation.rebalanceFeeReserves * allocationDetail.calculation.sendFees}
+                assetID={assetID}
+                level={2}
+                displayZero={true}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       <hr className="my-3" />
@@ -590,7 +610,7 @@ export const AllocationPanelHeader: React.FC<AllocationPanelHeaderProps> = ({
 }
 
 const QuickAllocationView: React.FC = () => {
-  const { botConfig, baseBridgeFeesAndLimits, quoteBridgeFeesAndLimits, dexMarket } = useBotConfigState()
+  const { botConfig, dexMarket } = useBotConfigState()
   const dispatch = useBotConfigDispatch()
 
   if (!botConfig.uiConfig.quickBalance) return null
@@ -598,6 +618,7 @@ const QuickAllocationView: React.FC = () => {
   const quickBalance = botConfig.uiConfig.quickBalance
 
   const marketHasAToken = botConfig.baseID !== dexMarket.baseFeeAssetID || botConfig.quoteID !== dexMarket.quoteFeeAssetID
+  const cexRebalance = !!botConfig.autoRebalance && !botConfig.autoRebalance.internalOnly
 
   const handleQuickConfigChange = (field: keyof typeof quickBalance, value: number) => {
     dispatch({
@@ -695,16 +716,16 @@ const QuickAllocationView: React.FC = () => {
               onChange={(value) => handleQuickConfigChange('sellFeeReserve', value)}
             />}
 
-            {/* Bridge Fee Reserve */}
-            { (baseBridgeFeesAndLimits || quoteBridgeFeesAndLimits) && <QuickConfigInput
-              label="Bridge Fee Reserve"
-              tooltip="Additional funds to reserve for bridge transaction fees"
+            {/* External Rebalance Fee Reserve */}
+            { cexRebalance && <QuickConfigInput
+              label="External Rebalance Fee Reserve"
+              tooltip="Additional funds to reserve for external rebalance fees, including bridge fees when applicable and approximate deposit send fees"
               showBorder={true}
               min={0}
               max={1000}
               precision={0}
-              value={quickBalance.bridgeFeeReserve}
-              onChange={(value) => handleQuickConfigChange('bridgeFeeReserve', value)}
+              value={quickBalance.rebalanceFeeReserve}
+              onChange={(value) => handleQuickConfigChange('rebalanceFeeReserve', value)}
             />}
         </div>
 

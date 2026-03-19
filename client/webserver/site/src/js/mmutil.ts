@@ -116,6 +116,14 @@ class MarketMakerBot {
     return postJSON('/api/maxfundingfees', { market, maxBuyPlacements, maxSellPlacements, baseOptions, quoteOptions })
   }
 
+  async estimateSendTxFee (addr: string, assetID: number, value: number, subtract = false, maxWithdraw = false) {
+    return postJSON('/api/txfee', { addr, assetID, value, subtract, maxWithdraw })
+  }
+
+  async newDepositAddress (assetID: number) {
+    return postJSON('/api/depositaddress', { assetID })
+  }
+
   async startBot (config: MarketWithHost) {
     return await postJSON('/api/startmarketmakingbot', { config })
   }
