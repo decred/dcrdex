@@ -1243,6 +1243,25 @@ func (dcr *ExchangeWallet) balance() (*asset.Balance, error) {
 	}
 
 	if accts.UnmixedAccount == "" {
+		// Mixing is disabled, but if the mixed or trading accounts exist
+		// and have funds (e.g. from a previous mixing session), include
+		// them as locked so the user can see they exist.
+		for _, acctName := range []string{mixedAccountName, tradingAccountName} {
+			acctBal, err := dcr.wallet.AccountBalance(dcr.ctx, 0, acctName)
+			if err != nil {
+				continue // account may not exist
+			}
+			total := toAtoms(acctBal.Total)
+			if total > 0 {
+				bal.Locked += total
+			}
+			staked := toAtoms(acctBal.LockedByTickets)
+			if staked > 0 {
+				bal.Other[asset.BalanceCategoryStaked] = asset.CustomBalance{
+					Amount: bal.Other[asset.BalanceCategoryStaked].Amount + staked,
+				}
+			}
+		}
 		return bal, nil
 	}
 
