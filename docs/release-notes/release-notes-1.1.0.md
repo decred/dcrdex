@@ -18,22 +18,29 @@ This release introduces per-match swap addresses, which change the trade
 negotiation protocol. Old clients cannot trade on a v1.1.0 server and new
 clients cannot trade on a v1.0.x server.
 
-### EVM Contract Upgrade (Server Operators)
+### Upgrading (Server Operators)
 
-v1.0.6 used EVM contract version 0. v1.1.0 defaults to contract version 1.
-The server's RPC client binds to a single contract version, so after upgrading
-the server cannot verify coins from in-flight v0 swaps. To handle this safely,
-operators should either:
+All active swaps from v1.0.x will be revoked on upgrade because the v1.1.0
+server requires per-match swap addresses on all matches. Revoked matches are
+marked as no-fault, so neither party is penalized, but participants with
+on-chain swaps will need to wait for locktime expiry to refund.
 
-1. Wait for all active EVM swaps to complete before upgrading, OR
-2. Place an `evm-protocol-overrides.json` file in the server's working
-   directory to keep v0 until remaining swaps drain:
+**Operators must wait for all active swaps to complete before upgrading.**
 
-   ```json
-   {"eth": 0, "usdc.eth": 0, "usdt.eth": 0, "matic.eth": 0}
-   ```
+Additionally, v1.0.6 used EVM contract version 0 while v1.1.0 defaults to
+contract version 1. An `evm-protocol-overrides.json` file can be placed in
+the server's working directory to override the contract version for specific
+assets, but this does not prevent the per-match address revocation above.
 
-   Once no v0 swaps remain, remove the file and restart to use v1.
+## Known Issues
+
+### Electrum Wallets Temporarily Disabled
+
+Electrum wallet support (BTC, LTC, FIRO) has been temporarily disabled due to
+inconsistencies found during testing. Existing Electrum wallets will continue
+to function, but new Electrum wallet creation is not available in this release.
+Users should use native SPV or RPC wallets instead. A fix is expected in a
+subsequent patch release.
 
 ## New Features
 

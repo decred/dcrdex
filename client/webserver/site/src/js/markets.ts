@@ -1132,10 +1132,17 @@ export default class MarketsPage extends BasePage {
     // exchange data, so just put up a message and wait for the connection to be
     // established, at which time handleConnNote will refresh and reload.
     if (!dex || !dex.markets || dex.connectionStatus !== ConnectionStatus.Connected) {
-      let errMsg = intl.prep(intl.ID_CONNECTION_FAILED)
-      if (dex.disabled) errMsg = intl.prep(intl.ID_DEX_DISABLED_MSG)
-      page.chartErrMsg.textContent = errMsg
-      Doc.show(page.chartErrMsg, page.disconnectedOverlay)
+      if (dex && dex.disabled) {
+        page.disabledMsg.textContent = intl.prep(intl.ID_DEX_DISABLED_MSG)
+        page.disabledSettingsLink.href = `/dexsettings/${dex.host}`
+        Doc.show(page.disabledContent)
+        Doc.hide(page.disconnectedContent)
+      } else {
+        page.chartErrMsg.textContent = intl.prep(intl.ID_CONNECTION_FAILED)
+        Doc.show(page.chartErrMsg, page.disconnectedContent)
+        Doc.hide(page.disabledContent)
+      }
+      Doc.show(page.disconnectedOverlay)
       return
     }
 

@@ -66,21 +66,9 @@ const optimismExplorers: Record<number, (cid: string) => string> = {
 
 export const CoinExplorers: Record<number, Record<number, (cid: string) => string>> = {
   42: { // dcr
-    [Mainnet]: (cid: string) => {
-      const [txid, vout] = cid.split(':')
-      if (vout !== undefined) return `https://dcrdata.decred.org/tx/${txid}/out/${vout}`
-      return `https://dcrdata.decred.org/tx/${txid}`
-    },
-    [Testnet]: (cid: string) => {
-      const [txid, vout] = cid.split(':')
-      if (vout !== undefined) return `https://testnet.decred.org/tx/${txid}/out/${vout}`
-      return `https://testnet.decred.org/tx/${txid}`
-    },
-    [Simnet]: (cid: string) => {
-      const [txid, vout] = cid.split(':')
-      if (vout !== undefined) return `http://127.0.0.1:17779/tx/${txid}/out/${vout}`
-      return `https://127.0.0.1:17779/tx/${txid}`
-    }
+    [Mainnet]: (cid: string) => `https://dcrdata.decred.org/tx/${cid.split(':')[0]}`,
+    [Testnet]: (cid: string) => `https://testnet.decred.org/tx/${cid.split(':')[0]}`,
+    [Simnet]: (cid: string) => `http://127.0.0.1:17779/tx/${cid.split(':')[0]}`
   },
   0: { // btc
     [Mainnet]: (cid: string) => `https://mempool.space/tx/${cid.split(':')[0]}`,

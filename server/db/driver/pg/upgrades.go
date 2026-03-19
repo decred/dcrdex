@@ -395,10 +395,11 @@ func v8Upgrade(tx *sql.Tx) error {
 	log.Infof("Adding per-match swap address columns to matches tables for %d markets", len(mkts))
 
 	for _, mkt := range mkts {
-		if !safeIdentRE.MatchString(mkt.Name) {
-			return fmt.Errorf("market name %q contains disallowed characters", mkt.Name)
+		schema := marketSchema(mkt.Name)
+		if !safeIdentRE.MatchString(schema) {
+			return fmt.Errorf("market schema %q (from %q) contains disallowed characters", schema, mkt.Name)
 		}
-		tableName := mkt.Name + "." + matchesTableName
+		tableName := schema + "." + matchesTableName
 		_, err = tx.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS makerSwapAddr TEXT DEFAULT '';", tableName))
 		if err != nil {
 			return fmt.Errorf("error adding makerSwapAddr column to %s: %w", tableName, err)
