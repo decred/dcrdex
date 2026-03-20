@@ -711,6 +711,77 @@ paths:
                 assetID: 42
                 txID: "abc123..."
 
+  /gaslessredeemcalldata:
+    post:
+      tags: [Transactions]
+      summary: Build emergency gasless redeem calldata
+      description: |
+        Build signed calldata for an emergency gasless redeem. All requested
+        match IDs must belong to the same trade and will be batched into one
+        redeemWithSignature call. The relayer address is the wallet address
+        of whoever will submit the transaction on-chain and collect the relay
+        fee.
+
+        **Route:** `gaslessredeemcalldata`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: gaslessredeemcalldata
+              id: 1
+              payload:
+                appPass: "mypassword"
+                relayerAddress: "0x1234567890abcdef1234567890abcdef12345678"
+                matchIDs:
+                  - "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+
+  /validategaslessredeem:
+    post:
+      tags: [Transactions]
+      summary: Validate gasless redeem calldata
+      description: |
+        Validate emergency gasless redeem calldata against the specified asset
+        wallet. Returns the relay fee, gas estimate, and whether submitting is
+        profitable. The fee recipient in the calldata must match the wallet
+        address.
+
+        **Route:** `validategaslessredeem`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: validategaslessredeem
+              id: 1
+              payload:
+                assetID: 966
+                contractAddress: "0x8C4484ABb1E003e5dDE399aFbBa8B9369f45AE3D"
+                calldata: "0xfc0ad009..."
+
+  /submitgaslessredeem:
+    post:
+      tags: [Transactions]
+      summary: Submit gasless redeem calldata
+      description: |
+        Submit emergency gasless redeem calldata on-chain. The submitter pays
+        gas and collects the relay fee embedded in the calldata. The fee
+        recipient must match the submitter's wallet address.
+
+        **Route:** `submitgaslessredeem`
+      requestBody:
+        content:
+          application/json:
+            example:
+              type: 1
+              route: submitgaslessredeem
+              id: 1
+              payload:
+                appPass: "mypassword"
+                assetID: 966
+                contractAddress: "0x8C4484ABb1E003e5dDE399aFbBa8B9369f45AE3D"
+                calldata: "0xfc0ad009..."
+
   /withdrawbchspv:
     post:
       tags: [Transactions]

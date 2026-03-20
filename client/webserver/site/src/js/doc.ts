@@ -462,8 +462,9 @@ export default class Doc {
    * requested instead.
    */
   static logoPath (symbol: string): string {
-    if (BipSymbols.indexOf(symbol) === -1) symbol = symbol.substring(0, 1)
     symbol = symbol.split('.')[0] // e.g. usdc.eth => usdc
+    if (symbol === 'weth') symbol = 'eth'
+    if (!BipSymbols.some(s => s.split('.')[0] === symbol)) symbol = symbol.substring(0, 1)
     return `/img/coins/${symbol}.png`
   }
 

@@ -19,6 +19,12 @@ Before you begin, ensure you have the following installed on your system:
    ```
 
 2. Run `npm ci` to set up the environment. The `./prepare.sh` script is auto executed by `npm ci` after `npm ci` is done.
+   To include Monero (XMR) support, run `prepare.sh` manually with the `--xmr` flag:
+
+   ```bash
+   ./prepare.sh --xmr
+   ```
+
    If you just want to run the application without building it, you can use the following command after `npm ci`:
 
    ```bash

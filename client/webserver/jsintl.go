@@ -673,7 +673,7 @@ var enUS = map[string]*intl.Translation{
 	idMarketOrderCapitalize:        {T: "Market"},
 	idLimitOrderCapitalize:         {T: "Limit"},
 	idInsuffRedeemFundsErrMsg:      {T: "Insufficient gas for redemption. Configure a relay to do a gasless redemption."},
-	idInsuffRedeemFundsRelayErrMsg: {T: "Redemption lot size is too small to cover the gas fees in a gasless redemption."},
+	idInsuffRedeemFundsRelayErrMsg: {T: "Redemption value per lot at this rate is too small to cover gasless redemption fees."},
 	idSlippageAckRequired:          {T: "Please acknowledge the high slippage warning before submitting."},
 	idSlippageWarningMsg:           {T: "This order has significant price impact. The estimated fill rate is {{ slippagePct }}% away from the mid-market rate."},
 	idHighSlippageWarningMsg:       {T: "This order has very high price impact ({{ slippagePct }}% slippage). You may receive significantly less than expected."},

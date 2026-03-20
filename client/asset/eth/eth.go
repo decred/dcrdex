@@ -4485,6 +4485,29 @@ func (w *assetWallet) validateRedemptions(ctx context.Context, redemptions []*as
 			return 0, 0, fmt.Errorf("Redeem: failed to check if swap is redeemable: %w", err)
 		}
 		if !redeemable {
+			// Check if the swap was already redeemed (e.g. by an
+			// emergency gasless redeem submission).
+			st, vec, err := w.statusAndVector(ctx, locator, ver)
+			if err == nil && st.Step == dexeth.SSRedeemed {
+				// Accumulate value from this and all remaining
+				// redemptions, assuming all were redeemed together.
+				redeemedValue += w.atomize(vec.Value)
+				for _, r := range redemptions[i+1:] {
+					_, loc, err := dexeth.DecodeContractData(r.Spends.Contract)
+					if err != nil {
+						break
+					}
+					st, vec, err := w.statusAndVector(ctx, loc, ver)
+					if err != nil {
+						break
+					}
+					if st.Step != dexeth.SSRedeemed {
+						break
+					}
+					redeemedValue += w.atomize(vec.Value)
+				}
+				return contractVer, redeemedValue, asset.ErrSwapRedeemed
+			}
 			return 0, 0, fmt.Errorf("Redeem: version %d locator %x not redeemable with secret %x",
 				ver, locator, secret)
 		}
@@ -4515,6 +4538,24 @@ func (w *assetWallet) Redeem(ctx context.Context, form *asset.RedeemForm, feeWal
 
 	if n == 0 {
 		return fail(errors.New("Redeem: must be called with at least 1 redemption"))
+	}
+
+	syntheticResult := func(contractVer uint32, redeemedValue uint64) ([]dex.Bytes, asset.Coin, uint64, error) {
+		zeroHash := common.Hash{}
+		txs := make([]dex.Bytes, n)
+		for i := range txs {
+			txs[i] = zeroHash[:]
+		}
+		g := w.gases(contractVer)
+		var fees uint64
+		if g != nil {
+			fees = g.RedeemN(int(n)) * form.FeeSuggestion
+		}
+		outputCoin := &coin{
+			txHash: zeroHash,
+			value:  redeemedValue,
+		}
+		return txs, outputCoin, fees, nil
 	}
 
 	// Only check on-chain state on retry (cache hit) to avoid unnecessary
@@ -4548,24 +4589,16 @@ func (w *assetWallet) Redeem(ctx context.Context, form *asset.RedeemForm, feeWal
 		}
 		if allRedeemed {
 			w.log.Infof("All %d redemptions already redeemed on-chain, returning cached results", n)
-			zeroHash := common.Hash{}
-			txs := make([]dex.Bytes, n)
-			for i := range txs {
-				txs[i] = zeroHash[:]
-			}
-			g := w.gases(contractVer)
-			var fees uint64
-			if g != nil {
-				fees = g.RedeemN(int(n)) * form.FeeSuggestion
-			}
-			outputCoin := &coin{
-				txHash: zeroHash,
-				value:  redeemedValue,
-			}
-			return txs, outputCoin, fees, nil
+			return syntheticResult(contractVer, redeemedValue)
 		}
 	}
 	contractVer, redeemedValue, err := w.validateRedemptions(ctx, form.Redemptions)
+	if errors.Is(err, asset.ErrSwapRedeemed) {
+		// Already redeemed on-chain (e.g. emergency gasless redeem).
+		// Return synthetic success so core advances the match state.
+		w.log.Infof("Redemption already complete on-chain. Returning synthetic result.")
+		return syntheticResult(contractVer, redeemedValue)
+	}
 	if err != nil {
 		return fail(fmt.Errorf("Redeem: failed to validate redemptions: %w", err))
 	}
@@ -5639,15 +5672,20 @@ func (w *ETHWallet) canRedeemWithRelay(lotSize uint64, gases *dexeth.Gases, n ui
 		}
 	}
 
-	relayerTip := evmrelay.ExtractRelayerTip(
-		estimate.Fee, int(n), gases.SignedRedeem, gases.SignedRedeemAdd,
-		baseFee, tipRate, l1Fee,
-	)
-
-	// Reject if the relayer tip exceeds 10 gwei per gas.
+	// Sanity check the relay fee. Rather than back-calculating the
+	// relay's per-gas profit (which is sensitive to baseFee differences
+	// between RPC providers), compare the total fee against what we'd
+	// estimate ourselves using a generous max tip. If the relay fee
+	// exceeds 150% of that, reject it.
 	maxRelayerTip := dexeth.GweiToWei(10)
-	if relayerTip.Cmp(maxRelayerTip) > 0 {
-		w.log.Warnf("Relay tip %s exceeds max %s per gas", relayerTip, maxRelayerTip)
+	maxAcceptableFee := evmrelay.EstimateRelayFee(
+		int(n), gases.SignedRedeem, gases.SignedRedeemAdd,
+		baseFee, tipRate, maxRelayerTip, l1Fee,
+	)
+	maxAcceptableFee.Mul(maxAcceptableFee, big.NewInt(3))
+	maxAcceptableFee.Div(maxAcceptableFee, big.NewInt(2))
+	if estimate.Fee.Cmp(maxAcceptableFee) > 0 {
+		w.log.Warnf("Relay fee %s exceeds max acceptable %s", estimate.Fee, maxAcceptableFee)
 		return false, nil
 	}
 
@@ -7050,9 +7088,20 @@ func (w *assetWallet) confirmTransaction(coinID dex.Bytes, confirmTx *asset.Conf
 	r, err := w.node.transactionReceipt(w.ctx, txHash)
 	if err != nil {
 		if errors.Is(err, asset.CoinNotFoundError) {
-			// We don't know it ourselves and we can't see it on-chain. This
-			// used to be a CoinNotFoundError, but since we have local tx
-			// storage, we'll assume it's lost to space and time now.
+			// We don't know it ourselves and we can't see it on-chain.
+			// Before declaring lost, check the contract state. The swap
+			// may have been redeemed or refunded by another tx (e.g.
+			// emergency gasless redeem).
+			status, sErr := w.status(w.ctx, locator, contractVer)
+			if sErr == nil {
+				switch status.Step {
+				case dexeth.SSRedeemed:
+					w.log.Infof("Tx %s unknown but contract shows redeemed. Confirming.", txHash)
+					return confStatus(w.finalizeConfs, w.finalizeConfs, txHash), nil
+				case dexeth.SSRefunded:
+					return nil, asset.ErrSwapRefunded
+				}
+			}
 			return nil, asset.ErrTxLost
 		}
 		return nil, err
