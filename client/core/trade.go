@@ -1738,6 +1738,8 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) (r
 	switch match.Status {
 	case order.NewlyMatched, order.MakerSwapCast:
 		return false, false // all swaps not yet sent
+	case order.MatchComplete:
+		return false, false // already redeemed
 	}
 
 	if match.swapErr != nil || len(match.MetaData.Proof.RefundCoin) != 0 {

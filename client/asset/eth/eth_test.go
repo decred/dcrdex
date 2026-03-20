@@ -5527,8 +5527,12 @@ func testRedemptionReserves(t *testing.T, assetID uint32) {
 		t.Fatalf("expected ErrRelayRedemptionLotSizeTooSmall, got %v", err)
 	}
 
-	// Excessive relayer tip -> false, nil (fall back to on-chain)
-	excessiveTip := dexeth.GweiToWei(20) // 20 gwei > 10 gwei max
+	// Excessive relay fee -> false, nil (fall back to on-chain).
+	// The validation computes a max acceptable fee using a 10 gwei
+	// relayer tip with a 150% buffer. With baseFee=100 gwei (2.2x
+	// adjusted) dominating, the tip must be large enough to push
+	// the total fee over that threshold.
+	excessiveTip := dexeth.GweiToWei(200)
 	excessiveFee := evmrelay.EstimateRelayFee(
 		1, gases.SignedRedeem, gases.SignedRedeemAdd,
 		node.baseFee, node.tip, excessiveTip, nil,

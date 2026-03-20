@@ -397,9 +397,10 @@ func (c *redeemCoin) Confirmations(ctx context.Context) (int64, error) {
 	// not validating the locktime, as the swap is redeemed and
 	// locktime no longer relevant.
 	if status.Step == dexeth.SSRedeemed {
-		if c.isRelay {
-			// Relay redeems have no tx hash to look up the receipt.
-			// The swap is confirmed redeemed on-chain.
+		if c.isRelay || c.txHash == (common.Hash{}) {
+			// Relay redeems and externally redeemed swaps have no
+			// tx hash to look up the receipt. The swap is confirmed
+			// redeemed on-chain.
 			return 1, nil
 		}
 		if c.contractVer == 1 {
