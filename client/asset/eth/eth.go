@@ -5639,15 +5639,20 @@ func (w *ETHWallet) canRedeemWithRelay(lotSize uint64, gases *dexeth.Gases, n ui
 		}
 	}
 
-	relayerTip := evmrelay.ExtractRelayerTip(
-		estimate.Fee, int(n), gases.SignedRedeem, gases.SignedRedeemAdd,
-		baseFee, tipRate, l1Fee,
-	)
-
-	// Reject if the relayer tip exceeds 10 gwei per gas.
+	// Sanity check the relay fee. Rather than back-calculating the
+	// relay's per-gas profit (which is sensitive to baseFee differences
+	// between RPC providers), compare the total fee against what we'd
+	// estimate ourselves using a generous max tip. If the relay fee
+	// exceeds 150% of that, reject it.
 	maxRelayerTip := dexeth.GweiToWei(10)
-	if relayerTip.Cmp(maxRelayerTip) > 0 {
-		w.log.Warnf("Relay tip %s exceeds max %s per gas", relayerTip, maxRelayerTip)
+	maxAcceptableFee := evmrelay.EstimateRelayFee(
+		int(n), gases.SignedRedeem, gases.SignedRedeemAdd,
+		baseFee, tipRate, maxRelayerTip, l1Fee,
+	)
+	maxAcceptableFee.Mul(maxAcceptableFee, big.NewInt(3))
+	maxAcceptableFee.Div(maxAcceptableFee, big.NewInt(2))
+	if estimate.Fee.Cmp(maxAcceptableFee) > 0 {
+		w.log.Warnf("Relay fee %s exceeds max acceptable %s", estimate.Fee, maxAcceptableFee)
 		return false, nil
 	}
 
