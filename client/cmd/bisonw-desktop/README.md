@@ -57,6 +57,12 @@ cd electron
 npm run make
 ```
 
+To include Monero (XMR) support, pass `--xmr` to `prepare.sh`:
+
+```bash
+./electron/prepare.sh --xmr
+```
+
 The `.dmg` will be in `electron/out/make/`.
 
 ### Release build
