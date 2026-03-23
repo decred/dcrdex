@@ -82,6 +82,7 @@ func (s *relayServer) promoteQueuedTask(ctx context.Context, snapshot *taskEntry
 	baseFee, tipCap, err := cc.validateFee(ctx, calldata, parsed)
 	if err != nil {
 		if isPermanentPreflightError(err) {
+			log.Debugf("Chain %d: task %s fee validation failed: %v", snapshot.ChainID, snapshot.TaskID, err)
 			return s.store.markTaskFailed(snapshot.TaskID, failureReasonUnprofitable, nil), nil
 		}
 		return false, err
@@ -90,6 +91,7 @@ func (s *relayServer) promoteQueuedTask(ctx context.Context, snapshot *taskEntry
 	prepared, err := cc.prepareRedeemTx(ctx, snapshot.Target, calldata, parsed, baseFee, tipCap)
 	if err != nil {
 		if isPermanentPreflightError(err) {
+			log.Debugf("Chain %d: task %s tx preparation failed: %v", snapshot.ChainID, snapshot.TaskID, err)
 			return s.store.markTaskFailed(snapshot.TaskID, failureReasonUnprofitable, nil), nil
 		}
 		return false, err

@@ -3772,8 +3772,22 @@ func (c *Core) refundMatches(t *trackedTrade, matches []*matchTracker) (uint64, 
 						symbol, swapCoinString)
 					t.findMakersRedemption(c.ctx, match)
 				} else {
-					c.log.Warnf("Failed to refund %s contract %s for match %s: contract already spent by counterparty.",
+					// Maker's swap was already redeemed by the
+					// counterparty. The trade is economically
+					// complete. Confirm the match so it can retire.
+					c.log.Infof("Maker's %s contract %s for match %s was redeemed by counterparty. Confirming match.",
 						symbol, swapCoinString, match)
+					match.Status = order.MatchConfirmed
+					if t.isMarketBuy() {
+						t.unlockRedemptionFraction(1, uint64(len(t.matches)))
+						t.unlockRefundFraction(1, uint64(len(t.matches)))
+					} else {
+						t.unlockRedemptionFraction(match.Quantity, t.Trade().Quantity)
+						t.unlockRefundFraction(match.Quantity, t.Trade().Quantity)
+					}
+					if dbErr := t.db.UpdateMatch(&match.MetaMatch); dbErr != nil {
+						errs.add("error storing match info in database: %v", dbErr)
+					}
 				}
 			} else {
 				match.delayTicks(time.Minute * 5)
