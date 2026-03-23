@@ -1,4 +1,5 @@
 import React, { useRef } from 'react'
+import ReactDOM from 'react-dom'
 
 interface PopupButton {
   text: string
@@ -31,7 +32,7 @@ const Popup: React.FC<PopupProps> = ({
     }
   }
 
-  return (
+  return ReactDOM.createPortal(
     <div id="forms" className="stylish-overflow flex-center" onMouseDown={handleBackdropClick}>
       <form ref={formRef} className="position-relative mw-425 stylish-overflow" autoComplete="off">
         <div className="form-closer">
@@ -63,7 +64,8 @@ const Popup: React.FC<PopupProps> = ({
           ))}
         </div>
       </form>
-    </div>
+    </div>,
+    document.body
   )
 }
 

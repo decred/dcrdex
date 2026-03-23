@@ -59,6 +59,11 @@ div[data-handler=mm] {
 
   #botTypeForm {
     min-width: 375px;
+
+    @media (width <= 500px) {
+      min-width: 0;
+      width: 100%;
+    }
   }
 
   #cexSelection {
@@ -112,11 +117,49 @@ div[data-handler=mm] {
   #cexOrderDetailsForm,
   #depositDetailsForm,
   #withdrawalDetailsForm {
-      min-width: 400px;
+    min-width: 400px;
+
+    @media (width <= 500px) {
+      min-width: 0;
+      width: 100%;
+    }
+  }
+
+  // Max-width container for ultrawide screens
+  .mm-settings-container {
+    max-width: 1400px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  // Sidebar for lg+ layout
+  .mm-sidebar {
+    width: 260px;
+    min-width: 260px;
+    position: sticky;
+    top: 1rem;
+    align-self: flex-start;
+  }
+
+  // Content area
+  .mm-content {
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
+  // Market + bot type compact header row
+  .mm-header-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+
+    .configure-bot-market-display,
+    .configure-bot-bot-type-display {
+      flex: none;
+    }
   }
 
   .configure-bot-market-display {
-    flex: 1;
     display: flex;
     flex-direction: column;
     align-items: flex-start;
@@ -124,14 +167,13 @@ div[data-handler=mm] {
     border-radius: 0.25rem;
     cursor: pointer;
     transition: background-color 0.15s ease-in-out;
-  }
 
-  .configure-bot-market-display:hover {
-    background-color: rgb(0 123 255 / 10%);
+    &:hover {
+      background-color: var(--tertiary-bg);
+    }
   }
 
   .configure-bot-bot-type-display {
-    flex: 1;
     display: flex;
     flex-direction: column;
     align-items: flex-start;
@@ -139,47 +181,200 @@ div[data-handler=mm] {
     border-radius: 0.25rem;
     cursor: pointer;
     transition: background-color 0.15s ease-in-out;
+
+    &:hover {
+      background-color: var(--tertiary-bg);
+    }
   }
 
-  .configure-bot-bot-type-display:hover {
-    background-color: rgb(0 123 255 / 10%);
+  // Tab navigation - underline style
+  .mm-tab-nav {
+    display: flex;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .mm-tab-nav-vertical {
+    display: flex;
+    flex-direction: column;
+    border-bottom: none;
+    border-right: 1px solid var(--border-color);
+    padding-right: 0.5rem;
+
+    .configure-bot-tab-section {
+      border-bottom: none;
+      border-right: 2px solid transparent;
+      text-align: left;
+      justify-content: flex-start;
+
+      &.active {
+        border-right-color: var(--btn-feature-bg);
+      }
+
+      &:hover {
+        border-right-color: var(--border-color);
+      }
+
+      &.active:hover {
+        border-right-color: var(--btn-feature-bg);
+      }
+    }
+  }
+
+  // Scrollable tab container for small screens
+  .mm-tab-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+
+    &::-webkit-scrollbar {
+      height: 2px;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      background-color: var(--border-color);
+    }
+
+    .mm-tab-nav {
+      min-width: max-content;
+    }
   }
 
   .configure-bot-tab-section {
-    flex: 1;
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 0.75rem 1rem;
-    margin: 0 0.25rem;
-    border-radius: 0.25rem;
+    padding: 0.625rem 1rem;
+    margin: 0;
+    border-radius: 0;
     cursor: pointer;
     transition: all 0.15s ease-in-out;
     background-color: transparent;
-    color: #6c757d;
+    color: var(--text-grey);
     border: none;
+    border-bottom: 2px solid transparent;
+    white-space: nowrap;
+
+    &:hover {
+      background-color: transparent;
+      color: var(--text-color);
+      border-bottom-color: var(--border-color);
+    }
+
+    &.active {
+      background-color: transparent;
+      color: var(--text-color);
+      border-bottom-color: var(--btn-feature-bg);
+    }
+
+    &.active:hover {
+      background-color: transparent;
+      color: var(--text-color);
+      border-bottom-color: var(--btn-feature-bg);
+    }
   }
 
-  .configure-bot-tab-section:hover {
-    background-color: rgb(0 123 255 / 10%);
-    color: #0056b3;
+  // Action buttons
+  .mm-action-buttons {
+    display: flex;
+    gap: 0.5rem;
   }
 
-  .configure-bot-tab-section.active {
-    background-color: rgb(0 123 255 / 15%);
-    color: white;
+  .mm-action-primary {
+    display: flex;
+    gap: 0.5rem;
+    flex: 1;
   }
 
-  .configure-bot-tab-section.active:hover {
-    background-color: rgb(0 123 255 / 20%);
-    color: white;
+  .mm-action-danger {
+    border-top: 1px solid var(--border-color);
+    padding-top: 0.5rem;
+    margin-top: 0.25rem;
+  }
+
+  // Slider styles
+  .mm-slider-track {
+    height: 2px;
+    cursor: pointer;
+    background-color: var(--border-color);
+
+    &.disabled {
+      cursor: not-allowed;
+    }
+  }
+
+  .mm-slider-thumb {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background-color: var(--text-grey);
+    user-select: none;
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+
+    &:not(.disabled) {
+      cursor: grab;
+
+      &.dragging {
+        cursor: grabbing;
+      }
+    }
+
+    &.disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+  }
+
+  // Loading overlay
+  .mm-loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgb(0 0 0 / 50%);
+    backdrop-filter: blur(5px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+  }
+
+  // Allocation breakdown panel
+  .mm-allocation-breakdown {
+    max-height: 400px;
+    overflow-y: auto;
+    background-color: var(--section-bg);
+  }
+
+  .mm-mixer-row {
+    max-width: 28rem;
+  }
+
+  .bridge-fees-table {
+    border-collapse: separate;
+    border-spacing: 0.75rem 0.25rem;
+  }
+
+  .mm-mixer-label {
+    min-width: 3.5rem;
+    margin-right: 0.5rem;
+  }
+
+  // Table wrapper for horizontal scroll on mobile
+  .mm-table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+
+    table {
+      min-width: 480px;
+    }
   }
 
   .placements-chart-wrapper {
     width: 100%;
     height: 200px;
-    border: 1px solid #595a5a;
+    border: 1px solid var(--border-color);
     border-radius: 0.25rem;
     box-sizing: border-box;
     overflow: hidden;

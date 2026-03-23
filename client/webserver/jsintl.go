@@ -190,17 +190,10 @@ const (
 	mmHostHeaderID                 = "MM_HOST_HEADER"
 	mmArbHeaderID                  = "MM_ARB_HEADER"
 	mmChooseBotID                  = "MM_CHOOSE_BOT"
-	mmNextID                       = "MM_NEXT"
-	mmSubmitID                     = "MM_SUBMIT"
-	mmWalletSettingsID             = "MM_WALLET_SETTINGS"
-	mmBaseWalletID                 = "MM_BASE_WALLET"
-	mmQuoteWalletID                = "MM_QUOTE_WALLET"
-	mmKnobsID                      = "MM_KNOBS"
 	mmDriftToleranceID             = "MM_DRIFT_TOLERANCE"
 	mmDriftToleranceTooltipID      = "MM_DRIFT_TOLERANCE_TOOLTIP"
 	mmOrderPersistenceID           = "MM_ORDER_PERSISTENCE"
 	mmOrderPersistenceTooltipID    = "MM_ORDER_PERSISTENCE_TOOLTIP"
-	mmEpochsID                     = "MM_EPOCHS"
 	mmMultiHopArbID                = "MM_MULTI_HOP_ARB"
 	mmIntermediateAssetID          = "MM_INTERMEDIATE_ASSET"
 	mmIntermediateAssetTooltipID   = "MM_INTERMEDIATE_ASSET_TOOLTIP"
@@ -221,9 +214,12 @@ const (
 	mmFactorLabelMultiplierID      = "MM_FACTOR_LABEL_MULTIPLIER"
 	mmProfitThresholdID            = "MM_PROFIT_THRESHOLD"
 	mmProfitThresholdDescID        = "MM_PROFIT_THRESHOLD_DESC"
+	mmProfitThresholdMMTooltipID   = "MM_PROFIT_THRESHOLD_MM_TOOLTIP"
 	mmPriceLevelsPerSideID         = "MM_PRICE_LEVELS_PER_SIDE"
 	mmPriceIncrementID             = "MM_PRICE_INCREMENT"
+	mmPriceIncrementTooltipID      = "MM_PRICE_INCREMENT_TOOLTIP"
 	mmMatchBufferID                = "MM_MATCH_BUFFER"
+	mmMatchBufferTooltipID         = "MM_MATCH_BUFFER_TOOLTIP"
 	mmTradedAmountID               = "MM_TRADED_AMOUNT"
 	mmSwapFeesID                   = "MM_SWAP_FEES"
 	mmRedeemFeesID                 = "MM_REDEEM_FEES"
@@ -257,18 +253,95 @@ const (
 	mmBridgeID                     = "MM_BRIDGE"
 	mmSelectBridgeID               = "MM_SELECT_BRIDGE"
 	mmBridgeFeesID                 = "MM_BRIDGE_FEES"
-	mmRebalanceMethodID            = "MM_REBALANCE_METHOD"
 	mmCEXRebalanceID               = "MM_CEX_REBALANCE"
 	mmCEXRebalanceDescID           = "MM_CEX_REBALANCE_DESC"
 	mmInternalTransfersOnlyID      = "MM_INTERNAL_TRANSFERS_ONLY"
 	mmInternalTransfersDescID      = "MM_INTERNAL_TRANSFERS_DESC"
 	mmRebalanceDescriptionID       = "MM_REBALANCE_DESCRIPTION"
 	mmFailedStartBotID             = "MM_FAILED_START_BOT"
+	mmMissingFiatRatesID           = "MM_MISSING_FIAT_RATES"
 	mmLoadingID                    = "MM_LOADING"
 	mmRemovePlacementID            = "MM_REMOVE_PLACEMENT"
 	mmMoveUpID                     = "MM_MOVE_UP"
 	mmMoveDownID                   = "MM_MOVE_DOWN"
 	mmAddPlacementID               = "MM_ADD_PLACEMENT"
+	mmPercentPlusDescID            = "MM_PERCENT_PLUS_DESC"
+	mmPercentDescID                = "MM_PERCENT_DESC"
+	mmAbsolutePlusDescID           = "MM_ABSOLUTE_PLUS_DESC"
+	mmAbsoluteDescID               = "MM_ABSOLUTE_DESC"
+	mmMultiplierDescID             = "MM_MULTIPLIER_DESC"
+	mmProfitAdvDescID              = "MM_PROFIT_ADV_DESC"
+	mmPriorityID                   = "MM_PRIORITY"
+	mmPriorityTooltipID            = "MM_PRIORITY_TOOLTIP"
+	mmLotsID                       = "MM_LOTS"
+	mmBuyPlacementsID              = "MM_BUY_PLACEMENTS"
+	mmSellPlacementsID             = "MM_SELL_PLACEMENTS"
+	mmAdvPlacementsDescID          = "MM_ADV_PLACEMENTS_DESC"
+	mmSettingsDescID               = "MM_SETTINGS_DESC"
+	mmMultiHopLockedID             = "MM_MULTI_HOP_LOCKED"
+	mmMarketOrderWarningID         = "MM_MARKET_ORDER_WARNING"
+	mmTradingID                    = "MM_TRADING"
+	mmNoConfigOptionsID            = "MM_NO_CONFIG_OPTIONS"
+	mmCollectSnapshotsID           = "MM_COLLECT_SNAPSHOTS"
+	mmCollectSnapshotsTooltipID    = "MM_COLLECT_SNAPSHOTS_TOOLTIP"
+	mmNoCexAvailableID             = "MM_NO_CEX_AVAILABLE"
+	mmBasicMMDescID                = "MM_BASIC_MM_DESC"
+	mmArbMMDescID                  = "MM_ARB_MM_DESC"
+	mmBasicArbDescID               = "MM_BASIC_ARB_DESC"
+	mmContinueID                   = "MM_CONTINUE"
+	mmCexConfigPromptID            = "MM_CEX_CONFIG_PROMPT"
+	mmCexConnectionErrorID         = "MM_CEX_CONNECTION_ERROR"
+	mmApiKeyID                     = "MM_API_KEY"
+	mmApiSecretID                  = "MM_API_SECRET"
+	mmSaveCexCredentialsID         = "MM_SAVE_CEX_CREDENTIALS"
+	mmFailedDeleteBotID            = "MM_FAILED_DELETE_BOT"
+	mmFailedUpdateRunningID        = "MM_FAILED_UPDATE_RUNNING"
+	mmManualAllocDescID            = "MM_MANUAL_ALLOC_DESC"
+	mmBisonWalletSideID            = "MM_BISON_WALLET_SIDE"
+	mmCexSideID                    = "MM_CEX_SIDE"
+	mmSelectMarketDescID           = "MM_SELECT_MARKET_DESC"
+	mmNoMarketsMatchID             = "MM_NO_MARKETS_MATCH"
+	mmRegisterHostID               = "MM_REGISTER_HOST"
+	mmPriceLevelsTooltipID         = "MM_PRICE_LEVELS_TOOLTIP"
+	mmLotsPerLevelID               = "MM_LOTS_PER_LEVEL"
+	mmUsdPerSideID                 = "MM_USD_PER_SIDE"
+	mmLotsUsdTooltipID             = "MM_LOTS_USD_TOOLTIP"
+	mmQuickPlacementsID            = "MM_QUICK_PLACEMENTS"
+	mmAdvancedPlacementsID         = "MM_ADVANCED_PLACEMENTS"
+	mmSwitchToAdvancedID           = "MM_SWITCH_TO_ADVANCED"
+	mmSwitchToQuickID              = "MM_SWITCH_TO_QUICK"
+	mmQuickPlacementsDescID        = "MM_QUICK_PLACEMENTS_DESC"
+	mmBridgeLockedID               = "MM_BRIDGE_LOCKED"
+	mmBridgeRoundTripFeesID        = "MM_BRIDGE_ROUND_TRIP_FEES"
+	mmFundedID                     = "MM_FUNDED"
+	mmUnderfundedID                = "MM_UNDERFUNDED"
+	mmFundedWithRebalanceID        = "MM_FUNDED_WITH_REBALANCE"
+	mmFundedWithRebalanceTooltipID = "MM_FUNDED_WITH_REBALANCE_TOOLTIP"
+	mmQuickAllocationID            = "MM_QUICK_ALLOCATION"
+	mmManualAllocationID           = "MM_MANUAL_ALLOCATION"
+	mmSwitchToManualID             = "MM_SWITCH_TO_MANUAL"
+	mmUseAutoEstimateID            = "MM_USE_AUTO_ESTIMATE"
+	mmBuffersAndReservesID         = "MM_BUFFERS_AND_RESERVES"
+	mmAllocationPreviewID          = "MM_ALLOCATION_PREVIEW"
+	mmQuickAllocDescID             = "MM_QUICK_ALLOC_DESC"
+	mmAllocRunningQuickID          = "MM_ALLOC_RUNNING_QUICK"
+	mmAllocNewQuickID              = "MM_ALLOC_NEW_QUICK"
+	mmAllocRunningManualID         = "MM_ALLOC_RUNNING_MANUAL"
+	mmAllocRunningManualNoteID     = "MM_ALLOC_RUNNING_MANUAL_NOTE"
+	mmAllocNewManualID             = "MM_ALLOC_NEW_MANUAL"
+	mmExtraBuyLotsTooltipID        = "MM_EXTRA_BUY_LOTS_TOOLTIP"
+	mmExtraSellLotsTooltipID       = "MM_EXTRA_SELL_LOTS_TOOLTIP"
+	mmSlippageBufferTooltipID      = "MM_SLIPPAGE_BUFFER_TOOLTIP"
+	mmExtraBuyFeeTooltipID         = "MM_EXTRA_BUY_FEE_TOOLTIP"
+	mmExtraSellFeeTooltipID        = "MM_EXTRA_SELL_FEE_TOOLTIP"
+	mmExtraRebalanceFeeTooltipID   = "MM_EXTRA_REBALANCE_FEE_TOOLTIP"
+	mmSendFeesID                   = "MM_SEND_FEES"
+	mmBufferedAmountID             = "MM_BUFFERED_AMOUNT"
+	mmAllocChangeID                = "MM_ALLOC_CHANGE"
+	mmBuyFeeReservesID             = "MM_BUY_FEE_RESERVES"
+	mmSellFeeReservesID            = "MM_SELL_FEE_RESERVES"
+	mmHowRebalancingWorksID        = "MM_HOW_REBALANCING_WORKS"
+	mmMinExternalTransferID        = "MM_MIN_EXTERNAL_TRANSFER"
 
 	txTypeUnknownID                = "TX_TYPE_UNKNOWN"
 	txTypeSendID                   = "TX_TYPE_SEND"
@@ -503,10 +576,10 @@ var enUS = map[string]*intl.Translation{
 
 	// MM Settings translations
 	mmStartBotID:                   {T: "Start Bot"},
-	mmSaveSettingsID:               {T: "Save Settings"},
-	mmDeleteBotID:                  {T: "Delete Bot"},
-	mmUpdateRunningBotID:           {T: "Update Running Bot"},
-	mmConfirmDeleteID:              {T: "Are you sure you want to delete this bot?"},
+	mmSaveSettingsID:               {T: "Save Bot Configuration"},
+	mmDeleteBotID:                  {T: "Delete Bot Configuration"},
+	mmUpdateRunningBotID:           {T: "Apply Changes to Running Bot"},
+	mmConfirmDeleteID:              {T: "Delete this saved bot configuration?"},
 	mmCancelID:                     {T: "Cancel"},
 	mmDeleteID:                     {T: "Delete"},
 	mmCloseID:                      {T: "Close"},
@@ -521,33 +594,26 @@ var enUS = map[string]*intl.Translation{
 	mmUnknownID:                    {T: "Unknown"},
 	mmConfigureID:                  {T: "Configure"},
 	mmFixErrorsID:                  {T: "Fix errors"},
-	mmMarketNotAvailableID:         {T: "Market not available"},
-	mmSelectMarketID:               {T: "Select a Market"},
-	mmSearchMarketsID:              {T: "Search markets..."},
+	mmMarketNotAvailableID:         {T: "This market is not supported for this bot type"},
+	mmSelectMarketID:               {T: "Select Market"},
+	mmSearchMarketsID:              {T: "Search by asset or host"},
 	mmMarketHeaderID:               {T: "Market"},
 	mmHostHeaderID:                 {T: "Host"},
-	mmArbHeaderID:                  {T: "Arb"},
+	mmArbHeaderID:                  {T: "CEX Support"},
 	mmChooseBotID:                  {T: "Choose Your Bot"},
-	mmNextID:                       {T: "Next"},
-	mmSubmitID:                     {T: "Submit"},
-	mmWalletSettingsID:             {T: "Wallet Settings"},
-	mmBaseWalletID:                 {T: "Base Wallet"},
-	mmQuoteWalletID:                {T: "Quote Wallet"},
-	mmKnobsID:                      {T: "Knobs"},
 	mmDriftToleranceID:             {T: "Drift Tolerance"},
-	mmDriftToleranceTooltipID:      {T: "Maximum allowed price deviation before repositioning orders"},
+	mmDriftToleranceTooltipID:      {T: "If an existing DEX order drifts too far from the bot's current target price, the bot cancels and replaces it."},
 	mmOrderPersistenceID:           {T: "Order Persistence"},
-	mmOrderPersistenceTooltipID:    {T: "Number of epochs to keep unfilled orders active"},
-	mmEpochsID:                     {T: "epochs"},
+	mmOrderPersistenceTooltipID:    {T: "How many epochs an unfilled arbitrage order can remain open before the bot cancels it."},
 	mmMultiHopArbID:                {T: "Multi-Hop Arbitrage"},
 	mmIntermediateAssetID:          {T: "Intermediate Asset"},
-	mmIntermediateAssetTooltipID:   {T: "Asset to use for multi-hop arbitrage"},
-	mmCompletionOrderTypeID:        {T: "Completion Order Type"},
-	mmCompletionOrderTypeTooltipID: {T: "This specifies the type of order to execute on the second leg of a multi-hop arb. Market orders will always be filled, ensuring that the bot never has any funds stuck in the intermediate asset, but may result in losses if the price suddenly moves against the bot."},
+	mmIntermediateAssetTooltipID:   {T: "The CEX asset the bot routes through to complete the second leg of a multi-hop hedge."},
+	mmCompletionOrderTypeID:        {T: "Second-Leg Order Type"},
+	mmCompletionOrderTypeTooltipID: {T: "Controls how the bot finishes the second CEX trade in a multi-hop hedge. Market orders favor completion. Limit orders favor price control but can leave funds temporarily stuck in the intermediate asset."},
 	mmMarketOrderCapitalizeID:      {T: "Market"},
 	mmLimitOrderCapitalizeID:       {T: "Limit"},
-	mmLimitBufferID:                {T: "Limit Buffer"},
-	mmLimitBufferTooltipID:         {T: "This specifies the buffer to apply to the limit order rate for the second leg of a multi-hop arb. The buffer will make the rate 'worse' (lower for sell orders, higher for buy orders) resulting in a higher probability of the trade being filled in order to avoid having funds stuck in the intermediate asset."},
+	mmLimitBufferID:                {T: "Second-Leg Limit Buffer"},
+	mmLimitBufferTooltipID:         {T: "When using a limit order for the second leg, the bot worsens the price by this amount to improve the chance of a fill."},
 	mmGapStrategyID:                {T: "Gap Strategy"},
 	mmPercentPlusID:                {T: "Percent Plus"},
 	mmPercentID:                    {T: "Percent"},
@@ -558,10 +624,13 @@ var enUS = map[string]*intl.Translation{
 	mmFactorLabelRateID:            {T: "Rate"},
 	mmFactorLabelMultiplierID:      {T: "Multiplier"},
 	mmProfitThresholdID:            {T: "Profit Threshold"},
-	mmProfitThresholdDescID:        {T: "Minimum profit required for arbitrage opportunities."},
+	mmProfitThresholdDescID:        {T: "Minimum profit required after the DEX order fills and the hedge is placed on the CEX."},
+	mmProfitThresholdMMTooltipID:   {T: "Sets the minimum half-spread \u2014 how far the innermost buy and sell placements start from the market. Additional levels are placed farther out using Price Increment."},
 	mmPriceLevelsPerSideID:         {T: "Price levels per side"},
 	mmPriceIncrementID:             {T: "Price increment"},
+	mmPriceIncrementTooltipID:      {T: "Sets how much farther from the market each additional placement level sits."},
 	mmMatchBufferID:                {T: "Match buffer"},
+	mmMatchBufferTooltipID:         {T: "Makes the bot price against more CEX liquidity than the exact placement size. Higher values are more conservative and can make the hedge easier to complete if top-of-book liquidity disappears."},
 	mmTradedAmountID:               {T: "Traded Amount"},
 	mmSwapFeesID:                   {T: "Swap Fees"},
 	mmRedeemFeesID:                 {T: "Redeem Fees"},
@@ -571,42 +640,119 @@ var enUS = map[string]*intl.Translation{
 	mmMultiSplitBufferID:           {T: "Multi-Split Buffer"},
 	mmInitialBuyFundingFeesID:      {T: "Initial Buy Funding Fees"},
 	mmInitialSellFundingFeesID:     {T: "Initial Sell Funding Fees"},
-	mmBridgeFeeReservesID:          {T: "Bridge Fee Reserves"},
-	mmTotalRequiredID:              {T: "Total Required"},
-	mmAlreadyAllocatedID:           {T: "Already Allocated"},
-	mmAvailableToUnallocateID:      {T: "Available To Unallocate"},
-	mmTotalAvailableID:             {T: "Total Available"},
-	mmAmountAllocatedID:            {T: "Amount Allocated"},
-	mmBuyBufferID:                  {T: "Buy Buffer"},
-	mmSellBufferID:                 {T: "Sell Buffer"},
-	mmBuyFeeReserveID:              {T: "Buy Fee Reserve"},
-	mmSellFeeReserveID:             {T: "Sell Fee Reserve"},
-	mmBridgeFeeReserveID:           {T: "Bridge Fee Reserve"},
+	mmBridgeFeeReservesID:          {T: "Extra External Rebalance Fee Units"},
+	mmTotalRequiredID:              {T: "Estimated Total Needed"},
+	mmAlreadyAllocatedID:           {T: "Currently Reserved by Running Bot"},
+	mmAvailableToUnallocateID:      {T: "Available to Remove Now"},
+	mmTotalAvailableID:             {T: "Unreserved Balance Available Now"},
+	mmAmountAllocatedID:            {T: "Allocation to Reserve"},
+	mmBuyBufferID:                  {T: "Extra Buy Lots"},
+	mmSellBufferID:                 {T: "Extra Sell Lots"},
+	mmBuyFeeReserveID:              {T: "Extra Buy Token Fee Reserves"},
+	mmSellFeeReserveID:             {T: "Extra Sell Token Fee Reserves"},
+	mmBridgeFeeReserveID:           {T: "Extra External Rebalance Fee Units"},
 	mmWithdrawalID:                 {T: "Withdrawal"},
 	mmDepositID:                    {T: "Deposit"},
-	mmFailedSaveBotConfigID:        {T: "Failed to save bot config:"},
-	mmMinTransferID:                {T: "Min Transfer"},
-	mmMinTransferTooltipID:         {T: "Minimum {{ asset }} asset amount for transfers"},
+	mmFailedSaveBotConfigID:        {T: "Failed to save bot config: "},
+	mmMinTransferID:                {T: "Minimum External Transfer Size"},
+	mmMinTransferTooltipID:         {T: "Real deposits and withdrawals below this size are skipped. Use this to avoid excessive fee churn on small transfers."},
 	mmFailedFetchBridgeFeesID:      {T: "Failed to fetch bridge fees and limits"},
-	mmBridgeConfigurationID:        {T: "{{ asset }} Bridge Configuration"},
-	mmBridgeConfigTooltipID:        {T: "The {{ asset }} asset cannot be directly transferred between Bison Wallet and the CEX. It must be bridged before deposits and after withdrawals."},
-	mmBridgeToAssetID:              {T: "Bridge to Asset:"},
-	mmSelectCEXAssetID:             {T: "Select CEX Asset"},
-	mmBridgeID:                     {T: "Bridge:"},
-	mmSelectBridgeID:               {T: "Select Bridge"},
+	mmBridgeConfigurationID:        {T: "{{ asset }} Asset Bridge"},
+	mmBridgeConfigTooltipID:        {T: "The DEX and CEX use different assets or networks for this side of the market. Choose which CEX asset to bridge to and which bridge to use for rebalance transfers."},
+	mmBridgeToAssetID:              {T: "Bridge To"},
+	mmSelectCEXAssetID:             {T: "Select target asset"},
+	mmBridgeID:                     {T: "Bridge Route"},
+	mmSelectBridgeID:               {T: "Select bridge route"},
 	mmBridgeFeesID:                 {T: "Bridge Fees"},
-	mmRebalanceMethodID:            {T: "Rebalance Method"},
-	mmCEXRebalanceID:               {T: "CEX Rebalance"},
-	mmCEXRebalanceDescID:           {T: "Automatically rebalance funds between DEX and CEX"},
-	mmInternalTransfersOnlyID:      {T: "Internal Transfers Only"},
-	mmInternalTransfersDescID:      {T: "Only use internal wallet transfers for rebalancing"},
-	mmRebalanceDescriptionID:       {T: "Configure settings related to rebalancing between Bison Wallet and a CEX. If all of the required placements cannot be made, the bot will automatically transfer funds in order to be able to make the maximum amount of placements."},
-	mmFailedStartBotID:             {T: "Failed to start bot:"},
+	mmCEXRebalanceID:               {T: "Allow external deposits and withdrawals"},
+	mmCEXRebalanceDescID:           {T: "The bot may move funds between wallet and CEX accounts when that improves inventory balance, subject to the minimum transfer sizes below."},
+	mmInternalTransfersOnlyID:      {T: "Use internal-only rebalancing"},
+	mmInternalTransfersDescID:      {T: "The bot may reassign currently unreserved funds between the DEX side and CEX side in its internal inventory model, but it will not perform real deposits or withdrawals."},
+	mmRebalanceDescriptionID:       {T: "Control how the bot shifts inventory between its DEX side and CEX side when one side runs low."},
+	mmFailedStartBotID:             {T: "Failed to start bot: "},
+	mmMissingFiatRatesID:           {T: "Fiat rate data is not available for {{ assetSymbols }}."},
 	mmLoadingID:                    {T: "Loading..."},
 	mmRemovePlacementID:            {T: "Remove placement"},
 	mmMoveUpID:                     {T: "Move up"},
 	mmMoveDownID:                   {T: "Move down"},
 	mmAddPlacementID:               {T: "Add placement"},
+	mmPercentPlusDescID:            {T: "Places orders at a fixed percentage from the market mid-gap, then adds the estimated break-even gap."},
+	mmPercentDescID:                {T: "Places orders at a fixed percentage from the market mid-gap, without adding break-even costs."},
+	mmAbsolutePlusDescID:           {T: "Places orders at a fixed rate distance from the market mid-gap, then adds the estimated break-even gap."},
+	mmAbsoluteDescID:               {T: "Places orders at a fixed rate distance from the market mid-gap, without adding break-even costs."},
+	mmMultiplierDescID:             {T: "Places orders using a multiple of the estimated break-even gap."},
+	mmProfitAdvDescID:              {T: "Minimum profit required after the DEX trade and its CEX hedge are both accounted for."},
+	mmPriorityID:                   {T: "Priority"},
+	mmPriorityTooltipID:            {T: "Higher rows are kept first if balance is not enough to fund every placement."},
+	mmLotsID:                       {T: "Lots"},
+	mmBuyPlacementsID:              {T: "Buy Placements"},
+	mmSellPlacementsID:             {T: "Sell Placements"},
+	mmAdvPlacementsDescID:          {T: "Set each target placement explicitly, in priority order."},
+	mmSettingsDescID:               {T: "Configure live bot behavior, wallet funding options, and optional data collection."},
+	mmMultiHopLockedID:             {T: "These multi-hop route settings cannot be changed while the bot is running."},
+	mmMarketOrderWarningID:         {T: "Market orders can lose funds in thin markets or during high volatility."},
+	mmTradingID:                    {T: "Trading"},
+	mmNoConfigOptionsID:            {T: "No configurable options"},
+	mmCollectSnapshotsID:           {T: "Collect signed epoch snapshots"},
+	mmCollectSnapshotsTooltipID:    {T: "Subscribe to server-signed epoch snapshots for this market while the bot is running. You can export them later to independently verify market-making activity."},
+	mmNoCexAvailableID:             {T: "No connected CEX is available for arbitrage yet, so only the DEX-only market maker can be used."},
+	mmBasicMMDescID:                {T: "Keeps buy and sell orders on the DEX order book. Profit comes from earning spread over time while providing liquidity."},
+	mmArbMMDescID:                  {T: "Places standing DEX orders only where a profitable CEX hedge is available. When a DEX order fills, the bot immediately submits the offsetting trade on the CEX."},
+	mmBasicArbDescID:               {T: "Waits for direct DEX/CEX arbitrage opportunities and submits the trade pair when one is profitable, instead of maintaining standing maker orders."},
+	mmContinueID:                   {T: "Continue"},
+	mmCexConfigPromptID:            {T: "Enter your {{ cexName }} API credentials so this bot can read balances and place hedge trades for arbitrage features."},
+	mmCexConnectionErrorID:         {T: "CEX connection error"},
+	mmApiKeyID:                     {T: "API Key"},
+	mmApiSecretID:                  {T: "API Secret"},
+	mmSaveCexCredentialsID:         {T: "Save CEX Credentials"},
+	mmFailedDeleteBotID:            {T: "Failed to delete bot: "},
+	mmFailedUpdateRunningID:        {T: "Failed to update running bot: "},
+	mmManualAllocDescID:            {T: "Set the bot allocation directly instead of using the automatic estimate."},
+	mmBisonWalletSideID:            {T: "Bison Wallet Side"},
+	mmCexSideID:                    {T: "{{ cexName }} Side"},
+	mmSelectMarketDescID:           {T: "Choose the DEX market this bot will manage."},
+	mmNoMarketsMatchID:             {T: "No markets match your search."},
+	mmRegisterHostID:               {T: "Register on {{ host }} to use this market for market making"},
+	mmPriceLevelsTooltipID:         {T: "How many distinct buy prices and sell prices the bot should target."},
+	mmLotsPerLevelID:               {T: "Lots per level"},
+	mmUsdPerSideID:                 {T: "Approx. USD per side"},
+	mmLotsUsdTooltipID:             {T: "How much size the bot tries to keep at each configured price level. Toggle the arrows to view or enter the same setting as an approximate USD amount per side."},
+	mmQuickPlacementsID:            {T: "Quick Placements"},
+	mmAdvancedPlacementsID:         {T: "Advanced Placements"},
+	mmSwitchToAdvancedID:           {T: "Switch to advanced"},
+	mmSwitchToQuickID:              {T: "Switch to quick"},
+	mmQuickPlacementsDescID:        {T: "Set how many orders the bot aims to keep on each side of the book and how far from the market they should sit."},
+	mmBridgeLockedID:               {T: "Bridge route settings cannot be changed while the bot is running."},
+	mmBridgeRoundTripFeesID:        {T: "Estimated Round-Trip Bridge Fees"},
+	mmFundedID:                     {T: "Funded"},
+	mmUnderfundedID:                {T: "Underfunded"},
+	mmFundedWithRebalanceID:        {T: "Funded with rebalance"},
+	mmFundedWithRebalanceTooltipID: {T: "The bot cannot satisfy this requirement from the current side alone, but rebalance settings allow it to shift more inventory to the needed side."},
+	mmQuickAllocationID:            {T: "Quick Allocation"},
+	mmManualAllocationID:           {T: "Manual Allocation"},
+	mmSwitchToManualID:             {T: "Switch to manual"},
+	mmUseAutoEstimateID:            {T: "Use automatic estimate"},
+	mmBuffersAndReservesID:         {T: "Buffers & Reserves"},
+	mmAllocationPreviewID:          {T: "Allocation Preview"},
+	mmQuickAllocDescID:             {T: "Automatically estimates the funds to reserve based on your placements, fees, and rebalance settings."},
+	mmAllocRunningQuickID:          {T: "This bot is already running. The preview below shows only the allocation changes that will be applied \u2014 not the bot's new total."},
+	mmAllocNewQuickID:              {T: "This preview shows the total starting allocation that will be saved for the bot and reserved when it starts."},
+	mmAllocRunningManualID:         {T: "This bot is already running. Enter the net amount to add to or remove from the bot's current allocation on each side."},
+	mmAllocRunningManualNoteID:     {T: "Positive values add funds. Negative values remove funds that are currently available to the running bot."},
+	mmAllocNewManualID:             {T: "Enter the total amount to reserve for this bot on each side."},
+	mmExtraBuyLotsTooltipID:        {T: "Adds buy-side lot capacity above the lots required by your configured placements."},
+	mmExtraSellLotsTooltipID:       {T: "Adds sell-side lot capacity above the lots required by your configured placements."},
+	mmSlippageBufferTooltipID:      {T: "Adds extra funds above the expected trade amount so the bot can still complete trades if execution moves against it."},
+	mmExtraBuyFeeTooltipID:         {T: "Only used on token markets. Reserves extra copies of the estimated buy-side token fee budget because those fee balances are spent over time and are not replenished by the bot's trades."},
+	mmExtraSellFeeTooltipID:        {T: "Only used on token markets. Reserves extra copies of the estimated sell-side token fee budget because those fee balances are spent over time and are not replenished by the bot's trades."},
+	mmExtraRebalanceFeeTooltipID:   {T: "Reserves extra copies of estimated external rebalance costs, including bridge fees when used and the approximate wallet send fee for deposits."},
+	mmSendFeesID:                   {T: "Send Fees"},
+	mmBufferedAmountID:             {T: "Buffered Amount"},
+	mmAllocChangeID:                {T: "Allocation Change to Apply"},
+	mmBuyFeeReservesID:             {T: "Buy Fee Reserves"},
+	mmSellFeeReservesID:            {T: "Sell Fee Reserves"},
+	mmHowRebalancingWorksID:        {T: "How Rebalancing Works"},
+	mmMinExternalTransferID:        {T: "Minimum External Transfer Size"},
 
 	apiErrorID:                     {T: "api error: {{ msg }}"},
 	txTypeUnknownID:                {T: "Unknown"},
@@ -735,7 +881,6 @@ var ptBR = map[string]*intl.Translation{
 	availableID:               {T: "disponível"},
 	immatureID:                {T: "imaturo"},
 	maxID:                     {T: "ma"},
-	mmWalletSettingsID:        {T: "Configurações da Carteira"},
 	mmDepositID:               {T: "Depositar"},
 }
 
@@ -954,25 +1099,6 @@ var zhCN = map[string]*intl.Translation{
 	idOrderReportTitle:               {T: "{{ side }}订单报告，纪元 #{{ epochNum }}"},
 	idCEXBalances:                    {T: "{{ cexName }}余额"},
 	idCausesSelfMatch:                {T: "此订单会导致自匹配"},
-	mmBasicMarketMakerID:             {T: "基础做市商"},
-	mmBasicArbitrageID:               {T: "基础套利"},
-	mmFixErrorsID:                    {T: "修复错误"},
-	mmChooseBotID:                    {T: "选择您的机器人"},
-	mmPlacementsID:                   {T: "投放"},
-	mmConfigureID:                    {T: "配置"},
-	mmMarketNotAvailableID:           {T: "市场不可用"},
-	mmSelectMarketID:                 {T: "选择一个市场"},
-	mmWalletSettingsID:               {T: "钱包设置"},
-	mmMMPlusArbID:                    {T: "市场做市 + 套利"},
-	mmRebalanceSettingsID:            {T: "再平衡设置"},
-	mmSettingsID:                     {T: "设置"},
-	mmGapStrategyID:                  {T: "差距策略"},
-	mmProfitThresholdID:              {T: "利润阈值"},
-	mmPriceLevelsPerSideID:           {T: "每边价格等级"},
-	mmPriceIncrementID:               {T: "价格增量"},
-	mmMatchBufferID:                  {T: "匹配缓冲区"},
-	mmWithdrawalID:                   {T: "提取"},
-	mmDepositID:                      {T: "存款"},
 }
 
 var plPL = map[string]*intl.Translation{
@@ -1161,7 +1287,6 @@ var plPL = map[string]*intl.Translation{
 	mmConfigureID:                    {T: "Skonfiguruj"},
 	mmMarketNotAvailableID:           {T: "Rynek niedostępny"},
 	mmSelectMarketID:                 {T: "Wybierz rynek"},
-	mmWalletSettingsID:               {T: "Ustawienia portfela"},
 	mmRebalanceSettingsID:            {T: "Ustawienia rebalancingu"},
 	mmSettingsID:                     {T: "Ustawienia"},
 	mmDepositID:                      {T: "Zdeponuj"},
@@ -1393,7 +1518,6 @@ var deDE = map[string]*intl.Translation{
 	mmMarketNotAvailableID:           {T: "Markt nicht verfügbar"},
 	mmSelectMarketID:                 {T: "Wähle einen Markt"},
 	mmPlacementsID:                   {T: "Platzierungen"},
-	mmWalletSettingsID:               {T: "Wallet Einstellungen"},
 	mmRebalanceSettingsID:            {T: "Rebalance Einstellungen"},
 	mmSettingsID:                     {T: "Einstellungen"},
 	mmGapStrategyID:                  {T: "Gap Strategy"},
@@ -1591,7 +1715,6 @@ var ar = map[string]*intl.Translation{
 	mmConfigureID:                    {T: "التهيئة"},
 	mmMarketNotAvailableID:           {T: "السوق غير متوفر"},
 	mmSelectMarketID:                 {T: "اختر سوقًا"},
-	mmWalletSettingsID:               {T: "اعدادات المحفظة"},
 	mmRebalanceSettingsID:            {T: "إعدادات إعادة الرصيد لـ"},
 	mmSettingsID:                     {T: "الإعدادات"},
 	mmDepositID:                      {T: "إيداع"},

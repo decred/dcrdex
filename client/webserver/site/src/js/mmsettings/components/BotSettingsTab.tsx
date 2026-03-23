@@ -4,12 +4,28 @@ import Tooltip from './Tooltip'
 import { app, OrderOption } from '../../registry'
 import Doc from '../../doc'
 import { PanelHeader, NumberInput } from './FormComponents'
+import {
+  prep,
+  ID_MM_SETTINGS, ID_MM_SETTINGS_DESC,
+  ID_MM_MULTI_HOP_LOCKED,
+  ID_MM_INTERMEDIATE_ASSET, ID_MM_INTERMEDIATE_ASSET_TOOLTIP,
+  ID_MM_COMPLETION_ORDER_TYPE, ID_MM_COMPLETION_ORDER_TYPE_TOOLTIP,
+  ID_MM_MARKET_ORDER_CAPITALIZE, ID_MM_LIMIT_ORDER_CAPITALIZE,
+  ID_MM_MARKET_ORDER_WARNING,
+  ID_MM_LIMIT_BUFFER, ID_MM_LIMIT_BUFFER_TOOLTIP,
+  ID_MM_TRADING,
+  ID_MM_DRIFT_TOLERANCE, ID_MM_DRIFT_TOLERANCE_TOOLTIP,
+  ID_MM_ORDER_PERSISTENCE, ID_MM_ORDER_PERSISTENCE_TOOLTIP,
+  ID_MM_MULTI_HOP_ARB,
+  ID_MM_NO_CONFIG_OPTIONS,
+  ID_MM_COLLECT_SNAPSHOTS, ID_MM_COLLECT_SNAPSHOTS_TOOLTIP
+} from '../../locales'
 
 export const SettingsPanelHeader: React.FC = () => {
   return (
     <PanelHeader
-      title="Settings"
-      description="Configure advanced bot settings including wallet options, rebalancing parameters, and trading preferences"
+      title={prep(ID_MM_SETTINGS)}
+      description={prep(ID_MM_SETTINGS_DESC)}
     />
   )
 }
@@ -19,16 +35,27 @@ const MultiHopSettings: React.FC = () => {
   const dispatch = useBotConfigDispatch()
 
   const { intermediateAssets, intermediateAsset, botConfig } = botConfigState
-  if (!intermediateAssets || intermediateAssets.length === 0) {
+  const isRunning = !!botConfigState.runStats
+  // Get the current multi-hop config
+  const multiHopConfig = botConfig.arbMarketMakingConfig?.multiHop
+  const currentIntermediateAsset = multiHopConfig
+    ? (multiHopConfig.baseAssetMarket[0] === botConfig.cexBaseID
+        ? multiHopConfig.baseAssetMarket[1]
+        : multiHopConfig.baseAssetMarket[0])
+    : intermediateAsset
+  const displayIntermediateAssets = intermediateAssets ? [...intermediateAssets] : []
+  if (currentIntermediateAsset != null && !displayIntermediateAssets.includes(currentIntermediateAsset)) {
+    displayIntermediateAssets.push(currentIntermediateAsset)
+  }
+  if (displayIntermediateAssets.length === 0) {
     return null
   }
 
-  // Get the current multi-hop config
-  const multiHopConfig = botConfig.arbMarketMakingConfig?.multiHop
   const marketOrders = multiHopConfig?.marketOrders ?? false
   const limitOrdersBuffer = multiHopConfig?.limitOrdersBuffer ?? 0.01
 
   const handleIntermediateAssetChange = (assetID: number) => {
+    if (isRunning) return
     dispatch({
       type: 'UPDATE_INTERMEDIATE_ASSET',
       payload: assetID
@@ -36,6 +63,7 @@ const MultiHopSettings: React.FC = () => {
   }
 
   const handleOrderTypeChange = (isMarketOrder: boolean) => {
+    if (isRunning) return
     dispatch({
       type: 'UPDATE_MULTI_HOP_MARKET_COMPLETION',
       payload: isMarketOrder
@@ -43,6 +71,7 @@ const MultiHopSettings: React.FC = () => {
   }
 
   const handleLimitBufferChange = (value: number) => {
+    if (isRunning) return
     dispatch({
       type: 'UPDATE_MULTI_HOP_LIMIT_BUFFER',
       payload: value / 100 // Convert from percentage to decimal
@@ -50,21 +79,29 @@ const MultiHopSettings: React.FC = () => {
   }
 
   return (
-    <div>
+    <>
+      {isRunning && (
+        <div className="fs14 text-muted mb-2">
+          {prep(ID_MM_MULTI_HOP_LOCKED)}
+        </div>
+      )}
+
       {/* Intermediate Asset */}
       <div className="d-flex align-items-center justify-content-between mb-2">
-        <span className="fs16">Intermediate Asset</span>
-        <Tooltip content="Asset to use for multi-hop arbitrage">
-          <span className="ico-info fs12"></span>
-        </Tooltip>
-      </div>
-      <div className="mb-3">
+        <div className="d-flex align-items-center">
+          <span className="fs16">{prep(ID_MM_INTERMEDIATE_ASSET)}</span>
+          <Tooltip content={prep(ID_MM_INTERMEDIATE_ASSET_TOOLTIP)}>
+            <span className="ico-info fs12 ms-1"></span>
+          </Tooltip>
+        </div>
         <select
-          className="form-select"
-          value={intermediateAsset || ''}
-          onChange={(e) => handleIntermediateAssetChange(parseInt(e.target.value) || 0)}
+          className={`form-select ${isRunning ? 'mm-readonly-select' : ''}`}
+          style={{ width: 'auto' }}
+          value={currentIntermediateAsset ?? ''}
+          disabled={isRunning}
+          onChange={(e) => handleIntermediateAssetChange(parseInt(e.target.value))}
         >
-          {intermediateAssets.map(assetID => (
+          {displayIntermediateAssets.map(assetID => (
             <option key={assetID} value={assetID}>
               {Doc.shortSymbol(app().assets[assetID]?.symbol) || `Asset ${assetID}`}
             </option>
@@ -72,16 +109,15 @@ const MultiHopSettings: React.FC = () => {
         </select>
       </div>
 
-      {/* Completion Radio Buttons */}
-      <div className="mb-3">
-        <div className="d-flex align-items-center justify-content-between mb-2">
-          <span className="fs16">Completion Order Type</span>
-          <Tooltip content="This specifies the type of order to execute on the second leg of a multi-hop arb. Market orders will always be filled, ensuring that the bot never has any funds stuck in the intermediate asset, but may result in losses if the price suddenly moves against the bot.">
-            <span className="ico-info fs12"></span>
+      {/* Completion Order Type */}
+      <div className="d-flex align-items-center justify-content-between mb-2">
+        <div className="d-flex align-items-center">
+          <span className="fs16">{prep(ID_MM_COMPLETION_ORDER_TYPE)}</span>
+          <Tooltip content={prep(ID_MM_COMPLETION_ORDER_TYPE_TOOLTIP)}>
+            <span className="ico-info fs12 ms-1"></span>
           </Tooltip>
         </div>
-
-        <div className="d-flex gap-3">
+        <div className={`d-flex gap-3 ${isRunning ? 'mm-readonly-radio-group' : ''}`}>
           <div className="form-check pe-2">
             <input
               className="form-check-input"
@@ -89,13 +125,13 @@ const MultiHopSettings: React.FC = () => {
               name="orderType"
               id="marketOrder"
               checked={marketOrders}
+              disabled={isRunning}
               onChange={() => handleOrderTypeChange(true)}
             />
             <label className="form-check-label" htmlFor="marketOrder">
-              Market Order
+              {prep(ID_MM_MARKET_ORDER_CAPITALIZE)}
             </label>
           </div>
-
           <div className="form-check">
             <input
               className="form-check-input"
@@ -103,41 +139,47 @@ const MultiHopSettings: React.FC = () => {
               name="orderType"
               id="limitOrder"
               checked={!marketOrders}
+              disabled={isRunning}
               onChange={() => handleOrderTypeChange(false)}
             />
             <label className="form-check-label" htmlFor="limitOrder">
-              Limit Order
+              {prep(ID_MM_LIMIT_ORDER_CAPITALIZE)}
             </label>
           </div>
         </div>
       </div>
 
-      {/* Limit Orders Buffer Slider - Only show when limit orders are selected */}
-      {!marketOrders && (
-        <div className="mb-3">
-          <div className="d-flex align-items-center justify-content-between mb-2">
-            <span className="fs16">Limit Buffer</span>
-            <Tooltip content="This specifies the buffer to apply to the limit order rate for the second leg of a multi-hop arb. The buffer will make the rate 'worse' (lower for sell orders, higher for buy orders) resulting in a higher probability of the trade being filled in order to avoid having funds stuck in the intermediate asset.">
-              <span className="ico-info fs12"></span>
-            </Tooltip>
-          </div>
-
-          <div className="d-flex align-items-center">
-            <div className="flex-grow-1 me-2">
-              <NumberInput
-                min={0.1}
-                max={2.0}
-                precision={2}
-                value={limitOrdersBuffer * 100} // Convert to percentage for display
-                onChange={handleLimitBufferChange}
-                withSlider={true}
-              />
-            </div>
-            <span className="fs14 grey">%</span>
-          </div>
+      {/* Market order warning */}
+      {marketOrders && (
+        <div className="fs14 text-danger mb-2">
+          {prep(ID_MM_MARKET_ORDER_WARNING)}
         </div>
       )}
-    </div>
+
+      {/* Limit Orders Buffer Slider - Only show when limit orders are selected */}
+      {!marketOrders && (
+        <div className="d-flex align-items-center">
+          <div className="fs16 me-3 flex-shrink-0">
+            {prep(ID_MM_LIMIT_BUFFER)}
+            <Tooltip content={prep(ID_MM_LIMIT_BUFFER_TOOLTIP)}>
+              <span className="ico-info fs12 ms-1"></span>
+            </Tooltip>
+          </div>
+          <NumberInput
+            sliderPosition="inline"
+            className={isRunning ? 'p-1 text-center fs14 mm-readonly-input' : 'p-1 text-center fs14'}
+            min={0.1}
+            max={2.0}
+            precision={2}
+            value={limitOrdersBuffer * 100}
+            onChange={handleLimitBufferChange}
+            withSlider={true}
+            disabled={isRunning}
+            suffix="%"
+          />
+        </div>
+      )}
+    </>
   )
 }
 
@@ -156,9 +198,7 @@ const IndividualWalletSettings: React.FC<IndividualWalletSettingsProps> = ({
 }) => {
   if (!options || options.length === 0) {
     return (
-      <div className="text-center text-muted p-3">
-        No settings available for {asset} wallet
-      </div>
+      <span className="fs14 fst-italic grey">{prep(ID_MM_NO_CONFIG_OPTIONS)}</span>
     )
   }
 
@@ -174,7 +214,7 @@ const IndividualWalletSettings: React.FC<IndividualWalletSettingsProps> = ({
 
         if (opt.isboolean) {
           return (
-            <div key={opt.key} className="d-flex align-items-center pt-2 mt-2 border-top">
+            <div key={opt.key} className="d-flex align-items-center">
               <div className="form-check">
                 <input
                   className="form-check-input me-2"
@@ -201,28 +241,26 @@ const IndividualWalletSettings: React.FC<IndividualWalletSettingsProps> = ({
           const numericValue = parseFloat(currentValue) || start.x
 
           return (
-            <div key={opt.key} className="pt-2 mt-2 border-top">
-              <div className="d-flex align-items-center justify-content-between">
-                <span>{opt.displayname}</span>
+            <div key={opt.key} className="d-flex align-items-center">
+              <div className="fs16 me-3 flex-shrink-0">
+                {opt.displayname}
                 {opt.description && (
                   <Tooltip content={opt.description}>
-                    <span className="ico-info fs12"></span>
+                    <span className="ico-info fs12 ms-1"></span>
                   </Tooltip>
                 )}
               </div>
-              <div className="d-flex align-items-center">
-                <div className="flex-grow-1 me-2">
-                  <NumberInput
-                    min={start.x}
-                    max={end.x}
-                    precision={0}
-                    value={numericValue}
-                    onChange={(value) => onSettingChange(asset, opt.key, value.toString())}
-                    withSlider={true}
-                  />
-                </div>
-                {xUnit && <span className="fs14 grey ms-1">{xUnit}</span>}
-              </div>
+              <NumberInput
+                sliderPosition="inline"
+                className="p-1 text-center fs14"
+                min={start.x}
+                max={end.x}
+                precision={0}
+                value={numericValue}
+                onChange={(value) => onSettingChange(asset, opt.key, value.toString())}
+                withSlider={true}
+                suffix={xUnit}
+              />
             </div>
           )
         }
@@ -233,10 +271,21 @@ const IndividualWalletSettings: React.FC<IndividualWalletSettingsProps> = ({
   )
 }
 
-const WalletSettings: React.FC = () => {
+const BotSettingsTab: React.FC = () => {
   const botConfigState = useBotConfigState()
-  const { botConfig, dexMarket, baseMultiFundingOpts, quoteMultiFundingOpts } = botConfigState
+  const { botConfig, dexMarket, baseMultiFundingOpts, quoteMultiFundingOpts, intermediateAssets } = botConfigState
   const dispatch = useBotConfigDispatch()
+
+  const driftTolerance = botConfig.basicMarketMakingConfig?.driftTolerance ??
+                         botConfig.arbMarketMakingConfig?.driftTolerance ?? 0.001
+  const orderPersistence = botConfig.arbMarketMakingConfig?.orderPersistence ??
+    botConfig.simpleArbConfig?.numEpochsLeaveOpen ?? 2
+
+  const hasKnobs = !!(botConfig.arbMarketMakingConfig || botConfig.basicMarketMakingConfig || botConfig.simpleArbConfig)
+  const hasMultiHop = (intermediateAssets && intermediateAssets.length > 0) || !!botConfig.arbMarketMakingConfig?.multiHop
+
+  const baseAsset = app().assets[dexMarket.baseID]
+  const quoteAsset = app().assets[dexMarket.quoteID]
 
   const handleWalletSettingChange = (asset: 'base' | 'quote', key: string, value: string) => {
     dispatch({
@@ -245,155 +294,114 @@ const WalletSettings: React.FC = () => {
     })
   }
 
-  const baseAsset = app().assets[dexMarket.baseID]
-  const quoteAsset = app().assets[dexMarket.quoteID]
-
   return (
-    <div className="mb-4">
-      <div className="d-flex align-items-center mb-3">
-        <span className="ico-wallet fs20 pe-2"></span>
-        <span className="fs22">Wallet Settings</span>
-      </div>
+    <div>
+      <SettingsPanelHeader />
 
-      <div className="row">
-        {/* Base Wallet Settings */}
-        <div className="col-12 mb-3">
-          <div className="border rounded p-3">
-            <div className="d-flex align-items-center mb-3">
-              <img
-                className="mini-icon me-2"
-                src={Doc.logoPath(baseAsset.symbol)}
-                alt={baseAsset.symbol}
-              />
-              <span className="fs18">Base Wallet ({baseAsset.unitInfo.conventional.unit})</span>
+      <div className="border rounded p-3 mm-mixer-row">
+        {/* Knobs Section */}
+        {hasKnobs && (
+          <>
+            <span className="fs16 demi d-block mb-2">{prep(ID_MM_TRADING)}</span>
+            <div className="d-flex flex-column gap-3 ps-2">
+              {(botConfig.arbMarketMakingConfig || botConfig.basicMarketMakingConfig) && (
+                <div className="d-flex align-items-center">
+                  <div className="fs16 me-3 flex-shrink-0">
+                    {prep(ID_MM_DRIFT_TOLERANCE)}
+                    <Tooltip content={prep(ID_MM_DRIFT_TOLERANCE_TOOLTIP)}>
+                      <span className="ico-info fs12 ms-1"></span>
+                    </Tooltip>
+                  </div>
+                  <NumberInput
+                    sliderPosition="inline"
+                    className="p-1 text-center fs14"
+                    min={0.01}
+                    max={1}
+                    precision={2}
+                    value={driftTolerance * 100}
+                    onChange={(value) => dispatch({
+                      type: 'UPDATE_DRIFT_TOLERANCE',
+                      payload: value / 100
+                    })}
+                    withSlider={true}
+                    suffix="%"
+                  />
+                </div>
+              )}
+
+              {(botConfig.arbMarketMakingConfig || botConfig.simpleArbConfig) && (
+                <div className="d-flex align-items-center">
+                  <div className="fs16 me-3 flex-shrink-0">
+                    {prep(ID_MM_ORDER_PERSISTENCE)}
+                    <Tooltip content={prep(ID_MM_ORDER_PERSISTENCE_TOOLTIP)}>
+                      <span className="ico-info fs12 ms-1"></span>
+                    </Tooltip>
+                  </div>
+                  <NumberInput
+                    sliderPosition="inline"
+                    className="p-1 text-center fs14"
+                    min={2}
+                    max={40}
+                    precision={0}
+                    value={orderPersistence}
+                    onChange={(value) => dispatch({
+                      type: 'UPDATE_ORDER_PERSISTENCE',
+                      payload: value
+                    })}
+                    withSlider={true}
+                    suffix="epochs"
+                  />
+                </div>
+              )}
             </div>
-
-            <IndividualWalletSettings
-              asset="base"
-              options={baseMultiFundingOpts}
-              optionsState={botConfig.baseWalletOptions ?? null}
-              onSettingChange={handleWalletSettingChange}
-            />
-          </div>
-        </div>
-
-        {/* Quote Wallet Settings */}
-        <div className="col-12 mb-3">
-          <div className="border rounded p-3">
-            <div className="d-flex align-items-center mb-3">
-              <img
-                className="mini-icon me-2"
-                src={Doc.logoPath(quoteAsset.symbol)}
-                alt={quoteAsset.symbol}
-              />
-              <span className="fs18">Quote Wallet ({quoteAsset.unitInfo.conventional.unit})</span>
-            </div>
-
-            <IndividualWalletSettings
-              asset="quote"
-              options={quoteMultiFundingOpts}
-              optionsState={botConfig.quoteWalletOptions ?? null}
-              onSettingChange={handleWalletSettingChange}
-            />
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-const Knobs: React.FC = () => {
-  const botConfigState = useBotConfigState()
-  const { botConfig } = botConfigState
-  const dispatch = useBotConfigDispatch()
-
-  const driftTolerance = botConfig.basicMarketMakingConfig?.driftTolerance ??
-                         botConfig.arbMarketMakingConfig?.driftTolerance ?? 0.001
-
-  const orderPersistence = botConfig.arbMarketMakingConfig?.orderPersistence ??
-    botConfig.simpleArbConfig?.numEpochsLeaveOpen ?? 2
-
-  return (
-    <div className="mb-4">
-      <div className="d-flex align-items-center mb-3">
-        <span className="ico-lever fs20 pe-2"></span>
-        <span className="fs22">Knobs</span>
-      </div>
-
-      <div className="border rounded p-3">
-        {/* Drift Tolerance (ArbMM or BasicMM) */}
-        {(botConfig.arbMarketMakingConfig || botConfig.basicMarketMakingConfig) && (
-          <div className="mb-3">
-            <div className="d-flex align-items-center justify-content-between mb-2">
-              <span className="fs16">Drift Tolerance</span>
-              <Tooltip content="Maximum allowed price deviation before repositioning orders">
-                <span className="ico-info fs12"></span>
-              </Tooltip>
-            </div>
-            <div className="d-flex align-items-center">
-              <div className="flex-grow-1 me-2">
-                <NumberInput
-                  min={0.01}
-                  max={1}
-                  precision={2}
-                  value={driftTolerance * 100}
-                  onChange={(value) => dispatch({
-                    type: 'UPDATE_DRIFT_TOLERANCE',
-                    payload: value / 100
-                  })}
-                  withSlider={true}
-                />
-              </div>
-              <span className="fs14 grey">%</span>
-            </div>
-          </div>
+            <hr className="my-3" />
+          </>
         )}
 
-        {/* Order Persistence (ArbMM or BasicArb) */}
-        {(botConfig.arbMarketMakingConfig || botConfig.simpleArbConfig) && (
-          <div className="mb-3">
-            <div className="d-flex align-items-center justify-content-between mb-2">
-              <span className="fs16">Order Persistence</span>
-              <Tooltip content="Number of epochs to keep unfilled orders active">
-                <span className="ico-info fs12"></span>
-              </Tooltip>
-            </div>
-            <div className="d-flex align-items-center">
-              <div className="flex-grow-1 me-2">
-                <NumberInput
-                  min={2}
-                  max={40}
-                  precision={0}
-                  value={orderPersistence}
-                  onChange={(value) => dispatch({
-                    type: 'UPDATE_ORDER_PERSISTENCE',
-                    payload: value
-                  })}
-                  withSlider={true}
-                />
-              </div>
-              <span className="fs14 grey">epochs</span>
-            </div>
+        {/* Wallet Settings Section */}
+        <div className="mb-1">
+          <div className="d-flex align-items-center mb-2">
+            <img className="mini-icon me-1" src={Doc.logoPath(baseAsset.symbol)} alt={baseAsset.symbol} />
+            <span className="fs16 demi">{baseAsset.unitInfo.conventional.unit} Wallet</span>
           </div>
+          <IndividualWalletSettings
+            asset="base"
+            options={baseMultiFundingOpts}
+            optionsState={botConfig.baseWalletOptions ?? null}
+            onSettingChange={handleWalletSettingChange}
+          />
+        </div>
+
+        <hr className="my-3" />
+
+        <div className="mb-1">
+          <div className="d-flex align-items-center mb-2">
+            <img className="mini-icon me-1" src={Doc.logoPath(quoteAsset.symbol)} alt={quoteAsset.symbol} />
+            <span className="fs16 demi">{quoteAsset.unitInfo.conventional.unit} Wallet</span>
+          </div>
+          <IndividualWalletSettings
+            asset="quote"
+            options={quoteMultiFundingOpts}
+            optionsState={botConfig.quoteWalletOptions ?? null}
+            onSettingChange={handleWalletSettingChange}
+          />
+        </div>
+
+        {/* Multi-Hop Section */}
+        {hasMultiHop && (
+          <>
+            <hr className="my-3" />
+            <div>
+              <span className="fs16 demi d-block mb-2">{prep(ID_MM_MULTI_HOP_ARB)}</span>
+              <div className="ps-2">
+                <MultiHopSettings />
+              </div>
+            </div>
+          </>
         )}
-      </div>
-    </div>
-  )
-}
 
-const MMSnapshotsSection: React.FC = () => {
-  const botConfigState = useBotConfigState()
-  const dispatch = useBotConfigDispatch()
-  const { botConfig } = botConfigState
-
-  return (
-    <div className="mb-4">
-      <div className="d-flex align-items-center mb-3">
-        <span className="ico-camera fs20 pe-2"></span>
-        <span className="fs22">MM Epoch Snapshots</span>
-      </div>
-
-      <div className="border rounded p-3">
+        {/* Snapshots */}
+        <hr className="my-3" />
         <div className="form-check">
           <input
             className="form-check-input me-2"
@@ -403,55 +411,11 @@ const MMSnapshotsSection: React.FC = () => {
             onChange={(e) => dispatch({ type: 'TOGGLE_MM_SNAPSHOTS', payload: e.target.checked })}
           />
           <label className="form-check-label" htmlFor="mmSnapshots">
-            Enable epoch snapshot collection
+            {prep(ID_MM_COLLECT_SNAPSHOTS)}
           </label>
-          <Tooltip content="Subscribe to server-signed epoch snapshots for this market. Snapshots can be exported later for independent verification of market making activity.">
+          <Tooltip content={prep(ID_MM_COLLECT_SNAPSHOTS_TOOLTIP)}>
             <span className="ico-info fs12 ms-1"></span>
           </Tooltip>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-const MultiHopSection: React.FC = () => {
-  const botConfigState = useBotConfigState()
-  const { intermediateAssets } = botConfigState
-  if (!intermediateAssets || intermediateAssets.length === 0) {
-    return null
-  }
-
-  return (
-    <div className="mb-4">
-      <div className="d-flex align-items-center mb-3">
-        <span className="ico-shuffle fs20 pe-2"></span>
-        <span className="fs22">Multi-Hop Arbitrage</span>
-      </div>
-
-      <div className="border rounded p-3">
-        <MultiHopSettings />
-      </div>
-    </div>
-  )
-}
-
-const BotSettingsTab: React.FC = () => {
-  return (
-    <div>
-      <SettingsPanelHeader />
-
-      <div className="row">
-        <div className="col-12">
-          <WalletSettings />
-        </div>
-        <div className="col-12">
-          <Knobs />
-        </div>
-        <div className="col-12">
-          <MMSnapshotsSection />
-        </div>
-        <div className="col-12">
-          <MultiHopSection />
         </div>
       </div>
     </div>

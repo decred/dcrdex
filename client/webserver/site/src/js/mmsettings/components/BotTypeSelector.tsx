@@ -8,12 +8,16 @@ import {
   prep,
   ID_MM_CONFIGURE,
   ID_MM_FIX_ERRORS,
-  ID_MM_MARKET_NOT_AVAILABLE,
   ID_MM_CHOOSE_BOT,
   ID_MM_BASIC_MARKET_MAKER,
   ID_MM_MM_PLUS_ARB,
   ID_MM_BASIC_ARBITRAGE,
-  ID_MM_SUBMIT
+  ID_MM_MARKET_NOT_AVAILABLE,
+  ID_MM_NO_CEX_AVAILABLE,
+  ID_MM_BASIC_MM_DESC,
+  ID_MM_ARB_MM_DESC,
+  ID_MM_BASIC_ARB_DESC,
+  ID_MM_CONTINUE
 } from '../../locales'
 
 interface CexMarketSupportChecker {
@@ -216,7 +220,7 @@ const BotTypeSelector: React.FC<BotTypeSelectorProps> = ({
 
         {availableCexes.length === 0 && (
           <div className="fs18 mb-3">
-            Only basic market making is available. Configure CEXes to enable more options.
+            {prep(ID_MM_NO_CEX_AVAILABLE)}
           </div>
         )}
 
@@ -229,7 +233,7 @@ const BotTypeSelector: React.FC<BotTypeSelectorProps> = ({
           >
             <div className="flex-center fs24 p-2">{prep(ID_MM_BASIC_MARKET_MAKER)}</div>
             <div className="flex-center fs16 px-3 pb-2 d-hide">
-                Keep orders on both sides of a DEX market with a configurable spread. If a buy and a sell order both match with minimal market movement in between, you profit.
+              {prep(ID_MM_BASIC_MM_DESC)}
             </div>
           </div>
 
@@ -243,7 +247,7 @@ const BotTypeSelector: React.FC<BotTypeSelectorProps> = ({
               >
                 <div className="flex-center fs24 p-2">{prep(ID_MM_MM_PLUS_ARB)}</div>
                 <div className="flex-center fs16 px-3 pb-2 d-hide">
-                  Maintain orders on a DEX market placed at positions calculated for matching profitable existing orders on CEX. When the DEX order matches, the CEX order is placed immediately for a profit.
+                  {prep(ID_MM_ARB_MM_DESC)}
                 </div>
               </div>
 
@@ -255,7 +259,7 @@ const BotTypeSelector: React.FC<BotTypeSelectorProps> = ({
               >
                 <div className="flex-center fs24 p-2">{prep(ID_MM_BASIC_ARBITRAGE)}</div>
                 <div className="flex-center fs16 px-3 pb-2 d-hide">
-                  Watch both CEX and DEX order books and wait for conditions favorable to place a pair of orders such that when both match, a profit is made.
+                  {prep(ID_MM_BASIC_ARB_DESC)}
                 </div>
               </div>
             </>
@@ -297,7 +301,7 @@ const BotTypeSelector: React.FC<BotTypeSelectorProps> = ({
             disabled={isSubmitDisabled}
             onClick={handleSubmit}
           >
-            {prep(ID_MM_SUBMIT)}
+            {prep(ID_MM_CONTINUE)}
           </button>
         </div>
       </form>

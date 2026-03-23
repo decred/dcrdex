@@ -138,7 +138,7 @@ func (a *ArbMarketMakerConfig) copy() *ArbMarketMakerConfig {
 	return &c
 }
 
-func (a *ArbMarketMakerConfig) validate(baseID, quoteID uint32) error {
+func (a *ArbMarketMakerConfig) validate(cexBaseID, cexQuoteID uint32) error {
 	if len(a.BuyPlacements) == 0 && len(a.SellPlacements) == 0 {
 		return fmt.Errorf("no placements")
 	}
@@ -156,19 +156,19 @@ func (a *ArbMarketMakerConfig) validate(baseID, quoteID uint32) error {
 	}
 
 	if a.MultiHop != nil {
-		if a.MultiHop.BaseAssetMarket[0] != baseID && a.MultiHop.BaseAssetMarket[1] != baseID {
-			return fmt.Errorf("multi-hop base asset market must involve the DEX base asset")
+		if a.MultiHop.BaseAssetMarket[0] != cexBaseID && a.MultiHop.BaseAssetMarket[1] != cexBaseID {
+			return fmt.Errorf("multi-hop base asset market must involve the configured CEX base asset")
 		}
-		if a.MultiHop.QuoteAssetMarket[0] != quoteID && a.MultiHop.QuoteAssetMarket[1] != quoteID {
-			return fmt.Errorf("multi-hop quote asset market must involve the DEX quote asset")
+		if a.MultiHop.QuoteAssetMarket[0] != cexQuoteID && a.MultiHop.QuoteAssetMarket[1] != cexQuoteID {
+			return fmt.Errorf("multi-hop quote asset market must involve the configured CEX quote asset")
 		}
 		var baseIntermediateID, quoteIntermediateID uint32
-		if a.MultiHop.BaseAssetMarket[0] == baseID {
+		if a.MultiHop.BaseAssetMarket[0] == cexBaseID {
 			baseIntermediateID = a.MultiHop.BaseAssetMarket[1]
 		} else {
 			baseIntermediateID = a.MultiHop.BaseAssetMarket[0]
 		}
-		if a.MultiHop.QuoteAssetMarket[0] == quoteID {
+		if a.MultiHop.QuoteAssetMarket[0] == cexQuoteID {
 			quoteIntermediateID = a.MultiHop.QuoteAssetMarket[1]
 		} else {
 			quoteIntermediateID = a.MultiHop.QuoteAssetMarket[0]

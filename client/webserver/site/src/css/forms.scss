@@ -62,6 +62,14 @@ select {
   &:focus {
     border-color: var(--form-input-border-focus);
   }
+
+  &.mm-readonly-select:disabled {
+    color: var(--text-grey);
+    background-color: var(--form-bg);
+    border-color: var(--border-color);
+    opacity: 1;
+    cursor: not-allowed;
+  }
 }
 
 #regAssetForm {
@@ -158,6 +166,26 @@ select {
 
 .form-check-label {
   user-select: none;
+}
+
+.mm-readonly-radio-group {
+  .form-check-input {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+
+  .form-check-label {
+    color: var(--text-grey);
+    cursor: not-allowed;
+  }
+}
+
+.mm-readonly-input:disabled {
+  color: var(--text-grey);
+  background-color: var(--form-bg);
+  border-color: var(--border-color);
+  opacity: 1;
+  cursor: not-allowed;
 }
 
 #forms {

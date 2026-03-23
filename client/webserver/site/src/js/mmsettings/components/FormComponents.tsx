@@ -12,7 +12,7 @@ export const PanelHeader: React.FC<PanelHeaderProps> = ({ title, description, bu
   return (
     <div className="pb-2 my-2 border-bottom">
       <div className="d-flex justify-content-start lh1 align-items-center">
-        <span className="fs20 pt-pt5 me-4">{title}</span>
+        <span className="fs20 demi pt-pt5 me-4">{title}</span>
         {buttonText && onClick && (
           <button className="small" onClick={onClick}>
             <span className="ico-settings fs14 me-1"></span>
@@ -29,22 +29,6 @@ export const PanelHeader: React.FC<PanelHeaderProps> = ({ title, description, bu
   )
 }
 
-interface FormLabelProps {
-  text: string
-  description?: string
-  className?: string
-  isBold?: boolean
-}
-
-export const FormLabel: React.FC<FormLabelProps> = ({ text, description, className = '', isBold = true }) => {
-  return (
-    <div className={`pb-1 ${className}`}>
-      <span className={`fs18 ${isBold ? 'demi' : ''}`}>{text}</span>
-      {description && <span className="fs14 mt-1 d-block">{description}</span>}
-    </div>
-  )
-}
-
 interface NumberInputProps {
   value?: number;
   onChange: (num: number) => void;
@@ -56,11 +40,10 @@ interface NumberInputProps {
   // and down arrows
   onIncrement?: () => void;
   onDecrement?: () => void;
-  header?: React.ReactNode;
-  bottomContent?: React.ReactNode;
   suffix?: string;
   disabled?: boolean;
   withSlider?: boolean;
+  sliderPosition?: 'below' | 'inline';
 }
 
 export const NumberInput: React.FC<NumberInputProps> = ({
@@ -73,10 +56,9 @@ export const NumberInput: React.FC<NumberInputProps> = ({
   suffix,
   onIncrement,
   onDecrement,
-  header,
-  bottomContent,
   withSlider = false,
-  disabled = false
+  disabled = false,
+  sliderPosition = 'below'
 }) => {
   const [inputValue, setInputValue] = React.useState<string>(value !== undefined ? value.toFixed(precision) : '')
   const [isDragging, setIsDragging] = React.useState(false)
@@ -182,9 +164,46 @@ export const NumberInput: React.FC<NumberInputProps> = ({
 
   const hasArrows = onIncrement && onDecrement
 
+  const thumbClass = `mm-slider-thumb${disabled ? ' disabled' : ''}${isDragging ? ' dragging' : ''}`
+  const trackClass = `mm-slider-track w-100${disabled ? ' disabled' : ''}`
+
+  if (withSlider && sliderPosition === 'inline') {
+    return (
+      <div className="d-flex align-items-center flex-grow-1">
+        <div className="flex-grow-1 position-relative me-2">
+          <div
+            ref={sliderRef}
+            className={trackClass}
+            onClick={handleSliderClick}
+          />
+          <div
+            className={thumbClass}
+            style={{
+              left: `${getPercentage()}%`
+            }}
+            onMouseDown={handleMouseDown}
+          />
+        </div>
+        <div className="d-flex align-items-center flex-shrink-0" style={{ width: '6rem' }}>
+          <input
+            type="text"
+            inputMode="decimal"
+            className={`${className} flex-grow-1`}
+            style={{ minWidth: 0 }}
+            value={inputValue}
+            disabled={disabled}
+            onChange={handleInputChange}
+            onKeyDown={handleKeyDown}
+            onBlur={commitInputValue}
+          />
+          {suffix && <span className="fs14 ms-1">{suffix}</span>}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="d-flex flex-column align-items-stretch">
-      {header}
       <div className="d-flex align-items-center">
         <div className="flex-grow-1">
           <input
@@ -201,27 +220,13 @@ export const NumberInput: React.FC<NumberInputProps> = ({
             <div className="position-relative mt-2">
               <div
                 ref={sliderRef}
-                className="w-100"
-                style={{
-                  height: '2px',
-                  cursor: disabled ? 'not-allowed' : 'pointer',
-                  backgroundColor: '#6c757d'
-                }}
+                className={trackClass}
                 onClick={handleSliderClick}
               />
               <div
-                className="position-absolute"
+                className={thumbClass}
                 style={{
-                  width: '12px',
-                  height: '12px',
-                  borderRadius: '50%',
-                  top: '50%',
-                  left: `${getPercentage()}%`,
-                  transform: 'translate(-50%, -50%)',
-                  cursor: disabled ? 'not-allowed' : isDragging ? 'grabbing' : 'grab',
-                  userSelect: 'none',
-                  backgroundColor: '#6c757d',
-                  opacity: disabled ? 0.5 : 1
+                  left: `${getPercentage()}%`
                 }}
                 onMouseDown={handleMouseDown}
               />
@@ -244,7 +249,6 @@ export const NumberInput: React.FC<NumberInputProps> = ({
         {suffix && <span className="fs24 ms-2">{suffix}</span>}
       </div>
 
-      {bottomContent}
     </div>
   )
 }
@@ -294,22 +298,7 @@ export const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({ isLoading }) => 
   if (!isLoading) return null
 
   return (
-    <div
-      className="loading-overlay"
-      style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
-        backdropFilter: 'blur(5px)',
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        zIndex: 9999
-      }}
-    >
+    <div className="mm-loading-overlay">
       <div className="spinner-border text-primary" role="status" style={{ width: '3rem', height: '3rem' }}>
         <span className="visually-hidden">{prep(ID_MM_LOADING)}</span>
       </div>

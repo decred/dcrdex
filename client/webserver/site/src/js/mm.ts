@@ -411,12 +411,13 @@ class Bot extends BotMarket {
 
     Doc.setVis(cexName, page.baseCexBalanceSection, page.quoteCexBalanceSection)
     if (cexName) {
-      const baseCexBalance = Doc.formatCoinValue(cexBalances[baseID] ?? 0, bui)
+      const { cexBaseID, cexQuoteID } = this.cfg
+      const baseCexBalance = Doc.formatCoinValue(cexBalances[cexBaseID] ?? 0, bui)
       page.baseCexBalance.textContent = baseCexBalance
-      totalBaseBalance += cexBalances[baseID] ?? 0
-      const quoteCexBalance = Doc.formatCoinValue(cexBalances[quoteID] ?? 0, qui)
+      totalBaseBalance += cexBalances[cexBaseID] ?? 0
+      const quoteCexBalance = Doc.formatCoinValue(cexBalances[cexQuoteID] ?? 0, qui)
       page.quoteCexBalance.textContent = quoteCexBalance
-      totalQuoteBalance += cexBalances[quoteID] ?? 0
+      totalQuoteBalance += cexBalances[cexQuoteID] ?? 0
     }
 
     page.baseTotalBalance.textContent = Doc.formatCoinValue(totalBaseBalance, bui)
@@ -433,7 +434,7 @@ class Bot extends BotMarket {
       page.baseFeeBalance.textContent = baseFeeBalance
     }
 
-    if (quoteFeeAssetIsTraded) {
+    if (quoteFeeAssetIsTraded || quoteFeeID === baseFeeID) {
       Doc.hide(page.quoteFeeBalanceSection)
     } else {
       Doc.show(page.quoteFeeBalanceSection)

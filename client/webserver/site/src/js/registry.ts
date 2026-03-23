@@ -834,12 +834,17 @@ export interface BotBalanceAllocation {
   cex: Record<number, number>
 }
 
+export interface BotInventoryDiffs {
+  dex: Record<number, number>
+  cex: Record<number, number>
+}
+
 export interface QuickBalanceConfig {
   buysBuffer: number
   sellsBuffer: number
   buyFeeReserve: number
   sellFeeReserve: number
-  bridgeFeeReserve: number
+  rebalanceFeeReserve: number
   slippageBuffer: number
 }
 
@@ -887,6 +892,7 @@ export interface MMCEXStatus {
   connectErr: string
   markets: Record<string, CEXMarket>
   balances: Record<number, ExchangeBalance>
+  assetGroups: Record<number, number>
 }
 
 export interface BotBalance {

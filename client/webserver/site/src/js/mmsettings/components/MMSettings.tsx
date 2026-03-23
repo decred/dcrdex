@@ -1,4 +1,4 @@
-import React, { useReducer, useState, createContext, useContext, forwardRef, useImperativeHandle } from 'react'
+import React, { useReducer, useState, createContext, useContext, forwardRef, useImperativeHandle, useEffect, useRef } from 'react'
 import { MMCEXStatus, app, BalanceNote, CEXBalanceUpdate, SupportedAsset, ApprovalStatus } from '../../registry'
 import { MM } from '../../mmutil'
 import { BotSpecs, specLK } from '../../mmsettings'
@@ -8,7 +8,18 @@ import BotTypeSelector from './BotTypeSelector'
 import ConfigureBot from './ConfigureBot'
 import ErrorPopup from './ErrorPopup'
 import { LoadingSpinner } from './FormComponents'
-import { botConfigStateReducer, initialBotConfigState, BotConfigStateContext, BotConfigDispatchContext, BotConfigState } from '../utils/BotConfig'
+import { prep, ID_MM_MISSING_FIAT_RATES } from '../../locales'
+import {
+  botConfigStateReducer,
+  initialBotConfigState,
+  BotConfigStateContext,
+  BotConfigDispatchContext,
+  BotConfigState,
+  fetchExternalFees,
+  fetchFundingFees,
+  externalFeeRequestKey,
+  fundingFeesRequestKey
+} from '../utils/BotConfig'
 import State from '../../state'
 import { requiredDexAssets } from '../utils/AllocationUtil'
 
@@ -98,31 +109,41 @@ export const cexSupportsArbOnMarket = (
     return true
   }
 
-  // baseBridges and quoteBridges are all the assets that the base and quote
-  // asset can be bridged to that are supported by the CEX, mapping to available bridge names.
-  // If the CEX supports the base or quote assets directly, the bridge map will be empty.
-  let baseBridges: Record<number, string[]> | null = {}
-  let quoteBridges: Record<number, string[]> | null = {}
+  // baseBridges and quoteBridges are the bridge destinations exposed in the UI
+  // when the asset is not supported directly on the CEX. Route discovery still
+  // considers both direct and bridged representations in parallel.
+  let baseDirectSupport = false
+  let quoteDirectSupport = false
+  const baseBridgeOptions: Record<number, string[]> = {}
+  const quoteBridgeOptions: Record<number, string[]> = {}
   for (const { baseID: cexBaseID, quoteID: cexQuoteID } of Object.values(cexStatus.markets ?? [])) {
-    if (cexBaseID === baseID) {
-      baseBridges = null
+    if (cexBaseID === baseID || cexQuoteID === baseID) {
+      baseDirectSupport = true
     }
-    if (cexQuoteID === quoteID) {
-      quoteBridges = null
+    if (cexBaseID === quoteID || cexQuoteID === quoteID) {
+      quoteDirectSupport = true
     }
-    if (baseBridges && supportedBridgePath(baseID, cexBaseID)) {
-      baseBridges[cexBaseID] = getBridgeNames(baseID, cexBaseID)
+    if (supportedBridgePath(baseID, cexBaseID)) {
+      baseBridgeOptions[cexBaseID] = getBridgeNames(baseID, cexBaseID)
     }
-    if (baseBridges && supportedBridgePath(baseID, cexQuoteID)) {
-      baseBridges[cexQuoteID] = getBridgeNames(baseID, cexQuoteID)
+    if (supportedBridgePath(baseID, cexQuoteID)) {
+      baseBridgeOptions[cexQuoteID] = getBridgeNames(baseID, cexQuoteID)
     }
-    if (quoteBridges && supportedBridgePath(quoteID, cexQuoteID)) {
-      quoteBridges[cexQuoteID] = getBridgeNames(quoteID, cexQuoteID)
+    if (supportedBridgePath(quoteID, cexQuoteID)) {
+      quoteBridgeOptions[cexQuoteID] = getBridgeNames(quoteID, cexQuoteID)
     }
-    if (quoteBridges && supportedBridgePath(quoteID, cexBaseID)) {
-      quoteBridges[cexBaseID] = getBridgeNames(quoteID, cexBaseID)
+    if (supportedBridgePath(quoteID, cexBaseID)) {
+      quoteBridgeOptions[cexBaseID] = getBridgeNames(quoteID, cexBaseID)
     }
   }
+
+  const baseBridges = baseDirectSupport ? null : baseBridgeOptions
+  const quoteBridges = quoteDirectSupport ? null : quoteBridgeOptions
+
+  const supportsBaseAsset = (cexAssetID: number): boolean =>
+    cexAssetID === baseID || baseBridgeOptions[cexAssetID] !== undefined
+  const supportsQuoteAsset = (cexAssetID: number): boolean =>
+    cexAssetID === quoteID || quoteBridgeOptions[cexAssetID] !== undefined
 
   // Find all markets that trade either base or quote assets trade on. If there
   // is an exact match, we can return early.
@@ -133,10 +154,10 @@ export const cexSupportsArbOnMarket = (
       return [true, null, baseBridges, quoteBridges]
     }
 
-    if (cexBaseID === baseID || (baseBridges && baseBridges[cexBaseID])) baseMarkets.add(cexQuoteID)
-    if (cexQuoteID === baseID || (baseBridges && baseBridges[cexQuoteID])) baseMarkets.add(cexBaseID)
-    if (cexBaseID === quoteID || (quoteBridges && quoteBridges[cexBaseID])) quoteMarkets.add(cexQuoteID)
-    if (cexQuoteID === quoteID || (quoteBridges && quoteBridges[cexQuoteID])) quoteMarkets.add(cexBaseID)
+    if (supportsBaseAsset(cexBaseID)) baseMarkets.add(cexQuoteID)
+    if (supportsBaseAsset(cexQuoteID)) baseMarkets.add(cexBaseID)
+    if (supportsQuoteAsset(cexBaseID)) quoteMarkets.add(cexQuoteID)
+    if (supportsQuoteAsset(cexQuoteID)) quoteMarkets.add(cexBaseID)
   }
 
   // If there was no exact match, find all the intermediate assets that can
@@ -148,25 +169,21 @@ export const cexSupportsArbOnMarket = (
     }
   }
 
-  // Filter out duplicate intermediate assets. If two intermediate assets
-  // share the same symbol, only one of them is required. WETH is also
-  // ignored.
-  const intermediateAssetSymbols : Set<string> = new Set()
+  // Filter out duplicate intermediate assets using the CEX's asset group
+  // mapping, which maps non-canonical asset IDs to their canonical
+  // equivalents. WETH is also ignored.
+  const assetGroups = cexStatus.assetGroups ?? {}
+  const seenCanonical = new Set<number>()
   const filteredIntermediateAssets: number[] = []
   for (const intermediateAsset of Object.keys(intermediateAssets).map(Number)) {
-    const asset = app().assets[intermediateAsset]
-    if (!asset) {
-      continue
-    }
+    const canonicalID = assetGroups[intermediateAsset] ?? intermediateAsset
+    if (seenCanonical.has(canonicalID)) continue
+    const asset = app().assets[canonicalID]
+    if (!asset) continue
     const assetSymbol = asset.symbol.split('.')[0]
-    if (assetSymbol === 'weth') {
-      continue
-    }
-    if (intermediateAssetSymbols.has(assetSymbol)) {
-      continue
-    }
-    intermediateAssetSymbols.add(assetSymbol)
-    filteredIntermediateAssets.push(intermediateAsset)
+    if (assetSymbol === 'weth') continue
+    seenCanonical.add(canonicalID)
+    filteredIntermediateAssets.push(canonicalID)
   }
 
   return [false, filteredIntermediateAssets, baseBridges, quoteBridges]
@@ -221,9 +238,15 @@ export interface MMSettingsError {
   onClose?: () => void
 }
 
-const checkFiatRates = (): boolean => {
-  // TODO: check fiat rates for the required assets
-  return true
+const missingFiatRateAssetIDs = (botConfigState: BotConfigState): number[] => {
+  const { baseID, quoteID } = botConfigState.dexMarket
+  const requiredAssetIDs = [...new Set([baseID, quoteID])]
+  return requiredAssetIDs.filter((assetID) => !botConfigState.fiatRatesMap[assetID])
+}
+
+const missingFiatRateMessage = (assetIDs: number[]): string => {
+  const symbols = assetIDs.map((assetID) => app().assets[assetID]?.symbol.toUpperCase() || String(assetID))
+  return prep(ID_MM_MISSING_FIAT_RATES, { assetSymbols: symbols.join(', ') })
 }
 
 function initialErrorState (botConfigState: BotConfigState | string | undefined, returnToMM?: boolean): [BotConfigState | null, MMSettingsError | null] {
@@ -240,9 +263,10 @@ function initialErrorState (botConfigState: BotConfigState | string | undefined,
     }]
   }
 
-  if (!checkFiatRates()) {
+  const missingFiatRates = missingFiatRateAssetIDs(botConfigState)
+  if (missingFiatRates.length > 0) {
     return [null, {
-      message: 'Fiat rates are not available for the selected market',
+      message: missingFiatRateMessage(missingFiatRates),
       onClose: () => {
         if (returnToMM) app().loadPage('mm')
       }
@@ -307,6 +331,25 @@ const MMSettings = forwardRef<MMSettingsHandle, MMSettingsProps>(({
     baseID: number;
     quoteID: number;
   } | null>(null)
+  const latestBotConfigState = useRef<BotConfigState | null>(initialState)
+  const fundingFeesRequestSeq = useRef(0)
+  const fundingFeesInFlightKey = useRef<string | null>(null)
+  const fundingFeesRetry = useRef<{ key: string; timer: number } | null>(null)
+  const externalFeesRequestSeq = useRef(0)
+  const externalFeesInFlightKey = useRef<string | null>(null)
+  const externalFeesLoadedKey = useRef<string | null>(null)
+  const mounted = useRef(true)
+  latestBotConfigState.current = botConfigState
+
+  useEffect(() => {
+    return () => {
+      mounted.current = false
+      if (fundingFeesRetry.current) {
+        window.clearTimeout(fundingFeesRetry.current.timer)
+        fundingFeesRetry.current = null
+      }
+    }
+  }, [])
 
   const handleCEXesUpdated = async () => {
     try {
@@ -376,6 +419,93 @@ const MMSettings = forwardRef<MMSettingsHandle, MMSettingsProps>(({
       }
     }
   }), [botConfigState])
+
+  useEffect(() => {
+    if (!botConfigState) return
+
+    const key = fundingFeesRequestKey(botConfigState)
+    const fundingFeesReady = botConfigState.fundingFeesKey === key
+    if (fundingFeesReady || fundingFeesInFlightKey.current === key) {
+      return
+    }
+
+    if (fundingFeesRetry.current && fundingFeesRetry.current.key !== key) {
+      window.clearTimeout(fundingFeesRetry.current.timer)
+      fundingFeesRetry.current = null
+    }
+
+    const performFetch = async (stateSnapshot: BotConfigState, keySnapshot: string) => {
+      if (fundingFeesInFlightKey.current === keySnapshot) {
+        return
+      }
+
+      fundingFeesInFlightKey.current = keySnapshot
+      const requestID = ++fundingFeesRequestSeq.current
+      const result = await fetchFundingFees(stateSnapshot)
+      if (!mounted.current || fundingFeesRequestSeq.current !== requestID) {
+        return
+      }
+
+      if (fundingFeesInFlightKey.current === keySnapshot) {
+        fundingFeesInFlightKey.current = null
+      }
+
+      if (result.ok) {
+        if (fundingFeesRetry.current?.key === keySnapshot) {
+          window.clearTimeout(fundingFeesRetry.current.timer)
+          fundingFeesRetry.current = null
+        }
+        dispatch({
+          type: 'SET_FUNDING_FEES',
+          payload: { buyFees: result.buyFees, sellFees: result.sellFees, key: result.key }
+        })
+      } else {
+        if (fundingFeesRetry.current?.key === keySnapshot) {
+          return
+        }
+        const timer = window.setTimeout(() => {
+          if (fundingFeesRetry.current?.key === keySnapshot) {
+            fundingFeesRetry.current = null
+          }
+          const latestState = latestBotConfigState.current
+          if (!latestState) {
+            return
+          }
+          const latestKey = fundingFeesRequestKey(latestState)
+          if (latestKey !== keySnapshot || latestState.fundingFeesKey === latestKey) {
+            return
+          }
+          performFetch(latestState, keySnapshot).then(() => undefined)
+        }, 3000)
+        fundingFeesRetry.current = { key: keySnapshot, timer }
+      }
+    }
+
+    if (fundingFeesRetry.current?.key === key) {
+      return
+    }
+
+    performFetch(botConfigState, key).then(() => undefined)
+  }, [botConfigState])
+
+  useEffect(() => {
+    if (!botConfigState) return
+    const key = externalFeeRequestKey(botConfigState)
+    if (externalFeesLoadedKey.current === key || externalFeesInFlightKey.current === key) return
+
+    const performFetch = async (stateSnapshot: BotConfigState, keySnapshot: string) => {
+      if (externalFeesInFlightKey.current === keySnapshot) return
+      externalFeesInFlightKey.current = keySnapshot
+      const requestID = ++externalFeesRequestSeq.current
+      const result = await fetchExternalFees(stateSnapshot)
+      if (!mounted.current || externalFeesRequestSeq.current !== requestID) return
+      if (externalFeesInFlightKey.current === keySnapshot) externalFeesInFlightKey.current = null
+      externalFeesLoadedKey.current = result.key
+      dispatch({ type: 'SET_EXTERNAL_FEES', payload: result })
+    }
+
+    performFetch(botConfigState, key).then(() => undefined)
+  }, [botConfigState])
 
   // Create the CEX market support checker function
   const checkCexMarketSupport = createCexMarketSupportChecker(bridgePaths, cexes)

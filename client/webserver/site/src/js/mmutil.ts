@@ -15,6 +15,7 @@ import {
   UnitInfo,
   MarketReport,
   BotBalanceAllocation,
+  BotInventoryDiffs,
   BalanceNote,
   BotBalance,
   Order,
@@ -90,7 +91,7 @@ class MarketMakerBot {
   /*
    * updateRunningBot updates the BotConfig and inventory for a running bot.
    */
-  async updateRunningBot (cfg: BotConfig, diffs: BotBalanceAllocation, autoRebalanceCfg?: AutoRebalanceConfig) {
+  async updateRunningBot (cfg: BotConfig, diffs: BotInventoryDiffs, autoRebalanceCfg?: AutoRebalanceConfig) {
     const req: any = { cfg, diffs }
     if (autoRebalanceCfg) req.autoRebalanceCfg = autoRebalanceCfg
     return postJSON('/api/updaterunningbot', req)
@@ -113,6 +114,14 @@ class MarketMakerBot {
 
   async maxFundingFees (market: MarketWithHost, maxBuyPlacements: number, maxSellPlacements: number, baseOptions: Record<string, string>, quoteOptions: Record<string, string>) {
     return postJSON('/api/maxfundingfees', { market, maxBuyPlacements, maxSellPlacements, baseOptions, quoteOptions })
+  }
+
+  async estimateSendTxFee (addr: string, assetID: number, value: number, subtract = false, maxWithdraw = false) {
+    return postJSON('/api/txfee', { addr, assetID, value, subtract, maxWithdraw })
+  }
+
+  async newDepositAddress (assetID: number) {
+    return postJSON('/api/depositaddress', { assetID })
   }
 
   async startBot (config: MarketWithHost) {

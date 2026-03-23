@@ -2,7 +2,17 @@ import React, { useState } from 'react'
 import Doc from '../../doc'
 import { CEXDisplayInfos } from '../../mmutil'
 import { renderSymbol, AvailableMarket } from './MMSettings'
-import { prep, ID_MM_SELECT_MARKET, ID_MM_SEARCH_MARKETS, ID_MM_MARKET_HEADER, ID_MM_HOST_HEADER, ID_MM_ARB_HEADER } from '../../locales'
+import {
+  prep,
+  ID_MM_SELECT_MARKET,
+  ID_MM_SELECT_MARKET_DESC,
+  ID_MM_SEARCH_MARKETS,
+  ID_MM_MARKET_HEADER,
+  ID_MM_HOST_HEADER,
+  ID_MM_ARB_HEADER,
+  ID_MM_NO_MARKETS_MATCH,
+  ID_MM_REGISTER_HOST
+} from '../../locales'
 
 interface MarketData {
   baseSymbol: string;
@@ -87,6 +97,9 @@ const MarketSelector: React.FC<MarketSelectorProps> = ({
             <span className="me-2 ico-robot fs35 pb-1"></span>
             <span className="fs26">{prep(ID_MM_SELECT_MARKET)}</span>
           </header>
+          <div className="fs14 text-muted mb-3">
+            {prep(ID_MM_SELECT_MARKET_DESC)}
+          </div>
 
           {/* Market Filter Box */}
           <div id="marketFilterBox" className="flex-center mb-3">
@@ -102,8 +115,8 @@ const MarketSelector: React.FC<MarketSelectorProps> = ({
             </div>
           </div>
 
-      {/* Market Selection Table */}
-      <div id="marketSelectionTable">
+      {/* Market Selection Table - scrollable on small screens */}
+      <div id="marketSelectionTable" className="mm-table-wrapper">
         <table className="row-border w-100">
           <thead>
             <tr>
@@ -159,7 +172,7 @@ const MarketSelector: React.FC<MarketSelectorProps> = ({
       {/* No Markets Message */}
       {filteredMarkets.length === 0 && (
         <div id="noMarkets" className="flex-center py-4">
-          No markets available
+          {prep(ID_MM_NO_MARKETS_MATCH)}
         </div>
       )}
 
@@ -175,7 +188,7 @@ const MarketSelector: React.FC<MarketSelectorProps> = ({
                   window.location.href = `/register?host=${encodeURIComponent(host)}&backTo=mmsettings`
                 }}
               >
-                Register {host} to enable market making
+                {prep(ID_MM_REGISTER_HOST, { host })}
               </button>
             </div>
           ))}

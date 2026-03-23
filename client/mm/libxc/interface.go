@@ -157,6 +157,12 @@ type CEX interface {
 	TradeStatus(ctx context.Context, id string, baseID, quoteID uint32) (*Trade, error)
 	// Book generates the CEX's current view of a market's orderbook.
 	Book(baseID, quoteID uint32) (buys, sells []*core.MiniOrder, _ error)
+	// AssetGroups returns a mapping of asset IDs that represent the same
+	// asset on the CEX. Each non-canonical asset ID maps to its canonical
+	// equivalent (the lowest BIP ID in the group). Missing keys are already
+	// canonical. For example, {8453: 60} means Base (8453) is ETH (60) on
+	// this CEX.
+	AssetGroups() map[uint32]uint32
 }
 
 const (
