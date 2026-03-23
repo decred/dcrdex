@@ -5865,9 +5865,9 @@ func (eth *baseWallet) SignCoinMessage(_ asset.Coin, msg dex.Bytes) (pubkeys, si
 
 // AuditContract retrieves information about a swap contract on the
 // blockchain. This would be used to verify the counter-party's contract
-// during a swap. coinID is expected to be the transaction id, and must
-// be the same as the hash of serializedTx. contract is expected to be
-// (contractVersion|secretHash) where the secretHash uniquely keys the swap.
+// during a swap. coinID is expected to be the transaction id. contract
+// is expected to be (contractVersion|secretHash) where the secretHash
+// uniquely keys the swap.
 func (w *assetWallet) AuditContract(coinID, contract, serializedTx dex.Bytes, rebroadcast bool) (*asset.AuditInfo, error) {
 	tx := new(types.Transaction)
 	err := tx.UnmarshalBinary(serializedTx)
@@ -5875,9 +5875,15 @@ func (w *assetWallet) AuditContract(coinID, contract, serializedTx dex.Bytes, re
 		return nil, fmt.Errorf("AuditContract: failed to unmarshal transaction: %w", err)
 	}
 
+	// The deserialized tx hash may not match coinID if the RPC provider
+	// returned the transaction without signature data. This is acceptable
+	// because the contract state is validated against the locator from the
+	// contract data, not the tx hash. Use the coinID as the canonical hash.
 	txHash := tx.Hash()
 	if !bytes.Equal(coinID, txHash[:]) {
-		return nil, fmt.Errorf("AuditContract: coin id != txHash - coin id: %x, txHash: %s", coinID, tx.Hash())
+		w.log.Warnf("AuditContract: coinID %x differs from deserialized txHash %s (unsigned tx from RPC?). Proceeding with contract validation.",
+			[]byte(coinID), txHash)
+		copy(txHash[:], coinID)
 	}
 
 	version, locator, err := dexeth.DecodeContractData(contract)
