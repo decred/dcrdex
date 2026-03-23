@@ -1207,6 +1207,7 @@ func TestCheckPendingTxs(t *testing.T) {
 		actionID    string
 		bridgeDone  string
 		recast      bool
+		assumedLost []bool // if set, check AssumedLost on remaining txs
 	}{
 		{
 			name: "first of two is confirmed",
@@ -1262,6 +1263,16 @@ func TestCheckPendingTxs(t *testing.T) {
 			},
 			noncesAfter: []uint64{11},
 			actionID:    actionTypeMissingNonces,
+		}, {
+			name: "aged out with persistent RPC error marks assumed lost",
+			pendingTxs: []*extendedWalletTx{
+				extendedTx(9, 0, 0, agedOut),
+			},
+			noncesAfter: []uint64{9},
+			receipts:    []*types.Receipt{nil},
+			receiptErrs: []error{errors.New("json parse error")},
+			txs:         []bool{false},
+			assumedLost: []bool{true},
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1306,6 +1317,11 @@ func TestCheckPendingTxs(t *testing.T) {
 			}
 			if tt.recast != (node.lastSignedTx != nil) {
 				t.Fatalf("wrong recast result recast = %t, lastSignedTx = %t", tt.recast, node.lastSignedTx != nil)
+			}
+			for i, expLost := range tt.assumedLost {
+				if eth.pendingTxs[i].AssumedLost != expLost {
+					t.Fatalf("expected AssumedLost=%v for tx at index %d, got %v", expLost, i, eth.pendingTxs[i].AssumedLost)
+				}
 			}
 		})
 	}
@@ -3769,6 +3785,8 @@ func TestGaslessRedeem(t *testing.T) {
 		calldataErr error
 		signDataErr error
 		convertErr  error
+		redeemErr   error // error from on-chain redeem (contractor)
+		noRelay     bool  // if true, don't configure relayer
 
 		expSubmitted bool // true = regular redeem
 		expError     bool
@@ -3950,6 +3968,68 @@ func TestGaslessRedeem(t *testing.T) {
 			relayTaskID: relayTaskID,
 			expNonce:    new(big.Int).Add(contractNonce, big.NewInt(1)),
 		},
+		{
+			name:    "balance error routes to relay",
+			balance: 0, // Will cause balance retrieval issues
+			redemptions: []*asset.Redemption{
+				newRedeem(0),
+			},
+			swapState: map[[32]byte]*dexeth.SwapState{
+				secretHashes[0]: {
+					State: dexeth.SSInitiated,
+					Value: dexeth.GweiToWei(value),
+				},
+			},
+			relayTaskID: relayTaskID,
+		},
+		{
+			name:    "on-chain redeem insufficient funds, relay fallback succeeds",
+			balance: ethGasesV1.Redeem * nodeRecommendedFee, // enough for lockFunds
+			redemptions: []*asset.Redemption{
+				newRedeem(0),
+			},
+			swapState: map[[32]byte]*dexeth.SwapState{
+				secretHashes[0]: {
+					State: dexeth.SSInitiated,
+					Value: dexeth.GweiToWei(value),
+				},
+			},
+			redeemErr:   errors.New("insufficient funds for gas * price + value"),
+			relayTaskID: relayTaskID,
+		},
+		{
+			name:    "on-chain redeem insufficient funds, relay fallback fails",
+			balance: ethGasesV1.Redeem * nodeRecommendedFee,
+			redemptions: []*asset.Redemption{
+				newRedeem(0),
+			},
+			swapState: map[[32]byte]*dexeth.SwapState{
+				secretHashes[0]: {
+					State: dexeth.SSInitiated,
+					Value: dexeth.GweiToWei(value),
+				},
+			},
+			redeemErr:   errors.New("insufficient funds for gas * price + value"),
+			relayTaskID: relayTaskID,
+			submitErr:   errors.New("relay down"),
+			expError:    true,
+		},
+		{
+			name:    "on-chain redeem insufficient funds, no relay",
+			balance: ethGasesV1.Redeem * nodeRecommendedFee,
+			redemptions: []*asset.Redemption{
+				newRedeem(0),
+			},
+			swapState: map[[32]byte]*dexeth.SwapState{
+				secretHashes[0]: {
+					State: dexeth.SSInitiated,
+					Value: dexeth.GweiToWei(value),
+				},
+			},
+			redeemErr: errors.New("insufficient funds for gas * price + value"),
+			noRelay:   true,
+			expError:  true,
+		},
 	}
 
 	for _, test := range tests {
@@ -3985,6 +4065,10 @@ func TestGaslessRedeem(t *testing.T) {
 			node.signDataErr = test.signDataErr
 			node.bal = dexeth.GweiToWei(test.balance)
 			node.tContractor.redeemTx = types.NewTx(&types.DynamicFeeTx{})
+			node.tContractor.redeemErr = test.redeemErr
+			if test.noRelay {
+				eth.relayer = nil
+			}
 
 			if test.expNonce != nil {
 				// Pre-populate a pending relay at the on-chain nonce
@@ -5743,6 +5827,7 @@ func testConfirmTransaction(t *testing.T, assetID uint32) {
 		expectErr                 bool
 		expectSwapRefundedErr     bool
 		expectRedemptionFailedErr bool
+		expectTxLostErr           bool
 		pendingTx                 *extendedWalletTx
 		dbTx                      *extendedWalletTx
 		dbErr                     error
@@ -5755,6 +5840,7 @@ func testConfirmTransaction(t *testing.T, assetID uint32) {
 	tests := []*test{
 		{
 			name: "found on-chain. not yet confirmed",
+			step: dexeth.SSInitiated,
 			receipt: &types.Receipt{
 				Status:      types.ReceiptStatusSuccessful,
 				BlockNumber: big.NewInt(confBlock + 1),
@@ -5794,7 +5880,7 @@ func testConfirmTransaction(t *testing.T, assetID uint32) {
 			name:          "db error not propagated. unconfirmed",
 			step:          dexeth.SSRedeemed,
 			dbErr:         errors.New("test error"),
-			expectedConfs: txConfsNeededToConfirm - 1,
+			expectedConfs: txConfsNeededToConfirm, // contract shows redeemed, treated as confirmed
 			confirmTx:     confirmTx,
 			receipt: &types.Receipt{
 				Status:      types.ReceiptStatusSuccessful,
@@ -5852,6 +5938,20 @@ func testConfirmTransaction(t *testing.T, assetID uint32) {
 			confirmTx: asset.NewRefundConfTx(txHash[:], dexeth.EncodeContractData(0, secretHash[:]), secret[:]),
 			expectErr: true,
 		},
+		{
+			name:            "contract shows no swap",
+			step:            dexeth.SSNone,
+			confirmTx:       confirmTx,
+			expectErr:       true,
+			expectTxLostErr: true,
+		},
+		{
+			name:          "receipt RPC error, contract initiated, retries",
+			step:          dexeth.SSInitiated,
+			confirmTx:     confirmTx,
+			receiptErr:    errors.New("json parse error: non-standard signature"),
+			expectedConfs: 0,
+		},
 	}
 
 	runTest := func(test *test) {
@@ -5887,6 +5987,9 @@ func testConfirmTransaction(t *testing.T, assetID uint32) {
 			}
 			if test.expectSwapRefundedErr && !errors.Is(asset.ErrSwapRefunded, err) {
 				t.Fatalf("%s: expected swap refunded error but got %v", test.name, err)
+			}
+			if test.expectTxLostErr && !errors.Is(err, asset.ErrTxLost) {
+				t.Fatalf("%s: expected tx lost error but got %v", test.name, err)
 			}
 			return
 		}

@@ -2890,12 +2890,13 @@ func (w *assetWallet) fundReserveOfType(t fundReserveType) *uint64 {
 }
 
 var errInsufficientFunds = errors.New("insufficient funds")
+var errBalanceRetrieval = errors.New("balance retrieval error")
 
 // lockFunds locks funds for a use case.
 func (w *assetWallet) lockFunds(amt uint64, t fundReserveType) error {
 	balance, err := w.balance()
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %v", errBalanceRetrieval, err)
 	}
 
 	if balance.Available < amt {
@@ -4401,12 +4402,13 @@ func (w *ETHWallet) GaslessRedeem(ctx context.Context, form *asset.RedeemForm) (
 		return fail(fmt.Errorf("no gas table"))
 	}
 	redeemGas := g.Redeem + g.RedeemAdd*(numRedemptions-1)
-	reserve := redeemGas * feeRateGwei
+	_, redeemL1, _ := w.l1FeesForOps(ver)
+	reserve := redeemGas*feeRateGwei + redeemL1*numRedemptions
 
 	// Check if we have enough funds to redeem the swaps. If not, we will
 	// submit via the relay service.
 	err = w.lockFunds(reserve, redemptionReserve)
-	if errors.Is(err, errInsufficientFunds) {
+	if err != nil && (errors.Is(err, errInsufficientFunds) || errors.Is(err, errBalanceRetrieval)) {
 		w.relayerMtx.RLock()
 		relay := w.relayer
 		w.relayerMtx.RUnlock()
@@ -4442,6 +4444,23 @@ func (w *ETHWallet) GaslessRedeem(ctx context.Context, form *asset.RedeemForm) (
 	// ourselves.
 	txs, coin, fees, err := w.assetWallet.Redeem(ctx, form, nil, nil)
 	if err != nil {
+		// On OP Stack chains, the L1 data fee can make the actual tx
+		// cost much higher than the L2 gas estimate used by lockFunds.
+		// Fall back to relay if available.
+		if errors.Is(err, errInsufficientFunds) {
+			w.unlockFunds(reserve, redemptionReserve)
+			w.relayerMtx.RLock()
+			relay := w.relayer
+			w.relayerMtx.RUnlock()
+			if relay != nil {
+				w.log.Warnf("On-chain redeem failed with insufficient funds, falling back to relay.")
+				rtxs, rcoin, rfees, relayErr := w.gaslessRedeem(ctx, form, relay)
+				if relayErr == nil {
+					return rtxs, rcoin, rfees, false, nil
+				}
+				return fail(fmt.Errorf("on-chain redeem failed: %v; relay fallback failed: %w", err, relayErr))
+			}
+		}
 		return nil, nil, 0, false, err
 	}
 
@@ -5705,7 +5724,8 @@ func (w *ETHWallet) ReserveNRedemptions(n uint64, ver uint32, maxFeeRate uint64,
 	}
 
 	redeemCost := g.Redeem * maxFeeRate
-	reserve := redeemCost * n
+	_, redeemL1, _ := w.l1FeesForOps(ver)
+	reserve := redeemCost*n + redeemL1*n
 
 	err := w.lockFunds(reserve, redemptionReserve)
 	if errors.Is(err, errInsufficientFunds) {
@@ -7084,61 +7104,43 @@ func (w *assetWallet) confirmTransaction(coinID dex.Bytes, confirmTx *asset.Conf
 	}
 
 	// We know nothing of the tx locally. This shouldn't really happen, but
-	// we'll look for it on-chain anyway.
+	// we'll look for it on-chain anyway. The contract state is the source
+	// of truth, so check that first.
+	status, err := w.status(w.ctx, locator, contractVer)
+	if err != nil {
+		return nil, fmt.Errorf("error pulling swap data from contract: %v", err)
+	}
+	switch status.Step {
+	case dexeth.SSRedeemed:
+		if confirmTx.IsRedeem() {
+			w.log.Infof("Tx %s unknown but contract shows redeemed. Confirming.", txHash)
+			return confStatus(w.finalizeConfs, w.finalizeConfs, txHash), nil
+		}
+		return nil, asset.ErrSwapRedeemed
+	case dexeth.SSRefunded:
+		if !confirmTx.IsRedeem() {
+			w.log.Infof("Tx %s unknown but contract shows refunded. Confirming.", txHash)
+			return confStatus(w.finalizeConfs, w.finalizeConfs, txHash), nil
+		}
+		return nil, asset.ErrSwapRefunded
+	case dexeth.SSNone:
+		return nil, asset.ErrTxLost
+	}
+
+	// Contract is still in SSInitiated. Check the receipt to see if our
+	// tx reverted.
 	r, err := w.node.transactionReceipt(w.ctx, txHash)
 	if err != nil {
 		if errors.Is(err, asset.CoinNotFoundError) {
-			// We don't know it ourselves and we can't see it on-chain.
-			// Before declaring lost, check the contract state. The swap
-			// may have been redeemed or refunded by another tx (e.g.
-			// emergency gasless redeem).
-			status, sErr := w.status(w.ctx, locator, contractVer)
-			if sErr == nil {
-				switch status.Step {
-				case dexeth.SSRedeemed:
-					w.log.Infof("Tx %s unknown but contract shows redeemed. Confirming.", txHash)
-					return confStatus(w.finalizeConfs, w.finalizeConfs, txHash), nil
-				case dexeth.SSRefunded:
-					return nil, asset.ErrSwapRefunded
-				}
-			}
+			// Tx not found but contract still initiated. Tx may be
+			// in mempool or lost.
 			return nil, asset.ErrTxLost
 		}
-		return nil, err
+		// RPC error. Report zero confs so we retry later.
+		return confStatus(0, w.finalizeConfs, txHash), nil
 	}
-
-	// We could potentially grab the tx, check the from address, and store it
-	// to our db right here, but I suspect that this case would be exceedingly
-	// rare anyway.
-
 	confs := safeConfsBig(tip, r.BlockNumber)
-	if confs >= w.finalizeConfs {
-		if r.Status == types.ReceiptStatusSuccessful {
-			return confStatus(w.finalizeConfs, w.finalizeConfs, txHash), nil
-		}
-		// We weren't able to redeem. Perhaps fees were too low, but we'll
-		// check the status in the contract for a couple of other conditions.
-		status, err := w.status(w.ctx, locator, contractVer)
-		if err != nil {
-			return nil, fmt.Errorf("error pulling swap data from contract: %v", err)
-		}
-		if confirmTx.IsRedeem() {
-			switch status.Step {
-			case dexeth.SSRedeemed:
-				w.log.Infof("Redemption in tx %s was apparently redeemed by another tx. OK.", txHash)
-				return confStatus(w.finalizeConfs, w.finalizeConfs, txHash), nil
-			case dexeth.SSRefunded:
-				return nil, asset.ErrSwapRefunded
-			}
-		} else {
-			switch status.Step {
-			case dexeth.SSRedeemed:
-				return nil, asset.ErrSwapRedeemed
-			case dexeth.SSRefunded:
-				w.log.Infof("Refund in tx %s was apparently redeemed by another tx. OK.", txHash)
-				return confStatus(w.finalizeConfs, w.finalizeConfs, txHash), nil
-			}
-		}
+	if confs >= w.finalizeConfs && r.Status != types.ReceiptStatusSuccessful {
 		err = fmt.Errorf("tx %s failed to %s %s funds", txHash, confirmTx.TxType(), dex.BipIDSymbol(w.assetID))
 		return nil, errors.Join(err, asset.ErrTxRejected)
 	}
@@ -7279,22 +7281,32 @@ func (w *assetWallet) sumPendingTxs() (out, in uint64) {
 		if pendingTx.BlockNumber != 0 {
 			return
 		}
+		if pendingTx.AssumedLost {
+			return
+		}
 
 		txAssetID := w.baseChainID
 		if pendingTx.TokenID != nil {
 			txAssetID = *pendingTx.TokenID
 		}
 
+		var txOut, txIn uint64
 		if txAssetID == w.assetID {
 			if asset.IncomingTxType(pendingTx.Type) {
-				in += pendingTx.Amount
+				txIn = pendingTx.Amount
 			} else {
-				out += pendingTx.Amount
+				txOut = pendingTx.Amount
 			}
 		}
 		if !isToken {
-			out += pendingTx.Fees
+			txOut += pendingTx.Fees
 		}
+		if txOut > 0 || txIn > 0 {
+			w.log.Tracef("sumPendingTxs: tx %s type=%s amount=%d fees=%d out=%d in=%d",
+				pendingTx.ID, pendingTx.Type, pendingTx.Amount, pendingTx.Fees, txOut, txIn)
+		}
+		out += txOut
+		in += txIn
 	}
 
 	w.nonceMtx.RLock()
@@ -7416,7 +7428,12 @@ func (w *assetWallet) balanceWithTxPool() (*Balance, error) {
 				continue
 			}
 			if outEVM.Cmp(confirmed) > 0 {
-				return nil, fmt.Errorf("balance underflow detected. pending out (%s) > balance (%s)", outEVM, confirmed)
+				// This can happen transiently when a tx has just
+				// been broadcast and the max fee estimate exceeds
+				// the remaining balance. Clamp to zero rather than
+				// erroring - the tx will confirm shortly.
+				w.log.Warnf("Pending out (%s) > balance (%s). Clamping available balance to zero.", outEVM, confirmed)
+				outEVM = confirmed
 			}
 
 			return &Balance{
@@ -7822,6 +7839,10 @@ func (w *assetWallet) redeem(
 
 		return res, w.withContractor(contractVer, func(c contractor) error {
 			res.tx, err = c.redeem(txOpts, redemptions)
+			if err != nil && strings.Contains(err.Error(), "insufficient funds") {
+				w.log.Warnf("Redeem tx returned insufficient funds error (string match): %v", err)
+				return fmt.Errorf("%w: %v", errInsufficientFunds, err)
+			}
 			return err
 		})
 	})
@@ -7998,6 +8019,14 @@ func (w *baseWallet) updatePendingTx(tip uint64, pendingTx *extendedWalletTx) {
 			}
 		} else {
 			w.log.Errorf("Error getting confirmations for pending tx %s: %v", pendingTx.txHash, err)
+			// If the receipt is persistently unretrievable (not just
+			// missing but unparseable), mark as lost after age-out so
+			// it stops contributing to the pending balance.
+			if pendingTx.age() >= txAgeOut && pendingTx.Receipt == nil {
+				w.log.Warnf("Marking persistently unretrievable tx %s as lost after age-out.", pendingTx.txHash)
+				pendingTx.AssumedLost = true
+				updated = true
+			}
 		}
 		return
 	}

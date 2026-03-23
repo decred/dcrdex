@@ -64,3 +64,4 @@ dex/lexi/cmd/lexidbexplorer/lexidbexplorer
 client/asset/xmr/cmd/mkjson/mkjson
 client/cmd/verifymm/verifymm
 *.db
+evmrelay/cmd/evmrelay/evmrelay
