@@ -812,7 +812,7 @@ func (r *OrderRouter) handleCancel(user account.AccountID, msg *msgjson.Message)
 	copy(targetID[:], cancel.TargetID)
 
 	if !tunnel.Cancelable(targetID) {
-		return msgjson.NewError(msgjson.OrderParameterError, "target order not known: %v", targetID)
+		return msgjson.NewError(msgjson.UnknownOrderError, "target order not known: %v", targetID)
 	}
 
 	// Check that OrderType is set correctly

@@ -1261,7 +1261,7 @@ func TestCancel(t *testing.T) {
 
 	// Unknown order.
 	oRig.market.cancelable = false
-	ensureErr("non cancelable", sendCancel(), msgjson.OrderParameterError)
+	ensureErr("non cancelable", sendCancel(), msgjson.UnknownOrderError)
 	oRig.market.cancelable = true
 
 	// Wrong order type marked for cancel order

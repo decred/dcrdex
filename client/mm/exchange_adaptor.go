@@ -23,6 +23,7 @@ import (
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
+	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/dex/utils"
 )
@@ -1423,6 +1424,15 @@ func (u *unifiedExchangeAdaptor) multiTrade(
 	for _, cancel := range cancels {
 		if err := u.Cancel(cancel); err != nil {
 			u.log.Errorf("multiTrade: error canceling order %s: %v", cancel, err)
+			// If the server doesn't know the order, it's already
+			// gone. Remove it so we don't retry every epoch.
+			var msgErr *msgjson.Error
+			if errors.As(err, &msgErr) && msgErr.Code == msgjson.UnknownOrderError {
+				u.log.Warnf("multiTrade: order %s not known by server, removing from pending orders.", cancel)
+				var oid order.OrderID
+				copy(oid[:], cancel)
+				u.removeDEXOrder(oid)
+			}
 		}
 	}
 
@@ -3189,6 +3199,24 @@ func (u *unifiedExchangeAdaptor) handleDEXOrderUpdate(o *core.Order) {
 	u.updateDEXOrderEvent(pendingOrder, complete)
 }
 
+// removeDEXOrder removes an order from pendingDEXOrders and settles its
+// balance effects. This is used when the server indicates the order no longer
+// exists (e.g. "target order not known" during cancel).
+func (u *unifiedExchangeAdaptor) removeDEXOrder(oid order.OrderID) {
+	u.balancesMtx.Lock()
+	defer u.balancesMtx.Unlock()
+	pendingOrder, found := u.pendingDEXOrders[oid]
+	if !found {
+		return
+	}
+	delete(u.pendingDEXOrders, oid)
+	dexEffects := pendingOrder.currentState().dexBalanceEffects
+	for assetID, diff := range dexEffects.Settled {
+		u.baseDexBalances[assetID] += diff
+	}
+	u.logBalanceAdjustments(dexEffects.Settled, nil, fmt.Sprintf("DEX order %s removed (not known by server).", oid))
+}
+
 func (u *unifiedExchangeAdaptor) handleServerConfigUpdate() {
 	coreMkt, err := u.clientCore.ExchangeMarket(u.host, u.dexBaseID, u.dexQuoteID)
 	if err != nil {
@@ -3705,6 +3733,14 @@ func (u *unifiedExchangeAdaptor) doExternalTransfers(dist *distribution, currEpo
 	if len(cancels) > 0 {
 		for _, o := range cancels {
 			if err := u.Cancel(o.order.ID); err != nil {
+				var msgErr *msgjson.Error
+				if errors.As(err, &msgErr) && msgErr.Code == msgjson.UnknownOrderError {
+					u.log.Warnf("doExternalTransfers: order %s not known by server, removing from pending orders.", o.order.ID)
+					var oid order.OrderID
+					copy(oid[:], o.order.ID)
+					u.removeDEXOrder(oid)
+					continue
+				}
 				return false, fmt.Errorf("error canceling order: %w", err)
 			}
 		}
