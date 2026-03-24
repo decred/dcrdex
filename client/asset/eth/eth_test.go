@@ -4725,8 +4725,9 @@ func testAuditContract(t *testing.T, assetID uint32) {
 					Value:       dexeth.GweiToWei(1),
 				},
 			},
-			differentHash: true,
-			wantErr:       true,
+			differentHash:  true,
+			wantRecipient:  testAddressA.Hex(),
+			wantExpiration: now,
 		},
 		{
 			name:     "contract is invalid versioned bytes",
