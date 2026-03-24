@@ -536,7 +536,7 @@ export class BotMarket {
 
   status () {
     const { baseID, quoteID } = this
-    const botStatus = app().mmStatus.bots.find((s: MMBotStatus) => s.config.baseID === baseID && s.config.quoteID === quoteID)
+    const botStatus = app().mmStatus.bots.find((s: MMBotStatus) => s.config.baseID === baseID && s.config.quoteID === quoteID && s.config.host === this.host)
     if (!botStatus) return { botCfg: {} as BotConfig, running: false, stopping: false, runStats: {} as RunStats }
     const { config: botCfg, running, stopping, runStats, latestEpoch, cexProblems } = botStatus
     return { botCfg, running, stopping, runStats, latestEpoch, cexProblems }
