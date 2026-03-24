@@ -132,7 +132,7 @@ func TestToggleAccountStatus(t *testing.T) {
 		}
 		tCore.connMtx.Unlock()
 
-		err := tCore.ToggleAccountStatus(tPW, test.host, test.wantDisable)
+		err := tCore.ToggleAccountStatus(tPW, test.host, test.wantDisable, false)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %v", test.name)

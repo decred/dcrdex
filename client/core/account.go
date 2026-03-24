@@ -47,8 +47,10 @@ func (c *Core) disconnectDEX(dc *dexConnection) {
 }
 
 // ToggleAccountStatus is used to disable or enable an account by given host and
-// application password.
-func (c *Core) ToggleAccountStatus(pw []byte, host string, disable bool) error {
+// application password. If force is true and disable is true, active orders
+// will be revoked to allow disabling. Matches with on-chain swaps in progress
+// will continue to settle (refund/redeem) independently.
+func (c *Core) ToggleAccountStatus(pw []byte, host string, disable, force bool) error {
 	// Validate password.
 	crypter, err := c.encryptionKey(pw)
 	if err != nil {
@@ -69,7 +71,15 @@ func (c *Core) ToggleAccountStatus(pw []byte, host string, disable bool) error {
 	if disable {
 		// Check active orders or bonds.
 		if dc.hasActiveOrders() {
-			return errors.New("cannot disable account with active orders")
+			if !force {
+				return errors.New("cannot disable account with active orders")
+			}
+			c.log.Warnf("Force-disabling account on %s with active orders. Revoking unfilled orders.", host)
+			dc.tradeMtx.RLock()
+			for _, trade := range dc.trades {
+				trade.revoke()
+			}
+			dc.tradeMtx.RUnlock()
 		}
 
 		if dc.hasUnspentBond() {

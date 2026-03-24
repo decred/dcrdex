@@ -771,7 +771,7 @@ func (c *TCore) AccountExport(pw []byte, host string) (*core.Account, []*db.Bond
 func (c *TCore) AccountImport(pw []byte, account *core.Account, bond []*db.Bond) error {
 	return nil
 }
-func (c *TCore) ToggleAccountStatus(pw []byte, host string, disable bool) error { return nil }
+func (c *TCore) ToggleAccountStatus(pw []byte, host string, disable, force bool) error { return nil }
 
 func (c *TCore) TxHistory(uint32, *asset.TxHistoryRequest) (*asset.TxHistoryResponse, error) {
 	return nil, nil

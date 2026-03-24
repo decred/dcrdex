@@ -315,16 +315,22 @@ export default class DexSettingsPage extends BasePage {
 
   // toggleAccountStatus enables or disables the account associated with the
   // provided host.
-  async toggleAccountStatus (disable:boolean) {
+  async toggleAccountStatus (disable:boolean, force?: boolean): Promise<void> {
     const page = this.page
     Doc.hide(page.errMsg)
     let host: string|null = this.host
     if (disable) host = page.disableAccountHost.textContent
-    const req = { host, disable: disable }
+    const req = { host, disable: disable, force: force || false }
     const loaded = app().loading(this.body)
     const res = await postJSON('/api/toggleaccountstatus', req)
     loaded()
     if (!app().checkResponse(res)) {
+      // If disabling fails because of active orders, retry with force
+      // to revoke unfilled orders. The user already confirmed the
+      // disable via the form.
+      if (disable && !force && res.msg && res.msg.includes('active orders')) {
+        return this.toggleAccountStatus(true, true)
+      }
       if (disable) {
         page.disableAccountErr.textContent = res.msg
         Doc.show(page.disableAccountErr)

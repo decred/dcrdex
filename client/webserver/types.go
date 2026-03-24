@@ -137,6 +137,7 @@ type updateAccountStatusForm struct {
 	Pass    encode.PassBytes `json:"pw"`
 	Host    string           `json:"host"`
 	Disable bool             `json:"disable"`
+	Force   bool             `json:"force"`
 }
 
 type deleteRecordsForm struct {
