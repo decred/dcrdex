@@ -59,10 +59,12 @@ var (
 	// tokenV1Gases are the gas estimates for v1 token swap contracts, measured
 	// from usdt.base mainnet. These values are used for all tokens on all
 	// networks since the v1 contract handles all ERC20 tokens identically.
+	// Redeem includes a buffer for cold storage costs when the redeemer has
+	// never held the token (SSTORE zero-to-nonzero + cold access surcharges).
 	tokenV1Gases = dexeth.Gases{
 		Swap:      119_624,
 		SwapAdd:   38_646,
-		Redeem:    64_512,
+		Redeem:    110_028,
 		RedeemAdd: 17_440,
 		Refund:    72_758,
 		Approve:   60_732,

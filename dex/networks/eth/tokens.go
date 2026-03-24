@@ -71,10 +71,12 @@ type SwapContract struct {
 // tokenV1Gases are the gas estimates for v1 token swap contracts, measured
 // from usdt.eth mainnet. These values are used for all tokens on all
 // networks since the v1 contract handles all ERC20 tokens identically.
+// Redeem includes a buffer for cold storage costs when the redeemer has
+// never held the token (SSTORE zero-to-nonzero + cold access surcharges).
 var tokenV1Gases = Gases{
 	Swap:      135_447,
 	SwapAdd:   38_646,
-	Redeem:    79_427,
+	Redeem:    124_928,
 	RedeemAdd: 17_440,
 	Refund:    87_834,
 	Approve:   63_550,
