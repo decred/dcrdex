@@ -9,6 +9,16 @@
         <File Source="..\..\build\windows\Bisonw-desktop.exe" Id="BisonwDesktopExe" KeyPath="yes" Checksum="yes" />
         <File Source="..\..\build\windows\WebView2Loader.dll" Checksum="yes" />
       </Component>
+      <?if $(var.CrossCompiled) = 1 ?>
+      <Component Id="MinGWRuntime" Guid="a1d4f8e2-7b39-4c56-8e1a-5f9d3c6b2e08">
+        <File Source="..\..\build\windows\libwinpthread-1.dll" Checksum="yes" />
+      </Component>
+      <?endif ?>
+      <?if $(var.XmrEnabled) = 1 ?>
+      <Component Id="XmrLibrary" Guid="b7a3e1f4-5c82-4d19-9a6b-3e8f2d7c1a05">
+        <File Source="..\..\build\windows\libwallet2_api_c.dll" Checksum="yes" />
+      </Component>
+      <?endif ?>
     </DirectoryRef>
 
     <DirectoryRef Id="ApplicationProgramsFolder">
@@ -25,6 +35,12 @@
     <Feature Id="MainApplication" Title="Main Application" Level="1">
       <ComponentRef Id="BisonwDesktopExe" />
       <ComponentRef Id="ApplicationShortcut" />
+      <?if $(var.CrossCompiled) = 1 ?>
+      <ComponentRef Id="MinGWRuntime" />
+      <?endif ?>
+      <?if $(var.XmrEnabled) = 1 ?>
+      <ComponentRef Id="XmrLibrary" />
+      <?endif ?>
     </Feature>
 
     <StandardDirectory Id="ProgramFiles64Folder">
