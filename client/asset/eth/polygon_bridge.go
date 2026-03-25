@@ -33,13 +33,11 @@ var (
 var polygonBridgeSupportedAssets = map[dex.Network]map[uint32]map[uint32]uint32{
 	dex.Mainnet: {
 		ethID: {
-			usdtEthID:    usdtPolygonID,
 			ethID:        wethPolygonID,
 			maticEthID:   polygonID,
 			polygonEthID: polygonID,
 		},
 		polygonID: {
-			usdtPolygonID: usdtEthID,
 			wethPolygonID: ethID,
 			polygonID:     polygonEthID,
 		},
