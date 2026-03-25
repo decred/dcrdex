@@ -147,7 +147,7 @@ type clientCore interface {
 	MaxSell(host string, base, quote uint32) (*core.MaxOrderEstimate, error)
 	AccountExport(pw []byte, host string) (*core.Account, []*db.Bond, error)
 	AccountImport(pw []byte, account *core.Account, bonds []*db.Bond) error
-	ToggleAccountStatus(pw []byte, host string, disable bool) error
+	ToggleAccountStatus(pw []byte, host string, disable, force bool) error
 	IsInitialized() bool
 	ExportSeed(pw []byte) (string, error)
 	PreOrder(*core.TradeForm) (*core.OrderEstimate, error)

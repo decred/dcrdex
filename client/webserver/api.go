@@ -887,7 +887,7 @@ func (s *WebServer) apiToggleAccountStatus(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	// Disable account.
-	err = s.core.ToggleAccountStatus(appPW, form.Host, form.Disable)
+	err = s.core.ToggleAccountStatus(appPW, form.Host, form.Disable, form.Force)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error updating account status: %w", err))
 		return
