@@ -45,6 +45,10 @@ sudo ufw disable # if ufw is installed on the host, this is neccessary for lxd t
 
 The snap can be uploaded to the Snap Store using `./linux/publish-snap.sh`.  This requires [Snapcraft developer account credentials](https://snapcraft.io/docs/releasing-your-app).  After this is completed, the package can be installed on any system running `snap` by running `snap install bisonw`.  The app will be available on the [Snap Store](https://snapcraft.io/store/bisonw).
 
+## Windows
+
+See [windows/README.md](windows/README.md) for full instructions on setting up the build environment and building the Windows binary and MSI installer.
+
 ## macOS (darwin)
 
 macOS builds use Electron.

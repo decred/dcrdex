@@ -4,7 +4,7 @@ BASE_DIR=$(realpath $(dirname $0))
 BUILD_DIR="${BASE_DIR}/build"
 REPO_DIR="${BUILD_DIR}/torrepo"
 
-COMMIT_HASH=3cb6a690be60fcdab60130402ff88dcfc0657596
+COMMIT_HASH=d133d41f5d285c2f0a9c2fd75acde285d67afd3d
 
 rm -r -f "${REPO_DIR}"
 mkdir -p "${REPO_DIR}"

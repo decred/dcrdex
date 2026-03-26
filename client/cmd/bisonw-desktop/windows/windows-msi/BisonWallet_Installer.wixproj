@@ -1,2 +1,7 @@
 ﻿<Project Sdk="WixToolset.Sdk/5.0.0">
+  <PropertyGroup>
+    <XmrEnabled Condition="'$(XmrEnabled)' == ''">0</XmrEnabled>
+    <CrossCompiled Condition="'$(CrossCompiled)' == ''">0</CrossCompiled>
+    <DefineConstants>XmrEnabled=$(XmrEnabled);CrossCompiled=$(CrossCompiled)</DefineConstants>
+  </PropertyGroup>
 </Project>
