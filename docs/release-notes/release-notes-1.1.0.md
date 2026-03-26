@@ -32,6 +32,30 @@ contract version 1. An `evm-protocol-overrides.json` file can be placed in
 the server's working directory to override the contract version for specific
 assets, but this does not prevent the per-match address revocation above.
 
+## Changes Since rc1
+
+### Fixes
+
+- Fix MM cancel loop and bot status matching (#3579)
+- Fix EVM relay redeem path and L1 fees (#3576)
+- Use total fee comparison for relay fee validation (#3575)
+- Fix tx popup explorer links (#3573)
+- Fix login redirect loop (#3571)
+- Coinbase API fixes (#3570)
+- Warn instead of fail on audit txHash mismatch (#3578)
+- Market making bug fixes and UI polish (#3577)
+- Remove USDT support on polygon bridge (#3581)
+- Allow force-disable of DEX account (#3580)
+
+### Other
+
+- Add missing translations (#3569)
+- Disable electrum wallets (#3564)
+- Improve UX when DEX is unreachable (#3568)
+- Add Linux ARM64 (aarch64) XMR library support (#3567)
+- Use reflect.TypeFor (#3566)
+- Add Windows Docker cross-compilation (#3582)
+
 ## Known Issues
 
 ### Electrum Wallets Temporarily Disabled
