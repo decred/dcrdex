@@ -7,7 +7,7 @@
 # set -ex
 
 source linux/common.sh
-VER="1.1.0-rc1" # pre, beta, rc1, etc.
+VER="1.1.0-rc2" # pre, beta, rc1, etc.
 
 # Parse flags.
 TAGS=""
