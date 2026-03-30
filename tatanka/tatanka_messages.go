@@ -179,6 +179,7 @@ func (t *Tatanka) handlePathInquiry(tt *remoteTatanka, msg *msgjson.Message) *ms
 	var inq mj.PathInquiry
 	if err := msg.Unmarshal(&inq); err != nil {
 		t.log.Errorf("Failed to unmarshal path inquiry from %s: %v", tt.ID, err)
+		return msgjson.NewError(mj.ErrBadRequest, "unmarshal error: %v", err)
 	}
 
 	t.clientMtx.RLock()
