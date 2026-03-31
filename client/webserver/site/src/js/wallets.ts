@@ -1224,8 +1224,8 @@ export default class WalletsPage extends BasePage {
       const tokenDisabled = w && w.disabled
       if (disabled || tokenDisabled) {
         // Target the token wallet if it's the one that's disabled,
-        // otherwise the parent.
-        if (tokenDisabled && !disabled) this.selectedWalletID = assetID
+        // otherwise the parent chain.
+        this.selectedWalletID = (tokenDisabled && !disabled) ? assetID : configAssetID
         Doc.show(page.actEnable)
       } else {
         if (hasWallet) Doc.show(page.actTxHistory)
@@ -2264,6 +2264,7 @@ export default class WalletsPage extends BasePage {
 
   /* Show the form used to change wallet configuration settings. */
   async showReconfig (assetID: number, cfg?: reconfigSettings) {
+    this.selectedWalletID = assetID
     const page = this.page
     Doc.hide(
       page.changeWalletType, page.changeTypeHideIcon, page.reconfigErr,
