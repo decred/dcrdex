@@ -1097,13 +1097,12 @@ func (s *Swapper) processBlock(ctx context.Context, block *blockNotification) {
 		// If it's neither of the match assets, nothing to do.
 		if match.makerStatus.swapAsset != block.assetID &&
 			match.takerStatus.swapAsset != block.assetID {
-			return
+			continue
 		}
 
 		// Lock the matchTracker so the following checks and updates are atomic
 		// with respect to Status.
 		match.mtx.RLock()
-		defer match.mtx.RUnlock()
 
 		switch match.Status {
 		case order.MakerSwapCast:
@@ -1127,6 +1126,8 @@ func (s *Swapper) processBlock(ctx context.Context, block *blockNotification) {
 				s.unlockOrderCoins(match.Taker)
 			}
 		}
+
+		match.mtx.RUnlock()
 	}
 }
 
