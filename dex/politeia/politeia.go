@@ -141,32 +141,45 @@ func New(ctx context.Context, politeiaURL string, dbPath string, log dex.Logger)
 // have voted along with their votes, and the total yes and no votes cast by
 // the wallet.
 func (p *Politeia) WalletProposalVoteDetails(wallet VotingWallet, token string) (*WalletProposalVoteDetails, error) {
-	req := tkv1.Results{
-		Token: token,
-	}
-	votesResults, err := p.client.TicketVoteResults(req)
+	// Fetch the vote details to get the full list of eligible tickets
+	// from the snapshot.
+	voteDetails, err := p.client.TicketVoteDetails(tkv1.Details{Token: token})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("TicketVoteDetails error: %w", err)
+	}
+	if voteDetails.Vote == nil {
+		return nil, fmt.Errorf("no vote details for proposal %s", token)
 	}
 
-	hashes := make([]*chainhash.Hash, 0, len(votesResults.Votes))
-	castVotes := make(map[string]string)
-	for _, v := range votesResults.Votes {
-		hash, err := chainhash.NewHashFromStr(v.Ticket)
+	// Build the list of all eligible ticket hashes from the vote snapshot.
+	eligibleHashes := make([]*chainhash.Hash, 0, len(voteDetails.Vote.EligibleTickets))
+	for _, ticketStr := range voteDetails.Vote.EligibleTickets {
+		hash, err := chainhash.NewHashFromStr(ticketStr)
 		if err != nil {
 			return nil, err
 		}
-		hashes = append(hashes, hash)
+		eligibleHashes = append(eligibleHashes, hash)
+	}
+
+	// Fetch the votes already cast to know which tickets have voted.
+	votesResults, err := p.client.TicketVoteResults(tkv1.Results{Token: token})
+	if err != nil {
+		return nil, fmt.Errorf("TicketVoteResults error: %w", err)
+	}
+
+	castVotes := make(map[string]string, len(votesResults.Votes))
+	for _, v := range votesResults.Votes {
 		castVotes[v.Ticket] = v.VoteBit
 	}
 
-	walletTicketHashes, addresses, err := wallet.CommittedTickets(hashes)
+	// Check which eligible tickets belong to this wallet.
+	walletTicketHashes, addresses, err := wallet.CommittedTickets(eligibleHashes)
 	if err != nil {
 		return nil, err
 	}
 
-	eligibleWalletTickets := make([]*Ticket, 0) // eligibleWalletTickets are wallet tickets that have not yet voted.
-	walletVotedTickets := make([]*Ticket, 0)    // walletVotedTickets are wallet tickets that have voted.
+	eligibleWalletTickets := make([]*Ticket, 0)
+	walletVotedTickets := make([]*Ticket, 0)
 	for i := 0; i < len(walletTicketHashes); i++ {
 		ticket := &Ticket{
 			Hash:    walletTicketHashes[i].String(),
@@ -176,17 +189,18 @@ func (p *Politeia) WalletProposalVoteDetails(wallet VotingWallet, token string) 
 		isMine, accountNumber, err := wallet.AddressAccount(ticket.Address)
 		if err != nil {
 			if strings.Contains(err.Error(), "address not found in wallet") {
-				continue // address not found in wallet, skip this ticket
+				continue
 			}
 			return nil, err
 		}
 
-		// filter out tickets controlled by imported accounts or not owned by this wallet
+		// Filter out tickets controlled by imported accounts or not
+		// owned by this wallet.
 		if !isMine || accountNumber == udb.ImportedAddrAccount {
 			continue
 		}
 
-		// filter out wallet tickets that have voted.
+		// Separate into already-voted and eligible.
 		if _, ok := castVotes[ticket.Hash]; ok {
 			walletVotedTickets = append(walletVotedTickets, ticket)
 			continue
@@ -261,6 +275,13 @@ func (p *Politeia) CastVotes(wallet VotingWallet, eligibleTickets []*Ticket, bit
 	if len(voteErrors) > 0 {
 		return fmt.Errorf("errors casting votes: %v", strings.Join(voteErrors, "; "))
 	}
+
+	ticketHashes := make([]string, len(eligibleTickets))
+	for i, t := range eligibleTickets {
+		ticketHashes[i] = t.Hash
+	}
+	p.log.Infof("Successfully cast %d %s vote(s) on proposal %s with tickets: %s",
+		len(eligibleTickets), bit, token, strings.Join(ticketHashes, ", "))
 
 	return nil
 }
