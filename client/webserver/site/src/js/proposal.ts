@@ -107,6 +107,7 @@ export default class ProposalPage extends BasePage {
       Doc.show(page.voteFormError)
       return
     }
+    Doc.hide(page.viewVoteFormBtn)
     this.closePopups()
     this.showSuccess(intl.prep(intl.ID_VOTE_CAST_MESSAGE))
   }
