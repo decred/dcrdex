@@ -67,7 +67,7 @@ type TCore struct {
 	epochOrdersErr   error
 	marketMatches    []*dexsrv.MatchData
 	marketMatchesErr error
-	dataEnabled      uint32
+	dataEnabled      atomic.Uint32
 }
 
 func (c *TCore) ConfigMsg() json.RawMessage { return nil }
@@ -179,7 +179,7 @@ func (c *TCore) EnableDataAPI(yes bool) {
 	if yes {
 		v = 1
 	}
-	atomic.StoreUint32(&c.dataEnabled, v)
+	c.dataEnabled.Store(v)
 }
 
 type tResponseWriter struct {
@@ -1367,11 +1367,11 @@ func TestEnableDataAPI(t *testing.T) {
 			t.Fatalf("%q: apiEnableDataAPI returned code %d, expected %d", test.name, w.Code, test.wantCode)
 		}
 
-		if test.wantEnabled != atomic.LoadUint32(&core.dataEnabled) {
-			t.Fatalf("%q: apiEnableDataAPI expected dataEnabled = %d, got %d", test.name, test.wantEnabled, atomic.LoadUint32(&core.dataEnabled))
+		if test.wantEnabled != core.dataEnabled.Load() {
+			t.Fatalf("%q: apiEnableDataAPI expected dataEnabled = %d, got %d", test.name, test.wantEnabled, core.dataEnabled.Load())
 		}
 
-		atomic.StoreUint32(&core.dataEnabled, 0)
+		core.dataEnabled.Store(0)
 	}
 
 }

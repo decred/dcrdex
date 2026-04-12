@@ -28,7 +28,7 @@ var (
 	// to facilitate testing.
 	pingPeriod = (pongWait * 9) / 10
 	// A client id counter.
-	cidCounter int32
+	cidCounter atomic.Int32
 )
 
 type bookFeed struct {
@@ -50,7 +50,7 @@ type wsClient struct {
 func newWSClient(addr string, conn ws.Connection, hndlr func(msg *msgjson.Message) *msgjson.Error, logger dex.Logger) *wsClient {
 	return &wsClient{
 		WSLink: ws.NewWSLink(addr, conn, pingPeriod, hndlr, logger),
-		cid:    atomic.AddInt32(&cidCounter, 1),
+		cid:    cidCounter.Add(1),
 	}
 }
 

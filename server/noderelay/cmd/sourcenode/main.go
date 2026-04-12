@@ -136,10 +136,10 @@ func mainErr() (err error) {
 
 	// Keep track of some basic stats.
 	var stats struct {
-		requests uint32
-		errors   uint32
-		received uint64
-		sent     uint64
+		requests atomic.Uint32
+		errors   atomic.Uint32
+		received atomic.Uint64
+		sent     atomic.Uint64
 	}
 
 	// Periodically print the node usage statistics.
@@ -152,8 +152,8 @@ func mainErr() (err error) {
 				return
 			}
 			log.Infof("%d requests, %.4g MB received, %.4g MB sent, %d errors in %s",
-				atomic.LoadUint32(&stats.requests), float64(atomic.LoadUint64(&stats.received))/1e6,
-				float64(atomic.LoadUint64(&stats.sent))/1e6, atomic.LoadUint32(&stats.errors),
+				stats.requests.Load(), float64(stats.received.Load())/1e6,
+				float64(stats.sent.Load())/1e6, stats.errors.Load(),
 				time.Since(start))
 		}
 	}()
@@ -209,12 +209,12 @@ func mainErr() (err error) {
 		ConnectEventFunc: func(s comms.ConnectionStatus) {},
 		Logger:           dex.StdOutLogger("CL", dex.LevelDebug),
 		RawHandler: func(b []byte) {
-			atomic.AddUint64(&stats.received, uint64(len(b)))
-			atomic.AddUint32(&stats.requests, 1)
+			stats.received.Add(uint64(len(b)))
+			stats.requests.Add(1)
 			// Request received from server.
 			var msg noderelay.RelayedMessage
 			if err := json.Unmarshal(b, &msg); err != nil {
-				atomic.AddUint32(&stats.errors, 1)
+				stats.errors.Add(1)
 				log.Errorf("json unmarshal error: %v", err)
 				return
 			}
@@ -223,7 +223,7 @@ func mainErr() (err error) {
 			defer cancel()
 			req, err := http.NewRequestWithContext(ctx, msg.Method, localNodeURL, bytes.NewReader(msg.Body))
 			if err != nil {
-				atomic.AddUint32(&stats.errors, 1)
+				stats.errors.Add(1)
 				log.Errorf("Error constructing request: %v", err)
 				return
 			}
@@ -231,7 +231,7 @@ func mainErr() (err error) {
 			// Send request to local service.
 			resp, err := httpClient.Do(req)
 			if err != nil {
-				atomic.AddUint32(&stats.errors, 1)
+				stats.errors.Add(1)
 				log.Errorf("error processing request: %v", err)
 				return
 			}
@@ -239,11 +239,11 @@ func mainErr() (err error) {
 			b, err = io.ReadAll(resp.Body)
 			resp.Body.Close()
 			if err != nil {
-				atomic.AddUint32(&stats.errors, 1)
+				stats.errors.Add(1)
 				log.Errorf("Error reading response: %v", err)
 				return
 			}
-			atomic.AddUint64(&stats.sent, uint64(len(b)))
+			stats.sent.Add(uint64(len(b)))
 			encResp, err := json.Marshal(&noderelay.RelayedMessage{
 				MessageID: msg.MessageID,
 				Body:      b,

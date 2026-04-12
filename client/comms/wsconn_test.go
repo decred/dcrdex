@@ -85,11 +85,11 @@ func TestWsConn(t *testing.T) {
 		clientMtx.Unlock()
 	}()
 
-	var id uint64
+	var id atomic.Uint64
 	// server's "/ws" handler
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		t.Helper()
-		id := atomic.AddUint64(&id, 1) // shadow id
+		id := id.Add(1) // shadow id
 		hCtx, hCancel := context.WithCancel(ctx)
 
 		c, err := upgrader.Upgrade(w, r, nil)

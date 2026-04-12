@@ -63,7 +63,7 @@ type WSLink struct {
 	conn Connection
 	// on is used internally to prevent multiple Close calls on the underlying
 	// connections.
-	on uint32
+	on atomic.Uint32
 	// quit is used to cancel the Context.
 	quit context.CancelFunc
 	// stopped is closed when quit is called.
@@ -172,7 +172,7 @@ func (c *WSLink) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	// started. The pong handler will set subsequent read deadlines. 2x ping
 	// period is a very generous initial pong wait; the readWait provided to
 	// NewConnection could be stored and used here (once) instead.
-	if !atomic.CompareAndSwapUint32(&c.on, 0, 1) {
+	if !c.on.CompareAndSwap(0, 1) {
 		return nil, fmt.Errorf("attempted to Start a running WSLink")
 	}
 	linkCtx, quit := context.WithCancel(ctx)
@@ -197,7 +197,7 @@ func (c *WSLink) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 
 func (c *WSLink) stop() {
 	// Flip the switch into the off position and cancel the context.
-	if !atomic.CompareAndSwapUint32(&c.on, 1, 0) {
+	if !c.on.CompareAndSwap(1, 0) {
 		return
 	}
 	// Signal to senders we are done.
@@ -497,7 +497,7 @@ out:
 
 // Off will return true if the link has disconnected.
 func (c *WSLink) Off() bool {
-	return atomic.LoadUint32(&c.on) == 0
+	return c.on.Load() == 0
 }
 
 // Addr returns the string-encoded IP address.

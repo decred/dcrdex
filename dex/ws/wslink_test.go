@@ -25,12 +25,12 @@ var tLogger = dex.StdOutLogger("ws_TEST", dex.LevelTrace)
 type ConnStub struct {
 	inMsg  chan []byte
 	inErr  chan error
-	closed int32
+	closed atomic.Int32
 }
 
 func (c *ConnStub) Close() error {
 	// make ReadMessage return with a close error
-	atomic.StoreInt32(&c.closed, 1)
+	c.closed.Store(1)
 	c.inErr <- &websocket.CloseError{
 		Code: websocket.CloseNormalClosure,
 		Text: "bye",
@@ -45,7 +45,7 @@ func (c *ConnStub) SetWriteDeadline(t time.Time) error {
 	return nil
 }
 func (c *ConnStub) ReadMessage() (int, []byte, error) {
-	if atomic.LoadInt32(&c.closed) == 1 {
+	if c.closed.Load() == 1 {
 		return 0, nil, &websocket.CloseError{
 			Code: websocket.CloseAbnormalClosure,
 			Text: io.ErrUnexpectedEOF.Error(),
@@ -71,7 +71,7 @@ func microSecDelay(stdDev float64, min int64) time.Duration {
 var lastID int64 = -1 // first msg.ID should be 0
 
 func (c *ConnStub) WriteMessage(_ int, b []byte) error {
-	if atomic.LoadInt32(&c.closed) == 1 {
+	if c.closed.Load() == 1 {
 		return websocket.ErrCloseSent
 	}
 	msg, err := msgjson.DecodeMessage(b)

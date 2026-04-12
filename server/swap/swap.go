@@ -82,8 +82,8 @@ type swapStatus struct {
 	swapAsset   uint32
 	redeemAsset uint32
 
-	swapSearching   uint32 // atomic
-	redeemSearching uint32 // atomic
+	swapSearching   atomic.Uint32 // atomic
+	redeemSearching atomic.Uint32 // atomic
 
 	mtx sync.RWMutex
 	// The time that the swap coordinator sees the transaction.
@@ -105,19 +105,19 @@ func (ss *swapStatus) String() string {
 }
 
 func (ss *swapStatus) startSwapSearch() bool {
-	return atomic.CompareAndSwapUint32(&ss.swapSearching, 0, 1)
+	return ss.swapSearching.CompareAndSwap(0, 1)
 }
 
 func (ss *swapStatus) endSwapSearch() {
-	atomic.StoreUint32(&ss.swapSearching, 0)
+	ss.swapSearching.Store(0)
 }
 
 func (ss *swapStatus) startRedeemSearch() bool {
-	return atomic.CompareAndSwapUint32(&ss.redeemSearching, 0, 1)
+	return ss.redeemSearching.CompareAndSwap(0, 1)
 }
 
 func (ss *swapStatus) endRedeemSearch() {
-	atomic.StoreUint32(&ss.redeemSearching, 0)
+	ss.redeemSearching.Store(0)
 }
 
 func (ss *swapStatus) swapConfTime() time.Time {

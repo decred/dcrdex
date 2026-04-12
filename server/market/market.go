@@ -134,7 +134,7 @@ type Market struct {
 
 	runMtx  sync.RWMutex
 	running chan struct{} // closed when running (accepting new orders)
-	up      uint32        // Run is called, either waiting for first epoch or running
+	up      atomic.Uint32 // Run is called, either waiting for first epoch or running
 
 	bookMtx      sync.Mutex // guards book and bookEpochIdx
 	book         *book.Book
@@ -1360,11 +1360,11 @@ func (m *Market) lazy(do func()) {
 // function using sendToFeeds.
 func (m *Market) Run(ctx context.Context) {
 	// Prevent multiple incantations of Run.
-	if !atomic.CompareAndSwapUint32(&m.up, 0, 1) {
+	if !m.up.CompareAndSwap(0, 1) {
 		log.Errorf("Run: Market not stopped!")
 		return
 	}
-	defer atomic.StoreUint32(&m.up, 0)
+	defer m.up.Store(0)
 
 	var running bool
 	ctxRun, cancel := context.WithCancel(ctx)

@@ -188,9 +188,9 @@ func Run(t *testing.T, cfg *Config) {
 		}
 	}
 
-	var blockReported uint32
+	var blockReported atomic.Uint32
 	blkFunc := func(name string) {
-		atomic.StoreUint32(&blockReported, 1)
+		blockReported.Store(1)
 		tLogger.Infof("%s has reported a new block", name)
 	}
 
@@ -500,7 +500,7 @@ func Run(t *testing.T, cfg *Config) {
 
 	// Mine a block and find the redemption again.
 	mine()
-	if atomic.LoadUint32(&blockReported) == 0 {
+	if blockReported.Load() == 0 {
 		t.Fatalf("no block reported")
 	}
 	// Check that there is 1 confirmation on the swap

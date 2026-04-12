@@ -1504,7 +1504,7 @@ type TLink struct {
 	sendErr     error
 	sendTrigger chan struct{}
 	banished    bool
-	on          uint32
+	on          atomic.Uint32
 	closed      chan struct{}
 	sendRawErr  error
 }
@@ -1592,7 +1592,7 @@ func (conn *TLink) Done() <-chan struct{} {
 	return conn.closed
 }
 func (conn *TLink) Disconnect() {
-	if atomic.CompareAndSwapUint32(&conn.on, 0, 1) {
+	if conn.on.CompareAndSwap(0, 1) {
 		close(conn.closed)
 	}
 }
