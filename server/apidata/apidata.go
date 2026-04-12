@@ -20,7 +20,7 @@ import (
 var (
 	// Our internal millisecond representation of the bin sizes.
 	binSizes []uint64
-	started  uint32
+	started  atomic.Uint32
 )
 
 // DBSource is a source of persistent data. DBSource is used to prime the
@@ -72,7 +72,7 @@ func NewDataAPI(dbSrc DBSource, registerHTTP func(route string, handler comms.HT
 		marketCaches:   make(map[string]map[uint64]*cacheWithStoredTime),
 	}
 
-	if atomic.CompareAndSwapUint32(&started, 0, 1) {
+	if started.CompareAndSwap(0, 1) {
 		registerHTTP(msgjson.SpotsRoute, s.handleSpots)
 		registerHTTP(msgjson.CandlesRoute, s.handleCandles)
 		registerHTTP(msgjson.OrderBookRoute, s.handleOrderBook)

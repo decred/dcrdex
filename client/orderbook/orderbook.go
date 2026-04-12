@@ -73,8 +73,8 @@ type OrderBook struct {
 	// feeRates is at the top to account for atomic field alignment in
 	// 32-bit systems. See also https://golang.org/pkg/sync/atomic/#pkg-note-BUG
 	feeRates struct {
-		base  uint64
-		quote uint64
+		base  atomic.Uint64
+		quote atomic.Uint64
 	}
 
 	log      dex.Logger
@@ -119,12 +119,12 @@ func NewOrderBook(logger dex.Logger) *OrderBook {
 
 // BaseFeeRate is the last reported base asset fee rate.
 func (ob *OrderBook) BaseFeeRate() uint64 {
-	return atomic.LoadUint64(&ob.feeRates.base)
+	return ob.feeRates.base.Load()
 }
 
 // QuoteFeeRate is the last reported quote asset fee rate.
 func (ob *OrderBook) QuoteFeeRate() uint64 {
-	return atomic.LoadUint64(&ob.feeRates.quote)
+	return ob.feeRates.quote.Load()
 }
 
 // setSynced sets the synced state of the order book.
@@ -243,8 +243,8 @@ func (ob *OrderBook) Reset(snapshot *msgjson.OrderBook) error {
 	ob.seq = snapshot.Seq
 	ob.seqMtx.Unlock()
 
-	atomic.StoreUint64(&ob.feeRates.base, snapshot.BaseFeeRate)
-	atomic.StoreUint64(&ob.feeRates.quote, snapshot.QuoteFeeRate)
+	ob.feeRates.base.Store(snapshot.BaseFeeRate)
+	ob.feeRates.quote.Store(snapshot.QuoteFeeRate)
 
 	ob.marketID = snapshot.MarketID
 
@@ -427,8 +427,8 @@ func (ob *OrderBook) UpdateRemaining(note *msgjson.UpdateRemainingNote) error {
 // the future.
 func (ob *OrderBook) LogEpochReport(note *msgjson.EpochReportNote) error {
 	// TODO: update future candlestick charts.
-	atomic.StoreUint64(&ob.feeRates.base, note.BaseFeeRate)
-	atomic.StoreUint64(&ob.feeRates.quote, note.QuoteFeeRate)
+	ob.feeRates.base.Store(note.BaseFeeRate)
+	ob.feeRates.quote.Store(note.QuoteFeeRate)
 	return nil
 }
 

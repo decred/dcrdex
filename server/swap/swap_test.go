@@ -551,10 +551,10 @@ func TNewAsset(backend asset.Backend, assetID uint32) *asset.BackedAsset {
 	}
 }
 
-var testMsgID uint64
+var testMsgID atomic.Uint64
 
 func nextID() uint64 {
-	return atomic.AddUint64(&testMsgID, 1)
+	return testMsgID.Add(1)
 }
 
 func tNewResponse(id uint64, resp []byte) *msgjson.Message {

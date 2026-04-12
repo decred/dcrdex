@@ -383,9 +383,9 @@ func TestClientRequests(t *testing.T) {
 		c.Banish()
 		return nil
 	})
-	var httpSeen uint32
+	var httpSeen atomic.Uint32
 	server.RegisterHTTP("httproute", func(thing any) (any, error) {
-		atomic.StoreUint32(&httpSeen, 1)
+		httpSeen.Store(1)
 		srvChan <- nil
 		return struct{}{}, nil
 	})
@@ -496,7 +496,7 @@ func TestClientRequests(t *testing.T) {
 	conn.addChan()
 	sendToServer("httproute", "{}")
 	readChannel(t, "httproute", srvChan)
-	if !atomic.CompareAndSwapUint32(&httpSeen, 1, 0) {
+	if !httpSeen.CompareAndSwap(1, 0) {
 		t.Fatalf("HTTP route not hit")
 	}
 	conn.wait(t, "http route success")
@@ -508,7 +508,7 @@ func TestClientRequests(t *testing.T) {
 	if resp.Error == nil || resp.Error.Code != msgjson.TooManyRequestsError {
 		t.Fatalf("no or incorrect error for disabled HTTP route: %v", resp.Error)
 	}
-	if atomic.CompareAndSwapUint32(&httpSeen, 1, 0) {
+	if httpSeen.CompareAndSwap(1, 0) {
 		t.Fatalf("disabled HTTP route hit")
 	}
 
@@ -516,7 +516,7 @@ func TestClientRequests(t *testing.T) {
 	criticalRoutes["httproute"] = true
 	sendToServer("httproute", "{}")
 	readChannel(t, "httproute", srvChan)
-	if !atomic.CompareAndSwapUint32(&httpSeen, 1, 0) {
+	if !httpSeen.CompareAndSwap(1, 0) {
 		t.Fatalf("critical HTTP route not hit")
 	}
 	conn.wait(t, "critical http route success")
@@ -908,11 +908,11 @@ func TestParseListeners(t *testing.T) {
 }
 
 type tHTTPHandler struct {
-	count uint32
+	count atomic.Uint32
 }
 
 func (h *tHTTPHandler) ServeHTTP(http.ResponseWriter, *http.Request) {
-	atomic.AddUint32(&h.count, 1)
+	h.count.Add(1)
 }
 
 func TestHTTPRateLimiter(t *testing.T) {
@@ -928,7 +928,7 @@ func TestHTTPRateLimiter(t *testing.T) {
 	}
 	time.Sleep(100 * time.Millisecond)
 	f.ServeHTTP(recorder, req)
-	successes := atomic.LoadUint32(&tHandler.count)
+	successes := tHandler.count.Load()
 	if successes != uint32(DefaultIPBurstSize) {
 		t.Fatalf("expected %d requests. got %d", DefaultIPBurstSize, successes)
 	}
@@ -994,7 +994,7 @@ func TestXForwardedForIgnored(t *testing.T) {
 		f.ServeHTTP(httptest.NewRecorder(), req)
 	}
 
-	successes := atomic.LoadUint32(&tHandler.count)
+	successes := tHandler.count.Load()
 	if successes != uint32(DefaultIPBurstSize) {
 		t.Fatalf("expected %d successes (rate limited by real IP), got %d", DefaultIPBurstSize, successes)
 	}

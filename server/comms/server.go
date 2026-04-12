@@ -71,7 +71,7 @@ var (
 	pingPeriod = (pongWait * 9) / 10 // i.e. 18 sec
 )
 
-var idCounter uint64
+var idCounter atomic.Uint64
 
 // ipRateLimiter is used to track an IPs HTTP request rate.
 type ipRateLimiter struct {
@@ -113,7 +113,7 @@ func (s *Server) getIPLimiter(ip dex.IPKey) *ipRateLimiter {
 
 // NextID returns a unique ID to identify a request-type message.
 func NextID() uint64 {
-	return atomic.AddUint64(&idCounter, 1)
+	return idCounter.Add(1)
 }
 
 // MsgHandler describes a handler for a specific message route.

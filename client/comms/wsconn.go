@@ -155,7 +155,7 @@ type WsCfg struct {
 type wsConn struct {
 	// 64-bit atomic variables first. See
 	// https://golang.org/pkg/sync/atomic/#pkg-note-BUG.
-	rID    uint64
+	rID    atomic.Uint64
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 	log    dex.Logger
@@ -168,7 +168,7 @@ type wsConn struct {
 	writeMtx sync.Mutex
 	ws       *websocket.Conn
 
-	connectionStatus uint32 // atomic
+	connectionStatus atomic.Uint32 // atomic
 
 	reqMtx       sync.RWMutex
 	respHandlers map[uint64]*responseHandler
@@ -229,13 +229,13 @@ func (conn *wsConn) url() string {
 
 // IsDown indicates if the connection is known to be down.
 func (conn *wsConn) IsDown() bool {
-	return atomic.LoadUint32(&conn.connectionStatus) != uint32(Connected)
+	return conn.connectionStatus.Load() != uint32(Connected)
 }
 
 // setConnectionStatus updates the connection's status and runs the
 // ConnectEventFunc in case of a change.
 func (conn *wsConn) setConnectionStatus(status ConnectionStatus) {
-	oldStatus := atomic.SwapUint32(&conn.connectionStatus, uint32(status))
+	oldStatus := conn.connectionStatus.Swap(uint32(status))
 	statusChange := oldStatus != uint32(status)
 	if statusChange && conn.cfg.ConnectEventFunc != nil {
 		conn.cfg.ConnectEventFunc(status)
@@ -544,7 +544,7 @@ func (conn *wsConn) keepAlive(ctx context.Context) {
 
 // NextID returns the next request id.
 func (conn *wsConn) NextID() uint64 {
-	return atomic.AddUint64(&conn.rID, 1)
+	return conn.rID.Add(1)
 }
 
 // Connect connects the client. Any error encountered during the initial

@@ -148,10 +148,10 @@ func (s *TStorage) AddMatchOutcome(ctx context.Context, user account.AccountID, 
 	return nil, nil
 }
 
-var dbIDCounter int64
+var dbIDCounter atomic.Int64
 
 func nextDBID() int64 {
-	return atomic.AddInt64(&dbIDCounter, 1)
+	return dbIDCounter.Add(1)
 }
 
 func (s *TStorage) AddOrderOutcome(ctx context.Context, user account.AccountID, oid order.OrderID, canceled bool) (*db.OrderOutcome, error) {
@@ -203,7 +203,7 @@ type TRPCClient struct {
 	banished   bool
 	sends      []*msgjson.Message
 	reqs       []*tReq
-	on         uint32
+	on         atomic.Uint32
 	closed     chan struct{}
 }
 
@@ -243,7 +243,7 @@ func (c *TRPCClient) Done() <-chan struct{} {
 	return c.closed
 }
 func (c *TRPCClient) Disconnect() {
-	if atomic.CompareAndSwapUint32(&c.on, 0, 1) {
+	if c.on.CompareAndSwap(0, 1) {
 		close(c.closed)
 	}
 }
