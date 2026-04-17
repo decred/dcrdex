@@ -118,7 +118,11 @@ func (o *Oracle) calculateAverage() []int {
 
 	// Notify all listeners if we have rates to broadcast.
 	if len(broadCastFeeRates) > 0 {
-		o.listener <- broadCastFeeRates
+		select {
+		case o.listener <- broadCastFeeRates:
+		default:
+			// Listener channel is busy (or shutting down). Do not block the Oracle.
+		}
 	}
 
 	return reActivatedSourceIndexes
