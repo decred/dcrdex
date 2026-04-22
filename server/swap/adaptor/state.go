@@ -261,6 +261,8 @@ type Coordinator struct {
 	xmr     XMRAuditor
 	report  OutcomeReporter
 	persist StatePersister
+	// cfg is runtime configuration; not persisted.
+	cfg *Config
 }
 
 // PeerRouter relays a validated Adaptor* message to the other
@@ -326,48 +328,4 @@ type StatePersister interface {
 	Load(matchID order.MatchID) (*State, error)
 }
 
-// Handle is the event dispatcher. Pattern matches the client-side
-// orchestrator. Bodies are stubs documenting the expected server
-// action for each (phase, event) pair; these fill in once the
-// server wiring reaches a similar live-test baseline as the CLI
-// has achieved.
-func (c *Coordinator) Handle(evt Event) error {
-	c.state.mu.Lock()
-	defer c.state.mu.Unlock()
-
-	switch c.state.Phase {
-	case PhaseInit:
-		// Expect: EventPartSetup. Validate DLEQ proof shape. Store
-		// participant material. Transition to PhaseAwaitingInitSetup.
-	case PhaseAwaitingPartSetup:
-		// As above.
-	case PhaseAwaitingInitSetup:
-		// Expect: EventInitSetup. Validate DLEQ proof, match
-		// combined pubkey math, validate refund-tx chain. Route
-		// to participant. Transition to PhaseAwaitingPresigned.
-	case PhaseAwaitingPresigned:
-		// Expect: EventPresigned. Validate adaptor sig shape.
-		// Route to initiator. Transition to PhaseAwaitingLocked.
-	case PhaseAwaitingLocked:
-		// Expect: EventLocked from initiator. Kick off
-		// BTCAuditor.WaitLockConfirm. On EventLockConfirmed,
-		// transition to PhaseAwaitingXmrLocked.
-	case PhaseAwaitingXmrLocked:
-		// Expect: EventXmrLocked from participant + optional
-		// XMR audit. Transition to PhaseAwaitingSpendPresig.
-		// Timeout: EventTimeout -> OutcomeParticipantBailed.
-	case PhaseAwaitingSpendPresig:
-		// Expect: EventSpendPresig from initiator. Route to
-		// participant. Transition to PhaseAwaitingSpendBroadcast.
-	case PhaseAwaitingSpendBroadcast:
-		// Expect: EventSpendBroadcast + EventSpendOnChain.
-		// Happy path complete; transition to PhaseComplete
-		// with OutcomeSuccess.
-	case PhaseAwaitingRefundResolution:
-		// refundTx observed on-chain. Wait for either
-		// EventCoopRefundOnChain or EventPunishOnChain.
-	case PhaseAwaitingCoopOrPunish:
-		// Analogous.
-	}
-	return nil
-}
+// Handle lives in coordinator.go alongside the phase handlers.

@@ -156,6 +156,15 @@ type State struct {
 	SpendRefundTx *wire.MsgTx
 	SpendTx       *wire.MsgTx // filled once initiator builds it
 
+	// Scripts as received from peer (participant side only). Held
+	// separately from Lock/Refund since participant doesn't
+	// reconstruct the taproot tree locally.
+	LockLeafScript   []byte
+	RefundPkScript   []byte
+	CoopLeafScript   []byte
+	PunishLeafScript []byte
+	LockBlocks       uint32
+
 	// Collected signatures.
 	OwnRefundSig          []byte
 	PeerRefundSig         []byte
@@ -165,6 +174,9 @@ type State struct {
 	// XMR-side lock artifacts.
 	XmrSendTxID      string
 	XmrRestoreHeight uint64
+	// SpendTxID is the on-chain txid of the broadcast spendTx.
+	// Populated by the participant after they assemble + broadcast.
+	SpendTxID []byte
 	// Recovered XMR-key-half scalar from RecoverTweakBIP340. Set when
 	// the counterparty's completed sig appears on-chain and the
 	// recovery runs. Combined with XmrSpendKeyHalf to form the full
@@ -239,6 +251,9 @@ type Orchestrator struct {
 	assetXMR XMRAssetAdapter
 	sendMsg  MessageSender
 	persist  StatePersister
+	// cfg is the runtime configuration. Not persisted (it is
+	// derived from the match record on restart).
+	cfg *Config
 }
 
 // BTCAssetAdapter is what the orchestrator needs from the BTC asset
@@ -283,52 +298,5 @@ type StatePersister interface {
 	Load(swapID [32]byte) (*Snapshot, error)
 }
 
-// Handle is the top-level event dispatcher. It locks the state,
-// validates the event against the current phase, performs the
-// transition (including persistence), and returns any error that
-// should be propagated up to Core.
-//
-// Unimplemented transitions are explicit: the orchestrator does
-// not silently drop events; it returns an error and logs, making
-// protocol bugs loud.
-func (o *Orchestrator) Handle(evt Event) error {
-	o.state.mu.Lock()
-	defer o.state.mu.Unlock()
-
-	// The body below is a skeleton. Each case will be filled in as
-	// the orchestrator transitions from design doc to live code.
-	switch o.state.Phase {
-	case PhaseInit:
-		// Participant: send AdaptorSetupPart. Transition to PhaseKeysSent.
-		// Initiator: wait for EventKeysReceived.
-	case PhaseKeysSent:
-		// Participant: wait for EventKeysReceived.
-	case PhaseKeysReceived:
-		// Both: pre-sign refund chain, transition to PhaseRefundPresigned.
-	case PhaseRefundPresigned:
-		// Initiator: broadcast lockTx via FundBroadcastTaproot.
-		// Participant: wait for EventLockConfirmed.
-	case PhaseLockBroadcast:
-		// Initiator: wait for its own wallet to confirm.
-	case PhaseLockConfirmed:
-		// Participant: send XMR to shared address, transition to PhaseXmrSent.
-	case PhaseXmrSent:
-		// Initiator: wait for EventXmrConfirmed.
-	case PhaseXmrConfirmed:
-		// Initiator: build + adaptor-sign spendTx, send AdaptorSpendPresig.
-	case PhaseSpendPresig:
-		// Participant: decrypt + broadcast spendTx, transition to PhaseSpendBroadcast.
-	case PhaseSpendBroadcast:
-		// Initiator: ObserveSpend, RecoverTweakBIP340, open sweep wallet.
-	case PhaseXmrSwept:
-		// Both: terminal success, set PhaseComplete.
-	case PhaseRefundTxBroadcast:
-		// Initiator: decide coop-refund vs. wait.
-		// Participant: wait-then-punish after CSV.
-	case PhaseCoopRefund:
-		// Participant: recover initiator scalar from on-chain sig, sweep XMR.
-	case PhasePunish:
-		// Participant: sign punish leaf, broadcast. Accept XMR stranding.
-	}
-	return nil
-}
+// Handle is the top-level event dispatcher, implemented in
+// orchestrator.go alongside the phase handlers.

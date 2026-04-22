@@ -126,6 +126,7 @@ require (
 	github.com/gorilla/schema v1.1.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/h2non/go-is-svg v0.0.0-20160927212452-35e8c4b0612c // indirect
+	github.com/haven-protocol-org/monero-go-utils v0.0.0-20211126154105-058b2666f217 // indirect
 	github.com/holiman/billy v0.0.0-20250707135307-f2f9b9aae7db // indirect
 	github.com/holiman/bloomfilter/v2 v2.0.3 // indirect
 	github.com/holiman/uint256 v1.3.2 // indirect

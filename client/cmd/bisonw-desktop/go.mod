@@ -60,6 +60,7 @@ require (
 	github.com/google/trillian v1.4.1 // indirect
 	github.com/gorilla/schema v1.1.0 // indirect
 	github.com/h2non/go-is-svg v0.0.0-20160927212452-35e8c4b0612c // indirect
+	github.com/haven-protocol-org/monero-go-utils v0.0.0-20211126154105-058b2666f217 // indirect
 	github.com/holiman/billy v0.0.0-20250707135307-f2f9b9aae7db // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/ltcsuite/lnd/tlv v0.0.0-20240222214433-454d35886119 // indirect
