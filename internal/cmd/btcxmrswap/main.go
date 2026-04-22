@@ -3,11 +3,9 @@
 // Taproot tapscript 2-of-2) and Monero using the primitives in
 // internal/adaptorsigs and internal/adaptorsigs/btc.
 //
-// Status: scaffold and happy-path scenario only. The three failure
-// scenarios (alice-bail, cooperative refund, bob-bail) are sketched for
-// completeness but not yet wired up. Simnet validation requires a running
-// bitcoind (regtest with Taproot and a loaded wallet) and the existing
-// dex/testing/xmr harness.
+// All four scenarios from the reference are implemented: success,
+// aliceBailsBeforeXmrInit, refund (cooperative), and bobBailsAfterXmrInit.
+// See README.md for harness setup and run instructions.
 package main
 
 import (
@@ -59,20 +57,26 @@ var (
 	bobxmr   = "http://127.0.0.1:28184/json_rpc"
 	extraxmr = "http://127.0.0.1:28484/json_rpc"
 
-	// BTC endpoints. Both parties talk to the same regtest bitcoind
-	// wallet in the simplest simnet setup, differentiated by wallet
-	// name via separate RPC endpoints.
-	aliceBTCRPC = "127.0.0.1:20556"
-	bobBTCRPC   = "127.0.0.1:20557"
-	btcRPCUser  = "user"
-	btcRPCPass  = "pass"
+	// BTC endpoints. Each party targets a distinct bitcoind node
+	// (alpha/beta) AND a specific named wallet - bitcoind refuses
+	// RPC when multiple wallets are loaded without a /wallet/<name>
+	// URL path, which the dex/testing/btc harness produces (default
+	// wallet + gamma on alpha; default wallet + delta on beta).
+	aliceBTCRPC    = "127.0.0.1:20557"
+	aliceBTCWallet = "delta"
+	bobBTCRPC      = "127.0.0.1:20556"
+	bobBTCWallet   = "gamma"
+	btcRPCUser     = "user"
+	btcRPCPass     = "pass"
 
 	testnet bool
+	noMine  bool
 	netTag  = uint64(18) // mainnet XMR tag; stagenet = 24 on testnet flag
 )
 
 func init() {
-	flag.BoolVar(&testnet, "testnet", false, "use testnet")
+	flag.BoolVar(&testnet, "testnet", false, "use testnet (requires config.json)")
+	flag.BoolVar(&noMine, "no-mine", false, "disable auto-mining regtest blocks (for testnet runs where blocks come naturally)")
 }
 
 func main() {
@@ -112,10 +116,11 @@ func run(ctx context.Context) error {
 }
 
 type clientJSON struct {
-	XMRHost string `json:"xmrhost"`
-	BTCRPC  string `json:"btcrpc"`
-	BTCUser string `json:"btcuser"`
-	BTCPass string `json:"btcpass"`
+	XMRHost   string `json:"xmrhost"`
+	BTCRPC    string `json:"btcrpc"`
+	BTCWallet string `json:"btcwallet"`
+	BTCUser   string `json:"btcuser"`
+	BTCPass   string `json:"btcpass"`
 }
 
 type configJSON struct {
@@ -144,7 +149,9 @@ func parseConfig() error {
 	alicexmr = cj.Alice.XMRHost
 	bobxmr = cj.Bob.XMRHost
 	aliceBTCRPC = cj.Alice.BTCRPC
+	aliceBTCWallet = cj.Alice.BTCWallet
 	bobBTCRPC = cj.Bob.BTCRPC
+	bobBTCWallet = cj.Bob.BTCWallet
 	extraxmr = cj.ExtraXMRHost
 	return nil
 }
@@ -190,8 +197,10 @@ type partClient struct {
 }
 
 // newClient connects to an XMR wallet-rpc and a bitcoind-compatible
-// RPC endpoint.
-func newClient(ctx context.Context, xmrAddr, btcAddr, btcUser, btcPass string) (*client, error) {
+// RPC endpoint. btcWallet identifies the wallet on the bitcoind node
+// via the /wallet/<name> URL path; when bitcoind has multiple wallets
+// loaded (as the dex/testing/btc harness does) this is required.
+func newClient(ctx context.Context, xmrAddr, btcAddr, btcWallet, btcUser, btcPass string) (*client, error) {
 	xmr := rpc.New(rpc.Config{
 		Address: xmrAddr,
 		Client:  &http.Client{},
@@ -219,8 +228,12 @@ func newClient(ctx context.Context, xmrAddr, btcAddr, btcUser, btcPass string) (
 	}
 xmrReady:
 
+	host := btcAddr
+	if btcWallet != "" {
+		host = btcAddr + "/wallet/" + btcWallet
+	}
 	btc, err := rpcclient.New(&rpcclient.ConnConfig{
-		Host:         btcAddr,
+		Host:         host,
 		User:         btcUser,
 		Pass:         btcPass,
 		HTTPPostMode: true,
@@ -658,7 +671,7 @@ func (c *partClient) redeemBtc(ctx context.Context, esig *adaptorsigs.AdaptorSig
 		aliceSig, bobSigCompleted.Serialize(), lock.LeafScript, ctrlSer,
 	}
 
-	txHash, err := c.btc.SendRawTransaction(spendTx, false)
+	txHash, err := c.sendRawTransaction(spendTx)
 	if err != nil {
 		return nil, fmt.Errorf("broadcast spendTx: %w", err)
 	}
@@ -765,11 +778,11 @@ func reverseBytes(s *[32]byte) {
 // adaptor-signs spendTx, Alice completes and broadcasts, Bob recovers
 // Alice's scalar and sweeps the XMR.
 func success(ctx context.Context) error {
-	alicec, err := newClient(ctx, alicexmr, aliceBTCRPC, btcRPCUser, btcRPCPass)
+	alicec, err := newClient(ctx, alicexmr, aliceBTCRPC, aliceBTCWallet, btcRPCUser, btcRPCPass)
 	if err != nil {
 		return fmt.Errorf("alice client: %w", err)
 	}
-	bobc, err := newClient(ctx, bobxmr, bobBTCRPC, btcRPCUser, btcRPCPass)
+	bobc, err := newClient(ctx, bobxmr, bobBTCRPC, bobBTCWallet, btcRPCUser, btcRPCPass)
 	if err != nil {
 		return fmt.Errorf("bob client: %w", err)
 	}
@@ -797,7 +810,7 @@ func success(ctx context.Context) error {
 	}
 
 	fmt.Println("[4] Bob signs and broadcasts lockTx")
-	signed, complete, err := bob.btc.SignRawTransaction(bob.lockTx)
+	signed, complete, err := bob.signRawTransactionWithWallet(ctx, bob.lockTx)
 	if err != nil {
 		return fmt.Errorf("sign lockTx: %w", err)
 	}
@@ -805,14 +818,17 @@ func success(ctx context.Context) error {
 		return errors.New("lockTx signing not complete")
 	}
 	bob.lockTx = signed
-	txHash, err := bob.btc.SendRawTransaction(bob.lockTx, false)
+	txHash, err := bob.sendRawTransaction(bob.lockTx)
 	if err != nil {
 		return fmt.Errorf("broadcast lockTx: %w", err)
 	}
 	fmt.Printf("    lockTx: %s (vout %d, value %d sat)\n", txHash, bob.vIn, btcAmt)
 
-	// Wait briefly for lockTx confirmation. Matching reference
-	// behavior, we use a sleep rather than polling-to-height.
+	// Confirm lockTx. On regtest this mines the block; on testnet
+	// --no-mine skips and we rely on natural confirms.
+	if err := bob.mineBlocks(1); err != nil {
+		return err
+	}
 	time.Sleep(5 * time.Second)
 
 	fmt.Println("[5] Alice captures XMR restore height, sends XMR to shared address")
@@ -877,6 +893,94 @@ func success(ctx context.Context) error {
 	return nil
 }
 
+// sendRawTransaction calls bitcoind's sendrawtransaction directly
+// via RawRequest. rpcclient.Client.SendRawTransaction does a
+// getnetworkinfo call first for version detection, which fails on
+// Bitcoin Core 28+ because the "warnings" field became an array.
+func (c *client) sendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error) {
+	var buf bytes.Buffer
+	if err := tx.Serialize(&buf); err != nil {
+		return nil, fmt.Errorf("serialize: %w", err)
+	}
+	hexTx, err := json.Marshal(hex.EncodeToString(buf.Bytes()))
+	if err != nil {
+		return nil, err
+	}
+	raw, err := c.btc.RawRequest("sendrawtransaction",
+		[]json.RawMessage{hexTx})
+	if err != nil {
+		return nil, err
+	}
+	var txid string
+	if err := json.Unmarshal(raw, &txid); err != nil {
+		return nil, fmt.Errorf("unmarshal txid: %w", err)
+	}
+	h, err := chainhash.NewHashFromStr(txid)
+	if err != nil {
+		return nil, fmt.Errorf("parse txid: %w", err)
+	}
+	return h, nil
+}
+
+// signRawTransactionWithWallet calls bitcoind's
+// signrawtransactionwithwallet RPC. rpcclient.Client.SignRawTransaction
+// targets the legacy signrawtransaction method that was removed in
+// Bitcoin Core 0.18+, so we issue the new method via RawRequest.
+func (c *client) signRawTransactionWithWallet(ctx context.Context, tx *wire.MsgTx) (*wire.MsgTx, bool, error) {
+	var buf bytes.Buffer
+	if err := tx.Serialize(&buf); err != nil {
+		return nil, false, fmt.Errorf("serialize: %w", err)
+	}
+	hexTx, err := json.Marshal(hex.EncodeToString(buf.Bytes()))
+	if err != nil {
+		return nil, false, err
+	}
+	raw, err := c.btc.RawRequest("signrawtransactionwithwallet",
+		[]json.RawMessage{hexTx})
+	if err != nil {
+		return nil, false, err
+	}
+	var res struct {
+		Hex      string `json:"hex"`
+		Complete bool   `json:"complete"`
+		Errors   []any  `json:"errors,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, false, fmt.Errorf("unmarshal: %w", err)
+	}
+	if !res.Complete {
+		return nil, false, fmt.Errorf("sign incomplete; errors: %v", res.Errors)
+	}
+	signedBytes, err := hex.DecodeString(res.Hex)
+	if err != nil {
+		return nil, false, fmt.Errorf("decode signed hex: %w", err)
+	}
+	signed := wire.NewMsgTx(2)
+	if err := signed.Deserialize(bytes.NewReader(signedBytes)); err != nil {
+		return nil, false, fmt.Errorf("deserialize signed: %w", err)
+	}
+	return signed, res.Complete, nil
+}
+
+// mineBlocks is a regtest helper: mines n blocks to a fresh address
+// from the connected wallet. A no-op when --no-mine is set. Needed
+// because bitcoind regtest does not produce blocks on its own, and
+// the protocol's confirmation and CSV-maturity steps require blocks
+// to advance.
+func (c *client) mineBlocks(n int64) error {
+	if noMine {
+		return nil
+	}
+	addr, err := c.btc.GetNewAddress("")
+	if err != nil {
+		return fmt.Errorf("mine: new address: %w", err)
+	}
+	if _, err := c.btc.GenerateToAddress(n, addr, nil); err != nil {
+		return fmt.Errorf("mine: generate: %w", err)
+	}
+	return nil
+}
+
 // ----- Refund paths -----
 
 // startRefund broadcasts the pre-signed refundTx by assembling the
@@ -893,7 +997,7 @@ func (c *client) startRefund(ctx context.Context, aliceRefundSig, bobRefundSig [
 	refundTx.TxIn[0].Witness = wire.TxWitness{
 		aliceRefundSig, bobRefundSig, lock.LeafScript, ctrlSer,
 	}
-	txHash, err := c.btc.SendRawTransaction(refundTx, false)
+	txHash, err := c.sendRawTransaction(refundTx)
 	if err != nil {
 		return fmt.Errorf("broadcast refundTx: %w", err)
 	}
@@ -901,11 +1005,17 @@ func (c *client) startRefund(ctx context.Context, aliceRefundSig, bobRefundSig [
 	return nil
 }
 
-// waitBTC polls bitcoind's block count until it has advanced by
-// lockBlocks since startHeight, matching what the reference does for
-// DCR. In regtest this typically requires an external block generator
-// to produce blocks.
+// waitBTC ensures the chain has advanced by lockBlocks past
+// startHeight. When auto-mining is enabled (the default on regtest)
+// we just produce the blocks directly; otherwise we poll and rely on
+// external block production (testnet, or user-driven regtest).
 func (c *client) waitBTC(ctx context.Context, startHeight int64) error {
+	if !noMine {
+		// Mine enough to satisfy CSV.
+		if err := c.mineBlocks(lockBlocks); err != nil {
+			return err
+		}
+	}
 	tick := time.NewTicker(5 * time.Second)
 	defer tick.Stop()
 	for {
@@ -961,7 +1071,7 @@ func (c *initClient) refundBtc(ctx context.Context, spendRefundTx *wire.MsgTx,
 	spendRefundTx.TxIn[0].Witness = wire.TxWitness{
 		aliceSigCompleted.Serialize(), bobSig, refund.CoopLeafScript, ctrlSer,
 	}
-	txHash, err := c.btc.SendRawTransaction(spendRefundTx, false)
+	txHash, err := c.sendRawTransaction(spendRefundTx)
 	if err != nil {
 		return nil, fmt.Errorf("broadcast spendRefund: %w", err)
 	}
@@ -1051,7 +1161,7 @@ func (c *partClient) takeBtc(ctx context.Context, refund *btcadaptor.RefundTxOut
 	spendRefundTx.TxIn[0].Witness = wire.TxWitness{
 		aliceSig, refund.PunishLeafScript, ctrlSer,
 	}
-	txHash, err := c.btc.SendRawTransaction(spendRefundTx, false)
+	txHash, err := c.sendRawTransaction(spendRefundTx)
 	if err != nil {
 		return fmt.Errorf("broadcast punish: %w", err)
 	}
@@ -1066,11 +1176,11 @@ func (c *partClient) takeBtc(ctx context.Context, refund *btcadaptor.RefundTxOut
 // his BTC back. His sig on that leaf leaks his XMR scalar, but Alice
 // never locked XMR so the leak is harmless.
 func aliceBailsBeforeXmrInit(ctx context.Context) error {
-	alicec, err := newClient(ctx, alicexmr, aliceBTCRPC, btcRPCUser, btcRPCPass)
+	alicec, err := newClient(ctx, alicexmr, aliceBTCRPC, aliceBTCWallet, btcRPCUser, btcRPCPass)
 	if err != nil {
 		return err
 	}
-	bobc, err := newClient(ctx, bobxmr, bobBTCRPC, btcRPCUser, btcRPCPass)
+	bobc, err := newClient(ctx, bobxmr, bobBTCRPC, bobBTCWallet, btcRPCUser, btcRPCPass)
 	if err != nil {
 		return err
 	}
@@ -1096,7 +1206,7 @@ func aliceBailsBeforeXmrInit(ctx context.Context) error {
 		return err
 	}
 
-	signed, complete, err := bob.btc.SignRawTransaction(bob.lockTx)
+	signed, complete, err := bob.signRawTransactionWithWallet(ctx, bob.lockTx)
 	if err != nil {
 		return err
 	}
@@ -1104,7 +1214,10 @@ func aliceBailsBeforeXmrInit(ctx context.Context) error {
 		return errors.New("lockTx signing not complete")
 	}
 	bob.lockTx = signed
-	if _, err := bob.btc.SendRawTransaction(bob.lockTx, false); err != nil {
+	if _, err := bob.sendRawTransaction(bob.lockTx); err != nil {
+		return err
+	}
+	if err := bob.mineBlocks(1); err != nil {
 		return err
 	}
 	fmt.Println("    lockTx broadcast; Alice sits silent.")
@@ -1131,11 +1244,11 @@ func aliceBailsBeforeXmrInit(ctx context.Context) error {
 // Bob refunds via coop leaf (reveals his XMR scalar); Alice sweeps
 // XMR using the recovered scalar.
 func refundScenario(ctx context.Context) error {
-	alicec, err := newClient(ctx, alicexmr, aliceBTCRPC, btcRPCUser, btcRPCPass)
+	alicec, err := newClient(ctx, alicexmr, aliceBTCRPC, aliceBTCWallet, btcRPCUser, btcRPCPass)
 	if err != nil {
 		return err
 	}
-	bobc, err := newClient(ctx, bobxmr, bobBTCRPC, btcRPCUser, btcRPCPass)
+	bobc, err := newClient(ctx, bobxmr, bobBTCRPC, bobBTCWallet, btcRPCUser, btcRPCPass)
 	if err != nil {
 		return err
 	}
@@ -1161,7 +1274,7 @@ func refundScenario(ctx context.Context) error {
 		return err
 	}
 
-	signed, complete, err := bob.btc.SignRawTransaction(bob.lockTx)
+	signed, complete, err := bob.signRawTransactionWithWallet(ctx, bob.lockTx)
 	if err != nil {
 		return err
 	}
@@ -1169,7 +1282,10 @@ func refundScenario(ctx context.Context) error {
 		return errors.New("lockTx signing not complete")
 	}
 	bob.lockTx = signed
-	if _, err := bob.btc.SendRawTransaction(bob.lockTx, false); err != nil {
+	if _, err := bob.sendRawTransaction(bob.lockTx); err != nil {
+		return err
+	}
+	if err := bob.mineBlocks(1); err != nil {
 		return err
 	}
 
@@ -1216,11 +1332,11 @@ func refundScenario(ctx context.Context) error {
 // locktime, and punishes via the refund-tree's Alice-only leaf. Her
 // XMR is stranded since Bob's scalar was never revealed.
 func bobBailsAfterXmrInit(ctx context.Context) error {
-	alicec, err := newClient(ctx, alicexmr, aliceBTCRPC, btcRPCUser, btcRPCPass)
+	alicec, err := newClient(ctx, alicexmr, aliceBTCRPC, aliceBTCWallet, btcRPCUser, btcRPCPass)
 	if err != nil {
 		return err
 	}
-	bobc, err := newClient(ctx, bobxmr, bobBTCRPC, btcRPCUser, btcRPCPass)
+	bobc, err := newClient(ctx, bobxmr, bobBTCRPC, bobBTCWallet, btcRPCUser, btcRPCPass)
 	if err != nil {
 		return err
 	}
@@ -1246,7 +1362,7 @@ func bobBailsAfterXmrInit(ctx context.Context) error {
 		return err
 	}
 
-	signed, complete, err := bob.btc.SignRawTransaction(bob.lockTx)
+	signed, complete, err := bob.signRawTransactionWithWallet(ctx, bob.lockTx)
 	if err != nil {
 		return err
 	}
@@ -1254,7 +1370,10 @@ func bobBailsAfterXmrInit(ctx context.Context) error {
 		return errors.New("lockTx signing not complete")
 	}
 	bob.lockTx = signed
-	if _, err := bob.btc.SendRawTransaction(bob.lockTx, false); err != nil {
+	if _, err := bob.sendRawTransaction(bob.lockTx); err != nil {
+		return err
+	}
+	if err := bob.mineBlocks(1); err != nil {
 		return err
 	}
 
