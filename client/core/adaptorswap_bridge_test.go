@@ -1,7 +1,10 @@
 package core
 
 import (
+	"bytes"
+	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -255,7 +258,15 @@ func TestStartAdaptorMatches(t *testing.T) {
 	}
 
 	ord := &order.LimitOrder{P: order.Prefix{ServerTime: time.Now()}}
-	tracker := &trackedTrade{Order: ord}
+	// Tracker has a dexConnection backed by captureWsConn so the
+	// per-match dcSender wired into the orchestrator's Config can
+	// emit AdaptorSetupPart on the participant path without a nil
+	// deref. The captured messages are not asserted here (TestDcSender
+	// covers the wire shape); we just need a non-nil transport.
+	tracker := &trackedTrade{
+		Order: ord,
+		dc:    &dexConnection{WsConn: &captureWsConn{}},
+	}
 
 	matchID := order.MatchID{0xDE, 0xAD}
 	makerMatch := &msgjson.Match{
@@ -284,10 +295,14 @@ func TestStartAdaptorMatches(t *testing.T) {
 		t.Fatalf("expected empty OwnXMRSweepDest with no wallet, got %q", o.Cfg().OwnXMRSweepDest)
 	}
 
+	// Per-match dcSender wires outbound through tracker.dc.WsConn,
+	// not through the manager's default sender. So assertions about
+	// who emitted what go through the captured ws conn.
+	captured := tracker.dc.WsConn.(*captureWsConn)
 	// Maker on a BTC-base market => initiator => Start sends
 	// nothing (initiator waits for AdaptorSetupPart).
-	if len(sender.routes) != 0 {
-		t.Fatalf("initiator should not emit setup; routes=%v", sender.routes)
+	if len(captured.sent) != 0 {
+		t.Fatalf("initiator should not emit setup; ws sent %d", len(captured.sent))
 	}
 
 	// A second match where this client is the taker => participant
@@ -306,8 +321,13 @@ func TestStartAdaptorMatches(t *testing.T) {
 	if mgr.orchestrators[matchID2] == nil {
 		t.Fatalf("no orchestrator registered for taker match %s", matchID2)
 	}
-	if len(sender.routes) != 1 || sender.routes[0] != msgjson.AdaptorSetupPartRoute {
-		t.Fatalf("participant should emit AdaptorSetupPart; routes=%v", sender.routes)
+	if len(captured.sent) != 1 || captured.sent[0].Route != msgjson.AdaptorSetupPartRoute {
+		t.Fatalf("participant should emit AdaptorSetupPart; captured=%d", len(captured.sent))
+	}
+	// Manager's default sender stays empty - per-match override
+	// took priority.
+	if len(sender.routes) != 0 {
+		t.Fatalf("manager default sender should not be used; routes=%v", sender.routes)
 	}
 }
 
@@ -410,6 +430,77 @@ func TestXmrNetTagForNet(t *testing.T) {
 		}
 	}
 }
+
+// TestDcSender verifies the production message sender wraps the
+// payload in a notification on the right route and pushes it
+// through the dexConnection's websocket.
+func TestDcSender(t *testing.T) {
+	captured := &captureWsConn{}
+	dc := &dexConnection{WsConn: captured}
+	s := &dcSender{dc: dc}
+
+	matchID := order.MatchID{0xCA, 0xFE}
+	payload := &msgjson.AdaptorSetupPart{
+		MatchID:         matchID[:],
+		PubSpendKeyHalf: make([]byte, 32),
+	}
+	if err := s.SendToPeer(msgjson.AdaptorSetupPartRoute, payload); err != nil {
+		t.Fatalf("SendToPeer: %v", err)
+	}
+	if len(captured.sent) != 1 {
+		t.Fatalf("captured.sent = %d, want 1", len(captured.sent))
+	}
+	got := captured.sent[0]
+	if got.Route != msgjson.AdaptorSetupPartRoute {
+		t.Errorf("route = %s, want %s", got.Route, msgjson.AdaptorSetupPartRoute)
+	}
+	if got.Type != msgjson.Notification {
+		t.Errorf("type = %d, want Notification", got.Type)
+	}
+	// Round-trip the encoded payload to verify the matchid
+	// survived.
+	var back msgjson.AdaptorSetupPart
+	if err := got.Unmarshal(&back); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if !bytes.Equal(back.MatchID, matchID[:]) {
+		t.Errorf("matchid lost in transit: got %x, want %x", back.MatchID, matchID[:])
+	}
+
+	// SendErr from the underlying WsConn surfaces.
+	captured.sendErr = errors.New("ws down")
+	if err := s.SendToPeer(msgjson.AdaptorSetupPartRoute, payload); err == nil {
+		t.Fatal("expected SendErr to surface")
+	}
+}
+
+// captureWsConn is a minimal comms.WsConn that records each Send
+// call. Only Send is used by dcSender; the rest are no-op stubs.
+type captureWsConn struct {
+	sent    []*msgjson.Message
+	sendErr error
+}
+
+func (c *captureWsConn) NextID() uint64 { return 0 }
+func (c *captureWsConn) IsDown() bool   { return false }
+func (c *captureWsConn) Send(m *msgjson.Message) error {
+	c.sent = append(c.sent, m)
+	return c.sendErr
+}
+func (c *captureWsConn) SendRaw([]byte) error { return nil }
+func (c *captureWsConn) Request(*msgjson.Message, func(*msgjson.Message)) error {
+	return nil
+}
+func (c *captureWsConn) RequestRaw(uint64, []byte, func(*msgjson.Message)) error {
+	return nil
+}
+func (c *captureWsConn) RequestWithTimeout(*msgjson.Message, func(*msgjson.Message),
+	time.Duration, func()) error {
+	return nil
+}
+func (c *captureWsConn) Connect(context.Context) (*sync.WaitGroup, error) { return nil, nil }
+func (c *captureWsConn) MessageSource() <-chan *msgjson.Message           { return nil }
+func (c *captureWsConn) UpdateURL(string)                                 {}
 
 // TestManagerMultipleSwapsIsolated verifies that several
 // concurrent matches on a single AdaptorSwapManager get distinct

@@ -307,6 +307,10 @@ func (c *Core) startAdaptorMatches(tracker *trackedTrade, msgMatches []*msgjson.
 			// CounterPartyAddress message arrives for this match
 			// (handleCounterPartyAddressMsg routes adaptor
 			// matches to the manager).
+			// SendMsg is wired per-match to the trade's
+			// dexConnection so outbound adaptor_* messages
+			// actually reach the server.
+			SendMsg: &dcSender{dc: tracker.dc},
 		}
 		if _, err := c.adaptorMgr.StartSwap(cfg); err != nil {
 			c.log.Errorf("AdaptorSwapManager.StartSwap match %s: %v", matchID, err)
@@ -497,6 +501,32 @@ func (b *BTCRPCAdapter) CurrentHeight() (int64, error) {
 type NoopSender struct{}
 
 func (NoopSender) SendToPeer(route string, payload any) error { return nil }
+
+// dcSender is the production adaptorswap.MessageSender. Outbound
+// adaptor_* messages from the orchestrator are wrapped in
+// notifications and pushed through the dexConnection's websocket.
+// The server-side coordinator validates each message and routes it
+// to the matched counterparty (which receives it via its own
+// noteHandlers / handleAdaptorMsg path).
+type dcSender struct {
+	dc *dexConnection
+}
+
+func (s *dcSender) SendToPeer(route string, payload any) error {
+	// The server's handleAdaptorMsg authenticates every adaptor_*
+	// payload against the user's account key. Sign before sending.
+	if signable, ok := payload.(msgjson.Signable); ok {
+		if s.dc.acct.locked() {
+			return fmt.Errorf("cannot sign %s: %s account locked", route, s.dc.acct.host)
+		}
+		sign(s.dc.acct.privKey, signable)
+	}
+	msg, err := msgjson.NewNotification(route, payload)
+	if err != nil {
+		return fmt.Errorf("NewNotification %s: %w", route, err)
+	}
+	return s.dc.Send(msg)
+}
 
 // ----- Persister stubs -----
 
