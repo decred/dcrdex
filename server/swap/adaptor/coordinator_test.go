@@ -442,6 +442,102 @@ func TestCoordinatorOutOfPhaseEventErrors(t *testing.T) {
 	}
 }
 
+// TestCoordinatorRejectsMalformedSetup walks the validators that
+// gate the setup phase and confirms each malformation drives the
+// coordinator into PhaseFailed with OutcomeProtocolError. Exercises
+// validatePartSetup (length checks, bad DLEQ), validateInitSetup
+// (mismatched leaf scripts), and validatePresigned (wrong-length
+// refund sig).
+func TestCoordinatorRejectsMalformedSetup(t *testing.T) {
+	matchID := [32]byte{0x99}
+
+	// (1) PartSetup with wrong-length PubSpendKeyHalf.
+	t.Run("part-bad-spend-pub-len", func(t *testing.T) {
+		c, _ := NewCoordinator(&Config{
+			MatchID: matchID, OrderID: matchID,
+			Router: &recordingRouter{}, Report: &recordingReporter{}, Persist: &nopPersister{},
+		})
+		bad, _ := buildPartSetup(t, matchID)
+		bad.PubSpendKeyHalf = []byte{1, 2, 3}  // wrong length
+		_ = c.Handle(EventPartSetup{Msg: bad}) // fail() returns nil by design
+		if got := c.Phase(); got != PhaseFailed {
+			t.Fatalf("phase=%s, want PhaseFailed", got)
+		}
+		if got := c.FailOutcome(); got != OutcomeProtocolError {
+			t.Fatalf("outcome=%d, want OutcomeProtocolError", got)
+		}
+	})
+
+	// (2) PartSetup with empty DLEQ proof.
+	t.Run("part-empty-dleq", func(t *testing.T) {
+		c, _ := NewCoordinator(&Config{
+			MatchID: matchID, OrderID: matchID,
+			Router: &recordingRouter{}, Report: &recordingReporter{}, Persist: &nopPersister{},
+		})
+		bad, _ := buildPartSetup(t, matchID)
+		bad.DLEQProof = nil
+		_ = c.Handle(EventPartSetup{Msg: bad})
+		if c.Phase() != PhaseFailed {
+			t.Fatalf("phase=%s, want PhaseFailed", c.Phase())
+		}
+	})
+
+	// (3) PartSetup with garbage DLEQ proof that fails extraction.
+	t.Run("part-bad-dleq-bytes", func(t *testing.T) {
+		c, _ := NewCoordinator(&Config{
+			MatchID: matchID, OrderID: matchID,
+			Router: &recordingRouter{}, Report: &recordingReporter{}, Persist: &nopPersister{},
+		})
+		bad, _ := buildPartSetup(t, matchID)
+		bad.DLEQProof = []byte("not a real dleq proof")
+		_ = c.Handle(EventPartSetup{Msg: bad})
+		if c.Phase() != PhaseFailed {
+			t.Fatalf("phase=%s, want PhaseFailed", c.Phase())
+		}
+	})
+
+	// (4) InitSetup with a coop leaf script that doesn't match what
+	// the coordinator rebuilds from the advertised pubkeys.
+	t.Run("init-mismatched-coop-script", func(t *testing.T) {
+		c, _ := NewCoordinator(&Config{
+			MatchID: matchID, OrderID: matchID, LockBlocks: 144,
+			Router: &recordingRouter{}, Report: &recordingReporter{}, Persist: &nopPersister{},
+		})
+		// Run the participant's part-setup so the coordinator stores
+		// ParticipantPubSignKeyHalf, which the init-setup validator
+		// uses to rebuild the leaf scripts.
+		part, partBtc := buildPartSetup(t, matchID)
+		if err := c.Handle(EventPartSetup{Msg: part}); err != nil {
+			t.Fatalf("setup precondition: %v", err)
+		}
+		bad := buildInitSetup(t, matchID, btcschnorr.SerializePubKey(partBtc.PubKey()), 144)
+		bad.CoopLeafScript = []byte{0xDE, 0xAD, 0xBE, 0xEF}
+		_ = c.Handle(EventInitSetup{Msg: bad})
+		if c.Phase() != PhaseFailed {
+			t.Fatalf("phase=%s, want PhaseFailed", c.Phase())
+		}
+	})
+
+	// (5) Presigned with wrong-length refund sig.
+	t.Run("presigned-bad-refund-sig-len", func(t *testing.T) {
+		c, _ := NewCoordinator(&Config{
+			MatchID: matchID, OrderID: matchID,
+			Router: &recordingRouter{}, Report: &recordingReporter{}, Persist: &nopPersister{},
+		})
+		c.state.Phase = PhaseAwaitingPresigned // skip ahead
+		bad := &msgjson.AdaptorRefundPresigned{
+			OrderID:               matchID[:],
+			MatchID:               matchID[:],
+			RefundSig:             []byte{1, 2, 3}, // not 64
+			SpendRefundAdaptorSig: make([]byte, 97),
+		}
+		_ = c.Handle(EventPresigned{Msg: bad})
+		if c.Phase() != PhaseFailed {
+			t.Fatalf("phase=%s, want PhaseFailed", c.Phase())
+		}
+	})
+}
+
 func TestCoordinatorHappyPathTerminal(t *testing.T) {
 	router := &recordingRouter{}
 	reporter := &recordingReporter{}
