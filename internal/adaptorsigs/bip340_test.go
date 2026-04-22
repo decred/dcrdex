@@ -181,6 +181,146 @@ func TestBIP340AdaptorWrongTweak(t *testing.T) {
 	}
 }
 
+// TestBIP340PrivateKeyTweakedRoundtrip exercises the private-key-tweaked
+// adaptor path: a party who already has a valid signature and knows the
+// tweak constructs an adaptor that only they or the tweak-learner can
+// complete.
+func TestBIP340PrivateKeyTweakedRoundtrip(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		privKey, err := btcec.NewPrivateKey()
+		if err != nil {
+			t.Fatalf("privkey: %v", err)
+		}
+		tweakKey, err := btcec.NewPrivateKey()
+		if err != nil {
+			t.Fatalf("tweak: %v", err)
+		}
+		var hash [32]byte
+		if _, err := rand.Read(hash[:]); err != nil {
+			t.Fatalf("read hash: %v", err)
+		}
+		var auxRand [32]byte
+		if _, err := rand.Read(auxRand[:]); err != nil {
+			t.Fatalf("read aux: %v", err)
+		}
+
+		// Produce a standard BIP-340 sig via our test signer (vector-validated).
+		sig, err := signBIP340Standard(privKey, hash[:], auxRand[:])
+		if err != nil {
+			t.Fatalf("iter %d: sign: %v", i, err)
+		}
+		if !sig.Verify(hash[:], privKey.PubKey()) {
+			t.Fatalf("iter %d: baseline sig failed btcec verify", i)
+		}
+
+		adaptor := PrivateKeyTweakedAdaptorSigBIP340(sig, &tweakKey.Key)
+		if err := adaptor.VerifyBIP340(hash[:], privKey.PubKey()); err != nil {
+			t.Fatalf("iter %d: privkey adaptor verify: %v", i, err)
+		}
+
+		decrypted, err := adaptor.DecryptBIP340(&tweakKey.Key)
+		if err != nil {
+			t.Fatalf("iter %d: decrypt: %v", i, err)
+		}
+		if !decrypted.Verify(hash[:], privKey.PubKey()) {
+			t.Fatalf("iter %d: decrypted failed btcec verify", i)
+		}
+		// The decrypted signature should match the original sig bit-exactly.
+		if !bytes.Equal(decrypted.Serialize(), sig.Serialize()) {
+			t.Fatalf("iter %d: decrypted != original sig", i)
+		}
+	}
+}
+
+// TestBIP340TwoPartySwap models the classic adaptor-signature swap: Party
+// 1 has a valid sig on message m1 and knows t; they send a
+// private-key-tweaked adaptor to Party 2. Party 2 constructs a
+// public-key-tweaked adaptor on a different message m2 using the same T
+// (without knowing t) and sends it to Party 1. Party 1 completes Party
+// 2's adaptor and broadcasts the resulting sig. Party 2 sees the
+// completed sig, recovers t via RecoverTweakBIP340, and then decrypts
+// Party 1's adaptor to obtain the valid sig on m1.
+func TestBIP340TwoPartySwap(t *testing.T) {
+	// Party 1.
+	priv1, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatalf("priv1: %v", err)
+	}
+	// Party 2.
+	priv2, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatalf("priv2: %v", err)
+	}
+	// Hidden scalar t known only to Party 1.
+	tweakKey, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatalf("tweak: %v", err)
+	}
+	tweak := &tweakKey.Key
+	var T btcec.JacobianPoint
+	btcec.ScalarBaseMultNonConst(tweak, &T)
+
+	var m1, m2, auxRand [32]byte
+	if _, err := rand.Read(m1[:]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rand.Read(m2[:]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rand.Read(auxRand[:]); err != nil {
+		t.Fatal(err)
+	}
+
+	// Party 1 signs m1 normally, then constructs a priv-key-tweaked adaptor.
+	sig1, err := signBIP340Standard(priv1, m1[:], auxRand[:])
+	if err != nil {
+		t.Fatalf("sign m1: %v", err)
+	}
+	adaptor1 := PrivateKeyTweakedAdaptorSigBIP340(sig1, tweak)
+	if err := adaptor1.VerifyBIP340(m1[:], priv1.PubKey()); err != nil {
+		t.Fatalf("party2 verify adaptor1: %v", err)
+	}
+
+	// Party 2 signs m2 as a pub-key-tweaked adaptor with the same T.
+	adaptor2, err := PublicKeyTweakedAdaptorSigBIP340(priv2, m2[:], &T)
+	if err != nil {
+		t.Fatalf("party2 adaptor sign: %v", err)
+	}
+	if err := adaptor2.VerifyBIP340(m2[:], priv2.PubKey()); err != nil {
+		t.Fatalf("party1 verify adaptor2: %v", err)
+	}
+
+	// Party 1 (who knows t) completes Party 2's adaptor and publishes.
+	completed2, err := adaptor2.DecryptBIP340(tweak)
+	if err != nil {
+		t.Fatalf("party1 decrypt adaptor2: %v", err)
+	}
+	if !completed2.Verify(m2[:], priv2.PubKey()) {
+		t.Fatal("completed sig on m2 does not verify")
+	}
+
+	// Party 2 observes completed2, recovers t.
+	recoveredTweak, err := adaptor2.RecoverTweakBIP340(completed2)
+	if err != nil {
+		t.Fatalf("party2 recover tweak: %v", err)
+	}
+	if !recoveredTweak.Equals(tweak) {
+		t.Fatal("recovered tweak does not match")
+	}
+
+	// Party 2 decrypts Party 1's adaptor using the recovered tweak.
+	completed1, err := adaptor1.DecryptBIP340(recoveredTweak)
+	if err != nil {
+		t.Fatalf("party2 decrypt adaptor1: %v", err)
+	}
+	if !completed1.Verify(m1[:], priv1.PubKey()) {
+		t.Fatal("completed sig on m1 does not verify")
+	}
+	if !bytes.Equal(completed1.Serialize(), sig1.Serialize()) {
+		t.Fatal("completed1 != sig1")
+	}
+}
+
 // TestBIP340AdaptorTamper confirms that mutating any field of an adaptor
 // signature makes VerifyBIP340 fail.
 func TestBIP340AdaptorTamper(t *testing.T) {

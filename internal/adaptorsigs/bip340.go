@@ -230,16 +230,52 @@ func bip340EncryptedSign(d, k *btcec.ModNScalar, hash, pXBytes []byte,
 	}, true
 }
 
-// VerifyBIP340 verifies that a public-key-tweaked adaptor signature will
-// yield a valid BIP-340 signature when decrypted with the scalar
-// corresponding to the stored tweak point. Only valid for pubKeyTweak
-// adaptors (produced by PublicKeyTweakedAdaptorSigBIP340).
+// PrivateKeyTweakedAdaptorSigBIP340 builds a private-key-tweaked adaptor
+// signature from an already-valid BIP-340 signature and the scalar tweak.
+// The signer knows both the signature and t; the resulting adaptor cannot
+// be used by a party who lacks t. The counterparty can later complete it
+// by learning t (typically by observing a completed pub-key-tweaked
+// adaptor on-chain via RecoverTweakBIP340).
 //
-// The verifier does not need the tweak scalar.
-func (sig *AdaptorSignature) VerifyBIP340(hash []byte, pubKey *btcec.PublicKey) error {
-	if !sig.pubKeyTweak {
-		return errors.New("bip340 verify: only pub-key-tweaked adaptors can be verified without the tweak")
+// The provided sig must be a valid BIP-340 signature produced by a
+// canonical signer (e.g. btcschnorr.Sign); the returned adaptor inherits
+// its implicit R point's even-y convention.
+func PrivateKeyTweakedAdaptorSigBIP340(sig *btcschnorr.Signature,
+	tweak *btcec.ModNScalar) *AdaptorSignature {
+
+	var T btcec.JacobianPoint
+	btcec.ScalarBaseMultNonConst(tweak, &T)
+	T.ToAffine()
+
+	// btcschnorr.Signature does not expose r and s as accessors; recover
+	// them from the serialized form.
+	ser := sig.Serialize()
+	var r btcec.FieldVal
+	r.SetByteSlice(ser[0:32])
+	var s btcec.ModNScalar
+	s.SetBytes((*[scalarSize]byte)(ser[32:64]))
+
+	// s' = s + t (mod n). Decrypt subtracts t to recover the original s.
+	sPrime := new(btcec.ModNScalar).Add2(&s, tweak)
+
+	return &AdaptorSignature{
+		r:           r,
+		s:           *sPrime,
+		t:           affinePoint{x: T.X, y: T.Y},
+		pubKeyTweak: false,
 	}
+}
+
+// VerifyBIP340 verifies an adaptor signature under BIP-340. Works for both
+// public-key-tweaked and private-key-tweaked adaptors. The verifier does
+// not need the tweak scalar - the stored T and the sig fields are
+// sufficient.
+//
+// For pub-key-tweaked adaptors, a successful verify means that decrypting
+// with the correct tweak will produce a valid BIP-340 signature. For
+// private-key-tweaked adaptors, it means the signer already possesses a
+// valid BIP-340 signature that only lacks subtraction of the tweak.
+func (sig *AdaptorSignature) VerifyBIP340(hash []byte, pubKey *btcec.PublicKey) error {
 	if len(hash) != scalarSize {
 		return fmt.Errorf("bip340 verify: hash must be %d bytes, got %d",
 			scalarSize, len(hash))
@@ -265,44 +301,52 @@ func (sig *AdaptorSignature) VerifyBIP340(hash []byte, pubKey *btcec.PublicKey) 
 	e.SetBytes((*[scalarSize]byte)(eHash))
 	e.Negate()
 
-	// Reconstruct R_adapt = s*G - e*P + T and check x == sig.r and y even.
-	var sG, eP, sum, Radapt btcec.JacobianPoint
+	// Reconstruct the expected R, varying sign of T by scheme:
+	//   pubKeyTweak:  s*G - e*P + T = R_adapt  (with x == sig.r, y even)
+	//   privKeyTweak: s*G - e*P - T = R        (with x == sig.r, y even)
+	var sG, eP, sum, result btcec.JacobianPoint
 	btcec.ScalarBaseMultNonConst(&sig.s, &sG)
 	btcec.ScalarMultNonConst(&e, &P, &eP)
 	btcec.AddNonConst(&sG, &eP, &sum)
-	btcec.AddNonConst(&sum, sig.t.asJacobian(), &Radapt)
 
-	if (Radapt.X.IsZero() && Radapt.Y.IsZero()) || Radapt.Z.IsZero() {
+	T := *sig.t.asJacobian()
+	if !sig.pubKeyTweak {
+		T.Y.Negate(1)
+		T.Y.Normalize()
+	}
+	btcec.AddNonConst(&sum, &T, &result)
+
+	if (result.X.IsZero() && result.Y.IsZero()) || result.Z.IsZero() {
 		return errors.New("bip340 verify: R is point at infinity")
 	}
-	Radapt.ToAffine()
-	if Radapt.Y.IsOdd() {
+	result.ToAffine()
+	if result.Y.IsOdd() {
 		return errors.New("bip340 verify: R has odd y")
 	}
-	if !sig.r.Equals(&Radapt.X) {
+	if !sig.r.Equals(&result.X) {
 		return errors.New("bip340 verify: r mismatch")
 	}
 	return nil
 }
 
-// DecryptBIP340 completes a public-key-tweaked adaptor signature into a
-// standard BIP-340 signature using the correct tweak scalar. The tweak is
-// checked against the stored T before returning; a mismatch returns an
-// error rather than a garbage signature.
+// DecryptBIP340 completes an adaptor signature into a standard BIP-340
+// signature. Works for both public-key-tweaked and private-key-tweaked
+// adaptors. The provided tweak is checked against the stored T; a
+// mismatch returns an error rather than a garbage signature.
 func (sig *AdaptorSignature) DecryptBIP340(tweak *btcec.ModNScalar) (*btcschnorr.Signature, error) {
-	if !sig.pubKeyTweak {
-		return nil, errors.New("bip340 decrypt: only pub-key-tweaked adaptors")
-	}
 	var expectedT btcec.JacobianPoint
 	btcec.ScalarBaseMultNonConst(tweak, &expectedT)
 	if !expectedT.EquivalentNonConst(sig.t.asJacobian()) {
 		return nil, errors.New("bip340 decrypt: tweak does not match stored T")
 	}
 
-	// s_final = s + t (mod n). The sign convention differs from DCRv0's
-	// subtraction; this is the BIP-340 correction that turns the adaptor
-	// back into a standard BIP-340 signature.
-	sFinal := new(btcec.ModNScalar).Set(tweak).Add(&sig.s)
+	//   pubKeyTweak:  s_final = s + t (mod n)
+	//   privKeyTweak: s_final = s - t (mod n)
+	sFinal := new(btcec.ModNScalar).Set(tweak)
+	if !sig.pubKeyTweak {
+		sFinal.Negate()
+	}
+	sFinal.Add(&sig.s)
 	return btcschnorr.NewSignature(&sig.r, sFinal), nil
 }
 
