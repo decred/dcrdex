@@ -60,6 +60,15 @@ type Config struct {
 	// PeerBTCPayoutScript on receipt.
 	DecodeBTCAddr func(addr string) ([]byte, error)
 
+	// SpendObserver is called by the initiator when it transitions
+	// into PhaseSpendPresig. The bridge typically supplies a
+	// closure that spawns a goroutine polling
+	// AssetBTC.ObserveSpend and, on observation, feeds the witness
+	// back via the manager's Handle as EventSpendObservedOnChain.
+	// nil means no observer wired (test mode); the swap will stall
+	// at PhaseSpendPresig.
+	SpendObserver func(outpoint wire.OutPoint, startHeight int64)
+
 	// Network tag for XMR address encoding (18=mainnet, 24=stagenet).
 	XmrNetTag uint64
 
@@ -825,7 +834,21 @@ func (o *Orchestrator) handleXmrConfirmed(evt Event) error {
 		return fmt.Errorf("send AdaptorSpendPresig: %w", err)
 	}
 	o.state.Phase = PhaseSpendPresig
-	return o.save()
+	if err := o.save(); err != nil {
+		return err
+	}
+	// Kick off the BTC chain watcher. The participant will broadcast
+	// spendTx once they decrypt the adaptor sig; the witness on that
+	// spend reveals their sig, from which RecoverTweakBIP340 extracts
+	// the participant's XMR scalar so the initiator can sweep XMR.
+	if o.cfg.SpendObserver != nil {
+		lockHash := o.state.LockTx.TxHash()
+		o.cfg.SpendObserver(
+			wire.OutPoint{Hash: lockHash, Index: o.state.LockVout},
+			o.state.LockHeight,
+		)
+	}
+	return nil
 }
 
 // handleSpendPresig: initiator waits to observe spend on chain.

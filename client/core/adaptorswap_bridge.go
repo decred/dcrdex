@@ -133,6 +133,54 @@ func (m *AdaptorSwapManager) Stop(matchID order.MatchID) {
 	m.mu.Unlock()
 }
 
+// spendObserverFor returns a closure suitable for
+// adaptorswap.Config.SpendObserver. Invoked by the initiator at
+// PhaseSpendPresig with the lock outpoint; the closure spawns a
+// goroutine that polls the BTC adapter's ObserveSpend, then feeds
+// the witness back via Handle as EventSpendObservedOnChain.
+func (c *Core) spendObserverFor(matchID order.MatchID) func(wire.OutPoint, int64) {
+	return func(outpoint wire.OutPoint, startHeight int64) {
+		m := c.adaptorMgr
+		m.mu.Lock()
+		o, ok := m.orchestrators[matchID]
+		m.mu.Unlock()
+		if !ok {
+			c.log.Warnf("spendObserverFor: no orchestrator for match %s", matchID)
+			return
+		}
+		btc := o.Cfg().AssetBTC
+		if btc == nil {
+			c.log.Errorf("spendObserverFor match %s: AssetBTC nil; "+
+				"cannot observe spend to recover XMR scalar", matchID)
+			return
+		}
+		go func() {
+			c.log.Infof("spendObserverFor match %s: watching outpoint %s from height %d",
+				matchID, outpoint, startHeight)
+			witness, err := btc.ObserveSpend(outpoint, startHeight)
+			if err != nil {
+				c.log.Errorf("spendObserverFor match %s: ObserveSpend: %v; "+
+					"swap stalled at PhaseSpendPresig", matchID, err)
+				return
+			}
+			c.log.Infof("spendObserverFor match %s: spend observed, feeding witness into orchestrator",
+				matchID)
+			// Confirm the orchestrator is still registered before
+			// dispatching - the swap may have been Stopped.
+			m.mu.Lock()
+			o, ok := m.orchestrators[matchID]
+			m.mu.Unlock()
+			if !ok {
+				return
+			}
+			if err := o.Handle(adaptorswap.EventSpendObservedOnChain{Witness: witness}); err != nil {
+				c.log.Errorf("spendObserverFor match %s: orchestrator Handle: %v",
+					matchID, err)
+			}
+		}()
+	}
+}
+
 // OnCounterPartyAddress is the entry point used by Core's
 // handleCounterPartyAddressMsg to forward the counterparty's BTC
 // payout address to the right orchestrator. Returns handled=false
@@ -329,6 +377,13 @@ func (c *Core) startAdaptorMatches(tracker *trackedTrade, msgMatches []*msgjson.
 			DecodeBTCAddr: func(addr string) ([]byte, error) {
 				return btcAddressToScript(addr, c.net)
 			},
+			// SpendObserver runs the BTC ObserveSpend polling loop
+			// in a background goroutine and feeds the witness back
+			// via the manager's Handle once seen on-chain. Closes
+			// the gap between PhaseSpendPresig (initiator has sent
+			// the adaptor sig) and PhaseXmrSwept (initiator has
+			// recovered the participant's scalar and swept XMR).
+			SpendObserver: c.spendObserverFor(matchID),
 			// SendMsg is wired per-match to the trade's
 			// dexConnection so outbound adaptor_* messages
 			// actually reach the server.
