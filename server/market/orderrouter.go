@@ -64,6 +64,11 @@ type MarketTunnel interface {
 	LotSize() uint64
 	// RateStep is the market's rate step in units of the quote asset.
 	RateStep() uint64
+	// SwapInfo returns the swap protocol and, for adaptor-swap
+	// markets, the scriptable asset ID. Used by handleLimit to
+	// enforce Option-1 semantics on adaptor markets: only the
+	// scriptable-side holder may post limit orders.
+	SwapInfo() (dex.SwapType, uint32)
 	// CoinLocked should return true if the CoinID is currently a funding Coin
 	// for an active DEX order. This is required for Coin validation to prevent
 	// a user from submitting multiple orders spending the same Coin. This
@@ -270,6 +275,24 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 		force = order.ImmediateTiF
 	default:
 		return msgjson.NewError(msgjson.OrderParameterError, "unknown time-in-force")
+	}
+
+	// Option-1 enforcement for adaptor-swap markets: the
+	// scriptable-side holder (the one who can lock a script output)
+	// must be the maker. A standing limit order becomes a maker when
+	// it rests on the book, so we reject any standing limit order
+	// whose seller holds the non-scriptable asset. Immediate orders
+	// (ImmediateTiF) may proceed because they cannot rest on the
+	// book and will only match as takers.
+	if swapType, scriptable := tunnel.SwapInfo(); swapType == dex.SwapTypeAdaptor && force == order.StandingTiF {
+		sellAsset := limit.Quote
+		if sell {
+			sellAsset = limit.Base
+		}
+		if sellAsset != scriptable {
+			return msgjson.NewError(msgjson.OrderParameterError,
+				"limit orders selling the non-scriptable asset are not allowed on adaptor-swap markets")
+		}
 	}
 
 	lotSize := tunnel.LotSize()

@@ -680,6 +680,13 @@ func (m *Market) RateStep() uint64 {
 	return m.marketInfo.RateStep
 }
 
+// SwapInfo returns the swap protocol type and, for adaptor-swap
+// markets, the asset ID of the scriptable side. For HTLC markets
+// the scriptable asset value is meaningless and should be ignored.
+func (m *Market) SwapInfo() (dex.SwapType, uint32) {
+	return m.marketInfo.SwapType, m.marketInfo.ScriptableAsset
+}
+
 // Base is the base asset ID.
 func (m *Market) Base() uint32 {
 	return m.marketInfo.Base
