@@ -86,6 +86,20 @@ type Market struct {
 	Duration   uint64  `json:"epochDuration"`
 	MBBuffer   float64 `json:"marketBuyBuffer"`
 	Disabled   bool    `json:"disabled"`
+	// SwapType selects the atomic-swap protocol. "htlc" (or empty)
+	// for the legacy HTLC swap; "adaptor" for the BIP-340 adaptor-
+	// signature swap used on pairs where one side is a non-
+	// scriptable chain (XMR). Adaptor markets must additionally
+	// set ScriptableAsset and LockBlocks.
+	SwapType string `json:"swapType,omitempty"`
+	// ScriptableAsset (only used when SwapType == "adaptor") names
+	// the asset symbol whose holders must be makers on this market
+	// under Option-1 enforcement. Must equal Base or Quote.
+	ScriptableAsset string `json:"scriptableAsset,omitempty"`
+	// LockBlocks (only used when SwapType == "adaptor") is the CSV
+	// window in scriptable-chain blocks on the punish leaf of the
+	// refund tap tree.
+	LockBlocks uint32 `json:"lockBlocks,omitempty"`
 }
 
 // Config is a market and asset configuration file.
@@ -251,6 +265,35 @@ func loadMarketConf(net dex.Network, src io.Reader) ([]*dex.MarketInfo, []*Asset
 		if err != nil {
 			return nil, nil, err
 		}
+
+		// Adaptor-swap configuration. Defaults to HTLC (zero
+		// value of SwapType) when no swapType field is set.
+		switch strings.ToLower(mktConf.SwapType) {
+		case "", "htlc":
+			// HTLC; nothing more to do.
+		case "adaptor":
+			if mktConf.ScriptableAsset == "" {
+				return nil, nil, fmt.Errorf("market %s: adaptor swap requires scriptableAsset", mkt.Name)
+			}
+			if mktConf.LockBlocks == 0 {
+				return nil, nil, fmt.Errorf("market %s: adaptor swap requires lockBlocks > 0", mkt.Name)
+			}
+			scriptID, found := dex.BipSymbolID(strings.ToLower(mktConf.ScriptableAsset))
+			if !found {
+				return nil, nil, fmt.Errorf("market %s: scriptableAsset %q unrecognized",
+					mkt.Name, mktConf.ScriptableAsset)
+			}
+			if scriptID != mkt.Base && scriptID != mkt.Quote {
+				return nil, nil, fmt.Errorf("market %s: scriptableAsset %q (id %d) is neither base (%d) nor quote (%d)",
+					mkt.Name, mktConf.ScriptableAsset, scriptID, mkt.Base, mkt.Quote)
+			}
+			mkt.SwapType = dex.SwapTypeAdaptor
+			mkt.ScriptableAsset = scriptID
+			mkt.LockBlocks = mktConf.LockBlocks
+		default:
+			return nil, nil, fmt.Errorf("market %s: unknown swapType %q", mkt.Name, mktConf.SwapType)
+		}
+
 		markets = append(markets, mkt)
 	}
 
