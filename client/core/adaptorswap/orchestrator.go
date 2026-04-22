@@ -275,6 +275,14 @@ func (o *Orchestrator) initiatorConsumePartSetup(m *msgjson.AdaptorSetupPart) er
 	}
 	s.Lock = lock
 	s.Refund = refund
+	// Mirror leaf scripts into the script-fields for snapshot/restore
+	// uniformity across roles (participant populates these from the
+	// peer's setup msg; initiator does it here from its own builders).
+	s.LockLeafScript = lock.LeafScript
+	s.RefundPkScript = refund.PkScript
+	s.CoopLeafScript = refund.CoopLeafScript
+	s.PunishLeafScript = refund.PunishLeafScript
+	s.LockBlocks = o.cfg.LockBlocks
 
 	// Build unsigned refundTx and spendRefundTx skeletons. lockTx is
 	// built later when we know the funded outpoint.

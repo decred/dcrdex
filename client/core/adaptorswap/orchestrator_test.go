@@ -393,5 +393,158 @@ func TestInitiatorRefundPath(t *testing.T) {
 	}
 }
 
+// TestStateFullSnapshotRoundtrip drives an initiator through to
+// PhaseLockBroadcast (the most state-heavy point in the happy path
+// before redemption), serializes the resulting State to bytes, and
+// restores it. The restored State must contain matching values for
+// all fields that were populated, including the rebuilt Lock and
+// Refund taproot output materials.
+func TestStateFullSnapshotRoundtrip(t *testing.T) {
+	msgr := &recordingSender{}
+	btc := &fakeBTC{}
+	cfg := &Config{
+		SwapID: [32]byte{0xAA}, OrderID: [32]byte{0xBB}, MatchID: [32]byte{0xCC},
+		Role:                RoleInitiator,
+		BtcAmount:           100_000,
+		XmrAmount:           1000,
+		LockBlocks:          2,
+		PeerBTCPayoutScript: []byte{txscript.OP_TRUE},
+		XmrNetTag:           18,
+		AssetBTC:            btc, AssetXMR: &fakeXMR{}, SendMsg: msgr, Persist: &memPersister{},
+	}
+	o, _ := NewOrchestrator(cfg)
+	_ = o.Start()
+
+	partSetup, _, _, _ := fakePeerSetup(t, cfg.OrderID, cfg.MatchID)
+	if err := o.Handle(EventKeysReceived{Setup: partSetup}); err != nil {
+		t.Fatalf("part setup: %v", err)
+	}
+
+	// Build a real adaptor sig so PhaseLockBroadcast is reached.
+	bobScalar, _ := btcec.PrivKeyFromBytes(o.state.XmrSpendKeyHalf.Serialize())
+	var T btcec.JacobianPoint
+	btcec.ScalarBaseMultNonConst(&bobScalar.Key, &T)
+	alicePriv, _ := btcec.NewPrivateKey()
+	refundValue := o.state.RefundTx.TxOut[0].Value
+	prev := txscript.NewCannedPrevOutputFetcher(o.state.Refund.PkScript, refundValue)
+	sh := txscript.NewTxSigHashes(o.state.SpendRefundTx, prev)
+	coopLeaf := txscript.NewBaseTapLeaf(o.state.Refund.CoopLeafScript)
+	sigHash, _ := txscript.CalcTapscriptSignaturehash(sh, txscript.SigHashDefault,
+		o.state.SpendRefundTx, 0, prev, coopLeaf)
+	esig, _ := adaptorsigs.PublicKeyTweakedAdaptorSigBIP340(alicePriv, sigHash, &T)
+	pres := EventRefundPresignedReceived{
+		RefundSig:  make([]byte, 64),
+		AdaptorSig: esig.Serialize(),
+	}
+	if err := o.Handle(pres); err != nil {
+		t.Fatalf("presigned: %v", err)
+	}
+
+	// Snapshot and restore.
+	o.state.mu.Lock()
+	data, err := o.state.FullSnapshot()
+	o.state.mu.Unlock()
+	if err != nil {
+		t.Fatalf("FullSnapshot: %v", err)
+	}
+	if len(data) < 200 {
+		t.Fatalf("snapshot too small: %d bytes", len(data))
+	}
+
+	got, err := RestoreState(data)
+	if err != nil {
+		t.Fatalf("RestoreState: %v", err)
+	}
+
+	// Spot-check key fields.
+	if got.Phase != o.state.Phase {
+		t.Errorf("phase=%s want %s", got.Phase, o.state.Phase)
+	}
+	if got.SwapID != o.state.SwapID {
+		t.Error("swap ID mismatch")
+	}
+	if got.LockHeight != o.state.LockHeight {
+		t.Errorf("lock height got %d want %d", got.LockHeight, o.state.LockHeight)
+	}
+	if got.LockTx == nil || got.RefundTx == nil || got.SpendRefundTx == nil {
+		t.Error("transactions not restored")
+	}
+	if got.Lock == nil || got.Refund == nil {
+		t.Error("Lock/Refund not rebuilt from leaf scripts")
+	}
+	if got.SpendRefundAdaptorSig == nil {
+		t.Error("adaptor sig not restored")
+	}
+	if got.BtcSignKey == nil ||
+		!got.BtcSignKey.Key.Equals(&o.state.BtcSignKey.Key) {
+		t.Error("btc sign key mismatch")
+	}
+	if got.XmrSpendKeyHalf == nil ||
+		!bytesEqual(got.XmrSpendKeyHalf.Serialize(), o.state.XmrSpendKeyHalf.Serialize()) {
+		t.Error("xmr spend key mismatch")
+	}
+}
+
+// TestFilePersisterRoundtrip writes a full snapshot to disk and
+// reads it back through the FilePersister.
+func TestFilePersisterRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	p, err := NewFilePersister(dir)
+	if err != nil {
+		t.Fatalf("NewFilePersister: %v", err)
+	}
+	// Build a minimal state with enough populated fields to
+	// exercise the JSON encoding.
+	s := &State{
+		SwapID:     [32]byte{0xEE},
+		OrderID:    [32]byte{0xFF},
+		MatchID:    [32]byte{0x01},
+		Role:       RoleInitiator,
+		Phase:      PhaseLockBroadcast,
+		LockBlocks: 2,
+		LockHeight: 100,
+	}
+	priv, _ := btcec.NewPrivateKey()
+	s.BtcSignKey = priv
+	xmrK, _ := edwards.GeneratePrivateKey()
+	s.XmrSpendKeyHalf = xmrK
+
+	swapID := s.SwapID
+	if err := p.SaveFull(swapID, s); err != nil {
+		t.Fatalf("SaveFull: %v", err)
+	}
+	got, err := p.LoadFull(swapID)
+	if err != nil {
+		t.Fatalf("LoadFull: %v", err)
+	}
+	if got == nil {
+		t.Fatal("got nil state")
+	}
+	if got.Phase != s.Phase || got.LockHeight != s.LockHeight {
+		t.Errorf("mismatch: phase %s/%s height %d/%d",
+			got.Phase, s.Phase, got.LockHeight, s.LockHeight)
+	}
+	// Missing swap returns (nil, nil).
+	missing, err := p.LoadFull([32]byte{0xFE})
+	if err != nil {
+		t.Fatalf("LoadFull(missing): %v", err)
+	}
+	if missing != nil {
+		t.Error("missing snapshot should be nil")
+	}
+}
+
+func bytesEqual(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // Ensure unused imports compile in all code paths.
 var _ = fmt.Errorf
