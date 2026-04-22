@@ -480,6 +480,43 @@ func driveSetupPhase(t *testing.T, initBTC, partBTC *fakeBTC,
 	return init, part
 }
 
+// TestOnTerminalFiresOnce asserts the OnTerminal callback runs
+// exactly once when the orchestrator first enters a terminal
+// phase. Drives through TestParticipantPunishPath's setup, calls
+// InitiateRefund + CSVMatured (-> PhasePunish, terminal), and
+// verifies OnTerminal saw PhasePunish exactly one time even
+// across an extra save() (e.g. Phase=Complete double-write
+// pattern that handleXmrSwept exhibits).
+func TestOnTerminalFiresOnce(t *testing.T) {
+	initBTC, partBTC := &fakeBTC{}, &fakeBTC{}
+	initXMR, partXMR := &fakeXMR{}, &fakeXMR{}
+	initSender, partSender := &recordingSender{}, &recordingSender{}
+	_, part := driveSetupPhase(t, initBTC, partBTC, initXMR, partXMR, initSender, partSender)
+
+	var (
+		fired  []Phase
+		mu     sync.Mutex
+		notify = func(p Phase) { mu.Lock(); fired = append(fired, p); mu.Unlock() }
+	)
+	part.cfg.OnTerminal = notify
+
+	if err := part.InitiateRefund(); err != nil {
+		t.Fatalf("InitiateRefund: %v", err)
+	}
+	if err := part.Handle(EventRefundCSVMatured{Height: 200}); err != nil {
+		t.Fatalf("CSV matured: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(fired) != 1 {
+		t.Fatalf("OnTerminal fired %d times, want 1: %v", len(fired), fired)
+	}
+	if fired[0] != PhasePunish {
+		t.Fatalf("OnTerminal phase=%s, want PhasePunish", fired[0])
+	}
+}
+
 // TestBTCPayoutAddrFlowsThroughSetupPart confirms that the
 // participant's BTC payout address rides on AdaptorSetupPart and
 // the initiator decodes it into PeerBTCPayoutScript on receipt

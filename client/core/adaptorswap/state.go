@@ -111,9 +111,12 @@ func (p Phase) String() string {
 	return "unknown"
 }
 
-// IsTerminal reports whether the phase is a final state.
+// IsTerminal reports whether the phase is a final state. Includes
+// PhasePunish (initiator stalled, participant solo-spent the
+// refund output) which the orchestrator stops at without further
+// transitions.
 func (p Phase) IsTerminal() bool {
-	return p == PhaseComplete || p == PhaseFailed
+	return p == PhaseComplete || p == PhaseFailed || p == PhasePunish
 }
 
 // State is the complete per-swap state record. It persists through
@@ -274,6 +277,11 @@ type Orchestrator struct {
 	// cfg is the runtime configuration. Not persisted (it is
 	// derived from the match record on restart).
 	cfg *Config
+	// terminalFired guards against double-invocation of
+	// cfg.OnTerminal when save() runs more than once in the same
+	// terminal phase. Held under state.mu (every save() caller
+	// holds it).
+	terminalFired bool
 }
 
 // BTCAssetAdapter is what the orchestrator needs from the BTC asset

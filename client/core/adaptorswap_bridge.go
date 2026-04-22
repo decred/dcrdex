@@ -133,6 +133,42 @@ func (m *AdaptorSwapManager) Stop(matchID order.MatchID) {
 	m.mu.Unlock()
 }
 
+// adaptorTerminalCallback returns a closure that the orchestrator
+// invokes once when reaching a terminal phase. Logs the outcome,
+// updates the order's status (best-effort - canceled or executed
+// depending on the terminal phase), and removes the orchestrator
+// from the manager registry so its memory is reclaimed.
+func (c *Core) adaptorTerminalCallback(tracker *trackedTrade, matchID order.MatchID,
+	mktName string) func(adaptorswap.Phase) {
+
+	return func(phase adaptorswap.Phase) {
+		switch phase {
+		case adaptorswap.PhaseComplete:
+			c.log.Infof("Adaptor swap complete for match %s on %s", matchID, mktName)
+		case adaptorswap.PhaseFailed:
+			c.log.Warnf("Adaptor swap failed for match %s on %s", matchID, mktName)
+		case adaptorswap.PhasePunish:
+			c.log.Warnf("Adaptor swap reached punish branch for match %s on %s "+
+				"(participant took BTC; XMR forfeited)", matchID, mktName)
+		default:
+			return
+		}
+		// Tear down the per-match orchestrator. The trackedTrade's
+		// order status update is best-effort; if no other matches
+		// remain on the order, mark it executed so it leaves the
+		// active set.
+		c.adaptorMgr.Stop(matchID)
+		if tracker != nil {
+			tracker.mtx.Lock()
+			if tracker.metaData != nil &&
+				tracker.metaData.Status < order.OrderStatusExecuted {
+				tracker.metaData.Status = order.OrderStatusExecuted
+			}
+			tracker.mtx.Unlock()
+		}
+	}
+}
+
 // spendObserverFor returns a closure suitable for
 // adaptorswap.Config.SpendObserver. Invoked by the initiator at
 // PhaseSpendPresig with the lock outpoint; the closure spawns a
@@ -384,6 +420,10 @@ func (c *Core) startAdaptorMatches(tracker *trackedTrade, msgMatches []*msgjson.
 			// the adaptor sig) and PhaseXmrSwept (initiator has
 			// recovered the participant's scalar and swept XMR).
 			SpendObserver: c.spendObserverFor(matchID),
+			// OnTerminal logs the swap outcome and unregisters the
+			// orchestrator from the manager's pool. Order/match
+			// status updates are best-effort and live alongside.
+			OnTerminal: c.adaptorTerminalCallback(tracker, matchID, mkt.Name),
 			// SendMsg is wired per-match to the trade's
 			// dexConnection so outbound adaptor_* messages
 			// actually reach the server.

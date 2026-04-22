@@ -69,6 +69,13 @@ type Config struct {
 	// at PhaseSpendPresig.
 	SpendObserver func(outpoint wire.OutPoint, startHeight int64)
 
+	// OnTerminal is called once when the orchestrator reaches a
+	// terminal phase (PhaseComplete, PhaseFailed, PhasePunish).
+	// The bridge typically uses this to log the outcome, update
+	// the order's status, and tear down the orchestrator from the
+	// manager's registry. nil disables the callback.
+	OnTerminal func(phase Phase)
+
 	// Network tag for XMR address encoding (18=mainnet, 24=stagenet).
 	XmrNetTag uint64
 
@@ -1127,13 +1134,23 @@ func (o *Orchestrator) handlePunish(evt Event) error {
 }
 
 // save is a wrapper around the persister. Must be called with
-// o.state.mu held.
+// o.state.mu held. Also fires the OnTerminal callback exactly
+// once when the state machine first enters a terminal phase, so
+// the bridge can record outcomes and tear down the orchestrator.
 func (o *Orchestrator) save() error {
 	o.state.Updated = time.Now()
-	if o.persist == nil {
-		return nil
+	terminal := o.state.Phase.IsTerminal() && !o.terminalFired
+	if terminal {
+		o.terminalFired = true
 	}
-	return o.persist.Save(o.cfg.SwapID, o.state.Snapshot())
+	var err error
+	if o.persist != nil {
+		err = o.persist.Save(o.cfg.SwapID, o.state.Snapshot())
+	}
+	if terminal && o.cfg.OnTerminal != nil {
+		o.cfg.OnTerminal(o.state.Phase)
+	}
+	return err
 }
 
 // ----- crypto helpers -----
