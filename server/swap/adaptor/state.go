@@ -29,6 +29,7 @@
 package adaptor
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -310,8 +311,15 @@ type BTCAuditor interface {
 // can adjudicate refund/punish claims that reference XMR outputs.
 // A permissive operator config may skip this and trust the
 // counterparty reports.
+//
+// The implementation in server/asset/xmr opens a per-swap view-only
+// wallet via monero-wallet-rpc's generate_from_keys. swapID names
+// the wallet file; viewKeyHex is the shared view key derived from
+// both parties' halves; restoreHeight is the block at which the
+// participant sent XMR (avoids scanning the full chain).
 type XMRAuditor interface {
-	WaitOutputAtAddress(sharedAddr string, amount uint64, minConf uint32) error
+	WaitOutputAtAddress(ctx context.Context, swapID, sharedAddr,
+		viewKeyHex string, restoreHeight, amount uint64, minConf uint32) error
 }
 
 // OutcomeReporter feeds the reputation system. Implementations
