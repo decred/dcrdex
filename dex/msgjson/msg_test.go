@@ -1347,3 +1347,46 @@ func TestMMEpochSnapshotSerialize(t *testing.T) {
 		t.Fatalf("Sig mismatch after JSON round-trip")
 	}
 }
+
+// TestMarketAdaptorFields confirms the SwapType, ScriptableAsset,
+// and LockBlocks fields round-trip through JSON, and that an HTLC
+// market (zero values) marshals without emitting the omitempty
+// fields, preserving wire compatibility with pre-adaptor servers.
+func TestMarketAdaptorFields(t *testing.T) {
+	adaptor := &Market{
+		Name:            "btc_xmr",
+		Base:            0,
+		Quote:           128,
+		LotSize:         100000,
+		RateStep:        100,
+		EpochLen:        20000,
+		ParcelSize:      1,
+		SwapType:        1,
+		ScriptableAsset: 0,
+		LockBlocks:      144,
+	}
+	b, err := json.Marshal(adaptor)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var back Market
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if back.SwapType != 1 || back.ScriptableAsset != 0 || back.LockBlocks != 144 {
+		t.Fatalf("adaptor fields lost: swapType=%d scriptable=%d lockBlocks=%d",
+			back.SwapType, back.ScriptableAsset, back.LockBlocks)
+	}
+
+	// HTLC market: omitempty must drop all three new fields.
+	htlc := &Market{Name: "dcr_btc", Base: 42, Quote: 0}
+	hb, err := json.Marshal(htlc)
+	if err != nil {
+		t.Fatalf("marshal htlc: %v", err)
+	}
+	for _, key := range []string{"swaptype", "scriptableasset", "lockblocks"} {
+		if bytes.Contains(hb, []byte(key)) {
+			t.Fatalf("HTLC market wire form should not contain %q: %s", key, hb)
+		}
+	}
+}

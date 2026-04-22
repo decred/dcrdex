@@ -1271,7 +1271,21 @@ type Market struct {
 	RateStep        uint64  `json:"ratestep"`
 	MarketBuyBuffer float64 `json:"buybuffer"`
 	ParcelSize      uint32  `json:"parcelSize"`
-	MarketStatus    `json:"status"`
+	// SwapType selects the swap protocol. 0 (default) means
+	// HTLC; 1 means BIP-340 adaptor-signature swap. Adaptor
+	// markets additionally populate ScriptableAsset and
+	// LockBlocks. omitempty preserves wire compatibility with
+	// pre-adaptor servers.
+	SwapType uint8 `json:"swaptype,omitempty"`
+	// ScriptableAsset is only meaningful when SwapType is the
+	// adaptor swap. It names the asset (Base or Quote) whose
+	// holders must be makers on this market.
+	ScriptableAsset uint32 `json:"scriptableasset,omitempty"`
+	// LockBlocks is only meaningful when SwapType is the
+	// adaptor swap. It is the CSV window (in scriptable-chain
+	// blocks) on the punish leaf of the refund tap tree.
+	LockBlocks   uint32 `json:"lockblocks,omitempty"`
+	MarketStatus `json:"status"`
 }
 
 // Running indicates if the market should be running given the known StartEpoch,

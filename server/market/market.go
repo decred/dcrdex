@@ -688,6 +688,13 @@ func (m *Market) SwapInfo() (dex.SwapType, uint32) {
 	return m.marketInfo.SwapType, m.marketInfo.ScriptableAsset
 }
 
+// LockBlocks returns the CSV window (in scriptable-chain blocks) on
+// the punish leaf of the refund tap tree. Only meaningful for
+// adaptor-swap markets; zero for HTLC markets.
+func (m *Market) LockBlocks() uint32 {
+	return m.marketInfo.LockBlocks
+}
+
 // Base is the base asset ID.
 func (m *Market) Base() uint32 {
 	return m.marketInfo.Base

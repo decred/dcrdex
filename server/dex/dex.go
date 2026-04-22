@@ -1103,6 +1103,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		startEpochIdx := 1 + now/int64(mkt.EpochDuration())
 		mkt.SetStartEpochIdx(startEpochIdx)
 		bookSources[name] = mkt
+		swapType, scriptable := mkt.SwapInfo()
 		cfgMarkets = append(cfgMarkets, &msgjson.Market{
 			Name:            name,
 			Base:            mkt.Base(),
@@ -1112,6 +1113,9 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			EpochLen:        mkt.EpochDuration(),
 			MarketBuyBuffer: mkt.MarketBuyBuffer(),
 			ParcelSize:      mkt.ParcelSize(),
+			SwapType:        uint8(swapType),
+			ScriptableAsset: scriptable,
+			LockBlocks:      mkt.LockBlocks(),
 			MarketStatus: msgjson.MarketStatus{
 				StartEpoch: uint64(startEpochIdx),
 			},
