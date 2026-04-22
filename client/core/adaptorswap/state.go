@@ -230,6 +230,23 @@ type EventSpendObservedOnChain struct{ Witness [][]byte }
 type EventRefundObservedOnChain struct{ Witness [][]byte }
 type EventTimeout struct{ Reason string }
 
+// Refund-branch events.
+//
+// EventRefundCSVMatured fires when the refundTx output has matured
+// past its CSV locktime and the caller may now spend it (either via
+// the coop path or the punish path depending on role).
+type EventRefundCSVMatured struct{ Height int64 }
+
+// EventCoopRefundObserved fires (participant only) when the
+// initiator's coop-refund spendRefundTx hits the chain. The witness
+// carries the completed participant signature from which the
+// participant's XMR scalar is recovered via RecoverTweakBIP340.
+type EventCoopRefundObserved struct{ Witness [][]byte }
+
+// EventPunishObserved is informational; when either party sees the
+// punish leaf spent they can mark the swap terminal.
+type EventPunishObserved struct{ TxID []byte }
+
 func (EventKeysReceived) eventTag()            {}
 func (EventRefundPresignedReceived) eventTag() {}
 func (EventLockConfirmed) eventTag()           {}
@@ -238,6 +255,9 @@ func (EventSpendPresigReceived) eventTag()     {}
 func (EventSpendObservedOnChain) eventTag()    {}
 func (EventRefundObservedOnChain) eventTag()   {}
 func (EventTimeout) eventTag()                 {}
+func (EventRefundCSVMatured) eventTag()        {}
+func (EventCoopRefundObserved) eventTag()      {}
+func (EventPunishObserved) eventTag()          {}
 
 // Orchestrator drives a State through the protocol.
 //

@@ -364,8 +364,29 @@ func (o *Orchestrator) participantConsumeInitSetup(m *msgjson.AdaptorSetupInit) 
 	s.PunishLeafScript = m.PunishLeafScript
 	s.LockBlocks = m.LockBlocks
 
-	// TODO: validate that the scripts, when re-derived from
-	// advertised pubkeys + lockBlocks, match m.LockLeafScript etc.
+	// Rebuild Lock and Refund locally so the participant has the
+	// control blocks available at spend time. Both sides call
+	// btcadaptor with the same inputs, producing identical outputs
+	// - also serves as a structural sanity check on the received
+	// leaf scripts.
+	kal := m.PubSignKeyHalf
+	kaf := btcschnorr.SerializePubKey(s.BtcSignKey.PubKey())
+	lock, err := btcadaptor.NewLockTxOutput(kal, kaf)
+	if err != nil {
+		return fmt.Errorf("participant rebuild lock: %w", err)
+	}
+	if !bytes.Equal(lock.LeafScript, m.LockLeafScript) {
+		return errors.New("lock leaf script mismatch vs. local rebuild")
+	}
+	refund, err := btcadaptor.NewRefundTxOutput(kal, kaf, int64(m.LockBlocks))
+	if err != nil {
+		return fmt.Errorf("participant rebuild refund: %w", err)
+	}
+	if !bytes.Equal(refund.PkScript, m.RefundPkScript) {
+		return errors.New("refund pkScript mismatch vs. local rebuild")
+	}
+	s.Lock = lock
+	s.Refund = refund
 
 	// Pre-sign refundTx and adaptor-sign spendRefundTx.
 	sigRefund, esig, err := o.participantPresignRefund()
@@ -737,24 +758,222 @@ func (o *Orchestrator) handleSpendBroadcast(evt Event) error {
 	return o.save()
 }
 
-// Refund-path handlers are stubbed; they mirror the CLI's
-// aliceBailsBeforeXmrInit / refund / bobBailsAfterXmrInit scenarios
-// line-by-line and are the next piece of work. Left as targeted
-// TODOs rather than untested code.
+// InitiateRefund is called when the local party has decided to bail
+// on the swap and needs to start the refund chain. Assembles the
+// pre-signed refundTx witness from PeerRefundSig + OwnRefundSig and
+// broadcasts via the BTC adapter. Transitions to
+// PhaseRefundTxBroadcast; the caller is responsible for feeding
+// EventRefundCSVMatured (and, on the participant side,
+// EventCoopRefundObserved) once those chain events occur.
+func (o *Orchestrator) InitiateRefund() error {
+	o.state.mu.Lock()
+	defer o.state.mu.Unlock()
+	s := o.state
+	if s.RefundTx == nil || s.Lock == nil {
+		return errors.New("InitiateRefund: refund chain not ready")
+	}
+	// Participant holds its own refund sig in OwnRefundSig; peer's
+	// refund sig in PeerRefundSig. Initiator's own sig was generated
+	// in signRefundTx and cached separately. For both sides, the
+	// witness is [sig_kaf, sig_kal, script, control_block].
+	var sigKaf, sigKal []byte
+	if s.Role == RoleInitiator {
+		// initiator = kal, participant = kaf. peer sig is the kaf.
+		sigKaf = s.PeerRefundSig
+		// initiator's own sig - need to produce it now if not cached.
+		own, err := o.initiatorSignRefundTx()
+		if err != nil {
+			return err
+		}
+		sigKal = own
+	} else {
+		sigKaf = s.OwnRefundSig
+		sigKal = s.PeerRefundSig
+	}
 
+	ctrlSer, err := s.Lock.ControlBlock.ToBytes()
+	if err != nil {
+		return fmt.Errorf("control block: %w", err)
+	}
+	s.RefundTx.TxIn[0].Witness = wire.TxWitness{
+		sigKaf, sigKal, s.Lock.LeafScript, ctrlSer,
+	}
+	if _, err := o.assetBTC.BroadcastTx(s.RefundTx); err != nil {
+		return fmt.Errorf("broadcast refundTx: %w", err)
+	}
+	s.Phase = PhaseRefundTxBroadcast
+	return o.save()
+}
+
+// initiatorSignRefundTx produces the initiator's cooperative sig on
+// refundTx at refund time. Kept separate from the pre-sign flow so
+// we don't hold a standing signature over the wire.
+func (o *Orchestrator) initiatorSignRefundTx() ([]byte, error) {
+	s := o.state
+	prev := txscript.NewCannedPrevOutputFetcher(s.Lock.PkScript, o.cfg.BtcAmount)
+	sh := txscript.NewTxSigHashes(s.RefundTx, prev)
+	leaf := txscript.NewBaseTapLeaf(s.Lock.LeafScript)
+	return txscript.RawTxInTapscriptSignature(
+		s.RefundTx, sh, 0, o.cfg.BtcAmount, s.Lock.PkScript, leaf,
+		txscript.SigHashDefault, s.BtcSignKey,
+	)
+}
+
+// handleRefundTxBroadcast: wait for CSV maturity, then execute the
+// role-specific branch.
+//
+//   - Initiator: on EventRefundCSVMatured, decrypts the participant's
+//     adaptor-sig on spendRefundTx using its own ed25519 scalar and
+//     broadcasts the coop path. Transitions to PhaseCoopRefund
+//     terminal.
+//   - Participant: on EventCoopRefundObserved (initiator cooperated),
+//     recovers the initiator's scalar from the on-chain sig and
+//     sweeps the shared-address XMR. Terminal.
+//   - Participant: on EventRefundCSVMatured (initiator stalled),
+//     signs the punish leaf alone and broadcasts. Transitions to
+//     PhasePunish terminal. XMR is forfeited.
 func (o *Orchestrator) handleRefundTxBroadcast(evt Event) error {
-	// TODO: port from internal/cmd/btcxmrswap refund flows.
-	return errors.New("refund path not yet implemented in orchestrator")
+	s := o.state
+	switch e := evt.(type) {
+	case EventRefundCSVMatured:
+		if s.Role == RoleInitiator {
+			return o.initiatorCoopRefund()
+		}
+		return o.participantPunish()
+	case EventCoopRefundObserved:
+		if s.Role != RoleParticipant {
+			return errors.New("EventCoopRefundObserved unexpected on initiator side")
+		}
+		return o.participantRecoverAndSweep(e.Witness)
+	default:
+		return fmt.Errorf("unexpected event %T in PhaseRefundTxBroadcast", evt)
+	}
 }
 
+// initiatorCoopRefund (Bob) decrypts Alice's adaptor sig on
+// spendRefundTx with his ed25519 scalar, signs his own tapscript
+// half, assembles the coop-leaf witness, and broadcasts. Terminal
+// on success.
+func (o *Orchestrator) initiatorCoopRefund() error {
+	s := o.state
+	bobScalar, _ := btcec.PrivKeyFromBytes(s.XmrSpendKeyHalf.Serialize())
+	aliceSig, err := s.SpendRefundAdaptorSig.DecryptBIP340(&bobScalar.Key)
+	if err != nil {
+		return fmt.Errorf("decrypt alice spendRefund adaptor: %w", err)
+	}
+	refundValue := s.RefundTx.TxOut[0].Value
+	prev := txscript.NewCannedPrevOutputFetcher(s.Refund.PkScript, refundValue)
+	sh := txscript.NewTxSigHashes(s.SpendRefundTx, prev)
+	leaf := txscript.NewBaseTapLeaf(s.Refund.CoopLeafScript)
+
+	bobSig, err := txscript.RawTxInTapscriptSignature(
+		s.SpendRefundTx, sh, 0, refundValue, s.Refund.PkScript, leaf,
+		txscript.SigHashDefault, s.BtcSignKey,
+	)
+	if err != nil {
+		return fmt.Errorf("bob sign spendRefund coop: %w", err)
+	}
+	ctrlSer, err := s.Refund.CoopControlBlock.ToBytes()
+	if err != nil {
+		return fmt.Errorf("coop control block: %w", err)
+	}
+	s.SpendRefundTx.TxIn[0].Witness = wire.TxWitness{
+		aliceSig.Serialize(), bobSig, s.Refund.CoopLeafScript, ctrlSer,
+	}
+	if _, err := o.assetBTC.BroadcastTx(s.SpendRefundTx); err != nil {
+		return fmt.Errorf("broadcast coop spendRefund: %w", err)
+	}
+	s.Phase = PhaseCoopRefund
+	s.Phase = PhaseComplete
+	return o.save()
+}
+
+// participantPunish (Alice) signs the punish leaf alone and
+// broadcasts the spendRefundTx after CSV matured without initiator
+// cooperation. Terminal - XMR is stranded at the shared address.
+func (o *Orchestrator) participantPunish() error {
+	s := o.state
+	refundValue := s.RefundTx.TxOut[0].Value
+	prev := txscript.NewCannedPrevOutputFetcher(s.Refund.PkScript, refundValue)
+	sh := txscript.NewTxSigHashes(s.SpendRefundTx, prev)
+	leaf := txscript.NewBaseTapLeaf(s.Refund.PunishLeafScript)
+
+	aliceSig, err := txscript.RawTxInTapscriptSignature(
+		s.SpendRefundTx, sh, 0, refundValue, s.Refund.PkScript, leaf,
+		txscript.SigHashDefault, s.BtcSignKey,
+	)
+	if err != nil {
+		return fmt.Errorf("alice punish sign: %w", err)
+	}
+	ctrlSer, err := s.Refund.PunishControlBlock.ToBytes()
+	if err != nil {
+		return fmt.Errorf("punish control block: %w", err)
+	}
+	s.SpendRefundTx.TxIn[0].Witness = wire.TxWitness{
+		aliceSig, s.Refund.PunishLeafScript, ctrlSer,
+	}
+	if _, err := o.assetBTC.BroadcastTx(s.SpendRefundTx); err != nil {
+		return fmt.Errorf("broadcast punish spendRefund: %w", err)
+	}
+	s.Phase = PhasePunish
+	return o.save()
+}
+
+// participantRecoverAndSweep (Alice) extracts the initiator's XMR
+// scalar from the coop-refund witness on-chain, combines with her
+// own half, and sweeps the shared-address XMR.
+func (o *Orchestrator) participantRecoverAndSweep(witness [][]byte) error {
+	s := o.state
+	if len(witness) < 2 {
+		return fmt.Errorf("coop witness too short: %d", len(witness))
+	}
+	// Witness layout: [sig_kaf (alice completed), sig_kal (bob), script, ctrl].
+	completed := witness[0]
+	sig, err := btcschnorr.ParseSignature(completed)
+	if err != nil {
+		return fmt.Errorf("parse completed sig: %w", err)
+	}
+	scalar, err := s.SpendRefundAdaptorSig.RecoverTweakBIP340(sig)
+	if err != nil {
+		return fmt.Errorf("recover bob scalar: %w", err)
+	}
+	s.RecoveredPeerScalar = scalar
+
+	var sb [32]byte
+	scalar.PutBytes(&sb)
+	partRecov, _, err := edwards.PrivKeyFromScalar(sb[:])
+	if err != nil {
+		return fmt.Errorf("part scalar -> ed25519: %w", err)
+	}
+	full := scalarAdd(s.XmrSpendKeyHalf.GetD(), partRecov.GetD())
+	full.Mod(full, curve.N)
+	var fullBytes [32]byte
+	full.FillBytes(fullBytes[:])
+
+	viewHex := hex.EncodeToString(reverseBytes(s.FullViewKey.Serialize()))
+	spendHex := hex.EncodeToString(reverseBytes(fullBytes[:]))
+	sharedAddr := deriveSharedAddress(s.FullSpendPub, s.FullViewKey.PubKey(), o.cfg.XmrNetTag)
+
+	if _, err := o.assetXMR.SweepSharedAddress(hex.EncodeToString(o.cfg.SwapID[:]),
+		sharedAddr, spendHex, viewHex, s.XmrRestoreHeight, o.cfg.OwnXMRSweepDest); err != nil {
+		return fmt.Errorf("sweep xmr: %w", err)
+	}
+	s.Phase = PhaseCoopRefund
+	s.Phase = PhaseComplete
+	return o.save()
+}
+
+// handleCoopRefund: terminal for initiator on the coop path;
+// participant transitions via participantRecoverAndSweep from
+// handleRefundTxBroadcast.
 func (o *Orchestrator) handleCoopRefund(evt Event) error {
-	// TODO: port from btcxmrswap refundBtc+refundXmr.
-	return errors.New("coop refund not yet implemented in orchestrator")
+	return fmt.Errorf("event %T in terminal PhaseCoopRefund", evt)
 }
 
+// handlePunish: terminal for participant. Initiator does not reach
+// this phase (the punish path is participant-only).
 func (o *Orchestrator) handlePunish(evt Event) error {
-	// TODO: port from btcxmrswap takeBtc.
-	return errors.New("punish not yet implemented in orchestrator")
+	return fmt.Errorf("event %T in terminal PhasePunish", evt)
 }
 
 // save is a wrapper around the persister. Must be called with

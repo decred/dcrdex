@@ -304,5 +304,94 @@ func TestHandleRejectsWrongEvent(t *testing.T) {
 	}
 }
 
+// TestInitiatorRefundPath drives a fully-setup initiator from
+// PhaseLockBroadcast through InitiateRefund -> RefundTxBroadcast ->
+// EventRefundCSVMatured -> coop spendRefund broadcast (terminal).
+func TestInitiatorRefundPath(t *testing.T) {
+	msgr := &recordingSender{}
+	btc := &fakeBTC{}
+	cfg := &Config{
+		SwapID: [32]byte{1}, OrderID: [32]byte{2}, MatchID: [32]byte{3},
+		Role:                RoleInitiator,
+		BtcAmount:           100_000,
+		XmrAmount:           1000,
+		LockBlocks:          2,
+		PeerBTCPayoutScript: []byte{txscript.OP_TRUE},
+		XmrNetTag:           18,
+		AssetBTC:            btc,
+		AssetXMR:            &fakeXMR{},
+		SendMsg:             msgr,
+		Persist:             &memPersister{},
+	}
+	o, _ := NewOrchestrator(cfg)
+	_ = o.Start()
+
+	partSetup, _, _, _ := fakePeerSetup(t, cfg.OrderID, cfg.MatchID)
+	if err := o.Handle(EventKeysReceived{Setup: partSetup}); err != nil {
+		t.Fatalf("part setup: %v", err)
+	}
+
+	// Fabricate a real adaptor sig for spendRefundTx using Bob's XMR
+	// scalar as the tweak - this is what the initiator would later
+	// decrypt with its own ed25519 key.
+	//
+	// Tweak point = Bob's XMR spend-key half secp pubkey. Here we
+	// just reach into the orchestrator state to grab Bob's own
+	// ed25519 scalar and use it to create T.
+	bobScalar, _ := btcec.PrivKeyFromBytes(o.state.XmrSpendKeyHalf.Serialize())
+	var T btcec.JacobianPoint
+	btcec.ScalarBaseMultNonConst(&bobScalar.Key, &T)
+
+	// Alice's secp signing key is fresh for this test; we build an
+	// adaptor sig on the orchestrator's spendRefundTx sighash.
+	alicePriv, _ := btcec.NewPrivateKey()
+	refundValue := o.state.RefundTx.TxOut[0].Value
+	prev := txscript.NewCannedPrevOutputFetcher(o.state.Refund.PkScript, refundValue)
+	sh := txscript.NewTxSigHashes(o.state.SpendRefundTx, prev)
+	coopLeaf := txscript.NewBaseTapLeaf(o.state.Refund.CoopLeafScript)
+	sigHash, err := txscript.CalcTapscriptSignaturehash(sh, txscript.SigHashDefault,
+		o.state.SpendRefundTx, 0, prev, coopLeaf)
+	if err != nil {
+		t.Fatalf("sighash: %v", err)
+	}
+	esig, err := adaptorsigs.PublicKeyTweakedAdaptorSigBIP340(alicePriv, sigHash, &T)
+	if err != nil {
+		t.Fatalf("adaptor: %v", err)
+	}
+
+	pres := EventRefundPresignedReceived{
+		RefundSig:  make([]byte, 64),
+		AdaptorSig: esig.Serialize(),
+	}
+	if err := o.Handle(pres); err != nil {
+		t.Fatalf("presigned: %v", err)
+	}
+	if o.state.Phase != PhaseLockBroadcast {
+		t.Fatalf("phase=%s want PhaseLockBroadcast", o.state.Phase)
+	}
+
+	// Now pivot to refund path. Initiator decides to bail.
+	if err := o.InitiateRefund(); err != nil {
+		t.Fatalf("InitiateRefund: %v", err)
+	}
+	if o.state.Phase != PhaseRefundTxBroadcast {
+		t.Fatalf("phase=%s want PhaseRefundTxBroadcast", o.state.Phase)
+	}
+	if len(btc.broadcasts) != 1 {
+		t.Fatalf("refundTx broadcasts: %d want 1", len(btc.broadcasts))
+	}
+
+	// CSV matures - initiator coop-refunds.
+	if err := o.Handle(EventRefundCSVMatured{Height: 200}); err != nil {
+		t.Fatalf("csv matured: %v", err)
+	}
+	if o.state.Phase != PhaseComplete {
+		t.Fatalf("phase=%s want PhaseComplete", o.state.Phase)
+	}
+	if len(btc.broadcasts) != 2 {
+		t.Fatalf("spendRefund broadcasts: %d want 2 total", len(btc.broadcasts))
+	}
+}
+
 // Ensure unused imports compile in all code paths.
 var _ = fmt.Errorf
