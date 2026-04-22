@@ -50,18 +50,23 @@ func TestManagerRouteToEventMapping(t *testing.T) {
 		})
 	}
 
-	// Informational routes.
-	for _, route := range []string{
-		msgjson.AdaptorLockedRoute,
-		msgjson.AdaptorSpendBroadcastRoute,
-	} {
-		_, err := routeToEvent(route, nil)
-		if !errors.Is(err, errPurelyInformational) {
-			t.Fatalf("route %s: err=%v want informational", route, err)
-		}
-		if !IsInformational(err) {
-			t.Fatalf("IsInformational rejected informational error for %s", route)
-		}
+	// AdaptorLocked now produces EventLockConfirmed (trust mode in
+	// the absence of a participant-side chain watcher).
+	if evt, err := routeToEvent(msgjson.AdaptorLockedRoute,
+		&msgjson.AdaptorLocked{}); err != nil {
+		t.Fatalf("AdaptorLockedRoute: err=%v", err)
+	} else if _, ok := evt.(adaptorswap.EventLockConfirmed); !ok {
+		t.Fatalf("AdaptorLockedRoute event type %T, want EventLockConfirmed", evt)
+	}
+
+	// AdaptorSpendBroadcast remains informational (initiator
+	// advances via observed witness).
+	_, err := routeToEvent(msgjson.AdaptorSpendBroadcastRoute, nil)
+	if !errors.Is(err, errPurelyInformational) {
+		t.Fatalf("AdaptorSpendBroadcastRoute: err=%v want informational", err)
+	}
+	if !IsInformational(err) {
+		t.Fatal("IsInformational rejected informational error for AdaptorSpendBroadcastRoute")
 	}
 
 	// Unknown route.
@@ -121,8 +126,11 @@ func TestManagerStartAndHandle(t *testing.T) {
 		t.Fatal("expected error for unknown match")
 	}
 
-	// Informational routes return the sentinel, not a failure.
-	if err := m.Handle(msgjson.AdaptorLockedRoute, matchID, &msgjson.AdaptorLocked{}); err == nil {
+	// AdaptorSpendBroadcast remains the only purely informational
+	// route (terminal on the participant side; initiator advances
+	// via on-chain witness observation, not the wire claim).
+	if err := m.Handle(msgjson.AdaptorSpendBroadcastRoute, matchID,
+		&msgjson.AdaptorSpendBroadcast{}); err == nil {
 		t.Fatal("expected informational error")
 	} else if !IsInformational(err) {
 		t.Fatalf("got %v, want informational", err)
@@ -187,24 +195,16 @@ func TestHandleAdaptorMsg(t *testing.T) {
 		})
 	}
 
-	// Informational routes: with the orchestrator started, the
-	// manager returns errPurelyInformational; the handler must
-	// suppress it.
-	for _, route := range []string{msgjson.AdaptorLockedRoute, msgjson.AdaptorSpendBroadcastRoute} {
-		var p any
-		switch route {
-		case msgjson.AdaptorLockedRoute:
-			p = &msgjson.AdaptorLocked{MatchID: matchID[:]}
-		case msgjson.AdaptorSpendBroadcastRoute:
-			p = &msgjson.AdaptorSpendBroadcast{MatchID: matchID[:]}
-		}
-		msg, err := msgjson.NewNotification(route, p)
-		if err != nil {
-			t.Fatalf("NewNotification(%s): %v", route, err)
-		}
-		if err := handleAdaptorMsg(c, nil, msg); err != nil {
-			t.Fatalf("informational %s leaked error: %v", route, err)
-		}
+	// AdaptorSpendBroadcast remains informational on the
+	// initiator side (it advances via observed witness, not the
+	// wire claim). Confirm the handler suppresses the sentinel.
+	msg, err := msgjson.NewNotification(msgjson.AdaptorSpendBroadcastRoute,
+		&msgjson.AdaptorSpendBroadcast{MatchID: matchID[:]})
+	if err != nil {
+		t.Fatalf("NewNotification: %v", err)
+	}
+	if err := handleAdaptorMsg(c, nil, msg); err != nil {
+		t.Fatalf("informational adaptor_spend_broadcast leaked error: %v", err)
 	}
 
 	// Bad match ID length surfaces as a decode error.

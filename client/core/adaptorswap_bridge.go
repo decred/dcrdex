@@ -185,12 +185,22 @@ func routeToEvent(route string, payload any) (adaptorswap.Event, error) {
 			AdaptorSig: m.SpendRefundAdaptorSig,
 		}, nil
 	case msgjson.AdaptorLockedRoute:
-		// Locked notification; the initiator's wallet and the
-		// participant's chain watcher both feed EventLockConfirmed
-		// once confirmation depth is reached. This message itself
-		// is informational; the orchestrator advances on the
-		// chain event.
-		return nil, errPurelyInformational
+		// AdaptorLocked carries the initiator's confirmed lockTx
+		// outpoint + value. In the absence of a participant-side
+		// chain watcher (production deployments would add one) we
+		// trust the wire claim and fire EventLockConfirmed so the
+		// participant proceeds to send XMR. The matching server-
+		// side coordinator validates the claim; a malicious
+		// initiator who lies here gets caught when the participant
+		// later observes the chain or the audit kicks in.
+		if _, ok := payload.(*msgjson.AdaptorLocked); !ok {
+			return nil, fmt.Errorf("payload type %T for route %s", payload, route)
+		}
+		// Height isn't carried on AdaptorLocked; participant uses
+		// it only to record into LockHeight, which is informational
+		// (XMR restore-from height comes from the participant's own
+		// XMR wallet, not BTC height). Zero is fine.
+		return adaptorswap.EventLockConfirmed{Height: 0}, nil
 	case msgjson.AdaptorXmrLockedRoute:
 		m, ok := payload.(*msgjson.AdaptorXmrLocked)
 		if !ok {

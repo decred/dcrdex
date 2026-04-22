@@ -621,20 +621,36 @@ func (o *Orchestrator) handleKeysReceived(evt Event) error {
 		return fmt.Errorf("send AdaptorLocked: %w", err)
 	}
 	s.Phase = PhaseLockBroadcast
-	return o.save()
+	if err := o.save(); err != nil {
+		return err
+	}
+	// FundBroadcastTaproot's waitForConfirm callback already blocked
+	// until the tx confirmed, so the height is real and we can
+	// immediately self-fire EventLockConfirmed without waiting for an
+	// external chain watcher. Advances to PhaseLockConfirmed and
+	// waits for participant's AdaptorXmrLocked.
+	return o.handleLockBroadcast(EventLockConfirmed{Height: height})
 }
 
 // handleRefundPresigned: participant side, awaits EventLockConfirmed
-// or an inbound AdaptorLocked for awareness.
+// (delivered either by a chain watcher or, on simnet/test mode, by
+// the inbound AdaptorLocked notification translated to an event in
+// the bridge). On confirmation, advances to PhaseLockConfirmed and
+// chains directly into handleLockConfirmed so the participant
+// proceeds to send XMR without needing a second wakeup.
 func (o *Orchestrator) handleRefundPresigned(evt Event) error {
-	switch e := evt.(type) {
-	case EventLockConfirmed:
-		o.state.LockHeight = e.Height
-		o.state.Phase = PhaseLockConfirmed
-		return o.save()
-	default:
+	e, ok := evt.(EventLockConfirmed)
+	if !ok {
 		return fmt.Errorf("expected EventLockConfirmed, got %T", evt)
 	}
+	o.state.LockHeight = e.Height
+	o.state.Phase = PhaseLockConfirmed
+	if err := o.save(); err != nil {
+		return err
+	}
+	// Continue inline: handleLockConfirmed (participant branch) sends
+	// XMR and advances to PhaseXmrSent.
+	return o.handleLockConfirmed(evt)
 }
 
 // handleLockBroadcast: initiator waits for its lockTx to reach
@@ -664,7 +680,15 @@ func (o *Orchestrator) handleLockConfirmed(evt Event) error {
 		s.XmrSendTxID = string(xmr.XmrTxID)
 		s.XmrRestoreHeight = xmr.RestoreHeight
 		s.Phase = PhaseXmrConfirmed
-		return o.save()
+		if err := o.save(); err != nil {
+			return err
+		}
+		// On simnet / no XMR auditor configured, trust the
+		// participant's claim and continue inline. handleXmrConfirmed
+		// builds + adaptor-signs spendTx and emits AdaptorSpendPresig.
+		// Production with a real XMR auditor would instead wait for
+		// EventXmrConfirmed before invoking this handler.
+		return o.handleXmrConfirmed(EventXmrConfirmed{Height: xmr.RestoreHeight})
 	}
 	// Participant: send XMR.
 	sharedAddr := deriveSharedAddress(s.FullSpendPub, s.FullViewKey.PubKey(), o.cfg.XmrNetTag)

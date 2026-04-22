@@ -225,8 +225,11 @@ func TestInitiatorHappyPathThroughLockBroadcast(t *testing.T) {
 	if err := o.Handle(pres); err != nil {
 		t.Fatalf("handle refund presigned: %v", err)
 	}
-	if o.state.Phase != PhaseLockBroadcast {
-		t.Fatalf("after refund presigned phase=%s want PhaseLockBroadcast", o.state.Phase)
+	// Initiator now auto-advances through PhaseLockBroadcast on
+	// the strength of FundBroadcastTaproot's blocking confirm and
+	// lands in PhaseLockConfirmed waiting for AdaptorXmrLocked.
+	if o.state.Phase != PhaseLockConfirmed {
+		t.Fatalf("after refund presigned phase=%s want PhaseLockConfirmed", o.state.Phase)
 	}
 	if o.state.LockTx == nil || o.state.LockHeight != 100 {
 		t.Fatalf("lockTx not recorded: tx=%v height=%d", o.state.LockTx != nil, o.state.LockHeight)
@@ -366,8 +369,11 @@ func TestInitiatorRefundPath(t *testing.T) {
 	if err := o.Handle(pres); err != nil {
 		t.Fatalf("presigned: %v", err)
 	}
-	if o.state.Phase != PhaseLockBroadcast {
-		t.Fatalf("phase=%s want PhaseLockBroadcast", o.state.Phase)
+	// Initiator auto-advances through PhaseLockBroadcast (lockTx
+	// confirmed by FundBroadcastTaproot's blocking confirm) and
+	// lands in PhaseLockConfirmed.
+	if o.state.Phase != PhaseLockConfirmed {
+		t.Fatalf("phase=%s want PhaseLockConfirmed", o.state.Phase)
 	}
 
 	// Now pivot to refund path. Initiator decides to bail.
@@ -854,8 +860,8 @@ func TestResumeFromSnapshot(t *testing.T) {
 		t.Fatalf("presigned: %v", err)
 	}
 	savedPhase := o.Phase()
-	if savedPhase != PhaseLockBroadcast {
-		t.Fatalf("setup phase = %s, want PhaseLockBroadcast", savedPhase)
+	if savedPhase != PhaseLockConfirmed {
+		t.Fatalf("setup phase = %s, want PhaseLockConfirmed", savedPhase)
 	}
 
 	// Snapshot -> bytes.
