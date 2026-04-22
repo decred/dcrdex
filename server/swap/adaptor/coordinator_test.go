@@ -355,6 +355,93 @@ func TestServerFilePersisterRoundtrip(t *testing.T) {
 // TestCoordinatorHappyPathTerminal exercises the final on-chain
 // spend observation: PhaseAwaitingSpendBroadcast + EventSpendOnChain
 // should report OutcomeSuccess for both roles.
+// TestCoordinatorLockPhaseAdvances validates the chain-event side
+// of the coordinator: EventLocked relays the BTC lock notice to the
+// participant without advancing phase, EventLockConfirmed advances
+// to PhaseAwaitingXmrLocked, EventXmrLocked relays the XMR notice
+// to the initiator and (with no XMR auditor wired) auto-advances to
+// PhaseAwaitingSpendPresig.
+func TestCoordinatorLockPhaseAdvances(t *testing.T) {
+	router := &recordingRouter{}
+	cfg := &Config{
+		MatchID: [32]byte{0x55}, OrderID: [32]byte{0x66},
+		Router: router, Persist: &nopPersister{},
+	}
+	c, err := NewCoordinator(cfg)
+	if err != nil {
+		t.Fatalf("NewCoordinator: %v", err)
+	}
+
+	// Skip ahead to the start of the lock phase.
+	c.state.Phase = PhaseAwaitingLocked
+
+	// EventLocked: relays AdaptorLockedRoute to participant. With no
+	// BTC auditor wired (cfg.BTC == nil), the coordinator trust-skips
+	// the audit and auto-advances to PhaseAwaitingXmrLocked, mirroring
+	// the no-XMR-auditor branch below.
+	lockTxID := []byte{1, 2, 3, 4}
+	if err := c.Handle(EventLocked{Msg: &msgjson.AdaptorLocked{
+		MatchID: cfg.MatchID[:], TxID: lockTxID, Vout: 0, Value: 100_000_000,
+	}}); err != nil {
+		t.Fatalf("EventLocked: %v", err)
+	}
+	if got := router.last(); got.role != RoleParticipant || got.route != msgjson.AdaptorLockedRoute {
+		t.Fatalf("EventLocked routed to role=%d route=%s, want RoleParticipant/AdaptorLockedRoute", got.role, got.route)
+	}
+	if got := c.Phase(); got != PhaseAwaitingXmrLocked {
+		t.Fatalf("after EventLocked phase=%s, want PhaseAwaitingXmrLocked (trust-skip with no auditor)", got)
+	}
+
+	// EventXmrLocked: relays AdaptorXmrLockedRoute to initiator. No
+	// XMR auditor is wired (cfg.XMR == nil), so the coordinator
+	// trust-skips the audit and auto-advances.
+	if err := c.Handle(EventXmrLocked{Msg: &msgjson.AdaptorXmrLocked{
+		MatchID: cfg.MatchID[:], XmrTxID: []byte("xmrtxid"), RestoreHeight: 1234,
+	}}); err != nil {
+		t.Fatalf("EventXmrLocked: %v", err)
+	}
+	if got := router.last(); got.role != RoleInitiator || got.route != msgjson.AdaptorXmrLockedRoute {
+		t.Fatalf("EventXmrLocked routed to role=%d route=%s, want RoleInitiator/AdaptorXmrLockedRoute", got.role, got.route)
+	}
+	if got := c.Phase(); got != PhaseAwaitingSpendPresig {
+		t.Fatalf("after EventXmrLocked (no auditor) phase=%s, want PhaseAwaitingSpendPresig", got)
+	}
+}
+
+// TestCoordinatorOutOfPhaseEventErrors confirms that delivering an
+// event for a phase other than the current one is rejected without
+// changing state, and a valid event for the current phase still
+// works after the rejection (no permanent corruption).
+func TestCoordinatorOutOfPhaseEventErrors(t *testing.T) {
+	router := &recordingRouter{}
+	cfg := &Config{
+		MatchID: [32]byte{0x77}, OrderID: [32]byte{0x88},
+		Router: router, Persist: &nopPersister{},
+	}
+	c, err := NewCoordinator(cfg)
+	if err != nil {
+		t.Fatalf("NewCoordinator: %v", err)
+	}
+	// Coordinator is in PhaseAwaitingPartSetup; deliver an
+	// EventLocked instead. The handler should reject it.
+	if err := c.Handle(EventLocked{Msg: &msgjson.AdaptorLocked{
+		MatchID: cfg.MatchID[:], TxID: []byte{0xAA},
+	}}); err == nil {
+		t.Fatal("expected error for EventLocked in PhaseAwaitingPartSetup")
+	}
+	if got := c.Phase(); got != PhaseAwaitingPartSetup {
+		t.Fatalf("phase changed after rejected event: got %s, want PhaseAwaitingPartSetup", got)
+	}
+	// A valid in-phase event then proceeds normally.
+	part, _ := buildPartSetup(t, cfg.MatchID)
+	if err := c.Handle(EventPartSetup{Msg: part}); err != nil {
+		t.Fatalf("subsequent valid EventPartSetup: %v", err)
+	}
+	if got := c.Phase(); got != PhaseAwaitingInitSetup {
+		t.Fatalf("phase=%s, want PhaseAwaitingInitSetup", got)
+	}
+}
+
 func TestCoordinatorHappyPathTerminal(t *testing.T) {
 	router := &recordingRouter{}
 	reporter := &recordingReporter{}
