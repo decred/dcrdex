@@ -385,16 +385,22 @@ func (o *Orchestrator) initiatorConsumePartSetup(m *msgjson.AdaptorSetupPart) er
 func (o *Orchestrator) participantConsumeInitSetup(m *msgjson.AdaptorSetupInit) error {
 	s := o.state
 
-	fullSpend, err := btcec.ParsePubKey(m.PubSpendKey)
+	// PubSpendKey is the combined ed25519 spend pubkey serialized
+	// via SerializeCompressed in the initiator's emit path, so try
+	// edwards first; fall back to btcec only for forward compat.
+	fullSpend, err := edwards.ParsePubKey(m.PubSpendKey)
 	if err != nil {
-		// Also accept compressed ed25519.
-		pk, edErr := edwards.ParsePubKey(m.PubSpendKey)
-		if edErr != nil {
-			return fmt.Errorf("parse full spend: %w / %w", err, edErr)
+		_, secpErr := btcec.ParsePubKey(m.PubSpendKey)
+		if secpErr != nil {
+			return fmt.Errorf("parse full spend: %w / %w", err, secpErr)
 		}
-		_ = pk
+		// secp parse worked - we accept it but cannot derive a
+		// shared XMR address from a non-edwards pubkey, so the
+		// participant cannot sweep on the refund branch. Fail
+		// loudly rather than silently.
+		return errors.New("FullSpendPub came over the wire as secp; participant requires ed25519")
 	}
-	_ = fullSpend
+	s.FullSpendPub = fullSpend
 
 	peerScalarSecp, err := adaptorsigs.ExtractSecp256k1PubKeyFromProof(m.DLEQProof)
 	if err != nil {

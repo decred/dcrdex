@@ -393,6 +393,197 @@ func TestInitiatorRefundPath(t *testing.T) {
 	}
 }
 
+// driveSetupPhase runs both initiator and participant orchestrators
+// through the setup phase by hand, exchanging emitted messages
+// between them. After this call the participant is in
+// PhaseRefundPresigned with a fully-populated refund chain ready
+// to drive into refund/punish branches; the initiator has received
+// the AdaptorSetupPart and emitted AdaptorSetupInit but has not yet
+// processed the participant's refund-presigned (so it stays at
+// PhaseKeysReceived).
+//
+// Returns both orchestrators along with their senders so callers
+// can assert on the emitted messages. Used by the punish/recover
+// branch tests, which need a valid participant state to start
+// from but don't otherwise care about the initiator side.
+func driveSetupPhase(t *testing.T, initBTC, partBTC *fakeBTC,
+	initXMR, partXMR *fakeXMR, initSender, partSender *recordingSender) (
+	init *Orchestrator, part *Orchestrator) {
+
+	t.Helper()
+	matchID := [32]byte{0x42}
+	orderID := [32]byte{0x42}
+	mkCfg := func(role Role, btc *fakeBTC, xmr *fakeXMR, s *recordingSender) *Config {
+		return &Config{
+			SwapID: matchID, OrderID: orderID, MatchID: matchID,
+			Role:                role,
+			BtcAmount:           100_000,
+			XmrAmount:           1000,
+			LockBlocks:          2,
+			PeerBTCPayoutScript: []byte{txscript.OP_TRUE},
+			OwnXMRSweepDest:     "4tester",
+			XmrNetTag:           18,
+			AssetBTC:            btc,
+			AssetXMR:            xmr,
+			SendMsg:             s,
+			Persist:             &memPersister{},
+		}
+	}
+	var err error
+	init, err = NewOrchestrator(mkCfg(RoleInitiator, initBTC, initXMR, initSender))
+	if err != nil {
+		t.Fatalf("init NewOrchestrator: %v", err)
+	}
+	part, err = NewOrchestrator(mkCfg(RoleParticipant, partBTC, partXMR, partSender))
+	if err != nil {
+		t.Fatalf("part NewOrchestrator: %v", err)
+	}
+	if err := init.Start(); err != nil {
+		t.Fatalf("init Start: %v", err)
+	}
+	if err := part.Start(); err != nil {
+		t.Fatalf("part Start: %v", err)
+	}
+	// part emitted AdaptorSetupPart -> deliver to init.
+	partLast := partSender.last()
+	if partLast.route != msgjson.AdaptorSetupPartRoute {
+		t.Fatalf("part emitted %s, want AdaptorSetupPartRoute", partLast.route)
+	}
+	setupPart, ok := partLast.payload.(*msgjson.AdaptorSetupPart)
+	if !ok {
+		t.Fatalf("part payload type %T", partLast.payload)
+	}
+	if err := init.Handle(EventKeysReceived{Setup: setupPart}); err != nil {
+		t.Fatalf("init handle PartSetup: %v", err)
+	}
+	// init emitted AdaptorSetupInit -> deliver to part.
+	initLast := initSender.last()
+	if initLast.route != msgjson.AdaptorSetupInitRoute {
+		t.Fatalf("init emitted %s, want AdaptorSetupInitRoute", initLast.route)
+	}
+	setupInit, ok := initLast.payload.(*msgjson.AdaptorSetupInit)
+	if !ok {
+		t.Fatalf("init payload type %T", initLast.payload)
+	}
+	if err := part.Handle(EventKeysReceived{Setup: setupInit}); err != nil {
+		t.Fatalf("part handle InitSetup: %v", err)
+	}
+	if got := part.Phase(); got != PhaseRefundPresigned {
+		t.Fatalf("part phase after setup = %s, want PhaseRefundPresigned", got)
+	}
+	return init, part
+}
+
+// TestParticipantPunishPath drives a participant from a setup-
+// complete state through InitiateRefund + EventRefundCSVMatured
+// and verifies it broadcasts the punish-leaf spendRefundTx and
+// reaches PhasePunish (terminal). This is the asymmetric outcome
+// where the initiator stalled after the participant locked XMR -
+// the participant takes the BTC, but XMR is forfeited.
+func TestParticipantPunishPath(t *testing.T) {
+	initBTC, partBTC := &fakeBTC{}, &fakeBTC{}
+	initXMR, partXMR := &fakeXMR{}, &fakeXMR{}
+	initSender, partSender := &recordingSender{}, &recordingSender{}
+	_, part := driveSetupPhase(t, initBTC, partBTC, initXMR, partXMR, initSender, partSender)
+
+	if err := part.InitiateRefund(); err != nil {
+		t.Fatalf("part InitiateRefund: %v", err)
+	}
+	if got := part.Phase(); got != PhaseRefundTxBroadcast {
+		t.Fatalf("after InitiateRefund phase = %s, want PhaseRefundTxBroadcast", got)
+	}
+	if len(partBTC.broadcasts) != 1 {
+		t.Fatalf("refundTx broadcasts: %d, want 1", len(partBTC.broadcasts))
+	}
+
+	// CSV matures with no coop refund from initiator -> punish.
+	if err := part.Handle(EventRefundCSVMatured{Height: 200}); err != nil {
+		t.Fatalf("EventRefundCSVMatured: %v", err)
+	}
+	if got := part.Phase(); got != PhasePunish {
+		t.Fatalf("after CSV matured phase = %s, want PhasePunish", got)
+	}
+	if len(partBTC.broadcasts) != 2 {
+		t.Fatalf("after punish total broadcasts = %d, want 2 (refundTx + punish spendRefund)",
+			len(partBTC.broadcasts))
+	}
+	// XMR was never swept (it's forfeited in this branch).
+	if partXMR.swept != "" {
+		t.Errorf("XMR sweep happened on punish path; dest=%q", partXMR.swept)
+	}
+}
+
+// TestParticipantRecoverAndSweepPath drives a participant through
+// the alternate refund branch: after both parties have decided to
+// unwind and the initiator coop-refunded, the on-chain witness
+// reveals the initiator's XMR scalar and the participant sweeps
+// the shared-address XMR back to its own destination. Terminal:
+// PhaseComplete (both parties whole minus chain fees).
+func TestParticipantRecoverAndSweepPath(t *testing.T) {
+	initBTC, partBTC := &fakeBTC{}, &fakeBTC{}
+	initXMR, partXMR := &fakeXMR{}, &fakeXMR{}
+	initSender, partSender := &recordingSender{}, &recordingSender{}
+	init, part := driveSetupPhase(t, initBTC, partBTC, initXMR, partXMR, initSender, partSender)
+
+	// To produce a valid coop-refund witness, run the initiator
+	// through InitiateRefund + EventRefundCSVMatured (its coop
+	// branch), capturing the on-chain spendRefundTx witness. Then
+	// feed that witness to the participant's
+	// EventCoopRefundObserved handler.
+	//
+	// The initiator needs a valid SpendRefundAdaptorSig, which it
+	// acquires from the participant's AdaptorRefundPresigned
+	// message. Snoop that from partSender.
+	var refundPresig *msgjson.AdaptorRefundPresigned
+	for _, m := range partSender.sent {
+		if m.route == msgjson.AdaptorRefundPresignedRoute {
+			refundPresig = m.payload.(*msgjson.AdaptorRefundPresigned)
+			break
+		}
+	}
+	if refundPresig == nil {
+		t.Fatal("participant never emitted AdaptorRefundPresigned")
+	}
+	if err := init.Handle(EventRefundPresignedReceived{
+		RefundSig:  refundPresig.RefundSig,
+		AdaptorSig: refundPresig.SpendRefundAdaptorSig,
+	}); err != nil {
+		t.Fatalf("init handle Presigned: %v", err)
+	}
+	if err := init.InitiateRefund(); err != nil {
+		t.Fatalf("init InitiateRefund: %v", err)
+	}
+	if err := init.Handle(EventRefundCSVMatured{Height: 200}); err != nil {
+		t.Fatalf("init EventRefundCSVMatured: %v", err)
+	}
+	// init's coop refund broadcast the spendRefundTx; the witness
+	// is in initBTC.spendTx.TxIn[0].Witness.
+	if initBTC.spendTx == nil {
+		t.Fatal("initiator never broadcast spendRefundTx")
+	}
+	witness := initBTC.spendTx.TxIn[0].Witness
+	if len(witness) < 4 {
+		t.Fatalf("coop witness length = %d, want >=4", len(witness))
+	}
+
+	// Participant initiates refund (so participant's state is in
+	// PhaseRefundTxBroadcast when it observes the coop), then
+	// observes the on-chain coop refund and sweeps.
+	if err := part.InitiateRefund(); err != nil {
+		t.Fatalf("part InitiateRefund: %v", err)
+	}
+	if err := part.Handle(EventCoopRefundObserved{Witness: witness}); err != nil {
+		t.Fatalf("part EventCoopRefundObserved: %v", err)
+	}
+	if got := part.Phase(); got != PhaseComplete {
+		t.Fatalf("after recover+sweep phase = %s, want PhaseComplete", got)
+	}
+	// Sweep was executed against participant's OwnXMRSweepDest.
+	if partXMR.swept != "4tester" {
+		t.Errorf("XMR sweep dest = %q, want %q", partXMR.swept, "4tester")
+	}
+}
+
 // TestStateFullSnapshotRoundtrip drives an initiator through to
 // PhaseLockBroadcast (the most state-heavy point in the happy path
 // before redemption), serializes the resulting State to bytes, and
