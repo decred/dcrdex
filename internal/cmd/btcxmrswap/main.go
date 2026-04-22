@@ -92,11 +92,22 @@ func run(ctx context.Context) error {
 		netTag = 24
 	}
 
-	fmt.Println("=== BTC/XMR adaptor swap demo (happy path) ===")
-	if err := success(ctx); err != nil {
-		return fmt.Errorf("success: %w", err)
+	scenarios := []struct {
+		name string
+		fn   func(context.Context) error
+	}{
+		{"success", success},
+		{"aliceBailsBeforeXmrInit", aliceBailsBeforeXmrInit},
+		{"refund", refundScenario},
+		{"bobBailsAfterXmrInit", bobBailsAfterXmrInit},
 	}
-	fmt.Println("Success completed without error.")
+	for _, s := range scenarios {
+		fmt.Printf("=== Running %s ===\n", s.name)
+		if err := s.fn(ctx); err != nil {
+			return fmt.Errorf("%s: %w", s.name, err)
+		}
+		fmt.Printf("    %s completed without error.\n", s.name)
+	}
 	return nil
 }
 
@@ -863,6 +874,412 @@ func success(ctx context.Context) error {
 	fmt.Printf("    sweep wallet balance=%d unlocked=%d\n",
 		bal.Balance, bal.UnlockedBalance)
 
+	return nil
+}
+
+// ----- Refund paths -----
+
+// startRefund broadcasts the pre-signed refundTx by assembling the
+// cooperative 2-of-2 witness. Either party may call it; both
+// signatures must be in hand.
+func (c *client) startRefund(ctx context.Context, aliceRefundSig, bobRefundSig []byte,
+	lock *btcadaptor.LockTxOutput, refundTx *wire.MsgTx) error {
+
+	ctrlSer, err := lock.ControlBlock.ToBytes()
+	if err != nil {
+		return err
+	}
+	// Witness order: sig_kaf (alice), sig_kal (bob), script, control.
+	refundTx.TxIn[0].Witness = wire.TxWitness{
+		aliceRefundSig, bobRefundSig, lock.LeafScript, ctrlSer,
+	}
+	txHash, err := c.btc.SendRawTransaction(refundTx, false)
+	if err != nil {
+		return fmt.Errorf("broadcast refundTx: %w", err)
+	}
+	fmt.Printf("    refundTx: %s\n", txHash)
+	return nil
+}
+
+// waitBTC polls bitcoind's block count until it has advanced by
+// lockBlocks since startHeight, matching what the reference does for
+// DCR. In regtest this typically requires an external block generator
+// to produce blocks.
+func (c *client) waitBTC(ctx context.Context, startHeight int64) error {
+	tick := time.NewTicker(5 * time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-tick.C:
+			h, err := c.btc.GetBlockCount()
+			if err != nil {
+				return err
+			}
+			if h >= startHeight+lockBlocks {
+				return nil
+			}
+		}
+	}
+}
+
+// refundBtc (Bob) spends refundTx via the cooperative-refund leaf.
+// Decrypts Alice's pre-signed adaptor using his own ed25519 scalar,
+// signs his tapscript half, assembles the witness, and broadcasts.
+// The completed Alice sig that lands on-chain reveals Bob's
+// XMR-key-half to Alice via RecoverTweakBIP340.
+func (c *initClient) refundBtc(ctx context.Context, spendRefundTx *wire.MsgTx,
+	esig *adaptorsigs.AdaptorSignature, refund *btcadaptor.RefundTxOutput) (completedAliceSig []byte, err error) {
+
+	bobScalar, _ := btcec.PrivKeyFromBytes(c.initSpendKeyHalf.Serialize())
+	aliceSigCompleted, err := esig.DecryptBIP340(&bobScalar.Key)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt alice adaptor: %w", err)
+	}
+
+	refundValue := spendRefundTx.TxIn[0].PreviousOutPoint // just for addressing
+	_ = refundValue
+	prev := txscript.NewCannedPrevOutputFetcher(refund.PkScript,
+		spendRefundTx.TxOut[0].Value+1000)
+	sigHashes := txscript.NewTxSigHashes(spendRefundTx, prev)
+	leaf := txscript.NewBaseTapLeaf(refund.CoopLeafScript)
+
+	bobSig, err := txscript.RawTxInTapscriptSignature(
+		spendRefundTx, sigHashes, 0,
+		spendRefundTx.TxOut[0].Value+1000, refund.PkScript, leaf,
+		txscript.SigHashDefault, c.initSignKeyHalf,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("bob sign: %w", err)
+	}
+
+	ctrlSer, err := refund.CoopControlBlock.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+	spendRefundTx.TxIn[0].Witness = wire.TxWitness{
+		aliceSigCompleted.Serialize(), bobSig, refund.CoopLeafScript, ctrlSer,
+	}
+	txHash, err := c.btc.SendRawTransaction(spendRefundTx, false)
+	if err != nil {
+		return nil, fmt.Errorf("broadcast spendRefund: %w", err)
+	}
+	fmt.Printf("    coop spendRefund: %s\n", txHash)
+	return aliceSigCompleted.Serialize(), nil
+}
+
+// refundXmr (Alice) recovers Bob's XMR-key-half from Bob's published
+// coop-refund sig and sweeps the shared address.
+func (c *partClient) refundXmr(ctx context.Context, completedAliceSig []byte,
+	esig *adaptorsigs.AdaptorSignature, restoreHeight uint64) (*rpc.Client, error) {
+
+	sig, err := btcschnorr.ParseSignature(completedAliceSig)
+	if err != nil {
+		return nil, fmt.Errorf("parse completed sig: %w", err)
+	}
+	bobScalar, err := esig.RecoverTweakBIP340(sig)
+	if err != nil {
+		return nil, fmt.Errorf("recover bob scalar: %w", err)
+	}
+	var bobBytes [32]byte
+	bobScalar.PutBytes(&bobBytes)
+	bobPartRecovered, _, err := edwards.PrivKeyFromScalar(bobBytes[:])
+	if err != nil {
+		return nil, fmt.Errorf("recover bob privkey: %w", err)
+	}
+	return c.openSweepXMRWalletAlice(ctx, bobPartRecovered, restoreHeight)
+}
+
+// openSweepXMRWalletAlice is the Alice-side sweep helper after a
+// cooperative refund. Mirrors openSweepXMRWallet but using Alice's
+// spend key half.
+func (c *partClient) openSweepXMRWalletAlice(ctx context.Context,
+	bobPartRecovered *edwards.PrivateKey, restoreHeight uint64) (*rpc.Client, error) {
+
+	vkbsBig := scalarAdd(c.partSpendKeyHalf.GetD(), bobPartRecovered.GetD())
+	vkbsBig.Mod(vkbsBig, curve.N)
+	var vkbsBytes [32]byte
+	vkbsBig.FillBytes(vkbsBytes[:])
+	vkbs, _, err := edwards.PrivKeyFromScalar(vkbsBytes[:])
+	if err != nil {
+		return nil, fmt.Errorf("full spend key: %w", err)
+	}
+
+	var fullPubKey []byte
+	fullPubKey = append(fullPubKey, vkbs.PubKey().Serialize()...)
+	fullPubKey = append(fullPubKey, c.viewKey.PubKey().Serialize()...)
+	walletAddr := base58.EncodeAddr(netTag, fullPubKey)
+	walletFileName := fmt.Sprintf("%s_spend", walletAddr)
+
+	var viewKeyBytes [32]byte
+	copy(viewKeyBytes[:], c.viewKey.Serialize())
+	reverseBytes(&vkbsBytes)
+	reverseBytes(&viewKeyBytes)
+
+	return createWatchOnlyXMRWallet(ctx, rpc.GenerateFromKeysRequest{
+		Filename:      walletFileName,
+		Address:       walletAddr,
+		SpendKey:      hex.EncodeToString(vkbsBytes[:]),
+		ViewKey:       hex.EncodeToString(viewKeyBytes[:]),
+		RestoreHeight: restoreHeight,
+	})
+}
+
+// takeBtc (Alice) spends refundTx via the punish leaf - Alice alone
+// after CSV matures. Alice forfeits recovery of the XMR she locked
+// (Bob never reveals his scalar through this path).
+func (c *partClient) takeBtc(ctx context.Context, refund *btcadaptor.RefundTxOutput,
+	spendRefundTx *wire.MsgTx) error {
+
+	refundValue := spendRefundTx.TxOut[0].Value + 1000
+	prev := txscript.NewCannedPrevOutputFetcher(refund.PkScript, refundValue)
+	sigHashes := txscript.NewTxSigHashes(spendRefundTx, prev)
+	leaf := txscript.NewBaseTapLeaf(refund.PunishLeafScript)
+
+	aliceSig, err := txscript.RawTxInTapscriptSignature(
+		spendRefundTx, sigHashes, 0, refundValue, refund.PkScript, leaf,
+		txscript.SigHashDefault, c.partSignKeyHalf,
+	)
+	if err != nil {
+		return fmt.Errorf("alice punish sign: %w", err)
+	}
+	ctrlSer, err := refund.PunishControlBlock.ToBytes()
+	if err != nil {
+		return err
+	}
+	spendRefundTx.TxIn[0].Witness = wire.TxWitness{
+		aliceSig, refund.PunishLeafScript, ctrlSer,
+	}
+	txHash, err := c.btc.SendRawTransaction(spendRefundTx, false)
+	if err != nil {
+		return fmt.Errorf("broadcast punish: %w", err)
+	}
+	fmt.Printf("    punish spendRefund: %s\n", txHash)
+	return nil
+}
+
+// ----- Remaining scenarios -----
+
+// aliceBailsBeforeXmrInit: Bob locks BTC, Alice never locks XMR. Bob
+// starts the refund chain and uses the cooperative-refund leaf to get
+// his BTC back. His sig on that leaf leaks his XMR scalar, but Alice
+// never locked XMR so the leak is harmless.
+func aliceBailsBeforeXmrInit(ctx context.Context) error {
+	alicec, err := newClient(ctx, alicexmr, aliceBTCRPC, btcRPCUser, btcRPCPass)
+	if err != nil {
+		return err
+	}
+	bobc, err := newClient(ctx, bobxmr, bobBTCRPC, btcRPCUser, btcRPCPass)
+	if err != nil {
+		return err
+	}
+	alice := partClient{client: alicec}
+	bob := initClient{client: bobc}
+
+	pubSpendKeyf, kbvf, pubPartSignKeyHalf, aliceDleag, err := alice.generateDleag(ctx)
+	if err != nil {
+		return err
+	}
+	lock, refund, refundTx, spendRefundTx, _, _, bobDleag, _, err :=
+		bob.generateLockTxn(ctx, pubSpendKeyf, kbvf, pubPartSignKeyHalf, aliceDleag)
+	if err != nil {
+		return err
+	}
+
+	esig, aliceRefundSig, err := alice.generateRefundSigs(refundTx, spendRefundTx, lock, refund, bobDleag)
+	if err != nil {
+		return err
+	}
+	bobRefundSig, err := bob.signRefundTx(refundTx, lock)
+	if err != nil {
+		return err
+	}
+
+	signed, complete, err := bob.btc.SignRawTransaction(bob.lockTx)
+	if err != nil {
+		return err
+	}
+	if !complete {
+		return errors.New("lockTx signing not complete")
+	}
+	bob.lockTx = signed
+	if _, err := bob.btc.SendRawTransaction(bob.lockTx, false); err != nil {
+		return err
+	}
+	fmt.Println("    lockTx broadcast; Alice sits silent.")
+
+	time.Sleep(5 * time.Second)
+	startHeight, err := bob.btc.GetBlockCount()
+	if err != nil {
+		return err
+	}
+	if err := bob.startRefund(ctx, aliceRefundSig, bobRefundSig, lock, refundTx); err != nil {
+		return err
+	}
+	if err := bob.waitBTC(ctx, startHeight); err != nil {
+		return err
+	}
+	if _, err := bob.refundBtc(ctx, spendRefundTx, esig, refund); err != nil {
+		return err
+	}
+	fmt.Println("    Bob recovered his BTC; his XMR-key leak is harmless.")
+	return nil
+}
+
+// refund: both parties have locked, decide to unwind cooperatively.
+// Bob refunds via coop leaf (reveals his XMR scalar); Alice sweeps
+// XMR using the recovered scalar.
+func refundScenario(ctx context.Context) error {
+	alicec, err := newClient(ctx, alicexmr, aliceBTCRPC, btcRPCUser, btcRPCPass)
+	if err != nil {
+		return err
+	}
+	bobc, err := newClient(ctx, bobxmr, bobBTCRPC, btcRPCUser, btcRPCPass)
+	if err != nil {
+		return err
+	}
+	alice := partClient{client: alicec}
+	bob := initClient{client: bobc}
+
+	pubSpendKeyf, kbvf, pubPartSignKeyHalf, aliceDleag, err := alice.generateDleag(ctx)
+	if err != nil {
+		return err
+	}
+	lock, refund, refundTx, spendRefundTx, pubSpendKey, viewKey, bobDleag, _, err :=
+		bob.generateLockTxn(ctx, pubSpendKeyf, kbvf, pubPartSignKeyHalf, aliceDleag)
+	if err != nil {
+		return err
+	}
+
+	esig, aliceRefundSig, err := alice.generateRefundSigs(refundTx, spendRefundTx, lock, refund, bobDleag)
+	if err != nil {
+		return err
+	}
+	bobRefundSig, err := bob.signRefundTx(refundTx, lock)
+	if err != nil {
+		return err
+	}
+
+	signed, complete, err := bob.btc.SignRawTransaction(bob.lockTx)
+	if err != nil {
+		return err
+	}
+	if !complete {
+		return errors.New("lockTx signing not complete")
+	}
+	bob.lockTx = signed
+	if _, err := bob.btc.SendRawTransaction(bob.lockTx, false); err != nil {
+		return err
+	}
+
+	time.Sleep(5 * time.Second)
+	heightRes, err := alice.xmr.GetHeight(ctx)
+	if err != nil {
+		return err
+	}
+	if err := alice.initXmr(ctx, viewKey, pubSpendKey); err != nil {
+		return err
+	}
+	time.Sleep(5 * time.Second)
+
+	startHeight, err := bob.btc.GetBlockCount()
+	if err != nil {
+		return err
+	}
+	if err := bob.startRefund(ctx, aliceRefundSig, bobRefundSig, lock, refundTx); err != nil {
+		return err
+	}
+	if err := bob.waitBTC(ctx, startHeight); err != nil {
+		return err
+	}
+	completedAlice, err := bob.refundBtc(ctx, spendRefundTx, esig, refund)
+	if err != nil {
+		return err
+	}
+
+	time.Sleep(5 * time.Second)
+	sweep, err := alice.refundXmr(ctx, completedAlice, esig, heightRes.Height)
+	if err != nil {
+		return err
+	}
+	bal, err := waitXMRBalance(ctx, sweep, xmrAmt)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("    alice recovered XMR bal=%d unlocked=%d\n", bal.Balance, bal.UnlockedBalance)
+	return nil
+}
+
+// bobBailsAfterXmrInit: both parties have locked; Bob disappears.
+// Alice broadcasts the pre-signed refundTx, waits for the CSV
+// locktime, and punishes via the refund-tree's Alice-only leaf. Her
+// XMR is stranded since Bob's scalar was never revealed.
+func bobBailsAfterXmrInit(ctx context.Context) error {
+	alicec, err := newClient(ctx, alicexmr, aliceBTCRPC, btcRPCUser, btcRPCPass)
+	if err != nil {
+		return err
+	}
+	bobc, err := newClient(ctx, bobxmr, bobBTCRPC, btcRPCUser, btcRPCPass)
+	if err != nil {
+		return err
+	}
+	alice := partClient{client: alicec}
+	bob := initClient{client: bobc}
+
+	pubSpendKeyf, kbvf, pubPartSignKeyHalf, aliceDleag, err := alice.generateDleag(ctx)
+	if err != nil {
+		return err
+	}
+	lock, refund, refundTx, spendRefundTx, pubSpendKey, viewKey, bobDleag, _, err :=
+		bob.generateLockTxn(ctx, pubSpendKeyf, kbvf, pubPartSignKeyHalf, aliceDleag)
+	if err != nil {
+		return err
+	}
+
+	_, aliceRefundSig, err := alice.generateRefundSigs(refundTx, spendRefundTx, lock, refund, bobDleag)
+	if err != nil {
+		return err
+	}
+	bobRefundSig, err := bob.signRefundTx(refundTx, lock)
+	if err != nil {
+		return err
+	}
+
+	signed, complete, err := bob.btc.SignRawTransaction(bob.lockTx)
+	if err != nil {
+		return err
+	}
+	if !complete {
+		return errors.New("lockTx signing not complete")
+	}
+	bob.lockTx = signed
+	if _, err := bob.btc.SendRawTransaction(bob.lockTx, false); err != nil {
+		return err
+	}
+
+	time.Sleep(5 * time.Second)
+	if err := alice.initXmr(ctx, viewKey, pubSpendKey); err != nil {
+		return err
+	}
+	time.Sleep(5 * time.Second)
+	fmt.Println("    Alice locked XMR; Bob is expected to send esig but goes silent.")
+
+	startHeight, err := alice.btc.GetBlockCount()
+	if err != nil {
+		return err
+	}
+	// Alice broadcasts refundTx using both pre-signed sigs.
+	if err := alice.startRefund(ctx, aliceRefundSig, bobRefundSig, lock, refundTx); err != nil {
+		return err
+	}
+	if err := alice.waitBTC(ctx, startHeight); err != nil {
+		return err
+	}
+	if err := alice.takeBtc(ctx, refund, spendRefundTx); err != nil {
+		return err
+	}
+	fmt.Println("    Alice took BTC via punish leaf; her XMR is stranded.")
 	return nil
 }
 
