@@ -202,6 +202,99 @@ func TestNegotiateAdaptor(t *testing.T) {
 	}
 }
 
+// TestAdaptorCoordinatorsMultipleMatchesIsolated verifies the
+// server-side per-match registry behaves analogously to the client
+// AdaptorSwapManager: distinct coordinators per match, Handle for
+// one match leaves the others untouched, Stop on one removes only
+// that entry.
+func TestAdaptorCoordinatorsMultipleMatchesIsolated(t *testing.T) {
+	router := &bridgeRouter{}
+	pool := NewAdaptorCoordinators(adaptor.Config{
+		Router: router, Report: NoopReporter{}, Persist: NoopPersister{},
+	})
+
+	type swap struct {
+		matchID, orderID order.MatchID
+	}
+	swaps := []swap{
+		{matchID: order.MatchID{0xA1}, orderID: order.MatchID{0xA0}},
+		{matchID: order.MatchID{0xB1}, orderID: order.MatchID{0xB0}},
+		{matchID: order.MatchID{0xC1}, orderID: order.MatchID{0xC0}},
+	}
+	coords := make(map[order.MatchID]*adaptor.Coordinator, len(swaps))
+	for _, s := range swaps {
+		c, err := pool.Start(s.matchID, s.orderID, 0, 128, 144)
+		if err != nil {
+			t.Fatalf("Start %x: %v", s.matchID[:1], err)
+		}
+		coords[s.matchID] = c
+	}
+	if got := len(pool.m); got != 3 {
+		t.Fatalf("registry size = %d, want 3", got)
+	}
+	if coords[swaps[0].matchID] == coords[swaps[1].matchID] {
+		t.Fatal("matches share a coordinator instance")
+	}
+
+	// Capture initial phases.
+	initial := make(map[order.MatchID]adaptor.Phase, len(swaps))
+	for _, s := range swaps {
+		initial[s.matchID] = coords[s.matchID].Phase()
+	}
+
+	// Drive only swap 0 through a real PartSetup.
+	target := swaps[0].matchID
+	other := swaps[1].matchID
+	third := swaps[2].matchID
+
+	spend, _ := edwards.GeneratePrivateKey()
+	view, _ := edwards.GeneratePrivateKey()
+	btcKey, _ := btcec.NewPrivateKey()
+	dleq, err := adaptorsigs.ProveDLEQ(spend.Serialize())
+	if err != nil {
+		t.Fatalf("dleq: %v", err)
+	}
+	part := &msgjson.AdaptorSetupPart{
+		OrderID:         swaps[0].orderID[:],
+		MatchID:         target[:],
+		PubSpendKeyHalf: spend.PubKey().Serialize(),
+		ViewKeyHalf:     view.Serialize(),
+		PubSignKeyHalf:  btcschnorr.SerializePubKey(btcKey.PubKey()),
+		DLEQProof:       dleq,
+	}
+	if err := pool.Handle(msgjson.AdaptorSetupPartRoute, target, part); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	// Target advanced.
+	if got := coords[target].Phase(); got == initial[target] {
+		t.Fatalf("target match %x phase did not advance", target[:1])
+	}
+	// Others unchanged.
+	if got := coords[other].Phase(); got != initial[other] {
+		t.Errorf("match %x phase moved from %s to %s after handling match %x",
+			other[:1], initial[other], got, target[:1])
+	}
+	if got := coords[third].Phase(); got != initial[third] {
+		t.Errorf("match %x phase moved after handling match %x", third[:1], target[:1])
+	}
+
+	// Stop only the second match.
+	pool.Stop(other)
+	if _, present := pool.m[other]; present {
+		t.Error("stopped match still in registry")
+	}
+	if _, present := pool.m[target]; !present {
+		t.Error("untouched match removed from registry")
+	}
+	if _, present := pool.m[third]; !present {
+		t.Error("untouched third match removed from registry")
+	}
+	// Handle on the stopped match errors.
+	if err := pool.Handle(msgjson.AdaptorSetupPartRoute, other, part); err == nil {
+		t.Error("Handle on stopped match should error")
+	}
+}
+
 // TestAdaptorRouteToEventMapping confirms every supported
 // server-inbound route produces the correct Event type, and
 // unknown routes error.
