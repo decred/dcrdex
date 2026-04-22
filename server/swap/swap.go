@@ -390,6 +390,16 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 	authMgr.Route(msgjson.InitRoute, swapper.handleInit)
 	authMgr.Route(msgjson.RedeemRoute, swapper.handleRedeem)
 
+	// Adaptor swap routes are only registered when the coordinator
+	// pool is configured. Operators on HTLC-only deployments
+	// don't see these routes and clients sending them get the
+	// standard "unknown route" error from comms.
+	if swapper.adaptorCoords != nil {
+		for _, route := range adaptorRoutes {
+			authMgr.Route(route, swapper.handleAdaptorMsg)
+		}
+	}
+
 	return swapper, nil
 }
 

@@ -257,6 +257,135 @@ func (s *Swapper) StopAdaptorMatch(matchID order.MatchID) {
 	s.adaptorCoords.Stop(matchID)
 }
 
+// handleAdaptorMsg is the AuthManager.Route handler registered for
+// every adaptor_* route. It decodes the payload according to
+// msg.Route, validates the user's signature against it, extracts
+// the match ID, and dispatches to HandleAdaptor.
+//
+// All adaptor messages flow through this single function; the
+// per-route decoding lives in adaptorMsgPayload to mirror the
+// client-side decodeAdaptorMsg structure.
+func (s *Swapper) handleAdaptorMsg(user account.AccountID, msg *msgjson.Message) *msgjson.Error {
+	if s.adaptorCoords == nil {
+		return &msgjson.Error{
+			Code:    msgjson.RPCInternalError,
+			Message: "adaptor swap coordination not configured",
+		}
+	}
+	payload, matchID, err := adaptorMsgPayload(msg)
+	if err != nil {
+		return &msgjson.Error{
+			Code:    msgjson.RPCParseError,
+			Message: fmt.Sprintf("decode %s: %v", msg.Route, err),
+		}
+	}
+	if rpcErr := s.authUser(user, payload); rpcErr != nil {
+		return rpcErr
+	}
+	if err := s.HandleAdaptor(msg.Route, matchID, payload); err != nil {
+		return &msgjson.Error{
+			Code:    msgjson.RPCInternalError,
+			Message: fmt.Sprintf("handle %s match %s: %v", msg.Route, matchID, err),
+		}
+	}
+	return nil
+}
+
+// adaptorMsgPayload decodes msg according to msg.Route into the
+// concrete msgjson Adaptor* type and returns it along with the
+// match ID. Mirrors client/core's decodeAdaptorMsg; kept locally
+// so the server doesn't import client/core.
+func adaptorMsgPayload(msg *msgjson.Message) (msgjson.Signable, order.MatchID, error) {
+	var matchBytes []byte
+	var payload msgjson.Signable
+	switch msg.Route {
+	case msgjson.AdaptorSetupPartRoute:
+		p := new(msgjson.AdaptorSetupPart)
+		if err := msg.Unmarshal(p); err != nil {
+			return nil, order.MatchID{}, err
+		}
+		matchBytes, payload = p.MatchID, p
+	case msgjson.AdaptorSetupInitRoute:
+		p := new(msgjson.AdaptorSetupInit)
+		if err := msg.Unmarshal(p); err != nil {
+			return nil, order.MatchID{}, err
+		}
+		matchBytes, payload = p.MatchID, p
+	case msgjson.AdaptorRefundPresignedRoute:
+		p := new(msgjson.AdaptorRefundPresigned)
+		if err := msg.Unmarshal(p); err != nil {
+			return nil, order.MatchID{}, err
+		}
+		matchBytes, payload = p.MatchID, p
+	case msgjson.AdaptorLockedRoute:
+		p := new(msgjson.AdaptorLocked)
+		if err := msg.Unmarshal(p); err != nil {
+			return nil, order.MatchID{}, err
+		}
+		matchBytes, payload = p.MatchID, p
+	case msgjson.AdaptorXmrLockedRoute:
+		p := new(msgjson.AdaptorXmrLocked)
+		if err := msg.Unmarshal(p); err != nil {
+			return nil, order.MatchID{}, err
+		}
+		matchBytes, payload = p.MatchID, p
+	case msgjson.AdaptorSpendPresigRoute:
+		p := new(msgjson.AdaptorSpendPresig)
+		if err := msg.Unmarshal(p); err != nil {
+			return nil, order.MatchID{}, err
+		}
+		matchBytes, payload = p.MatchID, p
+	case msgjson.AdaptorSpendBroadcastRoute:
+		p := new(msgjson.AdaptorSpendBroadcast)
+		if err := msg.Unmarshal(p); err != nil {
+			return nil, order.MatchID{}, err
+		}
+		matchBytes, payload = p.MatchID, p
+	case msgjson.AdaptorRefundBroadcastRoute:
+		p := new(msgjson.AdaptorRefundBroadcast)
+		if err := msg.Unmarshal(p); err != nil {
+			return nil, order.MatchID{}, err
+		}
+		matchBytes, payload = p.MatchID, p
+	case msgjson.AdaptorCoopRefundRoute:
+		p := new(msgjson.AdaptorCoopRefund)
+		if err := msg.Unmarshal(p); err != nil {
+			return nil, order.MatchID{}, err
+		}
+		matchBytes, payload = p.MatchID, p
+	case msgjson.AdaptorPunishRoute:
+		p := new(msgjson.AdaptorPunish)
+		if err := msg.Unmarshal(p); err != nil {
+			return nil, order.MatchID{}, err
+		}
+		matchBytes, payload = p.MatchID, p
+	default:
+		return nil, order.MatchID{}, fmt.Errorf("unknown adaptor route %q", msg.Route)
+	}
+	if len(matchBytes) != order.MatchIDSize {
+		return nil, order.MatchID{}, fmt.Errorf("matchid length %d, want %d",
+			len(matchBytes), order.MatchIDSize)
+	}
+	var matchID order.MatchID
+	copy(matchID[:], matchBytes)
+	return payload, matchID, nil
+}
+
+// adaptorRoutes is the list of routes handleAdaptorMsg is
+// registered for. Used by NewSwapper to wire them all in one place.
+var adaptorRoutes = []string{
+	msgjson.AdaptorSetupPartRoute,
+	msgjson.AdaptorSetupInitRoute,
+	msgjson.AdaptorRefundPresignedRoute,
+	msgjson.AdaptorLockedRoute,
+	msgjson.AdaptorXmrLockedRoute,
+	msgjson.AdaptorSpendPresigRoute,
+	msgjson.AdaptorSpendBroadcastRoute,
+	msgjson.AdaptorRefundBroadcastRoute,
+	msgjson.AdaptorCoopRefundRoute,
+	msgjson.AdaptorPunishRoute,
+}
+
 // NegotiateAdaptor is the adaptor-swap analogue of Negotiate. It is
 // invoked by the Market when its market config has SwapType ==
 // dex.SwapTypeAdaptor. The matchSets are all from the same adaptor

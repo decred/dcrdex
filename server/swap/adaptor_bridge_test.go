@@ -1,11 +1,16 @@
 package swap
 
 import (
+	"errors"
 	"testing"
+	"time"
 
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/internal/adaptorsigs"
+	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/comms"
+	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/swap/adaptor"
 	"github.com/btcsuite/btcd/btcec/v2"
 	btcschnorr "github.com/btcsuite/btcd/btcec/v2/schnorr"
@@ -293,6 +298,125 @@ func TestAdaptorCoordinatorsMultipleMatchesIsolated(t *testing.T) {
 	if err := pool.Handle(msgjson.AdaptorSetupPartRoute, other, part); err == nil {
 		t.Error("Handle on stopped match should error")
 	}
+}
+
+// TestHandleAdaptorMsg covers the AuthManager-route entry point:
+// decode the route's payload, authUser passes (we mock the
+// authMgr to accept), the matchID is extracted correctly, and the
+// dispatch reaches the registered coordinator via HandleAdaptor.
+// Also covers the nil-coords / unknown-route / bad-matchid /
+// auth-fail error paths.
+func TestHandleAdaptorMsg(t *testing.T) {
+	// Without an AdaptorCoordinators pool the handler should
+	// short-circuit to RPCInternalError.
+	t.Run("no-pool", func(t *testing.T) {
+		s := &Swapper{}
+		msg, _ := msgjson.NewNotification(msgjson.AdaptorSetupPartRoute,
+			&msgjson.AdaptorSetupPart{MatchID: make([]byte, 32)})
+		err := s.handleAdaptorMsg(account.AccountID{}, msg)
+		if err == nil || err.Code != msgjson.RPCInternalError {
+			t.Fatalf("err = %v, want RPCInternalError", err)
+		}
+	})
+
+	router := &bridgeRouter{}
+	pool := NewAdaptorCoordinators(adaptor.Config{
+		Router: router, Report: NoopReporter{}, Persist: NoopPersister{},
+	})
+	auth := &fakeAuthMgr{}
+	s := &Swapper{adaptorCoords: pool, authMgr: auth}
+
+	matchID := order.MatchID{0x42}
+	orderID := order.MatchID{0x07}
+	if _, err := pool.Start(matchID, orderID, 0, 128, 144); err != nil {
+		t.Fatalf("pool.Start: %v", err)
+	}
+
+	// Build a real AdaptorSetupPart that the coordinator will
+	// validate.
+	spend, _ := edwards.GeneratePrivateKey()
+	view, _ := edwards.GeneratePrivateKey()
+	btcKey, _ := btcec.NewPrivateKey()
+	dleq, err := adaptorsigs.ProveDLEQ(spend.Serialize())
+	if err != nil {
+		t.Fatalf("dleq: %v", err)
+	}
+	part := &msgjson.AdaptorSetupPart{
+		Signature:       msgjson.Signature{Sig: []byte{0xAA}}, // accepted by fakeAuthMgr
+		OrderID:         orderID[:],
+		MatchID:         matchID[:],
+		PubSpendKeyHalf: spend.PubKey().Serialize(),
+		ViewKeyHalf:     view.Serialize(),
+		PubSignKeyHalf:  btcschnorr.SerializePubKey(btcKey.PubKey()),
+		DLEQProof:       dleq,
+	}
+	msg, err := msgjson.NewNotification(msgjson.AdaptorSetupPartRoute, part)
+	if err != nil {
+		t.Fatalf("NewNotification: %v", err)
+	}
+
+	t.Run("happy", func(t *testing.T) {
+		if rpcErr := s.handleAdaptorMsg(account.AccountID{}, msg); rpcErr != nil {
+			t.Fatalf("handleAdaptorMsg: %v", rpcErr)
+		}
+		if pool.Coordinator(matchID).Phase() != adaptor.PhaseAwaitingInitSetup {
+			t.Fatalf("phase = %s, want PhaseAwaitingInitSetup", pool.Coordinator(matchID).Phase())
+		}
+		if len(router.sent) != 1 {
+			t.Fatalf("router got %d msgs, want 1", len(router.sent))
+		}
+	})
+
+	t.Run("unknown-route", func(t *testing.T) {
+		bad, _ := msgjson.NewNotification("adaptor_unknown",
+			&msgjson.AdaptorPunish{MatchID: matchID[:]})
+		err := s.handleAdaptorMsg(account.AccountID{}, bad)
+		if err == nil || err.Code != msgjson.RPCParseError {
+			t.Fatalf("err = %v, want RPCParseError", err)
+		}
+	})
+
+	t.Run("bad-matchid", func(t *testing.T) {
+		bad, _ := msgjson.NewNotification(msgjson.AdaptorSetupPartRoute,
+			&msgjson.AdaptorSetupPart{MatchID: []byte{1, 2, 3}}) // wrong length
+		err := s.handleAdaptorMsg(account.AccountID{}, bad)
+		if err == nil || err.Code != msgjson.RPCParseError {
+			t.Fatalf("err = %v, want RPCParseError", err)
+		}
+	})
+
+	t.Run("auth-fail", func(t *testing.T) {
+		auth.authErr = errors.New("bad sig")
+		defer func() { auth.authErr = nil }()
+		if rpcErr := s.handleAdaptorMsg(account.AccountID{}, msg); rpcErr == nil ||
+			rpcErr.Code != msgjson.SignatureError {
+			t.Fatalf("err = %v, want SignatureError", rpcErr)
+		}
+	})
+}
+
+// fakeAuthMgr is a minimal AuthManager whose Auth() returns
+// authErr (or nil). Other methods are no-op stubs needed only to
+// satisfy the interface; this test exercises only the auth path.
+type fakeAuthMgr struct {
+	authErr error
+}
+
+func (f *fakeAuthMgr) Auth(account.AccountID, []byte, []byte) error { return f.authErr }
+func (*fakeAuthMgr) Sign(...msgjson.Signable)                       {}
+func (*fakeAuthMgr) Send(account.AccountID, *msgjson.Message) error { return nil }
+func (*fakeAuthMgr) Request(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message)) error {
+	return nil
+}
+func (*fakeAuthMgr) RequestWithTimeout(account.AccountID, *msgjson.Message,
+	func(comms.Link, *msgjson.Message), time.Duration, func()) error {
+	return nil
+}
+func (*fakeAuthMgr) Route(string, func(account.AccountID, *msgjson.Message) *msgjson.Error) {}
+func (*fakeAuthMgr) SwapSuccess(account.AccountID, db.MarketMatchID, uint64, time.Time) {
+}
+func (*fakeAuthMgr) Inaction(account.AccountID, db.Outcome, db.MarketMatchID, uint64,
+	time.Time, order.OrderID) {
 }
 
 // TestAdaptorRouteToEventMapping confirms every supported
