@@ -255,6 +255,103 @@ func TestCoordinatorTimeoutMapsOutcome(t *testing.T) {
 	}
 }
 
+// TestStateMarshalRoundtrip serializes a populated State, parses it
+// back, and verifies field-by-field equality. Server-side state is
+// public-only so plain JSON round-trip is sufficient.
+func TestStateMarshalRoundtrip(t *testing.T) {
+	s := &State{
+		MatchID:                    [32]byte{0xAA},
+		OrderID:                    [32]byte{0xBB},
+		ScriptableAsset:            0,
+		NonScriptAsset:             128,
+		LockBlocks:                 144,
+		ParticipantPubSpendKeyHalf: []byte{0x01, 0x02, 0x03},
+		ParticipantPubSignKeyHalf:  []byte{0x04, 0x05},
+		ParticipantDLEQProof:       []byte{0x06, 0x07, 0x08, 0x09},
+		InitiatorPubSpendKeyHalf:   nil, // initiator's ed25519 half embedded in FullSpendPub
+		InitiatorPubSignKeyHalf:    []byte{0x0A, 0x0B},
+		InitiatorDLEQProof:         []byte{0x0C, 0x0D},
+		FullSpendPub:               []byte{0x10, 0x11, 0x12, 0x13},
+		FullViewKey:                []byte{0x14, 0x15, 0x16, 0x17},
+		LockTxID:                   []byte{0x20, 0x21, 0x22, 0x23},
+		LockVout:                   3,
+		LockValue:                  1_000_000,
+		LockHeight:                 815000,
+		XmrTxID:                    []byte{0x30, 0x31, 0x32},
+		XmrSentHeight:              3000000,
+		Phase:                      PhaseAwaitingSpendPresig,
+		FailOutcome:                OutcomeSuccess,
+	}
+	data, err := s.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	got, err := Unmarshal(data)
+	if err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if got.MatchID != s.MatchID || got.OrderID != s.OrderID {
+		t.Error("identity mismatch")
+	}
+	if got.LockBlocks != s.LockBlocks || got.LockHeight != s.LockHeight ||
+		got.LockValue != s.LockValue || got.LockVout != s.LockVout {
+		t.Errorf("lock fields mismatch: blocks %d/%d height %d/%d value %d/%d vout %d/%d",
+			got.LockBlocks, s.LockBlocks, got.LockHeight, s.LockHeight,
+			got.LockValue, s.LockValue, got.LockVout, s.LockVout)
+	}
+	if got.Phase != s.Phase {
+		t.Errorf("phase: got %s want %s", got.Phase, s.Phase)
+	}
+	if string(got.ParticipantDLEQProof) != string(s.ParticipantDLEQProof) ||
+		string(got.InitiatorDLEQProof) != string(s.InitiatorDLEQProof) {
+		t.Error("DLEQ proofs mismatch")
+	}
+	if string(got.FullSpendPub) != string(s.FullSpendPub) ||
+		string(got.FullViewKey) != string(s.FullViewKey) {
+		t.Error("XMR keys mismatch")
+	}
+}
+
+// TestServerFilePersisterRoundtrip writes and reads a state via
+// the file persister. Also exercises the missing-snapshot case.
+func TestServerFilePersisterRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	p, err := NewFilePersister(dir)
+	if err != nil {
+		t.Fatalf("NewFilePersister: %v", err)
+	}
+	var matchID order.MatchID
+	copy(matchID[:], []byte{0xEE, 0xFF})
+	s := &State{
+		MatchID:    matchID,
+		Phase:      PhaseAwaitingLocked,
+		LockHeight: 1234,
+		LockValue:  100_000,
+	}
+	if err := p.Save(matchID, s); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := p.Load(matchID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got == nil {
+		t.Fatal("nil state")
+	}
+	if got.Phase != s.Phase || got.LockHeight != s.LockHeight {
+		t.Errorf("mismatch: phase %s/%s height %d/%d",
+			got.Phase, s.Phase, got.LockHeight, s.LockHeight)
+	}
+
+	var missing order.MatchID
+	copy(missing[:], []byte{0x99})
+	if got, err := p.Load(missing); err != nil {
+		t.Fatalf("Load missing: %v", err)
+	} else if got != nil {
+		t.Error("missing should return nil")
+	}
+}
+
 // TestCoordinatorHappyPathTerminal exercises the final on-chain
 // spend observation: PhaseAwaitingSpendBroadcast + EventSpendOnChain
 // should report OutcomeSuccess for both roles.
