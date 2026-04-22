@@ -411,6 +411,121 @@ func TestXmrNetTagForNet(t *testing.T) {
 	}
 }
 
+// TestSetupPhaseRoundTrip is the first end-to-end test of the
+// adaptor-swap message exchange. It wires two AdaptorSwapManagers
+// (one initiator, one participant) with senders that forward
+// outbound messages into the other manager's Handle, then runs the
+// pump until the message queue drains. Asserts both orchestrators
+// reach the expected phase by the end of the setup-phase exchange.
+//
+// Halts before any chain interaction by giving the initiator a BTC
+// adapter whose FundBroadcastTaproot returns an error; this leaves
+// the initiator in PhaseKeysReceived (after responding with
+// AdaptorSetupInit) without the test needing a live chain backend.
+func TestSetupPhaseRoundTrip(t *testing.T) {
+	type queuedMsg struct {
+		route   string
+		payload any
+	}
+	var toInit, toPart []queuedMsg
+
+	initSender := senderFunc(func(route string, payload any) error {
+		toPart = append(toPart, queuedMsg{route, payload})
+		return nil
+	})
+	partSender := senderFunc(func(route string, payload any) error {
+		toInit = append(toInit, queuedMsg{route, payload})
+		return nil
+	})
+
+	// Initiator's BTC adapter halts at FundBroadcastTaproot so the
+	// state machine stops at PhaseKeysReceived without needing a
+	// real chain.
+	initMgr := NewAdaptorSwapManager(&AdaptorSwapManagerConfig{
+		BTC: &errorBTC{}, XMR: &bridgeFakeXMR{}, Send: initSender,
+	})
+	partMgr := NewAdaptorSwapManager(&AdaptorSwapManagerConfig{
+		BTC: &bridgeFakeBTC{}, XMR: &bridgeFakeXMR{}, Send: partSender,
+	})
+
+	matchID := order.MatchID{0x42, 0x42}
+	makeCfg := func(role adaptorswap.Role) *adaptorswap.Config {
+		return &adaptorswap.Config{
+			SwapID:              [32]byte{1},
+			OrderID:             [32]byte{2},
+			MatchID:             matchID,
+			Role:                role,
+			PairBTC:             0,
+			PairXMR:             128,
+			BtcAmount:           100_000_000,
+			XmrAmount:           50_000_000,
+			LockBlocks:          144,
+			XmrNetTag:           18,
+			PeerBTCPayoutScript: []byte{0x51}, // OP_TRUE; placeholder
+			OwnXMRSweepDest:     "test-xmr-dest",
+		}
+	}
+
+	if _, err := initMgr.StartSwap(makeCfg(adaptorswap.RoleInitiator)); err != nil {
+		t.Fatalf("initiator StartSwap: %v", err)
+	}
+	if _, err := partMgr.StartSwap(makeCfg(adaptorswap.RoleParticipant)); err != nil {
+		t.Fatalf("participant StartSwap: %v", err)
+	}
+
+	// Pump messages until both queues drain. Bound iterations to
+	// catch infinite loops cheaply.
+	const maxIters = 32
+	for i := 0; i < maxIters; i++ {
+		if len(toInit) == 0 && len(toPart) == 0 {
+			break
+		}
+		if len(toInit) > 0 {
+			m := toInit[0]
+			toInit = toInit[1:]
+			if err := initMgr.Handle(m.route, matchID, m.payload); err != nil && !IsInformational(err) {
+				t.Logf("initMgr.Handle(%s): %v", m.route, err)
+			}
+		}
+		if len(toPart) > 0 {
+			m := toPart[0]
+			toPart = toPart[1:]
+			if err := partMgr.Handle(m.route, matchID, m.payload); err != nil && !IsInformational(err) {
+				t.Logf("partMgr.Handle(%s): %v", m.route, err)
+			}
+		}
+	}
+	if len(toInit) > 0 || len(toPart) > 0 {
+		t.Fatalf("queues not drained: toInit=%d toPart=%d", len(toInit), len(toPart))
+	}
+
+	initOrch := initMgr.orchestrators[matchID]
+	partOrch := partMgr.orchestrators[matchID]
+	if initOrch == nil || partOrch == nil {
+		t.Fatalf("orchestrators missing: init=%v part=%v", initOrch, partOrch)
+	}
+
+	if got := partOrch.Phase(); got != adaptorswap.PhaseRefundPresigned {
+		t.Errorf("participant phase = %s, want PhaseRefundPresigned", got)
+	}
+	if got := initOrch.Phase(); got != adaptorswap.PhaseKeysReceived {
+		t.Errorf("initiator phase = %s, want PhaseKeysReceived (halt at FundBroadcastTaproot)", got)
+	}
+}
+
+type senderFunc func(route string, payload any) error
+
+func (f senderFunc) SendToPeer(route string, payload any) error { return f(route, payload) }
+
+type errorBTC struct{}
+
+func (*errorBTC) FundBroadcastTaproot(pkScript []byte, value int64) (*wire.MsgTx, uint32, int64, error) {
+	return nil, 0, 0, errors.New("test halt: FundBroadcastTaproot disabled")
+}
+func (*errorBTC) ObserveSpend(wire.OutPoint, int64) ([][]byte, error) { return nil, nil }
+func (*errorBTC) BroadcastTx(*wire.MsgTx) (string, error)             { return "", nil }
+func (*errorBTC) CurrentHeight() (int64, error)                       { return 0, nil }
+
 // ---- local test doubles (same shape as the orchestrator test mocks
 // but declared here since the bridge is in package core) ----
 

@@ -119,6 +119,14 @@ func NewOrchestrator(cfg *Config) (*Orchestrator, error) {
 // is not safe in general, but reading them at any time is.
 func (o *Orchestrator) Cfg() *Config { return o.cfg }
 
+// Phase returns the current phase of the state machine. Safe to
+// call concurrently with Handle.
+func (o *Orchestrator) Phase() Phase {
+	o.state.mu.Lock()
+	defer o.state.mu.Unlock()
+	return o.state.Phase
+}
+
 // SetPeerBTCPayoutScript records the counterparty's BTC payout
 // pkScript on the orchestrator's runtime config. Idempotent if
 // called twice with an identical script; errors on a mismatched
