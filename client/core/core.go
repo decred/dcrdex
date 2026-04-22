@@ -9629,6 +9629,18 @@ func handleCounterPartyAddressMsg(c *Core, dc *dexConnection, msg *msgjson.Messa
 	var matchID order.MatchID
 	copy(matchID[:], cpa.MatchID)
 
+	// Adaptor-swap matches are not in tracker.matches (HTLC map);
+	// route the address into the orchestrator instead. Only one of
+	// the two paths fires per match - if the manager doesn't have an
+	// orchestrator for this match, fall through to the HTLC path.
+	if handled, err := c.adaptorMgr.OnCounterPartyAddress(matchID, cpa.Address, c.net); handled {
+		if err != nil {
+			return fmt.Errorf("counterparty_address (adaptor) match %s: %w", matchID, err)
+		}
+		c.log.Infof("Recorded counterparty address %s for adaptor match %s", cpa.Address, matchID)
+		return nil
+	}
+
 	tracker.mtx.Lock()
 	match := tracker.matches[matchID]
 	if match == nil {

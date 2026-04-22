@@ -1538,6 +1538,10 @@ func newTestRig() *testRig {
 		m:       originLocale,
 		printer: message.NewPrinter(language.AmericanEnglish),
 	})
+	// Adaptor-swap manager is unconditional in production; construct
+	// one here so handlers that consult c.adaptorMgr (e.g. the
+	// counterparty_address divert) don't panic on a nil receiver.
+	rig.core.adaptorMgr = NewAdaptorSwapManager(&AdaptorSwapManagerConfig{Send: NoopSender{}})
 
 	rig.core.InitializeClient(tPW, nil)
 

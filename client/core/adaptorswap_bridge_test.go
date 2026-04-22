@@ -9,6 +9,9 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
+	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/wire"
 )
 
@@ -306,6 +309,90 @@ func TestStartAdaptorMatches(t *testing.T) {
 	if len(sender.routes) != 1 || sender.routes[0] != msgjson.AdaptorSetupPartRoute {
 		t.Fatalf("participant should emit AdaptorSetupPart; routes=%v", sender.routes)
 	}
+}
+
+// TestOnCounterPartyAddress confirms that a peer-address message
+// for an adaptor match is routed into the orchestrator's
+// PeerBTCPayoutScript, that an unknown match returns
+// handled=false (so the HTLC path can run), and that a mismatched
+// follow-up address is rejected.
+func TestOnCounterPartyAddress(t *testing.T) {
+	mgr := NewAdaptorSwapManager(&AdaptorSwapManagerConfig{
+		BTC: &bridgeFakeBTC{}, XMR: &bridgeFakeXMR{}, Send: &bridgeRecordingSender{},
+	})
+	matchID := order.MatchID{0xC0, 0xDE}
+	o, err := mgr.StartSwap(&adaptorswap.Config{
+		SwapID:  [32]byte{1},
+		OrderID: [32]byte{2},
+		MatchID: matchID,
+		Role:    adaptorswap.RoleInitiator, // initiator needs peer's BTC payout
+	})
+	if err != nil {
+		t.Fatalf("StartSwap: %v", err)
+	}
+
+	// Two valid regtest P2PKH addresses derived from fresh keys
+	// so the test is independent of any external fixture.
+	addr1 := genRegtestAddr(t)
+	addr2 := genRegtestAddr(t)
+	if addr1 == addr2 {
+		t.Fatalf("test setup: regtest addr generator produced duplicates")
+	}
+
+	handled, err := mgr.OnCounterPartyAddress(matchID, addr1, dex.Simnet)
+	if !handled {
+		t.Fatal("expected handled=true for known adaptor match")
+	}
+	if err != nil {
+		t.Fatalf("OnCounterPartyAddress: %v", err)
+	}
+	if got := o.Cfg().PeerBTCPayoutScript; len(got) == 0 {
+		t.Fatal("PeerBTCPayoutScript not set")
+	}
+
+	// Unknown match: handled=false so the HTLC path takes over.
+	other := order.MatchID{0xFF}
+	handled, err = mgr.OnCounterPartyAddress(other, addr1, dex.Simnet)
+	if handled || err != nil {
+		t.Fatalf("unknown match: handled=%v err=%v, want false/nil", handled, err)
+	}
+
+	// Mismatched follow-up address rejected.
+	handled, err = mgr.OnCounterPartyAddress(matchID, addr2, dex.Simnet)
+	if !handled {
+		t.Fatal("expected handled=true for known match on follow-up")
+	}
+	if err == nil {
+		t.Fatal("expected error for mismatched follow-up address")
+	}
+
+	// Identical follow-up address is idempotent.
+	handled, err = mgr.OnCounterPartyAddress(matchID, addr1, dex.Simnet)
+	if !handled || err != nil {
+		t.Fatalf("idempotent re-set: handled=%v err=%v", handled, err)
+	}
+
+	// Bad address surfaces decode error.
+	handled, err = mgr.OnCounterPartyAddress(matchID, "not-an-address", dex.Simnet)
+	if !handled || err == nil {
+		t.Fatalf("bad address: handled=%v err=%v", handled, err)
+	}
+}
+
+// genRegtestAddr returns a fresh BTC regtest P2PKH address.
+func genRegtestAddr(t *testing.T) string {
+	t.Helper()
+	priv, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatalf("priv: %v", err)
+	}
+	addr, err := btcutil.NewAddressPubKeyHash(
+		btcutil.Hash160(priv.PubKey().SerializeCompressed()),
+		&chaincfg.RegressionNetParams)
+	if err != nil {
+		t.Fatalf("addr: %v", err)
+	}
+	return addr.EncodeAddress()
 }
 
 func TestXmrNetTagForNet(t *testing.T) {

@@ -119,6 +119,26 @@ func NewOrchestrator(cfg *Config) (*Orchestrator, error) {
 // is not safe in general, but reading them at any time is.
 func (o *Orchestrator) Cfg() *Config { return o.cfg }
 
+// SetPeerBTCPayoutScript records the counterparty's BTC payout
+// pkScript on the orchestrator's runtime config. Idempotent if
+// called twice with an identical script; errors on a mismatched
+// follow-up to make replay attacks visible.
+func (o *Orchestrator) SetPeerBTCPayoutScript(script []byte) error {
+	if len(script) == 0 {
+		return errors.New("empty peer btc payout script")
+	}
+	o.state.mu.Lock()
+	defer o.state.mu.Unlock()
+	if existing := o.cfg.PeerBTCPayoutScript; len(existing) > 0 {
+		if !bytes.Equal(existing, script) {
+			return errors.New("peer btc payout script already set with different value")
+		}
+		return nil
+	}
+	o.cfg.PeerBTCPayoutScript = script
+	return nil
+}
+
 // Start kicks off the state machine based on Role. For a
 // participant, this emits the initial AdaptorSetupPart; for an
 // initiator, it is a no-op and the machine waits for inbound

@@ -28,8 +28,11 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	btcadaptor "decred.org/dcrdex/internal/adaptorsigs/btc"
+	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/rpcclient"
+	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 )
 
@@ -128,6 +131,30 @@ func (m *AdaptorSwapManager) Stop(matchID order.MatchID) {
 	m.mu.Lock()
 	delete(m.orchestrators, matchID)
 	m.mu.Unlock()
+}
+
+// OnCounterPartyAddress is the entry point used by Core's
+// handleCounterPartyAddressMsg to forward the counterparty's BTC
+// payout address to the right orchestrator. Returns handled=false
+// when no orchestrator exists for matchID, in which case the caller
+// should fall back to the HTLC path. handled=true with err!=nil
+// means the address was for an adaptor match but could not be
+// applied (decode failure, mismatch with a previously recorded
+// value).
+func (m *AdaptorSwapManager) OnCounterPartyAddress(matchID order.MatchID,
+	addr string, net dex.Network) (handled bool, err error) {
+
+	m.mu.Lock()
+	o, ok := m.orchestrators[matchID]
+	m.mu.Unlock()
+	if !ok {
+		return false, nil
+	}
+	script, err := btcAddressToScript(addr, net)
+	if err != nil {
+		return true, fmt.Errorf("decode peer btc address %q: %w", addr, err)
+	}
+	return true, o.SetPeerBTCPayoutScript(script)
 }
 
 // routeToEvent maps a msgjson Adaptor* route + payload to the
@@ -477,6 +504,32 @@ type noopAdaptorPersister struct{}
 
 func (noopAdaptorPersister) Save(id [32]byte, s *adaptorswap.Snapshot) error { return nil }
 func (noopAdaptorPersister) Load(id [32]byte) (*adaptorswap.Snapshot, error) { return nil, nil }
+
+// btcAddressToScript decodes a BTC address string and returns its
+// pkScript. chaincfg params are derived from the dex network (a
+// later refactor may consult the connected BTC wallet for its
+// configured params instead).
+func btcAddressToScript(addr string, n dex.Network) ([]byte, error) {
+	var params *chaincfg.Params
+	switch n {
+	case dex.Mainnet:
+		params = &chaincfg.MainNetParams
+	case dex.Testnet:
+		params = &chaincfg.TestNet3Params
+	case dex.Simnet:
+		params = &chaincfg.RegressionNetParams
+	default:
+		return nil, fmt.Errorf("unsupported network %v", n)
+	}
+	a, err := btcutil.DecodeAddress(addr, params)
+	if err != nil {
+		return nil, fmt.Errorf("DecodeAddress: %w", err)
+	}
+	if !a.IsForNet(params) {
+		return nil, fmt.Errorf("address %q not for network %v", addr, n)
+	}
+	return txscript.PayToAddrScript(a)
+}
 
 // xmrNetTagForNet returns the Monero network tag byte used in
 // base58 address encoding for the given dex network.
