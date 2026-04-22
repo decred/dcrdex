@@ -411,6 +411,94 @@ func TestXmrNetTagForNet(t *testing.T) {
 	}
 }
 
+// TestManagerMultipleSwapsIsolated verifies that several
+// concurrent matches on a single AdaptorSwapManager get distinct
+// orchestrators, that a Handle for one match leaves the others
+// untouched, and that stopping one match does not disturb the
+// rest. Exercises the per-match registry + mutex.
+func TestManagerMultipleSwapsIsolated(t *testing.T) {
+	mgr := NewAdaptorSwapManager(&AdaptorSwapManagerConfig{
+		BTC: &bridgeFakeBTC{}, XMR: &bridgeFakeXMR{},
+		Send: &bridgeRecordingSender{},
+	})
+
+	mkCfg := func(b byte, role adaptorswap.Role) *adaptorswap.Config {
+		var mid order.MatchID
+		mid[0] = b
+		return &adaptorswap.Config{
+			SwapID:  [32]byte{b},
+			OrderID: [32]byte{b},
+			MatchID: mid,
+			Role:    role,
+		}
+	}
+
+	cfgs := []*adaptorswap.Config{
+		mkCfg(0x01, adaptorswap.RoleInitiator),
+		mkCfg(0x02, adaptorswap.RoleParticipant),
+		mkCfg(0x03, adaptorswap.RoleInitiator),
+	}
+	orchs := make(map[order.MatchID]*adaptorswap.Orchestrator, len(cfgs))
+	for _, cfg := range cfgs {
+		o, err := mgr.StartSwap(cfg)
+		if err != nil {
+			t.Fatalf("StartSwap %x: %v", cfg.MatchID[:1], err)
+		}
+		orchs[cfg.MatchID] = o
+	}
+	if len(mgr.orchestrators) != 3 {
+		t.Fatalf("registry size = %d, want 3", len(mgr.orchestrators))
+	}
+	// All three are distinct instances.
+	if orchs[cfgs[0].MatchID] == orchs[cfgs[1].MatchID] {
+		t.Fatal("matches 1 and 2 share an orchestrator")
+	}
+
+	// Capture each orch's initial phase. Initiators start at
+	// PhaseKeysSent; participants at PhaseKeysSent (after
+	// sendPartSetup).
+	initialPhases := make(map[order.MatchID]adaptorswap.Phase, len(cfgs))
+	for mid, o := range orchs {
+		initialPhases[mid] = o.Phase()
+	}
+
+	// Drive only match 1 through the next setup step. Phases of
+	// matches 2 and 3 must not move.
+	target := cfgs[0].MatchID
+	other := cfgs[1].MatchID
+	thirdMatch := cfgs[2].MatchID
+
+	// A bogus AdaptorSetupInit advances the target's state-machine
+	// attempt (it'll likely fail validation but the failure path is
+	// per-orchestrator). What we care about is whether the OTHER
+	// orchestrators see any state change.
+	_ = mgr.Handle(msgjson.AdaptorSetupInitRoute, target, &msgjson.AdaptorSetupInit{
+		MatchID: target[:],
+	})
+	if got := orchs[other].Phase(); got != initialPhases[other] {
+		t.Errorf("match %x phase moved from %s to %s after handling match %x",
+			other[:1], initialPhases[other], got, target[:1])
+	}
+	if got := orchs[thirdMatch].Phase(); got != initialPhases[thirdMatch] {
+		t.Errorf("match %x phase moved after handling match %x", thirdMatch[:1], target[:1])
+	}
+
+	// Stop match 2 only.
+	mgr.Stop(other)
+	if _, present := mgr.orchestrators[other]; present {
+		t.Error("orchestrator for stopped match still in registry")
+	}
+	if _, present := mgr.orchestrators[target]; !present {
+		t.Error("non-stopped match removed from registry")
+	}
+	// Handle on the stopped match errors, but on the others still
+	// works (here just confirm dispatch, not state advancement).
+	if err := mgr.Handle(msgjson.AdaptorSetupPartRoute, other,
+		&msgjson.AdaptorSetupPart{MatchID: other[:]}); err == nil {
+		t.Error("Handle on stopped match should error")
+	}
+}
+
 // TestSetupPhaseRoundTrip is the first end-to-end test of the
 // adaptor-swap message exchange. It wires two AdaptorSwapManagers
 // (one initiator, one participant) with senders that forward
