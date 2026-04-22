@@ -160,6 +160,48 @@ func TestSwapperHandleAdaptorWithPool(t *testing.T) {
 	}
 }
 
+// TestNegotiateAdaptor exercises the full match-creation path: a
+// real Swapper rig is given an AdaptorCoordinators pool, then
+// NegotiateAdaptor is invoked with a single match. Asserts that
+// (a) a coordinator was created for the match, and (b) standard
+// 'match' notifications were sent to both maker and taker so the
+// existing client-side ack flow still kicks in.
+func TestNegotiateAdaptor(t *testing.T) {
+	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true)
+	matchInfo := set.matchInfos[0]
+	rig, cleanup := tNewTestRig(matchInfo)
+	defer cleanup()
+
+	router := &bridgeRouter{}
+	pool := NewAdaptorCoordinators(adaptor.Config{
+		Router: router, Report: NoopReporter{}, Persist: NoopPersister{},
+	})
+	rig.swapper.adaptorCoords = pool
+
+	rig.swapper.NegotiateAdaptor([]*order.MatchSet{set.matchSet}, ABCID, 144)
+
+	if c := pool.Coordinator(matchInfo.matchID); c == nil {
+		t.Fatalf("no coordinator created for match %s", matchInfo.matchID)
+	}
+
+	// HTLC tracking map must NOT contain the adaptor match.
+	rig.swapper.matchMtx.RLock()
+	_, htlcTracked := rig.swapper.matches[matchInfo.matchID]
+	rig.swapper.matchMtx.RUnlock()
+	if htlcTracked {
+		t.Fatalf("adaptor match %s should not be in s.matches (HTLC tracking)", matchInfo.matchID)
+	}
+
+	// Both maker and taker should have received a 'match' request
+	// from the standard notification fanout.
+	if req := rig.auth.popReq(matchInfo.maker.acct); req == nil {
+		t.Fatal("maker did not receive a match notification")
+	}
+	if req := rig.auth.popReq(matchInfo.taker.acct); req == nil {
+		t.Fatal("taker did not receive a match notification")
+	}
+}
+
 // TestAdaptorRouteToEventMapping confirms every supported
 // server-inbound route produces the correct Event type, and
 // unknown routes error.

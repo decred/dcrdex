@@ -18,6 +18,8 @@ import (
 
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/swap/adaptor"
 )
 
@@ -253,4 +255,118 @@ func (s *Swapper) StopAdaptorMatch(matchID order.MatchID) {
 		return
 	}
 	s.adaptorCoords.Stop(matchID)
+}
+
+// NegotiateAdaptor is the adaptor-swap analogue of Negotiate. It is
+// invoked by the Market when its market config has SwapType ==
+// dex.SwapTypeAdaptor. The matchSets are all from the same adaptor
+// market, so they share scriptableAsset and lockBlocks.
+//
+// Per match: locks the order coins, persists the match record, and
+// either cancels (cancel-order matches) or starts an adaptor-swap
+// coordinator. The standard 'match' notification is still emitted to
+// both parties so the existing client-side ack machinery and order-
+// status flow work unchanged; the adaptor-specific setup messages
+// flow on the separate Adaptor* routes once the coordinator is
+// running.
+func (s *Swapper) NegotiateAdaptor(matchSets []*order.MatchSet,
+	scriptableAsset, lockBlocks uint32) {
+
+	s.handlerMtx.RLock()
+	defer s.handlerMtx.RUnlock()
+	if s.stop {
+		log.Errorf("NegotiateAdaptor called on stopped swapper. Matches lost!")
+		return
+	}
+	if s.adaptorCoords == nil {
+		log.Errorf("NegotiateAdaptor called but no AdaptorCoordinators configured. Matches lost!")
+		return
+	}
+
+	swapOrders := make([]order.Order, 0, 2*len(matchSets))
+	for _, set := range matchSets {
+		if set.Taker.Type() == order.CancelOrderType {
+			continue
+		}
+		swapOrders = append(swapOrders, set.Taker)
+		for _, maker := range set.Makers {
+			swapOrders = append(swapOrders, maker)
+		}
+	}
+	s.LockOrdersCoins(swapOrders)
+
+	matches := readMatches(matchSets)
+
+	for _, match := range matches {
+		if err := s.storage.InsertMatch(match.Match); err != nil {
+			log.Errorf("InsertMatch (match id=%v) failed: %v", match.ID(), err)
+			return
+		}
+	}
+
+	userMatches := make(map[account.AccountID][]*messageAcker)
+	addUserMatch := func(acker *messageAcker) {
+		s.authMgr.Sign(acker.params)
+		userMatches[acker.user] = append(userMatches[acker.user], acker)
+	}
+
+	for _, match := range matches {
+		if match.Taker.Type() == order.CancelOrderType {
+			if err := s.storage.CancelOrder(match.Maker); err != nil {
+				log.Errorf("Failed to cancel order %v", match.Maker)
+				return
+			}
+		} else {
+			// Pick the non-scriptable asset from the market base/quote.
+			base, quote := match.Maker.BaseAsset, match.Maker.QuoteAsset
+			nonScript := quote
+			if scriptableAsset == quote {
+				nonScript = base
+			}
+			matchID := match.ID()
+			orderID := match.Maker.ID()
+			var mid, oid order.MatchID
+			copy(mid[:], matchID[:])
+			copy(oid[:], orderID[:])
+			if _, err := s.adaptorCoords.Start(mid, oid, scriptableAsset, nonScript, lockBlocks); err != nil {
+				log.Errorf("AdaptorCoordinators.Start (match %s): %v", matchID, err)
+				continue
+			}
+		}
+
+		makerMsg, takerMsg := matchNotifications(match)
+		addUserMatch(&messageAcker{
+			user:    match.Maker.User(),
+			match:   match,
+			params:  makerMsg,
+			isMaker: true,
+		})
+		addUserMatch(&messageAcker{
+			user:    match.Taker.User(),
+			match:   match,
+			params:  takerMsg,
+			isMaker: false,
+		})
+	}
+
+	for user, ms := range userMatches {
+		msgs := make([]msgjson.Signable, 0, len(ms))
+		for _, m := range ms {
+			msgs = append(msgs, m.params)
+		}
+		req, err := msgjson.NewRequest(comms.NextID(), msgjson.MatchRoute, msgs)
+		if err != nil {
+			log.Errorf("error creating adaptor match notification request: %v", err)
+			continue
+		}
+		u, m := user, ms
+		log.Debugf("NegotiateAdaptor: sending 'match' ack request to user %v for %d matches",
+			u, len(m))
+		if err := s.authMgr.Request(u, req, func(_ comms.Link, resp *msgjson.Message) {
+			s.processMatchAcks(u, resp, m)
+		}); err != nil {
+			log.Infof("Failed to send %v request to %v. The match will be returned in the connect response.",
+				req.Route, u)
+		}
+	}
 }

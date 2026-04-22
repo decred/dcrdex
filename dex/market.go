@@ -76,6 +76,14 @@ type MarketInfo struct {
 	// non-scriptable asset) are rejected at order intake. Must equal
 	// Base or Quote.
 	ScriptableAsset uint32
+	// LockBlocks is only used when SwapType is SwapTypeAdaptor. It
+	// is the CSV window (in blocks of the scriptable chain) on the
+	// punish leaf of the refund tap tree: the number of blocks the
+	// initiator has to broadcast a cooperative refund (revealing
+	// his XMR scalar) before the participant can solo-spend the
+	// refund output via the punish branch. The server validates
+	// that counterparties' on-wire setup matches this value.
+	LockBlocks uint32
 }
 
 // IsAdaptor reports whether this market uses adaptor-signature swaps.
