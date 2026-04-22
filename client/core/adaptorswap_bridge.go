@@ -198,6 +198,109 @@ func routeToEvent(route string, payload any) (adaptorswap.Event, error) {
 // this error rather than surface it as a failure.
 var errPurelyInformational = errors.New("informational message; no event")
 
+// handleAdaptorMsg is the routeHandler for every adaptor_* route in
+// Core's noteHandlers map. It unmarshals the payload according to
+// msg.Route, extracts the MatchID, and dispatches into Core's
+// AdaptorSwapManager. Informational routes (no state change on the
+// receiving side) are silently dropped.
+//
+// dexConnection is unused for now; a future refactor will allow
+// orchestrators to send messages back to the same dc, at which point
+// the manager's per-swap MessageSender will close over dc and the
+// route table can stop indirecting through Core.
+func handleAdaptorMsg(c *Core, _ *dexConnection, msg *msgjson.Message) error {
+	payload, matchID, err := decodeAdaptorMsg(msg)
+	if err != nil {
+		return fmt.Errorf("decode %s: %w", msg.Route, err)
+	}
+	if err := c.adaptorMgr.Handle(msg.Route, matchID, payload); err != nil {
+		if IsInformational(err) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+// decodeAdaptorMsg unmarshals msg's payload into the type appropriate
+// for msg.Route and returns it alongside the match ID. Returns an
+// error for unknown adaptor routes or malformed payloads.
+func decodeAdaptorMsg(msg *msgjson.Message) (any, order.MatchID, error) {
+	var matchBytes []byte
+	var payload any
+	switch msg.Route {
+	case msgjson.AdaptorSetupPartRoute:
+		p := new(msgjson.AdaptorSetupPart)
+		if err := msg.Unmarshal(p); err != nil {
+			return nil, order.MatchID{}, err
+		}
+		matchBytes, payload = p.MatchID, p
+	case msgjson.AdaptorSetupInitRoute:
+		p := new(msgjson.AdaptorSetupInit)
+		if err := msg.Unmarshal(p); err != nil {
+			return nil, order.MatchID{}, err
+		}
+		matchBytes, payload = p.MatchID, p
+	case msgjson.AdaptorRefundPresignedRoute:
+		p := new(msgjson.AdaptorRefundPresigned)
+		if err := msg.Unmarshal(p); err != nil {
+			return nil, order.MatchID{}, err
+		}
+		matchBytes, payload = p.MatchID, p
+	case msgjson.AdaptorLockedRoute:
+		p := new(msgjson.AdaptorLocked)
+		if err := msg.Unmarshal(p); err != nil {
+			return nil, order.MatchID{}, err
+		}
+		matchBytes, payload = p.MatchID, p
+	case msgjson.AdaptorXmrLockedRoute:
+		p := new(msgjson.AdaptorXmrLocked)
+		if err := msg.Unmarshal(p); err != nil {
+			return nil, order.MatchID{}, err
+		}
+		matchBytes, payload = p.MatchID, p
+	case msgjson.AdaptorSpendPresigRoute:
+		p := new(msgjson.AdaptorSpendPresig)
+		if err := msg.Unmarshal(p); err != nil {
+			return nil, order.MatchID{}, err
+		}
+		matchBytes, payload = p.MatchID, p
+	case msgjson.AdaptorSpendBroadcastRoute:
+		p := new(msgjson.AdaptorSpendBroadcast)
+		if err := msg.Unmarshal(p); err != nil {
+			return nil, order.MatchID{}, err
+		}
+		matchBytes, payload = p.MatchID, p
+	case msgjson.AdaptorRefundBroadcastRoute:
+		p := new(msgjson.AdaptorRefundBroadcast)
+		if err := msg.Unmarshal(p); err != nil {
+			return nil, order.MatchID{}, err
+		}
+		matchBytes, payload = p.MatchID, p
+	case msgjson.AdaptorCoopRefundRoute:
+		p := new(msgjson.AdaptorCoopRefund)
+		if err := msg.Unmarshal(p); err != nil {
+			return nil, order.MatchID{}, err
+		}
+		matchBytes, payload = p.MatchID, p
+	case msgjson.AdaptorPunishRoute:
+		p := new(msgjson.AdaptorPunish)
+		if err := msg.Unmarshal(p); err != nil {
+			return nil, order.MatchID{}, err
+		}
+		matchBytes, payload = p.MatchID, p
+	default:
+		return nil, order.MatchID{}, fmt.Errorf("unknown adaptor route %q", msg.Route)
+	}
+	if len(matchBytes) != order.MatchIDSize {
+		return nil, order.MatchID{}, fmt.Errorf("matchid length %d, want %d",
+			len(matchBytes), order.MatchIDSize)
+	}
+	var matchID order.MatchID
+	copy(matchID[:], matchBytes)
+	return payload, matchID, nil
+}
+
 // IsInformational reports whether an error from Handle is the
 // "informational message" sentinel and can be safely ignored.
 func IsInformational(err error) bool {

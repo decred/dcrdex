@@ -1700,6 +1700,13 @@ type Core struct {
 	meshMtx sync.RWMutex
 	mesh    *mesh.Mesh
 	meshCM  *dex.ConnectionMaster
+
+	// adaptorMgr drives BIP-340 adaptor-signature swaps for matches
+	// on markets configured with msgjson.Market.SwapType !=
+	// SwapTypeHTLC. Always non-nil so adaptor route handlers do not
+	// need a nil check; backed by NoopSender and nil asset adapters
+	// until those are wired in by the per-build entry points.
+	adaptorMgr *AdaptorSwapManager
 }
 
 // New is the constructor for a new Core.
@@ -1846,6 +1853,14 @@ func New(cfg *Config) (*Core, error) {
 		notes:            make(chan asset.WalletNotification, 128),
 		requestedActions: make(map[string]*asset.ActionRequiredNote),
 	}
+
+	// Adaptor-swap manager. Asset adapters and message sender are
+	// installed later by the per-asset wiring; until then StartSwap
+	// will fail at orchestrator construction, which is the correct
+	// behavior - we have not yet routed any match into it.
+	c.adaptorMgr = NewAdaptorSwapManager(&AdaptorSwapManagerConfig{
+		Send: NoopSender{},
+	})
 
 	c.intl.Store(&locale{
 		lang:    lang,
@@ -9677,6 +9692,19 @@ var noteHandlers = map[string]routeHandler{
 	msgjson.BondExpiredRoute:         handleBondExpiredMsg,
 	msgjson.MMEpochSnapshotRoute:     handleMMEpochSnapshotMsg,
 	msgjson.CounterPartyAddressRoute: handleCounterPartyAddressMsg,
+
+	// Adaptor-swap routes. All ten dispatch through the same
+	// handler, which uses msg.Route to pick the payload type.
+	msgjson.AdaptorSetupPartRoute:       handleAdaptorMsg,
+	msgjson.AdaptorSetupInitRoute:       handleAdaptorMsg,
+	msgjson.AdaptorRefundPresignedRoute: handleAdaptorMsg,
+	msgjson.AdaptorLockedRoute:          handleAdaptorMsg,
+	msgjson.AdaptorXmrLockedRoute:       handleAdaptorMsg,
+	msgjson.AdaptorSpendPresigRoute:     handleAdaptorMsg,
+	msgjson.AdaptorSpendBroadcastRoute:  handleAdaptorMsg,
+	msgjson.AdaptorRefundBroadcastRoute: handleAdaptorMsg,
+	msgjson.AdaptorCoopRefundRoute:      handleAdaptorMsg,
+	msgjson.AdaptorPunishRoute:          handleAdaptorMsg,
 }
 
 // listen monitors the DEX websocket connection for server requests and
