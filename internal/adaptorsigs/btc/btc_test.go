@@ -10,6 +10,34 @@ import (
 	"github.com/btcsuite/btcd/wire"
 )
 
+// TestScriptInputValidation covers the input-validation paths in
+// LockLeafScript and PunishLeafScript.
+func TestScriptInputValidation(t *testing.T) {
+	validKey := make([]byte, 32)
+	shortKey := make([]byte, 31)
+
+	if _, err := LockLeafScript(shortKey, validKey); err == nil {
+		t.Fatal("expected error for short kal")
+	}
+	if _, err := LockLeafScript(validKey, shortKey); err == nil {
+		t.Fatal("expected error for short kaf")
+	}
+
+	if _, err := PunishLeafScript(shortKey, 10); err == nil {
+		t.Fatal("expected error for short kaf in punish script")
+	}
+	if _, err := PunishLeafScript(validKey, 0); err == nil {
+		t.Fatal("expected error for zero lockBlocks")
+	}
+	if _, err := PunishLeafScript(validKey, -1); err == nil {
+		t.Fatal("expected error for negative lockBlocks")
+	}
+	// CSV block-range is 16 bits.
+	if _, err := PunishLeafScript(validKey, 0x10000); err == nil {
+		t.Fatal("expected error for lockBlocks > 0xFFFF")
+	}
+}
+
 // TestUnspendableInternalKey checks that the NUMS point parses as a
 // valid BIP-340 x-only pubkey.
 func TestUnspendableInternalKey(t *testing.T) {
