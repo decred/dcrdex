@@ -209,3 +209,48 @@ func (NoopPersister) Load(order.MatchID) (*adaptor.State, error) { return nil, n
 // sanity: errors import silences "imported and not used" if no
 // package-level error is declared.
 var _ = errors.New
+
+// HandleAdaptor routes an inbound msgjson Adaptor* message through
+// the configured AdaptorCoordinators pool. Returns an error if
+// adaptor coordination is not configured for this Swapper.
+//
+// Intended to be called from server/comms's adaptor-route handler:
+//
+//	dex.AuthMgr.Route(msgjson.AdaptorSetupPartRoute, func(...) {
+//	    swapper.HandleAdaptor(msgjson.AdaptorSetupPartRoute, matchID, payload)
+//	})
+//
+// HTLC routes continue to flow through the existing Swapper
+// handlers; this method only fires for Adaptor* routes.
+func (s *Swapper) HandleAdaptor(route string, matchID order.MatchID, payload any) error {
+	if s.adaptorCoords == nil {
+		return errors.New("adaptor swap coordination not configured")
+	}
+	return s.adaptorCoords.Handle(route, matchID, payload)
+}
+
+// StartAdaptorMatch creates an adaptor swap coordinator for a new
+// match. Called from the match-creation path in Negotiate when the
+// match's market has SwapType == dex.SwapTypeAdaptor.
+//
+// TODO: hook into Negotiate. The remaining call-site work is to
+// have Negotiate consult its market config, dispatch
+// adaptor-marked matches here, and skip the HTLC matchTracker
+// setup for them.
+func (s *Swapper) StartAdaptorMatch(matchID, orderID order.MatchID,
+	scriptableAsset, nonScriptAsset uint32, lockBlocks uint32) error {
+	if s.adaptorCoords == nil {
+		return errors.New("adaptor swap coordination not configured")
+	}
+	_, err := s.adaptorCoords.Start(matchID, orderID, scriptableAsset, nonScriptAsset, lockBlocks)
+	return err
+}
+
+// StopAdaptorMatch tears down the coordinator for a completed or
+// cancelled adaptor swap match.
+func (s *Swapper) StopAdaptorMatch(matchID order.MatchID) {
+	if s.adaptorCoords == nil {
+		return
+	}
+	s.adaptorCoords.Stop(matchID)
+}

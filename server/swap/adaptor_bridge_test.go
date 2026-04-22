@@ -98,6 +98,68 @@ func TestAdaptorCoordinatorsLifecycle(t *testing.T) {
 	}
 }
 
+// TestSwapperHandleAdaptorWithoutPool returns an error when
+// AdaptorCoordinators is not configured. Verifies HTLC-only
+// deployments aren't accidentally exposed to adaptor routing.
+func TestSwapperHandleAdaptorWithoutPool(t *testing.T) {
+	s := &Swapper{}
+	var matchID order.MatchID
+	if err := s.HandleAdaptor(msgjson.AdaptorSetupPartRoute, matchID, nil); err == nil {
+		t.Fatal("expected error when adaptorCoords is nil")
+	}
+	if err := s.StartAdaptorMatch(matchID, matchID, 0, 128, 2); err == nil {
+		t.Fatal("expected error from StartAdaptorMatch without pool")
+	}
+	// Stop is a no-op without a pool.
+	s.StopAdaptorMatch(matchID)
+}
+
+// TestSwapperHandleAdaptorWithPool wires a pool through a Swapper
+// and verifies the dispatch path reaches the coordinator.
+func TestSwapperHandleAdaptorWithPool(t *testing.T) {
+	router := &bridgeRouter{}
+	pool := NewAdaptorCoordinators(adaptor.Config{
+		Router: router, Report: NoopReporter{}, Persist: NoopPersister{},
+	})
+	s := &Swapper{adaptorCoords: pool}
+
+	var matchID, orderID order.MatchID
+	copy(matchID[:], []byte{0x01})
+	copy(orderID[:], []byte{0x02})
+
+	if err := s.StartAdaptorMatch(matchID, orderID, 0, 128, 2); err != nil {
+		t.Fatalf("StartAdaptorMatch: %v", err)
+	}
+
+	// Real part-setup payload routes through.
+	spend, _ := edwards.GeneratePrivateKey()
+	view, _ := edwards.GeneratePrivateKey()
+	btcKey, _ := btcec.NewPrivateKey()
+	dleq, err := adaptorsigs.ProveDLEQ(spend.Serialize())
+	if err != nil {
+		t.Fatalf("dleq: %v", err)
+	}
+	part := &msgjson.AdaptorSetupPart{
+		OrderID:         orderID[:],
+		MatchID:         matchID[:],
+		PubSpendKeyHalf: spend.PubKey().Serialize(),
+		ViewKeyHalf:     view.Serialize(),
+		PubSignKeyHalf:  btcschnorr.SerializePubKey(btcKey.PubKey()),
+		DLEQProof:       dleq,
+	}
+	if err := s.HandleAdaptor(msgjson.AdaptorSetupPartRoute, matchID, part); err != nil {
+		t.Fatalf("HandleAdaptor: %v", err)
+	}
+	if len(router.sent) != 1 {
+		t.Fatalf("router got %d msgs", len(router.sent))
+	}
+
+	s.StopAdaptorMatch(matchID)
+	if err := s.HandleAdaptor(msgjson.AdaptorSetupPartRoute, matchID, part); err == nil {
+		t.Fatal("expected error after Stop")
+	}
+}
+
 // TestAdaptorRouteToEventMapping confirms every supported
 // server-inbound route produces the correct Event type, and
 // unknown routes error.
