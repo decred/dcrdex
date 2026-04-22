@@ -40,10 +40,25 @@ type Config struct {
 	// Peer's destination address for their output. For the
 	// initiator this is Alice's BTC payout address (where Alice
 	// receives BTC on redeem). For the participant this is Bob's
-	// XMR sweep destination. These are collected out-of-band at
-	// match time.
+	// XMR sweep destination. PeerBTCPayoutScript is populated by
+	// the initiator's setup handler from AdaptorSetupPart.BTCPayoutAddr,
+	// or out-of-band via SetPeerBTCPayoutScript.
 	PeerBTCPayoutScript []byte
 	OwnXMRSweepDest     string
+
+	// OwnBTCPayoutAddr is the participant's own BTC deposit
+	// address; the participant sends it in AdaptorSetupPart so the
+	// initiator can build a spendTx output that pays this address.
+	// Populated at config-build time by the bridge from the local
+	// BTC wallet.
+	OwnBTCPayoutAddr string
+
+	// DecodeBTCAddr converts a BTC address string into a pkScript.
+	// Supplied by the bridge so the orchestrator does not need to
+	// know about chain params or btcutil. Used by the initiator to
+	// translate AdaptorSetupPart.BTCPayoutAddr into
+	// PeerBTCPayoutScript on receipt.
+	DecodeBTCAddr func(addr string) ([]byte, error)
 
 	// Network tag for XMR address encoding (18=mainnet, 24=stagenet).
 	XmrNetTag uint64
@@ -203,6 +218,7 @@ func (o *Orchestrator) sendPartSetup() error {
 		ViewKeyHalf:     kbvf.Serialize(),
 		PubSignKeyHalf:  btcschnorr.SerializePubKey(o.state.BtcSignKey.PubKey()),
 		DLEQProof:       o.state.DLEQProof,
+		BTCPayoutAddr:   o.cfg.OwnBTCPayoutAddr,
 	}
 	if err := o.sendMsg.SendToPeer(msgjson.AdaptorSetupPartRoute, msg); err != nil {
 		return fmt.Errorf("send AdaptorSetupPart: %w", err)
@@ -277,6 +293,23 @@ func (o *Orchestrator) handleSetup(evt Event) error {
 // lockTx/refundTx/spendRefundTx chain, and emits AdaptorSetupInit.
 func (o *Orchestrator) initiatorConsumePartSetup(m *msgjson.AdaptorSetupPart) error {
 	s := o.state
+
+	// Decode the participant's BTC payout address into a pkScript.
+	// The script becomes the spendTx output (where Alice receives
+	// BTC on redeem). Skip silently when no address came over the
+	// wire AND no decoder is configured - tests / out-of-band
+	// CounterPartyAddress flow can populate PeerBTCPayoutScript
+	// later via SetPeerBTCPayoutScript.
+	if m.BTCPayoutAddr != "" {
+		if o.cfg.DecodeBTCAddr == nil {
+			return errors.New("AdaptorSetupPart carries BTCPayoutAddr but no DecodeBTCAddr is configured")
+		}
+		script, err := o.cfg.DecodeBTCAddr(m.BTCPayoutAddr)
+		if err != nil {
+			return fmt.Errorf("decode peer btc payout addr %q: %w", m.BTCPayoutAddr, err)
+		}
+		o.cfg.PeerBTCPayoutScript = script
+	}
 
 	// Parse Alice's ed25519 spend-key half pubkey.
 	partSpendPub, err := edwards.ParsePubKey(m.PubSpendKeyHalf)

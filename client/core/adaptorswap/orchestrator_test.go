@@ -474,6 +474,85 @@ func driveSetupPhase(t *testing.T, initBTC, partBTC *fakeBTC,
 	return init, part
 }
 
+// TestBTCPayoutAddrFlowsThroughSetupPart confirms that the
+// participant's BTC payout address rides on AdaptorSetupPart and
+// the initiator decodes it into PeerBTCPayoutScript on receipt
+// (closes the simnet blocker where the address never reached the
+// initiator). Decoder is a closure here so the test does not
+// depend on chaincfg.
+func TestBTCPayoutAddrFlowsThroughSetupPart(t *testing.T) {
+	const aliceAddr = "alice-test-addr"
+	wantScript := []byte{0xDE, 0xAD, 0xBE, 0xEF}
+
+	matchID := [32]byte{0x55}
+	orderID := [32]byte{0x66}
+
+	initSender := &recordingSender{}
+	partSender := &recordingSender{}
+
+	mkCfg := func(role Role, btc *fakeBTC, s *recordingSender) *Config {
+		cfg := &Config{
+			SwapID: matchID, OrderID: orderID, MatchID: matchID,
+			Role:                role,
+			BtcAmount:           100_000,
+			XmrAmount:           1000,
+			LockBlocks:          2,
+			PeerBTCPayoutScript: nil, // initiator must populate from setup msg
+			OwnXMRSweepDest:     "4tester",
+			XmrNetTag:           18,
+			AssetBTC:            btc,
+			AssetXMR:            &fakeXMR{},
+			SendMsg:             s,
+			Persist:             &memPersister{},
+			DecodeBTCAddr: func(addr string) ([]byte, error) {
+				if addr != aliceAddr {
+					t.Fatalf("decoder got addr %q, want %q", addr, aliceAddr)
+				}
+				return wantScript, nil
+			},
+		}
+		if role == RoleParticipant {
+			cfg.OwnBTCPayoutAddr = aliceAddr
+		}
+		return cfg
+	}
+
+	init, err := NewOrchestrator(mkCfg(RoleInitiator, &fakeBTC{}, initSender))
+	if err != nil {
+		t.Fatalf("init NewOrchestrator: %v", err)
+	}
+	part, err := NewOrchestrator(mkCfg(RoleParticipant, &fakeBTC{}, partSender))
+	if err != nil {
+		t.Fatalf("part NewOrchestrator: %v", err)
+	}
+	if err := init.Start(); err != nil {
+		t.Fatalf("init Start: %v", err)
+	}
+	if err := part.Start(); err != nil {
+		t.Fatalf("part Start: %v", err)
+	}
+
+	// Snoop the participant's emit and confirm the address rode.
+	partLast := partSender.last()
+	setupPart, ok := partLast.payload.(*msgjson.AdaptorSetupPart)
+	if !ok {
+		t.Fatalf("part payload type %T", partLast.payload)
+	}
+	if setupPart.BTCPayoutAddr != aliceAddr {
+		t.Fatalf("AdaptorSetupPart.BTCPayoutAddr = %q, want %q",
+			setupPart.BTCPayoutAddr, aliceAddr)
+	}
+
+	// Deliver to the initiator and verify the decoded script
+	// landed in cfg.PeerBTCPayoutScript.
+	if err := init.Handle(EventKeysReceived{Setup: setupPart}); err != nil {
+		t.Fatalf("init handle PartSetup: %v", err)
+	}
+	if got := init.Cfg().PeerBTCPayoutScript; !bytesEqual(got, wantScript) {
+		t.Fatalf("init PeerBTCPayoutScript = %x, want %x", got, wantScript)
+	}
+}
+
 // TestParticipantPunishPath drives a participant from a setup-
 // complete state through InitiateRefund + EventRefundCSVMatured
 // and verifies it broadcasts the punish-leaf spendRefundTx and

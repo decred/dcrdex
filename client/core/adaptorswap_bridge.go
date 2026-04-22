@@ -286,27 +286,39 @@ func (c *Core) startAdaptorMatches(tracker *trackedTrade, msgMatches []*msgjson.
 		copy(swapID[:], matchID[:])
 		copy(oid[:], tracker.ID().Bytes())
 
+		// Per-role wallet address pre-fetch:
+		//  - Initiator (BTC holder) sweeps XMR back to its own
+		//    XMR deposit address.
+		//  - Participant (XMR holder) is paid BTC at its own BTC
+		//    deposit address; the address is sent in
+		//    AdaptorSetupPart so the initiator can build the spendTx
+		//    output that targets it.
+		var ownXMRDest, ownBTCAddr string
+		if role == adaptorswap.RoleInitiator {
+			ownXMRDest = c.adaptorOwnDepositAddr(pairXMR)
+		} else {
+			ownBTCAddr = c.adaptorOwnDepositAddr(pairBTC)
+		}
 		cfg := &adaptorswap.Config{
-			SwapID:     swapID,
-			OrderID:    oid,
-			MatchID:    matchID,
-			Role:       role,
-			PairBTC:    pairBTC,
-			PairXMR:    pairXMR,
-			BtcAmount:  btcAmt,
-			XmrAmount:  xmrAmt,
-			LockBlocks: mkt.LockBlocks,
-			XmrNetTag:  xmrNetTagForNet(c.net),
-			// OwnXMRSweepDest is the local XMR wallet's deposit
-			// address, used by the initiator at sweep time. Best-
-			// effort lookup; if the wallet is not yet connected,
-			// the orchestrator will fail at sweep with a clear
-			// error rather than block setup.
-			OwnXMRSweepDest: c.adaptorOwnXMRDest(pairXMR),
-			// PeerBTCPayoutScript: populated when the
-			// CounterPartyAddress message arrives for this match
-			// (handleCounterPartyAddressMsg routes adaptor
-			// matches to the manager).
+			SwapID:           swapID,
+			OrderID:          oid,
+			MatchID:          matchID,
+			Role:             role,
+			PairBTC:          pairBTC,
+			PairXMR:          pairXMR,
+			BtcAmount:        btcAmt,
+			XmrAmount:        xmrAmt,
+			LockBlocks:       mkt.LockBlocks,
+			XmrNetTag:        xmrNetTagForNet(c.net),
+			OwnXMRSweepDest:  ownXMRDest,
+			OwnBTCPayoutAddr: ownBTCAddr,
+			// DecodeBTCAddr lets the initiator translate the
+			// participant's BTCPayoutAddr (received in AdaptorSetupPart)
+			// into a pkScript without the orchestrator needing to
+			// know about chain params.
+			DecodeBTCAddr: func(addr string) ([]byte, error) {
+				return btcAddressToScript(addr, c.net)
+			},
 			// SendMsg is wired per-match to the trade's
 			// dexConnection so outbound adaptor_* messages
 			// actually reach the server.
@@ -579,11 +591,12 @@ func xmrNetTagForNet(n dex.Network) uint64 {
 	return 18
 }
 
-// adaptorOwnXMRDest returns a deposit address from the connected
-// XMR wallet for assetID, or empty if the wallet is not connected
-// or does not implement asset.NewAddresser. Used to populate the
-// orchestrator's OwnXMRSweepDest at swap-setup time.
-func (c *Core) adaptorOwnXMRDest(assetID uint32) string {
+// adaptorOwnDepositAddr returns a deposit address from the
+// connected wallet for assetID, or empty if the wallet is not
+// connected or does not implement asset.NewAddresser. Used to
+// populate the orchestrator's OwnXMRSweepDest (initiator) and
+// OwnBTCPayoutAddr (participant) at swap-setup time.
+func (c *Core) adaptorOwnDepositAddr(assetID uint32) string {
 	c.walletMtx.RLock()
 	w, ok := c.wallets[assetID]
 	c.walletMtx.RUnlock()
@@ -596,7 +609,7 @@ func (c *Core) adaptorOwnXMRDest(assetID uint32) string {
 	}
 	addr, err := na.NewAddress()
 	if err != nil {
-		c.log.Warnf("XMR NewAddress (asset %d) for adaptor sweep dest: %v", assetID, err)
+		c.log.Warnf("NewAddress (asset %d) for adaptor swap: %v", assetID, err)
 		return ""
 	}
 	return addr

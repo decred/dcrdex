@@ -80,6 +80,11 @@ type AdaptorSetupPart struct {
 	// DLEQProof binds PubSpendKeyHalf (ed25519) to the secp256k1
 	// point that the initiator will use as the adaptor tweak.
 	DLEQProof Bytes `json:"dleqproof"`
+	// BTCPayoutAddr is the participant's BTC deposit address. The
+	// initiator builds the spendTx output that pays the participant
+	// against this address. Must be valid on the relevant
+	// scriptable-chain network (mainnet/testnet/regtest).
+	BTCPayoutAddr string `json:"btcpayoutaddr,omitempty"`
 }
 
 var _ Signable = (*AdaptorSetupPart)(nil)
@@ -87,13 +92,14 @@ var _ Signable = (*AdaptorSetupPart)(nil)
 func (m *AdaptorSetupPart) Serialize() []byte {
 	s := make([]byte, 0, len(m.OrderID)+len(m.MatchID)+
 		len(m.PubSpendKeyHalf)+len(m.ViewKeyHalf)+
-		len(m.PubSignKeyHalf)+len(m.DLEQProof))
+		len(m.PubSignKeyHalf)+len(m.DLEQProof)+len(m.BTCPayoutAddr))
 	s = append(s, m.OrderID...)
 	s = append(s, m.MatchID...)
 	s = append(s, m.PubSpendKeyHalf...)
 	s = append(s, m.ViewKeyHalf...)
 	s = append(s, m.PubSignKeyHalf...)
-	return append(s, m.DLEQProof...)
+	s = append(s, m.DLEQProof...)
+	return append(s, []byte(m.BTCPayoutAddr)...)
 }
 
 // AdaptorSetupInit is the initiator's (BTC holder) response to
