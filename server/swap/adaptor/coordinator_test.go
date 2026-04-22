@@ -538,6 +538,99 @@ func TestCoordinatorRejectsMalformedSetup(t *testing.T) {
 	})
 }
 
+// TestCoordinatorResumeFromSnapshot mirrors the client-side
+// TestResumeFromSnapshot for the server coordinator: drive a
+// coordinator through the setup phase, snapshot, restart with a
+// fresh config, and verify the resumed coordinator continues the
+// state machine from the saved phase.
+func TestCoordinatorResumeFromSnapshot(t *testing.T) {
+	router1 := &recordingRouter{}
+	matchID := [32]byte{0xCA}
+	cfg := &Config{
+		MatchID: matchID, OrderID: matchID, LockBlocks: 144,
+		Router: router1, Report: &recordingReporter{}, Persist: &nopPersister{},
+	}
+	c, err := NewCoordinator(cfg)
+	if err != nil {
+		t.Fatalf("NewCoordinator: %v", err)
+	}
+
+	// Drive through setup so the saved State has substantive
+	// content (peer pubkeys, dleq proofs, leaf scripts).
+	part, partBtc := buildPartSetup(t, matchID)
+	if err := c.Handle(EventPartSetup{Msg: part}); err != nil {
+		t.Fatalf("part: %v", err)
+	}
+	init := buildInitSetup(t, matchID, btcschnorr.SerializePubKey(partBtc.PubKey()), cfg.LockBlocks)
+	if err := c.Handle(EventInitSetup{Msg: init}); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	savedPhase := c.Phase()
+	if savedPhase != PhaseAwaitingPresigned {
+		t.Fatalf("setup phase = %s, want PhaseAwaitingPresigned", savedPhase)
+	}
+
+	// Snapshot -> bytes -> Unmarshal.
+	c.state.mu.Lock()
+	data, err := c.state.Marshal()
+	c.state.mu.Unlock()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	restored, err := Unmarshal(data)
+	if err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	// Simulate a process restart: fresh router (a real restart
+	// gets a new comms layer) and a new Coordinator over the
+	// restored state.
+	router2 := &recordingRouter{}
+	resumeCfg := &Config{
+		MatchID: cfg.MatchID, OrderID: cfg.OrderID, LockBlocks: cfg.LockBlocks,
+		Router: router2, Report: &recordingReporter{}, Persist: &nopPersister{},
+	}
+	resumed, err := NewCoordinatorFromState(resumeCfg, restored)
+	if err != nil {
+		t.Fatalf("NewCoordinatorFromState: %v", err)
+	}
+	if got := resumed.Phase(); got != savedPhase {
+		t.Fatalf("resumed phase = %s, want %s", got, savedPhase)
+	}
+
+	// Resume must continue the state machine. Feed the next valid
+	// event (Presigned) and verify it advances + routes to the
+	// initiator on the new router.
+	priv, _ := btcec.NewPrivateKey()
+	tweak, _ := btcec.NewPrivateKey()
+	var T btcec.JacobianPoint
+	btcec.ScalarBaseMultNonConst(&tweak.Key, &T)
+	var hash [32]byte
+	fakeSig, _ := adaptorsigs.PublicKeyTweakedAdaptorSigBIP340(priv, hash[:], &T)
+	pres := &msgjson.AdaptorRefundPresigned{
+		OrderID: matchID[:], MatchID: matchID[:],
+		RefundSig: make([]byte, 64), SpendRefundAdaptorSig: fakeSig.Serialize(),
+	}
+	if err := resumed.Handle(EventPresigned{Msg: pres}); err != nil {
+		t.Fatalf("resumed Handle Presigned: %v", err)
+	}
+	if got := resumed.Phase(); got != PhaseAwaitingLocked {
+		t.Errorf("after resumed Presigned phase = %s, want PhaseAwaitingLocked", got)
+	}
+	if got := router2.last(); got.role != RoleInitiator || got.route != msgjson.AdaptorRefundPresignedRoute {
+		t.Errorf("resumed routing role=%d route=%s, want RoleInitiator/AdaptorRefundPresignedRoute",
+			got.role, got.route)
+	}
+	// The original router must NOT have received the post-resume
+	// message - confirms cfg.Router is the new one.
+	router1.mu.Lock()
+	last := router1.sent[len(router1.sent)-1]
+	router1.mu.Unlock()
+	if last.route == msgjson.AdaptorRefundPresignedRoute {
+		t.Error("original router got the post-resume message; resume Cfg's Router not in use")
+	}
+}
+
 func TestCoordinatorHappyPathTerminal(t *testing.T) {
 	router := &recordingRouter{}
 	reporter := &recordingReporter{}

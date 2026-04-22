@@ -62,6 +62,30 @@ func (c *Config) redeemTimeout() time.Duration {
 	return c.RedeemTimeout
 }
 
+// NewCoordinatorFromState rehydrates a Coordinator from a State
+// returned by Unmarshal (or any persister-supplied state). The cfg
+// supplies runtime deps (router, btc/xmr auditors, reporter,
+// persister); the State carries the per-match identity, phase, and
+// public artifacts. Used at startup to resume in-flight matches
+// after a process restart.
+func NewCoordinatorFromState(cfg *Config, state *State) (*Coordinator, error) {
+	if cfg == nil {
+		return nil, errors.New("nil config")
+	}
+	if state == nil {
+		return nil, errors.New("nil state")
+	}
+	return &Coordinator{
+		state:   state,
+		router:  cfg.Router,
+		btc:     cfg.BTC,
+		xmr:     cfg.XMR,
+		report:  cfg.Report,
+		persist: cfg.Persist,
+		cfg:     cfg,
+	}, nil
+}
+
 // NewCoordinator constructs a Coordinator in PhaseAwaitingPartSetup.
 // The caller feeds events via Handle until a terminal phase.
 func NewCoordinator(cfg *Config) (*Coordinator, error) {
