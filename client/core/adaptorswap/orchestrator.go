@@ -119,6 +119,29 @@ func NewOrchestrator(cfg *Config) (*Orchestrator, error) {
 // is not safe in general, but reading them at any time is.
 func (o *Orchestrator) Cfg() *Config { return o.cfg }
 
+// NewOrchestratorFromState rehydrates an Orchestrator from a State
+// previously recovered via RestoreState. Used at startup to resume
+// in-flight swaps after a process restart. cfg supplies the runtime
+// dependencies (asset adapters, sender, persister); the State owns
+// the swap-specific identity and key material so they survive the
+// restart.
+func NewOrchestratorFromState(cfg *Config, state *State) (*Orchestrator, error) {
+	if cfg == nil {
+		return nil, errors.New("nil config")
+	}
+	if state == nil {
+		return nil, errors.New("nil state")
+	}
+	return &Orchestrator{
+		state:    state,
+		assetBTC: cfg.AssetBTC,
+		assetXMR: cfg.AssetXMR,
+		sendMsg:  cfg.SendMsg,
+		persist:  cfg.Persist,
+		cfg:      cfg,
+	}, nil
+}
+
 // Phase returns the current phase of the state machine. Safe to
 // call concurrently with Handle.
 func (o *Orchestrator) Phase() Phase {

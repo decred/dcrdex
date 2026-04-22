@@ -534,6 +534,109 @@ func TestFilePersisterRoundtrip(t *testing.T) {
 	}
 }
 
+// TestResumeFromSnapshot drives an orchestrator to PhaseLockBroadcast,
+// snapshots its state, restores it via RestoreState, hands the
+// restored state to NewOrchestratorFromState, and verifies the new
+// orchestrator (a) reports the saved phase and (b) has the same
+// per-swap key material as the original. Closes the restart-resilience
+// gap end-to-end (snapshot -> bytes -> RestoreState -> Orchestrator).
+func TestResumeFromSnapshot(t *testing.T) {
+	msgr := &recordingSender{}
+	cfg := &Config{
+		SwapID: [32]byte{0xAA}, OrderID: [32]byte{0xBB}, MatchID: [32]byte{0xCC},
+		Role:                RoleInitiator,
+		BtcAmount:           100_000,
+		XmrAmount:           1000,
+		LockBlocks:          2,
+		PeerBTCPayoutScript: []byte{txscript.OP_TRUE},
+		XmrNetTag:           18,
+		AssetBTC:            &fakeBTC{}, AssetXMR: &fakeXMR{}, SendMsg: msgr, Persist: &memPersister{},
+	}
+	o, err := NewOrchestrator(cfg)
+	if err != nil {
+		t.Fatalf("NewOrchestrator: %v", err)
+	}
+	if err := o.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	partSetup, _, _, _ := fakePeerSetup(t, cfg.OrderID, cfg.MatchID)
+	if err := o.Handle(EventKeysReceived{Setup: partSetup}); err != nil {
+		t.Fatalf("part setup: %v", err)
+	}
+
+	// Drive to PhaseLockBroadcast with a real adaptor sig.
+	bobScalar, _ := btcec.PrivKeyFromBytes(o.state.XmrSpendKeyHalf.Serialize())
+	var T btcec.JacobianPoint
+	btcec.ScalarBaseMultNonConst(&bobScalar.Key, &T)
+	alicePriv, _ := btcec.NewPrivateKey()
+	refundValue := o.state.RefundTx.TxOut[0].Value
+	prev := txscript.NewCannedPrevOutputFetcher(o.state.Refund.PkScript, refundValue)
+	sh := txscript.NewTxSigHashes(o.state.SpendRefundTx, prev)
+	coopLeaf := txscript.NewBaseTapLeaf(o.state.Refund.CoopLeafScript)
+	sigHash, _ := txscript.CalcTapscriptSignaturehash(sh, txscript.SigHashDefault,
+		o.state.SpendRefundTx, 0, prev, coopLeaf)
+	esig, _ := adaptorsigs.PublicKeyTweakedAdaptorSigBIP340(alicePriv, sigHash, &T)
+	if err := o.Handle(EventRefundPresignedReceived{
+		RefundSig:  make([]byte, 64),
+		AdaptorSig: esig.Serialize(),
+	}); err != nil {
+		t.Fatalf("presigned: %v", err)
+	}
+	savedPhase := o.Phase()
+	if savedPhase != PhaseLockBroadcast {
+		t.Fatalf("setup phase = %s, want PhaseLockBroadcast", savedPhase)
+	}
+
+	// Snapshot -> bytes.
+	o.state.mu.Lock()
+	data, err := o.state.FullSnapshot()
+	o.state.mu.Unlock()
+	if err != nil {
+		t.Fatalf("FullSnapshot: %v", err)
+	}
+
+	// Simulate a process restart: bytes -> RestoreState -> rehydrated
+	// orchestrator with a fresh Config (the runtime deps are not
+	// persisted; only the state is).
+	restored, err := RestoreState(data)
+	if err != nil {
+		t.Fatalf("RestoreState: %v", err)
+	}
+	resumeCfg := &Config{
+		SwapID: cfg.SwapID, OrderID: cfg.OrderID, MatchID: cfg.MatchID,
+		Role:                cfg.Role,
+		BtcAmount:           cfg.BtcAmount,
+		XmrAmount:           cfg.XmrAmount,
+		LockBlocks:          cfg.LockBlocks,
+		PeerBTCPayoutScript: cfg.PeerBTCPayoutScript,
+		XmrNetTag:           cfg.XmrNetTag,
+		AssetBTC:            &fakeBTC{}, AssetXMR: &fakeXMR{},
+		SendMsg: &recordingSender{}, Persist: &memPersister{},
+	}
+	resumed, err := NewOrchestratorFromState(resumeCfg, restored)
+	if err != nil {
+		t.Fatalf("NewOrchestratorFromState: %v", err)
+	}
+
+	if got := resumed.Phase(); got != savedPhase {
+		t.Errorf("resumed phase = %s, want %s", got, savedPhase)
+	}
+	// The original key material survived the round trip.
+	if !resumed.state.BtcSignKey.Key.Equals(&o.state.BtcSignKey.Key) {
+		t.Error("resumed BtcSignKey != original")
+	}
+	if !bytesEqual(resumed.state.XmrSpendKeyHalf.Serialize(), o.state.XmrSpendKeyHalf.Serialize()) {
+		t.Error("resumed XmrSpendKeyHalf != original")
+	}
+	// Cfg() returns the resume Config, which is what the rehydrated
+	// machine should use going forward (different sender, different
+	// asset adapter instances).
+	if resumed.Cfg() != resumeCfg {
+		t.Error("Cfg() should be the resume Config, not the original")
+	}
+}
+
 func bytesEqual(a, b []byte) bool {
 	if len(a) != len(b) {
 		return false
