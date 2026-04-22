@@ -12,11 +12,15 @@
 package btc
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
+	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/rpcclient"
 	"github.com/btcsuite/btcd/wire"
@@ -124,3 +128,115 @@ func ObserveSpendInMempool(client *rpcclient.Client,
 // Convenience: ensure we link chainhash so a future caller can use
 // it to construct OutPoints.
 var _ = chainhash.Hash{}
+
+// FundBroadcastTaproot funds and broadcasts a tx that pays `value` to
+// the given taproot pkScript, waits for it to confirm, and returns
+// the confirmed tx, the vout index of the taproot output, and the
+// confirmation block height.
+//
+// The lock output's pkScript is what distinguishes it from any
+// change output the funding process may have added, so the caller
+// must pass in the exact pkScript they want to locate.
+//
+// waitForConfirm is a caller-provided function; typically it mines
+// regtest blocks or polls for mainnet confirms. It receives the
+// tx hash and should return the block height the tx confirmed at.
+// The separation lets tests and live runs share this helper without
+// the helper itself knowing anything about mining or chain cadence.
+func FundBroadcastTaproot(ctx context.Context, client *rpcclient.Client,
+	pkScript []byte, value int64,
+	waitForConfirm func(ctx context.Context, txid *chainhash.Hash) (int64, error),
+) (*wire.MsgTx, uint32, int64, error) {
+
+	unfunded := wire.NewMsgTx(2)
+	unfunded.AddTxOut(&wire.TxOut{Value: value, PkScript: pkScript})
+
+	funded, err := client.FundRawTransaction(unfunded, fundOpts(), nil)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("fund raw: %w", err)
+	}
+	// Use RawRequest for signrawtransactionwithwallet and sendrawtransaction
+	// rather than client.SignRawTransaction / client.SendRawTransaction:
+	// btcd's rpcclient calls the legacy "signrawtransaction" method, which
+	// Bitcoin Core removed, and its SendRawTransaction fails version
+	// detection against Bitcoin Core 28+. Same pattern as the BTCRPCAdapter
+	// in client/core/adaptorswap_bridge.go.
+	var fundedBuf bytes.Buffer
+	if err := funded.Transaction.Serialize(&fundedBuf); err != nil {
+		return nil, 0, 0, fmt.Errorf("serialize funded: %w", err)
+	}
+	hexFunded, err := json.Marshal(hex.EncodeToString(fundedBuf.Bytes()))
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	signRaw, err := client.RawRequest("signrawtransactionwithwallet",
+		[]json.RawMessage{hexFunded})
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("sign raw: %w", err)
+	}
+	var signResult struct {
+		Hex      string `json:"hex"`
+		Complete bool   `json:"complete"`
+	}
+	if err := json.Unmarshal(signRaw, &signResult); err != nil {
+		return nil, 0, 0, fmt.Errorf("decode sign result: %w", err)
+	}
+	if !signResult.Complete {
+		return nil, 0, 0, errors.New("fundBroadcastTaproot: sign incomplete")
+	}
+	signedBytes, err := hex.DecodeString(signResult.Hex)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("decode signed hex: %w", err)
+	}
+	signed := wire.NewMsgTx(2)
+	if err := signed.Deserialize(bytes.NewReader(signedBytes)); err != nil {
+		return nil, 0, 0, fmt.Errorf("deserialize signed: %w", err)
+	}
+	hexSigned, err := json.Marshal(hex.EncodeToString(signedBytes))
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	sendRaw, err := client.RawRequest("sendrawtransaction",
+		[]json.RawMessage{hexSigned})
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("send raw: %w", err)
+	}
+	var txidStr string
+	if err := json.Unmarshal(sendRaw, &txidStr); err != nil {
+		return nil, 0, 0, fmt.Errorf("decode txid: %w", err)
+	}
+	txHash, err := chainhash.NewHashFromStr(txidStr)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("parse txid: %w", err)
+	}
+
+	// Locate the taproot output.
+	vout := uint32(0)
+	found := false
+	for i, out := range signed.TxOut {
+		if bytes.Equal(out.PkScript, pkScript) {
+			vout = uint32(i)
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil, 0, 0, errors.New("taproot output missing after funding")
+	}
+
+	height := int64(-1)
+	if waitForConfirm != nil {
+		height, err = waitForConfirm(ctx, txHash)
+		if err != nil {
+			return nil, 0, 0, fmt.Errorf("wait confirm: %w", err)
+		}
+	}
+	return signed, vout, height, nil
+}
+
+// fundOpts returns the default fundrawtransaction options. Kept as a
+// function so callers can override if they need specific fee rates
+// or change types.
+func fundOpts() btcjson.FundRawTransactionOpts {
+	return btcjson.FundRawTransactionOpts{}
+}
