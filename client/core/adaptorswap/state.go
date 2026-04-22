@@ -190,11 +190,11 @@ type State struct {
 }
 
 // Snapshot returns a serializable copy of the state for persistence.
-// Keys, scalars, and *wire.MsgTx are encoded as bytes; see
-// state_persist.go (not yet written) for the exact serialization.
+// Caller must hold s.mu (the orchestrator calls this from within a
+// locked handler). Keys, scalars, and *wire.MsgTx are encoded as
+// bytes; see state_persist.go (not yet written) for the exact
+// serialization.
 func (s *State) Snapshot() *Snapshot {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	return &Snapshot{
 		Phase:   s.Phase,
 		Updated: s.Updated,
