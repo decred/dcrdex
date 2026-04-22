@@ -21,7 +21,9 @@ import (
 	"sync"
 	"time"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core/adaptorswap"
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
@@ -267,9 +269,17 @@ func (c *Core) startAdaptorMatches(tracker *trackedTrade, msgMatches []*msgjson.
 			BtcAmount:  btcAmt,
 			XmrAmount:  xmrAmt,
 			LockBlocks: mkt.LockBlocks,
-			// PeerBTCPayoutScript, OwnXMRSweepDest, XmrNetTag:
-			// populated later from CounterPartyAddress route +
-			// wallet lookups (next wiring step).
+			XmrNetTag:  xmrNetTagForNet(c.net),
+			// OwnXMRSweepDest is the local XMR wallet's deposit
+			// address, used by the initiator at sweep time. Best-
+			// effort lookup; if the wallet is not yet connected,
+			// the orchestrator will fail at sweep with a clear
+			// error rather than block setup.
+			OwnXMRSweepDest: c.adaptorOwnXMRDest(pairXMR),
+			// PeerBTCPayoutScript: populated when the
+			// CounterPartyAddress message arrives for this match
+			// (handleCounterPartyAddressMsg routes adaptor
+			// matches to the manager).
 		}
 		if _, err := c.adaptorMgr.StartSwap(cfg); err != nil {
 			c.log.Errorf("AdaptorSwapManager.StartSwap match %s: %v", matchID, err)
@@ -467,3 +477,44 @@ type noopAdaptorPersister struct{}
 
 func (noopAdaptorPersister) Save(id [32]byte, s *adaptorswap.Snapshot) error { return nil }
 func (noopAdaptorPersister) Load(id [32]byte) (*adaptorswap.Snapshot, error) { return nil, nil }
+
+// xmrNetTagForNet returns the Monero network tag byte used in
+// base58 address encoding for the given dex network.
+//
+//   - Mainnet (and Regtest, which uses mainnet-shaped addresses
+//     under the dex/testing/xmr harness's regtest=1 monerod) -> 18
+//   - Testnet -> 24 (stagenet, because monero_c has known address-
+//     validation bugs on testnet; the btcxmrswap CLI uses the same
+//     workaround)
+func xmrNetTagForNet(n dex.Network) uint64 {
+	switch n {
+	case dex.Mainnet, dex.Simnet:
+		return 18
+	case dex.Testnet:
+		return 24
+	}
+	return 18
+}
+
+// adaptorOwnXMRDest returns a deposit address from the connected
+// XMR wallet for assetID, or empty if the wallet is not connected
+// or does not implement asset.NewAddresser. Used to populate the
+// orchestrator's OwnXMRSweepDest at swap-setup time.
+func (c *Core) adaptorOwnXMRDest(assetID uint32) string {
+	c.walletMtx.RLock()
+	w, ok := c.wallets[assetID]
+	c.walletMtx.RUnlock()
+	if !ok || !w.connected() {
+		return ""
+	}
+	na, is := w.Wallet.(asset.NewAddresser)
+	if !is {
+		return ""
+	}
+	addr, err := na.NewAddress()
+	if err != nil {
+		c.log.Warnf("XMR NewAddress (asset %d) for adaptor sweep dest: %v", assetID, err)
+		return ""
+	}
+	return addr
+}

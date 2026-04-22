@@ -114,6 +114,11 @@ func NewOrchestrator(cfg *Config) (*Orchestrator, error) {
 // will add cfg there rather than resort to a wrapper. See state.go
 // patch companion to this file.
 
+// Cfg returns the orchestrator's runtime configuration. The
+// returned pointer is the same one held internally; mutating fields
+// is not safe in general, but reading them at any time is.
+func (o *Orchestrator) Cfg() *Config { return o.cfg }
+
 // Start kicks off the state machine based on Role. For a
 // participant, this emits the initial AdaptorSetupPart; for an
 // initiator, it is a no-op and the machine waits for inbound

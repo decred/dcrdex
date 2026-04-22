@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/core/adaptorswap"
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"github.com/btcsuite/btcd/wire"
@@ -231,7 +232,12 @@ func TestStartAdaptorMatches(t *testing.T) {
 	mgr := NewAdaptorSwapManager(&AdaptorSwapManagerConfig{
 		BTC: &bridgeFakeBTC{}, XMR: &bridgeFakeXMR{}, Send: sender,
 	})
-	c := &Core{adaptorMgr: mgr, log: tLogger}
+	c := &Core{
+		adaptorMgr: mgr,
+		log:        tLogger,
+		net:        dex.Simnet,
+		wallets:    make(map[uint32]*xcWallet),
+	}
 
 	const (
 		btcAssetID uint32 = 0
@@ -262,8 +268,17 @@ func TestStartAdaptorMatches(t *testing.T) {
 	}
 
 	// Orchestrator registered.
-	if mgr.orchestrators[matchID] == nil {
+	o := mgr.orchestrators[matchID]
+	if o == nil {
 		t.Fatalf("no orchestrator registered for match %s", matchID)
+	}
+	// XmrNetTag derived from c.net (Simnet -> 18, mainnet-shaped).
+	if o.Cfg().XmrNetTag != 18 {
+		t.Fatalf("XmrNetTag = %d, want 18 for Simnet", o.Cfg().XmrNetTag)
+	}
+	// OwnXMRSweepDest left empty when no XMR wallet is connected.
+	if o.Cfg().OwnXMRSweepDest != "" {
+		t.Fatalf("expected empty OwnXMRSweepDest with no wallet, got %q", o.Cfg().OwnXMRSweepDest)
 	}
 
 	// Maker on a BTC-base market => initiator => Start sends
@@ -290,6 +305,22 @@ func TestStartAdaptorMatches(t *testing.T) {
 	}
 	if len(sender.routes) != 1 || sender.routes[0] != msgjson.AdaptorSetupPartRoute {
 		t.Fatalf("participant should emit AdaptorSetupPart; routes=%v", sender.routes)
+	}
+}
+
+func TestXmrNetTagForNet(t *testing.T) {
+	cases := []struct {
+		net  dex.Network
+		want uint64
+	}{
+		{dex.Mainnet, 18},
+		{dex.Testnet, 24}, // stagenet workaround for monero_c testnet bugs
+		{dex.Simnet, 18},
+	}
+	for _, tc := range cases {
+		if got := xmrNetTagForNet(tc.net); got != tc.want {
+			t.Errorf("xmrNetTagForNet(%s) = %d, want %d", tc.net, got, tc.want)
+		}
 	}
 }
 
