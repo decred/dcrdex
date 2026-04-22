@@ -3,6 +3,7 @@ package core
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"decred.org/dcrdex/client/core/adaptorswap"
 	"decred.org/dcrdex/dex/msgjson"
@@ -217,6 +218,78 @@ func TestHandleAdaptorMsg(t *testing.T) {
 	}
 	if err := handleAdaptorMsg(c, nil, unk); err == nil {
 		t.Fatal("expected error for unknown route")
+	}
+}
+
+// TestStartAdaptorMatches confirms that an adaptor-market match
+// fed to startAdaptorMatches results in an orchestrator registered
+// in the manager, and the role + amount derivations match Option-1
+// semantics (BTC holder is maker == initiator) and base/quote pair
+// assignment.
+func TestStartAdaptorMatches(t *testing.T) {
+	sender := &bridgeRecordingSender{}
+	mgr := NewAdaptorSwapManager(&AdaptorSwapManagerConfig{
+		BTC: &bridgeFakeBTC{}, XMR: &bridgeFakeXMR{}, Send: sender,
+	})
+	c := &Core{adaptorMgr: mgr, log: tLogger}
+
+	const (
+		btcAssetID uint32 = 0
+		xmrAssetID uint32 = 128
+	)
+	mkt := &msgjson.Market{
+		Name:            "btc_xmr",
+		Base:            btcAssetID,
+		Quote:           xmrAssetID,
+		ScriptableAsset: btcAssetID,
+		LockBlocks:      144,
+	}
+
+	ord := &order.LimitOrder{P: order.Prefix{ServerTime: time.Now()}}
+	tracker := &trackedTrade{Order: ord}
+
+	matchID := order.MatchID{0xDE, 0xAD}
+	makerMatch := &msgjson.Match{
+		OrderID:  ord.ID().Bytes(),
+		MatchID:  matchID[:],
+		Quantity: 100_000_000, // 1 BTC, base
+		Rate:     50_000_000,  // 0.5 XMR per BTC, base→quote
+		Side:     uint8(order.Maker),
+	}
+
+	if err := c.startAdaptorMatches(tracker, []*msgjson.Match{makerMatch}, mkt); err != nil {
+		t.Fatalf("startAdaptorMatches: %v", err)
+	}
+
+	// Orchestrator registered.
+	if mgr.orchestrators[matchID] == nil {
+		t.Fatalf("no orchestrator registered for match %s", matchID)
+	}
+
+	// Maker on a BTC-base market => initiator => Start sends
+	// nothing (initiator waits for AdaptorSetupPart).
+	if len(sender.routes) != 0 {
+		t.Fatalf("initiator should not emit setup; routes=%v", sender.routes)
+	}
+
+	// A second match where this client is the taker => participant
+	// => Start emits AdaptorSetupPart.
+	matchID2 := order.MatchID{0xBE, 0xEF}
+	takerMatch := &msgjson.Match{
+		OrderID:  ord.ID().Bytes(),
+		MatchID:  matchID2[:],
+		Quantity: 200_000_000,
+		Rate:     50_000_000,
+		Side:     uint8(order.Taker),
+	}
+	if err := c.startAdaptorMatches(tracker, []*msgjson.Match{takerMatch}, mkt); err != nil {
+		t.Fatalf("startAdaptorMatches taker: %v", err)
+	}
+	if mgr.orchestrators[matchID2] == nil {
+		t.Fatalf("no orchestrator registered for taker match %s", matchID2)
+	}
+	if len(sender.routes) != 1 || sender.routes[0] != msgjson.AdaptorSetupPartRoute {
+		t.Fatalf("participant should emit AdaptorSetupPart; routes=%v", sender.routes)
 	}
 }
 

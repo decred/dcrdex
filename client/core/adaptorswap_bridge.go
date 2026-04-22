@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/core/adaptorswap"
+	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	btcadaptor "decred.org/dcrdex/internal/adaptorsigs/btc"
@@ -197,6 +198,88 @@ func routeToEvent(route string, payload any) (adaptorswap.Event, error) {
 // (state advances via a chain event instead). Callers should ignore
 // this error rather than surface it as a failure.
 var errPurelyInformational = errors.New("informational message; no event")
+
+// startAdaptorMatches kicks off an adaptor-swap orchestrator for
+// each msgMatch on an adaptor-market trade. Called from
+// negotiateMatches when the market's SwapType is SwapTypeAdaptor.
+//
+// The Config is built from data available at match time: identity,
+// pair assets, amounts, role, and the operator-set CSV window. Asset
+// adapters and the message sender come from the AdaptorSwapManager
+// defaults.
+//
+// Wallet-dependent fields - PeerBTCPayoutScript, OwnXMRSweepDest,
+// XmrNetTag - are not yet sourced here; the orchestrator is
+// constructed without them and will need them populated before it
+// can build the lock/spend transactions. Their wiring is the next
+// step (collect via the existing CounterPartyAddress route +
+// per-asset wallet address lookups).
+func (c *Core) startAdaptorMatches(tracker *trackedTrade, msgMatches []*msgjson.Match,
+	mkt *msgjson.Market) error {
+
+	for _, m := range msgMatches {
+		if len(m.MatchID) != order.MatchIDSize {
+			c.log.Errorf("adaptor match: bad matchid length %d for order %s",
+				len(m.MatchID), tracker.ID())
+			continue
+		}
+		var matchID order.MatchID
+		copy(matchID[:], m.MatchID)
+
+		// Role: under Option 1 enforcement, the BTC-side holder is
+		// always the maker. So Side==Maker => initiator.
+		role := adaptorswap.RoleParticipant
+		if m.Side == uint8(order.Maker) {
+			role = adaptorswap.RoleInitiator
+		}
+
+		// Pair-asset assignment from the market's scriptable side.
+		pairBTC := mkt.ScriptableAsset
+		var pairXMR uint32
+		if pairBTC == mkt.Base {
+			pairXMR = mkt.Quote
+		} else {
+			pairXMR = mkt.Base
+		}
+
+		// Amount conversion: Quantity is in base units.
+		var btcAmt int64
+		var xmrAmt uint64
+		if pairBTC == mkt.Base {
+			btcAmt = int64(m.Quantity)
+			xmrAmt = calc.BaseToQuote(m.Rate, m.Quantity)
+		} else {
+			btcAmt = int64(calc.BaseToQuote(m.Rate, m.Quantity))
+			xmrAmt = m.Quantity
+		}
+
+		var swapID, oid [32]byte
+		copy(swapID[:], matchID[:])
+		copy(oid[:], tracker.ID().Bytes())
+
+		cfg := &adaptorswap.Config{
+			SwapID:     swapID,
+			OrderID:    oid,
+			MatchID:    matchID,
+			Role:       role,
+			PairBTC:    pairBTC,
+			PairXMR:    pairXMR,
+			BtcAmount:  btcAmt,
+			XmrAmount:  xmrAmt,
+			LockBlocks: mkt.LockBlocks,
+			// PeerBTCPayoutScript, OwnXMRSweepDest, XmrNetTag:
+			// populated later from CounterPartyAddress route +
+			// wallet lookups (next wiring step).
+		}
+		if _, err := c.adaptorMgr.StartSwap(cfg); err != nil {
+			c.log.Errorf("AdaptorSwapManager.StartSwap match %s: %v", matchID, err)
+			continue
+		}
+		c.log.Infof("Adaptor swap started for match %s on %s (role=%s, btc=%d, xmr=%d)",
+			matchID, mkt.Name, role, btcAmt, xmrAmt)
+	}
+	return nil
+}
 
 // handleAdaptorMsg is the routeHandler for every adaptor_* route in
 // Core's noteHandlers map. It unmarshals the payload according to

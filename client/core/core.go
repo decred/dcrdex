@@ -8822,6 +8822,15 @@ func (c *Core) negotiateMatches(sm *serverMatches) (assetMap, error) {
 		}
 	}
 
+	// Adaptor-swap markets divert here: skip the HTLC matchTracker
+	// setup entirely and hand the matches to the AdaptorSwapManager.
+	// HTLC tracker.negotiate is not safe to call for adaptor matches
+	// because its scripts and state machine assume the HTLC protocol.
+	if mkt := tracker.dc.marketConfig(tracker.mktID); mkt != nil &&
+		mkt.SwapType == uint8(dex.SwapTypeAdaptor) && len(sm.msgMatches) > 0 {
+		return updatedAssets, c.startAdaptorMatches(tracker, sm.msgMatches, mkt)
+	}
+
 	// Begin negotiation for any trade Matches.
 	if len(sm.msgMatches) > 0 {
 		tracker.mtx.Lock()
