@@ -246,3 +246,277 @@ func TestFullBTCSwapHappyPath(t *testing.T) {
 		t.Fatal("recovered pubkey != Alice's DLEQ secp pubkey")
 	}
 }
+
+// swapParties holds everything two parties share after the DLEQ + key
+// setup phase. Helper for the refund-path tests.
+type swapParties struct {
+	aliceSpendKey *edwards.PrivateKey // alice ed25519 XMR spend-key half
+	bobSpendKey   *edwards.PrivateKey // bob   ed25519 XMR spend-key half
+	alicePubSecp  *btcec.PublicKey    // DLEQ-extracted from alice's proof
+	bobPubSecp    *btcec.PublicKey    // DLEQ-extracted from bob's proof
+	aliceBTC      *btcec.PrivateKey   // alice secp BTC signing key
+	bobBTC        *btcec.PrivateKey   // bob   secp BTC signing key
+	kal           []byte              // x-only pubkey of initiator (Bob)
+	kaf           []byte              // x-only pubkey of participant (Alice)
+}
+
+func setupSwapParties(t *testing.T) *swapParties {
+	t.Helper()
+	aliceSpend, err := edwards.GeneratePrivateKey()
+	if err != nil {
+		t.Fatalf("alice ed25519: %v", err)
+	}
+	bobSpend, err := edwards.GeneratePrivateKey()
+	if err != nil {
+		t.Fatalf("bob ed25519: %v", err)
+	}
+	aliceDLEAG, err := adaptorsigs.ProveDLEQ(aliceSpend.Serialize())
+	if err != nil {
+		t.Fatalf("alice dleq: %v", err)
+	}
+	bobDLEAG, err := adaptorsigs.ProveDLEQ(bobSpend.Serialize())
+	if err != nil {
+		t.Fatalf("bob dleq: %v", err)
+	}
+	alicePubSecp, err := adaptorsigs.ExtractSecp256k1PubKeyFromProof(aliceDLEAG)
+	if err != nil {
+		t.Fatalf("alice extract: %v", err)
+	}
+	bobPubSecp, err := adaptorsigs.ExtractSecp256k1PubKeyFromProof(bobDLEAG)
+	if err != nil {
+		t.Fatalf("bob extract: %v", err)
+	}
+	aliceBTC, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatalf("alice btc: %v", err)
+	}
+	bobBTC, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatalf("bob btc: %v", err)
+	}
+	return &swapParties{
+		aliceSpendKey: aliceSpend,
+		bobSpendKey:   bobSpend,
+		alicePubSecp:  alicePubSecp,
+		bobPubSecp:    bobPubSecp,
+		aliceBTC:      aliceBTC,
+		bobBTC:        bobBTC,
+		kal:           schnorr.SerializePubKey(bobBTC.PubKey()),
+		kaf:           schnorr.SerializePubKey(aliceBTC.PubKey()),
+	}
+}
+
+// buildAndVerifyRefundTx synthesizes funding, builds the lockTx output
+// from the refund test's perspective (the refund-spending-lockTx), and
+// executes the refundTx witness through the script engine. It returns
+// the refund output materials and the refundTx itself so the caller
+// can build the spend-refund step on top.
+func buildAndVerifyRefundTx(t *testing.T, p *swapParties, lockBlocks int64,
+	lockValue int64) (*RefundTxOutput, *wire.MsgTx) {
+	t.Helper()
+
+	lock, err := NewLockTxOutput(p.kal, p.kaf)
+	if err != nil {
+		t.Fatalf("lock output: %v", err)
+	}
+
+	// Synthesize lockTx funding.
+	fundTx := wire.NewMsgTx(wire.TxVersion)
+	fundTx.AddTxIn(&wire.TxIn{})
+	fundTx.AddTxOut(&wire.TxOut{Value: lockValue, PkScript: lock.PkScript})
+	fundHash := fundTx.TxHash()
+
+	refund, err := NewRefundTxOutput(p.kal, p.kaf, lockBlocks)
+	if err != nil {
+		t.Fatalf("refund output: %v", err)
+	}
+
+	// refundTx spends the lockTx output via the 2-of-2 leaf and pays
+	// to the refund taproot output.
+	refundTx := wire.NewMsgTx(2)
+	refundTx.AddTxIn(&wire.TxIn{
+		PreviousOutPoint: wire.OutPoint{Hash: fundHash, Index: 0},
+	})
+	refundTx.AddTxOut(&wire.TxOut{Value: lockValue - 1000, PkScript: refund.PkScript})
+
+	// Both parties pre-sign the refundTx with their secp keys
+	// (standard tapscript sigs, not adaptor). Either can later
+	// broadcast it unilaterally.
+	prev := txscript.NewCannedPrevOutputFetcher(lock.PkScript, lockValue)
+	sigHashes := txscript.NewTxSigHashes(refundTx, prev)
+	leaf := txscript.NewBaseTapLeaf(lock.LeafScript)
+
+	bobSig, err := txscript.RawTxInTapscriptSignature(
+		refundTx, sigHashes, 0, lockValue, lock.PkScript, leaf,
+		txscript.SigHashDefault, p.bobBTC,
+	)
+	if err != nil {
+		t.Fatalf("bob refundTx sign: %v", err)
+	}
+	aliceSig, err := txscript.RawTxInTapscriptSignature(
+		refundTx, sigHashes, 0, lockValue, lock.PkScript, leaf,
+		txscript.SigHashDefault, p.aliceBTC,
+	)
+	if err != nil {
+		t.Fatalf("alice refundTx sign: %v", err)
+	}
+	ctrlSer, err := lock.ControlBlock.ToBytes()
+	if err != nil {
+		t.Fatalf("control: %v", err)
+	}
+	refundTx.TxIn[0].Witness = wire.TxWitness{
+		aliceSig, bobSig, lock.LeafScript, ctrlSer,
+	}
+	if err := runScriptEngine(refundTx, 0, lock.PkScript, lockValue, prev); err != nil {
+		t.Fatalf("refundTx engine: %v", err)
+	}
+	return refund, refundTx
+}
+
+// TestBTCSwapCooperativeRefund exercises the cooperative-refund flow:
+// Bob locks BTC, both pre-sign the refund chain, then they decide to
+// unwind. Alice's adaptor signature on spendRefundTx is decrypted by
+// Bob using his own XMR-key-half scalar, revealing that scalar to
+// Alice when the completed sig hits chain - allowing her to sweep the
+// XMR she locked at the shared address.
+func TestBTCSwapCooperativeRefund(t *testing.T) {
+	p := setupSwapParties(t)
+	const (
+		lockBlocks = int64(2)
+		lockValue  = int64(100_000)
+	)
+	refund, refundTx := buildAndVerifyRefundTx(t, p, lockBlocks, lockValue)
+	refundHash := refundTx.TxHash()
+	refundValue := refundTx.TxOut[0].Value
+
+	// spendRefundTxCoop: spends refundTx output via coop leaf. In a
+	// real swap, Alice pre-signs as an adaptor (tweak = Bob's XMR
+	// pubkey) before the lockTx ever hits chain. Bob only decrypts and
+	// broadcasts after both parties lock.
+	spend := wire.NewMsgTx(2)
+	spend.AddTxIn(&wire.TxIn{
+		PreviousOutPoint: wire.OutPoint{Hash: refundHash, Index: 0},
+	})
+	spend.AddTxOut(&wire.TxOut{Value: refundValue - 1000, PkScript: []byte{txscript.OP_TRUE}})
+
+	prev := txscript.NewCannedPrevOutputFetcher(refund.PkScript, refundValue)
+	sigHashes := txscript.NewTxSigHashes(spend, prev)
+	coopLeaf := txscript.NewBaseTapLeaf(refund.CoopLeafScript)
+
+	sigHash, err := txscript.CalcTapscriptSignaturehash(
+		sigHashes, txscript.SigHashDefault, spend, 0, prev, coopLeaf,
+	)
+	if err != nil {
+		t.Fatalf("sighash: %v", err)
+	}
+
+	// Alice's adaptor signature, with tweak = Bob's XMR-key-half
+	// secp pubkey (extracted from Bob's DLEQ proof).
+	var bobTweak btcec.JacobianPoint
+	p.bobPubSecp.AsJacobian(&bobTweak)
+	aliceAdaptor, err := adaptorsigs.PublicKeyTweakedAdaptorSigBIP340(
+		p.aliceBTC, sigHash, &bobTweak,
+	)
+	if err != nil {
+		t.Fatalf("alice adaptor: %v", err)
+	}
+	if err := aliceAdaptor.VerifyBIP340(sigHash, p.aliceBTC.PubKey()); err != nil {
+		t.Fatalf("bob verify alice adaptor: %v", err)
+	}
+
+	// Bob decrypts using his ed25519 scalar reinterpreted as secp256k1.
+	bobScalarForSecp, _ := btcec.PrivKeyFromBytes(p.bobSpendKey.Serialize())
+	aliceSigCompleted, err := aliceAdaptor.DecryptBIP340(&bobScalarForSecp.Key)
+	if err != nil {
+		t.Fatalf("bob decrypt: %v", err)
+	}
+	if !aliceSigCompleted.Verify(sigHash, p.aliceBTC.PubKey()) {
+		t.Fatal("completed alice sig does not verify")
+	}
+
+	// Bob signs his half normally.
+	bobSig, err := txscript.RawTxInTapscriptSignature(
+		spend, sigHashes, 0, refundValue, refund.PkScript, coopLeaf,
+		txscript.SigHashDefault, p.bobBTC,
+	)
+	if err != nil {
+		t.Fatalf("bob sign: %v", err)
+	}
+
+	ctrlSer, err := refund.CoopControlBlock.ToBytes()
+	if err != nil {
+		t.Fatalf("control: %v", err)
+	}
+	spend.TxIn[0].Witness = wire.TxWitness{
+		aliceSigCompleted.Serialize(), bobSig, refund.CoopLeafScript, ctrlSer,
+	}
+	if err := runScriptEngine(spend, 0, refund.PkScript, refundValue, prev); err != nil {
+		t.Fatalf("spendRefund engine: %v", err)
+	}
+
+	// Alice observes the completed alice-sig on-chain and recovers
+	// Bob's XMR-key-half scalar from her own adaptor.
+	recovered, err := aliceAdaptor.RecoverTweakBIP340(aliceSigCompleted)
+	if err != nil {
+		t.Fatalf("alice recover: %v", err)
+	}
+	if !recovered.Equals(&bobScalarForSecp.Key) {
+		t.Fatal("recovered scalar != bob's secp-reinterpreted scalar")
+	}
+	var recoveredBytes [32]byte
+	recovered.PutBytes(&recoveredBytes)
+	if !bytes.Equal(recoveredBytes[:], p.bobSpendKey.Serialize()) {
+		t.Fatal("recovered bytes != bob's ed25519 private key bytes")
+	}
+}
+
+// TestBTCSwapPunishRefund exercises the punish path: Bob has gone
+// silent after both parties locked. Alice waits for the CSV locktime
+// and sweeps the BTC alone via the punish leaf. She does NOT learn
+// Bob's XMR-key-half scalar - the punish branch does not constrain
+// Bob's signature, so Bob's ed25519 half is never revealed on-chain.
+func TestBTCSwapPunishRefund(t *testing.T) {
+	p := setupSwapParties(t)
+	const (
+		lockBlocks = int64(2)
+		lockValue  = int64(100_000)
+	)
+	refund, refundTx := buildAndVerifyRefundTx(t, p, lockBlocks, lockValue)
+	refundHash := refundTx.TxHash()
+	refundValue := refundTx.TxOut[0].Value
+
+	// spendRefundTx via punish leaf; sequence must satisfy CSV.
+	spend := wire.NewMsgTx(2)
+	spend.AddTxIn(&wire.TxIn{
+		PreviousOutPoint: wire.OutPoint{Hash: refundHash, Index: 0},
+		Sequence:         uint32(lockBlocks),
+	})
+	spend.AddTxOut(&wire.TxOut{Value: refundValue - 1000, PkScript: []byte{txscript.OP_TRUE}})
+
+	prev := txscript.NewCannedPrevOutputFetcher(refund.PkScript, refundValue)
+	sigHashes := txscript.NewTxSigHashes(spend, prev)
+	punishLeaf := txscript.NewBaseTapLeaf(refund.PunishLeafScript)
+
+	aliceSig, err := txscript.RawTxInTapscriptSignature(
+		spend, sigHashes, 0, refundValue, refund.PkScript, punishLeaf,
+		txscript.SigHashDefault, p.aliceBTC,
+	)
+	if err != nil {
+		t.Fatalf("alice sign: %v", err)
+	}
+
+	ctrlSer, err := refund.PunishControlBlock.ToBytes()
+	if err != nil {
+		t.Fatalf("control: %v", err)
+	}
+	spend.TxIn[0].Witness = wire.TxWitness{
+		aliceSig, refund.PunishLeafScript, ctrlSer,
+	}
+	if err := runScriptEngine(spend, 0, refund.PkScript, refundValue, prev); err != nil {
+		t.Fatalf("punish engine: %v", err)
+	}
+	// Note: no scalar recovery is possible here; the punish sig alone
+	// does not reveal Bob's ed25519 scalar, which is by design - Alice
+	// accepting the BTC alone means she forfeits the ability to sweep
+	// the XMR, matching the asymmetric-punish property of the protocol.
+}
