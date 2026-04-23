@@ -35,6 +35,7 @@ import (
 	"decred.org/dcrdex/server/market"
 	"decred.org/dcrdex/server/noderelay"
 	"decred.org/dcrdex/server/swap"
+	"decred.org/dcrdex/server/swap/adaptor"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/go-chi/chi/v5"
@@ -86,6 +87,20 @@ type Market struct {
 	Duration   uint64  `json:"epochDuration"`
 	MBBuffer   float64 `json:"marketBuyBuffer"`
 	Disabled   bool    `json:"disabled"`
+	// SwapType selects the atomic-swap protocol. "htlc" (or empty)
+	// for the legacy HTLC swap; "adaptor" for the BIP-340 adaptor-
+	// signature swap used on pairs where one side is a non-
+	// scriptable chain (XMR). Adaptor markets must additionally
+	// set ScriptableAsset and LockBlocks.
+	SwapType string `json:"swapType,omitempty"`
+	// ScriptableAsset (only used when SwapType == "adaptor") names
+	// the asset symbol whose holders must be makers on this market
+	// under Option-1 enforcement. Must equal Base or Quote.
+	ScriptableAsset string `json:"scriptableAsset,omitempty"`
+	// LockBlocks (only used when SwapType == "adaptor") is the CSV
+	// window in scriptable-chain blocks on the punish leaf of the
+	// refund tap tree.
+	LockBlocks uint32 `json:"lockBlocks,omitempty"`
 }
 
 // Config is a market and asset configuration file.
@@ -251,6 +266,35 @@ func loadMarketConf(net dex.Network, src io.Reader) ([]*dex.MarketInfo, []*Asset
 		if err != nil {
 			return nil, nil, err
 		}
+
+		// Adaptor-swap configuration. Defaults to HTLC (zero
+		// value of SwapType) when no swapType field is set.
+		switch strings.ToLower(mktConf.SwapType) {
+		case "", "htlc":
+			// HTLC; nothing more to do.
+		case "adaptor":
+			if mktConf.ScriptableAsset == "" {
+				return nil, nil, fmt.Errorf("market %s: adaptor swap requires scriptableAsset", mkt.Name)
+			}
+			if mktConf.LockBlocks == 0 {
+				return nil, nil, fmt.Errorf("market %s: adaptor swap requires lockBlocks > 0", mkt.Name)
+			}
+			scriptID, found := dex.BipSymbolID(strings.ToLower(mktConf.ScriptableAsset))
+			if !found {
+				return nil, nil, fmt.Errorf("market %s: scriptableAsset %q unrecognized",
+					mkt.Name, mktConf.ScriptableAsset)
+			}
+			if scriptID != mkt.Base && scriptID != mkt.Quote {
+				return nil, nil, fmt.Errorf("market %s: scriptableAsset %q (id %d) is neither base (%d) nor quote (%d)",
+					mkt.Name, mktConf.ScriptableAsset, scriptID, mkt.Base, mkt.Quote)
+			}
+			mkt.SwapType = dex.SwapTypeAdaptor
+			mkt.ScriptableAsset = scriptID
+			mkt.LockBlocks = mktConf.LockBlocks
+		default:
+			return nil, nil, fmt.Errorf("market %s: unknown swapType %q", mkt.Name, mktConf.SwapType)
+		}
+
 		markets = append(markets, mkt)
 	}
 
@@ -975,17 +1019,52 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		mkt.SwapDone(ord, match, fail)
 	}
 
+	// Build the AdaptorCoordinators pool for adaptor-swap markets.
+	// Trust-mode operator setup: nil BTC/XMR auditors (coordinator
+	// auto-advances on EventLocked / EventXmrLocked), Noop reporter
+	// and persister. The PeerRouter wraps authMgr.Send: outbound
+	// adaptor-route messages from the coordinator are addressed by
+	// (matchID, role) and routed to the corresponding user account
+	// recorded at AdaptorCoordinators.Start time. Wire claims about
+	// the chain are accepted without independent verification - this
+	// is the simnet trust path the README calls out as TODO #2.
+	var adaptorCoords *swap.AdaptorCoordinators
+	adaptorRouter := swap.RouterFunc(func(matchID order.MatchID, role adaptor.Role, route string, payload any) error {
+		user, ok := adaptorCoords.UserFor(matchID, role)
+		if !ok {
+			return fmt.Errorf("adaptor router: no user for match %s role %s", matchID, role)
+		}
+		msg, err := msgjson.NewNotification(route, payload)
+		if err != nil {
+			return fmt.Errorf("adaptor router: NewNotification: %w", err)
+		}
+		// Diagnostic: log each outbound relay so operators can see
+		// whether a Send failed (user offline, link broken) versus
+		// the participant's handler dropping a delivered message.
+		sendErr := authMgr.Send(user, msg)
+		log.Infof("adaptor router relayed route=%s match=%s to role=%s (user=%s): err=%v",
+			route, matchID, role, user, sendErr)
+		return sendErr
+	})
+	adaptorCoords = swap.NewAdaptorCoordinators(adaptor.Config{
+		Router:  adaptorRouter,
+		Report:  swap.NoopReporter{},
+		Persist: swap.NoopPersister{},
+		// BTC, XMR auditors intentionally nil (trust mode).
+	})
+
 	// Create the swapper.
 	swapperCfg := &swap.Config{
-		Assets:           lockableAssets,
-		Storage:          storage,
-		AuthManager:      authMgr,
-		BroadcastTimeout: cfg.BroadcastTimeout,
-		TxWaitExpiration: cfg.TxWaitExpiration,
-		LockTimeTaker:    dex.LockTimeTaker(cfg.Network),
-		LockTimeMaker:    dex.LockTimeMaker(cfg.Network),
-		SwapDone:         swapDone,
-		NoResume:         cfg.NoResumeSwaps,
+		Assets:              lockableAssets,
+		Storage:             storage,
+		AuthManager:         authMgr,
+		BroadcastTimeout:    cfg.BroadcastTimeout,
+		TxWaitExpiration:    cfg.TxWaitExpiration,
+		LockTimeTaker:       dex.LockTimeTaker(cfg.Network),
+		LockTimeMaker:       dex.LockTimeMaker(cfg.Network),
+		SwapDone:            swapDone,
+		NoResume:            cfg.NoResumeSwaps,
+		AdaptorCoordinators: adaptorCoords,
 		// TODO: set the AllowPartialRestore bool to allow startup with a
 		// missing asset backend if necessary in an emergency.
 	}
@@ -1103,6 +1182,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		startEpochIdx := 1 + now/int64(mkt.EpochDuration())
 		mkt.SetStartEpochIdx(startEpochIdx)
 		bookSources[name] = mkt
+		swapType, scriptable := mkt.SwapInfo()
 		cfgMarkets = append(cfgMarkets, &msgjson.Market{
 			Name:            name,
 			Base:            mkt.Base(),
@@ -1112,6 +1192,9 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			EpochLen:        mkt.EpochDuration(),
 			MarketBuyBuffer: mkt.MarketBuyBuffer(),
 			ParcelSize:      mkt.ParcelSize(),
+			SwapType:        uint8(swapType),
+			ScriptableAsset: scriptable,
+			LockBlocks:      mkt.LockBlocks(),
 			MarketStatus: msgjson.MarketStatus{
 				StartEpoch: uint64(startEpochIdx),
 			},

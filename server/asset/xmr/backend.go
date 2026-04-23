@@ -11,6 +11,7 @@ import (
 	"decred.org/dcrdex/server/asset"
 	"github.com/bisoncraft/go-monero/old_rpc"
 	"github.com/bisoncraft/go-monero/rpc"
+	"github.com/haven-protocol-org/monero-go-utils/base58"
 )
 
 type rpcDaemon struct {
@@ -135,10 +136,29 @@ func (b *Backend) ValidateSecret(secret []byte, contractData []byte) bool {
 	return false // maybe implement
 }
 
-// CheckSwapAddress checks that the given address is parseable, and suitable
-// as a redeem address in a swap contract script or initiation.
-func (b *Backend) CheckSwapAddress(_ string) bool {
-	return false // probably implement
+// CheckSwapAddress checks that the given address is a parseable XMR address
+// for this backend's network. Primary, subaddress, and integrated formats
+// are all accepted.
+func (b *Backend) CheckSwapAddress(addr string) bool {
+	tag, data := base58.DecodeAddr(addr)
+	if data == nil {
+		return false
+	}
+	// Standard address = 32-byte spend pub + 32-byte view pub.
+	// Integrated address adds an 8-byte payment ID.
+	if len(data) != 64 && len(data) != 72 {
+		return false
+	}
+	var primary, subaddr, integrated uint64
+	switch b.net {
+	case dex.Mainnet, dex.Simnet: // monerod regtest uses mainnet tags
+		primary, subaddr, integrated = 18, 42, 19
+	case dex.Testnet:
+		primary, subaddr, integrated = 53, 63, 54
+	default:
+		return false
+	}
+	return tag == primary || tag == subaddr || tag == integrated
 }
 
 // ValidateCoinID checks the coinID to ensure it can be decoded, returning a

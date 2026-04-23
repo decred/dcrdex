@@ -240,6 +240,9 @@ type Swapper struct {
 	authMgr AuthManager
 	// swapDone is callback for reporting a swap outcome.
 	swapDone func(oid order.Order, match *order.Match, fail bool)
+	// adaptorCoords routes adaptor-swap matches to a parallel
+	// coordinator pool. nil for HTLC-only deployments.
+	adaptorCoords *AdaptorCoordinators
 
 	// The matches maps and the contained matches are protected by the matchMtx.
 	matchMtx    sync.RWMutex
@@ -321,6 +324,17 @@ type Config struct {
 	// SwapDone registers a match with the DEX manager (or other consumer) for a
 	// given order as being finished.
 	SwapDone func(oid order.Order, match *order.Match, fail bool)
+	// AdaptorCoordinators is an optional pool of adaptor-swap
+	// coordinators for markets configured with
+	// dex.SwapTypeAdaptor. When non-nil, the Swapper routes
+	// Adaptor* msgjson routes for those markets through the pool
+	// instead of the HTLC handlers. Nil-safe; HTLC behavior is
+	// unaffected when this is not configured.
+	//
+	// Match-creation hookup (calling AdaptorCoordinators.Start
+	// from the appropriate place in Negotiate) is the remaining
+	// wire-up step; tracked separately.
+	AdaptorCoordinators *AdaptorCoordinators
 }
 
 // NewSwapper is a constructor for a Swapper.
@@ -344,6 +358,7 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 		storage:            cfg.Storage,
 		authMgr:            authMgr,
 		swapDone:           cfg.SwapDone,
+		adaptorCoords:      cfg.AdaptorCoordinators,
 		latencyQ:           wait.NewTaperingTickerQueue(fastRecheckInterval, taperedRecheckInterval),
 		matches:            make(map[order.MatchID]*matchTracker),
 		userMatches:        make(map[account.AccountID]map[order.MatchID]*matchTracker),
@@ -374,6 +389,16 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 	// method requests.
 	authMgr.Route(msgjson.InitRoute, swapper.handleInit)
 	authMgr.Route(msgjson.RedeemRoute, swapper.handleRedeem)
+
+	// Adaptor swap routes are only registered when the coordinator
+	// pool is configured. Operators on HTLC-only deployments
+	// don't see these routes and clients sending them get the
+	// standard "unknown route" error from comms.
+	if swapper.adaptorCoords != nil {
+		for _, route := range adaptorRoutes {
+			authMgr.Route(route, swapper.handleAdaptorMsg)
+		}
+	}
 
 	return swapper, nil
 }

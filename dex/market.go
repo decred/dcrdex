@@ -41,6 +41,20 @@ const (
 	ParcelLimitScoreMultiplier = 3
 )
 
+// SwapType identifies the atomic-swap protocol a market uses.
+type SwapType uint8
+
+const (
+	// SwapTypeHTLC is the traditional dcrdex HTLC-based swap. All
+	// existing markets use this.
+	SwapTypeHTLC SwapType = iota
+	// SwapTypeAdaptor is the BIP-340 adaptor-signature swap. Used
+	// for pairs where one side is a non-scriptable chain (XMR).
+	// Under "Option 1" semantics only the scriptable-side holder
+	// may place maker orders; see ScriptableAsset below.
+	SwapTypeAdaptor
+)
+
 // MarketInfo specifies a market that the Archiver must support.
 type MarketInfo struct {
 	Name                   string
@@ -52,6 +66,37 @@ type MarketInfo struct {
 	EpochDuration          uint64 // msec
 	MarketBuyBuffer        float64
 	MaxUserCancelsPerEpoch uint32
+	// SwapType selects the swap protocol. Zero value is
+	// SwapTypeHTLC, preserving backward compatibility.
+	SwapType SwapType
+	// ScriptableAsset is only used when SwapType is SwapTypeAdaptor.
+	// It names the asset (Base or Quote) whose holders must be
+	// makers on this market. Orders that would put the non-scriptable
+	// asset holder in the maker role (i.e. limit orders selling the
+	// non-scriptable asset) are rejected at order intake. Must equal
+	// Base or Quote.
+	ScriptableAsset uint32
+	// LockBlocks is only used when SwapType is SwapTypeAdaptor. It
+	// is the CSV window (in blocks of the scriptable chain) on the
+	// punish leaf of the refund tap tree: the number of blocks the
+	// initiator has to broadcast a cooperative refund (revealing
+	// his XMR scalar) before the participant can solo-spend the
+	// refund output via the punish branch. The server validates
+	// that counterparties' on-wire setup matches this value.
+	LockBlocks uint32
+}
+
+// IsAdaptor reports whether this market uses adaptor-signature swaps.
+func (mi *MarketInfo) IsAdaptor() bool {
+	return mi.SwapType == SwapTypeAdaptor
+}
+
+// MakerAssetIsScriptable reports whether a trader whose order sells
+// the given asset would be the maker on the scriptable side. For
+// adaptor-swap markets under Option 1, only such orders may be
+// limit orders.
+func (mi *MarketInfo) MakerAssetIsScriptable(sellAsset uint32) bool {
+	return sellAsset == mi.ScriptableAsset
 }
 
 func marketName(base, quote string) string {

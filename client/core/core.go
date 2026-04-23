@@ -1700,6 +1700,13 @@ type Core struct {
 	meshMtx sync.RWMutex
 	mesh    *mesh.Mesh
 	meshCM  *dex.ConnectionMaster
+
+	// adaptorMgr drives BIP-340 adaptor-signature swaps for matches
+	// on markets configured with msgjson.Market.SwapType !=
+	// SwapTypeHTLC. Always non-nil so adaptor route handlers do not
+	// need a nil check; backed by NoopSender and nil asset adapters
+	// until those are wired in by the per-build entry points.
+	adaptorMgr *AdaptorSwapManager
 }
 
 // New is the constructor for a new Core.
@@ -1846,6 +1853,14 @@ func New(cfg *Config) (*Core, error) {
 		notes:            make(chan asset.WalletNotification, 128),
 		requestedActions: make(map[string]*asset.ActionRequiredNote),
 	}
+
+	// Adaptor-swap manager. Asset adapters and message sender are
+	// installed later by the per-asset wiring; until then StartSwap
+	// will fail at orchestrator construction, which is the correct
+	// behavior - we have not yet routed any match into it.
+	c.adaptorMgr = NewAdaptorSwapManager(&AdaptorSwapManagerConfig{
+		Send: NoopSender{},
+	})
 
 	c.intl.Store(&locale{
 		lang:    lang,
@@ -8807,6 +8822,15 @@ func (c *Core) negotiateMatches(sm *serverMatches) (assetMap, error) {
 		}
 	}
 
+	// Adaptor-swap markets divert here: skip the HTLC matchTracker
+	// setup entirely and hand the matches to the AdaptorSwapManager.
+	// HTLC tracker.negotiate is not safe to call for adaptor matches
+	// because its scripts and state machine assume the HTLC protocol.
+	if mkt := tracker.dc.marketConfig(tracker.mktID); mkt != nil &&
+		mkt.SwapType == uint8(dex.SwapTypeAdaptor) && len(sm.msgMatches) > 0 {
+		return updatedAssets, c.startAdaptorMatches(tracker, sm.msgMatches, mkt)
+	}
+
 	// Begin negotiation for any trade Matches.
 	if len(sm.msgMatches) > 0 {
 		tracker.mtx.Lock()
@@ -9605,6 +9629,18 @@ func handleCounterPartyAddressMsg(c *Core, dc *dexConnection, msg *msgjson.Messa
 	var matchID order.MatchID
 	copy(matchID[:], cpa.MatchID)
 
+	// Adaptor-swap matches are not in tracker.matches (HTLC map);
+	// route the address into the orchestrator instead. Only one of
+	// the two paths fires per match - if the manager doesn't have an
+	// orchestrator for this match, fall through to the HTLC path.
+	if handled, err := c.adaptorMgr.OnCounterPartyAddress(matchID, cpa.Address, c.net); handled {
+		if err != nil {
+			return fmt.Errorf("counterparty_address (adaptor) match %s: %w", matchID, err)
+		}
+		c.log.Infof("Recorded counterparty address %s for adaptor match %s", cpa.Address, matchID)
+		return nil
+	}
+
 	tracker.mtx.Lock()
 	match := tracker.matches[matchID]
 	if match == nil {
@@ -9677,6 +9713,19 @@ var noteHandlers = map[string]routeHandler{
 	msgjson.BondExpiredRoute:         handleBondExpiredMsg,
 	msgjson.MMEpochSnapshotRoute:     handleMMEpochSnapshotMsg,
 	msgjson.CounterPartyAddressRoute: handleCounterPartyAddressMsg,
+
+	// Adaptor-swap routes. All ten dispatch through the same
+	// handler, which uses msg.Route to pick the payload type.
+	msgjson.AdaptorSetupPartRoute:       handleAdaptorMsg,
+	msgjson.AdaptorSetupInitRoute:       handleAdaptorMsg,
+	msgjson.AdaptorRefundPresignedRoute: handleAdaptorMsg,
+	msgjson.AdaptorLockedRoute:          handleAdaptorMsg,
+	msgjson.AdaptorXmrLockedRoute:       handleAdaptorMsg,
+	msgjson.AdaptorSpendPresigRoute:     handleAdaptorMsg,
+	msgjson.AdaptorSpendBroadcastRoute:  handleAdaptorMsg,
+	msgjson.AdaptorRefundBroadcastRoute: handleAdaptorMsg,
+	msgjson.AdaptorCoopRefundRoute:      handleAdaptorMsg,
+	msgjson.AdaptorPunishRoute:          handleAdaptorMsg,
 }
 
 // listen monitors the DEX websocket connection for server requests and

@@ -1,0 +1,536 @@
+package adaptorsigs
+
+import (
+	"bytes"
+	"crypto/rand"
+	"encoding/hex"
+	"testing"
+
+	"github.com/btcsuite/btcd/btcec/v2"
+)
+
+// bip340OfficialVectors contains the sign-verify test vectors from the
+// canonical BIP-340 test-vectors.csv (rows 0-3, which have secret keys).
+// These are used to cross-check our shared primitives - nonce derivation,
+// challenge hash, and the signing equation - against the reference output.
+// If signBIP340Standard matches these bit-exactly, the same primitives
+// reused inside PublicKeyTweakedAdaptorSigBIP340 are vector-validated.
+var bip340OfficialVectors = []struct {
+	name      string
+	secretKey string
+	pubKey    string
+	auxRand   string
+	message   string
+	signature string
+}{
+	{
+		name:      "vector 0",
+		secretKey: "0000000000000000000000000000000000000000000000000000000000000003",
+		pubKey:    "F9308A019258C31049344F85F89D5229B531C845836F99B08601F113BCE036F9",
+		auxRand:   "0000000000000000000000000000000000000000000000000000000000000000",
+		message:   "0000000000000000000000000000000000000000000000000000000000000000",
+		signature: "E907831F80848D1069A5371B402410364BDF1C5F8307B0084C55F1CE2DCA821525F66A4A85EA8B71E482A74F382D2CE5EBEEE8FDB2172F477DF4900D310536C0",
+	},
+	{
+		name:      "vector 1",
+		secretKey: "B7E151628AED2A6ABF7158809CF4F3C762E7160F38B4DA56A784D9045190CFEF",
+		pubKey:    "DFF1D77F2A671C5F36183726DB2341BE58FEAE1DA2DECED843240F7B502BA659",
+		auxRand:   "0000000000000000000000000000000000000000000000000000000000000001",
+		message:   "243F6A8885A308D313198A2E03707344A4093822299F31D0082EFA98EC4E6C89",
+		signature: "6896BD60EEAE296DB48A229FF71DFE071BDE413E6D43F917DC8DCF8C78DE33418906D11AC976ABCCB20B091292BFF4EA897EFCB639EA871CFA95F6DE339E4B0A",
+	},
+	{
+		name:      "vector 2",
+		secretKey: "C90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B14E5C9",
+		pubKey:    "DD308AFEC5777E13121FA72B9CC1B7CC0139715309B086C960E18FD969774EB8",
+		auxRand:   "C87AA53824B4D7AE2EB035A2B5BBBCCC080E76CDC6D1692C4B0B62D798E6D906",
+		message:   "7E2D58D8B3BCDF1ABADEC7829054F90DDA9805AAB56C77333024B9D0A508B75C",
+		signature: "5831AAEED7B44BB74E5EAB94BA9D4294C49BCF2A60728D8B4C200F50DD313C1BAB745879A5AD954A72C45A91C3A51D3C7ADEA98D82F8481E0E1E03674A6F3FB7",
+	},
+	{
+		name:      "vector 3",
+		secretKey: "0B432B2677937381AEF05BB02A66ECD012773062CF3FA2549E44F58ED2401710",
+		pubKey:    "25D1DFF95105F5253C4022F628A996AD3A0D95FBF21D468A1B33F8C160D8F517",
+		auxRand:   "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+		message:   "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+		signature: "7EB0509757E246F19449885651611CB965ECC1A187DD51B64FDA1EDC9637D5EC97582B9CB13DB3933705B32BA982AF5AF25FD78881EBB32771FC5922EFC66EA3",
+	},
+}
+
+// TestBIP340StandardSignVectors checks that signBIP340Standard (which
+// shares its nonce, challenge, and signing code with the adaptor path)
+// reproduces the canonical BIP-340 test vectors bit-exactly.
+func TestBIP340StandardSignVectors(t *testing.T) {
+	for _, tv := range bip340OfficialVectors {
+		t.Run(tv.name, func(t *testing.T) {
+			dBytes, err := hex.DecodeString(tv.secretKey)
+			if err != nil {
+				t.Fatalf("decode secret key: %v", err)
+			}
+			msg, err := hex.DecodeString(tv.message)
+			if err != nil {
+				t.Fatalf("decode message: %v", err)
+			}
+			auxRand, err := hex.DecodeString(tv.auxRand)
+			if err != nil {
+				t.Fatalf("decode auxRand: %v", err)
+			}
+			wantSig, err := hex.DecodeString(tv.signature)
+			if err != nil {
+				t.Fatalf("decode signature: %v", err)
+			}
+
+			privKey, _ := btcec.PrivKeyFromBytes(dBytes)
+			sig, err := signBIP340Standard(privKey, msg, auxRand)
+			if err != nil {
+				t.Fatalf("signBIP340Standard: %v", err)
+			}
+			gotSig := sig.Serialize()
+			if !bytes.Equal(gotSig, wantSig) {
+				t.Fatalf("signature mismatch\ngot  %x\nwant %x", gotSig, wantSig)
+			}
+		})
+	}
+}
+
+// TestBIP340AdaptorRoundtrip exercises the full adaptor flow:
+//
+//  1. Signer creates a pub-key-tweaked adaptor under BIP-340.
+//  2. Verifier (no tweak) checks it with VerifyBIP340.
+//  3. Recipient (knows tweak) decrypts to a standard BIP-340 signature.
+//  4. Standard signature validates under btcec's canonical BIP-340 Verify.
+//  5. Given the decrypted signature, the signer can recover the tweak.
+func TestBIP340AdaptorRoundtrip(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		// Signer's key.
+		privKey, err := btcec.NewPrivateKey()
+		if err != nil {
+			t.Fatalf("privkey: %v", err)
+		}
+
+		// Hidden scalar t and its point T = t*G.
+		tweakKey, err := btcec.NewPrivateKey()
+		if err != nil {
+			t.Fatalf("tweak: %v", err)
+		}
+		tweak := &tweakKey.Key
+		var T btcec.JacobianPoint
+		btcec.ScalarBaseMultNonConst(tweak, &T)
+
+		var hash [32]byte
+		if _, err := rand.Read(hash[:]); err != nil {
+			t.Fatalf("read hash: %v", err)
+		}
+
+		sig, err := PublicKeyTweakedAdaptorSigBIP340(privKey, hash[:], &T)
+		if err != nil {
+			t.Fatalf("iter %d: adaptor sign: %v", i, err)
+		}
+
+		if err := sig.VerifyBIP340(hash[:], privKey.PubKey()); err != nil {
+			t.Fatalf("iter %d: adaptor verify: %v", i, err)
+		}
+
+		decrypted, err := sig.DecryptBIP340(tweak)
+		if err != nil {
+			t.Fatalf("iter %d: decrypt: %v", i, err)
+		}
+		if !decrypted.Verify(hash[:], privKey.PubKey()) {
+			t.Fatalf("iter %d: decrypted signature failed BIP-340 Verify", i)
+		}
+
+		recovered, err := sig.RecoverTweakBIP340(decrypted)
+		if err != nil {
+			t.Fatalf("iter %d: recover: %v", i, err)
+		}
+		if !recovered.Equals(tweak) {
+			t.Fatalf("iter %d: recovered tweak mismatch", i)
+		}
+	}
+}
+
+// TestBIP340AdaptorWrongTweak ensures Decrypt rejects a tweak that does not
+// correspond to the stored T.
+func TestBIP340AdaptorWrongTweak(t *testing.T) {
+	privKey, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatalf("privkey: %v", err)
+	}
+	tweakKey, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatalf("tweak: %v", err)
+	}
+	var T btcec.JacobianPoint
+	btcec.ScalarBaseMultNonConst(&tweakKey.Key, &T)
+
+	var hash [32]byte
+	if _, err := rand.Read(hash[:]); err != nil {
+		t.Fatalf("read hash: %v", err)
+	}
+	sig, err := PublicKeyTweakedAdaptorSigBIP340(privKey, hash[:], &T)
+	if err != nil {
+		t.Fatalf("adaptor sign: %v", err)
+	}
+
+	wrongKey, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatalf("wrong tweak: %v", err)
+	}
+	if _, err := sig.DecryptBIP340(&wrongKey.Key); err == nil {
+		t.Fatal("expected error from DecryptBIP340 with wrong tweak")
+	}
+}
+
+// TestBIP340PrivateKeyTweakedRoundtrip exercises the private-key-tweaked
+// adaptor path: a party who already has a valid signature and knows the
+// tweak constructs an adaptor that only they or the tweak-learner can
+// complete.
+func TestBIP340PrivateKeyTweakedRoundtrip(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		privKey, err := btcec.NewPrivateKey()
+		if err != nil {
+			t.Fatalf("privkey: %v", err)
+		}
+		tweakKey, err := btcec.NewPrivateKey()
+		if err != nil {
+			t.Fatalf("tweak: %v", err)
+		}
+		var hash [32]byte
+		if _, err := rand.Read(hash[:]); err != nil {
+			t.Fatalf("read hash: %v", err)
+		}
+		var auxRand [32]byte
+		if _, err := rand.Read(auxRand[:]); err != nil {
+			t.Fatalf("read aux: %v", err)
+		}
+
+		// Produce a standard BIP-340 sig via our test signer (vector-validated).
+		sig, err := signBIP340Standard(privKey, hash[:], auxRand[:])
+		if err != nil {
+			t.Fatalf("iter %d: sign: %v", i, err)
+		}
+		if !sig.Verify(hash[:], privKey.PubKey()) {
+			t.Fatalf("iter %d: baseline sig failed btcec verify", i)
+		}
+
+		adaptor := PrivateKeyTweakedAdaptorSigBIP340(sig, &tweakKey.Key)
+		if err := adaptor.VerifyBIP340(hash[:], privKey.PubKey()); err != nil {
+			t.Fatalf("iter %d: privkey adaptor verify: %v", i, err)
+		}
+
+		decrypted, err := adaptor.DecryptBIP340(&tweakKey.Key)
+		if err != nil {
+			t.Fatalf("iter %d: decrypt: %v", i, err)
+		}
+		if !decrypted.Verify(hash[:], privKey.PubKey()) {
+			t.Fatalf("iter %d: decrypted failed btcec verify", i)
+		}
+		// The decrypted signature should match the original sig bit-exactly.
+		if !bytes.Equal(decrypted.Serialize(), sig.Serialize()) {
+			t.Fatalf("iter %d: decrypted != original sig", i)
+		}
+	}
+}
+
+// TestBIP340TwoPartySwap models the classic adaptor-signature swap: Party
+// 1 has a valid sig on message m1 and knows t; they send a
+// private-key-tweaked adaptor to Party 2. Party 2 constructs a
+// public-key-tweaked adaptor on a different message m2 using the same T
+// (without knowing t) and sends it to Party 1. Party 1 completes Party
+// 2's adaptor and broadcasts the resulting sig. Party 2 sees the
+// completed sig, recovers t via RecoverTweakBIP340, and then decrypts
+// Party 1's adaptor to obtain the valid sig on m1.
+func TestBIP340TwoPartySwap(t *testing.T) {
+	// Party 1.
+	priv1, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatalf("priv1: %v", err)
+	}
+	// Party 2.
+	priv2, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatalf("priv2: %v", err)
+	}
+	// Hidden scalar t known only to Party 1.
+	tweakKey, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatalf("tweak: %v", err)
+	}
+	tweak := &tweakKey.Key
+	var T btcec.JacobianPoint
+	btcec.ScalarBaseMultNonConst(tweak, &T)
+
+	var m1, m2, auxRand [32]byte
+	if _, err := rand.Read(m1[:]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rand.Read(m2[:]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rand.Read(auxRand[:]); err != nil {
+		t.Fatal(err)
+	}
+
+	// Party 1 signs m1 normally, then constructs a priv-key-tweaked adaptor.
+	sig1, err := signBIP340Standard(priv1, m1[:], auxRand[:])
+	if err != nil {
+		t.Fatalf("sign m1: %v", err)
+	}
+	adaptor1 := PrivateKeyTweakedAdaptorSigBIP340(sig1, tweak)
+	if err := adaptor1.VerifyBIP340(m1[:], priv1.PubKey()); err != nil {
+		t.Fatalf("party2 verify adaptor1: %v", err)
+	}
+
+	// Party 2 signs m2 as a pub-key-tweaked adaptor with the same T.
+	adaptor2, err := PublicKeyTweakedAdaptorSigBIP340(priv2, m2[:], &T)
+	if err != nil {
+		t.Fatalf("party2 adaptor sign: %v", err)
+	}
+	if err := adaptor2.VerifyBIP340(m2[:], priv2.PubKey()); err != nil {
+		t.Fatalf("party1 verify adaptor2: %v", err)
+	}
+
+	// Party 1 (who knows t) completes Party 2's adaptor and publishes.
+	completed2, err := adaptor2.DecryptBIP340(tweak)
+	if err != nil {
+		t.Fatalf("party1 decrypt adaptor2: %v", err)
+	}
+	if !completed2.Verify(m2[:], priv2.PubKey()) {
+		t.Fatal("completed sig on m2 does not verify")
+	}
+
+	// Party 2 observes completed2, recovers t.
+	recoveredTweak, err := adaptor2.RecoverTweakBIP340(completed2)
+	if err != nil {
+		t.Fatalf("party2 recover tweak: %v", err)
+	}
+	if !recoveredTweak.Equals(tweak) {
+		t.Fatal("recovered tweak does not match")
+	}
+
+	// Party 2 decrypts Party 1's adaptor using the recovered tweak.
+	completed1, err := adaptor1.DecryptBIP340(recoveredTweak)
+	if err != nil {
+		t.Fatalf("party2 decrypt adaptor1: %v", err)
+	}
+	if !completed1.Verify(m1[:], priv1.PubKey()) {
+		t.Fatal("completed sig on m1 does not verify")
+	}
+	if !bytes.Equal(completed1.Serialize(), sig1.Serialize()) {
+		t.Fatal("completed1 != sig1")
+	}
+}
+
+// TestBIP340SignErrors covers input-validation paths in
+// PublicKeyTweakedAdaptorSigBIP340.
+func TestBIP340SignErrors(t *testing.T) {
+	priv, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatalf("priv: %v", err)
+	}
+	tweakKey, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatalf("tweak: %v", err)
+	}
+	var T btcec.JacobianPoint
+	btcec.ScalarBaseMultNonConst(&tweakKey.Key, &T)
+
+	// Wrong hash length.
+	if _, err := PublicKeyTweakedAdaptorSigBIP340(priv, make([]byte, 31), &T); err == nil {
+		t.Fatal("expected error for short hash")
+	}
+	if _, err := PublicKeyTweakedAdaptorSigBIP340(priv, make([]byte, 33), &T); err == nil {
+		t.Fatal("expected error for long hash")
+	}
+
+	// Zero private key.
+	var zero btcec.PrivateKey
+	hash := make([]byte, 32)
+	if _, err := PublicKeyTweakedAdaptorSigBIP340(&zero, hash, &T); err == nil {
+		t.Fatal("expected error for zero private key")
+	}
+}
+
+// TestBIP340AdaptorTamperR tampers the r field of a valid adaptor
+// signature and confirms VerifyBIP340 rejects it.
+func TestBIP340AdaptorTamperR(t *testing.T) {
+	sig, hash, priv := newValidAdaptor(t)
+	sig.r.Add(new(btcec.FieldVal).SetInt(1))
+	sig.r.Normalize()
+	if err := sig.VerifyBIP340(hash, priv.PubKey()); err == nil {
+		t.Fatal("expected verify to fail after r tamper")
+	}
+}
+
+// TestBIP340AdaptorTamperT tampers the stored tweak point and confirms
+// VerifyBIP340 rejects the mutated adaptor.
+func TestBIP340AdaptorTamperT(t *testing.T) {
+	sig, hash, priv := newValidAdaptor(t)
+	// Replace T with a completely unrelated point.
+	otherKey, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatalf("other tweak: %v", err)
+	}
+	var Totherwise btcec.JacobianPoint
+	btcec.ScalarBaseMultNonConst(&otherKey.Key, &Totherwise)
+	Totherwise.ToAffine()
+	sig.t = affinePoint{x: Totherwise.X, y: Totherwise.Y}
+	if err := sig.VerifyBIP340(hash, priv.PubKey()); err == nil {
+		t.Fatal("expected verify to fail after T tamper")
+	}
+}
+
+// TestBIP340AdaptorSchemeMismatch flips the pubKeyTweak flag on a valid
+// adaptor and confirms verification fails, modeling the class of bugs
+// where a privKeyTweak adaptor is handled as pubKeyTweak or vice versa.
+func TestBIP340AdaptorSchemeMismatch(t *testing.T) {
+	sig, hash, priv := newValidAdaptor(t)
+	sig.pubKeyTweak = !sig.pubKeyTweak
+	if err := sig.VerifyBIP340(hash, priv.PubKey()); err == nil {
+		t.Fatal("expected verify to fail after scheme flag flip")
+	}
+}
+
+// TestBIP340RecoverWrongSig confirms that RecoverTweakBIP340 rejects a
+// completed signature produced under a different tweak.
+func TestBIP340RecoverWrongSig(t *testing.T) {
+	sig, _, _ := newValidAdaptor(t)
+
+	// A signature that doesn't match: produce a completely unrelated
+	// adaptor+decrypt pair.
+	other, _, _ := newValidAdaptor(t)
+	otherTweak, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatalf("other tweak: %v", err)
+	}
+	// Patch `other`'s T so decrypt doesn't error. We do this by
+	// rebuilding `other` from scratch with a specific tweak value.
+	var T btcec.JacobianPoint
+	btcec.ScalarBaseMultNonConst(&otherTweak.Key, &T)
+	otherPriv, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatalf("other priv: %v", err)
+	}
+	otherHash := make([]byte, 32)
+	otherHash[0] = 0xff
+	other, err = PublicKeyTweakedAdaptorSigBIP340(otherPriv, otherHash, &T)
+	if err != nil {
+		t.Fatalf("other adaptor: %v", err)
+	}
+	otherCompleted, err := other.DecryptBIP340(&otherTweak.Key)
+	if err != nil {
+		t.Fatalf("other decrypt: %v", err)
+	}
+
+	if _, err := sig.RecoverTweakBIP340(otherCompleted); err == nil {
+		t.Fatal("expected RecoverTweakBIP340 to reject mismatched sig")
+	}
+}
+
+// TestBIP340RecoverRejectsPrivKeyTweak confirms RecoverTweakBIP340
+// refuses to operate on private-key-tweaked adaptors, since recovery
+// is only meaningful in the pub-key-tweaked direction.
+func TestBIP340RecoverRejectsPrivKeyTweak(t *testing.T) {
+	priv, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatalf("priv: %v", err)
+	}
+	tweak, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatalf("tweak: %v", err)
+	}
+	hash := make([]byte, 32)
+	var auxRand [32]byte
+	sig, err := signBIP340Standard(priv, hash, auxRand[:])
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	adaptor := PrivateKeyTweakedAdaptorSigBIP340(sig, &tweak.Key)
+	completed, err := adaptor.DecryptBIP340(&tweak.Key)
+	if err != nil {
+		t.Fatalf("decrypt: %v", err)
+	}
+	if _, err := adaptor.RecoverTweakBIP340(completed); err == nil {
+		t.Fatal("expected RecoverTweakBIP340 to reject privKeyTweak adaptor")
+	}
+}
+
+// newValidAdaptor is a small helper for the negative tests: it
+// produces a freshly-generated valid pub-key-tweaked adaptor.
+func newValidAdaptor(t *testing.T) (*AdaptorSignature, []byte, *btcec.PrivateKey) {
+	t.Helper()
+	priv, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatalf("priv: %v", err)
+	}
+	tweak, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatalf("tweak: %v", err)
+	}
+	var T btcec.JacobianPoint
+	btcec.ScalarBaseMultNonConst(&tweak.Key, &T)
+	var hash [32]byte
+	if _, err := rand.Read(hash[:]); err != nil {
+		t.Fatalf("rand: %v", err)
+	}
+	sig, err := PublicKeyTweakedAdaptorSigBIP340(priv, hash[:], &T)
+	if err != nil {
+		t.Fatalf("adaptor: %v", err)
+	}
+	if err := sig.VerifyBIP340(hash[:], priv.PubKey()); err != nil {
+		t.Fatalf("baseline verify: %v", err)
+	}
+	return sig, hash[:], priv
+}
+
+// TestBIP340AdaptorTamper confirms that mutating any field of an adaptor
+// signature makes VerifyBIP340 fail.
+func TestBIP340AdaptorTamper(t *testing.T) {
+	privKey, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatalf("privkey: %v", err)
+	}
+	tweakKey, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatalf("tweak: %v", err)
+	}
+	var T btcec.JacobianPoint
+	btcec.ScalarBaseMultNonConst(&tweakKey.Key, &T)
+
+	var hash [32]byte
+	if _, err := rand.Read(hash[:]); err != nil {
+		t.Fatalf("read hash: %v", err)
+	}
+	sig, err := PublicKeyTweakedAdaptorSigBIP340(privKey, hash[:], &T)
+	if err != nil {
+		t.Fatalf("adaptor sign: %v", err)
+	}
+	if err := sig.VerifyBIP340(hash[:], privKey.PubKey()); err != nil {
+		t.Fatalf("baseline verify: %v", err)
+	}
+
+	// Tamper with s.
+	tampered := *sig
+	var one btcec.ModNScalar
+	one.SetInt(1)
+	tampered.s.Add(&one)
+	if err := tampered.VerifyBIP340(hash[:], privKey.PubKey()); err == nil {
+		t.Fatal("expected verify to fail after s tamper")
+	}
+
+	// Tamper with the message.
+	badHash := hash
+	badHash[0] ^= 0x01
+	if err := sig.VerifyBIP340(badHash[:], privKey.PubKey()); err == nil {
+		t.Fatal("expected verify to fail on wrong hash")
+	}
+
+	// Wrong pubkey.
+	otherKey, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatalf("other privkey: %v", err)
+	}
+	if err := sig.VerifyBIP340(hash[:], otherKey.PubKey()); err == nil {
+		t.Fatal("expected verify to fail on wrong pubkey")
+	}
+}

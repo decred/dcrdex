@@ -59,6 +59,7 @@ const (
 // Swapper coordinates atomic swaps for one or more matchsets.
 type Swapper interface {
 	Negotiate(matchSets []*order.MatchSet)
+	NegotiateAdaptor(matchSets []*order.MatchSet, scriptableAsset, lockBlocks uint32)
 	CheckUnspent(ctx context.Context, asset uint32, coinID []byte) error
 	ChainsSynced(base, quote uint32) (bool, error)
 }
@@ -678,6 +679,20 @@ func (m *Market) LotSize() uint64 {
 // RateStep returns the market's rate step in units of the quote asset.
 func (m *Market) RateStep() uint64 {
 	return m.marketInfo.RateStep
+}
+
+// SwapInfo returns the swap protocol type and, for adaptor-swap
+// markets, the asset ID of the scriptable side. For HTLC markets
+// the scriptable asset value is meaningless and should be ignored.
+func (m *Market) SwapInfo() (dex.SwapType, uint32) {
+	return m.marketInfo.SwapType, m.marketInfo.ScriptableAsset
+}
+
+// LockBlocks returns the CSV window (in scriptable-chain blocks) on
+// the punish leaf of the refund tap tree. Only meaningful for
+// adaptor-swap markets; zero for HTLC markets.
+func (m *Market) LockBlocks() uint32 {
+	return m.marketInfo.LockBlocks
 }
 
 // Base is the base asset ID.
@@ -2680,7 +2695,12 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 	if len(matches) > 0 {
 		log.Debugf("Negotiating %d matches for epoch %d:%d", len(matches),
 			epoch.Epoch, epoch.Duration)
-		m.swapper.Negotiate(matches)
+		if m.marketInfo.IsAdaptor() {
+			m.swapper.NegotiateAdaptor(matches,
+				m.marketInfo.ScriptableAsset, m.marketInfo.LockBlocks)
+		} else {
+			m.swapper.Negotiate(matches)
+		}
 	}
 }
 

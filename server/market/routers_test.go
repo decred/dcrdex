@@ -291,6 +291,9 @@ type TMarketTunnel struct {
 	acctRedeems int
 	base, quote uint32
 	parcels     float64
+	// Option-1 adaptor-swap configuration. Defaults to HTLC / 0.
+	swapType        dex.SwapType
+	scriptableAsset uint32
 }
 
 func tNewMarket(auth *TAuth) *TMarketTunnel {
@@ -343,6 +346,10 @@ func (m *TMarketTunnel) LotSize() uint64 {
 
 func (m *TMarketTunnel) RateStep() uint64 {
 	return m.rateStep
+}
+
+func (m *TMarketTunnel) SwapInfo() (dex.SwapType, uint32) {
+	return m.swapType, m.scriptableAsset
 }
 
 func (m *TMarketTunnel) CoinLocked(assetID uint32, coinid order.CoinID) bool {
@@ -1031,6 +1038,80 @@ func TestLimit(t *testing.T) {
 	// None needed to redeem.
 	oRig.polygon.bal = 0
 	ensureSuccess("enough to redeem account-based quote")
+}
+
+// TestLimitAdaptorOption1 verifies that handleLimit rejects standing
+// limit orders that sell the non-scriptable asset on an adaptor-swap
+// market, and accepts the scriptable-side orders as well as immediate
+// TiF orders regardless of side.
+func TestLimitAdaptorOption1(t *testing.T) {
+	const lots = 10
+	qty := uint64(dcrLotSize) * lots
+	rate := uint64(1000) * dcrRateStep
+	user := oRig.user
+
+	mkLimit := func(side uint8, tif uint8) *msgjson.Message {
+		pi := ordertest.RandomPreimage()
+		commit := pi.Commit()
+		lim := &msgjson.LimitOrder{
+			Prefix: msgjson.Prefix{
+				AccountID:  user.acct[:],
+				Base:       dcrID,
+				Quote:      btcID,
+				OrderType:  msgjson.LimitOrderNum,
+				ClientTime: uint64(nowMs().UnixMilli()),
+				Commit:     commit[:],
+			},
+			Trade: msgjson.Trade{
+				Side:     side,
+				Quantity: qty,
+				Coins: []*msgjson.Coin{
+					oRig.signedUTXO(dcrID, qty-dcrLotSize, 1),
+					oRig.signedUTXO(dcrID, 2*dcrLotSize, 2),
+				},
+				Address: btcAddr,
+			},
+			Rate: rate,
+			TiF:  tif,
+		}
+		msg, _ := msgjson.NewRequest(uint64(rand.Int63n(1<<30)), msgjson.LimitRoute, lim)
+		return msg
+	}
+
+	// Configure the market as adaptor with BTC (quote) as the
+	// scriptable side. Under Option 1, Sell-side limit orders
+	// (selling DCR) are selling the non-scriptable asset and must
+	// be rejected when standing.
+	oRig.market.swapType = dex.SwapTypeAdaptor
+	oRig.market.scriptableAsset = btcID
+	defer func() {
+		oRig.market.swapType = dex.SwapTypeHTLC
+		oRig.market.scriptableAsset = 0
+	}()
+
+	oRig.market.added = make(chan struct{}, 1)
+	defer func() { oRig.market.added = nil }()
+
+	// Sell+Standing: non-scriptable maker; reject.
+	if rpcErr := oRig.router.handleLimit(user.acct,
+		mkLimit(msgjson.SellOrderNum, msgjson.StandingOrderNum)); rpcErr == nil {
+		t.Fatal("expected rejection for non-scriptable standing sell")
+	} else if rpcErr.Code != msgjson.OrderParameterError {
+		t.Fatalf("wrong error code: %d", rpcErr.Code)
+	}
+
+	// Flip the scriptable asset: now Sell-side (DCR) is the
+	// scriptable side and Buy-side (BTC) is non-scriptable. The
+	// same Sell+Standing that was rejected above should now be
+	// allowed past the Option-1 gate (it may still fail for other
+	// reasons but not with OrderParameterError from this check).
+	oRig.market.scriptableAsset = dcrID
+	if rpcErr := oRig.router.handleLimit(user.acct,
+		mkLimit(msgjson.BuyOrderNum, msgjson.StandingOrderNum)); rpcErr == nil {
+		t.Fatal("expected rejection for non-scriptable standing buy after flip")
+	} else if rpcErr.Code != msgjson.OrderParameterError {
+		t.Fatalf("wrong error code: %d", rpcErr.Code)
+	}
 }
 
 func TestMarketStartProcessStop(t *testing.T) {
