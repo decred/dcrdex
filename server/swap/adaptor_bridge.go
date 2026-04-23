@@ -105,7 +105,16 @@ func (cc *AdaptorCoordinators) Handle(route string, matchID order.MatchID, paylo
 	if err != nil {
 		return err
 	}
-	return c.Handle(evt)
+	// Diagnostic: make inbound adaptor events visible in the server log
+	// and report whether the coordinator accepted them. Lets the
+	// operator tell "message never arrived" apart from "coordinator
+	// rejected it".
+	log.Infof("adaptor coordinator inbound route=%s match=%s phase=%s",
+		route, matchID, c.Phase())
+	err = c.Handle(evt)
+	log.Infof("adaptor coordinator dispatched route=%s match=%s phase=%s err=%v",
+		route, matchID, c.Phase(), err)
+	return err
 }
 
 // Dispatch feeds a non-message event (chain observation, timeout)

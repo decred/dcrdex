@@ -153,7 +153,7 @@ func TestHandleAdaptorMsg(t *testing.T) {
 	mgr := NewAdaptorSwapManager(&AdaptorSwapManagerConfig{
 		BTC: &bridgeFakeBTC{}, XMR: &bridgeFakeXMR{}, Send: sender,
 	})
-	c := &Core{adaptorMgr: mgr}
+	c := &Core{adaptorMgr: mgr, log: tLogger}
 
 	matchID := order.MatchID{0xAB}
 	if _, err := mgr.StartSwap(&adaptorswap.Config{

@@ -1038,7 +1038,13 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		if err != nil {
 			return fmt.Errorf("adaptor router: NewNotification: %w", err)
 		}
-		return authMgr.Send(user, msg)
+		// Diagnostic: log each outbound relay so operators can see
+		// whether a Send failed (user offline, link broken) versus
+		// the participant's handler dropping a delivered message.
+		sendErr := authMgr.Send(user, msg)
+		log.Infof("adaptor router relayed route=%s match=%s to role=%s (user=%s): err=%v",
+			route, matchID, role, user, sendErr)
+		return sendErr
 	})
 	adaptorCoords = swap.NewAdaptorCoordinators(adaptor.Config{
 		Router:  adaptorRouter,

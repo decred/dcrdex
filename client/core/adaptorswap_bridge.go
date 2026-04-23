@@ -493,7 +493,16 @@ func handleAdaptorMsg(c *Core, _ *dexConnection, msg *msgjson.Message) error {
 	if err != nil {
 		return fmt.Errorf("decode %s: %w", msg.Route, err)
 	}
-	if err := c.adaptorMgr.Handle(msg.Route, matchID, payload); err != nil {
+	// Diagnostic: make the inbound adaptor route + dispatch outcome
+	// visible in the log so stuck handlers (e.g. a blocked XMR send)
+	// can be distinguished from dropped messages. Matched by the
+	// dispatch-complete log below.
+	c.log.Infof("adaptor msg inbound route=%s match=%s", msg.Route, matchID)
+	start := time.Now()
+	err = c.adaptorMgr.Handle(msg.Route, matchID, payload)
+	c.log.Infof("adaptor msg dispatch route=%s match=%s elapsed=%s err=%v",
+		msg.Route, matchID, time.Since(start), err)
+	if err != nil {
 		if IsInformational(err) {
 			return nil
 		}
