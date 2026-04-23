@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -401,6 +402,34 @@ func (c *Core) startAdaptorMatches(tracker *trackedTrade, msgMatches []*msgjson.
 		} else {
 			ownBTCAddr = c.adaptorOwnDepositAddr(pairBTC)
 		}
+		xmrWallet, _ := c.wallet(pairXMR)
+		// HACK (adaptor swaps): per-swap BTC/XMR adapters. Prefer
+		// adapters pre-installed on the manager (tests inject mocks
+		// that way); fall back to env-var BTC RPC + connected XMR
+		// wallet otherwise. Until per-wallet adapter plumbing lands
+		// (README TODO #5), this is how the orchestrator gets working
+		// asset access. Fail fast here instead of letting the
+		// orchestrator panic later on a typed-nil interface.
+		var btcAdapter adaptorswap.BTCAssetAdapter = c.adaptorMgr.btc
+		if btcAdapter == nil {
+			if a := buildAdaptorBTCAdapter(c.log); a != nil {
+				btcAdapter = a
+			}
+		}
+		if btcAdapter == nil {
+			c.log.Errorf("adaptor match %s: BTC adapter unavailable; "+
+				"set DCRDEX_ADAPTOR_BTC_{RPC,USER,PASS}", matchID)
+			continue
+		}
+		xmrAdapter := c.adaptorMgr.xmr
+		if xmrAdapter == nil {
+			xmrAdapter = buildAdaptorXMRAdapter(c.ctx, xmrWallet)
+		}
+		if xmrAdapter == nil {
+			c.log.Errorf("adaptor match %s: XMR adapter unavailable; "+
+				"connect the XMR wallet (build with -tags xmr)", matchID)
+			continue
+		}
 		cfg := &adaptorswap.Config{
 			SwapID:           swapID,
 			OrderID:          oid,
@@ -414,6 +443,8 @@ func (c *Core) startAdaptorMatches(tracker *trackedTrade, msgMatches []*msgjson.
 			XmrNetTag:        xmrNetTagForNet(c.net),
 			OwnXMRSweepDest:  ownXMRDest,
 			OwnBTCPayoutAddr: ownBTCAddr,
+			AssetBTC:         btcAdapter,
+			AssetXMR:         xmrAdapter,
 			// DecodeBTCAddr lets the initiator translate the
 			// participant's BTCPayoutAddr (received in AdaptorSetupPart)
 			// into a pkScript without the orchestrator needing to
@@ -616,6 +647,67 @@ func (b *BTCRPCAdapter) BroadcastTx(tx *wire.MsgTx) (string, error) {
 
 func (b *BTCRPCAdapter) CurrentHeight() (int64, error) {
 	return b.client.GetBlockCount()
+}
+
+// HACK (adaptor swaps): buildAdaptorBTCAdapter reads simnet BTC RPC
+// credentials from the environment and returns a BTCRPCAdapter. The
+// adaptor orchestrator needs an *rpcclient.Client that can FundRaw /
+// SignRaw / SendRaw, and bisonw's BTC wallet does not expose its own
+// client. Side-channel the connection via env vars until per-wallet
+// adapter plumbing lands (README TODO #5). Returns nil if unset.
+//
+// Env vars:
+//
+//	DCRDEX_ADAPTOR_BTC_RPC  host:port, e.g. 127.0.0.1:20556
+//	DCRDEX_ADAPTOR_BTC_USER rpc user
+//	DCRDEX_ADAPTOR_BTC_PASS rpc password
+func buildAdaptorBTCAdapter(log dex.Logger) *BTCRPCAdapter {
+	host := os.Getenv("DCRDEX_ADAPTOR_BTC_RPC")
+	user := os.Getenv("DCRDEX_ADAPTOR_BTC_USER")
+	pass := os.Getenv("DCRDEX_ADAPTOR_BTC_PASS")
+	if host == "" || user == "" || pass == "" {
+		return nil
+	}
+	cl, err := rpcclient.New(&rpcclient.ConnConfig{
+		Host:         host,
+		User:         user,
+		Pass:         pass,
+		HTTPPostMode: true,
+		DisableTLS:   true,
+	}, nil)
+	if err != nil {
+		log.Errorf("adaptor btc rpc setup: %v", err)
+		return nil
+	}
+	waitConfirm := func(ctx context.Context, txid *chainhash.Hash) (int64, error) {
+		tick := time.NewTicker(3 * time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			case <-tick.C:
+			}
+			res, err := cl.GetRawTransactionVerbose(txid)
+			if err != nil {
+				continue
+			}
+			if res.Confirmations < 1 || res.BlockHash == "" {
+				continue
+			}
+			bh, err := chainhash.NewHashFromStr(res.BlockHash)
+			if err != nil {
+				return 0, err
+			}
+			hdr, err := cl.GetBlockHeaderVerbose(bh)
+			if err != nil {
+				return 0, err
+			}
+			return int64(hdr.Height), nil
+		}
+	}
+	log.Infof("adaptor btc rpc adapter: host=%s", host)
+	return NewBTCRPCAdapter(cl, waitConfirm)
 }
 
 // ----- Message router (no-op default) -----

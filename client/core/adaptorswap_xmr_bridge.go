@@ -59,3 +59,18 @@ func (a *XMRWalletAdapter) SweepSharedAddress(swapID, addr, spendKeyHex, viewKey
 
 	return a.w.SweepSharedAddress(a.ctx, swapID, addr, spendKeyHex, viewKeyHex, restoreHeight, dest)
 }
+
+// buildAdaptorXMRAdapter wraps a connected XMR wallet for use by the
+// adaptor-swap orchestrator. Returns nil if the wallet is not the
+// expected *xmr.ExchangeWallet type (e.g. not connected). The xmr
+// build tag is required; see the !xmr stub in the companion file.
+func buildAdaptorXMRAdapter(ctx context.Context, w *xcWallet) adaptorswap.XMRAssetAdapter {
+	if w == nil {
+		return nil
+	}
+	ew, ok := w.Wallet.(*xmr.ExchangeWallet)
+	if !ok {
+		return nil
+	}
+	return NewXMRWalletAdapter(ctx, ew)
+}
