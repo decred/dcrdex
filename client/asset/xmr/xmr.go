@@ -311,6 +311,7 @@ type ExchangeWallet struct {
 
 var _ asset.Wallet = (*ExchangeWallet)(nil)
 var _ asset.Opener = (*ExchangeWallet)(nil)
+var _ asset.Authenticator = (*ExchangeWallet)(nil)
 var _ asset.NewAddresser = (*ExchangeWallet)(nil)
 var _ asset.Withdrawer = (*ExchangeWallet)(nil)
 var _ asset.FeeRater = (*ExchangeWallet)(nil)
@@ -362,6 +363,28 @@ func newWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	w.syncStatus.Store(&asset.SyncStatus{})
 
 	return w, nil
+}
+
+// Unlock satisfies asset.Authenticator. The cgo wallet is opened
+// once via OpenWithPW and stays open for the session, so there is
+// no separate unlock step. Returning nil here lets xcWallet.Unlock
+// cache the decrypted password the same way it does for Authenticator
+// wallets, which locallyUnlocked relies on.
+func (w *ExchangeWallet) Unlock(pw []byte) error {
+	return nil
+}
+
+// Lock satisfies asset.Authenticator. The cgo wallet is closed via
+// Close; Lock is a no-op so that brief Lock/Unlock cycles elsewhere
+// in core do not tear down the per-session wallet handle.
+func (w *ExchangeWallet) Lock() error {
+	return nil
+}
+
+// Locked satisfies asset.Authenticator. A wallet is considered
+// locked only when it has not been opened yet.
+func (w *ExchangeWallet) Locked() bool {
+	return !w.isOpen.Load()
 }
 
 // OpenWithPW opens the wallet with the provided password. This must be called
@@ -1344,11 +1367,31 @@ func (w *ExchangeWallet) RecoverWithSubaddresses(subaddressCount uint64) error {
 	return w.rescanFromHeight(0, 0)
 }
 
-// The following methods are required by the Wallet interface but not supported
-// for basic wallet functionality (trading not implemented).
+// HACK (adaptor swaps): the participant side of an adaptor swap places an
+// order without locking any XMR up front - the real send-to-shared-address
+// happens after EventLockConfirmed, driven by the orchestrator. The HTLC-
+// shaped Core.prepareTradeRequest path still calls FundOrder / FundingCoins
+// / ReturnCoins / SignCoinMessage unconditionally, so we return synthetic
+// stub values that pass client-side shape checks. The matching server-side
+// bypass lives in server/market/orderrouter.go (processTrade). Remove when
+// order-intake gains real adaptor awareness (README TODO #5).
+
+type adaptorStubCoin struct {
+	id    dex.Bytes
+	value uint64
+}
+
+func (c *adaptorStubCoin) ID() dex.Bytes  { return c.id }
+func (c *adaptorStubCoin) String() string { return "xmr-adaptor-stub:" + c.id.String() }
+func (c *adaptorStubCoin) Value() uint64  { return c.value }
+func (c *adaptorStubCoin) TxID() string   { return "" }
+
+// 32 bytes so Driver.DecodeCoinID does not reject it when Core logs the ID.
+var adaptorStubCoinID = dex.Bytes("xmr-adaptor-participant---------")
 
 func (w *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uint64, error) {
-	return nil, nil, 0, asset.ErrUnsupported
+	return asset.Coins{&adaptorStubCoin{id: adaptorStubCoinID, value: ord.Value}},
+		[]dex.Bytes{nil}, 0, nil
 }
 
 func (w *ExchangeWallet) MaxOrder(form *asset.MaxOrderForm) (*asset.SwapEstimate, error) {
@@ -1364,11 +1407,17 @@ func (w *ExchangeWallet) PreRedeem(form *asset.PreRedeemForm) (*asset.PreRedeem,
 }
 
 func (w *ExchangeWallet) ReturnCoins(coins asset.Coins) error {
-	return asset.ErrUnsupported
+	// HACK (adaptor swaps): stub FundOrder coins, nothing to release.
+	return nil
 }
 
 func (w *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
-	return nil, asset.ErrUnsupported
+	// HACK (adaptor swaps): restore the stub FundOrder coin by ID.
+	coins := make(asset.Coins, 0, len(ids))
+	for _, id := range ids {
+		coins = append(coins, &adaptorStubCoin{id: id})
+	}
+	return coins, nil
 }
 
 func (w *ExchangeWallet) Swap(_ context.Context, swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
@@ -1380,7 +1429,10 @@ func (w *ExchangeWallet) Redeem(_ context.Context, form *asset.RedeemForm) ([]de
 }
 
 func (w *ExchangeWallet) SignCoinMessage(coin asset.Coin, msg dex.Bytes) ([]dex.Bytes, []dex.Bytes, error) {
-	return nil, nil, asset.ErrUnsupported
+	// HACK (adaptor swaps): the stub FundOrder coin has no real key; return
+	// dummy pubkey+signature to satisfy client-side shape checks. The server
+	// skips signature verification for adaptor-market participant orders.
+	return []dex.Bytes{make(dex.Bytes, 33)}, []dex.Bytes{make(dex.Bytes, 64)}, nil
 }
 
 func (w *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroadcast bool) (*asset.AuditInfo, error) {

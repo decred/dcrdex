@@ -440,6 +440,18 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 	user := oRecord.order.User()
 	trade := oRecord.order.Trade()
 
+	// HACK (adaptor swaps): the participant (non-scriptable-side seller)
+	// places an order without locking funds up front - the real XMR send
+	// happens after EventLockConfirmed, driven peer-to-peer by the
+	// orchestrator. Skip all HTLC-shaped coin validation for these orders.
+	// See client/asset/xmr/xmr.go (FundOrder stub) for the matching client
+	// side. Remove when order-intake gains real adaptor awareness
+	// (README TODO #5).
+	if swapType, scriptable := tunnel.SwapInfo(); swapType == dex.SwapTypeAdaptor &&
+		assets.funding.ID != scriptable {
+		return r.submitOrderToMarket(tunnel, oRecord)
+	}
+
 	// If the receiving asset is account-based, we need to check that they can
 	// cover fees for the redemption, since they can't be subtracted from the
 	// received amount.
