@@ -181,6 +181,13 @@ func (o *Orchestrator) Phase() Phase {
 	return o.state.Phase
 }
 
+// Role returns the role this orchestrator is playing.
+func (o *Orchestrator) Role() Role {
+	o.state.mu.Lock()
+	defer o.state.mu.Unlock()
+	return o.state.Role
+}
+
 // SetPeerBTCPayoutScript records the counterparty's BTC payout
 // pkScript on the orchestrator's runtime config. Idempotent if
 // called twice with an identical script; errors on a mismatched

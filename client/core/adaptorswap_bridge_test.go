@@ -16,6 +16,7 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
 // TestManagerRouteToEventMapping exercises routeToEvent for each
@@ -263,9 +264,13 @@ func TestStartAdaptorMatches(t *testing.T) {
 	// emit AdaptorSetupPart on the participant path without a nil
 	// deref. The captured messages are not asserted here (TestDcSender
 	// covers the wire shape); we just need a non-nil transport.
+	priv, _ := secp256k1.GeneratePrivateKey()
 	tracker := &trackedTrade{
 		Order: ord,
-		dc:    &dexConnection{WsConn: &captureWsConn{}},
+		dc: &dexConnection{
+			WsConn: &captureWsConn{},
+			acct:   &dexAccount{privKey: priv},
+		},
 	}
 
 	matchID := order.MatchID{0xDE, 0xAD}
@@ -436,7 +441,8 @@ func TestXmrNetTagForNet(t *testing.T) {
 // through the dexConnection's websocket.
 func TestDcSender(t *testing.T) {
 	captured := &captureWsConn{}
-	dc := &dexConnection{WsConn: captured}
+	priv, _ := secp256k1.GeneratePrivateKey()
+	dc := &dexConnection{WsConn: captured, acct: &dexAccount{privKey: priv}}
 	s := &dcSender{dc: dc}
 
 	matchID := order.MatchID{0xCA, 0xFE}

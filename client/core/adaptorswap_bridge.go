@@ -234,6 +234,14 @@ func (m *AdaptorSwapManager) OnCounterPartyAddress(matchID order.MatchID,
 	if !ok {
 		return false, nil
 	}
+	// Only the initiator needs the peer's BTC payout (to build the
+	// spendTx output). The participant receives the maker's XMR
+	// redemption address here, which is irrelevant to the adaptor
+	// flow - the participant gets BTC at their own payout address
+	// announced via AdaptorSetupPart.
+	if o.Role() != adaptorswap.RoleInitiator {
+		return true, nil
+	}
 	script, err := btcAddressToScript(addr, net)
 	if err != nil {
 		return true, fmt.Errorf("decode peer btc address %q: %w", addr, err)
