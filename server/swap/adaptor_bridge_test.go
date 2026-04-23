@@ -50,7 +50,7 @@ func TestAdaptorCoordinatorsLifecycle(t *testing.T) {
 	var orderID order.MatchID
 	copy(orderID[:], []byte{0xCD})
 
-	c, err := pool.Start(matchID, orderID, 0, 128, 2)
+	c, err := pool.Start(matchID, orderID, 0, 128, 2, account.AccountID{}, account.AccountID{})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestAdaptorCoordinatorsLifecycle(t *testing.T) {
 	}
 
 	// Duplicate start errors.
-	if _, err := pool.Start(matchID, orderID, 0, 128, 2); err == nil {
+	if _, err := pool.Start(matchID, orderID, 0, 128, 2, account.AccountID{}, account.AccountID{}); err == nil {
 		t.Fatal("expected error for duplicate Start")
 	}
 
@@ -112,7 +112,7 @@ func TestSwapperHandleAdaptorWithoutPool(t *testing.T) {
 	if err := s.HandleAdaptor(msgjson.AdaptorSetupPartRoute, matchID, nil); err == nil {
 		t.Fatal("expected error when adaptorCoords is nil")
 	}
-	if err := s.StartAdaptorMatch(matchID, matchID, 0, 128, 2); err == nil {
+	if err := s.StartAdaptorMatch(matchID, matchID, 0, 128, 2, account.AccountID{}, account.AccountID{}); err == nil {
 		t.Fatal("expected error from StartAdaptorMatch without pool")
 	}
 	// Stop is a no-op without a pool.
@@ -132,7 +132,7 @@ func TestSwapperHandleAdaptorWithPool(t *testing.T) {
 	copy(matchID[:], []byte{0x01})
 	copy(orderID[:], []byte{0x02})
 
-	if err := s.StartAdaptorMatch(matchID, orderID, 0, 128, 2); err != nil {
+	if err := s.StartAdaptorMatch(matchID, orderID, 0, 128, 2, account.AccountID{}, account.AccountID{}); err != nil {
 		t.Fatalf("StartAdaptorMatch: %v", err)
 	}
 
@@ -228,7 +228,7 @@ func TestAdaptorCoordinatorsMultipleMatchesIsolated(t *testing.T) {
 	}
 	coords := make(map[order.MatchID]*adaptor.Coordinator, len(swaps))
 	for _, s := range swaps {
-		c, err := pool.Start(s.matchID, s.orderID, 0, 128, 144)
+		c, err := pool.Start(s.matchID, s.orderID, 0, 128, 144, account.AccountID{}, account.AccountID{})
 		if err != nil {
 			t.Fatalf("Start %x: %v", s.matchID[:1], err)
 		}
@@ -328,7 +328,7 @@ func TestHandleAdaptorMsg(t *testing.T) {
 
 	matchID := order.MatchID{0x42}
 	orderID := order.MatchID{0x07}
-	if _, err := pool.Start(matchID, orderID, 0, 128, 144); err != nil {
+	if _, err := pool.Start(matchID, orderID, 0, 128, 144, account.AccountID{}, account.AccountID{}); err != nil {
 		t.Fatalf("pool.Start: %v", err)
 	}
 

@@ -35,6 +35,7 @@ import (
 	"decred.org/dcrdex/server/market"
 	"decred.org/dcrdex/server/noderelay"
 	"decred.org/dcrdex/server/swap"
+	"decred.org/dcrdex/server/swap/adaptor"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/go-chi/chi/v5"
@@ -1018,17 +1019,46 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		mkt.SwapDone(ord, match, fail)
 	}
 
+	// Build the AdaptorCoordinators pool for adaptor-swap markets.
+	// Trust-mode operator setup: nil BTC/XMR auditors (coordinator
+	// auto-advances on EventLocked / EventXmrLocked), Noop reporter
+	// and persister. The PeerRouter wraps authMgr.Send: outbound
+	// adaptor-route messages from the coordinator are addressed by
+	// (matchID, role) and routed to the corresponding user account
+	// recorded at AdaptorCoordinators.Start time. Wire claims about
+	// the chain are accepted without independent verification - this
+	// is the simnet trust path the README calls out as TODO #2.
+	var adaptorCoords *swap.AdaptorCoordinators
+	adaptorRouter := swap.RouterFunc(func(matchID order.MatchID, role adaptor.Role, route string, payload any) error {
+		user, ok := adaptorCoords.UserFor(matchID, role)
+		if !ok {
+			return fmt.Errorf("adaptor router: no user for match %s role %s", matchID, role)
+		}
+		msg, err := msgjson.NewNotification(route, payload)
+		if err != nil {
+			return fmt.Errorf("adaptor router: NewNotification: %w", err)
+		}
+		return authMgr.Send(user, msg)
+	})
+	adaptorCoords = swap.NewAdaptorCoordinators(adaptor.Config{
+		Router:  adaptorRouter,
+		Report:  swap.NoopReporter{},
+		Persist: swap.NoopPersister{},
+		// BTC, XMR auditors intentionally nil (trust mode).
+	})
+
 	// Create the swapper.
 	swapperCfg := &swap.Config{
-		Assets:           lockableAssets,
-		Storage:          storage,
-		AuthManager:      authMgr,
-		BroadcastTimeout: cfg.BroadcastTimeout,
-		TxWaitExpiration: cfg.TxWaitExpiration,
-		LockTimeTaker:    dex.LockTimeTaker(cfg.Network),
-		LockTimeMaker:    dex.LockTimeMaker(cfg.Network),
-		SwapDone:         swapDone,
-		NoResume:         cfg.NoResumeSwaps,
+		Assets:              lockableAssets,
+		Storage:             storage,
+		AuthManager:         authMgr,
+		BroadcastTimeout:    cfg.BroadcastTimeout,
+		TxWaitExpiration:    cfg.TxWaitExpiration,
+		LockTimeTaker:       dex.LockTimeTaker(cfg.Network),
+		LockTimeMaker:       dex.LockTimeMaker(cfg.Network),
+		SwapDone:            swapDone,
+		NoResume:            cfg.NoResumeSwaps,
+		AdaptorCoordinators: adaptorCoords,
 		// TODO: set the AllowPartialRestore bool to allow startup with a
 		// missing asset backend if necessary in an emergency.
 	}

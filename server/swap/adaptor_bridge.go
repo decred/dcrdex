@@ -26,8 +26,9 @@ import (
 // AdaptorCoordinators is a per-match pool of server-side adaptor
 // swap coordinators. Safe for concurrent use.
 type AdaptorCoordinators struct {
-	mu sync.Mutex
-	m  map[order.MatchID]*adaptor.Coordinator
+	mu    sync.Mutex
+	m     map[order.MatchID]*adaptor.Coordinator
+	users map[order.MatchID]map[adaptor.Role]account.AccountID
 
 	cfgTmpl adaptor.Config // template; cfgTmpl.MatchID/OrderID are
 	// overwritten per swap.
@@ -39,6 +40,7 @@ type AdaptorCoordinators struct {
 func NewAdaptorCoordinators(cfgTmpl adaptor.Config) *AdaptorCoordinators {
 	return &AdaptorCoordinators{
 		m:       make(map[order.MatchID]*adaptor.Coordinator),
+		users:   make(map[order.MatchID]map[adaptor.Role]account.AccountID),
 		cfgTmpl: cfgTmpl,
 	}
 }
@@ -47,7 +49,8 @@ func NewAdaptorCoordinators(cfgTmpl adaptor.Config) *AdaptorCoordinators {
 // order. Returns an error if a coordinator already exists for the
 // match.
 func (cc *AdaptorCoordinators) Start(matchID, orderID order.MatchID,
-	scriptableAsset, nonScriptAsset uint32, lockBlocks uint32) (*adaptor.Coordinator, error) {
+	scriptableAsset, nonScriptAsset uint32, lockBlocks uint32,
+	initiator, participant account.AccountID) (*adaptor.Coordinator, error) {
 
 	cc.mu.Lock()
 	defer cc.mu.Unlock()
@@ -66,7 +69,25 @@ func (cc *AdaptorCoordinators) Start(matchID, orderID order.MatchID,
 		return nil, err
 	}
 	cc.m[matchID] = c
+	cc.users[matchID] = map[adaptor.Role]account.AccountID{
+		adaptor.RoleInitiator:   initiator,
+		adaptor.RoleParticipant: participant,
+	}
 	return c, nil
+}
+
+// UserFor returns the user account for the given match and role, or
+// false if the match is unknown. Used by the PeerRouter to route
+// outbound coordinator messages to the right counterparty.
+func (cc *AdaptorCoordinators) UserFor(matchID order.MatchID, role adaptor.Role) (account.AccountID, bool) {
+	cc.mu.Lock()
+	defer cc.mu.Unlock()
+	roles, ok := cc.users[matchID]
+	if !ok {
+		return account.AccountID{}, false
+	}
+	user, ok := roles[role]
+	return user, ok
 }
 
 // Handle routes an inbound Adaptor* message payload to the
@@ -104,6 +125,7 @@ func (cc *AdaptorCoordinators) Dispatch(matchID order.MatchID, evt adaptor.Event
 func (cc *AdaptorCoordinators) Stop(matchID order.MatchID) {
 	cc.mu.Lock()
 	delete(cc.m, matchID)
+	delete(cc.users, matchID)
 	cc.mu.Unlock()
 }
 
@@ -240,11 +262,12 @@ func (s *Swapper) HandleAdaptor(route string, matchID order.MatchID, payload any
 // adaptor-marked matches here, and skip the HTLC matchTracker
 // setup for them.
 func (s *Swapper) StartAdaptorMatch(matchID, orderID order.MatchID,
-	scriptableAsset, nonScriptAsset uint32, lockBlocks uint32) error {
+	scriptableAsset, nonScriptAsset uint32, lockBlocks uint32,
+	initiator, participant account.AccountID) error {
 	if s.adaptorCoords == nil {
 		return errors.New("adaptor swap coordination not configured")
 	}
-	_, err := s.adaptorCoords.Start(matchID, orderID, scriptableAsset, nonScriptAsset, lockBlocks)
+	_, err := s.adaptorCoords.Start(matchID, orderID, scriptableAsset, nonScriptAsset, lockBlocks, initiator, participant)
 	return err
 }
 
@@ -457,7 +480,12 @@ func (s *Swapper) NegotiateAdaptor(matchSets []*order.MatchSet,
 			var mid, oid order.MatchID
 			copy(mid[:], matchID[:])
 			copy(oid[:], orderID[:])
-			if _, err := s.adaptorCoords.Start(mid, oid, scriptableAsset, nonScript, lockBlocks); err != nil {
+			// On adaptor markets the maker is the scriptable-side
+			// holder (initiator), the taker is the non-scriptable
+			// holder (participant). Order-router Option-1 enforces
+			// this at intake.
+			if _, err := s.adaptorCoords.Start(mid, oid, scriptableAsset, nonScript, lockBlocks,
+				match.Maker.User(), match.Taker.User()); err != nil {
 				log.Errorf("AdaptorCoordinators.Start (match %s): %v", matchID, err)
 				continue
 			}
