@@ -65,7 +65,7 @@ func CleanAndExpandPath(path string) string {
 	return filepath.Join(homeDir, path)
 }
 
-// FilesExists reports whether the named file or directory exists.
+// FileExists reports whether the named file or directory exists.
 func FileExists(name string) bool {
 	_, err := os.Stat(name)
 	return !os.IsNotExist(err)

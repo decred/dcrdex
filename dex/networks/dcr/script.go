@@ -1117,7 +1117,7 @@ func multisigScriptSize(nPub int64) uint64 {
 		1 // OP_ENDIF
 }
 
-// PaymentMultisigRedeemSize returns the redeem tx size based on the number
+// PaymentMultisigRedeemTxSize returns the redeem tx size based on the number
 // of signatures and pubkeys involved and the number recipients.
 func PaymentMultisigRedeemTxSize(nPub, nRequired, nRecipients int64) uint64 {
 	redeemScriptSize := multisigScriptSize(nPub)
@@ -1132,7 +1132,7 @@ func PaymentMultisigRedeemTxSize(nPub, nRequired, nRecipients int64) uint64 {
 	return MsgTxOverhead + inputSize + uint64(nRecipients)*P2PKHOutputSize
 }
 
-// PaymentMultisigRefundSize returns the redeem tx size based on the number
+// PaymentMultisigRefundTxSize returns the redeem tx size based on the number
 // of signatures and pubkeys involved and the number recipients.
 func PaymentMultisigRefundTxSize(nPub int64) uint64 {
 	redeemScriptSize := multisigScriptSize(nPub)
