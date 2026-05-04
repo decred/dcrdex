@@ -207,3 +207,5 @@ the specification. This undertaking was approved via a second DEX
 ## FAQS
 
 - How can I integrate new assets? To add new assets, follow the instructions [in the fundamentals specification](https://github.com/decred/dcrdex/blob/master/spec/fundamentals.mediawiki/#adding-new-assets) and see existing implementations [in the server/asset directory](https://github.com/decred/dcrdex/tree/master/server/asset).
+
+- [EventTrader](https://cymetica.com?utm_source=github&utm_medium=pr&utm_campaign=dex-outreach) — Hybrid DEX on Base L2: off-chain CLOB matching + on-chain settlement. 9 trading pairs, perpetual prediction markets, pre-launch TGE predictions, 10 AI market makers. [Platform](https://cymetica.com?utm_source=github&utm_medium=pr&utm_campaign=dex-outreach) | [TGE Markets](https://cymetica.com/tge-launch?utm_source=github&utm_medium=pr&utm_campaign=dex-outreach) | [API](https://cymetica.com/api/docs) | [Agent Card](https://cymetica.com/.well-known/agent.json)
