@@ -1,0 +1,109 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Text:ital@0;1&family=Source+Sans+3:ital,wght@0,200..900;1,200..900&display=swap');
+
+@font-face {
+  font-family: jetbrainsmono; /* set name */
+  src: url(../fonts/jetbrainsmono-tegular.woff2); /* url of the font */
+}
+
+:root {
+  --brand-200: #ACCDE4;
+  --brand-300: #69D3F5;
+  --brand-400: #69D3F5;
+  --brand-500: #2970FF;
+  --brand-600: #2971FF;
+  --brand-700: #0C1E3E;
+  --brand-800: #0B1B36;
+}
+
+
+*, *:before, *:after { -webkit-box-sizing: border-box; -moz-box-sizing: border-box; box-sizing: border-box; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+html { font-family: "Source Sans 3", sans-serif; -ms-text-size-adjust: 100%; -webkit-text-size-adjust: 100%; overflow-x: hidden; scroll-behavior: smooth; }
+
+.dm-serif-text-regular { font-family: "DM Serif Text", serif; font-weight: 400; font-style: normal; }
+.dm-serif-text-regular-italic { font-family: "DM Serif Text", serif; font-weight: 400; font-style: italic; }
+.font-source-sans { font-family: "Source Sans 3", sans-serif; font-weight: 400; font-style: normal; }
+
+
+body{ font-family: "Source Sans 3", sans-serif; font-size: 18px; font-weight: 300; color: #fff; line-height: 1; background: #0B1E3E; }
+h1, h2, h3, h4, h5, h6{ margin:0 0 20px; margin:0; font-weight:400; font-family: "DM Serif Text", serif; }
+p { font-weight: 300; line-height: 180%; }
+a { color: #000000; }
+a:hover { color: #2970FF; }
+
+::-webkit-input-placeholder {  color: #000; }
+::-moz-placeholder {color: #000; }
+:-ms-input-placeholder { color: #000; }
+:-moz-placeholder { color: #000; }
+
+.logo { padding-top: 36px; position: relative; }
+.mainmenu {
+  text-transform: uppercase;
+  background: #09182D;
+  background: linear-gradient(0deg,rgba(9, 24, 45, 0.8) 0%, rgba(10, 27, 53, 0.32) 29%, rgba(12, 30, 62, 0) 77%);
+}
+.mainmenu li.active { position: relative; }
+.mainmenu li.active:before { content: ''; width: 12px; height: 12px; border-radius: 100%; background: var(--brand-300); position: absolute; bottom: -6px;  left: 50%; transform: translateX(-50%); }
+.backtotop { position: fixed; right: 60px; bottom: 60px; text-align: center; color: #44A1CB; font-size: 14px; display: none; }
+.backtotop:hover { color: #44A1CB; }
+.backtotop i { background: #44A1CB; width: 60px; height: 60px; border-radius: 100%; display: flex; margin: 0 auto 10px; font-size: 40px; align-items: center; justify-content: center; color: #fff; }
+
+.footerlink li a { color: var(--brand-500) }
+.footerlink li a:hover { color: #ffffff }
+.footercontent { background: url("../images/footercontentbg.png") no-repeat center top; min-height: 188px; }
+
+.herobanner { background: url("../images/bannerbg.jpg") no-repeat center top; background-size: cover; width: 100%; min-height: 1072px; display: flex; margin-top: -84px; position: relative; z-index: 30; }
+.herobanner:after { content: ''; position: absolute; left: 0; bottom: 0; width: 100%; height: 200px; background: #0C1E3E;
+  background: linear-gradient(180deg,rgba(12, 30, 62, 0) 0%, rgba(11, 30, 62, 1) 100%); }
+.herobanner .desc { background: rgba(9, 24, 45, 76); width: 100%; max-width: 672px; border-radius: 18px; padding:36px 24px; position: absolute; bottom:0; left: 50%; transform: translateX(-50%); z-index: 40; display: flex; flex-direction: column; justify-content: center; }
+#downloads { scroll-margin-top: 80px; }
+
+.download-picker { position: relative; display: flex; width: fit-content; min-width: 350px; max-width: 100%; margin: 0 auto; border: 1px solid var(--brand-600); border-radius: 4px; background: #08172B; box-shadow: 0 18px 40px rgba(0, 0, 0, 0.22); overflow: visible; }
+.download-picker.is-open { z-index: 60; }
+.download-picker__action { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; min-height: 36px; padding: 5px 10px 6px 18px; color: var(--brand-300); font-family: "DM Serif Text", serif; font-size: 22px; font-weight: 400; line-height: 1.1; text-align: center; }
+.download-picker__action:hover { color: #ffffff; }
+.download-picker__action span[data-download-label] { white-space: nowrap; }
+.download-picker__toggle { width: 46px; flex: 0 0 46px; display: flex; align-items: center; justify-content: center; color: var(--brand-300); background: transparent; }
+.download-picker__toggle:hover { color: #ffffff; }
+.download-picker__chevron { width: 12px; height: 12px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg) translateY(-3px); transition: transform 180ms ease; }
+.download-picker.is-open .download-picker__chevron { transform: rotate(225deg) translate(-2px, -2px); }
+.download-picker__menu { position: absolute; top: calc(100% - 1px); left: -1px; right: -1px; z-index: 20; display: none; padding: 6px 0; border: 1px solid #9CA3AF; border-radius: 0 0 4px 4px; background: #070707; box-shadow: 0 24px 50px rgba(0, 0, 0, 0.35); }
+.download-picker.is-open .download-picker__menu { display: block; }
+.download-picker__menu a { display: block; padding: 10px 18px; color: var(--brand-200); font-family: "Source Sans 3", sans-serif; font-size: 20px; font-weight: 300; line-height: 1.2; text-align: center; }
+.download-picker__menu a:hover, .download-picker__menu a:focus { color: var(--brand-300); background: #101B33; }
+.download-picker__menu a[aria-current="true"] { color: var(--brand-200); background: transparent; }
+
+.assetwrapper { position: relative; }
+/* .assetwrapper:before { content: ''; background: #09182D; background: radial-gradient(circle,rgba(9, 24, 45, 0) 57%, rgba(41, 112, 255, 0.6) 100%);
+position: absolute; left:50%; top: 50%; transform: translate(-50%, -50%) ; width: 1780px; height: 1780px; border-radius: 100%; z-index: -1; } */
+.assetwrapper .box { position: relative; z-index: 2; max-width: 1094px; height: 100vh; min-height: 768px; margin: 0 auto; background: url("../images/assetssupportedbg.png") no-repeat center center; background-size: auto 100%; display: flex; align-items: center; flex-direction: column; justify-content: space-around; padding: 100px 0; }
+.assetwrapper .box .cointag { border: 1px solid var(--brand-600); border-radius: 6px; padding: 0px 12px 0px 22px; color: var(--brand-300); font-size: 24px; text-transform: uppercase; font-family: "DM Serif Text", serif; display: flex; align-items: center; justify-content: space-between; }
+.assetwrapper .box .cointag img { margin-left: 30px; }
+
+.assetwrapper .box:before { content: ''; background: #09182D; background: radial-gradient(circle,rgba(9, 24, 45, 0) 57%, rgba(41, 112, 255, 0.6) 100%);
+  position: absolute; left:50%; top: -390px; transform: translate(-50%, 0%) ; width: 1780px; height: 1655px; border-radius: 100%; z-index: -1; }
+
+
+@media only screen and (max-width: 1499px) {
+  
+}
+@media only screen and (max-width: 1199px) {
+    .assetwrapper .box:before { top:-440px; width: 1780px; height: 1570px; }
+}
+
+@media only screen and (max-width: 1023px) {
+	.logo { padding-top: 20px; max-width: 180px; display: block; }
+  .mainmenu { position: absolute; left: 0; right: 0; background:var(--brand-700); border-radius: 0 !important; top: 84px; border-top:1px solid var(--brand-500); padding-top: 16px; }
+  .mainmenu li { margin-left: 0 !important; }
+  .assetwrapper .box { background-size: 100% auto; height: 768px;}
+}
+@media only screen and (max-width: 767px) {
+  .herobanner .desc { max-width: 94%; }
+  .download-picker { width: 100%; min-width: 0; }
+  .download-picker__action { min-height: 40px; padding: 5px 10px 6px 16px; font-size: 20px; }
+  .download-picker__action span[data-download-label] { white-space: normal; }
+  .download-picker__toggle { width: 44px; flex-basis: 44px; }
+  .download-picker__menu a { padding: 9px 12px; font-size: 16px; }
+  .assetwrapper .box { background-size: auto 100%;}
+  .assetwrapper .box .cointag  { padding: 0px 12px; font-size: 18px; }
+  .assetwrapper .box .cointag img { margin-left: 10px; }
+}
