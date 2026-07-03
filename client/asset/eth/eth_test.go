@@ -227,6 +227,9 @@ func (n *testNode) txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate, t
 	}
 	n.lastTxOptsMaxFeeRate = maxFeeRate
 	n.lastTxOptsTipRate = tipRate
+	// The fixed tip below is baked into many test fixtures (e.g. gasless
+	// redeem viability decisions). Assertions about the tip passed to txOpts
+	// should use lastTxOptsTipRate rather than the built TransactOpts.
 	txOpts := newTxOpts(ctx, n.addr, val, maxGas, maxFeeRate, dexeth.GweiToWei(2))
 	txOpts.Nonce = big.NewInt(1)
 	return txOpts, nil

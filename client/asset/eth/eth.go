@@ -3762,16 +3762,27 @@ func swapFeeRateRescue(assignedGwei uint64, baseRate *big.Int, gasLimit, feesRes
 	if baseFeeGwei <= assignedGwei {
 		return feeRateGwei, nil
 	}
+	if gasLimit == 0 {
+		return 0, errors.New("zero gas limit in fee rate rescue")
+	}
 	bal, err := feeWallet.Balance()
 	if err != nil {
 		return 0, fmt.Errorf("error getting balance for fee rate rescue: %w", err)
 	}
-	additionalFundsNeeded := (2 * baseFeeGwei * gasLimit) - feesReserved
-	if bal.Available > additionalFundsNeeded {
-		feeRateGwei = 2 * baseFeeGwei
-	} else {
-		feeRateGwei = (bal.Available + feesReserved) / gasLimit
+	// big.Int arithmetic: the base fee is reported by an RPC provider, so an
+	// absurd value must not overflow the rescue decision.
+	gasLimitBig := new(big.Int).SetUint64(gasLimit)
+	targetRate := new(big.Int).Lsh(new(big.Int).SetUint64(baseFeeGwei), 1) // 2 * baseFeeGwei
+	neededFunds := new(big.Int).Mul(targetRate, gasLimitBig)
+	budget := new(big.Int).Add(new(big.Int).SetUint64(bal.Available), new(big.Int).SetUint64(feesReserved))
+	rate := targetRate
+	if budget.Cmp(neededFunds) < 0 {
+		rate = budget.Div(budget, gasLimitBig)
 	}
+	if !rate.IsUint64() {
+		return 0, fmt.Errorf("unreasonable rescue fee rate %s gwei", rate)
+	}
+	feeRateGwei = rate.Uint64()
 	log.Warnf("network base fee %d gwei exceeds assigned swap fee rate %d gwei. using %d gwei as fee cap",
 		baseFeeGwei, assignedGwei, feeRateGwei)
 	return feeRateGwei, nil
