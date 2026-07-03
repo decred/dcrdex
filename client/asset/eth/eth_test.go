@@ -3010,6 +3010,10 @@ func testSwap(t *testing.T, assetID uint32) {
 		gases = &tokenGasesV0
 	}
 
+	// The swap fee rate (assetCfg.MaxFeeRate) is the tx's gas fee cap and
+	// must not be below the current base fee, or Swap refuses to broadcast.
+	node.baseFee = dexeth.GweiToWei(5)
+
 	receivingAddress := "0x2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27"
 	node.tContractor.initTx = types.NewTx(&types.DynamicFeeTx{})
 
@@ -3270,6 +3274,20 @@ func testSwap(t *testing.T, assetID uint32) {
 		LockChange:   false,
 	}
 	testSwap("v1", swaps, false)
+
+	// An assigned fee rate below the current base fee would produce a tx
+	// that cannot be mined. Swap must refuse to broadcast it.
+	node.baseFee = dexeth.GweiToWei(assetCfg.MaxFeeRate + 1)
+	inputs = refreshWalletAndFundCoins(5, []uint64{ethToGwei(2) + (2 * 200 * dexeth.InitGas(1, 1))}, 2)
+	swaps = asset.Swaps{
+		Inputs:       inputs,
+		AssetVersion: assetCfg.Version,
+		Contracts:    contracts,
+		FeeRate:      assetCfg.MaxFeeRate,
+		LockChange:   false,
+	}
+	testSwap("assigned fee rate below base fee", swaps, true)
+	node.baseFee = dexeth.GweiToWei(5)
 }
 
 func TestPreRedeem(t *testing.T) {

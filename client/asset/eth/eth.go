@@ -3727,6 +3727,23 @@ func (*swapReceipt) SignedRefund() dex.Bytes {
 
 var _ asset.Receipt = (*swapReceipt)(nil)
 
+// checkSwapFeeRateMinable errors if the server-assigned swap fee rate, which
+// becomes the transaction's gas fee cap, is below the network's current base
+// fee. Such a transaction cannot be mined until the base fee recedes, and
+// broadcasting it would occupy the nonce and block every subsequent
+// transaction from this wallet until it is mined or replaced. Erroring before
+// the nonce is consumed leaves the wallet unencumbered, and core will retry
+// the swap, which will proceed if the base fee recedes within the broadcast
+// timeout.
+func checkSwapFeeRateMinable(assignedGwei uint64, baseRate *big.Int) error {
+	if dexeth.GweiToWei(assignedGwei).Cmp(baseRate) < 0 {
+		return fmt.Errorf("assigned fee rate cap %d gwei is below the current network base fee %d gwei; "+
+			"refusing to broadcast a swap transaction that cannot be mined",
+			assignedGwei, dexeth.WeiToGweiCeil(baseRate))
+	}
+	return nil
+}
+
 // Swap sends the swaps in a single transaction. The fees used returned are the
 // max fees that will possibly be used, since in ethereum with EIP-1559 we cannot
 // know exactly how much fees will be used.
@@ -3782,9 +3799,9 @@ func (w *ETHWallet) Swap(ctx context.Context, swaps *asset.Swaps) ([]asset.Recei
 	}
 
 	maxFeeRate := dexeth.GweiToWei(swaps.FeeRate)
-	_, tipRate, err := w.currentNetworkFees(ctx)
+	baseRate, tipRate, err := w.currentNetworkFees(ctx)
 	if err != nil {
-		return fail("Swap: failed to get network tip cap: %w", err)
+		return fail("Swap: failed to get network fees: %w", err)
 	}
 
 	// Only check on-chain state on retry (cache hit) to avoid unnecessary
@@ -3830,6 +3847,9 @@ func (w *ETHWallet) Swap(ctx context.Context, swaps *asset.Swaps) ([]asset.Recei
 			// fees is an estimate (gasLimit * feeRate), not actual tx fees.
 			return receipts, change, fees, nil
 		}
+	}
+	if err := checkSwapFeeRateMinable(swaps.FeeRate, baseRate); err != nil {
+		return fail("Swap: %v", err)
 	}
 	tx, err := w.initiate(ctx, w.assetID, swaps.Contracts, gasLimit, maxFeeRate, tipRate, contractVer)
 	if err != nil {
@@ -3938,9 +3958,9 @@ func (w *TokenWallet) Swap(ctx context.Context, swaps *asset.Swaps) ([]asset.Rec
 	}
 
 	maxFeeRate := dexeth.GweiToWei(swaps.FeeRate)
-	_, tipRate, err := w.currentNetworkFees(ctx)
+	baseRate, tipRate, err := w.currentNetworkFees(ctx)
 	if err != nil {
-		return fail("Swap: failed to get network tip cap: %w", err)
+		return fail("Swap: failed to get network fees: %w", err)
 	}
 
 	if w.netToken.SwapContracts[swaps.AssetVersion] == nil {
@@ -3994,6 +4014,9 @@ func (w *TokenWallet) Swap(ctx context.Context, swaps *asset.Swaps) ([]asset.Rec
 			// fees is an estimate (gasLimit * feeRate), not actual tx fees.
 			return receipts, change, fees, nil
 		}
+	}
+	if err := checkSwapFeeRateMinable(swaps.FeeRate, baseRate); err != nil {
+		return fail("Swap: %v", err)
 	}
 	tx, err := w.initiate(ctx, w.assetID, swaps.Contracts, gasLimit, maxFeeRate, tipRate, contractVer)
 	if err != nil {
