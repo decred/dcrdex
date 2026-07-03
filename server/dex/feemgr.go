@@ -52,6 +52,13 @@ type feeFetcher struct {
 		rate  uint64
 		stamp time.Time
 	}
+
+	// erosionWarning rate-limits the operator warning that is logged when
+	// the live fee estimate approaches the configured maxFeeRate.
+	erosionWarning struct {
+		sync.Mutex
+		stamp time.Time
+	}
 }
 
 var _ market.FeeFetcher = (*feeFetcher)(nil)
@@ -76,6 +83,27 @@ func newFeeFetcher(asset *asset.BackedAsset) *feeFetcher {
 // Use the lower rate for a minute after a rate increase to avoid races.
 const stashedRateExpiry = time.Minute
 
+// erosionWarningInterval limits how often the maxFeeRate erosion warning is
+// logged per asset.
+const erosionWarningInterval = 10 * time.Minute
+
+// warnErosion logs an operator warning, at most once per
+// erosionWarningInterval, that the live fee estimate is approaching the
+// configured maxFeeRate. Once the estimate exceeds maxFeeRate, assigned swap
+// fee rates are capped there, and swap transactions may not mine promptly.
+func (f *feeFetcher) warnErosion(rate uint64) {
+	f.erosionWarning.Lock()
+	defer f.erosionWarning.Unlock()
+	if time.Since(f.erosionWarning.stamp) < erosionWarningInterval {
+		return
+	}
+	f.erosionWarning.stamp = time.Now()
+	log.Warnf("Live %s fee rate estimate (%d) is above half of the configured maxFeeRate (%d). "+
+		"If the estimate exceeds maxFeeRate, assigned swap fee rates will be capped there and swap "+
+		"transactions may not mine promptly. Consider raising the %s maxFeeRate.",
+		f.Symbol, rate, f.Asset.MaxFeeRate, f.Symbol)
+}
+
 // FeeRate fetches a new fee rate and updates the cache.
 func (f *feeFetcher) FeeRate(ctx context.Context) uint64 {
 	r, err := f.Backend.FeeRate(ctx)
@@ -85,6 +113,9 @@ func (f *feeFetcher) FeeRate(ctx context.Context) uint64 {
 	}
 	if r <= 0 {
 		return 0
+	}
+	if r > f.Asset.MaxFeeRate/2 {
+		f.warnErosion(r)
 	}
 	if r > f.Asset.MaxFeeRate {
 		r = f.Asset.MaxFeeRate
@@ -124,12 +155,22 @@ func (f *feeFetcher) MaxFeeRate() uint64 {
 	return f.Asset.MaxFeeRate
 }
 
-// SwapFeeRate returns the tx fee that needs to be used to initiate a swap.
-// This fee will be the max fee rate if the asset supports dynamic tx fees,
-// and otherwise it will be the current market fee rate.
+// SwapFeeRate returns the tx fee rate assigned to a match's swap transactions:
+// the current market fee rate, capped at the configured maxFeeRate. The
+// configured maxFeeRate is a reserve bound, not the assigned value.
+//
+// Historically, assets that support dynamic tx fees (EIP-1559) were assigned
+// maxFeeRate itself, since an overshooting fee cap is refunded on-chain and a
+// maximal cap made the assigned rate immune to fee movement between match
+// time and broadcast time. But the maximal cap has off-chain costs that grow
+// with the configured value: clients reserve funds per lot at this rate, gate
+// order placement on it, and lock it into resting orders, so operators are
+// pressured to configure it low, and a network fee spike above the configured
+// value renders every swap transaction unminable. Assigning a live rate frees
+// maxFeeRate to be set high as pure insurance. Fee movement after match time
+// is instead handled client-side: the wallet may raise its fee cap above the
+// assigned rate, up to its order reserves, when the base fee demands
+// (ValidateFeeRate only enforces the assigned rate as a floor).
 func (f *feeFetcher) SwapFeeRate(ctx context.Context) uint64 {
-	if f.Backend.Info().SupportsDynamicTxFee {
-		return f.MaxFeeRate()
-	}
 	return f.FeeRate(ctx)
 }
