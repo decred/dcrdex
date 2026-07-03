@@ -159,6 +159,8 @@ func (be *AssetBackend) newRedeemCoin(coinID []byte, contractData []byte) (*rede
 			backend:     be,
 			locator:     locator,
 			contractVer: contractVer,
+			gasFeeCap:   new(big.Int),
+			gasTipCap:   new(big.Int),
 		}
 		return &redeemCoin{
 			baseCoin: bc,

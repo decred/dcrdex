@@ -15,6 +15,7 @@ import (
 
 	"decred.org/dcrdex/dex/encode"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
+	"decred.org/dcrdex/server/asset"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -39,13 +40,15 @@ func TestNewRedeemCoin(t *testing.T) {
 	const wantGas = 30
 	const wantGasTipCap = 2
 	tests := []struct {
-		name          string
-		ver           uint32
-		locator       []byte
-		tx            *types.Transaction
-		swpErr, txErr error
-		swap          *dexeth.SwapState
-		wantErr       bool
+		name             string
+		ver              uint32
+		backendVer       *uint32 // if nil, defaults to ver (backend and contract data agree)
+		locator          []byte
+		tx               *types.Transaction
+		swpErr, txErr    error
+		swap             *dexeth.SwapState
+		wantErr          bool
+		wantCoinNotFound bool
 	}{
 		{
 			name:    "ok redeem v0",
@@ -79,17 +82,50 @@ func TestNewRedeemCoin(t *testing.T) {
 			swap:    tSwap(97, initLocktime, 1000, secret, dexeth.SSRedeemed, &participantAddr),
 			locator: secretHash[:],
 		}, {
-			name:    "tx not found, not redeemed",
+			// Regression test: this is the exact scenario of the bug where
+			// TokenBackend() left contractVer at its zero value. With the
+			// backend correctly reporting v1 (matching the contract data),
+			// the fallback must resolve via on-chain swap status.
+			name:    "tx not found, redeemed, v1 backend matches contract version",
+			ver:     1,
 			txErr:   ethereum.NotFound,
-			swap:    tSwap(97, initLocktime, 1000, secret, dexeth.SSInitiated, &participantAddr),
-			locator: secretHash[:],
-			wantErr: true,
+			swap:    tSwap(97, initLocktime, 1000, secret, dexeth.SSRedeemed, &participantAddr),
+			locator: locator,
+		}, {
+			name:             "tx not found, not redeemed",
+			txErr:            ethereum.NotFound,
+			swap:             tSwap(97, initLocktime, 1000, secret, dexeth.SSInitiated, &participantAddr),
+			locator:          secretHash[:],
+			wantErr:          true,
+			wantCoinNotFound: true,
 		}, {
 			name:    "tx not found, swap err",
 			txErr:   ethereum.NotFound,
 			swpErr:  errors.New("swap not found"),
 			locator: secretHash[:],
 			wantErr: true,
+			// The raw statusAndVector error propagates as-is; it must not
+			// be conflated with the CoinNotFoundError retry sentinel.
+			wantCoinNotFound: false,
+		}, {
+			// Backend behind the contract data's version (e.g. a v0-only
+			// backend seeing a v1 redeem). This must be a hard,
+			// non-retryable error, not CoinNotFoundError.
+			name:       "tx not found, backend behind contract version",
+			ver:        1,
+			backendVer: uint32Ptr(0),
+			txErr:      ethereum.NotFound,
+			swap:       tSwap(97, initLocktime, 1000, secret, dexeth.SSRedeemed, &participantAddr),
+			locator:    locator,
+			wantErr:    true,
+		}, {
+			// The reverse: backend ahead of an older contract data version.
+			name:       "tx not found, backend ahead of contract version",
+			backendVer: uint32Ptr(1),
+			txErr:      ethereum.NotFound,
+			swap:       tSwap(97, initLocktime, 1000, secret, dexeth.SSRedeemed, &participantAddr),
+			locator:    secretHash[:],
+			wantErr:    true,
 		},
 	}
 	for _, test := range tests {
@@ -102,6 +138,10 @@ func TestNewRedeemCoin(t *testing.T) {
 				string(test.locator):  test.swap,
 			},
 		}
+		backendVer := test.ver
+		if test.backendVer != nil {
+			backendVer = *test.backendVer
+		}
 		eth := &AssetBackend{
 			baseBackend: &baseBackend{
 				node:       node,
@@ -111,11 +151,16 @@ func TestNewRedeemCoin(t *testing.T) {
 			assetID:      BipID,
 			log:          tLogger,
 			atomize:      dexeth.WeiToGwei,
+			contractVer:  backendVer,
 		}
 		rc, err := eth.newRedeemCoin(txHash[:], dexeth.EncodeContractData(test.ver, test.locator))
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)
+			}
+			if got := errors.Is(err, asset.CoinNotFoundError); got != test.wantCoinNotFound {
+				t.Fatalf("test %q: errors.Is(err, CoinNotFoundError) = %v, want %v (err: %v)",
+					test.name, got, test.wantCoinNotFound, err)
 			}
 			continue
 		}
@@ -129,6 +174,114 @@ func TestNewRedeemCoin(t *testing.T) {
 			dexeth.WeiToGwei(rc.gasFeeCap) != wantGas ||
 			dexeth.WeiToGwei(rc.gasTipCap) != wantGasTipCap) {
 			t.Fatalf("returns do not match expected for test %q / %v", test.name, rc)
+		}
+
+		if test.txErr != nil {
+			// Coins built via the tx-not-found fallback previously had a
+			// nil gasFeeCap/gasTipCap, which would panic in FeeRate.
+			if fr := rc.FeeRate(); fr != 0 {
+				t.Fatalf("test %q: expected zero fee rate for fallback-constructed coin, got %d", test.name, fr)
+			}
+		}
+	}
+}
+
+// TestNewRedeemCoinRelay covers redeem coins built from relay coin IDs
+// (gasless redemptions). Unlike the tx-lookup path, relay coins are verified
+// entirely via on-chain swap status in relayBaseCoin, which independently
+// enforces the same be.contractVer check that newRedeemCoin's tx-not-found
+// fallback does. Before the fix to TokenBackend(), that check always failed
+// for token backends (contractVer stuck at 0), so every gasless token
+// redemption was rejected server-side with a non-retryable error.
+func TestNewRedeemCoinRelay(t *testing.T) {
+	contractAddr := randomAddress()
+	secret, locator := secretB, locatorB
+
+	tests := []struct {
+		name             string
+		ver              uint32
+		backendVer       *uint32 // if nil, defaults to ver (backend and contract data agree)
+		locator          []byte
+		swap             *dexeth.SwapState
+		wantErr          bool
+		wantCoinNotFound bool
+	}{
+		{
+			name:    "relay v1, redeemed",
+			ver:     1,
+			locator: locator,
+			swap:    tSwap(97, initLocktime, 1000, secret, dexeth.SSRedeemed, &participantAddr),
+		}, {
+			name:             "relay v1, still pending",
+			ver:              1,
+			locator:          locator,
+			swap:             tSwap(97, initLocktime, 1000, secret, dexeth.SSInitiated, &participantAddr),
+			wantErr:          true,
+			wantCoinNotFound: true,
+		}, {
+			name:    "relay v0 unsupported",
+			locator: secretHashB[:],
+			swap:    tSwap(97, initLocktime, 1000, secret, dexeth.SSRedeemed, &participantAddr),
+			wantErr: true,
+		}, {
+			// The pre-fix bug scenario: the backend's contractVer (0, as it
+			// was left before TokenBackend() set it) disagrees with the
+			// contract data's version (1). Relay coins never go through the
+			// tx-not-found fallback, so this must surface as a hard,
+			// non-retryable error straight out of relayBaseCoin.
+			name:       "relay version mismatch (pre-fix bug scenario)",
+			ver:        1,
+			backendVer: uint32Ptr(0),
+			locator:    locator,
+			swap:       tSwap(97, initLocktime, 1000, secret, dexeth.SSRedeemed, &participantAddr),
+			wantErr:    true,
+		},
+	}
+
+	for _, test := range tests {
+		node := &testNode{
+			swp: map[string]*dexeth.SwapState{
+				string(test.locator): test.swap,
+			},
+		}
+		backendVer := test.ver
+		if test.backendVer != nil {
+			backendVer = *test.backendVer
+		}
+		eth := &AssetBackend{
+			baseBackend: &baseBackend{
+				node:       node,
+				baseLogger: tLogger,
+			},
+			contractAddr: *contractAddr,
+			assetID:      BipID,
+			log:          tLogger,
+			atomize:      dexeth.WeiToGwei,
+			contractVer:  backendVer,
+		}
+
+		relayCoinID := encode.RandomBytes(int(dexeth.RelayCoinIDLength))
+		rc, err := eth.newRedeemCoin(relayCoinID, dexeth.EncodeContractData(test.ver, test.locator))
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for test %q", test.name)
+			}
+			if got := errors.Is(err, asset.CoinNotFoundError); got != test.wantCoinNotFound {
+				t.Fatalf("test %q: errors.Is(err, CoinNotFoundError) = %v, want %v (err: %v)",
+					test.name, got, test.wantCoinNotFound, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("unexpected error for test %q: %v", test.name, err)
+		}
+		if rc.secret != secret {
+			t.Fatalf("test %q: secret mismatch, got %x", test.name, rc.secret)
+		}
+		// relayBaseCoin sets zeroed gas fields; confirm FeeRate is safe and
+		// reports zero rather than panicking on a nil big.Int.
+		if fr := rc.FeeRate(); fr != 0 {
+			t.Fatalf("test %q: expected zero fee rate for relay coin, got %d", test.name, fr)
 		}
 	}
 }
