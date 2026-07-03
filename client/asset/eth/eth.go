@@ -3842,7 +3842,6 @@ func (w *ETHWallet) Swap(ctx context.Context, swaps *asset.Swaps) ([]asset.Recei
 		}
 	}
 
-	maxFeeRate := dexeth.GweiToWei(swaps.FeeRate)
 	baseRate, tipRate, err := w.currentNetworkFees(ctx)
 	if err != nil {
 		return fail("Swap: failed to get network fees: %w", err)
@@ -3899,7 +3898,7 @@ func (w *ETHWallet) Swap(ctx context.Context, swaps *asset.Swaps) ([]asset.Recei
 	if err := checkSwapFeeRateMinable(feeRateGwei, baseRate); err != nil {
 		return fail("Swap: %v", err)
 	}
-	maxFeeRate = dexeth.GweiToWei(feeRateGwei)
+	maxFeeRate := dexeth.GweiToWei(feeRateGwei)
 	tx, err := w.initiate(ctx, w.assetID, swaps.Contracts, gasLimit, maxFeeRate, tipRate, contractVer)
 	if err != nil {
 		return fail("Swap: initiate error: %w", err)
@@ -4006,7 +4005,6 @@ func (w *TokenWallet) Swap(ctx context.Context, swaps *asset.Swaps) ([]asset.Rec
 		} // See (*ETHWallet).Swap comments for a third option.
 	}
 
-	maxFeeRate := dexeth.GweiToWei(swaps.FeeRate)
 	baseRate, tipRate, err := w.currentNetworkFees(ctx)
 	if err != nil {
 		return fail("Swap: failed to get network fees: %w", err)
@@ -4071,7 +4069,7 @@ func (w *TokenWallet) Swap(ctx context.Context, swaps *asset.Swaps) ([]asset.Rec
 	if err := checkSwapFeeRateMinable(feeRateGwei, baseRate); err != nil {
 		return fail("Swap: %v", err)
 	}
-	maxFeeRate = dexeth.GweiToWei(feeRateGwei)
+	maxFeeRate := dexeth.GweiToWei(feeRateGwei)
 	tx, err := w.initiate(ctx, w.assetID, swaps.Contracts, gasLimit, maxFeeRate, tipRate, contractVer)
 	if err != nil {
 		return fail("Swap: initiate error: %w", err)
