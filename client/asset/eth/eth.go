@@ -8543,6 +8543,26 @@ func (w *assetWallet) amendPendingTx(txID string, f func(common.Hash, *types.Tra
 	return nil
 }
 
+// rbfPriceBumpPct is the minimum percentage by which both the fee cap and
+// the tip cap of a replacement transaction must exceed those of the
+// transaction it replaces. geth-family mempools require the replacement to be
+// strictly greater than the old values AND at least PriceBump percent above
+// them, on both components independently (go-ethereum
+// core/txpool/legacypool/list.go). PriceBump defaults to 10 in geth and its
+// forks, e.g. polygon's bor.
+const rbfPriceBumpPct = 10
+
+// rbfReplacementFloor is the minimum acceptable value for a fee component
+// (fee cap or tip cap) of a transaction replacing one whose corresponding
+// component had value old.
+func rbfReplacementFloor(old *big.Int) *big.Int {
+	floor := new(big.Int).Mul(old, big.NewInt(100+rbfPriceBumpPct))
+	floor.Div(floor, big.NewInt(100))
+	// The strictly-greater-than requirement applies to the raw old values,
+	// and the threshold division truncates, so add 1 to cover both.
+	return floor.Add(floor, big.NewInt(1))
+}
+
 // userActionBumpFees is a request by a user to resolve a actionTypeTooCheap
 // condition.
 func (w *assetWallet) userActionBumpFees(actionB []byte) error {
@@ -8566,6 +8586,21 @@ func (w *assetWallet) userActionBumpFees(actionB []byte) error {
 		maxFeeRate, tipCap, err := w.recommendedMaxFeeRate(w.ctx)
 		if err != nil {
 			return fmt.Errorf("error getting new fee rate: %w", err)
+		}
+		// The recommended rate is derived from current network conditions
+		// alone. If it doesn't sufficiently exceed the fees of the tx being
+		// replaced, e.g. when a cached tip suggestion returns the same tip
+		// that the original tx was created with, the mempool will reject the
+		// replacement as underpriced. Raise both components to at least
+		// their replace-by-fee floors.
+		if floor := rbfReplacementFloor(tx.GasFeeCap()); maxFeeRate.Cmp(floor) < 0 {
+			maxFeeRate = floor
+		}
+		if floor := rbfReplacementFloor(tx.GasTipCap()); tipCap.Cmp(floor) < 0 {
+			tipCap = floor
+		}
+		if tipCap.Cmp(maxFeeRate) > 0 {
+			maxFeeRate = tipCap
 		}
 		txOpts, err := w.node.txOpts(w.ctx, 0 /* set below */, tx.Gas(), maxFeeRate, tipCap, nonce)
 		if err != nil {

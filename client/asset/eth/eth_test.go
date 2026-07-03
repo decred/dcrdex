@@ -151,6 +151,8 @@ type testNode struct {
 	estimateGasErr         error
 	simBackend             bind.ContractBackend
 	maxFeeRate             *big.Int
+	lastTxOptsMaxFeeRate   *big.Int
+	lastTxOptsTipRate      *big.Int
 	tContractor            *tContractor
 	tokenContractor        *tTokenContractor
 	signedRedeemContractor *tSignedRedeemContractor
@@ -223,6 +225,8 @@ func (n *testNode) txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate, t
 	if maxFeeRate == nil {
 		maxFeeRate = n.maxFeeRate
 	}
+	n.lastTxOptsMaxFeeRate = maxFeeRate
+	n.lastTxOptsTipRate = tipRate
 	txOpts := newTxOpts(ctx, n.addr, val, maxGas, maxFeeRate, dexeth.GweiToWei(2))
 	txOpts.Nonce = big.NewInt(1)
 	return txOpts, nil
@@ -1327,6 +1331,39 @@ func TestCheckPendingTxs(t *testing.T) {
 	}
 }
 
+func TestRBFReplacementFloor(t *testing.T) {
+	gwei := func(v int64) *big.Int { return dexeth.GweiToWei(uint64(v)) }
+	for _, tt := range []struct {
+		name      string
+		old, want *big.Int
+	}{
+		// A zero old value still requires a strictly greater replacement.
+		{"zero", big.NewInt(0), big.NewInt(1)},
+		// Truncating division must not undercut the percentage threshold.
+		{"small odd", big.NewInt(99), big.NewInt(109)},   // 99*1.1 = 108.9
+		{"small even", big.NewInt(100), big.NewInt(111)}, // 110 fails strictly-greater margin
+		{"one gwei", gwei(1), new(big.Int).Add(big.NewInt(1_100_000_000), big.NewInt(1))},
+		{"200 gwei", gwei(200), new(big.Int).Add(big.NewInt(220_000_000_000), big.NewInt(1))},
+	} {
+		if got := rbfReplacementFloor(tt.old); got.Cmp(tt.want) != 0 {
+			t.Fatalf("%s: rbfReplacementFloor(%s) = %s, want %s", tt.name, tt.old, got, tt.want)
+		}
+	}
+	// Every floor must satisfy geth's acceptance rule: strictly greater than
+	// old AND >= old*(100+priceBump)/100.
+	for _, old := range []*big.Int{big.NewInt(0), big.NewInt(1), big.NewInt(7), gwei(2), gwei(30), gwei(1000)} {
+		floor := rbfReplacementFloor(old)
+		if floor.Cmp(old) <= 0 {
+			t.Fatalf("floor %s not strictly greater than old %s", floor, old)
+		}
+		threshold := new(big.Int).Mul(old, big.NewInt(100+rbfPriceBumpPct))
+		threshold.Div(threshold, big.NewInt(100))
+		if floor.Cmp(threshold) < 0 {
+			t.Fatalf("floor %s below percentage threshold %s for old %s", floor, threshold, old)
+		}
+	}
+}
+
 func TestTakeAction(t *testing.T) {
 	_, eth, node, shutdown := tassetWallet(BipID)
 	defer shutdown()
@@ -1368,6 +1405,40 @@ func TestTakeAction(t *testing.T) {
 	}
 	if !newPendingTx.savedToDB {
 		t.Fatal("didn't save to DB")
+	}
+
+	// A bump of a tx whose fees are at or above the network-based
+	// recommendation must still clear the mempool's replace-by-fee floors,
+	// on both the fee cap and the tip cap independently. With node.baseFee
+	// = 100 gwei and node.tip = 2 gwei, the recommendation is 202 gwei /
+	// 2 gwei, so both floors bind here.
+	oldFeeCap := dexeth.GweiToWei(500)
+	oldTip := dexeth.GweiToWei(2) // same as the (possibly cached) tip suggestion
+	highFeeRecipient := common.BytesToAddress(encode.RandomBytes(20))
+	highFeeTx, _ := types.SignTx(types.NewTx(&types.DynamicFeeTx{
+		Nonce:     2,
+		GasTipCap: oldTip,
+		GasFeeCap: oldFeeCap,
+		Gas:       50_000,
+		To:        &highFeeRecipient,
+		ChainID:   node.chainConfig().ChainID,
+	}), signer, node.privKey)
+	pendingTx = eth.extendedTx(&genTxResult{
+		tx:     highFeeTx,
+		txType: asset.Send,
+		amt:    1,
+	})
+	eth.pendingTxs = []*extendedWalletTx{pendingTx}
+
+	tooCheapAction = []byte(fmt.Sprintf(`{"txID":"%s","bump":true}`, pendingTx.ID))
+	if err := eth.TakeAction(actionTypeTooCheap, tooCheapAction); err != nil {
+		t.Fatalf("TakeAction high-fee bump error: %v", err)
+	}
+	if wantFeeCap := rbfReplacementFloor(oldFeeCap); node.lastTxOptsMaxFeeRate.Cmp(wantFeeCap) != 0 {
+		t.Fatalf("replacement fee cap not raised to RBF floor. wanted %s, got %s", wantFeeCap, node.lastTxOptsMaxFeeRate)
+	}
+	if wantTip := rbfReplacementFloor(oldTip); node.lastTxOptsTipRate.Cmp(wantTip) != 0 {
+		t.Fatalf("replacement tip cap not raised to RBF floor. wanted %s, got %s", wantTip, node.lastTxOptsTipRate)
 	}
 
 	pendingTx = eth.extendedTx(&genTxResult{
