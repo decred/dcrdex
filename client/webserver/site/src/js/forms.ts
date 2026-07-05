@@ -1,5 +1,6 @@
 import Doc, { Animation } from './doc'
 import { postJSON } from './http'
+import ws from './ws'
 import State from './state'
 import * as intl from './locales'
 import { Wave } from './charts'
@@ -1787,7 +1788,23 @@ export class LoginForm {
       return
     }
     const loaded = app().loading(this.form)
+    // The login request can run long while the backend connects wallets and
+    // DEX servers. Status updates arrive as login notes over the websocket,
+    // so if the websocket drops while the request is pending, flag the
+    // displayed status as possibly stale until the connection returns.
+    const staleHint = ' (connection to app lost, reconnecting...)'
+    const loaderMsg = () => Doc.idel(this.form, 'loaderMsg')
+    ws.registerRoute('close', () => {
+      const msg = loaderMsg()
+      if (msg && !msg.textContent?.includes(staleHint)) msg.textContent += staleHint
+    })
+    ws.registerRoute('open', () => {
+      const msg = loaderMsg()
+      if (msg?.textContent) msg.textContent = msg.textContent.replace(staleHint, '')
+    })
     const res = await postJSON('/api/login', { pass: pw })
+    ws.deregisterRoute('close')
+    ws.deregisterRoute('open')
     loaded()
     page.pw.value = ''
     if (!app().checkResponse(res)) {
