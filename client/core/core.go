@@ -4947,13 +4947,104 @@ func (c *Core) upgradeV0CredsToV1(appPW []byte, creds db.PrimaryCredentials) (en
 	return newInnerCrypter, &creds, nil
 }
 
+// loginProgressReportInterval is how often a login phase reports the items
+// it is still waiting on via LoginNote.
+const loginProgressReportInterval = 5 * time.Second
+
+// loginProgress emits LoginNotes as the items of a login phase complete, and
+// periodically names the stragglers, so that the UI can show what a slow
+// login is waiting on. Mark items with start/finish. stop when the phase is
+// over.
+type loginProgress struct {
+	c     *Core
+	phase string
+	total int
+	done  uint32
+	quit  chan struct{}
+
+	mtx     sync.Mutex
+	pending map[string]struct{}
+}
+
+// trackLoginProgress creates a loginProgress for a login phase with total
+// expected items and starts the straggler reporter.
+func (c *Core) trackLoginProgress(phase string, total int) *loginProgress {
+	p := &loginProgress{
+		c:       c,
+		phase:   phase,
+		total:   total,
+		quit:    make(chan struct{}),
+		pending: make(map[string]struct{}, total),
+	}
+	go func() {
+		ticker := time.NewTicker(loginProgressReportInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if waitingOn := p.waitingOn(); waitingOn != "" {
+					c.notify(newLoginNote(fmt.Sprintf("%s waiting on %s", p.phase, waitingOn)))
+				}
+			case <-p.quit:
+				return
+			case <-c.ctx.Done():
+				return
+			}
+		}
+	}()
+	return p
+}
+
+// start marks an item as pending.
+func (p *loginProgress) start(name string) {
+	p.mtx.Lock()
+	p.pending[name] = struct{}{}
+	p.mtx.Unlock()
+}
+
+// finish marks an item as done and emits an updated progress note.
+func (p *loginProgress) finish(name string) {
+	p.mtx.Lock()
+	delete(p.pending, name)
+	p.mtx.Unlock()
+	n := atomic.AddUint32(&p.done, 1)
+	p.c.notify(newLoginNote(fmt.Sprintf("%s (%d/%d)", p.phase, n, p.total)))
+}
+
+// stop ends the straggler reporting.
+func (p *loginProgress) stop() {
+	close(p.quit)
+}
+
+// waitingOn returns a comma-separated list of the pending items.
+func (p *loginProgress) waitingOn() string {
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
+	if len(p.pending) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(p.pending))
+	for name := range p.pending {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
+}
+
 // connectWallets attempts to connect to and retrieve balance from all known
 // wallets. This should be done only ONCE on Login.
 func (c *Core) connectWallets(crypter encrypt.Crypter) {
 	var wg sync.WaitGroup
 	var connectCount uint32
+	wallets := c.xcWallets()
+	walletCount := len(wallets)
+	progress := c.trackLoginProgress("Connecting wallets...", walletCount)
+	defer progress.stop()
 	connectWallet := func(wallet *xcWallet) {
 		defer wg.Done()
+		symbol := strings.ToUpper(wallet.Symbol)
+		progress.start(symbol)
+		defer progress.finish(symbol)
 		// Return early if wallet is disabled.
 		if wallet.isDisabled() {
 			return
@@ -5019,8 +5110,6 @@ func (c *Core) connectWallets(crypter encrypt.Crypter) {
 		}
 		atomic.AddUint32(&connectCount, 1)
 	}
-	wallets := c.xcWallets()
-	walletCount := len(wallets)
 	var tokenWallets []*xcWallet
 
 	for _, wallet := range wallets {
@@ -5457,10 +5546,14 @@ func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, erro
 func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) {
 	var wg sync.WaitGroup
 	conns := c.dexConnections()
+	progress := c.trackLoginProgress("Connecting to DEX servers...", len(conns))
+	defer progress.stop()
 	for _, dc := range conns {
 		wg.Add(1)
 		go func(dc *dexConnection) {
 			defer wg.Done()
+			progress.start(dc.acct.host)
+			defer progress.finish(dc.acct.host)
 			c.initializeDEXConnection(dc, crypter)
 		}(dc)
 	}

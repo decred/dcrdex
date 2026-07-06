@@ -1570,6 +1570,12 @@ func (s *WebServer) apiPreOrder(w http.ResponseWriter, r *http.Request) {
 // apiActuallyLogin logs the user in. login form private data is expected to be
 // cleared by the caller.
 func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login *loginForm) error {
+	// The first login after startup connects wallets and DEX servers, which
+	// can legitimately outlast the server's WriteTimeout. The response
+	// carries the auth cookie, so it must not be cut off by the deadline.
+	if err := http.NewResponseController(w).SetWriteDeadline(time.Time{}); err != nil {
+		log.Warnf("Unable to clear the login response write deadline: %v", err)
+	}
 	// Only allow login from the onion address when a companion app is
 	// actively paired. This prevents an unpaired companion app from
 	// re-authenticating with saved credentials.
