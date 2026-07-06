@@ -3727,6 +3727,67 @@ func (*swapReceipt) SignedRefund() dex.Bytes {
 
 var _ asset.Receipt = (*swapReceipt)(nil)
 
+// checkSwapFeeRateMinable errors if the swap fee rate, which becomes the
+// transaction's gas fee cap, is below the network's current base fee. Such a
+// transaction cannot be mined until the base fee recedes, and broadcasting it
+// would occupy the nonce and block every subsequent transaction from this
+// wallet until it is mined or replaced. Erroring before the nonce is consumed
+// leaves the wallet unencumbered, and core will retry the swap, which will
+// proceed if the base fee recedes within the broadcast timeout. This is a
+// last resort: swapFeeRateRescue will already have attempted to raise the
+// rate, so this only trips when funds are insufficient to cover a minable
+// fee cap.
+func checkSwapFeeRateMinable(feeRateGwei uint64, baseRate *big.Int) error {
+	if dexeth.GweiToWei(feeRateGwei).Cmp(baseRate) < 0 {
+		return fmt.Errorf("swap fee rate cap %d gwei is below the current network base fee %d gwei; "+
+			"refusing to broadcast a swap transaction that cannot be mined",
+			feeRateGwei, dexeth.WeiToGweiCeil(baseRate))
+	}
+	return nil
+}
+
+// swapFeeRateRescue raises the swap tx's fee rate when the network base fee
+// exceeds the server-assigned rate, which would otherwise produce a tx that
+// cannot be mined. The target is 2*baseFee, funds permitting, mirroring the
+// equivalent rescue in Redeem. Under EIP-1559 the fee cap is not the fee
+// paid, and the server's ValidateFeeRate only requires the cap to be at
+// least the assigned rate, so a higher cap is protocol-legal. feesReserved
+// is the fee budget already accounted for at the assigned rate; anything
+// above it must be covered by the fee wallet's available balance.
+func swapFeeRateRescue(assignedGwei uint64, baseRate *big.Int, gasLimit, feesReserved uint64,
+	feeWallet *assetWallet, log dex.Logger) (feeRateGwei uint64, err error) {
+
+	feeRateGwei = assignedGwei
+	baseFeeGwei := dexeth.WeiToGweiCeil(baseRate)
+	if baseFeeGwei <= assignedGwei {
+		return feeRateGwei, nil
+	}
+	if gasLimit == 0 {
+		return 0, errors.New("zero gas limit in fee rate rescue")
+	}
+	bal, err := feeWallet.Balance()
+	if err != nil {
+		return 0, fmt.Errorf("error getting balance for fee rate rescue: %w", err)
+	}
+	// big.Int arithmetic: the base fee is reported by an RPC provider, so an
+	// absurd value must not overflow the rescue decision.
+	gasLimitBig := new(big.Int).SetUint64(gasLimit)
+	targetRate := new(big.Int).Lsh(new(big.Int).SetUint64(baseFeeGwei), 1) // 2 * baseFeeGwei
+	neededFunds := new(big.Int).Mul(targetRate, gasLimitBig)
+	budget := new(big.Int).Add(new(big.Int).SetUint64(bal.Available), new(big.Int).SetUint64(feesReserved))
+	rate := targetRate
+	if budget.Cmp(neededFunds) < 0 {
+		rate = budget.Div(budget, gasLimitBig)
+	}
+	if !rate.IsUint64() {
+		return 0, fmt.Errorf("unreasonable rescue fee rate %s gwei", rate)
+	}
+	feeRateGwei = rate.Uint64()
+	log.Warnf("network base fee %d gwei exceeds assigned swap fee rate %d gwei. using %d gwei as fee cap",
+		baseFeeGwei, assignedGwei, feeRateGwei)
+	return feeRateGwei, nil
+}
+
 // Swap sends the swaps in a single transaction. The fees used returned are the
 // max fees that will possibly be used, since in ethereum with EIP-1559 we cannot
 // know exactly how much fees will be used.
@@ -3781,10 +3842,9 @@ func (w *ETHWallet) Swap(ctx context.Context, swaps *asset.Swaps) ([]asset.Recei
 		}
 	}
 
-	maxFeeRate := dexeth.GweiToWei(swaps.FeeRate)
-	_, tipRate, err := w.currentNetworkFees(ctx)
+	baseRate, tipRate, err := w.currentNetworkFees(ctx)
 	if err != nil {
-		return fail("Swap: failed to get network tip cap: %w", err)
+		return fail("Swap: failed to get network fees: %w", err)
 	}
 
 	// Only check on-chain state on retry (cache hit) to avoid unnecessary
@@ -3831,6 +3891,14 @@ func (w *ETHWallet) Swap(ctx context.Context, swaps *asset.Swaps) ([]asset.Recei
 			return receipts, change, fees, nil
 		}
 	}
+	feeRateGwei, err := swapFeeRateRescue(swaps.FeeRate, baseRate, gasLimit, fees, w.assetWallet, w.log)
+	if err != nil {
+		return fail("Swap: %v", err)
+	}
+	if err := checkSwapFeeRateMinable(feeRateGwei, baseRate); err != nil {
+		return fail("Swap: %v", err)
+	}
+	maxFeeRate := dexeth.GweiToWei(feeRateGwei)
 	tx, err := w.initiate(ctx, w.assetID, swaps.Contracts, gasLimit, maxFeeRate, tipRate, contractVer)
 	if err != nil {
 		return fail("Swap: initiate error: %w", err)
@@ -3937,10 +4005,9 @@ func (w *TokenWallet) Swap(ctx context.Context, swaps *asset.Swaps) ([]asset.Rec
 		} // See (*ETHWallet).Swap comments for a third option.
 	}
 
-	maxFeeRate := dexeth.GweiToWei(swaps.FeeRate)
-	_, tipRate, err := w.currentNetworkFees(ctx)
+	baseRate, tipRate, err := w.currentNetworkFees(ctx)
 	if err != nil {
-		return fail("Swap: failed to get network tip cap: %w", err)
+		return fail("Swap: failed to get network fees: %w", err)
 	}
 
 	if w.netToken.SwapContracts[swaps.AssetVersion] == nil {
@@ -3995,6 +4062,14 @@ func (w *TokenWallet) Swap(ctx context.Context, swaps *asset.Swaps) ([]asset.Rec
 			return receipts, change, fees, nil
 		}
 	}
+	feeRateGwei, err := swapFeeRateRescue(swaps.FeeRate, baseRate, gasLimit, fees, w.parent, w.log)
+	if err != nil {
+		return fail("Swap: %v", err)
+	}
+	if err := checkSwapFeeRateMinable(feeRateGwei, baseRate); err != nil {
+		return fail("Swap: %v", err)
+	}
+	maxFeeRate := dexeth.GweiToWei(feeRateGwei)
 	tx, err := w.initiate(ctx, w.assetID, swaps.Contracts, gasLimit, maxFeeRate, tipRate, contractVer)
 	if err != nil {
 		return fail("Swap: initiate error: %w", err)
