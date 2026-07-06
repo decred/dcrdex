@@ -532,6 +532,7 @@ func (eth *ETHBackend) TokenBackend(assetID uint32, configPath string) (asset.Ba
 			assetID:      assetID,
 			blockChans:   make(map[chan *asset.BlockUpdate]struct{}),
 			contractAddr: contractAddr,
+			contractVer:  vToken.ContractVersion,
 			atomize:      vToken.EVMToAtomic,
 			gases:        &swapContract.Gas,
 		},

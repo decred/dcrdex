@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"math/big"
 	"net/url"
 	"os"
@@ -142,6 +143,8 @@ func mustArray32(s string) (b [32]byte) {
 	copy(b[:], mustParseHex(s))
 	return
 }
+
+func uint32Ptr(v uint32) *uint32 { return &v }
 
 type testNode struct {
 	connectErr       error
@@ -668,13 +671,16 @@ func TestRedemption(t *testing.T) {
 	const gasTipCap = 2
 
 	tests := []struct {
-		name    string
-		ver     uint32
-		coinID  []byte
-		locator []byte
-		swp     *dexeth.SwapState
-		tx      *types.Transaction
-		wantErr bool
+		name             string
+		ver              uint32
+		backendVer       *uint32 // if nil, defaults to ver (backend and contract data agree)
+		coinID           []byte
+		locator          []byte
+		swp              *dexeth.SwapState
+		tx               *types.Transaction
+		txErr            error
+		wantErr          bool
+		wantCoinNotFound bool
 	}{
 		{
 			name:    "ok v0",
@@ -709,28 +715,80 @@ func TestRedemption(t *testing.T) {
 			coinID:  txHash[:],
 			swp:     tSwap(0, 0, 0, secret, dexeth.SSRedeemed, receiverAddr),
 			wantErr: true,
+		}, {
+			// Regression test: tx-not-found fallback for a v1 token-style
+			// backend (i.e. AssetBackend.contractVer correctly matches the
+			// contract data version, as TokenBackend() now sets it). Before
+			// the fix, token backends left contractVer at its zero value,
+			// so this case (and any v1 token redeem hitting the fallback)
+			// failed with "wrong contract version" instead of resolving via
+			// on-chain swap status.
+			name:    "tx not found, redeemed, v1 backend matches contract version",
+			ver:     1,
+			txErr:   ethereum.NotFound,
+			locator: locatorA,
+			coinID:  txHash[:],
+			swp:     tSwap(0, 0, 0, secret, dexeth.SSRedeemed, receiverAddr),
+		}, {
+			name:             "tx not found, swap still pending",
+			ver:              1,
+			txErr:            ethereum.NotFound,
+			locator:          locatorA,
+			coinID:           txHash[:],
+			swp:              tSwap(0, 0, 0, secret, dexeth.SSInitiated, receiverAddr),
+			wantErr:          true,
+			wantCoinNotFound: true,
+		}, {
+			// Backend still on v0 (e.g. an evm-protocol-overrides.json drain
+			// scenario) seeing a v1 contract in the redeem data. Must be
+			// rejected outright, not treated as CoinNotFoundError, since the
+			// backend can't validate a contract version it doesn't support.
+			name:       "tx not found, backend behind contract version",
+			ver:        1,
+			backendVer: uint32Ptr(0),
+			txErr:      ethereum.NotFound,
+			locator:    locatorA,
+			coinID:     txHash[:],
+			swp:        tSwap(0, 0, 0, secret, dexeth.SSRedeemed, receiverAddr),
+			wantErr:    true,
 		},
 	}
 
 	for _, test := range tests {
 		eth, node := tNewBackend(BipID)
 		node.tx = test.tx
+		node.txErr = test.txErr
 		node.receipt = &types.Receipt{
 			BlockNumber: big.NewInt(5),
 		}
 		node.swp[string(test.locator)] = test.swp
 		eth.contractAddr = *contractAddr
+		if test.backendVer != nil {
+			eth.contractVer = *test.backendVer
+		} else {
+			eth.contractVer = test.ver
+		}
 
 		contract := dexeth.EncodeContractData(test.ver, test.locator)
-		_, err := eth.Redemption(test.coinID, nil, contract)
+		coin, err := eth.Redemption(test.coinID, nil, contract)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)
+			}
+			if got := errors.Is(err, asset.CoinNotFoundError); got != test.wantCoinNotFound {
+				t.Fatalf("test %q: errors.Is(err, CoinNotFoundError) = %v, want %v (err: %v)",
+					test.name, got, test.wantCoinNotFound, err)
 			}
 			continue
 		}
 		if err != nil {
 			t.Fatalf("unexpected error for test %q: %v", test.name, err)
+		}
+		// Coins built via the tx-not-found fallback previously had a nil
+		// gasFeeCap/gasTipCap, which would panic in FeeRate. Confirm it's
+		// safe to call.
+		if fr := coin.FeeRate(); test.txErr != nil && fr != 0 {
+			t.Fatalf("test %q: expected zero fee rate for fallback-constructed coin, got %d", test.name, fr)
 		}
 	}
 }
@@ -848,6 +906,47 @@ func testValidateContract(t *testing.T, assetID uint32) {
 		if err != nil {
 			t.Fatalf("unexpected error for test %q: %v", test.name, err)
 		}
+	}
+}
+
+// TestTokenBackendContractVersion is a regression test for a bug where
+// TokenBackend() built the token's AssetBackend without setting contractVer,
+// leaving it at the zero value regardless of the token's actual contract
+// version. That field is read directly (not via the contract data) by the
+// tx-not-found redeem fallback and by relay coin construction, so an unset
+// contractVer caused every v1 token to fail those paths with a spurious
+// "wrong contract version" error.
+func TestTokenBackendContractVersion(t *testing.T) {
+	for _, ver := range []uint32{0, 1} {
+		t.Run(fmt.Sprintf("contract version %d", ver), func(t *testing.T) {
+			vToken := &VersionedToken{
+				Token:           dexeth.Tokens[usdcID],
+				ContractVersion: ver,
+			}
+			eth := &ETHBackend{&AssetBackend{
+				baseBackend: &baseBackend{
+					ctx:             tCtx,
+					net:             dex.Simnet,
+					node:            &testNode{},
+					baseLogger:      tLogger,
+					tokens:          make(map[uint32]*TokenBackend),
+					versionedTokens: map[uint32]*VersionedToken{usdcID: vToken},
+				},
+				contractAddrV1: *randomAddress(),
+			}}
+
+			be, err := eth.TokenBackend(usdcID, "")
+			if err != nil {
+				t.Fatalf("TokenBackend error for version %d: %v", ver, err)
+			}
+			tb, ok := be.(*TokenBackend)
+			if !ok {
+				t.Fatalf("TokenBackend returned unexpected type %T", be)
+			}
+			if tb.contractVer != ver {
+				t.Fatalf("contractVer = %d, want %d", tb.contractVer, ver)
+			}
+		})
 	}
 }
 
