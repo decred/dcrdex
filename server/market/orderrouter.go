@@ -261,6 +261,10 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 			limit.Rate, rateStep)
 	}
 
+	if _, ok := calc.BaseToQuoteChecked(limit.Rate, limit.Quantity); !ok {
+		return msgjson.NewError(msgjson.OrderParameterError, "quote is too high")
+	}
+
 	// Check time-in-force
 	var force order.TimeInForce
 	switch limit.TiF {

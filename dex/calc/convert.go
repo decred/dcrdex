@@ -17,16 +17,28 @@ var (
 	bigRateConversionFactor = big.NewInt(RateEncodingFactor)
 )
 
-// BaseToQuote computes a quote asset amount based on a base asset amount
-// and an integer representation of the price rate. That is,
-//
-//	quoteAmt = rate * baseAmt / atomsPerCoin
+// Deprecated: The result is truncated if it overflows uint64.  Use
+// [BaseToQuoteChecked] instead.
 func BaseToQuote(rate uint64, base uint64) (quote uint64) {
-	bigRate := big.NewInt(int64(rate))
-	bigBase := big.NewInt(int64(base))
+	bigRate := new(big.Int).SetUint64(rate)
+	bigBase := new(big.Int).SetUint64(base)
 	bigBase.Mul(bigBase, bigRate)
 	bigBase.Div(bigBase, bigRateConversionFactor)
 	return bigBase.Uint64()
+}
+
+// BaseToQuoteChecked computes a quote asset amount based on a base asset amount
+// and an integer representation of the price rate. That is,
+//
+//	quoteAmt = rate * baseAmt / atomsPerCoin
+//
+// Returns false if the quote overflows uint64.
+func BaseToQuoteChecked(rate uint64, base uint64) (quote uint64, ok bool) {
+	bigRate := new(big.Int).SetUint64(rate)
+	bigBase := new(big.Int).SetUint64(base)
+	bigBase.Mul(bigBase, bigRate)
+	bigBase.Div(bigBase, bigRateConversionFactor)
+	return bigBase.Uint64(), bigBase.IsUint64()
 }
 
 // QuoteToBase computes a base asset amount based on a quote asset amount
@@ -37,8 +49,8 @@ func QuoteToBase(rate uint64, quote uint64) (base uint64) {
 	if rate == 0 {
 		return 0 // caller handle rate==0, but don't panic
 	}
-	bigRate := big.NewInt(int64(rate))
-	bigQuote := big.NewInt(int64(quote))
+	bigRate := new(big.Int).SetUint64(rate)
+	bigQuote := new(big.Int).SetUint64(quote)
 	bigQuote.Mul(bigQuote, bigRateConversionFactor)
 	bigQuote.Div(bigQuote, bigRate)
 	return bigQuote.Uint64()
@@ -50,8 +62,8 @@ func BaseQuoteToRate(base uint64, quote uint64) (rate uint64) {
 	if base == 0 {
 		return 0
 	}
-	bigQuote := big.NewInt(int64(quote))
-	bigBase := big.NewInt(int64(base))
+	bigQuote := new(big.Int).SetUint64(quote)
+	bigBase := new(big.Int).SetUint64(base)
 	bigQuote.Mul(bigQuote, bigRateConversionFactor)
 	bigQuote.Div(bigQuote, bigBase)
 	return bigQuote.Uint64()
