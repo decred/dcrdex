@@ -3111,7 +3111,23 @@ func TestAuditContract(t *testing.T) {
 		t.Fatalf("no error for bad txid")
 	}
 
-	// Wrong contract
+	// Correct coin ID, correct contract, correct pkScript, wrong value.
+	forgedTx := wire.NewMsgTx()
+	forgedTx.AddTxIn(&wire.TxIn{})
+	forgedTx.AddTxOut(&wire.TxOut{
+		Value:    500 * int64(tLotSize),
+		PkScript: pkScript,
+	})
+	forgedTxData, err := forgedTx.Bytes()
+	if err != nil {
+		t.Fatalf("error preparing forged contract txdata: %v", err)
+	}
+	_, err = wallet.AuditContract(contractCoinID, contract, forgedTxData, false)
+	if err == nil {
+		t.Fatalf("no error for coin id different than tx hash")
+	}
+
+	// Correct coin ID, wrong contract, correct pkScript, correct tx data.
 	pkh, _ := hex.DecodeString("c6a704f11af6cbee8738ff19fc28cdc70aba0b82")
 	wrongAddr, _ := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(pkh, tChainParams)
 	wrongAddrStr := wrongAddr.String()
@@ -3148,7 +3164,7 @@ func TestAuditContract(t *testing.T) {
 		t.Fatalf("no error for unknown txout")
 	}
 
-	// Wrong txdata, wrong output script
+	// Wrong coin ID, correct contract, wrong pkScript, wrong tx data.
 	wrongContractTx := wire.NewMsgTx()
 	wrongContractTx.AddTxIn(&wire.TxIn{})
 	wrongContractTx.AddTxOut(&wire.TxOut{
@@ -3159,7 +3175,9 @@ func TestAuditContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error preparing wrong contract txdata: %v", err)
 	}
-	_, err = wallet.AuditContract(contractCoinID, contract, wrongContractTxData, false)
+	wrongContractHash := wrongContractTx.TxHash()
+	wrongContractCoinID := ToCoinID(&wrongContractHash, contractVout)
+	_, err = wallet.AuditContract(wrongContractCoinID, contract, wrongContractTxData, false)
 	if err == nil {
 		t.Fatalf("no error for unknown txout")
 	}
