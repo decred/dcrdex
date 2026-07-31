@@ -5347,6 +5347,9 @@ func (btc *baseWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroad
 		if err != nil {
 			return nil, fmt.Errorf("coin not found, and error encountered decoding tx data: %v", err)
 		}
+		if h := tx.TxHash(); h != *txHash {
+			return nil, fmt.Errorf("invalid contract tx data: expected hash %s, got %s", txHash, h)
+		}
 		if len(tx.TxOut) <= int(vout) {
 			return nil, fmt.Errorf("specified output %d not found in decoded tx %s", vout, txHash)
 		}

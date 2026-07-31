@@ -3588,8 +3588,9 @@ func testAuditContract(t *testing.T, segwit bool, walletType string) {
 
 	txHash := tx.TxHash()
 	const vout = 0
+	contractCoinID := ToCoinID(&txHash, vout)
 
-	audit, err := wallet.AuditContract(ToCoinID(&txHash, vout), contract, txData, false)
+	audit, err := wallet.AuditContract(contractCoinID, contract, txData, false)
 	if err != nil {
 		t.Fatalf("audit error: %v", err)
 	}
@@ -3609,11 +3610,23 @@ func testAuditContract(t *testing.T, segwit bool, walletType string) {
 		t.Fatalf("no error for bad txid")
 	}
 
+	// Correct coin ID, correct contract, correct pkScript, wrong value.
+	forgedTx := makeRawTx([]dex.Bytes{pkScript}, []*wire.TxIn{dummyInput()})
+	forgedTx.TxOut[0].Value = 100 * 1e8
+	forgedTxData, err := serializeMsgTx(forgedTx)
+	if err != nil {
+		t.Fatalf("error making forged contract tx data: %v", err)
+	}
+	_, err = wallet.AuditContract(contractCoinID, contract, forgedTxData, false)
+	if err == nil {
+		t.Fatalf("no error for coin id different than tx hash")
+	}
+
 	// Wrong contract
 	pkh, _ := hex.DecodeString("c6a704f11af6cbee8738ff19fc28cdc70aba0b82")
 	wrongAddr, _ := btcutil.NewAddressPubKeyHash(pkh, &chaincfg.MainNetParams)
 	badContract, _ := txscript.PayToAddrScript(wrongAddr)
-	_, err = wallet.AuditContract(ToCoinID(&txHash, vout), badContract, nil, false)
+	_, err = wallet.AuditContract(contractCoinID, badContract, nil, false)
 	if err == nil {
 		t.Fatalf("no error for wrong contract")
 	}
