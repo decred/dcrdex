@@ -1115,6 +1115,20 @@ func handlePostBond(s *RPCServer, msg *msgjson.Message) *msgjson.ResponsePayload
 	exchCfg := exchInf[form.Addr]
 	if exchCfg == nil {
 		// Not already registered.
+		//
+		// form.Cert arrives as a JSON string - bwctl's optionalTextFiles
+		// pre-reads a cert filepath argument into the certificate's raw
+		// content before sending it, same as handleGetDEXConfig does
+		// above (which explicitly converts to []byte for this reason).
+		// core.PostBondForm.Cert is typed any, so it unmarshals as a Go
+		// string rather than []byte here, and core.parseCert then
+		// treats that string as a filepath and tries to re-read the PEM
+		// content as if it were a filename, which always fails. Convert
+		// to []byte here, matching handleGetDEXConfig, so parseCert
+		// takes its []byte branch instead.
+		if certStr, ok := form.Cert.(string); ok && certStr != "" {
+			form.Cert = []byte(certStr)
+		}
 		var err error
 		exchCfg, err = s.core.GetDEXConfig(form.Addr, form.Cert)
 		if err != nil {
