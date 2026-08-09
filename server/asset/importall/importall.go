@@ -9,6 +9,7 @@ import (
 	_ "decred.org/dcrdex/server/asset/doge" // register doge asset
 	_ "decred.org/dcrdex/server/asset/firo" // register firo asset
 	_ "decred.org/dcrdex/server/asset/ltc"  // register ltc asset
+	_ "decred.org/dcrdex/server/asset/shc"  // register shc asset
 	_ "decred.org/dcrdex/server/asset/xmr"  // register xmr asset
 	_ "decred.org/dcrdex/server/asset/zec"  // register zec asset
 	// nixed

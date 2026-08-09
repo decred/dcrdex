@@ -647,6 +647,7 @@ var bipIDs = map[uint32]string{
 	91927009: "kusd",
 	99999998: "fluid",
 	99999999: "qkc",
+	8443000:  "shc", // Sharecoin - self-assigned, not an official SLIP-44 index
 	// math.MaxInt32 is the highest ID we should gol for v1 non-mesh dcrdex cuz
 	// of db type used for asset ID.
 	// Reserved for pre-paid bonds.
