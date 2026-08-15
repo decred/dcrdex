@@ -37,6 +37,7 @@ const BipIDs: Record<number, string> = {
   128: 'xmr',
   136: 'firo',
   133: 'zec',
+  140: 'lbc', // LBRY Credits
   966: 'polygon',
   966001: 'usdc.polygon',
   966002: 'weth.polygon',

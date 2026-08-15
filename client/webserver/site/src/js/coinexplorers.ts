@@ -119,6 +119,11 @@ export const CoinExplorers: Record<number, Record<number, (cid: string) => strin
     [Testnet]: (cid: string) => `https://testexplorer.firo.org/tx/${cid.split(':')[0]}`,
     [Simnet]: (cid: string) => `https://explorer.firo.org/tx/${cid.split(':')[0]}`
   },
+  140: { // lbc (LBRY Credits)
+    [Mainnet]: (cid: string) => `https://explorer.lbry.com/tx/${cid.split(':')[0]}`,
+    [Testnet]: (cid: string) => `https://explorer.lbry.com/tx/${cid.split(':')[0]}`,
+    [Simnet]: (cid: string) => `https://explorer.lbry.com/tx/${cid.split(':')[0]}`
+  },
   145: { // bch
     [Mainnet]: (cid: string) => `https://bch.loping.net/tx/${cid.split(':')[0]}`,
     [Testnet]: (cid: string) => `https://tbch4.loping.net/tx/${cid.split(':')[0]}`,
