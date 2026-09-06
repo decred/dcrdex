@@ -4,6 +4,7 @@
 package mesh
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 )
@@ -39,3 +40,5 @@ func validateEvent(event *Event) error {
 	}
 	return nil
 }
+
+const eventLogTipHashSize = sha256.Size

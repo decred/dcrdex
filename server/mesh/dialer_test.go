@@ -17,6 +17,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/server/db"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/gorilla/websocket"
 )
 
@@ -55,6 +56,15 @@ func (c *tPeerConn) requestHello(context.Context, *helloMessage) (*helloResponse
 	return nil, nil
 }
 func (c *tPeerConn) requestDecision(context.Context, *decisionMessage) error { return nil }
+
+func testPrivKey() *secp256k1.PrivateKey {
+	return secp256k1.PrivKeyFromBytes([]byte{
+		1, 1, 1, 1, 1, 1, 1, 1,
+		1, 1, 1, 1, 1, 1, 1, 1,
+		1, 1, 1, 1, 1, 1, 1, 1,
+		1, 1, 1, 1, 1, 1, 1, 1,
+	})
+}
 
 func TestParsePeerURL(t *testing.T) {
 	tests := []struct {

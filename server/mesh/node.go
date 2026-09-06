@@ -6,6 +6,7 @@ package mesh
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -122,6 +123,78 @@ func (n *node) handleEffect(eff effect) {
 		n.lifecycle.peerClientEndpointChanged(e.Host, append([]byte(nil), e.Cert...))
 	case effectFailPendingCommands:
 		n.lifecycle.failPendingCommands(e.Reason)
+	}
+}
+
+// errConnNotAdopted means this conn lost adoption to an existing session
+// with the same peer.
+var errConnNotAdopted = errors.New("connection not adopted")
+
+// applyHandshakeResult hands a completed wire handshake to the control loop,
+// which decides whether to adopt the connection and which mode this node
+// moves to (possibly halting it).
+//   - nil means the connection was adopted as the active connection
+//   - Any error means the connection was not adopted and the caller must disconnect it.
+//   - errConnNotAdopted specifically means the handshake itself was fine but an
+//     existing session with this peer took precedence.
+func (n *node) applyHandshakeResult(ctx context.Context, conn link, result *handshakeResult, initiatorNodeID string) error {
+	peerConn := newNodeConn(conn, result.peerHello.NodeID, initiatorNodeID)
+	peerRole := result.peerHello.Role
+	progress := result.progress
+	peerFrontier := fromFrontierMessage(result.peerHello.Frontier)
+
+	localFrontier, err := n.eventLogReader.EventLogFrontier(ctx)
+	if err != nil {
+		return fmt.Errorf("local event log frontier: %w", err)
+	}
+
+	res, err := n.control.send(handshakeResolvedSignal{
+		conn:          peerConn,
+		peerRole:      peerRole,
+		progress:      progress,
+		localFrontier: localFrontier,
+		peerFrontier:  peerFrontier,
+		clientHost:    result.clientHost,
+		clientCert:    append([]byte(nil), result.clientCert...),
+		at:            time.Now(),
+	})
+	if err != nil {
+		return err
+	}
+	if res.err != nil {
+		return res.err
+	}
+
+	state := res.state
+
+	switch outcome := res.outcome.(type) {
+	case handshakeOutcome:
+		switch outcome {
+		case handshakeAdopted:
+			n.log.Infof("Mesh handshake with peer %s resolved: peer_role=%s progress=%s local_state=%s",
+				meshPeerLogID(peerConn), peerRole, progress, state.mode)
+			return nil
+		case handshakeNotAdopted:
+			n.log.Infof("Mesh handshake with peer %s resolved: peer_role=%s progress=%s connection_not_adopted local_state=%s",
+				meshPeerLogID(peerConn), peerRole, progress, state.mode)
+			return errConnNotAdopted
+		case handshakeDivergedJoinRejected:
+			n.log.Warnf("Mesh peer %s presented a diverged event log (peer_role=%s); "+
+				"rejecting join, remaining serving master. local_state=%s",
+				meshPeerLogID(peerConn), peerRole, state.mode)
+			return fmt.Errorf("diverged peer join rejected; this node remains the serving master")
+		case handshakeHalted:
+			n.log.Warnf("Mesh handshake with peer %s resolved: peer_role=%s progress=%s local_state=%s err=%v",
+				meshPeerLogID(peerConn), peerRole, progress, state.mode, state.haltErr)
+			if state.haltErr != nil {
+				return state.haltErr
+			}
+			return fmt.Errorf("mesh halted after handshake")
+		default:
+			return fmt.Errorf("unknown handshake outcome %s", outcome)
+		}
+	default:
+		return fmt.Errorf("handshake resolution reported no outcome (local_state=%s)", state.mode)
 	}
 }
 
