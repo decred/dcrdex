@@ -205,6 +205,8 @@ type Service struct {
 	eventPublishClosed bool
 }
 
+var _ meshApplication = (*Service)(nil)
+
 // NewService creates the mesh service.
 func NewService(cfg *ServiceConfig) (*Service, error) {
 	if err := cfg.validate(); err != nil {
