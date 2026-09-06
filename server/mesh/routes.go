@@ -49,6 +49,55 @@ const (
 	snapshotChunkRoute      = "snapshot_chunk"
 )
 
+// routes returns the node's route table for incoming messages.
+func (n *node) routes() map[string]meshRoute {
+	if n.routeTable != nil {
+		return n.routeTable
+	}
+	n.routeTable = map[string]meshRoute{
+		helloRoute:              {handler: n.handleHello},
+		helloDecisionRoute:      {handler: n.handleDecision, requiresAuth: true},
+		commandForwardRoute:     n.activePeerRoute(n.handleCommandForward, nodeMode.canExecuteCommands),
+		commandFailureRoute:     n.activePeerRoute(n.handleCommandFailure, nodeMode.canForwardCommands),
+		commandResultRoute:      n.activePeerRoute(n.handleCommandResult, nodeMode.canForwardCommands),
+		clientProxyMessageRoute: n.activePeerRoute(n.handleClientProxyMessage, nodeMode.canRelayClientMessages),
+		clientConnectedRoute:    n.activePeerRoute(n.handleClientConnected, nodeMode.canExchangeClientConnectivity),
+		eventEnvelopeRoute:      n.activePeerRoute(n.handleEventEnvelope, nodeMode.canReceiveEventStream),
+		masterHandoffRoute:      n.activePeerRoute(n.handleMasterHandoff, nodeMode.canAcceptMasterHandoff),
+		snapshotChunkRoute:      n.activePeerRoute(n.handleSnapshotChunk, nodeMode.canReceiveEventStream),
+
+		// stream_subscribe and snapshot_request are gated by the state machine,
+		// not by activePeerRoute. A request that races the master's adoption
+		// of the handshake must get a retryable rejection, not an unauthorized
+		// error.
+		streamSubscribeRoute: {requiresAuth: true, handler: n.handleStreamSubscribe},
+		snapshotRequestRoute: {requiresAuth: true, handler: n.handleSnapshotRequest},
+	}
+	return n.routeTable
+}
+
+// peerMeshHandler is the function signature for a route handler that only the
+// active peer may use.
+type peerMeshHandler func(context.Context, link, *nodeConn, *msgjson.Message) *msgjson.Error
+
+// activePeerRoute wraps a handler in a route that only the active peer may
+// use, and only while allowed reports true for the node's mode. Any other
+// request is refused with UnauthorizedConnection.
+func (n *node) activePeerRoute(handler peerMeshHandler, allowed func(nodeMode) bool) meshRoute {
+	return meshRoute{
+		requiresAuth: true,
+		handler: func(ctx context.Context, conn link, msg *msgjson.Message) *msgjson.Error {
+			state := n.control.currentState()
+			if !allowed(state.mode) || state.activeConn == nil || state.activeConn.link == nil ||
+				state.activeConn.link.ID() != conn.ID() {
+				return msgjson.NewError(msgjson.UnauthorizedConnection,
+					"mesh route requires active peer connection in an allowed local state")
+			}
+			return handler(ctx, conn, state.activeConn, msg)
+		},
+	}
+}
+
 // decodeRoutePayload unmarshals the request payload into a T and validates
 // it, if validate is given. A failure is answered with RPCParseError, and
 // payloadName identifies the payload in that error.

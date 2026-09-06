@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/db"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
 // meshApplication lets the node deliver peer commands, events, and results to
@@ -34,6 +36,72 @@ type lifecycleHooks struct {
 	peerClientEndpointChanged func(string, []byte)
 	failPendingCommands       func(reason string)
 	halted                    func(error)
+}
+
+// nodeConfig is configuration of a mesh node.
+type nodeConfig struct {
+	app       meshApplication
+	lifecycle lifecycleHooks
+
+	dataDir    string
+	listenAddr string
+	rpcKey     string
+	rpcCert    string
+	noTLS      bool
+	compat     *CompatSnapshot
+	// dexPrivKey is the server signing identity already used for client-facing
+	// messages. In the current mesh design, both nodes share that key so
+	// client-facing signatures do not change during failover, and mesh hello
+	// payloads are authenticated with the same shared identity.
+	dexPrivKey     *secp256k1.PrivateKey
+	eventLogReader db.EventLogReader
+	snapshotStore  db.SnapshotStore
+	logger         dex.Logger
+
+	peerAddr string
+	peerCert []byte
+
+	// clientHost and clientCert are advertised in the signed mesh hello.
+	clientHost string
+	clientCert []byte
+
+	// initialFrontier is the event-log frontier at service construction time.
+	// It may be nil for a brand-new node.
+	initialFrontier *db.EventLogPosition
+}
+
+func (cfg *nodeConfig) validate() error {
+	if cfg == nil {
+		return fmt.Errorf("nil config")
+	}
+	if cfg.dataDir == "" {
+		return fmt.Errorf("empty data dir")
+	}
+	if cfg.listenAddr == "" {
+		return fmt.Errorf("empty listen address")
+	}
+	if cfg.peerAddr == "" {
+		return fmt.Errorf("empty peer address")
+	}
+	if !cfg.noTLS && (cfg.rpcKey == "" || cfg.rpcCert == "") {
+		return fmt.Errorf("missing cert pair file")
+	}
+	if cfg.compat == nil {
+		return fmt.Errorf("nil compatibility snapshot")
+	}
+	if cfg.dexPrivKey == nil {
+		return fmt.Errorf("nil DEX private key")
+	}
+	if cfg.eventLogReader == nil {
+		return fmt.Errorf("nil event log reader")
+	}
+	if cfg.snapshotStore == nil {
+		return fmt.Errorf("nil snapshot store")
+	}
+	if cfg.app == nil {
+		return fmt.Errorf("nil mesh application")
+	}
+	return nil
 }
 
 // node is the peered implementation of meshTransport (as opposed to
@@ -72,6 +140,160 @@ type node struct {
 }
 
 var _ meshTransport = (*node)(nil)
+
+// newNode constructs the mesh node.
+func newNode(cfg *nodeConfig) (*node, error) {
+	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
+
+	var initialEventSeq uint64
+	if cfg.initialFrontier != nil {
+		initialEventSeq = cfg.initialFrontier.Seq
+	}
+
+	logger := cfg.logger
+	if logger == nil {
+		logger = dex.Disabled
+	}
+
+	nodeID, err := loadOrCreateNodeID(cfg.dataDir)
+	if err != nil {
+		return nil, fmt.Errorf("loadOrCreateNodeID: %w", err)
+	}
+
+	peerParsed, err := parsePeerURL(cfg.peerAddr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid peer address: %w", err)
+	}
+	peerURL := peerParsed.String()
+
+	node := &node{
+		log:    logger,
+		nodeID: nodeID,
+		serverCfg: meshServerConfig{
+			ListenAddr: cfg.listenAddr,
+			RPCKey:     cfg.rpcKey,
+			RPCCert:    cfg.rpcCert,
+			NoTLS:      cfg.noTLS,
+		},
+		app:            cfg.app,
+		lifecycle:      cfg.lifecycle,
+		eventLogReader: cfg.eventLogReader,
+		snapshotStore:  cfg.snapshotStore,
+		eventsGate:     newReadiness(),
+	}
+	if initialEventSeq == 0 {
+		node.seeding.Store(true)
+	}
+	node.control = newControlLoop(logger, nodeID, node)
+	node.stream = newEventStreamManager(&eventStreamManagerConfig{
+		log:                logger,
+		eventLogReader:     cfg.eventLogReader,
+		node:               node,
+		initialFrontierSeq: initialEventSeq,
+	})
+	node.snapshots = newSnapshotServer(logger, cfg.snapshotStore, node)
+
+	signer, err := newSecp256k1Signer(cfg.dexPrivKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize signer: %w", err)
+	}
+
+	node.handshakeSvc = newHandshakeService(
+		nodeID,
+		node.control.currentRole,
+		signer,
+		cfg.compat,
+		cfg.eventLogReader,
+		cfg.clientHost,
+		cfg.clientCert,
+		logger,
+	)
+	node.handshakes = newHandshakeSessions(logger, node.handshakeSvc, node)
+
+	dialer, err := newOutboundDialer(
+		peerURL,
+		cfg.peerCert,
+		logger,
+		node.handshakeSvc,
+		node.routes(),
+		node,
+	)
+	if err != nil {
+		return nil, err
+	}
+	node.dialer = dialer
+
+	return node, nil
+}
+
+// connect starts the node. It returns once startup has resolved: the node is
+// established as master, established as slave, or has halted due to
+// incompatibility with the configured peer.
+func (n *node) connect(ctx context.Context) (*sync.WaitGroup, error) {
+	n.log.Infof("Mesh starting. Local node ID %s", n.nodeID)
+
+	server, err := newMeshServer(&n.serverCfg, n.routes(), n.log)
+	if err != nil {
+		return nil, err
+	}
+
+	wg := new(sync.WaitGroup)
+
+	runCtx, cancel := context.WithCancel(ctx)
+	startup := n.startLoops(runCtx, cancel, wg)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := server.Run(runCtx); err != nil {
+			n.log.Errorf("mesh server error: %v", err)
+			cancel()
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		n.dialer.Run(runCtx)
+	}()
+
+	if err := n.waitForStartup(runCtx, startup); err != nil {
+		cancel()
+		wg.Wait()
+		return nil, err
+	}
+
+	return wg, nil
+}
+
+// startLoops starts the control loop and the event stream manager.
+func (n *node) startLoops(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup) *readiness {
+	startup := newReadiness()
+	n.cancelRun = cancel
+	n.runContext = ctx
+	n.control.prepareRun(ctx)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		n.control.run(ctx, startup)
+	}()
+
+	streamReady := make(chan struct{})
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := n.stream.run(ctx, streamReady); err != nil && ctx.Err() == nil {
+			n.log.Errorf("eventStreamManager.run error: %v", err)
+			cancel()
+		}
+	}()
+	<-streamReady
+
+	return startup
+}
 
 // waitForStartup blocks until startup resolves or the run context ends. A
 // context end is refined into the halt error when the control loop halted.
@@ -124,6 +346,18 @@ func (n *node) handleEffect(eff effect) {
 	case effectFailPendingCommands:
 		n.lifecycle.failPendingCommands(e.Reason)
 	}
+}
+
+// watchPeerConn starts a goroutine to monitor a peer connection and report a
+// disconnection event to the control loop when the connection is closed.
+// If this node is the master, it also starts a timer to make sure the slave
+// establishes a stream in time.
+func (n *node) watchPeerConn(peerConn *nodeConn) {
+	go func() {
+		<-peerConn.link.Done()
+		_ = n.control.post(connectionDisconnectedSignal{conn: peerConn, at: time.Now()})
+	}()
+	go n.watchSubscribeTimeout(peerConn)
 }
 
 // errConnNotAdopted means this conn lost adoption to an existing session
@@ -196,6 +430,21 @@ func (n *node) applyHandshakeResult(ctx context.Context, conn link, result *hand
 	default:
 		return fmt.Errorf("handshake resolution reported no outcome (local_state=%s)", state.mode)
 	}
+}
+
+// activePeerForRequest returns the active peer connection if allowed returns
+// true for the current mode the node is in. It is used to authorize incoming
+// requests. If there is no active connection, or the request is not allowed
+// in the current mode, it returns an error.
+func (n *node) activePeerForRequest(allowed func(nodeMode) bool) (*nodeConn, error) {
+	state := n.control.currentState()
+	if !allowed(state.mode) {
+		return nil, fmt.Errorf("mesh active peer unavailable in node mode %s", state.mode)
+	}
+	if state.activeConn == nil || state.activeConn.link == nil {
+		return nil, fmt.Errorf("mesh active peer connection unavailable")
+	}
+	return state.activeConn, nil
 }
 
 // notifyMasterReady sends a signal to the control loop to indicate

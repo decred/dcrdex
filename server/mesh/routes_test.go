@@ -258,6 +258,33 @@ func (a *testMeshApplication) applyReceivedEvent(ctx context.Context, entry *eve
 	return a.event(ctx, entry)
 }
 
+func newRouteTestNode(mode nodeMode, active link, app meshApplication) *node {
+	if app == nil {
+		app = &testMeshApplication{}
+	}
+	state := nodeState{
+		mode: mode,
+	}
+	if active != nil {
+		state.activeConn = newNodeConn(active, "peer-node", "peer-node")
+	}
+	return newTestNodeWithState(state, app)
+}
+
+func handleRoutePayload(t testing.TB, n *node, routeName string, conn link, payload any) *msgjson.Error {
+	t.Helper()
+	return handleRouteMessage(t, context.Background(), n, conn, mustRequestMessage(t, routeName, payload))
+}
+
+func handleRouteMessage(t testing.TB, ctx context.Context, n *node, conn link, msg *msgjson.Message) *msgjson.Error {
+	t.Helper()
+	route := n.routes()[msg.Route]
+	if route.handler == nil {
+		t.Fatalf("missing test route %q", msg.Route)
+	}
+	return route.handler(ctx, conn, msg)
+}
+
 type capturedHandshakeResolution struct {
 	calls        int
 	conn         *nodeConn
@@ -462,6 +489,59 @@ func peerHandshakeCapture(role helloRole, progress progressState, frontier *db.E
 		peerFrontier: frontier,
 		peerNodeID:   routePeerNodeID,
 		initiatorID:  routePeerNodeID,
+	}
+}
+
+func TestNodeRoutesPolicyBeforeParse(t *testing.T) {
+	active := newTRouteLink(601)
+	inactive := newTRouteLink(602)
+
+	tests := []struct {
+		name  string
+		mode  nodeMode
+		conn  link
+		route string
+	}{
+		{"command forward wrong mode", modeEstablishedSlave, active, commandForwardRoute},
+		{"command forward preparing master", modePreparingMaster, active, commandForwardRoute},
+		{"command forward inactive", modeEstablishedMaster, inactive, commandForwardRoute},
+		{"command failure while syncing", modeEstablishedSlaveSyncing, active, commandFailureRoute},
+		{"command failure wrong mode", modeEstablishedMaster, active, commandFailureRoute},
+		{"command failure inactive", modeEstablishedSlave, inactive, commandFailureRoute},
+		{"command result while syncing", modeEstablishedSlaveSyncing, active, commandResultRoute},
+		{"command result wrong mode", modeEstablishedMaster, active, commandResultRoute},
+		{"command result inactive", modeEstablishedSlave, inactive, commandResultRoute},
+		{"client proxy wrong mode", modePending, active, clientProxyMessageRoute},
+		{"client proxy preparing master", modePreparingMaster, active, clientProxyMessageRoute},
+		{"client proxy inactive", modeEstablishedMaster, inactive, clientProxyMessageRoute},
+		{"client connected wrong mode", modePending, active, clientConnectedRoute},
+		{"client connected inactive", modeEstablishedSlave, inactive, clientConnectedRoute},
+		{"event wrong mode", modeEstablishedMaster, active, eventEnvelopeRoute},
+		{"event inactive", modeEstablishedSlave, inactive, eventEnvelopeRoute},
+		{"master handoff wrong mode", modeEstablishedMaster, active, masterHandoffRoute},
+		{"master handoff inactive", modeEstablishedSlave, inactive, masterHandoffRoute},
+		{"snapshot chunk wrong mode", modeEstablishedMaster, active, snapshotChunkRoute},
+		{"snapshot chunk inactive", modeEstablishedSlaveSyncing, inactive, snapshotChunkRoute},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls int
+			handler := newRouteTestNode(tt.mode, active, &testMeshApplication{
+				commandForward:  func(context.Context, string, CommandRequest) *msgjson.Error { calls++; return nil },
+				commandFailure:  func(string, *msgjson.Error) { calls++ },
+				commandResult:   func(string, json.RawMessage) { calls++ },
+				clientProxy:     func(context.Context, *ClientProxyMessage) error { calls++; return nil },
+				clientConnected: func([]account.AccountID) []account.AccountID { calls++; return nil },
+				event:           func(context.Context, *eventEnvelope) error { calls++; return nil },
+			})
+
+			rpcErr := handleRoutePayload(t, handler, tt.route, tt.conn, "not a valid payload")
+			requireRPCCode(t, rpcErr, msgjson.UnauthorizedConnection)
+			if calls != 0 {
+				t.Fatalf("app calls = %d, want 0", calls)
+			}
+		})
 	}
 }
 
@@ -832,5 +912,15 @@ func TestNodeRoutesHandleDecision(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			run(t, tt)
 		})
+	}
+}
+
+func TestNodeRoutesHandshakeAuthPolicy(t *testing.T) {
+	routes := newRouteTestNode(modePending, nil, nil).routes()
+	if routes[helloRoute].requiresAuth {
+		t.Fatalf("%s requires auth", helloRoute)
+	}
+	if !routes[helloDecisionRoute].requiresAuth {
+		t.Fatalf("%s does not require auth", helloDecisionRoute)
 	}
 }
