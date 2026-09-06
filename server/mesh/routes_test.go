@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -331,6 +332,18 @@ func validCommandForward(t *testing.T, commandID string) *commandForward {
 		Kind:      req.Kind,
 		User:      req.User,
 		Msg:       req.Msg,
+	}
+}
+
+func validClientProxyMessage(t testing.TB) *ClientProxyMessage {
+	t.Helper()
+	req, err := msgjson.NewRequest(77, msgjson.PreimageRoute, map[string]string{"ok": "true"})
+	if err != nil {
+		t.Fatalf("NewRequest error: %v", err)
+	}
+	return &ClientProxyMessage{
+		User: account.AccountID{0x22},
+		Msg:  req,
 	}
 }
 
@@ -707,6 +720,100 @@ func TestNodeRoutesHandleCommandForward(t *testing.T) {
 		if called.Load() {
 			t.Fatalf("unexpected command app call")
 		}
+	})
+}
+
+func TestNodeRoutesHandleClientProxyMessage(t *testing.T) {
+	t.Run("sends ack on success", func(t *testing.T) {
+		active := newTRouteLink(501)
+		var calls int
+		handler := newRouteTestNode(modeEstablishedMaster, active, &testMeshApplication{
+			clientProxy: func(context.Context, *ClientProxyMessage) error {
+				calls++
+				return nil
+			},
+		})
+
+		rpcErr := handleRoutePayload(t, handler, clientProxyMessageRoute, active, validClientProxyMessage(t))
+		requireNoRPCError(t, rpcErr)
+		if calls != 1 {
+			t.Fatalf("client proxy calls = %d, want 1", calls)
+		}
+		requireOneAck(t, active)
+	})
+
+	t.Run("allows a syncing slave", func(t *testing.T) {
+		active := newTRouteLink(502)
+		var calls int
+		handler := newRouteTestNode(modeEstablishedSlaveSyncing, active, &testMeshApplication{
+			clientProxy: func(context.Context, *ClientProxyMessage) error {
+				calls++
+				return nil
+			},
+		})
+
+		rpcErr := handleRoutePayload(t, handler, clientProxyMessageRoute, active, validClientProxyMessage(t))
+		requireNoRPCError(t, rpcErr)
+		if calls != 1 {
+			t.Fatalf("client proxy calls = %d, want 1", calls)
+		}
+		requireOneAck(t, active)
+	})
+
+	t.Run("maps client-not-connected app error", func(t *testing.T) {
+		active := newTRouteLink(506)
+		handler := newRouteTestNode(modeEstablishedSlave, active, &testMeshApplication{
+			clientProxy: func(context.Context, *ClientProxyMessage) error {
+				return fmt.Errorf("%w: user gone", ErrClientNotConnected)
+			},
+		})
+
+		rpcErr := handleRoutePayload(t, handler, clientProxyMessageRoute, active, validClientProxyMessage(t))
+		requireRPCCode(t, rpcErr, msgjson.UserNotConnectedError)
+	})
+
+	t.Run("client-not-connected verdict reaches requester as sentinel", func(t *testing.T) {
+		active := newTRouteLink(507)
+		handler := newRouteTestNode(modeEstablishedSlave, active, &testMeshApplication{
+			clientProxy: func(context.Context, *ClientProxyMessage) error {
+				return fmt.Errorf("%w: user gone", ErrClientNotConnected)
+			},
+		})
+		active.requestFunc = func(ctx context.Context, route string, payload any, response any) error {
+			msg, err := msgjson.NewRequest(99, route, payload)
+			if err != nil {
+				return err
+			}
+			rpcErr := handleRouteMessage(t, ctx, handler, active, msg)
+			if rpcErr != nil {
+				return &peerRPCError{Code: rpcErr.Code, Message: rpcErr.Message}
+			}
+			return nil
+		}
+		requester := &node{
+			log: dex.Disabled,
+			control: newTestControlLoop(nodeState{
+				mode:       modeEstablishedMaster,
+				activeConn: newNodeConn(active, "peer-node", "peer-node"),
+			}),
+		}
+
+		err := requester.sendClientProxyMessage(context.Background(), validClientProxyMessage(t))
+		if !errors.Is(err, ErrClientNotConnected) {
+			t.Fatalf("requester error = %v, want ErrClientNotConnected", err)
+		}
+	})
+
+	t.Run("wraps ordinary app error", func(t *testing.T) {
+		active := newTRouteLink(503)
+		handler := newRouteTestNode(modeEstablishedSlave, active, &testMeshApplication{
+			clientProxy: func(context.Context, *ClientProxyMessage) error {
+				return errors.New("boom")
+			},
+		})
+
+		rpcErr := handleRoutePayload(t, handler, clientProxyMessageRoute, active, validClientProxyMessage(t))
+		requireRPCCode(t, rpcErr, msgjson.RPCInternal)
 	})
 }
 
@@ -1235,6 +1342,88 @@ func TestNodeRoutesHandshakeAuthPolicy(t *testing.T) {
 	}
 	if !routes[helloDecisionRoute].requiresAuth {
 		t.Fatalf("%s does not require auth", helloDecisionRoute)
+	}
+}
+
+func decodeClientConnectedResult(t testing.TB, msg *msgjson.Message) []account.AccountID {
+	t.Helper()
+	resp, err := msg.Response()
+	if err != nil {
+		t.Fatalf("Response error: %v", err)
+	}
+	if resp.Error != nil {
+		t.Fatalf("unexpected response error: %v", resp.Error)
+	}
+	var result clientConnectedResult
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("Unmarshal client connected result error: %v", err)
+	}
+	return result.Connected
+}
+
+func TestNodeRoutesHandleClientConnected(t *testing.T) {
+	userA, userB := account.AccountID{0x01}, account.AccountID{0x02}
+	validQuery := &clientConnectedQuery{Users: []account.AccountID{userA, userB}}
+
+	t.Run("answers from app in every established mode", func(t *testing.T) {
+		for _, mode := range []nodeMode{modeEstablishedMaster, modeEstablishedSlaveSyncing, modeEstablishedSlave} {
+			active := newTRouteLink(521)
+			var gotUsers []account.AccountID
+			handler := newRouteTestNode(mode, active, &testMeshApplication{
+				clientConnected: func(users []account.AccountID) []account.AccountID {
+					gotUsers = users
+					return []account.AccountID{userB}
+				},
+			})
+
+			rpcErr := handleRoutePayload(t, handler, clientConnectedRoute, active, validQuery)
+			requireNoRPCError(t, rpcErr)
+			if len(gotUsers) != 2 || gotUsers[0] != userA || gotUsers[1] != userB {
+				t.Fatalf("mode %s: queried users = %v, want [%v %v]", mode, gotUsers, userA, userB)
+			}
+			connected := decodeClientConnectedResult(t, requireSent(t, active, 1)[0])
+			if len(connected) != 1 || connected[0] != userB {
+				t.Fatalf("mode %s: connected = %v, want just %v", mode, connected, userB)
+			}
+		}
+	})
+
+	t.Run("rejects invalid payload before app", func(t *testing.T) {
+		active := newTRouteLink(522)
+		handler := newRouteTestNode(modeEstablishedSlave, active, &testMeshApplication{
+			clientConnected: func([]account.AccountID) []account.AccountID {
+				t.Fatalf("unexpected client connected app call")
+				return nil
+			},
+		})
+
+		rpcErr := handleRoutePayload(t, handler, clientConnectedRoute, active, &clientConnectedQuery{})
+		requireRPCCode(t, rpcErr, msgjson.RPCParseError)
+		requireNoSent(t, active)
+	})
+}
+
+func TestValidateClientConnectedQuery(t *testing.T) {
+	user := account.AccountID{0x01}
+	overLimit := make([]account.AccountID, maxClientConnectedUsers+1)
+	tests := []struct {
+		name    string
+		query   *clientConnectedQuery
+		wantErr bool
+	}{
+		{"nil", nil, true},
+		{"empty", &clientConnectedQuery{}, true},
+		{"over limit", &clientConnectedQuery{Users: overLimit}, true},
+		{"at limit ok", &clientConnectedQuery{Users: overLimit[:maxClientConnectedUsers]}, false},
+		{"one user ok", &clientConnectedQuery{Users: []account.AccountID{user}}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateClientConnectedQuery(tt.query)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateClientConnectedQuery error = %v, wantErr = %v", err, tt.wantErr)
+			}
+		})
 	}
 }
 

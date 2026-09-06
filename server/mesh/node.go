@@ -677,6 +677,62 @@ func (n *node) sendCommandResult(ctx context.Context, result *commandResult) err
 	return conn.link.Request(ctx, commandResultRoute, result, nil)
 }
 
+// sendClientProxyMessage relays a live client message through the active mesh
+// peer and waits only for mesh-level receipt.
+func (n *node) sendClientProxyMessage(ctx context.Context, msg *ClientProxyMessage) error {
+	if err := validateClientProxyMessage(msg); err != nil {
+		return err
+	}
+
+	conn, err := n.activePeerForRequest(nodeMode.canRelayClientMessages)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrClientProxyUnavailable, err)
+	}
+
+	if err := conn.link.Request(ctx, clientProxyMessageRoute, msg, nil); err != nil {
+		var peerErr *peerRPCError
+		if errors.As(err, &peerErr) && peerErr.Code == msgjson.UserNotConnectedError {
+			return fmt.Errorf("%w to peer", ErrClientNotConnected)
+		}
+		return err
+	}
+
+	return nil
+}
+
+// queryClientConnected asks the active mesh peer which of the listed client
+// accounts are connected to it and returns the peer's answer.
+func (n *node) queryClientConnected(ctx context.Context, users []account.AccountID) ([]account.AccountID, error) {
+	query := &clientConnectedQuery{Users: users}
+	if err := validateClientConnectedQuery(query); err != nil {
+		return nil, err
+	}
+
+	conn, err := n.activePeerForRequest(nodeMode.canExchangeClientConnectivity)
+	if err != nil {
+		return nil, fmt.Errorf("mesh client connected query: %w", err)
+	}
+
+	var result clientConnectedResult
+	if err := conn.link.Request(ctx, clientConnectedRoute, query, &result); err != nil {
+		return nil, err
+	}
+
+	// A connectivity claim for an account this node never asked about is a
+	// malformed answer. Reject the whole response.
+	queried := make(map[account.AccountID]struct{}, len(users))
+	for _, user := range users {
+		queried[user] = struct{}{}
+	}
+	for _, user := range result.Connected {
+		if _, found := queried[user]; !found {
+			return nil, fmt.Errorf("client connected response claims un-queried account %v", user)
+		}
+	}
+
+	return result.Connected, nil
+}
+
 // notifyMasterReady sends a signal to the control loop to indicate
 // the master is ready to serve clients.
 func (n *node) notifyMasterReady() error {

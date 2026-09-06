@@ -6,6 +6,7 @@ package mesh
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 
 	"decred.org/dcrdex/dex/msgjson"
@@ -236,6 +237,39 @@ func (n *node) handleCommandResult(_ context.Context, conn link, _ *nodeConn, ms
 	n.app.receiveCommandResult(result.CommandID, result.Result)
 
 	return sendRouteAck(conn, msg.ID, "command result")
+}
+
+// handleClientProxyMessage delivers a client message from the peer to a
+// client on this node, or to all of them for a broadcast.
+// Returns UserNotConnectedError if the client is not connected to this node.
+func (n *node) handleClientProxyMessage(ctx context.Context, conn link, _ *nodeConn, msg *msgjson.Message) *msgjson.Error {
+	req, msgErr := decodeRoutePayload(msg, "client proxy message", validateClientProxyMessage)
+	if msgErr != nil {
+		return msgErr
+	}
+
+	if err := n.app.handleClientProxyMessage(ctx, req); err != nil {
+		if errors.Is(err, ErrClientNotConnected) {
+			return msgjson.NewError(msgjson.UserNotConnectedError, "client proxy message: client not connected")
+		}
+		return msgjson.NewError(msgjson.RPCInternal, "client proxy message: %v", err)
+	}
+
+	return sendRouteAck(conn, msg.ID, "client proxy message")
+}
+
+// handleClientConnected answers a peer's client connected query. The answer
+// is the subset of the queried accounts that have a client connection to
+// this node.
+func (n *node) handleClientConnected(_ context.Context, conn link, _ *nodeConn, msg *msgjson.Message) *msgjson.Error {
+	query, msgErr := decodeRoutePayload(msg, "client connected query", validateClientConnectedQuery)
+	if msgErr != nil {
+		return msgErr
+	}
+
+	result := &clientConnectedResult{Connected: n.app.answerClientConnected(query.Users)}
+
+	return sendRouteResponse(conn, msg.ID, result, "client connected")
 }
 
 // handleEventEnvelope applies a batch of streamed events from the master in

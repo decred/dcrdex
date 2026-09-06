@@ -656,6 +656,40 @@ func (s *Service) applyEventLocal(ctx context.Context, event *Event, position *d
 	return entry, applyCtx, err
 }
 
+// ProxyClientMessage relays a live client message through the active mesh
+// peer. When no peer can relay, it fails with ErrClientProxyUnavailable,
+// except broadcasts in single-server mode, which are a silent no-op. A
+// unicast whose user is not connected on the peer fails with
+// ErrClientNotConnected.
+func (s *Service) ProxyClientMessage(ctx context.Context, msg *ClientProxyMessage) error {
+	return s.transport.sendClientProxyMessage(ctx, msg)
+}
+
+// QueryClientConnected asks the peer which of the listed accounts are
+// connected to it. Large lists are split across requests; single-server mode
+// returns an empty set.
+func (s *Service) QueryClientConnected(ctx context.Context, users []account.AccountID) ([]account.AccountID, error) {
+	var connected []account.AccountID
+	for start := 0; start < len(users); start += maxClientConnectedUsers {
+		chunk, err := s.transport.queryClientConnected(ctx, users[start:min(start+maxClientConnectedUsers, len(users))])
+		if err != nil {
+			return nil, err
+		}
+		connected = append(connected, chunk...)
+	}
+	return connected, nil
+}
+
+// answerClientConnected implements the meshApplication interface.
+func (s *Service) answerClientConnected(users []account.AccountID) []account.AccountID {
+	return s.clientConnectedHandler(users)
+}
+
+// handleClientProxyMessage implements the meshApplication interface.
+func (s *Service) handleClientProxyMessage(ctx context.Context, msg *ClientProxyMessage) error {
+	return s.clientProxyHandler(ctx, msg)
+}
+
 // executeForwardedCommand implements the meshApplication interface.
 func (s *Service) executeForwardedCommand(ctx context.Context, commandID string, req CommandRequest) *msgjson.Error {
 	return s.commands.executeForwarded(ctx, commandID, req)

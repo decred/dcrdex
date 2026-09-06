@@ -18,6 +18,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/db"
 )
 
@@ -165,6 +166,19 @@ func (f *testTransport) sendCommandResult(_ context.Context, result *commandResu
 		f.peer.receiveCommandResult(result.CommandID, result.Result)
 	}
 	return nil
+}
+
+func (f *testTransport) sendClientProxyMessage(context.Context, *ClientProxyMessage) error {
+	return nil
+}
+
+func (f *testTransport) queryClientConnected(_ context.Context, users []account.AccountID) ([]account.AccountID, error) {
+	f.connectedQueries = append(f.connectedQueries, len(users))
+	if f.queryConnectedErr != nil {
+		return nil, f.queryConnectedErr
+	}
+	// Echo the queried chunk back so callers can verify chunked merging.
+	return users, nil
 }
 
 func (f *testTransport) notifyLocalEventCommitted(seq uint64, originCommandID string, commandResult json.RawMessage) {
@@ -1541,6 +1555,80 @@ func TestServiceWaitUntilReadyForComms(t *testing.T) {
 		waitServiceWorkers(t, svc, "mesh worker failure shutdown")
 	})
 
+}
+
+func TestServiceQueryClientConnectedChunking(t *testing.T) {
+	transport := &testTransport{}
+	svc := &Service{log: dex.Disabled, transport: transport}
+
+	users := make([]account.AccountID, 2*maxClientConnectedUsers+1)
+	for i := range users {
+		users[i][0], users[i][1], users[i][2] = byte(i), byte(i>>8), byte(i>>16)
+	}
+
+	connected, err := svc.QueryClientConnected(context.Background(), users)
+	if err != nil {
+		t.Fatalf("QueryClientConnected error: %v", err)
+	}
+	wantChunks := []int{maxClientConnectedUsers, maxClientConnectedUsers, 1}
+	if len(transport.connectedQueries) != len(wantChunks) {
+		t.Fatalf("requests = %d, want %d", len(transport.connectedQueries), len(wantChunks))
+	}
+	for i, want := range wantChunks {
+		if transport.connectedQueries[i] != want {
+			t.Fatalf("request %d queried %d users, want %d", i, transport.connectedQueries[i], want)
+		}
+	}
+	// The echoing test transport claims every queried user is connected, so
+	// the merged result must be the full user list in order.
+	if len(connected) != len(users) {
+		t.Fatalf("connected = %d users, want %d", len(connected), len(users))
+	}
+	for i, user := range users {
+		if connected[i] != user {
+			t.Fatalf("connected[%d] = %v, want %v", i, connected[i], user)
+		}
+	}
+
+	// A chunk failure fails the whole query.
+	transport.queryConnectedErr = errors.New("peer gone")
+	if _, err := svc.QueryClientConnected(context.Background(), users); err == nil {
+		t.Fatalf("no error from failed chunk")
+	}
+
+	// No users, no requests.
+	transport.connectedQueries = nil
+	if connected, err := svc.QueryClientConnected(context.Background(), nil); err != nil || len(connected) != 0 {
+		t.Fatalf("empty query returned %v, %v", connected, err)
+	}
+	if len(transport.connectedQueries) != 0 {
+		t.Fatalf("empty query issued %d requests, want 0", len(transport.connectedQueries))
+	}
+}
+
+func TestServiceQueryClientConnectedSingleServer(t *testing.T) {
+	svc := &Service{log: dex.Disabled, transport: newSingleServerTransport()}
+	connected, err := svc.QueryClientConnected(context.Background(), []account.AccountID{{0x01}, {0x02}})
+	if err != nil {
+		t.Fatalf("single-server QueryClientConnected error: %v", err)
+	}
+	if len(connected) != 0 {
+		t.Fatalf("single-server connected = %v, want empty", connected)
+	}
+}
+
+func TestServiceProxyClientMessageSingleServer(t *testing.T) {
+	svc := &Service{log: dex.Disabled, transport: newSingleServerTransport()}
+	note, err := msgjson.NewNotification(msgjson.NotifyRoute, "note")
+	if err != nil {
+		t.Fatalf("NewNotification error: %v", err)
+	}
+	if err := svc.ProxyClientMessage(context.Background(), &ClientProxyMessage{Msg: note, Broadcast: true}); err != nil {
+		t.Fatalf("single-server broadcast error: %v", err)
+	}
+	if err := svc.ProxyClientMessage(context.Background(), &ClientProxyMessage{Msg: note}); !errors.Is(err, ErrClientProxyUnavailable) {
+		t.Fatalf("single-server unicast error = %v, want %v", err, ErrClientProxyUnavailable)
+	}
 }
 
 func TestEnsureLoaded(t *testing.T) {

@@ -1210,3 +1210,147 @@ func TestMeshPreparingMasterDefersStartupEventStreamUntilReady(t *testing.T) {
 		t.Fatalf("event payload = %s, want %s", got.Payload, startupEntry.Event)
 	}
 }
+
+func TestMeshProxyClientMessage(t *testing.T) {
+	type proxiedCall struct {
+		user      account.AccountID
+		msgType   msgjson.MessageType
+		route     string
+		msgID     uint64
+		timeout   time.Duration
+		broadcast bool
+	}
+
+	var (
+		callMtx sync.Mutex
+		calls   []proxiedCall
+	)
+
+	proxiedHandler := func(_ context.Context, req *ClientProxyMessage) error {
+		time.Sleep(20 * time.Millisecond)
+		callMtx.Lock()
+		calls = append(calls, proxiedCall{
+			user:      req.User,
+			msgType:   req.Msg.Type,
+			route:     req.Msg.Route,
+			msgID:     req.Msg.ID,
+			timeout:   time.Duration(req.TimeoutMS) * time.Millisecond,
+			broadcast: req.Broadcast,
+		})
+		callMtx.Unlock()
+		return nil
+	}
+
+	aListen := reserveTCPAddr(t)
+	bListen := reserveTCPAddr(t)
+	aPeer := "ws://" + bListen + meshWSPath
+	bPeer := "ws://" + aListen + meshWSPath
+
+	nodeA := newIntegrationNode(t, integrationNodeConfig{
+		listenAddr:   aListen,
+		peerAddr:     aPeer,
+		compat:       testCompatSnapshot(t),
+		proxyHandler: proxiedHandler,
+	})
+	nodeB := newIntegrationNode(t, integrationNodeConfig{
+		listenAddr:   bListen,
+		peerAddr:     bPeer,
+		compat:       testCompatSnapshot(t),
+		proxyHandler: proxiedHandler,
+	})
+
+	runA := startIntegrationNode(t, nodeA)
+	runB := startIntegrationNode(t, nodeB)
+	t.Cleanup(func() {
+		runA.shutdown(t)
+		runB.shutdown(t)
+	})
+
+	runA.waitForStartup(t)
+	runB.waitForStartup(t)
+
+	master, slave := waitForComplementaryModes(t, nodeA, nodeB)
+
+	var user account.AccountID
+	user[0] = 0x44
+
+	req, err := msgjson.NewRequest(88, msgjson.PreimageRoute, map[string]string{"mkt": "dcr_btc"})
+	if err != nil {
+		t.Fatalf("NewRequest error: %v", err)
+	}
+
+	err = master.sendClientProxyMessage(context.Background(), &ClientProxyMessage{
+		User:      user,
+		Msg:       req,
+		TimeoutMS: 50,
+	})
+	if err != nil {
+		t.Fatalf("ProxyClientMessage error: %v", err)
+	}
+
+	resp, err := msgjson.NewResponse(89, struct{}{}, nil)
+	if err != nil {
+		t.Fatalf("NewResponse error: %v", err)
+	}
+	err = slave.sendClientProxyMessage(context.Background(), &ClientProxyMessage{
+		User: user,
+		Msg:  resp,
+	})
+	if err != nil {
+		t.Fatalf("response ProxyClientMessage error: %v", err)
+	}
+
+	note, err := msgjson.NewNotification(msgjson.NotifyRoute, "scheduled maintenance in 10 minutes")
+	if err != nil {
+		t.Fatalf("NewNotification error: %v", err)
+	}
+	err = master.sendClientProxyMessage(context.Background(), &ClientProxyMessage{
+		Msg:       note,
+		Broadcast: true,
+	})
+	if err != nil {
+		t.Fatalf("broadcast ProxyClientMessage error: %v", err)
+	}
+
+	callMtx.Lock()
+	defer callMtx.Unlock()
+	if len(calls) != 3 {
+		t.Fatalf("proxied handler calls = %d, want 3", len(calls))
+	}
+	if calls[0].user != user {
+		t.Fatalf("proxied handler user = %v, want %v", calls[0].user, user)
+	}
+	if calls[0].msgType != msgjson.Request {
+		t.Fatalf("proxied handler message type = %v, want request", calls[0].msgType)
+	}
+	if calls[0].route != msgjson.PreimageRoute {
+		t.Fatalf("proxied handler route = %q, want %q", calls[0].route, msgjson.PreimageRoute)
+	}
+	if calls[0].msgID != req.ID {
+		t.Fatalf("proxied handler msg id = %d, want %d", calls[0].msgID, req.ID)
+	}
+	if calls[0].timeout != 50*time.Millisecond {
+		t.Fatalf("proxied handler timeout = %v, want %v", calls[0].timeout, 50*time.Millisecond)
+	}
+	if calls[1].user != user {
+		t.Fatalf("response handler user = %v, want %v", calls[1].user, user)
+	}
+	if calls[1].msgType != msgjson.Response {
+		t.Fatalf("response handler message type = %v, want response", calls[1].msgType)
+	}
+	if calls[1].msgID != resp.ID {
+		t.Fatalf("response handler msg id = %d, want %d", calls[1].msgID, resp.ID)
+	}
+	if calls[0].broadcast || calls[1].broadcast {
+		t.Fatalf("per-user proxied messages arrived flagged as broadcast")
+	}
+	if !calls[2].broadcast {
+		t.Fatalf("broadcast flag not relayed")
+	}
+	if calls[2].msgType != msgjson.Notification {
+		t.Fatalf("broadcast handler message type = %v, want notification", calls[2].msgType)
+	}
+	if calls[2].route != msgjson.NotifyRoute {
+		t.Fatalf("broadcast handler route = %q, want %q", calls[2].route, msgjson.NotifyRoute)
+	}
+}

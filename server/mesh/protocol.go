@@ -83,6 +83,72 @@ func validateCommandResult(result *commandResult) error {
 	return nil
 }
 
+// ClientProxyMessage is a request to deliver a message to a client
+// connected to the peer.
+type ClientProxyMessage struct {
+	User account.AccountID `json:"user"`
+	Msg  *msgjson.Message  `json:"msg"`
+	// Broadcast delivers Msg to every client on the peer. User is ignored.
+	Broadcast bool `json:"broadcast,omitempty"`
+	// TimeoutMS is the timeout of a proxied request.
+	TimeoutMS uint64 `json:"timeoutMS,omitempty"`
+	// DeliverToClient marks a Response that the server sends to the client,
+	// as opposed to a Response that the client sends to the peer.
+	DeliverToClient bool `json:"deliverToClient,omitempty"`
+}
+
+func validateClientProxyMessage(msg *ClientProxyMessage) error {
+	if msg == nil {
+		return fmt.Errorf("nil client proxy message")
+	}
+	if msg.Msg == nil {
+		return fmt.Errorf("nil client proxy message payload")
+	}
+	if msg.Broadcast && msg.Msg.Type != msgjson.Notification {
+		return fmt.Errorf("broadcast requires a notification message, got type %d", msg.Msg.Type)
+	}
+	switch msg.Msg.Type {
+	case msgjson.Request:
+		if msg.Msg.ID == 0 {
+			return fmt.Errorf("request id cannot be 0")
+		}
+	case msgjson.Response:
+		if msg.Msg.ID == 0 {
+			return fmt.Errorf("response id cannot be 0")
+		}
+	case msgjson.Notification:
+	default:
+		return fmt.Errorf("unsupported message type %d", msg.Msg.Type)
+	}
+	return nil
+}
+
+// maxClientConnectedUsers is the maximum number of users in one
+// client_connected query. QueryClientConnected splits larger queries.
+const maxClientConnectedUsers = 4096
+
+// clientConnectedQuery asks the peer which of the listed client accounts are
+// currently connected to it.
+type clientConnectedQuery struct {
+	Users []account.AccountID `json:"users"`
+}
+
+// clientConnectedResult lists the subset of the queried accounts that are
+// connected to the answering node.
+type clientConnectedResult struct {
+	Connected []account.AccountID `json:"connected,omitempty"`
+}
+
+func validateClientConnectedQuery(query *clientConnectedQuery) error {
+	if query == nil || len(query.Users) == 0 {
+		return fmt.Errorf("empty client connected query")
+	}
+	if len(query.Users) > maxClientConnectedUsers {
+		return fmt.Errorf("client connected query for %d users exceeds limit %d", len(query.Users), maxClientConnectedUsers)
+	}
+	return nil
+}
+
 func validateClientRequestMsg(msg *msgjson.Message) error {
 	if msg == nil {
 		return fmt.Errorf("nil request message")
