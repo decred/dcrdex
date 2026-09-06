@@ -1,9 +1,13 @@
 package mesh
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -29,6 +33,43 @@ type runningMeshNode struct {
 
 	wg              *sync.WaitGroup
 	connectReturned bool
+}
+
+type memoryEventLogProvider struct {
+	mtx      sync.Mutex
+	frontier *db.EventLogPosition
+	entries  []*db.EventLogEntry
+}
+
+func (p *memoryEventLogProvider) EventLogFrontier(context.Context) (*db.EventLogPosition, error) {
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
+	return p.frontier, nil
+}
+
+func (p *memoryEventLogProvider) EventLogEntriesAfter(_ context.Context, after uint64, limit int) ([]*db.EventLogEntry, error) {
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
+	var entries []*db.EventLogEntry
+	for _, entry := range p.entries {
+		if entry.Seq > after {
+			entries = append(entries, entry)
+			if len(entries) == limit {
+				break
+			}
+		}
+	}
+	return entries, nil
+}
+
+func (p *memoryEventLogProvider) appendEntry(entry *db.EventLogEntry) {
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
+	p.entries = append(p.entries, entry)
+	p.frontier = &db.EventLogPosition{
+		Seq:     entry.Seq,
+		TipHash: entry.TipHash,
+	}
 }
 
 func reserveTCPAddr(t *testing.T) string {
@@ -147,6 +188,18 @@ func startIntegrationNode(t *testing.T, node *node) *runningMeshNode {
 	}()
 
 	return run
+}
+
+func publishEventForTest(ctx context.Context, master *node, entry *eventEnvelope) error {
+	state := master.control.currentState()
+	if state.activeConn == nil || state.activeConn.link == nil {
+		return fmt.Errorf("master has no active connection")
+	}
+	var ack eventAck
+	if err := state.activeConn.link.Request(ctx, eventEnvelopeRoute, &eventBatch{Entries: []*eventEnvelope{entry}}, &ack); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (r *runningMeshNode) waitForConnectResult(t *testing.T, timeout time.Duration) meshConnectResult {
@@ -304,6 +357,333 @@ func TestMeshNodesEstablishMasterSlave(t *testing.T) {
 	}
 }
 
+func TestMeshEventStreamReplaysAndStaysLive(t *testing.T) {
+	aListen := reserveTCPAddr(t)
+	bListen := reserveTCPAddr(t)
+	aPeer := "ws://" + bListen + meshWSPath
+	bPeer := "ws://" + aListen + meshWSPath
+
+	entries := []*db.EventLogEntry{
+		{Seq: 1, Kind: "stream_test", Event: []byte(`"one"`), TipHash: testTipHash(1)},
+		{Seq: 2, Kind: "stream_test", Event: []byte(`"two"`), TipHash: testTipHash(2)},
+	}
+	aFrontier := &memoryEventLogProvider{
+		frontier: &db.EventLogPosition{Seq: 2, TipHash: testTipHash(2)},
+		entries:  entries,
+	}
+	bFrontier := &memoryEventLogProvider{
+		frontier: &db.EventLogPosition{},
+	}
+
+	entryBySeq := make(map[uint64]*db.EventLogEntry, len(entries))
+	for _, entry := range entries {
+		entryBySeq[entry.Seq] = entry
+	}
+	var applied []uint64
+	var appliedMtx sync.Mutex
+	applyStreamEvent := func(_ context.Context, entry *eventEnvelope) error {
+		logEntry := entryBySeq[entry.Seq]
+		switch {
+		case logEntry != nil:
+			bFrontier.appendEntry(logEntry)
+		case entry.Seq == 3:
+			bFrontier.appendEntry(&db.EventLogEntry{
+				Seq:     entry.Seq,
+				Kind:    entry.Kind,
+				Event:   append([]byte(nil), entry.Payload...),
+				TipHash: append([]byte(nil), entry.TipHash...),
+			})
+		default:
+			return fmt.Errorf("unexpected stream seq %d", entry.Seq)
+		}
+		appliedMtx.Lock()
+		applied = append(applied, entry.Seq)
+		appliedMtx.Unlock()
+		return nil
+	}
+
+	nodeA := newIntegrationNode(t, integrationNodeConfig{
+		listenAddr:     aListen,
+		peerAddr:       aPeer,
+		compat:         testCompatSnapshot(t),
+		eventLogReader: aFrontier,
+	})
+	nodeB := newIntegrationNode(t, integrationNodeConfig{
+		listenAddr:     bListen,
+		peerAddr:       bPeer,
+		compat:         testCompatSnapshot(t),
+		eventLogReader: bFrontier,
+		eventHandler:   applyStreamEvent,
+	})
+	nodeA.dialer.reconnectInterval = time.Hour
+	nodeB.dialer.reconnectInterval = 10 * time.Millisecond
+
+	runA := startIntegrationNode(t, nodeA)
+	time.Sleep(100 * time.Millisecond)
+	runB := startIntegrationNode(t, nodeB)
+	t.Cleanup(func() {
+		runA.shutdown(t)
+		runB.shutdown(t)
+	})
+
+	runA.waitForStartup(t)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if nodeA.control.currentMode() == modeEstablishedMaster && nodeB.control.currentMode() == modeEstablishedSlave {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if nodeA.control.currentMode() != modeEstablishedMaster || nodeB.control.currentMode() != modeEstablishedSlave {
+		t.Fatalf("timed out waiting for stream establishment: a=%s b=%s", nodeA.control.currentState(), nodeB.control.currentState())
+	}
+	runB.waitForStartup(t)
+	master, slave := waitForComplementaryModes(t, nodeA, nodeB)
+	if master != nodeA || slave != nodeB {
+		t.Fatalf("unexpected roles after stream replay: master=%p slave=%p", master, slave)
+	}
+
+	appliedMtx.Lock()
+	gotApplied := append([]uint64(nil), applied...)
+	appliedMtx.Unlock()
+	wantApplied := []uint64{1, 2}
+	if !reflect.DeepEqual(gotApplied, wantApplied) {
+		t.Fatalf("applied stream seqs = %v, want %v", gotApplied, wantApplied)
+	}
+	frontier, err := bFrontier.EventLogFrontier(context.Background())
+	if err != nil {
+		t.Fatalf("frontier error: %v", err)
+	}
+	if frontier.Seq != 2 || !bytes.Equal(frontier.TipHash, testTipHash(2)) {
+		t.Fatalf("frontier = %+v, want seq=2 hash=02", frontier)
+	}
+
+	aFrontier.appendEntry(&db.EventLogEntry{
+		Seq:     3,
+		Kind:    "stream_test",
+		Event:   []byte(`"three"`),
+		TipHash: testTipHash(3),
+	})
+	master.notifyLocalEventCommitted(3, "", nil)
+	waitForMeshCondition(t, "slave event seq 3", func() bool {
+		frontier, err := bFrontier.EventLogFrontier(context.Background())
+		return err == nil && frontier.Seq == 3
+	})
+	appliedMtx.Lock()
+	gotApplied = append([]uint64(nil), applied...)
+	appliedMtx.Unlock()
+	wantApplied = []uint64{1, 2, 3}
+	if !reflect.DeepEqual(gotApplied, wantApplied) {
+		t.Fatalf("applied stream seqs after live tail = %v, want %v", gotApplied, wantApplied)
+	}
+	frontier, err = bFrontier.EventLogFrontier(context.Background())
+	if err != nil {
+		t.Fatalf("frontier error after live tail: %v", err)
+	}
+	if frontier.Seq != 3 || !bytes.Equal(frontier.TipHash, testTipHash(3)) {
+		t.Fatalf("frontier after live tail = %+v, want seq=3 hash=03", frontier)
+	}
+}
+
+func TestMeshEventStreamReconnectResyncsAfterApplyFailure(t *testing.T) {
+	aListen := reserveTCPAddr(t)
+	bListen := reserveTCPAddr(t)
+	aPeer := "ws://" + bListen + meshWSPath
+	bPeer := "ws://" + aListen + meshWSPath
+
+	entries := []*db.EventLogEntry{
+		{Seq: 1, Kind: "stream_test", Event: []byte(`"one"`), TipHash: testTipHash(1)},
+		{Seq: 2, Kind: "stream_test", Event: []byte(`"two"`), TipHash: testTipHash(2)},
+	}
+	aFrontier := &memoryEventLogProvider{
+		frontier: &db.EventLogPosition{Seq: 2, TipHash: testTipHash(2)},
+		entries:  entries,
+	}
+	bFrontier := &memoryEventLogProvider{
+		frontier: &db.EventLogPosition{},
+	}
+
+	entryBySeq := make(map[uint64]*db.EventLogEntry, len(entries))
+	for _, entry := range entries {
+		entryBySeq[entry.Seq] = entry
+	}
+
+	var (
+		applyMtx sync.Mutex
+		attempts []uint64
+		failed   bool
+	)
+	firstAttempt := make(chan struct{})
+	applyStreamEvent := func(_ context.Context, entry *eventEnvelope) error {
+		applyMtx.Lock()
+		attempts = append(attempts, entry.Seq)
+		if !failed {
+			failed = true
+			close(firstAttempt)
+			applyMtx.Unlock()
+			return errors.New("one-shot stream apply failure")
+		}
+		applyMtx.Unlock()
+
+		logEntry := entryBySeq[entry.Seq]
+		if logEntry == nil {
+			return fmt.Errorf("unexpected stream seq %d", entry.Seq)
+		}
+		bFrontier.appendEntry(logEntry)
+		return nil
+	}
+
+	nodeA := newIntegrationNode(t, integrationNodeConfig{
+		listenAddr:     aListen,
+		peerAddr:       aPeer,
+		compat:         testCompatSnapshot(t),
+		eventLogReader: aFrontier,
+	})
+	nodeB := newIntegrationNode(t, integrationNodeConfig{
+		listenAddr:     bListen,
+		peerAddr:       bPeer,
+		compat:         testCompatSnapshot(t),
+		eventLogReader: bFrontier,
+		eventHandler:   applyStreamEvent,
+	})
+	nodeA.dialer.reconnectInterval = time.Hour
+	nodeB.dialer.reconnectInterval = 10 * time.Millisecond
+
+	runA := startIntegrationNode(t, nodeA)
+	time.Sleep(100 * time.Millisecond)
+	runB := startIntegrationNode(t, nodeB)
+	t.Cleanup(func() {
+		runA.shutdown(t)
+		runB.shutdown(t)
+	})
+
+	runA.waitForStartup(t)
+	select {
+	case <-firstAttempt:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for first stream apply attempt")
+	}
+	frontier, err := bFrontier.EventLogFrontier(context.Background())
+	if err != nil {
+		t.Fatalf("frontier error after one-shot failure: %v", err)
+	}
+	if frontier.Seq != 0 {
+		t.Fatalf("frontier after one-shot failure = %+v, want seq 0", frontier)
+	}
+
+	runB.waitForStartup(t)
+	master, slave := waitForComplementaryModes(t, nodeA, nodeB)
+	if master != nodeA || slave != nodeB {
+		t.Fatalf("unexpected roles after reconnect: master=%p slave=%p", master, slave)
+	}
+
+	waitForMeshCondition(t, "slave resynced to seq 2", func() bool {
+		frontier, err := bFrontier.EventLogFrontier(context.Background())
+		return err == nil && frontier.Seq == 2
+	})
+	frontier, err = bFrontier.EventLogFrontier(context.Background())
+	if err != nil {
+		t.Fatalf("frontier error after reconnect: %v", err)
+	}
+	if frontier.Seq != 2 || !bytes.Equal(frontier.TipHash, testTipHash(2)) {
+		t.Fatalf("frontier after reconnect = %+v, want seq=2 hash=02", frontier)
+	}
+
+	applyMtx.Lock()
+	gotAttempts := append([]uint64(nil), attempts...)
+	applyMtx.Unlock()
+	if len(gotAttempts) < 3 || gotAttempts[0] != 1 || gotAttempts[1] != 1 {
+		t.Fatalf("stream attempts = %v, want first failure and replay of seq 1", gotAttempts)
+	}
+}
+
+// Mid-batch apply failure: seq 1 is durable, reconnect resumes at seq 2.
+func TestMeshEventStreamReconnectResyncsAfterMidBatchApplyFailure(t *testing.T) {
+	entries := []*db.EventLogEntry{
+		{Seq: 1, Kind: "stream_test", Event: []byte(`"one"`), TipHash: testTipHash(1)},
+		{Seq: 2, Kind: "stream_test", Event: []byte(`"two"`), TipHash: testTipHash(2)},
+	}
+	aFrontier := &memoryEventLogProvider{
+		frontier: &db.EventLogPosition{Seq: 2, TipHash: testTipHash(2)},
+		entries:  entries,
+	}
+	bFrontier := &memoryEventLogProvider{frontier: &db.EventLogPosition{}}
+
+	var (
+		applyMtx sync.Mutex
+		attempts []uint64
+		failOnce = true
+	)
+	failed := make(chan struct{})
+	apply := func(_ context.Context, env *eventEnvelope) error {
+		applyMtx.Lock()
+		attempts = append(attempts, env.Seq)
+		if env.Seq == 2 && failOnce {
+			failOnce = false
+			applyMtx.Unlock()
+			close(failed)
+			return errors.New("mid-batch apply failure")
+		}
+		applyMtx.Unlock()
+		for _, e := range entries {
+			if e.Seq == env.Seq {
+				bFrontier.appendEntry(e)
+				return nil
+			}
+		}
+		return fmt.Errorf("unexpected seq %d", env.Seq)
+	}
+
+	aListen, bListen := reserveTCPAddr(t), reserveTCPAddr(t)
+	nodeA := newIntegrationNode(t, integrationNodeConfig{
+		listenAddr:     aListen,
+		peerAddr:       "ws://" + bListen + meshWSPath,
+		compat:         testCompatSnapshot(t),
+		eventLogReader: aFrontier,
+	})
+	nodeB := newIntegrationNode(t, integrationNodeConfig{
+		listenAddr:     bListen,
+		peerAddr:       "ws://" + aListen + meshWSPath,
+		compat:         testCompatSnapshot(t),
+		eventLogReader: bFrontier,
+		eventHandler:   apply,
+	})
+	nodeA.dialer.reconnectInterval = time.Hour
+	nodeB.dialer.reconnectInterval = 10 * time.Millisecond
+
+	runA := startIntegrationNode(t, nodeA)
+	time.Sleep(100 * time.Millisecond)
+	runB := startIntegrationNode(t, nodeB)
+	t.Cleanup(func() { runA.shutdown(t); runB.shutdown(t) })
+
+	runA.waitForStartup(t)
+	select {
+	case <-failed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for mid-batch failure")
+	}
+	if f, _ := bFrontier.EventLogFrontier(context.Background()); f.Seq != 1 {
+		t.Fatalf("frontier after partial apply = %+v, want seq 1", f)
+	}
+
+	runB.waitForStartup(t)
+	if master, slave := waitForComplementaryModes(t, nodeA, nodeB); master != nodeA || slave != nodeB {
+		t.Fatalf("unexpected roles: master=%p slave=%p", master, slave)
+	}
+	waitForMeshCondition(t, "slave at seq 2", func() bool {
+		f, err := bFrontier.EventLogFrontier(context.Background())
+		return err == nil && f.Seq == 2
+	})
+
+	applyMtx.Lock()
+	got := append([]uint64(nil), attempts...)
+	applyMtx.Unlock()
+	// apply 1, fail 2, reconnect from frontier 1, apply only 2.
+	if want := []uint64{1, 2, 2}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("attempts = %v, want %v", got, want)
+	}
+}
+
 func TestMeshConnectWaitsForPeerUntilCanceled(t *testing.T) {
 	listenAddr := reserveTCPAddr(t)
 	peerAddr := "ws://" + reserveTCPAddr(t) + meshWSPath
@@ -400,5 +780,239 @@ func TestMeshCompatMismatchHaltsStartup(t *testing.T) {
 	}
 	if haltErr == nil || !strings.Contains(haltErr.Error(), "compatibility hash mismatch") {
 		t.Fatalf("HaltStatus err = %v, want compatibility hash mismatch", haltErr)
+	}
+}
+
+func TestMeshPublishEvent(t *testing.T) {
+	recA := new(meshEventRecorder)
+	recB := new(meshEventRecorder)
+	frontierA := &memoryEventLogProvider{frontier: &db.EventLogPosition{}}
+	frontierB := &memoryEventLogProvider{frontier: &db.EventLogPosition{}}
+
+	aListen := reserveTCPAddr(t)
+	bListen := reserveTCPAddr(t)
+	aPeer := "ws://" + bListen + meshWSPath
+	bPeer := "ws://" + aListen + meshWSPath
+
+	nodeA := newIntegrationNode(t, integrationNodeConfig{
+		listenAddr:     aListen,
+		peerAddr:       aPeer,
+		compat:         testCompatSnapshot(t),
+		eventLogReader: frontierA,
+		eventHandler:   recA.handler(frontierA),
+	})
+	nodeB := newIntegrationNode(t, integrationNodeConfig{
+		listenAddr:     bListen,
+		peerAddr:       bPeer,
+		compat:         testCompatSnapshot(t),
+		eventLogReader: frontierB,
+		eventHandler:   recB.handler(frontierB),
+	})
+
+	runA := startIntegrationNode(t, nodeA)
+	t.Cleanup(func() {
+		runA.shutdown(t)
+	})
+	runA.assertStartupPending(t, 200*time.Millisecond)
+
+	runB := startIntegrationNode(t, nodeB)
+	t.Cleanup(func() {
+		runB.shutdown(t)
+	})
+	runB.waitForStartup(t)
+	runA.waitForStartup(t)
+
+	master, slave := waitForComplementaryModes(t, nodeA, nodeB)
+	masterConn, ok := master.control.currentState().activeConn.link.(*rpcConn)
+	if !ok {
+		t.Fatalf("master active conn type = %T", master.control.currentState().activeConn.link)
+	}
+	slaveConn, ok := slave.control.currentState().activeConn.link.(*rpcConn)
+	if !ok {
+		t.Fatalf("slave active conn type = %T", slave.control.currentState().activeConn.link)
+	}
+	waitForMeshCondition(t, "authorized mesh links", func() bool {
+		return masterConn.Authed() && slaveConn.Authed()
+	})
+
+	if err := publishEventForTest(context.Background(), master, &eventEnvelope{
+		Seq:             1,
+		TipHash:         testTipHash(1),
+		MasterTip:       1,
+		Kind:            "test_order_accepted",
+		OriginCommandID: "cmd-88",
+		Payload:         []byte(`{"oid":"abc123"}`),
+	}); err != nil {
+		t.Fatalf("PublishEvent #1 error: %v", err)
+	}
+	if err := publishEventForTest(context.Background(), master, &eventEnvelope{
+		Seq:       2,
+		TipHash:   testTipHash(2),
+		MasterTip: 2,
+		Kind:      "epoch_ended",
+		Payload:   []byte(`{"epoch":7}`),
+	}); err != nil {
+		t.Fatalf("PublishEvent #2 error: %v", err)
+	}
+
+	waitForMeshCondition(t, "slave event seq 2", func() bool {
+		if slave == nodeA {
+			return recA.count() == 2
+		}
+		return recB.count() == 2
+	})
+
+	var applied []eventEnvelope
+	if slave == nodeA {
+		applied = recA.events()
+	} else {
+		applied = recB.events()
+	}
+
+	if len(applied) != 2 {
+		t.Fatalf("applied events = %d, want 2", len(applied))
+	}
+	if applied[0].Seq != 1 || applied[0].Kind != "test_order_accepted" {
+		t.Fatalf("first event = %+v, want seq=1 kind=order_accepted", applied[0])
+	}
+	if applied[0].OriginCommandID != "cmd-88" {
+		t.Fatalf("first event origin command id = %q, want cmd-88", applied[0].OriginCommandID)
+	}
+	if string(applied[0].Payload) != `{"oid":"abc123"}` {
+		t.Fatalf("first event payload = %s", applied[0].Payload)
+	}
+	if applied[1].Seq != 2 || applied[1].Kind != "epoch_ended" {
+		t.Fatalf("second event = %+v, want seq=2 kind=epoch_ended", applied[1])
+	}
+	if string(applied[1].Payload) != `{"epoch":7}` {
+		t.Fatalf("second event payload = %s", applied[1].Payload)
+	}
+}
+
+type meshEventRecorder struct {
+	mtx       sync.Mutex
+	envelopes []eventEnvelope
+}
+
+func (r *meshEventRecorder) handler(frontier *memoryEventLogProvider) func(context.Context, *eventEnvelope) error {
+	return func(_ context.Context, entry *eventEnvelope) error {
+		r.mtx.Lock()
+		defer r.mtx.Unlock()
+		copied := *entry
+		copied.TipHash = append([]byte(nil), entry.TipHash...)
+		copied.Payload = append([]byte(nil), entry.Payload...)
+		copied.CommandResult = append([]byte(nil), entry.CommandResult...)
+		r.envelopes = append(r.envelopes, copied)
+		frontier.appendEntry(&db.EventLogEntry{
+			Seq:     entry.Seq,
+			Kind:    entry.Kind,
+			Event:   append([]byte(nil), entry.Payload...),
+			TipHash: append([]byte(nil), entry.TipHash...),
+		})
+		return nil
+	}
+}
+
+func (r *meshEventRecorder) count() int {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+	return len(r.envelopes)
+}
+
+func (r *meshEventRecorder) events() []eventEnvelope {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+	return append([]eventEnvelope(nil), r.envelopes...)
+}
+
+func TestMeshPreparingMasterDefersStartupEventStreamUntilReady(t *testing.T) {
+	recA := new(meshEventRecorder)
+	recB := new(meshEventRecorder)
+	frontierA := &memoryEventLogProvider{frontier: &db.EventLogPosition{}}
+	frontierB := &memoryEventLogProvider{frontier: &db.EventLogPosition{}}
+
+	aListen := reserveTCPAddr(t)
+	bListen := reserveTCPAddr(t)
+	aPeer := "ws://" + bListen + meshWSPath
+	bPeer := "ws://" + aListen + meshWSPath
+
+	nodeA := newIntegrationNode(t, integrationNodeConfig{
+		listenAddr:     aListen,
+		peerAddr:       aPeer,
+		compat:         testCompatSnapshot(t),
+		eventLogReader: frontierA,
+		eventHandler:   recA.handler(frontierA),
+		lifecycle:      &lifecycleHooks{},
+	})
+	nodeB := newIntegrationNode(t, integrationNodeConfig{
+		listenAddr:     bListen,
+		peerAddr:       bPeer,
+		compat:         testCompatSnapshot(t),
+		eventLogReader: frontierB,
+		eventHandler:   recB.handler(frontierB),
+		lifecycle:      &lifecycleHooks{},
+	})
+
+	runA := startIntegrationNode(t, nodeA)
+	runB := startIntegrationNode(t, nodeB)
+	t.Cleanup(func() {
+		runA.shutdown(t)
+		runB.shutdown(t)
+	})
+
+	waitForMeshCondition(t, "preparing master and established slave", func() bool {
+		aState := nodeA.control.currentState()
+		bState := nodeB.control.currentState()
+		paired := aState.activeConn != nil && bState.activeConn != nil &&
+			aState.activeConn.initiatorNodeID == bState.activeConn.initiatorNodeID
+		return paired && ((aState.mode == modePreparingMaster && bState.mode == modeEstablishedSlave) ||
+			(aState.mode == modeEstablishedSlave && bState.mode == modePreparingMaster))
+	})
+
+	master, slaveRec, masterFrontier := nodeA, recB, frontierA
+	if nodeB.control.currentMode() == modePreparingMaster {
+		master, slaveRec, masterFrontier = nodeB, recA, frontierB
+	}
+
+	if err := master.checkEventPublishAvailable(false); err != nil {
+		t.Fatalf("direct event unavailable during master preparation: %v", err)
+	}
+	if err := master.checkEventPublishAvailable(true); err == nil {
+		t.Fatalf("forwarded-command event available during master preparation")
+	}
+
+	startupEntry := &db.EventLogEntry{
+		Seq:     1,
+		Kind:    "test_market_started",
+		Event:   []byte(`{"market":"dcr_btc"}`),
+		TipHash: testTipHash(1),
+	}
+	masterFrontier.appendEntry(startupEntry)
+	master.notifyLocalEventCommitted(startupEntry.Seq, "", nil)
+
+	time.Sleep(100 * time.Millisecond)
+	if got := slaveRec.count(); got != 0 {
+		t.Fatalf("slave received %d events before master readiness, want 0", got)
+	}
+
+	if err := master.notifyMasterReady(); err != nil {
+		t.Fatalf("notifyMasterReady error: %v", err)
+	}
+	runA.waitForStartup(t)
+	runB.waitForStartup(t)
+	waitForComplementaryModes(t, nodeA, nodeB)
+
+	waitForMeshCondition(t, "slave received market_started event", func() bool {
+		return slaveRec.count() == 1
+	})
+	got := slaveRec.events()[0]
+	if got.Seq != startupEntry.Seq || got.MasterTip != startupEntry.Seq || got.Kind != startupEntry.Kind {
+		t.Fatalf("event envelope = %+v, want seq/tip=%d kind=%q", got, startupEntry.Seq, startupEntry.Kind)
+	}
+	if got.OriginCommandID != "" || len(got.CommandResult) != 0 {
+		t.Fatalf("event command ID/result = %q/%x, want empty", got.OriginCommandID, got.CommandResult)
+	}
+	if string(got.Payload) != string(startupEntry.Event) {
+		t.Fatalf("event payload = %s, want %s", got.Payload, startupEntry.Event)
 	}
 }

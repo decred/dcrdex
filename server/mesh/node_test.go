@@ -6,6 +6,7 @@ package mesh
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -33,6 +34,158 @@ func newTestNodeWithState(state nodeState, app meshApplication) *node {
 	}
 	n.snapshots = newSnapshotServer(n.log, n.snapshotStore, n)
 	return n
+}
+
+func TestCheckEventPublishAvailable(t *testing.T) {
+	peer := newNodeConn(newTRouteLink(1), "peer-node", "peer-node")
+
+	startStream := func(n *node, connID uint64) {
+		t.Helper()
+		n.stream = newTestEventStreamManager(&streamTestReader{}, nil, nil, &db.EventLogPosition{})
+		n.stream.ctx = context.Background()
+		n.stream.startStreamOnConn(connID, &db.EventLogPosition{})
+	}
+
+	t.Run("forwarded conn no stream", func(t *testing.T) {
+		n := newTestNodeWithState(nodeState{mode: modeEstablishedMaster, activeConn: peer}, nil)
+		err := n.checkEventPublishAvailable(true)
+		if !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("err = %v, want ErrUnavailable", err)
+		}
+	})
+
+	t.Run("forwarded stream to other conn", func(t *testing.T) {
+		n := newTestNodeWithState(nodeState{mode: modeEstablishedMaster, activeConn: peer}, nil)
+		startStream(n, 2)
+		err := n.checkEventPublishAvailable(true)
+		if !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("err = %v, want ErrUnavailable", err)
+		}
+	})
+
+	t.Run("forwarded stream to active conn", func(t *testing.T) {
+		n := newTestNodeWithState(nodeState{mode: modeEstablishedMaster, activeConn: peer}, nil)
+		startStream(n, 1)
+		if err := n.checkEventPublishAvailable(true); err != nil {
+			t.Fatalf("err = %v, want nil", err)
+		}
+	})
+
+	t.Run("local no stream", func(t *testing.T) {
+		n := newTestNodeWithState(nodeState{mode: modeEstablishedMaster, activeConn: peer}, nil)
+		if err := n.checkEventPublishAvailable(false); err != nil {
+			t.Fatalf("err = %v, want nil", err)
+		}
+	})
+
+	t.Run("preparation local vs forwarded", func(t *testing.T) {
+		n := newTestNodeWithState(nodeState{mode: modePreparingMaster, activeConn: peer}, nil)
+		if err := n.checkEventPublishAvailable(false); err != nil {
+			t.Fatalf("local err = %v, want nil", err)
+		}
+		err := n.checkEventPublishAvailable(true)
+		if !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("forwarded err = %v, want ErrUnavailable", err)
+		}
+	})
+}
+
+func TestApplyInboundEventEnvelopeTerminalFailure(t *testing.T) {
+	const appliedSeq uint64 = 1
+	applyErr := &db.EventLogDivergenceError{
+		Seq:             appliedSeq + 1,
+		ExpectedTipHash: testTipHash(appliedSeq + 1),
+		ActualTipHash:   testTipHash(appliedSeq + 2),
+		Err:             errors.New("frontier mismatch"),
+	}
+	n := newTestNodeWithState(nodeState{mode: modeEstablishedSlave}, &testMeshApplication{
+		event: func(context.Context, *eventEnvelope) error {
+			return applyErr
+		},
+	})
+	queue := n.control.testQueue()
+
+	err := n.applyInboundEventEnvelope(nil, &eventEnvelope{
+		Seq:       appliedSeq + 1,
+		TipHash:   testTipHash(appliedSeq + 1),
+		MasterTip: appliedSeq + 1,
+		Kind:      "test",
+		Payload:   []byte("peer-payload"),
+	})
+	if !errors.Is(err, applyErr) {
+		t.Fatalf("apply error = %v, want %v", err, applyErr)
+	}
+
+	select {
+	case queued := <-queue:
+		ev, ok := queued.signal.(terminalApplyFailureSignal)
+		if !ok {
+			t.Fatalf("posted event = %T, want terminalApplyFailureSignal", queued.signal)
+		}
+		if !errors.Is(ev.err, applyErr) {
+			t.Fatalf("posted error = %v, want %v", ev.err, applyErr)
+		}
+	default:
+		t.Fatalf("missing terminalApplyFailureSignal")
+	}
+}
+
+func TestNodePostTerminalApplyFailureIfNeeded(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantPosted bool
+	}{
+		{
+			name: "ignores non-terminal error",
+			err:  errors.New("apply failed"),
+		},
+		{
+			name: "posts terminal divergence error",
+			err: &db.EventLogDivergenceError{
+				Seq: 2,
+				Err: errors.New("projection mismatch"),
+			},
+			wantPosted: true,
+		},
+		{
+			name:       "posts unknown commit outcome",
+			err:        &db.EventCommitUnknownError{Err: errors.New("commit outcome unknown")},
+			wantPosted: true,
+		},
+		{
+			name:       "posts replication wedge",
+			err:        &replicationWedgedError{Seq: 7, Attempts: 3, Err: errors.New("apply failed")},
+			wantPosted: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := newTestNodeWithState(nodeState{mode: modeEstablishedSlave}, nil)
+			queue := p.control.testQueue()
+
+			p.postTerminalApplyFailureIfNeeded(tt.err)
+
+			select {
+			case queued := <-queue:
+				if !tt.wantPosted {
+					t.Fatalf("posted event = %T, want none", queued.signal)
+				}
+				ev, ok := queued.signal.(terminalApplyFailureSignal)
+				if !ok {
+					t.Fatalf("posted event = %T, want terminalApplyFailureSignal", queued.signal)
+				}
+				if !errors.Is(ev.err, tt.err) {
+					t.Fatalf("posted error = %v, want %v", ev.err, tt.err)
+				}
+			default:
+				if tt.wantPosted {
+					t.Fatalf("missing terminalApplyFailureSignal")
+				}
+			}
+		})
+	}
 }
 
 func TestNodeApplyHandshakeResult(t *testing.T) {
@@ -139,4 +292,137 @@ func TestNodeApplyHandshakeResult(t *testing.T) {
 
 func testRPCSession(cpNode, localNode string) *nodeConn {
 	return newNodeConn(newTRouteLink(801), cpNode, localNode)
+}
+
+func TestNodeSendEventEnvelopeTreatsClosedLinkAsCanceled(t *testing.T) {
+	wsConn := &tWSConn{closed: make(chan struct{})}
+	reqConn := newRPCConn(t.Context(), "test-peer", wsConn, nil, dex.Disabled)
+	wg, err := reqConn.connect()
+	if err != nil {
+		t.Fatalf("connect error: %v", err)
+	}
+	reqConn.Disconnect()
+	wg.Wait()
+
+	conn := newNodeConn(reqConn, "node-b", "node-a")
+	p := &node{
+		control: newTestControlLoop(nodeState{
+			mode:       modeEstablishedMaster,
+			activeConn: conn,
+		}),
+	}
+	err = p.sendEventBatch(context.Background(), conn.ID(), &eventBatch{Entries: []*eventEnvelope{{
+		Seq:       1,
+		TipHash:   testTipHash(1),
+		MasterTip: 1,
+		Kind:      "test",
+		Payload:   []byte(`{"payload":1}`),
+	}}})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("send event envelope error = %v, want context canceled", err)
+	}
+}
+
+func TestApplyFailureStreak(t *testing.T) {
+	var e applyFailureStreak
+	err := errors.New("apply failed")
+	live := context.Background()
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	steps := []struct {
+		ctx  context.Context
+		seq  uint64
+		err  error
+		want int
+	}{
+		{live, 5, err, 1},
+		{live, 5, err, 2},
+		{live, 5, err, 3},
+		{live, 6, err, 1}, // different seq restarts
+		{live, 6, err, 2},
+		{canceled, 6, err, 0}, // dead ctx did not reset
+		{canceled, 6, context.Canceled, 0},
+		{live, 6, err, 3},
+		{live, 6, context.Canceled, 4}, // live ctx: internal cancel still counts
+		{live, 6, fmt.Errorf("apply: %w", context.DeadlineExceeded), 5},
+		{live, 6, nil, 0}, // success resets
+		{live, 6, err, 1},
+	}
+	for i, step := range steps {
+		if got := e.observe(step.ctx, step.seq, step.err); got != step.want {
+			t.Fatalf("step %d: observe(%d, %v) = %d, want %d",
+				i, step.seq, step.err, got, step.want)
+		}
+	}
+}
+
+func TestApplyInboundEventEnvelopeWedgeHalt(t *testing.T) {
+	applyErr := errors.New("event apply failed: swap contract recorded event for unknown match")
+	failing := true
+	n := newTestNodeWithState(nodeState{mode: modeEstablishedSlaveSyncing}, &testMeshApplication{
+		event: func(context.Context, *eventEnvelope) error {
+			if failing {
+				return applyErr
+			}
+			return nil
+		},
+	})
+	queue := n.control.testQueue()
+
+	requireNoSignal := func(step string) {
+		t.Helper()
+		select {
+		case queued := <-queue:
+			t.Fatalf("%s: unexpected posted signal %T", step, queued.signal)
+		default:
+		}
+	}
+
+	// MasterTip != Seq so the success path does not post a caught-up signal.
+	env := &eventEnvelope{Seq: 24, MasterTip: 30, Kind: "test", Payload: []byte("p")}
+	otherEnv := &eventEnvelope{Seq: 25, MasterTip: 30, Kind: "test", Payload: []byte("p")}
+
+	// Two failures, then a different seq, then a success: streak resets, no halt.
+	for i := 0; i < applyWedgeStreakThreshold-1; i++ {
+		if err := n.applyInboundEventEnvelope(nil, env); !errors.Is(err, applyErr) {
+			t.Fatalf("apply %d error = %v, want %v", i, err, applyErr)
+		}
+	}
+	if err := n.applyInboundEventEnvelope(nil, otherEnv); !errors.Is(err, applyErr) {
+		t.Fatalf("other-seq apply error = %v, want %v", err, applyErr)
+	}
+	requireNoSignal("below threshold")
+	failing = false
+	if err := n.applyInboundEventEnvelope(nil, otherEnv); err != nil {
+		t.Fatalf("successful apply error: %v", err)
+	}
+	if got := n.applyFailures.count; got != 0 {
+		t.Fatalf("failure streak after success = %d, want 0", got)
+	}
+
+	// Three consecutive failures at one seq post the wedge halt.
+	failing = true
+	for i := 0; i < applyWedgeStreakThreshold; i++ {
+		if err := n.applyInboundEventEnvelope(nil, env); !errors.Is(err, applyErr) {
+			t.Fatalf("apply %d error = %v, want %v", i, err, applyErr)
+		}
+	}
+	select {
+	case queued := <-queue:
+		sig, ok := queued.signal.(terminalApplyFailureSignal)
+		if !ok {
+			t.Fatalf("posted signal = %T, want terminalApplyFailureSignal", queued.signal)
+		}
+		var wedged *replicationWedgedError
+		if !errors.As(sig.err, &wedged) {
+			t.Fatalf("posted error = %v, want replicationWedgedError", sig.err)
+		}
+		if wedged.Seq != env.Seq || wedged.Attempts != applyWedgeStreakThreshold || !errors.Is(wedged, applyErr) {
+			t.Fatalf("wedged error = %+v, want seq %d, attempts %d, cause %v",
+				wedged, env.Seq, applyWedgeStreakThreshold, applyErr)
+		}
+	default:
+		t.Fatalf("missing wedge halt signal after %d failures", applyWedgeStreakThreshold)
+	}
 }

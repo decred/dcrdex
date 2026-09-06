@@ -127,6 +127,17 @@ func (f *testTransport) notifyLocalEventCommitted(seq uint64, originCommandID st
 	}
 }
 
+func (f *testTransport) postTerminalApplyFailureIfNeeded(err error) {
+	if isTerminalEventApplyFailure(err) {
+		_ = f.postEvent(terminalApplyFailureSignal{err: err, at: time.Now()})
+	}
+}
+
+func (f *testTransport) postEvent(ev meshSignal) error {
+	f.postedEvents = append(f.postedEvents, ev)
+	return nil
+}
+
 func (f *testTransport) canExecuteCommandLocally() bool {
 	return f.master
 }
@@ -312,6 +323,42 @@ func TestServiceApplyEvent(t *testing.T) {
 		}
 		if got := len(transport.postedEvents); got != 0 {
 			t.Fatalf("posted events = %d, want 0", got)
+		}
+	})
+
+	t.Run("terminal apply error is reported to transport", func(t *testing.T) {
+		terminalErr := &CommittedEventApplyError{
+			Applied: &db.EventLogEntry{Seq: 1, Kind: "test", TipHash: testTipHash(1)},
+			Err:     errors.New("side effect failed"),
+		}
+		transport := &testTransport{}
+		svc := newTestService(t, nil, transport)
+		applyCalled := false
+		svc.events["test"] = func(applyCtx *EventApplyContext, event *Event) (*db.EventLogEntry, error) {
+			applyCalled = true
+			if applyCtx.Position != nil {
+				t.Fatalf("apply position = %+v, want nil", applyCtx.Position)
+			}
+			return nil, terminalErr
+		}
+
+		origin := plainEventOrigin()
+		event := &Event{
+			Kind:    "test",
+			Payload: []byte("terminal apply error is reported to transport"),
+		}
+		_, err := svc.applyEvent(context.Background(), event, origin)
+		if !errors.Is(err, terminalErr) {
+			t.Fatalf("apply error = %v, want %v", err, terminalErr)
+		}
+		if !applyCalled {
+			t.Fatal("applier was not called")
+		}
+		if got := len(transport.committedEvents); got != 0 {
+			t.Fatalf("committed events = %d, want 0", got)
+		}
+		if got := len(transport.postedEvents); got != 1 {
+			t.Fatalf("posted events = %d, want 1", got)
 		}
 	})
 

@@ -830,6 +830,26 @@ func TestReduceTerminalApplyFailure(t *testing.T) {
 	})
 }
 
+// TestHelloFrontierIsNotAStreamPosition checks that handshake adoption
+// does not start an event stream.
+func TestHelloFrontierIsNotAStreamPosition(t *testing.T) {
+	conn := testSession("node-b", "node-a")
+	cur := nodeState{mode: modeEstablishedMaster}
+	result, err := reduceSignal("node-a", defaultSlavePromotionDelay, cur,
+		testHandshakeResolvedSignal(conn, roleSlave, progressLocalAhead))
+	if err != nil {
+		t.Fatalf("reduce error: %v", err)
+	}
+	if !result.handled {
+		t.Fatal("handshake not handled")
+	}
+	for _, eff := range result.effects {
+		if _, ok := eff.(effectStartEventStream); ok {
+			t.Fatal("adoption started a stream; streaming must be slave-initiated")
+		}
+	}
+}
+
 func TestReduceStreamSubscribe(t *testing.T) {
 	frontier := &db.EventLogPosition{Seq: 4, TipHash: testTipHash(4)}
 	conn := testSession("node-b", "node-a")

@@ -268,6 +268,97 @@ func (n *node) connect(ctx context.Context) (*sync.WaitGroup, error) {
 	return wg, nil
 }
 
+// notifyReadyForEvents notifies that the application is ready to receive
+// and apply streamed events.
+func (n *node) notifyReadyForEvents() {
+	n.eventsGate.resolve(nil)
+}
+
+// eventsGateOpen reports whether notifyReadyForEvents has been called.
+func (n *node) eventsGateOpen() bool {
+	if n.eventsGate == nil {
+		return true
+	}
+	select {
+	case <-n.eventsGate.resolved():
+		return true
+	default:
+		return false
+	}
+}
+
+// applyWedgeStreakThreshold is consecutive apply failures at one seq before
+// the node treats the failure as deterministic and halts.
+const applyWedgeStreakThreshold = 3
+
+// applyFailureStreak counts consecutive apply failures at one seq.
+type applyFailureStreak struct {
+	mtx   sync.Mutex
+	seq   uint64
+	count int
+}
+
+// observe returns the consecutive failure count for seq (0 on success). A
+// different seq restarts the count. A dead apply context reports 0 without
+// resetting the streak.
+func (e *applyFailureStreak) observe(ctx context.Context, seq uint64, err error) int {
+	e.mtx.Lock()
+	defer e.mtx.Unlock()
+	if err == nil {
+		e.seq, e.count = 0, 0
+		return 0
+	}
+	if ctx.Err() != nil {
+		return 0
+	}
+	if seq != e.seq {
+		e.seq, e.count = seq, 1
+	} else {
+		e.count++
+	}
+	return e.count
+}
+
+// replicationWedgedError is returned when the slave has tried to apply a replicated
+// event multiple times, and failed.
+type replicationWedgedError struct {
+	Seq      uint64
+	Attempts int
+	Err      error
+}
+
+func (err *replicationWedgedError) Error() string {
+	return fmt.Sprintf("replicated event at seq %d failed to apply %d consecutive times: %v.",
+		err.Seq, err.Attempts, err.Err)
+}
+
+func (err *replicationWedgedError) Unwrap() error {
+	return err.Err
+}
+
+// applyInboundEventEnvelope is used by the slave to apply an event received from the master.
+func (n *node) applyInboundEventEnvelope(peerConn *nodeConn, entry *eventEnvelope) error {
+	ctx := n.runContext
+	if err := n.app.applyReceivedEvent(ctx, entry); err != nil {
+		if isTerminalEventApplyFailure(err) {
+			n.postTerminalApplyFailureIfNeeded(err)
+			return err
+		}
+		if count := n.applyFailures.observe(ctx, entry.Seq, err); count >= applyWedgeStreakThreshold {
+			n.postTerminalApplyFailureIfNeeded(&replicationWedgedError{
+				Seq: entry.Seq, Attempts: count, Err: err,
+			})
+		}
+		return err
+	}
+
+	n.applyFailures.observe(ctx, entry.Seq, nil)
+	n.stream.eventCommitted(entry.Seq, "", nil)
+	n.postStreamCaughtUpIfAtMasterTip(peerConn, entry)
+
+	return nil
+}
+
 // startLoops starts the control loop and the event stream manager.
 func (n *node) startLoops(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup) *readiness {
 	startup := newReadiness()
@@ -430,6 +521,60 @@ func (n *node) applyHandshakeResult(ctx context.Context, conn link, result *hand
 	default:
 		return fmt.Errorf("handshake resolution reported no outcome (local_state=%s)", state.mode)
 	}
+}
+
+// postStreamCaughtUpIfAtMasterTip reports completion of initial catch-up
+// when the slave reaches the tip carried by the received event.
+func (n *node) postStreamCaughtUpIfAtMasterTip(peerConn *nodeConn, entry *eventEnvelope) {
+	if entry.Seq != entry.MasterTip || n.control.currentMode() != modeEstablishedSlaveSyncing {
+		return
+	}
+	target := &db.EventLogPosition{
+		Seq:     entry.MasterTip,
+		TipHash: append([]byte(nil), entry.TipHash...),
+	}
+	if err := n.control.post(streamCaughtUpSignal{conn: peerConn, target: target}); err != nil {
+		n.log.Debugf("failed to post mesh stream caught-up event: %v", err)
+	}
+}
+
+// postTerminalApplyFailureIfNeeded requests a halt if err is terminal.
+func (n *node) postTerminalApplyFailureIfNeeded(err error) {
+	if isTerminalEventApplyFailure(err) {
+		_ = n.control.post(terminalApplyFailureSignal{err: err, at: time.Now()})
+	}
+}
+
+// checkEventPublishAvailable returns nil if the node can publish an event now,
+// or an error wrapping ErrUnavailable if it cannot. Only a master can publish
+// an event, and only a master with an established stream can publish an event
+// originating from a forwarded command.
+func (n *node) checkEventPublishAvailable(forwardedCommand bool) error {
+	state := n.control.currentState()
+
+	if !(state.mode == modeEstablishedMaster || state.mode == modePreparingMaster) {
+		return fmt.Errorf("event publisher unavailable for local apply: %w", ErrUnavailable)
+	}
+
+	if !forwardedCommand {
+		return nil
+	}
+
+	// This check is a sanity check.. redundant with the below checks. Only established
+	// master should have a stream.
+	if state.mode != modeEstablishedMaster {
+		return fmt.Errorf("event publisher unavailable for forwarded command: %w", ErrUnavailable)
+	}
+
+	if state.activeConn == nil || state.activeConn.link == nil {
+		return fmt.Errorf("event publisher has no active peer for forwarded command: %w", ErrUnavailable)
+	}
+
+	if !n.stream.isStreamingTo(state.activeConn.ID()) {
+		return fmt.Errorf("no event stream for forwarded command: %w", ErrUnavailable)
+	}
+
+	return nil
 }
 
 // activePeerForRequest returns the active peer connection if allowed returns

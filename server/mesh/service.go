@@ -4,6 +4,7 @@
 package mesh
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -572,6 +573,68 @@ func (s *Service) applyEvent(ctx context.Context, event *Event, origin eventOrig
 	}
 
 	return result, nil
+}
+
+// applyReceivedEvent applies an event on a slave that was streamed from the
+// master.
+func (s *Service) applyReceivedEvent(ctx context.Context, entry *eventEnvelope) error {
+	// Determine the event origin. If there is a OriginCommandID on the
+	// envelope, it means this event is the result of the local node (slave)
+	// forwarding a command to the master.
+	origin := plainEventOrigin()
+	if entry.OriginCommandID != "" {
+		if len(entry.CommandResult) == 0 {
+			return fmt.Errorf("event %q for command %s missing command result", entry.Kind, entry.OriginCommandID)
+		}
+		origin = receivedCommandEventOrigin(entry.OriginCommandID)
+	}
+
+	// Skip application if this event is already stored with the same tip
+	// hash. A different hash at this sequence is a divergence error.
+	applyCtx, err := func() (*EventApplyContext, error) {
+		s.applyMtx.Lock()
+		defer s.applyMtx.Unlock()
+
+		stored, err := entryAt(ctx, s.eventLogReader, entry.Seq)
+		var applyCtx *EventApplyContext
+		switch {
+		case err != nil:
+			err = fmt.Errorf("event log entry %d: %w", entry.Seq, err)
+		case stored == nil:
+			_, applyCtx, err = s.applyEventLocal(ctx, eventFromEnvelope(entry), &db.EventLogPosition{
+				Seq:     entry.Seq,
+				TipHash: append([]byte(nil), entry.TipHash...),
+			}, origin.collectsAfterCommandResult())
+		case !bytes.Equal(stored.TipHash, entry.TipHash):
+			err = &db.EventLogDivergenceError{
+				Seq:             entry.Seq,
+				ExpectedTipHash: append([]byte(nil), entry.TipHash...),
+				ActualTipHash:   append([]byte(nil), stored.TipHash...),
+				Err:             fmt.Errorf("event log replay tip hash mismatch"),
+			}
+		}
+		return applyCtx, err
+	}()
+	if err != nil {
+		return err
+	}
+
+	// Deliver the response to the client, if the command that created this
+	// event originated on the local (slave) node.
+	if origin.kind == originReceivedCommand {
+		if err := s.commands.deliverPending(origin.commandID, entry.CommandResult); err != nil {
+			s.log.Debugf("failed to deliver event %s result for command %s: %v", entry.Kind, origin.commandID, err)
+		}
+	}
+
+	// applyCtx is nil when this seq was already in the log.
+	if applyCtx != nil {
+		for _, callback := range applyCtx.afterCommandResult {
+			callback(ctx)
+		}
+	}
+
+	return nil
 }
 
 // applyEventLocal calls the registered applier and checks that it returned

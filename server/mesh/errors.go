@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/server/db"
 )
 
 var (
@@ -65,4 +66,15 @@ var (
 // wrapPeerIncompatible marks err as an errPeerIncompatible.
 func wrapPeerIncompatible(err error) error {
 	return fmt.Errorf("%w: %v", errPeerIncompatible, err)
+}
+
+// isTerminalEventApplyFailure reports whether an event application error
+// requires the node to halt.
+func isTerminalEventApplyFailure(err error) bool {
+	var divergence *db.EventLogDivergenceError
+	var unknown *db.EventCommitUnknownError
+	var committed *CommittedEventApplyError
+	var wedged *replicationWedgedError
+	return errors.As(err, &divergence) || errors.As(err, &unknown) ||
+		errors.As(err, &committed) || errors.As(err, &wedged)
 }

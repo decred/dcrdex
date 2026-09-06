@@ -4,10 +4,12 @@
 package mesh
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/server/db"
 )
 
 // link is a connection to the peer, as the routes and the handshake use it.
@@ -167,6 +169,29 @@ func (n *node) handleDecision(ctx context.Context, conn link, msg *msgjson.Messa
 	return n.handshakes.handleDecision(ctx, conn, msg.ID, decision)
 }
 
+// handleEventEnvelope applies a batch of streamed events from the master in
+// order. It answers with an eventAck after every entry was applied, or with
+// an error at the first entry that failed to apply.
+func (n *node) handleEventEnvelope(ctx context.Context, conn link, peerConn *nodeConn, msg *msgjson.Message) *msgjson.Error {
+	batch, msgErr := decodeRoutePayload(msg, "event batch", validateEventBatch)
+	if msgErr != nil {
+		return msgErr
+	}
+
+	if !n.eventsGateOpen() {
+		return msgjson.NewError(msgjson.RPCInternal,
+			"event envelope before this node was ready for events")
+	}
+
+	for _, entry := range batch.Entries {
+		if err := n.applyInboundEventEnvelope(peerConn, entry); err != nil {
+			return msgjson.NewError(msgjson.RPCInternal, "event apply failed: %v", err)
+		}
+	}
+
+	return sendRouteResponse(conn, msg.ID, &eventAck{}, "event")
+}
+
 // requestServe sends sig to the state machine and reports whether the
 // signal has been handled. TryAgainLater is returned if the node is not
 // in the correct mode to handle the signal.
@@ -183,6 +208,121 @@ func (n *node) requestServe(sig meshSignal, routeName string) *msgjson.Error {
 			"%s: this node is not the established master on this connection (mode %s)", routeName, res.state.mode)
 	}
 	return nil
+}
+
+// handleStreamSubscribe answers a subscription to the event stream. It first
+// checks the slave's frontier against the log. Then the state machine starts
+// the stream, and the response carries this node's current tip.
+func (n *node) handleStreamSubscribe(ctx context.Context, conn link, msg *msgjson.Message) *msgjson.Error {
+	sub, msgErr := decodeRoutePayload(msg, "stream subscribe", validateStreamSubscribe)
+	if msgErr != nil {
+		return msgErr
+	}
+
+	frontier := fromFrontierMessage(sub.Frontier)
+
+	if msgErr := n.validateSubscribeAgainstLog(ctx, frontier); msgErr != nil {
+		if msgErr.Code == msgjson.SubscribeRejectedError {
+			n.log.Warnf("Rejecting stream subscription from %s: %v", conn.Addr(), msgErr)
+		}
+		return msgErr
+	}
+
+	sig := streamSubscribeSignal{connID: conn.ID(), frontier: frontier}
+	if msgErr := n.requestServe(sig, "stream subscribe"); msgErr != nil {
+		return msgErr
+	}
+
+	// The stream is started. Tell the slave where this node's log ends.
+	local, err := n.eventLogReader.EventLogFrontier(ctx)
+	if err != nil {
+		return msgjson.NewError(msgjson.RPCInternal, "event log frontier: %v", err)
+	}
+
+	return sendRouteResponse(conn, msg.ID, &streamSubscribeResult{MasterTip: local.Seq}, "stream subscribe")
+}
+
+// validateSubscribeAgainstLog checks that this node's log can serve the event
+// stream from peerFrontier. A SubscribeRejectedError will cause the slave to halt.
+func (n *node) validateSubscribeAgainstLog(ctx context.Context, peerFrontier *db.EventLogPosition) *msgjson.Error {
+	localFrontier, err := n.eventLogReader.EventLogFrontier(ctx)
+	if err != nil {
+		return msgjson.NewError(msgjson.RPCInternal, "event log frontier: %v", err)
+	}
+
+	if peerFrontier.Seq > 0 {
+		return n.validateResumePosition(ctx, peerFrontier, localFrontier)
+	}
+
+	return n.validateFullReplay(ctx, localFrontier)
+}
+
+// validateResumePosition checks that peerFrontier is a position in this
+// node's log with the same tip hash.
+func (n *node) validateResumePosition(ctx context.Context, peerFrontier, localFrontier *db.EventLogPosition) *msgjson.Error {
+	if peerFrontier.Seq > localFrontier.Seq {
+		return msgjson.NewError(msgjson.SubscribeRejectedError,
+			"subscribe frontier %d beyond this node's tip %d", peerFrontier.Seq, localFrontier.Seq)
+	}
+	tipHash := localFrontier.TipHash
+	if peerFrontier.Seq < localFrontier.Seq {
+		entry, err := entryAt(ctx, n.eventLogReader, peerFrontier.Seq)
+		if err != nil {
+			return msgjson.NewError(msgjson.RPCInternal, "event log read: %v", err)
+		}
+		if entry == nil {
+			return msgjson.NewError(msgjson.SubscribeRejectedError,
+				"subscribe frontier %d is not in this node's replayable history", peerFrontier.Seq)
+		}
+		tipHash = entry.TipHash
+	}
+	if !bytes.Equal(tipHash, peerFrontier.TipHash) {
+		return msgjson.NewError(msgjson.SubscribeRejectedError,
+			"subscribe frontier %d tip hash does not match this node's log (diverged)", peerFrontier.Seq)
+	}
+	return nil
+}
+
+// validateFullReplay checks that this node's log can be replayed from the
+// start. The log must be empty, or begin at sequence 1 with a real event. A
+// log that begins at an anchor can only be joined from a snapshot.
+func (n *node) validateFullReplay(ctx context.Context, localFrontier *db.EventLogPosition) *msgjson.Error {
+	if localFrontier.Seq == 0 {
+		return nil
+	}
+	entry, err := entryAt(ctx, n.eventLogReader, 1)
+	if err != nil {
+		return msgjson.NewError(msgjson.RPCInternal, "event log read: %v", err)
+	}
+	if entry == nil {
+		return msgjson.NewError(msgjson.SubscribeRejectedError,
+			"this node's event log does not begin at sequence 1 and its earlier state is "+
+				"not replayable; the peer must seed from a snapshot instead")
+	}
+	if db.IsEventLogAnchorKind(entry.Kind) {
+		return msgjson.NewError(msgjson.SubscribeRejectedError,
+			"this node's event log begins at a %q anchor and its earlier state is not "+
+				"replayable; the peer must seed from a snapshot instead", entry.Kind)
+	}
+	return nil
+}
+
+// entryAt returns the log entry at seq, or nil when the log has none. The
+// entry is missing when it was never written or was pruned behind an anchor.
+// Seq 0 is the empty log and has no entry.
+func entryAt(ctx context.Context, reader db.EventLogReader, seq uint64) (*db.EventLogEntry, error) {
+	if seq == 0 {
+		return nil, nil
+	}
+	entries, err := reader.EventLogEntriesAfter(ctx, seq-1, 1)
+	if err != nil {
+		return nil, err
+	}
+	// entries[0].Seq != seq  means the entry was pruned behind an anchor.
+	if len(entries) == 0 || entries[0] == nil || entries[0].Seq != seq {
+		return nil, nil
+	}
+	return entries[0], nil
 }
 
 // handleSnapshotRequest handles a slave's request for a snapshot of the

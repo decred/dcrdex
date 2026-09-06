@@ -558,6 +558,101 @@ func TestNodeRoutesPolicyBeforeParse(t *testing.T) {
 	}
 }
 
+func TestNodeRoutesHandleEventEnvelope(t *testing.T) {
+	t.Run("allows syncing and established slave states", func(t *testing.T) {
+		for _, mode := range []nodeMode{modeEstablishedSlaveSyncing, modeEstablishedSlave} {
+			t.Run(mode.String(), func(t *testing.T) {
+				active := newTRouteLink(701)
+				handler := newRouteTestNode(mode, active, &testMeshApplication{
+					event: func(context.Context, *eventEnvelope) error {
+						return nil
+					},
+				})
+
+				rpcErr := handleRoutePayload(t, handler, eventEnvelopeRoute, active, &eventBatch{Entries: []*eventEnvelope{{
+					Seq:       1,
+					TipHash:   testTipHash(1),
+					MasterTip: 2,
+					Kind:      "test",
+				}}})
+				requireNoRPCError(t, rpcErr)
+				requireSent(t, active, 1)
+			})
+		}
+	})
+
+	t.Run("uses accepted connection snapshot for caught up event", func(t *testing.T) {
+		active := newTRouteLink(702)
+		replacement := newTRouteLink(703)
+		handler := newRouteTestNode(modeEstablishedSlaveSyncing, active, nil)
+		handler.app = &testMeshApplication{
+			event: func(context.Context, *eventEnvelope) error {
+				handler.control.setState(nodeState{
+					mode:       modeEstablishedSlaveSyncing,
+					activeConn: newNodeConn(replacement, "replacement-node", "replacement-node"),
+				})
+				return nil
+			},
+		}
+
+		caughtUp := make(chan *nodeConn, 1)
+		go func() {
+			queued := <-handler.control.testQueue()
+			ev, ok := queued.signal.(streamCaughtUpSignal)
+			if ok {
+				caughtUp <- ev.conn
+			}
+		}()
+
+		rpcErr := handleRoutePayload(t, handler, eventEnvelopeRoute, active, &eventBatch{Entries: []*eventEnvelope{{
+			Seq:       1,
+			TipHash:   testTipHash(1),
+			MasterTip: 1,
+			Kind:      "test",
+		}}})
+		requireNoRPCError(t, rpcErr)
+
+		select {
+		case got := <-caughtUp:
+			if got == nil || got.link != active {
+				t.Fatalf("caught up conn = %v, want original active link", got)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("missing stream caught up event")
+		}
+	})
+
+	t.Run("uses run context after route cancellation", func(t *testing.T) {
+		active := newTRouteLink(704)
+		appliedCtx := make(chan context.Context, 1)
+		handler := newRouteTestNode(modeEstablishedSlave, active, &testMeshApplication{
+			event: func(ctx context.Context, _ *eventEnvelope) error {
+				appliedCtx <- ctx
+				return ctx.Err()
+			},
+		})
+		runCtx := context.Background()
+		handler.runContext = runCtx
+		routeCtx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		rpcErr := handleRouteMessage(t, routeCtx, handler, active,
+			mustRequestMessage(t, eventEnvelopeRoute, &eventBatch{Entries: []*eventEnvelope{{
+				Seq: 1, TipHash: testTipHash(1), MasterTip: 2, Kind: "test",
+			}}}))
+		requireNoRPCError(t, rpcErr)
+		requireSent(t, active, 1)
+		select {
+		case got := <-appliedCtx:
+			if got != runCtx {
+				t.Fatalf("apply context = %v, want node run context", got)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("event was not applied")
+		}
+	})
+}
+
 func TestNodeRoutesHandleHello(t *testing.T) {
 	fix := newRouteHandshakeFixture(t)
 
@@ -938,6 +1033,47 @@ func TestNodeRoutesHandshakeAuthPolicy(t *testing.T) {
 	}
 }
 
+func TestValidateEventBatch(t *testing.T) {
+	valid := func(seq uint64) *eventEnvelope {
+		return &eventEnvelope{
+			Seq:       seq,
+			TipHash:   testTipHash(seq),
+			MasterTip: eventStreamBatchLimit + 1,
+			Kind:      "test",
+		}
+	}
+	atLimit := make([]*eventEnvelope, eventStreamBatchLimit)
+	for i := range atLimit {
+		atLimit[i] = valid(uint64(i + 1))
+	}
+	overLimit := make([]*eventEnvelope, eventStreamBatchLimit+1)
+	for i := range overLimit {
+		overLimit[i] = valid(uint64(i + 1))
+	}
+	tests := []struct {
+		name    string
+		batch   *eventBatch
+		wantErr bool
+	}{
+		{"nil", nil, true},
+		{"empty", &eventBatch{}, true},
+		{"nil entry", &eventBatch{Entries: []*eventEnvelope{nil}}, true},
+		{"non-contiguous", &eventBatch{Entries: []*eventEnvelope{valid(1), valid(3)}}, true},
+		{"over limit", &eventBatch{Entries: overLimit}, true},
+		{"at limit ok", &eventBatch{Entries: atLimit}, false},
+		{"one entry ok", &eventBatch{Entries: []*eventEnvelope{valid(1)}}, false},
+		{"two contiguous ok", &eventBatch{Entries: []*eventEnvelope{valid(1), valid(2)}}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateEventBatch(tt.batch)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateEventBatch error = %v, wantErr = %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 // controlAnswer replies to the next signal on a node's control queue and
 // records that signal.
 type controlAnswer struct {
@@ -975,6 +1111,97 @@ func (a *controlAnswer) wait(t testing.TB) meshSignal {
 		t.Fatalf("no control signal received")
 		return nil
 	}
+}
+
+// none fails the test if a signal was answered.
+func (a *controlAnswer) none(t testing.TB) {
+	t.Helper()
+	select {
+	case sig := <-a.got:
+		t.Fatalf("unexpected control signal %T", sig)
+	default:
+	}
+}
+
+func decodeResultInto(t testing.TB, msg *msgjson.Message, result any) {
+	t.Helper()
+	resp, err := msg.Response()
+	if err != nil {
+		t.Fatalf("Response error: %v", err)
+	}
+	if resp.Error != nil {
+		t.Fatalf("unexpected response error: %v", resp.Error)
+	}
+	if err := json.Unmarshal(resp.Result, result); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+}
+
+func TestNodeRoutesHandleStreamSubscribe(t *testing.T) {
+	tip := &db.EventLogPosition{Seq: 10, TipHash: testTipHash(10)}
+	subscribeAt := func(pos *db.EventLogPosition) *streamSubscribe {
+		return &streamSubscribe{Frontier: toFrontierMessage(pos)}
+	}
+
+	t.Run("starts the stream and reports the master tip", func(t *testing.T) {
+		active := newTRouteLink(801)
+		handler := newRouteTestNode(modeEstablishedMaster, active, nil)
+		handler.eventLogReader = &testEventLogReader{frontier: tip}
+		answer := answerControlSignal(t, handler, signalResult{
+			handled: true,
+			state:   nodeState{mode: modeEstablishedMaster},
+		})
+
+		rpcErr := handleRoutePayload(t, handler, streamSubscribeRoute, active, subscribeAt(tip))
+		requireNoRPCError(t, rpcErr)
+		sig, ok := answer.wait(t).(streamSubscribeSignal)
+		if !ok || sig.connID != active.ID() || sig.frontier.Seq != tip.Seq {
+			t.Fatalf("control signal = %+v, want stream subscribe on conn %d at seq %d", sig, active.ID(), tip.Seq)
+		}
+		var result streamSubscribeResult
+		decodeResultInto(t, requireSent(t, active, 1)[0], &result)
+		if result.MasterTip != tip.Seq {
+			t.Fatalf("master tip = %d, want %d", result.MasterTip, tip.Seq)
+		}
+	})
+
+	t.Run("not the master gets try again later", func(t *testing.T) {
+		active := newTRouteLink(802)
+		handler := newRouteTestNode(modeEstablishedSlave, active, nil)
+		handler.eventLogReader = &testEventLogReader{frontier: tip}
+		answerControlSignal(t, handler, signalResult{state: nodeState{mode: modeEstablishedSlave}})
+
+		rpcErr := handleRoutePayload(t, handler, streamSubscribeRoute, active, subscribeAt(tip))
+		requireRPCOutcome(t, rpcErr, msgjson.TryAgainLaterError, "not the established master")
+		requireNoSent(t, active)
+	})
+
+	t.Run("control error is internal", func(t *testing.T) {
+		active := newTRouteLink(803)
+		handler := newRouteTestNode(modeEstablishedMaster, active, nil)
+		handler.eventLogReader = &testEventLogReader{frontier: tip}
+		answerControlSignal(t, handler, signalResult{err: errors.New("boom")})
+
+		rpcErr := handleRoutePayload(t, handler, streamSubscribeRoute, active, subscribeAt(tip))
+		requireRPCOutcome(t, rpcErr, msgjson.RPCInternal, "stream subscribe failed")
+		requireNoSent(t, active)
+	})
+
+	t.Run("rejects a frontier beyond the tip before the state machine", func(t *testing.T) {
+		active := newTRouteLink(804)
+		handler := newRouteTestNode(modeEstablishedMaster, active, nil)
+		handler.eventLogReader = &testEventLogReader{frontier: tip}
+		answer := answerControlSignal(t, handler, signalResult{
+			handled: true,
+			state:   nodeState{mode: modeEstablishedMaster},
+		})
+
+		beyond := &db.EventLogPosition{Seq: 11, TipHash: testTipHash(11)}
+		rpcErr := handleRoutePayload(t, handler, streamSubscribeRoute, active, subscribeAt(beyond))
+		requireRPCOutcome(t, rpcErr, msgjson.SubscribeRejectedError, "beyond this node's tip")
+		requireNoSent(t, active)
+		answer.none(t)
+	})
 }
 
 func TestNodeRoutesHandleSnapshotRequest(t *testing.T) {

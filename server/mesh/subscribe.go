@@ -11,10 +11,15 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/server/db"
 )
 
 const (
+	// subscribeTimeout is the slave's idle timeout. If the slave does not have
+	// an active stream or snapshot for this timeout, it is disconnected.
+	subscribeTimeout = 15 * time.Minute
+
 	// seedTimeout limits the wait for seeding a new node.
 	seedTimeout = 10 * time.Minute
 
@@ -25,6 +30,97 @@ const (
 
 // errSeedConnectionClosed identifies a seed wait stopped by connection loss.
 var errSeedConnectionClosed = errors.New("connection closed")
+
+// runSubscriber starts the subscriber loop on the slave. It waits
+// for the node to be able to receive events, then requests the
+// master to start streaming events.
+func (n *node) runSubscriber(conn *nodeConn) {
+	select {
+	case <-n.eventsGate.resolved():
+	case <-conn.link.Done():
+		return
+	}
+
+	for {
+		state := n.control.currentState()
+		if !sameConn(state.activeConn, conn) || !state.mode.canReceiveEventStream() {
+			return
+		}
+		if n.trySubscribe(conn) {
+			return
+		}
+		if sleepSubscribeRetry(n.runContext, conn) != nil {
+			return
+		}
+	}
+}
+
+// trySubscribe requests the master to start streaming events.
+// It returns true if the request was accepted.
+func (n *node) trySubscribe(conn *nodeConn) (done bool) {
+	frontier, err := n.eventLogReader.EventLogFrontier(n.runContext)
+	if err != nil {
+		if n.runContext.Err() == nil {
+			n.log.Errorf("trySubscribe: EventLogFrontier: %v", err)
+		}
+		return false
+	}
+
+	var result streamSubscribeResult
+	err = conn.link.Request(n.runContext, streamSubscribeRoute, &streamSubscribe{
+		Frontier: toFrontierMessage(frontier),
+	}, &result)
+	if err == nil {
+		n.log.Infof("Mesh event subscribe accepted by peer %s from frontier %s (peer tip %d).",
+			meshPeerLogID(conn), frontier, result.MasterTip)
+
+		// Check if we are already caught up.
+		if result.MasterTip == frontier.Seq {
+			if postErr := n.control.post(streamCaughtUpSignal{conn: conn, target: frontier}); postErr != nil {
+				n.log.Debugf("failed to post subscribe caught-up: %v", postErr)
+			}
+		}
+		return true
+	}
+
+	if subscribeRejectionPermanent(err) {
+		n.log.Warnf("Mesh event subscribe permanently rejected by peer %s: %v", meshPeerLogID(conn), err)
+		n.postSubscribeRejected(conn, fmt.Errorf("stream subscribe rejected: %w", err))
+		return true
+	}
+
+	// Retryable rejection or transport failure.
+	return false
+}
+
+// subscribeRejectionPermanent reports whether err is a permanent stream
+// refusal.
+func subscribeRejectionPermanent(err error) bool {
+	var peerErr *peerRPCError
+	return errors.As(err, &peerErr) && peerErr.Code == msgjson.SubscribeRejectedError
+}
+
+// postSubscribeRejected reports a permanent stream refusal to the state
+// machine.
+func (n *node) postSubscribeRejected(conn *nodeConn, err error) {
+	_ = n.control.post(subscribeRejectedSignal{conn: conn, err: err, at: time.Now()})
+}
+
+// sleepSubscribeRetry waits for the retry delay.
+// It returns an error if ctx ends or the connection closes first.
+func sleepSubscribeRetry(ctx context.Context, conn *nodeConn) error {
+	const subscribeRetryDelay = time.Second
+	timer := time.NewTimer(subscribeRetryDelay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-conn.link.Done():
+		return errSeedConnectionClosed
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
 
 // seedInProgress reports whether initial database seeding is pending or
 // running.
@@ -229,4 +325,44 @@ func (a *seedAttempt) outcome() error {
 	a.mtx.Lock()
 	defer a.mtx.Unlock()
 	return a.err
+}
+
+// watchSubscribeTimeout periodically checks that the slave has either
+// an active stream or snapshot. If the slave is idle for too long,
+// it is disconnected.
+func (n *node) watchSubscribeTimeout(peerConn *nodeConn) {
+	ticker := time.NewTicker(subscribeTimeout / 10)
+	defer ticker.Stop()
+
+	var silentSince time.Time
+	for {
+		select {
+		case <-peerConn.link.Done():
+			return
+		case <-ticker.C:
+		}
+
+		state := n.control.currentState()
+		if !sameConn(state.activeConn, peerConn) {
+			return
+		}
+
+		silent := state.mode.isAuthoritativeMaster() &&
+			!n.stream.isStreamingTo(peerConn.ID()) &&
+			!n.snapshots.sendingTo(peerConn.ID())
+		if !silent {
+			silentSince = time.Time{}
+			continue
+		}
+		if silentSince.IsZero() {
+			silentSince = time.Now()
+		}
+		if time.Since(silentSince) < subscribeTimeout {
+			continue
+		}
+		n.log.Debugf("Mesh peer %s adopted but not streaming for %v. Disconnecting so it can connect and handshake again.",
+			meshPeerLogID(peerConn), subscribeTimeout)
+		peerConn.link.Disconnect()
+		return
+	}
 }

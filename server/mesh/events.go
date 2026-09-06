@@ -76,6 +76,13 @@ func forwardedCommandEventOrigin(commandID string, resultFn func() any) eventOri
 	}
 }
 
+func receivedCommandEventOrigin(commandID string) eventOrigin {
+	return eventOrigin{
+		kind:      originReceivedCommand,
+		commandID: commandID,
+	}
+}
+
 // collectsAfterCommandResult reports whether this node owns the local client
 // response for the event and should therefore gather AfterCommandResult
 // callbacks during apply.
@@ -133,3 +140,10 @@ func (c *EventApplyContext) AfterCommandResult(f func(context.Context)) bool {
 // (at Position when set). Mesh delivers the client response; the applier
 // does not.
 type EventApplier func(*EventApplyContext, *Event) (*db.EventLogEntry, error)
+
+func eventFromEnvelope(entry *eventEnvelope) *Event {
+	return &Event{
+		Kind:    entry.Kind,
+		Payload: append([]byte(nil), entry.Payload...),
+	}
+}
