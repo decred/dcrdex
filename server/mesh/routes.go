@@ -169,6 +169,75 @@ func (n *node) handleDecision(ctx context.Context, conn link, msg *msgjson.Messa
 	return n.handshakes.handleDecision(ctx, conn, msg.ID, decision)
 }
 
+// handleCommandForward accepts a command that the slave forwarded. It checks
+// the payload and runs the command in a new goroutine, which sends the
+// response when the command is finished. A bad payload is refused at once.
+func (n *node) handleCommandForward(_ context.Context, conn link, _ *nodeConn, msg *msgjson.Message) *msgjson.Error {
+	cmd, msgErr := decodeRoutePayload(msg, "forwarded command", validateCommandForward)
+	if msgErr != nil {
+		return msgErr
+	}
+	// The executor can send requests to the slave on this same link, for
+	// example command_result, command_failure or a relayed client message.
+	// This connection's read loop reads their responses. The command must
+	// run off the read loop, or the loop would wait on itself.
+	go n.runForwardedCommand(conn, msg.ID, cmd.CommandID, CommandRequest{
+		Kind: cmd.Kind,
+		User: cmd.User,
+		Msg:  cmd.Msg,
+	})
+
+	return nil
+}
+
+// runForwardedCommand runs a forwarded command and answers the forward
+// request.
+func (n *node) runForwardedCommand(conn link, reqID uint64, commandID string, req CommandRequest) {
+	// The command runs under the node run context. The handler context is
+	// the connection context, and a peer disconnect must not abort a command
+	// in the middle of an apply.
+	//
+	// Errors in the executor are sent as an error response.
+	if msgErr := n.app.executeForwardedCommand(n.runContext, commandID, req); msgErr != nil {
+		if sendErr := sendRouteErrorResponse(conn, reqID, msgErr, "forwarded command"); sendErr != nil {
+			n.log.Debugf("failed to send forwarded command error response: %v", sendErr)
+		}
+		return
+	}
+
+	// Just ack here. The actual response is sent in an event envelope, command_result or
+	// command_failure.
+	if err := sendRouteAck(conn, reqID, "forwarded command"); err != nil {
+		n.log.Debugf("failed to send forwarded command ack: %v", err)
+	}
+}
+
+// handleCommandFailure handles a command_failure sent from the master
+// to the slave. This is an async response to a command_forward.
+func (n *node) handleCommandFailure(_ context.Context, conn link, _ *nodeConn, msg *msgjson.Message) *msgjson.Error {
+	fail, msgErr := decodeRoutePayload(msg, "command failure", validateCommandFailure)
+	if msgErr != nil {
+		return msgErr
+	}
+
+	n.app.receiveCommandFailure(fail.CommandID, fail.Error)
+
+	return sendRouteAck(conn, msg.ID, "command failure")
+}
+
+// handleCommandResult handles a command_result sent from the master to the
+// slave. This is an async response to a command_forward.
+func (n *node) handleCommandResult(_ context.Context, conn link, _ *nodeConn, msg *msgjson.Message) *msgjson.Error {
+	result, msgErr := decodeRoutePayload(msg, "command result", validateCommandResult)
+	if msgErr != nil {
+		return msgErr
+	}
+
+	n.app.receiveCommandResult(result.CommandID, result.Result)
+
+	return sendRouteAck(conn, msg.ID, "command result")
+}
+
 // handleEventEnvelope applies a batch of streamed events from the master in
 // order. It answers with an eventAck after every entry was applied, or with
 // an error at the first entry that failed to apply.

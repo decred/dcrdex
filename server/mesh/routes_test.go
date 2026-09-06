@@ -10,6 +10,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -164,6 +165,19 @@ func decodeEmptyResponse(t testing.TB, msg *msgjson.Message) {
 	}
 }
 
+func decodeResponseError(t testing.TB, msg *msgjson.Message) *msgjson.Error {
+	t.Helper()
+
+	resp, err := msg.Response()
+	if err != nil {
+		t.Fatalf("Response error: %v", err)
+	}
+	if resp.Error == nil {
+		t.Fatalf("expected response error")
+	}
+	return resp.Error
+}
+
 func requireNoRPCError(t testing.TB, rpcErr *msgjson.Error) {
 	t.Helper()
 	if rpcErr != nil {
@@ -207,6 +221,17 @@ func requireOneAck(t testing.TB, conn *tRouteLink) {
 func requireNoSent(t testing.TB, conn *tRouteLink) {
 	t.Helper()
 	requireSent(t, conn, 0)
+}
+
+func requireResponseErrorCode(t testing.TB, conn *tRouteLink, code int) {
+	t.Helper()
+	msg := requireSent(t, conn, 1)[0]
+	if msg.ID != 1 {
+		t.Fatalf("response id = %d, want 1", msg.ID)
+	}
+	if got := decodeResponseError(t, msg); got.Code != code {
+		t.Fatalf("response error = %+v, want code %d", got, code)
+	}
 }
 
 func waitForCondition(t testing.TB, cond func() bool, desc string) {
@@ -296,6 +321,17 @@ func handleRouteMessage(t testing.TB, ctx context.Context, n *node, conn link, m
 		t.Fatalf("missing test route %q", msg.Route)
 	}
 	return route.handler(ctx, conn, msg)
+}
+
+func validCommandForward(t *testing.T, commandID string) *commandForward {
+	t.Helper()
+	req := testCommandRequest(t)
+	return &commandForward{
+		CommandID: commandID,
+		Kind:      req.Kind,
+		User:      req.User,
+		Msg:       req.Msg,
+	}
 }
 
 type capturedHandshakeResolution struct {
@@ -503,6 +539,175 @@ func peerHandshakeCapture(role helloRole, progress progressState, frontier *db.E
 		peerNodeID:   routePeerNodeID,
 		initiatorID:  routePeerNodeID,
 	}
+}
+
+func TestNodeRoutesHandleCommandResult(t *testing.T) {
+	t.Run("delivers pending result and sends ack", func(t *testing.T) {
+		active := newTRouteLink(301)
+		svc := &Service{commands: newTestCommandCoordinator(nil, nil)}
+		req := testCommandRequest(t)
+		responder := new(testCommandResponder)
+		req.Respond = responder.Send
+		svc.commands.registerPending("cmd-ok", req)
+		defer svc.commands.removePending("cmd-ok")
+		result := map[string]string{"status": "ok"}
+
+		handler := newRouteTestNode(modeEstablishedSlave, active, &testMeshApplication{
+			commandResult: svc.receiveCommandResult,
+		})
+
+		rpcErr := handleRoutePayload(t, handler, commandResultRoute, active, &commandResult{
+			CommandID: "cmd-ok",
+			Result:    mustMarshalJSON(t, result),
+		})
+		requireNoRPCError(t, rpcErr)
+
+		requireOneAck(t, active)
+		svc.commands.pendingMtx.Lock()
+		pending := svc.commands.pending["cmd-ok"]
+		svc.commands.pendingMtx.Unlock()
+		if pending != nil {
+			t.Fatalf("pending command was not removed")
+		}
+		responder.requireResult(t, result)
+	})
+
+	t.Run("rejects invalid payload", func(t *testing.T) {
+		active := newTRouteLink(305)
+		handler := newRouteTestNode(modeEstablishedSlave, active, &testMeshApplication{
+			commandResult: func(string, json.RawMessage) {
+				t.Fatalf("unexpected command result callback")
+			},
+		})
+
+		result := map[string]string{"status": "ok"}
+		rpcErr := handleRoutePayload(t, handler, commandResultRoute, active, &commandResult{
+			Result: mustMarshalJSON(t, result),
+		})
+		requireRPCCode(t, rpcErr, msgjson.RPCParseError)
+	})
+}
+
+func TestNodeRoutesHandleCommandFailure(t *testing.T) {
+	t.Run("delivers failure and sends ack", func(t *testing.T) {
+		active := newTRouteLink(351)
+		wantErr := msgjson.NewError(msgjson.FundingError, "funding failed")
+		var (
+			gotCommandID string
+			gotErr       *msgjson.Error
+		)
+		handler := newRouteTestNode(modeEstablishedSlave, active, &testMeshApplication{
+			commandFailure: func(commandID string, msgErr *msgjson.Error) {
+				gotCommandID = commandID
+				gotErr = msgErr
+			},
+		})
+
+		rpcErr := handleRoutePayload(t, handler, commandFailureRoute, active, &commandFailure{
+			CommandID: "cmd-fail",
+			Error:     wantErr,
+		})
+		requireNoRPCError(t, rpcErr)
+		if gotErr == nil {
+			t.Fatalf("command failure callback was not called")
+		}
+		if gotCommandID != "cmd-fail" || gotErr.Code != wantErr.Code {
+			t.Fatalf("command failure = %s %+v, want command cmd-fail code %d", gotCommandID, gotErr, wantErr.Code)
+		}
+		requireOneAck(t, active)
+	})
+
+}
+
+func TestNodeRoutesHandleCommandForward(t *testing.T) {
+	t.Run("sends startup ack only after app completes", func(t *testing.T) {
+		active := newTRouteLink(401)
+		started := make(chan struct{})
+		release := make(chan struct{})
+		handler := newRouteTestNode(modeEstablishedMaster, active, &testMeshApplication{
+			commandForward: func(context.Context, string, CommandRequest) *msgjson.Error {
+				close(started)
+				<-release
+				return nil
+			},
+		})
+
+		rpcErr := handleRoutePayload(t, handler, commandForwardRoute, active, validCommandForward(t, "cmd-async"))
+		requireNoRPCError(t, rpcErr)
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatalf("command app handler did not start")
+		}
+		requireNoSent(t, active)
+
+		close(release)
+		waitForCondition(t, func() bool { return len(active.sentMessages()) == 1 }, "forwarded command ack")
+		requireOneAck(t, active)
+	})
+
+	t.Run("preserves msgjson app error", func(t *testing.T) {
+		active := newTRouteLink(402)
+		wantErr := msgjson.NewError(msgjson.FundingError, "funding failed")
+		handler := newRouteTestNode(modeEstablishedMaster, active, &testMeshApplication{
+			commandForward: func(context.Context, string, CommandRequest) *msgjson.Error {
+				return wantErr
+			},
+		})
+
+		rpcErr := handleRoutePayload(t, handler, commandForwardRoute, active, validCommandForward(t, "cmd-msgjson-err"))
+		requireNoRPCError(t, rpcErr)
+		waitForCondition(t, func() bool { return len(active.sentMessages()) == 1 }, "forwarded command error response")
+		requireResponseErrorCode(t, active, wantErr.Code)
+	})
+
+	t.Run("runs under the node run context", func(t *testing.T) {
+		active := newTRouteLink(405)
+		gotCtx := make(chan context.Context, 1)
+		handler := newRouteTestNode(modeEstablishedMaster, active, &testMeshApplication{
+			commandForward: func(ctx context.Context, _ string, _ CommandRequest) *msgjson.Error {
+				gotCtx <- ctx
+				return nil
+			},
+		})
+		type runKey struct{}
+		runCtx := context.WithValue(context.Background(), runKey{}, "run")
+		handler.runContext = runCtx
+		routeCtx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		rpcErr := handleRouteMessage(t, routeCtx, handler, active,
+			mustRequestMessage(t, commandForwardRoute, validCommandForward(t, "cmd-ctx")))
+		requireNoRPCError(t, rpcErr)
+		select {
+		case got := <-gotCtx:
+			if got != runCtx {
+				t.Fatalf("command context = %v, want node run context", got)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("command was not run")
+		}
+		waitForCondition(t, func() bool { return len(active.sentMessages()) == 1 }, "forwarded command ack")
+		requireOneAck(t, active)
+	})
+
+	t.Run("rejects invalid payload before app goroutine", func(t *testing.T) {
+		active := newTRouteLink(404)
+		var called atomic.Bool
+		handler := newRouteTestNode(modeEstablishedMaster, active, &testMeshApplication{
+			commandForward: func(context.Context, string, CommandRequest) *msgjson.Error {
+				called.Store(true)
+				return nil
+			},
+		})
+
+		rpcErr := handleRoutePayload(t, handler, commandForwardRoute, active, &commandForward{})
+		requireRPCCode(t, rpcErr, msgjson.RPCParseError)
+		requireNoSent(t, active)
+		if called.Load() {
+			t.Fatalf("unexpected command app call")
+		}
+	})
 }
 
 func TestNodeRoutesPolicyBeforeParse(t *testing.T) {

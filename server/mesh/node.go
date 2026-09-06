@@ -592,6 +592,91 @@ func (n *node) activePeerForRequest(allowed func(nodeMode) bool) (*nodeConn, err
 	return state.activeConn, nil
 }
 
+// activePeerForCommandForward returns the active peer connection if the
+// current mode allows command forwarding. If there is no active connection,
+// or if command forwarding is not allowed in the current mode, it returns an
+// error.
+func (n *node) activePeerForCommandForward(kind string) (*nodeConn, *msgjson.Error) {
+	state := n.control.currentState()
+	if !state.mode.canForwardCommands() || state.activeConn == nil || state.activeConn.link == nil {
+		return nil, msgjson.NewError(msgjson.TryAgainLaterError,
+			"mesh command %q cannot be forwarded; retry the request", kind)
+	}
+	return state.activeConn, nil
+}
+
+// canExecuteCommandLocally reports if the current mode allows command
+// execution locally.
+func (n *node) canExecuteCommandLocally() bool {
+	return n.control.currentMode().canExecuteCommands()
+}
+
+// canForwardCommand reports if the current mode allows command forwarding.
+func (n *node) canForwardCommand() bool {
+	state := n.control.currentState()
+	return state.mode.canForwardCommands() && state.activeConn != nil && state.activeConn.link != nil
+}
+
+// forwardCommand forwards a prepared state-changing client command from a
+// slave to the current master.
+func (n *node) forwardCommand(ctx context.Context, cmd *commandForward) (*msgjson.Error, bool) {
+	conn, msgErr := n.activePeerForCommandForward(cmd.Kind)
+	if msgErr != nil {
+		return msgErr, false
+	}
+
+	// Use a default request timeout shorter than the pending-command
+	// timeout so a late completion can still find the pending entry.
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, forwardCommandTimeout)
+		defer cancel()
+	}
+
+	if err := conn.link.Request(ctx, commandForwardRoute, cmd, nil); err != nil {
+		n.log.Debugf("Command %q forward to master failed: %v", cmd.Kind, err)
+
+		// peerRPCError means that the request reached the master, but was
+		// rejected.
+		var peerErr *peerRPCError
+		if errors.As(err, &peerErr) {
+			// UnauthorizedConnection is returned when the request is rejected
+			// because master not in the correct mode to execute a forwarded
+			// command. This means the client should TryAgainLater.
+			if peerErr.Code != msgjson.UnauthorizedConnection {
+				return peerErr.MsgError(), false
+			}
+			return msgjson.NewError(msgjson.TryAgainLaterError,
+				"mesh command %q forward refused by a mesh gate; retry the request", cmd.Kind), false
+		}
+
+		// No response. The command may have reached the master anyway.
+		return nil, true
+	}
+
+	return nil, false
+}
+
+// sendCommandFailure sends a terminal failure for an accepted forwarded command
+// from the master to the slave holding the original client request.
+func (n *node) sendCommandFailure(ctx context.Context, fail *commandFailure) error {
+	conn, err := n.activePeerForRequest(nodeMode.canDeliverCommandCompletions)
+	if err != nil {
+		return fmt.Errorf("mesh command failure: %w", err)
+	}
+	return conn.link.Request(ctx, commandFailureRoute, fail, nil)
+}
+
+// sendCommandResult sends a success result for an accepted forwarded command
+// from the master to the slave holding the original client request.
+func (n *node) sendCommandResult(ctx context.Context, result *commandResult) error {
+	conn, err := n.activePeerForRequest(nodeMode.canDeliverCommandCompletions)
+	if err != nil {
+		return fmt.Errorf("mesh command result: %w", err)
+	}
+	return conn.link.Request(ctx, commandResultRoute, result, nil)
+}
+
 // notifyMasterReady sends a signal to the control loop to indicate
 // the master is ready to serve clients.
 func (n *node) notifyMasterReady() error {

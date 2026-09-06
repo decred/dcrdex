@@ -9,8 +9,10 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -107,6 +109,64 @@ func requireServiceReadyBlocked(t testing.TB, svc *Service, desc string) {
 	}
 }
 
+// registerPeerService links two test services synchronously. This is only test
+// plumbing for exercising service-to-service flow without websocket transport.
+func (f *testTransport) registerPeerService(peer *Service) {
+	f.peer = peer
+}
+
+func (f *testTransport) forwardCommand(ctx context.Context, cmd *commandForward) (*msgjson.Error, bool) {
+	var kind string
+	if cmd != nil {
+		kind = cmd.Kind
+	}
+	if !f.slave {
+		return msgjson.NewError(msgjson.TryAgainLaterError,
+			"mesh command %q cannot be forwarded; retry the request", kind), false
+	}
+
+	f.commandForwards = append(f.commandForwards, cmd)
+	if f.err != nil {
+		var peerErr *peerRPCError
+		if errors.As(f.err, &peerErr) {
+			return peerErr.MsgError(), false
+		}
+		return nil, true
+	}
+	if f.peer != nil {
+		if msgErr := f.peer.executeForwardedCommand(ctx, cmd.CommandID, CommandRequest{
+			Kind: cmd.Kind,
+			User: cmd.User,
+			Msg:  cmd.Msg,
+		}); msgErr != nil {
+			return msgErr, false
+		}
+	}
+	return nil, false
+}
+
+func (f *testTransport) sendCommandFailure(_ context.Context, fail *commandFailure) error {
+	f.commandFailures = append(f.commandFailures, fail)
+	if f.err != nil {
+		return f.err
+	}
+	if f.peer != nil {
+		f.peer.receiveCommandFailure(fail.CommandID, fail.Error)
+	}
+	return nil
+}
+
+func (f *testTransport) sendCommandResult(_ context.Context, result *commandResult) error {
+	f.commandResults = append(f.commandResults, result)
+	if f.err != nil {
+		return f.err
+	}
+	if f.peer != nil {
+		f.peer.receiveCommandResult(result.CommandID, result.Result)
+	}
+	return nil
+}
+
 func (f *testTransport) notifyLocalEventCommitted(seq uint64, originCommandID string, commandResult json.RawMessage) {
 	if f.owner == nil || seq == 0 || seq > uint64(len(f.owner.appliedEvents)) {
 		return
@@ -148,6 +208,59 @@ func (f *testTransport) canForwardCommand() bool {
 
 func (f *testTransport) checkEventPublishAvailable(bool) error {
 	return f.eventPublishErr
+}
+
+func (f *testTransport) requireForwardedCommand(t *testing.T, req CommandRequest) *commandForward {
+	t.Helper()
+	if len(f.commandForwards) != 1 {
+		t.Fatalf("forwarded commands = %d, want 1", len(f.commandForwards))
+	}
+	cmd := f.commandForwards[0]
+	if cmd.CommandID == "" {
+		t.Fatalf("forwarded command has empty command id")
+	}
+	if cmd.Kind != req.Kind || cmd.User != req.User || cmd.Msg != req.Msg {
+		t.Fatalf("forwarded command mismatch: %+v", cmd)
+	}
+	return cmd
+}
+
+func (f *testTransport) requireNoForwardedCommands(t *testing.T) {
+	t.Helper()
+	if len(f.commandForwards) != 0 {
+		t.Fatalf("forwarded commands = %d, want 0", len(f.commandForwards))
+	}
+}
+
+func (f *testTransport) requireCommittedEvent(t *testing.T, originCommandID string) {
+	t.Helper()
+	if len(f.committedEvents) != 1 {
+		t.Fatalf("committed events = %d, want 1", len(f.committedEvents))
+	}
+	if got := f.committedEvents[0].OriginCommandID; got != originCommandID {
+		t.Fatalf("committed origin command id = %q, want %q", got, originCommandID)
+	}
+}
+
+func (f *testTransport) requireCommandResult(t *testing.T, commandID string) {
+	t.Helper()
+	if len(f.commandResults) != 1 {
+		t.Fatalf("command results = %d, want 1", len(f.commandResults))
+	}
+	if got := f.commandResults[0].CommandID; got != commandID {
+		t.Fatalf("command result id = %q, want %s", got, commandID)
+	}
+}
+
+func (f *testTransport) requireCommandFailure(t *testing.T, commandID string, code int) {
+	t.Helper()
+	if len(f.commandFailures) != 1 {
+		t.Fatalf("command failures = %d, want 1", len(f.commandFailures))
+	}
+	fail := f.commandFailures[0]
+	if fail.CommandID != commandID || fail.Error.Code != code {
+		t.Fatalf("command failure = %+v, want command %s code %d", fail, commandID, code)
+	}
 }
 
 func newTestService(t *testing.T, exec CommandExecutor, transport *testTransport) *testService {
@@ -266,11 +379,97 @@ func (s *testService) requireAppliedPayload(t *testing.T, want string) {
 	}
 }
 
+func (s *testService) requirePending(t *testing.T, commandID string) {
+	t.Helper()
+	s.commands.pendingMtx.Lock()
+	defer s.commands.pendingMtx.Unlock()
+	if s.commands.pending[commandID] == nil {
+		t.Fatalf("pending command %q was not retained", commandID)
+	}
+}
+
+func (s *testService) requirePendingRemoved(t *testing.T, commandID string) {
+	t.Helper()
+	s.commands.pendingMtx.Lock()
+	defer s.commands.pendingMtx.Unlock()
+	if s.commands.pending[commandID] != nil {
+		t.Fatalf("pending command %q was not removed", commandID)
+	}
+}
+
+func (s *testService) requireNoPending(t *testing.T) {
+	t.Helper()
+	s.commands.pendingMtx.Lock()
+	defer s.commands.pendingMtx.Unlock()
+	if len(s.commands.pending) != 0 {
+		t.Fatalf("pending commands = %d, want 0", len(s.commands.pending))
+	}
+}
+
+type linkedTestServices struct {
+	master *testService
+	slave  *testService
+}
+
+func newLinkedTestServices(t *testing.T, masterExec CommandExecutor) *linkedTestServices {
+	t.Helper()
+	masterTransport := &testTransport{master: true}
+	slaveTransport := &testTransport{slave: true}
+	master := newTestService(t, masterExec, masterTransport)
+	slave := newTestService(t, nil, slaveTransport)
+	masterTransport.registerPeerService(slave.Service)
+	slaveTransport.registerPeerService(master.Service)
+	return &linkedTestServices{master: master, slave: slave}
+}
+
+func (s *linkedTestServices) forwardCommand(t *testing.T, req CommandRequest) string {
+	t.Helper()
+	if rpcErr := s.slave.ExecuteCommand(context.Background(), req); rpcErr != nil {
+		t.Fatalf("ExecuteCommand error: %v", rpcErr)
+	}
+	return s.slave.testTransport.requireForwardedCommand(t, req).CommandID
+}
+
+func (s *testCommandResponder) requireErrorCode(t *testing.T, want int) {
+	t.Helper()
+	if len(s.sent) != 1 {
+		t.Fatalf("responses = %d, want 1", len(s.sent))
+	}
+	resp, err := s.sent[0].Response()
+	if err != nil {
+		t.Fatalf("response decode: %v", err)
+	}
+	if resp.Error == nil || resp.Error.Code != want {
+		t.Fatalf("response error = %+v, want code %d", resp.Error, want)
+	}
+}
+
 func (s *testCommandResponder) requireNoResponses(t *testing.T) {
 	t.Helper()
 	if len(s.sent) != 0 {
 		t.Fatalf("responses = %d, want 0", len(s.sent))
 	}
+}
+
+func requireGeneratedCommandID(t *testing.T, commandID string) {
+	t.Helper()
+	suffix, ok := strings.CutPrefix(commandID, "test-node-")
+	if !ok {
+		t.Fatalf("command id = %q, want test-node prefix", commandID)
+	}
+	if suffix == "" {
+		t.Fatalf("command id = %q, want numeric suffix", commandID)
+	}
+	if _, err := strconv.ParseUint(suffix, 10, 64); err != nil {
+		t.Fatalf("command id suffix %q is not numeric: %v", suffix, err)
+	}
+}
+
+func boolInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 func requireExecuteCommandError(t *testing.T, got *msgjson.Error, wantCode int, wantErr *msgjson.Error) {
@@ -318,6 +517,91 @@ func TestServiceApplyEvent(t *testing.T) {
 		if applyCalled {
 			t.Fatal("applier was called unexpectedly")
 		}
+		if got := len(transport.committedEvents); got != 0 {
+			t.Fatalf("committed events = %d, want 0", got)
+		}
+		if got := len(transport.postedEvents); got != 0 {
+			t.Fatalf("posted events = %d, want 0", got)
+		}
+	})
+
+	t.Run("rejects forwarded command in single-server mode", func(t *testing.T) {
+		result := map[string]string{"status": "ok"}
+		svc := newTestService(t, nil, nil)
+		apply := svc.events["test"]
+		applyCalled := false
+		svc.events["test"] = func(applyCtx *EventApplyContext, event *Event) (*db.EventLogEntry, error) {
+			applyCalled = true
+			if applyCtx.Position != nil {
+				t.Fatalf("apply position = %+v, want nil", applyCtx.Position)
+			}
+			return apply(applyCtx, event)
+		}
+
+		responder := new(testCommandResponder)
+		req := testCommandRequest(t)
+		req.Respond = responder.Send
+		completion := newCommandCompletion("cmd-forwarded", req, svc.commands)
+		resultCalled := false
+		origin := completion.eventOrigin(func() any {
+			resultCalled = true
+			return result
+		})
+		event := &Event{
+			Kind:    "test",
+			Payload: []byte("rejects forwarded command in single-server mode"),
+		}
+		_, err := svc.applyEvent(context.Background(), event, origin)
+		if err == nil {
+			t.Fatal("apply succeeded, want error")
+		}
+		if applyCalled {
+			t.Fatal("applier was called unexpectedly")
+		}
+		if resultCalled {
+			t.Fatal("result callback was called unexpectedly")
+		}
+		responder.requireNoResponses(t)
+	})
+
+	t.Run("rejects forwarded command when delivery is unavailable", func(t *testing.T) {
+		result := map[string]string{"status": "ok"}
+		transport := &testTransport{eventPublishErr: errors.New("mesh event publisher unavailable for command cmd-forwarded")}
+		svc := newTestService(t, nil, transport)
+		apply := svc.events["test"]
+		applyCalled := false
+		svc.events["test"] = func(applyCtx *EventApplyContext, event *Event) (*db.EventLogEntry, error) {
+			applyCalled = true
+			if applyCtx.Position != nil {
+				t.Fatalf("apply position = %+v, want nil", applyCtx.Position)
+			}
+			return apply(applyCtx, event)
+		}
+
+		responder := new(testCommandResponder)
+		req := testCommandRequest(t)
+		req.Respond = responder.Send
+		completion := newCommandCompletion("cmd-forwarded", req, svc.commands)
+		resultCalled := false
+		origin := completion.eventOrigin(func() any {
+			resultCalled = true
+			return result
+		})
+		event := &Event{
+			Kind:    "test",
+			Payload: []byte("rejects forwarded command when delivery is unavailable"),
+		}
+		_, err := svc.applyEvent(context.Background(), event, origin)
+		if err == nil {
+			t.Fatal("apply succeeded, want error")
+		}
+		if applyCalled {
+			t.Fatal("applier was called unexpectedly")
+		}
+		if resultCalled {
+			t.Fatal("result callback was called unexpectedly")
+		}
+		responder.requireNoResponses(t)
 		if got := len(transport.committedEvents); got != 0 {
 			t.Fatalf("committed events = %d, want 0", got)
 		}
@@ -467,6 +751,109 @@ func TestServiceApplyEvent(t *testing.T) {
 		responder.requireResult(t, result)
 	})
 
+	t.Run("forwarded command result is attached to committed event", func(t *testing.T) {
+		result := map[string]string{"status": "ok"}
+		transport := &testTransport{master: true}
+		svc := newTestService(t, nil, transport)
+		apply := svc.events["test"]
+		applyCalled := false
+		svc.events["test"] = func(applyCtx *EventApplyContext, event *Event) (*db.EventLogEntry, error) {
+			applyCalled = true
+			if applyCtx.Position != nil {
+				t.Fatalf("apply position = %+v, want nil", applyCtx.Position)
+			}
+			return apply(applyCtx, event)
+		}
+
+		responder := new(testCommandResponder)
+		req := testCommandRequest(t)
+		req.Respond = responder.Send
+		completion := newCommandCompletion("cmd-forwarded", req, svc.commands)
+		resultCalled := false
+		origin := completion.eventOrigin(func() any {
+			resultCalled = true
+			return result
+		})
+		event := &Event{
+			Kind:    "test",
+			Payload: []byte("forwarded command result is attached to committed event"),
+		}
+		_, err := svc.applyEvent(context.Background(), event, origin)
+		if err != nil {
+			t.Fatalf("apply error: %v", err)
+		}
+		if !applyCalled {
+			t.Fatal("applier was not called")
+		}
+		if !resultCalled {
+			t.Fatal("result callback was not called")
+		}
+		responder.requireNoResponses(t)
+		if got := len(transport.committedEvents); got != 1 {
+			t.Fatalf("committed events = %d, want 1", got)
+		}
+		entry := transport.committedEvents[0]
+		if entry.OriginCommandID != "cmd-forwarded" {
+			t.Fatalf("origin command id = %q, want %q", entry.OriginCommandID, "cmd-forwarded")
+		}
+		requireJSONResult(t, entry.CommandResult, result)
+		if got := len(transport.postedEvents); got != 0 {
+			t.Fatalf("posted events = %d, want 0", got)
+		}
+	})
+
+	t.Run("forwarded command result marshal error commits without a command result", func(t *testing.T) {
+		transport := &testTransport{master: true}
+		svc := newTestService(t, nil, transport)
+		apply := svc.events["test"]
+		applyCalled := false
+		svc.events["test"] = func(applyCtx *EventApplyContext, event *Event) (*db.EventLogEntry, error) {
+			applyCalled = true
+			if applyCtx.Position != nil {
+				t.Fatalf("apply position = %+v, want nil", applyCtx.Position)
+			}
+			return apply(applyCtx, event)
+		}
+
+		responder := new(testCommandResponder)
+		req := testCommandRequest(t)
+		req.Respond = responder.Send
+		completion := newCommandCompletion("cmd-forwarded", req, svc.commands)
+		resultCalled := false
+		origin := completion.eventOrigin(func() any {
+			resultCalled = true
+			return make(chan int)
+		})
+		event := &Event{
+			Kind:    "test",
+			Payload: []byte("forwarded command result marshal error commits without a command result"),
+		}
+		_, err := svc.applyEvent(context.Background(), event, origin)
+		if err != nil {
+			t.Fatalf("apply error: %v", err)
+		}
+		if !applyCalled {
+			t.Fatal("applier was not called")
+		}
+		if !resultCalled {
+			t.Fatal("result callback was not called")
+		}
+		responder.requireNoResponses(t)
+		if got := len(transport.committedEvents); got != 1 {
+			t.Fatalf("committed events = %d, want 1", got)
+		}
+		entry := transport.committedEvents[0]
+		if entry.OriginCommandID != "" {
+			t.Fatalf("origin command id = %q, want %q", entry.OriginCommandID, "")
+		}
+		if len(entry.CommandResult) != 0 {
+			t.Fatalf("command result = %q, want empty", entry.CommandResult)
+		}
+		if got := len(transport.postedEvents); got != 0 {
+			t.Fatalf("posted events = %d, want 0", got)
+		}
+	})
+
 	t.Run("apply without durable row fails", func(t *testing.T) {
 		transport := &testTransport{master: true}
 		svc := newTestService(t, nil, transport)
@@ -612,12 +999,16 @@ func TestServiceApplyEventLocal(t *testing.T) {
 }
 
 func TestServiceExecuteCommand(t *testing.T) {
+	wantForwardErr := msgjson.NewError(msgjson.AuthenticationError, "nope")
+	wantForwardPeerErr := &peerRPCError{Code: msgjson.AuthenticationError, Message: "nope"}
 	tests := []struct {
 		name                string
 		transport           *testTransport
 		mutateReq           func(*CommandRequest)
 		wantErrCode         int
+		wantErrIs           *msgjson.Error
 		wantExecutedLocally bool
+		wantForward         bool
 	}{
 		{
 			name:                "single-server executes locally",
@@ -629,9 +1020,25 @@ func TestServiceExecuteCommand(t *testing.T) {
 			wantExecutedLocally: true,
 		},
 		{
+			name:        "slave forwards",
+			transport:   &testTransport{slave: true},
+			wantForward: true,
+		},
+		{
 			name:        "unavailable mesh rejects retryably",
 			transport:   &testTransport{},
 			wantErrCode: msgjson.TryAgainLaterError,
+		},
+		{
+			name:        "forward transport error holds pending",
+			transport:   &testTransport{slave: true, err: errors.New("boom")},
+			wantForward: true,
+		},
+		{
+			name:        "forward preserves peer app-level error",
+			transport:   &testTransport{slave: true, err: wantForwardPeerErr},
+			wantErrIs:   wantForwardErr,
+			wantForward: true,
 		},
 		{
 			name:        "nil command message",
@@ -663,7 +1070,7 @@ func TestServiceExecuteCommand(t *testing.T) {
 			svc := newTestService(t, testEmitResult(result), tt.transport)
 
 			rpcErr := svc.ExecuteCommand(context.Background(), req)
-			requireExecuteCommandError(t, rpcErr, tt.wantErrCode, nil)
+			requireExecuteCommandError(t, rpcErr, tt.wantErrCode, tt.wantErrIs)
 
 			if tt.wantExecutedLocally {
 				svc.requireExecutedCommand(t, req)
@@ -674,8 +1081,238 @@ func TestServiceExecuteCommand(t *testing.T) {
 				svc.requireNoAppliedEvents(t)
 				responder.requireNoResponses(t)
 			}
+
+			if tt.transport == nil {
+				svc.requireNoPending(t)
+				return
+			}
+			if !tt.wantForward {
+				tt.transport.requireNoForwardedCommands(t)
+				svc.requireNoPending(t)
+				return
+			}
+
+			commandID := tt.transport.requireForwardedCommand(t, req).CommandID
+			requireGeneratedCommandID(t, commandID)
+			wantPending := tt.wantErrCode == 0 && tt.wantErrIs == nil
+			if wantPending {
+				svc.requirePending(t, commandID)
+			} else {
+				svc.requirePendingRemoved(t, commandID)
+			}
+			svc.commands.removePending(commandID)
 		})
 	}
+}
+
+func TestServiceReceivedEventReplay(t *testing.T) {
+	svc := newTestService(t, nil, &testTransport{slave: true})
+	applyStarted := make(chan struct{})
+	releaseApply := make(chan struct{})
+	originalApply := svc.events["test"]
+	var applyCalls atomic.Int32
+	svc.events["test"] = func(ctx *EventApplyContext, event *Event) (*db.EventLogEntry, error) {
+		applyCalls.Add(1)
+		close(applyStarted)
+		<-releaseApply
+		return originalApply(ctx, event)
+	}
+	env := &eventEnvelope{Seq: 1, TipHash: testTipHash(1), Kind: "test"}
+
+	firstDone := make(chan error, 1)
+	go func() { firstDone <- svc.applyReceivedEvent(context.Background(), env) }()
+	<-applyStarted
+	commandResult := map[string]string{"status": "accepted"}
+	responder := new(testCommandResponder)
+	req := testCommandRequest(t)
+	req.Respond = responder.Send
+	svc.commands.registerPending("cmd-replay", req)
+	replay := *env
+	replay.OriginCommandID = "cmd-replay"
+	replay.CommandResult = mustMarshalJSON(t, commandResult)
+	secondDone := make(chan error, 1)
+	go func() { secondDone <- svc.applyReceivedEvent(context.Background(), &replay) }()
+	select {
+	case err := <-secondDone:
+		t.Fatalf("replay returned before the original apply completed: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(releaseApply)
+	for i, done := range []<-chan error{firstDone, secondDone} {
+		if err := <-done; err != nil {
+			t.Fatalf("apply %d: %v", i+1, err)
+		}
+	}
+	if calls := applyCalls.Load(); calls != 1 {
+		t.Fatalf("applier calls = %d, want 1", calls)
+	}
+	responder.requireResult(t, commandResult)
+	svc.requirePendingRemoved(t, replay.OriginCommandID)
+
+	diverged := *env
+	diverged.TipHash = testTipHash(2)
+	err := svc.applyReceivedEvent(context.Background(), &diverged)
+	var divergence *db.EventLogDivergenceError
+	if !errors.As(err, &divergence) {
+		t.Fatalf("divergent replay error = %T %[1]v, want EventLogDivergenceError", err)
+	}
+}
+
+func TestServiceForwardedCommandLifecycle(t *testing.T) {
+	t.Run("event backed command publishes event and slave delivers result", func(t *testing.T) {
+		req := testCommandRequest(t)
+		responder := new(testCommandResponder)
+		req.Respond = responder.Send
+		result := map[string]string{"status": "accepted"}
+		services := newLinkedTestServices(t, func(cmd *CommandContext) *msgjson.Error {
+			if err := cmd.Completion.Emit(cmd.Context, &Event{
+				Kind:    "test",
+				Payload: []byte("accepted"),
+			}, func() any {
+				return result
+			}); err != nil {
+				return msgjson.NewError(msgjson.RPCInternalError, "emit failed: %v", err)
+			}
+			return nil
+		})
+
+		commandID := services.forwardCommand(t, req)
+		services.master.requireExecutedCommand(t, req)
+		services.master.requireAppliedEvents(t, 1)
+
+		services.master.testTransport.requireCommittedEvent(t, commandID)
+		entry := services.master.testTransport.committedEvents[0]
+		if entry.OriginCommandID != commandID {
+			t.Fatalf("origin command id = %q, want %s", entry.OriginCommandID, commandID)
+		}
+		if len(entry.CommandResult) == 0 {
+			t.Fatalf("missing forwarded command result")
+		}
+		services.slave.requireAppliedPayload(t, "accepted")
+		responder.requireResult(t, result)
+		services.slave.requirePendingRemoved(t, commandID)
+	})
+
+	t.Run("no event command sends command result and slave delivers result", func(t *testing.T) {
+		req := testCommandRequest(t)
+		responder := new(testCommandResponder)
+		req.Respond = responder.Send
+		result := map[string]string{"status": "already"}
+		services := newLinkedTestServices(t, func(cmd *CommandContext) *msgjson.Error {
+			if err := cmd.Completion.Complete(cmd.Context, result); err != nil {
+				return msgjson.NewError(msgjson.RPCInternalError, "complete failed: %v", err)
+			}
+			return nil
+		})
+
+		commandID := services.forwardCommand(t, req)
+		services.master.requireExecutedCommand(t, req)
+		services.master.requireNoAppliedEvents(t)
+		services.master.testTransport.requireCommandResult(t, commandID)
+		responder.requireResult(t, result)
+		services.slave.requirePendingRemoved(t, commandID)
+	})
+
+	t.Run("event with origin command id requires command result", func(t *testing.T) {
+		slave := newTestService(t, nil, &testTransport{slave: true})
+		missingResult := &eventEnvelope{Seq: 2, TipHash: testTipHash(2), MasterTip: 2, Kind: "test", OriginCommandID: "cmd-missing-result"}
+		if err := slave.applyReceivedEvent(context.Background(), missingResult); err == nil {
+			t.Fatalf("missing command result did not error")
+		}
+		slave.requireNoAppliedEvents(t)
+	})
+
+	t.Run("received event delivers command result", func(t *testing.T) {
+		slave := newTestService(t, nil, &testTransport{slave: true})
+		commandID := "cmd-event-result"
+		req := testCommandRequest(t)
+		responder := new(testCommandResponder)
+		req.Respond = func(msg *msgjson.Message) error {
+			if !slave.applyMtx.TryLock() {
+				t.Fatal("applyMtx held during received result delivery")
+			}
+			slave.applyMtx.Unlock()
+			return responder.Send(msg)
+		}
+		slave.commands.registerPending(commandID, req)
+		defer slave.commands.removePending(commandID)
+
+		commandResult := map[string]string{"status": "accepted"}
+		err := slave.applyReceivedEvent(context.Background(), &eventEnvelope{
+			Seq:             1,
+			TipHash:         testTipHash(1),
+			MasterTip:       1,
+			Kind:            "test",
+			OriginCommandID: commandID,
+			CommandResult:   mustMarshalJSON(t, commandResult),
+			Payload:         []byte("accepted"),
+		})
+		if err != nil {
+			t.Fatalf("applyReceivedEvent error: %v", err)
+		}
+		slave.requireAppliedPayload(t, "accepted")
+		responder.requireResult(t, commandResult)
+		slave.requirePendingRemoved(t, commandID)
+	})
+
+	t.Run("received event treats missing pending command as no-op", func(t *testing.T) {
+		slave := newTestService(t, nil, &testTransport{slave: true})
+		err := slave.applyReceivedEvent(context.Background(), &eventEnvelope{
+			Seq:             1,
+			TipHash:         testTipHash(1),
+			MasterTip:       1,
+			Kind:            "test",
+			OriginCommandID: "cmd-not-pending",
+			CommandResult:   mustMarshalJSON(t, map[string]string{"status": "accepted"}),
+		})
+		if err != nil {
+			t.Fatalf("applyReceivedEvent error: %v", err)
+		}
+		slave.requireAppliedEvents(t, 1)
+		slave.requireNoPending(t)
+	})
+
+	t.Run("received event ignores command result delivery error", func(t *testing.T) {
+		slave := newTestService(t, nil, &testTransport{slave: true})
+		commandID := "cmd-bad-result"
+		req := testCommandRequest(t)
+		responder := new(testCommandResponder)
+		req.Respond = responder.Send
+		slave.commands.registerPending(commandID, req)
+		defer slave.commands.removePending(commandID)
+
+		err := slave.applyReceivedEvent(context.Background(), &eventEnvelope{
+			Seq:             1,
+			TipHash:         testTipHash(1),
+			MasterTip:       1,
+			Kind:            "test",
+			OriginCommandID: commandID,
+			CommandResult:   json.RawMessage(`{`),
+		})
+		if err != nil {
+			t.Fatalf("applyReceivedEvent error: %v", err)
+		}
+		responder.requireNoResponses(t)
+		slave.requirePendingRemoved(t, commandID)
+	})
+
+	t.Run("command failure delivers pending error", func(t *testing.T) {
+		req := testCommandRequest(t)
+		responder := new(testCommandResponder)
+		req.Respond = responder.Send
+		services := newLinkedTestServices(t, func(cmd *CommandContext) *msgjson.Error {
+			if err := cmd.Completion.Fail(cmd.Context, msgjson.NewError(msgjson.FundingError, "funding failed")); err != nil {
+				return msgjson.NewError(msgjson.RPCInternalError, "fail failed: %v", err)
+			}
+			return nil
+		})
+
+		commandID := services.forwardCommand(t, req)
+		services.master.requireExecutedCommand(t, req)
+		services.master.testTransport.requireCommandFailure(t, commandID, msgjson.FundingError)
+		responder.requireErrorCode(t, msgjson.FundingError)
+		services.slave.requirePendingRemoved(t, commandID)
+	})
 }
 
 func TestServiceWaitUntilReadyForComms(t *testing.T) {

@@ -9,10 +9,22 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/server/account"
+)
+
+const (
+	// defaultPendingCommandTimeout is how long a slave waits for a forwarded
+	// command before giving up and answering with an unknown outcome error.
+	defaultPendingCommandTimeout = 2 * time.Minute
+
+	// forwardCommandTimeout bounds the command_forward request itself. It must
+	// stay below defaultPendingCommandTimeout so an entry held after a forward
+	// timeout still has a window in which a late completion can land.
+	forwardCommandTimeout = 90 * time.Second
 )
 
 // CommandRequest is a client state-changing request.
@@ -31,6 +43,21 @@ type CommandRequest struct {
 	// If ExecuteCommand returns an error, the caller sends that error
 	// to the client and Respond is not called.
 	Respond func(*msgjson.Message) error
+}
+
+// pendingCommand tracks a forwarded command awaiting completion.
+type pendingCommand struct {
+	reqID   uint64
+	respond func(*msgjson.Message) error
+	expire  *time.Timer
+	acked   bool
+}
+
+// resultUnavailableError answers a pending command whose outcome this node
+// does not know. It must never be used for a refusal.
+func resultUnavailableError(reason string) *msgjson.Error {
+	return msgjson.NewError(msgjson.ResultUnavailableError,
+		"mesh command outcome unknown (%s); resend the request", reason)
 }
 
 // commandCoordinator coordinates the execution of commands and the delivery of
@@ -98,6 +125,176 @@ func (c *commandCoordinator) executeLocal(ctx context.Context, originCommandID s
 		Request:    req,
 		Completion: completion,
 	})
+}
+
+// executeForwarded executes a command forwarded from the slave to the master.
+func (c *commandCoordinator) executeForwarded(ctx context.Context, commandID string, req CommandRequest) *msgjson.Error {
+	return c.executeLocal(ctx, commandID, req)
+}
+
+// forward forwards a command to the master. It registers a pending command
+// and then sends the request to the master.
+func (c *commandCoordinator) forward(ctx context.Context, req CommandRequest) *msgjson.Error {
+	commandID := c.newCommandID()
+	cmd := &commandForward{
+		CommandID: commandID,
+		Kind:      req.Kind,
+		User:      req.User,
+		Msg:       req.Msg,
+	}
+	c.registerPending(commandID, req)
+
+	rpcErr, outcomeUnknown := c.transport.forwardCommand(ctx, cmd)
+	if outcomeUnknown {
+		c.log.Debugf("Command %s forward outcome unknown; holding the pending entry.", commandID)
+		return nil
+	}
+
+	if rpcErr != nil {
+		// failAllPending may have already answered; do not reply twice.
+		if c.takePending(commandID) == nil {
+			return nil
+		}
+		return rpcErr
+	}
+
+	c.markPendingAcked(commandID)
+
+	return nil
+}
+
+// markPendingAcked marks that the master has acknowledged they have received
+// the command.
+func (c *commandCoordinator) markPendingAcked(commandID string) {
+	c.pendingMtx.Lock()
+	if pending := c.pending[commandID]; pending != nil {
+		pending.acked = true
+	}
+	c.pendingMtx.Unlock()
+}
+
+func (c *commandCoordinator) newCommandID() string {
+	return fmt.Sprintf("%s-%d", c.nodeID, nextRequestID())
+}
+
+// receiveForwardedFailure completes a forwarded command with the failure that
+// the master sent.
+func (c *commandCoordinator) receiveForwardedFailure(commandID string, msgErr *msgjson.Error) {
+	if err := c.deliverPendingError(commandID, msgErr); err != nil {
+		c.log.Debugf("failed to deliver command %s failure: %v", commandID, err)
+	}
+}
+
+// receiveForwardedResult completes a forwarded command with the result that
+// the master sent.
+func (c *commandCoordinator) receiveForwardedResult(commandID string, result json.RawMessage) {
+	if err := c.deliverPending(commandID, result); err != nil {
+		c.log.Debugf("failed to deliver command %s result: %v", commandID, err)
+	}
+}
+
+// registerPending is used by the slave to start tracking a command they
+// forwarded to the master.
+func (c *commandCoordinator) registerPending(commandID string, req CommandRequest) {
+	reqID := req.Msg.ID
+	c.pendingMtx.Lock()
+	defer c.pendingMtx.Unlock()
+	c.pending[commandID] = &pendingCommand{
+		reqID:   reqID,
+		respond: req.Respond,
+		expire: time.AfterFunc(defaultPendingCommandTimeout, func() {
+			c.expirePending(commandID)
+		}),
+	}
+}
+
+// expirePending removes a command that has timed out and replies with
+// ResultUnavailableError.
+func (c *commandCoordinator) expirePending(commandID string) {
+	pending := c.takePending(commandID)
+	if pending == nil {
+		return
+	}
+	reason := "forwarded command expired unacknowledged"
+	if pending.acked {
+		reason = "forwarded command expired without a completion"
+	}
+	c.log.Warnf("Forwarded command %s expired after %v (%s); "+
+		"answering the client with an unknown-outcome error.", commandID, defaultPendingCommandTimeout, reason)
+	msgErr := resultUnavailableError(reason)
+	if err := deliverCommandError(pending.reqID, pending.respond, msgErr); err != nil {
+		c.log.Debugf("failed to deliver expiry error for command %s: %v", commandID, err)
+	}
+}
+
+// failAllPending answers every pending forward with an unknown-outcome error.
+func (c *commandCoordinator) failAllPending(reason string) {
+	c.pendingMtx.Lock()
+	pending := c.pending
+	c.pending = make(map[string]*pendingCommand)
+	c.pendingMtx.Unlock()
+
+	if len(pending) == 0 {
+		return
+	}
+	c.log.Warnf("Failing %d pending forwarded command(s) with an unknown-outcome error: %s.",
+		len(pending), reason)
+	msgErr := resultUnavailableError(reason)
+	for commandID, p := range pending {
+		p.expire.Stop()
+		if err := deliverCommandError(p.reqID, p.respond, msgErr); err != nil {
+			c.log.Debugf("failed to deliver failure for command %s: %v", commandID, err)
+		}
+	}
+}
+
+// pendingCount returns the number of pending commands.
+func (c *commandCoordinator) pendingCount() int {
+	c.pendingMtx.Lock()
+	defer c.pendingMtx.Unlock()
+	return len(c.pending)
+}
+
+// removePending is used by the slave to remove a command from the pending list.
+func (c *commandCoordinator) removePending(commandID string) {
+	c.pendingMtx.Lock()
+	if pending := c.pending[commandID]; pending != nil {
+		pending.expire.Stop()
+		delete(c.pending, commandID)
+	}
+	c.pendingMtx.Unlock()
+}
+
+// takePending is used by the slave to remove a command from the pending list
+// and return it.
+func (c *commandCoordinator) takePending(commandID string) *pendingCommand {
+	c.pendingMtx.Lock()
+	defer c.pendingMtx.Unlock()
+	pending := c.pending[commandID]
+	if pending == nil {
+		return nil
+	}
+	pending.expire.Stop()
+	delete(c.pending, commandID)
+	return pending
+}
+
+// deliverPending is used by the slave to deliver a command result to the client.
+func (c *commandCoordinator) deliverPending(commandID string, result any) error {
+	pending := c.takePending(commandID)
+	if pending == nil {
+		return nil
+	}
+	return deliverCommandResult(pending.reqID, pending.respond, result)
+}
+
+// deliverPendingError is used by the slave to deliver a command error to the client.
+func (c *commandCoordinator) deliverPendingError(commandID string, msgErr *msgjson.Error) error {
+	pending := c.takePending(commandID)
+	if pending == nil {
+		return nil
+	}
+	return deliverCommandError(pending.reqID, pending.respond, msgErr)
 }
 
 // CommandCompletion completes a command. A command can be completed

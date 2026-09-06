@@ -25,6 +25,15 @@ func (s *testCommandResponder) Send(msg *msgjson.Message) error {
 	return s.err
 }
 
+func mustMarshalJSON(t testing.TB, v any) json.RawMessage {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal %T: %v", v, err)
+	}
+	return b
+}
+
 func requireJSONResult(t testing.TB, raw json.RawMessage, want any) {
 	t.Helper()
 	if want == nil {
@@ -81,6 +90,170 @@ func newTestCommandCoordinator(transport meshTransport, applyEvent func(context.
 		ct = transport
 	}
 	return newCommandCoordinator(dex.Disabled, ct, "test-node", nil, applyEvent)
+}
+
+func requireNoPendingCommand(t testing.TB, commands *commandCoordinator, commandID string) {
+	t.Helper()
+	commands.pendingMtx.Lock()
+	defer commands.pendingMtx.Unlock()
+	if commands.pending[commandID] != nil {
+		t.Fatalf("pending command %q was not removed", commandID)
+	}
+}
+
+func TestCommandCoordinatorExecuteForwarded(t *testing.T) {
+	req := testCommandRequest(t)
+	responder := new(testCommandResponder)
+	req.Respond = responder.Send
+	result := map[string]string{"status": "ok"}
+	transport := new(testTransport)
+	var got *CommandContext
+
+	commands := newCommandCoordinator(dex.Disabled, transport, "test-node", map[string]CommandExecutor{
+		"test": func(cmd *CommandContext) *msgjson.Error {
+			got = cmd
+			if err := cmd.Completion.Complete(cmd.Context, result); err != nil {
+				return msgjson.NewError(msgjson.RPCInternalError, "complete failed: %v", err)
+			}
+			return nil
+		},
+	}, nil)
+
+	if msgErr := commands.executeForwarded(context.Background(), "cmd-forwarded", req); msgErr != nil {
+		t.Fatalf("executeForwarded error: %v", msgErr)
+	}
+	if got == nil {
+		t.Fatalf("executor was not called")
+	}
+	if got.Request.Kind != req.Kind || got.Request.User != req.User || got.Request.Msg != req.Msg {
+		t.Fatalf("executed request mismatch: %+v", got.Request)
+	}
+	if got.Completion.originCommandID != "cmd-forwarded" {
+		t.Fatalf("completion origin command id = %q, want cmd-forwarded", got.Completion.originCommandID)
+	}
+	if len(responder.sent) != 0 {
+		t.Fatalf("local responses = %d, want 0", len(responder.sent))
+	}
+	transport.requireCommandResult(t, "cmd-forwarded")
+	requireJSONResult(t, transport.commandResults[0].Result, result)
+}
+
+func TestCommandCoordinatorForwardOutcomeUnknown(t *testing.T) {
+	req := testCommandRequest(t)
+	responder := new(testCommandResponder)
+	req.Respond = responder.Send
+	transport := &testTransport{slave: true, err: errors.New("boom")}
+	commands := newTestCommandCoordinator(transport, nil)
+
+	if msgErr := commands.execute(context.Background(), req); msgErr != nil {
+		t.Fatalf("execute error: %v", msgErr)
+	}
+	responder.requireNoResponses(t)
+	commandID := transport.requireForwardedCommand(t, req).CommandID
+
+	commands.pendingMtx.Lock()
+	pending := commands.pending[commandID]
+	commands.pendingMtx.Unlock()
+	if pending == nil {
+		t.Fatal("pending entry was not held on an unknown forward outcome")
+	}
+	if pending.acked {
+		t.Fatal("unknown forward outcome marked the pending entry acked")
+	}
+
+	result := map[string]string{"status": "ok"}
+	commands.receiveForwardedResult(commandID, mustMarshalJSON(t, result))
+	responder.requireResult(t, result)
+	requireNoPendingCommand(t, commands, commandID)
+}
+
+func TestCommandCoordinatorForwardAckMarksPending(t *testing.T) {
+	req := testCommandRequest(t)
+	transport := &testTransport{slave: true}
+	commands := newTestCommandCoordinator(transport, nil)
+
+	if msgErr := commands.execute(context.Background(), req); msgErr != nil {
+		t.Fatalf("execute error: %v", msgErr)
+	}
+	commandID := transport.requireForwardedCommand(t, req).CommandID
+	defer commands.removePending(commandID)
+
+	commands.pendingMtx.Lock()
+	pending := commands.pending[commandID]
+	commands.pendingMtx.Unlock()
+	if pending == nil {
+		t.Fatal("acked forward removed the pending entry")
+	}
+	if !pending.acked {
+		t.Fatal("acked forward did not mark the pending entry")
+	}
+}
+
+func TestCommandCoordinatorExpirePending(t *testing.T) {
+	for _, acked := range []bool{false, true} {
+		req := testCommandRequest(t)
+		responder := new(testCommandResponder)
+		req.Respond = responder.Send
+		commands := newTestCommandCoordinator(nil, nil)
+		commands.registerPending("cmd-exp", req)
+		if acked {
+			commands.markPendingAcked("cmd-exp")
+		}
+
+		commands.expirePending("cmd-exp")
+		responder.requireErrorCode(t, msgjson.ResultUnavailableError)
+		requireNoPendingCommand(t, commands, "cmd-exp")
+
+		commands.expirePending("cmd-exp")
+		if len(responder.sent) != 1 {
+			t.Fatalf("acked=%v: responses = %d, want 1", acked, len(responder.sent))
+		}
+	}
+}
+
+func TestCommandCoordinatorReceiveForwardedResult(t *testing.T) {
+	req := testCommandRequest(t)
+	responder := new(testCommandResponder)
+	req.Respond = responder.Send
+	commands := newTestCommandCoordinator(nil, nil)
+	commands.registerPending("cmd-ok", req)
+	defer commands.removePending("cmd-ok")
+	result := map[string]string{"status": "ok"}
+
+	commands.receiveForwardedResult("cmd-ok", mustMarshalJSON(t, result))
+	responder.requireResult(t, result)
+	requireNoPendingCommand(t, commands, "cmd-ok")
+}
+
+func TestCommandCoordinatorReceiveForwardedFailure(t *testing.T) {
+	req := testCommandRequest(t)
+	responder := new(testCommandResponder)
+	req.Respond = responder.Send
+	commands := newTestCommandCoordinator(nil, nil)
+	commands.registerPending("cmd-fail", req)
+	defer commands.removePending("cmd-fail")
+
+	commands.receiveForwardedFailure("cmd-fail", msgjson.NewError(msgjson.FundingError, "funding failed"))
+	responder.requireErrorCode(t, msgjson.FundingError)
+	requireNoPendingCommand(t, commands, "cmd-fail")
+}
+
+func TestCommandCoordinatorFailAllPending(t *testing.T) {
+	commands := newTestCommandCoordinator(nil, nil)
+	req := testCommandRequest(t)
+	responder := new(testCommandResponder)
+	req.Respond = responder.Send
+	commands.registerPending("cmd-a", req)
+
+	commands.failAllPending("mesh slave lost its master connection")
+	responder.requireErrorCode(t, msgjson.ResultUnavailableError)
+	requireNoPendingCommand(t, commands, "cmd-a")
+
+	// Second call with nothing pending does not re-answer.
+	commands.failAllPending("node promoted to mesh master")
+	if len(responder.sent) != 1 {
+		t.Fatalf("responses = %d, want 1", len(responder.sent))
+	}
 }
 
 func TestCommandCompletionEmit(t *testing.T) {
@@ -196,6 +369,20 @@ func TestCommandCompletionFail(t *testing.T) {
 			t.Fatalf("local error response = %+v, want funding error", resp.Error)
 		}
 	})
+
+	t.Run("forwarded command sends command failure to slave", func(t *testing.T) {
+		msgErr := msgjson.NewError(msgjson.FundingError, "funding failed")
+		transport := new(testTransport)
+		forwarded := newCommandCompletion("cmd-err", CommandRequest{Msg: newMsg(t)}, newTestCommandCoordinator(transport, nil))
+
+		if err := forwarded.Fail(context.Background(), msgErr); err != nil {
+			t.Fatalf("forwarded Fail error: %v", err)
+		}
+		transport.requireCommandFailure(t, "cmd-err", msgjson.FundingError)
+		if gotErr := transport.commandFailures[0].Error; gotErr != msgErr {
+			t.Fatalf("forwarded failure error = %v, want %v", gotErr, msgErr)
+		}
+	})
 }
 
 func TestCommandCompletionComplete(t *testing.T) {
@@ -220,5 +407,32 @@ func TestCommandCompletionComplete(t *testing.T) {
 			t.Fatalf("local Complete error: %v", err)
 		}
 		responder.requireResult(t, localResult)
+	})
+
+	t.Run("forwarded command sends command result to slave", func(t *testing.T) {
+		transport := new(testTransport)
+		forwarded := newCommandCompletion("cmd-ok", CommandRequest{Msg: newMsg(t)}, newTestCommandCoordinator(transport, nil))
+
+		forwardedResult := map[string]string{"status": "already"}
+		if err := forwarded.Complete(context.Background(), forwardedResult); err != nil {
+			t.Fatalf("forwarded Complete error: %v", err)
+		}
+		transport.requireCommandResult(t, "cmd-ok")
+		requireJSONResult(t, transport.commandResults[0].Result, forwardedResult)
+	})
+
+	t.Run("forwarded nil result is valid command result JSON", func(t *testing.T) {
+		transport := new(testTransport)
+		nilForwarded := newCommandCompletion("cmd-null", CommandRequest{Msg: newMsg(t)}, newTestCommandCoordinator(transport, nil))
+
+		if err := nilForwarded.Complete(context.Background(), nil); err != nil {
+			t.Fatalf("forwarded nil Complete error: %v", err)
+		}
+		transport.requireCommandResult(t, "cmd-null")
+		nilResult := transport.commandResults[0].Result
+		requireJSONResult(t, nilResult, nil)
+		if err := validateCommandResult(&commandResult{CommandID: "cmd-null", Result: nilResult}); err != nil {
+			t.Fatalf("nil command result validation error: %v", err)
+		}
 	})
 }

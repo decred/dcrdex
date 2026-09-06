@@ -15,6 +15,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/db"
 )
 
@@ -781,6 +782,199 @@ func TestMeshCompatMismatchHaltsStartup(t *testing.T) {
 	if haltErr == nil || !strings.Contains(haltErr.Error(), "compatibility hash mismatch") {
 		t.Fatalf("HaltStatus err = %v, want compatibility hash mismatch", haltErr)
 	}
+}
+
+func TestMeshRequestForwardsLimitToMaster(t *testing.T) {
+	var (
+		handlerMtx   sync.Mutex
+		calls        int
+		gotCommandID string
+		gotUser      account.AccountID
+		gotMsgID     uint64
+		gotRoute     string
+	)
+	handler := func(ctx context.Context, commandID string, req CommandRequest) *msgjson.Error {
+		handlerMtx.Lock()
+		calls++
+		gotCommandID = commandID
+		gotUser = req.User
+		gotMsgID = req.Msg.ID
+		gotRoute = req.Msg.Route
+		handlerMtx.Unlock()
+		return nil
+	}
+	nodeA, nodeB := func() (*node, *node) {
+		aListen := reserveTCPAddr(t)
+		bListen := reserveTCPAddr(t)
+		aPeer := "ws://" + bListen + meshWSPath
+		bPeer := "ws://" + aListen + meshWSPath
+		return newIntegrationNode(t, integrationNodeConfig{
+				listenAddr: aListen,
+				peerAddr:   aPeer,
+				compat:     testCompatSnapshot(t),
+				cmdHandler: handler,
+			}),
+			newIntegrationNode(t, integrationNodeConfig{
+				listenAddr: bListen,
+				peerAddr:   bPeer,
+				compat:     testCompatSnapshot(t),
+				cmdHandler: handler,
+			})
+	}()
+
+	runA := startIntegrationNode(t, nodeA)
+	runB := startIntegrationNode(t, nodeB)
+	t.Cleanup(func() {
+		runA.shutdown(t)
+		runB.shutdown(t)
+	})
+
+	runA.waitForStartup(t)
+	runB.waitForStartup(t)
+
+	master, slave := waitForComplementaryModes(t, nodeA, nodeB)
+	masterConn, ok := master.control.currentState().activeConn.link.(*rpcConn)
+	if !ok {
+		t.Fatalf("master active conn type = %T", master.control.currentState().activeConn.link)
+	}
+	slaveConn, ok := slave.control.currentState().activeConn.link.(*rpcConn)
+	if !ok {
+		t.Fatalf("slave active conn type = %T", slave.control.currentState().activeConn.link)
+	}
+	if !masterConn.Authed() || !slaveConn.Authed() {
+		t.Fatalf("authed flags before request: master=%v slave=%v", masterConn.Authed(), slaveConn.Authed())
+	}
+
+	var user account.AccountID
+	user[0] = 0x99
+
+	req, err := msgjson.NewRequest(77, msgjson.LimitRoute, map[string]string{"market": "dcr_btc"})
+	if err != nil {
+		t.Fatalf("NewRequest error: %v", err)
+	}
+
+	const commandID = "prepared-limit-command"
+	rpcErr, outcomeUnknown := slave.forwardCommand(context.Background(), &commandForward{
+		CommandID: commandID,
+		Kind:      "limit",
+		User:      user,
+		Msg:       req,
+	})
+	if rpcErr != nil {
+		t.Fatalf("slave forwardCommand error: %v", rpcErr)
+	}
+	if outcomeUnknown {
+		t.Fatal("acked forward reported an unknown outcome")
+	}
+
+	handlerMtx.Lock()
+	defer handlerMtx.Unlock()
+	if calls != 1 {
+		t.Fatalf("handler calls = %d, want 1", calls)
+	}
+	if gotCommandID != commandID {
+		t.Fatalf("handler command id = %q, want %q", gotCommandID, commandID)
+	}
+	if gotUser != user {
+		t.Fatalf("handler user = %v, want %v", gotUser, user)
+	}
+	if gotMsgID != req.ID {
+		t.Fatalf("handler msg id = %d, want %d", gotMsgID, req.ID)
+	}
+	if gotRoute != msgjson.LimitRoute {
+		t.Fatalf("handler route = %q, want %q", gotRoute, msgjson.LimitRoute)
+	}
+}
+
+func TestMeshSendCommandResult(t *testing.T) {
+	type recordedResult struct {
+		commandID string
+		result    json.RawMessage
+	}
+	type resultRecorder struct {
+		mtx     sync.Mutex
+		results []recordedResult
+	}
+	record := func(rec *resultRecorder) func(string, json.RawMessage) {
+		return func(commandID string, result json.RawMessage) {
+			rec.mtx.Lock()
+			defer rec.mtx.Unlock()
+			rec.results = append(rec.results, recordedResult{
+				commandID: commandID,
+				result:    append([]byte(nil), result...),
+			})
+		}
+	}
+
+	recA := new(resultRecorder)
+	recB := new(resultRecorder)
+
+	aListen := reserveTCPAddr(t)
+	bListen := reserveTCPAddr(t)
+	aPeer := "ws://" + bListen + meshWSPath
+	bPeer := "ws://" + aListen + meshWSPath
+
+	nodeA := newIntegrationNode(t, integrationNodeConfig{
+		listenAddr:    aListen,
+		peerAddr:      aPeer,
+		compat:        testCompatSnapshot(t),
+		resultHandler: record(recA),
+	})
+	nodeB := newIntegrationNode(t, integrationNodeConfig{
+		listenAddr:    bListen,
+		peerAddr:      bPeer,
+		compat:        testCompatSnapshot(t),
+		resultHandler: record(recB),
+	})
+
+	runA := startIntegrationNode(t, nodeA)
+	runB := startIntegrationNode(t, nodeB)
+	t.Cleanup(func() {
+		runA.shutdown(t)
+		runB.shutdown(t)
+	})
+
+	runA.waitForStartup(t)
+	runB.waitForStartup(t)
+
+	master, slave := waitForComplementaryModes(t, nodeA, nodeB)
+	masterConn, ok := master.control.currentState().activeConn.link.(*rpcConn)
+	if !ok {
+		t.Fatalf("master active conn type = %T", master.control.currentState().activeConn.link)
+	}
+	slaveConn, ok := slave.control.currentState().activeConn.link.(*rpcConn)
+	if !ok {
+		t.Fatalf("slave active conn type = %T", slave.control.currentState().activeConn.link)
+	}
+	waitForMeshCondition(t, "authorized mesh links", func() bool {
+		return masterConn.Authed() && slaveConn.Authed()
+	})
+
+	result := map[string]string{"status": "ok"}
+	if err := master.sendCommandResult(context.Background(), &commandResult{
+		CommandID: "cmd-ok",
+		Result:    mustMarshalJSON(t, result),
+	}); err != nil {
+		t.Fatalf("sendCommandResult error: %v", err)
+	}
+
+	var results []recordedResult
+	if slave == nodeA {
+		recA.mtx.Lock()
+		results = append([]recordedResult(nil), recA.results...)
+		recA.mtx.Unlock()
+	} else {
+		recB.mtx.Lock()
+		results = append([]recordedResult(nil), recB.results...)
+		recB.mtx.Unlock()
+	}
+	if len(results) != 1 {
+		t.Fatalf("received command results = %d, want 1", len(results))
+	}
+	if results[0].commandID != "cmd-ok" {
+		t.Fatalf("received command id = %q, want cmd-ok", results[0].commandID)
+	}
+	requireJSONResult(t, results[0].result, result)
 }
 
 func TestMeshPublishEvent(t *testing.T) {

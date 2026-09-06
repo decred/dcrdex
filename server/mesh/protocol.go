@@ -9,7 +9,92 @@ import (
 	"fmt"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/server/account"
 )
+
+// commandForward is a request from the slave to the master that wraps a
+// client's state changing request. The master answers the forward when the
+// command has run, with an error if the command was refused, or with an
+// empty ack. The result arrives separately, in the CommandResult field of
+// the eventEnvelope if an event was emitted, or in a commandResult or a
+// commandFailure if not, and it can arrive before the ack.
+type commandForward struct {
+	CommandID string            `json:"commandID"`
+	Kind      string            `json:"kind"`
+	User      account.AccountID `json:"user"`
+	Msg       *msgjson.Message  `json:"msg"`
+}
+
+func validateCommandForward(cmd *commandForward) error {
+	if cmd == nil {
+		return fmt.Errorf("nil command")
+	}
+	if cmd.CommandID == "" {
+		return fmt.Errorf("command id not specified")
+	}
+	if cmd.Kind == "" {
+		return fmt.Errorf("command kind not specified")
+	}
+	return validateClientRequestMsg(cmd.Msg)
+}
+
+// commandFailure is a message from the master to the slave that completes a
+// forwarded command with an error, when no event was emitted.
+type commandFailure struct {
+	CommandID string         `json:"commandID"`
+	Error     *msgjson.Error `json:"error"`
+}
+
+func validateCommandFailure(fail *commandFailure) error {
+	if fail == nil {
+		return fmt.Errorf("nil command failure")
+	}
+	if fail.CommandID == "" {
+		return fmt.Errorf("command id not specified")
+	}
+	if fail.Error == nil {
+		return fmt.Errorf("command error not specified")
+	}
+	return nil
+}
+
+// commandResult is a message from the master to the slave that completes a
+// forwarded command with a result, when no event was emitted (for example a
+// duplicate command that already has a result).
+type commandResult struct {
+	CommandID string          `json:"commandID"`
+	Result    json.RawMessage `json:"result"`
+}
+
+func validateCommandResult(result *commandResult) error {
+	if result == nil {
+		return fmt.Errorf("nil command result")
+	}
+	if result.CommandID == "" {
+		return fmt.Errorf("command id not specified")
+	}
+	if len(result.Result) == 0 {
+		return fmt.Errorf("command result not specified")
+	}
+	if !json.Valid(result.Result) {
+		return fmt.Errorf("invalid command result JSON")
+	}
+	return nil
+}
+
+func validateClientRequestMsg(msg *msgjson.Message) error {
+	if msg == nil {
+		return fmt.Errorf("nil request message")
+	}
+	if msg.Type != msgjson.Request {
+		return fmt.Errorf("invalid message type %d", msg.Type)
+	}
+	if msg.ID == 0 {
+		return fmt.Errorf("request id cannot be 0")
+	}
+	return nil
+}
 
 // Event is one replicated state change.
 type Event struct {

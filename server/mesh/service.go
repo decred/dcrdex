@@ -655,3 +655,18 @@ func (s *Service) applyEventLocal(ctx context.Context, event *Event, position *d
 	}
 	return entry, applyCtx, err
 }
+
+// executeForwardedCommand implements the meshApplication interface.
+func (s *Service) executeForwardedCommand(ctx context.Context, commandID string, req CommandRequest) *msgjson.Error {
+	return s.commands.executeForwarded(ctx, commandID, req)
+}
+
+// receiveCommandFailure implements the meshApplication interface.
+func (s *Service) receiveCommandFailure(commandID string, msgErr *msgjson.Error) {
+	s.commands.receiveForwardedFailure(commandID, msgErr)
+}
+
+// receiveCommandResult implements the meshApplication interface.
+func (s *Service) receiveCommandResult(commandID string, result json.RawMessage) {
+	s.commands.receiveForwardedResult(commandID, result)
+}

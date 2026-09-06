@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/server/db"
 )
 
@@ -320,6 +321,139 @@ func TestNodeSendEventEnvelopeTreatsClosedLinkAsCanceled(t *testing.T) {
 	}}})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("send event envelope error = %v, want context canceled", err)
+	}
+}
+
+func TestNodeForwardCommandActivePeerStates(t *testing.T) {
+	t.Run("established slave forwards", func(t *testing.T) {
+		active := newTRouteLink(901)
+		var (
+			gotRoute   string
+			gotPayload any
+		)
+		active.requestFunc = func(_ context.Context, route string, payload any, _ any) error {
+			gotRoute = route
+			gotPayload = payload
+			return nil
+		}
+		n := newTestNodeWithState(nodeState{
+			mode:       modeEstablishedSlave,
+			activeConn: newNodeConn(active, "peer-node", "peer-node"),
+		}, nil)
+		if !n.canForwardCommand() {
+			t.Fatal("established slave with an active master connection cannot forward")
+		}
+		cmd := validCommandForward(t, "cmd-ok")
+
+		rpcErr, outcomeUnknown := n.forwardCommand(context.Background(), cmd)
+		requireNoRPCError(t, rpcErr)
+		if outcomeUnknown {
+			t.Fatal("acked forward reported an unknown outcome")
+		}
+		if gotRoute != commandForwardRoute {
+			t.Fatalf("request route = %q, want %q", gotRoute, commandForwardRoute)
+		}
+		if gotPayload != cmd {
+			t.Fatalf("request payload = %p, want %p", gotPayload, cmd)
+		}
+	})
+
+	tests := []struct {
+		name     string
+		mode     nodeMode
+		active   bool
+		wantCode int
+	}{
+		{name: "pending", mode: modePending, active: true, wantCode: msgjson.TryAgainLaterError},
+		{name: "syncing slave", mode: modeEstablishedSlaveSyncing, active: true, wantCode: msgjson.TryAgainLaterError},
+		{name: "slave no master", mode: modeSlaveNoMaster, active: true, wantCode: msgjson.TryAgainLaterError},
+		{name: "preparing master", mode: modePreparingMaster, active: true, wantCode: msgjson.TryAgainLaterError},
+		{name: "preparing master without conn", mode: modePreparingMaster, wantCode: msgjson.TryAgainLaterError},
+		{name: "master", mode: modeEstablishedMaster, active: true, wantCode: msgjson.TryAgainLaterError},
+		{name: "halted", mode: modeHalted, active: true, wantCode: msgjson.TryAgainLaterError},
+		{name: "unknown mode", mode: nodeMode(255), active: true, wantCode: msgjson.TryAgainLaterError},
+		{name: "slave missing active link", mode: modeEstablishedSlave, wantCode: msgjson.TryAgainLaterError},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := nodeState{mode: tt.mode}
+			if tt.active {
+				state.activeConn = newNodeConn(newTRouteLink(902), "peer-node", "peer-node")
+			}
+			n := newTestNodeWithState(state, nil)
+			if n.canForwardCommand() {
+				t.Fatal("canForwardCommand = true, want false")
+			}
+
+			rpcErr, outcomeUnknown := n.forwardCommand(context.Background(), validCommandForward(t, "cmd-state"))
+			requireRPCCode(t, rpcErr, tt.wantCode)
+			if outcomeUnknown {
+				t.Fatal("mode-gate refusal reported an unknown outcome")
+			}
+		})
+	}
+}
+
+func TestNodeForwardCommandErrorTranslation(t *testing.T) {
+	tests := []struct {
+		name        string
+		reqErr      error
+		wantCode    int
+		wantUnknown bool
+	}{
+		{
+			name:        "transport failure leaves the outcome unknown",
+			reqErr:      errors.New("ws send failed"),
+			wantUnknown: true,
+		},
+		{
+			name: "master gate rejection translates to retryable",
+			reqErr: &peerRPCError{
+				Code:    msgjson.UnauthorizedConnection,
+				Message: "mesh route requires active peer connection in an allowed local state",
+			},
+			wantCode: msgjson.TryAgainLaterError,
+		},
+		{
+			name: "internal peer error passes through",
+			reqErr: &peerRPCError{
+				Code:    msgjson.RPCInternalError,
+				Message: "command forward handling failed",
+			},
+			wantCode: msgjson.RPCInternalError,
+		},
+		{
+			name: "app-level rejection",
+			reqErr: &peerRPCError{
+				Code:    msgjson.OrderParameterError,
+				Message: "bad order",
+			},
+			wantCode: msgjson.OrderParameterError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			active := newTRouteLink(903)
+			active.requestFunc = func(context.Context, string, any, any) error {
+				return tt.reqErr
+			}
+			n := newTestNodeWithState(nodeState{
+				mode:       modeEstablishedSlave,
+				activeConn: newNodeConn(active, "peer-node", "peer-node"),
+			}, nil)
+
+			rpcErr, outcomeUnknown := n.forwardCommand(context.Background(), validCommandForward(t, "cmd-err"))
+			if outcomeUnknown != tt.wantUnknown {
+				t.Fatalf("outcomeUnknown = %v, want %v", outcomeUnknown, tt.wantUnknown)
+			}
+			if tt.wantUnknown {
+				requireNoRPCError(t, rpcErr)
+				return
+			}
+			requireRPCCode(t, rpcErr, tt.wantCode)
+		})
 	}
 }
 
