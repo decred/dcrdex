@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
@@ -393,6 +394,94 @@ func TestNodeForwardCommandActivePeerStates(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNodeDrainEventStream(t *testing.T) {
+	conn := testSession("node-b", "node-a")
+	masterWithStream := func(tip uint64) *node {
+		n := newTestNodeWithState(nodeState{mode: modeEstablishedMaster, activeConn: conn}, nil)
+		n.stream = newTestEventStreamManager(&streamTestReader{}, nil, nil, &db.EventLogPosition{Seq: tip})
+		n.stream.ctx = context.Background()
+		return n
+	}
+
+	t.Run("established master with a caught-up stream drains", func(t *testing.T) {
+		n := masterWithStream(5)
+		n.stream.startStreamOnConn(1, &db.EventLogPosition{Seq: 5})
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		drained, err := n.drainEventStream(ctx)
+		if err != nil || !drained {
+			t.Fatalf("drainEventStream = (%v, %v), want (true, nil)", drained, err)
+		}
+	})
+
+	t.Run("stale stream tip still drains against the durable frontier", func(t *testing.T) {
+		reader := &streamTestReader{}
+		n := newTestNodeWithState(nodeState{mode: modeEstablishedMaster, activeConn: conn}, nil)
+		n.stream = newTestEventStreamManager(reader, nil, nil, &db.EventLogPosition{Seq: 5})
+		n.stream.ctx = context.Background()
+		n.stream.startStreamOnConn(1, &db.EventLogPosition{Seq: 5})
+		reader.setFrontier(&db.EventLogPosition{Seq: 7})
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		drained, err := n.drainEventStream(ctx)
+		if drained || err == nil || !strings.Contains(err.Error(), "slave acked through seq 5 of 7") {
+			t.Fatalf("drainEventStream = (%v, %v), want lag error against the durable frontier", drained, err)
+		}
+	})
+
+	t.Run("preparing master errors loudly", func(t *testing.T) {
+		n := newTestNodeWithState(nodeState{mode: modePreparingMaster}, nil)
+		drained, err := n.drainEventStream(context.Background())
+		if drained || err == nil || !strings.Contains(err.Error(), "preparing master") {
+			t.Fatalf("drainEventStream = (%v, %v), want preparing-master error", drained, err)
+		}
+	})
+
+	t.Run("non-streaming modes drain trivially", func(t *testing.T) {
+		for _, mode := range []nodeMode{modePending, modeEstablishedSlave, modeSlaveNoMaster, modeHalted} {
+			n := newTestNodeWithState(nodeState{mode: mode}, nil)
+			drained, err := n.drainEventStream(context.Background())
+			if drained || err != nil {
+				t.Fatalf("mode %s: drainEventStream = (%v, %v), want (false, nil)", mode, drained, err)
+			}
+		}
+	})
+
+	t.Run("no active stream fails the drain on deadline", func(t *testing.T) {
+		n := newTestNodeWithState(nodeState{mode: modeEstablishedMaster}, nil)
+		n.stream = newTestEventStreamManager(&streamTestReader{}, nil, nil, &db.EventLogPosition{Seq: 5})
+		n.stream.ctx = context.Background()
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		start := time.Now()
+		drained, err := n.drainEventStream(ctx)
+		if drained || err == nil || !strings.Contains(err.Error(), "no active event stream") {
+			t.Fatalf("drainEventStream = (%v, %v), want no-active-stream error", drained, err)
+		}
+		if time.Since(start) > time.Second {
+			t.Fatal("no-stream drain was not bounded by the caller deadline")
+		}
+	})
+
+	t.Run("stopped stream manager fails the drain fast", func(t *testing.T) {
+		n := masterWithStream(5)
+		n.stream.startStreamOnConn(1, &db.EventLogPosition{Seq: 3})
+		n.stream.mtx.Lock()
+		n.stream.stopped = true
+		n.stream.mtx.Unlock()
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		start := time.Now()
+		drained, err := n.drainEventStream(ctx)
+		if drained || err == nil || !strings.Contains(err.Error(), "manager stopped") {
+			t.Fatalf("drainEventStream = (%v, %v), want manager-stopped error", drained, err)
+		}
+		if time.Since(start) > time.Second {
+			t.Fatal("stopped manager did not fail the drain fast")
+		}
+	})
 }
 
 func TestNodeForwardCommandErrorTranslation(t *testing.T) {

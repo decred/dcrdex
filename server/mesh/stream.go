@@ -204,6 +204,43 @@ func (s *eventStreamManager) eventCommitted(seq uint64, originCommandID string, 
 	s.wakeUp()
 }
 
+// waitDrained waits for the slave to acknowledge the available log tip.
+// It returns an error if the manager stops or ctx ends first.
+func (s *eventStreamManager) waitDrained(ctx context.Context) error {
+	if err := s.refreshAvailableTip(ctx); err != nil {
+		return err
+	}
+
+	const drainPollInterval = 25 * time.Millisecond
+	ticker := time.NewTicker(drainPollInterval)
+	defer ticker.Stop()
+	for {
+		tip, cursor, active := s.progress()
+		if active && cursor >= tip {
+			// Success
+			return nil
+		}
+
+		s.mtx.Lock()
+		stopped := s.stopped
+		s.mtx.Unlock()
+		if stopped {
+			return fmt.Errorf("event stream manager stopped during the drain; " +
+				"the slave's position is unknown")
+		}
+
+		select {
+		case <-ctx.Done():
+			if !active {
+				return fmt.Errorf("no active event stream at the drain deadline (local tip %d); "+
+					"the slave's position is unknown", tip)
+			}
+			return fmt.Errorf("drain deadline: slave acked through seq %d of %d", cursor, tip)
+		case <-ticker.C:
+		}
+	}
+}
+
 // refreshAvailableTip raises the available tip to the durable log frontier.
 func (s *eventStreamManager) refreshAvailableTip(ctx context.Context) error {
 	frontier, err := s.eventLogReader.EventLogFrontier(ctx)
@@ -458,6 +495,26 @@ func (n *node) stopStreamForConn(peerConn *nodeConn) {
 // available to the stream.
 func (n *node) notifyLocalEventCommitted(seq uint64, originCommandID string, commandResult json.RawMessage) {
 	n.stream.eventCommitted(seq, originCommandID, commandResult)
+}
+
+// drainEventStream waits for an established master's slave to acknowledge the
+// committed tip.
+// It returns an error while preparing master.
+// Other modes return false without an error because no drain is required.
+func (n *node) drainEventStream(ctx context.Context) (drained bool, err error) {
+	state := n.control.currentState()
+	switch state.mode {
+	case modeEstablishedMaster:
+		if err := n.stream.waitDrained(ctx); err != nil {
+			return false, err
+		}
+		return true, nil
+	case modePreparingMaster:
+		return false, fmt.Errorf("stopping while preparing master: no stream exists yet, " +
+			"so replication cannot be confirmed")
+	default:
+		return false, nil
+	}
 }
 
 // sendEventBatch sends a batch to the active slave identified by connID and

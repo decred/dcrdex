@@ -1627,6 +1627,69 @@ func TestNodeRoutesHandleSnapshotRequest(t *testing.T) {
 	})
 }
 
+func TestNodeRoutesHandleMasterHandoff(t *testing.T) {
+	target := &db.EventLogPosition{Seq: 12, TipHash: testTipHash(12)}
+	local := &db.EventLogPosition{Seq: 10, TipHash: testTipHash(10)}
+	handoff := &masterHandoff{Frontier: toFrontierMessage(target)}
+
+	t.Run("plans the handoff and acks", func(t *testing.T) {
+		active := newTRouteLink(821)
+		handler := newRouteTestNode(modeEstablishedSlave, active, nil)
+		handler.eventLogReader = &testEventLogReader{frontier: local}
+		answer := answerControlSignal(t, handler, signalResult{
+			handled: true,
+			state:   nodeState{mode: modePreparingMaster},
+		})
+
+		rpcErr := handleRoutePayload(t, handler, masterHandoffRoute, active, handoff)
+		requireNoRPCError(t, rpcErr)
+		sig, ok := answer.wait(t).(plannedHandoffSignal)
+		if !ok || sig.conn == nil || sig.conn.link != active {
+			t.Fatalf("control signal = %+v, want planned handoff on the active connection", sig)
+		}
+		if sig.local.Seq != local.Seq || sig.target.Seq != target.Seq {
+			t.Fatalf("planned handoff local %d target %d, want %d and %d", sig.local.Seq, sig.target.Seq, local.Seq, target.Seq)
+		}
+		requireOneAck(t, active)
+	})
+
+	t.Run("refusal is unauthorized", func(t *testing.T) {
+		active := newTRouteLink(822)
+		handler := newRouteTestNode(modeEstablishedSlave, active, nil)
+		handler.eventLogReader = &testEventLogReader{frontier: local}
+		answerControlSignal(t, handler, signalResult{state: nodeState{mode: modeEstablishedSlave}})
+
+		rpcErr := handleRoutePayload(t, handler, masterHandoffRoute, active, handoff)
+		requireRPCOutcome(t, rpcErr, msgjson.UnauthorizedConnection, "master handoff refused")
+		requireNoSent(t, active)
+	})
+
+	t.Run("halt answers the halt error", func(t *testing.T) {
+		active := newTRouteLink(823)
+		handler := newRouteTestNode(modeEstablishedSlave, active, nil)
+		handler.eventLogReader = &testEventLogReader{frontier: local}
+		answerControlSignal(t, handler, signalResult{
+			handled: true,
+			state:   nodeState{mode: modeHalted, haltErr: errors.New("handoff halted")},
+		})
+
+		rpcErr := handleRoutePayload(t, handler, masterHandoffRoute, active, handoff)
+		requireRPCOutcome(t, rpcErr, msgjson.RPCInternal, "handoff halted")
+		requireNoSent(t, active)
+	})
+
+	t.Run("control error is internal", func(t *testing.T) {
+		active := newTRouteLink(824)
+		handler := newRouteTestNode(modeEstablishedSlave, active, nil)
+		handler.eventLogReader = &testEventLogReader{frontier: local}
+		answerControlSignal(t, handler, signalResult{err: errors.New("boom")})
+
+		rpcErr := handleRoutePayload(t, handler, masterHandoffRoute, active, handoff)
+		requireRPCOutcome(t, rpcErr, msgjson.RPCInternal, "master handoff transition")
+		requireNoSent(t, active)
+	})
+}
+
 func TestNodeRoutesHandleSnapshotChunk(t *testing.T) {
 	seedFinished := func(seed *seedAttempt) bool {
 		seed.mtx.Lock()

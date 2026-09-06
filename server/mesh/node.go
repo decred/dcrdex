@@ -764,3 +764,25 @@ func (n *node) notifyMasterPreparationFailed(err error) error {
 	}
 	return res.err
 }
+
+// requestMasterHandoff asks the caught-up slave to begin master preparation.
+// This is done to assure the slave that the master is purposely shutting down,
+// and does not need to wait for the slavePromotionDelay before promoting to
+// master.
+func (n *node) requestMasterHandoff(ctx context.Context) error {
+	frontier, err := n.eventLogReader.EventLogFrontier(ctx)
+	if err != nil {
+		return fmt.Errorf("read handoff frontier: %w", err)
+	}
+
+	peerConn, err := n.activePeerForRequest(nodeMode.canStreamEvents)
+	if err != nil {
+		return err
+	}
+	if err := peerConn.link.Request(ctx, masterHandoffRoute, &masterHandoff{
+		Frontier: toFrontierMessage(frontier),
+	}, nil); err != nil {
+		return err
+	}
+	return nil
+}

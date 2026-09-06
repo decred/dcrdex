@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
@@ -428,6 +429,39 @@ func (s *Service) serve(ctx, lifeCtx context.Context) {
 			s.drain(lifeCtx)
 		}
 	case <-lifeCtx.Done():
+	}
+}
+
+// drainTimeout caps how long a graceful stop waits for the peer to catch up
+// before returning with the drain incomplete.
+const drainTimeout = 30 * time.Second
+
+// drain is the graceful-stop path after the caller cancels: it stops producing
+// new authoritative work and waits (up to drainTimeout) for the peer to catch
+// up.
+func (s *Service) drain(lifeCtx context.Context) {
+	s.workers.stopWorkers()
+
+	s.applyMtx.Lock()
+	s.eventPublishClosed = true
+	s.applyMtx.Unlock()
+
+	ctx, cancel := context.WithTimeout(lifeCtx, drainTimeout)
+	defer cancel()
+	drained, err := s.transport.drainEventStream(ctx)
+	if err != nil {
+		s.log.Errorf("Mesh drain incomplete: %v. If the peer promotes without the missing events, "+
+			"this node will halt with MESH FORK DETECTED on restart and require the manual "+
+			"--meshforkreset procedure.", err)
+		return
+	}
+	if drained {
+		s.log.Infof("Mesh drain complete: the slave holds every committed event.")
+		if err := s.transport.requestMasterHandoff(ctx); err != nil {
+			s.log.Errorf("Mesh planned handoff failed: %v", err)
+			return
+		}
+		s.log.Infof("Mesh planned handoff accepted.")
 	}
 }
 

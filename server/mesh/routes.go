@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/server/db"
@@ -426,6 +427,42 @@ func entryAt(ctx context.Context, reader db.EventLogReader, seq uint64) (*db.Eve
 		return nil, nil
 	}
 	return entries[0], nil
+}
+
+// handleMasterHandoff handles the master_handoff request sent from the master.
+// The state machine immediately promotes the node if its event log frontier
+// is equal to what was sent in the request.
+func (n *node) handleMasterHandoff(ctx context.Context, conn link, peerConn *nodeConn, msg *msgjson.Message) *msgjson.Error {
+	handoff, msgErr := decodeRoutePayload(msg, "master handoff", validateMasterHandoff)
+	if msgErr != nil {
+		return msgErr
+	}
+
+	local, err := n.eventLogReader.EventLogFrontier(ctx)
+	if err != nil {
+		return msgjson.NewError(msgjson.RPCInternal, "event log frontier: %v", err)
+	}
+	res, err := n.control.send(plannedHandoffSignal{
+		conn:   peerConn,
+		local:  local,
+		target: fromFrontierMessage(handoff.Frontier),
+		at:     time.Now(),
+	})
+	if err == nil {
+		err = res.err
+	}
+	if err != nil {
+		return msgjson.NewError(msgjson.RPCInternal, "master handoff transition: %v", err)
+	}
+	if !res.handled {
+		return msgjson.NewError(msgjson.UnauthorizedConnection,
+			"master handoff refused in state %s", res.state.mode)
+	}
+	if res.state.mode == modeHalted {
+		return msgjson.NewError(msgjson.RPCInternal, "%v", res.state.haltErr)
+	}
+
+	return sendRouteAck(conn, msg.ID, "master handoff")
 }
 
 // handleSnapshotRequest handles a slave's request for a snapshot of the

@@ -744,6 +744,80 @@ func TestMeshNodeStartsAfterPeerAppears(t *testing.T) {
 	}
 }
 
+func TestMeshSlavePromotesAfterMasterDisconnect(t *testing.T) {
+	nodeA, nodeB := newMeshPair(t, testCompatSnapshot(t), testCompatSnapshot(t))
+	nodeA.control.slavePromotionDelay = 50 * time.Millisecond
+	nodeB.control.slavePromotionDelay = 50 * time.Millisecond
+
+	runA := startIntegrationNode(t, nodeA)
+	runB := startIntegrationNode(t, nodeB)
+	t.Cleanup(func() {
+		runA.shutdown(t)
+		runB.shutdown(t)
+	})
+
+	runA.waitForStartup(t)
+	runB.waitForStartup(t)
+
+	master, slave := waitForComplementaryModes(t, nodeA, nodeB)
+	var masterRun *runningMeshNode
+	if master == nodeA {
+		masterRun = runA
+	} else {
+		masterRun = runB
+	}
+
+	masterRun.shutdown(t)
+
+	waitForMeshCondition(t, "slave_no_master", func() bool {
+		return slave.control.currentMode() == modeSlaveNoMaster
+	})
+	waitForMeshCondition(t, "slave promotion to master", func() bool {
+		return slave.control.currentMode() == modeEstablishedMaster
+	})
+
+	if !slave.control.currentState().peerDisconnected.IsZero() {
+		t.Fatalf("peerDisconnected = %v, want zero", slave.control.currentState().peerDisconnected)
+	}
+}
+
+func TestMeshPlannedHandoffPromotesWithoutDelay(t *testing.T) {
+	nodeA, nodeB := newMeshPair(t, testCompatSnapshot(t), testCompatSnapshot(t))
+	nodeA.control.slavePromotionDelay = time.Hour
+	nodeB.control.slavePromotionDelay = time.Hour
+
+	runA := startIntegrationNode(t, nodeA)
+	runB := startIntegrationNode(t, nodeB)
+	t.Cleanup(func() {
+		runA.shutdown(t)
+		runB.shutdown(t)
+	})
+
+	runA.waitForStartup(t)
+	runB.waitForStartup(t)
+
+	master, slave := waitForComplementaryModes(t, nodeA, nodeB)
+	masterRun := runA
+	if master == nodeB {
+		masterRun = runB
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	drained, err := master.drainEventStream(ctx)
+	if err != nil || !drained {
+		t.Fatalf("drainEventStream = (%v, %v), want (true, nil)", drained, err)
+	}
+	if err := master.requestMasterHandoff(ctx); err != nil {
+		t.Fatalf("requestMasterHandoff error: %v", err)
+	}
+
+	masterRun.shutdown(t)
+	waitForMeshCondition(t, "planned slave promotion to master", func() bool {
+		return slave.control.currentMode() == modeEstablishedMaster
+	})
+}
+
 func TestMeshCompatMismatchHaltsStartup(t *testing.T) {
 	nodeA, nodeB := newMeshPair(t, testCompatSnapshot(t), differentCompatSnapshot(t))
 

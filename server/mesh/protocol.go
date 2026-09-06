@@ -280,6 +280,19 @@ func validateStreamSubscribe(sub *streamSubscribe) error {
 	return nil
 }
 
+// masterHandoff is a request from the master to let the slave know that it
+// should take over as the master immediately.
+type masterHandoff struct {
+	Frontier frontierMessage `json:"frontier"`
+}
+
+func validateMasterHandoff(handoff *masterHandoff) error {
+	if handoff == nil {
+		return fmt.Errorf("nil master handoff")
+	}
+	return validateFrontierMessage(handoff.Frontier)
+}
+
 // snapshotRequest is the slave's request for a snapshot of the master's
 // state. A slave with an empty event log sends it before it subscribes to the
 // event stream.

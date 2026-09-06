@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -26,6 +27,12 @@ func (r *streamTestReader) EventLogFrontier(context.Context) (*db.EventLogPositi
 	r.mtx.Lock()
 	defer r.mtx.Unlock()
 	return r.frontier, nil
+}
+
+func (r *streamTestReader) setFrontier(pos *db.EventLogPosition) {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+	r.frontier = pos
 }
 
 func (r *streamTestReader) EventLogEntriesAfter(ctx context.Context, after uint64, limit int) ([]*db.EventLogEntry, error) {
@@ -466,4 +473,90 @@ func TestRequestEventBatch(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWaitDrained(t *testing.T) {
+	newMgr := func(tip uint64) *eventStreamManager {
+		m := newTestEventStreamManager(&streamTestReader{}, nil, nil, &db.EventLogPosition{Seq: tip})
+		m.ctx = context.Background()
+		return m
+	}
+	shortCtx := func(d time.Duration) (context.Context, context.CancelFunc) {
+		return context.WithTimeout(context.Background(), d)
+	}
+
+	t.Run("caught-up active stream drains immediately", func(t *testing.T) {
+		m := newMgr(5)
+		m.startStreamOnConn(1, &db.EventLogPosition{Seq: 5})
+		ctx, cancel := shortCtx(time.Second)
+		defer cancel()
+		if err := m.waitDrained(ctx); err != nil {
+			t.Fatalf("waitDrained: %v", err)
+		}
+	})
+
+	t.Run("lagging stream reports cursor and tip at the deadline", func(t *testing.T) {
+		m := newMgr(0)
+		m.startStreamOnConn(1, &db.EventLogPosition{Seq: 3})
+		m.eventCommitted(7, "", nil)
+		ctx, cancel := shortCtx(100 * time.Millisecond)
+		defer cancel()
+		err := m.waitDrained(ctx)
+		if err == nil || !strings.Contains(err.Error(), "slave acked through seq 3 of 7") {
+			t.Fatalf("waitDrained err = %v", err)
+		}
+	})
+
+	t.Run("no active stream waits out the deadline", func(t *testing.T) {
+		m := newMgr(7)
+		ctx, cancel := shortCtx(100 * time.Millisecond)
+		defer cancel()
+		err := m.waitDrained(ctx)
+		if err == nil || !strings.Contains(err.Error(), "no active event stream") {
+			t.Fatalf("waitDrained err = %v", err)
+		}
+	})
+
+	t.Run("completed drain wins over a stopped manager", func(t *testing.T) {
+		m := newMgr(5)
+		m.startStreamOnConn(1, &db.EventLogPosition{Seq: 5})
+		m.mtx.Lock()
+		m.stopped = true
+		m.mtx.Unlock()
+		ctx, cancel := shortCtx(time.Second)
+		defer cancel()
+		if err := m.waitDrained(ctx); err != nil {
+			t.Fatalf("completed drain reported %v", err)
+		}
+	})
+
+	t.Run("stopped manager fails fast", func(t *testing.T) {
+		m := newMgr(5)
+		m.mtx.Lock()
+		m.stopped = true
+		m.mtx.Unlock()
+		ctx, cancel := shortCtx(2 * time.Second)
+		defer cancel()
+		start := time.Now()
+		err := m.waitDrained(ctx)
+		if err == nil || !strings.Contains(err.Error(), "manager stopped") {
+			t.Fatalf("waitDrained err = %v", err)
+		}
+		if time.Since(start) > time.Second {
+			t.Fatal("stopped manager did not fail fast")
+		}
+	})
+
+	t.Run("stream appearing mid-drain completes it", func(t *testing.T) {
+		m := newMgr(5)
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			m.startStreamOnConn(2, &db.EventLogPosition{Seq: 5})
+		}()
+		ctx, cancel := shortCtx(2 * time.Second)
+		defer cancel()
+		if err := m.waitDrained(ctx); err != nil {
+			t.Fatalf("waitDrained after reconnect: %v", err)
+		}
+	})
 }

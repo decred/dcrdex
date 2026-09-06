@@ -80,6 +80,20 @@ func (f *testTransport) haltStatus() (bool, error) {
 	return false, nil
 }
 
+func (f *testTransport) drainEventStream(ctx context.Context) (bool, error) {
+	if f.drain != nil {
+		return f.drain(ctx)
+	}
+	return false, nil
+}
+
+func (f *testTransport) requestMasterHandoff(ctx context.Context) error {
+	if f.handoff != nil {
+		return f.handoff(ctx)
+	}
+	return nil
+}
+
 func (f *testTransport) notifyMasterReady() error {
 	f.master = true
 	if f.notifyMasterReadyCalled != nil {
@@ -210,6 +224,17 @@ func (f *testTransport) postTerminalApplyFailureIfNeeded(err error) {
 func (f *testTransport) postEvent(ev meshSignal) error {
 	f.postedEvents = append(f.postedEvents, ev)
 	return nil
+}
+
+func (f *testTransport) fillStatus(st *Status) {
+	switch {
+	case f.master:
+		st.Mode = modeEstablishedMaster.String()
+	case f.slave:
+		st.Mode = modeEstablishedSlave.String()
+	default:
+		st.Mode = modePending.String()
+	}
 }
 
 func (f *testTransport) canExecuteCommandLocally() bool {
@@ -1760,4 +1785,172 @@ func TestRunSeedsBeforeLoaders(t *testing.T) {
 	if !reflect.DeepEqual(order, want) {
 		t.Fatalf("startup order = %v, want %v", order, want)
 	}
+}
+
+func TestServiceDrain(t *testing.T) {
+	applied := make(chan string, 4)
+	workerStarted := make(chan struct{})
+	workerExited := make(chan struct{})
+	drainCalled := make(chan struct{}, 1)
+	handoffCalled := make(chan struct{}, 1)
+	var drainComplete atomic.Bool
+	svc := &Service{
+		loaded: newReadiness(),
+		log:    dex.Disabled,
+		ready:  newReadiness(),
+		events: map[string]EventApplier{
+			"k": func(_ *EventApplyContext, event *Event) (*db.EventLogEntry, error) {
+				applied <- string(event.Payload)
+				return &db.EventLogEntry{Seq: 1, Kind: event.Kind}, nil
+			},
+		},
+		masterWorkers: []MasterWorker{{
+			Name: "test",
+			Run: func(ctx context.Context, reportReady func(error)) {
+				reportReady(nil)
+				close(workerStarted)
+				<-ctx.Done()
+				close(workerExited)
+			},
+		}},
+	}
+	sealRejected := func(err error) bool {
+		return errors.Is(err, ErrUnavailable)
+	}
+	svc.transport = &testTransport{
+		drain: func(context.Context) (bool, error) {
+			select {
+			case <-workerExited:
+			default:
+				t.Error("drainEventStream ran before the master worker exited")
+			}
+			// The measurement runs strictly after the seal: a commit
+			// attempted from here must already be rejected.
+			if _, err := svc.ApplyEvent(context.Background(), &Event{Kind: "k", Payload: []byte("mid-drain")}); !sealRejected(err) {
+				t.Errorf("mid-drain ApplyEvent err = %v, want ErrUnavailable", err)
+			}
+			drainCalled <- struct{}{}
+			drainComplete.Store(true)
+			return true, nil
+		},
+		handoff: func(context.Context) error {
+			if !drainComplete.Load() {
+				t.Error("master handoff ran before the event stream drained")
+			}
+			handoffCalled <- struct{}{}
+			return nil
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runDone := runServiceForTest(ctx, svc)
+
+	readyCtx, readyCancel := context.WithTimeout(context.Background(), time.Second)
+	defer readyCancel()
+	if err := svc.WaitUntilReadyForComms(readyCtx); err != nil {
+		t.Fatalf("WaitUntilReadyForComms: %v", err)
+	}
+
+	svc.workers.startWorkers()
+	select {
+	case <-workerStarted:
+	case <-time.After(time.Second):
+		t.Fatal("master worker did not start")
+	}
+
+	// Publication is open while the service runs.
+	if _, err := svc.ApplyEvent(context.Background(), &Event{Kind: "k", Payload: []byte("live")}); err != nil {
+		t.Fatalf("live ApplyEvent: %v", err)
+	}
+	if got := <-applied; got != "live" {
+		t.Fatalf("applied %q, want live", got)
+	}
+
+	cancel()
+	select {
+	case <-drainCalled:
+	case <-time.After(time.Second):
+		t.Fatal("transport drain was not called")
+	}
+	select {
+	case <-handoffCalled:
+	case <-time.After(time.Second):
+		t.Fatal("master handoff was not requested after the drain")
+	}
+	select {
+	case <-runDone:
+	case <-time.After(time.Second):
+		t.Fatal("Run did not return after the drain")
+	}
+
+	if _, err := svc.ApplyEvent(context.Background(), &Event{Kind: "k", Payload: []byte("late")}); !sealRejected(err) {
+		t.Fatalf("post-drain ApplyEvent err = %v, want ErrUnavailable", err)
+	}
+	select {
+	case extra := <-applied:
+		t.Fatalf("event %q applied through the seal", extra)
+	default:
+	}
+}
+
+// TestServiceStopWithoutDrain checks that startup cancellation and an
+// internal shutdown do not drain replication.
+func TestServiceStopWithoutDrain(t *testing.T) {
+	newSvc := func(t *testing.T, loaders []StateLoader) *Service {
+		return &Service{
+			loaded: newReadiness(),
+			log:    dex.Disabled,
+			transport: &testTransport{drain: func(context.Context) (bool, error) {
+				t.Error("drain ran on a no-drain stop path")
+				return false, nil
+			}},
+			stateLoaders: loaders,
+			ready:        newReadiness(),
+		}
+	}
+
+	t.Run("stop during blocked startup aborts", func(t *testing.T) {
+		svc := newSvc(t, []StateLoader{{
+			Name: "blocked",
+			Load: func(ctx context.Context) error {
+				<-ctx.Done()
+				return ctx.Err()
+			},
+		}})
+		ctx, cancel := context.WithCancel(context.Background())
+		runDone := runServiceForTest(ctx, svc)
+		cancel()
+
+		select {
+		case <-runDone:
+		case <-time.After(2 * time.Second):
+			t.Fatal("Run did not return after a stop during blocked startup")
+		}
+		readyCtx, readyCancel := context.WithTimeout(context.Background(), time.Second)
+		defer readyCancel()
+		if err := svc.WaitUntilReadyForComms(readyCtx); err == nil {
+			t.Fatal("readiness resolved without error for an aborted startup")
+		}
+	})
+
+	t.Run("internal cancel after ready", func(t *testing.T) {
+		svc := newSvc(t, nil)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		runDone := runServiceForTest(ctx, svc)
+
+		readyCtx, readyCancel := context.WithTimeout(context.Background(), time.Second)
+		defer readyCancel()
+		if err := svc.WaitUntilReadyForComms(readyCtx); err != nil {
+			t.Fatalf("WaitUntilReadyForComms: %v", err)
+		}
+
+		svc.lifeCancel()
+		select {
+		case <-runDone:
+		case <-time.After(time.Second):
+			t.Fatal("Run did not return after an internal cancel")
+		}
+	})
 }
