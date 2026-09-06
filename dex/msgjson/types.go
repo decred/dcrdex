@@ -107,6 +107,11 @@ const (
 	RPCTestContractGasError              // 87
 	RPCReconfigureWalletError            // 88
 	UnknownOrderError                    // 89
+	SubscribeRejectedError               // 90
+	UserNotConnectedError                // 91
+	ResultUnavailableError               // 92
+	MeshAlreadyConnectedError            // 93
+	MeshIncompatibleLogError             // 94
 )
 
 // Routes are destinations for a "payload" of data. The type of data being

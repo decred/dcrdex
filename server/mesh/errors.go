@@ -5,6 +5,7 @@ package mesh
 
 import (
 	"errors"
+	"fmt"
 
 	"decred.org/dcrdex/dex/msgjson"
 )
@@ -49,4 +50,19 @@ func LogApplyFailure(log applyFailureLogger, err error, format string, args ...a
 		return
 	}
 	log.Errorf(format, args...)
+}
+
+var (
+	// errPeerIncompatible means that the peer's configuration is incompatible
+	// with this node.
+	errPeerIncompatible = errors.New("mesh peer incompatible")
+
+	// errPeerAlreadyConnected means the peer is alive and already holds a
+	// session with this node.
+	errPeerAlreadyConnected = errors.New("peer already holds an active session")
+)
+
+// wrapPeerIncompatible marks err as an errPeerIncompatible.
+func wrapPeerIncompatible(err error) error {
+	return fmt.Errorf("%w: %v", errPeerIncompatible, err)
 }
