@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -929,4 +930,62 @@ func TestEnsureLoaded(t *testing.T) {
 			t.Fatalf("latch = %v, want %v", err, boom)
 		}
 	})
+}
+
+// seedOrderTransport records the order of startup lifecycle calls, riding
+// the single-server transport for everything else.
+type seedOrderTransport struct {
+	*singleServerTransport
+	mtx   sync.Mutex
+	order []string
+}
+
+func (tr *seedOrderTransport) record(step string) {
+	tr.mtx.Lock()
+	tr.order = append(tr.order, step)
+	tr.mtx.Unlock()
+}
+
+func (tr *seedOrderTransport) ensureSeeded(context.Context) error {
+	tr.record("seed")
+	return nil
+}
+
+func (tr *seedOrderTransport) notifyReadyForEvents() {
+	tr.record("ready-for-events")
+}
+
+func TestRunSeedsBeforeLoaders(t *testing.T) {
+	tr := &seedOrderTransport{singleServerTransport: newSingleServerTransport()}
+	s := &Service{
+		log:       dex.Disabled,
+		loaded:    newReadiness(),
+		ready:     newReadiness(),
+		transport: tr,
+		stateLoaders: []StateLoader{{Name: "loader", Load: func(context.Context) error {
+			tr.record("load")
+			return nil
+		}}},
+	}
+	tr.becameMaster = func() { s.workers.startWorkers() }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runDone := runServiceForTest(ctx, s)
+
+	waitCtx, waitCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer waitCancel()
+	if err := s.WaitUntilReadyForComms(waitCtx); err != nil {
+		t.Fatalf("WaitUntilReadyForComms: %v", err)
+	}
+	cancel()
+	<-runDone
+
+	tr.mtx.Lock()
+	order := append([]string(nil), tr.order...)
+	tr.mtx.Unlock()
+	want := []string{"seed", "load", "ready-for-events"}
+	if !reflect.DeepEqual(order, want) {
+		t.Fatalf("startup order = %v, want %v", order, want)
+	}
 }

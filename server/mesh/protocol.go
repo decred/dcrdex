@@ -42,3 +42,8 @@ func validateEvent(event *Event) error {
 }
 
 const eventLogTipHashSize = sha256.Size
+
+// snapshotRequest is the slave's request for a snapshot of the master's
+// state. A slave with an empty event log sends it before it subscribes to the
+// event stream.
+type snapshotRequest struct{}

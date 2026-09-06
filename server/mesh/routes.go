@@ -5,6 +5,7 @@ package mesh
 
 import (
 	"context"
+	"fmt"
 
 	"decred.org/dcrdex/dex/msgjson"
 )
@@ -164,4 +165,71 @@ func (n *node) handleDecision(ctx context.Context, conn link, msg *msgjson.Messa
 	}
 
 	return n.handshakes.handleDecision(ctx, conn, msg.ID, decision)
+}
+
+// requestServe sends sig to the state machine and reports whether the
+// signal has been handled. TryAgainLater is returned if the node is not
+// in the correct mode to handle the signal.
+func (n *node) requestServe(sig meshSignal, routeName string) *msgjson.Error {
+	res, err := n.control.send(sig)
+	if err == nil {
+		err = res.err
+	}
+	if err != nil {
+		return msgjson.NewError(msgjson.RPCInternal, "%s failed: %v", routeName, err)
+	}
+	if !res.handled {
+		return msgjson.NewError(msgjson.TryAgainLaterError,
+			"%s: this node is not the established master on this connection (mode %s)", routeName, res.state.mode)
+	}
+	return nil
+}
+
+// handleSnapshotRequest handles a slave's request for a snapshot of the
+// node's state. If the node can handle the request, it is acked, and the
+// transfer is initiated.
+func (n *node) handleSnapshotRequest(_ context.Context, conn link, msg *msgjson.Message) *msgjson.Error {
+	if _, msgErr := decodeRoutePayload[snapshotRequest](msg, "snapshot request", nil); msgErr != nil {
+		return msgErr
+	}
+
+	// The state machine will kick off the snapshot transfer.
+	if msgErr := n.requestServe(snapshotRequestSignal{connID: conn.ID()}, "snapshot request"); msgErr != nil {
+		return msgErr
+	}
+
+	return sendRouteAck(conn, msg.ID, "snapshot request")
+}
+
+// handleSnapshotChunk appends one snapshot chunk to the seed in progress on
+// this connection. It answers each accepted chunk with an ack. After the final
+// chunk it loads the snapshot into the DB in a new goroutine.
+func (n *node) handleSnapshotChunk(_ context.Context, conn link, peerConn *nodeConn, msg *msgjson.Message) *msgjson.Error {
+	chunk, msgErr := decodeRoutePayload[snapshotChunk](msg, "snapshot chunk", nil)
+	if msgErr != nil {
+		return msgErr
+	}
+
+	// A chunk is only accepted while a seed attempt is running on this
+	// connection.
+	seed := peerConn.seed.Load()
+	if seed == nil {
+		return msgjson.NewError(msgjson.RPCInternal, "unsolicited snapshot chunk: no seed in progress on this connection")
+	}
+	if seed.rx.transferComplete() {
+		return msgjson.NewError(msgjson.RPCInternal, "snapshot chunk after final chunk")
+	}
+
+	last, err := seed.rx.receiveChunk(chunk)
+	if err != nil {
+		seed.fail(fmt.Errorf("snapshot receive: %w", err))
+		return msgjson.NewError(msgjson.RPCInternal, "snapshot receive failed: %v", err)
+	}
+
+	if last {
+		go seed.runLoad()
+	}
+
+	msgErr = sendRouteResponse(conn, msg.ID, &eventAck{}, "snapshot chunk")
+	return msgErr
 }

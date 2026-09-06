@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/db"
@@ -50,6 +51,13 @@ func newTRouteLink(id uint64) *tRouteLink {
 func (c *tRouteLink) ID() uint64            { return c.id }
 func (c *tRouteLink) Addr() string          { return c.addr }
 func (c *tRouteLink) Done() <-chan struct{} { return c.done }
+
+func (c *tRouteLink) Request(ctx context.Context, route string, payload any, response any) error {
+	if c.requestFunc != nil {
+		return c.requestFunc(ctx, route, payload, response)
+	}
+	return nil
+}
 
 func (c *tRouteLink) Send(msg *msgjson.Message) error {
 	if c.sendErr != nil {
@@ -194,6 +202,11 @@ func requireSent(t testing.TB, conn *tRouteLink, want int) []*msgjson.Message {
 func requireOneAck(t testing.TB, conn *tRouteLink) {
 	t.Helper()
 	decodeEmptyResponse(t, requireSent(t, conn, 1)[0])
+}
+
+func requireNoSent(t testing.TB, conn *tRouteLink) {
+	t.Helper()
+	requireSent(t, conn, 0)
 }
 
 func waitForCondition(t testing.TB, cond func() bool, desc string) {
@@ -923,4 +936,121 @@ func TestNodeRoutesHandshakeAuthPolicy(t *testing.T) {
 	if !routes[helloDecisionRoute].requiresAuth {
 		t.Fatalf("%s does not require auth", helloDecisionRoute)
 	}
+}
+
+// controlAnswer replies to the next signal on a node's control queue and
+// records that signal.
+type controlAnswer struct {
+	got chan meshSignal
+}
+
+// answerControlSignal starts a goroutine that answers the next signal on the
+// node's control queue with reply. The goroutine stops at test cleanup if no
+// signal arrives.
+func answerControlSignal(t testing.TB, n *node, reply signalResult) *controlAnswer {
+	t.Helper()
+	answer := &controlAnswer{got: make(chan meshSignal, 1)}
+	done := make(chan struct{})
+	t.Cleanup(func() { close(done) })
+	go func() {
+		select {
+		case queued := <-n.control.testQueue():
+			answer.got <- queued.signal
+			if queued.reply != nil {
+				queued.reply <- reply
+			}
+		case <-done:
+		}
+	}()
+	return answer
+}
+
+// wait returns the answered signal.
+func (a *controlAnswer) wait(t testing.TB) meshSignal {
+	t.Helper()
+	select {
+	case sig := <-a.got:
+		return sig
+	case <-time.After(time.Second):
+		t.Fatalf("no control signal received")
+		return nil
+	}
+}
+
+func TestNodeRoutesHandleSnapshotRequest(t *testing.T) {
+	t.Run("starts the snapshot and acks", func(t *testing.T) {
+		active := newTRouteLink(811)
+		handler := newRouteTestNode(modeEstablishedMaster, active, nil)
+		answer := answerControlSignal(t, handler, signalResult{
+			handled: true,
+			state:   nodeState{mode: modeEstablishedMaster},
+		})
+
+		rpcErr := handleRoutePayload(t, handler, snapshotRequestRoute, active, &snapshotRequest{})
+		requireNoRPCError(t, rpcErr)
+		sig, ok := answer.wait(t).(snapshotRequestSignal)
+		if !ok || sig.connID != active.ID() {
+			t.Fatalf("control signal = %+v, want snapshot request on conn %d", sig, active.ID())
+		}
+		requireOneAck(t, active)
+	})
+
+	t.Run("not the master gets try again later", func(t *testing.T) {
+		active := newTRouteLink(812)
+		handler := newRouteTestNode(modePreparingMaster, active, nil)
+		answerControlSignal(t, handler, signalResult{state: nodeState{mode: modePreparingMaster}})
+
+		rpcErr := handleRoutePayload(t, handler, snapshotRequestRoute, active, &snapshotRequest{})
+		requireRPCOutcome(t, rpcErr, msgjson.TryAgainLaterError, "not the established master")
+		requireNoSent(t, active)
+	})
+}
+
+func TestNodeRoutesHandleSnapshotChunk(t *testing.T) {
+	seedFinished := func(seed *seedAttempt) bool {
+		seed.mtx.Lock()
+		defer seed.mtx.Unlock()
+		return seed.finished
+	}
+
+	t.Run("no seed in progress is internal", func(t *testing.T) {
+		active := newTRouteLink(831)
+		handler := newRouteTestNode(modeEstablishedSlaveSyncing, active, nil)
+
+		rpcErr := handleRoutePayload(t, handler, snapshotChunkRoute, active, &snapshotChunk{Bytes: []byte("abc")})
+		requireRPCOutcome(t, rpcErr, msgjson.RPCInternal, "unsolicited snapshot chunk")
+		requireNoSent(t, active)
+	})
+
+	t.Run("buffers the chunk and acks", func(t *testing.T) {
+		active := newTRouteLink(832)
+		handler := newRouteTestNode(modeEstablishedSlaveSyncing, active, nil)
+		seed := newSeedAttempt(context.Background(), nil, dex.Disabled)
+		handler.control.currentState().activeConn.seed.Store(seed)
+
+		rpcErr := handleRoutePayload(t, handler, snapshotChunkRoute, active, &snapshotChunk{Bytes: []byte("abc")})
+		requireNoRPCError(t, rpcErr)
+		requireOneAck(t, active)
+		if got := seed.rx.buf.String(); got != "abc" {
+			t.Fatalf("buffered %q, want %q", got, "abc")
+		}
+		if seedFinished(seed) {
+			t.Fatalf("seed finished after a chunk that was not the last")
+		}
+	})
+
+	t.Run("stray chunk after the final chunk does not fail the seed", func(t *testing.T) {
+		active := newTRouteLink(833)
+		handler := newRouteTestNode(modeEstablishedSlaveSyncing, active, nil)
+		seed := newSeedAttempt(context.Background(), nil, dex.Disabled)
+		seed.rx.done = true
+		handler.control.currentState().activeConn.seed.Store(seed)
+
+		rpcErr := handleRoutePayload(t, handler, snapshotChunkRoute, active, &snapshotChunk{Bytes: []byte("abc")})
+		requireRPCOutcome(t, rpcErr, msgjson.RPCInternal, "after final chunk")
+		requireNoSent(t, active)
+		if seedFinished(seed) {
+			t.Fatalf("stray chunk failed the seed")
+		}
+	})
 }
