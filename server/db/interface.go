@@ -5,6 +5,8 @@ package db
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"time"
 
 	"decred.org/dcrdex/dex"
@@ -363,6 +365,117 @@ type SwapDataFull struct {
 type MarketMatchID struct {
 	order.MatchID
 	Base, Quote uint32 // market
+}
+
+// EventLogEntry is a row in the event log.
+type EventLogEntry struct {
+	// Seq is the entry's sequence number. Stored entries start at 1 and
+	// increase monotonically.
+	Seq uint64
+	// Kind identifies the type of the event.
+	Kind string
+	// Event is the encoded canonical mesh event payload.
+	Event []byte
+	// TxData is the encoded transaction data.
+	TxData []byte
+	// TipHash is the hash of the log through this entry.
+	TipHash []byte
+}
+
+// SnapshotAnchorKind is the kind of the first entry in the event log that
+// was initialized using a snapshot.
+const SnapshotAnchorKind = "snapshot_anchor"
+
+// MeshGenesisKind is the kind of the first entry in the event log of a database
+// that was upgraded from a pre-mesh database. The seq of mesh genesis entries
+// is always 1.
+const MeshGenesisKind = "mesh_genesis"
+
+// IsEventLogAnchorKind reports whether kind is a non-replayable event-log
+// anchor.
+func IsEventLogAnchorKind(kind string) bool {
+	return kind == MeshGenesisKind || kind == SnapshotAnchorKind
+}
+
+// EventLogPosition identifies a position in the event log by sequence number
+// and tip hash. A zero seq represents an empty log.
+type EventLogPosition struct {
+	Seq     uint64
+	TipHash []byte
+}
+
+func (p *EventLogPosition) String() string {
+	if p == nil {
+		return "Position{nil}"
+	}
+	if p.Seq == 0 {
+		return "Position{seq=0}"
+	}
+	return fmt.Sprintf("Position{seq=%d hash=%x}", p.Seq, p.TipHash)
+}
+
+// EventCommitUnknownError means the database could not confirm whether an
+// event transaction committed.
+type EventCommitUnknownError struct {
+	Err error
+}
+
+func (e *EventCommitUnknownError) Error() string {
+	if e == nil || e.Err == nil {
+		return "event commit outcome unknown"
+	}
+	return fmt.Sprintf("event commit outcome unknown: %v", e.Err)
+}
+
+func (e *EventCommitUnknownError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+// EventLogDivergenceError means the tip hash at Seq differs from the expected
+// hash.
+type EventLogDivergenceError struct {
+	Seq             uint64
+	ExpectedTipHash []byte
+	ActualTipHash   []byte
+	Err             error
+}
+
+func (e *EventLogDivergenceError) Error() string {
+	if e == nil {
+		return "event log divergence"
+	}
+	if e.Err != nil {
+		return fmt.Sprintf("event log divergence at seq %d: %v", e.Seq, e.Err)
+	}
+	return fmt.Sprintf("event log divergence at seq %d", e.Seq)
+}
+
+func (e *EventLogDivergenceError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+// SnapshotStore imports and exports a snapshot of the database state, required
+// to sync a fresh database with a mesh peer.
+type SnapshotStore interface {
+	WriteSnapshot(ctx context.Context, w io.Writer) (*EventLogPosition, error)
+	LoadSnapshot(ctx context.Context, r io.Reader) (*EventLogPosition, error)
+}
+
+// EventLogReader allows callers to read the event log.
+type EventLogReader interface {
+	// EventLogFrontier returns the latest entry's position, or a zero
+	// position if the log is empty.
+	EventLogFrontier(context.Context) (*EventLogPosition, error)
+
+	// EventLogEntriesAfter returns up to limit entries with sequence numbers
+	// greater than after, in increasing order.
+	EventLogEntriesAfter(ctx context.Context, after uint64, limit int) ([]*EventLogEntry, error)
 }
 
 // MatchID constructs a MarketMatchID from an order.Match.

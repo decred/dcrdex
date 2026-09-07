@@ -49,6 +49,24 @@ func (aid AccountID) MarshalJSON() ([]byte, error) {
 	return json.Marshal(aid.String())
 }
 
+// UnmarshalJSON satisfies the json.Unmarshaler interface, and expects the
+// account ID as a quoted hexadecimal string.
+func (aid *AccountID) UnmarshalJSON(data []byte) error {
+	var enc string
+	if err := json.Unmarshal(data, &enc); err != nil {
+		return err
+	}
+	decoded, err := hex.DecodeString(enc)
+	if err != nil {
+		return err
+	}
+	if len(decoded) != HashSize {
+		return fmt.Errorf("invalid account id length %d", len(decoded))
+	}
+	copy(aid[:], decoded)
+	return nil
+}
+
 // Value implements the sql/driver.Valuer interface.
 func (aid AccountID) Value() (driver.Value, error) {
 	return aid[:], nil // []byte
