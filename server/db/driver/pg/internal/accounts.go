@@ -95,3 +95,6 @@ const (
 
 	UpdateReputationVersion = `UPDATE %s SET reputation_ver = $1 WHERE account_id = $2;`
 )
+
+const SelectBondAccount = `SELECT account_id FROM %s
+		WHERE bond_coin_id = $1 AND asset_id = $2;`

@@ -4,6 +4,47 @@
 package internal
 
 const (
+	// CreateOrdersArchivedTable stores archived orders. Different orders may
+	// have the same commitment or preimage.
+	CreateOrdersArchivedTable = `CREATE TABLE IF NOT EXISTS %s (
+		oid BYTEA PRIMARY KEY,
+		type INT2,
+		sell BOOLEAN,
+		account_id BYTEA,
+		address TEXT,
+		client_time TIMESTAMPTZ,
+		server_time TIMESTAMPTZ,
+		commit BYTEA,
+		coins BYTEA,
+		quantity INT8,
+		rate INT8,
+		force INT2,
+		status INT2,
+		filled INT8,
+		epoch_idx INT8, epoch_dur INT4,
+		preimage BYTEA,
+		complete_time INT8
+	);`
+
+	// CreateCancelOrdersArchivedTable stores archived cancels. Different cancels
+	// may have the same commitment or preimage.
+	CreateCancelOrdersArchivedTable = `CREATE TABLE IF NOT EXISTS %s (
+		oid BYTEA PRIMARY KEY,
+		account_id BYTEA,
+		client_time TIMESTAMPTZ,
+		server_time TIMESTAMPTZ,
+		commit BYTEA,          -- null for server-generated cancels (order revocations)
+		target_order BYTEA,
+		status INT2,
+		epoch_idx INT8, epoch_dur INT4,
+		epoch_gap INT4 DEFAULT -1,
+		preimage BYTEA
+	);`
+
+	// CreateArchivedCommitIndex indexes commitments in an archived order or
+	// cancel table without requiring them to be unique.
+	CreateArchivedCommitIndex = `CREATE INDEX IF NOT EXISTS %s ON %s (commit);`
+
 	// CreateOrdersTable creates a table specified via the %s printf specifier
 	// for market and limit orders.
 	CreateOrdersTable = `CREATE TABLE IF NOT EXISTS %s (

@@ -83,6 +83,12 @@ func createMarketTables(db *sql.DB, marketName string) error {
 				c.name, marketUID)
 		}
 	}
+	if err := createMarketMatchIndexes(db, marketUID); err != nil {
+		return err
+	}
+	if err := createMarketArchivedCommitIndexes(db, marketUID); err != nil {
+		return err
+	}
 
 	// Create tables for the candles.
 	for _, binSize := range append(candles.BinSizes, "epoch") {

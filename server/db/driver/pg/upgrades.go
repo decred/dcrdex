@@ -4,21 +4,29 @@
 package pg
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"regexp"
+	"sort"
 	"strings"
+	"time"
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
+	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/db/driver/pg/internal"
 )
 
-const dbVersion = 8
+const dbVersion = 9
 
 // The number of upgrades defined MUST be equal to dbVersion.
 var upgrades = []func(db *sql.Tx) error{
@@ -57,6 +65,12 @@ var upgrades = []func(db *sql.Tx) error{
 
 	// v8 upgrade adds per-match swap address columns to the matches tables.
 	v8Upgrade,
+
+	// v9 upgrade creates the tables needed for mesh replication, removes the
+	// accounts.fee_asset column, adds market indexes, and drops archived order
+	// commitment and preimage uniqueness constraints. It converts legacy
+	// reputation to points. Databases with existing state receive a genesis event.
+	v9Upgrade,
 }
 
 // v1Upgrade adds the schema_version column and removes the state_hash column
@@ -409,6 +423,294 @@ func v8Upgrade(tx *sql.Tx) error {
 			return fmt.Errorf("error adding takerSwapAddr column to %s: %w", tableName, err)
 		}
 	}
+	return nil
+}
+
+// v9Upgrade creates mesh tables, removes accounts.fee_asset, adds market indexes,
+// and drops archived order commitment and preimage uniqueness constraints. It
+// also converts legacy reputation to points and adds a genesis event to
+// databases with existing state.
+//
+// The uniqueness constraints are dropped because the list of archived orders may
+// differ between two databases. A new order that shares its commitment with an
+// archived order may get accepted by one node and rejected by another if we
+// keey the contraints.
+func v9Upgrade(tx *sql.Tx) error {
+	if err := createMeshTables(tx); err != nil {
+		return err
+	}
+
+	accountsTable := qualifySchemaTable(publicSchema, accountsTableName)
+	if _, err := tx.Exec(fmt.Sprintf("ALTER TABLE %s DROP COLUMN IF EXISTS fee_asset;", accountsTable)); err != nil {
+		return fmt.Errorf("drop legacy accounts.fee_asset column: %w", err)
+	}
+
+	markets, err := loadMarkets(tx, marketsTableName)
+	if err != nil {
+		return fmt.Errorf("load markets: %w", err)
+	}
+
+	log.Infof("Updating indexes and archived order constraints for %d markets", len(markets))
+
+	for _, market := range markets {
+		schema := marketSchema(market.Name)
+		if !safeIdentRE.MatchString(schema) {
+			return fmt.Errorf("market schema %q (from %q) contains disallowed characters", schema, market.Name)
+		}
+		if err := createMarketMatchIndexes(tx, schema); err != nil {
+			return fmt.Errorf("create active-match indexes for %s: %w", schema, err)
+		}
+		if err := dropArchivedOrderUniqueConstraints(tx, schema); err != nil {
+			return err
+		}
+		if err := createMarketArchivedCommitIndexes(tx, schema); err != nil {
+			return fmt.Errorf("create archived commit indexes for %s: %w", schema, err)
+		}
+	}
+
+	if err := upgradeReputationV1(tx, markets); err != nil {
+		return err
+	}
+	return stampMeshGenesis(tx)
+}
+
+// upgradeReputationV1 converts every remaining version-0 account to points.
+func upgradeReputationV1(tx *sql.Tx, markets []*dex.MarketInfo) error {
+	rows, err := tx.Query(`SELECT account_id FROM accounts WHERE reputation_ver = 0 ORDER BY account_id`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var users []account.AccountID
+	for rows.Next() {
+		var user account.AccountID
+		if err := rows.Scan(&user); err != nil {
+			return err
+		}
+		users = append(users, user)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	log.Infof("Converting legacy reputation for %d accounts", len(users))
+	insert, err := tx.Prepare(fmt.Sprintf(internal.InsertPoints, qualifySchemaTable(publicSchema, pointsTableName)))
+	if err != nil {
+		return err
+	}
+	defer insert.Close()
+	for i, user := range users {
+		if err := upgradeUserReputationV1(tx, insert, markets, user); err != nil {
+			return fmt.Errorf("convert reputation for %s: %w", user, err)
+		}
+		if (i+1)%1000 == 0 {
+			log.Infof("Converted reputation for %d/%d accounts", i+1, len(users))
+		}
+	}
+	log.Infof("Converted legacy reputation for %d accounts", len(users))
+	return nil
+}
+
+// upgradeUserReputationV1 reconstructs an account's recent outcomes from its
+// order and match history, stores the points, and marks the account as version 1.
+func upgradeUserReputationV1(tx *sql.Tx, insert *sql.Stmt, markets []*dex.MarketInfo, user account.AccountID) error {
+	// Keep the limits used by the original version-0 conversion, independently
+	// of future changes to reputation scoring.
+	const preimageLimit, matchLimit, orderLimit, freeCancelThreshold = 40, 60, 100, 2
+	type stampedOutcome struct {
+		link    order.OrderID
+		stamp   int64
+		outcome db.Outcome
+	}
+	var preimages, matches, orders []stampedOutcome
+	// The transaction's context, supplied by upgradeDB, controls cancellation.
+	ctx := context.Background()
+	for _, market := range markets {
+		schema := marketSchema(market.Name)
+		matchTable := qualifySchemaTable(schema, matchesTableName)
+		matchResults, err := completedAndAtFaultMatches(ctx, tx, matchTable, user, matchLimit, market.Base, market.Quote)
+		if err != nil {
+			return fmt.Errorf("read matches in %s: %w", schema, err)
+		}
+		for _, m := range matchResults {
+			outcome := db.OutcomeSwapSuccess
+			if m.Fail {
+				switch m.Status {
+				case order.NewlyMatched:
+					outcome = db.OutcomeNoSwapAsMaker
+				case order.MakerSwapCast:
+					outcome = db.OutcomeNoSwapAsTaker
+				case order.TakerSwapCast:
+					outcome = db.OutcomeNoRedeemAsMaker
+				case order.MakerRedeemed:
+					outcome = db.OutcomeNoRedeemAsTaker
+				}
+			}
+			matches = append(matches, stampedOutcome{order.OrderID(m.ID), m.Time, outcome})
+		}
+
+		orderTable := qualifySchemaTable(schema, ordersArchivedTableName)
+		cancelTable := qualifySchemaTable(schema, cancelsArchivedTableName)
+		for _, stmt := range []string{
+			fmt.Sprintf(internal.PreimageResultsLastN, orderTable),
+			fmt.Sprintf(internal.CancelPreimageResultsLastN, cancelTable),
+		} {
+			results, err := preimageStats(ctx, tx, stmt, user, preimageLimit)
+			if err != nil {
+				return fmt.Errorf("read preimages in %s: %w", schema, err)
+			}
+			for _, p := range results {
+				outcome := db.OutcomePreimageSuccess
+				if p.Miss {
+					outcome = db.OutcomePreimageMiss
+				}
+				preimages = append(preimages, stampedOutcome{p.ID, p.Time, outcome})
+			}
+		}
+
+		completed, err := completedUserOrders(ctx, tx, orderTable, user, orderLimit)
+		if err != nil {
+			return fmt.Errorf("read completed orders in %s: %w", schema, err)
+		}
+		for _, o := range completed {
+			orders = append(orders, stampedOutcome{o.oid, o.t, db.OutcomeOrderComplete})
+		}
+		epochTable := qualifySchemaTable(schema, epochsTableName)
+		stmt := fmt.Sprintf(internal.RetrieveCancelTimesForUserByStatus, cancelTable, epochTable)
+		cancels, err := executedCancelsForUser(ctx, tx, stmt, user, orderLimit)
+		if err != nil {
+			return fmt.Errorf("read executed cancels in %s: %w", schema, err)
+		}
+		// Filter exempt revokes before LIMIT so they cannot hide older counted ones.
+		stmt = fmt.Sprintf(`SELECT oid, target_order, server_time, epoch_idx
+			FROM %s WHERE account_id = $1 AND status = $2 AND epoch_idx != -1
+			ORDER BY server_time DESC LIMIT $3`, cancelTable)
+		revokes, err := revokeGeneratedCancelsForUser(ctx, tx, stmt, user, orderLimit)
+		if err != nil {
+			return fmt.Errorf("read revokes in %s: %w", schema, err)
+		}
+		for _, o := range append(cancels, revokes...) {
+			outcome := db.OutcomeOrderComplete
+			if o.EpochGap >= 0 && o.EpochGap < freeCancelThreshold {
+				outcome = db.OutcomeOrderCanceled
+			}
+			orders = append(orders, stampedOutcome{o.ID, o.MatchTime, outcome})
+		}
+	}
+
+	for _, group := range []struct {
+		outcomes []stampedOutcome
+		class    db.OutcomeClass
+		limit    int
+	}{
+		{preimages, db.OutcomeClassPreimage, preimageLimit},
+		{matches, db.OutcomeClassMatch, matchLimit},
+		{orders, db.OutcomeClassOrder, orderLimit},
+	} {
+		outcomes := group.outcomes
+		sort.Slice(outcomes, func(i, j int) bool {
+			if outcomes[i].stamp == outcomes[j].stamp {
+				return bytes.Compare(outcomes[i].link[:], outcomes[j].link[:]) < 0
+			}
+			return outcomes[i].stamp < outcomes[j].stamp
+		})
+		if len(outcomes) > group.limit {
+			outcomes = outcomes[len(outcomes)-group.limit:]
+		}
+		// Point IDs must increase from oldest to newest within each class.
+		for _, o := range outcomes {
+			var id int64
+			if err := insert.QueryRow(user, o.link, group.class, o.outcome).Scan(&id); err != nil {
+				return fmt.Errorf("insert reputation point: %w", err)
+			}
+		}
+	}
+	_, err := tx.Exec(fmt.Sprintf(internal.UpdateReputationVersion, qualifySchemaTable(publicSchema, accountsTableName)), 1, user)
+	return err
+}
+
+func dropArchivedOrderUniqueConstraints(tx *sql.Tx, schema string) error {
+	constraints := []struct{ table, name string }{
+		{ordersArchivedTableName, "orders_archived_commit_key"},
+		{ordersArchivedTableName, "orders_archived_preimage_key"},
+		{cancelsArchivedTableName, "cancels_archived_commit_key"},
+		{cancelsArchivedTableName, "cancels_archived_preimage_key"},
+	}
+	for _, constraint := range constraints {
+		stmt := fmt.Sprintf("ALTER TABLE %s.%s DROP CONSTRAINT IF EXISTS %s;",
+			schema, constraint.table, constraint.name)
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("drop %s on %s.%s: %w", constraint.name, schema, constraint.table, err)
+		}
+	}
+	return nil
+}
+
+// createMeshTables creates the public tables needed by the v9 upgrade.
+func createMeshTables(tx *sql.Tx) error {
+	for _, table := range []struct{ stmt, name string }{
+		{internal.CreateEventLogTable, eventLogTableName},
+		{internal.CreateMarketLifecycleTable, marketLifecycleTableName},
+		{internal.CreatePointsTable, pointsTableName},
+		{internal.CreatePrepaidBondsTable, prepaidBondsTableName},
+	} {
+		if _, err := createTableStmt(tx, table.stmt, publicSchema, table.name); err != nil {
+			return fmt.Errorf("create %s: %w", table.name, err)
+		}
+	}
+	if _, err := tx.Exec(fmt.Sprintf(internal.CreatePointsIndex, publicSchema+"."+pointsTableName)); err != nil {
+		return fmt.Errorf("create points index: %w", err)
+	}
+	return nil
+}
+
+// meshGenesisPayload is the payload of a mesh genesis event.
+type meshGenesisPayload struct {
+	// Nonce distinguishes independent databases.
+	Nonce dex.Bytes `json:"nonce"`
+	// UnixMs is the event creation time in Unix milliseconds.
+	UnixMs int64 `json:"unixMs"`
+}
+
+// stampMeshGenesis adds the first event to a database with existing state and
+// an empty event log. Empty databases remain available for snapshot loading.
+func stampMeshGenesis(tx *sql.Tx) error {
+	const genesisSeq = 1
+
+	eventLog := qualifySchemaTable(publicSchema, eventLogTableName)
+	query := fmt.Sprintf(internal.SelectEventLogFrontier, eventLog)
+	frontier, err := scanEventLogFrontier(tx.QueryRow(query))
+	if err != nil {
+		return fmt.Errorf("read event log frontier: %w", err)
+	}
+	if frontier.Seq > 0 {
+		return nil
+	}
+	empty, err := hasNoEventSourcedState(context.Background(), tx)
+	if err != nil {
+		return fmt.Errorf("check for event-sourced state: %w", err)
+	}
+	if empty {
+		return nil
+	}
+
+	var nonce [32]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return fmt.Errorf("generate genesis nonce: %w", err)
+	}
+	payload, err := json.Marshal(&meshGenesisPayload{
+		Nonce:  nonce[:],
+		UnixMs: time.Now().UnixMilli(),
+	})
+	if err != nil {
+		return fmt.Errorf("encode genesis payload: %w", err)
+	}
+	tipHash := eventLogHash(nil, genesisSeq, db.MeshGenesisKind, payload, nil)
+	stmt := fmt.Sprintf(internal.InsertEventLog, eventLog)
+	if _, err := tx.Exec(stmt, int64(genesisSeq), db.MeshGenesisKind, payload, []byte{}, tipHash); err != nil {
+		return fmt.Errorf("insert genesis row: %w", err)
+	}
+	log.Infof("Inserted mesh genesis at sequence %d with tip %x", genesisSeq, tipHash)
 	return nil
 }
 

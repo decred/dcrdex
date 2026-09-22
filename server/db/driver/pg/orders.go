@@ -770,7 +770,7 @@ func (a *Archiver) CompletedUserOrders(aid account.AccountID, N int) (oids []ord
 	return
 }
 
-func completedUserOrders(ctx context.Context, dbe *sql.DB, tableName string, aid account.AccountID, N int) (oids []orderCompStamped, err error) {
+func completedUserOrders(ctx context.Context, dbe sqlQueryer, tableName string, aid account.AccountID, N int) (oids []orderCompStamped, err error) {
 	stmt := fmt.Sprintf(internal.RetrieveCompletedOrdersForAccount, tableName)
 	var rows *sql.Rows
 	rows, err = dbe.QueryContext(ctx, stmt, aid, N)
@@ -807,28 +807,9 @@ func (a *Archiver) PreimageStats(user account.AccountID, lastN int) ([]*db.Preim
 		ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
 		defer cancel()
 
-		rows, err := a.db.QueryContext(ctx, stmt, user, lastN, orderStatusRevoked)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-
-		for rows.Next() {
-			var miss bool
-			var time int64
-			var oid order.OrderID
-			err = rows.Scan(&oid, &miss, &time)
-			if err != nil {
-				return err
-			}
-			outcomes = append(outcomes, &db.PreimageResult{
-				Miss: miss,
-				Time: time,
-				ID:   oid,
-			})
-		}
-
-		return rows.Err()
+		results, err := preimageStats(ctx, a.db, stmt, user, lastN)
+		outcomes = append(outcomes, results...)
+		return err
 	}
 
 	for schema := range a.markets {
@@ -853,6 +834,25 @@ func (a *Archiver) PreimageStats(user account.AccountID, lastN int) ([]*db.Preim
 	}
 
 	return outcomes, nil
+}
+
+// preimageStats reads preimage results from one order table.
+func preimageStats(ctx context.Context, dbe sqlQueryer, stmt string, user account.AccountID, lastN int) ([]*db.PreimageResult, error) {
+	rows, err := dbe.QueryContext(ctx, stmt, user, lastN, orderStatusRevoked)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var outcomes []*db.PreimageResult
+	for rows.Next() {
+		var result db.PreimageResult
+		if err := rows.Scan(&result.ID, &result.Miss, &result.Time); err != nil {
+			return nil, err
+		}
+		outcomes = append(outcomes, &result)
+	}
+	return outcomes, rows.Err()
 }
 
 // OrderStatusByID gets the status, type, and filled amount of the order with
@@ -1219,7 +1219,7 @@ func (a *Archiver) ExecutedCancelsForUser(aid account.AccountID, N int) (ords []
 		epochsTableName := fullEpochsTableName(a.dbName, marketSchema)
 		stmt := fmt.Sprintf(internal.RetrieveCancelTimesForUserByStatus, cancelTableName, epochsTableName)
 		ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
-		mktOrds, err := a.executedCancelsForUser(ctx, a.db, stmt, aid, N)
+		mktOrds, err := executedCancelsForUser(ctx, a.db, stmt, aid, N)
 		cancel()
 		if err != nil {
 			return nil, err
@@ -1229,7 +1229,7 @@ func (a *Archiver) ExecutedCancelsForUser(aid account.AccountID, N int) (ords []
 		// Query for revoked orders (server-initiated cancels).
 		stmt = fmt.Sprintf(internal.SelectRevokeCancels, cancelTableName)
 		ctx, cancel = context.WithTimeout(a.ctx, a.queryTimeout)
-		mktOrds, err = a.revokeGeneratedCancelsForUser(ctx, a.db, stmt, aid, N)
+		mktOrds, err = revokeGeneratedCancelsForUser(ctx, a.db, stmt, aid, N)
 		cancel()
 		if err != nil {
 			return nil, err
@@ -1244,7 +1244,7 @@ func (a *Archiver) ExecutedCancelsForUser(aid account.AccountID, N int) (ords []
 	return
 }
 
-func (a *Archiver) executedCancelsForUser(ctx context.Context, dbe *sql.DB, stmt string,
+func executedCancelsForUser(ctx context.Context, dbe sqlQueryer, stmt string,
 	aid account.AccountID, N int) (ords []*db.CancelRecord, err error) {
 
 	var rows *sql.Rows
@@ -1279,7 +1279,7 @@ func (a *Archiver) executedCancelsForUser(ctx context.Context, dbe *sql.DB, stmt
 
 // revokeGeneratedCancelsForUser excludes exempt/uncounted cancels created with
 // RevokeOrderUncounted or revokeOrder(..., exempt=true).
-func (a *Archiver) revokeGeneratedCancelsForUser(ctx context.Context, dbe *sql.DB, stmt string,
+func revokeGeneratedCancelsForUser(ctx context.Context, dbe sqlQueryer, stmt string,
 	aid account.AccountID, N int) (ords []*db.CancelRecord, err error) {
 
 	var rows *sql.Rows

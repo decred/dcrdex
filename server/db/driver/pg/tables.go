@@ -14,17 +14,25 @@ import (
 )
 
 const (
-	marketsTableName      = "markets"
-	metaTableName         = "meta"
-	feeKeysTableName      = "fee_keys"
-	accountsTableName     = "accounts"
-	bondsTableName        = "bonds"
-	prepaidBondsTableName = "prepaid_bonds"
-	pointsTableName       = "points"
+	marketsTableName         = "markets"
+	marketLifecycleTableName = "market_lifecycle"
+	metaTableName            = "meta"
+	feeKeysTableName         = "fee_keys"
+	accountsTableName        = "accounts"
+	bondsTableName           = "bonds"
+	prepaidBondsTableName    = "prepaid_bonds"
+	pointsTableName          = "points"
+	eventLogTableName        = "event_log"
 
 	indexBondsOnAccountName  = "idx_bonds_on_acct"
 	indexBondsOnLockTimeName = "idx_bonds_on_locktime"
 	indexBondsOnCoinIDName   = "idx_bonds_on_coinid"
+
+	indexMatchesActiveMakerOrderName = "idx_matches_active_maker_order"
+	indexMatchesActiveTakerOrderName = "idx_matches_active_taker_order"
+
+	indexArchivedOrdersCommitName  = "idx_orders_archived_commit"
+	indexArchivedCancelsCommitName = "idx_cancels_archived_commit"
 
 	// market schema tables
 	matchesTableName         = "matches"
@@ -44,8 +52,10 @@ type tableStmt struct {
 
 var createDEXTableStatements = []tableStmt{
 	{marketsTableName, internal.CreateMarketsTable},
+	{marketLifecycleTableName, internal.CreateMarketLifecycleTable},
 	{metaTableName, internal.CreateMetaTable},
 	{pointsTableName, internal.CreatePointsTable},
+	{eventLogTableName, internal.CreateEventLogTable},
 }
 
 var createAccountTableStatements = []tableStmt{
@@ -66,10 +76,15 @@ var createBondIndexesStatements = []indexStmt{
 	{indexBondsOnCoinIDName, internal.CreateBondsCoinIDIndex},
 }
 
+var createMarketMatchIndexesStatements = []indexStmt{
+	{indexMatchesActiveMakerOrderName, internal.CreateMatchesActiveMakerOrderIndex},
+	{indexMatchesActiveTakerOrderName, internal.CreateMatchesActiveTakerOrderIndex},
+}
+
 var createMarketTableStatements = []tableStmt{
-	{ordersArchivedTableName, internal.CreateOrdersTable},
+	{ordersArchivedTableName, internal.CreateOrdersArchivedTable},
 	{ordersActiveTableName, internal.CreateOrdersTable},
-	{cancelsArchivedTableName, internal.CreateCancelOrdersTable},
+	{cancelsArchivedTableName, internal.CreateCancelOrdersArchivedTable},
 	{cancelsActiveTableName, internal.CreateCancelOrdersTable},
 	{matchesTableName, internal.CreateMatchesTable}, // just one matches table per market for now
 	{epochsTableName, internal.CreateEpochsTable},
@@ -158,6 +173,29 @@ func createTable(db sqlQueryExecutor, schema, tableName string) (bool, error) {
 	return createTableStmt(db, createCommand, schema, tableName)
 }
 
+func createMarketMatchIndexes(db sqlQueryExecutor, marketSchema string) error {
+	fullMatchesTableName := marketSchema + "." + matchesTableName
+	for _, idx := range createMarketMatchIndexesStatements {
+		if err := createIndexStmt(db, idx.stmt, idx.idxName, fullMatchesTableName); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func createMarketArchivedCommitIndexes(db sqlQueryExecutor, marketSchema string) error {
+	for _, index := range []struct{ table, name string }{
+		{ordersArchivedTableName, indexArchivedOrdersCommitName},
+		{cancelsArchivedTableName, indexArchivedCancelsCommitName},
+	} {
+		table := marketSchema + "." + index.table
+		if err := createIndexStmt(db, internal.CreateArchivedCommitIndex, index.name, table); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // prepareTables ensures that all tables required by the DEX market config,
 // mktConfig, are ready. This also runs any required DB scheme upgrades. The
 // Context allows safely canceling upgrades, which may be long running. Returns
@@ -167,6 +205,9 @@ func prepareTables(ctx context.Context, db *sql.DB, mktConfig []*dex.MarketInfo)
 	created, err := createTable(db, publicSchema, marketsTableName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create markets table: %w", err)
+	}
+	if _, err = createTable(db, publicSchema, marketLifecycleTableName); err != nil {
+		return nil, fmt.Errorf("failed to create market lifecycle table: %w", err)
 	}
 	if created { // Fresh install
 		// Create the meta table in the public schema.
@@ -193,6 +234,9 @@ func prepareTables(ctx context.Context, db *sql.DB, mktConfig []*dex.MarketInfo)
 	}
 	if _, err = db.Exec(fmt.Sprintf(internal.CreatePointsIndex, publicSchema+"."+pointsTableName)); err != nil {
 		return nil, fmt.Errorf("error creating index on points table: %w", err)
+	}
+	if _, err = createTable(db, publicSchema, eventLogTableName); err != nil {
+		return nil, fmt.Errorf("error creating event log table: %w", err)
 	}
 	// Prepare the account and registration key counter tables.
 	if err = createAccountTables(db); err != nil {

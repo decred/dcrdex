@@ -149,7 +149,7 @@ func nukeAll(db *sql.DB) error {
 
 	// Drop tables in public schema.
 	dropPublic := func(stmts []tableStmt) error {
-		for i := range stmts {
+		for i := len(stmts) - 1; i >= 0; i-- {
 			tableName := "public." + stmts[i].name
 			log.Tracef(`Dropping DEX table %s...`, tableName)
 			if err = dropTable(db, tableName); err != nil {

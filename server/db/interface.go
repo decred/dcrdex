@@ -5,12 +5,16 @@ package db
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
+	"io"
 	"time"
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/candles"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/meshevents"
 )
 
 // EpochResults represents the outcome of epoch order processing, including
@@ -94,6 +98,9 @@ type DEXArchivist interface {
 	MatchArchiver
 	SwapArchiver
 	ReputationArchiver
+	EventLogReader
+	SnapshotStore
+	EventSourcedStateChecker
 }
 
 // OrderArchiver is the interface required for storage and retrieval of all
@@ -240,14 +247,10 @@ type Bond struct {
 // AccountArchiver is the interface required for storage and retrieval of all
 // account data.
 type AccountArchiver interface {
-	// Account retrieves the account information for the specified account ID. A
-	// nil pointer will be returned for unknown or closed accounts. Bond and
-	// registration fee payment status is returned as well. A bond is active if
-	// its lockTime is after the lockTimeThresh Time, which should be
-	// time.Now().Add(bondExpiry). The legacy bool return refers to the legacy
-	// registration fee system, and legacyPaid indicates if the account has a
-	// recorded fee coin (paid legacy fee).
-	Account(acctID account.AccountID, lockTimeThresh time.Time) (acct *account.Account, activeBonds []*Bond)
+	// Account returns the account and bonds whose lock time is at least
+	// lockTimeThresh. It returns a nil account and nil error if the account
+	// does not exist.
+	Account(ctx context.Context, acctID account.AccountID, lockTimeThresh time.Time) (acct *account.Account, activeBonds []*Bond, err error)
 
 	// CreateAccountWithBond creates a new account with the given bond. This is
 	// used for the new postbond request protocol. The bond tx should be
@@ -267,6 +270,17 @@ type AccountArchiver interface {
 
 	// AccountInfo returns data for an account.
 	AccountInfo(account.AccountID) (*Account, error)
+
+	// ApplyBondPostedEvent stores the account and bond changes with the event
+	// log entry in one transaction. It creates the account if needed and
+	// consumes the token for a prepaid bond. An existing bond for the same
+	// account is left unchanged, but the event is still recorded. A bond owned
+	// by another account is an error.
+	ApplyBondPostedEvent(ctx context.Context, meta *EventLogMeta, event *meshevents.BondPostedEvent, pimgSz, matchSz, orderSz int) (*BondPostedResult, error)
+
+	// ApplyPrepaidBondsCreatedEvent stores the prepaid bond tokens and event
+	// log entry in one transaction.
+	ApplyPrepaidBondsCreatedEvent(ctx context.Context, meta *EventLogMeta, event *meshevents.PrepaidBondsCreatedEvent) (*EventLogEntry, error)
 }
 
 // MatchData represents an order pair match, but with just the order IDs instead
@@ -363,6 +377,154 @@ type SwapDataFull struct {
 type MarketMatchID struct {
 	order.MatchID
 	Base, Quote uint32 // market
+}
+
+// ReputationForgivenResult contains the result of applying a reputation_forgiven event.
+type ReputationForgivenResult struct {
+	// Forgiven reports whether user forgiveness deleted any outcomes or match
+	// forgiveness updated an inactive match. An already-forgiven inactive
+	// match also reports true.
+	Forgiven bool
+	Log      *EventLogEntry
+}
+
+const EventLogTipHashSize = sha256.Size
+
+// EventLogMeta specifies how to record a database update in the event log.
+type EventLogMeta struct {
+	// Seq is the event's sequence number. If zero, storage assigns the next
+	// sequence. Otherwise, it must match the next sequence.
+	Seq uint64
+
+	// Event is the encoded event payload.
+	Event []byte
+
+	// ExpectedTipHash is the expected log tip hash after this event.
+	// A nil value skips hash verification.
+	ExpectedTipHash []byte
+}
+
+// EventLogEntry is a row in the event log.
+type EventLogEntry struct {
+	// Seq is the entry's sequence number. Stored entries start at 1 and
+	// increase monotonically.
+	Seq uint64
+	// Kind identifies the type of the event.
+	Kind string
+	// Event is the encoded canonical mesh event payload.
+	Event []byte
+	// TxData is the encoded transaction data.
+	TxData []byte
+	// TipHash is the hash of the log through this entry.
+	TipHash []byte
+}
+
+// SnapshotAnchorKind is the kind of the first entry in the event log that
+// was initialized using a snapshot.
+const SnapshotAnchorKind = "snapshot_anchor"
+
+// MeshGenesisKind is the kind of the first entry in the event log of a database
+// that was upgraded from a pre-mesh database. The seq of mesh genesis entries
+// is always 1.
+const MeshGenesisKind = "mesh_genesis"
+
+// IsEventLogAnchorKind reports whether kind is a non-replayable event-log
+// anchor.
+func IsEventLogAnchorKind(kind string) bool {
+	return kind == MeshGenesisKind || kind == SnapshotAnchorKind
+}
+
+// EventLogPosition identifies a position in the event log by sequence number
+// and tip hash. A zero seq represents an empty log.
+type EventLogPosition struct {
+	Seq     uint64
+	TipHash []byte
+}
+
+func (p *EventLogPosition) String() string {
+	if p == nil {
+		return "Position{nil}"
+	}
+	if p.Seq == 0 {
+		return "Position{seq=0}"
+	}
+	return fmt.Sprintf("Position{seq=%d hash=%x}", p.Seq, p.TipHash)
+}
+
+// EventCommitUnknownError means the database could not confirm whether an
+// event transaction committed.
+type EventCommitUnknownError struct {
+	Err error
+}
+
+func (e *EventCommitUnknownError) Error() string {
+	if e == nil || e.Err == nil {
+		return "event commit outcome unknown"
+	}
+	return fmt.Sprintf("event commit outcome unknown: %v", e.Err)
+}
+
+func (e *EventCommitUnknownError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+// EventLogDivergenceError means the tip hash at Seq differs from the expected
+// hash.
+type EventLogDivergenceError struct {
+	Seq             uint64
+	ExpectedTipHash []byte
+	ActualTipHash   []byte
+	Err             error
+}
+
+func (e *EventLogDivergenceError) Error() string {
+	if e == nil {
+		return "event log divergence"
+	}
+	if e.Err != nil {
+		return fmt.Sprintf("event log divergence at seq %d: %v", e.Seq, e.Err)
+	}
+	return fmt.Sprintf("event log divergence at seq %d", e.Seq)
+}
+
+func (e *EventLogDivergenceError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+// SnapshotStore imports and exports a snapshot of the database state, required
+// to sync a fresh database with a mesh peer.
+type SnapshotStore interface {
+	WriteSnapshot(ctx context.Context, w io.Writer) (*EventLogPosition, error)
+	LoadSnapshot(ctx context.Context, r io.Reader) (*EventLogPosition, error)
+}
+
+// EventSourcedStateChecker checks and clears the event log and event projections
+// while preserving configuration.
+type EventSourcedStateChecker interface {
+	// HasNoEventSourcedState reports whether the event log and all event
+	// projections are empty. Configuration tables are ignored.
+	HasNoEventSourcedState(ctx context.Context) (bool, error)
+
+	// WipeEventSourcedState clears the event log and all event projections,
+	// including historical market data. Configuration is preserved.
+	WipeEventSourcedState(ctx context.Context) error
+}
+
+// EventLogReader allows callers to read the event log.
+type EventLogReader interface {
+	// EventLogFrontier returns the latest entry's position, or a zero
+	// position if the log is empty.
+	EventLogFrontier(context.Context) (*EventLogPosition, error)
+
+	// EventLogEntriesAfter returns up to limit entries with sequence numbers
+	// greater than after, in increasing order.
+	EventLogEntriesAfter(ctx context.Context, after uint64, limit int) ([]*EventLogEntry, error)
 }
 
 // MatchID constructs a MarketMatchID from an order.Match.
@@ -540,19 +702,11 @@ type CancelRecord struct {
 
 // Reputation
 
-// ReputationArchiver handles interactions with the points table as well as
-// upgrading the reputation version in the accounts table.
+// ReputationArchiver handles interactions with the reputation points table.
 type ReputationArchiver interface {
 	GetUserReputationData(ctx context.Context, user account.AccountID, pimgSz, matchSz, orderSz int) ([]*PreimageOutcome, []*MatchResult, []*OrderOutcome, error)
-	AddPreimageOutcome(ctx context.Context, user account.AccountID, oid order.OrderID, miss bool) (*PreimageOutcome, error)
-	AddMatchOutcome(ctx context.Context, user account.AccountID, mid order.MatchID, outcome Outcome) (*MatchResult, error)
-	AddOrderOutcome(ctx context.Context, user account.AccountID, oid order.OrderID, canceled bool) (*OrderOutcome, error)
-	PruneOutcomes(ctx context.Context, user account.AccountID, outcomeClass OutcomeClass, fromDBID int64) error
-	GetUserReputationVersion(ctx context.Context, user account.AccountID) (int16, error)
-	UpgradeUserReputationV1(
-		ctx context.Context, user account.AccountID, pimgOutcomes []*PreimageOutcome, matchOutcomes []*MatchResult, orderOutcomes []*OrderOutcome, /* Without DB IDs */
-	) ([]*PreimageOutcome, []*MatchResult, []*OrderOutcome, error) /* With DB IDs */
-	ForgiveUser(ctx context.Context, user account.AccountID) error
+	ApplyReputationForgivenEvent(ctx context.Context, meta *EventLogMeta, event *meshevents.ReputationForgivenEvent) (*ReputationForgivenResult, error)
+	SetReputationInputsListener(func(users ...account.AccountID))
 }
 
 // OutcomeClass is the type of interaction for which the user's reputation
@@ -675,4 +829,18 @@ func (o *OrderOutcome) Outcome() Outcome {
 
 func (o *OrderOutcome) ID() int64 {
 	return o.DBID
+}
+
+// BondPostedResult contains the result of applying a bond_posted event.
+type BondPostedResult struct {
+	// BondAdded is true if the bond was inserted, or false if the account
+	// already had the bond.
+	BondAdded bool
+	Log       *EventLogEntry
+
+	// Reputation inputs read after storing the bond, in the same transaction.
+	Bonds     []*Bond
+	Preimages []*PreimageOutcome
+	Matches   []*MatchResult
+	Orders    []*OrderOutcome
 }

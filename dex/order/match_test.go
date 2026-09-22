@@ -3,9 +3,12 @@ package order
 import (
 	"bytes"
 	"encoding/hex"
+	"encoding/json"
 	"math/rand"
 	"testing"
 	"time"
+
+	"decred.org/dcrdex/dex/encode"
 )
 
 func TestMatchID(t *testing.T) {
@@ -119,5 +122,24 @@ func TestMatchSet(t *testing.T) {
 	qv := matchSet.QuoteVolume()
 	if qv != 25 {
 		t.Fatalf("wrong quote volume. wanted 25, got %d", qv)
+	}
+}
+
+func TestMatchIDJSON(t *testing.T) {
+	var want MatchID
+	copy(want[:], encode.RandomBytes(len(want)))
+
+	enc, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+
+	var got MatchID
+	if err := json.Unmarshal(enc, &got); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+
+	if got != want {
+		t.Fatalf("wrong MatchID after JSON round trip. want %s, got %s", want, got)
 	}
 }

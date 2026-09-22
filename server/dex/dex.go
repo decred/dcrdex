@@ -33,6 +33,7 @@ import (
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/db/driver/pg"
 	"decred.org/dcrdex/server/market"
+	"decred.org/dcrdex/server/mesh"
 	"decred.org/dcrdex/server/noderelay"
 	"decred.org/dcrdex/server/swap"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -415,6 +416,8 @@ type RPCConfig = comms.RPCConfig
 
 // DexConf is the configuration data required to create a new DEX.
 type DexConf struct {
+	// RequestShutdown requests server shutdown if the mesh service halts.
+	RequestShutdown  func(string)
 	DataDir          string
 	LogBackend       *dex.LoggerMaker
 	Markets          []*dex.MarketInfo
@@ -608,6 +611,9 @@ type Bonder interface {
 //  8. Create and start the book router, and create the order router.
 //  9. Create and start the comms server.
 func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
+	if cfg.RequestShutdown == nil {
+		return nil, fmt.Errorf("shutdown callback is required")
+	}
 	var subsystems []subsystem
 	startSubSys := func(name string, rc any) (err error) {
 		subsys := subsystem{name: name}
@@ -892,13 +898,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		return nil, err
 	}
 
-	// Create the user order unbook dispatcher for the AuthManager.
 	markets := make(map[string]*market.Market, len(cfg.Markets))
-	userUnbookFun := func(user account.AccountID) {
-		for _, mkt := range markets {
-			mkt.UnbookUserOrders(user)
-		}
-	}
 
 	bondChecker := func(ctx context.Context, assetID uint32, version uint16, coinID []byte) (amt, lockTime, confs int64,
 		acct account.AccountID, err error) {
@@ -940,8 +940,6 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		BondTxParser:     bondTxParser,
 		BondChecker:      bondChecker,
 		BondExpiry:       uint64(dex.BondExpiry(cfg.Network)),
-		UserUnbooker:     userUnbookFun,
-		MiaUserTimeout:   cfg.BroadcastTimeout,
 		CancelThreshold:  cfg.CancelThreshold,
 		FreeCancels:      cfg.FreeCancels,
 		PenaltyThreshold: cfg.PenaltyThreshold,
@@ -950,6 +948,20 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	}
 
 	authMgr := auth.NewAuthManager(&authCfg)
+	// Auth commands use the mesh service in single-server mode until market
+	// and swap state changes also participate in replication.
+	meshSvc, err := mesh.NewService(&mesh.ServiceConfig{
+		Commands:       authMgr.Commands(),
+		Events:         authMgr.Events(),
+		EventLogReader: storage,
+		Logger:         cfg.LogBackend.NewLogger("MSH", log.Level()),
+		OnHalt:         func(err error) { cfg.RequestShutdown(fmt.Sprintf("mesh halted: %v", err)) },
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create auth mesh service: %w", err)
+	}
+	authMgr.SetMeshService(meshSvc)
+
 	log.Infof("Cancellation rate threshold %f, new user grace period %d cancels",
 		cfg.CancelThreshold, authMgr.GraceLimit())
 	log.Infof("MIA user order unbook timeout %v", cfg.BroadcastTimeout)
@@ -1028,7 +1040,6 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 
 	// Markets
 	var orderRouter *market.OrderRouter
-	usersWithOrders := make(map[account.AccountID]struct{})
 	for _, mktInf := range cfg.Markets {
 		// nilness of the coin locker signals account-based asset.
 		var baseCoinLocker, quoteCoinLocker coinlock.CoinLocker
@@ -1073,24 +1084,9 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		if err != nil {
 			return nil, fmt.Errorf("DataSource.AddMarketSource: %w", err)
 		}
-
-		// Having loaded the book, get the accounts owning the orders.
-		_, buys, sells := mkt.Book()
-		for _, lo := range buys {
-			usersWithOrders[lo.AccountID] = struct{}{}
-		}
-		for _, lo := range sells {
-			usersWithOrders[lo.AccountID] = struct{}{}
-		}
 	}
 
-	// Having enumerated all users with booked orders, configure the AuthManager
-	// to expect them to connect in a certain time period.
-	authMgr.ExpectUsers(usersWithOrders, cfg.BroadcastTimeout)
-
-	// Start the AuthManager and Swapper subsystems after populating the markets
-	// map used by the unbook callbacks, and setting the AuthManager's unbook
-	// timers for the users with currently booked orders.
+	// Start the AuthManager and Swapper subsystems.
 	startSubSys("Auth manager", authMgr)
 	startSubSys("Swapper", swapper)
 
@@ -1205,7 +1201,15 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		rr.With(orderBookParamsParser).Get("/orderbook/{baseSymbol}/{quoteSymbol}", server.NewRouteHandler(msgjson.OrderBookRoute))
 	})
 
+	if err := startSubSys("Mesh", meshSvc); err != nil {
+		return nil, err
+	}
+	if err := meshSvc.WaitUntilReadyForComms(ctx); err != nil {
+		return nil, err
+	}
 	startSubSys("Comms Server", server)
+
+	dexMgr.subsystems = subsystems
 
 	ready = true // don't shut down on return
 
