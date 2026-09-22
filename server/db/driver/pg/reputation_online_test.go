@@ -24,7 +24,9 @@ func TestReputation(t *testing.T) {
 	acct := tNewAccount(t)
 	user := acct.ID
 
-	if err := archie.CreateAccountWithBond(acct, &db.Bond{}); err != nil {
+	if err := archie.CreateAccountWithBond(acct, &db.Bond{
+		CoinID: []byte{1},
+	}); err != nil {
 		t.Fatalf("Error creating account: %v", err)
 	}
 

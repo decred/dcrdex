@@ -1,6 +1,10 @@
 package internal
 
 const (
+	CreateMatchesActiveMakerOrderIndex = `CREATE INDEX IF NOT EXISTS %s ON %s (makerOrder) WHERE active;`
+
+	CreateMatchesActiveTakerOrderIndex = `CREATE INDEX IF NOT EXISTS %s ON %s (takerOrder) WHERE active;`
+
 	// CreateMatchesTable creates the matches table for storing data related to
 	// a match and the related swap. This only includes trade matches, not
 	// cancel order matches that just remove one order from the book (and change

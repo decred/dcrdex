@@ -5,6 +5,9 @@ package db
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
+	"io"
 	"time"
 
 	"decred.org/dcrdex/dex"
@@ -94,6 +97,9 @@ type DEXArchivist interface {
 	MatchArchiver
 	SwapArchiver
 	ReputationArchiver
+	EventLogReader
+	SnapshotStore
+	EventSourcedStateChecker
 }
 
 // OrderArchiver is the interface required for storage and retrieval of all
@@ -363,6 +369,145 @@ type SwapDataFull struct {
 type MarketMatchID struct {
 	order.MatchID
 	Base, Quote uint32 // market
+}
+
+const EventLogTipHashSize = sha256.Size
+
+// EventLogMeta specifies how to record a database update in the event log.
+type EventLogMeta struct {
+	// Seq is the event's sequence number. If zero, storage assigns the next
+	// sequence. Otherwise, it must match the next sequence.
+	Seq uint64
+
+	// Event is the encoded event payload.
+	Event []byte
+
+	// ExpectedTipHash is the expected log tip hash after this event.
+	// A nil value skips hash verification.
+	ExpectedTipHash []byte
+}
+
+// EventLogEntry is a row in the event log.
+type EventLogEntry struct {
+	// Seq is the entry's sequence number. Stored entries start at 1 and
+	// increase monotonically.
+	Seq uint64
+	// Kind identifies the type of the event.
+	Kind string
+	// Event is the encoded canonical mesh event payload.
+	Event []byte
+	// TxData is the encoded transaction data.
+	TxData []byte
+	// TipHash is the hash of the log through this entry.
+	TipHash []byte
+}
+
+// SnapshotAnchorKind is the kind of the first entry in the event log that
+// was initialized using a snapshot.
+const SnapshotAnchorKind = "snapshot_anchor"
+
+// MeshGenesisKind is the kind of the first entry in the event log of a database
+// that was upgraded from a pre-mesh database. The seq of mesh genesis entries
+// is always 1.
+const MeshGenesisKind = "mesh_genesis"
+
+// IsEventLogAnchorKind reports whether kind is a non-replayable event-log
+// anchor.
+func IsEventLogAnchorKind(kind string) bool {
+	return kind == MeshGenesisKind || kind == SnapshotAnchorKind
+}
+
+// EventLogPosition identifies a position in the event log by sequence number
+// and tip hash. A zero seq represents an empty log.
+type EventLogPosition struct {
+	Seq     uint64
+	TipHash []byte
+}
+
+func (p *EventLogPosition) String() string {
+	if p == nil {
+		return "Position{nil}"
+	}
+	if p.Seq == 0 {
+		return "Position{seq=0}"
+	}
+	return fmt.Sprintf("Position{seq=%d hash=%x}", p.Seq, p.TipHash)
+}
+
+// EventCommitUnknownError means the database could not confirm whether an
+// event transaction committed.
+type EventCommitUnknownError struct {
+	Err error
+}
+
+func (e *EventCommitUnknownError) Error() string {
+	if e == nil || e.Err == nil {
+		return "event commit outcome unknown"
+	}
+	return fmt.Sprintf("event commit outcome unknown: %v", e.Err)
+}
+
+func (e *EventCommitUnknownError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+// EventLogDivergenceError means the tip hash at Seq differs from the expected
+// hash.
+type EventLogDivergenceError struct {
+	Seq             uint64
+	ExpectedTipHash []byte
+	ActualTipHash   []byte
+	Err             error
+}
+
+func (e *EventLogDivergenceError) Error() string {
+	if e == nil {
+		return "event log divergence"
+	}
+	if e.Err != nil {
+		return fmt.Sprintf("event log divergence at seq %d: %v", e.Seq, e.Err)
+	}
+	return fmt.Sprintf("event log divergence at seq %d", e.Seq)
+}
+
+func (e *EventLogDivergenceError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+// SnapshotStore imports and exports a snapshot of the database state, required
+// to sync a fresh database with a mesh peer.
+type SnapshotStore interface {
+	WriteSnapshot(ctx context.Context, w io.Writer) (*EventLogPosition, error)
+	LoadSnapshot(ctx context.Context, r io.Reader) (*EventLogPosition, error)
+}
+
+// EventSourcedStateChecker checks and clears the event log and event projections
+// while preserving configuration.
+type EventSourcedStateChecker interface {
+	// HasNoEventSourcedState reports whether the event log and all event
+	// projections are empty. Configuration tables are ignored.
+	HasNoEventSourcedState(ctx context.Context) (bool, error)
+
+	// WipeEventSourcedState clears the event log and all event projections,
+	// including historical market data. Configuration is preserved.
+	WipeEventSourcedState(ctx context.Context) error
+}
+
+// EventLogReader allows callers to read the event log.
+type EventLogReader interface {
+	// EventLogFrontier returns the latest entry's position, or a zero
+	// position if the log is empty.
+	EventLogFrontier(context.Context) (*EventLogPosition, error)
+
+	// EventLogEntriesAfter returns up to limit entries with sequence numbers
+	// greater than after, in increasing order.
+	EventLogEntriesAfter(ctx context.Context, after uint64, limit int) ([]*EventLogEntry, error)
 }
 
 // MatchID constructs a MarketMatchID from an order.Match.

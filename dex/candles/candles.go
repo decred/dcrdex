@@ -156,9 +156,9 @@ func (c *Cache) Delta(since time.Time) (changePct float64, vol, high, low uint64
 			// Interpret the point linearly between the start and end stamps
 			cut := float64(cutoff-candle.StartStamp) / float64(candle.EndStamp-candle.StartStamp)
 			rateDelta := float64(candle.EndRate) - float64(candle.StartRate)
-			r := candle.StartRate + uint64(cut*rateDelta)
+			r := float64(candle.StartRate) + cut*rateDelta
 			if r > 0 {
-				startRate = r
+				startRate = uint64(r)
 			}
 			vol += uint64((1 - cut) * float64(candle.MatchVolume))
 

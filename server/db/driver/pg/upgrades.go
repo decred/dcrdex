@@ -5,20 +5,24 @@ package pg
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"regexp"
 	"strings"
+	"time"
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/db/driver/pg/internal"
 )
 
-const dbVersion = 8
+const dbVersion = 9
 
 // The number of upgrades defined MUST be equal to dbVersion.
 var upgrades = []func(db *sql.Tx) error{
@@ -57,6 +61,12 @@ var upgrades = []func(db *sql.Tx) error{
 
 	// v8 upgrade adds per-match swap address columns to the matches tables.
 	v8Upgrade,
+
+	// v9 upgrade creates the tables needed for mesh replication, removes the
+	// accounts.fee_asset column, adds market indexes, and drops archived order
+	// commitment and preimage uniqueness constraints. Databases with existing
+	// state receive a genesis event.
+	v9Upgrade,
 }
 
 // v1Upgrade adds the schema_version column and removes the state_hash column
@@ -409,6 +419,135 @@ func v8Upgrade(tx *sql.Tx) error {
 			return fmt.Errorf("error adding takerSwapAddr column to %s: %w", tableName, err)
 		}
 	}
+	return nil
+}
+
+// v9Upgrade creates mesh tables, removes accounts.fee_asset, adds market indexes,
+// and drops archived order commitment and preimage uniqueness constraints. It
+// also adds a genesis event to databases with existing state.
+//
+// The uniqueness constraints are dropped because the list of archived orders may
+// differ between two databases. A new order that shares its commitment with an
+// archived order may get accepted by one node and rejected by another if we
+// keey the contraints.
+func v9Upgrade(tx *sql.Tx) error {
+	if err := createMeshTables(tx); err != nil {
+		return err
+	}
+
+	accountsTable := qualifySchemaTable(publicSchema, accountsTableName)
+	if _, err := tx.Exec(fmt.Sprintf("ALTER TABLE %s DROP COLUMN IF EXISTS fee_asset;", accountsTable)); err != nil {
+		return fmt.Errorf("drop legacy accounts.fee_asset column: %w", err)
+	}
+
+	markets, err := loadMarkets(tx, marketsTableName)
+	if err != nil {
+		return fmt.Errorf("load markets: %w", err)
+	}
+
+	log.Infof("Updating indexes and archived order constraints for %d markets", len(markets))
+
+	for _, market := range markets {
+		schema := marketSchema(market.Name)
+		if !safeIdentRE.MatchString(schema) {
+			return fmt.Errorf("market schema %q (from %q) contains disallowed characters", schema, market.Name)
+		}
+		if err := createMarketMatchIndexes(tx, schema); err != nil {
+			return fmt.Errorf("create active-match indexes for %s: %w", schema, err)
+		}
+		if err := dropArchivedOrderUniqueConstraints(tx, schema); err != nil {
+			return err
+		}
+		if err := createMarketArchivedCommitIndexes(tx, schema); err != nil {
+			return fmt.Errorf("create archived commit indexes for %s: %w", schema, err)
+		}
+	}
+
+	return stampMeshGenesis(tx)
+}
+
+func dropArchivedOrderUniqueConstraints(tx *sql.Tx, schema string) error {
+	constraints := []struct{ table, name string }{
+		{ordersArchivedTableName, "orders_archived_commit_key"},
+		{ordersArchivedTableName, "orders_archived_preimage_key"},
+		{cancelsArchivedTableName, "cancels_archived_commit_key"},
+		{cancelsArchivedTableName, "cancels_archived_preimage_key"},
+	}
+	for _, constraint := range constraints {
+		stmt := fmt.Sprintf("ALTER TABLE %s.%s DROP CONSTRAINT IF EXISTS %s;",
+			schema, constraint.table, constraint.name)
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("drop %s on %s.%s: %w", constraint.name, schema, constraint.table, err)
+		}
+	}
+	return nil
+}
+
+// createMeshTables creates the public tables needed by the v9 upgrade.
+func createMeshTables(tx *sql.Tx) error {
+	for _, table := range []struct{ stmt, name string }{
+		{internal.CreateEventLogTable, eventLogTableName},
+		{internal.CreateMarketLifecycleTable, marketLifecycleTableName},
+		{internal.CreatePointsTable, pointsTableName},
+		{internal.CreatePrepaidBondsTable, prepaidBondsTableName},
+	} {
+		if _, err := createTableStmt(tx, table.stmt, publicSchema, table.name); err != nil {
+			return fmt.Errorf("create %s: %w", table.name, err)
+		}
+	}
+	if _, err := tx.Exec(fmt.Sprintf(internal.CreatePointsIndex, publicSchema+"."+pointsTableName)); err != nil {
+		return fmt.Errorf("create points index: %w", err)
+	}
+	return nil
+}
+
+// meshGenesisPayload is the payload of a mesh genesis event.
+type meshGenesisPayload struct {
+	// Nonce distinguishes independent databases.
+	Nonce dex.Bytes `json:"nonce"`
+	// UnixMs is the event creation time in Unix milliseconds.
+	UnixMs int64 `json:"unixMs"`
+}
+
+// stampMeshGenesis adds the first event to a database with existing state and
+// an empty event log. Empty databases remain available for snapshot loading.
+func stampMeshGenesis(tx *sql.Tx) error {
+	const genesisSeq = 1
+
+	eventLog := qualifySchemaTable(publicSchema, eventLogTableName)
+	query := fmt.Sprintf(internal.SelectEventLogFrontier, eventLog)
+	frontier, err := scanEventLogFrontier(tx.QueryRow(query))
+	if err != nil {
+		return fmt.Errorf("read event log frontier: %w", err)
+	}
+	if frontier.Seq > 0 {
+		return nil
+	}
+	empty, err := hasNoEventSourcedState(context.Background(), tx)
+	if err != nil {
+		return fmt.Errorf("check for event-sourced state: %w", err)
+	}
+	if empty {
+		return nil
+	}
+
+	var nonce [32]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return fmt.Errorf("generate genesis nonce: %w", err)
+	}
+	payload, err := json.Marshal(&meshGenesisPayload{
+		Nonce:  nonce[:],
+		UnixMs: time.Now().UnixMilli(),
+	})
+	if err != nil {
+		return fmt.Errorf("encode genesis payload: %w", err)
+	}
+	tipHash := eventLogHash(nil, genesisSeq, db.MeshGenesisKind, payload, nil)
+	stmt := fmt.Sprintf(internal.InsertEventLog, eventLog)
+	if _, err := tx.Exec(stmt, int64(genesisSeq), db.MeshGenesisKind, payload, []byte{}, tipHash); err != nil {
+		return fmt.Errorf("insert genesis row: %w", err)
+	}
+	log.Infof("Inserted mesh genesis at sequence %d with tip %x", genesisSeq, tipHash)
 	return nil
 }
 

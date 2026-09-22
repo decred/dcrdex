@@ -18,6 +18,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"decred.org/dcrdex/server/db"
 )
 
 func loadDBSnap(t *testing.T, file string) {
@@ -90,6 +92,21 @@ func Test_upgradeDB(t *testing.T) {
 			t.Errorf("upgrade of DB snapshot %q failed: %v", snap, err)
 		}
 	}
+
+	// The last snapshot contains matches, so v9 should add a genesis event.
+	t.Run("v9", func(t *testing.T) {
+		version, err := DBVersion(archie.db)
+		if err != nil || version != dbVersion {
+			t.Fatalf("DBVersion = (%d, %v), want %d", version, err, dbVersion)
+		}
+		entries, err := archie.EventLogEntriesAfter(ctx, 0, 2)
+		if err != nil || len(entries) != 1 {
+			t.Fatalf("event log entries = (%+v, %v), want exactly one", entries, err)
+		}
+		if entry := entries[0]; entry.Seq != 1 || entry.Kind != db.MeshGenesisKind {
+			t.Fatalf("first event = (%d, %q), want (1, %q)", entry.Seq, entry.Kind, db.MeshGenesisKind)
+		}
+	})
 
 	// Try with canceled context.
 	var cancel context.CancelFunc
