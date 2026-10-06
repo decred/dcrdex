@@ -56,8 +56,8 @@ func (oids *orderIDs) Scan(src any) error {
 	return nil
 }
 
-// InsertEpoch stores the results of a newly-processed epoch. TODO: test.
-func (a *Archiver) InsertEpoch(ed *db.EpochResults) error {
+// insertEpoch stores the results of a newly-processed epoch.
+func (a *Archiver) insertEpoch(dbe sqlExecutor, ed *db.EpochResults) error {
 	marketSchema, err := a.marketSchema(ed.MktBase, ed.MktQuote)
 	if err != nil {
 		return err
@@ -66,7 +66,7 @@ func (a *Archiver) InsertEpoch(ed *db.EpochResults) error {
 	epochsTableName := fullEpochsTableName(a.dbName, marketSchema)
 	stmt := fmt.Sprintf(internal.InsertEpoch, epochsTableName)
 
-	_, err = a.db.Exec(stmt, ed.Idx, ed.Dur, ed.MatchTime, ed.CSum, ed.Seed,
+	_, err = dbe.Exec(stmt, ed.Idx, ed.Dur, ed.MatchTime, ed.CSum, ed.Seed,
 		orderIDs(ed.OrdersRevealed), orderIDs(ed.OrdersMissed))
 	if err != nil {
 		a.fatalBackendErr(err)
@@ -76,7 +76,7 @@ func (a *Archiver) InsertEpoch(ed *db.EpochResults) error {
 	epochReportsTableName := fullEpochReportsTableName(a.dbName, marketSchema)
 	stmt = fmt.Sprintf(internal.InsertEpochReport, epochReportsTableName)
 	epochEnd := (ed.Idx + 1) * ed.Dur
-	_, err = a.db.Exec(stmt, epochEnd, ed.Dur, ed.MatchVolume, ed.QuoteVolume, ed.BookBuys, ed.BookBuys5, ed.BookBuys25,
+	_, err = dbe.Exec(stmt, epochEnd, ed.Dur, ed.MatchVolume, ed.QuoteVolume, ed.BookBuys, ed.BookBuys5, ed.BookBuys25,
 		ed.BookSells, ed.BookSells5, ed.BookSells25, ed.HighRate, ed.LowRate, ed.StartRate, ed.EndRate)
 	if err != nil {
 		a.fatalBackendErr(err)
@@ -84,6 +84,8 @@ func (a *Archiver) InsertEpoch(ed *db.EpochResults) error {
 
 	return err
 }
+
+func (a *Archiver) InsertEpoch(ed *db.EpochResults) error { return a.insertEpoch(a.db, ed) }
 
 // LastEpochRate gets the EndRate of the last EpochResults inserted for the
 // market. If the database is empty, no error and a rate of zero are returned.
@@ -167,7 +169,7 @@ func (a *Archiver) LoadEpochStats(base, quote uint32, caches []*candles.Cache) e
 			EndRate:     uint64(endRate),
 		}
 		for since, cache := range sinceCaches {
-			if uint64(endStamp) > since {
+			if uint64(endStamp) >= since {
 				cache.Add(candle)
 			}
 		}

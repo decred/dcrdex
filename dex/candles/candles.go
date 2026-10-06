@@ -156,9 +156,9 @@ func (c *Cache) Delta(since time.Time) (changePct float64, vol, high, low uint64
 			// Interpret the point linearly between the start and end stamps
 			cut := float64(cutoff-candle.StartStamp) / float64(candle.EndStamp-candle.StartStamp)
 			rateDelta := float64(candle.EndRate) - float64(candle.StartRate)
-			r := candle.StartRate + uint64(cut*rateDelta)
+			r := float64(candle.StartRate) + cut*rateDelta
 			if r > 0 {
-				startRate = r
+				startRate = uint64(r)
 			}
 			vol += uint64((1 - cut) * float64(candle.MatchVolume))
 
@@ -182,10 +182,13 @@ func (c *Cache) Last() *Candle {
 	return &c.Candles[c.cursor]
 }
 
-// CompletedCandlesSince returns any candles that fall into an epoch after the
-// epoch of the provided timestamp, and before the current epoch.
+// CompletedCandlesSince returns candles in bins after the provided timestamp
+// and before the newest bin in the cache.
 func (c *Cache) CompletedCandlesSince(lastStoredEndStamp uint64) (cs []*Candle) {
-	currentIdx := uint64(time.Now().UnixMilli()) / c.BinSize
+	if len(c.Candles) == 0 {
+		return nil
+	}
+	currentIdx := c.Last().EndStamp / c.BinSize
 	lastStoredIdx := lastStoredEndStamp / c.BinSize
 
 	sz := len(c.Candles)

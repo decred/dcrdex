@@ -5,12 +5,16 @@ package db
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
+	"io"
 	"time"
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/candles"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/meshevents"
 )
 
 // EpochResults represents the outcome of epoch order processing, including
@@ -94,6 +98,9 @@ type DEXArchivist interface {
 	MatchArchiver
 	SwapArchiver
 	ReputationArchiver
+	EventLogReader
+	SnapshotStore
+	EventSourcedStateChecker
 }
 
 // OrderArchiver is the interface required for storage and retrieval of all
@@ -109,15 +116,8 @@ type OrderArchiver interface {
 	// EpochOrders returns all epoch orders for a market.
 	EpochOrders(base, quote uint32) ([]order.Order, error)
 
-	// FlushBook revokes all booked orders for a market.
-	FlushBook(base, quote uint32) (sellsRemoved, buysRemoved []order.OrderID, err error)
-
 	// ActiveOrderCoins retrieves a CoinID slice for each active order.
 	ActiveOrderCoins(base, quote uint32) (baseCoins, quoteCoins map[order.OrderID][]order.CoinID, err error)
-
-	// UserOrders retrieves all orders for the given account in the market
-	// specified by a base and quote asset.
-	UserOrders(ctx context.Context, aid account.AccountID, base, quote uint32) ([]order.Order, []order.OrderStatus, error)
 
 	// UserOrderStatuses retrieves the statuses and filled amounts of the orders
 	// with the provided order IDs for the given account in the market specified
@@ -140,12 +140,6 @@ type OrderArchiver interface {
 	// for the user across all markets.
 	PreimageStats(user account.AccountID, lastN int) ([]*PreimageResult, error)
 
-	// ExecutedCancelsForUser retrieves up to N executed cancel orders for a
-	// given user. These may be user-initiated cancels, or cancels created by
-	// the server (revokes). Executed cancel orders from all markets are
-	// returned.
-	ExecutedCancelsForUser(aid account.AccountID, N int) ([]*CancelRecord, error)
-
 	// OrderWithCommit searches all markets' trade and cancel orders, both
 	// active and archived, for an order with the given Commitment.
 	OrderWithCommit(ctx context.Context, commit order.Commitment) (found bool, oid order.OrderID, err error)
@@ -163,32 +157,15 @@ type OrderArchiver interface {
 	// StorePreimage stores the preimage associated with an existing order.
 	StorePreimage(ord order.Order, pi order.Preimage) error
 
-	// BookOrder books the given order. If the order was already stored (i.e.
-	// NewEpochOrder), it's status and filled amount are updated, otherwise it
-	// is inserted. See also UpdateOrderFilled.
-	BookOrder(*order.LimitOrder) error
-
-	// ExecuteOrder puts the order into the executed state, and sets the filled
-	// amount for market and limit orders. For unmatched cancel orders, use
-	// FailCancelOrder instead.
-	ExecuteOrder(ord order.Order) error
-
-	// CancelOrder puts a limit order into the canceled state. Market orders
-	// must use ExecuteOrder since they may not be canceled. Similarly, cancel
-	// orders must use ExecuteOrder or FailCancelOrder. Orders that are
-	// terminated by the DEX rather than via a cancel order are considered
-	// "revoked", and RevokeOrder should be used to set this status.
 	CancelOrder(*order.LimitOrder) error
 
 	// RevokeOrder puts an order into the revoked state, and generates a cancel
 	// order to record the action. Orders should be revoked by the DEX according
-	// to policy on failed orders. For canceling an order that was matched with
-	// a cancel order, use CancelOrder.
+	// to policy on failed orders.
 	RevokeOrder(order.Order) (cancelID order.OrderID, t time.Time, err error)
 
 	// RevokeOrderUncounted is like RevokeOrder except that the generated cancel
-	// order will not be counted against the user. i.e. ExecutedCancelsForUser
-	// should not return the cancel orders created this way.
+	// order will not be counted against the user.
 	RevokeOrderUncounted(order.Order) (cancelID order.OrderID, t time.Time, err error)
 
 	// NewArchivedCancel stores a cancel order directly in the executed state. This
@@ -196,13 +173,8 @@ type OrderArchiver interface {
 	// do not need to be matched.
 	NewArchivedCancel(ord *order.CancelOrder, epochID, epochDur int64) error
 
-	// FailCancelOrder puts an unmatched cancel order into the executed state.
-	// For matched cancel orders, use ExecuteOrder.
-	FailCancelOrder(*order.CancelOrder) error
-
 	// UpdateOrderFilled updates the filled amount of the given order. This
-	// function applies only to limit orders, not cancel or market orders. The
-	// filled amount of a market order should be updated by ExecuteOrder.
+	// function applies only to limit orders, not cancel or market orders.
 	UpdateOrderFilled(*order.LimitOrder) error
 
 	// UpdateOrderStatus updates the status and filled amount of the given
@@ -213,6 +185,19 @@ type OrderArchiver interface {
 	// order. This will follow the final step in swap negotiation, for an order
 	// that is not on the book.
 	SetOrderCompleteTime(ord order.Order, compTimeMs int64) error
+
+	OrdersWithCommit(ctx context.Context, base, quote uint32, commit order.Commitment, archivedCutoff time.Time) ([]OrderWithStatus, error)
+	ApplyOrderAcceptedEvent(ctx context.Context, meta *EventLogMeta, update *OrderAcceptedUpdate) (*EventLogEntry, error)
+	ApplyMarketStartedEvent(ctx context.Context, meta *EventLogMeta, update *MarketStartedUpdate) (*MarketStartedApplyResult, error)
+	MarketLifecycle(market string) (*MarketLifecycle, error)
+	ApplyMarketSuspendScheduledEvent(ctx context.Context, meta *EventLogMeta, update *MarketSuspendScheduledUpdate) (*MarketSuspendScheduledApplyResult, error)
+	ApplyMarketSuspendedEvent(ctx context.Context, meta *EventLogMeta, update *MarketSuspendedUpdate) (*MarketSuspendedApplyResult, error)
+	ApplyMarketResumeScheduledEvent(ctx context.Context, meta *EventLogMeta, update *MarketResumeScheduledUpdate) (*MarketResumeScheduledApplyResult, error)
+	ApplyMarketResumedEvent(ctx context.Context, meta *EventLogMeta, update *MarketResumedUpdate) (*MarketResumedApplyResult, error)
+	ApplyAdvanceEpochEvent(ctx context.Context, meta *EventLogMeta, event *meshevents.AdvanceEpochEvent) (*EventLogEntry, error)
+	ApplyEpochProcessedEvent(ctx context.Context, meta *EventLogMeta, policy *ReputationOutcomePolicy, update *EpochProcessedUpdate) (*EventLogEntry, error)
+	ApplySuspendedCancelEvent(ctx context.Context, meta *EventLogMeta, update *SuspendedCancelUpdate) (*SuspendedCancelApplyResult, error)
+	ApplyOrdersRevokedEvent(ctx context.Context, meta *EventLogMeta, policy *ReputationOutcomePolicy, update *OrdersRevokedUpdate) (*EventLogEntry, error)
 }
 
 // Account holds data returned by Accounts.
@@ -240,14 +225,10 @@ type Bond struct {
 // AccountArchiver is the interface required for storage and retrieval of all
 // account data.
 type AccountArchiver interface {
-	// Account retrieves the account information for the specified account ID. A
-	// nil pointer will be returned for unknown or closed accounts. Bond and
-	// registration fee payment status is returned as well. A bond is active if
-	// its lockTime is after the lockTimeThresh Time, which should be
-	// time.Now().Add(bondExpiry). The legacy bool return refers to the legacy
-	// registration fee system, and legacyPaid indicates if the account has a
-	// recorded fee coin (paid legacy fee).
-	Account(acctID account.AccountID, lockTimeThresh time.Time) (acct *account.Account, activeBonds []*Bond)
+	// Account returns the account and bonds whose lock time is at least
+	// lockTimeThresh. It returns a nil account and nil error if the account
+	// does not exist.
+	Account(ctx context.Context, acctID account.AccountID, lockTimeThresh time.Time) (acct *account.Account, activeBonds []*Bond, err error)
 
 	// CreateAccountWithBond creates a new account with the given bond. This is
 	// used for the new postbond request protocol. The bond tx should be
@@ -267,6 +248,17 @@ type AccountArchiver interface {
 
 	// AccountInfo returns data for an account.
 	AccountInfo(account.AccountID) (*Account, error)
+
+	// ApplyBondPostedEvent stores the account and bond changes with the event
+	// log entry in one transaction. It creates the account if needed and
+	// consumes the token for a prepaid bond. An existing bond for the same
+	// account is left unchanged, but the event is still recorded. A bond owned
+	// by another account is an error.
+	ApplyBondPostedEvent(ctx context.Context, meta *EventLogMeta, event *meshevents.BondPostedEvent, pimgSz, matchSz, orderSz int) (*BondPostedResult, error)
+
+	// ApplyPrepaidBondsCreatedEvent stores the prepaid bond tokens and event
+	// log entry in one transaction.
+	ApplyPrepaidBondsCreatedEvent(ctx context.Context, meta *EventLogMeta, event *meshevents.PrepaidBondsCreatedEvent) (*EventLogEntry, error)
 }
 
 // MatchData represents an order pair match, but with just the order IDs instead
@@ -363,6 +355,154 @@ type SwapDataFull struct {
 type MarketMatchID struct {
 	order.MatchID
 	Base, Quote uint32 // market
+}
+
+// ReputationForgivenResult contains the result of applying a reputation_forgiven event.
+type ReputationForgivenResult struct {
+	// Forgiven reports whether user forgiveness deleted any outcomes or match
+	// forgiveness updated an inactive match. An already-forgiven inactive
+	// match also reports true.
+	Forgiven bool
+	Log      *EventLogEntry
+}
+
+const EventLogTipHashSize = sha256.Size
+
+// EventLogMeta specifies how to record a database update in the event log.
+type EventLogMeta struct {
+	// Seq is the event's sequence number. If zero, storage assigns the next
+	// sequence. Otherwise, it must match the next sequence.
+	Seq uint64
+
+	// Event is the encoded event payload.
+	Event []byte
+
+	// ExpectedTipHash is the expected log tip hash after this event.
+	// A nil value skips hash verification.
+	ExpectedTipHash []byte
+}
+
+// EventLogEntry is a row in the event log.
+type EventLogEntry struct {
+	// Seq is the entry's sequence number. Stored entries start at 1 and
+	// increase monotonically.
+	Seq uint64
+	// Kind identifies the type of the event.
+	Kind string
+	// Event is the encoded canonical mesh event payload.
+	Event []byte
+	// TxData is the encoded transaction data.
+	TxData []byte
+	// TipHash is the hash of the log through this entry.
+	TipHash []byte
+}
+
+// SnapshotAnchorKind is the kind of the first entry in the event log that
+// was initialized using a snapshot.
+const SnapshotAnchorKind = "snapshot_anchor"
+
+// MeshGenesisKind is the kind of the first entry in the event log of a database
+// that was upgraded from a pre-mesh database. The seq of mesh genesis entries
+// is always 1.
+const MeshGenesisKind = "mesh_genesis"
+
+// IsEventLogAnchorKind reports whether kind is a non-replayable event-log
+// anchor.
+func IsEventLogAnchorKind(kind string) bool {
+	return kind == MeshGenesisKind || kind == SnapshotAnchorKind
+}
+
+// EventLogPosition identifies a position in the event log by sequence number
+// and tip hash. A zero seq represents an empty log.
+type EventLogPosition struct {
+	Seq     uint64
+	TipHash []byte
+}
+
+func (p *EventLogPosition) String() string {
+	if p == nil {
+		return "Position{nil}"
+	}
+	if p.Seq == 0 {
+		return "Position{seq=0}"
+	}
+	return fmt.Sprintf("Position{seq=%d hash=%x}", p.Seq, p.TipHash)
+}
+
+// EventCommitUnknownError means the database could not confirm whether an
+// event transaction committed.
+type EventCommitUnknownError struct {
+	Err error
+}
+
+func (e *EventCommitUnknownError) Error() string {
+	if e == nil || e.Err == nil {
+		return "event commit outcome unknown"
+	}
+	return fmt.Sprintf("event commit outcome unknown: %v", e.Err)
+}
+
+func (e *EventCommitUnknownError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+// EventLogDivergenceError means the tip hash at Seq differs from the expected
+// hash.
+type EventLogDivergenceError struct {
+	Seq             uint64
+	ExpectedTipHash []byte
+	ActualTipHash   []byte
+	Err             error
+}
+
+func (e *EventLogDivergenceError) Error() string {
+	if e == nil {
+		return "event log divergence"
+	}
+	if e.Err != nil {
+		return fmt.Sprintf("event log divergence at seq %d: %v", e.Seq, e.Err)
+	}
+	return fmt.Sprintf("event log divergence at seq %d", e.Seq)
+}
+
+func (e *EventLogDivergenceError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+// SnapshotStore imports and exports a snapshot of the database state, required
+// to sync a fresh database with a mesh peer.
+type SnapshotStore interface {
+	WriteSnapshot(ctx context.Context, w io.Writer) (*EventLogPosition, error)
+	LoadSnapshot(ctx context.Context, r io.Reader) (*EventLogPosition, error)
+}
+
+// EventSourcedStateChecker checks and clears the event log and event projections
+// while preserving configuration.
+type EventSourcedStateChecker interface {
+	// HasNoEventSourcedState reports whether the event log and all event
+	// projections are empty. Configuration tables are ignored.
+	HasNoEventSourcedState(ctx context.Context) (bool, error)
+
+	// WipeEventSourcedState clears the event log and all event projections,
+	// including historical market data. Configuration is preserved.
+	WipeEventSourcedState(ctx context.Context) error
+}
+
+// EventLogReader allows callers to read the event log.
+type EventLogReader interface {
+	// EventLogFrontier returns the latest entry's position, or a zero
+	// position if the log is empty.
+	EventLogFrontier(context.Context) (*EventLogPosition, error)
+
+	// EventLogEntriesAfter returns up to limit entries with sequence numbers
+	// greater than after, in increasing order.
+	EventLogEntriesAfter(ctx context.Context, after uint64, limit int) ([]*EventLogEntry, error)
 }
 
 // MatchID constructs a MarketMatchID from an order.Match.
@@ -540,19 +680,11 @@ type CancelRecord struct {
 
 // Reputation
 
-// ReputationArchiver handles interactions with the points table as well as
-// upgrading the reputation version in the accounts table.
+// ReputationArchiver handles interactions with the reputation points table.
 type ReputationArchiver interface {
 	GetUserReputationData(ctx context.Context, user account.AccountID, pimgSz, matchSz, orderSz int) ([]*PreimageOutcome, []*MatchResult, []*OrderOutcome, error)
-	AddPreimageOutcome(ctx context.Context, user account.AccountID, oid order.OrderID, miss bool) (*PreimageOutcome, error)
-	AddMatchOutcome(ctx context.Context, user account.AccountID, mid order.MatchID, outcome Outcome) (*MatchResult, error)
-	AddOrderOutcome(ctx context.Context, user account.AccountID, oid order.OrderID, canceled bool) (*OrderOutcome, error)
-	PruneOutcomes(ctx context.Context, user account.AccountID, outcomeClass OutcomeClass, fromDBID int64) error
-	GetUserReputationVersion(ctx context.Context, user account.AccountID) (int16, error)
-	UpgradeUserReputationV1(
-		ctx context.Context, user account.AccountID, pimgOutcomes []*PreimageOutcome, matchOutcomes []*MatchResult, orderOutcomes []*OrderOutcome, /* Without DB IDs */
-	) ([]*PreimageOutcome, []*MatchResult, []*OrderOutcome, error) /* With DB IDs */
-	ForgiveUser(ctx context.Context, user account.AccountID) error
+	ApplyReputationForgivenEvent(ctx context.Context, meta *EventLogMeta, event *meshevents.ReputationForgivenEvent) (*ReputationForgivenResult, error)
+	SetReputationInputsListener(func(users ...account.AccountID))
 }
 
 // OutcomeClass is the type of interaction for which the user's reputation
@@ -675,4 +807,280 @@ func (o *OrderOutcome) Outcome() Outcome {
 
 func (o *OrderOutcome) ID() int64 {
 	return o.DBID
+}
+
+// BondPostedResult contains the result of applying a bond_posted event.
+type BondPostedResult struct {
+	// BondAdded is true if the bond was inserted, or false if the account
+	// already had the bond.
+	BondAdded bool
+	Log       *EventLogEntry
+
+	// Reputation inputs read after storing the bond, in the same transaction.
+	Bonds     []*Bond
+	Preimages []*PreimageOutcome
+	Matches   []*MatchResult
+	Orders    []*OrderOutcome
+}
+
+// OrderWithStatus contains an order and its stored status.
+type OrderWithStatus struct {
+	Order  order.Order
+	Status order.OrderStatus
+}
+
+// OrderAcceptedUpdate contains an accepted order and the epoch information
+// needed to store it. Unlike meshevents.OrderAcceptedEvent, it includes the
+// epoch index, duration, and cancel epoch gap calculated by the market.
+type OrderAcceptedUpdate struct {
+	Order    order.Order
+	EpochIdx int64
+	EpochDur int64
+	EpochGap int32
+}
+
+// MarketState is a market's stored lifecycle state.
+type MarketState int16
+
+const (
+	MarketStateRunning MarketState = iota + 1
+	MarketStateSuspended
+	// MarketStateDraining means order intake has stopped while outstanding
+	// epochs finish processing before suspension.
+	MarketStateDraining
+)
+
+// MarketPendingAction is a scheduled market transition.
+type MarketPendingAction int16
+
+const (
+	MarketPendingNone MarketPendingAction = iota
+	MarketPendingSuspend
+	MarketPendingResume
+)
+
+// MarketLifecycle stores a market's state, scheduled transition,
+// epoch progress, and trading parameters. Epoch durations are in milliseconds.
+type MarketLifecycle struct {
+	Market string
+	State  MarketState
+	// StartEpochIdx is the first epoch of the current or scheduled market run.
+	StartEpochIdx int64
+	StartEpochDur int64
+	// FinalEpochIdx is the last trading epoch of a scheduled or completed
+	// suspension. It and FinalEpochDur are zero when no final epoch is recorded.
+	FinalEpochIdx int64
+	FinalEpochDur int64
+	PendingAction MarketPendingAction
+	// PendingEpochIdx and PendingEpochDur identify the epoch of the pending
+	// suspension or resumption. Both are zero when PendingAction is MarketPendingNone.
+	PendingEpochIdx int64
+	PendingEpochDur int64
+	// PersistBook records whether to retain booked orders on suspension.
+	// It is nil during normal trading, before a suspension is scheduled.
+	PersistBook *bool
+	// ActiveEpochIdx is the current trading epoch, or zero while draining
+	// or suspended.
+	ActiveEpochIdx int64
+	// ProcessedEpochIdx is the last processed epoch, or the last epoch skipped
+	// during startup or resume. The next epoch to process is ProcessedEpochIdx + 1.
+	ProcessedEpochIdx int64
+	// RunParams are the trading parameters for the current market run.
+	RunParams meshevents.MarketRunParams
+}
+
+// SuspendTime is the wall-clock end of the final trading epoch. It is only
+// meaningful when suspension is scheduled, the market is draining, or the
+// market is suspended with no resume scheduled.
+func (lc *MarketLifecycle) SuspendTime() time.Time {
+	return time.UnixMilli((lc.FinalEpochIdx + 1) * lc.FinalEpochDur).UTC()
+}
+
+// ResumeTime is the wall-clock start of the pending resume epoch. It is only
+// meaningful while PendingAction is MarketPendingResume.
+func (lc *MarketLifecycle) ResumeTime() time.Time {
+	return time.UnixMilli(lc.PendingEpochIdx * lc.PendingEpochDur).UTC()
+}
+
+// MarketSuspendScheduledUpdate contains the event fields and resolved market asset IDs.
+type MarketSuspendScheduledUpdate struct {
+	Market        string
+	Base, Quote   uint32
+	FinalEpochIdx int64
+	EpochDur      int64
+	// PersistBook specifies whether suspension keeps booked orders.
+	PersistBook bool
+}
+
+// MarketSuspendScheduledApplyResult contains the stored lifecycle and event log entry.
+type MarketSuspendScheduledApplyResult struct {
+	Log       *EventLogEntry
+	Lifecycle *MarketLifecycle
+}
+
+// MarketSuspendedUpdate identifies the market and final trading epoch
+// for completing a scheduled suspension.
+type MarketSuspendedUpdate struct {
+	Market        string
+	Base, Quote   uint32
+	FinalEpochIdx int64
+	EpochDur      int64
+	// Timestamp is the revocation time for orders removed when purging the book.
+	Timestamp time.Time
+}
+
+// MarketSuspendedApplyResult contains the updated lifecycle, event log entry,
+// and IDs of orders revoked when purging the book.
+type MarketSuspendedApplyResult struct {
+	Log         *EventLogEntry
+	Lifecycle   *MarketLifecycle
+	PurgeOrders []order.OrderID
+}
+
+// MarketResumeScheduledUpdate identifies the market and first trading epoch
+// for scheduling a resumption.
+type MarketResumeScheduledUpdate struct {
+	Market        string
+	Base, Quote   uint32
+	StartEpochIdx int64
+	EpochDur      int64
+}
+
+// MarketResumeScheduledApplyResult contains the updated lifecycle and event log
+// entry for a scheduled resumption.
+type MarketResumeScheduledApplyResult struct {
+	Log       *EventLogEntry
+	Lifecycle *MarketLifecycle
+}
+
+// MarketResumedUpdate contains the market, epoch, trading parameters, and order
+// revocations for completing a scheduled resumption.
+type MarketResumedUpdate struct {
+	Market        string
+	Base, Quote   uint32
+	StartEpochIdx int64
+	EpochDur      int64
+	Timestamp     time.Time
+	// ResumeRevokes lists orders to revoke before resuming trading. Orders that
+	// are no longer booked are skipped.
+	ResumeRevokes []*StartupOrderRevoke
+	RunParams     meshevents.MarketRunParams
+}
+
+// MarketResumedApplyResult contains the updated lifecycle, event log entry,
+// and orders revoked when resuming trading.
+type MarketResumedApplyResult struct {
+	Log           *EventLogEntry
+	Lifecycle     *MarketLifecycle
+	ResumeRevokes []*StartupOrderRevoke
+}
+
+// MarketStartedApplyResult is the stored outcome of a market_started event.
+type MarketStartedApplyResult struct {
+	Log       *EventLogEntry
+	Lifecycle *MarketLifecycle
+}
+
+// MarketStartedUpdate contains the decoded orders and resolved market asset IDs
+// for a market_started event. This type exists in addition to
+// meshevents.MarketStartedEvent so the database and in-memory updates can share
+// the same validated orders without decoding them again.
+type MarketStartedUpdate struct {
+	Market          string
+	Base            uint32
+	Quote           uint32
+	CurrentEpochIdx int64
+	EpochDur        int64
+	RunParams       meshevents.MarketRunParams
+	RevocationTime  time.Time
+	BookedRevokes   []*StartupOrderRevoke
+	// EpochRevokes lists the abandoned epoch orders. It must include every
+	// active epoch order exactly once.
+	EpochRevokes []*StartupOrderRevoke
+}
+
+// OrdersRevokedUpdate contains the booked orders selected for revocation.
+// Unlike meshevents.OrdersRevokedEvent, it contains the resolved orders
+// rather than an account or a list of order IDs.
+type OrdersRevokedUpdate struct {
+	Reason     meshevents.OrderRevokeReason
+	RevokeTime time.Time
+	Orders     []*order.LimitOrder
+}
+
+// ReputationOutcomePolicy sets how many outcomes of each class are retained
+// per account and which successful cancellations count as penalties.
+type ReputationOutcomePolicy struct {
+	PreimageLimit int
+	OrderLimit    int
+
+	// Successful cancellations with a nonnegative epoch gap below this
+	// threshold are penalized.
+	FreeCancelThreshold int32
+}
+
+// PreimageMissUpdate identifies an order to revoke for a missing preimage and
+// the time to record for its revocation.
+type PreimageMissUpdate struct {
+	Order      order.Order
+	RevokeTime time.Time
+}
+
+// PreimageRevealUpdate contains an order and its revealed preimage.
+type PreimageRevealUpdate struct {
+	Order    order.Order
+	Preimage order.Preimage
+}
+
+// EpochProcessedUpdate contains the database changes resulting from matching
+// an epoch, including preimage results, order changes, and matches.
+type EpochProcessedUpdate struct {
+	Epoch           *EpochResults
+	Misses          []*PreimageMissUpdate
+	Reveals         []*PreimageRevealUpdate
+	TradesBooked    []*order.LimitOrder
+	TradesPartial   []*order.LimitOrder
+	TradesCompleted []order.Order
+	TradesCanceled  []*order.LimitOrder
+
+	// TradesFailed contains orders that did not match and will not enter the
+	// book, such as market orders and immediate limit orders. They are archived
+	// with executed status.
+	TradesFailed    []order.Order
+	CancelsFailed   []*order.CancelOrder
+	CancelsExecuted []*order.CancelOrder
+	Matches         []*order.Match
+}
+
+// SuspendedCancelUpdate contains a cancel order, its target details, and the
+// expected match for canceling an order while the market is suspended.
+type SuspendedCancelUpdate struct {
+	Market          string
+	Base            uint32
+	Quote           uint32
+	Cancel          *order.CancelOrder
+	TargetOrderID   order.OrderID
+	TargetAccount   account.AccountID
+	TargetSell      bool
+	EpochIdx        int64
+	EpochDur        int64
+	FeeRateBase     uint64
+	FeeRateQuote    uint64
+	MatchServerTime time.Time
+	Match           *order.Match
+}
+
+// SuspendedCancelApplyResult contains the event log entry, executed cancel,
+// stored target order, and match derived from the stored target.
+type SuspendedCancelApplyResult struct {
+	Log         *EventLogEntry
+	Cancel      *order.CancelOrder
+	TargetOrder *order.LimitOrder
+	Match       *order.Match
+}
+
+// StartupOrderRevoke contains an order and its startup revocation reason.
+type StartupOrderRevoke struct {
+	Order  order.Order
+	Reason meshevents.StartupOrderRevokeReason
 }

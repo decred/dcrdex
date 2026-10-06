@@ -252,20 +252,6 @@ func TestBook(t *testing.T) {
 		t.Errorf("buy side was empty")
 	}
 
-	buysRemoved, sellsRemoved := b.Clear()
-	if len(buysRemoved) != len(bookBuyOrders)-2 {
-		t.Errorf("removed %d buys, expected, %d", len(buysRemoved), len(bookBuyOrders)-2)
-	}
-	if len(sellsRemoved) != len(bookSellOrders)-2 {
-		t.Errorf("removed %d sells, expected, %d", len(sellsRemoved), len(bookSellOrders)-2)
-	}
-
-	if b.SellCount() != 0 {
-		t.Errorf("sell side was not empty after Clear")
-	}
-	if b.BuyCount() != 0 {
-		t.Errorf("buy side was not empty after Clear")
-	}
 }
 
 func TestAccountTracking(t *testing.T) {
@@ -330,5 +316,79 @@ func TestAccountTracking(t *testing.T) {
 
 	if len(b.acctTracker.quote) != 0 {
 		t.Fatalf("quote asset not cleared")
+	}
+}
+
+func TestCheckLotSize(t *testing.T) {
+	startLogger()
+	b := New(LotSize, 0)
+	if err := b.CheckLotSize(0, nil); err == nil {
+		t.Fatal("CheckLotSize accepted zero on an empty book")
+	}
+
+	twoLots := newLimitOrder(false, 2500000, 2, order.StandingTiF, 0)
+	if !b.Insert(twoLots) {
+		t.Fatal("insert two-lot buy")
+	}
+	if err := b.CheckLotSize(LotSize, nil); err != nil {
+		t.Fatalf("CheckLotSize current: %v", err)
+	}
+	if err := b.CheckLotSize(2*LotSize, nil); err != nil {
+		t.Fatalf("CheckLotSize 2x: %v", err)
+	}
+
+	oneLot := newLimitOrder(true, 5000000, 1, order.StandingTiF, 0)
+	if !b.Insert(oneLot) {
+		t.Fatal("insert one-lot sell")
+	}
+	if err := b.CheckLotSize(2*LotSize, nil); err == nil {
+		t.Fatal("CheckLotSize accepted an incompatible quantity")
+	}
+	revoked := map[order.OrderID]bool{oneLot.ID(): true}
+	if err := b.CheckLotSize(2*LotSize, revoked); err != nil {
+		t.Fatalf("CheckLotSize excluding one-lot sell: %v", err)
+	}
+
+	// A fill valid at the old lot size prevents increasing it to two lots.
+	twoLots.SetFill(LotSize)
+	if err := b.CheckLotSize(LotSize, nil); err != nil {
+		t.Fatalf("CheckLotSize current with partial fill: %v", err)
+	}
+	if err := b.CheckLotSize(2*LotSize, revoked); err == nil {
+		t.Fatal("CheckLotSize accepted an incompatible filled amount")
+	}
+	revoked[twoLots.ID()] = true
+	if err := b.CheckLotSize(2*LotSize, revoked); err != nil {
+		t.Fatalf("CheckLotSize excluding both incompatible orders: %v", err)
+	}
+	if err := b.CheckLotSize(0, revoked); err == nil {
+		t.Fatal("CheckLotSize accepted zero with all orders excluded")
+	}
+	if b.LotSize() != LotSize || !b.HaveOrder(twoLots.ID()) || !b.HaveOrder(oneLot.ID()) {
+		t.Fatal("CheckLotSize changed the lot size or removed an excluded order")
+	}
+}
+
+func TestSetLotSize(t *testing.T) {
+	startLogger()
+	b := New(LotSize, 0)
+	unfilled := newLimitOrder(true, 5000000, 2, order.StandingTiF, 0)
+	if !b.Insert(unfilled) {
+		t.Fatal("insert two-lot order")
+	}
+	if err := b.CheckLotSize(2*LotSize, nil); err != nil {
+		t.Fatalf("CheckLotSize: %v", err)
+	}
+	b.SetLotSize(2 * LotSize)
+	if b.LotSize() != 2*LotSize {
+		t.Fatalf("LotSize = %d, want %d", b.LotSize(), 2*LotSize)
+	}
+	if !b.HaveOrder(unfilled.ID()) {
+		t.Fatal("SetLotSize removed a compatible order")
+	}
+
+	oneLot := newLimitOrder(false, 2500000, 1, order.StandingTiF, 0)
+	if b.Insert(oneLot) {
+		t.Fatal("Insert accepted a quantity incompatible with the new lot size")
 	}
 }

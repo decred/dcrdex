@@ -185,7 +185,7 @@ func (a *Archiver) UserMatchFails(aid account.AccountID, lastN int) ([]*db.Match
 	return fails, nil
 }
 
-func completedAndAtFaultMatches(ctx context.Context, dbe *sql.DB, tableName string,
+func completedAndAtFaultMatches(ctx context.Context, dbe sqlQueryer, tableName string,
 	aid account.AccountID, lastN int, base, quote uint32) (outcomes []*db.MatchOutcome, err error) {
 	stmt := fmt.Sprintf(internal.CompletedOrAtFaultMatchesLastN, tableName)
 	rows, err := dbe.QueryContext(ctx, stmt, aid, lastN)

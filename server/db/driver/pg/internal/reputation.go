@@ -18,7 +18,26 @@ const (
 
 	SelectPoints = `SELECT id, link, class, outcome FROM %s WHERE account = $1 ORDER BY id;`
 
-	PrunePoints = `DELETE FROM %s WHERE account = $1 AND class = $2 AND id <= $3;`
+	PrunePointsPastLimit = `WITH pruned AS (
+			SELECT id
+			FROM %[1]s
+			WHERE account = $1 AND class = $2
+			ORDER BY id DESC
+			OFFSET $3
+		)
+		DELETE FROM %[1]s
+		WHERE id IN (SELECT id FROM pruned);`
 
+	// ForgiveUser deletes every non-success outcome for the account. $2-$4 are
+	// the success outcomes: swap success, preimage success, order complete.
 	ForgiveUser = `DELETE FROM %s WHERE account = $1 AND outcome NOT IN ($2, $3, $4);`
+
+	// ForgiveMatchFailures deletes the account's failure outcomes for a single
+	// match. $4 is the swap success outcome, the only non-failure outcome in
+	// the match class.
+	ForgiveMatchFailures = `DELETE FROM %s
+		WHERE account = $1
+			AND link = $2
+			AND class = $3
+			AND outcome <> $4;`
 )

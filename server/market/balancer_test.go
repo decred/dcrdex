@@ -6,8 +6,8 @@ package market
 import (
 	"testing"
 
-	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
+	"decred.org/dcrdex/server/asset"
 )
 
 func TestBalancer(t *testing.T) {
@@ -21,33 +21,33 @@ func TestBalancer(t *testing.T) {
 	tokenTunnel := &TMarketTunnel{quote: assetToken.ID}
 	tokenBackend := &tAccountBackend{}
 
-	ethBalancer := &backedBalancer{
-		balancer:  ethBackend,
-		assetInfo: &assetETH.Asset,
-		markets: []PendingAccounter{
-			ethTunnel,
-		},
-		feeFamily: map[uint32]*dex.Asset{
-			assetToken.ID: &assetToken.Asset,
-		},
+	eth, token := *assetETH, *assetToken
+	eth.Backend = ethBackend
+	token.Backend = tokenBackend
+	balancer, err := NewDEXBalancer(map[uint32]*asset.BackedAsset{
+		eth.ID:   &eth,
+		token.ID: &token,
+	}, swapper)
+	if err != nil {
+		t.Fatal(err)
 	}
+	// The test token has no registered driver, so link its fee asset explicitly.
+	balancer.assets[token.ID].feeBalancer = balancer.assets[eth.ID]
+	balancer.assets[token.ID].feeFamily[eth.ID] = &eth.Asset
+	balancer.assets[eth.ID].feeFamily[token.ID] = &token.Asset
+	balancer.SetMarkets(map[string]PendingAccounter{
+		"eth":   ethTunnel,
+		"token": tokenTunnel,
+	})
 
-	balancer := &DEXBalancer{
-		assets: map[uint32]*backedBalancer{
-			assetETH.ID: ethBalancer,
-			assetToken.ID: {
-				balancer:  tokenBackend,
-				assetInfo: &assetToken.Asset,
-				markets: []PendingAccounter{
-					tokenTunnel,
-				},
-				feeBalancer: ethBalancer,
-				feeFamily: map[uint32]*dex.Asset{
-					assetETH.ID: &assetETH.Asset,
-				},
-			},
-		},
-		matchNegotiator: swapper,
+	ethTunnel.acctQty, ethTunnel.acctLots = lotSize, 1
+	ethBackend.bal = calc.RequiredOrderFunds(lotSize, 0, 1, tInitTxSize, tInitTxSize, assetETH.MaxFeeRate)
+	if !balancer.CheckReserved("a", assetETH.ID) {
+		t.Fatal("CheckReserved rejected an account whose balance exactly covers existing orders")
+	}
+	ethBackend.bal--
+	if balancer.CheckReserved("a", assetETH.ID) {
+		t.Fatal("CheckReserved accepted an account with insufficient balance for existing orders")
 	}
 
 	ethNine := calc.RequiredOrderFunds(lotSize*9, 0, 9, tInitTxSize, tInitTxSize, assetETH.Asset.MaxFeeRate)

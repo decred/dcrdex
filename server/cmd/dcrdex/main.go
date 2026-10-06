@@ -152,8 +152,9 @@ func mainCore(ctx context.Context) error {
 			GlobalHTTPRate:    cfg.GlobalHTTPRate,
 			GlobalHTTPBurst:   cfg.GlobalHTTPBurst,
 		},
-		NoResumeSwaps: cfg.NoResumeSwaps,
-		NodeRelayAddr: cfg.NodeRelayAddr,
+		NoResumeSwaps:   cfg.NoResumeSwaps,
+		NodeRelayAddr:   cfg.NodeRelayAddr,
+		RequestShutdown: requestShutdown,
 	}
 	dexMan, err := dexsrv.NewDEX(ctx, dexConf) // ctx cancel just aborts setup; Stop does normal shutdown
 	if err != nil {

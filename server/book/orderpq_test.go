@@ -522,7 +522,7 @@ func TestOrderPQ_Remove(t *testing.T) {
 	}
 }
 
-func TestOrderPQ_RemoveUserOrders(t *testing.T) {
+func TestOrderPQ_UserOrders(t *testing.T) {
 	pq := NewMaxOrderPQ(6)
 
 	ok := pq.Insert(orders[0])
@@ -563,40 +563,17 @@ func TestOrderPQ_RemoveUserOrders(t *testing.T) {
 		t.Errorf("wanted %d orders, got %d", 1, count)
 	}
 
-	removed := pq.RemoveUserOrders(user0)
-	if pq.Len() != 1 {
-		t.Errorf("Queue length expected %d, got %d", 1, pq.Len())
-	}
-	if len(removed) != 2 {
-		t.Fatalf("removed %d orders, expected %d", len(removed), 2)
-	}
-	for _, oid := range []order.OrderID{orders[0].ID(), orders[1].ID()} {
-		var found bool
-		for i := range removed {
-			if oid == removed[i].ID() {
-				found = true
-				break
+	for _, user := range []account.AccountID{user0, user1} {
+		got := pq.UserOrders(user)
+		_, count := pq.UserOrderTotals(user)
+		if len(got) != int(count) {
+			t.Fatalf("UserOrders returned %d orders, want %d", len(got), count)
+		}
+		for _, lo := range got {
+			if lo.User() != user {
+				t.Fatalf("UserOrders returned an order for another account")
 			}
 		}
-		if !found {
-			t.Errorf("didn't remove order %v", oid)
-		}
-	}
-
-	remainingID := pq.PeekBest().ID()
-	if remainingID != other.ID() {
-		t.Errorf("Remaining element expected %s, got %s", other.ID(),
-			remainingID)
-	}
-	removed = pq.RemoveUserOrders(user1)
-	if remain := pq.Len(); remain != 0 {
-		t.Errorf("didn't remove all orders, still have %d", remain)
-	}
-	if len(removed) != 1 {
-		t.Fatalf("removed %d orders, expected %d", len(removed), 1)
-	}
-	if removed[0].ID() != other.ID() {
-		t.Errorf("removed order %v, expected %v", removed[0], other.ID())
 	}
 }
 

@@ -49,6 +49,24 @@ func (aid AccountID) MarshalJSON() ([]byte, error) {
 	return json.Marshal(aid.String())
 }
 
+// UnmarshalJSON satisfies the json.Unmarshaler interface, and expects the
+// account ID as a quoted hexadecimal string.
+func (aid *AccountID) UnmarshalJSON(data []byte) error {
+	var enc string
+	if err := json.Unmarshal(data, &enc); err != nil {
+		return err
+	}
+	decoded, err := hex.DecodeString(enc)
+	if err != nil {
+		return err
+	}
+	if len(decoded) != HashSize {
+		return fmt.Errorf("invalid account id length %d", len(decoded))
+	}
+	copy(aid[:], decoded)
+	return nil
+}
+
 // Value implements the sql/driver.Valuer interface.
 func (aid AccountID) Value() (driver.Value, error) {
 	return aid[:], nil // []byte
@@ -175,6 +193,9 @@ type Reputation struct {
 	// BondedTier is the tier indicated by the user's active bonds. BondedTier
 	// does not account for penalties.
 	BondedTier int64 `json:"bondedTier"`
+	// BondExpiryThreshold is the lock-time threshold used to calculate
+	// BondedTier. Bonds with an earlier lock time were excluded.
+	BondExpiryThreshold int64 `json:"bondExpiryThreshold,omitempty"`
 	// Penalties are the number of tiers that are currently revoked due to low
 	// user score.
 	Penalties uint16 `json:"penalties"`

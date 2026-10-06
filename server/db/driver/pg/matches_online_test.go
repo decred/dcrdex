@@ -645,11 +645,11 @@ func generateMatch(t *testing.T, matchStatus order.MatchStatus, active bool, mak
 	}
 	epochID := order.EpochID{epIdx, 1000}
 
-	err := archie.StoreOrder(loBuy, int64(epochID.Idx), int64(epochID.Dur), order.OrderStatusExecuted)
+	err := storeOrderForTest(archie, loBuy, int64(epochID.Idx), int64(epochID.Dur), order.OrderStatusExecuted)
 	if err != nil {
 		t.Fatalf("failed to store order: %v", err)
 	}
-	err = archie.StoreOrder(loSell, int64(epochID.Idx), int64(epochID.Dur), order.OrderStatusExecuted)
+	err = storeOrderForTest(archie, loSell, int64(epochID.Idx), int64(epochID.Dur), order.OrderStatusExecuted)
 	if err != nil {
 		t.Fatalf("failed to store order: %v", err)
 	}
