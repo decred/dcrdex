@@ -107,6 +107,11 @@ const (
 	RPCTestContractGasError              // 87
 	RPCReconfigureWalletError            // 88
 	UnknownOrderError                    // 89
+	SubscribeRejectedError               // 90
+	UserNotConnectedError                // 91
+	ResultUnavailableError               // 92
+	MeshAlreadyConnectedError            // 93
+	MeshIncompatibleLogError             // 94
 )
 
 // Routes are destinations for a "payload" of data. The type of data being
@@ -249,6 +254,8 @@ const (
 	// delivering the counterparty's per-match swap address after both sides
 	// have acknowledged the match.
 	CounterPartyAddressRoute = "counterparty_address"
+	// MeshEndpointsRoute notifies clients of an updated mesh endpoint list.
+	MeshEndpointsRoute = "mesh_endpoints"
 )
 
 const errNullRespPayload = dex.ErrorKind("null response payload")
@@ -1303,6 +1310,20 @@ type BondAsset struct {
 	Amt     uint64 `json:"amount"` // to be implied by bond version?
 }
 
+// MeshEndpoint identifies a client-facing endpoint for a DEX mesh.
+type MeshEndpoint struct {
+	// Host is the client connection address.
+	Host string `json:"host"`
+	// Cert is an optional PEM-encoded TLS certificate.
+	Cert dex.Bytes `json:"cert,omitempty"`
+}
+
+// MeshEndpointsNotification lists the client-facing mesh endpoints,
+// including the endpoint of the node sending the notification.
+type MeshEndpointsNotification struct {
+	MeshEndpoints []*MeshEndpoint `json:"meshEndpoints"`
+}
+
 // ConfigResult is the successful result for the ConfigRoute.
 type ConfigResult struct {
 	// APIVersion is the server's communications API version, but we may
@@ -1329,6 +1350,8 @@ type ConfigResult struct {
 
 	PenaltyThreshold uint32 `json:"penaltyThreshold"`
 	MaxScore         uint32 `json:"maxScore"`
+
+	MeshEndpoints []*MeshEndpoint `json:"meshEndpoints,omitempty"`
 }
 
 // Spot is a snapshot of a market at the end of a match cycle. A slice of Spot

@@ -5,6 +5,7 @@
 package book
 
 import (
+	"fmt"
 	"sync"
 
 	"decred.org/dcrdex/dex/order"
@@ -42,21 +43,49 @@ func New(lotSize uint64, acctTracking AccountTracking) *Book {
 	}
 }
 
-// Clear reset the order book with configured capacity.
-func (b *Book) Clear() (removedBuys, removedSells []*order.LimitOrder) {
-	b.mtx.Lock()
-	removedBuys, removedSells = b.buys.Orders(), b.sells.Orders()
-	b.buys, b.sells = nil, nil
-	b.buys = NewMaxOrderPQ(initBookHalfCapacity)
-	b.sells = NewMinOrderPQ(initBookHalfCapacity)
-	b.acctTracker = newAccountTracker(b.acctTracking)
-	b.mtx.Unlock()
-	return
-}
-
 // LotSize returns the Book's configured lot size in atoms of the base asset.
 func (b *Book) LotSize() uint64 {
+	b.mtx.RLock()
+	defer b.mtx.RUnlock()
 	return b.lotSize
+}
+
+// IncompatibleLotSize reports whether lotSize is zero or the order's
+// quantity or filled amount is not a multiple of it.
+func IncompatibleLotSize(lo *order.LimitOrder, lotSize uint64) bool {
+	return lotSize == 0 || lo.Quantity%lotSize != 0 || lo.Filled()%lotSize != 0
+}
+
+// CheckLotSize returns an error if lotSize is zero or any booked order
+// outside revoked is incompatible with it. It does not modify the book.
+func (b *Book) CheckLotSize(lotSize uint64, revoked map[order.OrderID]bool) error {
+	b.mtx.RLock()
+	defer b.mtx.RUnlock()
+	return b.checkLotSizeLocked(lotSize, revoked)
+}
+
+// SetLotSize changes the book's lot size. The caller must first validate it
+// with CheckLotSize and remove any incompatible orders. Insertions and fills
+// must not invalidate the check before this update.
+func (b *Book) SetLotSize(lotSize uint64) {
+	b.mtx.Lock()
+	defer b.mtx.Unlock()
+	b.lotSize = lotSize
+}
+
+// checkLotSizeLocked requires b.mtx to be held for reading or writing.
+func (b *Book) checkLotSizeLocked(lotSize uint64, revoked map[order.OrderID]bool) error {
+	if lotSize == 0 {
+		return fmt.Errorf("lot size must be positive")
+	}
+	for _, side := range [][]*order.LimitOrder{b.buys.Orders(), b.sells.Orders()} {
+		for _, lo := range side {
+			if IncompatibleLotSize(lo, lotSize) && !revoked[lo.ID()] {
+				return fmt.Errorf("booked order %v is incompatible with lot size %d", lo.ID(), lotSize)
+			}
+		}
+	}
+	return nil
 }
 
 // BuyCount returns the number of buy orders.
@@ -95,12 +124,12 @@ func (b *Book) Best() (bestBuy, bestSell *order.LimitOrder) {
 // boolean indicating if the insertion was successful. If the order is not an
 // integer multiple of the Book's lot size, the order will not be inserted.
 func (b *Book) Insert(o *order.LimitOrder) bool {
+	b.mtx.Lock()
+	defer b.mtx.Unlock()
 	if o.Quantity%b.lotSize != 0 {
 		log.Warnf("(*Book).Insert: Refusing to insert an order with a quantity that is not a multiple of lot size.")
 		return false
 	}
-	b.mtx.Lock()
-	defer b.mtx.Unlock()
 	if o.Sell {
 		if b.sells.Insert(o) {
 			b.acctTracker.add(o)
@@ -128,20 +157,6 @@ func (b *Book) Remove(oid order.OrderID) (*order.LimitOrder, bool) {
 		return removed, true
 	}
 	return nil, false
-}
-
-// RemoveUserOrders removes all orders from the book that belong to a user. The
-// removed buy and sell orders are returned.
-func (b *Book) RemoveUserOrders(user account.AccountID) (removedBuys, removedSells []*order.LimitOrder) {
-	removedBuys = b.buys.RemoveUserOrders(user)
-	for _, lo := range removedBuys {
-		b.acctTracker.remove(lo)
-	}
-	removedSells = b.sells.RemoveUserOrders(user)
-	for _, lo := range removedSells {
-		b.acctTracker.remove(lo)
-	}
-	return
 }
 
 // HaveOrder checks if an order is in either the buy or sell side of the book.
@@ -191,6 +206,24 @@ func (b *Book) BuyOrders() []*order.LimitOrder {
 // BuyOrdersN copies out the N best buy orders in the book, sorted.
 func (b *Book) BuyOrdersN(N int) []*order.LimitOrder {
 	return b.buys.OrdersN(N)
+}
+
+// UserOrders retrieves all orders in the book belonging to a given user.
+func (b *Book) UserOrders(user account.AccountID) (buys, sells []*order.LimitOrder) {
+	b.mtx.RLock()
+	defer b.mtx.RUnlock()
+	return b.buys.UserOrders(user), b.sells.UserOrders(user)
+}
+
+// Users returns the accounts owning orders in the book, with their booked
+// order counts.
+func (b *Book) Users() map[account.AccountID]int {
+	b.mtx.RLock()
+	defer b.mtx.RUnlock()
+	users := make(map[account.AccountID]int)
+	b.buys.collectUsers(users)
+	b.sells.collectUsers(users)
+	return users
 }
 
 // UnfilledUserBuys retrieves all buy orders belonging to a given user that are

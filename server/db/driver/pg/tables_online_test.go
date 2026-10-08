@@ -30,46 +30,30 @@ func TestPrepareTables(t *testing.T) {
 
 	// Create new tables and schemas.
 	markets := []*dex.MarketInfo{mktConfig}
-	purgeMkts, err := prepareTables(context.Background(), archie.db, markets)
-	if err != nil {
+	if err := prepareTables(context.Background(), archie.db, markets); err != nil {
 		t.Error(err)
-	}
-	if purgeMkts != nil {
-		t.Error("expected no purged markets for new table")
 	}
 
 	// Cover the cases where the tables already exist (OK). This hits the
 	// upgradeDB path, which returns early with current == dbVersion.
-	purgeMkts, err = prepareTables(context.Background(), archie.db, markets)
-	if err != nil {
+	if err := prepareTables(context.Background(), archie.db, markets); err != nil {
 		t.Error(err)
 	}
-	if purgeMkts != nil {
-		t.Error("expected no purged markets for no config changes")
-	}
 
-	// Mutated existing market. Should return mutated markets in purge
-	// returns.
+	// Mutated existing market. The lot size metadata update happens here, but
+	// book cleanup is handled by market startup cleanup.
 	mktConfig, err = dex.NewMarketInfoFromSymbols("DCR", "BTC", 1e8, RateStep, EpochDuration, 0, MarketBuyBuffer) // lot size change
 	if err != nil {
 		t.Fatal(err)
 	}
-	purgeMkts, err = prepareTables(context.Background(), archie.db, []*dex.MarketInfo{mktConfig})
-	if err != nil {
+	if err := prepareTables(context.Background(), archie.db, []*dex.MarketInfo{mktConfig}); err != nil {
 		t.Error(err)
-	}
-	if len(purgeMkts) != 1 || purgeMkts[0] != "dcr_btc" {
-		t.Error("expected a dcr_btc purge markets return for changed lot size")
 	}
 
 	// Add a new market.
 	mktConfig, _ = dex.NewMarketInfoFromSymbols("dcr", "ltc", 1e9, RateStep, EpochDuration, 0, MarketBuyBuffer)
-	purgeMkts, err = prepareTables(context.Background(), archie.db, []*dex.MarketInfo{mktConfig})
-	if err != nil {
+	if err := prepareTables(context.Background(), archie.db, []*dex.MarketInfo{mktConfig}); err != nil {
 		t.Error(err)
-	}
-	if purgeMkts != nil {
-		t.Error("expected no purged markets for new market")
 	}
 }
 
@@ -86,8 +70,7 @@ func TestUpdateLotSize(t *testing.T) {
 
 	// Create new tables and schemas.
 	markets := []*dex.MarketInfo{mktConfig}
-	_, err = prepareTables(context.Background(), archie.db, markets)
-	if err != nil {
+	if err := prepareTables(context.Background(), archie.db, markets); err != nil {
 		t.Error(err)
 	}
 

@@ -35,18 +35,17 @@ type MatchNegotiator interface {
 	AccountStats(acctAddr string, assetID uint32) (qty, swaps uint64, redeems int)
 }
 
-// BackedBalancer is an asset manager that is capable of querying the entire DEX
-// for the balance required to fulfill new + existing orders and outstanding
-// redemptions.
+// DEXBalancer checks account balances against funds required for orders
+// and pending swaps.
 type DEXBalancer struct {
 	assets          map[uint32]*backedBalancer
+	markets         map[string]PendingAccounter
 	matchNegotiator MatchNegotiator
 }
 
-// NewDEXBalancer is a constructor for a DEXBalancer. Provided assets will
-// be filtered for those that are account-based. The matchNegotiator is
-// satisfied by the *Swapper.
-func NewDEXBalancer(tunnels map[string]PendingAccounter, assets map[uint32]*asset.BackedAsset, matchNegotiator MatchNegotiator) (*DEXBalancer, error) {
+// NewDEXBalancer creates a balance checker for account-based assets.
+// Call SetMarkets before performing balance checks.
+func NewDEXBalancer(assets map[uint32]*asset.BackedAsset, matchNegotiator MatchNegotiator) (*DEXBalancer, error) {
 	balancers := make(map[uint32]*backedBalancer)
 
 	addAsset := func(ba *asset.BackedAsset) error {
@@ -56,18 +55,10 @@ func NewDEXBalancer(tunnels map[string]PendingAccounter, assets map[uint32]*asse
 			return nil
 		}
 
-		var markets []PendingAccounter
-		for _, mkt := range tunnels {
-			if mkt.Base() == assetID || mkt.Quote() == assetID {
-				markets = append(markets, mkt)
-			}
-		}
-
 		bb := &backedBalancer{
 			balancer:  balancer,
 			assetInfo: &ba.Asset,
 			feeFamily: make(map[uint32]*dex.Asset),
-			markets:   markets,
 		}
 		balancers[assetID] = bb
 
@@ -124,6 +115,20 @@ func NewDEXBalancer(tunnels map[string]PendingAccounter, assets map[uint32]*asse
 		assets:          balancers,
 		matchNegotiator: matchNegotiator,
 	}, nil
+}
+
+// SetMarkets sets the markets included in balance checks. Markets are supplied
+// separately because they need the balancer during construction.
+// Call it once during initialization, before any balance checks.
+// The supplied map must not be modified afterward.
+func (b *DEXBalancer) SetMarkets(markets map[string]PendingAccounter) {
+	b.markets = markets
+}
+
+// CheckReserved reports whether the account has enough balance for its
+// existing orders and pending swaps, including fees.
+func (b *DEXBalancer) CheckReserved(acctAddr string, assetID uint32) bool {
+	return b.CheckBalance(acctAddr, assetID, assetID, 0, 0, 0)
 }
 
 // CheckBalance checks if there is sufficient balance to support the specified
@@ -213,8 +218,11 @@ func (b *DEXBalancer) CheckBalance(acctAddr string, assetID, redeemAssetID uint3
 
 		var l uint64
 		var r int
-		for _, mt := range ba.markets {
-			newQty, newLots, newRedeems := mt.AccountPending(acctAddr, assetID)
+		for _, mkt := range b.markets {
+			if mkt.Base() != assetID && mkt.Quote() != assetID {
+				continue
+			}
+			newQty, newLots, newRedeems := mkt.AccountPending(acctAddr, assetID)
 			l += newLots
 			q += newQty
 			if isToken {
@@ -279,5 +287,4 @@ type backedBalancer struct {
 	assetInfo   *dex.Asset
 	feeBalancer *backedBalancer       // feeBalancer != nil implies that this is a token
 	feeFamily   map[uint32]*dex.Asset // Excluding self
-	markets     []PendingAccounter
 }

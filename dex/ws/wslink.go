@@ -285,7 +285,14 @@ out:
 			// next ReadMessage call has adequate time to read buffered
 			// pong frames.
 			if err := c.conn.SetReadDeadline(time.Now().Add(c.pingPeriod * 2)); err != nil {
-				c.log.Errorf("failed to set read deadline: %v", err)
+				// SetReadDeadline goes straight to the net.Conn. If Disconnect
+				// (or a peer hangup) closed it while we were in the handler,
+				// this fails with ErrClosed — a normal teardown race, not a
+				// hard error. Still exit the loop; the next ReadMessage would
+				// fail the same way.
+				if !errors.Is(err, net.ErrClosed) {
+					c.log.Errorf("failed to set read deadline: %v", err)
+				}
 				break out
 			}
 			continue
@@ -311,7 +318,14 @@ out:
 		// ensures the next ReadMessage call has adequate time to
 		// read buffered pong frames.
 		if err := c.conn.SetReadDeadline(time.Now().Add(c.pingPeriod * 2)); err != nil {
-			c.log.Errorf("failed to set read deadline: %v", err)
+			// SetReadDeadline goes straight to the net.Conn. If Disconnect
+			// (or a peer hangup) closed it while we were in the handler,
+			// this fails with ErrClosed — a normal teardown race, not a
+			// hard error. Still exit the loop; the next ReadMessage would
+			// fail the same way.
+			if !errors.Is(err, net.ErrClosed) {
+				c.log.Errorf("failed to set read deadline: %v", err)
+			}
 			break out
 		}
 	}

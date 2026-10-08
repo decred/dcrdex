@@ -301,13 +301,20 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 
 	}
 
+	// Sort map drains so output is deterministic.
 	for _, lo := range partialMap {
 		updates.TradesPartial = append(updates.TradesPartial, lo)
 	}
+	sort.Slice(updates.TradesPartial, func(i, j int) bool {
+		idi, idj := updates.TradesPartial[i].ID(), updates.TradesPartial[j].ID()
+		return bytes.Compare(idi[:], idj[:]) < 0
+	})
 
+	firstStanding := len(nomatched)
 	for _, q := range nomatchStanding {
 		nomatched = append(nomatched, q)
 	}
+	sortQueueByID(nomatched[firstStanding:])
 
 	for _, matchSet := range matches {
 		if matchSet.Total > 0 { // cancel filter

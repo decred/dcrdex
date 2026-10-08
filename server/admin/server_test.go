@@ -32,6 +32,7 @@ import (
 	"decred.org/dcrdex/server/db"
 	dexsrv "decred.org/dcrdex/server/dex"
 	"decred.org/dcrdex/server/market"
+	"decred.org/dcrdex/server/mesh"
 	"github.com/decred/dcrd/certgen"
 	"github.com/decred/slog"
 	"github.com/go-chi/chi/v5"
@@ -51,6 +52,8 @@ type TMarket struct {
 	resumeEpoch int64
 	resumeTime  time.Time
 	persist     bool
+	persistSet  bool
+	lifecycle   db.MarketState
 }
 
 type TCore struct {
@@ -68,9 +71,11 @@ type TCore struct {
 	marketMatches    []*dexsrv.MatchData
 	marketMatchesErr error
 	dataEnabled      uint32
+	notifyErr        error
 }
 
 func (c *TCore) ConfigMsg() json.RawMessage { return nil }
+func (c *TCore) MeshStatus() mesh.Status    { return mesh.Status{Mode: "single_server"} }
 
 func (c *TCore) Suspend(tSusp time.Time, persistBooks bool) map[string]*market.SuspendEpoch {
 	return nil
@@ -113,13 +118,18 @@ func (c *TCore) MarketStatus(mktName string) *market.Status {
 	if mkt.suspend != nil {
 		suspendEpoch = mkt.suspend.Idx
 	}
+	var persist *bool
+	if mkt.suspend != nil || mkt.persistSet {
+		persistLocal := mkt.persist
+		persist = &persistLocal
+	}
 	return &market.Status{
 		Running:       mkt.running,
 		EpochDuration: mkt.dur,
 		ActiveEpoch:   mkt.activeEpoch,
 		StartEpoch:    mkt.startEpoch,
 		SuspendEpoch:  suspendEpoch,
-		PersistBook:   mkt.persist,
+		PersistBook:   persist,
 	}
 }
 
@@ -154,24 +164,29 @@ func (c *TCore) MarketStatuses() map[string]*market.Status {
 		if mkt.suspend != nil {
 			suspendEpoch = mkt.suspend.Idx
 		}
+		var persist *bool
+		if mkt.suspend != nil || mkt.persistSet {
+			persistLocal := mkt.persist
+			persist = &persistLocal
+		}
 		mktStatuses[name] = &market.Status{
 			Running:       mkt.running,
 			EpochDuration: mkt.dur,
 			ActiveEpoch:   mkt.activeEpoch,
 			StartEpoch:    mkt.startEpoch,
 			SuspendEpoch:  suspendEpoch,
-			PersistBook:   mkt.persist,
+			PersistBook:   persist,
 		}
 	}
 	return mktStatuses
 }
 
-func (c *TCore) MarketRunning(mktName string) (found, running bool) {
+func (c *TCore) MarketLifecycleState(mktName string) (found bool, state db.MarketState) {
 	mkt := c.market(mktName)
 	if mkt == nil {
-		return
+		return false, 0
 	}
-	return true, mkt.running
+	return true, mkt.lifecycle
 }
 
 func (c *TCore) EnableDataAPI(yes bool) {
@@ -220,9 +235,11 @@ func (c *TCore) CreatePrepaidBonds(n int, strength uint32, durSecs int64) ([][]b
 func (c *TCore) AccountMatchOutcomesN(user account.AccountID, n int) ([]*auth.MatchOutcome, error) {
 	return nil, nil
 }
-func (c *TCore) Notify(_ account.AccountID, _ *msgjson.Message) {}
-func (c *TCore) NotifyAll(_ *msgjson.Message)                   {}
-func (c *TCore) ForgiveUser(account.AccountID) error            { return nil }
+func (c *TCore) Notify(_ account.AccountID, _ *msgjson.Message) error {
+	return c.notifyErr
+}
+func (c *TCore) NotifyAll(_ *msgjson.Message)        {}
+func (c *TCore) ForgiveUser(account.AccountID) error { return nil }
 
 // genCertPair generates a key/cert pair to the paths provided.
 func genCertPair(certFile, keyFile string) error {
@@ -401,6 +418,40 @@ func TestMarkets(t *testing.T) {
 			log.Errorf("incorrect market status. got %v, expected %v", stat, wantStat)
 		}
 	}
+
+	// Pending resume has no final epoch, but still exposes the preserved
+	// persist flag.
+	tMkt.running = false
+	tMkt.startEpoch = 12350
+	tMkt.persist = true
+	tMkt.persistSet = true
+	w = httptest.NewRecorder()
+	r, _ = http.NewRequest(http.MethodGet, "https://localhost/markets", nil)
+	r.RemoteAddr = "localhost"
+
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("apiMarkets returned code %d, expected %d", w.Code, http.StatusOK)
+	}
+
+	exp = `{
+    "dcr_btc": {
+        "running": false,
+        "epochlen": 1234,
+        "activeepoch": 12343,
+        "startepoch": 12350,
+        "persistbook": true
+    }
+}
+`
+	if exp != w.Body.String() {
+		t.Errorf("unexpected response %q, wanted %q", w.Body.String(), exp)
+	}
+
+	tMkt.running = true
+	tMkt.startEpoch = 12340
+	tMkt.persistSet = false
 
 	// Set suspend data.
 	tMkt.suspend = &market.SuspendEpoch{Idx: 12345, End: time.UnixMilli(int64(dur) * idx)}
@@ -768,10 +819,32 @@ func TestResume(t *testing.T) {
 
 	// With the market, but already running
 	tMkt := &TMarket{
-		running: true,
-		dur:     6000,
+		lifecycle: db.MarketStateRunning,
+		running:   true,
+		dur:       6000,
 	}
 	core.markets[name] = tMkt
+
+	for _, tc := range []struct {
+		name    string
+		state   db.MarketState
+		message string
+	}{
+		{"draining", db.MarketStateDraining, "finalizing suspension"},
+		{"uninitialized", 0, "not resumable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tMkt.lifecycle = tc.state
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodGet, "/market/"+name+"/resume", nil)
+			mux.ServeHTTP(w, r)
+			want := fmt.Sprintf("market %q %s\n", name, tc.message)
+			if w.Code != http.StatusBadRequest || w.Body.String() != want {
+				t.Fatalf("response = %d %q, want %d %q", w.Code, w.Body.String(), http.StatusBadRequest, want)
+			}
+		})
+	}
+	tMkt.lifecycle = db.MarketStateRunning
 
 	w = httptest.NewRecorder()
 	r, _ = http.NewRequest(http.MethodGet, "https://localhost/market/"+name+"/resume", nil)
@@ -789,6 +862,7 @@ func TestResume(t *testing.T) {
 
 	// Now stopped.
 	tMkt.running = false
+	tMkt.lifecycle = db.MarketStateSuspended
 	w = httptest.NewRecorder()
 	r, _ = http.NewRequest(http.MethodGet, "https://localhost/market/"+name+"/resume", nil)
 	r.RemoteAddr = "localhost"
@@ -876,9 +950,31 @@ func TestSuspend(t *testing.T) {
 
 	// With the market, but not running
 	tMkt := &TMarket{
-		suspend: &market.SuspendEpoch{},
+		lifecycle: db.MarketStateSuspended,
+		suspend:   &market.SuspendEpoch{},
 	}
 	core.markets[name] = tMkt
+
+	for _, tc := range []struct {
+		name    string
+		state   db.MarketState
+		message string
+	}{
+		{"draining", db.MarketStateDraining, "finalizing suspension"},
+		{"uninitialized", 0, "not schedulable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tMkt.lifecycle = tc.state
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodGet, "/market/"+name+"/suspend", nil)
+			mux.ServeHTTP(w, r)
+			want := fmt.Sprintf("market %q %s\n", name, tc.message)
+			if w.Code != http.StatusBadRequest || w.Body.String() != want {
+				t.Fatalf("response = %d %q, want %d %q", w.Code, w.Body.String(), http.StatusBadRequest, want)
+			}
+		})
+	}
+	tMkt.lifecycle = db.MarketStateSuspended
 
 	w = httptest.NewRecorder()
 	r, _ = http.NewRequest(http.MethodGet, "https://localhost/market/"+name+"/suspend", nil)
@@ -896,6 +992,7 @@ func TestSuspend(t *testing.T) {
 
 	// Now running.
 	tMkt.running = true
+	tMkt.lifecycle = db.MarketStateRunning
 	w = httptest.NewRecorder()
 	r, _ = http.NewRequest(http.MethodGet, "https://localhost/market/"+name+"/suspend", nil)
 	r.RemoteAddr = "localhost"
@@ -1238,12 +1335,31 @@ func TestNotify(t *testing.T) {
 	msgStr := "Hello world.\nAll your base are belong to us."
 	tests := []struct {
 		name, txt, acctID string
+		notifyErr         error
 		wantCode          int
 	}{{
 		name:     "ok",
 		acctID:   acctIDStr,
 		txt:      msgStr,
 		wantCode: http.StatusOK,
+	}, {
+		name:      "user not connected",
+		acctID:    acctIDStr,
+		txt:       msgStr,
+		notifyErr: auth.ErrUserNotConnected,
+		wantCode:  http.StatusNotFound,
+	}, {
+		name:      "wrapped user not connected",
+		acctID:    acctIDStr,
+		txt:       msgStr,
+		notifyErr: fmt.Errorf("delivery failed: %w", auth.ErrUserNotConnected),
+		wantCode:  http.StatusNotFound,
+	}, {
+		name:      "delivery error",
+		acctID:    acctIDStr,
+		txt:       msgStr,
+		notifyErr: errors.New("delivery failed"),
+		wantCode:  http.StatusInternalServerError,
 	}, {
 		name:     "ok at max size",
 		acctID:   acctIDStr,
@@ -1270,6 +1386,7 @@ func TestNotify(t *testing.T) {
 		wantCode: http.StatusBadRequest,
 	}}
 	for _, test := range tests {
+		core.notifyErr = test.notifyErr
 		w := httptest.NewRecorder()
 		br := bytes.NewReader([]byte(test.txt))
 		r, _ := http.NewRequest("POST", "https://localhost/account/"+test.acctID+"/notify", br)

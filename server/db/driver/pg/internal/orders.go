@@ -4,8 +4,7 @@
 package internal
 
 const (
-	// CreateOrdersTable creates a table specified via the %s printf specifier
-	// for market and limit orders.
+	// CreateOrdersTable creates the active market/limit order table.
 	CreateOrdersTable = `CREATE TABLE IF NOT EXISTS %s (
 		oid BYTEA PRIMARY KEY, -- UNIQUE
 		type INT2,
@@ -24,6 +23,28 @@ const (
 		epoch_idx INT8, epoch_dur INT4,
 		preimage BYTEA UNIQUE,
 		complete_time INT8      -- when the order has successfully completed all swaps
+	);`
+
+	// CreateOrdersArchivedTable stores archived orders. Different orders may
+	// have the same commitment or preimage.
+	CreateOrdersArchivedTable = `CREATE TABLE IF NOT EXISTS %s (
+		oid BYTEA PRIMARY KEY,
+		type INT2,
+		sell BOOLEAN,
+		account_id BYTEA,
+		address TEXT,
+		client_time TIMESTAMPTZ,
+		server_time TIMESTAMPTZ,
+		commit BYTEA,
+		coins BYTEA,
+		quantity INT8,
+		rate INT8,
+		force INT2,
+		status INT2,
+		filled INT8,
+		epoch_idx INT8, epoch_dur INT4,
+		preimage BYTEA,
+		complete_time INT8
 	);`
 
 	// InsertOrder inserts a market or limit order into the specified table.
@@ -47,20 +68,10 @@ const (
 		commit, coins, quantity, rate, force, filled
 	FROM %s WHERE status = $1;`
 
-	PreimageResultsLastN = `SELECT oid, (preimage IS NULL AND status=$3) AS preimageMiss, 
-		(epoch_idx+1) * epoch_dur as epochCloseTime   -- when preimages are requested
-	FROM %s -- e.g. dcr_btc.orders_archived
-	WHERE account_id = $1
-		AND status >= 0         -- exclude forgiven
-	ORDER BY epochCloseTime DESC
-	LIMIT $2` // no ;
-	// NOTE: we could join with the epochs table if we really want match_time instead of epoch close time
+	SelectOrderIDsByStatus = `SELECT oid FROM %s WHERE status = $1 ORDER BY oid;`
 
-	// SelectUserOrders retrieves all columns of all orders for the given
-	// account ID.
-	SelectUserOrders = `SELECT oid, type, sell, account_id, address, client_time, server_time,
-		commit, coins, quantity, rate, force, status, filled
-	FROM %s WHERE account_id = $1;`
+	SelectOrderIDsByStatusAndEpoch = `SELECT oid FROM %s
+		WHERE status = $1 AND epoch_idx = $2 AND epoch_dur = $3;`
 
 	// SelectUserOrderStatuses retrieves the order IDs and statuses of all orders
 	// for the given account ID. Only applies to market and limit orders.
@@ -85,6 +96,15 @@ const (
 	// SelectOrderByCommit retrieves the order ID for any order with the given
 	// commitment value. This applies to the cancel order tables as well.
 	SelectOrderByCommit = `SELECT oid FROM %s WHERE commit = $1;`
+
+	// SelectOrderByCommitSince retrieves order IDs with the given commitment
+	// accepted at or after a cutoff. Archived orders may share a commitment,
+	// so several rows can match.
+	SelectOrderByCommitSince = `SELECT oid FROM %s WHERE commit = $1 AND server_time >= $2;`
+
+	// CreateArchivedCommitIndex indexes commitments in an archived order or
+	// cancel table without requiring them to be unique.
+	CreateArchivedCommitIndex = `CREATE INDEX IF NOT EXISTS %s ON %s (commit);`
 
 	// SelectOrderPreimage retrieves the preimage for the order ID;
 	SelectOrderPreimage = `SELECT preimage FROM %s WHERE oid = $1;`
@@ -169,8 +189,7 @@ const (
 	SELECT * FROM moved
 	RETURNING oid, sell, account_id;`
 
-	// CreateCancelOrdersTable creates a table specified via the %s printf
-	// specifier for cancel orders.
+	// CreateCancelOrdersTable creates the active cancel-order table.
 	CreateCancelOrdersTable = `CREATE TABLE IF NOT EXISTS %s (
 		oid BYTEA PRIMARY KEY, -- UNIQUE INDEX
 		account_id BYTEA,      -- TODO: INDEX
@@ -184,6 +203,21 @@ const (
 		preimage BYTEA UNIQUE  -- null before preimage collection, and all server-generated cancels (revocations)
 	);`
 
+	// CreateCancelOrdersArchivedTable stores archived cancels. Different cancels
+	// may have the same commitment or preimage.
+	CreateCancelOrdersArchivedTable = `CREATE TABLE IF NOT EXISTS %s (
+		oid BYTEA PRIMARY KEY,
+		account_id BYTEA,
+		client_time TIMESTAMPTZ,
+		server_time TIMESTAMPTZ,
+		commit BYTEA,          -- null for server-generated cancels (order revocations)
+		target_order BYTEA,
+		status INT2,
+		epoch_idx INT8, epoch_dur INT4,
+		epoch_gap INT4 DEFAULT -1,
+		preimage BYTEA
+	);`
+
 	SelectCancelOrder = `SELECT oid, account_id, client_time, server_time,
 		commit, target_order, status
 	FROM %s WHERE oid = $1;`
@@ -191,22 +225,6 @@ const (
 	SelectCancelOrdersByStatus = `SELECT account_id, client_time, server_time,
 		commit, target_order
 	FROM %s WHERE status = $1;`
-
-	CancelPreimageResultsLastN = `SELECT oid, (preimage IS NULL AND status=$3) AS preimageMiss,  -- orderStatusRevoked
-		(epoch_idx+1) * epoch_dur AS epochCloseTime   -- when preimages are requested
-	FROM %s -- e.g. dcr_btc.cancels_archived
-	WHERE account_id = $1
-		AND commit IS NOT NULL  -- commit NOT NULL to exclude server-generated cancels
-		AND status >= 0         -- not forgiven
-	ORDER BY epochCloseTime DESC
-	LIMIT $2` // no ;
-
-	// SelectRevokeCancels retrieves server-initiated cancels (revokes).
-	SelectRevokeCancels = `SELECT oid, target_order, server_time, epoch_idx
-		FROM %s
-		WHERE account_id = $1 AND status = $2 -- use orderStatusRevoked
-		ORDER BY server_time DESC
-		LIMIT $3;`
 
 	// RetrieveCancelsForUserByStatus gets matched cancel orders by user and
 	// status, where status should be orderStatusExecuted. This query may be
@@ -217,17 +235,6 @@ const (
 		FROM %s
 		WHERE account_id = $1 AND status = $2
 		ORDER BY epoch_idx * epoch_dur DESC;`
-	// RetrieveCancelTimesForUserByStatus is similar to
-	// RetrieveCancelsForUserByStatus, but it joins on an epochs table to get
-	// the match_time directly instead of the epoch_idx and epoch_dur. The
-	// cancels table, with full market schema, is %[1]s, while the epochs table
-	// is %[2]s.
-	RetrieveCancelTimesForUserByStatus = `SELECT oid, target_order, epoch_gap, match_time
-		FROM %[1]s -- a cancels table
-		JOIN %[2]s ON %[2]s.epoch_idx = %[1]s.epoch_idx AND %[2]s.epoch_dur = %[1]s.epoch_dur -- join on epochs table PK
-		WHERE account_id = $1 AND status = $2
-		ORDER BY match_time DESC
-		LIMIT $3;` // NOTE: find revoked orders via SelectRevokeCancels
 
 	// InsertCancelOrder inserts a cancel order row into the specified table.
 	InsertCancelOrder = `INSERT INTO %s (oid, account_id, client_time, server_time,
@@ -236,6 +243,8 @@ const (
 
 	// CancelOrderStatus retrieves an order's status
 	CancelOrderStatus = `SELECT status FROM %s WHERE oid = $1;`
+
+	SelectCancelOrderEpochGap = `SELECT epoch_gap FROM %s WHERE oid = $1;`
 
 	// MoveCancelOrder, like MoveOrder, moves an order row from one table to
 	// another. However, for a cancel order, only status column is updated.
@@ -247,3 +256,40 @@ const (
 	INSERT INTO %s (oid, account_id, client_time, server_time, commit, target_order, status, epoch_idx, epoch_dur, epoch_gap, preimage)
 	SELECT * FROM moved;`
 )
+
+// Legacy history queries used by the v9 reputation conversion.
+const (
+	PreimageResultsLastN = `SELECT oid, (preimage IS NULL AND status=$3) AS preimageMiss,
+		(epoch_idx+1) * epoch_dur as epochCloseTime   -- when preimages are requested
+	FROM %s -- e.g. dcr_btc.orders_archived
+	WHERE account_id = $1
+		AND status >= 0         -- exclude forgiven
+	ORDER BY epochCloseTime DESC
+	LIMIT $2` // no ;
+
+	CancelPreimageResultsLastN = `SELECT oid, (preimage IS NULL AND status=$3) AS preimageMiss,  -- orderStatusRevoked
+		(epoch_idx+1) * epoch_dur AS epochCloseTime   -- when preimages are requested
+	FROM %s -- e.g. dcr_btc.cancels_archived
+	WHERE account_id = $1
+		AND commit IS NOT NULL  -- commit NOT NULL to exclude server-generated cancels
+		AND status >= 0         -- not forgiven
+	ORDER BY epochCloseTime DESC
+	LIMIT $2` // no ;
+
+	RetrieveCancelTimesForUserByStatus = `SELECT oid, target_order, epoch_gap, match_time
+		FROM %[1]s -- a cancels table
+		JOIN %[2]s ON %[2]s.epoch_idx = %[1]s.epoch_idx AND %[2]s.epoch_dur = %[1]s.epoch_dur -- join on epochs table PK
+		WHERE account_id = $1 AND status = $2
+		ORDER BY match_time DESC
+		LIMIT $3;` // NOTE: find revoked orders via SelectRevokeCancels
+)
+
+const SelectRevokeCancels = `SELECT oid, target_order, server_time, epoch_idx
+		FROM %s
+		WHERE account_id = $1 AND status = $2 -- use orderStatusRevoked
+		ORDER BY server_time DESC
+		LIMIT $3;`
+
+const SelectUserOrders = `SELECT oid, type, sell, account_id, address, client_time, server_time,
+		commit, coins, quantity, rate, force, status, filled
+	FROM %s WHERE account_id = $1;`

@@ -5,10 +5,12 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"reflect"
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/server/account"
 )
 
@@ -472,6 +474,25 @@ func TestMarketOrder_ID(t *testing.T) {
 				t.Errorf("MarketOrder.ID() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestOrderIDJSON(t *testing.T) {
+	var want OrderID
+	copy(want[:], encode.RandomBytes(len(want)))
+
+	enc, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+
+	var got OrderID
+	if err := json.Unmarshal(enc, &got); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+
+	if got != want {
+		t.Fatalf("wrong OrderID after JSON round trip. want %s, got %s", want, got)
 	}
 }
 

@@ -6,6 +6,7 @@ package apidata
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -54,6 +55,7 @@ type cacheWithStoredTime struct {
 type DataAPI struct {
 	db             DBSource
 	epochDurations map[string]uint64
+	marketSources  map[string]MarketSource
 	bookSource     BookSource
 
 	spotsMtx sync.RWMutex
@@ -68,6 +70,7 @@ func NewDataAPI(dbSrc DBSource, registerHTTP func(route string, handler comms.HT
 	s := &DataAPI{
 		db:             dbSrc,
 		epochDurations: make(map[string]uint64),
+		marketSources:  make(map[string]MarketSource),
 		spots:          make(map[string]json.RawMessage),
 		marketCaches:   make(map[string]map[uint64]*cacheWithStoredTime),
 	}
@@ -80,14 +83,33 @@ func NewDataAPI(dbSrc DBSource, registerHTTP func(route string, handler comms.HT
 	return s
 }
 
-// AddMarketSource should be called before any markets are running.
+// AddMarketSource registers a market for candle cache loading.
+// Call it before LoadCaches.
 func (s *DataAPI) AddMarketSource(mkt MarketSource) error {
 	mktName, err := dex.MarketName(mkt.Base(), mkt.Quote())
 	if err != nil {
 		return err
 	}
+	s.marketSources[mktName] = mkt
+	return nil
+}
+
+// LoadCaches loads candle history for all registered markets.
+// Call it after market state restoration and before reporting epochs
+// or serving requests.
+func (s *DataAPI) LoadCaches() error {
+	for mktName, mkt := range s.marketSources {
+		if err := s.loadMarketCaches(mkt, mktName); err != nil {
+			return fmt.Errorf("market %s: %w", mktName, err)
+		}
+	}
+	return nil
+}
+
+// loadMarketCaches loads a market's candle history using its current
+// epoch duration.
+func (s *DataAPI) loadMarketCaches(mkt MarketSource, mktName string) error {
 	epochDur := mkt.EpochDuration()
-	s.epochDurations[mktName] = epochDur
 	binCaches := make(map[uint64]*cacheWithStoredTime, len(binSizes)+1)
 	cacheList := make([]*candles.Cache, 0, len(binSizes)+1)
 	for _, binSize := range append([]uint64{epochDur}, binSizes...) {
@@ -100,12 +122,13 @@ func (s *DataAPI) AddMarketSource(mkt MarketSource) error {
 		cacheList = append(cacheList, cache)
 		binCaches[binSize] = c
 	}
-	err = s.db.LoadEpochStats(mkt.Base(), mkt.Quote(), cacheList)
+	err := s.db.LoadEpochStats(mkt.Base(), mkt.Quote(), cacheList)
 	if err != nil {
 		return err
 	}
 	s.cacheMtx.Lock()
 	s.marketCaches[mktName] = binCaches
+	s.epochDurations[mktName] = epochDur
 	s.cacheMtx.Unlock()
 	return nil
 }
@@ -131,7 +154,20 @@ func (s *DataAPI) ReportEpoch(base, quote uint32, epochIdx uint64, stats *matche
 		if mktCaches == nil {
 			return 0, 0, 0, 0, fmt.Errorf("unknown market %q", mktName)
 		}
-		epochDur := s.epochDurations[mktName]
+		epochDur := s.marketSources[mktName].EpochDuration()
+		if previousDur := s.epochDurations[mktName]; previousDur != epochDur {
+			// Replace the old epoch cache, but retain it if it also serves
+			// one of the standard candle intervals.
+			if !slices.Contains(binSizes, previousDur) {
+				delete(mktCaches, previousDur)
+			}
+			if _, exists := mktCaches[epochDur]; !exists {
+				mktCaches[epochDur] = &cacheWithStoredTime{
+					Cache: candles.NewCache(candles.CacheSize, epochDur),
+				}
+			}
+			s.epochDurations[mktName] = epochDur
+		}
 		startStamp := epochIdx * epochDur
 		endStamp := startStamp + epochDur
 		var cache5min *cacheWithStoredTime
@@ -152,9 +188,8 @@ func (s *DataAPI) ReportEpoch(base, quote uint32, epochIdx uint64, stats *matche
 			}
 			cache.Add(candle)
 
-			// Check if any candles need to be inserted.
-			// Don't insert epoch candles.
-			if cache.BinSize == epochDur {
+			// Persist standard intervals even when they also serve as the epoch cache.
+			if !slices.Contains(binSizes, dur) {
 				continue
 			}
 

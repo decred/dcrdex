@@ -6,6 +6,7 @@ package market
 import (
 	"context"
 	"sync"
+	"time"
 
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/matcher"
@@ -17,6 +18,17 @@ type readyEpoch struct {
 	cSum           []byte
 	ordersRevealed []*matcher.OrderRevealed
 	misses         []order.Order
+	missRevokeTime time.Time
+}
+
+// complete records the preimage collection outcome and releases the epoch
+// pump. It must be called exactly once for each readyEpoch.
+func (rq *readyEpoch) complete(cSum []byte, ordersRevealed []*matcher.OrderRevealed, misses []order.Order, missRevokeTime time.Time) {
+	rq.cSum = cSum
+	rq.ordersRevealed = ordersRevealed
+	rq.misses = misses
+	rq.missRevokeTime = missRevokeTime
+	close(rq.ready)
 }
 
 type epochPump struct {
