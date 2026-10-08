@@ -14,6 +14,10 @@ const (
 	// in milliseconds.
 	defaultEpochDuration uint64 = 20000
 
+	// MinEpochDuration is the shortest configurable epoch duration, in
+	// milliseconds.
+	MinEpochDuration uint64 = 5000
+
 	// Parcels are used to track user trading limits. A parcel is a number of
 	// lots. How many lots are in a parcel is defined as part of a market's
 	// configuration. Markets with low-fee assets might have very small lot
@@ -124,6 +128,10 @@ func NewMarketInfoFromSymbols(base, quote string, lotSize, rateStep, epochDurati
 	// Check for sensible epoch duration.
 	if epochDuration == 0 {
 		epochDuration = defaultEpochDuration
+	}
+	if epochDuration < MinEpochDuration {
+		return nil, fmt.Errorf("epoch duration %d ms is below the minimum %d ms",
+			epochDuration, MinEpochDuration)
 	}
 
 	return &MarketInfo{

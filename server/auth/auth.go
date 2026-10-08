@@ -1,16 +1,17 @@
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
+// Package auth authenticates clients, manages their sessions, and handles
+// account bonds and reputation.
 package auth
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math"
-	"sort"
 	"sync"
 	"time"
 
@@ -23,6 +24,8 @@ import (
 	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
+	"decred.org/dcrdex/server/mesh"
+	"decred.org/dcrdex/server/meshevents"
 
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
@@ -48,34 +51,32 @@ var (
 	ErrUserNotConnected = dex.ErrorKind("user not connected")
 )
 
-func unixMsNow() time.Time {
-	return time.Now().Truncate(time.Millisecond).UTC()
-}
+const (
+	reputationForgivenessCommandTimeout = 2 * time.Minute
+	reputationEventRefreshTimeout       = 5 * time.Second
+)
 
 // Storage updates and fetches account-related data from what is presumably a
 // database.
 type Storage interface {
-	// Account retrieves account info for the specified account ID and lock time
-	// threshold, which determines when a bond is considered expired.
-	Account(account.AccountID, time.Time) (acct *account.Account, bonds []*db.Bond)
+	// Account returns the account and bonds whose lock time is at least
+	// lockTimeThresh. It returns a nil account and nil error if the account
+	// does not exist.
+	Account(ctx context.Context, acctID account.AccountID, lockTimeThresh time.Time) (acct *account.Account, bonds []*db.Bond, err error)
 
-	CreateAccountWithBond(acct *account.Account, bond *db.Bond) error
-	AddBond(acct account.AccountID, bond *db.Bond) error
-	DeleteBond(assetID uint32, coinID []byte) error
+	// ApplyBondPostedEvent applies the auth bond_posted event in one database
+	// transaction.
+	ApplyBondPostedEvent(context.Context, *db.EventLogMeta, *meshevents.BondPostedEvent, int, int, int) (*db.BondPostedResult, error)
+	ApplyPrepaidBondsCreatedEvent(context.Context, *db.EventLogMeta, *meshevents.PrepaidBondsCreatedEvent) (*db.EventLogEntry, error)
+
 	FetchPrepaidBond(bondCoinID []byte) (strength uint32, lockTime int64, err error)
-	DeletePrepaidBond(coinID []byte) error
-	StorePrepaidBonds(coinIDs [][]byte, strength uint32, lockTime int64) error
 
 	AccountInfo(aid account.AccountID) (*db.Account, error)
 
 	UserOrderStatuses(aid account.AccountID, base, quote uint32, oids []order.OrderID) ([]*db.OrderStatus, error)
 	ActiveUserOrderStatuses(aid account.AccountID) ([]*db.OrderStatus, error)
-	CompletedUserOrders(aid account.AccountID, N int) (oids []order.OrderID, compTimes []int64, err error)
-	ExecutedCancelsForUser(aid account.AccountID, N int) ([]*db.CancelRecord, error)
 	CompletedAndAtFaultMatchStats(aid account.AccountID, lastN int) ([]*db.MatchOutcome, error)
 	UserMatchFails(aid account.AccountID, lastN int) ([]*db.MatchFail, error)
-	ForgiveMatchFail(mid order.MatchID) (bool, error)
-	PreimageStats(user account.AccountID, lastN int) ([]*db.PreimageResult, error)
 	AllActiveUserMatches(aid account.AccountID) ([]*db.MatchData, error)
 	MatchStatuses(aid account.AccountID, base, quote uint32, matchIDs []order.MatchID) ([]*db.MatchStatus, error)
 
@@ -120,67 +121,19 @@ type respHandler struct {
 	expire *time.Timer
 }
 
+// proxyResponseKey identifies a pending proxied request by account and request ID.
+type proxyResponseKey struct {
+	user account.AccountID
+	id   uint64
+}
+
 // clientInfo represents a DEX client, including account information and last
 // known comms.Link.
 type clientInfo struct {
-	acct *account.Account
-	conn comms.Link
-
-	mtx          sync.Mutex
+	acct         *account.Account
+	conn         comms.Link
 	respHandlers map[uint64]*respHandler
-	tier         int64
-	score        int32
-	bonds        []*db.Bond // only confirmed and active, not pending
-}
-
-// not thread-safe
-func (client *clientInfo) bondTier() (bondTier int64) {
-	for _, bi := range client.bonds {
-		bondTier += int64(bi.Strength)
-	}
-	return
-}
-
-// not thread-safe
-func (client *clientInfo) addBond(bond *db.Bond) (bondTier int64) {
-	var dup bool
-	for _, bi := range client.bonds {
-		bondTier += int64(bi.Strength)
-		dup = dup || (bi.AssetID == bond.AssetID && bytes.Equal(bi.CoinID, bond.CoinID))
-	}
-
-	if !dup { // idempotent
-		client.bonds = append(client.bonds, bond)
-		bondTier += int64(bond.Strength)
-	}
-
-	return
-}
-
-// not thread-safe
-func (client *clientInfo) pruneBonds(lockTimeThresh int64) (pruned []*db.Bond, bondTier int64) {
-	if len(client.bonds) == 0 {
-		return
-	}
-
-	var n int
-	for _, bond := range client.bonds {
-		if bond.LockTime >= lockTimeThresh { // not expired
-			if len(pruned) > 0 /* n < i */ { // a prior bond was removed, must move this element up in the slice
-				client.bonds[n] = bond
-			}
-			n++
-			bondTier += int64(bond.Strength)
-			continue
-		}
-		log.Infof("Expiring user %v bond %v (%s)", client.acct.ID,
-			coinIDString(bond.AssetID, bond.CoinID), dex.BipIDSymbol(bond.AssetID))
-		pruned = append(pruned, bond)
-		// n not incremented, next live bond shifts up
-	}
-	client.bonds = client.bonds[:n] // no-op if none expired
-
-	return
+	mtx          sync.Mutex
 }
 
 func (client *clientInfo) rmHandler(id uint64) bool {
@@ -232,20 +185,17 @@ func (client *clientInfo) respHandler(id uint64) *respHandler {
 	return handler
 }
 
-// AuthManager handles authentication-related tasks, including validating client
-// signatures, maintaining association between accounts and `comms.Link`s, and
-// signing messages with the DEX's private key. AuthManager manages requests to
-// the 'connect' route.
+// AuthManager authenticates clients, manages their sessions, and processes
+// bond and reputation requests. It signs outgoing messages and routes
+// communication to authenticated clients.
 type AuthManager struct {
-	wg             sync.WaitGroup
-	ctx            context.Context
-	storage        Storage
-	signer         Signer
-	parseBondTx    BondTxParser
-	checkBond      BondCoinChecker // fidelity bond amount, lockTime, acct, and confs
-	miaUserTimeout time.Duration
-	unbookFun      func(account.AccountID)
-	route          func(route string, handler comms.MsgHandler)
+	wg          sync.WaitGroup
+	ctx         context.Context
+	storage     Storage
+	signer      Signer
+	parseBondTx BondTxParser
+	checkBond   BondCoinChecker // fidelity bond amount, lockTime, acct, and confs
+	route       func(route string, handler comms.MsgHandler)
 
 	bondExpiry time.Duration // a bond is expired when time.Until(lockTime) < bondExpiry
 	bondAssets map[uint32]*msgjson.BondAsset
@@ -254,25 +204,28 @@ type AuthManager struct {
 	penaltyThreshold int32
 	cancelThresh     float64
 
+	// rep caches account scores and bonds, including expired bonds.
+	rep *repCache
+
 	// latencyQ is a queue for fee coin waiters to deal with latency.
 	latencyQ *wait.TickerQueue
 
 	bondWaiterMtx sync.Mutex
 	bondWaiterIdx map[string]struct{}
 
-	connMtx   sync.RWMutex
-	users     map[account.AccountID]*clientInfo
-	conns     map[uint64]*clientInfo
-	unbookers map[account.AccountID]*time.Timer
+	connMtx sync.RWMutex
+	users   map[account.AccountID]*clientInfo
+	conns   map[uint64]*clientInfo
 
-	violationMtx   sync.Mutex
-	matchOutcomes  map[account.AccountID]*latestOutcomes[*db.MatchResult]
-	preimgOutcomes map[account.AccountID]*latestOutcomes[*db.PreimageOutcome]
-	orderOutcomes  map[account.AccountID]*latestOutcomes[*db.OrderOutcome] // cancel/complete, was in clientInfo.recentOrders
+	// repNotifyMtx serializes reputation updates sent to clients.
+	repNotifyMtx sync.Mutex
 
 	txDataSources map[uint32]TxDataSource
 
-	prepaidBondMtx sync.Mutex
+	mesh MeshService
+
+	proxyRespMtx      sync.Mutex
+	proxyRespHandlers map[proxyResponseKey]*respHandler
 
 	connectCallbackMtx sync.RWMutex
 	connectCallbacks   []func(account.AccountID)
@@ -334,8 +287,8 @@ type Config struct {
 
 	Route func(route string, handler comms.MsgHandler)
 
-	// BondExpiry is the time in seconds left until a bond's LockTime is reached
-	// that defines when a bond is considered expired.
+	// BondExpiry is the minimum remaining lock time, in seconds, for a bond
+	// to contribute to the account's tier.
 	BondExpiry uint64
 	// BondAssets indicates the supported bond assets and parameters.
 	BondAssets map[string]*msgjson.BondAsset
@@ -349,17 +302,11 @@ type Config struct {
 	// TxDataSources are sources of tx data for a coin ID.
 	TxDataSources map[uint32]TxDataSource
 
-	// UserUnbooker is a function for unbooking all of a user's orders.
-	UserUnbooker func(account.AccountID)
-	// MiaUserTimeout is how long after a user disconnects until UserUnbooker is
-	// called for that user.
-	MiaUserTimeout time.Duration
-
 	CancelThreshold float64
 	FreeCancels     bool
 
-	// PenaltyThreshold defines the score deficit at which a user's bond is
-	// revoked.
+	// PenaltyThreshold is the number of negative score points per reputation
+	// penalty. Each penalty reduces the account's effective tier by one.
 	PenaltyThreshold uint32
 }
 
@@ -381,28 +328,33 @@ func NewAuthManager(cfg *Config) *AuthManager {
 	}
 
 	auth := &AuthManager{
-		storage:          cfg.Storage,
-		signer:           cfg.Signer,
-		bondAssets:       bondAssets,
-		bondExpiry:       time.Duration(cfg.BondExpiry) * time.Second,
-		parseBondTx:      cfg.BondTxParser, // e.g. dcr's ParseBondTx
-		checkBond:        cfg.BondChecker,  // e.g. dcr's BondCoin
-		miaUserTimeout:   cfg.MiaUserTimeout,
-		unbookFun:        cfg.UserUnbooker,
-		route:            cfg.Route,
-		freeCancels:      cfg.FreeCancels,
-		penaltyThreshold: penaltyThreshold,
-		cancelThresh:     cfg.CancelThreshold,
-		latencyQ:         wait.NewTickerQueue(recheckInterval),
-		users:            make(map[account.AccountID]*clientInfo),
-		conns:            make(map[uint64]*clientInfo),
-		unbookers:        make(map[account.AccountID]*time.Timer),
-		bondWaiterIdx:    make(map[string]struct{}),
-		matchOutcomes:    make(map[account.AccountID]*latestOutcomes[*db.MatchResult]),
-		preimgOutcomes:   make(map[account.AccountID]*latestOutcomes[*db.PreimageOutcome]),
-		orderOutcomes:    make(map[account.AccountID]*latestOutcomes[*db.OrderOutcome]),
-		txDataSources:    cfg.TxDataSources,
+		storage:           cfg.Storage,
+		signer:            cfg.Signer,
+		bondAssets:        bondAssets,
+		bondExpiry:        time.Duration(cfg.BondExpiry) * time.Second,
+		parseBondTx:       cfg.BondTxParser, // e.g. dcr's ParseBondTx
+		checkBond:         cfg.BondChecker,  // e.g. dcr's BondCoin
+		route:             cfg.Route,
+		freeCancels:       cfg.FreeCancels,
+		penaltyThreshold:  penaltyThreshold,
+		cancelThresh:      cfg.CancelThreshold,
+		rep:               newRepCache(repCacheCapacity, repCacheMaxAge),
+		latencyQ:          wait.NewTickerQueue(recheckInterval),
+		users:             make(map[account.AccountID]*clientInfo),
+		conns:             make(map[uint64]*clientInfo),
+		bondWaiterIdx:     make(map[string]struct{}),
+		txDataSources:     cfg.TxDataSources,
+		proxyRespHandlers: make(map[proxyResponseKey]*respHandler),
 	}
+
+	cfg.Storage.SetReputationInputsListener(func(users ...account.AccountID) {
+		if len(users) == 0 {
+			return
+		}
+		auth.rep.invalidate(users...)
+		notifyUsers := append([]account.AccountID(nil), users...)
+		go auth.notifyReputationInputsChanged(notifyUsers)
+	})
 
 	// Unauthenticated
 	cfg.Route(msgjson.ConnectRoute, auth.handleConnect)
@@ -413,26 +365,10 @@ func NewAuthManager(cfg *Config) *AuthManager {
 	return auth
 }
 
-func (auth *AuthManager) unbookUserOrders(user account.AccountID) {
-	log.Tracef("Unbooking all orders for user %v", user)
-	auth.unbookFun(user)
-	auth.connMtx.Lock()
-	delete(auth.unbookers, user)
-	auth.connMtx.Unlock()
-}
-
-// ExpectUsers specifies which users are expected to connect within a certain
-// time or have their orders unbooked (revoked). This should be run prior to
-// starting the AuthManager. This is not part of the constructor since it is
-// convenient to obtain this information from the Market's Books, and Market
-// requires the AuthManager. The same information could be pulled from storage,
-// but the Market is the authoritative book. The AuthManager should be started
-// via Run immediately after calling ExpectUsers so the users can connect.
-func (auth *AuthManager) ExpectUsers(users map[account.AccountID]struct{}, within time.Duration) {
-	log.Debugf("Expecting %d users with booked orders to connect within %v", len(users), within)
-	for user := range users {
-		auth.unbookers[user] = time.AfterFunc(within, func() { auth.unbookUserOrders(user) })
-	}
+// SetMeshService configures the mesh service. It must be set before the comms
+// routes serve traffic.
+func (auth *AuthManager) SetMeshService(svc MeshService) {
+	auth.mesh = svc
 }
 
 // GraceLimit returns the number of initial orders allowed for a new user before
@@ -442,81 +378,11 @@ func (auth *AuthManager) GraceLimit() int {
 	return int(math.Round(1e8*auth.cancelThresh/(1-auth.cancelThresh))) / 1e8
 }
 
-// RecordCancel records a user's executed cancel order, including the canceled
-// order ID, and the time when the cancel was executed.
+// These callbacks are retained until market and swap record reputation through mesh events.
 func (auth *AuthManager) RecordCancel(user account.AccountID, oid, target order.OrderID, epochGap int32, t time.Time) {
-	score := auth.recordOrderDone(user, oid, &target, epochGap, t.UnixMilli())
-
-	rep, tierChanged, scoreChanged := auth.computeUserReputation(user, score)
-	effectiveTier := rep.EffectiveTier()
-	log.Debugf("RecordCancel: user %v strikes %d, bond tier %v => trading tier %v",
-		user, score, rep.BondedTier, effectiveTier)
-	// If their tier sinks below 1, unbook their orders and send a note.
-	if tierChanged && effectiveTier < 1 {
-		details := fmt.Sprintf("excessive cancellation rate, new tier = %d", effectiveTier)
-		auth.Penalize(user, account.CancellationRate, details)
-	}
-	if tierChanged {
-		go auth.sendTierChanged(user, rep, "excessive, cancellation rate")
-	} else if scoreChanged {
-		go auth.sendScoreChanged(user, rep)
-	}
-
 }
 
-// RecordCompletedOrder records a user's completed order, where completed means
-// a swap involving the order was successfully completed and the order is no
-// longer on the books if it ever was.
 func (auth *AuthManager) RecordCompletedOrder(user account.AccountID, oid order.OrderID, t time.Time) {
-	score := auth.recordOrderDone(user, oid, nil, db.EpochGapNA, t.UnixMilli())
-	rep, tierChanged, scoreChanged := auth.computeUserReputation(user, score) // may raise tier
-	if tierChanged {
-		log.Tracef("RecordCompletedOrder: tier changed for user %v strikes %d, bond tier %v => trading tier %v",
-			user, score, rep.BondedTier, rep.EffectiveTier())
-		go auth.sendTierChanged(user, rep, "successful order completion")
-	} else if scoreChanged {
-		go auth.sendScoreChanged(user, rep)
-	}
-}
-
-// recordOrderDone records that an order has finished processing. This can be a
-// cancel order, which matched and unbooked another order, or a trade order that
-// completed the swap negotiation. Note that in the case of a cancel, oid refers
-// to the ID of the cancel order itself, while target is non-nil for cancel
-// orders. The user's new score is returned, which can be used to compute the
-// user's tier with computeUserTier.
-func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.OrderID, target *order.OrderID, epochGap int32, tMS int64) (score int32) {
-	canceled := target != nil && epochGap >= 0 && epochGap < freeCancelThreshold
-	o, err := auth.storage.AddOrderOutcome(auth.ctx, user, oid, canceled)
-	if err != nil {
-		log.Errorf("Error storing order outcome for order %s, user %s: %v", oid, user, err)
-		return
-	}
-	auth.violationMtx.Lock()
-	if orderOutcomes, found := auth.orderOutcomes[user]; found {
-		if popped := orderOutcomes.add(o); popped != 0 {
-			if err := auth.storage.PruneOutcomes(auth.ctx, user, db.OutcomeClassOrder, popped); err != nil {
-				log.Errorf("Error pruning order outcomes for user %s: %v", user, err)
-			}
-		}
-		score = auth.userScore(user)
-		auth.violationMtx.Unlock()
-		log.Debugf("Recorded order %v that has finished processing: user=%v, time=%v, target=%v",
-			oid, user, tMS, target)
-		return
-	}
-	auth.violationMtx.Unlock()
-
-	// The user is currently not connected and authenticated. When the user logs
-	// back in, their history will be reloaded (loadUserScore) and their tier
-	// recomputed, but compute their score now from DB for the caller.
-	score, err = auth.loadUserScore(user)
-	if err != nil {
-		log.Errorf("Failed to load order and match outcomes for user %v: %v", user, err)
-		return 0
-	}
-
-	return
 }
 
 // Connect runs the AuthManager until the context is canceled. Satisfies the
@@ -526,36 +392,26 @@ func (auth *AuthManager) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	auth.wg.Add(1)
 	go func() {
 		defer auth.wg.Done()
-		t := time.NewTicker(20 * time.Second)
-		defer t.Stop()
-
-		for {
-			select {
-			case <-t.C:
-				auth.checkBonds()
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-
-	auth.wg.Add(1)
-	go func() {
-		defer auth.wg.Done()
 		auth.latencyQ.Run(ctx)
 	}()
 
 	auth.wg.Add(1)
 	go func() {
 		defer auth.wg.Done()
-		<-ctx.Done()
-		auth.connMtx.Lock()
-		defer auth.connMtx.Unlock()
-		for user, ub := range auth.unbookers {
-			ub.Stop()
-			delete(auth.unbookers, user)
+		ticker := time.NewTicker(30 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				hits, misses, invalidations, evictions := auth.rep.stats()
+				log.Debugf("Reputation cache: %d hits, %d misses, %d invalidations, %d evictions",
+					hits, misses, invalidations, evictions)
+			case <-ctx.Done():
+				return
+			}
 		}
 	}()
+
 	// TODO: wait for running comms route handlers and other DB writers.
 	return &auth.wg, nil
 }
@@ -570,9 +426,7 @@ func (auth *AuthManager) OnConnect(f func(account.AccountID)) {
 	auth.connectCallbackMtx.Unlock()
 }
 
-// Route wraps the comms.Route function, storing the response handler with the
-// associated clientInfo, and sending the message on the current comms.Link for
-// the client.
+// Route registers a message handler that requires an authenticated client.
 func (auth *AuthManager) Route(route string, handler func(account.AccountID, *msgjson.Message) *msgjson.Error) {
 	auth.route(route, func(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 		client := auth.conn(conn)
@@ -615,6 +469,29 @@ func (auth *AuthManager) Auth(user account.AccountID, msg, sig []byte) error {
 	return checkSigS256(msg, sig, client.acct.PubKey)
 }
 
+// VerifyUserSig checks a signature with the user's public key. It uses the
+// connected client's key when available, or loads it from the database.
+func (auth *AuthManager) VerifyUserSig(user account.AccountID, msg, sig []byte) error {
+	client := auth.user(user)
+	if client != nil {
+		return checkSigS256(msg, sig, client.acct.PubKey)
+	}
+
+	acctInfo, err := auth.storage.AccountInfo(user)
+	if err != nil {
+		return err
+	}
+	if acctInfo == nil {
+		return fmt.Errorf("account %s not found", user)
+	}
+
+	pubKey, err := secp256k1.ParsePubKey(acctInfo.Pubkey)
+	if err != nil {
+		return fmt.Errorf("error decoding secp256k1 public key: %w", err)
+	}
+	return checkSigS256(msg, sig, pubKey)
+}
+
 // SignMsg signs the message with the DEX private key, returning the DER encoded
 // signature. SHA256 is used to hash the message before signing it.
 func (auth *AuthManager) SignMsg(msg []byte) []byte {
@@ -632,84 +509,258 @@ func (auth *AuthManager) Sign(signables ...msgjson.Signable) {
 
 // Response and notification (non-request) messages
 
-// Send sends the non-Request-type msgjson.Message to the client identified by
-// the specified account ID. The message is sent asynchronously, so an error is
-// only generated if the specified user is not connected and authorized, if the
-// message fails marshalling, or if the link is in a failing state. See
-// dex/ws.(*WSLink).Send for more information.
+// Send sends a response or notification to the user on this node or the peer.
+// Local sends are queued; proxied sends wait for the peer's relay result.
+// It returns ErrUserNotConnected if the user is absent or no peer can relay.
 func (auth *AuthManager) Send(user account.AccountID, msg *msgjson.Message) error {
-	client := auth.user(user)
-	if client == nil {
+	if client := auth.user(user); client != nil {
+		return auth.send(client, msg)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultRequestTimeout)
+	defer cancel()
+	err := auth.mesh.ProxyClientMessage(ctx, &mesh.ClientProxyMessage{
+		User:            user,
+		Msg:             msg,
+		DeliverToClient: true,
+	})
+	if errors.Is(err, mesh.ErrClientProxyUnavailable) || errors.Is(err, mesh.ErrClientNotConnected) {
 		log.Debugf("Send requested for disconnected user %v", user)
 		return dex.NewError(ErrUserNotConnected, user.String())
 	}
+	return err
+}
 
+// Notify is identical to Send and remains only to keep existing callers compiling.
+// Remove it once all call sites use Send.
+func (auth *AuthManager) Notify(acctID account.AccountID, msg *msgjson.Message) error {
+	return auth.Send(acctID, msg)
+}
+
+// SendIfLocal sends a message to a locally connected user.
+// It returns nil if the user is not connected locally.
+func (auth *AuthManager) SendIfLocal(user account.AccountID, msg *msgjson.Message) error {
+	client := auth.user(user)
+	if client == nil {
+		return nil
+	}
+	return auth.send(client, msg)
+}
+
+func (auth *AuthManager) send(client *clientInfo, msg *msgjson.Message) error {
 	err := client.conn.Send(msg)
 	if err != nil {
 		log.Debugf("error sending on link: %v", err)
 		// Remove client assuming connection is broken, requiring reconnect.
 		auth.removeClient(client)
-		// client.conn.Disconnect() // async removal
 	}
 	return err
-}
-
-// Notify sends a message to a client. The message should be a notification.
-// See msgjson.NewNotification.
-func (auth *AuthManager) Notify(acctID account.AccountID, msg *msgjson.Message) {
-	if err := auth.Send(acctID, msg); err != nil {
-		log.Infof("Failed to send notification to user %s: %v", acctID, err)
-	}
 }
 
 // Requests
 
-// DefaultRequestTimeout is the default timeout for requests to wait for
-// responses from connected users after the request is successfully sent.
+// DefaultRequestTimeout is the default wait for a client response.
 const DefaultRequestTimeout = 30 * time.Second
 
-func (auth *AuthManager) request(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message),
-	expireTimeout time.Duration, expire func()) error {
-
-	client := auth.user(user)
-	if client == nil {
-		log.Debugf("Send requested for disconnected user %v", user)
-		return dex.NewError(ErrUserNotConnected, user.String())
-	}
-	// log.Tracef("Registering '%s' request ID %d for user %v (auth clientInfo)", msg.Route, msg.ID, user)
-	client.logReq(msg.ID, f, expireTimeout, expire)
-	// auth.handleResponse checks clientInfo map and the found client's request
-	// handler map, where the expire function should be found for msg.ID.
-	err := client.conn.Request(msg, auth.handleResponse, expireTimeout, func() {})
-	if err != nil {
-		log.Debugf("error sending request ID %d: %v", msg.ID, err)
-		// Remove the responseHandler registered by logReq and stop the expire
-		// timer so that it does not eventually fire and run the expire func.
-		// The caller receives a non-nil error to deal with it.
-		client.respHandler(msg.ID) // drop the removed handler
-		// Remove client assuming connection is broken, requiring reconnect.
-		auth.removeClient(client)
-		// client.conn.Disconnect() // async removal
-	}
-	return err
-}
-
-// Request sends the Request-type msgjson.Message to the client identified by
-// the specified account ID. The user must respond within DefaultRequestTimeout
-// of the request. Late responses are not handled.
+// Request sends a request using DefaultRequestTimeout. See RequestWithTimeout
+// for delivery, callback, and error behavior.
 func (auth *AuthManager) Request(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message)) error {
 	return auth.request(user, msg, f, DefaultRequestTimeout, func() {})
 }
 
-// RequestWithTimeout sends the Request-type msgjson.Message to the client
-// identified by the specified account ID. If the user responds within
-// expireTime of the request, the response handler is called, otherwise the
-// expire function is called. If the response handler is called, it is
-// guaranteed that the request Message.ID is equal to the response Message.ID
-// (see handleResponse).
+// RequestWithTimeout sends a request locally or through the peer. The response
+// handler receives the original request ID and a nil link for proxied responses.
+// Unanswered requests call expire after expireTimeout; nonpositive timeouts use
+// DefaultRequestTimeout. Local send failures return an error. Proxy failures
+// call expire asynchronously. Late responses are ignored.
 func (auth *AuthManager) RequestWithTimeout(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message),
 	expireTimeout time.Duration, expire func()) error {
 	return auth.request(user, msg, f, expireTimeout, expire)
+}
+
+// RequestIfLocal sends a request to a locally connected user.
+// It returns nil without sending if the user is not connected locally.
+func (auth *AuthManager) RequestIfLocal(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message)) error {
+	client := auth.user(user)
+	if client == nil {
+		return nil
+	}
+	return auth.requestLocal(client, msg, f, DefaultRequestTimeout, func() {})
+}
+
+func (auth *AuthManager) request(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message),
+	expireTimeout time.Duration, expire func()) error {
+	if expireTimeout <= 0 {
+		expireTimeout = DefaultRequestTimeout
+	}
+	if client := auth.user(user); client != nil {
+		return auth.requestLocal(client, msg, f, expireTimeout, expire)
+	}
+	return auth.requestPeer(user, msg, f, expireTimeout, expire)
+}
+
+func (auth *AuthManager) requestLocal(client *clientInfo, msg *msgjson.Message, f func(comms.Link, *msgjson.Message),
+	expireTimeout time.Duration, expire func()) error {
+
+	client.logReq(msg.ID, f, expireTimeout, expire)
+	// client.logReq handles expiration, so the connection needs no expiration callback.
+	err := client.conn.Request(msg, auth.handleResponse, expireTimeout, func() {})
+	if err != nil {
+		log.Debugf("error sending request ID %d: %v", msg.ID, err)
+		// Cancel expiration because the caller handles the send error.
+		client.respHandler(msg.ID)
+		// Remove client assuming connection is broken, requiring reconnect.
+		auth.removeClient(client)
+	}
+	return err
+}
+
+// requestPeer registers the response deadline before relaying the request.
+// Relay failures call expire asynchronously, just like an unanswered request.
+func (auth *AuthManager) requestPeer(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message),
+	expireTimeout time.Duration, expire func()) error {
+	timeoutMS := uint64(expireTimeout / time.Millisecond)
+
+	handler := auth.registerProxyRespHandler(user, msg.ID, f, expireTimeout, expire)
+	meshSvc := auth.mesh
+	go func() {
+		err := meshSvc.ProxyClientMessage(context.Background(), &mesh.ClientProxyMessage{
+			User:      user,
+			Msg:       msg,
+			TimeoutMS: timeoutMS,
+		})
+		if err != nil {
+			log.Debugf("proxied request %q for user %v failed: %v", msg.Route, user, err)
+			if auth.removeProxyRespHandler(proxyResponseKey{user: user, id: msg.ID}, handler) {
+				expire()
+			}
+		}
+	}()
+
+	return nil
+}
+
+// HandleProxiedClientMessage delivers a message to a local client or
+// dispatches a client response to its pending request handler.
+func (auth *AuthManager) HandleProxiedClientMessage(_ context.Context, req *mesh.ClientProxyMessage) error {
+	if req == nil {
+		return fmt.Errorf("nil proxied client message")
+	}
+	if req.Msg == nil {
+		return fmt.Errorf("nil proxied client message payload")
+	}
+
+	switch req.Msg.Type {
+	case msgjson.Request:
+		return auth.proxyClientRequest(req)
+	case msgjson.Response:
+		// Responses either go to a local client or complete a request
+		// this node sent through a peer.
+		if req.DeliverToClient {
+			return auth.sendProxiedClientMessage(req.User, req.Msg)
+		}
+		if handler := auth.takeProxyRespHandler(req.User, req.Msg.ID); handler != nil {
+			go handler.f(nil, req.Msg)
+			return nil
+		}
+		log.Debugf("Dropping late proxied client response %d for user %v", req.Msg.ID, req.User)
+		return nil
+	case msgjson.Notification:
+		return auth.sendProxiedClientMessage(req.User, req.Msg)
+	default:
+		return fmt.Errorf("unsupported proxied client message type %d", req.Msg.Type)
+	}
+}
+
+func (auth *AuthManager) proxyClientRequest(req *mesh.ClientProxyMessage) error {
+	client := auth.user(req.User)
+	if client == nil {
+		return mesh.ErrClientNotConnected
+	}
+	timeout := time.Duration(req.TimeoutMS) * time.Millisecond
+	if timeout <= 0 {
+		timeout = DefaultRequestTimeout
+	}
+
+	peerRequestID := req.Msg.ID
+	clientRequest := *req.Msg
+	// Avoid collisions with requests generated by this node.
+	clientRequest.ID = comms.NextID()
+
+	handleResponse := func(_ comms.Link, resp *msgjson.Message) {
+		if resp == nil {
+			log.Debugf("proxied client response %d for user %v was nil", peerRequestID, req.User)
+			return
+		}
+		peerResponse := *resp
+		peerResponse.ID = peerRequestID
+		meshSvc := auth.mesh
+		go func() {
+			err := meshSvc.ProxyClientMessage(context.Background(), &mesh.ClientProxyMessage{
+				User: req.User,
+				Msg:  &peerResponse,
+			})
+			if err != nil {
+				log.Debugf("proxied client response %d for user %v failed: %v", peerRequestID, req.User, err)
+			}
+		}()
+	}
+	return auth.requestLocal(client, &clientRequest, handleResponse, timeout, func() {
+		log.Debugf("proxied client request %q for user %v timed out locally", req.Msg.Route, req.User)
+	})
+}
+
+func (auth *AuthManager) sendProxiedClientMessage(user account.AccountID, msg *msgjson.Message) error {
+	client := auth.user(user)
+	if client == nil {
+		log.Debugf("Proxied send requested for disconnected user %v", user)
+		return mesh.ErrClientNotConnected
+	}
+	return auth.send(client, msg)
+}
+
+func (auth *AuthManager) registerProxyRespHandler(user account.AccountID, id uint64, f func(comms.Link, *msgjson.Message), expireTimeout time.Duration, expire func()) *respHandler {
+	key := proxyResponseKey{user: user, id: id}
+	handler := &respHandler{f: f}
+	auth.proxyRespMtx.Lock()
+	defer auth.proxyRespMtx.Unlock()
+	if previous := auth.proxyRespHandlers[key]; previous != nil {
+		previous.expire.Stop()
+	}
+	handler.expire = time.AfterFunc(expireTimeout, func() {
+		// A replacement may have registered after this timer started firing.
+		if auth.removeProxyRespHandler(key, handler) {
+			expire()
+		}
+	})
+	auth.proxyRespHandlers[key] = handler
+	return handler
+}
+
+// takeProxyRespHandler removes the response handler and stops its timer.
+func (auth *AuthManager) takeProxyRespHandler(user account.AccountID, id uint64) *respHandler {
+	key := proxyResponseKey{user: user, id: id}
+	auth.proxyRespMtx.Lock()
+	defer auth.proxyRespMtx.Unlock()
+
+	handler := auth.proxyRespHandlers[key]
+	if handler == nil {
+		return nil
+	}
+	handler.expire.Stop()
+	delete(auth.proxyRespHandlers, key)
+	return handler
+}
+
+// removeProxyRespHandler removes key only if it still refers to handler.
+func (auth *AuthManager) removeProxyRespHandler(key proxyResponseKey, handler *respHandler) bool {
+	auth.proxyRespMtx.Lock()
+	defer auth.proxyRespMtx.Unlock()
+	if auth.proxyRespHandlers[key] != handler {
+		return false
+	}
+	handler.expire.Stop()
+	delete(auth.proxyRespHandlers, key)
+	return true
 }
 
 func (auth *AuthManager) integrateOutcomes(
@@ -744,49 +795,24 @@ func (auth *AuthManager) integrateOutcomes(
 	return
 }
 
-// userScore computes an authenticated user's score from their recent order and
-// match outcomes. They must have entries in the outcome maps. Use loadUserScore
-// to compute score from history in DB. This must be called with the
-// violationMtx locked.
-func (auth *AuthManager) userScore(user account.AccountID) (score int32) {
-	score, _, _ = auth.integrateOutcomes(auth.matchOutcomes[user], auth.preimgOutcomes[user], auth.orderOutcomes[user])
-	return score
-}
-
-// UserScore calculates the user's score, loading it from storage if necessary.
-func (auth *AuthManager) UserScore(user account.AccountID) (score int32, err error) {
-	auth.violationMtx.Lock()
-	if _, found := auth.matchOutcomes[user]; found {
-		score = auth.userScore(user)
-		auth.violationMtx.Unlock()
-		return
-	}
-	auth.violationMtx.Unlock()
-
-	// The user is currently not connected and authenticated. When the user logs
-	// back in, their history will be reloaded (loadUserScore) and their tier
-	// recomputed, but compute their score now from DB for the caller.
-	score, err = auth.loadUserScore(user)
-	if err != nil {
-		return 0, fmt.Errorf("failed to load order and match outcomes for user %v: %v", user, err)
-	}
-	return
-}
-
-// UserReputation calculates some quantities related to the user's reputation.
-// UserReputation satisfies market.AuthManager.
-func (auth *AuthManager) UserReputation(user account.AccountID) (tier int64, score, maxScore int32, err error) {
+// UserReputationAt returns the user's tier, score, and maximum score,
+// with bond expiry evaluated at asOf.
+func (auth *AuthManager) UserReputationAt(user account.AccountID, asOf time.Time) (tier int64, score, maxScore int32, err error) {
 	maxScore = ScoringMatchLimit
-	score, err = auth.UserScore(user)
+	data, err := auth.rep.get(auth.ctx, user, auth.loadUserRepData)
 	if err != nil {
 		return
 	}
-	r, _, _ := auth.computeUserReputation(user, score)
-	if r != nil {
-		return r.EffectiveTier(), r.Score, ScoringMatchLimit, nil
-
+	if !data.exists {
+		return 0, data.score, maxScore, nil
 	}
-	return
+	r := auth.reputationFromData(data, asOf.Add(auth.bondExpiry).Unix())
+	return r.EffectiveTier(), r.Score, maxScore, nil
+}
+
+// UserReputation returns the user's tier, score, and maximum score at the current time.
+func (auth *AuthManager) UserReputation(user account.AccountID) (tier int64, score, maxScore int32, err error) {
+	return auth.UserReputationAt(user, time.Now())
 }
 
 // userReputation computes the breakdown of a user's tier and score.
@@ -802,312 +828,206 @@ func (auth *AuthManager) userReputation(bondTier int64, score int32) *account.Re
 	}
 }
 
-// tier computes a user's tier from their conduct score and bond tier.
-func (auth *AuthManager) tier(bondTier int64, score int32) int64 {
-	return auth.userReputation(bondTier, score).EffectiveTier()
+// reputationFromData calculates reputation using bonds locked until at least
+// bondExpiryThreshold.
+func (auth *AuthManager) reputationFromData(data *repData, bondExpiryThreshold int64) *account.Reputation {
+	rep := auth.userReputation(data.bondTier(bondExpiryThreshold), data.score)
+	rep.BondExpiryThreshold = bondExpiryThreshold
+	return rep
 }
 
-// computeUserReputation computes the user's tier given the provided score
-// weighed against known active bonds. Note that bondTier is not a specific
-// asset, and is just for logging, and it may be removed or changed to a map by
-// asset ID. For online users, this will also indicate if the tier changed; this
-// will always return false for offline users.
-func (auth *AuthManager) computeUserReputation(user account.AccountID, score int32) (r *account.Reputation, tierChanged, scoreChanged bool) {
-	client := auth.user(user)
-	if client == nil {
-		// Offline. Load active bonds and legacyFeePaid flag from DB.
-		lockTimeThresh := time.Now().Add(auth.bondExpiry)
-		_, bonds := auth.storage.Account(user, lockTimeThresh)
-		var bondTier int64
-		for _, bond := range bonds {
-			bondTier += int64(bond.Strength)
-		}
-		return auth.userReputation(bondTier, score), false, false
+func (auth *AuthManager) loadUserReputation(ctx context.Context, user account.AccountID) (*account.Reputation, error) {
+	data, err := auth.rep.get(ctx, user, auth.loadUserRepData)
+	if err != nil {
+		return nil, err
+	}
+	if !data.exists {
+		return nil, nil
+	}
+	bondExpiryThreshold := time.Now().Add(auth.bondExpiry).Unix()
+	return auth.reputationFromData(data, bondExpiryThreshold), nil
+}
+
+func (auth *AuthManager) loadUserReputationWithTimeout(ctx context.Context, user account.AccountID) (*account.Reputation, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	readCtx, cancel := context.WithTimeout(ctx, reputationEventRefreshTimeout)
+	defer cancel()
+	return auth.loadUserReputation(readCtx, user)
+}
+
+// loadUserRepData loads a user's score and bonds.
+func (auth *AuthManager) loadUserRepData(ctx context.Context, user account.AccountID) (*repData, error) {
+	score, err := auth.loadUserScoreContext(ctx, user)
+	if err != nil {
+		return nil, err
 	}
 
-	client.mtx.Lock()
-	defer client.mtx.Unlock()
-	wasTier := client.tier
-	wasScore := client.score
-	bondTier := client.bondTier()
-	r = auth.userReputation(bondTier, score)
-	client.tier = r.EffectiveTier()
-	client.score = score
-	scoreChanged = wasScore != score
-	tierChanged = wasTier != client.tier
+	// TODO(mesh): Remove old expired bonds once we know they are no longer
+	// needed to replay events. All nodes must agree on when to remove them.
+	// Until then, the database, snapshots, and cached bond lists keep growing.
+	acct, bonds, err := auth.storage.Account(ctx, user, time.Time{})
+	if err != nil {
+		return nil, err
+	}
 
-	return
+	return newRepData(acct != nil, score, bonds), nil
 }
 
-// ComputeUserReputation computes the user's reputation from their active bonds and conduct
-// score. The DB is always consulted for computing the conduct score. Summing bond amounts
-// may access the DB if the user is not presently connected. Returns nil for an unknown user.
+// ComputeUserReputation computes the user's reputation from their active bonds
+// and conduct score. Returns nil for an unknown user, and also (with the
+// error only logged) when the reputation load fails; use AcctRepStatus to
+// distinguish the two.
 func (auth *AuthManager) ComputeUserReputation(user account.AccountID) *account.Reputation {
-	score, err := auth.loadUserScore(user)
+	rep, err := auth.loadUserReputation(auth.ctx, user)
 	if err != nil {
-		log.Errorf("failed to load user score: %v", err)
+		log.Errorf("failed to load user reputation: %v", err)
 		return nil
 	}
-	r, _, _ := auth.computeUserReputation(user, score)
-	return r
+	return rep
 }
 
-func (auth *AuthManager) registerMatchOutcome(user account.AccountID, outcome Outcome, mmid db.MarketMatchID) (score int32) {
-	o, err := auth.storage.AddMatchOutcome(auth.ctx, user, mmid.MatchID, outcome)
-	if err != nil {
-		log.Errorf("Error storing match outcome %s for user %s: %w", user, mmid.MatchID, err)
-		return
-	}
-
-	auth.violationMtx.Lock()
-	if matchOutcomes, found := auth.matchOutcomes[user]; found {
-		if popped := matchOutcomes.add(o); popped != 0 {
-			if err := auth.storage.PruneOutcomes(auth.ctx, user, db.OutcomeClassMatch, popped); err != nil {
-				log.Errorf("Error pruning match outcomes for user %s: %v", user, err)
-			}
-		}
-
-		score = auth.userScore(user)
-		auth.violationMtx.Unlock()
-		return
-	}
-	auth.violationMtx.Unlock()
-
-	// The user is currently not connected and authenticated. When the user logs
-	// back in, their history will be reloaded (loadUserScore) and their tier
-	// recomputed, but compute their score now from DB for the caller.
-	score, err = auth.loadUserScore(user)
-	if err != nil {
-		log.Errorf("Failed to load order and match outcomes for user %v: %v", user, err)
-		return 0
-	}
-
+// AcctRepStatus reports local connectivity and reputation. Unlike AcctStatus,
+// a reputation load failure is returned as an error, not as tier 0. For an
+// unknown account, rep and err are both nil.
+func (auth *AuthManager) AcctRepStatus(user account.AccountID) (connected bool, rep *account.Reputation, err error) {
+	connected = auth.user(user) != nil
+	rep, err = auth.loadUserReputation(auth.ctx, user)
 	return
 }
 
-// SwapSuccess registers the successful completion of a swap by the given user.
-// TODO: provide lots instead of value, or convert to lots somehow. But, Swapper
-// has no clue about lot size, and neither does DB!
-func (auth *AuthManager) SwapSuccess(user account.AccountID, mmid db.MarketMatchID, value uint64, redeemTime time.Time) {
-	score := auth.registerMatchOutcome(user, db.OutcomeSwapSuccess, mmid)
-	rep, tierChanged, scoreChanged := auth.computeUserReputation(user, score) // may raise tier
-	effectiveTier := rep.EffectiveTier()
-	log.Debugf("Match success for user %v: strikes %d, bond tier %v => tier %v",
-		user, score, rep.BondedTier, effectiveTier)
-	if tierChanged {
-		log.Infof("SwapSuccess: tier change for user %v, strikes %d, bond tier %v => trading tier %v",
-			user, score, rep.BondedTier, effectiveTier)
-		go auth.sendTierChanged(user, rep, "successful swap completion")
-	} else if scoreChanged {
-		go auth.sendScoreChanged(user, rep)
-	}
-}
-
-// Inaction registers an inaction violation by the user at the given step. The
-// refTime is time to which the at-fault user's inaction deadline for the match
-// is referenced. e.g. For a swap that failed in TakerSwapCast, refTime would be
-// the maker's redeem time, which is recorded in the DB when the server
-// validates the maker's redemption and informs the taker, and is roughly when
-// the actor was first able to take the missed action.
-// TODO: provide lots instead of value, or convert to lots somehow. But, Swapper
-// has no clue about lot size, and neither does DB!
-func (auth *AuthManager) Inaction(user account.AccountID, outcome Outcome, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID) {
-	score := auth.registerMatchOutcome(user, outcome, mmid)
-
-	// Recompute tier.
-	rep, tierChanged, scoreChanged := auth.computeUserReputation(user, score)
-	effectiveTier := rep.EffectiveTier()
-	log.Infof("Match failure for user %v: %q (badness %v), strikes %d, bond tier %v => trading tier %v",
-		user, outcome, outcomeScores[outcome], score, rep.BondedTier, effectiveTier)
-	// If their tier sinks below 1, unbook their orders and send a note.
-	if tierChanged && effectiveTier < 1 {
-		details := fmt.Sprintf("swap %v failure (%v) for order %v, new tier = %d",
-			mmid.MatchID, outcome, oid, effectiveTier)
-		auth.Penalize(user, account.FailureToAct, details)
-	}
-	if tierChanged {
-		reason := fmt.Sprintf("swap failure for match %v order %v: %v", mmid.MatchID, oid, outcome)
-		go auth.sendTierChanged(user, rep, reason)
-	} else if scoreChanged {
-		go auth.sendScoreChanged(user, rep)
-	}
-}
-
-func (auth *AuthManager) registerPreimageOutcome(user account.AccountID, miss bool, oid order.OrderID, refTime time.Time) (score int32) {
-	o, err := auth.storage.AddPreimageOutcome(auth.ctx, user, oid, miss)
-	if err != nil {
-		log.Errorf("Error storing order outcome for order %s, user %s: %v", oid, user, err)
-		return
-	}
-	auth.violationMtx.Lock()
-	piOutcomes, found := auth.preimgOutcomes[user]
-	if found {
-
-		if popped := piOutcomes.add(o); popped != 0 {
-			if err := auth.storage.PruneOutcomes(auth.ctx, user, db.OutcomeClassPreimage, popped); err != nil {
-				log.Errorf("Error pruning preimage outcomes for user %s: %v", user, err)
-			}
-		}
-		score = auth.userScore(user)
-		auth.violationMtx.Unlock()
-		return
-	}
-	auth.violationMtx.Unlock()
-
-	// The user is currently not connected and authenticated. When the user logs
-	// back in, their history will be reloaded (loadUserScore) and their tier
-	// recomputed, but compute their score now from DB for the caller.
-	score, err = auth.loadUserScore(user)
-	if err != nil {
-		log.Errorf("Failed to load order and match outcomes for user %v: %v", user, err)
-		return 0
-	}
-
-	return
-}
-
-// PreimageSuccess registers an accepted preimage for the user.
 func (auth *AuthManager) PreimageSuccess(user account.AccountID, epochEnd time.Time, oid order.OrderID) {
-	score := auth.registerPreimageOutcome(user, false, oid, epochEnd)
-	auth.computeUserReputation(user, score) // may raise tier, but no action needed
 }
 
-// MissedPreimage registers a missed preimage violation by the user.
 func (auth *AuthManager) MissedPreimage(user account.AccountID, epochEnd time.Time, oid order.OrderID) {
-	score := auth.registerPreimageOutcome(user, true, oid, epochEnd)
-	if score < auth.penaltyThreshold {
-		return
-	}
-
-	// Recompute tier.
-	rep, tierChanged, scoreChanged := auth.computeUserReputation(user, score)
-	effectiveTier := rep.EffectiveTier()
-	log.Debugf("MissedPreimage: user %v strikes %d, bond tier %v => trading tier %v", user, score, rep.BondedTier, effectiveTier)
-	// If their tier sinks below 1, unbook their orders and send a note.
-	if tierChanged && effectiveTier < 1 {
-		details := fmt.Sprintf("preimage for order %v not provided upon request: new tier = %d", oid, effectiveTier)
-		auth.Penalize(user, account.PreimageReveal, details)
-	}
-	if tierChanged {
-		reason := fmt.Sprintf("preimage not provided upon request for order %v", oid)
-		go auth.sendTierChanged(user, rep, reason)
-	} else if scoreChanged {
-		go auth.sendScoreChanged(user, rep)
-	}
-}
-
-// Penalize unbooks all of their orders, and notifies them of this action while
-// citing the provided rule that corresponds to their most recent infraction.
-// This method is to be used when a user's tier drops below 1.
-// NOTE: There is now a 'tierchange' route for *any* tier change, but this
-// method still handles unbooking of the user's orders.
-func (auth *AuthManager) Penalize(user account.AccountID, lastRule account.Rule, extraDetails string) {
-	// Unbook all of the user's orders across all markets.
-	auth.unbookUserOrders(user)
-
-	log.Debugf("User %v account penalized. Last rule broken = %v. Detail: %s", user, lastRule, extraDetails)
-
-	// Notify user of penalty.
-	details := "Ordering has been suspended for this account. Post additional bond to offset violations."
-	details = fmt.Sprintf("%s\nLast Broken Rule Details: %s\n%s", details, lastRule.Description(), extraDetails)
-	penalty := &msgjson.Penalty{
-		Rule:    lastRule,
-		Time:    uint64(time.Now().UnixMilli()),
-		Details: details,
-	}
-	penaltyNote := &msgjson.PenaltyNote{
-		Penalty: penalty,
-	}
-	penaltyNote.Sig = auth.SignMsg(penaltyNote.Serialize())
-	note, err := msgjson.NewNotification(msgjson.PenaltyRoute, penaltyNote)
-	if err != nil {
-		log.Errorf("error creating penalty notification: %w", err)
-		return
-	}
-	auth.Notify(user, note)
 }
 
 // AcctStatus indicates if the user is presently connected and their tier.
 func (auth *AuthManager) AcctStatus(user account.AccountID) (connected bool, tier int64) {
-	client := auth.user(user)
-	if client == nil {
-		// Load user info from DB.
-		rep := auth.ComputeUserReputation(user)
-		if rep != nil {
-			tier = rep.EffectiveTier()
-		}
-		return
+	connected = auth.user(user) != nil
+	rep := auth.ComputeUserReputation(user)
+	if rep != nil {
+		tier = rep.EffectiveTier()
 	}
-	connected = true
-
-	client.mtx.Lock()
-	tier = client.tier
-	client.mtx.Unlock()
-
 	return
 }
 
-func (auth *AuthManager) reRepUser(user account.AccountID) (*account.Reputation, error) {
-	// Reload outcomes from DB. NOTE: This does not use loadUserScore because we
-	// also need to update the matchOutcomes map if the user is online.
-	pimgs, matches, ords, err := auth.loadUserOutcomes(user)
-	if err != nil {
-		return nil, err
-	}
-	auth.violationMtx.Lock()
-	_, online := auth.matchOutcomes[user]
-	if online {
-		auth.preimgOutcomes[user] = pimgs
-		auth.matchOutcomes[user] = matches
-		auth.orderOutcomes[user] = ords
-	}
-	auth.violationMtx.Unlock()
-
-	// Recompute the user's score.
-	score, _, _ := auth.integrateOutcomes(matches, pimgs, ords)
-
-	// Recompute tier.
-	rep, tierChanged, scoreChanged := auth.computeUserReputation(user, score)
-	if tierChanged {
-		go auth.sendTierChanged(user, rep, "user forgiven")
-	} else if scoreChanged {
-		go auth.sendScoreChanged(user, rep)
-	}
-	return rep, nil
-}
-
-// ForgiveMatchFail forgives a user for a specific match failure, potentially
-// allowing them to resume trading if their score becomes passing. NOTE: This
-// may become deprecated with mesh, unless matches may be forgiven in some
-// automatic network reconciliation process.
+// ForgiveMatchFail forgives a user's match failure. It reports whether the match
+// was forgiven and whether refreshed reputation confirms a positive effective
+// tier. If reputation cannot be determined, unbanned is false.
 func (auth *AuthManager) ForgiveMatchFail(user account.AccountID, mid order.MatchID) (forgiven, unbanned bool, err error) {
-	// Forgive the specific match failure in the DB.
-	forgiven, err = auth.storage.ForgiveMatchFail(mid)
+	result, err := auth.executeReputationForgivenessCommand(context.Background(), &meshevents.ReputationForgivenEvent{
+		AccountID: user,
+		Scope:     meshevents.ReputationForgivenessScopeMatch,
+		MatchID:   &mid,
+	})
 	if err != nil {
-		return
+		return false, false, err
 	}
-	rep, err := auth.reRepUser(user)
-	if err != nil {
-		return
-	}
-
-	unbanned = rep.EffectiveTier() > 0
-
-	return
+	return result.Forgiven, result.Unbanned, nil
 }
 
-// CreatePrepaidBonds generates pre-paid bonds.
+// CreatePrepaidBonds creates and stores n prepaid bond tokens with the given
+// strength and lifetime in seconds, and returns their coin IDs.
 func (auth *AuthManager) CreatePrepaidBonds(n int, strength uint32, durSecs int64) ([][]byte, error) {
-	coinIDs := make([][]byte, n)
-	const prepaidBondIDLength = 16
-	for i := 0; i < n; i++ {
-		coinIDs[i] = encode.RandomBytes(prepaidBondIDLength)
+	if n < 0 {
+		return nil, fmt.Errorf("pre-paid bond count cannot be negative")
 	}
-	lockTime := time.Now().Add(auth.bondExpiry).Add(time.Duration(durSecs) * time.Second)
-	if err := auth.storage.StorePrepaidBonds(coinIDs, strength, lockTime.Unix()); err != nil {
+	if n == 0 {
+		return [][]byte{}, nil
+	}
+	if auth.mesh == nil {
+		return nil, fmt.Errorf("mesh service not configured")
+	}
+
+	reqMsg, err := msgjson.NewRequest(comms.NextID(), commandKindCreatePrepaidBonds, &createPrepaidBondsRequest{
+		Count:        n,
+		Strength:     strength,
+		DurationSecs: durSecs,
+	})
+	if err != nil {
 		return nil, err
 	}
-	return coinIDs, nil
+
+	responses := make(chan *msgjson.Message, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), txWaitExpiration)
+	defer cancel()
+
+	if rpcErr := auth.mesh.ExecuteCommand(ctx, mesh.CommandRequest{
+		Kind: commandKindCreatePrepaidBonds,
+		Msg:  reqMsg,
+		Respond: func(resp *msgjson.Message) error {
+			select {
+			case responses <- resp:
+			default:
+			}
+			return nil
+		},
+	}); rpcErr != nil {
+		return nil, rpcErr
+	}
+
+	select {
+	case resp := <-responses:
+		var result createPrepaidBondsResult
+		if err := resp.UnmarshalResult(&result); err != nil {
+			return nil, err
+		}
+		return result.CoinIDs, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+type createPrepaidBondsRequest struct {
+	Count        int    `json:"n"`
+	Strength     uint32 `json:"strength"`
+	DurationSecs int64  `json:"durSecs"`
+}
+
+type createPrepaidBondsResult struct {
+	CoinIDs [][]byte `json:"coinIDs"`
+}
+
+func (auth *AuthManager) executeCreatePrepaidBonds(cmdCtx *mesh.CommandContext) *msgjson.Error {
+	var req createPrepaidBondsRequest
+	if err := cmdCtx.Request.Msg.Unmarshal(&req); err != nil {
+		return msgjson.NewError(msgjson.RPCParseError, "error parsing create prepaid bonds request: %v", err)
+	}
+	if req.Count < 0 {
+		return msgjson.NewError(msgjson.RPCArgumentsError, "pre-paid bond count cannot be negative")
+	}
+	if req.Count == 0 {
+		if err := cmdCtx.Completion.Complete(cmdCtx.Context, &createPrepaidBondsResult{CoinIDs: [][]byte{}}); err != nil {
+			return msgjson.NewError(msgjson.RPCInternalError, "failed to complete pre-paid bond creation")
+		}
+		return nil
+	}
+
+	lockTime := time.Now().Add(auth.bondExpiry).Add(time.Duration(req.DurationSecs) * time.Second).Unix()
+	coinIDs := make([][]byte, req.Count)
+	bonds := make([]*meshevents.PrepaidBond, req.Count)
+	for i := 0; i < req.Count; i++ {
+		coinIDs[i] = encode.RandomBytes(prepaidBondIDLength)
+		bonds[i] = &meshevents.PrepaidBond{
+			CoinID:   coinIDs[i],
+			Strength: req.Strength,
+			LockTime: lockTime,
+		}
+	}
+	event, err := mesh.NewEvent(&meshevents.PrepaidBondsCreatedEvent{Bonds: bonds})
+	if err != nil {
+		return msgjson.NewError(msgjson.RPCInternalError, "failed to encode pre-paid bond creation event")
+	}
+
+	if err = cmdCtx.Completion.Emit(cmdCtx.Context, event, func() any {
+		return &createPrepaidBondsResult{CoinIDs: coinIDs}
+	}); err != nil {
+		mesh.LogApplyFailure(log, err, "Failed to store pre-paid bonds: %v", err)
+		return mesh.ClientError(err, msgjson.RPCInternalError, "failed to store pre-paid bonds")
+	}
+	return nil
 }
 
 // TODO: a way to manipulate/forgive cancellation rate violation.
@@ -1126,25 +1046,27 @@ func (auth *AuthManager) conn(conn comms.Link) *clientInfo {
 	return auth.conns[conn.ID()]
 }
 
-// sendTierChanged sends a tierchanged notification to an account.
-func (auth *AuthManager) sendTierChanged(acctID account.AccountID, rep *account.Reputation, reason string) {
-	effectiveTier := rep.EffectiveTier()
-	log.Debugf("Sending tierchanged notification to %v, new tier = %d, reason = %v",
-		acctID, effectiveTier, reason)
-	tierChangedNtfn := &msgjson.TierChangedNotification{
-		Tier:       effectiveTier,
-		Reputation: rep,
-		Reason:     reason,
-	}
-	auth.Sign(tierChangedNtfn)
-	resp, err := msgjson.NewNotification(msgjson.TierChangeRoute, tierChangedNtfn)
-	if err != nil {
-		log.Error("TierChangeRoute encoding error: %v", err)
-		return
-	}
-	if err = auth.Send(acctID, resp); err != nil {
-		log.Warnf("Error sending tier changed notification to account %v: %v", acctID, err)
-		// The user will need to 'connect' to see their current tier and bonds.
+// notifyReputationInputsChanged loads and sends reputation to locally
+// connected users, even if their score and tier have not changed.
+//
+// TODO(mesh): Avoid sending notifications when only reputation inputs,
+// rather than the user's score or tier, have changed.
+func (auth *AuthManager) notifyReputationInputsChanged(users []account.AccountID) {
+	auth.repNotifyMtx.Lock()
+	defer auth.repNotifyMtx.Unlock()
+	for _, user := range users {
+		if auth.user(user) == nil {
+			continue
+		}
+		rep, err := auth.loadUserReputationWithTimeout(context.Background(), user)
+		if err != nil {
+			log.Errorf("failed to load reputation after inputs change for account %v: %v", user, err)
+			continue
+		}
+		if rep == nil {
+			continue
+		}
+		auth.sendScoreChanged(user, rep)
 	}
 }
 
@@ -1156,134 +1078,20 @@ func (auth *AuthManager) sendScoreChanged(acctID account.AccountID, rep *account
 	auth.Sign(note)
 	resp, err := msgjson.NewNotification(msgjson.ScoreChangeRoute, note)
 	if err != nil {
-		log.Error("TierChangeRoute encoding error: %v", err)
+		log.Errorf("ScoreChangeRoute encoding error: %v", err)
 		return
 	}
-	if err = auth.Send(acctID, resp); err != nil {
+	if err = auth.SendIfLocal(acctID, resp); err != nil {
 		log.Warnf("Error sending score changed notification to account %v: %v", acctID, err)
 		// The user will need to 'connect' to see their current tier and bonds.
 	}
 }
 
-// sendBondExpired sends a bondexpired notification to an account.
-func (auth *AuthManager) sendBondExpired(acctID account.AccountID, bond *db.Bond, rep *account.Reputation) {
-	effectiveTier := rep.EffectiveTier()
-	log.Debugf("Sending bondexpired notification to %v for bond %v (%s), new tier = %d",
-		acctID, coinIDString(bond.AssetID, bond.CoinID), dex.BipIDSymbol(bond.AssetID), effectiveTier)
-	bondExpNtfn := &msgjson.BondExpiredNotification{
-		AssetID:    bond.AssetID,
-		BondCoinID: bond.CoinID,
-		AccountID:  acctID[:],
-		Tier:       effectiveTier,
-		Reputation: rep,
-	}
-	auth.Sign(bondExpNtfn)
-	resp, err := msgjson.NewNotification(msgjson.BondExpiredRoute, bondExpNtfn)
-	if err != nil {
-		log.Error("BondExpiredRoute encoding error: %v", err)
-		return
-	}
-	if err = auth.Send(acctID, resp); err != nil {
-		log.Warnf("Error sending bond expired notification to account %v: %v", acctID, err)
-		// The user will need to 'connect' to see their current tier and bonds.
-	}
-}
-
-// checkBonds checks all connected users' bonds expiry and recomputes user tier
-// on change. This should be run on a ticker.
-func (auth *AuthManager) checkBonds() {
-	lockTimeThresh := time.Now().Add(auth.bondExpiry).Unix()
-
-	checkClientBonds := func(client *clientInfo) ([]*db.Bond, *account.Reputation) {
-		client.mtx.Lock()
-		defer client.mtx.Unlock()
-		pruned, bondTier := client.pruneBonds(lockTimeThresh)
-		if len(pruned) == 0 {
-			return nil, nil // no tier change
-		}
-
-		auth.violationMtx.Lock()
-		score := auth.userScore(client.acct.ID)
-		auth.violationMtx.Unlock()
-
-		client.tier = auth.tier(bondTier, score)
-		client.score = score
-
-		return pruned, auth.userReputation(bondTier, score)
-	}
-
-	auth.connMtx.RLock()
-	defer auth.connMtx.RUnlock()
-
-	type checkRes struct {
-		rep   *account.Reputation
-		bonds []*db.Bond
-	}
-	expiredBonds := make(map[account.AccountID]checkRes)
-	for acct, client := range auth.users {
-		pruned, rep := checkClientBonds(client)
-		if len(pruned) > 0 {
-			log.Infof("Pruned %d expired bonds for user %v, new bond tier = %d, new trading tier = %d",
-				len(pruned), acct, rep.BondedTier, client.tier)
-			expiredBonds[acct] = checkRes{rep, pruned}
-		}
-	}
-
-	if len(expiredBonds) == 0 {
-		return // skip the goroutine alloc
-	}
-
-	auth.wg.Add(1)
-	go func() { // godspeed
-		defer auth.wg.Done()
-		for acct, prunes := range expiredBonds {
-			for _, bond := range prunes.bonds {
-				if err := auth.storage.DeleteBond(bond.AssetID, bond.CoinID); err != nil {
-					log.Errorf("Failed to delete expired bond %v (%s) for user %v: %v",
-						coinIDString(bond.AssetID, bond.CoinID), dex.BipIDSymbol(bond.AssetID), acct, err)
-				}
-				auth.sendBondExpired(acct, bond, prunes.rep)
-			}
-		}
-	}()
-}
-
-// addBond registers a new active bond for an authenticated user. This only
-// updates their clientInfo.{bonds,tier} fields. It does not touch the DB. If
-// the user is not authenticated, it returns -1, -1.
-func (auth *AuthManager) addBond(user account.AccountID, bond *db.Bond) *account.Reputation {
-	client := auth.user(user)
-	if client == nil {
-		return nil // offline
-	}
-
-	auth.violationMtx.Lock()
-	score := auth.userScore(user)
-	auth.violationMtx.Unlock()
-
-	client.mtx.Lock()
-	defer client.mtx.Unlock()
-
-	bondTier := client.addBond(bond)
-	rep := auth.userReputation(bondTier, score)
-	client.tier = rep.EffectiveTier()
-	client.score = score
-
-	return rep
-}
-
-// addClient adds the client to the users and conns maps, and stops any unbook
-// timers started when they last disconnected.
+// addClient adds the client to the users and conns maps.
 func (auth *AuthManager) addClient(client *clientInfo) {
 	auth.connMtx.Lock()
 	defer auth.connMtx.Unlock()
 	user := client.acct.ID
-	if unbookTimer, found := auth.unbookers[user]; found {
-		if unbookTimer.Stop() {
-			log.Debugf("Stopped unbook timer for user %v", user)
-		}
-		delete(auth.unbookers, user)
-	}
 
 	oldClient := auth.users[user]
 	auth.users[user] = client
@@ -1314,37 +1122,21 @@ func (auth *AuthManager) addClient(client *clientInfo) {
 	}()
 }
 
-// removeClient removes the client from the users and conns map, and sets a
-// timer to unbook all of the user's orders if they do not return within a
-// certain time. This is idempotent for a given conn ID.
+// removeClient unregisters the client from the users and conns maps. It is
+// idempotent for a given conn ID.
 func (auth *AuthManager) removeClient(client *clientInfo) {
 	auth.connMtx.Lock()
-	defer auth.connMtx.Unlock()
 	connID := client.conn.ID()
-	_, connFound := auth.conns[connID]
-	if !connFound {
+	if _, connFound := auth.conns[connID]; !connFound {
 		// conn already removed manually when this user made a new connection.
 		// This user is still in the users map, so return.
+		auth.connMtx.Unlock()
 		return
 	}
-	user := client.acct.ID
-	delete(auth.users, user)
+	delete(auth.users, client.acct.ID)
 	delete(auth.conns, connID)
+	auth.connMtx.Unlock()
 	client.conn.Disconnect() // in case not triggered by disconnect
-	auth.unbookers[user] = time.AfterFunc(auth.miaUserTimeout, func() { auth.unbookUserOrders(user) })
-
-	auth.violationMtx.Lock()
-	delete(auth.matchOutcomes, user)
-	delete(auth.preimgOutcomes, user)
-	delete(auth.orderOutcomes, user)
-	auth.violationMtx.Unlock()
-}
-
-func legacyMatchOutcomeToOutcome(m *db.MatchOutcome) Outcome {
-	if !m.Fail {
-		return db.OutcomeSwapSuccess
-	}
-	return matchStatusToOutcome(m.Status)
 }
 
 func matchStatusToOutcome(s order.MatchStatus) Outcome {
@@ -1364,121 +1156,23 @@ func matchStatusToOutcome(s order.MatchStatus) Outcome {
 	}
 }
 
-// loadUserOutcomes returns user's latest match and preimage outcomes from order
-// and swap data retrieved from the DB.
+// loadUserOutcomes returns the user's latest reputation outcomes from the
+// reputation points table.
 func (auth *AuthManager) loadUserOutcomes(user account.AccountID) (pimgs *latestOutcomes[*db.PreimageOutcome], matches *latestOutcomes[*db.MatchResult], ords *latestOutcomes[*db.OrderOutcome], err error) {
-	repVer, err := auth.storage.GetUserReputationVersion(auth.ctx, user)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("error getting current user reputation version: %w", err)
-	}
-	switch repVer {
-	case 0:
-		return auth.upgradeUserOutcomesV0(user)
-	case 1:
-		return auth.loadUserOutcomesV1(user)
-	default:
-		return nil, nil, nil, fmt.Errorf("unknown user reputation version %d", repVer)
-	}
+	return auth.loadUserOutcomesContext(auth.ctx, user)
 }
 
-func (auth *AuthManager) upgradeUserOutcomesV0(user account.AccountID) (*latestOutcomes[*db.PreimageOutcome], *latestOutcomes[*db.MatchResult], *latestOutcomes[*db.OrderOutcome], error) {
-	// Load the N most recent matches resulting in success or an at-fault match
-	// revocation for the user.
-	matchOutcomes, err := auth.storage.CompletedAndAtFaultMatchStats(user, ScoringMatchLimit)
+func (auth *AuthManager) loadUserOutcomesContext(ctx context.Context, user account.AccountID) (pimgs *latestOutcomes[*db.PreimageOutcome], matches *latestOutcomes[*db.MatchResult], ords *latestOutcomes[*db.OrderOutcome], err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	dbPimgs, dbMatches, dbOrds, err := auth.storage.GetUserReputationData(ctx, user, scoringOrderLimit, ScoringMatchLimit, cancelThreshWindow)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("CompletedAndAtFaultMatchStats: %w", err)
+		return nil, nil, nil, fmt.Errorf("error loading reputation data for user %s: %w", user, err)
 	}
-	// These are sorted in descending time, but we want ascending.
-	matches := make([]*db.MatchResult, 0, len(matchOutcomes))
-	for _, m := range matchOutcomes {
-		matches = append(matches, &db.MatchResult{
-			MatchID:      m.ID,
-			MatchOutcome: legacyMatchOutcomeToOutcome(m),
-		})
-	}
-
-	// Load the count of preimage misses in the N most recently placed orders.
-	piOutcomes, err := auth.storage.PreimageStats(user, scoringOrderLimit)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("PreimageStats: %w", err)
-	}
-	pimgs := make([]*db.PreimageOutcome, 0, len(piOutcomes))
-	for _, p := range piOutcomes {
-		pimgs = append(pimgs, &db.PreimageOutcome{
-			OrderID: p.ID,
-			Miss:    p.Miss,
-		})
-	}
-
-	// Load the cancelThreshWindow latest successfully completed orders for the user.
-	oids, compTimes, err := auth.storage.CompletedUserOrders(user, cancelThreshWindow)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	// Load the cancelThreshWindow latest executed cancel orders for the user.
-	cancels, err := auth.storage.ExecutedCancelsForUser(user, cancelThreshWindow)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	ords := assembleCanceledOrders(oids, compTimes, cancels)
-
-	pimgs, matches, ords, err = auth.storage.UpgradeUserReputationV1(auth.ctx, user, pimgs, matches, ords)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("error upgrading user reputation to v1: %w", err)
-	}
-
-	log.Infof("User %s reputation upgraded to version 1", user)
-
-	return newLatestOutcomes(pimgs, scoringOrderLimit),
-		newLatestOutcomes(matches, ScoringMatchLimit),
-		newLatestOutcomes(ords, cancelThreshWindow),
-		nil
-}
-
-func assembleCanceledOrders(oids /* completed */ []order.OrderID, compTimes []int64, cancels []*db.CancelRecord) []*db.OrderOutcome {
-	type stampedOrderOutcome struct {
-		Outcome *db.OrderOutcome
-		Stamp   int64
-	}
-	stampedOrds := make([]*stampedOrderOutcome, 0, 2*cancelThreshWindow)
-	for i := range oids {
-		stampedOrds = append(stampedOrds, &stampedOrderOutcome{
-			Outcome: &db.OrderOutcome{OrderID: oids[i]},
-			Stamp:   compTimes[i],
-		})
-	}
-	for _, o := range cancels {
-		stampedOrds = append(stampedOrds, &stampedOrderOutcome{
-			Outcome: &db.OrderOutcome{
-				OrderID:  o.ID,
-				Canceled: o.EpochGap >= 0 && o.EpochGap < freeCancelThreshold,
-			},
-			Stamp: o.MatchTime,
-		})
-	}
-	sort.Slice(stampedOrds, func(i, j int) bool {
-		return stampedOrds[i].Stamp > stampedOrds[j].Stamp
-	})
-	if len(stampedOrds) > cancelThreshWindow {
-		stampedOrds = stampedOrds[len(stampedOrds)-cancelThreshWindow:]
-	}
-	ords := make([]*db.OrderOutcome, len(stampedOrds))
-	for i, o := range stampedOrds {
-		ords[i] = o.Outcome
-	}
-	return ords
-}
-
-func (auth *AuthManager) loadUserOutcomesV1(user account.AccountID) (*latestOutcomes[*db.PreimageOutcome], *latestOutcomes[*db.MatchResult], *latestOutcomes[*db.OrderOutcome], error) {
-	pimgs, matches, ords, err := auth.storage.GetUserReputationData(auth.ctx, user, scoringOrderLimit, ScoringMatchLimit, cancelThreshWindow)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("error loading v1 user reputation data for user %s: %w", user, err)
-	}
-	return newLatestOutcomes(pimgs, scoringOrderLimit),
-		newLatestOutcomes(matches, ScoringMatchLimit),
-		newLatestOutcomes(ords, cancelThreshWindow), nil
+	return newLatestOutcomes(dbPimgs, scoringOrderLimit),
+		newLatestOutcomes(dbMatches, ScoringMatchLimit),
+		newLatestOutcomes(dbOrds, cancelThreshWindow), nil
 }
 
 // MatchOutcome is a JSON-friendly version of db.MatchOutcome.
@@ -1535,10 +1229,8 @@ func (auth *AuthManager) UserMatchFails(user account.AccountID, n int) ([]*Match
 	return fails, nil
 }
 
-// loadUserScore computes the user's current score from order and swap data
-// retrieved from the DB. Use this instead of userScore if the user is offline.
-func (auth *AuthManager) loadUserScore(user account.AccountID) (int32, error) {
-	latestPreimageResults, latestMatches, latestFinished, err := auth.loadUserOutcomes(user)
+func (auth *AuthManager) loadUserScoreContext(ctx context.Context, user account.AccountID) (int32, error) {
+	latestPreimageResults, latestMatches, latestFinished, err := auth.loadUserOutcomesContext(ctx, user)
 	if err != nil {
 		return 0, err
 	}
@@ -1567,7 +1259,14 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	var user account.AccountID
 	copy(user[:], connect.AccountID[:])
 	lockTimeThresh := time.Now().Add(auth.bondExpiry).Truncate(time.Second)
-	acctInfo, bonds := auth.storage.Account(user, lockTimeThresh)
+	acctInfo, bonds, err := auth.storage.Account(auth.ctx, user, lockTimeThresh)
+	if err != nil {
+		log.Errorf("Account read failed for user %v on connect: %v", user, err)
+		return &msgjson.Error{
+			Code:    msgjson.RPCInternalError,
+			Message: "failed to retrieve account",
+		}
+	}
 	if acctInfo == nil {
 		return &msgjson.Error{
 			Code:    msgjson.AccountNotFoundError,
@@ -1597,7 +1296,6 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		oldClient.mtx.Unlock()
 	}
 
-	// Compute the user's score, loading the preimage/order/match outcomes.
 	latestPreimageResults, latestMatches, latestFinished, err := auth.loadUserOutcomes(user)
 	if err != nil {
 		log.Errorf("Failed to compute user %v score: %v", user, err)
@@ -1614,13 +1312,6 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	violationScore := score - piMissScore - successScore // work backwards as per above comment
 	log.Debugf("User %v score = %d:%d (%d successes) - %d (violations) - %d (%d preimage misses) ",
 		user, score, successScore, successCount, -violationScore, -piMissScore, piMissCount)
-
-	// Make outcome entries for the user.
-	auth.violationMtx.Lock()
-	auth.matchOutcomes[user] = latestMatches
-	auth.preimgOutcomes[user] = latestPreimageResults
-	auth.orderOutcomes[user] = latestFinished
-	auth.violationMtx.Unlock()
 
 	client := &clientInfo{
 		acct:         acctInfo,
@@ -1705,7 +1396,6 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 
 	// Prepare bond info for response.
 	var bondTier int64
-	activeBonds := make([]*db.Bond, 0, len(bonds)) // some may have just expired
 	msgBonds := make([]*msgjson.Bond, 0, len(bonds))
 	for _, bond := range bonds {
 		// Double check the DB backend's thresholding.
@@ -1725,14 +1415,10 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 			AssetID:  bond.AssetID,
 			Strength: bond.Strength, // Added with v2 reputation
 		})
-		activeBonds = append(activeBonds, bond)
 	}
 
-	// Ensure tier and filtered bonds agree.
 	rep := auth.userReputation(bondTier, score)
-	client.tier = rep.EffectiveTier()
-	client.score = score
-	client.bonds = activeBonds
+	rep.BondExpiryThreshold = lockTimeThresh.Unix()
 
 	// Sign and send the connect response.
 	sig := auth.SignMsg(sigMsg)
@@ -1761,7 +1447,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 
 	log.Infof("Authenticated account %v from %v with %d active orders, %d active matches, tier = %v, "+
 		"bond tier = %v, score = %v",
-		user, conn.Addr(), len(msgOrderStatuses), len(msgMatches), client.tier, bondTier, score)
+		user, conn.Addr(), len(msgOrderStatuses), len(msgMatches), rep.EffectiveTier(), bondTier, score)
 	auth.addClient(client)
 
 	auth.connectCallbackMtx.RLock()
@@ -1772,23 +1458,6 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	}
 
 	return nil
-}
-
-func (auth *AuthManager) loadRecentFinishedOrders(aid account.AccountID, N int) (*latestOutcomes[*db.OrderOutcome], error) {
-	// Load the N latest successfully completed orders for the user.
-	oids, compTimes, err := auth.storage.CompletedUserOrders(aid, N)
-	if err != nil {
-		return nil, err
-	}
-
-	// Load the N latest executed cancel orders for the user.
-	cancels, err := auth.storage.ExecutedCancelsForUser(aid, N)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create the sorted list with capacity.
-	return newLatestOutcomes(assembleCanceledOrders(oids, compTimes, cancels), cancelThreshWindow), nil
 }
 
 // handleResponse handles all responses for AuthManager registered routes,
@@ -1963,12 +1632,95 @@ func (auth *AuthManager) handleMatchStatus(conn comms.Link, msg *msgjson.Message
 	return nil
 }
 
+// ForgiveUser forgives all penalty outcomes for a user.
 func (auth *AuthManager) ForgiveUser(user account.AccountID) error {
-	if err := auth.storage.ForgiveUser(auth.ctx, user); err != nil {
-		return err
+	_, err := auth.executeReputationForgivenessCommand(context.Background(), &meshevents.ReputationForgivenEvent{
+		AccountID: user,
+		Scope:     meshevents.ReputationForgivenessScopeUser,
+	})
+	return err
+}
+
+type reputationForgivenessResult struct {
+	Forgiven bool `json:"forgiven"`
+	Unbanned bool `json:"unbanned"`
+}
+
+func (auth *AuthManager) executeReputationForgivenessCommand(ctx context.Context, req *meshevents.ReputationForgivenEvent) (*reputationForgivenessResult, error) {
+	if auth.mesh == nil {
+		return nil, fmt.Errorf("mesh service is not configured")
 	}
-	if _, err := auth.reRepUser(user); err != nil {
-		log.Errorf("Error updating user reputation after forgiveness: %v", err)
+	cmdCtx, cancel := context.WithTimeout(ctx, reputationForgivenessCommandTimeout)
+	defer cancel()
+
+	msg, err := msgjson.NewRequest(comms.NextID(), commandKindForgiveReputation, req)
+	if err != nil {
+		return nil, err
+	}
+
+	responses := make(chan *msgjson.Message, 1)
+	execErrs := make(chan *msgjson.Error, 1)
+	go func() {
+		if rpcErr := auth.mesh.ExecuteCommand(cmdCtx, mesh.CommandRequest{
+			Kind: commandKindForgiveReputation,
+			User: req.AccountID,
+			Msg:  msg,
+			Respond: func(resp *msgjson.Message) error {
+				select {
+				case responses <- resp:
+				default:
+				}
+				return nil
+			},
+		}); rpcErr != nil {
+			execErrs <- rpcErr
+		}
+	}()
+
+	var authDone <-chan struct{}
+	if auth.ctx != nil {
+		authDone = auth.ctx.Done()
+	}
+
+	select {
+	case rpcErr := <-execErrs:
+		return nil, rpcErr
+	case resp := <-responses:
+		if resp == nil {
+			return nil, fmt.Errorf("nil reputation forgiveness response")
+		}
+		var result reputationForgivenessResult
+		if err := resp.UnmarshalResult(&result); err != nil {
+			return nil, err
+		}
+		return &result, nil
+	case <-authDone:
+		return nil, auth.ctx.Err()
+	case <-cmdCtx.Done():
+		return nil, cmdCtx.Err()
+	}
+}
+
+func (auth *AuthManager) executeForgiveReputation(cmdCtx *mesh.CommandContext) *msgjson.Error {
+	var event meshevents.ReputationForgivenEvent
+	if err := cmdCtx.Request.Msg.Unmarshal(&event); err != nil {
+		return msgjson.NewError(msgjson.RPCParseError, "error parsing reputation forgiveness request")
+	}
+	if event.AccountID != cmdCtx.Request.User {
+		return msgjson.NewError(msgjson.RPCInternalError, "reputation forgiveness command account mismatch")
+	}
+
+	if err := event.Validate(); err != nil {
+		return msgjson.NewError(msgjson.RPCParseError, "invalid reputation forgiveness request: %v", err)
+	}
+	meshEvent, err := mesh.NewEvent(&event)
+	if err != nil {
+		return msgjson.NewError(msgjson.RPCInternalError, "failed to encode reputation forgiveness event")
+	}
+
+	if err = cmdCtx.Completion.Emit(cmdCtx.Context, meshEvent, nil); err != nil {
+		mesh.LogApplyFailure(log, err, "Failed to apply reputation forgiveness event for account %v: %v", event.AccountID, err)
+		return mesh.ClientError(err, msgjson.RPCInternalError, "failed to apply reputation forgiveness: %v", err)
 	}
 	return nil
 }
@@ -2082,4 +1834,15 @@ func coinIDString(assetID uint32, coinID []byte) string {
 		return "unparsed:" + hex.EncodeToString(coinID)
 	}
 	return s
+}
+
+// ReputationOutcomePolicy returns the reputation policy used when storage
+// derives outcome updates from event facts.
+func (auth *AuthManager) ReputationOutcomePolicy() *db.ReputationOutcomePolicy {
+	return &db.ReputationOutcomePolicy{
+		PreimageLimit:       scoringOrderLimit,
+		MatchLimit:          ScoringMatchLimit,
+		OrderLimit:          cancelThreshWindow,
+		FreeCancelThreshold: freeCancelThreshold,
+	}
 }

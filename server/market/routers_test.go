@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -25,6 +26,8 @@ import (
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/matcher"
+	"decred.org/dcrdex/server/mesh"
+	"decred.org/dcrdex/server/meshevents"
 	"decred.org/dcrdex/server/swap"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
@@ -55,6 +58,16 @@ const (
 
 	clientPreimageDelay = 75 * time.Millisecond
 )
+
+type emptyEventLogReader struct{}
+
+func (emptyEventLogReader) EventLogFrontier(context.Context) (*db.EventLogPosition, error) {
+	return &db.EventLogPosition{}, nil
+}
+
+func (emptyEventLogReader) EventLogEntriesAfter(context.Context, uint64, int) ([]*db.EventLogEntry, error) {
+	return nil, nil
+}
 
 var (
 	oRig       *tOrderRig
@@ -123,6 +136,8 @@ func nowMs() time.Time {
 // The AuthManager handles client-related actions, including authorization and
 // communications.
 type TAuth struct {
+	canceledOrder      order.OrderID
+	cancelOrder        order.OrderID
 	authErr            error
 	sendsMtx           sync.Mutex
 	sends              []*msgjson.Message
@@ -135,8 +150,7 @@ type TAuth struct {
 	handlePreimageDone chan struct{}
 	handleMatchDone    chan *msgjson.Message
 	suspensions        map[account.AccountID]bool
-	canceledOrder      order.OrderID
-	cancelOrder        order.OrderID
+	onUserReputationAt func(time.Time)
 	rep                struct {
 		tier            int64
 		score, maxScore int32
@@ -153,6 +167,9 @@ func (a *TAuth) Suspended(user account.AccountID) (found, suspended bool) {
 }
 func (a *TAuth) Auth(user account.AccountID, msg, sig []byte) error {
 	//log.Infof("Auth for user %v", user)
+	return a.authErr
+}
+func (a *TAuth) VerifyUserSig(user account.AccountID, msg, sig []byte) error {
 	return a.authErr
 }
 func (a *TAuth) Sign(...msgjson.Signable) {}
@@ -202,6 +219,10 @@ func (a *TAuth) Send(user account.AccountID, msg *msgjson.Message) error {
 
 	return nil
 }
+func (a *TAuth) SendIfLocal(user account.AccountID, msg *msgjson.Message) error {
+	return a.Send(user, msg)
+}
+
 func (a *TAuth) getSend() *msgjson.Message {
 	a.sendsMtx.Lock()
 	defer a.sendsMtx.Unlock()
@@ -214,6 +235,9 @@ func (a *TAuth) getSend() *msgjson.Message {
 }
 func (a *TAuth) Request(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message)) error {
 	return a.RequestWithTimeout(user, msg, f, time.Hour, func() {})
+}
+func (a *TAuth) RequestIfLocal(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message)) error {
+	return a.Request(user, msg, f)
 }
 func (a *TAuth) RequestWithTimeout(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message), expDur time.Duration, exp func()) error {
 	log.Infof("Request for user %v", user)
@@ -253,13 +277,10 @@ func (a *TAuth) RequestWithTimeout(user account.AccountID, msg *msgjson.Message,
 	return nil
 }
 
-func (a *TAuth) PreimageSuccess(user account.AccountID, refTime time.Time, oid order.OrderID) {}
-func (a *TAuth) MissedPreimage(user account.AccountID, refTime time.Time, oid order.OrderID)  {}
-func (a *TAuth) SwapSuccess(user account.AccountID, mmid db.MarketMatchID, value uint64, refTime time.Time) {
-}
-func (a *TAuth) Inaction(user account.AccountID, step db.Outcome, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID) {
-}
-func (a *TAuth) UserReputation(user account.AccountID) (tier int64, score, maxScore int32, err error) {
+func (a *TAuth) UserReputationAt(user account.AccountID, asOf time.Time) (tier int64, score, maxScore int32, err error) {
+	if a.onUserReputationAt != nil {
+		a.onUserReputationAt(asOf)
+	}
 	if a.rep.maxScore == 0 {
 		return 1, 30, 60, a.rep.err
 	}
@@ -268,29 +289,28 @@ func (a *TAuth) UserReputation(user account.AccountID) (tier int64, score, maxSc
 func (a *TAuth) AcctStatus(user account.AccountID) (connected bool, tier int64) {
 	return true, 1
 }
-func (a *TAuth) RecordCompletedOrder(account.AccountID, order.OrderID, time.Time) {}
-func (a *TAuth) RecordCancel(aid account.AccountID, coid, oid order.OrderID, epochGap int32, t time.Time) {
-	a.cancelOrder = coid
-	a.canceledOrder = oid
+func (a *TAuth) ReputationOutcomePolicy() *db.ReputationOutcomePolicy {
+	return &db.ReputationOutcomePolicy{PreimageLimit: 40, MatchLimit: 60, OrderLimit: 100, FreeCancelThreshold: 2}
 }
 
 type TMarketTunnel struct {
-	adds        []*orderRecord
-	added       chan struct{}
-	auth        *TAuth
-	midGap      uint64
-	lotSize     uint64
-	rateStep    uint64
-	mbBuffer    float64
-	epochIdx    uint64
-	epochDur    uint64
-	locked      bool
-	cancelable  bool
-	acctQty     uint64
-	acctLots    uint64
-	acctRedeems int
-	base, quote uint32
-	parcels     float64
+	adds          []*orderRecord
+	added         chan struct{}
+	auth          *TAuth
+	midGap        uint64
+	lotSize       uint64
+	rateStep      uint64
+	mbBuffer      float64
+	epochIdx      uint64
+	epochDur      uint64
+	locked        bool
+	cancelable    bool
+	resendHandled bool
+	acctQty       uint64
+	acctLots      uint64
+	acctRedeems   int
+	base, quote   uint32
+	parcels       float64
 }
 
 func tNewMarket(auth *TAuth) *TMarketTunnel {
@@ -307,29 +327,32 @@ func tNewMarket(auth *TAuth) *TMarketTunnel {
 	}
 }
 
-func (m *TMarketTunnel) SubmitOrder(o *orderRecord) error {
-	// set the server time
+func (m *TMarketTunnel) HandleOrderResubmission(_ context.Context, _ *orderRecord, _ *mesh.CommandCompletion) (bool, *msgjson.Error) {
+	return m.resendHandled, nil
+}
+
+func (m *TMarketTunnel) AcceptOrderCommand(ctx context.Context, o *orderRecord, completion *mesh.CommandCompletion) *msgjson.Error {
 	now := nowMs()
 	o.order.SetTime(now)
-
 	m.adds = append(m.adds, o)
 
-	// Send the order, but skip the signature
 	oid := o.order.ID()
-	resp, _ := msgjson.NewResponse(1, &msgjson.OrderResult{
+	result := &msgjson.OrderResult{
 		Sig:        msgjson.Bytes{},
 		OrderID:    oid[:],
 		ServerTime: uint64(now.UnixMilli()),
-	}, nil)
-	err := m.auth.Send(account.AccountID{}, resp)
-	if err != nil {
-		log.Debug("Send:", err)
 	}
-
+	event, err := mesh.NewEvent(meshevents.NewOrderAcceptedEvent(o.order))
+	if err != nil {
+		return msgjson.NewError(msgjson.RPCInternalError, "new order accepted event error: %v", err)
+	}
+	err = completion.Emit(ctx, event, func() any { return result })
 	if m.added != nil {
 		m.added <- struct{}{}
 	}
-
+	if err != nil {
+		return marketOrderError(err)
+	}
 	return nil
 }
 
@@ -364,11 +387,6 @@ func (m *TMarketTunnel) pop() *orderRecord {
 
 func (m *TMarketTunnel) Cancelable(order.OrderID) bool {
 	return m.cancelable
-}
-
-func (m *TMarketTunnel) Suspend(asSoonAs time.Time, persistBook bool) (finalEpochIdx int64, finalEpochEnd time.Time) {
-	// no suspension
-	return -1, time.Time{}
 }
 
 func (m *TMarketTunnel) Running() bool {
@@ -749,10 +767,11 @@ func TestMain(m *testing.M) {
 		60:  assetETH,
 		966: assetMATIC,
 	}
-	balancer, err := NewDEXBalancer(pendingAccounters, assets, matchNegotiator)
+	balancer, err := NewDEXBalancer(assets, matchNegotiator)
 	if err != nil {
 		panic("NewDEXBalancer error:" + err.Error())
 	}
+	balancer.SetMarkets(pendingAccounters)
 	oRig.router = NewOrderRouter(&OrderRouterConfig{
 		AuthManager:  oRig.auth,
 		Assets:       assets,
@@ -761,6 +780,20 @@ func TestMain(m *testing.M) {
 		DEXBalancer:  balancer,
 		MatchSwapper: swapper,
 	})
+	meshSvc, err := mesh.NewService(&mesh.ServiceConfig{
+		EventLogReader: emptyEventLogReader{},
+		OnHalt:         func(error) {},
+		Commands:       oRig.router.Commands(),
+		Events: map[string]mesh.EventApplier{
+			meshevents.EventKindOrderAccepted: func(*mesh.EventApplyContext, *mesh.Event) (*db.EventLogEntry, error) {
+				return new(db.EventLogEntry), nil
+			},
+		},
+	})
+	if err != nil {
+		panic("mesh.NewService error:" + err.Error())
+	}
+	oRig.router.SetMeshService(meshSvc)
 	rig = newTestRig()
 	src1 := rig.source1
 	src2 := rig.source2
@@ -786,6 +819,7 @@ func TestMain(m *testing.M) {
 		var shutdown context.CancelFunc
 		testCtx, shutdown = context.WithCancel(context.Background())
 		rig.router = NewBookRouter(rig.sources(), &tFeeSource{}, func(route string, handler comms.MsgHandler) {})
+		rig.router.SeedBooks()
 		var wg sync.WaitGroup
 		wg.Add(1)
 		go func() {
@@ -797,7 +831,7 @@ func TestMain(m *testing.M) {
 			oRig.router.Run(testCtx)
 			wg.Done()
 		}()
-		time.Sleep(100 * time.Millisecond) // let the router actually start in runBook
+		time.Sleep(100 * time.Millisecond) // let the routers actually start
 		defer func() {
 			shutdown()
 			wg.Wait()
@@ -904,6 +938,28 @@ func TestLimit(t *testing.T) {
 		func(tag string, code int) { t.Helper(); ensureErr(tag, sendLimit(), code) },
 	)
 
+	// Recognized resubmissions bypass the age and current rate-step checks.
+	ogTime, ogRateStep := limit.ClientTime, oRig.market.rateStep
+	for _, test := range []struct {
+		name   string
+		change func()
+		code   int
+	}{
+		{"old client time", func() { limit.ClientTime = ogTime - maxClockOffset - 1 }, msgjson.ClockRangeError},
+		{"changed rate step", func() { oRig.market.rateStep = limit.Rate + 1 }, msgjson.OrderParameterError},
+	} {
+		test.change()
+		oRig.market.resendHandled = true
+		msg, err := msgjson.NewRequest(reqID, msgjson.LimitRoute, limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ensureErr("resubmission with "+test.name, oRig.router.handleLimit(user.acct, msg), -1)
+		oRig.market.resendHandled = false
+		ensureErr("new request with "+test.name, sendLimit(), test.code)
+		limit.ClientTime, oRig.market.rateStep = ogTime, ogRateStep
+	}
+
 	// Zero-conf fails fee rate validation.
 	oRig.dcr.confsMinus2 = -2
 	oRig.dcr.invalidFeeRate = true
@@ -976,11 +1032,16 @@ func TestLimit(t *testing.T) {
 	if respMsg == nil {
 		t.Fatalf("no response from limit order")
 	}
-	resp, _ := respMsg.Response()
-	result := new(msgjson.OrderResult)
-	err := json.Unmarshal(resp.Result, result)
-	if err != nil {
-		t.Fatalf("unmarshal error: %v", err)
+	if respMsg.ID != reqID {
+		t.Fatalf("response request ID = %d, want %d", respMsg.ID, reqID)
+	}
+	var result msgjson.OrderResult
+	if err := respMsg.UnmarshalResult(&result); err != nil {
+		t.Fatalf("response result: %v", err)
+	}
+	oid := epochOrder.ID()
+	if !bytes.Equal(result.OrderID, oid[:]) {
+		t.Fatalf("response order ID = %x, want %v", result.OrderID, oid)
 	}
 	lo.ServerTime = time.UnixMilli(int64(result.ServerTime))
 
@@ -1031,6 +1092,71 @@ func TestLimit(t *testing.T) {
 	// None needed to redeem.
 	oRig.polygon.bal = 0
 	ensureSuccess("enough to redeem account-based quote")
+}
+
+func TestOrderHandlersSubmitCommand(t *testing.T) {
+	user := oRig.user
+	auth := new(TAuth)
+	router := &OrderRouter{auth: auth}
+
+	type handlerCase struct {
+		route  string
+		kind   string
+		handle func(account.AccountID, *msgjson.Message) *msgjson.Error
+	}
+
+	tests := []handlerCase{
+		{
+			route:  msgjson.LimitRoute,
+			kind:   commandKindLimit,
+			handle: router.handleLimit,
+		},
+		{
+			route:  msgjson.MarketRoute,
+			kind:   commandKindMarket,
+			handle: router.handleMarket,
+		},
+		{
+			route:  msgjson.CancelRoute,
+			kind:   commandKindCancel,
+			handle: router.handleCancel,
+		},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.kind, func(t *testing.T) {
+			meshReq := &tMesh{}
+			router.SetMeshService(meshReq)
+			auth.sends = nil
+
+			reqID := uint64(55 + i)
+			msg, err := msgjson.NewRequest(reqID, tt.route, nil)
+			if err != nil {
+				t.Fatalf("NewRequest(%q): %v", tt.route, err)
+			}
+			if rpcErr := tt.handle(user.acct, msg); rpcErr != nil {
+				t.Fatalf("handler error: %v", rpcErr)
+			}
+			if meshReq.calls != 1 {
+				t.Fatalf("mesh request calls = %d, want 1", meshReq.calls)
+			}
+			if meshReq.req.Kind != tt.kind {
+				t.Fatalf("wrong command kind. got %q, want %q", meshReq.req.Kind, tt.kind)
+			}
+			if meshReq.user != user.acct {
+				t.Fatalf("mesh request user = %v, want %v", meshReq.user, user.acct)
+			}
+			if meshReq.msg != msg {
+				t.Fatal("mesh request msg pointer mismatch")
+			}
+			if meshReq.req.Respond == nil {
+				t.Fatal("mesh request missing response callback")
+			}
+			if len(auth.sends) != 0 {
+				t.Fatalf("unexpected immediate local responses: %d", len(auth.sends))
+			}
+		})
+	}
 }
 
 func TestMarketStartProcessStop(t *testing.T) {
@@ -1193,11 +1319,16 @@ func TestMarketStartProcessStop(t *testing.T) {
 	if respMsg == nil {
 		t.Fatalf("no response from market order")
 	}
-	resp, _ := respMsg.Response()
-	result := new(msgjson.OrderResult)
-	err := json.Unmarshal(resp.Result, result)
-	if err != nil {
-		t.Fatalf("unmarshal error: %v", err)
+	if respMsg.ID != reqID {
+		t.Fatalf("response request ID = %d, want %d", respMsg.ID, reqID)
+	}
+	var result msgjson.OrderResult
+	if err := respMsg.UnmarshalResult(&result); err != nil {
+		t.Fatalf("response result: %v", err)
+	}
+	oid := epochOrder.ID()
+	if !bytes.Equal(result.OrderID, oid[:]) {
+		t.Fatalf("response order ID = %x, want %v", result.OrderID, oid)
 	}
 	mo.ServerTime = time.UnixMilli(int64(result.ServerTime))
 
@@ -1311,13 +1442,18 @@ func TestCancel(t *testing.T) {
 	// Get the server time from the response.
 	respMsg := oRig.auth.getSend()
 	if respMsg == nil {
-		t.Fatalf("no response from market order")
+		t.Fatalf("no response from cancel order")
 	}
-	resp, _ := respMsg.Response()
-	result := new(msgjson.OrderResult)
-	err := json.Unmarshal(resp.Result, result)
-	if err != nil {
-		t.Fatalf("unmarshal error: %v", err)
+	if respMsg.ID != reqID {
+		t.Fatalf("response request ID = %d, want %d", respMsg.ID, reqID)
+	}
+	var result msgjson.OrderResult
+	if err := respMsg.UnmarshalResult(&result); err != nil {
+		t.Fatalf("response result: %v", err)
+	}
+	oid := epochOrder.ID()
+	if !bytes.Equal(result.OrderID, oid[:]) {
+		t.Fatalf("response order ID = %x, want %v", result.OrderID, oid)
 	}
 	co.ServerTime = time.UnixMilli(int64(result.ServerTime))
 
@@ -1467,7 +1603,6 @@ func makeCORevealed(writer *ordertest.Writer, targetID order.OrderID) (*order.Ca
 type TBookSource struct {
 	buys  []*order.LimitOrder
 	sells []*order.LimitOrder
-	feed  chan *updateSignal
 	base  uint32
 	quote uint32
 }
@@ -1482,7 +1617,6 @@ func (s *TBookSource) Quote() uint32 {
 
 func tNewBookSource(base, quote uint32) *TBookSource {
 	return &TBookSource{
-		feed:  make(chan *updateSignal, 16),
 		base:  base,
 		quote: quote,
 	}
@@ -1490,9 +1624,6 @@ func tNewBookSource(base, quote uint32) *TBookSource {
 
 func (s *TBookSource) Book() (eidx int64, buys []*order.LimitOrder, sells []*order.LimitOrder) {
 	return 13241324, s.buys, s.sells
-}
-func (s *TBookSource) OrderFeed() <-chan *updateSignal {
-	return s.feed
 }
 
 type TLink struct {
@@ -1518,7 +1649,7 @@ func tNewLink() *TLink {
 		ip:          dex.NewIPKey("[1:800:dead:cafe::]"),
 		addr:        "testaddr",
 		sends:       make([]*msgjson.Message, 0),
-		sendTrigger: make(chan struct{}, 1),
+		sendTrigger: make(chan struct{}, 32),
 	}
 }
 
@@ -1814,17 +1945,10 @@ func TestRouter(t *testing.T) {
 	orders = checkResponse("second link, market 1", mktName1, sub.ID, link2)
 	checkBook(src1, msgjson.StandingOrderNum, "second link, market 1", orders...)
 
-	// An epoch notification sent on market 1's channel should arrive at both
-	// clients.
+	// An accepted order should notify both subscribers and update the book epoch.
 	lo := makeLO(buyer1, mkRate1(0.8, 1.0), randLots(10), order.ImmediateTiF)
-	sig := &updateSignal{
-		action: epochAction,
-		data: sigDataEpochOrder{
-			order:    lo,
-			epochIdx: 12345678,
-		},
-	}
-	src1.feed <- sig
+	epochIdx := router.books[mktName1].epoch() + 1
+	router.applyOrderAcceptedEvent(router.books[mktName1], epochOrderNote(lo, mktName1, epochIdx), epochIdx)
 
 	epochNote := getEpochNoteFromLink(t, link1)
 	compareLO(&epochNote.BookOrderNote, lo, msgjson.ImmediateOrderNum, "epoch notification, link1")
@@ -1835,10 +1959,17 @@ func TestRouter(t *testing.T) {
 	epochNote = getEpochNoteFromLink(t, link2)
 	compareLO(&epochNote.BookOrderNote, lo, msgjson.ImmediateOrderNum, "epoch notification, link2")
 
-	// just for kicks, checks the epoch is as expected.
-	wantIdx := sig.data.(sigDataEpochOrder).epochIdx
-	if epochNote.Epoch != uint64(wantIdx) {
-		t.Fatalf("wrong epoch. wanted %d, got %d", wantIdx, epochNote.Epoch)
+	if epochNote.Epoch != uint64(epochIdx) {
+		t.Fatalf("wrong epoch. wanted %d, got %d", epochIdx, epochNote.Epoch)
+	}
+	if epochNote.Seq == 0 {
+		t.Fatal("expected non-zero epoch note sequence")
+	}
+	if epochNote.OrderType != msgjson.LimitOrderNum {
+		t.Fatalf("epoch note order type = %d, want %d", epochNote.OrderType, msgjson.LimitOrderNum)
+	}
+	if got := router.books[mktName1].epoch(); got != epochIdx {
+		t.Fatalf("book epoch = %d, want %d", got, epochIdx)
 	}
 
 	// Have both subscribers subscribe to market 2.
@@ -1856,14 +1987,7 @@ func TestRouter(t *testing.T) {
 
 	// Send an epoch update for a market order.
 	mo := makeMO(buyer2, randLots(10))
-	sig = &updateSignal{
-		action: epochAction,
-		data: sigDataEpochOrder{
-			order:    mo,
-			epochIdx: 12345678,
-		},
-	}
-	src2.feed <- sig
+	router.applyOrderAcceptedEvent(router.books[mktName2], epochOrderNote(mo, mktName2, epochIdx), epochIdx)
 
 	epochNote = getEpochNoteFromLink(t, link1)
 	compareTrade(&epochNote.BookOrderNote, mo, "link 1 market 2 epoch update (market order)")
@@ -1872,22 +1996,25 @@ func TestRouter(t *testing.T) {
 	compareTrade(&epochNote.BookOrderNote, mo, "link 2 market 2 epoch update (market order)")
 
 	// Make a new standing limit order with a quantity of at least 3 lots for
-	// the market 2 sell book. Book it with a bookAction, fill 1 lot, and send
-	// an updateRemainingAction update.
+	// the market 2 sell book. Book it with one lot filled, then update its
+	// remaining quantity.
 	lo = makeLO(seller2, mkRate2(1.0, 1.2), randLots(10)+1, order.StandingTiF)
 	lo.FillAmt = mkt2.LotSize
 
-	sig = &updateSignal{
-		action: bookAction,
-		data: sigDataBookedOrder{
-			order:    lo,
-			epochIdx: 12344365,
-		},
-	}
-	src2.feed <- sig
+	router.applyBookedOrder(router.books[mktName2], lo)
 
 	bookNote := getBookNoteFromLink(t, link1)
 	compareLO(bookNote, lo, msgjson.StandingOrderNum, "book notification, link1, market 2")
+	if bookNote.Seq == 0 {
+		t.Fatal("expected non-zero book note sequence")
+	}
+	book := router.books[mktName2]
+	book.mtx.RLock()
+	stored := book.orders[lo.ID()]
+	book.mtx.RUnlock()
+	if stored == nil {
+		t.Fatalf("booked order %v missing from router book", lo.ID())
+	}
 	if bookNote.MarketID != mktName2 {
 		t.Fatalf("wrong market id. wanted %s, got %s", mktName2, bookNote.MarketID)
 	}
@@ -1902,15 +2029,7 @@ func TestRouter(t *testing.T) {
 	// Update the order's remaining quantity. Leave one lot remaining.
 	lo.FillAmt = lo.Quantity - mkt2.LotSize
 
-	sig = &updateSignal{
-		action: updateRemainingAction,
-		data: sigDataUpdateRemaining{
-			order:    lo,
-			epochIdx: 12344365,
-		},
-	}
-
-	src2.feed <- sig
+	router.updateRemaining(router.books[mktName2], lo)
 
 	urNote := getUpdateRemainingNoteFromLink(t, link2)
 	if urNote.Remaining != lo.Remaining() {
@@ -1919,15 +2038,8 @@ func TestRouter(t *testing.T) {
 	// clear the send from client 1
 	link1.getSend()
 
-	// Now unbook the order.
-	sig = &updateSignal{
-		action: unbookAction,
-		data: sigDataUnbookedOrder{
-			order:    lo,
-			epochIdx: 12345678,
-		},
-	}
-	src2.feed <- sig
+	// Now unbook the order and notify subscribers.
+	router.UnbookOrder(mktName2, lo)
 
 	unbookNote := getUnbookNoteFromLink(t, link1)
 	if lo.ID().String() != unbookNote.OrderID.String() {
@@ -1942,6 +2054,13 @@ func TestRouter(t *testing.T) {
 	// Make sure the order is no longer stored in the router's books
 	if router.books[mktName2].orders[lo.ID()] != nil {
 		t.Fatalf("order still in book after unbookAction")
+	}
+
+	// Unbooking an already removed order must not send another notification.
+	seq := router.books[mktName2].subs.lastSeq()
+	router.unbookOrder(router.books[mktName2], lo)
+	if got := router.books[mktName2].subs.lastSeq(); got != seq {
+		t.Fatalf("duplicate removal advanced sequence from %d to %d", seq, got)
 	}
 
 	// Now unsubscribe link 1 from market 1.
@@ -1968,14 +2087,7 @@ func TestRouter(t *testing.T) {
 	}
 
 	mo = makeMO(seller1, randLots(10))
-	sig = &updateSignal{
-		action: epochAction,
-		data: sigDataEpochOrder{
-			order:    mo,
-			epochIdx: 12345678,
-		},
-	}
-	src1.feed <- sig
+	router.applyOrderAcceptedEvent(router.books[mktName1], epochOrderNote(mo, mktName1, epochIdx), epochIdx)
 
 	if link2.getSend() == nil {
 		t.Fatalf("client 2 didn't receive an update after client 1 unsubbed")
@@ -1991,14 +2103,8 @@ func TestRouter(t *testing.T) {
 	// Now epoch a cancel order to client 2.
 	targetID := src1.buys[0].ID()
 	co := makeCO(buyer1, targetID)
-	sig = &updateSignal{
-		action: epochAction,
-		data: sigDataEpochOrder{
-			order:    co,
-			epochIdx: 12345678,
-		},
-	}
-	src1.feed <- sig
+	coNote := epochOrderNote(co, mktName1, epochIdx)
+	router.applyOrderAcceptedEvent(router.books[mktName1], coNote, epochIdx)
 
 	epochNote = getEpochNoteFromLink(t, link2)
 	if epochNote.OrderType != msgjson.CancelOrderNum {
@@ -2013,7 +2119,7 @@ func TestRouter(t *testing.T) {
 
 	// Send another, but err on the send. Check for unsubscribed
 	link2.sendRawErr = dummyError
-	src1.feed <- sig
+	router.applyOrderAcceptedEvent(router.books[mktName1], coNote, epochIdx)
 
 	// Wait for (*BookRouter).sendNote to remove the erroring link from the
 	// subscription conns map.
@@ -2162,13 +2268,10 @@ func TestPriceFeed(t *testing.T) {
 		t.Fatal("spot volume not communicated")
 	}
 
-	rig.source1.feed <- &updateSignal{
-		action: epochReportAction,
-		data: sigDataEpochReport{
-			spot:  &msgjson.Spot{Vol24: 12345},
-			stats: &matcher.MatchCycleStats{},
-		},
-	}
+	rig.router.publishEpochReport(rig.router.books[mktName1], &epochReport{
+		spot:  &msgjson.Spot{Vol24: 12345},
+		stats: &matcher.MatchCycleStats{},
+	})
 
 	update := link.getSend()
 	spot = new(msgjson.Spot)
@@ -2214,17 +2317,25 @@ func TestParcelLimits(t *testing.T) {
 		return calc.Parcels(settlingWeight+lo.Quantity, 0, lotSize, 1)
 	}
 
+	asOf := time.UnixMilli(123456789)
+	oRig.auth.onUserReputationAt = func(got time.Time) {
+		if !got.Equal(asOf) {
+			t.Fatalf("reputation lookup time = %v, want %v", got, asOf)
+		}
+	}
+	t.Cleanup(func() { oRig.auth.onUserReputationAt = nil })
+
 	ensureSuccess := func() {
 		t.Helper()
 		// Single lot should definitely be ok.
-		if ok := oRig.router.CheckParcelLimit(oRecord.order.User(), "dcr_btc", calcParcels); !ok {
-			t.Fatalf("not ok")
+		if ok, err := oRig.router.CheckParcelLimit(oRecord.order.User(), "dcr_btc", asOf, calcParcels); err != nil || !ok {
+			t.Fatalf("not ok (err = %v)", err)
 		}
 	}
 
 	ensureErr := func() {
 		t.Helper()
-		if ok := oRig.router.CheckParcelLimit(oRecord.order.User(), "dcr_btc", calcParcels); ok {
+		if ok, _ := oRig.router.CheckParcelLimit(oRecord.order.User(), "dcr_btc", asOf, calcParcels); ok {
 			t.Fatalf("not error")
 		}
 	}
@@ -2238,6 +2349,13 @@ func TestParcelLimits(t *testing.T) {
 	rep.tier = 0
 	ensureErr()
 	rep.tier = 1
+
+	// A reputation load failure propagates as an error, never as a verdict.
+	rep.err = errors.New("db down")
+	if ok, err := oRig.router.CheckParcelLimit(oRecord.order.User(), "dcr_btc", asOf, calcParcels); err == nil || ok {
+		t.Fatalf("reputation load failure: ok=%v err=%v, want propagated error", ok, err)
+	}
+	rep.err = nil
 
 	var maxParcels uint64 = dex.PerTierBaseParcelLimit // based on score of 0
 	maxMakerQty := lotSize * maxParcels
@@ -2276,4 +2394,28 @@ func TestParcelLimits(t *testing.T) {
 
 	lo.Quantity += lotSize
 	ensureErr()
+}
+
+func (a *TAuth) PreimageSuccess(user account.AccountID, refTime time.Time, oid order.OrderID) {}
+
+func (a *TAuth) MissedPreimage(user account.AccountID, refTime time.Time, oid order.OrderID) {}
+
+func (a *TAuth) SwapSuccess(user account.AccountID, mmid db.MarketMatchID, value uint64, refTime time.Time) {
+}
+
+func (a *TAuth) Inaction(user account.AccountID, step db.Outcome, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID) {
+}
+
+func (a *TAuth) UserReputation(user account.AccountID) (tier int64, score, maxScore int32, err error) {
+	if a.rep.maxScore == 0 {
+		return 1, 30, 60, a.rep.err
+	}
+	return a.rep.tier, a.rep.score, a.rep.maxScore, a.rep.err
+}
+
+func (a *TAuth) RecordCompletedOrder(account.AccountID, order.OrderID, time.Time) {}
+
+func (a *TAuth) RecordCancel(aid account.AccountID, coid, oid order.OrderID, epochGap int32, t time.Time) {
+	a.cancelOrder = coid
+	a.canceledOrder = oid
 }

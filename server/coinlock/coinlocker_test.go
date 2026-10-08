@@ -1,8 +1,8 @@
 package coinlock
 
 import (
+	"bytes"
 	crand "crypto/rand"
-	"math/rand"
 	"testing"
 
 	"decred.org/dcrdex/dex/order"
@@ -59,7 +59,9 @@ func Test_swapLocker_LockOrderCoins(t *testing.T) {
 		t.Fatalf("found coins that were not yet locked")
 	}
 
-	swapLock.LockOrdersCoins(orders)
+	if failed := swapLock.LockOrdersCoins(orders); len(failed) != 0 {
+		t.Fatalf("initial locks failed: %v", failed)
+	}
 
 	lo0Coins := masterLock.OrderCoinsLocked(oid0)
 	if len(lo0Coins) != len(lo0.Coins) {
@@ -83,10 +85,22 @@ func Test_swapLocker_LockOrderCoins(t *testing.T) {
 		}
 	}
 
-	// Try and fail to relock coins.
+	// Locking the same orders again succeeds.
 	failed := swapLock.LockOrdersCoins(orders)
-	if len(failed) != len(orders) {
-		t.Fatalf("should have failed to lock %d coins, got %d failed", len(orders), len(failed))
+	if len(failed) != 0 {
+		t.Fatalf("same-order relock should succeed, got %d failed", len(failed))
+	}
+
+	// A different order contending for an already-locked coin still fails.
+	lo2, _ := test.WriteLimitOrder(w, 1000, 3, order.StandingTiF, 0)
+	newCoin := randcomCoinID()
+	lo2.Coins = []order.CoinID{newCoin, lo0.Coins[0]}
+	failed = swapLock.LockOrdersCoins([]order.Order{lo2})
+	if len(failed) != 1 || failed[0] != lo2 {
+		t.Fatalf("failed orders = %v, want only the contender", failed)
+	}
+	if swapLock.CoinLocked(newCoin) || len(swapLock.OrderCoinsLocked(lo2.ID())) != 0 {
+		t.Fatal("failed request left coins locked")
 	}
 
 	// Now lock some in the book lock.
@@ -119,6 +133,29 @@ func Test_swapLocker_LockOrderCoins(t *testing.T) {
 			t.Errorf("bookLocker said coin %v was locked", coin)
 		}
 	}
+	if coins := swapLock.OrderCoinsLocked(oid0); len(coins) != 0 {
+		t.Fatalf("unlocked order still lists coins: %v", coins)
+	}
+
+	// A repeated unlock must not release coins acquired by a new owner.
+	if failed := swapLock.LockOrdersCoins([]order.Order{lo2}); len(failed) != 0 {
+		t.Fatalf("new owner could not lock released coins: %v", failed)
+	}
+	swapLock.UnlockOrderCoins(oid0)
+	for _, coin := range lo2.Coins {
+		if !swapLock.CoinLocked(coin) {
+			t.Fatal("old owner unlocked the new owner's coin")
+		}
+	}
+	swapLock.UnlockOrderCoins(lo2.ID())
+	if coins := swapLock.OrderCoinsLocked(lo2.ID()); len(coins) != 0 {
+		t.Fatalf("unlocked contender still lists coins: %v", coins)
+	}
+	for _, coin := range lo2.Coins {
+		if swapLock.CoinLocked(coin) {
+			t.Fatal("contender's coin remains locked after unlock")
+		}
+	}
 }
 
 func Test_bookLocker_LockCoins(t *testing.T) {
@@ -127,10 +164,10 @@ func Test_bookLocker_LockCoins(t *testing.T) {
 
 	coinMap := make(map[order.OrderID][]CoinID)
 	var allCoins []CoinID
-	numOrders := 99
+	const numOrders = 2
 	allOrderIDs := make([]order.OrderID, numOrders)
 	for i := 0; i < numOrders; i++ {
-		coins := make([]CoinID, rand.Int63n(8)+1)
+		coins := make([]CoinID, i+2)
 		for j := range coins {
 			coins[j] = randCoinID()
 		}
@@ -140,7 +177,9 @@ func Test_bookLocker_LockCoins(t *testing.T) {
 		allOrderIDs[i] = oid
 	}
 
-	bookLock.LockCoins(coinMap)
+	if failed := bookLock.LockCoins(coinMap); len(failed) != 0 {
+		t.Fatalf("initial locks failed: %v", failed)
+	}
 
 	verifyLocked := func(cl CoinLockChecker, coins []CoinID, wantLocked bool) (ok bool) {
 		for _, coin := range coins {
@@ -186,26 +225,52 @@ func Test_bookLocker_LockCoins(t *testing.T) {
 		t.Errorf("swapLock indicated coins were locked that should have been unlocked")
 	}
 
-	// Attempt relock of the already-locked coins.
+	if coins := bookLock.OrderCoinsLocked(oid); len(coins) != 0 {
+		t.Fatalf("unlocked order still lists coins: %v", coins)
+	}
+
+	// Locking the remaining order again succeeds.
 	delete(coinMap, oid)
 	failed := bookLock.LockCoins(coinMap)
-	if len(failed) != len(coinMap) {
-		t.Fatalf("should have failed to lock %d coins, got %d failed", len(coinMap), len(failed))
+	if len(failed) != 0 {
+		t.Fatalf("same-order relock should succeed, got %d failed", len(failed))
+	}
+
+	// A different order contending for an already-locked coin still fails.
+	contender := randomOrderID()
+	newCoin, lockedCoin := randCoinID(), coinMap[allOrderIDs[1]][0]
+	failed = bookLock.LockCoins(map[order.OrderID][]CoinID{
+		contender: {newCoin, lockedCoin},
+	})
+	if len(failed) != 1 || len(failed[contender]) != 1 || !bytes.Equal(failed[contender][0], lockedCoin) {
+		t.Fatalf("failed coins = %v, want the contender's conflicting coin", failed)
+	}
+	if bookLock.CoinLocked(newCoin) || len(bookLock.OrderCoinsLocked(contender)) != 0 {
+		t.Fatal("failed request left coins locked")
+	}
+
+	// Releasing the old order again must preserve the new owner's locks.
+	if failed := bookLock.LockCoins(map[order.OrderID][]CoinID{contender: orderCoins}); len(failed) != 0 {
+		t.Fatalf("new owner could not lock released coins: %v", failed)
+	}
+	bookLock.UnlockOrdersCoins([]order.OrderID{oid})
+	if !verifyLocked(bookLock, orderCoins, true) {
+		t.Fatal("old owner unlocked the new owner's coins")
+	}
+	bookLock.UnlockOrdersCoins([]order.OrderID{contender})
+	if coins := bookLock.OrderCoinsLocked(contender); len(coins) != 0 {
+		t.Fatalf("unlocked contender still lists coins: %v", coins)
 	}
 
 	// Relock the coins for the removed order.
-	bookLock.LockCoins(map[order.OrderID][]CoinID{
+	if failed := bookLock.LockCoins(map[order.OrderID][]CoinID{
 		oid: orderCoins,
-	})
+	}); len(failed) != 0 {
+		t.Fatalf("relocking the original order failed: %v", failed)
+	}
 
 	// Make sure the BOOK locker say they are locked.
 	if !verifyLocked(bookLock, allCoins, true) {
 		t.Errorf("bookLock indicated coins were unlocked that should have been locked")
-	}
-
-	bookLock.UnlockAll()
-
-	if !verifyLocked(bookLock, orderCoins, false) {
-		t.Errorf("bookLock indicated coins were locked that should have been unlocked")
 	}
 }

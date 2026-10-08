@@ -3,7 +3,10 @@ package account
 import (
 	"bytes"
 	"encoding/hex"
+	"encoding/json"
 	"testing"
+
+	"decred.org/dcrdex/dex/encode"
 )
 
 func TestNewAccountFromPubKey(t *testing.T) {
@@ -81,5 +84,24 @@ func TestNewID(t *testing.T) {
 			t.Errorf("[NewID #%d] expected id %v, got %v",
 				idx+1, hex.EncodeToString(tc.id), hex.EncodeToString(id[:]))
 		}
+	}
+}
+
+func TestAccountIDJSONRoundTrip(t *testing.T) {
+	var want AccountID
+	copy(want[:], encode.RandomBytes(len(want)))
+
+	enc, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+
+	var got AccountID
+	if err := json.Unmarshal(enc, &got); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+
+	if got != want {
+		t.Fatalf("wrong account id after round trip. got %s, want %s", got, want)
 	}
 }

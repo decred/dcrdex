@@ -67,6 +67,21 @@ func (oid OrderID) MarshalJSON() ([]byte, error) {
 	return json.Marshal(oid.String())
 }
 
+// UnmarshalJSON satisfies the json.Unmarshaler interface, and expects the id
+// to be encoded as a hex string.
+func (oid *OrderID) UnmarshalJSON(data []byte) error {
+	var sid string
+	if err := json.Unmarshal(data, &sid); err != nil {
+		return err
+	}
+	decoded, err := IDFromHex(sid)
+	if err != nil {
+		return err
+	}
+	*oid = decoded
+	return nil
+}
+
 // Bytes returns the order ID as a []byte.
 func (oid OrderID) Bytes() []byte {
 	return oid[:]

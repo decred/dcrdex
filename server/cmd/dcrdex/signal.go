@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 )
 
 // shutdownRequested checks if the Done channel of the given context has been
@@ -27,13 +28,17 @@ func shutdownRequested(ctx context.Context) bool {
 
 var (
 	// shutdownSignal is closed whenever shutdown is invoked through an
-	// interrupt signal. Any contexts created using withShutdownChannel are
-	// canceled when this is closed.
+	// interrupt signal or requestShutdown call. Any contexts created using
+	// withShutdownCancel are canceled when this is closed.
+	//
+	// The channel close is guarded with shutdownOnce so repeated shutdown
+	// requests from signals and internal callers are safe.
 	shutdownSignal = make(chan struct{})
+	shutdownOnce   sync.Once
 )
 
 // withShutdownCancel creates a copy of a context that is canceled whenever
-// shutdown is invoked through an interrupt signal or from an JSON-RPC stop
+// shutdown is invoked through an interrupt signal or an internal shutdown
 // request.
 func withShutdownCancel(ctx context.Context) context.Context {
 	ctx, cancel := context.WithCancel(ctx)
@@ -42,6 +47,17 @@ func withShutdownCancel(ctx context.Context) context.Context {
 		cancel()
 	}()
 	return ctx
+}
+
+// requestShutdown triggers shutdown for all contexts created with
+// withShutdownCancel. It is safe to call multiple times.
+func requestShutdown(reason string) {
+	shutdownOnce.Do(func() {
+		if reason != "" {
+			log.Warnf("Shutdown requested: %s", reason)
+		}
+		close(shutdownSignal)
+	})
 }
 
 // shutdownListener listens for shutdown requests and cancels all contexts
@@ -56,7 +72,7 @@ func shutdownListener() {
 	fmt.Printf("Received signal (%s). Shutting down...\n", sig)
 
 	// Cancel all contexts created from withShutdownCancel.
-	close(shutdownSignal)
+	requestShutdown("")
 
 	// Listen for any more shutdown signals and log that shutdown has already
 	// been signaled.

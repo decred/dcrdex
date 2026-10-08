@@ -33,6 +33,7 @@ import (
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/db/driver/pg"
 	"decred.org/dcrdex/server/market"
+	"decred.org/dcrdex/server/mesh"
 	"decred.org/dcrdex/server/noderelay"
 	"decred.org/dcrdex/server/swap"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -415,6 +416,8 @@ type RPCConfig = comms.RPCConfig
 
 // DexConf is the configuration data required to create a new DEX.
 type DexConf struct {
+	// RequestShutdown requests server shutdown if the mesh service halts.
+	RequestShutdown  func(string)
 	DataDir          string
 	LogBackend       *dex.LoggerMaker
 	Markets          []*dex.MarketInfo
@@ -460,6 +463,7 @@ func (ss *subsystem) stop() {
 // DEX is the DEX manager, which creates and controls the lifetime of all
 // components of the DEX.
 type DEX struct {
+	meshSvc     *mesh.Service
 	network     dex.Network
 	markets     map[string]*market.Market
 	assets      map[uint32]*swap.SwapperAsset
@@ -517,31 +521,6 @@ func newConfigResponse(cfg *DexConf, bondAssets map[string]*msgjson.BondAsset,
 	}, nil
 }
 
-func (cr *configResponse) setMktSuspend(name string, finalEpoch uint64, persist bool) {
-	for _, mkt := range cr.configMsg.Markets {
-		if mkt.Name == name {
-			mkt.MarketStatus.FinalEpoch = finalEpoch
-			mkt.MarketStatus.Persist = &persist
-			cr.remarshal()
-			return
-		}
-	}
-	log.Errorf("Failed to update MarketStatus for market %q", name)
-}
-
-func (cr *configResponse) setMktResume(name string, startEpoch uint64) (epochLen uint64) {
-	for _, mkt := range cr.configMsg.Markets {
-		if mkt.Name == name {
-			mkt.MarketStatus.StartEpoch = startEpoch
-			mkt.MarketStatus.FinalEpoch = 0
-			cr.remarshal()
-			return mkt.EpochLen
-		}
-	}
-	log.Errorf("Failed to update MarketStatus for market %q", name)
-	return 0
-}
-
 func (cr *configResponse) remarshal() {
 	encResult, err := json.Marshal(cr.configMsg)
 	if err != nil {
@@ -596,18 +575,42 @@ type Bonder interface {
 		bondPubKeyHash []byte, lockTime int64, acct account.AccountID, err error)
 }
 
+// lockersForBackend returns book and swap lockers for OutputTracker backends.
+func lockersForBackend(be asset.Backend, master *coinlock.MasterCoinLocker) (book, swap coinlock.CoinLocker) {
+	if be == nil {
+		return nil, nil
+	}
+	if _, ok := be.(asset.OutputTracker); !ok {
+		return nil, nil
+	}
+	return master.Book(), master.Swap()
+}
+
+func newSwapperAsset(ba *asset.BackedAsset, master *coinlock.MasterCoinLocker) *swap.SwapperAsset {
+	_, swapLocker := lockersForBackend(ba.Backend, master)
+	return &swap.SwapperAsset{BackedAsset: ba, Locker: swapLocker}
+}
+
 // NewDEX creates the dex manager and starts all subsystems. Use Stop to
 // shutdown cleanly. The Context is used to abort setup.
+//
 //  1. Validate each specified asset.
 //  2. Create CoinLockers for each asset.
 //  3. Create and start asset backends.
 //  4. Create the archivist and connect to the storage backend.
 //  5. Create the authentication manager.
-//  6. Create and start the Swapper.
-//  7. Create and start the markets.
+//  6. Create the Swapper.
+//  7. Create the markets (their Run loops start as mesh master workers in
+//     step 10; state loads via the mesh state loaders).
 //  8. Create and start the book router, and create the order router.
-//  9. Create and start the comms server.
+//  9. Create the mesh node.
+//  10. Start the mesh subsystem, which starts master workers when this node
+//     is master.
+//  11. Start the comms server.
 func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
+	if cfg.RequestShutdown == nil {
+		return nil, fmt.Errorf("shutdown callback is required")
+	}
 	var subsystems []subsystem
 	startSubSys := func(name string, rc any) (err error) {
 		subsys := subsystem{name: name}
@@ -826,11 +829,6 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			return err
 		}
 
-		var coinLocker coinlock.CoinLocker
-		if _, isAccountRedeemer := be.(asset.AccountBalancer); isAccountRedeemer {
-			coinLocker = dexCoinLocker.AssetLocker(assetID).Swap()
-		}
-
 		ba := &asset.BackedAsset{
 			Asset: dex.Asset{
 				ID:         assetID,
@@ -844,10 +842,12 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		}
 
 		backedAssets[assetID] = ba
-		lockableAssets[assetID] = &swap.SwapperAsset{
-			BackedAsset: ba,
-			Locker:      coinLocker,
+		lockableAssets[assetID] = newSwapperAsset(ba, dexCoinLocker.AssetLocker(assetID))
+		swapLockerKind := "nil"
+		if lockableAssets[assetID].Locker != nil {
+			swapLockerKind = "utxo"
 		}
+		log.Infof("asset %s (%d) swap_locker=%s", symbol, assetID, swapLockerKind)
 		feeMgr.AddFetcher(ba)
 
 		// Prepare assets portion of config response.
@@ -892,13 +892,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		return nil, err
 	}
 
-	// Create the user order unbook dispatcher for the AuthManager.
 	markets := make(map[string]*market.Market, len(cfg.Markets))
-	userUnbookFun := func(user account.AccountID) {
-		for _, mkt := range markets {
-			mkt.UnbookUserOrders(user)
-		}
-	}
 
 	bondChecker := func(ctx context.Context, assetID uint32, version uint16, coinID []byte) (amt, lockTime, confs int64,
 		acct account.AccountID, err error) {
@@ -940,8 +934,6 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		BondTxParser:     bondTxParser,
 		BondChecker:      bondChecker,
 		BondExpiry:       uint64(dex.BondExpiry(cfg.Network)),
-		UserUnbooker:     userUnbookFun,
-		MiaUserTimeout:   cfg.BroadcastTimeout,
 		CancelThreshold:  cfg.CancelThreshold,
 		FreeCancels:      cfg.FreeCancels,
 		PenaltyThreshold: cfg.PenaltyThreshold,
@@ -950,6 +942,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	}
 
 	authMgr := auth.NewAuthManager(&authCfg)
+
 	log.Infof("Cancellation rate threshold %f, new user grace period %d cancels",
 		cfg.CancelThreshold, authMgr.GraceLimit())
 	log.Infof("MIA user order unbook timeout %v", cfg.BroadcastTimeout)
@@ -957,6 +950,8 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		log.Infof("Cancellations are NOT COUNTED (the cancellation rate threshold is ignored).")
 	}
 	log.Infof("Penalty threshold is %v", cfg.PenaltyThreshold)
+
+	var bookRouter *market.BookRouter
 
 	// Create a swapDone dispatcher for the Swapper.
 	swapDone := func(ord order.Order, match *order.Match, fail bool) {
@@ -967,12 +962,12 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		}
 		mkt := markets[name]
 		if mkt == nil {
-			// markets are populated after the Swapper is created, so
-			// this is expected for matches revoked during startup.
-			log.Warnf("swapDone: no market %q for order %v (match may have been revoked during initialization)", name, ord.ID())
+			log.Errorf("swapDone: no market %q for order %v", name, ord.ID())
 			return
 		}
-		mkt.SwapDone(ord, match, fail)
+		if removed := mkt.SwapDone(ord, match, fail); removed != nil {
+			bookRouter.UnbookOrder(name, removed)
+		}
 	}
 
 	// Create the swapper.
@@ -985,9 +980,6 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		LockTimeTaker:    dex.LockTimeTaker(cfg.Network),
 		LockTimeMaker:    dex.LockTimeMaker(cfg.Network),
 		SwapDone:         swapDone,
-		NoResume:         cfg.NoResumeSwaps,
-		// TODO: set the AllowPartialRestore bool to allow startup with a
-		// missing asset backend if necessary in an emergency.
 	}
 
 	swapper, err := swap.NewSwapper(swapperCfg)
@@ -1002,43 +994,21 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		return nil, err
 	}
 
-	// Because the dexBalancer relies on the marketTunnels map, and NewMarket
-	// checks necessary balances for account-based assets using the dexBalancer,
-	// that means that each market can only query orders for the markets that
-	// were initialized before it was, which is fine, but notable. The
-	// resulting behavior is that a user could have orders involving an
-	// account-based asset approved for re-booking on one market, but have
-	// orders rejected on a market involving the same asset created afterwards,
-	// since the later balance query is accounting for the earlier market.
-	//
-	// The current behavior is to reject all orders for the market if the
-	// account balance is too low to support them all, though an algorithm could
-	// be developed to do reject only some orders, based on available funding.
-	//
-	// This pattern is only safe because the markets are not Run until after
-	// they are all instantiated, so we are synchronous in our use of the
-	// marketTunnels map.
 	marketTunnels := make(map[string]market.MarketTunnel, len(cfg.Markets))
 	pendingAccounters := make(map[string]market.PendingAccounter, len(cfg.Markets))
 
-	dexBalancer, err := market.NewDEXBalancer(pendingAccounters, backedAssets, swapper)
+	dexBalancer, err := market.NewDEXBalancer(backedAssets, swapper)
 	if err != nil {
 		return nil, fmt.Errorf("NewDEXBalancer error: %w", err)
 	}
 
 	// Markets
 	var orderRouter *market.OrderRouter
-	usersWithOrders := make(map[account.AccountID]struct{})
 	for _, mktInf := range cfg.Markets {
 		// nilness of the coin locker signals account-based asset.
-		var baseCoinLocker, quoteCoinLocker coinlock.CoinLocker
 		b, q := backedAssets[mktInf.Base], backedAssets[mktInf.Quote]
-		if _, ok := b.Backend.(asset.OutputTracker); ok {
-			baseCoinLocker = dexCoinLocker.AssetLocker(mktInf.Base).Book()
-		}
-		if _, ok := q.Backend.(asset.OutputTracker); ok {
-			quoteCoinLocker = dexCoinLocker.AssetLocker(mktInf.Quote).Book()
-		}
+		baseCoinLocker, _ := lockersForBackend(b.Backend, dexCoinLocker.AssetLocker(mktInf.Base))
+		quoteCoinLocker, _ := lockersForBackend(q.Backend, dexCoinLocker.AssetLocker(mktInf.Quote))
 
 		// Calculate a minimum market rate that avoids dust.
 		// quote_dust = base_lot * min_rate / rate_encoding_factor
@@ -1057,8 +1027,8 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			CoinLockerQuote: quoteCoinLocker,
 			DataCollector:   dataAPI,
 			Balancer:        dexBalancer,
-			CheckParcelLimit: func(user account.AccountID, calcParcels market.MarketParcelCalculator) bool {
-				return orderRouter.CheckParcelLimit(user, mktInf.Name, calcParcels)
+			CheckParcelLimit: func(user account.AccountID, asOf time.Time, calcParcels market.MarketParcelCalculator) (bool, error) {
+				return orderRouter.CheckParcelLimit(user, mktInf.Name, asOf, calcParcels)
 			},
 			MinimumRate: minRate,
 		})
@@ -1073,35 +1043,15 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		if err != nil {
 			return nil, fmt.Errorf("DataSource.AddMarketSource: %w", err)
 		}
-
-		// Having loaded the book, get the accounts owning the orders.
-		_, buys, sells := mkt.Book()
-		for _, lo := range buys {
-			usersWithOrders[lo.AccountID] = struct{}{}
-		}
-		for _, lo := range sells {
-			usersWithOrders[lo.AccountID] = struct{}{}
-		}
 	}
 
-	// Having enumerated all users with booked orders, configure the AuthManager
-	// to expect them to connect in a certain time period.
-	authMgr.ExpectUsers(usersWithOrders, cfg.BroadcastTimeout)
+	dexBalancer.SetMarkets(pendingAccounters)
 
-	// Start the AuthManager and Swapper subsystems after populating the markets
-	// map used by the unbook callbacks, and setting the AuthManager's unbook
-	// timers for the users with currently booked orders.
-	startSubSys("Auth manager", authMgr)
-	startSubSys("Swapper", swapper)
-
-	// Set start epoch index for each market. Also create BookSources for the
-	// BookRouter, and MarketTunnels for the OrderRouter.
-	now := time.Now().UnixMilli()
+	// Market status is refreshed after mesh loads the stored lifecycle.
 	bookSources := make(map[string]market.BookSource, len(cfg.Markets))
 	cfgMarkets := make([]*msgjson.Market, 0, len(cfg.Markets))
 	for name, mkt := range markets {
-		startEpochIdx := 1 + now/int64(mkt.EpochDuration())
-		mkt.SetStartEpochIdx(startEpochIdx)
+		status := mkt.Status()
 		bookSources[name] = mkt
 		cfgMarkets = append(cfgMarkets, &msgjson.Market{
 			Name:            name,
@@ -1113,13 +1063,14 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			MarketBuyBuffer: mkt.MarketBuyBuffer(),
 			ParcelSize:      mkt.ParcelSize(),
 			MarketStatus: msgjson.MarketStatus{
-				StartEpoch: uint64(startEpochIdx),
+				StartEpoch: uint64(status.StartEpoch),
 			},
 		})
 	}
 
 	// Book router
-	bookRouter := market.NewBookRouter(bookSources, feeMgr, server.Route)
+	bookRouter = market.NewBookRouter(bookSources, feeMgr, server.Route)
+	startSubSys("Auth manager", authMgr)
 	startSubSys("BookRouter", bookRouter)
 
 	// Register the MM snapshot subscription handler once for all markets.
@@ -1147,11 +1098,6 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	// The data API gets the order book from the book router.
 	dataAPI.SetBookSource(bookRouter)
 
-	// Market, now that book router is running.
-	for name, mkt := range markets {
-		startSubSys(marketSubSysName(name), mkt)
-	}
-
 	// Order router
 	orderRouter = market.NewOrderRouter(&market.OrderRouterConfig{
 		Assets:       backedAssets,
@@ -1163,6 +1109,81 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	})
 	startSubSys("OrderRouter", orderRouter)
 
+	commands := authMgr.Commands()
+	if err := mergeMeshCommands(commands, orderRouter.Commands()); err != nil {
+		return nil, err
+	}
+	if err := mergeMeshCommands(commands, market.LifecycleCommands(markets)); err != nil {
+		return nil, err
+	}
+	if err := mergeMeshCommands(commands, swapper.Commands()); err != nil {
+		return nil, err
+	}
+	var dexMgr *DEX
+	lifecycleUpdated := newLifecycleUpdated(func() *DEX { return dexMgr })
+	events := authMgr.Events()
+	if err := mergeMeshEvents(events, market.Events(markets, bookRouter, authMgr.SendIfLocal, lifecycleUpdated)); err != nil {
+		return nil, err
+	}
+	if err := mergeMeshEvents(events, swapper.Events()); err != nil {
+		return nil, err
+	}
+	// Restore markets before loading their order books and candle caches.
+	mktNames := make([]string, 0, len(markets))
+	for name := range markets {
+		mktNames = append(mktNames, name)
+	}
+	sort.Strings(mktNames)
+	var stateLoaders []mesh.StateLoader
+	masterWorkers := newMasterWorkers(swapper.Run, swapper.EnableInactionChecks, markets)
+	for _, name := range mktNames {
+		mkt := markets[name]
+		stateLoaders = append(stateLoaders, mesh.StateLoader{
+			Name: "market " + name,
+			Load: func(context.Context) error { return mkt.LoadState() },
+		})
+	}
+	stateLoaders = append(stateLoaders,
+		mesh.StateLoader{
+			Name: "Swapper",
+			Load: func(context.Context) error {
+				if cfg.NoResumeSwaps {
+					return nil
+				}
+				return swapper.RestoreActiveSwaps(false)
+			},
+		},
+		mesh.StateLoader{
+			Name: "BookRouter",
+			Load: func(context.Context) error {
+				bookRouter.SeedBooks()
+				return nil
+			},
+		},
+		mesh.StateLoader{
+			Name: "DataAPI",
+			Load: func(context.Context) error { return dataAPI.LoadCaches() },
+		},
+	)
+	meshSvc, err := mesh.NewService(&mesh.ServiceConfig{
+		Commands:       commands,
+		Events:         events,
+		StateLoaders:   stateLoaders,
+		MasterWorkers:  masterWorkers,
+		EventLogReader: storage,
+		Logger:         cfg.LogBackend.NewLogger("MSH", log.Level()),
+		OnHalt:         func(err error) { cfg.RequestShutdown(fmt.Sprintf("mesh halted: %v", err)) },
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create mesh service: %w", err)
+	}
+	authMgr.SetMeshService(meshSvc)
+	orderRouter.SetMeshService(meshSvc)
+	swapper.SetMeshService(meshSvc)
+	for _, mkt := range markets {
+		mkt.SetMeshService(meshSvc)
+	}
+
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -1172,7 +1193,8 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		return nil, err
 	}
 
-	dexMgr := &DEX{
+	dexMgr = &DEX{
+		meshSvc:     meshSvc,
 		network:     cfg.Network,
 		markets:     markets,
 		assets:      lockableAssets,
@@ -1205,7 +1227,18 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		rr.With(orderBookParamsParser).Get("/orderbook/{baseSymbol}/{quoteSymbol}", server.NewRouteHandler(msgjson.OrderBookRoute))
 	})
 
+	if err := startSubSys("Mesh", meshSvc); err != nil {
+		return nil, err
+	}
+	if err := meshSvc.WaitUntilReadyForComms(ctx); err != nil {
+		return nil, err
+	}
+	for _, mkt := range markets {
+		dexMgr.updateConfigMarketStatus(mkt.Status())
+	}
 	startSubSys("Comms Server", server)
+
+	dexMgr.subsystems = subsystems
 
 	ready = true // don't shut down on return
 
@@ -1251,14 +1284,14 @@ func (dm *DEX) ConfigMsg() json.RawMessage {
 	return dm.configResp.configEnc
 }
 
-// TODO: for just market running status, the DEX manager should use its
-// knowledge of Market subsystem state.
-func (dm *DEX) MarketRunning(mktName string) (found, running bool) {
+// MarketLifecycleState returns the named market's stored lifecycle state.
+// found is false when the market is unknown.
+func (dm *DEX) MarketLifecycleState(mktName string) (found bool, state db.MarketState) {
 	mkt := dm.markets[mktName]
 	if mkt == nil {
-		return
+		return false, 0
 	}
-	return true, mkt.Running()
+	return true, mkt.LifecycleState()
 }
 
 // MarketStatus returns the market.Status for the named market. If the market is
@@ -1281,66 +1314,17 @@ func (dm *DEX) MarketStatuses() map[string]*market.Status {
 	return statuses
 }
 
-// SuspendMarket schedules a suspension of a given market, with the option to
-// persist the orders on the book (or purge the book automatically on market
-// shutdown). The scheduled final epoch and suspend time are returned. This is a
-// passthrough to the OrderRouter. A TradeSuspension notification is broadcasted
-// to all connected clients.
+// SuspendMarket schedules a market suspension.
 func (dm *DEX) SuspendMarket(name string, tSusp time.Time, persistBooks bool) (suspEpoch *market.SuspendEpoch, err error) {
 	name = strings.ToLower(name)
-
-	// Locate the (running) subsystem for this market.
-	i := dm.findSubsys(marketSubSysName(name))
-	if i == -1 {
-		err = fmt.Errorf("market subsystem %s not found", name)
+	if dm.markets[name] == nil {
+		err = fmt.Errorf("unknown market %s", name)
 		return
 	}
-	if !dm.subsystems[i].ssw.On() {
-		err = fmt.Errorf("market subsystem %s is not running", name)
-		return
-	}
-
-	// Go through the order router since OrderRouter is likely to have market
-	// status tracking built into it to facilitate resume.
-	suspEpoch = dm.orderRouter.SuspendMarket(name, tSusp, persistBooks)
-	if suspEpoch == nil {
-		err = fmt.Errorf("unable to locate market %s", name)
-		return
-	}
-
-	// Update config message with suspend schedule.
-	dm.configRespMtx.Lock()
-	dm.configResp.setMktSuspend(name, uint64(suspEpoch.Idx), persistBooks)
-	dm.configRespMtx.Unlock()
-
-	// Broadcast a TradeSuspension notification to all connected clients.
-	note, errMsg := msgjson.NewNotification(msgjson.SuspensionRoute, msgjson.TradeSuspension{
-		MarketID:    name,
-		FinalEpoch:  uint64(suspEpoch.Idx),
-		SuspendTime: uint64(suspEpoch.End.UnixMilli()),
-		Persist:     persistBooks,
-	})
-	if errMsg != nil {
-		log.Errorf("Failed to create suspend notification: %v", errMsg)
-		// Notification or not, the market is resuming, so do not return error.
-	} else {
-		dm.server.Broadcast(note)
-	}
-	return
+	return market.ExecuteScheduleSuspend(context.Background(), dm.meshSvc, name, tSusp, persistBooks)
 }
 
-func (dm *DEX) findSubsys(name string) int {
-	for i := range dm.subsystems {
-		if dm.subsystems[i].name == name {
-			return i
-		}
-	}
-	return -1
-}
-
-// ResumeMarket launches a stopped market subsystem as early as the given time.
-// The actual time the market will resume depends on the configure epoch
-// duration, as the market only starts at the beginning of an epoch.
+// ResumeMarket schedules a market resumption.
 func (dm *DEX) ResumeMarket(name string, asSoonAs time.Time) (startEpoch int64, startTime time.Time, err error) {
 	name = strings.ToLower(name)
 	mkt := dm.markets[name]
@@ -1348,58 +1332,7 @@ func (dm *DEX) ResumeMarket(name string, asSoonAs time.Time) (startEpoch int64, 
 		err = fmt.Errorf("unknown market %s", name)
 		return
 	}
-
-	// Get the next available start epoch given the earliest allowed time.
-	// Requires the market to be stopped already.
-	startEpoch = mkt.ResumeEpoch(asSoonAs)
-	if startEpoch == 0 {
-		err = fmt.Errorf("unable to resume market %s at time %v", name, asSoonAs)
-		return
-	}
-
-	// Locate the (stopped) subsystem for this market.
-	i := dm.findSubsys(marketSubSysName(name))
-	if i == -1 {
-		err = fmt.Errorf("market subsystem %s not found", name)
-		return
-	}
-	if dm.subsystems[i].ssw.On() {
-		err = fmt.Errorf("market subsystem %s not stopped", name)
-		return
-	}
-
-	// Update config message with resume schedule.
-	dm.configRespMtx.Lock()
-	epochLen := dm.configResp.setMktResume(name, uint64(startEpoch))
-	dm.configRespMtx.Unlock()
-	if epochLen == 0 {
-		return // couldn't set the new start epoch
-	}
-
-	// Configure the start epoch with the Market.
-	startTimeMS := int64(epochLen) * startEpoch
-	startTime = time.UnixMilli(startTimeMS)
-	mkt.SetStartEpochIdx(startEpoch)
-
-	// Relaunch the market.
-	ssw := dex.NewStartStopWaiter(mkt)
-	dm.subsystems[i].ssw = ssw
-	ssw.Start(context.Background())
-
-	// Broadcast a TradeResumption notification to all connected clients.
-	note, errMsg := msgjson.NewNotification(msgjson.ResumptionRoute, msgjson.TradeResumption{
-		MarketID:   name,
-		ResumeTime: uint64(startTimeMS),
-		StartEpoch: uint64(startEpoch),
-	})
-	if errMsg != nil {
-		log.Errorf("Failed to create resume notification: %v", errMsg)
-		// Notification or not, the market is resuming, so do not return error.
-	} else {
-		dm.server.Broadcast(note)
-	}
-
-	return
+	return market.ExecuteScheduleResume(context.Background(), dm.meshSvc, name, asSoonAs)
 }
 
 // AccountInfo returns data for an account.
@@ -1630,4 +1563,100 @@ func parseBaseQuoteIDs(r *http.Request) (baseID, quoteID uint32, errMsg string) 
 		return 0, 0, "unknown quote"
 	}
 	return
+}
+
+// setMktLifecycle projects a market's durable lifecycle row into the served
+// market status.
+func (cr *configResponse) setMktLifecycle(lc *db.MarketLifecycle) {
+	if lc == nil {
+		return
+	}
+	for _, mkt := range cr.configMsg.Markets {
+		if mkt.Name == lc.Market {
+			mkt.MarketStatus.StartEpoch = uint64(lc.StartEpochIdx)
+			mkt.MarketStatus.FinalEpoch = uint64(lc.FinalEpochIdx)
+			mkt.MarketStatus.Persist = lc.PersistBook
+			if lc.RunParams.LotSize != 0 {
+				mkt.LotSize = lc.RunParams.LotSize
+				mkt.RateStep = lc.RunParams.RateStep
+				mkt.ParcelSize = lc.RunParams.ParcelSize
+				mkt.EpochLen = uint64(lc.StartEpochDur)
+			}
+			cr.remarshal()
+			return
+		}
+	}
+	log.Errorf("Failed to update MarketStatus for market %q", lc.Market)
+}
+
+func (dm *DEX) updateConfigMarketLifecycle(lc *db.MarketLifecycle) {
+	dm.configRespMtx.Lock()
+	defer dm.configRespMtx.Unlock()
+	dm.configResp.setMktLifecycle(lc)
+}
+
+// updateConfigMarketStatus updates the served market configuration from
+// the market's current status after startup.
+func (dm *DEX) updateConfigMarketStatus(status *market.Status) {
+	name, err := dex.MarketName(status.Base, status.Quote)
+	if err != nil {
+		log.Errorf("updateConfigMarketStatus: bad market %d-%d: %v", status.Base, status.Quote, err)
+		return
+	}
+	dm.configRespMtx.Lock()
+	defer dm.configRespMtx.Unlock()
+	for _, mkt := range dm.configResp.configMsg.Markets {
+		if mkt.Name == name {
+			mkt.MarketStatus.StartEpoch = uint64(status.StartEpoch)
+			mkt.MarketStatus.FinalEpoch = uint64(status.SuspendEpoch)
+			mkt.MarketStatus.Persist = status.PersistBook
+			mkt.LotSize = status.LotSize
+			mkt.RateStep = status.RateStep
+			mkt.ParcelSize = status.ParcelSize
+			mkt.EpochLen = status.EpochDuration
+			dm.configResp.remarshal()
+			return
+		}
+	}
+	log.Errorf("Failed to update MarketStatus for market %q", name)
+}
+
+// broadcastLifecycleNote sends a suspend/resume schedule note to clients.
+func (dm *DEX) broadcastLifecycleNote(kind, route string, payload any) {
+	note, err := msgjson.NewNotification(route, payload)
+	if err != nil {
+		log.Errorf("Failed to create %s notification: %v", kind, err)
+		return
+	}
+	dm.server.Broadcast(note)
+}
+
+// newLifecycleUpdated keeps served market config current and notifies clients
+// of scheduled suspend/resume. getDEX may be nil during NewDEX construction.
+func newLifecycleUpdated(getDEX func() *DEX) market.LifecycleUpdated {
+	return func(transition market.LifecycleTransition, lc *db.MarketLifecycle) {
+		dexMgr := getDEX()
+		if dexMgr == nil || lc == nil {
+			return
+		}
+		dexMgr.updateConfigMarketLifecycle(lc)
+		switch transition {
+		case market.LifecycleTransitionScheduleSuspend:
+			if lc.PersistBook == nil {
+				return
+			}
+			dexMgr.broadcastLifecycleNote("suspend", msgjson.SuspensionRoute, msgjson.TradeSuspension{
+				MarketID:    lc.Market,
+				FinalEpoch:  uint64(lc.FinalEpochIdx),
+				SuspendTime: uint64(lc.SuspendTime().UnixMilli()),
+				Persist:     *lc.PersistBook,
+			})
+		case market.LifecycleTransitionScheduleResume:
+			dexMgr.broadcastLifecycleNote("resume", msgjson.ResumptionRoute, msgjson.TradeResumption{
+				MarketID:   lc.Market,
+				ResumeTime: uint64(lc.ResumeTime().UnixMilli()),
+				StartEpoch: uint64(lc.PendingEpochIdx),
+			})
+		}
+	}
 }
