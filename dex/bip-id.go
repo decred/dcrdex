@@ -449,6 +449,7 @@ var bipIDs = map[uint32]string{
 	420:   "node",
 	425:   "aion",
 	426:   "bc",
+	434:   "ksm",
 	444:   "phr",
 	447:   "din",
 	457:   "ae",
@@ -623,6 +624,9 @@ var bipIDs = map[uint32]string{
 	200665: "genom",
 	246529: "ats",
 	424242: "x42",
+	// Kusama Asset Hub reserved token range 434000-434999
+	434001: "dusd.ksm",
+	// END Kusama Asset Hub reserved token range
 	666666: "vite",
 	// Polygon reserved token range 966000-966999
 	966001: "usdc.polygon",
