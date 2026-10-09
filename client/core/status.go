@@ -38,7 +38,7 @@ func (c *Core) resolveMatchConflicts(dc *dexConnection, statusConflicts map[orde
 	}
 
 	var msgStatuses []*msgjson.MatchStatusResult
-	err := sendRequest(dc.WsConn, msgjson.MatchStatusRoute, statusRequests, &msgStatuses, DefaultResponseTimeout)
+	err := sendRequest(dc.FailoverWsConn, msgjson.MatchStatusRoute, statusRequests, &msgStatuses, DefaultResponseTimeout)
 	if err != nil {
 		c.log.Errorf("match_status request error for %s requesting %d match statuses: %v",
 			dc.acct.host, len(statusRequests), err)

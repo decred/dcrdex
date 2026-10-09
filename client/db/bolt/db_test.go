@@ -267,6 +267,98 @@ func TestAccounts(t *testing.T) {
 	acct.DEXPubKey = dexKey
 }
 
+func TestUpdateAccount(t *testing.T) {
+	boltdb, shutdown := newTestDB(t)
+	defer shutdown()
+
+	err := boltdb.UpdateAccount("nonexistent.com:7232", func(*db.AccountInfo) bool { return true })
+	if !errors.Is(err, db.ErrAcctNotFound) {
+		t.Fatalf("expected ErrAcctNotFound, got %v", err)
+	}
+
+	acct := dbtest.RandomAccountInfo()
+	host := acct.Host
+	if err := boltdb.CreateAccount(acct); err != nil {
+		t.Fatalf("CreateAccount error: %v", err)
+	}
+
+	// Sequential writers of different fields keep each other's values.
+	endpoints := []*db.MeshEndpoint{{Host: "peer1.example.com:7232", Cert: []byte{0xaa}}}
+	if err := boltdb.UpdateAccount(host, func(ai *db.AccountInfo) bool {
+		ai.MeshEndpoints = endpoints
+		return true
+	}); err != nil {
+		t.Fatalf("mesh UpdateAccount: %v", err)
+	}
+	if err := boltdb.UpdateAccount(host, func(ai *db.AccountInfo) bool {
+		ai.TargetTier = 7
+		return true
+	}); err != nil {
+		t.Fatalf("tier UpdateAccount: %v", err)
+	}
+	stored, err := boltdb.Account(host)
+	if err != nil {
+		t.Fatalf("Account: %v", err)
+	}
+	if stored.TargetTier != 7 {
+		t.Fatalf("tier not stored: %d", stored.TargetTier)
+	}
+	if len(stored.MeshEndpoints) != 1 || stored.MeshEndpoints[0].Host != endpoints[0].Host {
+		t.Fatalf("endpoints not kept: %+v", stored.MeshEndpoints)
+	}
+
+	// Discarded updates must not change fields or certificate bytes.
+	if err := boltdb.UpdateAccount(host, func(ai *db.AccountInfo) bool {
+		ai.TargetTier = 99
+		ai.Cert[0] ^= 0xff
+		return false
+	}); err != nil {
+		t.Fatalf("save=false UpdateAccount: %v", err)
+	}
+	if stored, err = boltdb.Account(host); err != nil {
+		t.Fatalf("Account: %v", err)
+	} else if stored.TargetTier != 7 {
+		t.Fatalf("save=false wrote: tier %d", stored.TargetTier)
+	}
+
+	if !bytes.Equal(stored.Cert, acct.Cert) {
+		t.Fatal("save=false changed the certificate")
+	}
+
+	// Concurrent increments must all be retained.
+	const workers, iterations = 2, 50
+	wantTier := stored.TargetTier + workers*iterations
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	wg.Add(workers)
+	for range workers {
+		go func() {
+			defer wg.Done()
+			<-start
+			for range iterations {
+				if err := boltdb.UpdateAccount(host, func(ai *db.AccountInfo) bool {
+					ai.TargetTier++
+					return true
+				}); err != nil {
+					t.Errorf("tier UpdateAccount: %v", err)
+					return
+				}
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if stored, err = boltdb.Account(host); err != nil {
+		t.Fatalf("Account: %v", err)
+	}
+	if stored.TargetTier != wantTier {
+		t.Fatalf("tier = %d, want %d", stored.TargetTier, wantTier)
+	}
+	if len(stored.MeshEndpoints) != 1 || stored.MeshEndpoints[0].Host != endpoints[0].Host {
+		t.Fatalf("lost endpoint write: %+v", stored.MeshEndpoints)
+	}
+}
+
 func TestToggleAccountStatus(t *testing.T) {
 	boltdb, shutdown := newTestDB(t)
 	defer shutdown()

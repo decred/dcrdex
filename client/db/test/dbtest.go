@@ -33,11 +33,19 @@ func randomPubKey() *secp256k1.PublicKey {
 
 // RandomAccountInfo creates an AccountInfo with random values.
 func RandomAccountInfo() *db.AccountInfo {
+	meshEndpoints := make([]*db.MeshEndpoint, rand.IntN(3))
+	for i := range meshEndpoints {
+		meshEndpoints[i] = &db.MeshEndpoint{
+			Host: ordertest.RandomAddress(),
+			Cert: randBytes(100),
+		}
+	}
 	return &db.AccountInfo{
 		Host: ordertest.RandomAddress(),
 		// LegacyEncKey: randBytes(32),
 		EncKeyV2:         randBytes(32),
 		DEXPubKey:        randomPubKey(),
+		MeshEndpoints:    meshEndpoints,
 		TargetTier:       uint64(rand.IntN(34)),
 		MaxBondedAmt:     uint64(rand.IntN(40e8)),
 		BondAsset:        uint32(rand.IntN(66)),
@@ -260,6 +268,19 @@ func MustCompareAccountInfo(t testKiller, a1, a2 *db.AccountInfo) {
 	if a1.Host != a2.Host {
 		t.Fatalf("Host mismatch. %s != %s", a1.Host, a2.Host)
 	}
+	if len(a1.MeshEndpoints) != len(a2.MeshEndpoints) {
+		t.Fatalf("MeshEndpoints count mismatch. %d != %d", len(a1.MeshEndpoints), len(a2.MeshEndpoints))
+	}
+	for i, endpoint := range a1.MeshEndpoints {
+		other := a2.MeshEndpoints[i]
+		if endpoint.Host != other.Host {
+			t.Fatalf("MeshEndpoints[%d] host mismatch. %q != %q", i, endpoint.Host, other.Host)
+		}
+		if !bytes.Equal(endpoint.Cert, other.Cert) {
+			t.Fatalf("MeshEndpoints[%d] certificate mismatch. %x != %x", i, endpoint.Cert, other.Cert)
+		}
+	}
+
 	if !bytes.Equal(a1.LegacyEncKey, a2.LegacyEncKey) {
 		t.Fatalf("LegacyEncKey mismatch. %x != %x", a1.LegacyEncKey, a2.LegacyEncKey)
 	}

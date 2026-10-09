@@ -282,6 +282,10 @@ var originLocale = map[Topic]*translation{
 		subject:  intl.Translation{T: "Internet Connectivity"},
 		template: intl.Translation{T: "Your internet connection to %s is unstable, check your internet connection", Notes: "args: [host]"},
 	},
+	TopicServerEndpointSwitched: {
+		subject:  intl.Translation{T: "Server endpoint switched"},
+		template: intl.Translation{T: "The connection to %s is now served by endpoint %s.", Notes: "args: [host, endpoint]"},
+	},
 	TopicPenalized: {
 		subject:  intl.Translation{T: "Server has penalized you"},
 		template: intl.Translation{T: "Penalty from DEX at %s\nlast broken rule: %s\ntime: %v\ndetails:\n\"%s\"\n", Notes: "args: [host, rule, time, details]"},

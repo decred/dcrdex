@@ -35,10 +35,14 @@ type DB interface {
 	Account(host string) (*AccountInfo, error)
 	// CreateAccount saves the AccountInfo.
 	CreateAccount(ai *AccountInfo) error
-	// UpdateAccountInfo updates the account info for an existing account with
-	// the same Host as the parameter. If no account exists with this host,
-	// an error is returned.
-	UpdateAccountInfo(ai *AccountInfo) error
+	// UpdateAccount updates the account for host in one write transaction.
+	// The callback receives the stored record and returns true to save its
+	// changes or false to discard them. It must not block or call the DB.
+	// Existing bonds are not loaded. Bonds supplied by the callback are added
+	// or updated; bonds not supplied are left unchanged.
+	// Disabled status is neither loaded nor changed. Returns ErrAcctNotFound
+	// if the account is missing.
+	UpdateAccount(host string, update func(ai *AccountInfo) (save bool)) error
 	// AddBond saves a new Bond or updates an existing bond for a DEX.
 	AddBond(host string, bond *Bond) error
 	// NextBondKeyIndex returns the next bond key index and increments the

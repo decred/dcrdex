@@ -10,7 +10,8 @@ import {
   ConnectionStatus,
   Exchange,
   WalletState,
-  PrepaidBondID
+  PrepaidBondID,
+  ServerEndpointsNote
 } from './registry'
 
 interface Animator {
@@ -43,6 +44,7 @@ export default class DexSettingsPage extends BasePage {
   reputationMeter: ReputationMeter
   animation: Animation
   renewToggle: AniToggle
+  serverEndpointTmpl: PageElement
 
   constructor (body: HTMLElement) {
     super()
@@ -51,6 +53,8 @@ export default class DexSettingsPage extends BasePage {
     const xc = app().exchanges[host]
     const page = this.page = Doc.idDescendants(body)
     this.forms = Doc.applySelector(page.forms, ':scope > form')
+    this.serverEndpointTmpl = page.serverEndpointTmpl
+    Doc.cleanTemplates(page.serverEndpointTmpl)
 
     this.confirmRegisterForm = new forms.ConfirmRegistrationForm(page.confirmRegForm, async () => {
       this.showSuccess(intl.prep(intl.ID_TRADING_TIER_UPDATED))
@@ -183,13 +187,23 @@ export default class DexSettingsPage extends BasePage {
     })
 
     app().registerNoteFeeder({
-      conn: () => { this.setConnectionStatus() },
+      conn: () => {
+        this.setConnectionStatus()
+        this.updateServerEndpoints()
+        app().bindTooltips(page.serverEndpointsList)
+      },
+      serverendpoints: (note: ServerEndpointsNote) => {
+        if (note.host !== this.host) return
+        this.updateServerEndpoints()
+        app().bindTooltips(page.serverEndpointsList)
+      },
       reputation: () => { this.updateReputation() },
       feepayment: () => { this.updateReputation() },
       bondpost: () => { this.updateReputation() }
     })
 
     this.setConnectionStatus()
+    this.updateServerEndpoints()
     this.updateReputation()
   }
 
@@ -400,30 +414,58 @@ export default class DexSettingsPage extends BasePage {
   setConnectionStatus () {
     const page = this.page
     const exchange = app().user.exchanges[this.host]
-    const displayIcons = (connected: boolean) => {
-      if (connected) {
-        Doc.hide(page.disconnectedIcon)
-        Doc.show(page.connectedIcon)
-      } else {
-        Doc.show(page.disconnectedIcon)
-        Doc.hide(page.connectedIcon)
-      }
+    const displayIcon = (icon: PageElement) => {
+      Doc.hide(page.connectedIcon, page.disconnectedIcon)
+      Doc.show(icon)
     }
     if (exchange) {
       switch (exchange.connectionStatus) {
-        case ConnectionStatus.Connected:
-          displayIcons(true)
-          page.connectionStatus.textContent = intl.prep(intl.ID_CONNECTED)
+        case ConnectionStatus.Connected: {
+          displayIcon(page.connectedIcon)
+          const endpoint = exchange.activeEndpoint
+          if (endpoint && endpoint !== exchange.host) {
+            page.connectionStatus.textContent = intl.prep(intl.ID_CONNECTED_VIA_BACKUP_ENDPOINT, { endpoint })
+          } else {
+            page.connectionStatus.textContent = intl.prep(intl.ID_CONNECTED)
+          }
           break
+        }
         case ConnectionStatus.Disconnected:
-          displayIcons(false)
+          displayIcon(page.disconnectedIcon)
           if (this.accountDisabled) page.connectionStatus.textContent = intl.prep(intl.ID_ACCOUNT_DISABLED_MSG)
           else page.connectionStatus.textContent = intl.prep(intl.ID_DISCONNECTED)
           break
         case ConnectionStatus.InvalidCert:
-          displayIcons(false)
+          displayIcon(page.disconnectedIcon)
           page.connectionStatus.textContent = `${intl.prep(intl.ID_DISCONNECTED)} - ${intl.prep(intl.ID_INVALID_CERTIFICATE)}`
       }
+    }
+  }
+
+  /*
+   * updateServerEndpoints lists known endpoints and marks the live connection.
+   */
+  updateServerEndpoints () {
+    const page = this.page
+    const xc = app().user.exchanges[this.host]
+    const endpoints = xc?.serverEndpoints ?? []
+    Doc.empty(page.serverEndpointsList)
+    if (!xc || endpoints.length <= 1) {
+      Doc.hide(page.serverEndpointsBox)
+      return
+    }
+    Doc.show(page.serverEndpointsBox)
+    const live = xc.connectionStatus === ConnectionStatus.Connected ? (xc.activeEndpoint || '') : ''
+    for (const endpoint of endpoints) {
+      const row = this.serverEndpointTmpl.cloneNode(true) as PageElement
+      const tmpl = Doc.parseTemplate(row)
+      tmpl.host.textContent = endpoint
+      const isLive = Boolean(live) && endpoint === live
+      const isRegistered = endpoint === xc.host
+      Doc.setVis(isLive, tmpl.liveIco)
+      Doc.setVis(isRegistered && !isLive, tmpl.registeredBadge)
+      if (!isLive) tmpl.host.classList.add('grey')
+      page.serverEndpointsList.appendChild(row)
     }
   }
 

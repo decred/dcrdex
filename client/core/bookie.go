@@ -303,7 +303,7 @@ func (b *bookie) candles(durStr string, feedID uint32) error {
 		NumCandles: candles.CacheSize,
 	}
 	wireCandles := new(msgjson.WireCandles)
-	err = sendRequest(b.dc.WsConn, msgjson.CandlesRoute, payload, wireCandles, DefaultResponseTimeout)
+	err = sendRequest(b.dc.FailoverWsConn, msgjson.CandlesRoute, payload, wireCandles, DefaultResponseTimeout)
 	if err != nil {
 		return err
 	}
@@ -825,7 +825,7 @@ func handleTradeResumptionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 func (dc *dexConnection) refreshServerConfig() (*msgjson.ConfigResult, error) {
 	// Fetch the updated DEX configuration.
 	cfg := new(msgjson.ConfigResult)
-	err := sendRequest(dc.WsConn, msgjson.ConfigRoute, nil, cfg, DefaultResponseTimeout)
+	err := sendRequest(dc.FailoverWsConn, msgjson.ConfigRoute, nil, cfg, DefaultResponseTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("unable to fetch server config: %w", err)
 	}
@@ -898,7 +898,7 @@ func (dc *dexConnection) refreshServerConfig() (*msgjson.ConfigResult, error) {
 // initial prices.
 func (dc *dexConnection) subPriceFeed() {
 	var spots map[string]*msgjson.Spot
-	err := sendRequest(dc.WsConn, msgjson.PriceFeedRoute, nil, &spots, DefaultResponseTimeout)
+	err := sendRequest(dc.FailoverWsConn, msgjson.PriceFeedRoute, nil, &spots, DefaultResponseTimeout)
 	if err != nil {
 		var msgErr *msgjson.Error
 		// Ignore old servers' errors.

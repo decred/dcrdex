@@ -8,6 +8,7 @@ import (
 	"errors"
 	"testing"
 
+	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
@@ -132,6 +133,22 @@ func TestToggleAccountStatus(t *testing.T) {
 		}
 		tCore.connMtx.Unlock()
 
+		feed := tCore.NotificationFeed()
+		defer feed.ReturnFeed()
+		if !test.wantDisable {
+			rig.acct.toggleAccountStatus(true)
+			rig.db.acct.Host = test.host
+			rig.db.acct.Disabled = false
+			// Keep the disabled connection separate from the new live websocket.
+			oldWS := newTWebsocket()
+			oldWS.setDown(true)
+			rig.dc.FailoverWsConn = oldWS
+			rig.dc.notify = tCore.notify
+			// A view-only account needs no authentication to test the endpoint note.
+			rig.db.acct.EncKeyV2 = nil
+			rig.queueConfig()
+		}
+
 		err := tCore.ToggleAccountStatus(tPW, test.host, test.wantDisable, false)
 		if test.wantErr {
 			if err == nil {
@@ -157,8 +174,22 @@ func TestToggleAccountStatus(t *testing.T) {
 					" got: %v", test.host, *rig.db.disabledHost)
 			}
 		} else {
-			if dc, found := tCore.conns[test.host]; found && dc.acct.isDisabled() {
-				t.Fatal("expected enabled dex account")
+			dc := tCore.conns[test.host]
+			defer dc.connMaster.Disconnect()
+			if dc == rig.dc || dc.acct.isDisabled() {
+				t.Fatal("expected a new enabled dex account")
+			}
+			var enabledNotes int
+			for len(feed.C) > 0 {
+				if note, ok := (<-feed.C).(*ConnEventNote); ok && note.Topic() == TopicDEXEnabled {
+					enabledNotes++
+					if note.ActiveEndpoint != test.host || note.ConnectionStatus != comms.Connected {
+						t.Fatalf("incorrect enabled note: %+v", note)
+					}
+				}
+			}
+			if enabledNotes != 1 {
+				t.Fatalf("got %d enabled notes, want 1", enabledNotes)
 			}
 		}
 	}
@@ -171,12 +202,12 @@ func TestUpdateCert(t *testing.T) {
 	rig.db.acct.LegacyFeeCoin = encode.RandomBytes(32)
 
 	tests := []struct {
-		name                 string
-		host                 string
-		acctErr              bool
-		updateAccountInfoErr bool
-		queueConfig          bool
-		expectError          bool
+		name             string
+		host             string
+		acctErr          bool
+		updateAccountErr bool
+		queueConfig      bool
+		expectError      bool
 	}{
 		{
 			name:        "ok",
@@ -197,20 +228,20 @@ func TestUpdateCert(t *testing.T) {
 			expectError: true,
 		},
 		{
-			name:                 "db update account err",
-			host:                 rig.db.acct.Host,
-			queueConfig:          true,
-			updateAccountInfoErr: true,
-			expectError:          true,
+			name:             "db update account err",
+			host:             rig.db.acct.Host,
+			queueConfig:      true,
+			updateAccountErr: true,
+			expectError:      true,
 		},
 	}
 
 	for _, test := range tests {
-		rig.db.verifyUpdateAccountInfo = false
-		if test.updateAccountInfoErr {
-			rig.db.updateAccountInfoErr = errors.New("")
+		rig.db.verifyUpdateAccount = false
+		if test.updateAccountErr {
+			rig.db.updateAccountErr = errors.New("")
 		} else {
-			rig.db.updateAccountInfoErr = nil
+			rig.db.updateAccountErr = nil
 		}
 		if test.acctErr {
 			rig.db.acctErr = errors.New("")
@@ -231,7 +262,7 @@ func TestUpdateCert(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: unexpected error: %v", test.name, err)
 		}
-		if !rig.db.verifyUpdateAccountInfo {
+		if !rig.db.verifyUpdateAccount {
 			t.Fatalf("%s: expected update account to be called but it was not", test.name)
 		}
 		if !bytes.Equal(randomCert, rig.db.acct.Cert) {

@@ -334,6 +334,7 @@ type trackedTrade struct {
 	change           asset.Coin
 	changeLocked     bool
 	cancel           *trackedCancel
+	cancelInFlight   bool // A cancel submission is awaiting its result.
 	matches          map[order.MatchID]*matchTracker
 	redemptionLocked uint64 // remaining locked of redemptionReserves
 	refundLocked     uint64 // remaining locked of refundReserves
@@ -899,12 +900,9 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match, perMatchAddrs map[
 
 		var mid order.MatchID
 		copy(mid[:], msgMatch.MatchID)
-		// Do not process matches with existing matchTrackers. e.g. In case we
-		// start "extra" matches from the 'connect' response negotiating via
-		// authDEX>readConnectMatches, and a subsequent resent 'match' request
-		// leads us here again or vice versa. Or just duplicate match requests.
+		// Keep the original match and the swap address used to verify its contract.
 		if t.matches[mid] != nil {
-			t.dc.log.Warnf("Skipping match %v that is already negotiating.", mid)
+			t.dc.log.Debugf("Skipping match %v that is already negotiating.", mid)
 			continue
 		}
 
@@ -1093,6 +1091,36 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match, perMatchAddrs map[
 		return fmt.Errorf("failed to update order in db: %w", err)
 	}
 	return nil
+}
+
+// storedSwapAddress returns the match's saved swap address and whether
+// the match is tracked.
+func (t *trackedTrade) storedSwapAddress(mid order.MatchID) (addr string, known bool) {
+	t.mtx.RLock()
+	defer t.mtx.RUnlock()
+	match := t.matches[mid]
+	if match == nil {
+		return "", false
+	}
+	return match.MetaData.SwapAddr, true
+}
+
+// matchAckAddress returns the match's saved swap address. For a recorded
+// cancellation match, it returns an empty address and isCancel = true.
+func (t *trackedTrade) matchAckAddress(mid order.MatchID) (addr string, isCancel bool) {
+	t.mtx.RLock()
+	defer t.mtx.RUnlock()
+	if match := t.matches[mid]; match != nil {
+		return match.MetaData.SwapAddr, false
+	}
+	if t.cancel != nil {
+		for _, mm := range []*msgjson.Match{t.cancel.matches.maker, t.cancel.matches.taker} {
+			if mm != nil && bytes.Equal(mm.MatchID, mid[:]) {
+				return "", true
+			}
+		}
+	}
+	return "", false
 }
 
 func (t *trackedTrade) recalcFilled() (matchFilled, canceled uint64) {
@@ -1318,11 +1346,38 @@ func (t *trackedTrade) deleteStaleCancelOrder() {
 	t.notify(newOrderNote(TopicFailedCancel, subject, details, db.WarningLevel, t.coreOrderInternal()))
 }
 
-// isActive will be true if the trade is booked or epoch, or if any of the
-// matches are still negotiating.
+// beginCancelSend checks that the trade is cancellable and marks a cancel
+// submission in flight. The caller must clear cancelInFlight after the send.
+func (t *trackedTrade) beginCancelSend() error {
+	t.mtx.Lock()
+	defer t.mtx.Unlock()
+	oid := t.ID()
+	if status := t.metaData.Status; status != order.OrderStatusEpoch && status != order.OrderStatusBooked {
+		return fmt.Errorf("order %v not cancellable in status %v", oid, status)
+	}
+	if t.cancelInFlight {
+		return fmt.Errorf("order %s - a cancel submission is already in flight", oid)
+	}
+	t.deleteStaleCancelOrder()
+	if t.cancel != nil {
+		return fmt.Errorf("order %s - only one cancel order can be submitted per order per epoch. "+
+			"still waiting on cancel order %s to match", oid, t.cancel.ID())
+	}
+	t.cancelInFlight = true
+	return nil
+}
+
+// isActive reports whether the order is booked or in an epoch, a cancel
+// submission is pending, or any matches are still active.
 func (t *trackedTrade) isActive() bool {
 	t.mtx.RLock()
 	defer t.mtx.RUnlock()
+
+	// Keep the trade tracked until cancel submission finishes so an
+	// accepted cancel can still answer preimage requests.
+	if t.cancelInFlight {
+		return true
+	}
 
 	// Status of the order itself.
 	if t.metaData.Status == order.OrderStatusBooked ||
@@ -2870,6 +2925,17 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, highestF
 	}
 }
 
+// isRetryableSettlementError identifies failures to retry on a later settlement
+// tick after signAndRequest returns. It also includes duplicate requests that
+// the server is still processing.
+func isRetryableSettlementError(err error) bool {
+	if isRetryableSendErr(err) {
+		return true
+	}
+	var msgErr *msgjson.Error
+	return errors.As(err, &msgErr) && msgErr.Code == msgjson.DuplicateRequestError
+}
+
 // sendInitAsync starts a goroutine to send an `init` request for the specified
 // match and save the server's ack sig to db. Sends a notification if an error
 // occurs while sending the request or validating the server's response.
@@ -2886,9 +2952,14 @@ func (c *Core) sendInitAsync(t *trackedTrade, match *matchTracker, coinID, contr
 	go func() {
 		defer c.wg.Done() // bottom of the stack
 		var err error
+		var transientErr bool
 		defer func() {
 			atomic.StoreUint32(&match.sendingInitAsync, 0)
 			if err != nil {
+				if transientErr {
+					c.log.Warnf("Transient error sending 'init' request for match %s (will retry): %v", match, err)
+					return
+				}
 				corder := t.coreOrder()
 				subject, details := c.formatDetails(TopicInitError, match, err)
 				t.notify(newOrderNote(TopicInitError, subject, details, db.ErrorLevel, corder))
@@ -2938,6 +3009,7 @@ func (c *Core) sendInitAsync(t *trackedTrade, match *matchTracker, coinID, contr
 					c.notify(newOrderNote(TopicMissingMatches, subject, details, db.ErrorLevel, t.coreOrderInternal()))
 				}
 			}
+			transientErr = isRetryableSettlementError(err)
 			err = fmt.Errorf("error sending 'init' message: %w", err)
 			return
 		}
@@ -3208,14 +3280,11 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 	go func() {
 		defer c.wg.Done() // bottom of the stack
 		var err error
-		var transientErr bool // set for connection/timeout errors that will be retried
+		var transientErr bool
 		defer func() {
 			atomic.StoreUint32(&match.sendingRedeemAsync, 0)
 			if err != nil {
 				if transientErr {
-					// Transient connection errors will be retried by
-					// resendPendingRequests on the next tick. Log a warning
-					// instead of sending an ERROR notification.
 					c.log.Warnf("Transient error sending 'redeem' request for match %s (will retry): %v", match, err)
 					return
 				}
@@ -3267,11 +3336,8 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 						numMissing, makeOrderToken(t.token()), t.dc.acct.host)
 					c.notify(newOrderNote(TopicMissingMatches, subject, details, db.ErrorLevel, t.coreOrderInternal()))
 				}
-			} else if errors.Is(err, errTimeout) || strings.Contains(err.Error(), "broken connection") {
-				// Transient connection/timeout errors will be retried by
-				// resendPendingRequests on the next tick.
-				transientErr = true
 			}
+			transientErr = isRetryableSettlementError(err)
 			err = fmt.Errorf("error sending 'redeem' message: %w", err)
 			return
 		}

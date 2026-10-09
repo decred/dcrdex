@@ -52,10 +52,6 @@
       margin: 0 0 0.5rem 0;
     }
 
-    .d-none {
-      display: none;
-    }
-
     .w-50 {
       width: 50%;
     }
@@ -133,6 +129,41 @@
     .fs18 {
       font-size: 18px;
     }
+
+    .okcolor {
+      color: rgb(90, 180, 120);
+    }
+
+    .warncolor {
+      color: rgb(210, 170, 80);
+    }
+
+    .mesh-row {
+      display: flex;
+      gap: 0.75rem;
+      margin-bottom: 0.25rem;
+      align-items: baseline;
+    }
+
+    .mesh-label {
+      min-width: 9rem;
+      flex-shrink: 0;
+      color: #9aa0a8;
+    }
+
+    .mesh-value {
+      font-family: monospace;
+      word-break: break-all;
+    }
+
+    .mesh-meta {
+      color: #888;
+    }
+
+    /* After .mesh-row so display:none wins over display:flex when both apply. */
+    .d-none {
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -140,6 +171,58 @@
     <div class="p-3 border-bottom">
       <h3>⚙️ View Config</h3>
       <button id=configBttn>View</button>
+    </div>
+    <div class="p-3 border-bottom">
+      <h3>🔗 Mesh</h3>
+      <div class="mb-2">
+        <button id=meshStatusBttn>Status</button>
+        <label class="ml-2">
+          <input type=checkbox id=meshWatchCheckbox>
+          Watch
+        </label>
+        <span id=meshWatchMeta class="mesh-meta ml-2"></span>
+      </div>
+      <div id=meshStatusPanel class="mb-2">
+        <div class="mesh-row"><span class="mesh-label">mode</span><span id=meshMode class="mesh-value">—</span></div>
+        <div class="mesh-row"><span class="mesh-label">ready</span><span id=meshReady class="mesh-value">—</span></div>
+        <div id=meshLastTransitionRow class="mesh-row d-none">
+          <span class="mesh-label">last transition</span><span id=meshLastTransition class="mesh-value">—</span>
+        </div>
+        <div id=meshHaltRow class="mesh-row d-none">
+          <span class="mesh-label">halt err</span><span id=meshHaltErr class="mesh-value errcolor"></span>
+        </div>
+        <div id=meshIdentityBlock class="d-none">
+          <div class="mesh-row"><span class="mesh-label">node id</span><span id=meshNodeID class="mesh-value">—</span></div>
+          <div class="mesh-row"><span class="mesh-label">peer</span><span id=meshPeer class="mesh-value">—</span></div>
+        </div>
+        <div id=meshFrontierBlock class="d-none">
+          <div class="mesh-row"><span class="mesh-label">frontier</span><span id=meshFrontier class="mesh-value">—</span></div>
+        </div>
+        <div id=meshFailoverBlock class="d-none">
+          <div class="mesh-row"><span class="mesh-label">disconnected</span><span id=meshDisconnectedAt class="mesh-value">—</span></div>
+          <div class="mesh-row"><span class="mesh-label">promote at</span><span id=meshPromoteAt class="mesh-value">—</span></div>
+          <div class="mesh-row"><span class="mesh-label">promote in</span><span id=meshPromoteIn class="mesh-value warncolor">—</span></div>
+        </div>
+        <div id=meshDialBlock class="d-none">
+          <div class="mesh-row"><span class="mesh-label">dial attempts</span><span id=meshDialAttempts class="mesh-value">—</span></div>
+          <div id=meshDialErrRow class="mesh-row d-none">
+            <span class="mesh-label">last dial err</span><span id=meshLastDialError class="mesh-value errcolor"></span>
+          </div>
+        </div>
+        <div id=meshStreamBlock class="d-none">
+          <div class="mesh-row"><span class="mesh-label">stream</span><span id=meshStream class="mesh-value">—</span></div>
+          <div class="mesh-row"><span class="mesh-label">pending results</span><span id=meshPendingStreamResults class="mesh-value">—</span></div>
+        </div>
+        <div id=meshCmdsBlock class="d-none">
+          <div class="mesh-row"><span class="mesh-label">pending cmds</span><span id=meshPendingCmds class="mesh-value">—</span></div>
+          <div class="mesh-row"><span class="mesh-label">state loaded</span><span id=meshStateLoaded class="mesh-value">—</span></div>
+        </div>
+        <div id=meshSeedingRow class="mesh-row d-none">
+          <span class="mesh-label">seeding</span><span id=meshSeeding class="mesh-value warncolor">true</span>
+        </div>
+      </div>
+      <div id=meshErr class="errcolor mono d-none"></div>
+      <div id=meshUpdated class="mesh-meta"></div>
     </div>
     <div class="p-3 border-bottom">
       <h3>🪙 Assets</h3>

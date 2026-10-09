@@ -16,6 +16,17 @@
       <div>Account ID</div>
       <div class="user-select-all w-100 overflow-ellipsis">{{.Exchange.AcctID}}</div>
     </div>
+    {{- /* SERVER ENDPOINTS - mesh endpoints list; hidden when only one host */ -}}
+    <div class="py-1 pt-3 px-3 d-hide" id="serverEndpointsBox">
+      <div class="mb-1">[[[server_endpoints]]] <span class="fs14 ico-info" data-tooltip="[[[server_endpoints_tooltip]]]"></span></div>
+      <div id="serverEndpointsList" class="flex-stretch-column">
+        <div id="serverEndpointTmpl" class="d-flex align-items-center py-1">
+          <span data-tmpl="liveIco" class="d-hide ico-connection text-success me-2" data-tooltip="[[[endpoint_live]]]"></span>
+          <span data-tmpl="host" class="user-select-all overflow-ellipsis flex-grow-1"></span>
+          <span data-tmpl="registeredBadge" class="d-hide grey fs14 ms-2 text-nowrap">[[[endpoint_registered]]]</span>
+        </div>
+      </div>
+    </div>
     <div class="flex-stretch-column pt-3 mt-3 px-3 border-top">
       <div class="d-flex align-items-stretch">
         <div class="flex-center flex-grow-1 pe-3">
@@ -87,6 +98,7 @@
       <div class="border-bottom px-3 py-2 {{if .Exchange.ViewOnly}}d-hide{{end}}">
         <button id="exportDexBtn">[[[Export Account]]]</button>
       </div>
+      <div class="px-3 pt-2 fs14 grey {{if .Exchange.Disabled}}d-hide{{end}}">[[[primary_host_scope_hint]]]</div>
       <div class="border-bottom px-3 py-2 {{if .Exchange.Disabled}}d-hide{{end}}">
         <input type="file" class="d-none" id="certFileInput">
         <button id="updateCertBtn">[[[Update TLS Certificate]]]</button>

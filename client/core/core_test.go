@@ -172,14 +172,19 @@ type TWebsocket struct {
 	id             uint64
 	sendErr        error
 	sendMsgErrChan chan *msgjson.Error
+	sentMsgs       []*msgjson.Message
 	reqErr         error
 	connectErr     error
 	msgs           <-chan *msgjson.Message
+	endpoints      []*comms.WsEndpoint
+	endpointErr    error
 	// handlers simulates a peer (server) response for request, and handles the
 	// response with the msgFunc.
 	handlers       map[string][]func(*msgjson.Message, msgFunc) error
 	submittedBond  *msgjson.PostBond
 	liveBondExpiry uint64
+	down           atomic.Bool
+	expireFn       func()
 }
 
 func newTWebsocket() *TWebsocket {
@@ -214,11 +219,12 @@ func testDexConnection(ctx context.Context, crypter *tCrypter) (*dexConnection, 
 	connMaster.Connect(ctx)
 	acct := tNewAccount(crypter)
 	return &dexConnection{
-		WsConn:     conn,
-		log:        tLogger,
-		connMaster: connMaster,
-		ticker:     newDexTicker(time.Millisecond * 1000 / 3),
-		acct:       acct,
+		ctx:            ctx,
+		FailoverWsConn: conn,
+		log:            tLogger,
+		connMaster:     connMaster,
+		ticker:         newDexTicker(time.Millisecond * 1000 / 3),
+		acct:           acct,
 		assets: map[uint32]*dex.Asset{
 			tUTXOAssetA.ID: tUTXOAssetA,
 			tUTXOAssetB.ID: tUTXOAssetB,
@@ -306,6 +312,9 @@ func (conn *TWebsocket) NextID() uint64 {
 	return conn.id
 }
 func (conn *TWebsocket) Send(msg *msgjson.Message) error {
+	conn.mtx.Lock()
+	conn.sentMsgs = append(conn.sentMsgs, msg)
+	conn.mtx.Unlock()
 	if conn.sendMsgErrChan != nil {
 		resp, err := msg.Response()
 		if err != nil {
@@ -323,29 +332,54 @@ func (conn *TWebsocket) Send(msg *msgjson.Message) error {
 func (conn *TWebsocket) SendRaw([]byte) error {
 	return conn.sendErr
 }
+
+// sentResponse finds the response sent for the request with the given ID.
+func (conn *TWebsocket) sentResponse(id uint64) *msgjson.Message {
+	conn.mtx.RLock()
+	defer conn.mtx.RUnlock()
+	for _, msg := range conn.sentMsgs {
+		if msg.Type == msgjson.Response && msg.ID == id {
+			return msg
+		}
+	}
+	return nil
+}
 func (conn *TWebsocket) Request(msg *msgjson.Message, f msgFunc) error {
 	return conn.RequestWithTimeout(msg, f, 0, func() {})
 }
 func (conn *TWebsocket) RequestRaw(msgID uint64, rawMsg []byte, respHandler func(*msgjson.Message)) error {
 	return nil
 }
-func (conn *TWebsocket) RequestWithTimeout(msg *msgjson.Message, f func(*msgjson.Message), _ time.Duration, _ func()) error {
+func (conn *TWebsocket) RequestWithTimeout(msg *msgjson.Message, f func(*msgjson.Message), _ time.Duration, expire func()) error {
 	if conn.reqErr != nil {
 		return conn.reqErr
 	}
 	conn.mtx.Lock()
-	defer conn.mtx.Unlock()
+	conn.expireFn = expire
 	handlers := conn.handlers[msg.Route]
-	if len(handlers) > 0 {
-		handler := handlers[0]
-		conn.handlers[msg.Route] = handlers[1:]
-		return handler(msg, f)
+	if len(handlers) == 0 {
+		conn.mtx.Unlock()
+		return fmt.Errorf("no handler for route %q", msg.Route)
 	}
-	return fmt.Errorf("no handler for route %q", msg.Route)
+	handler := handlers[0]
+	conn.handlers[msg.Route] = handlers[1:]
+	conn.mtx.Unlock()
+	return handler(msg, f)
 }
 func (conn *TWebsocket) MessageSource() <-chan *msgjson.Message { return conn.msgs } // use when Core.listen is running
 func (conn *TWebsocket) IsDown() bool {
-	return false
+	return conn.down.Load()
+}
+func (conn *TWebsocket) setDown(down bool) {
+	conn.down.Store(down)
+}
+func (conn *TWebsocket) fireExpire() {
+	conn.mtx.Lock()
+	expire := conn.expireFn
+	conn.mtx.Unlock()
+	if expire != nil {
+		expire()
+	}
 }
 func (conn *TWebsocket) Connect(context.Context) (*sync.WaitGroup, error) {
 	// NOTE: tCore's wsConstructor just returns a reused conn, so we can't close
@@ -354,7 +388,30 @@ func (conn *TWebsocket) Connect(context.Context) (*sync.WaitGroup, error) {
 	return &sync.WaitGroup{}, conn.connectErr
 }
 
-func (conn *TWebsocket) UpdateURL(string) {}
+func (conn *TWebsocket) SetFailoverEndpoints(endpoints []*comms.WsEndpoint) error {
+	conn.mtx.Lock()
+	defer conn.mtx.Unlock()
+	if conn.endpointErr != nil {
+		return conn.endpointErr
+	}
+	conn.endpoints = append([]*comms.WsEndpoint(nil), endpoints...)
+	return nil
+}
+
+func (conn *TWebsocket) ActiveEndpoint() string {
+	conn.mtx.RLock()
+	defer conn.mtx.RUnlock()
+	if conn.IsDown() || len(conn.endpoints) == 0 {
+		return ""
+	}
+	return conn.endpoints[0].URL
+}
+
+func (conn *TWebsocket) UpdateURL(uri string) {
+	conn.mtx.Lock()
+	defer conn.mtx.Unlock()
+	conn.endpoints = []*comms.WsEndpoint{{URL: uri}}
+}
 
 type TDB struct {
 	updateWalletErr  error
@@ -363,6 +420,7 @@ type TDB struct {
 	createAccountErr error
 	// updateMatchHook is called during UpdateMatch if non-nil.
 	updateMatchHook  func(m *db.MetaMatch)
+	updateMatchErr   error
 	addBondErr       error
 	updateOrderErr   error
 	activeDEXOrders  []*db.MetaOrder
@@ -389,7 +447,7 @@ type TDB struct {
 	existValues              map[string]bool
 	accountProofErr          error
 	verifyCreateAccount      bool
-	verifyUpdateAccountInfo  bool
+	verifyUpdateAccount      bool
 	disabledHost             *string
 	disableAccountErr        error
 	creds                    *db.PrimaryCredentials
@@ -400,7 +458,7 @@ type TDB struct {
 	archivedOrders           int
 	deleteInactiveMatchesErr error
 	archivedMatches          int
-	updateAccountInfoErr     error
+	updateAccountErr         error
 }
 
 func (tdb *TDB) Run(context.Context) {}
@@ -447,10 +505,19 @@ func (tdb *TDB) ToggleAccountStatus(host string, disable bool) error {
 	return tdb.disableAccountErr
 }
 
-func (tdb *TDB) UpdateAccountInfo(ai *db.AccountInfo) error {
-	tdb.verifyUpdateAccountInfo = true
-	tdb.acct = ai
-	return tdb.updateAccountInfoErr
+func (tdb *TDB) UpdateAccount(host string, update func(ai *db.AccountInfo) bool) error {
+	tdb.verifyUpdateAccount = true
+	if tdb.updateAccountErr != nil {
+		return tdb.updateAccountErr
+	}
+	if tdb.acct == nil {
+		return db.ErrAcctNotFound
+	}
+	ai := *tdb.acct
+	if update(&ai) {
+		*tdb.acct = ai
+	}
+	return nil
 }
 
 func (tdb *TDB) UpdateOrder(m *db.MetaOrder) error {
@@ -554,6 +621,9 @@ func (tdb *TDB) LinkOrder(oid, linkedID order.OrderID) error {
 }
 
 func (tdb *TDB) UpdateMatch(m *db.MetaMatch) error {
+	if tdb.updateMatchErr != nil {
+		return tdb.updateMatchErr
+	}
 	if tdb.updateMatchHook != nil {
 		tdb.updateMatchHook(m)
 	}
@@ -1507,11 +1577,11 @@ func newTestRig() *testRig {
 			wallets:       make(map[uint32]*xcWallet),
 			blockWaiters:  make(map[string]*blockWaiter),
 			sentCommits:   make(map[order.Commitment]chan struct{}),
-			wsConstructor: func(*comms.WsCfg) (comms.WsConn, error) {
+			wsConstructor: func(_ *comms.WsCfg, endpoints []*comms.WsEndpoint) (comms.FailoverWsConn, error) {
 				// This is not very realistic since it doesn't start a fresh
 				// one, and (*Core).connectDEX always gets the same TWebsocket,
 				// which may have been previously "disconnected".
-				return conn, nil
+				return conn, conn.SetFailoverEndpoints(endpoints)
 			},
 			newCrypter: func([]byte) encrypt.Crypter { return crypter },
 			reCrypter:  func([]byte, []byte) (encrypt.Crypter, error) { return crypter, crypter.recryptErr },
@@ -2155,6 +2225,417 @@ func TestGetFee(t *testing.T) {
 }
 */
 
+func TestSignAndRequestRetries(t *testing.T) {
+	oldDelays := requestRetryDelays
+	requestRetryDelays = []time.Duration{time.Millisecond, time.Millisecond}
+	t.Cleanup(func() { requestRetryDelays = oldDelays })
+
+	tryAgain := msgjson.NewError(msgjson.TryAgainLaterError, "try again")
+	for _, test := range []struct {
+		name     string
+		outcomes []error
+	}{
+		{"try again then success", []error{tryAgain, nil}},
+		{"retries exhausted", []error{tryAgain, tryAgain, tryAgain}},
+		{"server rejection", []error{msgjson.NewError(msgjson.AccountNotFoundError, "account not found")}},
+		{"transport error", []error{tErr}},
+		{"broken connection", []error{errors.New("cannot send on a broken connection"), nil}},
+		{"expired request", []error{errTimeout, nil}},
+		{"unknown outcome", []error{msgjson.NewError(msgjson.ResultUnavailableError, "outcome unknown"), nil}},
+		{"unauthorized connection", []error{msgjson.NewError(msgjson.UnauthorizedConnection, "not authenticated"), nil}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			rig := newTestRig()
+			t.Cleanup(rig.shutdown)
+			var attempts int
+			var firstPayload []byte
+			for _, outcome := range test.outcomes {
+				rig.ws.queueResponse(msgjson.CancelRoute, func(msg *msgjson.Message, f msgFunc) error {
+					attempts++
+					if attempts == 1 {
+						firstPayload = msg.Payload
+					} else if !bytes.Equal(msg.Payload, firstPayload) {
+						t.Error("signed payload changed between attempts")
+					}
+					if errors.Is(outcome, errTimeout) {
+						rig.ws.fireExpire()
+						return nil
+					}
+					var rpcErr *msgjson.Error
+					if outcome != nil && !errors.As(outcome, &rpcErr) {
+						return outcome
+					}
+					resp, err := msgjson.NewResponse(msg.ID, &msgjson.OrderResult{ServerTime: 123}, rpcErr)
+					if err != nil {
+						return err
+					}
+					f(resp)
+					return nil
+				})
+			}
+			rig.ws.queueResponse(msgjson.CancelRoute, func(*msgjson.Message, msgFunc) error {
+				attempts++
+				t.Error("unexpected extra request")
+				return tErr
+			})
+
+			co := new(msgjson.CancelOrder)
+			result := new(msgjson.OrderResult)
+			err := rig.dc.signAndRequest(co, msgjson.CancelRoute, result, time.Second)
+			wantErr := test.outcomes[len(test.outcomes)-1]
+			var wantRPC, gotRPC *msgjson.Error
+			if errors.As(wantErr, &wantRPC) {
+				if !errors.As(err, &gotRPC) || gotRPC.Code != wantRPC.Code {
+					t.Fatalf("got error %v, want RPC code %d", err, wantRPC.Code)
+				}
+			} else if !errors.Is(err, wantErr) {
+				t.Fatalf("got error %v, want %v", err, wantErr)
+			}
+			if attempts != len(test.outcomes) {
+				t.Fatalf("got %d attempts, want %d", attempts, len(test.outcomes))
+			}
+			if len(co.Sig) == 0 {
+				t.Fatal("request was not signed")
+			}
+			if wantErr == nil && result.ServerTime != 123 {
+				t.Fatalf("response server time = %d, want 123", result.ServerTime)
+			}
+		})
+	}
+}
+
+func TestIsActiveCancelInFlight(t *testing.T) {
+	// Keep an otherwise inactive trade tracked while cancel submission is pending.
+	tracker := &trackedTrade{
+		metaData: &db.OrderMetaData{Status: order.OrderStatusRevoked},
+	}
+	if tracker.isActive() {
+		t.Fatal("revoked trade with no in-flight cancel reported active")
+	}
+	tracker.cancelInFlight = true
+	if !tracker.isActive() {
+		t.Fatal("revoked trade with an in-flight cancel reported inactive")
+	}
+}
+
+func TestSignAndRequestCtxAbort(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	dc := rig.dc
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	dc.ctx = ctx
+
+	// Use a long delay to verify that cancellation interrupts the retry wait.
+	defer func(delays []time.Duration) { requestRetryDelays = delays }(requestRetryDelays)
+	requestRetryDelays = []time.Duration{time.Minute}
+
+	rig.ws.queueResponse(msgjson.CancelRoute, func(msg *msgjson.Message, f msgFunc) error {
+		resp, _ := msgjson.NewResponse(msg.ID, nil, msgjson.NewError(msgjson.TryAgainLaterError, "later"))
+		f(resp)
+		return nil
+	})
+
+	co := new(msgjson.CancelOrder)
+	start := time.Now()
+	err := dc.signAndRequest(co, msgjson.CancelRoute, &struct{}{}, time.Second)
+	var rpcErr *msgjson.Error
+	if !errors.As(err, &rpcErr) || rpcErr.Code != msgjson.TryAgainLaterError {
+		t.Fatalf("got error %v, want the last TryAgainLater failure", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("canceled context did not interrupt the retry wait (took %v)", elapsed)
+	}
+}
+
+func TestHandleReconnect(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	tCore := rig.core
+	dc := rig.dc
+
+	// A temporary or replaced connection must not reconnect the registered one.
+	other := &dexConnection{acct: &dexAccount{host: dc.acct.host}}
+	atomic.StoreUint32(&dc.connectionStatus, uint32(comms.Connected))
+	rig.ws.reqErr = tErr
+	tCore.handleReconnect(other)
+	if dc.status() != comms.Connected {
+		t.Fatal("another connection's reconnect changed the registered connection status")
+	}
+	rig.ws.reqErr = nil
+
+	ai := &db.AccountInfo{Host: dc.acct.host}
+	rig.db.acct = ai // for mesh endpoint persistence
+
+	if dc.acct.authed() {
+		t.Fatalf("account unexpectedly authed before reconnect")
+	}
+
+	// The refreshed config advertises a fresh mesh endpoint.
+	endpoint := &msgjson.MeshEndpoint{Host: "mesh.example:7232"}
+	rig.ws.queueResponse(msgjson.ConfigRoute, func(msg *msgjson.Message, f msgFunc) error {
+		cfg := *rig.dc.cfg
+		cfg.MeshEndpoints = []*msgjson.MeshEndpoint{endpoint}
+		resp, _ := msgjson.NewResponse(msg.ID, cfg, nil)
+		f(resp)
+		return nil
+	})
+	rig.ws.queueResponse(msgjson.PriceFeedRoute, func(msg *msgjson.Message, f msgFunc) error {
+		resp, _ := msgjson.NewResponse(msg.ID, map[string]*msgjson.Spot{}, nil)
+		f(resp)
+		return nil
+	})
+	rig.queueConnect(nil, nil, nil) // re-auth on the new endpoint
+
+	tCore.handleReconnect(dc)
+
+	if !dc.acct.authed() {
+		t.Fatalf("account not re-authenticated after reconnect")
+	}
+	rig.ws.mtx.RLock()
+	endpointCount := len(rig.ws.endpoints)
+	rig.ws.mtx.RUnlock()
+	if endpointCount != 2 {
+		t.Fatalf("failover endpoint count after reconnect = %d, want 2", endpointCount)
+	}
+	if len(ai.MeshEndpoints) != 1 || ai.MeshEndpoints[0].Host != "mesh.example:7232" {
+		t.Fatalf("mesh endpoints not persisted on reconnect: %+v", ai.MeshEndpoints)
+	}
+}
+
+func TestHandleMeshEndpointsMsg(t *testing.T) {
+	previous := &msgjson.MeshEndpoint{Host: "previous.example:7232", Cert: []byte{0x1}}
+	replacement := &msgjson.MeshEndpoint{Host: "mesh.example:7232", Cert: []byte{0x2}}
+	tests := []struct {
+		name         string
+		advertised   []*msgjson.MeshEndpoint
+		endpointErr  error
+		persistErr   error
+		keepPrevious bool
+		unregistered bool
+		replaced     bool
+	}{
+		{
+			name:         "unchanged peers",
+			advertised:   []*msgjson.MeshEndpoint{previous},
+			keepPrevious: true,
+		},
+		{
+			name:         "unregistered connection",
+			advertised:   []*msgjson.MeshEndpoint{replacement},
+			unregistered: true,
+		},
+		{
+			name:       "replaced connection",
+			advertised: []*msgjson.MeshEndpoint{replacement},
+			replaced:   true,
+		},
+		{
+			name:       "replace peers",
+			advertised: []*msgjson.MeshEndpoint{replacement},
+		},
+		{
+			name:         "ignore empty list",
+			keepPrevious: true,
+		},
+		{
+			name: "deduplicate peers and registered host",
+			advertised: []*msgjson.MeshEndpoint{
+				{Host: tDexHost, Cert: []byte{0x3}},
+				replacement,
+				{Host: replacement.Host, Cert: []byte{0x4}},
+			},
+		},
+		{
+			name:         "reject invalid address",
+			advertised:   []*msgjson.MeshEndpoint{{Host: tUnparseableHost}},
+			keepPrevious: true,
+		},
+		{
+			name:         "websocket rejects update",
+			advertised:   []*msgjson.MeshEndpoint{replacement},
+			endpointErr:  tErr,
+			keepPrevious: true,
+		},
+		{
+			name:       "persistence failure leaves update active",
+			advertised: []*msgjson.MeshEndpoint{replacement},
+			persistErr: tErr,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			rig := newTestRig()
+			defer rig.shutdown()
+			dc := rig.dc
+			rig.db.acct = &db.AccountInfo{Host: dc.acct.host}
+			rig.core.configureMeshEndpoints(dc, []*msgjson.MeshEndpoint{previous})
+			feed := rig.core.NotificationFeed()
+			defer feed.ReturnFeed()
+			if test.unregistered {
+				delete(rig.core.conns, dc.acct.host)
+			} else if test.replaced {
+				rig.core.conns[dc.acct.host] = &dexConnection{acct: dc.acct}
+			}
+			rig.ws.endpointErr = test.endpointErr
+			rig.db.updateAccountErr = test.persistErr
+
+			note, err := msgjson.NewNotification(msgjson.MeshEndpointsRoute, &msgjson.MeshEndpointsNotification{
+				MeshEndpoints: test.advertised,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := handleMeshEndpointsMsg(rig.core, dc, note); err != nil {
+				t.Fatal(err)
+			}
+
+			wantPeer, wantConfig := replacement, test.advertised
+			if test.keepPrevious {
+				wantPeer, wantConfig = previous, []*msgjson.MeshEndpoint{previous}
+			}
+			dc.cfgMtx.RLock()
+			configEndpoints := dc.cfg.MeshEndpoints
+			dc.cfgMtx.RUnlock()
+			if !reflect.DeepEqual(configEndpoints, wantConfig) {
+				t.Fatalf("configured endpoints = %+v, want %+v", configEndpoints, wantConfig)
+			}
+
+			wantEndpoints := []*comms.WsEndpoint{
+				{URL: "wss://" + tDexHost + "/ws", Cert: dc.acct.cert},
+				{URL: "wss://" + wantPeer.Host + "/ws", Cert: wantPeer.Cert},
+			}
+			rig.ws.mtx.RLock()
+			endpoints := rig.ws.endpoints
+			rig.ws.mtx.RUnlock()
+			if !reflect.DeepEqual(endpoints, wantEndpoints) {
+				t.Fatalf("websocket endpoints = %+v, want %+v", endpoints, wantEndpoints)
+			}
+
+			wantNote := !test.keepPrevious && !test.unregistered && !test.replaced
+			noteCount := len(feed.C)
+			if wantNote {
+				if noteCount != 1 {
+					t.Fatalf("got %d notes, want one endpoint update", noteCount)
+				}
+				note, ok := (<-feed.C).(*ServerEndpointsNote)
+				if !ok || note.Host != dc.acct.host || !reflect.DeepEqual(note.ServerEndpoints, []string{tDexHost, wantPeer.Host}) {
+					t.Fatalf("unexpected endpoint note: %+v", note)
+				}
+			} else if noteCount != 0 {
+				t.Fatalf("got %d unexpected notes", noteCount)
+			}
+
+			if test.persistErr != nil {
+				wantPeer = previous
+			}
+			wantStored := []*db.MeshEndpoint{{Host: wantPeer.Host, Cert: wantPeer.Cert}}
+			if !reflect.DeepEqual(rig.db.acct.MeshEndpoints, wantStored) {
+				t.Fatalf("stored endpoints = %+v, want %+v", rig.db.acct.MeshEndpoints, wantStored)
+			}
+		})
+	}
+}
+
+func TestPersistMeshEndpointsOnAccountCreate(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	tCore := rig.core
+
+	// Endpoints are learned before the account is saved.
+	rig.db.acct = nil
+
+	meshCert := []byte{0x2}
+	meshEndpoint := &msgjson.MeshEndpoint{
+		Host: "mesh.example:7232",
+		Cert: meshCert,
+	}
+	rig.ws.queueResponse(msgjson.ConfigRoute, func(msg *msgjson.Message, f msgFunc) error {
+		cfg := *rig.dc.cfg
+		cfg.MeshEndpoints = []*msgjson.MeshEndpoint{meshEndpoint}
+		resp, _ := msgjson.NewResponse(msg.ID, cfg, nil)
+		f(resp)
+		return nil
+	})
+
+	ai := &db.AccountInfo{
+		Host: "somedex.com",
+		Cert: []byte{0x1},
+	}
+	dc, err := tCore.connectDEX(ai)
+	if err != nil {
+		t.Fatalf("first-session connectDEX error: %v", err)
+	}
+	defer dc.connMaster.Disconnect()
+
+	if rig.db.acct != nil {
+		t.Fatalf("connecting unexpectedly saved an account")
+	}
+
+	err = tCore.dbCreateOrUpdateAccount(dc, &db.AccountInfo{
+		Host:      dc.acct.host,
+		Cert:      dc.acct.cert,
+		DEXPubKey: dc.acct.dexPubKey,
+	})
+	if err != nil {
+		t.Fatalf("dbCreateOrUpdateAccount error: %v", err)
+	}
+
+	stored := rig.db.acct
+	if stored == nil {
+		t.Fatal("account not saved")
+	}
+	if len(stored.MeshEndpoints) != 1 || stored.MeshEndpoints[0].Host != "mesh.example:7232" ||
+		!bytes.Equal(stored.MeshEndpoints[0].Cert, meshCert) {
+		t.Fatalf("mesh endpoints not persisted on account create: %+v", stored.MeshEndpoints)
+	}
+}
+
+func TestDuplicateDEXRegistration(t *testing.T) {
+	const alternateHost = "mesh2.example.com:7232"
+	tests := []struct {
+		name     string
+		register func(*testRig) error
+	}{
+		{
+			name: "post bond",
+			register: func(rig *testRig) error {
+				wallet, tWallet := newTWallet(tUTXOAssetA.ID)
+				rig.core.wallets[tUTXOAssetA.ID] = wallet
+				tWallet.bal = &asset.Balance{Available: 4e9}
+				_, err := rig.core.PostBond(&PostBondForm{
+					Addr:    alternateHost,
+					AppPass: tPW,
+					Asset:   &tUTXOAssetA.ID,
+					Bond:    dcrBondAsset.Amt,
+					Cert:    []byte{0x1},
+				})
+				return err
+			},
+		},
+		{
+			name: "redeem prepaid bond",
+			register: func(rig *testRig) error {
+				_, err := rig.core.RedeemPrepaidBond(tPW, []byte{0x1}, alternateHost, []byte{0x1})
+				return err
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			rig := newTestRig()
+			defer rig.shutdown()
+
+			// The alternate host advertises the existing DEX's public key.
+			rig.queueConfig()
+			if err := test.register(rig); !errorHasCode(err, dupeDEXErr) {
+				t.Fatalf("expected duplicate DEX error, got %v", err)
+			}
+		})
+	}
+}
+
 func TestPostBond(t *testing.T) {
 	// This test takes a little longer because the key is decrypted every time
 	// Register is called.
@@ -2770,6 +3251,87 @@ func TestConnectDEX(t *testing.T) {
 	}
 	dc.connMaster.Disconnect()
 
+	meshCert := []byte{0x2}
+	rig.db.acct = ai // for mesh endpoint persistence
+	meshEndpoint := &msgjson.MeshEndpoint{
+		Host: "mesh.example:7232",
+		Cert: meshCert,
+	}
+	rig.ws.queueResponse(msgjson.ConfigRoute, func(msg *msgjson.Message, f msgFunc) error {
+		cfg := *rig.dc.cfg
+		cfg.MeshEndpoints = []*msgjson.MeshEndpoint{meshEndpoint}
+		resp, _ := msgjson.NewResponse(msg.ID, cfg, nil)
+		f(resp)
+		return nil
+	})
+	dc, err = tCore.connectDEX(ai)
+	if err != nil {
+		t.Fatalf("connectDEX with mesh endpoint error: %v", err)
+	}
+	rig.ws.mtx.RLock()
+	endpoints := append([]*comms.WsEndpoint(nil), rig.ws.endpoints...)
+	rig.ws.mtx.RUnlock()
+	wantURLs := []string{"wss://somedex.com:7232/ws", "wss://mesh.example:7232/ws"}
+	if len(endpoints) != len(wantURLs) {
+		t.Fatalf("mesh endpoint count = %d, want %d", len(endpoints), len(wantURLs))
+	}
+	for i, wantURL := range wantURLs {
+		if endpoints[i].URL != wantURL {
+			t.Fatalf("mesh endpoint %d URL = %q, want %q", i, endpoints[i].URL, wantURL)
+		}
+	}
+	if !bytes.Equal(endpoints[1].Cert, meshCert) {
+		t.Fatalf("advertised mesh endpoint cert not passed to websocket")
+	}
+	wantHosts := []string{"somedex.com:7232", "mesh.example:7232"}
+	if hosts := dc.endpointHostList(); !reflect.DeepEqual(hosts, wantHosts) {
+		t.Fatalf("endpoint hosts = %v, want %v", hosts, wantHosts)
+	}
+	if active := dc.activeEndpointHost(); active != "somedex.com:7232" {
+		t.Fatalf("active endpoint host = %q, want somedex.com:7232", active)
+	}
+	if len(ai.MeshEndpoints) != 1 || ai.MeshEndpoints[0].Host != "mesh.example:7232" ||
+		!bytes.Equal(ai.MeshEndpoints[0].Cert, meshCert) {
+		t.Fatalf("advertised mesh endpoint not persisted: %+v", ai.MeshEndpoints)
+	}
+	dc.connMaster.Disconnect()
+
+	// Persisted mesh endpoints seed the initial failover set, so the backup
+	// is reachable on restart even if the registered host is down.
+	var seededURLs []string
+	captureConstructor := tCore.wsConstructor
+	tCore.wsConstructor = func(cfg *comms.WsCfg, endpoints []*comms.WsEndpoint) (comms.FailoverWsConn, error) {
+		seededURLs = make([]string, 0, len(endpoints))
+		for _, endpoint := range endpoints {
+			seededURLs = append(seededURLs, endpoint.URL)
+		}
+		return captureConstructor(cfg, endpoints)
+	}
+	rig.queueConfig() // no advertised mesh endpoints this time
+	dc, err = tCore.connectDEX(ai)
+	if err != nil {
+		t.Fatalf("connectDEX with persisted mesh endpoint error: %v", err)
+	}
+	if !reflect.DeepEqual(seededURLs, wantURLs) {
+		t.Fatalf("seeded endpoint URLs = %v, want %v", seededURLs, wantURLs)
+	}
+	// A config without advertised endpoints leaves the saved peers unchanged.
+	if len(ai.MeshEndpoints) != 1 || ai.MeshEndpoints[0].Host != "mesh.example:7232" {
+		t.Fatalf("mesh endpoints changed after config without advertisements: %+v", ai.MeshEndpoints)
+	}
+	// Live failover set should still include the persisted peer after config apply.
+	rig.ws.mtx.RLock()
+	liveURLs := make([]string, 0, len(rig.ws.endpoints))
+	for _, endpoint := range rig.ws.endpoints {
+		liveURLs = append(liveURLs, endpoint.URL)
+	}
+	rig.ws.mtx.RUnlock()
+	if !reflect.DeepEqual(liveURLs, wantURLs) {
+		t.Fatalf("live endpoint URLs after empty config = %v, want %v", liveURLs, wantURLs)
+	}
+	tCore.wsConstructor = captureConstructor
+	dc.connMaster.Disconnect()
+
 	// Bad URL.
 	ai.Host = tUnparseableHost // Illegal ASCII control character
 	_, err = tCore.connectDEX(ai)
@@ -2780,7 +3342,7 @@ func TestConnectDEX(t *testing.T) {
 
 	// Constructor error.
 	ogConstructor := tCore.wsConstructor
-	tCore.wsConstructor = func(*comms.WsCfg) (comms.WsConn, error) {
+	tCore.wsConstructor = func(*comms.WsCfg, []*comms.WsEndpoint) (comms.FailoverWsConn, error) {
 		return nil, tErr
 	}
 	_, err = tCore.connectDEX(ai)
@@ -2818,6 +3380,67 @@ func TestConnectDEX(t *testing.T) {
 	dc.connMaster.Disconnect()
 
 	// TODO: test temporary, ensure listen isn't running, somehow
+}
+
+func TestHandleConnectEventEndpointSwitch(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	dc := rig.dc
+	atomic.StoreUint32(&dc.reportingConnects, 1)
+	var notes []*ConnEventNote
+	dc.notify = func(n Notification) {
+		if note, ok := n.(*ConnEventNote); ok {
+			notes = append(notes, note)
+		}
+	}
+
+	const peerHost = "[::1]:7232"
+	hosts := []string{tDexHost, peerHost}
+	dc.setEndpointHosts(hosts)
+	for _, test := range []struct {
+		name       string
+		activeHost string
+		wantSwitch bool
+	}{
+		{name: "first connection", activeHost: tDexHost},
+		{name: "disconnect"},
+		{name: "same endpoint", activeHost: tDexHost},
+		{name: "failover", activeHost: peerHost, wantSwitch: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			notes = nil
+			status := comms.Disconnected
+			rig.ws.setDown(test.activeHost == "")
+			if test.activeHost != "" {
+				status = comms.Connected
+				if err := dc.SetFailoverEndpoints([]*comms.WsEndpoint{{URL: "wss://" + test.activeHost + "/ws"}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			rig.core.handleConnectEvent(dc, status)
+
+			var switches int
+			for _, note := range notes {
+				if note.Host != tDexHost || note.ActiveEndpoint != test.activeHost || note.ConnectionStatus != status {
+					t.Fatalf("unexpected connection note: %+v", note)
+				}
+				if note.Topic() == TopicServerEndpointSwitched {
+					switches++
+				}
+			}
+			wantSwitches := 0
+			if test.wantSwitch {
+				wantSwitches = 1
+			}
+			if switches != wantSwitches || len(notes) != 1+wantSwitches {
+				t.Fatalf("got %d connection notes with %d switches, want %d with %d switches", len(notes), switches, 1+wantSwitches, wantSwitches)
+			}
+			xc := rig.core.exchangeInfo(dc)
+			if xc.ActiveEndpoint != test.activeHost || !reflect.DeepEqual(xc.ServerEndpoints, hosts) {
+				t.Fatalf("exchange endpoints = %v, active = %q", xc.ServerEndpoints, xc.ActiveEndpoint)
+			}
+		})
+	}
 }
 
 func TestInitializeClient(t *testing.T) {
@@ -3962,12 +4585,31 @@ func TestCancel(t *testing.T) {
 	dc.trades[oid] = tracker
 
 	rig.queueCancel(nil)
+	cancelResponse := rig.ws.handlers[msgjson.CancelRoute][0]
+	rig.ws.handlers[msgjson.CancelRoute][0] = func(msg *msgjson.Message, f msgFunc) error {
+		if !tracker.mtx.TryLock() {
+			t.Error("trade lock held while submitting cancellation")
+			return tErr
+		}
+		inFlight := tracker.cancelInFlight
+		tracker.mtx.Unlock()
+		if !inFlight {
+			t.Error("cancel submission not marked in flight")
+		}
+		if err := tracker.beginCancelSend(); err == nil {
+			t.Error("another cancel submission allowed while one is in flight")
+		}
+		return cancelResponse(msg, f)
+	}
 	err := rig.core.Cancel(oid[:])
 	if err != nil {
 		t.Fatalf("cancel error: %v", err)
 	}
 	if tracker.cancel == nil {
 		t.Fatalf("cancel order not found")
+	}
+	if tracker.cancelInFlight {
+		t.Fatal("cancel submission still in flight after success")
 	}
 
 	ensureErr := func(tag string) {
@@ -4007,6 +4649,9 @@ func TestCancel(t *testing.T) {
 	rig.ws.reqErr = tErr
 	ensureErr("Request error")
 	ensureNilCancel("Request error")
+	if tracker.cancelInFlight {
+		t.Fatal("cancel submission still in flight after request error")
+	}
 	rig.ws.reqErr = nil
 }
 
@@ -4892,6 +5537,54 @@ func TestTradeTracking(t *testing.T) {
 		}
 	}
 
+	resendPending := func() {
+		tracker.mtx.RLock()
+		tCore.resendPendingRequests(tracker)
+		tracker.mtx.RUnlock()
+	}
+
+	// resendPendingTryAgain exhausts signAndRequest's in-call try-again
+	// schedule on route, then waits for resendPendingRequests to finish.
+	resendPendingTryAgain := func(route string) {
+		t.Helper()
+		oldDelays := requestRetryDelays
+		requestRetryDelays = []time.Duration{time.Millisecond}
+		defer func() { requestRetryDelays = oldDelays }()
+		tryAgainErr := msgjson.NewError(msgjson.TryAgainLaterError,
+			"mesh command waiting for established master or slave state")
+		for i := 0; i < len(requestRetryDelays)+1; i++ {
+			rig.ws.queueResponse(route, func(msg *msgjson.Message, f msgFunc) error {
+				resp, _ := msgjson.NewResponse(msg.ID, nil, tryAgainErr)
+				f(resp)
+				return nil
+			})
+		}
+		resendPending()
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			pending := false
+			tracker.mtx.RLock()
+			for _, match := range tracker.matches {
+				if route == msgjson.InitRoute {
+					pending = atomic.LoadUint32(&match.sendingInitAsync) != 0
+				} else {
+					pending = atomic.LoadUint32(&match.sendingRedeemAsync) != 0
+				}
+				if pending {
+					break
+				}
+			}
+			tracker.mtx.RUnlock()
+			if !pending {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s resend did not finish after exhausting retries", route)
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+
 	// MAKER MATCH
 	matchTime := time.Now()
 	msgMatch := &msgjson.Match{
@@ -4970,7 +5663,7 @@ func TestTradeTracking(t *testing.T) {
 		name: "resend pending init (invalid ack)",
 		fn: func() error {
 			rig.ws.queueResponse(msgjson.InitRoute, invalidAcker)
-			tCore.resendPendingRequests(tracker)
+			resendPending()
 			return nil
 		},
 		expectError:          false,
@@ -4983,13 +5676,28 @@ func TestTradeTracking(t *testing.T) {
 		t.Fatalf("init sig recorded for second invalid init ack")
 	}
 
+	// Try-again init after in-call retries: no ERROR note.
+	testSwapRelatedAction(swapRelatedAction{
+		name: "resend pending init (failover try-again)",
+		fn: func() error {
+			resendPendingTryAgain(msgjson.InitRoute)
+			return nil
+		},
+		expectError:          false,
+		expectMatchDBUpdates: 0,
+		expectSwapErrorNote:  false,
+	})
+	if len(auth.InitSig) != 0 {
+		t.Fatalf("init sig recorded for try-again rejected init")
+	}
+
 	// queue a valid DEX init ack and re-send pending init request
 	// a valid ack should produce a db update otherwise it's an error
 	testSwapRelatedAction(swapRelatedAction{
 		name: "resend pending init (valid ack)",
 		fn: func() error {
 			rig.ws.queueResponse(msgjson.InitRoute, initAcker)
-			tCore.resendPendingRequests(tracker)
+			resendPending()
 			return nil
 		},
 		expectError:          false,
@@ -5284,6 +5992,37 @@ func TestTradeTracking(t *testing.T) {
 	if len(auth.RedeemSig) == 0 {
 		t.Fatalf("redeem ack sig not set for taker")
 	}
+
+	// Lost redeem ack + try-again: no ERROR note; valid ack recovers.
+	auth.RedeemSig = nil
+	testSwapRelatedAction(swapRelatedAction{
+		name: "resend pending redeem (failover try-again)",
+		fn: func() error {
+			resendPendingTryAgain(msgjson.RedeemRoute)
+			return nil
+		},
+		expectError:          false,
+		expectMatchDBUpdates: 0,
+		expectSwapErrorNote:  false,
+	})
+	if len(auth.RedeemSig) != 0 {
+		t.Fatalf("redeem sig recorded for try-again rejected redeem")
+	}
+	testSwapRelatedAction(swapRelatedAction{
+		name: "resend pending redeem (valid ack)",
+		fn: func() error {
+			rig.ws.queueResponse(msgjson.RedeemRoute, redeemAcker)
+			resendPending()
+			return nil
+		},
+		expectError:          false,
+		expectMatchDBUpdates: 1,
+		expectSwapErrorNote:  false,
+	})
+	if len(auth.RedeemSig) == 0 {
+		t.Fatalf("redeem sig not recorded for valid redeem ack")
+	}
+
 	rig.db.updateMatchChan = nil
 	tBtcWallet.redeemErrChan = nil
 
@@ -6534,7 +7273,7 @@ func TestCompareServerMatches(t *testing.T) {
 		oidMissing: trackerMissing,
 	}
 
-	exceptions, _ := dc.compareServerMatches(srvMatches)
+	exceptions, _ := dc.compareServerMatches(srvMatches, nil)
 	if len(exceptions) != 2 {
 		t.Fatalf("exceptions did not include both trades, just %d", len(exceptions))
 	}
@@ -11498,6 +12237,158 @@ func TestUpdateBondOptions(t *testing.T) {
 	}
 }
 
+func TestUpdateReputationBondExpiry(t *testing.T) {
+	t.Run("server threshold", func(t *testing.T) {
+		rig := newTestRig()
+		defer rig.shutdown()
+
+		const now = int64(1_800_000_000)
+		bondCfg := rig.core.dexBondConfig(rig.dc, now)
+		localThreshold := bondCfg.lockTimeThresh
+		serverThreshold := localThreshold - 1
+		serverExpired := &db.Bond{Strength: 1, LockTime: uint64(serverThreshold - 1)}
+		// A bond at the server's threshold still contributes to its reported tier.
+		expiresLocally := &db.Bond{Strength: 2, LockTime: uint64(serverThreshold)}
+		stillActive := &db.Bond{Strength: 1, LockTime: uint64(serverThreshold + 100)}
+		rig.acct.bonds = []*db.Bond{serverExpired, expiresLocally, stillActive}
+
+		// The server has excluded serverExpired, leaving a bonded tier of 3.
+		rig.acct.authMtx.Lock()
+		rig.dc.updateReputation(&account.Reputation{
+			BondedTier:          3,
+			BondExpiryThreshold: serverThreshold,
+		})
+		rig.acct.authMtx.Unlock()
+
+		if len(rig.acct.bonds) != 2 || rig.acct.bonds[0] != expiresLocally || rig.acct.bonds[1] != stillActive {
+			t.Fatalf("live bonds after reputation update = %v, want expiresLocally and stillActive", rig.acct.bonds)
+		}
+		if len(rig.acct.expiredBonds) != 1 || rig.acct.expiredBonds[0] != serverExpired {
+			t.Fatalf("expired bonds after reputation update = %v, want only serverExpired", rig.acct.expiredBonds)
+		}
+
+		if !rig.acct.bondExpiryPending {
+			t.Fatal("server reconciliation did not retain the expiry notification")
+		}
+
+		// Local expiry removes expiresLocally's strength of 2, leaving tier 1.
+		state := rig.core.bondStateOfDEX(rig.dc, bondCfg)
+		if state.Rep.BondedTier != 1 {
+			t.Fatalf("BondedTier after local expiry = %d, want 1", state.Rep.BondedTier)
+		}
+		if !state.notifyBondExpiry {
+			t.Fatal("bond expiry notification not retained")
+		}
+		if len(rig.acct.bonds) != 1 || rig.acct.bonds[0] != stillActive {
+			t.Fatalf("live bonds after local expiry = %v, want only stillActive", rig.acct.bonds)
+		}
+
+		// Repeating the calculation must not subtract either expired bond again.
+		state = rig.core.bondStateOfDEX(rig.dc, bondCfg)
+		if state.Rep.BondedTier != 1 {
+			t.Fatalf("BondedTier after repeated state calculation = %d, want 1", state.Rep.BondedTier)
+		}
+	})
+
+	t.Run("missing server threshold", func(t *testing.T) {
+		rig := newTestRig()
+		defer rig.shutdown()
+
+		lockTimeThresh := time.Now().Unix() + int64(rig.dc.config().BondExpiry)
+		bond := &db.Bond{LockTime: uint64(lockTimeThresh - 1)}
+		rig.acct.bonds = []*db.Bond{bond}
+
+		rig.acct.authMtx.Lock()
+		rig.dc.updateReputation(&account.Reputation{})
+		rig.acct.authMtx.Unlock()
+		if len(rig.acct.bonds) != 0 {
+			t.Fatalf("live bonds = %v, want none", rig.acct.bonds)
+		}
+		if len(rig.acct.expiredBonds) != 1 || rig.acct.expiredBonds[0] != bond {
+			t.Fatalf("expired bonds = %v, want the bond excluded by the local threshold", rig.acct.expiredBonds)
+		}
+	})
+}
+
+func TestBondExpiryNotifications(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		serverFirst bool
+	}{
+		{name: "rotation before server notification"},
+		{name: "server notification before rotation", serverFirst: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			rig := newTestRig()
+			defer rig.shutdown()
+			if err := rig.core.Login(tPW); err != nil {
+				t.Fatal(err)
+			}
+			// Disable new bond posting while checking expiry notifications.
+			rig.acct.disabled = true
+			rig.acct.targetTier = 1
+			rig.acct.rep.BondedTier = 1
+			bond := &db.Bond{
+				AssetID:  dcrBondAsset.ID,
+				CoinID:   []byte{1},
+				Strength: 1,
+				LockTime: uint64(time.Now().Unix()) + rig.dc.config().BondExpiry - 1,
+			}
+			rig.acct.bonds = []*db.Bond{bond}
+			feed := rig.core.NotificationFeed()
+			defer feed.ReturnFeed()
+
+			// Reading account state expires the bond but leaves the warning pending.
+			rig.core.exchangeAuth(rig.dc)
+			if !rig.acct.bondExpiryPending {
+				t.Fatal("state query did not retain the expiry notification")
+			}
+			if !tt.serverFirst {
+				rig.core.rotateBonds(rig.core.ctx)
+			}
+			// Deliver the same server notice twice to check duplicate suppression.
+			for range 2 {
+				if err := rig.core.bondExpired(rig.dc, bond.AssetID, bond.CoinID,
+					&msgjson.BondExpiredNotification{Reputation: &account.Reputation{}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			rig.core.rotateBonds(rig.core.ctx)
+			if rig.acct.bondExpiryPending {
+				t.Fatal("expiry notification is still pending")
+			}
+
+			var warnings int
+			for len(feed.C) > 0 {
+				note := <-feed.C
+				if note.Topic() != TopicBondExpired {
+					continue
+				}
+				warnings++
+				bondNote := note.(*BondPostNote)
+				if bondNote.BondedTier == nil {
+					t.Fatal("expiry warning has no bonded tier")
+				}
+				if *bondNote.BondedTier != 0 {
+					t.Fatalf("expiry warning bonded tier = %d, want 0", *bondNote.BondedTier)
+				}
+				if bondNote.Auth == nil {
+					t.Fatal("expiry warning has no account state")
+				}
+				if bondNote.Auth.EffectiveTier != 0 {
+					t.Fatalf("expiry warning effective tier = %d, want 0", bondNote.Auth.EffectiveTier)
+				}
+				if bondNote.Auth.TargetTier != 1 {
+					t.Fatalf("expiry warning target tier = %d, want 1", bondNote.Auth.TargetTier)
+				}
+			}
+			if warnings != 1 {
+				t.Fatalf("expiry warnings = %d, want 1", warnings)
+			}
+		})
+	}
+}
+
 func TestRotateBonds(t *testing.T) {
 	const feeRate = 50
 
@@ -11556,10 +12447,15 @@ func TestRotateBonds(t *testing.T) {
 	// should create another bond.
 	acct.bonds, acct.pendingBonds = acct.pendingBonds, nil
 	acct.bonds[0].LockTime = locktimeExpired
+	// Expiring this bond must preserve the tier from bonds not stored locally.
+	acct.rep.BondedTier = 2
 	rig.queuePrevalidateBond()
 	// The newly expired bond will be refunded in time to fund our next round,
 	// so we only need fees reserved.
 	run(1, 1, bondFeeBuffer)
+	if acct.rep.BondedTier != 1 {
+		t.Fatalf("BondedTier after DEX expiry = %d, want 1", acct.rep.BondedTier)
+	}
 
 	// If the live bond is closer to expiration, the expired bond won't be
 	// ready in time, so we'll need more reserves.
@@ -11604,6 +12500,22 @@ func TestRotateBonds(t *testing.T) {
 	unmergingBond := acct.pendingBonds[0]
 	if unmergingBond.LockTime == acct.bonds[0].LockTime {
 		t.Fatalf("Unmergeable bond was scheduled for merged")
+	}
+
+	// Pending-bond DEX expiry must not change BondedTier.
+	acct.targetTier = 0
+	acct.bonds = nil
+	acct.pendingBonds = []*db.Bond{{
+		AssetID:  bondAsset.ID,
+		Amount:   bondAsset.Amt,
+		Strength: 1,
+		LockTime: locktimeExpired,
+	}}
+	acct.expiredBonds = nil
+	acct.rep.BondedTier = 1
+	run(0, 1, 0)
+	if acct.rep.BondedTier != 1 {
+		t.Fatalf("BondedTier after pending expiry = %d, want 1", acct.rep.BondedTier)
 	}
 }
 
@@ -12866,17 +13778,12 @@ func TestParseMatchesPerMatchAddr(t *testing.T) {
 	}
 	sign(tDexPriv, msgMatch)
 
-	matches, acks, err := dc.parseMatches([]*msgjson.Match{msgMatch}, true)
+	matches, parsed, _, err := dc.parseMatches([]*msgjson.Match{msgMatch}, true)
 	if err != nil {
 		t.Fatalf("parseMatches error: %v", err)
 	}
-	if len(acks) != 1 {
-		t.Fatalf("expected 1 ack, got %d", len(acks))
-	}
-
-	// The ack should contain the per-match address.
-	if acks[0].Address == "" {
-		t.Fatal("expected per-match address in ack, got empty")
+	if len(parsed) != 1 {
+		t.Fatalf("expected 1 parsed match, got %d", len(parsed))
 	}
 
 	// The serverMatches should have the per-match address stored.
@@ -12893,11 +13800,7 @@ func TestParseMatchesPerMatchAddr(t *testing.T) {
 
 	// Test RedemptionAddress error.
 	tBtcWallet.addrErr = tErr
-	_, _, err = dc.parseMatches([]*msgjson.Match{msgMatch}, true)
-	// parseMatches returns errors as a joined string, not as an error return.
-	// But the match should be skipped and not appear in the acks.
-	// Actually, parseMatches returns the error string. Let me check the
-	// actual behavior.
+	_, _, _, err = dc.parseMatches([]*msgjson.Match{msgMatch}, true)
 	if err == nil {
 		t.Fatal("expected error when RedemptionAddress fails")
 	}
@@ -12950,13 +13853,15 @@ func TestTradePerMatchAddr(t *testing.T) {
 	}
 	sign(tDexPriv, msgMatch)
 
-	matches, acks, err := dc.parseMatches([]*msgjson.Match{msgMatch}, true)
+	matches, _, _, err := dc.parseMatches([]*msgjson.Match{msgMatch}, true)
 	if err != nil {
 		t.Fatalf("parseMatches error: %v", err)
 	}
-	if acks[0].Address != "our-per-match-addr" {
-		t.Fatalf("expected per-match addr %q in ack, got %q",
-			"our-per-match-addr", acks[0].Address)
+	for _, sm := range matches {
+		if sm.perMatchAddrs[mid.String()] != "our-per-match-addr" {
+			t.Fatalf("expected per-match addr %q, got %q",
+				"our-per-match-addr", sm.perMatchAddrs[mid.String()])
+		}
 	}
 
 	// Step 2: Call negotiate to store the match with per-match address.
@@ -13013,4 +13918,180 @@ func TestTradePerMatchAddr(t *testing.T) {
 	}
 
 	_ = tBtcWallet
+}
+
+// TestConnectParseFailureNotMissing checks that a match that fails parsing
+// on the connect path is not treated as missing (and revoked).
+func TestConnectParseFailureNotMissing(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	dc, tCore := rig.dc, rig.core
+
+	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, dcrBtcLotSize, dcrBtcRateStep*10)
+
+	tracker := newTrackedTrade(dbOrder, preImg, dc, tCore.lockTimeTaker, tCore.lockTimeMaker,
+		rig.db, rig.queue, nil, nil, tCore.notify, tCore.formatDetails, &tCore.wg)
+	dc.trades[lo.ID()] = tracker
+
+	// A known match with no stored address fails parsing rather than
+	// minting a replacement.
+	mid := ordertest.RandomMatchID()
+	tracker.matches[mid] = &matchTracker{MetaMatch: db.MetaMatch{
+		MetaData:  &db.MatchMetaData{},
+		UserMatch: &order.UserMatch{MatchID: mid},
+	}}
+
+	msgMatch := &msgjson.Match{
+		OrderID: lo.ID().Bytes(), MatchID: mid[:],
+		Quantity: dcrBtcLotSize, Rate: dcrBtcRateStep * 10,
+		Address: "counterparty", Side: uint8(order.Maker),
+		ServerTime: uint64(time.Now().UnixMilli()),
+	}
+
+	srvMatches, _, failed, err := dc.parseMatches([]*msgjson.Match{msgMatch}, false)
+	if err == nil {
+		t.Fatal("parseMatches succeeded for known match with no swap address")
+	}
+	if _, ok := failed[mid]; !ok {
+		t.Fatalf("failed set = %v, want %v in it", failed, mid)
+	}
+
+	exceptions, _ := dc.compareServerMatches(srvMatches, failed)
+	if disc := exceptions[lo.ID()]; disc != nil {
+		t.Fatalf("failed match treated as discrepancy: %+v", disc)
+	}
+}
+
+// TestMatchAckAddresses checks that acknowledgements use the stored swap address,
+// including repeated deliveries and both sides of a self-trade.
+func TestMatchAckAddresses(t *testing.T) {
+	setup := func(t *testing.T, sells ...bool) (*testRig, *TXCWallet, []*trackedTrade, []*msgjson.Match) {
+		t.Helper()
+		rig := newTestRig()
+		t.Cleanup(rig.shutdown)
+		dc, c := rig.dc, rig.core
+		dcrWallet, dcr := newTWallet(tUTXOAssetA.ID)
+		btcWallet, btc := newTWallet(tUTXOAssetB.ID)
+		c.wallets[tUTXOAssetA.ID], c.wallets[tUTXOAssetB.ID] = dcrWallet, btcWallet
+		dcr.redemptionAddr, dcr.validAddr = "dcr-address", true
+		btc.redemptionAddr, btc.validAddr = "btc-address", true
+
+		mid := ordertest.RandomMatchID()
+		var trackers []*trackedTrade
+		var matches []*msgjson.Match
+		for _, sell := range sells {
+			lo, dbOrder, preImg, _ := makeLimitOrder(dc, sell, dcrBtcLotSize*3, dcrBtcRateStep*10)
+			wallets, _, _, err := c.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, sell)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tracker := newTrackedTrade(dbOrder, preImg, dc, c.lockTimeTaker, c.lockTimeMaker,
+				rig.db, rig.queue, wallets, nil, c.notify, c.formatDetails, &c.wg)
+			dc.trades[lo.ID()] = tracker
+			match := &msgjson.Match{
+				OrderID: lo.ID().Bytes(), MatchID: mid[:],
+				Quantity: dcrBtcLotSize, Rate: dcrBtcRateStep * 10,
+				Address: "counterparty", Side: uint8(order.Maker),
+				ServerTime: uint64(time.Now().UnixMilli()),
+			}
+			sign(tDexPriv, match)
+			trackers = append(trackers, tracker)
+			matches = append(matches, match)
+		}
+		return rig, btc, trackers, matches
+	}
+	sendMatches := func(t *testing.T, rig *testRig, matches []*msgjson.Match) (*msgjson.Message, error) {
+		t.Helper()
+		id := rig.ws.NextID()
+		req, err := msgjson.NewRequest(id, msgjson.MatchRoute, matches)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = handleMatchRoute(rig.core, rig.dc, req)
+		return rig.ws.sentResponse(id), err
+	}
+	checkAcks := func(t *testing.T, response *msgjson.Message, trackers []*trackedTrade, want ...string) {
+		t.Helper()
+		if response == nil {
+			t.Fatal("no acknowledgement response")
+		}
+		var acks []msgjson.Acknowledgement
+		if err := response.UnmarshalResult(&acks); err != nil {
+			t.Fatal(err)
+		}
+		if len(acks) != len(want) {
+			t.Fatalf("got %d acknowledgements, want %d", len(acks), len(want))
+		}
+		for i, addr := range want {
+			var mid order.MatchID
+			copy(mid[:], acks[i].MatchID)
+			stored, known := trackers[i].storedSwapAddress(mid)
+			if acks[i].Address != addr || !known || stored != addr {
+				t.Fatalf("match %d: acknowledged %q, stored %q (known %v), want %q", i, acks[i].Address, stored, known, addr)
+			}
+		}
+	}
+
+	t.Run("new and repeated match", func(t *testing.T) {
+		rig, btc, trackers, matches := setup(t, true)
+		rig.db.updateMatchHook = func(*db.MetaMatch) {
+			rig.ws.mtx.RLock()
+			defer rig.ws.mtx.RUnlock()
+			if len(rig.ws.sentMsgs) != 0 {
+				t.Error("match acknowledged before it was saved")
+			}
+		}
+		response, err := sendMatches(t, rig, matches)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkAcks(t, response, trackers, "btc-address")
+
+		btc.addrErr = tErr // Repeated matches must not ask the wallet for an address.
+		response, err = sendMatches(t, rig, matches)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkAcks(t, response, trackers, "btc-address")
+	})
+
+	t.Run("self-trade", func(t *testing.T) {
+		rig, _, trackers, matches := setup(t, true, false)
+		matches[1].Side = uint8(order.Taker)
+		sign(tDexPriv, matches[1])
+		response, err := sendMatches(t, rig, matches)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkAcks(t, response, trackers, "btc-address", "dcr-address")
+	})
+
+	for _, test := range []struct {
+		name        string
+		storedMatch bool
+	}{
+		{name: "storage failure"},
+		{name: "known match without an address", storedMatch: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			rig, _, trackers, matches := setup(t, true)
+			var mid order.MatchID
+			copy(mid[:], matches[0].MatchID)
+			if !test.storedMatch {
+				rig.db.updateMatchErr = tErr
+			} else {
+				trackers[0].matches[mid] = &matchTracker{MetaMatch: db.MetaMatch{
+					MetaData:  &db.MatchMetaData{},
+					UserMatch: &order.UserMatch{MatchID: mid},
+				}}
+			}
+			response, err := sendMatches(t, rig, matches)
+			if err == nil || response != nil {
+				t.Fatalf("expected an error and no response, got error %v, response %+v", err, response)
+			}
+			if addr, _ := trackers[0].storedSwapAddress(mid); addr != "" {
+				t.Fatalf("unexpected stored address %q", addr)
+			}
+		})
+	}
 }

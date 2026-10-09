@@ -108,6 +108,26 @@ func (pq *OrderPQ) copy(newCap uint32) *OrderPQ {
 	return newPQ
 }
 
+// collectUsers adds each account's order count to users.
+func (pq *OrderPQ) collectUsers(users map[account.AccountID]int) {
+	pq.mtx.RLock()
+	for user, orders := range pq.userOrders {
+		users[user] += len(orders)
+	}
+	pq.mtx.RUnlock()
+}
+
+// UserOrders retrieves all orders for a given user.
+func (pq *OrderPQ) UserOrders(user account.AccountID) []*order.LimitOrder {
+	pq.mtx.RLock()
+	defer pq.mtx.RUnlock()
+	orders := make([]*order.LimitOrder, 0, len(pq.userOrders[user]))
+	for _, lo := range pq.userOrders[user] {
+		orders = append(orders, lo)
+	}
+	return orders
+}
+
 // UnfilledForUser retrieves all completely unfilled orders for a given user.
 func (pq *OrderPQ) UnfilledForUser(user account.AccountID) []*order.LimitOrder {
 	pq.mtx.RLock()
@@ -456,23 +476,6 @@ func (pq *OrderPQ) RemoveOrderID(oid order.OrderID) (*order.LimitOrder, bool) {
 	pq.mtx.Lock()
 	defer pq.mtx.Unlock()
 	return pq.removeOrder(pq.orders[oid])
-}
-
-// RemoveUserOrders removes all orders from the queue that belong to a user.
-func (pq *OrderPQ) RemoveUserOrders(user account.AccountID) (removed []*order.LimitOrder) {
-	pq.mtx.Lock()
-	defer pq.mtx.Unlock()
-	uos, found := pq.userOrders[user]
-	if !found {
-		return
-	}
-
-	removed = make([]*order.LimitOrder, 0, len(uos))
-	for oid, lo := range uos {
-		pq.removeOrder(pq.orders[oid])
-		removed = append(removed, lo)
-	}
-	return
 }
 
 // HaveOrder indicates if an order is in the queue.

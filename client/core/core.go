@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -154,10 +155,11 @@ type pendingFeeState struct {
 
 // dexConnection is the websocket connection and the DEX configuration.
 type dexConnection struct {
-	comms.WsConn
+	comms.FailoverWsConn
 	connMaster *dex.ConnectionMaster
 	log        dex.Logger
 	acct       *dexAccount
+	ctx        context.Context
 	notify     func(Notification)
 	ticker     *dexTicker
 	// apiVer is an atomic. An uninitiated connection should be set to -1.
@@ -207,6 +209,11 @@ type dexConnection struct {
 	anomaliesCount uint32 // atomic
 	lastConnectMtx sync.RWMutex
 	lastConnect    time.Time
+
+	endpointsMtx  sync.RWMutex // endpointHosts, lastConnectedHost
+	endpointHosts []string     // registered host first, then mesh peers
+	// lastConnectedHost is used to detect failover between successful connects.
+	lastConnectedHost string
 
 	// mmSnapshotSubs tracks markets with active MM snapshot subscriptions,
 	// keyed by market name (e.g. "dcr_btc"), for re-subscription on
@@ -274,6 +281,28 @@ func (dc *dexConnection) running(mkt string) bool {
 // status returns the status of the connection to the dex.
 func (dc *dexConnection) status() comms.ConnectionStatus {
 	return comms.ConnectionStatus(atomic.LoadUint32(&dc.connectionStatus))
+}
+
+func (dc *dexConnection) setEndpointHosts(hosts []string) bool {
+	dc.endpointsMtx.Lock()
+	defer dc.endpointsMtx.Unlock()
+	changed := !slices.Equal(dc.endpointHosts, hosts)
+	dc.endpointHosts = hosts
+	return changed
+}
+
+func (dc *dexConnection) endpointHostList() []string {
+	dc.endpointsMtx.RLock()
+	defer dc.endpointsMtx.RUnlock()
+	return append([]string(nil), dc.endpointHosts...)
+}
+
+func (dc *dexConnection) activeEndpointHost() string {
+	endpoint, err := url.Parse(dc.ActiveEndpoint())
+	if err != nil {
+		return ""
+	}
+	return endpoint.Host
 }
 
 func (dc *dexConnection) config() *msgjson.ConfigResult {
@@ -536,6 +565,8 @@ func (c *Core) exchangeInfo(dc *dexConnection) *Exchange {
 		return &Exchange{
 			Host:             dc.acct.host,
 			AcctID:           acctID,
+			ServerEndpoints:  dc.endpointHostList(),
+			ActiveEndpoint:   dc.activeEndpointHost(),
 			DEXPubKey:        dexPubKeyB,
 			ConnectionStatus: dc.status(),
 			Disabled:         dc.acct.isDisabled(),
@@ -568,6 +599,8 @@ func (c *Core) exchangeInfo(dc *dexConnection) *Exchange {
 	return &Exchange{
 		Host:             dc.acct.host,
 		AcctID:           acctID,
+		ServerEndpoints:  dc.endpointHostList(),
+		ActiveEndpoint:   dc.activeEndpointHost(),
 		DEXPubKey:        dexPubKeyB,
 		Markets:          dc.marketMap(),
 		Assets:           assets,
@@ -708,22 +741,22 @@ func (c *Core) sendCancelOrder(dc *dexConnection, oid order.OrderID, base, quote
 	// Create and send the order message. Check the response before using it.
 	route, msgOrder, _ := messageOrder(co, nil)
 	var result = new(msgjson.OrderResult)
-	err = dc.signAndRequest(msgOrder, route, result, DefaultResponseTimeout)
-	if err != nil {
-		// At this point there is a possibility that the server got the request
-		// and created the cancel order, but we lost the connection before
-		// receiving the response with the cancel's order ID. Any preimage
-		// request will be unrecognized. This order is ABANDONED.
+
+	abandon := func() {
 		c.sentCommitsMtx.Lock()
 		delete(c.sentCommits, co.Commit)
 		c.sentCommitsMtx.Unlock()
+		close(commitSig)
+	}
+
+	err = dc.signAndRequest(msgOrder, route, result, DefaultResponseTimeout)
+	if err != nil {
+		abandon()
 		return preImg, nil, nil, nil, fmt.Errorf("failed to submit cancel order targeting trade %v: %w", oid, err)
 	}
 	err = validateOrderResponse(dc, result, co, msgOrder)
 	if err != nil {
-		c.sentCommitsMtx.Lock()
-		delete(c.sentCommits, co.Commit)
-		c.sentCommitsMtx.Unlock()
+		abandon()
 		return preImg, nil, nil, nil, fmt.Errorf("Abandoning order. preimage: %x, server time: %d: %w",
 			preImg[:], result.ServerTime, err)
 	}
@@ -753,29 +786,22 @@ func (c *Core) tryCancelTrade(dc *dexConnection, tracker *trackedTrade) error {
 		return newError(marketErr, "unknown market %q", tracker.mktID)
 	}
 
+	if err := tracker.beginCancelSend(); err != nil {
+		return err
+	}
+
+	// Release the trade lock while waiting for the server so settlement
+	// and order queries can continue.
+	preImg, co, sig, commitSig, err := c.sendCancelOrder(dc, oid, tracker.Base(), tracker.Quote())
+
 	tracker.mtx.Lock()
 	defer tracker.mtx.Unlock()
-
-	if status := tracker.metaData.Status; status != order.OrderStatusEpoch && status != order.OrderStatusBooked {
-		return fmt.Errorf("order %v not cancellable in status %v", oid, status)
-	}
-
-	if tracker.cancel != nil {
-		// Existing cancel might be stale. Deleting it now allows this
-		// cancel attempt to proceed.
-		tracker.deleteStaleCancelOrder()
-
-		if tracker.cancel != nil {
-			return fmt.Errorf("order %s - only one cancel order can be submitted per order per epoch. "+
-				"still waiting on cancel order %s to match", oid, tracker.cancel.ID())
-		}
-	}
-
-	// Construct and send the order.
-	preImg, co, sig, commitSig, err := c.sendCancelOrder(dc, oid, tracker.Base(), tracker.Quote())
+	tracker.cancelInFlight = false
 	if err != nil {
 		return err
 	}
+	// The order may have finished while submission was pending, but an
+	// accepted cancel still needs to be tracked to answer preimage requests.
 	defer close(commitSig)
 
 	// Store the cancel order with the tracker.
@@ -811,14 +837,50 @@ func (c *Core) tryCancelTrade(dc *dexConnection, tracker *trackedTrade) error {
 	return nil
 }
 
-// signAndRequest signs and sends the request, unmarshaling the response into
-// the provided interface.
+// requestRetryDelays allows time for recovery during failover. The delays total
+// 55 seconds, excluding time spent waiting for each request's response.
+var requestRetryDelays = []time.Duration{
+	time.Second, 2 * time.Second, 4 * time.Second,
+	8 * time.Second, 8 * time.Second, 8 * time.Second,
+	8 * time.Second, 8 * time.Second, 8 * time.Second,
+}
+
+// isRetryableSendErr identifies failures that signAndRequest retries.
+func isRetryableSendErr(err error) bool {
+	var msgErr *msgjson.Error
+	if errors.As(err, &msgErr) {
+		switch msgErr.Code {
+		case msgjson.TryAgainLaterError, msgjson.ResultUnavailableError, msgjson.UnauthorizedConnection:
+			return true
+		}
+		return false
+	}
+	return errors.Is(err, errTimeout) || strings.Contains(err.Error(), "broken connection")
+}
+
+// signAndRequest signs the request once and retries the same signed payload
+// after retryable failures, decoding a successful response into result.
+// Its routes must support repeated submissions of the same signed payload.
 func (dc *dexConnection) signAndRequest(signable msgjson.Signable, route string, result any, timeout time.Duration) error {
 	if dc.acct.locked() {
 		return fmt.Errorf("cannot sign: %s account locked", dc.acct.host)
 	}
 	sign(dc.acct.privKey, signable)
-	return sendRequest(dc.WsConn, route, signable, result, timeout)
+
+	for attempt := 0; ; attempt++ {
+		err := sendRequest(dc.FailoverWsConn, route, signable, result, timeout)
+		if err == nil || attempt >= len(requestRetryDelays) || !isRetryableSendErr(err) {
+			return err
+		}
+		delay := requestRetryDelays[attempt]
+		dc.log.Warnf("Request %q to %s failed; retrying in %s: %v",
+			route, dc.acct.host, delay, err)
+		select {
+		case <-time.After(delay):
+		case <-dc.ctx.Done():
+			return err
+		}
+	}
 }
 
 // ack sends an Acknowledgement for a match-related request.
@@ -848,29 +910,64 @@ type serverMatches struct {
 	tracker    *trackedTrade
 	msgMatches []*msgjson.Match
 	cancel     *msgjson.Match
-	// perMatchAddrs maps match ID hex to the per-match swap address we
-	// generated and included in our ack.
+	// perMatchAddrs maps match ID hex to the new or reused swap address
+	// to store when negotiating the match.
 	perMatchAddrs map[string]string
 }
 
-// parseMatches sorts the list of matches and associates them with a trade. This
-// may be called from handleMatchRoute on receipt of a new 'match' request, or
+// parsedMatch holds a match message, its trade, and our acknowledgement signature.
+// Each entry keeps its trade so a self-trade acknowledges each order's own address.
+type parsedMatch struct {
+	msgMatch      *msgjson.Match
+	tracker       *trackedTrade
+	isCancelOrder bool
+	sig           []byte
+}
+
+// buildMatchAcks returns acknowledgements in request order using stored swap
+// addresses. Cancel matches have no address; a trade match without one fails
+// the batch.
+func buildMatchAcks(parsed []*parsedMatch) ([]msgjson.Acknowledgement, error) {
+	acks := make([]msgjson.Acknowledgement, 0, len(parsed))
+	for _, pm := range parsed {
+		ack := msgjson.Acknowledgement{MatchID: pm.msgMatch.MatchID, Sig: pm.sig}
+		if pm.isCancelOrder {
+			acks = append(acks, ack)
+			continue
+		}
+		var mid order.MatchID
+		copy(mid[:], pm.msgMatch.MatchID)
+		addr, isCancel := pm.tracker.matchAckAddress(mid)
+		if !isCancel && addr == "" {
+			return nil, fmt.Errorf("no stored swap address for match %v", mid)
+		}
+		ack.Address = addr
+		acks = append(acks, ack)
+	}
+	return acks, nil
+}
+
+// parseMatches associates reported matches with trades and obtains their swap
+// addresses. It is called from handleMatchRoute for a new 'match' request, or
 // by authDEX with the list of active matches returned by the 'connect' request.
-func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs bool) (map[order.OrderID]*serverMatches, []msgjson.Acknowledgement, error) {
-	var acks []msgjson.Acknowledgement
+// The returned failed set identifies matches the server reported but the client
+// could not process, so reconnect reconciliation does not treat them as missing.
+func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs bool) (map[order.OrderID]*serverMatches, []*parsedMatch, map[order.MatchID]struct{}, error) {
+	var accepted []*parsedMatch
 	matches := make(map[order.OrderID]*serverMatches)
 	var errs []string
+	failed := make(map[order.MatchID]struct{})
+	fail := func(msgMatch *msgjson.Match, reason string) {
+		var mid order.MatchID
+		copy(mid[:], msgMatch.MatchID)
+		failed[mid] = struct{}{}
+		errs = append(errs, reason)
+	}
 
 	// Phase 1: Find all orders and verify/sign signatures. This is fast
 	// and must complete before phase 2's slow wallet RPCs, which could
 	// otherwise allow cancel orders to be retired by concurrent trade
 	// ticks before findOrder is called for them.
-	type parsedMatch struct {
-		msgMatch *msgjson.Match
-		tracker  *trackedTrade
-		isCancel bool
-		sig      []byte
-	}
 	var parsed []*parsedMatch
 	for _, msgMatch := range msgMatches {
 		var oid order.OrderID
@@ -895,7 +992,7 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs boo
 			swapRate = msgMatch.FeeRateBase
 		}
 		if !isCancel && swapRate > tracker.metaData.MaxFeeRate {
-			errs = append(errs, fmt.Sprintf("rejecting match %s for order %s because assigned rate (%d) is > MaxFeeRate (%d)",
+			fail(msgMatch, fmt.Sprintf("rejecting match %s for order %s because assigned rate (%d) is > MaxFeeRate (%d)",
 				msgMatch.MatchID, msgMatch.OrderID, swapRate, tracker.metaData.MaxFeeRate))
 			continue
 		}
@@ -906,24 +1003,24 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs boo
 			if err != nil {
 				// If the caller (e.g. handleMatchRoute) requests signature
 				// verification, this is fatal.
-				return nil, nil, fmt.Errorf("parseMatches: match signature verification failed: %w", err)
+				return nil, nil, nil, fmt.Errorf("parseMatches: match signature verification failed: %w", err)
 			}
 		}
 		sig, err := dc.acct.sign(sigMsg)
 		if err != nil {
-			errs = append(errs, err.Error())
+			fail(msgMatch, err.Error())
 			continue
 		}
 
 		parsed = append(parsed, &parsedMatch{
-			msgMatch: msgMatch,
-			tracker:  tracker,
-			isCancel: isCancel,
-			sig:      sig,
+			msgMatch:      msgMatch,
+			tracker:       tracker,
+			isCancelOrder: isCancel,
+			sig:           sig,
 		})
 	}
 
-	// Phase 2: Generate per-match swap addresses for non-cancel matches.
+	// Phase 2: Reuse stored swap addresses, or generate them for new matches.
 	// RedemptionAddress involves wallet RPCs that can be very slow under
 	// load, so generate them concurrently to avoid O(N) serial latency.
 	type addrResult struct {
@@ -933,8 +1030,20 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs boo
 	}
 	addrCh := make(chan addrResult, len(parsed))
 	for i, pm := range parsed {
-		if pm.isCancel {
+		if pm.isCancelOrder {
 			addrCh <- addrResult{idx: i}
+			continue
+		}
+		// Reuse the address saved for this match and used to verify its contract.
+		var mid order.MatchID
+		copy(mid[:], pm.msgMatch.MatchID)
+		if addr, known := pm.tracker.storedSwapAddress(mid); known {
+			if addr == "" {
+				addrCh <- addrResult{idx: i, err: fmt.Sprintf(
+					"known match %v has no stored swap address", mid)}
+				continue
+			}
+			addrCh <- addrResult{idx: i, addr: addr}
 			continue
 		}
 		if pm.tracker.wallets == nil || pm.tracker.wallets.toWallet == nil {
@@ -960,26 +1069,22 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs boo
 	for range parsed {
 		res := <-addrCh
 		if res.err != "" {
-			errs = append(errs, res.err)
+			fail(parsed[res.idx].msgMatch, res.err)
 			addrFailed[res.idx] = true
 			continue
 		}
 		addrs[res.idx] = res.addr
 	}
 
-	// Phase 3: Assemble matches and acks from the address results.
+	// Phase 3: Group successful matches by trade and retain their request order.
 	for i, pm := range parsed {
 		if addrFailed[i] {
 			continue
 		}
 		perMatchAddr := addrs[i]
 
-		// Success. Add the serverMatch and the Acknowledgement.
-		acks = append(acks, msgjson.Acknowledgement{
-			MatchID: pm.msgMatch.MatchID,
-			Sig:     pm.sig,
-			Address: perMatchAddr,
-		})
+		// Success. Add the serverMatch.
+		accepted = append(accepted, pm)
 
 		trackerID := pm.tracker.ID()
 		match := matches[trackerID]
@@ -990,7 +1095,7 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs boo
 			}
 			matches[trackerID] = match
 		}
-		if pm.isCancel {
+		if pm.isCancelOrder {
 			match.cancel = pm.msgMatch // taker match
 		} else {
 			match.msgMatches = append(match.msgMatches, pm.msgMatch)
@@ -1010,9 +1115,9 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs boo
 	if len(errs) > 0 {
 		err = fmt.Errorf("parseMatches errors: %s", strings.Join(errs, ", "))
 	}
-	// A non-nil error only means that at least one match failed to parse, so we
-	// must return the successful matches and acks for further processing.
-	return matches, acks, err
+	// A non-nil error only means that at least one match failed to parse, so
+	// we must return the successful matches for further processing.
+	return matches, accepted, failed, err
 }
 
 // matchDiscreps specifies a trackedTrades's missing and extra matches compared
@@ -1036,8 +1141,9 @@ type matchStatusConflict struct {
 // for each serverMatch.
 // Reported matches with missing trackers are already checked by parseMatches,
 // but we also must check for incomplete matches that the server is not
-// reporting.
-func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serverMatches) (
+// reporting. Matches in failed were reported but could not be processed; they
+// must not be treated as missing.
+func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serverMatches, failed map[order.MatchID]struct{}) (
 	exceptions map[order.OrderID]*matchDiscreps, statusConflicts map[order.OrderID]*matchStatusConflict) {
 
 	exceptions = make(map[order.OrderID]*matchDiscreps)
@@ -1149,6 +1255,9 @@ func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serv
 			if m.Status >= order.MatchComplete || m.MetaData.Proof.IsRevoked() {
 				continue
 			}
+			if _, ok := failed[m.MatchID]; ok {
+				continue // failed parse, not missing
+			}
 			activeMatches = append(activeMatches, m)
 		}
 		if len(activeMatches) == 0 {
@@ -1245,7 +1354,7 @@ func (dc *dexConnection) syncOrderStatuses(orders []*trackedTrade) (reconciledOr
 
 	// Send the 'order_status' request.
 	var orderStatusResults []*msgjson.OrderStatus
-	err := sendRequest(dc.WsConn, msgjson.OrderStatusRoute, orderStatusRequests,
+	err := sendRequest(dc.FailoverWsConn, msgjson.OrderStatusRoute, orderStatusRequests,
 		&orderStatusResults, DefaultResponseTimeout)
 	if err != nil {
 		dc.log.Errorf("Error retrieving order statuses from DEX %s: %v", dc.acct.host, err)
@@ -1657,7 +1766,7 @@ type Core struct {
 
 	seedGenerationTime uint64
 
-	wsConstructor func(*comms.WsCfg) (comms.WsConn, error)
+	wsConstructor func(*comms.WsCfg, []*comms.WsEndpoint) (comms.FailoverWsConn, error)
 	newCrypter    func([]byte) encrypt.Crypter
 	reCrypter     func([]byte, []byte) (encrypt.Crypter, error)
 	latencyQ      *wait.TickerQueue
@@ -1831,7 +1940,7 @@ func New(cfg *Config) (*Core, error) {
 		balPending:    make(map[uint32]*asset.Balance),
 		balActive:     make(map[uint32]bool),
 		// Allowing to change the constructor makes testing a lot easier.
-		wsConstructor: comms.NewWsConn,
+		wsConstructor: comms.NewFailoverWsConn,
 		newCrypter:    encrypt.NewCrypter,
 		reCrypter:     encrypt.Deserialize,
 		latencyQ:      wait.NewTickerQueue(recheckInterval),
@@ -4228,6 +4337,8 @@ func (c *Core) GetDEXConfig(dexAddr string, certI any) (*Exchange, error) {
 		return nil, err
 	}
 
+	defer dc.connMaster.Disconnect()
+
 	// Since connectDEX succeeded, we have the server config. exchangeInfo is
 	// guaranteed to return an *Exchange with full asset and market info.
 	return c.exchangeInfo(dc), nil
@@ -4279,12 +4390,8 @@ func (c *Core) AddDEX(appPW []byte, dexAddr string, certI any) error {
 		}
 	}()
 
-	// Don't allow adding another dex with the same pubKey. There can only be
-	// one dex connection per pubKey. UpdateDEXHost must be called to connect to
-	// the same dex using a different host name.
-	exists, host := c.dexWithPubKeyExists(dc.acct.dexPubKey)
-	if exists {
-		return newError(dupeDEXErr, "already connected to DEX at %s but with different host name %s", dexAddr, host)
+	if err := c.checkDupeDEXPubKey(dc, dexAddr); err != nil {
+		return err
 	}
 
 	err = c.db.CreateAccount(&db.AccountInfo{
@@ -4295,6 +4402,7 @@ func (c *Core) AddDEX(appPW []byte, dexAddr string, certI any) error {
 	if err != nil {
 		return fmt.Errorf("error saving account info for view-only DEX: %w", err)
 	}
+	c.configureMeshEndpointsFromConfig(dc)
 
 	success = true
 	c.connMtx.Lock()
@@ -4328,10 +4436,20 @@ func (c *Core) dbCreateOrUpdateAccount(dc *dexConnection, ai *db.AccountInfo) er
 	defer dc.acct.keyMtx.Unlock()
 
 	if !dc.acct.viewOnly {
-		return c.db.CreateAccount(ai)
+		if err := c.db.CreateAccount(ai); err != nil {
+			return err
+		}
+		c.configureMeshEndpointsFromConfig(dc)
+		return nil
 	}
 
-	err := c.db.UpdateAccountInfo(ai)
+	err := c.db.UpdateAccount(ai.Host, func(stored *db.AccountInfo) bool {
+		// Keep advertised endpoints when replacing view-only account details.
+		endpoints := stored.MeshEndpoints
+		*stored = *ai
+		stored.MeshEndpoints = endpoints
+		return true
+	})
 	if err == nil {
 		dc.acct.viewOnly = false
 	}
@@ -4437,6 +4555,18 @@ func (c *Core) dexWithPubKeyExists(pubKey *secp256k1.PublicKey) (bool, string) {
 	return false, ""
 }
 
+// checkDupeDEXPubKey rejects a new DEX connection whose public key matches
+// an existing DEX account.
+func (c *Core) checkDupeDEXPubKey(dc *dexConnection, addr string) error {
+	if dc.acct.dexPubKey == nil {
+		return nil // older server, nothing to compare
+	}
+	if exists, host := c.dexWithPubKeyExists(dc.acct.dexPubKey); exists {
+		return newError(dupeDEXErr, "the dex at %s is the same dex as %s (another endpoint of the same server); use Update Host to switch host names", addr, host)
+	}
+	return nil
+}
+
 // upgradeConnection promotes a temporary dex connection and starts listening
 // to the messages it receives.
 func (c *Core) upgradeConnection(dc *dexConnection) {
@@ -4513,14 +4643,9 @@ func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI any) (*Exchan
 		return c.exchangeInfo(dc), false, nil
 	}
 
-	// Don't allow registering for another dex with the same pubKey. There can only
-	// be one dex connection per pubKey. UpdateDEXHost must be called to connect to
-	// the same dex using a different host name.
 	if !existingConn {
-		exists, host := c.dexWithPubKeyExists(dc.acct.dexPubKey)
-		if exists {
-			return nil, false,
-				fmt.Errorf("the dex at %v is the same dex as %v. Use Update Host to switch host names", host, dexAddr)
+		if err := c.checkDupeDEXPubKey(dc, dexAddr); err != nil {
+			return nil, false, err
 		}
 	}
 
@@ -5523,7 +5648,7 @@ func (c *Core) initializeDEXConnection(dc *dexConnection, crypter encrypt.Crypte
 		c.log.Warnf("Connection to %v not available for authorization. "+
 			"It will automatically authorize when it connects.", dc.acct.host)
 		subject, details := c.formatDetails(TopicDEXDisconnected, dc.acct.host)
-		c.notify(newConnEventNote(TopicDEXDisconnected, subject, dc.acct.host, comms.Disconnected, details, db.ErrorLevel))
+		c.notify(newConnEventNote(TopicDEXDisconnected, subject, dc.acct.host, "", comms.Disconnected, details, db.ErrorLevel))
 		return
 	}
 
@@ -7147,10 +7272,8 @@ func (c *Core) sendTradeRequest(tr *tradeRequest) (*Order, error) {
 	result := new(msgjson.OrderResult)
 	err := dc.signAndRequest(msgOrder, route, result, fundingTxWait+DefaultResponseTimeout)
 	if err != nil {
-		// At this point there is a possibility that the server got the request
-		// and created the trade order, but we lost the connection before
-		// receiving the response with the trade's order ID. Any preimage
-		// request will be unrecognized. This order is ABANDONED.
+		// The server may have accepted the order even though submission failed.
+		// Abandon it locally; without its preimage, the server cannot match it.
 		return nil, fmt.Errorf("new order request with DEX server %v market %v failed: %w", dc.acct.host, mktID, err)
 	}
 
@@ -7348,12 +7471,33 @@ func bondKey(assetID uint32, coinID []byte) string {
 	return string(append(encode.Uint32Bytes(assetID), coinID...))
 }
 
-// updateReputation sets the account's reputation-related fields.
-// updateReputation must be called with the authMtx locked.
-func (dc *dexConnection) updateReputation(
-	newReputation *account.Reputation,
-) {
+// updateReputation installs the server's reputation and moves bonds excluded
+// by its expiry threshold to expiredBonds. The caller must hold authMtx.
+func (dc *dexConnection) updateReputation(newReputation *account.Reputation) {
 	dc.acct.rep = *newReputation
+
+	// Bonds excluded by the server's threshold must leave acct.bonds so local
+	// expiry does not subtract their strength from the reported tier again.
+	lockTimeThresh := newReputation.BondExpiryThreshold
+	if lockTimeThresh <= 0 { // Servers predating BondExpiryThreshold.
+		cfg := dc.config()
+		if cfg == nil {
+			return
+		}
+		lockTimeThresh = time.Now().Unix() + int64(cfg.BondExpiry)
+	}
+
+	liveBonds := make([]*db.Bond, 0, len(dc.acct.bonds))
+	for _, bond := range dc.acct.bonds {
+		if int64(bond.LockTime) >= lockTimeThresh {
+			liveBonds = append(liveBonds, bond)
+			continue
+		}
+		dc.acct.expiredBonds = append(dc.acct.expiredBonds, bond)
+		dc.acct.bondExpiryPending = true
+	}
+
+	dc.acct.bonds = liveBonds
 }
 
 // findBondKeyIdx will attempt to find the address index whose public key hashes
@@ -7706,12 +7850,12 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	}
 
 	// Associate the matches with known trades.
-	matches, _, err := dc.parseMatches(result.ActiveMatches, false)
+	matches, _, failed, err := dc.parseMatches(result.ActiveMatches, false)
 	if err != nil {
 		c.log.Error(err)
 	}
 
-	exceptions, matchConflicts := dc.compareServerMatches(matches)
+	exceptions, matchConflicts := dc.compareServerMatches(matches, failed)
 	for oid, matchAnomalies := range exceptions {
 		trade := matchAnomalies.trade
 		missing, extras := matchAnomalies.missing, matchAnomalies.extra
@@ -8858,6 +9002,170 @@ func isOnionHost(addr string) bool {
 	return strings.HasSuffix(host, ".onion")
 }
 
+func (c *Core) wsEndpoint(host string, cert []byte) (*comms.WsEndpoint, error) {
+	wsURL, err := url.Parse("wss://" + host + "/ws")
+	if err != nil {
+		return nil, newError(addressParseErr, "error parsing ws address from host %s: %w", host, err)
+	}
+
+	endpoint := &comms.WsEndpoint{
+		URL:  wsURL.String(),
+		Cert: cert,
+	}
+
+	onionHost := isOnionHost(wsURL.Host)
+	if onionHost || c.cfg.TorProxy != "" {
+		proxyAddr := c.cfg.TorProxy
+		if onionHost {
+			if c.cfg.Onion == "" {
+				return nil, errors.New("tor must be configured for .onion addresses")
+			}
+			proxyAddr = c.cfg.Onion
+
+			wsURL.Scheme = "ws"
+			endpoint.URL = wsURL.String()
+		}
+		proxy := &socks.Proxy{
+			Addr:         proxyAddr,
+			TorIsolation: c.cfg.TorIsolation, // need socks.NewPool with isolation???
+		}
+		endpoint.NetDialContext = proxy.DialContext
+	}
+
+	return endpoint, nil
+}
+
+// configureMeshEndpoints applies advertised mesh endpoints and persists them.
+// Empty lists and rejected updates leave the current endpoints unchanged.
+// Persistence failures are logged but leave successfully applied endpoints active.
+func (c *Core) configureMeshEndpoints(dc *dexConnection, advertised []*msgjson.MeshEndpoint) {
+	if len(advertised) == 0 {
+		return
+	}
+	peers, err := c.applyMeshEndpoints(dc, advertised)
+	if err != nil {
+		dc.log.Errorf("Unable to update mesh endpoints for %s: %v", dc.acct.host, err)
+		return
+	}
+	dc.cfgMtx.Lock()
+	if dc.cfg != nil {
+		dc.cfg.MeshEndpoints = advertised
+	}
+	dc.cfgMtx.Unlock()
+	c.persistMeshEndpoints(dc, peers)
+}
+
+// configureMeshEndpointsFromConfig reapplies the advertised endpoints and
+// saves them now that the account exists.
+func (c *Core) configureMeshEndpointsFromConfig(dc *dexConnection) {
+	dc.cfgMtx.RLock()
+	var advertised []*msgjson.MeshEndpoint
+	if dc.cfg != nil {
+		advertised = dc.cfg.MeshEndpoints
+	}
+	dc.cfgMtx.RUnlock()
+	c.configureMeshEndpoints(dc, advertised)
+}
+
+// applyMeshEndpoints sets failover to the registered host plus advertised
+// peers. It returns the peers (not the registered host) for persistence.
+func (c *Core) applyMeshEndpoints(dc *dexConnection, advertised []*msgjson.MeshEndpoint) ([]*db.MeshEndpoint, error) {
+	// Normalize to an ordered candidate list, deduplicated by host, with the
+	// registered host always first.
+	registered, err := addrHost(dc.acct.host)
+	if err != nil {
+		return nil, err
+	}
+	candidates := []*db.MeshEndpoint{{Host: registered, Cert: dc.acct.cert}}
+	seen := map[string]struct{}{registered: {}}
+	for _, endpoint := range advertised {
+		if endpoint == nil {
+			return nil, errors.New("nil mesh endpoint")
+		}
+		host, err := addrHost(endpoint.Host)
+		if err != nil {
+			return nil, fmt.Errorf("malformed mesh endpoint %q: %w", endpoint.Host, err)
+		}
+		if _, found := seen[host]; found {
+			continue
+		}
+		seen[host] = struct{}{}
+		candidates = append(candidates, &db.MeshEndpoint{Host: host, Cert: endpoint.Cert})
+	}
+
+	endpoints := make([]*comms.WsEndpoint, 0, len(candidates))
+	hosts := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		endpoint, err := c.wsEndpoint(candidate.Host, candidate.Cert)
+		if err != nil {
+			return nil, fmt.Errorf("mesh endpoint %q: %w", candidate.Host, err)
+		}
+		endpoints = append(endpoints, endpoint)
+		hosts = append(hosts, candidate.Host)
+	}
+
+	if err := dc.FailoverWsConn.SetFailoverEndpoints(endpoints); err != nil {
+		return nil, err
+	}
+	if dc.setEndpointHosts(hosts) {
+		c.connMtx.RLock()
+		current := c.conns[dc.acct.host] == dc
+		c.connMtx.RUnlock()
+		if current {
+			c.notify(&ServerEndpointsNote{
+				Notification:    db.NewNotification(NoteTypeServerEndpoints, TopicServerEndpointsUpdated, "", "", db.Data),
+				Host:            dc.acct.host,
+				ServerEndpoints: hosts,
+			})
+		}
+	}
+	return candidates[1:], nil
+}
+
+// handleMeshEndpointsMsg replaces the advertised peers with those in the
+// notification. Empty lists are ignored to preserve known peers.
+func handleMeshEndpointsMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
+	var note msgjson.MeshEndpointsNotification
+	if err := msg.Unmarshal(&note); err != nil {
+		return fmt.Errorf("mesh endpoints note unmarshal error: %w", err)
+	}
+	if len(note.MeshEndpoints) == 0 {
+		dc.log.Warnf("Ignoring empty mesh_endpoints notification from %s", dc.acct.host)
+		return nil
+	}
+	c.configureMeshEndpoints(dc, note.MeshEndpoints)
+	return nil
+}
+
+// persistMeshEndpoints saves advertised peers on the account if they changed.
+func (c *Core) persistMeshEndpoints(dc *dexConnection, endpoints []*db.MeshEndpoint) {
+	err := c.db.UpdateAccount(dc.acct.host, func(ai *db.AccountInfo) bool {
+		if meshEndpointsEqual(ai.MeshEndpoints, endpoints) {
+			return false
+		}
+		ai.MeshEndpoints = endpoints
+		return true
+	})
+	if errors.Is(err, db.ErrAcctNotFound) {
+		// Temporary connections and new registrations may not have a saved account yet.
+		c.log.Debugf("Not persisting mesh endpoints for %s: %v", dc.acct.host, err)
+	} else if err != nil {
+		c.log.Errorf("Error persisting mesh endpoints for %s: %v", dc.acct.host, err)
+	}
+}
+
+func meshEndpointsEqual(a, b []*db.MeshEndpoint) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Host != b[i].Host || !bytes.Equal(a[i].Cert, b[i].Cert) {
+			return false
+		}
+	}
+	return true
+}
+
 type connectDEXFlag uint8
 
 const (
@@ -8904,9 +9212,9 @@ func (c *Core) newDEXConnection(acctInfo *db.AccountInfo, flag connectDEXFlag) (
 	if err != nil {
 		return nil, newError(addressParseErr, "error parsing address: %v", err)
 	}
-	wsURL, err := url.Parse("wss://" + host + "/ws")
+	wsEndpoint, err := c.wsEndpoint(host, acctInfo.Cert)
 	if err != nil {
-		return nil, newError(addressParseErr, "error parsing ws address from host %s: %w", host, err)
+		return nil, err
 	}
 
 	listen := flag&connectDEXFlagTemporary == 0
@@ -8918,6 +9226,7 @@ func (c *Core) newDEXConnection(acctInfo *db.AccountInfo, flag connectDEXFlag) (
 
 	dc := &dexConnection{
 		log:                c.log,
+		ctx:                c.ctx,
 		acct:               newDEXAccount(acctInfo, viewOnly),
 		notify:             c.notify,
 		ticker:             newDexTicker(defaultTickInterval), // updated when server config obtained
@@ -8938,46 +9247,52 @@ func (c *Core) newDEXConnection(acctInfo *db.AccountInfo, flag connectDEXFlag) (
 	}
 
 	wsCfg := comms.WsCfg{
-		URL:      wsURL.String(),
 		PingWait: 20 * time.Second, // larger than server's pingPeriod (server/comms/server.go)
-		Cert:     acctInfo.Cert,
-		Logger:   c.log.SubLogger(wsURL.String()),
-	}
-
-	isOnionHost := isOnionHost(wsURL.Host)
-	if isOnionHost || c.cfg.TorProxy != "" {
-		proxyAddr := c.cfg.TorProxy
-		if isOnionHost {
-			if c.cfg.Onion == "" {
-				return nil, errors.New("tor must be configured for .onion addresses")
-			}
-			proxyAddr = c.cfg.Onion
-
-			wsURL.Scheme = "ws"
-			wsCfg.URL = wsURL.String()
-		}
-		proxy := &socks.Proxy{
-			Addr:         proxyAddr,
-			TorIsolation: c.cfg.TorIsolation, // need socks.NewPool with isolation???
-		}
-		wsCfg.NetDialContext = proxy.DialContext
+		Logger:   c.log.SubLogger(wsEndpoint.URL),
 	}
 
 	wsCfg.ConnectEventFunc = func(status comms.ConnectionStatus) {
 		c.handleConnectEvent(dc, status)
 	}
 	wsCfg.ReconnectSync = func() {
-		go c.handleReconnect(host)
+		go c.handleReconnect(dc)
+	}
+
+	// Seed failover from saved peers so the registered host need not be reachable.
+	// Skip peers with invalid addresses or unavailable proxy settings.
+	endpoints := []*comms.WsEndpoint{wsEndpoint}
+	hosts := []string{host}
+	seen := map[string]struct{}{host: {}}
+	for _, meshEndpoint := range acctInfo.MeshEndpoints {
+		peerHost, err := addrHost(meshEndpoint.Host)
+		if err != nil {
+			c.log.Warnf("Skipping malformed persisted mesh endpoint %q for %s: %v",
+				meshEndpoint.Host, host, err)
+			continue
+		}
+		if _, found := seen[peerHost]; found {
+			continue
+		}
+		seen[peerHost] = struct{}{}
+		endpoint, err := c.wsEndpoint(peerHost, meshEndpoint.Cert)
+		if err != nil {
+			c.log.Warnf("Skipping invalid persisted mesh endpoint %q for %s: %v",
+				meshEndpoint.Host, host, err)
+			continue
+		}
+		endpoints = append(endpoints, endpoint)
+		hosts = append(hosts, peerHost)
 	}
 
 	// Create a websocket "connection" to the server. (Don't actually connect.)
-	conn, err := c.wsConstructor(&wsCfg)
+	conn, err := c.wsConstructor(&wsCfg, endpoints)
 	if err != nil {
 		return nil, err
 	}
 
-	dc.WsConn = conn
+	dc.FailoverWsConn = conn
 	dc.connMaster = dex.NewConnectionMaster(conn)
+	dc.setEndpointHosts(hosts)
 
 	return dc, nil
 }
@@ -9068,6 +9383,7 @@ func (c *Core) startDexConnection(acctInfo *db.AccountInfo, dc *dexConnection) e
 		}
 		return err // no dc.acct.dexPubKey
 	}
+	c.configureMeshEndpoints(dc, cfg.MeshEndpoints)
 	// handleConnectEvent sets dc.connected, even on first connect
 
 	// Given bond config, sort through our db.Bond slice.
@@ -9085,12 +9401,12 @@ func (c *Core) startDexConnection(acctInfo *db.AccountInfo, dc *dexConnection) e
 
 // handleReconnect is called when a WsConn indicates that a lost connection has
 // been re-established.
-func (c *Core) handleReconnect(host string) {
+func (c *Core) handleReconnect(dc *dexConnection) {
+	host := dc.acct.host
 	c.connMtx.RLock()
-	dc, found := c.conns[host]
+	current := c.conns[host] == dc
 	c.connMtx.RUnlock()
-	if !found {
-		c.log.Errorf("handleReconnect: Unable to find previous connection to DEX at %s", host)
+	if !current {
 		return
 	}
 
@@ -9108,6 +9424,7 @@ func (c *Core) handleReconnect(host string) {
 		c.log.Errorf("handleReconnect: Unable to apply new configuration for DEX at %s: %v", host, err)
 		return
 	}
+	c.configureMeshEndpoints(dc, cfg.MeshEndpoints)
 	c.notify(newServerConfigUpdateNote(host))
 
 	type market struct { // for book re-subscribe
@@ -9266,11 +9583,21 @@ func (c *Core) handleConnectEvent(dc *dexConnection, status comms.ConnectionStat
 	atomic.StoreUint32(&dc.connectionStatus, uint32(status))
 
 	topic := TopicDEXDisconnected
+	var activeHost string
+	var endpointSwitched bool
 	if status == comms.Connected {
 		topic = TopicDEXConnected
 		dc.lastConnectMtx.Lock()
 		dc.lastConnect = time.Now()
 		dc.lastConnectMtx.Unlock()
+
+		activeHost = dc.activeEndpointHost()
+		dc.endpointsMtx.Lock()
+		if activeHost != "" {
+			endpointSwitched = dc.lastConnectedHost != "" && dc.lastConnectedHost != activeHost
+			dc.lastConnectedHost = activeHost
+		}
+		dc.endpointsMtx.Unlock()
 	} else {
 		dc.lastConnectMtx.RLock()
 		lastConnect := dc.lastConnect
@@ -9281,7 +9608,7 @@ func (c *Core) handleConnectEvent(dc *dexConnection, status comms.ConnectionStat
 			if count%wsMaxAnomalyCount == 0 {
 				// Send notification to check connectivity.
 				subject, details := c.formatDetails(TopicDexConnectivity, dc.acct.host)
-				c.notify(newConnEventNote(TopicDexConnectivity, subject, dc.acct.host, dc.status(), details, db.Poke))
+				c.notify(newConnEventNote(TopicDexConnectivity, subject, dc.acct.host, dc.activeEndpointHost(), dc.status(), details, db.Poke))
 			}
 		} else {
 			atomic.StoreUint32(&dc.anomaliesCount, 0)
@@ -9307,7 +9634,11 @@ func (c *Core) handleConnectEvent(dc *dexConnection, status comms.ConnectionStat
 
 	if dc.broadcastingConnect() {
 		subject, details := c.formatDetails(topic, dc.acct.host)
-		dc.notify(newConnEventNote(topic, subject, dc.acct.host, status, details, db.Poke))
+		dc.notify(newConnEventNote(topic, subject, dc.acct.host, activeHost, status, details, db.Poke))
+		if endpointSwitched {
+			subject, details := c.formatDetails(TopicServerEndpointSwitched, dc.acct.host, activeHost)
+			dc.notify(newConnEventNote(TopicServerEndpointSwitched, subject, dc.acct.host, activeHost, status, details, db.Poke))
+		}
 	}
 }
 
@@ -9677,6 +10008,7 @@ var noteHandlers = map[string]routeHandler{
 	msgjson.BondExpiredRoute:         handleBondExpiredMsg,
 	msgjson.MMEpochSnapshotRoute:     handleMMEpochSnapshotMsg,
 	msgjson.CounterPartyAddressRoute: handleCounterPartyAddressMsg,
+	msgjson.MeshEndpointsRoute:       handleMeshEndpointsMsg,
 }
 
 // listen monitors the DEX websocket connection for server requests and
@@ -10049,6 +10381,10 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	// Go async while waiting.
 	go func() {
 		// Order request success OR fail closes the channel.
+		// TODO(mesh): Answer using the pending order's preimage without waiting
+		// for its submission result. A lost response can delay this past the
+		// server's preimage deadline. Once revealed, retain the order and its
+		// funding coins even if the submission result is still unknown.
 		<-commitSig
 		if err := processPreimageRequest(c, dc, msg.ID, oid, req.CommitChecksum); err != nil {
 			c.log.Errorf("async processPreimageRequest for %v failed: %v", oid, err)
@@ -10153,7 +10489,7 @@ func handleMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	// request handling.
 
 	// Acknowledgements MUST be in the same orders as the msgjson.Matches.
-	matches, acks, err := dc.parseMatches(msgMatches, true)
+	matches, parsed, _, err := dc.parseMatches(msgMatches, true)
 	if err != nil {
 		// Even one failed match fails them all since the server requires acks
 		// for them all, and in the same order. TODO: consider lifting this
@@ -10179,7 +10515,32 @@ func handleMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 		}
 	}
 
-	resp, err := msgjson.NewResponse(msg.ID, acks, nil)
+	// Store matches before acknowledging them, so the addresses we send agree
+	// with those saved locally and used to verify the counterparty's contracts.
+	var wg sync.WaitGroup
+	for oid, sm := range matches {
+		wg.Add(1)
+		dc.dispatchTradeWork(oid, func() {
+			defer wg.Done()
+			updatedAssets, err := c.negotiateMatches(sm)
+			if len(updatedAssets) > 0 {
+				c.updateBalances(updatedAssets)
+			}
+			if err != nil {
+				c.log.Errorf("negotiateMatches for order %v: %v", sm.tracker.ID(), err)
+			}
+		})
+	}
+	wg.Wait()
+
+	// Another delivery may have stored the match while this request was being
+	// processed. Acknowledge the saved address, not the one obtained above.
+	ackMsgs, err := buildMatchAcks(parsed)
+	if err != nil {
+		return err
+	}
+
+	resp, err := msgjson.NewResponse(msg.ID, ackMsgs, nil)
 	if err != nil {
 		return err
 	}
@@ -10189,23 +10550,6 @@ func handleMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	if err != nil {
 		// Do not bail on the matches on error, just log it.
 		c.log.Errorf("Send match response: %v", err)
-	}
-
-	// Dispatch per-trade negotiate work to the per-trade message
-	// queues. Each trade's negotiate runs sequentially with other
-	// messages for that trade (e.g. audit, redemption), preserving
-	// the ordering the server sent while allowing different trades
-	// to be processed concurrently.
-	for oid, sm := range matches {
-		dc.dispatchTradeWork(oid, func() {
-			updatedAssets, err := c.negotiateMatches(sm)
-			if len(updatedAssets) > 0 {
-				c.updateBalances(updatedAssets)
-			}
-			if err != nil {
-				c.log.Errorf("negotiateMatches for order %v: %v", sm.tracker.ID(), err)
-			}
-		})
 	}
 
 	for mktID := range mktIDs {
@@ -10981,11 +11325,16 @@ func stampAndSign(privKey *secp256k1.PrivateKey, payload msgjson.Stampable) {
 	sign(privKey, payload)
 }
 
+type requestConn interface {
+	NextID() uint64
+	RequestWithTimeout(*msgjson.Message, func(*msgjson.Message), time.Duration, func()) error
+}
+
 // sendRequest sends a request via the specified ws connection and unmarshals
 // the response into the provided interface.
 // TODO: Modify to accept a context.Context argument so callers can pass core's
 // context to break out of the reply wait when Core starts shutting down.
-func sendRequest(conn comms.WsConn, route string, request, response any, timeout time.Duration) error {
+func sendRequest(conn requestConn, route string, request, response any, timeout time.Duration) error {
 	reqMsg, err := msgjson.NewRequest(conn.NextID(), route, request)
 	if err != nil {
 		return fmt.Errorf("error encoding %q request: %w", route, err)
@@ -10995,7 +11344,7 @@ func sendRequest(conn comms.WsConn, route string, request, response any, timeout
 	err = conn.RequestWithTimeout(reqMsg, func(msg *msgjson.Message) {
 		errChan <- msg.UnmarshalResult(response)
 	}, timeout, func() {
-		errChan <- fmt.Errorf("timed out waiting for %q response (%w)", route, errTimeout) // code this as a timeout! like today!!!
+		errChan <- fmt.Errorf("timed out waiting for %q response (%w)", route, errTimeout)
 	})
 	// Check the request error.
 	if err != nil {
@@ -11132,6 +11481,9 @@ func parseCert(host string, certI any, net dex.Network) ([]byte, error) {
 	case string:
 		if len(c) == 0 {
 			return CertStore[net][host], nil // not found is ok (try without TLS)
+		}
+		if strings.Contains(c, "-----BEGIN CERTIFICATE-----") {
+			return []byte(c), nil
 		}
 		cert, err := os.ReadFile(c)
 		if err != nil {

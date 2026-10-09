@@ -104,7 +104,8 @@ func (c *Core) ToggleAccountStatus(pw []byte, host string, disable, force bool) 
 		if err != nil {
 			return err
 		}
-		dc, connected := c.connectAccount(acctInfo)
+		var connected bool
+		dc, connected = c.connectAccount(acctInfo)
 		if !connected {
 			return errors.New("failed to connected re-enabled account")
 		}
@@ -112,7 +113,7 @@ func (c *Core) ToggleAccountStatus(pw []byte, host string, disable, force bool) 
 	}
 
 	subject, details := c.formatDetails(topic, dc.acct.host)
-	dc.notify(newConnEventNote(topic, subject, dc.acct.host, status, details, db.Poke))
+	dc.notify(newConnEventNote(topic, subject, dc.acct.host, dc.activeEndpointHost(), status, details, db.Poke))
 
 	return nil
 }
@@ -345,7 +346,10 @@ func (c *Core) UpdateCert(host string, cert []byte) error {
 		return fmt.Errorf("failed to connect using new cert (will attempt to restore old connection): %v", err)
 	}
 
-	err = c.db.UpdateAccountInfo(acct)
+	err = c.db.UpdateAccount(host, func(ai *db.AccountInfo) bool {
+		ai.Cert = cert
+		return true
+	})
 	if err != nil {
 		return fmt.Errorf("failed to update account info: %w", err)
 	}

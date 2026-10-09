@@ -106,6 +106,8 @@ const (
 	orderAccelerationErrMsgID        = "ORDER_ACCELERATION_ERR_MSG"
 	connectedID                      = "CONNECTED"
 	disconnectedID                   = "DISCONNECTED"
+	connectedViaBackupID             = "CONNECTED_VIA_BACKUP_ENDPOINT"
+	duplicateServerEndpointMsgID     = "DUPLICATE_SERVER_ENDPOINT_MSG"
 	invalidCertID                    = "INVALID_CERTIFICATE"
 	confirmationsID                  = "CONFIRMATIONS"
 	takerID                          = "TAKER"
@@ -519,6 +521,8 @@ var enUS = map[string]*intl.Translation{
 	orderAccelerationErrMsgID:        {T: "Error accelerating order: {{ msg }}"},
 	connectedID:                      {T: "Connected"},
 	disconnectedID:                   {T: "Disconnected"},
+	connectedViaBackupID:             {T: "Connected via {{ endpoint }}"},
+	duplicateServerEndpointMsgID:     {T: "Already added as {{ host }}. This address is another endpoint of the same server. To use it as the main address, open that server's settings and choose Update DEX Host."},
 	invalidCertID:                    {T: "Invalid Certificate"},
 	confirmationsID:                  {T: "confirmations"},
 	takerID:                          {T: "Taker"},

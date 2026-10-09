@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"decred.org/dcrdex/dex/candles"
+	"decred.org/dcrdex/server/db"
 )
 
 func TestCandles(t *testing.T) {
@@ -56,5 +57,25 @@ func TestCandles(t *testing.T) {
 
 	if cache.Last().MatchVolume != 1 {
 		t.Fatalf("Overwrite failed")
+	}
+
+	// The newest epoch has not yet been saved as a completed candle.
+	if err := archie.insertEpoch(archie.db, &db.EpochResults{
+		MktBase: baseID, MktQuote: quoteID,
+		Idx: 2, Dur: int64(candleDur), MatchVolume: 7,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cache = candles.NewCache(5, candleDur)
+	if err := archie.LoadEpochStats(baseID, quoteID, []*candles.Cache{cache}); err != nil {
+		t.Fatal(err)
+	}
+	if len(cache.Candles) != 3 {
+		t.Fatalf("restored %d candles, want 3", len(cache.Candles))
+	}
+	last := cache.Last()
+	if last.StartStamp != candleDur*2 || last.EndStamp != candleDur*3 || last.MatchVolume != 7 {
+		t.Fatalf("latest restored candle = %+v, want stamps %d/%d and volume 7",
+			last, candleDur*2, candleDur*3)
 	}
 }

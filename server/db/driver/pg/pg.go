@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/db/driver/pg/internal"
 )
@@ -55,28 +56,28 @@ type Config struct {
 
 // Some frequently used long-form table names.
 type archiverTables struct {
-	feeKeys      string
-	accounts     string
-	bonds        string
-	prepaidBonds string
-	points       string
+	accounts        string
+	bonds           string
+	prepaidBonds    string
+	points          string
+	eventLog        string
+	marketLifecycle string
 }
 
 // Archiver must implement server/db.DEXArchivist.
 // So far: OrderArchiver, AccountArchiver.
 type Archiver struct {
-	ctx          context.Context
-	queryTimeout time.Duration
-	db           *sql.DB
-	dbName       string
-	markets      map[string]*dex.MarketInfo
-	tables       archiverTables
+	repListenerMtx sync.RWMutex
+	repListener    func(users ...account.AccountID)
+	ctx            context.Context
+	queryTimeout   time.Duration
+	db             *sql.DB
+	dbName         string
+	markets        map[string]*dex.MarketInfo
+	tables         archiverTables
 
 	queries struct {
-		selectPoints            *sql.Stmt // internal.SelectPoints
-		insertPoints            *sql.Stmt // internal.InsertPoints
-		prunePoints             *sql.Stmt // internal.PrunePoints
-		selectReputationVersion *sql.Stmt // internal.SelectReputationVersion
+		selectPoints *sql.Stmt // internal.SelectPoints
 	}
 
 	fatalMtx sync.RWMutex
@@ -160,11 +161,12 @@ func NewArchiverForRead(ctx context.Context, cfg *Config) (*Archiver, error) {
 		queryTimeout: queryTimeout,
 		markets:      mktMap,
 		tables: archiverTables{
-			feeKeys:      fullTableName(cfg.DBName, publicSchema, feeKeysTableName),
-			accounts:     fullTableName(cfg.DBName, publicSchema, accountsTableName),
-			bonds:        fullTableName(cfg.DBName, publicSchema, bondsTableName),
-			prepaidBonds: fullTableName(cfg.DBName, publicSchema, prepaidBondsTableName),
-			points:       fullTableName(cfg.DBName, publicSchema, pointsTableName),
+			accounts:        fullTableName(cfg.DBName, publicSchema, accountsTableName),
+			bonds:           fullTableName(cfg.DBName, publicSchema, bondsTableName),
+			prepaidBonds:    fullTableName(cfg.DBName, publicSchema, prepaidBondsTableName),
+			points:          fullTableName(cfg.DBName, publicSchema, pointsTableName),
+			eventLog:        fullTableName(cfg.DBName, publicSchema, eventLogTableName),
+			marketLifecycle: fullTableName(cfg.DBName, publicSchema, marketLifecycleTableName),
 		},
 		fatal: make(chan struct{}),
 	}, nil
@@ -185,24 +187,15 @@ func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
 	}
 
 	// Ensure all tables required by the current market configuration are ready.
-	purgeMarkets, err := prepareTables(ctx, archiver.db, cfg.MarketCfg)
-	if err != nil {
+	if err := prepareTables(ctx, archiver.db, cfg.MarketCfg); err != nil {
 		return nil, err
 	}
 	if err := archiver.prepareQueries(); err != nil {
 		return nil, err
 	}
-	for _, staleMarket := range purgeMarkets {
-		mkt := archiver.markets[staleMarket]
-		if mkt == nil { // shouldn't happen
-			return nil, fmt.Errorf("unrecognized market %v", staleMarket)
-		}
-		unbookedSells, unbookedBuys, err := archiver.FlushBook(mkt.Base, mkt.Quote)
-		if err != nil {
-			return nil, fmt.Errorf("failed to flush book for market %v: %w", staleMarket, err)
-		}
-		log.Infof("Flushed %d sell orders and %d buy orders from market %v with a changed lot size.",
-			len(unbookedSells), len(unbookedBuys), staleMarket)
+
+	if err := archiver.verifyTableClassification(ctx); err != nil {
+		return nil, err
 	}
 
 	return archiver, nil
@@ -236,18 +229,6 @@ func (a *Archiver) prepareQueries() (err error) {
 	a.queries.selectPoints, err = a.db.Prepare(fmt.Sprintf(internal.SelectPoints, a.tables.points))
 	if err != nil {
 		return fmt.Errorf("error constructing prepared statement for reputation points selection: %w", err)
-	}
-	a.queries.insertPoints, err = a.db.Prepare(fmt.Sprintf(internal.InsertPoints, a.tables.points))
-	if err != nil {
-		return fmt.Errorf("error constructing prepared statement for reputation points insertion: %w", err)
-	}
-	a.queries.prunePoints, err = a.db.Prepare(fmt.Sprintf(internal.PrunePoints, a.tables.points))
-	if err != nil {
-		return fmt.Errorf("error constructing prepared statement for reputation points pruning: %w", err)
-	}
-	a.queries.selectReputationVersion, err = a.db.Prepare(fmt.Sprintf(internal.SelectReputationVersion, a.tables.accounts))
-	if err != nil {
-		return fmt.Errorf("error constructing prepared statement for reputation version selection: %w", err)
 	}
 	return nil
 }

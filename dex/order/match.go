@@ -33,6 +33,21 @@ func (id MatchID) MarshalJSON() ([]byte, error) {
 	return json.Marshal(id.String())
 }
 
+// UnmarshalJSON satisfies the json.Unmarshaler interface, and expects the id
+// to be encoded as a hex string.
+func (id *MatchID) UnmarshalJSON(data []byte) error {
+	var sid string
+	if err := json.Unmarshal(data, &sid); err != nil {
+		return err
+	}
+	decoded, err := DecodeMatchID(sid)
+	if err != nil {
+		return err
+	}
+	*id = decoded
+	return nil
+}
+
 // Bytes returns the match ID as a []byte.
 func (id MatchID) Bytes() []byte {
 	return id[:]

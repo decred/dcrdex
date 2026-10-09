@@ -1362,7 +1362,12 @@ export default class WalletsPage extends BasePage {
     const proposalsMeta = res.proposalsMeta as ProposalsMeta
     this.proposalsMeta = proposalsMeta
     page.proposalsInProgressCount.textContent = String(proposalsMeta?.proposalsInProgress?.length ?? 0)
-    const stakeStatus = res.status as TicketStakingStatus
+    const stakeStatus = res.status as TicketStakingStatus | null
+    if (!stakeStatus) {
+      Doc.hide(page.stakingSummary, page.ticketPriceBox)
+      Doc.show(page.stakingRpcSpvMsg)
+      return
+    }
     this.stakeStatus = stakeStatus
     page.stakingAgendaCount.textContent = String(stakeStatus.stances.agendas.length)
     page.stakingTspendCount.textContent = String(stakeStatus.stances.tspends.length)

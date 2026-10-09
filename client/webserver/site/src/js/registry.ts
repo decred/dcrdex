@@ -61,6 +61,13 @@ export interface Exchange {
   markets: Record<string, Market>
   assets: Record<number, Asset>
   connectionStatus: ConnectionStatus
+  // serverEndpoints is the known server endpoint hosts: the registered host
+  // plus any peers the server advertises for failover.
+  serverEndpoints?: string[]
+  // activeEndpoint is the endpoint host serving the current connection. It
+  // may differ from host when the connection has failed over to a backup
+  // endpoint, and is empty when disconnected.
+  activeEndpoint?: string
   viewOnly: boolean
   bondAssets: Record<string, BondAsset>
   candleDurs: string[]
@@ -583,6 +590,14 @@ export interface MatchNote extends CoreNote {
 export interface ConnEventNote extends CoreNote {
   host: string
   connectionStatus: ConnectionStatus
+  // activeEndpoint is the endpoint host serving the connection, empty when
+  // disconnected.
+  activeEndpoint?: string
+}
+
+export interface ServerEndpointsNote extends CoreNote {
+  host: string
+  serverEndpoints: string[]
 }
 
 export interface OrderNote extends CoreNote {

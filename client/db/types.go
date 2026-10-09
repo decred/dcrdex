@@ -211,6 +211,13 @@ func decodeBond_v2(pushes [][]byte) (*Bond, error) {
 	}, nil
 }
 
+// MeshEndpoint contains the address and optional TLS certificate of a
+// mesh server.
+type MeshEndpoint struct {
+	Host string
+	Cert []byte
+}
+
 // AccountInfo is information about an account on a Decred DEX. The database
 // is designed for one account per server.
 type AccountInfo struct {
@@ -218,6 +225,9 @@ type AccountInfo struct {
 	Host      string
 	Cert      []byte
 	DEXPubKey *secp256k1.PublicKey
+
+	// MeshEndpoints lists advertised failover endpoints, excluding Host.
+	MeshEndpoints []*MeshEndpoint
 
 	// EncKeyV2 is an encrypted private key generated deterministically from the
 	// app seed.
@@ -245,7 +255,7 @@ type AccountInfo struct {
 // DB upgrade at some point. But how to deal with old accounts needing to store
 // this data forever?
 func (ai *AccountInfo) Encode() []byte {
-	return versionedBytes(4).
+	return versionedBytes(5).
 		AddData([]byte(ai.Host)).
 		AddData(ai.Cert).
 		AddData(ai.DEXPubKey.SerializeCompressed()).
@@ -256,7 +266,45 @@ func (ai *AccountInfo) Encode() []byte {
 		AddData(encode.Uint32Bytes(ai.BondAsset)).
 		AddData(encode.Uint32Bytes(ai.LegacyFeeAssetID)).
 		AddData(ai.LegacyFeeCoin).
-		AddData(encode.Uint16Bytes(ai.PenaltyComps))
+		AddData(encode.Uint16Bytes(ai.PenaltyComps)).
+		AddData(encodeMeshEndpoints(ai.MeshEndpoints))
+}
+
+// encodeMeshEndpoints encodes an ordered list of hosts and certificates.
+func encodeMeshEndpoints(endpoints []*MeshEndpoint) []byte {
+	blob := versionedBytes(0)
+	for _, endpoint := range endpoints {
+		blob = blob.AddData([]byte(endpoint.Host)).AddData(endpoint.Cert)
+	}
+	return blob
+}
+
+func decodeMeshEndpoints(b []byte) ([]*MeshEndpoint, error) {
+	// The v4 account decoder supplies an empty field for the missing endpoint list.
+	if len(b) == 0 {
+		return nil, nil
+	}
+	ver, pushes, err := encode.DecodeBlob(b)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding mesh endpoints: %w", err)
+	}
+	if ver != 0 {
+		return nil, fmt.Errorf("unknown mesh endpoints version %d", ver)
+	}
+	if len(pushes)%2 != 0 {
+		return nil, fmt.Errorf("expected an even number of mesh endpoint pushes, got %d", len(pushes))
+	}
+	if len(pushes) == 0 {
+		return nil, nil
+	}
+	endpoints := make([]*MeshEndpoint, 0, len(pushes)/2)
+	for i := 0; i < len(pushes); i += 2 {
+		endpoints = append(endpoints, &MeshEndpoint{
+			Host: string(pushes[i]),
+			Cert: pushes[i+1],
+		})
+	}
+	return endpoints, nil
 }
 
 // ViewOnly is true if account keys are not saved.
@@ -290,6 +338,8 @@ func DecodeAccountInfo(b []byte) (*AccountInfo, error) {
 		return decodeAccountInfo_v3(pushes)
 	case 4:
 		return decodeAccountInfo_v4(pushes)
+	case 5:
+		return decodeAccountInfo_v5(pushes)
 	}
 	return nil, fmt.Errorf("unknown AccountInfo version %d", ver)
 }
@@ -355,22 +405,36 @@ func decodeAccountInfo_v3(pushes [][]byte) (*AccountInfo, error) {
 
 func decodeAccountInfo_v4(pushes [][]byte) (*AccountInfo, error) {
 	if len(pushes) != 11 {
-		return nil, fmt.Errorf("decodeAccountInfo: expected 11 data pushes, got %d", len(pushes))
+		return nil, fmt.Errorf("decodeAccountInfo_v4: expected 11 data pushes, got %d", len(pushes))
+	}
+	pushes = append(pushes, nil) // empty mesh endpoint list
+	return decodeAccountInfo_v5(pushes)
+}
+
+func decodeAccountInfo_v5(pushes [][]byte) (*AccountInfo, error) {
+	if len(pushes) != 12 {
+		return nil, fmt.Errorf("decodeAccountInfo_v5: expected 12 data pushes, got %d", len(pushes))
 	}
 	hostB, certB, dexPkB := pushes[0], pushes[1], pushes[2]                // dex identity
 	v2Key, legacyKeyB := pushes[3], pushes[4]                              // account identity
 	targetTierB, maxBondedB, bondAssetB := pushes[5], pushes[6], pushes[7] // bond options
 	regAssetB, coinB, penaltyComps := pushes[8], pushes[9], pushes[10]     // legacy reg fee data
+	meshEndpointsB := pushes[11]
 	pk, err := secp256k1.ParsePubKey(dexPkB)
 	if err != nil {
 		return nil, err
 	}
+	meshEndpoints, err := decodeMeshEndpoints(meshEndpointsB)
+	if err != nil {
+		return nil, err
+	}
 	return &AccountInfo{
-		Host:         string(hostB),
-		Cert:         certB,
-		DEXPubKey:    pk,
-		EncKeyV2:     v2Key,
-		LegacyEncKey: legacyKeyB,
+		Host:          string(hostB),
+		Cert:          certB,
+		DEXPubKey:     pk,
+		MeshEndpoints: meshEndpoints,
+		EncKeyV2:      v2Key,
+		LegacyEncKey:  legacyKeyB,
 		// Bonds decoded by DecodeBond from separate pushes.
 		TargetTier:       intCoder.Uint64(targetTierB),
 		MaxBondedAmt:     intCoder.Uint64(maxBondedB),

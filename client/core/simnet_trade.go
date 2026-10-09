@@ -2498,9 +2498,9 @@ func (client *simulationClient) replaceConns() {
 	// with.
 	client.core.connMtx.Lock()
 	client.filteredConn = &tConn{
-		WsConn: client.core.conns[dexHost].WsConn,
+		FailoverWsConn: client.core.conns[dexHost].FailoverWsConn,
 	}
-	client.core.conns[dexHost].WsConn = client.filteredConn
+	client.core.conns[dexHost].FailoverWsConn = client.filteredConn
 	client.core.connMtx.Unlock()
 }
 
@@ -2840,10 +2840,10 @@ func (client *simulationClient) disconnectWallets() {
 	client.core.walletMtx.Unlock()
 }
 
-var _ comms.WsConn = (*tConn)(nil)
+var _ comms.FailoverWsConn = (*tConn)(nil)
 
 type tConn struct {
-	comms.WsConn
+	comms.FailoverWsConn
 	requestFilter atomic.Value // func(route string) error
 	sendFilter    atomic.Value // func(msg *msgjson.Message) *msgjson.Message
 }
@@ -2866,7 +2866,7 @@ func (tc *tConn) Send(msg *msgjson.Message) error {
 	if fi := tc.sendFilter.Load(); fi != nil {
 		msg = fi.(func(*msgjson.Message) *msgjson.Message)(msg)
 	}
-	return tc.WsConn.Send(msg)
+	return tc.FailoverWsConn.Send(msg)
 }
 
 func (tc *tConn) Request(msg *msgjson.Message, respHandler func(*msgjson.Message)) error {
@@ -2879,7 +2879,7 @@ func (tc *tConn) RequestWithTimeout(msg *msgjson.Message, respHandler func(*msgj
 			return err
 		}
 	}
-	return tc.WsConn.RequestWithTimeout(msg, respHandler, expireTime, expire)
+	return tc.FailoverWsConn.RequestWithTimeout(msg, respHandler, expireTime, expire)
 }
 
 func init() {

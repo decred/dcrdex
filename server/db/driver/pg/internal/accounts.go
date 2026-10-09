@@ -1,13 +1,6 @@
 package internal
 
 const (
-	// CreateFeeKeysTable creates the fee_keys table, which is a small table that
-	// is used as a persistent child key counter for master extended public key.
-	CreateFeeKeysTable = `CREATE TABLE IF NOT EXISTS %s (
-		key_hash BYTEA PRIMARY KEY,    -- UNIQUE INDEX
-		child INT8 DEFAULT 0
-		);`
-
 	// CreateAccountsTable creates the account table.
 	CreateAccountsTable = `CREATE TABLE IF NOT EXISTS %s (
 		account_id BYTEA PRIMARY KEY,  -- UNIQUE INDEX
@@ -39,29 +32,12 @@ const (
 	AddBond = `INSERT INTO %s (version, bond_coin_id, asset_id, account_id, amount, strength, lock_time)
 		VALUES ($1, $2, $3, $4, $5, $6, $7);`
 
-	DeleteBond = `DELETE FROM %s WHERE bond_coin_id = $1 AND asset_id = $2;`
+	SelectBondAccount = `SELECT account_id FROM %s
+		WHERE bond_coin_id = $1 AND asset_id = $2;`
 
 	SelectActiveBondsForUser = `SELECT version, bond_coin_id, asset_id, amount, strength, lock_time FROM %s
 		WHERE account_id = $1 AND lock_time >= $2
 		ORDER BY lock_time;`
-
-	// InsertKeyIfMissing creates an entry for the specified key hash, if it
-	// doesn't already exist.
-	InsertKeyIfMissing = `INSERT INTO %s (key_hash)
-		VALUES ($1)
-		ON CONFLICT (key_hash) DO NOTHING
-		RETURNING child;`
-
-	CurrentKeyIndex = `SELECT child FROM %s WHERE key_hash = $1;`
-
-	SetKeyIndex = `UPDATE %s
-		SET child = $1
-		WHERE key_hash = $2;`
-
-	UpsertKeyIndex = `INSERT INTO %s (child, key_hash)
-		VALUES ($1, $2)
-		ON CONFLICT (key_hash) DO UPDATE
-		SET child = $1;`
 
 	// CloseAccount sets the broken_rule column for the account, which signifies
 	// that the account is closed.
@@ -90,8 +66,7 @@ const (
 	DeletePrepaidBond = `DELETE FROM %s WHERE coin_id = $1;`
 
 	InsertPrepaidBond = `INSERT INTO %s (coin_id, strength, lock_time) VALUES ($1, $2, $3);`
-
-	SelectReputationVersion = `SELECT reputation_ver FROM %s WHERE account_id = $1;`
-
-	UpdateReputationVersion = `UPDATE %s SET reputation_ver = $1 WHERE account_id = $2;`
 )
+
+// UpdateReputationVersion marks accounts converted by the v9 upgrade.
+const UpdateReputationVersion = `UPDATE %s SET reputation_ver = $1 WHERE account_id = $2;`

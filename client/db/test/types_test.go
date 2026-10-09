@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/db"
+	"decred.org/dcrdex/dex/encode"
 )
 
 func TestAccountInfo(t *testing.T) {
@@ -25,6 +26,42 @@ func TestAccountInfo(t *testing.T) {
 		MustCompareAccountInfo(t, ai, reAI)
 	})
 	t.Logf("encoded, decoded, and compared %d AccountInfo in %d ms", spins, time.Since(tStart)/time.Millisecond)
+
+	ai := RandomAccountInfo()
+	ai.MeshEndpoints = nil
+	_, pushes, err := encode.DecodeBlob(ai.Encode())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name      string
+		version   byte
+		endpoints []byte
+		wantErr   bool
+	}{
+		{"v4 account", 4, nil, false},
+		{"unknown endpoint version", 5, []byte{1}, true},
+		{"missing certificate", 5, encode.BuildyBytes{0}.AddData([]byte("peer.example:7232")), true},
+		{"truncated endpoint", 5, []byte{0, 1}, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			blob := encode.BuildyBytes{tt.version}
+			// The first 11 fields are shared by account versions 4 and 5.
+			for _, push := range pushes[:11] {
+				blob = blob.AddData(push)
+			}
+			if tt.version == 5 {
+				blob = blob.AddData(tt.endpoints)
+			}
+			decoded, err := db.DecodeAccountInfo(blob)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("DecodeAccountInfo error = %v, want error %v", err, tt.wantErr)
+			}
+			if !tt.wantErr {
+				MustCompareAccountInfo(t, ai, decoded)
+			}
+		})
+	}
 }
 
 func TestMatchProof(t *testing.T) {

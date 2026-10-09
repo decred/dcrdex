@@ -314,3 +314,31 @@ func TestCandlesCopy(t *testing.T) {
 		}
 	}
 }
+
+func TestCompletedCandlesSince(t *testing.T) {
+	cache := NewCache(3, fiveMins)
+	if cs := cache.CompletedCandlesSince(0); len(cs) != 0 {
+		t.Fatalf("empty cache returned %d candles", len(cs))
+	}
+
+	// Historical epochs in the same bin must finish replaying before it is saved.
+	base := uint64(time.Now().Add(-time.Hour).UnixMilli()) / fiveMins * fiveMins
+	for _, offset := range []uint64{1000, 2000} {
+		cache.Add(&Candle{EndStamp: base + offset, MatchVolume: 10})
+		if cs := cache.CompletedCandlesSince(0); len(cs) != 0 {
+			t.Fatalf("incomplete bin returned as completed: %+v", cs)
+		}
+	}
+
+	cache.Add(&Candle{EndStamp: base + fiveMins, MatchVolume: 1})
+	cs := cache.CompletedCandlesSince(0)
+	if len(cs) != 1 {
+		t.Fatalf("got %d completed candles, want 1", len(cs))
+	}
+	if cs[0].EndStamp != base+2000 || cs[0].MatchVolume != 20 {
+		t.Fatalf("completed candle does not include both epochs: %+v", cs[0])
+	}
+	if cs := cache.CompletedCandlesSince(base + 1000); len(cs) != 0 {
+		t.Fatalf("already stored bin returned again: %+v", cs)
+	}
+}

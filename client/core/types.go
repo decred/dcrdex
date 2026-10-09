@@ -742,8 +742,13 @@ type ExchangeAuth struct {
 
 // Exchange represents a single DEX with any number of markets.
 type Exchange struct {
-	Host             string                 `json:"host"`
-	AcctID           string                 `json:"acctID"`
+	Host   string `json:"host"`
+	AcctID string `json:"acctID"`
+	// ServerEndpoints is the registered host plus advertised mesh peers.
+	ServerEndpoints []string `json:"serverEndpoints,omitempty"`
+	// ActiveEndpoint is the live endpoint host; may differ from Host after
+	// failover. Empty when disconnected.
+	ActiveEndpoint   string                 `json:"activeEndpoint,omitempty"`
 	DEXPubKey        dex.Bytes              `json:"dexPubKey,omitempty"`
 	Markets          map[string]*Market     `json:"markets"`
 	Assets           map[uint32]*dex.Asset  `json:"assets"`
@@ -865,6 +870,8 @@ type dexAccount struct {
 	bonds             []*db.Bond // confirmed, and not yet expired
 	expiredBonds      []*db.Bond // expired and needing refund
 	rep               account.Reputation
+	// bondExpiryPending records an expiry that still needs a notification.
+	bondExpiryPending bool
 	targetTier        uint64
 	maxBondedAmt      uint64
 	penaltyComps      uint16 // max penalties to compensate for

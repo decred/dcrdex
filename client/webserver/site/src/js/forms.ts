@@ -1,5 +1,5 @@
 import Doc, { Animation } from './doc'
-import { postJSON } from './http'
+import { Errors, postJSON } from './http'
 import State from './state'
 import * as intl from './locales'
 import { Wave } from './charts'
@@ -847,7 +847,7 @@ export class ConfirmRegistrationForm {
     const res = await postJSON(url, form)
     loaded()
     if (!app().checkResponse(res)) {
-      page.regErr.textContent = res.msg
+      page.regErr.textContent = friendlyDupeDEXError(res.msg, res.code)
       Doc.show(page.regErr)
       return
     }
@@ -1165,7 +1165,7 @@ export class FeeAssetSelectionForm {
     }
     const res = await postJSON('/api/redeemprepaidbond', { host, code, cert: this.certFile })
     if (!app().checkResponse(res)) {
-      page.prepaidBondErr.textContent = res.msg
+      page.prepaidBondErr.textContent = friendlyDupeDEXError(res.msg, res.code)
       Doc.show(page.prepaidBondErr)
       return
     }
@@ -1682,7 +1682,7 @@ export class DEXAddressForm {
       if (String(res.msg).includes('certificate required')) {
         Doc.show(page.needCert)
       } else {
-        page.err.textContent = res.msg
+        page.err.textContent = friendlyDupeDEXError(res.msg, res.code)
         Doc.show(page.err)
       }
       return
@@ -1732,7 +1732,7 @@ export class DiscoverAccountForm {
     const res = await postJSON('/api/discoveracct', req)
     loaded()
     if (!app().checkResponse(res)) {
-      page.err.textContent = res.msg
+      page.err.textContent = friendlyDupeDEXError(res.msg, res.code)
       Doc.show(page.err)
       return
     }
@@ -2260,6 +2260,16 @@ export async function slideSwap (form1: HTMLElement, form2: HTMLElement) {
     form2.style.right = `${-shift + progress * shift}px`
   }, 'easeOutHard')
   form2.style.right = '0'
+}
+
+/* Formats duplicate DEX errors with instructions for changing the host. */
+function friendlyDupeDEXError (msg: string, code?: number): string {
+  if (code !== Errors.dupeDEXErr) return msg
+  const match = /is the same dex as ([^\s()]+)/.exec(msg)
+  if (!match) return msg
+  const host = match[1].replace(/[.,;]+$/, '')
+  if (!host) return msg
+  return intl.prep(intl.ID_DUPLICATE_SERVER_ENDPOINT_MSG, { host })
 }
 
 export function showSuccess (page: Record<string, PageElement>, msg: string) {

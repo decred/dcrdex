@@ -738,39 +738,47 @@ func (db *BoltDB) MultisigIndexForPubkey(assetID uint32, pubkey [33]byte) (uint3
 	})
 }
 
-// UpdateAccountInfo updates the account info for an existing account with
-// the same Host as the parameter. If no account exists with this host,
-// an error is returned.
-func (db *BoltDB) UpdateAccountInfo(ai *dexdb.AccountInfo) error {
+// UpdateAccount updates the account for host. See db.DB.
+func (db *BoltDB) UpdateAccount(host string, update func(ai *dexdb.AccountInfo) (save bool)) error {
 	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
-		acct := accts.Bucket([]byte(ai.Host))
+		acct := accts.Bucket([]byte(host))
 		if acct == nil {
-			return fmt.Errorf("account not found for %s", ai.Host)
+			return dexdb.ErrAcctNotFound
 		}
 
-		err := acct.Put(accountKey, ai.Encode())
+		acctB := getCopy(acct, accountKey)
+		if acctB == nil {
+			return fmt.Errorf("empty account record for %s", host)
+		}
+		ai, err := dexdb.DecodeAccountInfo(acctB)
 		if err != nil {
+			return err
+		}
+
+		if !update(ai) {
+			return nil
+		}
+
+		if err := acct.Put(accountKey, ai.Encode()); err != nil {
 			return fmt.Errorf("accountKey put error: %w", err)
 		}
-
+		if len(ai.Bonds) == 0 {
+			return nil
+		}
 		bonds, err := acct.CreateBucketIfNotExists(bondsSubBucket)
 		if err != nil {
 			return fmt.Errorf("unable to create bonds sub-bucket for account for %s: %w", ai.Host, err)
 		}
-
 		for _, bond := range ai.Bonds {
 			bondUID := bond.UniqueID()
 			bondBkt, err := bonds.CreateBucketIfNotExists(bondUID)
 			if err != nil {
 				return fmt.Errorf("failed to create bond %x bucket: %w", bondUID, err)
 			}
-
-			err = db.storeBond(bondBkt, bond)
-			if err != nil {
+			if err := db.storeBond(bondBkt, bond); err != nil {
 				return err
 			}
 		}
-
 		return nil
 	})
 }

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"time"
 
 	"decred.org/dcrdex/dex"
@@ -20,24 +21,25 @@ import (
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/comms"
+	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/matcher"
+	"decred.org/dcrdex/server/mesh"
 )
 
 // The AuthManager handles client-related actions, including authorization and
 // communications.
 type AuthManager interface {
 	Route(route string, handler func(account.AccountID, *msgjson.Message) *msgjson.Error)
-	Auth(user account.AccountID, msg, sig []byte) error
+	VerifyUserSig(user account.AccountID, msg, sig []byte) error
 	AcctStatus(user account.AccountID) (connected bool, tier int64)
 	Sign(...msgjson.Signable)
 	Send(account.AccountID, *msgjson.Message) error
+	SendIfLocal(account.AccountID, *msgjson.Message) error
 	Request(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message)) error
+	RequestIfLocal(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message)) error
 	RequestWithTimeout(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message), time.Duration, func()) error
-	PreimageSuccess(user account.AccountID, refTime time.Time, oid order.OrderID)
-	MissedPreimage(user account.AccountID, refTime time.Time, oid order.OrderID)
-	RecordCancel(user account.AccountID, oid, target order.OrderID, epochGap int32, t time.Time)
-	RecordCompletedOrder(user account.AccountID, oid order.OrderID, t time.Time)
-	UserReputation(user account.AccountID) (tier int64, score, maxScore int32, err error)
+	ReputationOutcomePolicy() *db.ReputationOutcomePolicy
+	UserReputationAt(user account.AccountID, asOf time.Time) (tier int64, score, maxScore int32, err error)
 }
 
 const (
@@ -51,9 +53,9 @@ const (
 
 // MarketTunnel is a connection to a market.
 type MarketTunnel interface {
-	// SubmitOrder submits the order to the market for insertion into the epoch
-	// queue.
-	SubmitOrder(*orderRecord) error
+	// AcceptOrderCommand validates and accepts an order.
+	AcceptOrderCommand(context.Context, *orderRecord, *mesh.CommandCompletion) *msgjson.Error
+	HandleOrderResubmission(ctx context.Context, rec *orderRecord, completion *mesh.CommandCompletion) (handled bool, rpcErr *msgjson.Error)
 	// MidGap returns the mid-gap market rate, which is ths rate halfway between
 	// the best buy order and the best sell order in the order book.
 	MidGap() uint64
@@ -80,22 +82,14 @@ type MarketTunnel interface {
 	// in the order book.
 	Cancelable(order.OrderID) bool
 
-	// Suspend suspends the market as soon as a given time, returning the final
-	// epoch index and and time at which that epoch closes.
-	Suspend(asSoonAs time.Time, persistBook bool) (finalEpochIdx int64, finalEpochEnd time.Time)
-
 	// Running indicates is the market is accepting new orders. This will return
 	// false when suspended, but false does not necessarily mean Run has stopped
 	// since a start epoch may be set.
 	Running() bool
 
-	// CheckUnfilled checks a user's unfilled book orders that are funded by
-	// coins for a given asset to ensure that their funding coins are not spent.
-	// If any of an unfilled order's funding coins are spent, the order is
-	// unbooked (removed from the in-memory book, revoked in the DB, a
-	// cancellation marked against the user, coins unlocked, and orderbook
-	// subscribers notified). See Unbook for details.
-	CheckUnfilled(assetID uint32, user account.AccountID) (unbooked []*order.LimitOrder)
+	// CheckUnfilled revokes a user's unfilled booked orders whose funding
+	// coins are spent and returns the revoked orders.
+	CheckUnfilled(assetID uint32, user account.AccountID) []*order.LimitOrder
 
 	// Parcels calculates the number of active parcels for the market.
 	Parcels(user account.AccountID, settlingQty uint64) float64
@@ -103,8 +97,7 @@ type MarketTunnel interface {
 
 type MarketParcelCalculator func(settlingQty uint64) (parcels float64)
 
-// orderRecord contains the information necessary to respond to an order
-// request.
+// orderRecord contains an order and its client request.
 type orderRecord struct {
 	order order.Order
 	req   msgjson.Stampable
@@ -144,8 +137,7 @@ type MatchSwapper interface {
 	UnsettledQuantity(user account.AccountID) map[[2]uint32]uint64
 }
 
-// OrderRouter handles the 'limit', 'market', and 'cancel' DEX routes. These
-// are authenticated routes used for placing and canceling orders.
+// OrderRouter validates client orders and routes requests to their markets.
 type OrderRouter struct {
 	auth        AuthManager
 	assets      map[uint32]*asset.BackedAsset
@@ -154,6 +146,7 @@ type OrderRouter struct {
 	feeSource   FeeSource
 	dexBalancer *DEXBalancer
 	swapper     MatchSwapper
+	mesh        MeshService
 }
 
 // OrderRouterConfig is the configuration settings for an OrderRouter.
@@ -183,21 +176,14 @@ func NewOrderRouter(cfg *OrderRouterConfig) *OrderRouter {
 	return router
 }
 
-func (r *OrderRouter) Run(ctx context.Context) {
-	r.latencyQ.Run(ctx)
+// SetMeshService configures the mesh service. It must be set before the comms
+// routes serve traffic.
+func (r *OrderRouter) SetMeshService(mesh MeshService) {
+	r.mesh = mesh
 }
 
-func (r *OrderRouter) respondError(reqID uint64, user account.AccountID, msgErr *msgjson.Error) {
-	log.Debugf("Error going to user %v: %s", user, msgErr)
-	msg, err := msgjson.NewResponse(reqID, nil, msgErr)
-	if err != nil {
-		log.Errorf("Failed to create error response with message '%s': %v", msg, err)
-		return // this should not be possible, but don't pass nil msg to Send
-	}
-	if err := r.auth.Send(user, msg); err != nil {
-		log.Infof("Failed to send %s error response (msg = %s) to disconnected user %v: %q",
-			msg.Route, msgErr, user, err)
-	}
+func (r *OrderRouter) Run(ctx context.Context) {
+	r.latencyQ.Run(ctx)
 }
 
 func fundingCoin(backend asset.Backend, coinID []byte, redeemScript []byte) (asset.FundingCoin, error) {
@@ -216,10 +202,23 @@ func coinConfirmations(coin asset.Coin) (int64, error) {
 	return coin.Confirmations(ctx)
 }
 
-// handleLimit is the handler for the 'limit' route. This route accepts a
-// msgjson.Limit payload, validates the information, constructs an
-// order.LimitOrder and submits it to the epoch queue.
+// handleLimit submits a limit order command.
 func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) *msgjson.Error {
+	return r.mesh.ExecuteCommand(context.Background(), mesh.CommandRequest{
+		Kind: commandKindLimit,
+		User: user,
+		Msg:  msg,
+		Respond: func(resp *msgjson.Message) error {
+			return r.auth.Send(user, resp)
+		},
+	})
+}
+
+// executeLimit validates a limit order request and submits the order for acceptance.
+func (r *OrderRouter) executeLimit(cmdCtx *mesh.CommandContext) *msgjson.Error {
+	user := cmdCtx.Request.User
+	msg := cmdCtx.Request.Msg
+
 	limit := new(msgjson.LimitOrder)
 	err := msg.Unmarshal(&limit)
 	if err != nil || limit == nil {
@@ -231,19 +230,9 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 		return rpcErr
 	}
 
-	if _, tier := r.auth.AcctStatus(user); tier < 1 {
-		return msgjson.NewError(msgjson.AccountClosedError, "account %v with tier %d may not submit trade orders", user, tier)
-	}
-
 	tunnel, assets, sell, rpcErr := r.extractMarketDetails(&limit.Prefix, &limit.Trade)
 	if rpcErr != nil {
 		return rpcErr
-	}
-
-	// Spare some resources if the market is closed now. Any orders that make it
-	// through to a closed market will receive a similar error from SubmitOrder.
-	if !tunnel.Running() {
-		return msgjson.NewError(msgjson.MarketNotRunningError, "market closed to new orders")
 	}
 
 	// Check that OrderType is set correctly
@@ -252,13 +241,8 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 			msgjson.LimitOrderNum, limit.OrderType)
 	}
 
-	// Check that the rate is non-zero and obeys the rate step interval.
 	if limit.Rate == 0 {
 		return msgjson.NewError(msgjson.OrderParameterError, "rate = 0 not allowed")
-	}
-	if rateStep := tunnel.RateStep(); limit.Rate%rateStep != 0 {
-		return msgjson.NewError(msgjson.OrderParameterError, "rate (%d) not a multiple of ratestep (%d)",
-			limit.Rate, rateStep)
 	}
 
 	// Check time-in-force
@@ -270,12 +254,6 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 		force = order.ImmediateTiF
 	default:
 		return msgjson.NewError(msgjson.OrderParameterError, "unknown time-in-force")
-	}
-
-	lotSize := tunnel.LotSize()
-	rpcErr = r.checkPrefixTrade(assets, lotSize, &limit.Prefix, &limit.Trade, true)
-	if rpcErr != nil {
-		return rpcErr
 	}
 
 	// Commitment
@@ -299,7 +277,7 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 			QuoteAsset: limit.Quote,
 			OrderType:  order.LimitOrderType,
 			ClientTime: time.UnixMilli(int64(limit.ClientTime)),
-			//ServerTime set in epoch queue processing pipeline.
+			// ServerTime is set by command acceptance.
 			Commit: commit,
 		},
 		T: order.Trade{
@@ -322,13 +300,51 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 		msgID: msg.ID,
 	}
 
-	return r.processTrade(oRecord, tunnel, assets, limit.Coins, sell, limit.Rate, limit.RedeemSig, limit.Serialize())
+	if handled, rpcErr := tunnel.HandleOrderResubmission(cmdCtx, oRecord, cmdCtx.Completion); handled {
+		return rpcErr
+	}
+
+	if rateStep := tunnel.RateStep(); limit.Rate%rateStep != 0 {
+		return msgjson.NewError(msgjson.OrderParameterError, "rate (%d) not a multiple of ratestep (%d)",
+			limit.Rate, rateStep)
+	}
+
+	rpcErr = r.checkPrefixTrade(assets, tunnel.LotSize(), &limit.Prefix, &limit.Trade, true)
+	if rpcErr != nil {
+		return rpcErr
+	}
+
+	if _, tier := r.auth.AcctStatus(user); tier < 1 {
+		return msgjson.NewError(msgjson.AccountClosedError, "account %v with tier %d may not submit trade orders", user, tier)
+	}
+
+	// Spare some resources if the market is closed now. Any orders that make it
+	// through to a closed market will receive a similar error from the market
+	// command handler.
+	if !tunnel.Running() {
+		return msgjson.NewError(msgjson.MarketNotRunningError, "market closed to new orders")
+	}
+
+	return r.processTrade(oRecord, tunnel, cmdCtx.Completion, assets, limit.Coins, sell, limit.Rate, limit.RedeemSig, limit.Serialize())
 }
 
-// handleMarket is the handler for the 'market' route. This route accepts a
-// msgjson.MarketOrder payload, validates the information, constructs an
-// order.MarketOrder and submits it to the epoch queue.
+// handleMarket submits a market order command.
 func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message) *msgjson.Error {
+	return r.mesh.ExecuteCommand(context.Background(), mesh.CommandRequest{
+		Kind: commandKindMarket,
+		User: user,
+		Msg:  msg,
+		Respond: func(resp *msgjson.Message) error {
+			return r.auth.Send(user, resp)
+		},
+	})
+}
+
+// executeMarket validates a market order request and submits the order for acceptance.
+func (r *OrderRouter) executeMarket(cmdCtx *mesh.CommandContext) *msgjson.Error {
+	user := cmdCtx.Request.User
+	msg := cmdCtx.Request.Msg
+
 	market := new(msgjson.MarketOrder)
 	err := msg.Unmarshal(&market)
 	if err != nil || market == nil {
@@ -340,31 +356,14 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 		return rpcErr
 	}
 
-	if _, tier := r.auth.AcctStatus(user); tier < 1 {
-		return msgjson.NewError(msgjson.AccountClosedError, "account %v with tier %d may not submit trade orders", user, tier)
-	}
-
 	tunnel, assets, sell, rpcErr := r.extractMarketDetails(&market.Prefix, &market.Trade)
 	if rpcErr != nil {
 		return rpcErr
 	}
 
-	if !tunnel.Running() {
-		mktName, _ := dex.MarketName(market.Base, market.Quote)
-		return msgjson.NewError(msgjson.MarketNotRunningError, "market %s closed to new orders", mktName)
-	}
-
 	// Check that OrderType is set correctly
 	if market.OrderType != msgjson.MarketOrderNum {
 		return msgjson.NewError(msgjson.OrderParameterError, "wrong order type set for market order")
-	}
-
-	// Passing sell as the checkLot parameter causes the lot size check to be
-	// ignored for market buy orders.
-	lotSize := tunnel.LotSize()
-	rpcErr = r.checkPrefixTrade(assets, lotSize, &market.Prefix, &market.Trade, sell)
-	if rpcErr != nil {
-		return rpcErr
 	}
 
 	// Commitment.
@@ -388,7 +387,7 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 			QuoteAsset: market.Quote,
 			OrderType:  order.MarketOrderType,
 			ClientTime: time.UnixMilli(int64(market.ClientTime)),
-			//ServerTime set in epoch queue processing pipeline.
+			// ServerTime is set by command acceptance.
 			Commit: commit,
 		},
 		T: order.Trade{
@@ -399,18 +398,38 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 		},
 	}
 
-	// Send the order to the epoch queue.
+	// Submit the order for acceptance.
 	oRecord := &orderRecord{
 		order: mo,
 		req:   market,
 		msgID: msg.ID,
 	}
 
-	return r.processTrade(oRecord, tunnel, assets, market.Coins, sell, 0, market.RedeemSig, market.Serialize())
+	if handled, rpcErr := tunnel.HandleOrderResubmission(cmdCtx, oRecord, cmdCtx.Completion); handled {
+		return rpcErr
+	}
+
+	// Passing sell as the checkLot parameter causes the lot size check to be
+	// ignored for market buy orders.
+	rpcErr = r.checkPrefixTrade(assets, tunnel.LotSize(), &market.Prefix, &market.Trade, sell)
+	if rpcErr != nil {
+		return rpcErr
+	}
+
+	if _, tier := r.auth.AcctStatus(user); tier < 1 {
+		return msgjson.NewError(msgjson.AccountClosedError, "account %v with tier %d may not submit trade orders", user, tier)
+	}
+
+	if !tunnel.Running() {
+		mktName, _ := dex.MarketName(market.Base, market.Quote)
+		return msgjson.NewError(msgjson.MarketNotRunningError, "market %s closed to new orders", mktName)
+	}
+
+	return r.processTrade(oRecord, tunnel, cmdCtx.Completion, assets, market.Coins, sell, 0, market.RedeemSig, market.Serialize())
 }
 
 // processTrade checks that the trade is valid and submits it to the market.
-func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, assets *assetSet,
+func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, completion *mesh.CommandCompletion, assets *assetSet,
 	coins []*msgjson.Coin, sell bool, rate uint64, redeemSig *msgjson.RedeemSig, sigMsg []byte) *msgjson.Error {
 
 	fundingAsset := assets.funding
@@ -468,7 +487,7 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 		if !r.sufficientAccountBalance(acctAddr, oRecord.order, assets.funding.Asset.ID, assets.receiving.ID, tunnel) {
 			return msgjson.NewError(msgjson.FundingError, "insufficient balance")
 		}
-		return r.submitOrderToMarket(tunnel, oRecord)
+		return tunnel.AcceptOrderCommand(context.Background(), oRecord, completion)
 	}
 
 	// Funding coins are from a utxo-based asset. Need to find them.
@@ -487,6 +506,10 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 		}
 		// TODO: Check all markets here?
 		if tunnel.CoinLocked(assets.funding.ID, coinID) {
+			// An identical request may have been accepted since the initial lookup.
+			if handled, rpcErr := tunnel.HandleOrderResubmission(context.Background(), oRecord, completion); handled {
+				return rpcErr
+			}
 			return msgjson.NewError(msgjson.FundingError, "coin %s is locked", fmtCoinID(assets.funding.ID, coinID))
 		}
 		coinStrs = append(coinStrs, coinStr)
@@ -600,7 +623,17 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 		return false, nil
 	}
 
+	respondError := func(msgErr *msgjson.Error) {
+		log.Debugf("Error going to user %v: %s", user, msgErr)
+		if err := completion.Fail(context.Background(), msgErr); err != nil {
+			log.Infof("Failed to send order error response (msg = %s) to disconnected user %v: %q",
+				msgErr, user, err)
+		}
+	}
+
 	log.Tracef("Searching for %s coins %v for new order", fundingAsset.Symbol, coinStrs)
+	// Funding checks may continue after this function returns. The completion
+	// delivers the response when the order is accepted or the checks fail.
 	r.latencyQ.Wait(&wait.Waiter{
 		Expiration: time.Now().Add(fundingTxWait),
 		TryFunc: func() wait.TryDirective {
@@ -609,21 +642,21 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 				return wait.TryAgain
 			}
 			if msgErr != nil {
-				r.respondError(oRecord.msgID, user, msgErr)
+				respondError(msgErr)
 				return wait.DontTryAgain
 			}
 
-			// Send the order to the epoch queue where it will be time stamped.
+			// Submit the order for acceptance, where it will be time stamped.
 			log.Tracef("Found and validated %s coins %v for new order", fundingAsset.Symbol, coinStrs)
-			if msgErr := r.submitOrderToMarket(tunnel, oRecord); msgErr != nil {
-				r.respondError(oRecord.msgID, user, msgErr)
+			if msgErr := tunnel.AcceptOrderCommand(context.Background(), oRecord, completion); msgErr != nil {
+				respondError(msgErr)
 			}
 			return wait.DontTryAgain
 		},
 		ExpireFunc: func() {
 			// Tell them to broadcast again or check their node before broadcast
 			// timeout is reached and the match is revoked.
-			r.respondError(oRecord.msgID, user, msgjson.NewError(msgjson.TransactionUndiscovered,
+			respondError(msgjson.NewError(msgjson.TransactionUndiscovered,
 				"failed to find funding coins %v", coinStrs))
 		},
 	})
@@ -696,15 +729,15 @@ func calcParcelLimit(tier int64, score, maxScore int32) uint32 {
 // calculate the number of parcels from that market when quantity from settling
 // matches is taken into consideration. CheckParcelLimit checks the global
 // parcel limit, based on the users tier and score and active orders for ALL
-// markets.
-func (r *OrderRouter) CheckParcelLimit(user account.AccountID, targetMarketName string, calcParcels MarketParcelCalculator) bool {
-	tier, score, maxScore, err := r.auth.UserReputation(user)
+// markets. The tier is evaluated at asOf (the order's server time). A returned
+// error is a reputation-load failure, not a limit verdict.
+func (r *OrderRouter) CheckParcelLimit(user account.AccountID, targetMarketName string, asOf time.Time, calcParcels MarketParcelCalculator) (bool, error) {
+	tier, score, maxScore, err := r.auth.UserReputationAt(user, asOf)
 	if err != nil {
-		log.Errorf("error getting user score for parcel limit check: %w", err)
-		return false
+		return false, fmt.Errorf("loading reputation for parcel limit check: %w", err)
 	}
 	if tier <= 0 {
-		return false
+		return false, nil
 	}
 
 	roundParcels := func(parcels float64) uint32 {
@@ -724,39 +757,31 @@ func (r *OrderRouter) CheckParcelLimit(user account.AccountID, targetMarketName 
 		settlingQuantities[mktName] += qty
 	}
 
+	// Accumulate in sorted market order: float addition is not associative,
+	// and this verdict re-runs on every node, so map-iteration order must
+	// not be able to flip a boundary case between nodes.
+	mktNames := make([]string, 0, len(r.tunnels))
+	for mktName := range r.tunnels {
+		mktNames = append(mktNames, mktName)
+	}
+	sort.Strings(mktNames)
+
 	var otherMarketParcels float64
 	var settlingQty uint64
-	for mktName, mkt := range r.tunnels {
+	for _, mktName := range mktNames {
 		if mktName == targetMarketName {
 			settlingQty = settlingQuantities[mktName]
 			continue
 		}
 
-		otherMarketParcels += mkt.Parcels(user, settlingQuantities[mktName])
+		otherMarketParcels += r.tunnels[mktName].Parcels(user, settlingQuantities[mktName])
 		if roundParcels(otherMarketParcels) > parcelLimit {
-			return false
+			return false, nil
 		}
 	}
 	targetMarketParcels := calcParcels(settlingQty)
 
-	return roundParcels(otherMarketParcels+targetMarketParcels) <= parcelLimit
-}
-
-func (r *OrderRouter) submitOrderToMarket(tunnel MarketTunnel, oRecord *orderRecord) *msgjson.Error {
-	if err := tunnel.SubmitOrder(oRecord); err != nil {
-		code := msgjson.UnknownMarketError
-		switch {
-		case errors.Is(err, ErrInternalServer):
-			log.Errorf("Market failed to SubmitOrder: %v", err)
-		case errors.Is(err, ErrQuantityTooHigh):
-			code = msgjson.OrderQuantityTooHigh
-			fallthrough
-		default:
-			log.Debugf("Market failed to SubmitOrder: %v", err)
-		}
-		return msgjson.NewError(code, "%v", err)
-	}
-	return nil
+	return roundParcels(otherMarketParcels+targetMarketParcels) <= parcelLimit, nil
 }
 
 // Check the FundingCoin confirmations, and if zero, ensure the tx fee rate
@@ -783,10 +808,23 @@ func (r *OrderRouter) checkZeroConfs(dexCoin asset.FundingCoin, fundingAsset *as
 	return nil
 }
 
-// handleCancel is the handler for the 'cancel' route. This route accepts a
-// msgjson.Cancel payload, validates the information, constructs an
-// order.CancelOrder and submits it to the epoch queue.
+// handleCancel submits a cancel order command.
 func (r *OrderRouter) handleCancel(user account.AccountID, msg *msgjson.Message) *msgjson.Error {
+	return r.mesh.ExecuteCommand(context.Background(), mesh.CommandRequest{
+		Kind: commandKindCancel,
+		User: user,
+		Msg:  msg,
+		Respond: func(resp *msgjson.Message) error {
+			return r.auth.Send(user, resp)
+		},
+	})
+}
+
+// executeCancel validates a cancel order request and submits the order for acceptance.
+func (r *OrderRouter) executeCancel(cmdCtx *mesh.CommandContext) *msgjson.Error {
+	user := cmdCtx.Request.User
+	msg := cmdCtx.Request.Msg
+
 	cancel := new(msgjson.CancelOrder)
 	err := msg.Unmarshal(&cancel)
 	if err != nil || cancel == nil {
@@ -811,18 +849,9 @@ func (r *OrderRouter) handleCancel(user account.AccountID, msg *msgjson.Message)
 	var targetID order.OrderID
 	copy(targetID[:], cancel.TargetID)
 
-	if !tunnel.Cancelable(targetID) {
-		return msgjson.NewError(msgjson.UnknownOrderError, "target order not known: %v", targetID)
-	}
-
 	// Check that OrderType is set correctly
 	if cancel.OrderType != msgjson.CancelOrderNum {
 		return msgjson.NewError(msgjson.OrderParameterError, "wrong order type set for cancel order")
-	}
-
-	rpcErr = checkTimes(&cancel.Prefix)
-	if rpcErr != nil {
-		return rpcErr
 	}
 
 	// Commitment.
@@ -840,25 +869,33 @@ func (r *OrderRouter) handleCancel(user account.AccountID, msg *msgjson.Message)
 			QuoteAsset: cancel.Quote,
 			OrderType:  order.CancelOrderType,
 			ClientTime: time.UnixMilli(int64(cancel.ClientTime)),
-			//ServerTime set in epoch queue processing pipeline.
+			// ServerTime is set by command acceptance.
 			Commit: commit,
 		},
 		TargetOrderID: targetID,
 	}
 
-	// Send the order to the epoch queue.
+	// Submit the order for acceptance.
 	oRecord := &orderRecord{
 		order: co,
 		req:   cancel,
 		msgID: msg.ID,
 	}
-	if err := tunnel.SubmitOrder(oRecord); err != nil {
-		if errors.Is(err, ErrInternalServer) {
-			log.Errorf("Market failed to SubmitOrder: %v", err)
-		}
-		return msgjson.NewError(msgjson.UnknownMarketError, "%v", err)
+
+	if handled, rpcErr := tunnel.HandleOrderResubmission(cmdCtx, oRecord, cmdCtx.Completion); handled {
+		return rpcErr
 	}
-	return nil
+
+	rpcErr = checkTimes(&cancel.Prefix)
+	if rpcErr != nil {
+		return rpcErr
+	}
+
+	if !tunnel.Cancelable(targetID) {
+		return msgjson.NewError(msgjson.UnknownOrderError, "target order not known: %v", targetID)
+	}
+
+	return tunnel.AcceptOrderCommand(cmdCtx, oRecord, cmdCtx.Completion)
 }
 
 // verifyAccount checks that the submitted order squares with the submitting user.
@@ -869,7 +906,7 @@ func (r *OrderRouter) verifyAccount(user account.AccountID, msgAcct msgjson.Byte
 	}
 	// Check the clients signature of the order.
 	sigMsg := signable.Serialize()
-	err := r.auth.Auth(user, sigMsg, signable.SigBytes())
+	err := r.auth.VerifyUserSig(user, sigMsg, signable.SigBytes())
 	if err != nil {
 		return msgjson.NewError(msgjson.SignatureError, "signature error: %v", err.Error())
 	}
@@ -894,44 +931,6 @@ func (r *OrderRouter) extractMarket(prefix *msgjson.Prefix) (MarketTunnel, *msgj
 type SuspendEpoch struct {
 	Idx int64
 	End time.Time
-}
-
-// SuspendMarket schedules a suspension of a given market, with the option to
-// persist the orders on the book (or purge the book automatically on market
-// shutdown). The scheduled final epoch and suspend time are returned. Note that
-// OrderRouter is a proxy for this request to the ultimate Market. This is done
-// because OrderRouter is the entry point for new orders into the market. TODO:
-// track running, suspended, and scheduled-suspended markets, appropriately
-// blocking order submission according to the schedule rather than just checking
-// Market.Running prior to submitting incoming orders to the Market.
-func (r *OrderRouter) SuspendMarket(mktName string, asSoonAs time.Time, persistBooks bool) *SuspendEpoch {
-	mkt, found := r.tunnels[mktName]
-	if !found {
-		return nil
-	}
-
-	idx, t := mkt.Suspend(asSoonAs, persistBooks)
-	return &SuspendEpoch{
-		Idx: idx,
-		End: t,
-	}
-}
-
-// Suspend is like SuspendMarket, but for all known markets.
-func (r *OrderRouter) Suspend(asSoonAs time.Time, persistBooks bool) map[string]*SuspendEpoch {
-
-	suspendTimes := make(map[string]*SuspendEpoch, len(r.tunnels))
-	for name, mkt := range r.tunnels {
-		idx, ts := mkt.Suspend(asSoonAs, persistBooks)
-		suspendTimes[name] = &SuspendEpoch{Idx: idx, End: ts}
-	}
-
-	// MarketTunnel.Running will return false when the market closes, and true
-	// when and if it opens again. Locking/blocking of the incoming order
-	// handlers is not necessary since any orders that sneak in to a Market will
-	// be rejected if there is no active epoch.
-
-	return suspendTimes
 }
 
 // extractMarketDetails finds the MarketTunnel, an assetSet, and market side for

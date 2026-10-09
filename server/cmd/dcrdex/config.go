@@ -99,6 +99,11 @@ type dexConf struct {
 	NoResumeSwaps     bool
 	DisableDataAPI    bool
 	NodeRelayAddr     string
+	MeshPeerAddr      string
+	MeshPeerCert      []byte
+	MeshListen        string
+	MeshForkReset     string
+	ClientAddr        string
 	ValidateMarkets   bool
 	MaxClients        int
 	MaxConnsPerIP     int
@@ -159,6 +164,12 @@ type flagsData struct {
 	DisableDataAPI bool `long:"nodata" description:"Disable the HTTP data API."`
 
 	NodeRelayAddr string `long:"noderelayaddr" description:"The public address by which node sources should connect to the node relay"`
+
+	MeshPeerAddr  string `long:"meshpeer" description:"Address of the peer's mesh listener. Accepts host:port (TLS), ws://, or wss:// URLs."`
+	MeshPeerCert  string `long:"meshpeercert" description:"Path to the peer's PEM TLS certificate file, required unless meshpeer uses ws://. Relative paths use appdata."`
+	MeshListen    string `long:"meshlisten" description:"Address on which the mesh websocket server should listen for incoming peer connections."`
+	MeshForkReset string `long:"meshforkreset" description:"DANGER: clear this node's event log and event-sourced state so it can reload state from its peer. Only for a node halted with MESH FORK DETECTED; the value is the <seq>:<tiphash-prefix> token from the halt error. Back up the database first. Remove this option after use; a stale token prevents startup."`
+	ClientAddr    string `long:"clientaddr" description:"Public client-facing websocket RPC address or URL advertised to mesh peers for client failover."`
 
 	ValidateMarkets bool `long:"validate" description:"Validate the market configuration and quit"`
 
@@ -252,6 +263,59 @@ func normalizeNetworkAddress(a, defaultHost, defaultPort string) (string, error)
 		port = defaultPort
 	}
 	return net.JoinHostPort(host, port), nil
+}
+
+// validateMeshOptions trims mesh settings and checks required and
+// incompatible options.
+func validateMeshOptions(cfg *flagsData) error {
+	cfg.MeshPeerAddr = strings.TrimSpace(cfg.MeshPeerAddr)
+	cfg.MeshListen = strings.TrimSpace(cfg.MeshListen)
+	cfg.ClientAddr = strings.TrimSpace(cfg.ClientAddr)
+	cfg.MeshPeerCert = strings.TrimSpace(cfg.MeshPeerCert)
+	cfg.MeshForkReset = strings.TrimSpace(cfg.MeshForkReset)
+
+	if cfg.MeshPeerAddr == "" {
+		var set []string
+		if cfg.MeshListen != "" {
+			set = append(set, "meshlisten")
+		}
+		if cfg.ClientAddr != "" {
+			set = append(set, "clientaddr")
+		}
+		if cfg.MeshPeerCert != "" {
+			set = append(set, "meshpeercert")
+		}
+		if cfg.MeshForkReset != "" {
+			set = append(set, "meshforkreset")
+		}
+		if len(set) > 0 {
+			return fmt.Errorf("%s set but meshpeer is not; set meshpeer or remove the mesh options",
+				strings.Join(set, ", "))
+		}
+		return nil
+	}
+
+	var missing []string
+	if cfg.MeshListen == "" {
+		missing = append(missing, "meshlisten")
+	}
+	if cfg.ClientAddr == "" {
+		missing = append(missing, "clientaddr")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("meshpeer requires %s", strings.Join(missing, ", "))
+	}
+
+	if cfg.NoResumeSwaps {
+		return fmt.Errorf("noresumeswaps cannot be used with meshpeer; a mesh node that skips " +
+			"swap restoration diverges from its peer's committed match state")
+	}
+
+	if !strings.HasPrefix(cfg.MeshPeerAddr, "ws://") && cfg.MeshPeerCert == "" {
+		return fmt.Errorf("meshpeercert is required for a TLS mesh peer; set meshpeercert " +
+			"or use an explicit ws:// address for a plaintext link")
+	}
+	return nil
 }
 
 // loadConfig initializes and parses the config using a config file and command
@@ -471,6 +535,12 @@ func loadConfig() (*dexConf, *procOpts, error) {
 	if !filepath.IsAbs(cfg.DEXPrivKeyPath) {
 		cfg.DEXPrivKeyPath = filepath.Join(cfg.AppDataDir, cfg.DEXPrivKeyPath)
 	}
+	if err := validateMeshOptions(&cfg); err != nil {
+		return loadConfigError(err)
+	}
+	if cfg.MeshPeerCert != "" && !filepath.IsAbs(cfg.MeshPeerCert) {
+		cfg.MeshPeerCert = filepath.Join(cfg.AppDataDir, cfg.MeshPeerCert)
+	}
 
 	// Validate each RPC listen host:port.
 	var RPCListen []string
@@ -551,6 +621,14 @@ func loadConfig() (*dexConf, *procOpts, error) {
 	// If using {netname} then replace it with the network name.
 	cfg.PGDBName = strings.ReplaceAll(cfg.PGDBName, "{netname}", network.String())
 
+	var meshPeerCert []byte
+	if cfg.MeshPeerCert != "" {
+		meshPeerCert, err = os.ReadFile(cfg.MeshPeerCert)
+		if err != nil {
+			return loadConfigError(fmt.Errorf("failed to read mesh peer cert %q: %w", cfg.MeshPeerCert, err))
+		}
+	}
+
 	dexCfg := &dexConf{
 		DataDir:           cfg.DataDir,
 		Network:           network,
@@ -583,6 +661,11 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		NoResumeSwaps:     cfg.NoResumeSwaps,
 		DisableDataAPI:    cfg.DisableDataAPI,
 		NodeRelayAddr:     cfg.NodeRelayAddr,
+		MeshPeerAddr:      cfg.MeshPeerAddr,
+		MeshPeerCert:      meshPeerCert,
+		MeshListen:        cfg.MeshListen,
+		MeshForkReset:     cfg.MeshForkReset,
+		ClientAddr:        cfg.ClientAddr,
 		ValidateMarkets:   cfg.ValidateMarkets,
 		MaxClients:        cfg.MaxClients,
 		MaxConnsPerIP:     cfg.MaxConnsPerIP,

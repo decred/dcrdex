@@ -19,6 +19,8 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/auth"
+	"decred.org/dcrdex/server/db"
 	dexsrv "decred.org/dcrdex/server/dex"
 	"decred.org/dcrdex/server/market"
 	"github.com/go-chi/chi/v5"
@@ -55,6 +57,11 @@ func writeJSONWithStatus(w http.ResponseWriter, thing any, code int) {
 // apiPing is the handler for the '/ping' API request.
 func apiPing(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, pongStr)
+}
+
+// apiMesh returns the mesh status.
+func (s *Server) apiMesh(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, s.core.MeshStatus())
 }
 
 // apiConfig is the handler for the '/config' API request.
@@ -143,10 +150,7 @@ func (s *Server) apiMarkets(w http.ResponseWriter, r *http.Request) {
 			ActiveEpoch:   status.ActiveEpoch,
 			StartEpoch:    status.StartEpoch,
 			SuspendEpoch:  status.SuspendEpoch,
-		}
-		if status.SuspendEpoch != 0 {
-			persist := status.PersistBook
-			mktStatus.PersistBook = &persist
+			PersistBook:   status.PersistBook,
 		}
 		mktStatuses[name] = mktStatus
 	}
@@ -163,11 +167,6 @@ func (s *Server) apiMarketInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var persist *bool
-	if status.SuspendEpoch != 0 {
-		persistLocal := status.PersistBook
-		persist = &persistLocal
-	}
 	mktStatus := &MarketStatus{
 		Name:          mkt,
 		Running:       status.Running,
@@ -175,11 +174,7 @@ func (s *Server) apiMarketInfo(w http.ResponseWriter, r *http.Request) {
 		ActiveEpoch:   status.ActiveEpoch,
 		StartEpoch:    status.StartEpoch,
 		SuspendEpoch:  status.SuspendEpoch,
-		PersistBook:   persist,
-	}
-	if status.SuspendEpoch != 0 {
-		persist := status.PersistBook
-		mktStatus.PersistBook = &persist
+		PersistBook:   status.PersistBook,
 	}
 	writeJSON(w, mktStatus)
 }
@@ -328,13 +323,21 @@ func (s *Server) apiMarketMatches(w http.ResponseWriter, r *http.Request) {
 func (s *Server) apiResume(w http.ResponseWriter, r *http.Request) {
 	// Ensure the market exists and is not running.
 	mkt := strings.ToLower(chi.URLParam(r, marketNameKey))
-	found, running := s.core.MarketRunning(mkt)
+	found, lifecycle := s.core.MarketLifecycleState(mkt)
 	if !found {
 		http.Error(w, fmt.Sprintf("unknown market %q", mkt), http.StatusBadRequest)
 		return
 	}
-	if running {
+	switch lifecycle {
+	case db.MarketStateDraining:
+		http.Error(w, fmt.Sprintf("market %q finalizing suspension", mkt), http.StatusBadRequest)
+		return
+	case db.MarketStateRunning:
 		http.Error(w, fmt.Sprintf("market %q running", mkt), http.StatusBadRequest)
+		return
+	case db.MarketStateSuspended:
+	default:
+		http.Error(w, fmt.Sprintf("market %q not resumable", mkt), http.StatusBadRequest)
 		return
 	}
 
@@ -376,13 +379,21 @@ func (s *Server) apiResume(w http.ResponseWriter, r *http.Request) {
 func (s *Server) apiSuspend(w http.ResponseWriter, r *http.Request) {
 	// Ensure the market exists and is running.
 	mkt := strings.ToLower(chi.URLParam(r, marketNameKey))
-	found, running := s.core.MarketRunning(mkt)
+	found, lifecycle := s.core.MarketLifecycleState(mkt)
 	if !found {
 		http.Error(w, fmt.Sprintf("unknown market %q", mkt), http.StatusBadRequest)
 		return
 	}
-	if !running {
+	switch lifecycle {
+	case db.MarketStateDraining:
+		http.Error(w, fmt.Sprintf("market %q finalizing suspension", mkt), http.StatusBadRequest)
+		return
+	case db.MarketStateRunning:
+	case db.MarketStateSuspended:
 		http.Error(w, fmt.Sprintf("market %q not running", mkt), http.StatusBadRequest)
+		return
+	default:
+		http.Error(w, fmt.Sprintf("market %q not schedulable", mkt), http.StatusBadRequest)
 		return
 	}
 
@@ -418,7 +429,8 @@ func (s *Server) apiSuspend(w http.ResponseWriter, r *http.Request) {
 
 	suspEpoch, err := s.core.SuspendMarket(mkt, suspTime, persistBook)
 	if suspEpoch == nil || err != nil {
-		// Should not happen.
+		// This includes a schedule that lost a race with an epoch boundary
+		// and was rejected at commit time; retrying the command resolves it.
 		msg := fmt.Sprintf("Failed to suspend market: %v", err)
 		log.Errorf(msg)
 		http.Error(w, msg, http.StatusInternalServerError)
@@ -663,7 +675,14 @@ func (s *Server) apiNotify(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), errCode)
 		return
 	}
-	s.core.Notify(acctID, msg)
+	if err := s.core.Notify(acctID, msg); err != nil {
+		if errors.Is(err, auth.ErrUserNotConnected) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 }
 

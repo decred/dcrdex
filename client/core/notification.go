@@ -44,6 +44,8 @@ const (
 	NoteTypeReputation     = "reputation"
 	NoteTypeActionRequired = "actionrequired"
 	NoteTypeBridge         = "bridge"
+
+	NoteTypeServerEndpoints = "serverendpoints"
 )
 
 var noteChanCounter uint64
@@ -499,25 +501,39 @@ func (on *EpochNotification) String() string {
 // ConnEventNote is a notification regarding individual DEX connection status.
 type ConnEventNote struct {
 	db.Notification
-	Host             string                 `json:"host"`
+	Host string `json:"host"`
+	// ActiveEndpoint is the live endpoint host (may differ from Host after
+	// failover). Empty when disconnected.
+	ActiveEndpoint   string                 `json:"activeEndpoint,omitempty"`
 	ConnectionStatus comms.ConnectionStatus `json:"connectionStatus"`
 }
 
 const (
-	TopicDEXConnected    Topic = "DEXConnected"
-	TopicDEXDisconnected Topic = "DEXDisconnected"
-	TopicDexConnectivity Topic = "DEXConnectivity"
-	TopicDEXDisabled     Topic = "DEXDisabled"
-	TopicDEXEnabled      Topic = "DEXEnabled"
+	TopicDEXConnected           Topic = "DEXConnected"
+	TopicDEXDisconnected        Topic = "DEXDisconnected"
+	TopicDexConnectivity        Topic = "DEXConnectivity"
+	TopicDEXDisabled            Topic = "DEXDisabled"
+	TopicDEXEnabled             Topic = "DEXEnabled"
+	TopicServerEndpointSwitched Topic = "ServerEndpointSwitched"
 )
 
-func newConnEventNote(topic Topic, subject, host string, status comms.ConnectionStatus, details string, severity db.Severity) *ConnEventNote {
+func newConnEventNote(topic Topic, subject, host, activeEndpoint string, status comms.ConnectionStatus, details string, severity db.Severity) *ConnEventNote {
 	return &ConnEventNote{
 		Notification:     db.NewNotification(NoteTypeConnEvent, topic, subject, details, severity),
 		Host:             host,
+		ActiveEndpoint:   activeEndpoint,
 		ConnectionStatus: status,
 	}
 }
+
+// ServerEndpointsNote reports the registered host and advertised mesh peers.
+type ServerEndpointsNote struct {
+	db.Notification
+	Host            string   `json:"host"`
+	ServerEndpoints []string `json:"serverEndpoints"`
+}
+
+const TopicServerEndpointsUpdated Topic = "ServerEndpointsUpdated"
 
 // FiatRatesNote is an update of fiat rate data for assets.
 type FiatRatesNote struct {
