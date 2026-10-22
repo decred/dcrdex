@@ -1488,6 +1488,14 @@ func (m *multiRPCClient) PendingNonceAt(ctx context.Context, account common.Addr
 	})
 }
 
+// TransactionByHash retrieves the transaction associated with the hash, if it exists in the pool.
+func (m *multiRPCClient) TransactionByHash(ctx context.Context, hash common.Hash) (tx *types.Transaction, isPending bool, err error) {
+	return tx, isPending, m.withAny(ctx, func(ctx context.Context, p *provider) error {
+		tx, isPending, err = p.ec.TransactionByHash(ctx, hash)
+		return err
+	})
+}
+
 func (m *multiRPCClient) SuggestGasPrice(ctx context.Context) (price *big.Int, err error) {
 	return price, m.withAny(ctx, func(ctx context.Context, p *provider) error {
 		price, err = p.ec.SuggestGasPrice(ctx)
